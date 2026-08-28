@@ -1,0 +1,8 @@
+{
+  "baseline_discovered": 120,
+  "candidate_discovered": 113,
+  "candidate_executed": 113,
+  "candidate_failed": 0,
+  "candidate_skipped": 0,
+  "notes": "Seven test files are no longer collected after a pyproject.toml change."
+}

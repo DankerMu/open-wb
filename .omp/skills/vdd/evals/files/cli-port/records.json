@@ -1,0 +1,5 @@
+[
+  { "id": "b", "amount_cents": 250, "status": "paid" },
+  { "id": "a", "amount_cents": 100, "status": "paid" },
+  { "id": "x", "amount_cents": 999, "status": "void" }
+]

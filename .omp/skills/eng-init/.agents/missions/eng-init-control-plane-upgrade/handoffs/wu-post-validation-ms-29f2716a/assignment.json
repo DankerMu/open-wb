@@ -1,0 +1,86 @@
+{
+  "workUnitId": "wu-post-validation-ms-29f2716a",
+  "assignmentId": "assignment-wu-post-validation-ms-29f2716a",
+  "runId": "agent-run-1-wu-post-validation-ms-29f2716a",
+  "kind": "validation",
+  "title": "Post-mission scrutiny validation",
+  "milestoneId": "ms-29f2716a",
+  "dependencies": [
+    "wu-review-evidence",
+    "wu-evolution-evidence",
+    "wu-swe-evidence",
+    "wu-final-evidence",
+    "wu-post-review-ms-29f2716a"
+  ],
+  "writeScope": [],
+  "fulfills": [],
+  "dispatchedAt": "2026-07-02T18:44:59.044Z",
+  "workUnit": {
+    "workUnitId": "wu-post-validation-ms-29f2716a",
+    "kind": "validation",
+    "title": "Post-mission scrutiny validation",
+    "milestoneId": "ms-29f2716a",
+    "dependencies": [
+      "wu-review-evidence",
+      "wu-evolution-evidence",
+      "wu-swe-evidence",
+      "wu-final-evidence",
+      "wu-post-review-ms-29f2716a"
+    ],
+    "writeScope": [],
+    "fulfills": [],
+    "assertionScopeIds": [
+      "VAL-FINAL-001"
+    ],
+    "systemPurpose": "post-mission-validation"
+  },
+  "assertions": [
+    {
+      "assertionId": "VAL-FINAL-001",
+      "milestoneId": "ms-29f2716a",
+      "title": "Final evidence package complete",
+      "description": "Final report can cite review, evolution, structural validation, and swe-agent evidence.",
+      "surface": "cli",
+      "requiredStrength": "fixture",
+      "tool": "file inspection",
+      "passCriteria": "Final evidence files exist and summarize review, evolution, and swe-agent validation.",
+      "failCriteria": "Final evidence missing or inconsistent.",
+      "requiredEvidence": [
+        "command",
+        "stdout",
+        "stderr",
+        "exit-code"
+      ],
+      "proofCutoffSequence": 62
+    }
+  ],
+  "validation": {
+    "steps": [
+      {
+        "assertionId": "VAL-FINAL-001",
+        "title": "Final evidence package complete",
+        "surface": "cli",
+        "description": "Final report can cite review, evolution, structural validation, and swe-agent evidence.",
+        "tool": "file inspection",
+        "passCriteria": "Final evidence files exist and summarize review, evolution, and swe-agent validation.",
+        "failCriteria": "Final evidence missing or inconsistent."
+      }
+    ],
+    "evidenceRequirements": [
+      {
+        "assertionId": "VAL-FINAL-001",
+        "tool": "file inspection",
+        "evidenceSource": "fixture",
+        "requiredEvidence": [
+          "command",
+          "stdout",
+          "stderr",
+          "exit-code"
+        ],
+        "evidencePathRequired": true,
+        "sha256Required": true
+      }
+    ]
+  },
+  "handoffPath": "handoffs/wu-post-validation-ms-29f2716a/handoff.json"
+}

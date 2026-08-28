@@ -1,0 +1,77 @@
+{
+  "workUnitId": "wu-validation-wu-review-evidence",
+  "assignmentId": "assignment-wu-validation-wu-review-evidence",
+  "runId": "workflow-run-8-wu-validation-wu-review-evidence",
+  "kind": "validation",
+  "title": "Validate Record independent review evidence",
+  "milestoneId": "ms-29f2716a",
+  "dependencies": [
+    "wu-review-evidence"
+  ],
+  "writeScope": [],
+  "fulfills": [],
+  "dispatchedAt": "2026-07-02T18:42:40.552Z",
+  "workUnit": {
+    "workUnitId": "wu-validation-wu-review-evidence",
+    "parentId": "wu-review-evidence",
+    "kind": "validation",
+    "title": "Validate Record independent review evidence",
+    "milestoneId": "ms-29f2716a",
+    "dependencies": [
+      "wu-review-evidence"
+    ],
+    "writeScope": [],
+    "fulfills": [],
+    "assertionScopeIds": [
+      "VAL-REVIEW-001"
+    ],
+    "systemPurpose": "deliverable-validation"
+  },
+  "assertions": [
+    {
+      "assertionId": "VAL-REVIEW-001",
+      "milestoneId": "ms-2ed442bc",
+      "title": "Independent review and remediation complete",
+      "description": "Independent review completed and all findings dispositioned.",
+      "surface": "cli",
+      "requiredStrength": "fixture",
+      "tool": "review handoff",
+      "passCriteria": "Review output has findings or approval, and every finding has disposition with follow-up evidence.",
+      "failCriteria": "Review skipped, same-agent review only, or unresolved blocker findings.",
+      "requiredEvidence": [
+        "review-output",
+        "disposition-table",
+        "exit-code"
+      ],
+      "proofCutoffSequence": 13
+    }
+  ],
+  "validation": {
+    "steps": [
+      {
+        "assertionId": "VAL-REVIEW-001",
+        "title": "Independent review and remediation complete",
+        "surface": "cli",
+        "description": "Independent review completed and all findings dispositioned.",
+        "tool": "review handoff",
+        "passCriteria": "Review output has findings or approval, and every finding has disposition with follow-up evidence.",
+        "failCriteria": "Review skipped, same-agent review only, or unresolved blocker findings."
+      }
+    ],
+    "evidenceRequirements": [
+      {
+        "assertionId": "VAL-REVIEW-001",
+        "tool": "review handoff",
+        "evidenceSource": "fixture",
+        "requiredEvidence": [
+          "review-output",
+          "disposition-table",
+          "exit-code"
+        ],
+        "evidencePathRequired": true,
+        "sha256Required": true
+      }
+    ]
+  },
+  "handoffPath": "handoffs/wu-validation-wu-review-evidence/handoff.json"
+}

@@ -1,0 +1,79 @@
+{
+  "workUnitId": "wu-validation-wu-swe-evidence",
+  "assignmentId": "assignment-wu-validation-wu-swe-evidence",
+  "runId": "workflow-run-9-wu-validation-wu-swe-evidence",
+  "kind": "validation",
+  "title": "Validate Record swe-agent validation evidence",
+  "milestoneId": "ms-29f2716a",
+  "dependencies": [
+    "wu-swe-evidence"
+  ],
+  "writeScope": [],
+  "fulfills": [],
+  "dispatchedAt": "2026-07-02T18:42:40.552Z",
+  "workUnit": {
+    "workUnitId": "wu-validation-wu-swe-evidence",
+    "parentId": "wu-swe-evidence",
+    "kind": "validation",
+    "title": "Validate Record swe-agent validation evidence",
+    "milestoneId": "ms-29f2716a",
+    "dependencies": [
+      "wu-swe-evidence"
+    ],
+    "writeScope": [],
+    "fulfills": [],
+    "assertionScopeIds": [
+      "VAL-SWE-001"
+    ],
+    "systemPurpose": "deliverable-validation"
+  },
+  "assertions": [
+    {
+      "assertionId": "VAL-SWE-001",
+      "milestoneId": "ms-2ed442bc",
+      "title": "swe-agent real-project test completes",
+      "description": "New eng-init behavior is exercised against swe-agent in read-only audit/spec-preview style.",
+      "surface": "cli",
+      "requiredStrength": "fixture",
+      "tool": "file inspection / agent transcript",
+      "passCriteria": "Raw evidence records mode routing/audit behavior on swe-agent and any skill feedback is resolved or logged.",
+      "failCriteria": "No swe-agent test, destructive writes without approval, or unhandled test failures.",
+      "requiredEvidence": [
+        "command",
+        "stdout",
+        "stderr",
+        "exit-code"
+      ],
+      "proofCutoffSequence": 15
+    }
+  ],
+  "validation": {
+    "steps": [
+      {
+        "assertionId": "VAL-SWE-001",
+        "title": "swe-agent real-project test completes",
+        "surface": "cli",
+        "description": "New eng-init behavior is exercised against swe-agent in read-only audit/spec-preview style.",
+        "tool": "file inspection / agent transcript",
+        "passCriteria": "Raw evidence records mode routing/audit behavior on swe-agent and any skill feedback is resolved or logged.",
+        "failCriteria": "No swe-agent test, destructive writes without approval, or unhandled test failures."
+      }
+    ],
+    "evidenceRequirements": [
+      {
+        "assertionId": "VAL-SWE-001",
+        "tool": "file inspection / agent transcript",
+        "evidenceSource": "fixture",
+        "requiredEvidence": [
+          "command",
+          "stdout",
+          "stderr",
+          "exit-code"
+        ],
+        "evidencePathRequired": true,
+        "sha256Required": true
+      }
+    ]
+  },
+  "handoffPath": "handoffs/wu-validation-wu-swe-evidence/handoff.json"
+}

@@ -1,0 +1,10 @@
+# 上游应用原始副本（只读、体积 1.7G），不纳入版本控制
+app-reference/*
+# 例外：本仓库自有的分析产出
+!app-reference/analysis/
+
+# macOS
+.DS_Store
+
+# 本地能力投影目录（Claude Code），不纳入版本控制
+.claude/

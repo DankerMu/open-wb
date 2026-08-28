@@ -1,0 +1,16 @@
+{
+  "release": "replacement-cli@def5678",
+  "window_minutes": 15,
+  "traffic_percent": 5,
+  "declared_thresholds": {
+    "error_rate_max": 0.01,
+    "p95_latency_ms_max": 250
+  },
+  "observed": {
+    "error_rate": 0.034,
+    "p95_latency_ms": 218
+  },
+  "rollback_trigger": "any declared threshold breach",
+  "rollback_available": true,
+  "new_counterexample": "malformed UTF-8 filename causes exit 101"
+}

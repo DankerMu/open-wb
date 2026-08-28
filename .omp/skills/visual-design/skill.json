@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "name": "visual-design",
+  "displayName": "Visual Design Engineering",
+  "description": "Use for creating, implementing, revising, exploring, or reviewing polished visual artifacts and interfaces—such as web/product UI, dashboards, mobile flows, decks, prototypes, editorial/media experiences, motion, and agentic interfaces—when the primary outcome is a visual deliverable or design judgment. Trigger for briefs, PRDs, screenshots, references, or existing work refined into visual results. Do not trigger from UI/CSS/screenshot/slide/dashboard terms alone when the outcome is appearance-preserving engineering/debugging, content extraction/transformation/description, technical diagrams, backend work, or prose without design judgment.",
+  "version": "0.1.0",
+  "maturity": "experimental",
+  "categories": [
+    "design",
+    "frontend"
+  ],
+  "tags": [
+    "visual-design",
+    "ui",
+    "prototype",
+    "design-system",
+    "user-invoked"
+  ],
+  "authors": [
+    {
+      "name": "danker"
+    }
+  ],
+  "license": "MIT",
+  "entrypoints": {
+    "skillDoc": "SKILL.md",
+    "changelog": "CHANGELOG.md"
+  }
+}

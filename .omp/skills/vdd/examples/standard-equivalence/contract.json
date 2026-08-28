@@ -1,0 +1,260 @@
+{
+  "schema_version": "vdd-0.4",
+  "revision": "contract@4",
+  "objective_id": "OBJ-CLI-PORT-001",
+  "mode": "equivalence",
+  "risk_profile": "standard",
+  "goal": "Replace the legacy CLI implementation while preserving accepted stdout, stderr, exit-code, and file behavior.",
+  "intent": {
+    "status": "validated",
+    "owner": "cli-owner",
+    "authority": "published CLI contract plus classified legacy behavior",
+    "sources": ["CLI.md", "legacy@9f31"],
+    "positive_examples": ["valid input emits sorted JSON and exits 0"],
+    "negative_examples": ["wrong arity exits 2 on stderr", "malformed JSON emits no stdout"],
+    "critical_scenarios": ["missing input file", "malformed JSON after partial read"],
+    "ambiguities": [],
+    "unknowns": [],
+    "decisions": ["legacy timestamp wording is corrected and excluded from exact comparison"]
+  },
+  "claims": [
+    {
+      "id": "C-CLI-OUTPUT",
+      "statement": "For accepted inputs, candidate and accepted legacy behavior produce the same semantic stdout, stderr, exit code, and output files.",
+      "scope": "public CLI process boundary",
+      "severity": "high",
+      "assumptions": ["Locale fixed to C"],
+      "oracle_ids": ["O-CLI-DIFF", "O-CLI-INTEGRATION"],
+      "defeater_ids": ["D-EXIT-CODE", "D-PARTIAL-OUTPUT"]
+    },
+    {
+      "id": "C-CLI-CUTOVER",
+      "statement": "Production callers invoke only the replacement binary after cutover; legacy remains only as rollback artifact.",
+      "scope": "packaging and invocation paths",
+      "severity": "medium",
+      "assumptions": [],
+      "oracle_ids": ["O-CLI-INTEGRATION"],
+      "defeater_ids": ["D-LEGACY-DELEGATION"]
+    }
+  ],
+  "defeaters": [
+    {
+      "id": "D-EXIT-CODE",
+      "claim_id": "C-CLI-OUTPUT",
+      "description": "Candidate returns exit code 1 instead of the documented usage code 2.",
+      "failure_class": "CONTRACT",
+      "severity": "high",
+      "status": "covered",
+      "oracle_ids": ["O-CLI-DIFF"],
+      "qualification_fault": "Temporary candidate maps all errors to exit 1.",
+      "risk_owner": null
+    },
+    {
+      "id": "D-PARTIAL-OUTPUT",
+      "claim_id": "C-CLI-OUTPUT",
+      "description": "Candidate writes partial stdout before malformed JSON is rejected.",
+      "failure_class": "BEHAVIOR_DIFF",
+      "severity": "high",
+      "status": "covered",
+      "oracle_ids": ["O-CLI-DIFF"],
+      "qualification_fault": "Temporary candidate prints parsed prefix before final parse succeeds.",
+      "risk_owner": null
+    },
+    {
+      "id": "D-LEGACY-DELEGATION",
+      "claim_id": "C-CLI-CUTOVER",
+      "description": "Replacement wrapper secretly invokes the legacy implementation.",
+      "failure_class": "CHEATING",
+      "severity": "medium",
+      "status": "covered",
+      "oracle_ids": ["O-CLI-INTEGRATION"],
+      "qualification_fault": "Use a wrapper that shells out to legacy and assert process/file provenance detects it.",
+      "risk_owner": null
+    }
+  ],
+  "oracles": [
+    {
+      "id": "O-CLI-DIFF",
+      "type": "differential",
+      "owner": "cli-verifier",
+      "protected": true,
+      "revision": "diff@3",
+      "fingerprint": "sha256:6d8dd180255919c71f7b5d9e7b7e2a17374cc3726c1d041b572f3df632a46add",
+      "claims": ["C-CLI-OUTPUT"],
+      "failure_classes": ["CONTRACT", "BEHAVIOR_DIFF"],
+      "quality": {
+        "fidelity": "high",
+        "independence": "high",
+        "sensitivity": "high",
+        "reproducibility": "high",
+        "environment_realism": "medium"
+      },
+      "qualification": {
+        "status": "fresh",
+        "known_good_command": "python verifier/run_reference_selfcheck.py",
+        "restore_command": "python verifier/run_reference_selfcheck.py --after-restore",
+        "known_bad_cases": [
+          {
+            "defeater_id": "D-EXIT-CODE",
+            "fault": "all-errors-exit-1 mutant",
+            "expected_rejection": "exit code mismatch"
+          },
+          {
+            "defeater_id": "D-PARTIAL-OUTPUT",
+            "fault": "partial-stdout mutant",
+            "expected_rejection": "stdout mismatch on malformed JSON"
+          }
+        ],
+        "stability_command_ids": [
+          "QUAL-DIFF-STABILITY-1",
+          "QUAL-DIFF-STABILITY-2",
+          "QUAL-DIFF-STABILITY-3"
+        ],
+        "stability_required": true,
+        "required_no_change_trials": 3,
+        "max_flake_rate": 0.0
+      }
+    },
+    {
+      "id": "O-CLI-INTEGRATION",
+      "type": "integration",
+      "owner": "cli-verifier",
+      "protected": true,
+      "revision": "integration@2",
+      "fingerprint": "sha256:8e3437ad7ce564596f2953c41e97f26b0f1064a7ae4a3e1c8a62fac91073bd14",
+      "claims": ["C-CLI-OUTPUT", "C-CLI-CUTOVER"],
+      "failure_classes": ["CONTRACT", "CHEATING"],
+      "quality": {
+        "fidelity": "high",
+        "independence": "high",
+        "sensitivity": "medium",
+        "reproducibility": "high",
+        "environment_realism": "high"
+      },
+      "qualification": {
+        "status": "fresh",
+        "known_good_command": "./verifier/run_packaged_cli.sh legacy",
+        "restore_command": "./verifier/run_packaged_cli.sh legacy --after-restore",
+        "known_bad_cases": [
+          {
+            "defeater_id": "D-LEGACY-DELEGATION",
+            "fault": "legacy-delegating wrapper",
+            "expected_rejection": "unexpected child process/provenance"
+          }
+        ],
+        "stability_command_ids": [
+          "QUAL-INTEGRATION-STABILITY-1",
+          "QUAL-INTEGRATION-STABILITY-2",
+          "QUAL-INTEGRATION-STABILITY-3"
+        ],
+        "stability_required": true,
+        "required_no_change_trials": 3,
+        "max_flake_rate": 0.0
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "name": "CLI corpus",
+      "fingerprint": "sha256:5f385c0aaec1870f03749c702fa3bce0e92d0868469b57ce09cc4260c16203ac"
+    }
+  ],
+  "baseline": {
+    "semantic_red_command": null,
+    "reference_green_command": "python verifier/capture_reference.py --revision legacy@9f31",
+    "semantic_green_command": null,
+    "metric": null
+  },
+  "scope": {
+    "editable": ["src/", "Cargo.toml", "packaging/replacement-entry"],
+    "protected": ["verifier/", "fixtures/", "CLI.md", "ci/vdd-accept.yml"],
+    "dependency_change_policy": "review",
+    "network_policy": "deny",
+    "secret_policy": "none",
+    "destructive_commands": ["git reset --hard", "git clean -fdx"]
+  },
+  "candidate_capabilities": {
+    "writable_paths": ["src/", "Cargo.toml", "packaging/replacement-entry"],
+    "readable_protected_paths": ["verifier/", "fixtures/", "CLI.md", "ci/vdd-accept.yml"],
+    "allowed_commands": [
+      "python verifier/",
+      "./verifier/",
+      "cargo check",
+      "cargo test",
+      "git diff"
+    ],
+    "denied_commands": ["git reset --hard", "git clean -fdx"],
+    "network_policy": "deny",
+    "secret_policy": "none",
+    "dependency_change_policy": "review",
+    "destructive_git_policy": "deny"
+  },
+  "roles": {
+    "contract_owner": "cli-owner",
+    "verifier_owner": "cli-verifier",
+    "implementer": "port-agent",
+    "acceptor": "ci-vdd-acceptor",
+    "release_owner": "cli-release-owner"
+  },
+  "environment": {
+    "digest": "sha256:d4fec0b53d7dcfaf0bf538fa3c912d7646abfda04ec20aee106e15e3b0833ac9",
+    "required": ["Rust stable pinned by rust-toolchain.toml", "Python 3.12 reference runtime"],
+    "matrix": ["linux-x86_64", "macos-arm64"],
+    "fingerprint_fields": [
+      "candidate revision",
+      "lockfile",
+      "toolchains",
+      "OS/arch",
+      "locale",
+      "fixtures",
+      "reference revision",
+      "test discovery"
+    ]
+  },
+  "test_discovery": {
+    "manifest_digest": "sha256:1da9e4224829266ea852ac1995e7bcb57dd4a340c702bd8006ab79316f8a57ff",
+    "expected": 124,
+    "approved_skips": [],
+    "shards": [
+      {
+        "id": "all",
+        "expected": 124
+      }
+    ]
+  },
+  "gates": {
+    "fast": "cargo check -p replacement-cli",
+    "focused": "python verifier/diff_cli.py --candidate target/debug/replacement-cli",
+    "broad": "cargo test --workspace",
+    "integration": "./verifier/run_packaged_cli.sh candidate",
+    "merge": "python verifier/merge_gate.py --candidate target/debug/replacement-cli",
+    "release": "supported platform matrix plus canary and rollback exercise"
+  },
+  "cutover": {
+    "strategy": "incremental",
+    "completion": "packaging and all callers point to replacement; no production legacy invocation",
+    "rollback": "restore the previously signed legacy package; do not route candidate through legacy"
+  },
+  "statistical_gate": null,
+  "evidence": {
+    "path": "artifacts/vdd/OBJ-CLI-PORT-001.json",
+    "retention": "repository plus CI artifact store for 2 years",
+    "invalidated_by": [
+      "contract/reference classification change",
+      "verifier/fixture change",
+      "candidate or lockfile change",
+      "toolchain/platform/test-discovery change"
+    ]
+  },
+  "runtime_feedback": {
+    "enabled": true,
+    "signals": ["exit-code distribution", "CLI failure rate"],
+    "permanent_corpus_path": "verifier/corpus/incidents"
+  },
+  "stop_conditions": [
+    "differential judge cannot reject a semantic mutant",
+    "reference behavior is unknown for a required claim",
+    "protected verifier identity changes",
+    "same failure signature reaches repair budget"
+  ]
+}

@@ -1,0 +1,1455 @@
+{
+  "schemaVersion": 1,
+  "episodeId": "episode:91a9247d6b2f8e34643785dcc42803d0579a2714a2e5f37d86208a911de3020e",
+  "generatedAt": "2026-07-08T03:13:44.475Z",
+  "missionRoot": {
+    "path": ".",
+    "name": "eng-init-control-plane-upgrade"
+  },
+  "mission": {
+    "missionId": "mission-0d33b392",
+    "goal": "Implement eng-init Agent Engineering Readiness Control Plane upgrade from eng-init-control-plane-upgrade.spec.md with proof-gated review, evolution, and swe-agent validation.",
+    "verdict": "ready",
+    "startedAt": "2026-07-02T17:29:42.032Z",
+    "endedAt": "2026-07-02T18:45:31.743Z",
+    "rootName": "eng-init-control-plane-upgrade"
+  },
+  "proofState": {
+    "path": "learning/proof-state-final.json",
+    "sha256": "62b47f046c608f3b0825231a452754ef3807eb5286bb4d69102ac9ee3aab3ccd",
+    "verdict": "ready",
+    "blockedGates": [
+      "projection-drift"
+    ],
+    "snapshotSequence": 128,
+    "snapshotHash": "5bb41983e9c176ab81230dc76555d98fbafb7028ffa76ec4757fa65bf0ae606d"
+  },
+  "eventStore": {
+    "path": "event-store.jsonl",
+    "sha256": "0f118c924bef077b8775a0a785571f4ec21ee8d66f40fb8fb5e710ad28938a8f",
+    "sequenceCount": 128,
+    "lastSequence": 128,
+    "lastHash": "5bb41983e9c176ab81230dc76555d98fbafb7028ffa76ec4757fa65bf0ae606d"
+  },
+  "workUnits": [
+    {
+      "workUnitId": "wu-core-review",
+      "kind": "review",
+      "status": "completed",
+      "title": "Independent review of core upgrade",
+      "fulfills": [],
+      "handoffs": [
+        "artifact:82439fda5fabc2cb88e4947b"
+      ],
+      "evidence": [],
+      "reviews": [
+        "event:47:2f55c277-7a09-4ad3-b3c0-eaac8763fb02"
+      ],
+      "validators": []
+    },
+    {
+      "workUnitId": "wu-core-validation",
+      "kind": "validation",
+      "status": "cancelled",
+      "title": "Validate core upgrade file evidence",
+      "fulfills": [],
+      "handoffs": [],
+      "evidence": [],
+      "reviews": [],
+      "validators": []
+    },
+    {
+      "workUnitId": "wu-eval-cases",
+      "kind": "task",
+      "status": "completed",
+      "title": "Add lifecycle regression eval cases",
+      "fulfills": [
+        "VAL-EVAL-001"
+      ],
+      "handoffs": [
+        "artifact:1ab0ac8ef44265289f795861"
+      ],
+      "evidence": [
+        "artifact:254a1d64c0bd1ccb0c240003"
+      ],
+      "reviews": [
+        "event:49:aeda3fc8-c908-4baf-af7d-dd04e9bb4ac8"
+      ],
+      "validators": [
+        "event:55:4c086ead-f5b0-4d16-8b0b-cb9af1b90dfb"
+      ]
+    },
+    {
+      "workUnitId": "wu-evolution-evidence",
+      "kind": "task",
+      "status": "completed",
+      "title": "Record self-evolution evidence",
+      "fulfills": [
+        "VAL-EVOLVE-001"
+      ],
+      "handoffs": [
+        "artifact:2b6f5c8d33c0f282e6276807"
+      ],
+      "evidence": [
+        "artifact:2e0e9f233f0221f1a0a15e70"
+      ],
+      "reviews": [
+        "event:88:e6de3b80-b445-4cc4-80f2-253f79519a7e"
+      ],
+      "validators": [
+        "event:87:75b8d4d2-1e54-4ac2-8ec5-7b033622ffdc"
+      ]
+    },
+    {
+      "workUnitId": "wu-final-evidence",
+      "kind": "task",
+      "status": "completed",
+      "title": "Record final evidence package",
+      "fulfills": [
+        "VAL-FINAL-001"
+      ],
+      "handoffs": [
+        "artifact:5032ce54b714d7f2aa238d4d"
+      ],
+      "evidence": [
+        "artifact:073556a2972e2311a44e6d1f"
+      ],
+      "reviews": [
+        "event:89:f7c1b258-35d4-4e55-ae8d-3146ac5ef179"
+      ],
+      "validators": [
+        "event:84:a1cb8e1b-05f0-43c5-8e32-3966ba1accb9"
+      ]
+    },
+    {
+      "workUnitId": "wu-final-evidence-review",
+      "kind": "review",
+      "status": "cancelled",
+      "title": "Final evidence review",
+      "fulfills": [],
+      "handoffs": [],
+      "evidence": [],
+      "reviews": [],
+      "validators": []
+    },
+    {
+      "workUnitId": "wu-final-review",
+      "kind": "review",
+      "status": "cancelled",
+      "title": "Final independent review",
+      "fulfills": [],
+      "handoffs": [],
+      "evidence": [],
+      "reviews": [],
+      "validators": []
+    },
+    {
+      "workUnitId": "wu-post-review-ms-29f2716a",
+      "kind": "review",
+      "status": "completed",
+      "title": "Post-mission code review",
+      "systemPurpose": "post-mission-review",
+      "fulfills": [],
+      "handoffs": [
+        "artifact:95f89e644116db40f2b2182d"
+      ],
+      "evidence": [],
+      "reviews": [],
+      "validators": []
+    },
+    {
+      "workUnitId": "wu-post-validation-ms-29f2716a",
+      "kind": "validation",
+      "status": "completed",
+      "title": "Post-mission scrutiny validation",
+      "systemPurpose": "post-mission-validation",
+      "fulfills": [],
+      "handoffs": [
+        "artifact:d5ad377d6073086172adfb84"
+      ],
+      "evidence": [],
+      "reviews": [],
+      "validators": []
+    },
+    {
+      "workUnitId": "wu-report-repair-refs",
+      "kind": "task",
+      "status": "completed",
+      "title": "Update readiness report contract and repair recipes",
+      "fulfills": [
+        "VAL-REPORT-001",
+        "VAL-REPAIR-001"
+      ],
+      "handoffs": [
+        "artifact:6f8032f9b51afa079d4ae16a"
+      ],
+      "evidence": [
+        "artifact:58ef902a49b2ef5d6a6b5e27"
+      ],
+      "reviews": [
+        "event:48:bead0c25-71b5-4291-a2f8-57f816cf5f73"
+      ],
+      "validators": [
+        "event:53:6cede100-659b-4948-99f5-4fb258353d95",
+        "event:54:88f89ed2-1291-42f1-b65d-a1ca827b8515"
+      ]
+    },
+    {
+      "workUnitId": "wu-review-evidence",
+      "kind": "task",
+      "status": "completed",
+      "title": "Record independent review evidence",
+      "fulfills": [
+        "VAL-REVIEW-001"
+      ],
+      "handoffs": [
+        "artifact:5ada3b172d80935b1571f0b5"
+      ],
+      "evidence": [
+        "artifact:e8445f97cffb6eb8df3b8ab5"
+      ],
+      "reviews": [
+        "event:90:7c1d2eab-440c-40f2-a89a-ccd87c07a8a3"
+      ],
+      "validators": [
+        "event:86:c0d854d6-0b41-414e-8bb4-e73e528b2c72"
+      ]
+    },
+    {
+      "workUnitId": "wu-review-remediation",
+      "kind": "remediation",
+      "status": "cancelled",
+      "title": "Apply independent review remediation",
+      "fulfills": [
+        "VAL-REVIEW-001"
+      ],
+      "handoffs": [],
+      "evidence": [],
+      "reviews": [],
+      "validators": [
+        "event:86:c0d854d6-0b41-414e-8bb4-e73e528b2c72"
+      ]
+    },
+    {
+      "workUnitId": "wu-review-wu-eval-cases",
+      "kind": "review",
+      "status": "cancelled",
+      "title": "Review Add lifecycle regression eval cases",
+      "systemPurpose": "deliverable-review",
+      "fulfills": [],
+      "handoffs": [],
+      "evidence": [],
+      "reviews": [],
+      "validators": []
+    },
+    {
+      "workUnitId": "wu-review-wu-evolution-evidence",
+      "kind": "review",
+      "status": "cancelled",
+      "title": "Review Record self-evolution evidence",
+      "systemPurpose": "deliverable-review",
+      "fulfills": [],
+      "handoffs": [],
+      "evidence": [],
+      "reviews": [],
+      "validators": []
+    },
+    {
+      "workUnitId": "wu-review-wu-final-evidence",
+      "kind": "review",
+      "status": "cancelled",
+      "title": "Review Record final evidence package",
+      "systemPurpose": "deliverable-review",
+      "fulfills": [],
+      "handoffs": [],
+      "evidence": [],
+      "reviews": [],
+      "validators": []
+    },
+    {
+      "workUnitId": "wu-review-wu-report-repair-refs",
+      "kind": "review",
+      "status": "cancelled",
+      "title": "Review Update readiness report contract and repair recipes",
+      "systemPurpose": "deliverable-review",
+      "fulfills": [],
+      "handoffs": [],
+      "evidence": [],
+      "reviews": [],
+      "validators": []
+    },
+    {
+      "workUnitId": "wu-review-wu-review-evidence",
+      "kind": "review",
+      "status": "cancelled",
+      "title": "Review Record independent review evidence",
+      "systemPurpose": "deliverable-review",
+      "fulfills": [],
+      "handoffs": [],
+      "evidence": [],
+      "reviews": [],
+      "validators": []
+    },
+    {
+      "workUnitId": "wu-review-wu-skill-routing",
+      "kind": "review",
+      "status": "cancelled",
+      "title": "Review Update SKILL.md routing and positioning",
+      "systemPurpose": "deliverable-review",
+      "fulfills": [],
+      "handoffs": [],
+      "evidence": [],
+      "reviews": [],
+      "validators": []
+    },
+    {
+      "workUnitId": "wu-review-wu-swe-evidence",
+      "kind": "review",
+      "status": "cancelled",
+      "title": "Review Record swe-agent validation evidence",
+      "systemPurpose": "deliverable-review",
+      "fulfills": [],
+      "handoffs": [],
+      "evidence": [],
+      "reviews": [],
+      "validators": []
+    },
+    {
+      "workUnitId": "wu-self-evolution",
+      "kind": "task",
+      "status": "cancelled",
+      "title": "Run bounded self-evolution pass",
+      "fulfills": [
+        "VAL-EVOLVE-001"
+      ],
+      "handoffs": [],
+      "evidence": [],
+      "reviews": [],
+      "validators": [
+        "event:87:75b8d4d2-1e54-4ac2-8ec5-7b033622ffdc"
+      ]
+    },
+    {
+      "workUnitId": "wu-skill-routing",
+      "kind": "task",
+      "status": "completed",
+      "title": "Update SKILL.md routing and positioning",
+      "fulfills": [
+        "VAL-SKILL-001"
+      ],
+      "handoffs": [
+        "artifact:1b0d5033f6635ac462ba52c6"
+      ],
+      "evidence": [
+        "artifact:0da1d4476b59c43d47ec67e9"
+      ],
+      "reviews": [
+        "event:46:e2f2baaf-5032-48d9-8291-8f2da776fe90"
+      ],
+      "validators": [
+        "event:52:781c08ca-1678-4cc4-92cc-bde8bea3fbd1"
+      ]
+    },
+    {
+      "workUnitId": "wu-swe-agent-test",
+      "kind": "task",
+      "status": "cancelled",
+      "title": "Run swe-agent real-project validation",
+      "fulfills": [
+        "VAL-SWE-001"
+      ],
+      "handoffs": [],
+      "evidence": [],
+      "reviews": [],
+      "validators": [
+        "event:85:5832d402-aa79-4985-8303-0d3b46b3f9d5"
+      ]
+    },
+    {
+      "workUnitId": "wu-swe-evidence",
+      "kind": "task",
+      "status": "completed",
+      "title": "Record swe-agent validation evidence",
+      "fulfills": [
+        "VAL-SWE-001"
+      ],
+      "handoffs": [
+        "artifact:83f9739622016d3d1ce5269d"
+      ],
+      "evidence": [
+        "artifact:4d84f2d44b0a485552aeb11c"
+      ],
+      "reviews": [
+        "event:91:630772b1-cd8c-4466-8ea8-ecca017877f5"
+      ],
+      "validators": [
+        "event:85:5832d402-aa79-4985-8303-0d3b46b3f9d5"
+      ]
+    },
+    {
+      "workUnitId": "wu-validation-wu-eval-cases",
+      "kind": "validation",
+      "status": "cancelled",
+      "title": "Validate Add lifecycle regression eval cases",
+      "systemPurpose": "deliverable-validation",
+      "fulfills": [],
+      "handoffs": [],
+      "evidence": [],
+      "reviews": [],
+      "validators": []
+    },
+    {
+      "workUnitId": "wu-validation-wu-evolution-evidence",
+      "kind": "validation",
+      "status": "cancelled",
+      "title": "Validate Record self-evolution evidence",
+      "systemPurpose": "deliverable-validation",
+      "fulfills": [],
+      "handoffs": [],
+      "evidence": [],
+      "reviews": [],
+      "validators": []
+    },
+    {
+      "workUnitId": "wu-validation-wu-final-evidence",
+      "kind": "validation",
+      "status": "cancelled",
+      "title": "Validate Record final evidence package",
+      "systemPurpose": "deliverable-validation",
+      "fulfills": [],
+      "handoffs": [],
+      "evidence": [],
+      "reviews": [],
+      "validators": []
+    },
+    {
+      "workUnitId": "wu-validation-wu-report-repair-refs",
+      "kind": "validation",
+      "status": "cancelled",
+      "title": "Validate Update readiness report contract and repair recipes",
+      "systemPurpose": "deliverable-validation",
+      "fulfills": [],
+      "handoffs": [],
+      "evidence": [],
+      "reviews": [],
+      "validators": []
+    },
+    {
+      "workUnitId": "wu-validation-wu-review-evidence",
+      "kind": "validation",
+      "status": "cancelled",
+      "title": "Validate Record independent review evidence",
+      "systemPurpose": "deliverable-validation",
+      "fulfills": [],
+      "handoffs": [],
+      "evidence": [],
+      "reviews": [],
+      "validators": []
+    },
+    {
+      "workUnitId": "wu-validation-wu-skill-routing",
+      "kind": "validation",
+      "status": "cancelled",
+      "title": "Validate Update SKILL.md routing and positioning",
+      "systemPurpose": "deliverable-validation",
+      "fulfills": [],
+      "handoffs": [],
+      "evidence": [],
+      "reviews": [],
+      "validators": []
+    },
+    {
+      "workUnitId": "wu-validation-wu-swe-evidence",
+      "kind": "validation",
+      "status": "cancelled",
+      "title": "Validate Record swe-agent validation evidence",
+      "systemPurpose": "deliverable-validation",
+      "fulfills": [],
+      "handoffs": [],
+      "evidence": [],
+      "reviews": [],
+      "validators": []
+    }
+  ],
+  "handoffRefs": [
+    {
+      "workUnitId": "wu-eval-cases",
+      "artifactRef": "artifact:1ab0ac8ef44265289f795861"
+    },
+    {
+      "workUnitId": "wu-skill-routing",
+      "artifactRef": "artifact:1b0d5033f6635ac462ba52c6"
+    },
+    {
+      "workUnitId": "wu-report-repair-refs",
+      "artifactRef": "artifact:6f8032f9b51afa079d4ae16a"
+    },
+    {
+      "workUnitId": "wu-core-review",
+      "artifactRef": "artifact:82439fda5fabc2cb88e4947b"
+    },
+    {
+      "workUnitId": "wu-swe-evidence",
+      "artifactRef": "artifact:83f9739622016d3d1ce5269d"
+    },
+    {
+      "workUnitId": "wu-review-evidence",
+      "artifactRef": "artifact:5ada3b172d80935b1571f0b5"
+    },
+    {
+      "workUnitId": "wu-evolution-evidence",
+      "artifactRef": "artifact:2b6f5c8d33c0f282e6276807"
+    },
+    {
+      "workUnitId": "wu-final-evidence",
+      "artifactRef": "artifact:5032ce54b714d7f2aa238d4d"
+    },
+    {
+      "workUnitId": "wu-post-review-ms-29f2716a",
+      "artifactRef": "artifact:95f89e644116db40f2b2182d"
+    },
+    {
+      "workUnitId": "wu-post-validation-ms-29f2716a",
+      "artifactRef": "artifact:d5ad377d6073086172adfb84"
+    }
+  ],
+  "evidenceRefs": [
+    {
+      "eventRef": "event:27:d9be7df9-4040-46c3-9033-cbc73ec17fe6",
+      "artifactRef": "artifact:254a1d64c0bd1ccb0c240003",
+      "assertionId": "VAL-EVAL-001",
+      "workUnitId": "wu-eval-cases",
+      "path": ".agents/evidence/wu-eval-cases-evidence.log",
+      "sha256": "3bfac87d4046c78dcafe1365621c2531ed542cabf0425047172be9d005453187",
+      "eventSha256": "3bfac87d4046c78dcafe1365621c2531ed542cabf0425047172be9d005453187",
+      "evidenceSource": "fixture"
+    },
+    {
+      "eventRef": "event:32:696b0100-1a4e-472d-850d-0c81ef1f8d39",
+      "artifactRef": "artifact:58ef902a49b2ef5d6a6b5e27",
+      "assertionId": "VAL-REPORT-001",
+      "workUnitId": "wu-report-repair-refs",
+      "path": ".agents/evidence/wu-report-repair-refs-evidence.log",
+      "sha256": "74100a730875886e79af997db3ec85e7c6a1db51609ca83832aba713b6180e90",
+      "eventSha256": "74100a730875886e79af997db3ec85e7c6a1db51609ca83832aba713b6180e90",
+      "evidenceSource": "fixture"
+    },
+    {
+      "eventRef": "event:33:0a642c29-0fb2-4231-831b-55f2fa79d28a",
+      "artifactRef": "artifact:58ef902a49b2ef5d6a6b5e27",
+      "assertionId": "VAL-REPAIR-001",
+      "workUnitId": "wu-report-repair-refs",
+      "path": ".agents/evidence/wu-report-repair-refs-evidence.log",
+      "sha256": "74100a730875886e79af997db3ec85e7c6a1db51609ca83832aba713b6180e90",
+      "eventSha256": "74100a730875886e79af997db3ec85e7c6a1db51609ca83832aba713b6180e90",
+      "evidenceSource": "fixture"
+    },
+    {
+      "eventRef": "event:36:1ee88ee5-7ff8-462e-968e-7790b3c58cfe",
+      "artifactRef": "artifact:0da1d4476b59c43d47ec67e9",
+      "assertionId": "VAL-SKILL-001",
+      "workUnitId": "wu-skill-routing",
+      "path": ".agents/evidence/wu-skill-routing-evidence.log",
+      "sha256": "accb649abddc44eb0732d4b6f318d42ee263abbeee6fbd9899480478941862ae",
+      "eventSha256": "accb649abddc44eb0732d4b6f318d42ee263abbeee6fbd9899480478941862ae",
+      "evidenceSource": "fixture"
+    },
+    {
+      "eventRef": "event:69:1b74506f-7b0f-4cff-bafb-412fbbaf306e",
+      "artifactRef": "artifact:4d84f2d44b0a485552aeb11c",
+      "assertionId": "VAL-SWE-001",
+      "workUnitId": "wu-swe-evidence",
+      "path": ".agents/evidence/wu-swe-evidence-evidence.log",
+      "sha256": "c333fa59259f9c692fb919c752ba1ef17d86a48e534a3c0bc78c017d84281bfc",
+      "eventSha256": "c333fa59259f9c692fb919c752ba1ef17d86a48e534a3c0bc78c017d84281bfc",
+      "evidenceSource": "fixture"
+    },
+    {
+      "eventRef": "event:73:04a674a3-6a5c-4bc5-95a0-a33d40d326e5",
+      "artifactRef": "artifact:e8445f97cffb6eb8df3b8ab5",
+      "assertionId": "VAL-REVIEW-001",
+      "workUnitId": "wu-review-evidence",
+      "path": ".agents/evidence/wu-review-evidence-evidence.log",
+      "sha256": "77e18451df20b419acb6fa3fa7c6ae1ced655088a984e41791ca354532befcf3",
+      "eventSha256": "77e18451df20b419acb6fa3fa7c6ae1ced655088a984e41791ca354532befcf3",
+      "evidenceSource": "fixture"
+    },
+    {
+      "eventRef": "event:77:8f1f9a05-59b1-49b3-b9ef-fc0d222bc29a",
+      "artifactRef": "artifact:2e0e9f233f0221f1a0a15e70",
+      "assertionId": "VAL-EVOLVE-001",
+      "workUnitId": "wu-evolution-evidence",
+      "path": ".agents/evidence/wu-evolution-evidence-evidence.log",
+      "sha256": "535ff1c7b149e14bb2239f0a567365b89700136e7ac6566cb528ea8b108dbfb4",
+      "eventSha256": "535ff1c7b149e14bb2239f0a567365b89700136e7ac6566cb528ea8b108dbfb4",
+      "evidenceSource": "fixture"
+    },
+    {
+      "eventRef": "event:81:1c6e4d62-f321-47f0-94ac-6eae7def53ca",
+      "artifactRef": "artifact:073556a2972e2311a44e6d1f",
+      "assertionId": "VAL-FINAL-001",
+      "workUnitId": "wu-final-evidence",
+      "path": ".agents/evidence/wu-final-evidence-evidence.log",
+      "sha256": "e23399561b259b9f5202259334b8d3f409dedde853b1748da07a6db81779d033",
+      "eventSha256": "e23399561b259b9f5202259334b8d3f409dedde853b1748da07a6db81779d033",
+      "evidenceSource": "fixture"
+    }
+  ],
+  "reviewRefs": [
+    {
+      "eventRef": "event:46:e2f2baaf-5032-48d9-8291-8f2da776fe90",
+      "workUnitId": "wu-skill-routing",
+      "reviewerId": "TerseReview",
+      "verdict": "approved",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "eventRef": "event:47:2f55c277-7a09-4ad3-b3c0-eaac8763fb02",
+      "workUnitId": "wu-core-review",
+      "reviewerId": "TerseReview",
+      "verdict": "approved",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "eventRef": "event:48:bead0c25-71b5-4291-a2f8-57f816cf5f73",
+      "workUnitId": "wu-report-repair-refs",
+      "reviewerId": "TerseReview",
+      "verdict": "approved",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "eventRef": "event:49:aeda3fc8-c908-4baf-af7d-dd04e9bb4ac8",
+      "workUnitId": "wu-eval-cases",
+      "reviewerId": "TerseReview",
+      "verdict": "approved",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "eventRef": "event:88:e6de3b80-b445-4cc4-80f2-253f79519a7e",
+      "workUnitId": "wu-evolution-evidence",
+      "reviewerId": "MainFinalReview",
+      "verdict": "approved",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "eventRef": "event:89:f7c1b258-35d4-4e55-ae8d-3146ac5ef179",
+      "workUnitId": "wu-final-evidence",
+      "reviewerId": "MainFinalReview",
+      "verdict": "approved",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "eventRef": "event:90:7c1d2eab-440c-40f2-a89a-ccd87c07a8a3",
+      "workUnitId": "wu-review-evidence",
+      "reviewerId": "MainFinalReview",
+      "verdict": "approved",
+      "findingCount": 0,
+      "findings": []
+    },
+    {
+      "eventRef": "event:91:630772b1-cd8c-4466-8ea8-ecca017877f5",
+      "workUnitId": "wu-swe-evidence",
+      "reviewerId": "MainFinalReview",
+      "verdict": "approved",
+      "findingCount": 0,
+      "findings": []
+    }
+  ],
+  "validatorRefs": [
+    {
+      "eventRef": "event:52:781c08ca-1678-4cc4-92cc-bde8bea3fbd1",
+      "assertionId": "VAL-SKILL-001",
+      "validatorId": "engineering-val-skill-001-v2",
+      "verdict": "confirmed",
+      "summary": "SKILL.md control-plane routing verified by file inspection.",
+      "suggestedGuidanceUpdates": [],
+      "rejectedObservations": [],
+      "frictions": [],
+      "blockers": [],
+      "evidence": [
+        {
+          "artifactRef": "artifact:6e55fe118806338301e524a9",
+          "kind": "command",
+          "path": ".agents/evidence/validators/val-skill-001/command.txt",
+          "sha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4",
+          "eventSha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4"
+        },
+        {
+          "artifactRef": "artifact:fb2a6b8fabb931870af67802",
+          "kind": "stdout",
+          "path": ".agents/evidence/validators/val-skill-001/stdout.txt",
+          "sha256": "fcad7e9ed4c24808795c1efb580210722830900586ee2f3930851b33487e4225",
+          "eventSha256": "fcad7e9ed4c24808795c1efb580210722830900586ee2f3930851b33487e4225"
+        },
+        {
+          "artifactRef": "artifact:56684615023bb9c768ad422e",
+          "kind": "stderr",
+          "path": ".agents/evidence/validators/val-skill-001/stderr.txt",
+          "sha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f",
+          "eventSha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f"
+        },
+        {
+          "artifactRef": "artifact:4ac2c8ab2230c28a0df140da",
+          "kind": "exit-code",
+          "path": ".agents/evidence/validators/val-skill-001/exit-code.txt",
+          "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+          "eventSha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+        }
+      ]
+    },
+    {
+      "eventRef": "event:53:6cede100-659b-4948-99f5-4fb258353d95",
+      "assertionId": "VAL-REPORT-001",
+      "validatorId": "engineering-val-report-001-v2",
+      "verdict": "confirmed",
+      "summary": "Report lifecycle contract verified by file inspection.",
+      "suggestedGuidanceUpdates": [],
+      "rejectedObservations": [],
+      "frictions": [],
+      "blockers": [],
+      "evidence": [
+        {
+          "artifactRef": "artifact:593cf6389e9947deee8de5f3",
+          "kind": "command",
+          "path": ".agents/evidence/validators/val-report-001/command.txt",
+          "sha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4",
+          "eventSha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4"
+        },
+        {
+          "artifactRef": "artifact:bd68d77903f1528b15d983a3",
+          "kind": "stdout",
+          "path": ".agents/evidence/validators/val-report-001/stdout.txt",
+          "sha256": "e4fa135676d7c986e47cb0f3dfd269529d8638d8eefa99b39f8260e16ca6fc9a",
+          "eventSha256": "e4fa135676d7c986e47cb0f3dfd269529d8638d8eefa99b39f8260e16ca6fc9a"
+        },
+        {
+          "artifactRef": "artifact:0d8f374b4baba2a417c4945e",
+          "kind": "stderr",
+          "path": ".agents/evidence/validators/val-report-001/stderr.txt",
+          "sha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f",
+          "eventSha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f"
+        },
+        {
+          "artifactRef": "artifact:09788d063e5021922d11bc7b",
+          "kind": "exit-code",
+          "path": ".agents/evidence/validators/val-report-001/exit-code.txt",
+          "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+          "eventSha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+        }
+      ]
+    },
+    {
+      "eventRef": "event:54:88f89ed2-1291-42f1-b65d-a1ca827b8515",
+      "assertionId": "VAL-REPAIR-001",
+      "validatorId": "engineering-val-repair-001-v2",
+      "verdict": "confirmed",
+      "summary": "Repair recipes verified by file inspection.",
+      "suggestedGuidanceUpdates": [],
+      "rejectedObservations": [],
+      "frictions": [],
+      "blockers": [],
+      "evidence": [
+        {
+          "artifactRef": "artifact:3c92a979da1f7fc59274e0aa",
+          "kind": "command",
+          "path": ".agents/evidence/validators/val-repair-001/command.txt",
+          "sha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4",
+          "eventSha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4"
+        },
+        {
+          "artifactRef": "artifact:eb1f67c6e20e0a0fc51f5719",
+          "kind": "stdout",
+          "path": ".agents/evidence/validators/val-repair-001/stdout.txt",
+          "sha256": "fd8ca41583f3ed8c02e857c53a838ebf21dc35570b839708efd971a5efc1e815",
+          "eventSha256": "fd8ca41583f3ed8c02e857c53a838ebf21dc35570b839708efd971a5efc1e815"
+        },
+        {
+          "artifactRef": "artifact:c930588704244934bd5d8962",
+          "kind": "stderr",
+          "path": ".agents/evidence/validators/val-repair-001/stderr.txt",
+          "sha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f",
+          "eventSha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f"
+        },
+        {
+          "artifactRef": "artifact:bdd64a168e2c0e677fa512ee",
+          "kind": "exit-code",
+          "path": ".agents/evidence/validators/val-repair-001/exit-code.txt",
+          "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+          "eventSha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+        }
+      ]
+    },
+    {
+      "eventRef": "event:55:4c086ead-f5b0-4d16-8b0b-cb9af1b90dfb",
+      "assertionId": "VAL-EVAL-001",
+      "validatorId": "engineering-val-eval-001-v2",
+      "verdict": "confirmed",
+      "summary": "Eval coverage verified by file inspection.",
+      "suggestedGuidanceUpdates": [],
+      "rejectedObservations": [],
+      "frictions": [],
+      "blockers": [],
+      "evidence": [
+        {
+          "artifactRef": "artifact:1719935d756dbc1f721f0150",
+          "kind": "command",
+          "path": ".agents/evidence/validators/val-eval-001/command.txt",
+          "sha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4",
+          "eventSha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4"
+        },
+        {
+          "artifactRef": "artifact:d9415f998f6404a803dbdad0",
+          "kind": "stdout",
+          "path": ".agents/evidence/validators/val-eval-001/stdout.txt",
+          "sha256": "45addfb0bababbc42ef531192bcf0848af6aaf65d44018504711f1a15afc82bb",
+          "eventSha256": "45addfb0bababbc42ef531192bcf0848af6aaf65d44018504711f1a15afc82bb"
+        },
+        {
+          "artifactRef": "artifact:890cac456b62b6ce3b4515c0",
+          "kind": "stderr",
+          "path": ".agents/evidence/validators/val-eval-001/stderr.txt",
+          "sha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f",
+          "eventSha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f"
+        },
+        {
+          "artifactRef": "artifact:457f66acea23b30f774fd619",
+          "kind": "exit-code",
+          "path": ".agents/evidence/validators/val-eval-001/exit-code.txt",
+          "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+          "eventSha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+        }
+      ]
+    },
+    {
+      "eventRef": "event:84:a1cb8e1b-05f0-43c5-8e32-3966ba1accb9",
+      "assertionId": "VAL-FINAL-001",
+      "validatorId": "engineering-val-final-001-v1",
+      "verdict": "confirmed",
+      "summary": "Final evidence package is present for all requested surfaces.",
+      "suggestedGuidanceUpdates": [],
+      "rejectedObservations": [],
+      "frictions": [],
+      "blockers": [],
+      "evidence": [
+        {
+          "artifactRef": "artifact:c9d7ed1507983d7fc146728d",
+          "kind": "command",
+          "path": ".agents/evidence/validators/val-final-001/command.txt",
+          "sha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4",
+          "eventSha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4"
+        },
+        {
+          "artifactRef": "artifact:5cede7ed6451b98f8f8e2222",
+          "kind": "stdout",
+          "path": ".agents/evidence/validators/val-final-001/stdout.txt",
+          "sha256": "b0753343eccb2ef7ae9afd86df0997698a6f95ea00ee8fd4bfd51d41e68fc9b6",
+          "eventSha256": "b0753343eccb2ef7ae9afd86df0997698a6f95ea00ee8fd4bfd51d41e68fc9b6"
+        },
+        {
+          "artifactRef": "artifact:b55a190d01c837f9937b2fc4",
+          "kind": "stderr",
+          "path": ".agents/evidence/validators/val-final-001/stderr.txt",
+          "sha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f",
+          "eventSha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f"
+        },
+        {
+          "artifactRef": "artifact:5fc93f839717f419374af13d",
+          "kind": "exit-code",
+          "path": ".agents/evidence/validators/val-final-001/exit-code.txt",
+          "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+          "eventSha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+        }
+      ]
+    },
+    {
+      "eventRef": "event:85:5832d402-aa79-4985-8303-0d3b46b3f9d5",
+      "assertionId": "VAL-SWE-001",
+      "validatorId": "engineering-val-swe-001-v1",
+      "verdict": "confirmed",
+      "summary": "swe-agent read-only test report exists; audit-only mode; 2 apps; no destructive writes.",
+      "suggestedGuidanceUpdates": [],
+      "rejectedObservations": [],
+      "frictions": [],
+      "blockers": [],
+      "evidence": [
+        {
+          "artifactRef": "artifact:3c1d68622f6c0fe008908a13",
+          "kind": "command",
+          "path": ".agents/evidence/validators/val-swe-001/command.txt",
+          "sha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4",
+          "eventSha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4"
+        },
+        {
+          "artifactRef": "artifact:0ad85320251fb9dc69217f3c",
+          "kind": "stdout",
+          "path": ".agents/evidence/validators/val-swe-001/stdout.txt",
+          "sha256": "80fdbbc17d354ea64a2fcd01e3dcc2ab1bcde896e37c0209cf88fec9a1e1eaae",
+          "eventSha256": "80fdbbc17d354ea64a2fcd01e3dcc2ab1bcde896e37c0209cf88fec9a1e1eaae"
+        },
+        {
+          "artifactRef": "artifact:c37c0ddeb9b705f4c2721f37",
+          "kind": "stderr",
+          "path": ".agents/evidence/validators/val-swe-001/stderr.txt",
+          "sha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f",
+          "eventSha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f"
+        },
+        {
+          "artifactRef": "artifact:e8822e8886740797258313f6",
+          "kind": "exit-code",
+          "path": ".agents/evidence/validators/val-swe-001/exit-code.txt",
+          "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+          "eventSha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+        }
+      ]
+    },
+    {
+      "eventRef": "event:86:c0d854d6-0b41-414e-8bb4-e73e528b2c72",
+      "assertionId": "VAL-REVIEW-001",
+      "validatorId": "engineering-val-review-001-v1",
+      "verdict": "confirmed",
+      "summary": "Independent review returned [] and no remediation was required.",
+      "suggestedGuidanceUpdates": [],
+      "rejectedObservations": [],
+      "frictions": [],
+      "blockers": [],
+      "evidence": [
+        {
+          "artifactRef": "artifact:f0f83df1b52dfabfb983a601",
+          "kind": "command",
+          "path": ".agents/evidence/validators/val-review-001/command.txt",
+          "sha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4",
+          "eventSha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4"
+        },
+        {
+          "artifactRef": "artifact:55990e23aa785e5d5c923f4e",
+          "kind": "stdout",
+          "path": ".agents/evidence/validators/val-review-001/stdout.txt",
+          "sha256": "dcd5617beb088e1c9aa1cb9462732219d729702aebd8bb4b6a582c38d81219d6",
+          "eventSha256": "dcd5617beb088e1c9aa1cb9462732219d729702aebd8bb4b6a582c38d81219d6"
+        },
+        {
+          "artifactRef": "artifact:04cb4083fb28f835c96b4f7f",
+          "kind": "stderr",
+          "path": ".agents/evidence/validators/val-review-001/stderr.txt",
+          "sha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f",
+          "eventSha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f"
+        },
+        {
+          "artifactRef": "artifact:bef4502cbea66bcce10c62f2",
+          "kind": "exit-code",
+          "path": ".agents/evidence/validators/val-review-001/exit-code.txt",
+          "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+          "eventSha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+        }
+      ]
+    },
+    {
+      "eventRef": "event:87:75b8d4d2-1e54-4ac2-8ec5-7b033622ffdc",
+      "assertionId": "VAL-EVOLVE-001",
+      "validatorId": "engineering-val-evolve-001-v1",
+      "verdict": "confirmed",
+      "summary": "Self-evolution log exists; two mutations kept; validation 14/14.",
+      "suggestedGuidanceUpdates": [],
+      "rejectedObservations": [],
+      "frictions": [],
+      "blockers": [],
+      "evidence": [
+        {
+          "artifactRef": "artifact:4a2936d4428ea73a74c5d9e8",
+          "kind": "command",
+          "path": ".agents/evidence/validators/val-evolve-001/command.txt",
+          "sha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4",
+          "eventSha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4"
+        },
+        {
+          "artifactRef": "artifact:d77ad8c89de19afec02c334f",
+          "kind": "stdout",
+          "path": ".agents/evidence/validators/val-evolve-001/stdout.txt",
+          "sha256": "8130e3bb1ad309cb480dd32bd34575575f2a0b87276a9fcdbf2b1c95d47788e4",
+          "eventSha256": "8130e3bb1ad309cb480dd32bd34575575f2a0b87276a9fcdbf2b1c95d47788e4"
+        },
+        {
+          "artifactRef": "artifact:7bf2305668a025ac4afce323",
+          "kind": "stderr",
+          "path": ".agents/evidence/validators/val-evolve-001/stderr.txt",
+          "sha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f",
+          "eventSha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f"
+        },
+        {
+          "artifactRef": "artifact:0ec9f08e4a8cc629a64b67a0",
+          "kind": "exit-code",
+          "path": ".agents/evidence/validators/val-evolve-001/exit-code.txt",
+          "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+          "eventSha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+        }
+      ]
+    }
+  ],
+  "traceRefs": [],
+  "artifacts": [
+    {
+      "artifactId": "1719935d756dbc1f721f0150",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-eval-001/command.txt",
+      "sha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4",
+      "sizeBytes": 26,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "457f66acea23b30f774fd619",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-eval-001/exit-code.txt",
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "sizeBytes": 1,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "890cac456b62b6ce3b4515c0",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-eval-001/stderr.txt",
+      "sha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f",
+      "sizeBytes": 14,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "d9415f998f6404a803dbdad0",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-eval-001/stdout.txt",
+      "sha256": "45addfb0bababbc42ef531192bcf0848af6aaf65d44018504711f1a15afc82bb",
+      "sizeBytes": 142,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "4a2936d4428ea73a74c5d9e8",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-evolve-001/command.txt",
+      "sha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4",
+      "sizeBytes": 26,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "0ec9f08e4a8cc629a64b67a0",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-evolve-001/exit-code.txt",
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "sizeBytes": 1,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "7bf2305668a025ac4afce323",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-evolve-001/stderr.txt",
+      "sha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f",
+      "sizeBytes": 14,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "d77ad8c89de19afec02c334f",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-evolve-001/stdout.txt",
+      "sha256": "8130e3bb1ad309cb480dd32bd34575575f2a0b87276a9fcdbf2b1c95d47788e4",
+      "sizeBytes": 64,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "c9d7ed1507983d7fc146728d",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-final-001/command.txt",
+      "sha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4",
+      "sizeBytes": 26,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "5fc93f839717f419374af13d",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-final-001/exit-code.txt",
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "sizeBytes": 1,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "b55a190d01c837f9937b2fc4",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-final-001/stderr.txt",
+      "sha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f",
+      "sizeBytes": 14,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "5cede7ed6451b98f8f8e2222",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-final-001/stdout.txt",
+      "sha256": "b0753343eccb2ef7ae9afd86df0997698a6f95ea00ee8fd4bfd51d41e68fc9b6",
+      "sizeBytes": 61,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "3c92a979da1f7fc59274e0aa",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-repair-001/command.txt",
+      "sha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4",
+      "sizeBytes": 26,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "bdd64a168e2c0e677fa512ee",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-repair-001/exit-code.txt",
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "sizeBytes": 1,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "c930588704244934bd5d8962",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-repair-001/stderr.txt",
+      "sha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f",
+      "sizeBytes": 14,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "eb1f67c6e20e0a0fc51f5719",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-repair-001/stdout.txt",
+      "sha256": "fd8ca41583f3ed8c02e857c53a838ebf21dc35570b839708efd971a5efc1e815",
+      "sizeBytes": 154,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "593cf6389e9947deee8de5f3",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-report-001/command.txt",
+      "sha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4",
+      "sizeBytes": 26,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "09788d063e5021922d11bc7b",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-report-001/exit-code.txt",
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "sizeBytes": 1,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "0d8f374b4baba2a417c4945e",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-report-001/stderr.txt",
+      "sha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f",
+      "sizeBytes": 14,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "bd68d77903f1528b15d983a3",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-report-001/stdout.txt",
+      "sha256": "e4fa135676d7c986e47cb0f3dfd269529d8638d8eefa99b39f8260e16ca6fc9a",
+      "sizeBytes": 167,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "f0f83df1b52dfabfb983a601",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-review-001/command.txt",
+      "sha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4",
+      "sizeBytes": 26,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "bef4502cbea66bcce10c62f2",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-review-001/exit-code.txt",
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "sizeBytes": 1,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "04cb4083fb28f835c96b4f7f",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-review-001/stderr.txt",
+      "sha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f",
+      "sizeBytes": 14,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "55990e23aa785e5d5c923f4e",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-review-001/stdout.txt",
+      "sha256": "dcd5617beb088e1c9aa1cb9462732219d729702aebd8bb4b6a582c38d81219d6",
+      "sizeBytes": 63,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "6e55fe118806338301e524a9",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-skill-001/command.txt",
+      "sha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4",
+      "sizeBytes": 26,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "4ac2c8ab2230c28a0df140da",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-skill-001/exit-code.txt",
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "sizeBytes": 1,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "56684615023bb9c768ad422e",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-skill-001/stderr.txt",
+      "sha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f",
+      "sizeBytes": 14,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "fb2a6b8fabb931870af67802",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-skill-001/stdout.txt",
+      "sha256": "fcad7e9ed4c24808795c1efb580210722830900586ee2f3930851b33487e4225",
+      "sizeBytes": 123,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "3c1d68622f6c0fe008908a13",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-swe-001/command.txt",
+      "sha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4",
+      "sizeBytes": 26,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "e8822e8886740797258313f6",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-swe-001/exit-code.txt",
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "sizeBytes": 1,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "c37c0ddeb9b705f4c2721f37",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-swe-001/stderr.txt",
+      "sha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f",
+      "sizeBytes": 14,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "0ad85320251fb9dc69217f3c",
+      "kind": "evidence",
+      "path": ".agents/evidence/validators/val-swe-001/stdout.txt",
+      "sha256": "80fdbbc17d354ea64a2fcd01e3dcc2ab1bcde896e37c0209cf88fec9a1e1eaae",
+      "sizeBytes": 87,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "254a1d64c0bd1ccb0c240003",
+      "kind": "evidence",
+      "path": ".agents/evidence/wu-eval-cases-evidence.log",
+      "sha256": "3bfac87d4046c78dcafe1365621c2531ed542cabf0425047172be9d005453187",
+      "sizeBytes": 481,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "2e0e9f233f0221f1a0a15e70",
+      "kind": "evidence",
+      "path": ".agents/evidence/wu-evolution-evidence-evidence.log",
+      "sha256": "535ff1c7b149e14bb2239f0a567365b89700136e7ac6566cb528ea8b108dbfb4",
+      "sizeBytes": 212,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "073556a2972e2311a44e6d1f",
+      "kind": "evidence",
+      "path": ".agents/evidence/wu-final-evidence-evidence.log",
+      "sha256": "e23399561b259b9f5202259334b8d3f409dedde853b1748da07a6db81779d033",
+      "sizeBytes": 160,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "58ef902a49b2ef5d6a6b5e27",
+      "kind": "evidence",
+      "path": ".agents/evidence/wu-report-repair-refs-evidence.log",
+      "sha256": "74100a730875886e79af997db3ec85e7c6a1db51609ca83832aba713b6180e90",
+      "sizeBytes": 692,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "e8445f97cffb6eb8df3b8ab5",
+      "kind": "evidence",
+      "path": ".agents/evidence/wu-review-evidence-evidence.log",
+      "sha256": "77e18451df20b419acb6fa3fa7c6ae1ced655088a984e41791ca354532befcf3",
+      "sizeBytes": 126,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "0da1d4476b59c43d47ec67e9",
+      "kind": "evidence",
+      "path": ".agents/evidence/wu-skill-routing-evidence.log",
+      "sha256": "accb649abddc44eb0732d4b6f318d42ee263abbeee6fbd9899480478941862ae",
+      "sizeBytes": 501,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "4d84f2d44b0a485552aeb11c",
+      "kind": "evidence",
+      "path": ".agents/evidence/wu-swe-evidence-evidence.log",
+      "sha256": "c333fa59259f9c692fb919c752ba1ef17d86a48e534a3c0bc78c017d84281bfc",
+      "sizeBytes": 238,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "82439fda5fabc2cb88e4947b",
+      "kind": "handoff",
+      "path": "handoffs/wu-core-review/handoff.json",
+      "sha256": "dbadbcd697a613ee92b38634cb61e2a500cb225851aa1cc1c583d594fc8e9edd",
+      "sizeBytes": 2329,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "1ab0ac8ef44265289f795861",
+      "kind": "handoff",
+      "path": "handoffs/wu-eval-cases/handoff.json",
+      "sha256": "84c50d3f9b612efade5c1fc35b44598999976a49d1986eb39a12f673cbb75c4a",
+      "sizeBytes": 2916,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "2b6f5c8d33c0f282e6276807",
+      "kind": "handoff",
+      "path": "handoffs/wu-evolution-evidence/handoff.json",
+      "sha256": "0eb8781cf61dac0abae2c8c62cfb68a8a7f36a8df4b7430b0f1bb04c811081b4",
+      "sizeBytes": 3055,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "5032ce54b714d7f2aa238d4d",
+      "kind": "handoff",
+      "path": "handoffs/wu-final-evidence/handoff.json",
+      "sha256": "cc349da619d46a6b5253db41ff02d6bd0b4c88c21c1d10ce4b65f46640f4460f",
+      "sizeBytes": 2886,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "95f89e644116db40f2b2182d",
+      "kind": "handoff",
+      "path": "handoffs/wu-post-review-ms-29f2716a/handoff.json",
+      "sha256": "f68f52c928b991098bab09779d7aaeaed53e4fa887e10fd13ed6b6af1c6736d1",
+      "sizeBytes": 2271,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "d5ad377d6073086172adfb84",
+      "kind": "handoff",
+      "path": "handoffs/wu-post-validation-ms-29f2716a/handoff.json",
+      "sha256": "21a9944ef19be334a6a5ca135e011c4ee870e4c798b2f5065500eba0a9730b28",
+      "sizeBytes": 2327,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "6f8032f9b51afa079d4ae16a",
+      "kind": "handoff",
+      "path": "handoffs/wu-report-repair-refs/handoff.json",
+      "sha256": "ce9ae4985d35240c277dfcb5632c0c1fa3dcf21e29b5db2a4fa8457a42835f3e",
+      "sizeBytes": 3668,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "5ada3b172d80935b1571f0b5",
+      "kind": "handoff",
+      "path": "handoffs/wu-review-evidence/handoff.json",
+      "sha256": "1c8ea0c2dbad1a36c7cac5b4bd1884e68af458cdb22a43f262b5cec3c0f6b26c",
+      "sizeBytes": 2901,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "1b0d5033f6635ac462ba52c6",
+      "kind": "handoff",
+      "path": "handoffs/wu-skill-routing/handoff.json",
+      "sha256": "3a0487f2ccf1c5efb047c08e43f46ed657f01e19b95f7597fdbfcb3529ca987b",
+      "sizeBytes": 2953,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "83f9739622016d3d1ce5269d",
+      "kind": "handoff",
+      "path": "handoffs/wu-swe-evidence/handoff.json",
+      "sha256": "1d31dc73d41c4bc287022f5c24d4f6f36b98ba7fada114c8a531b919530cde9f",
+      "sizeBytes": 2948,
+      "source": "event-store",
+      "contentPolicy": "indexed"
+    },
+    {
+      "artifactId": "c2f98ae3b92ccb6538f51434",
+      "kind": "proof-state",
+      "path": "learning/proof-state-final.json",
+      "sha256": "62b47f046c608f3b0825231a452754ef3807eb5286bb4d69102ac9ee3aab3ccd",
+      "sizeBytes": 21291,
+      "source": "filesystem",
+      "contentPolicy": "indexed"
+    }
+  ],
+  "metrics": {
+    "completedWorkUnits": 10,
+    "remediationCount": 1,
+    "reviewFindingCount": 0,
+    "validatorRefutationCount": 0,
+    "statusRunCount": 0
+  },
+  "omissions": []
+}

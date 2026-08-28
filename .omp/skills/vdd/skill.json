@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "name": "vdd",
+  "displayName": "VDD",
+  "description": "Use when software work must be governed by executable evidence: new behavior or bug fixes, behavior-preserving refactors, ports, migrations, measurable improvements, verifier or observability construction, verification-governed operating plans, audit closure, or repair of compromised validation evidence. Also use when the user explicitly asks for VDD, verification-first, oracle-first, self-verifying, or self-healing development. Do not use for pure explanation, non-software artifacts, ordinary review with no implementation or verification deliverable, or trivial coding where the user did not request VDD and ordinary TDD is sufficient.",
+  "version": "0.1.0",
+  "maturity": "experimental",
+  "categories": [
+    "testing",
+    "workflow"
+  ],
+  "tags": [
+    "verification",
+    "oracle",
+    "evidence",
+    "acceptance"
+  ],
+  "authors": [
+    {
+      "name": "danker"
+    }
+  ],
+  "license": "MIT",
+  "entrypoints": {
+    "skillDoc": "SKILL.md",
+    "changelog": "CHANGELOG.md"
+  }
+}

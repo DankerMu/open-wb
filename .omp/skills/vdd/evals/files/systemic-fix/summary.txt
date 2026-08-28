@@ -1,0 +1,1 @@
+A new generator rule was merged to fix the entire lifetime annotation class. The ordinary regression suite is green. Decide whether the failure class can be closed.

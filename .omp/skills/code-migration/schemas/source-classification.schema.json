@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/code-migration/3/source-classification.schema.json",
+  "title": "Code Migration Source Behavior Classification",
+  "type": "object",
+  "required": ["schemaVersion", "migrationId", "referenceRevision", "behaviors"],
+  "properties": {
+    "schemaVersion": { "const": "code-migration-3" },
+    "migrationId": { "$ref": "#/$defs/nonEmptyString" },
+    "referenceRevision": { "$ref": "#/$defs/nonEmptyString" },
+    "revision": {
+      "$ref": "#/$defs/classificationRevision",
+      "description": "Ledger revision bound by VDD migration context as source-classification@N."
+    },
+    "sourceAuthority": {
+      "$ref": "#/$defs/nonEmptyString",
+      "description": "Owner that authorizes this ledger revision."
+    },
+    "behaviors": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/behavior" }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "nonEmptyString": { "type": "string", "minLength": 1 },
+    "classificationRevision": {
+      "type": "string",
+      "pattern": "^source-classification@[0-9]+(?![\\s\\S])"
+    },
+    "nonBlankString": { "type": "string", "pattern": ".*\\S.*" },
+    "stringArray": { "type": "array", "items": { "$ref": "#/$defs/nonEmptyString" } },
+    "behavior": {
+      "type": "object",
+      "required": [
+        "id",
+        "statement",
+        "sourceCitations",
+        "disposition",
+        "rationale",
+        "decisionOwner",
+        "targetObligation",
+        "vddClaimIds",
+        "vddOracleIds",
+        "blockingStage",
+        "invalidatedBy"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "statement": { "$ref": "#/$defs/nonEmptyString" },
+        "sourceCitations": { "$ref": "#/$defs/stringArray", "minItems": 1 },
+        "disposition": { "enum": ["accepted", "corrected", "unknown"] },
+        "rationale": { "$ref": "#/$defs/nonEmptyString" },
+        "decisionOwner": { "type": ["string", "null"] },
+        "targetObligation": { "$ref": "#/$defs/nonEmptyString" },
+        "vddClaimIds": { "$ref": "#/$defs/stringArray", "minItems": 1 },
+        "vddOracleIds": { "$ref": "#/$defs/stringArray", "minItems": 1 },
+        "blockingStage": { "enum": ["bootstrap", "batch", "completion", "cutover", "release"] },
+        "invalidatedBy": { "$ref": "#/$defs/stringArray", "minItems": 1 }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "disposition": { "enum": ["accepted", "corrected"] } },
+            "required": ["disposition"]
+          },
+          "then": { "properties": { "decisionOwner": { "$ref": "#/$defs/nonBlankString" } } }
+        },
+        {
+          "if": {
+            "properties": { "disposition": { "const": "unknown" } },
+            "required": ["disposition"]
+          },
+          "then": {
+            "properties": {
+              "decisionOwner": { "type": "null" },
+              "blockingStage": { "const": "batch" }
+            }
+          }
+        }
+      ],
+      "additionalProperties": false
+    }
+  }
+}

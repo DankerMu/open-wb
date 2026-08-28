@@ -1,0 +1,116 @@
+{
+  "workUnitId": "wu-report-repair-refs",
+  "assignmentId": "assignment-wu-report-repair-refs",
+  "runId": "workflow-run-2-wu-report-repair-refs",
+  "kind": "task",
+  "title": "Update readiness report contract and repair recipes",
+  "milestoneId": "ms-64efcdd7",
+  "dependencies": [],
+  "writeScope": [],
+  "fulfills": [
+    "VAL-REPORT-001",
+    "VAL-REPAIR-001"
+  ],
+  "dispatchedAt": "2026-07-02T17:36:16.246Z",
+  "workUnit": {
+    "workUnitId": "wu-report-repair-refs",
+    "kind": "task",
+    "title": "Update readiness report contract and repair recipes",
+    "milestoneId": "ms-64efcdd7",
+    "dependencies": [],
+    "writeScope": [],
+    "fulfills": [
+      "VAL-REPORT-001",
+      "VAL-REPAIR-001"
+    ],
+    "assertionScopeIds": [
+      "VAL-REPORT-001",
+      "VAL-REPAIR-001"
+    ]
+  },
+  "assertions": [
+    {
+      "assertionId": "VAL-REPORT-001",
+      "milestoneId": "ms-64efcdd7",
+      "title": "Readiness report contract drives repair",
+      "description": "Readiness report reference defines deterministic audit/report lifecycle and repair-usable output.",
+      "surface": "cli",
+      "requiredStrength": "fixture",
+      "tool": "file inspection",
+      "passCriteria": "Reference evidence includes application discovery, denominator stability, previous report behavior, partial credit, control-plane summary, and priority actions.",
+      "failCriteria": "Report remains non-deterministic, score-only, or cannot drive repair.",
+      "requiredEvidence": [
+        "file-path",
+        "excerpt",
+        "exit-code"
+      ],
+      "proofCutoffSequence": 4
+    },
+    {
+      "assertionId": "VAL-REPAIR-001",
+      "milestoneId": "ms-64efcdd7",
+      "title": "Repair recipes prevent fake fixes",
+      "description": "Repair recipe reference defines fixability classes, validators, rescore evidence, and high-value recipes.",
+      "surface": "cli",
+      "requiredStrength": "fixture",
+      "tool": "file inspection",
+      "passCriteria": "readiness-fix-recipes.md exists with universal rules, fixability classes, schema, and required initial recipes.",
+      "failCriteria": "No recipe reference, no validators, or allows placeholder/disabled-check fixes.",
+      "requiredEvidence": [
+        "file-path",
+        "excerpt",
+        "exit-code"
+      ],
+      "proofCutoffSequence": 5
+    }
+  ],
+  "validation": {
+    "steps": [
+      {
+        "assertionId": "VAL-REPORT-001",
+        "title": "Readiness report contract drives repair",
+        "surface": "cli",
+        "description": "Readiness report reference defines deterministic audit/report lifecycle and repair-usable output.",
+        "tool": "file inspection",
+        "passCriteria": "Reference evidence includes application discovery, denominator stability, previous report behavior, partial credit, control-plane summary, and priority actions.",
+        "failCriteria": "Report remains non-deterministic, score-only, or cannot drive repair."
+      },
+      {
+        "assertionId": "VAL-REPAIR-001",
+        "title": "Repair recipes prevent fake fixes",
+        "surface": "cli",
+        "description": "Repair recipe reference defines fixability classes, validators, rescore evidence, and high-value recipes.",
+        "tool": "file inspection",
+        "passCriteria": "readiness-fix-recipes.md exists with universal rules, fixability classes, schema, and required initial recipes.",
+        "failCriteria": "No recipe reference, no validators, or allows placeholder/disabled-check fixes."
+      }
+    ],
+    "evidenceRequirements": [
+      {
+        "assertionId": "VAL-REPORT-001",
+        "tool": "file inspection",
+        "evidenceSource": "fixture",
+        "requiredEvidence": [
+          "file-path",
+          "excerpt",
+          "exit-code"
+        ],
+        "evidencePathRequired": true,
+        "sha256Required": true
+      },
+      {
+        "assertionId": "VAL-REPAIR-001",
+        "tool": "file inspection",
+        "evidenceSource": "fixture",
+        "requiredEvidence": [
+          "file-path",
+          "excerpt",
+          "exit-code"
+        ],
+        "evidencePathRequired": true,
+        "sha256Required": true
+      }
+    ]
+  },
+  "handoffPath": "handoffs/wu-report-repair-refs/handoff.json"
+}

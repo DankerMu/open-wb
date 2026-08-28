@@ -1,0 +1,6 @@
+Working directory: /Users/chenwenjie/.agents/skills/eng-init
+Command: independent review via TerseReview subagent
+Exit code: 0
+Stdout: []
+Stderr: 
+Evidence: TerseReview returned no actionable findings for changed files.

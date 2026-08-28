@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "name": "to-spec",
+  "displayName": "To Spec",
+  "description": "Turn conversation context, repo facts, or a feature idea into a compact PRD plus execution spec by default, with independently-grabbable issue slices when requested, or a questionnaire for someone else to fill in. Use when the user asks for a PRD, feature spec, implementation spec, mission handoff, issue breakdown, task slicing, a questionnaire, or to convert requirements into agent-ready work.",
+  "version": "0.1.0",
+  "maturity": "experimental",
+  "categories": [
+    "productivity",
+    "documentation"
+  ],
+  "tags": [
+    "prd",
+    "spec",
+    "issue-slicing",
+    "user-invoked"
+  ],
+  "authors": [
+    {
+      "name": "danker"
+    }
+  ],
+  "license": "MIT",
+  "entrypoints": {
+    "skillDoc": "SKILL.md",
+    "changelog": "CHANGELOG.md"
+  }
+}

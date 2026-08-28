@@ -1,0 +1,110 @@
+{
+  "skill_name": "visual-design",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "Design a polished one-page landing page for AtlasOps, a B2B incident-command SaaS for infrastructure teams. Audience: SRE leaders and platform engineering managers. Tone: modern minimal / tech utility. Include hero, proof, feature modules, workflow section, pricing teaser, and final CTA. Build a complete standalone HTML file.",
+      "expected_output": "A standalone HTML landing page with a coherent software-native visual system, inspectable sections, responsive CSS, specific AtlasOps copy, trustworthy proof handling, and a working decision path.",
+      "files": [],
+      "expectations": [
+        "The output directory contains at least one non-empty runnable HTML file.",
+        "The HTML uses unique meaningful data-od-id attributes on core visible sections or controls.",
+        "The HTML defines a tokenized visual system using CSS custom properties and at least one oklch() color.",
+        "The landing page includes specific AtlasOps/SRE/incident-command copy rather than lorem ipsum or Feature One style filler.",
+        "The HTML includes responsive implementation evidence such as @media, clamp(), container queries, or mobile layout CSS.",
+        "Claims, proof, metrics, customer quotes, or certifications are not fabricated as factual evidence.",
+        "The primary CTA has a real visible response or viable destination rather than a dead clickable-looking control.",
+        "The output avoids obvious AI-slop defaults: emoji feature icons, generic purple gradients, and equal rounded cards with left-border accent strips.",
+        "The execution transcript shows that the artifact was rendered or browser-checked when browser tooling was available."
+      ]
+    },
+    {
+      "id": 1,
+      "prompt": "Make a 6-slide HTML deck for a climate-finance board update called 'Carbon Ledger Q3'. Audience: board members. Style: editorial but restrained. Slides: title, market context, portfolio movement, risk map, operating plan, decision ask. Build a complete standalone HTML deck.",
+      "expected_output": "A standalone six-slide HTML board deck with fixed-canvas mechanics, board-ready editorial content, evidence-aware claims, presentation navigation, and verified legibility.",
+      "files": [],
+      "expectations": [
+        "The output directory contains at least one non-empty runnable HTML file.",
+        "The HTML contains exactly six slide sections or equivalent slide containers matching the requested narrative.",
+        "Each slide is labeled with data-screen-label or an equivalent 1-indexed semantic slide label.",
+        "The deck includes keyboard navigation, a visible counter, print styles, and localStorage position persistence.",
+        "The deck uses a fixed-canvas or scale-to-fit presentation structure such as 1920x1080, aspect-ratio 16/9, or a stage wrapper.",
+        "The slide content is specific to Carbon Ledger Q3 climate-finance board reporting, not generic business filler.",
+        "Unknown portfolio metrics or market claims are labeled honestly rather than presented as invented facts.",
+        "The decision-ask slide contains a concrete board decision rather than a generic closing CTA.",
+        "The execution transcript shows that navigation and rendered slide legibility were checked when browser tooling was available."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Create a mobile onboarding prototype for a food delivery app named BentoLoop. Include at least three screens: welcome, dietary preferences, and live order tracking. Target iOS. Style: human and approachable. Build a complete standalone HTML file with clickable navigation between screens.",
+      "expected_output": "A standalone iOS mobile prototype with framed screens, real onboarding and tracking state transitions, accessible touch targets, and an approachable BentoLoop visual system.",
+      "files": [],
+      "expectations": [
+        "The output directory contains at least one non-empty runnable HTML file.",
+        "The HTML includes at least three distinct BentoLoop onboarding or order-tracking screens/states.",
+        "The prototype includes appropriate iOS framing evidence such as a status area, Dynamic Island, safe-area bottom affordance, or iPhone frame without covering content.",
+        "The HTML includes working clickable navigation or JavaScript state transitions between the requested screens.",
+        "Primary mobile controls have at least 44px target sizing and meaningful accessible names.",
+        "The content is specific to food delivery, dietary preferences, and live order tracking rather than generic app-placeholder text.",
+        "The order-tracking screen communicates progress/state and a useful next action, not only a static map illustration.",
+        "The execution transcript shows that the mobile flow was exercised in a rendered browser when browser tooling was available."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Build a standalone HTML product console for RelayGrid, a batch-job scheduler used by platform operators. The primary task is diagnosing and recovering failed jobs. Include dense job navigation, a job table, a failed-job detail drawer, and explicit simulations for loading, filter-empty, API error, permission-limited, queued, running, failed, retrying, and recovered states. Retry must visibly transition from failed to retrying to recovered. Destructive cancellation must explain consequences. Do not ask questions; use a dense operational direction.",
+      "expected_output": "A dense operational console whose main task is failure diagnosis and recovery, with complete non-happy states, semantic job status, a functional retry path, and browser-verified interactions.",
+      "files": [],
+      "expectations": [
+        "The output directory contains at least one non-empty runnable HTML file.",
+        "The first viewport makes failed-job diagnosis and recovery the obvious primary task rather than presenting a generic KPI card wall.",
+        "The artifact provides reachable simulations or visible UI for loading, filter-empty, API error, permission-limited, queued, running, failed, retrying, and recovered states.",
+        "The failed-job detail exposes a concrete failure reason and a recovery action tied to the selected job.",
+        "Retry visibly transitions through a pending/retrying state and then a recovered or successful state.",
+        "Permission-limited actions are unavailable with an explanation rather than silently enabled.",
+        "Destructive cancellation identifies the affected job and explains the consequence before confirmation.",
+        "Status, risk, category, and actions are not all represented as interchangeable decorative pills.",
+        "The layout includes responsive behavior and meaningful data-od-id attributes.",
+        "The execution transcript shows browser rendering plus interaction checks for the failed-job drawer and retry path when browser tooling was available."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Create a standalone interactive HTML prototype for TracePilot, an AI incident postmortem assistant. The experience must let an SRE specify service, time range, and evidence sources; show understanding, clarification, execution, waiting-for-user, failed, and completed states; require explicit confirmation before publishing a postmortem; present evidence-backed findings with uncertainty; and allow edit scope, cancel, retry, and resume. Do not expose chain-of-thought. Use controlled product UI rather than making the whole product a chat transcript.",
+      "expected_output": "An agentic workflow prototype that makes intent, context, runtime state, decision checkpoints, evidence, uncertainty, and recovery visible through controlled product UI.",
+      "files": [],
+      "expectations": [
+        "The output directory contains at least one non-empty runnable HTML file.",
+        "The intent entry visibly includes service, time range, and evidence-source context rather than only a freeform chat box.",
+        "The artifact provides reachable or visible understanding, clarification, execution, waiting-for-user, failed, and completed states.",
+        "Publishing is blocked behind an explicit confirmation that identifies what will be published and its scope.",
+        "Findings distinguish evidence, inference/recommendation, and uncertainty without fabricated citations or confidence scores.",
+        "The user can edit scope, cancel, retry, and resume through controls connected to the workflow state.",
+        "The primary experience uses controlled cards, panels, or structured surfaces rather than rendering the entire product as an undifferentiated chat transcript.",
+        "The artifact does not expose hidden reasoning or chain-of-thought as a trust mechanism.",
+        "The execution transcript shows browser rendering and at least one decision/recovery path check when browser tooling was available."
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "Revise the supplied QueueScope console rather than rebuilding it. Preserve its established app shell, compact geometry, typography, and semantic tokens. Add a failed-job detail drawer with error evidence and a retry flow that visibly transitions through pending to recovered. Keep the existing table and filters. Copy the updated runnable files into the output directory. Do not create a parallel app, independent palette, or competing token system.",
+      "expected_output": "A surgical revision of the supplied QueueScope console that preserves the design authority and existing structure while adding a functional failure-recovery flow.",
+      "files": [
+        "evals/files/system-bound/index.html",
+        "evals/files/system-bound/tokens.css",
+        "evals/files/system-bound/DESIGN.md"
+      ],
+      "expectations": [
+        "The output directory contains an updated runnable QueueScope HTML artifact.",
+        "The established app shell, existing table, and filters remain present rather than being replaced by a new application.",
+        "The revision reuses the supplied semantic CSS variables and does not introduce an independent palette or competing token system.",
+        "The new failed-job drawer is tied to the selected row and displays error evidence.",
+        "Retry visibly transitions through pending/retrying to recovered and updates the selected job state.",
+        "The compact geometry and typography rules from DESIGN.md remain visibly and structurally respected.",
+        "No unrelated landing-page hero, demo settings panel, or broad visual redesign is introduced.",
+        "The execution transcript shows the supplied design authority was inspected before editing and the updated flow was browser-checked when browser tooling was available."
+      ]
+    }
+  ]
+}

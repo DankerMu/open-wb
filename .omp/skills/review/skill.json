@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "name": "review",
+  "displayName": "Review",
+  "description": "Structured review of concrete artifacts: PRs, diffs, commits, branches, staged changes, named files, docs, API specs, database migrations, or infrastructure config. Activate on explicit, artifact-scoped review requests — \"code review\", \"review my changes\", \"find bugs in\", \"security review\" — and on consistency/drift requests (\"is this consistent with our conventions?\", naming drift, pattern duplication), which run consistency mode. Produces severity-graded findings with fix directions. Do NOT activate for brainstorming, open-ended design feedback, governance/library audits, or whether-an-approach-seems-good conversations.",
+  "version": "0.8.0",
+  "maturity": "experimental",
+  "categories": [
+    "review",
+    "coding",
+    "security"
+  ],
+  "tags": [
+    "architecture",
+    "code-review",
+    "consistency",
+    "diff",
+    "documentation",
+    "drift",
+    "entropy",
+    "pull-request",
+    "quality",
+    "security"
+  ],
+  "authors": [
+    {
+      "name": "Qiongyu Li"
+    }
+  ],
+  "entrypoints": {
+    "skillDoc": "SKILL.md",
+    "changelog": "CHANGELOG.md"
+  },
+  "requirements": {
+    "tools": [
+      "git",
+      "gh"
+    ]
+  },
+  "capabilities": {
+    "shell": true,
+    "filesystemRead": true,
+    "filesystemWrite": true
+  }
+}

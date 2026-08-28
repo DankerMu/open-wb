@@ -1,0 +1,1 @@
+SKILL.md contains repo-local agent control plane, hot-path interface, and Audit/Initialize/Repair/Refactor Harness routing.

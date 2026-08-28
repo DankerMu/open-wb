@@ -1,0 +1,85 @@
+{
+  "artifact_name": "demo_prompt",
+  "artifact_type": "prompt",
+  "default_execution": { "method": "llm", "config": { "temperature": 0 } },
+  "cases": [
+    {
+      "id": "case-01",
+      "prompt": "Summarize Q1 revenue performance.",
+      "expected_output": "A summary naming the period and the figure",
+      "assertions": [{ "type": "contains", "value": "Q1" }]
+    },
+    {
+      "id": "case-02",
+      "prompt": "What drove the margin change?",
+      "expected_output": "Names at least one driver",
+      "assertions": [
+        {
+          "type": "llm_judge",
+          "value": "Does the output name a specific driver of the margin change?"
+        }
+      ]
+    },
+    {
+      "id": "case-03",
+      "prompt": "List the top three risks.",
+      "expected_output": "Three enumerated risks",
+      "assertions": [{ "type": "regex", "value": "1\\..*2\\..*3\\." }]
+    },
+    {
+      "id": "case-04",
+      "prompt": "Compare this period to last.",
+      "expected_output": "An explicit comparison",
+      "assertions": [
+        { "type": "llm_judge", "value": "Does the output explicitly compare two periods?" }
+      ]
+    },
+    {
+      "id": "case-05",
+      "prompt": "Give the headcount figure.",
+      "expected_output": "A number",
+      "assertions": [{ "type": "regex", "value": "\\d+" }]
+    },
+    {
+      "id": "case-06",
+      "prompt": "Any regulatory exposure?",
+      "expected_output": "Addresses regulation",
+      "assertions": [{ "type": "contains", "value": "regulat" }]
+    },
+    {
+      "id": "case-07",
+      "prompt": "Summarize in one sentence.",
+      "expected_output": "Exactly one sentence",
+      "assertions": [{ "type": "llm_judge", "value": "Is the output a single sentence?" }]
+    },
+    {
+      "id": "case-08",
+      "prompt": "What is the cash position?",
+      "expected_output": "A cash figure",
+      "assertions": [{ "type": "regex", "value": "\\$[\\d,]+" }]
+    },
+    {
+      "id": "case-09",
+      "prompt": "Report the recurring revenue trend.",
+      "expected_output": "Describes the trend on a quarterly basis",
+      "assertions": [
+        { "type": "contains", "value": "quarterly" },
+        {
+          "type": "llm_judge",
+          "value": "Does the output describe a trend rather than a single point value?"
+        }
+      ]
+    },
+    {
+      "id": "case-10",
+      "prompt": "Anything material to flag?",
+      "expected_output": "Flags or explicitly clears",
+      "assertions": [
+        {
+          "type": "llm_judge",
+          "value": "Does the output either flag a material item or explicitly state there is none?"
+        }
+      ]
+    }
+  ]
+}

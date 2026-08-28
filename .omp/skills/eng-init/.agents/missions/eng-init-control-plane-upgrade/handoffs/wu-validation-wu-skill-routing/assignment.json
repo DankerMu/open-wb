@@ -1,0 +1,77 @@
+{
+  "workUnitId": "wu-validation-wu-skill-routing",
+  "assignmentId": "assignment-wu-validation-wu-skill-routing",
+  "runId": "workflow-run-7-wu-validation-wu-skill-routing",
+  "kind": "validation",
+  "title": "Validate Update SKILL.md routing and positioning",
+  "milestoneId": "ms-64efcdd7",
+  "dependencies": [
+    "wu-skill-routing"
+  ],
+  "writeScope": [],
+  "fulfills": [],
+  "dispatchedAt": "2026-07-02T18:33:12.577Z",
+  "workUnit": {
+    "workUnitId": "wu-validation-wu-skill-routing",
+    "parentId": "wu-skill-routing",
+    "kind": "validation",
+    "title": "Validate Update SKILL.md routing and positioning",
+    "milestoneId": "ms-64efcdd7",
+    "dependencies": [
+      "wu-skill-routing"
+    ],
+    "writeScope": [],
+    "fulfills": [],
+    "assertionScopeIds": [
+      "VAL-SKILL-001"
+    ],
+    "systemPurpose": "deliverable-validation"
+  },
+  "assertions": [
+    {
+      "assertionId": "VAL-SKILL-001",
+      "milestoneId": "ms-64efcdd7",
+      "title": "SKILL.md defines control-plane routing",
+      "description": "SKILL.md presents eng-init as a repo-local Agent Engineering Readiness Control Plane skill and routes Audit, Initialize, Repair, and Refactor Harness.",
+      "surface": "cli",
+      "requiredStrength": "fixture",
+      "tool": "file inspection",
+      "passCriteria": "File evidence shows control-plane positioning, AGENTS.md interface framing, and four pipeline routing.",
+      "failCriteria": "SKILL.md remains artifact-first, omits routing, or weakens existing strictness/no-phantom/refactor rules.",
+      "requiredEvidence": [
+        "file-path",
+        "excerpt",
+        "exit-code"
+      ],
+      "proofCutoffSequence": 3
+    }
+  ],
+  "validation": {
+    "steps": [
+      {
+        "assertionId": "VAL-SKILL-001",
+        "title": "SKILL.md defines control-plane routing",
+        "surface": "cli",
+        "description": "SKILL.md presents eng-init as a repo-local Agent Engineering Readiness Control Plane skill and routes Audit, Initialize, Repair, and Refactor Harness.",
+        "tool": "file inspection",
+        "passCriteria": "File evidence shows control-plane positioning, AGENTS.md interface framing, and four pipeline routing.",
+        "failCriteria": "SKILL.md remains artifact-first, omits routing, or weakens existing strictness/no-phantom/refactor rules."
+      }
+    ],
+    "evidenceRequirements": [
+      {
+        "assertionId": "VAL-SKILL-001",
+        "tool": "file inspection",
+        "evidenceSource": "fixture",
+        "requiredEvidence": [
+          "file-path",
+          "excerpt",
+          "exit-code"
+        ],
+        "evidencePathRequired": true,
+        "sha256Required": true
+      }
+    ]
+  },
+  "handoffPath": "handoffs/wu-validation-wu-skill-routing/handoff.json"
+}

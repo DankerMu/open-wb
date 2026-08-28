@@ -1,0 +1,101 @@
+{
+  "_diagnostic": true,
+  "_description": "Non-authoritative snapshot for orchestrator prompts and debugging. Do not use as primary state.",
+  "workUnits": [
+    {
+      "id": "wu-skill-routing",
+      "milestoneId": "ms-64efcdd7",
+      "kind": "task",
+      "status": "planned",
+      "title": "Update SKILL.md routing and positioning",
+      "dependencies": [],
+      "writeScope": []
+    },
+    {
+      "id": "wu-report-repair-refs",
+      "milestoneId": "ms-64efcdd7",
+      "kind": "task",
+      "status": "planned",
+      "title": "Update readiness report contract and repair recipes",
+      "dependencies": [],
+      "writeScope": []
+    },
+    {
+      "id": "wu-eval-cases",
+      "milestoneId": "ms-64efcdd7",
+      "kind": "task",
+      "status": "planned",
+      "title": "Add lifecycle regression eval cases",
+      "dependencies": [],
+      "writeScope": []
+    },
+    {
+      "id": "wu-core-review",
+      "milestoneId": "ms-64efcdd7",
+      "kind": "review",
+      "status": "planned",
+      "title": "Independent review of core upgrade",
+      "dependencies": [
+        "wu-skill-routing",
+        "wu-report-repair-refs",
+        "wu-eval-cases"
+      ],
+      "writeScope": []
+    },
+    {
+      "id": "wu-core-validation",
+      "milestoneId": "ms-64efcdd7",
+      "kind": "validation",
+      "status": "planned",
+      "title": "Validate core upgrade file evidence",
+      "dependencies": [
+        "wu-core-review"
+      ],
+      "writeScope": []
+    },
+    {
+      "id": "wu-review-remediation",
+      "milestoneId": "ms-2ed442bc",
+      "kind": "remediation",
+      "status": "planned",
+      "title": "Apply independent review remediation",
+      "dependencies": [
+        "wu-core-review"
+      ],
+      "writeScope": []
+    },
+    {
+      "id": "wu-self-evolution",
+      "milestoneId": "ms-2ed442bc",
+      "kind": "task",
+      "status": "planned",
+      "title": "Run bounded self-evolution pass",
+      "dependencies": [
+        "wu-review-remediation"
+      ],
+      "writeScope": []
+    },
+    {
+      "id": "wu-swe-agent-test",
+      "milestoneId": "ms-2ed442bc",
+      "kind": "task",
+      "status": "planned",
+      "title": "Run swe-agent real-project validation",
+      "dependencies": [
+        "wu-self-evolution"
+      ],
+      "writeScope": []
+    },
+    {
+      "id": "wu-final-review",
+      "milestoneId": "ms-2ed442bc",
+      "kind": "review",
+      "status": "planned",
+      "title": "Final independent review",
+      "dependencies": [
+        "wu-swe-agent-test"
+      ],
+      "writeScope": []
+    }
+  ]
+}

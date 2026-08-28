@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "name": "code-migration",
+  "displayName": "Code Migration",
+  "description": "Use for codebase-scale language ports, compatibility-preserving replacements, same-stack runtime or framework uplifts, strangler rewrites, migration feasibility, migration pilots, phased cutovers, or resuming an artifact-backed code migration. This skill owns migration classification, domain artifacts, phase gates, and handoffs. It delegates durable execution to Missions and executable oracle qualification and acceptance to VDD. Do not use for a local file conversion, routine refactor, data/schema-only migration, or a small incremental language adoption that fits ordinary TDD/VDD.",
+  "version": "0.1.0",
+  "maturity": "experimental",
+  "categories": [
+    "coding",
+    "refactoring"
+  ],
+  "tags": [
+    "migration",
+    "port",
+    "equivalence",
+    "cutover",
+    "user-invoked"
+  ],
+  "authors": [
+    {
+      "name": "danker"
+    }
+  ],
+  "license": "MIT",
+  "entrypoints": {
+    "skillDoc": "SKILL.md",
+    "changelog": "CHANGELOG.md"
+  }
+}

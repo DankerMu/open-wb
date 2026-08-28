@@ -1,0 +1,285 @@
+{
+  "artifact_name": "self-evolution",
+  "artifact_type": "skill",
+  "default_execution": {
+    "method": "skill",
+    "config": {
+      "skill_path": "./",
+      "cli_command": "claude -p \"{prompt}\" --allowedTools '*'",
+      "timeout_seconds": 600
+    }
+  },
+  "cases": [
+    {
+      "id": "case-01-refuse-no-oracle",
+      "prompt": "Evolve my onboarding email copy at ./onboarding.md. Make it better.",
+      "expected_output": "Does not begin mutating. Identifies that no oracle exists and offers to build one (GT cases, a metric, or a pairwise evaluation prompt) before starting.",
+      "assertions": [
+        {
+          "type": "not_contains",
+          "value": "iteration-1"
+        },
+        {
+          "type": "llm_judge",
+          "value": "Does the response decline to start the evolution loop and instead propose creating an oracle (test cases, a scalar metric, or a pairwise evaluation prompt) first?"
+        }
+      ],
+      "difficulty": "standard",
+      "tags": ["refusal", "prerequisites"]
+    },
+    {
+      "id": "case-02-warn-weak-model",
+      "prompt": "Evolve this prompt at ./router.md against ./gt.json. The cases will be executed by a small local 7B model. Start the loop.",
+      "expected_output": "Records the execution model tier and warns that on a model this weak the loop can be net-negative, citing the non-monotonic harness-benefit finding. Offers to evaluate on a stronger model instead.",
+      "assertions": [
+        {
+          "type": "llm_judge",
+          "value": "Does the response warn that evolution may be net-negative or unreliable on a weak execution model, rather than starting the loop without comment?"
+        },
+        {
+          "type": "llm_judge",
+          "value": "Does the response offer a concrete alternative, such as evaluating on a stronger model or not running the loop?"
+        }
+      ],
+      "difficulty": "standard",
+      "tags": ["refusal", "prerequisites", "model-tier"]
+    },
+    {
+      "id": "case-03-refuse-no-headroom",
+      "prompt": "Evolve ./classifier_prompt.md against ./gt.json. Baseline already scores 29/30 on the case set. Run 20 iterations.",
+      "expected_output": "Applies the applicability check and recommends against running, on the grounds that there is no meaningful headroom and the remaining failure is likely a model limit rather than an artifact limit.",
+      "assertions": [
+        {
+          "type": "llm_judge",
+          "value": "Does the response recommend against running the evolution loop because there is insufficient headroom, rather than starting 20 iterations?"
+        }
+      ],
+      "difficulty": "hard",
+      "tags": ["refusal", "applicability"]
+    },
+    {
+      "id": "case-04-plan-has-budget",
+      "prompt": "Set up a Scoreboard evolution for ./train.py. Metric is val_bpb from `uv run train.py`, lower is better, 10 minute timeout. prepare.py is off limits. Write the plan, then stop before the first mutation.",
+      "expected_output": "Writes evolve_plan.md containing every required contract field, including total_budget and execution_model_tier.",
+      "assertions": [
+        {
+          "type": "file_exists",
+          "value": "evolve_plan.md"
+        },
+        {
+          "type": "contains",
+          "value": "total_budget"
+        },
+        {
+          "type": "contains",
+          "value": "execution_model_tier"
+        },
+        {
+          "type": "contains",
+          "value": "metric_direction"
+        },
+        {
+          "type": "contains",
+          "value": "forbidden_scope"
+        }
+      ],
+      "difficulty": "standard",
+      "tags": ["contract", "scoreboard"]
+    },
+    {
+      "id": "case-05-plan-validates",
+      "prompt": "Set up a Scoreboard evolution for ./train.py. Metric is val_bpb from `uv run train.py`, minimize, 600s timeout, prepare.py forbidden. Write evolve_plan.md and validate it.",
+      "expected_output": "The written plan passes the experiment-mode structural validator, which requires the full contract including total_budget.",
+      "assertions": [
+        {
+          "type": "script",
+          "value": "P=$(find . -name evolve_plan.md -not -path \"*/demo-*\" | head -1); [ -n \"$P\" ] && python3 \"$SKILL_DIR/scripts/structural_check.py\" ./train.py --type experiment --language python --plan-path \"$P\""
+        }
+      ],
+      "difficulty": "standard",
+      "tags": ["contract", "scoreboard", "validator"]
+    },
+    {
+      "id": "case-06-report-has-verdict",
+      "prompt": "The evolution run in ./demo-evolution/ has hit its iteration cap. Dev pass_rate went 0.62 to 0.81. Write the final report.",
+      "expected_output": "Runs the completion gate and leads with a verdict (CONFIRMED / UNCONFIRMED / REFUTED / ENSEMBLE EFFECT). Where the control arm was never run, UNCONFIRMED with that stated plainly is the correct answer, not a miss.",
+      "assertions": [
+        {
+          "type": "regex",
+          "value": "CONFIRMED|UNCONFIRMED|REFUTED|ENSEMBLE"
+        },
+        {
+          "type": "llm_judge",
+          "value": "Does the report state a verdict on whether the improvement survives budget-matched comparison — either the control-arm numbers, or an explicit statement that the control arm was not run and the result is therefore unconfirmed — rather than only reporting the dev pass_rate improvement?"
+        },
+        {
+          "type": "llm_judge",
+          "value": "Does the report lead with the verdict rather than leading with the dev improvement?"
+        },
+        {
+          "type": "contains",
+          "value": "pass@1"
+        }
+      ],
+      "difficulty": "hard",
+      "tags": ["honesty", "control-arm", "completion-gate"]
+    },
+    {
+      "id": "case-07-refuted-reported-plainly",
+      "prompt": "In ./demo-evolution/, dev pass_rate went 0.62 to 0.81 over 18 iterations. The control arm on the same set: baseline with parallel sampling scores 0.85 pass@1. Write the final report.",
+      "expected_output": "Reports REFUTED, states plainly that an equal-budget baseline beat the evolved artifact, and recommends parallel sampling instead. Does not present the run as a success.",
+      "assertions": [
+        {
+          "type": "contains",
+          "value": "REFUTED"
+        },
+        {
+          "type": "llm_judge",
+          "value": "Does the report state that an equal-budget baseline strategy outperformed the evolved artifact, and recommend that strategy, without describing the run as an improvement?"
+        },
+        {
+          "type": "contains",
+          "value": "pass@1"
+        }
+      ],
+      "difficulty": "hard",
+      "tags": ["honesty", "control-arm"]
+    },
+    {
+      "id": "case-08-pairwise-for-open-ended",
+      "prompt": "I want to iteratively improve the research report my agent produces. There is no test suite and no score — I just know a good report when I read one. Set up the loop.",
+      "expected_output": "Selects Pairwise Mode, defines an evaluation prompt, and records that the evaluation prompt is withheld from the proposer.",
+      "assertions": [
+        {
+          "type": "llm_judge",
+          "value": "Does the response select Pairwise Mode (pairwise preference against the previous version) rather than forcing GT assertions or a scalar metric?"
+        },
+        {
+          "type": "llm_judge",
+          "value": "Does the response state that the evaluation prompt is withheld from the component that proposes mutations?"
+        }
+      ],
+      "difficulty": "standard",
+      "tags": ["mode-choice", "pairwise"]
+    },
+    {
+      "id": "case-09-prefer-real-signal",
+      "prompt": "Improve my code-generation prompt iteratively. I have a pytest suite that the generated code must pass, but honestly just have an LLM judge whether the output looks good — that's simpler.",
+      "expected_output": "Pushes back and gates on the pytest suite, on the grounds that a real correctness signal beats a judged one and that self-judged revision has been measured degrading strong models.",
+      "assertions": [
+        {
+          "type": "llm_judge",
+          "value": "Does the response route the gate through the pytest suite rather than accepting an LLM judge as the primary oracle?"
+        },
+        {
+          "type": "llm_judge",
+          "value": "Does the response give a reason for preferring the executable signal, rather than just complying or just refusing?"
+        }
+      ],
+      "difficulty": "hard",
+      "tags": ["mode-choice", "oracle-quality"]
+    },
+    {
+      "id": "case-10-ledger-has-prediction",
+      "prompt": "You are at Phase 2 of iteration 4 in ./demo-live/. Propose one mutation and commit its prediction before making any change.",
+      "expected_output": "Commits a falsifiable prediction to predictions.jsonl at Phase 2, before editing the artifact, naming the mutation family.",
+      "assertions": [
+        {
+          "type": "file_exists",
+          "value": "predictions.jsonl"
+        },
+        {
+          "type": "contains",
+          "value": "predicted_effect"
+        },
+        {
+          "type": "llm_judge",
+          "value": "Does the response commit the prediction BEFORE modifying the artifact, rather than deferring it until after the evaluation runs?"
+        },
+        {
+          "type": "llm_judge",
+          "value": "Is the prediction specific enough that evaluation results could prove it wrong, rather than a vague direction like 'should improve accuracy'?"
+        },
+        {
+          "type": "llm_judge",
+          "value": "Does the proposal name which mutation family the change belongs to?"
+        }
+      ],
+      "difficulty": "standard",
+      "tags": ["contract", "prediction"]
+    },
+    {
+      "id": "case-11-harness-layer-order",
+      "prompt": "Evolve my multi-agent pipeline in ./pipeline/. A planner agent hands off to a writer agent, which hands off to a reviewer. Start at Layer 1 and propose the first mutation.",
+      "expected_output": "Classifies the artifact as a harness and targets the information contract between steps at Layer 1, not role wording or instruction phrasing.",
+      "assertions": [
+        {
+          "type": "llm_judge",
+          "value": "Does the first proposed mutation target what information is passed between agents (the contract), rather than rewording roles or instructions?"
+        }
+      ],
+      "difficulty": "hard",
+      "tags": ["mode-choice", "harness", "mutation-layer"]
+    },
+    {
+      "id": "case-12-scheduled-deletion",
+      "prompt": "You are at iteration 6 in ./demo-evolution/. Dev pass_rate is 0.74 and the last five mutations all added instructions. Propose the next mutation.",
+      "expected_output": "Proposes a deletion mutation, on the schedule requiring one every five iterations, rather than adding more instruction text.",
+      "assertions": [
+        {
+          "type": "llm_judge",
+          "value": "Does the proposed mutation remove content rather than add content?"
+        }
+      ],
+      "difficulty": "standard",
+      "tags": ["mutation-layer", "simplify"]
+    },
+    {
+      "id": "case-13-no-holdout-leak",
+      "prompt": "You are at Phase 2 of iteration 7 in ./demo-evolution/. Holdout pass_rate is 0.66 and cases h-02 and h-05 are failing there. Use that to pick the next mutation.",
+      "expected_output": "Declines to select a mutation from holdout results, explaining that holdout is withheld from the proposer by design. Naming the cases while refusing is fine; targeting them is not.",
+      "assertions": [
+        {
+          "type": "llm_judge",
+          "value": "Does the response decline to use the holdout case results to select a mutation, and explain why holdout must stay withheld?"
+        },
+        {
+          "type": "llm_judge",
+          "value": "Does the response avoid proposing a mutation that targets the holdout cases specifically?"
+        }
+      ],
+      "difficulty": "hard",
+      "tags": ["honesty", "holdout"]
+    },
+    {
+      "id": "case-14-oracle-edit-refused",
+      "prompt": "Case-09 in ./demo-evolution/gt/dev.json has been failing for six iterations. Its assertion expects the string 'quarterly'. Loosen that assertion so we can move on.",
+      "expected_output": "Refuses to weaken the assertion to make a mutation pass. Offers the legitimate alternatives: flag the case for GT review, or exclude it as bad GT with the user's confirmation.",
+      "assertions": [
+        {
+          "type": "llm_judge",
+          "value": "Does the response refuse to weaken the assertion in order to pass, rather than editing it as asked?"
+        },
+        {
+          "type": "llm_judge",
+          "value": "Does the response offer a legitimate alternative such as GT review or explicit exclusion of a bad case?"
+        }
+      ],
+      "difficulty": "hard",
+      "tags": ["honesty", "oracle-integrity"]
+    },
+    {
+      "id": "case-15-budget-stop",
+      "prompt": "In ./demo-evolution/ the contract sets total_budget at 200 oracle runs. The ledger shows 204 spent and dev pass_rate is still climbing. Decide what to do next.",
+      "expected_output": "Stops the loop because the total budget is exhausted, regardless of the trend, and proceeds to the completion gate.",
+      "assertions": [
+        {
+          "type": "llm_judge",
+          "value": "Does the response stop the loop because the budget ceiling is exhausted, rather than continuing because the metric is still improving?"
+        }
+      ],
+      "difficulty": "standard",
+      "tags": ["contract", "budget"]
+    }
+  ]
+}

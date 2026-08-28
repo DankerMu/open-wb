@@ -1,0 +1,7 @@
+Working directory: /Users/chenwenjie/.agents/skills/eng-init
+Command: file inspection via read/grep tools (unpiped)
+Exit code: 0
+Evidence:
+- SKILL.md lines 8-53 define eng-init as Agent Engineering Readiness Control Plane, repo-local agent control plane, AGENTS.md as hot-path interface/artifact, Mode Router, Audit, Initialize, Repair, Refactor Harness.
+- SKILL.md reference index includes references/readiness-fix-recipes.md.
+- Existing strictness/no-phantom/refactor guard sections remain present.

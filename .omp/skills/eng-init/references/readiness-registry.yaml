@@ -1,0 +1,954 @@
+# Machine-readable readiness registry for eng-init audit/repair.
+# Canonical executable contract for criteria metadata; keep in sync with
+# references/agent-readiness-criteria.md using scripts/check_readiness_registry.py.
+schema_version: 1
+scoring:
+  repo_scope_denominator: 1
+  app_scope_denominator: APPLICATIONS_IDENTIFIED
+  configured_but_not_blocking_credit: 0.5
+  null_numerator_allowed_only_when_skippable: true
+control_plane_layers:
+  - Memory
+  - Invariant
+  - Protocol
+  - Permission
+  - Sensorium
+  - Evaluation / GC
+  - Governance
+criteria:
+  - id: large_file_detection
+    level: 3
+    scope: repository
+    skippable: false
+    fixability: B
+    layer: Protocol
+    artifact: Conventions / Enforcement
+    validator: Hook/CI/LFS/lint flags files over threshold
+    rescore_evidence: large_file_detection=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: tech_debt_tracking
+    level: 3
+    scope: repository
+    skippable: false
+    fixability: B
+    layer: Evaluation / GC
+    artifact: Conventions
+    validator: TODO scanner, TODO→issue enforcement, SonarQube SQALE
+    rescore_evidence: tech_debt_tracking=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: build_cmd_doc
+    level: 2
+    scope: repository
+    skippable: false
+    fixability: A
+    layer: Protocol
+    artifact: Development Workflow
+    validator: Build command documented in README/AGENTS.md
+    rescore_evidence: build_cmd_doc=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: deps_pinned
+    level: 2
+    scope: repository
+    skippable: false
+    fixability: B
+    layer: Protocol
+    artifact: Stack & Versions
+    validator: Lockfile committed (package-lock, poetry.lock, Cargo.lock, go.sum)
+    rescore_evidence: deps_pinned=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: vcs_cli_tools
+    level: 2
+    scope: repository
+    skippable: false
+    fixability: D
+    layer: Protocol
+    artifact: Enforcement Index
+    validator: gh or glab installed and authenticated
+    rescore_evidence: vcs_cli_tools=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: automated_pr_review
+    level: 2
+    scope: repository
+    skippable: true
+    fixability: B
+    layer: Protocol
+    artifact: Agent Operating Rules
+    validator: Bot/Action posts review content on PRs
+    rescore_evidence: automated_pr_review=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: agentic_development
+    level: 3
+    scope: repository
+    skippable: false
+    fixability: B
+    layer: Protocol
+    artifact: Agent Operating Rules
+    validator: Evidence of AI agents in git history, CI, .factory, .agents, or equivalent agent directories
+    rescore_evidence: agentic_development=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: fast_ci_feedback
+    level: 4
+    scope: repository
+    skippable: true
+    fixability: B
+    layer: Protocol
+    artifact: Development Workflow
+    validator: CI completes in under 10 minutes for typical PRs
+    rescore_evidence: fast_ci_feedback=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: build_performance_tracking
+    level: 4
+    scope: repository
+    skippable: true
+    fixability: B
+    layer: Evaluation / GC
+    artifact: Enforcement Index
+    validator: Build duration measured; caching/optimization evidence
+    rescore_evidence: build_performance_tracking=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: deployment_frequency
+    level: 4
+    scope: repository
+    skippable: true
+    fixability: D
+    layer: Governance
+    artifact: Enforcement Index
+    validator: Multiple deploys per week with automation
+    rescore_evidence: deployment_frequency=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: single_command_setup
+    level: 3
+    scope: repository
+    skippable: false
+    fixability: B
+    layer: Protocol
+    artifact: Development Workflow
+    validator: One command from fresh clone to running dev server
+    rescore_evidence: single_command_setup=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: feature_flag_infrastructure
+    level: 4
+    scope: repository
+    skippable: false
+    fixability: C
+    layer: Invariant
+    artifact: Architecture Discipline
+    validator: LaunchDarkly/Statsig/Unleash/GrowthBook/custom flags configured
+    rescore_evidence: feature_flag_infrastructure=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: release_notes_automation
+    level: 3
+    scope: repository
+    skippable: false
+    fixability: B
+    layer: Governance
+    artifact: Enforcement Index
+    validator: semantic-release/changesets/equivalent generates changelog
+    rescore_evidence: release_notes_automation=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: progressive_rollout
+    level: 4
+    scope: repository
+    skippable: true
+    fixability: D
+    layer: Governance
+    artifact: Enforcement Index
+    validator: Canary/percentage/ring deploys configured
+    rescore_evidence: progressive_rollout=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: rollback_automation
+    level: 4
+    scope: repository
+    skippable: true
+    fixability: C
+    layer: Governance
+    artifact: Enforcement Index
+    validator: One-click or auto rollback exists, is documented, and carries exercise evidence (drill or real use within the last release cycle); never-exercised standby caps at half credit
+    rescore_evidence: rollback_automation=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: monorepo_tooling
+    level: 2
+    scope: repository
+    skippable: true
+    fixability: B
+    layer: Protocol
+    artifact: Stack & Versions
+    validator: Workspace tool configured (turbo/nx/pnpm-workspaces/go.work/cargo workspaces/bazel)
+    rescore_evidence: monorepo_tooling=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: version_drift_detection
+    level: 3
+    scope: repository
+    skippable: true
+    fixability: B
+    layer: Evaluation / GC
+    artifact: Stack & Versions
+    validator: syncpack/manypkg/Renovate-group/Nx-constraints prevents version drift across packages
+    rescore_evidence: version_drift_detection=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: release_automation
+    level: 3
+    scope: repository
+    skippable: false
+    fixability: B
+    layer: Governance
+    artifact: Enforcement Index
+    validator: Automated release/deploy pipeline (CD on merge, release-please, ArgoCD, etc.)
+    rescore_evidence: release_automation=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: dead_feature_flag_detection
+    level: 3
+    scope: repository
+    skippable: true
+    fixability: B
+    layer: Invariant
+    artifact: Architecture Discipline
+    validator: Stale-flag detector (depends on feature_flag_infrastructure)
+    rescore_evidence: dead_feature_flag_detection=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: agents_md
+    level: 2
+    scope: repository
+    skippable: false
+    fixability: A
+    layer: Memory
+    artifact: (this skill's primary output)
+    validator: AGENTS.md exists at repo root, ≥100 characters, documents scripts/commands
+    rescore_evidence: agents_md=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: context_md
+    level: 2
+    scope: repository
+    skippable: false
+    fixability: A
+    layer: Memory
+    artifact: CONTEXT.md
+    validator: CONTEXT.md exists at repo root, defines project identity and either domain terms or explicitly says no domain glossary is needed yet
+    rescore_evidence: context_md=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: readme
+    level: 1
+    scope: repository
+    skippable: false
+    fixability: D
+    layer: Memory
+    artifact: external system or stack-specific config
+    validator: README.md exists at repo root with setup/usage
+    rescore_evidence: readme=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: automated_doc_generation
+    level: 2
+    scope: repository
+    skippable: false
+    fixability: B
+    layer: Protocol
+    artifact: Enforcement Index
+    validator: Swagger/JSDoc/Sphinx/agent-driven doc updates
+    rescore_evidence: automated_doc_generation=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: skills
+    level: 3
+    scope: repository
+    skippable: false
+    fixability: A
+    layer: Protocol
+    artifact: Agent Operating Rules
+    validator: .factory/skills/, .claude/skills/, or .skills/ with at least one valid SKILL.md
+    rescore_evidence: skills=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: documentation_freshness
+    level: 3
+    scope: repository
+    skippable: false
+    fixability: B
+    layer: Protocol
+    artifact: Conventions
+    validator: README/AGENTS.md/CONTRIBUTING.md touched within last 180 days
+    rescore_evidence: documentation_freshness=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: service_flow_documented
+    level: 3
+    scope: repository
+    skippable: false
+    fixability: A
+    layer: Memory
+    artifact: Directory Map
+    validator: Architecture diagrams (mermaid/plantuml) or service-dependency docs
+    rescore_evidence: service_flow_documented=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: agents_md_validation
+    level: 4
+    scope: repository
+    skippable: false
+    fixability: B
+    layer: Protocol
+    artifact: Enforcement Index
+    validator: CI/hook validates AGENTS.md commands still work (depends on agents_md)
+    rescore_evidence: agents_md_validation=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: devcontainer
+    level: 2
+    scope: repository
+    skippable: false
+    fixability: B
+    layer: Protocol
+    artifact: Development Workflow
+    validator: .devcontainer/devcontainer.json with toolchain
+    rescore_evidence: devcontainer=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: env_template
+    level: 1
+    scope: repository
+    skippable: false
+    fixability: B
+    layer: Protocol
+    artifact: Development Workflow
+    validator: .env.example exists or env vars documented
+    rescore_evidence: env_template=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: local_services_setup
+    level: 2
+    scope: repository
+    skippable: true
+    fixability: C
+    layer: Protocol
+    artifact: Development Workflow
+    validator: docker-compose.yml or clear local-service setup
+    rescore_evidence: local_services_setup=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: devcontainer_runnable
+    level: 3
+    scope: repository
+    skippable: true
+    fixability: B
+    layer: Protocol
+    artifact: Development Workflow
+    validator: Devcontainer actually builds and runs
+    rescore_evidence: devcontainer_runnable=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: runbooks_documented
+    level: 2
+    scope: repository
+    skippable: false
+    fixability: A
+    layer: Memory
+    artifact: Enforcement Index
+    validator: Runbooks/playbooks linked (Notion, Confluence, runbooks/ dir)
+    rescore_evidence: runbooks_documented=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: branch_protection
+    level: 2
+    scope: repository
+    skippable: true
+    fixability: D
+    layer: Permission
+    artifact: Enforcement Index
+    validator: Modern rulesets or legacy protection on main/dev
+    rescore_evidence: branch_protection=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: secret_scanning
+    level: 3
+    scope: repository
+    skippable: true
+    fixability: B
+    layer: Permission
+    artifact: Enforcement Index
+    validator: gitleaks/trufflehog/native scanning configured
+    rescore_evidence: secret_scanning=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: codeowners
+    level: 2
+    scope: repository
+    skippable: false
+    fixability: A
+    layer: Protocol
+    artifact: Conventions
+    validator: CODEOWNERS file with valid team assignments
+    rescore_evidence: codeowners=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: automated_security_review
+    level: 2
+    scope: repository
+    skippable: true
+    fixability: B
+    layer: Permission
+    artifact: Enforcement Index
+    validator: Semgrep/CodeQL/Snyk SAST or equivalent in CI
+    rescore_evidence: automated_security_review=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: dependency_update_automation
+    level: 2
+    scope: repository
+    skippable: false
+    fixability: B
+    layer: Protocol
+    artifact: Stack & Versions
+    validator: Dependabot/Renovate creating PRs
+    rescore_evidence: dependency_update_automation=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: gitignore_comprehensive
+    level: 1
+    scope: repository
+    skippable: false
+    fixability: A
+    layer: Protocol
+    artifact: Conventions
+    validator: .gitignore excludes .env, node_modules, build artifacts, IDE/OS files
+    rescore_evidence: gitignore_comprehensive=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: privacy_compliance
+    level: 4
+    scope: repository
+    skippable: true
+    fixability: D
+    layer: Invariant
+    artifact: Architecture Discipline
+    validator: Consent SDK / retention docs / GDPR-CCPA endpoints
+    rescore_evidence: privacy_compliance=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: secrets_management
+    level: 2
+    scope: repository
+    skippable: false
+    fixability: C
+    layer: Permission
+    artifact: Development Workflow
+    validator: Secrets manager integration or properly gitignored .env with template
+    rescore_evidence: secrets_management=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: min_release_age
+    level: 3
+    scope: repository
+    skippable: false
+    fixability: B
+    layer: Governance
+    artifact: Stack & Versions
+    validator: Renovate minimumReleaseAge/stabilityDays or documented wait policy
+    rescore_evidence: min_release_age=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: issue_templates
+    level: 2
+    scope: repository
+    skippable: false
+    fixability: A
+    layer: Protocol
+    artifact: Agent Operating Rules
+    validator: .github/ISSUE_TEMPLATE/ or .gitlab/issue_templates/
+    rescore_evidence: issue_templates=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: issue_labeling_system
+    level: 2
+    scope: repository
+    skippable: false
+    fixability: B
+    layer: Protocol
+    artifact: Agent Operating Rules
+    validator: Consistent priority/type/area labels exist
+    rescore_evidence: issue_labeling_system=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: backlog_health
+    level: 4
+    scope: repository
+    skippable: true
+    fixability: D
+    layer: Protocol
+    artifact: Agent Operating Rules
+    validator: ">70% open issues have descriptive title + label; not 50%+ ancient"
+    rescore_evidence: backlog_health=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: pr_templates
+    level: 2
+    scope: repository
+    skippable: false
+    fixability: A
+    layer: Protocol
+    artifact: Conventions
+    validator: .github/pull_request_template.md with description/testing/context sections
+    rescore_evidence: pr_templates=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: verification_matrix
+    level: 2
+    scope: repository
+    skippable: true
+    fixability: A
+    layer: Protocol
+    artifact: Verification Matrix
+    validator: AGENTS.md contains a Verification Matrix whose commands resolve through the selected dev entry point (justfile, Makefile, or package scripts)
+    rescore_evidence: verification_matrix=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: dev_server_lifecycle_documented
+    level: 2
+    scope: repository
+    skippable: true
+    fixability: A
+    layer: Protocol
+    artifact: Development Workflow
+    validator: dev-bg / dev-stop / dev-status / logs commands exist through the selected dev entry point and AGENTS.md documents the start/stop/status/logs lifecycle; skippable when nothing long-running exists
+    rescore_evidence: dev_server_lifecycle_documented=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: runtime_evidence_in_pr_template
+    level: 2
+    scope: repository
+    skippable: false
+    fixability: A
+    layer: Protocol
+    artifact: Agent Operating Rules
+    validator: PR template contains a ## Runtime evidence section (None — review-only change allowed with stated reason)
+    rescore_evidence: runtime_evidence_in_pr_template=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: guardrail_self_test
+    level: 3
+    scope: repository
+    skippable: true
+    fixability: A
+    layer: Sensorium
+    artifact: Enforcement Index
+    validator: scripts/test-guardrails.sh exists, a CI/cron job runs it, and it asserts both directions (clean-tree acceptance plus one staged violation rejected per guard)
+    rescore_evidence: guardrail_self_test=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: exemption_registry_hygiene
+    level: 3
+    scope: repository
+    skippable: true
+    fixability: A
+    layer: Evaluation / GC
+    artifact: Enforcement Index
+    validator: a wired hygiene check accepts the clean tree and rejects one staged sample per rule — stale target, empty reason, and one object on two mutually exclusive lists — each naming the offending entry
+    rescore_evidence: exemption_registry_hygiene=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: incident_pipeline
+    level: 3
+    scope: repository
+    skippable: true
+    fixability: A
+    layer: Evaluation / GC
+    artifact: Enforcement Index
+    validator: a check accepts the real postmortem set and rejects each staged sample — trigger criteria removed, a guardrail entry crediting a mechanism that does not exist, a landing layer left blank; danger-patterns promotion is a human call, with only the mechanical half gated (if the doc exists it links two or more distinct postmortems)
+    rescore_evidence: incident_pipeline=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: generated_docs_check_mode
+    level: 3
+    scope: repository
+    skippable: true
+    fixability: B
+    layer: Evaluation / GC
+    artifact: Enforcement Index
+    validator: Every generated doc has a generator with a --check mode wired into CI that fails on drift; generated outputs are never hand-edited
+    rescore_evidence: generated_docs_check_mode=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: ci_aggregator_gate
+    level: 2
+    scope: repository
+    skippable: true
+    fixability: A
+    layer: Permission
+    artifact: Enforcement Index
+    validator: CI workflow defines an always()-guarded aggregator job that fails on failed/cancelled/skipped required dependencies; branch protection requires that single check
+    rescore_evidence: ci_aggregator_gate=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: violation_baseline_tracked
+    level: 3
+    scope: repository
+    skippable: true
+    fixability: B
+    layer: Evaluation / GC
+    artifact: Enforcement Index
+    validator: constraints.yaml baseline.counts present when legacy violations exist, with a CI comparison step that fails on increase; skippable when Stage 0 found no violations
+    rescore_evidence: violation_baseline_tracked=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: source_of_truth_declared
+    level: 3
+    scope: repository
+    skippable: true
+    fixability: A
+    layer: Protocol
+    artifact: Source of Truth & Refactor Contract
+    validator: Active refactor contract names the canonical source for each behavior surface (legacy/, upstream repo, old binary, formal spec, golden fixtures, or schema)
+    rescore_evidence: source_of_truth_declared=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: compare_oracle_exists
+    level: 4
+    scope: repository
+    skippable: true
+    fixability: A
+    layer: Protocol
+    artifact: Verification Matrix
+    validator: Active refactor contract has at least one real compare/oracle command and the command resolves to a dev-entry target
+    rescore_evidence: compare_oracle_exists=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: anti_cheat_rules_concrete
+    level: 3
+    scope: repository
+    skippable: true
+    fixability: A
+    layer: Protocol
+    artifact: Source of Truth & Refactor Contract
+    validator: Active refactor contract explicitly forbids weakening compare tests, shelling out to legacy outside oracle commands, silent fallback, and unapproved dual production paths
+    rescore_evidence: anti_cheat_rules_concrete=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: task_ownership_protocol
+    level: 3
+    scope: repository
+    skippable: true
+    fixability: A
+    layer: Protocol
+    artifact: Agent Operating Rules
+    validator: Public OSS / multi-agent refactor has issue labels, task files, or external tracker rules for claiming exactly one work unit
+    rescore_evidence: task_ownership_protocol=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: verification_snapshot_tiers
+    level: 3
+    scope: repository
+    skippable: true
+    fixability: B
+    layer: Sensorium
+    artifact: Verification Matrix
+    validator: Keyless snapshot/replay tiers pin model-, protocol-, or human-visible output through runnable examples; CI replays in read-only mode; capability-proving suites assert zero skipped tests
+    rescore_evidence: verification_snapshot_tiers=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: decision_record_lifecycle
+    level: 3
+    scope: repository
+    skippable: true
+    fixability: A
+    layer: Evaluation / GC
+    artifact: Agent Operating Rules
+    validator: Decision records follow a four-zone lifecycle (proposed/implemented/rejected/archived) with classification by kind, archive freeze, supersession check at write, and the rule that non-trivial changes ship their record in the same PR; a manifest/verify script checks the tree when one exists
+    rescore_evidence: decision_record_lifecycle=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: documentation_gates
+    level: 3
+    scope: repository
+    skippable: true
+    fixability: A
+    layer: Protocol
+    artifact: Enforcement Index
+    validator: Docs change with code (README/JSDoc updated for altered behavior in the same change); a scripted doc-validation gate wired into CI fails on drift; Known Limitations sections mandatory with a justified allowlist
+    rescore_evidence: documentation_gates=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: runtime_invariants
+    level: 3
+    scope: repository
+    skippable: true
+    fixability: B
+    layer: Invariant
+    artifact: Enforcement Index
+    validator: Packages/modules register ownership assertions over authoritative event streams or mutable data (invariant companions); empty companions carry an explained reason; a verify script enforces them
+    rescore_evidence: runtime_invariants=1/1 when evidence satisfies the criterion; 0/1 when missing; null only if skippable and not applicable
+  - id: lint_config
+    level: 1
+    scope: application
+    skippable: false
+    fixability: B
+    layer: Invariant
+    artifact: Stack & Versions / Enforcement
+    validator: ESLint / ruff / golangci-lint / clippy / equivalent configured
+    rescore_evidence: lint_config=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: type_check
+    level: 1
+    scope: application
+    skippable: false
+    fixability: B
+    layer: Invariant
+    artifact: Stack & Versions
+    validator: tsconfig strict -true for TS, mypy/pyright for Py, etc.
+    rescore_evidence: type_check=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: formatter
+    level: 1
+    scope: application
+    skippable: false
+    fixability: B
+    layer: Invariant
+    artifact: Conventions / Enforcement
+    validator: Prettier/Black/gofmt/rustfmt/equivalent configured
+    rescore_evidence: formatter=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: pre_commit_hooks
+    level: 2
+    scope: application
+    skippable: false
+    fixability: B
+    layer: Protocol
+    artifact: Enforcement Index
+    validator: Husky/lint-staged or .pre-commit-config.yaml runs lint/format on commit
+    rescore_evidence: pre_commit_hooks=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: strict_typing
+    level: 2
+    scope: application
+    skippable: true
+    fixability: B
+    layer: Protocol
+    artifact: Stack & Versions
+    validator: TS strict -true, mypy strict, or compiler-enforced typing
+    rescore_evidence: strict_typing=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: naming_consistency
+    level: 3
+    scope: application
+    skippable: false
+    fixability: B
+    layer: Invariant
+    artifact: Conventions
+    validator: Linter rule (@typescript-eslint/naming-convention, pylint), or documented conventions in AGENTS.md
+    rescore_evidence: naming_consistency=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: cyclomatic_complexity
+    level: 5
+    scope: application
+    skippable: false
+    fixability: B
+    layer: Invariant
+    artifact: Enforcement Index
+    validator: ESLint complexity / lizard / radon / gocyclo / SonarQube cognitive complexity
+    rescore_evidence: cyclomatic_complexity=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: dead_code_detection
+    level: 3
+    scope: application
+    skippable: false
+    fixability: B
+    layer: Evaluation / GC
+    artifact: Code Canonicality (CRITICAL)
+    validator: knip / vulture / golangci-lint unused / cargo-machete / cargo-udeps / Maven or Gradle dependency analysis / SonarQube
+    rescore_evidence: dead_code_detection=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: duplicate_code_detection
+    level: 3
+    scope: application
+    skippable: false
+    fixability: B
+    layer: Evaluation / GC
+    artifact: Code Canonicality (CRITICAL)
+    validator: jscpd / dupl / Pylint duplicate-code / PMD CPD / SonarQube duplicate detection
+    rescore_evidence: duplicate_code_detection=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: code_modularization
+    level: 4
+    scope: application
+    skippable: true
+    fixability: B
+    layer: Memory
+    artifact: Directory Map & Module Boundaries
+    validator: eslint-plugin-boundaries / dependency-cruiser / ArchUnit / import-linter / Go internal/
+    rescore_evidence: code_modularization=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: n_plus_one_detection
+    level: 4
+    scope: application
+    skippable: true
+    fixability: B
+    layer: Invariant
+    artifact: Architecture Discipline
+    validator: bullet / nplusone / DataLoader / ORM query analysis
+    rescore_evidence: n_plus_one_detection=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: heavy_dependency_detection
+    level: 4
+    scope: application
+    skippable: true
+    fixability: B
+    layer: Protocol
+    artifact: Stack & Versions
+    validator: Bundle analyzer, size-limit, Lighthouse CI budgets
+    rescore_evidence: heavy_dependency_detection=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: unused_dependencies_detection
+    level: 3
+    scope: application
+    skippable: false
+    fixability: B
+    layer: Evaluation / GC
+    artifact: Code Canonicality
+    validator: depcheck / knip / deptry / go mod tidy in CI / cargo-udeps / Maven analyze
+    rescore_evidence: unused_dependencies_detection=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: unit_tests_exist
+    level: 1
+    scope: application
+    skippable: false
+    fixability: B
+    layer: Sensorium
+    artifact: Development Workflow
+    validator: "*.test.ts / __tests__/ / tests/test_*.py / *_test.go / *_test.rs present"
+    rescore_evidence: unit_tests_exist=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: integration_tests_exist
+    level: 3
+    scope: application
+    skippable: false
+    fixability: B
+    layer: Sensorium
+    artifact: Development Workflow
+    validator: cypress/playwright config / tests/integration/ / Behave features
+    rescore_evidence: integration_tests_exist=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: unit_tests_runnable
+    level: 2
+    scope: application
+    skippable: false
+    fixability: B
+    layer: Sensorium
+    artifact: Development Workflow
+    validator: test script runs (verified with --listTests / --collect-only style flags)
+    rescore_evidence: unit_tests_runnable=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: test_performance_tracking
+    level: 4
+    scope: application
+    skippable: false
+    fixability: B
+    layer: Sensorium
+    artifact: Enforcement Index
+    validator: Test timing surfaced (--durations, --verbose, BuildPulse, Datadog CI)
+    rescore_evidence: test_performance_tracking=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: flaky_test_detection
+    level: 4
+    scope: application
+    skippable: true
+    fixability: B
+    layer: Sensorium
+    artifact: Enforcement Index
+    validator: Retry config, BuildPulse, quarantine mechanism
+    rescore_evidence: flaky_test_detection=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: test_coverage_thresholds
+    level: 2
+    scope: application
+    skippable: false
+    fixability: B
+    layer: Sensorium
+    artifact: Conventions
+    validator: coverageThreshold, --cov-fail-under, Codecov gate, SonarQube quality gate
+    rescore_evidence: test_coverage_thresholds=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: test_naming_conventions
+    level: 3
+    scope: application
+    skippable: false
+    fixability: B
+    layer: Invariant
+    artifact: Conventions
+    validator: Test framework patterns enforced or documented in AGENTS.md
+    rescore_evidence: test_naming_conventions=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: test_isolation
+    level: 4
+    scope: application
+    skippable: false
+    fixability: B
+    layer: Invariant
+    artifact: Architecture Discipline
+    validator: Parallel execution config / t.Parallel() / pytest-xdist / DB isolation / randomization
+    rescore_evidence: test_isolation=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: api_schema_docs
+    level: 3
+    scope: application
+    skippable: true
+    fixability: C
+    layer: Memory
+    artifact: Directory Map
+    validator: OpenAPI/Swagger/GraphQL schema files committed
+    rescore_evidence: api_schema_docs=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: database_schema
+    level: 2
+    scope: application
+    skippable: true
+    fixability: C
+    layer: Memory
+    artifact: Directory Map
+    validator: Prisma schema / TypeORM entities / SQLAlchemy models / SQL migrations
+    rescore_evidence: database_schema=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: structured_logging
+    level: 2
+    scope: application
+    skippable: false
+    fixability: C
+    layer: Sensorium
+    artifact: Stack & Versions
+    validator: winston/pino/bunyan/structlog/loguru or dedicated logger module
+    rescore_evidence: structured_logging=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: distributed_tracing
+    level: 3
+    scope: application
+    skippable: false
+    fixability: C
+    layer: Invariant
+    artifact: Architecture Discipline
+    validator: OpenTelemetry / X-Request-ID propagation / trace correlation
+    rescore_evidence: distributed_tracing=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: metrics_collection
+    level: 3
+    scope: application
+    skippable: false
+    fixability: C
+    layer: Invariant
+    artifact: Architecture Discipline
+    validator: Datadog/Prometheus/New Relic/CloudWatch instrumentation
+    rescore_evidence: metrics_collection=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: code_quality_metrics
+    level: 4
+    scope: application
+    skippable: true
+    fixability: B
+    layer: Sensorium
+    artifact: Enforcement Index
+    validator: Coverage/complexity/maintainability tracked (SonarQube, Codecov bot, etc.)
+    rescore_evidence: code_quality_metrics=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: error_tracking_contextualized
+    level: 2
+    scope: application
+    skippable: false
+    fixability: C
+    layer: Invariant
+    artifact: Architecture Discipline
+    validator: Sentry/Bugsnag/Rollbar with source maps + breadcrumbs + user context
+    rescore_evidence: error_tracking_contextualized=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: alerting_configured
+    level: 3
+    scope: application
+    skippable: false
+    fixability: D
+    layer: Sensorium
+    artifact: out of scope (ops)
+    validator: PagerDuty/OpsGenie/custom alert rules defined
+    rescore_evidence: alerting_configured=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: deployment_observability
+    level: 4
+    scope: application
+    skippable: false
+    fixability: D
+    layer: Sensorium
+    artifact: Enforcement Index
+    validator: Dashboards linked (Datadog/Grafana/New Relic) and deploy annotations
+    rescore_evidence: deployment_observability=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: health_checks
+    level: 3
+    scope: application
+    skippable: true
+    fixability: C
+    layer: Invariant
+    artifact: Architecture Discipline
+    validator: /health//healthz//ready//live endpoints; K8s probes; Docker HEALTHCHECK
+    rescore_evidence: health_checks=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: circuit_breakers
+    level: 4
+    scope: application
+    skippable: true
+    fixability: C
+    layer: Invariant
+    artifact: Architecture Discipline
+    validator: opossum/cockatiel/resilience4j/polly/tenacity or service-mesh equivalents
+    rescore_evidence: circuit_breakers=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: profiling_instrumentation
+    level: 4
+    scope: application
+    skippable: true
+    fixability: D
+    layer: Protocol
+    artifact: out of scope (ops)
+    validator: APM (Datadog/New Relic) or continuous profiling (Pyroscope, Parca)
+    rescore_evidence: profiling_instrumentation=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: dast_scanning
+    level: 4
+    scope: application
+    skippable: true
+    fixability: D
+    layer: Permission
+    artifact: out of scope (security)
+    validator: OWASP ZAP / Burp / Nuclei in CI against staging
+    rescore_evidence: dast_scanning=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: pii_handling
+    level: 3
+    scope: application
+    skippable: true
+    fixability: C
+    layer: Invariant
+    artifact: Architecture Discipline
+    validator: Presidio/Macie/DLP, masking utilities, or PII handling docs
+    rescore_evidence: pii_handling=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: log_scrubbing
+    level: 3
+    scope: application
+    skippable: false
+    fixability: C
+    layer: Invariant
+    artifact: Architecture Discipline
+    validator: Redaction in logger config (pino redact, winston format, structlog processors)
+    rescore_evidence: log_scrubbing=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: product_analytics_instrumentation
+    level: 3
+    scope: application
+    skippable: false
+    fixability: D
+    layer: Governance
+    artifact: external system or stack-specific config
+    validator: Mixpanel/Amplitude/PostHog/GA4 instrumented
+    rescore_evidence: product_analytics_instrumentation=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: error_to_insight_pipeline
+    level: 5
+    scope: application
+    skippable: false
+    fixability: C
+    layer: Protocol
+    artifact: Enforcement Index
+    validator: Sentry-GitHub integration, error-to-issue automation
+    rescore_evidence: error_to_insight_pipeline=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: smoke_tests_exist
+    level: 2
+    scope: application
+    skippable: true
+    fixability: B
+    layer: Sensorium
+    artifact: Verification Matrix
+    validator: Selected-entry smoke command exercises key API/CLI routes against a running app (hurl/curl scripts) asserting status + body; skippable only for pure libraries
+    rescore_evidence: smoke_tests_exist=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: seed_data_available
+    level: 2
+    scope: application
+    skippable: true
+    fixability: C
+    layer: Sensorium
+    artifact: Development Workflow
+    validator: Selected-entry seed command (with db-reset command when persistence is resettable) produces a deterministic local dataset for runtime verification; skippable when no persistence
+    rescore_evidence: seed_data_available=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: coverage_per_file
+    level: 3
+    scope: application
+    skippable: true
+    fixability: B
+    layer: Sensorium
+    artifact: Conventions
+    validator: "Per-file 100% coverage gate (strong form of test_coverage_thresholds): the gate fails on any file under 100%; an uncovered line is treated as a dead-code candidate, not a missing test to bolt on"
+    rescore_evidence: coverage_per_file=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking
+  - id: built_artifact_smokes
+    level: 3
+    scope: application
+    skippable: true
+    fixability: B
+    layer: Sensorium
+    artifact: Verification Matrix
+    validator: "Published-artifact smokes: packages with a bin or non-index runtime entry run the built output under plain runtime (not source-transpiled), asserting the shipping artifact boots; a genuinely missing config exits non-zero; skippable when no bin or non-index runtime entry exists"
+    rescore_evidence: built_artifact_smokes=k/N where N is APPLICATIONS_IDENTIFIED and k is apps with qualifying evidence; partial credit only when configured but not blocking

@@ -1,0 +1,39 @@
+{
+  "schemaVersion": "code-migration.g1-judge-qualification.v2",
+  "migrationId": "MIG-001",
+  "verdict": "qualified",
+  "qualifiedBy": "vdd-owner",
+  "qualifiedAt": "2026-07-17T00:00:00Z",
+  "repository": {
+    "canonicalRealPath": "/absolute/path/to/canonical-target-repository",
+    "baselineCommit": "0000000000000000000000000000000000000000"
+  },
+  "manifestDigest": "sha256:replace-with-manifest-content-digest",
+  "sourceClassificationDigest": "sha256:replace-with-classification-content-digest",
+  "routeArtifacts": {
+    "rulebook": {
+      "artifactRef": "RULEBOOK.md",
+      "digest": "sha256:replace-with-rulebook-content-digest"
+    },
+    "gapInventory": {
+      "artifactRef": "gap-inventory.tsv",
+      "digest": "sha256:replace-with-gap-inventory-content-digest"
+    }
+  },
+  "vddBindingDigest": "sha256:replace-with-vdd-binding-content-digest",
+  "knownGood": {
+    "id": "known-good-pass",
+    "command": "<qualified known-good command>",
+    "expectedExit": "zero"
+  },
+  "knownBad": {
+    "id": "known-bad-rejected",
+    "command": "<qualified deliberately bad candidate command>",
+    "expectedExit": "nonzero"
+  },
+  "restoration": {
+    "id": "restoration-pass",
+    "command": "<qualified restored candidate command>",
+    "expectedExit": "zero"
+  }
+}

@@ -1,0 +1,11 @@
+Working directory: /Users/chenwenjie/.agents/skills/eng-init
+Command: file inspection via read/grep tools (unpiped)
+Exit code: 0
+Evidence:
+- evals/cases.md lines 330-387 append cases 28-32.
+- case-28 covers existing-report user signal repair.
+- case-29 covers no-report direct signal repair.
+- case-30 covers all-passing report noop.
+- case-31 covers monorepo denominator stability.
+- case-32 covers metric-gaming rejection.
+- Existing cases 1-27 remain before the appended cases.

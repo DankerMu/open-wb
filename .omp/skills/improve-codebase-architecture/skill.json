@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "name": "improve-codebase-architecture",
+  "displayName": "Improve Codebase Architecture",
+  "description": "基于“深模块”哲学寻找架构改进点：扫描 codebase，对照 openspec/glossary.md 的领域术语与 docs/adr/ 的决策， 找出 shallow modules 并提出 deepening 重构（把浅模块变深，提升 testability 与 AI 可导航性）， 产出可视化 HTML 评审，再进入 grill 对话逐个落地；落定的 deepening 可经 gh-create-issue / stage-change-pipeline 变成可追踪工作项。 触发词：\"improve architecture\"、\"找重构机会\"、\"合并紧耦合模块\"、\"让代码更可测\"、\"架构评审\"、\"把重构拆成 issue\"。 不用于纯需求澄清（用 clarify）或纯方向选型（用 future-aware-architecture）。",
+  "version": "0.5.0",
+  "maturity": "experimental",
+  "categories": [
+    "refactoring",
+    "design",
+    "coding"
+  ],
+  "tags": [
+    "architecture",
+    "deep-modules",
+    "refactoring",
+    "testability",
+    "seams",
+    "html-report"
+  ],
+  "authors": [
+    {
+      "name": "danker"
+    }
+  ],
+  "license": "MIT",
+  "entrypoints": {
+    "skillDoc": "SKILL.md"
+  },
+  "capabilities": {
+    "shell": true,
+    "filesystemRead": true,
+    "filesystemWrite": true
+  }
+}

@@ -1,0 +1,1 @@
+swe-agent read-only test report exists; audit-only mode; 2 apps; no destructive writes.

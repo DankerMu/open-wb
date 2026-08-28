@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "name": "diagnosing-bugs",
+  "displayName": "Diagnosing Bugs",
+  "description": "因未知失败的诊断纪律：先建红色反馈回路，后假设。适用于难缠 bug 与性能回归—— 症状明确但原因不明、修了又复发、CI 挂但本地复现不了。核心闸门：没有一条已跑过、 能红的命令，禁止读代码编理论。难缠 bug 可选多代理扇出模式（回路构建与假设生成并行化）。 触发词：\"diagnose\"、\"debug\"、\"诊断这个 bug\"、\"为什么一直挂\"、\"复现不了\"、 \"性能回归\"、\"查根因\"。不用于原因已确诊只差动手的修复（直接修）， 或\"该做什么/怎么设计\"的问题（用 grill/prototype 类）。",
+  "version": "0.2.0",
+  "maturity": "experimental",
+  "categories": [
+    "debugging",
+    "coding"
+  ],
+  "tags": [
+    "feedback-loop",
+    "root-cause",
+    "reproduction",
+    "falsifiable-hypotheses",
+    "instrumentation",
+    "regression-test",
+    "hitl"
+  ],
+  "authors": [
+    {
+      "name": "danker"
+    }
+  ],
+  "license": "MIT",
+  "entrypoints": {
+    "skillDoc": "SKILL.md"
+  },
+  "capabilities": {
+    "shell": true,
+    "filesystemRead": true,
+    "filesystemWrite": true
+  }
+}

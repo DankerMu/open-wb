@@ -1,0 +1,108 @@
+{
+  "workUnitId": "wu-evolution-evidence",
+  "assignmentId": "assignment-wu-evolution-evidence",
+  "workerSessionId": "wu-evolution-evidence-session",
+  "actorId": "MainEvidence",
+  "summary": "Self-evolution evidence recorded.",
+  "outcome": "completed",
+  "changedFiles": [
+    "SKILL.md",
+    "references/readiness-fix-recipes.md",
+    ".agents/missions/eng-init-control-plane-upgrade/evolution-pass.md"
+  ],
+  "startup": {
+    "contextFilesRead": [
+      "mission.md",
+      "AGENTS.md",
+      "requirements.json",
+      "validation-contract.md"
+    ],
+    "assignmentRead": true,
+    "assertionsLoaded": [
+      "VAL-EVOLVE-001"
+    ],
+    "preconditionsChecked": [
+      "evidence exists"
+    ],
+    "baselineValidation": {
+      "command": "file inspection baseline",
+      "exitCode": 0,
+      "startedAt": "2026-07-02T18:41:23Z",
+      "finishedAt": "2026-07-02T18:41:23Z",
+      "evidenceFile": {
+        "kind": "validation-log",
+        "path": ".agents/evidence/wu-evolution-evidence-evidence.log",
+        "sha256": "535ff1c7b149e14bb2239f0a567365b89700136e7ac6566cb528ea8b108dbfb4",
+        "command": "file inspection"
+      }
+    }
+  },
+  "validationRuns": [
+    {
+      "command": "file inspection",
+      "exitCode": 0,
+      "startedAt": "2026-07-02T18:41:23Z",
+      "finishedAt": "2026-07-02T18:41:23Z",
+      "evidenceFile": {
+        "kind": "validation-log",
+        "path": ".agents/evidence/wu-evolution-evidence-evidence.log",
+        "sha256": "535ff1c7b149e14bb2239f0a567365b89700136e7ac6566cb528ea8b108dbfb4",
+        "command": "file inspection"
+      }
+    }
+  ],
+  "openIssues": [],
+  "evidence": [
+    {
+      "kind": "validation-log",
+      "path": ".agents/evidence/wu-evolution-evidence-evidence.log",
+      "sha256": "535ff1c7b149e14bb2239f0a567365b89700136e7ac6566cb528ea8b108dbfb4",
+      "command": "file inspection"
+    }
+  ],
+  "evidenceFiles": [
+    {
+      "kind": "validation-log",
+      "path": ".agents/evidence/wu-evolution-evidence-evidence.log",
+      "sha256": "535ff1c7b149e14bb2239f0a567365b89700136e7ac6566cb528ea8b108dbfb4",
+      "command": "file inspection"
+    }
+  ],
+  "assertionEvidence": [
+    {
+      "assertionId": "VAL-EVOLVE-001",
+      "verdict": "passed",
+      "surface": "cli",
+      "evidenceSource": "fixture",
+      "toolUsed": "file inspection",
+      "evidenceKindsCaptured": [
+        "command",
+        "stdout",
+        "stderr",
+        "exit-code"
+      ],
+      "evidenceFiles": [
+        {
+          "kind": "validation-log",
+          "path": ".agents/evidence/wu-evolution-evidence-evidence.log",
+          "sha256": "535ff1c7b149e14bb2239f0a567365b89700136e7ac6566cb528ea8b108dbfb4",
+          "command": "file inspection"
+        }
+      ]
+    }
+  ],
+  "cleanup": {
+    "servicesStarted": [],
+    "servicesStopped": [],
+    "tempFilesRemoved": [],
+    "orphanedProcesses": []
+  },
+  "procedureFeedback": {
+    "followedProcedure": true,
+    "deviations": [],
+    "suggestedChanges": []
+  },
+  "discoveredIssues": [],
+  "whatWasLeftUndone": [],
+  "needsReplan": false
+}

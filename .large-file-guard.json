@@ -1,0 +1,6 @@
+{
+  "exclude": [
+    ".omp/skills/*",
+    "resource/workbuddy-live-demo.html"
+  ]
+}

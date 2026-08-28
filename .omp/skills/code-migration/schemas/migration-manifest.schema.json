@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/code-migration/3/migration-manifest.schema.json",
+  "title": "Code Migration Domain Manifest",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "migrationId",
+    "revision",
+    "variant",
+    "source",
+    "target",
+    "scope",
+    "units",
+    "invalidatedBy"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "code-migration-3" },
+    "migrationId": { "$ref": "#/$defs/nonEmptyString" },
+    "revision": { "$ref": "#/$defs/nonEmptyString" },
+    "variant": {
+      "enum": ["structure-preserving-port", "same-stack-uplift", "redesign-or-strangler"]
+    },
+    "source": { "$ref": "#/$defs/system" },
+    "target": { "$ref": "#/$defs/system" },
+    "scope": { "$ref": "#/$defs/scope" },
+    "units": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/unit" }
+    },
+    "invalidatedBy": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/nonEmptyString" }
+    }
+  },
+  "patternProperties": {
+    "^(status|actor|assignment|retryCount|lock|queuePosition|runId|nextAction|lease|attempt)$": false
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "nonEmptyString": { "type": "string", "minLength": 1 },
+    "stringArray": { "type": "array", "items": { "$ref": "#/$defs/nonEmptyString" } },
+    "system": {
+      "type": "object",
+      "required": ["root", "stack", "version"],
+      "properties": {
+        "root": { "$ref": "#/$defs/nonEmptyString" },
+        "stack": { "$ref": "#/$defs/nonEmptyString" },
+        "version": { "$ref": "#/$defs/nonEmptyString" },
+        "revision": { "$ref": "#/$defs/nonEmptyString" }
+      },
+      "additionalProperties": false
+    },
+    "scope": {
+      "type": "object",
+      "required": ["source", "target", "externalConsumers"],
+      "properties": {
+        "source": { "$ref": "#/$defs/systemScope" },
+        "target": { "$ref": "#/$defs/systemScope" },
+        "externalConsumers": { "$ref": "#/$defs/stringArray" }
+      },
+      "additionalProperties": false
+    },
+    "systemScope": {
+      "type": "object",
+      "required": ["includes", "excludes"],
+      "properties": {
+        "includes": { "$ref": "#/$defs/stringArray", "minItems": 1 },
+        "excludes": { "$ref": "#/$defs/stringArray" }
+      },
+      "additionalProperties": false
+    },
+    "unit": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "sourcePaths",
+        "targetPaths",
+        "dependencies",
+        "sharedSeamOwner",
+        "risk",
+        "classificationIds",
+        "artifactRefs"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/nonEmptyString" },
+        "kind": { "enum": ["module", "component", "subsystem", "shared-seam", "scc"] },
+        "sourcePaths": { "$ref": "#/$defs/stringArray", "minItems": 1 },
+        "targetPaths": { "$ref": "#/$defs/stringArray", "minItems": 1 },
+        "dependencies": { "$ref": "#/$defs/stringArray" },
+        "sharedSeamOwner": { "$ref": "#/$defs/nonEmptyString" },
+        "risk": { "enum": ["low", "medium", "high", "critical"] },
+        "classificationIds": { "$ref": "#/$defs/stringArray" },
+        "artifactRefs": { "$ref": "#/$defs/stringArray", "minItems": 1 },
+        "blockedBy": { "$ref": "#/$defs/stringArray", "minItems": 1 },
+        "excluded": {
+          "type": "object",
+          "required": ["decisionRef"],
+          "properties": {
+            "decisionRef": {
+              "type": "string",
+              "pattern": "^rulebook@[0-9]+(?![\\s\\S])"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

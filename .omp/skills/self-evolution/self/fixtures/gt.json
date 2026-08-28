@@ -1,0 +1,31 @@
+{
+  "artifact_name": "router",
+  "artifact_type": "prompt",
+  "default_execution": { "method": "llm", "config": { "temperature": 0 } },
+  "cases": [
+    {
+      "id": "r-01",
+      "prompt": "My card was charged twice this month.",
+      "expected_output": "BILLING",
+      "assertions": [{ "type": "contains", "value": "BILLING" }]
+    },
+    {
+      "id": "r-02",
+      "prompt": "The export button returns a 500 error.",
+      "expected_output": "TECHNICAL",
+      "assertions": [{ "type": "contains", "value": "TECHNICAL" }]
+    },
+    {
+      "id": "r-03",
+      "prompt": "I need to change the email on my profile.",
+      "expected_output": "ACCOUNT",
+      "assertions": [{ "type": "contains", "value": "ACCOUNT" }]
+    },
+    {
+      "id": "r-04",
+      "prompt": "Do you sponsor conferences?",
+      "expected_output": "OTHER",
+      "assertions": [{ "type": "contains", "value": "OTHER" }]
+    }
+  ]
+}

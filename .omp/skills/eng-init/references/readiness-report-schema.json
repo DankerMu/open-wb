@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eng-init.local/readiness-report-schema.json",
+  "title": "eng-init readiness report",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "generated_at",
+    "applications",
+    "score",
+    "criteria",
+    "configured_but_not_blocking",
+    "control_plane_layers",
+    "agents_md_constraint_dimensions",
+    "priority_actions"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "generated_at": { "type": "string" },
+    "previous_report": {
+      "type": "object",
+      "required": ["present", "changes_since_previous_report"],
+      "properties": {
+        "present": { "type": "boolean" },
+        "changes_since_previous_report": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "applications": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["path", "description"],
+        "properties": {
+          "path": { "type": "string" },
+          "description": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "score": {
+      "type": "object",
+      "required": ["level", "average", "applications_identified"],
+      "properties": {
+        "level": { "type": "string" },
+        "average": { "type": "number", "minimum": 0, "maximum": 1 },
+        "applications_identified": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "criteria": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "scope", "numerator", "denominator", "status", "evidence", "fixability", "validator", "rescore_rule"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+          "scope": { "type": "string" },
+          "numerator": { "type": ["number", "null"] },
+          "denominator": { "type": "integer", "minimum": 1 },
+          "status": { "enum": ["passing", "failing", "partial", "skipped", "pending_external"] },
+          "evidence": { "type": "string" },
+          "evidence_locations": { "type": "array", "items": { "type": "string" }, "description": "Paths/commands the auditor checked; required by the audit honesty rules for every criterion whose status is not passing" },
+          "fixability": { "enum": ["A", "B", "C", "D", "A_or_C", "B_or_C"] },
+          "validator": { "type": "string" },
+          "rescore_rule": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "configured_but_not_blocking": { "type": "array", "items": { "type": "string" } },
+    "control_plane_layers": { "type": "object" },
+    "agents_md_constraint_dimensions": { "type": "object" },
+    "priority_actions": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

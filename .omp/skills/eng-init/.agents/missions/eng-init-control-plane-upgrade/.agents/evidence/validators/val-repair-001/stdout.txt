@@ -1,0 +1,1 @@
+readiness-fix-recipes.md contains universal repair rules, fixability classes, schema, and required recipes including unit_tests_exist from evolution pass.

@@ -1,0 +1,121 @@
+{
+  "schemaVersion": "code-migration-missions-v4-2",
+  "migrationId": "MIG-001",
+  "repository": {
+    "canonicalRealPath": "/absolute/path/to/canonical-target-repository",
+    "baselineCommit": "0000000000000000000000000000000000000000"
+  },
+  "plan": {
+    "id": "migration-pilot-001",
+    "revision": 1,
+    "phase": "pilot",
+    "milestone": "pilot",
+    "budgets": {
+      "maxAttemptsPerFeature": 3,
+      "maxRepairRoundsPerMilestone": 2
+    },
+    "reviewPolicy": {
+      "scrutiny": "required",
+      "checklist": [
+        {
+          "id": "migration-scope",
+          "text": "Review the approved migration scope and VDD binding."
+        }
+      ]
+    },
+    "units": [
+      {
+        "id": "U-EXAMPLE",
+        "skillName": "migration-worker",
+        "skillFiles": [
+          {
+            "artifactRef": "skills/migration-worker/SKILL.md",
+            "digest": "sha256:<skill-content-digest>"
+          }
+        ],
+        "verification": {
+          "mode": "steps",
+          "steps": [
+            {
+              "id": "unit-tests",
+              "command": "<approved unit verification command>",
+              "expectedExit": "zero"
+            }
+          ]
+        },
+        "qaFlows": [
+          {
+            "id": "unit-flow",
+            "artifact": {
+              "artifactRef": "qa/unit-flow.md",
+              "digest": "sha256:<qa-flow-content-digest>"
+            },
+            "passCriteria": [
+              {
+                "id": "observable-result",
+                "text": "The approved observable result is present."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "g1JudgeQualification": {
+    "artifact": {
+      "artifactRef": "evidence/g1-judge-qualification.json",
+      "digest": "sha256:replace-with-g1-artifact-content-digest"
+    },
+    "knownGood": {
+      "id": "known-good-pass",
+      "command": "<qualified known-good command>",
+      "expectedExit": "zero"
+    },
+    "knownBad": {
+      "id": "known-bad-rejected",
+      "command": "<qualified deliberately bad candidate command>",
+      "expectedExit": "nonzero"
+    },
+    "restoration": {
+      "id": "restoration-pass",
+      "command": "<qualified restored candidate command>",
+      "expectedExit": "zero"
+    }
+  },
+  "g2Approval": {
+    "artifact": {
+      "artifactRef": "approval/g2-plan-approval.json",
+      "digest": "sha256:replace-with-g2-artifact-content-digest"
+    },
+    "approvedBy": "contract-owner",
+    "approvedAt": "2026-07-18T00:00:00Z"
+  },
+  "migrationArtifacts": {
+    "manifest": {
+      "artifactRef": "manifest.json",
+      "digest": "sha256:<manifest-content-digest>"
+    },
+    "sourceClassification": {
+      "artifactRef": "source-classification.json",
+      "digest": "sha256:<classification-content-digest>"
+    },
+    "routeArtifacts": {
+      "rulebook": {
+        "artifactRef": "RULEBOOK.md",
+        "digest": "sha256:<rulebook-content-digest>"
+      },
+      "gapInventory": {
+        "artifactRef": "gap-inventory.tsv",
+        "digest": "sha256:<gap-inventory-content-digest>"
+      }
+    },
+    "vddBinding": {
+      "artifactRef": "vdd/migration-binding.json",
+      "digest": "sha256:<vdd-binding-content-digest>"
+    },
+    "pilotPlaybook": {
+      "artifactRef": "PILOT_PLAYBOOK.md",
+      "digest": "sha256:<playbook-content-digest>"
+    }
+  }
+}

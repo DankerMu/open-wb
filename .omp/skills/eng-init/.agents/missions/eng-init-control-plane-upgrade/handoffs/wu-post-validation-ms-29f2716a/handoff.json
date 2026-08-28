@@ -1,0 +1,77 @@
+{
+  "workUnitId": "wu-post-validation-ms-29f2716a",
+  "assignmentId": "assignment-wu-post-validation-ms-29f2716a",
+  "workerSessionId": "wu-post-validation-ms-29f2716a-session",
+  "actorId": "MainFinal",
+  "summary": "post-mission validation",
+  "outcome": "completed",
+  "changedFiles": [],
+  "startup": {
+    "contextFilesRead": [
+      "mission.md"
+    ],
+    "assignmentRead": true,
+    "assertionsLoaded": [],
+    "preconditionsChecked": [
+      "final evidence exists"
+    ],
+    "baselineValidation": {
+      "command": "post-mission validation",
+      "exitCode": 0,
+      "startedAt": "2026-07-02T18:45:16Z",
+      "finishedAt": "2026-07-02T18:45:16Z",
+      "evidenceFile": {
+        "kind": "validation-log",
+        "path": ".agents/evidence/wu-post-validation-ms-29f2716a-evidence.log",
+        "sha256": "dc8da930c789d9e93b1b2b91abb1ebb82cd36e8d401ef40cb5a74092221906f0",
+        "command": "post-mission validation"
+      }
+    }
+  },
+  "validationRuns": [
+    {
+      "command": "post-mission validation",
+      "exitCode": 0,
+      "startedAt": "2026-07-02T18:45:16Z",
+      "finishedAt": "2026-07-02T18:45:16Z",
+      "evidenceFile": {
+        "kind": "validation-log",
+        "path": ".agents/evidence/wu-post-validation-ms-29f2716a-evidence.log",
+        "sha256": "dc8da930c789d9e93b1b2b91abb1ebb82cd36e8d401ef40cb5a74092221906f0",
+        "command": "post-mission validation"
+      }
+    }
+  ],
+  "openIssues": [],
+  "evidence": [
+    {
+      "kind": "validation-log",
+      "path": ".agents/evidence/wu-post-validation-ms-29f2716a-evidence.log",
+      "sha256": "dc8da930c789d9e93b1b2b91abb1ebb82cd36e8d401ef40cb5a74092221906f0",
+      "command": "post-mission validation"
+    }
+  ],
+  "evidenceFiles": [
+    {
+      "kind": "validation-log",
+      "path": ".agents/evidence/wu-post-validation-ms-29f2716a-evidence.log",
+      "sha256": "dc8da930c789d9e93b1b2b91abb1ebb82cd36e8d401ef40cb5a74092221906f0",
+      "command": "post-mission validation"
+    }
+  ],
+  "assertionEvidence": [],
+  "cleanup": {
+    "servicesStarted": [],
+    "servicesStopped": [],
+    "tempFilesRemoved": [],
+    "orphanedProcesses": []
+  },
+  "procedureFeedback": {
+    "followedProcedure": true,
+    "deviations": [],
+    "suggestedChanges": []
+  },
+  "discoveredIssues": [],
+  "whatWasLeftUndone": [],
+  "needsReplan": false
+}

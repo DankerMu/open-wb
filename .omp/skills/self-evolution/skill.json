@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "name": "self-evolution",
+  "displayName": "Self Evolution",
+  "description": "Iteratively evolve any measurable artifact (prompt, skill, harness, code, idea, configuration, document, benchmarked experiment) through autonomous mutation-evaluate-gate loops. Supports GT case suites, autoresearch-style scalar metric loops where a fixed command prints one score, and pairwise-preference loops for open-ended output with no absolute metric. Uses 8-phase iteration, 3-layer evaluation, deterministic keep/discard gates, blocking holdout gates, budget-matched control arms that separate real improvement from extra search, trace-driven diagnosis, and layered mutation. Can evolve itself. Trigger on \"evolve this\", \"optimize iteratively\", \"self-improve\", \"train this prompt\", \"iterate on this code\", \"make this better through iteration\", \"run evolution loop\", \"self-evolution\", \"evolve this skill\", \"train this skill\", \"optimize skill quality\", \"autonomous research\", \"autoresearch\", or whenever the user has a measurable artifact that needs data-driven improvement with automatic keep/revert decisions.",
+  "version": "0.1.0",
+  "maturity": "experimental",
+  "categories": [
+    "ai",
+    "workflow"
+  ],
+  "tags": [
+    "evolution",
+    "optimization",
+    "eval-loop",
+    "user-invoked"
+  ],
+  "authors": [
+    {
+      "name": "danker"
+    }
+  ],
+  "license": "MIT",
+  "entrypoints": {
+    "skillDoc": "SKILL.md",
+    "changelog": "CHANGELOG.md"
+  }
+}

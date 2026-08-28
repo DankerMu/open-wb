@@ -1,0 +1,7 @@
+Working directory: /Users/chenwenjie/.agents/skills/eng-init
+Command: file inspection via read/grep tools (unpiped)
+Exit code: 0
+Evidence:
+- references/agent-readiness-criteria.md lines 34-47 define Report lifecycle contract: app discovery before scoring, denominator stability, previous-report behavior, partial credit, control-plane summary, constraint dimension audit, priority actions, repair-usable output.
+- references/agent-readiness-criteria.md lines 85-96 define Fixability classes A-D and external/governance no-fake-completion rule.
+- references/readiness-fix-recipes.md contains universal repair rules, fixability classes, recipe schema, and recipes for the 13 required criteria.

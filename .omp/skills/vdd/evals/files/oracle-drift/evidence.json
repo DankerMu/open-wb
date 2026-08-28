@@ -1,0 +1,172 @@
+{
+  "schema_version": "vdd-0.4",
+  "attestation_id": "A-CLI-PORT-001",
+  "objective_id": "OBJ-CLI-PORT-001",
+  "mode": "equivalence",
+  "risk_profile": "standard",
+  "stage": "merge",
+  "status": "accepted",
+  "candidate": {
+    "revision": "def5678",
+    "dirty": false,
+    "artifact_digests": ["sha256:fce4ead20877d262cd6fbcffc3b2e8a07edf35b2fd392baa795aed8fbccaf346"]
+  },
+  "contract": {
+    "revision": "contract@4",
+    "fingerprint": "sha256:524478ff3d9867f18ff665138eb59348210e148f8bad5e5249f630edb8585959"
+  },
+  "oracles": [
+    {
+      "id": "O-CLI-DIFF",
+      "revision": "diff@3",
+      "fingerprint": "sha256:changed-after-qualification",
+      "qualified": true,
+      "known_bad_rejections": ["D-EXIT-CODE", "D-PARTIAL-OUTPUT"],
+      "no_change_trials": 3,
+      "flake_rate": 0.0
+    },
+    {
+      "id": "O-CLI-INTEGRATION",
+      "revision": "integration@2",
+      "fingerprint": "sha256:8e3437ad7ce564596f2953c41e97f26b0f1064a7ae4a3e1c8a62fac91073bd14",
+      "qualified": true,
+      "known_bad_rejections": ["D-LEGACY-DELEGATION"],
+      "no_change_trials": 3,
+      "flake_rate": 0.0
+    }
+  ],
+  "fixtures": [
+    {
+      "name": "CLI corpus",
+      "fingerprint": "sha256:5f385c0aaec1870f03749c702fa3bce0e92d0868469b57ce09cc4260c16203ac"
+    }
+  ],
+  "environment": {
+    "digest": "sha256:d4fec0b53d7dcfaf0bf538fa3c912d7646abfda04ec20aee106e15e3b0833ac9",
+    "details": {
+      "rust": "pinned stable",
+      "python": "3.12",
+      "matrix": ["linux-x86_64", "macos-arm64"],
+      "locale": "C"
+    }
+  },
+  "test_discovery": {
+    "manifest_digest": "sha256:1da9e4224829266ea852ac1995e7bcb57dd4a340c702bd8006ab79316f8a57ff",
+    "expected": 124,
+    "executed": 124,
+    "skipped": [],
+    "approved_skips": []
+  },
+  "commands": [
+    {
+      "id": "REF-GREEN",
+      "command": "python verifier/capture_reference.py --revision legacy@9f31",
+      "exit_code": 0,
+      "result": "pass",
+      "artifact_refs": ["reference.json"]
+    },
+    {
+      "id": "QUAL-EXIT",
+      "command": "python verifier/qualify.py exit-code-mutant",
+      "exit_code": 1,
+      "result": "expected_reject",
+      "artifact_refs": ["D-EXIT-CODE"]
+    },
+    {
+      "id": "QUAL-PARTIAL",
+      "command": "python verifier/qualify.py partial-output-mutant",
+      "exit_code": 1,
+      "result": "expected_reject",
+      "artifact_refs": ["D-PARTIAL-OUTPUT"]
+    },
+    {
+      "id": "QUAL-DELEGATION",
+      "command": "python verifier/qualify.py delegation-mutant",
+      "exit_code": 1,
+      "result": "expected_reject",
+      "artifact_refs": ["D-LEGACY-DELEGATION"]
+    },
+    {
+      "id": "CHECK",
+      "command": "cargo check -p replacement-cli",
+      "exit_code": 0,
+      "result": "pass",
+      "artifact_refs": ["check.log"]
+    },
+    {
+      "id": "DIFF",
+      "command": "python verifier/diff_cli.py --candidate target/debug/replacement-cli",
+      "exit_code": 0,
+      "result": "pass",
+      "artifact_refs": ["diff.json"]
+    },
+    {
+      "id": "BROAD",
+      "command": "cargo test --workspace",
+      "exit_code": 0,
+      "result": "pass",
+      "artifact_refs": ["tests.xml"]
+    },
+    {
+      "id": "INTEGRATION",
+      "command": "./verifier/run_packaged_cli.sh candidate",
+      "exit_code": 0,
+      "result": "pass",
+      "artifact_refs": ["integration.json"]
+    }
+  ],
+  "claim_results": [
+    {
+      "claim_id": "C-CLI-OUTPUT",
+      "status": "confirmed",
+      "evidence_refs": ["DIFF", "INTEGRATION"]
+    },
+    {
+      "claim_id": "C-CLI-CUTOVER",
+      "status": "confirmed",
+      "evidence_refs": ["INTEGRATION"]
+    }
+  ],
+  "defeater_results": [
+    {
+      "defeater_id": "D-EXIT-CODE",
+      "status": "eliminated",
+      "evidence_refs": ["QUAL-EXIT", "DIFF"]
+    },
+    {
+      "defeater_id": "D-PARTIAL-OUTPUT",
+      "status": "eliminated",
+      "evidence_refs": ["QUAL-PARTIAL", "DIFF"]
+    },
+    {
+      "defeater_id": "D-LEGACY-DELEGATION",
+      "status": "eliminated",
+      "evidence_refs": ["QUAL-DELEGATION", "INTEGRATION"]
+    }
+  ],
+  "forbidden_scope_diff": [],
+  "residual_risks": [],
+  "invalidation_events": ["verifier normalization changed after qualification"],
+  "issued_by": {
+    "identity": "ci-vdd-acceptor",
+    "role": "acceptor",
+    "independent_from_candidate": true
+  },
+  "merge": {
+    "integration_passed": true,
+    "cutover_complete": true,
+    "rollback_exercised": true
+  },
+  "release": {
+    "canary_or_shadow": null,
+    "thresholds_passed": null,
+    "rollback_trigger": null,
+    "release_owner": null
+  },
+  "runtime_feedback": {
+    "counterexamples_added": [],
+    "open_incidents": []
+  },
+  "retained_at": "artifacts/vdd/A-CLI-PORT-001.json",
+  "issued_at": "2026-07-15T00:00:00Z"
+}

@@ -1,0 +1,582 @@
+{
+  "missionId": "mission-0d33b392",
+  "verdict": "ready",
+  "assertions": [
+    {
+      "assertionId": "VAL-SKILL-001",
+      "description": "SKILL.md presents eng-init as a repo-local Agent Engineering Readiness Control Plane skill and routes Audit, Initialize, Repair, and Refactor Harness.",
+      "surface": "cli",
+      "requiredStrength": "fixture",
+      "achievedStrength": "fixture",
+      "verdict": "proven",
+      "evidenceChain": [
+        {
+          "evidencePath": ".agents/evidence/wu-skill-routing-evidence.log",
+          "sha256": "accb649abddc44eb0732d4b6f318d42ee263abbeee6fbd9899480478941862ae",
+          "evidenceSource": "fixture",
+          "workUnitId": "wu-skill-routing",
+          "recordedAt": "2026-07-02T17:37:14.192Z"
+        }
+      ],
+      "validatorVerdicts": [
+        {
+          "verdictId": "781c08ca-1678-4cc4-92cc-bde8bea3fbd1",
+          "validatorId": "engineering-val-skill-001-v2",
+          "lens": "validator",
+          "verdict": "confirmed",
+          "summary": "SKILL.md control-plane routing verified by file inspection.",
+          "rationale": "SKILL.md control-plane routing verified by file inspection.",
+          "evidence": [
+            {
+              "path": ".agents/evidence/validators/val-skill-001/command.txt",
+              "sha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4",
+              "kind": "command"
+            },
+            {
+              "path": ".agents/evidence/validators/val-skill-001/stdout.txt",
+              "sha256": "fcad7e9ed4c24808795c1efb580210722830900586ee2f3930851b33487e4225",
+              "kind": "stdout"
+            },
+            {
+              "path": ".agents/evidence/validators/val-skill-001/stderr.txt",
+              "sha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f",
+              "kind": "stderr"
+            },
+            {
+              "path": ".agents/evidence/validators/val-skill-001/exit-code.txt",
+              "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+              "kind": "exit-code"
+            }
+          ],
+          "evidenceSource": "fixture",
+          "validatorType": "engineering"
+        }
+      ]
+    },
+    {
+      "assertionId": "VAL-REPORT-001",
+      "description": "Readiness report reference defines deterministic audit/report lifecycle and repair-usable output.",
+      "surface": "cli",
+      "requiredStrength": "fixture",
+      "achievedStrength": "fixture",
+      "verdict": "proven",
+      "evidenceChain": [
+        {
+          "evidencePath": ".agents/evidence/wu-report-repair-refs-evidence.log",
+          "sha256": "74100a730875886e79af997db3ec85e7c6a1db51609ca83832aba713b6180e90",
+          "evidenceSource": "fixture",
+          "workUnitId": "wu-report-repair-refs",
+          "recordedAt": "2026-07-02T17:37:14.193Z"
+        }
+      ],
+      "validatorVerdicts": [
+        {
+          "verdictId": "6cede100-659b-4948-99f5-4fb258353d95",
+          "validatorId": "engineering-val-report-001-v2",
+          "lens": "validator",
+          "verdict": "confirmed",
+          "summary": "Report lifecycle contract verified by file inspection.",
+          "rationale": "Report lifecycle contract verified by file inspection.",
+          "evidence": [
+            {
+              "path": ".agents/evidence/validators/val-report-001/command.txt",
+              "sha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4",
+              "kind": "command"
+            },
+            {
+              "path": ".agents/evidence/validators/val-report-001/stdout.txt",
+              "sha256": "e4fa135676d7c986e47cb0f3dfd269529d8638d8eefa99b39f8260e16ca6fc9a",
+              "kind": "stdout"
+            },
+            {
+              "path": ".agents/evidence/validators/val-report-001/stderr.txt",
+              "sha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f",
+              "kind": "stderr"
+            },
+            {
+              "path": ".agents/evidence/validators/val-report-001/exit-code.txt",
+              "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+              "kind": "exit-code"
+            }
+          ],
+          "evidenceSource": "fixture",
+          "validatorType": "engineering"
+        }
+      ]
+    },
+    {
+      "assertionId": "VAL-REPAIR-001",
+      "description": "Repair recipe reference defines fixability classes, validators, rescore evidence, and high-value recipes.",
+      "surface": "cli",
+      "requiredStrength": "fixture",
+      "achievedStrength": "fixture",
+      "verdict": "proven",
+      "evidenceChain": [
+        {
+          "evidencePath": ".agents/evidence/wu-report-repair-refs-evidence.log",
+          "sha256": "74100a730875886e79af997db3ec85e7c6a1db51609ca83832aba713b6180e90",
+          "evidenceSource": "fixture",
+          "workUnitId": "wu-report-repair-refs",
+          "recordedAt": "2026-07-02T17:37:14.194Z"
+        }
+      ],
+      "validatorVerdicts": [
+        {
+          "verdictId": "88f89ed2-1291-42f1-b65d-a1ca827b8515",
+          "validatorId": "engineering-val-repair-001-v2",
+          "lens": "validator",
+          "verdict": "confirmed",
+          "summary": "Repair recipes verified by file inspection.",
+          "rationale": "Repair recipes verified by file inspection.",
+          "evidence": [
+            {
+              "path": ".agents/evidence/validators/val-repair-001/command.txt",
+              "sha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4",
+              "kind": "command"
+            },
+            {
+              "path": ".agents/evidence/validators/val-repair-001/stdout.txt",
+              "sha256": "fd8ca41583f3ed8c02e857c53a838ebf21dc35570b839708efd971a5efc1e815",
+              "kind": "stdout"
+            },
+            {
+              "path": ".agents/evidence/validators/val-repair-001/stderr.txt",
+              "sha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f",
+              "kind": "stderr"
+            },
+            {
+              "path": ".agents/evidence/validators/val-repair-001/exit-code.txt",
+              "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+              "kind": "exit-code"
+            }
+          ],
+          "evidenceSource": "fixture",
+          "validatorType": "engineering"
+        }
+      ]
+    },
+    {
+      "assertionId": "VAL-EVAL-001",
+      "description": "Eval cases include the new lifecycle coverage specified by the spec.",
+      "surface": "cli",
+      "requiredStrength": "fixture",
+      "achievedStrength": "fixture",
+      "verdict": "proven",
+      "evidenceChain": [
+        {
+          "evidencePath": ".agents/evidence/wu-eval-cases-evidence.log",
+          "sha256": "3bfac87d4046c78dcafe1365621c2531ed542cabf0425047172be9d005453187",
+          "evidenceSource": "fixture",
+          "workUnitId": "wu-eval-cases",
+          "recordedAt": "2026-07-02T17:37:14.186Z"
+        }
+      ],
+      "validatorVerdicts": [
+        {
+          "verdictId": "4c086ead-f5b0-4d16-8b0b-cb9af1b90dfb",
+          "validatorId": "engineering-val-eval-001-v2",
+          "lens": "validator",
+          "verdict": "confirmed",
+          "summary": "Eval coverage verified by file inspection.",
+          "rationale": "Eval coverage verified by file inspection.",
+          "evidence": [
+            {
+              "path": ".agents/evidence/validators/val-eval-001/command.txt",
+              "sha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4",
+              "kind": "command"
+            },
+            {
+              "path": ".agents/evidence/validators/val-eval-001/stdout.txt",
+              "sha256": "45addfb0bababbc42ef531192bcf0848af6aaf65d44018504711f1a15afc82bb",
+              "kind": "stdout"
+            },
+            {
+              "path": ".agents/evidence/validators/val-eval-001/stderr.txt",
+              "sha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f",
+              "kind": "stderr"
+            },
+            {
+              "path": ".agents/evidence/validators/val-eval-001/exit-code.txt",
+              "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+              "kind": "exit-code"
+            }
+          ],
+          "evidenceSource": "fixture",
+          "validatorType": "engineering"
+        }
+      ]
+    },
+    {
+      "assertionId": "VAL-REVIEW-001",
+      "description": "Independent review completed and all findings dispositioned.",
+      "surface": "cli",
+      "requiredStrength": "fixture",
+      "achievedStrength": "fixture",
+      "verdict": "proven",
+      "evidenceChain": [
+        {
+          "evidencePath": ".agents/evidence/wu-review-evidence-evidence.log",
+          "sha256": "77e18451df20b419acb6fa3fa7c6ae1ced655088a984e41791ca354532befcf3",
+          "evidenceSource": "fixture",
+          "workUnitId": "wu-review-evidence",
+          "recordedAt": "2026-07-02T18:41:36.934Z"
+        }
+      ],
+      "validatorVerdicts": [
+        {
+          "verdictId": "c0d854d6-0b41-414e-8bb4-e73e528b2c72",
+          "validatorId": "engineering-val-review-001-v1",
+          "lens": "validator",
+          "verdict": "confirmed",
+          "summary": "Independent review returned [] and no remediation was required.",
+          "rationale": "Independent review returned [] and no remediation was required.",
+          "evidence": [
+            {
+              "path": ".agents/evidence/validators/val-review-001/command.txt",
+              "sha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4",
+              "kind": "command"
+            },
+            {
+              "path": ".agents/evidence/validators/val-review-001/stdout.txt",
+              "sha256": "dcd5617beb088e1c9aa1cb9462732219d729702aebd8bb4b6a582c38d81219d6",
+              "kind": "stdout"
+            },
+            {
+              "path": ".agents/evidence/validators/val-review-001/stderr.txt",
+              "sha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f",
+              "kind": "stderr"
+            },
+            {
+              "path": ".agents/evidence/validators/val-review-001/exit-code.txt",
+              "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+              "kind": "exit-code"
+            }
+          ],
+          "evidenceSource": "fixture",
+          "validatorType": "engineering"
+        }
+      ]
+    },
+    {
+      "assertionId": "VAL-EVOLVE-001",
+      "description": "Bounded self-evolution pass records weaknesses, mutations, decisions, and final rationale.",
+      "surface": "cli",
+      "requiredStrength": "fixture",
+      "achievedStrength": "fixture",
+      "verdict": "proven",
+      "evidenceChain": [
+        {
+          "evidencePath": ".agents/evidence/wu-evolution-evidence-evidence.log",
+          "sha256": "535ff1c7b149e14bb2239f0a567365b89700136e7ac6566cb528ea8b108dbfb4",
+          "evidenceSource": "fixture",
+          "workUnitId": "wu-evolution-evidence",
+          "recordedAt": "2026-07-02T18:41:36.939Z"
+        }
+      ],
+      "validatorVerdicts": [
+        {
+          "verdictId": "75b8d4d2-1e54-4ac2-8ec5-7b033622ffdc",
+          "validatorId": "engineering-val-evolve-001-v1",
+          "lens": "validator",
+          "verdict": "confirmed",
+          "summary": "Self-evolution log exists; two mutations kept; validation 14/14.",
+          "rationale": "Self-evolution log exists; two mutations kept; validation 14/14.",
+          "evidence": [
+            {
+              "path": ".agents/evidence/validators/val-evolve-001/command.txt",
+              "sha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4",
+              "kind": "command"
+            },
+            {
+              "path": ".agents/evidence/validators/val-evolve-001/stdout.txt",
+              "sha256": "8130e3bb1ad309cb480dd32bd34575575f2a0b87276a9fcdbf2b1c95d47788e4",
+              "kind": "stdout"
+            },
+            {
+              "path": ".agents/evidence/validators/val-evolve-001/stderr.txt",
+              "sha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f",
+              "kind": "stderr"
+            },
+            {
+              "path": ".agents/evidence/validators/val-evolve-001/exit-code.txt",
+              "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+              "kind": "exit-code"
+            }
+          ],
+          "evidenceSource": "fixture",
+          "validatorType": "engineering"
+        }
+      ]
+    },
+    {
+      "assertionId": "VAL-SWE-001",
+      "description": "New eng-init behavior is exercised against swe-agent in read-only audit/spec-preview style.",
+      "surface": "cli",
+      "requiredStrength": "fixture",
+      "achievedStrength": "fixture",
+      "verdict": "proven",
+      "evidenceChain": [
+        {
+          "evidencePath": ".agents/evidence/wu-swe-evidence-evidence.log",
+          "sha256": "c333fa59259f9c692fb919c752ba1ef17d86a48e534a3c0bc78c017d84281bfc",
+          "evidenceSource": "fixture",
+          "workUnitId": "wu-swe-evidence",
+          "recordedAt": "2026-07-02T18:41:36.926Z"
+        }
+      ],
+      "validatorVerdicts": [
+        {
+          "verdictId": "5832d402-aa79-4985-8303-0d3b46b3f9d5",
+          "validatorId": "engineering-val-swe-001-v1",
+          "lens": "validator",
+          "verdict": "confirmed",
+          "summary": "swe-agent read-only test report exists; audit-only mode; 2 apps; no destructive writes.",
+          "rationale": "swe-agent read-only test report exists; audit-only mode; 2 apps; no destructive writes.",
+          "evidence": [
+            {
+              "path": ".agents/evidence/validators/val-swe-001/command.txt",
+              "sha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4",
+              "kind": "command"
+            },
+            {
+              "path": ".agents/evidence/validators/val-swe-001/stdout.txt",
+              "sha256": "80fdbbc17d354ea64a2fcd01e3dcc2ab1bcde896e37c0209cf88fec9a1e1eaae",
+              "kind": "stdout"
+            },
+            {
+              "path": ".agents/evidence/validators/val-swe-001/stderr.txt",
+              "sha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f",
+              "kind": "stderr"
+            },
+            {
+              "path": ".agents/evidence/validators/val-swe-001/exit-code.txt",
+              "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+              "kind": "exit-code"
+            }
+          ],
+          "evidenceSource": "fixture",
+          "validatorType": "engineering"
+        }
+      ]
+    },
+    {
+      "assertionId": "VAL-FINAL-001",
+      "description": "Final report can cite review, evolution, structural validation, and swe-agent evidence.",
+      "surface": "cli",
+      "requiredStrength": "fixture",
+      "achievedStrength": "fixture",
+      "verdict": "proven",
+      "evidenceChain": [
+        {
+          "evidencePath": ".agents/evidence/wu-final-evidence-evidence.log",
+          "sha256": "e23399561b259b9f5202259334b8d3f409dedde853b1748da07a6db81779d033",
+          "evidenceSource": "fixture",
+          "workUnitId": "wu-final-evidence",
+          "recordedAt": "2026-07-02T18:41:36.948Z"
+        }
+      ],
+      "validatorVerdicts": [
+        {
+          "verdictId": "a1cb8e1b-05f0-43c5-8e32-3966ba1accb9",
+          "validatorId": "engineering-val-final-001-v1",
+          "lens": "validator",
+          "verdict": "confirmed",
+          "summary": "Final evidence package is present for all requested surfaces.",
+          "rationale": "Final evidence package is present for all requested surfaces.",
+          "evidence": [
+            {
+              "path": ".agents/evidence/validators/val-final-001/command.txt",
+              "sha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4",
+              "kind": "command"
+            },
+            {
+              "path": ".agents/evidence/validators/val-final-001/stdout.txt",
+              "sha256": "b0753343eccb2ef7ae9afd86df0997698a6f95ea00ee8fd4bfd51d41e68fc9b6",
+              "kind": "stdout"
+            },
+            {
+              "path": ".agents/evidence/validators/val-final-001/stderr.txt",
+              "sha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f",
+              "kind": "stderr"
+            },
+            {
+              "path": ".agents/evidence/validators/val-final-001/exit-code.txt",
+              "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+              "kind": "exit-code"
+            }
+          ],
+          "evidenceSource": "fixture",
+          "validatorType": "engineering"
+        }
+      ]
+    }
+  ],
+  "milestones": [
+    {
+      "milestoneId": "ms-64efcdd7",
+      "title": "Core skill upgrade",
+      "sealed": true,
+      "sealHash": "23f7f03d534046a5730c5243713630cc9bf581c87ce4366d3e5f3afbf99ac252",
+      "assertionIds": [
+        "VAL-SKILL-001",
+        "VAL-REPORT-001",
+        "VAL-REPAIR-001",
+        "VAL-EVAL-001"
+      ],
+      "verdict": "ready",
+      "blockers": []
+    },
+    {
+      "milestoneId": "ms-2ed442bc",
+      "title": "Evolution and real-project validation",
+      "sealed": true,
+      "sealHash": "4c6f4bd015086c7c0939db5c3e867c9c2b5e2f72b51c3e87806601f9e677e6ed",
+      "assertionIds": [
+        "VAL-REVIEW-001",
+        "VAL-EVOLVE-001",
+        "VAL-SWE-001"
+      ],
+      "verdict": "ready",
+      "blockers": []
+    },
+    {
+      "milestoneId": "ms-29f2716a",
+      "title": "Final evidence completion",
+      "sealed": true,
+      "sealHash": "bb7626308ee46d6641642313921b7d857006a0709486aa61501320c7c7ac34f7",
+      "assertionIds": [
+        "VAL-FINAL-001"
+      ],
+      "verdict": "ready",
+      "blockers": []
+    }
+  ],
+  "gates": [
+    {
+      "gateId": "event-store-integrity",
+      "gateType": "mission-complete",
+      "passed": true,
+      "blockers": [],
+      "checkedAt": "2026-07-02T18:45:31.743Z"
+    },
+    {
+      "gateId": "assertions",
+      "gateType": "mission-complete",
+      "passed": true,
+      "blockers": [],
+      "checkedAt": "2026-07-02T18:45:31.743Z"
+    },
+    {
+      "gateId": "oracle-strength",
+      "gateType": "mission-complete",
+      "passed": true,
+      "blockers": [],
+      "checkedAt": "2026-07-02T18:45:31.743Z"
+    },
+    {
+      "gateId": "issues-dispositioned",
+      "gateType": "mission-complete",
+      "passed": true,
+      "blockers": [],
+      "checkedAt": "2026-07-02T18:45:31.743Z"
+    },
+    {
+      "gateId": "convergence",
+      "gateType": "converge-budget",
+      "passed": true,
+      "blockers": [],
+      "checkedAt": "2026-07-02T18:45:31.743Z"
+    },
+    {
+      "gateId": "executor-lifecycle",
+      "gateType": "advisory",
+      "passed": true,
+      "blockers": [],
+      "checkedAt": "2026-07-02T18:45:31.743Z"
+    },
+    {
+      "gateId": "milestone-seal",
+      "gateType": "advisory",
+      "passed": true,
+      "blockers": [],
+      "checkedAt": "2026-07-02T18:45:31.743Z"
+    },
+    {
+      "gateId": "work-units-terminal",
+      "gateType": "mission-complete",
+      "passed": true,
+      "blockers": [],
+      "checkedAt": "2026-07-02T18:45:31.743Z"
+    },
+    {
+      "gateId": "evidence-integrity",
+      "gateType": "mission-complete",
+      "passed": true,
+      "blockers": [],
+      "checkedAt": "2026-07-02T18:45:31.743Z"
+    },
+    {
+      "gateId": "validator-coverage",
+      "gateType": "mission-complete",
+      "passed": true,
+      "blockers": [],
+      "checkedAt": "2026-07-02T18:45:31.743Z"
+    },
+    {
+      "gateId": "validator-refuted",
+      "gateType": "mission-complete",
+      "passed": true,
+      "blockers": [],
+      "checkedAt": "2026-07-02T18:45:31.743Z"
+    },
+    {
+      "gateId": "engineering-validation",
+      "gateType": "mission-complete",
+      "passed": true,
+      "blockers": [],
+      "checkedAt": "2026-07-02T18:45:31.743Z"
+    },
+    {
+      "gateId": "provisional-work-units",
+      "gateType": "mission-complete",
+      "passed": true,
+      "blockers": [],
+      "checkedAt": "2026-07-02T18:45:31.743Z"
+    },
+    {
+      "gateId": "review-coverage",
+      "gateType": "mission-complete",
+      "passed": true,
+      "blockers": [],
+      "checkedAt": "2026-07-02T18:45:31.743Z"
+    },
+    {
+      "gateId": "post-mission-review",
+      "gateType": "mission-complete",
+      "passed": true,
+      "blockers": [],
+      "checkedAt": "2026-07-02T18:45:31.743Z"
+    },
+    {
+      "gateId": "projection-drift",
+      "gateType": "advisory",
+      "passed": false,
+      "blockers": [
+        "diagnostic files out of date with event-derived state"
+      ],
+      "checkedAt": "2026-07-02T18:45:31.743Z"
+    }
+  ],
+  "findings": [
+    {
+      "findingId": "finding-1",
+      "findingType": "projection-drift",
+      "severity": "warning",
+      "description": "Diagnostic files are out of date with event-derived state"
+    }
+  ],
+  "issues": [],
+  "snapshotSequence": 128,
+  "snapshotHash": "5bb41983e9c176ab81230dc76555d98fbafb7028ffa76ec4757fa65bf0ae606d",
+  "driftDetected": true
+}

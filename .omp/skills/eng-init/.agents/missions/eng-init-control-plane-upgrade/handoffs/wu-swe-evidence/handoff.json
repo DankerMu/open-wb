@@ -1,0 +1,106 @@
+{
+  "workUnitId": "wu-swe-evidence",
+  "assignmentId": "assignment-wu-swe-evidence",
+  "workerSessionId": "wu-swe-evidence-session",
+  "actorId": "MainEvidence",
+  "summary": "swe-agent validation evidence recorded.",
+  "outcome": "completed",
+  "changedFiles": [
+    ".agents/missions/eng-init-control-plane-upgrade/swe-agent-test.md"
+  ],
+  "startup": {
+    "contextFilesRead": [
+      "mission.md",
+      "AGENTS.md",
+      "requirements.json",
+      "validation-contract.md"
+    ],
+    "assignmentRead": true,
+    "assertionsLoaded": [
+      "VAL-SWE-001"
+    ],
+    "preconditionsChecked": [
+      "evidence exists"
+    ],
+    "baselineValidation": {
+      "command": "file inspection baseline",
+      "exitCode": 0,
+      "startedAt": "2026-07-02T18:41:23Z",
+      "finishedAt": "2026-07-02T18:41:23Z",
+      "evidenceFile": {
+        "kind": "validation-log",
+        "path": ".agents/evidence/wu-swe-evidence-evidence.log",
+        "sha256": "c333fa59259f9c692fb919c752ba1ef17d86a48e534a3c0bc78c017d84281bfc",
+        "command": "file inspection"
+      }
+    }
+  },
+  "validationRuns": [
+    {
+      "command": "file inspection",
+      "exitCode": 0,
+      "startedAt": "2026-07-02T18:41:23Z",
+      "finishedAt": "2026-07-02T18:41:23Z",
+      "evidenceFile": {
+        "kind": "validation-log",
+        "path": ".agents/evidence/wu-swe-evidence-evidence.log",
+        "sha256": "c333fa59259f9c692fb919c752ba1ef17d86a48e534a3c0bc78c017d84281bfc",
+        "command": "file inspection"
+      }
+    }
+  ],
+  "openIssues": [],
+  "evidence": [
+    {
+      "kind": "validation-log",
+      "path": ".agents/evidence/wu-swe-evidence-evidence.log",
+      "sha256": "c333fa59259f9c692fb919c752ba1ef17d86a48e534a3c0bc78c017d84281bfc",
+      "command": "file inspection"
+    }
+  ],
+  "evidenceFiles": [
+    {
+      "kind": "validation-log",
+      "path": ".agents/evidence/wu-swe-evidence-evidence.log",
+      "sha256": "c333fa59259f9c692fb919c752ba1ef17d86a48e534a3c0bc78c017d84281bfc",
+      "command": "file inspection"
+    }
+  ],
+  "assertionEvidence": [
+    {
+      "assertionId": "VAL-SWE-001",
+      "verdict": "passed",
+      "surface": "cli",
+      "evidenceSource": "fixture",
+      "toolUsed": "file inspection",
+      "evidenceKindsCaptured": [
+        "command",
+        "stdout",
+        "stderr",
+        "exit-code"
+      ],
+      "evidenceFiles": [
+        {
+          "kind": "validation-log",
+          "path": ".agents/evidence/wu-swe-evidence-evidence.log",
+          "sha256": "c333fa59259f9c692fb919c752ba1ef17d86a48e534a3c0bc78c017d84281bfc",
+          "command": "file inspection"
+        }
+      ]
+    }
+  ],
+  "cleanup": {
+    "servicesStarted": [],
+    "servicesStopped": [],
+    "tempFilesRemoved": [],
+    "orphanedProcesses": []
+  },
+  "procedureFeedback": {
+    "followedProcedure": true,
+    "deviations": [],
+    "suggestedChanges": []
+  },
+  "discoveredIssues": [],
+  "whatWasLeftUndone": [],
+  "needsReplan": false
+}

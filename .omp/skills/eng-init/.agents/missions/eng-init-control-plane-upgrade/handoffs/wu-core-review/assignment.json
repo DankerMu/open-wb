@@ -1,0 +1,35 @@
+{
+  "workUnitId": "wu-core-review",
+  "assignmentId": "assignment-wu-core-review",
+  "runId": "workflow-run-1-wu-core-review",
+  "kind": "review",
+  "title": "Independent review of core upgrade",
+  "milestoneId": "ms-64efcdd7",
+  "dependencies": [
+    "wu-skill-routing",
+    "wu-report-repair-refs",
+    "wu-eval-cases"
+  ],
+  "writeScope": [],
+  "fulfills": [],
+  "dispatchedAt": "2026-07-02T18:33:12.569Z",
+  "workUnit": {
+    "workUnitId": "wu-core-review",
+    "kind": "review",
+    "title": "Independent review of core upgrade",
+    "milestoneId": "ms-64efcdd7",
+    "dependencies": [
+      "wu-skill-routing",
+      "wu-report-repair-refs",
+      "wu-eval-cases"
+    ],
+    "writeScope": [],
+    "fulfills": []
+  },
+  "assertions": [],
+  "validation": {
+    "steps": [],
+    "evidenceRequirements": []
+  },
+  "handoffPath": "handoffs/wu-core-review/handoff.json"
+}

@@ -1,0 +1,75 @@
+{
+  "workUnitId": "wu-eval-cases",
+  "assignmentId": "assignment-wu-eval-cases",
+  "runId": "workflow-run-1-wu-eval-cases",
+  "kind": "task",
+  "title": "Add lifecycle regression eval cases",
+  "milestoneId": "ms-64efcdd7",
+  "dependencies": [],
+  "writeScope": [],
+  "fulfills": [
+    "VAL-EVAL-001"
+  ],
+  "dispatchedAt": "2026-07-02T17:36:16.242Z",
+  "workUnit": {
+    "workUnitId": "wu-eval-cases",
+    "kind": "task",
+    "title": "Add lifecycle regression eval cases",
+    "milestoneId": "ms-64efcdd7",
+    "dependencies": [],
+    "writeScope": [],
+    "fulfills": [
+      "VAL-EVAL-001"
+    ],
+    "assertionScopeIds": [
+      "VAL-EVAL-001"
+    ]
+  },
+  "assertions": [
+    {
+      "assertionId": "VAL-EVAL-001",
+      "milestoneId": "ms-64efcdd7",
+      "title": "Regression eval coverage exists",
+      "description": "Eval cases include the new lifecycle coverage specified by the spec.",
+      "surface": "cli",
+      "requiredStrength": "fixture",
+      "tool": "file inspection",
+      "passCriteria": "cases.md includes five new observable cases and existing cases are preserved.",
+      "failCriteria": "New cases missing, subjective-only, or existing cases weakened/deleted.",
+      "requiredEvidence": [
+        "file-path",
+        "excerpt",
+        "exit-code"
+      ],
+      "proofCutoffSequence": 6
+    }
+  ],
+  "validation": {
+    "steps": [
+      {
+        "assertionId": "VAL-EVAL-001",
+        "title": "Regression eval coverage exists",
+        "surface": "cli",
+        "description": "Eval cases include the new lifecycle coverage specified by the spec.",
+        "tool": "file inspection",
+        "passCriteria": "cases.md includes five new observable cases and existing cases are preserved.",
+        "failCriteria": "New cases missing, subjective-only, or existing cases weakened/deleted."
+      }
+    ],
+    "evidenceRequirements": [
+      {
+        "assertionId": "VAL-EVAL-001",
+        "tool": "file inspection",
+        "evidenceSource": "fixture",
+        "requiredEvidence": [
+          "file-path",
+          "excerpt",
+          "exit-code"
+        ],
+        "evidencePathRequired": true,
+        "sha256Required": true
+      }
+    ]
+  },
+  "handoffPath": "handoffs/wu-eval-cases/handoff.json"
+}

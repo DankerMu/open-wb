@@ -1,0 +1,81 @@
+{
+  "workUnitId": "wu-core-review",
+  "assignmentId": "assignment-wu-core-review",
+  "workerSessionId": "TerseReview-session",
+  "actorId": "TerseReview",
+  "summary": "Independent review completed with no actionable findings.",
+  "outcome": "completed",
+  "changedFiles": [],
+  "startup": {
+    "contextFilesRead": [
+      "mission.md",
+      "AGENTS.md",
+      "requirements.json",
+      "validation-contract.md",
+      "features.json"
+    ],
+    "assignmentRead": true,
+    "assertionsLoaded": [],
+    "preconditionsChecked": [
+      "changed files reviewed"
+    ],
+    "baselineValidation": {
+      "command": "independent review baseline",
+      "exitCode": 0,
+      "startedAt": "2026-07-02T18:37:27Z",
+      "finishedAt": "2026-07-02T18:37:27Z",
+      "evidenceFile": {
+        "kind": "validation-log",
+        "path": ".agents/evidence/wu-core-review-evidence.log",
+        "sha256": "f1c93415ab995246a9f5800ae2132804c4956e162668d7d7cc492de6e942f47e",
+        "command": "independent review"
+      }
+    }
+  },
+  "validationRuns": [
+    {
+      "command": "independent review",
+      "exitCode": 0,
+      "startedAt": "2026-07-02T18:37:27Z",
+      "finishedAt": "2026-07-02T18:37:27Z",
+      "evidenceFile": {
+        "kind": "validation-log",
+        "path": ".agents/evidence/wu-core-review-evidence.log",
+        "sha256": "f1c93415ab995246a9f5800ae2132804c4956e162668d7d7cc492de6e942f47e",
+        "command": "independent review"
+      }
+    }
+  ],
+  "openIssues": [],
+  "evidence": [
+    {
+      "kind": "validation-log",
+      "path": ".agents/evidence/wu-core-review-evidence.log",
+      "sha256": "f1c93415ab995246a9f5800ae2132804c4956e162668d7d7cc492de6e942f47e",
+      "command": "independent review"
+    }
+  ],
+  "evidenceFiles": [
+    {
+      "kind": "validation-log",
+      "path": ".agents/evidence/wu-core-review-evidence.log",
+      "sha256": "f1c93415ab995246a9f5800ae2132804c4956e162668d7d7cc492de6e942f47e",
+      "command": "independent review"
+    }
+  ],
+  "assertionEvidence": [],
+  "cleanup": {
+    "servicesStarted": [],
+    "servicesStopped": [],
+    "tempFilesRemoved": [],
+    "orphanedProcesses": []
+  },
+  "procedureFeedback": {
+    "followedProcedure": true,
+    "deviations": [],
+    "suggestedChanges": []
+  },
+  "discoveredIssues": [],
+  "whatWasLeftUndone": [],
+  "needsReplan": false
+}

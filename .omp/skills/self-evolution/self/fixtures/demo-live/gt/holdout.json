@@ -1,0 +1,28 @@
+{
+  "artifact_name": "demo_prompt",
+  "artifact_type": "prompt",
+  "cases": [
+    {
+      "id": "h-02",
+      "prompt": "Break down revenue by segment.",
+      "expected_output": "Per-segment figures",
+      "assertions": [
+        {
+          "type": "llm_judge",
+          "value": "Does the output break revenue down by segment?"
+        }
+      ]
+    },
+    {
+      "id": "h-05",
+      "prompt": "What changed in guidance?",
+      "expected_output": "Names the guidance change",
+      "assertions": [
+        {
+          "type": "llm_judge",
+          "value": "Does the output state what changed in guidance?"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,107 @@
+{
+  "workUnitId": "wu-skill-routing",
+  "assignmentId": "assignment-wu-skill-routing",
+  "workerSessionId": "SkillRouting-session",
+  "actorId": "SkillRouting",
+  "summary": "Updated SKILL.md routing and control-plane positioning.",
+  "outcome": "completed",
+  "changedFiles": [
+    "SKILL.md"
+  ],
+  "startup": {
+    "contextFilesRead": [
+      "mission.md",
+      "AGENTS.md",
+      "requirements.json",
+      "validation-contract.md",
+      "features.json"
+    ],
+    "assignmentRead": true,
+    "assertionsLoaded": [
+      "VAL-SKILL-001"
+    ],
+    "preconditionsChecked": [
+      "Allowed scope verified",
+      "Spec reviewed"
+    ],
+    "baselineValidation": {
+      "command": "file inspection baseline",
+      "exitCode": 0,
+      "startedAt": "2026-07-02T17:37:00Z",
+      "finishedAt": "2026-07-02T17:37:00Z",
+      "evidenceFile": {
+        "kind": "validation-log",
+        "path": ".agents/evidence/wu-skill-routing-evidence.log",
+        "sha256": "accb649abddc44eb0732d4b6f318d42ee263abbeee6fbd9899480478941862ae",
+        "command": "file inspection"
+      }
+    }
+  },
+  "validationRuns": [
+    {
+      "command": "file inspection",
+      "exitCode": 0,
+      "startedAt": "2026-07-02T17:37:00Z",
+      "finishedAt": "2026-07-02T17:37:00Z",
+      "evidenceFile": {
+        "kind": "validation-log",
+        "path": ".agents/evidence/wu-skill-routing-evidence.log",
+        "sha256": "accb649abddc44eb0732d4b6f318d42ee263abbeee6fbd9899480478941862ae",
+        "command": "file inspection"
+      }
+    }
+  ],
+  "openIssues": [],
+  "evidence": [
+    {
+      "kind": "validation-log",
+      "path": ".agents/evidence/wu-skill-routing-evidence.log",
+      "sha256": "accb649abddc44eb0732d4b6f318d42ee263abbeee6fbd9899480478941862ae",
+      "command": "file inspection"
+    }
+  ],
+  "evidenceFiles": [
+    {
+      "kind": "validation-log",
+      "path": ".agents/evidence/wu-skill-routing-evidence.log",
+      "sha256": "accb649abddc44eb0732d4b6f318d42ee263abbeee6fbd9899480478941862ae",
+      "command": "file inspection"
+    }
+  ],
+  "assertionEvidence": [
+    {
+      "assertionId": "VAL-SKILL-001",
+      "verdict": "passed",
+      "surface": "cli",
+      "evidenceSource": "fixture",
+      "toolUsed": "file inspection",
+      "evidenceKindsCaptured": [
+        "file-path",
+        "excerpt",
+        "exit-code"
+      ],
+      "evidenceFiles": [
+        {
+          "kind": "validation-log",
+          "path": ".agents/evidence/wu-skill-routing-evidence.log",
+          "sha256": "accb649abddc44eb0732d4b6f318d42ee263abbeee6fbd9899480478941862ae",
+          "command": "file inspection"
+        }
+      ]
+    }
+  ],
+  "cleanup": {
+    "servicesStarted": [],
+    "servicesStopped": [],
+    "tempFilesRemoved": [],
+    "orphanedProcesses": []
+  },
+  "procedureFeedback": {
+    "followedProcedure": true,
+    "deviations": [],
+    "suggestedChanges": []
+  },
+  "discoveredIssues": [],
+  "whatWasLeftUndone": [],
+  "needsReplan": false
+}

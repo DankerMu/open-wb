@@ -1,0 +1,159 @@
+{
+  "schema_version": "vdd-0.4",
+  "attestation_id": "A-SLUG-001",
+  "objective_id": "OBJ-SLUG-001",
+  "mode": "construction",
+  "risk_profile": "light",
+  "stage": "merge",
+  "status": "accepted",
+  "candidate": {
+    "revision": "abc1234",
+    "dirty": false,
+    "artifact_digests": ["sha256:26f4845e71ab48e02cde5e303ff379a33ae766b7b347fb4b09cc0371fee4cd31"]
+  },
+  "contract": {
+    "revision": "contract@1",
+    "fingerprint": "sha256:ec042e8d1831340eab73dd30a68737528b8c3fe244cf7f4fa17ba3f54ba04ceb"
+  },
+  "oracles": [
+    {
+      "id": "O-SLUG-UNIT",
+      "revision": "tests@1",
+      "fingerprint": "sha256:1646cad3ad0a2ea38dd4862a0a6ea890c11afe457d5d4d4d4cf483e06756de30",
+      "qualified": true,
+      "known_bad_rejections": ["D-REPEATED-SEPARATOR"],
+      "no_change_trials": 1,
+      "flake_rate": 0.0
+    }
+  ],
+  "fixtures": [
+    {
+      "name": "slug cases",
+      "fingerprint": "sha256:655bc2f4ba777e13e8178a723608b28a62e953fc6135c4bd2514d0854a6cb754"
+    }
+  ],
+  "environment": {
+    "digest": "sha256:c5481f9fc752a1a10851a01e5e04edd26607791c77b428feaaa81bcfabe8e0d5",
+    "details": {
+      "python": "3.12",
+      "os": "linux-x86_64"
+    }
+  },
+  "test_discovery": {
+    "manifest_digest": "sha256:8147e2b7a3c327745503bff1f5b07229c3a7eb379bc3ead6ff9132f2501583f4",
+    "expected": 6,
+    "discovered": 6,
+    "executed": 6,
+    "skipped": [],
+    "approved_skips": [],
+    "shards": [
+      {
+        "id": "all",
+        "discovered": 6,
+        "executed": 6,
+        "skipped": []
+      }
+    ]
+  },
+  "commands": [
+    {
+      "id": "Q-GOOD",
+      "command": "python -m unittest tests.test_slugify_reference",
+      "exit_code": 0,
+      "result": "pass",
+      "artifact_refs": []
+    },
+    {
+      "id": "Q-BAD",
+      "command": "python tools/run_slug_mutant.py non_collapsing",
+      "exit_code": 1,
+      "result": "expected_reject",
+      "claim_ids": [],
+      "defeater_ids": ["D-REPEATED-SEPARATOR"],
+      "artifact_refs": ["D-REPEATED-SEPARATOR"]
+    },
+    {
+      "id": "Q-RESTORE",
+      "command": "python -m unittest tests.test_slugify_reference --after-restore",
+      "exit_code": 0,
+      "result": "pass",
+      "artifact_refs": ["restore.log"]
+    },
+    {
+      "id": "Q-STABILITY",
+      "command": "python -m unittest tests.test_slugify_reference",
+      "exit_code": 0,
+      "result": "pass",
+      "artifact_refs": ["stability.log"]
+    },
+    {
+      "id": "BASE-RED",
+      "command": "python -m unittest tests.test_slugify.TestSlugify.test_collapses_runs",
+      "exit_code": 1,
+      "result": "expected_reject",
+      "artifact_refs": ["semantic-red.log"]
+    },
+    {
+      "id": "FOCUSED",
+      "command": "python -m unittest tests.test_slugify",
+      "exit_code": 0,
+      "result": "pass",
+      "claim_ids": ["C-SLUG"],
+      "defeater_ids": ["D-REPEATED-SEPARATOR"],
+      "artifact_refs": ["focused.xml"]
+    },
+    {
+      "id": "BROAD",
+      "command": "python -m unittest",
+      "exit_code": 0,
+      "result": "pass",
+      "claim_ids": ["C-SLUG"],
+      "defeater_ids": [],
+      "artifact_refs": ["regression.xml"]
+    }
+  ],
+  "claim_results": [
+    {
+      "claim_id": "C-SLUG",
+      "status": "confirmed",
+      "evidence_refs": ["FOCUSED", "BROAD"]
+    }
+  ],
+  "defeater_results": [
+    {
+      "defeater_id": "D-REPEATED-SEPARATOR",
+      "status": "eliminated",
+      "evidence_refs": ["Q-BAD", "FOCUSED"]
+    }
+  ],
+  "mode_evidence": {
+    "semantic_red_command": "BASE-RED",
+    "focused_green_commands": ["FOCUSED"],
+    "boundary_commands": ["BROAD"]
+  },
+  "forbidden_scope_diff": [],
+  "residual_risks": [],
+  "invalidation_events": [],
+  "issued_by": {
+    "identity": "ci-light-gate",
+    "role": "acceptor",
+    "independent_from_candidate": true
+  },
+  "merge": {
+    "integration_passed": true,
+    "cutover_complete": null,
+    "rollback_exercised": false
+  },
+  "release": {
+    "canary_or_shadow": null,
+    "thresholds_passed": null,
+    "rollback_trigger": null,
+    "release_owner": null
+  },
+  "runtime_feedback": {
+    "counterexamples_added": [],
+    "open_incidents": []
+  },
+  "retained_at": "artifacts/vdd/A-SLUG-001.json",
+  "issued_at": "2026-07-15T00:00:00Z"
+}

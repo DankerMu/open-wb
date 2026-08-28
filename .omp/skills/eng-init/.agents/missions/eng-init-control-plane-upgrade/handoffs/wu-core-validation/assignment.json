@@ -1,0 +1,31 @@
+{
+  "workUnitId": "wu-core-validation",
+  "assignmentId": "assignment-wu-core-validation",
+  "runId": "agent-run-1-wu-core-validation",
+  "kind": "validation",
+  "title": "Validate core upgrade file evidence",
+  "milestoneId": "ms-64efcdd7",
+  "dependencies": [
+    "wu-core-review"
+  ],
+  "writeScope": [],
+  "fulfills": [],
+  "dispatchedAt": "2026-07-02T18:37:42.125Z",
+  "workUnit": {
+    "workUnitId": "wu-core-validation",
+    "kind": "validation",
+    "title": "Validate core upgrade file evidence",
+    "milestoneId": "ms-64efcdd7",
+    "dependencies": [
+      "wu-core-review"
+    ],
+    "writeScope": [],
+    "fulfills": []
+  },
+  "assertions": [],
+  "validation": {
+    "steps": [],
+    "evidenceRequirements": []
+  },
+  "handoffPath": "handoffs/wu-core-validation/handoff.json"
+}

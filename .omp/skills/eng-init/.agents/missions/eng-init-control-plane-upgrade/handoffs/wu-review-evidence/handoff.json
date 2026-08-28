@@ -1,0 +1,104 @@
+{
+  "workUnitId": "wu-review-evidence",
+  "assignmentId": "assignment-wu-review-evidence",
+  "workerSessionId": "wu-review-evidence-session",
+  "actorId": "MainEvidence",
+  "summary": "Independent review evidence recorded.",
+  "outcome": "completed",
+  "changedFiles": [],
+  "startup": {
+    "contextFilesRead": [
+      "mission.md",
+      "AGENTS.md",
+      "requirements.json",
+      "validation-contract.md"
+    ],
+    "assignmentRead": true,
+    "assertionsLoaded": [
+      "VAL-REVIEW-001"
+    ],
+    "preconditionsChecked": [
+      "evidence exists"
+    ],
+    "baselineValidation": {
+      "command": "file inspection baseline",
+      "exitCode": 0,
+      "startedAt": "2026-07-02T18:41:23Z",
+      "finishedAt": "2026-07-02T18:41:23Z",
+      "evidenceFile": {
+        "kind": "validation-log",
+        "path": ".agents/evidence/wu-review-evidence-evidence.log",
+        "sha256": "77e18451df20b419acb6fa3fa7c6ae1ced655088a984e41791ca354532befcf3",
+        "command": "file inspection"
+      }
+    }
+  },
+  "validationRuns": [
+    {
+      "command": "file inspection",
+      "exitCode": 0,
+      "startedAt": "2026-07-02T18:41:23Z",
+      "finishedAt": "2026-07-02T18:41:23Z",
+      "evidenceFile": {
+        "kind": "validation-log",
+        "path": ".agents/evidence/wu-review-evidence-evidence.log",
+        "sha256": "77e18451df20b419acb6fa3fa7c6ae1ced655088a984e41791ca354532befcf3",
+        "command": "file inspection"
+      }
+    }
+  ],
+  "openIssues": [],
+  "evidence": [
+    {
+      "kind": "validation-log",
+      "path": ".agents/evidence/wu-review-evidence-evidence.log",
+      "sha256": "77e18451df20b419acb6fa3fa7c6ae1ced655088a984e41791ca354532befcf3",
+      "command": "file inspection"
+    }
+  ],
+  "evidenceFiles": [
+    {
+      "kind": "validation-log",
+      "path": ".agents/evidence/wu-review-evidence-evidence.log",
+      "sha256": "77e18451df20b419acb6fa3fa7c6ae1ced655088a984e41791ca354532befcf3",
+      "command": "file inspection"
+    }
+  ],
+  "assertionEvidence": [
+    {
+      "assertionId": "VAL-REVIEW-001",
+      "verdict": "passed",
+      "surface": "cli",
+      "evidenceSource": "fixture",
+      "toolUsed": "file inspection",
+      "evidenceKindsCaptured": [
+        "command",
+        "stdout",
+        "stderr",
+        "exit-code"
+      ],
+      "evidenceFiles": [
+        {
+          "kind": "validation-log",
+          "path": ".agents/evidence/wu-review-evidence-evidence.log",
+          "sha256": "77e18451df20b419acb6fa3fa7c6ae1ced655088a984e41791ca354532befcf3",
+          "command": "file inspection"
+        }
+      ]
+    }
+  ],
+  "cleanup": {
+    "servicesStarted": [],
+    "servicesStopped": [],
+    "tempFilesRemoved": [],
+    "orphanedProcesses": []
+  },
+  "procedureFeedback": {
+    "followedProcedure": true,
+    "deviations": [],
+    "suggestedChanges": []
+  },
+  "discoveredIssues": [],
+  "whatWasLeftUndone": [],
+  "needsReplan": false
+}

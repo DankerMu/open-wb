@@ -1,0 +1,77 @@
+{
+  "workUnitId": "wu-post-review-ms-29f2716a",
+  "assignmentId": "assignment-wu-post-review-ms-29f2716a",
+  "workerSessionId": "wu-post-review-ms-29f2716a-session",
+  "actorId": "MainFinal",
+  "summary": "post-mission review",
+  "outcome": "completed",
+  "changedFiles": [],
+  "startup": {
+    "contextFilesRead": [
+      "mission.md"
+    ],
+    "assignmentRead": true,
+    "assertionsLoaded": [],
+    "preconditionsChecked": [
+      "final evidence exists"
+    ],
+    "baselineValidation": {
+      "command": "post-mission review",
+      "exitCode": 0,
+      "startedAt": "2026-07-02T18:44:42Z",
+      "finishedAt": "2026-07-02T18:44:42Z",
+      "evidenceFile": {
+        "kind": "validation-log",
+        "path": ".agents/evidence/wu-post-review-ms-29f2716a-evidence.log",
+        "sha256": "d9bdf919e719323b845bc7b265984471a72a238de415c20eaeb24538739124ea",
+        "command": "post-mission review"
+      }
+    }
+  },
+  "validationRuns": [
+    {
+      "command": "post-mission review",
+      "exitCode": 0,
+      "startedAt": "2026-07-02T18:44:42Z",
+      "finishedAt": "2026-07-02T18:44:42Z",
+      "evidenceFile": {
+        "kind": "validation-log",
+        "path": ".agents/evidence/wu-post-review-ms-29f2716a-evidence.log",
+        "sha256": "d9bdf919e719323b845bc7b265984471a72a238de415c20eaeb24538739124ea",
+        "command": "post-mission review"
+      }
+    }
+  ],
+  "openIssues": [],
+  "evidence": [
+    {
+      "kind": "validation-log",
+      "path": ".agents/evidence/wu-post-review-ms-29f2716a-evidence.log",
+      "sha256": "d9bdf919e719323b845bc7b265984471a72a238de415c20eaeb24538739124ea",
+      "command": "post-mission review"
+    }
+  ],
+  "evidenceFiles": [
+    {
+      "kind": "validation-log",
+      "path": ".agents/evidence/wu-post-review-ms-29f2716a-evidence.log",
+      "sha256": "d9bdf919e719323b845bc7b265984471a72a238de415c20eaeb24538739124ea",
+      "command": "post-mission review"
+    }
+  ],
+  "assertionEvidence": [],
+  "cleanup": {
+    "servicesStarted": [],
+    "servicesStopped": [],
+    "tempFilesRemoved": [],
+    "orphanedProcesses": []
+  },
+  "procedureFeedback": {
+    "followedProcedure": true,
+    "deviations": [],
+    "suggestedChanges": []
+  },
+  "discoveredIssues": [],
+  "whatWasLeftUndone": [],
+  "needsReplan": false
+}

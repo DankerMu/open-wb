@@ -1,0 +1,1 @@
+evals/cases.md contains cases 28-32 for signal repair, no-report repair, all-passing noop, monorepo denominators, and metric-gaming rejection.

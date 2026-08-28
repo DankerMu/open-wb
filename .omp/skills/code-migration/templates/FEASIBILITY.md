@@ -1,0 +1,22 @@
+# Migration Feasibility
+
+- Migration ID:
+- Date and owner:
+- Source authority and immutable revision:
+- Target stack/runtime/version:
+- Selected route:
+- Scope / exclusions / external consumers:
+- Inbound consumer decisions (per external consumer: `multi-target | expand-scope | accept-break`):
+- Build and test census:
+- CI/build definition read (path and what it revealed):
+- Escalating smoke result (one file compiles → one real unit builds the way CI does):
+- Reference execution viability:
+- Candidate public/system oracle and known-bad discrimination plan:
+- Source inventory approach and protected scanner owner:
+- Major semantic/platform gaps:
+- Cutover and rollback feasibility:
+- Scale band and representative pilot candidates:
+- Model tier plan (binds every later phase; tier by blast radius):
+- Banded cost estimate, shown as a visible multiplication:
+- Verdict: `proceed | defer | do-not-proceed`
+- Approval / decision that could change this verdict:

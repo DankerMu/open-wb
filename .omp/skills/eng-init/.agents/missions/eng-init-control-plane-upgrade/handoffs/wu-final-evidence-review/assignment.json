@@ -1,0 +1,31 @@
+{
+  "workUnitId": "wu-final-evidence-review",
+  "assignmentId": "assignment-wu-final-evidence-review",
+  "runId": "workflow-run-1-wu-final-evidence-review",
+  "kind": "review",
+  "title": "Final evidence review",
+  "milestoneId": "ms-29f2716a",
+  "dependencies": [
+    "wu-final-evidence"
+  ],
+  "writeScope": [],
+  "fulfills": [],
+  "dispatchedAt": "2026-07-02T18:42:40.547Z",
+  "workUnit": {
+    "workUnitId": "wu-final-evidence-review",
+    "kind": "review",
+    "title": "Final evidence review",
+    "milestoneId": "ms-29f2716a",
+    "dependencies": [
+      "wu-final-evidence"
+    ],
+    "writeScope": [],
+    "fulfills": []
+  },
+  "assertions": [],
+  "validation": {
+    "steps": [],
+    "evidenceRequirements": []
+  },
+  "handoffPath": "handoffs/wu-final-evidence-review/handoff.json"
+}

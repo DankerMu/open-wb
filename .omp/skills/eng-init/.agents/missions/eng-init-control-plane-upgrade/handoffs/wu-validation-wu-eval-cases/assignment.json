@@ -1,0 +1,77 @@
+{
+  "workUnitId": "wu-validation-wu-eval-cases",
+  "assignmentId": "assignment-wu-validation-wu-eval-cases",
+  "runId": "workflow-run-5-wu-validation-wu-eval-cases",
+  "kind": "validation",
+  "title": "Validate Add lifecycle regression eval cases",
+  "milestoneId": "ms-64efcdd7",
+  "dependencies": [
+    "wu-eval-cases"
+  ],
+  "writeScope": [],
+  "fulfills": [],
+  "dispatchedAt": "2026-07-02T18:33:12.576Z",
+  "workUnit": {
+    "workUnitId": "wu-validation-wu-eval-cases",
+    "parentId": "wu-eval-cases",
+    "kind": "validation",
+    "title": "Validate Add lifecycle regression eval cases",
+    "milestoneId": "ms-64efcdd7",
+    "dependencies": [
+      "wu-eval-cases"
+    ],
+    "writeScope": [],
+    "fulfills": [],
+    "assertionScopeIds": [
+      "VAL-EVAL-001"
+    ],
+    "systemPurpose": "deliverable-validation"
+  },
+  "assertions": [
+    {
+      "assertionId": "VAL-EVAL-001",
+      "milestoneId": "ms-64efcdd7",
+      "title": "Regression eval coverage exists",
+      "description": "Eval cases include the new lifecycle coverage specified by the spec.",
+      "surface": "cli",
+      "requiredStrength": "fixture",
+      "tool": "file inspection",
+      "passCriteria": "cases.md includes five new observable cases and existing cases are preserved.",
+      "failCriteria": "New cases missing, subjective-only, or existing cases weakened/deleted.",
+      "requiredEvidence": [
+        "file-path",
+        "excerpt",
+        "exit-code"
+      ],
+      "proofCutoffSequence": 6
+    }
+  ],
+  "validation": {
+    "steps": [
+      {
+        "assertionId": "VAL-EVAL-001",
+        "title": "Regression eval coverage exists",
+        "surface": "cli",
+        "description": "Eval cases include the new lifecycle coverage specified by the spec.",
+        "tool": "file inspection",
+        "passCriteria": "cases.md includes five new observable cases and existing cases are preserved.",
+        "failCriteria": "New cases missing, subjective-only, or existing cases weakened/deleted."
+      }
+    ],
+    "evidenceRequirements": [
+      {
+        "assertionId": "VAL-EVAL-001",
+        "tool": "file inspection",
+        "evidenceSource": "fixture",
+        "requiredEvidence": [
+          "file-path",
+          "excerpt",
+          "exit-code"
+        ],
+        "evidencePathRequired": true,
+        "sha256Required": true
+      }
+    ]
+  },
+  "handoffPath": "handoffs/wu-validation-wu-eval-cases/handoff.json"
+}

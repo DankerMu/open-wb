@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "name": "eng-init",
+  "displayName": "Eng Init",
+  "description": "Agent Engineering Readiness Control Plane — establishes, audits, repairs, and maintains the repo-local agent control plane for safe AI-agent work. Use whenever the user wants to bootstrap a new project, harden a repo for AI-agent work, set up AGENTS.md, create CONTEXT.md, establish unified dev commands, add tests/lint/CI/pre-commit guardrails, audit agent readiness, repair failing readiness signals, install a refactor harness, or prevent AI-coding drift (_v1/_v2 files, scratchpad bloat, dead code). Also governs verification tiers (snapshot replay, built-artifact smokes, per-file coverage), decision-record/agent-notes operational lifecycles (proposed/implemented/rejected/archived, archive freeze), documentation discipline (doc gates, Known Limitations, generated catalogs), and agent-harness architecture clauses (model-visible ⟺ logged, runtime invariant companions). Trigger phrases include \"initialize project\", \"set up AGENTS.md\", \"bootstrap this repo\", \"engineering setup\", \"agent-ready repo\", \"audit agent readiness\", \"fix readiness\", \"repair lint/tests/guardrails\", \"refactor harness\", \"create CONTEXT.md\", \"工程初始化\", \"项目初始化\", \"仓库约束\", \"AI 就绪检查\", \"文档纪律\", \"决策记录\", \"agent notes\", \"验证分层\", \"stop the v2 file problem\". Produces the hot-path AGENTS.md interface, CONTEXT.md, command entrypoints, validation baseline, readiness report/repair evidence, and mechanical guardrails.",
+  "version": "3.5.8",
+  "maturity": "experimental",
+  "categories": [
+    "devops",
+    "workflow"
+  ],
+  "tags": [
+    "bootstrap",
+    "control-plane",
+    "guardrails",
+    "readiness",
+    "user-invoked"
+  ],
+  "authors": [
+    {
+      "name": "danker"
+    }
+  ],
+  "license": "MIT",
+  "entrypoints": {
+    "skillDoc": "SKILL.md",
+    "changelog": "CHANGELOG.md"
+  }
+}

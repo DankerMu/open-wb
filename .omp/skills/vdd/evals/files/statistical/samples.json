@@ -1,0 +1,9 @@
+{
+  "metric": "requests_per_second",
+  "direction": "higher",
+  "minimum_meaningful_improvement_percent": 5.0,
+  "baseline": [1000, 1035, 980, 1015, 995, 1040, 970, 1020, 1005, 990],
+  "candidate": [1010, 1045, 985, 1025, 1000, 1030, 975, 1035, 1015, 995],
+  "environment": "same host and workload",
+  "semantic_gate": "pass"
+}

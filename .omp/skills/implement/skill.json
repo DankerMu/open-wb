@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "name": "implement",
+  "displayName": "Implement",
+  "description": "Implement a piece of work based on a spec or set of tickets.",
+  "version": "0.1.0",
+  "maturity": "experimental",
+  "categories": [
+    "coding",
+    "workflow"
+  ],
+  "tags": [
+    "implementation",
+    "spec-driven",
+    "user-invoked"
+  ],
+  "authors": [
+    {
+      "name": "danker"
+    }
+  ],
+  "license": "MIT",
+  "entrypoints": {
+    "skillDoc": "SKILL.md",
+    "changelog": "CHANGELOG.md"
+  }
+}

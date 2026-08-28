@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eng-init.local/readiness-repair-schema.json",
+  "title": "eng-init readiness repair handoff",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "requested_signal",
+    "matched_criterion",
+    "pre_state",
+    "fixability",
+    "allowed_files",
+    "validator",
+    "post_state",
+    "decision"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "requested_signal": { "type": "string" },
+    "matched_criterion": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+    "semantic_match_evidence": { "type": "string" },
+    "pre_state": {
+      "type": "object",
+      "required": ["status", "score", "evidence"],
+      "properties": {
+        "status": { "enum": ["passing", "failing", "partial", "missing", "unknown"] },
+        "score": { "type": ["number", "null"] },
+        "evidence": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "fixability": { "enum": ["A", "B", "C", "D", "A_or_C", "B_or_C"] },
+    "allowed_files": { "type": "array", "items": { "type": "string" } },
+    "change_summary": { "type": "string" },
+    "validator": {
+      "type": "object",
+      "required": ["command", "exit_code", "evidence"],
+      "properties": {
+        "command": { "type": "string" },
+        "exit_code": { "type": ["integer", "null"] },
+        "evidence": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "post_state": {
+      "type": "object",
+      "required": ["status", "score", "rescore_evidence"],
+      "properties": {
+        "status": { "enum": ["passing", "failing", "partial", "skipped", "pending_external"] },
+        "score": { "type": ["number", "null"] },
+        "rescore_evidence": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "decision": { "enum": ["repaired", "no_op_already_passing", "blocked_missing_prerequisite", "pending_external", "not_locally_fixable"] },
+    "metric_gaming_rejected": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

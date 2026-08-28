@@ -1,0 +1,129 @@
+{
+  "workUnitId": "wu-report-repair-refs",
+  "assignmentId": "assignment-wu-report-repair-refs",
+  "workerSessionId": "ReportRepairRefs-session",
+  "actorId": "ReportRepairRefs",
+  "summary": "Updated readiness report lifecycle and created repair recipes.",
+  "outcome": "completed",
+  "changedFiles": [
+    "references/agent-readiness-criteria.md",
+    "references/readiness-fix-recipes.md"
+  ],
+  "startup": {
+    "contextFilesRead": [
+      "mission.md",
+      "AGENTS.md",
+      "requirements.json",
+      "validation-contract.md",
+      "features.json"
+    ],
+    "assignmentRead": true,
+    "assertionsLoaded": [
+      "VAL-REPORT-001",
+      "VAL-REPAIR-001"
+    ],
+    "preconditionsChecked": [
+      "Allowed scope verified",
+      "Spec reviewed"
+    ],
+    "baselineValidation": {
+      "command": "file inspection baseline",
+      "exitCode": 0,
+      "startedAt": "2026-07-02T17:37:00Z",
+      "finishedAt": "2026-07-02T17:37:00Z",
+      "evidenceFile": {
+        "kind": "validation-log",
+        "path": ".agents/evidence/wu-report-repair-refs-evidence.log",
+        "sha256": "74100a730875886e79af997db3ec85e7c6a1db51609ca83832aba713b6180e90",
+        "command": "file inspection"
+      }
+    }
+  },
+  "validationRuns": [
+    {
+      "command": "file inspection",
+      "exitCode": 0,
+      "startedAt": "2026-07-02T17:37:00Z",
+      "finishedAt": "2026-07-02T17:37:00Z",
+      "evidenceFile": {
+        "kind": "validation-log",
+        "path": ".agents/evidence/wu-report-repair-refs-evidence.log",
+        "sha256": "74100a730875886e79af997db3ec85e7c6a1db51609ca83832aba713b6180e90",
+        "command": "file inspection"
+      }
+    }
+  ],
+  "openIssues": [],
+  "evidence": [
+    {
+      "kind": "validation-log",
+      "path": ".agents/evidence/wu-report-repair-refs-evidence.log",
+      "sha256": "74100a730875886e79af997db3ec85e7c6a1db51609ca83832aba713b6180e90",
+      "command": "file inspection"
+    }
+  ],
+  "evidenceFiles": [
+    {
+      "kind": "validation-log",
+      "path": ".agents/evidence/wu-report-repair-refs-evidence.log",
+      "sha256": "74100a730875886e79af997db3ec85e7c6a1db51609ca83832aba713b6180e90",
+      "command": "file inspection"
+    }
+  ],
+  "assertionEvidence": [
+    {
+      "assertionId": "VAL-REPORT-001",
+      "verdict": "passed",
+      "surface": "cli",
+      "evidenceSource": "fixture",
+      "toolUsed": "file inspection",
+      "evidenceKindsCaptured": [
+        "file-path",
+        "excerpt",
+        "exit-code"
+      ],
+      "evidenceFiles": [
+        {
+          "kind": "validation-log",
+          "path": ".agents/evidence/wu-report-repair-refs-evidence.log",
+          "sha256": "74100a730875886e79af997db3ec85e7c6a1db51609ca83832aba713b6180e90",
+          "command": "file inspection"
+        }
+      ]
+    },
+    {
+      "assertionId": "VAL-REPAIR-001",
+      "verdict": "passed",
+      "surface": "cli",
+      "evidenceSource": "fixture",
+      "toolUsed": "file inspection",
+      "evidenceKindsCaptured": [
+        "file-path",
+        "excerpt",
+        "exit-code"
+      ],
+      "evidenceFiles": [
+        {
+          "kind": "validation-log",
+          "path": ".agents/evidence/wu-report-repair-refs-evidence.log",
+          "sha256": "74100a730875886e79af997db3ec85e7c6a1db51609ca83832aba713b6180e90",
+          "command": "file inspection"
+        }
+      ]
+    }
+  ],
+  "cleanup": {
+    "servicesStarted": [],
+    "servicesStopped": [],
+    "tempFilesRemoved": [],
+    "orphanedProcesses": []
+  },
+  "procedureFeedback": {
+    "followedProcedure": true,
+    "deviations": [],
+    "suggestedChanges": []
+  },
+  "discoveredIssues": [],
+  "whatWasLeftUndone": [],
+  "needsReplan": false
+}

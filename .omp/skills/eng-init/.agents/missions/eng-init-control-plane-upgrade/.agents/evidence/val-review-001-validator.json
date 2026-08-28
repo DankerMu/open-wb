@@ -1,0 +1,30 @@
+{
+  "assertionId": "VAL-REVIEW-001",
+  "validatorId": "engineering-val-review-001-v1",
+  "validatorType": "engineering",
+  "verdict": "confirmed",
+  "summary": "Independent review returned [] and no remediation was required.",
+  "evidenceSource": "fixture",
+  "evidence": [
+    {
+      "path": ".agents/evidence/validators/val-review-001/command.txt",
+      "sha256": "de10bda2863f5f44f6595f841167c0fa97908a11118b980e7266e85b05a4a0b4",
+      "kind": "command"
+    },
+    {
+      "path": ".agents/evidence/validators/val-review-001/stdout.txt",
+      "sha256": "dcd5617beb088e1c9aa1cb9462732219d729702aebd8bb4b6a582c38d81219d6",
+      "kind": "stdout"
+    },
+    {
+      "path": ".agents/evidence/validators/val-review-001/stderr.txt",
+      "sha256": "49bcd89450886745b5dbef363f5855d3afa7a0e9229b4b7229b1e98b717e013f",
+      "kind": "stderr"
+    },
+    {
+      "path": ".agents/evidence/validators/val-review-001/exit-code.txt",
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "kind": "exit-code"
+    }
+  ]
+}

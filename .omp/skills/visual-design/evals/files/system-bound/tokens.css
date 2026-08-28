@@ -1,0 +1,19 @@
+:root {
+  --qs-bg: oklch(97% 0.006 250);
+  --qs-surface: oklch(100% 0 0);
+  --qs-surface-muted: oklch(95% 0.008 250);
+  --qs-fg: oklch(22% 0.018 250);
+  --qs-muted: oklch(52% 0.014 250);
+  --qs-border: oklch(88% 0.008 250);
+  --qs-info: oklch(58% 0.15 250);
+  --qs-danger: oklch(56% 0.18 25);
+  --qs-success: oklch(55% 0.14 150);
+  --qs-focus: oklch(62% 0.17 250);
+  --qs-radius: 4px;
+  --qs-sidebar: 56px;
+  --qs-topbar: 48px;
+  --qs-control: 32px;
+  --qs-fast: 160ms;
+  --qs-font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --qs-font-mono: "SFMono-Regular", Consolas, monospace;
+}

@@ -1,0 +1,1580 @@
+{
+  "_comment": "Skill-owned content invariants. Every mechanically checkable promise in SKILL.md/references gets an assertion here; scripts/check_skill_content.py exits non-zero when one breaks. Paths are relative to the skill root.",
+  "cases": [
+    {
+      "id": "R1-ci-aggregator",
+      "desc": "P0-1: CI template gains all-checks-passed aggregator with if:always(); criterion registered; eval case-35",
+      "checks": [
+        {
+          "file": "references/aux-file-templates.md",
+          "type": "contains",
+          "pattern": "all-checks-passed"
+        },
+        {
+          "file": "references/aux-file-templates.md",
+          "type": "contains",
+          "pattern": "if: always()"
+        },
+        {
+          "file": "references/aux-file-templates.md",
+          "type": "regex",
+          "pattern": "skipped.*required check|required check.*skipped",
+          "flags": "i"
+        },
+        {
+          "file": "references/agent-readiness-criteria.md",
+          "type": "contains",
+          "pattern": "ci_aggregator_gate"
+        },
+        {
+          "file": "references/readiness-registry.yaml",
+          "type": "contains",
+          "pattern": "ci_aggregator_gate"
+        },
+        {
+          "file": "evals/cases.md",
+          "type": "regex",
+          "pattern": "^## case-35 .*aggregator",
+          "flags": "i"
+        }
+      ]
+    },
+    {
+      "id": "R2-self-skip-family",
+      "desc": "P0-2: secret preflight template + self-skip anti-pattern + eval case-36",
+      "checks": [
+        {
+          "file": "references/agent-harness-templates.md",
+          "type": "regex",
+          "pattern": "Secret preflight",
+          "flags": "i"
+        },
+        {
+          "file": "references/agent-harness-templates.md",
+          "type": "contains",
+          "pattern": "::error::"
+        },
+        {
+          "file": "SKILL.md",
+          "type": "regex",
+          "pattern": "self-skip",
+          "flags": "i"
+        },
+        {
+          "file": "evals/cases.md",
+          "type": "regex",
+          "pattern": "^## case-36 .*preflight",
+          "flags": "i"
+        }
+      ]
+    },
+    {
+      "id": "R3-perfile-coverage",
+      "desc": "P0-3: per-file coverage at L3/L4 + uncovered-line-is-dead-code reframing + exemption exit_condition + eval case-37",
+      "checks": [
+        {
+          "file": "references/agents-md-sections.md",
+          "type": "regex",
+          "pattern": "per-file",
+          "flags": "i"
+        },
+        {
+          "file": "references/agents-md-sections.md",
+          "type": "regex",
+          "pattern": "dead code",
+          "flags": "i"
+        },
+        {
+          "file": "references/constraints-yaml-template.md",
+          "type": "contains",
+          "pattern": "exit_condition"
+        },
+        {
+          "file": "references/aux-file-templates.md",
+          "type": "contains",
+          "pattern": "perFile"
+        },
+        {
+          "file": "evals/cases.md",
+          "type": "regex",
+          "pattern": "^## case-37 .*(per-file|coverage)",
+          "flags": "i"
+        }
+      ]
+    },
+    {
+      "id": "R4-anticheat-normalizer-ci-snapshot",
+      "desc": "P0-4: normalizer-growth ban + CI read-only snapshot rule in anti-patterns and refactor contract + eval case-38",
+      "checks": [
+        {
+          "file": "SKILL.md",
+          "type": "regex",
+          "pattern": "normalizer",
+          "flags": "i"
+        },
+        {
+          "file": "references/agents-md-sections.md",
+          "type": "regex",
+          "pattern": "fix fixtures.*not.*normalizer|normalizer",
+          "flags": "i"
+        },
+        {
+          "file": "references/agents-md-sections.md",
+          "type": "regex",
+          "pattern": "CI.*(read-only|never (writes|updates))",
+          "flags": "i"
+        },
+        {
+          "file": "evals/cases.md",
+          "type": "regex",
+          "pattern": "^## case-38 .*normalizer",
+          "flags": "i"
+        }
+      ]
+    },
+    {
+      "id": "R5-world-verification",
+      "desc": "P0-5: verify-the-world evidence rule for agent-built behavior + eval case-39",
+      "checks": [
+        {
+          "file": "references/agents-md-sections.md",
+          "type": "regex",
+          "pattern": "self-report",
+          "flags": "i"
+        },
+        {
+          "file": "references/agents-md-sections.md",
+          "type": "regex",
+          "pattern": "re-(run|execute|read)|observe the world|external",
+          "flags": "i"
+        },
+        {
+          "file": "evals/cases.md",
+          "type": "regex",
+          "pattern": "^## case-39 .*(world|self-report)",
+          "flags": "i"
+        }
+      ]
+    },
+    {
+      "id": "R6-todo-grades",
+      "desc": "P0-6: FIXME/TODO/XXX graded urgency semantics in Conventions",
+      "checks": [
+        {
+          "file": "references/agents-md-sections.md",
+          "type": "regex",
+          "pattern": "FIXME.*release|release.*FIXME",
+          "flags": "i"
+        },
+        {
+          "file": "references/agents-md-sections.md",
+          "type": "contains",
+          "pattern": "XXX"
+        }
+      ]
+    },
+    {
+      "id": "R7-generated-docs-strong-freshness",
+      "desc": "P1-7: generator + --check derivation-equality criterion; weak-mtime caveat",
+      "checks": [
+        {
+          "file": "references/agent-readiness-criteria.md",
+          "type": "contains",
+          "pattern": "generated_docs_check_mode"
+        },
+        {
+          "file": "references/readiness-registry.yaml",
+          "type": "contains",
+          "pattern": "generated_docs_check_mode"
+        },
+        {
+          "file": "references/agent-harness-templates.md",
+          "type": "regex",
+          "pattern": "--check",
+          "flags": ""
+        }
+      ]
+    },
+    {
+      "id": "R9-evidence-matches-surface",
+      "desc": "P1-9: change-type-to-narrowest-evidence map + deterministic change-scope guidance",
+      "checks": [
+        {
+          "file": "references/agents-md-sections.md",
+          "type": "regex",
+          "pattern": "narrowest",
+          "flags": "i"
+        },
+        {
+          "file": "references/agents-md-sections.md",
+          "type": "regex",
+          "pattern": "never.*(rerun|re-run|full suite)|full suite",
+          "flags": "i"
+        },
+        {
+          "file": "references/agent-harness-templates.md",
+          "type": "regex",
+          "pattern": "change.?scope",
+          "flags": "i"
+        }
+      ]
+    },
+    {
+      "id": "R10-explained-absence",
+      "desc": "P1-10: mandatory presence or mandatory justified absence as guardrail design principle",
+      "checks": [
+        {
+          "file": "references/eng-pillars.md",
+          "type": "regex",
+          "pattern": "justified absence",
+          "flags": "i"
+        }
+      ]
+    },
+    {
+      "id": "R11-self-terminating-policy",
+      "desc": "P1-11: temporary rules must embed their removal trigger + eval case-40",
+      "checks": [
+        {
+          "file": "references/agents-md-sections.md",
+          "type": "regex",
+          "pattern": "removal (trigger|condition)",
+          "flags": "i"
+        },
+        {
+          "file": "SKILL.md",
+          "type": "regex",
+          "pattern": "removal (trigger|condition)|self-terminat",
+          "flags": "i"
+        },
+        {
+          "file": "evals/cases.md",
+          "type": "regex",
+          "pattern": "^## case-40 .*(self-terminat|temporary)",
+          "flags": "i"
+        }
+      ]
+    },
+    {
+      "id": "R12-blind-spot-declaration",
+      "desc": "P1-12: Enforcement Index rows may declare blind spots handed to review",
+      "checks": [
+        {
+          "file": "references/agents-md-sections.md",
+          "type": "regex",
+          "pattern": "blind spot",
+          "flags": "i"
+        }
+      ]
+    },
+    {
+      "id": "R13-decision-records",
+      "desc": "P1-13: optional decision-record module for L3+/multi-agent with mandatory alternatives-considered",
+      "checks": [
+        {
+          "file": "references/question-bank.md",
+          "type": "regex",
+          "pattern": "decision record",
+          "flags": "i"
+        },
+        {
+          "file": "references/aux-file-templates.md",
+          "type": "contains",
+          "pattern": "Alternatives considered"
+        }
+      ]
+    },
+    {
+      "id": "R21-evidence-provenance",
+      "desc": "P1-21: runtime evidence carries provenance; binary media on orphan assets branch + eval case-41",
+      "checks": [
+        {
+          "file": "references/aux-file-templates.md",
+          "type": "regex",
+          "pattern": "provenance",
+          "flags": "i"
+        },
+        {
+          "file": "references/aux-file-templates.md",
+          "type": "regex",
+          "pattern": "orphan.*branch|assets branch",
+          "flags": "i"
+        },
+        {
+          "file": "evals/cases.md",
+          "type": "regex",
+          "pattern": "^## case-41 .*provenance",
+          "flags": "i"
+        }
+      ]
+    },
+    {
+      "id": "R22-trust-but-verify",
+      "desc": "P1-22: delegated-fix verification protocol in large-refactor roles + eval case-42",
+      "checks": [
+        {
+          "file": "references/agents-md-sections.md",
+          "type": "regex",
+          "pattern": "intent, not",
+          "flags": "i"
+        },
+        {
+          "file": "references/agents-md-sections.md",
+          "type": "regex",
+          "pattern": "(re-run|rerun).*(gate|check)s? yourself|prove.*fail",
+          "flags": "i"
+        },
+        {
+          "file": "evals/cases.md",
+          "type": "regex",
+          "pattern": "^## case-42 .*(trust|verify)",
+          "flags": "i"
+        }
+      ]
+    },
+    {
+      "id": "R25-misconfig-fails-loud",
+      "desc": "P1-25: misconfiguration fails loud universal rule + eval case-43",
+      "checks": [
+        {
+          "file": "references/lang-constraints.md",
+          "type": "regex",
+          "pattern": "fails? loud",
+          "flags": "i"
+        },
+        {
+          "file": "references/lang-constraints.md",
+          "type": "regex",
+          "pattern": "silent(ly)? (no-op|skip)",
+          "flags": "i"
+        },
+        {
+          "file": "evals/cases.md",
+          "type": "regex",
+          "pattern": "^## case-43 .*(misconfig|fails.loud)",
+          "flags": "i"
+        }
+      ]
+    },
+    {
+      "id": "R27-minimal-churn-fixture-guards",
+      "desc": "P1-27: minimal-churn snapshot design + fixture guards in Pillar 4",
+      "checks": [
+        {
+          "file": "references/eng-pillars.md",
+          "type": "regex",
+          "pattern": "churn",
+          "flags": "i"
+        },
+        {
+          "file": "references/eng-pillars.md",
+          "type": "regex",
+          "pattern": "fixture guard|guards? its own inputs",
+          "flags": "i"
+        }
+      ]
+    },
+    {
+      "id": "R35-harness-gap-in-scope",
+      "desc": "P1-35: harness expressiveness gap is part of the feature scope, not deferred follow-up + eval case-44",
+      "checks": [
+        {
+          "file": "SKILL.md",
+          "type": "regex",
+          "pattern": "harness (gap|extension|support).*(scope|part of)|part of the (implementation|write set)",
+          "flags": "i"
+        },
+        {
+          "file": "evals/cases.md",
+          "type": "regex",
+          "pattern": "^## case-44 .*harness",
+          "flags": "i"
+        }
+      ]
+    },
+    {
+      "id": "R8-gate-runner-pattern",
+      "desc": "P1-8: optional gate-runner-in-code section + rule-set fingerprint for L3+/monorepo",
+      "checks": [
+        {
+          "file": "references/agent-harness-templates.md",
+          "type": "regex",
+          "pattern": "gate runner",
+          "flags": "i"
+        },
+        {
+          "file": "references/agent-harness-templates.md",
+          "type": "regex",
+          "pattern": "fingerprint",
+          "flags": "i"
+        }
+      ]
+    },
+    {
+      "id": "P2-R23-deviations-carry-reasons",
+      "desc": "config deviations name motivating failure; empty catch names what it swallows",
+      "checks": [
+        {
+          "file": "references/agents-md-sections.md",
+          "type": "contains",
+          "pattern": "motivating failure"
+        },
+        {
+          "file": "references/agents-md-sections.md",
+          "type": "contains",
+          "pattern": "empty catch"
+        }
+      ]
+    },
+    {
+      "id": "P2-R24-incident-earned-constraints",
+      "desc": "pitfall/notes lists earn entries through incidents, not generic best practices",
+      "checks": [
+        {
+          "file": "references/agents-md-sections.md",
+          "type": "contains",
+          "pattern": "earn entries through real incidents"
+        }
+      ]
+    },
+    {
+      "id": "P2-R26-extension-map",
+      "desc": "Where-new-behavior-goes map in Module Boundaries",
+      "checks": [
+        {
+          "file": "references/agents-md-sections.md",
+          "type": "regex",
+          "pattern": "where new behavior goes",
+          "flags": "i"
+        }
+      ]
+    },
+    {
+      "id": "P2-R28-standby-exercised",
+      "desc": "rollback/failover needs exercise evidence, not just docs",
+      "checks": [
+        {
+          "file": "references/agent-readiness-criteria.md",
+          "type": "regex",
+          "pattern": "exercise (evidence|proof)|never-exercised",
+          "flags": "i"
+        }
+      ]
+    },
+    {
+      "id": "P2-R29-release-preflight",
+      "desc": "release pipeline asserts tag/version parity + artifact inventory",
+      "checks": [
+        {
+          "file": "references/eng-pillars.md",
+          "type": "regex",
+          "pattern": "preflight",
+          "flags": "i"
+        },
+        {
+          "file": "references/eng-pillars.md",
+          "type": "regex",
+          "pattern": "tag.{0,40}version|version.{0,40}tag",
+          "flags": "i"
+        }
+      ]
+    },
+    {
+      "id": "P2-R30-ci-secret-conventions",
+      "desc": "never pull_request_target for secret workflows; fork exclusions. Asserts the prohibition's direction, not just the token: a rewrite that keeps the keyword while inverting the advice is the one rot mode a bare `contains` cannot see, and this is a secret-leak rule.",
+      "checks": [
+        {
+          "file": "references/aux-file-templates.md",
+          "type": "regex",
+          "pattern": "(never|do not|must not|forbidden to)\\s+(use|adopt|switch to)[^.\\n]{0,40}`?pull_request_target`?",
+          "flags": "i"
+        },
+        {
+          "file": "references/aux-file-templates.md",
+          "type": "regex",
+          "pattern": "untrusted[^.\\n]{0,60}secret|secret[^.\\n]{0,60}untrusted",
+          "flags": "i"
+        },
+        {
+          "file": "references/aux-file-templates.md",
+          "type": "regex",
+          "pattern": "trusted events",
+          "flags": "i"
+        }
+      ]
+    },
+    {
+      "id": "P2-R32-tunables-dichotomy",
+      "desc": "deployment-varying tunables in config; protocol/security constants fixed; single-point defaulting",
+      "checks": [
+        {
+          "file": "references/lang-constraints.md",
+          "type": "contains",
+          "pattern": "tunable"
+        }
+      ]
+    },
+    {
+      "id": "P2-R33-stacked-pr-invariant",
+      "desc": "branch deletable only when no open PR bases on it; native platform stacked-PR required when available; no stacked-PR chain when unavailable; lease-protected history rewrites",
+      "checks": [
+        {
+          "file": "references/agents-md-sections.md",
+          "type": "contains",
+          "pattern": "no open PR bases on it"
+        },
+        {
+          "file": "references/agents-md-sections.md",
+          "type": "contains",
+          "pattern": "Use the platform's native stacked-PR mechanism whenever available"
+        },
+        {
+          "file": "references/agents-md-sections.md",
+          "type": "contains",
+          "pattern": "If unavailable, do not use a stacked-PR chain at all"
+        },
+        {
+          "file": "references/agents-md-sections.md",
+          "type": "contains",
+          "pattern": "--force-with-lease"
+        }
+      ]
+    },
+    {
+      "id": "P2-20-agent-heavy-strictness",
+      "desc": "Q1.4 raises the recommended profile when agents are the primary contributors, with the labor/review-attention reason stated",
+      "checks": [
+        {
+          "file": "references/question-bank.md",
+          "type": "regex",
+          "pattern": "agent-heavy",
+          "flags": "i"
+        },
+        {
+          "file": "references/question-bank.md",
+          "type": "regex",
+          "pattern": "review attention",
+          "flags": "i"
+        }
+      ]
+    },
+    {
+      "id": "REPAIR-recipes-cover-new-criteria",
+      "desc": "both criteria added in v3.1.0 have repair recipes, so audit findings stay repairable",
+      "checks": [
+        {
+          "file": "references/readiness-fix-recipes.md",
+          "type": "contains",
+          "pattern": "### `ci_aggregator_gate`"
+        },
+        {
+          "file": "references/readiness-fix-recipes.md",
+          "type": "contains",
+          "pattern": "### `generated_docs_check_mode`"
+        }
+      ]
+    },
+    {
+      "id": "SELF-gates-are-runnable",
+      "desc": "the skill owns a single runnable self-check covering registry cross-reference, content invariants, and verifier tests",
+      "checks": [
+        {
+          "file": "scripts/selfcheck.sh",
+          "type": "contains",
+          "pattern": "--criteria-reference"
+        },
+        {
+          "file": "scripts/selfcheck.sh",
+          "type": "contains",
+          "pattern": "check_skill_content.py"
+        },
+        {
+          "file": "scripts/selfcheck.sh",
+          "type": "contains",
+          "pattern": "pytest"
+        }
+      ]
+    },
+    {
+      "id": "FIELD-stage0-bounded-probe",
+      "desc": "Stage 0 probes the verification surface with listing-style flags and never executes a full suite (field defect: go test ./... stalled a real 425-file repo before any write)",
+      "checks": [
+        {
+          "file": "SKILL.md",
+          "type": "regex",
+          "pattern": "Probe, do not execute",
+          "flags": ""
+        },
+        {
+          "file": "SKILL.md",
+          "type": "regex",
+          "pattern": "collect-only|-list",
+          "flags": ""
+        },
+        {
+          "file": "SKILL.md",
+          "type": "regex",
+          "pattern": "Never run a full test suite",
+          "flags": ""
+        }
+      ]
+    },
+    {
+      "id": "FIELD-stage4-runs-own-checker",
+      "desc": "Stage 4 runs check_rendered_harness.py on the written repo and fixes every failure before Stage 5 (field defect: 11 unresolved placeholders shipped in a justfile while the run reported success)",
+      "checks": [
+        {
+          "file": "SKILL.md",
+          "type": "contains",
+          "pattern": "check_rendered_harness.py"
+        },
+        {
+          "file": "SKILL.md",
+          "type": "regex",
+          "pattern": "Run the deterministic checker on your own output",
+          "flags": ""
+        }
+      ]
+    },
+    {
+      "id": "FIELD-placeholder-scan-scoped",
+      "desc": "placeholder scanning is limited to eng-init artifacts so product source and binaries do not produce false failures on a real repo",
+      "checks": [
+        {
+          "file": "scripts/check_rendered_harness.py",
+          "type": "contains",
+          "pattern": "ENG_INIT_OWNED_NAMES"
+        },
+        {
+          "file": "scripts/check_rendered_harness.py",
+          "type": "contains",
+          "pattern": "def is_binary"
+        },
+        {
+          "file": "scripts/check_rendered_harness.py",
+          "type": "contains",
+          "pattern": "--scan-all"
+        }
+      ]
+    },
+    {
+      "id": "FIELD-checker-in-validation-contract",
+      "desc": "the rendered-artifact check is a named command in the Stage 3 validation contract and the first Stage 5 command, not prose advice (field: the Stage 4 prose mandate was read but never executed)",
+      "checks": [
+        {
+          "file": "SKILL.md",
+          "type": "regex",
+          "pattern": "Validation contract.*commands, not intentions",
+          "flags": "s"
+        },
+        {
+          "file": "SKILL.md",
+          "type": "regex",
+          "pattern": "Run this first and fix every failure",
+          "flags": ""
+        },
+        {
+          "file": "SKILL.md",
+          "type": "regex",
+          "pattern": "Reading it is not running it",
+          "flags": ""
+        }
+      ]
+    },
+    {
+      "id": "FIELD-agents-md-budget-320",
+      "desc": "rendered AGENTS.md budget accounts for the always-rendered rules v3.1/3.2 added, and both homes agree",
+      "checks": [
+        {
+          "file": "references/agents-md-sections.md",
+          "type": "contains",
+          "pattern": "under 320 lines"
+        },
+        {
+          "file": "references/agents-md-sections.md",
+          "type": "regex",
+          "pattern": "relocate before condensing and condense before raising",
+          "flags": ""
+        },
+        {
+          "file": "scripts/check_rendered_harness.py",
+          "type": "contains",
+          "pattern": "default=320"
+        }
+      ]
+    },
+    {
+      "id": "FIELD-ci-aggregator-render-check",
+      "desc": "the CI aggregator is verified at render time, not only scored at audit time (field: ci.yml shipped without it and the checker passed)",
+      "checks": [
+        {
+          "file": "scripts/check_rendered_harness.py",
+          "type": "contains",
+          "pattern": "def check_ci_aggregator"
+        },
+        {
+          "file": "scripts/check_rendered_harness.py",
+          "type": "contains",
+          "pattern": "--require-ci-aggregator"
+        },
+        {
+          "file": "SKILL.md",
+          "type": "contains",
+          "pattern": "--require-ci-aggregator"
+        }
+      ]
+    },
+    {
+      "id": "FIELD-no-backups-git-is-rollback",
+      "desc": "eng-init never creates file backups (git is the rollback path); a stale eng-init backup is debt to propose deleting, and a backup directory holding non-eng-init artifacts is never treated as litter",
+      "checks": [
+        {
+          "file": "SKILL.md",
+          "type": "regex",
+          "pattern": "never creates? (a )?file backups?|does not create backups",
+          "flags": "i"
+        },
+        {
+          "file": "SKILL.md",
+          "type": "contains",
+          "pattern": "not eng-init's to remove"
+        }
+      ]
+    },
+    {
+      "id": "FIELD-rerun-retires-obsolete-sections",
+      "desc": "re-running at a newer version presents four diff classes, including sections the older version generated that the current one no longer does \u2014 never silently kept, never silently deleted",
+      "checks": [
+        {
+          "file": "SKILL.md",
+          "type": "regex",
+          "pattern": "retire",
+          "flags": "i"
+        },
+        {
+          "file": "SKILL.md",
+          "type": "regex",
+          "pattern": "no longer generat",
+          "flags": "i"
+        },
+        {
+          "file": "SKILL.md",
+          "type": "regex",
+          "pattern": "user-owned from then on|becomes user-owned",
+          "flags": "i"
+        }
+      ]
+    },
+    {
+      "id": "FIELD-never-relax-target-repo-gates",
+      "desc": "eng-init fits within the target repo's existing thresholds instead of raising them to accommodate its own output (field: it raised ds-harness's AGENTS.md word budget 1775->2500 and labelled it 'repaired')",
+      "checks": [
+        {
+          "file": "SKILL.md",
+          "type": "regex",
+          "pattern": "never relax|do not relax|Do not raise",
+          "flags": "i"
+        },
+        {
+          "file": "SKILL.md",
+          "type": "regex",
+          "pattern": "budget|threshold",
+          "flags": "i"
+        },
+        {
+          "file": "SKILL.md",
+          "type": "regex",
+          "pattern": "to fit its own output|to accommodate its own|make its own output fit",
+          "flags": "i"
+        }
+      ]
+    },
+    {
+      "id": "REGRESSION-tmpdir-fallback",
+      "desc": "template shell scripts use ${TMPDIR:-/tmp}; a bare $TMPDIR is unbound on GitHub-hosted Linux runners and dies under set -u (field defect, round 4)",
+      "checks": [
+        {
+          "file": "references/agent-harness-templates.md",
+          "type": "regex",
+          "pattern": "\\$\\{TMPDIR:-/tmp\\}"
+        },
+        {
+          "file": "references/agent-harness-templates.md",
+          "type": "not_regex",
+          "pattern": "\"\\$TMPDIR[/\"]"
+        }
+      ]
+    },
+    {
+      "id": "REGRESSION-commitlint-cjs",
+      "desc": "commitlint config is .cjs because the Node skeleton sets type:module, under which a .js file using module.exports throws on load (field defect, round 4)",
+      "checks": [
+        {
+          "file": "references/aux-file-templates.md",
+          "type": "contains",
+          "pattern": "commitlint.config.cjs"
+        },
+        {
+          "file": "references/aux-file-templates.md",
+          "type": "contains",
+          "pattern": "\"type\": \"module\""
+        }
+      ]
+    },
+    {
+      "id": "REGRESSION-husky-v9-no-sourcing",
+      "desc": "hook templates carry no `. .../_/husky.sh` sourcing line \u2014 deprecated in husky v9 (the skeleton's own pin) and removed in v10 (field defect, round 4)",
+      "checks": [
+        {
+          "file": "references/aux-file-templates.md",
+          "type": "not_regex",
+          "pattern": "^\\. .*_/husky\\.sh"
+        },
+        {
+          "file": "references/aux-file-templates.md",
+          "type": "regex",
+          "pattern": "deprecated in husky v9|husky v9: hooks are plain scripts"
+        }
+      ]
+    },
+    {
+      "id": "REGRESSION-secret-preflight-trusted-events",
+      "desc": "the secret-preflight job gate keeps the event_name disjunct; a bare head-repo equality is falsy on push/dispatch and would skip the job on exactly the trusted events it must run on (field defect, round 4)",
+      "checks": [
+        {
+          "file": "references/agent-harness-templates.md",
+          "type": "regex",
+          "pattern": "if: github\\.actor != 'dependabot\\[bot\\]' && \\(github\\.event_name != 'pull_request' \\|\\|"
+        }
+      ]
+    },
+    {
+      "id": "R37-gate-quality-dual-assertion",
+      "desc": "v3.4.0: gate quality contract exists; guardrail self-test asserts both directions (clean-tree acceptance + staged-violation rejection); exemption hygiene criterion registered with recipe; eval case-51",
+      "checks": [
+        {
+          "file": "references/gate-quality-contract.md",
+          "type": "regex",
+          "pattern": "dual assertion",
+          "flags": "i"
+        },
+        {
+          "file": "references/gate-quality-contract.md",
+          "type": "regex",
+          "pattern": "not self-proof",
+          "flags": "i"
+        },
+        {
+          "file": "references/agent-harness-templates.md",
+          "type": "contains",
+          "pattern": "expect_accept"
+        },
+        {
+          "file": "references/agent-harness-templates.md",
+          "type": "regex",
+          "pattern": "clean tree|clean-state baseline",
+          "flags": "i"
+        },
+        {
+          "file": "references/agent-readiness-criteria.md",
+          "type": "contains",
+          "pattern": "exemption_registry_hygiene"
+        },
+        {
+          "file": "references/readiness-registry.yaml",
+          "type": "contains",
+          "pattern": "exemption_registry_hygiene"
+        },
+        {
+          "file": "references/readiness-fix-recipes.md",
+          "type": "contains",
+          "pattern": "### `exemption_registry_hygiene`"
+        },
+        {
+          "file": "evals/cases.md",
+          "type": "regex",
+          "pattern": "^## case-51 .*(dual|self-test)",
+          "flags": "i"
+        }
+      ]
+    },
+    {
+      "id": "R38-incident-pipeline",
+      "desc": "v3.4.0: postmortem contract skeleton (trigger criteria + skeleton), three-layer landing with explicit not-applicable, danger-patterns convergence threshold; criterion + recipe + Q6.9; eval case-52",
+      "checks": [
+        {
+          "file": "references/incident-pipeline-templates.md",
+          "type": "regex",
+          "pattern": "costly to rediscover",
+          "flags": "i"
+        },
+        {
+          "file": "references/incident-pipeline-templates.md",
+          "type": "contains",
+          "pattern": "not applicable"
+        },
+        {
+          "file": "references/incident-pipeline-templates.md",
+          "type": "regex",
+          "pattern": "why existing defenses missed it",
+          "flags": "i"
+        },
+        {
+          "file": "references/agent-readiness-criteria.md",
+          "type": "contains",
+          "pattern": "incident_pipeline"
+        },
+        {
+          "file": "references/readiness-registry.yaml",
+          "type": "contains",
+          "pattern": "incident_pipeline"
+        },
+        {
+          "file": "references/readiness-fix-recipes.md",
+          "type": "contains",
+          "pattern": "### `incident_pipeline`"
+        },
+        {
+          "file": "references/question-bank.md",
+          "type": "contains",
+          "pattern": "Q6.9"
+        },
+        {
+          "file": "evals/cases.md",
+          "type": "regex",
+          "pattern": "^## case-52 .*incident",
+          "flags": "i"
+        }
+      ]
+    },
+    {
+      "id": "R39-repo-skill-layer",
+      "desc": "v3.4.0: repo-local skill layer as conditional artifact \u2014 placement decision tree, judgment-skill four elements, empty-shell rule; Q6.10; eval case-53",
+      "checks": [
+        {
+          "file": "references/repo-skill-templates.md",
+          "type": "regex",
+          "pattern": "placement decision tree",
+          "flags": "i"
+        },
+        {
+          "file": "references/repo-skill-templates.md",
+          "type": "regex",
+          "pattern": "anti-quota",
+          "flags": "i"
+        },
+        {
+          "file": "references/repo-skill-templates.md",
+          "type": "regex",
+          "pattern": "empty-shell",
+          "flags": "i"
+        },
+        {
+          "file": "references/question-bank.md",
+          "type": "contains",
+          "pattern": "Q6.10"
+        },
+        {
+          "file": "SKILL.md",
+          "type": "contains",
+          "pattern": "repo-skill-templates.md"
+        },
+        {
+          "file": "SKILL.md",
+          "type": "contains",
+          "pattern": "incident-pipeline-templates.md"
+        },
+        {
+          "file": "SKILL.md",
+          "type": "contains",
+          "pattern": "gate-quality-contract.md"
+        },
+        {
+          "file": "evals/cases.md",
+          "type": "regex",
+          "pattern": "^## case-53 .*skill",
+          "flags": "i"
+        }
+      ]
+    },
+    {
+      "id": "R40-section-order-fixed",
+      "desc": "v3.4.1: Code Canonicality is the first section in every mode, mechanically checked. (The repair-plan-gate half was DISCARDED after verification: 0 of 2 target expectations flipped and two previously-passing ones regressed; see eng-init-evolution-r3/FINAL_REPORT.md.) Code review found the docstring's compensating control was never wired: the Stage 5 command passed only Verification Matrix, so an AGENTS.md with no Code Canonicality section went green. The flag is now in the documented command and both halves are pinned.",
+      "checks": [
+        {
+          "file": "references/agents-md-sections.md",
+          "type": "regex",
+          "pattern": "Section order is fixed",
+          "flags": "i"
+        },
+        {
+          "file": "references/agents-md-sections.md",
+          "type": "regex",
+          "pattern": "never reorders",
+          "flags": "i"
+        },
+        {
+          "file": "scripts/check_rendered_harness.py",
+          "type": "contains",
+          "pattern": "def check_canonicality_first"
+        },
+        {
+          "file": "scripts/tests/test_check_rendered_harness.py",
+          "type": "contains",
+          "pattern": "test_canonicality_first_rejects_demoted_section"
+        },
+        {
+          "file": "scripts/tests/test_check_rendered_harness.py",
+          "type": "contains",
+          "pattern": "test_canonicality_first_accepts_correct_order"
+        },
+        {
+          "file": "SKILL.md",
+          "type": "contains",
+          "pattern": "--require-section \"Code Canonicality\""
+        },
+        {
+          "file": "scripts/tests/test_untested_invariants.py",
+          "type": "contains",
+          "pattern": "def test_stage5_command_requires_the_canonicality_section"
+        }
+      ]
+    },
+    {
+      "id": "R41-agents-checks-not-gated-by-ci-flag",
+      "desc": "v3.4.1 review: check_agents/check_root_backups were nested under --require-ci-aggregator, so every AGENTS.md check silently no-opped without that flag; absence of an optional section is not failed where an explicit flag already demands presence The source-shape regexes were removed: a single blank line broke them while the code was still correct, and the invariant is proven behaviourally by the tests pinned below.",
+      "checks": [
+        {
+          "file": "scripts/tests/test_check_rendered_harness.py",
+          "type": "contains",
+          "pattern": "test_agents_checks_run_without_the_ci_aggregator_flag"
+        },
+        {
+          "file": "scripts/tests/test_check_rendered_harness.py",
+          "type": "contains",
+          "pattern": "test_agents_checks_still_pass_a_valid_repo_without_the_ci_flag"
+        },
+        {
+          "file": "scripts/tests/test_check_rendered_harness.py",
+          "type": "contains",
+          "pattern": "test_canonicality_first_ignores_absent_section"
+        }
+      ]
+    },
+    {
+      "id": "R42-audit-closes-L0-and-unproven-gates",
+      "desc": "2026-08-10 first-principles audit: the two readiness validators were named in the reference index, had zero tests and were never executed (L0); three checks had a real mechanism and zero proof of rejection (L2 mistaken for L3). All five now carry dual assertions and the validators are wired into selfcheck.",
+      "checks": [
+        {
+          "file": "scripts/selfcheck.sh",
+          "type": "contains",
+          "pattern": "score_readiness_report.py"
+        },
+        {
+          "file": "scripts/selfcheck.sh",
+          "type": "contains",
+          "pattern": "validate_readiness_repair.py"
+        },
+        {
+          "file": "scripts/selfcheck.sh",
+          "type": "contains",
+          "pattern": "smoke_rejects"
+        },
+        {
+          "file": "scripts/tests/test_readiness_validators.py",
+          "type": "contains",
+          "pattern": "def test_score_accepts_a_valid_report"
+        },
+        {
+          "file": "scripts/tests/test_readiness_validators.py",
+          "type": "contains",
+          "pattern": "def test_repair_accepts_a_valid_handoff"
+        },
+        {
+          "file": "scripts/tests/test_readiness_validators.py",
+          "type": "contains",
+          "pattern": "fake local completion"
+        },
+        {
+          "file": "scripts/tests/test_check_rendered_harness.py",
+          "type": "contains",
+          "pattern": "def test_matrix_target_resolution_rejects_a_ghost_target"
+        },
+        {
+          "file": "scripts/tests/test_check_rendered_harness.py",
+          "type": "contains",
+          "pattern": "def test_enforcement_index_rejects_a_config_path_that_does_not_exist"
+        },
+        {
+          "file": "scripts/tests/test_check_readiness_registry.py",
+          "type": "contains",
+          "pattern": "def test_cross_reference_rejects_a_criterion_missing_from_the_registry"
+        },
+        {
+          "file": "scripts/tests/test_check_readiness_registry.py",
+          "type": "contains",
+          "pattern": "def test_cross_reference_accepts_matching_sets"
+        }
+      ]
+    },
+    {
+      "id": "R43-mutation-verified-suite",
+      "desc": "2026-08-10 test verification: selfcheck discards bytecode caches; mutation_sweep.py neuters every failable branch and proves a test goes red. Swept 100 branches: 0 survive now; the initial count is unknown and at least 45 (that sweep's log was captured through `tail -45`, see postmortem 0002 instance 5). mutation_check.py was deleted as superseded: it carried the replace(...,1) defect that produced a false HOLE, and shipping two overlapping mutation tools is the parallel-implementation pattern this skill forbids. The sweep restores on SIGINT/SIGTERM/SIGHUP and refuses to report while a mutation is still on disk: a killed run had left `pass  # MUTATED` in a committed checker, because `finally` does not survive a signal.",
+      "checks": [
+        {
+          "file": "scripts/selfcheck.sh",
+          "type": "contains",
+          "pattern": "__pycache__"
+        },
+        {
+          "file": "scripts/selfcheck.sh",
+          "type": "regex",
+          "pattern": "stale \\.pyc|stale bytecode",
+          "flags": "i"
+        },
+        {
+          "file": "scripts/tests/test_check_rendered_harness.py",
+          "type": "contains",
+          "pattern": "def test_enforcement_index_rejects_a_command_with_no_target"
+        },
+        {
+          "file": "scripts/tests/test_check_rendered_harness.py",
+          "type": "contains",
+          "pattern": "shadowed branch"
+        },
+        {
+          "file": "scripts/mutation_sweep.py",
+          "type": "contains",
+          "pattern": "UNTESTED INVARIANTS"
+        },
+        {
+          "file": "scripts/tests/test_untested_invariants.py",
+          "type": "contains",
+          "pattern": "def test_default_path_accepts_a_conforming_repo"
+        },
+        {
+          "file": "scripts/tests/test_untested_invariants.py",
+          "type": "contains",
+          "pattern": "def test_scorer_rejects_a_non_object_criteria_row"
+        },
+        {
+          "file": "scripts/mutation_sweep.py",
+          "type": "contains",
+          "pattern": "_PENDING_RESTORE"
+        },
+        {
+          "file": "scripts/mutation_sweep.py",
+          "type": "contains",
+          "pattern": "signal.SIGTERM"
+        },
+        {
+          "file": "scripts/mutation_sweep.py",
+          "type": "contains",
+          "pattern": "mutation residue left in"
+        }
+      ]
+    },
+    {
+      "id": "R44-incident-pipeline-self-used",
+      "desc": "eng-init installs an incident pipeline for others (Q6.9) but had no docs/postmortem/ of its own while producing real escaped defects. Two postmortems written from this session's incidents; every guardrail entry names a mechanism that exists.",
+      "checks": [
+        {
+          "file": "docs/postmortem/README.md",
+          "type": "regex",
+          "pattern": "costly to rediscover",
+          "flags": "i"
+        },
+        {
+          "file": "docs/postmortem/README.md",
+          "type": "regex",
+          "pattern": "why existing defenses missed it",
+          "flags": "i"
+        },
+        {
+          "file": "docs/postmortem/README.md",
+          "type": "regex",
+          "pattern": "not applicable",
+          "flags": "i"
+        },
+        {
+          "file": "docs/postmortem/README.md",
+          "type": "regex",
+          "pattern": "two or more incidents converge|\u22652 incidents converge",
+          "flags": "i"
+        },
+        {
+          "file": "docs/postmortem/0001-stale-bytecode-validated-deleted-code.md",
+          "type": "contains",
+          "pattern": "## Root cause"
+        },
+        {
+          "file": "docs/postmortem/0001-stale-bytecode-validated-deleted-code.md",
+          "type": "contains",
+          "pattern": "## Guardrails added"
+        },
+        {
+          "file": "docs/postmortem/0002-verification-scope-overstated-four-times.md",
+          "type": "contains",
+          "pattern": "Why existing defenses missed it"
+        },
+        {
+          "file": "docs/postmortem/0002-verification-scope-overstated-four-times.md",
+          "type": "contains",
+          "pattern": "not applicable"
+        }
+      ]
+    },
+    {
+      "id": "R45-error-message-protocol-self-applied",
+      "desc": "eng-init published an error-message protocol in gate-quality-contract.md and none of its five gates followed it (FAIL / ERROR: / ::error:: / three success shapes). One implementation in scripts/gate_output.py; conformance pinned in both directions.",
+      "checks": [
+        {
+          "file": "scripts/gate_output.py",
+          "type": "contains",
+          "pattern": "def report("
+        },
+        {
+          "file": "scripts/gate_output.py",
+          "type": "regex",
+          "pattern": "violation\\(s\\) found"
+        },
+        {
+          "file": "scripts/check_rendered_harness.py",
+          "type": "contains",
+          "pattern": "check-rendered-harness"
+        },
+        {
+          "file": "scripts/check_readiness_registry.py",
+          "type": "contains",
+          "pattern": "check-readiness-registry"
+        },
+        {
+          "file": "scripts/score_readiness_report.py",
+          "type": "contains",
+          "pattern": "score-readiness-report"
+        },
+        {
+          "file": "scripts/validate_readiness_repair.py",
+          "type": "contains",
+          "pattern": "validate-readiness-repair"
+        },
+        {
+          "file": "scripts/check_skill_content.py",
+          "type": "contains",
+          "pattern": "check-skill-content"
+        },
+        {
+          "file": "scripts/tests/test_untested_invariants.py",
+          "type": "contains",
+          "pattern": "def test_every_gate_reports_through_the_shared_protocol"
+        },
+        {
+          "file": "scripts/check_rendered_harness.py",
+          "type": "not_regex",
+          "pattern": "print\\(f\"FAIL "
+        },
+        {
+          "file": "scripts/check_readiness_registry.py",
+          "type": "not_regex",
+          "pattern": "print\\(f\"ERROR: "
+        },
+        {
+          "file": "scripts/tests/test_untested_invariants.py",
+          "type": "contains",
+          "pattern": "def test_usage_error_is_exit_two_not_one"
+        },
+        {
+          "file": "scripts/tests/test_untested_invariants.py",
+          "type": "contains",
+          "pattern": "GATE_SCRIPTS = sorted("
+        }
+      ]
+    },
+    {
+      "id": "R46-documented-claims-are-checked",
+      "desc": "A fix commit reported syncing a section whose str.replace anchor did not match, so nothing changed and nothing said so (postmortem 0002 instance 9). check_doc_claims.py compares each documented claim to the artifact it describes, derives both sides of every count rather than hard-coding one, and runs in selfcheck.",
+      "checks": [
+        {
+          "file": "scripts/check_doc_claims.py",
+          "type": "contains",
+          "pattern": "def postmortem_claims"
+        },
+        {
+          "file": "scripts/check_doc_claims.py",
+          "type": "contains",
+          "pattern": "def guardrail_claims"
+        },
+        {
+          "file": "scripts/check_doc_claims.py",
+          "type": "regex",
+          "pattern": "derive both sides, never hard-code one",
+          "flags": "i"
+        },
+        {
+          "file": "scripts/selfcheck.sh",
+          "type": "contains",
+          "pattern": "check_doc_claims.py"
+        }
+      ]
+    },
+    {
+      "id": "R47-no-gate-escapes-the-inventory",
+      "desc": "Three hand-maintained gate lists went stale the moment a gate was added (exit-2 conformance missed check_skill_content, the mutation inventory missed check_doc_claims, and check_doc_claims shipped with ten unproven branches). Deriving each list fixed each instance; these two assertions fix the property \u2014 a gate cannot enter the repository without entering the machinery that proves it rejects anything.",
+      "checks": [
+        {
+          "file": "scripts/mutation_sweep.py",
+          "type": "contains",
+          "pattern": "def discover_targets"
+        },
+        {
+          "file": "scripts/mutation_sweep.py",
+          "type": "contains",
+          "pattern": "_NOT_A_GATE"
+        },
+        {
+          "file": "scripts/tests/test_untested_invariants.py",
+          "type": "contains",
+          "pattern": "def test_every_gate_is_inside_the_verification_inventory"
+        },
+        {
+          "file": "scripts/tests/test_untested_invariants.py",
+          "type": "contains",
+          "pattern": "def test_every_gate_is_named_by_at_least_one_test"
+        },
+        {
+          "file": "scripts/tests/test_untested_invariants.py",
+          "type": "contains",
+          "pattern": "def test_doc_claims_rejects_the_remaining_rot_modes"
+        }
+      ]
+    },
+    {
+      "id": "R48-hygiene-rules-ship-paired-rejection-samples",
+      "desc": "exemption_registry_hygiene names three accept/reject rules (stale target, empty reason, contradictory lists) but its Validator gave a rejection sample only for the first. The gate-quality-contract this skill publishes requires a paired sample per rule in the same change, so the criterion violated the contract it enforces on target repos. All three samples are now named in the recipe and mirrored in the registry validator.",
+      "checks": [
+        {
+          "file": "references/readiness-fix-recipes.md",
+          "type": "contains",
+          "pattern": "stale target"
+        },
+        {
+          "file": "references/readiness-fix-recipes.md",
+          "type": "contains",
+          "pattern": "empty reason"
+        },
+        {
+          "file": "references/readiness-fix-recipes.md",
+          "type": "contains",
+          "pattern": "contradictory lists"
+        },
+        {
+          "file": "references/readiness-registry.yaml",
+          "type": "contains",
+          "pattern": "one staged sample per rule"
+        }
+      ]
+    },
+    {
+      "id": "R49-ungateable-judgement-is-declared-not-implied",
+      "desc": "incident_pipeline's validator was existence-only and asserted that 'lessons recurring across >=2 incidents are promoted' \u2014 a semantic judgement no deterministic gate can make, stated as though a check covered it (contract rule 5). The recipe now carries three rejection samples, and the promotion decision is declared a human call in all four places that state the rule, with only its mechanical half gated: a danger-patterns doc must link two or more distinct postmortems.",
+      "checks": [
+        {
+          "file": "references/readiness-fix-recipes.md",
+          "type": "contains",
+          "pattern": "not gated in that direction"
+        },
+        {
+          "file": "references/incident-pipeline-templates.md",
+          "type": "contains",
+          "pattern": "human call, and no gate enforces it"
+        },
+        {
+          "file": "docs/postmortem/README.md",
+          "type": "contains",
+          "pattern": "No gate enforces this threshold"
+        },
+        {
+          "file": "references/agent-readiness-criteria.md",
+          "type": "contains",
+          "pattern": "not a gated rule"
+        }
+      ]
+    },
+    {
+      "id": "R51-verification-tiers",
+      "desc": "v3.5.0: verification-tiers reference indexed; verification_snapshot_tiers criterion in criteria + registry",
+      "checks": [
+        {
+          "file": "references/verification-tiers.md",
+          "type": "contains",
+          "pattern": "Keyless snapshot replay"
+        },
+        {
+          "file": "SKILL.md",
+          "type": "contains",
+          "pattern": "verification-tiers.md"
+        },
+        {
+          "file": "references/agent-readiness-criteria.md",
+          "type": "contains",
+          "pattern": "verification_snapshot_tiers"
+        },
+        {
+          "file": "references/readiness-registry.yaml",
+          "type": "contains",
+          "pattern": "verification_snapshot_tiers"
+        }
+      ]
+    },
+    {
+      "id": "R52-decision-record-operations",
+      "desc": "v3.5.0: decision-record operational lifecycle reference + criterion in criteria + registry + Q6.8 full option [2026-08-12: zone model synced to four-zone; 2026-08-12: desc wording synced]",
+      "checks": [
+        {
+          "file": "references/decision-record-operations.md",
+          "type": "contains",
+          "pattern": "Archive freeze"
+        },
+        {
+          "file": "SKILL.md",
+          "type": "contains",
+          "pattern": "decision-record-operations.md"
+        },
+        {
+          "file": "references/agent-readiness-criteria.md",
+          "type": "contains",
+          "pattern": "decision_record_lifecycle"
+        },
+        {
+          "file": "references/readiness-registry.yaml",
+          "type": "contains",
+          "pattern": "decision_record_lifecycle"
+        },
+        {
+          "file": "references/question-bank.md",
+          "type": "contains",
+          "pattern": "four-zone"
+        }
+      ]
+    },
+    {
+      "id": "R53-documentation-discipline",
+      "desc": "v3.5.0: Q6.11 documentation-discipline module + documentation_gates criterion + eval case-54",
+      "checks": [
+        {
+          "file": "references/documentation-discipline.md",
+          "type": "regex",
+          "pattern": "docs-change-with-code",
+          "flags": "i"
+        },
+        {
+          "file": "SKILL.md",
+          "type": "contains",
+          "pattern": "documentation-discipline.md"
+        },
+        {
+          "file": "references/question-bank.md",
+          "type": "regex",
+          "pattern": "Q6.11",
+          "flags": ""
+        },
+        {
+          "file": "references/agent-readiness-criteria.md",
+          "type": "contains",
+          "pattern": "documentation_gates"
+        },
+        {
+          "file": "references/readiness-registry.yaml",
+          "type": "contains",
+          "pattern": "documentation_gates"
+        },
+        {
+          "file": "evals/cases.md",
+          "type": "regex",
+          "pattern": "^## case-54 .*doc",
+          "flags": "i"
+        }
+      ]
+    },
+    {
+      "id": "R54-harness-architecture",
+      "desc": "v3.5.0: agent-harness-architecture clauses + runtime_invariants criterion in criteria + registry",
+      "checks": [
+        {
+          "file": "references/agent-harness-architecture.md",
+          "type": "contains",
+          "pattern": "Model-visible \u27fa logged"
+        },
+        {
+          "file": "SKILL.md",
+          "type": "contains",
+          "pattern": "agent-harness-architecture.md"
+        },
+        {
+          "file": "references/agent-readiness-criteria.md",
+          "type": "contains",
+          "pattern": "runtime_invariants"
+        },
+        {
+          "file": "references/readiness-registry.yaml",
+          "type": "contains",
+          "pattern": "runtime_invariants"
+        }
+      ]
+    },
+    {
+      "id": "R55-defensive-pattern-seeds",
+      "desc": "v3.5.0: defensive-patterns seeds reference indexed, marked as seeds not installable verbatim",
+      "checks": [
+        {
+          "file": "references/defensive-patterns-seeds.md",
+          "type": "contains",
+          "pattern": "not installable content"
+        },
+        {
+          "file": "SKILL.md",
+          "type": "contains",
+          "pattern": "defensive-patterns-seeds.md"
+        }
+      ]
+    },
+    {
+      "id": "R56-coverage-per-file-criterion",
+      "desc": "v3.5.0: coverage_per_file criterion in criteria + registry + strong form in question-bank Q4.2",
+      "checks": [
+        {
+          "file": "references/agent-readiness-criteria.md",
+          "type": "contains",
+          "pattern": "coverage_per_file"
+        },
+        {
+          "file": "references/readiness-registry.yaml",
+          "type": "contains",
+          "pattern": "coverage_per_file"
+        },
+        {
+          "file": "references/question-bank.md",
+          "type": "regex",
+          "pattern": "per-file 100%",
+          "flags": ""
+        }
+      ]
+    },
+    {
+      "id": "R57-built-artifact-smokes",
+      "desc": "v3.5.0: built_artifact_smokes criterion in criteria + registry",
+      "checks": [
+        {
+          "file": "references/agent-readiness-criteria.md",
+          "type": "contains",
+          "pattern": "built_artifact_smokes"
+        },
+        {
+          "file": "references/readiness-registry.yaml",
+          "type": "contains",
+          "pattern": "built_artifact_smokes"
+        }
+      ]
+    }
+  ]
+}

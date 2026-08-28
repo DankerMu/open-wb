@@ -1,0 +1,7 @@
+{
+  "writable_paths": ["src/"],
+  "protected_paths": ["verifier/", "fixtures/", "ci/"],
+  "network_policy": "deny",
+  "secret_policy": "none",
+  "destructive_git_policy": "deny"
+}

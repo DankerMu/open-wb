@@ -1,0 +1,17 @@
+{
+  "artifact_name": "demo_prompt",
+  "artifact_type": "prompt",
+  "cases": [
+    {
+      "id": "case-01",
+      "prompt": "Summarize Q1 revenue performance.",
+      "expected_output": "A summary naming the period and the figure",
+      "assertions": [
+        {
+          "type": "contains",
+          "value": "Q1"
+        }
+      ]
+    }
+  ]
+}

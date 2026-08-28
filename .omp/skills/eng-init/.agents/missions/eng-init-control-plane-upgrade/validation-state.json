@@ -1,0 +1,55 @@
+{
+  "_diagnostic": true,
+  "_description": "Non-authoritative snapshot for orchestrator prompts and debugging. Do not use as primary state.",
+  "assertions": [
+    {
+      "assertionId": "VAL-SKILL-001",
+      "milestoneId": "ms-64efcdd7",
+      "description": "SKILL.md presents eng-init as a repo-local Agent Engineering Readiness Control Plane skill and routes Audit, Initialize, Repair, and Refactor Harness.",
+      "surface": "cli",
+      "requiredStrength": "fixture"
+    },
+    {
+      "assertionId": "VAL-REPORT-001",
+      "milestoneId": "ms-64efcdd7",
+      "description": "Readiness report reference defines deterministic audit/report lifecycle and repair-usable output.",
+      "surface": "cli",
+      "requiredStrength": "fixture"
+    },
+    {
+      "assertionId": "VAL-REPAIR-001",
+      "milestoneId": "ms-64efcdd7",
+      "description": "Repair recipe reference defines fixability classes, validators, rescore evidence, and high-value recipes.",
+      "surface": "cli",
+      "requiredStrength": "fixture"
+    },
+    {
+      "assertionId": "VAL-EVAL-001",
+      "milestoneId": "ms-64efcdd7",
+      "description": "Eval cases include the new lifecycle coverage specified by the spec.",
+      "surface": "cli",
+      "requiredStrength": "fixture"
+    },
+    {
+      "assertionId": "VAL-REVIEW-001",
+      "milestoneId": "ms-2ed442bc",
+      "description": "Independent review completed and all findings dispositioned.",
+      "surface": "cli",
+      "requiredStrength": "fixture"
+    },
+    {
+      "assertionId": "VAL-EVOLVE-001",
+      "milestoneId": "ms-2ed442bc",
+      "description": "Bounded self-evolution pass records weaknesses, mutations, decisions, and final rationale.",
+      "surface": "cli",
+      "requiredStrength": "fixture"
+    },
+    {
+      "assertionId": "VAL-SWE-001",
+      "milestoneId": "ms-2ed442bc",
+      "description": "New eng-init behavior is exercised against swe-agent in read-only audit/spec-preview style.",
+      "surface": "cli",
+      "requiredStrength": "fixture"
+    }
+  ]
+}

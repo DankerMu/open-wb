@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "name": "architecture-design",
+  "displayName": "Architecture Design",
+  "description": "Design a new project's architecture — module decomposition, seams, and directory structure — or audit an existing one for refactoring recommendations, recording load-bearing decisions as ADRs.",
+  "version": "0.1.0",
+  "maturity": "experimental",
+  "categories": [
+    "design",
+    "coding"
+  ],
+  "tags": [
+    "architecture",
+    "adr",
+    "module-decomposition",
+    "user-invoked"
+  ],
+  "authors": [
+    {
+      "name": "danker"
+    }
+  ],
+  "license": "MIT",
+  "entrypoints": {
+    "skillDoc": "SKILL.md",
+    "changelog": "CHANGELOG.md"
+  }
+}

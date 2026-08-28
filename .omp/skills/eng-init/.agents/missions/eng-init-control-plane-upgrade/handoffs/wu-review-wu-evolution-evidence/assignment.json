@@ -1,0 +1,77 @@
+{
+  "workUnitId": "wu-review-wu-evolution-evidence",
+  "assignmentId": "assignment-wu-review-wu-evolution-evidence",
+  "runId": "workflow-run-2-wu-review-wu-evolution-evidence",
+  "kind": "review",
+  "title": "Review Record self-evolution evidence",
+  "milestoneId": "ms-29f2716a",
+  "dependencies": [
+    "wu-evolution-evidence"
+  ],
+  "writeScope": [],
+  "fulfills": [],
+  "dispatchedAt": "2026-07-02T18:42:40.548Z",
+  "workUnit": {
+    "workUnitId": "wu-review-wu-evolution-evidence",
+    "parentId": "wu-evolution-evidence",
+    "kind": "review",
+    "title": "Review Record self-evolution evidence",
+    "milestoneId": "ms-29f2716a",
+    "dependencies": [
+      "wu-evolution-evidence"
+    ],
+    "writeScope": [],
+    "fulfills": [],
+    "assertionScopeIds": [
+      "VAL-EVOLVE-001"
+    ],
+    "systemPurpose": "deliverable-review"
+  },
+  "assertions": [
+    {
+      "assertionId": "VAL-EVOLVE-001",
+      "milestoneId": "ms-2ed442bc",
+      "title": "Self-evolution pass completes",
+      "description": "Bounded self-evolution pass records weaknesses, mutations, decisions, and final rationale.",
+      "surface": "cli",
+      "requiredStrength": "fixture",
+      "tool": "self-evolution log",
+      "passCriteria": "Evolution log shows baseline, weaknesses, attempted improvements, keep/discard decisions, and final rationale.",
+      "failCriteria": "No evolution pass or ungrounded keep/discard decisions.",
+      "requiredEvidence": [
+        "evolution-output",
+        "file-path",
+        "exit-code"
+      ],
+      "proofCutoffSequence": 14
+    }
+  ],
+  "validation": {
+    "steps": [
+      {
+        "assertionId": "VAL-EVOLVE-001",
+        "title": "Self-evolution pass completes",
+        "surface": "cli",
+        "description": "Bounded self-evolution pass records weaknesses, mutations, decisions, and final rationale.",
+        "tool": "self-evolution log",
+        "passCriteria": "Evolution log shows baseline, weaknesses, attempted improvements, keep/discard decisions, and final rationale.",
+        "failCriteria": "No evolution pass or ungrounded keep/discard decisions."
+      }
+    ],
+    "evidenceRequirements": [
+      {
+        "assertionId": "VAL-EVOLVE-001",
+        "tool": "self-evolution log",
+        "evidenceSource": "fixture",
+        "requiredEvidence": [
+          "evolution-output",
+          "file-path",
+          "exit-code"
+        ],
+        "evidencePathRequired": true,
+        "sha256Required": true
+      }
+    ]
+  },
+  "handoffPath": "handoffs/wu-review-wu-evolution-evidence/handoff.json"
+}

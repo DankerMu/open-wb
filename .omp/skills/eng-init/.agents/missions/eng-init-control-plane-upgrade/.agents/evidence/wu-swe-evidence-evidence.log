@@ -1,0 +1,5 @@
+Command: SweAgentTest subagent read-only validation
+Exit code: 0
+Stdout: audit-only mode, 2 applications, no destructive writes, commands recorded.
+Stderr: <empty>
+Report: .agents/missions/eng-init-control-plane-upgrade/swe-agent-test.md

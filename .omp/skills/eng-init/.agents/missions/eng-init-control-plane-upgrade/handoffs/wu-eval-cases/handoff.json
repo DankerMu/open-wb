@@ -1,0 +1,107 @@
+{
+  "workUnitId": "wu-eval-cases",
+  "assignmentId": "assignment-wu-eval-cases",
+  "workerSessionId": "EvalCases-session",
+  "actorId": "EvalCases",
+  "summary": "Appended lifecycle regression eval cases.",
+  "outcome": "completed",
+  "changedFiles": [
+    "evals/cases.md"
+  ],
+  "startup": {
+    "contextFilesRead": [
+      "mission.md",
+      "AGENTS.md",
+      "requirements.json",
+      "validation-contract.md",
+      "features.json"
+    ],
+    "assignmentRead": true,
+    "assertionsLoaded": [
+      "VAL-EVAL-001"
+    ],
+    "preconditionsChecked": [
+      "Allowed scope verified",
+      "Spec reviewed"
+    ],
+    "baselineValidation": {
+      "command": "file inspection baseline",
+      "exitCode": 0,
+      "startedAt": "2026-07-02T17:37:00Z",
+      "finishedAt": "2026-07-02T17:37:00Z",
+      "evidenceFile": {
+        "kind": "validation-log",
+        "path": ".agents/evidence/wu-eval-cases-evidence.log",
+        "sha256": "3bfac87d4046c78dcafe1365621c2531ed542cabf0425047172be9d005453187",
+        "command": "file inspection"
+      }
+    }
+  },
+  "validationRuns": [
+    {
+      "command": "file inspection",
+      "exitCode": 0,
+      "startedAt": "2026-07-02T17:37:00Z",
+      "finishedAt": "2026-07-02T17:37:00Z",
+      "evidenceFile": {
+        "kind": "validation-log",
+        "path": ".agents/evidence/wu-eval-cases-evidence.log",
+        "sha256": "3bfac87d4046c78dcafe1365621c2531ed542cabf0425047172be9d005453187",
+        "command": "file inspection"
+      }
+    }
+  ],
+  "openIssues": [],
+  "evidence": [
+    {
+      "kind": "validation-log",
+      "path": ".agents/evidence/wu-eval-cases-evidence.log",
+      "sha256": "3bfac87d4046c78dcafe1365621c2531ed542cabf0425047172be9d005453187",
+      "command": "file inspection"
+    }
+  ],
+  "evidenceFiles": [
+    {
+      "kind": "validation-log",
+      "path": ".agents/evidence/wu-eval-cases-evidence.log",
+      "sha256": "3bfac87d4046c78dcafe1365621c2531ed542cabf0425047172be9d005453187",
+      "command": "file inspection"
+    }
+  ],
+  "assertionEvidence": [
+    {
+      "assertionId": "VAL-EVAL-001",
+      "verdict": "passed",
+      "surface": "cli",
+      "evidenceSource": "fixture",
+      "toolUsed": "file inspection",
+      "evidenceKindsCaptured": [
+        "file-path",
+        "excerpt",
+        "exit-code"
+      ],
+      "evidenceFiles": [
+        {
+          "kind": "validation-log",
+          "path": ".agents/evidence/wu-eval-cases-evidence.log",
+          "sha256": "3bfac87d4046c78dcafe1365621c2531ed542cabf0425047172be9d005453187",
+          "command": "file inspection"
+        }
+      ]
+    }
+  ],
+  "cleanup": {
+    "servicesStarted": [],
+    "servicesStopped": [],
+    "tempFilesRemoved": [],
+    "orphanedProcesses": []
+  },
+  "procedureFeedback": {
+    "followedProcedure": true,
+    "deviations": [],
+    "suggestedChanges": []
+  },
+  "discoveredIssues": [],
+  "whatWasLeftUndone": [],
+  "needsReplan": false
+}

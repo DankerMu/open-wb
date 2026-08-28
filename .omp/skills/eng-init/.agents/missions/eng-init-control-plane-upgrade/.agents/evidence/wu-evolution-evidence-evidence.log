@@ -1,0 +1,5 @@
+Command: SelfEvolutionPass subagent
+Exit code: 0
+Stdout: kept 2 mutations; weaknesses identified 5; validation 14/14 passed.
+Stderr: <empty>
+Log: .agents/missions/eng-init-control-plane-upgrade/evolution-pass.md

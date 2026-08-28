@@ -1,0 +1,166 @@
+{
+  "schema_version": "vdd-0.4",
+  "revision": "contract@1",
+  "objective_id": "OBJ-SLUG-001",
+  "mode": "construction",
+  "risk_profile": "light",
+  "goal": "Add an ASCII slugify function with collapsed separators and trimmed hyphens.",
+  "intent": {
+    "status": "validated",
+    "owner": "package-maintainer",
+    "authority": "public utility API requirement",
+    "sources": ["issue-42"],
+    "positive_examples": ["A  B -> a-b", "Version 2 -> version-2"],
+    "negative_examples": ["--- -> empty", "A__B must not produce repeated hyphens"],
+    "critical_scenarios": [],
+    "ambiguities": [],
+    "unknowns": [],
+    "decisions": ["ASCII alphanumerics only"]
+  },
+  "claims": [
+    {
+      "id": "C-SLUG",
+      "statement": "slugify lowercases ASCII alphanumerics, collapses non-alphanumeric runs to one hyphen, trims hyphens, and returns empty when none remain.",
+      "scope": "public slugify(title) API",
+      "severity": "medium",
+      "assumptions": ["Unicode letters are separators by contract"],
+      "oracle_ids": ["O-SLUG-UNIT"],
+      "defeater_ids": ["D-REPEATED-SEPARATOR"]
+    }
+  ],
+  "defeaters": [
+    {
+      "id": "D-REPEATED-SEPARATOR",
+      "claim_id": "C-SLUG",
+      "description": "An implementation replaces each separator independently and produces repeated hyphens.",
+      "failure_class": "CONTRACT",
+      "severity": "medium",
+      "status": "covered",
+      "oracle_ids": ["O-SLUG-UNIT"],
+      "qualification_fault": "Use a temporary implementation that maps every separator to a hyphen without collapsing.",
+      "risk_owner": null
+    }
+  ],
+  "oracles": [
+    {
+      "id": "O-SLUG-UNIT",
+      "type": "contract",
+      "owner": "package-maintainer",
+      "protected": true,
+      "revision": "tests@1",
+      "fingerprint": "sha256:1646cad3ad0a2ea38dd4862a0a6ea890c11afe457d5d4d4d4cf483e06756de30",
+      "claims": ["C-SLUG"],
+      "failure_classes": ["CONTRACT"],
+      "quality": {
+        "fidelity": "high",
+        "independence": "medium",
+        "sensitivity": "medium",
+        "reproducibility": "high",
+        "environment_realism": "medium"
+      },
+      "qualification": {
+        "status": "fresh",
+        "known_good_command": "python -m unittest tests.test_slugify_reference",
+        "restore_command": "python -m unittest tests.test_slugify_reference --after-restore",
+        "known_bad_cases": [
+          {
+            "defeater_id": "D-REPEATED-SEPARATOR",
+            "fault": "non-collapsing temporary candidate",
+            "expected_rejection": "A__B differs: a--b != a-b"
+          }
+        ],
+        "stability_command_ids": ["Q-STABILITY"],
+        "stability_required": false,
+        "required_no_change_trials": 0,
+        "max_flake_rate": 0.0
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "name": "slug cases",
+      "fingerprint": "sha256:655bc2f4ba777e13e8178a723608b28a62e953fc6135c4bd2514d0854a6cb754"
+    }
+  ],
+  "baseline": {
+    "semantic_red_command": "python -m unittest tests.test_slugify.TestSlugify.test_collapses_runs",
+    "reference_green_command": null,
+    "semantic_green_command": null,
+    "metric": null
+  },
+  "scope": {
+    "editable": ["src/slug.py"],
+    "protected": ["tests/test_slugify.py", "vdd/contract.json"],
+    "dependency_change_policy": "deny",
+    "network_policy": "deny",
+    "secret_policy": "none",
+    "destructive_commands": []
+  },
+  "candidate_capabilities": {
+    "writable_paths": ["src/slug.py"],
+    "readable_protected_paths": ["tests/test_slugify.py", "vdd/contract.json"],
+    "allowed_commands": ["python -m unittest", "python tools/run_slug_mutant.py"],
+    "denied_commands": [],
+    "network_policy": "deny",
+    "secret_policy": "none",
+    "dependency_change_policy": "deny",
+    "destructive_git_policy": "deny"
+  },
+  "roles": {
+    "contract_owner": "package-maintainer",
+    "verifier_owner": "package-maintainer",
+    "implementer": "coding-agent",
+    "acceptor": "ci-light-gate",
+    "release_owner": null
+  },
+  "environment": {
+    "digest": "sha256:c5481f9fc752a1a10851a01e5e04edd26607791c77b428feaaa81bcfabe8e0d5",
+    "required": ["Python 3.12"],
+    "matrix": ["linux-x86_64"],
+    "fingerprint_fields": ["candidate revision", "Python version", "test manifest"]
+  },
+  "test_discovery": {
+    "manifest_digest": "sha256:8147e2b7a3c327745503bff1f5b07229c3a7eb379bc3ead6ff9132f2501583f4",
+    "expected": 6,
+    "approved_skips": [],
+    "shards": [
+      {
+        "id": "all",
+        "expected": 6
+      }
+    ]
+  },
+  "gates": {
+    "fast": "python -m unittest tests.test_slugify.TestSlugify.test_collapses_runs",
+    "focused": "python -m unittest tests.test_slugify",
+    "broad": "python -m unittest",
+    "integration": "python -m unittest",
+    "merge": "python -m unittest",
+    "release": null
+  },
+  "cutover": {
+    "strategy": null,
+    "completion": null,
+    "rollback": "git revert the candidate commit"
+  },
+  "statistical_gate": null,
+  "evidence": {
+    "path": "artifacts/vdd/OBJ-SLUG-001.json",
+    "retention": "repository history",
+    "invalidated_by": [
+      "contract change",
+      "test/fixture change",
+      "Python runtime change",
+      "candidate change"
+    ]
+  },
+  "runtime_feedback": {
+    "enabled": false,
+    "signals": [],
+    "permanent_corpus_path": null
+  },
+  "stop_conditions": [
+    "judge does not reject the non-collapsing candidate",
+    "public behavior remains unobservable"
+  ]
+}

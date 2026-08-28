@@ -1,0 +1,5 @@
+id,path,status
+LIFE-001,src/a.rs,confirmed_fixed
+LIFE-002,src/b.rs,confirmed_fixed
+LIFE-003,src/c.rs,unresolved
+LIFE-004,src/d.rs,unknown

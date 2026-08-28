@@ -1,0 +1,8 @@
+iteration	layer	mutation_type	description	pass_rate	delta	decision	oracle_runs	tokens	duration_s	cost_usd	timestamp
+0	0	baseline	baseline run	0.6200	+0.0000	BASELINE	24	14000	110.0	0.4800	2026-08-01T12:00:00+00:00
+1	1	disambiguation	name the period explicitly	0.6600	+0.0400	KEEP	30	17000	132.0	0.5900	2026-08-01T12:00:00+00:00
+2	1	constraint	require units on every figure	0.6200	-0.0400	DISCARD	30	17500	135.0	0.6100	2026-08-01T12:00:00+00:00
+3	1	disambiguation	distinguish trend from point value	0.7400	+0.0800	KEEP	30	18000	140.0	0.6300	2026-08-01T12:00:00+00:00
+4	1	constraint	cap summary length	0.7400	+0.0000	DISCARD	30	18200	141.0	0.6400	2026-08-01T12:00:00+00:00
+5	1	disambiguation	spell out risk enumeration format	0.7800	+0.0400	KEEP	30	19000	148.0	0.6700	2026-08-01T12:00:00+00:00
+6	1	constraint	demand explicit no-flag statement	0.8100	+0.0300	KEEP	30	19500	151.0	0.6900	2026-08-01T12:00:00+00:00
