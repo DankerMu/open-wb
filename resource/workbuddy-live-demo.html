@@ -3220,12 +3220,12 @@ function centerTabHTML(){
       <div class="connector-row ${k.id===DB.currentKb?'on':''}" data-kb="${k.id}" style="cursor:pointer">
         ${icon('bookOpen','')}
         <div class="connector-info">
-          <div class="connector-name">${esc(k.name)}<span class="tag" style="height:16px;font-size:10px">${esc(methodLabel(k.method))}</span>${k.raptor?'<span class="tag tag--brand" style="height:16px;font-size:10px">RAPTOR</span>':''}${k.kg?'<span class="tag tag--brand" style="height:16px;font-size:10px">知识图谱</span>':''}${kbOwned(k)?'':'<span class="tag" style="height:16px;font-size:10px">只读</span>'}</div>
+          <div class="connector-name">${esc(k.name)}<span class="tag" style="height:16px;font-size:10px">${esc(methodLabel(k.method))}</span>${k.raptor?'<span class="tag tag--brand" style="height:16px;font-size:10px">RAPTOR</span>':''}${k.kg?'<span class="tag tag--brand" style="height:16px;font-size:10px">知识图谱</span>':''}${kbOwned(k)?'':`<span class="tag" style="height:16px;font-size:10px" title="共享给你的知识库：可检索与引用，不能改动">只读</span>`}</div>
           <div class="connector-desc">${k.docs.length} 个文档 · ${kbChunkCount(k)} 个切片 · ${kbOwned(k)?`更新于 ${esc(k.updated)}`:`来自 ${esc(ownerOf(k.owner)?ownerOf(k.owner).name+' · '+ownerOf(k.owner).dept:'—')}`}</div>
         </div>
         ${kbOwned(k)
           ? `<button class="wb-btn wb-btn--sm kb-scope-btn" data-kb-scope="${k.id}" title="点击修改可见范围">${icon(k.scope==='me'?'lock':'users','icon--12')}${esc(scopeDetail(k))}${icon('chevronDown','icon--12')}</button>`
-          : `<span class="tag tag--brand">${esc(scopeDetail(k))}</span>`}
+          : `<span class="tag tag--brand" title="由所有者 ${esc(ownerOf(k.owner)?ownerOf(k.owner).name:'—')} 设置，只有 TA 能修改">${esc(scopeDetail(k))}</span>`}
         <span class="tag ${k.docs.some(d=>d.status==='parsing')?'':'tag--success'}">${k.docs.some(d=>d.status==='parsing')?'解析中':'已就绪'}</span>
         ${kbOwned(k)?`<span class="fs-unmount" data-kb-del="${k.id}" title="删除知识库">${icon('x','icon--12')}</span>`:''}
       </div>`).join('')||`<div class="panel-body"><div class="sec-note">还没有知识库，点击下方新建</div></div>`}
