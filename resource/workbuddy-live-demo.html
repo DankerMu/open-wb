@@ -1041,7 +1041,6 @@ function toast(message, type='success', iconName){
 /* ================= 下拉菜单 ================= */
 function closeMenus(){ $('#menu-root').innerHTML=''; }
 document.addEventListener('click', e=>{ if(!e.target.closest('.menu-pop') && !e.target.closest('[data-menu-anchor]')) closeMenus(); });
-document.addEventListener('keydown', e=>{ if(e.key==='Escape'){ closeMenus(); closeModal(); closeDrawer(); }});
 function openMenu(anchorEl, items, opts={}){
   closeMenus();
   if(anchorEl && anchorEl.setAttribute) anchorEl.setAttribute('data-menu-anchor','1');
@@ -1090,11 +1089,17 @@ function openModal({title, body, foot, width, onClose}){
   modalStack.push({wrap,onClose});
   return wrap;
 }
+/** 不传 wrap 时关闭栈顶弹窗（Esc 语义）；onClose 从栈内取，任一关闭入口都会触发 */
 function closeModal(wrap, onClose){
-  if(wrap && wrap.parentNode){ wrap.style.opacity='0'; setTimeout(()=>wrap.remove(),150); }
-  else $('#modal-root').innerHTML='';
-  if(onClose) onClose();
+  if(!wrap){ const top = modalStack[modalStack.length-1]; if(!top) return; wrap = top.wrap; }
+  const i = modalStack.findIndex(m=>m.wrap===wrap);
+  if(i<0 && !wrap.parentNode) return;   // 已关闭，避免 onClose 重复触发
+  const cb = onClose || (i>=0 ? modalStack[i].onClose : null);
+  if(i>=0) modalStack.splice(i,1);
+  if(wrap.parentNode){ wrap.style.opacity='0'; wrap.style.pointerEvents='none'; setTimeout(()=>wrap.remove(),150); }
+  if(cb) cb();
 }
+function closeAllModals(){ while(modalStack.length) closeModal(); }
 function confirmDialog({title, desc, danger=false, okText='确认', cancelText='取消', onOk}){
   const wrap = openModal({
     title: icon(danger?'alertTriangle':'info','') + esc(title),
@@ -3503,7 +3508,7 @@ function render(){
   const shell = $('#app-shell'), lroot = $('#login-root');
   if(!DB.currentUser){
     shell.style.display='none'; lroot.style.display='flex';
-    closeMenus(); closeModal(); closeDrawer(); closePops(); closePalette();
+    closeMenus(); closeAllModals(); closeDrawer(); closePops(); closePalette();
     renderLoginPage();
     return;
   }
