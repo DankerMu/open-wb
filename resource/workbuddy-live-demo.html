@@ -666,6 +666,9 @@ a{color:inherit;text-decoration:none}
 .fs-layout{display:flex;height:100%;min-height:0;overflow:hidden}
 .fs-tree{width:280px;flex-shrink:0;border-right:1px solid var(--wb-border-default);display:flex;flex-direction:column;overflow:hidden;background:var(--wb-bg-secondary)}
 .fs-tree-head{display:flex;align-items:center;justify-content:space-between;padding:10px 12px 6px;font-size:11.5px;font-weight:600;color:var(--wb-text-tertiary);letter-spacing:.02em}
+.kb-scope-btn{background:transparent;color:var(--wb-text-secondary);border-color:var(--wb-border-default)}
+.kb-scope-btn:hover{background:var(--wb-bg-hover);color:var(--wb-text-primary);border-color:var(--wb-text-tertiary)}
+.kb-scope-btn .icon{width:12px;height:12px;flex-shrink:0}
 .rag-cites{border-top:1px solid var(--wb-border-default);padding:8px 12px;display:flex;flex-direction:column;gap:8px}
 .rag-cite{border-left:2px solid var(--wb-brand-primary);padding-left:10px}
 .rag-cite-head{display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:3px}
@@ -2778,7 +2781,8 @@ function kbDetailHTML(k){
   return `
   <div class="panel" style="max-width:760px;margin-top:16px">
     <div class="panel-head"><div class="panel-title">${icon('fileText','')}${esc(k.name)} · 文档</div>
-      <span class="tag">${esc(methodOf(k.method).label)} · ${esc(methodOf(k.method).desc)}</span></div>
+      <span class="tag">${esc(methodOf(k.method).label)} · ${esc(methodOf(k.method).desc)}</span>
+      ${kbOwned(k)?`<button class="wb-btn wb-btn--sm kb-scope-btn" style="margin-left:auto" data-kb-scope="${k.id}" title="点击修改可见范围">${icon(k.scope==='me'?'lock':'users','icon--12')}${esc(scopeDetail(k))}${icon('chevronDown','icon--12')}</button>`:''}</div>
     ${k.docs.map((d,i)=>`
     <div class="connector-row">
       ${icon(FILE_ICONS[d.ext]||'file','')}
@@ -3220,7 +3224,7 @@ function centerTabHTML(){
           <div class="connector-desc">${k.docs.length} 个文档 · ${kbChunkCount(k)} 个切片 · ${kbOwned(k)?`更新于 ${esc(k.updated)}`:`来自 ${esc(ownerOf(k.owner)?ownerOf(k.owner).name+' · '+ownerOf(k.owner).dept:'—')}`}</div>
         </div>
         ${kbOwned(k)
-          ? `<button class="wb-btn wb-btn--sm wb-btn--secondary" data-kb-scope="${k.id}" title="修改可见范围">${esc(scopeDetail(k))}</button>`
+          ? `<button class="wb-btn wb-btn--sm kb-scope-btn" data-kb-scope="${k.id}" title="点击修改可见范围">${icon(k.scope==='me'?'lock':'users','icon--12')}${esc(scopeDetail(k))}${icon('chevronDown','icon--12')}</button>`
           : `<span class="tag tag--brand">${esc(scopeDetail(k))}</span>`}
         <span class="tag ${k.docs.some(d=>d.status==='parsing')?'':'tag--success'}">${k.docs.some(d=>d.status==='parsing')?'解析中':'已就绪'}</span>
         ${kbOwned(k)?`<span class="fs-unmount" data-kb-del="${k.id}" title="删除知识库">${icon('x','icon--12')}</span>`:''}
