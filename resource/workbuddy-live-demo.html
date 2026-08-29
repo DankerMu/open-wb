@@ -12,7 +12,7 @@
 
    内网部署版：已移除公网依赖（分享/微信、SaaS 连接器、市场热度、
    计费倍率、版本更新、积分），模型改为内网自建注册表，
-   新增账号体系（内网统一身份 + 用户隔离 + 每账号沙箱）、
+   新增账号体系（内网统一身份 + 用户隔离 + 每账号沙箱 + 跨部门项目组）、
    工作空间文件视图，以及内建知识库（切片模板与解析策略参照
    RAGFlow, Apache-2.0 实现，归属见 ATTRIBUTION.md）。
    ============================================================ */
@@ -1400,6 +1400,10 @@ const DB = {
     { id:'u3', name:'李四', account:'lisi', pwd:'demo', dept:'产品部', title:'产品经理', role:'管理员',
       sandbox:'/data/workbuddy/lisi', quota:'50 GB' },
   ],
+  // 项目组：应用内自建的跨部门虚拟组，用于知识库共享；成员关系不来自统一身份
+  groups:[
+    { id:'g1', name:'内网落地专项', members:['u1','u2'] },
+  ],
   // 工作空间：一等实体。root 位于用户沙箱内，任务启动于此，/files 页也按它过滤挂载点
   workspaces:[
     { id:'w1', owner:'u1', name:'workbuddy-demo', root:'/data/workbuddy/zhangsan/workbuddy-demo' },
@@ -1634,6 +1638,12 @@ const Session = {
   login(account, pwd){
     const u = DB.users.find(x=>x.account===account.trim().toLowerCase());
     if(!u || u.pwd!==pwd){ DB.loginError = '账号或密码不正确'; return false; }
+    if(u.disabled){
+      DB.loginError = '该账号已停用，请联系管理员';
+      DB.audits.unshift({ kind:'auth', owner:u.id, icon:'lock', title:`停用账号 ${u.account} 尝试登录`,
+        desc:'已拒绝 · 内网统一身份', time:nowHM() });
+      return false;
+    }
     DB.currentUser = u; DB.loginError = '';
     try{ localStorage.setItem(Session.KEY, u.id); }catch(e){}
     Session.applyUserScope();
@@ -2717,12 +2727,17 @@ function mockVoiceInput(){
 
 
 /* ================= 知识库（能力内建，切片模板参照 RAGFlow 实现） ================= */
+function groupsOf(uid){ return DB.groups.filter(g=>g.members.includes(uid)); }
+function groupById(id){ return DB.groups.find(g=>g.id===id) || null; }
 const KB_SCOPES = [
   { id:'me',   label:'仅自己可见', desc:'只有你能检索与引用，文档留在你的沙箱内' },
   { id:'dept', label:'本部门可见', desc:'同部门同事可检索与引用，但不能改动内容' },
+  { id:'group',label:'项目组可见', desc:'指定项目组的成员可检索与引用，可跨部门' },
   { id:'all',  label:'全员可见',   desc:'全公司可检索与引用，适合口径、规范类文档' },
 ];
 function scopeLabel(id){ const x=KB_SCOPES.find(s=>s.id===id); return x?x.label:id; }
+/** 共享范围的完整说明：项目组要带出组名 */
+function scopeDetail(k){ return k.scope==='group' ? `${scopeLabel(k.scope)} · ${groupById(k.groupId)?groupById(k.groupId).name:'组已解散'}` : scopeLabel(k.scope); }
 function ownerOf(id){ return DB.users.find(u=>u.id===id) || null; }
 /** 我拥有的知识库：可增删文档、可改可见范围 */
 function myKbs(){ return ownedBy(DB.kbs); }
@@ -2730,7 +2745,8 @@ function myKbs(){ return ownedBy(DB.kbs); }
 function visibleKbs(){
   const u = me(); if(!u) return [];
   return DB.kbs.filter(k => k.owner===u.id || k.scope==='all' ||
-    (k.scope==='dept' && ownerOf(k.owner) && ownerOf(k.owner).dept===u.dept));
+    (k.scope==='dept' && ownerOf(k.owner) && ownerOf(k.owner).dept===u.dept) ||
+    (k.scope==='group' && groupById(k.groupId) && groupById(k.groupId).members.includes(u.id)));
 }
 function kbOwned(k){ return !!me() && k.owner===me().id; }
 function methodLabel(id){ const m=DB.kbMethods.find(x=>x.id===id); return m?m.label:id; }
@@ -2813,7 +2829,7 @@ function buildRag(promptText){
   if(kbs.length < ids.length) toast('部分知识库已取消共享，本轮不再检索','info');   // 引用后所有者收回了共享
   if(!kbs.length) return null;
   kbs.filter(k=>!kbOwned(k)).forEach(k=>DB.audits.unshift({ kind:'perm', owner:me().id, icon:'library',
-    title:`检索共享知识库 ${k.name}`, desc:`所有者 ${ownerOf(k.owner)?ownerOf(k.owner).name:'—'} · ${scopeLabel(k.scope)} · 只读`, time:nowHM() }));
+    title:`检索共享知识库 ${k.name}`, desc:`所有者 ${ownerOf(k.owner)?ownerOf(k.owner).name:'—'} · ${scopeDetail(k)} · 只读`, time:nowHM() }));
   const hits = [];
   kbs.forEach(k=>kbSearch(k, promptText).forEach(h=>hits.push({...h, kb:k.name})));
   hits.sort((a,b)=>b.score-a.score);
@@ -2855,6 +2871,105 @@ function ragHTML(m){
     ${r.state==='done' && !r.hits.length ? `<div class="rag-cites"><div class="sec-note">知识库中没有命中相关切片，以下回答未使用知识库引用</div></div>` : ''}
   </div>`;
 }
+/* ---- 账号与项目组管理（仅管理员，且只改应用侧属性） ---- */
+function openUserAdminDialog(id){
+  if(!isAdmin()) return;
+  const u = DB.users.find(x=>x.id===id);
+  // 不提供编辑自己的入口：操作者本人始终是启用状态的管理员，因此不存在把管理员降到 0 的路径
+  if(!u || u.id===me().id) return;
+  const wrap = openModal({ title:`管理「${u.name}」`, body:`
+    <div class="set-card" style="margin-bottom:12px">
+      <div class="set-row"><div><div class="set-t">身份属性</div>
+        <div class="set-d">${esc(u.account)} · ${esc(u.dept)} · ${esc(u.title)}</div></div>
+        <span class="tag">统一身份下发 · 不可改</span></div>
+      <div class="set-row"><div><div class="set-t">沙箱根目录</div>
+        <div class="set-d" style="font-family:var(--wb-mono)">${esc(u.sandbox)}</div></div>
+        <span class="tag tag--success">已隔离</span></div>
+    </div>
+    <div class="form-group"><label class="form-label">角色</label>
+      <select class="wb-input" id="ua-role">
+        <option value="成员" ${u.role==='成员'?'selected':''}>成员</option>
+        <option value="管理员" ${u.role==='管理员'?'selected':''}>管理员</option>
+      </select></div>
+    <div class="form-group"><label class="form-label">沙箱配额</label>
+      <input class="wb-input" id="ua-quota" value="${esc(u.quota)}" placeholder="例如 20 GB"></div>
+    <div class="set-row" style="padding:4px 0"><div><div class="set-t">启用账号</div>
+      <div class="set-d">停用后该账号无法登录，已有数据保留在其沙箱内</div></div>
+      <button class="switch ${u.disabled?'':'on'}" data-action="ua-enabled"></button></div>`,
+    foot:`<button class="wb-btn wb-btn--ghost" data-cancel>取消</button><button class="wb-btn wb-btn--primary" data-ok>保存</button>`, width:'sm' });
+  let enabled = !u.disabled;
+  $('[data-action="ua-enabled"]',wrap).addEventListener('click', e=>{ enabled=!enabled; e.currentTarget.classList.toggle('on',enabled); });
+  $('[data-cancel]',wrap).addEventListener('click', ()=>closeModal(wrap));
+  $('[data-ok]',wrap).addEventListener('click', ()=>{
+    const role = $('#ua-role',wrap).value;
+    const quota = $('#ua-quota',wrap).value.trim();
+    if(!quota){ toast('配额不能为空','error'); return; }
+    const changes = [];
+    if(role!==u.role) changes.push(`角色 ${u.role} → ${role}`);
+    if(quota!==u.quota) changes.push(`配额 ${u.quota} → ${quota}`);
+    if(enabled === !!u.disabled) changes.push(enabled?'启用账号':'停用账号');
+    if(!changes.length){ closeModal(wrap); return; }
+    u.role = role; u.quota = quota; u.disabled = !enabled;
+    DB.audits.unshift({ kind:'perm', owner:me().id, icon:'shield', title:`调整账号 ${u.account}`,
+      desc:`${changes.join(' · ')} · 操作人 ${me().name}`, time:nowHM() });
+    closeModal(wrap); renderCenterPage(); toast(`「${u.name}」已更新`);
+  });
+}
+function openGroupDialog(id){
+  if(!isAdmin()) return;
+  const g = id ? groupById(id) : null;
+  if(id && !g) return;
+  const wrap = openModal({ title: g?`「${g.name}」成员`:'新建项目组', body:`
+    <div class="form-group"><label class="form-label">组名</label>
+      <input class="wb-input" id="gp-name" value="${g?esc(g.name):''}" placeholder="例如 内网落地专项"></div>
+    <div class="form-group"><label class="form-label">成员</label>
+      <div style="max-height:240px;overflow:auto;display:flex;flex-direction:column;gap:2px">
+        ${DB.users.map(u=>`<label class="set-row" style="padding:6px 4px;cursor:pointer">
+          <input type="checkbox" data-gp-member="${u.id}" ${g&&g.members.includes(u.id)?'checked':''} ${u.disabled?'disabled':''} style="margin-right:8px">
+          <div style="flex:1"><div class="set-t">${esc(u.name)}${u.disabled?'（已停用）':''}</div>
+            <div class="set-d">${esc(u.dept)} · ${esc(u.title)}</div></div>
+        </label>`).join('')}
+      </div>
+      <div class="form-hint">项目组可跨部门；成员变化后，以该组共享的知识库可见范围立即生效</div></div>`,
+    foot:`<button class="wb-btn wb-btn--ghost" data-cancel>取消</button><button class="wb-btn wb-btn--primary" data-ok>保存</button>`, width:'sm' });
+  $('[data-cancel]',wrap).addEventListener('click', ()=>closeModal(wrap));
+  $('[data-ok]',wrap).addEventListener('click', ()=>{
+    const name = $('#gp-name',wrap).value.trim();
+    if(!name){ toast('请填写组名','error'); return; }
+    if(DB.groups.some(x=>x.name===name && x!==g)){ toast('已存在同名项目组','error'); return; }
+    const members = $$('[data-gp-member]',wrap).filter(c=>c.checked).map(c=>c.dataset.gpMember);
+    if(g){
+      const added = members.filter(m=>!g.members.includes(m)).length;
+      const removed = g.members.filter(m=>!members.includes(m)).length;
+      g.name = name; g.members = members;
+      DB.audits.unshift({ kind:'perm', owner:me().id, icon:'users', title:`更新项目组 ${name}`,
+        desc:`成员 ${members.length} 人${added?` · 新增 ${added}`:''}${removed?` · 移出 ${removed}`:''} · 操作人 ${me().name}`, time:nowHM() });
+      toast(`「${name}」已更新`);
+    } else {
+      DB.groups.push({ id:'g'+uid(), name, members });
+      DB.audits.unshift({ kind:'perm', owner:me().id, icon:'users', title:`新建项目组 ${name}`,
+        desc:`成员 ${members.length} 人 · 操作人 ${me().name}`, time:nowHM() });
+      toast(`项目组「${name}」已创建`);
+    }
+    closeModal(wrap); renderCenterPage();
+  });
+}
+function deleteGroup(id){
+  if(!isAdmin()) return;
+  const g = groupById(id); if(!g) return;
+  const affected = DB.kbs.filter(k=>k.scope==='group' && k.groupId===g.id);
+  confirmDialog({ title:'解散项目组', danger:true, okText:'解散',
+    desc:`确定解散「${g.name}」吗？${affected.length?`有 ${affected.length} 个知识库以该组共享，解散后会退回「仅自己可见」。`:''}`,
+    onOk:()=>{
+      affected.forEach(k=>{ k.scope='me'; k.groupId=null;
+        DB.audits.unshift({ kind:'perm', owner:k.owner, icon:'shield', title:`知识库 ${k.name} 可见范围变更`,
+          desc:`项目组可见 · ${g.name} → 仅自己可见（项目组已解散）`, time:nowHM() }); });
+      DB.groups = DB.groups.filter(x=>x.id!==g.id);
+      DB.audits.unshift({ kind:'perm', owner:me().id, icon:'users', title:`解散项目组 ${g.name}`,
+        desc:`原成员 ${g.members.length} 人${affected.length?` · ${affected.length} 个知识库退回仅自己可见`:''} · 操作人 ${me().name}`, time:nowHM() });
+      renderCenterPage(); toast(`「${g.name}」已解散`);
+    }});
+}
 function openKbNewDialog(){
   const wrap = openModal({ title:'新建知识库', body:`
     <div class="form-group"><label class="form-label">名称</label><input class="wb-input" id="kb-name" placeholder="例如 运维手册库"></div>
@@ -2866,6 +2981,13 @@ function openKbNewDialog(){
       <select class="wb-input" id="kb-scope">${KB_SCOPES.map(x=>
         `<option value="${x.id}">${esc(x.label)} — ${esc(x.desc)}</option>`).join('')}</select>
       <div class="form-hint">共享出去的知识库对他人只读，随时可以改回仅自己可见</div></div>
+    <div class="form-group" id="kb-new-group-wrap" style="display:none">
+      <label class="form-label">项目组</label>
+      ${groupsOf(me().id).length
+        ? `<select class="wb-input" id="kb-new-group">${groupsOf(me().id).map(g=>
+            `<option value="${g.id}">${esc(g.name)}（${g.members.length} 人）</option>`).join('')}</select>`
+        : `<div class="form-hint">你还不属于任何项目组，请让管理员在「中心 → 账号」中把你加入</div>`}
+    </div>
     <div class="set-row" style="padding:4px 0"><div><div class="set-t">RAPTOR 递归摘要</div><div class="set-d" id="kb-raptor-d">提升跨段落长问题的召回，仅部分模板支持</div></div>
       <button class="switch" data-action="kb-raptor"></button></div>
     <div class="set-row" style="padding:4px 0"><div><div class="set-t">知识图谱</div><div class="set-d">抽取实体与关系，代价较高，适合口径类文档</div></div>
@@ -2880,6 +3002,9 @@ function openKbNewDialog(){
     $('#kb-raptor-d',wrap).textContent = ok?'提升跨段落长问题的召回':`${methodOf(sel.value).label} 模板不支持 RAPTOR`;
   };
   sel.addEventListener('change', syncRaptor); syncRaptor();
+  const scopeSel = $('#kb-scope',wrap);
+  const syncScope = ()=>{ $('#kb-new-group-wrap',wrap).style.display = scopeSel.value==='group'?'':'none'; };
+  scopeSel.addEventListener('change', syncScope); syncScope();
   rb.addEventListener('click', ()=>{ if(rb.disabled) return; raptor=!raptor; rb.classList.toggle('on',raptor); });
   $('[data-action="kb-kg"]',wrap).addEventListener('click', e=>{ kg=!kg; e.currentTarget.classList.toggle('on',kg); });
   $('[data-cancel]',wrap).addEventListener('click', ()=>closeModal(wrap));
@@ -2888,33 +3013,50 @@ function openKbNewDialog(){
     if(!name){ toast('请填写知识库名称','error'); return; }
     if(myKbs().some(k=>k.name===name)){ toast('已存在同名知识库','error'); return; }
     const id = 'kb'+uid();
-    const scope = $('#kb-scope',wrap).value;
-    DB.kbs.push({ id, owner:me().id, scope, name, method:sel.value, raptor, kg, updated:nowHM(), docs:[] });
+    const scope = scopeSel.value;
+    if(scope==='group' && !groupsOf(me().id).length){ toast('你还不属于任何项目组','error'); return; }
+    const groupId = scope==='group' ? $('#kb-new-group',wrap).value : null;
+    DB.kbs.push({ id, owner:me().id, scope, groupId, name, method:sel.value, raptor, kg, updated:nowHM(), docs:[] });
     DB.currentKb = id; DB.kbHits = null; DB.kbQuery = '';
     DB.audits.unshift({ kind:'perm', owner:me().id, icon:'library', title:`新建知识库 ${name}`,
-      desc:`切片模板 ${methodOf(sel.value).label} · ${scopeLabel(scope)}${raptor?' · RAPTOR':''}${kg?' · 知识图谱':''}`, time:nowHM() });
+      desc:`切片模板 ${methodOf(sel.value).label} · ${scope==='group'?scopeLabel(scope)+' · '+(groupById(groupId)?groupById(groupId).name:'—'):scopeLabel(scope)}${raptor?' · RAPTOR':''}${kg?' · 知识图谱':''}`, time:nowHM() });
     closeModal(wrap); renderCenterPage(); toast(`知识库「${name}」已创建`);
   });
 }
 function openKbScopeDialog(id){
   const kb = myKbs().find(k=>k.id===id); if(!kb) return;
+  const mine = groupsOf(me().id);
   const wrap = openModal({ title:`「${kb.name}」可见范围`, body:
     KB_SCOPES.map(x=>`<label class="set-row" style="padding:8px 4px;cursor:pointer">
       <input type="radio" name="kbsc" value="${x.id}" ${kb.scope===x.id?'checked':''} style="margin-right:10px">
       <div style="flex:1"><div class="set-t">${esc(x.label)}</div><div class="set-d">${esc(x.desc)}</div></div>
     </label>`).join('') +
-    `<div class="form-hint" style="margin-top:8px">共享只给读权限：他人可检索与引用，不能增删文档或改设置。切换范围会记入审计。</div>`,
+    `<div class="form-group" id="kb-group-wrap" style="display:none;margin-top:6px">
+      <label class="form-label">项目组</label>
+      ${mine.length
+        ? `<select class="wb-input" id="kb-group">${mine.map(g=>
+            `<option value="${g.id}" ${kb.groupId===g.id?'selected':''}>${esc(g.name)}（${g.members.length} 人）</option>`).join('')}</select>`
+        : `<div class="form-hint">你还不属于任何项目组，请让管理员在「中心 → 账号」中把你加入</div>`}
+    </div>
+    <div class="form-hint" style="margin-top:8px">共享只给读权限：他人可检索与引用，不能增删文档或改设置。切换范围会记入审计。</div>`,
     foot:`<button class="wb-btn wb-btn--ghost" data-cancel>取消</button><button class="wb-btn wb-btn--primary" data-ok>保存</button>`, width:'sm' });
+  const syncGroup = ()=>{
+    const v = ($$('[name="kbsc"]',wrap).find(r=>r.checked)||{}).value;
+    $('#kb-group-wrap',wrap).style.display = v==='group' ? '' : 'none';
+  };
+  $$('[name="kbsc"]',wrap).forEach(r=>r.addEventListener('change', syncGroup)); syncGroup();
   $('[data-cancel]',wrap).addEventListener('click', ()=>closeModal(wrap));
   $('[data-ok]',wrap).addEventListener('click', ()=>{
     const picked = $$('[name="kbsc"]',wrap).find(r=>r.checked);
     if(!picked){ toast('请选择一个可见范围','error'); return; }
-    if(picked.value===kb.scope){ closeModal(wrap); return; }
-    const from = scopeLabel(kb.scope);
-    kb.scope = picked.value;
+    if(picked.value==='group' && !mine.length){ toast('你还不属于任何项目组','error'); return; }
+    const gid = picked.value==='group' ? $('#kb-group',wrap).value : null;
+    if(picked.value===kb.scope && gid===(kb.groupId||null)){ closeModal(wrap); return; }
+    const from = scopeDetail(kb);
+    kb.scope = picked.value; kb.groupId = gid;
     DB.audits.unshift({ kind:'perm', owner:me().id, icon:'shield', title:`知识库 ${kb.name} 可见范围变更`,
-      desc:`${from} → ${scopeLabel(kb.scope)}${kb.scope==='dept'?`（${me().dept}）`:''}`, time:nowHM() });
-    closeModal(wrap); renderCenterPage(); toast(`已设为${scopeLabel(kb.scope)}`);
+      desc:`${from} → ${scopeDetail(kb)}${kb.scope==='dept'?`（${me().dept}）`:''}`, time:nowHM() });
+    closeModal(wrap); renderCenterPage(); toast(`已设为${scopeDetail(kb)}`);
   });
 }
 function openKbIngestDialog(){
@@ -3078,8 +3220,8 @@ function centerTabHTML(){
           <div class="connector-desc">${k.docs.length} 个文档 · ${kbChunkCount(k)} 个切片 · ${kbOwned(k)?`更新于 ${esc(k.updated)}`:`来自 ${esc(ownerOf(k.owner)?ownerOf(k.owner).name+' · '+ownerOf(k.owner).dept:'—')}`}</div>
         </div>
         ${kbOwned(k)
-          ? `<button class="wb-btn wb-btn--sm wb-btn--secondary" data-kb-scope="${k.id}" title="修改可见范围">${esc(scopeLabel(k.scope))}</button>`
-          : `<span class="tag tag--brand">${esc(scopeLabel(k.scope))}</span>`}
+          ? `<button class="wb-btn wb-btn--sm wb-btn--secondary" data-kb-scope="${k.id}" title="修改可见范围">${esc(scopeDetail(k))}</button>`
+          : `<span class="tag tag--brand">${esc(scopeDetail(k))}</span>`}
         <span class="tag ${k.docs.some(d=>d.status==='parsing')?'':'tag--success'}">${k.docs.some(d=>d.status==='parsing')?'解析中':'已就绪'}</span>
         ${kbOwned(k)?`<span class="fs-unmount" data-kb-del="${k.id}" title="删除知识库">${icon('x','icon--12')}</span>`:''}
       </div>`).join('')||`<div class="panel-body"><div class="sec-note">还没有知识库，点击下方新建</div></div>`}
@@ -3117,20 +3259,40 @@ function centerTabHTML(){
   if(DB.centerTab==='account'){
     if(!isAdmin()) return `<div class="empty-state" style="padding:48px"><div class="empty-title">无权访问</div><div class="empty-desc">账号管理仅管理员可见</div></div>`;
     const count = id => DB.conversations.filter(c=>c.owner===id).length;
-    return `<div class="panel" style="max-width:760px">
+    return `<div class="panel" style="max-width:760px;margin-bottom:16px">
       <div class="panel-head"><div class="panel-title">${icon('user','')}账号与沙箱</div><span class="tag tag--brand">管理员</span></div>
       ${DB.users.map(u=>`
-      <div class="connector-row">
+      <div class="connector-row" style="${u.disabled?'opacity:.6':''}">
         <span class="sb-avatar" style="flex-shrink:0">${initials(u.name)}</span>
         <div class="connector-info">
-          <div class="connector-name">${esc(u.name)}<span class="tag" style="height:16px;font-size:10px">${esc(u.account)}</span>${u.role==='管理员'?'<span class="tag tag--brand" style="height:16px;font-size:10px">管理员</span>':''}</div>
-          <div class="connector-desc" style="font-family:var(--wb-mono);font-size:11px">${esc(u.sandbox)} · 配额 ${esc(u.quota)} · ${count(u.id)} 个任务</div>
+          <div class="connector-name">${esc(u.name)}<span class="tag" style="height:16px;font-size:10px">${esc(u.account)}</span>${u.role==='管理员'?'<span class="tag tag--brand" style="height:16px;font-size:10px">管理员</span>':''}${u.disabled?'<span class="tag" style="height:16px;font-size:10px">已停用</span>':''}</div>
+          <div class="connector-desc" style="font-family:var(--wb-mono);font-size:11px">${esc(u.sandbox)} · 配额 ${esc(u.quota)} · ${count(u.id)} 个任务${groupsOf(u.id).length?' · 组 '+esc(groupsOf(u.id).map(g=>g.name).join('/')):''}</div>
         </div>
-        <span class="tag tag--success">已隔离</span>
-        ${u.id===me().id?`<button class="wb-btn wb-btn--sm wb-btn--secondary" disabled>当前</button>`:''}
+        ${u.id===me().id
+          ? `<button class="wb-btn wb-btn--sm wb-btn--secondary" disabled>当前</button>`
+          : `<button class="wb-btn wb-btn--sm wb-btn--ghost" data-user-edit="${u.id}">管理</button>`}
       </div>`).join('')}
       <div class="panel-body" style="border-top:1px solid var(--wb-border-default)">
-        <div class="sec-note">账号由内网统一身份下发，本页只读。每个账号独占沙箱根目录，跨账号读写在沙箱层拒绝并记入审计。</div>
+        <div class="sec-note">姓名、账号、部门、职务由内网统一身份下发，本页不可改；管理员只能调整应用侧属性（角色、配额、启用状态）与项目组。每个账号独占沙箱根目录，跨账号读写在沙箱层拒绝并记入审计。</div>
+      </div>
+    </div>
+
+    <div class="panel" style="max-width:760px">
+      <div class="panel-head"><div class="panel-title">${icon('users','')}项目组</div>
+        <span class="tag">应用内自建 · 可跨部门</span></div>
+      ${DB.groups.map(g=>`
+      <div class="connector-row">
+        ${icon('users','')}
+        <div class="connector-info">
+          <div class="connector-name">${esc(g.name)}<span class="tag" style="height:16px;font-size:10px">${g.members.length} 人</span></div>
+          <div class="connector-desc">${g.members.map(id=>{const u=ownerOf(id);return u?esc(u.name)+'（'+esc(u.dept)+'）':'—';}).join('、')||'暂无成员'}</div>
+        </div>
+        <button class="wb-btn wb-btn--sm wb-btn--ghost" data-group-edit="${g.id}">成员</button>
+        <span class="fs-unmount" data-group-del="${g.id}" title="解散项目组">${icon('x','icon--12')}</span>
+      </div>`).join('')||`<div class="panel-body"><div class="sec-note">还没有项目组</div></div>`}
+      <div class="panel-body" style="border-top:1px solid var(--wb-border-default)">
+        <button class="wb-btn wb-btn--primary" data-action="group-new">${icon('plus','')}新建项目组</button>
+        <div class="sec-note" style="margin-top:8px">项目组只影响知识库共享范围，不改变沙箱边界与文件权限。解散后，以该组共享的知识库自动退回「仅自己可见」。</div>
       </div>
     </div>`;
   }
@@ -3145,6 +3307,10 @@ function centerTabHTML(){
       <div class="set-row">
         <div><div class="set-t">沙箱根目录</div><div class="set-d" style="font-family:var(--wb-mono)">${esc(u.sandbox)}　·　配额 ${esc(u.quota)}</div></div>
         <span class="tag tag--success">已隔离</span>
+      </div>
+      <div class="set-row">
+        <div><div class="set-t">我所在的项目组</div><div class="set-d">${groupsOf(u.id).length?esc(groupsOf(u.id).map(g=>g.name+'（'+g.members.length+' 人）').join('、')):'暂未加入任何项目组'}</div></div>
+        <span class="tag">${groupsOf(u.id).length?'影响知识库共享':'—'}</span>
       </div>
       <div class="set-row">
         <div><div class="set-t">用户隔离</div><div class="set-d">会话、附件、工作空间与助理任务按账号隔离；越界读写由沙箱拦截并记入审计</div></div>
@@ -3185,6 +3351,10 @@ function bindCenterBody(){
   const root = $('.ct-body');
   if(!root) return;
   $$('[data-cat]',root).forEach(b=>b.addEventListener('click', ()=>{ DB.expertsCat=b.dataset.cat; renderCenterPage(); }));
+  $$('[data-user-edit]',root).forEach(b=>b.addEventListener('click', ()=>openUserAdminDialog(b.dataset.userEdit)));
+  $$('[data-group-edit]',root).forEach(b=>b.addEventListener('click', ()=>openGroupDialog(b.dataset.groupEdit)));
+  $$('[data-group-del]',root).forEach(b=>b.addEventListener('click', e=>{ e.stopPropagation(); deleteGroup(b.dataset.groupDel); }));
+  $('[data-action="group-new"]',root)?.addEventListener('click', ()=>openGroupDialog(null));
   $('[data-action="kb-new"]',root)?.addEventListener('click', openKbNewDialog);
   $('[data-action="kb-ingest"]',root)?.addEventListener('click', openKbIngestDialog);
   $$('[data-kb-scope]',root).forEach(b=>b.addEventListener('click', e=>{
