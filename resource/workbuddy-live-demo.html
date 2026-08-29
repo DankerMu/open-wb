@@ -669,6 +669,8 @@ a{color:inherit;text-decoration:none}
 .kb-scope-btn{background:transparent;color:var(--wb-text-secondary);border-color:var(--wb-border-default)}
 .kb-scope-btn:hover{background:var(--wb-bg-hover);color:var(--wb-text-primary);border-color:var(--wb-text-tertiary)}
 .kb-scope-btn .icon{width:12px;height:12px;flex-shrink:0}
+.rag-foot{border-top:1px solid var(--wb-border-default);padding:8px 12px;font-size:11.5px;line-height:18px;color:var(--wb-text-tertiary)}
+.rag-foot b{color:var(--wb-text-secondary);font-weight:600}
 .rag-cites{border-top:1px solid var(--wb-border-default);padding:8px 12px;display:flex;flex-direction:column;gap:8px}
 .rag-cite{border-left:2px solid var(--wb-brand-primary);padding-left:10px}
 .rag-cite-head{display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:3px}
@@ -2825,6 +2827,15 @@ function kbDetailHTML(k){
   </div>`;
 }
 /** 本轮引用了知识库时构造检索过程：命中切片由 kbSearch 真实算出 */
+/** 检索式改写：主查询取原问句，备查询放宽为单字/关键词，用于证据不足时的第二轮 */
+function kbRewrite(q){
+  const toks = kbTokens(q);
+  const latin = toks.filter(t=>/^[a-z0-9_.]+$/.test(t));
+  const zh = String(q).replace(/[^一-龥]/g,'');
+  const wide = [...new Set(latin.concat(zh.split('')))].slice(0,8);
+  return { main:String(q).trim(), wide:wide.join(' ') };
+}
+/** agentic 检索：改写 → 首轮召回 → 证据充分性判定 → 不足则二轮 → 只把命中切片作为引用 */
 function buildRag(promptText){
   const ids = DB.pendingKbs || [];
   DB.pendingKbs = [];
@@ -2834,21 +2845,32 @@ function buildRag(promptText){
   if(!kbs.length) return null;
   kbs.filter(k=>!kbOwned(k)).forEach(k=>DB.audits.unshift({ kind:'perm', owner:me().id, icon:'library',
     title:`检索共享知识库 ${k.name}`, desc:`所有者 ${ownerOf(k.owner)?ownerOf(k.owner).name:'—'} · ${scopeDetail(k)} · 只读`, time:nowHM() }));
-  const hits = [];
-  kbs.forEach(k=>kbSearch(k, promptText).forEach(h=>hits.push({...h, kb:k.name})));
-  hits.sort((a,b)=>b.score-a.score);
-  const top = hits.slice(0,3);
-  return {
-    kbs: kbs.map(k=>k.name),
-    chunkTotal: kbs.reduce((n,k)=>n+kbChunkCount(k),0),
-    state: 'run',
-    steps: [
-      { name:'向量召回', st:'todo', note:`${kbs.reduce((n,k)=>n+kbChunkCount(k),0)} 个切片` },
-      { name:'重排', st:'todo', note:`候选 ${hits.length} 条` },
-      { name:'带引用作答', st:'todo', note:top.length?`采用 ${top.length} 条`:'无命中' },
-    ],
-    hits: top,
-  };
+
+  const rw = kbRewrite(promptText);
+  const searchAll = q => { const out=[]; kbs.forEach(k=>kbSearch(k,q).forEach(h=>out.push({...h, kb:k.name}))); return out.sort((a,b)=>b.score-a.score); };
+
+  const r1 = searchAll(rw.main);
+  // 证据判定：首条相似度够高且至少两条互相印证，才认为不必再检索
+  const enough = r1.length>=2 && r1[0] && r1[0].score>=0.34;
+  const r2 = enough ? [] : searchAll(rw.wide);
+  const merged = [];
+  r1.concat(r2).forEach(h=>{ if(!merged.some(x=>x.doc===h.doc && x.idx===h.idx)) merged.push(h); });
+  const top = merged.slice(0,3);
+
+  const docTotal = kbs.reduce((n,k)=>n+k.docs.filter(d=>d.status==='done').length,0);
+  const chunkTotal = kbs.reduce((n,k)=>n+kbChunkCount(k),0);
+  const chars = top.reduce((n,h)=>n+h.text.length,0);
+
+  const steps = [
+    { name:'解析问题 · 生成检索式', st:'todo', note: rw.main.length>22 ? rw.main.slice(0,22)+'…' : rw.main },
+    { name:'第 1 轮检索', st:'todo', note:`命中 ${r1.length} 条 / 共 ${chunkTotal} 切片` },
+    { name:'评估证据是否充分', st:'todo', note: enough ? '充分，停止检索' : '不足，改写后再检索' },
+  ];
+  if(!enough) steps.push({ name:'第 2 轮检索 · 放宽检索式', st:'todo', note:`命中 ${r2.length} 条` });
+  steps.push({ name:'采纳切片作为引用', st:'todo', note: top.length?`${top.length} 条`:'无可用证据' });
+
+  return { kbs: kbs.map(k=>k.name), state:'run', steps, hits: top,
+    stat:{ docTotal, chunkTotal, used: top.length, chars, rounds: enough?1:2 } };
 }
 function ragHTML(m){
   const r = m.rag;
@@ -2873,6 +2895,10 @@ function ragHTML(m){
       </div>`).join('')}
     </div>` : ''}
     ${r.state==='done' && !r.hits.length ? `<div class="rag-cites"><div class="sec-note">知识库中没有命中相关切片，以下回答未使用知识库引用</div></div>` : ''}
+    ${r.state==='done' ? `<div class="rag-foot">
+      进入上下文：${r.stat.used} 个切片（约 ${r.stat.chars} 字）· 检索 ${r.stat.rounds} 轮 ·
+      知识库内 ${r.stat.docTotal} 个文档 / ${r.stat.chunkTotal} 个切片<b>未整篇载入</b>，模型只看到上面列出的引用
+    </div>` : ''}
   </div>`;
 }
 /* ---- 账号与项目组管理（仅管理员，且只改应用侧属性） ---- */
@@ -3233,7 +3259,7 @@ function centerTabHTML(){
         <button class="wb-btn wb-btn--primary" data-action="kb-new">${icon('plus','')}新建知识库</button>
       </div>
     </div>
-    <div class="sec-note" style="margin-top:10px;max-width:760px">新建的知识库默认仅自己可见；共享后同事只能检索与引用，不能增删文档或改设置。共享来的知识库，其文档仍存放在所有者沙箱内，读取记入审计。</div>
+    <div class="sec-note" style="margin-top:10px;max-width:760px">知识库是检索层，不是文件夹：会话中引用后，助手先检索、必要时改写再检索，只把命中的切片连同出处带入上下文，不会整篇载入原文档；需要让助手通读某份文件，请用「工作空间」引用。新建的知识库默认仅自己可见；共享后同事只能检索与引用，不能增删文档或改设置。共享来的知识库，其文档仍存放在所有者沙箱内，读取记入审计。</div>
     ${cur?kbDetailHTML(cur):''}`;
   }
   if(DB.centerTab==='model'){
@@ -3624,13 +3650,13 @@ function openAttachPop(anchor, origin){
     <div class="pop-head" style="font-weight:600">添加引用</div>
     ${refs.length? refs.map(a=>`<button class="pop-item" data-ref="${esc(a.file)}"><span class="mlogo" style="background:var(--wb-status-success-soft-bg);color:var(--wb-status-success-text);display:flex;align-items:center;justify-content:center">M</span>${esc(a.file)}</button>`).join('') : ''}
     ${visibleKbs().length?`<div class="pop-sep"></div>
-    <div class="pop-head" style="font-size:11px;color:var(--wb-text-tertiary)">知识库</div>
+    <div class="pop-head" style="font-size:11px;color:var(--wb-text-tertiary)">知识库 · 检索后只带回相关切片</div>
     ${visibleKbs().map(k=>`<button class="pop-item ws-file" data-kb-ref="${k.id}" title="${esc(methodOf(k.method).desc)}">
       ${icon('library','')}
       <span class="ws-file-main"><b>${esc(k.name)}</b><i>${kbOwned(k)?esc(methodLabel(k.method)):esc((ownerOf(k.owner)?ownerOf(k.owner).name:'—')+' 共享')} · ${k.docs.length} 文档 · ${kbChunkCount(k)} 切片</i></span>
     </button>`).join('')}`:''}
     ${files.length?`<div class="pop-sep"></div>
-    <div class="pop-head" style="font-size:11px;color:var(--wb-text-tertiary)">工作空间 · ${esc(ws?ws.name:'—')}</div>
+    <div class="pop-head" style="font-size:11px;color:var(--wb-text-tertiary)">工作空间 · ${esc(ws?ws.name:'—')} · 整份文件交给助手读</div>
     ${files.map(f=>`<button class="pop-item ws-file" data-wsfile="${esc(f.path)}" title="${esc(f.path)}">
       ${icon(FILE_ICONS[f.ext]||'file','')}
       <span class="ws-file-main"><b>${esc(f.name)}</b><i>${esc(f.mount.name)}${f.mount.readOnly?' · 只读':''}</i></span>
@@ -4058,6 +4084,7 @@ function renderTokensPage(){
          ['重排模型',DB.kbPipeline.rerank],['索引',DB.kbPipeline.store],
          ['切片模板',DB.kbMethods.map(m=>m.label).join(' / ')]].map(([k,v])=>
         `<div class="set-row"><div><div class="set-t">${esc(k)}</div><div class="set-d">${esc(v)}</div></div></div>`).join('')}
+      <div class="set-row"><div><div class="set-t">检索策略</div><div class="set-d">agentic：改写检索式 → 召回 → 证据充分性判定 → 不足则二轮检索 → 仅命中切片入上下文，原文档不整篇载入</div></div></div>
       <div class="set-row"><div><div class="set-t">部署形态</div><div class="set-d">能力内建于本应用，不额外拉起独立检索服务；全过程在内网完成、不出网</div></div></div>
     </div>
     <div class="sec-h">设计令牌<span class="sec-note">色阶取自 --wb-* 变量计算值，随主题实时变化 · 来源：WorkBuddy 5.3.11 设计 token（light 603 / dark 857）</span></div>
