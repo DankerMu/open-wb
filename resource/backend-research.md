@@ -148,10 +148,26 @@
   bash/read/edit/write 内置工具。
 - 顺序纪律：阶段 1 先做并实测；2/3 只在数字不达标时进入；4 独立于 1-3，随集成一起做。
 
-## 3. 开放问题（待定，不阻塞）
+## 3. 决策记录与开放问题
 
-- 内网如何分发 `InfiniFlow/deepdoc` 的 onnx 模型与 embedding/rerank 模型权重（HF 镜像 or 制品库）。
+已定（2026-08-29 讨论定案）：
+
+- **模型分发 = 捆进部署包**。deepdoc onnx 与 Python 依赖（wheel，含 `infinity`）随 kb-service
+  部署包捆绑，`snapshot_download` 改为包内本地路径，不依赖内网制品库/HF 镜像；
+  bge-m3 / bge-reranker-v2-m3 不由 kb-service 本地加载，走模型注册表的服务化端点，
+  权重分发归模型服务部署侧。
+- **omp 冻结后的 CVE 策略 = 允许例外 cherry-pick**。触发线：高危且内网可利用
+  （RCE/路径穿越/凭证泄露），DoS 与公网向量忽略。响应优先级：配置面缓解 →
+  自修最小 patch → cherry-pick 上游单个安全 commit；**禁止升版本**。
+  感知渠道：季度对 lockfile 跑 osv-scanner/`bun audit` + 订阅 Bun release notes。
+- **KB 检索 host tool = app-server 转发**。kb-service 只信 app-server 一个客户端，
+  权限过滤与审计在转发点。**附带硬约束**：omp 有 bash 工具，可直连本地端口——
+  kb-service 必须对每请求鉴权，凭证只在 app-server 手里，绝不进 omp 子进程环境变量，
+  且沙箱白名单须排除 app-server 配置文件。
+
+开放（待定，不阻塞）：
+
 - ~~根级 LICENSE~~ 已定 Apache-2.0；~~omp 归属条目~~ 已入 `ATTRIBUTION.md` §3（2026-08-29）。
-- omp 冻结后的安全修复策略：出高危 CVE 时是自修还是例外性 cherry-pick，届时再定。
-- kb-service（Python）与 omp（RPC 子进程）之间：KB 检索 host tool 由 app-server 转发，
-  还是 omp 直连 kb-service 的本地端口——前者审计链完整，后者少一跳。**[INFERENCE]** 倾向前者。
+- omp 会话的模型网关凭证：架构上 omp 直连模型注册表，意味着网关凭证进 omp 子进程环境。
+  共享密钥最简单但一泄全泄；理想是 app-server 每会话签发限额 token（网关需支持）。
+  与 P0 内网 provider 接通一起定。
