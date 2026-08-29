@@ -650,6 +650,64 @@ a{color:inherit;text-decoration:none}
 .sb-user:hover{background:var(--wb-bg-hover)}
 .sb-user .sb-uinfo{display:block}
 .sb-user .sb-uname,.sb-user .sb-uplan{display:block}
+/* ==================== 工作空间文件页 ==================== */
+.pop-item.ws-item,.pop-item.ws-file{align-items:center;gap:8px}
+.ws-item-main,.ws-file-main{flex:1;min-width:0;text-align:left}
+.ws-item-main b,.ws-file-main b{display:block;font-size:12.5px;font-weight:550;line-height:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ws-item-main i,.ws-file-main i{display:block;font-style:normal;font-family:var(--wb-mono);font-size:10.5px;color:var(--wb-text-tertiary);line-height:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fs-ws{display:flex;align-items:center;gap:8px;margin:10px 10px 4px;padding:8px 10px;border:1px solid var(--wb-border-default);border-radius:10px;background:var(--wb-bg-primary);cursor:pointer;color:var(--wb-text-primary)}
+.fs-ws:hover{background:var(--wb-bg-hover)}
+.fs-ws .icon{width:15px;height:15px;flex-shrink:0;color:var(--wb-icon-secondary)}
+.fs-ws-main{flex:1;min-width:0;text-align:left}
+.fs-ws-main b{display:block;font-size:12.5px;font-weight:600;line-height:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fs-ws-main i{display:block;font-style:normal;font-family:var(--wb-mono);font-size:10.5px;color:var(--wb-text-tertiary);line-height:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fs-layout{display:flex;height:100%;min-height:0;overflow:hidden}
+.fs-tree{width:280px;flex-shrink:0;border-right:1px solid var(--wb-border-default);display:flex;flex-direction:column;overflow:hidden;background:var(--wb-bg-secondary)}
+.fs-tree-head{display:flex;align-items:center;justify-content:space-between;padding:10px 12px 6px;font-size:11.5px;font-weight:600;color:var(--wb-text-tertiary);letter-spacing:.02em}
+.fs-root{margin-top:2px;font-weight:600}
+.fs-root:first-child{margin-top:0}
+.fs-root-name{flex:1;min-width:0;font-size:12.5px}
+.fs-root .tag{flex-shrink:0}
+.fs-root-path{padding:0 8px 4px 34px;font-family:var(--wb-mono);font-size:10.5px;color:var(--wb-text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fs-root-off{padding:2px 8px 6px 34px;font-size:11px;color:var(--wb-text-tertiary)}
+.fs-caret-ph{width:12px;flex-shrink:0}
+.fs-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.fs-dot--online{background:var(--wb-status-success)}
+.fs-dot--offline{background:var(--wb-icon-muted)}
+.fs-unmount{display:flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:5px;flex-shrink:0;color:var(--wb-text-tertiary);opacity:0}
+.fs-root:hover .fs-unmount{opacity:1}
+.fs-unmount:hover{background:var(--wb-bg-hover);color:var(--wb-status-error)}
+.fs-nodes{flex:1;min-height:0;overflow:auto;padding:0 6px 12px}
+.fs-node{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:6px;font-size:12.5px;cursor:pointer;color:var(--wb-text-primary);white-space:nowrap;overflow:hidden}
+.fs-node:hover{background:var(--wb-bg-hover)}
+.fs-node.sel{background:var(--wb-brand-primary-subtle);color:var(--wb-brand-primary-deep)}
+.fs-node .icon{width:14px;height:14px;flex-shrink:0;color:var(--wb-icon-secondary)}
+.fs-node span{overflow:hidden;text-overflow:ellipsis}
+.fs-node i{margin-left:auto;font-style:normal;font-size:10.5px;color:var(--wb-text-tertiary);flex-shrink:0}
+.fs-caret{transform:rotate(-90deg);transition:transform .12s}
+.fs-node.open .fs-caret{transform:none}
+.fs-preview{flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden}
+.fs-crumbs{display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--wb-border-default);flex-shrink:0}
+.fs-crumbs .icon{width:15px;height:15px;color:var(--wb-icon-secondary)}
+.fs-crumb-path{font-family:var(--wb-mono);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fs-crumb-meta{margin-left:auto;font-size:11px;color:var(--wb-text-tertiary);flex-shrink:0}
+.fs-code{flex:1;overflow:auto;padding:6px 0}
+.fs-code table{border-collapse:collapse;width:100%;font-family:var(--wb-mono);font-size:12px;line-height:19px}
+.fs-code td.ln{width:1%;text-align:right;padding:0 12px 0 14px;color:var(--wb-text-disabled);user-select:none;vertical-align:top}
+.fs-code td.lc{white-space:pre-wrap;word-break:break-word;padding-right:16px;color:var(--wb-text-primary)}
+.fs-code tr:hover td.lc{background:var(--wb-bg-hover)}
+.fs-md{flex:1;overflow:auto;padding:18px 22px;max-width:840px}
+.fs-md h1{font-size:22px;line-height:30px;margin:0 0 10px}
+.fs-md h2{font-size:16px;line-height:24px;margin:22px 0 8px}
+.fs-md h3{font-size:14px;line-height:22px;margin:18px 0 6px}
+.fs-md p,.fs-md ul,.fs-md ol{margin:0 0 10px}
+.fs-md li{margin:2px 0}
+.fs-md code{font-family:var(--wb-mono);font-size:12px;background:var(--wb-bg-hover);padding:1px 5px;border-radius:4px}
+.fs-table{flex:1;overflow:auto;padding:12px 16px}
+.fs-img{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;padding:24px;background:var(--wb-bg-secondary)}
+.fs-img img{max-width:100%;max-height:100%;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12)}
+.fs-preview .empty-state{flex:1}
+@media (max-width:900px){ .fs-tree{width:210px} }
 .empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:56px 20px;color:var(--wb-text-secondary)}
 .empty-state .empty-icon{width:64px;height:64px;border-radius:20px;background:var(--wb-bg-hover);display:flex;align-items:center;justify-content:center;color:var(--wb-icon-muted)}
 .empty-state .empty-icon .icon{width:28px;height:28px}
@@ -705,7 +763,7 @@ a{color:inherit;text-decoration:none}
 .drawer-title{font-size:15px;font-weight:600;flex:1}
 .drawer-body{flex:1;overflow-y:auto;padding:16px 18px}
 /* 锚定弹层 (模型/工作空间/权限/附件/筛选) */
-.pop{position:absolute;bottom:84px;background:var(--wb-bg-primary);border:1px solid var(--wb-border-default);border-radius:12px;box-shadow:var(--wb-shadow-popover);padding:8px;width:300px;z-index:1300;display:none}
+.pop{position:absolute;bottom:84px;background:var(--wb-bg-primary);border:1px solid var(--wb-border-default);border-radius:12px;box-shadow:var(--wb-shadow-popover);padding:8px;width:300px;z-index:1300;display:none;max-height:min(70vh,520px);overflow-y:auto}
 .pop.show{display:block;animation:wb-pop .15s ease}
 .pop-head{display:flex;align-items:center;justify-content:space-between;padding:7px 10px;font-size:12.5px;font-weight:600}
 .pop-item{display:flex;align-items:center;gap:9px;width:100%;text-align:left;padding:8px 10px;border-radius:6px;font-size:13px;background:none;border:none;cursor:pointer;color:var(--wb-text-primary)}
@@ -1162,6 +1220,159 @@ const QUICK_PROMPTS = {
   '移动端 App':'帮我设计一个移动端打卡界面','设计系统':'帮我整理一套设计系统规范',
 };
 
+/* ================= 工作空间文件内容（演示用真实样例内容） ================= */
+const MOCK = {
+  weekly: `# 周报 · 第 31 周
+
+## 本周进展
+- 完成登录页状态分支重构，补齐 loading / error / empty 三态
+- 内网模型网关联调通过，平均首 token 延迟 480ms
+- 修复侧边栏任务分组在折叠态下计数错误
+
+## 下周计划
+- 工作空间文件预览接入 SFTP 挂载
+- 沙箱越界写入拦截补充单元测试
+
+## 风险
+共享盘 nas-01 本周两次离线，需要运维确认心跳配置。`,
+
+  delivery: `交付说明
+========
+产物目录：/data/workbuddy/zhangsan/out
+生成时间：2026-08-28 18:40
+包含文件：
+  周报-第31周.md   本周工作汇总
+  交付说明.txt     本文件
+
+校验方式：sha256sum *.md > checksums.txt
+注意：本目录在沙箱内，跨账号不可读。`,
+
+  loginView: `import { useState } from 'react';
+import { LoginForm, StateSkeleton, StateError, StateEmpty } from './components';
+
+export function LoginView() {
+  const [state, setState] = useState('idle');
+
+  if (state === 'loading') return <StateSkeleton rows={3} />;
+  if (state === 'error') return <StateError onRetry={() => setState('idle')} />;
+  if (state === 'empty') return <StateEmpty title="暂无可用账号" />;
+
+  return (
+    <LoginForm
+      onSubmit={async (v) => {
+        setState('loading');
+        try {
+          await signIn(v);
+        } catch {
+          setState('error');
+        }
+      }}
+    />
+  );
+}`,
+
+  config: `{
+  "model": "内网通用模型",
+  "endpoint": "http://llm-gw.intra:8000/v1",
+  "protocol": "OpenAI 兼容",
+  "sandbox": "/data/workbuddy/zhangsan",
+  "maxTokens": 4096,
+  "stream": true
+}`,
+
+  bundle: `/*! app.bundle.js — 构建产物，已压缩 */
+(function(){"use strict";var e=window.__APP__||{};function t(n,r){return n==null?r:n}
+e.boot=function(n){var r=t(n.root,document.body);r.setAttribute("data-booted","1");
+return{version:"5.3.11",mount:function(o){r.appendChild(o)}}};window.__APP__=e})();`,
+
+  indexHtml: `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>WebApp</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <div id="root"></div>
+  <scr` + `ipt src="/assets/app.bundle.js"></scr` + `ipt>
+</body>
+</html>`,
+
+  buildLog: `[07:01:58] 开始构建 webapp @ commit 3f9c2e1
+[07:01:59] 解析依赖 ... 412 个模块
+[07:02:03] 编译 TypeScript ... ok
+[07:02:07] 打包 assets/app.bundle.js  2.4 MB (gzip 612 KB)
+[07:02:07] 打包 assets/app.css        184 KB
+[07:02:08] WARN  未使用的导出: src/utils/legacy.ts#formatLegacyDate
+[07:02:08] 构建完成，用时 10.2s`,
+
+  metrics: `# 指标口径说明
+
+## 活跃用户（DAU）
+统计口径：当日发起过至少一次任务的去重账号数。
+排除：系统账号、压测账号（account 前缀 \`bot_\`）。
+
+## 区域拆解
+按账号所属部门映射到区域，映射表见 \`区域销售.csv\`。
+跨区调岗的账号按当月末归属计算，不追溯历史。
+
+## 环比 / 同比
+环比＝(本期 − 上期) / 上期，上期为自然月。
+同比对齐到去年同月，去年缺失月份不参与计算，直接标注为 —。`,
+
+  salesCsv: `区域,部门,7月销售额,8月销售额,环比
+华东,平台研发部,1284000,1391000,8.3%
+华南,产品部,962000,904000,-6.0%
+华北,数据部,1105000,1188000,7.5%
+西南,质量部,431000,467000,8.4%
+东北,设计部,288000,275000,-4.5%`,
+
+  dwCsv: `dt,region,channel,orders,gmv
+2026-08-01,华东,直营,12841,3910284
+2026-08-01,华南,分销,9620,2904118
+2026-08-02,华东,直营,13102,4021990
+2026-08-02,华南,分销,9188,2775431
+2026-08-03,华北,直营,11054,3388207`,
+
+  schema: `{
+  "table": "dw_sales_daily",
+  "partition": "dt",
+  "columns": [
+    { "name": "dt", "type": "date", "comment": "统计日期" },
+    { "name": "region", "type": "string", "comment": "区域" },
+    { "name": "channel", "type": "string", "comment": "渠道" },
+    { "name": "orders", "type": "bigint", "comment": "订单数" },
+    { "name": "gmv", "type": "decimal(18,2)", "comment": "成交金额（分）" }
+  ],
+  "refresh": "每日 03:00 全量覆盖"
+}`,
+
+  dwReadme: `# 数据仓库导出目录
+
+只读挂载，由 dw-node-02.intra 每日 03:00 推送。
+
+- 目录按月分区：\`YYYY-MM/\`
+- 每张表一个 csv，同名 \`schema.json\` 描述字段
+- 不要在此目录写入，写请求会被挂载层拒绝
+
+联系人：数据部 · 赵六`,
+
+  okr: `# 季度目标拆解
+
+## O1 提升内网 AI 助手渗透率
+- KR1 月活账号从 120 提升到 300
+- KR2 人均周任务数 ≥ 5
+- KR3 任务成功率 ≥ 92%（当前 87%）
+
+## O2 完成内网化改造
+- KR1 移除全部公网依赖（已完成）
+- KR2 模型全部切至内网推理节点（已完成）
+- KR3 账号体系接入统一身份（进行中）
+
+## 依赖
+GitLab 部署排期未定，代码类任务的仓库联动本季度不承诺。`,
+};
+
 /* ================= 应用状态 ================= */
 const DB = {
   theme:'system',
@@ -1170,12 +1381,22 @@ const DB = {
   // 会话/助理任务/审计均按 owner 隔离，切换账号后互不可见。
   users:[
     { id:'u1', name:'张三', account:'zhangsan', pwd:'demo', dept:'平台研发部', title:'前端工程师', role:'成员',
-      sandbox:'/data/workbuddy/zhangsan', spaces:['workbuddy-demo','智能客服重构'], quota:'20 GB' },
+      sandbox:'/data/workbuddy/zhangsan', quota:'20 GB' },
     { id:'u2', name:'赵六', account:'zhaoliu', pwd:'demo', dept:'数据部', title:'数据分析师', role:'成员',
-      sandbox:'/data/workbuddy/zhaoliu', spaces:['指标口径梳理','数据中台建设'], quota:'20 GB' },
+      sandbox:'/data/workbuddy/zhaoliu', quota:'20 GB' },
     { id:'u3', name:'李四', account:'lisi', pwd:'demo', dept:'产品部', title:'产品经理', role:'管理员',
-      sandbox:'/data/workbuddy/lisi', spaces:['workbuddy-demo','数据中台建设'], quota:'50 GB' },
+      sandbox:'/data/workbuddy/lisi', quota:'50 GB' },
   ],
+  // 工作空间：一等实体。root 位于用户沙箱内，任务启动于此，/files 页也按它过滤挂载点
+  workspaces:[
+    { id:'w1', owner:'u1', name:'workbuddy-demo', root:'/data/workbuddy/zhangsan/workbuddy-demo' },
+    { id:'w2', owner:'u1', name:'智能客服重构',   root:'/data/workbuddy/zhangsan/kefu' },
+    { id:'w3', owner:'u2', name:'指标口径梳理',   root:'/data/workbuddy/zhaoliu/metrics' },
+    { id:'w4', owner:'u2', name:'数据中台建设',   root:'/data/workbuddy/zhaoliu/dw' },
+    { id:'w5', owner:'u3', name:'workbuddy-demo', root:'/data/workbuddy/lisi/workbuddy-demo' },
+    { id:'w6', owner:'u3', name:'数据中台建设',   root:'/data/workbuddy/lisi/dw' },
+  ],
+  wsId:null,
   currentUser:null,
   loginError:'',
   route:'/',
@@ -1188,8 +1409,6 @@ const DB = {
   quickSelected:null,
   model:'内网通用模型',
   fullAccess:false,
-  space:'workbuddy-demo',   // 当前选中的工作空间（登录时按用户重置）
-  // spaces 来自当前用户（userSpaces()），此处仅保留当前选中值
   models:['内网通用模型','Qwen3-32B','DeepSeek-V3','GLM-4-32B'],
   // 内网模型注册表：endpoint 为内网地址，protocol 决定适配层
   modelRegistry:[
@@ -1199,16 +1418,16 @@ const DB = {
     { name:'GLM-4-32B', protocol:'Ollama', endpoint:'http://gpu-node-03.intra:11434', note:'轻量推理' },
   ],
   conversations: [
-    { id:'c1', owner:'u1', title:'统计活跃用户数', status:'running', group:'今天', time:Date.now()-1000*60*3, mode:'working', kind:'data' },
-    { id:'c2', owner:'u3', title:'2026 上半年经营数据分析报告', status:'done', group:'今天', time:Date.now()-1000*60*5, mode:'working', kind:'research' },
-    { id:'c3', owner:'u3', title:'部门季度目标拆解', status:'done', group:'今天', time:Date.now()-1000*60*6, mode:'working', kind:'research' },
-    { id:'c4', owner:'u2', title:'各区域销售指标口径核对', status:'done', group:'今天', time:Date.now()-1000*60*20, mode:'working', kind:'q3' },
-    { id:'c5', owner:'u1', title:'内部工具使用情况投票页', status:'done', group:'今天', time:Date.now()-1000*60*96, mode:'design', kind:'research' },
-    { id:'c6', owner:'u2', title:'销售周报 · 第 31 周', status:'done', group:'昨天', time:Date.now()-86400000, mode:'working', kind:'q3' },
-    { id:'c7', owner:'u3', title:'Q3 OKR 复盘材料整理', status:'done', group:'昨天', time:Date.now()-86400000-1000*60*60*4, mode:'working', kind:'research' },
-    { id:'c8', owner:'u1', title:'登录页样式修复', status:'failed', group:'过去7天', time:Date.now()-3*86400000, mode:'code', kind:'custom' },
-    { id:'c9', owner:'u1', title:'新品发布海报设计', status:'done', group:'过去7天', time:Date.now()-4*86400000, mode:'design', kind:'custom' },
-    { id:'c10', owner:'u2', title:'数据看板搭建', status:'done', group:'更早', time:Date.now()-12*86400000, mode:'working', kind:'custom' },
+    { id:'c1', ws:'w2', owner:'u1', title:'统计活跃用户数', status:'running', group:'今天', time:Date.now()-1000*60*3, mode:'working', kind:'data' },
+    { id:'c2', ws:'w5', owner:'u3', title:'2026 上半年经营数据分析报告', status:'done', group:'今天', time:Date.now()-1000*60*5, mode:'working', kind:'research' },
+    { id:'c3', ws:'w5', owner:'u3', title:'部门季度目标拆解', status:'done', group:'今天', time:Date.now()-1000*60*6, mode:'working', kind:'research' },
+    { id:'c4', ws:'w3', owner:'u2', title:'各区域销售指标口径核对', status:'done', group:'今天', time:Date.now()-1000*60*20, mode:'working', kind:'q3' },
+    { id:'c5', ws:'w1', owner:'u1', title:'内部工具使用情况投票页', status:'done', group:'今天', time:Date.now()-1000*60*96, mode:'design', kind:'research' },
+    { id:'c6', ws:'w3', owner:'u2', title:'销售周报 · 第 31 周', status:'done', group:'昨天', time:Date.now()-86400000, mode:'working', kind:'q3' },
+    { id:'c7', ws:'w5', owner:'u3', title:'Q3 OKR 复盘材料整理', status:'done', group:'昨天', time:Date.now()-86400000-1000*60*60*4, mode:'working', kind:'research' },
+    { id:'c8', ws:'w1', owner:'u1', title:'登录页样式修复', status:'failed', group:'过去7天', time:Date.now()-3*86400000, mode:'code', kind:'custom' },
+    { id:'c9', ws:'w2', owner:'u1', title:'新品发布海报设计', status:'done', group:'过去7天', time:Date.now()-4*86400000, mode:'design', kind:'custom' },
+    { id:'c10', ws:'w4', owner:'u2', title:'数据看板搭建', status:'done', group:'更早', time:Date.now()-12*86400000, mode:'working', kind:'custom' },
   ],
   pinned:['c1'],
   // 空间分组: 项目/工作空间/专家团 (真实侧栏结构)
@@ -1222,6 +1441,70 @@ const DB = {
     { id:'ac2', owner:'u1', title:'本地助理 · 文件扫描', status:'running', time:Date.now()-600e3 },
     { id:'ac3', owner:'u2', title:'本地助理 · 指标校验', status:'done', time:Date.now()-7200e3 },
   ],
+  // ===== 工作空间文件 =====
+  // 挂载点按 owner 隔离：每人默认挂载自己的沙箱根，其余为本机/远程服务器目录
+  // 挂载点：每个工作空间 = 自己的根目录（kind:'workspace'，不可卸载）+ 挂到它名下的服务器目录
+  mounts:[
+    { id:'r1', owner:'u1', ws:'w1', name:'workbuddy-demo', kind:'workspace', path:'/data/workbuddy/zhangsan/workbuddy-demo', host:'', proto:'', readOnly:false, status:'online' },
+    { id:'r2', owner:'u1', ws:'w2', name:'智能客服重构', kind:'workspace', path:'/data/workbuddy/zhangsan/kefu', host:'', proto:'', readOnly:false, status:'online' },
+    { id:'m2', owner:'u1', ws:'w2', name:'前端构建产物', kind:'local', path:'/srv/build/webapp', host:'', proto:'', readOnly:true, status:'online' },
+    { id:'r3', owner:'u2', ws:'w3', name:'指标口径梳理', kind:'workspace', path:'/data/workbuddy/zhaoliu/metrics', host:'', proto:'', readOnly:false, status:'online' },
+    { id:'r4', owner:'u2', ws:'w4', name:'数据中台建设', kind:'workspace', path:'/data/workbuddy/zhaoliu/dw', host:'', proto:'', readOnly:false, status:'online' },
+    { id:'m4', owner:'u2', ws:'w4', name:'数据仓库导出', kind:'remote', path:'/export/dw', host:'dw-node-02.intra', proto:'SFTP', readOnly:true, status:'online' },
+    { id:'r5', owner:'u3', ws:'w5', name:'workbuddy-demo', kind:'workspace', path:'/data/workbuddy/lisi/workbuddy-demo', host:'', proto:'', readOnly:false, status:'online' },
+    { id:'r6', owner:'u3', ws:'w6', name:'数据中台建设', kind:'workspace', path:'/data/workbuddy/lisi/dw', host:'', proto:'', readOnly:false, status:'online' },
+    { id:'m6', owner:'u3', ws:'w6', name:'产品共享盘', kind:'remote', path:'/share/product', host:'nas-01.intra', proto:'SMB', readOnly:false, status:'offline' },
+  ],
+  fileTrees:{
+    r1:[
+      { name:'out', type:'dir', children:[
+        { name:'周报-第31周.md', type:'file', ext:'md', size:'3.1 KB', mtime:'今天 09:12', content:MOCK.weekly },
+        { name:'交付说明.txt', type:'file', ext:'txt', size:'612 B', mtime:'昨天 18:40', content:MOCK.delivery },
+      ]},
+      { name:'截图.png', type:'file', ext:'png', size:'184 KB', mtime:'昨天 14:22', asset:'insp1' },
+      { name:'归档.zip', type:'file', ext:'zip', size:'86.3 MB', mtime:'上周' },
+    ],
+    r2:[
+      { name:'src', type:'dir', children:[
+        { name:'login-view.tsx', type:'file', ext:'tsx', size:'1.8 KB', mtime:'今天 08:30', content:MOCK.loginView },
+        { name:'config.json', type:'file', ext:'json', size:'428 B', mtime:'3 天前', content:MOCK.config },
+      ]},
+    ],
+    m2:[
+      { name:'assets', type:'dir', children:[
+        { name:'app.bundle.js', type:'file', ext:'js', size:'2.4 MB', mtime:'今天 07:02', content:MOCK.bundle },
+      ]},
+      { name:'index.html', type:'file', ext:'html', size:'1.2 KB', mtime:'今天 07:02', content:MOCK.indexHtml },
+      { name:'build.log', type:'file', ext:'log', size:'44 KB', mtime:'今天 07:02', content:MOCK.buildLog },
+    ],
+    r3:[
+      { name:'out', type:'dir', children:[
+        { name:'指标口径.md', type:'file', ext:'md', size:'2.2 KB', mtime:'今天 08:20', content:MOCK.metrics },
+      ]},
+      { name:'区域销售.csv', type:'file', ext:'csv', size:'1.1 KB', mtime:'今天 09:41', content:MOCK.salesCsv },
+    ],
+    r4:[
+      { name:'口径对照.md', type:'file', ext:'md', size:'2.2 KB', mtime:'昨天 16:10', content:MOCK.metrics },
+    ],
+    m4:[
+      { name:'2026-08', type:'dir', children:[
+        { name:'dw_sales_daily.csv', type:'file', ext:'csv', size:'8.4 MB', mtime:'今天 03:00', content:MOCK.dwCsv },
+        { name:'schema.json', type:'file', ext:'json', size:'1.6 KB', mtime:'今天 03:00', content:MOCK.schema },
+      ]},
+      { name:'README.md', type:'file', ext:'md', size:'980 B', mtime:'上周', content:MOCK.dwReadme },
+    ],
+    r5:[
+      { name:'out', type:'dir', children:[
+        { name:'季度目标拆解.md', type:'file', ext:'md', size:'2.8 KB', mtime:'昨天 17:05', content:MOCK.okr },
+      ]},
+      { name:'评审材料.png', type:'file', ext:'png', size:'220 KB', mtime:'3 天前', asset:'insp2' },
+    ],
+    r6:[],
+    m6:[],
+  },
+  currentFile:null,      // {path, node}
+  dirExpanded:{},
+  mdSource:false,        // Markdown 预览：渲染 / 源码
   currentConv:null,
   streaming:null,
   messages:{},
@@ -1304,14 +1587,16 @@ const Session = {
     // 清空跨用户可见的会话态，避免切换账号后残留
     DB.currentConv = null; DB.streaming = null; DB.inputText = '';
     DB.messages = {};   // 清空消息缓存，避免上一账号的会话内容残留在内存中
+    DB.wsId = null; DB.currentFile = null; DB.dirExpanded = {}; DB.mdSource = false;
     DB.attachments = {w:[],t:[],a:[]}; DB.assistantMsgs = []; DB.assistantStarted = false;
     DB.route = '/'; location.hash = '/';
     render();
   },
   applyUserScope(){
     const sp = userSpaces();
-    if(!sp.includes(DB.space)) DB.space = sp[0];
+    if(!sp.some(w=>w.id===DB.wsId)) DB.wsId = sp.length?sp[0].id:null;
     DB.currentConv = null;
+    DB.currentFile = null; DB.dirExpanded = {};
     DB.centerTab = 'expert';
   },
 };
@@ -1330,7 +1615,26 @@ function WHITELIST(u){
   return u.role==='管理员' ? base.concat(['查看全域审计日志','管理账号与沙箱配额']) : base;
 }
 function isAdmin(){ return !!DB.currentUser && DB.currentUser.role==='管理员'; }
-function userSpaces(){ return DB.currentUser ? DB.currentUser.spaces : []; }
+function userSpaces(){ return ownedBy(DB.workspaces); }
+function currentWs(){ return userSpaces().find(w=>w.id===DB.wsId) || null; }
+/** 当前工作空间的目录：工作空间根目录 + 挂到它名下的服务器目录 */
+function wsMounts(){
+  return ownedBy(DB.mounts).filter(m=>m.ws===DB.wsId);
+}
+/** 展平当前工作空间全部可读文件，供会话引用（只读挂载同样可读） */
+function wsFiles(){
+  const out=[];
+  wsMounts().forEach(m=>{
+    if(m.status!=='online') return;
+    const walk=(nodes,base)=>(nodes||[]).forEach(n=>{
+      const path=base+'/'+n.name;
+      if(n.type==='dir') walk(n.children,path);
+      else out.push({ path, name:n.name, ext:n.ext, size:n.size, mount:m });
+    });
+    walk(DB.fileTrees[m.id]||[], m.path);
+  });
+  return out;
+}
 /** 归属过滤：管理员在「审计」视图可见全部，其余一律只见本人数据 */
 function ownedBy(list){ const u=DB.currentUser; return u ? list.filter(x=>x.owner===u.id) : []; }
 function initials(name){ return name ? name.slice(-2) : '?'; }
@@ -1370,7 +1674,7 @@ function renderLoginPage(){
 
 /* ================= 路由 ================= */
 const PAGE_TITLES = {
-  '/':null, '/center':'中心', '/settings':'设置',
+  '/':null, '/files':'工作空间', '/center':'中心', '/settings':'设置', '/tokens':'设计令牌',
 };
 function parseRoute(){
   const h = location.hash.replace(/^#/,'') || '/';
@@ -1380,6 +1684,7 @@ function navigate(path){ if(location.hash !== '#'+path) location.hash = path; el
 function setSidebarTab(tab, extra){
   DB.sidebarTab = tab;
   if(tab==='chats') navigate('/');
+  else if(tab==='files') navigate('/files');
   else if(tab==='center') navigate('/center');
   else if(tab==='settings') navigate('/settings');
   else render();
@@ -1388,6 +1693,7 @@ function setSidebarTab(tab, extra){
 /* ================= 侧边栏渲染（核心：会话 + 中心 + 设置 入口，任务列表 + 本地用户页脚） ================= */
 const SB_TABS = [
   { id:'chats', label:'会话', icon:'chat' },
+  { id:'files', label:'工作空间', icon:'folder', sub:'文件·预览·挂载' },
   { id:'center', label:'中心', icon:'layoutGrid', sub:'专家·技能·连接器·模型·权限' },
   { id:'settings', label:'设置', icon:'settings' },
 ];
@@ -1671,6 +1977,9 @@ function openConversation(id){
     toast('该任务不属于当前账号，已拒绝访问','error');
     DB.audits.unshift({ kind:'perm', owner:me().id, icon:'lock', title:'越权访问会话被拒绝', desc:`任务 ${id} 不属于账号 ${me().account}`, time:nowHM() });
     return;
+  }
+  if(conv.ws && conv.ws!==DB.wsId){   // 打开会话时切回它启动时所在的工作空间
+    DB.wsId = conv.ws; DB.currentFile=null; DB.dirExpanded={};
   }
   DB.currentConv=id;
   if(!DB.messages[id]) seedMessages(id);
@@ -2174,7 +2483,7 @@ function playbooksHTML(){
   const canSend = DB.inputText.trim().length>0 || (DB.attachments[origin]||[]).length>0;
   const atts = DB.attachments[origin]||[];
   const footer = withFooter ? `<div class="slot-footer" data-od-id="composer-axes">
-      <button class="axis-btn" data-action="pop-space">${icon('folder','')}任务启动于<span class="axis-val">${esc(DB.space)}</span>${icon('chevronDown','icon--12')}</button>
+      <button class="axis-btn" data-action="pop-space">${icon('folder','')}任务启动于<span class="axis-val">${esc(currentWs()?currentWs().name:'未选择')}</span>${icon('chevronDown','icon--12')}</button>
       <button class="axis-btn" data-action="pop-perm">${icon('shield','')}权限<span class="axis-val">${DB.fullAccess?'完全访问':'默认权限'}</span>${icon('chevronDown','icon--12')}</button>
     </div>` : '';
   return `<div class="composer-slot">
@@ -2299,7 +2608,7 @@ function doSend(){
   if(!convId){
     convId = uid();
     const title = text.length>18 ? text.slice(0,18)+'…' : text;
-    DB.conversations.unshift({ id:convId, owner:me().id, title, status:'running', group:'今天', time:Date.now(), mode:detectMode(text), kind:'custom-live' });
+    DB.conversations.unshift({ id:convId, owner:me().id, ws:DB.wsId, title, status:'running', group:'今天', time:Date.now(), mode:detectMode(text), kind:'custom-live' });
     DB.currentConv=convId;
     DB.messages[convId]=[];
   }
@@ -2642,16 +2951,6 @@ function renderSettingsPage(){
         <div><div class="set-t">当前生效</div><div class="set-d" id="theme-resolved-line">${Theme.resolve()==='dark'?'深色':'浅色'} · 持久保存于 localStorage</div></div>
       </div>
     </div>
-    <div class="sec-h">设计令牌<span class="sec-note">色阶取自 --wb-* 变量计算值，随主题实时变化 · 来源：WorkBuddy 5.3.11 设计 token（light 603 / dark 857）</span></div>
-    <div class="sw-grid" id="token-swatches" data-od-id="token-swatches">
-      ${tokenSwatches().map(f=>`<div class="sw-fam">${f.label}</div>`+f.cells.map(c=>`
-        <div class="sw-cell"><div class="sw-chip" style="background:${c.val}"></div><div class="sw-name">${c.name}</div><div class="sw-val">${c.val}</div></div>`).join('')).join('')}
-    </div>
-    <div class="sec-h">语义层（当前主题计算值）</div>
-    <table class="tbl" id="sem-table" data-od-id="sem-table">
-      <thead><tr><th style="width:150px">语义</th><th>变量</th><th>计算值</th></tr></thead>
-      <tbody>${semTableRows()}</tbody>
-    </table>
     <div class="sec-h">关于</div>
     <div class="set-card" style="margin-bottom:20px">
       <div class="set-row">
@@ -2665,11 +2964,7 @@ function renderSettingsPage(){
     $$('[data-action="theme-set"]',root).forEach(x=>x.classList.toggle('on',x===b));
     $('#theme-resolved-line').textContent = (Theme.resolve()==='dark'?'深色':'浅色')+' · 持久保存于 localStorage';
     renderSidebar(); renderTopbar();
-    // 重绘色板
-    DB.tokenSwatches=null;
-    $('#token-swatches').outerHTML = `<div class="sw-grid" id="token-swatches">${tokenSwatches().map(f=>`<div class="sw-fam">${f.label}</div>`+f.cells.map(c=>`
-        <div class="sw-cell"><div class="sw-chip" style="background:${c.val}"></div><div class="sw-name">${c.name}</div><div class="sw-val">${c.val}</div></div>`).join('')).join('')}</div>`;
-    $('#sem-table tbody').innerHTML = semTableRows();
+    DB.tokenSwatches=null;   // 色板在 /tokens 页按需重算
     toast('主题已切换');
   }));
 }
@@ -2694,27 +2989,47 @@ function openModelPop(anchor){
 }
 function openSpacePop(anchor){
   closePops();
-  const list = userSpaces().filter(s=>s.includes((window.__spaceQuery||'')));
+  const q = (window.__spaceQuery||'');
+  const list = userSpaces().filter(w=>w.name.includes(q));
   const pop = buildPop('pop-space', `
     <input class="pop-search" placeholder="搜索工作空间" data-action="space-search">
-    ${list.map(s=>`<button class="pop-item ${DB.space===s?'on':''}" data-pick-space="${esc(s)}"><span class="mlogo" style="background:var(--wb-palette-gray-5)"></span>${esc(s)}${DB.space===s?'<span class="chk">✓</span>':''}</button>`).join('')}
+    ${list.map(w=>`<button class="pop-item ws-item ${DB.wsId===w.id?'on':''}" data-pick-space="${esc(w.id)}">
+      <span class="mlogo" style="background:var(--wb-palette-gray-5)"></span>
+      <span class="ws-item-main"><b>${esc(w.name)}</b><i>${esc(w.root)}</i></span>
+      ${DB.wsId===w.id?'<span class="chk">✓</span>':''}
+    </button>`).join('')||`<div class="conv-group-empty">没有匹配的工作空间</div>`}
     <div class="pop-sep"></div>
     <button class="pop-item" data-action="new-space">＋ 新建工作空间</button>
-    <button class="pop-item" data-action="open-folder">▤ 打开本地文件夹</button>`, anchor);
+    <button class="pop-item" data-action="open-folder">▤ 挂载目录到当前空间</button>`, anchor, 300);
   $('[data-action="space-search"]',pop).addEventListener('input', debounce(e=>{ window.__spaceQuery=e.target.value; openSpacePop(anchor); },200));
   $$('[data-pick-space]',pop).forEach(b=>b.addEventListener('click', ()=>{
-    DB.space=b.dataset.pickSpace;
-    closePops(); renderComposer();
-    toast(`已切换工作空间「${DB.space}」`);
+    closePops(); switchWorkspace(b.dataset.pickSpace);
+    toast(`已切换工作空间「${currentWs().name}」`);
   }));
   $('[data-action="new-space"]',pop).addEventListener('click', ()=>{ closePops(); newWorkspaceModal(); });
-  $('[data-action="open-folder"]',pop).addEventListener('click', ()=>{ closePops(); toast('选择本地目录（演示）','info'); });
+  $('[data-action="open-folder"]',pop).addEventListener('click', ()=>{ closePops(); navigate('/files'); setTimeout(openMountDialog,0); });
 }
 function newWorkspaceModal(){
-  const wrap = openModal({ title:'新建工作空间', body:`<div class="form-group"><label class="form-label">工作空间名称</label><input class="wb-input" id="ws-name" placeholder="输入工作空间名称"><div class="form-hint">本地将自动创建同名文件夹，命名后不可随意更改</div></div>`,
+  const wrap = openModal({ title:'新建工作空间', body:`<div class="form-group"><label class="form-label">工作空间名称</label><input class="wb-input" id="ws-name" placeholder="输入工作空间名称"><div class="form-hint">将在你的沙箱内创建同名目录：<span style="font-family:var(--wb-mono)">${esc(me().sandbox)}/&lt;目录名&gt;</span></div></div>
+    <div class="form-group"><label class="form-label">目录名</label><input class="wb-input" id="ws-dir" placeholder="留空则按名称生成"></div>`,
     foot:`<button class="wb-btn wb-btn--ghost" data-cancel>取消</button><button class="wb-btn wb-btn--primary" data-ok>创建</button>`, width:'sm' });
   $('[data-cancel]',wrap).addEventListener('click', ()=>closeModal(wrap));
-  $('[data-ok]',wrap).addEventListener('click', ()=>{ const n=$('#ws-name',wrap).value.trim(); if(!n){ toast('请输入名称','error'); return; } me().spaces.push(n); DB.space=n; closeModal(wrap); renderComposer(); toast(`工作空间「${n}」已创建`); });
+  $('[data-ok]',wrap).addEventListener('click', ()=>{
+    const n=$('#ws-name',wrap).value.trim();
+    if(!n){ toast('请输入名称','error'); return; }
+    if(userSpaces().some(w=>w.name===n)){ toast('同名工作空间已存在','error'); return; }
+    const dir = ($('#ws-dir',wrap).value.trim() || n).replace(/[^\w\u4e00-\u9fa5-]/g,'-');
+    const id = 'w'+uid();
+    const root = me().sandbox+'/'+dir;
+    DB.workspaces.push({ id, owner:me().id, name:n, root });
+    // 工作空间根目录本身即树根，不可卸载
+    const mid = 'r'+uid();
+    DB.mounts.push({ id:mid, owner:me().id, ws:id, name:n, kind:'workspace', path:root, host:'', proto:'', readOnly:false, status:'online' });
+    DB.fileTrees[mid]=[];
+    DB.audits.unshift({ kind:'perm', owner:me().id, icon:'folder', title:`创建工作空间 ${n}`, desc:`根目录 ${root}`, time:nowHM() });
+    closeModal(wrap); switchWorkspace(id); renderComposer();
+    toast(`工作空间「${n}」已创建`);
+  });
 }
 function openPermPop(anchor){
   closePops();
@@ -2732,26 +3047,40 @@ function openPermPop(anchor){
 function openAttachPop(anchor, origin){
   closePops();
   const refs = (DB.messages[DB.currentConv]||[]).flatMap(m=>m.artifacts||[]);
+  const ws = currentWs();
+  const files = wsFiles().slice(0,8);   // 工作空间可读文件（只读挂载同样可引用）
   const pop = buildPop('pop-attach', `
     <div class="pop-head" style="font-weight:600">添加引用</div>
-    ${refs.length? refs.map(a=>`<button class="pop-item" data-ref="${esc(a.file)}"><span class="mlogo" style="background:var(--wb-status-success-soft-bg);color:var(--wb-status-success-text);display:flex;align-items:center;justify-content:center">M</span>${esc(a.file)}</button>`).join('') : `<div class="pop-note" style="color:var(--wb-text-secondary);font-size:11.5px">当前对话中暂无文件</div>`}
+    ${refs.length? refs.map(a=>`<button class="pop-item" data-ref="${esc(a.file)}"><span class="mlogo" style="background:var(--wb-status-success-soft-bg);color:var(--wb-status-success-text);display:flex;align-items:center;justify-content:center">M</span>${esc(a.file)}</button>`).join('') : ''}
+    ${files.length?`<div class="pop-sep"></div>
+    <div class="pop-head" style="font-size:11px;color:var(--wb-text-tertiary)">工作空间 · ${esc(ws?ws.name:'—')}</div>
+    ${files.map(f=>`<button class="pop-item ws-file" data-wsfile="${esc(f.path)}" title="${esc(f.path)}">
+      ${icon(FILE_ICONS[f.ext]||'file','')}
+      <span class="ws-file-main"><b>${esc(f.name)}</b><i>${esc(f.mount.name)}${f.mount.readOnly?' · 只读':''}</i></span>
+      <span style="font-size:10.5px;color:var(--wb-text-tertiary);flex-shrink:0">${esc(f.size||'')}</span>
+    </button>`).join('')}
+    <button class="pop-item" data-action="browse-files">▤ 在工作空间中浏览…</button>`:''}
     <div class="pop-sep"></div>
-    <button class="pop-item" data-action="upload">↑ 上传本地文件…</button>`, anchor, 270);
-  $$('[data-ref]',pop).forEach(b=>b.addEventListener('click', ()=>{
-    const o = origin==='a'?'a':(document.querySelector('.task-composer')?'t':'w');
-    DB.attachments[o].push({name:b.dataset.ref, type:'file'});
-    closePops();
+    <button class="pop-item" data-action="upload">↑ 上传本地文件…</button>`, anchor, 300);
+  const target = ()=> origin==='a'?'a':(document.querySelector('.task-composer')?'t':'w');
+  const push = (att, msg)=>{
+    const o=target(); DB.attachments[o].push(att); closePops();
     if(o==='w' && !document.querySelector('.task-composer')) renderComposer(); else renderChatPage();
-    toast(`已引用「${b.dataset.ref}」`);
+    toast(msg);
+  };
+  $$('[data-ref]',pop).forEach(b=>b.addEventListener('click', ()=>
+    push({name:b.dataset.ref, type:'file'}, `已引用「${b.dataset.ref}」`)));
+  $$('[data-wsfile]',pop).forEach(b=>b.addEventListener('click', ()=>{
+    const f = wsFiles().find(x=>x.path===b.dataset.wsfile);
+    if(!f){ toast('文件不存在','error'); return; }
+    push({name:f.name, path:f.path, type:(f.ext==='png'||f.ext==='jpg'||f.ext==='jpeg')?'img':'file'},
+      `已引用工作空间文件「${f.name}」`);
   }));
+  $('[data-action="browse-files"]',pop)?.addEventListener('click', ()=>{ closePops(); navigate('/files'); });
   $('[data-action="upload"]',pop).addEventListener('click', ()=>{
     const names=['需求文档.docx','产品截图.png','销售数据.xlsx','会议录音.m4a'];
     const name = names[Math.floor(Math.random()*names.length)];
-    const o = origin==='a'?'a':(document.querySelector('.task-composer')?'t':'w');
-    DB.attachments[o].push({name, type:name.includes('.png')?'img':'file'});
-    closePops();
-    if(o==='w' && !document.querySelector('.task-composer')) renderComposer(); else renderChatPage();
-    toast(`已添加附件「${name}」`);
+    push({name, type:name.includes('.png')?'img':'file'}, `已添加附件「${name}」`);
   });
 }
 function closePops(){ $$('.pop').forEach(p=>p.classList.remove('show')); }
@@ -2778,7 +3107,12 @@ function buildPop(id, html, anchor, width){
   pop.style.bottom = 'auto';
   pop.style.left = clamp(r.left, 8, innerWidth - (width||300) - 8)+'px';
   if(r.bottom + pop.offsetHeight + 8 < innerHeight) pop.style.top = (r.bottom + 6)+'px';
-  else pop.style.bottom = (innerHeight - r.top + 6)+'px';
+  else {
+    // 向上展开：不足以完整放下时贴顶并让内部滚动，避免被视口裁掉
+    const above = r.top - 6;
+    if(pop.offsetHeight + 8 > above){ pop.style.top = '8px'; pop.style.maxHeight = (above - 8)+'px'; }
+    else pop.style.bottom = (innerHeight - r.top + 6)+'px';
+  }
   return pop;
 }
 
@@ -2866,12 +3200,245 @@ function openArtifactPreview(code, file){
   toast('已在浏览器打开预览');
 }
 
+
+
+/* ================= 工作空间文件页（/files）：挂载点 + 目录树 + 预览 ================= */
+const FILE_ICONS = { md:'fileText', txt:'fileText', log:'fileText', csv:'fileSpreadsheet',
+  json:'code', js:'fileCode', tsx:'fileCode', ts:'fileCode', html:'fileCode',
+  png:'image', jpg:'image', jpeg:'image', zip:'package' };
+const PREVIEWABLE = new Set(['md','txt','log','csv','json','js','ts','tsx','html','png','jpg','jpeg']);
+function fileIcon(n){ return n.type==='dir' ? 'folder' : (FILE_ICONS[n.ext]||'file'); }
+function myMounts(){ return wsMounts(); }   // /files 只展示当前工作空间的目录
+/** 当前工作空间的树根：工作空间根目录在前，挂载目录在后 */
+function fsRoots(){
+  const ms = myMounts();
+  return ms.filter(m=>m.kind==='workspace').concat(ms.filter(m=>m.kind!=='workspace'));
+}
+/** 首次进入某工作空间时展开工作空间根，避免只看到一行折叠的树 */
+function expandDefaultRoots(){
+  fsRoots().forEach(m=>{ if(m.kind==='workspace' && DB.dirExpanded[m.path]===undefined) DB.dirExpanded[m.path]=true; });
+}
+/** 切换工作空间：composer 与 /files 保持一致 */
+function switchWorkspace(id){
+  if(DB.wsId===id) return;
+  DB.wsId = id;
+  DB.currentFile = null; DB.dirExpanded = {};
+  if(DB.route==='/files') renderFilesPage(); else renderComposer();
+}
+
+function renderFilesPage(){
+  const root = $('#page-root'); root.className='page-root';
+  const ws = currentWs();
+  const roots = fsRoots();
+  expandDefaultRoots();
+  root.innerHTML = `<div class="fs-layout" data-od-id="files-page">
+    <div class="fs-tree">
+      <button class="fs-ws" data-action="ws-switch" title="切换工作空间">
+        ${icon('layoutGrid','')}
+        <span class="fs-ws-main"><b>${esc(ws?ws.name:'未选择工作空间')}</b><i>${esc(ws?ws.root:'—')}</i></span>
+        ${icon('chevronDown','icon--12')}
+      </button>
+      <div class="fs-tree-head">
+        <span>工作空间目录</span>
+        <button class="icon-btn" data-action="mount-add" title="挂载目录">${icon('plus','')}</button>
+      </div>
+      <div class="fs-nodes">${roots.map(rootHTML).join('')||`<div class="conv-group-empty">该工作空间暂无目录</div>`}</div>
+    </div>
+    <div class="fs-preview">${previewHTML()}</div>
+  </div>`;
+  bindFilesPage();
+}
+/** 一个树根：挂载点自身信息（状态/只读/卸载）挂在根行上，下面直接展开它的内容 */
+function rootHTML(m){
+  const online = m.status==='online';
+  const open = online && !!DB.dirExpanded[m.path];
+  const loc = m.kind==='remote' ? m.host+':'+m.path : m.path;
+  const head = `<div class="fs-node fs-root ${open?'open':''}"${online?` data-dir="${esc(m.path)}"`:''} title="${esc(loc)}">
+      ${online?icon('chevronDown','icon--12 fs-caret'):`<span class="fs-caret-ph"></span>`}
+      ${icon(m.kind==='remote'?'cloud':(m.kind==='workspace'?'shield':'folder'),'')}
+      <span class="fs-root-name">${esc(m.name)}</span>
+      ${m.readOnly?`<span class="tag" style="height:15px;font-size:10px">只读</span>`:''}
+      <span class="fs-dot fs-dot--${m.status}" title="${online?'在线':'离线'}"></span>
+      ${m.kind!=='workspace'?`<span class="fs-unmount" data-unmount="${m.id}" title="卸载">${icon('x','icon--12')}</span>`:''}
+    </div>
+    <div class="fs-root-path">${esc(loc)}</div>`;
+  if(!online) return head + `<div class="fs-root-off">离线，重新连接后可浏览</div>`;
+  if(!open) return head;
+  const nodes = DB.fileTrees[m.id]||[];
+  return head + (nodes.length ? treeHTML(nodes, m.path, 1) : `<div class="fs-root-off">空目录</div>`);
+}
+function treeHTML(nodes, parentPath, depth=0){
+  return nodes.map(n=>{
+    const path = parentPath+'/'+n.name;
+    if(n.type==='dir'){
+      const open = DB.dirExpanded[path];
+      return `<div class="fs-node ${open?'open':''}" data-dir="${esc(path)}" style="padding-left:${8+depth*12}px">
+          ${icon('chevronDown','icon--12 fs-caret')}${icon('folder','')}<span>${esc(n.name)}</span>
+        </div>` + (open ? treeHTML(n.children||[], path, depth+1) : '');
+    }
+    const sel = DB.currentFile && DB.currentFile.path===path;
+    return `<div class="fs-node fs-file ${sel?'sel':''}" data-file="${esc(path)}" style="padding-left:${20+depth*12}px">
+      ${icon(fileIcon(n),'')}<span>${esc(n.name)}</span><i>${esc(n.size||'')}</i>
+    </div>`;
+  }).join('');
+}
+/** 按根路径前缀定位所属挂载点（按边界匹配，避免 /a 误吞 /ab 的子路径） */
+function mountOf(path){
+  return fsRoots().find(m => path===m.path || path.startsWith(m.path+'/')) || null;
+}
+function findNode(path){
+  const m = mountOf(path); if(!m) return null;
+  const rest = path.slice(m.path.length).split('/').filter(Boolean);
+  let list = DB.fileTrees[m.id]||[], node=null;
+  for(const seg of rest){
+    node = (list||[]).find(x=>x.name===seg);
+    if(!node) return null;
+    list = node.children;
+  }
+  return node;
+}
+function previewHTML(){
+  if(!fsRoots().length) return `<div class="empty-state"><div class="empty-title">该工作空间暂无目录</div><div class="empty-desc">点击左上角 ＋ 挂载本服务器或外部服务器目录</div></div>`;
+  const f = DB.currentFile;
+  if(!f) return `<div class="empty-state"><div class="empty-title">未选择文件</div><div class="empty-desc">在左侧目录树中选择一个文件进行预览</div></div>`;
+  const m = f.mount, n = f.node, ext = n.ext||'';
+  const head = `<div class="fs-crumbs">
+      ${icon(fileIcon(n),'')}<span class="fs-crumb-path">${esc(f.path)}</span>
+      <span class="fs-crumb-meta">${esc(n.size||'')} · ${esc(n.mtime||'')}${m&&m.readOnly?' · 只读':''}</span>
+      ${ext==='md'?`<button class="wb-btn wb-btn--sm wb-btn--ghost" data-action="md-toggle">${DB.mdSource?'渲染视图':'查看源码'}</button>`:''}
+    </div>`;
+  if(!PREVIEWABLE.has(ext)) return head + `<div class="empty-state"><div class="empty-title">该类型不支持预览</div><div class="empty-desc">${esc(n.name)} · ${esc(n.size||'')}　二进制或未识别格式，可下载到沙箱后处理</div></div>`;
+  if(ext==='png'||ext==='jpg'||ext==='jpeg') return head + `<div class="fs-img"><img src="${ASSETS[n.asset]||ASSETS.mascot}" alt="${esc(n.name)}"></div>`;
+  const text = n.content||'';
+  if(ext==='md' && !DB.mdSource) return head + `<div class="fs-md md-body">${mdRender(text)}</div>`;
+  if(ext==='csv') return head + csvTableHTML(text);
+  return head + codeHTML(ext==='json'?prettyJSON(text):text);
+}
+function prettyJSON(t){ try{ return JSON.stringify(JSON.parse(t), null, 2); }catch(e){ return t; } }
+function codeHTML(text){
+  const lines = String(text).split('\n');
+  return `<div class="fs-code"><table><tbody>${lines.map((l,i)=>
+    `<tr><td class="ln">${i+1}</td><td class="lc">${esc(l)||'&nbsp;'}</td></tr>`).join('')}</tbody></table></div>`;
+}
+function csvTableHTML(text){
+  const rows = String(text).trim().split('\n').map(r=>r.split(','));
+  const head = rows.shift()||[];
+  return `<div class="fs-table"><table class="tbl">
+    <thead><tr>${head.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody>
+  </table><div class="sec-note" style="padding:8px 2px">共 ${rows.length} 行 · 大文件仅预览前若干行</div></div>`;
+}
+function bindFilesPage(){
+  const root = $('#page-root');
+  $$('[data-unmount]',root).forEach(b=>b.addEventListener('click', e=>{ e.stopPropagation(); unmount(b.dataset.unmount); }));
+  $$('[data-dir]',root).forEach(b=>b.addEventListener('click', ()=>{
+    const p=b.dataset.dir; DB.dirExpanded[p]=!DB.dirExpanded[p]; renderFilesPage();
+  }));
+  $$('[data-file]',root).forEach(b=>b.addEventListener('click', ()=>{
+    const path=b.dataset.file, node=findNode(path);
+    if(!node){ toast('文件不存在','error'); return; }
+    DB.currentFile={path,node,mount:mountOf(path)}; DB.mdSource=false; renderFilesPage();
+  }));
+  $('[data-action="md-toggle"]',root)?.addEventListener('click', ()=>{ DB.mdSource=!DB.mdSource; renderFilesPage(); });
+  $('[data-action="mount-add"]',root)?.addEventListener('click', openMountDialog);
+  $('[data-action="ws-switch"]',root)?.addEventListener('click', e=>openSpacePop(e.currentTarget));
+}
+function openMountDialog(){
+  const wrap = openModal({ title:'挂载目录', body:`
+    <div class="form-group"><label class="form-label">挂载名称</label><input class="wb-input" id="mt-name" placeholder="例如 数据仓库导出"></div>
+    <div class="form-group"><label class="form-label">位置</label>
+      <select class="wb-input" id="mt-kind"><option value="local">本服务器目录</option><option value="remote">外部服务器</option></select></div>
+    <div class="form-group" id="mt-remote" style="display:none">
+      <label class="form-label">主机与协议</label>
+      <div style="display:flex;gap:8px">
+        <input class="wb-input" id="mt-host" placeholder="dw-node-02.intra" style="flex:1">
+        <select class="wb-input" id="mt-proto" style="width:110px"><option>SFTP</option><option>NFS</option><option>SMB</option></select>
+      </div><div class="form-hint">仅允许内网主机，公网地址将被拒绝</div></div>
+    <div class="form-group"><label class="form-label">目录路径</label><input class="wb-input" id="mt-path" placeholder="/srv/data"></div>
+    <div class="set-row" style="padding:4px 0"><div><div class="set-t">只读挂载</div><div class="set-d">禁止写入，防止误改源目录</div></div>
+      <button class="switch on" data-action="mt-ro"></button></div>`,
+    foot:`<button class="wb-btn wb-btn--ghost" data-cancel>取消</button><button class="wb-btn wb-btn--primary" data-ok>测试连通并挂载</button>`, width:'sm' });
+  const kind = $('#mt-kind',wrap);
+  kind.addEventListener('change', ()=>{ $('#mt-remote',wrap).style.display = kind.value==='remote'?'':'none'; });
+  let ro = true;
+  $('[data-action="mt-ro"]',wrap).addEventListener('click', e=>{ ro=!ro; e.currentTarget.classList.toggle('on',ro); });
+  $('[data-cancel]',wrap).addEventListener('click', ()=>closeModal(wrap));
+  $('[data-ok]',wrap).addEventListener('click', ()=>{
+    const name=$('#mt-name',wrap).value.trim(), path=$('#mt-path',wrap).value.trim(), k=kind.value;
+    const host=$('#mt-host',wrap).value.trim();
+    if(!name){ toast('请填写挂载名称','error'); return; }
+    if(!path.startsWith('/')){ toast('请填写绝对路径，如 /srv/data','error'); return; }
+    if(k==='remote'){
+      if(!host){ toast('请填写主机','error'); return; }
+      if(/\.(com|cn|net|org|io)$/i.test(host) && !/\.intra$/i.test(host)){
+        toast('检测到公网主机，内网部署下已拒绝','error'); return;
+      }
+    }
+    const id='m'+uid();
+    DB.mounts.push({ id, owner:me().id, ws:DB.wsId, name, kind:k, path, host:k==='remote'?host:'',
+      proto:k==='remote'?$('#mt-proto',wrap).value:'', readOnly:ro, status:'online' });
+    DB.fileTrees[id]=[];
+    DB.audits.unshift({ kind:'perm', owner:me().id, icon:'folder', title:`挂载目录 ${name}`,
+      desc:`${k==='remote'?$('#mt-proto',wrap).value+' '+host+':':'本机 '}${path} · ${ro?'只读':'可写'} · 工作空间 ${currentWs()?currentWs().name:'—'}`, time:nowHM() });
+    DB.dirExpanded[path]=true; DB.currentFile=null;
+    closeModal(wrap); renderFilesPage(); toast(`「${name}」已挂载`);
+  });
+}
+function unmount(id){
+  const m = myMounts().find(x=>x.id===id); if(!m) return;
+  if(m.kind==='workspace'){ toast('工作空间根目录不可卸载','error'); return; }
+  DB.mounts = DB.mounts.filter(x=>x.id!==id);
+  delete DB.fileTrees[id];
+  DB.audits.unshift({ kind:'perm', owner:me().id, icon:'folder', title:`卸载挂载点 ${m.name}`, desc:m.path, time:nowHM() });
+  if(DB.currentFile && DB.currentFile.mount && DB.currentFile.mount.id===id) DB.currentFile=null;
+  delete DB.dirExpanded[m.path];
+  renderFilesPage(); toast(`「${m.name}」已卸载`);
+}
+
+/* ================= 设计令牌页（开发者用，/tokens，无侧栏入口） ================= */
+function renderTokensPage(){
+  const root = $('#page-root'); root.className='page-root';
+  DB.tokenSwatches = null;   // 主题可能已变，强制按当前计算值重算
+  root.innerHTML = `
+  <div class="ct-body" data-od-id="tokens-body">
+    <div class="sec-h">开发者页<span class="sec-note">设置页不提供入口，直接访问 #/tokens</span></div>
+    <div class="set-card" style="margin-bottom:16px">
+      <div class="set-row">
+        <div><div class="set-t">用途</div><div class="set-d">复刻 UI 时核对取色、校验主题变量是否漏配，非终端用户功能</div></div>
+        <div class="seg">
+          <button class="${Theme.get()==='light'?'on':''}" data-mode="light" data-action="tk-theme">浅色</button>
+          <button class="${Theme.get()==='dark'?'on':''}" data-mode="dark" data-action="tk-theme">深色</button>
+          <button class="${Theme.get()==='system'?'on':''}" data-mode="system" data-action="tk-theme">跟随系统</button>
+        </div>
+      </div>
+    </div>
+    <div class="sec-h">设计令牌<span class="sec-note">色阶取自 --wb-* 变量计算值，随主题实时变化 · 来源：WorkBuddy 5.3.11 设计 token（light 603 / dark 857）</span></div>
+    <div class="sw-grid" id="token-swatches" data-od-id="token-swatches">
+      ${tokenSwatches().map(f=>`<div class="sw-fam">${f.label}</div>`+f.cells.map(c=>`
+        <div class="sw-cell"><div class="sw-chip" style="background:${c.val}"></div><div class="sw-name">${c.name}</div><div class="sw-val">${c.val}</div></div>`).join('')).join('')}
+    </div>
+    <div class="sec-h">语义层（当前主题计算值）</div>
+    <table class="tbl" id="sem-table" data-od-id="sem-table">
+      <thead><tr><th style="width:150px">语义</th><th>变量</th><th>计算值</th></tr></thead>
+      <tbody>${semTableRows()}</tbody>
+    </table>
+    <div style="height:20px"></div>
+  </div>`;
+  $$('[data-action="tk-theme"]',root).forEach(b=>b.addEventListener('click', ()=>{
+    Theme.set(b.dataset.mode);
+    renderSidebar(); renderTopbar(); renderTokensPage();
+    toast('主题已切换');
+  }));
+}
+
 /* ================= 渲染调度 ================= */
 function renderPage(){
   switch(DB.route){
     case '/': renderChatPage(); break;
+    case '/files': renderFilesPage(); break;
     case '/center': renderCenterPage(); break;
     case '/settings': renderSettingsPage(); break;
+    case '/tokens': renderTokensPage(); break;
     default: navigate('/');
   }
 }
@@ -2886,6 +3453,7 @@ function render(){
   shell.style.display=''; lroot.style.display='none'; lroot.innerHTML='';
   DB.route = parseRoute();
   if(DB.route==='/') DB.sidebarTab='chats';
+  else if(DB.route==='/files') DB.sidebarTab='files';
   else if(DB.route==='/center') DB.sidebarTab='center';
   else if(DB.route==='/settings') DB.sidebarTab='settings';
   renderSidebar();
