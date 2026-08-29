@@ -8,3 +8,7 @@ app-reference/*
 
 # 本地能力投影目录（Claude Code），不纳入版本控制
 .claude/
+
+# 上游开源项目参考副本（浅克隆、可 git pull 更新），不纳入版本控制
+resource/ragflow/
+resource/oh-my-pi/
