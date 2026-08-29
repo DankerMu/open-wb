@@ -12,10 +12,13 @@
    最大耦合点是 `api.db.services.*`，吸收时需替换成自己的存储层；官方解耦缝是
    `common/doc_store/doc_store_base.py` 的 `DocStoreConnection` 抽象。
 2. **omp 可以做 agent 后端，但不是进程内 SDK，而是子进程 RPC**。已决策（2026-08-29）：
-   **fork 并定死在 v18.0.10 / commit `33cc6b9a`，后续不再跟进上游**。SDK 要求 Bun 运行时
-   （`docs/sdk.md`：Requires Bun 1.3.14+；`packages/coding-agent/src` 有 900+ 处 Bun API），
-   Electron 主进程内嵌不可行。正确姿势是 spawn `omp --mode rpc`（stdio JSONL），
-   这也是上游 WorkBuddy 桥接 CodeBuddy CLI 的同构架构（见 `app-reference/analysis/03-cli-backend.md`）。
+   **fork 并定死在 v18.0.10 / commit `33cc6b9a`，后续不再跟进上游**。SDK 要求宿主进程跑 Bun
+   （`docs/sdk.md`：Requires Bun 1.3.14+；`packages/coding-agent/src` 有 900+ 处 Bun API）。
+   本项目形态为 web 服务（见 `PLAN.md`），app-server 选 Bun 后 SDK 技术上可行，但仍不选：
+   单进程承载全部用户会话，一崩全站，且并发多会话需绕 AgentRegistry 的单 Main 限制
+   （`docs/sdk.md`）。正确姿势是每活跃会话 spawn 一个 `omp --mode rpc`（stdio JSONL）——
+   崩溃隔离、每用户 cwd、资源限额，也是上游 WorkBuddy 桥接 CodeBuddy CLI 的同构架构
+   （见 `app-reference/analysis/03-cli-backend.md`）。
 3. **两条线的接合点**：RPC 协议的 `set_host_tools`（`packages/coding-agent/src/modes/rpc/rpc-types.ts:45`）
    允许宿主注册工具、agent 调用时回调宿主。把知识库 agentic 检索注册为 host tool，
    KB 权限过滤就留在 WorkBuddy 宿主侧，与原型的权限模型（visibleKbs/只读共享/审计）一致。
@@ -58,8 +61,8 @@
   torch 按需装——`deepdoc/vision/ocr.py:25` `pip_install_torch`、doc store 客户端等）。
 - **[INFERENCE]** 合理落地形态：把吸收的模块组装成本应用的一个内部 Python 进程
   （"kb-service"，只含 deepdoc + rag/nlp + advanced_rag + 一个 doc store 连接器），
-  由 Electron 主进程管理生命周期。这不违背"不拉起完整 RAGFlow 服务"——它不是 RAGFlow
-  的 api server，只是吸收代码后的宿主进程；Python 重依赖（onnx/torch）也不可能塞进 Node 进程。
+  由 app-server 管理生命周期。这不违背"不拉起完整 RAGFlow 服务"——它不是 RAGFlow
+  的 api server，只是吸收代码后的宿主进程；Python 重依赖（onnx/torch）也不该塞进 app-server 进程。
 
 ## 2. oh-my-pi（v18.0.10）作为 agent 后端
 
@@ -67,7 +70,7 @@
 
 | 通道 | 可行性 | 依据 |
 |---|---|---|
-| 进程内 SDK（`createAgentSession`，`packages/coding-agent/src/sdk.ts:1278`） | ❌ Electron 内不可行 | `docs/sdk.md` 明确 Requires Bun 1.3.14+；`packages/coding-agent/src` 913 处 Bun API 调用，Node 移植不现实 |
+| 进程内 SDK（`createAgentSession`，`packages/coding-agent/src/sdk.ts:1278`） | ❌ 不选 | 要求宿主跑 Bun（`docs/sdk.md`）；即便 app-server 用 Bun，单进程承载全部用户会话缺乏崩溃隔离，多会话还需绕 AgentRegistry 单 Main 限制——多用户 web 服务下子进程隔离价值更高 |
 | **子进程 RPC（`omp --mode rpc`）** | ✅ 推荐 | `docs/rpc.md`：stdio JSONL，ready 帧协商、1MiB 帧 + v2 分块重组、自带 TS/Python `RpcClient`。官方先例：`python/robomp` 就是外部服务按 issue 驱动 `omp --mode rpc`（`docs/user-facing-packages.md`）；社区 `apoc/omp-desktop` 同路 |
 | ACP 模式（`src/modes/acp/`） | 备选 | 编辑器标准协议，功能面窄于自家 RPC |
 
@@ -133,7 +136,7 @@
 - MCP：**保留**（原型"连接器"页依赖），但只走显式配置，不自动发现。
 - 浏览器工具、computer-use：关；LSP 默认关、按工作空间语言按需开。
 - telemetry：关。
-- 会话目录、内网模型 provider、审计事件订阅由 Electron 侧在 RPC 会话建立时注入
+- 会话目录、内网模型 provider、审计事件订阅由 app-server 在 RPC 会话建立时注入
   （`docs/rpc.md`：host 默认值仅在未显式配置时生效，项目/全局配置仍是权威）。
 
 **验收（减肥完成的定义）**
@@ -150,5 +153,5 @@
 - 内网如何分发 `InfiniFlow/deepdoc` 的 onnx 模型与 embedding/rerank 模型权重（HF 镜像 or 制品库）。
 - ~~根级 LICENSE~~ 已定 Apache-2.0；~~omp 归属条目~~ 已入 `ATTRIBUTION.md` §3（2026-08-29）。
 - omp 冻结后的安全修复策略：出高危 CVE 时是自修还是例外性 cherry-pick，届时再定。
-- kb-service（Python）与 omp（RPC 子进程）之间：KB 检索 host tool 由 Electron 主进程转发，
+- kb-service（Python）与 omp（RPC 子进程）之间：KB 检索 host tool 由 app-server 转发，
   还是 omp 直连 kb-service 的本地端口——前者审计链完整，后者少一跳。**[INFERENCE]** 倾向前者。
