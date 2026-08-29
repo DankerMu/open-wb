@@ -1476,7 +1476,7 @@ const DB = {
     { id:'tag', label:'Tag', desc:'标签集，为其他知识库提供标签', raptor:false },
   ],
   kbs:[
-    { id:'kb1', owner:'u1', name:'前端规范库', method:'manual', raptor:true, kg:false, updated:'今天 09:20', docs:[
+    { id:'kb1', scope:'dept', owner:'u1', name:'前端规范库', method:'manual', raptor:true, kg:false, updated:'今天 09:20', docs:[
       { name:'前端编码规范.md', ext:'md', size:'18 KB', from:'/data/workbuddy/zhangsan/workbuddy-demo/out', status:'done', chunks:[
         '组件命名统一使用大驼峰，文件名与默认导出同名；工具函数使用小驼峰，禁止在组件文件内导出多个组件。',
         '所有网络请求经统一 request 封装，禁止在组件里直接调用 fetch；超时统一 15 秒，失败按错误码走全局提示。',
@@ -1487,19 +1487,19 @@ const DB = {
       { name:'login-view.tsx', ext:'tsx', size:'1.8 KB', from:'/data/workbuddy/zhangsan/kefu/src', status:'done', chunks:[
         '登录页表单校验在提交前统一执行，账号做 trim 与小写化处理，密码错误不区分账号不存在与密码错误两种提示。' ]},
     ]},
-    { id:'kb2', owner:'u1', name:'客服系统问答', method:'qa', raptor:false, kg:false, updated:'昨天 17:40', docs:[
+    { id:'kb2', scope:'me', owner:'u1', name:'客服系统问答', method:'qa', raptor:false, kg:false, updated:'昨天 17:40', docs:[
       { name:'客服FAQ.md', ext:'md', size:'26 KB', from:'/data/workbuddy/zhangsan/kefu', status:'done', chunks:[
         '问：工单超时未响应如何处理？答：超过 30 分钟未响应自动升级到组长队列，并在审计中记录一次升级事件。',
         '问：客户重复提交同一问题怎么合并？答：按客户号与问题指纹去重，合并后保留最早工单，其余标记为重复并关联。' ]},
     ]},
-    { id:'kb3', owner:'u2', name:'指标口径库', method:'manual', raptor:true, kg:true, updated:'今天 08:25', docs:[
+    { id:'kb3', scope:'all', owner:'u2', name:'指标口径库', method:'manual', raptor:true, kg:true, updated:'今天 08:25', docs:[
       { name:'指标口径.md', ext:'md', size:'2.2 KB', from:'/data/workbuddy/zhaoliu/metrics/out', status:'done', chunks:[
         '销售额口径：以订单支付成功时间归属自然日，退款不冲减当日销售额，单独计入退款指标。',
         '活跃用户口径：自然日内产生任一有效行为的去重账号数，内部测试账号在数仓侧已剔除。' ]},
       { name:'README.md', ext:'md', size:'980 B', from:'dw-node-02.intra:/export/dw', status:'done', chunks:[
         '数据仓库导出目录按月分区，每张表一个 csv，同名 schema.json 描述字段，该目录为只读挂载不接受写入。' ]},
     ]},
-    { id:'kb4', owner:'u3', name:'产品文档库', method:'book', raptor:false, kg:false, updated:'3 天前', docs:[
+    { id:'kb4', scope:'me', owner:'u3', name:'产品文档库', method:'book', raptor:false, kg:false, updated:'3 天前', docs:[
       { name:'季度目标拆解.md', ext:'md', size:'2.8 KB', from:'/data/workbuddy/lisi/workbuddy-demo/out', status:'done', chunks:[
         '本季度目标拆解为三条主线：内网部署闭环、工作空间文件能力、知识库检索质量，每条主线设一名负责人与周度验收点。' ]},
     ]},
@@ -2717,9 +2717,24 @@ function mockVoiceInput(){
 
 
 /* ================= 知识库（能力内建，切片模板参照 RAGFlow 实现） ================= */
+const KB_SCOPES = [
+  { id:'me',   label:'仅自己可见', desc:'只有你能检索与引用，文档留在你的沙箱内' },
+  { id:'dept', label:'本部门可见', desc:'同部门同事可检索与引用，但不能改动内容' },
+  { id:'all',  label:'全员可见',   desc:'全公司可检索与引用，适合口径、规范类文档' },
+];
+function scopeLabel(id){ const x=KB_SCOPES.find(s=>s.id===id); return x?x.label:id; }
+function ownerOf(id){ return DB.users.find(u=>u.id===id) || null; }
+/** 我拥有的知识库：可增删文档、可改可见范围 */
+function myKbs(){ return ownedBy(DB.kbs); }
+/** 我可见的知识库：自己的 + 全员共享 + 同部门共享；共享来的一律只读 */
+function visibleKbs(){
+  const u = me(); if(!u) return [];
+  return DB.kbs.filter(k => k.owner===u.id || k.scope==='all' ||
+    (k.scope==='dept' && ownerOf(k.owner) && ownerOf(k.owner).dept===u.dept));
+}
+function kbOwned(k){ return !!me() && k.owner===me().id; }
 function methodLabel(id){ const m=DB.kbMethods.find(x=>x.id===id); return m?m.label:id; }
 function methodOf(id){ return DB.kbMethods.find(x=>x.id===id) || DB.kbMethods[0]; }
-function myKbs(){ return ownedBy(DB.kbs); }
 function kbChunkCount(k){ return k.docs.reduce((n,d)=>n+(d.status==='done'?d.chunks.length:0),0); }
 /** 查询分词：拉丁词 + 中文二元组，够用且不引入分词库 */
 function kbTokens(q){
@@ -2758,10 +2773,12 @@ function kbDetailHTML(k){
       ${d.status==='done'
         ? `<span class="tag tag--success">已切片 ${d.chunks.length}</span>`
         : `<span class="tag tag--brand">解析中…</span>`}
-      <span class="fs-unmount" data-kb-doc-del="${i}" title="移出知识库">${icon('x','icon--12')}</span>
-    </div>`).join('')||`<div class="panel-body"><div class="sec-note">知识库为空，从工作空间选择文件入库</div></div>`}
+      ${kbOwned(k)?`<span class="fs-unmount" data-kb-doc-del="${i}" title="移出知识库">${icon('x','icon--12')}</span>`:''}
+    </div>`).join('')||`<div class="panel-body"><div class="sec-note">${kbOwned(k)?'知识库为空，从工作空间选择文件入库':'该知识库暂无文档'}</div></div>`}
     <div class="panel-body" style="border-top:1px solid var(--wb-border-default)">
-      <button class="wb-btn wb-btn--primary" data-action="kb-ingest">${icon('plus','')}从工作空间入库</button>
+      ${kbOwned(k)
+        ? `<button class="wb-btn wb-btn--primary" data-action="kb-ingest">${icon('plus','')}从工作空间入库</button>`
+        : `<div class="sec-note">共享给你的知识库只读：可检索、可在会话中引用，不能增删文档。需要补充内容请联系 ${esc(ownerOf(k.owner)?ownerOf(k.owner).name:'所有者')}。</div>`}
     </div>
   </div>
 
@@ -2792,8 +2809,11 @@ function buildRag(promptText){
   const ids = DB.pendingKbs || [];
   DB.pendingKbs = [];
   if(!ids.length) return null;
-  const kbs = myKbs().filter(k=>ids.includes(k.id));
+  const kbs = visibleKbs().filter(k=>ids.includes(k.id));
+  if(kbs.length < ids.length) toast('部分知识库已取消共享，本轮不再检索','info');   // 引用后所有者收回了共享
   if(!kbs.length) return null;
+  kbs.filter(k=>!kbOwned(k)).forEach(k=>DB.audits.unshift({ kind:'perm', owner:me().id, icon:'library',
+    title:`检索共享知识库 ${k.name}`, desc:`所有者 ${ownerOf(k.owner)?ownerOf(k.owner).name:'—'} · ${scopeLabel(k.scope)} · 只读`, time:nowHM() }));
   const hits = [];
   kbs.forEach(k=>kbSearch(k, promptText).forEach(h=>hits.push({...h, kb:k.name})));
   hits.sort((a,b)=>b.score-a.score);
@@ -2842,6 +2862,10 @@ function openKbNewDialog(){
       <select class="wb-input" id="kb-method">${DB.kbMethods.map(m=>
         `<option value="${m.id}">${esc(m.label)} — ${esc(m.desc)}</option>`).join('')}</select>
       <div class="form-hint">决定文档按什么规则切分，入库后不建议再改</div></div>
+    <div class="form-group"><label class="form-label">可见范围</label>
+      <select class="wb-input" id="kb-scope">${KB_SCOPES.map(x=>
+        `<option value="${x.id}">${esc(x.label)} — ${esc(x.desc)}</option>`).join('')}</select>
+      <div class="form-hint">共享出去的知识库对他人只读，随时可以改回仅自己可见</div></div>
     <div class="set-row" style="padding:4px 0"><div><div class="set-t">RAPTOR 递归摘要</div><div class="set-d" id="kb-raptor-d">提升跨段落长问题的召回，仅部分模板支持</div></div>
       <button class="switch" data-action="kb-raptor"></button></div>
     <div class="set-row" style="padding:4px 0"><div><div class="set-t">知识图谱</div><div class="set-d">抽取实体与关系，代价较高，适合口径类文档</div></div>
@@ -2864,11 +2888,33 @@ function openKbNewDialog(){
     if(!name){ toast('请填写知识库名称','error'); return; }
     if(myKbs().some(k=>k.name===name)){ toast('已存在同名知识库','error'); return; }
     const id = 'kb'+uid();
-    DB.kbs.push({ id, owner:me().id, name, method:sel.value, raptor, kg, updated:nowHM(), docs:[] });
+    const scope = $('#kb-scope',wrap).value;
+    DB.kbs.push({ id, owner:me().id, scope, name, method:sel.value, raptor, kg, updated:nowHM(), docs:[] });
     DB.currentKb = id; DB.kbHits = null; DB.kbQuery = '';
     DB.audits.unshift({ kind:'perm', owner:me().id, icon:'library', title:`新建知识库 ${name}`,
-      desc:`切片模板 ${methodOf(sel.value).label}${raptor?' · RAPTOR':''}${kg?' · 知识图谱':''}`, time:nowHM() });
+      desc:`切片模板 ${methodOf(sel.value).label} · ${scopeLabel(scope)}${raptor?' · RAPTOR':''}${kg?' · 知识图谱':''}`, time:nowHM() });
     closeModal(wrap); renderCenterPage(); toast(`知识库「${name}」已创建`);
+  });
+}
+function openKbScopeDialog(id){
+  const kb = myKbs().find(k=>k.id===id); if(!kb) return;
+  const wrap = openModal({ title:`「${kb.name}」可见范围`, body:
+    KB_SCOPES.map(x=>`<label class="set-row" style="padding:8px 4px;cursor:pointer">
+      <input type="radio" name="kbsc" value="${x.id}" ${kb.scope===x.id?'checked':''} style="margin-right:10px">
+      <div style="flex:1"><div class="set-t">${esc(x.label)}</div><div class="set-d">${esc(x.desc)}</div></div>
+    </label>`).join('') +
+    `<div class="form-hint" style="margin-top:8px">共享只给读权限：他人可检索与引用，不能增删文档或改设置。切换范围会记入审计。</div>`,
+    foot:`<button class="wb-btn wb-btn--ghost" data-cancel>取消</button><button class="wb-btn wb-btn--primary" data-ok>保存</button>`, width:'sm' });
+  $('[data-cancel]',wrap).addEventListener('click', ()=>closeModal(wrap));
+  $('[data-ok]',wrap).addEventListener('click', ()=>{
+    const picked = $$('[name="kbsc"]',wrap).find(r=>r.checked);
+    if(!picked){ toast('请选择一个可见范围','error'); return; }
+    if(picked.value===kb.scope){ closeModal(wrap); return; }
+    const from = scopeLabel(kb.scope);
+    kb.scope = picked.value;
+    DB.audits.unshift({ kind:'perm', owner:me().id, icon:'shield', title:`知识库 ${kb.name} 可见范围变更`,
+      desc:`${from} → ${scopeLabel(kb.scope)}${kb.scope==='dept'?`（${me().dept}）`:''}`, time:nowHM() });
+    closeModal(wrap); renderCenterPage(); toast(`已设为${scopeLabel(kb.scope)}`);
   });
 }
 function openKbIngestDialog(){
@@ -3017,28 +3063,31 @@ function centerTabHTML(){
     </div>`;
   }
   if(DB.centerTab==='kb'){
-    const list = ownedBy(DB.kbs).filter(k=>!q || (k.name+methodLabel(k.method)).toLowerCase().includes(q));
+    const list = visibleKbs().filter(k=>!q || (k.name+methodLabel(k.method)).toLowerCase().includes(q));
     if(DB.currentKb && !list.some(k=>k.id===DB.currentKb)) DB.currentKb = null;
     const cur = list.find(k=>k.id===DB.currentKb) || null;
     return `
     <div class="panel" style="max-width:760px">
-      <div class="panel-head"><div class="panel-title">${icon('bookOpen','')}我的知识库</div>
-        <span class="tag">${list.length} 个 · 仅本人可见</span></div>
+      <div class="panel-head"><div class="panel-title">${icon('bookOpen','')}知识库</div>
+        <span class="tag">我的 ${list.filter(kbOwned).length} 个 · 共享给我 ${list.filter(k=>!kbOwned(k)).length} 个</span></div>
       ${list.map(k=>`
       <div class="connector-row ${k.id===DB.currentKb?'on':''}" data-kb="${k.id}" style="cursor:pointer">
         ${icon('bookOpen','')}
         <div class="connector-info">
-          <div class="connector-name">${esc(k.name)}<span class="tag" style="height:16px;font-size:10px">${esc(methodLabel(k.method))}</span>${k.raptor?'<span class="tag tag--brand" style="height:16px;font-size:10px">RAPTOR</span>':''}${k.kg?'<span class="tag tag--brand" style="height:16px;font-size:10px">知识图谱</span>':''}</div>
-          <div class="connector-desc">${k.docs.length} 个文档 · ${kbChunkCount(k)} 个切片 · 更新于 ${esc(k.updated)}</div>
+          <div class="connector-name">${esc(k.name)}<span class="tag" style="height:16px;font-size:10px">${esc(methodLabel(k.method))}</span>${k.raptor?'<span class="tag tag--brand" style="height:16px;font-size:10px">RAPTOR</span>':''}${k.kg?'<span class="tag tag--brand" style="height:16px;font-size:10px">知识图谱</span>':''}${kbOwned(k)?'':'<span class="tag" style="height:16px;font-size:10px">只读</span>'}</div>
+          <div class="connector-desc">${k.docs.length} 个文档 · ${kbChunkCount(k)} 个切片 · ${kbOwned(k)?`更新于 ${esc(k.updated)}`:`来自 ${esc(ownerOf(k.owner)?ownerOf(k.owner).name+' · '+ownerOf(k.owner).dept:'—')}`}</div>
         </div>
+        ${kbOwned(k)
+          ? `<button class="wb-btn wb-btn--sm wb-btn--secondary" data-kb-scope="${k.id}" title="修改可见范围">${esc(scopeLabel(k.scope))}</button>`
+          : `<span class="tag tag--brand">${esc(scopeLabel(k.scope))}</span>`}
         <span class="tag ${k.docs.some(d=>d.status==='parsing')?'':'tag--success'}">${k.docs.some(d=>d.status==='parsing')?'解析中':'已就绪'}</span>
-        <span class="fs-unmount" data-kb-del="${k.id}" title="删除知识库">${icon('x','icon--12')}</span>
+        ${kbOwned(k)?`<span class="fs-unmount" data-kb-del="${k.id}" title="删除知识库">${icon('x','icon--12')}</span>`:''}
       </div>`).join('')||`<div class="panel-body"><div class="sec-note">还没有知识库，点击下方新建</div></div>`}
       <div class="panel-body" style="border-top:1px solid var(--wb-border-default)">
         <button class="wb-btn wb-btn--primary" data-action="kb-new">${icon('plus','')}新建知识库</button>
       </div>
     </div>
-    <div class="sec-note" style="margin-top:10px;max-width:760px">知识库只对你本人可见，文档与切片都存放在你的沙箱内，检索全过程在内网完成、不出网。</div>
+    <div class="sec-note" style="margin-top:10px;max-width:760px">新建的知识库默认仅自己可见；共享后同事只能检索与引用，不能增删文档或改设置。共享来的知识库，其文档仍存放在所有者沙箱内，读取记入审计。</div>
     ${cur?kbDetailHTML(cur):''}`;
   }
   if(DB.centerTab==='model'){
@@ -3138,8 +3187,11 @@ function bindCenterBody(){
   $$('[data-cat]',root).forEach(b=>b.addEventListener('click', ()=>{ DB.expertsCat=b.dataset.cat; renderCenterPage(); }));
   $('[data-action="kb-new"]',root)?.addEventListener('click', openKbNewDialog);
   $('[data-action="kb-ingest"]',root)?.addEventListener('click', openKbIngestDialog);
+  $$('[data-kb-scope]',root).forEach(b=>b.addEventListener('click', e=>{
+    e.stopPropagation(); openKbScopeDialog(b.dataset.kbScope);
+  }));
   $$('[data-kb]',root).forEach(b=>b.addEventListener('click', e=>{
-    if(e.target.closest('[data-kb-del]')) return;
+    if(e.target.closest('[data-kb-del]') || e.target.closest('[data-kb-scope]')) return;
     DB.currentKb = DB.currentKb===b.dataset.kb ? null : b.dataset.kb;
     DB.kbHits = null; DB.kbQuery = ''; renderCenterPage();
   }));
@@ -3161,7 +3213,7 @@ function bindCenterBody(){
     renderCenterPage(); toast(`「${d.name}」已移出知识库`);
   }));
   const doKbSearch = ()=>{
-    const kb = myKbs().find(k=>k.id===DB.currentKb); if(!kb) return;
+    const kb = visibleKbs().find(k=>k.id===DB.currentKb); if(!kb) return;
     DB.kbQuery = ($('#kb-q',root)?.value||'').trim();
     if(!DB.kbQuery){ toast('请输入检索内容','error'); return; }
     DB.kbHits = kbSearch(kb, DB.kbQuery);
@@ -3397,11 +3449,11 @@ function openAttachPop(anchor, origin){
   const pop = buildPop('pop-attach', `
     <div class="pop-head" style="font-weight:600">添加引用</div>
     ${refs.length? refs.map(a=>`<button class="pop-item" data-ref="${esc(a.file)}"><span class="mlogo" style="background:var(--wb-status-success-soft-bg);color:var(--wb-status-success-text);display:flex;align-items:center;justify-content:center">M</span>${esc(a.file)}</button>`).join('') : ''}
-    ${myKbs().length?`<div class="pop-sep"></div>
+    ${visibleKbs().length?`<div class="pop-sep"></div>
     <div class="pop-head" style="font-size:11px;color:var(--wb-text-tertiary)">知识库</div>
-    ${myKbs().map(k=>`<button class="pop-item ws-file" data-kb-ref="${k.id}" title="${esc(methodOf(k.method).desc)}">
+    ${visibleKbs().map(k=>`<button class="pop-item ws-file" data-kb-ref="${k.id}" title="${esc(methodOf(k.method).desc)}">
       ${icon('library','')}
-      <span class="ws-file-main"><b>${esc(k.name)}</b><i>${esc(methodLabel(k.method))} · ${k.docs.length} 文档 · ${kbChunkCount(k)} 切片</i></span>
+      <span class="ws-file-main"><b>${esc(k.name)}</b><i>${kbOwned(k)?esc(methodLabel(k.method)):esc((ownerOf(k.owner)?ownerOf(k.owner).name:'—')+' 共享')} · ${k.docs.length} 文档 · ${kbChunkCount(k)} 切片</i></span>
     </button>`).join('')}`:''}
     ${files.length?`<div class="pop-sep"></div>
     <div class="pop-head" style="font-size:11px;color:var(--wb-text-tertiary)">工作空间 · ${esc(ws?ws.name:'—')}</div>
@@ -3428,9 +3480,10 @@ function openAttachPop(anchor, origin){
       `已引用工作空间文件「${f.name}」`);
   }));
   $$('[data-kb-ref]',pop).forEach(b=>b.addEventListener('click', ()=>{
-    const k = myKbs().find(x=>x.id===b.dataset.kbRef);
-    if(!k){ toast('知识库不存在','error'); return; }
-    push({name:k.name, kbId:k.id, type:'kb'}, `已引用知识库「${k.name}」`);
+    const k = visibleKbs().find(x=>x.id===b.dataset.kbRef);
+    if(!k){ toast('知识库不存在或已取消共享','error'); return; }
+    push({name:k.name, kbId:k.id, type:'kb'},
+      kbOwned(k)?`已引用知识库「${k.name}」`:`已引用共享知识库「${k.name}」（只读）`);
   }));
   $('[data-action="browse-files"]',pop)?.addEventListener('click', ()=>{ closePops(); navigate('/files'); });
   $('[data-action="upload"]',pop).addEventListener('click', ()=>{
