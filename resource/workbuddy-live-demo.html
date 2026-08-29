@@ -12,7 +12,8 @@
 
    内网部署版：已移除公网依赖（分享/微信、SaaS 连接器、市场热度、
    计费倍率、版本更新、积分），模型改为内网自建注册表，
-   并新增账号体系（内网统一身份 + 用户隔离 + 每账号沙箱）。
+   新增账号体系（内网统一身份 + 用户隔离 + 每账号沙箱）、
+   工作空间文件视图，以及对接 RAGFlow（Apache-2.0，内网私有化）的知识库。
    ============================================================ */
 :root{
   --wb-palette-brand-1:#DFF7F2; --wb-palette-brand-2:#BFF0E6; --wb-palette-brand-3:#9FE8D9;
@@ -664,6 +665,12 @@ a{color:inherit;text-decoration:none}
 .fs-layout{display:flex;height:100%;min-height:0;overflow:hidden}
 .fs-tree{width:280px;flex-shrink:0;border-right:1px solid var(--wb-border-default);display:flex;flex-direction:column;overflow:hidden;background:var(--wb-bg-secondary)}
 .fs-tree-head{display:flex;align-items:center;justify-content:space-between;padding:10px 12px 6px;font-size:11.5px;font-weight:600;color:var(--wb-text-tertiary);letter-spacing:.02em}
+.rag-cites{border-top:1px solid var(--wb-border-default);padding:8px 12px;display:flex;flex-direction:column;gap:8px}
+.rag-cite{border-left:2px solid var(--wb-brand-primary);padding-left:10px}
+.rag-cite-head{display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:3px}
+.rag-cite-head b{font-weight:600}
+.rag-cite-head span:last-child{color:var(--wb-text-tertiary);font-size:10.5px}
+.rag-cite-text{font-size:12.5px;line-height:20px;color:var(--wb-text-secondary)}
 .fs-root{margin-top:2px;font-weight:600}
 .fs-root:first-child{margin-top:0}
 .fs-root-name{flex:1;min-width:0;font-size:12.5px}
@@ -1448,6 +1455,55 @@ const DB = {
   ],
   // ===== 工作空间文件 =====
   // 挂载点按 owner 隔离：每人默认挂载自己的沙箱根，其余为本机/远程服务器目录
+  // 知识库：后端对接 RAGFlow（Apache-2.0，内网 Docker Compose 私有化部署）
+  kbEngine:{ name:'RAGFlow', version:'v0.27.1', license:'Apache-2.0',
+    endpoint:'http://ragflow.intra:9380', apiKey:'ragflow-9f2c····8ad1', docEngine:'Infinity',
+    embedding:'bge-m3（内网 vLLM）', rerank:'bge-reranker-v2-m3', status:'online' },
+  // RAGFlow 切片模板（chunk_method）原名与用途
+  kbMethods:[
+    { id:'naive', label:'General', desc:'通用文本，按标题与段落切分', raptor:false },
+    { id:'qa', label:'Q&A', desc:'问答对，一问一答成块', raptor:true },
+    { id:'manual', label:'Manual', desc:'手册规范，尊重章节与步骤', raptor:true },
+    { id:'paper', label:'Paper', desc:'论文，摘要/方法/结论分块', raptor:true },
+    { id:'book', label:'Book', desc:'长文档书籍', raptor:true },
+    { id:'laws', label:'Laws', desc:'法规条文，按条款切分', raptor:true },
+    { id:'presentation', label:'Presentation', desc:'演示文稿，按页切分', raptor:true },
+    { id:'table', label:'Table', desc:'表格，按行列结构解析', raptor:false },
+    { id:'one', label:'One', desc:'整篇文档作为一个块', raptor:false },
+    { id:'picture', label:'Picture', desc:'图片，走 OCR 与版面识别', raptor:false },
+    { id:'email', label:'Email', desc:'邮件，按往来切分', raptor:false },
+    { id:'tag', label:'Tag', desc:'标签集，为其他知识库提供标签', raptor:false },
+  ],
+  kbs:[
+    { id:'kb1', owner:'u1', name:'前端规范库', method:'manual', raptor:true, kg:false, updated:'今天 09:20', docs:[
+      { name:'前端编码规范.md', ext:'md', size:'18 KB', from:'/data/workbuddy/zhangsan/workbuddy-demo/out', status:'done', chunks:[
+        '组件命名统一使用大驼峰，文件名与默认导出同名；工具函数使用小驼峰，禁止在组件文件内导出多个组件。',
+        '所有网络请求经统一 request 封装，禁止在组件里直接调用 fetch；超时统一 15 秒，失败按错误码走全局提示。',
+        '样式只允许使用设计 token 变量，禁止硬编码色值；深色主题必须同时在 prefers-color-scheme 与 data-theme 两处覆盖。' ]},
+      { name:'组件库使用指南.md', ext:'md', size:'11 KB', from:'/data/workbuddy/zhangsan/workbuddy-demo/out', status:'done', chunks:[
+        '弹窗统一走 openModal，关闭必须调用 closeModal 并由弹窗栈维护层级，禁止直接操作 DOM 移除节点。',
+        '表格组件默认虚拟滚动，超过 200 行才启用；列宽自适应需显式声明，否则按内容撑开。' ]},
+      { name:'login-view.tsx', ext:'tsx', size:'1.8 KB', from:'/data/workbuddy/zhangsan/kefu/src', status:'done', chunks:[
+        '登录页表单校验在提交前统一执行，账号做 trim 与小写化处理，密码错误不区分账号不存在与密码错误两种提示。' ]},
+    ]},
+    { id:'kb2', owner:'u1', name:'客服系统问答', method:'qa', raptor:false, kg:false, updated:'昨天 17:40', docs:[
+      { name:'客服FAQ.md', ext:'md', size:'26 KB', from:'/data/workbuddy/zhangsan/kefu', status:'done', chunks:[
+        '问：工单超时未响应如何处理？答：超过 30 分钟未响应自动升级到组长队列，并在审计中记录一次升级事件。',
+        '问：客户重复提交同一问题怎么合并？答：按客户号与问题指纹去重，合并后保留最早工单，其余标记为重复并关联。' ]},
+    ]},
+    { id:'kb3', owner:'u2', name:'指标口径库', method:'manual', raptor:true, kg:true, updated:'今天 08:25', docs:[
+      { name:'指标口径.md', ext:'md', size:'2.2 KB', from:'/data/workbuddy/zhaoliu/metrics/out', status:'done', chunks:[
+        '销售额口径：以订单支付成功时间归属自然日，退款不冲减当日销售额，单独计入退款指标。',
+        '活跃用户口径：自然日内产生任一有效行为的去重账号数，内部测试账号在数仓侧已剔除。' ]},
+      { name:'README.md', ext:'md', size:'980 B', from:'dw-node-02.intra:/export/dw', status:'done', chunks:[
+        '数据仓库导出目录按月分区，每张表一个 csv，同名 schema.json 描述字段，该目录为只读挂载不接受写入。' ]},
+    ]},
+    { id:'kb4', owner:'u3', name:'产品文档库', method:'book', raptor:false, kg:false, updated:'3 天前', docs:[
+      { name:'季度目标拆解.md', ext:'md', size:'2.8 KB', from:'/data/workbuddy/lisi/workbuddy-demo/out', status:'done', chunks:[
+        '本季度目标拆解为三条主线：内网部署闭环、工作空间文件能力、知识库检索质量，每条主线设一名负责人与周度验收点。' ]},
+    ]},
+  ],
+  currentKb:null, kbQuery:'', kbHits:null, pendingKbs:[],
   // 挂载点：每个工作空间 = 自己的根目录（kind:'workspace'，不可卸载）+ 挂到它名下的服务器目录
   mounts:[
     { id:'r1', owner:'u1', ws:'w1', name:'workbuddy-demo', kind:'workspace', path:'/data/workbuddy/zhangsan/workbuddy-demo', host:'', proto:'', readOnly:false, status:'online' },
@@ -1593,6 +1649,7 @@ const Session = {
     DB.currentConv = null; DB.streaming = null; DB.inputText = '';
     DB.messages = {};   // 清空消息缓存，避免上一账号的会话内容残留在内存中
     DB.wsId = null; DB.currentFile = null; DB.dirExpanded = {}; DB.mdSource = false;
+    DB.currentKb = null; DB.kbQuery = ''; DB.kbHits = null; DB.pendingKbs = [];
     DB.attachments = {w:[],t:[],a:[]}; DB.assistantMsgs = []; DB.assistantStarted = false;
     DB.route = '/'; location.hash = '/';
     render();
@@ -1602,6 +1659,7 @@ const Session = {
     if(!sp.some(w=>w.id===DB.wsId)) DB.wsId = sp.length?sp[0].id:null;
     DB.currentConv = null;
     DB.currentFile = null; DB.dirExpanded = {};
+    DB.currentKb = null; DB.kbQuery = ''; DB.kbHits = null; DB.pendingKbs = [];
     DB.centerTab = 'expert';
   },
 };
@@ -1699,7 +1757,7 @@ function setSidebarTab(tab, extra){
 const SB_TABS = [
   { id:'chats', label:'会话', icon:'chat' },
   { id:'files', label:'工作空间', icon:'folder', sub:'文件·预览·挂载' },
-  { id:'center', label:'中心', icon:'layoutGrid', sub:'专家·技能·连接器·模型·权限' },
+  { id:'center', label:'中心', icon:'layoutGrid', sub:'专家·技能·知识库·模型·权限' },
   { id:'settings', label:'设置', icon:'settings' },
 ];
 function renderSidebar(){
@@ -2178,6 +2236,7 @@ async function runMockStream(promptText){
     thinking: DB.deepThink ? thinkingForMode(mode) : null,
     exec: { title: promptText.slice(0,18), steps: plan.map((s,i)=>({...s, st:i===0?'run':'todo'})), state:'run' },
     approval: isSales ? { state:'pending', text:'执行到清理旧备份这一步需要你确认。', countdown:15, result:null } : null,
+    rag: buildRag(promptText),
   };
   msgs.push(msg);
   const handle = { convId, stopped:false, stop(){ this.stopped=true; } };
@@ -2186,6 +2245,19 @@ async function runMockStream(promptText){
   renderComposer();
   scrollChatToBottom(true);
   const stopReq = ()=>handle.stopped || DB.streaming?.convId!==convId;
+
+  // 阶段0: 知识库检索（召回 → 重排 → 引用）
+  if(msg.rag){
+    for(let i=0;i<msg.rag.steps.length;i++){
+      if(stopReq()) break;
+      msg.rag.steps[i].st='run'; renderChatMessages(); scrollChatToBottom(true);
+      await sleep(420+Math.random()*280);
+      if(stopReq()) break;
+      msg.rag.steps[i].st='done';
+      if(i===msg.rag.steps.length-1) msg.rag.state='done';
+      renderChatMessages(); scrollChatToBottom(true);
+    }
+  }
 
   // 阶段1: 执行步骤推进
   for(let i=0;i<plan.length;i++){
@@ -2296,6 +2368,7 @@ function msgHTML(m, idx){
     <summary>${icon('chevronRight','icon--12')}深度思考过程</summary>
     <div class="thinking-body">${esc(m.thinking)}</div>
   </details>` : '';
+  const ragCard = m.rag ? ragHTML(m) : '';
   const execCard = m.exec ? execHTML(m) : '';
   const approvalHTML = m.approval ? approvalHTMLFor(m) : '';
   const contentHTML = m.content ? `<div class="assistant-content">${mdRender(m.content)}${isStreaming?'<span class="stream-caret"></span>':''}</div>` : (isStreaming?'':`<div class="assistant-content" style="color:var(--wb-text-secondary)">${esc(m.content||'（空回复）')}</div>`);
@@ -2311,7 +2384,7 @@ function msgHTML(m, idx){
   return `<div class="assistant-msg-row" data-od-id="assistant-message-${idx}">
     <div class="assistant-avatar"><img src="${ASSETS.appIcon}" alt=""></div>
     <div class="assistant-msg-body">
-      ${thinkingHTML}${execCard}${approvalHTML}${contentHTML}${artifactsHTML}${filesHTML}${followHTML}${actionsHTML}
+      ${thinkingHTML}${ragCard}${execCard}${approvalHTML}${contentHTML}${artifactsHTML}${filesHTML}${followHTML}${actionsHTML}
     </div>
   </div>`;
 }
@@ -2618,6 +2691,7 @@ function doSend(){
     DB.messages[convId]=[];
   }
   const atts = DB.attachments.w.slice();
+  DB.pendingKbs = atts.filter(a=>a.type==='kb').map(a=>a.kbId);
   const attachText = atts.length?`\n\n[附件: ${atts.map(a=>a.name).join('、')}]`:'';
   DB.messages[convId].push({ role:'user', content:text+attachText, time:Date.now() });
   DB.inputText=''; DB.attachments.w=[]; DB.quickSelected=null; window.__chatPinnedUp=false;
@@ -2640,10 +2714,217 @@ function mockVoiceInput(){
   }, 1400);
 }
 
-/* ================= 中心页（seg: 专家/技能/连接器/模型/权限/审计） ================= */
+
+/* ================= 知识库（后端对接 RAGFlow） ================= */
+function methodLabel(id){ const m=DB.kbMethods.find(x=>x.id===id); return m?m.label:id; }
+function methodOf(id){ return DB.kbMethods.find(x=>x.id===id) || DB.kbMethods[0]; }
+function myKbs(){ return ownedBy(DB.kbs); }
+function kbChunkCount(k){ return k.docs.reduce((n,d)=>n+(d.status==='done'?d.chunks.length:0),0); }
+/** 查询分词：拉丁词 + 中文二元组，够用且不引入分词库 */
+function kbTokens(q){
+  const s=String(q).toLowerCase(), out=[];
+  (s.match(/[a-z0-9_.]+/g)||[]).forEach(w=>out.push(w));
+  const zh = s.replace(/[^一-龥]/g,'');
+  if(zh.length===1) out.push(zh);
+  for(let i=0;i<zh.length-1;i++) out.push(zh.slice(i,i+2));
+  return [...new Set(out)];
+}
+/** 在已解析完成的切片上做召回，再按命中密度重排（演示用，真实检索由 RAGFlow 完成） */
+function kbSearch(kb, q){
+  const toks = kbTokens(q);
+  if(!toks.length) return [];
+  const hits = [];
+  kb.docs.filter(d=>d.status==='done').forEach(d=>d.chunks.forEach((c,i)=>{
+    const t = c.toLowerCase();
+    const n = toks.filter(tk=>t.includes(tk)).length;
+    if(n) hits.push({ doc:d.name, from:d.from, idx:i, text:c, recall:n/toks.length, score:n/toks.length*(1-i*0.03) });
+  }));
+  return hits.sort((a,b)=>b.score-a.score).slice(0,6);
+}
+function kbDetailHTML(k){
+  const hits = DB.kbHits;
+  return `
+  <div class="panel" style="max-width:760px;margin-top:16px">
+    <div class="panel-head"><div class="panel-title">${icon('fileText','')}${esc(k.name)} · 文档</div>
+      <span class="tag">${esc(methodOf(k.method).label)} · ${esc(methodOf(k.method).desc)}</span></div>
+    ${k.docs.map((d,i)=>`
+    <div class="connector-row">
+      ${icon(FILE_ICONS[d.ext]||'file','')}
+      <div class="connector-info">
+        <div class="connector-name">${esc(d.name)}</div>
+        <div class="connector-desc" style="font-family:var(--wb-mono);font-size:11px">${esc(d.from)} · ${esc(d.size)}</div>
+      </div>
+      ${d.status==='done'
+        ? `<span class="tag tag--success">已切片 ${d.chunks.length}</span>`
+        : `<span class="tag tag--brand">解析中…</span>`}
+      <span class="fs-unmount" data-kb-doc-del="${i}" title="移出知识库">${icon('x','icon--12')}</span>
+    </div>`).join('')||`<div class="panel-body"><div class="sec-note">知识库为空，从工作空间选择文件入库</div></div>`}
+    <div class="panel-body" style="border-top:1px solid var(--wb-border-default)">
+      <button class="wb-btn wb-btn--primary" data-action="kb-ingest">${icon('plus','')}从工作空间入库</button>
+    </div>
+  </div>
+
+  <div class="panel" style="max-width:760px;margin-top:16px">
+    <div class="panel-head"><div class="panel-title">${icon('search','')}检索测试</div><span class="tag">召回 → 重排 → 引用</span></div>
+    <div class="panel-body">
+      <div style="display:flex;gap:8px">
+        <input class="wb-input" id="kb-q" placeholder="例如 销售额口径 / 弹窗 / 工单超时" value="${esc(DB.kbQuery)}" style="flex:1">
+        <button class="wb-btn wb-btn--primary" data-action="kb-search">检索</button>
+      </div>
+      ${hits===null?`<div class="sec-note" style="margin-top:10px">输入问题后检索，命中切片会带出所属文档与来源路径</div>`
+        : hits.length===0?`<div class="sec-note" style="margin-top:10px">没有命中，换个说法或先把相关文档入库</div>`
+        : `<div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">${hits.map((h,i)=>`
+          <div style="border:1px solid var(--wb-border-default);border-radius:8px;padding:10px 12px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+              <span class="tag tag--brand" style="height:16px;font-size:10px">#${i+1}</span>
+              <b style="font-size:12.5px">${esc(h.doc)}</b>
+              <span style="font-size:11px;color:var(--wb-text-tertiary)">切片 ${h.idx+1} · 相似度 ${h.score.toFixed(2)}</span>
+            </div>
+            <div style="font-size:12.5px;line-height:20px;color:var(--wb-text-secondary)">${esc(h.text)}</div>
+            <div style="margin-top:6px;font-family:var(--wb-mono);font-size:10.5px;color:var(--wb-text-tertiary)">${esc(h.from)}</div>
+          </div>`).join('')}</div>`}
+    </div>
+  </div>`;
+}
+/** 本轮引用了知识库时构造检索过程：命中切片由 kbSearch 真实算出 */
+function buildRag(promptText){
+  const ids = DB.pendingKbs || [];
+  DB.pendingKbs = [];
+  if(!ids.length) return null;
+  const kbs = myKbs().filter(k=>ids.includes(k.id));
+  if(!kbs.length) return null;
+  const hits = [];
+  kbs.forEach(k=>kbSearch(k, promptText).forEach(h=>hits.push({...h, kb:k.name})));
+  hits.sort((a,b)=>b.score-a.score);
+  const top = hits.slice(0,3);
+  return {
+    kbs: kbs.map(k=>k.name),
+    engine: `${DB.kbEngine.name} ${DB.kbEngine.version}`,
+    state: 'run',
+    steps: [
+      { name:`向量召回 · ${DB.kbEngine.embedding.split('（')[0]}`, st:'todo', note:`${kbs.reduce((n,k)=>n+kbChunkCount(k),0)} 个切片` },
+      { name:`重排 · ${DB.kbEngine.rerank}`, st:'todo', note:`候选 ${hits.length} 条` },
+      { name:'带引用作答', st:'todo', note:top.length?`采用 ${top.length} 条`:'无命中' },
+    ],
+    hits: top,
+  };
+}
+function ragHTML(m){
+  const r = m.rag;
+  const done = r.steps.filter(x=>x.st==='done').length;
+  return `<div class="exec" data-od-id="rag-card">
+    <div class="exec-head" style="cursor:default">
+      <span class="caret" style="visibility:hidden">▼</span>
+      ${icon('library','icon--12')}
+      <span>知识库检索 · ${esc(r.kbs.join('、'))}</span>
+      <span class="n">(${done}/${r.steps.length})</span>
+      <span class="st ${r.state==='done'?'st-fin':'st-run'}">${esc(r.engine)}</span>
+    </div>
+    <div class="exec-body">
+      ${r.steps.map(st=>xRowHTML(st.st==='done'?'done':st.st==='run'?'run':'todo',
+        st.st==='done'?'✓':st.st==='run'?'⟳':'·', st.name, st.note, '')).join('')}
+    </div>
+    ${r.state==='done' && r.hits.length ? `<div class="rag-cites">
+      ${r.hits.map((h,i)=>`<div class="rag-cite">
+        <div class="rag-cite-head"><span class="tag tag--brand" style="height:15px;font-size:10px">[${i+1}]</span>
+          <b>${esc(h.doc)}</b><span>切片 ${h.idx+1} · 相似度 ${h.score.toFixed(2)} · ${esc(h.kb)}</span></div>
+        <div class="rag-cite-text">${esc(h.text)}</div>
+      </div>`).join('')}
+    </div>` : ''}
+    ${r.state==='done' && !r.hits.length ? `<div class="rag-cites"><div class="sec-note">知识库中没有命中相关切片，以下回答未使用知识库引用</div></div>` : ''}
+  </div>`;
+}
+function openKbNewDialog(){
+  const wrap = openModal({ title:'新建知识库', body:`
+    <div class="form-group"><label class="form-label">名称</label><input class="wb-input" id="kb-name" placeholder="例如 运维手册库"></div>
+    <div class="form-group"><label class="form-label">切片模板</label>
+      <select class="wb-input" id="kb-method">${DB.kbMethods.map(m=>
+        `<option value="${m.id}">${esc(m.label)} — ${esc(m.desc)}</option>`).join('')}</select>
+      <div class="form-hint">对应 RAGFlow 的 chunk_method，入库后不建议再改</div></div>
+    <div class="set-row" style="padding:4px 0"><div><div class="set-t">RAPTOR 递归摘要</div><div class="set-d" id="kb-raptor-d">提升跨段落长问题的召回，仅部分模板支持</div></div>
+      <button class="switch" data-action="kb-raptor"></button></div>
+    <div class="set-row" style="padding:4px 0"><div><div class="set-t">知识图谱</div><div class="set-d">抽取实体与关系，代价较高，适合口径类文档</div></div>
+      <button class="switch" data-action="kb-kg"></button></div>`,
+    foot:`<button class="wb-btn wb-btn--ghost" data-cancel>取消</button><button class="wb-btn wb-btn--primary" data-ok>创建</button>`, width:'sm' });
+  let raptor=false, kg=false;
+  const sel = $('#kb-method',wrap), rb = $('[data-action="kb-raptor"]',wrap);
+  const syncRaptor = ()=>{
+    const ok = methodOf(sel.value).raptor;
+    rb.disabled = !ok; rb.style.opacity = ok?'':'0.45';
+    if(!ok){ raptor=false; rb.classList.remove('on'); }
+    $('#kb-raptor-d',wrap).textContent = ok?'提升跨段落长问题的召回':`${methodOf(sel.value).label} 模板不支持 RAPTOR`;
+  };
+  sel.addEventListener('change', syncRaptor); syncRaptor();
+  rb.addEventListener('click', ()=>{ if(rb.disabled) return; raptor=!raptor; rb.classList.toggle('on',raptor); });
+  $('[data-action="kb-kg"]',wrap).addEventListener('click', e=>{ kg=!kg; e.currentTarget.classList.toggle('on',kg); });
+  $('[data-cancel]',wrap).addEventListener('click', ()=>closeModal(wrap));
+  $('[data-ok]',wrap).addEventListener('click', ()=>{
+    const name = $('#kb-name',wrap).value.trim();
+    if(!name){ toast('请填写知识库名称','error'); return; }
+    if(myKbs().some(k=>k.name===name)){ toast('已存在同名知识库','error'); return; }
+    const id = 'kb'+uid();
+    DB.kbs.push({ id, owner:me().id, name, method:sel.value, raptor, kg, updated:nowHM(), docs:[] });
+    DB.currentKb = id; DB.kbHits = null; DB.kbQuery = '';
+    DB.audits.unshift({ kind:'perm', owner:me().id, icon:'library', title:`新建知识库 ${name}`,
+      desc:`RAGFlow dataset · 切片模板 ${methodOf(sel.value).label}${raptor?' · RAPTOR':''}${kg?' · 知识图谱':''}`, time:nowHM() });
+    closeModal(wrap); renderCenterPage(); toast(`知识库「${name}」已创建`);
+  });
+}
+function openKbIngestDialog(){
+  const kb = myKbs().find(k=>k.id===DB.currentKb); if(!kb) return;
+  const files = wsFiles().filter(f=>!kb.docs.some(d=>d.name===f.name && d.from===f.path.slice(0,f.path.lastIndexOf('/'))));
+  if(!files.length){ toast('当前工作空间没有可入库的新文件','error'); return; }
+  const wrap = openModal({ title:`入库到「${kb.name}」`, body:`
+    <div class="form-hint" style="margin-bottom:8px">来源为当前工作空间 ${esc(currentWs()?currentWs().name:'—')}，只读挂载同样可入库（读取不写回）</div>
+    <div style="max-height:280px;overflow:auto;display:flex;flex-direction:column;gap:2px">
+      ${files.map((f,i)=>`<label class="set-row" style="padding:6px 4px;cursor:pointer">
+        <input type="checkbox" data-kb-file="${i}" style="margin-right:8px">
+        <div style="flex:1;min-width:0"><div class="set-t">${esc(f.name)}</div>
+          <div class="set-d" style="font-family:var(--wb-mono);font-size:10.5px">${esc(f.path)}${f.mount.readOnly?' · 只读':''}</div></div>
+        <span class="tag" style="height:16px;font-size:10px">${esc(f.size||'')}</span>
+      </label>`).join('')}
+    </div>`,
+    foot:`<button class="wb-btn wb-btn--ghost" data-cancel>取消</button><button class="wb-btn wb-btn--primary" data-ok>入库并解析</button>`, width:'sm' });
+  $('[data-cancel]',wrap).addEventListener('click', ()=>closeModal(wrap));
+  $('[data-ok]',wrap).addEventListener('click', ()=>{
+    const picked = $$('[data-kb-file]',wrap).filter(c=>c.checked).map(c=>files[+c.dataset.kbFile]);
+    if(!picked.length){ toast('请至少选择一个文件','error'); return; }
+    picked.forEach(f=>{
+      const doc = { name:f.name, ext:f.ext, size:f.size||'', from:f.path.slice(0,f.path.lastIndexOf('/')),
+        status:'parsing', chunks:[] };
+      kb.docs.push(doc);
+      setTimeout(()=>{
+        doc.status='done';
+        doc.chunks = chunksFor(f);
+        kb.updated = nowHM();
+        if(DB.route==='/center' && DB.centerTab==='kb') renderCenterPage();
+        toast(`「${f.name}」解析完成，${doc.chunks.length} 个切片`);
+      }, 1200+Math.random()*800);
+    });
+    DB.audits.unshift({ kind:'perm', owner:me().id, icon:'library', title:`入库 ${picked.length} 个文档`,
+      desc:`知识库 ${kb.name} · 来源工作空间 ${currentWs()?currentWs().name:'—'}`, time:nowHM() });
+    closeModal(wrap); renderCenterPage(); toast('已提交解析，RAGFlow 正在切片');
+  });
+}
+/** 用文件真实内容切片；无文本内容（图片/压缩包）时按文件属性生成一条描述切片 */
+function chunksFor(f){
+  const node = findNodeIn(f);
+  const text = node && node.content ? String(node.content) : '';
+  if(!text) return [`${f.name}（${f.size||'未知大小'}）位于 ${f.path}，该类型不做文本切片，仅登记元数据供检索定位。`];
+  return text.split(/\n{2,}/).map(t=>t.trim()).filter(t=>t.length>8).slice(0,8);
+}
+function findNodeIn(f){
+  const m = f.mount; if(!m) return null;
+  const rest = f.path.slice(m.path.length).split('/').filter(Boolean);
+  let list = DB.fileTrees[m.id]||[], node=null;
+  for(const seg of rest){ node=(list||[]).find(x=>x.name===seg); if(!node) return null; list=node.children; }
+  return node;
+}
+
+/* ================= 中心页（seg: 专家/技能/连接器/知识库/模型/权限/审计） ================= */
 const CENTER_SEGS_BASE = [
   { id:'expert', label:'专家' },{ id:'skill', label:'技能' },{ id:'connector', label:'连接器' },
-  { id:'model', label:'模型' },{ id:'perm', label:'权限' },{ id:'audit', label:'审计' },
+  { id:'kb', label:'知识库' },{ id:'model', label:'模型' },{ id:'perm', label:'权限' },{ id:'audit', label:'审计' },
 ];
 /** 「账号」仅管理员可见 */
 function centerSegs(){ return isAdmin() ? CENTER_SEGS_BASE.concat([{ id:'account', label:'账号' }]) : CENTER_SEGS_BASE; }
@@ -2720,7 +3001,7 @@ function centerTabHTML(){
         <div class="panel-head"><div class="panel-title">${icon('plug','')}连接器</div><span class="tag">内网</span></div>
         <div class="empty-state" style="padding:40px 24px">
           <div class="empty-title">尚未接入内网连接器</div>
-          <div class="empty-desc" style="margin-top:6px">公网 SaaS 连接器（文档/邮箱/IM）在内网部署下已移除。内网 GitLab 等系统部署完成后在此接入；知识库由本应用自建，不走连接器。</div>
+          <div class="empty-desc" style="margin-top:6px">公网 SaaS 连接器（文档/邮箱/IM）在内网部署下已移除。内网 GitLab 等系统部署完成后在此接入；知识库由本应用自建（后端对接 RAGFlow），见「知识库」页签，不走连接器。</div>
         </div>
       </div>`;
     }
@@ -2733,6 +3014,55 @@ function centerTabHTML(){
       <div class="panel-head"><div class="panel-title">${icon('plus','')}可添加</div></div>
       ${rest.map(row).join('')||`<div class="empty-state" style="padding:32px"><div class="empty-title">暂无更多连接器</div></div>`}
     </div>`;
+  }
+  if(DB.centerTab==='kb'){
+    const eng = DB.kbEngine;
+    const list = ownedBy(DB.kbs).filter(k=>!q || (k.name+methodLabel(k.method)).toLowerCase().includes(q));
+    if(DB.currentKb && !list.some(k=>k.id===DB.currentKb)) DB.currentKb = null;
+    const cur = list.find(k=>k.id===DB.currentKb) || null;
+    return `
+    <div class="panel" style="max-width:760px;margin-bottom:16px">
+      <div class="panel-head"><div class="panel-title">${icon('plug','')}检索引擎</div>
+        <span class="tag ${eng.status==='online'?'tag--success':''}">${eng.status==='online'?'在线':'离线'}</span></div>
+      <div class="connector-row">
+        <span class="mlogo" style="width:20px;height:20px;border-radius:6px;background:linear-gradient(135deg,var(--wb-palette-brand-8),var(--wb-palette-blue-8));flex-shrink:0"></span>
+        <div class="connector-info">
+          <div class="connector-name">${esc(eng.name)} ${esc(eng.version)}<span class="tag" style="height:16px;font-size:10px">${esc(eng.license)}</span></div>
+          <div class="connector-desc" style="font-family:var(--wb-mono);font-size:11px">${esc(eng.endpoint)} · 文档引擎 ${esc(eng.docEngine)}</div>
+        </div>
+        <button class="wb-btn wb-btn--sm wb-btn--secondary" data-action="kb-ping">测试连通</button>
+      </div>
+      <div class="connector-row">
+        <span class="mlogo" style="width:20px;height:20px;border-radius:6px;background:var(--wb-palette-black-90);flex-shrink:0"></span>
+        <div class="connector-info">
+          <div class="connector-name">向量与重排模型</div>
+          <div class="connector-desc">嵌入 ${esc(eng.embedding)} · 重排 ${esc(eng.rerank)}</div>
+        </div>
+        <span class="tag tag--brand">内网</span>
+      </div>
+      <div class="panel-body" style="border-top:1px solid var(--wb-border-default)">
+        <div class="sec-note">RAGFlow 以 Docker Compose 私有化部署在内网，浏览器不直连：全部检索与入库请求由本应用后端代理，并按账号绑定独立 dataset 命名空间，归属校验在本应用侧强制执行，不依赖 RAGFlow 自身的团队权限。</div>
+      </div>
+    </div>
+
+    <div class="panel" style="max-width:760px">
+      <div class="panel-head"><div class="panel-title">${icon('bookOpen','')}我的知识库</div>
+        <span class="tag">${list.length} 个 · 仅本人可见</span></div>
+      ${list.map(k=>`
+      <div class="connector-row ${k.id===DB.currentKb?'on':''}" data-kb="${k.id}" style="cursor:pointer">
+        ${icon('bookOpen','')}
+        <div class="connector-info">
+          <div class="connector-name">${esc(k.name)}<span class="tag" style="height:16px;font-size:10px">${esc(methodLabel(k.method))}</span>${k.raptor?'<span class="tag tag--brand" style="height:16px;font-size:10px">RAPTOR</span>':''}${k.kg?'<span class="tag tag--brand" style="height:16px;font-size:10px">知识图谱</span>':''}</div>
+          <div class="connector-desc">${k.docs.length} 个文档 · ${kbChunkCount(k)} 个切片 · 更新于 ${esc(k.updated)}</div>
+        </div>
+        <span class="tag ${k.docs.some(d=>d.status==='parsing')?'':'tag--success'}">${k.docs.some(d=>d.status==='parsing')?'解析中':'已就绪'}</span>
+        <span class="fs-unmount" data-kb-del="${k.id}" title="删除知识库">${icon('x','icon--12')}</span>
+      </div>`).join('')||`<div class="panel-body"><div class="sec-note">还没有知识库，点击下方新建</div></div>`}
+      <div class="panel-body" style="border-top:1px solid var(--wb-border-default)">
+        <button class="wb-btn wb-btn--primary" data-action="kb-new">${icon('plus','')}新建知识库</button>
+      </div>
+    </div>
+    ${cur?kbDetailHTML(cur):''}`;
   }
   if(DB.centerTab==='model'){
     const palette = ['linear-gradient(135deg,var(--wb-palette-brand-8),var(--wb-palette-brand-9))',
@@ -2829,6 +3159,44 @@ function bindCenterBody(){
   const root = $('.ct-body');
   if(!root) return;
   $$('[data-cat]',root).forEach(b=>b.addEventListener('click', ()=>{ DB.expertsCat=b.dataset.cat; renderCenterPage(); }));
+  $('[data-action="kb-ping"]',root)?.addEventListener('click', e=>{
+    const b=e.currentTarget; b.disabled=true; b.textContent='测试中…';
+    setTimeout(()=>{ b.disabled=false; b.textContent='测试连通';
+      toast(`${DB.kbEngine.endpoint} 可达 · 文档引擎 ${DB.kbEngine.docEngine} 正常`); }, 900);
+  });
+  $('[data-action="kb-new"]',root)?.addEventListener('click', openKbNewDialog);
+  $('[data-action="kb-ingest"]',root)?.addEventListener('click', openKbIngestDialog);
+  $$('[data-kb]',root).forEach(b=>b.addEventListener('click', e=>{
+    if(e.target.closest('[data-kb-del]')) return;
+    DB.currentKb = DB.currentKb===b.dataset.kb ? null : b.dataset.kb;
+    DB.kbHits = null; DB.kbQuery = ''; renderCenterPage();
+  }));
+  $$('[data-kb-del]',root).forEach(b=>b.addEventListener('click', e=>{
+    e.stopPropagation();
+    const kb = myKbs().find(k=>k.id===b.dataset.kbDel); if(!kb) return;
+    confirmDialog({title:'删除知识库', desc:`确定删除「${kb.name}」吗？RAGFlow 侧对应 dataset 与全部切片会一并删除。`, danger:true, okText:'删除', onOk:()=>{
+      DB.kbs = DB.kbs.filter(k=>k.id!==kb.id);
+      if(DB.currentKb===kb.id){ DB.currentKb=null; DB.kbHits=null; }
+      DB.attachments.w = DB.attachments.w.filter(a=>a.kbId!==kb.id);
+      DB.audits.unshift({ kind:'perm', owner:me().id, icon:'library', title:`删除知识库 ${kb.name}`, desc:'RAGFlow dataset 已移除', time:nowHM() });
+      renderCenterPage(); toast('知识库已删除');
+    }});
+  }));
+  $$('[data-kb-doc-del]',root).forEach(b=>b.addEventListener('click', ()=>{
+    const kb = myKbs().find(k=>k.id===DB.currentKb); if(!kb) return;
+    const d = kb.docs[+b.dataset.kbDocDel]; if(!d) return;
+    kb.docs.splice(+b.dataset.kbDocDel,1); kb.updated=nowHM(); DB.kbHits=null;
+    renderCenterPage(); toast(`「${d.name}」已移出知识库`);
+  }));
+  const doKbSearch = ()=>{
+    const kb = myKbs().find(k=>k.id===DB.currentKb); if(!kb) return;
+    DB.kbQuery = ($('#kb-q',root)?.value||'').trim();
+    if(!DB.kbQuery){ toast('请输入检索内容','error'); return; }
+    DB.kbHits = kbSearch(kb, DB.kbQuery);
+    renderCenterPage();
+  };
+  $('[data-action="kb-search"]',root)?.addEventListener('click', doKbSearch);
+  $('#kb-q',root)?.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); doKbSearch(); } });
   $$('[data-summon]',root).forEach(b=>b.addEventListener('click', ()=>{
     const e = DB.experts.find(x=>x.id===b.dataset.summon);
     b.disabled=true; b.textContent='召唤中…';
@@ -3057,6 +3425,12 @@ function openAttachPop(anchor, origin){
   const pop = buildPop('pop-attach', `
     <div class="pop-head" style="font-weight:600">添加引用</div>
     ${refs.length? refs.map(a=>`<button class="pop-item" data-ref="${esc(a.file)}"><span class="mlogo" style="background:var(--wb-status-success-soft-bg);color:var(--wb-status-success-text);display:flex;align-items:center;justify-content:center">M</span>${esc(a.file)}</button>`).join('') : ''}
+    ${myKbs().length?`<div class="pop-sep"></div>
+    <div class="pop-head" style="font-size:11px;color:var(--wb-text-tertiary)">知识库 · RAGFlow</div>
+    ${myKbs().map(k=>`<button class="pop-item ws-file" data-kb-ref="${k.id}" title="${esc(methodOf(k.method).desc)}">
+      ${icon('library','')}
+      <span class="ws-file-main"><b>${esc(k.name)}</b><i>${esc(methodLabel(k.method))} · ${k.docs.length} 文档 · ${kbChunkCount(k)} 切片</i></span>
+    </button>`).join('')}`:''}
     ${files.length?`<div class="pop-sep"></div>
     <div class="pop-head" style="font-size:11px;color:var(--wb-text-tertiary)">工作空间 · ${esc(ws?ws.name:'—')}</div>
     ${files.map(f=>`<button class="pop-item ws-file" data-wsfile="${esc(f.path)}" title="${esc(f.path)}">
@@ -3080,6 +3454,11 @@ function openAttachPop(anchor, origin){
     if(!f){ toast('文件不存在','error'); return; }
     push({name:f.name, path:f.path, type:(f.ext==='png'||f.ext==='jpg'||f.ext==='jpeg')?'img':'file'},
       `已引用工作空间文件「${f.name}」`);
+  }));
+  $$('[data-kb-ref]',pop).forEach(b=>b.addEventListener('click', ()=>{
+    const k = myKbs().find(x=>x.id===b.dataset.kbRef);
+    if(!k){ toast('知识库不存在','error'); return; }
+    push({name:k.name, kbId:k.id, type:'kb'}, `已引用知识库「${k.name}」`);
   }));
   $('[data-action="browse-files"]',pop)?.addEventListener('click', ()=>{ closePops(); navigate('/files'); });
   $('[data-action="upload"]',pop).addEventListener('click', ()=>{
