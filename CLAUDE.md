@@ -12,7 +12,7 @@ WorkBuddy AI 桌面应用（macOS arm64, v5.4.2）的参考副本、只读结构
 
 - **`app-reference/` 全树只读**：它是上游应用的原始副本（`WorkBuddyAI.app/`、`app_asar/`），任何情况下都不要修改、重打包或"顺手修复"其中的文件。本仓库的自有产出只写在 `app-reference/analysis/`、`resource/`、根文档。
 - **分析文档写作纪律**：路径基准写 `app-reference/app_asar/`；引用需给真实行号；推断结论必须标 `[INFERENCE]`，不得与代码/注释直接证据混写。
-- **归属义务**：上游版权为 `Copyright © 2026 Tencent Technology (Shenzhen) Company Limited`，捆绑第三方库各自保留许可。新增派生内容须按 `ATTRIBUTION.md` 保留归属；仓库**尚无根级 LICENSE**，在补齐许可声明前不要对外发布或再分发。
+- **归属义务**：上游版权为 `Copyright © 2026 Tencent Technology (Shenzhen) Company Limited`，捆绑第三方库各自保留许可。新增派生内容须按 `ATTRIBUTION.md` 保留归属；根级 `LICENSE` 为 **Apache-2.0**（只覆盖本仓库自有内容），上游应用与第三方内容各自保留许可，`app-reference/` 全树不在授权范围内、不得再分发。
 - `resource/workbuddy-live-demo.html` 的设计 token 取自上游 WorkBuddy 5.3.11 的 token 文件——编辑该文件时保留文件头的来源注释。
 <!-- TODO: 若后续引入构建/测试工具链或新增领域不变量，在此补充并重跑 project-instruction-bootstrap -->
 
@@ -29,6 +29,7 @@ WorkBuddy AI 桌面应用（macOS arm64, v5.4.2）的参考副本、只读结构
 | 原生模块层 | `app-reference/analysis/04-native-modules.md` |
 | 版权、许可、第三方归属 | `ATTRIBUTION.md` |
 | 功能演示原型 | `resource/workbuddy-live-demo.html` |
+| 后端选型（RAGFlow 复用地图 / omp RPC 集成与减肥策略） | `resource/backend-research.md` |
 
 ## 能力路由
 

@@ -11,7 +11,8 @@
    核心可复用件：切片模板、深度版面解析、混合检索、agentic 检索环、RAPTOR、GraphRAG。
    最大耦合点是 `api.db.services.*`，吸收时需替换成自己的存储层；官方解耦缝是
    `common/doc_store/doc_store_base.py` 的 `DocStoreConnection` 抽象。
-2. **omp 可以做 agent 后端，但不是进程内 SDK，而是子进程 RPC**。SDK 要求 Bun 运行时
+2. **omp 可以做 agent 后端，但不是进程内 SDK，而是子进程 RPC**。已决策（2026-08-29）：
+   **fork 并定死在 v18.0.10 / commit `33cc6b9a`，后续不再跟进上游**。SDK 要求 Bun 运行时
    （`docs/sdk.md`：Requires Bun 1.3.14+；`packages/coding-agent/src` 有 900+ 处 Bun API），
    Electron 主进程内嵌不可行。正确姿势是 spawn `omp --mode rpc`（stdio JSONL），
    这也是上游 WorkBuddy 桥接 CodeBuddy CLI 的同构架构（见 `app-reference/analysis/03-cli-backend.md`）。
@@ -19,7 +20,8 @@
    允许宿主注册工具、agent 调用时回调宿主。把知识库 agentic 检索注册为 host tool，
    KB 权限过滤就留在 WorkBuddy 宿主侧，与原型的权限模型（visibleKbs/只读共享/审计）一致。
 4. 许可均无障碍：RAGFlow Apache-2.0，omp MIT（版权链：Mario Zechner pi → Can Bölük → Stencil Labs）。
-   一旦实际吸收 RAGFlow 源码，`ATTRIBUTION.md` §3 的条件义务立即生效
+   据此已定根级 `LICENSE` = **Apache-2.0**（吸收目标 RAGFlow 即 Apache-2.0，MIT 内容兼容），
+   见 `ATTRIBUTION.md` §4。一旦实际吸收 RAGFlow 源码，`ATTRIBUTION.md` §3 的条件义务立即生效
    （补 `LICENSE-RAGFlow` 全文 + `NOTICE` + 派生文件头标注来源与修改点）。
 
 ## 1. RAGFlow（v0.27.1）复用地图
@@ -78,34 +80,75 @@
 - **会话持久化**：`SessionManager` 文件型 `.jsonl` 会话，天然支持 resume/fork——与原型的会话模型吻合。
 - RPC 模式默认关闭自动标题生成、支持 host 默认配置注入（`docs/rpc.md` Behavior notes）。
 
-### 2.2 轻量化（"减肥"）清单
+### 2.2 减肥策略（定稿）
 
-omp 发行形态是 `bun build --compile` 单二进制（Bun 运行时内嵌，见 `scripts/fix-dt-verdef.ts:4`）。
-减肥的两个层次：
+前提决策：fork 定死在 `33cc6b9a`（v18.0.10），不合并上游。这消掉了"持续 rebase 债"，
+换来两个新风险，列在阶段 0。omp 发行形态是 `bun build --compile` 单二进制
+（Bun 运行时内嵌，见 `scripts/fix-dt-verdef.ts:4`），减肥按收益/风险比分五个阶段，
+**每个阶段结束都跑同一套冒烟脚本 + 记录三项指标**（见"验收"）。
 
-**第一层：配置面裁剪（不动代码，优先做）**
-- 关掉 extensions / skills / MCP 自动发现、浏览器工具、LSP（按需）——SDK/RPC 均支持显式传入代替发现
-- 不装 `browser-relay`、不触发 puppeteer 路径；禁 telemetry（OTel 全家桶是 coding-agent 直接依赖）
+**阶段 0 —— 冻结基线**
 
-**第二层：编译入口裁剪（fork 后自建 entry，确认第一层不够再做）**
+- fork 到自有仓库，打 tag（如 `workbuddy-base` = `33cc6b9a`）；Bun 锁 `1.4.0`
+  （根 `package.json` 的 `packageManager` 字段）。
+- 冻结的代价，认了但要记录：① 上游安全修复无法自动获得，只能自查自修；
+  ② `pi-catalog` 内置模型库随时间过期——内网模型走自定义 provider 不受影响，
+  但若将来要接新的公网模型，需手工补 catalog 条目。
+- 先构建一次官方全量二进制，记录基线：体积 / 冷启动到 ready 帧耗时 / 空载 RSS。
 
-| 处置 | 包/目录 | 说明 |
-|---|---|---|
-| 保留 | `packages/agent`（agent-loop/compaction）、`ai`、`catalog`、`wire`、`utils`、`snapcompact`、`natives`（裁 feature）、`coding-agent` 的 `session/ tools/ config/ prompts/ modes/rpc/` | 核心回路 + RPC 模式 |
-| 裁掉 | `modes/` 里除 `rpc` 外的交互层（interactive/TUI/composer/theme，约 3.9MB 源码）、`packages/tui`（2.5MB）、`src/web`、`src/eval`、`autoresearch`、`stats`、`metaharness`、`collab-web`、`browser-relay`、`robomp` | 全是 TUI/评测/协作/浏览器周边。注意 `tui`/`stats`/`mnemopi` 是 `coding-agent` 的 package.json 直接依赖，裁掉需连带 patch 其依赖引用；`mnemopi`（记忆引擎）建议先留、配置关闭 |
-| natives 裁 feature | `crates/`：`pi-voice`（语音）、WebRTC、剪贴板等 | `packages/natives` 是单一 N-API 包（PDF/音频/WebRTC/grep/PTY/语法高亮全在里面，见其 package.json 描述），减体积要在 Rust feature 层做 |
+**阶段 1 —— 入口收敛（不删代码，靠打包器摇树；收益最大、风险最低，先做）**
 
-**风险**：omp 迭代极快（版本号 18.x，上游日更）。fork 减肥 = 背上持续 rebase 的债。
-所以推荐路径是三步走，且 YAGNI——前一步证明不够再走下一步：
+- 新建精简入口 `packages/coding-agent/src/rpc-main.ts`：只挂运行时初始化
+  （`src/modes/runtime-init.ts`）+ RPC 模式（`src/modes/rpc/rpc-mode.ts`），
+  不 import `src/cli.ts`、`interactive-mode.ts`、TUI/composer/theme/setup-wizard。
+- `bun build --compile --minify` 以 `rpc-main.ts` 为入口出 `omp-rpc` 单二进制；
+  交互层、`src/web`、`src/eval` 等未被引用的子树由打包器摇掉。
+- **[INFERENCE]** `rpc-mode.ts` 的 import 闭包不含 TUI（RPC 是 stdio 协议，无终端渲染），
+  摇树应能剥离 `pi-tui`；以阶段 1 的体积对比实测验证，若摇不掉说明有隐蔽引用，转阶段 2 处理。
 
-1. 直接 spawn 官方 `omp --mode rpc`，验证链路：host tool 注册 KB 检索 + 内网 provider + 会话 resume；
-2. 配置面裁剪（第一层），实测启动耗时/内存/二进制体积是否可接受；
-3. 仅当 ②仍超标，才 fork 自建精简编译入口（第二层）。
+**阶段 2 —— 依赖面裁剪（删包 + patch，仅当阶段 1 指标不达标）**
+
+- 直接删除的 workspace 包（无 rpc 链路引用）：`metaharness`、`collab-web`、
+  `browser-relay`、`typescript-edit-benchmark`、`python/robomp`。
+- 需要 patch 才能删的（是 `coding-agent` 的 package.json 直接依赖）：
+  `pi-tui`（仅交互模式引用，随阶段 1 入口已不进产物，删包时同步去依赖声明）、
+  `omp-stats`（去掉 `omp stats` 子命令注册）。
+- **保留但配置关闭**：`mnemopi`（记忆引擎）——它嵌在 session 链路里，删除要动核心代码，不值。
+- 去掉 `puppeteer-core` 依赖与 `patches/puppeteer-core@25.3.0.patch`（浏览器工具整条链路
+  不进 rpc 入口）。
+- OTel：保留 `@opentelemetry/api`（类型与 no-op 实现），移除 exporter/sdk 系列；
+  先实测默认路径是否惰性加载——若本来就不初始化，此项跳过。
+
+**阶段 3 —— natives 裁 feature（Rust 层，仅当二进制/内存仍超标）**
+
+- `packages/natives` 是单一 N-API 包，PDF/音频/WebRTC/grep/剪贴板/图像/语法高亮/PTY/shell
+  全在一个 .node 里（见其 package.json 描述）；裁剪要在 `crates/` workspace 的 feature 层做。
+- 保留：shell/PTY（bash 工具）、grep/walker（文本检索）、`pi-ast`（语法）、PDF（附件解析可能用）。
+- 裁掉：`pi-voice`（语音）、WebRTC、剪贴板；图像处理视附件功能取舍。
+- JS 侧 addon 加载器（`docs/natives-addon-loader-runtime.md`）需同步容错缺失符号。
+
+**阶段 4 —— 运行时配置面（随发行物固化的 host 默认值）**
+
+- extensions / skills / slash-commands 自动发现：关，改由 WorkBuddy 经 RPC 显式注入。
+- MCP：**保留**（原型"连接器"页依赖），但只走显式配置，不自动发现。
+- 浏览器工具、computer-use：关；LSP 默认关、按工作空间语言按需开。
+- telemetry：关。
+- 会话目录、内网模型 provider、审计事件订阅由 Electron 侧在 RPC 会话建立时注入
+  （`docs/rpc.md`：host 默认值仅在未显式配置时生效，项目/全局配置仍是权威）。
+
+**验收（减肥完成的定义）**
+
+- 指标：二进制体积、冷启动到 ready 帧耗时、空载 RSS——每阶段与阶段 0 基线对比；
+  绝对目标在基线实测后定（先验数字没有意义）。
+- 功能门槛（冒烟脚本全绿）：RPC v2 握手与分块、`set_host_tools` 注册 KB 检索并完成一次
+  host_tool_call 往返、prompt 流式事件、session resume/fork、内网 provider 对话、
+  bash/read/edit/write 内置工具。
+- 顺序纪律：阶段 1 先做并实测；2/3 只在数字不达标时进入；4 独立于 1-3，随集成一起做。
 
 ## 3. 开放问题（待定，不阻塞）
 
 - 内网如何分发 `InfiniFlow/deepdoc` 的 onnx 模型与 embedding/rerank 模型权重（HF 镜像 or 制品库）。
-- 仓库仍无根级 LICENSE；引入两个上游参考副本后此事更该定了（已多次上报，等决策）。
-- omp 二进制一旦进入发行物，需在 `ATTRIBUTION.md` 补 MIT 归属条目（现阶段仅本地参考副本，未分发，不触发）。
+- ~~根级 LICENSE~~ 已定 Apache-2.0；~~omp 归属条目~~ 已入 `ATTRIBUTION.md` §3（2026-08-29）。
+- omp 冻结后的安全修复策略：出高危 CVE 时是自修还是例外性 cherry-pick，届时再定。
 - kb-service（Python）与 omp（RPC 子进程）之间：KB 检索 host tool 由 Electron 主进程转发，
   还是 omp 直连 kb-service 的本地端口——前者审计链完整，后者少一跳。**[INFERENCE]** 倾向前者。
