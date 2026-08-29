@@ -19,7 +19,13 @@
 
 > 注：以上为仓库内可观察到的注释,并非完整清单。应用内还包含其它组件（如 `turing_sdk`、`@tencent/qimei-node` 等原生模块、`default_app.asar`、Electron 运行时);分发前请以应用自带的许可/供应商协议为准。
 
-## 3. 本仓库自有内容
+## 3. 参照实现的开源项目
+
+- **RAGFlow** —— `Apache License 2.0`,版权归 InfiniFlow 及其贡献者（https://github.com/infiniflow/ragflow）
+  - 用途：`resource/workbuddy-live-demo.html` 的知识库功能,其**切片模板划分**（`naive`/`qa`/`manual`/`paper`/`book`/`laws`/`presentation`/`table`/`one`/`picture`/`email`/`tag`,即 RAGFlow 的 `chunk_method`）与**深度版面解析 + 模板化切片 + 召回/重排**的管线设计参照 RAGFlow 实现。
+  - 义务：Apache-2.0 要求保留版权声明、许可证副本与变更说明。**若后续实际吸收 RAGFlow 源码**（而非仅参照设计）,须在仓库内附 `LICENSE-RAGFlow`（Apache-2.0 全文）与 `NOTICE`,并在被派生的文件头标注来源与修改点。当前仅为原型层面的概念参照,尚未纳入其源码。
+
+## 4. 本仓库自有内容
 
 - `app-reference/analysis/*.md` —— 结构分析文档（仓库作者）
-- `resource/workbuddy-live-demo.html` —— 功能演示原型（仓库作者）；其中设计 token 取自 WorkBuddy 5.3.11 的设计 token 文件（`wb-design-tokens-master.css` / `design-tokens.json`）,文件头注释已标注来源。
+- `resource/workbuddy-live-demo.html` —— 功能演示原型（仓库作者）；知识库部分的参照实现见第 3 节；其中设计 token 取自 WorkBuddy 5.3.11 的设计 token 文件（`wb-design-tokens-master.css` / `design-tokens.json`）,文件头注释已标注来源。
