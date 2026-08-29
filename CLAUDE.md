@@ -21,6 +21,7 @@ WorkBuddy AI 桌面应用（macOS arm64, v5.4.2）的参考副本、只读结构
 | 需求 | 去这里 |
 |---|---|
 | 项目是什么、目录布局 | `README.md` |
+| 建设方案与功能清单（建什么/用什么建/分几步） | `PLAN.md` |
 | 应用整体结论（进程模型/数据流/能力面/安全） | `app-reference/analysis/00-overview.md`（分析入口） |
 | Electron 主进程、preload、IPC、存储、CLI 桥接 | `app-reference/analysis/01-main-process.md` |
 | 渲染层 UI 技术栈、路由表、聊天渲染管线 | `app-reference/analysis/02-renderer-ui.md` |
