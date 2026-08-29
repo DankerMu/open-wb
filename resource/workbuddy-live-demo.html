@@ -3,12 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>WorkBuddy · 功能演示原型 (Live Demo)</title>
+<title>WorkBuddy · 内网部署版功能演示原型 (Live Demo)</title>
 <style>
 /* ============================================================
    WorkBuddy Live Demo — 设计 token 取自 WorkBuddy 5.3.11
    (wb-design-tokens-master.css / design-tokens.json)
    品牌色 light #00C29A / dark #4cf0ce
+
+   内网部署版：已移除公网依赖（分享/微信、SaaS 连接器、市场热度、
+   计费倍率、版本更新、积分），模型改为内网自建注册表，
+   并新增账号体系（内网统一身份 + 用户隔离 + 每账号沙箱）。
    ============================================================ */
 :root{
   --wb-palette-brand-1:#DFF7F2; --wb-palette-brand-2:#BFF0E6; --wb-palette-brand-3:#9FE8D9;
@@ -303,7 +307,7 @@ a{color:inherit;text-decoration:none}
   .sidebar.collapsed{margin-left:-288px;width:288px}
 }
 
-/* ==================== Topbar（参考：crumbs + badge + 面板按钮） ==================== */
+/* ==================== Topbar（crumbs + 面板按钮） ==================== */
 .workbuddy-topbar{flex:none;height:56px;min-height:56px;display:flex;align-items:center;gap:10px;padding:0 12px 0 16px;background:var(--wb-home-bg-secondary);position:relative;z-index:101}
 .workbuddy-topbar--page{border-bottom:1px solid var(--wb-border-card)}
 .crumbs{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--wb-text-secondary);min-width:0}
@@ -313,8 +317,6 @@ a{color:inherit;text-decoration:none}
 .crumbs .edit-btn{width:22px;height:22px;border-radius:4px;display:none;align-items:center;justify-content:center;color:var(--wb-icon-secondary);padding:0}
 .crumbs:hover .edit-btn{display:inline-flex}
 .tb-right{margin-left:auto;display:flex;align-items:center;gap:6px;flex-shrink:0}
-.badge-coop{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;background:var(--wb-status-success-soft-bg, rgba(12,191,91,.1));color:var(--wb-status-success-text);padding:3px 10px;border-radius:99px;font-weight:600;white-space:nowrap}
-.badge-coop i{width:6px;height:6px;border-radius:50%;background:var(--wb-status-success);animation:wb-pulse 1.6s infinite}
 /* 对话内搜索条 */
 .conv-search{display:flex;align-items:center;gap:6px;background:var(--wb-bg-primary);border:1px solid var(--wb-border-default);border-radius:8px;padding:4px 8px;min-width:230px}
 .conv-search input{border:none;outline:none;background:none;font-size:12.5px;color:var(--wb-text-primary);flex:1;min-width:60px}
@@ -629,6 +631,25 @@ a{color:inherit;text-decoration:none}
 .wb-table tbody tr{transition:background .12s;cursor:pointer}
 .wb-table tbody tr:hover{background:var(--wb-bg-hover)}
 /* 空状态 */
+/* ==================== 登录页 / 账号 ==================== */
+.login-root{display:none;position:fixed;inset:0;z-index:60;align-items:center;justify-content:center;background:var(--wb-home-bg-primary)}
+.login-card{width:360px;max-width:calc(100vw - 32px);background:var(--wb-bg-primary);border:1px solid var(--wb-border-card);border-radius:16px;padding:28px 24px 22px;box-shadow:0 12px 40px rgba(0,0,0,.10)}
+.login-brand{display:flex;justify-content:center;margin-bottom:14px}
+.login-brand img{height:26px}
+.login-title{font-size:18px;font-weight:650;text-align:center;color:var(--wb-text-primary)}
+.login-sub{font-size:12px;color:var(--wb-text-tertiary);text-align:center;margin:4px 0 18px}
+.login-btn{width:100%;height:36px;margin-top:4px}
+.login-err{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--wb-status-error-text);background:var(--wb-status-error-soft-bg,rgba(246,64,65,.1));border-radius:8px;padding:7px 10px;margin-bottom:10px}
+.login-hint{font-size:11.5px;color:var(--wb-text-tertiary);text-align:center;margin-top:12px;line-height:18px}
+.login-quick{display:flex;flex-direction:column;gap:6px;margin-top:14px;border-top:1px solid var(--wb-border-default);padding-top:14px}
+.login-quick-item{display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:10px;background:transparent;border:1px solid transparent;cursor:pointer;text-align:left;color:var(--wb-text-primary)}
+.login-quick-item:hover{background:var(--wb-bg-hover);border-color:var(--wb-border-default)}
+.login-quick-item b{display:block;font-size:13px;font-weight:550;line-height:18px}
+.login-quick-item i{display:block;font-style:normal;font-size:11px;color:var(--wb-text-secondary);line-height:15px}
+.sb-user{display:flex;align-items:center;gap:8px;flex:1;min-width:0;background:transparent;border:0;padding:2px 4px;margin:-2px -4px;border-radius:10px;cursor:pointer;text-align:left;color:var(--wb-text-primary)}
+.sb-user:hover{background:var(--wb-bg-hover)}
+.sb-user .sb-uinfo{display:block}
+.sb-user .sb-uname,.sb-user .sb-uplan{display:block}
 .empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:56px 20px;color:var(--wb-text-secondary)}
 .empty-state .empty-icon{width:64px;height:64px;border-radius:20px;background:var(--wb-bg-hover);display:flex;align-items:center;justify-content:center;color:var(--wb-icon-muted)}
 .empty-state .empty-icon .icon{width:28px;height:28px}
@@ -699,68 +720,28 @@ a{color:inherit;text-decoration:none}
 .pop-search{width:100%;padding:7px 10px;border:1px solid var(--wb-border-default);border-radius:6px;font-size:12.5px;outline:none;margin-bottom:6px;background:var(--wb-bg-secondary);color:var(--wb-text-primary)}
 .pop-search:focus{border-color:var(--wb-text-tertiary)}
 
-/* ==================== 项目 / 自动化 / 助理 / 设置 / 资料库 / 弹层扩展 ==================== */
-/* 项目列表 */
+/* ==================== 中心页 / 设置 / 弹层扩展 ==================== */
 .pj-hero{padding:34px 40px 8px;display:flex;align-items:flex-start;gap:24px;max-width:1120px;margin:0 auto}
 .pj-hero h1{font-size:24px;line-height:32px;font-weight:750;margin-bottom:6px;display:flex;align-items:center;gap:10px}
 .pj-hero .sub{font-size:13px;color:var(--wb-text-secondary)}
 .pj-hero .btn{margin-left:auto;flex:none}
-.pj-sec{padding:16px 40px 8px;max-width:1120px;margin:0 auto}
-.pj-sec-h{display:flex;align-items:center;gap:12px;font-size:14px;font-weight:700;margin-bottom:12px}
-.pj-sec-h input{margin-left:auto;width:210px;padding:6px 12px;border:1px solid var(--wb-border-default);border-radius:99px;font-size:12px;outline:none;background:var(--wb-bg-hover-light,var(--wb-color-bg-input));color:var(--wb-text-primary)}
-.pj-row{display:flex;align-items:center;gap:12px;padding:11px 14px;border:1px solid var(--wb-border-default);border-radius:12px;background:var(--wb-bg-secondary);margin-bottom:8px;transition:border-color .15s;max-width:1120px}
-.pj-row:hover{border-color:var(--wb-text-tertiary);cursor:pointer}
 .pj-row.selected{border-color:var(--wb-brand-primary)}
-.pj-ic{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;font-weight:700;flex:none}
 .pj-ic .icon{width:16px;height:16px}
-.pj-name{font-size:13.5px;font-weight:650}
-.pj-meta{font-size:11.5px;color:var(--wb-text-secondary);margin-top:2px}
 .pj-row .more{margin-left:auto;color:var(--wb-icon-muted);width:26px;height:26px;border-radius:6px;display:flex;align-items:center;justify-content:center;background:none;border:none;cursor:pointer}
 .pj-row .more:hover{background:var(--wb-bg-hover)}
-.pj-status{flex-shrink:0}
-.tpl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;max-width:1120px}
-.tpl-card{border:1px solid var(--wb-border-default);border-radius:12px;background:var(--wb-bg-secondary);padding:14px;cursor:pointer;transition:all .15s}
-.tpl-card:hover{border-color:var(--wb-text-tertiary);box-shadow:var(--wb-activity-card-shadow)}
-.tpl-card-name{font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px}
 .tpl-card-name .icon{width:14px;height:14px;color:var(--wb-brand-primary)}
-.tpl-card-desc{font-size:11.5px;color:var(--wb-text-secondary);margin-top:3px;line-height:17px}
 /* 项目详情 */
-.pj-tabs{flex:none;display:flex;align-items:center;gap:2px;padding:0 18px;border-bottom:1px solid var(--wb-border-default);background:var(--wb-home-bg-secondary)}
-.pj-tab{padding:10px 13px;font-size:13px;color:var(--wb-text-secondary);border-bottom:2px solid transparent;margin-bottom:-1px;background:none;border-top:none;border-left:none;border-right:none;cursor:pointer}
-.pj-tab:hover{color:var(--wb-text-primary)}
 .pj-tab.on{color:var(--wb-text-primary);font-weight:650;border-bottom-color:var(--wb-palette-black-90)}
 [data-theme="dark"] .pj-tab.on{border-bottom-color:var(--wb-palette-white-90)}
-.pj-body{flex:1;display:flex;min-height:0;max-width:1120px;margin:0 auto;width:100%}
-.pj-main{flex:1;overflow-y:auto;padding:18px 22px 28px;min-width:0}
-.pj-config{width:270px;flex:none;border-left:1px solid var(--wb-border-default);overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;background:var(--wb-sidebar-bg)}
 .pj-config.hidden{display:none}
-.cfg-h{font-size:13px;font-weight:700}
-.cfg-card{border:1px solid var(--wb-border-default);border-radius:10px;background:var(--wb-bg-secondary);padding:12px}
-.cfg-card-t{font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:7px}
 .cfg-card-t .icon{width:13px;height:13px;color:var(--wb-brand-primary)}
-.cfg-card-d{font-size:11.5px;color:var(--wb-text-secondary);margin-top:4px;line-height:17px}
-.cfg-card-op{margin-top:8px;display:flex;gap:6px}
-/* 自动化 */
-.auto-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
-.auto-card{border:1px solid var(--wb-border-default);border-radius:12px;padding:14px;background:var(--wb-bg-secondary);transition:all .15s;display:flex;flex-direction:column;gap:10px}
-.auto-card:hover{box-shadow:var(--wb-activity-card-shadow)}
 .auto-card.off{opacity:.62}
-.auto-card-head{display:flex;align-items:center;gap:10px}
-.auto-icon{width:34px;height:34px;border-radius:10px;background:var(--wb-brand-primary-subtle);color:var(--wb-brand-primary);display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .auto-icon .icon{width:16px;height:16px}
-.auto-name{font-size:13.5px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.auto-flow{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--wb-text-secondary);flex-wrap:wrap}
-.auto-flow-node{display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:8px;background:var(--wb-bg-hover);border:1px solid var(--wb-border-default);max-width:150px}
 .auto-flow-node .icon{width:12px;height:12px;color:var(--wb-brand-primary)}
-.auto-flow-node-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--wb-text-primary)}
-.auto-flow-arrow{color:var(--wb-icon-muted);display:inline-flex}
-.auto-foot{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--wb-text-secondary)}
 .auto-foot .switch{margin-left:auto}
 /* 助理页 */
-.assist-body{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--wb-text-secondary);padding:24px}
 .assist-body .big{font-size:16px;font-weight:650;color:var(--wb-text-primary)}
 .assist-body .sub{font-size:12.5px;max-width:420px;text-align:center;line-height:1.7}
-.assist-scroll{flex:1;overflow-y:auto;padding:20px 24px 8px;display:none;min-height:0}
 .assist-scroll.started{display:block}
 /* 设置 */
 .set-card{border:1px solid var(--wb-border-default);border-radius:12px;background:var(--wb-bg-secondary);padding:4px 16px;max-width:860px}
@@ -822,45 +803,20 @@ a{color:inherit;text-decoration:none}
 .connector-info{flex:1;min-width:0}
 .connector-name{font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:6px}
 .connector-desc{font-size:12px;color:var(--wb-text-secondary);margin-top:1px}
-/* 灵感 */
-.inspire-wall{columns:3;column-gap:12px}
 @media (max-width:900px){.inspire-wall{columns:2}}
-.inspire-card{break-inside:avoid;margin-bottom:12px;border-radius:14px;overflow:hidden;position:relative;cursor:pointer;border:1px solid var(--wb-border-default);background:var(--wb-bg-secondary);transition:transform .2s,box-shadow .2s}
-.inspire-card:hover{transform:translateY(-3px);box-shadow:var(--wb-activity-card-shadow)}
-.inspire-card img{width:100%;display:block}
-.inspire-card-body{padding:12px 14px}
-.inspire-card-title{font-size:13.5px;font-weight:600}
-.inspire-card-desc{font-size:12px;color:var(--wb-text-secondary);margin-top:3px;line-height:18px}
-/* 资料库 */
-.library-layout{display:flex;gap:16px;align-items:flex-start;min-height:420px}
-.library-nav{width:210px;flex-shrink:0;display:flex;flex-direction:column;gap:2px;position:sticky;top:0}
-.library-nav-item{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;font-size:13.5px;color:var(--wb-text-secondary);transition:all .15s;cursor:pointer;background:none;border:none;text-align:left}
-.library-nav-item:hover{background:var(--wb-bg-hover);color:var(--wb-text-primary)}
 .library-nav-item.active{background:var(--wb-bg-active);color:var(--wb-text-primary);font-weight:600}
 .library-nav-item .icon{width:15px;height:15px}
 .library-nav-item .badge-count{margin-left:auto;font-size:11px;color:var(--wb-text-secondary)}
-.library-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:12px}
-.file-row{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--wb-border-default);cursor:pointer;transition:background .12s}
-.file-row:hover{background:var(--wb-bg-hover)}
 .file-icon{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .file-icon .icon{width:16px;height:16px}
-.file-name{font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px}
-.file-meta{font-size:11.5px;color:var(--wb-text-secondary);margin-top:1px}
 /* 面板 */
 .panel{border:1px solid var(--wb-border-default);border-radius:12px;background:var(--wb-bg-secondary);overflow:hidden}
 .panel-head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--wb-border-default)}
 .panel-title{font-size:14px;font-weight:600;flex:1;display:flex;align-items:center;gap:8px}
 .panel-body{padding:14px 16px}
 /* 任务行 */
-.task-row{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--wb-border-default);cursor:pointer;transition:background .12s}
-.task-row:hover{background:var(--wb-bg-hover)}
-.task-row:last-child{border-bottom:none}
 .task-icon{width:26px;height:26px;border-radius:8px;background:var(--wb-bg-hover);display:flex;align-items:center;justify-content:center;color:var(--wb-icon-secondary);flex-shrink:0}
 .task-icon .icon{width:13px;height:13px}
-.task-info{flex:1;min-width:0}
-.task-name{font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.task-sub{font-size:11.5px;color:var(--wb-text-secondary);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.task-owner{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--wb-text-secondary);flex-shrink:0}
 /* 响应式 */
 @media (max-width:1100px){
   .claw-panels{grid-template-columns:1fr!important}
@@ -879,6 +835,7 @@ a{color:inherit;text-decoration:none}
 </style>
 </head>
 <body>
+<div class="login-root" id="login-root"></div>
 <div class="app-shell" id="app-shell">
   <aside class="sidebar" id="sidebar" data-od-id="sidebar"></aside>
   <div class="main-column">
@@ -905,6 +862,8 @@ const fmtSize = n => n>=1048576? (n/1048576).toFixed(1)+' MB' : n>=1024? Math.ro
 
 /* ================= 图标 (lucide 风格路径) ================= */
 const I = {
+  logOut: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
+  lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
   chat: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
   messageSquare: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
   plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
@@ -1184,28 +1143,41 @@ const ASSETS = {
 
 /* ================= 场景与快捷（对齐参考） ================= */
 const SCENES = {
-  office: { name: '日常办公', quick: ['文档处理','金融服务','数据分析及可视化','深度研究','幻灯片','产品需求'] },
+  office: { name: '日常办公', quick: ['文档处理','内部汇报','数据分析及可视化','资料归档','幻灯片','产品需求'] },
   code:   { name: '代码开发', quick: ['日常开发','网站开发','Agent 应用','Skill 开发','CI/CD'] },
   design: { name: '创意设计', quick: ['网站设计','PPT 设计','视觉海报','移动端 App','设计系统'] },
 };
 const QUICK_ICONS = {
-  '文档处理':'fileText','金融服务':'zap','数据分析及可视化':'fileSpreadsheet','深度研究':'search','幻灯片':'filePresentation','产品需求':'doc',
+  '文档处理':'fileText','内部汇报':'zap','数据分析及可视化':'fileSpreadsheet','资料归档':'folder','幻灯片':'filePresentation','产品需求':'doc',
   '日常开发':'code','网站开发':'globe','Agent 应用':'bot','Skill 开发':'wand','CI/CD':'refresh',
   '网站设计':'layoutGrid','PPT 设计':'filePresentation','视觉海报':'image','移动端 App':'monitor','设计系统':'palette',
 };
 const QUICK_PROMPTS = {
-  '文档处理':'把 Q3 财报做成 18 页经营分析 PPT','金融服务':'分析人民币与东南亚货币汇率并输出报告',
+  '文档处理':'把 Q3 经营数据做成 18 页分析 PPT','内部汇报':'汇总本季度部门进展并输出汇报材料',
   '数据分析及可视化':'分析 2026 年 7 月销售数据，生成周报：同比环比、区域拆解、异常标注',
-  '深度研究':'调研 AI 办公助手竞品，输出对比表','幻灯片':'帮我做一份产品发布会 PPT 大纲','产品需求':'帮我整理一份产品需求文档',
-  '日常开发':'帮我实现一个带校验的登录组件','网站开发':'帮我搭建一个官网首页','Agent 应用':'帮我设计一个 Agent 应用的交互流程',
+  '资料归档':'整理本地项目文档并建立分类索引','幻灯片':'帮我做一份项目评审 PPT 大纲','产品需求':'帮我整理一份产品需求文档',
+  '日常开发':'帮我实现一个带校验的登录组件','网站开发':'帮我搭建一个内部系统首页','Agent 应用':'帮我设计一个 Agent 应用的交互流程',
   'Skill 开发':'帮我写一个数据处理 Skill','CI/CD':'帮我生成一条 CI 流水线配置',
-  '网站设计':'帮我设计一个现代官网首页','PPT 设计':'帮我美化这份 PPT 的配色与排版','视觉海报':'帮我设计一张科技感的产品发布海报',
+  '网站设计':'帮我设计一个内部系统首页','PPT 设计':'帮我美化这份 PPT 的配色与排版','视觉海报':'帮我设计一张科技感的产品发布海报',
   '移动端 App':'帮我设计一个移动端打卡界面','设计系统':'帮我整理一套设计系统规范',
 };
 
 /* ================= 应用状态 ================= */
 const DB = {
   theme:'system',
+  // ===== 身份与隔离 =====
+  // 内网统一身份（演示：本地校验）。每个用户拥有独立沙箱根目录与工作空间，
+  // 会话/助理任务/审计均按 owner 隔离，切换账号后互不可见。
+  users:[
+    { id:'u1', name:'张三', account:'zhangsan', pwd:'demo', dept:'平台研发部', title:'前端工程师', role:'成员',
+      sandbox:'/data/workbuddy/zhangsan', spaces:['workbuddy-demo','智能客服重构'], quota:'20 GB' },
+    { id:'u2', name:'赵六', account:'zhaoliu', pwd:'demo', dept:'数据部', title:'数据分析师', role:'成员',
+      sandbox:'/data/workbuddy/zhaoliu', spaces:['指标口径梳理','数据中台建设'], quota:'20 GB' },
+    { id:'u3', name:'李四', account:'lisi', pwd:'demo', dept:'产品部', title:'产品经理', role:'管理员',
+      sandbox:'/data/workbuddy/lisi', spaces:['workbuddy-demo','数据中台建设'], quota:'50 GB' },
+  ],
+  currentUser:null,
+  loginError:'',
   route:'/',
   sidebarTab:'chats',
   expanded:{},
@@ -1214,33 +1186,41 @@ const DB = {
   scene:'office',           // 场景: office/code/design
   quickExpanded:false,
   quickSelected:null,
-  model:'推荐模型',
+  model:'内网通用模型',
   fullAccess:false,
-  space:'workbuddy-demo',
-  spaces:['workbuddy-demo','竞品分析','数据中台建设'],
-  models:['推荐模型','Hy3','GLM-5.2','Kimi-K3'],
+  space:'workbuddy-demo',   // 当前选中的工作空间（登录时按用户重置）
+  // spaces 来自当前用户（userSpaces()），此处仅保留当前选中值
+  models:['内网通用模型','Qwen3-32B','DeepSeek-V3','GLM-4-32B'],
+  // 内网模型注册表：endpoint 为内网地址，protocol 决定适配层
+  modelRegistry:[
+    { name:'内网通用模型', protocol:'OpenAI 兼容', endpoint:'http://llm-gw.intra:8000/v1', note:'网关默认路由' },
+    { name:'Qwen3-32B', protocol:'vLLM', endpoint:'http://gpu-node-01.intra:8001/v1', note:'A100 ×2' },
+    { name:'DeepSeek-V3', protocol:'OpenAI 兼容', endpoint:'http://gpu-node-02.intra:8000/v1', note:'长上下文' },
+    { name:'GLM-4-32B', protocol:'Ollama', endpoint:'http://gpu-node-03.intra:11434', note:'轻量推理' },
+  ],
   conversations: [
-    { id:'c1', title:'统计活跃用户数', status:'running', group:'今天', time:Date.now()-1000*60*3, mode:'working', kind:'data' },
-    { id:'c2', title:'2025年国际金融行业分析报告', status:'done', group:'今天', time:Date.now()-1000*60*5, mode:'working', kind:'research' },
-    { id:'c3', title:'规划7日游行程', status:'done', group:'今天', time:Date.now()-1000*60*6, mode:'working', kind:'research' },
-    { id:'c4', title:'人民币与东南亚货币汇率分析', status:'done', group:'今天', time:Date.now()-1000*60*20, mode:'working', kind:'q3' },
-    { id:'c5', title:'团队 Outing 目的地投票网页', status:'done', group:'今天', time:Date.now()-1000*60*96, mode:'design', kind:'research' },
-    { id:'c6', title:'销售周报 · 第 31 周', status:'done', group:'昨天', time:Date.now()-86400000, mode:'working', kind:'q3' },
-    { id:'c7', title:'Q3 OKR 复盘材料整理', status:'done', group:'昨天', time:Date.now()-86400000-1000*60*60*4, mode:'working', kind:'research' },
-    { id:'c8', title:'登录页样式修复', status:'failed', group:'过去7天', time:Date.now()-3*86400000, mode:'code', kind:'custom' },
-    { id:'c9', title:'新品发布海报设计', status:'done', group:'过去7天', time:Date.now()-4*86400000, mode:'design', kind:'custom' },
-    { id:'c10', title:'数据看板搭建', status:'done', group:'更早', time:Date.now()-12*86400000, mode:'working', kind:'custom' },
+    { id:'c1', owner:'u1', title:'统计活跃用户数', status:'running', group:'今天', time:Date.now()-1000*60*3, mode:'working', kind:'data' },
+    { id:'c2', owner:'u3', title:'2026 上半年经营数据分析报告', status:'done', group:'今天', time:Date.now()-1000*60*5, mode:'working', kind:'research' },
+    { id:'c3', owner:'u3', title:'部门季度目标拆解', status:'done', group:'今天', time:Date.now()-1000*60*6, mode:'working', kind:'research' },
+    { id:'c4', owner:'u2', title:'各区域销售指标口径核对', status:'done', group:'今天', time:Date.now()-1000*60*20, mode:'working', kind:'q3' },
+    { id:'c5', owner:'u1', title:'内部工具使用情况投票页', status:'done', group:'今天', time:Date.now()-1000*60*96, mode:'design', kind:'research' },
+    { id:'c6', owner:'u2', title:'销售周报 · 第 31 周', status:'done', group:'昨天', time:Date.now()-86400000, mode:'working', kind:'q3' },
+    { id:'c7', owner:'u3', title:'Q3 OKR 复盘材料整理', status:'done', group:'昨天', time:Date.now()-86400000-1000*60*60*4, mode:'working', kind:'research' },
+    { id:'c8', owner:'u1', title:'登录页样式修复', status:'failed', group:'过去7天', time:Date.now()-3*86400000, mode:'code', kind:'custom' },
+    { id:'c9', owner:'u1', title:'新品发布海报设计', status:'done', group:'过去7天', time:Date.now()-4*86400000, mode:'design', kind:'custom' },
+    { id:'c10', owner:'u2', title:'数据看板搭建', status:'done', group:'更早', time:Date.now()-12*86400000, mode:'working', kind:'custom' },
   ],
   pinned:['c1'],
   // 空间分组: 项目/工作空间/专家团 (真实侧栏结构)
   taskGroups:[
-    { kind:'project', name:'智能客服重构', ids:['c1','c9'] },
-    { kind:'workspace', name:'workbuddy-demo', ids:['c2','c4'] },
-    { kind:'expert', name:'数据分析师 · 专家团', ids:['c3','c6'] },
+    { kind:'project', owner:'u1', name:'智能客服重构', ids:['c1','c9'] },
+    { kind:'workspace', owner:'u3', name:'workbuddy-demo', ids:['c2','c7'] },
+    { kind:'expert', owner:'u2', name:'数据分析师 · 专家团', ids:['c4','c6'] },
   ],
   colleagueTasks:[
-    { id:'ac1', title:'本地助理 · 周报整理', status:'done', time:Date.now()-3600e3 },
-    { id:'ac2', title:'本地助理 · 文件扫描', status:'running', time:Date.now()-600e3 },
+    { id:'ac1', owner:'u1', title:'本地助理 · 周报整理', status:'done', time:Date.now()-3600e3 },
+    { id:'ac2', owner:'u1', title:'本地助理 · 文件扫描', status:'running', time:Date.now()-600e3 },
+    { id:'ac3', owner:'u2', title:'本地助理 · 指标校验', status:'done', time:Date.now()-7200e3 },
   ],
   currentConv:null,
   streaming:null,
@@ -1255,138 +1235,138 @@ const DB = {
   recState:'idle',  // idle/listening
   centerTab:'expert',  // expert/skill/connector/model/perm/audit
   centerSearch:'',
-  projects:[
-    { id:'p1', name:'智能客服重构', desc:'客服机器人核心链路升级', members:['张三','李四','王五'], tasks:12, auto:3, icon:'bot', color:'#2563eb' },
-    { id:'p2', name:'数据中台建设', desc:'统一指标口径与数据服务', members:['张三','赵六'], tasks:8, auto:2, icon:'fileSpreadsheet', color:'#0CBF5B' },
-    { id:'p3', name:'移动端体验优化', desc:'App 性能与交互体验提升', members:['李四','钱七','孙八'], tasks:15, auto:1, icon:'monitor', color:'#7c3aed' },
-    { id:'p4', name:'内容运营助手', desc:'AI 内容生成与分发自动化', members:['王五','张三'], tasks:6, auto:4, icon:'sparkles', color:'#FF7800' },
-  ],
-  currentProject:'p1',
-  projectTab:'tasks',
-  automations:[
-    { id:'a1', name:'每日站会纪要自动发送', trigger:{icon:'clock', text:'每天 09:30'}, action:{icon:'mail', text:'发送纪要到群'}, enabled:true, runs:128, lastRun:'今天 09:30' },
-    { id:'a2', name:'新需求自动拆解任务', trigger:{icon:'inbox', text:'收到新需求'}, action:{icon:'listChecks', text:'拆解并创建任务'}, enabled:true, runs:47, lastRun:'今天 11:02' },
-    { id:'a3', name:'周报定时生成', trigger:{icon:'calendar', text:'每周五 17:00'}, action:{icon:'fileText', text:'生成周报文档'}, enabled:true, runs:36, lastRun:'上周五 17:00' },
-    { id:'a4', name:'缺陷自动分派', trigger:{icon:'alertTriangle', text:'Bug 状态变更'}, action:{icon:'user', text:'分派给对应负责人'}, enabled:false, runs:19, lastRun:'3 天前' },
-    { id:'a5', name:'发布提醒推送', trigger:{icon:'rocket', text:'版本发布完成'}, action:{icon:'bell', text:'推送全员提醒'}, enabled:true, runs:8, lastRun:'昨天 18:40' },
-  ],
   experts:[
-    { id:'e1', name:'前端架构师', sub:'官方专家 · 2.1k 人用过', img:'miao', desc:'精通 React/Vue 架构设计、性能优化与工程化体系建设，擅长大型前端项目重构。', tags:['前端','架构','性能'], uses:'2.1k', category:'开发' },
-    { id:'e2', name:'数据分析师', sub:'官方专家 · 1.6k 人用过', img:'miao', desc:'擅长数据清洗、指标体系建设与可视化看板搭建，输出结构化分析报告。', tags:['数据分析','报表'], uses:'1.6k', category:'办公' },
-    { id:'e3', name:'品牌视觉设计师', sub:'官方专家 · 3.2k 人用过', img:'miao', desc:'品牌 VI、海报、社交媒体视觉全案设计，支持多风格探索与快速迭代。', tags:['品牌','海报','VI'], uses:'3.2k', category:'设计' },
-    { id:'e4', name:'测试工程师', sub:'官方专家 · 980 人用过', img:'miao', desc:'自动化测试用例设计、接口测试与回归测试方案输出，覆盖主流测试框架。', tags:['测试','自动化'], uses:'980', category:'开发' },
-    { id:'e5', name:'内容运营官', sub:'社区专家 · 1.1k 人用过', img:'miao', desc:'公众号推文、营销文案、短视频脚本一站式产出，自带平台风格库。', tags:['文案','运营','短视频'], uses:'1.1k', category:'办公' },
-    { id:'e6', name:'AI 产品顾问', sub:'社区专家 · 760 人用过', img:'miao', desc:'产品定位、需求分析、PRD 撰写与 AI 功能规划咨询。', tags:['产品','AI'], uses:'760', category:'产品' },
+    { id:'e1', name:'前端架构师', sub:'内置专家', img:'miao', desc:'精通 React/Vue 架构设计、性能优化与工程化体系建设，擅长大型前端项目重构。', tags:['前端','架构','性能'], category:'开发' },
+    { id:'e2', name:'数据分析师', sub:'内置专家', img:'miao', desc:'擅长数据清洗、指标体系建设与可视化看板搭建，输出结构化分析报告。', tags:['数据分析','报表'], category:'办公' },
+    { id:'e3', name:'品牌视觉设计师', sub:'内置专家', img:'miao', desc:'品牌 VI、海报、社交媒体视觉全案设计，支持多风格探索与快速迭代。', tags:['品牌','海报','VI'], category:'设计' },
+    { id:'e4', name:'测试工程师', sub:'内置专家', img:'miao', desc:'自动化测试用例设计、接口测试与回归测试方案输出，覆盖主流测试框架。', tags:['测试','自动化'], category:'开发' },
+    { id:'e5', name:'内容运营官', sub:'本地自建', img:'miao', desc:'内部通知、宣传文案、汇报材料一站式产出。', tags:['文案','运营'], category:'办公' },
+    { id:'e6', name:'AI 产品顾问', sub:'本地自建', img:'miao', desc:'产品定位、需求分析、PRD 撰写与 AI 功能规划咨询。', tags:['产品','AI'], category:'产品' },
   ],
   skills:[
-    { id:'s1', name:'Excel 数据透视', icon:'fileSpreadsheet', color:'#0CBF5B', desc:'自动完成数据透视表、图表与条件格式', author:'官方', installed:true, cat:'办公', uses:'4.5k' },
-    { id:'s2', name:'PPT 一键美化', icon:'filePresentation', color:'#FF7800', desc:'统一配色字体、智能排版、模板套用', author:'官方', installed:false, cat:'办公', uses:'3.8k' },
-    { id:'s3', name:'代码审查', icon:'fileCode', color:'#2563eb', desc:'按规范审查代码并输出改进建议', author:'官方', installed:true, cat:'开发', uses:'6.2k' },
-    { id:'s4', name:'海报生成器', icon:'image', color:'#7c3aed', desc:'输入主题自动生成多风格营销海报', author:'官方', installed:true, cat:'设计', uses:'5.1k' },
-    { id:'s5', name:'会议纪要整理', icon:'mic', color:'#00C29A', desc:'录音转文字并提炼行动项与责任人', author:'社区', installed:false, cat:'办公', uses:'2.9k' },
-    { id:'s6', name:'接口文档生成', icon:'plug', color:'#22D3EE', desc:'扫描代码自动生成 OpenAPI 文档', author:'社区', installed:false, cat:'开发', uses:'1.7k' },
-    { id:'s7', name:'Logo 设计', icon:'palette', color:'#F64041', desc:'生成品牌 Logo 与 VI 应用示例', author:'官方', installed:false, cat:'设计', uses:'4.0k' },
-    { id:'s8', name:'周报生成器', icon:'fileText', color:'#FF7800', desc:'根据工作记录自动生成结构化周报', author:'官方', installed:true, cat:'办公', uses:'7.3k' },
-    { id:'s9', name:'SQL 优化', icon:'terminal', color:'#2563eb', desc:'分析慢查询并输出优化后的 SQL', author:'社区', installed:false, cat:'开发', uses:'2.2k' },
+    { id:'s1', name:'Excel 数据透视', icon:'fileSpreadsheet', color:'#0CBF5B', desc:'自动完成数据透视表、图表与条件格式', author:'内置', installed:true, cat:'办公' },
+    { id:'s2', name:'PPT 一键美化', icon:'filePresentation', color:'#FF7800', desc:'统一配色字体、智能排版、模板套用', author:'内置', installed:false, cat:'办公' },
+    { id:'s3', name:'代码审查', icon:'fileCode', color:'#2563eb', desc:'按规范审查代码并输出改进建议', author:'内置', installed:true, cat:'开发' },
+    { id:'s4', name:'海报生成器', icon:'image', color:'#7c3aed', desc:'输入主题自动生成多风格宣传海报', author:'内置', installed:true, cat:'设计' },
+    { id:'s5', name:'会议纪要整理', icon:'mic', color:'#00C29A', desc:'录音转文字并提炼行动项与责任人', author:'本地自建', installed:false, cat:'办公' },
+    { id:'s6', name:'接口文档生成', icon:'plug', color:'#22D3EE', desc:'扫描代码自动生成 OpenAPI 文档', author:'本地自建', installed:false, cat:'开发' },
+    { id:'s7', name:'Logo 设计', icon:'palette', color:'#F64041', desc:'生成品牌 Logo 与 VI 应用示例', author:'内置', installed:false, cat:'设计' },
+    { id:'s8', name:'周报生成器', icon:'fileText', color:'#FF7800', desc:'根据工作记录自动生成结构化周报', author:'内置', installed:true, cat:'办公' },
+    { id:'s9', name:'SQL 优化', icon:'terminal', color:'#2563eb', desc:'分析慢查询并输出优化后的 SQL', author:'本地自建', installed:false, cat:'开发' },
   ],
-  connectors:[
-    { id:'ct1', name:'腾讯文档', img:'tdocs', desc:'读写腾讯文档，协作创作', connected:true, cat:'文档' },
-    { id:'ct2', name:'QQ邮箱', img:'qqmail', desc:'收发邮件、智能起草', connected:true, cat:'通讯' },
-    { id:'ct3', name:'企业微信', img:'wecom', desc:'企微消息、日程与文档', connected:false, cat:'通讯' },
-    { id:'ct4', name:'腾讯会议', img:'tmeet', desc:'会议预约与纪要同步', connected:false, cat:'通讯' },
-    { id:'ct5', name:'乐享知识库', img:'lexiang', desc:'企业知识检索与沉淀', connected:false, cat:'知识' },
-    { id:'ct6', name:'ima 知识库', img:'mascot', desc:'个人知识库检索', connected:true, cat:'知识' },
-    { id:'ct7', name:'GitHub', img:'', desc:'代码仓库与 Issue 联动', connected:false, cat:'开发', mono:'git' },
-    { id:'ct8', name:'飞书', img:'lark', desc:'飞书消息与云文档', connected:false, cat:'通讯' },
-    { id:'ct9', name:'钉钉', img:'dingtalk', desc:'钉钉消息与审批', connected:false, cat:'通讯' },
-  ],
-  plugins:[
-    { id:'pl1', name:'Ardot Design', icon:'palette', ver:'2.4.1', desc:'设计稿转代码的腾讯设计语言插件', installed:true, cat:'设计', author:'Tencent' },
-    { id:'pl2', name:'SheetAgent', icon:'fileSpreadsheet', ver:'1.8.0', desc:'智能表格处理与数据分析代理', installed:true, cat:'办公', author:'Tencent' },
-    { id:'pl3', name:'CloudStudio 部署', icon:'cloud', ver:'0.9.3', desc:'一键部署应用到云开发环境', installed:false, cat:'开发', author:'Tencent' },
-    { id:'pl4', name:'微信支付助手', icon:'qr', ver:'1.2.0', desc:'支付流程查询与订单对账', installed:false, cat:'金融', author:'Tencent' },
-    { id:'pl5', name:'PPT 智能排版', icon:'filePresentation', ver:'2.0.2', desc:'幻灯片内容生成与排版优化', installed:false, cat:'办公', author:'社区' },
-    { id:'pl6', name:'多模态生图', icon:'image', ver:'1.5.7', desc:'文生图/图生图能力增强', installed:true, cat:'设计', author:'社区' },
-  ],
+  // 内网部署：公网 SaaS 连接器已全部移除；内网连接器（GitLab 等）待部署后接入
+  connectors:[],
   audits:[
-    { kind:'approval', icon:'shield', title:'允许删除旧备份文件', desc:'销售周报任务 · 审批', time:'10:36', ok:true },
-    { kind:'tool', icon:'terminal', title:'mcp.web 调用 5 条结果', desc:'竞品分析任务 · 工具', time:'09:12' },
-    { kind:'job', icon:'clock', title:'「每日站会纪要」执行完成', desc:'自动化 · cron', time:'今天 09:30' },
-    { kind:'system', icon:'sparkles', title:'任务「规划7日游行程」已归档', desc:'系统 · 生命周期', time:'昨天 18:02' },
+    { kind:'approval', owner:'u2', icon:'shield', title:'允许删除旧备份文件', desc:'销售周报任务 · 审批', time:'10:36', ok:true },
+    { kind:'tool', owner:'u2', icon:'terminal', title:'内网知识检索 返回 5 条结果', desc:'指标口径核对任务 · 工具', time:'09:12' },
+    { kind:'perm', owner:'u1', icon:'lock', title:'越界写入被沙箱拦截', desc:'路径 /etc 不在沙箱 /data/workbuddy/zhangsan 内 · 已拒绝', time:'今天 09:41' },
+    { kind:'auth', owner:'u3', icon:'user', title:'账号 lisi 登录成功', desc:'内网统一身份 · 管理员', time:'今天 09:02' },
+    { kind:'system', owner:'u3', icon:'sparkles', title:'任务「部门季度目标拆解」已归档', desc:'系统 · 生命周期', time:'昨天 18:02' },
   ],
-  inspirations:[
-    { id:'i1', img:'insp1', title:'渐变玻璃质感后台', desc:'毛玻璃 + 渐变光晕的现代管理后台', tags:['UI','Web'], likes:342 },
-    { id:'i2', img:'insp2', title:'品牌海报视觉探索', desc:'大胆撞色与几何构图的海报系列', tags:['海报','品牌'], likes:517 },
-    { id:'i3', img:'insp3', title:'移动端打卡界面', desc:'轻量有趣的每日打卡交互设计', tags:['移动端','交互'], likes:286 },
-    { id:'i4', img:'insp1', title:'数据可视化大屏', desc:'深色系实时数据监控大屏', tags:['大屏','数据'], likes:428 },
-    { id:'i5', img:'insp2', title:'节气营销插画', desc:'二十四节气系列插画与字体设计', tags:['插画','营销'], likes:655 },
-    { id:'i6', img:'insp3', title:'智能家居控制面板', desc:'极简风格的全屋智能控制界面', tags:['IoT','UI'], likes:199 },
-  ],
-  libraryNav:[
-    { key:'tencent-docs', label:'腾讯文档', icon:'fileText', count:24 },
-    { key:'ima', label:'ima 知识库', icon:'brain', count:156 },
-    { key:'lexiang', label:'乐享知识库', icon:'bookOpen', count:89 },
-    { key:'my-files', label:'我的文件', icon:'folder', count:47 },
-    { key:'agent-mail', label:'AI 邮件', icon:'mail', count:12 },
-  ],
-  libraryFiles:{
-    'tencent-docs':[
-      { icon:'fileText', color:'#2563eb', name:'Q3 季度复盘报告', owner:'我', time:'今天 10:24', size:'2.4 MB', type:'文档' },
-      { icon:'fileSpreadsheet', color:'#0CBF5B', name:'销售数据看板', owner:'李四', time:'昨天 16:08', size:'5.1 MB', type:'表格' },
-      { icon:'filePresentation', color:'#FF7800', name:'产品发布会演讲', owner:'我', time:'3 天前', size:'18.7 MB', type:'幻灯片' },
-      { icon:'file', color:'#F64041', name:'合同模板 v3', owner:'王五', time:'5 天前', size:'1.2 MB', type:'PDF' },
-      { icon:'fileText', color:'#2563eb', name:'需求池 2025H2', owner:'李四', time:'上周', size:'860 KB', type:'文档' },
-    ],
-    'ima':[
-      { icon:'fileText', color:'#2563eb', name:'大模型评测方法论文档', owner:'我', time:'今天 09:12', size:'3.2 MB', type:'文档' },
-      { icon:'file', color:'#7c3aed', name:'Prompt 工程最佳实践', owner:'我', time:'昨天 20:45', size:'1.8 MB', type:'PDF' },
-      { icon:'fileSpreadsheet', color:'#0CBF5B', name:'知识库条目清单', owner:'我', time:'4 天前', size:'420 KB', type:'表格' },
-    ],
-    'lexiang':[
-      { icon:'fileText', color:'#2563eb', name:'新人入职指南', owner:'HR 团队', time:'2 天前', size:'1.1 MB', type:'文档' },
-      { icon:'filePresentation', color:'#FF7800', name:'公司战略宣讲', owner:'管理层', time:'上周', size:'12.4 MB', type:'幻灯片' },
-    ],
-    'my-files':[
-      { icon:'fileCode', color:'#00C29A', name:'workbuddy-demo.js', owner:'我', time:'今天 08:30', size:'42 KB', type:'代码' },
-      { icon:'fileImage', color:'#7c3aed', name:'产品截图合集.zip', owner:'我', time:'昨天 14:22', size:'86.3 MB', type:'压缩包' },
-      { icon:'fileText', color:'#2563eb', name:'会议纪要 0805', owner:'我', time:'3 天前', size:'96 KB', type:'文档' },
-    ],
-    'agent-mail':[
-      { icon:'mail', color:'#00C29A', name:'【周报】本周工作进展', owner:'我', time:'今天 07:30', size:'—', type:'已发送' },
-      { icon:'mail', color:'#FF7800', name:'项目评审会议邀请', owner:'李四', time:'昨天 11:00', size:'—', type:'收件箱' },
-      { icon:'mail', color:'#F64041', name:'服务器告警通知', owner:'系统', time:'2 天前', size:'—', type:'收件箱' },
-    ],
-  },
-  libraryKey:'tencent-docs',
   notices:[
-    { icon:'bell', title:'新版本 v5.3.11 已发布', desc:'新增专家团队协作与更多连接器', time:'今天 09:00', unread:true },
-    { icon:'sparkles', title:'你的周报已生成', desc:'「周报自动生成」任务执行完成', time:'昨天 17:05', unread:true },
-    { icon:'user', title:'张三 邀请你加入「智能客服重构」项目', desc:'等待你接受邀请', time:'昨天 15:42', unread:false },
-    { icon:'zap', title:'积分到账', desc:'完成任务获得 120 积分', time:'3 天前', unread:false },
+    { owner:'u1', icon:'sparkles', title:'你的周报已生成', desc:'「周报自动生成」任务执行完成', time:'昨天 17:05', unread:true },
+    { owner:'u1', icon:'lock', title:'一次越界写入已被沙箱拦截', desc:'目标路径不在你的沙箱内，操作已拒绝', time:'今天 09:41', unread:true },
+    { owner:'u2', icon:'sparkles', title:'指标校验任务已完成', desc:'「本地助理 · 指标校验」执行完成', time:'今天 08:20', unread:true },
+    { owner:'u3', icon:'user', title:'有 2 个新账号待审批', desc:'管理员 · 账号管理', time:'昨天 15:42', unread:false },
   ],
   taskFilter:{ st:'all', tm:'all' },
   expertsCat:'全部',
-  skillsCat:'全部',
-  connectorsCat:'全部',
-  pluginsCat:'全部',
-  inspireShuffle:0,
   pbIdx:0,
-  clawChannels:[
-    { id:'wecom', name:'企业微信', img:'wecom', connected:true, desc:'随时通过企微给 WorkBuddy 下任务' },
-    { id:'lark', name:'飞书', img:'lark', connected:true, desc:'飞书消息即任务入口' },
-    { id:'dingtalk', name:'钉钉', img:'dingtalk', connected:false, desc:'钉钉群机器人接单' },
-    { id:'qq', name:'QQ', img:'wechat', connected:false, desc:'QQ 消息直达本地 Agent' },
-  ],
-  colleagues:[
-    { id:'m1', name:'张三', role:'前端工程师', status:'online', tags:['核心开发','UI'], dept:'平台研发部' },
-    { id:'m2', name:'李四', role:'产品经理', status:'online', tags:['需求规划'], dept:'产品部' },
-    { id:'m3', name:'王五', role:'后端工程师', status:'away', tags:['服务端','架构'], dept:'平台研发部' },
-    { id:'m4', name:'赵六', role:'数据分析师', status:'offline', tags:['指标体系'], dept:'数据部' },
-    { id:'m5', name:'钱七', role:'测试工程师', status:'online', tags:['质量保障'], dept:'质量部' },
-    { id:'m6', name:'孙八', role:'设计师', status:'away', tags:['视觉','品牌'], dept:'设计部' },
-  ],
   tokenSwatches: null, // 启动时生成
 };
+
+/* ================= 账号 / 会话（内网统一身份，演示为本地校验） ================= */
+const Session = {
+  KEY:'wb_demo_session',
+  restore(){
+    try{
+      const id = localStorage.getItem(Session.KEY);
+      const u = id && DB.users.find(x=>x.id===id);
+      if(u) DB.currentUser = u;
+    }catch(e){ /* 隐私模式下 localStorage 不可用，保持未登录 */ }
+    if(DB.currentUser) Session.applyUserScope();
+  },
+  login(account, pwd){
+    const u = DB.users.find(x=>x.account===account.trim().toLowerCase());
+    if(!u || u.pwd!==pwd){ DB.loginError = '账号或密码不正确'; return false; }
+    DB.currentUser = u; DB.loginError = '';
+    try{ localStorage.setItem(Session.KEY, u.id); }catch(e){}
+    Session.applyUserScope();
+    DB.audits.unshift({ kind:'auth', owner:u.id, icon:'user', title:`账号 ${u.account} 登录成功`,
+      desc:`内网统一身份 · ${u.role} · 沙箱 ${u.sandbox}`, time:nowHM() });
+    return true;
+  },
+  logout(){
+    const u = DB.currentUser;
+    if(u) DB.audits.unshift({ kind:'auth', owner:u.id, icon:'user', title:`账号 ${u.account} 已退出`, desc:'内网统一身份', time:nowHM() });
+    DB.currentUser = null;
+    try{ localStorage.removeItem(Session.KEY); }catch(e){}
+    // 清空跨用户可见的会话态，避免切换账号后残留
+    DB.currentConv = null; DB.streaming = null; DB.inputText = '';
+    DB.messages = {};   // 清空消息缓存，避免上一账号的会话内容残留在内存中
+    DB.attachments = {w:[],t:[],a:[]}; DB.assistantMsgs = []; DB.assistantStarted = false;
+    DB.route = '/'; location.hash = '/';
+    render();
+  },
+  applyUserScope(){
+    const sp = userSpaces();
+    if(!sp.includes(DB.space)) DB.space = sp[0];
+    DB.currentConv = null;
+    DB.centerTab = 'expert';
+  },
+};
+function nowHM(){ const d=new Date(); return `今天 ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
+function me(){ return DB.currentUser; }
+/** 白名单按当前用户沙箱派生：所有可写路径都在其沙箱内，管理员多两条运维规则 */
+function WHITELIST(u){
+  const base = [
+    `读取 ${u.sandbox} 下全部文件`,
+    `写入 ${u.sandbox}/out`,
+    `在 ${u.sandbox} 内运行只读 shell 命令`,
+    '调用内网模型推理接口',
+    '检索本应用自建知识库（本人可见范围）',
+    '发送站内通知',
+  ];
+  return u.role==='管理员' ? base.concat(['查看全域审计日志','管理账号与沙箱配额']) : base;
+}
+function isAdmin(){ return !!DB.currentUser && DB.currentUser.role==='管理员'; }
+function userSpaces(){ return DB.currentUser ? DB.currentUser.spaces : []; }
+/** 归属过滤：管理员在「审计」视图可见全部，其余一律只见本人数据 */
+function ownedBy(list){ const u=DB.currentUser; return u ? list.filter(x=>x.owner===u.id) : []; }
+function initials(name){ return name ? name.slice(-2) : '?'; }
+
+function renderLoginPage(){
+  const root = $('#login-root');
+  root.innerHTML = `<div class="login-wrap">
+    <div class="login-card">
+      <div class="login-brand"><img src="${ASSETS[Theme.resolve()==='dark'?'logoDark':'logoLight']}" alt="WorkBuddy"></div>
+      <div class="login-title">登录 WorkBuddy</div>
+      <div class="login-sub">内网统一身份 · 本实例不出网</div>
+      <div class="form-group"><label class="form-label">账号</label>
+        <input class="wb-input" id="lg-acc" placeholder="域账号，如 zhangsan" autocomplete="username"></div>
+      <div class="form-group"><label class="form-label">密码</label>
+        <input class="wb-input" id="lg-pwd" type="password" placeholder="密码" autocomplete="current-password"></div>
+      ${DB.loginError?`<div class="login-err">${icon('alertTriangle','icon--12')}${esc(DB.loginError)}</div>`:''}
+      <button class="wb-btn wb-btn--primary login-btn" data-action="do-login">登录</button>
+      <div class="login-hint">演示账号：<b>zhangsan</b> / <b>zhaoliu</b> / <b>lisi</b>（管理员），密码均为 <b>demo</b></div>
+      <div class="login-quick">${DB.users.map(u=>`
+        <button class="login-quick-item" data-quick="${u.account}">
+          <span class="sb-avatar">${initials(u.name)}</span>
+          <span><b>${esc(u.name)}</b><i>${esc(u.dept)} · ${esc(u.role)}</i></span>
+        </button>`).join('')}</div>
+    </div>
+  </div>`;
+  const submit = ()=>{
+    if(Session.login($('#lg-acc').value, $('#lg-pwd').value)){ render(); toast(`欢迎回来，${me().name}`); }
+    else render();
+  };
+  $('[data-action="do-login"]',root).addEventListener('click', submit);
+  $$('input.wb-input',root).forEach(inp=>inp.addEventListener('keydown', e=>{ if(e.key==='Enter') submit(); }));
+  $$('[data-quick]',root).forEach(b=>b.addEventListener('click', ()=>{
+    $('#lg-acc').value = b.dataset.quick; $('#lg-pwd').value = 'demo'; submit();
+  }));
+  $('#lg-acc',root).focus();
+}
 
 /* ================= 路由 ================= */
 const PAGE_TITLES = {
@@ -1432,13 +1412,15 @@ function renderSidebar(){
   </div>
   <div class="sidebar-main" data-od-id="sidebar-task-list">${renderSidebarTasks()}</div>
   <div class="sidebar-footer">
-    <div class="sb-avatar">本</div>
-    <div class="sb-uinfo">
-      <div class="sb-uname">本地用户</div>
-      <div class="sb-uplan">企业版</div>
-    </div>
+    <button class="sb-user" data-action="user-menu" title="账号">
+      <span class="sb-avatar">${initials(me().name)}</span>
+      <span class="sb-uinfo">
+        <span class="sb-uname">${esc(me().name)}${isAdmin()?'<span class="tag tag--brand" style="height:15px;font-size:10px;margin-left:6px">管理员</span>':''}</span>
+        <span class="sb-uplan">${esc(me().dept)} · 内网</span>
+      </span>
+    </button>
     <div class="sb-acts">
-      <button class="icon-btn" data-action="bell" title="通知" style="position:relative">${icon('bell','')}${DB.notices.some(n=>n.unread)?'<span class="badge-dot"></span>':''}</button>
+      <button class="icon-btn" data-action="bell" title="通知" style="position:relative">${icon('bell','')}${ownedBy(DB.notices).some(n=>n.unread)?'<span class="badge-dot"></span>':''}</button>
       <button class="icon-btn" data-action="settings" title="设置" data-od-id="open-settings">${icon('settings','')}</button>
     </div>
   </div>`;
@@ -1446,6 +1428,13 @@ function renderSidebar(){
   $('[data-action="search"]',el).addEventListener('click', ()=>openPalette());
   $('[data-action="filter"]',el).addEventListener('click', e=>openTaskFilter(e.currentTarget));
   $('[data-action="bell"]',el).addEventListener('click', e=>openNotifs(e.currentTarget));
+  $('[data-action="user-menu"]',el).addEventListener('click', e=>openMenu(e.currentTarget,[
+    {label:`沙箱 ${me().sandbox}`, icon:'folder', onClick:()=>toast(`当前沙箱根目录：${me().sandbox}（配额 ${me().quota}）`,'info')},
+    {label:'账号与隔离', icon:'shield', onClick:()=>{ DB.centerTab='perm'; navigate('/center'); }},
+    'divider',
+    {label:'切换账号', icon:'refresh', onClick:()=>Session.logout()},
+    {label:'退出登录', icon:'logOut', onClick:()=>confirmDialog({title:'退出登录？', desc:'退出后本机不再保留登录状态，未完成的任务会保留在你的沙箱中。', okText:'退出', onOk:()=>Session.logout()})},
+  ]));
   $('[data-action="settings"]',el).addEventListener('click', ()=>navigate('/settings'));
   $$('[data-tab]',el).forEach(btn=>btn.addEventListener('click', ()=>setSidebarTab(btn.dataset.tab)));
   bindSidebarTasks();
@@ -1466,7 +1455,8 @@ function openTaskFilter(anchor){
 }
 function filteredTasks(){
   const {st,tm} = DB.taskFilter;
-  return DB.conversations.filter(c=>{
+  // 用户隔离：只返回当前登录用户拥有的会话
+  return ownedBy(DB.conversations).filter(c=>{
     if(st==='run' && c.status!=='running') return false;
     if(st==='done' && c.status==='running') return false;
     if(tm==='today' && c.group!=='今天') return false;
@@ -1477,7 +1467,8 @@ function filteredTasks(){
 function renderSidebarTasks(){
   if(DB.sidebarTab!=='chats') return '';
   const items = filteredTasks();
-  const groupedIds = new Set(DB.taskGroups.flatMap(g=>g.ids));
+  const myGroups = ownedBy(DB.taskGroups);
+  const groupedIds = new Set(myGroups.flatMap(g=>g.ids));
   const independent = items.filter(c=>!groupedIds.has(c.id));
   const pinned = items.filter(c=>DB.pinned.includes(c.id));
   let html = '';
@@ -1501,7 +1492,7 @@ function renderSidebarTasks(){
       : `<div class="conv-group-empty">${items.length?'':'没有匹配的任务'}</div>`;
     html += section('tasks', `任务 (${independent.length})`, inner);
   }
-  const groupHTML = DB.taskGroups.map(g=>{
+  const groupHTML = myGroups.map(g=>{
     const children = g.ids.map(id=>items.find(c=>c.id===id)).filter(Boolean);
     if(!children.length) return '';
     const gKey = 'space-'+g.kind+'-'+g.name;
@@ -1510,13 +1501,14 @@ function renderSidebarTasks(){
       ${icon('chevronDown','icon--12')}<span class="sidebar-section-label-text">${esc(g.name)}</span>
     </div>` + (collapsed?'':children.map(convItem).join(''));
   }).join('');
-  if(groupHTML) html += section('spaces', `空间 (${DB.taskGroups.reduce((n,g)=>n+g.ids.length,0)})`, groupHTML, {add:false});
-  const acHTML = DB.colleagueTasks.map(c => `
+  if(groupHTML) html += section('spaces', `空间 (${myGroups.reduce((n,g)=>n+g.ids.length,0)})`, groupHTML, {add:false});
+  const myAssist = ownedBy(DB.colleagueTasks);
+  const acHTML = myAssist.map(c => `
     <div class="conv-item ${DB.currentConv===c.id?'active':''}" data-assistant-task="${c.id}">
       <span class="conv-item-status conv-item-status--${c.status}"></span>
       <span class="conv-item-title">${esc(c.title)}</span>
     </div>`).join('');
-  html += section('colleagues', '助理任务 (2)', acHTML, {add:false});
+  if(myAssist.length) html += section('colleagues', `助理任务 (${myAssist.length})`, acHTML, {add:false});
   if(!independent.length && !items.length) html = `<div class="conv-group-empty">没有匹配的任务</div>`;
   return html;
 }
@@ -1547,7 +1539,7 @@ function bindSidebarTasks(){
   $$('[data-group-toggle]',container).forEach(l=>l.addEventListener('click', ()=>{ const g=l.dataset.groupToggle; DB.convSectionCollapsed[g]=!DB.convSectionCollapsed[g]; renderSidebar(); }));
 }
 
-/* ================= Topbar（参考：crumbs + 协同中 + 对话内搜索 + 面板按钮） ================= */
+/* ================= Topbar（crumbs + 对话内搜索 + 面板按钮） ================= */
 function renderTopbar(){
   const el = $('#topbar');
   const route = DB.route;
@@ -1572,10 +1564,8 @@ function renderTopbar(){
         <button data-action="cs-next" title="下一个">↓</button>
         <button data-action="cs-close" title="关闭">✕</button>
       </div>
-      <span class="badge-coop" title="协同中"><i></i>协同中</span>
       <button class="icon-btn" data-action="chat-search" title="对话内搜索">${icon('search','')}</button>
       <button class="icon-btn" data-action="artifacts" title="产物面板">${icon('package','')}</button>
-      <button class="icon-btn" data-action="share" title="分享">${icon('share','')}</button>
       <button class="icon-btn" data-action="more-top" title="更多">${icon('moreHorizontal','')}</button>
     </div>`;
   } else if(route==='/'){
@@ -1601,12 +1591,10 @@ function renderTopbar(){
   $('[data-action="back-welcome"]',el)?.addEventListener('click', ()=>{ DB.currentConv=null; navigate('/'); });
   $('[data-action="chat-search"]',el)?.addEventListener('click', ()=>openConvSearch());
   $('[data-action="artifacts"]',el)?.addEventListener('click', ()=>openArtifactsPanel());
-  $('[data-action="share"]',el)?.addEventListener('click', ()=>openShareDialog());
   $('[data-action="history"]',el)?.addEventListener('click', ()=>openPromptHistory());
   $('[data-action="theme"]',el)?.addEventListener('click', ()=>{ Theme.toggle(); renderTopbar(); });
   $('[data-action="more-top"]',el)?.addEventListener('click', e=>openMenu(e.currentTarget,[
     {label:'历史提问', icon:'history', onClick:openPromptHistory},
-    {label:'分享', icon:'share', onClick:openShareDialog},
     {label:'切换主题', icon:Theme.resolve()==='dark'?'sun':'moon', onClick:()=>{ Theme.toggle(); renderTopbar(); }},
     'divider',
     {label:'设置', icon:'settings', onClick:()=>navigate('/settings')},
@@ -1678,6 +1666,12 @@ function newConversation(){
   navigate('/');
 }
 function openConversation(id){
+  const conv = DB.conversations.find(c=>c.id===id);
+  if(!conv || conv.owner!==me().id){   // 越权访问：不属于当前账号的会话一律拒绝
+    toast('该任务不属于当前账号，已拒绝访问','error');
+    DB.audits.unshift({ kind:'perm', owner:me().id, icon:'lock', title:'越权访问会话被拒绝', desc:`任务 ${id} 不属于账号 ${me().account}`, time:nowHM() });
+    return;
+  }
   DB.currentConv=id;
   if(!DB.messages[id]) seedMessages(id);
   // 通过 hash 导航（render 内 parseRoute 会从 hash 覆盖 DB.route，直接赋值会被吞掉）
@@ -1748,7 +1742,7 @@ function workingReply(prompt, done){
     `| 产出 | 初稿完成 | 待评审后定稿 |`,
     ``,
     `### 三、交付物`,
-    `整理后的文档已生成，包含摘要、明细与行动计划，可直接分享评审。`,
+    `整理后的文档已生成，包含摘要、明细与行动计划，可直接提交评审。`,
     ``,
     `> 以上为演示数据，实际使用中 WorkBuddy 会基于真实资料生成。`
   ].join('\n');
@@ -2155,12 +2149,12 @@ function welcomeHTML(){
 }
 const PLAYBOOKS = [
   { icon:'fileSpreadsheet', t:'数据分析', d:'清洗销售数据，生成周报与区域拆解看板' },
-  { icon:'filePresentation', t:'内容创作', d:'把财报做成 18 页经营分析 PPT' },
+  { icon:'filePresentation', t:'内容创作', d:'把经营数据做成 18 页分析 PPT' },
   { icon:'code', t:'工程研发', d:'重构模块并补齐回归测试' },
   { icon:'sparkles', t:'AI 应用', d:'设计一个 Agent 应用的交互流程' },
-  { icon:'search', t:'深度研究', d:'调研 AI 办公助手竞品并输出对比表' },
+  { icon:'search', t:'资料归档', d:'整理本地项目文档并建立分类索引' },
   { icon:'image', t:'视觉设计', d:'为发布活动设计一张科技感海报' },
-  { icon:'mail', t:'智能邮件', d:'起草客户回访邮件并安排跟进' },
+  { icon:'zap', t:'内部汇报', d:'汇总部门进展并输出汇报材料' },
 ];
 function playbooksHTML(){
   const start = DB.pbIdx % PLAYBOOKS.length;
@@ -2274,7 +2268,7 @@ function bindPlaybooks(){
   $$('[data-pb]').forEach(c=>{
     if(c.dataset.bound==='1') return; c.dataset.bound='1';
     c.addEventListener('click', ()=>{
-    const prompts = { '数据分析':'分析 2026 年 7 月销售数据，生成周报：同比环比、区域拆解、异常标注', '内容创作':'把 Q3 财报做成 18 页经营分析 PPT', '工程研发':'帮我重构一个模块并补齐回归测试', 'AI 应用':'帮我设计一个 Agent 应用的交互流程', '深度研究':'调研 AI 办公助手竞品，输出对比表', '视觉设计':'帮我设计一张科技感的产品发布海报', '智能邮件':'帮我起草一封客户回访邮件' };
+    const prompts = { '数据分析':'分析 2026 年 7 月销售数据，生成周报：同比环比、区域拆解、异常标注', '内容创作':'把 Q3 经营数据做成 18 页分析 PPT', '工程研发':'帮我重构一个模块并补齐回归测试', 'AI 应用':'帮我设计一个 Agent 应用的交互流程', '资料归档':'整理本地项目文档并建立分类索引', '视觉设计':'帮我设计一张内部活动海报', '内部汇报':'汇总本季度部门进展并输出汇报材料' };
     DB.inputText = prompts[c.dataset.pb] || ('请帮我完成「'+c.dataset.pb+'」');
     const ta=$('#composer-textarea'); if(ta){ ta.value=DB.inputText; autoGrow(ta); ta.focus(); }
     syncSendBtn();
@@ -2305,7 +2299,7 @@ function doSend(){
   if(!convId){
     convId = uid();
     const title = text.length>18 ? text.slice(0,18)+'…' : text;
-    DB.conversations.unshift({ id:convId, title, status:'running', group:'今天', time:Date.now(), mode:detectMode(text), kind:'custom-live' });
+    DB.conversations.unshift({ id:convId, owner:me().id, title, status:'running', group:'今天', time:Date.now(), mode:detectMode(text), kind:'custom-live' });
     DB.currentConv=convId;
     DB.messages[convId]=[];
   }
@@ -2320,7 +2314,7 @@ function doSend(){
   setTimeout(()=>runMockStream(finalText), 300);
 }
 function mockVoiceInput(){
-  const samples=['帮我总结今天的会议内容','生成一份本周工作周报','把这份数据做成图表','帮我写一封客户回访邮件'];
+  const samples=['帮我总结今天的会议内容','生成一份本周工作周报','把这份数据做成图表','帮我整理这份需求文档的要点'];
   const t=samples[Math.floor(Math.random()*samples.length)];
   DB.recState='listening';
   const pill=$('#rec-pill'); if(pill) pill.classList.add('show');
@@ -2333,17 +2327,19 @@ function mockVoiceInput(){
 }
 
 /* ================= 中心页（seg: 专家/技能/连接器/模型/权限/审计） ================= */
-const CENTER_SEGS = [
+const CENTER_SEGS_BASE = [
   { id:'expert', label:'专家' },{ id:'skill', label:'技能' },{ id:'connector', label:'连接器' },
   { id:'model', label:'模型' },{ id:'perm', label:'权限' },{ id:'audit', label:'审计' },
 ];
+/** 「账号」仅管理员可见 */
+function centerSegs(){ return isAdmin() ? CENTER_SEGS_BASE.concat([{ id:'account', label:'账号' }]) : CENTER_SEGS_BASE; }
 function renderCenterPage(){
   const root = $('#page-root'); root.className='page-root';
   root.style.display='flex'; root.style.flexDirection='column';
   root.innerHTML = `
   <div class="ct-bar" data-od-id="center-bar">
     <div class="seg" data-od-id="center-seg">
-      ${CENTER_SEGS.map(s=>`<button class="${DB.centerTab===s.id?'on':''}" data-center-tab="${s.id}">${esc(s.label)}</button>`).join('')}
+      ${centerSegs().map(s=>`<button class="${DB.centerTab===s.id?'on':''}" data-center-tab="${s.id}">${esc(s.label)}</button>`).join('')}
     </div>
     <input class="ct-search" placeholder="搜索专家、技能、工具…" data-center-search value="${esc(DB.centerSearch)}">
   </div>
@@ -2366,11 +2362,11 @@ function centerTabHTML(){
       <div class="expert-card" data-od-id="expert-${e.id}">
         <div class="expert-head">
           <div class="expert-avatar"><img src="${ASSETS.miao}" alt=""></div>
-          <div><div class="expert-name">${esc(e.name)}${e.sub.includes('官方')?'<span class="tag tag--brand" style="height:16px;font-size:10px">官方</span>':''}</div><div class="expert-sub">${esc(e.sub)}</div></div>
+          <div><div class="expert-name">${esc(e.name)}${e.sub==='内置专家'?'<span class="tag tag--brand" style="height:16px;font-size:10px">内置</span>':''}</div><div class="expert-sub">${esc(e.sub)}</div></div>
         </div>
         <div class="expert-desc">${esc(e.desc)}</div>
         <div class="expert-tags">${e.tags.map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div>
-        <div class="expert-foot"><span style="font-size:11.5px;color:var(--wb-text-secondary)">${e.uses} 人使用</span>
+        <div class="expert-foot"><span style="font-size:11.5px;color:var(--wb-text-secondary)">${esc(e.category)}</span>
           <button class="wb-btn wb-btn--sm wb-btn--primary" data-summon="${e.id}">${icon('sparkles','')}召唤</button>
         </div>
       </div>`).join('')}
@@ -2383,7 +2379,7 @@ function centerTabHTML(){
       <div class="expert-card" data-od-id="skill-${s.id}">
         <div class="expert-head">
           <div class="expert-avatar" style="background:${s.color}1a;color:${s.color}">${icon(s.icon,'')}</div>
-          <div><div class="expert-name">${esc(s.name)}</div><div class="expert-sub">${esc(s.author)} · ${s.uses} 次使用</div></div>
+          <div><div class="expert-name">${esc(s.name)}</div><div class="expert-sub">${esc(s.author)}</div></div>
         </div>
         <div class="expert-desc">${esc(s.desc)}</div>
         <div class="expert-foot">
@@ -2405,6 +2401,15 @@ function centerTabHTML(){
         ? `<button class="wb-btn wb-btn--sm wb-btn--secondary" data-disconnect="${c.id}">断开</button>`
         : `<button class="wb-btn wb-btn--sm wb-btn--primary" data-connect="${c.id}">连接</button>`}
     </div>`;
+    if(!DB.connectors.length){
+      return `<div class="panel" style="max-width:640px">
+        <div class="panel-head"><div class="panel-title">${icon('plug','')}连接器</div><span class="tag">内网</span></div>
+        <div class="empty-state" style="padding:40px 24px">
+          <div class="empty-title">尚未接入内网连接器</div>
+          <div class="empty-desc" style="margin-top:6px">公网 SaaS 连接器（文档/邮箱/IM）在内网部署下已移除。内网 GitLab 等系统部署完成后在此接入；知识库由本应用自建，不走连接器。</div>
+        </div>
+      </div>`;
+    }
     return `
     ${connected.length?`<div class="panel" style="margin-bottom:16px">
       <div class="panel-head"><div class="panel-title">${icon('checkCircle','')}已连接（${connected.length}）</div></div>
@@ -2416,35 +2421,67 @@ function centerTabHTML(){
     </div>`;
   }
   if(DB.centerTab==='model'){
-    const models = [
-      { name:'推荐模型', color:'linear-gradient(135deg,var(--wb-palette-brand-8),var(--wb-palette-brand-9))', rate:'1.0x', cur:DB.model==='推荐模型' },
-      { name:'Hy3', color:'linear-gradient(135deg,var(--wb-palette-blue-8),var(--wb-palette-purple-8))', rate:'0.8x', cur:DB.model==='Hy3' },
-      { name:'GLM-5.2', color:'var(--wb-palette-black-90)', rate:'1.2x', cur:DB.model==='GLM-5.2' },
-      { name:'Kimi-K3', color:'var(--wb-palette-black-100)', rate:'1.5x', cur:DB.model==='Kimi-K3' },
-    ];
+    const palette = ['linear-gradient(135deg,var(--wb-palette-brand-8),var(--wb-palette-brand-9))',
+      'linear-gradient(135deg,var(--wb-palette-blue-8),var(--wb-palette-purple-8))',
+      'var(--wb-palette-black-90)','var(--wb-palette-black-100)'];
     return `
-    <div class="panel" style="max-width:520px">
-      <div class="panel-head"><div class="panel-title">${icon('sparkles','')}内置模型</div><span class="tag tag--brand">请求级切换</span></div>
-      ${models.map(m=>`
+    <div class="panel" style="max-width:640px">
+      <div class="panel-head"><div class="panel-title">${icon('sparkles','')}内网模型</div><span class="tag tag--brand">请求级切换</span></div>
+      ${DB.modelRegistry.map((m,i)=>`
       <div class="connector-row">
-        <span class="mlogo" style="width:20px;height:20px;border-radius:50%;background:${m.color};flex-shrink:0"></span>
-        <div class="connector-info"><div class="connector-name">${esc(m.name)}</div></div>
-        <span class="tag" style="font-family:var(--wb-mono)">${esc(m.rate)}</span>
-        ${m.cur
+        <span class="mlogo" style="width:20px;height:20px;border-radius:50%;background:${palette[i%palette.length]};flex-shrink:0"></span>
+        <div class="connector-info">
+          <div class="connector-name">${esc(m.name)}<span class="tag" style="height:16px;font-size:10px">${esc(m.protocol)}</span></div>
+          <div class="connector-desc" style="font-family:var(--wb-mono);font-size:11px">${esc(m.endpoint)} · ${esc(m.note)}</div>
+        </div>
+        ${DB.model===m.name
           ? `<button class="wb-btn wb-btn--sm wb-btn--secondary" disabled>使用中</button>`
           : `<button class="wb-btn wb-btn--sm wb-btn--primary" data-set-model="${esc(m.name)}">设为默认</button>`}
       </div>`).join('')}
       <div class="panel-body" style="border-top:1px solid var(--wb-border-default)">
-        <button class="wb-btn wb-btn--secondary" data-action="custom-model">${icon('pencil','')}配置自定义模型</button>
+        <button class="wb-btn wb-btn--primary" data-action="custom-model">${icon('plus','')}接入内网模型</button>
       </div>
     </div>
-    <div class="sec-note" style="margin-top:10px">Max 模式未接入（演示），模型随请求生效。</div>`;
+    <div class="sec-note" style="margin-top:10px">全部模型均部署在内网，不出网。协议适配层支持 OpenAI 兼容 / vLLM / Ollama / TGI / 自定义 HTTP。</div>`;
+  }
+  if(DB.centerTab==='account'){
+    if(!isAdmin()) return `<div class="empty-state" style="padding:48px"><div class="empty-title">无权访问</div><div class="empty-desc">账号管理仅管理员可见</div></div>`;
+    const count = id => DB.conversations.filter(c=>c.owner===id).length;
+    return `<div class="panel" style="max-width:760px">
+      <div class="panel-head"><div class="panel-title">${icon('user','')}账号与沙箱</div><span class="tag tag--brand">管理员</span></div>
+      ${DB.users.map(u=>`
+      <div class="connector-row">
+        <span class="sb-avatar" style="flex-shrink:0">${initials(u.name)}</span>
+        <div class="connector-info">
+          <div class="connector-name">${esc(u.name)}<span class="tag" style="height:16px;font-size:10px">${esc(u.account)}</span>${u.role==='管理员'?'<span class="tag tag--brand" style="height:16px;font-size:10px">管理员</span>':''}</div>
+          <div class="connector-desc" style="font-family:var(--wb-mono);font-size:11px">${esc(u.sandbox)} · 配额 ${esc(u.quota)} · ${count(u.id)} 个任务</div>
+        </div>
+        <span class="tag tag--success">已隔离</span>
+        ${u.id===me().id?`<button class="wb-btn wb-btn--sm wb-btn--secondary" disabled>当前</button>`:''}
+      </div>`).join('')}
+      <div class="panel-body" style="border-top:1px solid var(--wb-border-default)">
+        <div class="sec-note">账号由内网统一身份下发，本页只读。每个账号独占沙箱根目录，跨账号读写在沙箱层拒绝并记入审计。</div>
+      </div>
+    </div>`;
   }
   if(DB.centerTab==='perm'){
+    const u = me();
     return `
     <div class="set-card">
       <div class="set-row">
-        <div><div class="set-t">默认权限</div><div class="set-d">所有操作在安全沙箱约束内进行，超出范围会请求你的允许</div></div>
+        <div><div class="set-t">当前身份</div><div class="set-d">${esc(u.name)} · ${esc(u.account)} · ${esc(u.dept)} · ${esc(u.role)}</div></div>
+        <span class="tag tag--brand">内网统一身份</span>
+      </div>
+      <div class="set-row">
+        <div><div class="set-t">沙箱根目录</div><div class="set-d" style="font-family:var(--wb-mono)">${esc(u.sandbox)}　·　配额 ${esc(u.quota)}</div></div>
+        <span class="tag tag--success">已隔离</span>
+      </div>
+      <div class="set-row">
+        <div><div class="set-t">用户隔离</div><div class="set-d">会话、附件、工作空间与助理任务按账号隔离；越界读写由沙箱拦截并记入审计</div></div>
+        <span class="tag">强制</span>
+      </div>
+      <div class="set-row">
+        <div><div class="set-t">默认权限</div><div class="set-d">所有操作在沙箱约束内进行，超出范围会请求你的允许</div></div>
         <span class="tag tag--brand">当前</span>
       </div>
       <div class="set-row">
@@ -2452,22 +2489,26 @@ function centerTabHTML(){
         <button class="switch ${DB.fullAccess?'on':''}" data-action="toggle-full"></button>
       </div>
       <div class="set-row">
-        <div><div class="set-t">白名单</div><div class="set-d">7 条规则 · sensitive 路径写/删需审批（C-004）</div></div>
+        <div><div class="set-t">白名单</div><div class="set-d">${WHITELIST(u).length} 条规则 · 沙箱外路径写/删一律拒绝</div></div>
         <button class="wb-btn wb-btn--sm wb-btn--ghost" data-action="view-whitelist">查看</button>
       </div>
     </div>`;
   }
-  // audit
-  const kindName = { approval:'审批', tool:'工具', job:'自动化', system:'系统' };
-  return `<div class="panel" style="max-width:680px">
-    <div class="panel-head"><div class="panel-title">${icon('listChecks','')}审计日志</div><span class="tag">聚合派生 · 演示</span></div>
-    ${DB.audits.map(a=>`
+  // audit —— 管理员可见全域，成员仅见本人
+  const kindName = { approval:'审批', tool:'工具', perm:'权限', auth:'登录', system:'系统' };
+  const rows = isAdmin() ? DB.audits : ownedBy(DB.audits);
+  const uname = id => (DB.users.find(u=>u.id===id)||{}).name || '—';
+  return `<div class="panel" style="max-width:760px">
+    <div class="panel-head"><div class="panel-title">${icon('listChecks','')}审计日志</div>
+      <span class="tag ${isAdmin()?'tag--brand':''}">${isAdmin()?'全域（管理员）':'仅本人'}</span></div>
+    ${rows.length? rows.map(a=>`
     <div class="connector-row">
       <span class="task-icon">${icon(a.icon,'')}</span>
       <div class="connector-info"><div class="connector-name">${esc(a.title)}</div><div class="connector-desc">${esc(a.desc)}</div></div>
+      <span class="tag">${esc(uname(a.owner))}</span>
       <span class="tag">${esc(kindName[a.kind]||a.kind)}</span>
       <span style="font-size:11px;color:var(--wb-text-secondary)">${esc(a.time)}</span>
-    </div>`).join('')}
+    </div>`).join('') : `<div class="empty-state" style="padding:32px"><div class="empty-title">暂无审计记录</div></div>`}
   </div>`;
 }
 function bindCenterBody(){
@@ -2504,15 +2545,27 @@ function bindCenterBody(){
     toast(`默认模型已切换为「${DB.model}」`);
   }));
   $('[data-action="custom-model"]',root)?.addEventListener('click', ()=>{
-    const wrap = openModal({ title:'配置自定义模型', body:`<div class="form-group"><label class="form-label">Provider</label><input class="wb-input" id="cm-provider" placeholder="openai / anthropic / 自定义"></div>
-      <div class="form-group"><label class="form-label">Base URL</label><input class="wb-input" id="cm-url" placeholder="https://api.example.com/v1"></div>
-      <div class="form-group"><label class="form-label">模型名</label><input class="wb-input" id="cm-model" placeholder="model-name"></div>
-      <div class="form-group"><label class="form-label">密钥</label><input class="wb-input" id="cm-key" placeholder="sk-…（不明文存储）" type="password"></div>`,
+    const wrap = openModal({ title:'接入内网模型', body:`<div class="form-group"><label class="form-label">模型名</label><input class="wb-input" id="cm-model" placeholder="例如 Qwen3-14B"></div>
+      <div class="form-group"><label class="form-label">接口协议</label>
+        <select class="wb-input" id="cm-proto">
+          <option>OpenAI 兼容</option><option>vLLM</option><option>Ollama</option><option>TGI</option><option>自定义 HTTP</option>
+        </select><div class="form-hint">内网各类推理服务均可接入，协议决定请求体适配方式</div></div>
+      <div class="form-group"><label class="form-label">内网地址</label><input class="wb-input" id="cm-url" placeholder="http://gpu-node-0x.intra:8000/v1"><div class="form-hint">仅允许内网地址，公网地址将被拒绝</div></div>
+      <div class="form-group"><label class="form-label">备注</label><input class="wb-input" id="cm-note" placeholder="部署位置 / 用途"></div>
+      <div class="form-group"><label class="form-label">访问令牌（可选）</label><input class="wb-input" id="cm-key" placeholder="内网服务若无鉴权可留空" type="password"></div>`,
       foot:`<button class="wb-btn wb-btn--ghost" data-cancel>取消</button><button class="wb-btn wb-btn--primary" data-test>测试连通并保存</button>`, width:'sm' });
     $('[data-cancel]',wrap).addEventListener('click', ()=>closeModal(wrap));
     $('[data-test]',wrap).addEventListener('click', ()=>{
-      if(!$('#cm-model',wrap).value.trim()){ toast('请填写模型名','error'); return; }
-      closeModal(wrap); toast('连通成功，模型已保存（演示）');
+      const name=$('#cm-model',wrap).value.trim(), url=$('#cm-url',wrap).value.trim();
+      if(!name){ toast('请填写模型名','error'); return; }
+      if(!url){ toast('请填写内网地址','error'); return; }
+      if(/^https?:\/\/(?!localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)[^/]*\.(com|cn|net|org|io)\b/i.test(url)){
+        toast('检测到公网地址，内网部署下已拒绝','error'); return;
+      }
+      if(DB.modelRegistry.some(m=>m.name===name)){ toast('同名模型已存在','error'); return; }
+      DB.modelRegistry.push({ name, protocol:$('#cm-proto',wrap).value, endpoint:url, note:$('#cm-note',wrap).value.trim()||'自定义接入' });
+      DB.models.push(name);
+      closeModal(wrap); renderCenterPage(); toast(`模型「${name}」已接入`);
     });
   });
   $('[data-action="toggle-full"]',root)?.addEventListener('click', e=>{
@@ -2521,8 +2574,9 @@ function bindCenterBody(){
     } else { DB.fullAccess=false; renderCenterPage(); toast('已恢复默认权限','info'); }
   });
   $('[data-action="view-whitelist"]',root)?.addEventListener('click', ()=>{
-    openDrawer({ title:'权限白名单', body:`<div class="pop-note" style="padding:0 0 12px">默认权限下，以下 7 条规则允许直接执行，其余敏感操作将请求确认。</div>
-      ${['读取 ~/work 目录','写入 ~/work/out 目录','网络 GET 请求','运行只读 shell 命令','读取本地数据库','调用日历查询','发送站内通知'].map(r=>`<div class="connector-row" style="padding:8px 0"><span class="task-icon" style="background:var(--wb-status-success-soft-bg);color:var(--wb-status-success-text)">${icon('check','icon--12')}</span><div class="connector-info"><div class="connector-name" style="font-size:13px">${esc(r)}</div></div></div>`).join('')}`,
+    const u = me();
+    openDrawer({ title:'权限白名单', body:`<div class="pop-note" style="padding:0 0 12px">默认权限下，以下 ${WHITELIST(u).length} 条规则允许直接执行；沙箱 <b>${esc(u.sandbox)}</b> 之外的写/删一律拒绝，其余敏感操作请求确认。</div>
+      ${WHITELIST(u).map(r=>`<div class="connector-row" style="padding:8px 0"><span class="task-icon" style="background:var(--wb-status-success-soft-bg);color:var(--wb-status-success-text)">${icon('check','icon--12')}</span><div class="connector-info"><div class="connector-name" style="font-size:13px">${esc(r)}</div></div></div>`).join('')}`,
       foot:`<button class="wb-btn wb-btn--ghost" data-cancel>关闭</button>` });
     $('[data-cancel]')?.addEventListener('click', closeDrawer);
   });
@@ -2603,7 +2657,6 @@ function renderSettingsPage(){
       <div class="set-row">
         <img src="${ASSETS.appIcon}" style="width:32px;height:32px;border-radius:8px">
         <div><div class="set-t">WorkBuddy</div><div class="set-d">版本 5.3.11 · Live Demo 演示原型 · 数据为本地 mock，无真实 API 调用</div></div>
-        <button class="wb-btn wb-btn--sm wb-btn--secondary" data-action="check-update">检查更新</button>
       </div>
     </div>
   </div>`;
@@ -2619,21 +2672,18 @@ function renderSettingsPage(){
     $('#sem-table tbody').innerHTML = semTableRows();
     toast('主题已切换');
   }));
-  $('[data-action="check-update"]',root).addEventListener('click', ()=>toast('当前已是最新版本 v5.3.11','info'));
 }
 
 /* ================= 锚定弹层（模型 / 工作空间 / 权限 / 附件） ================= */
 function openModelPop(anchor){
   closePops();
   const pop = buildPop('pop-model', `
-    <div class="pop-head">Max 模式<span class="switch" data-action="toggle-max"></span></div>
-    <div class="pop-sep"></div>
     ${DB.models.map(m=>`<button class="pop-item ${DB.model===m?'on':''}" data-pick-model="${esc(m)}">
       <span class="mlogo" style="background:linear-gradient(135deg,var(--wb-palette-brand-8),var(--wb-palette-brand-9))"></span>${esc(m)}
       ${DB.model===m?'<span class="chk">✓</span>':''}
     </button>`).join('')}
     <div class="pop-sep"></div>
-    <button class="pop-item" data-action="custom-model">✎ 配置自定义模型</button>`, anchor);
+    <button class="pop-item" data-action="custom-model">＋ 接入内网模型</button>`, anchor);
   $$('[data-pick-model]',pop).forEach(b=>b.addEventListener('click', ()=>{
     DB.model=b.dataset.pickModel;
     closePops(); renderComposer();
@@ -2641,11 +2691,10 @@ function openModelPop(anchor){
     toast(`模型已切换为「${DB.model}」`);
   }));
   $('[data-action="custom-model"]',pop).addEventListener('click', ()=>{ closePops(); DB.centerTab='model'; navigate('/center'); });
-  $('[data-action="toggle-max"]',pop).addEventListener('click', e=>{ e.currentTarget.classList.toggle('on'); toast('Max 模式未接入（演示）','info'); });
 }
 function openSpacePop(anchor){
   closePops();
-  const list = DB.spaces.filter(s=>s.includes((window.__spaceQuery||'')));
+  const list = userSpaces().filter(s=>s.includes((window.__spaceQuery||'')));
   const pop = buildPop('pop-space', `
     <input class="pop-search" placeholder="搜索工作空间" data-action="space-search">
     ${list.map(s=>`<button class="pop-item ${DB.space===s?'on':''}" data-pick-space="${esc(s)}"><span class="mlogo" style="background:var(--wb-palette-gray-5)"></span>${esc(s)}${DB.space===s?'<span class="chk">✓</span>':''}</button>`).join('')}
@@ -2665,7 +2714,7 @@ function newWorkspaceModal(){
   const wrap = openModal({ title:'新建工作空间', body:`<div class="form-group"><label class="form-label">工作空间名称</label><input class="wb-input" id="ws-name" placeholder="输入工作空间名称"><div class="form-hint">本地将自动创建同名文件夹，命名后不可随意更改</div></div>`,
     foot:`<button class="wb-btn wb-btn--ghost" data-cancel>取消</button><button class="wb-btn wb-btn--primary" data-ok>创建</button>`, width:'sm' });
   $('[data-cancel]',wrap).addEventListener('click', ()=>closeModal(wrap));
-  $('[data-ok]',wrap).addEventListener('click', ()=>{ const n=$('#ws-name',wrap).value.trim(); if(!n){ toast('请输入名称','error'); return; } DB.spaces.push(n); DB.space=n; closeModal(wrap); renderComposer(); toast(`工作空间「${n}」已创建`); });
+  $('[data-ok]',wrap).addEventListener('click', ()=>{ const n=$('#ws-name',wrap).value.trim(); if(!n){ toast('请输入名称','error'); return; } me().spaces.push(n); DB.space=n; closeModal(wrap); renderComposer(); toast(`工作空间「${n}」已创建`); });
 }
 function openPermPop(anchor){
   closePops();
@@ -2673,7 +2722,7 @@ function openPermPop(anchor){
     <div class="pop-note">当前为${DB.fullAccess?'完全访问':'默认权限'}，${DB.fullAccess?'所有操作可直接执行，请注意数据安全':'所有操作都会在安全沙箱约束内进行，<b>超出范围会请求你的允许</b>'}。</div>
     <div class="pop-head" style="font-weight:500">允许完全访问<span class="switch ${DB.fullAccess?'on':''}" data-action="toggle-full"></span></div>
     <div class="pop-sep"></div>
-    <div class="pop-note" style="color:var(--wb-text-secondary);font-size:11.5px">白名单 7 条 · sensitive 路径写/删需审批（C-004）<br>详见 中心 → 权限</div>`, anchor, 320);
+    <div class="pop-note" style="color:var(--wb-text-secondary);font-size:11.5px">沙箱 <b>${esc(me().sandbox)}</b><br>白名单 ${WHITELIST(me()).length} 条 · 沙箱外写/删一律拒绝<br>详见 中心 → 权限</div>`, anchor, 320);
   $('[data-action="toggle-full"]',pop).addEventListener('click', e=>{
     if(!DB.fullAccess){
       confirmDialog({title:'确认允许完全访问？', desc:'开启后 AI 将减少确认步骤，并可直接执行更多操作，包括敏感操作、文件修改或外部执行。仅建议在您信任当前任务时使用。', danger:true, okText:'允许完全访问', onOk:()=>{ DB.fullAccess=true; e.currentTarget.classList.add('on'); renderComposer(); toast('已切换为完全访问（演示）','info'); }});
@@ -2759,7 +2808,7 @@ function renderPalette(q){
   const list = $('#palette-list');
   const items = [];
   const push = (kind, label, sub, act) => items.push({kind, label, sub, act});
-  DB.conversations.filter(c=>!q||c.title.toLowerCase().includes(q.toLowerCase())).slice(0,5).forEach(c=>push('任务', c.title, c.group+' · '+fmtRel(c.time), ()=>{ closePalette(); openConversation(c.id); }));
+  ownedBy(DB.conversations).filter(c=>!q||c.title.toLowerCase().includes(q.toLowerCase())).slice(0,5).forEach(c=>push('任务', c.title, c.group+' · '+fmtRel(c.time), ()=>{ closePalette(); openConversation(c.id); }));
   DB.experts.filter(e=>!q||e.name.toLowerCase().includes(q.toLowerCase())).slice(0,3).forEach(e=>push('专家', e.name, e.sub, ()=>{ closePalette(); DB.centerTab='expert'; navigate('/center'); }));
   DB.skills.filter(s=>!q||s.name.toLowerCase().includes(q.toLowerCase())).slice(0,3).forEach(s=>push('技能', s.name, s.cat, ()=>{ closePalette(); DB.centerTab='skill'; navigate('/center'); }));
   [
@@ -2776,55 +2825,20 @@ function renderPalette(q){
 
 /* ================= 通知 ================= */
 function openNotifs(anchor){
+  const mine = ownedBy(DB.notices);   // 通知按账号隔离
   const wrap = openModal({ title:`${icon('bell','')}通知`, body:`
     <div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="wb-btn wb-btn--sm wb-btn--ghost" data-action="mark-all">全部已读</button></div>
-    ${DB.notices.length? DB.notices.map((n,i)=>`<div class="notif-item ${n.unread?'unread':''}" data-notice="${i}">
+    ${mine.length? mine.map((n,i)=>`<div class="notif-item ${n.unread?'unread':''}" data-notice="${i}">
       <span class="ni"></span>
       <div style="flex:1;min-width:0"><div>${esc(n.title)}</div><div style="color:var(--wb-text-secondary);font-size:12px;margin-top:1px">${esc(n.desc)}</div><div class="nt">${esc(n.time)}</div></div>
     </div>`).join('') : `<div class="notif-empty">暂无通知</div>`}`,
     foot:`<button class="wb-btn wb-btn--ghost" data-cancel>关闭</button>`, width:'sm' });
-  $$('[data-notice]',wrap).forEach(n=>n.addEventListener('click', ()=>{ DB.notices[+n.dataset.notice].unread=false; n.classList.remove('unread'); renderSidebar(); toast('已标记为已读','info'); }));
-  $('[data-action="mark-all"]',wrap).addEventListener('click', ()=>{ DB.notices.forEach(n=>n.unread=false); closeModal(wrap); renderSidebar(); toast('全部标记为已读','info'); });
+  $$('[data-notice]',wrap).forEach(n=>n.addEventListener('click', ()=>{ mine[+n.dataset.notice].unread=false; n.classList.remove('unread'); renderSidebar(); toast('已标记为已读','info'); }));
+  $('[data-action="mark-all"]',wrap).addEventListener('click', ()=>{ mine.forEach(n=>n.unread=false); closeModal(wrap); renderSidebar(); toast('全部标记为已读','info'); });
   $('[data-cancel]',wrap).addEventListener('click', ()=>closeModal(wrap));
 }
 
-/* ================= 分享 / 历史提问 / 重命名 / 制品预览 ================= */
-function openShareDialog(){
-  const wrap = openModal({ title:`${icon('share','')}分享对话`, body:`
-    <div style="margin-bottom:14px">
-      <div class="form-label">分享链接</div>
-      <div style="display:flex;gap:8px"><input class="wb-input" id="share-link" readonly value="https://workbuddy.demo/share/ab3f9c2e" style="flex:1">
-      <button class="wb-btn wb-btn--secondary" data-action="copy-link">${icon('copy','')}复制</button></div>
-      <div class="form-hint">已生成公开链接，拥有链接的人可查看（演示）</div>
-    </div>
-    <div style="display:flex;gap:14px;align-items:center">
-      <canvas class="fake-qr" id="share-qr" width="148" height="148"></canvas>
-      <div style="flex:1;font-size:13px;color:var(--wb-text-secondary);line-height:20px">微信扫码后可直接在手机上查看本次对话，随时跟进任务进展。</div>
-    </div>`,
-    foot:`<button class="wb-btn wb-btn--ghost" data-cancel>关闭</button><button class="wb-btn wb-btn--primary" data-wechat>${icon('messageCircle','')}分享到微信</button>` });
-  drawFakeQR($('#share-qr',wrap));
-  $('[data-cancel]',wrap).addEventListener('click', ()=>closeModal(wrap));
-  $('[data-action="copy-link"]',wrap).addEventListener('click', ()=>copyText('https://workbuddy.demo/share/ab3f9c2e'));
-  $('[data-wechat]',wrap).addEventListener('click', ()=>{ closeModal(wrap); toast('请使用微信扫码分享（演示）','info'); });
-}
-function drawFakeQR(canvas){
-  const ctx=canvas.getContext('2d');
-  ctx.fillStyle='#fff'; ctx.fillRect(0,0,148,148);
-  ctx.fillStyle='#111';
-  const n=29, cell=148/n;
-  let seed=42; const rnd=()=>{ seed=(seed*1103515245+12345)%2147483648; return seed/2147483648; };
-  for(let y=0;y<n;y++)for(let x=0;x<n;x++){
-    const inFinder = (x<7&&y<7)||(x>n-8&&y<7)||(x<7&&y>n-8);
-    if(inFinder){
-      const fx=x<7?x:x>n-8?x-(n-7):x, fy=y<7?y:y>n-8?y-(n-7):y;
-      const border = fx===0||fy===0||fx===6||fy===6;
-      const core = fx>=2&&fx<=4&&fy>=2&&fy<=4;
-      if(border||core) ctx.fillRect(x*cell,y*cell,cell,cell);
-      continue;
-    }
-    if(rnd()>0.52) ctx.fillRect(x*cell,y*cell,cell,cell);
-  }
-}
+/* ================= 历史提问 / 重命名 / 制品预览 ================= */
 function openPromptHistory(){
   const msgs=DB.currentConv?DB.messages[DB.currentConv]||[]:[];
   const prompts=msgs.filter(m=>m.role==='user');
@@ -2862,6 +2876,14 @@ function renderPage(){
   }
 }
 function render(){
+  const shell = $('#app-shell'), lroot = $('#login-root');
+  if(!DB.currentUser){
+    shell.style.display='none'; lroot.style.display='flex';
+    closeMenus(); closeModal(); closeDrawer(); closePops(); closePalette();
+    renderLoginPage();
+    return;
+  }
+  shell.style.display=''; lroot.style.display='none'; lroot.innerHTML='';
   DB.route = parseRoute();
   if(DB.route==='/') DB.sidebarTab='chats';
   else if(DB.route==='/center') DB.sidebarTab='center';
@@ -2878,8 +2900,9 @@ document.addEventListener('keydown', e=>{
 });
 /* ================= 启动 ================= */
 Theme.apply();
+Session.restore();
 render();
-console.log('%c WorkBuddy Live Demo %c 前端功能演示 · 无真实 API 调用 · 数据均为本地 mock ',
+console.log('%c WorkBuddy Live Demo · 内网版 %c 前端功能演示 · 无真实 API 调用 · 不出网 · 数据均为本地 mock ',
   'background:#00C29A;color:#fff;padding:4px 8px;border-radius:4px 0 0 4px;font-weight:bold',
   'background:#1f1f1f;color:#ccc;padding:4px 8px;border-radius:0 4px 4px 0');
 
