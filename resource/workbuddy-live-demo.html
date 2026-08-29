@@ -3027,7 +3027,7 @@ function newWorkspaceModal(){
     DB.mounts.push({ id:mid, owner:me().id, ws:id, name:n, kind:'workspace', path:root, host:'', proto:'', readOnly:false, status:'online' });
     DB.fileTrees[mid]=[];
     DB.audits.unshift({ kind:'perm', owner:me().id, icon:'folder', title:`创建工作空间 ${n}`, desc:`根目录 ${root}`, time:nowHM() });
-    closeModal(wrap); switchWorkspace(id); renderComposer();
+    closeModal(wrap); switchWorkspace(id);
     toast(`工作空间「${n}」已创建`);
   });
 }
@@ -3240,7 +3240,7 @@ function renderFilesPage(){
       </button>
       <div class="fs-tree-head">
         <span>工作空间目录</span>
-        <button class="icon-btn" data-action="mount-add" title="挂载目录">${icon('plus','')}</button>
+        <button class="icon-btn" data-action="fs-add" title="新建或挂载目录">${icon('plus','')}</button>
       </div>
       <div class="fs-nodes">${roots.map(rootHTML).join('')||`<div class="conv-group-empty">该工作空间暂无目录</div>`}</div>
     </div>
@@ -3298,7 +3298,7 @@ function findNode(path){
   return node;
 }
 function previewHTML(){
-  if(!fsRoots().length) return `<div class="empty-state"><div class="empty-title">该工作空间暂无目录</div><div class="empty-desc">点击左上角 ＋ 挂载本服务器或外部服务器目录</div></div>`;
+  if(!fsRoots().length) return `<div class="empty-state"><div class="empty-title">该工作空间暂无目录</div><div class="empty-desc">点击左上角 ＋ 新建文件夹，或挂载本服务器/外部服务器目录</div></div>`;
   const f = DB.currentFile;
   if(!f) return `<div class="empty-state"><div class="empty-title">未选择文件</div><div class="empty-desc">在左侧目录树中选择一个文件进行预览</div></div>`;
   const m = f.mount, n = f.node, ext = n.ext||'';
@@ -3340,8 +3340,65 @@ function bindFilesPage(){
     DB.currentFile={path,node,mount:mountOf(path)}; DB.mdSource=false; renderFilesPage();
   }));
   $('[data-action="md-toggle"]',root)?.addEventListener('click', ()=>{ DB.mdSource=!DB.mdSource; renderFilesPage(); });
-  $('[data-action="mount-add"]',root)?.addEventListener('click', openMountDialog);
+  $('[data-action="fs-add"]',root)?.addEventListener('click', e=>openMenu(e.currentTarget,[
+    { label:'新建文件夹', icon:'folder', onClick:()=>openNewDirDialog() },
+    { label:'挂载目录',   icon:'cloud',  onClick:openMountDialog },
+    'divider',
+    { label:'新建工作空间', icon:'layoutGrid', onClick:newWorkspaceModal },
+  ], {alignRight:true, width:180}));
   $('[data-action="ws-switch"]',root)?.addEventListener('click', e=>openSpacePop(e.currentTarget));
+}
+/** 当前工作空间中允许新建的目录：可写且在线的根，及其下全部子目录 */
+function writableDirs(){
+  const out=[];
+  fsRoots().forEach(m=>{
+    if(m.readOnly || m.status!=='online') return;
+    out.push({ path:m.path, label:m.name, mount:m });
+    const walk=(nodes,base,depth)=>(nodes||[]).forEach(n=>{
+      if(n.type!=='dir') return;
+      const path=base+'/'+n.name;
+      out.push({ path, label:'　'.repeat(depth)+n.name, mount:m });
+      walk(n.children,path,depth+1);
+    });
+    walk(DB.fileTrees[m.id]||[], m.path, 1);
+  });
+  return out;
+}
+/** 定位某路径在其挂载点树中的子节点数组（根路径返回该挂载的顶层数组） */
+function childListOf(path){
+  const m = mountOf(path); if(!m) return null;
+  if(path===m.path) return DB.fileTrees[m.id] || (DB.fileTrees[m.id]=[]);
+  const node = findNode(path);
+  if(!node || node.type!=='dir') return null;
+  return node.children || (node.children=[]);
+}
+function openNewDirDialog(){
+  const dirs = writableDirs();
+  if(!dirs.length){ toast('当前工作空间没有可写目录','error'); return; }
+  const wrap = openModal({ title:'新建文件夹', body:`
+    <div class="form-group"><label class="form-label">位置</label>
+      <select class="wb-input" id="nd-parent">${dirs.map(d=>
+        `<option value="${esc(d.path)}">${esc(d.label)}　${esc(d.path)}</option>`).join('')}</select>
+      <div class="form-hint">只读挂载与离线挂载不可新建</div></div>
+    <div class="form-group"><label class="form-label">文件夹名称</label>
+      <input class="wb-input" id="nd-name" placeholder="例如 out"></div>`,
+    foot:`<button class="wb-btn wb-btn--ghost" data-cancel>取消</button><button class="wb-btn wb-btn--primary" data-ok>创建</button>`, width:'sm' });
+  $('[data-cancel]',wrap).addEventListener('click', ()=>closeModal(wrap));
+  $('[data-ok]',wrap).addEventListener('click', ()=>{
+    const parent = $('#nd-parent',wrap).value;
+    const name = $('#nd-name',wrap).value.trim();
+    if(!name){ toast('请填写文件夹名称','error'); return; }
+    if(/[\/\\]/.test(name)){ toast('名称不能包含路径分隔符','error'); return; }
+    const list = childListOf(parent);
+    if(!list){ toast('目标目录不存在','error'); return; }
+    if(list.some(n=>n.name===name)){ toast('该目录下已存在同名条目','error'); return; }
+    list.push({ name, type:'dir', children:[] });
+    list.sort((a,b)=> (a.type===b.type ? a.name.localeCompare(b.name,'zh') : (a.type==='dir'?-1:1)));
+    DB.dirExpanded[parent]=true; DB.dirExpanded[parent+'/'+name]=true;
+    DB.audits.unshift({ kind:'perm', owner:me().id, icon:'folder', title:`新建文件夹 ${name}`,
+      desc:`${parent}/${name} · 工作空间 ${currentWs()?currentWs().name:'—'}`, time:nowHM() });
+    closeModal(wrap); renderFilesPage(); toast(`「${name}」已创建`);
+  });
 }
 function openMountDialog(){
   const wrap = openModal({ title:'挂载目录', body:`
