@@ -1,183 +1,43 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { openDb } from "../src/core/db/index.js";
 import { compareMigrationFilenames, readMigrationAssets } from "../src/core/db/migration-assets.js";
 import { runMigration } from "../src/core/db/migration-runner.js";
+import {
+  type CatalogStateCase,
+  COMPLETE_CATALOG,
+  COMPLETE_CATALOG_WITH_UNRELATED_TRIGGER,
+  createCanonicalLedger,
+  createValid0010Prefix,
+  createValidCompletePrefix,
+  createWrongTriggerTarget,
+  EMPTY_CATALOG,
+  expectCatalogSnapshot,
+  expectFailedMigrationPrefix,
+  expectFailedOpenToPreserve,
+  expectNoMigrationFoundationObjects,
+  expectOpenDbFailure,
+  fixtureMigration,
+  HISTORY_VIEW,
+  ledgerFilenames,
+  ledgerRows,
+  MIGRATION_002,
+  MIGRATION_0010,
+  migrationReceiptExists,
+  PREFIX_CATALOG,
+  removeTempDirs,
+  schemaInventory,
+  seedValid0010Prefix,
+  tableExists,
+  tempDir,
+  withBigIntDatabase,
+  withDatabase,
+  withOpenDb,
+} from "./core-db-helpers.js";
 
-const MIGRATION_0010 = "0010_schema_migrations_update_guard.sql";
-const MIGRATION_002 = "002_schema_migrations_history.sql";
-const HISTORY_VIEW = "schema_migration_history";
-
-const tmpDirs: string[] = [];
-
-function tempDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), "core-db-test-"));
-  tmpDirs.push(dir);
-  return dir;
-}
-
-afterEach(() => {
-  for (const dir of tmpDirs.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-function withDatabase<T>(path: string, action: (db: DatabaseSync) => T): T {
-  const db = new DatabaseSync(path);
-  try {
-    return action(db);
-  } finally {
-    db.close();
-  }
-}
-
-function withBigIntDatabase<T>(path: string, action: (db: DatabaseSync) => T): T {
-  const db = new DatabaseSync(path, { readBigInts: true });
-  try {
-    return action(db);
-  } finally {
-    db.close();
-  }
-}
-
-function withOpenDb<T>(path: string, action: (db: DatabaseSync) => T): T {
-  const db = openDb(path);
-  try {
-    return action(db);
-  } finally {
-    db.close();
-  }
-}
-
-/** 版本回执按 sequence（实际应用顺序）。 */
-function ledgerRows(db: DatabaseSync): Array<[number, string]> {
-  return db
-    .prepare("SELECT sequence, filename FROM schema_migrations ORDER BY sequence")
-    .all()
-    .map((row) => [Number(row.sequence), String(row.filename)]);
-}
-
-function ledgerFilenames(db: DatabaseSync): string[] {
-  return ledgerRows(db).map(([, filename]) => filename);
-}
-
-/** 全部 schema 对象清单（名称/类型/定义），用于两次打开的一致性比较。 */
-function schemaInventory(db: DatabaseSync): string {
-  return JSON.stringify(
-    db.prepare("SELECT type, name, sql FROM sqlite_master ORDER BY type, name").all(),
-  );
-}
-
-function tableExists(db: DatabaseSync, tableName: string): boolean {
-  return (
-    db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(tableName) !==
-    undefined
-  );
-}
-
-function migrationReceiptExists(db: DatabaseSync, filename: string): boolean {
-  return (
-    db.prepare("SELECT 1 FROM schema_migrations WHERE filename = ?").get(filename) !== undefined
-  );
-}
-
-function createCanonicalLedger(db: DatabaseSync): void {
-  db.exec(`CREATE TABLE schema_migrations (
-    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-    filename TEXT NOT NULL UNIQUE,
-    applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`);
-}
-
-function installValid0010Foundation(db: DatabaseSync): void {
-  db.exec(`CREATE TRIGGER schema_migrations_no_update
-BEFORE UPDATE ON schema_migrations
-BEGIN
-  SELECT RAISE(ABORT, 'UPDATE on schema_migrations is forbidden');
-END;
-
-CREATE TRIGGER schema_migrations_no_reinsert
-BEFORE INSERT ON schema_migrations
-WHEN EXISTS (SELECT 1 FROM schema_migrations WHERE filename = NEW.filename)
-  OR EXISTS (SELECT 1 FROM schema_migrations WHERE sequence = NEW.sequence)
-BEGIN
-  SELECT RAISE(ABORT, 'INSERT on schema_migrations reuses an existing receipt');
-END;`);
-}
-
-function createWrongTriggerTarget(db: DatabaseSync): void {
-  db.exec("CREATE TABLE wrong_trigger_target (value TEXT)");
-}
-
-function seedValid0010Prefix(path: string): void {
-  withDatabase(path, (db) => {
-    createCanonicalLedger(db);
-    installValid0010Foundation(db);
-    db.prepare("INSERT INTO schema_migrations(filename) VALUES (?)").run(MIGRATION_0010);
-  });
-}
-
-function expectOpenDbFailure(path: string, expectedError?: RegExp): void {
-  let db: DatabaseSync | undefined;
-  let capturedError: unknown;
-
-  try {
-    db = openDb(path);
-  } catch (error) {
-    capturedError = error;
-  } finally {
-    db?.close();
-  }
-
-  expect(capturedError).toBeDefined();
-  if (expectedError !== undefined) {
-    expect(capturedError).toMatchObject({ message: expect.stringMatching(expectedError) });
-  }
-}
-
-function expectNoMigrationFoundationObjects(db: DatabaseSync): void {
-  expect(tableExists(db, HISTORY_VIEW)).toBe(false);
-  expect(
-    db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'schema_migrations_no_update'").get(),
-  ).toBeUndefined();
-  expect(
-    db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'schema_migrations_no_reinsert'").get(),
-  ).toBeUndefined();
-  expect(
-    db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'schema_migrations_no_delete'").get(),
-  ).toBeUndefined();
-}
-
-function expectFailedOpenToPreserve(path: string): void {
-  expectOpenDbFailure(path);
-  withDatabase(path, (db) => {
-    expect(tableExists(db, "schema_migrations")).toBe(true);
-    expectNoMigrationFoundationObjects(db);
-  });
-}
-
-function fixtureMigration(filename: string, source: string): { filename: string; source: string } {
-  return { filename, source };
-}
-
-function expectFailedMigrationPrefix(
-  path: string,
-  expectedError: RegExp,
-  expectedReceipts: readonly string[],
-  historyExists: boolean,
-): void {
-  expectOpenDbFailure(path, expectedError);
-  withDatabase(path, (db) => {
-    expect(ledgerFilenames(db)).toEqual(expectedReceipts);
-    expect(
-      db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'schema_migration_history'").get() !==
-        undefined,
-    ).toBe(historyExists);
-  });
-}
+afterEach(removeTempDirs);
 
 describe("core/db migration assets", () => {
   it("按 Unicode scalar code-point 而非 UTF-16 代码单元排序文件名", () => {
@@ -314,18 +174,71 @@ END`);
     });
   });
 
-  it("bigint 回执结果为一时提交迁移效果与回执", () => {
-    withBigIntDatabase(":memory:", (db) => {
+  it.each([
+    [
+      "删除",
+      "DELETE FROM schema_migrations WHERE sequence = NEW.sequence;",
+      "receipt-delete-effect",
+    ],
+    [
+      "改名",
+      "UPDATE schema_migrations SET filename = 'renamed-receipt.sql' WHERE sequence = NEW.sequence;",
+      "receipt-rename-effect",
+    ],
+    [
+      "替换",
+      "DELETE FROM schema_migrations WHERE sequence = NEW.sequence; INSERT INTO schema_migrations(filename) VALUES ('mutated-receipt.sql');",
+      "receipt-replace-effect",
+    ],
+  ])("回执 AFTER 触发器%s最终回执时回滚效果与回执", (_name, mutation, effectTable) => {
+    withDatabase(":memory:", (db) => {
+      createCanonicalLedger(db);
+      db.exec(`CREATE TEMP TRIGGER mutate_migration_receipt
+AFTER INSERT ON schema_migrations
+WHEN NEW.filename = 'mutated-receipt.sql'
+BEGIN
+  ${mutation}
+END`);
+      db.exec("BEGIN");
+      try {
+        expect(
+          db
+            .prepare("INSERT INTO schema_migrations(filename) VALUES (?)")
+            .run("mutated-receipt.sql").changes,
+        ).toBe(1);
+      } finally {
+        db.exec("ROLLBACK");
+      }
+      const migration = fixtureMigration(
+        "mutated-receipt.sql",
+        `CREATE TABLE "${effectTable}" (value TEXT);`,
+      );
+
+      expect(() => runMigration(db, migration)).toThrow(
+        /migration receipt does not match the expected sequence/,
+      );
+      expect(tableExists(db, effectTable)).toBe(false);
+      expect(migrationReceiptExists(db, migration.filename)).toBe(false);
+      expect(ledgerRows(db)).toEqual([]);
+      expect(db.isTransaction).toBe(false);
+    });
+  });
+
+  it.each([
+    ["number", (action: (db: DatabaseSync) => void) => withDatabase(":memory:", action)],
+    ["bigint", (action: (db: DatabaseSync) => void) => withBigIntDatabase(":memory:", action)],
+  ])("%s 回执结果为一时提交预期 sequence=1 的效果与回执", (_mode, withDb) => {
+    withDb((db) => {
       createCanonicalLedger(db);
       const migration = fixtureMigration(
-        "bigint-result.sql",
-        "CREATE TABLE bigint_migration_effect (value TEXT);",
+        "normal-receipt.sql",
+        "CREATE TABLE normal_receipt_effect (value TEXT);",
       );
 
       runMigration(db, migration);
 
-      expect(tableExists(db, "bigint_migration_effect")).toBe(true);
-      expect(migrationReceiptExists(db, migration.filename)).toBe(true);
+      expect(tableExists(db, "normal_receipt_effect")).toBe(true);
+      expect(ledgerRows(db)).toEqual([[1, migration.filename]]);
       expect(db.isTransaction).toBe(false);
     });
   });
@@ -435,6 +348,152 @@ describe("core/db openDb", () => {
       expect(
         db.prepare("SELECT type FROM sqlite_master WHERE name = ?").get(HISTORY_VIEW)?.type,
       ).toBe("view");
+    });
+  });
+
+  it.each<CatalogStateCase>([
+    {
+      name: "空规范账本",
+      seed: createCanonicalLedger,
+      before: EMPTY_CATALOG,
+      after: COMPLETE_CATALOG,
+    },
+    {
+      name: "规范 0010 前缀",
+      seed: createValid0010Prefix,
+      before: PREFIX_CATALOG,
+      after: COMPLETE_CATALOG,
+    },
+    {
+      name: "完整规范前缀",
+      seed: createValidCompletePrefix,
+      before: COMPLETE_CATALOG,
+      after: COMPLETE_CATALOG,
+    },
+    {
+      name: "小写额外账本触发器",
+      seed: (db) => {
+        createCanonicalLedger(db);
+        db.exec(
+          "CREATE TRIGGER lowercase_ledger_trigger BEFORE INSERT ON schema_migrations BEGIN SELECT 1; END",
+        );
+      },
+      before: { ...EMPTY_CATALOG, triggerNames: ["lowercase_ledger_trigger"] },
+      failure: /schema_migrations triggers do not match the receipt prefix/,
+    },
+    {
+      name: "大写目标的额外账本触发器",
+      seed: (db) => {
+        createCanonicalLedger(db);
+        db.exec(
+          "CREATE TRIGGER uppercase_ledger_trigger BEFORE INSERT ON SCHEMA_MIGRATIONS BEGIN SELECT 1; END",
+        );
+      },
+      before: { ...EMPTY_CATALOG, triggerNames: ["uppercase_ledger_trigger"] },
+      failure: /schema_migrations triggers do not match the receipt prefix/,
+    },
+    {
+      name: "正文提及账本的无关表触发器",
+      seed: (db) => {
+        createCanonicalLedger(db);
+        db.exec(`CREATE TABLE unrelated_trigger_target (value TEXT);
+CREATE TRIGGER unrelated_table_trigger AFTER INSERT ON unrelated_trigger_target
+BEGIN
+  SELECT (SELECT COUNT(*) FROM schema_migrations);
+END`);
+      },
+      before: { ...EMPTY_CATALOG, triggerNames: ["unrelated_table_trigger"] },
+      after: COMPLETE_CATALOG_WITH_UNRELATED_TRIGGER,
+    },
+    {
+      name: "空账本的已污染计数器",
+      seed: (db) => {
+        createCanonicalLedger(db);
+        db.exec("INSERT OR IGNORE INTO schema_migrations(filename) VALUES (NULL)");
+      },
+      before: {
+        ...EMPTY_CATALOG,
+        sequenceRows: [["schema_migrations", 1, "integer"]],
+      },
+      failure: /sqlite_sequence state is not canonical for an empty ledger/,
+    },
+    {
+      name: "0010 前缀的超前计数器",
+      seed: (db) => {
+        createValid0010Prefix(db);
+        db.exec("UPDATE sqlite_sequence SET seq = 2 WHERE name = 'schema_migrations'");
+      },
+      before: { ...PREFIX_CATALOG, sequenceRows: [["schema_migrations", 2, "integer"]] },
+      failure: /sqlite_sequence state does not match ledger receipts/,
+    },
+    {
+      name: "0010 前缀缺失计数器",
+      seed: (db) => {
+        createValid0010Prefix(db);
+        db.exec("DELETE FROM sqlite_sequence WHERE name = 'schema_migrations'");
+      },
+      before: { ...PREFIX_CATALOG, sequenceRows: [] },
+      failure: /sqlite_sequence state does not match ledger receipts/,
+    },
+    {
+      name: "0010 前缀只有大小写变体的计数器行",
+      seed: (db) => {
+        createValid0010Prefix(db);
+        db.exec("UPDATE sqlite_sequence SET name = 'SCHEMA_MIGRATIONS'");
+      },
+      before: { ...PREFIX_CATALOG, sequenceRows: [["SCHEMA_MIGRATIONS", 1, "integer"]] },
+      failure: /sqlite_sequence state does not match ledger receipts/,
+    },
+    {
+      name: "0010 前缀有大小写变体的重复计数器行",
+      seed: (db) => {
+        createValid0010Prefix(db);
+        db.exec("INSERT INTO sqlite_sequence(name, seq) VALUES ('SCHEMA_MIGRATIONS', 1)");
+      },
+      before: {
+        ...PREFIX_CATALOG,
+        sequenceRows: [
+          ["schema_migrations", 1, "integer"],
+          ["SCHEMA_MIGRATIONS", 1, "integer"],
+        ],
+      },
+      failure: /sqlite_sequence state does not match ledger receipts/,
+    },
+    {
+      name: "0010 前缀有数值相等但非整数的计数器",
+      seed: (db) => {
+        createValid0010Prefix(db);
+        db.exec("UPDATE sqlite_sequence SET seq = 1.0 WHERE name = 'schema_migrations'");
+      },
+      before: { ...PREFIX_CATALOG, sequenceRows: [["schema_migrations", 1, "real"]] },
+      failure: /sqlite_sequence state does not match ledger receipts/,
+    },
+    {
+      name: "0010 前缀有负计数器",
+      seed: (db) => {
+        createValid0010Prefix(db);
+        db.exec("UPDATE sqlite_sequence SET seq = -1 WHERE name = 'schema_migrations'");
+      },
+      before: { ...PREFIX_CATALOG, sequenceRows: [["schema_migrations", -1, "integer"]] },
+      failure: /sqlite_sequence state does not match ledger receipts/,
+    },
+  ])("$name 在新迁移效果前满足完整 SQLite 目录状态约束", (state) => {
+    const file = join(tempDir(), "app.db");
+    withDatabase(file, (db) => {
+      state.seed(db);
+      expectCatalogSnapshot(db, state.before);
+    });
+
+    if (state.failure === undefined) {
+      withOpenDb(file, (db) => {
+        expectCatalogSnapshot(db, state.after ?? state.before);
+      });
+      return;
+    }
+
+    expectOpenDbFailure(file, state.failure);
+    withDatabase(file, (db) => {
+      expectCatalogSnapshot(db, state.before);
     });
   });
 

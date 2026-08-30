@@ -10,6 +10,7 @@ export function runMigration(db: DatabaseSync, migration: MigrationToRun): void 
   db.exec("BEGIN");
 
   try {
+    const expectedSequence = expectedNextReceiptSequence(db);
     runMigrationBody(db, migration.source);
     const receipt = db
       .prepare("INSERT INTO schema_migrations(filename) VALUES (?)")
@@ -17,9 +18,36 @@ export function runMigration(db: DatabaseSync, migration: MigrationToRun): void 
     if (receipt.changes !== 1 && receipt.changes !== 1n) {
       throw new Error("migration receipt insert must change exactly one row");
     }
+    validatePersistedReceipt(db, migration.filename, expectedSequence);
     db.exec("COMMIT");
   } catch (error) {
     rollbackAfterMigrationFailure(db, error);
+  }
+}
+
+function expectedNextReceiptSequence(db: DatabaseSync): number | bigint {
+  const row = db.prepare("SELECT COUNT(*) + 1 AS sequence FROM schema_migrations").get() as
+    | { sequence: unknown }
+    | undefined;
+
+  if (row === undefined || (typeof row.sequence !== "number" && typeof row.sequence !== "bigint")) {
+    throw new Error("migration ledger next receipt sequence is invalid");
+  }
+
+  return row.sequence;
+}
+
+function validatePersistedReceipt(
+  db: DatabaseSync,
+  filename: string,
+  expectedSequence: number | bigint,
+): void {
+  const receipts = db
+    .prepare("SELECT sequence FROM schema_migrations WHERE filename = ?")
+    .all(filename) as Array<{ sequence: unknown }>;
+
+  if (receipts.length !== 1 || receipts[0]?.sequence !== expectedSequence) {
+    throw new Error("migration receipt does not match the expected sequence");
   }
 }
 

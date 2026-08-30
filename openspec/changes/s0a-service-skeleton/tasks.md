@@ -11,8 +11,8 @@
     - fresh `:memory:` + tracked `0010_schema_migrations_update_guard.sql`/`002_schema_migrations_history.sql` -> history receipt 按字典序严格为 `0010`,`002`（不得按数值/自然序成为 `002`,`0010`），且 ledger 的 UPDATE/DELETE/同 filename REPLACE 被拒；
     - U+E000 与 U+10000 filename segment -> scalar code-point comparator 必须排 U+E000 在前；
     - fresh 临时文件库 -> `PRAGMA journal_mode` = `wal`（`:memory:` 按 SQLite 能力保持 `memory`）；
-    - 同一路径连续两次打开 -> receipt 数不增、schema 一致；合法 `[0010]` prefix 可续跑，malformed/non-prefix/unknown/receipt-prefix-inconsistent extra-trigger ledger state 在任何新 effect 前失败；
-    - receipt INSERT changes != 1 -> 当前 migration effect 与 receipt 均回滚；
+    - 同一路径连续两次打开 -> receipt 数不增、schema 一致；合法 `[0010]` prefix 可续跑，malformed/non-prefix/unknown/case-variant extra-trigger/`sqlite_sequence` divergent ledger state 在任何新 effect 前失败，unrelated-table trigger 不误拦；
+    - receipt INSERT changes != 1 或最终 filename/sequence 不是预期 next contiguous identity -> 当前 migration effect 与 receipt 均回滚；
     - 临时文件库先用 `node:sqlite` 预置同名 `schema_migration_history` table，再调用同一 `openDb(path)` seam -> `002` 在创建 DELETE trigger 后因 CREATE VIEW 冲突失败，trigger 与 `002` receipt 均不存在，已提交的 `0010` receipt 保留；同名错误 trigger 同样失败且不写 receipt；
     - migration body 尝试 COMMIT/ROLLBACK/SAVEPOINT -> 被拒，effect 与 receipt 均不存在；失败路径真实调用内部 handle close；
     - 固定 migration 目录中的非 `.sql` 直属文件与嵌套 `.sql` -> 均不执行；特殊 filename 元字符不得使 receipt 绑定到不同 bytes；

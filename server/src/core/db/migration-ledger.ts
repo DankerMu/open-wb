@@ -82,6 +82,12 @@ interface Receipt {
   filename: string;
 }
 
+interface SequenceRow {
+  name: unknown;
+  seq: unknown;
+  seq_type: unknown;
+}
+
 /** 若账本不存在则创建；已存在账本必须在读回执前通过严格语义验证。 */
 export function prepareMigrationLedger(db: DatabaseSync): void {
   if (ledgerObject(db) === undefined) {
@@ -117,6 +123,7 @@ export function validatedAppliedFilenames(
 
   validatePromisedFoundationObjects(db, receipts);
   validateLedgerTriggerOwnership(db, receipts);
+  validateLedgerSequenceState(db, receipts);
   return new Set(receipts.map((receipt) => receipt.filename));
 }
 
@@ -287,7 +294,9 @@ function validatePromisedFoundationObjects(db: DatabaseSync, receipts: readonly 
 function validateLedgerTriggerOwnership(db: DatabaseSync, receipts: readonly Receipt[]): void {
   const expectedTriggerNames = expectedLedgerTriggerNames(receipts);
   const triggerNames = db
-    .prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ? ORDER BY name")
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name COLLATE NOCASE = ? ORDER BY name",
+    )
     .all(LEDGER_NAME)
     .map((row) => {
       const name = (row as { name: unknown }).name;
@@ -302,6 +311,37 @@ function validateLedgerTriggerOwnership(db: DatabaseSync, receipts: readonly Rec
     !triggerNames.every((name, index) => name === expectedTriggerNames[index])
   ) {
     throw new Error("schema_migrations triggers do not match the receipt prefix");
+  }
+}
+
+function validateLedgerSequenceState(db: DatabaseSync, receipts: readonly Receipt[]): void {
+  const sequenceRows = db
+    .prepare(
+      "SELECT name, seq, typeof(seq) AS seq_type FROM sqlite_sequence WHERE name COLLATE NOCASE = ?",
+    )
+    .all(LEDGER_NAME) as unknown as SequenceRow[];
+
+  if (receipts.length === 0) {
+    if (sequenceRows.length !== 0) {
+      throw new Error(
+        "schema_migrations sqlite_sequence state is not canonical for an empty ledger",
+      );
+    }
+    return;
+  }
+
+  const expectedSequence = receipts.at(-1)?.sequence;
+  const sequenceRow = sequenceRows[0];
+  if (
+    sequenceRows.length !== 1 ||
+    sequenceRow?.name !== LEDGER_NAME ||
+    sequenceRow.seq_type !== "integer" ||
+    typeof sequenceRow.seq !== "number" ||
+    !Number.isSafeInteger(sequenceRow.seq) ||
+    sequenceRow.seq < 1 ||
+    sequenceRow.seq !== expectedSequence
+  ) {
+    throw new Error("schema_migrations sqlite_sequence state does not match ledger receipts");
   }
 }
 
