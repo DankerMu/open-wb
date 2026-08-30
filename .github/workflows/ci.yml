@@ -1,0 +1,79 @@
+name: ci
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  fast-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version-file: .tool-versions, cache: npm }
+      - uses: astral-sh/setup-uv@v5
+      - run: npm ci
+      - run: cd kbservice && uv sync
+      - run: npx biome check server web scripts
+      - run: cd kbservice && uv run ruff check . && uv run ruff format --check .
+      - run: npm run typecheck --workspaces
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version-file: .tool-versions, cache: npm }
+      - uses: astral-sh/setup-uv@v5
+      - run: npm ci
+      - run: cd kbservice && uv sync
+      - run: npm test --workspaces
+      - run: cd kbservice && uv run pytest
+
+  anti-drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version-file: .tool-versions, cache: npm }
+      - run: npm ci
+      - run: npx knip
+      - run: npx jscpd --config .jscpd.json
+      - run: bash scripts/naming-guard.sh $(git ls-files 'server/**' 'web/**' 'kbservice/**' 'scripts/**')
+      - run: bash scripts/size-guard.sh
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+      - run: semgrep scan --config p/default --error server web kbservice scripts
+
+  all-checks-passed:
+    # 聚合门禁：分支保护只指向本 job。skipped 视为失败——GitHub 把 skipped 的
+    # required check 当通过，这个洞必须在这里堵死。
+    if: always()
+    needs: [fast-checks, unit-tests, anti-drift, secret-scan, sast]
+    runs-on: ubuntu-latest
+    steps:
+      - name: verify all required jobs succeeded
+        run: |
+          results='${{ toJSON(needs) }}'
+          echo "$results"
+          if echo "$results" | grep -Eq '"result": *"(failure|cancelled|skipped)"'; then
+            echo "some required job did not succeed (failure/cancelled/skipped)"; exit 1
+          fi

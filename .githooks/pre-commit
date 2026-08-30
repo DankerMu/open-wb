@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# pre-commit：命名/边界守卫 + 行数守卫 + 密钥扫描（gitleaks 存在时 block，缺席时提示——CI 恒为 block）。
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+mapfile -t staged < <(git diff --cached --name-only --diff-filter=ACR)
+[ "${#staged[@]}" -eq 0 ] && exit 0
+bash scripts/naming-guard.sh "${staged[@]}"
+bash scripts/size-guard.sh "${staged[@]}"
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks protect --staged --redact
+else
+  echo "warn: 本机未装 gitleaks，密钥扫描交由 CI 兜底（brew install gitleaks 可补齐本地防线）"
+fi

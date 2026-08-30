@@ -1,0 +1,25 @@
+{
+  "name": "open-workbuddy",
+  "private": true,
+  "version": "0.0.0",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "lint": "biome check server web scripts",
+    "fmt": "biome check --write server web scripts",
+    "typecheck": "npm run typecheck --workspaces",
+    "test": "npm test --workspaces",
+    "deadcode": "knip",
+    "dupes": "jscpd --config .jscpd.json"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.11",
+    "@vitest/coverage-v8": "^4.1.11",
+    "jscpd": "^5.0.16",
+    "knip": "^6.33.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
+  }
+}

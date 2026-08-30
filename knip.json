@@ -1,0 +1,7 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "workspaces": {
+    "server": { "entry": ["src/service-info.ts", "test/**/*.test.ts"], "project": ["src/**", "test/**"] },
+    "web": { "entry": ["src/lib/theme.ts", "test/**/*.test.ts"], "project": ["src/**", "test/**"] }
+  }
+}

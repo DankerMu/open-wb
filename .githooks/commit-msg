@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# commit-msg：Conventional Commits（类型表见 constraints.yaml commits 段）。
+set -euo pipefail
+msg=$(head -1 "$1")
+if ! echo "$msg" | grep -qE '^(feat|fix|refactor|chore|docs|test|ci|build|perf)(\([^)]+\))?!?: .+'; then
+  echo "BLOCK commit message 不符合 Conventional Commits: $msg" >&2
+  echo "格式: <type>(<scope>): <subject>，type ∈ feat|fix|refactor|chore|docs|test|ci|build|perf" >&2
+  exit 1
+fi

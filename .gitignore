@@ -12,3 +12,15 @@ app-reference/*
 # 上游开源项目参考副本（浅克隆、可 git pull 更新），不纳入版本控制
 resource/ragflow/
 resource/oh-my-pi/
+
+# 工具链产物
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+__pycache__/
+.venv/
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage

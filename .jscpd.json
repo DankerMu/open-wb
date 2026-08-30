@@ -1,0 +1,7 @@
+{
+  "threshold": 3,
+  "pattern": "{server,web,kbservice}/**/*.{ts,tsx,py}",
+  "ignore": ["**/node_modules/**", "**/coverage/**", "**/dist/**", "**/.venv/**"],
+  "reporters": ["consoleFull"],
+  "exitCode": 1
+}
