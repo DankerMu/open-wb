@@ -1,0 +1,1 @@
+{"date":"2026-08-30","change":"s0a-service-skeleton","grill_gate":"passed:branches=6,open=0","rounds":1,"gate_net_catch":1,"p0":{"in":1,"resolved":1,"residual":0},"p1":{"resolved":13},"regressions":1,"alignment":{"rounds":1,"p0":1,"p1":6,"resolved":7,"issues":"#4-#19"},"approx_subagent_calls":6,"verdict":"clean"}
