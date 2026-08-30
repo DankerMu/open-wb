@@ -1,1 +1,8 @@
-export { default } from "../vitest.shared";
+import { mergeConfig } from "vite";
+import sharedConfig from "../vitest.shared.js";
+
+export default mergeConfig(sharedConfig, {
+  test: {
+    environment: "jsdom",
+  },
+});

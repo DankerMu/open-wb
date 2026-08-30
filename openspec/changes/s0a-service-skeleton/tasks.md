@@ -24,7 +24,7 @@ Minimal mergeable slice: 2.1 迁移+seed 单独可合并保绿（依赖 1.1 已�
 
 ## 3. spa-shell
 
-- [ ] 3.0 web 构建工具链：vite + @vitejs/plugin-react + react/react-dom 依赖声明、`web/index.html`、`src/main.tsx` 最小入口、`vite.config.ts`（outDir=dist）、`tsconfig.base.json` 增 `jsx: react-jsx`、`web/vitest.config.ts` 覆写 jsdom 环境、`web/package.json` 增 build 脚本；验证 = `npm run build --workspace web` 产出 dist + `make check` 全绿（knip vite 插件自动解析入口，探针已证）
+- [x] 3.0 web 构建工具链：vite + @vitejs/plugin-react + react/react-dom + @types/react/@types/react-dom + jsdom + @testing-library/react 依赖声明、`web/index.html`、`src/main.tsx` 最小入口及配对 `web/test/main.test.tsx`（Testing Library 在 `#root` 装载入口）、`vite.config.ts`（outDir=dist）、`tsconfig.base.json` 增 `jsx: react-jsx`、`web/vitest.config.ts` 覆写 jsdom 环境、`web/package.json` 增 build 脚本；验证 = jsdom 入口测试 + `make typecheck` + `npm run build --workspace web` 产出 dist + `make check` 全绿（knip vite 插件自动解析入口，依赖均由入口/配置/测试实际消费）
 - [ ] 3.1 `lib/theme` 扩 system 模式：可注入 matchMedia、默认档 system（demo:1035）、未知值/存储不可用回退 system（修正现有回退 light 语义）+ 扩展既有 `web/test/theme.test.ts`
 - [ ] 3.2 路由壳：react-router 四路由 + 侧栏（demo:1773-1778 标签/副标题）+ 占位壳（/center 扁平，/tokens 不移植）+ jsdom 可达性断言
 - [ ] 3.3 `lib/api` + 登录页与路由守卫：fetch 封装（信封解析、401 进未登录态）、未登录任意路由渲染登录页并记录原目标、登录成功跳回、错误 message 展示 + jsdom 断言（未登录访问 /files 渲染登录页、登录后落 /files）
@@ -41,3 +41,15 @@ Minimal mergeable slice: 3.0 工具链单独可合并保绿（纯配置+最小�
 
 Suggested fixture level: none - harness 自身即验证物，其"测试"就是对真实服务全绿运行
 Minimal mergeable slice: 4.1 smoke 单独可合并保绿（依赖 1.3 启动命令与 1/2 组端点；与 Playwright 无耦合；smoke/ 不在 make check 与 naming-guard 扫描面内）
+
+## Issue #11 required evidence
+
+- Fixture level: expanded；repair intensity: medium；权威 requirement = `specs/spa-shell/spec.md` 的“web 构建工具链”。
+- [x] `web/test/main.test.tsx`：给定与 `index.html` 相同的 `#root` DOM，导入真实 `src/main.tsx` 后 Testing Library 可见最小根内容；测试先对 pre-change 源运行为红，实施后为绿。
+- [x] `make typecheck`：strict NodeNext + `react-jsx` 对 React 入口和测试退出 0；`@types/react`/`@types/react-dom` 已声明且无隐式 any。
+- [x] `npm run build --workspace web`：从受跟踪入口构建，退出 0，并生成 `web/dist/index.html` 与至少一个静态资源；重复运行仍成功。
+- [x] `make check`：lint、JSX typecheck、web/server/kbservice tests+覆盖率、knip/jscpd/守卫全部退出 0；不收窄 `coverage.include`，所有新增依赖由入口、配置或配对测试实际消费。
+- [x] 新生产入口的 TDD/red-proof 记录存在；入口必须有配对 jsdom 测试，不以 PR 偏离说明替代覆盖率和 TDD 门禁。
+- [x] 检查 `web/dist` 不含 `app-reference/`、远程 CDN URL 或未声明运行时依赖；依赖新增理由写入 PR。
+- [x] 保持 `web/src/lib/theme.ts`、现有 theme tests、server 与 kbservice 行为不变。
+- OpenSpec archive: **deferred with reason** — 本 change 由 S0a 全部子 issue 共用，只有 16 项全部完成后归档；本 PR 仅勾选 3.0 与本节证据。
