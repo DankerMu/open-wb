@@ -1,5 +1,5 @@
 -- 版本回执完整性守卫：schema_migrations 是迁移账本，DELETE 同样是账本篡改。
-CREATE TRIGGER IF NOT EXISTS schema_migrations_no_delete
+CREATE TRIGGER schema_migrations_no_delete
 BEFORE DELETE ON schema_migrations
 BEGIN
   SELECT RAISE(ABORT, 'DELETE on schema_migrations is forbidden');

@@ -8,11 +8,14 @@
   - Issue #5 fixture: high（上游 compact 因 migration/schema/path/shared core API 强制升档）；repair intensity: high。
   - Seams under test: `openDb(path)` 对真实 `:memory:` 与临时文件数据库，不 mock 被测 DB/迁移器。
   - Required evidence:
-    - fresh `:memory:` + tracked `0010_schema_migrations_update_guard.sql`/`002_schema_migrations_history.sql` -> history receipt 按字典序严格为 `0010`,`002`（不得按数值/自然序成为 `002`,`0010`），且 ledger 的 UPDATE/DELETE 被拒；
+    - fresh `:memory:` + tracked `0010_schema_migrations_update_guard.sql`/`002_schema_migrations_history.sql` -> history receipt 按字典序严格为 `0010`,`002`（不得按数值/自然序成为 `002`,`0010`），且 ledger 的 UPDATE/DELETE/同 filename REPLACE 被拒；
+    - U+E000 与 U+10000 filename segment -> scalar code-point comparator 必须排 U+E000 在前；
     - fresh 临时文件库 -> `PRAGMA journal_mode` = `wal`（`:memory:` 按 SQLite 能力保持 `memory`）；
-    - 同一路径连续两次打开 -> receipt 数不增、schema 一致；
-    - 临时文件库先用 `node:sqlite` 预置同名 `schema_migration_history` table，再调用同一 `openDb(path)` seam -> `002` 在创建 DELETE trigger 后因 CREATE VIEW 冲突失败，trigger 与 `002` receipt 均不存在，已提交的 `0010` receipt 保留；
-    - 固定 migration 目录中的非 `.sql` 直属文件与嵌套 `.sql` -> 均不执行；
+    - 同一路径连续两次打开 -> receipt 数不增、schema 一致；合法 `[0010]` prefix 可续跑，malformed/non-prefix/unknown ledger state 在任何新 effect 前失败；
+    - 临时文件库先用 `node:sqlite` 预置同名 `schema_migration_history` table，再调用同一 `openDb(path)` seam -> `002` 在创建 DELETE trigger 后因 CREATE VIEW 冲突失败，trigger 与 `002` receipt 均不存在，已提交的 `0010` receipt 保留；同名错误 trigger 同样失败且不写 receipt；
+    - migration body 尝试 COMMIT/ROLLBACK/SAVEPOINT -> 被拒，effect 与 receipt 均不存在；失败路径真实调用内部 handle close；
+    - 固定 migration 目录中的非 `.sql` 直属文件与嵌套 `.sql` -> 均不执行；特殊 filename 元字符不得使 receipt 绑定到不同 bytes；
+    - 每个测试自有 SQLite handle -> assertion 异常时仍经 `finally` 关闭；
     - `npm test --workspace server` 与 `make check` -> exit 0，coverage 门禁保持。
   - Non-goals: 业务表/seed（#8）、HTTP、并发多进程迁移协调、任意外部 migration 目录。
 - [ ] 1.2 Fastify 装配与横切：`app.ts`（可注入配置）+ `http/` 错误信封处理器（invalid_credentials/account_disabled/unauthorized/not_found 四码，401/403/404 同形状断言）+ healthz/info 端点 + `app.inject()` 测试

@@ -76,11 +76,12 @@ Domain packs:
 - Offline deployability: selected — migration execution uses only tracked assets and built-in Node APIs.
 
 Migration asset contract:
-- The migrator idempotently bootstraps `schema_migrations(sequence INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT NOT NULL UNIQUE, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)` before reading receipts; `filename` is migration identity and `sequence` records actual application order.
-- `0010_schema_migrations_update_guard.sql` installs the trigger that rejects UPDATE on migration receipts.
-- `002_schema_migrations_history.sql` installs the trigger that rejects DELETE and then creates the sequence-ordered `schema_migration_history` view; these are real migration-ledger integrity/introspection rules, not business tables or placeholders. The intentionally mixed-width immutable names make lexical order (`0010` before `002`) observably different from numeric/natural order and leave later `01x` names for issue #8.
+- The migrator idempotently bootstraps and then validates `schema_migrations(sequence INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT NOT NULL UNIQUE, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)` before trusting receipts; `filename` is migration identity and `sequence` records actual application order. Existing receipts must be the exact sequence-ordered Unicode scalar code-point lexical prefix of discovered migrations; malformed, duplicate, unknown, gapped, or reordered state fails before new effects.
+- `0010_schema_migrations_update_guard.sql` installs guards that reject UPDATE and reinsertion of an existing filename (including `INSERT OR REPLACE`) on migration receipts.
+- `002_schema_migrations_history.sql` installs the guard that rejects DELETE and then creates the sequence-ordered `schema_migration_history` view; these are real migration-ledger integrity/introspection rules, not business tables or placeholders. Same-name incompatible objects fail rather than being silently accepted. The intentionally mixed-width immutable names make lexical order (`0010` before `002`) observably different from numeric/natural order and leave later `01x` names for issue #8.
 - Business migrations, including account/session tables and seed data, remain exclusively in issue #8.
-- Discovery reads only direct-child `.sql` files from the tracked `server/src/core/db/migrations` directory; non-SQL files and subdirectories are ignored and no external migration path is accepted.
+- Discovery reads only the exact bytes of regular direct-child `.sql` files from the tracked `server/src/core/db/migrations` directory; non-SQL files and subdirectories are ignored, URL/path metacharacters cannot redirect the read, and no external migration path is accepted.
+- The runner owns transaction boundaries: migration bodies cannot execute transaction or savepoint control. A rejected/failed body leaves neither its effects nor its receipt, and failed `openDb` closes its internally owned handle.
 
 Invariant Matrix:
 - Governing invariant: every tracked SQL migration is applied in lexical filename order at most once, and its schema effects and version receipt commit atomically.
@@ -93,11 +94,15 @@ Invariant Matrix:
 - Failure paths/rollback/stale state: migration transaction rolls back SQL effects and receipt together; a prior receipt suppresses replay; rollback is exercised through `openDb(path)` on a temporary file database pre-seeded with a conflicting schema object, without exposing an alternate migration directory API.
 - Evidence/audit/readiness: server Vitest assertions over `:memory:` and a temporary file database, plus `make check`.
 - Regression rows:
-  - Fresh `:memory:` database + tracked `0010`/`002` -> `schema_migration_history` reports receipts in lexical sequence as `0010`, `002` (not numeric/natural `002`, `0010`), and UPDATE/DELETE on the ledger are rejected.
+  - Fresh `:memory:` database + tracked `0010`/`002` -> `schema_migration_history` reports receipts in lexical sequence as `0010`, `002` (not numeric/natural `002`, `0010`), and UPDATE/DELETE/reinsertion-by-REPLACE on the ledger are rejected.
+  - Unicode scalar comparator receives U+E000 and U+10000 filename segments -> U+E000 sorts first, unlike default UTF-16 code-unit sorting.
   - Fresh temporary file database -> `PRAGMA journal_mode` returns `wal`; `:memory:` may retain SQLite's `memory` journal mode because WAL is unsupported there.
-  - Same temporary file opened twice -> second open adds no receipt and schema is identical.
+  - Same temporary file opened twice -> second open adds no receipt and schema is identical; valid `[0010]` receipt/effect prefix continues to `[0010,002]`.
+  - Malformed ledger, non-prefix/unknown receipt, or same-name incompatible guard object -> `openDb` fails before any new migration effect or receipt.
   - Temporary file database pre-seeded through `node:sqlite` with a conflicting `schema_migration_history` table, then passed to `openDb(path)` -> migration `002` fails after creating its DELETE trigger; the transaction leaves neither that trigger nor an `002` receipt, while prior migration `0010` remains committed.
-  - Fixed migration directory containing a non-SQL direct child and a nested `.sql` file -> both are ignored.
+  - Migration body attempts COMMIT/ROLLBACK/SAVEPOINT control -> authorizer rejects it; its schema effects and receipt both remain absent.
+  - Fixed migration directory containing a non-SQL direct child and a nested `.sql` file -> both are ignored; special filename metacharacters cannot bind a discovered receipt to different bytes.
+  - Any failed `openDb` path -> its internally created `DatabaseSync.close` executes; every test-owned handle closes in `finally` even when an assertion fails.
   - Existing service-info test -> unchanged behavior.
 
 Boundary-surface checklist:
