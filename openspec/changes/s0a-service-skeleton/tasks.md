@@ -4,7 +4,17 @@
 
 ## 1. http-service-skeleton
 
-- [ ] 1.1 `core/db`：`openDb(path)`（node:sqlite、WAL、migrations/*.sql 按序执行、版本表幂等）+ `:memory:` 单测
+- [x] 1.1 `core/db`：`openDb(path)`（node:sqlite、WAL、migrations/*.sql 按序执行、版本表幂等）+ `:memory:` 单测
+  - Issue #5 fixture: high（上游 compact 因 migration/schema/path/shared core API 强制升档）；repair intensity: high。
+  - Seams under test: `openDb(path)` 对真实 `:memory:` 与临时文件数据库，不 mock 被测 DB/迁移器。
+  - Required evidence:
+    - fresh `:memory:` + tracked `0010_schema_migrations_update_guard.sql`/`002_schema_migrations_history.sql` -> history receipt 按字典序严格为 `0010`,`002`（不得按数值/自然序成为 `002`,`0010`），且 ledger 的 UPDATE/DELETE 被拒；
+    - fresh 临时文件库 -> `PRAGMA journal_mode` = `wal`（`:memory:` 按 SQLite 能力保持 `memory`）；
+    - 同一路径连续两次打开 -> receipt 数不增、schema 一致；
+    - 临时文件库先用 `node:sqlite` 预置同名 `schema_migration_history` table，再调用同一 `openDb(path)` seam -> `002` 在创建 DELETE trigger 后因 CREATE VIEW 冲突失败，trigger 与 `002` receipt 均不存在，已提交的 `0010` receipt 保留；
+    - 固定 migration 目录中的非 `.sql` 直属文件与嵌套 `.sql` -> 均不执行；
+    - `npm test --workspace server` 与 `make check` -> exit 0，coverage 门禁保持。
+  - Non-goals: 业务表/seed（#8）、HTTP、并发多进程迁移协调、任意外部 migration 目录。
 - [ ] 1.2 Fastify 装配与横切：`app.ts`（可注入配置）+ `http/` 错误信封处理器（invalid_credentials/account_disabled/unauthorized/not_found 四码，401/403/404 同形状断言）+ healthz/info 端点 + `app.inject()` 测试
 - [ ] 1.3 启动入口与命令面：`server.ts`（唯一 listen、启动日志输出模块清单）、`make dev` 与 `npm run start --workspace server`、`knip.json` server entry 增 `src/server.ts`、`.gitignore` 增 `var/`（默认 db 路径产物不入库）；启动行为验证由 4.1 smoke 对真实进程覆盖（设计已定，不写监听单测）
 - [ ] 1.4 静态托管与 history fallback：`STATIC_ROOT` 可配置（单测用临时夹具目录），非 `/api/*` GET 回 index.html，非 GET 与 `/api/*` 未命中回信封 404 + inject 测试

@@ -37,6 +37,77 @@
 - [dev-stub 密码 `demo` 入 seed] → 仅测试值、散列入库、文档标注"非生产凭证"；gitleaks 不放行真实密钥形态。
 - [React 组件与装配层拉低覆盖率] → 组件测试经 jsdom 补齐；覆盖率范围不得收窄 include 掩盖（AGENTS.md）。
 
+## Issue #5 delivery fixture: core/db migration base
+
+Issue type: feature
+Project profile: open-workbuddy
+Blast radius: medium
+Fixture level: high
+Repair intensity: high
+Upstream suggested level: compact (override: SQLite migration, persisted schema, file path, and shared core API are mandatory expanded triggers)
+Minimal mergeable slice: atomic — `openDb(path)` plus its migration tests
+
+Must preserve:
+- `openDb(path)` remains the only caller-facing database-opening seam; callers own the returned handle lifetime.
+- Existing server and web behavior, module dependency direction, and tracked migration assets remain unchanged outside `server/src/core/db`.
+
+Must add/change:
+- Open SQLite with WAL where SQLite supports it, discover tracked `migrations/*.sql` in lexical filename order, and record each applied filename once.
+- Reopening one file database must apply no migration twice and must expose the same schema; `:memory:` must execute the same migration set.
+
+Risk packs considered:
+- Public API / CLI / script entry: selected — `openDb(path)` is the shared core entry seam.
+- Config / project setup: selected — the caller supplies the database path and migration assets must resolve independently of the process working directory.
+- File IO / path safety / overwrite: selected — database and tracked SQL assets are file-backed; the DB path is trusted operator configuration, not a sandbox/user path.
+- Schema / columns / units / field names: selected — migration identity and version-table shape are persisted contracts.
+- Auth / permissions / secrets: not selected — no account, session, credential, or authorization data in this slice.
+- Concurrency / shared state / ordering: selected — lexical ordering and WAL setup are observable shared-state rules; concurrent migration coordination is a non-goal for the single-process S0a runtime.
+- Resource limits / large input / discovery: not selected — discovery is non-recursive, fixed to one tracked directory, filters direct-child `.sql` files, and accepts no runtime/external input; repository size guards bound the assets.
+- Legacy compatibility / examples: selected — reopening an already migrated database must be idempotent.
+- Error handling / rollback / partial outputs: selected — each migration and its version receipt must commit atomically or roll back together.
+- Release / packaging / dependency compatibility: selected — use Node 24 built-in `node:sqlite`; no new runtime dependency.
+- Documentation / migration notes: not selected — this PR introduces the migration mechanism and no user migration procedure.
+Domain packs:
+- Tenant/sandbox isolation: not selected — the operator DB path is outside the user workspace boundary.
+- Auth/session lifecycle: not selected — business tables are explicitly deferred to issue #8.
+- Process and child-environment isolation: not selected — this slice does not spawn, listen, log environment, or manage child processes.
+- Server/web HTTP-envelope compatibility: not selected — HTTP is an explicit issue #5 non-goal.
+- SQLite migration/seed compatibility: selected — filename identity, ordering, receipts, and transaction boundaries must agree.
+- Offline deployability: selected — migration execution uses only tracked assets and built-in Node APIs.
+
+Migration asset contract:
+- The migrator idempotently bootstraps `schema_migrations(sequence INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT NOT NULL UNIQUE, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)` before reading receipts; `filename` is migration identity and `sequence` records actual application order.
+- `0010_schema_migrations_update_guard.sql` installs the trigger that rejects UPDATE on migration receipts.
+- `002_schema_migrations_history.sql` installs the trigger that rejects DELETE and then creates the sequence-ordered `schema_migration_history` view; these are real migration-ledger integrity/introspection rules, not business tables or placeholders. The intentionally mixed-width immutable names make lexical order (`0010` before `002`) observably different from numeric/natural order and leave later `01x` names for issue #8.
+- Business migrations, including account/session tables and seed data, remain exclusively in issue #8.
+- Discovery reads only direct-child `.sql` files from the tracked `server/src/core/db/migrations` directory; non-SQL files and subdirectories are ignored and no external migration path is accepted.
+
+Invariant Matrix:
+- Governing invariant: every tracked SQL migration is applied in lexical filename order at most once, and its schema effects and version receipt commit atomically.
+- Source-of-truth identity/contract: migration filename plus the persisted migration-version row.
+- Producers: `server/src/core/db/migrations/*.sql`.
+- Validators/preflight: migration discovery and filtering inside `openDb(path)`.
+- Storage/cache/query: SQLite migration-version table and migrated schema.
+- Public routes/entrypoints: `openDb(path)`; no HTTP route in scope.
+- Frontend/downstream consumers: issue #8 migrations consume this seam; existing `service-info` is unchanged.
+- Failure paths/rollback/stale state: migration transaction rolls back SQL effects and receipt together; a prior receipt suppresses replay; rollback is exercised through `openDb(path)` on a temporary file database pre-seeded with a conflicting schema object, without exposing an alternate migration directory API.
+- Evidence/audit/readiness: server Vitest assertions over `:memory:` and a temporary file database, plus `make check`.
+- Regression rows:
+  - Fresh `:memory:` database + tracked `0010`/`002` -> `schema_migration_history` reports receipts in lexical sequence as `0010`, `002` (not numeric/natural `002`, `0010`), and UPDATE/DELETE on the ledger are rejected.
+  - Fresh temporary file database -> `PRAGMA journal_mode` returns `wal`; `:memory:` may retain SQLite's `memory` journal mode because WAL is unsupported there.
+  - Same temporary file opened twice -> second open adds no receipt and schema is identical.
+  - Temporary file database pre-seeded through `node:sqlite` with a conflicting `schema_migration_history` table, then passed to `openDb(path)` -> migration `002` fails after creating its DELETE trigger; the transaction leaves neither that trigger nor an `002` receipt, while prior migration `0010` remains committed.
+  - Fixed migration directory containing a non-SQL direct child and a nested `.sql` file -> both are ignored.
+  - Existing service-info test -> unchanged behavior.
+
+Boundary-surface checklist:
+- Shared helper roots: `server/src/core/db` only.
+- Public entrypoints: `openDb(path)` only.
+- Read/write surfaces: trusted DB path and tracked migration directory; no user-controlled sandbox path.
+- Producer/consumer evidence boundary: SQL filename to version receipt and schema transaction.
+- Stale-state/idempotency boundary: previously recorded filename on reopen.
+- Unchanged downstream consumers: service-info and both other workspaces.
+
 ## Migration Plan
 
 新增服务，无存量迁移。回滚 = revert PR；SQLite 文件路径可配置（默认 `var/dev.db`，gitignore）。

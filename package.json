@@ -16,6 +16,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.11",
+    "@types/node": "^24.13.1",
     "@vitest/coverage-v8": "^4.1.11",
     "jscpd": "^5.0.16",
     "knip": "^6.33.0",
