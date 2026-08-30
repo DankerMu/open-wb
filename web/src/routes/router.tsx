@@ -1,4 +1,4 @@
-import { createBrowserRouter, NavLink, Outlet } from "react-router";
+import { createBrowserRouter, NavLink, Outlet, replace } from "react-router";
 
 type RouteDefinition = {
   path: "/" | "/files" | "/center" | "/settings";
@@ -70,12 +70,21 @@ function PlaceholderPage({ description, title }: Pick<RouteDefinition, "descript
   );
 }
 
+function canonicalizeRoutePath(request: Request, path: RouteDefinition["path"]) {
+  const { pathname, search } = new URL(request.url);
+
+  if (pathname !== path) {
+    return replace(`${path}${search}`);
+  }
+}
+
 export function createAppRouter() {
   return createBrowserRouter([
     {
       Component: AppShell,
       children: routeManifest.map(({ description, path, title }) => ({
         path,
+        loader: ({ request }) => canonicalizeRoutePath(request, path),
         element: <PlaceholderPage description={description} title={title} />,
       })),
     },
