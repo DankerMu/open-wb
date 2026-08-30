@@ -43,4 +43,4 @@ IMPLEMENTATION_PLAN.md S0a：项目目前只有脚手架，无任何可运行服
 
 - 代码：`server/src/{app,server,http,core/db,auth/providers}`、`web/{index.html,vite.config.ts,src/{main,routes,features,lib}}`、`smoke/`、`web/e2e/`。
 - 构建面：根/`web` `package.json`、`tsconfig.base.json`（jsx）、`vitest.shared.ts` 或 `web/vitest.config.ts`（jsdom）、`knip.json`（server/web entry）、`Makefile`（dev/smoke/ui-walk 目标 + .PHONY）、`.github/workflows/ci.yml`（smoke/ui-walk job，先 build web 再起服务）、`AGENTS.md`（Verification Matrix/Enforcement Index/Known blind spots/Directory Map）、`constraints.yaml`（verification.surfaces 增 smoke/ui-walk）。
-- 依赖新增（PR 须按 AGENTS.md 说明理由）：fastify、@fastify/static、@fastify/cookie；react、react-dom、react-router、vite、@vitejs/plugin-react、jsdom、@testing-library/react；@playwright/test；hurl（CI 安装，不进 package.json）。SQLite 用 `node:sqlite`（Node 24 内建，零新增依赖；实测可用，仅 ExperimentalWarning）。
+- 依赖新增（PR 须按 AGENTS.md 说明理由）：fastify、@fastify/static、@fastify/cookie；react、react-dom、react-router、vite、@vitejs/plugin-react、jsdom、@testing-library/react、@types/react、@types/react-dom；@playwright/test；hurl（CI 安装，不进 package.json）。SQLite 用 `node:sqlite`（Node 24 内建，零新增依赖；实测可用，仅 ExperimentalWarning）。

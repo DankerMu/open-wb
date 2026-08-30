@@ -41,6 +41,35 @@
 
 新增服务，无存量迁移。回滚 = revert PR；SQLite 文件路径可配置（默认 `var/dev.db`，gitignore）。
 
+## Issue delivery fixture: #11 web 构建工具链
+
+- **Issue type / profile:** feature；Generic（open-workbuddy project profile）。
+- **Blast radius / fixture / repair:** medium；expanded；medium。
+- **Upstream suggested level:** compact — override：新增 Vite 浏览器/构建公共入口并发布 `dist` 文件产物，命中 entrypoint 与 file-output 强制 expanded 触发器。
+- **Change surface:** `web` workspace 依赖与脚本、`index.html`、`src/main.tsx` 及配对 `web/test/main.test.tsx`、Vite/vitest/tsconfig、根 JSX 与 knip 接线。
+- **Must preserve:** 现有 `lib/theme` 行为及测试；server/kbservice workspace 的 lint、typecheck、test、dead-code/coverage 门禁；`app-reference/` 不进产物。
+- **Must add:** React 根入口可打包并在 jsdom 挂载；Vite 固定输出 `web/dist`；web 测试运行于 jsdom；JSX 与 Vite 入口被 typecheck/knip 正确解析；React 类型包满足 strict NodeNext 编译。
+- **Seams under test:** `web/test/main.test.tsx` 经 Testing Library 从 `index.html` 同形 `#root` DOM 装载真实 `src/main.tsx` 并断言最小根内容；`npm run build --workspace web`（受跟踪入口 → `dist/index.html`+静态资源）；`make typecheck`（strict NodeNext + react-jsx → 退出 0）；`make check`（完整 workspace → 全部既有门禁退出 0）。
+- **Selected risk packs:** Public API / CLI / script entry；Config / project setup；File IO / path safety / overwrite；Release / packaging / dependency compatibility；Browser runtime / navigation / persistence。
+- **Review focus:** 构建输出位置、workspace 兼容、覆盖率/knip 未被绕过、依赖均有实际用途、无公网运行时依赖。
+- **Non-goals:** 页面、路由、主题语义、登录/设置、server、CI smoke/UI 走查。
+
+### Risk packs considered for #11
+
+- Public API / CLI / script entry: **selected** — 新增 `web` build 脚本与浏览器入口；build 命令须成功。
+- Config / project setup: **selected** — Vite、vitest、tsconfig 与 knip 必须一致接线。
+- File IO / path safety / overwrite: **selected** — 构建发布 `web/dist`；只验证固定 workspace 输出，不接受用户路径，因此 traversal/symlink/rollback 矩阵不适用。
+- Schema / columns / units / field names: **not selected** — 无数据格式或 API schema 变更。
+- Auth / permissions / secrets: **not selected** — 无认证、凭证或权限面。
+- Concurrency / shared state / ordering: **not selected** — 构建为单进程确定性命令，无持久共享状态。
+- Resource limits / large input / discovery: **not selected** — Vite 仅扫描受版本控制的固定入口，不接收外部发现根或不受控输入。
+- Legacy compatibility / examples: **selected** — 现有 theme 测试和另外两个 workspace 必须保持绿。
+- Error handling / rollback / partial outputs: **not selected** — `dist` 是可删除重建的忽略产物，无发布/外部可见部分成功语义；非零退出由构建命令表达。
+- Release / packaging / dependency compatibility: **selected** — 新运行时/开发依赖及 lockfile 必须与 Node 24/npm workspaces 兼容，产物可复现。
+- Documentation / migration notes: **not selected** — 工程契约已声明 P0 引入 React/Vite；无用户迁移。
+- Browser runtime / navigation / persistence: **selected** — 最小根入口须可在浏览器 DOM 装载；路由与持久化明确不在本刀。
+- Cross-service boundary / offline runtime: **not selected** — 本刀不调用服务或公网，Vite 产物不得引入运行时 CDN。
+
 ## Open Questions
 
 （无——三分支已 grill 拍板，其余为实现细节。）
