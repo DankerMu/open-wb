@@ -34,8 +34,9 @@
 - omp fork 冻结 v18.0.10；P0–P3 用官方全量二进制，减肥推迟到 S4a（先链路后体积）。
 - CONTEXT.md 五条不变量（尤其凭证不进 omp 环境、越界拒绝+审计）。
 - 每阶段结束系统可运行、`make check` 绿、master 经分支保护合入。
-- 开发机 macOS 而部署目标 Linux：FUSE（S1b）本地验证受限（macFUSE 内核扩展），
-  挂载类测试需 Linux 容器/VM 或 CI 承担——S1b 的 spike 首任务。
+- 开发机 macOS 而部署目标 Linux：FUSE（S1b）本地验证受限（macFUSE 内核扩展）。
+  已指定专用测试 VPS（Ubuntu 24.04 x86_64，fuse3/docker 就绪；连接信息在本地
+  `CLAUDE.local.md`，不入库——仓库为 public）承担挂载验证、Linux smoke 与部署演练。
 
 ## Success Criteria
 
@@ -145,10 +146,10 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 - Review attention：decision-dense（Critical Path 白盒；uid 分离决策先关闭）。
 
 **S1b FUSE 挂载**
-- Outcome：mount-manager（rclone/sshfs 生命周期、凭证经受权限保护的配置文件注入、崩溃重挂、在线状态）；挂载点入白名单推导。首任务 = Linux 验证环境 spike（macOS 开发机约束）。
+- Outcome：mount-manager（rclone/sshfs 生命周期、凭证经受权限保护的配置文件注入、崩溃重挂、在线状态）；挂载点入白名单推导。首任务 = 在测试 VPS 上装 rclone/sshfs 并打通挂载验证路径（macOS 开发机不可信）。
 - 覆盖：F-FILE-3。
 - 必读增量：ADR-0003（含凭证不上命令行的 Consequences）。
-- Verify：SFTP 真实挂载读写 + 断连状态呈现 + 卸载后白名单收回（Linux 容器/CI 跑）。
+- Verify：SFTP 真实挂载读写 + 断连状态呈现 + 卸载后白名单收回（测试 VPS 上跑）。
 - Depends on：S1a。
 - Review attention：decision-dense（Critical Path：挂载凭证存取）。
 
@@ -227,7 +228,7 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 - Outcome：部署产物（app-server+SPA+kbservice+减肥 omp+fuse3/rclone+onnx 与嵌入模型捆包）；冒烟脚本全绿。**P4 里程碑验收：无公网服务器全新部署跑通。**
 - 覆盖：F-OPS-4。
 - 必读增量：已定决策"模型分发=捆进部署包"（backend-research §3）。
-- Verify：干净 Linux 主机一键部署 + 全量 smoke + 双账号走查。
+- Verify：干净 Linux 环境（测试 VPS 的全新 docker 容器）一键部署 + 全量 smoke + 双账号走查。
 - Depends on：S4a、S3b。
 - Review attention：mechanical 为主。
 

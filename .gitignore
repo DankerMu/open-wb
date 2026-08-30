@@ -24,3 +24,4 @@ __pycache__/
 .ruff_cache/
 htmlcov/
 .coverage
+CLAUDE.local.md
