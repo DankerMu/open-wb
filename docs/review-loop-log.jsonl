@@ -1,0 +1,1 @@
+{"issue":11,"pr":21,"date":"2026-08-30","fixture":"expanded","rounds":1,"gate_net_catch":0,"verdicts":{"confirmed":2,"plausible":0,"refuted":0},"residual_deferred":0,"premerge_skip_blocks":0,"round_lenses":[["correctness","integration","security-performance","test-evidence"]],"catches":[]}
