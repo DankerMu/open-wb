@@ -120,13 +120,13 @@ make setup    # npm install + uv sync + 挂 git hooks
 
 ## Agent Operating Rules
 
-- **允许**：本地跑全部验证；直接提交 master（当前单维护者流；分支保护启用后改为 feature 分支 + PR，触发器见 Enforcement Index gap 行）。
+- **允许**：本地跑全部验证；提交走 feature 分支，CI 绿后合入 master——ff 合并同 SHA 直推或 PR 合并均可（分支保护已启用：master 只接受带通过 check 的提交）。
 - **禁止**：`--no-verify` 跳过 hooks；force-push 共享分支；对非本地环境做破坏性操作；未标注地修改 CI 文件；主版本依赖升级不经人工评审；把仓库当草稿板（会话临时文件放系统 scratchpad）。
 - **证据要求**：成功声明须附本会话的新鲜命令输出（命令+退出码）。验证世界而非自述：重跑命令、外部重读文件、打真实端点；关键词探测自身输出不算证据。UI 声明需截图 + 零新增控制台报错。
 - **范围化验证**：选覆盖改动面的最窄检查；改单模块跑该模块测试，全量交给 CI。覆盖率范围不得用 pass-with-no-tests 或收窄 include 掩盖未覆盖文件。
 - **迭代闸门**：同一失败检查最多 3 轮修复循环，然后停下报告已试与所需；绝不削弱/跳过/删除测试换绿（skip 需关联 issue + 截止期）；每个绿点 checkpoint 提交。
 - **CI 排障协议**：先分类失败层（fast-checks/unit-tests/anti-drift/secret-scan/sast）→ 读日志取第一个可行动错误 → 用同一命令本地复现 → 修根因 → 本地重跑该层再推送。环境差异记入 Important Development Notes。
-- 并行 agent 各用独立 worktree；一任务一分支（协作流启用后）。
+- 并行 agent 各用独立 worktree；一任务一分支。
 
 ## Enforcement Index
 
@@ -149,7 +149,7 @@ make setup    # npm install + uv sync + 挂 git hooks
 | CI 聚合门禁 | `.github/workflows/ci.yml`（all-checks-passed） | CI | block |
 | PR diff ≤400 行 | `constraints.yaml`（size_limits） | 评审检查项 | review-only |
 | TDD 配对测试 | 本文件 Conventions | 评审 + 覆盖率代理 | review-only |
-| 分支保护 | READINESS GAP：GitHub 设置 → Rulesets 启用 required status check = all-checks-passed 后本行升 gate | 手动启用 | review-only |
+| 分支保护 | GitHub Ruleset `master-protection`（required status check = `all-checks-passed`；禁删除/禁 force-push） | GitHub 服务端 | gate |
 
 阈值与正则的机器可读权威是 `constraints.yaml`；变更先改那里，再同步守卫脚本内的镜像正则。没有执行点的规则是愿望不是规则——要么接上，要么删掉。
 
