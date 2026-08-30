@@ -120,7 +120,7 @@ make setup    # npm install + uv sync + 挂 git hooks
 
 ## Agent Operating Rules
 
-- **允许**：本地跑全部验证；提交走 feature 分支，CI 绿后合入 master——ff 合并同 SHA 直推或 PR 合并均可（分支保护已启用：master 只接受带通过 check 的提交）。
+- **允许**：本地跑全部验证；提交走 feature 分支 → PR → `all-checks-passed` 绿 → 合并（分支保护已启用；CI 仅在 pull_request 与 push:master 触发，纯分支推送不产生 check，故 PR 是唯一合入通路）。
 - **禁止**：`--no-verify` 跳过 hooks；force-push 共享分支；对非本地环境做破坏性操作；未标注地修改 CI 文件；主版本依赖升级不经人工评审；把仓库当草稿板（会话临时文件放系统 scratchpad）。
 - **证据要求**：成功声明须附本会话的新鲜命令输出（命令+退出码）。验证世界而非自述：重跑命令、外部重读文件、打真实端点；关键词探测自身输出不算证据。UI 声明需截图 + 零新增控制台报错。
 - **范围化验证**：选覆盖改动面的最窄检查；改单模块跑该模块测试，全量交给 CI。覆盖率范围不得用 pass-with-no-tests 或收窄 include 掩盖未覆盖文件。
