@@ -84,6 +84,8 @@ flowchart LR
 
 ## 4. 建设阶段
 
+> 流水线粒度的子阶段切分与功能清单见根 `IMPLEMENTATION_PLAN.md`（stage-change-pipeline 的输入）。
+
 | 阶段 | 交付 | 验收（一行） |
 |---|---|---|
 | **P0 链路骨架** | app-server 骨架（登录桩 + 静态 SPA 托管）+ spawn 官方全量 `omp --mode rpc` + 内网 provider 接通 | 浏览器里一次流式对话渲染完整，会话文件落盘可 resume |
