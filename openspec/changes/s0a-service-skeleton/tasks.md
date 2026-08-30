@@ -25,7 +25,7 @@ Minimal mergeable slice: 2.1 迁移+seed 单独可合并保绿（依赖 1.1 已�
 ## 3. spa-shell
 
 - [x] 3.0 web 构建工具链：vite + @vitejs/plugin-react + react/react-dom + @types/react/@types/react-dom + jsdom + @testing-library/react 依赖声明、`web/index.html`、`src/main.tsx` 最小入口及配对 `web/test/main.test.tsx`（Testing Library 在 `#root` 装载入口）、`vite.config.ts`（outDir=dist）、`tsconfig.base.json` 增 `jsx: react-jsx`、`web/vitest.config.ts` 覆写 jsdom 环境、`web/package.json` 增 build 脚本；验证 = jsdom 入口测试 + `make typecheck` + `npm run build --workspace web` 产出 dist + `make check` 全绿（knip vite 插件自动解析入口，依赖均由入口/配置/测试实际消费）
-- [ ] 3.1 `lib/theme` 扩 system 模式：可注入 matchMedia、默认档 system（demo:1035）、未知值/存储不可用回退 system（修正现有回退 light 语义）+ 扩展既有 `web/test/theme.test.ts`
+- [x] 3.1 `lib/theme` 扩 system 模式：可注入 matchMedia、默认档 system（demo:1035）、未知值/存储不可用回退 system（修正现有回退 light 语义）+ 扩展既有 `web/test/theme.test.ts`
 - [x] 3.2 路由壳：react-router 四路由 + 侧栏（demo:1773-1778 标签/副标题）+ 占位壳（/center 扁平，/tokens 不移植）+ jsdom 可达性断言
 - [ ] 3.3 `lib/api` + 登录页与路由守卫：fetch 封装（信封解析、401 进未登录态）、未登录任意路由渲染登录页并记录原目标、登录成功跳回、错误 message 展示 + jsdom 断言（未登录访问 /files 渲染登录页、登录后落 /files）
 - [ ] 3.4 设置页与用户页脚：外观卡（三档 seg + 当前生效行）、关于卡（/api/info 版本）、侧栏页脚（用户名/角色 + 退出登录带确认）+ jsdom 断言
@@ -68,3 +68,16 @@ Minimal mergeable slice: 4.1 smoke 单独可合并保绿（依赖 1.3 启动命�
 - [x] 新增 `react-router` 依赖有实际消费且版本兼容 React 19/Node 24；`npm ci`、focused web test、`npm run build --workspace web`、`make check` 与 focused knip 全绿，coverage include/阈值不收窄。
 - [x] 保持 `web/src/lib/theme.ts` 及测试、server、kbservice、#11 build config 不变；不实现登录/守卫、settings 内容、用户页脚、center tabs、unknown-route 404 或 Playwright。
 - OpenSpec archive: **deferred with reason** — 本 change 仍有其他 S0a 子任务；本 PR 仅勾选 3.2 与本节证据，阶段全部完成后统一归档。
+
+## Issue #12 required evidence
+
+- Fixture level: compact；repair intensity: low；权威 requirement = `specs/spa-shell/spec.md` 的“设置页”主题语义，当前 PR 只交付其 `lib/theme` 纯函数地基。
+- [x] TDD/red-proof：先扩展既有 `web/test/theme.test.ts`，在 pre-change source 上因 `system` 值域/新 seam 缺失或旧 light fallback 而红；不 mock 被测主题函数，不留 `red-proof` stash。
+- [x] `normalizeTheme("light"|"dark"|"system")` 分别原样返回；unknown string 与 null 均返回 `system`，不再回 light。
+- [x] `loadTheme(reader)`：reader 返回三档时归一化返回；返回 null/unknown、reader 缺席或 reader 抛错时稳定返回 `system`，异常不外泄。
+- [x] `resolveTheme("system", matchMedia)`：只以精确 query `(prefers-color-scheme: dark)` 调用注入函数一次；matches=true→dark，false→light。
+- [x] `resolveTheme("light"|"dark", matchMedia)` 原样返回且 matchMedia 调用次数为 0；结果类型仅 `light | dark`。
+- [x] 模块 import 与函数调用不直接读取 `window`、`localStorage` 或全局 `matchMedia`；storage key/写入/change listener/data-theme/UI 留给 #15。
+- [x] focused `theme.test.ts`、`make typecheck`、web build、`make check` 与 focused knip 全绿；coverage include/阈值不收窄，无新依赖。
+- [x] 保持 router/main 真实入口测试、theme 以外 web 文件、server、kbservice 和构建配置不变。
+- OpenSpec archive: **deferred with reason** — stage change 尚有其他 S0a 子任务；本 PR 仅勾选 3.1 与本节证据，全部完成后统一归档。

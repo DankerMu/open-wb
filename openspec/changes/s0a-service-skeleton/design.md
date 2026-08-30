@@ -101,6 +101,36 @@
 - Browser runtime / navigation / persistence: **selected** — history 初始深链、链接导航与 active state 是本 issue 核心；逐路由 jsdom 测试并保留后续 UI-walk 接缝。
 - Cross-service boundary / offline runtime: **not selected** — 不访问 server 或公网，bundle 仍为本地依赖。
 
+## Issue delivery fixture: #12 theme system 模式
+
+- **Issue type / profile:** feature；Generic（open-workbuddy project profile）。
+- **Blast radius / fixture / repair:** low；compact；low。
+- **Upstream suggested level:** compact — agree：仅扩展既有内部纯函数 seam 与既有测试，无 package/public entrypoint、直接 browser storage、持久化写入或 UI。
+- **Change surface:** `web/src/lib/theme.ts` 与 `web/test/theme.test.ts`；零新增文件、依赖或入口。
+- **Must preserve:** 有效 `light`/`dark` 的归一化与解析结果；模块 import 不读取 browser globals；#11 build、#13 router、server/kbservice 和全链门禁。
+- **Must add:** `Theme = light | dark | system`；`ResolvedTheme = light | dark`；`normalizeTheme(value)` 对三档原样返回，对 unknown/null 回 `system`。
+- **Injected storage seam:** `loadTheme(readStoredTheme?)`；reader 缺席、返回 null/unknown 或抛错均回 `system`，不在本 issue 固定 storage key、不直接访问/写入 localStorage。
+- **Injected media seam:** `resolveTheme(theme, matchMedia)`；light/dark 原样且不调用 matchMedia；system 仅查询 `(prefers-color-scheme: dark)`，matches=true→dark、false→light。
+- **Seams under test:** 只扩展既有 `theme.test.ts`，覆盖三档归一化、unknown/null、reader 成功/缺席/抛错、system 深/浅解析、固定档不调用媒体查询。
+- **Selected risk packs:** Schema / field names；Legacy compatibility / examples；Error handling / rollback / partial outputs；Browser runtime / navigation / persistence。
+- **Non-goals:** localStorage key/写入、DOM data-theme 应用、matchMedia change listener、设置页/当前生效行、跨 tab 同步、SSR/global fallback；这些由 #15 消费该纯函数 API 时实现。
+
+### Risk packs considered for #12
+
+- Public API / CLI / script entry: **not selected** — 仅内部模块导出 seam，无 package export、route 或命令入口；测试直接消费。
+- Config / project setup: **not selected** — 无配置、manifest、依赖或构建接线变化。
+- File IO / path safety / overwrite: **not selected** — 无文件读写或路径。
+- Schema / columns / units / field names: **selected** — 内部主题值域由两档扩三档；三档与未知值矩阵逐项断言。
+- Auth / permissions / secrets: **not selected** — 无身份、权限或凭证。
+- Concurrency / shared state / ordering: **not selected** — 不注册媒体监听、不写共享状态；仅同步纯解析。
+- Resource limits / large input / discovery: **not selected** — 常量输入与单次函数调用。
+- Legacy compatibility / examples: **selected** — 既有 light/dark 调用语义和全部 workspace 门禁保持绿。
+- Error handling / rollback / partial outputs: **selected** — 注入 reader 缺席/抛错必须稳定回 `system`，无副作用/部分写入。
+- Release / packaging / dependency compatibility: **not selected** — 无新依赖或打包契约。
+- Documentation / migration notes: **not selected** — 无用户迁移；stage spec/design 是权威。
+- Browser runtime / navigation / persistence: **selected** — 通过注入 seam 模拟 storage 读取和系统深浅偏好；不直接触碰 browser globals/persistence。
+- Cross-service boundary / offline runtime: **not selected** — 无网络、服务或公网依赖。
+
 ## Open Questions
 
 （无——三分支已 grill 拍板，其余为实现细节。）
