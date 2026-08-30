@@ -70,6 +70,37 @@
 - Browser runtime / navigation / persistence: **selected** — 最小根入口须可在浏览器 DOM 装载；路由与持久化明确不在本刀。
 - Cross-service boundary / offline runtime: **not selected** — 本刀不调用服务或公网，Vite 产物不得引入运行时 CDN。
 
+## Issue delivery fixture: #13 SPA 路由壳与侧栏
+
+- **Issue type / profile:** feature；Generic（open-workbuddy project profile）。
+- **Blast radius / fixture / repair:** medium；expanded；medium。
+- **Upstream suggested level:** compact — override：`createBrowserRouter` 与 routing 是项目 profile 的强制 expanded trigger，并改写浏览器公共入口。
+- **Change surface:** `web/src/main.tsx`；`web/src/routes/` 模块入口、路由壳与侧栏；配对 jsdom 测试；`react-router` 依赖与 lockfile。
+- **Must preserve:** #11 的真实 `#root` 挂载、Vite build/coverage/knip；现有 theme 行为；server/kbservice；history 路由；后续 #14 可在路由外层加入认证守卫，#15 可替换 settings 占位内容而不重写 IA。
+- **Must add:** 仅 `/`、`/files`、`/center`、`/settings` 四个平级 route；所有页面共用侧栏+内容 outlet；当前链接以 `aria-current="page"` 唯一标识；`/center` 不定义子路由；侧栏不含 `/tokens`。
+- **Sidebar copy:** `会话`；`工作空间` / `文件·预览·挂载`；`中心` / `专家·技能·知识库·模型·权限`；`设置`（demo:1773-1778）。
+- **Placeholder copy:** `/` = `会话` / `S0b 将接入会话与 Agent 链路`；`/files` = `工作空间` / `S1a 将接入工作空间与文件`；`/center` = `中心` / `S1d 将接入专家、技能、连接器、知识库、模型与权限`；`/settings` = `设置` / `S0a 后续任务将接入外观与关于设置`。
+- **Seams under test:** 对每个 path 写入 jsdom history 后装配真实 production browser router，渲染标题/阶段说明/完整侧栏，并断言恰好一个当前链接；路由 manifest 断言路径集合精确等于四项，排除 `/tokens` 与 `/center/*`；真实 `main.tsx` 入口回归仍通过。
+- **Selected risk packs:** Public API / CLI / script entry；Config / project setup；Legacy compatibility / examples；Release / packaging / dependency compatibility；Browser runtime / navigation / persistence。
+- **Review focus:** browser history 初始位置、根路由 `end` 匹配、active state 唯一性、route manifest 单一来源、main 入口接线、组件/测试无重复 router 定义。
+- **Non-goals:** 登录页/认证守卫、设置内容、用户页脚、视觉定稿、中心页内 tabs、`/tokens`、未知路径自定义 404、server history fallback、Playwright。
+
+### Risk packs considered for #13
+
+- Public API / CLI / script entry: **selected** — 四个 browser route 与 `main.tsx` RouterProvider 是用户可见入口；jsdom 深链逐项验收。
+- Config / project setup: **selected** — 新增 `react-router` 并接入现有 Vite/TypeScript/Vitest workspace；build 与全链命令须绿。
+- File IO / path safety / overwrite: **not selected** — 不新增文件系统输入、输出或可配置路径；沿用 #11 固定 build 产物。
+- Schema / columns / units / field names: **not selected** — 无网络/持久化 schema；route metadata 是模块内唯一常量并由渲染 seam 验收。
+- Auth / permissions / secrets: **not selected** — 认证守卫明确属于 #14，本刀所有壳公开渲染且无凭证。
+- Concurrency / shared state / ordering: **not selected** — 无异步状态、持久共享状态、retry 或 cancellation。
+- Resource limits / large input / discovery: **not selected** — 固定四 route/四 nav item，无外部输入发现或不受控集合。
+- Legacy compatibility / examples: **selected** — #11 `main.tsx` 挂载、theme、另外两个 workspace 与后继 #14/#15 接缝必须保持兼容。
+- Error handling / rollback / partial outputs: **not selected** — 自定义 404 与服务端 fallback 明确非目标；四个受支持 path 无外部失败面。
+- Release / packaging / dependency compatibility: **selected** — `react-router` 必须兼容 React 19、Node 24、strict NodeNext、Vite build 与 npm clean install。
+- Documentation / migration notes: **not selected** — 新壳无存量用户迁移，权威 IA 已在 stage spec/design。
+- Browser runtime / navigation / persistence: **selected** — history 初始深链、链接导航与 active state 是本 issue 核心；逐路由 jsdom 测试并保留后续 UI-walk 接缝。
+- Cross-service boundary / offline runtime: **not selected** — 不访问 server 或公网，bundle 仍为本地依赖。
+
 ## Open Questions
 
 （无——三分支已 grill 拍板，其余为实现细节。）
