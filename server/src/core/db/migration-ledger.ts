@@ -116,6 +116,7 @@ export function validatedAppliedFilenames(
   }
 
   validatePromisedFoundationObjects(db, receipts);
+  validateLedgerTriggerOwnership(db, receipts);
   return new Set(receipts.map((receipt) => receipt.filename));
 }
 
@@ -281,6 +282,42 @@ function validatePromisedFoundationObjects(db: DatabaseSync, receipts: readonly 
       validateObjectDefinition(db, "view", HISTORY_VIEW_NAME, HISTORY_VIEW_NAME, HISTORY_VIEW_SQL);
     }
   }
+}
+
+function validateLedgerTriggerOwnership(db: DatabaseSync, receipts: readonly Receipt[]): void {
+  const expectedTriggerNames = expectedLedgerTriggerNames(receipts);
+  const triggerNames = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ? ORDER BY name")
+    .all(LEDGER_NAME)
+    .map((row) => {
+      const name = (row as { name: unknown }).name;
+      if (typeof name !== "string") {
+        throw new Error("schema_migrations trigger has an invalid name");
+      }
+      return name;
+    });
+
+  if (
+    triggerNames.length !== expectedTriggerNames.length ||
+    !triggerNames.every((name, index) => name === expectedTriggerNames[index])
+  ) {
+    throw new Error("schema_migrations triggers do not match the receipt prefix");
+  }
+}
+
+function expectedLedgerTriggerNames(receipts: readonly Receipt[]): readonly string[] {
+  const triggerNames: string[] = [];
+
+  for (const receipt of receipts) {
+    if (receipt.filename === "0010_schema_migrations_update_guard.sql") {
+      triggerNames.push(INSERT_GUARD_NAME, UPDATE_GUARD_NAME);
+    }
+    if (receipt.filename === "002_schema_migrations_history.sql") {
+      triggerNames.push(DELETE_GUARD_NAME);
+    }
+  }
+
+  return triggerNames.sort();
 }
 
 function validateObjectDefinition(

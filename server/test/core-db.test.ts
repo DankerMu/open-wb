@@ -34,6 +34,15 @@ function withDatabase<T>(path: string, action: (db: DatabaseSync) => T): T {
   }
 }
 
+function withBigIntDatabase<T>(path: string, action: (db: DatabaseSync) => T): T {
+  const db = new DatabaseSync(path, { readBigInts: true });
+  try {
+    return action(db);
+  } finally {
+    db.close();
+  }
+}
+
 function withOpenDb<T>(path: string, action: (db: DatabaseSync) => T): T {
   const db = openDb(path);
   try {
@@ -129,20 +138,24 @@ function expectOpenDbFailure(path: string, expectedError?: RegExp): void {
   }
 }
 
-function expectFailedOpenToPreserve(path: string, expectedEffect: string): void {
+function expectNoMigrationFoundationObjects(db: DatabaseSync): void {
+  expect(tableExists(db, HISTORY_VIEW)).toBe(false);
+  expect(
+    db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'schema_migrations_no_update'").get(),
+  ).toBeUndefined();
+  expect(
+    db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'schema_migrations_no_reinsert'").get(),
+  ).toBeUndefined();
+  expect(
+    db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'schema_migrations_no_delete'").get(),
+  ).toBeUndefined();
+}
+
+function expectFailedOpenToPreserve(path: string): void {
   expectOpenDbFailure(path);
   withDatabase(path, (db) => {
     expect(tableExists(db, "schema_migrations")).toBe(true);
-    expect(tableExists(db, expectedEffect)).toBe(false);
-    expect(
-      db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'schema_migrations_no_update'").get(),
-    ).toBeUndefined();
-    expect(
-      db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'schema_migrations_no_reinsert'").get(),
-    ).toBeUndefined();
-    expect(
-      db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'schema_migrations_no_delete'").get(),
-    ).toBeUndefined();
+    expectNoMigrationFoundationObjects(db);
   });
 }
 
@@ -277,6 +290,45 @@ describe("core/db migration runner", () => {
       expect(db.isTransaction).toBe(false);
     });
   });
+
+  it("回执插入被忽略时回滚迁移效果与回执", () => {
+    withDatabase(":memory:", (db) => {
+      createCanonicalLedger(db);
+      db.exec(`CREATE TRIGGER suppress_migration_receipt
+BEFORE INSERT ON schema_migrations
+WHEN NEW.filename = 'suppressed.sql'
+BEGIN
+  SELECT RAISE(IGNORE);
+END`);
+      const migration = fixtureMigration(
+        "suppressed.sql",
+        "CREATE TABLE suppressed_migration_effect (value TEXT);",
+      );
+
+      expect(() => runMigration(db, migration)).toThrow(
+        /migration receipt insert must change exactly one row/,
+      );
+      expect(tableExists(db, "suppressed_migration_effect")).toBe(false);
+      expect(migrationReceiptExists(db, migration.filename)).toBe(false);
+      expect(db.isTransaction).toBe(false);
+    });
+  });
+
+  it("bigint 回执结果为一时提交迁移效果与回执", () => {
+    withBigIntDatabase(":memory:", (db) => {
+      createCanonicalLedger(db);
+      const migration = fixtureMigration(
+        "bigint-result.sql",
+        "CREATE TABLE bigint_migration_effect (value TEXT);",
+      );
+
+      runMigration(db, migration);
+
+      expect(tableExists(db, "bigint_migration_effect")).toBe(true);
+      expect(migrationReceiptExists(db, migration.filename)).toBe(true);
+      expect(db.isTransaction).toBe(false);
+    });
+  });
 });
 
 describe("core/db openDb", () => {
@@ -392,7 +444,7 @@ describe("core/db openDb", () => {
       db.exec("CREATE TABLE schema_migrations (filename TEXT NOT NULL UNIQUE)");
     });
 
-    expectFailedOpenToPreserve(file, "schema_migration_history");
+    expectFailedOpenToPreserve(file);
     withDatabase(file, (db) => {
       expect(tableExists(db, "schema_migration_history")).toBe(false);
       expect(
@@ -408,7 +460,7 @@ describe("core/db openDb", () => {
       db.prepare("INSERT INTO schema_migrations(filename) VALUES (?)").run(MIGRATION_002);
     });
 
-    expectFailedOpenToPreserve(file, "schema_migration_history");
+    expectFailedOpenToPreserve(file);
     withDatabase(file, (db) => {
       expect(ledgerFilenames(db)).toEqual([MIGRATION_002]);
       expect(
@@ -460,7 +512,30 @@ describe("core/db openDb", () => {
     const file = join(tempDir(), "app.db");
     withDatabase(file, seed);
 
-    expectFailedOpenToPreserve(file, "schema_migration_history");
+    expectFailedOpenToPreserve(file);
+  });
+
+  it("额外账本回执触发器在 0010 效果与回执前失败", () => {
+    const file = join(tempDir(), "app.db");
+    withDatabase(file, (db) => {
+      createCanonicalLedger(db);
+      db.exec(`CREATE TRIGGER suppress_0010_receipt
+BEFORE INSERT ON schema_migrations
+WHEN NEW.filename = '0010_schema_migrations_update_guard.sql'
+BEGIN
+  SELECT RAISE(IGNORE);
+END`);
+    });
+
+    expectOpenDbFailure(file, /schema_migrations triggers do not match the receipt prefix/);
+    withDatabase(file, (db) => {
+      expect(ledgerFilenames(db)).toEqual([]);
+      expectNoMigrationFoundationObjects(db);
+      expect(
+        db.prepare("SELECT type FROM sqlite_master WHERE name = 'suppress_0010_receipt'").get()
+          ?.type,
+      ).toBe("trigger");
+    });
   });
 
   it("错误同名 UPDATE 触发器阻止 0010 回执", () => {

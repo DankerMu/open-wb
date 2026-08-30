@@ -11,7 +11,12 @@ export function runMigration(db: DatabaseSync, migration: MigrationToRun): void 
 
   try {
     runMigrationBody(db, migration.source);
-    db.prepare("INSERT INTO schema_migrations(filename) VALUES (?)").run(migration.filename);
+    const receipt = db
+      .prepare("INSERT INTO schema_migrations(filename) VALUES (?)")
+      .run(migration.filename);
+    if (receipt.changes !== 1 && receipt.changes !== 1n) {
+      throw new Error("migration receipt insert must change exactly one row");
+    }
     db.exec("COMMIT");
   } catch (error) {
     rollbackAfterMigrationFailure(db, error);
