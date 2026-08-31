@@ -17,11 +17,11 @@ auth 模块 SHALL 以 `authenticate(req) → Principal | null` 为对外唯一�
 - THEN 恰好存在上述四账号，`wangwu.disabled=1`，各行 `password_hash` 非明文 `demo` 且可被登录校验函数 verify 通过
 
 ### Requirement: 登录端点与语义
-`POST /api/auth/login` SHALL 接收账号与密码；账号先 trim 再小写化后匹配（demo:1644）；成功建立服务端会话并 Set-Cookie；失败语义镜像 demo，错误响应使用统一错误信封。
+`POST /api/auth/login` SHALL 接收恰为 `{account:string,password:string}` 的 JSON body；账号先 trim 再小写化后匹配（demo:1644）；成功建立服务端会话并 Set-Cookie；失败语义镜像 demo，错误响应使用统一错误信封。
 
 #### Scenario: 登录成功
 - WHEN 以正确凭证登录
-- THEN 返回 200 与用户信息（不含密码/散列字段），响应带 httpOnly session cookie，会话表新增一行
+- THEN 返回 200 与直接 Principal JSON 对象 `{id,account,role}`（三个字段均为 string，且恰为这三个字段，不含密码/散列字段），响应带 httpOnly session cookie，会话表新增一行
 
 #### Scenario: 凭证错误
 - WHEN 账号不存在或密码错误
@@ -44,7 +44,7 @@ auth 模块 SHALL 以 `authenticate(req) → Principal | null` 为对外唯一�
 
 #### Scenario: 会话有效期内访问
 - WHEN 携带有效 cookie 请求 `GET /api/auth/me`
-- THEN 返回 200 与当前用户信息
+- THEN 返回 200 与当前直接 Principal JSON 对象 `{id,account,role}`，形状与登录成功响应完全一致
 
 #### Scenario: 登出后失效
 - WHEN 登出后携带原 cookie 请求 `GET /api/auth/me`

@@ -1,4 +1,5 @@
 import { createBrowserRouter, NavLink, Outlet, replace } from "react-router";
+import { AuthGuard, AuthProvider } from "../features/auth/index.js";
 
 type RouteDefinition = {
   path: "/" | "/files" | "/center" | "/settings";
@@ -61,6 +62,16 @@ function AppShell() {
   );
 }
 
+function ProtectedAppShell() {
+  return (
+    <AuthProvider>
+      <AuthGuard>
+        <AppShell />
+      </AuthGuard>
+    </AuthProvider>
+  );
+}
+
 function PlaceholderPage({ description, title }: Pick<RouteDefinition, "description" | "title">) {
   return (
     <section>
@@ -81,7 +92,7 @@ function canonicalizeRoutePath(request: Request, path: RouteDefinition["path"]) 
 export function createAppRouter() {
   return createBrowserRouter([
     {
-      Component: AppShell,
+      Component: ProtectedAppShell,
       children: routeManifest.map(({ description, path, title }) => ({
         path,
         loader: ({ request }) => canonicalizeRoutePath(request, path),

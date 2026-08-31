@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { RouterProvider } from "react-router";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAppRouter, routeManifest } from "../src/routes/index.js";
 
 const expectedPages = [
@@ -61,10 +61,27 @@ const trailingSlashPages = [
   },
 ] as const;
 
+const authenticatedPrincipal = {
+  id: "user-1",
+  account: "zhangsan",
+  role: "member",
+};
+
 let router: ReturnType<typeof createAppRouter> | undefined;
 
 function setBrowserPath(path: string) {
   window.history.replaceState(null, "", path);
+}
+
+function authenticateRouter() {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(authenticatedPrincipal), {
+        headers: { "Content-Type": "application/json" },
+      }),
+    ),
+  );
 }
 
 async function expectRouteShell({
@@ -97,6 +114,7 @@ afterEach(() => {
   cleanup();
   router?.dispose();
   router = undefined;
+  vi.unstubAllGlobals();
   document.body.replaceChildren();
   setBrowserPath("/");
 });
@@ -115,6 +133,7 @@ describe("SPA route manifest", () => {
 describe("SPA shell routes", () => {
   it("navigates from 会话 to 工作空间", async () => {
     setBrowserPath("/");
+    authenticateRouter();
     router = createAppRouter();
     render(<RouterProvider router={router} />);
 
@@ -142,6 +161,7 @@ describe("SPA shell routes", () => {
     "renders the $path shell",
     async ({ path, title, description, currentLabel }) => {
       setBrowserPath(path);
+      authenticateRouter();
       router = createAppRouter();
       render(<RouterProvider router={router} />);
 
@@ -168,6 +188,7 @@ describe("SPA shell routes", () => {
     "canonicalizes $path to the $canonicalPath shell",
     async ({ path, canonicalPath, title, description, currentLabel }) => {
       setBrowserPath(path);
+      authenticateRouter();
       router = createAppRouter();
       render(<RouterProvider router={router} />);
 
