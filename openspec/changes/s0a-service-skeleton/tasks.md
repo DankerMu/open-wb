@@ -20,9 +20,25 @@
     - 每个测试自有 SQLite handle -> assertion 异常时仍经 `finally` 关闭；
     - `npm test --workspace server` 与 `make check` -> exit 0，coverage 门禁保持。
   - Non-goals: 业务表/seed（#8）、HTTP、并发多进程迁移协调、任意外部 migration 目录。
-- [ ] 1.2 Fastify 装配与横切：`app.ts`（可注入配置）+ `http/` 错误信封处理器（invalid_credentials/account_disabled/unauthorized/not_found 四码，401/403/404 同形状断言）+ healthz/info 端点 + `app.inject()` 测试
+- [x] 1.2 Fastify 装配与横切：`app.ts`（可注入配置）+ `http/` 错误信封处理器（invalid_credentials/account_disabled/unauthorized/not_found 四码，401/403/404 同形状断言）+ healthz/info 端点 + `app.inject()` 测试
+  - Issue #6 fixture: high（上游 compact 因 shared app entrypoint/routing/public schema/static path/fallback precedence 强制升档）；repair intensity: high；与 1.4 同 PR 原子交付。
+  - Seams under test: `createApp({db, staticRoot?})` + real Fastify `app.inject()`；使用真实 caller-owned `openDb(":memory:")`、真实 temp static root、真实 typed `HttpError`，不 mock Fastify/DB/filesystem/error handler/static plugin。
+  - Required evidence:
+    - caller-owned DB + 任意 static-root 状态 -> `createApp` ready，`app.db` 与传入对象 identity 相同；重复 inject 不改 DB；`app.close()` 后 caller 仍可查询并自行 close；
+    - `GET /api/healthz` -> 200 + exact `{"status":"ok"}`；`GET /api/info` -> 200 + exact `SERVICE_INFO`，version 仍为 semver；
+    - 四个 typed errors -> 分别 exact 401/403/401/404，exact code/message map，body 仅 `{error:{code,message}}`；unexpected programmer error -> 5xx 且不得伪装成四个 semantic code；
+    - exact `/api`、未知 `/api/*`（含 query 与 encoded separator/dot-segment bypass）-> JSON `not_found`，即使 static root 有同路径文件也不泄漏文件/index；known health/info 永远优先；percent-decoding 最多四轮，超过上限或 malformed 编码 fail closed，并以约 8KB nested-encoding case 证明 request work 不再随编码层数超线性放大；
+    - server package runtime dependencies/lockfile -> Fastify 5 + matching `@fastify/static` 在 Node 24/npm clean install 下可解析，无 CDN/公网运行时依赖；
+    - focused inject suite、server coverage、`make check`、strict OpenSpec -> exit 0，现有 core/db/service-info/web/kbservice 保持绿。
 - [ ] 1.3 启动入口与命令面：`server.ts`（唯一 listen、启动日志输出模块清单）、`make dev` 与 `npm run start --workspace server`、`knip.json` server entry 增 `src/server.ts`、`.gitignore` 增 `var/`（默认 db 路径产物不入库）；启动行为验证由 4.1 smoke 对真实进程覆盖（设计已定，不写监听单测）
-- [ ] 1.4 静态托管与 history fallback：`STATIC_ROOT` 可配置（单测用临时夹具目录），非 `/api/*` GET 回 index.html，非 GET 与 `/api/*` 未命中回信封 404 + inject 测试
+- [x] 1.4 静态托管与 history fallback：`STATIC_ROOT` 可配置（单测用临时夹具目录），非 `/api/*` GET 回 index.html，非 GET 与 `/api/*` 未命中回信封 404 + inject 测试
+  - Issue #6 required evidence（与 1.2 共用同一 app/inject fixture）：
+    - existing directory + regular index/asset -> direct asset GET 返回 exact bytes/content type；non-API deep-link GET（含 `/files/` trailing slash 与 query）返回 exact index bytes；
+    - absent、nonexistent、regular-file 或 index-less static root -> app readiness 与 health/info 不受影响；不可用 fallback/deep-link 返回 exact JSON 404；index-less root 的既有 regular asset 仍可直接读取；
+    - non-GET non-API miss -> exact JSON 404、不得返回 index；HEAD/POST 与 GET 的 fallback 分支需显式区分；
+    - root 内 `api/**` 文件、root/nested dotfiles、encoded/multi-encoded API path、traversal/encoded traversal、literal/encoded/multi-encoded symlink ancestor 与 outside sentinel -> `/api` 始终 JSON；static validation/existence/send target 绑定同一 normalized pathname；multi-encoded non-API path fail closed，任何 request 不得返回 hidden 或 root 外 bytes；
+    - repeated asset/deep-link/API requests 与 `app.close()` -> 无 double-send、无 leaked handle、无文件/DB mutation。
+  - Non-goals: `server.ts`/listen/env/default config（#7）、auth/session/cookie/guards（#9/#10）、web 源码、business schema/seed、HTTP smoke/UI walk、多进程协调、用户 workspace static root。
 
 Suggested fixture level: compact - 组装层有跨模块交互（db+http+static），但均经 app.inject() 单 seam 可证
 Minimal mergeable slice: 1.1 core/db 单独可合并保绿（独立模块+自带测试，无 HTTP 依赖；knip 探针已证测试 import 即非死代码）
