@@ -5,11 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthGuard, AuthProvider, useAuth } from "../src/features/auth/index.js";
 import { createAppRouter } from "../src/routes/index.js";
 
-const principal = {
-  id: "user-1",
-  account: "zhangsan",
-  role: "member",
-};
+const principal = { id: "user-1", account: "zhangsan", role: "member" };
 
 const protectedPaths = ["/", "/files", "/center", "/settings"] as const;
 
@@ -30,12 +26,8 @@ const canonicalLoginPaths = [
     "设置",
     "设置",
   ],
-  [
-    "/FILES?from=mixed-files-exact#target",
-    "/files?from=mixed-files-exact#target",
-    "工作空间",
-    "工作空间",
-  ],
+  // biome-ignore format: compact fixture table
+  ["/FILES?from=mixed-files-exact#target", "/files?from=mixed-files-exact#target", "工作空间", "工作空间"],
   [
     "/Files/?from=mixed-files-single#target",
     "/files?from=mixed-files-single#target",
@@ -70,10 +62,7 @@ const canonicalLoginPaths = [
   ],
 ] as const;
 
-type DeferredResponse = {
-  promise: Promise<Response>;
-  resolve: (response: Response) => void;
-};
+type DeferredResponse = { promise: Promise<Response>; resolve: (response: Response) => void };
 
 function deferredResponse(): DeferredResponse {
   let resolve!: (response: Response) => void;
@@ -205,6 +194,14 @@ function expectMeRequest(fetchMock: ReturnType<typeof vi.fn>, callIndex = 1) {
     signal: expect.any(AbortSignal),
   });
 }
+
+const expectInfoRequest = (fetchMock: ReturnType<typeof vi.fn>) =>
+  expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/info", {
+    method: "GET",
+    credentials: "same-origin",
+    cache: "no-store",
+    signal: expect.any(AbortSignal),
+  });
 
 function expectProviderLoginRequest(fetchMock: ReturnType<typeof vi.fn>) {
   const callIndex = fetchMock.mock.calls.findLastIndex(([path]) => path === "/api/auth/login") + 1;
@@ -406,7 +403,10 @@ describe("route guard initial authentication", () => {
 
       await expectAuthenticatedShell(title, currentLabel);
       expect(currentLocation()).toBe(canonicalPath);
-      expect(fetchMock).toHaveBeenCalledTimes(title === "设置" ? 3 : 2);
+      if (title === "设置") {
+        await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+        expectInfoRequest(fetchMock);
+      } else expect(fetchMock).toHaveBeenCalledTimes(2);
       expectProviderLoginRequest(fetchMock);
     },
   );
