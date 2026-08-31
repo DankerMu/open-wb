@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -77,10 +77,7 @@ type DeferredResponse = {
 
 function deferredResponse(): DeferredResponse {
   let resolve!: (response: Response) => void;
-  const promise = new Promise<Response>((resolvePromise) => {
-    resolve = resolvePromise;
-  });
-
+  const promise = new Promise<Response>((resolvePromise) => (resolve = resolvePromise));
   return { promise, resolve };
 }
 
@@ -93,13 +90,10 @@ function jsonResponse(body: unknown, status = 200) {
 
 function observedJsonResponse(body: unknown, status = 200) {
   const json = vi.fn().mockResolvedValue(body);
-  const response = {
-    ok: status >= 200 && status < 300,
-    status,
+  return {
     json,
-  } as unknown as Response;
-
-  return { json, response };
+    response: { ok: status >= 200 && status < 300, status, json } as unknown as Response,
+  };
 }
 
 async function requestSignal(
@@ -232,7 +226,7 @@ type AuthTransitionFixture = {
 
 async function renderAuthenticatedProvider(
   loginResponse: Response,
-  protectedChild?: ReactNode,
+  protectedChild: ReactNode = <p>受保护内容</p>,
 ): Promise<AuthTransitionFixture> {
   const fetchMock = vi
     .fn()
@@ -248,7 +242,7 @@ async function renderAuthenticatedProvider(
         onReady={(operation) => (login = operation)}
         onState={(next) => (state = next)}
       />
-      {protectedChild ? <AuthGuard>{protectedChild}</AuthGuard> : null}
+      <AuthGuard>{protectedChild}</AuthGuard>
     </AuthProvider>,
   );
 
@@ -277,8 +271,12 @@ async function renderAuthenticatedProvider(
   };
 }
 
+async function settleProviderLogin(operation: () => Promise<boolean>) {
+  return await act(operation);
+}
+
 async function submitProviderLogin(fixture: AuthTransitionFixture) {
-  await expect(fixture.login()).resolves.toBe(false);
+  expect(await settleProviderLogin(fixture.login)).toBe(false);
   expect(fixture.fetchMock).toHaveBeenCalledTimes(2);
   expectProviderLoginRequest(fixture.fetchMock);
 }
@@ -651,12 +649,13 @@ describe("auth transitions and lifecycle", () => {
         throw new Error("expected AuthProvider to expose login");
       }
 
-      await expect(login({ account: "lisi", password: "demo" })).resolves.toBe(true);
+      const providerLogin = login;
+      expect(
+        await settleProviderLogin(() => providerLogin({ account: "lisi", password: "demo" })),
+      ).toBe(true);
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(staleSignal.aborted).toBe(true);
-      await waitFor(() => {
-        expect(state).toMatchObject({ principal: newerPrincipal, status: "authenticated" });
-      });
+      expect(state).toMatchObject({ principal: newerPrincipal, status: "authenticated" });
       const currentPrincipal = state?.principal;
       if (!currentPrincipal) {
         throw new Error("expected newer login to set a Principal");
@@ -675,10 +674,7 @@ describe("auth transitions and lifecycle", () => {
   it("renders login at the same location after a provider-owned login 401", async () => {
     const requestedPath = "/files?from=session#target";
     setBrowserPath(requestedPath);
-    const fixture = await renderAuthenticatedProvider(
-      unauthenticatedResponse("会话已过期"),
-      <p>受保护内容</p>,
-    );
+    const fixture = await renderAuthenticatedProvider(unauthenticatedResponse("会话已过期"));
 
     await expectProviderOwnedLoginUnauthenticates(fixture, requestedPath, "会话已过期");
   });
@@ -688,13 +684,14 @@ describe("auth transitions and lifecycle", () => {
     setBrowserPath(requestedPath);
     const fixture = await renderAuthenticatedProvider(
       jsonResponse({ error: { code: "unauthorized" } }, 401),
-      <p>受保护内容</p>,
     );
 
     await expectProviderOwnedLoginUnauthenticates(fixture, requestedPath, "请求失败，请稍后重试");
   });
 
   it("preserves an authenticated Principal after a provider-owned login 403", async () => {
+    const requestedPath = "/settings?from=provider-403#target";
+    setBrowserPath(requestedPath);
     const fixture = await renderAuthenticatedProvider(
       jsonResponse(
         { error: { code: "account_disabled", message: "该账号已停用，请联系管理员" } },
@@ -703,15 +700,21 @@ describe("auth transitions and lifecycle", () => {
     );
     const { originalPrincipal: principal } = fixture;
 
+    expect(await screen.findByText("受保护内容", { exact: true })).toBeTruthy();
+    expect(currentLocation()).toBe(requestedPath);
+
     await submitProviderLogin(fixture);
-    await waitFor(() => {
-      expect(fixture.readState()).toMatchObject({
-        error: null,
-        exposesApiClient: false,
-        status: "authenticated",
-      });
-      expect(fixture.readState()?.principal).toBe(principal);
+
+    expect(fixture.readState()).toMatchObject({
+      error: null,
+      exposesApiClient: false,
+      principal,
+      status: "authenticated",
     });
+    expect(fixture.readState()?.principal).toBe(principal);
+    expect(screen.getByText("受保护内容", { exact: true })).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeNull();
+    expect(currentLocation()).toBe(requestedPath);
   });
 
   it("aborts pending authentication and suppresses its late 401 callback after unmount", async () => {
