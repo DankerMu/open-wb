@@ -3,7 +3,12 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { openDb } from "../src/core/db/index.js";
-import { compareMigrationFilenames, readMigrationAssets } from "../src/core/db/migration-assets.js";
+import {
+  compareMigrationFilenames,
+  readMigrationAssets,
+  trackedMigrationAssets,
+} from "../src/core/db/migration-assets.js";
+import { validatedAppliedFilenames } from "../src/core/db/migration-ledger.js";
 import { runMigration } from "../src/core/db/migration-runner.js";
 import {
   createCanonicalLedger,
@@ -11,6 +16,7 @@ import {
   expectNoMigrationFoundationObjects,
   expectOpenDbFailure,
   fixtureMigration,
+  fullCatalogSnapshot,
   HISTORY_VIEW,
   ledgerFilenames,
   ledgerRows,
@@ -164,21 +170,49 @@ END`);
     });
   });
 
-  it("迁移后验抛错时回滚效果与回执", () => {
-    withDatabase(":memory:", (db) => {
+  it("真实 SQLite postflight 目录冲突回滚当前触发器和回执，同时保留已提交 0010 前缀", () => {
+    const file = join(tempDir(), "runner-postflight-conflict.db");
+    const migrations = trackedMigrationAssets();
+    const priorMigration = migrations.find((migration) => migration.filename === MIGRATION_0010);
+    const currentMigration = migrations.find((migration) => migration.filename === MIGRATION_002);
+    if (priorMigration === undefined || currentMigration === undefined) {
+      throw new Error("tracked migration foundation is incomplete");
+    }
+
+    withDatabase(file, (db) => {
       createCanonicalLedger(db);
-      const migration = fixtureMigration(
-        "postflight.sql",
-        "CREATE TABLE postflight_migration_effect (value TEXT);",
-      );
+      runMigration(db, priorMigration, () => {
+        validatedAppliedFilenames(
+          db,
+          migrations.map((migration) => migration.filename),
+        );
+      });
+      expect(ledgerRows(db)).toEqual([[1, MIGRATION_0010]]);
+      const committedPrefix = fullCatalogSnapshot(db);
 
       expect(() =>
-        runMigration(db, migration, () => {
-          throw new Error("postflight rejected catalog");
+        runMigration(db, currentMigration, () => {
+          db.exec(`CREATE TRIGGER unexpected_postflight_trigger
+BEFORE INSERT ON schema_migrations
+BEGIN
+  SELECT 1;
+END`);
+          validatedAppliedFilenames(
+            db,
+            migrations.map((migration) => migration.filename),
+          );
         }),
-      ).toThrow(/postflight rejected catalog/);
-      expect(tableExists(db, "postflight_migration_effect")).toBe(false);
-      expect(migrationReceiptExists(db, migration.filename)).toBe(false);
+      ).toThrow(/schema_migrations triggers do not match the receipt prefix/);
+
+      expect(fullCatalogSnapshot(db)).toEqual(committedPrefix);
+      expect(ledgerRows(db)).toEqual([[1, MIGRATION_0010]]);
+      expect(
+        db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'schema_migrations_no_delete'").get(),
+      ).toBeUndefined();
+      expect(
+        db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'schema_migration_history'").get(),
+      ).toBeUndefined();
+      expect(migrationReceiptExists(db, MIGRATION_002)).toBe(false);
       expect(db.isTransaction).toBe(false);
     });
   });

@@ -219,7 +219,7 @@ function validateLedgerSchema(db: DatabaseSync, inventory: readonly MasterObject
   if (
     !hasCanonicalTableProperties(db, ledger) ||
     !hasAutoincrementSequence(db) ||
-    !hasOnlyFilenameUniqueConstraint(db) ||
+    !hasOnlyCanonicalLedgerIndex(db) ||
     hasForeignKeys(db)
   ) {
     throw new Error("schema_migrations constraints do not match the canonical ledger");
@@ -311,17 +311,18 @@ function isSqliteInteger(value: unknown): value is number | bigint {
   return typeof value === "number" || typeof value === "bigint";
 }
 
-function hasOnlyFilenameUniqueConstraint(db: DatabaseSync): boolean {
+function hasOnlyCanonicalLedgerIndex(db: DatabaseSync): boolean {
   const indexes = (db.prepare(LEDGER_INDEX_LIST_PRAGMA).all() as unknown as IndexSummary[]).sort(
     (left, right) => left.seq - right.seq,
   );
-  const uniqueIndexes = indexes.filter((index) => index.unique === 1);
 
   if (
-    uniqueIndexes.length !== 1 ||
-    uniqueIndexes[0]?.origin !== "u" ||
-    uniqueIndexes[0]?.partial !== 0 ||
-    uniqueIndexes[0]?.name !== "sqlite_autoindex_schema_migrations_1"
+    indexes.length !== 1 ||
+    indexes[0]?.seq !== 0 ||
+    indexes[0]?.unique !== 1 ||
+    indexes[0]?.origin !== "u" ||
+    indexes[0]?.partial !== 0 ||
+    indexes[0]?.name !== "sqlite_autoindex_schema_migrations_1"
   ) {
     return false;
   }

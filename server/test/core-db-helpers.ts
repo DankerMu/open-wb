@@ -279,21 +279,30 @@ export function fixtureMigration(
 }
 
 export interface FullCatalogSnapshot {
-  masterObjects: ReadonlyArray<readonly [string, string, string, string | null]>;
+  masterObjects: ReadonlyArray<readonly [unknown, string, string, string, unknown, string | null]>;
   sequenceRows: ReadonlyArray<readonly [unknown, string, unknown, string]>;
 }
 
 /** sqlite_master 定义及全部 sqlite_sequence 行，用于失败前后的完整持久目录快照。 */
 export function fullCatalogSnapshot(db: DatabaseSync): FullCatalogSnapshot {
   const masterObjects = db
-    .prepare("SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name, tbl_name")
+    .prepare("SELECT rowid, type, name, tbl_name, rootpage, sql FROM sqlite_master ORDER BY rowid")
     .all()
     .map((row) => {
-      const object = row as { type: unknown; name: unknown; tbl_name: unknown; sql: unknown };
+      const object = row as {
+        rowid: unknown;
+        type: unknown;
+        name: unknown;
+        tbl_name: unknown;
+        rootpage: unknown;
+        sql: unknown;
+      };
       return [
+        object.rowid,
         String(object.type),
         String(object.name),
         String(object.tbl_name),
+        object.rootpage,
         object.sql === null ? null : String(object.sql),
       ] as const;
     });

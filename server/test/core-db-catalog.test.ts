@@ -28,6 +28,59 @@ import {
 
 afterEach(removeTempDirs);
 
+interface LedgerIndexFixture {
+  name: string;
+  statement: string;
+  indexName: string;
+  partial: number;
+  keyColumn: readonly [number, string | null];
+}
+
+function expectPersistedLedgerIndex(db: DatabaseSync, fixture: LedgerIndexFixture): void {
+  const index = db
+    .prepare("PRAGMA main.index_list('schema_migrations')")
+    .all()
+    .find((row) => (row as { name: unknown }).name === fixture.indexName) as
+    | { name: unknown; unique: unknown; origin: unknown; partial: unknown }
+    | undefined;
+
+  expect(index).toMatchObject({
+    name: fixture.indexName,
+    unique: 0,
+    origin: "c",
+    partial: fixture.partial,
+  });
+  if (index === undefined) {
+    throw new Error(`expected persisted ledger index: ${fixture.indexName}`);
+  }
+
+  const keyColumns = db
+    .prepare(`PRAGMA main.index_xinfo('${fixture.indexName}')`)
+    .all()
+    .filter((row) => (row as { key: unknown }).key === 1)
+    .map((row) => {
+      const column = row as { cid: unknown; name: unknown };
+      return [column.cid, column.name] as const;
+    });
+  expect(keyColumns).toEqual([fixture.keyColumn]);
+}
+
+function recreateReservedDefinition(
+  db: DatabaseSync,
+  objectName: string,
+  expected: string,
+  drifted: string,
+): { original: string; altered: string } {
+  const object = db
+    .prepare("SELECT type, sql FROM sqlite_master WHERE name = ?")
+    .get(objectName) as { type: string; sql: string };
+  const altered = object.sql.replace(expected, drifted);
+  expect(altered).not.toBe(object.sql);
+  db.exec(`DROP ${object.type} ${objectName}`);
+  db.exec(altered);
+  return { original: object.sql, altered };
+}
+
 function seedReservedObject(db: DatabaseSync, kind: string, name: string): void {
   db.exec("CREATE TABLE reserved_object_target (value TEXT)");
 
@@ -206,6 +259,67 @@ END`);
     withDatabase(file, expectNoBootstrapLedger);
   });
 
+  it("预置 schema_migration_history 表在 bootstrap 与迁移前失败并完整保留目录", () => {
+    const file = join(tempDir(), "history-table-conflict.db");
+    withDatabase(file, (db) => {
+      db.exec("CREATE TABLE schema_migration_history (value TEXT)");
+    });
+
+    expectFailedOpenToPreserveFullCatalog(
+      file,
+      /migration ledger reserved catalog exists before bootstrap/,
+    );
+    withDatabase(file, expectNoBootstrapLedger);
+  });
+
+  it.each<LedgerIndexFixture>([
+    {
+      name: "普通非唯一索引",
+      statement: "CREATE INDEX unexpected_filename_lookup ON schema_migrations(applied_at)",
+      indexName: "unexpected_filename_lookup",
+      partial: 0,
+      keyColumn: [2, "applied_at"],
+    },
+    {
+      name: "部分索引",
+      statement:
+        "CREATE INDEX unexpected_partial_filename_lookup ON schema_migrations(filename) WHERE sequence > 0",
+      indexName: "unexpected_partial_filename_lookup",
+      partial: 1,
+      keyColumn: [1, "filename"],
+    },
+    {
+      name: "表达式索引",
+      statement:
+        "CREATE INDEX unexpected_expression_filename_lookup ON schema_migrations(lower(filename))",
+      indexName: "unexpected_expression_filename_lookup",
+      partial: 0,
+      keyColumn: [-2, null],
+    },
+  ])("规范账本含额外$name 时在新迁移效果前失败并完整保留目录", (fixture) => {
+    const file = join(tempDir(), "unexpected-ledger-index.db");
+    withDatabase(file, (db) => {
+      createCanonicalLedger(db);
+      db.exec(fixture.statement);
+      expectPersistedLedgerIndex(db, fixture);
+    });
+
+    expectFailedOpenToPreserveFullCatalog(
+      file,
+      /schema_migrations constraints do not match the canonical ledger/,
+    );
+    withDatabase(file, (db) => {
+      expectPersistedLedgerIndex(db, fixture);
+      expect(ledgerFilenames(db)).toEqual([]);
+      expect(
+        db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'schema_migrations_no_update'").get(),
+      ).toBeUndefined();
+      expect(
+        db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'schema_migration_history'").get(),
+      ).toBeUndefined();
+    });
+  });
+
   it("无关对象允许首次和重复打开，且目录稳定", () => {
     const file = join(tempDir(), "app.db");
     withDatabase(file, (db) => {
@@ -315,13 +429,44 @@ CREATE TRIGGER unrelated_trigger AFTER INSERT ON unrelated_table BEGIN SELECT 1;
     const file = join(tempDir(), "app.db");
     withDatabase(file, (db) => {
       createValidCompletePrefix(db, "\r\n");
-      const object = db
-        .prepare("SELECT type, sql FROM sqlite_master WHERE name = ?")
-        .get(objectName) as { type: string; sql: string };
-      const alteredDefinition = object.sql.replace(expected, drifted);
-      expect(alteredDefinition).not.toBe(object.sql);
-      db.exec(`DROP ${object.type} ${objectName}`);
-      db.exec(alteredDefinition);
+      recreateReservedDefinition(db, objectName, expected, drifted);
+    });
+
+    expectFailedOpenToPreserveFullCatalog(file, /migration ledger reserved catalog does not match/);
+  });
+
+  it.each([
+    [
+      "触发器的单个 interior space",
+      "schema_migrations_no_update",
+      "SELECT RAISE(ABORT, 'UPDATE on schema_migrations is forbidden');",
+      "SELECT  RAISE(ABORT, 'UPDATE on schema_migrations is forbidden');",
+    ],
+    [
+      "视图的单个 interior tab",
+      "schema_migration_history",
+      "ORDER BY sequence",
+      "ORDER BY\tsequence",
+    ],
+  ])("规范基座的%s漂移仍被拒绝并完整保留目录", (_name, objectName, expected, drifted) => {
+    const canonicalSourceFile = join(tempDir(), "canonical-definition-source.db");
+    const canonicalDefinition = withOpenDb(canonicalSourceFile, (db) => {
+      return (
+        db.prepare("SELECT sql FROM sqlite_master WHERE name = ?").get(objectName) as {
+          sql: string;
+        }
+      ).sql;
+    });
+    const file = join(tempDir(), "whitespace-definition-drift.db");
+    withDatabase(file, (db) => {
+      createValidCompletePrefix(db);
+      const definition = recreateReservedDefinition(db, objectName, expected, drifted);
+      const storedDefinition = db
+        .prepare("SELECT sql FROM sqlite_master WHERE name = ?")
+        .get(objectName) as { sql: string };
+      expect(definition.original).toBe(canonicalDefinition);
+      expect(storedDefinition.sql).toBe(definition.altered);
+      expect(storedDefinition.sql).not.toBe(canonicalDefinition);
     });
 
     expectFailedOpenToPreserveFullCatalog(file, /migration ledger reserved catalog does not match/);
