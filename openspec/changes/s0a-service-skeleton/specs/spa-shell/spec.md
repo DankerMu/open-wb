@@ -25,7 +25,7 @@ SPA SHALL 以 history 路由提供 `/`、`/files`、`/center`、`/settings` 四�
 - THEN 会话失效（logout 端点被调）并回到登录页
 
 ### Requirement: 登录页与路由守卫
-未登录时任意路由 SHALL 渲染登录页（域账号+密码）并记录原目标路由；登录失败 SHALL 展示错误信封的 message 字段文案；登录成功 SHALL 跳回原目标。`lib/api` SHALL 统一解析错误信封并在 401 时进入未登录态。
+未登录时任一受支持 SPA 路由（本阶段为 `/`、`/files`、`/center`、`/settings`）SHALL 在保持当前 browser URL 不变的情况下渲染登录页（域账号+密码），该 URL 即原目标路由；登录失败 SHALL 展示错误信封的 message 字段文案；登录成功 SHALL 在同一 URL 恢复原目标壳。`lib/api` SHALL 统一解析错误信封并在任何 401 响应时进入未登录态。
 
 #### Scenario: 未登录重定向
 - WHEN 未登录直接访问 `/files`

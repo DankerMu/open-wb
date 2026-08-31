@@ -58,7 +58,7 @@ Minimal mergeable slice: 2.1 迁移+seed 单独可合并保绿（依赖 1.1 已�
 - [x] 3.0 web 构建工具链：vite + @vitejs/plugin-react + react/react-dom + @types/react/@types/react-dom + jsdom + @testing-library/react 依赖声明、`web/index.html`、`src/main.tsx` 最小入口及配对 `web/test/main.test.tsx`（Testing Library 在 `#root` 装载入口）、`vite.config.ts`（outDir=dist）、`tsconfig.base.json` 增 `jsx: react-jsx`、`web/vitest.config.ts` 覆写 jsdom 环境、`web/package.json` 增 build 脚本；验证 = jsdom 入口测试 + `make typecheck` + `npm run build --workspace web` 产出 dist + `make check` 全绿（knip vite 插件自动解析入口，依赖均由入口/配置/测试实际消费）
 - [x] 3.1 `lib/theme` 扩 system 模式：可注入 matchMedia、默认档 system（demo:1035）、未知值/存储不可用回退 system（修正现有回退 light 语义）+ 扩展既有 `web/test/theme.test.ts`
 - [x] 3.2 路由壳：react-router 四路由 + 侧栏（demo:1773-1778 标签/副标题）+ 占位壳（/center 扁平，/tokens 不移植）+ jsdom 可达性断言
-- [ ] 3.3 `lib/api` + 登录页与路由守卫：fetch 封装（信封解析、401 进未登录态）、未登录任意路由渲染登录页并记录原目标、登录成功跳回、错误 message 展示 + jsdom 断言（未登录访问 /files 渲染登录页、登录后落 /files）
+- [x] 3.3 `lib/api` + 登录页与路由守卫：fetch 封装（信封解析、401 进未登录态）、未登录任意路由渲染登录页并记录原目标、登录成功跳回、错误 message 展示 + jsdom 断言（未登录访问 /files 渲染登录页、登录后落 /files）
 - [ ] 3.4 设置页与用户页脚：外观卡（三档 seg + 当前生效行）、关于卡（/api/info 版本）、侧栏页脚（用户名/角色 + 退出登录带确认）+ jsdom 断言
 
 Suggested fixture level: compact - UI 组件测试经 vitest+jsdom；端到端交给 ui-walk，不重复抬档
@@ -112,3 +112,21 @@ Minimal mergeable slice: 4.1 smoke 单独可合并保绿（依赖 1.3 启动命�
 - [x] focused `theme.test.ts`、`make typecheck`、web build、`make check` 与 focused knip 全绿；coverage include/阈值不收窄，无新依赖。
 - [x] 保持 router/main 真实入口测试、theme 以外 web 文件、server、kbservice 和构建配置不变。
 - OpenSpec archive: **deferred with reason** — stage change 尚有其他 S0a 子任务；本 PR 仅勾选 3.1 与本节证据，全部完成后统一归档。
+
+## Issue #14 required evidence
+
+- Fixture level: expanded；repair intensity: high；权威 requirements = `spa-shell`“登录页与路由守卫”+ `http-service-skeleton` 错误信封 + `dev-stub-auth` login/me Principal contract。
+- [x] TDD/red-proof：先添加 `lib/api` unit 与 production router/auth/login jsdom 测试，在 pre-change source 上因模块/guard/UI 缺失而红；只 mock fetch 网络边界，不 mock API client/router/auth provider/login SUT，不留 red-proof stash。
+- [x] API success schema：login/me 200 body 仅接受恰 `{id:string,account:string,role:string}`；缺失、额外、非 string、null/array 均为稳定前端错误，不产生 Principal。
+- [x] API error schema：非 2xx 的合法 `{error:{code,message}}` 生成 `ApiError` 并保留 status/code/message；非 JSON、畸形/额外字段 envelope、2xx malformed JSON 与 fetch reject 映射 `请求失败，请稍后重试`，不得显示原始 body/stack。
+- [x] Request contract：`GET /api/auth/me` 和 `POST /api/auth/login` 都使用 relative path + `credentials:"same-origin"`；login 精确 JSON body `{account,password}` 与 content-type；不记录/持久化密码/token/cookie。
+- [x] Initial state matrix（真实 production router）：四个受支持 path 各自 me 401→保持同一 `location.pathname/search/hash` 并渲染 `登录 WorkBuddy`；loading 期间不渲染 shell 或 login（可访问 loading status）。
+- [x] Authenticated me：`/files` me 200 Principal→工作空间壳/唯一 active；`/center` canonical/trailing-slash existing behavior仍成立；login 不显示。
+- [x] Login success：在未登录 `/files` 提交账号/密码→单次 POST、按钮提交中禁用、200 Principal 后仍在 `/files` 并显示工作空间壳；不新增 `/login` 或 returnUrl。
+- [x] Login failure：403 account_disabled 逐字显示 `该账号已停用，请联系管理员`；401 invalid_credentials 显示服务端 message；失败后账号保留、密码清空、按钮恢复可重试、受保护壳不闪现。
+- [x] Any-401 transition：已认证状态下 API client 收到 401 时通过单一 unauthorized callback 清 Principal 并在当前 route 显示 login；非 401 错误不得错误清除现有 Principal。
+- [x] Concurrency/lifecycle：同一 login form double submit 只产生一条请求；app dispose/unmount 后 pending me/login resolve 不更新状态或报 React warning；新 mount 不继承旧 Principal/error/password。
+- [x] Boundary inventory：一个 Principal/envelope validator、一个 auth state owner、一个 guard composition seam；#15 可消费 Principal/logout 而无需复制状态或重写四 route manifest。
+- [x] focused api/auth/login tests、`npm ci`、`make typecheck`、web build、`make check`、focused knip 全绿；coverage include/阈值不收窄，无新依赖。
+- [x] 保持 theme、server/kbservice、四 route/sidebars/canonicalization/main dispose 与非目标范围不变；真实 HTTP/UI walk 继续由 #16/#17 验收。
+- OpenSpec archive: **deferred with reason** — stage change 尚有 server/auth、settings、harness 等任务；本 PR 仅勾选 3.3 与本节证据，阶段全部完成后统一归档。
