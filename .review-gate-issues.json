@@ -1,11 +1,27 @@
 {
   "issues": {
+    "5": {
+      "ceilingPrs": [],
+      "gateEntries": 4,
+      "closed": []
+    },
     "11": {
       "ceilingPrs": [],
       "gateEntries": 0,
       "closed": [
         {
           "pr": 21,
+          "outcome": "merged",
+          "rounds": 1
+        }
+      ]
+    },
+    "12": {
+      "ceilingPrs": [],
+      "gateEntries": 0,
+      "closed": [
+        {
+          "pr": 27,
           "outcome": "merged",
           "rounds": 1
         }
@@ -19,17 +35,6 @@
           "pr": 25,
           "outcome": "merged",
           "rounds": 2
-        }
-      ]
-    },
-    "12": {
-      "ceilingPrs": [],
-      "gateEntries": 0,
-      "closed": [
-        {
-          "pr": 27,
-          "outcome": "merged",
-          "rounds": 1
         }
       ]
     }
