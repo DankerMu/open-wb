@@ -1,7 +1,32 @@
-/** 主题标识：与 demo 的 data-wb-theme 约定一致，SPA 落地时由根元素消费。 */
-export type Theme = "light" | "dark";
+export type Theme = "light" | "dark" | "system";
+export type ResolvedTheme = "light" | "dark";
+export type ReadStoredTheme = () => string | null;
+export type MatchMedia = (query: string) => { matches: boolean };
 
-/** 归一化用户输入/存储值；未知值回退 light，与 demo 行为一致。 */
 export function normalizeTheme(value: string | null): Theme {
-  return value === "dark" ? "dark" : "light";
+  if (value === "light" || value === "dark" || value === "system") {
+    return value;
+  }
+
+  return "system";
+}
+
+export function loadTheme(readStoredTheme?: ReadStoredTheme): Theme {
+  if (!readStoredTheme) {
+    return "system";
+  }
+
+  try {
+    return normalizeTheme(readStoredTheme());
+  } catch {
+    return "system";
+  }
+}
+
+export function resolveTheme(theme: Theme, matchMedia: MatchMedia): ResolvedTheme {
+  if (theme !== "system") {
+    return theme;
+  }
+
+  return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }

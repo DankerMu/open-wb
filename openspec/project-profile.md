@@ -1,48 +1,55 @@
-# Project Profile: open-workbuddy
+# open-workbuddy Project Profile
 
-Profile base: Generic, specialized for a Node/TypeScript app-server, React SPA, and Python kb-service. This is a living Phase 0.5 artifact.
+> Living artifact；项目新增风险面或验证命令时在 Phase 0.5 更新。
 
-## Entry surfaces
-- app-server: Fastify assembly, REST routes, startup CLI, static SPA fallback.
-- web: Vite browser entry, route shell, API client, Playwright walk.
-- kb-service: Python package and future HTTP API.
-- operator: Make targets, GitHub Actions, hurl smoke.
+**Project profile:** Generic（TypeScript Web 服务 + Python 知识库，多子系统）
 
-## Contracts
-- HTTP errors use one JSON envelope; server/web/smoke must agree on fields and status semantics.
-- SQLite migrations and persisted auth/session rows must remain deterministic and backward-compatible.
-- Module imports follow `http -> feature -> core`; services share only network contracts.
-- Sandbox, credentials, tenant isolation, and audit invariants come from `AGENTS.md` and `CONTEXT.md`.
+**Entry surfaces**
+- app-server：Fastify plugin 装配、REST、唯一 listen 入口、SQLite、模型代理与 omp 子进程边界。
+- web：Vite 浏览器入口、history 路由、API 客户端与登录态/主题持久化。
+- kbservice：HTTP 检索/摄取入口；跨服务只走网络契约。
+- operator：Make 目标、GitHub Actions、hurl smoke 与 Playwright UI 走查。
 
-## Risk axes
-- Public HTTP/CLI behavior, auth/session state, SQLite schema/migrations, static/file paths.
-- Process lifecycle, async ordering, persisted/shared state, and server/web contract drift.
-- Credentials and private deployment data must not enter source, logs, artifacts, or child environments.
+**Contracts**
+- REST 错误信封、session cookie、workspace/KB 网络契约与 SQLite migration receipt/schema。
+- 浏览器路由 IA、主题存储值、构建产物 `web/dist`；`app-reference/` 永不进产物。
+- 模块依赖遵循 `http -> feature -> core`；沙箱、凭证、租户与审计不变量以 `AGENTS.md`/`CONTEXT.md` 为准。
 
-## Typical evidence
-- Fastify `app.inject()` and direct public-seam Vitest tests with real in-memory/temp SQLite.
-- Real process plus hurl for HTTP; Playwright plus zero browser-console errors for UI.
-- Schema/version queries, negative auth cases, compatibility assertions, and full repository gates.
+**Risk axes**
+- 账号隔离、共享 KB 只读、沙箱越界审计、omp 环境零服务凭证。
+- SQLite schema/迁移/hidden catalog state、文件路径、进程生命周期与共享状态顺序。
+- SPA 深链/fallback、登录态回跳、浏览器持久化与 server/web 契约漂移。
+- Node/Python workspace 工具链、覆盖率/死代码/重复代码门禁兼容。
 
-## Command entry points
-- Setup: `make setup`; full gate: `make check`; guard self-test: `make test-guardrails`.
-- Focused: `npm test --workspace server`, `npm test --workspace web`, `cd kbservice && uv run pytest`.
-- Static/type/drift: `make lint`, `make typecheck`, `make anti-drift`.
+**Typical evidence**
+- Fastify `app.inject()`；公共 seam Vitest + 真实内存/临时 SQLite；失败、回滚、重开与未改消费者回归。
+- 固定 web 构建输出、jsdom 组件/路由断言、真实 HTTP smoke、Chromium UI 走查与零新增 console error。
+- 全仓 lint/typecheck/test/knip/jscpd/guard，以及 schema/version/权限负向断言。
 
-## Verification matrix
-- TypeScript source/tests/config -> `make lint && make typecheck` -> exit 0.
-- Server behavior/SQLite/HTTP -> `npm test --workspace server` -> exit 0 and server coverage >=80%.
-- Web behavior -> `npm test --workspace web` -> exit 0 and web coverage >=80%.
-- Python behavior -> `cd kbservice && uv run pytest` -> exit 0 and coverage >=80%.
-- Cross-repository compatibility -> `make check` -> exit 0.
-- Guard/control-plane changes -> `make test-guardrails` plus the affected Make/CI command -> all PASS.
-- HTTP runtime or static fallback -> `make smoke` once available; until then review plus `app.inject()` evidence.
-- Browser UI -> `make ui-walk` once available; until then review plus Vitest/jsdom evidence.
+**Command entry points**
+- setup=`make setup`; lint=`make lint`; typecheck=`make typecheck`; test=`make test`。
+- drift=`make anti-drift`; full=`make check`; guardrails=`make test-guardrails`。
+- server-test=`npm test --workspace server`; web-test=`npm test --workspace web`。
+- web-build=`npm run build --workspace web`；kb-test=`cd kbservice && uv run pytest`。
 
-## Domain risk packs
-- Tenant/sandbox isolation; auth/session lifecycle; process and child-environment isolation.
-- Server/web HTTP-envelope compatibility; SQLite migration/seed compatibility; offline deployability.
+**Verification matrix**
+- Web 构建/入口 -> `npm run build --workspace web` -> 退出码 0，`web/dist/index.html` 与静态资源存在。
+- TS/Python 静态与类型 -> `make lint && make typecheck` -> 退出码 0。
+- Server/SQLite/HTTP seam -> `npm test --workspace server` -> 退出码 0，coverage ≥80%。
+- Web 行为 -> `npm test --workspace web` -> 退出码 0，coverage ≥80%。
+- Python 行为 -> `cd kbservice && uv run pytest` -> 退出码 0，coverage ≥80%。
+- 死代码/重复/命名/行数 -> `make anti-drift` -> 退出码 0。
+- 默认全链 -> `make check` -> 退出码 0。
+- 守卫机制 -> `make test-guardrails` -> 每条注入违例均 PASS。
+- HTTP/UI 运行时 -> 当前无命令（AGENTS.md READINESS GAP）-> 改动仅评审；S0a harness 落地时更新。
 
-## Domain expanded triggers
-- Fastify assembly/routes/hooks, session cookies/TTL, SQLite migrations/seed, sandbox or static paths.
-- Process spawn/listen/shutdown, cross-service contracts, smoke/UI harness, CI/production configuration.
+**Domain risk packs**
+- Tenant/sandbox isolation；auth/session lifecycle；process/child-environment isolation。
+- SQLite migration/catalog compatibility；server/web HTTP-envelope compatibility；offline deployability。
+- Browser runtime/navigation/persistence：深链、当前路由、登录回跳、存储失败、console error。
+- Cross-service boundary：网络契约、无公网依赖、凭证不跨进程泄漏。
+
+**Domain expanded-triggers**
+- Fastify assembly/routes/hooks、session cookies/TTL、SQLite migrations/seed、sandbox/static paths。
+- `createBrowserRouter`、history fallback、route guard、browser storage、Playwright、service composition。
+- Process spawn/listen/shutdown、cross-service contracts、smoke/UI harness、CI/production configuration。
