@@ -265,6 +265,72 @@ Boundary-surface checklist:
 - Browser runtime / navigation / persistence: **selected** — same-URL guard, original-route restore, loading/no flash, no browser credential storage。
 - Cross-service boundary / offline runtime: **selected** — relative same-origin endpoints and cookie credentials；mock fetch locked to server spec, no公网 endpoint。
 
+## Issue delivery fixture: #15 设置页与侧栏用户页脚
+
+- **Issue type / profile:** feature；Generic（open-workbuddy project profile）。
+- **Blast radius / fixture / repair:** high；expanded；high。
+- **Upstream suggested level:** compact — override：browser storage/system listener/cross-tab shared state、strict `/api/info` schema、Provider-owned logout 与 auth transition/cancellation 均命中 expanded/high 触发器。
+- **Minimal mergeable slice:** atomic — 全局主题 owner、设置两卡、ServiceInfo consumer 与侧栏 logout 共用现有 router/AuthProvider/API 状态边界，拆开会留下死导出、无消费者 contract 或重复状态 owner。
+- **Dependencies:** #12 与 #14 已合并；server `/api/info` 与 `/api/auth/logout` 的实现仍分别属于共享任务 1.2/2.3，本 issue 只实现 Web consumer，并以本 change 的 exact contract 绑定 fetch mock。
+- **Change surface:** `lib/theme` browser adapter + 单一 ThemeProvider；strict API client 的 info/logout；既有 AuthProvider operation coordinator；settings feature；现有 router shell/sidebar；新的 jsdom/API/theme tests。`auth-router.test.tsx` 已恰好 800 行，不追加 #15 case。
+- **Must preserve:** #14 latest-operation/signal authority、any-current-401、non-401 Principal preservation、same-location guard、canonicalization/Provider retention、四 route/唯一 current link、main dispose；#12 pure normalize/load/resolve seams；server/kbservice 与 coverage/Knip/size/CI 门禁。
+- **Must add — theme owner:** production storage key 恰为 `workbuddy-theme`，持久值恰为 `light|dark|system`。唯一 ThemeProvider 初始化时安全读取 storage（缺失/unknown/throw→system），解析后写 `document.documentElement.dataset.theme`；同 tab 选择先更新内存/DOM，再 best-effort 写 storage，写失败不回滚内存选择且不抛 UI error。module import 不读 browser globals；缺失 `window`/`document`/`matchMedia`/storage 时稳定以 system+light fallback 工作。
+- **Theme subscriptions:** system 只使用 `(prefers-color-scheme: dark)`；system 档的 media change 实时更新 resolved/DOM/当前生效行但不改 stored `system`，固定档忽略系统变化。`storage` 事件只消费 exact key；有效值同步，null/unknown→system，其他 key 忽略；remote event 不回写 storage。owner unmount 移除 media/storage listeners。为避免两套初始化规则，不新增 inline `index.html` theme script；pre-React first-paint styling 属 #17 真实浏览器观察面，本 PR 只保证首次 React commit 前的 layout effect 应用。
+- **Theme UI:** `/settings` 仍使用既有 route/handle，渲染页面标题 `设置` 与且仅两张带 `h2` 的卡 `外观`/`关于`，无 `通用` 卡。外观卡有名为 `主题` 的单选组，逐字选项 `浅色`/`深色`/`跟随系统`；当前行恰为 `当前生效：浅色|深色`，消费唯一 ThemeContext，不直接读写 globals/storage。
+- **ServiceInfo contract:** `GET /api/info` 使用 relative path、GET、`credentials:"same-origin"`、`cache:"no-store"` 与 operation signal；200 只接受 exact plain JSON `{name:string,version:string}`，name 非空，version 按服务端现有 regex `^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$`。关于卡逐字显示返回 name 与 `版本 <version>`，loading=`正在读取服务信息`；合法非 401 envelope 显示 message，malformed/non-JSON/network 显示稳定 fallback，不用 demo name/version 伪造成功。
+- **Provider-owned info:** AuthContext 暴露窄 `loadServiceInfo(callerSignal) → Promise<ServiceInfo | null>` operation，不暴露 raw ApiClient。About mount 创建 lifecycle AbortController，cleanup（包括 `/settings` route element 离开）只 abort `callerSignal`；Provider 不订阅 router/location。Provider 启动自己的 operation controller：callerSignal 已 aborted 时立即 abort，否则注册一次性 abort listener，把 caller abort 单向链接到 operation controller；fetch 只接收该 operation controller 的 signal。任一 caller abort、更新 Provider operation、About cleanup 或 app unmount 都使同一个可观察 request signal aborted；`finally` 移除 caller listener。aborted/stale/current-401 均返回 null；caller cleanup 后 About 已 inactive，不写任何 state；current 401 最终卸载 About。若 operation 被 sibling operation supersede、其结果为 null但 logout/login 非 401 失败使 authenticated settings 仍 mounted，active About SHALL 结束 loading 并显示 stable fallback，而非永久 spinner。非 stale non-401 API error 向 About reject，由其显示。current 401 仍只经一个 callback 清 Principal；non-401 info error 不改 auth state。
+- **Logout API/UI:** API client `POST /api/auth/logout` 无 body/content-type，带 same-origin credentials 与 operation signal。logout 使用专用 empty-success mode：fetch 返回后先检查 `status===204` 并直接成功，绝不调用 `response.json()`/`text()`；HTTP 204 的 body 由 server contract 禁止，browser client 按 status 接受并忽略不可用 body。其他状态进入共享 JSON/error-envelope core；任何其他 2xx（含 200/205）最终均为 stable `request_failed`。AuthContext 暴露窄 `logout() → Promise<boolean>`，共享同一 operationRef，单次只允许一个 logout；启动 logout abort pending session/login/info。204 或 current 401（含 malformed/non-JSON 401）都以 `true` 终止为 unauthenticated、Principal/login `error`/`logoutError` null。`logoutError` 是 AuthState/AuthContext 的独立 authenticated-scope 字段：LoginForm 只读既有 `error`，footer 只读 `logoutError`；任一 auth terminal transition清 `logoutError`，新 logout 开始也先清它。非 401 envelope/network/非204 success 以 `false` 保留 exact Principal/shell/location、保持 login `error` 为 null，并只把合法 message 或 stable fallback 写入 `logoutError`，后续 retry 清旧值。
+- **Footer/confirm:** 已认证侧栏 footer 直接显示 Principal `account`/`role` 原字节（不发明 name/dept/本地化映射）与 `退出登录`。单用途 inline `alertdialog`（不抽象通用 modal/portal）逐字使用标题 `退出登录？`、说明 `退出后本机不再保留登录状态，未完成的任务会保留在你的沙箱中。`、按钮 `取消`/`退出`。取消零请求；确认 pending 时禁用重复动作，terminal 后关闭；204/current 401 在原 pathname/search/hash 显示登录，failure 回 footer alert 并可重试。
+- **Seams under test:** pure theme helpers + injected browser environment；真实 ThemeProvider/settings/router；真实 AuthProvider/Guard/footer/confirm；mock 仅 localStorage/matchMedia/browser event 与 fetch network boundary。API unit 严格断言 info/logout request/response branches；#15 新建测试文件承载 Provider/logout/settings 生命周期，不扩 800 行旧文件。
+- **Selected risk packs:** Public API / CLI / script entry；Schema / field names；Auth / permissions / secrets；Concurrency / shared state / ordering；Legacy compatibility / examples；Error handling / rollback / partial outputs；Browser runtime / navigation / persistence；Cross-service boundary / offline runtime。
+- **Non-goals:** server endpoint implementation、通用 modal library、demo 沙箱/账号/切换账号菜单、display name/dept/avatar、theme toast/topbar toggle、CSS/视觉定稿、首屏截图与真实 browser cookie/storage/autofill（#17）、CSRF/OIDC/audit、unknown-route 404、依赖/config/CI 改动。
+
+### Invariant Matrix for #15
+
+- **Governing invariant:** 主题 UI/DOM 只由归一化的当前 theme 选择与当前 system preference 决定；认证/API UI 只由 exact network contract 与最新获授权 Provider operation 决定，旧/取消/卸载工作不得覆盖更新状态。
+- **Source-of-truth identity/contract:** theme key `workbuddy-theme` + enum `light|dark|system` + resolved `light|dark`；direct Principal；exact ServiceInfo `{name,version}`；logout 204/current-401 terminal；operation controller signal。
+- **Producers:** localStorage/system media/storage events；server info/logout responses（本 PR contract-bound fetch mock）；当前 Principal 来自 #14 me/login。
+- **Validators/preflight:** existing normalize/load/resolve theme pure seams；one ThemeProvider adapter；one ServiceInfo validator + existing envelope helper；confirm before logout。
+- **Storage/cache/query:** localStorage 只存 selected theme；DOM `data-theme` 只存 resolved theme；info GET no-store；Principal/auth error 只在 AuthProvider memory。
+- **Public routes/entrypoints:** existing four-route `createAppRouter`/real main；ThemeProvider 是 `ProtectedAppShell` 内最外层 owner，初始 canonical Navigate 期间也保持 mounted，并包住后续 AuthProvider/login/shell；#14 的 AuthProvider 仍只在 canonical location 后启动。`/settings` 替换 placeholder 而不增 route；sidebar footer 仅在 authenticated shell。
+- **Frontend/downstream consumers:** appearance card consumes ThemeContext；About consumes Provider-owned info operation and owns only its caller lifecycle controller/local display error；footer consumes Principal/logoutError/logout；LoginForm alone consumes login error；Guard consumes auth state。
+- **Failure/rollback/stale state:** storage read/write/global absence stable；system/storage listener cleanup；About cleanup caller-abort linked to info operation；info stale/401；logout cancel/double submit/204/401/non401/network/unmount；newer operation aborts predecessor；login error 与 logoutError 不串台。
+- **Evidence/audit/readiness:** API/theme units + production router/Provider/settings/footer jsdom；mutation-capable exact branch tests；build/type/full check/strict OpenSpec/CI；real UI deferred #17。
+- **Regression rows:**
+  - no/unknown/throwing storage + system dark → selected system, resolved dark, `data-theme=dark`, no thrown UI error；write throw + choose light → memory/DOM light while stored value unchanged。
+  - selected system + media dark→light → current line/data-theme update, persisted `system` unchanged；fixed dark + same media event → remains dark；unmount → both listeners removed。
+  - storage event exact key dark/null/unknown → dark/system/system; other key → no change; event does not call writer。
+  - `/settings` + valid info → exact two cards, account/role footer, returned name/version；malformed/network → stable alert, Principal/shell retained；current info 401 → login at same location。
+  - cancel logout → zero POST/auth change；confirm + 204 or current 401 → one POST, Principal cleared/login same location；403/network/malformed success → exact Principal retained, footer alert, retry admitted。
+  - pending info + About route-element cleanup/logout/app dispose → caller abort 或 operation supersession 使传给 fetch 的 operation signal aborted，listener 被移除，late response 不能写 state/console warning；AuthProvider 不订阅 location。若 superseding logout 非 401 失败且 settings 留存，About 结束 loading并显示 stable fallback，Principal 与独立 logoutError 同时按各自 contract 保留。
+  - unchanged `/files`/`/center` route, canonical variants, login transitions, theme pure tests, main dispose, server/kbservice → prior behavior green。
+
+### Boundary-surface checklist for #15
+
+- **Shared helper roots:** `lib/theme` + ThemeProvider；`lib/api` validators/request core；AuthProvider operationRef。
+- **Public entrypoints:** existing `createAppRouter`/main only；no new route, raw client or package entry。
+- **Read surfaces:** localStorage/system/storage event；info/logout HTTP response；Principal context。
+- **Write/delete/overwrite:** one theme key + root `data-theme`；logout server side effect；in-memory auth/about state。
+- **Producer/consumer evidence boundary:** browser adapter → ThemeContext → settings；server spec → API validator → Provider operation → about/footer/Guard。
+- **Stale/idempotency:** event listener ownership；cross-tab no echo；single logout；About caller signal→Provider operation controller 单向 abort linkage/cleanup；latest operation identity；独立 login error/logoutError ownership。
+- **Unchanged downstream consumers:** login form/AuthGuard, route manifest/nav/canonicalization, main dispose, theme pure callers, server/kbservice。
+
+### Risk packs considered for #15
+
+- Public API / CLI / script entry: **selected** — AuthContext 增窄 info/logout operations，settings route element/footer 改用户入口；真实 production router seam 验收。
+- Config / project setup: **not selected** — 无依赖、构建、tsconfig、CI 或环境配置变化。
+- File IO / path safety / overwrite: **not selected** — 无文件/用户路径；localStorage 是固定单 key browser persistence，由 browser pack 覆盖。
+- Schema / columns / units / field names: **selected** — ServiceInfo exact keys/semver、204 empty body、theme enum/key、Principal account/role；malformed/extra/missing matrix。
+- Auth / permissions / secrets: **selected** — logout 会话失效与 current 401；不暴露 raw client/cookie/token，不记录 Principal 之外字段。
+- Concurrency / shared state / ordering: **selected** — theme media/storage events、cross-tab、info/logout/session/login operation supersession、double submit、unmount cancellation。
+- Resource limits / large input / discovery: **not selected** — 固定三档、两卡、两个 endpoint，无 unbounded input/discovery。
+- Legacy compatibility / examples: **selected** — #12/#14 public seams、四 route/sidebar/main、server/kbservice 保持兼容；demo 只取明确行为不复制 mock 身份字段。
+- Error handling / rollback / partial outputs: **selected** — storage/global failure、info malformed/network/401、logout 204/401/non401/network；错误不泄漏且失败保 Principal。
+- Release / packaging / dependency compatibility: **not selected** — platform fetch/storage/matchMedia/React only，无新依赖/产物 contract。
+- Documentation / migration notes: **not selected** — production storage key 为新值，无存量迁移；OpenSpec 即共享 contract。
+- Browser runtime / navigation / persistence: **selected** — data-theme、localStorage、system/storage listeners、route leave、same-location logout 与 UI 交互。
+- Cross-service boundary / offline runtime: **selected** — `/api/info` 与 `/api/auth/logout` exact contract、same-origin credentials/no-store、无公网依赖。
+
 ## Open Questions
 
-（无——三分支已 grill 拍板，其余为实现细节。）
+（无——三分支已 grill 拍板；#15 的 storage/info/logout/确认语义已在本 fixture 闭合，其余为实现细节。）

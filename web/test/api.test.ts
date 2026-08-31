@@ -1,38 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, createApiClient } from "../src/lib/api.js";
-
-const principal = {
-  id: "user-1",
-  account: "zhangsan",
-  role: "member",
-};
-
-function jsonResponse(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
-async function captureApiError(request: Promise<unknown>): Promise<ApiError> {
-  return request.then(
-    () => {
-      throw new Error("expected the API request to reject");
-    },
-    (error: unknown) => {
-      expect(error).toBeInstanceOf(ApiError);
-      return error as ApiError;
-    },
-  );
-}
-
-function expectRequestFailure(error: ApiError, status: number) {
-  expect(error).toMatchObject({
-    status,
-    code: "request_failed",
-    message: "请求失败，请稍后重试",
-  });
-}
+import { createApiClient } from "../src/lib/api.js";
+import {
+  captureApiError,
+  expectRequestFailure,
+  jsonResponse,
+  authenticatedPrincipal as principal,
+} from "./support.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();

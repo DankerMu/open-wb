@@ -197,7 +197,6 @@ async function expectOnlyLoading() {
   expect(screen.queryByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeNull();
   expect(screen.queryByRole("complementary", { name: "侧栏" })).toBeNull();
 }
-
 function expectMeRequest(fetchMock: ReturnType<typeof vi.fn>, callIndex = 1) {
   expect(fetchMock).toHaveBeenNthCalledWith(callIndex, "/api/auth/me", {
     method: "GET",
@@ -208,7 +207,8 @@ function expectMeRequest(fetchMock: ReturnType<typeof vi.fn>, callIndex = 1) {
 }
 
 function expectProviderLoginRequest(fetchMock: ReturnType<typeof vi.fn>) {
-  expect(fetchMock).toHaveBeenLastCalledWith("/api/auth/login", {
+  const callIndex = fetchMock.mock.calls.findLastIndex(([path]) => path === "/api/auth/login") + 1;
+  expect(fetchMock).toHaveBeenNthCalledWith(callIndex, "/api/auth/login", {
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
@@ -370,7 +370,6 @@ describe("route guard initial authentication", () => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
     },
   );
-
   it("renders the authenticated files shell with one current navigation link", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(principal));
     vi.stubGlobal("fetch", fetchMock);
@@ -391,7 +390,8 @@ describe("route guard initial authentication", () => {
           meLocations.push(currentLocation());
           return Promise.resolve(unauthenticatedResponse());
         })
-        .mockResolvedValueOnce(jsonResponse(principal));
+        .mockResolvedValueOnce(jsonResponse(principal))
+        .mockResolvedValueOnce(jsonResponse({ name: "workbuddy-app-server", version: "0.0.0" }));
       vi.stubGlobal("fetch", fetchMock);
 
       renderApp(initialPath);
@@ -406,7 +406,7 @@ describe("route guard initial authentication", () => {
 
       await expectAuthenticatedShell(title, currentLabel);
       expect(currentLocation()).toBe(canonicalPath);
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenCalledTimes(title === "设置" ? 3 : 2);
       expectProviderLoginRequest(fetchMock);
     },
   );

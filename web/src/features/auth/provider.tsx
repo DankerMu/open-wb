@@ -17,15 +17,17 @@ import {
   type LoginCredentials,
   type Principal,
   REQUEST_FAILED_MESSAGE,
+  type ServiceInfo,
 } from "../../lib/api.js";
 
 type AuthStatus = "loading" | "authenticated" | "unauthenticated";
-type AuthOperationKind = "login" | "session";
+type AuthOperationKind = "info" | "login" | "logout" | "session";
 
 type AuthState = {
   status: AuthStatus;
   principal: Principal | null;
   error: string | null;
+  logoutError: string | null;
 };
 
 type SetAuthState = Dispatch<SetStateAction<AuthState>>;
@@ -33,6 +35,7 @@ type SetAuthState = Dispatch<SetStateAction<AuthState>>;
 type AuthOperation = {
   controller: AbortController;
   kind: AuthOperationKind;
+  removeCallerAbortListener?: () => void;
   unauthorized: boolean;
 };
 
@@ -41,13 +44,16 @@ type AuthOperationRef = {
 };
 
 export type AuthContextValue = AuthState & {
+  loadServiceInfo(callerSignal: AbortSignal): Promise<ServiceInfo | null>;
   login(credentials: LoginCredentials): Promise<boolean>;
+  logout(): Promise<boolean>;
 };
 
 const initialAuthState: AuthState = {
   status: "loading",
   principal: null,
   error: null,
+  logoutError: null,
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -64,8 +70,17 @@ function isCurrentOperation(
   return mounted && !operation.controller.signal.aborted && operation === currentOperation;
 }
 
+function removeCallerAbortListener(operation: AuthOperation) {
+  operation.removeCallerAbortListener?.();
+  delete operation.removeCallerAbortListener;
+}
+
 function startOperation(operationRef: AuthOperationRef, kind: AuthOperationKind): AuthOperation {
-  operationRef.current?.controller.abort();
+  const previousOperation = operationRef.current;
+  previousOperation?.controller.abort();
+  if (previousOperation) {
+    removeCallerAbortListener(previousOperation);
+  }
 
   const operation: AuthOperation = {
     controller: new AbortController(),
@@ -76,12 +91,33 @@ function startOperation(operationRef: AuthOperationRef, kind: AuthOperationKind)
   return operation;
 }
 
+function finishOperation(operationRef: AuthOperationRef, operation: AuthOperation) {
+  removeCallerAbortListener(operation);
+  if (operationRef.current === operation) {
+    operationRef.current = null;
+  }
+}
+
+function cleanUnauthenticatedState(): AuthState {
+  return {
+    status: "unauthenticated",
+    principal: null,
+    error: null,
+    logoutError: null,
+  };
+}
+
 function unauthenticatedState(error: unknown): AuthState {
   return {
     status: "unauthenticated",
     principal: null,
     error: isApiError(error) ? error.message : REQUEST_FAILED_MESSAGE,
+    logoutError: null,
   };
+}
+
+function errorMessage(error: unknown) {
+  return isApiError(error) ? error.message : REQUEST_FAILED_MESSAGE;
 }
 
 function isRequestFailure(error: unknown) {
@@ -108,7 +144,7 @@ function useApiClient(
         }
 
         operation.unauthorized = true;
-        setState({ status: "unauthenticated", principal: null, error: null });
+        setState(cleanUnauthenticatedState());
       },
     });
   }
@@ -132,21 +168,22 @@ function useInitialSessionCheck(
           return;
         }
 
-        setState({ status: "authenticated", principal, error: null });
+        setState({ status: "authenticated", principal, error: null, logoutError: null });
       })
       .catch((error: unknown) => {
         if (!isCurrentOperation(mountedRef.current, operation, operationRef.current)) {
           return;
         }
 
-        if (operation.kind === "session" && operation.unauthorized && !isRequestFailure(error)) {
+        if (operation.unauthorized && !isRequestFailure(error)) {
           return;
         }
 
         setState((current) =>
           current.status === "authenticated" ? current : unauthenticatedState(error),
         );
-      });
+      })
+      .finally(() => finishOperation(operationRef, operation));
 
     return () => {
       operation.controller.abort();
@@ -160,20 +197,17 @@ function useLogin(
   operationRef: AuthOperationRef,
   setState: SetAuthState,
 ) {
-  const controllerRef = useRef<AbortController | null>(null);
-
-  const login = useCallback(
+  return useCallback(
     async (credentials: LoginCredentials) => {
-      if (controllerRef.current) {
+      if (operationRef.current?.kind === "login") {
         return false;
       }
 
       const operation = startOperation(operationRef, "login");
-      controllerRef.current = operation.controller;
       setState((current) =>
         current.status === "authenticated"
           ? current
-          : { status: "unauthenticated", principal: null, error: null },
+          : { status: "unauthenticated", principal: null, error: null, logoutError: null },
       );
 
       try {
@@ -184,7 +218,7 @@ function useLogin(
           return false;
         }
 
-        setState({ status: "authenticated", principal, error: null });
+        setState({ status: "authenticated", principal, error: null, logoutError: null });
         return true;
       } catch (error) {
         if (!isCurrentOperation(mountedRef.current, operation, operationRef.current)) {
@@ -201,23 +235,96 @@ function useLogin(
         );
         return false;
       } finally {
-        if (controllerRef.current === operation.controller) {
-          controllerRef.current = null;
-        }
+        finishOperation(operationRef, operation);
       }
     },
     [apiClient, mountedRef, operationRef, setState],
   );
+}
 
-  useEffect(
-    () => () => {
-      controllerRef.current?.abort();
-      controllerRef.current = null;
+function useServiceInfo(
+  apiClient: ApiClient,
+  mountedRef: { current: boolean },
+  operationRef: AuthOperationRef,
+) {
+  return useCallback(
+    async (callerSignal: AbortSignal): Promise<ServiceInfo | null> => {
+      const operation = startOperation(operationRef, "info");
+      const abortOperation = () => operation.controller.abort();
+
+      if (callerSignal.aborted) {
+        abortOperation();
+        finishOperation(operationRef, operation);
+        return null;
+      }
+
+      callerSignal.addEventListener("abort", abortOperation, { once: true });
+      operation.removeCallerAbortListener = () =>
+        callerSignal.removeEventListener("abort", abortOperation);
+      return apiClient
+        .getInfo({ signal: operation.controller.signal })
+        .then((serviceInfo) =>
+          isCurrentOperation(mountedRef.current, operation, operationRef.current)
+            ? serviceInfo
+            : null,
+        )
+        .catch((error: unknown) => {
+          if (!isCurrentOperation(mountedRef.current, operation, operationRef.current)) {
+            return null;
+          }
+
+          return operation.unauthorized ? null : Promise.reject(error);
+        })
+        .finally(() => finishOperation(operationRef, operation));
     },
-    [],
+    [apiClient, mountedRef, operationRef],
   );
+}
 
-  return login;
+function useLogout(
+  apiClient: ApiClient,
+  mountedRef: { current: boolean },
+  operationRef: AuthOperationRef,
+  setState: SetAuthState,
+) {
+  return useCallback(async () => {
+    if (operationRef.current?.kind === "logout") {
+      return false;
+    }
+
+    const operation = startOperation(operationRef, "logout");
+    setState((current) =>
+      current.status === "authenticated" ? { ...current, error: null, logoutError: null } : current,
+    );
+
+    try {
+      await apiClient.logout({ signal: operation.controller.signal });
+      if (!isCurrentOperation(mountedRef.current, operation, operationRef.current)) {
+        return false;
+      }
+
+      setState(cleanUnauthenticatedState());
+      return true;
+    } catch (error) {
+      if (!isCurrentOperation(mountedRef.current, operation, operationRef.current)) {
+        return false;
+      }
+
+      if (operation.unauthorized) {
+        setState(cleanUnauthenticatedState());
+        return true;
+      }
+
+      setState((current) =>
+        current.status === "authenticated"
+          ? { ...current, error: null, logoutError: errorMessage(error) }
+          : current,
+      );
+      return false;
+    } finally {
+      finishOperation(operationRef, operation);
+    }
+  }, [apiClient, mountedRef, operationRef, setState]);
 }
 
 export function AuthProvider({ children }: PropsWithChildren) {
@@ -232,14 +339,22 @@ export function AuthProvider({ children }: PropsWithChildren) {
     return () => {
       mountedRef.current = false;
       operationRef.current?.controller.abort();
+      if (operationRef.current) {
+        removeCallerAbortListener(operationRef.current);
+      }
       operationRef.current = null;
     };
   }, []);
 
   useInitialSessionCheck(apiClient, mountedRef, operationRef, setState);
   const login = useLogin(apiClient, mountedRef, operationRef, setState);
+  const loadServiceInfo = useServiceInfo(apiClient, mountedRef, operationRef);
+  const logout = useLogout(apiClient, mountedRef, operationRef, setState);
 
-  const value = useMemo<AuthContextValue>(() => ({ ...state, login }), [login, state]);
+  const value = useMemo<AuthContextValue>(
+    () => ({ ...state, loadServiceInfo, login, logout }),
+    [loadServiceInfo, login, logout, state],
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
