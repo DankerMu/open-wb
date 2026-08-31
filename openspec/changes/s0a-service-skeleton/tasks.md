@@ -16,6 +16,7 @@
     - 临时文件库先用 `node:sqlite` 预置同名 `schema_migration_history` table，再调用同一 `openDb(path)` seam -> `002` 在创建 DELETE trigger 后因 CREATE VIEW 冲突失败，trigger 与 `002` receipt 均不存在，已提交的 `0010` receipt 保留；同名错误 trigger 同样失败且不写 receipt；
     - migration body 尝试 COMMIT/ROLLBACK/SAVEPOINT -> 被拒，effect 与 receipt 均不存在；失败路径真实调用内部 handle close；
     - 固定 migration 目录中的非 `.sql` 直属文件与嵌套 `.sql` -> 均不执行；特殊 filename 元字符不得使 receipt 绑定到不同 bytes；
+    - canonical foundation SQL 的 LF/CRLF/lone-CR -> catalog compare 等价且 fresh/partial/complete 可稳定重开；非 EOL token/body drift -> 事务性失败；`.gitattributes` 同时固定 tracked migration `*.sql` 为 LF；
     - 每个测试自有 SQLite handle -> assertion 异常时仍经 `finally` 关闭；
     - `npm test --workspace server` 与 `make check` -> exit 0，coverage 门禁保持。
   - Non-goals: 业务表/seed（#8）、HTTP、并发多进程迁移协调、任意外部 migration 目录。

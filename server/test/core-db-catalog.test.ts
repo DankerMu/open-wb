@@ -19,6 +19,7 @@ import {
   MIGRATION_0010,
   PREFIX_CATALOG,
   removeTempDirs,
+  type SqlLineEnding,
   tableExists,
   tempDir,
   withDatabase,
@@ -271,5 +272,58 @@ CREATE TRIGGER unrelated_trigger AFTER INSERT ON unrelated_table BEGIN SELECT 1;
       expect(fullCatalogSnapshot(db)).toEqual(first.catalog);
       expect(ledgerFilenames(db)).toEqual([MIGRATION_0010, "002_schema_migrations_history.sql"]);
     });
+  });
+
+  it.each([
+    ["LF", "\n"],
+    ["CRLF", "\r\n"],
+    ["lone CR", "\r"],
+  ] as const)("%s 规范基座在空账本、0010 前缀与完整目录中均可稳定重开", (_name, lineEnding) => {
+    const cases: ReadonlyArray<
+      readonly [string, (db: DatabaseSync, ending: SqlLineEnding) => void]
+    > = [
+      ["空账本", (db) => createCanonicalLedger(db)],
+      ["0010 前缀", createValid0010Prefix],
+      ["完整目录", createValidCompletePrefix],
+    ];
+
+    for (const [stateName, seed] of cases) {
+      const file = join(tempDir(), `${stateName}.db`);
+      withDatabase(file, (db) => seed(db, lineEnding));
+
+      expectRepeatedOpenStable(file, (db) => {
+        expect(ledgerFilenames(db)).toEqual([MIGRATION_0010, "002_schema_migrations_history.sql"]);
+      });
+    }
+  });
+
+  it.each([
+    [
+      "触发器主体",
+      "schema_migrations_no_update",
+      "SELECT RAISE(ABORT, 'UPDATE on schema_migrations is forbidden');",
+      "SELECT 1;",
+    ],
+    [
+      "触发器消息",
+      "schema_migrations_no_update",
+      "UPDATE on schema_migrations is forbidden",
+      "UPDATE on schema_migrations changed",
+    ],
+    ["视图排序 token", "schema_migration_history", "ORDER BY sequence", "ORDER BY filename"],
+  ])("规范基座的非 EOL %s 漂移仍被拒绝并保留完整目录", (_name, objectName, expected, drifted) => {
+    const file = join(tempDir(), "app.db");
+    withDatabase(file, (db) => {
+      createValidCompletePrefix(db, "\r\n");
+      const object = db
+        .prepare("SELECT type, sql FROM sqlite_master WHERE name = ?")
+        .get(objectName) as { type: string; sql: string };
+      const alteredDefinition = object.sql.replace(expected, drifted);
+      expect(alteredDefinition).not.toBe(object.sql);
+      db.exec(`DROP ${object.type} ${objectName}`);
+      db.exec(alteredDefinition);
+    });
+
+    expectFailedOpenToPreserveFullCatalog(file, /migration ledger reserved catalog does not match/);
   });
 });

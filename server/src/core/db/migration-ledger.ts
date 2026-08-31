@@ -461,13 +461,22 @@ function matchesReservedObject(
     return false;
   }
 
-  return matchesReservedDefinition(object.sql, expected.sql, expected.name);
+  return matchesReservedDefinition(object.sql, expected);
 }
 
-function matchesReservedDefinition(actual: string, expected: string, name: string): boolean {
-  return name === LEDGER_NAME
-    ? compactLedgerDefinition(actual) === compactLedgerDefinition(expected)
-    : actual === expected;
+function matchesReservedDefinition(actual: string, expected: ExpectedReservedObject): boolean {
+  if (expected.name === LEDGER_NAME) {
+    return compactLedgerDefinition(actual) === compactLedgerDefinition(expected.sql);
+  }
+
+  return expected.type === "trigger" || expected.type === "view"
+    ? canonicalizeDefinitionLineEndings(actual) === canonicalizeDefinitionLineEndings(expected.sql)
+    : actual === expected.sql;
+}
+
+/** 目录定义仅将 Git checkout 的 CRLF 或 lone-CR 表示统一为 LF。 */
+function canonicalizeDefinitionLineEndings(definition: string): string {
+  return definition.replaceAll(/\r\n?/g, "\n");
 }
 
 function reservedObjectInventory(db: DatabaseSync): MasterObject[] {

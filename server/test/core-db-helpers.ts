@@ -8,6 +8,7 @@ import { openDb } from "../src/core/db/index.js";
 export const MIGRATION_0010 = "0010_schema_migrations_update_guard.sql";
 export const MIGRATION_002 = "002_schema_migrations_history.sql";
 export const HISTORY_VIEW = "schema_migration_history";
+export type SqlLineEnding = "\n" | "\r\n" | "\r";
 
 export interface CatalogSnapshot {
   receipts: ReadonlyArray<readonly [number, string]>;
@@ -169,8 +170,10 @@ export function createCanonicalLedger(db: DatabaseSync): void {
   )`);
 }
 
-function installValid0010Foundation(db: DatabaseSync): void {
-  db.exec(`CREATE TRIGGER schema_migrations_no_update
+function installValid0010Foundation(db: DatabaseSync, lineEnding: SqlLineEnding = "\n"): void {
+  db.exec(
+    withSqlLineEnding(
+      `CREATE TRIGGER schema_migrations_no_update
 BEFORE UPDATE ON schema_migrations
 BEGIN
   SELECT RAISE(ABORT, 'UPDATE on schema_migrations is forbidden');
@@ -182,11 +185,16 @@ WHEN EXISTS (SELECT 1 FROM schema_migrations WHERE filename = NEW.filename)
   OR EXISTS (SELECT 1 FROM schema_migrations WHERE sequence = NEW.sequence)
 BEGIN
   SELECT RAISE(ABORT, 'INSERT on schema_migrations reuses an existing receipt');
-END;`);
+END;`,
+      lineEnding,
+    ),
+  );
 }
 
-function installValid002Foundation(db: DatabaseSync): void {
-  db.exec(`CREATE TRIGGER schema_migrations_no_delete
+function installValid002Foundation(db: DatabaseSync, lineEnding: SqlLineEnding = "\n"): void {
+  db.exec(
+    withSqlLineEnding(
+      `CREATE TRIGGER schema_migrations_no_delete
 BEFORE DELETE ON schema_migrations
 BEGIN
   SELECT RAISE(ABORT, 'DELETE on schema_migrations is forbidden');
@@ -195,19 +203,29 @@ END;
 CREATE VIEW schema_migration_history AS
 SELECT sequence, filename, applied_at
 FROM schema_migrations
-ORDER BY sequence;`);
+ORDER BY sequence;`,
+      lineEnding,
+    ),
+  );
 }
 
-export function createValid0010Prefix(db: DatabaseSync): void {
+export function createValid0010Prefix(db: DatabaseSync, lineEnding: SqlLineEnding = "\n"): void {
   createCanonicalLedger(db);
-  installValid0010Foundation(db);
+  installValid0010Foundation(db, lineEnding);
   db.prepare("INSERT INTO schema_migrations(filename) VALUES (?)").run(MIGRATION_0010);
 }
 
-export function createValidCompletePrefix(db: DatabaseSync): void {
-  createValid0010Prefix(db);
-  installValid002Foundation(db);
+export function createValidCompletePrefix(
+  db: DatabaseSync,
+  lineEnding: SqlLineEnding = "\n",
+): void {
+  createValid0010Prefix(db, lineEnding);
+  installValid002Foundation(db, lineEnding);
   db.prepare("INSERT INTO schema_migrations(filename) VALUES (?)").run(MIGRATION_002);
+}
+
+function withSqlLineEnding(source: string, lineEnding: SqlLineEnding): string {
+  return source.replaceAll("\n", lineEnding);
 }
 
 export function seedValid0010Prefix(path: string): void {

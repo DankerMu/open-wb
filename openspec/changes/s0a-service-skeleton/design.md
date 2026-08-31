@@ -80,7 +80,7 @@ Migration asset contract:
 - `0010_schema_migrations_update_guard.sql` installs guards that reject UPDATE and reinsertion of an existing filename (including `INSERT OR REPLACE`) on migration receipts.
 - `002_schema_migrations_history.sql` installs the guard that rejects DELETE and then creates the sequence-ordered `schema_migration_history` view; these are real migration-ledger integrity/introspection rules, not business tables or placeholders. Same-name incompatible objects fail rather than being silently accepted. The intentionally mixed-width immutable names make lexical order (`0010` before `002`) observably different from numeric/natural order and leave later `01x` names for issue #8.
 - Business migrations, including account/session tables and seed data, remain exclusively in issue #8.
-- Discovery reads only the exact bytes of regular direct-child `.sql` files from the tracked `server/src/core/db/migrations` directory; non-SQL files and subdirectories are ignored, URL/path metacharacters cannot redirect the read, and no external migration path is accepted.
+- Discovery reads only the exact bytes of regular direct-child `.sql` files from the tracked `server/src/core/db/migrations` directory; non-SQL files and subdirectories are ignored, URL/path metacharacters cannot redirect the read, and no external migration path is accepted. Catalog definition validation treats `LF`, `CRLF`, and lone `CR` as one line-ending representation while comparing every other SQL character exactly; tracked migration SQL is additionally pinned to LF through `.gitattributes`, but runtime correctness does not depend on checkout policy.
 - The runner owns transaction boundaries: migration bodies cannot execute transaction or savepoint control. A rejected/failed body leaves neither its effects nor its receipt, and failed `openDb` closes its internally owned handle.
 
 Invariant Matrix:
@@ -103,6 +103,7 @@ Invariant Matrix:
   - Temporary file database pre-seeded through `node:sqlite` with a conflicting `schema_migration_history` table, then passed to `openDb(path)` -> migration `002` fails after creating its DELETE trigger; the transaction leaves neither that trigger nor an `002` receipt, while prior migration `0010` remains committed.
   - Migration body attempts COMMIT/ROLLBACK/SAVEPOINT control -> authorizer rejects it; its schema effects and receipt both remain absent.
   - Fixed migration directory containing a non-SQL direct child and a nested `.sql` file -> both are ignored; special filename metacharacters cannot bind a discovered receipt to different bytes.
+  - LF/CRLF/lone-CR forms of the canonical trigger/view SQL -> compare equivalent and fresh/partial/complete catalogs reopen stably; any non-EOL token/body drift -> validation fails transactionally.
   - Any failed `openDb` path -> its internally created `DatabaseSync.close` executes; every test-owned handle closes in `finally` even when an assertion fails.
   - Existing service-info test -> unchanged behavior.
 
