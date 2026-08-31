@@ -185,10 +185,6 @@ BEGIN
 END;`);
 }
 
-export function createWrongTriggerTarget(db: DatabaseSync): void {
-  db.exec("CREATE TABLE wrong_trigger_target (value TEXT)");
-}
-
 function installValid002Foundation(db: DatabaseSync): void {
   db.exec(`CREATE TRIGGER schema_migrations_no_delete
 BEFORE DELETE ON schema_migrations
@@ -264,18 +260,82 @@ export function fixtureMigration(
   return { filename, source };
 }
 
-export function expectFailedMigrationPrefix(
-  path: string,
-  expectedError: RegExp,
-  expectedReceipts: readonly string[],
-  historyExists: boolean,
-): void {
+export interface FullCatalogSnapshot {
+  masterObjects: ReadonlyArray<readonly [string, string, string, string | null]>;
+  sequenceRows: ReadonlyArray<readonly [unknown, string, unknown, string]>;
+}
+
+/** sqlite_master 定义及全部 sqlite_sequence 行，用于失败前后的完整持久目录快照。 */
+export function fullCatalogSnapshot(db: DatabaseSync): FullCatalogSnapshot {
+  const masterObjects = db
+    .prepare("SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name, tbl_name")
+    .all()
+    .map((row) => {
+      const object = row as { type: unknown; name: unknown; tbl_name: unknown; sql: unknown };
+      return [
+        String(object.type),
+        String(object.name),
+        String(object.tbl_name),
+        object.sql === null ? null : String(object.sql),
+      ] as const;
+    });
+  const sqliteSequenceExists =
+    db
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_sequence'")
+      .get() !== undefined;
+  const sequenceRows = sqliteSequenceExists
+    ? db
+        .prepare(
+          "SELECT rowid, name, seq, typeof(seq) AS seq_type FROM sqlite_sequence ORDER BY rowid",
+        )
+        .all()
+        .map((row) => {
+          const sequence = row as {
+            rowid: unknown;
+            name: unknown;
+            seq: unknown;
+            seq_type: unknown;
+          };
+          return [
+            sequence.rowid,
+            String(sequence.name),
+            sequence.seq,
+            String(sequence.seq_type),
+          ] as const;
+        })
+    : [];
+
+  return { masterObjects, sequenceRows };
+}
+
+export function expectFailedOpenToPreserveFullCatalog(path: string, expectedError: RegExp): void {
+  const before = withDatabase(path, fullCatalogSnapshot);
+
   expectOpenDbFailure(path, expectedError);
+
   withDatabase(path, (db) => {
-    expect(ledgerFilenames(db)).toEqual(expectedReceipts);
-    expect(
-      db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'schema_migration_history'").get() !==
-        undefined,
-    ).toBe(historyExists);
+    expect(fullCatalogSnapshot(db)).toEqual(before);
+  });
+}
+
+export function expectNoBootstrapLedger(db: DatabaseSync): void {
+  expect(tableExists(db, "schema_migrations")).toBe(false);
+  expect(
+    db
+      .prepare("SELECT 1 FROM sqlite_master WHERE name = 'sqlite_autoindex_schema_migrations_1'")
+      .get(),
+  ).toBeUndefined();
+}
+
+export function expectRepeatedOpenStable(path: string, verify: (db: DatabaseSync) => void): void {
+  const first = withOpenDb(path, (db) => ({
+    inventory: schemaInventory(db),
+    receipts: ledgerFilenames(db),
+  }));
+
+  withOpenDb(path, (db) => {
+    expect(ledgerFilenames(db)).toEqual(first.receipts);
+    expect(schemaInventory(db)).toEqual(first.inventory);
+    verify(db);
   });
 }

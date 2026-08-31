@@ -24,18 +24,19 @@ export function openDb(path: string): DatabaseSync {
     db.exec("PRAGMA journal_mode = WAL");
 
     const migrations = trackedMigrationAssets();
-    prepareMigrationLedger(db);
-    const applied = validatedAppliedFilenames(
-      db,
-      migrations.map((migration) => migration.filename),
-    );
+    const filenames = migrations.map((migration) => migration.filename);
+    const applied = prepareMigrationLedger(db, filenames);
+    const validateCatalog = (): void => {
+      validatedAppliedFilenames(db, filenames);
+    };
 
     for (const migration of migrations) {
       if (!applied.has(migration.filename)) {
-        runMigration(db, migration);
+        runMigration(db, migration, validateCatalog);
       }
     }
 
+    validateCatalog();
     return db;
   } catch (error) {
     closeFailedOpen(db, error);

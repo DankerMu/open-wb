@@ -5,8 +5,14 @@ export interface MigrationToRun {
   source: string;
 }
 
+export type MigrationPostflight = () => void;
+
 /** 单迁移 = 单个 runner 所有的事务；迁移正文无权控制事务或 savepoint。 */
-export function runMigration(db: DatabaseSync, migration: MigrationToRun): void {
+export function runMigration(
+  db: DatabaseSync,
+  migration: MigrationToRun,
+  postflight: MigrationPostflight,
+): void {
   db.exec("BEGIN");
 
   try {
@@ -19,9 +25,10 @@ export function runMigration(db: DatabaseSync, migration: MigrationToRun): void 
       throw new Error("migration receipt insert must change exactly one row");
     }
     validatePersistedReceipt(db, migration.filename, expectedSequence);
+    postflight();
     db.exec("COMMIT");
   } catch (error) {
-    rollbackAfterMigrationFailure(db, error);
+    rollbackAfterTransactionFailure(db, error, "migration rollback failed");
   }
 }
 
@@ -83,12 +90,17 @@ function runMigrationBody(db: DatabaseSync, source: string): void {
   }
 }
 
-function rollbackAfterMigrationFailure(db: DatabaseSync, originalError: unknown): never {
+/** 当前事务失败时回滚；保留原始错误并在回滚失败时聚合报告。 */
+export function rollbackAfterTransactionFailure(
+  db: DatabaseSync,
+  originalError: unknown,
+  rollbackMessage: string,
+): never {
   if (db.isTransaction) {
     try {
       db.exec("ROLLBACK");
     } catch (rollbackError) {
-      throw aggregateFailure(originalError, rollbackError, "migration rollback failed");
+      throw aggregateFailure(originalError, rollbackError, rollbackMessage);
     }
   }
 
