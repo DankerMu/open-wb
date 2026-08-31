@@ -1,0 +1,5 @@
+-- 验证数据（非生产迁移源）：按扩展名计这是非 SQL 直属文件。
+-- migrations/ 发现规则只接受直属 .sql 文件；若本文件被误当作迁移执行，
+-- 下面这句会创建 forbidden_sentinel_non_sql 表——测试经 openDb 断言该表不存在，
+-- 以此证明非 SQL 直属文件被忽略。
+CREATE TABLE IF NOT EXISTS forbidden_sentinel_non_sql (id INTEGER PRIMARY KEY);

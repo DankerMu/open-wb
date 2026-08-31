@@ -4,7 +4,22 @@
 
 ## 1. http-service-skeleton
 
-- [ ] 1.1 `core/db`：`openDb(path)`（node:sqlite、WAL、migrations/*.sql 按序执行、版本表幂等）+ `:memory:` 单测
+- [x] 1.1 `core/db`：`openDb(path)`（node:sqlite、WAL、migrations/*.sql 按序执行、版本表幂等）+ `:memory:` 单测
+  - Issue #5 fixture: high（上游 compact 因 migration/schema/path/shared core API 强制升档）；repair intensity: high。
+  - Seams under test: `openDb(path)` 对真实 `:memory:` 与临时文件数据库，不 mock 被测 DB/迁移器。
+  - Required evidence:
+    - fresh `:memory:` + tracked `0010_schema_migrations_update_guard.sql`/`002_schema_migrations_history.sql` -> history receipt 按字典序严格为 `0010`,`002`（不得按数值/自然序成为 `002`,`0010`），且 ledger 的 UPDATE/DELETE/同 filename REPLACE 被拒；
+    - U+E000 与 U+10000 filename segment -> scalar code-point comparator 必须排 U+E000 在前；
+    - fresh 临时文件库 -> `PRAGMA journal_mode` = `wal`（`:memory:` 按 SQLite 能力保持 `memory`）；
+    - 同一路径连续两次打开 -> receipt 数不增、schema 一致；合法 `[0010]` prefix 可续跑；malformed/no-ledger hidden-state/non-prefix/unknown/cross-object or case-variant reserved-name/extra-trigger/extra ledger index（nonunique/partial/expression）/PRAGMA-shadow/`sqlite_sequence` divergent state 在任何新 effect 前失败并保持 pre-open catalog snapshot，unrelated non-reserved table/trigger 不误拦；
+    - receipt INSERT changes != 1 或最终 filename/sequence 不是预期 next contiguous identity -> 当前 migration effect 与 receipt 均回滚；可达的真实 SQLite runner fixture 在 migration body/postflight 冲突时同样证明当前 trigger/effect/receipt 全部回滚且既有 prefix 不变；
+    - 临时文件库先用 `node:sqlite` 预置同名 `schema_migration_history` table，再调用同一 `openDb(path)` seam -> reserved-name preflight 在 bootstrap/`0010`/`002` 前失败，完整 `sqlite_master`/`sqlite_sequence` snapshot 不变，且不创建 ledger 或 receipt；同名错误 trigger 同样在任何新 effect 前失败；
+    - migration body 尝试 COMMIT/ROLLBACK/SAVEPOINT -> 被拒，effect 与 receipt 均不存在；失败路径真实调用内部 handle close；
+    - 固定 migration 目录中的非 `.sql` 直属文件与嵌套 `.sql` -> 均不执行；特殊 filename 元字符不得使 receipt 绑定到不同 bytes；
+    - canonical foundation SQL 的 LF/CRLF/lone-CR -> catalog compare 等价且 fresh/partial/complete 可稳定重开；非 EOL token/body 或仅一个 interior space/tab 的 drift -> 事务性失败，并以 whitespace-collapsing comparator mutant 证明测试可判别；`.gitattributes` 同时固定 tracked migration `*.sql` 为 LF；
+    - 每个测试自有 SQLite handle -> assertion 异常时仍经 `finally` 关闭；
+    - `npm test --workspace server` 与 `make check` -> exit 0，coverage 门禁保持。
+  - Non-goals: 业务表/seed（#8）、HTTP、并发多进程迁移协调、任意外部 migration 目录。
 - [ ] 1.2 Fastify 装配与横切：`app.ts`（可注入配置）+ `http/` 错误信封处理器（invalid_credentials/account_disabled/unauthorized/not_found 四码，401/403/404 同形状断言）+ healthz/info 端点 + `app.inject()` 测试
 - [ ] 1.3 启动入口与命令面：`server.ts`（唯一 listen、启动日志输出模块清单）、`make dev` 与 `npm run start --workspace server`、`knip.json` server entry 增 `src/server.ts`、`.gitignore` 增 `var/`（默认 db 路径产物不入库）；启动行为验证由 4.1 smoke 对真实进程覆盖（设计已定，不写监听单测）
 - [ ] 1.4 静态托管与 history fallback：`STATIC_ROOT` 可配置（单测用临时夹具目录），非 `/api/*` GET 回 index.html，非 GET 与 `/api/*` 未命中回信封 404 + inject 测试

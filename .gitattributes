@@ -1,0 +1,1 @@
+server/src/core/db/migrations/**/*.sql text eol=lf
