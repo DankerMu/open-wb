@@ -1,14 +1,27 @@
 import { act, cleanup, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const authenticatedPrincipal = {
+  id: "user-1",
+  account: "zhangsan",
+  role: "member",
+};
+
 let disposeMain: (() => void) | undefined;
 
-async function loadMain(path: "/" | "/files") {
+async function loadMain(path: "/" | "/files", fetchResult?: Promise<Response>) {
   window.history.replaceState(null, "", path);
+  vi.stubGlobal("fetch", vi.fn().mockReturnValue(fetchResult ?? Promise.resolve(jsonResponse())));
   document.body.innerHTML = '<div id="root"></div>';
   vi.resetModules();
   const main = await import("../src/main.js");
   disposeMain = main.disposeApp;
+}
+
+function jsonResponse() {
+  return new Response(JSON.stringify(authenticatedPrincipal), {
+    headers: { "Content-Type": "application/json" },
+  });
 }
 
 afterEach(() => {
@@ -17,6 +30,7 @@ afterEach(() => {
   });
   disposeMain = undefined;
   cleanup();
+  vi.unstubAllGlobals();
   document.body.innerHTML = "";
   window.history.replaceState(null, "", "/");
 });
@@ -40,5 +54,25 @@ describe("SPA root entry", () => {
     expect(screen.getByRole("link", { name: /工作空间/ }).getAttribute("aria-current")).toBe(
       "page",
     );
+  });
+
+  it("unmounts before disposing the router while authentication is pending", async () => {
+    let resolveResponse!: (response: Response) => void;
+    const pendingResponse = new Promise<Response>((resolve) => {
+      resolveResponse = resolve;
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await loadMain("/files", pendingResponse);
+
+    expect(await screen.findByRole("status")).toBeTruthy();
+    act(() => {
+      disposeMain?.();
+    });
+    resolveResponse(jsonResponse());
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
   });
 });

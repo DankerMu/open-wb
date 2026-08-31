@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { RouterProvider } from "react-router";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAppRouter, routeManifest } from "../src/routes/index.js";
 
 const expectedPages = [
@@ -59,12 +59,106 @@ const trailingSlashPages = [
     description: "S0a 后续任务将接入外观与关于设置",
     currentLabel: "设置",
   },
+  {
+    path: "/files//",
+    canonicalPath: "/files",
+    title: "工作空间",
+    description: "S1a 将接入工作空间与文件",
+    currentLabel: "工作空间",
+  },
+  {
+    path: "/center///",
+    canonicalPath: "/center",
+    title: "中心",
+    description: "S1d 将接入专家、技能、连接器、知识库、模型与权限",
+    currentLabel: "中心",
+  },
+  {
+    path: "/settings////",
+    canonicalPath: "/settings",
+    title: "设置",
+    description: "S0a 后续任务将接入外观与关于设置",
+    currentLabel: "设置",
+  },
+  {
+    path: "/FILES",
+    canonicalPath: "/files",
+    title: "工作空间",
+    description: "S1a 将接入工作空间与文件",
+    currentLabel: "工作空间",
+  },
+  {
+    path: "/Files/",
+    canonicalPath: "/files",
+    title: "工作空间",
+    description: "S1a 将接入工作空间与文件",
+    currentLabel: "工作空间",
+  },
+  {
+    path: "/FILES//",
+    canonicalPath: "/files",
+    title: "工作空间",
+    description: "S1a 将接入工作空间与文件",
+    currentLabel: "工作空间",
+  },
+  {
+    path: "/CeNtEr///",
+    canonicalPath: "/center",
+    title: "中心",
+    description: "S1d 将接入专家、技能、连接器、知识库、模型与权限",
+    currentLabel: "中心",
+  },
+  {
+    path: "/SeTTings////",
+    canonicalPath: "/settings",
+    title: "设置",
+    description: "S0a 后续任务将接入外观与关于设置",
+    currentLabel: "设置",
+  },
+  {
+    path: "/f%69les",
+    canonicalPath: "/files",
+    title: "工作空间",
+    description: "S1a 将接入工作空间与文件",
+    currentLabel: "工作空间",
+  },
+  {
+    path: "/C%45NTER//",
+    canonicalPath: "/center",
+    title: "中心",
+    description: "S1d 将接入专家、技能、连接器、知识库、模型与权限",
+    currentLabel: "中心",
+  },
+  {
+    path: "/se%74tings///",
+    canonicalPath: "/settings",
+    title: "设置",
+    description: "S0a 后续任务将接入外观与关于设置",
+    currentLabel: "设置",
+  },
 ] as const;
+
+const authenticatedPrincipal = {
+  id: "user-1",
+  account: "zhangsan",
+  role: "member",
+};
 
 let router: ReturnType<typeof createAppRouter> | undefined;
 
 function setBrowserPath(path: string) {
   window.history.replaceState(null, "", path);
+}
+
+function authenticateRouter() {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(authenticatedPrincipal), {
+        headers: { "Content-Type": "application/json" },
+      }),
+    ),
+  );
 }
 
 async function expectRouteShell({
@@ -97,6 +191,7 @@ afterEach(() => {
   cleanup();
   router?.dispose();
   router = undefined;
+  vi.unstubAllGlobals();
   document.body.replaceChildren();
   setBrowserPath("/");
 });
@@ -115,6 +210,7 @@ describe("SPA route manifest", () => {
 describe("SPA shell routes", () => {
   it("navigates from 会话 to 工作空间", async () => {
     setBrowserPath("/");
+    authenticateRouter();
     router = createAppRouter();
     render(<RouterProvider router={router} />);
 
@@ -142,6 +238,7 @@ describe("SPA shell routes", () => {
     "renders the $path shell",
     async ({ path, title, description, currentLabel }) => {
       setBrowserPath(path);
+      authenticateRouter();
       router = createAppRouter();
       render(<RouterProvider router={router} />);
 
@@ -168,6 +265,7 @@ describe("SPA shell routes", () => {
     "canonicalizes $path to the $canonicalPath shell",
     async ({ path, canonicalPath, title, description, currentLabel }) => {
       setBrowserPath(path);
+      authenticateRouter();
       router = createAppRouter();
       render(<RouterProvider router={router} />);
 

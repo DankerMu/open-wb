@@ -209,6 +209,62 @@ Boundary-surface checklist:
 - Browser runtime / navigation / persistence: **selected** — 通过注入 seam 模拟 storage 读取和系统深浅偏好；不直接触碰 browser globals/persistence。
 - Cross-service boundary / offline runtime: **not selected** — 无网络、服务或公网依赖。
 
+## Issue delivery fixture: #14 lib/api、登录页与路由守卫
+
+- **Issue type / profile:** feature；Generic（open-workbuddy project profile）。
+- **Blast radius / fixture / repair:** high；expanded；high。
+- **Upstream suggested level:** compact — override：auth/permission、public API wrapper、route guard、shared state transition 均为强制 expanded/high surface。
+- **Contract completion:** login 与 me 成功响应统一为直接 Principal `{id,account,role}`，恰三个 string 字段；错误信封恰为 `{error:{code,message}}`。这是把 server/web 并行链共享的既有“用户信息”语义补为网络 shape，不新增 endpoint。
+- **Change surface:** `web/src/lib/api.ts`；登录 feature；route guard/auth state；`routes`/`main` 装配；jsdom 集成测试。mock 的仅是 fetch 网络边界，router/API client/auth UI 是真实 SUT。
+- **Must preserve:** #13 恰四个 route/侧栏/active/canonicalization；当前 browser URL（含 canonical pathname 与现有 search/hash）不改写为 `/login`/returnUrl；#12 theme、server/kbservice、build/coverage/knip。
+- **Must add:** 初始 `GET /api/auth/me` 决定 loading→authenticated/unauthenticated；未登录任一支持 route 在原 URL 渲染 login；成功 `POST /api/auth/login` 恢复该 route；任何 API 401 清 Principal 并进入 login；403/其他信封保持未认证且显示原 message。
+- **Principal:** `{id:string, account:string, role:string}`；UI 当前只需登录态，#15 将消费 account/role；不接受额外/缺失/非 string 字段。
+- **API client:** relative `/api/...` only，所有 fetch 显式 `credentials:"same-origin"`；JSON request 使用 content-type；本 issue 的 200 JSON 按调用方 validator 验证；错误先按 envelope 验证，再生成稳定 `ApiError(status, code, message)`；204/logout 支持留给 #15。
+- **Malformed/network errors:** 非 JSON、畸形 envelope、成功 payload shape 错误、fetch reject 都不得泄漏原始响应/stack；登录页显示稳定中文 `请求失败，请稍后重试`，状态保持可重试。
+- **Login form:** 标题 `登录 WorkBuddy`；账号 label `账号`、密码 label `密码`、button `登录`；账号/密码按输入原样提交（server 负责 trim/lowercase）；提交中禁用按钮；失败后保留账号、清空密码；Enter/submit 走同一 form seam。
+- **Seams under test:** real production router + AuthProvider/guard + login UI，mock global fetch；逐项断言 me/login request method/path/credentials/body、四路未登录、`/files` 成功回跳、403 逐字文案、401 transition、malformed/network fallback、double-submit 单请求、existing route/sidebar regression。
+- **Selected risk packs:** Public API / CLI / script entry；Schema / field names；Auth / permissions / secrets；Concurrency / shared state / ordering；Legacy compatibility / examples；Error handling / rollback / partial outputs；Browser runtime / navigation / persistence；Cross-service boundary / offline runtime。
+- **Non-goals:** server implementation、cookie 内容/存储、logout/user footer（#15）、CSRF/OIDC、token/localStorage、审计、settings 内容、unknown-route 404、真实 HTTP/UI walk。
+
+### Invariant Matrix for #14
+
+- **Governing invariant:** UI 认证态只由同一 Principal contract 与最新有效 API transition 决定；未认证内容不可闪现，401 必清态，登录成功只恢复当前受支持 route。
+- **Source-of-truth identity/contract:** direct Principal `{id,account,role}`；error envelope `{error:{code,message}}`；browser `location` 是原目标。
+- **Producers:** server `/api/auth/login`、`/api/auth/me`（本 PR 以 contract-bound fetch mock 模拟）；前端不伪造 Principal。
+- **Validators/preflight:** `lib/api` envelope/Principal validators；login form required input/submit lock。
+- **Storage/cache/query:** React 内存 auth state only；不使用 localStorage/sessionStorage/token/query return URL。
+- **Public routes/entrypoints:** existing four-route `createAppRouter` + real `main.tsx`；login 是 guard render state，不新增 route。
+- **Frontend/downstream consumers:** guard、login page；#15 sidebar footer consumes Principal and logout seam later。
+- **Failure/rollback/stale state:** initial loading blocks shell/login flash；401 clears state；failed login leaves unauthenticated/retryable; stale/late duplicate submission cannot overwrite newer state because only one submit is admitted。
+- **Evidence/audit/readiness:** jsdom+mock fetch request/transition matrix；`make check`/CI；real browser deferred #17。
+- **Regression rows:** valid me on `/files`→files shell + Principal；me 401→same `/files` URL + login；valid login→same `/files` shell；403 envelope→exact disabled message/no shell；malformed/network→stable fallback/no Principal；unchanged `/center` active/canonical route→same behavior after authenticated me。
+
+### Boundary-surface checklist for #14
+
+- Shared helper roots: `lib/api` and auth state/provider — one error/Principal validator, no per-component forks。
+- Public entrypoints: `main.tsx` and `createAppRouter` consume one auth wrapper/factory。
+- Read surfaces: me/login response JSON only, bounded to normal fetch JSON payload; no file/network discovery。
+- Write/delete/overwrite: no local persistence; only POST login network side effect and in-memory state。
+- Producer/consumer boundaries: server spec ↔ API validator ↔ auth state ↔ guard/login/#15 Principal consumer。
+- Stale/idempotency: one in-flight login per form; initial me transition disposed safely with app lifecycle; no post-unmount state update warnings。
+- Unchanged consumers: route manifest/sidebar/theme tests and main dispose lifecycle。
+
+### Risk packs considered for #14
+
+- Public API / CLI / script entry: **selected** — shared fetch wrapper and four-route guard alter browser entry behavior；request/response integration matrix。
+- Config / project setup: **not selected** — no new config/dependency/build wiring。
+- File IO / path safety / overwrite: **not selected** — no filesystem or user paths；browser path remains existing router contract。
+- Schema / columns / units / field names: **selected** — strict Principal/envelope/request JSON fields across server/web；malformed/extra/missing matrix。
+- Auth / permissions / secrets: **selected** — credentials and session-cookie flow；password only in request body, never state/log/storage；401 transition matrix。
+- Concurrency / shared state / ordering: **selected** — initial me loading and login submit race/double-submit/unmount lifecycle；single admitted transition。
+- Resource limits / large input / discovery: **not selected** — fixed endpoints and normal JSON payloads；no discovery/unbounded collection。
+- Legacy compatibility / examples: **selected** — all existing routes/sidebar/main lifecycle/theme and server-independent tests remain green。
+- Error handling / rollback / partial outputs: **selected** — 401/403/other envelope、malformed JSON、fetch rejection and retry state all tested；no partial authenticated shell。
+- Release / packaging / dependency compatibility: **not selected** — use platform fetch/React, no dependency change。
+- Documentation / migration notes: **not selected** — no user migration；OpenSpec is shared contract。
+- Browser runtime / navigation / persistence: **selected** — same-URL guard, original-route restore, loading/no flash, no browser credential storage。
+- Cross-service boundary / offline runtime: **selected** — relative same-origin endpoints and cookie credentials；mock fetch locked to server spec, no公网 endpoint。
+
 ## Open Questions
 
 （无——三分支已 grill 拍板，其余为实现细节。）
