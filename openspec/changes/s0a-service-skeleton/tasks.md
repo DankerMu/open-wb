@@ -59,7 +59,7 @@ Minimal mergeable slice: 2.1 迁移+seed 单独可合并保绿（依赖 1.1 已�
 - [x] 3.1 `lib/theme` 扩 system 模式：可注入 matchMedia、默认档 system（demo:1035）、未知值/存储不可用回退 system（修正现有回退 light 语义）+ 扩展既有 `web/test/theme.test.ts`
 - [x] 3.2 路由壳：react-router 四路由 + 侧栏（demo:1773-1778 标签/副标题）+ 占位壳（/center 扁平，/tokens 不移植）+ jsdom 可达性断言
 - [x] 3.3 `lib/api` + 登录页与路由守卫：fetch 封装（信封解析、401 进未登录态）、未登录任意路由渲染登录页并记录原目标、登录成功跳回、错误 message 展示 + jsdom 断言（未登录访问 /files 渲染登录页、登录后落 /files）
-- [ ] 3.4 设置页与用户页脚：外观卡（三档 seg + 当前生效行）、关于卡（/api/info 版本）、侧栏页脚（用户名/角色 + 退出登录带确认）+ jsdom 断言
+- [x] 3.4 设置页与用户页脚：全局主题 owner（`workbuddy-theme`、data-theme、system/storage listener）、外观卡（三档单选 + 当前生效行）、关于卡（strict `/api/info`）、侧栏页脚（Principal account/role + Provider-owned 204 logout + 确认）+ jsdom 断言
 
 Suggested fixture level: compact - UI 组件测试经 vitest+jsdom；端到端交给 ui-walk，不重复抬档
 Minimal mergeable slice: 3.0 工具链单独可合并保绿（纯配置+最小入口，build 与 make check 即验证；后续任务全部依赖它）
@@ -130,3 +130,20 @@ Minimal mergeable slice: 4.1 smoke 单独可合并保绿（依赖 1.3 启动命�
 - [x] focused api/auth/login tests、`npm ci`、`make typecheck`、web build、`make check`、focused knip 全绿；coverage include/阈值不收窄，无新依赖。
 - [x] 保持 theme、server/kbservice、四 route/sidebars/canonicalization/main dispose 与非目标范围不变；真实 HTTP/UI walk 继续由 #16/#17 验收。
 - OpenSpec archive: **deferred with reason** — stage change 尚有 server/auth、settings、harness 等任务；本 PR 仅勾选 3.3 与本节证据，阶段全部完成后统一归档。
+
+## Issue #15 required evidence
+
+- Fixture level: expanded；repair intensity: high；effective accountability tier: high；上游 compact 因 browser persistence/events、strict cross-service schema、auth logout 与 shared operation state 强制升档。
+- [x] TDD/red-proof：先添加 #15 API/theme/settings/footer/logout tests，在 pre-change source 上因缺 ServiceInfo/logout/ThemeProvider/settings/footer seam 或旧 placeholder 行为而红；只 mock fetch/browser boundary，不 mock API client、Provider、router、ThemeProvider/settings/footer SUT；不留 red-proof stash。
+- [x] Theme initial/apply/persist：storage key 精确 `workbuddy-theme`；缺失/unknown/read throw/无 browser global → selected system；system dark/light 解析并写根 `data-theme`；选 light/dark/system 立即更新 radio、DOM 与 `当前生效：浅色|深色`，best-effort 写 enum；write throw 保持当前 memory/DOM 且不抛。
+- [x] Theme event matrix：system 下 media dark→light 实时更新且 stored 仍 system；fixed light/dark 忽略 media；storage event exact key 的 light/dark/system/null/unknown 同步且不回写，其他 key 不改变；owner unmount 精确移除 media/storage listeners，迟到 event 不写。
+- [x] Settings structure：production `/settings` 经真实 router/auth/theme 渲染页面标题 `设置`，且只有 `外观`/`关于` 两张设置卡和 `主题` 单选组三项；不存在 `通用` 卡、demo `5.3.11`、hardcoded success name/version 或第五 route；既有 canonical pathname/search/hash/唯一 current link 保持。
+- [x] ServiceInfo API：`GET /api/info` exact relative GET + same-origin + no-store + signal；只接受 exact plain `{name,version}`、nonempty name 与共享 semver regex，缺失/额外/非 string/空 name/invalid semver/null/array 均稳定失败；valid envelope 保留 message，malformed/non-JSON/network 不泄漏并回 `请求失败，请稍后重试`。
+- [x] About operation/UI：mount loading 逐字 `正在读取服务信息`，valid response 显示 returned name 与 `版本 <version>`；non401 failure 保持 Principal/settings/footer并显示 exact/stable local alert；current valid/malformed/non-JSON 401 清 Principal并在同 `/settings` URL 显示 login。About effect owns caller controller；cleanup abort caller signal，Provider 单向链接到自己的 operation controller，fetch 接收的 signal 在 caller abort/newer operation/app unmount 任一情况均 aborted，link listener 在 finally 清理；迟到 response 不写 UI/auth 或 console warning，Provider 不订阅 router。若 info 被 logout supersede而 logout 非401失败使 settings 留存，active About 必须结束 loading并显示 stable fallback，不得永久 spinner。
+- [x] Footer/confirm：所有 authenticated shell route 的侧栏 footer 逐字显示 exact Principal account/role 与 `退出登录`；无 display-name/dept/avatar fabrication。点击出现 accessible `alertdialog`，标题/说明/`取消`/`退出` 逐字匹配 fixture；cancel 关闭且零 POST/状态变化。
+- [x] Logout API/state：confirm 后单次 `POST /api/auth/logout`，无 body/content-type，same-origin + signal；专用 mode 在读 body 前仅凭 204 成功且不调 json/text，所有其他 2xx（含 200/205）稳定失败，非2xx走共享 envelope/401 core。204 与 current valid/malformed/non-JSON 401 均清 Principal/login error/logoutError、保持 pathname/search/hash并显示 login；403/500合法信封保 exact message，malformed success/error/network回稳定 fallback，均保 exact Principal/shell/location、login error null，并只写独立 authenticated `logoutError` 供 footer retry。
+- [x] Concurrency/lifecycle：同 tick double-confirm/sibling footer invocation 只产生一个 logout；logout supersede pending info/session/login，pending logout superseded/unmount 时 abort；stale/late 204/401/non401 不能覆盖 newer operation/fresh mount；所有 external/internal listener/controller 清理，main dispose 无新增 warning。
+- [x] Boundary inventory：一个 ThemeProvider/context 是 theme state/DOM/listener owner且作为 `ProtectedAppShell` 最外层包住 canonicalization/auth/login/shell；一个 ServiceInfo validator + existing envelope core + logout empty-success mode；一个 AuthProvider operationRef 授权 session/login/info/logout，Context 仅暴露窄 operations、独立 login error/logoutError，不暴露 raw API client/storage/media/router；settings/footer 不各自 fetch 或持久化。
+- [x] Final verification：new focused API/theme/settings/logout tests、全部 Web tests、`make typecheck`、Web build、`make check`、focused Web Knip、strict OpenSpec、diff/size/sensitive-data/artifact scans 全绿；coverage include/threshold、800 行旧 auth test、CI/guard 不收窄，无新依赖。
+- [x] Compatibility/non-goals：保持 #12 pure theme API、#14 auth/login/route/canonicalization/main dispose、server/kbservice 与四 route manifest；不实现 server endpoint、通用 modal、其他用户菜单、CSS/首屏截图、CSRF/OIDC/audit/真实 browser UI walk。
+- OpenSpec archive: **deferred with reason** — shared stage change 尚有 server/auth/harness 等任务；本 PR 只勾选 3.4 与本节证据，全部完成后统一归档。

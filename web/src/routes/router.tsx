@@ -7,7 +7,9 @@ import {
   useLocation,
   useMatches,
 } from "react-router";
-import { AuthGuard, AuthProvider } from "../features/auth/index.js";
+import { AuthFooter, AuthGuard, AuthProvider } from "../features/auth/index.js";
+import { SettingsPage } from "../features/settings/index.js";
+import { ThemeProvider } from "../features/theme/index.js";
 
 type RouteDefinition = {
   path: "/" | "/files" | "/center" | "/settings";
@@ -42,7 +44,7 @@ export const routeManifest: readonly RouteDefinition[] = [
     path: "/settings",
     label: "设置",
     title: "设置",
-    description: "S0a 后续任务将接入外观与关于设置",
+    description: "主题与服务信息",
   },
 ];
 
@@ -62,6 +64,7 @@ function AppShell() {
             ))}
           </ul>
         </nav>
+        <AuthFooter />
       </aside>
       <main>
         <Outlet />
@@ -116,15 +119,17 @@ function ProtectedAppShell() {
       />
     ) : null;
 
-  if (canonicalize && !providerStarted) {
-    return canonicalize;
-  }
-
   return (
-    <AuthProvider>
-      <ProviderStarted onStart={startProvider} />
-      {canonicalize ?? <AuthGuard>{<AppShell />}</AuthGuard>}
-    </AuthProvider>
+    <ThemeProvider>
+      {canonicalize && !providerStarted ? (
+        canonicalize
+      ) : (
+        <AuthProvider>
+          <ProviderStarted onStart={startProvider} />
+          {canonicalize ?? <AuthGuard>{<AppShell />}</AuthGuard>}
+        </AuthProvider>
+      )}
+    </ThemeProvider>
   );
 }
 
@@ -144,7 +149,12 @@ export function createAppRouter() {
       children: routeManifest.map(({ description, path, title }) => ({
         path,
         handle: { canonicalPath: path },
-        element: <PlaceholderPage description={description} title={title} />,
+        element:
+          path === "/settings" ? (
+            <SettingsPage />
+          ) : (
+            <PlaceholderPage description={description} title={title} />
+          ),
       })),
     },
   ]);

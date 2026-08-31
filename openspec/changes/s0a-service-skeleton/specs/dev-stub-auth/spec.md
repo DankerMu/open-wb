@@ -47,8 +47,8 @@ auth 模块 SHALL 以 `authenticate(req) → Principal | null` 为对外唯一�
 - THEN 返回 200 与当前直接 Principal JSON 对象 `{id,account,role}`，形状与登录成功响应完全一致
 
 #### Scenario: 登出后失效
-- WHEN 登出后携带原 cookie 请求 `GET /api/auth/me`
-- THEN 返回 401，会话表中该行已删除
+- WHEN 携带有效会话请求 `POST /api/auth/logout`
+- THEN 返回 204 且无 response body，删除会话行并清除 session cookie；之后携带原 cookie 请求 `GET /api/auth/me` 返回 401
 
 #### Scenario: 过期会话
 - WHEN 会话已过期（测试将 expires_at 置为过去）

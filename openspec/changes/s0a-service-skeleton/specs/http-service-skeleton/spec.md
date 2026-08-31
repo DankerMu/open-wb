@@ -10,7 +10,7 @@
 - THEN 进程持续监听配置端口，且 `GET /api/healthz` 返回 200（启动行为由 smoke 对真实进程验证）
 
 ### Requirement: 健康与服务信息端点
-系统 SHALL 提供 `GET /api/healthz`（无需认证）与 `GET /api/info`（无需认证，返回 exact SERVICE_INFO）；可注入 app 装配 SHALL 接收 caller-owned SQLite handle、以名为 `db` 的 Fastify decorator 保持同一对象 identity，并不得在 `app.close()` 时关闭该 handle。
+系统 SHALL 提供 `GET /api/healthz`（无需认证）与 `GET /api/info`（无需认证，返回 exact SERVICE_INFO）；info 成功 body SHALL 恰为 `{name:string,version:string}`，`name` 非空且 `version` 符合 `server/src/service-info.ts` 的 semver 规则。可注入 app 装配 SHALL 接收 caller-owned SQLite handle、以名为 `db` 的 Fastify decorator 保持同一对象 identity，并不得在 `app.close()` 时关闭该 handle。
 
 #### Scenario: 健康检查
 - WHEN 通过 `createApp({db, staticRoot})` 注入请求 `GET /api/healthz`
@@ -18,7 +18,7 @@
 
 #### Scenario: 服务信息
 - WHEN 请求 `GET /api/info`
-- THEN 返回 200，body exact 等于 `server/src/service-info.ts` 的 `SERVICE_INFO`，其 `version` 符合 semver
+- THEN 返回 200，body exact 等于 `server/src/service-info.ts` 的 `SERVICE_INFO` 且恰为 `{name,version}`；`name` 非空、`version` 符合 semver，两值不得由 route/UI 硬编码
 
 #### Scenario: caller 保留 DB 所有权
 - WHEN app ready 后读取 `db` decorator、重复 inject 并执行 `app.close()`

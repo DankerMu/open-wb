@@ -5,11 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthGuard, AuthProvider, useAuth } from "../src/features/auth/index.js";
 import { createAppRouter } from "../src/routes/index.js";
 
-const principal = {
-  id: "user-1",
-  account: "zhangsan",
-  role: "member",
-};
+const principal = { id: "user-1", account: "zhangsan", role: "member" };
 
 const protectedPaths = ["/", "/files", "/center", "/settings"] as const;
 
@@ -30,12 +26,8 @@ const canonicalLoginPaths = [
     "设置",
     "设置",
   ],
-  [
-    "/FILES?from=mixed-files-exact#target",
-    "/files?from=mixed-files-exact#target",
-    "工作空间",
-    "工作空间",
-  ],
+  // biome-ignore format: compact fixture table
+  ["/FILES?from=mixed-files-exact#target", "/files?from=mixed-files-exact#target", "工作空间", "工作空间"],
   [
     "/Files/?from=mixed-files-single#target",
     "/files?from=mixed-files-single#target",
@@ -70,10 +62,7 @@ const canonicalLoginPaths = [
   ],
 ] as const;
 
-type DeferredResponse = {
-  promise: Promise<Response>;
-  resolve: (response: Response) => void;
-};
+type DeferredResponse = { promise: Promise<Response>; resolve: (response: Response) => void };
 
 function deferredResponse(): DeferredResponse {
   let resolve!: (response: Response) => void;
@@ -197,7 +186,6 @@ async function expectOnlyLoading() {
   expect(screen.queryByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeNull();
   expect(screen.queryByRole("complementary", { name: "侧栏" })).toBeNull();
 }
-
 function expectMeRequest(fetchMock: ReturnType<typeof vi.fn>, callIndex = 1) {
   expect(fetchMock).toHaveBeenNthCalledWith(callIndex, "/api/auth/me", {
     method: "GET",
@@ -207,8 +195,17 @@ function expectMeRequest(fetchMock: ReturnType<typeof vi.fn>, callIndex = 1) {
   });
 }
 
+const expectInfoRequest = (fetchMock: ReturnType<typeof vi.fn>) =>
+  expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/info", {
+    method: "GET",
+    credentials: "same-origin",
+    cache: "no-store",
+    signal: expect.any(AbortSignal),
+  });
+
 function expectProviderLoginRequest(fetchMock: ReturnType<typeof vi.fn>) {
-  expect(fetchMock).toHaveBeenLastCalledWith("/api/auth/login", {
+  const callIndex = fetchMock.mock.calls.findLastIndex(([path]) => path === "/api/auth/login") + 1;
+  expect(fetchMock).toHaveBeenNthCalledWith(callIndex, "/api/auth/login", {
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
@@ -370,7 +367,6 @@ describe("route guard initial authentication", () => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
     },
   );
-
   it("renders the authenticated files shell with one current navigation link", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(principal));
     vi.stubGlobal("fetch", fetchMock);
@@ -391,7 +387,8 @@ describe("route guard initial authentication", () => {
           meLocations.push(currentLocation());
           return Promise.resolve(unauthenticatedResponse());
         })
-        .mockResolvedValueOnce(jsonResponse(principal));
+        .mockResolvedValueOnce(jsonResponse(principal))
+        .mockResolvedValueOnce(jsonResponse({ name: "workbuddy-app-server", version: "0.0.0" }));
       vi.stubGlobal("fetch", fetchMock);
 
       renderApp(initialPath);
@@ -406,7 +403,10 @@ describe("route guard initial authentication", () => {
 
       await expectAuthenticatedShell(title, currentLabel);
       expect(currentLocation()).toBe(canonicalPath);
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      if (title === "设置") {
+        await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+        expectInfoRequest(fetchMock);
+      } else expect(fetchMock).toHaveBeenCalledTimes(2);
       expectProviderLoginRequest(fetchMock);
     },
   );

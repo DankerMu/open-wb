@@ -25,7 +25,7 @@ const expectedPages = [
   {
     path: "/settings",
     title: "设置",
-    description: "S0a 后续任务将接入外观与关于设置",
+    description: "当前生效：浅色",
     currentLabel: "设置",
   },
 ] as const;
@@ -56,7 +56,7 @@ const trailingSlashPages = [
     path: "/settings/",
     canonicalPath: "/settings",
     title: "设置",
-    description: "S0a 后续任务将接入外观与关于设置",
+    description: "当前生效：浅色",
     currentLabel: "设置",
   },
   {
@@ -77,7 +77,7 @@ const trailingSlashPages = [
     path: "/settings////",
     canonicalPath: "/settings",
     title: "设置",
-    description: "S0a 后续任务将接入外观与关于设置",
+    description: "当前生效：浅色",
     currentLabel: "设置",
   },
   {
@@ -112,7 +112,7 @@ const trailingSlashPages = [
     path: "/SeTTings////",
     canonicalPath: "/settings",
     title: "设置",
-    description: "S0a 后续任务将接入外观与关于设置",
+    description: "当前生效：浅色",
     currentLabel: "设置",
   },
   {
@@ -133,7 +133,7 @@ const trailingSlashPages = [
     path: "/se%74tings///",
     canonicalPath: "/settings",
     title: "设置",
-    description: "S0a 后续任务将接入外观与关于设置",
+    description: "当前生效：浅色",
     currentLabel: "设置",
   },
 ] as const;
@@ -153,11 +153,25 @@ function setBrowserPath(path: string) {
 function authenticateRouter() {
   vi.stubGlobal(
     "fetch",
-    vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(authenticatedPrincipal), {
-        headers: { "Content-Type": "application/json" },
-      }),
-    ),
+    vi.fn((path: string) => {
+      if (path === "/api/auth/me") {
+        return Promise.resolve(
+          new Response(JSON.stringify(authenticatedPrincipal), {
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+
+      if (path === "/api/info") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ name: "workbuddy-app-server", version: "0.0.0" }), {
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+
+      throw new Error(`unexpected request ${path}`);
+    }),
   );
 }
 
@@ -204,6 +218,12 @@ describe("SPA route manifest", () => {
     expect(paths).not.toContain("/tokens");
     expect(paths).not.toContain("*");
     expect(paths.some((path) => path.startsWith("/center/"))).toBe(false);
+  });
+
+  it("describes the delivered settings surface", () => {
+    const settingsRoute = routeManifest.find(({ path }) => path === "/settings");
+
+    expect(settingsRoute).toMatchObject({ description: "主题与服务信息" });
   });
 });
 

@@ -4,6 +4,11 @@ export type Principal = {
   role: string;
 };
 
+export type ServiceInfo = {
+  name: string;
+  version: string;
+};
+
 export type LoginCredentials = {
   account: string;
   password: string;
@@ -15,7 +20,9 @@ type ApiRequestOptions = {
 
 export type ApiClient = {
   getMe(options?: ApiRequestOptions): Promise<Principal>;
+  getInfo(options?: ApiRequestOptions): Promise<ServiceInfo>;
   login(credentials: LoginCredentials, options?: ApiRequestOptions): Promise<Principal>;
+  logout(options?: ApiRequestOptions): Promise<void>;
 };
 
 export type ApiClientOptions = {
@@ -24,6 +31,9 @@ export type ApiClientOptions = {
 
 export const REQUEST_FAILED_MESSAGE = "请求失败，请稍后重试";
 const REQUEST_FAILED_CODE = "request_failed";
+const SERVICE_INFO_VERSION = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
+
+type ApiPath = "/api/auth/me" | "/api/auth/login" | "/api/auth/logout" | "/api/info";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -74,6 +84,23 @@ function parsePrincipal(value: unknown): Principal | null {
   return { id, account, role };
 }
 
+function parseServiceInfo(value: unknown): ServiceInfo | null {
+  if (!hasExactlyKeys(value, ["name", "version"])) {
+    return null;
+  }
+
+  const { name, version } = value;
+  if (typeof name !== "string" || name.length === 0 || typeof version !== "string") {
+    return null;
+  }
+
+  if (!SERVICE_INFO_VERSION.test(version)) {
+    return null;
+  }
+
+  return { name, version };
+}
+
 function parseErrorEnvelope(value: unknown): ErrorEnvelope | null {
   if (!hasExactlyKeys(value, ["error"]) || !hasExactlyKeys(value.error, ["code", "message"])) {
     return null;
@@ -91,6 +118,10 @@ function requestFailed(status: number): ApiError {
   return new ApiError(status, REQUEST_FAILED_CODE, REQUEST_FAILED_MESSAGE);
 }
 
+function isSuccessfulStatus(status: number) {
+  return status >= 200 && status < 300;
+}
+
 function requestOptions(signal?: AbortSignal): RequestInit {
   return {
     credentials: "same-origin",
@@ -98,7 +129,7 @@ function requestOptions(signal?: AbortSignal): RequestInit {
   };
 }
 
-function meRequestOptions(signal?: AbortSignal): RequestInit {
+function getRequestOptions(signal?: AbortSignal): RequestInit {
   return {
     ...requestOptions(signal),
     method: "GET",
@@ -117,48 +148,86 @@ function notifyUnauthorized(
   }
 }
 
-async function request(
-  path: "/api/auth/me" | "/api/auth/login",
-  options: RequestInit,
-  onUnauthorized: ApiClientOptions["onUnauthorized"],
-): Promise<unknown> {
-  let response: Response;
-
+async function fetchResponse(path: ApiPath, options: RequestInit): Promise<Response> {
   try {
-    response = await fetch(path, options);
+    return await fetch(path, options);
   } catch {
     throw requestFailed(0);
   }
+}
 
+async function parseJsonResponse(
+  response: Response,
+  signal: AbortSignal | undefined,
+  onUnauthorized: ApiClientOptions["onUnauthorized"],
+): Promise<unknown> {
   let body: unknown;
   try {
     body = await response.json();
   } catch {
     if (response.status === 401) {
-      notifyUnauthorized(onUnauthorized, options.signal ?? undefined);
+      notifyUnauthorized(onUnauthorized, signal);
     }
 
     throw requestFailed(response.status);
   }
 
-  if (response.ok) {
+  if (isSuccessfulStatus(response.status)) {
     return body;
   }
 
   const envelope = parseErrorEnvelope(body);
   if (!envelope) {
     if (response.status === 401) {
-      notifyUnauthorized(onUnauthorized, options.signal ?? undefined);
+      notifyUnauthorized(onUnauthorized, signal);
     }
 
     throw requestFailed(response.status);
   }
 
   if (response.status === 401) {
-    notifyUnauthorized(onUnauthorized, options.signal ?? undefined);
+    notifyUnauthorized(onUnauthorized, signal);
   }
 
   throw new ApiError(response.status, envelope.error.code, envelope.error.message);
+}
+
+async function request(
+  path: ApiPath,
+  options: RequestInit,
+  onUnauthorized: ApiClientOptions["onUnauthorized"],
+): Promise<unknown> {
+  const response = await fetchResponse(path, options);
+  return parseJsonResponse(response, options.signal ?? undefined, onUnauthorized);
+}
+
+async function serviceInfoRequest(
+  options: RequestInit,
+  onUnauthorized: ApiClientOptions["onUnauthorized"],
+): Promise<unknown> {
+  const response = await fetchResponse("/api/info", options);
+  if (isSuccessfulStatus(response.status) && response.status !== 200) {
+    throw requestFailed(response.status);
+  }
+
+  return parseJsonResponse(response, options.signal ?? undefined, onUnauthorized);
+}
+
+async function logoutRequest(
+  options: RequestInit,
+  onUnauthorized: ApiClientOptions["onUnauthorized"],
+): Promise<void> {
+  const response = await fetchResponse("/api/auth/logout", options);
+  if (response.status === 204) {
+    return;
+  }
+
+  if (isSuccessfulStatus(response.status)) {
+    throw requestFailed(response.status);
+  }
+
+  await parseJsonResponse(response, options.signal ?? undefined, onUnauthorized);
+  throw requestFailed(response.status);
 }
 
 export function createApiClient({ onUnauthorized }: ApiClientOptions = {}): ApiClient {
@@ -166,7 +235,7 @@ export function createApiClient({ onUnauthorized }: ApiClientOptions = {}): ApiC
     async getMe(options) {
       const response = await request(
         "/api/auth/me",
-        meRequestOptions(options?.signal),
+        getRequestOptions(options?.signal),
         onUnauthorized,
       );
       const principal = parsePrincipal(response);
@@ -175,6 +244,16 @@ export function createApiClient({ onUnauthorized }: ApiClientOptions = {}): ApiC
       }
 
       return principal;
+    },
+
+    async getInfo(options) {
+      const response = await serviceInfoRequest(getRequestOptions(options?.signal), onUnauthorized);
+      const serviceInfo = parseServiceInfo(response);
+      if (!serviceInfo) {
+        throw requestFailed(200);
+      }
+
+      return serviceInfo;
     },
 
     async login(credentials, options) {
@@ -194,6 +273,16 @@ export function createApiClient({ onUnauthorized }: ApiClientOptions = {}): ApiC
       }
 
       return principal;
+    },
+
+    async logout(options) {
+      await logoutRequest(
+        {
+          ...requestOptions(options?.signal),
+          method: "POST",
+        },
+        onUnauthorized,
+      );
     },
   };
 }
