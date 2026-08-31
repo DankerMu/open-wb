@@ -5,7 +5,7 @@ export function LoginForm() {
   const { error, login } = useAuth();
   const [account, setAccount] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const formRef = useRef<HTMLFormElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
   const lockedRef = useRef(false);
   const mountedRef = useRef(true);
 
@@ -22,18 +22,24 @@ export function LoginForm() {
       return;
     }
 
-    const password = new FormData(event.currentTarget).get("password");
-    if (typeof password !== "string") {
+    const formData = new FormData(event.currentTarget);
+    const submittedAccount = formData.get("account");
+    const password = formData.get("password");
+    if (typeof submittedAccount !== "string" || typeof password !== "string") {
       return;
     }
 
     lockedRef.current = true;
+    setAccount(submittedAccount);
     setSubmitting(true);
     try {
-      await login({ account, password });
+      await login({ account: submittedAccount, password });
     } finally {
       if (mountedRef.current) {
-        formRef.current?.reset();
+        const passwordInput = passwordRef.current;
+        if (passwordInput) {
+          passwordInput.value = "";
+        }
         lockedRef.current = false;
         setSubmitting(false);
       }
@@ -43,7 +49,7 @@ export function LoginForm() {
   return (
     <main>
       <h1>登录 WorkBuddy</h1>
-      <form ref={formRef} onSubmit={submit}>
+      <form onSubmit={submit}>
         <p>
           <label>
             账号
@@ -59,7 +65,13 @@ export function LoginForm() {
         <p>
           <label>
             密码
-            <input autoComplete="current-password" name="password" required type="password" />
+            <input
+              autoComplete="current-password"
+              name="password"
+              ref={passwordRef}
+              required
+              type="password"
+            />
           </label>
         </p>
         {error ? <p role="alert">{error}</p> : null}

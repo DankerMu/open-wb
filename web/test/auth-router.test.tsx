@@ -13,6 +13,63 @@ const principal = {
 
 const protectedPaths = ["/", "/files", "/center", "/settings"] as const;
 
+const canonicalLoginPaths = [
+  ["/files/?from=deep-link#target", "/files?from=deep-link#target", "工作空间", "工作空间"],
+  ["/center/?from=deep-link#target", "/center?from=deep-link#target", "中心", "中心"],
+  ["/settings/?from=deep-link#target", "/settings?from=deep-link#target", "设置", "设置"],
+  [
+    "/files//?from=repeated-files#target",
+    "/files?from=repeated-files#target",
+    "工作空间",
+    "工作空间",
+  ],
+  ["/center///?from=repeated-center#target", "/center?from=repeated-center#target", "中心", "中心"],
+  [
+    "/settings////?from=repeated-settings#target",
+    "/settings?from=repeated-settings#target",
+    "设置",
+    "设置",
+  ],
+  [
+    "/FILES?from=mixed-files-exact#target",
+    "/files?from=mixed-files-exact#target",
+    "工作空间",
+    "工作空间",
+  ],
+  [
+    "/Files/?from=mixed-files-single#target",
+    "/files?from=mixed-files-single#target",
+    "工作空间",
+    "工作空间",
+  ],
+  [
+    "/FILES//?from=mixed-files-repeated#target",
+    "/files?from=mixed-files-repeated#target",
+    "工作空间",
+    "工作空间",
+  ],
+  ["/CeNtEr///?from=mixed-center#target", "/center?from=mixed-center#target", "中心", "中心"],
+  [
+    "/SeTTings////?from=mixed-settings#target",
+    "/settings?from=mixed-settings#target",
+    "设置",
+    "设置",
+  ],
+  [
+    "/f%69les?from=encoded-files#target",
+    "/files?from=encoded-files#target",
+    "工作空间",
+    "工作空间",
+  ],
+  ["/C%45NTER//?from=encoded-center#target", "/center?from=encoded-center#target", "中心", "中心"],
+  [
+    "/se%74tings///?from=encoded-settings#target",
+    "/settings?from=encoded-settings#target",
+    "设置",
+    "设置",
+  ],
+] as const;
+
 type DeferredResponse = {
   promise: Promise<Response>;
   resolve: (response: Response) => void;
@@ -123,18 +180,37 @@ function submitLogin(accountValue: string, passwordValue: string) {
   return { account, password, submit };
 }
 
-async function expectFilesShell() {
-  expect(await screen.findByRole("heading", { level: 1, name: "工作空间" })).toBeTruthy();
+async function expectAuthenticatedShell(title: string, currentLabel: string) {
+  expect(await screen.findByRole("heading", { level: 1, name: title })).toBeTruthy();
   expect(screen.queryByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeNull();
   const sidebar = screen.getByRole("complementary", { name: "侧栏" });
-  const current = within(sidebar).getByRole("link", { name: /工作空间/ });
+  const current = within(sidebar).getByRole("link", { name: new RegExp(currentLabel) });
+  const currentLinks = within(sidebar)
+    .getAllByRole("link")
+    .filter((link) => link.getAttribute("aria-current") === "page");
+
   expect(current.getAttribute("aria-current")).toBe("page");
+  expect(currentLinks).toHaveLength(1);
+  expect(currentLinks[0]).toBe(current);
+}
+
+async function expectFilesShell() {
+  await expectAuthenticatedShell("工作空间", "工作空间");
 }
 
 async function expectOnlyLoading() {
   expect((await screen.findByRole("status")).textContent).toBe("正在检查登录状态");
   expect(screen.queryByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeNull();
   expect(screen.queryByRole("complementary", { name: "侧栏" })).toBeNull();
+}
+
+function expectMeRequest(fetchMock: ReturnType<typeof vi.fn>, callIndex = 1) {
+  expect(fetchMock).toHaveBeenNthCalledWith(callIndex, "/api/auth/me", {
+    method: "GET",
+    credentials: "same-origin",
+    cache: "no-store",
+    signal: expect.any(AbortSignal),
+  });
 }
 
 function expectProviderLoginRequest(fetchMock: ReturnType<typeof vi.fn>) {
@@ -207,6 +283,29 @@ async function submitProviderLogin(fixture: AuthTransitionFixture) {
   expectProviderLoginRequest(fixture.fetchMock);
 }
 
+async function expectProviderOwnedLoginUnauthenticates(
+  fixture: AuthTransitionFixture,
+  requestedPath: string,
+  message: string,
+) {
+  expect(await screen.findByText("受保护内容", { exact: true })).toBeTruthy();
+  expect(currentLocation()).toBe(requestedPath);
+
+  await submitProviderLogin(fixture);
+
+  await expectLogin();
+  await waitFor(() => {
+    expect(fixture.readState()).toMatchObject({
+      exposesApiClient: false,
+      principal: null,
+      status: "unauthenticated",
+    });
+    expect(screen.queryByText("受保护内容", { exact: true })).toBeNull();
+    expect(currentLocation()).toBe(requestedPath);
+  });
+  expect((await screen.findByRole("alert")).textContent).toBe(message);
+}
+
 afterEach(() => {
   cleanup();
   router?.dispose();
@@ -230,18 +329,47 @@ describe("route guard initial authentication", () => {
       await expectOnlyLoading();
       expect(currentLocation()).toBe(requestedPath);
       await waitFor(() => {
-        expect(fetchMock).toHaveBeenCalledWith("/api/auth/me", {
-          method: "GET",
-          credentials: "same-origin",
-          signal: expect.any(AbortSignal),
-        });
+        expectMeRequest(fetchMock);
       });
 
       pendingMe.resolve(unauthenticatedResponse());
 
       await expectLogin();
       expect(currentLocation()).toBe(requestedPath);
+      expect(screen.queryByRole("alert")).toBeNull();
       expect(screen.queryByRole("complementary", { name: "侧栏" })).toBeNull();
+    },
+  );
+
+  it.each([
+    ["a 200 non-JSON response", new Response("private response body")],
+    ["a fetch rejection", new Error("private transport failure")],
+    ["a malformed 401 envelope", jsonResponse({ error: { code: "unauthorized" } }, 401)],
+    ["a non-JSON 401 response", new Response("private response body", { status: 401 })],
+  ])(
+    "keeps the exact URL, shows stable fallback, and permits login after initial %s",
+    async (_label, meResult) => {
+      const fetchMock = vi
+        .fn()
+        .mockImplementationOnce(() =>
+          meResult instanceof Error ? Promise.reject(meResult) : Promise.resolve(meResult),
+        )
+        .mockResolvedValueOnce(jsonResponse(principal));
+      vi.stubGlobal("fetch", fetchMock);
+      const requestedPath = "/files?from=initial-failure#target";
+
+      renderApp(requestedPath);
+
+      await expectLogin();
+      expect((await screen.findByRole("alert")).textContent).toBe("请求失败，请稍后重试");
+      expect(screen.queryByRole("complementary", { name: "侧栏" })).toBeNull();
+      expect(currentLocation()).toBe(requestedPath);
+
+      submitLogin("zhangsan", "demo");
+
+      await expectFilesShell();
+      expect(currentLocation()).toBe(requestedPath);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
     },
   );
 
@@ -255,53 +383,106 @@ describe("route guard initial authentication", () => {
     expect(currentLocation()).toBe("/files");
   });
 
-  it("preserves the existing trailing-slash canonicalization after successful me", async () => {
+  it.each(canonicalLoginPaths)(
+    "canonicalizes %s before auth and preserves search/hash through login",
+    async (initialPath, canonicalPath, currentLabel, title) => {
+      const meLocations: string[] = [];
+      const fetchMock = vi
+        .fn()
+        .mockImplementationOnce(() => {
+          meLocations.push(currentLocation());
+          return Promise.resolve(unauthenticatedResponse());
+        })
+        .mockResolvedValueOnce(jsonResponse(principal));
+      vi.stubGlobal("fetch", fetchMock);
+
+      renderApp(initialPath);
+
+      await expectLogin();
+      expect(currentLocation()).toBe(canonicalPath);
+      expect(meLocations).toEqual([canonicalPath]);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expectMeRequest(fetchMock);
+
+      submitLogin("zhangsan", "demo");
+
+      await expectAuthenticatedShell(title, currentLabel);
+      expect(currentLocation()).toBe(canonicalPath);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expectProviderLoginRequest(fetchMock);
+    },
+  );
+
+  it("preserves trailing-slash canonicalization after a successful me", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(principal));
     vi.stubGlobal("fetch", fetchMock);
 
-    renderApp("/center/?keep=1");
+    renderApp("/center/?keep=1#target");
 
-    await waitFor(() => {
-      expect(currentLocation()).toBe("/center?keep=1");
-    });
-    expect(await screen.findByRole("heading", { level: 1, name: "中心" })).toBeTruthy();
-    expect(screen.queryByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeNull();
+    await expectAuthenticatedShell("中心", "中心");
+    expect(currentLocation()).toBe("/center?keep=1#target");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expectMeRequest(fetchMock);
+  });
+
+  it("canonicalizes later repeated-slash navigation without remounting the provider", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(principal));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderApp("/files");
+    await expectFilesShell();
+    expectMeRequest(fetchMock);
+    const initialMeSignal = await requestSignal(fetchMock, 0);
+
+    window.history.pushState(null, "", "/C%45nTeR///?from=later#target");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+
+    await expectAuthenticatedShell("中心", "中心");
+    expect(currentLocation()).toBe("/center?from=later#target");
+    expect(initialMeSignal.aborted).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("login form", () => {
-  it("submits once while pending and restores the same files route after a Principal response", async () => {
-    const pendingLogin = deferredResponse();
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(unauthenticatedResponse())
-      .mockReturnValueOnce(pendingLogin.promise);
-    vi.stubGlobal("fetch", fetchMock);
+  it.each([
+    ["the bare files route", "/files"],
+    ["a files deep link", "/files?from=deep-link#target"],
+  ])(
+    "submits once while pending and restores %s after a Principal response",
+    async (_label, requestedPath) => {
+      const pendingLogin = deferredResponse();
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(unauthenticatedResponse())
+        .mockReturnValueOnce(pendingLogin.promise);
+      vi.stubGlobal("fetch", fetchMock);
 
-    renderApp("/files");
-    await expectLogin();
-    const { account, password, submit } = getLoginForm();
-    fireEvent.change(account, { target: { value: "  ZhangSan " } });
-    fireEvent.change(password, { target: { value: "demo" } });
-    fireEvent.submit(submit.closest("form") as HTMLFormElement);
-    fireEvent.submit(submit.closest("form") as HTMLFormElement);
+      renderApp(requestedPath);
+      await expectLogin();
+      const { account, password, submit } = getLoginForm();
+      fireEvent.change(account, { target: { value: "  ZhangSan " } });
+      fireEvent.change(password, { target: { value: "demo" } });
+      fireEvent.submit(submit.closest("form") as HTMLFormElement);
+      fireEvent.submit(submit.closest("form") as HTMLFormElement);
 
-    expect(submit.disabled).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/auth/login", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: '{"account":"  ZhangSan ","password":"demo"}',
-      signal: expect.any(AbortSignal),
-    });
+      expect(submit.disabled).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenLastCalledWith("/api/auth/login", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: '{"account":"  ZhangSan ","password":"demo"}',
+        signal: expect.any(AbortSignal),
+      });
 
-    pendingLogin.resolve(jsonResponse(principal));
+      pendingLogin.resolve(jsonResponse(principal));
 
-    await expectFilesShell();
-    expect(currentLocation()).toBe("/files");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
+      await expectFilesShell();
+      expect(currentLocation()).toBe(requestedPath);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it("uses the native form submit seam for Enter", async () => {
     const fetchMock = vi
@@ -360,6 +541,52 @@ describe("login form", () => {
     },
   );
 
+  it("uses browser-filled DOM values and permits a real retry after failure", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(unauthenticatedResponse())
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { error: { code: "account_disabled", message: "该账号已停用，请联系管理员" } },
+          403,
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse(principal));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderApp("/files");
+    await expectLogin();
+    const { account, password, submit } = getLoginForm();
+    account.value = "  Filled Account ";
+    password.value = "filled-password";
+    fireEvent.submit(submit.closest("form") as HTMLFormElement);
+
+    expect((await screen.findByRole("alert")).textContent).toBe("该账号已停用，请联系管理员");
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/auth/login", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: '{"account":"  Filled Account ","password":"filled-password"}',
+      signal: expect.any(AbortSignal),
+    });
+    expect(account.value).toBe("  Filled Account ");
+    expect(password.value).toBe("");
+    expect(submit.disabled).toBe(false);
+
+    password.value = "retry-password";
+    fireEvent.submit(submit.closest("form") as HTMLFormElement);
+
+    await expectFilesShell();
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/auth/login", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: '{"account":"  Filled Account ","password":"retry-password"}',
+      signal: expect.any(AbortSignal),
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   it.each([
     ["a malformed login response", () => Promise.resolve(jsonResponse({ account: "zhangsan" }))],
     ["a network failure", () => Promise.reject(new Error("private transport failure"))],
@@ -386,6 +613,65 @@ describe("login form", () => {
 });
 
 describe("auth transitions and lifecycle", () => {
+  it.each([
+    ["a Principal", () => observedJsonResponse(principal)],
+    [
+      "a valid 401",
+      () => observedJsonResponse({ error: { code: "unauthorized", message: "登录已失效" } }, 401),
+    ],
+  ])(
+    "does not let stale me %s override a newer provider-owned login",
+    async (_label, staleResponse) => {
+      const pendingMe = deferredResponse();
+      const stale = staleResponse();
+      const newerPrincipal = { id: "user-2", account: "lisi", role: "admin" };
+      const fetchMock = vi
+        .fn()
+        .mockReturnValueOnce(pendingMe.promise)
+        .mockResolvedValueOnce(jsonResponse(newerPrincipal));
+      vi.stubGlobal("fetch", fetchMock);
+      let login: ReturnType<typeof useAuth>["login"] | undefined;
+      let state: AuthStateSnapshot | undefined;
+
+      render(
+        <AuthProvider>
+          <AuthStateProbe
+            onReady={(operation) => (login = operation)}
+            onState={(next) => (state = next)}
+          />
+        </AuthProvider>,
+      );
+
+      await waitFor(() => {
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+      });
+      const staleSignal = await requestSignal(fetchMock, 0);
+      expect(staleSignal.aborted).toBe(false);
+      if (!login) {
+        throw new Error("expected AuthProvider to expose login");
+      }
+
+      await expect(login({ account: "lisi", password: "demo" })).resolves.toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(staleSignal.aborted).toBe(true);
+      await waitFor(() => {
+        expect(state).toMatchObject({ principal: newerPrincipal, status: "authenticated" });
+      });
+      const currentPrincipal = state?.principal;
+      if (!currentPrincipal) {
+        throw new Error("expected newer login to set a Principal");
+      }
+
+      pendingMe.resolve(stale.response);
+
+      await waitFor(() => {
+        expect(stale.json).toHaveBeenCalledTimes(1);
+        expect(state).toMatchObject({ principal: newerPrincipal, status: "authenticated" });
+      });
+      expect(state?.principal).toBe(currentPrincipal);
+    },
+  );
+
   it("renders login at the same location after a provider-owned login 401", async () => {
     const requestedPath = "/files?from=session#target";
     setBrowserPath(requestedPath);
@@ -394,21 +680,18 @@ describe("auth transitions and lifecycle", () => {
       <p>受保护内容</p>,
     );
 
-    expect(await screen.findByText("受保护内容", { exact: true })).toBeTruthy();
-    expect(currentLocation()).toBe(requestedPath);
+    await expectProviderOwnedLoginUnauthenticates(fixture, requestedPath, "会话已过期");
+  });
 
-    await submitProviderLogin(fixture);
+  it("shows the stable fallback after a provider-owned login with a malformed 401 envelope", async () => {
+    const requestedPath = "/center?from=provider-malformed#target";
+    setBrowserPath(requestedPath);
+    const fixture = await renderAuthenticatedProvider(
+      jsonResponse({ error: { code: "unauthorized" } }, 401),
+      <p>受保护内容</p>,
+    );
 
-    await expectLogin();
-    await waitFor(() => {
-      expect(fixture.readState()).toMatchObject({
-        exposesApiClient: false,
-        principal: null,
-        status: "unauthenticated",
-      });
-      expect(screen.queryByText("受保护内容", { exact: true })).toBeNull();
-      expect(currentLocation()).toBe(requestedPath);
-    });
+    await expectProviderOwnedLoginUnauthenticates(fixture, requestedPath, "请求失败，请稍后重试");
   });
 
   it("preserves an authenticated Principal after a provider-owned login 403", async () => {

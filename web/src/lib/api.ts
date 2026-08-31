@@ -19,7 +19,7 @@ export type ApiClient = {
 };
 
 export type ApiClientOptions = {
-  onUnauthorized?: () => void;
+  onUnauthorized?: (signal?: AbortSignal) => void | Promise<void>;
 };
 
 export const REQUEST_FAILED_MESSAGE = "请求失败，请稍后重试";
@@ -93,15 +93,25 @@ function requestFailed(status: number): ApiError {
 
 function requestOptions(signal?: AbortSignal): RequestInit {
   return {
-    method: "GET",
     credentials: "same-origin",
     ...(signal ? { signal } : {}),
   };
 }
 
-function notifyUnauthorized(onUnauthorized: (() => void) | undefined) {
+function meRequestOptions(signal?: AbortSignal): RequestInit {
+  return {
+    ...requestOptions(signal),
+    method: "GET",
+    cache: "no-store",
+  };
+}
+
+function notifyUnauthorized(
+  onUnauthorized: ApiClientOptions["onUnauthorized"],
+  signal: AbortSignal | undefined,
+) {
   try {
-    onUnauthorized?.();
+    void Promise.resolve(onUnauthorized?.(signal)).catch(() => undefined);
   } catch {
     // The response contract must remain stable if a consumer callback fails.
   }
@@ -110,7 +120,7 @@ function notifyUnauthorized(onUnauthorized: (() => void) | undefined) {
 async function request(
   path: "/api/auth/me" | "/api/auth/login",
   options: RequestInit,
-  onUnauthorized: (() => void) | undefined,
+  onUnauthorized: ApiClientOptions["onUnauthorized"],
 ): Promise<unknown> {
   let response: Response;
 
@@ -120,14 +130,14 @@ async function request(
     throw requestFailed(0);
   }
 
-  if (response.status === 401) {
-    notifyUnauthorized(onUnauthorized);
-  }
-
   let body: unknown;
   try {
     body = await response.json();
   } catch {
+    if (response.status === 401) {
+      notifyUnauthorized(onUnauthorized, options.signal ?? undefined);
+    }
+
     throw requestFailed(response.status);
   }
 
@@ -137,7 +147,15 @@ async function request(
 
   const envelope = parseErrorEnvelope(body);
   if (!envelope) {
+    if (response.status === 401) {
+      notifyUnauthorized(onUnauthorized, options.signal ?? undefined);
+    }
+
     throw requestFailed(response.status);
+  }
+
+  if (response.status === 401) {
+    notifyUnauthorized(onUnauthorized, options.signal ?? undefined);
   }
 
   throw new ApiError(response.status, envelope.error.code, envelope.error.message);
@@ -148,7 +166,7 @@ export function createApiClient({ onUnauthorized }: ApiClientOptions = {}): ApiC
     async getMe(options) {
       const response = await request(
         "/api/auth/me",
-        requestOptions(options?.signal),
+        meRequestOptions(options?.signal),
         onUnauthorized,
       );
       const principal = parsePrincipal(response);

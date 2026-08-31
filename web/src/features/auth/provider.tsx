@@ -20,6 +20,7 @@ import {
 } from "../../lib/api.js";
 
 type AuthStatus = "loading" | "authenticated" | "unauthenticated";
+type AuthOperationKind = "login" | "session";
 
 type AuthState = {
   status: AuthStatus;
@@ -28,6 +29,16 @@ type AuthState = {
 };
 
 type SetAuthState = Dispatch<SetStateAction<AuthState>>;
+
+type AuthOperation = {
+  controller: AbortController;
+  kind: AuthOperationKind;
+  unauthorized: boolean;
+};
+
+type AuthOperationRef = {
+  current: AuthOperation | null;
+};
 
 export type AuthContextValue = AuthState & {
   login(credentials: LoginCredentials): Promise<boolean>;
@@ -45,13 +56,24 @@ function isApiError(error: unknown): error is ApiError {
   return error instanceof ApiError;
 }
 
-function canUpdate(
+function isCurrentOperation(
   mounted: boolean,
-  controller: AbortController,
-  transition: number,
-  currentTransition: number,
+  operation: AuthOperation,
+  currentOperation: AuthOperation | null,
 ) {
-  return mounted && !controller.signal.aborted && transition === currentTransition;
+  return mounted && !operation.controller.signal.aborted && operation === currentOperation;
+}
+
+function startOperation(operationRef: AuthOperationRef, kind: AuthOperationKind): AuthOperation {
+  operationRef.current?.controller.abort();
+
+  const operation: AuthOperation = {
+    controller: new AbortController(),
+    kind,
+    unauthorized: false,
+  };
+  operationRef.current = operation;
+  return operation;
 }
 
 function unauthenticatedState(error: unknown): AuthState {
@@ -62,21 +84,30 @@ function unauthenticatedState(error: unknown): AuthState {
   };
 }
 
+function isRequestFailure(error: unknown) {
+  return isApiError(error) && error.code === "request_failed";
+}
+
 function useApiClient(
   mountedRef: { current: boolean },
-  transitionRef: { current: number },
+  operationRef: AuthOperationRef,
   setState: SetAuthState,
 ) {
   const clientRef = useRef<ApiClient | null>(null);
 
   if (!clientRef.current) {
     clientRef.current = createApiClient({
-      onUnauthorized: () => {
-        if (!mountedRef.current) {
+      onUnauthorized: (signal) => {
+        const operation = operationRef.current;
+        if (
+          !operation ||
+          signal !== operation.controller.signal ||
+          !isCurrentOperation(mountedRef.current, operation, operationRef.current)
+        ) {
           return;
         }
 
-        transitionRef.current += 1;
+        operation.unauthorized = true;
         setState({ status: "unauthenticated", principal: null, error: null });
       },
     });
@@ -88,24 +119,27 @@ function useApiClient(
 function useInitialSessionCheck(
   apiClient: ApiClient,
   mountedRef: { current: boolean },
-  transitionRef: { current: number },
+  operationRef: AuthOperationRef,
   setState: SetAuthState,
 ) {
   useEffect(() => {
-    const controller = new AbortController();
-    const transition = ++transitionRef.current;
+    const operation = startOperation(operationRef, "session");
 
     void apiClient
-      .getMe({ signal: controller.signal })
+      .getMe({ signal: operation.controller.signal })
       .then((principal) => {
-        if (!canUpdate(mountedRef.current, controller, transition, transitionRef.current)) {
+        if (!isCurrentOperation(mountedRef.current, operation, operationRef.current)) {
           return;
         }
 
         setState({ status: "authenticated", principal, error: null });
       })
       .catch((error: unknown) => {
-        if (!canUpdate(mountedRef.current, controller, transition, transitionRef.current)) {
+        if (!isCurrentOperation(mountedRef.current, operation, operationRef.current)) {
+          return;
+        }
+
+        if (operation.kind === "session" && operation.unauthorized && !isRequestFailure(error)) {
           return;
         }
 
@@ -115,15 +149,15 @@ function useInitialSessionCheck(
       });
 
     return () => {
-      controller.abort();
+      operation.controller.abort();
     };
-  }, [apiClient, mountedRef, setState, transitionRef]);
+  }, [apiClient, mountedRef, operationRef, setState]);
 }
 
 function useLogin(
   apiClient: ApiClient,
   mountedRef: { current: boolean },
-  transitionRef: { current: number },
+  operationRef: AuthOperationRef,
   setState: SetAuthState,
 ) {
   const controllerRef = useRef<AbortController | null>(null);
@@ -134,9 +168,8 @@ function useLogin(
         return false;
       }
 
-      const controller = new AbortController();
-      const transition = ++transitionRef.current;
-      controllerRef.current = controller;
+      const operation = startOperation(operationRef, "login");
+      controllerRef.current = operation.controller;
       setState((current) =>
         current.status === "authenticated"
           ? current
@@ -144,15 +177,22 @@ function useLogin(
       );
 
       try {
-        const principal = await apiClient.login(credentials, { signal: controller.signal });
-        if (!canUpdate(mountedRef.current, controller, transition, transitionRef.current)) {
+        const principal = await apiClient.login(credentials, {
+          signal: operation.controller.signal,
+        });
+        if (!isCurrentOperation(mountedRef.current, operation, operationRef.current)) {
           return false;
         }
 
         setState({ status: "authenticated", principal, error: null });
         return true;
       } catch (error) {
-        if (!mountedRef.current || controller.signal.aborted) {
+        if (!isCurrentOperation(mountedRef.current, operation, operationRef.current)) {
+          return false;
+        }
+
+        if (operation.unauthorized) {
+          setState(unauthenticatedState(error));
           return false;
         }
 
@@ -161,12 +201,12 @@ function useLogin(
         );
         return false;
       } finally {
-        if (controllerRef.current === controller) {
+        if (controllerRef.current === operation.controller) {
           controllerRef.current = null;
         }
       }
     },
-    [apiClient, mountedRef, setState, transitionRef],
+    [apiClient, mountedRef, operationRef, setState],
   );
 
   useEffect(
@@ -182,21 +222,22 @@ function useLogin(
 
 export function AuthProvider({ children }: PropsWithChildren) {
   const mountedRef = useRef(false);
-  const transitionRef = useRef(0);
+  const operationRef = useRef<AuthOperation | null>(null);
   const [state, setState] = useState<AuthState>(initialAuthState);
-  const apiClient = useApiClient(mountedRef, transitionRef, setState);
+  const apiClient = useApiClient(mountedRef, operationRef, setState);
 
   useEffect(() => {
     mountedRef.current = true;
 
     return () => {
       mountedRef.current = false;
-      transitionRef.current += 1;
+      operationRef.current?.controller.abort();
+      operationRef.current = null;
     };
   }, []);
 
-  useInitialSessionCheck(apiClient, mountedRef, transitionRef, setState);
-  const login = useLogin(apiClient, mountedRef, transitionRef, setState);
+  useInitialSessionCheck(apiClient, mountedRef, operationRef, setState);
+  const login = useLogin(apiClient, mountedRef, operationRef, setState);
 
   const value = useMemo<AuthContextValue>(() => ({ ...state, login }), [login, state]);
 

@@ -52,6 +52,7 @@ describe("API client request contract", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/auth/me", {
       method: "GET",
       credentials: "same-origin",
+      cache: "no-store",
       signal: controller.signal,
     });
   });
@@ -200,6 +201,7 @@ describe("API client error envelope contract", () => {
       403,
     ],
     ["a non-JSON error response", new Response("leaked response body", { status: 500 }), 500],
+    ["a non-JSON successful response", new Response("leaked response body"), 200],
     ["a malformed successful payload", jsonResponse({ account: "zhangsan" }), 200],
   ])("maps $0 to a stable error without response text", async (_label, response, status) => {
     const fetchMock = vi.fn().mockResolvedValue(response);
@@ -226,27 +228,67 @@ describe("API client error envelope contract", () => {
 });
 
 describe("API client unauthorized callback", () => {
-  it("calls the one callback once for each 401, including a malformed body", async () => {
+  it("calls the callback once for valid, non-JSON, and malformed JSON 401 responses", async () => {
     const onUnauthorized = vi.fn();
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
         jsonResponse({ error: { code: "unauthorized", message: "登录已失效" } }, 401),
       )
-      .mockResolvedValueOnce(new Response("not JSON", { status: 401 }));
+      .mockResolvedValueOnce(new Response("not JSON", { status: 401 }))
+      .mockResolvedValueOnce(jsonResponse({ error: { code: "unauthorized" } }, 401));
     vi.stubGlobal("fetch", fetchMock);
     const client = createApiClient({ onUnauthorized });
+    const validController = new AbortController();
+    const nonJsonController = new AbortController();
+    const malformedJsonController = new AbortController();
 
-    const validError = await captureApiError(client.getMe());
-    const malformedError = await captureApiError(client.getMe());
+    const validError = await captureApiError(client.getMe({ signal: validController.signal }));
+    const nonJsonError = await captureApiError(client.getMe({ signal: nonJsonController.signal }));
+    const malformedJsonError = await captureApiError(
+      client.getMe({ signal: malformedJsonController.signal }),
+    );
 
     expect(validError).toMatchObject({ status: 401, code: "unauthorized", message: "登录已失效" });
-    expect(malformedError).toMatchObject({
-      status: 401,
-      code: "request_failed",
-      message: "请求失败，请稍后重试",
+    expectRequestFailure(nonJsonError, 401);
+    expectRequestFailure(malformedJsonError, 401);
+    expect(onUnauthorized).toHaveBeenCalledTimes(3);
+    expect(onUnauthorized).toHaveBeenNthCalledWith(1, validController.signal);
+    expect(onUnauthorized).toHaveBeenNthCalledWith(2, nonJsonController.signal);
+    expect(onUnauthorized).toHaveBeenNthCalledWith(3, malformedJsonController.signal);
+  });
+
+  it("contains synchronous and rejected unauthorized callbacks without replacing ApiError", async () => {
+    const syncThrow = vi.fn(() => {
+      throw new Error("callback failure");
     });
-    expect(onUnauthorized).toHaveBeenCalledTimes(2);
+    const asyncReject = vi.fn(async () => {
+      throw new Error("async callback failure");
+    });
+    const unhandledRejection = vi.fn();
+    window.addEventListener("unhandledrejection", unhandledRejection);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ error: { code: "unauthorized", message: "登录已失效" } }, 401),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ error: { code: "unauthorized", message: "登录已失效" } }, 401),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const syncError = await captureApiError(createApiClient({ onUnauthorized: syncThrow }).getMe());
+    const asyncError = await captureApiError(
+      createApiClient({ onUnauthorized: asyncReject }).getMe(),
+    );
+    await Promise.resolve();
+
+    expect(syncError).toMatchObject({ status: 401, code: "unauthorized", message: "登录已失效" });
+    expect(asyncError).toMatchObject({ status: 401, code: "unauthorized", message: "登录已失效" });
+    expect(syncThrow).toHaveBeenCalledTimes(1);
+    expect(asyncReject).toHaveBeenCalledTimes(1);
+    expect(unhandledRejection).not.toHaveBeenCalled();
+    window.removeEventListener("unhandledrejection", unhandledRejection);
   });
 
   it("does not call the unauthorized callback for a non-401 response", async () => {

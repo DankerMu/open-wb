@@ -1,4 +1,12 @@
-import { createBrowserRouter, NavLink, Outlet, replace } from "react-router";
+import { useCallback, useEffect, useState } from "react";
+import {
+  createBrowserRouter,
+  Navigate,
+  NavLink,
+  Outlet,
+  useLocation,
+  useMatches,
+} from "react-router";
 import { AuthGuard, AuthProvider } from "../features/auth/index.js";
 
 type RouteDefinition = {
@@ -62,12 +70,60 @@ function AppShell() {
   );
 }
 
+type RouteHandle = {
+  canonicalPath: RouteDefinition["path"];
+};
+
+type MatchedRoute = ReturnType<typeof useMatches>[number];
+
+function hasCanonicalPath(match: MatchedRoute): match is MatchedRoute & { handle: RouteHandle } {
+  const { handle } = match;
+  return (
+    typeof handle === "object" &&
+    handle !== null &&
+    "canonicalPath" in handle &&
+    typeof handle.canonicalPath === "string" &&
+    routeManifest.some(({ path }) => path === handle.canonicalPath)
+  );
+}
+
+function useMatchedCanonicalPath(): RouteDefinition["path"] | null {
+  const matches = useMatches();
+  for (const match of matches) {
+    if (hasCanonicalPath(match)) {
+      return match.handle.canonicalPath;
+    }
+  }
+
+  return null;
+}
+
+function ProviderStarted({ onStart }: { onStart: () => void }) {
+  useEffect(onStart, [onStart]);
+  return null;
+}
+
 function ProtectedAppShell() {
+  const location = useLocation();
+  const canonicalPath = useMatchedCanonicalPath();
+  const [providerStarted, setProviderStarted] = useState(false);
+  const startProvider = useCallback(() => setProviderStarted(true), []);
+  const canonicalize =
+    canonicalPath !== null && location.pathname !== canonicalPath ? (
+      <Navigate
+        replace
+        to={{ pathname: canonicalPath, search: location.search, hash: location.hash }}
+      />
+    ) : null;
+
+  if (canonicalize && !providerStarted) {
+    return canonicalize;
+  }
+
   return (
     <AuthProvider>
-      <AuthGuard>
-        <AppShell />
-      </AuthGuard>
+      <ProviderStarted onStart={startProvider} />
+      {canonicalize ?? <AuthGuard>{<AppShell />}</AuthGuard>}
     </AuthProvider>
   );
 }
@@ -81,21 +137,13 @@ function PlaceholderPage({ description, title }: Pick<RouteDefinition, "descript
   );
 }
 
-function canonicalizeRoutePath(request: Request, path: RouteDefinition["path"]) {
-  const { pathname, search } = new URL(request.url);
-
-  if (pathname !== path) {
-    return replace(`${path}${search}`);
-  }
-}
-
 export function createAppRouter() {
   return createBrowserRouter([
     {
       Component: ProtectedAppShell,
       children: routeManifest.map(({ description, path, title }) => ({
         path,
-        loader: ({ request }) => canonicalizeRoutePath(request, path),
+        handle: { canonicalPath: path },
         element: <PlaceholderPage description={description} title={title} />,
       })),
     },
