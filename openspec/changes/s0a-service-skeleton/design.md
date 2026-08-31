@@ -115,6 +115,92 @@ Boundary-surface checklist:
 - Stale-state/idempotency boundary: previously recorded filename on reopen.
 - Unchanged downstream consumers: service-info and both other workspaces.
 
+## Issue #6 delivery fixture: Fastify assembly, envelope, static fallback
+
+Issue type: feature
+Project profile: open-workbuddy
+Blast radius: high
+Fixture level: high
+Repair intensity: high
+Upstream suggested level: compact (override: shared app entrypoint, routing, public JSON schema, configured static path, and fallback precedence are mandatory expanded triggers)
+Minimal mergeable slice: atomic — tasks 1.2 + 1.4 share the global error/not-found pipeline and one `app.inject()` seam
+
+Change surface:
+- `server/src/app.ts`, `server/src/http/**`, `server/test/app.test.ts`, server dependencies/lockfile, and this issue's OpenSpec rows.
+
+Must preserve:
+- `openDb(path)` remains the only DB opener; `createApp({ db, staticRoot })` receives a caller-owned open `DatabaseSync`, makes it available to registered plugins, and never closes it, including when `app.close()` runs.
+- `SERVICE_INFO` remains the single source for app-server name/version; existing core/db, service-info, web, and kbservice behavior stays unchanged.
+- `server.ts`, listen commands, auth/session behavior, and web source remain out of this PR.
+
+Must add/change:
+- `createApp({ db, staticRoot? })` returns a Fastify instance ready for `app.inject()` without listening. It installs health/info routes, the typed application-error handler, API namespace 404 handling, optional static serving, and history fallback in deterministic order.
+- Expected application errors use one typed `HttpError`/definition map owned by `http/`: `invalid_credentials` → 401 / `账号或密码不正确`; `account_disabled` → 403 / `该账号已停用，请联系管理员`; `unauthorized` → 401 / `请先登录`; `not_found` → 404 / `请求的资源不存在`. Envelopes contain exactly `{error:{code,message}}`; unexpected programmer 5xx errors are not relabeled as one of these semantic codes.
+- `/api/healthz` returns exactly `{status:"ok"}` and `/api/info` returns exactly `SERVICE_INFO`. Exact `/api` and every unknown `/api/*` method/path resolve to the JSON `not_found` envelope and can never be served by static files or SPA fallback.
+- `staticRoot` is operator-controlled deployment configuration, not a user-workspace path. When it is an existing directory, regular assets are served under their URL paths. Only a non-API `GET` miss may fall back to that root's regular `index.html`. Absent, nonexistent, non-directory, or index-less roots do not block app readiness or health/info; the static lane or fallback is simply unavailable and misses return the JSON 404 envelope. Non-GET misses never receive index.html.
+
+Seams under test:
+- Real Fastify `app.inject()` over `createApp` is the single highest seam. Tests use a real caller-owned `openDb(":memory:")`, real temporary static files, and direct test route registration that throws each real typed `HttpError`; they do not mock Fastify, the DB, filesystem, error handler, or static plugin.
+
+Risk packs considered (core):
+- Public API / CLI / script entry: selected — `createApp` becomes the shared app-server entry seam; listen/CLI remains #7.
+- Config / project setup: selected — injected DB handle and optional `staticRoot` must have stable ownership/unavailable-root behavior.
+- File IO / path safety / overwrite: selected — untrusted URL paths read only from the configured static root through `@fastify/static`; no writes/deletes occur. Validation, symlink checks, existence checks, and `sendFile` bind to one normalized pathname identity. Non-API static paths allow at most one percent-decoding pass; multi-encoded non-API paths fail closed, so a percent-named symlink cannot be validated under a different decoded sibling. Traversal/symlinks cannot expose outside bytes, root/nested dotfiles (including encoded forms such as `.env`) are never served, and `/api` cannot be shadowed by static content.
+- Schema / columns / units / field names: selected — status/code/message and exact JSON envelope shape are public REST contracts.
+- Auth / permissions / secrets: not selected — no authentication/session decision is implemented; only future auth error vocabulary is centralized.
+- Concurrency / shared state / ordering: selected — Fastify route/plugin/not-found registration order must preserve API precedence and exactly-one response selection; runtime is synchronous from the caller's perspective.
+- Resource limits / large input / discovery: selected — request URLs are untrusted; recursive percent-decoding is capped at four passes and any still-encoded/malformed path fails closed before static/fallback, preventing superlinear CPU/heap amplification. The operator supplies one fixed artifact root and Fastify static handles file streaming.
+- Legacy compatibility / examples: selected — core/db/service-info and current workspaces remain green; future #7/#9/#10 consume the new seam/contracts.
+- Error handling / rollback / partial outputs: selected — unavailable static configurations, typed errors, API misses, and non-GET misses produce stable outputs without half registration or DB ownership changes.
+- Release / packaging / dependency compatibility: selected — `fastify` and `@fastify/static` are new runtime dependencies and must support Node 24/npm workspaces/offline installation from the lockfile.
+- Documentation / migration notes: not selected — no user migration or operator command exists yet; fixture and PR dependency rationale are sufficient.
+
+Domain packs:
+- Tenant/sandbox isolation: not selected — `staticRoot` is a trusted deployment artifact root, not an account workspace; request-path containment remains selected under File IO.
+- Auth/session lifecycle: not selected — auth routes/guards/cookies are #9/#10; this PR only provides typed errors they will consume.
+- Process/child-environment isolation: not selected — no listen/spawn/env forwarding in this PR.
+- SQLite migration/catalog compatibility: selected — app assembly consumes but does not mutate or own the caller's validated DB handle.
+- Server/web HTTP-envelope compatibility: selected — JSON error shape, health/info bodies, static assets, and SPA index fallback are shared server/browser contracts.
+- Offline deployability: selected — all runtime packages/assets resolve locally; no CDN/network dependency is introduced.
+- Browser runtime/navigation/persistence: selected — direct deep-link GET must return the configured SPA index while API/non-GET misses remain JSON.
+- Cross-service boundary: not selected — kbservice and external HTTP clients are untouched.
+
+Invariant Matrix:
+- Governing invariant: every injected request resolves exactly once according to method + API namespace + typed error + static-root state, with `/api` always taking precedence over static/fallback, while the app never takes ownership of the injected DB handle.
+- Source-of-truth identity/contract: one normalized request pathname/method used unchanged by namespace classification, dotfile/traversal/symlink/existence validation, and the final `sendFile` target; plus the four-entry typed error map, exact `SERVICE_INFO`, injected DB handle identity, and configured static-root/index identity.
+- Producers: `createApp` options, registered feature/test routes, incoming Fastify requests, `SERVICE_INFO`, and files under the configured static root.
+- Validators/preflight: app assembly validates static root/index type and installs route/error/not-found precedence; `@fastify/static` confines URL reads to its root.
+- Storage/cache/query: no new persisted state; `app.db` is the same caller-owned object and static responses read immutable fixture/build files.
+- Public routes/entrypoints: `createApp`, `GET /api/healthz`, `GET /api/info`, exact/descendant API misses, direct static GETs, and non-API fallback/miss behavior.
+- Frontend/downstream consumers: current SPA deep links/assets; future `server.ts`, auth routes/guard, hurl smoke, and browser UI walk; existing workspaces unchanged.
+- Failure paths/rollback/stale state: each typed error, API 404, non-GET miss, absent/nonexistent/file/index-less static root, traversal/outside-root request, plugin/app close, and post-close DB usability.
+- Evidence/audit/readiness: real `app.inject()` matrix, real temp root/outside sentinel, exact JSON/content-type/body assertions, direct DB identity/lifetime assertion, dependency lockfile, server coverage, `make check`, and strict OpenSpec validation.
+- Regression rows:
+  - Valid caller DB + any static-root state → app injects health/info successfully and `app.close()` leaves the same DB usable until the caller closes it.
+  - Each of the four typed errors → exact status and exact two-field envelope/message; no extra Fastify error fields leak.
+  - Static root with index + asset → direct asset returns its bytes; non-API deep-link GET including `/files/` and query variants returns exact index bytes; safe repeated separator-free trailing slashes do not become traversal errors.
+  - Static root containing an `api/**` file + unknown `/api` or `/api/*` request → JSON 404, never file/index; known health/info still win. API identity is recognized through at most four percent-decoding passes; deeper or malformed encodings fail closed with bounded work.
+  - Absent/nonexistent/regular-file/index-less static root → app becomes ready, health/info work, and deep-link miss is JSON 404 without startup failure.
+  - Non-GET non-API miss → JSON 404, never index; traversal/encoded traversal never returns outside bytes; literal and one-pass encoded safe assets bind validation and `sendFile` to the same normalized pathname; multi-encoded non-API asset/symlink paths fail closed; root/nested dotfiles in literal or encoded form return typed 404.
+  - Existing core/db and service-info tests plus web/kbservice suites → unchanged green behavior.
+
+Boundary-surface checklist:
+- Shared helper roots: typed error definitions/envelope sender and route-namespace classifier in `server/src/http`.
+- Public entrypoints: `createApp` only for this PR; no listen entry.
+- Read surfaces: caller DB identity and configured static root/index/assets; no user-workspace root.
+- Write/delete/overwrite surfaces: none.
+- Staging/publish/rollback surfaces: plugin registration/readiness/close; no file publish.
+- Producer/consumer evidence boundaries: typed code → status/message/envelope; static root/index → exact response; SERVICE_INFO → info body.
+- Stale-state/idempotency boundaries: repeated injects and app close must not mutate/close the DB or static files.
+- Unchanged downstream consumers: core/db, service-info, web, kbservice, lockfile/workspace gates.
+
+Review focus:
+- Fastify encapsulation and registration order cannot let static wildcard/fallback shadow known or unknown `/api` routes.
+- Error handler must preserve exact statuses/messages/shapes without swallowing unexpected 5xx or leaking default Fastify fields.
+- Static-root preflight/fallback must be non-throwing for unavailable roots and containment-safe for request paths.
+- App/DB ownership and `app.close()` cleanup are explicit and evidenced.
+- Dependency/lockfile and coverage changes remain minimal; no auth/listen/web scope creep.
+
 ## Migration Plan
 
 新增服务，无存量迁移。回滚 = revert PR；SQLite 文件路径可配置（默认 `var/dev.db`，gitignore）。
