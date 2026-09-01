@@ -9,12 +9,18 @@ auth 模块 SHALL 以 `authenticate(req) → Principal | null` 为对外唯一�
 - WHEN 对携带有效/无效会话的请求分别调用 `authenticate()`
 - THEN 分别返回 Principal（含 user id、账号、角色）与 null，不经 HTTP 层即可测试
 
-### Requirement: seed 测试账号
-首批迁移 SHALL 建立账号表并 seed 四账号（镜像 demo:1400-1407 + 停用扩展）：`zhangsan`（成员）、`zhaoliu`（成员）、`lisi`（管理员），密码均为 `demo`（demo:1734，dev-stub 测试值，非生产凭证）；另 seed `wangwu`（成员，`disabled=1`——demo 无停用 seed，为验证 403 分支引入）。密码 SHALL 以 scrypt 散列存入 `password_hash` 列，明文不入库。
+### Requirement: 账号与认证会话数据基座
+首批业务迁移 SHALL 以单一原子 migration 建立 `accounts` 与 `auth_sessions`。`accounts` 的持久契约 SHALL 恰为 `id`、`account`、`role`、`disabled`、`password_hash`：`id` 与规范化小写 `account` 唯一且非空，`role` 仅允许 `成员 | 管理员`，`disabled` 仅允许整数 `0 | 1`。`auth_sessions` 的持久契约 SHALL 恰为 `id`（256 bit lowercase hex）、`user_id`（引用 `accounts.id`，删账号级联删会话）与 `expires_at`（非负 Unix epoch milliseconds）；`openDb()` 返回的连接 SHALL 实际启用 SQLite foreign-key enforcement。
 
-#### Scenario: seed 存在且形态正确
-- WHEN 迁移完成后查询账号表
-- THEN 恰好存在上述四账号，`wangwu.disabled=1`，各行 `password_hash` 非明文 `demo` 且可被登录校验函数 verify 通过
+该 migration SHALL 同时 seed 四账号（镜像 demo:1400-1407 + 停用扩展）：`u1/zhangsan/成员`、`u2/zhaoliu/成员`、`u3/lisi/管理员`，密码均为 `demo`（demo:1734，dev-stub 测试值，非生产凭证）；另 seed `u4/wangwu/成员` 且 `disabled=1`——demo 无停用 seed，为验证 403 分支引入。每行 SHALL 使用不同的 16-byte salt，以 `scrypt$16384$8$1$<32 lowercase hex salt>$<64 lowercase hex digest>` 存入 `password_hash`；迁移源码与数据库均不得存储密码明文。`auth_sessions` 初始为空。
+
+#### Scenario: fresh seed 与 schema 形态正确
+- WHEN 通过 `openDb(":memory:")` 完成全部 tracked migrations
+- THEN migration receipts 按字典序包含既有 `0010`、`002` 后的单一 `010` 业务 migration；`accounts` 恰好存在上述四行、角色/停用值 exact，四个不同 salted scrypt hash 均非明文、以密码 `demo` 可校验而错误密码不可校验；`auth_sessions` 为空且其外键、级联与 epoch-millisecond/hex 约束实际生效
+
+#### Scenario: 既有 migration 基座原子升级并稳定重开
+- WHEN 临时文件库已是合法的 `0010` + `002` receipt/schema prefix，随后首次及再次调用 `openDb(path)`
+- THEN 首次只原子追加 `010` 的 schema、四个 seed 与 receipt，第二次 schema/seed/receipt 均不变化；若 `010` 发生 catalog conflict，则本次 schema、seed 与 receipt 全部回滚并保留既有 prefix
 
 ### Requirement: 登录端点与语义
 `POST /api/auth/login` SHALL 接收恰为 `{account:string,password:string}` 的 JSON body；账号先 trim 再小写化后匹配（demo:1644）；成功建立服务端会话并 Set-Cookie；失败语义镜像 demo，错误响应使用统一错误信封。

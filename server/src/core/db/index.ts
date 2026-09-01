@@ -22,6 +22,8 @@ export function openDb(path: string): DatabaseSync {
   try {
     // WAL 先于任何迁移；:memory: 不支持 WAL，SQLite 保持 memory 模式。
     db.exec("PRAGMA journal_mode = WAL");
+    // 外键按连接启用，不随文件持久化；每个成功返回的句柄都必须实际打开 enforcement。
+    db.exec("PRAGMA foreign_keys = ON");
 
     const migrations = trackedMigrationAssets();
     const filenames = migrations.map((migration) => migration.filename);

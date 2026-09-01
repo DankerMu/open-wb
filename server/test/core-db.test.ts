@@ -21,6 +21,7 @@ import {
   ledgerFilenames,
   ledgerRows,
   MIGRATION_002,
+  MIGRATION_010,
   MIGRATION_0010,
   migrationReceiptExists,
   removeTempDirs,
@@ -296,12 +297,13 @@ describe("core/db openDb", () => {
         .prepare("SELECT filename FROM schema_migration_history")
         .all()
         .map((row) => String(row.filename));
-      expect(history).toEqual([MIGRATION_0010, MIGRATION_002]);
+      expect(history).toEqual([MIGRATION_0010, MIGRATION_002, MIGRATION_010]);
 
       // 回执的 sequence 与字典序应用顺序一致。
       expect(ledgerRows(db)).toEqual([
         [1, MIGRATION_0010],
         [2, MIGRATION_002],
+        [3, MIGRATION_010],
       ]);
 
       // 两个守卫触发器与历史视图都真实存在（UPDATE/DELETE/REPLACE 被拒是其生效证明）。
@@ -359,7 +361,7 @@ describe("core/db openDb", () => {
         .prepare("SELECT filename FROM schema_migration_history")
         .all()
         .map((row) => String(row.filename));
-      expect(history).toEqual([MIGRATION_0010, MIGRATION_002]);
+      expect(history).toEqual([MIGRATION_0010, MIGRATION_002, MIGRATION_010]);
     } finally {
       try {
         db?.close();
@@ -387,7 +389,7 @@ describe("core/db openDb", () => {
     seedValid0010Prefix(file);
 
     withOpenDb(file, (db) => {
-      expect(ledgerFilenames(db)).toEqual([MIGRATION_0010, MIGRATION_002]);
+      expect(ledgerFilenames(db)).toEqual([MIGRATION_0010, MIGRATION_002, MIGRATION_010]);
       expect(
         db.prepare("SELECT type FROM sqlite_master WHERE name = ?").get(HISTORY_VIEW)?.type,
       ).toBe("view");
@@ -560,7 +562,7 @@ END`);
 
   it("忽略非 SQL 直属文件与嵌套 .sql 文件", () => {
     withOpenDb(join(tempDir(), "app.db"), (db) => {
-      expect(ledgerFilenames(db)).toEqual([MIGRATION_0010, MIGRATION_002]);
+      expect(ledgerFilenames(db)).toEqual([MIGRATION_0010, MIGRATION_002, MIGRATION_010]);
       const tables = db
         .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
         .all()

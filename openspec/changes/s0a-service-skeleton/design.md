@@ -201,9 +201,92 @@ Review focus:
 - App/DB ownership and `app.close()` cleanup are explicit and evidenced.
 - Dependency/lockfile and coverage changes remain minimal; no auth/listen/web scope creep.
 
+## Issue #8 delivery fixture: account/auth-session schema and dev seed
+
+Issue type: feature
+Project profile: open-workbuddy
+Blast radius: high
+Fixture level: high
+Repair intensity: high
+Upstream suggested level: compact (override: persisted migration/schema, password-derived secret material, foreign-key lifecycle, and shared auth storage are mandatory expanded triggers)
+Minimal mergeable slice: atomic — one `010` migration creates both tables, seeds all four accounts, and records one receipt
+
+Change surface:
+- One direct-child `server/src/core/db/migrations/010_*.sql` asset, `openDb` foreign-key setup, focused server migration/seed tests and helpers, plus this issue's OpenSpec rows.
+
+Must preserve:
+- `openDb(path)` remains the only DB-opening seam; lexical order remains `0010`, `002`, then `010`, and each migration body/effect/receipt remains one runner-owned transaction.
+- The existing migration foundation catalog, WAL behavior, caller-owned handle, Fastify app, service-info, web, and kbservice behavior remain unchanged.
+- A legal `0010` + `002` database is a supported prefix that upgrades once; malformed foundation state still fails before any new business effect.
+
+Must add/change:
+- A single plain-SQL `010_auth_schema_seed.sql` creates `accounts` and `auth_sessions` without `IF NOT EXISTS`, `OR IGNORE`, or alternate bootstrap path, then inserts exactly four fixed dev-stub accounts. A late table/seed conflict therefore aborts the migration transaction rather than silently accepting unknown state.
+- `accounts` has exactly `id`, `account`, `role`, `disabled`, `password_hash`; IDs are `u1`–`u4`, account is trimmed lowercase unique text, role is exactly `成员 | 管理员`, disabled is integer `0 | 1`, and no display-name/dept/sandbox/quota field is invented in this slice.
+- `auth_sessions` is distinct from future Agent conversation state and has exactly `id`, `user_id`, `expires_at`; IDs are 64 lowercase hex characters, `user_id` references `accounts(id) ON DELETE CASCADE`, and expiry is a non-negative integer Unix epoch in milliseconds. `openDb` enables SQLite foreign keys for every returned connection.
+- Seed hashes are four distinct precomputed scrypt values with self-describing format `scrypt$16384$8$1$<16-byte salt hex>$<32-byte digest hex>`. The tracked migration contains no plaintext `demo`; tests independently parse the encoding and use Node `scrypt` to prove each row accepts `demo` and rejects a wrong password. No production login/verifier API is added before #9.
+
+Seams under test:
+- Real `openDb(":memory:")` and a real temporary file path remain the only product seams; tests query SQLite schema/data directly and use built-in `node:crypto` only as an independent hash oracle. No DB, migrator, filesystem, or crypto mock.
+
+Risk packs considered (core):
+- Public API / CLI / script entry: selected — `openDb(path)` now promises foreign-key enforcement and the auth schema to downstream #9/#10.
+- Config / project setup: not selected — no new runtime config or external migration directory; the tracked fixed directory remains authoritative.
+- File IO / path safety / overwrite: selected — a new immutable tracked SQL asset must remain a regular direct child and bind its receipt to its exact bytes; existing asset-safety tests remain green.
+- Schema / columns / units / field names: selected — table names, exact columns, role/disabled domains, session-id shape, foreign key action, and epoch-millisecond unit are persisted contracts.
+- Auth / permissions / secrets: selected — password-derived material is stored; plaintext and reversible credentials are forbidden, and independent verification must distinguish correct/wrong passwords.
+- Concurrency / shared state / ordering: selected — lexical migration order, one receipt, unique account identity, foreign-key/cascade state, and reopen idempotency are shared-state rules; multi-process migration coordination remains out of scope.
+- Resource limits / large input / discovery: not selected — four fixed seed rows and one fixed SQL asset are repository-bounded; scrypt parameters are fixed and no user input/discovery occurs in this slice.
+- Legacy compatibility / examples: selected — an existing valid foundation prefix upgrades atomically and a fully upgraded DB reopens without changing schema, hashes, rows, or receipts.
+- Error handling / rollback / partial outputs: selected — any early/late `010` conflict must leave no new table, seed row, or receipt while preserving the committed foundation prefix byte-for-byte at the catalog level.
+- Release / packaging / dependency compatibility: selected — hashing verification uses Node 24 built-in `node:crypto`; no package dependency or network/runtime download is introduced.
+- Documentation / migration notes: not selected — no operator migration procedure exists yet; the tracked migration and fixture define first-install behavior.
+
+Domain packs:
+- Tenant/sandbox isolation: not selected — this slice stores account identity only and creates no workspace/sandbox path or visibility query.
+- Auth/session lifecycle: selected — account identity, disabled state, hash contract, session key/user/expiry schema and cascade are the exact storage seam consumed by #9/#10.
+- Process/child-environment isolation: not selected — no process, environment, model token, or credential forwarding.
+- SQLite migration/seed compatibility: selected — business effects, four seed rows and receipt must commit atomically after the legal foundation prefix and remain stable on reopen.
+- Server/web HTTP-envelope compatibility: not selected — no route, cookie, Principal response, or envelope behavior is implemented in this slice.
+- Offline deployability: selected — SQL and Node built-ins are the only runtime inputs.
+- Browser runtime/navigation/persistence: not selected — no browser behavior or client storage changes.
+- Cross-service boundary: not selected — no network contract or kbservice call.
+
+Invariant Matrix:
+- Governing invariant: one tracked `010` identity atomically turns a canonical foundation prefix into exactly one constrained account/session schema plus four independently verifiable non-plaintext dev accounts, and every later open observes the identical state.
+- Source-of-truth identity/contract: migration filename/receipt; `accounts.id` + normalized `account`; encoded scrypt parameter/salt/digest bytes; `auth_sessions.id` + `user_id` foreign key + millisecond expiry.
+- Producers: immutable `010_auth_schema_seed.sql` and its four literal seed rows.
+- Validators/preflight: existing migration discovery/catalog prefix validation; SQLite table CHECK/UNIQUE/FOREIGN KEY constraints; test-only independent scrypt parser/oracle.
+- Storage/cache/query: SQLite `accounts`, `auth_sessions`, `schema_migrations`, and connection-local `PRAGMA foreign_keys`.
+- Public routes/entrypoints: `openDb(path)` only; HTTP/login/authenticate remain #9/#10.
+- Frontend/downstream consumers: #9 reads account/hash/disabled and writes sessions; #10 reads/deletes sessions; current app DB decorator and all existing workspaces remain unchanged.
+- Failure paths/rollback/stale state: invalid row mutations are rejected; unknown pre-existing `accounts` or `auth_sessions` state conflicts; a late `auth_sessions` conflict proves earlier account DDL/seed rollback; valid complete state reopens without reseeding or hash drift.
+- Evidence/audit/readiness: exact `PRAGMA table_xinfo/index_list/foreign_key_list`, seed query, scrypt correct/wrong oracle, constraint mutation matrix, full catalog/data snapshot across upgrade/reopen/failure, server coverage, `make check`, and strict OpenSpec.
+- Regression rows:
+  - Fresh `:memory:` open → receipts exactly `[0010,002,010]`, exact two-table schema, exact four account identities/roles/disabled values, four unique valid hashes, zero auth sessions, foreign keys enabled.
+  - Each invalid account/session mutation (empty/non-normalized/duplicate account, invalid role/disabled/hash/session id/user/expiry) → SQLite rejects it without changing canonical seed/session state.
+  - Valid account + session then account delete → session cascades; unknown user insert → foreign-key failure.
+  - Valid foundation-only temporary file → first open adds exactly `010`; second open preserves complete catalog, seed/hash bytes, empty sessions, and receipt order.
+  - Foundation prefix + pre-existing conflicting `accounts` or late-conflicting `auth_sessions` → `openDb` fails, closes its owned handle, preserves the complete pre-open catalog/data snapshot, and leaves no `010` receipt or partial schema/seed.
+  - Existing core/db/app/service-info tests plus web/kbservice suites → unchanged green behavior after expected receipt assertions are advanced from foundation prefix to current complete schema.
+
+Boundary-surface checklist:
+- Shared helper roots: `server/src/core/db` migration discovery/runner/ledger; no second DB opener or seed runner.
+- Public entrypoints: `openDb(path)` only.
+- Read/write surfaces: fixed migration asset and SQLite schema/seed rows; no external path or user input.
+- Producer/consumer boundary: SQL hash encoding and table schema → #9/#10 auth consumers; names/units are fixed now to avoid downstream forks.
+- Stale-state/idempotency boundary: foundation-only prefix, complete receipt prefix, conflicting partial business catalog, repeated open.
+- Unchanged downstream consumers: Fastify app DB decorator, service-info, web, kbservice.
+
+Review focus:
+- SQL constraints and tests must prove the promised domains, not merely inspect four happy-path rows.
+- Hash verification must independently derive all four digests and reject a wrong password; no plaintext or fake placeholder hash may enter production SQL.
+- Foundation-prefix helpers/tests must not keep calling two receipts “complete”; every accepted/failure snapshot must distinguish foundation from current full schema.
+- Foreign-key enforcement must be active on the caller-visible `openDb` connection, with cascade and unknown-user rejection observed.
+- Conflict tests must exercise a late failure after earlier `010` statements to prove schema/seed/receipt rollback, not only an early CREATE failure.
+
 ## Migration Plan
 
-新增服务，无存量迁移。回滚 = revert PR；SQLite 文件路径可配置（默认 `var/dev.db`，gitignore）。
+新增服务，无存量业务数据迁移。Issue #8 从合法 foundation prefix 原子增加首个业务 schema；回滚 = revert PR 后删除仅由未发布开发版本产生的 DB。SQLite 文件路径仍由后续 #7 配置（默认 `var/dev.db`，gitignore）。
 
 ## Issue delivery fixture: #11 web 构建工具链
 

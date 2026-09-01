@@ -7,15 +7,18 @@ import {
   COMPLETE_CATALOG_WITH_UNRELATED_TRIGGER,
   createCanonicalLedger,
   createValid0010Prefix,
-  createValidCompletePrefix,
+  createValidFoundationPrefix,
   EMPTY_CATALOG,
   expectCatalogSnapshot,
   expectFailedOpenToPreserveFullCatalog,
   expectNoBootstrapLedger,
   expectOpenDbFailure,
   expectRepeatedOpenStable,
+  FOUNDATION_CATALOG,
   fullCatalogSnapshot,
   ledgerFilenames,
+  MIGRATION_002,
+  MIGRATION_010,
   MIGRATION_0010,
   PREFIX_CATALOG,
   removeTempDirs,
@@ -110,9 +113,9 @@ describe("core/db catalog protocol", () => {
       after: COMPLETE_CATALOG,
     },
     {
-      name: "完整规范前缀",
-      seed: createValidCompletePrefix,
-      before: COMPLETE_CATALOG,
+      name: "合法 foundation prefix",
+      seed: createValidFoundationPrefix,
+      before: FOUNDATION_CATALOG,
       after: COMPLETE_CATALOG,
     },
     {
@@ -384,7 +387,7 @@ CREATE TRIGGER unrelated_trigger AFTER INSERT ON unrelated_table BEGIN SELECT 1;
     withOpenDb(file, (db) => {
       expect(ledgerFilenames(db)).toEqual(first.receipts);
       expect(fullCatalogSnapshot(db)).toEqual(first.catalog);
-      expect(ledgerFilenames(db)).toEqual([MIGRATION_0010, "002_schema_migrations_history.sql"]);
+      expect(ledgerFilenames(db)).toEqual([MIGRATION_0010, MIGRATION_002, MIGRATION_010]);
     });
   });
 
@@ -392,24 +395,27 @@ CREATE TRIGGER unrelated_trigger AFTER INSERT ON unrelated_table BEGIN SELECT 1;
     ["LF", "\n"],
     ["CRLF", "\r\n"],
     ["lone CR", "\r"],
-  ] as const)("%s 规范基座在空账本、0010 前缀与完整目录中均可稳定重开", (_name, lineEnding) => {
-    const cases: ReadonlyArray<
-      readonly [string, (db: DatabaseSync, ending: SqlLineEnding) => void]
-    > = [
-      ["空账本", (db) => createCanonicalLedger(db)],
-      ["0010 前缀", createValid0010Prefix],
-      ["完整目录", createValidCompletePrefix],
-    ];
+  ] as const)(
+    "%s 规范基座在空账本、0010 前缀与 foundation prefix 中均可稳定重开",
+    (_name, lineEnding) => {
+      const cases: ReadonlyArray<
+        readonly [string, (db: DatabaseSync, ending: SqlLineEnding) => void]
+      > = [
+        ["空账本", (db) => createCanonicalLedger(db)],
+        ["0010 前缀", createValid0010Prefix],
+        ["foundation prefix", createValidFoundationPrefix],
+      ];
 
-    for (const [stateName, seed] of cases) {
-      const file = join(tempDir(), `${stateName}.db`);
-      withDatabase(file, (db) => seed(db, lineEnding));
+      for (const [stateName, seed] of cases) {
+        const file = join(tempDir(), `${stateName}.db`);
+        withDatabase(file, (db) => seed(db, lineEnding));
 
-      expectRepeatedOpenStable(file, (db) => {
-        expect(ledgerFilenames(db)).toEqual([MIGRATION_0010, "002_schema_migrations_history.sql"]);
-      });
-    }
-  });
+        expectRepeatedOpenStable(file, (db) => {
+          expect(ledgerFilenames(db)).toEqual([MIGRATION_0010, MIGRATION_002, MIGRATION_010]);
+        });
+      }
+    },
+  );
 
   it.each([
     [
@@ -428,7 +434,7 @@ CREATE TRIGGER unrelated_trigger AFTER INSERT ON unrelated_table BEGIN SELECT 1;
   ])("规范基座的非 EOL %s 漂移仍被拒绝并保留完整目录", (_name, objectName, expected, drifted) => {
     const file = join(tempDir(), "app.db");
     withDatabase(file, (db) => {
-      createValidCompletePrefix(db, "\r\n");
+      createValidFoundationPrefix(db, "\r\n");
       recreateReservedDefinition(db, objectName, expected, drifted);
     });
 
@@ -459,7 +465,7 @@ CREATE TRIGGER unrelated_trigger AFTER INSERT ON unrelated_table BEGIN SELECT 1;
     });
     const file = join(tempDir(), "whitespace-definition-drift.db");
     withDatabase(file, (db) => {
-      createValidCompletePrefix(db);
+      createValidFoundationPrefix(db);
       const definition = recreateReservedDefinition(db, objectName, expected, drifted);
       const storedDefinition = db
         .prepare("SELECT sql FROM sqlite_master WHERE name = ?")

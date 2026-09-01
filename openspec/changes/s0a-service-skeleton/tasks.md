@@ -45,7 +45,21 @@ Minimal mergeable slice: 1.1 core/db 单独可合并保绿（独立模块+自带
 
 ## 2. dev-stub-auth
 
-- [ ] 2.1 账号/会话表迁移 + seed 四账号（zhangsan/zhaoliu/lisi 密码 demo + wangwu 停用；scrypt 散列入 password_hash，明文不入库）+ seed 形态断言（散列可 verify、非明文）
+- [x] 2.1 账号/会话表迁移 + seed 四账号（zhangsan/zhaoliu/lisi 密码 demo + wangwu 停用；scrypt 散列入 password_hash，明文不入库）+ seed 形态断言（散列可 verify、非明文）
+  - Issue #8 fixture: high（上游 compact 因 migration/schema/password-derived secret/foreign-key lifecycle/shared auth state 强制升档）；repair intensity: high；minimal slice: atomic single `010` migration。
+  - Seams under test: real `openDb(":memory:")` + real temporary file DB；direct SQLite schema/data queries + independent test-only `node:crypto` scrypt oracle；不 mock DB/migrator/filesystem/crypto，不提前添加 #9 production verifier。
+  - Required evidence:
+    - TDD/red-proof：先添加 issue #8 focused test 并在 pre-change production source 上运行，因缺 `010`/schema/seed/foreign-key state 而红；最终恢复并全绿，无 red-proof stash；
+    - tracked assets/receipts exact lexical order = `0010_schema_migrations_update_guard.sql`, `002_schema_migrations_history.sql`, `010_auth_schema_seed.sql`；`010` 只有一条 receipt，migration source 不含 plaintext `'demo'`/`"demo"`、`IF NOT EXISTS`、`OR IGNORE` 或第二 seed runner；
+    - `accounts` exact columns = `id,account,role,disabled,password_hash`；`auth_sessions` exact columns = `id,user_id,expires_at`；table/index/FK inventory only contains promised PK/UNIQUE/FK/CHECK semantics，无额外列、表、view/trigger/index；
+    - exact seed rows = `u1/zhangsan/成员/0`, `u2/zhaoliu/成员/0`, `u3/lisi/管理员/0`, `u4/wangwu/成员/1`；恰四行，auth_sessions 恰零行；
+    - 四个 `password_hash` 均 exact match `scrypt$16384$8$1$[0-9a-f]{32}$[0-9a-f]{64}`、salt/digest 各不相同、非 `demo`；测试独立 parse 参数并以 Node `scrypt` 证明 `demo` true、wrong password false；tracked SQL 与 DB 文本扫描不得出现明文 password 字段/值；
+    - account mutation matrix：empty/uppercase/trim-needed/duplicate account、empty id、invalid role、disabled `-1/2/text/null`、malformed hash 均被 SQLite constraint 拒绝且 canonical four rows 不变；合法第五账号可插入并删除以证明约束不误拒；
+    - auth session matrix：id 非 64 lowercase hex、unknown user、negative/non-integer expiry 被拒；合法 session 可插入；删除 parent account 级联删除 session；`PRAGMA foreign_keys=1` 在 caller-visible `openDb` handle 上成立；
+    - legal foundation-only `0010+002` temp DB 首次打开 -> 原子追加 exact `010` schema/seed/receipt；第二次打开 -> full catalog + seed/hash/session/receipt snapshot byte-stable；foundation helper/既有 core-db expectations 明确改称 prefix，不再把两 receipt 当 current complete；
+    - early `accounts` conflict 与 late `auth_sessions` conflict（在 `010` 已执行 account DDL+seed 后失败）-> complete pre-open catalog/data snapshot 不变，无 partial accounts/session/seed/`010` receipt，failed `openDb` 真实关闭内部 handle；
+    - existing malformed foundation/asset/runner/EOL/catalog tests、app/service-info/web/kbservice 保持绿；`npm test --workspace server`、`make check`、strict OpenSpec、`git diff --check` exit 0，coverage include/80% thresholds 不收窄。
+  - Non-goals: production login/hash-verifier API（#9）、session generation/cookie（#9）、TTL/me/logout（#10）、guard（#19）、display name/dept/sandbox/quota、OIDC/audit/http/web、外部 migration/seed config、多进程迁移协调。
 - [ ] 2.2 provider 接缝与登录：`authenticate(req) → Principal | null` 出口 + `providers/dev-stub.ts` 登录流程（trim+小写化、401/403 信封文案镜像 demo、CSPRNG session id 256bit、Set-Cookie httpOnly/SameSite=Lax/Path=/、Secure 配置项）+ 接缝直接断言与 inject 测试
 - [ ] 2.3 会话生命周期：`GET /api/auth/me`、`POST /api/auth/logout`（删行清 cookie）、TTL 配置（默认 7 天绝对过期）与惰性清理 + inject 测试（含过期置回）
 - [ ] 2.4 认证守卫：`/api/*` 默认要求会话（healthz/info/login 豁免）、无 cookie 与伪造/未知 session id 均 401 信封不 5xx + inject 测试
