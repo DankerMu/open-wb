@@ -7,6 +7,8 @@ import { openDb } from "../src/core/db/index.js";
 
 export const MIGRATION_0010 = "0010_schema_migrations_update_guard.sql";
 export const MIGRATION_002 = "002_schema_migrations_history.sql";
+export const MIGRATION_010 = "010_auth_schema_seed.sql";
+export const TRACKED_MIGRATION_FILENAMES = [MIGRATION_0010, MIGRATION_002, MIGRATION_010] as const;
 export const HISTORY_VIEW = "schema_migration_history";
 export type SqlLineEnding = "\n" | "\r\n" | "\r";
 
@@ -37,12 +39,26 @@ export const PREFIX_CATALOG: CatalogSnapshot = {
   triggerNames: ["schema_migrations_no_reinsert", "schema_migrations_no_update"],
   historyExists: false,
 };
-export const COMPLETE_CATALOG: CatalogSnapshot = {
+export const FOUNDATION_CATALOG: CatalogSnapshot = {
   receipts: [
     [1, MIGRATION_0010],
     [2, MIGRATION_002],
   ],
   sequenceRows: [["schema_migrations", 2, "integer"]],
+  triggerNames: [
+    "schema_migrations_no_delete",
+    "schema_migrations_no_reinsert",
+    "schema_migrations_no_update",
+  ],
+  historyExists: true,
+};
+export const COMPLETE_CATALOG: CatalogSnapshot = {
+  receipts: [
+    [1, MIGRATION_0010],
+    [2, MIGRATION_002],
+    [3, MIGRATION_010],
+  ],
+  sequenceRows: [["schema_migrations", 3, "integer"]],
   triggerNames: [
     "schema_migrations_no_delete",
     "schema_migrations_no_reinsert",
@@ -215,7 +231,7 @@ export function createValid0010Prefix(db: DatabaseSync, lineEnding: SqlLineEndin
   db.prepare("INSERT INTO schema_migrations(filename) VALUES (?)").run(MIGRATION_0010);
 }
 
-export function createValidCompletePrefix(
+export function createValidFoundationPrefix(
   db: DatabaseSync,
   lineEnding: SqlLineEnding = "\n",
 ): void {
@@ -230,6 +246,10 @@ function withSqlLineEnding(source: string, lineEnding: SqlLineEnding): string {
 
 export function seedValid0010Prefix(path: string): void {
   withDatabase(path, createValid0010Prefix);
+}
+
+export function seedValidFoundationPrefix(path: string): void {
+  withDatabase(path, createValidFoundationPrefix);
 }
 
 export function expectOpenDbFailure(path: string, expectedError?: RegExp): void {
