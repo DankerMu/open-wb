@@ -5,11 +5,17 @@
 ### Requirement: provider 接缝
 auth 模块 SHALL 以 `authenticate(req) → Principal | null` 为对外唯一认证判定出口（ADR-0007 接缝）；Principal SHALL 恰为 `{id:string,account:string,role:string}`。dev-stub 凭证适配器 SHALL 落在 `server/src/auth/providers/dev-stub.ts`；cookie/session 读取 SHALL 是 provider 无关的共享实现，且不得 import dev-stub provider——S3a 增加 OIDC 适配器时接缝、session storage 与调用方不变。
 
-`authenticate()` SHALL 从 cookie `workbuddy_session` 读取会话 ID，只接受 64 位 lowercase hex；仅当会话存在、`expires_at` 严格晚于当前 Unix epoch milliseconds、关联账号存在且未停用时返回 exact Principal，否则返回 null。该读取不得创建、替换或删除会话；过期行的惰性删除属于 #10。
+`authenticate()` SHALL 从 cookie `workbuddy_session` 读取会话 ID，只接受 own property 的 64 位 lowercase hex；仅当该 ID 对应会话的 `expires_at` 严格晚于当前 Unix epoch milliseconds、关联账号存在且未停用时返回 exact Principal，否则返回 null。它 SHALL 在 SQLite 内先判定 matched row 的 expiry，避免把任意 64-bit epoch 投影成不安全 JavaScript number；若 exact matched row 的 `expires_at <= now`，即使关联账号已停用或成为 orphan，也 SHALL 以 `WHERE id=? AND expires_at<=?` 定点惰性删除并在 commit 后返回 null。Missing/畸形/unknown cookie、invalid clock 或 future disabled/orphan row SHALL 不删除任何会话；不得创建、替换、全表扫描/清理或改写 sibling row。
 
 #### Scenario: 接缝可直接断言
-- WHEN 不经 HTTP 路由，分别对携带有效、缺失、畸形、未知、过期或停用账号会话 cookie 的 request-shaped 输入调用 `authenticate()`
-- THEN 有效输入返回 exact Principal `{id,account,role}`，其余均返回 null；数据库行数不变化
+- WHEN 不经 HTTP 路由，对携带有效 future-enabled 会话 cookie 的 request-shaped 输入调用 `authenticate()`
+- THEN 返回 exact Principal `{id,account,role}`，所有 session/account rows 保持不变
+- WHEN 输入为 missing/own-property-missing/prototype-inherited、畸形/uppercase、unknown cookie，invalid clock，或 future disabled/orphan row
+- THEN 返回 null 且完整 session/account snapshots 不变
+
+#### Scenario: 过期 exact row 惰性清理
+- WHEN exact cookie 匹配 `expires_at < now` 或 `expires_at == now` 的 row（含 disabled/orphan row），同时数据库中存在 unrelated future/expired siblings
+- THEN `authenticate()` 只删除该 matched expired row并返回 null；siblings 与 accounts 逐值不变，重复调用不产生额外写入
 
 ### Requirement: 账号与认证会话数据基座
 首批业务迁移 SHALL 以单一原子 migration 建立 `accounts` 与 `auth_sessions`。`accounts` 的持久契约 SHALL 恰为 `id`、`account`、`role`、`disabled`、`password_hash`：`id` 为非空 TEXT；`account` 唯一且仅允许非空 lowercase ASCII `[a-z0-9._-]+`（登录输入仍先 trim+小写化后查询），`role` 仅允许 `成员 | 管理员`，`disabled` 仅允许整数 `0 | 1`。`auth_sessions` 的持久契约 SHALL 恰为 `id`（256 bit lowercase hex）、`user_id`（引用 `accounts.id`，删账号级联删会话）与 `expires_at`（非负 Unix epoch milliseconds）；`openDb()` 返回的连接 SHALL 实际启用 SQLite foreign-key enforcement。
@@ -27,11 +33,11 @@ auth 模块 SHALL 以 `authenticate(req) → Principal | null` 为对外唯一�
 ### Requirement: 登录端点与语义
 `POST /api/auth/login` SHALL 只接受 `application/json` 且 body 为 exact plain object `{account:string,password:string}`；缺失/额外字段、null/array、非 string 值、malformed JSON 或非 JSON content type SHALL 以稳定 400 `bad_request` 拒绝，且不得查询凭证、设置 cookie 或写会话。登录路由 SHALL 对 Fastify 已解析但未经 route-schema 变换的原始 JSON 值执行手写 exact-shape 校验；不得用会触发 Fastify/AJV 默认 type coercion 或 additional-property stripping 的 route schema，否则 `password:5` 或额外字段会在校验前被改写为合法 shape。全局 AJV 行为不得因本端点而改变。账号 SHALL 先使用 JavaScript `trim()` 再 `toLowerCase()` 后匹配（demo:1644）；空白归一化后为空 SHALL 等同未知账号。dev-stub provider SHALL 以存储 encoding 内的参数/salt/digest 使用 `node:crypto` scrypt，并以 constant-time digest compare 校验密码；未知账号 SHALL 使用请求提交的 password 对固定有效 dummy encoding 执行同参数 KDF并忽略 compare 结果，然后返回与错误密码同形状的 401，避免用响应类别或是否执行密码 KDF 枚举账号。production SHALL 只持有 dummy encoding，不得为该路径新增固定明文 dummy password。失败语义镜像 demo，错误响应使用统一错误信封。
 
-成功 SHALL 使用唯一共享 CSPRNG seam 的默认实现 `crypto.randomBytes(32).toString("hex")` 生成 session ID，并在一个 SQLite transaction 内插入恰一行；碰撞/constraint/transaction 失败 SHALL 返回 programmer 5xx，不得覆盖既有 session、泄漏 ID 或设置 cookie。Issue #9 SHALL 以默认 7 天的绝对 `expires_at = now + 604800000` Unix epoch milliseconds 建立可消费会话；TTL 配置、读取端点、登出与惰性清理由 #10 实现。响应 cookie 名 SHALL 为 `workbuddy_session`，值 SHALL 是 session ID，并恰包含 `HttpOnly`、`SameSite=Lax`、`Path=/`；`Secure` SHALL 只由 `createApp({ secureCookies })` 的显式 boolean 决定，默认 false。cookie SHALL 不设置 `Domain`，本刀不要求 `Expires`/`Max-Age`（browser cookie 生命周期与 server-side absolute expiry 分离）。
+成功 SHALL 使用唯一共享 CSPRNG seam 的默认实现 `crypto.randomBytes(32).toString("hex")` 生成 session ID，并在一个 SQLite transaction 内插入恰一行；碰撞/constraint/transaction 失败 SHALL 返回 programmer 5xx，不得覆盖既有 session、泄漏 ID 或设置 cookie。新会话的绝对 `expires_at` SHALL 等于 `now + sessionTtlMs` Unix epoch milliseconds；`sessionTtlMs` 省略/`undefined` 时默认恰为 `604800000`，custom 正安全整数配置按 lifecycle requirement 生效。响应 cookie 名 SHALL 为 `workbuddy_session`，值 SHALL 是 session ID，并恰包含 `HttpOnly`、`SameSite=Lax`、`Path=/`；`Secure` SHALL 只由 `createApp({ secureCookies })` 的显式 boolean 决定，默认 false。正常 cookie SHALL 不设置 `Domain`、`Expires` 或 `Max-Age`（browser cookie 生命周期与 server-side absolute expiry 分离）。
 
 #### Scenario: 登录成功
 - WHEN 以正确凭证登录
-- THEN 返回 200 与直接 Principal JSON 对象 `{id,account,role}`（三个字段均为 string，且恰为这三个字段，不含密码/散列字段），响应带上述 exact session cookie；会话表新增恰一行，其 ID 为 64 lowercase hex，`user_id` exact，`expires_at` 等于注入时钟加 604800000
+- THEN 返回 200 与直接 Principal JSON 对象 `{id,account,role}`（三个字段均为 string，且恰为这三个字段，不含密码/散列字段），响应带上述 exact session cookie；会话表新增恰一行，其 ID 为 64 lowercase hex，`user_id` exact，`expires_at` 等于注入时钟加 configured `sessionTtlMs`（省略/`undefined` 使用 604800000）
 
 #### Scenario: 凭证错误
 - WHEN 账号不存在、规范化后为空或密码错误
@@ -52,26 +58,46 @@ auth 模块 SHALL 以 `authenticate(req) → Principal | null` 为对外唯一�
 - THEN 返回稳定 4xx，且不执行 scrypt、不设置 cookie、不写会话；body 中的密码不得出现在响应、日志或错误对象中
 
 ### Requirement: 会话安全与生命周期
-会话记录 SHALL 落 SQLite（id、user_id、expires_at）；session id SHALL 由密码学安全随机源生成（`crypto.randomBytes` ≥128 bit，本实现 256 bit hex），不得由行号、时间或用户可推导量派生；TTL SHALL 为配置项（默认 7 天，绝对过期，惰性清理）；cookie SHALL 为 httpOnly、SameSite=Lax、Path=/，`Secure` 随部署形态配置。`POST /api/auth/logout` SHALL 删除会话并清 cookie；`GET /api/auth/me` SHALL 返回当前用户或 401。
+会话记录 SHALL 落 SQLite（id、user_id、expires_at）；session id SHALL 由密码学安全随机源生成（`crypto.randomBytes` ≥128 bit，本实现 256 bit hex），不得由行号、时间或用户可推导量派生。TTL SHALL 是 `createApp({sessionTtlMs})` 的正安全整数 epoch-millisecond 配置，默认恰为 7 天 `604800000`；只影响新会话且绝对 `now+ttl` 也 SHALL 为安全整数，不回写既有会话。`GET /api/auth/me` SHALL 返回当前 exact Principal 或 401，并对 exact expired row 惰性清理。`POST /api/auth/logout` SHALL 以 cookie bearer identity 删除任何 existing exact session row（不要求未过期/账号启用），并清 cookie；missing/畸形/unknown cookie SHALL 401 且不改 DB。两 route 都 SHALL `Cache-Control: no-store`。
+
+正常 session cookie SHALL 为 HttpOnly、SameSite=Lax、Path=/、无 Domain，`Secure` 随 `secureCookies`；不得设置 Expires/Max-Age。清 cookie SHALL 复用相同 scope/security 属性并设置空值、`Max-Age=0`、Unix epoch `Expires`，Domain 仍 absent。Clear-cookie 只可在 me/logout 的 terminal 401 或 logout DELETE commit 后的 204 上发布；storage/programmer 5xx 不得发布。
 
 #### Scenario: session id 不可预测
 - WHEN 连续建立多个会话
 - THEN 各 session id 长度与字符集符合 256 bit hex，互不相邻且不可由前一个推导（断言生成源为 CSPRNG 封装函数）
 
+#### Scenario: TTL 默认值、配置与边界
+- WHEN 省略 `sessionTtlMs` 或分别配置合法最小值 1 / 自定义正安全整数，并以 fixed `now` 登录
+- THEN 新会话 `expires_at` 分别 exact 等于 `now+604800000` / `now+ttl`，既有 rows 不变，正常 cookie 仍无 Expires/Max-Age
+- WHEN TTL 为 0、负数、小数、NaN/Infinity、非 number 或不安全整数，或合法 TTL 与 now 相加溢出 safe integer
+- THEN app 配置或登录在 DB write/Set-Cookie 前 generic fail；不得钳制/取整/回退默认值
+
 #### Scenario: 会话有效期内访问
-- WHEN 携带有效 cookie 请求 `GET /api/auth/me`
-- THEN 返回 200 与当前直接 Principal JSON 对象 `{id,account,role}`，形状与登录成功响应完全一致
+- WHEN 携带有效 future-enabled cookie 请求 `GET /api/auth/me`
+- THEN 返回 200、`Cache-Control: no-store` 与当前直接 Principal JSON `{id,account,role}`，形状与登录成功完全一致；无 Set-Cookie，完整数据库快照不变
+
+#### Scenario: me 未认证与过期清理
+- WHEN me 输入为 missing/畸形/unknown cookie、invalid clock 或 future disabled/orphan row
+- THEN 返回 exact 401 `unauthorized`、no-store 与 scoped clear-cookie，数据库逐值不变
+- WHEN me 的 exact row 已过期（`expires_at <= now`，含 disabled/orphan）
+- THEN 先 durably 只删除该 matched row，再返回相同 401/no-store/clear-cookie；若 conditional DELETE 因 race 已变为 0 rows，仍返回该 null/401 终态而非 5xx；任何真实 DELETE/COMMIT/rollback/query failure返回 generic 5xx且不发 clear-cookie
+- WHEN future `expires_at` 超过 JavaScript safe integer（含 SQLite maximum signed 64-bit integer）
+- THEN expiry 在 SQLite 内分类为 future，不因 JS number projection 发生 round/throw；enabled account仍返回 exact Principal，future disabled/orphan仍 null且不删行
 
 #### Scenario: 登出后失效
-- WHEN 携带有效会话请求 `POST /api/auth/logout`
-- THEN 返回 204 且无 response body，删除会话行并清除 session cookie；之后携带原 cookie 请求 `GET /api/auth/me` 返回 401
+- WHEN 携带 own exact cookie 对应任意 existing row（future/expired/disabled-account/future-or-expired orphan）请求 bodyless `POST /api/auth/logout`，包括 injected `authNow` 非法的 app
+- THEN logout 不消费 Principal/clock eligibility；在 owned transaction commit 删除 exact bearer row 后返回 204、empty body、no-store 与 scoped clear-cookie；之后携带原 cookie 请求 me 返回 401，unrelated rows不变
+- WHEN logout cookie missing/畸形/unknown
+- THEN 返回 exact 401 `unauthorized`、no-store 与 scoped clear-cookie，数据库不变；该 401 与 204 都是现有 web logout 的 terminal unauthenticated 结果
 
-#### Scenario: 过期会话
-- WHEN 会话已过期（测试将 expires_at 置为过去）
-- THEN 请求返回 401，且服务端按惰性清理删除该行
+#### Scenario: logout body 与失败边界
+- WHEN logout 携带任何 parsed body，或触发 malformed/empty JSON、unsupported media、超过最小 route body limit 的 native parser error
+- THEN 在 cookie lookup/DELETE/clear-cookie 前返回 exact 400 `bad_request`；route 不使用 schema且不信任 validation/status/code duck typing
+- WHEN BEGIN/DELETE/COMMIT 失败
+- THEN rollback 后返回 generic 5xx、无 clear-cookie且 snapshot 不变；rollback 也失败时保留 original+rollback AggregateError 和 caller recovery state；caller 已有 transaction 时不得提交/回滚其 effects
 
 ### Requirement: 认证守卫
-除 `healthz`/`info`/`auth/login` 外的 `/api/*` 端点 SHALL 默认要求有效会话；未认证返回 401 错误信封（code=unauthorized；静态资源与 fallback 不受守卫影响）。
+除 `healthz`/`info`/`auth/login` 与 bearer-revocation `POST /api/auth/logout` 外的 `/api/*` 端点 SHALL 默认要求有效会话；未认证返回 401 错误信封（code=unauthorized；静态资源与 fallback 不受守卫影响）。Logout SHALL 绕过 Principal eligibility guard，使 future disabled/orphan 或 invalid auth clock 的 existing exact session row 仍能进入 #10 handler并被 durable 删除；handler 自身对 missing/畸形/unknown cookie 返回同一 unauthorized。`GET /api/auth/me` 可由 #19 guard消费 `authenticate()`，但其 exact expired-row lazy cleanup 必须先运行。
 
 #### Scenario: 未登录访问受保护端点
 - WHEN 无 cookie 请求任一受保护 `/api/*` 端点

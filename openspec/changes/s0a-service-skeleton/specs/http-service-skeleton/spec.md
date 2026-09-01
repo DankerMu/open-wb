@@ -25,19 +25,19 @@
 - THEN decorator 与传入 handle 是同一对象，close 后 caller 仍可查询并自行关闭它
 
 ### Requirement: 统一错误信封
-所有本阶段可预期 `/api/*` 应用错误与 API 404 SHALL 使用统一信封 `{ "error": { "code": "<snake_case>", "message": "<可直接展示的中文文案>" } }`；typed definition map 固定为 `bad_request`(400, `请求格式不正确`)、`invalid_credentials`(401, `账号或密码不正确`)、`account_disabled`(403, `该账号已停用，请联系管理员`)、`unauthorized`(401, `请先登录`)、`not_found`(404, `请求的资源不存在`)；处理器 SHALL 落在 `http/` 横切层。`bad_request` 覆盖显式 typed `HttpError("bad_request")`；仅当 request 的 matched route identity 恰为 `POST /api/auth/login` 时，才额外覆盖 exact Fastify content-parser error code allowlist：`FST_ERR_CTP_INVALID_MEDIA_TYPE`、`FST_ERR_CTP_INVALID_JSON_BODY`、`FST_ERR_CTP_EMPTY_JSON_BODY`、`FST_ERR_CTP_BODY_TOO_LARGE`。Login 不使用 route schema，因此 `FST_ERR_VALIDATION` 不在此 allowlist，避免把可伪造的普通 Error shape当作受信 request error。映射不依赖 raw `statusCode`（body-too-large 原始状态可为 413），最终均为 exact 400。相同 allowlisted parser/media 错误若发生在 matched `/api`/`/api/*` catch-all 或未匹配的 non-GET miss，SHALL 恢复既有 typed `not_found` 404；发生在其他已注册 route 时保持 generic 5xx。不得回显 parser/schema/password 细节；具有相同 status/statusCode 或伪造 code 的任意 programmer error不得被误标成五种语义错误，仍为 5xx。
+所有本阶段可预期 `/api/*` 应用错误与 API 404 SHALL 使用统一信封 `{ "error": { "code": "<snake_case>", "message": "<可直接展示的中文文案>" } }`；typed definition map 固定为 `bad_request`(400, `请求格式不正确`)、`invalid_credentials`(401, `账号或密码不正确`)、`account_disabled`(403, `该账号已停用，请联系管理员`)、`unauthorized`(401, `请先登录`)、`not_found`(404, `请求的资源不存在`)；处理器 SHALL 落在 `http/` 横切层。`bad_request` 覆盖显式 typed `HttpError("bad_request")`；仅当 request 的 matched route identity 恰为 `POST /api/auth/login` 或 `POST /api/auth/logout` 时，才额外覆盖 exact Fastify content-parser error code allowlist：`FST_ERR_CTP_INVALID_MEDIA_TYPE`、`FST_ERR_CTP_INVALID_JSON_BODY`、`FST_ERR_CTP_EMPTY_JSON_BODY`、`FST_ERR_CTP_BODY_TOO_LARGE`。Login/logout 不使用 route schema，因此 `FST_ERR_VALIDATION` 不在此 allowlist，避免把可伪造的普通 Error shape当作受信 request error。映射不依赖 raw `statusCode`（body-too-large 原始状态可为 413），最终均为 exact 400。相同 allowlisted parser/media 错误若发生在 matched `/api`/`/api/*` catch-all 或未匹配的 non-GET miss，SHALL 恢复既有 typed `not_found` 404；发生在其他已注册 route 时保持 generic 5xx。不得回显 parser/schema/password 细节；具有相同 status/statusCode 或伪造 code 的任意 programmer error不得被误标成五种语义错误，仍为 5xx。
 
 #### Scenario: 五码信封形状一致
 - WHEN 测试路由分别抛出五种 typed application error
 - THEN 响应 status/code/message 与 definition map exact 对应，body 仅含 `{error:{code,message}}`，无 Fastify 默认 error 字段
 
-#### Scenario: 登录请求 parse/validation 错误稳定映射
-- WHEN `/api/auth/login` 收到 empty/malformed JSON、unsupported media type、不符合手写 exact body validator 的 JSON 或超过 16 KiB body limit
-- THEN 不论 Fastify raw status 是否为 400/413/415，均按显式 typed error 或 login-route-scoped allowlisted Fastify error code 返回 exact 400 `bad_request` 信封，不回显 validation/parser 详情或请求中的密码
+#### Scenario: auth POST 请求 parse/validation 错误稳定映射
+- WHEN `/api/auth/login` 收到 empty/malformed JSON、unsupported media type、不符合手写 exact body validator 的 JSON 或超过 16 KiB body limit，或 bodyless `/api/auth/logout` 收到任意 parsed body/empty-or-malformed JSON/unsupported media/超过其最小合法 body limit
+- THEN 不论 Fastify raw status 是否为 400/413/415，均按显式 typed error 或 exact matched auth-route-scoped allowlisted Fastify error code 返回 exact 400 `bad_request` 信封，不回显 validation/parser 详情或请求中的密码；错误发生在 logout cookie lookup/DELETE/clear-cookie 前
 - WHEN 相同 allowlisted malformed/media/body 错误发生在 matched `/api`/`/api/*` catch-all 或未匹配的 non-GET miss
 - THEN 返回既有 exact typed `not_found` 404；不得因 content parser 先于 catch-all handler 而成为 400/500
-- WHEN 相同错误发生在其他已注册 non-login route，或 programmer error 仅携带 `statusCode=400/413` /伪造 allowlist code/validation-shaped fields
-- THEN 保持 generic 5xx，不得被 login request-error mapper改写
+- WHEN 相同错误发生在 exact POST login/logout 之外的其他已注册 route，或 programmer error 仅携带 `statusCode=400/413` /伪造 allowlist code/validation-shaped fields
+- THEN 保持 generic 5xx，不得被 auth POST request-error mapper 改写
 
 #### Scenario: 意外错误不伪装
 - WHEN API route 抛出未分类的 programmer error

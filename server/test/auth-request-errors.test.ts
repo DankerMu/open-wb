@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
+import { registerAuth, SESSION_TTL } from "../src/auth/index.js";
 import { openDb } from "../src/core/db/index.js";
 import { HttpError, handleHttpError } from "../src/http/index.js";
 
@@ -104,6 +105,27 @@ function expectGenericServerError(response: InjectResponse): void {
   expect(response.statusCode).toBe(500);
   expect(response.payload).toBe(JSON.stringify(INTERNAL_ERROR_ENVELOPE));
   expect(response.headers["set-cookie"]).toBeUndefined();
+}
+
+interface ReplyCapture {
+  statusCode?: number;
+  body?: string;
+}
+
+/** 直接驱动导出的 handleHttpError 时捕获 reply.code/send 的唯一替身。 */
+function captureReply(): { reply: FastifyReply; captured: ReplyCapture } {
+  const captured: ReplyCapture = {};
+  const reply = {
+    code(statusCode: number) {
+      captured.statusCode = statusCode;
+      return this;
+    },
+    send(body: unknown) {
+      captured.body = JSON.stringify(body);
+      return this;
+    },
+  } as unknown as FastifyReply;
+  return { reply, captured };
 }
 
 describe("route-owner 结果：同一精确 CTP 输入在不同 route identity 上的 contract", () => {
@@ -233,6 +255,99 @@ describe("route-owner 结果：同一精确 CTP 输入在不同 route identity �
   });
 });
 
+/** Issue #10：CTP owner 只从 exact POST login 扩到 exact POST logout，其余优先级不变。 */
+describe("exact POST /api/auth/logout 加入 route-owner（#10）", () => {
+  it("logout 上相同 CTP 输入归一 exact 400，且不写/不清 cookie", async () => {
+    await withApp(async (app, db) => {
+      for (const row of IDENTICAL_INPUTS) {
+        const response = await inject(app, "POST", "/api/auth/logout", row.payload, {
+          ...row.headers,
+        });
+        expectBadRequest(response, db);
+      }
+    });
+  });
+
+  it("route identity 边界：query 精确 logout=400；PUT/尾斜杠/GET 回 404/405 语义不变", async () => {
+    await withApp(async (app, db) => {
+      const queried = await inject(app, "POST", "/api/auth/logout?x=1", '{"a": ', {
+        "content-type": "application/json",
+      });
+      expectBadRequest(queried, db);
+
+      const trailingSlash = await inject(app, "POST", "/api/auth/logout/", '{"a": ', {
+        "content-type": "application/json",
+      });
+      expectNotFound(trailingSlash, db);
+
+      const putLogout = await inject(app, "PUT", "/api/auth/logout", '{"a": ', {
+        "content-type": "application/json",
+      });
+      expectNotFound(putLogout, db);
+
+      const getLogout = await inject(app, "GET", "/api/auth/logout", '{"a": ', {
+        "content-type": "application/json",
+      });
+      expectNotFound(getLogout, db);
+    });
+  });
+
+  it("真实构造器-backed CTP error 在 logout=400；/api catch-all 与 unmatched non-GET 仍 404；其他 registered 仍 5xx", () => {
+    const requestShaped = (url: string | undefined, method: string) =>
+      ({
+        method,
+        url: url ?? "/unmatched",
+        routeOptions: { url },
+      }) as unknown as FastifyRequest;
+
+    const ctpConstructor = fastify.errorCodes.FST_ERR_CTP_EMPTY_JSON_BODY as unknown as new (
+      message: string,
+    ) => Error;
+    const realCtpError = Object.assign(
+      new ctpConstructor("Body cannot be empty when content-type is set to 'application/json'"),
+      { code: "FST_ERR_CTP_EMPTY_JSON_BODY", statusCode: 400 },
+    );
+
+    for (const url of ["/api/auth/login", "/api/auth/logout"]) {
+      const owned = captureReply();
+      handleHttpError(realCtpError, requestShaped(url, "POST"), owned.reply);
+      expect(owned.captured.statusCode).toBe(400);
+      expect(owned.captured.body).toBe(
+        JSON.stringify({ error: { code: "bad_request", message: "请求格式不正确" } }),
+      );
+    }
+
+    for (const url of ["/api", "/api/*"]) {
+      const fallback = captureReply();
+      handleHttpError(realCtpError, requestShaped(url, "POST"), fallback.reply);
+      expect(fallback.captured.statusCode).toBe(404);
+    }
+
+    const unmatched = captureReply();
+    handleHttpError(realCtpError, requestShaped(undefined, "POST"), unmatched.reply);
+    expect(unmatched.captured.statusCode).toBe(404);
+
+    const registered = captureReply();
+    handleHttpError(realCtpError, requestShaped("/api/registered", "POST"), registered.reply);
+    expect(registered.captured.statusCode).toBe(500);
+
+    const forged = captureReply();
+    handleHttpError(
+      Object.assign(new Error("forged logout code"), {
+        code: "FST_ERR_CTP_INVALID_JSON_BODY",
+        statusCode: 400,
+      }),
+      requestShaped("/api/auth/logout", "POST"),
+      forged.reply,
+    );
+    expect(forged.captured.statusCode).toBe(500);
+
+    const putOwned = captureReply();
+    handleHttpError(realCtpError, requestShaped("/api/auth/logout", "PUT"), putOwned.reply);
+    expect(putOwned.captured.statusCode).toBe(500);
+  });
+});
+
 describe("native error shape discrimination 与 login 路由 scope", () => {
   /** 从真实 schema 路由捕获 FST_ERR_VALIDATION，驱动导出的 handleHttpError。 */
   async function captureRealValidationError(): Promise<unknown> {
@@ -271,26 +386,6 @@ describe("native error shape discrimination 与 login 路由 scope", () => {
       url: routeOptionsUrl ?? "/unmatched",
       routeOptions: { url: routeOptionsUrl },
     } as unknown as FastifyRequest;
-  }
-
-  interface ReplyCapture {
-    statusCode?: number;
-    body?: string;
-  }
-
-  function captureReply(): { reply: FastifyReply; captured: ReplyCapture } {
-    const captured: ReplyCapture = {};
-    const reply = {
-      code(statusCode: number) {
-        captured.statusCode = statusCode;
-        return this;
-      },
-      send(body: unknown) {
-        captured.body = JSON.stringify(body);
-        return this;
-      },
-    } as unknown as FastifyReply;
-    return { reply, captured };
   }
 
   function expectSendErrorEnvelope(captured: ReplyCapture, code: string, message: string): void {
@@ -397,5 +492,135 @@ describe("native error shape discrimination 与 login 路由 scope", () => {
       result.reply,
     );
     expectSendErrorEnvelope(result.captured, "bad_request", "请求格式不正确");
+  });
+});
+
+/**
+ * auth→HTTP 映射器自身失败走真实 registerAuth 接缝。clear-cookie 的发布已移出 handler
+ * 控制流、改由 route-local onSend 按**最终状态**判定，因此映射器无论抛错还是返回 ordinary
+ * Error（`mapAuthError: (code) => Error` 允许后者，且 handleHttpError 会分类为 generic
+ * 5xx）都不得撤销浏览器会话；同时 no-store 仍在、DB 逐值不变。
+ * 两种 cookie 形状都跑：错误路径上 @fastify/cookie 是否真正发出已写入的 Set-Cookie 随
+ * 请求形状而变（携 cookie 头的 GET 与不携的形状行为不同），只测其一会是假覆盖。
+ */
+describe("mapAuthError 失败（抛错或返回 ordinary Error）不得发布 clear-cookie", () => {
+  const MAPPER_DETAIL = "private auth mapper detail";
+  const NOW = 1_700_000_000_000;
+
+  const mapperThrows = (): never => {
+    throw new Error(MAPPER_DETAIL);
+  };
+  const mapperReturnsOrdinaryError = (): Error => new Error(MAPPER_DETAIL);
+  const MAPPER_FAILURES: ReadonlyArray<[string, () => Error]> = [
+    ["映射器抛错", mapperThrows],
+    // mapAuthError 的签名允许返回 ordinary Error：这是 pass 4 的真实缺陷面
+    ["映射器返回 ordinary Error", mapperReturnsOrdinaryError],
+  ];
+
+  const UNAUTHENTICATED_CALLS = [
+    ["GET /api/auth/me 未认证（无 cookie）", "GET", "/api/auth/me", undefined],
+    ["GET /api/auth/me 未认证（携 cookie）", "GET", "/api/auth/me", "b".repeat(64)],
+    ["bodyless POST /api/auth/logout 无匹配行", "POST", "/api/auth/logout", "c".repeat(64)],
+  ] as const;
+
+  function sessionState(db: DatabaseSync): unknown {
+    return db
+      .prepare(
+        "SELECT group_concat(id || '@' || user_id || '@' || expires_at, '/') AS ids, COUNT(*) AS rows FROM auth_sessions",
+      )
+      .get();
+  }
+
+  async function withMapperFailingApp<T>(
+    mapAuthError: () => Error,
+    action: (app: FastifyInstance, db: DatabaseSync) => Promise<T>,
+  ): Promise<T> {
+    const db = openDb(":memory:");
+    const app = fastify({ logger: false });
+    app.setErrorHandler((error, request, reply) => handleHttpError(error, request, reply));
+    registerAuth(app, {
+      db,
+      secureCookies: false,
+      sessionTtlMs: SESSION_TTL,
+      runtime: { now: () => NOW, randomBytes: (size) => Buffer.alloc(size, 0x5a) },
+      mapAuthError: () => mapAuthError(),
+    });
+    try {
+      return await action(app, db);
+    } finally {
+      await app.close();
+      db.close();
+    }
+  }
+
+  function expectMapperFailure(response: {
+    statusCode: number;
+    payload: string;
+    headers: Record<string, unknown>;
+  }): void {
+    expect(response.statusCode).toBe(500);
+    expect(response.payload).toBe(JSON.stringify(INTERNAL_ERROR_ENVELOPE));
+    expect(response.payload).not.toContain(MAPPER_DETAIL);
+    // 5xx 绝不撤销：clear-cookie 只能由终态 401/204 发布
+    expect(response.headers["set-cookie"]).toBeUndefined();
+    expect(response.headers["cache-control"]).toBe("no-store");
+  }
+
+  for (const [mapperName, mapper] of MAPPER_FAILURES) {
+    it.each(UNAUTHENTICATED_CALLS)(
+      `${mapperName}：%s -> 500/无 Set-Cookie/DB 不变/no-store 仍在`,
+      async (_name, method, url, cookieValue) => {
+        await withMapperFailingApp(mapper, async (app, db) => {
+          db.prepare("INSERT INTO auth_sessions(id, user_id, expires_at) VALUES (?, ?, ?)").run(
+            "a".repeat(64),
+            "u1",
+            NOW + 60_000,
+          );
+          const before = sessionState(db);
+
+          expectMapperFailure(
+            await app.inject({
+              method,
+              url,
+              ...(cookieValue === undefined
+                ? {}
+                : { headers: { cookie: `workbuddy_session=${cookieValue}` } }),
+            }),
+          );
+          expect(sessionState(db)).toEqual(before);
+          expect(db.isTransaction).toBe(false);
+        });
+      },
+    );
+  }
+});
+
+/**
+ * clear-cookie 的 onSend 必须是 route-local，而非全局 hook：若全局按终态 401/204 发布，
+ * 任何非 auth route 返回这些状态都会顺带撤销浏览器会话并继承 no-store。exact logout 204
+ * 的正常撤销由 auth-lifecycle.test.ts 的 canonical 行验收。
+ */
+describe("clear-cookie onSend 作用域只限 me/logout", () => {
+  const BEARER = "d".repeat(64);
+
+  it("非 auth route 的终态 401/204 不发 clear-cookie、不继承 no-store", async () => {
+    await withApp(async (app, db) => {
+      app.get("/api/probe-401", () => {
+        throw new HttpError("unauthorized");
+      });
+      app.post("/api/probe-204", (_request, reply) => reply.code(204).send());
+      for (const [url, method, statusCode] of [
+        ["/api/probe-401", "GET", 401],
+        ["/api/probe-204", "POST", 204],
+      ] as const) {
+        const response = await inject(app, method, url, undefined, {
+          cookie: `workbuddy_session=${BEARER}`,
+        });
+        expect(response.statusCode).toBe(statusCode);
+        expect(response.headers["set-cookie"]).toBeUndefined();
+        expect(response.headers["cache-control"]).toBeUndefined();
+      }
+      expect(sessionCount(db)).toBe(0);
+    });
   });
 });
