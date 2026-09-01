@@ -154,6 +154,18 @@ describe("core/db auth schema and seed", () => {
     ["empty account", ["u5", "", "成员", 0, FIFTH_ACCOUNT_HASH]],
     ["uppercase account", ["u5", "ZhangSan", "成员", 0, FIFTH_ACCOUNT_HASH]],
     ["trim-needed account", ["u5", " zhangsan", "成员", 0, FIFTH_ACCOUNT_HASH]],
+    ["tab-leading account", ["u5", "\tzhangsan", "成员", 0, FIFTH_ACCOUNT_HASH]],
+    ["tab-trailing account", ["u5", "zhangsan\t", "成员", 0, FIFTH_ACCOUNT_HASH]],
+    ["tab-embedded account", ["u5", "zhang\tsan", "成员", 0, FIFTH_ACCOUNT_HASH]],
+    ["newline-leading account", ["u5", "\nzhangsan", "成员", 0, FIFTH_ACCOUNT_HASH]],
+    ["newline-trailing account", ["u5", "zhangsan\n", "成员", 0, FIFTH_ACCOUNT_HASH]],
+    ["newline-embedded account", ["u5", "zhang\nsan", "成员", 0, FIFTH_ACCOUNT_HASH]],
+    ["cr-leading account", ["u5", "\rzhangsan", "成员", 0, FIFTH_ACCOUNT_HASH]],
+    ["cr-trailing account", ["u5", "zhangsan\r", "成员", 0, FIFTH_ACCOUNT_HASH]],
+    ["cr-embedded account", ["u5", "zhang\rsan", "成员", 0, FIFTH_ACCOUNT_HASH]],
+    ["nul-embedded account", ["u5", "zhang\0san", "成员", 0, FIFTH_ACCOUNT_HASH]],
+    ["non-ascii account", ["u5", "张三", "成员", 0, FIFTH_ACCOUNT_HASH]],
+    ["punctuation account", ["u5", "zhangsan@", "成员", 0, FIFTH_ACCOUNT_HASH]],
     ["duplicate account", ["u5", "zhangsan", "成员", 0, FIFTH_ACCOUNT_HASH]],
     ["empty id", ["", "sunqi", "成员", 0, FIFTH_ACCOUNT_HASH]],
     ["invalid role", ["u5", "sunqi", "admin", 0, FIFTH_ACCOUNT_HASH]],
@@ -225,6 +237,9 @@ describe("core/db auth schema and seed", () => {
 
   it.each([
     ["non-64-hex id", ["short", "u1", 1]],
+    ["32-hex id", ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "u1", 1]],
+    ["63-hex id", ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "u1", 1]],
+    ["65-hex id", ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "u1", 1]],
     [
       "uppercase hex id",
       ["AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "u1", 1],

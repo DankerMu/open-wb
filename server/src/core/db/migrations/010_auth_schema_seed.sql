@@ -11,7 +11,14 @@ CREATE TABLE accounts (
   PRIMARY KEY (id),
   UNIQUE (account),
   CHECK (typeof(id) = 'text' AND length(id) > 0),
-  CHECK (account = lower(trim(account)) AND length(account) > 0),
+  -- persisted unique account identity = lowercase ASCII [a-z0-9._-]+, matching
+  -- downstream trim().toLowerCase() login matching without storing whitespace variants.
+  CHECK (
+    typeof(account) = 'text'
+    AND length(account) > 0
+    AND instr(account, char(0)) = 0
+    AND account NOT GLOB '*[^a-z0-9._-]*'
+  ),
   CHECK (role IN ('成员', '管理员')),
   CHECK (typeof(disabled) = 'integer' AND disabled IN (0, 1)),
   CHECK (

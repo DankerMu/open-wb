@@ -221,7 +221,7 @@ Must preserve:
 
 Must add/change:
 - A single plain-SQL `010_auth_schema_seed.sql` creates `accounts` and `auth_sessions` without `IF NOT EXISTS`, `OR IGNORE`, or alternate bootstrap path, then inserts exactly four fixed dev-stub accounts. A late table/seed conflict therefore aborts the migration transaction rather than silently accepting unknown state.
-- `accounts` has exactly `id`, `account`, `role`, `disabled`, `password_hash`; IDs are `u1`–`u4`, account is trimmed lowercase unique text, role is exactly `成员 | 管理员`, disabled is integer `0 | 1`, and no display-name/dept/sandbox/quota field is invented in this slice.
+- `accounts` has exactly `id`, `account`, `role`, `disabled`, `password_hash`; IDs are `u1`–`u4`, persisted account identity is unique nonempty lowercase ASCII `[a-z0-9._-]+` (the downstream login normalizes input via trim+lowercase before lookup), role is exactly `成员 | 管理员`, disabled is integer `0 | 1`, and no display-name/dept/sandbox/quota field is invented in this slice.
 - `auth_sessions` is distinct from future Agent conversation state and has exactly `id`, `user_id`, `expires_at`; IDs are 64 lowercase hex characters, `user_id` references `accounts(id) ON DELETE CASCADE`, and expiry is a non-negative integer Unix epoch in milliseconds. `openDb` enables SQLite foreign keys for every returned connection.
 - Seed hashes are four distinct precomputed scrypt values with self-describing format `scrypt$16384$8$1$<16-byte salt hex>$<32-byte digest hex>`. The tracked migration contains no plaintext `demo`; tests independently parse the encoding and use Node `scrypt` to prove each row accepts `demo` and rejects a wrong password. No production login/verifier API is added before #9.
 
