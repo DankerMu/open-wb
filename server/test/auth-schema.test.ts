@@ -47,7 +47,8 @@ const AUTH_MIGRATION_SOURCE_PATH = fileURLToPath(
   new URL("../src/core/db/migrations/010_auth_schema_seed.sql", import.meta.url),
 );
 const HASH_ENCODING = /^scrypt\$16384\$8\$1\$([0-9a-f]{32})\$([0-9a-f]{64})$/;
-const VALID_SESSION_ID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const VALID_SESSION_ID = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const FIFTH_ACCOUNT = "sun.qi_1-dev";
 const FIFTH_ACCOUNT_HASH =
   "scrypt$16384$8$1$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa$bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const EXPECTED_ACCOUNT_COLUMNS = ["id", "account", "role", "disabled", "password_hash"] as const;
@@ -193,13 +194,61 @@ describe("core/db auth schema and seed", () => {
     },
   );
 
+  it.each([
+    ["total length only", `${FIFTH_ACCOUNT_HASH}c`],
+    [
+      "exact 17-character algorithm/parameter prefix only",
+      `scrypt$16385$8$1$${FIFTH_ACCOUNT_HASH.slice(17)}`,
+    ],
+    [
+      "delimiter at position 50 only",
+      `${FIFTH_ACCOUNT_HASH.slice(0, 49)}0${FIFTH_ACCOUNT_HASH.slice(50)}`,
+    ],
+    [
+      "salt lowercase-hex only",
+      `${FIFTH_ACCOUNT_HASH.slice(0, 17)}g${FIFTH_ACCOUNT_HASH.slice(18)}`,
+    ],
+    [
+      "digest lowercase-hex only",
+      `${FIFTH_ACCOUNT_HASH.slice(0, 50)}g${FIFTH_ACCOUNT_HASH.slice(51)}`,
+    ],
+  ])(
+    "near-valid password_hash %s is rejected without changing canonical seed",
+    async (_name, passwordHash) => {
+      await withOpenDbAsync(":memory:", async (db) => {
+        const before = canonicalAccountSnapshot(db);
+        expect(() =>
+          db
+            .prepare(
+              "INSERT INTO accounts(id, account, role, disabled, password_hash) VALUES (?, ?, ?, ?, ?)",
+            )
+            .run("u5", "sunqi", "成员", 0, passwordHash),
+        ).toThrow();
+        expect(canonicalAccountSnapshot(db)).toEqual(before);
+        expect(sessionCount(db)).toBe(0);
+      });
+    },
+  );
+
   it("a legal fifth account can be inserted and deleted without changing canonical seed", async () => {
     await withOpenDbAsync(":memory:", async (db) => {
       const before = canonicalAccountSnapshot(db);
       db.prepare(
         "INSERT INTO accounts(id, account, role, disabled, password_hash) VALUES (?, ?, ?, ?, ?)",
-      ).run("u5", "sunqi", "成员", 0, FIFTH_ACCOUNT_HASH);
+      ).run("u5", FIFTH_ACCOUNT, "成员", 0, FIFTH_ACCOUNT_HASH);
       expect(db.prepare("SELECT COUNT(*) AS count FROM accounts").get()).toEqual({ count: 5 });
+      expect(
+        db
+          .prepare(
+            "SELECT id, account, typeof(id) AS id_type, typeof(account) AS account_type FROM accounts WHERE id = ?",
+          )
+          .get("u5"),
+      ).toEqual({
+        id: "u5",
+        account: FIFTH_ACCOUNT,
+        id_type: "text",
+        account_type: "text",
+      });
       db.prepare("DELETE FROM accounts WHERE id = ?").run("u5");
       expect(canonicalAccountSnapshot(db)).toEqual(before);
     });
@@ -295,6 +344,18 @@ describe("core/db auth schema and seed", () => {
         1,
       );
       expect(sessionCount(db)).toBe(1);
+      expect(
+        db
+          .prepare(
+            "SELECT id, user_id, typeof(id) AS id_type, typeof(user_id) AS user_type FROM auth_sessions WHERE id = ?",
+          )
+          .get(VALID_SESSION_ID),
+      ).toEqual({
+        id: VALID_SESSION_ID,
+        user_id: "u1",
+        id_type: "text",
+        user_type: "text",
+      });
       expect(() =>
         db
           .prepare("INSERT INTO auth_sessions(id, user_id, expires_at) VALUES (?, ?, ?)")
@@ -473,8 +534,14 @@ async function expectCanonicalSeedState(db: DatabaseSync): Promise<void> {
     expect(encoding).not.toBe("demo");
     expect(encoding.includes("demo")).toBe(false);
     const parsed = parseEncodedScrypt(encoding);
-    salts.add(parsed.salt.toString("hex"));
-    digests.add(parsed.digest.toString("hex"));
+    const saltHex = parsed.salt.toString("hex");
+    const digestHex = parsed.digest.toString("hex");
+    expect(saltHex).toMatch(/[0-9]/);
+    expect(saltHex).toMatch(/[a-f]/);
+    expect(digestHex).toMatch(/[0-9]/);
+    expect(digestHex).toMatch(/[a-f]/);
+    salts.add(saltHex);
+    digests.add(digestHex);
     expect(await passwordMatches(parsed, "demo")).toBe(true);
     expect(await passwordMatches(parsed, "wrong")).toBe(false);
   }
