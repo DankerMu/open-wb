@@ -12,12 +12,12 @@
 ## Decisions
 
 1. **Fastify + plugin 装配**（grill：用户拍板；备选 Express 5/Hono 见收敛小结）。每个 feature 模块导出 FastifyPluginAsync，`app.ts` 只做装配（可注入配置，供 inject 测试）；`server.ts` 是唯一 listen 入口（启动日志输出已注册模块清单），`make dev` / `npm run start --workspace server` 拉起——app/server 分离让 inject 测试不监听端口，`knip.json` server entry 增 `src/server.ts`。启动行为的验证由 smoke（4.1）对真实启动覆盖，不写监听单测。`http/` 仅承载横切中间件（认证守卫、错误信封处理器），无业务——对齐 system.md §3.1。
-2. **session cookie**（grill：用户拍板；备选 JWT 弃于"即时吊销要黑名单"）。`@fastify/cookie` + 自研 SQLite 会话表（id、user_id、expires_at），不引第三方 session 框架——表结构即 S3a OIDC 复用点，因此安全契约按长期标准定：**session id = `crypto.randomBytes(32)` hex（256 bit CSPRNG），不得由行号/时间/用户可推导量派生**；TTL 为配置项（默认 7 天，绝对过期，惰性清理）；cookie：httpOnly、SameSite=Lax、Path=/、`Secure` 随部署形态的配置项（内网 HTTP 阶段关，HTTPS 部署开）。
+2. **session cookie**（grill：用户拍板；备选 JWT 弃于"即时吊销要黑名单"）。`@fastify/cookie` + 自研 SQLite 会话表（id、user_id、expires_at），不引第三方 session 框架——表结构即 S3a OIDC 复用点，因此安全契约按长期标准定：**session id = `crypto.randomBytes(32)` hex（256 bit CSPRNG），不得由行号/时间/用户可推导量派生**；cookie 名固定为 `workbuddy_session`，属性为 httpOnly、SameSite=Lax、Path=/、无 Domain，`Secure` 只随 `createApp({secureCookies})` 的 boolean 配置（默认 false；内网 HTTP 阶段关，HTTPS 部署开）。#9 建立会话时先以默认 7 天写绝对 `expires_at=now+604800000`，使 provider 接缝在中间主干可直接消费；TTL 配置、me/logout 与惰性清理由 #10 独占。browser cookie 本刀不写 Expires/Max-Age，server-side absolute expiry 是认证真值。
 3. **history 路由 + fallback**（grill：用户拍板）。`@fastify/static` 托管静态根，`setNotFoundHandler` 对**非 `/api/*` 的 GET** 回 index.html；非 GET 未命中与 `/api/*` 未命中一律 JSON 404（错误信封）。静态根可配置（`STATIC_ROOT`）：单测用临时夹具目录，CI/生产指向 `web/dist`——1.3 因此不依赖 web 构建先行。
 4. **SQLite 经 `node:sqlite`**（Node 24 内建，同步 API 足够单机元数据负载；备选 better-sqlite3 弃于原生编译负担；实测 v24.13.1 可用，仅 stderr ExperimentalWarning——ui-walk 的"零 console error"断言限定为浏览器控制台，不含服务端 stderr）。`core/db`：打开 WAL、按序执行 `migrations/*.sql`、迁移版本表幂等。ADR-0004 的第一块落地。
-5. **auth provider 接缝**（ADR-0007、system.md §3.1/§5）：auth 模块对外唯一出口 `authenticate(req) → Principal | null`；dev-stub 适配器落 `server/src/auth/providers/dev-stub.ts`（登录流程），会话读取与守卫在 auth 模块内共享——S3a 换 OIDC 只增 `providers/oidc.ts`，接缝与调用方不动。单测直接对 `authenticate()` 断言以证明接缝可替换。
-6. **登录语义镜像 demo**：账号 trim+小写化（demo:1644）；两类错误文案逐字采用（demo:1645,1647）；停用账号拒绝登录但**不产生审计**（Non-goal；留痕在本节与 S1a change 的 Why，代码不写无号 TODO——AGENTS.md:105）。**密码存储 = `node:crypto` scrypt 散列（盐+参数编码入 `password_hash` 列），明文不入库**；seed 四账号镜像 demo（demo:1400-1407）：zhangsan/成员、zhaoliu/成员、lisi/管理员，密码 `demo`（demo:1734），另增 wangwu/成员/停用——demo 无停用 seed（disabled 是 S3a 账号页的运行时开关，demo:2942），此账号为验证 403 分支引入；四账号也满足 P3"双普通账号互不可见"验收前提。
-7. **统一错误信封**（ADR-0006 语言中立 REST 的具体化，S0b 起全部端点继承）：`{ "error": { "code": "<snake_case>", "message": "<可直接展示的中文文案>" } }`；本阶段取值域 `invalid_credentials`(401)/`account_disabled`(403)/`unauthorized`(401)/`not_found`(404)。处理器落 `http/`，server/web/hurl 三方按同一字段断言。
+5. **auth provider 接缝**（ADR-0007、system.md §3.1/§5）：auth 模块对外唯一认证判定出口 `authenticate(req) → Principal | null`；共享层拥有 cookie parse、session read/write、CSPRNG seam、Principal projection 与 Fastify plugin，provider 不拥有 cookie/session。dev-stub 适配器落 `server/src/auth/providers/dev-stub.ts`，只做 JavaScript `trim().toLowerCase()`、账号查询、self-describing scrypt parse/verify 与 disabled-after-password 判定；未知账号走固定 dummy scrypt，避免跳过 KDF。S3a 换 OIDC 只增 `providers/oidc.ts`，接缝、session storage 与调用方不动。单测直接对 `authenticate()` 断言有效/缺失/畸形/未知/过期/停用会话，证明接缝可替换且 read-only。
+6. **登录语义镜像 demo**：账号以 JavaScript `trim()` 后 `toLowerCase()`（demo:1644）；两类错误文案逐字采用（demo:1645,1647）；停用只在密码正确后暴露 403，错误密码仍为 401；停用账号拒绝登录但**不产生审计**（Non-goal；留痕在本节与 S1a change 的 Why，代码不写无号 TODO——AGENTS.md:105）。请求只接受 exact `{account,password}` string JSON object；无效 shape 在 provider/KDF/DB write 前拒绝。**密码存储 = `node:crypto` scrypt 散列（盐+参数编码入 `password_hash` 列），以 constant-time digest compare 校验，明文不入库/响应/日志**；未知/空账号使用同参数固定 dummy encoding 执行一次 scrypt 再统一 401。seed 四账号镜像 demo（demo:1400-1407）：zhangsan/成员、zhaoliu/成员、lisi/管理员，密码 `demo`（demo:1734），另增 wangwu/成员/停用——demo 无停用 seed（disabled 是 S3a 账号页的运行时开关，demo:2942），此账号为验证 403 分支引入；四账号也满足 P3"双普通账号互不可见"验收前提。
+7. **统一错误信封**（ADR-0006 语言中立 REST 的具体化，S0b 起全部端点继承）：`{ "error": { "code": "<snake_case>", "message": "<可直接展示的中文文案>" } }`；取值域为 `bad_request`(400, `请求格式不正确`)/`invalid_credentials`(401)/`account_disabled`(403)/`unauthorized`(401)/`not_found`(404)。Issue #6 先交付后四码；Issue #9 因 exact login JSON/schema/parse boundary 增量加入 `bad_request`，只将 Fastify validation、malformed JSON 与 unsupported login media type映射为不泄漏细节的 400，不把 programmer error 或凭证错误混入。处理器落 `http/`，server/web/hurl 三方按同一字段断言。
 8. **SPA 构建面**：Vite + @vitejs/plugin-react；`web/index.html` + `src/main.tsx` 入口；`tsconfig.base.json` 增 `jsx: react-jsx`；web 测试环境 jsdom（`web/vitest.config.ts` 覆写）；`knip.json` web entry 增 vite 约定入口（探针已证：index.html+vite.config.ts+声明依赖齐备时 knip vite 插件自动解析）；`npm run build --workspace web` 产出 `web/dist`。
 9. **SPA 结构**：react-router（createBrowserRouter）；**`/center` 为扁平路由 + 页内 tab**（镜像 demo——8 tab 是页内状态 `DB.centerTab` 而非 URL，demo:3144-3161；system.md §3.3 的 `/center/*` 字面按此澄清，S1d 需要 tab 深链时再引入 query 参数，不重构 router）；`/tokens` 不移植。路由级会话守卫：未登录任意路由渲染登录页并记录原目标，登录成功跳回。`lib/api`（fetch 封装 + 错误信封解析 + 401 统一跳登录）为独立横切模块，与首个消费方（登录页）同刀落地——理由是信封解析与 401 跳转需要消费方在场才能做有意义的集成断言（非 knip 死代码考虑：自带测试即不会被判死）。主题：`lib/theme` 扩 `system` 模式（可注入 matchMedia 接口），**默认档 = system**（demo:1035），normalizeTheme 未知值/存储不可用回退 system（现有回退 light 的语义同步修正）。退出登录在**侧栏用户页脚**（demo:1816-1822，带确认），设置页不放——demo IA 如此。
 10. **验证 harness**：hurl 走 `make smoke`（本地未装则目标显式失败并打印安装指引，CI 官方 installer；smoke job 先 `npm run build --workspace web` 再起服务，否则深链用例必挂）；Playwright `make ui-walk`（chromium 单浏览器）；两者进 CI 独立 job 并纳入 `all-checks-passed` needs。控制面**四处同步**（Makefile 头注释契约）：AGENTS.md Verification Matrix 两行 gap → 真命令 + Enforcement Index 升 block + Known blind spots 删过期条目 + Directory Map 增 `smoke/`；`constraints.yaml` verification.surfaces 增 smoke/ui-walk；Makefile 目标 + .PHONY。
@@ -284,9 +284,105 @@ Review focus:
 - Foreign-key enforcement must be active on the caller-visible `openDb` connection, with cascade and unknown-user rejection observed.
 - Conflict tests must exercise a late failure after earlier `010` statements to prove schema/seed/receipt rollback, not only an early CREATE failure.
 
+## Issue #9 delivery fixture: auth provider seam and dev-stub login
+
+Issue type: feature
+Project profile: open-workbuddy
+Blast radius: high
+Fixture level: high
+Repair intensity: high
+Upstream suggested level: compact (override: authentication decision seam, password KDF, CSPRNG session creation, cookie security attributes, persisted shared session state, and public login JSON/error contracts are mandatory high-risk triggers)
+Minimal mergeable slice: atomic — provider verification, shared session establishment, public `authenticate(req)` and the login route define one usable auth boundary; splitting would leave either an unreachable provider or a session writer with no replaceable authentication seam
+
+Change surface:
+- `server/src/auth/index.ts` plus internal shared session/plugin files and `server/src/auth/providers/dev-stub.ts`; `server/src/app.ts`; typed HTTP error mapping; focused direct/provider/real-`app.inject()` tests; `@fastify/cookie` runtime dependency/lockfile; this issue's OpenSpec rows.
+
+Must preserve:
+- `createApp({db,...})` keeps the caller-owned DB identity/lifetime and existing API/static precedence; `openDb(path)` remains the only DB opener and the existing `010` schema/seed bytes/receipt remain unchanged.
+- Existing health/info/static/error behavior, core/db migration invariants, web's exact direct Principal/error-envelope contract, and all workspaces remain green.
+- TTL configuration, me/logout, lazy expiry deletion and cookie clearing remain #10; default guard policy remains #19; no web, listen/server command, audit, OIDC or new migration scope.
+
+Must add/change:
+- Auth module exports exact `Principal = {id:string,account:string,role:string}` and one public decision seam `authenticate(request) -> Principal | null`. Its request contract is the minimal Fastify-compatible `{cookies,server.db}` shape; optional injected clock exists only as a deterministic dependency, not as an alternate identity API. It reads only an own cookie property `workbuddy_session` with exact `[0-9a-f]{64}`; prototype-inherited values are absent. It validates `now` as a nonnegative safe integer (invalid clock -> null), joins `auth_sessions` to `accounts`, requires `expires_at > now` and `disabled=0`, returns an exact projection, and performs no INSERT/UPDATE/DELETE.
+- Shared auth/session code owns cookie parsing, Principal projection, CSPRNG session creation, expiry assignment and session INSERT. `providers/dev-stub.ts` owns only credential normalization/query/scrypt/disabled policy and does not import HTTP or own cookie/session rows. `http` may map auth-domain failures to typed envelopes; auth must not import `server/src/http`.
+- Login accepts only `application/json` exact plain `{account,password}` with no extra keys and string values. The handler applies one hand-written validator to Fastify's parsed, unmodified body and does not attach a route body schema that could invoke default AJV type coercion or additional-property stripping; global AJV behavior remains unchanged. Raw account is bounded to 256 characters, password to 1024 characters, and route body to 16 KiB; shape/size/media/JSON parse failures occur before account lookup/KDF/session write and return exact `bad_request` 400 / `请求格式不正确` without Fastify/parser/password details.
+- Provider applies JavaScript `trim().toLowerCase()` then queries canonical `accounts.account`. It parses only exact `scrypt$16384$8$1$<32 lower hex>$<64 lower hex>`, derives 32 bytes with encoded salt/parameters and compares with `timingSafeEqual`. Unknown/normalized-empty account applies the request's submitted password to one fixed valid dummy encoding, executes exactly one real-equivalent scrypt path, ignores its compare result, then returns `invalid_credentials`; production contains no fixed plaintext dummy password. Disabled status is exposed only after a correct password, so disabled+wrong password is the same 401 as every other credential failure.
+- Successful login calls the shared generator whose production source is exactly `crypto.randomBytes(32)` and lower-hex encoding. It validates the generated 64-lowercase-hex identity, computes `expires_at = now + 604800000` as a non-negative safe integer, and uses an explicit SQLite transaction with plain INSERT to add exactly one session. Constraint/collision/transaction failure rolls back, preserves existing rows, returns generic 5xx, and sets no cookie. If rollback itself fails, shared session code throws an AggregateError preserving original + rollback errors/cause and does not claim cleanup succeeded; if caller already owns a transaction, BEGIN fails before ownership and the caller transaction/effects remain untouched.
+- Successful response is exact direct Principal JSON, carries `Cache-Control: no-store`, and one `Set-Cookie` named `workbuddy_session` whose value equals the committed row ID. Attributes are `HttpOnly; SameSite=Lax; Path=/`; `Secure` appears iff explicit `secureCookies=true` (default false); Domain, Expires and Max-Age are absent in #9.
+- `@fastify/cookie` is the only new runtime package and must be compatible with Fastify 5/Node 24/npm workspaces. Cookie registration precedes auth routes without changing API catch-all/static precedence.
+- Typed HTTP vocabulary adds `bad_request` for explicit `HttpError("bad_request")`; native Fastify content-parser failures are classified only by exact matched route identity plus exact constructor-backed code allowlist `FST_ERR_CTP_INVALID_MEDIA_TYPE`, `FST_ERR_CTP_INVALID_JSON_BODY`, `FST_ERR_CTP_EMPTY_JSON_BODY`, `FST_ERR_CTP_BODY_TOO_LARGE`. Login does not use route schema, so forgeable ordinary `FST_ERR_VALIDATION` shapes are not trusted. The mapper ignores raw `statusCode`: exact POST login returns 400; matched API catch-all or unmatched non-GET miss returns existing typed not_found 404; any other registered route stays generic 5xx. Arbitrary 400/413-like properties, forged codes/shapes, and DB/KDF/CSPRNG/programmer failures remain generic 5xx; no secret/error detail is reflected.
+
+Seams under test:
+- Real `createApp` + caller-owned `openDb(":memory:")` + `app.inject()` is the highest login/cookie/DB/error seam. Tests query the same SQLite handle before/after and use real `node:crypto` scrypt for canonical success/wrong/unknown/disabled scenarios.
+- Direct provider factory may inject only the crypto derivation boundary to prove unknown/empty/wrong/disabled ordering without mocking provider/DB behavior; at least one test per behavior also runs the real KDF.
+- Direct `authenticate()` receives minimal request-shaped input with real DB and injected `now` to prove valid/missing/malformed/unknown/equal-expiry/past-expiry/future-expiry/disabled-session behavior without HTTP.
+- Session ID generator receives an injected random-byte source in its direct unit seam to prove one 32-byte request and exact hex conversion; integration uses deterministic 32-byte fixtures for DB/cookie assertions plus multiple default-source sessions for unique/non-adjacent shape evidence.
+
+Risk packs considered (core):
+- Public API / CLI / script entry: selected — `POST /api/auth/login`, `authenticate(req)` and expanded `createApp` options are shared auth entry contracts.
+- Config / project setup: selected — `secureCookies` and deterministic auth dependencies must default safely; `@fastify/cookie`/lockfile must install offline-compatible.
+- File IO / path safety / overwrite: not selected — no filesystem/path input; existing static path behavior is preserved.
+- Schema / columns / units / field names: selected — exact body, Principal, cookie identity and epoch-millisecond session fields cross HTTP/feature/SQLite/web boundaries.
+- Auth / permissions / secrets: selected — password handling, account enumeration, disabled disclosure, cookie flags and session entropy are primary invariants.
+- Concurrency / shared state / ordering: selected — async KDF precedes one transaction; DB commit precedes cookie; collision/failure cannot overwrite rows or leak a header.
+- Resource limits / large input / discovery: selected — login body/account/password bounds stop oversized KDF work; fixed one-account query and one scrypt per shape-valid attempt.
+- Legacy compatibility / examples: selected — exact demo normalization/messages and existing web Principal/error consumers must agree; current schema/seed remains immutable.
+- Error handling / rollback / partial outputs: selected — validation, KDF, disabled, CSPRNG, clock, insert collision and transaction errors have distinct stable effects with no partial session/cookie.
+- Release / packaging / dependency compatibility: selected — one Fastify plugin dependency must support Node 24 and the pinned Fastify major.
+- Documentation / migration notes: not selected — no deployed schema migration or operator procedure; fixture records the new internal config.
+
+Domain packs:
+- Tenant/sandbox isolation: not selected — this slice authenticates account identity but reads no tenant workspace data.
+- Auth/session lifecycle: selected — session establishment and provider-independent authentication are the slice; lifecycle mutation endpoints remain #10.
+- Process/child-environment isolation: not selected — no child process/env/credential forwarding.
+- SQLite migration/seed compatibility: selected — no migration change is allowed; login must consume exact #8 schema and preserve all catalog/seed invariants.
+- Server/web HTTP-envelope compatibility: selected — direct Principal and exact bad-request/credential/disabled envelopes are already strict web contracts.
+- Offline deployability: selected — built-in crypto, SQLite and lockfile package only; no network runtime.
+- Browser runtime/navigation/persistence: selected only for cookie transport attributes and same-origin web contract; no web code/persistence change.
+- Cross-service boundary: not selected — no kbservice or external IdP call.
+
+Invariant Matrix:
+- Governing invariant: every shape-valid login performs exactly one bounded password-verification path before revealing account state; only a correct enabled account may atomically create one unpredictable server-side session and emit a cookie bound to that committed identity, while `authenticate` is a read-only provider-independent projection of a currently valid session.
+- Source-of-truth identity/contract: canonical `accounts.account`; encoded password hash; session row `id/user_id/expires_at`; cookie `workbuddy_session`; exact Principal and typed error definitions.
+- Producers: login JSON, #8 seed rows/hashes, injected clock/random-byte/KDF boundaries, SQLite session INSERT, cookie serializer.
+- Validators/preflight: hand-written exact validator over unmodified parsed JSON plus route body bound; exact login route identity + Fastify request-error code allowlist; account normalizer; exact real/dummy scrypt encoding parser; CSPRNG output/clock safe-integer validator; cookie-ID regex; SQLite constraints/FK.
+- Storage/cache/query: caller-owned SQLite `accounts`/`auth_sessions`; no token/local/browser storage, cache or second session repository.
+- Public routes/entrypoints: `POST /api/auth/login`, `authenticate(req)`, existing `createApp`; no me/logout/guard/listen route.
+- Frontend/downstream consumers: strict web `ApiClient.login` direct Principal/envelope parser; #10 consumes `authenticate`/session expiry/cookie constants; #19 consumes only `authenticate`; future OIDC reuses shared session establishment.
+- Failure paths/rollback/stale state: malformed/oversized requests, unknown/empty/wrong/disabled credentials, malformed stored hash, invalid random/clock, duplicate session ID, insert/commit failure, missing/malformed/unknown/expired/disabled session cookie, repeated login.
+- Evidence/audit/readiness: direct provider/authenticator/generator tests, real KDF, real `app.inject()`+SQLite rows/cookies, transaction fault/collision proof, package/lock checks, server coverage, `make check`, strict OpenSpec and secret/diff/stash scans.
+- Regression rows:
+  - Correct zhangsan/zhaoliu/lisi credential + fixed now/random bytes -> exact 200 Principal, no password/hash fields, one exact session row at `now+604800000`, one matching no-store cookie with secure flag exactly configured.
+  - `"  ZhangSan "` -> canonical zhangsan Principal/session user; whitespace-only/unknown/wrong password -> same exact 401 after one dummy/real KDF, no cookie/session delta.
+  - wangwu correct password -> exact 403 disabled; wangwu wrong password -> exact 401 invalid credentials; both run KDF and write nothing.
+  - Missing/extra/non-string/null/array/empty/malformed/non-JSON/over-bound login body -> exact 400 bad_request before KDF and DB write; a default-AJV route-schema mutant that coerces non-string values or strips extras is killed; password/parser/schema detail absent.
+  - Login Fastify raw 413/415 and other allowlisted request codes -> exact 400 bad_request; matched API catch-all/unmatched non-GET miss with the same native error -> exact 404 not_found; registered non-login route -> generic 5xx. StatusCode/code-prefix/global-mapper/validation-shape mutants are killed by the cross-route matrix.
+  - Generator direct seam -> random source called once with 32 and exact lowercase 64-hex output; multiple default logins -> unique IDs and no adjacent integer derivation; invalid-length source/unsafe clock/collision/forced insert failure -> generic 5xx, existing sessions unchanged, no Set-Cookie.
+  - Direct `authenticate` over valid/future row -> exact Principal; no/own-property-missing/prototype-inherited cookie, wrong name, malformed/uppercase/unknown ID, invalid clock, `expires_at <= now`, missing account or disabled account -> null with zero DB mutation.
+  - Session collision/constraint/COMMIT failure -> rollback leaves prior snapshot; forced rollback failure -> AggregateError preserves original+rollback errors and exposes still-active transaction for caller recovery; pre-existing caller transaction -> BEGIN fails without rollback/commit or effect loss.
+  - Existing health/info/API/static/error/core-db/auth-schema/web/kbservice tests -> unchanged except intentional five-code error-map advance; app close still leaves caller DB usable.
+
+Boundary-surface checklist:
+- Shared helper roots: one auth module owns Principal/cookie/session generator/writer/reader; one dev-stub provider; one typed HTTP error map.
+- Public entrypoints: `createApp`, `POST /api/auth/login`, `authenticate(req)`; no second DB opener/auth repository.
+- Read surfaces: bounded request JSON, parsed cookie, exact account/session rows, encoded hash.
+- Write/delete/overwrite surfaces: INSERT one session only; no UPDATE/DELETE/REPLACE, cookie set only after commit.
+- Staging/publish/rollback surfaces: KDF -> CSPRNG/expiry -> SQLite transaction commit -> response/cookie; every pre-commit failure emits no cookie and rollback preserves rows.
+- Producer/consumer evidence boundary: stored hash -> provider result -> Principal -> session identity -> Set-Cookie -> `authenticate`/future #10/#19 and existing web parser.
+- Stale/idempotency boundaries: expired/unknown/disabled-account session returns null read-only; repeated valid login creates independent rows; collision never reuses/overwrites.
+- Unchanged downstream consumers: core/db catalog/migration, Fastify static/API precedence, service-info, web auth client/provider/router/settings, kbservice.
+
+Review focus:
+- Feature-to-http dependency direction stays `http -> auth`, not `auth -> http`; shared session establishment is not buried in dev-stub.
+- Unknown/wrong/disabled ordering and dummy KDF cannot leak account existence through response or KDF omission.
+- Cookie/header identity is exactly the committed session row and is absent on every failure; secure default/config polarity is not inverted.
+- Request validation observes unmodified parsed JSON and rejects non-string/extra fields rather than letting Fastify/AJV coerce or strip them; native content-parser error mapping combines exact route owner and constructor-backed code allowlist, never trusts unreachable validation-shaped errors or global/statusCode/prefix duck typing, restores API/non-GET miss 404 precedence, and never reflects password/parser details.
+- `authenticate` checks strict expiry and disabled account but does not steal #10's cleanup ownership or mutate state.
+- Tests prove exact single-invariant failure paths (collision/clock/random/KDF/body) rather than generic multi-cause throws.
+
 ## Migration Plan
 
-新增服务，无存量业务数据迁移。Issue #8 从合法 foundation prefix 原子增加首个业务 schema；回滚 = revert PR 后删除仅由未发布开发版本产生的 DB。SQLite 文件路径仍由后续 #7 配置（默认 `var/dev.db`，gitignore）。
+新增服务，无存量业务数据迁移。Issue #8 从合法 foundation prefix 原子增加首个业务 schema；Issue #9 只消费该 schema，不增加或修改 migration。回滚 = revert PR，未发布开发会话可随 DB 删除；SQLite 文件路径仍由后续 #7 配置（默认 `var/dev.db`，gitignore）。
 
 ## Issue delivery fixture: #11 web 构建工具链
 

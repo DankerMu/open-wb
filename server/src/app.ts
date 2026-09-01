@@ -3,25 +3,41 @@ import { join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import fastifyStatic from "@fastify/static";
 import fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
-import { handleHttpError, rewriteUntrustedUrl, sendHttpError } from "./http/index.js";
+import {
+  type AuthRuntime,
+  DEFAULT_AUTH_RUNTIME,
+  type PasswordSource,
+  registerAuth,
+} from "./auth/index.js";
+import { HttpError, handleHttpError, rewriteUntrustedUrl, sendHttpError } from "./http/index.js";
 import { classifyRequestPath } from "./http/path-classifier.js";
 import { SERVICE_INFO } from "./service-info.js";
 
 declare module "fastify" {
   interface FastifyInstance {
     db: DatabaseSync;
+    authNow: () => number;
   }
 }
 
 export interface CreateAppOptions {
   db: DatabaseSync;
   staticRoot?: string;
+  secureCookies?: boolean;
+  authRuntime?: AuthRuntime;
+  passwordSource?: PasswordSource;
 }
 
 /**
  * 装配可注入的 HTTP app。调用方拥有 db 的完整生命周期；本函数不监听也不关闭它。
  */
-export function createApp({ db, staticRoot }: CreateAppOptions): FastifyInstance {
+export function createApp({
+  db,
+  staticRoot,
+  secureCookies = false,
+  authRuntime = DEFAULT_AUTH_RUNTIME,
+  passwordSource,
+}: CreateAppOptions): FastifyInstance {
   const app = fastify({
     logger: false,
     rewriteUrl: (request) => rewriteUntrustedUrl(request.url ?? ""),
@@ -29,7 +45,15 @@ export function createApp({ db, staticRoot }: CreateAppOptions): FastifyInstance
   const staticFiles = inspectStaticRoot(staticRoot);
 
   app.decorate("db", db);
-  app.setErrorHandler((error, _request, reply) => handleHttpError(error, reply));
+  app.setErrorHandler((error, request, reply) => handleHttpError(error, request, reply));
+
+  registerAuth(app, {
+    db,
+    secureCookies,
+    runtime: authRuntime,
+    mapAuthError: (code) => new HttpError(code),
+    ...(passwordSource === undefined ? {} : { passwordSource }),
+  });
 
   app.all("/api", (request, reply) => sendNotFound(reply, request));
   app.get("/api/healthz", () => ({ status: "ok" }));

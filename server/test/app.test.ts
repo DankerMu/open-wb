@@ -11,6 +11,7 @@ import { classifyUrlPathname, MAX_PERCENT_DECODE_PASSES } from "../src/http/path
 import { SERVICE_INFO } from "../src/service-info.js";
 
 const ERROR_CASES = [
+  { code: "bad_request", statusCode: 400, message: "请求格式不正确" },
   { code: "invalid_credentials", statusCode: 401, message: "账号或密码不正确" },
   { code: "account_disabled", statusCode: 403, message: "该账号已停用，请联系管理员" },
   { code: "unauthorized", statusCode: 401, message: "请先登录" },
@@ -83,6 +84,24 @@ function registerErrorRoutes(app: FastifyInstance): void {
   }
   app.get("/api/test-errors/unexpected", () => {
     throw new Error("private programmer detail");
+  });
+  app.get("/api/test-errors/status-400", () => {
+    throw Object.assign(new Error("status duck typing"), { statusCode: 400 });
+  });
+  app.get("/api/test-errors/status-413", () => {
+    throw Object.assign(new Error("status duck typing"), { statusCode: 413 });
+  });
+  app.get("/api/test-errors/forged-prefix-code", () => {
+    throw Object.assign(new Error("forged prefix code"), {
+      code: "FST_ERR_CTP_BODY_TOO_LARGE_FAKE",
+      statusCode: 413,
+    });
+  });
+  app.get("/api/test-errors/forged-allowlist-code", () => {
+    throw Object.assign(new Error("forged allowlist code"), {
+      code: "FST_ERR_CTP_BODY_TOO_LARGE",
+      statusCode: 413,
+    });
   });
 }
 
@@ -272,7 +291,7 @@ describe("createApp", () => {
     }
   });
 
-  it("将四种真实 HttpError 映射为唯一的精确 JSON 信封", async () => {
+  it("将五种真实 HttpError 映射为唯一的精确 JSON 信封", async () => {
     await withApp(undefined, async (app) => {
       registerErrorRoutes(app);
 
@@ -297,7 +316,7 @@ describe("createApp", () => {
     });
   });
 
-  it("不将意外 programmer error 伪装为四种应用错误", async () => {
+  it("不将意外 programmer error 伪装为五种应用错误", async () => {
     await withApp(undefined, async (app) => {
       registerErrorRoutes(app);
 
@@ -311,11 +330,119 @@ describe("createApp", () => {
       expect(response.json()).not.toMatchObject({
         error: {
           code: expect.stringMatching(
-            /^(invalid_credentials|account_disabled|unauthorized|not_found)$/u,
+            /^(bad_request|invalid_credentials|account_disabled|unauthorized|not_found)$/u,
           ),
         },
       });
       expectJsonContentType(response.headers);
+    });
+  });
+
+  it("statusCode/status 鸭型 400/413 与伪造/非 allowlist code 的 programmer error 保持 5xx", async () => {
+    await withApp(undefined, async (app) => {
+      registerErrorRoutes(app);
+
+      const routes = [
+        "/api/test-errors/status-400",
+        "/api/test-errors/status-413",
+        "/api/test-errors/forged-prefix-code",
+        "/api/test-errors/forged-allowlist-code",
+      ];
+
+      for (const url of routes) {
+        const response = await app.inject({ method: "GET", url });
+        expect(response.statusCode, url).toBeGreaterThanOrEqual(500);
+        expect(response.statusCode, url).toBeLessThan(600);
+        expect(response.payload, url).toBe('{"error":{"message":"服务器内部错误"}}');
+        expect(response.json(), url).toEqual({ error: { message: "服务器内部错误" } });
+        expect(response.json(), url).not.toMatchObject({
+          error: {
+            code: expect.stringMatching(
+              /^(bad_request|invalid_credentials|account_disabled|unauthorized|not_found)$/u,
+            ),
+          },
+        });
+      }
+    });
+  });
+
+  it("允许的 Fastify request error code 在登录路由稳定映射 exact 400 bad_request", async () => {
+    await withApp(undefined, async (app) => {
+      const malformedJson = await app.inject({
+        method: "POST",
+        url: "/api/auth/login",
+        payload: '{"broken": ',
+        headers: { "content-type": "application/json" },
+      });
+      expect(malformedJson.statusCode).toBe(400);
+      expect(malformedJson.payload).toBe(
+        JSON.stringify({
+          error: { code: "bad_request", message: "请求格式不正确" },
+        }),
+      );
+      expect(malformedJson.payload).not.toContain("FST_ERR");
+      expect(malformedJson.payload).not.toContain("Body is not valid JSON");
+
+      const unsupportedMedia = await app.inject({
+        method: "POST",
+        url: "/api/auth/login",
+        payload: "binary",
+        headers: { "content-type": "application/octet-stream" },
+      });
+      expect(unsupportedMedia.statusCode).toBe(400);
+      expect(unsupportedMedia.payload).toBe(
+        JSON.stringify({
+          error: { code: "bad_request", message: "请求格式不正确" },
+        }),
+      );
+    });
+  });
+
+  it("真实 FST_ERR_VALIDATION 不在 login allowlist（login 无 schema）：非 login route 保持 generic 5xx", async () => {
+    await withApp(undefined, async (app) => {
+      app.post(
+        "/api/test-errors/schema-validation",
+        {
+          schema: {
+            body: {
+              type: "object",
+              required: ["name"],
+              properties: { name: { type: "string" } },
+            },
+          },
+        },
+        () => ({ ok: true }),
+      );
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/test-errors/schema-validation",
+        payload: "{}",
+        headers: { "content-type": "application/json" },
+      });
+
+      expect(response.statusCode).toBeGreaterThanOrEqual(500);
+      expect(response.statusCode).toBeLessThan(600);
+      expect(response.payload).toBe('{"error":{"message":"服务器内部错误"}}');
+      expect(response.payload).not.toContain("FST_ERR");
+      expect(response.payload).not.toContain("required property");
+    });
+  });
+
+  it("非对象 programmer error（null throw）保持 generic 5xx", async () => {
+    await withApp(undefined, async (app) => {
+      app.get("/api/test-errors/primitive", () => {
+        throw null as unknown as Error;
+      });
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/test-errors/primitive",
+      });
+
+      expect(response.statusCode).toBeGreaterThanOrEqual(500);
+      expect(response.statusCode).toBeLessThan(600);
+      expect(response.payload).toBe('{"error":{"message":"服务器内部错误"}}');
     });
   });
 
