@@ -1,6 +1,7 @@
 import { scrypt as realScrypt } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
+import { AuthError } from "../src/auth/errors.js";
 import {
   createDevStubProvider,
   normalizeAccount,
@@ -143,6 +144,41 @@ describe("dev-stub provider verification seam", () => {
         expect(wrong.authError.code).toBe("invalid_credentials");
       }
       expect(db.prepare("SELECT COUNT(*) AS c FROM auth_sessions").get()).toEqual({ c: 0 });
+    });
+  });
+
+  async function expectWangwuDerivation(db: DatabaseSync, password: string) {
+    const row = db.prepare("SELECT password_hash FROM accounts WHERE id = ?").get("u4") as {
+      password_hash: string;
+    };
+    const stored = parseStoredHash(row.password_hash);
+
+    const invocations: DerivationInvocation[] = [];
+    const provider = createDevStubProvider(db, makeRecordingSource(invocations));
+    const outcome = await provider.verify("wangwu", password);
+
+    expect(invocations).toHaveLength(1);
+    expect(invocations[0]?.password).toBe(password);
+    expect(invocations[0]?.salt.toString("hex")).toBe(stored.salt.toString("hex"));
+    expect(invocations[0]?.keyLength).toBe(32);
+    expect(invocations[0]?.options).toEqual(SCRYPT_OPTIONS);
+    return outcome;
+  }
+
+  it("wangwu 正确密码：disabled 判定前恰好一次 stored-hash KDF（submitted password + stored salt + 32 + 精确参数）", async () => {
+    await withDb(async (db) => {
+      const outcome = await expectWangwuDerivation(db, "demo");
+      expect(outcome).toEqual({
+        principal: { id: "u4", account: "wangwu", role: "成员" },
+        disabled: true,
+      });
+    });
+  });
+
+  it("wangwu 错误密码：disabled 判定前恰好一次 stored-hash KDF（submitted password + stored salt + 32 + 精确参数）", async () => {
+    await withDb(async (db) => {
+      const outcome = await expectWangwuDerivation(db, "wrong");
+      expect(outcome).toEqual({ authError: new AuthError("invalid_credentials") });
     });
   });
 

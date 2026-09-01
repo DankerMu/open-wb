@@ -185,6 +185,39 @@ function sessionCount(db: DatabaseSync): number {
     .count;
 }
 
+function seedExistingSession(
+  db: DatabaseSync,
+): { id: string; user_id: string; expires_at: number }[] {
+  const row = { id: VALID_SESSION_ID, user_id: "u2", expires_at: FIXED_NOW + 604_800_000 };
+  db.prepare("INSERT INTO auth_sessions(id, user_id, expires_at) VALUES (?, ?, ?)").run(
+    row.id,
+    row.user_id,
+    row.expires_at,
+  );
+  return [row];
+}
+
+async function expectFaultPreservesSessions(
+  app: FastifyInstance,
+  db: DatabaseSync,
+  payload: string,
+): Promise<void> {
+  const before = seedExistingSession(db);
+  await expectServerError(app, payload);
+  expect(sessions(db)).toEqual(before);
+}
+
+function expectOneDummyDerivation(
+  invocations: readonly DerivationInvocation[],
+  password: string,
+): void {
+  expect(invocations).toHaveLength(1);
+  expect(invocations[0]?.password).toBe(password);
+  expect(invocations[0]?.salt.toString("hex")).toBe("00000000000000000000000000000000");
+  expect(invocations[0]?.keyLength).toBe(32);
+  expect(invocations[0]?.options).toEqual({ N: 16384, r: 8, p: 1 });
+}
+
 function responseCookie(response: { headers: Record<string, unknown> }): string {
   const cookie = response.headers["set-cookie"];
   if (typeof cookie !== "string") {
@@ -289,13 +322,40 @@ describe("POST /api/auth/login via createApp", () => {
     });
   });
 
-  it("account 超过 256 code units 与 password 超过 1024 code units 均为 400", async () => {
-    await withLoginApp({}, async (app, db) => {
+  it("account 超过 256 code units 与 password 超过 1024 code units 均为 400，KDF 0 次、无 Set-Cookie、无新增会话", async () => {
+    const invocations: DerivationInvocation[] = [];
+    await withLoginApp({ passwordSource: makeCountingSource(invocations) }, async (app, db) => {
       const longAccount = `a${"x".repeat(256)}`;
       const longPassword = `a${"x".repeat(1024)}`;
       await expectFailure(app, loginPayload(longAccount, "demo"), BAD_REQUEST_ENVELOPE);
       await expectFailure(app, loginPayload("zhangsan", longPassword), BAD_REQUEST_ENVELOPE);
+      expect(invocations).toHaveLength(0);
       expect(sessionCount(db)).toBe(0);
+    });
+  });
+
+  it("raw account 恰 256 与 raw password 恰 1024：shape-valid 各恰好一次 KDF，确定性 401，无 Set-Cookie、auth_sessions 不变", async () => {
+    const exactAccount = "a".repeat(256);
+    const exactPassword = "p".repeat(1024);
+    const invocations: DerivationInvocation[] = [];
+
+    await withLoginApp({ passwordSource: makeCountingSource(invocations) }, async (app, db) => {
+      const beforeSessions = seedExistingSession(db);
+
+      const accountAtMax = await postLogin(app, loginPayload(exactAccount, "demo"));
+      expect(accountAtMax.statusCode).toBe(401);
+      expect(accountAtMax.payload).toBe(JSON.stringify(CREDENTIAL_FAILURE_ENVELOPE));
+      expect(accountAtMax.headers["set-cookie"]).toBeUndefined();
+      expectOneDummyDerivation(invocations, "demo");
+
+      invocations.length = 0;
+      const passwordAtMax = await postLogin(app, loginPayload("no-such-account", exactPassword));
+      expect(passwordAtMax.statusCode).toBe(401);
+      expect(passwordAtMax.payload).toBe(JSON.stringify(CREDENTIAL_FAILURE_ENVELOPE));
+      expect(passwordAtMax.headers["set-cookie"]).toBeUndefined();
+      expectOneDummyDerivation(invocations, exactPassword);
+
+      expect(sessions(db)).toEqual(beforeSessions);
     });
   });
 
@@ -478,24 +538,33 @@ describe("POST /api/auth/login via createApp", () => {
     ["非整数时钟", (): number => 1.5],
     ["非有限时钟", (): number => Number.NaN],
     ["溢出时钟", (): number => Number.MAX_SAFE_INTEGER],
-  ] as const)("%s 是 generic 5xx，写会话与 cookie 前失败", async (_name, now) => {
-    await withLoginApp(
-      { authRuntime: { now, randomBytes: (size) => Buffer.alloc(size, 1) } },
-      async (app, _db) => {
-        await expectServerError(app, loginPayload("zhangsan", "demo"));
-      },
-    );
-  });
+  ] as const)(
+    "%s 是 generic 5xx，写会话与 cookie 前失败，auth_sessions 不变",
+    async (_name, now) => {
+      await withLoginApp(
+        { authRuntime: { now, randomBytes: (size) => Buffer.alloc(size, 1) } },
+        async (app, db) => {
+          await expectFaultPreservesSessions(app, db, loginPayload("zhangsan", "demo"));
+        },
+      );
+    },
+  );
 
   it.each([
     ["31 字节随机", (size: number) => Buffer.alloc(size - 1, 1)],
     ["33 字节随机", (size: number) => Buffer.alloc(size + 1, 1)],
     ["非 Buffer 输出", () => "not-a-buffer" as unknown as Buffer],
-  ] as const)("CSPRNG %s 是 generic 5xx，写会话与 cookie 前失败", async (_name, randomBytes) => {
-    await withLoginApp({ authRuntime: { now: () => FIXED_NOW, randomBytes } }, async (app, _db) => {
-      await expectServerError(app, loginPayload("zhangsan", "demo"));
-    });
-  });
+  ] as const)(
+    "CSPRNG %s 是 generic 5xx，写会话与 cookie 前失败，auth_sessions 不变",
+    async (_name, randomBytes) => {
+      await withLoginApp(
+        { authRuntime: { now: () => FIXED_NOW, randomBytes } },
+        async (app, db) => {
+          await expectFaultPreservesSessions(app, db, loginPayload("zhangsan", "demo"));
+        },
+      );
+    },
+  );
 
   it("existing sessions 在失败路径上保持字节级不变", async () => {
     await withLoginApp(
@@ -570,12 +639,12 @@ describe("POST /api/auth/login via createApp", () => {
     });
   });
 
-  it("KDF 失败（injected source reject）是 generic 5xx，无 cookie/会话", async () => {
+  it("KDF 失败（injected source reject）是 generic 5xx，无 Set-Cookie、auth_sessions 不变", async () => {
     const failingSource: PasswordSource = async () => {
       throw new Error("scrypt engine failure");
     };
-    await withLoginApp({ passwordSource: failingSource }, async (app, _db) => {
-      await expectServerError(app, loginPayload("zhangsan", "demo"));
+    await withLoginApp({ passwordSource: failingSource }, async (app, db) => {
+      await expectFaultPreservesSessions(app, db, loginPayload("zhangsan", "demo"));
     });
   });
 
