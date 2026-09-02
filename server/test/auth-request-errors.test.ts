@@ -5,14 +5,11 @@ import { createApp } from "../src/app.js";
 import { registerAuth, SESSION_TTL } from "../src/auth/index.js";
 import { openDb } from "../src/core/db/index.js";
 import { HttpError, handleHttpError } from "../src/http/index.js";
-
-const BAD_REQUEST_ENVELOPE = {
-  error: { code: "bad_request", message: "请求格式不正确" },
-};
-const NOT_FOUND_ENVELOPE = {
-  error: { code: "not_found", message: "请求的资源不存在" },
-};
-const INTERNAL_ERROR_ENVELOPE = { error: { message: "服务器内部错误" } };
+import {
+  BAD_REQUEST_ENVELOPE,
+  INTERNAL_ERROR_ENVELOPE,
+  NOT_FOUND_ENVELOPE,
+} from "./session-db-helpers.js";
 
 /** 三组逐字节相同的输入：malformed JSON / empty JSON body / unsupported media。
  *  相同输入必须在 login -> 400、unknown /api/* -> 404、unmatched non-GET -> 404、
@@ -52,6 +49,25 @@ async function withApp<T>(
   }
 }
 
+/**
+ * #19 后 protected API 的 parser/owner 结果只在已认证时可见（未认证在 parser 前 401，
+ * 由 http-guard-paths.test.ts 验收），因此这些既有用例先经 public login 建立真实会话。
+ * sessionCount 断言用的是独立 helper，故会话行不受影响：登录只发生在 setup 内。
+ */
+async function sessionCookieOf(app: FastifyInstance): Promise<string> {
+  const login = await app.inject({
+    method: "POST",
+    url: "/api/auth/login",
+    payload: JSON.stringify({ account: "zhangsan", password: "demo" }),
+    headers: { "content-type": "application/json" },
+  });
+  const cookie = login.headers["set-cookie"];
+  if (login.statusCode !== 200 || typeof cookie !== "string") {
+    throw new Error(`session setup failed with ${login.statusCode}: ${login.payload}`);
+  }
+  return cookie.split(";")[0] ?? "";
+}
+
 type HeaderValue = string | string[] | number | undefined;
 
 interface InjectResponse {
@@ -85,20 +101,21 @@ function sessionCount(db: DatabaseSync): number {
     .count;
 }
 
-function expectBadRequest(response: InjectResponse, db: DatabaseSync): void {
+function expectBadRequest(response: InjectResponse, db: DatabaseSync, sessions = 0): void {
   expect(response.statusCode).toBe(400);
   expect(response.payload).toBe(JSON.stringify(BAD_REQUEST_ENVELOPE));
   expect(response.payload).not.toContain("FST_ERR");
   expect(response.payload).not.toContain("Body is not valid JSON");
   expect(response.headers["set-cookie"]).toBeUndefined();
-  expect(sessionCount(db)).toBe(0);
+  // 除 setup 登录行之外不得新增任何会话行
+  expect(sessionCount(db)).toBe(sessions);
 }
 
-function expectNotFound(response: InjectResponse, db: DatabaseSync): void {
+function expectNotFound(response: InjectResponse, db: DatabaseSync, sessions = 0): void {
   expect(response.statusCode).toBe(404);
   expect(response.payload).toBe(JSON.stringify(NOT_FOUND_ENVELOPE));
   expect(response.headers["set-cookie"]).toBeUndefined();
-  expect(sessionCount(db)).toBe(0);
+  expect(sessionCount(db)).toBe(sessions);
 }
 
 function expectGenericServerError(response: InjectResponse): void {
@@ -150,21 +167,25 @@ describe("route-owner 结果：同一精确 CTP 输入在不同 route identity �
 
   it("相同输入在 matched /api/*（unknown API）恢复 typed not_found 404", async () => {
     await withApp(async (app, db) => {
+      const cookie = await sessionCookieOf(app);
       for (const row of IDENTICAL_INPUTS) {
         const response = await inject(app, "POST", "/api/no-such-route", row.payload, {
           ...row.headers,
+          cookie,
         });
-        expectNotFound(response, db);
+        expectNotFound(response, db, 1);
       }
       // exact /api 与尾斜杠同为 API fallback（routeOptions.url=/api 或 /api/*）
       const exactApi = await inject(app, "POST", "/api", '{"broken": ', {
         "content-type": "application/json",
+        cookie,
       });
-      expectNotFound(exactApi, db);
+      expectNotFound(exactApi, db, 1);
       const apiSlash = await inject(app, "POST", "/api/", '{"broken": ', {
         "content-type": "application/json",
+        cookie,
       });
-      expectNotFound(apiSlash, db);
+      expectNotFound(apiSlash, db, 1);
     });
   });
 
@@ -203,54 +224,65 @@ describe("route-owner 结果：同一精确 CTP 输入在不同 route identity �
         () => ({ ok: true }),
       );
 
+      const cookie = await sessionCookieOf(app);
       for (const row of IDENTICAL_INPUTS) {
         const response = await inject(app, "POST", "/api/registered", row.payload, {
           ...row.headers,
+          cookie,
         });
         expectGenericServerError(response);
       }
       const validation = await inject(app, "POST", "/api/registered-schema", "{}", {
         "content-type": "application/json",
+        cookie,
       });
       expectGenericServerError(validation);
-      expect(sessionCount(db)).toBe(0);
+      // setup 登录行之外无新增会话
+      expect(sessionCount(db)).toBe(1);
     });
   });
 
   it("route identity 边界基于实际路由：query 精确 login=400；PUT/尾斜杠回 /api/*=404；GET=404", async () => {
     await withApp(async (app, db) => {
+      // public login 自身的 400 无需会话
       const queried = await inject(app, "POST", "/api/auth/login?x=1", '{"account": ', {
         "content-type": "application/json",
       });
       expectBadRequest(queried, db);
 
+      // 落到 API catch-all 的近邻需要会话才能观察其既有 404 owner 结果
+      const cookie = await sessionCookieOf(app);
       const putLogin = await inject(app, "PUT", "/api/auth/login", '{"account": ', {
         "content-type": "application/json",
+        cookie,
       });
-      expectNotFound(putLogin, db);
+      expectNotFound(putLogin, db, 1);
 
       const trailingSlash = await inject(app, "POST", "/api/auth/login/", '{"account": ', {
         "content-type": "application/json",
+        cookie,
       });
-      expectNotFound(trailingSlash, db);
+      expectNotFound(trailingSlash, db, 1);
 
       const getLogin = await inject(app, "GET", "/api/auth/login", '{"account": ', {
         "content-type": "application/json",
+        cookie,
       });
-      expectNotFound(getLogin, db);
+      expectNotFound(getLogin, db, 1);
     });
   });
 
   it("unknown /api/* 的 valid 但 17 KiB body 走既有 /api/* not_found 404（login body-limit 只作用 login）", async () => {
     await withApp(async (app, db) => {
+      const cookie = await sessionCookieOf(app);
       const response = await inject(
         app,
         "POST",
         "/api/no-such-route",
         `{"a":"${"x".repeat(17_000)}"}`,
-        { "content-type": "application/json" },
+        { "content-type": "application/json", cookie },
       );
-      expectNotFound(response, db);
+      expectNotFound(response, db, 1);
     });
   });
 });
@@ -275,20 +307,24 @@ describe("exact POST /api/auth/logout 加入 route-owner（#10）", () => {
       });
       expectBadRequest(queried, db);
 
+      const cookie = await sessionCookieOf(app);
       const trailingSlash = await inject(app, "POST", "/api/auth/logout/", '{"a": ', {
         "content-type": "application/json",
+        cookie,
       });
-      expectNotFound(trailingSlash, db);
+      expectNotFound(trailingSlash, db, 1);
 
       const putLogout = await inject(app, "PUT", "/api/auth/logout", '{"a": ', {
         "content-type": "application/json",
+        cookie,
       });
-      expectNotFound(putLogout, db);
+      expectNotFound(putLogout, db, 1);
 
       const getLogout = await inject(app, "GET", "/api/auth/logout", '{"a": ', {
         "content-type": "application/json",
+        cookie,
       });
-      expectNotFound(getLogout, db);
+      expectNotFound(getLogout, db, 1);
     });
   });
 
@@ -609,18 +645,21 @@ describe("clear-cookie onSend 作用域只限 me/logout", () => {
         throw new HttpError("unauthorized");
       });
       app.post("/api/probe-204", (_request, reply) => reply.code(204).send());
+      // 探针 route 属 protected：先建立会话，才能观察"这些 route 自己"的终态头
+      const authorized = await sessionCookieOf(app);
       for (const [url, method, statusCode] of [
         ["/api/probe-401", "GET", 401],
         ["/api/probe-204", "POST", 204],
       ] as const) {
         const response = await inject(app, method, url, undefined, {
-          cookie: `workbuddy_session=${BEARER}`,
+          cookie: `${authorized}; workbuddy_session=${BEARER}`,
         });
         expect(response.statusCode).toBe(statusCode);
         expect(response.headers["set-cookie"]).toBeUndefined();
         expect(response.headers["cache-control"]).toBeUndefined();
       }
-      expect(sessionCount(db)).toBe(0);
+      // setup 登录行之外无新增：探针 BEARER 不得被任何 route 消费/撤销
+      expect(sessionCount(db)).toBe(1);
     });
   });
 });

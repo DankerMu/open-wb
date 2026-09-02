@@ -97,10 +97,20 @@ Minimal mergeable slice: 1.1 core/db 单独可合并保绿（独立模块+自带
     - compatibility：#9 login/provider/KDF/CSPRNG/normal-cookie/transaction tests、#6 app/static/error、#8 schema/migration、existing web `ApiClient.getMe/logout`/AuthProvider/footer、web/kbservice全绿；migration `010` byte-identical，无新增依赖或公网 runtime；
     - focused lifecycle/direct/request-error tests、`npm test --workspace server`、existing web consumer tests、`make check`、strict OpenSpec、`git diff --check`、size/knip/jscpd/secret/debug/skip/stash scans全绿，coverage include/80% threshold不收窄。
   - Non-goals: default `/api/*` guard/exemption policy（#19）、server.ts/env/listen mapping（#7）、hurl/real process（#16）、web changes、audit/OIDC/CSRF/rate limiting、schema migration/backfill、multi-process session coordination。
-- [ ] 2.4 认证守卫：`/api/*` 默认要求会话（healthz/info/login 与 bearer-revocation POST logout 豁免；me 可由 guard 消费 authenticate）、无 cookie 与伪造/未知 session id 均 401 信封不 5xx + inject 测试
-
-Suggested fixture level: compact - 认证是安全面但范围小、全部经 inject 单 seam 断言；expanded 留给 S3a OIDC
-Minimal mergeable slice: 2.1 迁移+seed 单独可合并保绿（依赖 1.1 已合并；纯迁移+seed 断言，无端点）
+- [x] 2.4 认证守卫：`/api`与`/api/*`默认要求会话，精确豁免GET/HEAD healthz/info、POST login与bearer-revocation POST logout；无cookie/伪造/未知session id均401信封不5xx、不写会话 + inject tests
+  - Issue #19 fixture: high（upstream compact因default auth routing、shared session cleanup、public exemption与parser/handler ordering强制升档）；repair intensity: high；minimal slice: default-deny guard + exact allowlist原子交付。
+  - Change boundary: `server/src/http/` guard/original-path owner、`app.ts` assembly、me request-local Principal消费与一个focused real-app test；不改resolver/migration/dependency/web/listen/smoke/audit。
+  - Required evidence:
+    - TDD/red-proof：pre-change无cookie/unknown exact `/api`与`/api/*`仍404而非401；不是syntax/import红，不留stash/probe；
+    - exact default/allowlist：无cookie及missing/wrong-name/32/63/65/uppercase/nonhex/unknown protected input→逐字相同401 unauthorized、无Set-Cookie/secret/detail、complete DB snapshot不变；GET/HEAD healthz/info、POST login/logout exact route（query仍同matched identity）保持既有行为；GET login/logout、POST health/info、trailing slash与encoded public-path near-miss仍受保护；
+    - original URL/path：exact `/api`、slash/backslash descendant、catch-all、1-4轮encoded API与post-decode `?`形成的routed exact `/api`（如`/api%3Fx=1`、`/%61pi%3Fx=1`）均受保护；`/files%3Ftab=1`仍为non-API fallback；ordinary non-API GET/POST/HEAD miss与malformed/超界/unsafe non-API即使被rewrite到internal API miss仍绕过guard、零session query并保持既有typed404/static/fallback边界；guard/rewrite/static复用同一bounded classifier owner，不能分裂identity或无界decode；
+    - hook/parser ordering：将me no-store从handler前移到route-local onRequest；cookie parser与me/logout onRequest先于root preParsing guard，guard先于body parser/handler。Unauth me仍401/no-store/clear；unauth protected malformed/media/oversize body→401；valid-auth同input恢复matched catch-all404或registered-route既有5xx；ordinary non-API POST/HEAD miss无/有cookie均404且session query count=0；public login/logout相同input仍既有400且在自身write/delete前；
+    - Principal/state：auth注册面唯一安装`principal:null` request decorator，使standalone `registerAuth`与createApp运行时都exact满足`Principal|null`类型；禁止共享object默认值/重复decorate；future enabled cookie→guard只authenticate一次并写exact `{id,account,role}`，me与test consumer不二次查询/不跨request共享；并发不同cookie不cross-bind；future disabled/orphan/invalid clock→401无写；expired enabled/disabled/orphan→authenticate只conditional cleanup exact row后401，siblings不变；
+    - failure ownership：session query/cleanup/transaction failure保持generic5xx，不降级401、不泄漏、不清cookie；guard 401不全局添加me/logout专属clear-cookie/no-store；me null仍401/no-store/clear，logout disabled/orphan/invalid-clock仍绕过guard并204/delete/clear；
+    - public zero-guard-work：healthz/info携任意cookie/invalid auth clock与expired row仍200/HEAD、无session SELECT/cleanup/row creation；login只执行自身validator/KDF/session流程，logout只执行自身bearer DELETE，guard不额外消费authenticate；
+    - lifecycle/compatibility：valid-auth unknown API继续exact404，unauth unknown API有意变401；#6 static/API/error/path、#9 login、#10 lifecycle/parser/cookie/transaction、strict web consumers与caller DB ownership保持绿；one DB opener，无global guard cache/second repository；
+    - focused guard/lifecycle/request-error/app tests、full server、existing web consumers、`make check`、strict OpenSpec、diff/size/knip/jscpd/secret/debug/skip/stash scans全绿，coverage include/80% threshold不收窄。
+  - Non-goals: #7 env/listen、#16 hurl/real process、resolver变化、web、audit/OIDC/CSRF/rate-limit、tenant authorization、schema/backfill/multi-process coordination。
 
 ## 3. spa-shell
 

@@ -11,7 +11,13 @@ import {
   SESSION_TTL,
   validateSessionTtl,
 } from "./auth/index.js";
-import { HttpError, handleHttpError, rewriteUntrustedUrl, sendHttpError } from "./http/index.js";
+import {
+  HttpError,
+  handleHttpError,
+  registerAuthGuard,
+  rewriteUntrustedUrl,
+  sendHttpError,
+} from "./http/index.js";
 import { classifyRequestPath } from "./http/path-classifier.js";
 import { SERVICE_INFO } from "./service-info.js";
 
@@ -62,6 +68,9 @@ export function createApp({
     mapAuthError: (code) => new HttpError(code),
     ...(passwordSource === undefined ? {} : { passwordSource }),
   });
+
+  // 横切守卫在 cookie/auth 之后装配（root preParsing 天然晚于二者的 onRequest）。
+  registerAuthGuard(app);
 
   app.all("/api", (request, reply) => sendNotFound(reply, request));
   app.get("/api/healthz", () => ({ status: "ok" }));

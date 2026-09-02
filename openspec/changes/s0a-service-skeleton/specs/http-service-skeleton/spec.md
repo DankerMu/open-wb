@@ -25,7 +25,7 @@
 - THEN decorator 与传入 handle 是同一对象，close 后 caller 仍可查询并自行关闭它
 
 ### Requirement: 统一错误信封
-所有本阶段可预期 `/api/*` 应用错误与 API 404 SHALL 使用统一信封 `{ "error": { "code": "<snake_case>", "message": "<可直接展示的中文文案>" } }`；typed definition map 固定为 `bad_request`(400, `请求格式不正确`)、`invalid_credentials`(401, `账号或密码不正确`)、`account_disabled`(403, `该账号已停用，请联系管理员`)、`unauthorized`(401, `请先登录`)、`not_found`(404, `请求的资源不存在`)；处理器 SHALL 落在 `http/` 横切层。`bad_request` 覆盖显式 typed `HttpError("bad_request")`；仅当 request 的 matched route identity 恰为 `POST /api/auth/login` 或 `POST /api/auth/logout` 时，才额外覆盖 exact Fastify content-parser error code allowlist：`FST_ERR_CTP_INVALID_MEDIA_TYPE`、`FST_ERR_CTP_INVALID_JSON_BODY`、`FST_ERR_CTP_EMPTY_JSON_BODY`、`FST_ERR_CTP_BODY_TOO_LARGE`。Login/logout 不使用 route schema，因此 `FST_ERR_VALIDATION` 不在此 allowlist，避免把可伪造的普通 Error shape当作受信 request error。映射不依赖 raw `statusCode`（body-too-large 原始状态可为 413），最终均为 exact 400。相同 allowlisted parser/media 错误若发生在 matched `/api`/`/api/*` catch-all 或未匹配的 non-GET miss，SHALL 恢复既有 typed `not_found` 404；发生在其他已注册 route 时保持 generic 5xx。不得回显 parser/schema/password 细节；具有相同 status/statusCode 或伪造 code 的任意 programmer error不得被误标成五种语义错误，仍为 5xx。
+所有本阶段可预期 `/api/*` 应用错误与 API 404 SHALL 使用统一信封 `{ "error": { "code": "<snake_case>", "message": "<可直接展示的中文文案>" } }`；typed definition map 固定为 `bad_request`(400, `请求格式不正确`)、`invalid_credentials`(401, `账号或密码不正确`)、`account_disabled`(403, `该账号已停用，请联系管理员`)、`unauthorized`(401, `请先登录`)、`not_found`(404, `请求的资源不存在`)；处理器 SHALL 落在 `http/` 横切层。`bad_request` 覆盖显式 typed `HttpError("bad_request")`；仅当 request 的 matched route identity 恰为豁免guard的 `POST /api/auth/login` 或 `POST /api/auth/logout` 时，才额外覆盖 exact Fastify content-parser error code allowlist：`FST_ERR_CTP_INVALID_MEDIA_TYPE`、`FST_ERR_CTP_INVALID_JSON_BODY`、`FST_ERR_CTP_EMPTY_JSON_BODY`、`FST_ERR_CTP_BODY_TOO_LARGE`。Login/logout 不使用 route schema，因此 `FST_ERR_VALIDATION` 不在此 allowlist，避免把可伪造的普通 Error shape当作受信 request error。映射不依赖 raw `statusCode`（body-too-large 原始状态可为 413），最终均为 exact 400。其他原始API namespace的protected request在root preParsing guard前不解析body：未认证先返回401；通过guard后，相同parser/media错误若发生在matched `/api`/`/api/*` catch-all，恢复既有typed `not_found` 404，发生在其他已注册API route保持generic5xx。原始non-API unmatched non-GET miss无论是否携cookie都绕过guard、零session query并保持既有typed404。不得回显parser/schema/password/session细节；具有相同status/statusCode或伪造code的任意programmer error不得被误标成五种语义错误，仍为5xx。
 
 #### Scenario: 五码信封形状一致
 - WHEN 测试路由分别抛出五种 typed application error
@@ -34,10 +34,14 @@
 #### Scenario: auth POST 请求 parse/validation 错误稳定映射
 - WHEN `/api/auth/login` 收到 empty/malformed JSON、unsupported media type、不符合手写 exact body validator 的 JSON 或超过 16 KiB body limit，或 bodyless `/api/auth/logout` 收到任意 parsed body/empty-or-malformed JSON/unsupported media/超过其最小合法 body limit
 - THEN 不论 Fastify raw status 是否为 400/413/415，均按显式 typed error 或 exact matched auth-route-scoped allowlisted Fastify error code 返回 exact 400 `bad_request` 信封，不回显 validation/parser 详情或请求中的密码；错误发生在 logout cookie lookup/DELETE/clear-cookie 前
-- WHEN 相同 allowlisted malformed/media/body 错误发生在 matched `/api`/`/api/*` catch-all 或未匹配的 non-GET miss
-- THEN 返回既有 exact typed `not_found` 404；不得因 content parser 先于 catch-all handler 而成为 400/500
-- WHEN 相同错误发生在 exact POST login/logout 之外的其他已注册 route，或 programmer error 仅携带 `statusCode=400/413` /伪造 allowlist code/validation-shaped fields
-- THEN 保持 generic 5xx，不得被 auth POST request-error mapper 改写
+- WHEN 未认证请求携相同 malformed/media/body 输入访问original API namespace的受保护matched `/api`/`/api/*` catch-all或其他protected API route
+- THEN guard在content parser前返回exact401 unauthorized；不得被raw parser status改写为400/404/500
+- WHEN无论有无cookie，相同输入访问original non-API unmatched non-GET miss
+- THEN绕过guard且零session query，保持既有exact typed `not_found` 404
+- WHEN有效会话携相同输入访问matched `/api`/`/api/*` catch-all
+- THEN通过guard后返回既有exact typed `not_found` 404；不得因content parser先于catch-all handler而成为400/500
+- WHEN有效会话携相同错误访问exact POST login/logout之外的其他已注册protected API route，或programmer error仅携带`statusCode=400/413`/伪造allowlist code/validation-shaped fields
+- THEN保持generic5xx，不得被auth POST request-error mapper或guard改写
 
 #### Scenario: 意外错误不伪装
 - WHEN API route 抛出未分类的 programmer error
@@ -55,15 +59,15 @@
 - THEN 全部迁移成功执行（单测经此 seam 验证）
 
 ### Requirement: 静态托管与 history fallback
-系统 SHALL 从可选 operator-configured `STATIC_ROOT` 托管常规静态文件；当 root 为存在目录且包含常规 `index.html` 时，仅非 `/api` 命名空间的 GET miss SHALL 返回该 index（200）。Exact `/api` 与所有 `/api/*`（含 query/encoded path）优先于静态文件与 fallback；未知 API、非 GET miss、不可用 fallback 均返回 typed `not_found` 404。Absent、nonexistent、non-directory、index-less root 不得阻断 app readiness、health 或 info。
+系统 SHALL 从可选 operator-configured `STATIC_ROOT` 托管常规静态文件；当 root 为存在目录且包含常规 `index.html` 时，仅非 `/api` 命名空间的 GET miss SHALL 返回该 index（200）。Exact `/api` 与所有 `/api/*`（含 query/encoded path）始终优先于静态文件与 fallback；#19后受保护的未知API先经默认guard：未认证返回typed `unauthorized` 401，有效会话通过guard后返回typed `not_found` 404。非GET非API miss与不可用fallback仍返回typed `not_found` 404。Absent、nonexistent、non-directory、index-less root 不得阻断 app readiness、health 或 info。
 
 #### Scenario: 静态文件与深链刷新
 - WHEN existing root 含 regular `index.html` 与 asset，分别 GET asset、`/files`、`/files/` 与 `/files?tab=1`
 - THEN asset 返回自身 exact bytes/content type，三个 deep link 均返回 exact index bytes
 
 #### Scenario: API namespace 永远优先且分类工作有界
-- WHEN root 内存在 `api/no-such` 文件或 index，客户端请求 exact `/api`、`/api/no-such`、其 query/一至四轮 encoded bypass，以及约 8KB 的更深 nested encoding
-- THEN API/encoded 变体均返回 JSON `not_found` 404、不返回文件或 index，深层输入在最多四次 decode 后 fail closed 而不继续按层分配；known health/info 仍返回自身 body
+- WHEN root 内存在 `api/no-such` 文件或 index，客户端以无会话或有效会话请求 exact `/api`、`/api/no-such`、其 literal query、1–4轮encoded path与decoded-query bypass（如`/api%3Fx=1`、`/%61pi%3Fx=1`），并另请求约8KB的更深nested encoding与`/files%3Ftab=1`
+- THEN exact、1–4轮encoded与post-decode routed exact `/api` identity永不返回文件/index：无会话返回JSON `unauthorized` 401，有效会话通过guard后返回JSON `not_found` 404；`/files%3Ftab=1`保持non-API fallback；更深输入在最多四次decode后作为unsafe fail-closed typed404而不继续按层分配或查询session，其他原始non-API unsafe identity同样404；known health/info保持自身body且不查询session
 
 #### Scenario: 静态根不可用不阻断 app
 - WHEN `staticRoot` absent、nonexistent、为 regular file、或目录缺 regular index

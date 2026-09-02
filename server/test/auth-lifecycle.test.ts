@@ -586,6 +586,10 @@ describe("POST /api/auth/logout", () => {
     },
   );
 
+  /**
+   * #19 后 protected API 的 parser 失败只在已认证时可见（未认证在 parser 前 401，
+   * 见 http-guard-paths.test.ts），因此本用例在同一真实会话下观察 no-store 的作用域。
+   */
   it("no-store 作用域只限 exact POST logout：其他 route 的 parser 失败不被全局加头", async () => {
     await withApp({}, async ({ app, db }) => {
       app.post("/api/registered-no-store-probe", async () => ({ ok: true }));
@@ -601,7 +605,7 @@ describe("POST /api/auth/logout", () => {
         method: "POST",
         url: "/api/registered-no-store-probe",
         payload: "{",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", cookie: pair },
       });
       expect(registered.statusCode).toBe(500);
       expect(registered.headers["cache-control"]).toBeUndefined();
@@ -611,7 +615,7 @@ describe("POST /api/auth/logout", () => {
         method: "POST",
         url: "/api/no-such-route",
         payload: "{",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", cookie: pair },
       });
       expect(fallback.statusCode).toBe(404);
       expect(fallback.headers["cache-control"]).toBeUndefined();
@@ -623,7 +627,7 @@ describe("POST /api/auth/logout", () => {
         method: "POST",
         url: "/api/auth/logout/",
         payload: "{",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", cookie: pair },
       });
       expect(miss.statusCode).toBe(404);
       expect(miss.headers["cache-control"]).toBeUndefined();
@@ -731,7 +735,13 @@ describe("HTTP typed error map 恰五码（auth 域只复用既有 unauthorized�
         app.get(`/api/test-envelope/${code}`, () => {
           throw new HttpError(code as HttpErrorCode);
         });
-        const response = await app.inject({ method: "GET", url: `/api/test-envelope/${code}` });
+        // typed 信封是 handler/error-handler 层合同：先建立会话穿过 #19 守卫再观察
+        const pair = await loginSessionPair(app);
+        const response = await app.inject({
+          method: "GET",
+          url: `/api/test-envelope/${code}`,
+          headers: { cookie: pair },
+        });
         expect(response.statusCode).toBe(definition.statusCode);
         expect(response.payload).toBe(
           JSON.stringify({ error: { code, message: definition.message } }),
