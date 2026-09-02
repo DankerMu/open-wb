@@ -8,6 +8,8 @@ import {
   DEFAULT_AUTH_RUNTIME,
   type PasswordSource,
   registerAuth,
+  SESSION_TTL,
+  validateSessionTtl,
 } from "./auth/index.js";
 import { HttpError, handleHttpError, rewriteUntrustedUrl, sendHttpError } from "./http/index.js";
 import { classifyRequestPath } from "./http/path-classifier.js";
@@ -24,20 +26,25 @@ export interface CreateAppOptions {
   db: DatabaseSync;
   staticRoot?: string;
   secureCookies?: boolean;
+  /** 绝对会话过期配置（epoch 毫秒）；省略或显式 `undefined` → 恰 604800000。 */
+  sessionTtlMs?: number | undefined;
   authRuntime?: AuthRuntime;
   passwordSource?: PasswordSource;
 }
 
 /**
  * 装配可注入的 HTTP app。调用方拥有 db 的完整生命周期；本函数不监听也不关闭它。
+ * TTL 配置在任何 app/DB 装配之前同步校验：非法值直接抛出，不钳制也不回退默认。
  */
 export function createApp({
   db,
   staticRoot,
   secureCookies = false,
+  sessionTtlMs = SESSION_TTL,
   authRuntime = DEFAULT_AUTH_RUNTIME,
   passwordSource,
 }: CreateAppOptions): FastifyInstance {
+  const sessionTtl = validateSessionTtl(sessionTtlMs);
   const app = fastify({
     logger: false,
     rewriteUrl: (request) => rewriteUntrustedUrl(request.url ?? ""),
@@ -50,6 +57,7 @@ export function createApp({
   registerAuth(app, {
     db,
     secureCookies,
+    sessionTtlMs: sessionTtl,
     runtime: authRuntime,
     mapAuthError: (code) => new HttpError(code),
     ...(passwordSource === undefined ? {} : { passwordSource }),

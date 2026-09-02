@@ -14,6 +14,7 @@ import {
   sessionIdFromCookies,
 } from "../src/auth/index.js";
 import { openDb } from "../src/core/db/index.js";
+import { denyStatement, MALFORMED_SESSION_IDS } from "./auth-lifecycle-helpers.js";
 
 const FIXED_NOW = 1_700_000_000_000;
 const VALID_SESSION_ID = "5777bb89d0a34b5f8af733b23fa6dd5d0b19b13d9b1e27a8aa5e3dbd2f0b4ca7";
@@ -34,7 +35,12 @@ function withDb<T>(action: (db: DatabaseSync) => T): T {
   }
 }
 
-function insertSessionRow(db: DatabaseSync, id: string, userId: string, expiresAt: number): void {
+function insertSessionRow(
+  db: DatabaseSync,
+  id: string,
+  userId: string,
+  expiresAt: number | bigint,
+): void {
   db.prepare("INSERT INTO auth_sessions(id, user_id, expires_at) VALUES (?, ?, ?)").run(
     id,
     userId,
@@ -62,7 +68,7 @@ function authRequest(db: DatabaseSync, cookieValue?: string, now = FIXED_NOW) {
   };
 }
 
-describe("authenticate read-only seam", () => {
+describe("authenticate seam：cookie 形状、时钟与账号资格（未过期路径不写入）", () => {
   it("有效未来行返回 exact Principal；过期行严格大于 now（相等即过期）", () => {
     withDb((db) => {
       insertSessionRow(db, VALID_SESSION_ID, "u1", FIXED_NOW + 1);
@@ -107,14 +113,7 @@ describe("authenticate read-only seam", () => {
     });
   });
 
-  it.each([
-    ["32 位", "a".repeat(32)],
-    ["63 位", "a".repeat(63)],
-    ["65 位", "a".repeat(65)],
-    ["大写 hex", "A".repeat(64)],
-    ["非 hex", "g".repeat(64)],
-    ["短 GUID 形", "5777bb89-d0a3-4b5f-8af7-33b23fa6dd5d"],
-  ] as const)("畸形/非法 session id（%s）返回 null", (_name, cookieValue) => {
+  it.each(MALFORMED_SESSION_IDS)("畸形/非法 session id（%s）返回 null", (_name, cookieValue) => {
     withDb((db) => {
       insertSessionRow(db, VALID_SESSION_ID, "u1", FIXED_NOW + 1);
       const before = sessionSnapshot(db);
@@ -135,17 +134,23 @@ describe("authenticate read-only seam", () => {
     });
   });
 
-  it("expires_at 严格大于 now，等于 now 即过期返回 null", () => {
+  it("expires_at 严格大于 now 才有效；等于 now 即过期（进入 #10 清理）", () => {
     withDb((db) => {
       const equalId = "c".repeat(64);
-      const pastId = "d".repeat(64);
+      const futureId = "e".repeat(64);
       insertSessionRow(db, equalId, "u1", FIXED_NOW);
-      insertSessionRow(db, pastId, "u2", FIXED_NOW - 60_000);
-      const before = sessionSnapshot(db);
+      insertSessionRow(db, futureId, "u2", FIXED_NOW + 1);
 
+      expect(authenticate(authRequest(db, futureId))).toEqual({
+        id: "u2",
+        account: "zhaoliu",
+        role: "成员",
+      });
       expect(authenticate(authRequest(db, equalId))).toBeNull();
-      expect(authenticate(authRequest(db, pastId))).toBeNull();
-      expect(sessionSnapshot(db)).toEqual(before);
+      // 相等即过期：matched 行被定点清理，future sibling 不动。
+      expect(sessionSnapshot(db)).toEqual([
+        { id: futureId, user_id: "u2", expires_at: FIXED_NOW + 1 },
+      ]);
     });
   });
 
@@ -167,6 +172,19 @@ describe("authenticate read-only seam", () => {
       expect(authenticate(authRequest(db, VALID_SESSION_ID, now as number))).toBeNull();
       expect(sessionSnapshot(db)).toEqual(beforeSessions);
       expect(accountSnapshot(db)).toEqual(beforeAccounts);
+    });
+  });
+
+  it("非法时钟在任何查询之前 fail closed：SELECT 被拒仍返回 null 且不抛错", () => {
+    withDb((db) => {
+      insertSessionRow(db, VALID_SESSION_ID, "u1", FIXED_NOW + 60_000);
+      denyStatement(db, constants.SQLITE_SELECT, null);
+      try {
+        expect(() => authenticate(authRequest(db, VALID_SESSION_ID, -1))).not.toThrow();
+        expect(authenticate(authRequest(db, VALID_SESSION_ID, -1))).toBeNull();
+      } finally {
+        db.setAuthorizer(null);
+      }
     });
   });
 
@@ -222,7 +240,7 @@ describe("authenticate read-only seam", () => {
     });
   });
 
-  it("authenticate 全程无 INSERT/UPDATE/DELETE；所有路径快照字节级不变", () => {
+  it("非过期/未知/停用路径零写入：INSERT/UPDATE 被拒仍通过，快照逐值不变", () => {
     withDb((db) => {
       insertSessionRow(db, VALID_SESSION_ID, "u1", FIXED_NOW + 1);
       insertSessionRow(db, OTHER_VALID_SESSION_ID, "u2", FIXED_NOW + 1);
@@ -230,13 +248,301 @@ describe("authenticate read-only seam", () => {
       const beforeSessions = sessionSnapshot(db);
       const beforeAccounts = accountSnapshot(db);
 
-      authenticate(authRequest(db, VALID_SESSION_ID));
-      authenticate(authRequest(db, "f".repeat(64)));
-      authenticate(authRequest(db, "g".repeat(64)));
-      authenticate(authRequest(db, "e".repeat(64)));
+      // 写/改/插一律 deny：任何 lazy 清理之外的 INSERT/UPDATE 都会被 authorizer 揭穿。
+      db.setAuthorizer((actionCode) =>
+        actionCode === constants.SQLITE_INSERT || actionCode === constants.SQLITE_UPDATE
+          ? constants.SQLITE_DENY
+          : constants.SQLITE_OK,
+      );
+      try {
+        authenticate(authRequest(db, VALID_SESSION_ID));
+        authenticate(authRequest(db, "f".repeat(64)));
+        authenticate(authRequest(db, "g".repeat(64)));
+        authenticate(authRequest(db, "e".repeat(64)));
+      } finally {
+        db.setAuthorizer(null);
+      }
 
       expect(sessionSnapshot(db)).toEqual(beforeSessions);
       expect(accountSnapshot(db)).toEqual(beforeAccounts);
+    });
+  });
+});
+
+/**
+ * Issue #10：`authenticate` 的 exact expired-row 惰性清理与共享 owned DELETE 事务纪律。
+ * 清理只按 `id + expires_at<=now` 定点发生；HTTP 面（me/logout/cookie）在
+ * auth-lifecycle.test.ts 验收。
+ */
+describe("authenticate 过期 exact row 惰性清理", () => {
+  const INT64_MAX = 9_223_372_036_854_775_807n;
+  const BEYOND_SAFE = BigInt(Number.MAX_SAFE_INTEGER) + 2n;
+
+  /** CAST 快照：int64 满量程行也逐值可比，不经 JS number 投影。 */
+  function castSnapshot(db: DatabaseSync) {
+    return db
+      .prepare(
+        "SELECT id, user_id, CAST(expires_at AS TEXT) AS expires_at FROM auth_sessions ORDER BY id",
+      )
+      .all();
+  }
+
+  function castRow(id: string, userId: string, expiresAt: number | bigint) {
+    return { id, user_id: userId, expires_at: String(expiresAt) };
+  }
+
+  it.each([
+    ["恰等过期（== now）", FIXED_NOW],
+    ["已过期（< now）", FIXED_NOW - 60_000],
+  ])("%s 的 exact 行被定点删除并返回 null；siblings 与 accounts 逐值不变", (_name, expiresAt) => {
+    withDb((db) => {
+      const matched = "a".repeat(64);
+      const siblingFuture = "b".repeat(64);
+      const siblingExpired = "c".repeat(64);
+      insertSessionRow(db, matched, "u1", expiresAt);
+      insertSessionRow(db, siblingFuture, "u2", FIXED_NOW + 1);
+      insertSessionRow(db, siblingExpired, "u3", FIXED_NOW - 1);
+      const beforeAccounts = accountSnapshot(db);
+
+      expect(authenticate(authRequest(db, matched))).toBeNull();
+      expect(castSnapshot(db)).toEqual([
+        castRow(siblingFuture, "u2", FIXED_NOW + 1),
+        castRow(siblingExpired, "u3", FIXED_NOW - 1),
+      ]);
+      expect(accountSnapshot(db)).toEqual(beforeAccounts);
+      expect(db.isTransaction).toBe(false);
+    });
+  });
+
+  function totalChanges(db: DatabaseSync): number {
+    return (db.prepare("SELECT total_changes() AS count").get() as { count: number }).count;
+  }
+
+  it("清理覆盖账号状态：expired 的 enabled/disabled/orphan exact 行都被删除", () => {
+    withDb((db) => {
+      const expiredOrphan = "d".repeat(64);
+      insertSessionRow(db, "a".repeat(64), "u1", FIXED_NOW - 1);
+      insertSessionRow(db, "b".repeat(64), "u4", FIXED_NOW);
+      db.exec("PRAGMA foreign_keys = OFF");
+      try {
+        insertSessionRow(db, expiredOrphan, "ghost", FIXED_NOW - 9);
+      } finally {
+        db.exec("PRAGMA foreign_keys = ON");
+      }
+
+      for (const id of ["a".repeat(64), "b".repeat(64), expiredOrphan]) {
+        expect(authenticate(authRequest(db, id))).toBeNull();
+      }
+      expect(castSnapshot(db)).toEqual([]);
+    });
+  });
+
+  it("重复调用不再写入（恰一行被删）；未知/畸形 cookie 从不触发 DELETE", () => {
+    withDb((db) => {
+      const matched = "a".repeat(64);
+      const survivor = "b".repeat(64);
+      insertSessionRow(db, matched, "u1", FIXED_NOW - 1);
+      insertSessionRow(db, survivor, "u2", FIXED_NOW - 2);
+      const changesBefore = totalChanges(db);
+
+      expect(authenticate(authRequest(db, matched))).toBeNull();
+      expect(authenticate(authRequest(db, matched))).toBeNull();
+      expect(authenticate(authRequest(db, "f".repeat(64)))).toBeNull();
+      expect(authenticate(authRequest(db, "g".repeat(64)))).toBeNull();
+      expect(castSnapshot(db)).toEqual([castRow(survivor, "u2", FIXED_NOW - 2)]);
+      expect(totalChanges(db) - changesBefore).toBe(1);
+    });
+  });
+
+  /**
+   * 真实 DB 竞态接缝：authorizer 在 DELETE 语句绑参时被 SQLite 调用（即"分类之后、
+   * 删除之前"），此时另一个写者把该行续期 → `id + expires_at<=now` 条件谓词不再成立，
+   * DELETE 以 0 行收据提交为 no-op。去掉条件谓词的实现会照删不误（快照变空）而暴露。
+   */
+  function renewOnDeleteBinding(db: DatabaseSync, id: string, expiresAt: number): void {
+    db.setAuthorizer((actionCode, arg1) => {
+      if (actionCode === constants.SQLITE_DELETE && arg1 === "auth_sessions") {
+        db.prepare("UPDATE auth_sessions SET expires_at = ? WHERE id = ?").run(expiresAt, id);
+      }
+      return constants.SQLITE_OK;
+    });
+  }
+
+  it("conditional DELETE 竞争丢失（receipt 0）：续期竞态仍返回 null 并保留该行，不 5xx/不假装删除", () => {
+    withDb((db) => {
+      const matched = "a".repeat(64);
+      const sibling = "b".repeat(64);
+      insertSessionRow(db, matched, "u1", FIXED_NOW - 1);
+      insertSessionRow(db, sibling, "u2", FIXED_NOW + 5);
+      const changesBefore = totalChanges(db);
+      try {
+        renewOnDeleteBinding(db, matched, FIXED_NOW + 3_600_000);
+        expect(authenticate(authRequest(db, matched))).toBeNull();
+      } finally {
+        db.setAuthorizer(null);
+      }
+      expect(castSnapshot(db)).toEqual([
+        castRow(matched, "u1", FIXED_NOW + 3_600_000),
+        castRow(sibling, "u2", FIXED_NOW + 5),
+      ]);
+      // 只有竞态续期的 1 次写入被提交：条件 DELETE 以 0 行收据提交为 no-op
+      expect(totalChanges(db) - changesBefore).toBe(1);
+      expect(db.isTransaction).toBe(false);
+    });
+  });
+
+  it("DELETE 行被触发器跳过（RAISE(IGNORE)）时同样按 0 行收据提交为 no-op", () => {
+    withDb((db) => {
+      const matched = "a".repeat(64);
+      insertSessionRow(db, matched, "u1", FIXED_NOW - 1);
+      db.exec(
+        `CREATE TRIGGER renewal_race BEFORE DELETE ON auth_sessions
+         BEGIN UPDATE auth_sessions SET expires_at = ${FIXED_NOW + 3_600_000} WHERE id = '${matched}'; SELECT RAISE(IGNORE); END`,
+      );
+      try {
+        expect(authenticate(authRequest(db, matched))).toBeNull();
+      } finally {
+        db.exec("DROP TRIGGER renewal_race");
+      }
+      expect(castSnapshot(db)).toEqual([castRow(matched, "u1", FIXED_NOW + 3_600_000)]);
+      expect(db.isTransaction).toBe(false);
+    });
+  });
+
+  it.each([
+    ["SQLite int64 上界", INT64_MAX],
+    ["安全整数上界之外", BEYOND_SAFE],
+  ] as const)("future expiry %s 在 SQLite 内分类，不投影为 JS number 也不抛错", (_name, expiry) => {
+    withDb((db) => {
+      const id = "a".repeat(64);
+      db.exec("PRAGMA foreign_keys = OFF");
+      try {
+        insertSessionRow(db, id, "u1", expiry);
+      } finally {
+        db.exec("PRAGMA foreign_keys = ON");
+      }
+
+      expect(() => authenticate(authRequest(db, id))).not.toThrow();
+      expect(authenticate(authRequest(db, id))).toEqual({
+        id: "u1",
+        account: "zhangsan",
+        role: "成员",
+      });
+      expect(castSnapshot(db)).toEqual([castRow(id, "u1", expiry)]);
+    });
+  });
+
+  it("future 的 int64 上界行即使账号停用/orphan 也不删行", () => {
+    withDb((db) => {
+      const disabled = "a".repeat(64);
+      const orphan = "b".repeat(64);
+      db.exec("PRAGMA foreign_keys = OFF");
+      try {
+        insertSessionRow(db, disabled, "u4", INT64_MAX);
+        insertSessionRow(db, orphan, "ghost", BEYOND_SAFE);
+      } finally {
+        db.exec("PRAGMA foreign_keys = ON");
+      }
+      const before = castSnapshot(db);
+
+      expect(authenticate(authRequest(db, disabled))).toBeNull();
+      expect(authenticate(authRequest(db, orphan))).toBeNull();
+      expect(castSnapshot(db)).toEqual(before);
+    });
+  });
+
+  it("now 逼近安全上界时仍由 SQLite 判定：非法 now 不查询，合法相等 now 删除", () => {
+    withDb((db) => {
+      const id = "a".repeat(64);
+      insertSessionRow(db, id, "u1", Number.MAX_SAFE_INTEGER);
+      // now = MAX_SAFE_INTEGER 本身非法（不安全整数）→ fail closed，不查询不删除
+      expect(authenticate(authRequest(db, id, Number.MAX_SAFE_INTEGER + 1))).toBeNull();
+      expect(castSnapshot(db)).toEqual([castRow(id, "u1", Number.MAX_SAFE_INTEGER)]);
+      // now = MAX_SAFE_INTEGER 合法且与 expires_at 相等 → 过期 → 删除
+      expect(authenticate(authRequest(db, id, Number.MAX_SAFE_INTEGER))).toBeNull();
+      expect(castSnapshot(db)).toEqual([]);
+    });
+  });
+
+  it.each([
+    ["BEGIN 被拒", constants.SQLITE_TRANSACTION, "BEGIN"],
+    ["DELETE 被拒", constants.SQLITE_DELETE, "auth_sessions"],
+    ["COMMIT 被拒", constants.SQLITE_TRANSACTION, "COMMIT"],
+  ] as const)(
+    "清理事务失败（%s）：原始错误上抛（不静默 null）、行不变、事务不残留",
+    (_name, actionCode, arg1) => {
+      withDb((db) => {
+        const matched = "a".repeat(64);
+        insertSessionRow(db, matched, "u1", FIXED_NOW - 1);
+        const before = castSnapshot(db);
+
+        denyStatement(db, actionCode, arg1);
+        try {
+          expect(() => authenticate(authRequest(db, matched))).toThrow(/not authorized/u);
+        } finally {
+          db.setAuthorizer(null);
+        }
+        expect(db.isTransaction).toBe(false);
+        expect(castSnapshot(db)).toEqual(before);
+      });
+    },
+  );
+
+  it("清理 ROLLBACK 也失败：AggregateError 保留 original+rollback/cause，事务仍活跃供调用方恢复", () => {
+    withDb((db) => {
+      const matched = "a".repeat(64);
+      insertSessionRow(db, matched, "u1", FIXED_NOW - 1);
+      db.exec(
+        `CREATE TRIGGER delete_guard BEFORE DELETE ON auth_sessions
+         BEGIN SELECT RAISE(ABORT, 'probe delete blocked'); END`,
+      );
+      denyStatement(db, constants.SQLITE_TRANSACTION, "ROLLBACK");
+
+      let caught: unknown;
+      try {
+        authenticate(authRequest(db, matched));
+      } catch (error) {
+        caught = error;
+      } finally {
+        db.setAuthorizer(null);
+        expect(db.isTransaction).toBe(true);
+        db.exec("ROLLBACK");
+        db.exec("DROP TRIGGER delete_guard");
+      }
+
+      expect(caught).toBeInstanceOf(AggregateError);
+      const aggregate = caught as AggregateError;
+      expect(aggregate.message).toBe("session delete rollback failed");
+      expect(aggregate.errors.map((error) => (error as Error).message)).toEqual([
+        "probe delete blocked",
+        "not authorized",
+      ]);
+      expect(aggregate.cause).toBe(aggregate.errors[0]);
+    });
+  });
+
+  it("caller 拥有事务时清理 BEGIN 失败：错误上抛且 caller 事务/效果活跃不变", () => {
+    withDb((db) => {
+      const matched = "a".repeat(64);
+      insertSessionRow(db, matched, "u1", FIXED_NOW - 1);
+      const callerId = "b".repeat(64);
+
+      db.exec("BEGIN");
+      try {
+        insertSessionRow(db, callerId, "u2", FIXED_NOW + 3);
+        expect(() => authenticate(authRequest(db, matched))).toThrow(
+          /cannot start a transaction within a transaction/u,
+        );
+        expect(db.isTransaction).toBe(true);
+        expect(castSnapshot(db)).toEqual([
+          castRow(matched, "u1", FIXED_NOW - 1),
+          castRow(callerId, "u2", FIXED_NOW + 3),
+        ]);
+      } finally {
+        db.exec("ROLLBACK");
+      }
+      expect(castSnapshot(db)).toEqual([castRow(matched, "u1", FIXED_NOW - 1)]);
+      expect(db.isTransaction).toBe(false);
     });
   });
 });

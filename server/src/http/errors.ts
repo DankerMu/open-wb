@@ -43,26 +43,31 @@ const ALLOWED_FASTIFY_REQUEST_ERROR_CODES = new Set([
   "FST_ERR_CTP_BODY_TOO_LARGE",
 ]);
 
-const LOGIN_ROUTE = "/api/auth/login";
+/** 受信 content-parser owner 的 exact auth 路由身份：POST login（#9）与 POST logout（#10）。 */
+const CONTENT_PARSER_OWNED_ROUTES = new Set(["/api/auth/login", "/api/auth/logout"]);
 
 /**
  * 构造函数-backed CTP 错误的 route-owner 结果：仅 matched identity 恰为
- * POST /api/auth/login 时归一 exact 400；matched /api 或 /api/* catch-all
- * 与 unmatched non-GET（routeOptions.url undefined 且 method != GET）恢复
- * typed not_found 404；其他已注册 route 保持 generic 5xx。显式 typed
- * HttpError 保持 route-independent。方法/URL 边界基于实际路由匹配，不做 raw
- * URL/statusCode/code-prefix 分类。
+ * POST /api/auth/login 或 POST /api/auth/logout 时归一 exact 400；matched /api
+ * 或 /api/* catch-all 与 unmatched non-GET（routeOptions.url undefined 且
+ * method != GET）恢复 typed not_found 404；其他已注册 route 保持 generic 5xx。
+ * 显式 typed HttpError 保持 route-independent。方法/URL 边界基于实际路由匹配，
+ * 不做 raw URL/statusCode/code-prefix 分类。
  */
 function routeOwnerResult(request: FastifyRequest, error: unknown): HttpErrorCode | null {
   if (!isConstructorBackedContentParserError(error)) {
     return null;
   }
 
-  if (request.method === "POST" && request.routeOptions.url === LOGIN_ROUTE) {
+  const routeUrl = request.routeOptions.url;
+  if (
+    request.method === "POST" &&
+    routeUrl !== undefined &&
+    CONTENT_PARSER_OWNED_ROUTES.has(routeUrl)
+  ) {
     return "bad_request";
   }
 
-  const routeUrl = request.routeOptions.url;
   const isApiFallback = routeUrl === "/api" || routeUrl === "/api/*";
   const isUnmatchedNonGetPost = routeUrl === undefined && request.method !== "GET";
   if (isApiFallback || isUnmatchedNonGetPost) {

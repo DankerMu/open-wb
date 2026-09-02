@@ -12,12 +12,12 @@
 ## Decisions
 
 1. **Fastify + plugin 装配**（grill：用户拍板；备选 Express 5/Hono 见收敛小结）。每个 feature 模块导出 FastifyPluginAsync，`app.ts` 只做装配（可注入配置，供 inject 测试）；`server.ts` 是唯一 listen 入口（启动日志输出已注册模块清单），`make dev` / `npm run start --workspace server` 拉起——app/server 分离让 inject 测试不监听端口，`knip.json` server entry 增 `src/server.ts`。启动行为的验证由 smoke（4.1）对真实启动覆盖，不写监听单测。`http/` 仅承载横切中间件（认证守卫、错误信封处理器），无业务——对齐 system.md §3.1。
-2. **session cookie**（grill：用户拍板；备选 JWT 弃于"即时吊销要黑名单"）。`@fastify/cookie` + 自研 SQLite 会话表（id、user_id、expires_at），不引第三方 session 框架——表结构即 S3a OIDC 复用点，因此安全契约按长期标准定：**session id = `crypto.randomBytes(32)` hex（256 bit CSPRNG），不得由行号/时间/用户可推导量派生**；cookie 名固定为 `workbuddy_session`，属性为 httpOnly、SameSite=Lax、Path=/、无 Domain，`Secure` 只随 `createApp({secureCookies})` 的 boolean 配置（默认 false；内网 HTTP 阶段关，HTTPS 部署开）。#9 建立会话时先以默认 7 天写绝对 `expires_at=now+604800000`，使 provider 接缝在中间主干可直接消费；TTL 配置、me/logout 与惰性清理由 #10 独占。browser cookie 本刀不写 Expires/Max-Age，server-side absolute expiry 是认证真值。
+2. **session cookie**（grill：用户拍板；备选 JWT 弃于"即时吊销要黑名单"）。`@fastify/cookie` + 自研 SQLite 会话表（id、user_id、expires_at），不引第三方 session 框架——表结构即 S3a OIDC 复用点，因此安全契约按长期标准定：**session id = `crypto.randomBytes(32)` hex（256 bit CSPRNG），不得由行号/时间/用户可推导量派生**；cookie 名固定为 `workbuddy_session`，属性为 httpOnly、SameSite=Lax、Path=/、无 Domain，`Secure` 只随 `createApp({secureCookies})` 的 boolean 配置（默认 false；内网 HTTP 阶段关，HTTPS 部署开）。#9 先以默认 7 天写绝对 `expires_at`；#10 将 TTL 收口为 `createApp({sessionTtlMs})` 的正安全整数毫秒配置（默认 `604800000`，只影响新会话，`now+ttl` 仍须是安全整数）。browser cookie 不写正常生命周期 Expires/Max-Age，server-side absolute expiry 是认证真值；logout 的 scoped clear-cookie 才写空值、`Max-Age=0` 与 Unix epoch `Expires`，并复用 Path/HttpOnly/SameSite/Secure 极性。
 3. **history 路由 + fallback**（grill：用户拍板）。`@fastify/static` 托管静态根，`setNotFoundHandler` 对**非 `/api/*` 的 GET** 回 index.html；非 GET 未命中与 `/api/*` 未命中一律 JSON 404（错误信封）。静态根可配置（`STATIC_ROOT`）：单测用临时夹具目录，CI/生产指向 `web/dist`——1.3 因此不依赖 web 构建先行。
 4. **SQLite 经 `node:sqlite`**（Node 24 内建，同步 API 足够单机元数据负载；备选 better-sqlite3 弃于原生编译负担；实测 v24.13.1 可用，仅 stderr ExperimentalWarning——ui-walk 的"零 console error"断言限定为浏览器控制台，不含服务端 stderr）。`core/db`：打开 WAL、按序执行 `migrations/*.sql`、迁移版本表幂等。ADR-0004 的第一块落地。
-5. **auth provider 接缝**（ADR-0007、system.md §3.1/§5）：auth 模块对外唯一认证判定出口 `authenticate(req) → Principal | null`；共享层拥有 cookie parse、session read/write、CSPRNG seam、Principal projection 与 Fastify plugin，provider 不拥有 cookie/session。dev-stub 适配器落 `server/src/auth/providers/dev-stub.ts`，只做 JavaScript `trim().toLowerCase()`、账号查询、self-describing scrypt parse/verify 与 disabled-after-password 判定；未知账号走固定 dummy scrypt，避免跳过 KDF。S3a 换 OIDC 只增 `providers/oidc.ts`，接缝、session storage 与调用方不动。单测直接对 `authenticate()` 断言有效/缺失/畸形/未知/过期/停用会话，证明接缝可替换且 read-only。
+5. **auth provider 接缝**（ADR-0007、system.md §3.1/§5）：auth 模块对外唯一认证判定出口 `authenticate(req) → Principal | null`；共享层拥有 cookie parse、session read/write、CSPRNG seam、Principal projection 与 Fastify plugin，provider 不拥有 cookie/session。dev-stub 适配器落 `server/src/auth/providers/dev-stub.ts`，只做 JavaScript `trim().toLowerCase()`、账号查询、self-describing scrypt parse/verify 与 disabled-after-password 判定；未知账号走固定 dummy scrypt，避免跳过 KDF。S3a 换 OIDC 只增 `providers/oidc.ts`，接缝、session storage 与调用方不动。#9 的 direct seam 先证明 read-only projection；#10 原地演进为“除 exact matched expired row 的惰性 DELETE 外无写入”：有效会话返回 Principal，过期会话定点删除后返回 null，缺失/畸形/未知/disabled/orphan/非法时钟均不删除任何 sibling row。
 6. **登录语义镜像 demo**：账号以 JavaScript `trim()` 后 `toLowerCase()`（demo:1644）；两类错误文案逐字采用（demo:1645,1647）；停用只在密码正确后暴露 403，错误密码仍为 401；停用账号拒绝登录但**不产生审计**（Non-goal；留痕在本节与 S1a change 的 Why，代码不写无号 TODO——AGENTS.md:105）。请求只接受 exact `{account,password}` string JSON object；无效 shape 在 provider/KDF/DB write 前拒绝。**密码存储 = `node:crypto` scrypt 散列（盐+参数编码入 `password_hash` 列），以 constant-time digest compare 校验，明文不入库/响应/日志**；未知/空账号使用同参数固定 dummy encoding 执行一次 scrypt 再统一 401。seed 四账号镜像 demo（demo:1400-1407）：zhangsan/成员、zhaoliu/成员、lisi/管理员，密码 `demo`（demo:1734），另增 wangwu/成员/停用——demo 无停用 seed（disabled 是 S3a 账号页的运行时开关，demo:2942），此账号为验证 403 分支引入；四账号也满足 P3"双普通账号互不可见"验收前提。
-7. **统一错误信封**（ADR-0006 语言中立 REST 的具体化，S0b 起全部端点继承）：`{ "error": { "code": "<snake_case>", "message": "<可直接展示的中文文案>" } }`；取值域为 `bad_request`(400, `请求格式不正确`)/`invalid_credentials`(401)/`account_disabled`(403)/`unauthorized`(401)/`not_found`(404)。Issue #6 先交付后四码；Issue #9 因 exact login JSON/schema/parse boundary 增量加入 `bad_request`——login 对 Fastify 已解析未变换的 body 执行无 schema 的手写 exact 校验，形状/尺寸失败由显式 typed `bad_request` 拥有；原生 Fastify content-parser 错误仅在 matched route 恰为 `POST /api/auth/login` 且 code 命中 exact constructor-backed allowlist（`FST_ERR_CTP_INVALID_MEDIA_TYPE`、`FST_ERR_CTP_INVALID_JSON_BODY`、`FST_ERR_CTP_EMPTY_JSON_BODY`、`FST_ERR_CTP_BODY_TOO_LARGE`）时映射为不泄漏细节的 400，不把 programmer error 或凭证错误混入。Login 不使用 route schema，因此普通/真实 `FST_ERR_VALIDATION` 形状不受信，保持 generic 5xx，除非它被显式 typed error 拥有。处理器落 `http/`，server/web/hurl 三方按同一字段断言。
+7. **统一错误信封**（ADR-0006 语言中立 REST 的具体化，S0b 起全部端点继承）：`{ "error": { "code": "<snake_case>", "message": "<可直接展示的中文文案>" } }`；取值域为 `bad_request`(400, `请求格式不正确`)/`invalid_credentials`(401)/`account_disabled`(403)/`unauthorized`(401)/`not_found`(404)。Issue #6 先交付后四码；Issue #9 因 exact login JSON/schema/parse boundary 增量加入 `bad_request`——auth POST route 对 Fastify 已解析未变换的 body 执行无 schema 的手写 exact 校验，形状/尺寸失败由显式 typed `bad_request` 拥有；原生 Fastify content-parser 错误仅在 matched route 恰为 `POST /api/auth/login` 或 `POST /api/auth/logout` 且 code 命中 exact constructor-backed allowlist（`FST_ERR_CTP_INVALID_MEDIA_TYPE`、`FST_ERR_CTP_INVALID_JSON_BODY`、`FST_ERR_CTP_EMPTY_JSON_BODY`、`FST_ERR_CTP_BODY_TOO_LARGE`）时映射为不泄漏细节的 400，不把 programmer error 或凭证错误混入。Login/logout 不使用 route schema，因此普通/真实 `FST_ERR_VALIDATION` 形状不受信，保持 generic 5xx，除非它被显式 typed error 拥有。处理器落 `http/`，server/web/hurl 三方按同一字段断言。
 8. **SPA 构建面**：Vite + @vitejs/plugin-react；`web/index.html` + `src/main.tsx` 入口；`tsconfig.base.json` 增 `jsx: react-jsx`；web 测试环境 jsdom（`web/vitest.config.ts` 覆写）；`knip.json` web entry 增 vite 约定入口（探针已证：index.html+vite.config.ts+声明依赖齐备时 knip vite 插件自动解析）；`npm run build --workspace web` 产出 `web/dist`。
 9. **SPA 结构**：react-router（createBrowserRouter）；**`/center` 为扁平路由 + 页内 tab**（镜像 demo——8 tab 是页内状态 `DB.centerTab` 而非 URL，demo:3144-3161；system.md §3.3 的 `/center/*` 字面按此澄清，S1d 需要 tab 深链时再引入 query 参数，不重构 router）；`/tokens` 不移植。路由级会话守卫：未登录任意路由渲染登录页并记录原目标，登录成功跳回。`lib/api`（fetch 封装 + 错误信封解析 + 401 统一跳登录）为独立横切模块，与首个消费方（登录页）同刀落地——理由是信封解析与 401 跳转需要消费方在场才能做有意义的集成断言（非 knip 死代码考虑：自带测试即不会被判死）。主题：`lib/theme` 扩 `system` 模式（可注入 matchMedia 接口），**默认档 = system**（demo:1035），normalizeTheme 未知值/存储不可用回退 system（现有回退 light 的语义同步修正）。退出登录在**侧栏用户页脚**（demo:1816-1822，带确认），设置页不放——demo IA 如此。
 10. **验证 harness**：hurl 走 `make smoke`（本地未装则目标显式失败并打印安装指引，CI 官方 installer；smoke job 先 `npm run build --workspace web` 再起服务，否则深链用例必挂）；Playwright `make ui-walk`（chromium 单浏览器）；两者进 CI 独立 job 并纳入 `all-checks-passed` needs。控制面**四处同步**（Makefile 头注释契约）：AGENTS.md Verification Matrix 两行 gap → 真命令 + Enforcement Index 升 block + Known blind spots 删过期条目 + Directory Map 增 `smoke/`；`constraints.yaml` verification.surfaces 增 smoke/ui-walk；Makefile 目标 + .PHONY。
@@ -380,9 +380,101 @@ Review focus:
 - `authenticate` checks strict expiry and disabled account but does not steal #10's cleanup ownership or mutate state.
 - Tests prove exact single-invariant failure paths (collision/clock/random/KDF/body) rather than generic multi-cause throws.
 
+## Issue #10 delivery fixture: session lifecycle (me/logout/TTL)
+
+Issue type: feature
+Project profile: open-workbuddy
+Blast radius: high
+Fixture level: high
+Repair intensity: high
+Upstream suggested level: compact (override: public auth endpoints, TTL config, persisted session DELETE, cookie revocation, transaction rollback and shared `authenticate` state transitions are mandatory expanded/high triggers)
+Minimal mergeable slice: atomic — configurable absolute expiry, `GET /api/auth/me`, `POST /api/auth/logout` and exact expired-row cleanup jointly close the valid/expired/revoked session lifecycle consumed by the existing web client; splitting leaves a route or config with incomplete revocation semantics
+
+Change surface:
+- Existing `server/src/auth/{index,session}.ts`, `server/src/app.ts`, logout-aware HTTP parser ownership, one new focused real-`createApp/openDb/app.inject` lifecycle test file, direct authenticate/session regressions, and this issue's OpenSpec rows. No dependency, migration, web, listen/env, guard or smoke change.
+
+Must preserve:
+- Issue #9 login/provider/KDF/CSPRNG/session-ID/error/cookie contract, exact direct Principal, caller-owned DB lifetime, one DB opener/repository, API/static precedence, five-code envelope and all #6/#8/downstream web consumers.
+- `authenticate(request)` remains the unique provider-independent auth decision seam. Missing/malformed/unknown cookie, invalid clock, or a future disabled-account/orphan row returns null without deleting any session; any exact matched row whose expiry is `<= now` is cleanup-eligible before account eligibility, so an expired disabled/orphan row is still deleted.
+- Browser cookie lifetime remains separate from server absolute expiry: successful login still omits Domain/Expires/Max-Age. #19 still exclusively owns default `/api/*` guard policy; #7 later chooses env/config sources without changing the programmatic `createApp` contract.
+
+Must add/change:
+- `createApp({sessionTtlMs})` owns TTL configuration in positive safe-integer milliseconds, defaults exactly to `604800000`, and validates synchronously before app assembly/DB mutation. Login computes `expires_at = now + sessionTtlMs`; both operands and the sum must be safe integers. Config changes affect new sessions only and never rewrite existing rows or add browser Expires/Max-Age.
+- Shared session resolution reads one exact session identity without projecting unbounded epoch integers into JavaScript: it classifies expiry in SQLite first, returns exact Principal only for a future row joined to an enabled account, and exposes no password/hash/expiry fields. An expired exact match (including disabled/orphan) is deleted with a conditional `WHERE id=? AND expires_at<=?`; no global expiry sweep, unknown-ID write, future disabled/orphan cleanup or sibling-row mutation is allowed.
+- Every session DELETE uses the same owned transaction discipline as INSERT: BEGIN before ownership, exact DELETE receipt limited to 0/1, COMMIT before any HTTP success/cookie header, rollback on failure, AggregateError when rollback also fails. A caller-owned transaction makes BEGIN fail before mutation and remains active/unchanged; no route may return 204 for an uncommitted delete.
+- `GET /api/auth/me` calls only `authenticate(request)`: valid cookie -> exact 200 direct Principal + `Cache-Control: no-store`, no Set-Cookie and no DB delta; null -> exact 401 `unauthorized` + no-store + scoped clear-cookie. Exact expired row is gone before 401; every other null path leaves complete account/session snapshots unchanged. Query/cleanup/programmer failure -> generic 5xx, no clear-cookie and no secret/detail leakage.
+- `POST /api/auth/logout` is bodyless. Fastify cannot accept `bodyLimit:0`, so the route uses the minimum legal `bodyLimit:1` and an explicit no-body validator: any parsed body is typed 400; malformed/empty-JSON-with-content-type/unsupported/over-limit body is exact route-owned 400 before cookie lookup/DELETE. No body/content-type remains the canonical request used by the existing web client.
+- Logout revokes by bearer identity, not Principal eligibility: own exact 64-lowerhex cookie + any existing session row (including expired or disabled-account rows) -> owned DELETE commit, then exact 204 with empty body, no-store and scoped clear-cookie. Missing/malformed/unknown cookie -> exact 401 `unauthorized`, no DB delta, no-store and the same clear-cookie. DELETE/BEGIN/COMMIT/rollback failure -> generic 5xx, complete state preserved where rollback succeeds, no clear-cookie.
+- Clear-cookie is exact and shared by me/logout: `workbuddy_session=` plus `Max-Age=0; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax`; `Secure` appears iff the same explicit `secureCookies=true`; Domain is absent. It is emitted only after a terminal 204/401 result is known, never before a storage/programmer 5xx.
+- Auth-domain mapping expands only to existing `unauthorized`; no new HTTP code/message. Native content-parser classification expands from exact POST login to exact POST login/logout route identities while preserving the same constructor-backed four-code allowlist, catch-all/non-GET 404 precedence, registered non-auth 5xx and forged/status/validation-shape rejection.
+
+Seams under test:
+- One focused real `createApp + openDb(":memory:") + app.inject()` lifecycle matrix uses the existing web request contract: me GET/no-store and logout POST with no body/content-type. It observes the same DB handle and exact Set-Cookie/response bytes.
+- Direct `authenticate()` + real SQLite proves future/expired/equal-expiry/invalid-clock/disabled/orphan/unknown behavior and the conditional DELETE boundary; SQLite authorizer/transaction seams prove DELETE denial, COMMIT/ROLLBACK failure and caller-transaction preservation without mocking the DB.
+- Existing login/provider/request-error/app/web suites remain downstream oracles; the direct session/authenticate suite is intentionally evolved from #9's expired-row zero-mutation expectation into #10 lazy-delete evidence while preserving every non-expired no-write row. A temporary pre-change behavioral red run must show missing routes/default-only TTL/no lazy cleanup, not a syntax-only failure.
+
+Risk packs considered (core):
+- Public API / CLI / script entry: selected — two shared auth routes and expanded `createApp` option have exact request/response contracts.
+- Config / project setup: selected — TTL units/default/value domain and secure-cookie polarity must fail fast and remain consumable by future #7.
+- File IO / path safety / overwrite: not selected — no filesystem/path input or output.
+- Schema / columns / units / field names: selected — epoch-millisecond TTL/expiry, exact Principal/error/cookie and DELETE identity cross HTTP/SQLite/web.
+- Auth / permissions / secrets: selected — me identity, bearer logout, stale cookie clearing and no credential/session leakage are primary invariants.
+- Concurrency / shared state / ordering: selected — read→conditional cleanup and DELETE commit→cookie/response ordering, caller transaction and race-safe condition.
+- Resource limits / large input / discovery: selected — logout request body is bounded to one byte before explicit rejection; cleanup is one ID, never an unbounded table sweep.
+- Legacy compatibility / examples: selected — #9 login/authenticate and existing web me/logout contract, #6 app behavior and #8 schema remain compatible.
+- Error handling / rollback / partial outputs: selected — query/BEGIN/DELETE/COMMIT/ROLLBACK/parser/cookie failure lanes have exact state/header outcomes.
+- Release / packaging / dependency compatibility: not selected — no dependency/package/runtime-network change; existing Fastify/cookie versions are consumed.
+- Documentation / migration notes: not selected — no DB schema/backfill/operator migration; OpenSpec records the new programmatic config.
+
+Domain packs:
+- Tenant/sandbox isolation: not selected — session identity is established but no tenant/workspace data is read.
+- Auth/session lifecycle: selected — this issue owns TTL, me, logout, revocation and expired-row cleanup.
+- Process/child-environment isolation: not selected — no process/env implementation; #7 chooses environment mapping later.
+- SQLite migration/catalog compatibility: selected — consume exact #8 table without migration change; DELETE must preserve FK/catalog/receipt and unrelated rows.
+- Server/web HTTP-envelope compatibility: selected — direct Principal, 204 empty success and current 401 terminal behavior are already strict web contracts.
+- Offline deployability: selected — built-in SQLite and installed cookie plugin only, no network dependency.
+- Browser runtime/navigation/persistence: selected only for exact same-origin me/logout response and clear-cookie contract; no web source/UI change.
+- Cross-service boundary: not selected — no kbservice/IdP/service call.
+
+Invariant Matrix:
+- Governing invariant: one own exact cookie identity resolves to at most one session row; future enabled row yields one exact Principal, expired row is durably deleted before unauthorized, and explicit logout durably deletes that exact bearer row before 204/clear-cookie — no other row or state transition is touched.
+- Source-of-truth identity/contract: cookie `workbuddy_session`; `auth_sessions.id/user_id/expires_at`; injected `authNow`; `sessionTtlMs` in epoch milliseconds; exact Principal; existing unauthorized envelope; exact scoped clear-cookie.
+- Producers: #9 login with injected clock/random source and configured TTL; persisted #8 rows; incoming cookie; me/logout handlers; conditional/session DELETE and cookie serializer.
+- Validators/preflight: positive-safe TTL and safe sum; own exact cookie parser; SQLite expiry classification; enabled-account join; logout no-body validator/body limit; exact route+constructor CTP classifier.
+- Storage/cache/query: caller-owned SQLite only; one point lookup and exact/conditional owned DELETE; no second repository, cache, token store or all-row cleanup.
+- Public routes/entrypoints: `createApp`, `authenticate`, existing login plus new GET me/POST logout; #19 guard and #7 listener remain absent.
+- Frontend/downstream consumers: existing strict `ApiClient.getMe/logout`, AuthProvider/router/footer; future #19 consumes the same authenticate seam; OIDC reuses shared session storage.
+- Failure paths/rollback/stale state: invalid config/clock/sum; missing/malformed/unknown/expired/disabled/orphan cookie; body/parser errors; DELETE 0/1/deny; COMMIT/ROLLBACK failure; caller transaction; repeated me/logout and stale old cookie.
+- Evidence/audit/readiness: direct session tests, real inject+SQLite snapshots/cookies, authorizer transaction faults, route-owner parser matrix, existing server/web suites, full check/strict OpenSpec/secret/diff/stash scans.
+- Regression rows:
+  - default/custom TTL + fixed now/login -> exact new expiry; existing rows unchanged; 0/negative/fractional/nonfinite/unsafe TTL or overflowing sum -> fail before write/cookie.
+  - valid future cookie me -> 200 exact Principal/no-store/no mutation/no Set-Cookie; exact equal/past row -> conditional commit-delete then 401/no-store/clear; sibling future/expired rows remain byte-identical; a conditional DELETE lost-race receipt of 0 remains null/401 rather than 5xx.
+  - missing/malformed/unknown or future disabled/orphan me -> same 401/clear, no session/account delta; expired disabled/orphan exact match -> delete then 401/clear. Persisted expiry above JavaScript safe range (including SQLite maximum signed 64-bit integer) is classified in SQLite as future without projection/throw; cleanup/query/transaction failure -> generic 5xx/no clear and no semantic code/detail leak.
+  - bodyless valid logout -> exact 204/empty/no-store, one committed row deletion and exact clear-cookie; repeat old cookie, missing/malformed/unknown -> exact 401/clear/no DB delta. Future/expired orphan rows and an existing row under invalid `authNow` still follow bearer DELETE -> 204/clear.
+  - logout expired/disabled/orphan row -> 204/delete/clear; any body/parser error -> 400 before delete/clear; DELETE/COMMIT failure -> 5xx/no clear/snapshot preserved; rollback-deny -> AggregateError evidence and active transaction for caller recovery.
+  - omitted/false vs true `secureCookies` -> normal and clear cookies share exact Secure polarity; Domain absent; normal login continues to omit Expires/Max-Age.
+  - existing login/KDF/session generation, API/static/error/core-db/auth-schema and web me/logout/guard UI -> unchanged.
+
+Boundary-surface checklist:
+- Shared helper roots: one session resolver, owned transaction primitive, point/conditional delete and one cookie-option owner.
+- Public entrypoints: createApp/login/me/logout/authenticate only; no second auth decision or DB opener.
+- Read surfaces: exact cookie, configured TTL/clock, one session/account join.
+- Write/delete/overwrite surfaces: login INSERT; expired conditional DELETE; logout exact DELETE; no UPDATE/REPLACE/global cleanup.
+- Staging/publish/rollback surfaces: resolve→conditional cleanup→401 and DELETE commit→204/clear; all failures before cookie/header terminal state.
+- Producer/consumer evidence boundary: TTL config→expiry row→cookie identity→me/logout/authenticate/web; exact identity cannot cross-bind sibling rows.
+- Stale/idempotency boundaries: equal expiry, repeated me/logout, unknown old cookie, disabled/orphan rows, conditional-delete race and caller-owned transaction.
+- Unchanged downstream consumers: #6 routes/static/errors, #8 schema/catalog, #9 login/provider, web AuthProvider/API/footer, kbservice.
+
+Review focus:
+- No global `DELETE WHERE expires_at<=now`; cleanup is identity-scoped and conditional, while logout is exact bearer-row revocation independent of account eligibility.
+- 204/401/400/5xx each has exact DB and Set-Cookie outcome; cookie is never cleared before a DELETE commit/failure is known.
+- TTL is one millisecond config owner with default compatibility, safe integer/sum checks and no mutation of existing sessions/browser expiry.
+- Fastify parser ownership expands only to POST logout, and bodyLimit=1 plus handler validation kills both one-byte and larger-body mutants without reintroducing global/status/code-shape trust.
+- Transaction tests discriminate BEGIN, DELETE, COMMIT and rollback failures; caller-owned effects are not committed or rolled back by auth.
+
 ## Migration Plan
 
-新增服务，无存量业务数据迁移。Issue #8 从合法 foundation prefix 原子增加首个业务 schema；Issue #9 只消费该 schema，不增加或修改 migration。回滚 = revert PR，未发布开发会话可随 DB 删除；SQLite 文件路径仍由后续 #7 配置（默认 `var/dev.db`，gitignore）。
+新增服务，无存量业务数据迁移。Issue #8 从合法 foundation prefix 原子增加首个业务 schema；Issues #9/#10 只消费该 schema，不增加或修改 migration。TTL config affects newly created development sessions only; rollback = revert PR, and no backfill is required. SQLite file path/env mapping remains later #7 scope (default `var/dev.db`, gitignore).
 
 ## Issue delivery fixture: #11 web 构建工具链
 

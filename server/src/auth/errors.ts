@@ -4,7 +4,11 @@
  * mapAuthError 把 AuthErrorCode 映射为 HttpError。
  */
 
-export type AuthErrorCode = "bad_request" | "invalid_credentials" | "account_disabled";
+export type AuthErrorCode =
+  | "bad_request"
+  | "invalid_credentials"
+  | "account_disabled"
+  | "unauthorized";
 
 export class AuthError extends Error {
   readonly code: AuthErrorCode;
