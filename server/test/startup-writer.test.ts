@@ -90,6 +90,23 @@ describe("writeManagedLine — 后到 error 事件与监听器生命周期", () 
     expect(sink.listenerCount("error")).toBe(1);
   });
 
+  it("裸 sink 无外部 error 监听：callback 成功后 nextTick 的 late error 被 writer 消费，无未处理异常", async () => {
+    // 无 fixture 自身的 error 收集监听——若 writer 在 settle 时同步移除自己的监听，
+    // 该 late error 就会变成 unhandled 'error' 事件（uncaught exception）。
+    const writes: string[] = [];
+    const sink = new Writable({
+      write(chunk, _encoding, callback) {
+        writes.push(String(chunk));
+        callback();
+        process.nextTick(() => sink.emit("error", new Error("bare-late-event-failure")));
+      },
+    });
+    await writeManagedLine(sink, "x\n");
+    await settleTicks();
+    expect(writes).toEqual(["x\n"]);
+    expect(sink.listenerCount("error")).toBe(0);
+  });
+
   it("失败后新 sink 的第二次 write 独立工作", async () => {
     const first = makeSink((_chunk, callback) => callback(new Error("first-fail")));
     await expect(writeManagedLine(first.sink, "a\n")).rejects.toThrow("first-fail");

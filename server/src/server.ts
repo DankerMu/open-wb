@@ -129,6 +129,8 @@ interface OwnedResources {
   db: DatabaseSync | undefined;
   releasing: Promise<void> | undefined;
   releaseFailed: boolean;
+  /** 已判定的真实启动失败（sticky）：signal 不得压制其 generic 发布或将退出码降为 0。 */
+  failed: boolean;
   signalReceived: boolean;
 }
 
@@ -149,6 +151,7 @@ function runEntrypoint(): void {
     db: undefined,
     releasing: undefined,
     releaseFailed: false,
+    failed: false,
     signalReceived: false,
   };
 
@@ -176,11 +179,11 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
     }
     await publishStarted(owned);
   } catch {
-    await releaseOwned(owned);
-    if (owned.signalReceived) {
-      return;
-    }
+    // 真实失败判定必须先于本失败路径的第一次 yield：一旦决定失败，signal 不得压制其
+    // generic 发布，也不得把退出码降为 0（sticky failure）。
+    owned.failed = true;
     process.exitCode = 1;
+    await releaseOwned(owned);
     await emitStartupFailed();
   }
 }
@@ -210,7 +213,8 @@ function requestShutdown(owned: OwnedResources): void {
   owned.signalReceived = true;
   owned.controller.abort();
   void releaseOwned(owned).then(() => {
-    process.exitCode = owned.releaseFailed ? 1 : 0;
+    // 已判定的启动/输出失败不得被 shutdown 降为 0；只允许在无失败历史时写 0。
+    process.exitCode = owned.releaseFailed || owned.failed ? 1 : 0;
   });
 }
 
