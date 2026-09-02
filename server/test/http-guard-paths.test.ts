@@ -326,12 +326,21 @@ describe("hook 与 parser 顺序：guard 在 cookie/route onRequest 之后、par
     },
   );
 
+  /**
+   * 完整 `PARSER_INPUTS`（含末项约 1.1 MiB、跨全局 1 MiB bodyLimit 的
+   * `FST_ERR_CTP_BODY_TOO_LARGE` 输入）：guard 放行后 owner 语义必须与既有
+   * malformed/empty/media 三行同源——同一条输入在四种 route owner 上各自给出
+   * 合同。route-agnostic 的 parser 映射不得抹平这些彼此不同的 owner 结果：
+   * catch-all 与 exact `/api` 不得因 parser 先于 catch-all handler 而变成
+   * 400/413，registered protected route 不得离开它的 generic 5xx，
+   * non-API miss 仍是 typed 404 且零 authenticate。
+   */
   it("有效会话携相同输入回到各 route owner 的既有语义：catch-all 404、registered 5xx、non-API 404", async () => {
     await withGuardApp(async ({ app, db, observe, handlerProbeCalls }) => {
       const sessionId = await loginSessionId(app);
       const before = sessionSnapshot(db);
 
-      for (const input of PARSER_INPUTS.slice(0, 3)) {
+      for (const input of PARSER_INPUTS) {
         const spec = {
           method: "POST" as const,
           payload: input.payload,
@@ -340,21 +349,32 @@ describe("hook 与 parser 顺序：guard 在 cookie/route onRequest 之后、par
         };
 
         const miss = await observe({ ...spec, url: "/api/no-such" });
+        expect(miss.response.statusCode, `${input.name} @ /api/no-such`).toBe(404);
         expectNotFound(miss);
         expectActivity(miss.activity, { selects: 1 });
+        expectUnchanged(miss, db);
 
         const exactApi = await observe({ ...spec, url: "/api" });
+        expect(exactApi.response.statusCode, `${input.name} @ exact /api`).toBe(404);
         expectNotFound(exactApi);
+        expectActivity(exactApi.activity, { selects: 1 });
+        expectUnchanged(exactApi, db);
 
         const registered = await observe({ ...spec, url: REGISTERED_PROBE_ROUTE });
         expect(registered.response.statusCode, input.name).toBeGreaterThanOrEqual(500);
         expect(registered.response.statusCode, input.name).toBeLessThan(600);
-        expect(registered.response.payload).toBe('{"error":{"message":"服务器内部错误"}}');
+        expect(registered.response.payload, input.name).toBe(
+          '{"error":{"message":"服务器内部错误"}}',
+        );
         expectActivity(registered.activity, { selects: 1 });
+        expectUnchanged(registered, db);
 
+        // non-API miss：无论 body 形状如何都绕过 guard（零 authenticate），typed 404 不继承 API 侧状态
         const nonApi = await observe({ ...spec, url: "/not-an-api" });
+        expect(nonApi.response.statusCode, `${input.name} @ /not-an-api`).toBe(404);
         expectNotFound(nonApi);
         expectActivity(nonApi.activity, {});
+        expectUnchanged(nonApi, db);
       }
       expect(handlerProbeCalls()).toBe(0);
       expect(sessionSnapshot(db)).toEqual(before);
