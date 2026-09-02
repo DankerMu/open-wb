@@ -97,12 +97,22 @@ auth 模块 SHALL 以 `authenticate(req) → Principal | null` 为对外唯一�
 - THEN rollback 后返回 generic 5xx、无 clear-cookie且 snapshot 不变；rollback 也失败时保留 original+rollback AggregateError 和 caller recovery state；caller 已有 transaction 时不得提交/回滚其 effects
 
 ### Requirement: 认证守卫
-除 `healthz`/`info`/`auth/login` 与 bearer-revocation `POST /api/auth/logout` 外的 `/api/*` 端点 SHALL 默认要求有效会话；未认证返回 401 错误信封（code=unauthorized；静态资源与 fallback 不受守卫影响）。Logout SHALL 绕过 Principal eligibility guard，使 future disabled/orphan 或 invalid auth clock 的 existing exact session row 仍能进入 #10 handler并被 durable 删除；handler 自身对 missing/畸形/unknown cookie 返回同一 unauthorized。`GET /api/auth/me` 可由 #19 guard消费 `authenticate()`，但其 exact expired-row lazy cleanup 必须先运行。
+原始request pathname属于exact `/api`或`/api/*`时，除exact matched method+route为GET/implicit HEAD `/api/healthz`、GET/implicit HEAD `/api/info`、POST `/api/auth/login`或bearer-revocation POST `/api/auth/logout`外，系统SHALL在body parsing与handler前调用唯一`authenticate(request)` exact一次。Auth注册面SHALL作为FastifyRequest Principal类型/runtime同一owner，唯一安装request-local `principal:null`默认值；standalone `registerAuth`同样不得出现undefined，禁止共享object默认值或guard重复decorate。Null SHALL返回exact401 `unauthorized`；guard是Principal唯一写者，值只绑定当前request供matched handler消费。判定SHALL使用rewrite前`request.originalUrl`的共享bounded pathname classifier与Fastify matched route identity；bounded decode产生`?`时SHALL按该decoded query delimiter前的实际routed pathname判定API identity（1–4轮encoded exact `/api?query`仍protected），同时保留完整canonical pathname/decode/unsafe输出；不得以string prefix、rewritten internal route或可任意扩张metadata豁免。静态/fallback/unsafe non-API 404不受guard影响。Storage/cleanup failure SHALL保持generic5xx，不得降级401。Guard不得全局发布me/logout专属no-store或clear-cookie。
 
-#### Scenario: 未登录访问受保护端点
-- WHEN 无 cookie 请求任一受保护 `/api/*` 端点
-- THEN 返回 401 错误信封
+Logout SHALL绕过Principal eligibility guard，使future disabled/orphan或invalid auth clock的existing exact row仍进入#10 handler并durable删除；login/logout parser与handler合同保持不变。Me SHALL把no-store前移到route-local onRequest并消费guard已绑定Principal，避免二次authenticate；null/expired路径仍保有#10 exact cleanup、no-store与clear-cookie。
 
-#### Scenario: 伪造或未知 session id
-- WHEN 携带会话表中不存在的 session id（伪造/篡改/库重建后的旧 cookie）请求受保护端点
-- THEN 返回 401 错误信封（与无 cookie 同形状），不返回 5xx，不写入任何会话行
+#### Scenario: 默认拒绝与request-local Principal
+- WHEN 无cookie、畸形、伪造/未知、future disabled/orphan或invalid-clock cookie请求受保护API（含exact `/api`、unknown catch-all、method/path/trailing-slash near-miss）
+- THEN在parser/handler前返回逐字相同401 unauthorized；除exact expired cleanup外不写任何session/account row，不返回5xx、不跨request共享Principal、不新增Set-Cookie
+- WHEN standalone auth或createApp装配后请求在guard写入前读取Principal，或valid future-enabled cookie请求受保护route/并发以不同cookie请求Principal consumer
+- THEN前者运行时exact为null且类型不含undefined、无重复decorator；guard各调用authenticate exact一次，handler消费对应exact request-local Principal；原route响应/404语义保持，数据库不变且Principal不得cross-bind
+- WHEN exact expired enabled/disabled/orphan row请求受保护route
+- THEN authenticate conditional cleanup只提交删除该row后返回401；siblings不变；query/cleanup/transaction failure为generic5xx而非401
+
+#### Scenario: 精确豁免、原始pathname与parser顺序
+- WHEN GET/HEAD healthz/info携任意cookie或invalid clock，或POST login/logout走其既有valid/error输入
+- THEN guard执行zero session lookup/cleanup；health/info保持exact success且不产生session，login保持自身KDF/INSERT/parser400，logout保持bearer DELETE/204|401/parser400；其他method、trailing slash或lookalike不继承豁免
+- WHEN unauth protected route携malformed/media/oversize body，或valid-auth携同一body
+- THEN unauth在body parser前401；valid-auth继续matched route原有parser/404/5xx语义；public login/logout仍先豁免guard再保留既有route-owned400
+- WHEN slash/backslash、1–4轮encoded API、post-decode `?`形成的routed exact `/api` identity，或ordinary/unsafe/multi-encoded non-API GET/POST/HEAD pathname（含被rewrite到internal API miss者）进入app
+- THEN API identity按original URL的共享bounded classifier受保护；`/files%3Ftab=1`等non-API routed pathname保持fallback，超界/unsafe/non-API无论是否携cookie都绕过guard、零session query并保持既有typed404/static隔离，不因rewritten route误报401

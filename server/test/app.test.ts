@@ -1,5 +1,4 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
@@ -9,6 +8,13 @@ import { openDb } from "../src/core/db/index.js";
 import { HttpError, type HttpErrorCode, rewriteUntrustedUrl } from "../src/http/index.js";
 import { classifyUrlPathname, MAX_PERCENT_DECODE_PASSES } from "../src/http/path-classifier.js";
 import { SERVICE_INFO } from "../src/service-info.js";
+import { rawHttpRequest, withListeningApp } from "./raw-http-helpers.js";
+import {
+  insertRow,
+  NOT_FOUND_ENVELOPE,
+  UNAUTHORIZED_ENVELOPE,
+  validatingBodyRouteOptions,
+} from "./session-db-helpers.js";
 
 const ERROR_CASES = [
   { code: "bad_request", statusCode: 400, message: "请求格式不正确" },
@@ -22,9 +28,6 @@ const ERROR_CASES = [
   message: string;
 }>;
 
-const NOT_FOUND_ENVELOPE = {
-  error: { code: "not_found", message: "请求的资源不存在" },
-};
 const INDEX_BYTES = "<!doctype html><html><body>workbuddy spa index</body></html>\n";
 const ASSET_BYTES = "body { color: rebeccapurple; }\n";
 const DOTTED_ASSET_BYTES = "body { color: cornflowerblue; }\n";
@@ -57,16 +60,26 @@ async function withStaticFixture<T>(action: (fixture: StaticFixture) => Promise<
   }
 }
 
+/**
+ * #19 后 `/api` 与 `/api/*` 默认要求会话。本文件的错误信封/API 优先级用例观察的是各 route
+ * 自己的既有终态，因此装配前直插一行 valid future 会话（不经 HTTP 登录——登录 inject 会冻结
+ * 路由表，令用例内的 route 注册失败），并把其 cookie 交给用例。守卫的 401 lane 归
+ * http-guard.test.ts；守卫本身仍逐请求判定一次。
+ */
+const VALID_SESSION_ID = "5a".repeat(32);
+const VALID_SESSION_COOKIE = `workbuddy_session=${VALID_SESSION_ID}`;
+
 async function withApp<T>(
   staticRoot: string | undefined,
-  action: (app: ReturnType<typeof createApp>) => Promise<T>,
+  action: (app: ReturnType<typeof createApp>, sid: string) => Promise<T>,
 ): Promise<T> {
   const db = openDb(":memory:");
+  insertRow(db, VALID_SESSION_ID, "u1", Date.now() + 86_400_000);
   let app: ReturnType<typeof createApp> | undefined;
 
   try {
     app = staticRoot === undefined ? createApp({ db }) : createApp({ db, staticRoot });
-    return await action(app);
+    return await action(app, VALID_SESSION_COOKIE);
   } finally {
     try {
       await app?.close();
@@ -133,43 +146,6 @@ function encodePathnameRounds(pathname: string, rounds: number): string {
 
 function createDeepEncodedPathname(): string {
   return encodePathnameRounds("/api/no-such", DEEP_ENCODING_ROUNDS);
-}
-
-async function withListeningApp<T>(
-  app: ReturnType<typeof createApp>,
-  action: (origin: string) => Promise<T>,
-): Promise<T> {
-  try {
-    await app.listen({ host: "127.0.0.1", port: 0 });
-    const address = app.server.address();
-    if (address === null || typeof address === "string") {
-      throw new Error("test app did not bind a TCP address");
-    }
-
-    return await action(`http://127.0.0.1:${address.port}`);
-  } finally {
-    await app.close();
-  }
-}
-
-async function rawHttpRequest(origin: string, target: string): Promise<string> {
-  const url = new URL(origin);
-  const socket = createConnection({ host: url.hostname, port: Number(url.port) });
-  const chunks: Buffer[] = [];
-
-  try {
-    await new Promise<void>((resolve, reject) => {
-      socket.once("connect", resolve);
-      socket.once("error", reject);
-    });
-    socket.write(`GET ${target} HTTP/1.1\r\nHost: ${url.host}\r\nConnection: close\r\n\r\n`);
-    for await (const chunk of socket) {
-      chunks.push(Buffer.from(chunk));
-    }
-    return Buffer.concat(chunks).toString("utf8");
-  } finally {
-    socket.destroy();
-  }
 }
 
 describe("createApp", () => {
@@ -292,13 +268,14 @@ describe("createApp", () => {
   });
 
   it("将五种真实 HttpError 映射为唯一的精确 JSON 信封", async () => {
-    await withApp(undefined, async (app) => {
+    await withApp(undefined, async (app, sid) => {
       registerErrorRoutes(app);
 
       for (const errorCase of ERROR_CASES) {
         const response = await app.inject({
           method: "GET",
           url: `/api/test-errors/${errorCase.code}`,
+          headers: { cookie: sid },
         });
 
         expect(response.statusCode).toBe(errorCase.statusCode);
@@ -317,10 +294,14 @@ describe("createApp", () => {
   });
 
   it("不将意外 programmer error 伪装为五种应用错误", async () => {
-    await withApp(undefined, async (app) => {
+    await withApp(undefined, async (app, sid) => {
       registerErrorRoutes(app);
 
-      const response = await app.inject({ method: "GET", url: "/api/test-errors/unexpected" });
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/test-errors/unexpected",
+        headers: { cookie: sid },
+      });
 
       expect(response.statusCode).toBeGreaterThanOrEqual(500);
       expect(response.statusCode).toBeLessThan(600);
@@ -339,7 +320,7 @@ describe("createApp", () => {
   });
 
   it("statusCode/status 鸭型 400/413 与伪造/非 allowlist code 的 programmer error 保持 5xx", async () => {
-    await withApp(undefined, async (app) => {
+    await withApp(undefined, async (app, sid) => {
       registerErrorRoutes(app);
 
       const routes = [
@@ -350,7 +331,7 @@ describe("createApp", () => {
       ];
 
       for (const url of routes) {
-        const response = await app.inject({ method: "GET", url });
+        const response = await app.inject({ method: "GET", url, headers: { cookie: sid } });
         expect(response.statusCode, url).toBeGreaterThanOrEqual(500);
         expect(response.statusCode, url).toBeLessThan(600);
         expect(response.payload, url).toBe('{"error":{"message":"服务器内部错误"}}');
@@ -399,26 +380,16 @@ describe("createApp", () => {
   });
 
   it("真实 FST_ERR_VALIDATION 不在 login allowlist（login 无 schema）：非 login route 保持 generic 5xx", async () => {
-    await withApp(undefined, async (app) => {
-      app.post(
-        "/api/test-errors/schema-validation",
-        {
-          schema: {
-            body: {
-              type: "object",
-              required: ["name"],
-              properties: { name: { type: "string" } },
-            },
-          },
-        },
-        () => ({ ok: true }),
-      );
+    await withApp(undefined, async (app, sid) => {
+      app.post("/api/test-errors/schema-validation", validatingBodyRouteOptions(), () => ({
+        ok: true,
+      }));
 
       const response = await app.inject({
         method: "POST",
         url: "/api/test-errors/schema-validation",
         payload: "{}",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", cookie: sid },
       });
 
       expect(response.statusCode).toBeGreaterThanOrEqual(500);
@@ -430,7 +401,7 @@ describe("createApp", () => {
   });
 
   it("非对象 programmer error（null throw）保持 generic 5xx", async () => {
-    await withApp(undefined, async (app) => {
+    await withApp(undefined, async (app, sid) => {
       app.get("/api/test-errors/primitive", () => {
         throw null as unknown as Error;
       });
@@ -438,6 +409,7 @@ describe("createApp", () => {
       const response = await app.inject({
         method: "GET",
         url: "/api/test-errors/primitive",
+        headers: { cookie: sid },
       });
 
       expect(response.statusCode).toBeGreaterThanOrEqual(500);
@@ -569,7 +541,7 @@ describe("createApp", () => {
       writeFileSync(join(root, "api", "healthz"), API_STATIC_BYTES);
       writeFileSync(join(root, "api", "info"), API_STATIC_BYTES);
 
-      await withApp(root, async (app) => {
+      await withApp(root, async (app, sid) => {
         const apiMisses = [
           "/api",
           "/api/",
@@ -585,13 +557,17 @@ describe("createApp", () => {
         ];
 
         for (const url of apiMisses) {
-          const response = await app.inject({ method: "GET", url });
+          const response = await app.inject({ method: "GET", url, headers: { cookie: sid } });
           expectNotFound(response);
           expect(response.payload).not.toContain(API_STATIC_BYTES);
           expect(response.payload).not.toBe(INDEX_BYTES);
         }
 
-        const postMiss = await app.inject({ method: "POST", url: "/api/no-such" });
+        const postMiss = await app.inject({
+          method: "POST",
+          url: "/api/no-such",
+          headers: { cookie: sid },
+        });
         expectNotFound(postMiss);
         expectJsonContentType(postMiss.headers);
 
@@ -659,7 +635,7 @@ describe("createApp", () => {
     await withStaticFixture(async ({ root }) => {
       writeFileSync(join(root, "index.html"), INDEX_BYTES);
 
-      await withApp(root, async (app) => {
+      await withApp(root, async (app, sid) => {
         const post = await app.inject({ method: "POST", url: "/files" });
         expectNotFound(post);
         expectJsonContentType(post.headers);
@@ -669,7 +645,18 @@ describe("createApp", () => {
         expect(head.payload).toBe("");
         expect(head.payload).not.toBe(INDEX_BYTES);
 
-        const apiHead = await app.inject({ method: "HEAD", url: "/api/no-such" });
+        // #19：protected HEAD 先命中守卫 401（wire 侧 body 抑制由 http-guard.test.ts 验收）；
+        // 带会话才回到既有 404 空 body 语义。
+        const deniedHead = await app.inject({ method: "HEAD", url: "/api/no-such" });
+        expect(deniedHead.statusCode).toBe(401);
+        expect(deniedHead.payload).toBe(JSON.stringify(UNAUTHORIZED_ENVELOPE));
+        expect(deniedHead.payload).not.toBe(INDEX_BYTES);
+
+        const apiHead = await app.inject({
+          method: "HEAD",
+          url: "/api/no-such",
+          headers: { cookie: sid },
+        });
         expect(apiHead.statusCode).toBe(404);
         expect(apiHead.payload).toBe("");
       });
@@ -760,16 +747,18 @@ describe("createApp", () => {
       let appClosed = false;
       try {
         await withListeningApp(listeningApp, async (origin) => {
-          for (const target of [
-            "/../outside-sentinel.txt",
-            "/%2e%2e/outside-sentinel.txt",
-            "/assets/%2e%2e/inside.txt",
-            "/api/%2e%2e/no-such",
-            "/api%5Cno-such",
-          ]) {
-            const response = await rawHttpRequest(origin, target);
-            expect(response).toContain("HTTP/1.1 404 Not Found");
-            expect(response).toContain(JSON.stringify(NOT_FOUND_ENVELOPE));
+          // non-API unsafe identity 仍 typed 404；original API identity 未认证是 401（#19）。
+          const wireRows = [
+            ["/../outside-sentinel.txt", "404 Not Found", NOT_FOUND_ENVELOPE],
+            ["/%2e%2e/outside-sentinel.txt", "404 Not Found", NOT_FOUND_ENVELOPE],
+            ["/assets/%2e%2e/inside.txt", "404 Not Found", NOT_FOUND_ENVELOPE],
+            ["/api/%2e%2e/no-such", "401 Unauthorized", UNAUTHORIZED_ENVELOPE],
+            ["/api%5Cno-such", "401 Unauthorized", UNAUTHORIZED_ENVELOPE],
+          ] as const;
+          for (const [target, statusLine, envelope] of wireRows) {
+            const response = await rawHttpRequest(origin, { target });
+            expect(response, target).toContain(`HTTP/1.1 ${statusLine}`);
+            expect(response, target).toContain(JSON.stringify(envelope));
             expect(response).not.toContain(OUTSIDE_SENTINEL_BYTES);
             expect(response).not.toContain(INDEX_BYTES);
           }

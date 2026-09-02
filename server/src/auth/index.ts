@@ -31,6 +31,18 @@ export type Principal = {
   role: string;
 };
 
+/**
+ * Principal 的请求级存放点由 auth 拥有：类型增广与运行时默认值同一 owner（默认值在
+ * `registerAuth` 中安装，standalone 装配同样生效），#19 的 root guard 是唯一写者，
+ * me/后继 handler 是读者。增广放在这里而不是 `http/`，否则会形成 auth → http 的类型依赖，
+ * 破坏 `http -> auth -> core/db` 单向。默认值恒为 `null`，绝不共享对象。
+ */
+declare module "fastify" {
+  interface FastifyRequest {
+    principal: Principal | null;
+  }
+}
+
 /** 唯一认证判定出口：request 形状 = Fastify 结构兼容 + server.db decorator。 */
 export interface AuthRequest {
   cookies: Record<string, string | undefined> | undefined;
@@ -99,12 +111,20 @@ export interface AuthRegistrationOptions {
 }
 
 /**
- * 注册 auth 面：cookie 解析 + login/me/logout 路由 + 共享时钟装饰。
+ * 注册 auth 面：request-local Principal 默认值 + cookie 解析 + login/me/logout 路由 + 共享时钟装饰。
  * 必须在 API 通配与静态托管之前调用，保持路由优先级。
  * fastifyCookie 在 root 注册（fp skip-override），使 #19 guard 的任意路由都能
  * 读到 request.cookies / reply.setCookie，而不仅限于 auth 插件内部。
+ *
+ * `principal` 的运行时默认值与类型增广同源：本模块声明 `FastifyRequest.principal: Principal | null`，
+ * 就必须由本模块在安装 auth 面时给出 exact `null` 的 request-local 默认值。#19 的 root guard 只在
+ * 自己装配时**写入**该属性；standalone `registerAuth` 不装 guard，也必须让任意后续 route 读到
+ * `null` 而不是 `undefined`，否则公共类型承诺与运行时不一致。默认值必须是 `null`：
+ * `decorateRequest` 对 object 默认值抛 `FST_ERR_DEC_REFERENCE_TYPE`（共享状态），对同一实例
+ * 第二次 `decorateRequest("principal")` 抛 `FST_ERR_DEC_ALREADY_PRESENT`，因此这里也是唯一安装点。
  */
 export function registerAuth(app: FastifyInstance, options: AuthRegistrationOptions): void {
+  app.decorateRequest("principal", null);
   app.decorate("authNow", options.runtime.now);
   void app.register(fastifyCookie);
   void app.register(authPlugin, options);
@@ -173,18 +193,25 @@ async function authPlugin(
     return outcome.principal;
   });
 
-  /** 只消费 authenticate(request)：valid → exact Principal；null → 401（clear 由 onSend 判定）。 */
+  /**
+   * 优先消费 #19 guard 已绑定的 request-local Principal，因此装配了 root guard 的 app 对
+   * me 只调用一次 authenticate（重复调用会把 session 点查询翻倍，可被 authorizer 计数观测）。
+   * 未装配 guard 的 standalone `registerAuth` 装配（既有 request-errors 用例形状）下
+   * `principal` 是 `registerAuth` 安装的 request-local `null`，故回落到同一个判定出口，
+   * 保持 #10 的 me 合同不破。
+   * `no-store` 挂在 route-local onRequest：先于 root preParsing，guard 提前 401 时 #10 的
+   * cache 合同与 clear-cookie（route-local onSend 按最终状态判定）依然成立。
+   */
   instance.get(
     "/api/auth/me",
-    { onSend: clearCookieOnFinalStatus(options, [UNAUTHORIZED_STATUS]) },
-    async (request, reply) => {
-      reply.header("Cache-Control", "no-store");
-      const principal = authenticate(request);
-      if (principal === null) {
-        return sendUnauthorized(options);
-      }
-      return principal;
+    {
+      onRequest: (_request, reply, done) => {
+        reply.header("Cache-Control", "no-store");
+        done();
+      },
+      onSend: clearCookieOnFinalStatus(options, [UNAUTHORIZED_STATUS]),
     },
+    async (request) => request.principal ?? authenticate(request) ?? sendUnauthorized(options),
   );
 
   /**
