@@ -202,6 +202,93 @@ Review focus:
 - App/DB ownership and `app.close()` cleanup are explicit and evidenced.
 - Dependency/lockfile and coverage changes remain minimal; no auth/listen/web scope creep.
 
+## Issue #7 delivery fixture: production server entrypoint and command surface
+
+Issue type: feature
+Project profile: open-workbuddy
+Blast radius: high
+Fixture level: high
+Repair intensity: high
+Upstream suggested level: compact (override: production entrypoint/CLI, environment config, DB file output, listen/close lifecycle and release assets are mandatory expanded/high triggers)
+Minimal mergeable slice: atomic — unique entry plus build/start/dev/knip/gitignore wiring
+
+Change surface:
+- `server/src/server.ts`, pure config-focused pairing tests, production build config and server package scripts, root `Makefile`, `knip.json`, `.gitignore`, project profile and this issue fixture.
+
+Must preserve:
+- `createApp` remains injectable and never listens/closes its caller DB; `openDb(path)` remains the only DB opener and compiled runtime consumes the exact tracked migrations.
+- #6 HTTP/static/error, #8 schema, #9/#10 auth lifecycle, #19 guard, web/kbservice and all package/coverage/CI controls remain unchanged.
+- #16 owns durable real-process hurl scenarios; this PR must make that command consumable without prematurely adding smoke or CI wiring.
+
+Must add/change:
+- One ESM-main-guarded production owner validates exact env config, creates only `dirname(DB_PATH)` for a non-memory DB, opens/migrates one DB, creates one app, listens once with a per-entry AbortSignal, emits one post-listen allowlisted JSON startup record through a managed sink writer, and closes app/DB on partial failure, sink failure or SIGINT/SIGTERM. Importing it is side-effect-free.
+- Exact env contract: `HOST` default `127.0.0.1`, empty/whitespace invalid and other nonempty exact; `PORT` default `3000` and canonical decimal `1..65535`; `DB_PATH` default repo-root `var/dev.db`; `STATIC_ROOT` default repo-root `web/dist`. Relative paths bind to repo root derived from `import.meta.url`, independent of cwd; absolute paths remain exact; SQLite `:memory:` remains special. Path explicit empty is invalid; unknown env is ignored.
+- Existing TypeScript compiler emits production-only `server/dist`; build starts from clean output and recursively copies the complete fixed migration tree with exact relative-path inventory/bytes so compiled `import.meta.url` resolves the same schema source. No dependency/runtime network is added.
+- `npm run start --workspace server` owns build+execute; `make dev` is one forwarding edge. `knip` recognizes `src/server.ts`; root `.gitignore` excludes `var/`.
+
+Seams under test:
+- Pure exported config seam proves default/override/negative/cwd-independent mapping without listening.
+- Controlled real compiled-process probe is Phase 2 evidence: temporary absolute DB/static root + free loopback port, stdout/stderr capture, real curl/HTTP, SIGINT/SIGTERM and occupied-port/DB-failure cleanup. It is not retained as a listener unit test; #16 makes the real-process suite durable.
+- Build artifact inventory/hash comparison proves compiled JS and migration assets are deployable offline.
+
+Risk packs considered (core):
+- Public API / CLI / script entry: selected — this is the sole production listen entry and two public commands must converge on it.
+- Config / project setup: selected — four own env keys, strict defaults/validation and cwd-independent path identity are public operator contracts.
+- File IO / path safety / overwrite: selected — trusted operator DB path may create a parent and SQLite file; default `var/` must be ignored; migration assets must bind to compiled owner bytes. No user-workspace path is accepted.
+- Schema / columns / units / field names: not selected — no schema change; existing migration assets are compatibility evidence only.
+- Auth / permissions / secrets: selected — startup logs/env handling are allowlisted and must not dump credentials/cookies/session data; auth behavior is unchanged.
+- Concurrency / shared state / ordering: selected — validate→mkdir→DB→app→abortable listen→managed log and signal/failure close order own shared port/DB state; pre-bind signals cannot outlive a cached cleanup.
+- Resource limits / large input / discovery: not selected — four trusted operator scalars, one fixed migration directory, one DB and one listener; no external discovery, recursive walk, polling or retry loop. PORT is explicitly bounded under config.
+- Legacy compatibility / examples: selected — createApp/openDb and every delivered HTTP/auth consumer remain green; `make dev` and workspace start resolve one root.
+- Error handling / rollback / partial outputs: selected — every main-path config/DB/app/listen/success-write failure is nonzero, closes every acquired resource and emits only exact generic stderr JSON when that sink is writable; stdout/stderr EPIPE never leaks a raw stack, and dual sink failure remains nonzero/clean without a physically impossible record; import-without-main is silent; signals are idempotent.
+- Release / packaging / dependency compatibility: selected — clean production build must contain runnable JS + exact non-TS migration assets under Node 24 without adding a runtime/development dependency.
+- Documentation / migration notes: selected — Makefile/package/knip/gitignore/project profile are the operator and tooling command contract; no user data migration note is needed.
+
+Domain packs:
+- Tenant/sandbox isolation: not selected — paths are trusted operator deployment config, not tenant/workspace input.
+- Auth/session lifecycle: selected — assembled auth/guard routes must remain identical and startup log must not expose auth state.
+- Process/child-environment isolation: selected — one foreground process consumes an allowlist of env keys and owns signal shutdown; no child process/env forwarding exists.
+- SQLite migration/catalog compatibility: selected — compiled runtime must apply the same asset bytes/order once and release its handle on failure/shutdown.
+- Server/web HTTP-envelope compatibility: selected — real health/info/auth/guard/static probes retain exact outputs.
+- Offline deployability: selected — compiler/assets resolve locally and start performs no install/fetch.
+- Browser runtime/navigation/persistence: not selected — no web source/browser state change; static root compatibility is observed via HTTP.
+- Cross-service boundary: not selected — kbservice/network service composition is not started.
+
+Invariant Matrix:
+- Governing invariant: one canonical env/config identity creates at most one DB handle and one Fastify listener; success is published only after listen, and every later failure/signal releases exactly those owned resources.
+- Source-of-truth identity/contract: own `HOST/PORT/DB_PATH/STATIC_ROOT` values + repo root derived from entry `import.meta.url` + stable module list `core/db,auth,http` + tracked migration bytes.
+- Producers: `process.env`, workspace package scripts, Makefile forwarding target, tracked `server/src/core/db/migrations/**`.
+- Validators/preflight: pure config parser validates all four keys and resolves path identity before filesystem/database/listen effects; build starts from clean dist and verifies/copies fixed assets.
+- Storage/cache/query: one `openDb` handle at configured/default path; one migrated SQLite catalog; no cache/second opener; static root is read-only.
+- Public routes/entrypoints: `npm run start --workspace server`, `make dev`, compiled `dist/server.js`, existing HTTP routes through one `createApp`.
+- Frontend/downstream consumers: #16 hurl and later deployment; current web API/auth consumers; knip/package/Make command discovery.
+- Failure paths/rollback/stale state: invalid env, missing/unwritable DB parent, migration conflict, occupied port, stdout/stderr sink failure, pre-bind and post-bind SIGINT/SIGTERM, repeated build/start and stale dist/DB.
+- Evidence/audit/readiness: config unit matrix, command red proof, clean build/inventory/hash, controlled real process HTTP/log/signal/failure probes, full gates and hygiene.
+- Regression rows:
+  - missing env through either repo-root public command, plus absolute compiled entry executed from foreign cwd → same default identities, health 200, exact post-listen JSON, repo-root DB migrated, graceful shutdown/reopen;
+  - valid absolute/relative override + temporary static root → exact custom identities and existing HTTP/static/auth behavior, no accidental default DB;
+  - invalid/empty env on main path → nonzero before filesystem/listen, stdout no success and application stderr exact generic failure JSON; import-without-main → silent/no side effect;
+  - DB/migration/listen/success-write failure after partial acquisition → nonzero, no success record or raw stream stack, app/DB/port reusable; stderr sink failure may suppress only the physically impossible generic line;
+  - signal in pre-bind window → AbortSignal prevents late bind and emits no startup record; post-bind duplicate/mixed signals → one idempotent listener→DB cleanup and normal exit; successor reuses exact port/DB;
+  - clean/repeated build → only production JS plus byte-identical complete migrations, no tests/stale output/network dependency;
+  - unchanged `createApp`/core-db/auth/web/kbservice consumers → existing results and coverage remain green.
+
+Boundary-surface checklist:
+- Shared helper roots: `openDb`, `createApp`, tracked migration asset owner; unchanged and consumed once.
+- Public entrypoints: one compiled ESM-main-guarded `server.ts`; Make/package only forward/build it; import is side-effect-free.
+- Read surfaces: four allowlisted env keys and fixed migration/static roots; success stdout exact `{event,host,port,modules}` only, runtime-failure stderr generic event only, no raw error/environment/auth-state dump.
+- Write/delete/overwrite surfaces: clean ignored `server/dist`, trusted DB parent/file, ignored repo `var/`; no user content delete/overwrite.
+- Staging/publish/rollback surfaces: build assets then DB/app/abortable-listen/managed-success-write; any failure reverses acquired runtime resources before generic failure publication.
+- Producer/consumer evidence boundaries: source migration bytes→dist bytes→migration receipts; env→resolved config→listen/log; app routes→#16.
+- Stale/idempotency boundaries: repeated build removes stale dist; repeated DB start does not replay migrations; pre-bind abort cannot permit a late listener; duplicate/mixed signals close once; output callback/error races settle once.
+- Unchanged downstream consumers: #5/#6/#8/#9/#10/#19, web/kbservice, package/coverage/CI gates.
+
+Review focus:
+- No second startup/config owner and no cwd-dependent default path split between Make/npm/direct compiled execution.
+- Dist cannot omit or stale-copy migration assets; start cannot require runtime network or a new TS runner.
+- Success log is post-listen and allowlisted; partial failures and signals close exactly the resources acquired.
+- No listener unit-test scope creep: durable real-process behavioral matrix remains #16, while this issue supplies config unit and controlled Phase 2 process evidence.
+
 ## Issue #8 delivery fixture: account/auth-session schema and dev seed
 
 Issue type: feature

@@ -1,7 +1,7 @@
 # open-workbuddy 唯一命令面。所有工作流经此路由；AGENTS.md 验证矩阵与 constraints.yaml
 # verification 段是它的镜像，增删目标须三处同步。
 SHELL := /bin/bash
-.PHONY: setup hooks lint fmt typecheck test anti-drift guard check test-guardrails precommit
+.PHONY: setup hooks lint fmt typecheck test anti-drift guard check test-guardrails precommit dev
 
 setup: ## 安装依赖 + 挂 git hooks
 	npm install
@@ -41,5 +41,8 @@ check: lint typecheck test anti-drift ## 全链验证，推送前必绿
 
 test-guardrails: ## 守卫自证：每条 guard 对注入违例必须报错
 	bash scripts/test-guardrails.sh
+
+dev: ## 唯一启动转发边：同一 workspace start owner（Issue #7）
+	npm run start --workspace server
 
 precommit: guard

@@ -29,13 +29,14 @@
 **Command entry points**
 - setup=`make setup`; lint=`make lint`; typecheck=`make typecheck`; test=`make test`。
 - drift=`make anti-drift`; full=`make check`; guardrails=`make test-guardrails`。
-- server-test=`npm test --workspace server`; web-test=`npm test --workspace web`。
-- web-build=`npm run build --workspace web`；kb-test=`cd kbservice && uv run pytest`。
+- server-test=`npm test --workspace server`; server-build=`npm run build --workspace server`; server-start=`npm run start --workspace server`; dev=`make dev`。
+- web-test=`npm test --workspace web`; web-build=`npm run build --workspace web`；kb-test=`cd kbservice && uv run pytest`。
 
 **Verification matrix**
 - Web 构建/入口 -> `npm run build --workspace web` -> 退出码 0，`web/dist/index.html` 与静态资源存在。
 - TS/Python 静态与类型 -> `make lint && make typecheck` -> 退出码 0。
 - Server/SQLite/HTTP seam -> `npm test --workspace server` -> 退出码 0，coverage ≥80%。
+- Server build/production entry -> `npm run build --workspace server` + controlled compiled-process probe -> dist JS/migration assets完整；health 200；startup JSON/env/default identity正确；SIGTERM释放DB/port。正式常驻HTTP回归由#16 `make smoke`接管。
 - Web 行为 -> `npm test --workspace web` -> 退出码 0，coverage ≥80%。
 - Python 行为 -> `cd kbservice && uv run pytest` -> 退出码 0，coverage ≥80%。
 - 死代码/重复/命名/行数 -> `make anti-drift` -> 退出码 0。

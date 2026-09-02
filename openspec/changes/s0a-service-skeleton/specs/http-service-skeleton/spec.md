@@ -3,11 +3,29 @@
 ## ADDED Requirements
 
 ### Requirement: 服务启动与装配
-系统 SHALL 以 `server/src/app.ts` 装配 Fastify 实例（feature 模块以 plugin 注册、配置可注入），并以 `server/src/server.ts` 作为唯一监听入口；监听地址与端口、SQLite 路径、静态根 SHALL 来自环境变量并有默认值；启动日志 SHALL 输出已注册模块清单。
+系统 SHALL 以 `server/src/app.ts` 装配 Fastify 实例，并以 `server/src/server.ts` 作为唯一 production listen/DB ownership 入口；import该module只暴露pure config seam，不得mkdir/open/listen或注册signal，只有ESM main guard命中的执行路径可启动。唯一配置源为 own environment keys `HOST`、`PORT`、`DB_PATH`、`STATIC_ROOT`：缺省值分别为 `127.0.0.1`、`3000`、repo-root `var/dev.db`、repo-root `web/dist`；relative DB/static path SHALL 相对由 entry module identity 推导的repo root，不得随shell/npm workspace cwd分裂。`PORT` SHALL只接受canonical ASCII decimal `1..65535`；HOST missing取默认、empty或whitespace-only非法且不得trim/coerce，其它nonempty string原样交listen；DB/static path explicit empty非法。全部config SHALL在任何filesystem/database/listen effect前验证。
 
-#### Scenario: 干净启动
-- WHEN 以默认配置执行启动命令（`make dev` 或 `npm run start --workspace server`）
-- THEN 进程持续监听配置端口，且 `GET /api/healthz` 返回 200（启动行为由 smoke 对真实进程验证）
+对于non-`:memory:` DB path，入口SHALL recursive创建且只创建missing `dirname(DB_PATH)`，随后由唯一`openDb`创建/打开exact file；不得创建`STATIC_ROOT`。Exact `:memory:` SHALL保留SQLite特殊identity且不得mkdir。DB parent为existing non-directory、不可创建/写入或DB/migration不合法 SHALL走同一partial-start failure cleanup，不得fallback到默认路径。
+
+`npm run start --workspace server` SHALL在clean checkout先以现有TypeScript compiler构建production-only JS并把tracked `migrations/`完整递归tree逐文件逐字节带入与compiled module相同的runtime位置，再执行compiled唯一入口；`make dev` SHALL只转发到该command，不得形成第二套启动逻辑。成功顺序 SHALL为validated config → DB-parent prepare → DB open/migrate → createApp → listen → application-owned stdout一行LF-terminated exact JSON `{"event":"server_started","host":"<actual>","port":<integer>,"modules":["core/db","auth","http"]}`，不得有extra key或在listen前/应用stderr出现。Package-manager command banner不属于application record。
+
+Runtime config/DB/app/listen/success-record任一步失败 SHALL不输出success record，以nonzero退出，并在stderr sink可写时由application-owned stderr输出一行LF-terminated exact generic JSON `{"event":"server_start_failed"}`（无extra key/原始error/config）；若stderr sink自身不可写，该行物理不可达，系统仍SHALL nonzero、释放资源且不得产生unhandled stream stack。Node `node:sqlite` ExperimentalWarning MAY作为平台warning另出stderr。任意success/failure stream均不得dump environment或包含cookie/password/session值。Application stdout/stderr record SHALL经受管writer处理sync throw、write callback与stream error，settle exact一次且不得泄漏raw EPIPE。
+
+失败清理 SHALL关闭当前入口已拥有的app/DB；每个entry SHALL把同一AbortSignal传给Fastify listen，SIGINT/SIGTERM先abort pending bind再经共享幂等shutdown停止已绑定listener、最后关闭唯一DB handle并正常退出。Signal落在listen invoke与实际bind之间时不得后到绑定、不得输出success/failure record，port/DB须可由successor立即复用。`.gitignore` SHALL排除default `var/` runtime output，knip SHALL把`src/server.ts`识别为entry。
+
+#### Scenario: 干净启动与一致命令面
+- WHEN 从repo root执行`make dev`或`npm run start --workspace server`，或build后从foreign cwd直接执行absolute `dist/server.js`，且未设置四项配置
+- THEN 三种启动形状消费同一entry/config identity，监听`127.0.0.1:3000`；只在repo-root recursive创建`var/`并使`var/dev.db`完成tracked migrations；不创建missing `web/dist`；`GET /api/healthz`返回exact200；application stdout只在listen成功后出现上述exact startup record；SIGTERM后端口与DB均可立即由后继进程重用
+
+#### Scenario: override、非法配置与部分启动失败
+- WHEN以可用custom host/port、absolute或relative DB/static root启动
+- THENoverride逐项原样生效，relative path仍绑定repo root；只创建non-memory DB的exact parent、绝不创建STATIC_ROOT或误建default DB；build output中的完整migration tree与tracked source inventory/bytes一致，health/info/auth/static合同保持
+- WHEN`PORT`为empty/whitespace/sign/fraction/exponent/zero/out-of-range，HOST为empty/whitespace-only，DB/STATIC path为explicit empty，或import `server.ts`但不命中main guard
+- THENmain-path非法config在任何filesystem/database/listen副作用前nonzero，application stderr恰一行上述generic failure record且无success；import-without-main保持silent且无filesystem/database/listen/signal副作用
+- WHENDB parent为file/不可创建、DB open/migration失败、HOST由listen拒绝、port已占用或post-listen stdout sink失败
+- THEN进程nonzero且stderr可写时只有generic failure record；stdout EPIPE不得输出raw stack；关闭所有已拥有的app/DB，不遗留可监听server或active SQLite handle，parent/static/default路径无额外副作用；stderr同时不可写时允许无record但同样nonzero/cleanup
+- WHEN SIGINT/SIGTERM 落在listen invoke后、实际bind前，或成功后重复/混合到达
+- THEN pending bind由同一AbortSignal取消且无startup record，或已绑定listener幂等关闭；两种情况下均先释放port再关DB并正常退出，successor可立即复用exact port/DB
 
 ### Requirement: 健康与服务信息端点
 系统 SHALL 提供 `GET /api/healthz`（无需认证）与 `GET /api/info`（无需认证，返回 exact SERVICE_INFO）；info 成功 body SHALL 恰为 `{name:string,version:string}`，`name` 非空且 `version` 符合 `server/src/service-info.ts` 的 semver 规则。可注入 app 装配 SHALL 接收 caller-owned SQLite handle、以名为 `db` 的 Fastify decorator 保持同一对象 identity，并不得在 `app.close()` 时关闭该 handle。
