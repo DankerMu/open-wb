@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --coverage"
+    "test": "vitest run --coverage",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && node scripts/copy-migration-assets.mjs",
+    "start": "npm run build && exec node dist/server.js"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",

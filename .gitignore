@@ -25,3 +25,6 @@ __pycache__/
 htmlcov/
 .coverage
 CLAUDE.local.md
+
+# 运行时输出（server 默认 DB 落位，Issue #7）
+var/
