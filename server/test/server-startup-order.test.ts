@@ -15,6 +15,12 @@ import { describe, expect, it } from "vitest";
  * yield（releaseOwned / emitStartupFailed 的 await 位）——失败判定不得被 signalReceived
  * 门控，generic 发布不得被 signalReceived 跳过；requestShutdown 的退出码赋值必须把
  * 已判定失败/release 失败视为 sticky，不得无条件覆写为 0。
+ *
+ * Round 2 补充（终端态单调墓碑 whole-source oracle）：
+ * 一旦失败被判定，owned.failed / owned.releaseFailed 都是单调墓碑——任何 sibling
+ * （requestShutdown / releaseOwned / closeOwned* / 发布路径）不得把墓碑清回 false 而把
+ * 已判定的 nonzero 降回 0。本 oracle 只匹配 "=" 运行时赋值，不误伤 ":" 初始器与
+ * "==="/"!==" 比较。
  */
 
 const SOURCE_PATH = fileURLToPath(new URL("../src/server.ts", import.meta.url));
@@ -86,5 +92,14 @@ describe("server.ts sticky failure：失败判定先于 yield，且不被 signal
   it("失败判定字段存在于 OwnedResources 且初始为 false", () => {
     expect(source).toContain("failed: boolean;");
     expect(source).toContain("failed: false,");
+  });
+
+  it("终端态墓碑单调：failed/releaseFailed 只置 true，全源无任何清回 false 的运行时赋值", () => {
+    // 运行时墓碑赋值：owned.failed 恰一次 true；"failed: false," 初始器用冒号，不匹配。
+    expect(source.match(/owned\.failed\s*=\s*true/gu)).toHaveLength(1);
+    // 全源不得存在把墓碑清回 false 的赋值；"===" / "!==" 比较与初始器均不匹配 "="。
+    expect(source).not.toMatch(/owned\.failed\s*=\s*false/u);
+    // releaseFailed 与 failed 同是单调墓碑（均被 :217 的退出码表达式 sticky 化），同门禁。
+    expect(source).not.toMatch(/owned\.releaseFailed\s*=\s*false/u);
   });
 });
