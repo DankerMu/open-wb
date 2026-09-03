@@ -35,4 +35,15 @@ describe("命令面：start 以 exec 替换 shell，单一 Node owner 承接 PID
     const devSection = makefile.slice(makefile.indexOf("dev:"), makefile.indexOf("precommit:"));
     expect(devSection).not.toMatch(/node |spawn|exec |uv /u);
   });
+
+  it("除 start 外的任何 lifecycle script 均不得 launch 生产入口 dist/server.js", () => {
+    const scripts = serverPackage.scripts ?? {};
+    expect(Object.keys(scripts).length).toBeGreaterThan(0);
+    // 只拒绝生产入口 launch（如 `prestart: node dist/server.js` 或 build 尾部追加
+    // `node dist/server.js`）；build 内合法的 `node scripts/copy-migration-assets.mjs` 不受影响。
+    const siblingLaunchers = Object.entries(scripts).filter(
+      ([name, command]) => name !== "start" && /\bnode\s+[^&|;]*dist\/server\.js/u.test(command),
+    );
+    expect(siblingLaunchers).toEqual([]);
+  });
 });
