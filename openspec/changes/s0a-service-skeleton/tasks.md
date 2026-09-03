@@ -139,7 +139,21 @@ Minimal mergeable slice: 3.0 工具链单独可合并保绿（纯配置+最小�
 
 ## 4. verification-harness
 
-- [ ] 4.1 hurl 用例集（healthz/info/登录三态含信封文案断言/守卫 401/伪造 session 401/登出/深链 fallback/API 404 信封）+ `make smoke`（缺 hurl 显式失败并打印指引）
+- [x] 4.1 hurl 用例集（healthz/info/登录三态含信封文案断言/守卫 401/伪造 session 401/登出/深链 fallback/API 404 信封）+ `make smoke`（缺 hurl 显式失败并打印指引）
+  - Issue #16 fixture: high（upstream none 因 public Make CLI、real HTTP/auth cookie state、external Hurl process、configured static path 与 failure exit contract 强制升档）；repair intensity: high；minimal slice: two self-contained Hurl files + tracked static fixture + one Make target 原子交付。
+  - Change boundary: `smoke/{public,auth}.hurl`、`smoke/fixtures/static/index.html`、Makefile smoke target/.PHONY、living project profile 与本 fixture；不改 server/web/package/lock/CI/AGENTS/constraints。Makefile 头部三处同步规则在shared S0a change内分阶段兑现：本 PR 只加 target，#18 原子补 AGENTS/constraints/CI/真实 `web/dist` job，Playwright 由 #17 接管。
+  - Required evidence:
+    - TDD/red-proof：pre-change `make smoke` 因无 target 非零；新增 harness 后，错误/无 index 的 STATIC_ROOT 使 deep-link exact-body assertion 红，绑定正确 tracked fixture 后才绿；不是 Hurl syntax-only red，不留 binary/temp/stash。
+    - command contract：`SMOKE_BASE_URL` omitted→`http://127.0.0.1:3000`，override origin（无 trailing slash）只传成一个 Hurl `base_url=<完整值>` argv；含 whitespace、quote、semicolon、`$()`、backtick、`#`、`&`、newline 或 `$(shell ...)` 形状的无效值保持 inert bytes、零side effect，fake Hurl nonzero仍使Make nonzero；`make smoke` 以 `--test --jobs 1`执行全部 top-level `smoke/*.hurl`并原样传播失败；不 build/start/stop/install 服务或工具，不写 cookie jar/report。
+    - missing tool：controlled PATH 无 `hurl`→在任何 request 前 nonzero，stderr 含 stable exact line `错误：未找到 hurl；安装说明：https://hurl.dev/docs/installation.html`；target 不 silent skip/fallback/download，npm manifests/lockfile无变化。
+    - `public.hurl`：真实 compiled #7 process + temporary migrated DB + free loopback port + caller-set `STATIC_ROOT=<repo>/smoke/fixtures/static`；health→200 exact `{"status":"ok"}`，info→200 exact `{"name":"workbuddy-app-server","version":"0.0.0"}`，`GET /files?smoke=deep-link`→200 + exact `Content-Type: text/html; charset=utf-8` + tracked index exact bytes；default `make dev`/`web/dist`不是本绿路径，wrong/no-index root使同target nonzero。
+    - `public.hurl` unauth/forged：无cookie protected unknown API与显式64-lowercase-hex forged `workbuddy_session`各→exact 401 `{"error":{"code":"unauthorized","message":"请先登录"}}`；explicit forged cookie只属于该request，不进入共享cookie store或污染后续entry。
+    - login errors：`zhangsan/wrong`→exact 401 invalid_credentials / `账号或密码不正确`；`wangwu/demo`→exact 403 account_disabled / `该账号已停用，请联系管理员`；两者无 session Set-Cookie。
+    - `auth.hurl` stateful lifecycle：wrong/disabled失败后，同文件 `zhangsan/demo`→exact 200 `{"id":"u1","account":"zhangsan","role":"成员"}` + `workbuddy_session` cookie（64 lowercase hex、HttpOnly、SameSite=Lax、Path=/、无Domain/Expires/Max-Age）；自动 cookie store随后请求 protected unknown API→exact authenticated 404 not_found / `请求的资源不存在`；bodyless POST logout→204/empty/no-store + exact `Set-Cookie: workbuddy_session=; Max-Age=0; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax`；随后 protected request→exact 401。
+    - state ownership/order：top-level Hurl files各自self-contained且不依赖shell glob顺序或跨文件cookie；target连续执行两次均exit0，临时DB最终 `auth_sessions` 0 rows；每次父验证finally终止自有process、确认port可复用并删除自有DB/static temp，不杀未知process。
+    - failure propagation：unreachable base URL、错误static root或任一status/body/message/cookie assertion mismatch→make nonzero；Hurl stdout/stderr不得泄漏实际 session value或非demo credential到tracked evidence。
+    - documentation/compatibility：Make recipe 为 `smoke: ##` 一行说明并含stable installation URL，不新增help target；focused real smoke、`make check`、`make test-guardrails`、strict OpenSpec、`git diff --check`、size/naming/knip/jscpd/sensitive/debug/skip/stash/artifact scans全绿；server/web/kbservice source、existing Make targets、coverage/CI controls不变。
+  - Non-goals: service launcher/cleanup owner、real `web/dist` build、CI hurl install/job/aggregate、AGENTS/constraints/Directory Map、Playwright/browser、server/web route change、remote/TLS/load smoke。
 - [ ] 4.2 Playwright 走查（登录→四路由→主题持久→侧栏页脚退出，零浏览器 console error）+ `make ui-walk`
 - [ ] 4.3 CI 接线与控制面四处同步：smoke/ui-walk 独立 job（装 hurl/browser、先 build web 再起服务）纳入 all-checks-passed；AGENTS.md（Verification Matrix 真命令、Enforcement Index 升 block、Known blind spots 删过期条目、Directory Map 增 smoke/）；constraints.yaml verification.surfaces 增两条；Makefile 目标 + .PHONY；验证 = 三处目标集合逐字比对
 
