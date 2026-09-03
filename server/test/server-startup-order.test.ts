@@ -21,6 +21,12 @@ import { describe, expect, it } from "vitest";
  * （requestShutdown / releaseOwned / closeOwned* / 发布路径）不得把墓碑清回 false 而把
  * 已判定的 nonzero 降回 0。本 oracle 只匹配 "=" 运行时赋值，不误伤 ":" 初始器与
  * "==="/"!==" 比较。
+ *
+ * Round 3 补充（set-side 墓碑与退出码 writer 的完整判定）：
+ * releaseFailed 除了 reset 门禁还须有 set-side 门禁：closeOwnedApp / closeOwnedDb 两处
+ * catch 各恰好一次 "= true"（删除任一处即把一个已判定的 release 失败静默降回 rc 0）；
+ * 非法 config 路径的 process.exitCode = 1 判定位必须先于配置失败的 emitStartupFailed()
+ * 调用位与第一个 signal handler 安装——generic 失败记录不得在退出码仍为 0 时发布。
  */
 
 const SOURCE_PATH = fileURLToPath(new URL("../src/server.ts", import.meta.url));
@@ -51,6 +57,18 @@ describe("server.ts 启动顺序：配置先于 signal 注册", () => {
 
     expect(emitFailCall).toBeGreaterThan(-1);
     expect(emitFailCall).toBeLessThan(firstHandler);
+  });
+
+  it("非法 config 的 exitCode=1 判定位先于配置失败记录与第一个 handler 安装", () => {
+    // 配置路径 catch 必须先写 nonzero，再发布 generic 失败记录、再安装 signal handler：
+    // 顺序断言（而非全局计数）保证行为保持型 helper 抽取（markExitFailure()）不误红。
+    const firstExitOne = source.indexOf("process.exitCode = 1;");
+    const configFailEmit = source.indexOf("emitStartupFailed();");
+    const firstHandler = source.indexOf('process.on("SIGINT"');
+
+    expect(firstExitOne).toBeGreaterThan(-1);
+    expect(configFailEmit).toBeGreaterThan(firstExitOne);
+    expect(firstHandler).toBeGreaterThan(firstExitOne);
   });
 });
 
@@ -99,7 +117,9 @@ describe("server.ts sticky failure：失败判定先于 yield，且不被 signal
     expect(source.match(/owned\.failed\s*=\s*true/gu)).toHaveLength(1);
     // 全源不得存在把墓碑清回 false 的赋值；"===" / "!==" 比较与初始器均不匹配 "="。
     expect(source).not.toMatch(/owned\.failed\s*=\s*false/u);
-    // releaseFailed 与 failed 同是单调墓碑（均被 :217 的退出码表达式 sticky 化），同门禁。
+    // releaseFailed 与 failed 同是单调墓碑（均被 :217 的退出码表达式 sticky 化），同门禁：
+    // set-side 恰两次 true（closeOwnedApp / closeOwnedDb 各一次），删除任一处即 false-green。
+    expect(source.match(/owned\.releaseFailed\s*=\s*true/gu)).toHaveLength(2);
     expect(source).not.toMatch(/owned\.releaseFailed\s*=\s*false/u);
   });
 });
