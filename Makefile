@@ -1,7 +1,7 @@
 # open-workbuddy 唯一命令面。所有工作流经此路由；AGENTS.md 验证矩阵与 constraints.yaml
 # verification 段是它的镜像，增删目标须三处同步。
 SHELL := /bin/bash
-.PHONY: setup hooks lint fmt typecheck test anti-drift guard check test-guardrails precommit dev smoke
+.PHONY: setup hooks lint fmt typecheck test anti-drift guard check test-guardrails precommit dev smoke ui-walk
 
 setup: ## 安装依赖 + 挂 git hooks
 	npm install
@@ -58,5 +58,12 @@ export SMOKE_BASE_URL
 smoke: ## Hurl HTTP 冒烟（只消费已运行服务；缺 hurl 显式失败并打印安装指引 https://hurl.dev/docs/installation.html）
 	@/usr/bin/env -i PATH="$$PATH" /bin/sh -c 'command -v hurl >/dev/null 2>&1' || { echo "错误：未找到 hurl；安装说明：https://hurl.dev/docs/installation.html" >&2; exit 1; }
 	/usr/bin/env -i PATH="$$PATH" hurl --test --jobs 1 --retry 0 --variable "base_url=$${SMOKE_BASE_URL}" smoke/public.hurl smoke/auth.hurl
+
+UI_WALK_BASE_URL ?= http://127.0.0.1:3000
+# 与 smoke 相同：$(value) 冻结成 raw 字面后 export；配方不把该值插进 shell 语法。
+override UI_WALK_BASE_URL := $(value UI_WALK_BASE_URL)
+export UI_WALK_BASE_URL
+ui-walk: ## Playwright UI 走查（只消费已运行服务；不 build/start/stop/install）
+	npm run ui-walk --workspace web
 
 precommit: guard
