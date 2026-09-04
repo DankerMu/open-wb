@@ -51,8 +51,12 @@ SMOKE_BASE_URL ?= http://127.0.0.1:3000
 # 带引号的参数展开，shell 不把其内容当语法重解析。
 override SMOKE_BASE_URL := $(value SMOKE_BASE_URL)
 export SMOKE_BASE_URL
+# 工具发现只发生在受控子进程内，且绝不把发现出的路径字节写回 recipe 文本：
+# 预检与调用都以字面 `hurl` 交给 /usr/bin/env 经 PATH 定位（env -i 只带 PATH，
+# 函数/别名/HURL 变量不进子进程），shell 不重新解析 PATH 组件——注入的引号/分号
+# 等字节只会成为路径的一部分，不会变成 shell 语法。
 smoke: ## Hurl HTTP 冒烟（只消费已运行服务；缺 hurl 显式失败并打印安装指引 https://hurl.dev/docs/installation.html）
-	@command -v hurl >/dev/null 2>&1 || { echo "错误：未找到 hurl；安装说明：https://hurl.dev/docs/installation.html" >&2; exit 1; }
-	hurl --test --jobs 1 --variable "base_url=$${SMOKE_BASE_URL}" smoke/public.hurl smoke/auth.hurl
+	@/usr/bin/env -i PATH="$$PATH" /bin/sh -c 'command -v hurl >/dev/null 2>&1' || { echo "错误：未找到 hurl；安装说明：https://hurl.dev/docs/installation.html" >&2; exit 1; }
+	/usr/bin/env -i PATH="$$PATH" hurl --test --jobs 1 --retry 0 --variable "base_url=$${SMOKE_BASE_URL}" smoke/public.hurl smoke/auth.hurl
 
 precommit: guard
