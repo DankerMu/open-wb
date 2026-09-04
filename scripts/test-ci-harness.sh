@@ -36,7 +36,7 @@ run_helper() {
 grep -F -q 'bash .github/scripts/ci-compiled-server.sh smoke' "$wf" \
   && grep -F -q 'bash .github/scripts/ci-compiled-server.sh ui-walk' "$wf" \
   && grep -F -q 'bash .github/scripts/ci-install-hurl.sh' "$wf" \
-  && ! grep -F -q 'harness.out' "$helper" \
+  && ! grep -F -q 'harness.out' "$helper" && ! grep -F -q 'pipe.rc' "$helper" \
   && echo "PASS workflow invokes exact helpers" && pass=$((pass+1)) \
   || { echo "FAIL workflow helper wiring"; fail=$((fail+1)); }
 write_bin hurl $'#!/bin/sh\necho hurl 8.0.1 fake\nexit 0'
@@ -100,33 +100,36 @@ set +e; out=$(CI_READY_ATTEMPTS=2 CI_READY_SLEEP=0.05 run_helper smoke 2>&1); rc
 record "never-ready live child" "$rc" 1
 expect_txt "never-ready diagnostic" "$out" "readiness failed against /api/healthz"
 alive_pid "$scratch/rt/node.pid" && { echo "FAIL never-ready child still live"; fail=$((fail+1)); } || { echo "PASS never-ready child reaped"; pass=$((pass+1)); }
-write_bin curl $'#!/bin/sh\nexit 0'
-term_node 0
-write_bin make $'#!/bin/sh\n[ "$1" = "$EXPECT_TARGET" ] || exit 9\nsleep 8; echo fake make ok; exit 0'
-sleep 30 &
-sentinel=$!
-rm -f "$scratch/rt/node.pid"
-set +e
-PATH="$scratch/bin:/usr/bin:/bin" RUNNER_TEMP="$scratch/rt" HOST=127.0.0.1 PORT=18016 SMOKE_BASE_URL=http://127.0.0.1:18016 UI_WALK_BASE_URL=http://127.0.0.1:18016 DB_PATH="$scratch/rt/app.db" STATIC_ROOT="$scratch/static" EXPECT_TARGET=smoke exec "$BASH_RUN" "$helper" smoke >"$scratch/cancel.out" 2>&1 &
-wp=$!
-n=0
-while [ "$n" -lt 80 ] && [ ! -f "$scratch/rt/node.pid" ]; do sleep 0.05; n=$((n+1)); done
-child=""
-[ -f "$scratch/rt/node.pid" ] && child=$(cat "$scratch/rt/node.pid")
-kill -TERM "$wp" 2>/dev/null || true; wait "$wp"; rc=$?
-n=0; while [ "$n" -lt 40 ] && [ -n "$child" ] && kill -0 "$child" 2>/dev/null; do sleep 0.05; n=$((n+1)); done
-set -e
-record "wrapper cancel" "$rc" 143
-[ -z "$child" ] && { echo "FAIL cancel never started child"; fail=$((fail+1)); }
-[ -n "$child" ] && kill -0 "$child" 2>/dev/null && { echo "FAIL cancel left owned child"; fail=$((fail+1)); kill -KILL "$child" 2>/dev/null || true; } || { [ -n "$child" ] && echo "PASS cancel reaped owned child" && pass=$((pass+1)); }
-if kill -0 "$sentinel" 2>/dev/null; then echo "PASS cancel sentinel survived"; pass=$((pass+1)); kill -TERM "$sentinel" 2>/dev/null || true; wait "$sentinel" 2>/dev/null || true
-else echo "FAIL cancel sentinel died"; fail=$((fail+1)); fi
-term_node 1; write_bin make $'#!/bin/sh\n[ "$1" = "$EXPECT_TARGET" ] || exit 9\necho fake make ok; exit 0'
-sleep 30 &
-sentinel=$!
+write_bin curl $'#!/bin/sh\nexit 0'; term_node 0; write_bin make $'#!/bin/sh\nexit 33'
 set +e; run_helper smoke >/dev/null 2>&1; rc=$?; set -e
-if kill -0 "$sentinel" 2>/dev/null; then echo "PASS sentinel survived"; pass=$((pass+1)); kill -TERM "$sentinel" 2>/dev/null || true; wait "$sentinel" 2>/dev/null || true
-else echo "FAIL sentinel died"; fail=$((fail+1)); fi
+record "pre-status/child 33 not green" "$rc" 33
+write_bin make $'#!/bin/sh\n[ "$1" = "$EXPECT_TARGET" ] || exit 9\necho $$ > "$RUNNER_TEMP/make.pid"\ntrap "" TERM\nwhile true; do sleep 0.05; done'
+sleep 30 & sentinel=$!; rm -f "$scratch/rt/node.pid" "$scratch/rt/make.pid"
+set +e
+PATH="$scratch/bin:/usr/bin:/bin" RUNNER_TEMP="$scratch/rt" HOST=127.0.0.1 PORT=18016 SMOKE_BASE_URL=http://127.0.0.1:18016 UI_WALK_BASE_URL=http://127.0.0.1:18016 DB_PATH="$scratch/rt/app.db" STATIC_ROOT="$scratch/static" EXPECT_TARGET=smoke CI_TERM_WAIT=2 CI_READY_SLEEP=0.05 exec "$BASH_RUN" "$helper" smoke >"$scratch/cancel.out" 2>&1 &
+wp=$!
+n=0; while [ "$n" -lt 80 ] && [ ! -f "$scratch/rt/make.pid" ]; do sleep 0.05; n=$((n+1)); done
+child=""; [ -f "$scratch/rt/node.pid" ] && child=$(cat "$scratch/rt/node.pid")
+mpid=""; [ -f "$scratch/rt/make.pid" ] && mpid=$(cat "$scratch/rt/make.pid")
+reap_test() { kill -KILL "$1" 2>/dev/null || true; [ -n "$2" ] && kill -KILL "$2" 2>/dev/null || true; [ -n "$3" ] && kill -KILL "$3" 2>/dev/null || true; k=0; while [ "$k" -lt 40 ] && kill -0 "$1" 2>/dev/null; do sleep 0.05; k=$((k+1)); done; }
+if [ -z "$mpid" ]; then echo "FAIL cancel never started harness"; fail=$((fail+1)); reap_test "$wp" "$child" ""
+else
+  kill -TERM "$wp" 2>/dev/null || true
+  n=0; while [ "$n" -lt 80 ] && kill -0 "$wp" 2>/dev/null; do sleep 0.05; n=$((n+1)); done
+  if kill -0 "$wp" 2>/dev/null; then echo "FAIL cancel wrapper hung"; fail=$((fail+1)); reap_test "$wp" "$child" "$mpid"
+  else
+    wait "$wp"; rc=$?; record "wrapper cancel" "$rc" 143
+    expect_txt "cancel KILL diagnostic" "$(cat "$scratch/cancel.out")" "KILL escalation for PGID"
+    [ -n "$child" ] && kill -0 "$child" 2>/dev/null && { echo "FAIL cancel left owned child"; fail=$((fail+1)); } || { [ -n "$child" ] && echo "PASS cancel reaped owned child" && pass=$((pass+1)); }
+    kill -0 "$mpid" 2>/dev/null && { echo "FAIL cancel left harness"; fail=$((fail+1)); } || { echo "PASS cancel reaped harness"; pass=$((pass+1)); }
+  fi
+fi
+set -e
+if kill -0 "$sentinel" 2>/dev/null; then echo "PASS cancel sentinel survived"; pass=$((pass+1)); kill -TERM "$sentinel" 2>/dev/null || true; wait "$sentinel" 2>/dev/null || true; else echo "FAIL cancel sentinel died"; fail=$((fail+1)); fi
+term_node 1; write_bin make $'#!/bin/sh\n[ "$1" = "$EXPECT_TARGET" ] || exit 9\necho fake make ok; exit 0'
+sleep 30 & sentinel=$!
+set +e; run_helper smoke >/dev/null 2>&1; rc=$?; set -e
+if kill -0 "$sentinel" 2>/dev/null; then echo "PASS sentinel survived"; pass=$((pass+1)); kill -TERM "$sentinel" 2>/dev/null || true; wait "$sentinel" 2>/dev/null || true; else echo "FAIL sentinel died"; fail=$((fail+1)); fi
 record "TERM exit 1 with sentinel" "$rc" 1
 printf '%s\n' '#!/bin/sh' 'while [ "$#" -gt 0 ] && [ "$1" != "--output" ]; do shift; done' '[ "$1" = "--output" ] && shift && : > "$1"' 'exit 0' > "$scratch/install/curl"
 printf '%s\n' '#!/bin/sh' 'echo 0000000000000000000000000000000000000000000000000000000000000000' > "$scratch/install/sha256sum"

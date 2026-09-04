@@ -949,11 +949,11 @@ Non-goals:
 - **Blast radius / fixture / repair:** high；expanded；high（effective accountability tier: high）。
 - **Upstream suggested level:** none — override：GitHub Actions production config、shared aggregate gate、service/process lifecycle、downloaded executable integrity 与 cross-file command schema 均为 mandatory expanded/high surfaces。
 - **Minimal mergeable slice:** atomic — `smoke`/`ui-walk` CI jobs、aggregate needs、AGENTS/constraints/Make mirror 与最终 shared OpenSpec task 必须同刀；拆开会留下未执行门禁或控制面谎言。
-- **Change surface:** `.github/workflows/ci.yml`、`AGENTS.md`、`constraints.yaml`、现有 Makefile target/`.PHONY` consistency、`openspec/project-profile.md` 与 shared change fixture；不改 product/server/web/hurl/e2e source、dependencies、lockfile 或任何既有 threshold。
+- **Change surface:** `.github/workflows/ci.yml`、`.github/scripts/ci-compiled-server.sh`、`.github/scripts/ci-install-hurl.sh`、`scripts/test-ci-harness.sh`、`AGENTS.md`、`constraints.yaml`、现有 Makefile target/`.PHONY` consistency、`openspec/project-profile.md` 与 shared change fixture；不改 product/server/web/hurl/e2e source、dependencies、lockfile 或任何既有 threshold。
 - **Must preserve:** fast-checks/unit-tests/anti-drift/secret-scan/sast 行为、timeout 与 `all-checks-passed` skipped-fails rule；#16 Hurl exact fixture/cookie contract；#17 exact-two-401 browser oracle；caller/service resource ownership；all coverage/size/complexity/duplication/branch rules。
 - **Must add:** independent `smoke` and `ui-walk` Ubuntu jobs. Each uses fresh runner state, exact lock install, Web build before service start, production server build, fresh runner-temp DB, loopback readiness, same Make target, failure-only safe logs, and exact owned-process cleanup. Aggregate needs both.
 - **Tool installation:** smoke downloads Hurl 8.0.1 official x86_64 Linux tarball by immutable versioned URL, verifies hardcoded SHA-256 `cac7c4670d69444db120edb21fe06c97ba8c80dcc52279957c8dd18f05fb0c06` before extraction/execution, and uses `smoke/fixtures/static`. ui-walk runs lockfile-resolved `npx playwright install --with-deps chromium` and uses built `web/dist`; neither test target installs tools itself.
-- **Service lifecycle:** each job builds server, starts exact `node server/dist/server.js` with `HOST=127.0.0.1`, fixed runner-local port, job-specific DB/static root, captures exact PID/log, bounds readiness, preserves harness exit, terminates/waits only its PID, and lets the ephemeral runner remove job temp state. No job shares cookies/DB/process/output with the other.
+- **Service lifecycle:** each job builds server, starts exact `node server/dist/server.js` with `HOST=127.0.0.1`, fixed runner-local port, job-specific DB/static root, captures the server PID/log and an isolated harness PGID, bounds readiness, preserves harness exit, terminates/waits only those captured identities, and lets the ephemeral runner remove job temp state. No job shares cookies/DB/process/output with the other.
 - **Seams under test:** CI workflow graph/step contract；existing `make smoke`/`make ui-walk` over real compiled server；AGENTS/constraints/Make exact command mirror；GitHub Ruleset required aggregate observed on the PR。
 
 ### Risk packs considered for #18
@@ -993,7 +993,7 @@ Non-goals:
 
 ### Boundary-surface checklist for #18
 
-- Shared helper roots: none — keep two explicit job scripts rather than add an unreviewed lifecycle abstraction.
+- Shared helper roots: `.github/scripts/ci-compiled-server.sh` owns both job lifecycles, `.github/scripts/ci-install-hurl.sh` owns verified Hurl installation, and `scripts/test-ci-harness.sh` is their tracked source-derived fault oracle; these replace duplicated inline wrappers and are mandatory review surfaces.
 - Public entrypoints: CI job IDs, aggregate `needs`, Make targets, AGENTS/constraints commands.
 - Read/write surfaces: fixed release URL/digest, repo build/static inputs, runner-temp tool/DB/log outputs only.
 - Staging/publish/rollback: no publish; job setup and cleanup are ephemeral; failure cannot report success.

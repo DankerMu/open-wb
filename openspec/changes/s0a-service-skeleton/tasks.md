@@ -258,7 +258,7 @@ Minimal mergeable slice: 4.1 smoke 单独可合并保绿（依赖 1.3 启动命�
 - [x] `smoke`/`ui-walk` 是独立 Ubuntu jobs；各自 checkout + exact `npm ci`，先 `npm run build --workspace web`、再 build server、以 isolated runner-temp DB/static/log 与 exact PID 启动 compiled server，bounded readiness 后只调用现有 Make target。
 - [x] smoke 安装 official Hurl 8.0.1 x86_64 archive，tarball bytes 在解压/执行前与 hardcoded SHA-256 `cac7c4670d69444db120edb21fe06c97ba8c80dcc52279957c8dd18f05fb0c06` 相等；static root 保持 `smoke/fixtures/static`；12 requests全绿。
 - [x] ui-walk 使用 lockfile `npx playwright install --with-deps chromium`，static root 为真实 `web/dist`；#17 full Chromium journey/exact error oracle全绿。
-- [x] 两 job 对 install/build/server early-exit/readiness/harness/cleanup failure 均 nonzero；只 kill/wait captured PID，必要日志不泄漏 dev password/session；jobs 不共享 DB/port/static/browser/cookie/output。
+- [x] 两 job 对 install/build/server early-exit/readiness/harness/cleanup failure 均 nonzero；只 kill/wait captured server PID 与 isolated harness PGID，必要日志不泄漏 dev password/session；jobs 不共享 DB/port/static/browser/cookie/output。
 - [x] `all-checks-passed.needs` 精确保留现有五 job并加入 `smoke`、`ui-walk`；既有 failure/cancelled/skipped aggregate guard不弱化；Ruleset仍只 require `all-checks-passed`。
 - [x] AGENTS Verification Matrix command exact `make smoke` / `make ui-walk` 且 evidence齐；Enforcement Index两行 `block`；Known blind spot过期 gap删除；Directory Map含 `smoke/`；AGENTS无 `READINESS GAP`。
 - [x] constraints `verification.surfaces.smoke` / `ui-walk` command分别 exact `make smoke` / `make ui-walk` 且 evidence/required_at齐；Makefile targets与`.PHONY`已存在且名称一致；人工/结构比对全绿。
