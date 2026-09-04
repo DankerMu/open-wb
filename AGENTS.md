@@ -43,10 +43,11 @@
 
 ```
 server/     app-server（业务后端：SSO/会话/工作空间/权限/沙箱/审计）
-web/        浏览器 SPA
+web/        浏览器 SPA（Playwright UI 走查在 web/e2e）
 kbservice/  知识库服务（P2 起吸收 RAGFlow，Apache-2.0，义务见 ATTRIBUTION.md §3）
 resource/   行为基准原型 + 后端选型研究 +（gitignore 的）上游参考克隆
 app-reference/  上游应用只读副本（gitignore；仅 analysis/ 可写）
+smoke/      Hurl HTTP 冒烟用例与深链 exact-byte fixture
 scripts/    守卫脚本    .githooks/  git hooks    .github/    CI
 ```
 
@@ -85,8 +86,8 @@ make setup    # npm install + uv sync + 挂 git hooks
 | 反漂移 | knip + jscpd + 守卫 | `make anti-drift` | 退出码 0 |
 | 全链 | 以上全部 | `make check` | 退出码 0 |
 | 守卫自身 | 注入违例自证 | `make test-guardrails` | 全 PASS |
-| HTTP smoke | READINESS GAP：P0 交付 HTTP 面时接入 hurl，此前 server 运行时改动为 review-only | — | — |
-| UI 走查 | READINESS GAP：P0 交付页面时接入 Playwright/agent-browser，此前 UI 改动为 review-only | — | — |
+| HTTP smoke | Hurl（调用方拥有已运行服务） | `make smoke` | 退出码 0；真实 HTTP 断言全绿 |
+| UI 走查 | Playwright Chromium（调用方拥有已运行服务） | `make ui-walk` | 退出码 0；真实浏览器走查与 error oracle 全绿 |
 
 每行命令必须解析到真实 Makefile 目标；无验证命令的 surface 的改动是 review-only，PR 必须写明。
 
@@ -145,6 +146,8 @@ make setup    # npm install + uv sync + 挂 git hooks
 | app-reference 只读 | `constraints.yaml`（boundaries） → `scripts/naming-guard.sh` | pre-commit + CI | block |
 | 密钥扫描 | gitleaks | CI（本机装有 gitleaks 时 pre-commit 亦 block） | block |
 | SAST | semgrep（p/default） | CI | block |
+| HTTP smoke | `.github/workflows/ci.yml`（job `smoke`） | `make smoke` + CI `smoke`/`all-checks-passed` | block |
+| UI 走查 | `.github/workflows/ci.yml`（job `ui-walk`） | `make ui-walk` + CI `ui-walk`/`all-checks-passed` | block |
 | Conventional commits | `.githooks/commit-msg` | pre-commit（commit-msg） | block |
 | CI 聚合门禁 | `.github/workflows/ci.yml`（all-checks-passed） | CI | block |
 | PR diff ≤400 行 | `constraints.yaml`（size_limits） | 评审检查项 | review-only |
@@ -157,4 +160,3 @@ make setup    # npm install + uv sync + 挂 git hooks
 
 - 密钥扫描本地依赖 gitleaks 安装与否（CI 恒定兜底）。
 - server/web/kbservice 互不 import 暂无 import-linter 类机械检查（当前无跨目录代码，出现即补）。
-- HTTP smoke 与 UI 走查两个 gap 行的触发器 = P0 交付对应 surface。

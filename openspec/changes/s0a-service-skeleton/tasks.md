@@ -156,7 +156,7 @@ Minimal mergeable slice: 3.0 工具链单独可合并保绿（纯配置+最小�
     - documentation/compatibility：Make recipe 为 `smoke: ##` 一行说明并含stable installation URL，不新增help target；focused real smoke、`make check`、`make test-guardrails`、strict OpenSpec、`git diff --check`、size/naming/knip/jscpd/sensitive/debug/skip/stash/artifact scans全绿；server/web/kbservice source、existing Make targets、coverage/CI controls不变。
   - Non-goals: service launcher/cleanup owner、real `web/dist` build、CI hurl install/job/aggregate、AGENTS/constraints/Directory Map、Playwright/browser、server/web route change、remote/TLS/load smoke。
 - [x] 4.2 Playwright 走查（fresh Chromium：登录→四路由→主题 reload 持久→侧栏页脚退出+reload 未登录，恰两次 contract-bound `/api/auth/me` 401 且零 unexpected browser console/page error）+ `make ui-walk`（只消费 caller 已启动的 `UI_WALK_BASE_URL`，不 build/start/stop/install）
-- [ ] 4.3 CI 接线与控制面四处同步：smoke/ui-walk 独立 job（装 hurl/browser、先 build web 再起服务）纳入 all-checks-passed；AGENTS.md（Verification Matrix 真命令、Enforcement Index 升 block、Known blind spots 删过期条目、Directory Map 增 smoke/）；constraints.yaml verification.surfaces 增两条；Makefile 目标 + .PHONY；验证 = 三处目标集合逐字比对
+- [x] 4.3 CI 接线与控制面四处同步：独立 `smoke`/`ui-walk` jobs 验证 fixed Hurl / lockfile Chromium、build Web/server、各自 fresh DB+compiled server lifecycle 并调用同名 Make target，纳入 `all-checks-passed`；AGENTS/constraints/Make exact command+evidence+block+Directory Map/Known gaps 原子同步；既有 thresholds 不变
 
 Suggested fixture level: none - harness 自身即验证物，其"测试"就是对真实服务全绿运行
 Minimal mergeable slice: 4.1 smoke 单独可合并保绿（依赖 1.3 启动命令与 1/2 组端点；与 Playwright 无耦合；smoke/ 不在 make check 与 naming-guard 扫描面内）
@@ -250,3 +250,18 @@ Minimal mergeable slice: 4.1 smoke 单独可合并保绿（依赖 1.3 启动命�
 - [x] Final evidence：repeat real-process run、focused web unit、web build、`make typecheck`、`make check`、focused Knip、strict OpenSpec、diff/artifact/sensitive-data scan均绿。
 - [x] 保持产品 source、server、smoke、CI、AGENTS、constraints不变；Makefile header staged sync 明确由 #18 完成。
 - OpenSpec archive: **deferred with reason** — shared S0a change 仍有 task 4.3；本 PR只完成 4.2，#18 合并后统一归档。
+
+## Issue #18 required evidence
+
+- Fixture level: expanded；repair intensity/effective tier: high；上游 none 因 CI production config、aggregate gate、process lifecycle、downloaded executable integrity 与 control schema 强制升档。
+- [x] TDD/red-proof：implementation 前结构检查因缺 `smoke`/`ui-walk` jobs、aggregate needs 与 AGENTS/constraints 真命令而红；implementation 后同一检查绿，不留 red-proof stash。
+- [x] `smoke`/`ui-walk` 是独立 Ubuntu jobs；各自 checkout + exact `npm ci`，先 `npm run build --workspace web`、再 build server、以 isolated runner-temp DB/static/log 与 exact PID 启动 compiled server，bounded readiness 后只调用现有 Make target。
+- [x] smoke 安装 official Hurl 8.0.1 x86_64 archive，tarball bytes 在解压/执行前与 hardcoded SHA-256 `cac7c4670d69444db120edb21fe06c97ba8c80dcc52279957c8dd18f05fb0c06` 相等；static root 保持 `smoke/fixtures/static`；12 requests全绿。
+- [x] ui-walk 使用 lockfile `npx playwright install --with-deps chromium`，static root 为真实 `web/dist`；#17 full Chromium journey/exact error oracle全绿。
+- [x] 两 job 对 install/build/server early-exit/readiness/harness/cleanup failure 均 nonzero；只 kill/wait captured PID，必要日志不泄漏 dev password/session；jobs 不共享 DB/port/static/browser/cookie/output。
+- [x] `all-checks-passed.needs` 精确保留现有五 job并加入 `smoke`、`ui-walk`；既有 failure/cancelled/skipped aggregate guard不弱化；Ruleset仍只 require `all-checks-passed`。
+- [x] AGENTS Verification Matrix command exact `make smoke` / `make ui-walk` 且 evidence齐；Enforcement Index两行 `block`；Known blind spot过期 gap删除；Directory Map含 `smoke/`；AGENTS无 `READINESS GAP`。
+- [x] constraints `verification.surfaces.smoke` / `ui-walk` command分别 exact `make smoke` / `make ui-walk` 且 evidence/required_at齐；Makefile targets与`.PHONY`已存在且名称一致；人工/结构比对全绿。
+- [x] 既有 fast/unit/drift/secret/sast jobs、timeout 与 coverage/complexity/duplication/diff-size/branch thresholds byte-preserved；不改 product/server/web/smoke/e2e/dependency/lockfile。
+- [ ] PR CI final evidence（local real smoke/UI、workflow/control structural checks、`make check`、`make test-guardrails`、strict OpenSpec、diff/sensitive/placeholder/stash scans已绿）：named smoke/ui-walk jobs与aggregate同 frozen SHA SUCCESS。
+- OpenSpec archive: **after merge** — 本 issue 完成 shared S0a 最后一项；实现 PR 合并后由 workflow follow-up 执行 `openspec archive s0a-service-skeleton` 并与 accountability line同一治理 PR 合入。
