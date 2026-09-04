@@ -155,7 +155,7 @@ Minimal mergeable slice: 3.0 工具链单独可合并保绿（纯配置+最小�
     - failure propagation：unreachable base URL、错误static root或任一status/body/message/cookie assertion mismatch→make nonzero；Hurl stdout/stderr不得泄漏实际 session value或非demo credential到tracked evidence。
     - documentation/compatibility：Make recipe 为 `smoke: ##` 一行说明并含stable installation URL，不新增help target；focused real smoke、`make check`、`make test-guardrails`、strict OpenSpec、`git diff --check`、size/naming/knip/jscpd/sensitive/debug/skip/stash/artifact scans全绿；server/web/kbservice source、existing Make targets、coverage/CI controls不变。
   - Non-goals: service launcher/cleanup owner、real `web/dist` build、CI hurl install/job/aggregate、AGENTS/constraints/Directory Map、Playwright/browser、server/web route change、remote/TLS/load smoke。
-- [ ] 4.2 Playwright 走查（登录→四路由→主题持久→侧栏页脚退出，零浏览器 console error）+ `make ui-walk`
+- [x] 4.2 Playwright 走查（fresh Chromium：登录→四路由→主题 reload 持久→侧栏页脚退出+reload 未登录，恰两次 contract-bound `/api/auth/me` 401 且零 unexpected browser console/page error）+ `make ui-walk`（只消费 caller 已启动的 `UI_WALK_BASE_URL`，不 build/start/stop/install）
 - [ ] 4.3 CI 接线与控制面四处同步：smoke/ui-walk 独立 job（装 hurl/browser、先 build web 再起服务）纳入 all-checks-passed；AGENTS.md（Verification Matrix 真命令、Enforcement Index 升 block、Known blind spots 删过期条目、Directory Map 增 smoke/）；constraints.yaml verification.surfaces 增两条；Makefile 目标 + .PHONY；验证 = 三处目标集合逐字比对
 
 Suggested fixture level: none - harness 自身即验证物，其"测试"就是对真实服务全绿运行
@@ -235,3 +235,18 @@ Minimal mergeable slice: 4.1 smoke 单独可合并保绿（依赖 1.3 启动命�
 - [x] Final verification：new focused API/theme/settings/logout tests、全部 Web tests、`make typecheck`、Web build、`make check`、focused Web Knip、strict OpenSpec、diff/size/sensitive-data/artifact scans 全绿；coverage include/threshold、800 行旧 auth test、CI/guard 不收窄，无新依赖。
 - [x] Compatibility/non-goals：保持 #12 pure theme API、#14 auth/login/route/canonicalization/main dispose、server/kbservice 与四 route manifest；不实现 server endpoint、通用 modal、其他用户菜单、CSS/首屏截图、CSRF/OIDC/audit/真实 browser UI walk。
 - OpenSpec archive: **deferred with reason** — shared stage change 尚有 server/auth/harness 等任务；本 PR 只勾选 3.4 与本节证据，全部完成后统一归档。
+
+## Issue #17 required evidence
+
+- Fixture level: expanded；repair intensity: high；effective accountability tier: high；上游 none 因 Playwright/auth/browser persistence/external process/service composition 强制升档。
+- [x] TDD/red-proof：走查与目标先于可运行接线；pre-change source 上 `make ui-walk` 必须红，且不留 `red-proof` stash。
+- [x] Fresh caller-owned temp DB + built `web/dist` + free loopback port 启动 production server；`make ui-walk UI_WALK_BASE_URL=<origin>` 只消费该服务并以 Chromium 退出 0，不 build/start/stop/install/清理 caller 资源。
+- [x] 从 `/files` 真实登录 `zhangsan`/`demo` 后仍在 `/files`；侧栏逐项访问 `/`、`/files`、`/center`、`/settings`，每项 exact heading/URL 且恰一个 current link；footer exact `zhangsan`/`成员`，settings info 非伪造。
+- [x] 选择 `深色` 后 exact radio/current row、root `data-theme=dark`、localStorage `workbuddy-theme=dark`；reload 后四项仍一致。
+- [x] footer confirm logout 后同 `/settings` 显示 `登录 WorkBuddy`、`workbuddy_session` cookie 不存在；reload 后仍未登录。
+- [x] 首次 navigation 前监听 browser response/console/page errors；完整 journey 恰有初始与 logout 后 reload 两次 `GET /api/auth/me` → 401。仅 exact path/text 且数量不超过这两次 response 的 Chromium transport diagnostic 分类为 expected；其他 console/page error 为零；server stderr 的 ExperimentalWarning 明确排除。
+- [x] Unreachable origin 或任一 assertion/browser error → target nonzero；Playwright/Chromium 缺失不得 skip/download；target 仅拥有并清理 Playwright browser/context。
+- [x] `web/vitest.config.ts` 排除 `e2e/**` 且不丢 Vitest 默认 excludes；`make test` 不收集 e2e；`make typecheck` 覆盖 Playwright config/e2e；workspace dependency/script/lockfile由真实入口消费。
+- [x] Final evidence：repeat real-process run、focused web unit、web build、`make typecheck`、`make check`、focused Knip、strict OpenSpec、diff/artifact/sensitive-data scan均绿。
+- [x] 保持产品 source、server、smoke、CI、AGENTS、constraints不变；Makefile header staged sync 明确由 #18 完成。
+- OpenSpec archive: **deferred with reason** — shared S0a change 仍有 task 4.3；本 PR只完成 4.2，#18 合并后统一归档。

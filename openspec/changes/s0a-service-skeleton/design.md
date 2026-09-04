@@ -886,6 +886,63 @@ Non-goals:
 - Browser runtime / navigation / persistence: **selected** — data-theme、localStorage、system/storage listeners、route leave、same-location logout 与 UI 交互。
 - Cross-service boundary / offline runtime: **selected** — `/api/info` 与 `/api/auth/logout` exact contract、same-origin credentials/no-store、无公网依赖。
 
+## Issue delivery fixture: #17 Playwright UI 走查
+
+- **Issue type / profile:** feature；Generic（open-workbuddy project profile）。
+- **Blast radius / fixture / repair:** high；expanded；high（effective accountability tier: high）。
+- **Upstream suggested level:** none — override：Playwright browser entry、auth/session、browser storage、external process 与 service composition 均命中 project profile 的 mandatory expanded triggers；真实 UI oracle 失真会让后续 CI 假绿。
+- **Minimal mergeable slice:** atomic — 一条真实 browser journey、单一 Playwright config、workspace dependency/script 与一个 Make target；拆开任一部分都没有可执行验收路径。
+- **Change surface:** `web/e2e/**`、`web/playwright.config.ts`、`web/package.json`/lockfile、`web/vitest.config.ts`/`web/tsconfig.json`、Makefile；不改产品 source、server、CI、AGENTS 或 constraints。
+- **Must preserve:** `make check`/web Vitest 只跑 unit/jsdom tests；四 route、auth/provider、theme/settings/footer、server startup 与现有 smoke 行为不变；#18 仍是 build/server/temp DB/CI 与控制面同步的唯一 owner。
+- **Must add:** `make ui-walk` 只把 caller-provided `UI_WALK_BASE_URL` 交给 workspace Playwright；缺省 loopback 3000；只运行 Chromium，一次 fresh context、一条串行 journey，失败原样 nonzero，不下载或接管服务资源。
+- **Journey oracle:** 从 `/files` 以 tracked dev-stub `zhangsan`/`demo` 登录并保持原 route；真实侧栏依次到四 route，逐项验证 URL/title/唯一 current link；settings 显示真实 service info；选择 dark 后同时验证 radio/current row/root `data-theme`/exact localStorage，reload 后仍 dark；页脚 exact Principal → alertdialog confirm → 同 `/settings` 登录页，cookie cleared，reload 仍未登录。
+- **Error oracle:** 在首个 `goto` 前监听 `response`、`console` 与 `pageerror`；必须恰有初始与 logout 后 reload 两次 `GET /api/auth/me` → 401。Chromium 会把这两个契约内 response 自动记录为固定 `Failed to load resource: the server responded with a status of 401 (Unauthorized)` console error；只有 console location pathname 也恰为 `/api/auth/me`、固定文本匹配且数量不超过已绑定的两次 401 时才分类为 expected transport diagnostic。任何额外/不同 401、其他 `console.error` 或 uncaught page error 最终使测试失败；服务端 stderr 不进入 browser oracle。
+- **Seams under test:** compiled production SPA + production server over loopback、browser accessibility roles/labels、real browser cookie/localStorage/reload/history；不 mock fetch/router/storage/media/auth/server。
+
+### Risk packs considered for #17
+
+- Public API / CLI / script entry: **selected** — 新 `make ui-walk`/workspace script 是常驻命令入口，退出码与参数传递必须可靠。
+- Config / project setup: **selected** — Playwright、Vitest exclusion、TypeScript include、workspace manifest/lockfile 必须一致。
+- File IO / path safety / overwrite: **not selected** — target 不接收路径、不 build/发布；Playwright success 不产生受跟踪输出，caller owns static/DB paths。
+- Schema / columns / units / field names: **selected** — exact route、Principal、theme key/value、DOM state 与 session-cookie outcomes 是跨层 contract。
+- Auth / permissions / secrets: **selected** — 真实 cookie login/logout；只用公开 dev fixture，密码不写 log/storage/artifact。
+- Concurrency / shared state / ordering: **selected** — navigation、reload、theme persistence 与 logout terminal state 必须按序稳定，单 journey/worker 避免共享 session。
+- Resource limits / large input / discovery: **selected** — 仅固定一条测试/一个 Chromium project，Playwright timeout 有界且浏览器 context 由 runner 回收。
+- Legacy compatibility / examples: **selected** — 现有 unit/smoke/build/server behavior 与四 route contracts 保持绿。
+- Error handling / rollback / partial outputs: **selected** — unavailable service、browser error 与 assertion failure 均 nonzero；target 不碰 caller resources。
+- Release / packaging / dependency compatibility: **selected** — `@playwright/test`/Chromium 与 Node 24/npm workspace/lockfile 配套，浏览器安装留给 caller/CI。
+- Documentation / migration notes: **not selected** — #18 原子更新 AGENTS/constraints/CI；shared change 明文允许本 PR 先落 Make target。
+- Tenant/sandbox isolation: **not selected** — 单公开 dev account，无 workspace/tenant data operation。
+- Auth/session lifecycle: **selected** — browser cookie 从 login 到 logout/clear/reload 形成真实终态证明。
+- Process/child-environment isolation: **selected** — Playwright 只拥有自己的 Chromium；不继承 server/DB cleanup ownership。
+- SQLite migration/catalog compatibility: **selected** — real fresh server DB 间接证明 seed/session lifecycle；无 schema mutation或 catalog assertion。
+- Server/web HTTP-envelope compatibility: **selected** — real SPA/API origin 覆盖 me/login/info/logout 与 history fallback。
+- Offline deployability: **selected** — target 不下载浏览器/依赖，使用 caller 已安装的 package/binary。
+- Browser runtime/navigation/persistence: **selected** — 本 issue 的核心 oracle。
+- Cross-service boundary: **selected** — compiled SPA 只访问同 origin app-server，不访问公网/kbservice。
+
+### Invariant Matrix for #17
+
+- **Governing invariant:** 一次 fresh-browser journey 只能依据当前 production origin 的真实 DOM、URL、cookie 与 storage 判定登录、导航、主题持久和退出；旧状态、mock 或 target-owned service lifecycle 不得制造假绿。
+- **Source of truth:** route manifest/accessibility names、`zhangsan` Principal、`workbuddy-theme=dark` + root `data-theme=dark`、`workbuddy_session` cookie terminal absence、exact two `/api/auth/me` 401 responses、zero unexpected browser errors。
+- **Producers:** production server/API、compiled `web/dist`、real user actions and browser persistence。
+- **Validators/preflight:** Playwright locators/assertions and configured base URL；no test-only product hooks。
+- **Storage/cache/query:** browser cookie/localStorage plus caller-owned fresh SQLite DB；runner owns neither DB nor server。
+- **Public routes/entrypoints:** `make ui-walk` → web script → Playwright config → `/files` and four production routes。
+- **Frontend/downstream consumers:** #18 CI job invokes the same target after build/server startup；unit Vitest remains separate。
+- **Failure/cleanup/stale state:** fresh context, one worker/journey, bounded timeout, listener installed before navigation, runner closes its browser; failed target leaves caller resources untouched。
+- **Evidence/readiness:** pre-change red proof；real-process green run；intentional unreachable-origin red；web unit/type/build/full check；strict OpenSpec。
+- **Regression rows:** fresh DB/context + valid credentials → `/files` authenticated and four-route exact UI；dark selection + reload → DOM/storage/radio stay dark；logout + reload → same-route login and no session cookie；unreachable origin or browser error → nonzero；`make test` → zero e2e collection。
+
+### Boundary-surface checklist for #17
+
+- Shared helper roots: none — tests consume production accessibility/API behavior without helper fork.
+- Public entrypoints: Make target, workspace script, Playwright config.
+- Read/write surfaces: fixed browser localStorage/cookie only; no file/path input or product write beyond auth session lifecycle.
+- Producer/consumer boundaries: server responses → SPA state/DOM → Playwright assertions; Make env → Playwright base URL.
+- Stale/idempotency: fresh context/fresh caller DB, reload persistence, logout terminal reload, repeat target on new server resources.
+- Unchanged consumers: Vitest/jsdom, Vite build, smoke, server startup, #18 CI/control-plane owner.
+
 ## Open Questions
 
-（无——三分支已 grill 拍板；#15 的 storage/info/logout/确认语义已在本 fixture 闭合，其余为实现细节。）
+（无——三分支已 grill 拍板；#15 的 storage/info/logout/确认语义与 #17 的真实 browser oracle 已在 fixture 闭合，其余为实现细节。）
