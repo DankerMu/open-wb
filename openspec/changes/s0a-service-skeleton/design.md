@@ -582,6 +582,94 @@ Review focus:
 - **Review focus:** public methods exact；unknown API intentionally unauth401/authenticated404；ordinary/unsafe non-API always404/zero query；me guard-null keepsroute no-store/clear；logout bypasses eligibility。
 - **Non-goals:** #7 env/listen、#16 smoke、#10 resolver changes、web、audit/OIDC/CSRF/rate-limit、tenant authorization、schema/backfill/multi-process coordination。
 
+## Issue #16 delivery fixture: Hurl HTTP smoke command
+
+Issue type: test
+Project profile: open-workbuddy
+Blast radius: high
+Fixture level: high
+Repair intensity: high
+Upstream suggested level: none (override: public Make CLI、real HTTP/auth cookie state、external Hurl process、configured static path 与 failure exit contract 均为 mandatory expanded/high trigger)
+Minimal mergeable slice: atomic — self-contained Hurl cases + tracked static fixture + one Make target
+
+Change surface:
+- `smoke/public.hurl`, `smoke/auth.hurl`, `smoke/fixtures/static/index.html`, root `Makefile`, living project profile and this Issue fixture only.
+
+Must preserve:
+- #6/#9/#10/#19 own all server routes, envelopes, auth/session/storage and fallback behavior; this issue consumes those public contracts without changing `server/**` or `web/**` source.
+- #7 remains the only service build/listen/DB/signal owner. `make smoke` targets an already-running service and never starts, stops, builds, migrates, creates a DB, allocates a port, or cleans caller resources.
+- `make check` remains independent of locally installed Hurl. The Makefile header's three-surface synchronization rule is deliberately staged for this shared S0a change: Issue #16 may add only the `smoke` target/`.PHONY`; #18 exclusively and atomically adds the matching AGENTS/constraints entries with CI jobs, `all-checks-passed` and real `web/dist` coverage. This recorded exception prevents a half-wired CI/control-plane state; #17 owns Playwright.
+
+Must add/change:
+- `make smoke` discovers `hurl` only through the caller's `PATH` inside a clean child environment before any request. Missing Hurl exits nonzero and prints one stable diagnostic naming `hurl` plus `https://hurl.dev/docs/installation.html`; no package dependency, vendored binary or silent skip is allowed. The real Hurl child receives only `PATH`: ambient Hurl options, variables, credentials, proxy or config/home state cannot disable assertions, inject request headers, redirect the origin or make execution unbounded; CLI pins `--retry 0`.
+- `SMOKE_BASE_URL` is the sole Make input, defaults to `http://127.0.0.1:3000`, and is passed as one Hurl variable argument `base_url`; callers override it with an origin URL without a trailing slash. Make/shell metacharacters, whitespace and command-substitution-shaped bytes remain inert data in that single argv (invalid origins fail in Hurl), never executable recipe text; discovered executable-path bytes likewise never re-enter recipe source, and Hurl nonzero cannot be swallowed. The target invokes every top-level `smoke/*.hurl` in test mode with one job and propagates parser/request/assertion failures.
+- `public.hurl` owns healthz, info, `GET /files?smoke=deep-link`, no-cookie guard and explicit forged-cookie guard. `auth.hurl` owns wrong-password, disabled-account and ordered login→authenticated miss→logout→post-logout denial using Hurl's in-file cookie store. Files are independently runnable; no case relies on shell glob order or cross-file cookie state, and an explicit forged request cookie never enters shared storage.
+- Deep-link exact bytes are promised only when the caller has started the existing production entry with `STATIC_ROOT=<repo>/smoke/fixtures/static`; default `make dev` against `web/dist` is not this target's green setup. The response is exact status 200, exact `Content-Type: text/html; charset=utf-8`, and body bytes equal tracked `smoke/fixtures/static/index.html`. Phase 2 also supplies a temporary DB and free loopback port.
+
+Seams under test:
+- Public `make smoke SMOKE_BASE_URL=<origin>` is the only harness seam. It calls a real Hurl binary against the real compiled #7 process; no Fastify/DB/filesystem/auth mock and no alternate runner script.
+- Controlled missing-tool `PATH` proves the command's preflight/error contract. Caller-owned process/DB/static-root setup and cleanup are Phase 2 evidence, not production harness behavior.
+
+Risk packs considered (core):
+- Public API / CLI / script entry: selected — one new operator command exercises public HTTP routes and must preserve exit status.
+- Config / project setup: selected — default/override base URL, Hurl discovery and fixture-root binding are public command inputs.
+- File IO / path safety / overwrite: selected — the real server reads one fixed tracked static fixture; harness writes/deletes nothing and caller owns temporary runtime paths.
+- Schema / columns / units / field names: selected — exact JSON body/code/message/Principal and cookie fields are public wire contracts.
+- Auth / permissions / secrets: selected — no-cookie, forged-cookie, login, bearer session, authenticated miss and logout transitions are exercised; output/fixtures contain no session value or non-demo credential.
+- Concurrency / shared state / ordering: selected — auth entries share exactly one in-file cookie store; files share no state and `--jobs 1` gives deterministic diagnostics rather than semantic ordering.
+- Resource limits / large input / discovery: not selected — two fixed top-level Hurl files and one small tracked fixture; no recursive or caller-selected discovery root, retry or polling.
+- Legacy compatibility / examples: selected — all already-delivered endpoints/commands and repeated smoke runs remain compatible.
+- Error handling / rollback / partial outputs: selected — missing tool, unreachable service or any failed assertion exits nonzero; the target owns no service/DB resource to roll back.
+- Release / packaging / dependency compatibility: selected — Hurl remains an external executable, absent from npm manifests/lockfile; official current binary syntax is exercised locally and #18 owns CI installation.
+- Documentation / migration notes: selected — the `smoke: ##` recipe description, stable installation URL and living profile expose the command; no new help target is added, and AGENTS/constraints synchronization is deliberately deferred to #18.
+
+Domain packs:
+- Tenant/sandbox isolation: not selected — only fixed dev seed accounts and a tracked static fixture are used; no tenant workspace path.
+- Auth/session lifecycle: selected — exact cookie establishment, use, revocation and post-logout denial form one stateful case.
+- Process/child-environment isolation: selected — Make launches only Hurl and passes only the public base URL; service lifecycle and temporary resources remain caller-owned.
+- SQLite migration/catalog compatibility: selected — the real production entry migrates a temporary DB, and a complete smoke run leaves no live session row after logout; no schema mutation is introduced.
+- Server/web HTTP-envelope compatibility: selected — health/info, three login outcomes, guard, authenticated API 404 and fallback bytes are checked at the network boundary.
+- Offline deployability: selected — execution contacts only the configured service and reads tracked fixtures; Hurl must already be installed and no runtime fetch/install occurs.
+- Browser runtime/navigation/persistence: not selected — deep-link response bytes are HTTP-only; browser rendering/storage belongs to #17.
+- Cross-service boundary: not selected — kbservice and any external service are not contacted.
+
+Invariant Matrix:
+- Governing invariant: one caller-selected origin is exercised by independent deterministic Hurl files, while the auth lifecycle keeps one exact in-file cookie identity from login through authenticated 404 and committed logout; any preflight/request/assertion failure makes `make smoke` nonzero without taking ownership of the service.
+- Source-of-truth identity/contract: `SMOKE_BASE_URL`→`base_url`, fixed top-level `.hurl` inventory, tracked static sentinel bytes, `workbuddy_session`, exact HTTP statuses and JSON bodies/messages.
+- Producers: caller-started #7 compiled service with temporary migrated DB and fixture `STATIC_ROOT`; Make default/override; Hurl request entries; existing dev seed.
+- Validators/preflight: clean-child `PATH` lookup for literal `hurl`, `env -i` child boundary, CLI `--retry 0`, and Hurl parser/test runner/status/body/JSONPath/header/cookie assertions.
+- Storage/cache/query: caller-owned SQLite DB plus Hurl's auth-file-local cookie store; public file and repeated invocations start with independent cookie state; no harness cache/output file.
+- Public routes/entrypoints: `make smoke`; GET healthz/info/deep link/protected unknown API, POST login/logout.
+- Frontend/downstream consumers: local operators and #18 CI consume the command; real `web/dist` and browsers are explicitly outside this issue.
+- Failure paths/rollback/stale state: Hurl missing, service unreachable, wrong base URL/response/static root, invalid/disabled/forged credentials, logout and repeat run; caller always owns process/DB/temp cleanup.
+- Evidence/audit/readiness: TDD no-target red, controlled missing-tool lane, wrong-static-root discriminator, two consecutive successful real-process runs, DB/session and process/port cleanup checks, full repository gates and strict OpenSpec.
+- Regression rows:
+  - running fixture service + default-equivalent or overridden origin -> health exact 200 body, info exact 200 service identity, deep link exact fixture bytes, command exit 0;
+  - no cookie and explicit forged 64-lowercase-hex cookie -> same exact 401 unauthorized envelope; forged cookie does not contaminate later state;
+  - wrong password -> exact 401 invalid_credentials message; disabled `wangwu/demo` -> exact 403 account_disabled message; neither creates a cookie;
+  - `zhangsan/demo` in `auth.hurl` -> exact 200 Principal and compliant cookie; same in-file cookie on unknown API -> exact authenticated 404 envelope; bodyless logout -> 204 plus exact `Set-Cookie: workbuddy_session=; Max-Age=0; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax`; subsequent protected request -> exact 401;
+  - absent Hurl -> stable install diagnostic/nonzero/no request; unreachable service, wrong static root or any response mutation -> Hurl assertion failure/nonzero; hostile `SMOKE_BASE_URL` or PATH component containing Make/shell metacharacters or command-substitution-shaped bytes -> inert argv/path data, no side effect, and fake-Hurl nonzero remains Make nonzero; ambient `HURL_NO_ASSERT`, infinite retry, user credentials, proxy/config/home and future Hurl option variables -> absent from the child, assertions remain active, no Authorization is added, and closed-port failure is prompt;
+  - run the full target twice against one temporary service -> both pass and no live `auth_sessions` row remains; caller then terminates service and reuses/deletes its port/DB/temp root.
+
+Boundary-surface checklist:
+- Shared helper roots: none added; existing Make command surface and public HTTP contracts are consumed unchanged.
+- Public entrypoints: one `smoke` target; two independently runnable top-level Hurl files.
+- Read surfaces: base URL, response bytes/headers/cookies and one tracked static fixture.
+- Write/delete/overwrite surfaces: Hurl in-memory cookie state only; server session INSERT/DELETE is existing behavior; no repository or caller resource write by Make.
+- Staging/publish/rollback surfaces: command preflight then Hurl execution; no build/start/install/publish/cleanup stage.
+- Producer/consumer evidence boundaries: Make variable→Hurl template→one origin; Set-Cookie→same-file requests→logout clear; fixture bytes→deep-link body.
+- Stale/idempotency boundaries: file independence, no glob-order dependency, post-logout denial and two consecutive runs.
+- Unchanged downstream consumers: server/web/kbservice source, package lock, CI, AGENTS/constraints, `make dev/check/test-guardrails`.
+
+Review focus:
+- The target cannot silently skip missing Hurl, start a second service owner, swallow Hurl status, or depend on cwd/glob/cross-file cookie order.
+- Stateful auth assertions must prove valid-session authenticated 404 before logout and denial after logout; forged cookie must remain request-local.
+- `public.hurl` deep-link success must bind exact `/files?smoke=deep-link` status/content-type/body to tracked fixture bytes, not an existing `web/dist` or generic 200; `auth.hurl` alone owns the stateful login/logout chain and exact #10 clear-cookie.
+- No #18 CI/control-plane or #17 Playwright scope enters the diff.
+
+Non-goals:
+- CI installation/job/aggregate wiring; AGENTS/constraints/Directory Map synchronization; real web build; Playwright/browser assertions; server/web behavior changes; service lifecycle wrapper; TLS/remote environment/load testing.
+
 ## Migration Plan
 
 新增服务，无存量业务数据迁移。Issue #8 从合法 foundation prefix 原子增加首个业务 schema；Issues #9/#10/#19 只消费该 schema，不增加或修改 migration。TTL config affects newly created development sessions only; rollback = revert PR, and no backfill is required. SQLite file path/env mapping remains later #7 scope (default `var/dev.db`, gitignore).

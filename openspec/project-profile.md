@@ -29,7 +29,7 @@
 **Command entry points**
 - setup=`make setup`; lint=`make lint`; typecheck=`make typecheck`; test=`make test`。
 - drift=`make anti-drift`; full=`make check`; guardrails=`make test-guardrails`。
-- server-test=`npm test --workspace server`; server-build=`npm run build --workspace server`; server-start=`npm run start --workspace server`; dev=`make dev`。
+- server-test=`npm test --workspace server`; server-build=`npm run build --workspace server`; server-start=`npm run start --workspace server`; dev=`make dev`；http-smoke=`make smoke`（只消费已运行服务）。
 - web-test=`npm test --workspace web`; web-build=`npm run build --workspace web`；kb-test=`cd kbservice && uv run pytest`。
 
 **Verification matrix**
@@ -42,7 +42,8 @@
 - 死代码/重复/命名/行数 -> `make anti-drift` -> 退出码 0。
 - 默认全链 -> `make check` -> 退出码 0。
 - 守卫机制 -> `make test-guardrails` -> 每条注入违例均 PASS。
-- HTTP/UI 运行时 -> 当前无命令（AGENTS.md READINESS GAP）-> 改动仅评审；S0a harness 落地时更新。
+- HTTP 运行时 -> `make smoke SMOKE_BASE_URL=<running-origin>` -> Hurl 全部 status/body/message/cookie 断言通过、退出码 0；服务/DB/static/temp 生命周期由调用者拥有。
+- UI 运行时 -> 当前无命令（AGENTS.md READINESS GAP）-> 改动仅评审；#17/#18 落地后更新。
 
 **Domain risk packs**
 - Tenant/sandbox isolation；auth/session lifecycle；process/child-environment isolation。
