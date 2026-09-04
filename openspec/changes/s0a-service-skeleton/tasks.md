@@ -156,7 +156,7 @@ Minimal mergeable slice: 3.0 工具链单独可合并保绿（纯配置+最小�
     - documentation/compatibility：Make recipe 为 `smoke: ##` 一行说明并含stable installation URL，不新增help target；focused real smoke、`make check`、`make test-guardrails`、strict OpenSpec、`git diff --check`、size/naming/knip/jscpd/sensitive/debug/skip/stash/artifact scans全绿；server/web/kbservice source、existing Make targets、coverage/CI controls不变。
   - Non-goals: service launcher/cleanup owner、real `web/dist` build、CI hurl install/job/aggregate、AGENTS/constraints/Directory Map、Playwright/browser、server/web route change、remote/TLS/load smoke。
 - [x] 4.2 Playwright 走查（fresh Chromium：登录→四路由→主题 reload 持久→侧栏页脚退出+reload 未登录，恰两次 contract-bound `/api/auth/me` 401 且零 unexpected browser console/page error）+ `make ui-walk`（只消费 caller 已启动的 `UI_WALK_BASE_URL`，不 build/start/stop/install）
-- [x] 4.3 CI 接线与控制面四处同步：独立 `smoke`/`ui-walk` jobs 验证 fixed Hurl / lockfile Chromium、build Web/server、各自 fresh DB+compiled server lifecycle 并调用同名 Make target，纳入 `all-checks-passed`；AGENTS/constraints/Make exact command+evidence+block+Directory Map/Known gaps 原子同步；既有 thresholds 不变
+- [ ] 4.3 CI 接线与控制面四处同步：独立 `smoke`/`ui-walk` jobs 验证 fixed Hurl / lockfile Chromium、build Web/server、各自 fresh DB+compiled server lifecycle 并调用同名 Make target，纳入 `all-checks-passed`；AGENTS/constraints/Make exact command+evidence+block+Directory Map/Known gaps 原子同步；既有 thresholds 不变
 
 Suggested fixture level: none - harness 自身即验证物，其"测试"就是对真实服务全绿运行
 Minimal mergeable slice: 4.1 smoke 单独可合并保绿（依赖 1.3 启动命令与 1/2 组端点；与 Playwright 无耦合；smoke/ 不在 make check 与 naming-guard 扫描面内）
@@ -254,7 +254,7 @@ Minimal mergeable slice: 4.1 smoke 单独可合并保绿（依赖 1.3 启动命�
 ## Issue #18 required evidence
 
 - Fixture level: expanded；repair intensity/effective tier: high；上游 none 因 CI production config、aggregate gate、process lifecycle、downloaded executable integrity 与 control schema 强制升档。
-- [x] TDD/red-proof：implementation 前结构检查因缺 `smoke`/`ui-walk` jobs、aggregate needs 与 AGENTS/constraints 真命令而红；implementation 后同一检查绿，不留 red-proof stash。
+- [x] TDD/red-proof：implementation 前结构检查因缺 `smoke`/`ui-walk` jobs、aggregate needs 与 AGENTS/constraints 真命令而红；implementation 后同一检查绿，不留 red-proof stash；最终 SHA 的 source-derived failure evidence 可复核。
 - [x] `smoke`/`ui-walk` 是独立 Ubuntu jobs；各自 checkout + exact `npm ci`，先 `npm run build --workspace web`、再 build server、以 isolated runner-temp DB/static/log 与 exact PID 启动 compiled server，bounded readiness 后只调用现有 Make target。
 - [x] smoke 安装 official Hurl 8.0.1 x86_64 archive，tarball bytes 在解压/执行前与 hardcoded SHA-256 `cac7c4670d69444db120edb21fe06c97ba8c80dcc52279957c8dd18f05fb0c06` 相等；static root 保持 `smoke/fixtures/static`；12 requests全绿。
 - [x] ui-walk 使用 lockfile `npx playwright install --with-deps chromium`，static root 为真实 `web/dist`；#17 full Chromium journey/exact error oracle全绿。
