@@ -43,7 +43,7 @@
 - 默认全链 -> `make check` -> 退出码 0。
 - 守卫机制 -> `make test-guardrails` -> 每条注入违例均 PASS。
 - HTTP 运行时 -> `make smoke SMOKE_BASE_URL=<running-origin>` -> Hurl 全部 status/body/message/cookie 断言通过、退出码 0；服务/DB/static/temp 生命周期由调用者拥有。
-- UI 运行时 -> 当前无命令（AGENTS.md READINESS GAP）-> 改动仅评审；#17/#18 落地后更新。
+- UI 运行时 -> `make ui-walk UI_WALK_BASE_URL=<running-origin>` -> Chromium 登录/四路由/主题 reload 持久/退出与 exact browser-error oracle 全绿、退出码 0；服务/DB/static 生命周期由调用者拥有。
 
 **Domain risk packs**
 - Tenant/sandbox isolation；auth/session lifecycle；process/child-environment isolation。
