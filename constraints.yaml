@@ -128,6 +128,14 @@ verification:
       command: "make test-guardrails"
       evidence: "per-guard PASS/FAIL 全 PASS"
       required_at: "L2+"
+    smoke:
+      command: "make smoke"
+      evidence: "exit-code; real HTTP assertions on caller-owned service"
+      required_at: "L2+"
+    ui-walk:
+      command: "make ui-walk"
+      evidence: "exit-code; Chromium journey on caller-owned service"
+      required_at: "L2+"
   enforced_by: "AGENTS.md 验证矩阵 ↔ 本段双向镜像 + Makefile 目标存在性检查"
 
 exemptions:

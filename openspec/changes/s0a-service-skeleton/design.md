@@ -943,6 +943,64 @@ Non-goals:
 - Stale/idempotency: fresh context/fresh caller DB, reload persistence, logout terminal reload, repeat target on new server resources.
 - Unchanged consumers: Vitest/jsdom, Vite build, smoke, server startup, #18 CI/control-plane owner.
 
+## Issue delivery fixture: #18 CI 接线与控制面同步
+
+- **Issue type / profile:** feature；Generic（open-workbuddy project profile）。
+- **Blast radius / fixture / repair:** high；expanded；high（effective accountability tier: high）。
+- **Upstream suggested level:** none — override：GitHub Actions production config、shared aggregate gate、service/process lifecycle、downloaded executable integrity 与 cross-file command schema 均为 mandatory expanded/high surfaces。
+- **Minimal mergeable slice:** atomic — `smoke`/`ui-walk` CI jobs、aggregate needs、AGENTS/constraints/Make mirror 与最终 shared OpenSpec task 必须同刀；拆开会留下未执行门禁或控制面谎言。
+- **Change surface:** `.github/workflows/ci.yml`、`.github/scripts/ci-compiled-server.sh`、`.github/scripts/ci-install-hurl.sh`、`scripts/test-ci-harness.sh`、`AGENTS.md`、`constraints.yaml`、现有 Makefile target/`.PHONY` consistency、`openspec/project-profile.md` 与 shared change fixture；不改 product/server/web/hurl/e2e source、dependencies、lockfile 或任何既有 threshold。
+- **Must preserve:** fast-checks/unit-tests/anti-drift/secret-scan/sast 行为、timeout 与 `all-checks-passed` skipped-fails rule；#16 Hurl exact fixture/cookie contract；#17 exact-two-401 browser oracle；caller/service resource ownership；all coverage/size/complexity/duplication/branch rules。
+- **Must add:** independent `smoke` and `ui-walk` Ubuntu jobs. Each uses fresh runner state, exact lock install, Web build before service start, production server build, fresh runner-temp DB, loopback readiness, same Make target, failure-only safe logs, and exact owned-process cleanup. Aggregate needs both.
+- **Tool installation:** smoke downloads Hurl 8.0.1 official x86_64 Linux tarball by immutable versioned URL, verifies hardcoded SHA-256 `cac7c4670d69444db120edb21fe06c97ba8c80dcc52279957c8dd18f05fb0c06` before extraction/execution, and uses `smoke/fixtures/static`. ui-walk runs lockfile-resolved `npx playwright install --with-deps chromium` and uses built `web/dist`; neither test target installs tools itself.
+- **Service lifecycle:** each job builds server, starts exact `node server/dist/server.js` with `HOST=127.0.0.1`, fixed runner-local port, job-specific DB/static root, captures the server PID/log and an isolated harness PGID, bounds readiness, preserves harness exit, terminates/waits only those captured identities, and lets the ephemeral runner remove job temp state. No job shares cookies/DB/process/output with the other.
+- **Seams under test:** CI workflow graph/step contract；existing `make smoke`/`make ui-walk` over real compiled server；AGENTS/constraints/Make exact command mirror；GitHub Ruleset required aggregate observed on the PR。
+
+### Risk packs considered for #18
+
+- Public API / CLI / script entry: **selected** — CI and control docs expose two operator commands and one required aggregate entry.
+- Config / project setup: **selected** — workflow YAML, job dependencies, tool installation and command mirrors are the implementation.
+- File IO / path safety / overwrite: **selected** — downloaded Hurl bytes, extraction root, built static roots, logs and runner-temp DB must bind to owned paths; no repo publish/delete.
+- Schema / columns / units / field names: **selected** — job IDs, `needs`, command/evidence strings, fixture/static-root identity and YAML/constraints fields are cross-file schema.
+- Auth / permissions / secrets: **selected** — CI runs real login/session flows; logs/artifacts must not expose password/session, and no new secret/token is required.
+- Concurrency / shared state / ordering: **selected** — jobs run independently; install→build→start→ready→test→cleanup and aggregate ordering are correctness contracts.
+- Resource limits / large input / discovery: **selected** — bounded download retries, readiness attempts, job timeouts, one server/browser, and no broad discovery.
+- Legacy compatibility / examples: **selected** — five existing jobs and both existing harness contracts remain unchanged and required.
+- Error handling / rollback / partial outputs: **selected** — digest/install/start/readiness/test/cleanup failures must propagate; cleanup cannot hide primary status or kill unknown processes.
+- Release / packaging / dependency compatibility: **selected** — Hurl release/digest and lockfile Playwright/Chromium must work on ubuntu-latest x86_64/Node 24.
+- Documentation / migration notes: **selected** — this issue closes both documented readiness gaps and synchronizes enforcement/control surfaces.
+- Tenant/sandbox isolation: **not selected** — only fixed dev account and test DB, no tenant workspace/KB data.
+- Auth/session lifecycle: **selected** — smoke and UI jobs exercise real cookie/session creation/revocation on isolated DBs.
+- Process/child-environment isolation: **selected** — each job owns exactly one compiled server PID and its own tool/browser process; no ambient credential forwarding into harness beyond their existing contracts.
+- SQLite migration/catalog compatibility: **selected** — each fresh DB runs tracked migrations/seeds and must remain job-local; no schema change.
+- Server/web HTTP-envelope compatibility: **selected** — both harnesses bind real compiled server, built SPA, exact errors/cookies/routes.
+- Offline deployability: **selected** — external network is build-tool acquisition only; runtime requests after startup stay loopback and built SPA has no CDN dependency.
+- Browser runtime/navigation/persistence: **selected** — UI CI installs exact Playwright Chromium and runs #17's real persistence/error oracle.
+- Cross-service boundary: **selected** — CI composes server + Web on same origin only; kbservice/public runtime calls remain absent.
+
+### Invariant Matrix for #18
+
+- **Governing invariant:** each required harness job must derive its verdict only from its own verified toolchain, built artifacts, fresh DB, exact server PID/origin and existing Make oracle, and `all-checks-passed` must fail unless both harness jobs and every prior required job succeed.
+- **Source of truth:** CI job IDs/needs；Hurl version+digest；lockfile Playwright revision；Make target names；job-specific DB/static root/PID；AGENTS/constraints command+evidence strings。
+- **Producers:** workflow checkout/install/build/start steps；existing server/Web/smoke/e2e sources；Makefile targets。
+- **Validators/preflight:** SHA-256 before Hurl extraction；Playwright install exit；server process/readiness loop；harness assertions；manual exact mirror comparison；GitHub aggregate result。
+- **Storage/cache/query:** runner cache may accelerate downloads but verdict uses verified bytes/lockfile；DB/log/tool roots are runner-temp/job-owned；no cross-job state。
+- **Public routes/entrypoints:** GitHub PR/push workflow；jobs `smoke`/`ui-walk`；`all-checks-passed`；`make smoke`/`make ui-walk`。
+- **Frontend/downstream consumers:** branch Ruleset requires aggregate；maintainers consume AGENTS/constraints/Make；future changes inherit both blocking harnesses。
+- **Failure/cleanup/stale state:** bad download/digest, install, build, early exit, readiness timeout, harness fail, signal/cancel, cleanup/wait, stale cache; no partial success or sibling resource mutation。
+- **Evidence/readiness:** structural workflow assertions + manual three-surface comparison + local real harness runs + PR CI showing both named jobs and aggregate SUCCESS + strict OpenSpec/full gates。
+- **Regression rows:** valid tools/build/fresh DB → each harness job success；bad Hurl digest or unavailable browser/server → owning job nonzero；one harness failure/cancel/skip → aggregate failure；three control surfaces → exact commands/evidence match；unchanged existing jobs → same checks still required。
+
+### Boundary-surface checklist for #18
+
+- Shared helper roots: `.github/scripts/ci-compiled-server.sh` owns both job lifecycles, `.github/scripts/ci-install-hurl.sh` owns verified Hurl installation, and `scripts/test-ci-harness.sh` is their tracked source-derived fault oracle; these replace duplicated inline wrappers and are mandatory review surfaces.
+- Public entrypoints: CI job IDs, aggregate `needs`, Make targets, AGENTS/constraints commands.
+- Read/write surfaces: fixed release URL/digest, repo build/static inputs, runner-temp tool/DB/log outputs only.
+- Staging/publish/rollback: no publish; job setup and cleanup are ephemeral; failure cannot report success.
+- Producer/consumer evidence: fixed bytes/lockfile → installed tool → Make oracle → job result → aggregate/Ruleset.
+- Stale/idempotency: fresh runners/DBs, bounded cache use, exact PID ownership, repeated PR runs independent.
+- Unchanged consumers: all existing CI jobs/rules, #16/#17 harnesses, product source and thresholds.
+
 ## Open Questions
 
-（无——三分支已 grill 拍板；#15 的 storage/info/logout/确认语义与 #17 的真实 browser oracle 已在 fixture 闭合，其余为实现细节。）
+（无——三分支已 grill 拍板；#15 的 storage/info/logout/确认语义、#17 browser oracle 与 #18 CI/control-plane closure 已在 fixture 闭合。）
