@@ -84,13 +84,10 @@ assert_dead "$scratch/rt/node.pid" "never-ready child reaped"
 write_bin curl $'#!/bin/sh\nexit 0'; term_node 0; write_bin make $'#!/bin/sh\nexit 33'
 set +e; run_helper smoke >/dev/null 2>&1; rc=$?; set -e; record "pre-status/child 33 not green" "$rc" 33
 ign_make() { write_bin make $'#!/bin/sh\n[ "$1" = "$EXPECT_TARGET" ] || exit 9\necho $$ > "$RUNNER_TEMP/make.pid"\ntrap "" TERM HUP INT\nwhile true; do sleep 0.05; done'; }
-finish() {
-  waitp "$wp"; child=$(pid_of "$scratch/rt/node.pid"); extra=$(pid_of "$3")
-  if [ -z "$extra" ] || kill -0 "$wp" 2>/dev/null; then echo "FAIL $1"; fail=$((fail+1)); reap_pids "$wp" "$child" "$extra"
+finish() { waitp "$wp"; child=$(pid_of "$scratch/rt/node.pid"); extra=$(pid_of "$3"); g=$(pid_of "$scratch/rt/hpid.mark")
+  if [ -z "$extra" ] || kill -0 "$wp" 2>/dev/null; then echo "FAIL $1"; fail=$((fail+1)); [ -n "$g" ] && kill -KILL -- "-$g" 2>/dev/null || true; reap_pids "$wp" "$child" "$extra"
   else wait "$wp"; rc=$?; record "$1" "$rc" "$2"
-    [ -n "$child" ] && kill -0 "$child" 2>/dev/null && { echo "FAIL $1 left server"; fail=$((fail+1)); } || { echo "PASS $1 reaped server"; pass=$((pass+1)); }
-    kill -0 "$extra" 2>/dev/null && { echo "FAIL $1 left member"; fail=$((fail+1)); } || { echo "PASS $1 reaped member"; pass=$((pass+1)); }
-  fi
+    [ -n "$child" ] && kill -0 "$child" 2>/dev/null && { echo "FAIL $1 left server"; fail=$((fail+1)); } || { echo "PASS $1 reaped server"; pass=$((pass+1)); }; kill -0 "$extra" 2>/dev/null && { echo "FAIL $1 left member"; fail=$((fail+1)); } || { echo "PASS $1 reaped member"; pass=$((pass+1)); }; fi
 }
 ign_make; mark "$scratch/hc.sh"; start_bg "$scratch/hc.sh" "$scratch/cancel.out"; waitf "$scratch/rt/make.pid"
 [ -n "$(pid_of "$scratch/rt/make.pid")" ] || { echo "FAIL cancel never started harness"; fail=$((fail+1)); reap_pids "$wp" "$(pid_of "$scratch/rt/node.pid")"; }
@@ -110,6 +107,10 @@ inj "$scratch/h-har.sh" ') &' 'n=0; while [ ! -f "$RUNNER_TEMP/make.pid" ] && [ 
 start_bg "$scratch/h-har.sh" "$scratch/har.out"; waitf "$scratch/rt/make.pid"
 finish "harness handoff cancel" 143 "$scratch/rt/make.pid"
 set -e; ck_sent "$sentinel" "harness handoff sentinel survived"
+inj "$scratch/h-wait.sh" 'set +m; galive "$hpid" || { echo "harness PGID contract failed (pid ${hpid})" >&2; cleanup_rc=1; }' 'echo "$hpid" > "$RUNNER_TEMP/hpid.mark"; n=0; while [ ! -f "$RUNNER_TEMP/make.pid" ] && [ "$n" -lt 80 ]; do sleep 0.05; n=$((n+1)); done; kill -s TERM $$'
+start_bg "$scratch/h-wait.sh" "$scratch/wait.out"; waitf "$scratch/rt/hpid.mark"; waitf "$scratch/rt/make.pid"
+finish "post-hpid wait cancel" 143 "$scratch/rt/make.pid"
+set -e; ck_sent "$sentinel" "post-hpid wait sentinel survived"
 term_node 0
 write_bin make $'#!/bin/sh\n[ "$1" = "$EXPECT_TARGET" ] || exit 9\n( exec </dev/null >/dev/null 2>&1; trap "" TERM HUP INT; while true; do sleep 0.05; done ) &\necho $! > "$RUNNER_TEMP/desc.pid"\nexit 0'
 start_bg "$helper" "$scratch/lead.out"; waitf "$scratch/rt/desc.pid"; extra=$(pid_of "$scratch/rt/desc.pid"); [ -n "$extra" ] && kill -0 "$extra" 2>/dev/null && kill -0 "$wp" 2>/dev/null || { echo "FAIL leader-exit identity"; fail=$((fail+1)); reap_pids "$wp" "$extra" "$(pid_of "$scratch/rt/node.pid")"; }
@@ -133,8 +134,7 @@ printf '%s\n' '#!/bin/sh' 'while [ "$#" -gt 0 ] && [ "$1" != "--output" ]; do sh
 printf '%s\n' '#!/bin/sh' 'echo 0000000000000000000000000000000000000000000000000000000000000000' > "$scratch/install/sha256sum"
 printf '%s\n' '#!/bin/sh' 'echo TAR_RAN > "${RUNNER_TEMP}/tar-ran"' 'exit 0' > "$scratch/install/tar"; chmod +x "$scratch/install/"*
 set +e; out=$(PATH="$scratch/install:/bin:/usr/bin" RUNNER_TEMP="$scratch/rt" "$BASH_RUN" "$installer" 2>&1); rc=$?; set -e
-record "hurl digest mismatch" "$rc" 1
-[ ! -f "$scratch/rt/tar-ran" ] && echo "PASS tar skipped" && pass=$((pass+1)) || { echo "FAIL tar ran"; fail=$((fail+1)); }
+record "hurl digest mismatch" "$rc" 1; [ ! -f "$scratch/rt/tar-ran" ] && echo "PASS tar skipped" && pass=$((pass+1)) || { echo "FAIL tar ran"; fail=$((fail+1)); }
 echo "$out" | grep -q "digest mismatch" && echo "PASS digest diagnostic" && pass=$((pass+1)) || { echo "FAIL digest diagnostic"; fail=$((fail+1)); }
 echo "ci-harness oracle: $pass PASS / $fail FAIL"
 [ "$fail" -eq 0 ]
