@@ -72,7 +72,7 @@ honor_cancel
 if [ "$ready" -ne 1 ]; then echo "readiness failed against /api/healthz (pid ${pid})" >&2; dump_logs; primary_rc=1; exit 1; fi
 set +e; set -m; honor_cancel
 ( make "$target" 2>&1 | sanitize; s0=${PIPESTATUS[0]} s1=${PIPESTATUS[1]}; [ "$s0" -ne 0 ] && exit "$s0"; [ "$s1" -ne 0 ] && exit "$s1"; exit 0 ) &
-hpid=$!; honor_cancel; set +m; galive "$hpid" || { echo "harness PGID contract failed (pid ${hpid})" >&2; cleanup_rc=1; }
+hpid=$!; trap 'exit 143' TERM INT; honor_cancel; set +m; galive "$hpid" || { echo "harness PGID contract failed (pid ${hpid})" >&2; cleanup_rc=1; }
 if wait "$hpid"; then primary_rc=0; else primary_rc=$?; fi; honor_cancel
 if galive "$hpid"; then echo "cleanup failed: harness group still present after leader exit (PGID ${hpid})" >&2; cleanup_rc=1; fi
 set -e
