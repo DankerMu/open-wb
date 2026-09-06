@@ -150,7 +150,12 @@ exemptions:
       reason: "上游只读参考副本，gitignore 且不属本仓产出"
       expires: never
       exit_condition: "none（结构性豁免）"
-  enforced_by: "守卫脚本与 lint includes 均不覆盖上述路径"
+    - path: "openspec/changes/archive/*/**"
+      rules: [code_canonicality.scratchpad_directories]
+      reason: "OpenSpec CLI 的规范归档根；仅 archive 目录规则需要结构性例外"
+      expires: never
+      exit_condition: "none（OpenSpec 规范归档路径；仍受后缀、.bak、大小与边界规则约束）"
+  enforced_by: "各路径仅按 entries.rules 豁免；OpenSpec 归档例外由 scripts/naming-guard.sh 执行"
 
 baseline:
   mode: "none"
