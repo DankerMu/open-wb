@@ -164,6 +164,11 @@
           "pr": 54,
           "outcome": "abandoned",
           "rounds": 5
+        },
+        {
+          "pr": 57,
+          "outcome": "merged",
+          "rounds": 1
         }
       ]
     }
