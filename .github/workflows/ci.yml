@@ -63,11 +63,52 @@ jobs:
       - uses: actions/checkout@v4
       - run: semgrep scan --config p/default --error server web kbservice scripts
 
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version-file: .tool-versions, cache: npm }
+      - run: npm ci
+      - run: npm run build --workspace web
+      - run: npm run build --workspace server
+      - name: install hurl 8.0.1
+        run: bash .github/scripts/ci-install-hurl.sh
+      - name: smoke compiled server
+        env:
+          HOST: "127.0.0.1"
+          PORT: "18016"
+          SMOKE_BASE_URL: "http://127.0.0.1:18016"
+          DB_PATH: "${{ runner.temp }}/workbuddy-smoke/app.db"
+          STATIC_ROOT: "${{ github.workspace }}/smoke/fixtures/static"
+        run: bash .github/scripts/ci-compiled-server.sh smoke
+
+  ui-walk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version-file: .tool-versions, cache: npm }
+      - run: npm ci
+      - run: npm run build --workspace web
+      - run: npm run build --workspace server
+      - run: npx playwright install --with-deps chromium
+      - name: ui-walk compiled server
+        env:
+          HOST: "127.0.0.1"
+          PORT: "18017"
+          UI_WALK_BASE_URL: "http://127.0.0.1:18017"
+          DB_PATH: "${{ runner.temp }}/workbuddy-ui-walk/app.db"
+          STATIC_ROOT: "${{ github.workspace }}/web/dist"
+        run: bash .github/scripts/ci-compiled-server.sh ui-walk
+
   all-checks-passed:
     # 聚合门禁：分支保护只指向本 job。skipped 视为失败——GitHub 把 skipped 的
     # required check 当通过，这个洞必须在这里堵死。
     if: always()
-    needs: [fast-checks, unit-tests, anti-drift, secret-scan, sast]
+    needs: [fast-checks, unit-tests, anti-drift, secret-scan, sast, smoke, ui-walk]
     runs-on: ubuntu-latest
     steps:
       - name: verify all required jobs succeeded

@@ -32,4 +32,4 @@ expect_accept "行数守卫放行现有源码"          bash scripts/size-guard.
 expect_reject "commit-msg 拒绝非规范信息"     bash .githooks/commit-msg <(echo "随手改一下")
 expect_accept "commit-msg 放行规范信息"       bash .githooks/commit-msg <(echo "feat(server): 新增健康探针")
 echo "guardrail self-test: $pass PASS / $fail FAIL"
-[ "$fail" -eq 0 ]
+[ "$fail" -eq 0 ] && bash scripts/test-ci-harness.sh
