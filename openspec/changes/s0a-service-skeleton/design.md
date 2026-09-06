@@ -954,7 +954,7 @@ Non-goals:
 - **Must add:** independent `smoke` and `ui-walk` Ubuntu jobs. Each uses fresh runner state, exact lock install, Web build before service start, production server build, fresh runner-temp DB, loopback readiness, same Make target, failure-only safe logs, and exact owned-process cleanup. Aggregate needs both.
 - **Tool installation:** smoke downloads Hurl 8.0.1 official x86_64 Linux tarball by immutable versioned URL, verifies hardcoded SHA-256 `cac7c4670d69444db120edb21fe06c97ba8c80dcc52279957c8dd18f05fb0c06` before extraction/execution, and uses `smoke/fixtures/static`. ui-walk runs lockfile-resolved `npx playwright install --with-deps chromium` and uses built `web/dist`; neither test target installs tools itself.
 - **Service lifecycle:** each job builds server, starts exact `node server/dist/server.js` with `HOST=127.0.0.1`, fixed runner-local port, job-specific DB/static root, captures the server PID/log and an isolated harness PGID, bounds readiness, preserves harness exit, terminates/waits only those captured identities, and lets the ephemeral runner remove job temp state. No job shares cookies/DB/process/output with the other.
-- **Seams under test:** CI workflow graph/step contract；existing `make smoke`/`make ui-walk` over real compiled server；AGENTS/constraints/Make exact command mirror；GitHub Ruleset required aggregate observed on the PR。
+- **Seams under test:** CI workflow graph/step contract；existing `make smoke`/`make ui-walk` over real compiled server；AGENTS/constraints/Make exact command mirror；GNU Make protected-target grammar（canonical 与 whitespace-before-colon duplicate/redefinition）及 source-derived mutation matrix；GitHub Ruleset required aggregate observed on the PR。
 
 ### Risk packs considered for #18
 
@@ -981,15 +981,15 @@ Non-goals:
 ### Invariant Matrix for #18
 
 - **Governing invariant:** each required harness job must derive its verdict only from its own verified toolchain, built artifacts, fresh DB, exact server PID/origin and existing Make oracle, and `all-checks-passed` must fail unless both harness jobs and every prior required job succeed.
-- **Source of truth:** CI job IDs/needs；Hurl version+digest；lockfile Playwright revision；Make target names；job-specific DB/static root/PID；AGENTS/constraints command+evidence strings。
+- **Source of truth:** CI job IDs/needs；Hurl version+digest；lockfile Playwright revision；GNU Make protected-target identity/grammar（`smoke:` / `ui-walk:` canonical headers，所有等价 duplicate/redefinition 均拒绝）；job-specific DB/static root/PID；AGENTS/constraints command+evidence strings。
 - **Producers:** workflow checkout/install/build/start steps；existing server/Web/smoke/e2e sources；Makefile targets。
 - **Validators/preflight:** SHA-256 before Hurl extraction；Playwright install exit；server process/readiness loop；harness assertions；manual exact mirror comparison；GitHub aggregate result。
 - **Storage/cache/query:** runner cache may accelerate downloads but verdict uses verified bytes/lockfile；DB/log/tool roots are runner-temp/job-owned；no cross-job state。
 - **Public routes/entrypoints:** GitHub PR/push workflow；jobs `smoke`/`ui-walk`；`all-checks-passed`；`make smoke`/`make ui-walk`。
 - **Frontend/downstream consumers:** branch Ruleset requires aggregate；maintainers consume AGENTS/constraints/Make；future changes inherit both blocking harnesses。
-- **Failure/cleanup/stale state:** bad download/digest, install, build, early exit, readiness timeout, harness fail, signal/cancel, cleanup/wait, stale cache; no partial success or sibling resource mutation。
+- **Failure/cleanup/stale state:** bad download/digest, install, build, early exit, readiness timeout, harness fail, signal/cancel, cleanup/wait, stale cache, or GNU Make equivalent duplicate/redefinition（含 `smoke :` / `ui-walk :`）; no partial success, skipped Make oracle, or sibling resource mutation。
 - **Evidence/readiness:** structural workflow assertions + manual three-surface comparison + local real harness runs + PR CI showing both named jobs and aggregate SUCCESS + strict OpenSpec/full gates。
-- **Regression rows:** valid tools/build/fresh DB → each harness job success；bad Hurl digest or unavailable browser/server → owning job nonzero；one harness failure/cancel/skip → aggregate failure；three control surfaces → exact commands/evidence match；unchanged existing jobs → same checks still required。
+- **Regression rows:** valid tools/build/fresh DB + canonical protected Make headers → each harness job success；`smoke :` / `ui-walk :` equivalent duplicate recipe → source-derived oracle nonzero and original recipe cannot be bypassed；bad Hurl digest or unavailable browser/server → owning job nonzero；one harness failure/cancel/skip → aggregate failure；three control surfaces → exact commands/evidence match；unchanged existing jobs → same checks still required。
 
 ### Boundary-surface checklist for #18
 

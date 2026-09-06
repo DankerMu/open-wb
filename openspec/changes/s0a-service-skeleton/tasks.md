@@ -261,7 +261,7 @@ Minimal mergeable slice: 4.1 smoke 单独可合并保绿（依赖 1.3 启动命�
 - [x] 两 job 对 install/build/server early-exit/readiness/harness/cleanup failure 均 nonzero；只 kill/wait captured server PID 与 isolated harness PGID，必要日志不泄漏 dev password/session；jobs 不共享 DB/port/static/browser/cookie/output。
 - [x] `all-checks-passed.needs` 精确保留现有五 job并加入 `smoke`、`ui-walk`；既有 failure/cancelled/skipped aggregate guard不弱化；Ruleset仍只 require `all-checks-passed`。
 - [x] AGENTS Verification Matrix command exact `make smoke` / `make ui-walk` 且 evidence齐；Enforcement Index两行 `block`；Known blind spot过期 gap删除；Directory Map含 `smoke/`；AGENTS无 `READINESS GAP`。
-- [x] constraints `verification.surfaces.smoke` / `ui-walk` command分别 exact `make smoke` / `make ui-walk` 且 evidence/required_at齐；Makefile targets与`.PHONY`已存在且名称一致；人工/结构比对全绿。
+- [x] constraints `verification.surfaces.smoke` / `ui-walk` command分别 exact `make smoke` / `make ui-walk` 且 evidence/required_at齐；Makefile canonical targets与`.PHONY`名称一致；source-derived grammar 拒绝 `smoke :` / `ui-walk :` 等价 duplicate-recipe bypass；人工/结构比对全绿。
 - [x] 既有 fast/unit/drift/secret/sast jobs、timeout 与 coverage/complexity/duplication/diff-size/branch thresholds byte-preserved；不改 product/server/web/smoke/e2e/dependency/lockfile。
 - [ ] PR CI final evidence（local real smoke/UI、workflow/control structural checks、`make check`、`make test-guardrails`、strict OpenSpec、diff/sensitive/placeholder/stash scans已绿）：named smoke/ui-walk jobs与aggregate同 frozen SHA SUCCESS。
 - OpenSpec archive: **after merge** — 本 issue 完成 shared S0a 最后一项；实现 PR 合并后由 workflow follow-up 执行 `openspec archive s0a-service-skeleton` 并与 accountability line同一治理 PR 合入。
