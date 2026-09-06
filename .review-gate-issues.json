@@ -153,6 +153,19 @@
           "rounds": 1
         }
       ]
+    },
+    "18": {
+      "ceilingPrs": [
+        54
+      ],
+      "gateEntries": 3,
+      "closed": [
+        {
+          "pr": 54,
+          "outcome": "abandoned",
+          "rounds": 5
+        }
+      ]
     }
   }
 }
