@@ -156,7 +156,7 @@ Minimal mergeable slice: 3.0 工具链单独可合并保绿（纯配置+最小�
     - documentation/compatibility：Make recipe 为 `smoke: ##` 一行说明并含stable installation URL，不新增help target；focused real smoke、`make check`、`make test-guardrails`、strict OpenSpec、`git diff --check`、size/naming/knip/jscpd/sensitive/debug/skip/stash/artifact scans全绿；server/web/kbservice source、existing Make targets、coverage/CI controls不变。
   - Non-goals: service launcher/cleanup owner、real `web/dist` build、CI hurl install/job/aggregate、AGENTS/constraints/Directory Map、Playwright/browser、server/web route change、remote/TLS/load smoke。
 - [x] 4.2 Playwright 走查（fresh Chromium：登录→四路由→主题 reload 持久→侧栏页脚退出+reload 未登录，恰两次 contract-bound `/api/auth/me` 401 且零 unexpected browser console/page error）+ `make ui-walk`（只消费 caller 已启动的 `UI_WALK_BASE_URL`，不 build/start/stop/install）
-- [ ] 4.3 CI 接线与控制面四处同步：独立 `smoke`/`ui-walk` jobs 验证 fixed Hurl / lockfile Chromium、build Web/server、各自 fresh DB+compiled server lifecycle 并调用同名 Make target，纳入 `all-checks-passed`；AGENTS/constraints/Make exact command+evidence+block+Directory Map/Known gaps 原子同步；既有 thresholds 不变
+- [x] 4.3 CI 接线与控制面四处同步：独立 `smoke`/`ui-walk` jobs 验证 fixed Hurl / lockfile Chromium、build Web/server、各自 fresh DB+compiled server lifecycle 并调用同名 Make target，纳入 `all-checks-passed`；AGENTS/constraints/Make exact command+evidence+block+Directory Map/Known gaps 原子同步；既有 thresholds 不变
 
 Suggested fixture level: none - harness 自身即验证物，其"测试"就是对真实服务全绿运行
 Minimal mergeable slice: 4.1 smoke 单独可合并保绿（依赖 1.3 启动命令与 1/2 组端点；与 Playwright 无耦合；smoke/ 不在 make check 与 naming-guard 扫描面内）
@@ -263,5 +263,5 @@ Minimal mergeable slice: 4.1 smoke 单独可合并保绿（依赖 1.3 启动命�
 - [x] AGENTS Verification Matrix command exact `make smoke` / `make ui-walk` 且 evidence齐；Enforcement Index两行 `block`；Known blind spot过期 gap删除；Directory Map含 `smoke/`；AGENTS无 `READINESS GAP`。
 - [x] constraints `verification.surfaces.smoke` / `ui-walk` command分别 exact `make smoke` / `make ui-walk` 且 evidence/required_at齐；Makefile canonical targets与`.PHONY`名称一致；source-derived grammar 拒绝 `smoke :` / `ui-walk :` 等价 duplicate-recipe bypass；人工/结构比对全绿。
 - [x] 既有 fast/unit/drift/secret/sast jobs、timeout 与 coverage/complexity/duplication/diff-size/branch thresholds byte-preserved；不改 product/server/web/smoke/e2e/dependency/lockfile。
-- [ ] PR CI final evidence（local real smoke/UI、workflow/control structural checks、`make check`、`make test-guardrails`、strict OpenSpec、diff/sensitive/placeholder/stash scans已绿）：named smoke/ui-walk jobs与aggregate同 frozen SHA SUCCESS。
+- [x] PR CI final evidence（local real smoke/UI、workflow/control structural checks、`make check`、`make test-guardrails`、strict OpenSpec、diff/sensitive/placeholder/stash scans已绿）：named smoke/ui-walk jobs与aggregate同 frozen SHA SUCCESS。
 - OpenSpec archive: **after merge** — 本 issue 完成 shared S0a 最后一项；实现 PR 合并后由 workflow follow-up 执行 `openspec archive s0a-service-skeleton` 并与 accountability line同一治理 PR 合入。
