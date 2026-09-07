@@ -230,12 +230,14 @@ describe("createApp", () => {
       expect(health.payload).toBe('{"status":"ok"}');
       expect(health.json()).toEqual({ status: "ok" });
       expectJsonContentType(health.headers);
+      expect(health.headers["cache-control"]).toBeUndefined();
 
       const info = await app.inject({ method: "GET", url: "/api/info" });
       expect(info.statusCode).toBe(200);
       expect(info.payload).toBe(JSON.stringify(SERVICE_INFO));
       expect(info.json()).toEqual(SERVICE_INFO);
       expectJsonContentType(info.headers);
+      expect(info.headers["cache-control"]).toBeUndefined();
 
       expect(
         db.prepare("SELECT sequence, filename FROM schema_migrations ORDER BY sequence").all(),
@@ -436,6 +438,7 @@ describe("createApp", () => {
         expect(asset.statusCode).toBe(200);
         expect(asset.payload).toBe(ASSET_BYTES);
         expect(String(asset.headers["content-type"])).toMatch(/^text\/css/iu);
+        expect(asset.headers["cache-control"]).toBe("public, max-age=0");
 
         const encodedAsset = await app.inject({ method: "GET", url: "/assets/site%2Ecss" });
         expect(encodedAsset.statusCode).toBe(200);
@@ -559,6 +562,7 @@ describe("createApp", () => {
         for (const url of apiMisses) {
           const response = await app.inject({ method: "GET", url, headers: { cookie: sid } });
           expectNotFound(response);
+          expect(response.headers["cache-control"]).toBeUndefined();
           expect(response.payload).not.toContain(API_STATIC_BYTES);
           expect(response.payload).not.toBe(INDEX_BYTES);
         }

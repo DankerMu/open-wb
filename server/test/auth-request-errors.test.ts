@@ -96,6 +96,10 @@ async function inject(
   };
 }
 
+function expectNoAuthCacheControl(response: InjectResponse): void {
+  expect(response.headers["cache-control"]).toBeUndefined();
+}
+
 function sessionCount(db: DatabaseSync): number {
   return (db.prepare("SELECT COUNT(*) AS count FROM auth_sessions").get() as { count: number })
     .count;
@@ -106,6 +110,7 @@ function expectBadRequest(response: InjectResponse, db: DatabaseSync, sessions =
   expect(response.payload).toBe(JSON.stringify(BAD_REQUEST_ENVELOPE));
   expect(response.payload).not.toContain("FST_ERR");
   expect(response.payload).not.toContain("Body is not valid JSON");
+  expect(response.headers["cache-control"]).toBe("no-store");
   expect(response.headers["set-cookie"]).toBeUndefined();
   // 除 setup 登录行之外不得新增任何会话行
   expect(sessionCount(db)).toBe(sessions);
@@ -257,18 +262,21 @@ describe("route-owner 结果：同一精确 CTP 输入在不同 route identity �
         cookie,
       });
       expectNotFound(putLogin, db, 1);
+      expectNoAuthCacheControl(putLogin);
 
       const trailingSlash = await inject(app, "POST", "/api/auth/login/", '{"account": ', {
         "content-type": "application/json",
         cookie,
       });
       expectNotFound(trailingSlash, db, 1);
+      expectNoAuthCacheControl(trailingSlash);
 
       const getLogin = await inject(app, "GET", "/api/auth/login", '{"account": ', {
         "content-type": "application/json",
         cookie,
       });
       expectNotFound(getLogin, db, 1);
+      expectNoAuthCacheControl(getLogin);
     });
   });
 
@@ -313,18 +321,21 @@ describe("exact POST /api/auth/logout 加入 route-owner（#10）", () => {
         cookie,
       });
       expectNotFound(trailingSlash, db, 1);
+      expectNoAuthCacheControl(trailingSlash);
 
       const putLogout = await inject(app, "PUT", "/api/auth/logout", '{"a": ', {
         "content-type": "application/json",
         cookie,
       });
       expectNotFound(putLogout, db, 1);
+      expectNoAuthCacheControl(putLogout);
 
       const getLogout = await inject(app, "GET", "/api/auth/logout", '{"a": ', {
         "content-type": "application/json",
         cookie,
       });
       expectNotFound(getLogout, db, 1);
+      expectNoAuthCacheControl(getLogout);
     });
   });
 

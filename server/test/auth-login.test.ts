@@ -117,12 +117,14 @@ async function expectBadRequest(
   db: DatabaseSync,
   payload: string,
   headers: Record<string, string> = { "content-type": "application/json" },
-): Promise<void> {
+) {
   const response = await postLogin(app, payload, headers);
   expect(response.statusCode).toBe(400);
   expect(response.payload).toBe(JSON.stringify(BAD_REQUEST_ENVELOPE));
+  expect(response.headers["cache-control"]).toBe("no-store");
   expect(response.headers["set-cookie"]).toBeUndefined();
   expect(sessionCount(db)).toBe(0);
+  return response;
 }
 
 async function expectServerError(
@@ -134,6 +136,7 @@ async function expectServerError(
   expect(response.statusCode).toBeGreaterThanOrEqual(500);
   expect(response.statusCode).toBeLessThan(600);
   expect(response.payload).toBe(JSON.stringify(INTERNAL_ERROR_ENVELOPE));
+  expect(response.headers["cache-control"]).toBe("no-store");
   expect(response.headers["set-cookie"]).toBeUndefined();
 }
 
@@ -170,6 +173,7 @@ async function expectFailure(
   expect(response.statusCode).toBe(expectedStatus);
   expect(response.payload).toBe(JSON.stringify(envelope));
   expect(response.json()).toEqual(envelope);
+  expect(response.headers["cache-control"]).toBe("no-store");
   expect(response.headers["set-cookie"]).toBeUndefined();
   expect(response.payload).not.toContain("demo");
 }
@@ -361,16 +365,10 @@ describe("POST /api/auth/login via createApp", () => {
 
   it("malformed JSON 稳定映射 400 bad_request，不带 parser 细节", async () => {
     await withLoginApp({}, async (app, db) => {
-      const response = await postLogin(app, '{"account": ', {
-        "content-type": "application/json",
-      });
-      expect(response.statusCode).toBe(400);
-      expect(response.payload).toBe(JSON.stringify(BAD_REQUEST_ENVELOPE));
-      expect(response.headers["set-cookie"]).toBeUndefined();
+      const response = await expectBadRequest(app, db, '{"account": ');
       expect(response.payload).not.toContain("FST_ERR");
       expect(response.payload).not.toContain("Body is not valid JSON");
       expect(response.payload).not.toContain("demo");
-      expect(sessionCount(db)).toBe(0);
     });
   });
 

@@ -264,6 +264,7 @@ describe("集中精确豁免表：matched method + route identity 完全相等�
     await withGuardApp(async ({ observe }) => {
       const { response, activity } = await observe({ method, url });
       expectUnauthorizedEnvelope(response);
+      expect(response.headers["cache-control"]).toBeUndefined();
       expect(response.headers["set-cookie"]).toBeUndefined();
       expectActivity(activity, {});
     });
