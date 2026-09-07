@@ -6,7 +6,7 @@ import { classifyOriginalUrl } from "./path-classifier.js";
 /**
  * 默认认证守卫（#19）：横切中间件，落 `http/`，由 `app.ts` 在 auth 注册之后装配为
  * **root `preParsing`**。相位是契约的一部分：`@fastify/cookie` 与 route-local `onRequest`
- * 先运行（cookie 可读、me/logout 的 no-store 已落），本守卫先于 body content parser 与
+ * 先运行（cookie 可读、login/me/logout 的 no-store 已落），本守卫先于 body content parser 与
  * handler，因此未认证的 malformed/oversized body 稳定 401，而不是被 raw parser 状态改写。
  *
  * 判定身份只有一条来源：`request.originalUrl`（rewrite 前）经共享 bounded classifier 得到的

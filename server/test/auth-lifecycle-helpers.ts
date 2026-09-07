@@ -146,6 +146,7 @@ export function expectServerError(response: InjectResponse): void {
   expect(response.statusCode).toBe(500);
   expect(response.payload).toBe(JSON.stringify(INTERNAL_ERROR_ENVELOPE));
   expect(response.payload).not.toContain("FST_ERR");
+  expect(response.headers["cache-control"]).toBe("no-store");
   expect(response.headers["set-cookie"]).toBeUndefined();
 }
 

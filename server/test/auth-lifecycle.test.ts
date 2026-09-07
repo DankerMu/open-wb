@@ -470,6 +470,7 @@ describe("POST /api/auth/logout", () => {
         const response = await requestLogout(app, bearerCookie(id));
         expect(response.statusCode).toBe(204);
         expect(response.payload).toBe("");
+        expect(response.headers["cache-control"]).toBe("no-store");
         expect(setCookieHeader(response)).toBe(CLEAR_COOKIE);
       }
       expect(sessionSnapshot(db)).toEqual([row(unrelated, "u3", INT64_MAX)]);

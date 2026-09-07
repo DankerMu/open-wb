@@ -1,7 +1,7 @@
 import { randomBytes as nodeRandomBytes } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import fastifyCookie from "@fastify/cookie";
-import type { FastifyInstance, onSendHookHandler } from "fastify";
+import type { FastifyInstance, onRequestHookHandler, onSendHookHandler } from "fastify";
 import { AuthError, type AuthErrorCode } from "./errors.js";
 import { createDevStubProvider, type PasswordSource } from "./providers/dev-stub.js";
 import {
@@ -90,6 +90,12 @@ const LOGOUT_BODY_LIMIT = 1;
 const MAX_ACCOUNT_LENGTH = 256;
 const MAX_PASSWORD_LENGTH = 1024;
 
+/** exact auth route 的最早响应策略：在 parser、guard 与 handler 之前声明不可存储。 */
+const noStoreAuthResponse: onRequestHookHandler = (_request, reply, done) => {
+  reply.header("Cache-Control", "no-store");
+  done();
+};
+
 export interface AuthRuntime {
   now(): number;
   randomBytes(size: number): Buffer;
@@ -164,36 +170,42 @@ async function authPlugin(
 ): Promise<void> {
   const provider = createDevStubProvider(options.db, options.passwordSource);
 
-  instance.post("/api/auth/login", { bodyLimit: LOGIN_BODY_LIMIT }, async (request, reply) => {
-    let credentials: { account: string; password: string };
-    try {
-      credentials = parseLoginBody(request.body);
-    } catch (error) {
-      throw asMappedAuthError(error, options.mapAuthError);
-    }
+  instance.post(
+    "/api/auth/login",
+    { bodyLimit: LOGIN_BODY_LIMIT, onRequest: noStoreAuthResponse },
+    async (request, reply) => {
+      let credentials: { account: string; password: string };
+      try {
+        credentials = parseLoginBody(request.body);
+      } catch (error) {
+        throw asMappedAuthError(error, options.mapAuthError);
+      }
 
-    const outcome = await provider.verify(credentials.account, credentials.password);
-    if ("authError" in outcome) {
-      throw options.mapAuthError(outcome.authError.code);
-    }
-    if (outcome.disabled) {
-      throw options.mapAuthError("account_disabled");
-    }
+      const outcome = await provider.verify(credentials.account, credentials.password);
+      if ("authError" in outcome) {
+        throw options.mapAuthError(outcome.authError.code);
+      }
+      if (outcome.disabled) {
+        throw options.mapAuthError("account_disabled");
+      }
 
-    const sessionId = generateSessionId(options.runtime.randomBytes);
-    const expiresAt = sessionExpiry(options.runtime.now(), options.sessionTtlMs);
-    insertSession(options.db, {
-      id: sessionId,
-      userId: outcome.principal.id,
-      expiresAt,
-    });
+      const sessionId = generateSessionId(options.runtime.randomBytes);
+      const expiresAt = sessionExpiry(options.runtime.now(), options.sessionTtlMs);
+      insertSession(options.db, {
+        id: sessionId,
+        userId: outcome.principal.id,
+        expiresAt,
+      });
 
-    reply.header("Cache-Control", "no-store");
-    reply.setCookie(SESSION_COOKIE_NAME, sessionId, sessionCookieOptions(options.secureCookies));
-    return outcome.principal;
-  });
+      reply.setCookie(SESSION_COOKIE_NAME, sessionId, sessionCookieOptions(options.secureCookies));
+      return outcome.principal;
+    },
+  );
 
   /**
+   * login/me/logout 共用 route-local `noStoreAuthResponse`，因此精确匹配后的终态在 parser、
+   * guard 与 handler 前已经声明不可存储。登录成功路径不再单独设头，避免与失败路径脱节。
+   *
    * 优先消费 #19 guard 已绑定的 request-local Principal，因此装配了 root guard 的 app 对
    * me 只调用一次 authenticate（重复调用会把 session 点查询翻倍，可被 authorizer 计数观测）。
    * 未装配 guard 的 standalone `registerAuth` 装配（既有 request-errors 用例形状）下
@@ -205,10 +217,7 @@ async function authPlugin(
   instance.get(
     "/api/auth/me",
     {
-      onRequest: (_request, reply, done) => {
-        reply.header("Cache-Control", "no-store");
-        done();
-      },
+      onRequest: noStoreAuthResponse,
       onSend: clearCookieOnFinalStatus(options, [UNAUTHORIZED_STATUS]),
     },
     async (request) => request.principal ?? authenticate(request) ?? sendUnauthorized(options),
@@ -227,10 +236,7 @@ async function authPlugin(
     "/api/auth/logout",
     {
       bodyLimit: LOGOUT_BODY_LIMIT,
-      onRequest: (_request, reply, done) => {
-        reply.header("Cache-Control", "no-store");
-        done();
-      },
+      onRequest: noStoreAuthResponse,
       onSend: clearCookieOnFinalStatus(options, [NO_CONTENT_STATUS, UNAUTHORIZED_STATUS]),
     },
     async (request, reply) => {
