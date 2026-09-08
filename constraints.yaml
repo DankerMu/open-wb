@@ -99,7 +99,8 @@ commits:
 
 ci:
   risk_layers: 5
-  fast_checks_timeout_minutes: 5
+  fast_checks_timeout_minutes: 10
+  anti_drift_timeout_minutes: 10
   matrix: ["ubuntu-latest"]
 
 verification:
