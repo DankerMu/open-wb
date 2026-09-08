@@ -12,3 +12,7 @@
 - Later-round attribution：pinned/Round-1 lens `8`；rotated-in lens `0`。
 - Trigger：`loop_log_audit.py --log docs/review-loop-log.jsonl` 首次返回 `DECIDABLE lens-rotation`。
 - Deferral reason：keep/cut 属维护者决策；当前无本次交付授权将全局 review policy 从 keep 改为 cut，故按默认 keep 暂不变更。
+
+## 2026-09-08 复评
+
+PR #62 合并后，样本增至 9 个 multi-round merged PR；later-round catches 为 core `10`、rotated `0`、phase `0`、skipped `0`。该新增样本没有提供 rotated-in lens 的正收益，也没有改变“全局 policy 调整需维护者决定”的边界。本次继续按既有延期决定保留 pinned-core + signal-triggered free-slot rotation，不修改 shared workflow policy；后续 audit 再次触发时沿用本决定，除非维护者明确要求 keep/cut 重议。
