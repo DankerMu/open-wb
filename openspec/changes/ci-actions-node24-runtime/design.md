@@ -5,7 +5,7 @@ master run 34201572662（push，SHA `bd07011016903c79578695c76315d6bb39a24051`�
 Fixture level: high
 Repair intensity: high
 Project profile: Generic（TypeScript Web 服务 + Python 知识库，多子系统）
-Minimal mergeable slice: `.github/workflows/ci.yml` 的四种 action major 与 `scripts/test-ci-harness.sh` 对应 exact identities/mutations 原子同步，并以一条新 PR CI 验收七个 direct jobs、aggregate 与 annotations。
+Minimal mergeable slice: `.github/workflows/ci.yml` 的四种 action major、`scripts/test-ci-harness.sh` 对应 oracle/exact identities/mutations，以及根 `package.json` / `package-lock.json` 的直接 `yaml@^2.9.0` 开发依赖原子同步，并以一条新 PR CI 验收七个 direct jobs、aggregate 与 annotations。
 
 ## Goals / Non-Goals
 
@@ -16,7 +16,7 @@ Minimal mergeable slice: `.github/workflows/ci.yml` 的四种 action major 与 `
 - 用 GitHub-hosted PR CI 的 job steps、outputs/cache logs、annotations 和 aggregate 证明兼容。
 
 **Non-Goals:**
-- 不修改 `.tool-versions`、应用 Node/Python/uv 版本、依赖/lockfile或产品代码。
+- 不修改 `.tool-versions`、应用 Node/Python/uv 版本或产品代码。依赖变动只允许用户于 2026-09-08 授权的根开发依赖 `yaml@^2.9.0` 及其必要 lockfile 更新，不升级其他依赖。
 - 不使用 `ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION`、fork、SHA pin 策略迁移或自行编译 action。
 - 不调整 workflow permissions、secret 值、job timeout、quality steps、coverage/guard thresholds 或 aggregate fail-closed 语义。
 - 不把 action major 升到高于消除 Node 20 所需的最新 major；checkout v6/v7、setup-node v6/v7、setup-uv v8/v9 不在本变更。
@@ -28,7 +28,8 @@ Minimal mergeable slice: `.github/workflows/ci.yml` 的四种 action major 与 `
 3. 使用 `astral-sh/setup-uv@v7`。v6 曾移除本仓未使用的 `pyproject-file`/`uv-file`、改变未使用的 `python-version` activation 与扩大 default cache dependency glob；本仓不给任何 inputs，只需要安装 uv 并沿用 hosted-runner `enable-cache:auto`。v7 移除本仓未用的 `server-url` 并切到 node24，hosted runner 兼容；其扩大后的 default cache glob仍包含 `kbservice/pyproject.toml` 和 `kbservice/uv.lock`。moving v7 当前解析 annotated tag commit `37802adc94f370d6bfd71619e3f0bf239e1f3b78`，uses node24。
 4. 使用 `gitleaks/gitleaks-action@v3`。上游 v3.0.0 明确只有 runtime node20→node24，无 inputs/outputs/behavior 变化；本仓继续由 `checkout@v5` 的 `fetch-depth: 0` 提供完整历史，并保留 exact `GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}`。仓库属于个人账号，不需要 organization-only `GITLEAKS_LICENSE`。moving tag当前 commit `e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e`。
 5. 保持 major moving refs，而非改成 full SHA pin。本仓现有 policy/grammar 使用 major refs，本 issue 只迁移 runtime；同时改变供应链 pin 策略会扩大范围。审阅时记录解析 commit和 metadata作为时间点证据，workflow合同仍以四个 major identity 为权威。
-6. 扩展现有 `check_wf`，不新建第二个 workflow parser。更新 fast/anti-drift/smoke/ui 既有 exact tuples 的 major；对 unit-tests、secret-scan、sast 只增加一层共享的 `uses` cardinality/关键 input/相对顺序检查，不复制三个完整 job snapshot。七个 direct jobs 共同拒绝 Node 20 fallback；保持 unrelated action内部实现不可见，不尝试在本地执行第三方 action。
+6. 保持 `check_wf` 为唯一 oracle 入口，用根直接开发依赖 `yaml@^2.9.0` 的 YAML AST 替代手写全局发现 scanner；不得依赖 Vite/knip 的传递依赖偶然存在。既有 direct-job exact tuples、关键 inputs/相对顺序、constraints mirror 和 aggregate 检查保持；全局遍历只观察真实 `jobs.*.steps[*].uses` 及 workflow/job/step `env` keys，local/docker 内部与 `run`/`with`/`outputs`/services/container env 等非目标内容不透明。YAML 解析错误、重复 key 或不支持且可能隐藏目标身份的表示必须非零；普通合法的 quoted、block/folded、flow、hanging 与标准 tag 表示按 AST 身份校验，不能因物理行布局误判。限制别名展开，不能执行输入中的代码或自定义 tag。第三方 action 本身不在本地执行。
+   - 2026-09-08 用户选择“引入 yaml 依赖（推荐）”，授权这一依赖/架构例外。三次手写 scanner 修复在独立 verifier 中仍有 false-green/false-red；使用已有成熟解析库是为了保留原验收语义，而非收窄合法 YAML 合同。保留全部已验证反例为回归；PR comprehensive round 计数不重置。
 7. 外部验收必须读取新 run 的 check-run annotations 和 action step names/log：8 jobs成功只是必要非充分条件；七个 direct jobs 的 Node 20 annotation必须为零。setup-node要显示 Node 24.13.1、npm cache main lookup/restore 与成功 post lifecycle；primary-key miss 时验证 save，hit 时接受明确的 `not saving cache`。setup-uv要安装 uv并有成功 cache post-step，secret-scan要在 full-history checkout 后执行gitleaks且成功。
 
 ## Upstream Compatibility Review
@@ -68,7 +69,7 @@ Governing invariant: each direct CI job SHALL use only the approved Node 24 acti
 - Failure: action step failure propagates; no if/continue/custom shell bypass; aggregate needs/severity unchanged.
 - Oracle/source: actual workflow path passed to mutation oracle, exact matrices updated together, old/partial mixed majors fail.
 - External evidence: PR head SHA, action step names/conclusions, Node/uv/cache/gitleaks logs and annotations.
-- Unchanged consumers: all run commands, service harnesses, timeouts, constraints mirrors, application/test/dependency files, branch protection.
+- Unchanged consumers: all run commands, service harnesses, timeouts, constraints mirrors, application/test files and branch protection; dependency files remain unchanged except the authorized root `yaml@^2.9.0` declaration and necessary lock metadata.
 
 Regression rows:
 - all 15 uses at approved majors + exact critical inputs -> source oracle accepts and new PR CI 8/8 succeeds with zero Node 20 annotations.
@@ -86,7 +87,7 @@ Regression rows:
 - Write/state: workspace checkout, npm/uv cache service; no node_modules cache or cross-job filesystem sharing.
 - Credential boundary: token remains action env only; no value logged or committed.
 - Stale/idempotency: every mutation starts from current workflow and executes against scratch path; missing anchor is not successful rejection.
-- Publish/rollback: workflow-only rollout; revert one atomic commit if any action behavior regresses.
+- Publish/rollback: atomically roll out or revert workflow + oracle + the root `yaml@^2.9.0` declaration and necessary lock metadata if action behavior regresses; no product/data deployment.
 - Unchanged downstream: all tests/build/harness/quality steps, timeouts, constraints, products and thresholds.
 
 ## Risks / Trade-offs
@@ -100,7 +101,7 @@ Regression rows:
 
 ## Migration Plan
 
-One workflow+oracle commit, PR CI validation, then merge. No product/data deployment. If any action/cache/secret-scan behavior fails, revert the commit; never add Node 20 fallback. Archive OpenSpec after merge.
+Ship workflow + oracle + the root `package.json` / `package-lock.json` direct `yaml@^2.9.0` development dependency atomically, validate PR CI, then merge. No product/data deployment. If any action/cache/secret-scan behavior fails, revert the atomic change; never add Node 20 fallback. Archive OpenSpec after merge.
 
 ## Open Questions
 

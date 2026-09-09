@@ -17,7 +17,7 @@
 
 - [x] 3.1 Replace all checkout v4 uses with checkout v5, all setup-node v4 uses with setup-node v5, both setup-uv v5 uses with setup-uv v7 and the gitleaks v2 use with gitleaks v3.
 - [x] 3.2 Preserve the exact seven-job action cardinality, critical `with`/`env` fields, action ordering, every run step, timeout, constraints mirror, aggregate dependency/predicate and workflow trigger.
-- [x] 3.3 Confirm no old/mixed action major, unsecure Node fallback, new permission, action pin-strategy change, application/tool version, dependency/lockfile or product change remains.
+- [x] 3.3 Confirm no old/mixed action major, unsecure Node fallback, new permission, action pin-strategy change, application/tool version or product change remains; dependency changes are limited to the explicitly authorized section 6 corrective action.
 
 ## 4. Local and external evidence
 
@@ -32,4 +32,12 @@
 
 ## 5. Non-goals
 
-- [x] 5.1 Do not change `.tool-versions`, package/lockfile, product code/tests, action pin policy, workflow permissions, secret values, timeouts, quality steps, thresholds, constraints or aggregate semantics; do not upgrade beyond v5/v5/v7/v3.
+- [x] 5.1 Preserve `.tool-versions`, product code/tests, action pin policy, workflow permissions, secret values, timeouts, quality steps, thresholds, constraints and aggregate semantics; do not upgrade beyond v5/v5/v7/v3. Package/lockfile changes are limited to the user-authorized root development dependency `yaml@^2.9.0` and necessary lock metadata.
+
+## 6. User-authorized AST corrective action (2026-09-08)
+
+- [x] 6.1 Declare `yaml@^2.9.0` directly, consume the actual scratch workflow through its AST and remove hand-written global YAML discovery. Retain existing direct-job/aggregate/constraints checks and one `check_wf` entrypoint.
+- [x] 6.2 Cover all eleven verified candidates using AST-semantic positive and negative pairs: quoted/flow/block/hanging/tagged values, exact protected/local/docker identities, actual env keys and scalar/comment/container decoys. Invalid YAML, duplicate keys and unsafe alias expansion must fail closed; unsupported syntax cannot silently hide protected uses.
+- [x] 6.3 Run fresh `make test-guardrails`, `make check`, strict OpenSpec and source/lockfile integrity checks.
+- [ ] 6.4 Run an independent invariant audit, comprehensive Round 2 and Phase 7 on the final head without resetting the PR counter.
+- [ ] 6.5 Record the authorized dependency/architecture deviation and exact-head CI evidence in the PR; preserve the original Node24 action and cache/annotation acceptance criteria.

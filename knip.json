@@ -1,6 +1,9 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
   "workspaces": {
+    ".": {
+      "entry": ["scripts/inspect-ci-workflow.js"]
+    },
     "server": {
       "entry": ["src/server.ts", "src/service-info.ts", "test/**/*.test.ts"],
       "project": ["src/**", "test/**"]

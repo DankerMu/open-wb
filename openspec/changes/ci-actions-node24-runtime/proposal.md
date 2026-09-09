@@ -21,4 +21,4 @@ GitHub hosted runner 已将四种 Node 20 action 强制运行在 Node 24，并�
 
 ## Impact
 
-影响 `.github/workflows/ci.yml` 与 `scripts/test-ci-harness.sh`；不修改应用 Node 版本、产品代码、依赖/lockfile、质量步骤、timeout、阈值、权限、secret 值或 aggregate 规则。四个 action major 已按上游 release/action metadata 完成人工兼容性审阅，详情见 design。
+影响 `.github/workflows/ci.yml`、`scripts/test-ci-harness.sh` 与 oracle 实现；用户于 2026-09-08 授权根直接开发依赖 `yaml@^2.9.0` 及必要 package/lockfile 更新，以成熟 YAML AST 替代三次修复仍不完整的手写扫描器。不修改应用 Node 版本、产品代码、其他依赖、质量步骤、timeout、阈值、权限、secret 值或 aggregate 规则。四个 action major 的上游 release/action metadata 兼容性审阅记录见 design。
