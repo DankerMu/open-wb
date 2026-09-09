@@ -39,5 +39,6 @@
 - [x] 6.1 Declare `yaml@^2.9.0` directly, consume the actual scratch workflow through its AST and remove hand-written global YAML discovery. Retain existing direct-job/aggregate/constraints checks and one `check_wf` entrypoint.
 - [x] 6.2 Cover all eleven verified candidates using AST-semantic positive and negative pairs: quoted/flow/block/hanging/tagged values, exact protected/local/docker identities, actual env keys and scalar/comment/container decoys. Invalid YAML, duplicate keys and unsafe alias expansion must fail closed; unsupported syntax cannot silently hide protected uses.
 - [x] 6.3 Run fresh `make test-guardrails`, `make check`, strict OpenSpec and source/lockfile integrity checks.
-- [ ] 6.4 Run an independent invariant audit, comprehensive Round 2 and Phase 7 on the final head without resetting the PR counter.
-- [ ] 6.5 Record the authorized dependency/architecture deviation and exact-head CI evidence in the PR; preserve the original Node24 action and cache/annotation acceptance criteria.
+- [x] 6.4 Run an independent invariant audit, comprehensive Round 2 and Phase 7 on the final head without resetting the PR counter.
+- [x] 6.5 Record the authorized dependency/architecture deviation and exact-head CI evidence in the PR; preserve the original Node24 action and cache/annotation acceptance criteria.
+  - Phase 6.2 and comprehensive Round 2 were clean at `4a0a3b0c613e720287726b66e77ee85b1a3452bb`; Phase 7 found no candidates. PR run [34298761001](https://github.com/DankerMu/open-wb/actions/runs/34298761001) completed 8/8 at the same SHA, with zero annotations across all seven direct jobs. The PR body records the AST dependency exception and keeps the local 460-case evidence separate from CI.
