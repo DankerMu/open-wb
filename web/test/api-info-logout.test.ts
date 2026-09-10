@@ -83,11 +83,13 @@ describe("ServiceInfo API contract", () => {
     expect(error).toMatchObject({ status: 503, code: "maintenance", message: "服务信息暂不可用" });
   });
 
+  const SERVICE_INFO_SECRET = "service-info-secret-7c4e2a91-b3d8-4f16-a5e0-9c8b7d6e5f14";
+
   it.each([
-    ["a 200 non-JSON response", new Response("private response body", { status: 200 }), 200],
-    ["a malformed envelope", jsonResponse({ error: { code: "private" } }, 500), 500],
-    ["a non-JSON response", new Response("private response body", { status: 500 }), 500],
-    ["a network rejection", new Error("private transport detail"), 0],
+    ["a 200 non-JSON response", new Response(SERVICE_INFO_SECRET, { status: 200 }), 200],
+    ["a malformed envelope", jsonResponse({ error: { code: SERVICE_INFO_SECRET } }, 500), 500],
+    ["a non-JSON response", new Response(SERVICE_INFO_SECRET, { status: 500 }), 500],
+    ["a network rejection", new Error(SERVICE_INFO_SECRET), 0],
   ])("does not leak $0", async (_label, result, status) => {
     const fetchMock = vi.fn().mockImplementation(() => {
       if (result instanceof Error) {
@@ -101,8 +103,8 @@ describe("ServiceInfo API contract", () => {
     const error = await captureApiError(createApiClient().getInfo());
 
     expectRequestFailure(error, status);
-    expect(error.message).not.toContain("private");
-    expect(error.stack).not.toContain("private");
+    expect(error.message).not.toContain(SERVICE_INFO_SECRET);
+    expect(error.stack).not.toContain(SERVICE_INFO_SECRET);
   });
 });
 
