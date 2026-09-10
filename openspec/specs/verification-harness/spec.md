@@ -112,3 +112,13 @@ source-derived CI oracle SHALL 从实际传入 workflow 解析全部七个 direc
 - **WHEN** 比对四个候选 major 的 release notes、`action.yml` inputs/runtime 与本仓实际配置
 - **THEN** checkout fetch/full-history、setup-node Node/npm cache、setup-uv install/cache 与 gitleaks token/扫描行为均有书面兼容性结论，runner 最低版本由 GitHub-hosted 环境满足
 - **AND** 不升级更高 action major，不改变 action pin 策略、workflow permissions、secret 值、应用工具链版本、产品代码、timeout、步骤或门禁阈值；依赖/lockfile 仅允许用户授权的根 YAML 解析开发依赖 `yaml@^2.9.0` 及必要锁定元数据，不升级其他依赖
+
+### Requirement: Locale-independent oversized-file diagnostics
+The size guard SHALL retain the 800-line limit and nonzero rejection while reporting one BLOCK line with the actual count and path for every oversized supported file, independent of C or UTF-8 locale. Guard self-verification SHALL reject missing diagnostics even if the command exits nonzero.
+#### Scenario: Multiple violations under macOS locales
+- **WHEN** Bash 3.2 or 5.x checks two supported files with 801 and 802 lines under C.UTF-8, en_US.UTF-8, zh_CN.UTF-8 or C
+- **THEN** each file has its own BLOCK line with its count and path, exit is nonzero and stderr has no unbound variable error
+#### Scenario: Valid boundary and diagnostic regression
+- **WHEN** the guard checks an 800-line file, or self-verification sees a failing guard with missing count/path diagnostics
+- **THEN** the valid file exits zero and the broken diagnostic oracle fails rather than accepting arbitrary nonzero status
+
