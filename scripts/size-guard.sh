@@ -3,12 +3,16 @@
 # 用法：size-guard.sh [file...]；无参数时扫描产品目录全部源码。
 set -euo pipefail
 MAX=800
+files=()
 if [ "$#" -gt 0 ]; then
   files=("$@")
 else
-  mapfile -t files < <(find server/src server/test web/src web/test kbservice/src kbservice/tests \
-    -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.py' \) 2>/dev/null || true)
+  while IFS= read -r -d '' f; do
+    files+=("$f")
+  done < <(find server/src server/test web/src web/test kbservice/src kbservice/tests \
+    -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.py' \) -print0 2>/dev/null || true)
 fi
+[ "${#files[@]}" -eq 0 ] && exit 0
 fail=0
 for f in "${files[@]}"; do
   [ -f "$f" ] || continue

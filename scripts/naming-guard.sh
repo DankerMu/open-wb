@@ -4,10 +4,13 @@
 # 用法：naming-guard.sh <file...>；无参数时检查 git 暂存区（pre-commit 模式）。
 set -euo pipefail
 
+files=()
 if [ "$#" -gt 0 ]; then
   files=("$@")
 else
-  mapfile -t files < <(git diff --cached --name-only --diff-filter=ACR)
+  while IFS= read -r -d '' f; do
+    files+=("$f")
+  done < <(git diff --cached --name-only -z --diff-filter=ACR)
 fi
 [ "${#files[@]}" -eq 0 ] && exit 0
 

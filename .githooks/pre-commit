@@ -2,7 +2,10 @@
 # pre-commit：命名/边界守卫 + 行数守卫 + 密钥扫描（gitleaks 存在时 block，缺席时提示——CI 恒为 block）。
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
-mapfile -t staged < <(git diff --cached --name-only --diff-filter=ACR)
+staged=()
+while IFS= read -r -d '' f; do
+  staged+=("$f")
+done < <(git diff --cached --name-only -z --diff-filter=ACR)
 [ "${#staged[@]}" -eq 0 ] && exit 0
 bash scripts/naming-guard.sh "${staged[@]}"
 bash scripts/size-guard.sh "${staged[@]}"

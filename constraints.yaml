@@ -1,6 +1,8 @@
 # constraints.yaml — 机器可读工程约束（规范来源）
 # 数值阈值与正则的唯一权威。守卫脚本/CI/lint 配置引用此处；改阈值先改这里。
 # 由 eng-init 生成维护。
+# Interpreter: first-party guards and .githooks support macOS system Bash 3.2 and Bash 5.x.
+# PATH: keep system dirs first so bash is /bin/bash; Node (npx) and uv must follow those dirs for make anti-drift / test-guardrails / check.
 
 strictness_profile:
   schema_version: "3.5.8"
