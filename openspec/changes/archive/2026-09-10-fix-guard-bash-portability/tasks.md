@@ -5,4 +5,4 @@
 ## 2. Verification
 - [x] 2.1 macOS /bin/bash 3.2 and Homebrew Bash 5.x: no-arg empty/nonempty guards; isolated actual git hook/commit acceptance and diagnostic rejection; no unbound errors; include whitespace filename preservation.
 - [x] 2.2 Strict system PATH make guard exit 0; dependency-complete system-first PATH make anti-drift and make test-guardrails exit 0; Homebrew-first make check exit 0. Record literal minimal-PATH missing-tool prerequisite if encountered, never claim it passed.
-- [ ] 2.3 First-party newer builtin search zero hits; Ubuntu 24.04 direct CLI compatibility and required PR CI all green; strict OpenSpec validation. These commands map CLI/legacy/errors/dependencies packs; constraints note maps setup/docs packs.
+- [x] 2.3 First-party newer builtin search zero hits; Ubuntu 24.04 direct CLI compatibility and required PR CI all green; strict OpenSpec validation. These commands map CLI/legacy/errors/dependencies packs; constraints note maps setup/docs packs.
