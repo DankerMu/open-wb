@@ -20,3 +20,7 @@ PR #62 合并后，样本增至 9 个 multi-round merged PR；later-round catche
 ## 2026-09-09 复评
 
 PR #66 合并后，样本增至 10 个 multi-round merged PR；later-round catches 仍为 core `10`、rotated `0`、phase `0`、skipped `0`。本次新增 PR 的第二轮 clean，没有产生新的 later-round catch，因此不改变既有证据或维护者决策边界。继续沿用延期决定并保留 pinned-core + signal-triggered free-slot rotation；不修改 shared workflow policy。用户要求完成 #29 后暂停，也未授权本轮重议全局 keep/cut。
+
+## 2026-09-10 复评
+
+PR #68 合并后，multi-round 样本仍为 10，later-round catches 仍为 core `10`、rotated `0`。本轮预授权覆盖 issue 交付与 merge，不包含全局 review policy 的 keep/cut 决策；沿用既有延期及默认 keep，不修改审核机制。
