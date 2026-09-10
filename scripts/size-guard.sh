@@ -15,7 +15,7 @@ for f in "${files[@]}"; do
   case "$f" in *.ts|*.tsx|*.py) ;; *) continue ;; esac
   lines=$(wc -l < "$f")
   if [ "$lines" -gt "$MAX" ]; then
-    echo "BLOCK 文件超过 ${MAX} 行（$lines）：拆分它，而不是调阈值: $f"; fail=1
+    echo "BLOCK 文件超过 ${MAX} 行（${lines}）：拆分它，而不是调阈值: $f"; fail=1
   fi
 done
 exit "$fail"
