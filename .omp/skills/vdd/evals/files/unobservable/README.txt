@@ -1,1 +1,0 @@
-The repository contains only a UI adapter. The proprietary legacy renderer, golden fixtures, staging credentials, screenshots, DOM captures, and production replay logs are unavailable. The request is to rewrite the renderer and guarantee pixel-identical behavior.
