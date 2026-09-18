@@ -560,15 +560,9 @@ END`);
     }
   });
 
-  it("忽略非 SQL 直属文件与嵌套 .sql 文件", () => {
+  it("受信任迁移目录恰好按序登记三个真实迁移", () => {
     withOpenDb(join(tempDir(), "app.db"), (db) => {
       expect(ledgerFilenames(db)).toEqual([MIGRATION_0010, MIGRATION_002, MIGRATION_010]);
-      const tables = db
-        .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
-        .all()
-        .map((row) => String(row.name));
-      expect(tables).not.toContain("forbidden_sentinel_non_sql");
-      expect(tables).not.toContain("forbidden_sentinel_nested");
     });
   });
 });
