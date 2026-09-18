@@ -52,7 +52,7 @@ kb-service 只认 kb_id 集合，不认用户——租户过滤是 app-server `k
 
 ### 3.3 web SPA（React + Vite）
 
-路由镜像 demo IA：`/`、`/files`、`/center/*`（8 tab）、`/settings`。横切：`lib/api`（REST 客户端）、
+路由镜像 demo IA：`/`、`/files`、`/center`（扁平路由，8 tab 为页内状态，S1d 需深链时再引入 query 参数）、`/settings`。横切：`lib/api`（REST 客户端）、
 `lib/sse`（Last-Event-ID 重连）、`lib/theme`（已有）。每路由一个 feature 目录，不做全局状态库，
 按需 React context。
 
@@ -103,7 +103,7 @@ kbservice/src/kbservice/
 └── embedding/           # 模型网关客户端
 
 web/src/
-├── routes/              # /、/files、/center/*、/settings
+├── routes/              # /、/files、/center、/settings
 ├── features/            # 每页面一个目录
 └── lib/                 # api、sse、theme
 ```
