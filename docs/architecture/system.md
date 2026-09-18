@@ -154,11 +154,12 @@ sequenceDiagram
 | [0006](../adr/0006-rest-sse-event-replay.md) | REST + SSE，事件序号回放 |
 | [0007](../adr/0007-oidc-provider-seam.md) | OIDC provider 接缝 |
 | [0008](../adr/0008-model-proxy-credentials.md) | app-server 模型代理，omp 零凭证 |
+| [0010](../adr/0010-dedicated-omp-uid.md) | omp 子进程单一专用 uid，与 app-server 分离 |
 
 ## 8. 开放问题
 
 - **IdP 是否带组声明**：带则项目组改同步（ADR-0007 的开放尾巴）。解锁条件 = 身份源调研结论；P3 前必须关闭。
 - **omp 子进程池参数**（上限/内存限额/空闲回收）：P1 实测定参（PLAN §5）。
 - **deepdoc 模型内网分发清单**：方案已定捆包（backend-research §3），具体模型清单与体积 P2 落地时定。
-- **omp 子进程与 app-server 的 uid 分离**：是否每账号独立 uid 运行 omp（进程级可见性与资源限额的根手段）。P1 沙箱强制落地前定；未分离期间 ADR-0003/0008 的"凭证不上命令行/不可猜测 token"是唯一防线。
+- ~~omp 子进程与 app-server 的 uid 分离~~ 已关闭（2026-09-18，ADR-0010：单一专用 omp uid；每账号 uid 记为 S3b/S4b 升级路径）。
 - **模块 import 边界机械化**：dependency-cruiser 接入时机（AGENTS.md 已知盲区之一）。
