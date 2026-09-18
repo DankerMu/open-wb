@@ -239,7 +239,7 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 | 阶段 | 覆盖 ID |
 |---|---|
 | S0a | F-SET-1 |
-| S0b | F-CHAT-3/6/8、F-OPS-2 |
+| S0b | F-CHAT-3/6/8、F-OPS-2（F-CHAT-6 的 fork 子项按 2026-09-18 grill 裁定归 S1c，与 S1c Outcome 原文一致）|
 | S1a | F-FILE-1/2/4/5 |
 | S1b | F-FILE-3 |
 | S1c | F-CHAT-1/2/7、F-OPS-1 |
