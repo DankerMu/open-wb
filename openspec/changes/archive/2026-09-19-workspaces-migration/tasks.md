@@ -2,7 +2,7 @@
 - [x] 1.1 Write real openDb SQLite tests for metadata, independent uniqueness collisions/cross-owner acceptance/cascade, id/name/dir boundaries and required fields; capture semantic RED before SQL implementation.
 - [x] 1.2 Add031 only, update exact canonical receipts/global business tables including audit successful-reopen expectations without changing audit failure-prefix expectations; preserve old SQL/runner.
 - [x] 1.3 Prove same-name table conflict rollback and temp-file reopen; parent server suite/typecheck/build/Biome/knip/jscpd/sizeguard and compiled openDb smoke pass.
-- [ ] 1.4 Independent expanded review and required CI green before merge; archive slice and keep parent Epic active.
+- [x] 1.4 Independent expanded review and required CI green before merge; archive slice and keep parent Epic active. PR #151 merged; three static seats clean and exact-head CI 35453243586 green.
 ## Risk packs
 - Not selected Public API / CLI / script entry: no new runtime application API.
 - Not selected Config / project setup: no configuration/toolchain changes.
