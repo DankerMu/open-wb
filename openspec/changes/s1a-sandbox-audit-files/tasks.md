@@ -25,7 +25,7 @@ Minimal mergeable slice: 2.1 迁移单独可合并保绿（独立 SQL + 形态�
 ## 3. workspaces
 
 - [ ] 3.1 `server/src/http/errors.ts`（依赖 S0b #84 的七码基线）：定义表七码 → 十一码（`sandbox_denied`/`conflict`/`preview_too_large`/`preview_unsupported`）+ `CONTENT_PARSER_OWNED_ROUTES` 增 `POST /api/workspaces`、`POST /api/workspaces/:id/dirs` + 既有信封测试扩为十一码与归属路由 400 断言
-- [ ] 3.2 迁移 `031_workspaces.sql`（双唯一、`dir` CHECK）+ 形态单测；受信任迁移目录计数断言随之 +1
+- [x] 3.2 迁移 `031_workspaces.sql`（双唯一、`dir` CHECK）+ 形态单测；受信任迁移目录计数断言随之 +1（#116 / PR #151；schema-only slice 已归档，目录根行为仍待 3.3）
 - [ ] 3.3 `server/src/workspaces/store.ts`：列表/创建事务（`dir` 派生与校验、冲突 → `conflict`、惰性沙箱根 + 空间根 `ensureSharedDir`、采用既有目录、`emit(workspace.create)`、失败回滚）与 `rootOf(principal, workspaceId)` 端口实现 + 单测（临时 `SANDBOX_ROOT` + `:memory:`）
 - [ ] 3.4 `server/src/workspaces/tree.ts` + `preview.ts`：单层列举（目录优先、字节序、跳过 symlink/特殊文件）与预览判定/流式读取（扩展名集合、`text/plain` + `nosniff`、1 MiB 截断头、图片 10 MiB 上限）纯函数 + 临时目录单测
 - [ ] 3.5 `server/src/workspaces/rest.ts` + `index.ts`：`registerWorkspaces(app,{db,sandbox,audit})` 五端点（列表/创建/tree/dirs/file；他人 404、越界 403 + 审计、409/413/415/400 分支、`no-store`）+ 对完整装配 app 的 `app.inject()` 单测（临时 `SANDBOX_ROOT`）
