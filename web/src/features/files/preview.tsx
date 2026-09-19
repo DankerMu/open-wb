@@ -5,7 +5,7 @@
  * Markdown mode is keyed by `path`; callers must remount across workspaces
  * if the same relative path can name different files.
  */
-import { type ReactNode, useState } from "react";
+import { type KeyboardEvent, type MouseEvent, type ReactNode, useState } from "react";
 import type { ApiClient } from "../../lib/api.js";
 import { parseCsv } from "./csv.js";
 import { type MdBlock, type MdInline, parseMarkdown } from "./md-render.js";
@@ -65,6 +65,15 @@ function lineDocuments(text: string): { source: number; value: string }[] {
   });
 }
 
+function preventInertNavigation(
+  event: MouseEvent<HTMLAnchorElement> | KeyboardEvent<HTMLAnchorElement>,
+) {
+  if ("key" in event && event.key !== "Enter" && event.key !== " ") {
+    return;
+  }
+  event.preventDefault();
+}
+
 function renderInline(nodes: MdInline[]): ReactNode[] {
   return nodes.map((node) => {
     if (node.type === "text") {
@@ -77,9 +86,15 @@ function renderInline(nodes: MdInline[]): ReactNode[] {
       return <strong key={node.source}>{renderInline(node.children)}</strong>;
     }
     return (
-      <button key={node.source} type="button">
+      // biome-ignore lint/a11y/useValidAnchor: controlled preview href="#" never navigates; destinations are dropped.
+      <a
+        href="#"
+        key={node.source}
+        onClick={preventInertNavigation}
+        onKeyDown={preventInertNavigation}
+      >
         {renderInline(node.children)}
-      </button>
+      </a>
     );
   });
 }
@@ -245,12 +260,17 @@ function PreviewBody({ name, preview }: { name: string; preview: PreviewState })
   );
 }
 
+function RenderedMarkdownDocument({ text }: { text: string }) {
+  return <div data-markdown-body="">{parseMarkdown(text).map(renderBlock)}</div>;
+}
+
 function MarkdownPreview({ text }: { text: string }) {
   const [showSource, setShowSource] = useState(false);
   const body = showSource ? (
     <CodeView text={text} />
   ) : (
-    <div data-markdown-body="">{parseMarkdown(text).map(renderBlock)}</div>
+    // Replacing a content snapshot avoids React's sibling-placement scan on dense inline updates.
+    <RenderedMarkdownDocument key={text} text={text} />
   );
   return (
     <div>

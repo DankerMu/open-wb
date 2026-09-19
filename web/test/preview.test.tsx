@@ -146,26 +146,48 @@ describe("PreviewPane Markdown", () => {
     expect(screen.getByRole("button", { name: "查看源码" })).toBeTruthy();
   });
 
-  it("leaves the URL unchanged for mouse and keyboard activation of inert Markdown link buttons", () => {
+  it("replaces same-path document content without resetting the chosen mode", () => {
+    const path = "docs/readme.md";
+    const view = render(textPreview("readme.md", "# 初始", { path }));
+
+    expect(screen.getByRole("heading", { level: 1, name: "初始" })).toBeTruthy();
+    view.rerender(textPreview("readme.md", "## 渲染更新", { path }));
+    expect(screen.queryByRole("heading", { level: 1, name: "初始" })).toBeNull();
+    expect(screen.getByRole("heading", { level: 2, name: "渲染更新" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "查看源码" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "查看源码" }));
+    expect(screen.getByRole("button", { name: "渲染视图" })).toBeTruthy();
+    view.rerender(textPreview("readme.md", "### 源码更新", { path }));
+    expect(screen.getByRole("button", { name: "渲染视图" })).toBeTruthy();
+    expect(
+      within(screen.getAllByRole("row")[0] as HTMLElement).getAllByRole("cell")[1]?.textContent,
+    ).toBe("### 源码更新");
+
+    fireEvent.click(screen.getByRole("button", { name: "渲染视图" }));
+    expect(screen.getByRole("heading", { level: 3, name: "源码更新" })).toBeTruthy();
+  });
+
+  it("leaves the URL unchanged for mouse and keyboard activation of href# Markdown links", () => {
     const hrefBefore = window.location.href;
     const { container } = render(textPreview("readme.md", "[文档](https://evil.example/docs)"));
     const body = container.querySelector("[data-markdown-body]");
-    const label = body?.querySelector("button");
-    if (!(label instanceof HTMLButtonElement)) {
-      throw new Error("expected an inert Markdown link button");
+    const link = body?.querySelector("a");
+    if (!(link instanceof HTMLAnchorElement)) {
+      throw new Error("expected a Markdown href# anchor");
     }
 
-    expect(label.type).toBe("button");
-    expect(label.textContent).toBe("文档");
-    expect(container.querySelector("a")).toBeNull();
-    fireEvent.click(label);
-    fireEvent.keyDown(label, { key: "Enter" });
-    fireEvent.keyDown(label, { key: " " });
+    expect(link.getAttribute("href")).toBe("#");
+    expect(link.getAttribute("onclick")).toBeNull();
+    expect(link.textContent).toBe("文档");
+    fireEvent.click(link);
+    fireEvent.keyDown(link, { key: "Enter" });
+    fireEvent.keyDown(link, { key: " " });
     expect(window.location.href).toBe(hrefBefore);
     expect(window.location.href).not.toContain("evil.example");
   });
 
-  it("matches mdRender HTML structure except inert React buttons for serialized anchors", () => {
+  it("matches mdRender HTML structure including href# anchors", () => {
     const src = [
       "# 一级标题",
       "## 二级标题",
@@ -207,13 +229,9 @@ describe("PreviewPane Markdown", () => {
       html.textContent?.replace(/\s+/g, " ").trim(),
     );
     expect(html.querySelector("a")?.getAttribute("href")).toBe("#");
-    expect(html.querySelector("a")?.textContent).toBe("文档");
-    expect(reactRoot.querySelector("a")).toBeNull();
-    expect(
-      [...reactRoot.querySelectorAll("button")].some(
-        (button) => button.type === "button" && button.textContent === "文档",
-      ),
-    ).toBe(true);
+    expect(reactRoot.querySelector("a")?.getAttribute("href")).toBe("#");
+    expect(reactRoot.querySelector("a")?.textContent).toBe("文档");
+    expect(reactRoot.querySelector("button")?.textContent).not.toBe("文档");
   });
 });
 

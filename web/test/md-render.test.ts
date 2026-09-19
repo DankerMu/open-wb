@@ -115,7 +115,8 @@ describe("mdRender input safety", () => {
     expect(link?.getAttribute("href")).toBe("#");
     expect(link?.getAttributeNames()).toEqual(["href"]);
     expect(link?.textContent).toBe("click");
-    expect(root.querySelector("p")?.textContent).toBe("click");
+    expect(root.querySelector("p")?.textContent).toBe("click)");
+    expect(root.innerHTML).not.toContain("javascript:");
   });
 
   it("keeps an onerror attribute injection as literal text", () => {
@@ -167,5 +168,70 @@ describe("parseMarkdown node identity", () => {
       throw new Error("expected a list");
     }
     expect(list.items.map((item) => item.source)).toEqual([0, 7]);
+  });
+});
+
+describe("mdRender adjacent links", () => {
+  it("keeps both labels and the comma between adjacent links", () => {
+    expect(mdRender("[A](one),[B](two)")).toBe('<p><a href="#">A</a>,<a href="#">B</a></p>');
+  });
+
+  it("stops destinations at the first closing parenthesis", () => {
+    expect(mdRender("[A](one) extra)")).toBe('<p><a href="#">A</a> extra)</p>');
+  });
+});
+
+describe("mdRender bounded inline scanning", () => {
+  it("treats unmatched opening brackets and unfinished destinations as literal text", () => {
+    expect(mdRender("[unfinished")).toBe("<p>[unfinished</p>");
+    expect(mdRender("[x](")).toBe("<p>[x](</p>");
+  });
+
+  it("counts a linear number of nodes for unmatched brackets and dense strong markers", () => {
+    const brackets = parseMarkdown("[".repeat(32));
+    const strong = parseMarkdown("**a**".repeat(8));
+    const unmatchedLink = parseMarkdown("[x](".repeat(8));
+
+    expect(brackets).toHaveLength(1);
+    expect(brackets[0]?.type).toBe("paragraph");
+    if (brackets[0]?.type === "paragraph") {
+      expect(brackets[0].children).toHaveLength(1);
+      expect(brackets[0].children[0]).toEqual({ type: "text", source: 0, value: "[".repeat(32) });
+    }
+    expect(strong).toHaveLength(1);
+    if (strong[0]?.type === "paragraph") {
+      expect(strong[0].children).toHaveLength(8);
+    }
+    expect(unmatchedLink).toHaveLength(1);
+    if (unmatchedLink[0]?.type === "paragraph") {
+      expect(unmatchedLink[0].children).toHaveLength(1);
+      expect(unmatchedLink[0].children[0]?.type).toBe("text");
+    }
+  });
+
+  it("scans 1 MiB unmatched brackets, unmatched link prefixes and dense strong markers in linear time", () => {
+    const megabyte = 1024 * 1024;
+    const started = Date.now();
+    const unmatchedBrackets = mdRender("[".repeat(megabyte));
+    const unmatchedLinks = mdRender("[x](".repeat(megabyte / 4));
+    const denseStrong = mdRender("**a**".repeat(megabyte / 5));
+    const elapsed = Date.now() - started;
+
+    expect(unmatchedBrackets).toBe(`<p>${"[".repeat(megabyte)}</p>`);
+    expect(unmatchedLinks).toBe(`<p>${"[x](".repeat(megabyte / 4)}</p>`);
+    expect(denseStrong.startsWith("<p>")).toBe(true);
+    expect(denseStrong.endsWith("</p>")).toBe(true);
+    expect(denseStrong.slice(3, -4)).toBe("<strong>a</strong>".repeat(megabyte / 5));
+    expect(elapsed).toBeLessThan(5_000);
+  });
+
+  it("keeps decorated siblings around closed and unclosed inline code", () => {
+    expect(mdRender("[A](one)`code`[B](two)")).toBe(
+      '<p><a href="#">A</a><code>code</code><a href="#">B</a></p>',
+    );
+    expect(mdRender("**a**`x`**b**")).toBe(
+      "<p><strong>a</strong><code>x</code><strong>b</strong></p>",
+    );
+    expect(mdRender("[A](one)`unclosed")).toBe('<p><a href="#">A</a>`unclosed</p>');
   });
 });

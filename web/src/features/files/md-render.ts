@@ -51,47 +51,147 @@ function appendText(nodes: MdInline[], value: string, source: number) {
   nodes.push({ type: "text", source, value });
 }
 
+function appendNodes(target: MdInline[], source: MdInline[]) {
+  for (const node of source) {
+    if (node.type === "text") {
+      appendText(target, node.value, node.source);
+      continue;
+    }
+    target.push(node);
+  }
+}
+
+function scanStrong(value: string, index: number, base: number): { next: number; node?: MdInline } {
+  let cursor = index + 2;
+  while (cursor < value.length - 1) {
+    if (value[cursor] === "\n") {
+      break;
+    }
+    if (value[cursor] === "*" && value[cursor + 1] === "*") {
+      if (cursor > index + 2) {
+        return {
+          next: cursor + 2,
+          node: {
+            type: "strong",
+            source: base + index,
+            children: [
+              { type: "text", source: base + index + 2, value: value.slice(index + 2, cursor) },
+            ],
+          },
+        };
+      }
+      break;
+    }
+    cursor += 1;
+  }
+  return { next: index + 1 };
+}
+
+function scanLink(
+  value: string,
+  index: number,
+  base: number,
+): { next: number; node?: MdInline; done?: boolean } {
+  const labelEnd = value.indexOf("]", index + 1);
+  if (labelEnd < 0) {
+    return { next: value.length, done: true };
+  }
+  if (value[labelEnd + 1] !== "(") {
+    return { next: labelEnd + 1 };
+  }
+  const destStart = labelEnd + 2;
+  const destEnd = value.indexOf(")", destStart);
+  if (destEnd < 0) {
+    return { next: value.length, done: true };
+  }
+  const destination = value.slice(destStart, destEnd);
+  if (
+    labelEnd === index + 1 ||
+    destEnd === destStart ||
+    destination.includes(" ") ||
+    destination.includes("\t")
+  ) {
+    return { next: index + 1 };
+  }
+  return {
+    next: destEnd + 1,
+    node: {
+      type: "link",
+      source: base + index,
+      children: [
+        { type: "text", source: base + index + 1, value: value.slice(index + 1, labelEnd) },
+      ],
+    },
+  };
+}
+
 function parseDecoratedText(value: string, base: number): MdInline[] {
   const nodes: MdInline[] = [];
-  let lastIndex = 0;
-  const pattern = /\*\*([^*\n]+)\*\*|\[([^\]]+)\]\((\S+)\)/g;
-  for (const match of value.matchAll(pattern)) {
-    appendText(nodes, value.slice(lastIndex, match.index), base + lastIndex);
-    if (match[1] !== undefined) {
-      nodes.push({
-        type: "strong",
-        source: base + match.index,
-        children: [{ type: "text", source: base + match.index + 2, value: match[1] }],
-      });
-    } else {
-      nodes.push({
-        type: "link",
-        source: base + match.index,
-        children: [{ type: "text", source: base + match.index + 1, value: match[2] ?? "" }],
-      });
-    }
-    lastIndex = match.index + match[0].length;
+  let index = 0;
+  let textStart = 0;
+
+  function flushText(until: number) {
+    appendText(nodes, value.slice(textStart, until), base + textStart);
+    textStart = until;
   }
-  appendText(nodes, value.slice(lastIndex), base + lastIndex);
+
+  while (index < value.length) {
+    if (value[index] === "*" && value[index + 1] === "*") {
+      const taken = scanStrong(value, index, base);
+      if (taken.node) {
+        flushText(index);
+        nodes.push(taken.node);
+        index = taken.next;
+        textStart = index;
+        continue;
+      }
+      index = taken.next;
+      continue;
+    }
+    if (value[index] === "[") {
+      const taken = scanLink(value, index, base);
+      if (taken.node) {
+        flushText(index);
+        nodes.push(taken.node);
+        index = taken.next;
+        textStart = index;
+        continue;
+      }
+      if (taken.done) {
+        index = value.length;
+        continue;
+      }
+      index = taken.next;
+      continue;
+    }
+    index += 1;
+  }
+  flushText(value.length);
   return nodes;
 }
 
 function parseInline(value: string, base: number): MdInline[] {
   const nodes: MdInline[] = [];
-  let lastIndex = 0;
-  for (const match of value.matchAll(/`([^`\n]*)`/g)) {
-    nodes.push(...parseDecoratedText(value.slice(lastIndex, match.index), base + lastIndex));
-    nodes.push({ type: "code", source: base + match.index, value: match[1] ?? "" });
-    lastIndex = match.index + match[0].length;
+  let index = 0;
+  let textStart = 0;
+
+  while (index < value.length) {
+    if (value[index] !== "`") {
+      index += 1;
+      continue;
+    }
+    const close = value.indexOf("`", index + 1);
+    if (close < 0) {
+      appendNodes(nodes, parseDecoratedText(value.slice(textStart, index), base + textStart));
+      appendText(nodes, value.slice(index), base + index);
+      return nodes;
+    }
+    appendNodes(nodes, parseDecoratedText(value.slice(textStart, index), base + textStart));
+    nodes.push({ type: "code", source: base + index, value: value.slice(index + 1, close) });
+    index = close + 1;
+    textStart = index;
   }
-  const leftover = value.slice(lastIndex);
-  const leftoverTick = leftover.indexOf("`");
-  if (leftoverTick < 0) {
-    nodes.push(...parseDecoratedText(leftover, base + lastIndex));
-    return nodes;
-  }
-  nodes.push(...parseDecoratedText(leftover.slice(0, leftoverTick), base + lastIndex));
-  appendText(nodes, leftover.slice(leftoverTick), base + lastIndex + leftoverTick);
+  appendNodes(nodes, parseDecoratedText(value.slice(textStart), base + textStart));
   return nodes;
 }
 
