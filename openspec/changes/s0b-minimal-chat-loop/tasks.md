@@ -2,11 +2,13 @@
 
 > 执行序按依赖排列；TDD：每条实现任务先写失败测试再实现。组 1/2/5 可并行；组 3 依赖 1、2；组 4 依赖 3；组 6 依赖 3、4、5。
 
+> 本次人工审核偏离：用户明确指示“本次工作豁免人工审核，待epic全部完成后进行功能审核”。仅适用于 Epic #81；代理审核、测试、CI 与修复轮次门禁不变。决定留痕：https://github.com/DankerMu/open-wb/issues/81#issuecomment-5743093674。
+
 ## 1. omp-runtime
 
 - [x] 1.1 `make omp-fetch`：Makefile 目标 + `scripts/omp-fetch.sh`（固定版本 v18.0.10、按 `uname -sm` 选资产、SHA256 表校验、幂等跳过、不支持平台显式失败）；`var/omp/` 落点；`.PHONY`/头注释同步；`scripts/test-ci-harness.sh` 控制面 oracle 同 PR 扩展——`omp-fetch` 进入受保护目标集（recipe 精确形状 + `omp-fetch :` 等价 duplicate mutation 必红），`make test-guardrails` 绿；本地实测 `var/omp/omp --version` = `omp/18.0.10`
 - [x] 1.2 `server/test/support/fake-omp.mjs`：按 rpc.md 吐帧的假子进程脚本（ready/negotiate/get_state、可脚本化：不发 ready、缺 sessionFile、分块/交错、崩溃、stopReason error、extension_ui_request、**call-proxy 模式**——从 `$PI_CODING_AGENT_DIR/models.yml` 取 `baseUrl`、以 `WORKBUDDY_MODEL_TOKEN` 为 bearer 真实 POST `/chat/completions` 并把上游文本转为 `text_delta` 帧，供 3.8 的「经代理的 prompt」单测使用）+ 自身契约单测
-- [ ] 1.3 `server/src/sessions/omp/process.ts` — **spawn 契约**：argv 组装（含 `--resume` 仅非 null 时追加）、env 白名单（精确键集断言）、四目录 mkdir；以捕获 spawn 参数的注入点单测，不走协议
+- [x] 1.3 `server/src/sessions/omp/process.ts` — **spawn 契约**：argv 组装（含 `--resume` 仅非 null 时追加）、env 白名单（精确键集断言）、四目录 mkdir；以捕获 spawn 参数的注入点单测，不走协议
 - [ ] 1.4 `server/src/sessions/omp/process.ts` — **帧层与握手**：JSONL 读写、`rpc_chunk` 重组与校验、`id` 相关、ready→negotiate v2→get_state（sessionFile 非空才成功）与超时、退出观察、`extension_ui_request` 回绝；对 1.2 假子进程单测
 - [ ] 1.5 `server/src/sessions/omp/runtime.ts`：`SessionRuntime`（懒 spawn、可注入时钟的 idle 计时器、关停序列 stdin→TERM→KILL、token 生成与注销回调、回合中退出上报）+ 单测
 

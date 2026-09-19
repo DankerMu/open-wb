@@ -2,10 +2,10 @@
 - [x] 1.1 Write failing spawn-contract tests before implementation, including semantic RED against a callable incomplete boundary; retain evidence.
 - [x] 1.2 Implement exact cold/resume argv, explicit env construction and four-directory preparation before spawn; preserve stdio pipes and no shell.
 - [x] 1.3 Prove exact capture plus real child env/cwd/argv, optional env present/absent/empty, 64-hex token, no credentials, parent env unchanged, existing-dir reuse and mkdir failure with no spawn.
-- [ ] 1.4 Run focused Vitest, npm test --workspace server (unchanged coverage), make lint, make typecheck, make anti-drift, direct boundary smoke and CI.
-- [ ] 1.5 Complete agent cross-review, obtain REQUIRED human white-box review, then merge and archive only this fixture.
+- [x] 1.4 Run focused Vitest, npm test --workspace server (unchanged coverage), make lint, make typecheck, make anti-drift, direct boundary smoke and CI.
+- [x] 1.5 Complete agent cross-review, record the user's Epic #81 human-review waiver, then merge and archive only this fixture.
 
-Evidence is retained in PR #147. The first agent review found a directory-ordering coverage gap (not a runtime defect): old tests passed an agent-directory-late mutant, strengthened synchronous spawn observers reject it (5 failures), restored implementation passes all 8 focused contracts. Native `/usr/bin/env` proves raw exact keys without filtering; Node probes verify argv/cwd and default spawning. #148 records OMP_BIN config evidence in #101 under the existing repo-root path requirement. Human white-box review remains unfulfilled; no merge or archive is authorized by automated evidence alone.
+Evidence is retained in PR #147. Two test-oracle repairs are qualified: late agent mkdir and swallowed home-mkdir failure mutants are rejected, restored implementation passes all 8 focused contracts. Native `/usr/bin/env` proves raw exact keys without filtering; Node probes verify argv/cwd and default spawning. #148 records OMP_BIN config evidence in #101 under the existing repo-root path requirement. The user explicitly waived pre-merge human review for this Epic and deferred functional review until Epic completion; this is a scoped exception, not a claim that human white-box review occurred. Decision: https://github.com/DankerMu/open-wb/issues/81#issuecomment-5743093674.
 
 ## Core risk packs
 - Selected Public API / CLI / script entry:1.2-1.4; real spawn and exact argv, no shell.

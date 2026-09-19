@@ -21,6 +21,6 @@ Required evidence: token retains the caller's 64-hex value; optional parent env 
 Required evidence: repeated launch reuses existing dirs; file obstructing a required directory fails before spawn; real child observations agree with capture and child is reaped by test owner.
 ## Risks / Trade-offs
 This closes declared environment inheritance only. Same-uid /proc and filesystem reads remain the documented S0b limit; ADR0010/S1a owns UID separation, not this issue.
-Production spawn/credential injection is Critical Path. Agent cross-review and green CI do not replace the REQUIRED human white-box review; hold merge until a human review record covers the final implementation.
+Production spawn/credential injection is Critical Path. The original per-PR human-review hold was explicitly waived by the user for Epic #81; functional review occurs after the Epic is complete. This scoped exception is recorded in issue #81 comment 5743093674 and PR #147; it does not change AGENTS defaults or waive agent review, testing or CI.
 ## Migration Plan
 No persisted-state migration. Later #95 extends the same module and uses this boundary; no second spawn implementation or compatibility wrapper.
