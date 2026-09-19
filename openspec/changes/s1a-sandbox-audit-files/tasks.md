@@ -15,7 +15,7 @@ Minimal mergeable slice: 1.1 `resolve` 纯函数单独可合并保绿（无依�
 
 ## 2. audit-core
 
-- [ ] 2.1 迁移 `030_audit_events.sql`（表/CHECK/索引/两只追加触发器）+ 形态与触发器单测；受信任迁移目录计数断言随之 +1
+- [x] 2.1 迁移 `030_audit_events.sql`（表/CHECK/索引/两只追加触发器）+ 形态与触发器单测；受信任迁移目录计数断言随之 +1（#114 / PR #146）
 - [ ] 2.2 `server/src/core/audit/index.ts`：`emit`/`query`（角色过滤、`limit` 1..200、`before` 游标、`detail` JSON 往返）+ `:memory:` 单测
 - [ ] 2.3 `server/src/accounts/index.ts`：`registerAccounts(app,{db})` 挂 `GET /api/audit`（guard 后、`no-store`、400 分支）+ `app.inject()` 单测（成员/管理员两账号）
 

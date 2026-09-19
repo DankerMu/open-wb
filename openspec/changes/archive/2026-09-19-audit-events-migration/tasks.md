@@ -2,7 +2,7 @@
 - [x] 1.1 Write real SQLite tests through openDb for schema/index/triggers, legal insert/defaults/generated id, immutable rows/FK restrictions, kind/JSON/ts/null constraints; record semantic RED before migration.
 - [x] 1.2 Add only 030 SQL, update exact tracked migration/receipt/global-trigger catalog expectations including auth-schema receipt row; prove GREEN without old migration/runner edits.
 - [x] 1.3 Exercise late-conflict atomic rollback and file reopen; parent runs server suite with unchanged coverage, typecheck/build, Biome/knip/jscpd and compiled openDb smoke.
-- [ ] 1.4 Independent expanded review and required CI green, then merge/archive slice; keep parent Epic active.
+- [x] 1.4 Independent expanded review and required CI green, then merge/archive slice; keep parent Epic active. Evidence: https://github.com/DankerMu/open-wb/pull/146#issuecomment-5742591426
 ## Risk packs
 - Not selected Public API / CLI / script entry: no new application API; existing openDb contract preserved.
 - Not selected Config / project setup: no settings or toolchain changes.
