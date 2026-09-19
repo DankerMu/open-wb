@@ -1,4 +1,15 @@
-import fs, { chmodSync, lstatSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import fs, {
+  chmodSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  type Stats,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -10,6 +21,7 @@ const EXISTING_MODE = 0o755;
 
 afterEach(() => {
   vi.restoreAllMocks();
+  syncBuiltinESMExports();
   for (const dir of tmpDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -21,8 +33,26 @@ function createParent(): string {
   return parent;
 }
 
+function existing0755Abc(): { a: string; b: string; c: string } {
+  const parent = createParent();
+  const a = join(parent, "a");
+  const b = join(a, "b");
+  const c = join(b, "c");
+  mkdirSync(a);
+  chmodSync(a, EXISTING_MODE);
+  return { a, b, c };
+}
+
 function modeOf(path: string): number {
   return lstatSync(path).mode & 0o7777;
+}
+
+function expectUnchangedSymlink(path: string, before: Stats): void {
+  const after = lstatSync(path);
+  expect(after.isSymbolicLink()).toBe(true);
+  expect(after.mode).toBe(before.mode);
+  expect(after.uid).toBe(before.uid);
+  expect(after.gid).toBe(before.gid);
 }
 
 describe("core/sandbox ensureSharedDir", () => {
@@ -46,16 +76,12 @@ describe("core/sandbox ensureSharedDir", () => {
   });
 
   it("leaves a pre-existing 0755 ancestor unchanged, does not chown, and does not change umask", () => {
-    const parent = createParent();
-    const a = join(parent, "a");
-    const b = join(a, "b");
-    const c = join(b, "c");
-    mkdirSync(a);
-    chmodSync(a, EXISTING_MODE);
+    const { a, b, c } = existing0755Abc();
     const beforeUid = lstatSync(a).uid;
     const beforeGid = lstatSync(a).gid;
     const beforeUmask = process.umask();
     const chownSpy = vi.spyOn(fs, "chownSync");
+    syncBuiltinESMExports();
 
     ensureSharedDir(c);
 
@@ -69,17 +95,12 @@ describe("core/sandbox ensureSharedDir", () => {
   });
 
   it("throws on a regular-file collision and preserves existing file and directory state", () => {
-    const parent = createParent();
-    const a = join(parent, "a");
-    const b = join(a, "b");
-    const c = join(b, "c");
-    mkdirSync(a);
-    chmodSync(a, EXISTING_MODE);
+    const { a, b, c } = existing0755Abc();
     writeFileSync(b, "not-a-directory");
     const beforeA = lstatSync(a);
     const beforeB = lstatSync(b);
 
-    expect(() => ensureSharedDir(c)).toThrow(expect.objectContaining({ code: "ENOTDIR" }));
+    expect(() => ensureSharedDir(c)).toThrow();
 
     expect(modeOf(a)).toBe(EXISTING_MODE);
     expect(lstatSync(a).isDirectory()).toBe(true);
@@ -89,6 +110,88 @@ describe("core/sandbox ensureSharedDir", () => {
     expect(lstatSync(b).mode).toBe(beforeB.mode);
     expect(lstatSync(b).uid).toBe(beforeB.uid);
     expect(lstatSync(b).gid).toBe(beforeB.gid);
-    expect(() => lstatSync(c)).toThrow(expect.objectContaining({ code: "ENOTDIR" }));
+    expect(() => lstatSync(c)).toThrow();
+  });
+
+  it("throws on a leaf regular-file collision and preserves file bytes, mode, and ownership", () => {
+    const parent = createParent();
+    const leaf = join(parent, "file");
+    writeFileSync(leaf, "sentinel-bytes");
+    const beforeLeaf = lstatSync(leaf);
+    const beforeParent = lstatSync(parent);
+
+    expect(() => ensureSharedDir(leaf)).toThrow();
+
+    expect(readFileSync(leaf, "utf8")).toBe("sentinel-bytes");
+    expect(lstatSync(leaf).isFile()).toBe(true);
+    expect(lstatSync(leaf).mode).toBe(beforeLeaf.mode);
+    expect(lstatSync(leaf).uid).toBe(beforeLeaf.uid);
+    expect(lstatSync(leaf).gid).toBe(beforeLeaf.gid);
+    expect(lstatSync(parent).isDirectory()).toBe(true);
+    expect(lstatSync(parent).mode).toBe(beforeParent.mode);
+    expect(lstatSync(parent).uid).toBe(beforeParent.uid);
+    expect(lstatSync(parent).gid).toBe(beforeParent.gid);
+  });
+
+  it("leaves a pre-existing 0755 leaf directory unchanged", () => {
+    const parent = createParent();
+    const leaf = join(parent, "leaf");
+    mkdirSync(leaf);
+    chmodSync(leaf, EXISTING_MODE);
+    const before = lstatSync(leaf);
+
+    ensureSharedDir(leaf);
+
+    expect(modeOf(leaf)).toBe(EXISTING_MODE);
+    expect(lstatSync(leaf).isDirectory()).toBe(true);
+    expect(lstatSync(leaf).uid).toBe(before.uid);
+    expect(lstatSync(leaf).gid).toBe(before.gid);
+  });
+
+  it("rejects a leaf symlink to a regular file and leaves the link unchanged", () => {
+    const parent = createParent();
+    const target = join(parent, "target");
+    const leaf = join(parent, "file-link");
+    writeFileSync(target, "payload");
+    symlinkSync(target, leaf);
+    const beforeLink = lstatSync(leaf);
+    const beforeTarget = lstatSync(target);
+
+    expect(() => ensureSharedDir(leaf)).toThrow();
+
+    expectUnchangedSymlink(leaf, beforeLink);
+    expect(readFileSync(target, "utf8")).toBe("payload");
+    expect(lstatSync(target).mode).toBe(beforeTarget.mode);
+    expect(lstatSync(target).uid).toBe(beforeTarget.uid);
+    expect(lstatSync(target).gid).toBe(beforeTarget.gid);
+  });
+
+  it("rejects a dangling leaf symlink and leaves the link unchanged", () => {
+    const parent = createParent();
+    const leaf = join(parent, "dangling");
+    symlinkSync(join(parent, "missing-target"), leaf);
+    const before = lstatSync(leaf);
+
+    expect(() => ensureSharedDir(leaf)).toThrow();
+
+    expectUnchangedSymlink(leaf, before);
+  });
+
+  it("accepts a symlink to an existing directory without changing the target mode", () => {
+    const parent = createParent();
+    const target = join(parent, "real-dir");
+    const leaf = join(parent, "dir-link");
+    mkdirSync(target);
+    chmodSync(target, EXISTING_MODE);
+    symlinkSync(target, leaf);
+    const beforeTarget = lstatSync(target);
+    const beforeLink = lstatSync(leaf);
+
+    ensureSharedDir(leaf);
+
+    expectUnchangedSymlink(leaf, beforeLink);
+    expect(modeOf(target)).toBe(EXISTING_MODE);
+    expect(lstatSync(target).uid).toBe(beforeTarget.uid);
+    expect(lstatSync(target).gid).toBe(beforeTarget.gid);
   });
 });

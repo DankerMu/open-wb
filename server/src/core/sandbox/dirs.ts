@@ -5,7 +5,7 @@
  * 不 chown、不改进程 umask、不改既有分量。组归属由部署 setgid 继承。
  */
 
-import { chmodSync, mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync, statSync } from "node:fs";
 
 const SHARED_DIR_MODE = 0o2770;
 
@@ -15,13 +15,13 @@ export function ensureSharedDir(absPath: string): void {
     const slash = absPath.indexOf("/", start);
     const current = slash === -1 ? absPath : absPath.slice(0, slash);
     start = slash === -1 ? absPath.length + 1 : slash + 1;
-    if (current.length === 0) {
-      continue;
-    }
     try {
       mkdirSync(current);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+        throw error;
+      }
+      if (!statSync(current).isDirectory()) {
         throw error;
       }
       continue;
