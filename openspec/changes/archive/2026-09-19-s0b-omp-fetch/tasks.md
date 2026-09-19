@@ -4,7 +4,7 @@
 - [x] 1.3 Add Make target and PHONY/header alignment; extend existing exact recipe and duplicate-target mutation oracle without weakening prior checks.
 - [x] 1.4 Run real make omp-fetch and var/omp/omp --version; assert omp/18.0.10; run again with downloader forbidden and observe skip.
 - [x] 1.5 Prove bad checksum reports expected/actual and leaves no destination; unsupported platform fails; verify both digest entries against official release.
-- [ ] 1.6 Run make test-guardrails and shell syntax checks; independently audit evidence and pass CI before merging.
+- [x] 1.6 Run make test-guardrails and shell syntax checks; independently audit evidence and pass CI before merging.
 
 ## Risk pack mapping
 - Selected Public API / CLI / script entry: tasks 1.1, 1.3-1.6; real make command and duplicate definition rejection.
