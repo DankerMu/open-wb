@@ -172,7 +172,7 @@ describe("spawnOmp spawn contract", () => {
     writeFileSync(roots.home, "not a directory");
     const calls: SpawnCall[] = [];
     await withContaminatedEnv({}, async () => {
-      await expect(spawnOmp(optsOf(roots, null), capturingSpawn(calls))).rejects.toThrow();
+      await expect(spawnOmp(optsOf(roots, null), capturingSpawn(roots, calls))).rejects.toThrow();
     });
     expect(calls).toHaveLength(0);
     expect(statSync(roots.home).isFile()).toBe(true);
@@ -189,10 +189,10 @@ describe("spawnOmp spawn contract", () => {
     await withContaminatedEnv({ LANG: "C.UTF-8", TMPDIR: "/tmp" }, async () => {
       const parentDuring = { ...process.env };
       argvProbe = await readArgvProbe(
-        await spawnOmp(optsOf(roots, resumePath), probingSpawn(argvCalls)),
+        await spawnOmp(optsOf(roots, resumePath), probingSpawn(roots, argvCalls)),
       );
       envDump = await readEnvDump(
-        await spawnOmp(optsOf(roots, resumePath), envDumpSpawn(envCalls)),
+        await spawnOmp(optsOf(roots, resumePath), envDumpSpawn(roots, envCalls)),
       );
       expect({ ...process.env }).toEqual(parentDuring);
     });
@@ -335,7 +335,7 @@ async function capture(
 ): Promise<SpawnCall> {
   const calls: SpawnCall[] = [];
   await withContaminatedEnv(patch, async () => {
-    await spawnOmp(optsOf(roots, resumePath), capturingSpawn(calls));
+    await spawnOmp(optsOf(roots, resumePath), capturingSpawn(roots, calls));
   });
   const call = calls[0];
   if (call === undefined) {
@@ -352,7 +352,7 @@ async function captureWithSnapshot(
   let parentDuring: NodeJS.ProcessEnv = {};
   await withContaminatedEnv(patch, async () => {
     parentDuring = { ...process.env };
-    await spawnOmp(optsOf(roots, null), capturingSpawn(calls));
+    await spawnOmp(optsOf(roots, null), capturingSpawn(roots, calls));
     expect({ ...process.env }).toEqual(parentDuring);
   });
   const call = calls[0];
@@ -362,31 +362,29 @@ async function captureWithSnapshot(
   return { call, parentDuring };
 }
 
-function capturingSpawn(calls: SpawnCall[]): SpawnImpl {
-  return (command, args, options) => {
-    calls.push(recordedCall(command, args, options));
-    const child = spawn(process.execPath, ["-e", "process.exit(0)"], {
+function capturingSpawn(roots: SpawnRoots, calls: SpawnCall[]): SpawnImpl {
+  return observingSpawn(roots, calls, (_command, _args, _options) =>
+    spawn(process.execPath, ["-e", "process.exit(0)"], {
       stdio: ["pipe", "pipe", "pipe"],
       env: { PATH: process.env.PATH ?? "" },
-    });
-    children.push(child);
-    return child;
-  };
+    }),
+  );
 }
 
-function probingSpawn(calls: SpawnCall[]): SpawnImpl {
-  return observingSpawn(calls, (command, args, options) =>
+function probingSpawn(roots: SpawnRoots, calls: SpawnCall[]): SpawnImpl {
+  return observingSpawn(roots, calls, (command, args, options) =>
     spawn(process.execPath, ["-e", ARGV_PROBE, command, ...args], observedSpawnOptions(options)),
   );
 }
 
-function envDumpSpawn(calls: SpawnCall[]): SpawnImpl {
-  return observingSpawn(calls, (_command, _args, options) =>
+function envDumpSpawn(roots: SpawnRoots, calls: SpawnCall[]): SpawnImpl {
+  return observingSpawn(roots, calls, (_command, _args, options) =>
     spawn(ENV_BIN, [], observedSpawnOptions(options)),
   );
 }
 
 function observingSpawn(
+  roots: SpawnRoots,
   calls: SpawnCall[],
   launch: (
     command: string,
@@ -395,6 +393,7 @@ function observingSpawn(
   ) => ChildProcessWithoutNullStreams,
 ): SpawnImpl {
   return (command, args, options) => {
+    expectFourDirectories(roots);
     calls.push(recordedCall(command, args, options));
     const child = launch(command, args, options);
     children.push(child);

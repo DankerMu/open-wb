@@ -7,6 +7,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
 export interface SpawnOmpOpts {
+  /** Trusted absolute executable path from config; not a PATH lookup. Validation is future config owner #101. */
   bin: string;
   sandboxRoot: string;
   stateDir: string;
