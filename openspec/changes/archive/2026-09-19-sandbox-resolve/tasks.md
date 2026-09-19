@@ -2,7 +2,7 @@
 - [x] 1.1 Write real-filesystem tests for every resolve scenario, observe semantic RED before implementation, preserve output.
 - [x] 1.2 Implement synchronous resolver only; prove GREEN and unchanged filesystem snapshots.
 - [x] 1.3 Run server suite with unchanged coverage scope, server typecheck, focused Biome checks; CI supplies full repository checks.
-- [ ] 1.4 Independent code review, human white-box review and green CI before merge.
+- [x] 1.4 Independent code review, human white-box review and green CI before merge. Approval: https://github.com/DankerMu/open-wb/pull/138#issuecomment-5741113182
 
 ## Risk packs
 - Selected Public API / CLI / script entry: exported result union exercised directly by scenario tests.
