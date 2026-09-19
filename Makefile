@@ -1,7 +1,8 @@
 # open-workbuddy 唯一命令面。所有工作流经此路由；AGENTS.md 验证矩阵与 constraints.yaml
-# verification 段是它的镜像，增删目标须三处同步。
+# verification 段是它的镜像，增删目标须三处同步。omp-fetch 是二进制供给前置，
+# 控制面文档行（AGENTS.md / constraints.yaml）延后到 issue #107。
 SHELL := /bin/bash
-.PHONY: setup hooks lint fmt typecheck test anti-drift guard check test-guardrails precommit dev smoke ui-walk
+.PHONY: setup hooks lint fmt typecheck test anti-drift guard check test-guardrails precommit dev smoke ui-walk omp-fetch
 
 setup: ## 安装依赖 + 挂 git hooks
 	npm install
@@ -65,5 +66,8 @@ override UI_WALK_BASE_URL := $(value UI_WALK_BASE_URL)
 export UI_WALK_BASE_URL
 ui-walk: ## Playwright UI 走查（只消费已运行服务；不 build/start/stop/install）
 	npm run ui-walk --workspace web
+
+omp-fetch: ## 拉取官方 omp v18.0.10 到 var/omp/omp（SHA256 校验；已校验则跳过）
+	bash scripts/omp-fetch.sh
 
 precommit: guard
