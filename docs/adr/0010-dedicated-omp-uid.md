@@ -17,3 +17,18 @@ CONTEXT.md 不变量 4（网关/kb 凭证不进 omp 可读环境）在同 uid �
 
 - 每账号独立 uid：隔离更强，但需动态建系统用户与配额，重得多；作为升级路径保留。
 - 同 uid 接受泄漏：须在 constraints.yaml downgrades 记为对不变量 4 的降级——等于承认不变量不成立，弃。
+
+## 补充（2026-09-18，S1a grill 拍板）：spawn 机制与权限模型
+
+- **spawn 机制**：Linux 上 app-server 以 `sudo -n -u <OMP_USER> -- VAR=val … <OMP_BIN> --mode rpc …` 启动 omp；
+  sudoers 一行 `<app-user> ALL=(<OMP_USER>) NOPASSWD: SETENV: <OMP_BIN>`——`SETENV` 允许命令行赋值，
+  使 S0b 的环境白名单原样传入且不继承 app-server 环境；stdio 直通，RPC 帧层不变。`OMP_USER` 未设置时
+  直接 spawn（macOS 开发机、单测）。否决项：`systemd-run --uid`（引入 systemd 与 polkit 依赖，容器内不稳）、
+  自研 setuid 包装器（多一个需审计的特权二进制）。
+- **权限模型**：两用户同属组 `workbuddy`；`SANDBOX_ROOT`、`OMP_STATE_DIR` 及其下目录 `2770`（setgid 继承组），
+  双方 umask `007`；app-server 自有状态（SQLite、配置、环境）放在沙箱与 omp 状态目录之外且 `0700`/`0600`。
+  `core/sandbox` 的目录创建路径负责施加位。否决项：POSIX ACL（依赖 acl 工具与 FUSE 支持，S1b 挂载不保证）、
+  app-server 经 sudo 代操作文件（每次列举/预览起进程）。
+- **验证**：CI 新增 ubuntu job `uid-isolation`（useradd、写 sudoers、`OMP_USER` 起编译服务）跑 Linux-only 集成测试：
+  子进程 `Uid` 为 omp、omp 用户读 app-server `/proc/<pid>/environ` 得 `EACCES`、沙箱目录可读写；进入 `all-checks-passed`。
+  测试 VPS 保留为部署演练。S0b `constraints.yaml downgrades` 的 `/proc` 向量条目于本 job 全绿时删除。
