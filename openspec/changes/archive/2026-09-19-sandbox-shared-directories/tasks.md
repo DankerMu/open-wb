@@ -1,7 +1,7 @@
 ## 1. Implement and verify
 - [x] 1.1 Real temp directory tests: three new levels 2770, repeat unchanged, existing 0755 preserved, no chownSync, no umask mutation, file collision failure; semantic RED before code.
 - [x] 1.2 Implement only ensureSharedDir and prove focused GREEN; exercise compiled public function as smoke.
-- [ ] 1.3 Parent runs server suite with unchanged coverage, typecheck, build, focused Biome and knip; independent reviews and required CI green before merge.
+- [x] 1.3 Parent runs server suite with unchanged coverage, typecheck, build, focused Biome and knip; independent reviews and required CI green before merge. Evidence: https://github.com/DankerMu/open-wb/pull/142#issuecomment-5741930668
 ## Risk packs
 - Selected Public API / CLI / script entry: signature and thrown failure observed through exported helper (1.1–1.3).
 - Not selected Config / project setup: no configuration changes.

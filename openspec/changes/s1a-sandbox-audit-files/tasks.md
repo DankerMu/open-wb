@@ -7,7 +7,7 @@
 ## 1. sandbox-core
 
 - [x] 1.1 `server/src/core/sandbox/resolve.ts`：`resolve(root, relPath, op)` 纯函数（NUL/绝对/`..`/边界前缀/逐分量 lstat 拒绝 symlink/mkdir 末段规则）+ 临时目录逃逸向量集单测（含 `/a` vs `/ab`、悬空 symlink、symlink 目录下子路径）（#112 / PR #138）
-- [ ] 1.2 `server/src/core/sandbox/dirs.ts`：`ensureSharedDir(absPath)`（递归创建、仅新建分量 `chmod 0o2770`、不 chown、不动 umask）+ mode 位单测（新建 `0o2770`、既有 `0o755` 不变、幂等）
+- [x] 1.2 `server/src/core/sandbox/dirs.ts`：`ensureSharedDir(absPath)`（递归创建、仅新建分量 `chmod 0o2770`、不 chown、不动 umask）+ mode 位单测（新建 `0o2770`、既有 `0o755` 不变、幂等）（#113 / PR #142）
 - [ ] 1.3 `server/src/core/sandbox/index.ts`：`createSandbox({rootOf, audit})` facade（`rootOf` null → `not_found`；拒绝 → `emit(sandbox.reject)` 后抛 `sandbox_denied`；审计失败 → 5xx 不放行）+ 以 stub `rootOf`/stub `audit` 的单测
 
 Suggested fixture level: expanded - 沙箱 resolve 是 AGENTS.md 白盒 Critical Path（不变量 3），逃逸向量集必须以真实文件系统（临时目录 + 真 symlink）证明，不可 mock
