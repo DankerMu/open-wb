@@ -3,6 +3,7 @@ import fs, {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   type Stats,
@@ -47,12 +48,16 @@ function modeOf(path: string): number {
   return lstatSync(path).mode & 0o7777;
 }
 
-function expectUnchangedSymlink(path: string, before: Stats): void {
+function expectUnchangedMetadata(path: string, before: Stats): void {
   const after = lstatSync(path);
-  expect(after.isSymbolicLink()).toBe(true);
   expect(after.mode).toBe(before.mode);
   expect(after.uid).toBe(before.uid);
   expect(after.gid).toBe(before.gid);
+}
+
+function expectUnchangedSymlink(path: string, before: Stats): void {
+  expect(lstatSync(path).isSymbolicLink()).toBe(true);
+  expectUnchangedMetadata(path, before);
 }
 
 describe("core/sandbox ensureSharedDir", () => {
@@ -107,9 +112,7 @@ describe("core/sandbox ensureSharedDir", () => {
     expect(lstatSync(a).uid).toBe(beforeA.uid);
     expect(lstatSync(a).gid).toBe(beforeA.gid);
     expect(lstatSync(b).isFile()).toBe(true);
-    expect(lstatSync(b).mode).toBe(beforeB.mode);
-    expect(lstatSync(b).uid).toBe(beforeB.uid);
-    expect(lstatSync(b).gid).toBe(beforeB.gid);
+    expectUnchangedMetadata(b, beforeB);
     expect(() => lstatSync(c)).toThrow();
   });
 
@@ -124,13 +127,9 @@ describe("core/sandbox ensureSharedDir", () => {
 
     expect(readFileSync(leaf, "utf8")).toBe("sentinel-bytes");
     expect(lstatSync(leaf).isFile()).toBe(true);
-    expect(lstatSync(leaf).mode).toBe(beforeLeaf.mode);
-    expect(lstatSync(leaf).uid).toBe(beforeLeaf.uid);
-    expect(lstatSync(leaf).gid).toBe(beforeLeaf.gid);
+    expectUnchangedMetadata(leaf, beforeLeaf);
     expect(lstatSync(parent).isDirectory()).toBe(true);
-    expect(lstatSync(parent).mode).toBe(beforeParent.mode);
-    expect(lstatSync(parent).uid).toBe(beforeParent.uid);
-    expect(lstatSync(parent).gid).toBe(beforeParent.gid);
+    expectUnchangedMetadata(parent, beforeParent);
   });
 
   it("leaves a pre-existing 0755 leaf directory unchanged", () => {
@@ -161,9 +160,7 @@ describe("core/sandbox ensureSharedDir", () => {
 
     expectUnchangedSymlink(leaf, beforeLink);
     expect(readFileSync(target, "utf8")).toBe("payload");
-    expect(lstatSync(target).mode).toBe(beforeTarget.mode);
-    expect(lstatSync(target).uid).toBe(beforeTarget.uid);
-    expect(lstatSync(target).gid).toBe(beforeTarget.gid);
+    expectUnchangedMetadata(target, beforeTarget);
   });
 
   it("rejects a dangling leaf symlink and leaves the link unchanged", () => {
@@ -193,5 +190,19 @@ describe("core/sandbox ensureSharedDir", () => {
     expect(modeOf(target)).toBe(EXISTING_MODE);
     expect(lstatSync(target).uid).toBe(beforeTarget.uid);
     expect(lstatSync(target).gid).toBe(beforeTarget.gid);
+  });
+
+  it("throws on a NAME_MAX leaf mkdir failure and leaves the parent directory unchanged", () => {
+    const parent = createParent();
+    const leaf = join(parent, "x".repeat(300));
+    const beforeParent = lstatSync(parent);
+    const beforeEntries = readdirSync(parent);
+
+    expect(() => ensureSharedDir(leaf)).toThrow();
+
+    expect(readdirSync(parent)).toEqual(beforeEntries);
+    expect(lstatSync(parent).isDirectory()).toBe(true);
+    expectUnchangedMetadata(parent, beforeParent);
+    expect(() => lstatSync(leaf)).toThrow();
   });
 });
