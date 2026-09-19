@@ -393,8 +393,8 @@ function observingSpawn(
   ) => ChildProcessWithoutNullStreams,
 ): SpawnImpl {
   return (command, args, options) => {
-    expectFourDirectories(roots);
     calls.push(recordedCall(command, args, options));
+    expectFourDirectories(roots);
     const child = launch(command, args, options);
     children.push(child);
     return child;
