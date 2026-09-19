@@ -1,10 +1,17 @@
 /**
- * omp spawn assembly (Issue #85): argv, allowlisted env, directory preparation.
- * Protocol, idle/reap, models.yml and token issuance live elsewhere.
+ * omp spawn assembly (Issue #85) and RPC transport (Issue #95).
+ * Idle/reap policy, models.yml and token issuance live elsewhere.
  */
 import { type ChildProcessWithoutNullStreams, type SpawnOptions, spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import {
+  MAX_RPC_FRAME_BYTES,
+  MAX_RPC_REASSEMBLED_BYTES,
+  type OmpFrame,
+  RpcChunkDecoder,
+} from "./frame.js";
 
 export interface SpawnOmpOpts {
   /** Trusted absolute executable path from config; not a PATH lookup. Validation is future config owner #101. */
@@ -80,4 +87,561 @@ export async function spawnOmp(
     stdio: ["pipe", "pipe", "pipe"],
     shell: false,
   });
+}
+
+const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000;
+
+export interface OmpProcessOpts extends SpawnOmpOpts {
+  spawnImpl?: SpawnImpl;
+  handshakeTimeoutMs?: number;
+}
+
+export interface OmpExit {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+}
+
+export class AgentUnavailableError extends Error {
+  readonly code = "agent_unavailable" as const;
+
+  constructor(message = "agent_unavailable") {
+    super(message);
+    this.name = "AgentUnavailableError";
+  }
+}
+
+export class OmpProtocolError extends Error {
+  readonly code = "protocol_error" as const;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "OmpProtocolError";
+  }
+}
+
+interface PendingRequest {
+  command: string;
+  resolve: (frame: OmpFrame) => void;
+  reject: (error: Error) => void;
+}
+
+interface OmpEvents {
+  frame: [OmpFrame];
+  exit: [OmpExit];
+  error: [Error];
+}
+
+/**
+ * JSONL RPC transport over spawnOmp. Handshake succeeds only after ready,
+ * negotiate_protocol v2, and nonempty get_state.sessionFile.
+ */
+export class OmpProcess {
+  readonly #opts: SpawnOmpOpts;
+  readonly #spawnImpl: SpawnImpl;
+  readonly handshakeTimeoutMs: number;
+  readonly #events = new EventEmitter();
+  readonly #pending = new Map<string, PendingRequest>();
+  readonly #decoder = new RpcChunkDecoder();
+  readonly #ready: Promise<void>;
+  #settleReady: ((error?: Error) => void) | undefined;
+  #readySettled = false;
+  #child: ChildProcessWithoutNullStreams | undefined;
+  #startPromise: Promise<{ sessionFile: string }> | undefined;
+  #handshakeTimer: ReturnType<typeof setTimeout> | undefined;
+  #nextId = 0;
+  #line: Buffer | undefined;
+  #lineLength = 0;
+  #discardingOversizedLine = false;
+  #maxPhysical = MAX_RPC_FRAME_BYTES;
+  #maxLogical = MAX_RPC_REASSEMBLED_BYTES;
+  #exited = false;
+  #closed = false;
+  #stdoutClosed = false;
+  #fatal: Error | undefined;
+
+  constructor(opts: OmpProcessOpts) {
+    const { spawnImpl, handshakeTimeoutMs, ...spawnOpts } = opts;
+    this.#opts = spawnOpts;
+    this.#spawnImpl = spawnImpl ?? (spawn as SpawnImpl);
+    this.handshakeTimeoutMs = handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS;
+    this.#ready = new Promise<void>((resolve, reject) => {
+      this.#settleReady = (error) => {
+        if (this.#readySettled) {
+          return;
+        }
+        this.#readySettled = true;
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      };
+    });
+    void this.#ready.catch(() => {});
+    this.#events.on("error", () => {});
+  }
+
+  get child(): ChildProcessWithoutNullStreams | undefined {
+    return this.#child;
+  }
+
+  on<K extends keyof OmpEvents>(event: K, listener: (...args: OmpEvents[K]) => void): this {
+    this.#events.on(event, listener as never);
+    return this;
+  }
+
+  start(): Promise<{ sessionFile: string }> {
+    this.#startPromise ??= this.#boot();
+    return this.#startPromise;
+  }
+
+  send(frame: OmpFrame): Promise<void> {
+    return this.#write(frame);
+  }
+
+  request(frame: OmpFrame): Promise<OmpFrame> {
+    const command = typeof frame.type === "string" ? frame.type : "";
+    const id = typeof frame.id === "string" && frame.id.length > 0 ? frame.id : this.#id();
+    return this.#request(command, { ...frame, id });
+  }
+
+  closeInput(): void {
+    this.#child?.stdin.end();
+  }
+
+  kill(signal: NodeJS.Signals = "SIGKILL"): boolean {
+    return this.#child?.kill(signal) ?? false;
+  }
+
+  async #boot(): Promise<{ sessionFile: string }> {
+    try {
+      this.#child = await spawnOmp(this.#opts, this.#spawnImpl);
+    } catch (error) {
+      throw this.#failStartup(sanitizeIo(error, "spawn failed"));
+    }
+    this.#attach(this.#child);
+    const timeout = this.#deadline();
+    const handshake = this.#handshake();
+    void handshake.catch(() => {});
+    try {
+      const sessionFile = await Promise.race([handshake, timeout.promise]);
+      return { sessionFile };
+    } catch (error) {
+      throw this.#failStartup(error);
+    } finally {
+      timeout.clear();
+    }
+  }
+
+  async #handshake(): Promise<string> {
+    if (this.#fatal) {
+      throw this.#fatal;
+    }
+    await this.#ready;
+    const negotiate = await this.#request("negotiate_protocol", {
+      id: this.#id(),
+      type: "negotiate_protocol",
+      protocolVersion: 2,
+    });
+    if (
+      negotiate.success !== true ||
+      negotiate.command !== "negotiate_protocol" ||
+      asRecord(negotiate.data).protocolVersion !== 2
+    ) {
+      throw new AgentUnavailableError("negotiate_protocol failed");
+    }
+    const state = await this.#request("get_state", { id: this.#id(), type: "get_state" });
+    const sessionFile = asRecord(state.data).sessionFile;
+    if (state.success !== true || state.command !== "get_state" || !isNonemptyString(sessionFile)) {
+      throw new AgentUnavailableError("get_state missing sessionFile");
+    }
+    return sessionFile;
+  }
+
+  #applyLimits(ready: OmpFrame): void {
+    const physical = ready.maxFrameBytes;
+    const logical = ready.maxReassembledFrameBytes;
+    if (typeof physical === "number" && Number.isSafeInteger(physical) && physical > 0) {
+      this.#maxPhysical = Math.min(physical, MAX_RPC_FRAME_BYTES);
+    }
+    if (typeof logical === "number" && Number.isSafeInteger(logical) && logical > 0) {
+      this.#maxLogical = Math.min(logical, MAX_RPC_REASSEMBLED_BYTES);
+    }
+    this.#decoder.setLimits(this.#maxPhysical, this.#maxLogical);
+  }
+
+  #request(command: string, frame: OmpFrame): Promise<OmpFrame> {
+    const id = typeof frame.id === "string" ? frame.id : this.#id();
+    if (this.#pending.has(id)) {
+      return Promise.reject(new OmpProtocolError("duplicate request id"));
+    }
+    return new Promise<OmpFrame>((resolve, reject) => {
+      if (this.#fatal) {
+        reject(this.#fatal);
+        return;
+      }
+      const pending: PendingRequest = { command, resolve, reject };
+      this.#pending.set(id, pending);
+      const failWrite = (error: unknown): void => {
+        if (this.#pending.get(id) === pending) this.#pending.delete(id);
+        reject(sanitizeIo(error, "write failed"));
+      };
+      void this.#write({ ...frame, id }).catch(failWrite);
+    });
+  }
+
+  #write(frame: OmpFrame): Promise<void> {
+    const child = this.#child;
+    if (child === undefined || child.stdin.destroyed || this.#closed) {
+      return Promise.reject(sanitizeIo(this.#fatal ?? new Error("stdin closed"), "write failed"));
+    }
+    let line: string;
+    try {
+      line = `${JSON.stringify(frame)}\n`;
+    } catch (error) {
+      return Promise.reject(sanitizeIo(error, "write failed"));
+    }
+    if (Buffer.byteLength(line, "utf8") > this.#maxPhysical) {
+      return Promise.reject(new OmpProtocolError("outbound frame exceeds physical limit"));
+    }
+    return new Promise<void>((resolve, reject) => {
+      try {
+        child.stdin.write(line, (error) => {
+          if (error) {
+            reject(sanitizeIo(error, "write failed"));
+            return;
+          }
+          resolve();
+        });
+      } catch (error) {
+        reject(sanitizeIo(error, "write failed"));
+      }
+    });
+  }
+
+  #attach(child: ChildProcessWithoutNullStreams): void {
+    child.stdout.on("data", (chunk: Buffer | string) => {
+      this.#onStdout(typeof chunk === "string" ? Buffer.from(chunk, "utf8") : chunk);
+    });
+    child.stdout.on("end", () => {
+      this.#onStdoutEnd();
+    });
+    child.stdout.on("close", () => {
+      this.#onStdoutEnd();
+    });
+    child.stdout.on("error", (error) => {
+      this.#failIo(error);
+    });
+    child.stdin.on("error", (error) => {
+      this.#failIo(error);
+    });
+    child.stderr.on("data", () => {
+      // Drain only; never retain or log raw stderr.
+    });
+    child.stderr.on("error", (error) => {
+      this.#failIo(error);
+    });
+    child.stderr.resume();
+    child.on("error", (error) => {
+      this.#failIo(error);
+    });
+    child.on("exit", (code, signal) => {
+      this.#onExit(code, signal);
+    });
+    if (child.stdout.readableEnded || child.stdout.destroyed) {
+      this.#onStdoutEnd();
+    }
+    if (child.exitCode !== null || child.signalCode !== null) {
+      this.#onExit(child.exitCode, child.signalCode);
+    }
+  }
+
+  #onStdout(chunk: Buffer): void {
+    if (this.#closed || this.#stdoutClosed) {
+      return;
+    }
+    let offset = 0;
+    while (offset < chunk.byteLength && !this.#closed) {
+      const resumed = this.#afterDiscardedLine(chunk, offset);
+      if (resumed === undefined) {
+        return;
+      }
+      offset = resumed;
+      const newline = chunk.indexOf(0x0a, offset);
+      const end = newline === -1 ? chunk.byteLength : newline;
+      const length = end - offset;
+      const terminated = newline !== -1;
+      if (this.#exceedsPhysicalLimit(length, terminated)) {
+        this.#discardOversizedLine(!terminated);
+        if (!terminated) {
+          return;
+        }
+        offset = newline + 1;
+        continue;
+      }
+      if (!terminated) {
+        this.#appendLinePart(chunk, offset, length);
+        return;
+      }
+      this.#completeLine(chunk, offset, length);
+      offset = newline + 1;
+    }
+  }
+
+  #afterDiscardedLine(chunk: Buffer, offset: number): number | undefined {
+    if (!this.#discardingOversizedLine) {
+      return offset;
+    }
+    const newline = chunk.indexOf(0x0a, offset);
+    if (newline === -1) {
+      return undefined;
+    }
+    this.#discardingOversizedLine = false;
+    return newline + 1;
+  }
+
+  #exceedsPhysicalLimit(length: number, terminated: boolean): boolean {
+    const total = this.#lineLength + length + (terminated ? 1 : 0);
+    return terminated ? total > this.#maxPhysical : total >= this.#maxPhysical;
+  }
+  #discardOversizedLine(waitForNewline: boolean): void {
+    const hadChunks = this.#decoder.hasPending();
+    this.#line = undefined;
+    this.#lineLength = 0;
+    this.#discardingOversizedLine = waitForNewline;
+    this.#decoder.reset();
+    const error = this.#reportProtocol("physical frame exceeds limit");
+    if (hadChunks) {
+      this.#rejectPending(error);
+    }
+  }
+  #appendLinePart(chunk: Buffer, offset: number, length: number): void {
+    if (length === 0) {
+      return;
+    }
+    this.#line ??= Buffer.allocUnsafe(this.#maxPhysical);
+    chunk.copy(this.#line, this.#lineLength, offset, offset + length);
+    this.#lineLength += length;
+  }
+  #completeLine(chunk: Buffer, offset: number, length: number): void {
+    const buffered = this.#line;
+    if (buffered === undefined) {
+      this.#onLine(chunk.subarray(offset, offset + length));
+      return;
+    }
+    if (length > 0) {
+      chunk.copy(buffered, this.#lineLength, offset, offset + length);
+      this.#lineLength += length;
+    }
+    const line = buffered.subarray(0, this.#lineLength);
+    this.#line = undefined;
+    this.#lineLength = 0;
+    this.#onLine(line);
+  }
+
+  #onLine(line: Buffer): void {
+    if (isBlankLine(line)) {
+      return;
+    }
+    const hadChunks = this.#decoder.hasPending();
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(line));
+    } catch {
+      this.#abandonChunkSequence("malformed JSON line", hadChunks);
+      return;
+    }
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      this.#abandonChunkSequence("rpc frame must be an object", hadChunks);
+      return;
+    }
+    const object = parsed as OmpFrame;
+    try {
+      const frame = this.#decoder.push(object);
+      if (frame !== undefined) {
+        this.#onFrame(frame);
+      }
+    } catch {
+      this.#decoder.reset();
+      const protocol = new OmpProtocolError("invalid rpc chunk");
+      this.#reportProtocol(protocol);
+      if (hadChunks) {
+        this.#rejectPending(protocol);
+      }
+    }
+  }
+  #abandonChunkSequence(message: string, hadChunks: boolean): void {
+    this.#decoder.reset();
+    const error = this.#reportProtocol(message);
+    if (hadChunks) {
+      this.#rejectPending(error);
+    }
+  }
+  #onStdoutEnd(): void {
+    if (this.#stdoutClosed) {
+      return;
+    }
+    this.#stdoutClosed = true;
+    const truncated = this.#discardIncompleteInput();
+    if (truncated !== undefined) {
+      this.#rejectPending(truncated);
+    }
+    this.#terminateTransport(new AgentUnavailableError("stdout closed"));
+  }
+  #discardIncompleteInput(): OmpProtocolError | undefined {
+    const incomplete =
+      this.#lineLength > 0 || this.#discardingOversizedLine || this.#decoder.hasPending();
+    this.#clearInput();
+    return incomplete ? this.#reportProtocol("truncated frame") : undefined;
+  }
+  #clearInput(): void {
+    this.#line = undefined;
+    this.#lineLength = 0;
+    this.#discardingOversizedLine = false;
+    this.#decoder.reset();
+  }
+
+  #onFrame(frame: OmpFrame): void {
+    if (frame.type === "ready") {
+      this.#applyLimits(frame);
+      this.#settleReady?.();
+    }
+    this.#events.emit("frame", frame);
+    if (frame.type === "extension_ui_request" && typeof frame.id === "string") {
+      void this.#write({ type: "extension_ui_response", id: frame.id, cancelled: true }).catch(
+        (error: unknown) => {
+          this.#failIo(error);
+        },
+      );
+    }
+    if (frame.type !== "response" || typeof frame.id !== "string") {
+      return;
+    }
+    const pending = this.#pending.get(frame.id);
+    if (pending === undefined || pending.command !== frame.command) {
+      return;
+    }
+    this.#pending.delete(frame.id);
+    pending.resolve(frame);
+  }
+
+  #onExit(code: number | null, signal: NodeJS.Signals | null): void {
+    if (this.#exited) {
+      return;
+    }
+    this.#exited = true;
+    if (!this.#stdoutClosed) {
+      this.#stdoutClosed = true;
+      const truncated = this.#discardIncompleteInput();
+      if (truncated !== undefined) {
+        this.#rejectPending(truncated);
+      }
+    }
+    this.#terminateTransport(this.#fatal ?? new AgentUnavailableError("child exited"));
+    this.#events.emit("exit", { code, signal });
+  }
+  #failIo(error: unknown): void {
+    this.#terminateTransport(sanitizeIo(error, "io failed"));
+  }
+  #terminateTransport(error: Error): void {
+    if (this.#fatal !== undefined) {
+      return;
+    }
+    this.#fatal = error;
+    this.#closed = true;
+    this.#clearTimer();
+    this.#clearInput();
+    this.#settleReady?.(error);
+    this.#rejectPending(error);
+    this.#events.emit("error", error);
+  }
+  #reportProtocol(error: string | OmpProtocolError): OmpProtocolError {
+    const protocol = typeof error === "string" ? new OmpProtocolError(error) : error;
+    this.#events.emit("error", protocol);
+    return protocol;
+  }
+  #failStartup(error: unknown): AgentUnavailableError {
+    const unavailable =
+      error instanceof AgentUnavailableError
+        ? error
+        : new AgentUnavailableError("agent_unavailable");
+    const firstFailure = this.#fatal === undefined;
+    this.#fatal = unavailable;
+    this.#closed = true;
+    this.#clearTimer();
+    this.#clearInput();
+    this.#settleReady?.(unavailable);
+    this.#rejectPending(unavailable);
+    if (
+      this.#child !== undefined &&
+      this.#child.exitCode === null &&
+      this.#child.signalCode === null
+    ) {
+      this.#child.kill("SIGKILL");
+    }
+    if (firstFailure) {
+      this.#events.emit("error", unavailable);
+    }
+    return unavailable;
+  }
+  #rejectPending(error: Error): void {
+    const pending = [...this.#pending.values()];
+    this.#pending.clear();
+    for (const request of pending) {
+      request.reject(error);
+    }
+  }
+
+  #deadline(): { promise: Promise<never>; clear: () => void } {
+    const promise = new Promise<never>((_resolve, reject) => {
+      this.#handshakeTimer = setTimeout(() => {
+        reject(new AgentUnavailableError("handshake timeout"));
+      }, this.handshakeTimeoutMs);
+    });
+    return {
+      promise,
+      clear: () => {
+        this.#clearTimer();
+      },
+    };
+  }
+  #clearTimer(): void {
+    if (this.#handshakeTimer !== undefined) {
+      clearTimeout(this.#handshakeTimer);
+      this.#handshakeTimer = undefined;
+    }
+  }
+  #id(): string {
+    while (true) {
+      this.#nextId += 1;
+      const id = `omp-${this.#nextId}`;
+      if (!this.#pending.has(id)) {
+        return id;
+      }
+    }
+  }
+}
+
+function asRecord(value: unknown): OmpFrame {
+  return value !== null && typeof value === "object" ? (value as OmpFrame) : {};
+}
+
+function isNonemptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function isBlankLine(line: Buffer): boolean {
+  for (const byte of line) {
+    if (byte !== 0x09 && byte !== 0x0b && byte !== 0x0c && byte !== 0x0d && byte !== 0x20) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function sanitizeIo(error: unknown, fallback: string): Error {
+  if (error instanceof AgentUnavailableError || error instanceof OmpProtocolError) {
+    return error;
+  }
+  return new AgentUnavailableError(fallback);
 }
