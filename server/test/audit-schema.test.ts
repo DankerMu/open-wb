@@ -12,6 +12,7 @@ import {
   migrationReceiptExists,
   removeTempDirs,
   schemaInventory,
+  TRACKED_MIGRATION_FILENAMES,
   tableExists,
   tempDir,
   withDatabase,
@@ -167,12 +168,7 @@ BEGIN SELECT 1; END;`;
       ).toMatch(
         /BEFORE DELETE ON audit_events[\s\S]*RAISE\(ABORT, 'audit_events is append-only'\)/,
       );
-      expect(ledgerFilenames(db)).toEqual([
-        MIGRATION_0010,
-        MIGRATION_002,
-        MIGRATION_010,
-        MIGRATION_030,
-      ]);
+      expect(ledgerFilenames(db)).toEqual([...TRACKED_MIGRATION_FILENAMES]);
     });
   });
 
@@ -314,7 +310,7 @@ BEGIN SELECT 1; END;`;
         receipts: ledgerFilenames(db),
       };
     });
-    expect(first.receipts).toEqual([MIGRATION_0010, MIGRATION_002, MIGRATION_010, MIGRATION_030]);
+    expect(first.receipts).toEqual([...TRACKED_MIGRATION_FILENAMES]);
     withOpenDb(file, (db) => {
       expect(eventRows(db)).toEqual(first.rows);
       expect(fullCatalogSnapshot(db)).toEqual(first.catalog);

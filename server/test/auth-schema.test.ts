@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { openDb } from "../src/core/db/index.js";
 import { trackedMigrationAssets } from "../src/core/db/migration-assets.js";
 import {
+  COMPLETE_CATALOG,
   createValidFoundationPrefix,
   expectCatalogSnapshot,
   expectOpenDbFailure,
@@ -14,10 +15,7 @@ import {
   fullCatalogSnapshot,
   ledgerFilenames,
   ledgerRows,
-  MIGRATION_002,
   MIGRATION_010,
-  MIGRATION_030,
-  MIGRATION_0010,
   migrationReceiptExists,
   removeTempDirs,
   schemaInventory,
@@ -25,6 +23,7 @@ import {
   TRACKED_MIGRATION_FILENAMES,
   tableExists,
   tempDir,
+  uniqueIndexKeys,
   withDatabase,
 } from "./core-db-helpers.js";
 
@@ -79,20 +78,6 @@ interface ColumnInfo {
   hidden: number;
 }
 
-interface UniqueIndexInfo {
-  name: string;
-  unique: number;
-  origin: string;
-  isPartial: number;
-}
-
-interface UniqueIndexKey {
-  seqno: number;
-  cid: number;
-  columnName: string | null;
-  isKey: number;
-}
-
 interface SessionForeignKey {
   referencedTable: string;
   fromColumn: string;
@@ -141,12 +126,7 @@ describe("core/db auth schema and seed", () => {
   it(":memory: open yields exact schema, four independently verifiable seeds, and foreign keys", async () => {
     await withOpenDbAsync(":memory:", async (db) => {
       expect(ledgerFilenames(db)).toEqual([...TRACKED_MIGRATION_FILENAMES]);
-      expect(ledgerRows(db)).toEqual([
-        [1, MIGRATION_0010],
-        [2, MIGRATION_002],
-        [3, MIGRATION_010],
-        [4, MIGRATION_030],
-      ]);
+      expect(ledgerRows(db)).toEqual([...COMPLETE_CATALOG.receipts]);
       expect(foreignKeysEnabled(db)).toBe(true);
       expectAuthSchema(db);
       await expectCanonicalSeedState(db);
@@ -513,7 +493,12 @@ function expectAuthSchema(db: DatabaseSync): void {
     { table: "accounts", from: "user_id", to: "id", on_delete: "CASCADE" },
   ]);
   expect(foreignKeysOf(db, "accounts")).toEqual([]);
-  expect(businessObjectNames(db, "table")).toEqual(["accounts", "audit_events", "auth_sessions"]);
+  expect(businessObjectNames(db, "table")).toEqual([
+    "accounts",
+    "audit_events",
+    "auth_sessions",
+    "workspaces",
+  ]);
   expect(businessObjectNames(db, "index")).toEqual(["audit_events_actor_id"]);
   expect(businessObjectNames(db, "view")).toEqual([]);
   expect(businessObjectNames(db, "trigger")).toEqual([
@@ -646,53 +631,6 @@ function tableColumns(db: DatabaseSync, table: string): ColumnInfo[] {
         hidden: Number(column.hidden),
       };
     });
-}
-
-function uniqueIndexKeys(db: DatabaseSync, table: string): string[][] {
-  const indexes = db
-    .prepare(`PRAGMA index_list('${table}')`)
-    .all()
-    .map((row) => {
-      const index = row as {
-        name: unknown;
-        unique: unknown;
-        origin: unknown;
-        partial: unknown;
-      };
-      return {
-        name: String(index.name),
-        unique: Number(index.unique),
-        origin: String(index.origin),
-        isPartial: Number(index.partial),
-      } satisfies UniqueIndexInfo;
-    });
-  expect(indexes.every((index) => index.unique === 1 && index.isPartial === 0)).toBe(true);
-  return indexes
-    .map((index) => uniqueKeyColumns(db, table, index.name))
-    .sort((left, right) => left.join("\0").localeCompare(right.join("\0")));
-}
-
-function uniqueKeyColumns(db: DatabaseSync, table: string, indexName: string): string[] {
-  const keys = db
-    .prepare(`PRAGMA index_xinfo('${indexName}')`)
-    .all()
-    .map((row) => {
-      const entry = row as { seqno: unknown; cid: unknown; name: unknown; key: unknown };
-      return {
-        seqno: Number(entry.seqno),
-        cid: Number(entry.cid),
-        columnName: entry.name === null ? null : String(entry.name),
-        isKey: Number(entry.key),
-      } satisfies UniqueIndexKey;
-    })
-    .filter((entry) => entry.isKey === 1)
-    .sort((left, right) => left.seqno - right.seqno);
-  return keys.map((entry) => {
-    if (entry.columnName === null) {
-      throw new Error(`unexpected expression index on ${table}`);
-    }
-    return entry.columnName;
-  });
 }
 
 function foreignKeysOf(

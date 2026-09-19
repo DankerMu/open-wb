@@ -17,13 +17,10 @@ import {
   FOUNDATION_CATALOG,
   fullCatalogSnapshot,
   ledgerFilenames,
-  MIGRATION_002,
-  MIGRATION_010,
-  MIGRATION_030,
-  MIGRATION_0010,
   PREFIX_CATALOG,
   removeTempDirs,
   type SqlLineEnding,
+  TRACKED_MIGRATION_FILENAMES,
   tableExists,
   tempDir,
   withDatabase,
@@ -388,12 +385,7 @@ CREATE TRIGGER unrelated_trigger AFTER INSERT ON unrelated_table BEGIN SELECT 1;
     withOpenDb(file, (db) => {
       expect(ledgerFilenames(db)).toEqual(first.receipts);
       expect(fullCatalogSnapshot(db)).toEqual(first.catalog);
-      expect(ledgerFilenames(db)).toEqual([
-        MIGRATION_0010,
-        MIGRATION_002,
-        MIGRATION_010,
-        MIGRATION_030,
-      ]);
+      expect(ledgerFilenames(db)).toEqual([...TRACKED_MIGRATION_FILENAMES]);
     });
   });
 
@@ -417,12 +409,7 @@ CREATE TRIGGER unrelated_trigger AFTER INSERT ON unrelated_table BEGIN SELECT 1;
         withDatabase(file, (db) => seed(db, lineEnding));
 
         expectRepeatedOpenStable(file, (db) => {
-          expect(ledgerFilenames(db)).toEqual([
-            MIGRATION_0010,
-            MIGRATION_002,
-            MIGRATION_010,
-            MIGRATION_030,
-          ]);
+          expect(ledgerFilenames(db)).toEqual([...TRACKED_MIGRATION_FILENAMES]);
         });
       }
     },

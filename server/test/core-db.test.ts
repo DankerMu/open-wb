@@ -11,6 +11,7 @@ import {
 import { validatedAppliedFilenames } from "../src/core/db/migration-ledger.js";
 import { runMigration } from "../src/core/db/migration-runner.js";
 import {
+  COMPLETE_CATALOG,
   createCanonicalLedger,
   expectFailedOpenToPreserve,
   expectNoMigrationFoundationObjects,
@@ -21,13 +22,12 @@ import {
   ledgerFilenames,
   ledgerRows,
   MIGRATION_002,
-  MIGRATION_010,
-  MIGRATION_030,
   MIGRATION_0010,
   migrationReceiptExists,
   removeTempDirs,
   schemaInventory,
   seedValid0010Prefix,
+  TRACKED_MIGRATION_FILENAMES,
   tableExists,
   tempDir,
   withBigIntDatabase,
@@ -298,15 +298,10 @@ describe("core/db openDb", () => {
         .prepare("SELECT filename FROM schema_migration_history")
         .all()
         .map((row) => String(row.filename));
-      expect(history).toEqual([MIGRATION_0010, MIGRATION_002, MIGRATION_010, MIGRATION_030]);
+      expect(history).toEqual([...TRACKED_MIGRATION_FILENAMES]);
 
       // 回执的 sequence 与字典序应用顺序一致。
-      expect(ledgerRows(db)).toEqual([
-        [1, MIGRATION_0010],
-        [2, MIGRATION_002],
-        [3, MIGRATION_010],
-        [4, MIGRATION_030],
-      ]);
+      expect(ledgerRows(db)).toEqual([...COMPLETE_CATALOG.receipts]);
 
       // 两个守卫触发器与历史视图都真实存在（UPDATE/DELETE/REPLACE 被拒是其生效证明）。
       const triggers = db
@@ -363,7 +358,7 @@ describe("core/db openDb", () => {
         .prepare("SELECT filename FROM schema_migration_history")
         .all()
         .map((row) => String(row.filename));
-      expect(history).toEqual([MIGRATION_0010, MIGRATION_002, MIGRATION_010, MIGRATION_030]);
+      expect(history).toEqual([...TRACKED_MIGRATION_FILENAMES]);
     } finally {
       try {
         db?.close();
@@ -391,12 +386,7 @@ describe("core/db openDb", () => {
     seedValid0010Prefix(file);
 
     withOpenDb(file, (db) => {
-      expect(ledgerFilenames(db)).toEqual([
-        MIGRATION_0010,
-        MIGRATION_002,
-        MIGRATION_010,
-        MIGRATION_030,
-      ]);
+      expect(ledgerFilenames(db)).toEqual([...TRACKED_MIGRATION_FILENAMES]);
       expect(
         db.prepare("SELECT type FROM sqlite_master WHERE name = ?").get(HISTORY_VIEW)?.type,
       ).toBe("view");
@@ -567,14 +557,9 @@ END`);
     }
   });
 
-  it("受信任迁移目录恰好按序登记四个真实迁移", () => {
+  it("受信任迁移目录恰好按序登记五个真实迁移", () => {
     withOpenDb(join(tempDir(), "app.db"), (db) => {
-      expect(ledgerFilenames(db)).toEqual([
-        MIGRATION_0010,
-        MIGRATION_002,
-        MIGRATION_010,
-        MIGRATION_030,
-      ]);
+      expect(ledgerFilenames(db)).toEqual([...TRACKED_MIGRATION_FILENAMES]);
     });
   });
 });
