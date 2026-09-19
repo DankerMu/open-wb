@@ -20,9 +20,12 @@ CONTEXT.md 不变量 4（网关/kb 凭证不进 omp 可读环境）在同 uid �
 
 ## 补充（2026-09-18，S1a grill 拍板）：spawn 机制与权限模型
 
-- **spawn 机制**：Linux 上 app-server 以 `sudo -n -u <OMP_USER> -- VAR=val … <OMP_BIN> --mode rpc …` 启动 omp；
-  sudoers 一行 `<app-user> ALL=(<OMP_USER>) NOPASSWD: SETENV: <OMP_BIN>`——`SETENV` 允许命令行赋值，
-  使 S0b 的环境白名单原样传入且不继承 app-server 环境；stdio 直通，RPC 帧层不变。`OMP_USER` 未设置时
+- **spawn 机制**：Linux 上 app-server 以 `sudo -n -u <OMP_USER> --preserve-env=<白名单键列表> -- <OMP_BIN> --mode rpc …`
+  启动 omp，白名单的值放在 sudo 进程自身的环境里（sudo 为 setuid root，其 `environ` 他人不可读），**绝不写进命令行**——
+  `/proc/<pid>/cmdline` 对任意本机用户可读，会话 token 上命令行等于广播（与 ADR-0003「凭证不上命令行」同理；
+  本节首版写的 `VAR=val` 命令行赋值形态因此作废，2026-09-18 S1a Stage 3 审核纠正）；
+  sudoers 一行 `<app-user> ALL=(<OMP_USER>) NOPASSWD: SETENV: <OMP_BIN>`——`SETENV` 使 `--preserve-env=<列表>` 对任意变量生效，
+  S0b 的环境白名单原样传入且不继承 app-server 其它环境；stdio 直通，RPC 帧层不变。`OMP_USER` 未设置时
   直接 spawn（macOS 开发机、单测）。否决项：`systemd-run --uid`（引入 systemd 与 polkit 依赖，容器内不稳）、
   自研 setuid 包装器（多一个需审计的特权二进制）。
 - **权限模型**：两用户同属组 `workbuddy`；`SANDBOX_ROOT`、`OMP_STATE_DIR` 及其下目录 `2770`（setgid 继承组），
