@@ -2,9 +2,11 @@
 
 > 执行序按依赖排列；TDD：每条实现任务先写失败测试再实现。组 1/2 可并行且不依赖 S0b；组 3 依赖 1、2 与 S0b 的 #84（七码基线）/#101（配置 seam 与 `STARTUP_MODULES` 基线）/#102（启动期 `agent` 目录）；组 4 的 jsdom 单测可对 REST 契约 mock 并行开工，但 4.3 合并需 3.5/3.6 先落地（`/files` 真实页对编译服务发请求，否则 `make ui-walk` 红）；组 5 依赖 1 与 S0b 的 #85/#87/#96/#101/#105；组 6 依赖 3、4、5 与 S0b 的 #107。本地持久化 `var/dev.db` 若迁移落地顺序与文件序不一致（`030/031` 先于 `020`），删库重建。凡触碰 Makefile/CI/AGENTS/constraints 的任务，`scripts/test-ci-harness.sh`（精确形状 oracle）与 `scripts/inspect-ci-workflow.js` 的期望**同 PR 更新**。
 
+> Epic #111 人工验收例外（2026-09-19 用户决定）：#112 人工白盒审查通过；后续子 issue 保留独立代理审核与 CI 门禁，不再逐项等待人工审查，人工对 Epic 最终功能完整验收。仅适用于本 Epic，不修改全仓默认规则。记录：https://github.com/DankerMu/open-wb/issues/111#issuecomment-5741112841
+
 ## 1. sandbox-core
 
-- [ ] 1.1 `server/src/core/sandbox/resolve.ts`：`resolve(root, relPath, op)` 纯函数（NUL/绝对/`..`/边界前缀/逐分量 lstat 拒绝 symlink/mkdir 末段规则）+ 临时目录逃逸向量集单测（含 `/a` vs `/ab`、悬空 symlink、symlink 目录下子路径）
+- [x] 1.1 `server/src/core/sandbox/resolve.ts`：`resolve(root, relPath, op)` 纯函数（NUL/绝对/`..`/边界前缀/逐分量 lstat 拒绝 symlink/mkdir 末段规则）+ 临时目录逃逸向量集单测（含 `/a` vs `/ab`、悬空 symlink、symlink 目录下子路径）（#112 / PR #138）
 - [ ] 1.2 `server/src/core/sandbox/dirs.ts`：`ensureSharedDir(absPath)`（递归创建、仅新建分量 `chmod 0o2770`、不 chown、不动 umask）+ mode 位单测（新建 `0o2770`、既有 `0o755` 不变、幂等）
 - [ ] 1.3 `server/src/core/sandbox/index.ts`：`createSandbox({rootOf, audit})` facade（`rootOf` null → `not_found`；拒绝 → `emit(sandbox.reject)` 后抛 `sandbox_denied`；审计失败 → 5xx 不放行）+ 以 stub `rootOf`/stub `audit` 的单测
 
