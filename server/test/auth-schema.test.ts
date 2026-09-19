@@ -16,6 +16,7 @@ import {
   ledgerRows,
   MIGRATION_002,
   MIGRATION_010,
+  MIGRATION_030,
   MIGRATION_0010,
   migrationReceiptExists,
   removeTempDirs,
@@ -144,6 +145,7 @@ describe("core/db auth schema and seed", () => {
         [1, MIGRATION_0010],
         [2, MIGRATION_002],
         [3, MIGRATION_010],
+        [4, MIGRATION_030],
       ]);
       expect(foreignKeysEnabled(db)).toBe(true);
       expectAuthSchema(db);
@@ -511,10 +513,13 @@ function expectAuthSchema(db: DatabaseSync): void {
     { table: "accounts", from: "user_id", to: "id", on_delete: "CASCADE" },
   ]);
   expect(foreignKeysOf(db, "accounts")).toEqual([]);
-  expect(businessObjectNames(db, "table")).toEqual(["accounts", "auth_sessions"]);
-  expect(businessObjectNames(db, "index")).toEqual([]);
+  expect(businessObjectNames(db, "table")).toEqual(["accounts", "audit_events", "auth_sessions"]);
+  expect(businessObjectNames(db, "index")).toEqual(["audit_events_actor_id"]);
   expect(businessObjectNames(db, "view")).toEqual([]);
-  expect(businessObjectNames(db, "trigger")).toEqual([]);
+  expect(businessObjectNames(db, "trigger")).toEqual([
+    "audit_events_no_delete",
+    "audit_events_no_update",
+  ]);
 }
 
 async function expectCanonicalSeedState(db: DatabaseSync): Promise<void> {

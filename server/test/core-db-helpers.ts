@@ -8,7 +8,13 @@ import { openDb } from "../src/core/db/index.js";
 export const MIGRATION_0010 = "0010_schema_migrations_update_guard.sql";
 export const MIGRATION_002 = "002_schema_migrations_history.sql";
 export const MIGRATION_010 = "010_auth_schema_seed.sql";
-export const TRACKED_MIGRATION_FILENAMES = [MIGRATION_0010, MIGRATION_002, MIGRATION_010] as const;
+export const MIGRATION_030 = "030_audit_events.sql";
+export const TRACKED_MIGRATION_FILENAMES = [
+  MIGRATION_0010,
+  MIGRATION_002,
+  MIGRATION_010,
+  MIGRATION_030,
+] as const;
 export const HISTORY_VIEW = "schema_migration_history";
 export type SqlLineEnding = "\n" | "\r\n" | "\r";
 
@@ -57,9 +63,12 @@ export const COMPLETE_CATALOG: CatalogSnapshot = {
     [1, MIGRATION_0010],
     [2, MIGRATION_002],
     [3, MIGRATION_010],
+    [4, MIGRATION_030],
   ],
-  sequenceRows: [["schema_migrations", 3, "integer"]],
+  sequenceRows: [["schema_migrations", 4, "integer"]],
   triggerNames: [
+    "audit_events_no_delete",
+    "audit_events_no_update",
     "schema_migrations_no_delete",
     "schema_migrations_no_reinsert",
     "schema_migrations_no_update",
@@ -69,6 +78,8 @@ export const COMPLETE_CATALOG: CatalogSnapshot = {
 export const COMPLETE_CATALOG_WITH_UNRELATED_TRIGGER: CatalogSnapshot = {
   ...COMPLETE_CATALOG,
   triggerNames: [
+    "audit_events_no_delete",
+    "audit_events_no_update",
     "schema_migrations_no_delete",
     "schema_migrations_no_reinsert",
     "schema_migrations_no_update",
