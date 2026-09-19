@@ -182,4 +182,14 @@ describe("core/sandbox resolve", () => {
 
     expect(snapshotTree(layout.parent)).toEqual(before);
   });
+
+  it("rejects a missing sandbox root without adding filesystem entries", () => {
+    const layout = createLayout();
+    const missingRoot = join(layout.parent, "missing-root");
+    const before = snapshotTree(layout.parent);
+
+    expectRejected(missingRoot, "");
+
+    expect(snapshotTree(layout.parent)).toEqual(before);
+  });
 });
