@@ -46,6 +46,7 @@ if [ -e "$DEST" ]; then
   fi
   actual="$(sha256_of "$DEST")"
   if [ "$actual" = "$expected" ]; then
+    chmod 755 "$DEST"
     echo "omp-fetch: skip download; ${DEST} already verified for v${OMP_VERSION} ${asset}"
     exit 0
   fi
