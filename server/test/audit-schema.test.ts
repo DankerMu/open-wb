@@ -46,6 +46,65 @@ describe("core/db audit_events schema", () => {
       .all();
   }
 
+  type AuditObjectName =
+    | "audit_events"
+    | "audit_events_actor_id"
+    | "audit_events_no_update"
+    | "audit_events_no_delete";
+
+  function auditConflictSeed(collidingName: AuditObjectName): string {
+    if (collidingName === "audit_events") {
+      return `CREATE TABLE audit_events (
+  id TEXT, ts TEXT, actor_id TEXT, kind TEXT, title TEXT, detail TEXT, workspace_id TEXT
+); INSERT INTO audit_events VALUES ('kept','0','u1','x.y','t','{}',NULL);`;
+    }
+    const sentinel =
+      "CREATE TABLE sentinel_audit_conflict (value TEXT); INSERT INTO sentinel_audit_conflict(value) VALUES ('kept');";
+    if (collidingName === "audit_events_actor_id") {
+      return `${sentinel} CREATE INDEX audit_events_actor_id ON sentinel_audit_conflict(value);`;
+    }
+    return `${sentinel} CREATE TRIGGER ${collidingName} BEFORE INSERT ON sentinel_audit_conflict
+BEGIN SELECT 1; END;`;
+  }
+
+  function auditConflictState(db: DatabaseSync, collidingName: AuditObjectName) {
+    return {
+      objects: db
+        .prepare(
+          "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name IN (?, 'sentinel_audit_conflict') ORDER BY name",
+        )
+        .all(collidingName),
+      named: db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE name IN ('audit_events','audit_events_actor_id','audit_events_no_update','audit_events_no_delete') ORDER BY name",
+        )
+        .all()
+        .map((row) => row.name),
+      events: tableExists(db, "audit_events")
+        ? db.prepare("SELECT * FROM audit_events ORDER BY rowid").all()
+        : null,
+      sentinel: tableExists(db, "sentinel_audit_conflict")
+        ? db.prepare("SELECT * FROM sentinel_audit_conflict ORDER BY rowid").all()
+        : null,
+    };
+  }
+
+  function expectPreservedAuditConflict(
+    file: string,
+    error: RegExp,
+    collidingName: AuditObjectName,
+  ): void {
+    const before = withDatabase(file, (db) => auditConflictState(db, collidingName));
+    expectOpenDbFailure(file, error);
+    withDatabase(file, (db) => {
+      expect(auditConflictState(db, collidingName)).toEqual(before);
+      expect(before.named).toEqual([collidingName]);
+      expect(ledgerFilenames(db)).toEqual([MIGRATION_0010, MIGRATION_002, MIGRATION_010]);
+      expect(migrationReceiptExists(db, MIGRATION_030)).toBe(false);
+      expect(tableExists(db, "accounts")).toBe(true);
+    });
+  }
+
   it("openDb exposes exact columns, actor/id-desc index, and two append-only triggers", () => {
     withOpenDb(":memory:", (db) => {
       expect(
@@ -213,6 +272,8 @@ describe("core/db audit_events schema", () => {
     ["whitespace", "sandbox reject"],
     ["hyphen", "sandbox-reject"],
     ["NUL", "sandbox.reject\u0000x"],
+    ["internal uppercase", "sandbox.reJect"],
+    ["digit-leading first segment", "9sandbox.reject"],
   ])("rejects invalid kind %s", (_name, kind) => {
     withOpenDb(":memory:", (db) => {
       expect(() => insertEvent(db, 0, kind)).toThrow(CHECK_FAILED);
@@ -263,39 +324,19 @@ describe("core/db audit_events schema", () => {
     });
   });
 
-  it("late trigger-name conflict rolls back 030 objects and omits its receipt", () => {
-    const file = join(tempDir(), "late-audit-trigger-conflict.db");
-    withDatabase(file, (db) => {
-      db.exec(`CREATE TABLE sentinel_audit_conflict (value TEXT);
-CREATE TRIGGER audit_events_no_delete BEFORE INSERT ON sentinel_audit_conflict BEGIN SELECT 1; END`);
-    });
-    const sentinel = withDatabase(file, (db) =>
-      db
-        .prepare(
-          "SELECT type, name, tbl_name FROM sqlite_master WHERE name = 'audit_events_no_delete'",
-        )
-        .get(),
-    );
-    expectOpenDbFailure(file, /trigger audit_events_no_delete already exists/);
-    withDatabase(file, (db) => {
-      expect(tableExists(db, "audit_events")).toBe(false);
-      expect(
-        db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'audit_events_actor_id'").get(),
-      ).toBeUndefined();
-      expect(
-        db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'audit_events_no_update'").get(),
-      ).toBeUndefined();
-      expect(
-        db
-          .prepare(
-            "SELECT type, name, tbl_name FROM sqlite_master WHERE name = 'audit_events_no_delete'",
-          )
-          .get(),
-      ).toEqual(sentinel);
-      expect(ledgerFilenames(db)).toEqual([MIGRATION_0010, MIGRATION_002, MIGRATION_010]);
-      expect(migrationReceiptExists(db, MIGRATION_030)).toBe(false);
-      expect(tableExists(db, "accounts")).toBe(true);
-      expect(tableExists(db, "sentinel_audit_conflict")).toBe(true);
-    });
-  });
+  it.each([
+    ["table", "audit_events", /table audit_events already exists/],
+    ["index", "audit_events_actor_id", /index audit_events_actor_id already exists/],
+    ["update trigger", "audit_events_no_update", /trigger audit_events_no_update already exists/],
+    ["delete trigger", "audit_events_no_delete", /trigger audit_events_no_delete already exists/],
+  ] as const)(
+    "late %s conflict rolls back 030 objects and omits its receipt",
+    (_name, collidingName, error) => {
+      const file = join(tempDir(), `late-audit-${collidingName}-conflict.db`);
+      withDatabase(file, (db) => {
+        db.exec(auditConflictSeed(collidingName));
+      });
+      expectPreservedAuditConflict(file, error, collidingName);
+    },
+  );
 });
