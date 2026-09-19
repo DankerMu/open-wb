@@ -1,0 +1,508 @@
+/**
+ * Issue #85 omp spawn contract: argv, allowlisted env, directory preparation.
+ */
+import {
+  type ChildProcessWithoutNullStreams,
+  type SpawnOptions,
+  type SpawnOptionsWithoutStdio,
+  spawn,
+} from "node:child_process";
+import { randomBytes } from "node:crypto";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { type SpawnImpl, type SpawnOmpOpts, spawnOmp } from "../src/sessions/omp/process.js";
+
+const CALLER_TOKEN = randomBytes(32).toString("hex");
+const PARENT_TOKEN = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const OWNER = "u1";
+const MODEL = "deepseek-v4.1-flash";
+const SENTINEL_PATH = "/workbuddy/sentinel-bin";
+const SENTINELS: Record<string, string> = {
+  MODEL_UPSTREAM_API_KEY: "upstream-api-key-sentinel",
+  MODEL_UPSTREAM_BASE_URL: "https://upstream.example/sentinel",
+  OPENAI_API_KEY: "openai-sentinel",
+  ANTHROPIC_API_KEY: "anthropic-sentinel",
+  KB_SERVICE_API_KEY: "kb-credential-sentinel",
+  DB_PATH: "/tmp/should-not-inherit.db",
+  UNRELATED_SENTINEL: "unrelated-parent-value",
+  HOME: "/tmp/parent-home-sentinel",
+  PI_CODING_AGENT_DIR: "/tmp/parent-agent-sentinel",
+  WORKBUDDY_MODEL_TOKEN: PARENT_TOKEN,
+  PATH: SENTINEL_PATH,
+};
+const FORBIDDEN_KEYS = [
+  "MODEL_UPSTREAM_API_KEY",
+  "MODEL_UPSTREAM_BASE_URL",
+  "OPENAI_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "KB_SERVICE_API_KEY",
+  "DB_PATH",
+  "UNRELATED_SENTINEL",
+] as const;
+const ARGV_PROBE = `process.stdout.write(JSON.stringify({
+  cwd: process.cwd(),
+  argv: process.argv.slice(1),
+}));`;
+const SHEBANG_PROBE = `process.stdout.write(JSON.stringify({
+  cwd: process.cwd(),
+  argv: process.argv.slice(2),
+}));`;
+const ENV_BIN = "/usr/bin/env";
+
+interface SpawnCall {
+  command: string;
+  args: string[];
+  cwd: string | undefined;
+  env: Record<string, string>;
+  stdio: unknown;
+  shell: unknown;
+}
+
+interface ArgvProbe {
+  cwd: string;
+  argv: string[];
+}
+
+interface SpawnRoots {
+  root: string;
+  bin: string;
+  sandboxRoot: string;
+  stateDir: string;
+  cwd: string;
+  sessionDir: string;
+  home: string;
+  agent: string;
+}
+
+const children: ChildProcessWithoutNullStreams[] = [];
+const temps: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(children.splice(0).map(stopChild));
+  for (const dir of temps.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+describe("spawnOmp spawn contract", () => {
+  it("cold launch uses exact argv without --resume after the four directories exist", async () => {
+    const roots = makeRoots();
+    const call = await capture(roots, null);
+    expect(call.command).toBe(roots.bin);
+    expect(call.args).toEqual(coldArgs(roots));
+    expect(call.args).not.toContain("--resume");
+    expect(call.args.join("\0")).not.toContain(CALLER_TOKEN);
+    expect(call.cwd).toBe(roots.cwd);
+    expect(call.stdio).toEqual(["pipe", "pipe", "pipe"]);
+    expect(call.shell).toBe(false);
+    expectFourDirectories(roots);
+  });
+
+  it("resume launch appends --resume and a path with spaces as one argv entry", async () => {
+    const roots = makeRoots();
+    const resumePath = join(roots.sessionDir, "resume file.jsonl");
+    const call = await capture(roots, resumePath);
+    expect(call.args).toEqual([...coldArgs(roots), "--resume", resumePath]);
+    expectFourDirectories(roots);
+    const cold = await capture(roots, null);
+    expect(cold.args).toEqual(coldArgs(roots));
+  });
+
+  it("child env is the allowlist with the caller token and no parent credentials", async () => {
+    const roots = makeRoots();
+    const parentBefore = { ...process.env };
+    const { call, parentDuring } = await captureWithSnapshot(roots, {
+      LANG: "C.UTF-8",
+      TMPDIR: "/tmp",
+    });
+    expect({ ...process.env }).toEqual(parentBefore);
+    expect(parentDuring.MODEL_UPSTREAM_API_KEY).toBe(SENTINELS.MODEL_UPSTREAM_API_KEY);
+    expect(CALLER_TOKEN).toMatch(/^[0-9a-f]{64}$/);
+    expect(call.env.WORKBUDDY_MODEL_TOKEN).toBe(CALLER_TOKEN);
+    expect(call.env.HOME).not.toBe(SENTINELS.HOME);
+    expect(call.env.PI_CODING_AGENT_DIR).not.toBe(SENTINELS.PI_CODING_AGENT_DIR);
+    for (const key of FORBIDDEN_KEYS) {
+      expect(call.env).not.toHaveProperty(key);
+    }
+  });
+
+  it("copies empty LANG and TMPDIR, omits them when absent, and uses empty PATH when absent", async () => {
+    const roots = makeRoots();
+    const empty = await capture(roots, null, { LANG: "", TMPDIR: "" });
+    expect(empty.env).toEqual(allowlist(roots, { LANG: "", TMPDIR: "" }));
+    const sparse = makeRoots();
+    const omitted = await capture(sparse, null, {
+      LANG: undefined,
+      TMPDIR: undefined,
+      PATH: undefined,
+    });
+    expect(omitted.env).toEqual(allowlist(sparse, { PATH: "" }));
+    expect(omitted.env).not.toHaveProperty("LANG");
+    expect(omitted.env).not.toHaveProperty("TMPDIR");
+  });
+
+  it("reuses existing directories on a later launch", async () => {
+    const roots = makeRoots();
+    mkdirSync(roots.cwd, { recursive: true });
+    mkdirSync(roots.sessionDir, { recursive: true });
+    mkdirSync(roots.home, { recursive: true });
+    mkdirSync(roots.agent, { recursive: true });
+    writeFileSync(join(roots.home, "keep.txt"), "keep");
+    const call = await capture(roots, null);
+    expect(call.command).toBe(roots.bin);
+    expect(call.args).toEqual(coldArgs(roots));
+    expectFourDirectories(roots);
+    expect(statSync(join(roots.home, "keep.txt")).isFile()).toBe(true);
+  });
+
+  it("fails before spawn when a required directory path is a file", async () => {
+    const roots = makeRoots();
+    mkdirSync(roots.stateDir, { recursive: true });
+    writeFileSync(roots.home, "not a directory");
+    const calls: SpawnCall[] = [];
+    await withContaminatedEnv({}, async () => {
+      await expect(spawnOmp(optsOf(roots, null), capturingSpawn(roots, calls))).rejects.toThrow();
+    });
+    expect(calls).toHaveLength(0);
+    expect(statSync(roots.home).isFile()).toBe(true);
+  });
+
+  it("real child observes captured env, cwd, and argv under contaminated parent env", async () => {
+    const roots = makeRoots();
+    const resumePath = join(roots.sessionDir, "resume file.jsonl");
+    const parentBefore = { ...process.env };
+    const argvCalls: SpawnCall[] = [];
+    const envCalls: SpawnCall[] = [];
+    let argvProbe: ArgvProbe | undefined;
+    let envDump: Record<string, string> | undefined;
+    await withContaminatedEnv({ LANG: "C.UTF-8", TMPDIR: "/tmp" }, async () => {
+      const parentDuring = { ...process.env };
+      argvProbe = await readArgvProbe(
+        await spawnOmp(optsOf(roots, resumePath), probingSpawn(roots, argvCalls)),
+      );
+      envDump = await readEnvDump(
+        await spawnOmp(optsOf(roots, resumePath), envDumpSpawn(roots, envCalls)),
+      );
+      expect({ ...process.env }).toEqual(parentDuring);
+    });
+    expect({ ...process.env }).toEqual(parentBefore);
+    const argvCall = argvCalls[0];
+    const envCall = envCalls[0];
+    expect(argvCall).toBeDefined();
+    expect(envCall).toBeDefined();
+    expect(argvProbe).toBeDefined();
+    expect(envDump).toBeDefined();
+    if (
+      argvCall === undefined ||
+      envCall === undefined ||
+      argvProbe === undefined ||
+      envDump === undefined
+    ) {
+      return;
+    }
+    expectFourDirectories(roots);
+    expect(realpathSync(argvProbe.cwd)).toBe(realpathSync(argvCall.cwd ?? argvProbe.cwd));
+    expect(realpathSync(argvProbe.cwd)).toBe(realpathSync(roots.cwd));
+    expect(argvProbe.argv).toEqual([argvCall.command, ...argvCall.args]);
+    expect(envDump).toEqual(envCall.env);
+    expect(envDump).toEqual(allowlist(roots, { LANG: "C.UTF-8", TMPDIR: "/tmp" }));
+    for (const key of FORBIDDEN_KEYS) {
+      expect(envDump).not.toHaveProperty(key);
+    }
+    expect(JSON.stringify(argvProbe.argv)).not.toContain(CALLER_TOKEN);
+  });
+
+  it("default spawn launches the supplied bin with piped argv and cwd", async () => {
+    const roots = makeRoots();
+    const bin = join(roots.root, "probe.mjs");
+    writeFileSync(bin, `#!${process.execPath}\n${SHEBANG_PROBE}\n`);
+    chmodSync(bin, 0o755);
+    const parentBefore = { ...process.env };
+    let stdout = "";
+    let status = 1;
+    await withContaminatedEnv({ LANG: "C.UTF-8", TMPDIR: "/tmp" }, async () => {
+      const parentDuring = { ...process.env };
+      const child = await spawnOmp({ ...optsOf(roots, null), bin });
+      children.push(child);
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (chunk: string) => {
+        stdout += chunk;
+      });
+      child.stdin.end();
+      status = await waitExit(child);
+      expect({ ...process.env }).toEqual(parentDuring);
+    });
+    expect({ ...process.env }).toEqual(parentBefore);
+    expect(status).toBe(0);
+    expectFourDirectories(roots);
+    const report = JSON.parse(stdout) as ArgvProbe;
+    expect(realpathSync(report.cwd)).toBe(realpathSync(roots.cwd));
+    expect(report.argv).toEqual(coldArgs(roots));
+    expect(JSON.stringify(report.argv)).not.toContain(CALLER_TOKEN);
+  });
+});
+
+function makeRoots(): SpawnRoots {
+  const root = mkdtempSync(join(tmpdir(), "omp-spawn-"));
+  temps.push(root);
+  const sandboxRoot = join(root, "sandbox root");
+  const stateDir = join(root, "state dir");
+  return {
+    root,
+    bin: join(root, "omp-bin"),
+    sandboxRoot,
+    stateDir,
+    cwd: join(sandboxRoot, OWNER),
+    sessionDir: join(stateDir, "sessions", OWNER),
+    home: join(stateDir, "home"),
+    agent: join(stateDir, "agent"),
+  };
+}
+
+function optsOf(roots: SpawnRoots, resumePath: string | null): SpawnOmpOpts {
+  return {
+    bin: roots.bin,
+    sandboxRoot: roots.sandboxRoot,
+    stateDir: roots.stateDir,
+    ownerId: OWNER,
+    modelId: MODEL,
+    token: CALLER_TOKEN,
+    resumePath,
+  };
+}
+
+function coldArgs(roots: SpawnRoots): string[] {
+  return [
+    "--mode",
+    "rpc",
+    "--cwd",
+    roots.cwd,
+    "--session-dir",
+    roots.sessionDir,
+    "--model",
+    `workbuddy/${MODEL}`,
+    "--approval-mode",
+    "yolo",
+    "--no-extensions",
+    "--no-lsp",
+    "--no-pty",
+    "--no-title",
+  ];
+}
+
+function allowlist(
+  roots: SpawnRoots,
+  extra: { PATH?: string; LANG?: string; TMPDIR?: string } = {},
+): Record<string, string> {
+  const env: Record<string, string> = {
+    PATH: extra.PATH ?? SENTINEL_PATH,
+    HOME: roots.home,
+    PI_CODING_AGENT_DIR: roots.agent,
+    WORKBUDDY_MODEL_TOKEN: CALLER_TOKEN,
+  };
+  if (extra.LANG !== undefined) {
+    env.LANG = extra.LANG;
+  }
+  if (extra.TMPDIR !== undefined) {
+    env.TMPDIR = extra.TMPDIR;
+  }
+  return env;
+}
+
+function expectFourDirectories(roots: SpawnRoots): void {
+  expect(statSync(roots.cwd).isDirectory()).toBe(true);
+  expect(statSync(roots.sessionDir).isDirectory()).toBe(true);
+  expect(statSync(roots.home).isDirectory()).toBe(true);
+  expect(statSync(roots.agent).isDirectory()).toBe(true);
+  expect(existsSync(roots.cwd)).toBe(true);
+}
+
+async function capture(
+  roots: SpawnRoots,
+  resumePath: string | null,
+  patch: Record<string, string | undefined> = {},
+): Promise<SpawnCall> {
+  const calls: SpawnCall[] = [];
+  await withContaminatedEnv(patch, async () => {
+    await spawnOmp(optsOf(roots, resumePath), capturingSpawn(roots, calls));
+  });
+  const call = calls[0];
+  if (call === undefined) {
+    throw new Error("spawnImpl was not invoked");
+  }
+  return call;
+}
+
+async function captureWithSnapshot(
+  roots: SpawnRoots,
+  patch: Record<string, string | undefined>,
+): Promise<{ call: SpawnCall; parentDuring: NodeJS.ProcessEnv }> {
+  const calls: SpawnCall[] = [];
+  let parentDuring: NodeJS.ProcessEnv = {};
+  await withContaminatedEnv(patch, async () => {
+    parentDuring = { ...process.env };
+    await spawnOmp(optsOf(roots, null), capturingSpawn(roots, calls));
+    expect({ ...process.env }).toEqual(parentDuring);
+  });
+  const call = calls[0];
+  if (call === undefined) {
+    throw new Error("spawnImpl was not invoked");
+  }
+  return { call, parentDuring };
+}
+
+function capturingSpawn(roots: SpawnRoots, calls: SpawnCall[]): SpawnImpl {
+  return observingSpawn(roots, calls, (_command, _args, _options) =>
+    spawn(process.execPath, ["-e", "process.exit(0)"], {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { PATH: process.env.PATH ?? "" },
+    }),
+  );
+}
+
+function probingSpawn(roots: SpawnRoots, calls: SpawnCall[]): SpawnImpl {
+  return observingSpawn(roots, calls, (command, args, options) =>
+    spawn(process.execPath, ["-e", ARGV_PROBE, command, ...args], observedSpawnOptions(options)),
+  );
+}
+
+function envDumpSpawn(roots: SpawnRoots, calls: SpawnCall[]): SpawnImpl {
+  return observingSpawn(roots, calls, (_command, _args, options) =>
+    spawn(ENV_BIN, [], observedSpawnOptions(options)),
+  );
+}
+
+function observingSpawn(
+  roots: SpawnRoots,
+  calls: SpawnCall[],
+  launch: (
+    command: string,
+    args: readonly string[],
+    options: SpawnOptions,
+  ) => ChildProcessWithoutNullStreams,
+): SpawnImpl {
+  return (command, args, options) => {
+    calls.push(recordedCall(command, args, options));
+    expectFourDirectories(roots);
+    const child = launch(command, args, options);
+    children.push(child);
+    return child;
+  };
+}
+
+function observedSpawnOptions(options: SpawnOptions): SpawnOptionsWithoutStdio {
+  return {
+    cwd: typeof options.cwd === "string" ? options.cwd : undefined,
+    env: options.env,
+    stdio: ["pipe", "pipe", "pipe"],
+    shell: false,
+  };
+}
+
+function recordedCall(command: string, args: readonly string[], options: SpawnOptions): SpawnCall {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(options.env ?? {})) {
+    if (value !== undefined) {
+      env[key] = value;
+    }
+  }
+  return {
+    command,
+    args: [...args],
+    cwd: typeof options.cwd === "string" ? options.cwd : undefined,
+    env,
+    stdio: options.stdio,
+    shell: options.shell,
+  };
+}
+
+async function readChildStdout(child: ChildProcessWithoutNullStreams): Promise<string> {
+  let stdout = "";
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => {
+    stdout += chunk;
+  });
+  await waitExit(child);
+  return stdout;
+}
+
+async function readArgvProbe(child: ChildProcessWithoutNullStreams): Promise<ArgvProbe> {
+  return JSON.parse(await readChildStdout(child)) as ArgvProbe;
+}
+
+async function readEnvDump(child: ChildProcessWithoutNullStreams): Promise<Record<string, string>> {
+  const env: Record<string, string> = {};
+  for (const line of (await readChildStdout(child)).split("\n")) {
+    if (line.length === 0) {
+      continue;
+    }
+    const separator = line.indexOf("=");
+    if (separator === -1) {
+      env[line] = "";
+    } else {
+      env[line.slice(0, separator)] = line.slice(separator + 1);
+    }
+  }
+  return env;
+}
+
+async function withContaminatedEnv(
+  patch: Record<string, string | undefined>,
+  fn: () => Promise<void>,
+): Promise<void> {
+  const merged: Record<string, string | undefined> = { ...SENTINELS, ...patch };
+  const previous: Record<string, string | undefined> = {};
+  for (const key of Object.keys(merged)) {
+    previous[key] = process.env[key];
+    const value = merged[key];
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+  try {
+    await fn();
+  } finally {
+    for (const key of Object.keys(previous)) {
+      const value = previous[key];
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+}
+
+async function stopChild(child: ChildProcessWithoutNullStreams): Promise<void> {
+  if (child.exitCode === null && child.signalCode === null) {
+    child.kill("SIGKILL");
+  }
+  await waitExit(child);
+}
+
+function waitExit(child: ChildProcessWithoutNullStreams): Promise<number> {
+  if (child.exitCode !== null) {
+    return Promise.resolve(child.exitCode);
+  }
+  if (child.signalCode !== null) {
+    return Promise.resolve(1);
+  }
+  return new Promise<number>((resolve) => {
+    child.once("exit", (code) => {
+      resolve(code ?? 1);
+    });
+  });
+}
