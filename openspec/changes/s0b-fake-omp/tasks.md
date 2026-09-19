@@ -1,9 +1,9 @@
 ## 1. Test-first implementation
-- [ ] 1.1 Write process contract tests first and capture their failed run before fake implementation; qualify known-bad frames/absent behaviors rather than treating ENOENT alone as semantic proof.
-- [ ] 1.2 Implement normal handshake/id correlation and full prompt lifecycle with at least three deltas and matching tool pair; test EOF cleanup.
-- [ ] 1.3 Cover no-ready, missing-session, chunked plus interleaved, crash, error and extension-ui observable differences; reconstruct >3MiB Unicode logical frame exactly.
-- [ ] 1.4 Implement call-proxy managed YAML read and real bearer POST/SSE text mapping; test local request body, fragmented SSE/Unicode, failure termination and no token in logs.
-- [ ] 1.5 Run `npx vitest run --config server/vitest.config.ts server/test/fake-omp.test.ts`, `npm test --workspace server`, `make lint`, `make typecheck`; no narrowed coverage includes; prove plain node CLI via direct process smoke.
+- [x] 1.1 Write process contract tests first and capture their failed run before fake implementation; qualify known-bad frames/absent behaviors rather than treating ENOENT alone as semantic proof.
+- [x] 1.2 Implement normal handshake/id correlation and full prompt lifecycle with at least three deltas and matching tool pair; test EOF cleanup.
+- [x] 1.3 Cover no-ready, missing-session, chunked plus interleaved, crash, error and extension-ui observable differences; reconstruct >3MiB Unicode logical frame exactly.
+- [x] 1.4 Implement call-proxy managed YAML read and real bearer POST/SSE text mapping; test local request body, fragmented SSE/Unicode, failure termination and no token in logs.
+- [x] 1.5 Run `npx vitest run --config server/vitest.config.ts server/test/fake-omp.test.ts`, `npm test --workspace server`, `make lint`, `make typecheck`; no narrowed coverage includes; prove plain node CLI via direct process smoke.
 - [ ] 1.6 Complete independent review/CI, record deviations and archive only this child fixture.
 
 ## Risk pack mapping
@@ -28,3 +28,8 @@
 - Not selected SQLite migration/catalog compatibility: no database access.
 - Not selected server/web HTTP-envelope compatibility: no app-server route or browser API changes.
 - Not selected browser runtime/navigation/persistence: no browser surface.
+
+## Evidence and limits
+PR #143 retains reviewer reports and adjudication. Initial missing-file and callable-stub RED preceded implementation. Fix-pass regressions failed on tool-origin ordering and truncated SSE completion; naive per-buffer UTF-8 decoding and injected chunk interleaving mutants failed their respective tests, then restored code passed.
+Independent verification: focused 11/11; server 586/586 with unchanged coverage thresholds; lint/typecheck/anti-drift pass after factoring repeated lifecycle/error assertions. Plain Node smoke emits 13 frames with toolUse message_end before tool execution and final terminal agent_end.
+The fake buffers proxy content until DONE rather than proving incremental relay timing. Managed YAML is the single-workbuddy-provider subset. These limits are intentional; real production decoder, cancellation and general YAML behavior are not implemented here. The atomic two-file test-support PR exceeds the review-only 400-line guideline, with rationale in the PR; each file remains under 800 lines.

@@ -18,6 +18,9 @@ const MAX_FRAME = 1_048_576;
 const MAX_REASSEMBLED = 67_108_864;
 const THREE_MIB = 3 * 1024 * 1024;
 const TOKEN = "wb-issue87-bearer-sentinel";
+const STREAMED_TEXT = "你好🌍";
+const SSE_EVENT = `data: {"choices":[{"delta":{"content":"${STREAMED_TEXT}"}}]}\n\n`;
+const SSE_DONE = Buffer.from(`${SSE_EVENT}data: [DONE]\n\n`, "utf8");
 const OMP_FLAGS = [
   "--mode",
   "rpc",
@@ -48,12 +51,7 @@ const servers: Server[] = [];
 const temps: string[] = [];
 
 afterEach(async () => {
-  for (const child of children.splice(0)) {
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill("SIGKILL");
-    }
-    await waitExit(child);
-  }
+  await Promise.all(children.splice(0).map(stopChild));
   await Promise.all(
     servers.splice(0).map(
       (server) =>
@@ -108,11 +106,24 @@ describe("fake-omp process contract", () => {
     expect(ends).toHaveLength(1);
     expect(starts[0]?.toolCallId).toBe(ends[0]?.toolCallId);
     expect(starts[0]?.toolName).toBe(ends[0]?.toolName);
-    const messageEnd = turn.findLast(
-      (frame) => frame.type === "message_end" && asRecord(frame.message).role === "assistant",
+    const toolOriginEnd = turn.find(
+      (frame) =>
+        frame.type === "message_end" &&
+        asRecord(frame.message).role === "assistant" &&
+        asRecord(frame.message).stopReason === "toolUse",
     );
-    expect(messageEnd).toBeDefined();
-    expect(turn.indexOf(messageEnd as Frame)).toBeLessThan(turn.indexOf(end));
+    const finalEnd = turn.findLast(
+      (frame) =>
+        frame.type === "message_end" &&
+        asRecord(frame.message).role === "assistant" &&
+        asRecord(frame.message).stopReason === "stop",
+    );
+    expect(toolOriginEnd).toBeDefined();
+    expect(finalEnd).toBeDefined();
+    expect(turn.indexOf(toolOriginEnd as Frame)).toBeLessThan(turn.indexOf(starts[0] as Frame));
+    expect(turn.indexOf(starts[0] as Frame)).toBeLessThan(turn.indexOf(ends[0] as Frame));
+    expect(turn.indexOf(ends[0] as Frame)).toBeLessThan(turn.indexOf(finalEnd as Frame));
+    expect(turn.indexOf(finalEnd as Frame)).toBeLessThan(turn.indexOf(end));
     session.closeStdin();
     await expect(session.waitExit()).resolves.toBe(0);
   });
@@ -154,8 +165,8 @@ describe("fake-omp process contract", () => {
     await session.wait((frame) => frame.type === "ready");
     session.write(HANDSHAKE);
     await session.wait(response("protocol-1", "negotiate_protocol"));
-    const chunks = await collectChunks(session);
-    const decoded = decodeChunks(chunks);
+    const sequence = await collectChunkSequence(session);
+    const decoded = decodeChunks(sequence);
     expect(decoded.bytes.byteLength).toBeGreaterThan(THREE_MIB);
     expect(decoded.json).toMatchObject({
       id: "state-1",
@@ -163,9 +174,8 @@ describe("fake-omp process contract", () => {
       command: "get_state",
       success: true,
     });
-    expect([...decoded.text].some((ch) => ch.codePointAt(0)! > 0x7f)).toBe(true);
-    session.closeStdin();
-    await session.waitExit();
+    expect(decoded.text).toMatch(/\P{ASCII}/u);
+    await closeSession(session);
   });
 
   it("inserts an unrelated frame between chunks when interleaved is selected", {
@@ -177,16 +187,11 @@ describe("fake-omp process contract", () => {
     await session.wait(response("protocol-1", "negotiate_protocol"));
     const sequence = await collectChunkSequence(session);
     expect(() => decodeChunks(sequence)).toThrow(/interleaved/u);
-    session.closeStdin();
-    await session.waitExit();
+    await closeSession(session);
   });
 
   it("exits nonzero during a prompt without terminal agent_end when crash is selected", async () => {
-    const session = startFake({ scenario: "crash" });
-    await session.wait((frame) => frame.type === "ready");
-    session.write(HANDSHAKE);
-    session.write(PROMPT);
-    await session.wait(response("req_1", "prompt"));
+    const session = await startPromptedSession({ scenario: "crash" });
     const code = await session.waitExit();
     expect(code).not.toBe(0);
     expect(
@@ -195,31 +200,13 @@ describe("fake-omp process contract", () => {
   });
 
   it("emits assistant stopReason error then terminal agent_end when error is selected", async () => {
-    const session = startFake({ scenario: "error" });
-    await session.wait((frame) => frame.type === "ready");
-    session.write(HANDSHAKE);
-    session.write(PROMPT);
-    const end = await session.wait(
-      (frame) => frame.type === "agent_end" && frame.isTerminal !== false,
-    );
-    const failed = session.frames.find(
-      (frame) =>
-        frame.type === "message_end" &&
-        asRecord(frame.message).role === "assistant" &&
-        asRecord(frame.message).stopReason === "error",
-    );
-    expect(typeof asRecord(failed?.message).errorMessage).toBe("string");
-    expect(String(asRecord(failed?.message).errorMessage).length).toBeGreaterThan(0);
-    expect(session.frames.indexOf(failed as Frame)).toBeLessThan(session.frames.indexOf(end));
-    session.closeStdin();
-    await session.waitExit();
+    const session = await startPromptedSession({ scenario: "error" });
+    await expectErrorTurn(session);
+    await closeSession(session);
   });
 
   it("waits for a matching cancelled extension_ui_response before completing", async () => {
-    const session = startFake({ scenario: "extension-ui" });
-    await session.wait((frame) => frame.type === "ready");
-    session.write(HANDSHAKE);
-    session.write(PROMPT);
+    const session = await startPromptedSession({ scenario: "extension-ui" });
     const request = await session.wait(
       (frame) => frame.type === "extension_ui_request" && frame.method === "confirm",
     );
@@ -231,45 +218,35 @@ describe("fake-omp process contract", () => {
     expect(session.frames.some((frame) => frame.type === "agent_end")).toBe(false);
     session.write([{ type: "extension_ui_response", id: request.id, cancelled: true }]);
     await session.wait((frame) => frame.type === "agent_end" && frame.isTerminal !== false);
-    session.closeStdin();
-    await session.waitExit();
+    await closeSession(session);
   });
 
-  it("POSTs a bearer streaming completion and maps split UTF-8 SSE to text_delta", async () => {
+  it("POSTs a bearer completion through forced fragmented UTF-8 SSE delivery", async () => {
     const captured: ProxyCapture[] = [];
-    const proxy = await startProxy((request, response) => {
-      void collectRequest(request).then((body) => {
-        captured.push({
-          url: request.url ?? "",
-          authorization: String(request.headers.authorization ?? ""),
-          body,
-        });
-        const payload = Buffer.from(
-          `data: {"choices":[{"delta":{"content":"你好🌍"}}]}\n\n` + `data: [DONE]\n\n`,
-          "utf8",
-        );
-        response.writeHead(200, { "content-type": "text/event-stream" });
-        response.write(payload.subarray(0, 40));
-        response.write(payload.subarray(40));
-        response.end();
+    const splitAt = splitInsideEmoji(SSE_DONE);
+    const proxy = await startProxy(async (request, response) => {
+      captured.push({
+        url: request.url ?? "",
+        authorization: String(request.headers.authorization ?? ""),
+        body: await collectRequest(request),
       });
+      await writeFragmentedSse(response, SSE_DONE, splitAt);
     });
-    const agentDir = tempAgentDir(managedYaml(`"${proxy.origin}/v1"`, "deepseek-v4.1-flash"));
-    const session = startFake({
+    const session = await startPromptedSession({
       scenario: "call-proxy",
-      env: { PI_CODING_AGENT_DIR: agentDir, WORKBUDDY_MODEL_TOKEN: TOKEN },
+      env: {
+        PI_CODING_AGENT_DIR: tempAgentDir(
+          managedYaml(`"${proxy.origin}/v1"`, "deepseek-v4.1-flash"),
+        ),
+        WORKBUDDY_MODEL_TOKEN: TOKEN,
+      },
     });
-    await session.wait((frame) => frame.type === "ready");
-    session.write(HANDSHAKE);
-    session.write(PROMPT);
-    const end = await session.wait(
-      (frame) => frame.type === "agent_end" && frame.isTerminal !== false,
-    );
+    await session.wait((frame) => frame.type === "agent_end" && frame.isTerminal !== false);
     const text = session.frames
       .filter(isTextDelta)
       .map((frame) => String(asRecord(frame.assistantMessageEvent).delta))
       .join("");
-    expect(text).toBe("你好🌍");
+    expect(text).toBe(STREAMED_TEXT);
     expect(captured).toHaveLength(1);
     expect(captured[0]?.url).toBe("/v1/chat/completions");
     expect(captured[0]?.authorization).toBe(`Bearer ${TOKEN}`);
@@ -278,49 +255,54 @@ describe("fake-omp process contract", () => {
       PROMPT.message,
     );
     expect(`${session.stdout}${session.stderr}`).not.toContain(TOKEN);
-    expect(session.frames.indexOf(end)).toBeGreaterThan(-1);
-    session.closeStdin();
-    await session.waitExit();
+    await closeSession(session);
   });
 
-  it("fails visibly on invalid managed YAML or HTTP errors without leaking the token", async () => {
-    const missing = startFake({
+  it("reports config, HTTP, and truncated-SSE failures before terminal completion", async () => {
+    const missing = await startPromptedSession({
       scenario: "call-proxy",
       env: { PI_CODING_AGENT_DIR: tempAgentDir(""), WORKBUDDY_MODEL_TOKEN: TOKEN },
     });
-    await missing.wait((frame) => frame.type === "ready");
-    missing.write(HANDSHAKE);
-    missing.write(PROMPT);
-    await missing.wait(response("req_1", "prompt"));
     await expectVisibleFailure(missing);
+    await closeSession(missing);
 
-    const malformedDir = tempAgentDir("providers: []\n");
-    const malformed = startFake({
-      scenario: "call-proxy",
-      env: { PI_CODING_AGENT_DIR: malformedDir, WORKBUDDY_MODEL_TOKEN: TOKEN },
-    });
-    await malformed.wait((frame) => frame.type === "ready");
-    malformed.write(HANDSHAKE);
-    malformed.write(PROMPT);
-    await malformed.wait(response("req_1", "prompt"));
-    await expectVisibleFailure(malformed);
-
-    const proxy = await startProxy((_request, response) => {
-      response.writeHead(500, { "content-type": "application/json" });
-      response.end('{"error":"upstream"}');
-    });
-    const httpFail = startFake({
+    const malformed = await startPromptedSession({
       scenario: "call-proxy",
       env: {
-        PI_CODING_AGENT_DIR: tempAgentDir(managedYaml(proxy.origin, "flash")),
+        PI_CODING_AGENT_DIR: tempAgentDir("providers: []\n"),
         WORKBUDDY_MODEL_TOKEN: TOKEN,
       },
     });
-    await httpFail.wait((frame) => frame.type === "ready");
-    httpFail.write(HANDSHAKE);
-    httpFail.write(PROMPT);
-    await httpFail.wait(response("req_1", "prompt"));
+    await expectVisibleFailure(malformed);
+    await closeSession(malformed);
+
+    const httpProxy = await startProxy(async (_request, response) => {
+      response.writeHead(500, { "content-type": "application/json" });
+      response.end('{"error":"upstream"}');
+    });
+    const httpFail = await startPromptedSession({
+      scenario: "call-proxy",
+      env: {
+        PI_CODING_AGENT_DIR: tempAgentDir(managedYaml(httpProxy.origin, "flash")),
+        WORKBUDDY_MODEL_TOKEN: TOKEN,
+      },
+    });
     await expectVisibleFailure(httpFail);
+    await closeSession(httpFail);
+
+    const eofProxy = await startProxy(async (_request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end(Buffer.from(SSE_EVENT, "utf8"));
+    });
+    const eof = await startPromptedSession({
+      scenario: "call-proxy",
+      env: {
+        PI_CODING_AGENT_DIR: tempAgentDir(managedYaml(eofProxy.origin, "flash")),
+        WORKBUDDY_MODEL_TOKEN: TOKEN,
+      },
+    });
+    await expectVisibleFailure(eof);
+    await closeSession(eof);
   });
 });
 
@@ -339,6 +321,10 @@ interface StartOptions {
   extraArgs?: string[];
   env?: NodeJS.ProcessEnv;
 }
+
+type ProxyHandler = (request: IncomingMessage, response: ServerResponse) => Promise<void>;
+
+const exitStatuses = new WeakMap<ChildProcessWithoutNullStreams, number>();
 
 function startFake(options: StartOptions = {}): Session {
   const args = [...OMP_FLAGS, ...(options.extraArgs ?? [])];
@@ -360,6 +346,10 @@ function startFake(options: StartOptions = {}): Session {
       listener();
     }
   };
+  const recordExit = (code: number | null, signal: NodeJS.Signals | null): void => {
+    exitStatuses.set(child, exitStatus(code, signal));
+    notify();
+  };
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
   child.stdout.on("data", (chunk: string) => {
@@ -380,7 +370,8 @@ function startFake(options: StartOptions = {}): Session {
     stderr += chunk;
     notify();
   });
-  child.on("exit", notify);
+  child.on("exit", recordExit);
+  child.on("close", recordExit);
   return {
     frames,
     get stdout() {
@@ -409,7 +400,7 @@ function startFake(options: StartOptions = {}): Session {
             resolve(match);
             return;
           }
-          if (child.exitCode !== null || child.signalCode !== null) {
+          if (observedExitStatus(child) !== undefined) {
             cleanup();
             reject(new Error(`child exited before frame; stdout=${stdout} stderr=${stderr}`));
           }
@@ -432,20 +423,69 @@ function startFake(options: StartOptions = {}): Session {
   };
 }
 
-function waitExit(child: ChildProcessWithoutNullStreams): Promise<number> {
+async function startPromptedSession(options: StartOptions = {}): Promise<Session> {
+  const session = startFake(options);
+  await session.wait((frame) => frame.type === "ready");
+  session.write(HANDSHAKE);
+  await session.wait(response("protocol-1", "negotiate_protocol"));
+  await session.wait(response("state-1", "get_state"));
+  session.write(PROMPT);
+  await session.wait(response("req_1", "prompt"));
+  return session;
+}
+
+async function closeSession(session: Session): Promise<void> {
+  session.closeStdin();
+  await session.waitExit();
+}
+
+async function stopChild(child: ChildProcessWithoutNullStreams): Promise<void> {
+  if (observedExitStatus(child) === undefined) {
+    child.kill("SIGKILL");
+  }
+  await waitExit(child);
+}
+
+function observedExitStatus(child: ChildProcessWithoutNullStreams): number | undefined {
+  const recorded = exitStatuses.get(child);
+  if (recorded !== undefined) {
+    return recorded;
+  }
   if (child.exitCode !== null) {
-    return Promise.resolve(child.exitCode);
+    return child.exitCode;
+  }
+  return child.signalCode === null ? undefined : 1;
+}
+
+function exitStatus(code: number | null, signal: NodeJS.Signals | null): number {
+  return code ?? (signal === null ? 0 : 1);
+}
+
+function waitExit(child: ChildProcessWithoutNullStreams): Promise<number> {
+  const observed = observedExitStatus(child);
+  if (observed !== undefined) {
+    return Promise.resolve(observed);
   }
   return new Promise<number>((resolve) => {
-    const abort = AbortSignal.timeout(3_000);
-    const onAbort = (): void => {
-      child.kill("SIGKILL");
+    const settle = (code: number | null, signal: NodeJS.Signals | null): void => {
+      child.off("exit", onExit);
+      child.off("close", onClose);
+      resolve(observedExitStatus(child) ?? exitStatus(code, signal));
     };
-    abort.addEventListener("abort", onAbort, { once: true });
-    child.once("exit", (code, signal) => {
-      abort.removeEventListener("abort", onAbort);
-      resolve(code ?? (signal === null ? 0 : 1));
-    });
+    const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
+      settle(code, signal);
+    };
+    const onClose = (code: number | null, signal: NodeJS.Signals | null): void => {
+      settle(code, signal);
+    };
+    child.once("exit", onExit);
+    child.once("close", onClose);
+    const cached = observedExitStatus(child);
+    if (cached !== undefined) {
+      child.off("exit", onExit);
+      child.off("close", onClose);
+      resolve(cached);
+    }
   });
 }
 
@@ -492,52 +532,50 @@ function decodeChunks(frames: Frame[]): { bytes: Buffer; text: string; json: Fra
   return { bytes, text, json: JSON.parse(text) as Frame };
 }
 
-async function collectChunks(session: Session): Promise<Frame[]> {
-  const first = await session.wait((frame) => frame.type === "rpc_chunk" && frame.index === 0);
-  const count = Number(first.count);
-  await session.wait(
-    () => session.frames.filter((frame) => frame.type === "rpc_chunk").length === count,
-  );
-  return session.frames.filter((frame) => frame.type === "rpc_chunk");
-}
-
 async function collectChunkSequence(session: Session): Promise<Frame[]> {
   const first = await session.wait((frame) => frame.type === "rpc_chunk");
   const count = Number(first.count);
   await session.wait(
     () => session.frames.filter((frame) => frame.type === "rpc_chunk").length >= count,
   );
-  const start = session.frames.findIndex((frame) => frame.type === "rpc_chunk");
-  const collected: Frame[] = [];
+  const start = session.frames.indexOf(first);
+  const sequence: Frame[] = [];
   for (const frame of session.frames.slice(start)) {
-    collected.push(frame);
-    if (collected.filter((item) => item.type === "rpc_chunk").length >= count) {
+    sequence.push(frame);
+    if (sequence.filter((item) => item.type === "rpc_chunk").length >= count) {
       break;
     }
   }
-  return collected;
+  return sequence;
+}
+
+async function expectErrorTurn(session: Session): Promise<void> {
+  const end = await session.wait(
+    (frame) => frame.type === "agent_end" && frame.isTerminal !== false,
+  );
+  const failed = session.frames.find(
+    (frame) =>
+      frame.type === "message_end" &&
+      asRecord(frame.message).role === "assistant" &&
+      asRecord(frame.message).stopReason === "error",
+  );
+  expect(failed).toBeDefined();
+  const message = asRecord(failed?.message);
+  expect(message).toMatchObject({ role: "assistant", stopReason: "error" });
+  expect(typeof message.errorMessage).toBe("string");
+  expect(String(message.errorMessage).length).toBeGreaterThan(0);
+  expect(session.frames.indexOf(failed as Frame)).toBeLessThan(session.frames.indexOf(end));
 }
 
 async function expectVisibleFailure(session: Session): Promise<void> {
-  const failed = session
-    .wait(
-      (frame) =>
-        (frame.type === "message_end" && asRecord(frame.message).stopReason === "error") ||
-        (frame.type === "response" && frame.success === false) ||
-        (frame.type === "agent_end" &&
-          frame.isTerminal !== false &&
-          session.frames.some(
-            (item) => item.type === "message_end" && asRecord(item.message).stopReason === "error",
-          )),
-    )
-    .then(() => "frame" as const);
-  const exited = session.waitExit().then((code) => (code === 0 ? "zero" : "nonzero"));
-  const outcome = await Promise.race([failed, exited]);
-  expect(outcome).not.toBe("zero");
+  await expectErrorTurn(session);
   expect(session.frames.some(isTextDelta)).toBe(false);
+  expect(
+    session.frames.some(
+      (frame) => frame.type === "message_end" && asRecord(frame.message).stopReason === "stop",
+    ),
+  ).toBe(false);
   expect(`${session.stdout}${session.stderr}`).not.toContain(TOKEN);
-  session.closeStdin();
-  await session.waitExit();
 }
 
 interface ProxyCapture {
@@ -546,10 +584,10 @@ interface ProxyCapture {
   body: string;
 }
 
-async function startProxy(
-  handler: (request: IncomingMessage, response: ServerResponse) => void,
-): Promise<{ origin: string }> {
-  const server = createServer(handler);
+async function startProxy(handler: ProxyHandler): Promise<{ origin: string }> {
+  const server = createServer((request, response) => {
+    void handler(request, response).catch(() => response.destroy());
+  });
   servers.push(server);
   await new Promise<void>((resolve) => {
     server.listen(0, "127.0.0.1", resolve);
@@ -570,6 +608,28 @@ function collectRequest(request: IncomingMessage): Promise<string> {
     request.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     request.on("error", reject);
   });
+}
+
+async function writeFragmentedSse(
+  response: ServerResponse,
+  payload: Buffer,
+  splitAt: number,
+): Promise<void> {
+  response.writeHead(200, { "content-type": "text/event-stream" });
+  response.socket?.setNoDelay(true);
+  await new Promise<void>((resolve, reject) => {
+    response.write(payload.subarray(0, splitAt), (error) => (error ? reject(error) : resolve()));
+  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  response.end(payload.subarray(splitAt));
+}
+
+function splitInsideEmoji(payload: Buffer): number {
+  const start = payload.indexOf(Buffer.from("🌍", "utf8"));
+  if (start < 0) {
+    throw new Error("missing emoji test payload");
+  }
+  return start + 2;
 }
 
 function tempAgentDir(yaml: string): string {

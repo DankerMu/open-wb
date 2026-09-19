@@ -238,6 +238,10 @@ async function completeTurn(deltas, tools) {
   }
   if (tools) {
     await emit({
+      type: "message_end",
+      message: { role: "assistant", content: [], stopReason: "toolUse" },
+    });
+    await emit({
       type: "tool_execution_start",
       toolCallId: TOOL_ID,
       toolName: TOOL_NAME,
@@ -394,31 +398,42 @@ function postChat(baseUrl, token, message) {
 }
 
 async function readSseContent(stream) {
-  const deltas = [];
-  let bytes = Buffer.alloc(0);
-  let text = "";
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const state = { buffer: "", deltas: [] };
   for await (const chunk of stream) {
-    bytes = Buffer.concat([bytes, chunk]);
-    const taken = takeUtf8(bytes);
-    bytes = taken.rest;
-    text += taken.text;
-    const parts = text.split("\n\n");
-    text = parts.pop() ?? "";
-    for (const event of parts) {
-      const data = eventData(event);
-      if (data === "[DONE]") {
-        return deltas;
-      }
-      if (data.length === 0) {
-        continue;
-      }
-      const content = JSON.parse(data)?.choices?.[0]?.delta?.content;
-      if (typeof content === "string" && content.length > 0) {
-        deltas.push(content);
-      }
+    if (consumeSseText(state, decoder.decode(chunk, { stream: true }))) {
+      return state.deltas;
     }
   }
-  return deltas;
+  if (consumeSseText(state, decoder.decode())) {
+    return state.deltas;
+  }
+  throw new Error("SSE ended before [DONE]");
+}
+
+function consumeSseText(state, text) {
+  state.buffer += text;
+  let boundary = state.buffer.indexOf("\n\n");
+  while (boundary !== -1) {
+    const data = eventData(state.buffer.slice(0, boundary));
+    state.buffer = state.buffer.slice(boundary + 2);
+    if (data === "[DONE]") {
+      return true;
+    }
+    appendSseContent(state.deltas, data);
+    boundary = state.buffer.indexOf("\n\n");
+  }
+  return false;
+}
+
+function appendSseContent(deltas, data) {
+  if (data.length === 0) {
+    return;
+  }
+  const content = JSON.parse(data)?.choices?.[0]?.delta?.content;
+  if (typeof content === "string" && content.length > 0) {
+    deltas.push(content);
+  }
 }
 
 function eventData(event) {
@@ -429,26 +444,4 @@ function eventData(event) {
     }
   }
   return lines.join("\n");
-}
-
-function takeUtf8(buffer) {
-  let end = buffer.length;
-  if (end === 0) {
-    return { text: "", rest: buffer };
-  }
-  let i = end - 1;
-  if ((buffer[i] & 0x80) !== 0) {
-    while (i > 0 && (buffer[i] & 0xc0) === 0x80) {
-      i--;
-    }
-    const lead = buffer[i];
-    const need = lead < 0xe0 ? 2 : lead < 0xf0 ? 3 : 4;
-    if (end - i < need) {
-      end = i;
-    }
-  }
-  if (end === 0) {
-    return { text: "", rest: buffer };
-  }
-  return { text: buffer.subarray(0, end).toString("utf8"), rest: buffer.subarray(end) };
 }
