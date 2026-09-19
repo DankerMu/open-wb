@@ -2,7 +2,7 @@
 - [x] 1.1 Add six-method public client tests, preserve semantic RED before implementation, cover URL/body contracts and canonical error/401 behavior.
 - [x] 1.2 Extend existing API client with typed workspace/tree/audit responses and text/image previews, using canonical helpers; preserve all existing consumers.
 - [x] 1.3 Prove header/body size distinction, exact image bytes and URL ownership, empty preview, malformed response/error precedence; run web suite/typecheck/build, scoped Biome, knip/jscpd/size guard and parent runtime smoke.
-- [ ] 1.4 Independent expanded review, exact-head CI and merge; archive this API-only delta and keep Epic active.
+- [x] 1.4 Independent expanded review, exact-head CI and merge; archive this API-only delta and keep Epic active. PR #153 merged; three static seats clean; CI 35459460125 passed.
 ## Risk packs
 - Selected Public API / CLI / script entry: six exported client methods and auth-provider sibling compatibility (1.1–1.3).
 - Not selected Config / project setup: no config changes.
