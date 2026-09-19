@@ -4,7 +4,7 @@
 - [x] 1.3 Cover no-ready, missing-session, chunked plus interleaved, crash, error and extension-ui observable differences; reconstruct >3MiB Unicode logical frame exactly.
 - [x] 1.4 Implement call-proxy managed YAML read and real bearer POST/SSE text mapping; test local request body, fragmented SSE/Unicode, failure termination and no token in logs.
 - [x] 1.5 Run `npx vitest run --config server/vitest.config.ts server/test/fake-omp.test.ts`, `npm test --workspace server`, `make lint`, `make typecheck`; no narrowed coverage includes; prove plain node CLI via direct process smoke.
-- [ ] 1.6 Complete independent review/CI, record deviations and archive only this child fixture.
+- [x] 1.6 Complete independent review/CI, record deviations and archive only this child fixture.
 
 ## Risk pack mapping
 - Selected Public API / CLI / script entry: 1.1-1.3, 1.5; real node argv/stdin/stdout tests.
