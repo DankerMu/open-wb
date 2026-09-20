@@ -28,7 +28,7 @@ API 端点清单（属 spec 阶段）。
 |---|---|---|---|
 | `core/sandbox` | `resolve(principal, workspaceId, relPath) → 绝对路径 \| 拒绝`（拒绝自动入审计）；`deriveWhitelist(workspace) → omp 沙箱配置` | 路径规范化、symlink 逃逸防御、多根挂载点合并、白名单推导（排除 app-server 配置） | 删掉它，越界防御在 workspaces/sessions/kb 每个调用点重现——AGENTS.md 白盒关键路径 |
 | `core/audit` | `emit(db, event)`；`query(db, principal, {limit?, before?})` | 只追加表、账号隔离、canonical id 游标分页 | 所有模块的合规出口收敛于一处 |
-| `core/errors` | `HttpError`、五码与中文消息 | HTTP 状态码、content-parser 归属与信封映射仍在 `http/` | 一处运行时身份，避免 core 反向依赖 http |
+| `core/errors` | `HttpError`、七码与中文消息 | HTTP 状态码、content-parser 归属与信封映射仍在 `http/` | 一处运行时身份，避免 core 反向依赖 http |
 | `core/db` | SQLite 句柄 + 迁移执行 | WAL 配置、schema 迁移（ADR-0004） | |
 | `auth` | `authenticate(req) → Principal`；login/callback/logout 路由 | OIDC 流程、会话 cookie、首登 provisioning；适配器×2：oidc、dev-stub（ADR-0007） | 两个适配器 = 真接缝 |
 | `accounts` | 账号属性/角色/配额/项目组管理；`scopeOf(principal)` → 可见范围解析输入 | IdP 字段与应用侧字段的分界 | |

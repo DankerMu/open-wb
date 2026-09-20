@@ -7,6 +7,8 @@
 ### Requirement: 统一错误信封
 所有本阶段可预期 `/api/*` 应用错误与 API 404 SHALL 使用统一信封 `{ "error": { "code": "<snake_case>", "message": "<可直接展示的中文文案>" } }`；typed definition map 固定为**七码**：`bad_request`(400, `请求格式不正确`)、`invalid_credentials`(401, `账号或密码不正确`)、`account_disabled`(403, `该账号已停用，请联系管理员`)、`unauthorized`(401, `请先登录`)、`not_found`(404, `请求的资源不存在`)、`session_busy`(409, `会话正在生成，请稍候`)、`agent_unavailable`(502, `Agent 运行时不可用`)；处理器 SHALL 落在 `http/` 横切层。`bad_request` 覆盖显式 typed `HttpError("bad_request")`；仅当 request 的 matched route identity 恰为 content-parser 归属集 `POST /api/auth/login`、`POST /api/auth/logout`、`POST /api/sessions/:id/prompt`、`POST /v1/chat/completions` 之一时，才额外覆盖 exact Fastify content-parser error code allowlist：`FST_ERR_CTP_INVALID_MEDIA_TYPE`、`FST_ERR_CTP_INVALID_JSON_BODY`、`FST_ERR_CTP_EMPTY_JSON_BODY`、`FST_ERR_CTP_BODY_TOO_LARGE`。归属路由均不使用 route schema，因此 `FST_ERR_VALIDATION` 不在此 allowlist。映射不依赖 raw `statusCode`（body-too-large 原始状态可为 413），最终均为 exact 400。其他原始 API namespace 的 protected request 在 root preParsing guard 前不解析 body：未认证先返回 401；通过 guard 后，相同 parser/media 错误若发生在 matched `/api`/`/api/*` catch-all，恢复既有 typed `not_found` 404，发生在归属集之外的其他已注册 API route 保持 generic 5xx。原始 non-API unmatched non-GET miss 无论是否携 cookie 都绕过 guard、零 session query 并保持既有 typed 404（`/v1/chat/completions` 是显式注册路由，不属 miss）。不得回显 parser/schema/password/session/bearer 细节；具有相同 status/statusCode 或伪造 code 的任意 programmer error 不得被误标成七种语义错误，仍为 5xx。
 
+公共 `HttpError` 类、错误代码与消息 SHALL 仅定义在 `core/errors`；HTTP 状态、content-parser 归属和信封映射 SHALL 留在 `http/`，不得恢复旧路径兼容转发或第二份定义。缓存与 cookie 策略 SHALL 保持 route-owned，不因七码扩展安装全局 hook。
+
 #### Scenario: 七码信封形状一致
 - WHEN 测试路由分别抛出七种 typed application error
 - THEN 响应 status/code/message 与 definition map exact 对应，body 仅含 `{error:{code,message}}`，无 Fastify 默认 error 字段
@@ -26,6 +28,12 @@
 #### Scenario: 意外错误不伪装
 - WHEN API route 抛出未分类的 programmer error
 - THEN 返回 5xx，且 body 不得声称七个 typed semantic code 中任一个
+
+#### Scenario: Cache policy remains route-owned
+- WHEN each of the seven typed errors passes through an existing no-store-owning route and the shared mapper
+- THEN the response preserves exact Cache-Control no-store and exact typed envelope, without widening that route's auth error vocabulary
+- WHEN an existing non-auth route emits401/204 without its own cache policy
+- THEN it SHALL NOT inherit auth no-store or clear-cookie side effects; this additive mapper change SHALL NOT install a global cache hook
 
 ### Requirement: 服务启动与装配
 系统 SHALL 以 `server/src/app.ts` 装配 Fastify 实例，并以 `server/src/server.ts` 作为唯一 production listen/DB ownership 入口；import 该 module 只暴露 pure config seam，不得 mkdir/open/listen 或注册 signal，只有 ESM main guard 命中的执行路径可启动。唯一配置源为 own environment keys `HOST`、`PORT`、`DB_PATH`、`STATIC_ROOT`、`OMP_BIN`、`OMP_STATE_DIR`、`OMP_IDLE_MS`、`SANDBOX_ROOT`、`MODEL_UPSTREAM_BASE_URL`、`MODEL_UPSTREAM_API_KEY`、`MODEL_ID`：缺省值分别为 `127.0.0.1`、`3000`、repo-root `var/dev.db`、repo-root `web/dist`、repo-root `var/omp/omp`、repo-root `var/omp-state`、`600000`、repo-root `var/sandbox`、（无，可缺）、（无，可缺）、`deepseek-v4.1-flash`；relative path SHALL 相对由 entry module identity 推导的 repo root，不得随 shell/npm workspace cwd 分裂。`PORT` SHALL 只接受 canonical ASCII decimal `1..65535`；`OMP_IDLE_MS` SHALL 只接受 canonical ASCII decimal 正整数；HOST missing 取默认、empty 或 whitespace-only 非法且不得 trim/coerce，其它 nonempty string 原样交 listen；DB/static/omp/state/sandbox path explicit empty 非法；`MODEL_UPSTREAM_BASE_URL`/`MODEL_UPSTREAM_API_KEY` 缺省合法（代理对任何请求 502），显式 empty 非法。全部 config SHALL 在任何 filesystem/database/listen effect 前验证。

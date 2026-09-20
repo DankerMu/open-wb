@@ -49,7 +49,7 @@ IMPLEMENTATION_PLAN.md S0b：S0a 已交付 HTTP 骨架、dev-stub 认证、SPA �
 
 ## Impact
 
-- 代码：`server/src/sessions`（含内部接缝 `sessions/omp/`，与 system.md §5 目录树一致）与 `server/src/model-proxy`（新模块）、`server/src/core/db/migrations/020_chat_sessions.sql`、`server/src/{app,server,http/errors}.ts`（装配/配置/错误码）、`web/src/features/chat`、`web/src/lib/api.ts`、`web/src/routes/router.tsx`、`server/test/support/fake-upstream.mjs`、`smoke/chat.hurl`、`web/e2e/ui-walk.spec.ts`。
+- 代码：`server/src/sessions`（含内部接缝 `sessions/omp/`，与 system.md §5 目录树一致）与 `server/src/model-proxy`（新模块）、`server/src/core/db/migrations/020_chat_sessions.sql`、`server/src/{app,server}.ts`（装配/配置）、`server/src/core/errors/index.ts`（唯一错误代码/消息/类）与 `server/src/http/errors.ts`（状态/信封/parser归属）、`web/src/features/chat`、`web/src/lib/api.ts`、`web/src/routes/router.tsx`、`server/test/support/fake-upstream.mjs`、`smoke/chat.hurl`、`web/e2e/ui-walk.spec.ts`。
 - 构建/控制面：`Makefile`（`omp-fetch`、`smoke-live`、`.PHONY`）、`.github/workflows/ci.yml` 与 `.github/scripts/`（omp 拉取、假上游启动）、`knip.json`（新入口如有）、`AGENTS.md` 验证矩阵/Directory Map、`constraints.yaml` verification 段、`.gitignore`（`var/` 已覆盖）。
 - 依赖：**零新增 npm 依赖**——子进程用 `node:child_process`，HTTP 上游用 Node 内建 `fetch`，SSE 用 Fastify 原生 reply raw stream，SQLite 沿用 `node:sqlite`。omp 二进制为运行时外部依赖，不进 package.json。
 - 依赖方向保持 `http → feature → core`：`model-proxy` 与 `sessions` 不互相 import；`sessions` 经构造注入拿到"模型代理 base URL 与 token 登记"接口。

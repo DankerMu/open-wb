@@ -8,8 +8,8 @@
 
 ## 3. Acceptance and delivery
 - [x] 3.1 Parent focused suite147/147, fullserver841/841 with coverage90.26% statements/88.89% branches; lint/typecheck/anti-drift0clones/build/strictOpenSpec all exit0. Independent compiled realHTTP probe passes seven auth-owned no-store envelopes, four matched POST parser owners and sanitized negatives; nine wrong compiled-copy candidates rejected by semantic assertions, reference/restoration GREEN.
-- [ ] 3.2 Expanded correctness / test-evidence+spec-compliance / integration review, bounded fix gate, same-SHA CI, automatic sourcePR merge.
-- [ ] 3.3 Correct parent ownership references/task2.2 and archive through docs-only follow-up; preserve canonical sibling requirements.
+- [x] 3.2 Expanded correctness / test-evidence+spec-compliance / integration review: three seats no findings, round1 CLEAN atabd5d2cef9a5e3f431c6043ccd38254cafd45f63; CI35516328639 all8jobs success; sourcePR171 merged as963e61b.
+- [x] 3.3 Correct parent ownership references/task2.2 and architecture code count, and archive through the docs-only follow-up carrying this ledger; preserve canonical sibling requirements and route-local cache policy.
 
 ## Risk packs
 - Selected Public API: exact seven envelope statuses/messages/body shape and route policy; 1.2/2.2/3.1.

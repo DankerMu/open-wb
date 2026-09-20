@@ -18,7 +18,7 @@ Minimal mergeable slice: 1.1 omp-fetch 单独可合并保绿（纯 Makefile+脚�
 ## 2. model-proxy
 
 - [x] 2.1 `server/test/support/fake-upstream.mjs`：零依赖假 OpenAI 兼容上游（两轮脚本、`WORKBUDDY_FAKE_ERROR` → 500、401、`FAKE_UPSTREAM_PORT`、可进程内 `start()`/可 `node` 直跑）+ 契约单测。#88 / PR168 merged；19契约、797服务端测试通过；9错误候选拒绝，三席首轮clean，同SHA CI全绿；双mount共享handler满足根路径及D11 `/v1` base。#166旧fake-omp两轮relay由#102集成处理。
-- [ ] 2.2 `server/src/http/errors.ts`：定义表扩为七码（`session_busy`/`agent_unavailable`）+ `CONTENT_PARSER_OWNED_ROUTES` 增 `POST /api/sessions/:id/prompt`、`POST /v1/chat/completions` + 既有五码测试扩为七码与归属路由 400 断言
+- [x] 2.2 `server/src/core/errors/index.ts` 消息/代码扩为七码（`session_busy`/`agent_unavailable`），`server/src/http/errors.ts` 状态映射同步409/502，`CONTENT_PARSER_OWNED_ROUTES` 增 `POST /api/sessions/:id/prompt`、`POST /v1/chat/completions`。#84 / PR171 merged；147聚焦、841服务端测试通过，真实HTTP与9错误候选检验通过，三席首轮clean、同SHA CI全绿；保留route-local no-store，无新产品路由或旧http类型转发。
 - [ ] 2.3 `server/src/model-proxy/index.ts`：`registerModelProxy(app,{upstream,tokens})`（bearer 校验、流式透传、502、no-store、4 MiB 与 parser 400）+ `app.inject()` 对进程内假上游单测
 - [ ] 2.4 `server/src/model-proxy/models-yml.ts`：`writeManagedModelsYml(agentDir,{proxyBaseUrl,modelId})` 幂等生成 + `proxyBaseUrl` 推导（`0.0.0.0`→`127.0.0.1`、`::`→`[::1]`、IPv6 方括号）+ 内容断言单测（不含上游值、不含 authHeader）
 
