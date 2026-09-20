@@ -27,7 +27,8 @@ API 端点清单（属 spec 阶段）。
 | 模块 | 接口 | 接缝背后 | 深度理由（删除测试） |
 |---|---|---|---|
 | `core/sandbox` | `resolve(principal, workspaceId, relPath) → 绝对路径 \| 拒绝`（拒绝自动入审计）；`deriveWhitelist(workspace) → omp 沙箱配置` | 路径规范化、symlink 逃逸防御、多根挂载点合并、白名单推导（排除 app-server 配置） | 删掉它，越界防御在 workspaces/sessions/kb 每个调用点重现——AGENTS.md 白盒关键路径 |
-| `core/audit` | `emit(event)`；`query(filter, principal)` | 只追加表、账号隔离过滤 | 所有模块的合规出口收敛于一处 |
+| `core/audit` | `emit(db, event)`；`query(db, principal, {limit?, before?})` | 只追加表、账号隔离、canonical id 游标分页 | 所有模块的合规出口收敛于一处 |
+| `core/errors` | `HttpError`、五码与中文消息 | HTTP 状态码、content-parser 归属与信封映射仍在 `http/` | 一处运行时身份，避免 core 反向依赖 http |
 | `core/db` | SQLite 句柄 + 迁移执行 | WAL 配置、schema 迁移（ADR-0004） | |
 | `auth` | `authenticate(req) → Principal`；login/callback/logout 路由 | OIDC 流程、会话 cookie、首登 provisioning；适配器×2：oidc、dev-stub（ADR-0007） | 两个适配器 = 真接缝 |
 | `accounts` | 账号属性/角色/配额/项目组管理；`scopeOf(principal)` → 可见范围解析输入 | IdP 字段与应用侧字段的分界 | |
@@ -36,7 +37,7 @@ API 端点清单（属 spec 阶段）。
 | `kb` | `search(principal, query, kbRefs) → 切片+出处`；center 管理透传 | 可见范围过滤（先过滤 kb_ids 再调 kb-service）、bearer 凭证、共享库检索审计 | host tool 与 UI 检索共用同一过滤路径 |
 | `models` | 模型注册表 CRUD + 探活（对话/嵌入/重排） | 网关寻址细节 | |
 | `model-proxy` | 对 omp：baseURL + 会话标识；OpenAI 兼容端点 | 注册表寻址、密钥注入、流式透传、计量/限额、审计（ADR-0008） | 不变量 4 的机械保障点 |
-| `http` | Express/Fastify 路由、中间件、SSE 端点 | 纯驱动适配器层，零业务 | |
+| `http` | Fastify 路由、中间件、SSE 端点；状态码与错误信封映射 | 纯驱动适配器层，零业务 | |
 
 ### 3.2 kb-service（Python，吸收 RAGFlow）
 
@@ -61,12 +62,13 @@ kb-service 只认 kb_id 集合，不认用户——租户过滤是 app-server `k
 ```mermaid
 flowchart TD
     H["http (驱动适配器)"] --> F["feature 模块<br/>auth·accounts·workspaces·sessions·kb·models·model-proxy"]
-    F --> C["core<br/>sandbox·audit·db"]
+    H --> C["core<br/>sandbox·audit·db·errors"]
+    F --> C["core<br/>sandbox·audit·db·errors"]
     F -.禁止.-> H
     C -.禁止.-> F
 ```
 
-1. 方向单向：`http → feature → core`。core 不 import feature，feature 不 import http。
+1. 方向单向：`http → feature → core`。http 可直接依赖 core（共享错误身份）；core 不 import feature/http，feature 不 import http。
 2. feature 之间只允许显式声明的依赖：`sessions → kb`（host tool 分派）、`workspaces/sessions/kb → core/sandbox`、`kb → accounts`（可见范围）。其余一律经 core。
 3. **一切文件路径操作必须经 `core/sandbox.resolve`**；feature 模块直接 `fs` 访问用户路径是缺陷。
 4. omp 与 kb-service 之间无直连——KB 检索必走 `host_tool_call → app-server kb 模块` 转发。
@@ -82,6 +84,7 @@ server/src/
 ├── core/
 │   ├── db/              # SQLite 打开 + 迁移
 │   ├── audit/           # emit/query，只追加
+│   ├── errors/          # 共享 HttpError、codes、messages
 │   └── sandbox/         # resolve、白名单推导
 ├── auth/                #   providers/oidc.ts、providers/dev-stub.ts
 ├── accounts/

@@ -23,6 +23,7 @@ S0a 交付 HTTP 骨架/认证/SPA 壳/harness，S0b（Epic #81，实现中）交
 1. **模块切分**（`http → feature → core`；与 system.md §5 目录树一致）：
    - `server/src/core/sandbox/`：`resolve.ts`（纯函数：规范化 + 逐分量 lstat + realpath 边界）、`dirs.ts`（`ensureSharedDir`）、`index.ts`（`createSandbox({ rootOf, audit }) → { resolve(principal, workspaceId, relPath, op), ensureSharedDir }`）。
    - `server/src/core/audit/`：`index.ts`（`emit(db, event)`、`query(db, principal, {limit, before})`）。
+   - `server/src/core/errors/`：唯一 `HttpError`、错误码与消息定义；HTTP 状态码、content-parser 归属及信封映射留在 `http/errors.ts`。用户在 #122 comment5748746011 批准原子迁移所有调用方、删除旧转发导出，以消除 core 反向依赖 http；#84/#115 后续加码须同时扩 core 消息和 HTTP 状态映射，不恢复重复定义。
    - `server/src/workspaces/`：`store.ts`（`workspaces` 表读写 + 沙箱根惰性创建）、`tree.ts`（单层列举）、`preview.ts`（类型判定 + 流式读取）、`rest.ts`（五端点）、`index.ts`（`registerWorkspaces(app, { db, sandbox, audit })`，并导出 `rootOf` 供装配注入沙箱端口）。
    - `server/src/accounts/`：`index.ts`（`registerAccounts(app, { db })`：`GET /api/audit`）。CONTEXT.md 把审计归"账号与治理"上下文，system.md 树有 `accounts/`；S1a 只放这一条路由，账号管理属 S3a。
    - `server/src/sessions/omp/process.ts`（S0b 代码）：`OMP_USER` 下 argv 前缀（D6）。

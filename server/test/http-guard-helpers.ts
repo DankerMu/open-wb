@@ -5,7 +5,8 @@ import { expect } from "vitest";
 import { createApp } from "../src/app.js";
 import { registerAuth, SESSION_TTL } from "../src/auth/index.js";
 import { openDb } from "../src/core/db/index.js";
-import { HttpError, handleHttpError } from "../src/http/index.js";
+import { HttpError } from "../src/core/errors/index.js";
+import { handleHttpError } from "../src/http/index.js";
 import {
   bearerCookie,
   disableAccount,

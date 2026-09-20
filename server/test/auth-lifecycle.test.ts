@@ -4,7 +4,7 @@ import { type CreateAppOptions, createApp } from "../src/app.js";
 import type { AuthErrorCode } from "../src/auth/errors.js";
 import { SESSION_TTL, sessionExpiry } from "../src/auth/index.js";
 import { openDb } from "../src/core/db/index.js";
-import { HttpError, type HttpErrorCode } from "../src/http/index.js";
+import { HttpError, type HttpErrorCode } from "../src/core/errors/index.js";
 import {
   accountSnapshot,
   BAD_REQUEST_ENVELOPE,
