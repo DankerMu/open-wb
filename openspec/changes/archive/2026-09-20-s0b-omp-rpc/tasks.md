@@ -6,8 +6,8 @@
 
 ## 2. Acceptance and delivery
 - [x] 2.1 Parent runs focused protocol/spawn tests, npm test --workspace server, make lint, make typecheck and make anti-drift; independent real-child smoke.
-- [ ] 2.2 Expanded agent reviews (correctness, test-evidence+spec-compliance, security-perf), bounded fix gate and same-SHA CI green.
-- [ ] 2.3 Merge issue PR; update parent task 1.4 and archive this fixture through follow-up PR.
+- [x] 2.2 Expanded agent reviews (correctness, test-evidence+spec-compliance, security-perf), bounded fix gate and same-SHA CI green. Round2 clean at b3ab423; CI run 35489080207.
+- [x] 2.3 Merge issue PR #156; update parent task 1.4 and archive this fixture through this docs-only follow-up PR.
 
 ## Risk pack disposition
 - Selected Public API / CLI / script entry: start/send/frame/exit behavior; tasks 1.3-1.4.
