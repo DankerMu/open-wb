@@ -4,7 +4,7 @@
  * can1357/oh-my-pi@33cc6b9a043a74e00a157e72ca909272796d8461
  * Local oracle: resource/oh-my-pi/docs/rpc.md (docs/architecture/rpc.md tracked by #141).
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { join } from "node:path";
@@ -205,7 +205,43 @@ async function handlePrompt(frame) {
     await turn();
     return;
   }
+  const report = probeReport(frame.message);
+  if (report !== undefined) {
+    await completeTurn([report], false);
+    return;
+  }
   await completeTurn(DELTAS, true);
+}
+
+function probeReport(message) {
+  const text = String(message ?? "");
+  if (!text.startsWith("probe:")) {
+    return undefined;
+  }
+  const rest = text.slice(6);
+  const colon = rest.indexOf(":");
+  if (colon === -1) {
+    return undefined;
+  }
+  const pid = rest.slice(0, colon);
+  const writePath = rest.slice(colon + 1);
+  if (!/^[0-9]+$/u.test(pid) || writePath.length === 0) {
+    return undefined;
+  }
+  let wrote = "ok";
+  try {
+    writeFileSync(writePath, "probe", "utf8");
+  } catch (error) {
+    wrote = error.code;
+  }
+  let environ = "readable";
+  try {
+    readFileSync(`/proc/${pid}/environ`);
+  } catch (error) {
+    environ = error.code;
+  }
+  const env = Object.keys(process.env).sort().join(",");
+  return `uid=${process.getuid()} gid=${process.getgid()} env=${env} home=${process.env.HOME ?? ""} agent=${process.env.PI_CODING_AGENT_DIR ?? ""} environ=${environ} wrote=${wrote}`;
 }
 
 async function requestConfirm() {

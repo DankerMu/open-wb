@@ -6,7 +6,7 @@
  * docs/architecture/rpc.md is absent (#141); this suite does not import the fixture.
  */
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,6 +21,25 @@ const TOKEN = "wb-issue87-bearer-sentinel";
 const STREAMED_TEXT = "你好🌍";
 const SSE_EVENT = `data: {"choices":[{"delta":{"content":"${STREAMED_TEXT}"}}]}\n\n`;
 const SSE_DONE = Buffer.from(`${SSE_EVENT}data: [DONE]\n\n`, "utf8");
+const PROBE_HOME = "/tmp/fake-omp home:dir";
+const PROBE_AGENT = "/tmp/fake-omp agent:dir";
+const PROBE_CANARY = "workbuddy-canary-secret";
+const PROBE_ENV: NodeJS.ProcessEnv = {
+  PATH: process.env.PATH ?? "/usr/bin",
+  HOME: PROBE_HOME,
+  PI_CODING_AGENT_DIR: PROBE_AGENT,
+  WORKBUDDY_CANARY_SECRET: PROBE_CANARY,
+  __CF_USER_TEXT_ENCODING: "0:0:0",
+};
+const PROBE_ENV_KEYS =
+  "HOME,PATH,PI_CODING_AGENT_DIR,WORKBUDDY_CANARY_SECRET,__CF_USER_TEXT_ENCODING";
+const PARENT_UID = process.getuid?.();
+const PARENT_GID = process.getgid?.();
+if (typeof PARENT_UID !== "number" || typeof PARENT_GID !== "number") {
+  throw new Error("posix uid/gid unavailable");
+}
+const PROC_ENVIRON = process.platform === "linux" ? "readable" : "ENOENT";
+const MISSING_PID = "1".repeat(18);
 const OMP_FLAGS = [
   "--mode",
   "rpc",
@@ -304,6 +323,31 @@ describe("fake-omp process contract", () => {
     await expectVisibleFailure(eof);
     await closeSession(eof);
   });
+
+  it("reports identity, sorted env keys, HOME/agent, and probe file content", async () => {
+    const writePath = join(tempAgentDir(""), "out:with spaces");
+    const session = await runProbe(`${process.pid}:${writePath}`);
+    await expectProbeTurn(session, expectedProbeReport(PROC_ENVIRON, "ok"));
+    expect(readFileSync(writePath, "utf8")).toBe("probe");
+    expect(`${session.stdout}${session.stderr}`).not.toContain(PROBE_CANARY);
+    await closeSession(session);
+  });
+
+  it("reports write ENOENT independently of the actual proc-read result", async () => {
+    const writePath = join(tempAgentDir(""), "missing", "probe.txt");
+    const session = await runProbe(`${process.pid}:${writePath}`);
+    await expectProbeTurn(session, expectedProbeReport(PROC_ENVIRON, "ENOENT"));
+    expect(existsSync(writePath)).toBe(false);
+    await closeSession(session);
+  });
+
+  it("reports missing-pid ENOENT independently of a successful write", async () => {
+    const writePath = join(tempAgentDir(""), "missing-pid.txt");
+    const session = await runProbe(`${MISSING_PID}:${writePath}`);
+    await expectProbeTurn(session, expectedProbeReport("ENOENT", "ok"));
+    expect(readFileSync(writePath, "utf8")).toBe("probe");
+    await closeSession(session);
+  });
 });
 
 interface Session {
@@ -320,6 +364,7 @@ interface StartOptions {
   scenario?: string;
   extraArgs?: string[];
   env?: NodeJS.ProcessEnv;
+  prompt?: Frame;
 }
 
 type ProxyHandler = (request: IncomingMessage, response: ServerResponse) => Promise<void>;
@@ -424,13 +469,14 @@ function startFake(options: StartOptions = {}): Session {
 }
 
 async function startPromptedSession(options: StartOptions = {}): Promise<Session> {
+  const prompt = options.prompt ?? PROMPT;
   const session = startFake(options);
   await session.wait((frame) => frame.type === "ready");
   session.write(HANDSHAKE);
   await session.wait(response("protocol-1", "negotiate_protocol"));
   await session.wait(response("state-1", "get_state"));
-  session.write(PROMPT);
-  await session.wait(response("req_1", "prompt"));
+  session.write(prompt);
+  await session.wait(response(String(prompt.id), "prompt"));
   return session;
 }
 
@@ -639,6 +685,46 @@ function tempAgentDir(yaml: string): string {
     writeFileSync(join(dir, "models.yml"), yaml);
   }
   return dir;
+}
+
+async function runProbe(rest: string): Promise<Session> {
+  return startPromptedSession({
+    env: PROBE_ENV,
+    prompt: { id: "req_probe", type: "prompt", message: `probe:${rest}` },
+  });
+}
+
+async function expectProbeTurn(session: Session, expectedDelta: string): Promise<void> {
+  const ack = await session.wait(response("req_probe", "prompt"));
+  expect(ack).toEqual({
+    id: "req_probe",
+    type: "response",
+    command: "prompt",
+    success: true,
+    data: { agentInvoked: true },
+  });
+  const end = await session.wait(
+    (frame) => frame.type === "agent_end" && frame.isTerminal === true,
+  );
+  expect(end).toEqual({ type: "agent_end", messages: [], isTerminal: true });
+  expect(session.frames.slice(session.frames.indexOf(ack))).toEqual([
+    ack,
+    { type: "agent_start" },
+    {
+      type: "message_update",
+      assistantMessageEvent: { type: "text_delta", delta: expectedDelta },
+      message: { role: "assistant", content: [] },
+    },
+    {
+      type: "message_end",
+      message: { role: "assistant", content: [], stopReason: "stop" },
+    },
+    end,
+  ]);
+}
+
+function expectedProbeReport(environ: string, wrote: string): string {
+  return `uid=${String(PARENT_UID)} gid=${String(PARENT_GID)} env=${PROBE_ENV_KEYS} home=${PROBE_HOME} agent=${PROBE_AGENT} environ=${environ} wrote=${wrote}`;
 }
 
 function managedYaml(baseUrl: string, modelId: string): string {
