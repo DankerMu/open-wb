@@ -8,10 +8,11 @@
 
 - [x] 1.1 `server/src/core/sandbox/resolve.ts`：`resolve(root, relPath, op)` 纯函数（NUL/绝对/`..`/边界前缀/逐分量 lstat 拒绝 symlink/mkdir 末段规则）+ 临时目录逃逸向量集单测（含 `/a` vs `/ab`、悬空 symlink、symlink 目录下子路径）（#112 / PR #138）
 - [x] 1.2 `server/src/core/sandbox/dirs.ts`：`ensureSharedDir(absPath)`（递归创建、仅新建分量 `chmod 0o2770`、不 chown、不动 umask）+ mode 位单测（新建 `0o2770`、既有 `0o755` 不变、幂等）（#113 / PR #142）
-- [ ] 1.3 `server/src/core/sandbox/index.ts`：`createSandbox({rootOf, audit})` facade（`rootOf` null → `not_found`；拒绝 → `emit(sandbox.reject)` 后抛 `sandbox_denied`；审计失败 → 5xx 不放行）+ 以 stub `rootOf`/stub `audit` 的单测
+- [x] 1.3 `server/src/core/sandbox/index.ts`：`createSandbox({rootOf, audit})` 同步 facade（`rootOf` null → `not_found`；拒绝先完成 canonical number-returning `emit(sandbox.reject)` 再抛 `sandbox_denied`；审计/lookup 异常原样传播、不放行）+ stub 端口/真实 resolver 与 symlink 单测；#123 / PR #179，CI35531687024 全绿，真实 HTTP/落库仍待 #127。
 
 Suggested fixture level: expanded - 沙箱 resolve 是 AGENTS.md 白盒 Critical Path（不变量 3），逃逸向量集必须以真实文件系统（临时目录 + 真 symlink）证明，不可 mock
-Minimal mergeable slice: 1.1 `resolve` 纯函数单独可合并保绿（无依赖、自带向量集测试）；1.2 独立可合并（纯 fs 工具）；1.3 依赖 1.1、1.2 与 2.2 的 `emit` 签名（可先以接口类型占位，stub 测试）
+Minimal mergeable slice: 1.1 `resolve` 纯函数单独可合并保绿（无依赖、自带向量集测试）；1.2 独立可合并（纯 fs 工具）；1.3 依赖 1.1、1.2、2.2 的 canonical 同步 `emit` 签名及 3.1 的 sandbox_denied；不使用占位类型或重复事件模型。
+Archive coordination: 主 `sandbox-core` 已晋升 resolver、dirs 与同步 facade；父 change 最终归档须去重，保留 null-root 前置/no-audit、审计完成后拒绝及原异常传播。#125 实现 owner-scoped rootOf；#127 验证真实 DB/HTTP403/404/500；#128 绑定 `(event) => emit(db,event)`。不得把 stub 调用证明扩大为授权/持久化/HTTP 证明，不恢复 void/async 歧义端口。
 
 ## 2. audit-core
 
