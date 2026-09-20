@@ -3,7 +3,7 @@
 - [x] 1.1 Write real createApp+openDb+cookie inject tests first; capture setup/semantic RED honestly for new route; cover member/admin pages, body/header shape, named errors, repeats/empties, unauthorized precedence, precision and generic DB failure.
 - [x] 1.2 Add only accounts/index.ts registerAccounts, reuse core query/errors and existing guard; route-local no-store before preParsing, scalar parsing, no app.ts wiring.
 - [x] 1.3 Run focused route/HTTP regressions, server coverage/type/build, scoped Biome, knip/jscpd/size and compiled actual HTTP smoke with explicit registration.
-- [ ] 1.4 Complete expanded static cross-review and exact-head CI, merge, parent2.3 completion and archive only this endpoint requirement; #128 remains assembly owner.
+- [x] 1.4 Complete expanded static cross-review and exact-head CI, merge, parent2.3 completion and archive only this endpoint requirement; #128 remains assembly owner. PR #167 merged; three seats clean on f2dfa344cbbf264b2d58d6ee0d1a9e7f2f5dab1c, CI35509431982 all checks passed.
 
 ## 2. Risk mapping
 
