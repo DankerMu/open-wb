@@ -1,7 +1,7 @@
 # audit-core Specification
 
 ## Purpose
-Persist append-only audit events with stable identifiers and account-reference integrity, and expose JSON-preserving emission plus exact-role account-scoped cursor queries without weakening HTTP error ownership boundaries.
+Persist append-only audit events with stable identifiers and account-reference integrity, expose JSON-preserving emission and exact-role account-scoped cursor queries, and provide a guarded no-store REST registration seam without weakening error ownership or claiming production assembly.
 ## Requirements
 ### Requirement: 只追加审计表
 迁移 `030_audit_events.sql` SHALL 原子建立 `audit_events(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL CHECK ts >= 0, actor_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT, kind TEXT NOT NULL CHECK 匹配小写点分标识（如 sandbox.reject）, title TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '{}' CHECK json_valid(detail), workspace_id TEXT NULL)`、索引 `(actor_id, id DESC)`，以及触发器 `audit_events_no_update BEFORE UPDATE` 与 `audit_events_no_delete BEFORE DELETE`，均 `RAISE(ABORT, 'audit_events is append-only')`。受信任迁移目录计数断言 SHALL 随之 +1。
@@ -34,4 +34,23 @@ Persist append-only audit events with stable identifiers and account-reference i
 #### Scenario: JSON 与时间及失败原子性
 - WHEN events contain nested JSON detail, explicit timestamp0, omitted timestamps/details/workspace, or invalid serialization/FK data
 - THEN successful events round-trip exactly with the specified defaults and IDs, default timestamp reflects the current clock, and failed emits leave the stored event set unchanged
+
+### Requirement: 审计只读端点
+`registerAccounts(app,{db})` SHALL register GET /api/audit behind the existing cookie guard, call canonical core/audit.query with the guard-bound principal and parsed limit/before, and return200 `{events:[...]}`. Responses SHALL carry Cache-Control:no-store, including guard401, invalid-query400 and unexpected500. The route SHALL preserve core actor filtering, exact-admin visibility, id order, JSON representation and cursor precision. It SHALL NOT accept authorization identity from query parameters or append/update/delete audit rows. Production app assembly remains a separate task.
+
+#### Scenario: 成员与管理员读取
+- WHEN real authenticated u1 and admin u3 query interleaved u1/u2 events with limit/before
+- THEN u1 sees only its events, u3 sees all, pages preserve id DESC without duplicates, response body is exactly an events array and header is no-store
+
+#### Scenario: 参数错误与认证优先级
+- WHEN an authenticated request supplies limit0/201/1.5, beforeabc/0/-1, an empty value or repeated limit/before
+- THEN it returns400 canonical bad_request without altering audit rows and with no-store
+- WHEN a request without valid login supplies even invalid query parameters
+- THEN guard returns401 before query processing, with no-store and no audit data
+
+#### Scenario: 原始游标与服务端故障
+- WHEN a valid canonical huge before string exceeds signed64 on ordinary stored rows
+- THEN query returns200 with the correct visible rows without cursor rounding/rejection
+- WHEN before='9007199254740993' includes stored audit id9007199254740992, or a real audit SELECT fails
+- THEN native query failure remains generic500 with no-store and no internal detail, never bad_request or a fabricated empty/safe-only200
 

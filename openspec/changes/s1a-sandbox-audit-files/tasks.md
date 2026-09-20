@@ -17,11 +17,11 @@ Minimal mergeable slice: 1.1 `resolve` 纯函数单独可合并保绿（无依�
 
 - [x] 2.1 迁移 `030_audit_events.sql`（表/CHECK/索引/两只追加触发器）+ 形态与触发器单测；受信任迁移目录计数断言随之 +1（#114 / PR #146）
 - [x] 2.2 `server/src/core/audit/index.ts`：`emit`/`query`（角色过滤、`limit` 1..200、`before` 游标、`detail` JSON 往返）+ `:memory:` 单测；用户批准 #122 同步将唯一 `HttpError`/错误码/消息迁至 `core/errors`，HTTP 状态/信封仍归 http，调用方原子迁移无旧转发导出（comment5748746011）。PR #163 已合并，CI35504605570 全绿。
-- [ ] 2.3 `server/src/accounts/index.ts`：`registerAccounts(app,{db})` 挂 `GET /api/audit`（guard 后、`no-store`、400 分支）+ `app.inject()` 单测（成员/管理员两账号）
+- [x] 2.3 `server/src/accounts/index.ts`：`registerAccounts(app,{db})` 挂 `GET /api/audit`（guard 后、`no-store`、400 分支）+ `app.inject()` 单测（成员/管理员两账号）；#124 / PR #167 已合并，CI35509431982 全绿。生产 app.ts 装配仍属 #128。
 
 Suggested fixture level: 2.2 expanded（#122 覆盖持久化写入、角色过滤与用户批准的公共错误迁移）；其余按各子 issue 风险分级。触发器由迁移测试证明，查询由真实 `:memory:` 证明，HTTP 行为由既有 inject 错误测试回归。
 Minimal mergeable slice: 2.1 迁移单独可合并保绿（独立 SQL + 形态测试，由 openDb 自动执行故非死代码）；2.2 依赖 2.1；2.3 依赖 2.2
-Archive coordination: 主 `audit-core` 已晋升 2.1 schema 与 2.2 emit/query（含默认50的可观测分页、精确大游标及原生数字解码错误边界）；主 `http-service-skeleton` 已晋升公共错误归 core。父 change 最终归档须去重这些要求并保留已验收语义，不得用旧版较弱 emit/query 覆盖；2.3 HTTP 端点仍待 #124。
+Archive coordination: 主 `audit-core` 已晋升 2.1 schema、2.2 emit/query（含默认50的可观测分页、精确大游标及原生数字解码错误边界）及 2.3 accounts 只读端点（含早期401/400/500的no-store、标量参数与未舍入游标）；主 `http-service-skeleton` 已晋升公共错误归 core。父 change 最终归档须去重并保留已验收语义，不得用旧版较弱要求覆盖。端点模块可显式注册，生产装配仍待 #128。
 
 ## 3. workspaces
 
