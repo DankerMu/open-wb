@@ -1,0 +1,29 @@
+## Context
+ADR0008 keeps upstream credentials out of omp. #84 supplies canonicalcore errors and the exact POST/v1/chat/completions parser owner; #88 supplies a real local two-round model fixture. No proxy module exists.
+History57d448e/#122 fixes core-vs-http ownership; 954eadf/#31 fixes route-local no-store; 6e903ca/#19 fixes guard-before-parser ordering. Do not recreate older combined tables or global hooks.
+## Goals / Non-Goals
+Public export registerModelProxy(app,{upstream,tokens}); model-proxy owns TokenLookup with synchronous lookup(token:string):string|null. Upstream is optional/undefined to represent missing configuration; configured value has baseUrl:string/apiKey:string. No env reads here.
+No TokenRegistry implementation, runtime translation, models.yml, app/server wiring, cookie exemptions, retries, semantic message parsing, content logging or vendor dependency.
+## Decisions
+User-approved SPEC_DISPUTE closure: all upstreamHTTP5xx normalize to502 and discard their body; auth precedes missing-config checks (invalid401, valid502). Preserve non5xx status/content-type/body. Parent docs updated in this PR; decision comment5750569111.
+Token syntax is64hex with exact lookup of the supplied token (no normalization into another identity); malformed/missing/unknown/revoked tokens never reach upstream. Auth and no-store run before parser; do not broaden PUBLIC_API_ROUTES because /v1 is already non-API for cookie guard (guard.ts53-59).
+Keep no-store route-local, including auth/config/parser/network failures. Parser behavior must remain encapsulated: preserve raw request bytes while checking JSON syntax/media/4MiB, without changing sibling parsers or reserializing JSON. Syntax validation is not message-semantic interpretation.
+Only configured upstream receives the replacement Bearer API key; forward content-type and exact body, not clientAuthorization/cookie or arbitrary client headers. Base URL path prefix (e.g./v1) must survive endpoint joining. No redirect following or automatic response transformation that breaks opaque-body/status forwarding.
+Use existing Node networking/streams; prefer the simplest path that preserves bytes, flow control and cancellation. No new dependency. HTTP and HTTPS configured upstreams use standard verified transport; no TLS verification bypass.
+10,000ms bounds connection establishment (DNS/TCP/TLS) only, ending when the applicable transport is established. Connected requests may wait beyond10s for model response headers/TTFT, and healthy SSE bodies may stay open beyond10s. A stalled connection establishment fails502. No new header/TTFT timer, test-only public timeout option or shortened production policy.
+Before downstream headers are committed, transport failure maps to sanitized502. After bytes are committed, terminate the failed stream rather than append a JSON envelope or fake DONE. Client disconnect/app close must cancel owned upstream work and settle handlers; repeated cleanup must not leak timers/sockets.
+Credential non-disclosure covers proxy-generated errors/diagnostics and header substitution. Opaque passthrough is not a content-redaction engine: no parsing/scanning of arbitrary successful upstream message bytes.
+## Governing invariant
+Only an exact live-token hit may trigger one upstream request; the original session bearer never becomes upstream Authorization, and no upstream5xx/transport failure becomes a successful stream or exposes raw diagnostics.
+## Sibling surfaces
+Canonical core/errors and HTTP mapper own identities/status/parser classification; registerAuthGuard skips/v1 by namespace. Existing auth parser/no-store/cookie contracts and health endpoint remain unchanged. Later#90 supplies TokenLookup, #101 assembles registration; #102 owns fake-omp relay issue166.
+#88 tests verify real two-round SSE/500. Additional recording/gated loopback servers may observe exact headers/body/zero-contact/early streaming without changing that fixture or mocking fetch/the proxy.
+## Required evidence
+StageA1 paired tests before new index.ts, honest missing-module SETUP only. StageA2 minimal callable registered404 route with exported port types reaches realHTTP/inject semanticRED; STOP before auth/forwarding. Parent authorizesB only after source chronology verified.
+Tests: invalid-token zero-contact and auth-before-parser/config; exact whitespace/multibyte JSON bytes and bearer replacement; #88 two-round/500; non5xx(e.g.429) unchanged; malformed/media/overlimit400 and exact4MiB acceptance; no-store on every response branch.
+Streaming proof: upstream deliberately holds completion until downstream first bytes observed, then releases; assert bytes/order, not TCP-chunk count. Distinguish stalled DNS/TCP/TLS connection establishment past10s→502 from established transport with delayed headers past10s→stillpending/normalcompletion, and established healthy stream past10s→stillvalid. Cover downstream abort, upstream midstream reset and appclose while headers are pending. Use gates/virtual clock or actual observed events, never sleeps as correctness proof.
+Parent independent realHTTP probe and disposable wrong candidates qualify auth bypass, key forwarding, byte reserialization, response buffering,5xx passthrough, parser/method scope, no-store and cancellation/deadline classes; keep known-good/restoration evidence.
+Focusedtests/fullservercoverage/lint/types/drift/build/OpenSpec; expanded correctness/test-evidence+spec/security-perf review and exactSHA CI. No productionnewroute assembly claimed until#101.
+## Risks / Rollback
+Raw parser encapsulation, response compression/decompression, timeout-versus-longstream and late-stream errors are the main failure modes. Explicit scenarios and real wire probes—not mocked forwarding—govern acceptance.
+Rollback is revert before downstream assembly; no persistent migration. Parent Epic archive must not duplicate this ADDED requirement after child promotion.
