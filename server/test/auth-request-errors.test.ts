@@ -436,16 +436,19 @@ describe("exact POST /api/auth/logout 加入 route-owner（#10）", () => {
   });
 });
 
-/** 未来产品路由身份只走共享 mapper，不挂载 /api/sessions/:id/prompt 或 /v1/chat/completions。 */
+/** 未来产品路由身份只走共享 mapper，不挂载产品端点。 */
 describe("未来 matched POST owner 身份走共享 handleHttpError 接缝", () => {
   const ALL_OWNERS = [
     "/api/auth/login",
     "/api/auth/logout",
     "/api/sessions/:id/prompt",
     "/v1/chat/completions",
+    "/api/workspaces",
+    "/api/workspaces/:id/dirs",
   ] as const;
   const CONCRETE_SESSION =
     "/api/sessions/5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a/prompt";
+  const CONCRETE_WORKSPACE_DIRS = "/api/workspaces/ws123/dirs";
 
   it.each(ALL_OWNERS)("exact POST %s 上真实 CTP error 映射 exact 400 bad_request", (url) => {
     const owned = captureReply();
@@ -458,6 +461,8 @@ describe("未来 matched POST owner 身份走共享 handleHttpError 接缝", () 
     ["PUT", "/api/sessions/:id/prompt"],
     ["DELETE", "/v1/chat/completions"],
     ["PUT", "/v1/chat/completions"],
+    ["PUT", "/api/workspaces"],
+    ["GET", "/api/workspaces/:id/dirs"],
   ] as const)("wrong method %s on matched %s stays generic 500", (method, url) => {
     const captured = captureReply();
     handleHttpError(genuineEmptyJsonCtpError(), requestShaped(url, method), captured.reply);
@@ -472,6 +477,9 @@ describe("未来 matched POST owner 身份走共享 handleHttpError 接缝", () 
     "/v1/chat/completions/extra",
     "/prefix/v1/chat/completions",
     CONCRETE_SESSION,
+    "/api/workspaces/",
+    "/api/workspaces-extra",
+    CONCRETE_WORKSPACE_DIRS,
     "/api/registered-unowned",
   ])("lookalike, raw-concrete, or unowned identity %s stays generic 500", (url) => {
     const captured = captureReply();
@@ -479,31 +487,32 @@ describe("未来 matched POST owner 身份走共享 handleHttpError 接缝", () 
     expectGeneric(captured.captured);
   });
 
-  it("raw request URL does not replace matched parametric owner identity", () => {
+  it.each([
+    ["/api/sessions/:id/prompt", CONCRETE_SESSION],
+    ["/api/workspaces/:id/dirs", CONCRETE_WORKSPACE_DIRS],
+  ] as const)("raw URL does not replace matched %s owner identity", (url, rawUrl) => {
     const captured = captureReply();
-    handleHttpError(
-      genuineEmptyJsonCtpError(),
-      requestShaped("/api/sessions/:id/prompt", "POST", CONCRETE_SESSION),
-      captured.reply,
-    );
+    handleHttpError(genuineEmptyJsonCtpError(), requestShaped(url, "POST", rawUrl), captured.reply);
     expectSendErrorEnvelope(captured.captured, "bad_request", "请求格式不正确");
   });
 
-  it.each(["/api/sessions/:id/prompt", "/v1/chat/completions"] as const)(
-    "forged constructor/code/status on %s stays generic 500",
-    (url) => {
-      const captured = captureReply();
-      handleHttpError(
-        Object.assign(new Error("forged future owner code"), {
-          code: "FST_ERR_CTP_INVALID_JSON_BODY",
-          statusCode: 400,
-        }),
-        requestShaped(url, "POST"),
-        captured.reply,
-      );
-      expectGeneric(captured.captured);
-    },
-  );
+  it.each([
+    "/api/sessions/:id/prompt",
+    "/v1/chat/completions",
+    "/api/workspaces",
+    "/api/workspaces/:id/dirs",
+  ] as const)("forged constructor/code/status on %s stays generic 500", (url) => {
+    const captured = captureReply();
+    handleHttpError(
+      Object.assign(new Error("forged future owner code"), {
+        code: "FST_ERR_CTP_INVALID_JSON_BODY",
+        statusCode: 400,
+      }),
+      requestShaped(url, "POST"),
+      captured.reply,
+    );
+    expectGeneric(captured.captured);
+  });
 });
 
 describe("native error shape discrimination 与 login 路由 scope", () => {
@@ -636,12 +645,11 @@ describe("native error shape discrimination 与 login 路由 scope", () => {
 });
 
 /**
- * 七种 typed 信封必须穿过真实 registerAuth 接缝：mapAuthError 返回 canonical HttpError，
- * Cache-Control no-store 只能来自 production route-local onRequest，不得在测试里手写该头。
- * AuthErrorCode 仍只四码；新 HTTP 码不扩 auth 词汇，只作为注入的 HttpError 观察信封。
+ * 十一种 typed 信封穿过真实 registerAuth：mapAuthError 返回 canonical HttpError，
+ * no-store 只来自 production route-local onRequest；AuthErrorCode 仍只四码。
  */
-describe("七种 typed HttpError 经真实 auth mapAuthError 接缝保留 route-owned no-store", () => {
-  const SEVEN_TYPED_ERRORS = [
+describe("十一种 typed HttpError 经真实 auth mapAuthError 接缝保留 route-owned no-store", () => {
+  const ELEVEN_TYPED_ERRORS = [
     ["bad_request", 400, "请求格式不正确"],
     ["invalid_credentials", 401, "账号或密码不正确"],
     ["account_disabled", 403, "该账号已停用，请联系管理员"],
@@ -649,9 +657,13 @@ describe("七种 typed HttpError 经真实 auth mapAuthError 接缝保留 route-
     ["not_found", 404, "请求的资源不存在"],
     ["session_busy", 409, "会话正在生成，请稍候"],
     ["agent_unavailable", 502, "Agent 运行时不可用"],
+    ["sandbox_denied", 403, "目标路径不在你的沙箱内，操作已拒绝"],
+    ["conflict", 409, "同名资源已存在"],
+    ["preview_too_large", 413, "文件过大，无法预览"],
+    ["preview_unsupported", 415, "该类型不支持预览"],
   ] as const;
 
-  it.each(SEVEN_TYPED_ERRORS)(
+  it.each(ELEVEN_TYPED_ERRORS)(
     "POST /api/auth/login 注入 %s -> exact %i/%s 且 production no-store",
     async (code, statusCode, message) => {
       await withMapperFailingApp(

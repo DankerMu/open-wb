@@ -10,6 +10,10 @@ export const HTTP_ERROR_MESSAGES = Object.freeze({
   not_found: "请求的资源不存在",
   session_busy: "会话正在生成，请稍候",
   agent_unavailable: "Agent 运行时不可用",
+  sandbox_denied: "目标路径不在你的沙箱内，操作已拒绝",
+  conflict: "同名资源已存在",
+  preview_too_large: "文件过大，无法预览",
+  preview_unsupported: "该类型不支持预览",
 });
 
 export type HttpErrorCode = keyof typeof HTTP_ERROR_MESSAGES;
