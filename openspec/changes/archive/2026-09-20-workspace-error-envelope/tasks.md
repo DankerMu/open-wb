@@ -3,7 +3,7 @@
 - [x] 1.1 Update existing seven-code matrices to eleven and six-owner behavioral tests; add focused real HTTP workspace parser boundary tests as needed; run and preserve behavioral RED before source changes.
 - [x] 1.2 Add four canonical messages/statuses and two exact POST owner identities, keep current classification/guard/cache behavior and auth vocabulary unchanged; update all affected exhaustive consumers.
 - [x] 1.3 Verify targeted tests, server coverage/type/build, scoped Biome, knip/jscpd/size, compiled realHTTP smoke; no production workspace route registration.
-- [ ] 1.4 Expanded static cross-review, bounded gate and exact-head CI; automatic merge, parent3.1 update and slice archive; unblock #117/#123/#125 afterward.
+- [x] 1.4 Expanded static cross-review, bounded gate and exact-head CI; automatic merge, parent3.1 update and slice archive; unblock #117/#123/#125 afterward. PR #173 merged; three seats clean on 6a3a8d3dc42055cdd49f819502a6efcd54414f9c, CI35520629741 all checks passed.
 
 ## 2. Risk mapping
 
