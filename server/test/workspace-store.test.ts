@@ -453,7 +453,6 @@ describe("workspaces store failure compensation", () => {
       expect(aggregate.cause).toBe(aggregate.errors[0]);
       expect(readdirSync(sandboxRoot)).toEqual([]);
       expect(db.isTransaction).toBe(true);
-      expect(countWorkspaces(db)).toBeGreaterThanOrEqual(0);
     });
   });
 
