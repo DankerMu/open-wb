@@ -151,6 +151,62 @@ function captureReply(): { reply: FastifyReply; captured: ReplyCapture } {
   return { reply, captured };
 }
 
+const MAPPER_NOW = 1_700_000_000_000;
+
+async function withMapperFailingApp<T>(
+  mapAuthError: () => Error,
+  action: (app: FastifyInstance, db: DatabaseSync) => Promise<T>,
+): Promise<T> {
+  const db = openDb(":memory:");
+  const app = fastify({ logger: false });
+  app.setErrorHandler((error, request, reply) => handleHttpError(error, request, reply));
+  registerAuth(app, {
+    db,
+    secureCookies: false,
+    sessionTtlMs: SESSION_TTL,
+    runtime: { now: () => MAPPER_NOW, randomBytes: (size) => Buffer.alloc(size, 0x5a) },
+    mapAuthError: () => mapAuthError(),
+  });
+  try {
+    return await action(app, db);
+  } finally {
+    await app.close();
+    db.close();
+  }
+}
+
+function requestShaped(
+  routeOptionsUrl: string | undefined,
+  method: string,
+  rawUrl = routeOptionsUrl ?? "/unmatched",
+): FastifyRequest {
+  return {
+    method,
+    url: rawUrl,
+    routeOptions: { url: routeOptionsUrl },
+  } as unknown as FastifyRequest;
+}
+
+function expectGeneric(captured: ReplyCapture): void {
+  expect(captured.statusCode).toBe(500);
+  expect(captured.body).toBe(JSON.stringify({ error: { message: "服务器内部错误" } }));
+}
+
+function expectSendErrorEnvelope(captured: ReplyCapture, code: string, message: string): void {
+  expect(captured.statusCode).toBe(400);
+  expect(captured.body).toBe(JSON.stringify({ error: { code, message } }));
+}
+
+function genuineEmptyJsonCtpError(): Error {
+  const ctpConstructor = fastify.errorCodes.FST_ERR_CTP_EMPTY_JSON_BODY as unknown as new (
+    message: string,
+  ) => Error;
+  return Object.assign(
+    new ctpConstructor("Body cannot be empty when content-type is set to 'application/json'"),
+    { code: "FST_ERR_CTP_EMPTY_JSON_BODY", statusCode: 400 },
+  );
+}
+
 describe("route-owner 结果：同一精确 CTP 输入在不同 route identity 上的 contract", () => {
   it("exact POST /api/auth/login：malformed/empty/unsupported/oversized 均归一 exact 400", async () => {
     await withApp(async (app, db) => {
@@ -341,28 +397,12 @@ describe("exact POST /api/auth/logout 加入 route-owner（#10）", () => {
   });
 
   it("真实构造器-backed CTP error 在 logout=400；/api catch-all 与 unmatched non-GET 仍 404；其他 registered 仍 5xx", () => {
-    const requestShaped = (url: string | undefined, method: string) =>
-      ({
-        method,
-        url: url ?? "/unmatched",
-        routeOptions: { url },
-      }) as unknown as FastifyRequest;
-
-    const ctpConstructor = fastify.errorCodes.FST_ERR_CTP_EMPTY_JSON_BODY as unknown as new (
-      message: string,
-    ) => Error;
-    const realCtpError = Object.assign(
-      new ctpConstructor("Body cannot be empty when content-type is set to 'application/json'"),
-      { code: "FST_ERR_CTP_EMPTY_JSON_BODY", statusCode: 400 },
-    );
+    const realCtpError = genuineEmptyJsonCtpError();
 
     for (const url of ["/api/auth/login", "/api/auth/logout"]) {
       const owned = captureReply();
       handleHttpError(realCtpError, requestShaped(url, "POST"), owned.reply);
-      expect(owned.captured.statusCode).toBe(400);
-      expect(owned.captured.body).toBe(
-        JSON.stringify({ error: { code: "bad_request", message: "请求格式不正确" } }),
-      );
+      expectSendErrorEnvelope(owned.captured, "bad_request", "请求格式不正确");
     }
 
     for (const url of ["/api", "/api/*"]) {
@@ -394,6 +434,76 @@ describe("exact POST /api/auth/logout 加入 route-owner（#10）", () => {
     handleHttpError(realCtpError, requestShaped("/api/auth/logout", "PUT"), putOwned.reply);
     expect(putOwned.captured.statusCode).toBe(500);
   });
+});
+
+/** 未来产品路由身份只走共享 mapper，不挂载 /api/sessions/:id/prompt 或 /v1/chat/completions。 */
+describe("未来 matched POST owner 身份走共享 handleHttpError 接缝", () => {
+  const ALL_OWNERS = [
+    "/api/auth/login",
+    "/api/auth/logout",
+    "/api/sessions/:id/prompt",
+    "/v1/chat/completions",
+  ] as const;
+  const CONCRETE_SESSION =
+    "/api/sessions/5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a/prompt";
+
+  it.each(ALL_OWNERS)("exact POST %s 上真实 CTP error 映射 exact 400 bad_request", (url) => {
+    const owned = captureReply();
+    handleHttpError(genuineEmptyJsonCtpError(), requestShaped(url, "POST"), owned.reply);
+    expectSendErrorEnvelope(owned.captured, "bad_request", "请求格式不正确");
+  });
+
+  it.each([
+    ["GET", "/api/sessions/:id/prompt"],
+    ["PUT", "/api/sessions/:id/prompt"],
+    ["DELETE", "/v1/chat/completions"],
+    ["PUT", "/v1/chat/completions"],
+  ] as const)("wrong method %s on matched %s stays generic 500", (method, url) => {
+    const captured = captureReply();
+    handleHttpError(genuineEmptyJsonCtpError(), requestShaped(url, method), captured.reply);
+    expectGeneric(captured.captured);
+  });
+
+  it.each([
+    "/api/sessions/:id/prompt/",
+    "/api/sessions/:id/prompt/extra",
+    "/prefix/api/sessions/:id/prompt",
+    "/v1/chat/completions/",
+    "/v1/chat/completions/extra",
+    "/prefix/v1/chat/completions",
+    CONCRETE_SESSION,
+    "/api/registered-unowned",
+  ])("lookalike, raw-concrete, or unowned identity %s stays generic 500", (url) => {
+    const captured = captureReply();
+    handleHttpError(genuineEmptyJsonCtpError(), requestShaped(url, "POST"), captured.reply);
+    expectGeneric(captured.captured);
+  });
+
+  it("raw request URL does not replace matched parametric owner identity", () => {
+    const captured = captureReply();
+    handleHttpError(
+      genuineEmptyJsonCtpError(),
+      requestShaped("/api/sessions/:id/prompt", "POST", CONCRETE_SESSION),
+      captured.reply,
+    );
+    expectSendErrorEnvelope(captured.captured, "bad_request", "请求格式不正确");
+  });
+
+  it.each(["/api/sessions/:id/prompt", "/v1/chat/completions"] as const)(
+    "forged constructor/code/status on %s stays generic 500",
+    (url) => {
+      const captured = captureReply();
+      handleHttpError(
+        Object.assign(new Error("forged future owner code"), {
+          code: "FST_ERR_CTP_INVALID_JSON_BODY",
+          statusCode: 400,
+        }),
+        requestShaped(url, "POST"),
+        captured.reply,
+      );
+      expectGeneric(captured.captured);
+    },
+  );
 });
 
 describe("native error shape discrimination 与 login 路由 scope", () => {
@@ -428,29 +538,11 @@ describe("native error shape discrimination 与 login 路由 scope", () => {
     return captured;
   }
 
-  function requestShaped(routeOptionsUrl: string | undefined, method: string): FastifyRequest {
-    return {
-      method,
-      url: routeOptionsUrl ?? "/unmatched",
-      routeOptions: { url: routeOptionsUrl },
-    } as unknown as FastifyRequest;
-  }
-
-  function expectSendErrorEnvelope(captured: ReplyCapture, code: string, message: string): void {
-    expect(captured.statusCode).toBe(400);
-    expect(captured.body).toBe(JSON.stringify({ error: { code, message } }));
-  }
-
   function expectNotFoundEnvelope(captured: ReplyCapture): void {
     expect(captured.statusCode).toBe(404);
     expect(captured.body).toBe(
       JSON.stringify({ error: { code: "not_found", message: "请求的资源不存在" } }),
     );
-  }
-
-  function expectGeneric(captured: ReplyCapture): void {
-    expect(captured.statusCode).toBe(500);
-    expect(captured.body).toBe(JSON.stringify({ error: { message: "服务器内部错误" } }));
   }
 
   it("伪造 validation-shaped programmer Error（code+validation[]）在 login 保持 5xx", async () => {
@@ -544,6 +636,44 @@ describe("native error shape discrimination 与 login 路由 scope", () => {
 });
 
 /**
+ * 七种 typed 信封必须穿过真实 registerAuth 接缝：mapAuthError 返回 canonical HttpError，
+ * Cache-Control no-store 只能来自 production route-local onRequest，不得在测试里手写该头。
+ * AuthErrorCode 仍只四码；新 HTTP 码不扩 auth 词汇，只作为注入的 HttpError 观察信封。
+ */
+describe("七种 typed HttpError 经真实 auth mapAuthError 接缝保留 route-owned no-store", () => {
+  const SEVEN_TYPED_ERRORS = [
+    ["bad_request", 400, "请求格式不正确"],
+    ["invalid_credentials", 401, "账号或密码不正确"],
+    ["account_disabled", 403, "该账号已停用，请联系管理员"],
+    ["unauthorized", 401, "请先登录"],
+    ["not_found", 404, "请求的资源不存在"],
+    ["session_busy", 409, "会话正在生成，请稍候"],
+    ["agent_unavailable", 502, "Agent 运行时不可用"],
+  ] as const;
+
+  it.each(SEVEN_TYPED_ERRORS)(
+    "POST /api/auth/login 注入 %s -> exact %i/%s 且 production no-store",
+    async (code, statusCode, message) => {
+      await withMapperFailingApp(
+        () => new HttpError(code),
+        async (app) => {
+          const response = await app.inject({
+            method: "POST",
+            url: "/api/auth/login",
+            payload: JSON.stringify({ account: "zhangsan", password: "wrong" }),
+            headers: { "content-type": "application/json" },
+          });
+          expect(response.statusCode).toBe(statusCode);
+          expect(response.payload).toBe(JSON.stringify({ error: { code, message } }));
+          expect(response.headers["cache-control"]).toBe("no-store");
+          expect(response.headers["set-cookie"]).toBeUndefined();
+        },
+      );
+    },
+  );
+});
+
+/**
  * auth→HTTP 映射器自身失败走真实 registerAuth 接缝。clear-cookie 的发布已移出 handler
  * 控制流、改由 route-local onSend 按**最终状态**判定，因此映射器无论抛错还是返回 ordinary
  * Error（`mapAuthError: (code) => Error` 允许后者，且 handleHttpError 会分类为 generic
@@ -553,7 +683,6 @@ describe("native error shape discrimination 与 login 路由 scope", () => {
  */
 describe("mapAuthError 失败（抛错或返回 ordinary Error）不得发布 clear-cookie", () => {
   const MAPPER_DETAIL = "private auth mapper detail";
-  const NOW = 1_700_000_000_000;
 
   const mapperThrows = (): never => {
     throw new Error(MAPPER_DETAIL);
@@ -579,28 +708,6 @@ describe("mapAuthError 失败（抛错或返回 ordinary Error）不得发布 cl
       .get();
   }
 
-  async function withMapperFailingApp<T>(
-    mapAuthError: () => Error,
-    action: (app: FastifyInstance, db: DatabaseSync) => Promise<T>,
-  ): Promise<T> {
-    const db = openDb(":memory:");
-    const app = fastify({ logger: false });
-    app.setErrorHandler((error, request, reply) => handleHttpError(error, request, reply));
-    registerAuth(app, {
-      db,
-      secureCookies: false,
-      sessionTtlMs: SESSION_TTL,
-      runtime: { now: () => NOW, randomBytes: (size) => Buffer.alloc(size, 0x5a) },
-      mapAuthError: () => mapAuthError(),
-    });
-    try {
-      return await action(app, db);
-    } finally {
-      await app.close();
-      db.close();
-    }
-  }
-
   function expectMapperFailure(response: {
     statusCode: number;
     payload: string;
@@ -622,7 +729,7 @@ describe("mapAuthError 失败（抛错或返回 ordinary Error）不得发布 cl
           db.prepare("INSERT INTO auth_sessions(id, user_id, expires_at) VALUES (?, ?, ?)").run(
             "a".repeat(64),
             "u1",
-            NOW + 60_000,
+            MAPPER_NOW + 60_000,
           );
           const before = sessionState(db);
 

@@ -23,6 +23,8 @@ const ERROR_CASES = [
   { code: "account_disabled", statusCode: 403, message: "该账号已停用，请联系管理员" },
   { code: "unauthorized", statusCode: 401, message: "请先登录" },
   { code: "not_found", statusCode: 404, message: "请求的资源不存在" },
+  { code: "session_busy", statusCode: 409, message: "会话正在生成，请稍候" },
+  { code: "agent_unavailable", statusCode: 502, message: "Agent 运行时不可用" },
 ] as const satisfies ReadonlyArray<{
   code: HttpErrorCode;
   statusCode: number;
@@ -270,7 +272,7 @@ describe("createApp", () => {
     }
   });
 
-  it("将五种真实 HttpError 映射为唯一的精确 JSON 信封", async () => {
+  it("将七种真实 HttpError 映射为唯一的精确 JSON 信封", async () => {
     await withApp(undefined, async (app, sid) => {
       registerErrorRoutes(app);
 
@@ -296,7 +298,7 @@ describe("createApp", () => {
     });
   });
 
-  it("不将意外 programmer error 伪装为五种应用错误", async () => {
+  it("不将意外 programmer error 伪装为七种应用错误", async () => {
     await withApp(undefined, async (app, sid) => {
       registerErrorRoutes(app);
 
@@ -314,7 +316,7 @@ describe("createApp", () => {
       expect(response.json()).not.toMatchObject({
         error: {
           code: expect.stringMatching(
-            /^(bad_request|invalid_credentials|account_disabled|unauthorized|not_found)$/u,
+            /^(bad_request|invalid_credentials|account_disabled|unauthorized|not_found|session_busy|agent_unavailable)$/u,
           ),
         },
       });
@@ -342,7 +344,7 @@ describe("createApp", () => {
         expect(response.json(), url).not.toMatchObject({
           error: {
             code: expect.stringMatching(
-              /^(bad_request|invalid_credentials|account_disabled|unauthorized|not_found)$/u,
+              /^(bad_request|invalid_credentials|account_disabled|unauthorized|not_found|session_busy|agent_unavailable)$/u,
             ),
           },
         });

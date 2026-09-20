@@ -8,6 +8,8 @@ const HTTP_ERROR_STATUSES = Object.freeze({
   account_disabled: 403,
   unauthorized: 401,
   not_found: 404,
+  session_busy: 409,
+  agent_unavailable: 502,
 } as const satisfies Record<HttpErrorCode, number>);
 
 export function sendHttpError(reply: FastifyReply, code: HttpErrorCode): FastifyReply {
@@ -31,12 +33,19 @@ const ALLOWED_FASTIFY_REQUEST_ERROR_CODES = new Set([
   "FST_ERR_CTP_BODY_TOO_LARGE",
 ]);
 
-/** 受信 content-parser owner 的 exact auth 路由身份：POST login（#9）与 POST logout（#10）。 */
-const CONTENT_PARSER_OWNED_ROUTES = new Set(["/api/auth/login", "/api/auth/logout"]);
+/** 受信 content-parser owner 的 exact 路由身份：POST login（#9）、POST logout（#10）、
+ * POST /api/sessions/:id/prompt 与 POST /v1/chat/completions。 */
+const CONTENT_PARSER_OWNED_ROUTES = new Set([
+  "/api/auth/login",
+  "/api/auth/logout",
+  "/api/sessions/:id/prompt",
+  "/v1/chat/completions",
+]);
 
 /**
  * 构造函数-backed CTP 错误的 route-owner 结果：仅 matched identity 恰为
- * POST /api/auth/login 或 POST /api/auth/logout 时归一 exact 400；matched /api
+ * POST /api/auth/login、POST /api/auth/logout、POST /api/sessions/:id/prompt
+ * 或 POST /v1/chat/completions 时归一 exact 400；matched /api
  * 或 /api/* catch-all 与 unmatched non-GET（routeOptions.url undefined 且
  * method != GET）恢复 typed not_found 404；其他已注册 route 保持 generic 5xx。
  * 显式 typed HttpError 保持 route-independent。方法/URL 边界基于实际路由匹配，
