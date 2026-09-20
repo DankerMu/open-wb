@@ -3,7 +3,7 @@
 ## ADDED Requirements
 
 ### Requirement: 透传端点与 bearer 鉴权
-app-server SHALL 提供 `POST /v1/chat/completions`。请求 SHALL 携带 `Authorization: Bearer <token>`，token 经 `TokenRegistry.lookup` 命中活跃会话 runtime 才放行；缺失、格式错误、未知或已注销的 token SHALL 返回 401 `unauthorized` 信封且不联系上游。放行请求 SHALL 原样转发 body 与 `content-type` 到 `${MODEL_UPSTREAM_BASE_URL}/chat/completions`，请求头 `Authorization` 替换为 `Bearer ${MODEL_UPSTREAM_API_KEY}`；响应 SHALL 透传上游状态码、`content-type` 与流式 body（逐块转发，不缓冲整段），并加 `Cache-Control: no-store`。上游连接失败或超时（连接 10s）SHALL 返回 502 `agent_unavailable`。请求体上限 4 MiB；该路由加入 content-parser 错误归属集，超限/非 JSON body SHALL 为 400 `bad_request` 信封而非 5xx。该路由 SHALL 不受 cookie guard 影响、不写任何消息内容日志。
+app-server SHALL 提供 `POST /v1/chat/completions`。请求 SHALL 携带 `Authorization: Bearer <token>`，token 经 `TokenRegistry.lookup` 命中活跃会话 runtime 才放行；缺失、格式错误、未知或已注销的 token SHALL 返回 401 `unauthorized` 信封且不联系上游。鉴权 SHALL 先于上游配置检查和 body parser；仅通过鉴权的请求在上游配置缺失时返回 502 `agent_unavailable`。放行请求 SHALL 原样转发 body 与 `content-type` 到 `${MODEL_UPSTREAM_BASE_URL}/chat/completions`，请求头 `Authorization` 替换为 `Bearer ${MODEL_UPSTREAM_API_KEY}`；对于非5xx响应，SHALL 透传上游状态码、`content-type` 与流式 body（逐块转发，不缓冲整段），并加 `Cache-Control: no-store`。上游HTTP5xx SHALL 丢弃上游错误body并返回本地502 `agent_unavailable`信封；上游连接失败或超时（连接 10s）SHALL 返回同一502。请求体上限 4 MiB；该路由加入 content-parser 错误归属集，超限/非 JSON body SHALL 为 400 `bad_request` 信封而非 5xx。该路由 SHALL 不受 cookie guard 影响、不写任何消息内容日志。错误映射与优先级由#98实施前用户裁定（issuecomment-5750569111）。
 
 #### Scenario: 有效 token 流式透传
 - WHEN 以活跃会话 token 发起 `stream:true` 请求，上游为进程内假上游
@@ -14,8 +14,14 @@ app-server SHALL 提供 `POST /v1/chat/completions`。请求 SHALL 携带 `Autho
 - THEN 401 `{"error":{"code":"unauthorized",...}}`，假上游未收到请求
 
 #### Scenario: 上游不可达
-- WHEN `MODEL_UPSTREAM_BASE_URL` 指向未监听端口或 env 缺失
+- WHEN 有效token请求遇到 `MODEL_UPSTREAM_BASE_URL` 指向未监听端口或上游env缺失
 - THEN 502 `agent_unavailable` 信封；`/api/healthz` 仍 200
+
+#### Scenario: 上游5xx归一与鉴权优先
+- WHEN 上游返回任意HTTP5xx
+- THEN 代理返回本地502 agent_unavailable、no-store，不透传上游错误body
+- WHEN 上游配置缺失且bearer无效
+- THEN 仍先返回401 unauthorized且无上游请求；仅有效bearer得到配置缺失的502
 
 ### Requirement: 托管 models.yml
 启动期（`listen` 之后）SHALL 在 `<OMP_STATE_DIR>/agent/models.yml` 幂等写入：provider `workbuddy`（`api: openai-completions`，`baseUrl` 为**可连接**的代理地址：`HOST` 为 `0.0.0.0` → `http://127.0.0.1:<实际端口>/v1`，`::` → `http://[::1]:<实际端口>/v1`，其余为实际绑定地址（IPv6 加方括号），`apiKey: WORKBUDDY_MODEL_TOKEN`；不写 `authHeader`，openai-completions 默认注入 Bearer），`models` 恰含 `{id:<MODEL_ID>, name, contextWindow:128000, maxTokens:8192}`。文件内容 SHALL 不含任何上游 URL 或密钥。
