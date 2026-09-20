@@ -7,6 +7,21 @@ function renderMarkdown(src: string): HTMLDivElement {
   return root;
 }
 
+function maxStrongDepth(root: Element): number {
+  let max = 0;
+  const visit = (node: Element, depth: number) => {
+    const next = node.tagName === "STRONG" ? depth + 1 : depth;
+    if (next > max) {
+      max = next;
+    }
+    for (const child of node.children) {
+      visit(child, next);
+    }
+  };
+  visit(root, 0);
+  return max;
+}
+
 describe("mdRender headings", () => {
   it("renders an ATX heading as a real heading element", () => {
     const root = renderMarkdown("# 文档标题");
@@ -341,4 +356,62 @@ describe("mdRender bounded inline scanning", () => {
     expect(mdRender("[x](`a)b`)")).toBe('<p><a href="#">x</a>b)</p>');
     expect(mdRender("[`a]b`](url)")).toBe("<p>[<code>a]b</code>](url)</p>");
   });
+});
+
+describe("mdRender reconstructed format depth", () => {
+  const input = "[**x](u**)t";
+  const unit = '<a href="#"><strong>x</strong></a><strong>t';
+
+  function rendered(repeats: number): string {
+    const extra = repeats > 64 ? '<a href="#">x</a>t'.repeat(repeats - 64) : "";
+    const wrapped = Math.min(repeats, 64);
+    return `<p>${unit.repeat(wrapped)}${extra}${"</strong>".repeat(wrapped)}</p>`;
+  }
+
+  it("preserves the demo's shallow nested reconstruction", () => {
+    expect(mdRender(input.repeat(3))).toBe(rendered(3));
+  });
+
+  it("elides redundant strong wrappers after 64 reconstructed ancestors", () => {
+    expect(mdRender(input.repeat(63))).toBe(rendered(63));
+    expect(mdRender(input.repeat(64))).toBe(rendered(64));
+    expect(mdRender(input.repeat(65))).toBe(rendered(65));
+  });
+
+  it("keeps text, links and mixed formatting after saturating strong depth", () => {
+    const mixed = `${input.repeat(65)}[**bold](url) tail** **y** \`c\``;
+    const html = mdRender(mixed);
+    const root = renderMarkdown(mixed);
+    const links = [...root.querySelectorAll("a")];
+
+    expect(root.textContent).toBe(`${"xt".repeat(65)}bold tail y c`);
+    expect(links).toHaveLength(66);
+    expect(links.every((node) => node.getAttribute("href") === "#")).toBe(true);
+    expect(links[64]?.textContent).toBe("x");
+    expect(links[65]?.textContent).toBe("bold");
+    expect(links[65]?.nextSibling?.textContent).toBe(" tail y ");
+    expect(root.querySelector("code")?.textContent).toBe("c");
+    expect(maxStrongDepth(root)).toBe(64);
+    expect(html.endsWith(`${"</strong>".repeat(64)}</p>`)).toBe(true);
+  });
+
+  it("serializes 10k reconstructed units with bounded strong depth", () => {
+    const html = mdRender(input.repeat(10_000));
+    const root = renderMarkdown(input.repeat(10_000));
+    expect(html).toBe(rendered(10_000));
+    expect(root.textContent).toBe("xt".repeat(10_000));
+    expect(root.querySelectorAll("a")).toHaveLength(10_000);
+    expect([...root.querySelectorAll("a")].every((node) => node.getAttribute("href") === "#")).toBe(
+      true,
+    );
+    expect(maxStrongDepth(root)).toBe(64);
+  }, 15_000);
+
+  it("serializes a near-1MiB reconstructed document without dropping links", () => {
+    const html = mdRender(input.repeat(95_325));
+    expect(html).toBe(rendered(95_325));
+    expect(html.replace(/<[^>]+>/g, "")).toBe("xt".repeat(95_325));
+    expect(html.match(/<a href="#">/g)).toHaveLength(95_325);
+    expect(html.match(/<strong>/g)).toHaveLength(128);
+  }, 60_000);
 });

@@ -26,6 +26,7 @@
 
 ### Requirement: 目录树与预览
 目录树 SHALL 懒加载：进入空间时请求根一层并默认展开根；点击目录切换展开并在首次展开时请求该层；点击文件请求预览。预览面板 SHALL 显示面包屑（路径、大小、mtime）；按扩展名前端先判定：不在可预览集 → 直接显示 `该类型不支持预览`（不请求）；`md` 默认渲染视图（移植 demo `mdRender`：先 HTML 转义再生成标题/列表/代码块/表格/链接标签，链接不可跳转），按钮 `查看源码`/`渲染视图` 切换；`csv` 渲染表格并注 `共 N 行 · 大文件仅预览前若干行`；其余文本以带行号的代码表显示，`json` 尝试格式化；图片以 `<img>` 显示；`X-Workbuddy-Truncated` 时显示截断横幅。`sandbox_denied`/`preview_*` 错误 SHALL 内联显示信封 message。
+经用户明确授权，病态重建格式 SHALL 有界规范化：规范节点输出每条祖先链最多保留 64 层 `strong`；超出部分的冗余粗体包装可省略，但全部文字顺序、链接及其作用范围、不可跳转行为和可见格式 SHALL 保留。普通及浅层输入仍遵循 demo 契约；代码保持字面值。此规则不是文本截断、纯文本降级或危险 HTML 注入，HTML 与 React 投影 SHALL 消费同一规范化节点结构。
 
 #### Scenario: 一次浏览
 - WHEN 以 mock fetch 提供根 `out/`、`readme.md`、`notes.csv`、`logo.png`、`归档.zip`：展开 `out`、依次点击四个文件
@@ -34,3 +35,7 @@
 #### Scenario: 渲染器安全
 - WHEN Markdown 源含 `<script>alert(1)</script>` 与 `[x](javascript:alert(1))`
 - THEN 输出中不含 `<script` 标签（被转义为文本），链接渲染为 `href="#"` 且不含 `javascript:`
+
+#### Scenario: 病态格式深度
+- WHEN 在同一预览实例依次显示浅层 Markdown、接近 1 MiB 的深层重建格式、普通文档，再切换源码/渲染和卸载
+- THEN 全部文字及链接保留，`strong` 祖先深度不超过 64，预览与后续交互完成且无新增控制台/页面错误；开发、生产和 StrictMode 生命周期均满足此契约

@@ -53,6 +53,32 @@ function renderMarkdownProjections(src: string) {
   };
 }
 
+function expectNormalizedDepth(body: HTMLElement, repeats: number) {
+  const links = [...body.querySelectorAll("a")];
+  expect(body.textContent).toBe("xt".repeat(repeats));
+  expect(links).toHaveLength(repeats);
+  expect(links.every((node) => node.getAttribute("href") === "#" && node.textContent === "x")).toBe(
+    true,
+  );
+  let maxDepth = 0;
+  for (const node of body.querySelectorAll("strong")) {
+    let depth = 0;
+    for (
+      let current: Element | null = node;
+      current && current !== body;
+      current = current.parentElement
+    ) {
+      if (current.tagName === "STRONG") {
+        depth += 1;
+      }
+    }
+    if (depth > maxDepth) {
+      maxDepth = depth;
+    }
+  }
+  expect(maxDepth).toBe(64);
+}
+
 describe("CsvTable", () => {
   it("renders the first row as headers and notes two data rows", () => {
     render(<CsvTable text={"name,size\nalpha,1\nbeta,2\n"} />);
@@ -183,6 +209,41 @@ describe("PreviewPane Markdown", () => {
     fireEvent.click(screen.getByRole("button", { name: "渲染视图" }));
     expect(screen.getByRole("heading", { level: 3, name: "源码更新" })).toBeTruthy();
   });
+
+  it("renders deep reconstructed Markdown with every literal text pair and link", () => {
+    const input = "[**x](u**)t";
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const view = render(textPreview("deep.md", input.repeat(3), { path: "docs/deep.md" }));
+      let body = view.container.querySelector("[data-markdown-body]");
+      if (!(body instanceof HTMLElement)) {
+        throw new Error("expected React Markdown body");
+      }
+      expect(body.innerHTML).toBe(
+        '<p><a href="#"><strong>x</strong></a><strong>t<a href="#"><strong>x</strong></a><strong>t<a href="#"><strong>x</strong></a><strong>t</strong></strong></strong></p>',
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "查看源码" }));
+      view.rerender(textPreview("deep.md", input.repeat(10_000), { path: "docs/deep.md" }));
+      expect(screen.getByRole("button", { name: "渲染视图" })).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "渲染视图" }));
+      body = view.container.querySelector("[data-markdown-body]");
+      if (!(body instanceof HTMLElement)) {
+        throw new Error("expected React Markdown body");
+      }
+      expectNormalizedDepth(body, 10_000);
+
+      view.rerender(textPreview("deep.md", "# 普通", { path: "docs/deep.md" }));
+      expect(screen.getByRole("heading", { level: 1, name: "普通" })).toBeTruthy();
+      view.rerender(textPreview("other.md", "# 另一份", { path: "docs/other.md" }));
+      expect(screen.getByRole("heading", { level: 1, name: "另一份" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "查看源码" })).toBeTruthy();
+      view.unmount();
+      expect(error.mock.calls.flat().join("\n")).toBe("");
+    } finally {
+      error.mockRestore();
+    }
+  }, 30_000);
 
   it("renders bold and a later href# link after malformed link syntax", () => {
     const { container } = render(

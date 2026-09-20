@@ -74,10 +74,9 @@ type FormatCursor = {
 };
 
 type InlineFrame =
-  | { type: "strong"; source: number; children: MdInline[] }
+  | { type: "strong"; source: number; children: MdInline[]; transparent: boolean }
   | { type: "link"; source: number; children: MdInline[] }
   | { type: "code"; source: number; value: string };
-
 function collectCodeSpans(value: string): { spans: InlineCodeSpan[]; opaqueFrom: number } {
   const spans: InlineCodeSpan[] = [];
   let index = 0;
@@ -250,7 +249,8 @@ class LinkLookahead {
  * Projects the demo's code, strong, then link replacement order into closed
  * nodes. Crossing strong/link boundaries close intervening frames and lazily
  * reconstruct them when visible content resumes, matching the demo DOM without
- * emitting malformed HTML.
+ * emitting malformed HTML. Extra reconstructed strong wrappers beyond 64
+ * ancestors stay logically present but transparent.
  */
 class InlineProjection {
   private readonly value: string;
@@ -264,7 +264,7 @@ class InlineProjection {
   private sourceCursor = 0;
   private codeIndex = 0;
   private codeOpening = true;
-
+  private strongDepth = 0;
   constructor(
     value: string,
     base: number,
@@ -358,7 +358,8 @@ class InlineProjection {
     if (position >= this.sourceCursor) {
       this.appendSourceText(this.sourceCursor, position);
       if (opening) {
-        this.openFormat(cursor.type, this.base + span.start);
+        this.ensurePending(this.base + span.start);
+        this.pushFormat(cursor.type, this.base + span.start);
         this.sourceCursor = span.contentStart;
       } else {
         this.closeFormat(cursor.type);
@@ -371,15 +372,17 @@ class InlineProjection {
     }
   }
 
+  private currentOutput(): MdInline[] {
+    const parent = this.stack[this.stack.length - 1];
+    return !parent || parent.type === "code" ? this.nodes : parent.children;
+  }
+
   private appendNode(node: MdInline) {
     const parent = this.stack[this.stack.length - 1];
-    if (!parent) {
-      this.nodes.push(node);
+    if (parent?.type === "code") {
       return;
     }
-    if (parent.type !== "code") {
-      parent.children.push(node);
-    }
+    this.currentOutput().push(node);
   }
 
   private closeFrame(frame: InlineFrame) {
@@ -387,12 +390,18 @@ class InlineProjection {
       this.appendNode({ type: "code", source: frame.source, value: frame.value });
       return;
     }
+    if (frame.type === "strong") {
+      if (frame.transparent) {
+        return;
+      }
+      this.strongDepth -= 1;
+    }
     this.appendNode({ type: frame.type, source: frame.source, children: frame.children });
   }
 
   private ensurePending(source: number) {
     for (let type = this.pending.pop(); type; type = this.pending.pop()) {
-      this.stack.push({ type, source, children: [] });
+      this.pushFormat(type, source);
     }
   }
 
@@ -407,12 +416,24 @@ class InlineProjection {
       parent.value += text;
       return;
     }
-    appendText(parent?.children ?? this.nodes, text, this.base + start);
+    appendText(this.currentOutput(), text, this.base + start);
   }
 
-  private openFormat(type: FormatKind, source: number) {
-    this.ensurePending(source);
-    this.stack.push({ type, source, children: [] });
+  private pushFormat(type: FormatKind, source: number) {
+    if (type === "link") {
+      this.stack.push({ type, source, children: [] });
+      return;
+    }
+    const transparent = this.strongDepth >= 64;
+    this.stack.push({
+      type,
+      source,
+      children: transparent ? this.currentOutput() : [],
+      transparent,
+    });
+    if (!transparent) {
+      this.strongDepth += 1;
+    }
   }
 
   private closeFormat(type: FormatKind) {
@@ -710,20 +731,34 @@ export function parseMarkdown(src: string): MdBlock[] {
 }
 
 function serializeInline(nodes: MdInline[]): string {
-  return nodes
-    .map((node) => {
-      if (node.type === "text") {
-        return escapeHtml(node.value);
+  const parts: string[] = [];
+  const stack: { nodes: MdInline[]; index: number; close: string }[] = [
+    { nodes, index: 0, close: "" },
+  ];
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1] as { nodes: MdInline[]; index: number; close: string };
+    if (frame.index === frame.nodes.length) {
+      stack.pop();
+      if (frame.close) {
+        parts.push(frame.close);
       }
-      if (node.type === "code") {
-        return `<code>${escapeHtml(node.value)}</code>`;
-      }
-      if (node.type === "strong") {
-        return `<strong>${serializeInline(node.children)}</strong>`;
-      }
-      return `<a href="#">${serializeInline(node.children)}</a>`;
-    })
-    .join("");
+      continue;
+    }
+    const node = frame.nodes[frame.index] as MdInline;
+    frame.index += 1;
+    if (node.type === "text") {
+      parts.push(escapeHtml(node.value));
+      continue;
+    }
+    if (node.type === "code") {
+      parts.push(`<code>${escapeHtml(node.value)}</code>`);
+      continue;
+    }
+    const link = node.type === "link";
+    parts.push(link ? '<a href="#">' : "<strong>");
+    stack.push({ nodes: node.children, index: 0, close: link ? "</a>" : "</strong>" });
+  }
+  return parts.join("");
 }
 
 function serializeBlock(block: MdBlock): string {

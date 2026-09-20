@@ -74,29 +74,57 @@ function preventInertNavigation(
   event.preventDefault();
 }
 
+type InlineElementNode = Extract<MdInline, { type: "strong" | "link" }>;
+type InlineRenderFrame = {
+  nodes: MdInline[];
+  index: number;
+  children: ReactNode[];
+  container: InlineElementNode | null;
+};
+
+function renderInlineElement(node: InlineElementNode, children: ReactNode[]): ReactNode {
+  if (node.type === "strong") {
+    return <strong key={node.source}>{children}</strong>;
+  }
+  return (
+    // biome-ignore lint/a11y/useValidAnchor: controlled preview href="#" never navigates; destinations are dropped.
+    <a
+      href="#"
+      key={node.source}
+      onClick={preventInertNavigation}
+      onKeyDown={preventInertNavigation}
+    >
+      {children}
+    </a>
+  );
+}
+
 function renderInline(nodes: MdInline[]): ReactNode[] {
-  return nodes.map((node) => {
+  const rendered: ReactNode[] = [];
+  const stack: InlineRenderFrame[] = [{ nodes, index: 0, children: rendered, container: null }];
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1] as InlineRenderFrame;
+    if (frame.index === frame.nodes.length) {
+      stack.pop();
+      const parent = stack[stack.length - 1];
+      if (parent && frame.container) {
+        parent.children.push(renderInlineElement(frame.container, frame.children));
+      }
+      continue;
+    }
+    const node = frame.nodes[frame.index] as MdInline;
+    frame.index += 1;
     if (node.type === "text") {
-      return node.value;
+      frame.children.push(node.value);
+      continue;
     }
     if (node.type === "code") {
-      return <code key={node.source}>{node.value}</code>;
+      frame.children.push(<code key={node.source}>{node.value}</code>);
+      continue;
     }
-    if (node.type === "strong") {
-      return <strong key={node.source}>{renderInline(node.children)}</strong>;
-    }
-    return (
-      // biome-ignore lint/a11y/useValidAnchor: controlled preview href="#" never navigates; destinations are dropped.
-      <a
-        href="#"
-        key={node.source}
-        onClick={preventInertNavigation}
-        onKeyDown={preventInertNavigation}
-      >
-        {renderInline(node.children)}
-      </a>
-    );
-  });
+    stack.push({ nodes: node.children, index: 0, children: [], container: node });
+  }
+  return rendered;
 }
 
 function MarkdownHeading({ level, children }: { level: 1 | 2 | 3 | 4; children: ReactNode }) {
@@ -261,7 +289,11 @@ function PreviewBody({ name, preview }: { name: string; preview: PreviewState })
 }
 
 function RenderedMarkdownDocument({ text }: { text: string }) {
-  return <div data-markdown-body="">{parseMarkdown(text).map(renderBlock)}</div>;
+  return (
+    <div data-markdown-body="" style={{ overflowWrap: "anywhere" }}>
+      {parseMarkdown(text).map(renderBlock)}
+    </div>
+  );
 }
 
 function MarkdownPreview({ text }: { text: string }) {
