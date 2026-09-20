@@ -3,8 +3,8 @@
 - [x] 1.1 Add semantic RED real migrated SQLite audit tests covering role-scoped pages, JSON/clock/defaults, invalid parameters and cursor precision, failed emits; preserve existing error behavior tests. Require ≥51 visible member rows interleaved with others for default50/pagination. Precision oracle MUST call exported query() on audit_events in isolated openDb(':memory:') with explicit ids9007199254740991 and9007199254740992: exact before='9007199254740993' propagates native ERR_OUT_OF_RANGE, not bad_request or a rounded safe-only page. Separate ordinary-row before='9223372036854775808' returns eligible rows. Scratch SQL is platform documentation only; no bigint public-ID expansion.
 - [x] 1.2 Implement canonical core/audit emit/query; no new routes/callers/migration.
 - [x] 1.3 Atomically relocate HttpError/codes/messages into core/errors, migrate all references with LSP assistance, remove old exports; HTTP statuses/mapping stay http. Update architecture and parent error ownership notes; do not add #84/#115 codes.
-- [ ] 1.4 Run focused tests, server coverage/type/build, scoped Biome, knip/jscpd/guards and actual compiled smoke; expanded static cross-review and exact-head CI.
-- [ ] 1.5 Merge automatically, update parent2.2 and archive only implemented audit/error ownership requirements; hand off #84/#115/#124.
+- [x] 1.4 Run focused tests, server coverage/type/build, scoped Biome, knip/jscpd/guards and actual compiled smoke; expanded static cross-review and exact-head CI. Three seats clean; CI35504605570 success on 57d448e2ae49c4883ed0027f2f16d168ae4b4240.
+- [x] 1.5 Merge automatically, update parent2.2 and archive only implemented audit/error ownership requirements; hand off #84/#115/#124. PR #163 merged; parent Epic remains active.
 
 ## 2. Risk mapping
 
