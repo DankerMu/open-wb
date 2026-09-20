@@ -10,7 +10,7 @@
 - [x] 1.2 `server/test/support/fake-omp.mjs`：按 rpc.md 吐帧的假子进程脚本（ready/negotiate/get_state、可脚本化：不发 ready、缺 sessionFile、分块/交错、崩溃、stopReason error、extension_ui_request、**call-proxy 模式**——从 `$PI_CODING_AGENT_DIR/models.yml` 取 `baseUrl`、以 `WORKBUDDY_MODEL_TOKEN` 为 bearer 真实 POST `/chat/completions` 并把上游文本转为 `text_delta` 帧，供 3.8 的「经代理的 prompt」单测使用）+ 自身契约单测
 - [x] 1.3 `server/src/sessions/omp/process.ts` — **spawn 契约**：argv 组装（含 `--resume` 仅非 null 时追加）、env 白名单（精确键集断言）、四目录 mkdir；以捕获 spawn 参数的注入点单测，不走协议
 - [x] 1.4 `server/src/sessions/omp/process.ts` — **帧层与握手**：JSONL 读写、`rpc_chunk` 重组与校验、`id` 相关、ready→negotiate v2→get_state（sessionFile 非空才成功）与超时、退出观察、`extension_ui_request` 回绝；对 1.2 假子进程单测
-- [ ] 1.5 `server/src/sessions/omp/runtime.ts`：`SessionRuntime`（懒 spawn、可注入时钟的 idle 计时器、关停序列 stdin→TERM→KILL、token 生成与注销回调、回合中退出上报）+ 单测
+- [x] 1.5 `server/src/sessions/omp/runtime.ts`：`SessionRuntime`（懒 spawn、可注入时钟的 idle 计时器、关停序列 stdin→TERM→KILL、token 生成与注销回调、回合中退出上报）+ 单测；PR160 合并，初始 TDD 顺序偏离保留在子 fixture 的历史未满足项中
 
 Suggested fixture level: expanded - 子进程生命周期、环境白名单与协议帧层是 Critical Path（凭证注入/spawn 回收）白盒面，必须以真实子进程（假脚本）而非 mock 证明
 Minimal mergeable slice: 1.1 omp-fetch 单独可合并保绿（纯 Makefile+脚本，自带 `--version` 验证，无 TS 依赖；scripts/*.sh 不在 size-guard/jscpd 扫描面）；1.2 假子进程脚本独立可合并（测试支撑 + 自带契约测试）；1.3 spawn 契约独立于 1.4 合并（参数捕获测试不需要协议）；1.4 依赖 1.2、1.3；1.5 依赖 1.4

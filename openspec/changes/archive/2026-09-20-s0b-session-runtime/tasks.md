@@ -7,8 +7,8 @@
 ## 2. Independent acceptance and delivery
 - [x] 2.1 Parent runs focused runtime+transport+spawn tests (122/122), server suite/coverage (767/767), make lint, make typecheck, make anti-drift (zero clones), server build and eight independent real-child probe cases; commands exit0.
 - [x] 2.2 Qualify lifecycle failure-class oracles against plausible wrong candidates in disposable copies; 15 guard mutants and two historical wrong candidates rejected, reference/restoration37/37 GREEN, source/test identities bound. No tests that only check mock forwarding or implementation fields.
-- [ ] 2.3 Expanded correctness / test-evidence+spec-compliance / invariant-state reviews, bounded fix gate and same-SHA CI green.
-- [ ] 2.4 Merge #96, update parent task1.5 and archive fixture through a docs-only follow-up PR.
+- [x] 2.3 Expanded correctness / test-evidence+spec-compliance / invariant-state reviews, bounded fix gate and same-SHA CI green. Round2 clean at f64f4a2; CI35504669639 all eight jobs successful.
+- [x] 2.4 Merge #96 through PR160, update parent task1.5 and archive fixture through this docs-only follow-up PR. Historical task1.2 remains unmet and is not retroactively checked.
 
 ## Risk pack disposition
 - Selected Public API / CLI / script entry: prompt iterable/shutdown/callback semantics; 1.3-1.4.
