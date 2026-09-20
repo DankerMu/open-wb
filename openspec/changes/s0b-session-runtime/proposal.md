@@ -14,7 +14,7 @@ None.
 - `omp-runtime`: add 每会话生命周期 and its race/ownership scenarios; preserve existing binary, spawn and transport contracts.
 
 ## Impact
-New `server/src/sessions/omp/runtime.ts` and paired tests, with minimal extensions to existing fake-omp support when needed. No supervisor, DB, network route, config, dependency or CI changes.
+New `server/src/sessions/omp/runtime.ts` and paired tests, with minimal extensions to existing fake-omp support. An executed shutdown-during-handshake counterexample required a small `process.ts` ownership extension: startup failure avoids an automatic duplicate after a successfully requested SIGKILL, while public kill forwarding and prior-TERM/failed-KILL behavior remain intact. No supervisor, DB, network route, config, dependency or CI changes.
 
 ## Triage
 Issue type: feature.

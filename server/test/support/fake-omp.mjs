@@ -25,7 +25,7 @@ let protocol = 1;
 let pendingUi = false;
 let queue = Promise.resolve();
 
-if (scenario !== "no-ready") {
+if (scenario !== "no-ready" && scenario !== "no-ready-hang") {
   queue = queue.then(() =>
     emit({
       type: "ready",
@@ -42,7 +42,7 @@ rl.on("line", (line) => {
   queue = queue.then(() => onLine(line));
 });
 rl.on("close", () => {
-  if (scenario === "hang-eof" || scenario === "hang-term") {
+  if (scenario === "hang-eof" || scenario === "hang-term" || scenario === "no-ready-hang") {
     return;
   }
   queue.then(
@@ -51,11 +51,14 @@ rl.on("close", () => {
   );
 });
 
-if (scenario === "hang-eof" || scenario === "hang-term") {
+if (scenario === "hang-eof" || scenario === "hang-term" || scenario === "no-ready-hang") {
   setInterval(() => {}, 60_000);
 }
-if (scenario === "hang-term") {
+if (scenario === "hang-term" || scenario === "no-ready-hang") {
   process.on("SIGTERM", () => {});
+}
+if (scenario === "no-ready-hang") {
+  process.stderr.write("no-ready-hang:handlers-ready\n");
 }
 
 function parseArgs(argv) {

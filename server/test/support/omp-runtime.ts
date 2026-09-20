@@ -3,6 +3,8 @@
  */
 import type { OmpFrame } from "../../src/sessions/omp/frame.js";
 
+export type IteratorOutcome = "pending" | "done" | "frame" | "rejected";
+
 export interface TokenBook {
   issued: string[];
   revoked: string[];
@@ -17,6 +19,7 @@ export interface TestClock {
   setTimeout(callback: () => void, ms: number): number;
   clearTimeout(id: unknown): void;
   advance(ms: number): void;
+  pending(): number;
 }
 
 interface PendingTimer {
@@ -78,6 +81,9 @@ export function createClock(): TestClock {
       }
       clock.nowMs = target;
     },
+    pending() {
+      return timers.size;
+    },
   };
   return clock;
 }
@@ -102,6 +108,29 @@ export async function collectUntilError(
   } catch (error) {
     return { frames, error };
   }
+}
+
+export function observeIteratorResult(pending: Promise<IteratorResult<OmpFrame>>): {
+  outcome: IteratorOutcome;
+  result?: IteratorResult<OmpFrame>;
+  error?: unknown;
+} {
+  const observation: {
+    outcome: IteratorOutcome;
+    result?: IteratorResult<OmpFrame>;
+    error?: unknown;
+  } = { outcome: "pending" };
+  void pending.then(
+    (result) => {
+      observation.result = result;
+      observation.outcome = result.done === true ? "done" : "frame";
+    },
+    (error: unknown) => {
+      observation.error = error;
+      observation.outcome = "rejected";
+    },
+  );
+  return observation;
 }
 
 function earliestDue(timers: Map<number, PendingTimer>, limit: number): PendingTimer | undefined {

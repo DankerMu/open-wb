@@ -114,6 +114,62 @@ describe("SessionRuntime prompt completion", () => {
     expect(result.frames[0]).toEqual({ type: "agent_start" });
     expect(result.frames[result.frames.length - 1]).toEqual(TERMINAL);
   });
+
+  it("resets idle on an accepted prompt without any response frames", async () => {
+    const world = openWired();
+    const first = collectUntilError(world.runtime.prompt("complete"));
+    const request = await world.waitPrompt();
+    ackPrompt(world, request.id);
+    world.child.emitLine(TERMINAL);
+    await first;
+    let stdinEnded = false;
+    world.child.stdin.on("finish", () => {
+      stdinEnded = true;
+    });
+    world.clock.advance(IDLE_MS - 1);
+    await waitImmediate();
+    expect(hasTerminated(world.child as unknown as ChildProcessWithoutNullStreams)).toBe(false);
+    expect(stdinEnded).toBe(false);
+    const held = collectUntilError(world.runtime.prompt("hold-frames"));
+    await world.waitPrompt();
+    world.clock.advance(1);
+    await waitImmediate();
+    expect(stdinEnded).toBe(false);
+    expect(hasTerminated(world.child as unknown as ChildProcessWithoutNullStreams)).toBe(false);
+    expect(observePromise(held).outcome).toBe("pending");
+    world.clock.advance(IDLE_MS - 2);
+    await waitImmediate();
+    expect(stdinEnded).toBe(false);
+    world.clock.advance(1);
+    await waitImmediate();
+    expect(stdinEnded).toBe(true);
+    world.clock.advance(8_000);
+    const result = await held;
+    expect(result.error).toBeInstanceOf(AgentUnavailableError);
+    expect(world.tokens.live.get(SESSION_ID)).toBeUndefined();
+  });
+
+  it("completes on omitted isTerminal agent_end and accepts the next prompt", async () => {
+    const world = openWired();
+    const first = collectUntilError(world.runtime.prompt("legacy-end"));
+    const request = await world.waitPrompt();
+    ackPrompt(world, request.id);
+    world.child.emitLine({ type: "agent_end", messages: [] });
+    const completed = await first;
+    expect(completed.error).toBeUndefined();
+    expect(completed.frames[completed.frames.length - 1]).toEqual({
+      type: "agent_end",
+      messages: [],
+    });
+    const second = collectUntilError(world.runtime.prompt("after-omitted"));
+    const next = await world.waitPrompt();
+    ackPrompt(world, next.id);
+    world.child.emitLine(TERMINAL);
+    const again = await second;
+    expect(again.error).toBeUndefined();
+    expect(again.frames[again.frames.length - 1]).toEqual(TERMINAL);
+    expect(world.spawns).toBe(1);
+  });
 });
 
 describe("SessionRuntime native drain, stale callbacks and transport errors", () => {

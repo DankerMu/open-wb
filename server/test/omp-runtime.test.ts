@@ -3,7 +3,9 @@
  * Independent oracles: Node child_process exit/signal vs injected clock, frozen rpc.md.
  */
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { setImmediate as waitImmediate } from "node:timers/promises";
+import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { setImmediate as waitImmediate, setTimeout as waitTimeout } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
@@ -16,12 +18,18 @@ import {
   SessionRuntime,
   type SessionRuntimeOpts,
 } from "../src/sessions/omp/runtime.js";
-import { createRpcHarness, DEFAULT_SESSION, hasTerminated } from "./support/omp-rpc.js";
+import {
+  createRpcHarness,
+  DEFAULT_SESSION,
+  hasTerminated,
+  observePromise,
+} from "./support/omp-rpc.js";
 import {
   collectPrompt,
   collectUntilError,
   createClock,
   createTokens,
+  observeIteratorResult,
   type TestClock,
   type TokenBook,
 } from "./support/omp-runtime.js";
@@ -224,30 +232,40 @@ describe("SessionRuntime crash, overlap and shutdown", () => {
   it("sends KILL at 8000ms when EOF and TERM are ignored and not before", {
     timeout: 15_000,
   }, async () => {
-    const world = openWorld({ scenario: "hang-term" });
-    await collectPrompt(world.runtime.prompt("hang-term"));
-    const observed = world.observed[0];
-    const child = world.children[0];
-    if (observed === undefined || child === undefined) {
-      throw new Error("missing hang-term child");
-    }
+    const { child, observed, world } = await openHangTerm();
     const shutting = world.runtime.shutdown();
-    world.clock.advance(4_999);
-    await waitImmediate();
-    expect(observed.signals).toEqual([]);
-    world.clock.advance(1);
-    await waitImmediate();
-    expect(observed.signals).toEqual(["SIGTERM"]);
-    expect(hasTerminated(child)).toBe(false);
-    world.clock.advance(2_999);
-    await waitImmediate();
-    expect(observed.signals).toEqual(["SIGTERM"]);
+    await advanceHangTermGrace(world, observed, child);
     expect(hasTerminated(child)).toBe(false);
     world.clock.advance(1);
     await observed.exit;
     await shutting;
     expect(observed.signals).toEqual(["SIGTERM", "SIGKILL"]);
     expect(observed.exits[0]?.signal).toBe("SIGKILL");
+  });
+
+  it("does not resolve shutdown until hang-term native exit is observed", {
+    timeout: 15_000,
+  }, async () => {
+    const { child, observed, world } = await openHangTerm();
+    let atShutdown:
+      | { exits: number; exitCode: number | null; signalCode: NodeJS.Signals | null }
+      | undefined;
+    const shutting = world.runtime.shutdown().then(() => {
+      atShutdown = {
+        exits: observed.exits.length,
+        exitCode: child.exitCode,
+        signalCode: child.signalCode,
+      };
+    });
+    await advanceHangTermGrace(world, observed, child);
+    world.clock.advance(1);
+    await observed.exit;
+    await shutting;
+    expect(atShutdown).toBeDefined();
+    expect(atShutdown?.exits).toBeGreaterThan(0);
+    expect(atShutdown?.exitCode !== null || atShutdown?.signalCode !== null).toBe(true);
+    expect(hasTerminated(child)).toBe(true);
+    expect(observed.exits[0]).toBeDefined();
   });
 
   it("reaps a child when shutdown races startup and forbids later prompts", {
@@ -268,6 +286,172 @@ describe("SessionRuntime crash, overlap and shutdown", () => {
   });
 });
 
+describe("SessionRuntime failed acquisition, delayed shutdown and iterator return", () => {
+  it("rejects a missing executable at clock 0 and keeps the known resume path", {
+    timeout: 15_000,
+  }, async () => {
+    await expectFailedAcquisition("missing-bin");
+  });
+
+  it("rejects a synchronous spawn throw at clock 0 and keeps the known resume path", {
+    timeout: 15_000,
+  }, async () => {
+    await expectFailedAcquisition("sync-throw");
+  });
+
+  it("rejects an obstructed directory before a child exists at clock 0", {
+    timeout: 15_000,
+  }, async () => {
+    await expectFailedAcquisition("obstructed-dir");
+  });
+
+  it("releases owned clock timers after failed acquisition and shutdown", {
+    timeout: 15_000,
+  }, async () => {
+    const world = openWorld({ spawnFailure: "missing-bin" });
+    expect(world.clock.pending()).toBe(0);
+    const failed = await collectUntilError(world.runtime.prompt("boot"));
+    expect(failed.error).toBeInstanceOf(AgentUnavailableError);
+    expect(world.clock.nowMs).toBe(0);
+    expect(world.tokens.live.get(SESSION_ID)).toBeUndefined();
+    await world.runtime.shutdown();
+    expect(world.clock.pending()).toBe(0);
+  });
+
+  it("closes stdin then TERM at 5000 and KILL at 8000 when shutdown races spawn return", {
+    timeout: 15_000,
+  }, async () => {
+    const world = openWorld({
+      scenario: "no-ready-hang",
+      shutdownInSpawn: true,
+      handshakeTimeoutMs: 60_000,
+    });
+    const pending = collectUntilError(world.runtime.prompt("startup"));
+    const spawned = await world.waitSpawn();
+    await spawned.ready;
+    expect(world.clock.nowMs).toBe(0);
+    expect(spawned.stdinEnded).toBe(true);
+    expect(spawned.signals).toEqual([]);
+    expect(hasTerminated(spawned.child)).toBe(false);
+
+    world.clock.advance(4_999);
+    await waitImmediate();
+    expect(spawned.signals).toEqual([]);
+    expect(hasTerminated(spawned.child)).toBe(false);
+
+    world.clock.advance(1);
+    await waitImmediate();
+    expect(spawned.signals).toEqual(["SIGTERM"]);
+    expect(hasTerminated(spawned.child)).toBe(false);
+
+    world.clock.advance(2_999);
+    await waitImmediate();
+    expect(spawned.signals).toEqual(["SIGTERM"]);
+    expect(hasTerminated(spawned.child)).toBe(false);
+
+    world.clock.advance(1);
+    await spawned.exit;
+    const result = await pending;
+    await world.shutdownInSpawn;
+    expect(spawned.signals).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(spawned.exits[0]?.signal).toBe("SIGKILL");
+    expect(result.error).toBeInstanceOf(AgentUnavailableError);
+    expect(world.tokens.live.get(SESSION_ID)).toBeUndefined();
+    expect(() => world.runtime.prompt("closed")).toThrow(AgentUnavailableError);
+  });
+
+  it("settles a parked next after iterator return and reclaims the child", {
+    timeout: 15_000,
+  }, async () => {
+    const world = openWorld({ scenario: "hang-prompt" });
+    const iterator = world.runtime.prompt("busy")[Symbol.asyncIterator]();
+    const ack = await iterator.next();
+    expect(ack.done).toBe(false);
+    expect(ack.value).toMatchObject({ type: "response", command: "prompt", success: true });
+    const parked = iterator.next();
+    const parkedWatch = observeIteratorResult(parked);
+    const returnIterator = requireIteratorReturn(iterator);
+    const returned = await returnIterator();
+    expect(returned).toEqual({ value: undefined, done: true });
+    await waitImmediate();
+    expect(parkedWatch.outcome).not.toBe("pending");
+    if (parkedWatch.outcome === "rejected") {
+      expect(parkedWatch.error).toBeInstanceOf(AgentUnavailableError);
+      expect((parkedWatch.error as AgentUnavailableError).code).toBe("agent_unavailable");
+    } else {
+      expect(parkedWatch.outcome).toBe("done");
+      expect(parkedWatch.result).toEqual({ value: undefined, done: true });
+    }
+    const child = world.children[0];
+    if (child === undefined) {
+      throw new Error("missing hang-prompt child");
+    }
+    world.clock.advance(8_000);
+    await world.observed[0]?.exit;
+    expect(hasTerminated(child)).toBe(true);
+    expect(world.tokens.live.get(SESSION_ID)).toBeUndefined();
+    world.scenario = undefined;
+    const next = await collectPrompt(world.runtime.prompt("after-parked-return"));
+    expect(world.spawns).toBe(2);
+    expect(next.some((frame) => frame.type === "agent_end")).toBe(true);
+  });
+
+  it("discards queued frames after return so later next stays terminal", {
+    timeout: 15_000,
+  }, async () => {
+    const world = openWorld();
+    const iterator = world.runtime.prompt("full-turn")[Symbol.asyncIterator]();
+    const ack = await iterator.next();
+    expect(ack.done).toBe(false);
+    expect(ack.value).toMatchObject({ type: "response", command: "prompt" });
+    const observed = world.observed[0];
+    if (observed === undefined) {
+      throw new Error("missing full-turn child");
+    }
+    await observed.agentEnd;
+    await waitImmediate();
+    await waitImmediate();
+    const returnIterator = requireIteratorReturn(iterator);
+    const returned = await returnIterator();
+    expect(returned).toEqual({ value: undefined, done: true });
+    const afterReturn = await iterator.next();
+    expect(afterReturn).toEqual({ value: undefined, done: true });
+    expect(hasTerminated(observed.child)).toBe(false);
+    expect(world.tokens.live.get(SESSION_ID)).toBeDefined();
+    const reused = await collectPrompt(world.runtime.prompt("reuse-after-return"));
+    expect(world.spawns).toBe(1);
+    expect(reused.some((frame) => frame.type === "agent_end")).toBe(true);
+    const shutting = world.runtime.shutdown();
+    await observed.exit;
+    await shutting;
+  });
+
+  it("does not write a canceled unsent prompt onto a reused child", {
+    timeout: 15_000,
+  }, async () => {
+    const world = openWorld();
+    await collectPrompt(world.runtime.prompt("first"));
+    expect(world.prompts).toEqual(["first"]);
+    const iterator = world.runtime.prompt("canceled-before-send")[Symbol.asyncIterator]();
+    const returnIterator = requireIteratorReturn(iterator);
+    await new Promise<void>((resolve, reject) => {
+      queueMicrotask(() => {
+        void returnIterator().then(() => {
+          resolve();
+        }, reject);
+      });
+    });
+    await waitImmediate();
+    expect(world.prompts).toEqual(["first"]);
+    expect(world.spawns).toBe(1);
+    const reused = await collectPrompt(world.runtime.prompt("after-cancel"));
+    expect(world.spawns).toBe(1);
+    expect(world.prompts).toEqual(["first", "after-cancel"]);
+    expect(reused.some((frame) => frame.type === "agent_end")).toBe(true);
+    await world.runtime.shutdown();
+  });
+});
+
 interface SpawnCall {
   args: string[];
   env: Record<string, string>;
@@ -278,7 +462,12 @@ interface ChildObservation {
   signals: NodeJS.Signals[];
   exits: OmpExit[];
   exit: Promise<OmpExit>;
+  ready: Promise<void>;
+  agentEnd: Promise<void>;
+  stdinEnded: boolean;
 }
+
+type SpawnFailure = "missing-bin" | "sync-throw" | "obstructed-dir";
 
 interface World {
   runtime: SessionRuntime;
@@ -288,18 +477,33 @@ interface World {
   children: ChildProcessWithoutNullStreams[];
   observed: ChildObservation[];
   exits: OmpExit[];
+  kills: NodeJS.Signals[];
+  prompts: string[];
   spawns: number;
   scenario: string | undefined;
+  spawnFailure: SpawnFailure | undefined;
+  shutdownInSpawn: Promise<void> | undefined;
+  obstructedPath: string | undefined;
   waitSpawn(): Promise<ChildObservation>;
 }
 
-function openWorld(options: { resumePath?: string | null; scenario?: string } = {}): World {
+function openWorld(
+  options: {
+    resumePath?: string | null;
+    scenario?: string;
+    spawnFailure?: SpawnFailure;
+    shutdownInSpawn?: boolean;
+    handshakeTimeoutMs?: number;
+  } = {},
+): World {
   const clock = createClock();
   const tokens = createTokens(TOKEN_PREFIX);
   const calls: SpawnCall[] = [];
   const children: ChildProcessWithoutNullStreams[] = [];
   const observed: ChildObservation[] = [];
   const exits: OmpExit[] = [];
+  const kills: NodeJS.Signals[] = [];
+  const prompts: string[] = [];
   const spawnWaiters: Array<(value: ChildObservation) => void> = [];
   const world: World = {
     runtime: undefined as unknown as SessionRuntime,
@@ -309,10 +513,15 @@ function openWorld(options: { resumePath?: string | null; scenario?: string } = 
     children,
     observed,
     exits,
+    kills,
+    prompts,
     get spawns() {
       return calls.length;
     },
     scenario: options.scenario,
+    spawnFailure: options.spawnFailure,
+    shutdownInSpawn: undefined,
+    obstructedPath: undefined,
     waitSpawn() {
       const existing = observed[observed.length - 1];
       if (existing !== undefined && observed.length > calls.length - 1) {
@@ -323,33 +532,38 @@ function openWorld(options: { resumePath?: string | null; scenario?: string } = 
       });
     },
   };
-  const spawnImpl: SpawnImpl = (_command, args, spawnOptions) => {
-    const extra = world.scenario === undefined ? [] : ["--scenario", world.scenario];
-    const child = spawn(process.execPath, [FAKE, ...args, ...extra], {
-      cwd: typeof spawnOptions.cwd === "string" ? spawnOptions.cwd : undefined,
-      env: spawnOptions.env,
-      stdio: ["pipe", "pipe", "pipe"],
-      shell: false,
-    });
-    harness.children.push(child);
-    children.push(child);
-    const env: Record<string, string> = {};
-    for (const [key, value] of Object.entries(spawnOptions.env ?? {})) {
-      if (value !== undefined) {
-        env[key] = value;
-      }
+  const spawnImpl: SpawnImpl = (command, args, spawnOptions) => {
+    calls.push(captureSpawnCall(args, spawnOptions.env));
+    if (world.spawnFailure === "sync-throw") {
+      throw new Error("spawnImpl refused before a child existed");
     }
-    calls.push({ args: [...args], env });
+    const child = spawnWorldChild(command, args, spawnOptions, world.spawnFailure, world.scenario);
+    child.on("error", () => {});
+    const originalKill = child.kill.bind(child);
+    child.kill = ((signal?: NodeJS.Signals) => {
+      kills.push(signal ?? "SIGTERM");
+      return originalKill(signal);
+    }) as typeof child.kill;
+    capturePromptWrites(child, prompts);
+    harness.children.push(child);
+    if (world.spawnFailure !== undefined) {
+      return child;
+    }
+    children.push(child);
     const watch = observeChild(child);
     observed.push(watch);
     spawnWaiters.splice(0).forEach((resolve) => {
       resolve(watch);
     });
+    if (options.shutdownInSpawn) {
+      world.shutdownInSpawn = world.runtime.shutdown();
+    }
     return child;
   };
+  const temp = harness.tempOpts(`${TOKEN_PREFIX}-unused`, "omp-rt-");
   const opts: SessionRuntimeOpts = {
     sessionId: SESSION_ID,
-    ...harness.tempOpts(`${TOKEN_PREFIX}-unused`, "omp-rt-"),
+    ...temp,
     bin: FAKE,
     tokens,
     idleMs: IDLE_MS,
@@ -359,9 +573,110 @@ function openWorld(options: { resumePath?: string | null; scenario?: string } = 
       exits.push(exit);
     },
     ...(options.resumePath === undefined ? {} : { resumePath: options.resumePath }),
+    ...(options.handshakeTimeoutMs === undefined
+      ? {}
+      : { handshakeTimeoutMs: options.handshakeTimeoutMs }),
   };
+  if (options.spawnFailure === "missing-bin") {
+    opts.bin = join(temp.sandboxRoot, "absent-omp");
+  }
+  if (options.spawnFailure === "obstructed-dir") {
+    mkdirSync(temp.sandboxRoot, { recursive: true });
+    world.obstructedPath = join(temp.sandboxRoot, temp.ownerId);
+    writeFileSync(world.obstructedPath, "not-a-directory");
+  }
   world.runtime = new SessionRuntime(opts);
   return world;
+}
+
+async function openHangTerm() {
+  const world = openWorld({ scenario: "hang-term" });
+  await collectPrompt(world.runtime.prompt("hang-term"));
+  const observed = world.observed[0];
+  const child = world.children[0];
+  if (observed === undefined || child === undefined) {
+    throw new Error("missing hang-term child");
+  }
+  return { child, observed, world };
+}
+
+async function advanceHangTermGrace(
+  world: World,
+  observed: ChildObservation,
+  child: ChildProcessWithoutNullStreams,
+): Promise<void> {
+  world.clock.advance(4_999);
+  await waitImmediate();
+  expect(observed.signals).toEqual([]);
+  world.clock.advance(1);
+  await waitImmediate();
+  expect(observed.signals).toEqual(["SIGTERM"]);
+  expect(hasTerminated(child)).toBe(false);
+  world.clock.advance(2_999);
+  await waitImmediate();
+  expect(observed.signals).toEqual(["SIGTERM"]);
+}
+
+function requireIteratorReturn<T>(iterator: AsyncIterator<T>): () => Promise<IteratorResult<T>> {
+  const cancel = iterator.return;
+  if (cancel === undefined) {
+    throw new Error("async iterator return is required for cancellation");
+  }
+  return () => cancel.call(iterator);
+}
+
+function captureSpawnCall(
+  args: readonly string[],
+  env: Parameters<SpawnImpl>[2]["env"],
+): SpawnCall {
+  const captured: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env ?? {})) {
+    if (value !== undefined) {
+      captured[key] = value;
+    }
+  }
+  return { args: [...args], env: captured };
+}
+
+function spawnWorldChild(
+  command: string,
+  args: readonly string[],
+  spawnOptions: Parameters<SpawnImpl>[2],
+  spawnFailure: SpawnFailure | undefined,
+  scenario: string | undefined,
+): ChildProcessWithoutNullStreams {
+  if (spawnFailure === "missing-bin") {
+    return spawn(command, args, {
+      cwd: typeof spawnOptions.cwd === "string" ? spawnOptions.cwd : undefined,
+      env: spawnOptions.env,
+      stdio: ["pipe", "pipe", "pipe"],
+      shell: false,
+    });
+  }
+  const extra = scenario === undefined ? [] : ["--scenario", scenario];
+  return spawn(process.execPath, [FAKE, ...args, ...extra], {
+    cwd: typeof spawnOptions.cwd === "string" ? spawnOptions.cwd : undefined,
+    env: spawnOptions.env,
+    stdio: ["pipe", "pipe", "pipe"],
+    shell: false,
+  });
+}
+
+function capturePromptWrites(child: ChildProcessWithoutNullStreams, prompts: string[]): void {
+  const originalWrite = child.stdin.write.bind(child.stdin);
+  child.stdin.write = ((chunk: string | Uint8Array, ...rest: unknown[]) => {
+    const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+    for (const line of text.split("\n")) {
+      if (line.length === 0) {
+        continue;
+      }
+      const frame = JSON.parse(line) as { type?: string; message?: string };
+      if (frame.type === "prompt" && typeof frame.message === "string") {
+        prompts.push(frame.message);
+      }
+    }
+    return originalWrite(chunk, ...(rest as []));
+  }) as typeof child.stdin.write;
 }
 
 function observeChild(child: ChildProcessWithoutNullStreams): ChildObservation {
@@ -379,7 +694,46 @@ function observeChild(child: ChildProcessWithoutNullStreams): ChildObservation {
       resolve(seen);
     });
   });
-  return { child, signals, exits, exit };
+  const watch: ChildObservation = {
+    child,
+    signals,
+    exits,
+    exit,
+    ready: Promise.resolve(),
+    agentEnd: Promise.resolve(),
+    stdinEnded: false,
+  };
+  child.stdin.on("finish", () => {
+    watch.stdinEnded = true;
+  });
+  child.stdin.on("close", () => {
+    watch.stdinEnded = true;
+  });
+  const marker = Buffer.from("no-ready-hang:handlers-ready");
+  watch.ready = new Promise<void>((resolve) => {
+    let buffered = Buffer.alloc(0);
+    const onData = (chunk: Buffer) => {
+      buffered = Buffer.concat([buffered, chunk]);
+      if (buffered.includes(marker)) {
+        child.stderr.off("data", onData);
+        resolve();
+      }
+    };
+    child.stderr.on("data", onData);
+  });
+  const agentEndMarker = Buffer.from('"type":"agent_end"');
+  watch.agentEnd = new Promise<void>((resolve) => {
+    let buffered = Buffer.alloc(0);
+    const onData = (chunk: Buffer) => {
+      buffered = Buffer.concat([buffered, chunk]);
+      if (buffered.includes(agentEndMarker)) {
+        child.stdout.off("data", onData);
+        resolve();
+      }
+    };
+    child.stdout.on("data", onData);
+  });
+  return watch;
 }
 
 function resumeOf(args: string[] | undefined): string | undefined {
@@ -388,4 +742,43 @@ function resumeOf(args: string[] | undefined): string | undefined {
   }
   const index = args.indexOf("--resume");
   return index === -1 ? undefined : args[index + 1];
+}
+
+async function expectFailedAcquisition(kind: SpawnFailure): Promise<void> {
+  const persisted = "/tmp/open-wb-persisted-session.jsonl";
+  const world = openWorld({
+    resumePath: persisted,
+    spawnFailure: kind,
+  });
+  const pending = collectUntilError(world.runtime.prompt("boot"));
+  const observation = observePromise(pending);
+  for (let i = 0; i < 40 && observation.outcome === "pending"; i += 1) {
+    await waitTimeout(5);
+  }
+  expect(world.clock.nowMs).toBe(0);
+  expect(observation.outcome).toBe("resolved");
+  const result = await pending;
+  expect(result.error).toBeInstanceOf(AgentUnavailableError);
+  expect((result.error as AgentUnavailableError).code).toBe("agent_unavailable");
+  expect(world.clock.nowMs).toBe(0);
+  expect(world.tokens.issued).toHaveLength(1);
+  expect(world.tokens.live.get(SESSION_ID)).toBeUndefined();
+  expect(world.tokens.revoked).toEqual(world.tokens.issued);
+  expect(world.runtime.sessionFile).toBe(persisted);
+  expect(world.kills).toEqual([]);
+  expect(world.children).toHaveLength(0);
+  if (world.calls[0] !== undefined) {
+    expect(resumeOf(world.calls[0].args)).toBe(persisted);
+  }
+  if (world.obstructedPath !== undefined) {
+    unlinkSync(world.obstructedPath);
+  }
+  world.spawnFailure = undefined;
+  world.scenario = "new-session";
+  const recovered = await collectPrompt(world.runtime.prompt("retry"));
+  expect(world.spawns).toBeGreaterThanOrEqual(1);
+  expect(resumeOf(world.calls[world.calls.length - 1]?.args)).toBe(persisted);
+  expect(recovered.some((frame) => frame.type === "agent_end")).toBe(true);
+  expect(world.runtime.sessionFile).toBe("/tmp/open-wb-new-session.jsonl");
+  await world.runtime.shutdown();
 }
