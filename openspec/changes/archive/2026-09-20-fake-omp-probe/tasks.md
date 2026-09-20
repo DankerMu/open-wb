@@ -2,8 +2,8 @@
 
 - [x] 1.1 Add real-child contract tests and capture semantic RED against unchanged fake omp; include success, colon/space path, independent errno and non-probe regression.
 - [x] 1.2 Extend canonical prompt dispatch and completion with truthful write-before-read probe reporting; no production changes.
-- [ ] 1.3 Run focused fake-omp Vitest, server regression coverage, server typecheck, scoped Biome, knip/jscpd/size guards, and actual child smoke; capture Linux same-uid readable in ordinary Ubuntu CI.
-- [ ] 1.4 Complete static expanded cross-review, exact-head protected CI and automatic merge; update parent 5.3 and archive only this probe requirement.
+- [x] 1.3 Run focused fake-omp Vitest, server regression coverage, server typecheck, scoped Biome, knip/jscpd/size guards, and actual child smoke; capture Linux same-uid readable in ordinary Ubuntu CI. Evidence: PR #161, CI run 35498694708, all checks passed.
+- [x] 1.4 Complete static expanded cross-review, exact-head protected CI and automatic merge; update parent 5.3 and archive only this probe requirement. PR #161 merged; three seats clean on 3851794491f68dd046e86814ed3cea0dd53d8a2e.
 
 ## 2. Risk mapping
 

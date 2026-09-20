@@ -1,7 +1,7 @@
 # omp-test-harness Specification
 
 ## Purpose
-TBD - created by archiving change s0b-fake-omp. Update Purpose after archive.
+Define the standalone fake omp protocol fixture and its real-child probe reporting contract, supporting deterministic RPC tests and later Linux identity-isolation verification without claiming production enforcement.
 ## Requirements
 ### Requirement: 假 omp 进程契约
 The standalone zero-dependency Node fixture SHALL expose JSONL stdin/stdout frames matching omp v18.0.10 commit 33cc6b9a043a74e00a157e72ca909272796d8461 for its supported commands, with explicit argv-selected scenarios. It SHALL not replace production code or contact a real model service in its contract tests.
@@ -33,4 +33,23 @@ The standalone zero-dependency Node fixture SHALL expose JSONL stdin/stdout fram
 - THEN it POSTs prompt messages with stream true to baseUrl/chat/completions using the environment WORKBUDDY_MODEL_TOKEN bearer, maps local upstream SSE content chunks to text_delta without byte-boundary corruption, and ends the turn after DONE
 - WHEN configuration is invalid or the local HTTP request fails
 - THEN the failure is observable without a fabricated successful reply or a token leak into stdout/stderr
+
+### Requirement: 假 omp probe 回报
+For prompt `probe:<pid>:<writePath>`, the fake omp SHALL first attempt to write UTF-8 `probe` at the complete writePath using its own credentials, then attempt to read `/proc/<pid>/environ`. It SHALL emit one text delta with fields in order `uid=<uid> gid=<gid> env=<comma-separated sorted environment keys> home=<HOME> agent=<PI_CODING_AGENT_DIR> environ=<readable|errno> wrote=<ok|errno>`, based on its own process and actual IO outcomes. It SHALL reuse normal prompt acknowledgement and assistant stop/terminal agent_end frames even when either IO operation fails. It SHALL not disclose arbitrary environment values or proc contents. Non-probe behavior SHALL remain unchanged.
+
+#### Scenario: 同 uid 成功
+- WHEN an ordinary Linux real child receives a probe for its same-uid parent with a writable test-owned path containing colons and spaces
+- THEN identity equals that of the parent, environment keys are sorted, HOME/agent equal supplied values, environ is readable, wrote is ok, and exact file content is probe before normal completion
+
+#### Scenario: IO 失败独立回报
+- WHEN the destination parent does not exist or the target proc pid does not exist
+- THEN the failed operation reports ENOENT, the other operation is still attempted and truthfully reported, and the process emits its normal terminal completion
+
+#### Scenario: 非 Linux 不伪造证明
+- WHEN the child runs on macOS without procfs
+- THEN it reports the actual proc read errno while identity, environment, file content and terminal behavior remain verifiable; this result is not reported as Linux readability or uid isolation proof
+
+#### Scenario: 非 probe 兼容
+- WHEN an existing non-probe prompt/scenario is exercised
+- THEN the #87 handshake, scenario-specific frame sequence, and normal shutdown remain unchanged
 
