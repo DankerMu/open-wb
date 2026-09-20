@@ -25,7 +25,7 @@ let protocol = 1;
 let pendingUi = false;
 let queue = Promise.resolve();
 
-if (scenario !== "no-ready") {
+if (scenario !== "no-ready" && scenario !== "no-ready-hang") {
   queue = queue.then(() =>
     emit({
       type: "ready",
@@ -42,11 +42,24 @@ rl.on("line", (line) => {
   queue = queue.then(() => onLine(line));
 });
 rl.on("close", () => {
+  if (scenario === "hang-eof" || scenario === "hang-term" || scenario === "no-ready-hang") {
+    return;
+  }
   queue.then(
     () => process.exit(0),
     () => process.exit(1),
   );
 });
+
+if (scenario === "hang-eof" || scenario === "hang-term" || scenario === "no-ready-hang") {
+  setInterval(() => {}, 60_000);
+}
+if (scenario === "hang-term" || scenario === "no-ready-hang") {
+  process.on("SIGTERM", () => {});
+}
+if (scenario === "no-ready-hang") {
+  process.stderr.write("no-ready-hang:handlers-ready\n");
+}
 
 function parseArgs(argv) {
   let selected = "normal";
@@ -158,9 +171,14 @@ function sessionState() {
     queuedMessageCount: 0,
     todoPhases: [],
   };
-  if (scenario !== "missing-session") {
-    data.sessionFile = resume ?? DEFAULT_SESSION;
+  if (scenario === "missing-session") {
+    return data;
   }
+  if (scenario === "new-session") {
+    data.sessionFile = "/tmp/open-wb-new-session.jsonl";
+    return data;
+  }
+  data.sessionFile = resume ?? DEFAULT_SESSION;
   return data;
 }
 
@@ -199,6 +217,7 @@ async function handlePrompt(frame) {
     error: () => failTurn("fake omp scripted error"),
     "extension-ui": () => requestConfirm(),
     "call-proxy": () => runProxy(frame.message),
+    "hang-prompt": () => {},
   };
   const turn = turns[scenario];
   if (turn) {

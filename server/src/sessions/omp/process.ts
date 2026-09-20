@@ -160,6 +160,7 @@ export class OmpProcess {
   #started = false;
   #fatal: Error | undefined;
   #nativeExit: OmpExit | undefined;
+  #sentSigkill = false;
 
   constructor(opts: OmpProcessOpts) {
     const { spawnImpl, handshakeTimeoutMs, ...spawnOpts } = opts;
@@ -212,7 +213,11 @@ export class OmpProcess {
   }
 
   kill(signal: NodeJS.Signals = "SIGKILL"): boolean {
-    return this.#child?.kill(signal) ?? false;
+    const sent = this.#child?.kill(signal) ?? false;
+    if (sent && signal === "SIGKILL") {
+      this.#sentSigkill = true;
+    }
+    return sent;
   }
 
   async #boot(): Promise<{ sessionFile: string }> {
@@ -616,9 +621,10 @@ export class OmpProcess {
     if (
       this.#child !== undefined &&
       this.#child.exitCode === null &&
-      this.#child.signalCode === null
+      this.#child.signalCode === null &&
+      !this.#sentSigkill
     ) {
-      this.#child.kill("SIGKILL");
+      this.kill("SIGKILL");
     }
     if (firstFailure) {
       this.#events.emit("error", unavailable);
