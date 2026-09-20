@@ -1,12 +1,12 @@
 ## 1. Contract and test-first barriers
 - [x] 1.1 Expanded fixture review PASS after correcting the unapproved header/TTFT timeout to connection-only10s; user-decided5xx/auth-first sync preserved. Child/parent strict validation exit0; freeze source/config/fixture baseline before StageA1.
-- [ ] 1.2 A1: write paired contract tests before index.ts; preserve missing-module SETUP, stop for parent. A2: minimal callable404 route only; record semanticRED on actual boundaries, stop before behavior implementation.
+- [x] 1.2 A1: tests landed with source absent; four missing-module suites recorded as SETUP only. A2: callable404 scaffold produced49 semantic failures before StageB authorization; parent compiledHTTP probe independently rejected400 instead of401. Frozen identities/raw logs retained in `/tmp/open-wb-issue98-evidence/`.
 ## 2. Proxy implementation
-- [ ] 2.1 Implement sole registration/TokenLookup port, auth-first configuration behavior, no-store and encapsulated raw JSON4MiB parser; do not edit root assembly/guard or canonical error ownership.
-- [ ] 2.2 Implement credential replacement and exact byte/status/content-type streaming,5xx/transport502 and10s DNS/TCP/TLS connection-establishment deadline; no retries/redirect following/header-TTFT/whole-stream timeout.
-- [ ] 2.3 Prove real #88 composition plus recording/gated upstream wire and resource behavior: early streaming, cancellation, midstream failure, shutdown, timeout; focused testsGREEN with source/test identities.
+- [x] 2.1 Implement sole registration/TokenLookup port, auth-first configuration behavior, no-store and encapsulated raw JSON4MiB parser; root assembly/guard and canonical error ownership unchanged.
+- [x] 2.2 Implement credential replacement and exact byte/status/content-type streaming,5xx/transport502 and10s DNS/TCP/TLS connection-establishment deadline; no retries/redirect following/header-TTFT/whole-stream timeout.
+- [x] 2.3 Real #88 composition and recording/gated upstream tests pass:50 focused cases, including test-first repair of app close during an incomplete authenticated upload.
 ## 3. Independent acceptance and delivery
-- [ ] 3.1 Parent runs focusedtests/fullservercoverage/lint/types/drift/build/strictOpenSpec and independent actualHTTP probe; qualify every major auth/wire/error/lifecycle failure class in disposable copies with reference/restorationGREEN.
+- [x] 3.1 Parent acceptance:891/891 server tests,90.33% statements/88.24% branches; lint/types/drift/build/strictOpenSpec exit0. Independent HTTP, upload-close and8 lifecycle scenarios pass;19 disposable semantic mutants rejected with restoredGREEN and dedicated no-change controls, including verified pooledHTTPS. Evidence: `/tmp/open-wb-issue98-evidence/qualification-attestation.json`.
 - [ ] 3.2 Expanded correctness / test-evidence+spec-compliance / security-perf review, bounded fix gate, same-SHA CI and automatic sourcePR merge.
 - [ ] 3.3 Update parent task2.3 and archive to canonicalmodel-proxy in docs-only follow-up; preserve existingfake requirement and user decisions.
 ## Risk packs
