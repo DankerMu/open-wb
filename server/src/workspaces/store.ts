@@ -143,7 +143,11 @@ function toWorkspace(sandboxRoot: string, ownerId: string, row: WorkspaceRow): W
 
 function validateName(rawName: string): string {
   const name = rawName.trim();
-  if (name.length === 0 || codePointCount(name) > MAX_NAME_CODEPOINTS || hasAsciiControl(name)) {
+  if (
+    name.length === 0 ||
+    codePointCount(name) > MAX_NAME_CODEPOINTS ||
+    hasForbiddenNameCodePoint(name)
+  ) {
     throw new HttpError("bad_request");
   }
   return name;
@@ -175,10 +179,13 @@ function codePointCount(value: string): number {
   return count;
 }
 
-function hasAsciiControl(value: string): boolean {
+function hasForbiddenNameCodePoint(value: string): boolean {
   for (const char of value) {
     const code = char.codePointAt(0);
-    if (code !== undefined && (code <= 0x1f || code === 0x7f)) {
+    if (
+      code !== undefined &&
+      (code <= 0x1f || code === 0x7f || (code >= 0xd800 && code <= 0xdfff))
+    ) {
       return true;
     }
   }

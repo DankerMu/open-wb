@@ -75,7 +75,6 @@ describe("workspaces store list and rootOf", () => {
       expect(readdirSync(sandboxRoot)).toEqual([]);
     });
   });
-
   it("does not create directories for foreign or missing rootOf and rejects unsafe persisted owner roots", () => {
     const sandboxRoot = openSandbox();
     withStore(sandboxRoot, (db, store) => {
@@ -87,7 +86,6 @@ describe("workspaces store list and rootOf", () => {
       expect(readdirSync(sandboxRoot)).toEqual([]);
     });
   });
-
   it("returns null for foreign rootOf before inspecting an unsafe existing path", () => {
     const sandboxRoot = openSandbox();
     const ownerRoot = join(sandboxRoot, "u2");
@@ -102,7 +100,6 @@ describe("workspaces store list and rootOf", () => {
       expect(readFileSync(join(outside, "secret.txt"), "utf8")).toBe("secret");
     });
   });
-
   it("rejects owned list and rootOf when the persisted workspace path is a symlink or file", () => {
     const { sandboxRoot, ownerRoot, outside } = linkedOwnerLayout();
     writeFileSync(join(ownerRoot, "file-root"), "not-a-dir");
@@ -161,37 +158,52 @@ describe("workspaces store create", () => {
       expect(db.isTransaction).toBe(false);
     });
   });
-
-  it("rejects invalid names and dirs before row, directory, or audit mutation", () => {
+  it("rejects ill-formed UTF-16 before mutation while preserving supplementary and replacement names", () => {
     const sandboxRoot = openSandbox();
     withStore(sandboxRoot, (db, store) => {
       const emoji64 = "😀".repeat(64);
       const explicit64 = "d".repeat(64);
-      expectCanonical(store, { name: "   " }, "bad_request");
-      expectCanonical(store, { name: "n".repeat(65) }, "bad_request");
-      expectCanonical(store, { name: "ok\nname" }, "bad_request");
-      expectCanonical(store, { name: "ok\u007fname" }, "bad_request");
-      expectCanonical(store, { name: "ok", dir: "valid\n" }, "bad_request");
-      expectCanonical(store, { name: "ok", dir: "d".repeat(65) }, "bad_request");
-      expectCanonical(store, { name: "ok", dir: "has/slash" }, "bad_request");
-      expectCanonical(store, { name: "ok", dir: "bad\u9fa6" }, "bad_request");
-      expectCanonical(store, { name: emoji64 }, "bad_request");
-
-      const fromEmoji = store.create(PRINCIPAL_U1, { name: emoji64, dir: explicit64 });
-      expect(fromEmoji.name).toBe(emoji64);
-      expect(fromEmoji.dir).toBe(explicit64);
-      expect(store.create(PRINCIPAL_U1, { name: "😀", dir: "emoji-ok" }).name).toBe("😀");
-      expect(store.create(PRINCIPAL_U1, { name: "ok-emoji", dir: "--" }).dir).toBe("--");
-      const fromDot = store.create(PRINCIPAL_U1, { name: "." });
-      expect(fromDot.name).toBe(".");
-      expect(fromDot.dir).toBe("-");
-      expect(store.create(PRINCIPAL_U1, { name: "范围\u4e00\u9fa5\u9fa6" }).dir).toBe(
-        "范围\u4e00\u9fa5-",
+      for (const input of [
+        { name: "   " },
+        { name: "n".repeat(65) },
+        { name: "ok\nname" },
+        { name: "ok\u007fname" },
+        { name: "ok", dir: "valid\n" },
+        { name: "ok", dir: "d".repeat(65) },
+        { name: "ok", dir: "has/slash" },
+        { name: "ok", dir: "bad\u9fa6" },
+        { name: emoji64 },
+        { name: "\uD800", dir: "high-surrogate" },
+        { name: "\uDC00", dir: "low-surrogate" },
+      ]) {
+        expectCanonical(store, input, "bad_request");
+      }
+      expectUnchangedStore(db, sandboxRoot, 0, []);
+      const emoji = store.create(PRINCIPAL_U1, { name: emoji64, dir: explicit64 });
+      const derivedEmoji = store.create(PRINCIPAL_U1, { name: "😀" });
+      const literalReplacement = store.create(PRINCIPAL_U1, { name: "\uFFFD", dir: "replacement" });
+      const dot = store.create(PRINCIPAL_U1, { name: "." });
+      const cjk = store.create(PRINCIPAL_U1, { name: "范围\u4e00\u9fa5\u9fa6" });
+      expect(emoji).toMatchObject({ name: emoji64, dir: explicit64 });
+      expect(derivedEmoji).toMatchObject({ name: "😀", dir: "--" });
+      expect(dot).toMatchObject({ name: ".", dir: "-" });
+      expect(cjk.dir).toBe("范围\u4e00\u9fa5-");
+      expectCanonical(store, { name: "\uD800", dir: "retry-surrogate" }, "bad_request");
+      expect(store.list("u1")).toEqual(expect.arrayContaining([emoji, literalReplacement]));
+      const namesAndTitles = db.prepare(
+        "SELECT w.name, a.title FROM workspaces AS w JOIN audit_events AS a ON a.workspace_id = w.id WHERE w.id = ?",
       );
+      expect(namesAndTitles.get(emoji.id)).toEqual({
+        name: emoji64,
+        title: `创建工作空间 ${emoji64}`,
+      });
+      expect(namesAndTitles.get(literalReplacement.id)).toEqual({
+        name: "\uFFFD",
+        title: "创建工作空间 \uFFFD",
+      });
       expectUnchangedStore(db, sandboxRoot, 5, ["u1"]);
     });
   });
-
   it("maps only same-owner name or dir uniqueness to conflict and leaves other owners independent", () => {
     const sandboxRoot = openSandbox();
     withOpenDb(":memory:", (db) => {

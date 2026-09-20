@@ -12,6 +12,10 @@
 - THEN derived dir is '智能-客服-重构'; invalid trimmed name/control characters or explicit empty/unsafe dir yield bad_request before row/filesystem/audit mutation
 - WHEN a name contains non-BMP characters or CJK boundary values
 - THEN name length follows SQLite code-point count, directory derivation follows the demo's non-u regex exactly, and derived/explicit dir still obeys the schema alphabet and64limit
+- WHEN a name contains an isolated high or low UTF-16 surrogate
+- THEN create rejects it as bad_request before any row/filesystem/audit mutation, including when a literal U+FFFD name already exists; it does not normalize the input into an existing name or report conflict
+- WHEN a valid supplementary character or literal U+FFFD name is accepted
+- THEN create, list, the stored name and audit title preserve that same name unchanged
 
 #### Scenario: 创建和采用
 - WHEN a valid workspace is created under a pre-provisioned sandbox base
