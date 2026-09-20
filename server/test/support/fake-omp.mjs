@@ -42,11 +42,21 @@ rl.on("line", (line) => {
   queue = queue.then(() => onLine(line));
 });
 rl.on("close", () => {
+  if (scenario === "hang-eof" || scenario === "hang-term") {
+    return;
+  }
   queue.then(
     () => process.exit(0),
     () => process.exit(1),
   );
 });
+
+if (scenario === "hang-eof" || scenario === "hang-term") {
+  setInterval(() => {}, 60_000);
+}
+if (scenario === "hang-term") {
+  process.on("SIGTERM", () => {});
+}
 
 function parseArgs(argv) {
   let selected = "normal";
@@ -158,9 +168,14 @@ function sessionState() {
     queuedMessageCount: 0,
     todoPhases: [],
   };
-  if (scenario !== "missing-session") {
-    data.sessionFile = resume ?? DEFAULT_SESSION;
+  if (scenario === "missing-session") {
+    return data;
   }
+  if (scenario === "new-session") {
+    data.sessionFile = "/tmp/open-wb-new-session.jsonl";
+    return data;
+  }
+  data.sessionFile = resume ?? DEFAULT_SESSION;
   return data;
 }
 
@@ -199,6 +214,7 @@ async function handlePrompt(frame) {
     error: () => failTurn("fake omp scripted error"),
     "extension-ui": () => requestConfirm(),
     "call-proxy": () => runProxy(frame.message),
+    "hang-prompt": () => {},
   };
   const turn = turns[scenario];
   if (turn) {
