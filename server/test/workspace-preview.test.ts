@@ -269,7 +269,7 @@ describe("openPreviewStream", () => {
     expect(plan.headers["X-Workbuddy-Truncated"]).toBe("1");
 
     const actual = await collectBytes(openPreviewStream(path, plan.limit));
-    expect(actual).toEqual(body.subarray(0, TEXT_LIMIT));
+    expect(actual.equals(body.subarray(0, TEXT_LIMIT))).toBe(true);
     expect(actual.length).toBe(TEXT_LIMIT);
     expect(actual.subarray(TEXT_LIMIT - 1)).toEqual(Buffer.from([0xe4]));
   });
@@ -333,8 +333,10 @@ describe("classifier and stream stay sequenced as metadata then bounded bytes", 
 
     vi.restoreAllMocks();
     syncBuiltinESMExports();
-    expect(await collectBytes(openPreviewStream(path, plan.limit))).toEqual(
-      body.subarray(0, TEXT_LIMIT),
-    );
+    expect(
+      (await collectBytes(openPreviewStream(path, plan.limit))).equals(
+        body.subarray(0, TEXT_LIMIT),
+      ),
+    ).toBe(true);
   });
 });
