@@ -7,8 +7,8 @@
 - [x] 2.3 Real #88 composition and recording/gated upstream tests pass:50 focused cases, including test-first repair of app close during an incomplete authenticated upload.
 ## 3. Independent acceptance and delivery
 - [x] 3.1 Parent acceptance:891/891 server tests,90.33% statements/88.24% branches; lint/types/drift/build/strictOpenSpec exit0. Independent HTTP, upload-close and8 lifecycle scenarios pass;19 disposable semantic mutants rejected with restoredGREEN and dedicated no-change controls, including verified pooledHTTPS. Evidence: `/tmp/open-wb-issue98-evidence/qualification-attestation.json`.
-- [ ] 3.2 Expanded correctness / test-evidence+spec-compliance / security-perf review, bounded fix gate, same-SHA CI and automatic sourcePR merge.
-- [ ] 3.3 Update parent task2.3 and archive to canonicalmodel-proxy in docs-only follow-up; preserve existingfake requirement and user decisions.
+- [x] 3.2 PR176 merged at1976c1d after three expanded seats returned no blocking findings; round1clean/0fix passes, same-head027be507d21e3267e9ae5e03f61a3e060d657f53 CI35527096356 all8green. Merge evidence: https://github.com/DankerMu/open-wb/pull/176#issuecomment-5751840515.
+- [x] 3.3 Parent task2.3 updated; endpoint requirement promoted alongside unchanged fake requirement in canonicalmodel-proxy, archived through docs-only follow-up. User5xx/auth-first decisions retained.
 ## Risk packs
 - Selected Public API/entry: one POST/v1/chat/completions plus exportedregistration/TokenLookup; 1.2/2.1/3.1.
 - Selected Config: optionalupstream vs configuredbaseUrl/apiKey; auth-first missingconfig502; noenv/assembly here; 2.1/3.1.
