@@ -702,7 +702,7 @@ describe("POST /api/auth/logout", () => {
   });
 });
 
-describe("HTTP typed error map 恰七码（auth 域只复用既有 unauthorized）", () => {
+describe("HTTP typed error map 恰十一码（auth 域只复用既有 unauthorized）", () => {
   const codes = {
     bad_request: { statusCode: 400, message: "请求格式不正确" },
     invalid_credentials: { statusCode: 401, message: "账号或密码不正确" },
@@ -711,6 +711,10 @@ describe("HTTP typed error map 恰七码（auth 域只复用既有 unauthorized�
     not_found: { statusCode: 404, message: "请求的资源不存在" },
     session_busy: { statusCode: 409, message: "会话正在生成，请稍候" },
     agent_unavailable: { statusCode: 502, message: "Agent 运行时不可用" },
+    sandbox_denied: { statusCode: 403, message: "目标路径不在你的沙箱内，操作已拒绝" },
+    conflict: { statusCode: 409, message: "同名资源已存在" },
+    preview_too_large: { statusCode: 413, message: "文件过大，无法预览" },
+    preview_unsupported: { statusCode: 415, message: "该类型不支持预览" },
   } as const satisfies Record<HttpErrorCode, { statusCode: number; message: string }>;
 
   /**
