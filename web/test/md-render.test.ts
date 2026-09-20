@@ -181,6 +181,61 @@ describe("mdRender adjacent links", () => {
   });
 });
 
+describe("mdRender demo bold and link-label precedence", () => {
+  it("requires a nonempty bold span without an internal star or newline", () => {
+    expect(mdRender("**a*b**")).toBe("<p>**a*b**</p>");
+    expect(mdRender("****")).toBe("<p>****</p>");
+    expect(mdRender("***a**")).toBe("<p>*<strong>a</strong></p>");
+    expect(mdRender("** **")).toBe("<p><strong> </strong></p>");
+  });
+
+  it("preserves mixed and adjacent formatted link labels", () => {
+    expect(mdRender("[**bold**](url)")).toBe('<p><a href="#"><strong>bold</strong></a></p>');
+    expect(mdRender("[plain **bold** tail **again**](url)")).toBe(
+      '<p><a href="#">plain <strong>bold</strong> tail <strong>again</strong></a></p>',
+    );
+    expect(mdRender("[**A**](one),[mid **B**](two)")).toBe(
+      '<p><a href="#"><strong>A</strong></a>,<a href="#">mid <strong>B</strong></a></p>',
+    );
+    expect(mdRender("[**a*b**](url)")).toBe('<p><a href="#">**a*b**</a></p>');
+  });
+
+  it("nests valid links inside a surrounding bold span", () => {
+    expect(mdRender("**[x](url)**")).toBe('<p><strong><a href="#">x</a></strong></p>');
+  });
+
+  it("projects bold-link crossings at both boundaries", () => {
+    expect(mdRender("[**bold](url)**")).toBe('<p><a href="#"><strong>bold</strong></a></p>');
+    expect(mdRender("**[bold**](url)")).toBe('<p><strong><a href="#">bold</a></strong></p>');
+    expect(mdRender("[**bold](url) tail**")).toBe(
+      '<p><a href="#"><strong>bold</strong></a><strong> tail</strong></p>',
+    );
+    expect(mdRender("**[bold** tail](url)")).toBe(
+      '<p><strong><a href="#">bold</a></strong><a href="#"> tail</a></p>',
+    );
+  });
+
+  it("keeps code markers literal beside formatted link labels", () => {
+    expect(mdRender("[**A**](one)`**code**`[**B**](two)")).toBe(
+      '<p><a href="#"><strong>A</strong></a><code>**code**</code><a href="#"><strong>B</strong></a></p>',
+    );
+    expect(mdRender("[**A**](one)`[**B**](two)")).toBe(
+      '<p><a href="#"><strong>A</strong></a>`[**B**](two)</p>',
+    );
+    expect(mdRender("[`**code**`](url)")).toBe('<p><a href="#"><code>**code**</code></a></p>');
+    expect(mdRender("[x `**code**` y](url)")).toBe(
+      '<p><a href="#">x <code>**code**</code> y</a></p>',
+    );
+  });
+
+  it("renders a bounded dense formatted label without an argument spread", () => {
+    const label = "**a**".repeat(100_000);
+    expect(mdRender(`[${label}](url)`)).toBe(
+      `<p><a href="#">${"<strong>a</strong>".repeat(100_000)}</a></p>`,
+    );
+  });
+});
+
 describe("mdRender bounded inline scanning", () => {
   it("keeps all rejected link branches literal without suppressing bold", () => {
     expect(mdRender("[unfinished **bold**")).toBe("<p>[unfinished <strong>bold</strong></p>");
@@ -267,10 +322,23 @@ describe("mdRender bounded inline scanning", () => {
       "<p><strong>a</strong><code>x</code><strong>b</strong></p>",
     );
     expect(mdRender("[unfinished **bold**`code`[A](one)")).toBe(
-      '<p>[unfinished <strong>bold</strong><code>code</code><a href="#">A</a></p>',
+      '<p><a href="#">unfinished <strong>bold</strong><code>code</code>[A</a></p>',
     );
     expect(mdRender("[unfinished **bold**`[A](one)")).toBe(
       "<p>[unfinished <strong>bold</strong>`[A](one)</p>",
     );
+  });
+
+  it("keeps rejected code-bearing link syntax literal at bounded sizes", () => {
+    for (const count of [64, 50_000]) {
+      const brackets = "[".repeat(count);
+      expect(mdRender(`${brackets}\`x\`]()`)).toBe(`<p>${brackets}<code>x</code>]()</p>`);
+    }
+  });
+
+  it("keeps demo link delimiters inside code visible to recognition", () => {
+    expect(mdRender("[x](`a b`)")).toBe("<p>[x](<code>a b</code>)</p>");
+    expect(mdRender("[x](`a)b`)")).toBe('<p><a href="#">x</a>b)</p>');
+    expect(mdRender("[`a]b`](url)")).toBe("<p>[<code>a]b</code>](url)</p>");
   });
 });

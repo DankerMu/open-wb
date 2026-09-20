@@ -51,59 +51,148 @@ function appendText(nodes: MdInline[], value: string, source: number) {
   nodes.push({ type: "text", source, value });
 }
 
-function appendNodes(target: MdInline[], source: MdInline[]) {
-  for (const node of source) {
-    if (node.type === "text") {
-      appendText(target, node.value, node.source);
+type InlineCodeSpan = {
+  start: number;
+  contentStart: number;
+  contentEnd: number;
+  end: number;
+};
+
+type InlineFormatSpan = {
+  start: number;
+  contentStart: number;
+  contentEnd: number;
+  end: number;
+};
+
+type FormatKind = "strong" | "link";
+type FormatCursor = {
+  type: FormatKind;
+  spans: InlineFormatSpan[];
+  index: number;
+  opening: boolean;
+};
+
+type InlineFrame =
+  | { type: "strong"; source: number; children: MdInline[] }
+  | { type: "link"; source: number; children: MdInline[] }
+  | { type: "code"; source: number; value: string };
+
+function collectCodeSpans(value: string): { spans: InlineCodeSpan[]; opaqueFrom: number } {
+  const spans: InlineCodeSpan[] = [];
+  let index = 0;
+  while (index < value.length) {
+    if (value[index] !== "`") {
+      index += 1;
       continue;
     }
-    target.push(node);
+    const contentStart = index + 1;
+    const contentEnd = value.indexOf("`", contentStart);
+    if (contentEnd < 0) {
+      return { spans, opaqueFrom: index };
+    }
+    spans.push({ start: index, contentStart, contentEnd, end: contentEnd + 1 });
+    index = contentEnd + 1;
   }
+  return { spans, opaqueFrom: value.length };
 }
 
-function scanStrong(value: string, index: number, base: number): { next: number; node?: MdInline } {
+function scanStrong(
+  value: string,
+  index: number,
+  codeSpans: InlineCodeSpan[],
+  codeIndex: number,
+  opaqueFrom: number,
+): InlineFormatSpan | null {
   let cursor = index + 2;
-  while (cursor < value.length - 1) {
-    if (value[cursor] === "\n") {
-      break;
+  let nextCode = codeIndex;
+  while (cursor < opaqueFrom - 1) {
+    const code = codeSpans[nextCode];
+    if (code && code.start <= cursor && cursor < code.end) {
+      cursor = code.end;
+      nextCode += 1;
+      continue;
     }
-    if (value[cursor] === "*" && value[cursor + 1] === "*") {
-      if (cursor > index + 2) {
-        return {
-          next: cursor + 2,
-          node: {
-            type: "strong",
-            source: base + index,
-            children: [
-              { type: "text", source: base + index + 2, value: value.slice(index + 2, cursor) },
-            ],
-          },
-        };
+    const char = value[cursor];
+    if (char === "\n" || char === "*") {
+      if (char === "*" && value[cursor + 1] === "*" && cursor > index + 2) {
+        return { start: index, contentStart: index + 2, contentEnd: cursor, end: cursor + 2 };
       }
-      break;
+      return null;
     }
     cursor += 1;
   }
-  return { next: index + 1 };
+  return null;
+}
+
+function scanFormat(
+  format: FormatKind,
+  value: string,
+  index: number,
+  codeSpans: InlineCodeSpan[],
+  codeIndex: number,
+  opaqueFrom: number,
+  links: LinkLookahead | null,
+): InlineFormatSpan | null {
+  if (format === "strong") {
+    return value[index] === "*" && value[index + 1] === "*"
+      ? scanStrong(value, index, codeSpans, codeIndex, opaqueFrom)
+      : null;
+  }
+  return value[index] === "[" ? (links?.scan(index) ?? null) : null;
+}
+
+function collectFormatSpans(
+  format: FormatKind,
+  value: string,
+  codeSpans: InlineCodeSpan[],
+  opaqueFrom: number,
+): InlineFormatSpan[] {
+  const spans: InlineFormatSpan[] = [];
+  const links = format === "link" ? new LinkLookahead(value, opaqueFrom) : null;
+  let codeIndex = 0;
+  let index = 0;
+  while (index < opaqueFrom) {
+    const code = codeSpans[codeIndex];
+    if (code?.start === index) {
+      index = code.end;
+      codeIndex += 1;
+      continue;
+    }
+    const span = scanFormat(format, value, index, codeSpans, codeIndex, opaqueFrom, links);
+    if (span) {
+      spans.push(span);
+      index = span.end;
+      while ((codeSpans[codeIndex]?.start ?? opaqueFrom) < index) {
+        codeIndex += 1;
+      }
+      continue;
+    }
+    index += 1;
+  }
+  return spans;
 }
 
 /**
  * The parser cursor only increases. Label and destination starts therefore only
  * increase too, so each cached closer is reused until passed; exhausted suffixes
- * are never searched again. Failed candidates still advance the parser by one.
+ * are never searched again. Label and destination terminators retain the demo's
+ * raw punctuation recognition.
  */
 class LinkLookahead {
   private readonly value: string;
+  private readonly opaqueFrom: number;
   private labelEnd = -1;
   private labelsExhausted = false;
   private terminator = -1;
   private terminatorsExhausted = false;
 
-  constructor(value: string) {
+  constructor(value: string, opaqueFrom: number) {
     this.value = value;
+    this.opaqueFrom = opaqueFrom;
   }
 
-  scan(index: number, base: number): { next: number; node: MdInline } | null {
+  scan(index: number): InlineFormatSpan | null {
     const labelEnd = this.labelAfter(index + 1);
     if (labelEnd < 0 || this.value[labelEnd + 1] !== "(") {
       return null;
@@ -118,29 +207,24 @@ class LinkLookahead {
     ) {
       return null;
     }
-    return {
-      next: terminator + 1,
-      node: {
-        type: "link",
-        source: base + index,
-        children: [
-          { type: "text", source: base + index + 1, value: this.value.slice(index + 1, labelEnd) },
-        ],
-      },
-    };
+    return { start: index, contentStart: index + 1, contentEnd: labelEnd, end: terminator + 1 };
   }
 
   private labelAfter(start: number): number {
     if (this.labelsExhausted) {
       return -1;
     }
-    if (this.labelEnd < start) {
-      this.labelEnd = this.value.indexOf("]", start);
-      if (this.labelEnd < 0) {
-        this.labelsExhausted = true;
+    if (this.labelEnd >= start) {
+      return this.labelEnd;
+    }
+    for (let index = start; index < this.opaqueFrom; index += 1) {
+      if (this.value[index] === "]") {
+        this.labelEnd = index;
+        return index;
       }
     }
-    return this.labelEnd;
+    this.labelsExhausted = true;
+    return -1;
   }
 
   private terminatorAfter(start: number): number {
@@ -150,7 +234,7 @@ class LinkLookahead {
     if (this.terminator >= start) {
       return this.terminator;
     }
-    for (let index = start; index < this.value.length; index += 1) {
+    for (let index = start; index < this.opaqueFrom; index += 1) {
       const char = this.value[index] ?? "";
       if (char === ")" || DESTINATION_WHITESPACE.test(char)) {
         this.terminator = index;
@@ -162,69 +246,232 @@ class LinkLookahead {
   }
 }
 
-function parseDecoratedText(value: string, base: number): MdInline[] {
-  const nodes: MdInline[] = [];
-  const links = new LinkLookahead(value);
-  let index = 0;
-  let textStart = 0;
+/**
+ * Projects the demo's code, strong, then link replacement order into closed
+ * nodes. Crossing strong/link boundaries close intervening frames and lazily
+ * reconstruct them when visible content resumes, matching the demo DOM without
+ * emitting malformed HTML.
+ */
+class InlineProjection {
+  private readonly value: string;
+  private readonly base: number;
+  private readonly codeSpans: InlineCodeSpan[];
+  private readonly strongCursor: FormatCursor;
+  private readonly linkCursor: FormatCursor;
+  private readonly nodes: MdInline[] = [];
+  private readonly stack: InlineFrame[] = [];
+  private pending: FormatKind[] = [];
+  private sourceCursor = 0;
+  private codeIndex = 0;
+  private codeOpening = true;
 
-  function flushText(until: number) {
-    appendText(nodes, value.slice(textStart, until), base + textStart);
-    textStart = until;
+  constructor(
+    value: string,
+    base: number,
+    codeSpans: InlineCodeSpan[],
+    strongSpans: InlineFormatSpan[],
+    linkSpans: InlineFormatSpan[],
+  ) {
+    this.value = value;
+    this.base = base;
+    this.codeSpans = codeSpans;
+    this.strongCursor = { type: "strong", spans: strongSpans, index: 0, opening: true };
+    this.linkCursor = { type: "link", spans: linkSpans, index: 0, opening: true };
   }
 
-  while (index < value.length) {
-    if (value[index] === "*" && value[index + 1] === "*") {
-      const taken = scanStrong(value, index, base);
-      if (taken.node) {
-        flushText(index);
-        nodes.push(taken.node);
-        index = taken.next;
-        textStart = index;
-        continue;
-      }
-      index = taken.next;
-      continue;
+  run(): MdInline[] {
+    while (this.consumeNextBoundary()) {}
+    this.appendSourceText(this.sourceCursor, this.value.length);
+    this.pending = [];
+    for (let frame = this.stack.pop(); frame; frame = this.stack.pop()) {
+      this.closeFrame(frame);
     }
-    if (value[index] === "[") {
-      const taken = links.scan(index, base);
-      if (taken) {
-        flushText(index);
-        nodes.push(taken.node);
-        index = taken.next;
-        textStart = index;
-        continue;
-      }
-    }
-    index += 1;
+    return this.nodes;
   }
-  flushText(value.length);
-  return nodes;
+
+  private consumeNextBoundary(): boolean {
+    const codePosition = this.codePosition();
+    const strongPosition = this.formatPosition(this.strongCursor);
+    const linkPosition = this.formatPosition(this.linkCursor);
+    if (
+      codePosition === Number.POSITIVE_INFINITY &&
+      strongPosition === Number.POSITIVE_INFINITY &&
+      linkPosition === Number.POSITIVE_INFINITY
+    ) {
+      return false;
+    }
+    if (codePosition <= strongPosition && codePosition <= linkPosition) {
+      this.consumeCode();
+      return true;
+    }
+    if (strongPosition <= linkPosition) {
+      this.consumeFormat(this.strongCursor);
+      return true;
+    }
+    this.consumeFormat(this.linkCursor);
+    return true;
+  }
+
+  private codePosition(): number {
+    const code = this.codeSpans[this.codeIndex];
+    return code ? (this.codeOpening ? code.start : code.contentEnd) : Number.POSITIVE_INFINITY;
+  }
+
+  private formatPosition(cursor: FormatCursor): number {
+    const span = cursor.spans[cursor.index];
+    return span ? (cursor.opening ? span.start : span.contentEnd) : Number.POSITIVE_INFINITY;
+  }
+
+  private consumeCode() {
+    const code = this.codeSpans[this.codeIndex];
+    if (!code) {
+      return;
+    }
+    const opening = this.codeOpening;
+    const position = opening ? code.start : code.contentEnd;
+    if (position >= this.sourceCursor) {
+      this.appendSourceText(this.sourceCursor, position);
+      if (opening) {
+        if (code.contentStart < code.contentEnd) {
+          this.ensurePending(this.base + code.start);
+        }
+        this.stack.push({ type: "code", source: this.base + code.start, value: "" });
+        this.sourceCursor = code.contentStart;
+      } else {
+        this.closeCode();
+        this.sourceCursor = code.end;
+      }
+    }
+    this.codeOpening = !opening;
+    if (this.codeOpening) {
+      this.codeIndex += 1;
+    }
+  }
+
+  private consumeFormat(cursor: FormatCursor) {
+    const span = cursor.spans[cursor.index];
+    if (!span) {
+      return;
+    }
+    const opening = cursor.opening;
+    const position = opening ? span.start : span.contentEnd;
+    if (position >= this.sourceCursor) {
+      this.appendSourceText(this.sourceCursor, position);
+      if (opening) {
+        this.openFormat(cursor.type, this.base + span.start);
+        this.sourceCursor = span.contentStart;
+      } else {
+        this.closeFormat(cursor.type);
+        this.sourceCursor = span.end;
+      }
+    }
+    cursor.opening = !opening;
+    if (cursor.opening) {
+      cursor.index += 1;
+    }
+  }
+
+  private appendNode(node: MdInline) {
+    const parent = this.stack[this.stack.length - 1];
+    if (!parent) {
+      this.nodes.push(node);
+      return;
+    }
+    if (parent.type !== "code") {
+      parent.children.push(node);
+    }
+  }
+
+  private closeFrame(frame: InlineFrame) {
+    if (frame.type === "code") {
+      this.appendNode({ type: "code", source: frame.source, value: frame.value });
+      return;
+    }
+    this.appendNode({ type: frame.type, source: frame.source, children: frame.children });
+  }
+
+  private ensurePending(source: number) {
+    for (let type = this.pending.pop(); type; type = this.pending.pop()) {
+      this.stack.push({ type, source, children: [] });
+    }
+  }
+
+  private appendSourceText(start: number, end: number) {
+    if (start === end) {
+      return;
+    }
+    this.ensurePending(this.base + start);
+    const text = this.value.slice(start, end);
+    const parent = this.stack[this.stack.length - 1];
+    if (parent?.type === "code") {
+      parent.value += text;
+      return;
+    }
+    appendText(parent?.children ?? this.nodes, text, this.base + start);
+  }
+
+  private openFormat(type: FormatKind, source: number) {
+    this.ensurePending(source);
+    this.stack.push({ type, source, children: [] });
+  }
+
+  private closeFormat(type: FormatKind) {
+    const target = this.findFormat(type);
+    if (target < 0) {
+      this.removePendingFormat(type);
+      return;
+    }
+    const displaced = this.closeInterveningFrames(target);
+    this.closeFrame(this.stack.pop() as InlineFrame);
+    if (displaced.length > 0) {
+      this.pending = displaced;
+    }
+  }
+
+  private findFormat(type: FormatKind): number {
+    for (let index = this.stack.length - 1; index >= 0; index -= 1) {
+      if (this.stack[index]?.type === type) {
+        return index;
+      }
+    }
+    return -1;
+  }
+
+  private removePendingFormat(type: FormatKind) {
+    for (let index = this.pending.length - 1; index >= 0; index -= 1) {
+      if (this.pending[index] === type) {
+        this.pending.splice(index, 1);
+        return;
+      }
+    }
+  }
+
+  private closeInterveningFrames(target: number): FormatKind[] {
+    const displaced: FormatKind[] = [];
+    while (this.stack.length - 1 > target) {
+      const frame = this.stack.pop() as InlineFrame;
+      this.closeFrame(frame);
+      if (frame.type !== "code") {
+        displaced.push(frame.type);
+      }
+    }
+    return displaced;
+  }
+
+  private closeCode() {
+    const frame = this.stack[this.stack.length - 1];
+    if (frame?.type !== "code") {
+      return;
+    }
+    this.closeFrame(this.stack.pop() as InlineFrame);
+  }
 }
 
 function parseInline(value: string, base: number): MdInline[] {
-  const nodes: MdInline[] = [];
-  let index = 0;
-  let textStart = 0;
-
-  while (index < value.length) {
-    if (value[index] !== "`") {
-      index += 1;
-      continue;
-    }
-    const close = value.indexOf("`", index + 1);
-    if (close < 0) {
-      appendNodes(nodes, parseDecoratedText(value.slice(textStart, index), base + textStart));
-      appendText(nodes, value.slice(index), base + index);
-      return nodes;
-    }
-    appendNodes(nodes, parseDecoratedText(value.slice(textStart, index), base + textStart));
-    nodes.push({ type: "code", source: base + index, value: value.slice(index + 1, close) });
-    index = close + 1;
-    textStart = index;
-  }
-  appendNodes(nodes, parseDecoratedText(value.slice(textStart), base + textStart));
-  return nodes;
+  const { spans: codeSpans, opaqueFrom } = collectCodeSpans(value);
+  const strongSpans = collectFormatSpans("strong", value, codeSpans, opaqueFrom);
+  const linkSpans = collectFormatSpans("link", value, codeSpans, opaqueFrom);
+  return new InlineProjection(value, base, codeSpans, strongSpans, linkSpans).run();
 }
 
 function parseTableCells(line: string, lineStart: number): MdTableCell[] {

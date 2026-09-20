@@ -37,6 +37,22 @@ function textPreview(
   );
 }
 
+function renderMarkdownProjections(src: string) {
+  const html = document.createElement("div");
+  html.innerHTML = mdRender(src);
+  const { container } = render(textPreview("readme.md", src));
+  const reactRoot = container.querySelector("[data-markdown-body]");
+  if (!(reactRoot instanceof HTMLElement)) {
+    throw new Error("expected React Markdown body");
+  }
+  return {
+    html,
+    reactRoot,
+    htmlParagraphs: html.querySelectorAll("p"),
+    reactParagraphs: reactRoot.querySelectorAll("p"),
+  };
+}
+
 describe("CsvTable", () => {
   it("renders the first row as headers and notes two data rows", () => {
     render(<CsvTable text={"name,size\nalpha,1\nbeta,2\n"} />);
@@ -185,6 +201,105 @@ describe("PreviewPane Markdown", () => {
     expect(body.textContent).toContain("[x]( A later");
   });
 
+  it("matches demo bold and formatted-label structure in both HTML and React projections", () => {
+    const src = [
+      "**a*b**",
+      "[**bold**](url)",
+      "**[x](url)**",
+      "[**A**](one)`**code**`[**B**](two)",
+      "[**bold](url)**",
+      "**[bold**](url)",
+      "[**bold](url) tail**",
+      "**[bold** tail](url)",
+      "[`**code**`](url)",
+      "[unfinished **bold**`code`[A](one)",
+    ].join("\n");
+    const { htmlParagraphs, reactParagraphs } = renderMarkdownProjections(src);
+
+    expect(htmlParagraphs[0]?.textContent).toBe("**a*b**");
+    expect(htmlParagraphs[0]?.querySelector("strong")).toBeNull();
+    expect(reactParagraphs[0]?.textContent).toBe("**a*b**");
+    expect(reactParagraphs[0]?.querySelector("strong")).toBeNull();
+
+    expect(htmlParagraphs[1]?.querySelector("a > strong")?.textContent).toBe("bold");
+    expect(reactParagraphs[1]?.querySelector("a > strong")?.textContent).toBe("bold");
+    expect(htmlParagraphs[2]?.querySelector("strong > a")?.textContent).toBe("x");
+    expect(reactParagraphs[2]?.querySelector("strong > a")?.textContent).toBe("x");
+
+    expect(htmlParagraphs[3]?.querySelectorAll("a > strong")).toHaveLength(2);
+    expect(reactParagraphs[3]?.querySelectorAll("a > strong")).toHaveLength(2);
+    expect(htmlParagraphs[3]?.querySelector("code")?.textContent).toBe("**code**");
+    expect(reactParagraphs[3]?.querySelector("code")?.textContent).toBe("**code**");
+    expect(htmlParagraphs[3]?.querySelector("code strong")).toBeNull();
+    expect(reactParagraphs[3]?.querySelector("code strong")).toBeNull();
+
+    expect(htmlParagraphs[4]?.querySelector("a > strong")?.textContent).toBe("bold");
+    expect(reactParagraphs[4]?.querySelector("a > strong")?.textContent).toBe("bold");
+    expect(htmlParagraphs[5]?.querySelector("strong > a")?.textContent).toBe("bold");
+    expect(reactParagraphs[5]?.querySelector("strong > a")?.textContent).toBe("bold");
+
+    expect(
+      [...((htmlParagraphs[6]?.children ?? []) as HTMLCollection)].map((node) => node.localName),
+    ).toEqual(["a", "strong"]);
+    expect(
+      [...((reactParagraphs[6]?.children ?? []) as HTMLCollection)].map((node) => node.localName),
+    ).toEqual(["a", "strong"]);
+    expect(htmlParagraphs[6]?.querySelector("a > strong")?.textContent).toBe("bold");
+    expect(reactParagraphs[6]?.querySelector("a > strong")?.textContent).toBe("bold");
+    expect(htmlParagraphs[6]?.children[1]?.textContent).toBe(" tail");
+    expect(reactParagraphs[6]?.children[1]?.textContent).toBe(" tail");
+
+    expect(
+      [...((htmlParagraphs[7]?.children ?? []) as HTMLCollection)].map((node) => node.localName),
+    ).toEqual(["strong", "a"]);
+    expect(
+      [...((reactParagraphs[7]?.children ?? []) as HTMLCollection)].map((node) => node.localName),
+    ).toEqual(["strong", "a"]);
+    expect(htmlParagraphs[7]?.querySelector("strong > a")?.textContent).toBe("bold");
+    expect(reactParagraphs[7]?.querySelector("strong > a")?.textContent).toBe("bold");
+    expect(htmlParagraphs[7]?.children[1]?.textContent).toBe(" tail");
+    expect(reactParagraphs[7]?.children[1]?.textContent).toBe(" tail");
+
+    expect(htmlParagraphs[8]?.querySelector("a > code")?.textContent).toBe("**code**");
+    expect(reactParagraphs[8]?.querySelector("a > code")?.textContent).toBe("**code**");
+    expect(htmlParagraphs[8]?.querySelector("code strong")).toBeNull();
+    expect(reactParagraphs[8]?.querySelector("code strong")).toBeNull();
+
+    expect(htmlParagraphs[9]?.querySelector("a")?.textContent).toBe("unfinished boldcode[A");
+    expect(reactParagraphs[9]?.querySelector("a")?.textContent).toBe("unfinished boldcode[A");
+    expect(htmlParagraphs[9]?.querySelector("a > strong")?.textContent).toBe("bold");
+    expect(reactParagraphs[9]?.querySelector("a > strong")?.textContent).toBe("bold");
+    expect(htmlParagraphs[9]?.querySelector("a > code")?.textContent).toBe("code");
+    expect(reactParagraphs[9]?.querySelector("a > code")?.textContent).toBe("code");
+    expect(htmlParagraphs[9]?.querySelector("a a")).toBeNull();
+    expect(reactParagraphs[9]?.querySelector("a a")).toBeNull();
+  });
+
+  it("matches demo link punctuation around inline code in both HTML and React projections", () => {
+    const src = ["[x](`a b`)", "[x](`a)b`)", "[`a]b`](url)"].join("\n");
+    const { htmlParagraphs, reactParagraphs } = renderMarkdownProjections(src);
+
+    expect(htmlParagraphs[0]?.textContent).toBe("[x](a b)");
+    expect(reactParagraphs[0]?.textContent).toBe("[x](a b)");
+    expect(htmlParagraphs[0]?.querySelector("a")).toBeNull();
+    expect(reactParagraphs[0]?.querySelector("a")).toBeNull();
+    expect(htmlParagraphs[0]?.querySelector("code")?.textContent).toBe("a b");
+    expect(reactParagraphs[0]?.querySelector("code")?.textContent).toBe("a b");
+
+    expect(htmlParagraphs[1]?.textContent).toBe("xb)");
+    expect(reactParagraphs[1]?.textContent).toBe("xb)");
+    expect(htmlParagraphs[1]?.querySelector("a")?.textContent).toBe("x");
+    expect(reactParagraphs[1]?.querySelector("a")?.textContent).toBe("x");
+    expect(htmlParagraphs[1]?.querySelector("code")).toBeNull();
+    expect(reactParagraphs[1]?.querySelector("code")).toBeNull();
+
+    expect(htmlParagraphs[2]?.textContent).toBe("[a]b](url)");
+    expect(reactParagraphs[2]?.textContent).toBe("[a]b](url)");
+    expect(htmlParagraphs[2]?.querySelector("a")).toBeNull();
+    expect(reactParagraphs[2]?.querySelector("a")).toBeNull();
+    expect(htmlParagraphs[2]?.querySelector("code")?.textContent).toBe("a]b");
+    expect(reactParagraphs[2]?.querySelector("code")?.textContent).toBe("a]b");
+  });
   it("leaves the URL unchanged for mouse and keyboard activation of href# Markdown links", () => {
     const hrefBefore = window.location.href;
     const { container } = render(textPreview("readme.md", "[文档](https://evil.example/docs)"));
@@ -231,13 +346,7 @@ describe("PreviewPane Markdown", () => {
       "const n = 1;",
       "```",
     ].join("\n");
-    const html = document.createElement("div");
-    html.innerHTML = mdRender(src);
-    const { container } = render(textPreview("readme.md", src));
-    const reactRoot = container.querySelector("[data-markdown-body]");
-    if (!(reactRoot instanceof HTMLElement)) {
-      throw new Error("expected React Markdown body");
-    }
+    const { html, reactRoot } = renderMarkdownProjections(src);
 
     expect([...reactRoot.children].map((node) => node.tagName)).toEqual(
       [...html.children].map((node) => node.tagName),
