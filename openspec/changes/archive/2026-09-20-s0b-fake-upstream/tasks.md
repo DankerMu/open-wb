@@ -9,8 +9,8 @@
 ## 3. Independent acceptance and delivery
 - [x] 3.1 Parent runs focused contract tests, full server suite/coverage, make lint, make typecheck, make anti-drift and strict OpenSpec validation; exercise the actual CLI over HTTP with observed cleanup. All commands exit0; CLI SIGTERM exits0 and subsequent curl exits7 (connection refused).
 - [x] 3.2 Qualify auth, branch/error selection and SSE/lifecycle oracles with semantic wrong candidates in a disposable copy. Nine mutants rejected by assertion failures; reference/restoration GREEN. Initial pooled-fetch refusal oracle missed a live listener; repaired to fresh TCP ECONNREFUSED and requalified all nine. No production mutation or imported expected-output constants.
-- [ ] 3.3 Expanded correctness / test-evidence+spec-compliance / security-perf review, bounded fix gate and same-SHA CI green.
-- [ ] 3.4 Merge #88, update parent task2.1 and archive this fixture through a docs-only follow-up PR.
+- [x] 3.3 Expanded correctness / test-evidence+spec-compliance / security-perf review: three seats no blocking findings, round1 CLEAN at592484e19b06b79ac6336b2e6133dbfc37a53975; CI35510322050 all8jobs success; PR168 merged.
+- [x] 3.4 Merge #88, update parent task2.1 and archive this fixture through the docs-only follow-up PR carrying this ledger. Source merge eb11971; canonical model-proxy adds only this fixture requirement.
 
 ## Risk pack disposition
 - Selected Public API / CLI / script entry: import/start/close and real standalone port/termination; 1.2/2.2/3.1.
