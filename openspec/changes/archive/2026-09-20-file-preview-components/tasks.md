@@ -2,7 +2,7 @@
 - [x] 1.1 Capture semantic RED and implement demo-subset mdRender with semantic snapshot, DOM injection tests and literal code/inert-link regressions; apply the user-authorized 64-layer strong normalization while preserving text/link scope and shallow parity.
 - [x] 1.2 Implement simple CSV parser, CsvTable, CodeView and PreviewPane; prove row counts, JSON fallback, Markdown toggle/reset, metadata, image, unsupported/error and truncation states.
 - [x] 1.3 Preserve source provenance; parent full web test/typecheck/build, scoped Biome, knip/jscpd/size and real Chromium component smoke with screenshot plus zero new console/page errors, including deep replacement/unmount and StrictMode in both build modes.
-- [ ] 1.4 Independent expanded review and exact-head CI, merge then archive only preview-component requirement; parent Epic stays active.
+- [x] 1.4 Independent expanded review and exact-head CI, merge then archive only preview-component requirement; parent Epic stays active. PR #155 merged; final normalized review and harness inspection clean, exact-head CI 35494181150 passed.
 ## Risk packs
 - Selected Public API / CLI / script entry: renderer/components public behavior through DOM tests (1.1–1.2).
 - Not selected Config / project setup: no toolchain/config changes.

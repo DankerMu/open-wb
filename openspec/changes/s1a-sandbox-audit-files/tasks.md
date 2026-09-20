@@ -37,11 +37,12 @@ Minimal mergeable slice: 3.1 错误表扩展单独可合并保绿（既有测试
 ## 4. files-web
 
 - [x] 4.1 `web/src/lib/api.ts` 增六方法与 403/409/413/415 解析 + 单测（#118 / PR #153；API-only slice 已归档，页面及 Blob URL 生命周期消费仍待 4.3）
-- [ ] 4.2 `web/src/features/files/md-render.ts` + `csv.ts` + `preview.tsx`：移植 demo `mdRender`（先转义；链接 `href="#"`）、CSV 表格、行号代码表、图片、不支持/截断态 纯组件 + jsdom 单测（含 `<script>`/`javascript:` 安全用例）
+- [x] 4.2 `web/src/features/files/md-render.ts` + `csv.ts` + `preview.tsx`：移植 demo `mdRender`（先转义；链接 `href="#"`）、CSV 表格、行号代码表、图片、不支持/截断态纯组件与安全单测（#119 / PR #155；用户授权 64 层 strong 规范化，开发/生产 × StrictMode 深层生命周期已证明；切片已归档）
 - [ ] 4.3 `web/src/features/files/page.tsx` + `tree.tsx` + 路由接线（`/files` 换为 FilesPage、`routeManifest` 描述更新、`?ws=` 参数、切换器弹层、`＋` 菜单两项、新建工作空间/新建文件夹对话框、空态文案；**同步更新 `web/test/routes.test.tsx` 与 `web/e2e/ui-walk.spec.ts` 对 `/files` 的断言**）+ jsdom 测试（mock fetch 一次"选空间 → 展开 → 预览四文件 → 新建目录"、无空间空态、刷新回到 `?ws=`、`?ws=` 非法回退首个并纠正 URL、新建文件夹空名/分隔符/409 三文案）；**合并前置：3.5/3.6 已落地**（否则真实服务 404 打红 `make ui-walk`）
 
 Suggested fixture level: compact - 纯前端展示，jsdom 单 seam；服务端契约以 spec 信封与端点形状为 oracle（mock）
 Minimal mergeable slice: 4.1 api 扩展单独可合并保绿（六方法配对测试即非死代码）；4.2 纯渲染组件独立可合并；4.3 依赖 4.1、4.2 且合并需 3.5/3.6 先落地
+Archive coordination: `files-web` 主 spec 已晋升 4.1 API 与 4.2 纯预览组件；父 change 最终归档时须去重既有新增项，保留已授权的 64 层规范化，不以旧版组合需求覆盖它。4.3 页面及树接线仍未完成。
 
 ## 5. omp-uid-isolation
 
