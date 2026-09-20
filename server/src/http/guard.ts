@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { authenticate } from "../auth/index.js";
-import { HttpError } from "./errors.js";
+import { HttpError } from "../core/errors/index.js";
 import { classifyOriginalUrl } from "./path-classifier.js";
 
 /**

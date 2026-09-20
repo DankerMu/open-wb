@@ -1,30 +1,18 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import fastify from "fastify";
+import { HTTP_ERROR_MESSAGES, HttpError, type HttpErrorCode } from "../core/errors/index.js";
 
-const HTTP_ERROR_DEFINITIONS = Object.freeze({
-  bad_request: Object.freeze({ statusCode: 400, message: "请求格式不正确" }),
-  invalid_credentials: Object.freeze({ statusCode: 401, message: "账号或密码不正确" }),
-  account_disabled: Object.freeze({ statusCode: 403, message: "该账号已停用，请联系管理员" }),
-  unauthorized: Object.freeze({ statusCode: 401, message: "请先登录" }),
-  not_found: Object.freeze({ statusCode: 404, message: "请求的资源不存在" }),
-});
-
-export type HttpErrorCode = keyof typeof HTTP_ERROR_DEFINITIONS;
-
-export class HttpError extends Error {
-  readonly code: HttpErrorCode;
-
-  constructor(code: HttpErrorCode) {
-    super(HTTP_ERROR_DEFINITIONS[code].message);
-    this.name = "HttpError";
-    this.code = code;
-  }
-}
+const HTTP_ERROR_STATUSES = Object.freeze({
+  bad_request: 400,
+  invalid_credentials: 401,
+  account_disabled: 403,
+  unauthorized: 401,
+  not_found: 404,
+} as const satisfies Record<HttpErrorCode, number>);
 
 export function sendHttpError(reply: FastifyReply, code: HttpErrorCode): FastifyReply {
-  const definition = HTTP_ERROR_DEFINITIONS[code];
-  return reply.code(definition.statusCode).send({
-    error: { code, message: definition.message },
+  return reply.code(HTTP_ERROR_STATUSES[code]).send({
+    error: { code, message: HTTP_ERROR_MESSAGES[code] },
   });
 }
 

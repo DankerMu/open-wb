@@ -16,15 +16,15 @@ Minimal mergeable slice: 1.1 `resolve` 纯函数单独可合并保绿（无依�
 ## 2. audit-core
 
 - [x] 2.1 迁移 `030_audit_events.sql`（表/CHECK/索引/两只追加触发器）+ 形态与触发器单测；受信任迁移目录计数断言随之 +1（#114 / PR #146）
-- [ ] 2.2 `server/src/core/audit/index.ts`：`emit`/`query`（角色过滤、`limit` 1..200、`before` 游标、`detail` JSON 往返）+ `:memory:` 单测
+- [ ] 2.2 `server/src/core/audit/index.ts`：`emit`/`query`（角色过滤、`limit` 1..200、`before` 游标、`detail` JSON 往返）+ `:memory:` 单测；用户批准 #122 同步将唯一 `HttpError`/错误码/消息迁至 `core/errors`，HTTP 状态/信封仍归 http，调用方原子迁移无旧转发导出（comment5748746011）。
 - [ ] 2.3 `server/src/accounts/index.ts`：`registerAccounts(app,{db})` 挂 `GET /api/audit`（guard 后、`no-store`、400 分支）+ `app.inject()` 单测（成员/管理员两账号）
 
-Suggested fixture level: compact - 只追加表与只读端点是单 seam（`:memory:` + inject）可证的窄面；触发器在迁移测试里已白盒
+Suggested fixture level: 2.2 expanded（#122 覆盖持久化写入、角色过滤与用户批准的公共错误迁移）；其余按各子 issue 风险分级。触发器由迁移测试证明，查询由真实 `:memory:` 证明，HTTP 行为由既有 inject 错误测试回归。
 Minimal mergeable slice: 2.1 迁移单独可合并保绿（独立 SQL + 形态测试，由 openDb 自动执行故非死代码）；2.2 依赖 2.1；2.3 依赖 2.2
 
 ## 3. workspaces
 
-- [ ] 3.1 `server/src/http/errors.ts`（依赖 S0b #84 的七码基线）：定义表七码 → 十一码（`sandbox_denied`/`conflict`/`preview_too_large`/`preview_unsupported`）+ `CONTENT_PARSER_OWNED_ROUTES` 增 `POST /api/workspaces`、`POST /api/workspaces/:id/dirs` + 既有信封测试扩为十一码与归属路由 400 断言
+- [ ] 3.1 `server/src/core/errors/index.ts` 消息/错误码与 `server/src/http/errors.ts` 状态映射（依赖 S0b #84 的七码基线；#122 已批准公共错误归 core）：七码 → 十一码（`sandbox_denied`/`conflict`/`preview_too_large`/`preview_unsupported`）+ HTTP 层 `CONTENT_PARSER_OWNED_ROUTES` 增 `POST /api/workspaces`、`POST /api/workspaces/:id/dirs` + 既有信封测试扩为十一码与归属路由 400 断言
 - [x] 3.2 迁移 `031_workspaces.sql`（双唯一、`dir` CHECK）+ 形态单测；受信任迁移目录计数断言随之 +1（#116 / PR #151；schema-only slice 已归档，目录根行为仍待 3.3）
 - [ ] 3.3 `server/src/workspaces/store.ts`：列表/创建事务（`dir` 派生与校验、冲突 → `conflict`、惰性沙箱根 + 空间根 `ensureSharedDir`、采用既有目录、`emit(workspace.create)`、失败回滚）与 `rootOf(principal, workspaceId)` 端口实现 + 单测（临时 `SANDBOX_ROOT` + `:memory:`）
 - [ ] 3.4 `server/src/workspaces/tree.ts` + `preview.ts`：单层列举（目录优先、字节序、跳过 symlink/特殊文件）与预览判定/流式读取（扩展名集合、`text/plain` + `nosniff`、1 MiB 截断头、图片 10 MiB 上限）纯函数 + 临时目录单测

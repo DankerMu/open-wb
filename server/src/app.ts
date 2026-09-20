@@ -11,8 +11,8 @@ import {
   SESSION_TTL,
   validateSessionTtl,
 } from "./auth/index.js";
+import { HttpError } from "./core/errors/index.js";
 import {
-  HttpError,
   handleHttpError,
   registerAuthGuard,
   rewriteUntrustedUrl,
