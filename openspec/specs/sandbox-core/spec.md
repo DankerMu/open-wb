@@ -1,7 +1,7 @@
 # sandbox-core Specification
 
 ## Purpose
-Define the app-server sandbox path boundary: canonical relative-path resolution, rejection of traversal and symbolic links, and metadata-only validation without filesystem mutation.
+Define the app-server sandbox boundary: metadata-only relative-path resolution rejecting traversal and symbolic links, shared-directory creation permissions, and a synchronous owner-root facade that completes rejection audit before denial and propagates port failures without granting access.
 ## Requirements
 ### Requirement: resolve 契约与逃逸向量
 `core/sandbox` SHALL 提供纯函数 `resolve(root, relPath, op)`：`relPath` 为 `/` 分隔的相对路径（空串表示根），`op ∈ {read, list, mkdir}`。它 SHALL 在以下任一条件下返回 `{ok:false, reason}`：`relPath` 含 NUL 字节；以 `/` 开头；任一分量为 `..`；规范化后的目标不满足边界匹配 `target === realpath(root) || target.startsWith(realpath(root) + "/")`；从 root 起任一**已存在**分量经 `lstat` 为 symbolic link（不跟随任何 symlink）。否则返回 `{ok:true, absPath}`；`op=mkdir` 时 SHALL 额外要求最后一段非 `.`/`..`、不含反斜杠、非空。函数 SHALL 不创建、不读取目标内容。
@@ -20,4 +20,27 @@ Define the app-server sandbox path boundary: canonical relative-path resolution,
 #### Scenario: 新建目录位精确
 - WHEN 在临时目录下 `ensureSharedDir("<tmp>/a/b/c")`（`a` 不存在）
 - THEN `a`、`a/b`、`a/b/c` 的 mode 位（`& 0o7777`）均为 `0o2770`；再次调用不改变任何 mode；预先以 `0o755` 存在的 `a` 保持 `0o755`
+
+### Requirement: 沙箱 facade 与拒绝审计
+`createSandbox({rootOf,audit})` SHALL expose synchronous `resolve(principal,workspaceId,relPath,op)` returning the permitted absolute path and the existing `ensureSharedDir(absPath)`. The rootOf port SHALL be core-owned and receive the supplied principal unchanged; its synchronous result SHALL be absolute root or null. core/sandbox SHALL NOT import feature modules. A null root SHALL throw canonical HttpError(not_found) before path inspection and SHALL NOT emit audit. A rejected underlying resolve SHALL synchronously complete `audit.emit({kind:"sandbox.reject",actorId:principal.id,workspaceId,title:"越界访问被沙箱拦截",detail:{relPath,op,reason}})` before throwing canonical HttpError(sandbox_denied). The audit port SHALL use the existing synchronous numeric-returning core/audit event contract. Audit/lookup errors SHALL propagate unchanged with no successful path or filesystem mutation; generic HTTP failure mapping belongs to the later route integration.
+
+#### Scenario: 不可见根先于路径检查
+- WHEN rootOf returns null and the requested relPath is an escape attempt
+- THEN resolve throws canonical not_found, emits no audit and does not inspect or modify a target path; missing and foreign roots have the same result
+
+#### Scenario: 合法路径与原有目录助手
+- WHEN rootOf yields a real temporary root and resolve receives a legal nested read/list path
+- THEN resolve returns its canonical absolute path, no rejection event is emitted, and no filesystem entry is created
+- WHEN ensureSharedDir is called through the facade for new nested directories below an existing parent
+- THEN new directories have mode2770 and the existing parent's mode and contents remain unchanged
+
+#### Scenario: 真正拒绝先完成审计
+- WHEN a permitted root receives traversal or a real symlink path that the existing resolver rejects
+- THEN exactly one sandbox.reject event records the actor, workspace, original relPath/op and nonempty reason before the caller receives sandbox_denied; no target content or directory is created
+
+#### Scenario: 端口失败不放行
+- WHEN audit.emit throws a sentinel error during rejection
+- THEN the caller receives that same error rather than sandbox_denied or a successful path, and filesystem state remains unchanged
+- WHEN rootOf throws a sentinel error
+- THEN that same error propagates and no audit event or path side effect occurs
 

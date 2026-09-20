@@ -2,7 +2,7 @@
 - [x] 1.1 Add facade scenarios using stub ports and real resolver/filesystem. Implementer reports incremental semantic RED/GREEN after initial bulk drafting; logs01–09 are transcribed observed output, not raw captures. Main independently captured focused GREEN and smoke mutant rejection, not claimed as historical TDD.
 - [x] 1.2 Implement only synchronous core-owned facade and canonical audit/error composition; no feature imports, duplicated resolver/permission code or async void port.
 - [x] 1.3 Focused22 tests and fullserver887/39 pass; server type/build/Biome/knip/dupes/size gates exit0. Main compiled real-filesystem smoke, swallowed-root/audit/unaudited-denial scratch mutants, async-port negative typecheck and explicit import-boundary inspection completed.
-- [ ] 1.4 Expanded independent static review, exact-head CI, automatic merge and facade-only archive with parent1.3/downstream handoff.
+- [x] 1.4 Three independent static seats clean, no fix pass; reviewed `e207f9f8724d390dc8be06f616a1b89073bea981`, CI35531687024 green (PR merge snapshot server937/43; local887/39). PR #179 merged; this follow-up archives only facade requirements and updates parent1.3/downstream handoff. Original historical toolResults/raw RED artifacts were recovered separately from transcribed logs; evidence https://github.com/DankerMu/open-wb/pull/179#issuecomment-5752047552 and reviews comment5752189253.
 
 ## 2. Risk mapping
 - Selected Public API / CLI / script entry: synchronous resolve string result, root/audit port shape; focused tests + tsc + compiled smoke.
