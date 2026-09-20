@@ -3,7 +3,7 @@
 - [x] 1.1 Add test-first real filesystem contracts for one-level listing, symlink/FIFO filtering, UTF8 order counterexample, byte size/mtimeMs, classifier-produced headers, exact text/image thresholds, raw byte cutoff and no-body rejection; preserve honest RED logs.
 - [x] 1.2 Implement tree.ts and preview.ts only with canonical errors, pure metadata classification and bounded native streams; additive headers/limit fields supply real production metadata ownership, no DB/Fastify/route or sandbox duplicate.
 - [x] 1.3 Verify completion/error/earlydestroy resource release and empty stream, targeted tests, server coverage/type/build/static gates and compiled real-file smoke.
-- [ ] 1.4 Expanded static cross-review, exact-head CI, automatic merge, parent3.4 update/archive only helper requirements and #127 metadata/authorization handoff.
+- [x] 1.4 Expanded static cross-review and exact-head CI completed; PR #175 merged after one assertion-only fix pass, reviewed SHA `02a06d4f29d94eb438c0dd94bd4059f413c429b5`, CI35527764996 green. This archive follow-up promotes only helper requirements, updates parent3.4 and preserves #127 metadata/authorization handoff.
 
 ## 2. Risk mapping
 
