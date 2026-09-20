@@ -6,7 +6,8 @@
     },
     "server": {
       "entry": ["src/server.ts", "src/service-info.ts", "test/**/*.test.ts"],
-      "project": ["src/**", "test/**"]
+      "project": ["src/**", "test/**"],
+      "ignoreBinaries": ["mkfifo"]
     },
     "web": {
       "entry": ["index.html", "src/lib/theme.ts", "test/**/*.test.ts", "test/**/*.test.tsx"],
