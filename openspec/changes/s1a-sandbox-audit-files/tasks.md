@@ -28,7 +28,7 @@ Archive coordination: 主 `audit-core` 已晋升 2.1 schema、2.2 emit/query（�
 
 - [x] 3.1 `server/src/core/errors/index.ts` 消息/错误码与 `server/src/http/errors.ts` 状态映射（依赖 S0b #84 的七码基线；#122 已批准公共错误归 core）：七码 → 十一码（`sandbox_denied`/`conflict`/`preview_too_large`/`preview_unsupported`）+ HTTP 层 `CONTENT_PARSER_OWNED_ROUTES` 增 `POST /api/workspaces`、`POST /api/workspaces/:id/dirs` + 既有信封测试扩为十一码与归属路由 400 断言；#115 / PR #173 已合并，CI35520629741 全绿。
 - [x] 3.2 迁移 `031_workspaces.sql`（双唯一、`dir` CHECK）+ 形态单测；受信任迁移目录计数断言随之 +1（#116 / PR #151；schema-only slice 已归档，目录根行为仍待 3.3）
-- [ ] 3.3 `server/src/workspaces/store.ts`：列表/创建事务（`dir` 派生与校验、冲突 → `conflict`、惰性沙箱根 + 空间根 `ensureSharedDir`、采用既有目录、`emit(workspace.create)`、失败回滚）与 `rootOf(principal, workspaceId)` 端口实现 + 单测（临时 `SANDBOX_ROOT` + `:memory:`）
+- [x] 3.3 `server/src/workspaces/store.ts`：owner-scoped列表/rootOf与同步创建事务、精确dir派生/Unicode scalar身份校验、INSERT-only conflict、惰性根/采用目录、同DB审计、失败回滚及逆序空目录补偿；ROLLBACK失败（含undefined）仍补偿并保留AggregateError/活动事务残留。#125 / PR #184，最终CI35545126599全绿；真实DB/FS/facade smoke已验，HTTP/装配仍待 #127/#128。
 - [x] 3.4 `server/src/workspaces/tree.ts` + `preview.ts`：单层列举（目录优先、字节序、跳过 symlink/特殊文件）与预览判定/流式读取（扩展名集合、`text/plain` + `nosniff`、1 MiB 截断头、图片 10 MiB 上限）纯函数 + 临时目录单测；#117 / PR #175，CI35527764996 全绿；helper-only slice 晋升，不含 REST/授权/装配。
 - [ ] 3.5 `server/src/workspaces/rest.ts` + `index.ts`：`registerWorkspaces(app,{db,sandbox,audit})` 五端点（列表/创建/tree/dirs/file；他人 404、越界 403 + 审计、409/413/415/400 分支、`no-store`）+ 对完整装配 app 的 `app.inject()` 单测（临时 `SANDBOX_ROOT`）
 - [ ] 3.6 `app.ts`/`server.ts`（依赖 S0b #101/#102）：沙箱 facade 构造（`rootOf` 来自 workspaces store、`emit` 来自 audit）并注入 `registerWorkspaces` → `registerAccounts`；`STARTUP_MODULES` 增 `workspaces`、`accounts`（恰七项）；配置/启动顺序测试面（`server-config.test.ts`、`server-startup-order.test.ts`）随之更新
@@ -37,6 +37,7 @@ Suggested fixture level: expanded - 工作空间 REST 是沙箱边界的唯一 H
 Minimal mergeable slice: 3.1 错误表扩展单独可合并保绿（既有 mapper 与测试侧真实 HTTP 路由证明，不导出私有 Set）；3.2 迁移独立可合并；3.4 纯函数依赖 3.1 的预览错误码；3.3 依赖 3.1、3.2、1.2、2.2；3.5 依赖 3.1、3.3、3.4、1.3；3.6 依赖 3.5、2.3、S0b #101/#102。1.3 facade 同样依赖 3.1 的 sandbox_denied（执行期补齐依赖）。
 Archive coordination: 主 `http-service-skeleton` 的「统一错误信封」已晋升至十一码/六 owner，并保留 constructor-backed allowlist、FST_ERR_VALIDATION 排除、guard/fallback 与 route-owned cache 语义。S0b/S1a 父 change 最终归档不得用旧七码/较弱文本覆盖；生产 workspace 路由仍归 #127，装配归 #128。
 Archive coordination: 主 `workspaces` 已晋升 schema 与单层列举/预览 helpers。父 change 最终归档保留 helper 的 UTF-8 字节序、生产 classifier headers/limit、原始字节上限与 canonical errors，不以旧组合需求覆盖；#127 仍负责先授权 resolve、缺失/非普通文件404、真实HTTP头/状态、原生错误路径脱敏与 client-abort 销毁流。helper 信任已授权路径和元数据，不声明 TOCTOU 防护。证据边界：精确1MiB/10MiB已测分类，整流不是独立阈值行；错误流测code+close，完成/提前destroy另测fd EBADF。
+Archive coordination: 主 `workspaces` 晋升 #125 store/惰性目录事务；最终归档保留合法Unicode名称身份、孤立surrogate在mutation前bad_request、raw `(db,event)=>number`同连接audit、INSERT-only conflict、失败ROLLBACK仍补偿及可能活动事务/未提交行残留。部署base可信预置、稳定FS假设不扩大为TOCTOU或跨FS/SQLite崩溃原子性。
 
 ## 4. files-web
 
