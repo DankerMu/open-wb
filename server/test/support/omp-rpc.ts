@@ -19,6 +19,19 @@ import {
 } from "../../src/sessions/omp/process.js";
 
 export const DEFAULT_SESSION = "/tmp/open-wb-fake-session.jsonl";
+export const RPC_PHYSICAL_LIMIT = 1_048_576;
+export const RPC_LOGICAL_LIMIT = 67_108_864;
+export const RPC_CHUNK_PAYLOAD = 256 * 1024;
+export const DEFAULT_READY: OmpFrame = {
+  type: "ready",
+  protocolVersion: 1,
+  supportedProtocolVersions: [1, 2],
+  maxFrameBytes: RPC_PHYSICAL_LIMIT,
+  maxReassembledFrameBytes: RPC_LOGICAL_LIMIT,
+};
+
+export const IO_ERROR_SOURCES = ["child", "stdin", "stdout", "stderr"] as const;
+export type IoErrorSource = (typeof IO_ERROR_SOURCES)[number];
 
 export class RpcHarness {
   readonly procs: OmpProcess[] = [];
@@ -168,7 +181,7 @@ export function negotiateOk(id: string): OmpFrame {
   };
 }
 
-export function stateOk(id: string, sessionFile = DEFAULT_SESSION): OmpFrame {
+function stateOk(id: string, sessionFile = DEFAULT_SESSION): OmpFrame {
   return {
     id,
     type: "response",
@@ -204,6 +217,88 @@ export function capturePromptFrames(child: FakeChild): OmpFrame[] {
     frames.push(frame);
   });
   return frames;
+}
+
+export function expectProtocolError(errors: unknown[]): void {
+  expect(errors).toHaveLength(1);
+  expect(errors[0]).toBeInstanceOf(OmpProtocolError);
+}
+
+export function rpcChunkFrames(bytes: Buffer, chunkId: string): OmpFrame[] {
+  const count = Math.ceil(bytes.byteLength / RPC_CHUNK_PAYLOAD);
+  return Array.from({ length: count }, (_, index) => ({
+    type: "rpc_chunk",
+    chunkId,
+    index,
+    count,
+    byteLength: bytes.byteLength,
+    data: bytes
+      .subarray(index * RPC_CHUNK_PAYLOAD, (index + 1) * RPC_CHUNK_PAYLOAD)
+      .toString("base64"),
+  }));
+}
+
+export function openFakeProcess(
+  harness: RpcHarness,
+  token: string,
+  options: { handshakeTimeoutMs?: number; prefix?: string } = {},
+): {
+  child: FakeChild;
+  proc: OmpProcess;
+  frames: OmpFrame[];
+  errors: unknown[];
+} {
+  const child = harness.fake();
+  const proc = harness.manage(
+    new OmpProcess({
+      ...harness.tempOpts(token, options.prefix ?? "omp-rpc-io-"),
+      spawnImpl: child.spawnImpl,
+      ...(options.handshakeTimeoutMs === undefined
+        ? {}
+        : { handshakeTimeoutMs: options.handshakeTimeoutMs }),
+    }),
+  );
+  return {
+    child,
+    proc,
+    frames: harness.collectFrames(proc),
+    errors: harness.collectErrors(proc),
+  };
+}
+
+export async function startFakeProcess(
+  harness: RpcHarness,
+  token: string,
+  options: { handshakeTimeoutMs?: number; prefix?: string; ready?: OmpFrame } = {},
+): Promise<{
+  child: FakeChild;
+  proc: OmpProcess;
+  frames: OmpFrame[];
+  errors: unknown[];
+}> {
+  const opened = openFakeProcess(harness, token, options);
+  opened.child.emitLine(options.ready ?? DEFAULT_READY);
+  opened.child.replyHandshake();
+  await expect(opened.proc.start()).resolves.toEqual({ sessionFile: DEFAULT_SESSION });
+  return opened;
+}
+
+export function emitIoFailure(child: FakeChild, source: IoErrorSource, token: string): void {
+  const error = new Error(`EIO ${token}`);
+  switch (source) {
+    case "child":
+      child.emit("error", error);
+      return;
+    case "stdin":
+      child.stdin.emit("error", error);
+      return;
+    case "stdout":
+      child.stdout.emit("error", error);
+      return;
+    case "stderr":
+      child.stderr.emit("error", error);
+      return;
+  }
 }
 
 export async function expectInterruptedRequest(
@@ -306,12 +401,13 @@ export class FakeChild {
     this.#handlers[type] = handler;
   }
 
-  replyHandshake(): void {
+  replyHandshake(handshake: { sessionFile?: string; afterState?: () => void } = {}): void {
     this.onCommand("negotiate_protocol", (frame) => {
       this.emitLine(negotiateOk(String(frame.id)));
     });
     this.onCommand("get_state", (frame) => {
-      this.emitLine(stateOk(String(frame.id)));
+      this.emitLine(stateOk(String(frame.id), handshake.sessionFile ?? DEFAULT_SESSION));
+      handshake.afterState?.();
     });
   }
 
@@ -339,10 +435,14 @@ export class FakeChild {
     }) as typeof this.stdin.write;
   }
 
-  exit(code: number | null, signal: NodeJS.Signals | null = null): void {
+  nativeExit(code: number | null, signal: NodeJS.Signals | null = null): void {
     this.exitCode = code;
     this.signalCode = signal;
     this.#emitter.emit("exit", code, signal);
+  }
+
+  exit(code: number | null, signal: NodeJS.Signals | null = null): void {
+    this.nativeExit(code, signal);
     this.#emitter.emit("close", code, signal);
   }
 

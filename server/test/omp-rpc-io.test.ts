@@ -14,30 +14,44 @@ import {
 import {
   capturePromptFrames,
   createRpcHarness,
+  DEFAULT_READY,
   DEFAULT_SESSION,
+  emitIoFailure,
   expectInterruptedRequest,
+  expectProtocolError,
   type FakeChild,
-  negotiateOk,
+  IO_ERROR_SOURCES,
   observePromise,
-  stateOk,
+  openFakeProcess,
+  RPC_CHUNK_PAYLOAD,
+  RPC_LOGICAL_LIMIT,
+  RPC_PHYSICAL_LIMIT,
+  rpcChunkFrames,
+  startFakeProcess,
 } from "./support/omp-rpc.js";
 
 const TOKEN = "wb-issue95-io-secret-token";
-const PHYSICAL = 1_048_576;
-const LOGICAL = 67_108_864;
-const CHUNK_PAYLOAD = 256 * 1024;
+const PHYSICAL = RPC_PHYSICAL_LIMIT;
+const LOGICAL = RPC_LOGICAL_LIMIT;
+const CHUNK_PAYLOAD = RPC_CHUNK_PAYLOAD;
 const SESSION = DEFAULT_SESSION;
-const READY: OmpFrame = {
-  type: "ready",
-  protocolVersion: 1,
-  supportedProtocolVersions: [1, 2],
-  maxFrameBytes: PHYSICAL,
-  maxReassembledFrameBytes: LOGICAL,
-};
+const READY = DEFAULT_READY;
 const harness = createRpcHarness();
 
-const IO_SOURCES = ["child", "stdin", "stdout", "stderr"] as const;
-type IoSource = (typeof IO_SOURCES)[number];
+function noticeWithInvalidUtf8(id: string, pad: string): Buffer {
+  return Buffer.concat([
+    Buffer.from(`{"type":"notice","id":"${id}","level":"info","message":"${pad}`, "utf8"),
+    Buffer.from([0xff]),
+    Buffer.from('"}', "utf8"),
+  ]);
+}
+
+const utf8Recovered: OmpFrame = {
+  type: "notice",
+  id: "utf8-recovered",
+  level: "info",
+  message: "independent",
+};
 
 describe("OmpProcess controlled wire", () => {
   it("resolves two concurrent requests in reverse order only when id and command match", async () => {
@@ -192,7 +206,7 @@ describe("OmpProcess controlled wire", () => {
   it("rejects a pending chunked response when malformed JSON abandons its sequence", async () => {
     const { child, proc, frames, errors } = await startWired();
     const id = "chunk-request";
-    const chunks = chunkFrames(
+    const chunks = rpcChunkFrames(
       Buffer.from(
         JSON.stringify({
           id,
@@ -242,15 +256,33 @@ describe("OmpProcess controlled wire", () => {
     expect(frames.some((frame) => frame.type === "rpc_chunk")).toBe(false);
   });
 
-  it("rejects invalid UTF-8 in a completed rpc chunk sequence", async () => {
-    const { child, frames, errors } = await startWired();
-    for (const chunk of utf8Chunks) {
-      child.emitLine(chunk);
-    }
+  for (const invalidUtf8 of [
+    { name: "physical JSONL", id: "utf8-physical", chunked: false },
+    { name: "chunked logical", id: "utf8-logical", chunked: true },
+  ] as const) {
+    it(`rejects invalid UTF-8 in ${invalidUtf8.name} and still reads the next frame`, async () => {
+      const { child, proc, frames, errors } = await startWired();
+      const bytes = noticeWithInvalidUtf8(
+        invalidUtf8.id,
+        invalidUtf8.chunked ? "x".repeat(PHYSICAL) : "x",
+      );
+      if (invalidUtf8.chunked) {
+        for (const chunk of rpcChunkFrames(bytes, "rpc-utf8")) {
+          child.emitLine(chunk);
+        }
+      } else {
+        child.stdout.write(Buffer.concat([bytes, Buffer.from("\n")]));
+      }
+      child.emitLine(utf8Recovered);
 
-    expectProtocolError(errors);
-    expect(frames.some((frame) => frame.type === "rpc_chunk")).toBe(false);
-  });
+      await expect(
+        harness.waitFrame(proc, (frame) => frame.id === utf8Recovered.id, 2_000, frames),
+      ).resolves.toEqual(utf8Recovered);
+      expectProtocolError(errors);
+      expect(frames.some((frame) => frame.id === invalidUtf8.id)).toBe(false);
+      expect(frames.some((frame) => frame.type === "rpc_chunk")).toBe(false);
+    });
+  }
 
   it("rejects rpc chunk metadata beyond the logical limit", async () => {
     const { child, frames, errors } = await startWired();
@@ -262,14 +294,19 @@ describe("OmpProcess controlled wire", () => {
 
   it("sanitizes malformed reassembled JSON without exposing payload text", async () => {
     const { child, frames, errors } = await startWired();
-    const secret = "SECRET_REASSEMBLED_PAYLOAD";
-    const chunks = chunkFrames(Buffer.from(`${secret}${"x".repeat(PHYSICAL)}`, "utf8"), "bad-json");
+    const secret = "ZXSECRET";
+    const chunks = rpcChunkFrames(
+      Buffer.from(`${secret}${"x".repeat(PHYSICAL)}`, "utf8"),
+      "bad-json",
+    );
     for (const chunk of chunks) {
       child.emitLine(chunk);
     }
 
     expectProtocolError(errors);
-    expect(errors.every((error) => !harness.includesSecret(error, secret))).toBe(true);
+    expect(
+      errors.every((error) => error instanceof Error && !harness.includesSecret(error, secret)),
+    ).toBe(true);
     expect(frames.some((frame) => frame.type === "rpc_chunk")).toBe(false);
   });
 
@@ -366,9 +403,13 @@ describe("OmpProcess controlled wire", () => {
     void generated.catch(() => {});
     await Promise.resolve();
 
-    expect(written.map((frame) => frame.id)).toEqual(["omp-3", "omp-4"]);
+    expect(written).toHaveLength(2);
+    const generatedId = written[1]?.id;
+    expect(typeof generatedId).toBe("string");
+    expect(generatedId).not.toBe("omp-3");
+    expect(written[0]?.id).toBe("omp-3");
     child.emitLine({
-      id: "omp-4",
+      id: generatedId,
       type: "response",
       command: "prompt",
       success: true,
@@ -381,7 +422,22 @@ describe("OmpProcess controlled wire", () => {
       success: true,
       data: { result: "supplied" },
     });
-    await expect(Promise.all([supplied, generated])).resolves.toHaveLength(2);
+    await expect(Promise.all([supplied, generated])).resolves.toEqual([
+      {
+        id: "omp-3",
+        type: "response",
+        command: "prompt",
+        success: true,
+        data: { result: "supplied" },
+      },
+      {
+        id: generatedId,
+        type: "response",
+        command: "prompt",
+        success: true,
+        data: { result: "generated" },
+      },
+    ]);
   });
 
   it("rejects a pending request when stdout closes", async () => {
@@ -409,7 +465,7 @@ describe("OmpProcess controlled wire", () => {
   it("rejects a pending request when stdout ends with truncated chunks", async () => {
     const { child, proc, frames, errors } = await startWired();
     const id = "truncated-request";
-    const chunks = chunkFrames(
+    const chunks = rpcChunkFrames(
       Buffer.from(
         JSON.stringify({
           id,
@@ -452,12 +508,7 @@ describe("OmpProcess controlled wire", () => {
   it("rejects an empty get_state sessionFile", async () => {
     const { child, proc } = openChild();
     child.emitLine(READY);
-    child.onCommand("negotiate_protocol", (frame) => {
-      child.emitLine(negotiateOk(String(frame.id)));
-    });
-    child.onCommand("get_state", (frame) => {
-      child.emitLine(stateOk(String(frame.id), ""));
-    });
+    child.replyHandshake({ sessionFile: "" });
 
     await expect(proc.start()).rejects.toBeInstanceOf(AgentUnavailableError);
   });
@@ -470,12 +521,12 @@ describe("OmpProcess controlled wire", () => {
     await expect(started).rejects.toBeInstanceOf(AgentUnavailableError);
   });
 
-  for (const source of IO_SOURCES) {
+  for (const source of IO_ERROR_SOURCES) {
     it(`observes and sanitizes ${source} errors while settling a request once`, async () => {
       const { child, proc, errors } = await startWired();
       const pending = proc.request({ id: `${source}-pending`, type: "prompt", message: "wait" });
       const observation = observePromise(pending);
-      emitIoFailure(child, source);
+      emitIoFailure(child, source, TOKEN);
       await Promise.resolve();
 
       expect(observation.settlements).toBe(1);
@@ -564,10 +615,10 @@ const afterInterrupt: OmpFrame = { type: "notice", level: "info", message: "inde
 const invalidMetadata: OmpFrame = {
   type: "rpc_chunk",
   chunkId: "",
-  index: -1,
-  count: 1,
-  byteLength: 4,
-  data: "ew==",
+  index: 0,
+  count: 5,
+  byteLength: PHYSICAL + 1,
+  data: Buffer.from("{", "utf8").toString("base64"),
 };
 const invalidBase64: OmpFrame = {
   type: "rpc_chunk",
@@ -586,10 +637,6 @@ const noncanonicalBase64: OmpFrame = {
   byteLength: PHYSICAL + 1,
   data: "ew",
 };
-const utf8Chunks = chunkFrames(
-  Buffer.concat([Buffer.alloc(PHYSICAL, 0x61), Buffer.from([0xff])]),
-  "rpc-utf8",
-);
 const oversizeLogical: OmpFrame = {
   type: "rpc_chunk",
   chunkId: "rpc-limit",
@@ -599,18 +646,6 @@ const oversizeLogical: OmpFrame = {
   data: Buffer.alloc(CHUNK_PAYLOAD, 0x61).toString("base64"),
 };
 
-function chunkFrames(bytes: Buffer, chunkId: string): OmpFrame[] {
-  const count = Math.ceil(bytes.byteLength / CHUNK_PAYLOAD);
-  return Array.from({ length: count }, (_, index) => ({
-    type: "rpc_chunk",
-    chunkId,
-    index,
-    count,
-    byteLength: bytes.byteLength,
-    data: bytes.subarray(index * CHUNK_PAYLOAD, (index + 1) * CHUNK_PAYLOAD).toString("base64"),
-  }));
-}
-
 function emitFirstChunk(child: FakeChild, chunks: OmpFrame[]): void {
   const initialChunk = chunks[0];
   if (initialChunk === undefined) {
@@ -619,51 +654,13 @@ function emitFirstChunk(child: FakeChild, chunks: OmpFrame[]): void {
   child.emitLine(initialChunk);
 }
 
-function expectProtocolError(errors: unknown[]): void {
-  expect(errors).toHaveLength(1);
-  expect(errors[0]).toBeInstanceOf(OmpProtocolError);
-}
-
-function emitIoFailure(child: FakeChild, source: IoSource): void {
-  const error = new Error(`EIO ${TOKEN}`);
-  switch (source) {
-    case "child":
-      child.emit("error", error);
-      return;
-    case "stdin":
-      child.stdin.emit("error", error);
-      return;
-    case "stdout":
-      child.stdout.emit("error", error);
-      return;
-    case "stderr":
-      child.stderr.emit("error", error);
-      return;
-  }
-}
-
 function openChild(options: { handshakeTimeoutMs?: number } = {}): {
   child: FakeChild;
   proc: OmpProcess;
   frames: OmpFrame[];
   errors: unknown[];
 } {
-  const child = harness.fake();
-  const proc = harness.manage(
-    new OmpProcess({
-      ...harness.tempOpts(TOKEN, "omp-rpc-io-"),
-      spawnImpl: child.spawnImpl,
-      ...(options.handshakeTimeoutMs === undefined
-        ? {}
-        : { handshakeTimeoutMs: options.handshakeTimeoutMs }),
-    }),
-  );
-  return {
-    child,
-    proc,
-    frames: harness.collectFrames(proc),
-    errors: harness.collectErrors(proc),
-  };
+  return openFakeProcess(harness, TOKEN, options);
 }
 
 async function startWired(): Promise<{
@@ -672,13 +669,5 @@ async function startWired(): Promise<{
   frames: OmpFrame[];
   errors: unknown[];
 }> {
-  const opened = openChild();
-  queueHandshake(opened.child);
-  await expect(opened.proc.start()).resolves.toEqual({ sessionFile: SESSION });
-  return opened;
-}
-
-function queueHandshake(child: FakeChild): void {
-  child.emitLine(READY);
-  child.replyHandshake();
+  return startFakeProcess(harness, TOKEN);
 }

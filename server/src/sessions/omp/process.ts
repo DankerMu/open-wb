@@ -155,9 +155,11 @@ export class OmpProcess {
   #maxPhysical = MAX_RPC_FRAME_BYTES;
   #maxLogical = MAX_RPC_REASSEMBLED_BYTES;
   #exited = false;
-  #closed = false;
+  #writesClosed = false;
   #stdoutClosed = false;
+  #started = false;
   #fatal: Error | undefined;
+  #nativeExit: OmpExit | undefined;
 
   constructor(opts: OmpProcessOpts) {
     const { spawnImpl, handshakeTimeoutMs, ...spawnOpts } = opts;
@@ -225,6 +227,10 @@ export class OmpProcess {
     void handshake.catch(() => {});
     try {
       const sessionFile = await Promise.race([handshake, timeout.promise]);
+      if (this.#fatal || this.#writesClosed || this.#childDead()) {
+        throw this.#fatal ?? new AgentUnavailableError("agent_unavailable");
+      }
+      this.#started = true;
       return { sessionFile };
     } catch (error) {
       throw this.#failStartup(error);
@@ -234,8 +240,8 @@ export class OmpProcess {
   }
 
   async #handshake(): Promise<string> {
-    if (this.#fatal) {
-      throw this.#fatal;
+    if (this.#fatal || this.#writesClosed) {
+      throw this.#fatal ?? new AgentUnavailableError("agent_unavailable");
     }
     await this.#ready;
     const negotiate = await this.#request("negotiate_protocol", {
@@ -276,8 +282,8 @@ export class OmpProcess {
       return Promise.reject(new OmpProtocolError("duplicate request id"));
     }
     return new Promise<OmpFrame>((resolve, reject) => {
-      if (this.#fatal) {
-        reject(this.#fatal);
+      if (this.#fatal || this.#writesClosed) {
+        reject(this.#fatal ?? new AgentUnavailableError("write failed"));
         return;
       }
       const pending: PendingRequest = { command, resolve, reject };
@@ -292,7 +298,7 @@ export class OmpProcess {
 
   #write(frame: OmpFrame): Promise<void> {
     const child = this.#child;
-    if (child === undefined || child.stdin.destroyed || this.#closed) {
+    if (child === undefined || child.stdin.destroyed || this.#writesClosed || this.#fatal) {
       return Promise.reject(sanitizeIo(this.#fatal ?? new Error("stdin closed"), "write failed"));
     }
     let line: string;
@@ -346,22 +352,24 @@ export class OmpProcess {
       this.#failIo(error);
     });
     child.on("exit", (code, signal) => {
-      this.#onExit(code, signal);
+      this.#onNativeExit(code, signal);
+    });
+    child.on("close", (code, signal) => {
+      this.#onChildClose(code, signal);
     });
     if (child.stdout.readableEnded || child.stdout.destroyed) {
       this.#onStdoutEnd();
     }
     if (child.exitCode !== null || child.signalCode !== null) {
-      this.#onExit(child.exitCode, child.signalCode);
+      this.#onNativeExit(child.exitCode, child.signalCode);
     }
   }
-
   #onStdout(chunk: Buffer): void {
-    if (this.#closed || this.#stdoutClosed) {
+    if (this.#stdoutClosed) {
       return;
     }
     let offset = 0;
-    while (offset < chunk.byteLength && !this.#closed) {
+    while (offset < chunk.byteLength && !this.#stdoutClosed) {
       const resumed = this.#afterDiscardedLine(chunk, offset);
       if (resumed === undefined) {
         return;
@@ -483,10 +491,10 @@ export class OmpProcess {
     }
     this.#stdoutClosed = true;
     const truncated = this.#discardIncompleteInput();
-    if (truncated !== undefined) {
-      this.#rejectPending(truncated);
-    }
-    this.#terminateTransport(new AgentUnavailableError("stdout closed"));
+    const closed = this.#fatal ?? new AgentUnavailableError("stdout closed");
+    this.#forbidCommands(closed);
+    this.#rejectPending(truncated ?? closed);
+    this.#publishExit();
   }
   #discardIncompleteInput(): OmpProtocolError | undefined {
     const incomplete =
@@ -507,7 +515,11 @@ export class OmpProcess {
       this.#settleReady?.();
     }
     this.#events.emit("frame", frame);
-    if (frame.type === "extension_ui_request" && typeof frame.id === "string") {
+    if (
+      frame.type === "extension_ui_request" &&
+      typeof frame.id === "string" &&
+      !this.#writesClosed
+    ) {
       void this.#write({ type: "extension_ui_response", id: frame.id, cancelled: true }).catch(
         (error: unknown) => {
           this.#failIo(error);
@@ -525,35 +537,61 @@ export class OmpProcess {
     pending.resolve(frame);
   }
 
-  #onExit(code: number | null, signal: NodeJS.Signals | null): void {
-    if (this.#exited) {
+  #onNativeExit(code: number | null, signal: NodeJS.Signals | null): void {
+    if (this.#nativeExit !== undefined) {
       return;
     }
-    this.#exited = true;
-    if (!this.#stdoutClosed) {
-      this.#stdoutClosed = true;
-      const truncated = this.#discardIncompleteInput();
-      if (truncated !== undefined) {
-        this.#rejectPending(truncated);
-      }
+    this.#nativeExit = { code, signal };
+    this.#forbidCommands(this.#fatal ?? new AgentUnavailableError("child exited"));
+    if (this.#stdoutClosed) {
+      this.#publishExit();
     }
-    this.#terminateTransport(this.#fatal ?? new AgentUnavailableError("child exited"));
-    this.#events.emit("exit", { code, signal });
+  }
+  #onChildClose(code: number | null, signal: NodeJS.Signals | null): void {
+    if (this.#nativeExit === undefined) {
+      this.#nativeExit = { code, signal };
+      this.#forbidCommands(this.#fatal ?? new AgentUnavailableError("child exited"));
+    }
+    this.#onStdoutEnd();
+    this.#publishExit();
   }
   #failIo(error: unknown): void {
     this.#terminateTransport(sanitizeIo(error, "io failed"));
+  }
+  #forbidCommands(error: Error): void {
+    const already = this.#writesClosed;
+    this.#writesClosed = true;
+    this.#clearTimer();
+    this.#settleReady?.(error);
+    if (!this.#started) {
+      this.#rejectPending(error);
+      if (!already && this.#fatal === undefined) {
+        this.#events.emit("error", error);
+      }
+    }
   }
   #terminateTransport(error: Error): void {
     if (this.#fatal !== undefined) {
       return;
     }
     this.#fatal = error;
-    this.#closed = true;
+    this.#writesClosed = true;
+    this.#stdoutClosed = true;
     this.#clearTimer();
     this.#clearInput();
     this.#settleReady?.(error);
     this.#rejectPending(error);
     this.#events.emit("error", error);
+    if (this.#nativeExit !== undefined) {
+      this.#publishExit();
+    }
+  }
+  #publishExit(): void {
+    if (this.#exited || this.#nativeExit === undefined) {
+      return;
+    }
+    this.#exited = true;
+    this.#events.emit("exit", this.#nativeExit);
   }
   #reportProtocol(error: string | OmpProtocolError): OmpProtocolError {
     const protocol = typeof error === "string" ? new OmpProtocolError(error) : error;
@@ -565,11 +603,14 @@ export class OmpProcess {
       error instanceof AgentUnavailableError
         ? error
         : new AgentUnavailableError("agent_unavailable");
-    const firstFailure = this.#fatal === undefined;
+    const firstFailure = this.#fatal === undefined && !this.#writesClosed;
     this.#fatal = unavailable;
-    this.#closed = true;
+    this.#writesClosed = true;
     this.#clearTimer();
-    this.#clearInput();
+    if (this.#nativeExit === undefined) {
+      this.#stdoutClosed = true;
+      this.#clearInput();
+    }
     this.#settleReady?.(unavailable);
     this.#rejectPending(unavailable);
     if (
@@ -619,6 +660,13 @@ export class OmpProcess {
         return id;
       }
     }
+  }
+  #childDead(): boolean {
+    const child = this.#child;
+    return (
+      this.#nativeExit !== undefined ||
+      (child !== undefined && (child.exitCode !== null || child.signalCode !== null))
+    );
   }
 }
 

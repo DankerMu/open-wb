@@ -1,11 +1,11 @@
 ## 1. Contract and implementation
 - [x] 1.1 Obtain fixture review and strict validation before source changes.
 - [x] 1.2 Capture semantic RED at callable OmpProcess boundary before implementation; preserve outputs outside repo.
-- [ ] 1.3 Implement process.ts protocol entrypoint and sole internal frame.ts decoder without changing spawn contract; cover handshake, correlation, chunking, IO errors and UI cancellation.
-- [ ] 1.4 Demonstrate real fake subprocess cases and controlled invalid-wire cases in design; preserve RED/GREEN and cleanup evidence.
+- [x] 1.3 Implement process.ts protocol entrypoint and sole internal frame.ts decoder without changing spawn contract; cover handshake, correlation, chunking, IO errors and UI cancellation.
+- [x] 1.4 Demonstrate real fake subprocess cases and controlled invalid-wire cases in design; preserve RED/GREEN and cleanup evidence.
 
 ## 2. Acceptance and delivery
-- [ ] 2.1 Parent runs focused protocol/spawn tests, npm test --workspace server, make lint, make typecheck and make anti-drift; independent real-child smoke.
+- [x] 2.1 Parent runs focused protocol/spawn tests, npm test --workspace server, make lint, make typecheck and make anti-drift; independent real-child smoke.
 - [ ] 2.2 Expanded agent reviews (correctness, test-evidence+spec-compliance, security-perf), bounded fix gate and same-SHA CI green.
 - [ ] 2.3 Merge issue PR; update parent task 1.4 and archive this fixture through follow-up PR.
 
