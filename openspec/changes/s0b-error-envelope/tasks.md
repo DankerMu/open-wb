@@ -1,13 +1,13 @@
 ## 1. Fixture and RED barrier
 - [x] 1.1 Review expanded fixture and pass strict validation; ErrorFixtureReview PASS after explicit app.test.ts sibling inclusion; strict validation exit0. Freeze source/config/fixture hashes before tests-only writer.
-- [ ] 1.2 Writer changes existing tests only: additive two-row ERROR_CASES in server/test/app.test.ts, seven-code auth-lifecycle map and auth-request-errors boundaries. Run those three files and record semantic RED against frozen mapper/core; STOP for parent authorization. Preserve caller behavior and remove only the self-asserting table-length/type-echo test, not observable guarantees.
+- [x] 1.2 Tests-only changes in three files yielded8 semantic failures/139passes with all19protected source/config/fixture hashes intact. Parent corrected one spoofed error construction to real HttpError(code) before freezing; same8RED retained. Independent realHTTP baseline also rejected session_busy500 instead of409.
 
 ## 2. Atomic implementation
-- [ ] 2.1 Extend canonical core messages + HTTP statuses and private four-owner set; update directly affected comments, never add product routes or cache policy.
-- [ ] 2.2 All three focused files GREEN for seven envelopes (including existing app.test.ts /api/test-errors/* routes), no-store on policy-owning real route, exact owner classification and sanitized negative cases; no source-text/set-export assertion.
+- [x] 2.1 Extend canonical core messages + HTTP statuses and private four-owner set; update directly affected comments, without product routes or cache policy.
+- [x] 2.2 All three focused files147/147 GREEN for seven envelopes (including existing app.test.ts /api/test-errors/* routes), real auth-owned no-store, exact owner classification and sanitized negative cases. Self-echo test removed; compile-time exhaustiveness retained; one assertion helper hoisted to eliminate a60-token clone without dropping checks.
 
 ## 3. Acceptance and delivery
-- [ ] 3.1 Parent runs test/app.test.ts, test/auth-lifecycle.test.ts and test/auth-request-errors.test.ts, fullserver coverage, make lint/typecheck/anti-drift and strictOpenSpec; independent HTTP mapper probe and disposable wrong-candidate rejection/restoration.
+- [x] 3.1 Parent focused suite147/147, fullserver841/841 with coverage90.26% statements/88.89% branches; lint/typecheck/anti-drift0clones/build/strictOpenSpec all exit0. Independent compiled realHTTP probe passes seven auth-owned no-store envelopes, four matched POST parser owners and sanitized negatives; nine wrong compiled-copy candidates rejected by semantic assertions, reference/restoration GREEN.
 - [ ] 3.2 Expanded correctness / test-evidence+spec-compliance / integration review, bounded fix gate, same-SHA CI, automatic sourcePR merge.
 - [ ] 3.3 Correct parent ownership references/task2.2 and archive through docs-only follow-up; preserve canonical sibling requirements.
 

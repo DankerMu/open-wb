@@ -8,6 +8,8 @@ export const HTTP_ERROR_MESSAGES = Object.freeze({
   account_disabled: "该账号已停用，请联系管理员",
   unauthorized: "请先登录",
   not_found: "请求的资源不存在",
+  session_busy: "会话正在生成，请稍候",
+  agent_unavailable: "Agent 运行时不可用",
 });
 
 export type HttpErrorCode = keyof typeof HTTP_ERROR_MESSAGES;

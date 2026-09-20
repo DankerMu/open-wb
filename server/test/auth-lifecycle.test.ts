@@ -702,19 +702,21 @@ describe("POST /api/auth/logout", () => {
   });
 });
 
-describe("HTTP typed error map 恰五码（auth 域只复用既有 unauthorized）", () => {
-  const codes: Record<HttpErrorCode, { statusCode: number; message: string }> = {
+describe("HTTP typed error map 恰七码（auth 域只复用既有 unauthorized）", () => {
+  const codes = {
     bad_request: { statusCode: 400, message: "请求格式不正确" },
     invalid_credentials: { statusCode: 401, message: "账号或密码不正确" },
     account_disabled: { statusCode: 403, message: "该账号已停用，请联系管理员" },
     unauthorized: { statusCode: 401, message: "请先登录" },
     not_found: { statusCode: 404, message: "请求的资源不存在" },
-  };
+    session_busy: { statusCode: 409, message: "会话正在生成，请稍候" },
+    agent_unavailable: { statusCode: 502, message: "Agent 运行时不可用" },
+  } as const satisfies Record<HttpErrorCode, { statusCode: number; message: string }>;
 
   /**
    * 编译期双向穷尽守卫：HTTP typed map 增码会让 `HttpCodesNotListed` 非 never，
-   * 从而使下面的赋值在 `make typecheck` 失败；删码则由上面的 `Record<HttpErrorCode,…>`
-   * 注解失败。auth 域同理：#10 只允许扩到既有 unauthorized。
+   * 从而使下面的赋值在 `make typecheck` 失败；删码则由上面的 `satisfies Record<HttpErrorCode,…>`
+   * 注解失败。auth 域同理：只允许既有四码，不把 session_busy/agent_unavailable 扩进 AuthErrorCode。
    */
   type HttpCodesNotListed = Exclude<HttpErrorCode, keyof typeof codes>;
   type AuthCodesNotListed = Exclude<
@@ -723,11 +725,8 @@ describe("HTTP typed error map 恰五码（auth 域只复用既有 unauthorized�
   >;
   const noExtraHttpCodes: [HttpCodesNotListed] extends [[]] ? true : false = true;
   const noExtraAuthCodes: [AuthCodesNotListed] extends [[]] ? true : false = true;
-
-  it("typed map 双向穷尽：既不多码也不少码", () => {
-    expect([noExtraHttpCodes, noExtraAuthCodes]).toEqual([true, true]);
-    expect(Object.keys(codes)).toHaveLength(5);
-  });
+  void noExtraHttpCodes;
+  void noExtraAuthCodes;
 
   it.each(Object.entries(codes))(
     "typed code %s 的 exact 信封逐字节稳定（me/logout 复用同一 unauthorized 定义）",
