@@ -1,14 +1,14 @@
 ## 1. Contract and test-first barrier
 - [x] 1.1 Obtain expanded fixture review and strict validation before implementation. UpstreamFixtureReview PASS; strict validation exit0.
-- [ ] 1.2 Write paired real-HTTP/CLI contract tests first; capture initial setup failure if module is absent, then semantic RED against a minimal callable wrong-response HTTP scaffold before implementing auth/SSE. Parent checks source chronology and raw exits before authorizing behavior implementation.
+- [x] 1.2 Write paired real-HTTP/CLI contract tests first; capture initial setup failure if module is absent, then semantic RED against a minimal callable wrong-response HTTP scaffold before implementing auth/SSE. Parent verified absent module, then live HTTP404 baseline (13 failed/6 passed), before Stage B; final19/19 passed.
 
 ## 2. Fixture implementation
-- [ ] 2.1 Implement the sole fake-upstream.mjs with start/close, configured bearer, both required mount points, deterministic tool/text SSE and last-user500 selection; add only a minimal .d.mts typing declaration if needed by strict TS consumers.
-- [ ] 2.2 Prove standalone port/readiness/native exit, imported no-side-effects/independent instances, malformed-request recovery and client-abort cleanup without changing existing fake-omp or product code.
+- [x] 2.1 Implement the sole fake-upstream.mjs with start/close, configured bearer, both required mount points, deterministic tool/text SSE and last-user500 selection; minimal .d.mts supplies strict TS import types.
+- [x] 2.2 Prove standalone port/readiness/native exit, imported no-side-effects/independent instances, malformed-request recovery and client-abort cleanup without changing existing fake-omp or product code. Contract cases and independent actual CLI/HTTP probe passed.
 
 ## 3. Independent acceptance and delivery
-- [ ] 3.1 Parent runs focused contract tests, full server suite/coverage, make lint, make typecheck, make anti-drift and strict OpenSpec validation; exercise the actual CLI over HTTP with observed cleanup.
-- [ ] 3.2 Qualify auth, branch/error selection and SSE/lifecycle oracles with semantic wrong candidates in a disposable copy, preserving known-good and restoration proof; never import fixture constants/builders to generate expected data.
+- [x] 3.1 Parent runs focused contract tests, full server suite/coverage, make lint, make typecheck, make anti-drift and strict OpenSpec validation; exercise the actual CLI over HTTP with observed cleanup. All commands exit0; CLI SIGTERM exits0 and subsequent curl exits7 (connection refused).
+- [x] 3.2 Qualify auth, branch/error selection and SSE/lifecycle oracles with semantic wrong candidates in a disposable copy. Nine mutants rejected by assertion failures; reference/restoration GREEN. Initial pooled-fetch refusal oracle missed a live listener; repaired to fresh TCP ECONNREFUSED and requalified all nine. No production mutation or imported expected-output constants.
 - [ ] 3.3 Expanded correctness / test-evidence+spec-compliance / security-perf review, bounded fix gate and same-SHA CI green.
 - [ ] 3.4 Merge #88, update parent task2.1 and archive this fixture through a docs-only follow-up PR.
 
