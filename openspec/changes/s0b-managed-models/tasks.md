@@ -1,11 +1,11 @@
 ## 1. Fixture and chronology
 - [x] 1.1 Expanded fixture reviewPASS with no additions; strict validation exit0. Fixture/dependency/config identities frozen beforeA1.
-- [ ] 1.2 A1 tests before source, honest SETUP; separately authorized A2 callable wrong-output semanticRED; parent checks chronology beforeB.
+- [x] 1.2 A1 source absent/import SETUP only; A2 callable wrongURL/no-file implementation produced6 semanticRED failures beforeB. Parent compiled realfilesystem probe independently rejected missing output; source/test chronology and hashes retained.
 ## 2. Generator
-- [ ] 2.1 Implement sole address derivation and deterministic safely-quoted blockYAML writer; no env reads/startup/proxy/dependency changes.
-- [ ] 2.2 Paired actual-filesystem testsGREEN: address forms, exact parsed schema/credential indirection, idempotence/update, escaping and failure propagation.
+- [x] 2.1 Sole address derivation and safely-quoted blockYAML writer implemented; no env reads/startup/proxy/dependency changes.
+- [x] 2.2 Six actual-filesystem/address testsGREEN: exact schema/credential indirection, idempotence/update, escaping and real failure propagation; module100% coverage.
 ## 3. Acceptance and delivery
-- [ ] 3.1 Parent compiled filesystem/network probe, semantic mutants/reference/restoration; scoped static/fullservercoverage/drift/build/strictOpenSpec.
+- [x] 3.1 Parent compiled filesystem/four real listener probeGREEN;15 post-freeze scalar/address holdout casesGREEN;13 semantic mutants rejected, restoration and dedicated stability controlsGREEN.937server tests,90.61% statements/88.51% branches; scoped format/types/build/drift0clones/strictOpenSpec exit0.
 - [ ] 3.2 Expanded correctness/test-evidence+spec/security-perf review; bounded fix gate and sameSHA CI/sourcePRmerge.
 - [ ] 3.3 Parent task2.4 update and docs-only canonical promotion/archive; keep prior proxy/fake requirements intact.
 ## Risk pack mapping
