@@ -168,6 +168,23 @@ describe("PreviewPane Markdown", () => {
     expect(screen.getByRole("heading", { level: 3, name: "源码更新" })).toBeTruthy();
   });
 
+  it("renders bold and a later href# link after malformed link syntax", () => {
+    const { container } = render(
+      textPreview("readme.md", "[unfinished **bold**\n[x]( [A](one) **later**"),
+    );
+    const body = container.querySelector("[data-markdown-body]");
+    if (!(body instanceof HTMLElement)) {
+      throw new Error("expected React Markdown body");
+    }
+
+    expect(body.querySelectorAll("strong")).toHaveLength(2);
+    expect(body.querySelector("strong")?.textContent).toBe("bold");
+    expect(body.querySelector("a")?.getAttribute("href")).toBe("#");
+    expect(body.querySelector("a")?.textContent).toBe("A");
+    expect(body.textContent).toContain("[unfinished bold");
+    expect(body.textContent).toContain("[x]( A later");
+  });
+
   it("leaves the URL unchanged for mouse and keyboard activation of href# Markdown links", () => {
     const hrefBefore = window.location.href;
     const { container } = render(textPreview("readme.md", "[文档](https://evil.example/docs)"));

@@ -12,7 +12,7 @@ const ESCAPE_CHARS: Record<string, string> = {
   '"': "&quot;",
   "'": "&#39;",
 };
-
+const DESTINATION_WHITESPACE = /\s/u;
 export type MdInline =
   | { type: "text"; source: number; value: string }
   | { type: "code"; source: number; value: string }
@@ -87,46 +87,84 @@ function scanStrong(value: string, index: number, base: number): { next: number;
   return { next: index + 1 };
 }
 
-function scanLink(
-  value: string,
-  index: number,
-  base: number,
-): { next: number; node?: MdInline; done?: boolean } {
-  const labelEnd = value.indexOf("]", index + 1);
-  if (labelEnd < 0) {
-    return { next: value.length, done: true };
+/**
+ * The parser cursor only increases. Label and destination starts therefore only
+ * increase too, so each cached closer is reused until passed; exhausted suffixes
+ * are never searched again. Failed candidates still advance the parser by one.
+ */
+class LinkLookahead {
+  private readonly value: string;
+  private labelEnd = -1;
+  private labelsExhausted = false;
+  private terminator = -1;
+  private terminatorsExhausted = false;
+
+  constructor(value: string) {
+    this.value = value;
   }
-  if (value[labelEnd + 1] !== "(") {
-    return { next: labelEnd + 1 };
+
+  scan(index: number, base: number): { next: number; node: MdInline } | null {
+    const labelEnd = this.labelAfter(index + 1);
+    if (labelEnd < 0 || this.value[labelEnd + 1] !== "(") {
+      return null;
+    }
+    const destinationStart = labelEnd + 2;
+    const terminator = this.terminatorAfter(destinationStart);
+    if (
+      terminator < 0 ||
+      this.value[terminator] !== ")" ||
+      labelEnd === index + 1 ||
+      terminator === destinationStart
+    ) {
+      return null;
+    }
+    return {
+      next: terminator + 1,
+      node: {
+        type: "link",
+        source: base + index,
+        children: [
+          { type: "text", source: base + index + 1, value: this.value.slice(index + 1, labelEnd) },
+        ],
+      },
+    };
   }
-  const destStart = labelEnd + 2;
-  const destEnd = value.indexOf(")", destStart);
-  if (destEnd < 0) {
-    return { next: value.length, done: true };
+
+  private labelAfter(start: number): number {
+    if (this.labelsExhausted) {
+      return -1;
+    }
+    if (this.labelEnd < start) {
+      this.labelEnd = this.value.indexOf("]", start);
+      if (this.labelEnd < 0) {
+        this.labelsExhausted = true;
+      }
+    }
+    return this.labelEnd;
   }
-  const destination = value.slice(destStart, destEnd);
-  if (
-    labelEnd === index + 1 ||
-    destEnd === destStart ||
-    destination.includes(" ") ||
-    destination.includes("\t")
-  ) {
-    return { next: index + 1 };
+
+  private terminatorAfter(start: number): number {
+    if (this.terminatorsExhausted) {
+      return -1;
+    }
+    if (this.terminator >= start) {
+      return this.terminator;
+    }
+    for (let index = start; index < this.value.length; index += 1) {
+      const char = this.value[index] ?? "";
+      if (char === ")" || DESTINATION_WHITESPACE.test(char)) {
+        this.terminator = index;
+        return index;
+      }
+    }
+    this.terminatorsExhausted = true;
+    return -1;
   }
-  return {
-    next: destEnd + 1,
-    node: {
-      type: "link",
-      source: base + index,
-      children: [
-        { type: "text", source: base + index + 1, value: value.slice(index + 1, labelEnd) },
-      ],
-    },
-  };
 }
 
 function parseDecoratedText(value: string, base: number): MdInline[] {
   const nodes: MdInline[] = [];
+  const links = new LinkLookahead(value);
   let index = 0;
   let textStart = 0;
 
@@ -149,20 +187,14 @@ function parseDecoratedText(value: string, base: number): MdInline[] {
       continue;
     }
     if (value[index] === "[") {
-      const taken = scanLink(value, index, base);
-      if (taken.node) {
+      const taken = links.scan(index, base);
+      if (taken) {
         flushText(index);
         nodes.push(taken.node);
         index = taken.next;
         textStart = index;
         continue;
       }
-      if (taken.done) {
-        index = value.length;
-        continue;
-      }
-      index = taken.next;
-      continue;
     }
     index += 1;
   }

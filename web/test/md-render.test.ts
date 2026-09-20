@@ -182,47 +182,81 @@ describe("mdRender adjacent links", () => {
 });
 
 describe("mdRender bounded inline scanning", () => {
-  it("treats unmatched opening brackets and unfinished destinations as literal text", () => {
-    expect(mdRender("[unfinished")).toBe("<p>[unfinished</p>");
-    expect(mdRender("[x](")).toBe("<p>[x](</p>");
+  it("keeps all rejected link branches literal without suppressing bold", () => {
+    expect(mdRender("[unfinished **bold**")).toBe("<p>[unfinished <strong>bold</strong></p>");
+    expect(mdRender("[**bold**]")).toBe("<p>[<strong>bold</strong>]</p>");
+    expect(mdRender("[x](**bold**")).toBe("<p>[x](<strong>bold</strong></p>");
+    expect(mdRender("[](one) **bold**")).toBe("<p>[](one) <strong>bold</strong></p>");
+    expect(mdRender("[x]() **bold**")).toBe("<p>[x]() <strong>bold</strong></p>");
   });
 
-  it("counts a linear number of nodes for unmatched brackets and dense strong markers", () => {
-    const brackets = parseMarkdown("[".repeat(32));
-    const strong = parseMarkdown("**a**".repeat(8));
-    const unmatchedLink = parseMarkdown("[x](".repeat(8));
-
-    expect(brackets).toHaveLength(1);
-    expect(brackets[0]?.type).toBe("paragraph");
-    if (brackets[0]?.type === "paragraph") {
-      expect(brackets[0].children).toHaveLength(1);
-      expect(brackets[0].children[0]).toEqual({ type: "text", source: 0, value: "[".repeat(32) });
-    }
-    expect(strong).toHaveLength(1);
-    if (strong[0]?.type === "paragraph") {
-      expect(strong[0].children).toHaveLength(8);
-    }
-    expect(unmatchedLink).toHaveLength(1);
-    if (unmatchedLink[0]?.type === "paragraph") {
-      expect(unmatchedLink[0].children).toHaveLength(1);
-      expect(unmatchedLink[0].children[0]?.type).toBe("text");
+  it("rejects every JavaScript whitespace destination before later valid formatting", () => {
+    for (const whitespace of ["\v", "\f", "\u00a0"]) {
+      expect(mdRender(`[x](${whitespace})[A](one) **bold**`)).toBe(
+        `<p>[x](${whitespace})<a href="#">A</a> <strong>bold</strong></p>`,
+      );
     }
   });
 
-  it("scans 1 MiB unmatched brackets, unmatched link prefixes and dense strong markers in linear time", () => {
-    const megabyte = 1024 * 1024;
-    const started = Date.now();
-    const unmatchedBrackets = mdRender("[".repeat(megabyte));
-    const unmatchedLinks = mdRender("[x](".repeat(megabyte / 4));
-    const denseStrong = mdRender("**a**".repeat(megabyte / 5));
-    const elapsed = Date.now() - started;
+  it("keeps later valid links and bold after rejected link syntax", () => {
+    expect(mdRender("[broken] [A](one) **bold**")).toBe(
+      '<p>[broken] <a href="#">A</a> <strong>bold</strong></p>',
+    );
+    expect(mdRender("[x]( [A](one) **bold**")).toBe(
+      '<p>[x]( <a href="#">A</a> <strong>bold</strong></p>',
+    );
+  });
 
-    expect(unmatchedBrackets).toBe(`<p>${"[".repeat(megabyte)}</p>`);
-    expect(unmatchedLinks).toBe(`<p>${"[x](".repeat(megabyte / 4)}</p>`);
-    expect(denseStrong.startsWith("<p>")).toBe(true);
-    expect(denseStrong.endsWith("</p>")).toBe(true);
-    expect(denseStrong.slice(3, -4)).toBe("<strong>a</strong>".repeat(megabyte / 5));
-    expect(elapsed).toBeLessThan(5_000);
+  it("preserves malformed-link formatting across headings, quotes, lists and table cells", () => {
+    const root = renderMarkdown(
+      [
+        "# [unfinished **head**",
+        "> [broken] [A](one) **quote**",
+        "- [**item**]",
+        "| value |",
+        "| --- |",
+        "| [x]( [B](two) **cell** |",
+      ].join("\n"),
+    );
+
+    expect(root.querySelector("h1 strong")?.textContent).toBe("head");
+    expect(root.querySelector("blockquote a")?.textContent).toBe("A");
+    expect(root.querySelector("blockquote strong")?.textContent).toBe("quote");
+    expect(root.querySelector("li strong")?.textContent).toBe("item");
+    expect(root.querySelector("td a")?.textContent).toBe("B");
+    expect(root.querySelector("td strong")?.textContent).toBe("cell");
+  });
+
+  it("keeps rejected links literal at bounded preview sizes", () => {
+    for (const count of [50_000, 200_000, 1_048_573]) {
+      const input = `${"[".repeat(count)}]()`;
+      expect(mdRender(input)).toBe(`<p>${input}</p>`);
+    }
+    for (const count of [50_000, 200_000, 262_143]) {
+      const input = `${"[x](".repeat(count)} )`;
+      expect(mdRender(input)).toBe(`<p>${input}</p>`);
+    }
+  });
+
+  it("keeps closer-free marker prefixes literal at bounded preview size", () => {
+    const brackets = "[".repeat(1024 * 1024);
+    const unfinishedLinks = "[x](".repeat(262_144);
+
+    expect(mdRender(brackets)).toBe(`<p>${brackets}</p>`);
+    expect(mdRender(unfinishedLinks)).toBe(`<p>${unfinishedLinks}</p>`);
+  });
+
+  it("renders dense strong runs through no-backtick, between-code and unclosed-tick paths", () => {
+    const strongA = "**a**".repeat(200_000);
+    const renderedA = "<strong>a</strong>".repeat(200_000);
+    const left = "**a**".repeat(100_000);
+    const right = "**b**".repeat(100_000);
+
+    expect(mdRender(strongA)).toBe(`<p>${renderedA}</p>`);
+    expect(mdRender(`${left}\`code\`${right}`)).toBe(
+      `<p>${"<strong>a</strong>".repeat(100_000)}<code>code</code>${"<strong>b</strong>".repeat(100_000)}</p>`,
+    );
+    expect(mdRender(`${strongA}\`tail`)).toBe(`<p>${renderedA}\`tail</p>`);
   });
 
   it("keeps decorated siblings around closed and unclosed inline code", () => {
@@ -232,6 +266,11 @@ describe("mdRender bounded inline scanning", () => {
     expect(mdRender("**a**`x`**b**")).toBe(
       "<p><strong>a</strong><code>x</code><strong>b</strong></p>",
     );
-    expect(mdRender("[A](one)`unclosed")).toBe('<p><a href="#">A</a>`unclosed</p>');
+    expect(mdRender("[unfinished **bold**`code`[A](one)")).toBe(
+      '<p>[unfinished <strong>bold</strong><code>code</code><a href="#">A</a></p>',
+    );
+    expect(mdRender("[unfinished **bold**`[A](one)")).toBe(
+      "<p>[unfinished <strong>bold</strong>`[A](one)</p>",
+    );
   });
 });
