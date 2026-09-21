@@ -28,7 +28,7 @@ Minimal mergeable slice: 2.1 假上游单独可合并保绿（纯测试支撑文
 ## 3. chat-sessions
 
 - [x] 3.1 #82/PR186 merged：`032_chat_sessions.sql`三表、CHECK/FK/级联/两查询索引；五→六回执，旧0010/002/010/030/031与业务数据不变。用户批准032追加以避免020插入破坏旧库；215相关/973服务端测试、真实升级/重开/回滚恢复与21错误候选检验通过；三席首轮clean，同SHA CI全绿。SQLite affinity预期修订、受影响auth目录断言及合成token扫描修复均留痕。
-- [ ] 3.2 `server/src/sessions/store.ts`：会话/消息/步骤读写（创建、按 owner 列表、消息树读取、prompt 受理事务、2s/2KB 进行中刷盘与回合收尾落盘、`stream_epoch` 递增、标题截取、**启动对账** running→failed）+ 对 `:memory:` 单测（含对账场景）
+- [x] 3.2 #97/PR189 merged：owner隔离读写、原子受理/未进展补偿、独立epoch/resume、2048 UTF-8字节/首增量2000ms刷盘、步骤/终态/close失败恢复及三表显式启动对账。21聚焦/1021服务端测试、19错误变体及恢复稳定性检验通过；一步骤进度覆盖缺口经fix pass1闭环，复审clean、同SHA CI全绿。trusted metadata错误语义后续#190；REST/runtime装配仍由3.5–3.8承担。
 - [ ] 3.3 `server/src/sessions/events.ts`：omp 帧 → 归一化事件映射（过滤表、detail 摘要、`message_end.stopReason` 失败记忆、`agent_end` 终态判定、异常退出判定）纯函数 + 单测
 - [ ] 3.4 `server/src/sessions/tokens.ts`：`TokenRegistry`（登记/查找/注销，64 hex）+ 单测
 - [ ] 3.5 `server/src/sessions/rest.ts`：四 REST 端点对 **stub supervisor**（隔离 404、400/409/502 分支、202 受理、done/failed 可再 prompt）+ `app.inject()` 单测
