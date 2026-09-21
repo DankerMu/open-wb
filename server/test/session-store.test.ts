@@ -8,6 +8,7 @@ import {
   messageRows,
   persistenceSnapshot,
   sessionRow,
+  stepRows,
   withFakeClock,
   withSessionStore,
 } from "./session-store-helpers.js";
@@ -149,6 +150,57 @@ describe("SessionStore admission, metadata, and compensation", () => {
           activeTurn: null,
         });
         expect(store.rollbackPrompt(accepted.assistantMessageId)).toBe(false);
+      });
+    });
+  });
+
+  it("rejects rollback after step-only progress and after a failed startStep persistence attempt", () => {
+    withFakeClock(FIXED_NOW, () => {
+      withSessionStore(({ db, store }) => {
+        const persisted = store.create("u1");
+        const persistedTurn = store.acceptPrompt(persisted.id, "u1", "step-only progress");
+        const stepId = store.startStep(persistedTurn.assistantMessageId, {
+          ordinal: 0,
+          name: "observed step",
+          detail: "persisted without delta",
+        });
+        const afterStep = persistenceSnapshot(db);
+        expect(
+          captureThrown(() => store.rollbackPrompt(persistedTurn.assistantMessageId)),
+        ).toBeInstanceOf(Error);
+        expect(persistenceSnapshot(db)).toEqual(afterStep);
+        expect(store.runtimeState(persisted.id)?.activeTurn).toEqual(persistedTurn);
+        expect(store.finishTurn(persistedTurn.assistantMessageId, "done")).toBe(true);
+        expect(sessionRow(db, persisted.id)).toMatchObject({ status: "done" });
+        expect(stepRows(db).map((row) => ({ id: row.id, status: row.status }))).toEqual([
+          { id: stepId, status: "done" },
+        ]);
+
+        const observed = store.create("u1");
+        const observedTurn = store.acceptPrompt(observed.id, "u1", "failed startStep progress");
+        db.exec(`CREATE TEMP TRIGGER reject_step_insert
+          BEFORE INSERT ON chat_steps
+          BEGIN SELECT RAISE(ABORT, 'step insert denied'); END`);
+        const insertFault = captureThrown(() =>
+          store.startStep(observedTurn.assistantMessageId, {
+            ordinal: 0,
+            name: "observed before persist",
+            detail: "sql failure",
+          }),
+        );
+        expect(insertFault).toMatchObject({ code: "ERR_SQLITE_ERROR" });
+        const afterFailedStart = persistenceSnapshot(db);
+        expect(
+          stepRows(db).filter((row) => row.message_id === observedTurn.assistantMessageId),
+        ).toEqual([]);
+        expect(
+          captureThrown(() => store.rollbackPrompt(observedTurn.assistantMessageId)),
+        ).toBeInstanceOf(Error);
+        expect(persistenceSnapshot(db)).toEqual(afterFailedStart);
+        expect(store.runtimeState(observed.id)?.activeTurn).toEqual(observedTurn);
+        db.exec("DROP TRIGGER reject_step_insert");
+        expect(store.finishTurn(observedTurn.assistantMessageId, "done")).toBe(true);
+        expect(sessionRow(db, observed.id)).toMatchObject({ status: "done" });
       });
     });
   });
