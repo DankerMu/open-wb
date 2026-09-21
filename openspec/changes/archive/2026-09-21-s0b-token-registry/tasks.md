@@ -5,8 +5,8 @@
 - [x] 2.1 Private indexed CSPRNG registry, exact lookup, isolated rotation/revocation and fail-closed entropy/collision paths implemented; eight focused tests GREEN with realcrypto1000 and controlled faults.
 ## 3. Acceptance and delivery
 - [x] 3.1 Parent realcrypto1000, entropy/collision/recovery and actual localHTTP proxy probes pass;12 disposable compiled mutants rejected by assertions, including stale rotation/revocation rejected at HTTP boundary. Restoration and dedicated stability pass for all three modes; reproducible qualification runner exit0. Final full server53files/1062tests,91.94% statements/89.38% branches;tokens.ts100% in all dimensions. Build/servertypes/scopedBiome/anti-drift/strictOpenSpec pass; neighbor/port identities unchanged.
-- [ ] 3.2 Expanded correctness/test-evidence+spec/security-perf review; bounded fix gate; same-SHA CI/source PR merge.
-- [ ] 3.3 Separate docs-only canonical bearer requirement promotion/archive and parent3.4 update; do not claim shared-instance root assembly completed.
+- [x] 3.2 PR196 merged at 0591840; reviewed source head 9451424d78b0d4406fe9af24176db826c8f10dc5. Expanded correctness/test-evidence+spec/security-perf seats found no P0/P1/P2 findings; round 1 clean, zero fix passes. CI35573831305: all eight jobs successful on exact source head. Summary: https://github.com/DankerMu/open-wb/pull/196#issuecomment-5757469442.
+- [x] 3.3 Docs-only canonical bearer requirement promotion/archive and parent3.4 update prepared as this follow-up; shared-instance root assembly remains #100/#101 and is not claimed. This archive PR requires its own CI before merge.
 ## Core risk mapping
 - Public API selected: three methods structurally compatible with both ownedports→1.1/2.1/3.1.
 - Config/projectsetup not selected: no dependency/config/env orsetup changes.
