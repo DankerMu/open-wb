@@ -158,6 +158,7 @@ describe("workspace REST structural absence", () => {
       for (const url of [
         `/api/workspaces/${U1_RAW_PATH}/tree?path=out&path=sub`,
         `/api/workspaces/${U1_RAW_PATH}/file?path=out&path=sub`,
+        `/api/workspaces/${U1_RAW_PATH}/file`,
       ]) {
         const response = await app.inject({ method: "GET", url, headers: { cookie } });
         expect(response.statusCode).toBe(400);

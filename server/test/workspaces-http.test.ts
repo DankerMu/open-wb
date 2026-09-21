@@ -195,6 +195,7 @@ describe("workspace REST", () => {
         { contentType: "application/json", payload: JSON.stringify({ name: "ok", actorId: "u2" }) },
         { contentType: "application/json", payload: JSON.stringify({ name: 1 }) },
         { contentType: "application/json", payload: JSON.stringify({ dir: "missing-name" }) },
+        { contentType: "application/json", payload: JSON.stringify({ name: "ok", dir: 1 }) },
         { contentType: "application/json", payload: "null" },
         { contentType: "application/json", payload: JSON.stringify(["name"]) },
         { contentType: "application/json", payload: "{" },

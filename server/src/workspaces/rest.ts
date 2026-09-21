@@ -168,6 +168,7 @@ export function registerWorkspaceRest(
       for (const [name, value] of Object.entries(preview.headers)) {
         reply.header(name, value);
       }
+      // nosemgrep: javascript.express.security.audit.xss.direct-response-write.direct-response-write -- classifier permits non-HTML text/images only; nosniff remains set.
       return reply.send(openPreviewStream(absPath, preview.limit));
     },
   );
