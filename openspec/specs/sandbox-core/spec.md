@@ -14,6 +14,14 @@ Define the app-server sandbox boundary: metadata-only relative-path resolution r
 - WHEN resolve 空串、`a`、`a/b/c.md`（各级为普通目录/文件或尚不存在）
 - THEN 返回 `ok:true` 且 `absPath` 位于 `realpath(root)` 之下；`op=mkdir` 对 `out`、`a/out` 成功，对 `a/.`、`a/..`、含反斜杠的 `a/b\c`、尾随斜杠的 `a/` 返回 `ok:false`
 
+路径安全检查 SHALL distinguish structural absence from unsafe/uninspectable metadata: ENOENT and ENOTDIR below an already inspected non-symlink component SHALL allow continued lexical/boundary validation; they do not assert that a target exists or is a directory. Other metadata errors SHALL remain rejection. HTTP callers SHALL decide existence/type separately after authorization.
+
+#### Scenario: 非目录祖先不是越界
+- WHEN an ordinary file exists at regular-file and resolve receives regular-file/child for read/list/mkdir
+- THEN it returns a safe absolute path without filesystem mutation; HTTP metadata handling can return404 instead of falsely auditing sandbox.reject
+- WHEN such a suffix also includes .., or an actual symlink or unexpected metadata error is encountered
+- THEN the original rejection rules still apply and no path access is authorized
+
 ### Requirement: 共享目录权限位
 `ensureSharedDir(absPath)` SHALL 递归创建目录，并对本次**新建**的每一级目录 `chmod 0o2770`（setgid + 属主/组 rwx，其他人无权限）；已存在目录的权限 SHALL 不改动；不调用 chown、不改进程 umask。`SANDBOX_ROOT/<ownerId>`、每个工作空间根、`OMP_STATE_DIR` 下由 app-server 创建的 `sessions/<ownerId>`、`home`、`agent` SHALL 全部经它创建。
 
