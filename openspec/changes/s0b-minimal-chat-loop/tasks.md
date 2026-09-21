@@ -27,7 +27,7 @@ Minimal mergeable slice: 2.1 假上游单独可合并保绿（纯测试支撑文
 
 ## 3. chat-sessions
 
-- [ ] 3.1 迁移 `020_chat_sessions.sql`（三表、CHECK/FK/级联/索引）+ receipt 顺序与约束单测；既有「受信任迁移目录恰好按序登记三个真实迁移」断言同 PR 更新为四个
+- [ ] 3.1 迁移 `032_chat_sessions.sql`（三表、CHECK/FK/级联/索引）+ receipt顺序与约束单测；既有受信任迁移目录五个回执升级为六个，保留0010/002/010/030/031原样。#82用户批准追加032以避免020插入破坏既有数据库连续前缀；验证冷启动、旧库升级/重开及失败原子性。
 - [ ] 3.2 `server/src/sessions/store.ts`：会话/消息/步骤读写（创建、按 owner 列表、消息树读取、prompt 受理事务、2s/2KB 进行中刷盘与回合收尾落盘、`stream_epoch` 递增、标题截取、**启动对账** running→failed）+ 对 `:memory:` 单测（含对账场景）
 - [ ] 3.3 `server/src/sessions/events.ts`：omp 帧 → 归一化事件映射（过滤表、detail 摘要、`message_end.stopReason` 失败记忆、`agent_end` 终态判定、异常退出判定）纯函数 + 单测
 - [ ] 3.4 `server/src/sessions/tokens.ts`：`TokenRegistry`（登记/查找/注销，64 hex）+ 单测
