@@ -5,8 +5,8 @@
 - [x] 2.1 Immutable message/request-bound mapping, tool correlation/summaries, filtering, first-failure memory, terminal-once and explicit abnormal-failure input implemented; 12 focused tests GREEN. No store/runtime/source-neighbor changes.
 ## 3. Independent acceptance and delivery
 - [x] 3.1 Parent compiled sequence/immutability probe and 21 fresh postfreeze cases passed; 19 disposable compiled mutations rejected semantically, restoration and dedicated stability passed for both probes. Server full suite:52files/1054tests,91.88% statements/89.33% branches; events.ts95.74%/95.87%. Server build/types, scoped Biome, anti-drift and strict OpenSpec passed. Full suite preceded final test-only ChatEvent typing and three identical expected-array extraction; focused tests and final static gates passed after those mechanical edits. Exact-SHA CI remains required.
-- [ ] 3.2 Expanded correctness/test-evidence+spec/invariant-state review, bounded fix gate, exact-head CI and source PR merge.
-- [ ] 3.3 Separate docs-only canonical pure-mapping promotion/archive; parent task3.3 checked without claiming Supervisor/SSE/local-only assembly complete.
+- [x] 3.2 PR194 merged at7eff8e1; source head844c0beab6616a29986e96f017698874e2fa4a1e. Expanded three-seat review nofindings, round1clean/0fixpasses; CI35567497524 all8green on samehead. Finished-ID restart note additionally proved by a third probe and one semantic mutant, total20 (15original/4holdout/1supplement), with restoration/stability; no source changes. Summary https://github.com/DankerMu/open-wb/pull/194#issuecomment-5756499227.
+- [x] 3.3 Docs-only canonical pure-mapping promotion/archive and parent task3.3 synchronization; Supervisor/SSE/local-only assembly remains pending. Disposable copies removed; original/corrected tests and executable evidence retained under /tmp/open-wb-issue83-evidence.
 ## Core risk packs
 - Public API selected: pure state/result and ChatEvent identity-phase types→1.1/2.1/3.1.
 - Config/project setup not selected: no environment, build or dependency change.
