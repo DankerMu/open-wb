@@ -1,11 +1,11 @@
 ## 1. Contract and test-first
 - [x] 1.1 Expandedfixture reviewPASS after one bounded revision pinningfaultedappend throwing retainederror; title/reconcile provenance andDTOprimitive types clarified. Strictvalidation exit0; schema/errors/runtime/config andAPI identities frozen beforeA1.
-- [ ] 1.2 A1 pairedtests beforestore source, SETUPonly; parent-authorizedA2 callablewrongDBbehavior semanticRED; freezesnapshot beforeB.
+- [x] 1.2 A1 tests preceded source (missing-module SETUP only); three preimplementation oracle corrections preserved original/corrected standalone bytes. A2 callable DB-inert baseline: 19 semantic failures; parent build passed and independent fileDB probe rejected wrong owner-list contents. Frozen before B.
 ## 2. Store lifecycle
-- [ ] 2.1 OwnerCRUD/orderedviews, atomicadmission/compensation, explicitruntime metadata/epoch andcanonicalnotfound/busyerrors.
-- [ ] 2.2 Immediate steps,2048byte/2000ms quiettimerbuffer, terminalatomicdrain, failureownership/stalefences/close andexplicitstartupreconcile; focusedrealSQLite+fakeclockGREEN.
+- [x] 2.1 OwnerCRUD/orderedviews, atomicadmission/compensation, explicitruntime metadata/epoch andcanonicalnotfound/busyerrors.
+- [x] 2.2 Immediate steps,2048byte/2000ms quiettimerbuffer, terminalatomicdrain, failureownership/stalefences/close andexplicitstartupreconcile. Parent found failed terminal entry still allowed compensation before any delta/step; genuine added regression RED then shared terminal-progress fix GREEN (20 focused tests).
 ## 3. Acceptance and delivery
-- [ ] 3.1 Parent compiledfileDB/realtimer proof, independentoracles/mutants/restoration, scoped/fullservercoverage/static/drift/build/strictOpenSpec andprotectedidentities.
+- [x] 3.1 Parent real fileDB, quiet timers, each-table reconciliation rollback, deferred commit failure, two-store isolation, terminal-progress and AggregateError recovery probes passed. 18 disposable compiled mutations rejected; restoration and dedicated stability controls passed. Full server: 49 files/1020 tests, 91.52% statements/88.64% branches; store 95.14%/85.71%. Build/types/scoped Biome/anti-drift passed; compiled bytes unchanged by unused-export cleanup. Final strict validation and same-SHA CI remain merge gates. Evidence: /tmp/open-wb-issue97-evidence.
 - [ ] 3.2 Expandedcorrectness/test-evidence+spec/invariant-state review; boundedfixgate/sameSHA CI/sourcePRmerge.
 - [ ] 3.3 Syncparentpersistencenotes/task3.2 anddocs-onlycanonicalpromotion/archive; do notmarkREST/runtimeassemblyimplemented.
 ## Risk mapping
@@ -23,3 +23,5 @@
 Projectdomain selected tenantownership, SQLitepersistentstate/catalogcompatibility, auth/sessionlifecycle atchatturnboundary, offlineNode/SQLite→2.1/2.2/3.1. Notselectedsandboxfileboundary, ompchildenv/processspawn, HTTP/SSEenvelopes, browserruntime, cross-servicenetwork: ownedbylaterissues, notthisstore.
 ## Governance
 Onewriter/currentcheckout/no newworktree. Implementation onlystore.ts+tests; parentownsfixtures/acceptance. No schema/config/deps/CI/threshold/runtime edits. Reviewersleaf/read-only/no verificationcommands. WriterMUSTNOTreadparent probes/baseline/qualification files; suppliedcontract andownreports only. Originaltestbytes andRED evidence frozenbeforeB; no retrospectiveRED. Userhumanwhiteboxwaiver doesnotwaiveagentreview/CI/finalEpicfunctionalreview.
+
+Deviations: paired tests underwent authorized preimplementation oracle corrections, later formatter-only changes, safe cleanup restructuring, one new reproduced terminal-progress regression, and unused-export removal; original standalone snapshots retained. Parent probe cleanup was corrected to preserve its primary caller-transaction assertion, then all affected mutations requalified. Writer accidentally reused parent terminal-progress-red.log for its separate Vitest RED; original parent subprocess output recovered unchanged to parent-terminal-progress-red.log. No acceptance assertions weakened. Source/tests exceed the review-only 400-line PR guidance because this issue owns the inseparable storage lifecycle and real-SQLite failure suite; files remain below 800 lines. No OS-enclave or production-release claim; final Epic functional review remains deferred by user decision.
