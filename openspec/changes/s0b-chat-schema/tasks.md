@@ -1,11 +1,11 @@
 ## 1. Contract and baseline
 - [x] 1.1 User approved032append, issue/parent synchronized. Expandedfixture reviewPASS after one bounded revision (triage/risk mapping and requiredmessageindex); child/parent strictvalidation exit0. Genuine pre032DB with five receipts and auth/audit/workspace rows captured beforeSQLcreation; protected identities frozen beforeStageA.
-- [ ] 1.2 StageA: paired realopenDb tests and sharedsix-receiptexpectations before032 exists; semanticRED on publicdatabase behavior; freeze standaloneoriginaltests beforeStageB.
+- [x] 1.2 Before032 existed, affected215 tests yielded49 semanticRED/166GREEN (five-vs-six receipts/missingchat tables); parent compiledprobe independently rejected missing032receipt. Initial and corrected standalonetest snapshots retained; SQLite numeric-string affinity oracle corrected beforeSQLcreation.
 ## 2. Schema
-- [ ] 2.1 Add only032_chat_sessions.sql with exacttables/domains/defaults/keys/cascades/indices; no runner/oldmigration/sessioncode edits.
-- [ ] 2.2 Focused testsGREEN: freshschema/negativewrites/cascadeisolation/oldDBupgrade/stablereopen/atomiclatefailureandrecovery; sharedcatalogconsumers remaincorrect.
+- [x] 2.1 Added only61-line032_chat_sessions.sql production asset with exactdomains/defaults/FKs/cascades/twoindices; oldmigration/runner/ledger bytes unchanged.
+- [x] 2.2 Focused215testsGREEN, including30new schema cases. Fresh/upgrade/reopen/lateconflictrollback/recovery/cascadeisolation pass; stale auth-schema globaltableinventory updated, incidentalglobalindexname assertion removed while semanticindexchecks remain.
 ## 3. Acceptance and delivery
-- [ ] 3.1 Parent compiledrealDBprobe and disposableSQLfaultqualification/reference/restoration; scopedchecks/fullservercoverage/build/strictOpenSpec and oldassetidentityproof.
+- [x] 3.1 Parent compiledrealSQLite probesGREEN,21 semanticSQLmutants rejected with restoredGREEN and dedicatednochange controls; actualpre032DB immutable.973server tests/45files,90.65% statements/88.55% branches; types/build/scopedlint/drift0clones/child+parentstrictOpenSpec exit0.
 - [ ] 3.2 Expandedcorrectness/test-evidence+spec/invariant-state review, boundedfixgate andsameSHA CI/sourcePRmerge.
 - [ ] 3.3 Parenttask3.1 update, canonicalchat-sessions promotion anddocs-onlyarchive; no prematurestore/routes requirements.
 ## Risk pack mapping

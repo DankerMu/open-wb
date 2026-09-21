@@ -10,12 +10,14 @@ export const MIGRATION_002 = "002_schema_migrations_history.sql";
 export const MIGRATION_010 = "010_auth_schema_seed.sql";
 export const MIGRATION_030 = "030_audit_events.sql";
 export const MIGRATION_031 = "031_workspaces.sql";
+export const MIGRATION_032 = "032_chat_sessions.sql";
 export const TRACKED_MIGRATION_FILENAMES = [
   MIGRATION_0010,
   MIGRATION_002,
   MIGRATION_010,
   MIGRATION_030,
   MIGRATION_031,
+  MIGRATION_032,
 ] as const;
 export const HISTORY_VIEW = "schema_migration_history";
 export type SqlLineEnding = "\n" | "\r\n" | "\r";
@@ -67,8 +69,9 @@ export const COMPLETE_CATALOG: CatalogSnapshot = {
     [3, MIGRATION_010],
     [4, MIGRATION_030],
     [5, MIGRATION_031],
+    [6, MIGRATION_032],
   ],
-  sequenceRows: [["schema_migrations", 5, "integer"]],
+  sequenceRows: [["schema_migrations", 6, "integer"]],
   triggerNames: [
     "audit_events_no_delete",
     "audit_events_no_update",
@@ -413,10 +416,30 @@ interface UniqueIndexKey {
   cid: number;
   columnName: string | null;
   isKey: number;
+  desc: number;
 }
 
 export function uniqueIndexKeys(db: DatabaseSync, table: string): string[][] {
-  const indexes = db
+  const indexes = listTableIndexes(db, table);
+  expect(indexes.every((index) => index.unique === 1 && index.isPartial === 0)).toBe(true);
+  return indexes
+    .map((index) => indexKeyPairs(db, table, index.name).map(([columnName]) => columnName))
+    .sort((left, right) => left.join("\0").localeCompare(right.join("\0")));
+}
+
+export function tableIndexKeys(
+  db: DatabaseSync,
+  table: string,
+): Array<{ unique: number; isPartial: number; columns: Array<[string, number]> }> {
+  return listTableIndexes(db, table).map((index) => ({
+    unique: index.unique,
+    isPartial: index.isPartial,
+    columns: indexKeyPairs(db, table, index.name),
+  }));
+}
+
+function listTableIndexes(db: DatabaseSync, table: string): UniqueIndexInfo[] {
+  return db
     .prepare(`PRAGMA index_list('${table}')`)
     .all()
     .map((row) => {
@@ -433,31 +456,41 @@ export function uniqueIndexKeys(db: DatabaseSync, table: string): string[][] {
         isPartial: Number(index.partial),
       } satisfies UniqueIndexInfo;
     });
-  expect(indexes.every((index) => index.unique === 1 && index.isPartial === 0)).toBe(true);
-  return indexes
-    .map((index) => uniqueKeyColumns(db, table, index.name))
-    .sort((left, right) => left.join("\0").localeCompare(right.join("\0")));
 }
 
-function uniqueKeyColumns(db: DatabaseSync, table: string, indexName: string): string[] {
-  const keys = db
+function indexKeyPairs(
+  db: DatabaseSync,
+  table: string,
+  indexName: string,
+): Array<[string, number]> {
+  return indexKeyEntries(db, indexName).map((entry) => {
+    if (entry.columnName === null) {
+      throw new Error(`unexpected expression index on ${table}`);
+    }
+    return [entry.columnName, entry.desc];
+  });
+}
+
+function indexKeyEntries(db: DatabaseSync, indexName: string): UniqueIndexKey[] {
+  return db
     .prepare(`PRAGMA index_xinfo('${indexName}')`)
     .all()
     .map((row) => {
-      const entry = row as { seqno: unknown; cid: unknown; name: unknown; key: unknown };
+      const entry = row as {
+        seqno: unknown;
+        cid: unknown;
+        name: unknown;
+        key: unknown;
+        desc: unknown;
+      };
       return {
         seqno: Number(entry.seqno),
         cid: Number(entry.cid),
         columnName: entry.name === null ? null : String(entry.name),
         isKey: Number(entry.key),
+        desc: Number(entry.desc),
       } satisfies UniqueIndexKey;
     })
     .filter((entry) => entry.isKey === 1)
     .sort((left, right) => left.seqno - right.seqno);
-  return keys.map((entry) => {
-    if (entry.columnName === null) {
-      throw new Error(`unexpected expression index on ${table}`);
-    }
-    return entry.columnName;
-  });
 }
