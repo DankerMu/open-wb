@@ -4,6 +4,7 @@
  * Callers supply a structural principal; this module does not import auth or http.
  */
 import type { DatabaseSync, SQLInputValue, SQLOutputValue } from "node:sqlite";
+import { createSqliteTextDecoder } from "../db/index.js";
 import { HttpError } from "../errors/index.js";
 
 const DEFAULT_LIMIT = 50;
@@ -46,7 +47,7 @@ type AuditEventRow = {
   ts: number;
   actor_id: string;
   kind: string;
-  title: string;
+  title: Uint8Array;
   detail: string;
   workspace_id: string | null;
 } & Record<string, SQLOutputValue>;
@@ -94,13 +95,14 @@ export function query(
   }
 
   params.push(limit);
+  const decoder = createSqliteTextDecoder(db);
   const where = clauses.length === 0 ? "" : `WHERE ${clauses.join(" AND ")} `;
   const rows = db
     .prepare(
-      `SELECT id, ts, actor_id, kind, title, detail, workspace_id FROM audit_events ${where}ORDER BY id DESC LIMIT ?`,
+      `SELECT id, ts, actor_id, kind, CAST(title AS BLOB) AS title, detail, workspace_id FROM audit_events ${where}ORDER BY id DESC LIMIT ?`,
     )
     .all(...params) as AuditEventRow[];
-  return rows.map(mapEvent);
+  return rows.map((row) => mapEvent(row, decoder));
 }
 
 function resolveLimit(limit: number | undefined): number {
@@ -131,13 +133,13 @@ function isCanonicalPositiveDecimal(value: string): boolean {
   return true;
 }
 
-function mapEvent(row: AuditEventRow): AuditEvent {
+function mapEvent(row: AuditEventRow, decoder: TextDecoder): AuditEvent {
   return {
     id: row.id,
     ts: row.ts,
     actorId: row.actor_id,
     kind: row.kind,
-    title: row.title,
+    title: decoder.decode(row.title),
     detail: JSON.parse(row.detail) as unknown,
     workspaceId: row.workspace_id,
   };
