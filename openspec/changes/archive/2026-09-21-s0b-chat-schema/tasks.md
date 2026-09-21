@@ -6,8 +6,8 @@
 - [x] 2.2 Focused215testsGREEN, including30new schema cases. Fresh/upgrade/reopen/lateconflictrollback/recovery/cascadeisolation pass; stale auth-schema globaltableinventory updated, incidentalglobalindexname assertion removed while semanticindexchecks remain.
 ## 3. Acceptance and delivery
 - [x] 3.1 Parent compiledrealSQLite probesGREEN,21 semanticSQLmutants rejected with restoredGREEN and dedicatednochange controls; actualpre032DB immutable.973server tests/45files,90.65% statements/88.55% branches; types/build/scopedlint/drift0clones/child+parentstrictOpenSpec exit0.
-- [ ] 3.2 Expandedcorrectness/test-evidence+spec/invariant-state review, boundedfixgate andsameSHA CI/sourcePRmerge.
-- [ ] 3.3 Parenttask3.1 update, canonicalchat-sessions promotion anddocs-onlyarchive; no prematurestore/routes requirements.
+- [x] 3.2 PR186 merged atabf93f8 after three expanded seats returned no blocking findings; round1clean/0fix passes, head42cb68ca710e546490fccc1bf0060c3b87f8c837 CI35550134385 all8green. Evidence: https://github.com/DankerMu/open-wb/pull/186#issuecomment-5754351808.
+- [x] 3.3 Parenttask3.1 updated and remaining non-normative020reference corrected; onlyschema requirement promoted to canonicalchat-sessions in docs-onlyarchive, no store/routes requirements.
 ## Risk pack mapping
 - Public API/CLI/script entry: not selected; no new exported API or entrypoint, existingopenDb used as verification boundary3.1.
 - Config/project setup: not selected; no config/env/dependency setup change.
