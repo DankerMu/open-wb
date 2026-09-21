@@ -30,7 +30,7 @@ Archive coordination: 主 `audit-core` 已晋升 2.1 schema、2.2 emit/query（�
 - [x] 3.2 迁移 `031_workspaces.sql`（双唯一、`dir` CHECK）+ 形态单测；受信任迁移目录计数断言随之 +1（#116 / PR #151；schema-only slice 已归档，目录根行为仍待 3.3）
 - [x] 3.3 `server/src/workspaces/store.ts`：owner-scoped列表/rootOf与同步创建事务、精确dir派生/Unicode scalar身份校验、INSERT-only conflict、惰性根/采用目录、同DB审计、失败回滚及逆序空目录补偿；ROLLBACK失败（含undefined）仍补偿并保留AggregateError/活动事务残留。#125 / PR #184，最终CI35545126599全绿；真实DB/FS/facade smoke已验，HTTP/装配仍待 #127/#128。
 - [x] 3.4 `server/src/workspaces/tree.ts` + `preview.ts`：单层列举（目录优先、字节序、跳过 symlink/特殊文件）与预览判定/流式读取（扩展名集合、`text/plain` + `nosniff`、1 MiB 截断头、图片 10 MiB 上限）纯函数 + 临时目录单测；#117 / PR #175，CI35527764996 全绿；helper-only slice 晋升，不含 REST/授权/装配。
-- [ ] 3.5 `server/src/workspaces/rest.ts` + `index.ts`：`registerWorkspaces(app,{db,sandbox,audit})` 五端点（列表/创建/tree/dirs/file；他人 404、越界 403 + 审计、409/413/415/400 分支、`no-store`）+ 对完整装配 app 的 `app.inject()` 单测（临时 `SANDBOX_ROOT`）
+- [x] 3.5 `server/src/workspaces/rest.ts` + `index.ts`：`registerWorkspaces(app,{store,sandbox,audit})` 五端点（列表/创建/tree/dirs/file；三条ID路由foreign/missing404、越界403+真实审计、409/413/415/400、早期no-store），真实createApp/DB/FS/facade/audit inject与localhost流中止/fd关闭验证；#127 / PR188，最终CI35561866604全绿。Canonicalstore由装配构造，生产接线仍待3.6。
 - [ ] 3.6 `app.ts`/`server.ts`（依赖 S0b #101/#102）：沙箱 facade 构造（`rootOf` 来自 workspaces store、`emit` 来自 audit）并注入 `registerWorkspaces` → `registerAccounts`；`STARTUP_MODULES` 增 `workspaces`、`accounts`（恰七项）；配置/启动顺序测试面（`server-config.test.ts`、`server-startup-order.test.ts`）随之更新
 
 Suggested fixture level: expanded - 工作空间 REST 是沙箱边界的唯一 HTTP 暴露面（Critical Path），隔离/越界/审计联动须以完整装配 app + 真实临时目录证明
@@ -38,6 +38,7 @@ Minimal mergeable slice: 3.1 错误表扩展单独可合并保绿（既有 mappe
 Archive coordination: 主 `http-service-skeleton` 的「统一错误信封」已晋升至十一码/六 owner，并保留 constructor-backed allowlist、FST_ERR_VALIDATION 排除、guard/fallback 与 route-owned cache 语义。S0b/S1a 父 change 最终归档不得用旧七码/较弱文本覆盖；生产 workspace 路由仍归 #127，装配归 #128。
 Archive coordination: 主 `workspaces` 已晋升 schema 与单层列举/预览 helpers。父 change 最终归档保留 helper 的 UTF-8 字节序、生产 classifier headers/limit、原始字节上限与 canonical errors，不以旧组合需求覆盖；#127 仍负责先授权 resolve、缺失/非普通文件404、真实HTTP头/状态、原生错误路径脱敏与 client-abort 销毁流。helper 信任已授权路径和元数据，不声明 TOCTOU 防护。证据边界：精确1MiB/10MiB已测分类，整流不是独立阈值行；错误流测code+close，完成/提前destroy另测fd EBADF。
 Archive coordination: 主 `workspaces` 晋升 #125 store/惰性目录事务；最终归档保留合法Unicode名称身份、孤立surrogate在mutation前bad_request、raw `(db,event)=>number`同连接audit、INSERT-only conflict、失败ROLLBACK仍补偿及可能活动事务/未提交行残留。部署base可信预置、稳定FS假设不扩大为TOCTOU或跨FS/SQLite崩溃原子性。
+Archive coordination: #127 REST要求与sandbox-core ENOTDIR结构不存在修正已晋升；父归档须保留单一store注入、invalidpersistedroot500/validmissingroot404、原始path、早期no-store、native预览错误清头/中止释放、dirs审计失败可留目录，不以旧组合要求覆盖。#128 handoff comment5755547224；用户批准精确单行SAST误报注释，不扩大为规则/目录豁免。
 
 ## 4. files-web
 
