@@ -1,0 +1,29 @@
+## 1. Contract and test-first
+- [x] 1.1 Expandedfixture reviewPASS after one bounded revision pinningfaultedappend throwing retainederror; title/reconcile provenance andDTOprimitive types clarified. Strictvalidation exit0; schema/errors/runtime/config andAPI identities frozen beforeA1.
+- [x] 1.2 A1 tests preceded source (missing-module SETUP only); three preimplementation oracle corrections preserved original/corrected standalone bytes. A2 callable DB-inert baseline: 19 semantic failures; parent build passed and independent fileDB probe rejected wrong owner-list contents. Frozen before B.
+## 2. Store lifecycle
+- [x] 2.1 OwnerCRUD/orderedviews, atomicadmission/compensation, explicitruntime metadata/epoch andcanonicalnotfound/busyerrors.
+- [x] 2.2 Immediate steps,2048byte/2000ms quiettimerbuffer, terminalatomicdrain, failureownership/stalefences/close andexplicitstartupreconcile. Parent found failed terminal entry still allowed compensation before any delta/step; genuine added regression RED then shared terminal-progress fix GREEN (20 focused tests).
+## 3. Acceptance and delivery
+- [x] 3.1 Parent real fileDB, quiet timers, each-table reconciliation rollback, deferred commit failure, two-store isolation, terminal-progress and AggregateError recovery probes passed. 18 disposable compiled mutations rejected; restoration and dedicated stability controls passed. Full server: 49 files/1020 tests, 91.52% statements/88.64% branches; store 95.14%/85.71%. Build/types/scoped Biome/anti-drift passed; compiled bytes unchanged by unused-export cleanup. Final strict validation and same-SHA CI remain merge gates. Evidence: /tmp/open-wb-issue97-evidence.
+- [ ] 3.2 Expandedcorrectness/test-evidence+spec/invariant-state review; boundedfixgate/sameSHA CI/sourcePRmerge.
+- [ ] 3.3 Syncparentpersistencenotes/task3.2 anddocs-onlycanonicalpromotion/archive; do notmarkREST/runtimeassemblyimplemented.
+## Risk mapping
+- PublicAPI selected: SessionStore/factory/view/error/lifecyclesignatures→2.1/2.2/3.1.
+- Config/projectsetup notselected: no env/dependency/build config; requiredflusherrorcallback islocalAPI, not operatorconfig.
+- FileIO/path selected: persistedSQLitefile/reopen/DBownership→3.1; no userfilesystempaths.
+- Schema/fields/units selected: existing032 DTOs,Unicodecharacters/UTF8bytes/ms/ordering→2.1/2.2; no SQLmigration.
+- Auth / permissions / secrets: selected for owner-scoped queries and admission, with trusted internal metadata kept separate. Evidence: 2.1 / 3.1. Token and cookie implementation excluded.
+- Concurrency/state/order selected: ownedtransactions, timer/buffer/turnidentity, atomiccompensation/finish/reconcile→2.1/2.2/3.1.
+- Resource/largeinput selected: boundedpendingflushbudget, no emptytimers, closereclaimsownedtimers, no fullanswercopyperdelta→2.2/3.1.
+- Compatibility selected: audit/workspaces/coreerrors/runtime unchanged, #99/#100downstreamports preserved→1.1/3.1.
+- Error/rollback selected: trigger-inducedpartialwrite/commit/flushfailure, callertransaction/notification→2.1/2.2/3.1.
+- Release/packaging selected: compileactualmodule/no newdependency/sameSHA CI→3.1/3.2.
+- Documentation selected: fixtures/parentstorage-state notes andcanonicalstore-onlypromotion→1.1/3.3.
+Projectdomain selected tenantownership, SQLitepersistentstate/catalogcompatibility, auth/sessionlifecycle atchatturnboundary, offlineNode/SQLite→2.1/2.2/3.1. Notselectedsandboxfileboundary, ompchildenv/processspawn, HTTP/SSEenvelopes, browserruntime, cross-servicenetwork: ownedbylaterissues, notthisstore.
+## Governance
+Onewriter/currentcheckout/no newworktree. Implementation onlystore.ts+tests; parentownsfixtures/acceptance. No schema/config/deps/CI/threshold/runtime edits. Reviewersleaf/read-only/no verificationcommands. WriterMUSTNOTreadparent probes/baseline/qualification files; suppliedcontract andownreports only. Originaltestbytes andRED evidence frozenbeforeB; no retrospectiveRED. Userhumanwhiteboxwaiver doesnotwaiveagentreview/CI/finalEpicfunctionalreview.
+
+Deviations: paired tests underwent authorized preimplementation oracle corrections, later formatter-only changes, safe cleanup restructuring, one new reproduced terminal-progress regression, and unused-export removal; original standalone snapshots retained. Parent probe cleanup was corrected to preserve its primary caller-transaction assertion, then all affected mutations requalified. Writer accidentally reused parent terminal-progress-red.log for its separate Vitest RED; original parent subprocess output recovered unchanged to parent-terminal-progress-red.log. No acceptance assertions weakened. Source/tests exceed the review-only 400-line PR guidance because this issue owns the inseparable storage lifecycle and real-SQLite failure suite; files remain below 800 lines. No OS-enclave or production-release claim; final Epic functional review remains deferred by user decision.
+
+Review round 1: correctness and invariant-state found no defects. Evidence seat identified missing persisted Biome pass output (the precommit command and same-SHA CI were already green); the pass was independently rerun and archived. Its step-only progress coverage gap consumed fix pass 1/2: one added case covers successful and SQL-failed startStep before any text/terminal progress; source unchanged. Focused 21 tests and full server 1021 tests pass; scoped Biome/types/anti-drift pass. Deleting only startStep's progress assignment in a disposable source copy makes this exact added test fail; restoration/stability pass. Parent step-only probe also discriminates, bringing compiled mutants to 19. Initial disposable test copy lacked tsconfig.base.json (SETUP-only, retained); configured rerun produced the claimed semantic failure. Trusted metadata missing-session error semantics remain intentionally unpinned; misleading unreachable not_found branch tracked nonblocking in #190, not silently expanded here.
