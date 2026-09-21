@@ -173,12 +173,37 @@ describe("core/sandbox resolve", () => {
     expect(snapshotTree(layout.parent)).toEqual(before);
   });
 
-  it("rejects unexpected metadata failures instead of authorizing the path", () => {
+  it("treats descendants below an ordinary file as structural absence while retaining later escape checks", () => {
     const layout = createLayout();
     writeFileSync(join(layout.sandbox, "regular-file"), "not-a-directory");
     const before = snapshotTree(layout.parent);
 
-    expectRejected(layout.sandbox, "regular-file/child", "read");
+    expect(resolve(layout.sandbox, "regular-file/child", "read")).toEqual({
+      ok: true,
+      absPath: join(layout.canonicalSandbox, "regular-file", "child"),
+    });
+    expect(resolve(layout.sandbox, "regular-file/child", "list")).toEqual({
+      ok: true,
+      absPath: join(layout.canonicalSandbox, "regular-file", "child"),
+    });
+    expect(resolve(layout.sandbox, "regular-file/child", "mkdir")).toEqual({
+      ok: true,
+      absPath: join(layout.canonicalSandbox, "regular-file", "child"),
+    });
+    expectRejected(layout.sandbox, "regular-file/child/..", "read");
+
+    expect(snapshotTree(layout.parent)).toEqual(before);
+  });
+
+  it("rejects a real unexpected metadata error instead of authorizing the path", () => {
+    const layout = createLayout();
+    const tooLongName = "x".repeat(256);
+    const before = snapshotTree(layout.parent);
+
+    expect(() => lstatSync(join(layout.sandbox, tooLongName))).toThrow(
+      expect.objectContaining({ code: "ENAMETOOLONG" }),
+    );
+    expectRejected(layout.sandbox, tooLongName, "read");
 
     expect(snapshotTree(layout.parent)).toEqual(before);
   });
