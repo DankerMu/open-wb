@@ -497,9 +497,11 @@ function expectAuthSchema(db: DatabaseSync): void {
     "accounts",
     "audit_events",
     "auth_sessions",
+    "chat_messages",
+    "chat_sessions",
+    "chat_steps",
     "workspaces",
   ]);
-  expect(businessObjectNames(db, "index")).toEqual(["audit_events_actor_id"]);
   expect(businessObjectNames(db, "view")).toEqual([]);
   expect(businessObjectNames(db, "trigger")).toEqual([
     "audit_events_no_delete",

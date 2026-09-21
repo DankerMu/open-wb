@@ -37,10 +37,10 @@ S0a 留下的接缝：`createApp({db,...})` 插件装配、`registerAuth` + root
    - 启动握手：读到 `ready` 帧 → 发 `negotiate_protocol 2` 成功 → 发 `get_state`；响应 `sessionFile` 为非空字符串才算握手成功并写回 `chat_sessions.omp_session_file`，**缺失/空视为握手失败**（终止子进程，spawn 以 `agent_unavailable` 失败）。握手超时（默认 10s）同样失败。
    - `rpc_chunk` 按 rpc.md 校验 `chunkId/index/count/byteLength`、拒绝交错、限 `maxReassembledFrameBytes`。
 3. **每会话生命周期**（`SessionRuntime`，grill ②）：懒启动——第一条 prompt 触发 spawn；每次收到 omp 事件或 prompt 重置 idle 计时器（`OMP_IDLE_MS` 默认 600000）；idle 到期或服务关停：关 stdin → 等待退出（宽限 5s）→ `SIGTERM` → 再 3s → `SIGKILL`；退出后注销 token、清空缓冲（下一 epoch 重新计数）。子进程在回合中意外退出：当前 assistant 消息置 `failed`（正文为已刷盘 + 内存中未刷盘的增量，一并落盘），先发 `error` 再发 `turn.end{status:"failed"}`，runtime 丢弃；下一条 prompt 按 D2 规则 spawn。
-4. **存储**（迁移 `020_chat_sessions.sql`，grill ③）：
-   - `chat_sessions(id TEXT PK, owner_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, title TEXT NULL, status TEXT NOT NULL CHECK IN ('idle','running','done','failed'), omp_session_file TEXT NULL, stream_epoch INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`，索引 `(owner_id, updated_at DESC)`。
-   - `chat_messages(id INTEGER PK AUTOINCREMENT, session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE, role TEXT CHECK IN ('user','assistant'), content TEXT NOT NULL DEFAULT '', status TEXT CHECK IN ('done','running','failed'), created_at INTEGER NOT NULL)`。
-   - `chat_steps(id INTEGER PK AUTOINCREMENT, message_id INTEGER NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE, ordinal INTEGER NOT NULL, name TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '', status TEXT CHECK IN ('running','done','failed'), started_at INTEGER NOT NULL, ended_at INTEGER NULL, UNIQUE(message_id, ordinal))`。
+4. **存储**（迁移 `032_chat_sessions.sql`，grill ③；#82用户批准末尾追加，保留已存在030/031回执）：
+   - `chat_sessions(id TEXT NOT NULL PK, owner_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, title TEXT NULL, status TEXT NOT NULL CHECK IN ('idle','running','done','failed'), omp_session_file TEXT NULL, stream_epoch INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`，索引 `(owner_id, updated_at DESC)`；id/epoch/时间戳值域见chat-sessions spec，TEXT PK显式NOT NULL防止SQLite空值旁路。
+   - `chat_messages(id INTEGER PK AUTOINCREMENT, session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE, role TEXT NOT NULL CHECK IN ('user','assistant'), content TEXT NOT NULL DEFAULT '', status TEXT NOT NULL CHECK IN ('done','running','failed'), created_at INTEGER NOT NULL)`，查询索引 `(session_id, created_at, id)`。
+   - `chat_steps(id INTEGER PK AUTOINCREMENT, message_id INTEGER NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE, ordinal INTEGER NOT NULL, name TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '', status TEXT NOT NULL CHECK IN ('running','done','failed'), started_at INTEGER NOT NULL, ended_at INTEGER NULL, UNIQUE(message_id, ordinal))`。
    - 会话 id 为 CSPRNG 128-bit lowercase hex；标题在首条 prompt 时取消息前 18 个字符（demo:2251）。写入时机：user 消息与空的 running assistant 消息在 prompt 受理时同事务插入；step 事件即时落盘；**正文刷盘节奏**：`text.delta` 先累加到内存，回合进行中**每 2s 或每累计 2KB 刷一次**（取先到者），`turn.end` 时做最终刷盘——因此崩溃丢失上限 ≤ 2s/2KB 的增量，且回合中崩溃时把内存残量一并落盘后再标 `failed`（实际丢失为 0，2s/2KB 只是 app-server 自身被 kill 时的上限）。
    - **启动对账**：`registerSessions` 在受理任何请求前，把所有 `status='running'` 的会话及其 `running` 消息置为 `failed`（此时不可能有活 runtime），避免上次进程被杀留下的永久 409。
 5. **事件契约与回放**（grill ④⑩）：
@@ -88,4 +88,4 @@ S0a 留下的接缝：`createApp({db,...})` 插件装配、`registerAuth` + root
 
 ## Migration Plan
 
-新增迁移 `020_chat_sessions.sql` 走既有 `openDb` 顺序执行；无既有数据迁移。启动对账只改 `status` 列。回滚 = 移除模块注册与迁移文件（开发期库可删 `var/dev.db`）。
+新增迁移 `032_chat_sessions.sql` 走既有 `openDb` 顺序执行；已有五条回执保持原序及原值，新回执追加为第六条，不修改连续前缀校验器。无既有业务数据改写；启动对账由后继store负责。应用前可回退代码；迁移应用后不得仅删除迁移文件或改旧回执，需恢复迁移前备份与对应代码，或另行设计追加迁移；本任务不自动删库。
