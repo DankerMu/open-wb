@@ -1,0 +1,22 @@
+## 1. Vertical implementation and evidence
+- [x] 1.1 Collection/list/create/shape validation captured semantic RED003/005/007 then GREEN; real createApp+store+facade+audit, owner/Unicode/domain policy preserved. Initial missing-export setup001 is not semantic proof.
+- [x] 1.2 Tree/dirs semantic RED011/013 then GREEN; pure ENOTDIR009 RED/010 GREEN plus retrospective oldresolver HTTP028 RED403/029 GREEN404-noaudit. Escape vectors and real ENAMETOOLONG fail-closed preserved. Later failure/edge coverage first-GREEN is not retroactiveTDD.
+- [x] 1.3 Preview semantic RED018/GREEN019; exact native bytes/security headers/zero/truncation/413/415/404. Main real HTTP observer proves rejected/zero previews never open bodies and aborted native descriptor closes.
+- [x] 1.4 Real SQLite audit/storage/failedROLLBACK residual cases and no-store exercised. Main found native preview-open error escaping canonical envelope via stale text/plain; real EACCES RED plus permanent onSend-unlink ENOENT RED048, route-local onError header reset GREEN. No stream lifecycle wrapper or global mapper change.
+- [x] 1.5 Main eight commands all exit0: scopedBiome, servertype, focused66/6, fullserver991/47 (lines91.25%,branches88.97%), build, knip, jscpd0clones, size. Actual compiled localhost HTTP matrix exit0: five routes/owner/parser/audit/Unicode/rawbytes, missingroot404 versus invalidpersistedroot500, preheaderEACCES canonical500, postheaderEBADF disconnect after65536bytes, actualclientabort after32414bytes; native stream closed fd after262144 of10485760bytes. Root D4 contradiction resolved by preserving #125 invalid-root500 contract. Three bounded clone corrections and two testtype fixes disclosed; no threshold/config changes. Scratch executables removed, recipes/rawlogs retained.
+- [ ] 1.6 Independent expanded static review, bounded fixes, exactheadCI, publicreports/deviations/summary, merge; archive onlythisslice and updateparent/#128handoff.
+## 2. Risk mapping
+- Selected Public API/CLI: five endpoints, exactbody/query/status/cache/envelope;1.1–1.4.
+- Not selected Config/projectsetup: no app/server/env/STARTUP_MODULES; composition in test/runtime smoke only.
+- Selected FileIO/path: owner-firstmetadata, core resolver, ENOTDIR taxonomy, symlink/FIFO, no recursiveparentcreation/adopteddatadeletion;1.2–1.5.
+- Selected Schema/units: existingownerDB, auditdetail, byte-size/epochms/noUnicodeidentitydrift; realDB tests1.1–1.4; no migration.
+- Selected Auth/permissions/secrets: realcookies/twoaccounts/foreign404/noaudit/pathsanitized500;1.1–1.4.
+- Selected Concurrency/sharedstate: syncmkdir/auditordering, storeownedtransaction failure, streamnativeabort;1.2/1.4/1.5. ExternalFSwriters excluded.
+- Selected Resource limits:16KiBparser,1MiBtextprefix,10MiBimage,zero,backpressure/abort;1.1/1.3/1.5.
+- Selected Legacy compatibility: canonicalstore/facade/headers/non-uderivation/rootcachepatterns preserved;1.1–1.5.
+- Selected Error/rollback/partialoutputs: directoryauditfailuremayretaindir; failedDBrollbackmayretaintransaction; preheader500 vs postheaderabort;1.4/1.5.
+- Not selected Release/dependencies: additiveunwiredmodule, no new dependencies.
+- Selected Documentation: fixture signature+resolver correctionexplicit, parent/#128handoff and selectivearchive;1.6.
+## 3. Verification ownership
+Implementer focusedsemanticRED/GREEN only, noformatter/linter/fullsuite/build; rawstdout/stderr/exit artifacts (no transcribedlogs). Main ownsfixture/git/allacceptance. Staticreviewers runNOtests/probes/scripts/build/lint/format and noedits. Allleaves noagents/worktrees/peercontact. Currentworktreeonly; userwaived perissuehumanreview.
+Commands: npm exec --workspace server -- vitest run <workspaceHTTPtests> test/sandbox-resolve.test.ts test/sandbox-facade.test.ts test/workspace-store.test.ts; npm test --workspace server; npm run typecheck --workspace server; npm run build --workspace server; scopednpxbiomecheck; npm run deadcode; npm run dupes; bash scripts/size-guard.sh. Main final actual localhost HTTP probe uses compiled modules; testsuitegreen is not socketabortproof.
