@@ -1,0 +1,311 @@
+/**
+ * Issue #83 pure protocol event mapping.
+ */
+import type { OmpFrame } from "./omp/frame.js";
+
+export type ChatEvent<StepId extends string | number = number> =
+  | { type: "turn.start"; data: { messageId: number } }
+  | { type: "text.delta"; data: { messageId: number; delta: string } }
+  | {
+      type: "step.start";
+      data: { messageId: number; stepId: StepId; name: string; detail: string };
+    }
+  | {
+      type: "step.end";
+      data: {
+        messageId: number;
+        stepId: StepId;
+        status: "done" | "failed";
+        detail: string;
+      };
+    }
+  | { type: "turn.end"; data: { messageId: number; status: "done" | "failed" } }
+  | { type: "error"; data: { messageId: number; message: string } };
+
+const GENERIC_FAILURE = "Agent execution failed";
+const MAX_DETAIL_POINTS = 120;
+const NO_TOOLS: readonly ToolEntry[] = Object.freeze([]);
+const NO_IDS: readonly string[] = Object.freeze([]);
+
+interface ToolEntry {
+  readonly id: string;
+  readonly name: string;
+  readonly detail: string;
+}
+
+interface EventState {
+  readonly messageId: number;
+  readonly promptRequestId: string;
+  readonly started: boolean;
+  readonly ended: boolean;
+  readonly failure: string | undefined;
+  readonly running: readonly ToolEntry[];
+  readonly finished: readonly string[];
+}
+
+interface ApplyResult {
+  state: EventState;
+  events: ChatEvent<string>[];
+}
+
+export function createEventState(input: {
+  messageId: number;
+  promptRequestId: string;
+}): EventState {
+  return freezeState({
+    messageId: input.messageId,
+    promptRequestId: input.promptRequestId,
+    started: false,
+    ended: false,
+    failure: undefined,
+    running: NO_TOOLS,
+    finished: NO_IDS,
+  });
+}
+
+export function applyFrame(state: EventState, frame: OmpFrame): ApplyResult {
+  if (state.ended) {
+    return { state, events: [] };
+  }
+  switch (frame.type) {
+    case "agent_start":
+      return applyAgentStart(state);
+    case "message_update":
+      return applyTextDelta(state, frame);
+    case "tool_execution_start":
+      return applyToolStart(state, frame);
+    case "tool_execution_end":
+      return applyToolEnd(state, frame);
+    case "message_end":
+      return applyMessageEnd(state, frame);
+    case "agent_end":
+      return applyAgentEnd(state, frame);
+    case "response":
+      return applyPromptFailure(state, frame);
+    default:
+      return { state, events: [] };
+  }
+}
+
+export function applyFailure(state: EventState, message: string): ApplyResult {
+  if (state.ended) {
+    return { state, events: [] };
+  }
+  return failTurn(state, message);
+}
+
+function applyAgentStart(state: EventState): ApplyResult {
+  if (state.started) {
+    return { state, events: [] };
+  }
+  return {
+    state: evolve(state, { started: true }),
+    events: [{ type: "turn.start", data: { messageId: state.messageId } }],
+  };
+}
+
+function applyTextDelta(state: EventState, frame: OmpFrame): ApplyResult {
+  if (!state.started) {
+    return { state, events: [] };
+  }
+  const event = asRecord(frame.assistantMessageEvent);
+  if (event?.type !== "text_delta" || typeof event.delta !== "string") {
+    return { state, events: [] };
+  }
+  const message = asRecord(frame.message);
+  if (message !== undefined && message.role !== undefined && message.role !== "assistant") {
+    return { state, events: [] };
+  }
+  return {
+    state,
+    events: [{ type: "text.delta", data: { messageId: state.messageId, delta: event.delta } }],
+  };
+}
+
+function applyToolStart(state: EventState, frame: OmpFrame): ApplyResult {
+  if (!state.started) {
+    return { state, events: [] };
+  }
+  const id = nonemptyString(frame.toolCallId);
+  const name = nonemptyString(frame.toolName);
+  if (
+    id === undefined ||
+    name === undefined ||
+    findRunning(state, id) !== undefined ||
+    state.finished.includes(id)
+  ) {
+    return { state, events: [] };
+  }
+  const detail = "args" in frame ? summarize(frame.args) : "";
+  return {
+    state: evolve(state, {
+      running: Object.freeze([...state.running, { id, name, detail }]),
+    }),
+    events: [
+      {
+        type: "step.start",
+        data: { messageId: state.messageId, stepId: id, name, detail },
+      },
+    ],
+  };
+}
+
+function applyToolEnd(state: EventState, frame: OmpFrame): ApplyResult {
+  if (!state.started) {
+    return { state, events: [] };
+  }
+  const id = nonemptyString(frame.toolCallId);
+  if (id === undefined) {
+    return { state, events: [] };
+  }
+  const entry = findRunning(state, id);
+  if (entry === undefined) {
+    return { state, events: [] };
+  }
+  const detail = "result" in frame ? summarize(frame.result) : entry.detail;
+  const status = frame.isError === true ? "failed" : "done";
+  return {
+    state: evolve(state, {
+      running: Object.freeze(state.running.filter((tool) => tool.id !== id)),
+      finished: Object.freeze([...state.finished, id]),
+    }),
+    events: [
+      {
+        type: "step.end",
+        data: { messageId: state.messageId, stepId: id, status, detail },
+      },
+    ],
+  };
+}
+
+function applyMessageEnd(state: EventState, frame: OmpFrame): ApplyResult {
+  const message = asRecord(frame.message);
+  if (
+    message === undefined ||
+    message.role !== "assistant" ||
+    (message.stopReason !== "error" && message.stopReason !== "aborted")
+  ) {
+    return { state, events: [] };
+  }
+  if (state.failure !== undefined) {
+    return { state, events: [] };
+  }
+  return {
+    state: evolve(state, { failure: nonemptyString(message.errorMessage) ?? GENERIC_FAILURE }),
+    events: [],
+  };
+}
+
+function applyAgentEnd(state: EventState, frame: OmpFrame): ApplyResult {
+  if (frame.isTerminal === false) {
+    return { state, events: [] };
+  }
+  if (state.failure !== undefined) {
+    return failTurn(state, state.failure);
+  }
+  return {
+    state: evolve(state, { ended: true }),
+    events: [{ type: "turn.end", data: { messageId: state.messageId, status: "done" } }],
+  };
+}
+
+function applyPromptFailure(state: EventState, frame: OmpFrame): ApplyResult {
+  if (frame.command !== "prompt" || frame.success !== false || frame.id !== state.promptRequestId) {
+    return { state, events: [] };
+  }
+  return failTurn(state, frame.error);
+}
+
+function failTurn(state: EventState, message: unknown): ApplyResult {
+  return {
+    state: evolve(state, { ended: true }),
+    events: [
+      {
+        type: "error",
+        data: {
+          messageId: state.messageId,
+          message: nonemptyString(message) ?? GENERIC_FAILURE,
+        },
+      },
+      { type: "turn.end", data: { messageId: state.messageId, status: "failed" } },
+    ],
+  };
+}
+
+function evolve(
+  state: EventState,
+  patch: {
+    started?: boolean;
+    ended?: boolean;
+    failure?: string;
+    running?: readonly ToolEntry[];
+    finished?: readonly string[];
+  },
+): EventState {
+  return freezeState({
+    messageId: state.messageId,
+    promptRequestId: state.promptRequestId,
+    started: patch.started ?? state.started,
+    ended: patch.ended ?? state.ended,
+    failure: patch.failure ?? state.failure,
+    running: patch.running ?? state.running,
+    finished: patch.finished ?? state.finished,
+  });
+}
+
+function freezeState(state: EventState): EventState {
+  Object.freeze(state.running);
+  Object.freeze(state.finished);
+  return Object.freeze(state);
+}
+
+function asRecord(value: unknown): OmpFrame | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as OmpFrame)
+    : undefined;
+}
+
+function nonemptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function findRunning(state: EventState, id: string): ToolEntry | undefined {
+  for (const entry of state.running) {
+    if (entry.id === id) {
+      return entry;
+    }
+  }
+  return undefined;
+}
+
+function summarize(value: unknown): string {
+  if (value === undefined) {
+    return "";
+  }
+  const json = JSON.stringify(value);
+  if (typeof json !== "string") {
+    return "";
+  }
+  return truncateCodepoints(
+    json.replaceAll("\u2028", "\\u2028").replaceAll("\u2029", "\\u2029"),
+    MAX_DETAIL_POINTS,
+  );
+}
+
+function truncateCodepoints(text: string, max: number): string {
+  const { length } = text;
+  let offset = 0;
+  let points = 0;
+  while (offset < length) {
+    const codePoint = text.codePointAt(offset);
+    if (codePoint === undefined) {
+      break;
+    }
+    if (points === max) {
+      return text.slice(0, offset);
+    }
+    points += 1;
+    offset += codePoint > 0xffff ? 2 : 1;
+  }
+  return text;
+}
