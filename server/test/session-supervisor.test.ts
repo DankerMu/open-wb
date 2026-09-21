@@ -9,11 +9,13 @@ import {
   sessionId,
   sessionRow,
   stepRow,
+  stepRows,
 } from "./session-store-helpers.js";
 import {
   closeOnEof,
   createControlledRuntime,
   createRealFakeRuntime,
+  createStartEofRuntime,
   eventsFor,
   IDLE_MS,
   OWNER_ID,
@@ -305,6 +307,160 @@ describe("SessionSupervisor real child persistence and lifecycle", () => {
     }
   });
 
+  it("assigns zero-based per-turn step ordinals and numeric public IDs, then resets ordinals on a reused generation", async () => {
+    const reusedToolCallId = "shared-tool";
+    let promptOrdinal = 0;
+    const runtime = createStartEofRuntime((child) => {
+      const turn = promptOrdinal;
+      promptOrdinal += 1;
+      child.emitLine({
+        type: "tool_execution_start",
+        toolCallId: reusedToolCallId,
+        toolName: "bash",
+        args: { command: turn === 0 ? "first-a" : "second" },
+      });
+      if (turn === 0) {
+        child.emitLine({
+          type: "tool_execution_start",
+          toolCallId: "second-tool",
+          toolName: "read",
+          args: { path: "notes.md" },
+        });
+        child.emitLine({
+          type: "tool_execution_end",
+          toolCallId: reusedToolCallId,
+          toolName: "bash",
+          result: { output: "a" },
+        });
+        child.emitLine({
+          type: "tool_execution_end",
+          toolCallId: "second-tool",
+          toolName: "read",
+          result: { text: "ok" },
+        });
+      } else {
+        child.emitLine({
+          type: "tool_execution_end",
+          toolCallId: reusedToolCallId,
+          toolName: "bash",
+          result: { output: "b" },
+        });
+      }
+      child.emitLine({ type: "agent_end", messages: [], isTerminal: true });
+    });
+    const { fixture, events, cookie, session } = await openRecordingSession(runtime.runtime);
+    try {
+      const firstResponse = await postPrompt(
+        fixture.app,
+        session,
+        cookie,
+        JSON.stringify({ message: "first multi-step turn" }),
+      );
+      expect(firstResponse.statusCode).toBe(202);
+      const firstTurn = await waitForTurn(fixture, session, "done");
+      const firstAssistant = assistantFrom(firstTurn);
+      const firstDbSteps = stepRows(fixture.db).filter(
+        (row) => row.message_id === firstAssistant.id,
+      );
+      expect(firstDbSteps.map((row) => row.ordinal)).toEqual([0, 1]);
+      expect(firstAssistant.steps.map((step) => step.ordinal)).toEqual([0, 1]);
+      expect(firstAssistant.steps.map((step) => step.id)).toEqual(
+        firstDbSteps.map((row) => row.id),
+      );
+      const firstPublic = eventsFor(events, session)
+        .map((entry) => entry.event)
+        .filter((event) => event.type === "step.start" || event.type === "step.end");
+      expect(firstPublic).toEqual([
+        {
+          type: "step.start",
+          data: {
+            messageId: firstAssistant.id,
+            stepId: firstDbSteps[0]?.id,
+            name: "bash",
+            detail: '{"command":"first-a"}',
+          },
+        },
+        {
+          type: "step.start",
+          data: {
+            messageId: firstAssistant.id,
+            stepId: firstDbSteps[1]?.id,
+            name: "read",
+            detail: '{"path":"notes.md"}',
+          },
+        },
+        {
+          type: "step.end",
+          data: {
+            messageId: firstAssistant.id,
+            stepId: firstDbSteps[0]?.id,
+            status: "done",
+            detail: '{"output":"a"}',
+          },
+        },
+        {
+          type: "step.end",
+          data: {
+            messageId: firstAssistant.id,
+            stepId: firstDbSteps[1]?.id,
+            status: "done",
+            detail: '{"text":"ok"}',
+          },
+        },
+      ]);
+
+      const secondResponse = await postPrompt(
+        fixture.app,
+        session,
+        cookie,
+        JSON.stringify({ message: "reuse generation with same toolCallId" }),
+      );
+      expect(secondResponse.statusCode).toBe(202);
+      const secondTurn = await waitForTurn(fixture, session, "done");
+      const secondAssistant = latestAssistantFrom(secondTurn);
+      const secondDbSteps = stepRows(fixture.db).filter(
+        (row) => row.message_id === secondAssistant.id,
+      );
+      expect(secondDbSteps.map((row) => row.ordinal)).toEqual([0]);
+      expect(secondAssistant.steps.map((step) => step.ordinal)).toEqual([0]);
+      expect(secondAssistant.steps.map((step) => step.id)).toEqual(
+        secondDbSteps.map((row) => row.id),
+      );
+      expect(secondDbSteps[0]?.id).not.toBe(firstDbSteps[0]?.id);
+      expect(secondDbSteps[0]?.id).not.toBe(firstDbSteps[1]?.id);
+      const secondPublic = eventsFor(events, session)
+        .map((entry) => entry.event)
+        .filter(
+          (event) =>
+            (event.type === "step.start" || event.type === "step.end") &&
+            event.data.messageId === secondAssistant.id,
+        );
+      expect(secondPublic).toEqual([
+        {
+          type: "step.start",
+          data: {
+            messageId: secondAssistant.id,
+            stepId: secondDbSteps[0]?.id,
+            name: "bash",
+            detail: '{"command":"second"}',
+          },
+        },
+        {
+          type: "step.end",
+          data: {
+            messageId: secondAssistant.id,
+            stepId: secondDbSteps[0]?.id,
+            status: "done",
+            detail: '{"output":"b"}',
+          },
+        },
+      ]);
+      expect(runtime.calls).toHaveLength(1);
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("reconciles stale rows before prompt routes and waits for active cleanup without closing caller SQLite", {
     timeout: 15_000,
   }, async () => {
@@ -412,6 +568,15 @@ describe("SessionSupervisor real child persistence and lifecycle", () => {
 
 function assistantFrom(tree: { messages: readonly AssistantMessage[] }) {
   const assistant = tree.messages.find((message) => message.role === "assistant");
+  if (assistant === undefined) {
+    throw new Error("completed turn has no assistant message");
+  }
+  return assistant;
+}
+
+function latestAssistantFrom(tree: { messages: readonly AssistantMessage[] }) {
+  const assistants = tree.messages.filter((message) => message.role === "assistant");
+  const assistant = assistants.at(-1);
   if (assistant === undefined) {
     throw new Error("completed turn has no assistant message");
   }
