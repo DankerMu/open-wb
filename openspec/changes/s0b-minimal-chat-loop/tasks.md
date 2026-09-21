@@ -30,7 +30,7 @@ Minimal mergeable slice: 2.1 假上游单独可合并保绿（纯测试支撑文
 - [x] 3.1 #82/PR186 merged：`032_chat_sessions.sql`三表、CHECK/FK/级联/两查询索引；五→六回执，旧0010/002/010/030/031与业务数据不变。用户批准032追加以避免020插入破坏旧库；215相关/973服务端测试、真实升级/重开/回滚恢复与21错误候选检验通过；三席首轮clean，同SHA CI全绿。SQLite affinity预期修订、受影响auth目录断言及合成token扫描修复均留痕。
 - [x] 3.2 #97/PR189 merged：owner隔离读写、原子受理/未进展补偿、独立epoch/resume、2048 UTF-8字节/首增量2000ms刷盘、步骤/终态/close失败恢复及三表显式启动对账。21聚焦/1021服务端测试、19错误变体及恢复稳定性检验通过；一步骤进度覆盖缺口经fix pass1闭环，复审clean、同SHA CI全绿。trusted metadata错误语义后续#190；REST/runtime装配仍由3.5–3.8承担。
 - [x] 3.3 #83/PR194 merged：纯createEventState/applyFrame/applyFailure，工具/request关联、ACK/噪声过滤、120Unicode codepoint摘要、首失败记忆和终态一次。12聚焦/1054服务端测试、20错误变体及恢复稳定性检验通过；三席首轮clean、同SHA CI全绿。内部toolCallId→DB ID、runtime requestId接缝及local-only完成由3.6/#100负责，未宣称装配完成；oracle-plan可见性偏离与冻结后holdout留痕。
-- [ ] 3.4 `server/src/sessions/tokens.ts`：`TokenRegistry`（登记/查找/注销，64 hex）+ 单测
+- [x] 3.4 #90/PR196 merged：TokenRegistry 原生32字节随机凭证、64位小写hex、精确查找、原子轮换、索引撤销、实例/会话隔离和熵/碰撞失败保留授权。8聚焦/1062服务端测试、真实HTTP代理与12错误变体及恢复稳定性检验通过；三席首轮clean、同SHA CI全绿。共享实例注入与运行时装配仍由3.6–3.8/#100/#101承担。
 - [ ] 3.5 `server/src/sessions/rest.ts`：四 REST 端点对 **stub supervisor**（隔离 404、400/409/502 分支、202 受理、done/failed 可再 prompt）+ `app.inject()` 单测
 - [ ] 3.6 `server/src/sessions/supervisor.ts` + `index.ts`：`SessionSupervisor`（sessionId→runtime、token 登记、崩溃上报→store）与 `registerSessions(app,deps)`（挂 REST；SSE 由 4.2 挂入同一函数）+ 对 1.2 假子进程的端到端回合单测（正常回合落盘、回合中崩溃与 `--resume`、缺 sessionFile 冷启动、上游错误 failed）
 - [ ] 3.7 `app.ts` 装配顺序（model-proxy → sessions）+ `server.ts` 新配置项解析与负向校验 + `STARTUP_MODULES` + 配置单测（`server-config.test.ts` 面）
