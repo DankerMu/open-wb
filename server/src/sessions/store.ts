@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import { randomBytes } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import { createSqliteTextDecoder } from "../core/db/index.js";
 import { HttpError } from "../core/errors/index.js";
 
 type SessionStatus = "idle" | "running" | "done" | "failed";
@@ -89,9 +90,9 @@ export interface SessionStore {
 type SessionDbRow = {
   id: string;
   owner_id: string;
-  title: string | null;
+  title: Uint8Array | null;
   status: SessionStatus;
-  omp_session_file: string | null;
+  omp_session_file: Uint8Array | null;
   stream_epoch: number;
   created_at: number;
   updated_at: number;
@@ -101,7 +102,7 @@ type MessageDbRow = {
   id: number;
   session_id: string;
   role: MessageRole;
-  content: string;
+  content: Uint8Array;
   status: MessageStatus;
   created_at: number;
 };
@@ -110,8 +111,8 @@ type StepDbRow = {
   id: number;
   message_id: number;
   ordinal: number;
-  name: string;
-  detail: string;
+  name: Uint8Array;
+  detail: Uint8Array;
   status: StepStatus;
   started_at: number;
   ended_at: number | null;
@@ -119,9 +120,11 @@ type StepDbRow = {
 
 type RuntimeDbRow = {
   owner_id: string;
-  omp_session_file: string | null;
+  omp_session_file: Uint8Array | null;
   stream_epoch: number;
 };
+
+type AdmissionDbRow = Pick<SessionDbRow, "id" | "owner_id" | "title" | "status" | "updated_at">;
 
 type Turn = {
   sessionId: string;
@@ -144,9 +147,11 @@ type Turn = {
 const FLUSH_BYTES = 2_048;
 const FLUSH_MS = 2_000;
 const SESSION_COLUMNS =
-  "id, owner_id, title, status, omp_session_file, stream_epoch, created_at, updated_at";
-const MESSAGE_COLUMNS = "id, session_id, role, content, status, created_at";
-const STEP_COLUMNS = "id, message_id, ordinal, name, detail, status, started_at, ended_at";
+  "id, owner_id, CAST(title AS BLOB) AS title, status, CAST(omp_session_file AS BLOB) AS omp_session_file, stream_epoch, created_at, updated_at";
+const MESSAGE_COLUMNS =
+  "id, session_id, role, CAST(content AS BLOB) AS content, status, created_at";
+const STEP_COLUMNS =
+  "s.id, s.message_id, s.ordinal, CAST(s.name AS BLOB) AS name, CAST(s.detail AS BLOB) AS detail, s.status, s.started_at, s.ended_at";
 const INSERT_SESSION =
   "INSERT INTO chat_sessions(id, owner_id, title, status, created_at, updated_at) VALUES (?, ?, NULL, 'idle', ?, ?)";
 const INSERT_MESSAGE =
@@ -174,6 +179,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
     },
 
     list(ownerId) {
+      const decoder = createSqliteTextDecoder(db);
       const rows = db
         .prepare(
           `SELECT ${SESSION_COLUMNS} FROM chat_sessions WHERE owner_id = ? ORDER BY updated_at DESC, id ASC`,
@@ -181,12 +187,13 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
         .all(ownerId) as unknown as SessionDbRow[];
       const listed: SessionView[] = [];
       for (const row of rows) {
-        listed.push(toSessionView(row));
+        listed.push(toSessionView(row, decoder));
       }
       return listed;
     },
 
     getMessages(sessionId, ownerId) {
+      const decoder = createSqliteTextDecoder(db);
       const session = db
         .prepare(
           `SELECT ${SESSION_COLUMNS} FROM chat_sessions WHERE id = ? AND owner_id = ? LIMIT 1`,
@@ -202,7 +209,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
         .all(sessionId) as unknown as MessageDbRow[];
       const steps = db
         .prepare(
-          `SELECT s.${STEP_COLUMNS.replaceAll(", ", ", s.")} FROM chat_steps AS s
+          `SELECT ${STEP_COLUMNS} FROM chat_steps AS s
          JOIN chat_messages AS m ON m.id = s.message_id
          WHERE m.session_id = ? ORDER BY s.ordinal ASC, s.id ASC`,
         )
@@ -210,7 +217,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
       const stepsByMessage = new Map<number, StepView[]>();
       for (const step of steps) {
         const current = stepsByMessage.get(step.message_id);
-        const view = toStepView(step);
+        const view = toStepView(step, decoder);
         if (current === undefined) {
           stepsByMessage.set(step.message_id, [view]);
         } else {
@@ -219,22 +226,24 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
       }
       const views: MessageView[] = [];
       for (const message of messages) {
-        views.push({ ...toMessageView(message), steps: stepsByMessage.get(message.id) ?? [] });
+        views.push({
+          ...toMessageView(message, decoder),
+          steps: stepsByMessage.get(message.id) ?? [],
+        });
       }
-      return { session: toSessionView(session), messages: views };
+      return { session: toSessionView(session, decoder), messages: views };
     },
 
     acceptPrompt(sessionId, ownerId, text) {
       assertOpen(closed);
       const now = Date.now();
       const accepted = runOwnedTransaction(db, "prompt admission rollback failed", () => {
+        const decoder = createSqliteTextDecoder(db);
         const session = db
           .prepare(
-            "SELECT id, owner_id, title, status, updated_at FROM chat_sessions WHERE id = ? LIMIT 1",
+            "SELECT id, owner_id, CAST(title AS BLOB) AS title, status, updated_at FROM chat_sessions WHERE id = ? LIMIT 1",
           )
-          .get(sessionId) as unknown as
-          | Pick<SessionDbRow, "id" | "owner_id" | "title" | "status" | "updated_at">
-          | undefined;
+          .get(sessionId) as unknown as AdmissionDbRow | undefined;
         if (session === undefined || session.owner_id !== ownerId) {
           throw new HttpError("not_found");
         }
@@ -247,7 +256,8 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
           .prepare(INSERT_MESSAGE)
           .run(sessionId, "assistant", "", "running", now);
         requireChanges(assistantReceipt.changes, 1, "assistant message insert");
-        const title = session.title === null ? titlePrefix(text) : session.title;
+        const previousTitle = decodeNullableText(decoder, session.title);
+        const title = previousTitle === null ? titlePrefix(text) : previousTitle;
         requireChanges(
           db
             .prepare(
@@ -261,7 +271,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
           userMessageId: Number(userReceipt.lastInsertRowid),
           assistantMessageId: Number(assistantReceipt.lastInsertRowid),
           previousStatus: session.status,
-          previousTitle: session.title,
+          previousTitle,
           previousUpdatedAt: Number(session.updated_at),
         };
       });
@@ -467,9 +477,10 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
     },
 
     runtimeState(sessionId) {
+      const decoder = createSqliteTextDecoder(db);
       const row = db
         .prepare(
-          "SELECT owner_id, omp_session_file, stream_epoch FROM chat_sessions WHERE id = ? LIMIT 1",
+          "SELECT owner_id, CAST(omp_session_file AS BLOB) AS omp_session_file, stream_epoch FROM chat_sessions WHERE id = ? LIMIT 1",
         )
         .get(sessionId) as unknown as RuntimeDbRow | undefined;
       if (row === undefined) {
@@ -480,7 +491,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
         assistantMessageId === undefined ? undefined : activeTurns.get(assistantMessageId);
       return {
         ownerId: row.owner_id,
-        ompSessionFile: row.omp_session_file,
+        ompSessionFile: decodeNullableText(decoder, row.omp_session_file),
         streamEpoch: Number(row.stream_epoch),
         activeTurn:
           turn === undefined
@@ -511,32 +522,36 @@ function assertOpen(closed: boolean): void {
   }
 }
 
-function toSessionView(row: SessionDbRow): SessionView {
+function decodeNullableText(decoder: TextDecoder, bytes: Uint8Array | null): string | null {
+  return bytes === null ? null : decoder.decode(bytes);
+}
+
+function toSessionView(row: SessionDbRow, decoder: TextDecoder): SessionView {
   return {
     id: row.id,
-    title: row.title,
+    title: decodeNullableText(decoder, row.title),
     status: row.status,
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   };
 }
 
-function toMessageView(row: MessageDbRow): Omit<MessageView, "steps"> {
+function toMessageView(row: MessageDbRow, decoder: TextDecoder): Omit<MessageView, "steps"> {
   return {
     id: Number(row.id),
     role: row.role,
-    content: row.content,
+    content: decoder.decode(row.content),
     status: row.status,
     createdAt: Number(row.created_at),
   };
 }
 
-function toStepView(row: StepDbRow): StepView {
+function toStepView(row: StepDbRow, decoder: TextDecoder): StepView {
   return {
     id: Number(row.id),
     ordinal: Number(row.ordinal),
-    name: row.name,
-    detail: row.detail,
+    name: decoder.decode(row.name),
+    detail: decoder.decode(row.detail),
     status: row.status,
     startedAt: Number(row.started_at),
     endedAt: row.ended_at === null ? null : Number(row.ended_at),
