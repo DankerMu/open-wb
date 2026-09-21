@@ -91,7 +91,9 @@ server/src/
 ├── workspaces/
 │   └── mounts/          # mount-manager（rclone/sshfs 生命周期）
 ├── sessions/
-│   ├── omp/             # supervisor + JSONL RPC 编解码
+│   ├── supervisor.ts    # runtime、事件映射与持久化编排
+│   ├── index.ts         # 会话模块注册、对账与资源回收
+│   ├── omp/             # 子进程生命周期 + JSONL RPC 编解码
 │   └── stream/          # 事件序号、环形缓冲、SSE 回放
 ├── kb/                  # 可见范围过滤 + kb-service 客户端
 ├── models/              # 注册表 + 探活

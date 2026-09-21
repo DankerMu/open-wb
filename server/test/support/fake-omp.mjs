@@ -214,6 +214,7 @@ async function handlePrompt(frame) {
   });
   const turns = {
     crash: () => process.exit(2),
+    "crash-after-deltas": () => crashAfterDeltas(),
     error: () => failTurn("fake omp scripted error"),
     "extension-ui": () => requestConfirm(),
     "call-proxy": () => runProxy(frame.message),
@@ -280,6 +281,18 @@ async function handleUi(frame) {
   }
   pendingUi = false;
   await completeTurn(DELTAS, true);
+}
+
+async function crashAfterDeltas() {
+  await emit({ type: "agent_start" });
+  for (const delta of DELTAS.slice(0, 2)) {
+    await emit({
+      type: "message_update",
+      assistantMessageEvent: { type: "text_delta", delta },
+      message: { role: "assistant", content: [] },
+    });
+  }
+  process.exit(2);
 }
 
 async function completeTurn(deltas, tools) {
