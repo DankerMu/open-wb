@@ -2,7 +2,7 @@
  * Shared Issue #95 protocol-test lifecycle and observation helpers.
  * Observation waits on real frame/exit events and never synthesizes termination.
  */
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { type ChildProcessWithoutNullStreams, type SpawnOptions, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -48,6 +48,17 @@ export class RpcHarness {
   fake(): FakeChild {
     const child = new FakeChild();
     this.fakes.push(child);
+    return child;
+  }
+
+  spawnTracked(args: readonly string[], options: SpawnOptions): ChildProcessWithoutNullStreams {
+    const child = spawn(process.execPath, args, {
+      cwd: typeof options.cwd === "string" ? options.cwd : undefined,
+      env: options.env,
+      stdio: ["pipe", "pipe", "pipe"],
+      shell: false,
+    });
+    this.children.push(child);
     return child;
   }
 
@@ -454,6 +465,39 @@ export class FakeChild {
       this.exit(0);
     }
   }
+}
+
+export function holdNextPromptWrite(child: FakeChild): { entered: Promise<void>; release(): void } {
+  const originalWrite = child.stdin.write.bind(child.stdin);
+  let enteredResolve!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    enteredResolve = resolve;
+  });
+  let release: (() => void) | undefined;
+  child.stdin.write = ((chunk: string | Uint8Array, ...rest: unknown[]) => {
+    const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+    if (!text.includes('"type":"prompt"')) {
+      return originalWrite(chunk, ...(rest as []));
+    }
+    const callback = typeof rest[0] === "function" ? rest[0] : rest[1];
+    release = () => {
+      child.stdin.emit("data", Buffer.from(text, "utf8"));
+      if (typeof callback === "function") {
+        callback();
+      }
+    };
+    enteredResolve();
+    return true;
+  }) as typeof child.stdin.write;
+  return {
+    entered,
+    release() {
+      if (release === undefined) {
+        throw new Error("missing held prompt write");
+      }
+      release();
+    },
+  };
 }
 
 async function stopChild(child: ChildProcessWithoutNullStreams): Promise<void> {

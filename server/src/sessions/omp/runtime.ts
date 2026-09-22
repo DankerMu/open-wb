@@ -11,6 +11,7 @@ import {
   OmpProtocolError,
   type SpawnImpl,
 } from "./process.js";
+import { FrameStream } from "./prompt-stream.js";
 
 const DEFAULT_IDLE_MS = 600_000;
 const TERM_GRACE_MS = 5_000;
@@ -44,6 +45,8 @@ export interface SessionRuntimeOpts {
   handshakeTimeoutMs?: number;
 }
 
+export type PromptDispatchReceipt = { requestId: string; sessionFile: string };
+
 export class SessionBusyError extends Error {
   readonly code = "session_busy" as const;
 
@@ -63,8 +66,9 @@ interface SpawnWaiter {
   resolve: (child: ChildProcessWithoutNullStreams | undefined) => void;
 }
 
-interface FrameWaiter {
-  resolve: (result: IteratorResult<OmpFrame>) => void;
+interface ReceiptWaiter {
+  promise: Promise<PromptDispatchReceipt>;
+  resolve: (receipt: PromptDispatchReceipt) => void;
   reject: (error: Error) => void;
 }
 
@@ -89,8 +93,9 @@ interface Turn {
   requestId: string;
   stream: FrameStream;
   sent: boolean;
+  dispatched: ReceiptWaiter;
+  receiptSettled: boolean;
 }
-
 const systemClock: SessionClock = {
   now: () => Date.now(),
   setTimeout: (callback, ms) => setTimeout(callback, ms),
@@ -117,6 +122,7 @@ export class SessionRuntime {
   #generation: Generation | undefined;
   #issuedGenId: number | undefined;
   #turn: Turn | undefined;
+  #pendingReceipts = new Set<Turn>();
   #nextGen = 0;
   #nextRequest = 0;
   #idleTimer: unknown;
@@ -144,7 +150,9 @@ export class SessionRuntime {
     return this.#sessionFile;
   }
 
-  prompt(text: string): AsyncIterable<OmpFrame> {
+  prompt(text: string): AsyncIterable<OmpFrame> & {
+    dispatched: Promise<PromptDispatchReceipt>;
+  } {
     if (this.#closed) {
       throw new AgentUnavailableError("runtime shutdown");
     }
@@ -152,14 +160,24 @@ export class SessionRuntime {
       throw new SessionBusyError();
     }
     const stream = new FrameStream();
-    const turn: Turn = { genId: 0, requestId: "", stream, sent: false };
+    const dispatched = deferredReceipt();
+    void dispatched.promise.catch(() => {});
+    const turn: Turn = {
+      genId: 0,
+      requestId: "",
+      stream,
+      sent: false,
+      dispatched,
+      receiptSettled: false,
+    };
     this.#turn = turn;
+    this.#pendingReceipts.add(turn);
     stream.onCancel = () => {
       this.#abandon(turn);
     };
     this.#resetIdle();
     void this.#runPrompt(text, turn);
-    return stream;
+    return Object.assign(stream, { dispatched: dispatched.promise });
   }
 
   async shutdown(): Promise<void> {
@@ -169,6 +187,7 @@ export class SessionRuntime {
     this.#closed = true;
     this.#clearIdle();
     this.#failActiveTurn(new AgentUnavailableError("runtime shutdown"));
+    this.#rejectPendingReceipts(new AgentUnavailableError("runtime shutdown"));
     const gen = this.#generation;
     if (gen === undefined) {
       return this.#retired;
@@ -183,15 +202,26 @@ export class SessionRuntime {
       turn.genId = gen.id;
       turn.requestId = this.#nextId();
       this.#resetIdle();
+      const sessionFile = this.#sessionFile;
+      if (sessionFile === undefined || sessionFile.length === 0) {
+        throw new AgentUnavailableError("get_state missing sessionFile");
+      }
       turn.sent = true;
       await gen.proc.send({ id: turn.requestId, type: "prompt", message: text });
+      this.#resolveReceipt(turn, { requestId: turn.requestId, sessionFile });
     } catch (error) {
+      const sanitized = sanitizeError(error);
       if (this.#turn === turn) {
-        this.#failTurn(turn, sanitizeError(error));
+        this.#failTurn(turn, sanitized);
+        const gen = this.#generation;
+        if (gen !== undefined) {
+          void this.#retire(gen);
+        }
+      } else {
+        this.#rejectReceipt(turn, sanitized);
       }
     }
   }
-
   async #readyGeneration(turn: Turn): Promise<Generation> {
     await this.#retired;
     this.#assertTurn(turn);
@@ -406,6 +436,7 @@ export class SessionRuntime {
       return;
     }
     this.#turn = undefined;
+    this.#rejectReceipt(turn, error);
     turn.stream.fail(error);
   }
 
@@ -421,12 +452,36 @@ export class SessionRuntime {
       return;
     }
     this.#turn = undefined;
+    this.#rejectReceipt(turn, new AgentUnavailableError("runtime shutdown"));
     const gen = this.#generation;
     if (gen !== undefined && (turn.sent || !gen.acquired)) {
       void this.#retire(gen);
     }
   }
 
+  #rejectPendingReceipts(error: Error): void {
+    for (const turn of [...this.#pendingReceipts]) {
+      this.#rejectReceipt(turn, error);
+    }
+  }
+
+  #resolveReceipt(turn: Turn, receipt: PromptDispatchReceipt): void {
+    if (turn.receiptSettled) {
+      return;
+    }
+    turn.receiptSettled = true;
+    this.#pendingReceipts.delete(turn);
+    turn.dispatched.resolve(receipt);
+  }
+
+  #rejectReceipt(turn: Turn, error: Error): void {
+    if (turn.receiptSettled) {
+      return;
+    }
+    turn.receiptSettled = true;
+    this.#pendingReceipts.delete(turn);
+    turn.dispatched.reject(error);
+  }
   #retire(gen: Generation): Promise<void> {
     gen.retiring ??= this.#runRetire(gen);
     if (this.#generation === gen) {
@@ -608,81 +663,6 @@ export class SessionRuntime {
   }
 }
 
-class FrameStream implements AsyncIterable<OmpFrame> {
-  onCancel: (() => void) | undefined;
-  #queue: OmpFrame[] = [];
-  #done = false;
-  #error: Error | undefined;
-  #wait: FrameWaiter | undefined;
-
-  push(frame: OmpFrame): void {
-    if (this.#done) {
-      return;
-    }
-    const waiter = this.#wait;
-    if (waiter !== undefined) {
-      this.#wait = undefined;
-      waiter.resolve({ value: frame, done: false });
-      return;
-    }
-    this.#queue.push(frame);
-  }
-
-  end(): void {
-    if (this.#done) {
-      return;
-    }
-    this.#done = true;
-    this.#wait?.resolve({ value: undefined, done: true });
-    this.#wait = undefined;
-  }
-
-  fail(error: Error): void {
-    if (this.#done) {
-      return;
-    }
-    this.#done = true;
-    this.#error = error;
-    this.#wait?.reject(error);
-    this.#wait = undefined;
-  }
-
-  [Symbol.asyncIterator](): AsyncIterator<OmpFrame> {
-    return {
-      next: () => this.#next(),
-      return: () => this.#return(),
-    };
-  }
-  #next(): Promise<IteratorResult<OmpFrame>> {
-    const queued = this.#queue.shift();
-    if (queued !== undefined) {
-      return Promise.resolve({ value: queued, done: false });
-    }
-    if (this.#error !== undefined) {
-      return Promise.reject(this.#error);
-    }
-    if (this.#done) {
-      return Promise.resolve({ value: undefined, done: true });
-    }
-    return new Promise((resolve, reject) => {
-      this.#wait = { resolve, reject };
-    });
-  }
-
-  async #return(): Promise<IteratorResult<OmpFrame>> {
-    if (!this.#done) {
-      this.onCancel?.();
-      this.#done = true;
-    }
-    this.#queue.length = 0;
-    this.#error = undefined;
-    const waiter = this.#wait;
-    this.#wait = undefined;
-    waiter?.resolve({ value: undefined, done: true });
-    return { value: undefined, done: true };
-  }
-}
-
 function liveChild(gen: Generation): ChildProcessWithoutNullStreams | undefined {
   const child = gen.child ?? gen.proc.child;
   if (child === undefined || child.exitCode !== null || child.signalCode !== null) {
@@ -744,6 +724,16 @@ function deferredSpawn(): SpawnWaiter {
     resolve = settle;
   });
   return { promise, resolve };
+}
+
+function deferredReceipt(): ReceiptWaiter {
+  let resolve!: (receipt: PromptDispatchReceipt) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<PromptDispatchReceipt>((settle, fail) => {
+    resolve = settle;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
 }
 
 function isTerminalEnd(frame: OmpFrame): boolean {
