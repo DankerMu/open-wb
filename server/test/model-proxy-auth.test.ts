@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { openDb } from "../src/core/db/index.js";
+import { TokenRegistry } from "../src/sessions/tokens.js";
 import {
   AGENT_UNAVAILABLE_ENVELOPE,
   API_KEY,
@@ -9,7 +10,6 @@ import {
   expectInjectEnvelope,
   expectZeroUpstream,
   FOUR_MIB,
-  installModelProxy,
   jsonBodyOfSize,
   LIVE_TOKEN,
   liveTokenTable,
@@ -227,11 +227,17 @@ describe("createApp sibling parser, guard, and cache isolation", () => {
   it("registers without a cookie exemption and leaves sibling auth/parser/cache intact", async () => {
     const upstream = await recordingEcho();
     const db = openDb(":memory:");
-    const app = createApp({ db });
+    const tokens = new TokenRegistry();
+    const liveToken = tokens.issue("runtime-live");
+    const app = createApp({
+      db,
+      assembly: {
+        tokens,
+        upstream: { baseUrl: `${upstream.origin}/v1`, apiKey: API_KEY },
+      },
+    });
     try {
-      await installModelProxy(app, configured(upstream));
-
-      const anonymous = await injectProxy(app, { authorization: `Bearer ${LIVE_TOKEN}` });
+      const anonymous = await injectProxy(app, { authorization: `Bearer ${liveToken}` });
       expect(anonymous.statusCode).toBe(202);
       expect(anonymous.headers["cache-control"]).toBe("no-store");
       expect(upstream.requests).toHaveLength(1);

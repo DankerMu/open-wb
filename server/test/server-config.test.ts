@@ -2,13 +2,54 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { resolveServerConfig, type ServerConfig } from "../src/server.js";
+import { resolveServerConfig } from "../src/server.js";
 
 const REPO_ROOT = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const SOURCE_ENTRY = pathToFileURL(join(REPO_ROOT, "server", "src", "server.ts")).href;
 const DIST_ENTRY = pathToFileURL(join(REPO_ROOT, "server", "dist", "server.js")).href;
 const DEFAULT_DB_PATH = join(REPO_ROOT, "var", "dev.db");
 const DEFAULT_STATIC_ROOT = join(REPO_ROOT, "web", "dist");
+const DEFAULT_OMP_BIN = join(REPO_ROOT, "var", "omp", "omp");
+const DEFAULT_OMP_STATE_DIR = join(REPO_ROOT, "var", "omp-state");
+const DEFAULT_OMP_IDLE_MS = 600_000;
+const DEFAULT_SANDBOX_ROOT = join(REPO_ROOT, "var", "sandbox");
+const DEFAULT_MODEL_ID = "deepseek-v4.1-flash";
+const MAX_IDLE_MS = 2_147_483_647;
+interface AgentSettings {
+  ompBin: string | undefined;
+  ompStateDir: string | undefined;
+  ompIdleMs: number | undefined;
+  sandboxRoot: string | undefined;
+  modelUpstreamBaseUrl: string | undefined;
+  modelUpstreamApiKey: string | undefined;
+  modelId: string | undefined;
+}
+
+function sevenDefaults(config: {
+  ompBin?: string;
+  ompStateDir?: string;
+  ompIdleMs?: number;
+  sandboxRoot?: string;
+  modelUpstreamBaseUrl?: string;
+  modelUpstreamApiKey?: string;
+  modelId?: string;
+}): AgentSettings {
+  return {
+    ompBin: config.ompBin,
+    ompStateDir: config.ompStateDir,
+    ompIdleMs: config.ompIdleMs,
+    sandboxRoot: config.sandboxRoot,
+    modelUpstreamBaseUrl: config.modelUpstreamBaseUrl,
+    modelUpstreamApiKey: config.modelUpstreamApiKey,
+    modelId: config.modelId,
+  };
+}
+
+function expectNamedInvalid(key: string, patch: Record<string, string>): void {
+  expect(() => resolveServerConfig(patch, SOURCE_ENTRY)).toThrow(
+    expect.objectContaining({ message: expect.stringContaining(key) as unknown }),
+  );
+}
 
 function expectInvalid(patch: Record<string, string>): void {
   expect(() => resolveServerConfig(patch, SOURCE_ENTRY)).toThrow();
@@ -19,14 +60,23 @@ describe("resolveServerConfig — 缺省身份", () => {
     const fromSource = resolveServerConfig({}, SOURCE_ENTRY);
     const fromDist = resolveServerConfig({}, DIST_ENTRY);
 
-    expect(fromSource).toEqual({
+    expect(fromSource).toMatchObject({
       host: "127.0.0.1",
       port: 3000,
       dbPath: DEFAULT_DB_PATH,
       staticRoot: DEFAULT_STATIC_ROOT,
       repoRoot: REPO_ROOT,
     });
-    expect(fromDist).toEqual(fromSource);
+    expect(sevenDefaults(fromSource)).toEqual({
+      ompBin: DEFAULT_OMP_BIN,
+      ompStateDir: DEFAULT_OMP_STATE_DIR,
+      ompIdleMs: DEFAULT_OMP_IDLE_MS,
+      sandboxRoot: DEFAULT_SANDBOX_ROOT,
+      modelUpstreamBaseUrl: undefined,
+      modelUpstreamApiKey: undefined,
+      modelId: DEFAULT_MODEL_ID,
+    });
+    expect(sevenDefaults(fromDist)).toEqual(sevenDefaults(fromSource));
   });
 
   it("路径身份不受 process.cwd() 影响，只由 entry module identity 推导", () => {
@@ -40,6 +90,13 @@ describe("resolveServerConfig — 缺省身份", () => {
       expect(fromTmp).toEqual(fromRoot);
       expect(fromTmp.dbPath).toBe(DEFAULT_DB_PATH);
       expect(fromTmp.staticRoot).toBe(DEFAULT_STATIC_ROOT);
+      expect(fromTmp.ompBin).toBe(DEFAULT_OMP_BIN);
+      expect(fromTmp.ompStateDir).toBe(DEFAULT_OMP_STATE_DIR);
+      expect(fromTmp.sandboxRoot).toBe(DEFAULT_SANDBOX_ROOT);
+      expect(fromTmp.ompIdleMs).toBe(DEFAULT_OMP_IDLE_MS);
+      expect(fromTmp.modelId).toBe(DEFAULT_MODEL_ID);
+      expect(fromTmp.modelUpstreamBaseUrl).toBeUndefined();
+      expect(fromTmp.modelUpstreamApiKey).toBeUndefined();
     } finally {
       process.chdir(originalCwd);
     }
@@ -61,7 +118,17 @@ describe("resolveServerConfig — 缺省身份", () => {
 
   it("显式写回缺省值得到同一身份（相对路径绑 repo root）", () => {
     const explicit = resolveServerConfig(
-      { HOST: "127.0.0.1", PORT: "3000", DB_PATH: "var/dev.db", STATIC_ROOT: "web/dist" },
+      {
+        HOST: "127.0.0.1",
+        PORT: "3000",
+        DB_PATH: "var/dev.db",
+        STATIC_ROOT: "web/dist",
+        OMP_BIN: "var/omp/omp",
+        OMP_STATE_DIR: "var/omp-state",
+        OMP_IDLE_MS: "600000",
+        SANDBOX_ROOT: "var/sandbox",
+        MODEL_ID: "deepseek-v4.1-flash",
+      },
       SOURCE_ENTRY,
     );
     expect(explicit).toEqual(resolveServerConfig({}, SOURCE_ENTRY));
@@ -147,17 +214,139 @@ describe("resolveServerConfig — STATIC_ROOT", () => {
   });
 });
 
-describe("配置 seam 只输出四个自有 key 的投影", () => {
-  it("返回值恰好是 host/port/dbPath/staticRoot/repoRoot", () => {
+describe("resolveServerConfig — 新增七项缺省与逐项覆盖", () => {
+  it("缺省路径、idle 与模型身份按 entry root 固定，上游保持缺席", () => {
     const config = resolveServerConfig({}, SOURCE_ENTRY);
-    expect(Object.keys(config).sort()).toEqual(
-      ["dbPath", "host", "port", "repoRoot", "staticRoot"].sort(),
+    expect(config).toMatchObject({
+      ompBin: DEFAULT_OMP_BIN,
+      ompStateDir: DEFAULT_OMP_STATE_DIR,
+      ompIdleMs: DEFAULT_OMP_IDLE_MS,
+      sandboxRoot: DEFAULT_SANDBOX_ROOT,
+      modelId: DEFAULT_MODEL_ID,
+    });
+    expect(config.modelUpstreamBaseUrl).toBeUndefined();
+    expect(config.modelUpstreamApiKey).toBeUndefined();
+  });
+
+  it("相对路径绑 repo root，绝对路径与模型字节原样保留", () => {
+    const config = resolveServerConfig(
+      {
+        OMP_BIN: "bin/omp",
+        OMP_STATE_DIR: "/state/omp",
+        OMP_IDLE_MS: "1",
+        SANDBOX_ROOT: "sandboxes/root",
+        MODEL_UPSTREAM_BASE_URL: "http://upstream.example/v1",
+        MODEL_UPSTREAM_API_KEY: "key-with-space ",
+        MODEL_ID: " custom-model ",
+      },
+      SOURCE_ENTRY,
+    );
+    expect(config).toMatchObject({
+      ompBin: join(REPO_ROOT, "bin", "omp"),
+      ompStateDir: "/state/omp",
+      ompIdleMs: 1,
+      sandboxRoot: join(REPO_ROOT, "sandboxes", "root"),
+      modelUpstreamBaseUrl: "http://upstream.example/v1",
+      modelUpstreamApiKey: "key-with-space ",
+      modelId: " custom-model ",
+    });
+    expect(resolveServerConfig({ OMP_BIN: "/opt/../opt/omp" }, SOURCE_ENTRY).ompBin).toBe(
+      "/opt/../opt/omp",
     );
   });
 
-  it("类型面：ServerConfig 形状可用于消费方", () => {
-    const config: ServerConfig = resolveServerConfig({}, SOURCE_ENTRY);
-    expect(config.port).toBeTypeOf("number");
-    expect(config.host).toBeTypeOf("string");
+  it("source 与 compiled entry 在无关 cwd 下得到同一组七项覆盖", () => {
+    const patch = {
+      OMP_BIN: "agents/omp",
+      OMP_STATE_DIR: "agents/state",
+      OMP_IDLE_MS: String(MAX_IDLE_MS),
+      SANDBOX_ROOT: "/srv/sandbox",
+      MODEL_UPSTREAM_BASE_URL: "https://models.example",
+      MODEL_UPSTREAM_API_KEY: "sentinel-key",
+      MODEL_ID: "model-bytes",
+    };
+    const originalCwd = process.cwd();
+    try {
+      process.chdir(tmpdir());
+      const fromSource = resolveServerConfig(patch, SOURCE_ENTRY);
+      process.chdir("/");
+      const fromDist = resolveServerConfig(patch, DIST_ENTRY);
+      expect(fromDist).toEqual(fromSource);
+      expect(fromSource).toMatchObject({
+        ompBin: join(REPO_ROOT, "agents", "omp"),
+        ompStateDir: join(REPO_ROOT, "agents", "state"),
+        ompIdleMs: MAX_IDLE_MS,
+        sandboxRoot: "/srv/sandbox",
+        modelUpstreamBaseUrl: "https://models.example",
+        modelUpstreamApiKey: "sentinel-key",
+        modelId: "model-bytes",
+        repoRoot: REPO_ROOT,
+      });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+});
+
+describe("resolveServerConfig — OMP_IDLE_MS", () => {
+  it("接受 canonical 边界 1 与 2147483647", () => {
+    expect(resolveServerConfig({ OMP_IDLE_MS: "1" }, SOURCE_ENTRY).ompIdleMs).toBe(1);
+    expect(resolveServerConfig({ OMP_IDLE_MS: String(MAX_IDLE_MS) }, SOURCE_ENTRY).ompIdleMs).toBe(
+      MAX_IDLE_MS,
+    );
+  });
+
+  it("拒绝空、零、非 canonical、越界与 Node 会溢出成 1ms 的整数", () => {
+    for (const bad of [
+      "",
+      "0",
+      "abc",
+      "-1",
+      "1.5",
+      "01",
+      " 1",
+      "1 ",
+      "+1",
+      "1e2",
+      "2147483648",
+      "999999999999",
+    ]) {
+      expectNamedInvalid("OMP_IDLE_MS", { OMP_IDLE_MS: bad });
+    }
+  });
+});
+
+describe("resolveServerConfig — 新路径与上游显式空值", () => {
+  it("OMP_BIN、OMP_STATE_DIR、SANDBOX_ROOT 的显式空值在解析前命名拒绝", () => {
+    expectNamedInvalid("OMP_BIN", { OMP_BIN: "" });
+    expectNamedInvalid("OMP_STATE_DIR", { OMP_STATE_DIR: "" });
+    expectNamedInvalid("SANDBOX_ROOT", { SANDBOX_ROOT: "" });
+  });
+
+  it("上游缺席或半对保持可用且不补造凭据；显式空值命名拒绝", () => {
+    const missing = resolveServerConfig({}, SOURCE_ENTRY);
+    expect(missing.modelUpstreamBaseUrl).toBeUndefined();
+    expect(missing.modelUpstreamApiKey).toBeUndefined();
+
+    const urlOnly = resolveServerConfig(
+      { MODEL_UPSTREAM_BASE_URL: "http://half.example" },
+      SOURCE_ENTRY,
+    );
+    expect(urlOnly.modelUpstreamBaseUrl).toBe("http://half.example");
+    expect(urlOnly.modelUpstreamApiKey).toBeUndefined();
+
+    const keyOnly = resolveServerConfig({ MODEL_UPSTREAM_API_KEY: "half-key" }, SOURCE_ENTRY);
+    expect(keyOnly.modelUpstreamBaseUrl).toBeUndefined();
+    expect(keyOnly.modelUpstreamApiKey).toBe("half-key");
+
+    const explicitUndefined = resolveServerConfig(
+      { MODEL_UPSTREAM_BASE_URL: undefined, MODEL_UPSTREAM_API_KEY: undefined },
+      SOURCE_ENTRY,
+    );
+    expect(explicitUndefined.modelUpstreamBaseUrl).toBeUndefined();
+    expect(explicitUndefined.modelUpstreamApiKey).toBeUndefined();
+
+    expectNamedInvalid("MODEL_UPSTREAM_BASE_URL", { MODEL_UPSTREAM_BASE_URL: "" });
+    expectNamedInvalid("MODEL_UPSTREAM_API_KEY", { MODEL_UPSTREAM_API_KEY: "" });
   });
 });

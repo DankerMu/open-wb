@@ -1,10 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance } from "fastify";
 import { vi } from "vitest";
+import { registerAuthGuard } from "../src/http/index.js";
 import { registerSessionRoutes, type SessionSupervisorPort } from "../src/sessions/rest.js";
 import { createSessionStore, type SessionStore } from "../src/sessions/store.js";
-import { bearerCookie, loginSessionId, withApp } from "./auth-lifecycle-helpers.js";
-import { PARSER_INPUTS } from "./http-guard-helpers.js";
+import { bearerCookie, loginSessionId } from "./auth-lifecycle-helpers.js";
+import { PARSER_INPUTS, withStandaloneAuthApp } from "./http-guard-helpers.js";
 
 export const SESSION_NOW = 1_740_000_000_000;
 export const MESSAGE_LIMIT = 32_768;
@@ -41,24 +42,28 @@ export async function withSessionRest<T>(
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(SESSION_NOW);
   try {
-    return await withApp({}, async ({ app, db }) => {
-      const supervisor = createSupervisor();
-      const store = createSessionStore(db, {
-        onFlushError(failure) {
-          throw new Error(`unexpected flush error: ${String(failure.error)}`);
-        },
-      });
-      registerSessionRoutes(app, { store, supervisor });
-      try {
-        return await action({ app, db, store, supervisor });
-      } finally {
-        db.setAuthorizer(null);
-        if (db.isTransaction) {
-          db.exec("ROLLBACK");
+    return await withStandaloneAuthApp(
+      async ({ app, db }) => {
+        registerAuthGuard(app);
+        const supervisor = createSupervisor();
+        const store = createSessionStore(db, {
+          onFlushError(failure) {
+            throw new Error(`unexpected flush error: ${String(failure.error)}`);
+          },
+        });
+        registerSessionRoutes(app, { store, supervisor });
+        try {
+          return await action({ app, db, store, supervisor });
+        } finally {
+          db.setAuthorizer(null);
+          if (db.isTransaction) {
+            db.exec("ROLLBACK");
+          }
+          store.close();
         }
-        store.close();
-      }
-    });
+      },
+      { now: () => SESSION_NOW },
+    );
   } finally {
     vi.useRealTimers();
   }

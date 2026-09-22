@@ -569,10 +569,7 @@ export async function startStalledHandshake(): Promise<{
   return { port, close: () => closeHttp(server, sockets) };
 }
 
-export async function installModelProxy(
-  app: FastifyInstance,
-  options: ModelProxyOptions,
-): Promise<void> {
+async function installModelProxy(app: FastifyInstance, options: ModelProxyOptions): Promise<void> {
   await Promise.resolve(registerModelProxy(app, options));
 }
 

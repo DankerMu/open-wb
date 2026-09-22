@@ -7,7 +7,6 @@ import { expect, vi } from "vitest";
 import { createApp } from "../src/app.js";
 import { openDb } from "../src/core/db/index.js";
 import type { ChatEvent } from "../src/sessions/events.js";
-import { registerSessions } from "../src/sessions/index.js";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import type { SpawnImpl } from "../src/sessions/omp/process.js";
 import type { SessionStore } from "../src/sessions/store.js";
@@ -153,16 +152,19 @@ function openSupervisorApp(input: {
   prepare?: (db: DatabaseSync) => void;
 }): SupervisorApp {
   const db = openDb(":memory:");
-  const app = createApp({ db, authRuntime: fixedRuntime(() => FIXED_NOW) });
   input.prepare?.(db);
   const tokens = input.tokens ?? new TokenRegistry();
-  const registered = registerSessions(app, {
+  const app = createApp({
     db,
-    tokens,
-    runtime: input.runtime,
-    onError: input.onError ?? (() => {}),
-    ...(input.onEvent === undefined ? {} : { onEvent: input.onEvent }),
+    authRuntime: fixedRuntime(() => FIXED_NOW),
+    assembly: {
+      tokens,
+      runtime: input.runtime,
+      onError: input.onError ?? (() => {}),
+      ...(input.onEvent === undefined ? {} : { onEvent: input.onEvent }),
+    },
   });
+  const registered = app.sessions;
   return {
     app,
     db,

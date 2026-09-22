@@ -80,7 +80,9 @@ flowchart TD
 
 ```
 server/src/
-├── app.ts               # bootstrap：装配模块、起 HTTP
+├── app.ts               # 可注入装配：auth → http guard → model-proxy → sessions；不 listen/关 DB
+├── server.ts            # 唯一生产入口：配置 → DB → app → listen；持有 DB 生命周期
+├── agent-config.ts      # app/入口共用的纯 agent 配置与默认值，无环境读取或 IO
 ├── core/
 │   ├── db/              # SQLite 打开 + 迁移
 │   ├── audit/           # emit/query，只追加
