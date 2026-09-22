@@ -14,56 +14,9 @@ export type RingRead = {
 };
 
 function retain(id: string, event: ChatEvent<number>): RetainedEvent {
-  if (event.type === "turn.start") {
-    return Object.freeze({
-      id,
-      type: event.type,
-      data: Object.freeze({ messageId: event.data.messageId }),
-    });
-  }
-  if (event.type === "text.delta") {
-    return Object.freeze({
-      id,
-      type: event.type,
-      data: Object.freeze({ messageId: event.data.messageId, delta: event.data.delta }),
-    });
-  }
-  if (event.type === "step.start") {
-    return Object.freeze({
-      id,
-      type: event.type,
-      data: Object.freeze({
-        messageId: event.data.messageId,
-        stepId: event.data.stepId,
-        name: event.data.name,
-        detail: event.data.detail,
-      }),
-    });
-  }
-  if (event.type === "step.end") {
-    return Object.freeze({
-      id,
-      type: event.type,
-      data: Object.freeze({
-        messageId: event.data.messageId,
-        stepId: event.data.stepId,
-        status: event.data.status,
-        detail: event.data.detail,
-      }),
-    });
-  }
-  if (event.type === "turn.end") {
-    return Object.freeze({
-      id,
-      type: event.type,
-      data: Object.freeze({ messageId: event.data.messageId, status: event.data.status }),
-    });
-  }
-  return Object.freeze({
-    id,
-    type: event.type,
-    data: Object.freeze({ messageId: event.data.messageId, message: event.data.message }),
-  });
+  // Spread keeps the original discriminant and its matching data; TypeScript widens it.
+  const owned = { ...event, id, data: Object.freeze({ ...event.data }) } as RetainedEvent;
+  return Object.freeze(owned);
 }
 
 export class RingBuffer {
@@ -116,7 +69,7 @@ export class RingBuffer {
     if (parsed.seq < oldest - 1) {
       return { mode: "gap", events: [] };
     }
-    return { mode: "replay", events: this.#materialize((seq) => seq > parsed.seq) };
+    return { mode: "replay", events: this.#materialize(parsed.seq + 1) };
   }
 
   #activeTurn(): RingRead {
@@ -125,16 +78,21 @@ export class RingBuffer {
     if (startSeq === undefined || startSeq < oldest) {
       return { mode: "gap", events: [] };
     }
-    return { mode: "replay", events: this.#materialize((seq) => seq >= startSeq) };
+    return { mode: "replay", events: this.#materialize(startSeq) };
   }
 
-  #materialize(keep: (seq: number) => boolean): RetainedEvent[] {
-    const events: RetainedEvent[] = [];
+  #materialize(startSeq: number): RetainedEvent[] {
     const oldest = this.#nextSeq - this.#count;
-    let index = (this.#head - this.#count + CAPACITY) % CAPACITY;
-    for (let seen = 0; seen < this.#count; seen += 1) {
+    const newest = this.#nextSeq - 1;
+    if (this.#count === 0 || startSeq > newest) {
+      return [];
+    }
+    const first = Math.max(startSeq, oldest);
+    const events: RetainedEvent[] = [];
+    let index = (this.#head - this.#count + (first - oldest) + CAPACITY) % CAPACITY;
+    for (let seq = first; seq <= newest; seq += 1) {
       const event = this.#slots[index];
-      if (event !== undefined && keep(oldest + seen)) {
+      if (event !== undefined) {
         events.push(event);
       }
       index = (index + 1) % CAPACITY;

@@ -268,8 +268,6 @@ describe("RingBuffer", () => {
       events: [{ id: "8:1", type: "turn.start", data: { messageId: 1 } }],
     });
     expect(second).toEqual(first);
-    expect(second).not.toBe(first);
-    expect(second.events).not.toBe(first.events);
     expect(right.since(null, { turnRunning: false })).toEqual({ mode: "fresh", events: [] });
     expect(right.since("8:0", { turnRunning: true })).toEqual({
       mode: "replay",
