@@ -1,8 +1,16 @@
 import { lstatSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 import fastifyStatic from "@fastify/static";
 import fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
+import {
+  DEFAULT_MODEL_ID,
+  DEFAULT_OMP_BIN_RELATIVE,
+  DEFAULT_OMP_IDLE_MS,
+  DEFAULT_OMP_STATE_RELATIVE,
+  DEFAULT_SANDBOX_RELATIVE,
+} from "./agent-config.js";
 import {
   type AuthRuntime,
   DEFAULT_AUTH_RUNTIME,
@@ -19,13 +27,28 @@ import {
   sendHttpError,
 } from "./http/index.js";
 import { classifyRequestPath } from "./http/path-classifier.js";
+import { registerModelProxy } from "./model-proxy/index.js";
 import { SERVICE_INFO } from "./service-info.js";
+import type { ChatEvent } from "./sessions/events.js";
+import { registerSessions } from "./sessions/index.js";
+import type { SessionStore } from "./sessions/store.js";
+import type { SessionSupervisor, SessionSupervisorRuntime } from "./sessions/supervisor.js";
+import { TokenRegistry } from "./sessions/tokens.js";
 
 declare module "fastify" {
   interface FastifyInstance {
     db: DatabaseSync;
     authNow: () => number;
+    sessions: { store: SessionStore; supervisor: SessionSupervisor };
   }
+}
+
+interface AssemblyDependencies {
+  tokens?: TokenRegistry;
+  upstream?: { baseUrl: string; apiKey: string } | undefined;
+  runtime?: SessionSupervisorRuntime;
+  onError?: (error: Error) => void;
+  onEvent?: (sessionId: string, epoch: number, event: ChatEvent<number>) => void;
 }
 
 export interface CreateAppOptions {
@@ -36,20 +59,22 @@ export interface CreateAppOptions {
   sessionTtlMs?: number | undefined;
   authRuntime?: AuthRuntime;
   passwordSource?: PasswordSource;
+  assembly?: AssemblyDependencies;
 }
 
 /**
  * 装配可注入的 HTTP app。调用方拥有 db 的完整生命周期；本函数不监听也不关闭它。
  * TTL 配置在任何 app/DB 装配之前同步校验：非法值直接抛出，不钳制也不回退默认。
  */
-export function createApp({
-  db,
-  staticRoot,
-  secureCookies = false,
-  sessionTtlMs = SESSION_TTL,
-  authRuntime = DEFAULT_AUTH_RUNTIME,
-  passwordSource,
-}: CreateAppOptions): FastifyInstance {
+export function createApp(options: CreateAppOptions): FastifyInstance {
+  const {
+    db,
+    staticRoot,
+    secureCookies = false,
+    sessionTtlMs = SESSION_TTL,
+    authRuntime = DEFAULT_AUTH_RUNTIME,
+    passwordSource,
+  } = options;
   const sessionTtl = validateSessionTtl(sessionTtlMs);
   const app = fastify({
     logger: false,
@@ -69,8 +94,30 @@ export function createApp({
     ...(passwordSource === undefined ? {} : { passwordSource }),
   });
 
-  // 横切守卫在 cookie/auth 之后装配（root preParsing 天然晚于二者的 onRequest）。
   registerAuthGuard(app);
+
+  const assembly = options.assembly;
+  const tokens = assembly?.tokens ?? new TokenRegistry();
+  const repoRoot = resolve(fileURLToPath(new URL("../../", import.meta.url)));
+  const runtime = assembly?.runtime ?? {
+    bin: join(repoRoot, DEFAULT_OMP_BIN_RELATIVE),
+    sandboxRoot: join(repoRoot, DEFAULT_SANDBOX_RELATIVE),
+    stateDir: join(repoRoot, DEFAULT_OMP_STATE_RELATIVE),
+    modelId: DEFAULT_MODEL_ID,
+    idleMs: DEFAULT_OMP_IDLE_MS,
+  };
+  registerModelProxy(app, {
+    tokens,
+    ...(assembly?.upstream === undefined ? {} : { upstream: assembly.upstream }),
+  });
+  const registered = registerSessions(app, {
+    db,
+    tokens,
+    runtime,
+    onError: assembly?.onError ?? ((error) => observeSessionFault(app, error)),
+    ...(assembly?.onEvent === undefined ? {} : { onEvent: assembly.onEvent }),
+  });
+  app.decorate("sessions", registered);
 
   app.all("/api", (request, reply) => sendNotFound(reply, request));
   app.get("/api/healthz", () => ({ status: "ok" }));
@@ -210,4 +257,9 @@ function sendNotFound(reply: FastifyReply, request: FastifyRequest): FastifyRepl
   }
 
   return sendHttpError(reply, "not_found");
+}
+
+function observeSessionFault(app: FastifyInstance, error: Error): void {
+  void error;
+  app.log.error({ event: "session_fault" });
 }

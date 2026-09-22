@@ -184,6 +184,7 @@ export function seedExpiredFamily(db: DatabaseSync): ExpiredFamily {
  */
 export async function withStandaloneAuthApp<T>(
   action: (fixture: { app: FastifyInstance; db: DatabaseSync }) => Promise<T>,
+  options: { now?: () => number } = {},
 ): Promise<T> {
   const db = openDb(":memory:");
   const app = fastify({ logger: false });
@@ -194,7 +195,7 @@ export async function withStandaloneAuthApp<T>(
     db,
     secureCookies: false,
     sessionTtlMs: SESSION_TTL,
-    runtime: fixedRuntime(() => FIXED_NOW),
+    runtime: fixedRuntime(options.now ?? (() => FIXED_NOW)),
     mapAuthError: (code) => new HttpError(code),
   });
   try {

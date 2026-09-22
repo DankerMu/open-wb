@@ -18,6 +18,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
+import { type AgentSettings, resolveAgentSettings } from "./agent-config.js";
 import { createApp } from "./app.js";
 import { openDb } from "./core/db/index.js";
 import { writeManagedLine } from "./startup-writer.js";
@@ -26,9 +27,9 @@ const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 3000;
 const DEFAULT_DB_RELATIVE = join("var", "dev.db");
 const DEFAULT_STATIC_RELATIVE = join("web", "dist");
-const STARTUP_MODULES = ["core/db", "auth", "http"];
+const STARTUP_MODULES = ["core/db", "auth", "http", "model-proxy", "sessions"];
 
-export interface ServerConfig {
+export interface ServerConfig extends AgentSettings {
   host: string;
   port: number;
   dbPath: string;
@@ -36,7 +37,7 @@ export interface ServerConfig {
   repoRoot: string;
 }
 
-/** 纯配置 seam：只消费自有 HOST/PORT/DB_PATH/STATIC_ROOT，未知 key 忽略；repo root 由 entry identity 推导。 */
+/** 纯配置 seam：消费十一项自有 key，agent 七项经 resolveAgentSettings，未知 key 忽略；repo root 由 entry identity 推导。 */
 export function resolveServerConfig(
   env: Record<string, string | undefined>,
   entryUrl: string,
@@ -48,6 +49,7 @@ export function resolveServerConfig(
     dbPath: resolveDatabasePath(env.DB_PATH, repoRoot),
     staticRoot: resolveStaticRoot(env.STATIC_ROOT, repoRoot),
     repoRoot,
+    ...resolveAgentSettings(env, repoRoot),
   };
 }
 
@@ -167,7 +169,27 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
       mkdirSync(dirname(config.dbPath), { recursive: true });
     }
     owned.db = openDb(config.dbPath);
-    owned.app = createApp({ db: owned.db, staticRoot: config.staticRoot });
+    owned.app = createApp({
+      db: owned.db,
+      staticRoot: config.staticRoot,
+      assembly: {
+        runtime: {
+          bin: config.ompBin,
+          sandboxRoot: config.sandboxRoot,
+          stateDir: config.ompStateDir,
+          modelId: config.modelId,
+          idleMs: config.ompIdleMs,
+        },
+        ...(config.modelUpstreamBaseUrl !== undefined && config.modelUpstreamApiKey !== undefined
+          ? {
+              upstream: {
+                baseUrl: config.modelUpstreamBaseUrl,
+                apiKey: config.modelUpstreamApiKey,
+              },
+            }
+          : {}),
+      },
+    });
     await owned.app.listen({
       host: config.host,
       port: config.port,
