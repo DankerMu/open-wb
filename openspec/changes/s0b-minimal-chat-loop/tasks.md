@@ -41,7 +41,7 @@ Minimal mergeable slice: 3.1 迁移单独可合并保绿（独立 SQL + 形态�
 
 ## 4. chat-stream
 
-- [ ] 4.1 `server/src/sessions/stream/ring-buffer.ts`：每会话环形缓冲（1000 条、epoch/seq id、`Last-Event-ID` 解析、三类入口判定：回放/缺口/刷新中从 `turn.start` 重放）纯逻辑 + 单测
+- [x] 4.1 #91/PR212 merged：固定1000条epoch/seq环形缓冲、canonical安全整数cursor、replay/gap/fresh、当前active turn.start刷新与snapshot隔离。用户确认min−1边界：保留2..1001时cursor1回放，cursor0 gap；1002条后cursor1 gap。13新增/1138服务端测试、独立compiled5cases及6400push/4046check多轮wrap、4候选mutants RED/恢复稳定性通过；compact首轮clean、同SHA CI八项全绿。SETUP/已GREEN的TDD偏离与alias测试修订留痕；SSE接线、epoch实例归属/退出丢弃仍归4.2/#103。
 - [ ] 4.2 `server/src/sessions/stream/sse.ts` + 挂入 `registerSessions`：`GET /api/sessions/:id/events`（头部、帧格式、keepalive 可注入计时、多订阅扇出、断开清理、404 先于任何帧）+ `app.inject()` raw stream 单测（断线回放/缺口/刷新中重放/双订阅）+ 对完整装配 app 断言该路由存在
 
 Suggested fixture level: compact - 缓冲与 SSE 是纯协议面，inject 单 seam 可证；不触 Critical Path
