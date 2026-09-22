@@ -14,6 +14,7 @@
  */
 
 import { mkdirSync } from "node:fs";
+import type { AddressInfo } from "node:net";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
@@ -21,6 +22,7 @@ import type { FastifyInstance } from "fastify";
 import { type AgentSettings, resolveAgentSettings } from "./agent-config.js";
 import { createApp } from "./app.js";
 import { openDb } from "./core/db/index.js";
+import { deriveProxyBaseUrl, writeManagedModelsYml } from "./model-proxy/models-yml.js";
 import { writeManagedLine } from "./startup-writer.js";
 
 const DEFAULT_HOST = "127.0.0.1";
@@ -195,11 +197,12 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
       port: config.port,
       signal: owned.controller.signal,
     });
+    owned.controller = new AbortController();
     if (owned.signalReceived) {
       await releaseOwned(owned);
       return;
     }
-    await publishStarted(owned);
+    await publishStarted(owned, config);
   } catch {
     // 真实失败判定必须先于本失败路径的第一次 yield：一旦决定失败，signal 不得压制其
     // generic 发布，也不得把退出码降为 0（sticky failure）。
@@ -210,8 +213,8 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
   }
 }
 
-/** 成功记录：listen 之后、实际 bound address/port；无效 app/address 抛给唯一的 start catch。 */
-async function publishStarted(owned: OwnedResources): Promise<void> {
+/** 成功记录：listen 之后写托管 models，再发实际 bound address/port。 */
+async function publishStarted(owned: OwnedResources, config: ServerConfig): Promise<void> {
   const app = owned.app;
   if (app === undefined) {
     throw new Error("startup owns no app instance");
@@ -219,6 +222,20 @@ async function publishStarted(owned: OwnedResources): Promise<void> {
   const address = app.server.address();
   if (address === null || typeof address === "string") {
     throw new Error("startup owns no bound address");
+  }
+  if (owned.signalReceived) {
+    return;
+  }
+  await writeManagedModelsYml(join(config.ompStateDir, "agent"), {
+    proxyBaseUrl: deriveProxyBaseUrl(address),
+    modelId: config.modelId,
+  });
+  if (owned.signalReceived || owned.app === undefined) {
+    return;
+  }
+  const published = app.server.address();
+  if (!sameAddress(published, address)) {
+    throw new Error("startup bound address changed before publication");
   }
   await writeManagedLine(
     process.stdout,
@@ -231,13 +248,31 @@ async function publishStarted(owned: OwnedResources): Promise<void> {
   );
 }
 
+function sameAddress(left: string | AddressInfo | null, right: AddressInfo): boolean {
+  return (
+    left !== null &&
+    typeof left !== "string" &&
+    left.address === right.address &&
+    left.port === right.port
+  );
+}
+
 function requestShutdown(owned: OwnedResources): void {
   owned.signalReceived = true;
-  owned.controller.abort();
+  const app = owned.app;
+  const bound = app !== undefined && addressOf(app) !== undefined;
+  if (!bound && !owned.controller.signal.aborted) {
+    owned.controller.abort();
+  }
   void releaseOwned(owned).then(() => {
     // 已判定的启动/输出失败不得被 shutdown 降为 0；只允许在无失败历史时写 0。
     process.exitCode = owned.releaseFailed || owned.failed ? 1 : 0;
   });
+}
+
+function addressOf(app: FastifyInstance): AddressInfo | undefined {
+  const address = app.server.address();
+  return address !== null && typeof address !== "string" ? address : undefined;
 }
 
 async function releaseOwned(owned: OwnedResources): Promise<void> {
