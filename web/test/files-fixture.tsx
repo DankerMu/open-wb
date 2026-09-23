@@ -97,6 +97,13 @@ export async function openWorkspaceDialogFromMenu() {
   return screen.findByRole("dialog", { name: "新建工作空间" });
 }
 export async function openDirectoryDialog() {
+  await waitFor(() => {
+    const button = screen.getByRole("button", { name: "折叠 root" });
+    const item = button.closest("li");
+    if (!item?.querySelector(":scope > ul")) {
+      throw new Error("expected the initial root listing to be present");
+    }
+  });
   fireEvent.click(screen.getByRole("button", { name: "新建" }));
   fireEvent.click(screen.getByRole("menuitem", { name: "新建文件夹" }));
   return screen.findByRole("dialog", { name: "新建文件夹" });
