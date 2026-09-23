@@ -52,7 +52,7 @@ Archive coordination: `files-web` 主 spec 已晋升 4.1 API 与 4.2 纯预览�
 
 ## 5. omp-uid-isolation
 
-- [ ] 5.1 `server.ts` 配置 seam 增 `OMP_USER`（正则、显式空非法；负例进 `server-config.test.ts`）+ `server/src/sessions/omp/process.ts` 的 sudo 前缀（argv `-n -u <user> --preserve-env=PATH,LANG,TMPDIR,HOME,PI_CODING_AGENT_DIR,WORKBUDDY_MODEL_TOKEN -- <OMP_BIN> <omp 参数>`，白名单值经 sudo 进程 env 传递、绝不进 argv；未设时与 S0b 逐字相同）+ spawn 参数捕获单测两形态（依赖 S0b #85 的注入点、#101 的配置 seam）
+- [x] 5.1 Canonical agent-config 的 OMP_USER → ompUser 经 server/supervisor/runtime/process 到所有冷启动/恢复代次；sudo 精确前缀与 env allowlist、unset direct 兼容、非法配置副作用前失败。用户批准仅 sudo 模式拒绝缺失/空/相对段 PATH，共享 config/spawn validator 保留合法 PATH 原字节。#120 / PR #215 merged 8cdfc02，最终 7bb80df 的 CI35806224549 全绿；参数/真实入口/HTTP/受控子进程证明，不宣称真实 uid/PAM 隔离。
 - [ ] 5.2 自有状态权限：`server.ts` 在 `openDb` 之前对缺失 DB 文件 `openSync("wx", 0o600)`、对既有主文件及 `-wal`/`-shm` `chmod 0o600`（失败走 partial-start 清理）+ 启动测试断言三文件 mode；S0b spawn 前的四目录与 `<OMP_STATE_DIR>/agent` 创建改用 `ensureSharedDir`（`0o2770`）+ 目录 mode 断言（依赖 1.2、S0b #85/#101/#102）——对应 omp-uid-isolation「自有状态不对组可读」Requirement 的完整证据面
 - [x] 5.3 `server/test/support/fake-omp.mjs` 增 `probe` 模式（prompt `probe:<pid>:<writePath>` → 先以自身 uid 写 `<writePath>`，再回 `uid=… gid=… env=<sorted keys> home=<$HOME> agent=<$PI_CODING_AGENT_DIR> environ=<EACCES|readable|errno> wrote=<ok|errno>` 的 `text_delta` + 正常 `agent_end`）+ 契约单测（依赖 S0b #87）；#121 / PR #161 已合并，Ubuntu 同 uid 契约通过。
 - [ ] 5.4 `server/test/linux/uid-isolation.test.ts`：`describe.skipIf(platform !== linux || !WORKBUDDY_UID_TEST)`；以 `OMP_USER` 起 S0b `SessionRuntime` + probe 假 omp，断言 uid ≠ 本进程、env 满足「白名单 ⊆ 键集、测试预置的三密钥键与哨兵键 `WORKBUDDY_CANARY_SECRET` 不存在（多出键只来自 sudo/PAM，不以闭集断言）、`home`/`agent` 回报值为传入值（不断言 PATH 值）」、`environ=EACCES`、`wrote=ok` 且本进程经 workspaces `tree` 列出该文件；本地 macOS 报告 skipped（依赖 5.1–5.3、S0b #96）
@@ -62,6 +62,7 @@ Archive coordination: `files-web` 主 spec 已晋升 4.1 API 与 4.2 纯预览�
 Suggested fixture level: expanded - 不变量 4 的机械证明只能来自真实子进程换 uid 后读 `/proc` 得 EACCES（Critical Path 白盒），CI ubuntu 是唯一执行场所
 Minimal mergeable slice: 5.1 sudo 前缀 + 配置单独可合并保绿（参数捕获测试，不起进程；未设 `OMP_USER` 时零行为变化）；5.2 独立可合并（DB/目录权限位只依赖入口与 1.2）；5.3 假 omp 模式独立可合并（测试支撑）；5.4 依赖 5.1–5.3（本地 skipped 仍绿）；5.5 依赖 5.4、6.1（multi-path：CI 运行 + oracle）；5.6 依赖 5.5
 Archive coordination: 5.3 探针契约已晋升至 `omp-test-harness`；父 change 最终归档保留「Linux 隔离证明」剩余集成要求并引用既有探针，不重复定义其协议。后续 #131 使用默认场景（显式故障/proxy 场景优先级不变），按字段标签解析含空格的 HOME/agent；同 uid 回报不等于跨 uid 隔离证明。
+Archive coordination: #120 两项配置/sudo 与 unsafe-PATH 要求已晋升至 `omp-uid-isolation`；最终父归档须保留完整 ompUser 链路、所有 spawn 代次和用户批准的 sudo-only PATH 拒绝，不以旧组合需求覆盖。目录 2770 与 DB 0600 仍为 5.2/#126；真实 uid/proc/PAM 仍为 #131/#132，不把受控子进程证明扩大为 Linux 隔离证明。
 
 ## 6. files-harness
 
