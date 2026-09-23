@@ -35,7 +35,15 @@ import {
 } from "./server-startup-helpers.js";
 
 const MODEL_ID = "issue-102-tracer-model";
-const STARTUP_MODULES = ["core/db", "auth", "http", "model-proxy", "sessions"];
+const STARTUP_MODULES = [
+  "core/db",
+  "auth",
+  "http",
+  "model-proxy",
+  "sessions",
+  "workspaces",
+  "accounts",
+];
 const PRIVATE_FILE_MODE = 0o600;
 const SHARED_DIR_MODE = 0o2770;
 const EXISTING_DIR_MODE = 0o755;
