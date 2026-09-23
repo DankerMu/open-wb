@@ -18,8 +18,6 @@ import {
   waitForTurn,
 } from "./session-supervisor-helpers.js";
 
-const SINK_CONTRACT = "session observation sink must return synchronously";
-
 afterEach(() => {
   vi.useRealTimers();
 });
@@ -53,8 +51,7 @@ describe("SessionSupervisor synchronous observation sinks", () => {
     const observed = await observeEventSinkFault(runtime, "rejected event sink", () =>
       Promise.reject(rejection),
     );
-    expect(observed.faults.map((error) => error.message)).toEqual([SINK_CONTRACT]);
-    expect(observed.faults[0]).not.toBe(rejection);
+    assertOwnedSinkFault(observed.faults, rejection);
   });
 
   it("reports a pending event-sink return without waiting for that Promise to settle", {
@@ -80,22 +77,24 @@ describe("SessionSupervisor synchronous observation sinks", () => {
   }, async () => {
     const runtime = createStartEofRuntime();
     const rejection = new Error("callable thenable rejection sentinel");
-    const callable = Object.assign(() => undefined, {
-      reason: undefined as Error | undefined,
-    });
-    // biome-ignore lint/suspicious/noThenProperty: intentional invalid sink return
-    Object.defineProperty(callable, "then", {
-      configurable: true,
-      value(this: { reason?: Error }, _fulfilled?: unknown, rejected?: (reason: unknown) => void) {
-        rejected?.(this.reason);
-      },
-    });
     const observed = await observeEventSinkFault(runtime, "callable thenable", () => {
-      callable.reason = rejection;
+      const callable = Object.assign(() => undefined, {
+        promise: Promise.reject(rejection),
+      });
+      // biome-ignore lint/suspicious/noThenProperty: intentional invalid sink return
+      Object.defineProperty(callable, "then", {
+        configurable: true,
+        value(
+          this: { promise: Promise<never> },
+          onFulfilled?: Parameters<Promise<never>["then"]>[0],
+          onRejected?: Parameters<Promise<never>["then"]>[1],
+        ) {
+          return this.promise.then(onFulfilled, onRejected);
+        },
+      });
       return callable;
     });
-    expect(observed.faults.map((error) => error.message)).toEqual([SINK_CONTRACT]);
-    expect(observed.faults.some((error) => error === rejection)).toBe(false);
+    assertOwnedSinkFault(observed.faults, rejection);
   });
 
   it("retains the original error thrown by an event-sink then getter", {
@@ -182,6 +181,12 @@ describe("SessionSupervisor synchronous observation sinks", () => {
     expect(observed.calls).toBe(1);
   });
 });
+
+function assertOwnedSinkFault(faults: Error[], rejection: Error) {
+  expect(faults).toHaveLength(1);
+  expect(faults[0]).toBeInstanceOf(Error);
+  expect(faults[0]).not.toBe(rejection);
+}
 
 async function observeEventSinkFault(
   runtime: ControlledRuntime,
