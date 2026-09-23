@@ -1,15 +1,25 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as accounts from "../src/accounts/index.js";
 import { type CreateAppOptions, createApp } from "../src/app.js";
+import * as auth from "../src/auth/index.js";
 import { openDb } from "../src/core/db/index.js";
+import * as http from "../src/http/index.js";
 import * as modelProxy from "../src/model-proxy/index.js";
 import * as sessions from "../src/sessions/index.js";
 import type { SessionSupervisorRuntime } from "../src/sessions/supervisor.js";
 import { TokenRegistry } from "../src/sessions/tokens.js";
+import * as workspaces from "../src/workspaces/index.js";
+import {
+  compileServerEntry,
+  releaseStartupFixtures,
+  reserveWildcardPort,
+  startCompiledServer,
+} from "./server-startup-helpers.js";
 import {
   bearerCookie,
   loginSessionId,
@@ -28,7 +38,7 @@ import {
 import type { FakeChild } from "./support/omp-rpc.js";
 
 /**
- * Issue #101 assembly baseline.
+ * Issue #101/#128 assembly baseline.
  * Order observation is a call-through spy on the live module exports.
  */
 
@@ -131,7 +141,7 @@ describe("真实 createApp 消费共享 registry 并先挂 proxy 再挂 sessions
     apps.push(app);
     await app.ready();
 
-    expect(order).toEqual(["model-proxy", "sessions"]);
+    expect(order).toEqual(["auth", "http", "model-proxy", "sessions", "workspaces", "accounts"]);
     expect(rowStatus(db, "chat_sessions", STALE_SESSION_ID)).toBe("failed");
     expect(runningCount(db, "chat_messages")).toBe(0);
     expect(runningCount(db, "chat_steps")).toBe(0);
@@ -287,8 +297,175 @@ describe("真实配置经认证 prompt 抵达 spawn", () => {
     expect(tokens.lookup(issued ?? "")).toBeNull();
   });
 });
+
+describe("真实 createApp 挂载 workspaces 与 accounts", () => {
+  it("认证后 GET /api/workspaces 与 GET /api/audit 返回真实形状与 no-store，匿名仍 401", async () => {
+    const { app, db, sandboxRoot } = openConfiguredAssemblyApp("open-wb-assembly-sandbox-");
+    const cookie = bearerCookie(await loginSessionId(app, "zhangsan"));
+
+    const workspacesResponse = await app.inject({
+      method: "GET",
+      url: "/api/workspaces",
+      headers: { cookie },
+    });
+    expect(workspacesResponse.statusCode).toBe(200);
+    expect(workspacesResponse.json()).toEqual({ workspaces: [] });
+    expect(workspacesResponse.headers["cache-control"]).toBe("no-store");
+
+    const auditResponse = await app.inject({
+      method: "GET",
+      url: "/api/audit",
+      headers: { cookie },
+    });
+    expect(auditResponse.statusCode).toBe(200);
+    expect(auditResponse.json()).toEqual({ events: [] });
+    expect(auditResponse.headers["cache-control"]).toBe("no-store");
+
+    for (const url of ["/api/workspaces", "/api/audit"]) {
+      const anonymous = await app.inject({ method: "GET", url });
+      expect(anonymous.statusCode).toBe(401);
+      expect(anonymous.json()).toEqual(UNAUTHORIZED_ENVELOPE);
+      expect(anonymous.headers["cache-control"]).toBe("no-store");
+    }
+
+    expect(existsSync(join(sandboxRoot, "u1"))).toBe(false);
+    expect(db.prepare("SELECT count(*) AS count FROM workspaces").get()).toEqual({ count: 0 });
+  });
+
+  it("同一装配把工作空间建在注入 runtime 根下，外账号管理员 404 无审计，属主越界 403 可经 GET /api/audit 看见", async () => {
+    const { app, db, sandboxRoot } = openConfiguredAssemblyApp("open-wb-assembly-tenant-");
+    const ownerCookie = bearerCookie(await loginSessionId(app, "zhangsan"));
+    const adminCookie = bearerCookie(await loginSessionId(app, "lisi"));
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/workspaces",
+      headers: { "content-type": "application/json", cookie: ownerCookie },
+      payload: JSON.stringify({ name: "assembly-root" }),
+    });
+    expect(created.statusCode).toBe(201);
+    const workspace = created.json() as { id: string; root: string };
+    expect(workspace.root).toBe(join(sandboxRoot, "u1", "assembly-root"));
+    expect(existsSync(workspace.root)).toBe(true);
+
+    const listed = await app.inject({
+      method: "GET",
+      url: "/api/workspaces",
+      headers: { cookie: ownerCookie },
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json()).toEqual({
+      workspaces: [
+        expect.objectContaining({
+          id: workspace.id,
+          name: "assembly-root",
+          dir: "assembly-root",
+          root: workspace.root,
+        }),
+      ],
+    });
+
+    const tree = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.id}/tree`,
+      headers: { cookie: ownerCookie },
+    });
+    expect(tree.statusCode).toBe(200);
+    expect(tree.json()).toEqual({ path: "", entries: [] });
+
+    const foreign = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.id}/tree?path=../outside`,
+      headers: { cookie: adminCookie },
+    });
+    expect(foreign.statusCode).toBe(404);
+    expect(foreign.json()).toEqual(NOT_FOUND_ENVELOPE);
+    expect(db.prepare("SELECT count(*) AS count FROM audit_events").get()).toEqual({ count: 1 });
+
+    const denied = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.id}/tree?path=../outside`,
+      headers: { cookie: ownerCookie },
+    });
+    expect(denied.statusCode).toBe(403);
+    expect(denied.json()).toEqual({
+      error: { code: "sandbox_denied", message: "目标路径不在你的沙箱内，操作已拒绝" },
+    });
+
+    const audit = await app.inject({
+      method: "GET",
+      url: "/api/audit",
+      headers: { cookie: ownerCookie },
+    });
+    expect(audit.statusCode).toBe(200);
+    expect(audit.json()).toEqual({
+      events: [
+        expect.objectContaining({
+          actorId: "u1",
+          kind: "sandbox.reject",
+          title: "越界访问被沙箱拦截",
+          workspaceId: workspace.id,
+          detail: { relPath: "../outside", op: "list", reason: expect.any(String) },
+        }),
+        expect.objectContaining({
+          actorId: "u1",
+          kind: "workspace.create",
+          title: "创建工作空间 assembly-root",
+          workspaceId: workspace.id,
+        }),
+      ],
+    });
+
+    await app.close();
+    apps.splice(apps.indexOf(app), 1);
+    expect(db.prepare("SELECT id FROM accounts WHERE id = 'u1'").get()).toEqual({ id: "u1" });
+  });
+
+  it("call-through 注册顺序与 compiled STARTUP_MODULES 记录一致", async () => {
+    const compiled = await compileServerEntry();
+    const port = await reserveWildcardPort();
+    const scratchRoot = mkdtempSync(join(tmpdir(), "open-wb-assembly-startup-"));
+    temps.push(scratchRoot);
+    const server = startCompiledServer(compiled.entry, {
+      HOST: "127.0.0.1",
+      PORT: String(port),
+      DB_PATH: join(scratchRoot, "db", "dev.db"),
+      OMP_STATE_DIR: join(scratchRoot, "state"),
+      SANDBOX_ROOT: join(scratchRoot, "sandbox"),
+      OMP_BIN: join(scratchRoot, "bin", "omp"),
+    });
+    try {
+      const started = (await server.waitForStarted()) as { modules: string[] };
+      const order = spyRegistrationOrder();
+      const { app } = openCurrentApp();
+      await app.ready();
+      expect(["core/db", ...order]).toEqual([
+        "core/db",
+        "auth",
+        "http",
+        "model-proxy",
+        "sessions",
+        "workspaces",
+        "accounts",
+      ]);
+      expect(started.modules).toEqual(["core/db", ...order]);
+      expect(existsSync(join(scratchRoot, "sandbox", "u1"))).toBe(false);
+    } finally {
+      await server.dispose();
+      await releaseStartupFixtures();
+    }
+  }, 90_000);
+});
 function spyRegistrationOrder(): string[] {
   const order: string[] = [];
+  vi.spyOn(auth, "registerAuth").mockImplementationOnce((app, options) => {
+    order.push("auth");
+    return auth.registerAuth(app, options);
+  });
+  vi.spyOn(http, "registerAuthGuard").mockImplementationOnce((app) => {
+    order.push("http");
+    return http.registerAuthGuard(app);
+  });
   vi.spyOn(modelProxy, "registerModelProxy").mockImplementationOnce((app, options) => {
     order.push("model-proxy");
     return modelProxy.registerModelProxy(app, options);
@@ -297,12 +474,44 @@ function spyRegistrationOrder(): string[] {
     order.push("sessions");
     return sessions.registerSessions(app, options);
   });
+  vi.spyOn(workspaces, "registerWorkspaces").mockImplementationOnce((app, options) => {
+    order.push("workspaces");
+    return workspaces.registerWorkspaces(app, options);
+  });
+  vi.spyOn(accounts, "registerAccounts").mockImplementationOnce((app, options) => {
+    order.push("accounts");
+    return accounts.registerAccounts(app, options);
+  });
   return order;
 }
 
-function openCurrentApp(): { app: FastifyInstance; db: DatabaseSync } {
+function openConfiguredAssemblyApp(prefix: string): {
+  app: FastifyInstance;
+  db: DatabaseSync;
+  sandboxRoot: string;
+} {
+  const sandboxRoot = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+  temps.push(sandboxRoot);
+  const { app, db } = openCurrentApp({
+    runtime: {
+      bin: join(sandboxRoot, "omp"),
+      sandboxRoot,
+      stateDir: join(sandboxRoot, "state"),
+      modelId: "deepseek-v4.1-flash",
+    },
+  });
+  return { app, db, sandboxRoot };
+}
+
+function openCurrentApp(assembly?: { runtime: SessionSupervisorRuntime }): {
+  app: FastifyInstance;
+  db: DatabaseSync;
+} {
   const db = track(openDb(":memory:"));
-  const app = createApp({ db });
+  const app = createApp({
+    db,
+    ...(assembly === undefined ? {} : { assembly }),
+  });
   apps.push(app);
   return { app, db };
 }

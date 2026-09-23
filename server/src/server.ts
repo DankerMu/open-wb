@@ -39,7 +39,15 @@ const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 3000;
 const DEFAULT_DB_RELATIVE = join("var", "dev.db");
 const DEFAULT_STATIC_RELATIVE = join("web", "dist");
-const STARTUP_MODULES = ["core/db", "auth", "http", "model-proxy", "sessions"];
+const STARTUP_MODULES = [
+  "core/db",
+  "auth",
+  "http",
+  "model-proxy",
+  "sessions",
+  "workspaces",
+  "accounts",
+];
 
 export interface ServerConfig extends AgentSettings {
   host: string;

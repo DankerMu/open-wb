@@ -1,7 +1,7 @@
 import { constants, type DatabaseSync } from "node:sqlite";
 import type { FastifyInstance } from "fastify";
 import { expect } from "vitest";
-import { createApp } from "../src/app.js";
+import { type CreateAppOptions, createApp } from "../src/app.js";
 import { openDb } from "../src/core/db/index.js";
 import {
   accountSnapshot,
@@ -56,6 +56,7 @@ export interface AppFixtureOptions {
   sessionTtlMs?: number | undefined;
   secureCookies?: boolean;
   now?: () => number;
+  assembly?: CreateAppOptions["assembly"];
 }
 
 export interface AppFixture {
@@ -79,6 +80,7 @@ export async function withApp<T>(
       authRuntime: fixedRuntime(options.now ?? (() => FIXED_NOW)),
       sessionTtlMs: options.sessionTtlMs,
       ...(options.secureCookies === undefined ? {} : { secureCookies: options.secureCookies }),
+      ...(options.assembly === undefined ? {} : { assembly: options.assembly }),
     });
     return await action({ app, db });
   } finally {

@@ -1,7 +1,6 @@
 import { constants, type DatabaseSync } from "node:sqlite";
 import type { FastifyInstance } from "fastify";
 import { describe, expect, it } from "vitest";
-import { registerAccounts } from "../src/accounts/index.js";
 import { emit } from "../src/core/audit/index.js";
 import {
   BAD_REQUEST_ENVELOPE,
@@ -75,10 +74,7 @@ type SeededEvents = {
 async function withAccountsApp<T>(
   action: (fixture: { app: FastifyInstance; db: DatabaseSync }) => Promise<T>,
 ): Promise<T> {
-  return withApp({}, async ({ app, db }) => {
-    registerAccounts(app, { db });
-    return action({ app, db });
-  });
+  return withApp({}, async ({ app, db }) => action({ app, db }));
 }
 
 function seedInterleavedEvents(db: DatabaseSync): SeededEvents {

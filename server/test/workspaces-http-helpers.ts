@@ -1,13 +1,8 @@
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
+import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance } from "fastify";
 import { expect } from "vitest";
-import { registerAccounts } from "../src/accounts/index.js";
-import { emit } from "../src/core/audit/index.js";
-import { ensureSharedDir } from "../src/core/sandbox/dirs.js";
-import { createSandbox } from "../src/core/sandbox/index.js";
-import { registerWorkspaces } from "../src/workspaces/index.js";
-import { createWorkspaceStore } from "../src/workspaces/store.js";
 import { type InjectResponse, NOT_FOUND_ENVELOPE, withApp } from "./auth-lifecycle-helpers.js";
 import { tempDir } from "./core-db-helpers.js";
 
@@ -25,16 +20,23 @@ export async function withWorkspacesApp<T>(
   beforeRoutes?: (fixture: WorkspaceHttpFixture) => void,
 ): Promise<T> {
   const sandboxRoot = realpathSync(tempDir());
-  return withApp({}, async ({ app, db }) => {
-    const store = createWorkspaceStore(db, { sandboxRoot, ensureSharedDir, emit });
-    const audit = { emit: (event: Parameters<typeof emit>[1]) => emit(db, event) };
-    const sandbox = createSandbox({ rootOf: store.rootOf, audit });
-    const fixture = { app, db, sandboxRoot };
-    beforeRoutes?.(fixture);
-    registerAccounts(app, { db });
-    registerWorkspaces(app, { store, sandbox, audit });
-    return action(fixture);
-  });
+  return withApp(
+    {
+      assembly: {
+        runtime: {
+          bin: join(sandboxRoot, "omp"),
+          sandboxRoot,
+          stateDir: join(sandboxRoot, "state"),
+          modelId: "deepseek-v4.1-flash",
+        },
+      },
+    },
+    async ({ app, db }) => {
+      const fixture = { app, db, sandboxRoot };
+      beforeRoutes?.(fixture);
+      return action(fixture);
+    },
+  );
 }
 
 export function expectWorkspaceResponse(
@@ -45,6 +47,12 @@ export function expectWorkspaceResponse(
   expect(response.statusCode).toBe(status);
   expect(response.json()).toEqual(body);
   expect(response.headers["cache-control"]).toBe("no-store");
+}
+
+export function expectEmptyWorkspaceAuditAndOwnerRoot(db: DatabaseSync, sandboxRoot: string): void {
+  expect(db.prepare("SELECT count(*) AS count FROM workspaces").get()).toEqual({ count: 0 });
+  expect(db.prepare("SELECT count(*) AS count FROM audit_events").get()).toEqual({ count: 0 });
+  expect(existsSync(join(sandboxRoot, "u1"))).toBe(false);
 }
 
 interface WorkspaceRequest {

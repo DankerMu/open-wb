@@ -23,6 +23,7 @@ import {
 } from "./auth-lifecycle-helpers.js";
 import { removeTempDirs } from "./core-db-helpers.js";
 import {
+  expectEmptyWorkspaceAuditAndOwnerRoot,
   expectWorkspaceResponse,
   insertWorkspace,
   requestWorkspaceFile,
@@ -215,9 +216,7 @@ describe("workspace REST", () => {
         expectWorkspaceResponse(response, 400, BAD_REQUEST_ENVELOPE);
       }
 
-      expect(db.prepare("SELECT count(*) AS count FROM workspaces").get()).toEqual({ count: 0 });
-      expect(db.prepare("SELECT count(*) AS count FROM audit_events").get()).toEqual({ count: 0 });
-      expect(existsSync(join(sandboxRoot, "u1"))).toBe(false);
+      expectEmptyWorkspaceAuditAndOwnerRoot(db, sandboxRoot);
     });
   });
   it("lists one owned workspace tree level with production ordering and metadata", async () => {

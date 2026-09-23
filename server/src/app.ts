@@ -4,6 +4,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import fastifyStatic from "@fastify/static";
 import fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
+import { registerAccounts } from "./accounts/index.js";
 import {
   DEFAULT_MODEL_ID,
   DEFAULT_OMP_BIN_RELATIVE,
@@ -19,7 +20,10 @@ import {
   SESSION_TTL,
   validateSessionTtl,
 } from "./auth/index.js";
+import { emit } from "./core/audit/index.js";
 import { HttpError } from "./core/errors/index.js";
+import { ensureSharedDir } from "./core/sandbox/dirs.js";
+import { createSandbox } from "./core/sandbox/index.js";
 import {
   handleHttpError,
   registerAuthGuard,
@@ -34,6 +38,8 @@ import { registerSessions } from "./sessions/index.js";
 import type { SessionStore } from "./sessions/store.js";
 import type { SessionSupervisor, SessionSupervisorRuntime } from "./sessions/supervisor.js";
 import { TokenRegistry } from "./sessions/tokens.js";
+import { registerWorkspaces } from "./workspaces/index.js";
+import { createWorkspaceStore } from "./workspaces/store.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -126,6 +132,15 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     ...(assembly?.onEvent === undefined ? {} : { onEvent: assembly.onEvent }),
   });
   app.decorate("sessions", registered);
+  const store = createWorkspaceStore(db, {
+    sandboxRoot: runtime.sandboxRoot,
+    ensureSharedDir,
+    emit,
+  });
+  const audit = { emit: (event: Parameters<typeof emit>[1]) => emit(db, event) };
+  const sandbox = createSandbox({ rootOf: store.rootOf, audit });
+  registerWorkspaces(app, { store, sandbox, audit });
+  registerAccounts(app, { db });
 
   app.all("/api", (request, reply) => sendNotFound(reply, request));
   app.get("/api/healthz", () => ({ status: "ok" }));
