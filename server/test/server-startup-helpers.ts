@@ -99,18 +99,27 @@ export function reserveWildcardPort(): Promise<number> {
 export function startCompiledServer(
   entry: string,
   env: Record<string, string>,
-  options: { orderTrace?: string } = {},
+  options: { orderTrace?: string; requireHook?: string } = {},
 ): StartedServer {
   const child = spawn(process.execPath, [entry], {
     detached: true,
     stdio: ["ignore", "pipe", "pipe"],
     env: {
       PATH: process.env.PATH ?? "/usr/bin",
-      ...(options.orderTrace === undefined
+      ...(options.orderTrace === undefined && options.requireHook === undefined
         ? {}
         : {
-            NODE_OPTIONS: `--require ${orderPreload(options.orderTrace)}`,
-            OPEN_WB_ORDER_TRACE: options.orderTrace,
+            NODE_OPTIONS: [
+              options.requireHook === undefined ? undefined : `--require ${options.requireHook}`,
+              options.orderTrace === undefined
+                ? undefined
+                : `--require ${orderPreload(options.orderTrace)}`,
+            ]
+              .filter((entry) => entry !== undefined)
+              .join(" "),
+            ...(options.orderTrace === undefined
+              ? {}
+              : { OPEN_WB_ORDER_TRACE: options.orderTrace }),
           }),
       ...env,
     },
