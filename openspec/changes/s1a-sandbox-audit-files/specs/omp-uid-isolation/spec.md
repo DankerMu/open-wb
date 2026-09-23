@@ -3,11 +3,11 @@
 ## ADDED Requirements
 
 ### Requirement: OMP_USER 配置与 sudo spawn 前缀
-`server.ts` 配置 seam SHALL 新增可缺省的 `OMP_USER`：缺省表示同 uid 直接 spawn（S0b 行为不变）；显式值 SHALL 匹配 `^[a-z_][a-z0-9_-]{0,31}$`，显式空或不匹配 → 启动前配置失败。`OMP_USER` 设置时 `OmpProcess.spawn` SHALL 以 PATH 上的 `sudo` 为可执行文件，argv 精确为 `["-n","-u",<OMP_USER>,"--preserve-env=PATH,LANG,TMPDIR,HOME,PI_CODING_AGENT_DIR,WORKBUDDY_MODEL_TOKEN","--", <OMP_BIN>, ...S0b 规定的 omp 参数]`，sudo 进程自身 env 精确等于 S0b 白名单（`LANG`/`TMPDIR` 缺席时不设）；白名单值 SHALL 不出现在任何 argv 中（`/proc/<pid>/cmdline` 全局可读）；S0b 的目录创建 SHALL 改用 `ensureSharedDir`（`0o2770`）。sudo 非零退出/立即退出 SHALL 走 S0b 既有的 `agent_unavailable` 路径，不重试为同 uid。
+`server.ts` 配置 seam SHALL 新增可缺省的 `OMP_USER`：缺省表示同 uid 直接 spawn（S0b 行为不变）；显式值 SHALL 匹配 `^[a-z_][a-z0-9_-]{0,31}$`，显式空或不匹配 → 启动前配置失败。`OMP_USER` 设置时 `OmpProcess.spawn` SHALL 以 PATH 上的 `sudo` 为可执行文件，argv 精确为 `["-n","-u",<OMP_USER>,"--preserve-env=PATH,LANG,TMPDIR,HOME,PI_CODING_AGENT_DIR,WORKBUDDY_MODEL_TOKEN",...optionalTmpdirAssignment,"--", <OMP_BIN>, ...S0b 规定的 omp 参数]`，sudo 进程自身 env 精确等于 S0b 白名单（`LANG`/`TMPDIR` 缺席时不设）；凭证值 SHALL 不出现在任何 argv 中；唯一环境赋值例外为非凭证 TMPDIR（`/proc/<pid>/cmdline` 全局可读）；S0b 的目录创建 SHALL 改用 `ensureSharedDir`（`0o2770`）。sudo 非零退出/立即退出 SHALL 走 S0b 既有的 `agent_unavailable` 路径，不重试为同 uid。 #239 修正：`optionalTmpdirAssignment` / `[TMPDIR=<value>]` 表示白名单 TMPDIR 已定义（含空串）时，在 `--` 前增加一个 `TMPDIR=<精确值>` argv 元素，缺席时零元素；不经 shell 展开或拆分。此非凭证路径例外跨过 glibc setuid 对 TMPDIR 的剥离，不允许 token/上游密钥上命令行。
 
 #### Scenario: argv 前缀
 - WHEN `OMP_USER=omp` 下对 owner u1 冷启动 spawn（捕获 spawn 参数，不起进程）
-- THEN 可执行为 `sudo`，argv 精确为 `-n -u omp --preserve-env=PATH,LANG,TMPDIR,HOME,PI_CODING_AGENT_DIR,WORKBUDDY_MODEL_TOKEN -- <OMP_BIN> --mode rpc --cwd <SANDBOX_ROOT>/u1 …`（不含任何 `KEY=value`）；sudo 进程 env 键集精确等于 `{PATH, LANG?, TMPDIR?, HOME, PI_CODING_AGENT_DIR, WORKBUDDY_MODEL_TOKEN}`（`LANG`/`TMPDIR` 父进程有则有），`WORKBUDDY_MODEL_TOKEN` 为 64 hex；未设 `OMP_USER` 时可执行与 argv 与 S0b 断言逐字相同
+- THEN 可执行为 `sudo`，argv 精确为 `-n -u omp --preserve-env=PATH,LANG,TMPDIR,HOME,PI_CODING_AGENT_DIR,WORKBUDDY_MODEL_TOKEN [TMPDIR=<value>] -- <OMP_BIN> --mode rpc --cwd <SANDBOX_ROOT>/u1 …`（仅允许所述非凭证 TMPDIR 环境赋值）；sudo 进程 env 键集精确等于 `{PATH, LANG?, TMPDIR?, HOME, PI_CODING_AGENT_DIR, WORKBUDDY_MODEL_TOKEN}`（`LANG`/`TMPDIR` 父进程有则有），`WORKBUDDY_MODEL_TOKEN` 为 64 hex；未设 `OMP_USER` 时可执行与 argv 与 S0b 断言逐字相同
 
 #### Scenario: 非法配置
 - WHEN `OMP_USER` 为空串、`Omp`、`omp user`、`root;id`

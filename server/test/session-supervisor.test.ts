@@ -24,6 +24,7 @@ import {
   requiredCall,
   requiredToken,
   resumePath,
+  sudoPrefix,
   waitFor,
   waitForTurn,
 } from "./session-supervisor-helpers.js";
@@ -50,6 +51,7 @@ describe("SessionSupervisor real child persistence and lifecycle", () => {
     { timeout: 15_000 },
     async (ompUser) => {
       const runtime = createRealFakeRuntime();
+      const tmpdir = process.env.TMPDIR;
       if (ompUser !== undefined) {
         runtime.runtime.ompUser = ompUser;
       }
@@ -157,8 +159,9 @@ describe("SessionSupervisor real child persistence and lifecycle", () => {
         expect(firstCall.command).toBe(ompUser === undefined ? runtime.runtime.bin : "sudo");
         expect(resumedCall.command).toBe(firstCall.command);
         if (ompUser !== undefined) {
-          expect(firstCall.args.slice(0, 6)).toEqual(sudoUserPrefix(runtime.runtime.bin, ompUser));
-          expect(resumedCall.args.slice(0, 6)).toEqual(firstCall.args.slice(0, 6));
+          const prefix = sudoPrefix(ompUser, runtime.runtime.bin, tmpdir);
+          expect(firstCall.args.slice(0, prefix.length)).toEqual(prefix);
+          expect(resumedCall.args.slice(0, prefix.length)).toEqual(prefix);
         } else {
           expect(firstCall.args[0]).toBe("--mode");
           expect(resumedCall.args.slice(0, firstCall.args.length)).toEqual(firstCall.args);
@@ -589,17 +592,6 @@ function assistantFrom(tree: { messages: readonly AssistantMessage[] }) {
     throw new Error("completed turn has no assistant message");
   }
   return assistant;
-}
-
-function sudoUserPrefix(bin: string, user: string): string[] {
-  return [
-    "-n",
-    "-u",
-    user,
-    "--preserve-env=PATH,LANG,TMPDIR,HOME,PI_CODING_AGENT_DIR,WORKBUDDY_MODEL_TOKEN",
-    "--",
-    bin,
-  ];
 }
 
 function latestAssistantFrom(tree: { messages: readonly AssistantMessage[] }) {
