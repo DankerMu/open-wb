@@ -13,6 +13,8 @@ SSE 复用 Supervisor 当前 generation 的唯一 ring 和已分配 ID；订阅�
 
 逻辑退订与物理响应关闭分开：取消订阅/定时器后，尚在 end/flush 的响应仍由传输持有，直到实际 close；preClose 必须能销毁它们。空闲订阅的真实 HTTP 头立即 flush，不能等15s首个 heartbeat。请求在 preClose 之后才进入 handler 时不得新建流；已认证 owner 获既有502 `agent_unavailable` 和 `Connection: close`。普通 REST 在关停期间完成后仍保留 keep-alive 的既有问题独立跟踪 [#227](https://github.com/DankerMu/open-wb/issues/227)，不是本次 SSE 交付对全部 HTTP 关停时长的保证。
 
+请求与响应寿命不能混同：Node 的 `IncomingMessage.destroyed` 在正常读完请求体后也可能为 true，而 SSE 响应仍可写。登记流之前检查响应 destroyed/ended 或真正的 request abort；若客户端已在异步 hook 中断开，不能因错过 close 事件而重新登记订阅。此边界由真实 TCP 的「先断开再恢复 handler」及「正常读完请求仍返回200」两条相反用例约束。
+
 ## Considered Options
 - WebSocket：双向能力现阶段用不上，连接生命周期与内网代理兼容成本更高。
 - tRPC：端到端类型安全，但把 API 绑进 TS 生态——kb-service 是 Python，API 须保持语言中立。

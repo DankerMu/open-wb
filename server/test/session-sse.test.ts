@@ -2,35 +2,35 @@
  * Issue #103 authenticated session SSE at GET /api/sessions/:id/events.
  * Expected status, headers, frames, and envelopes are fixture literals.
  */
-import type { ClientRequest, IncomingMessage, ServerResponse } from "node:http";
-import { request as httpRequest } from "node:http";
-import { createConnection } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createApp } from "../src/app.js";
-import { openDb } from "../src/core/db/index.js";
-import { TokenRegistry } from "../src/sessions/tokens.js";
 import { NOT_FOUND_ENVELOPE, UNAUTHORIZED_ENVELOPE } from "./auth-lifecycle-helpers.js";
-import { FIXED_NOW, fixedRuntime } from "./session-db-helpers.js";
 import { cookieFor, UNKNOWN_SESSION_ID } from "./session-rest-helpers.js";
 import {
-  type ControlledRuntime,
+  collected,
+  eventCount,
+  GAP_FRAME,
+  LARGE_DELTA,
+  lastDataId,
+  observeRaw,
+  openEventStream,
+  openGapBackpressuredStream,
+  openHeartbeatPair,
+  openLiveWriteFalseDelta,
+  readHttpHeaders,
+  readUntil,
+} from "./session-sse-helpers.js";
+import {
   closeFixture,
   createRealFakeRuntime,
-  createSession,
-  createStartHeldRuntime,
   emitAssistantDelta,
   openBareSession,
   openBulkDeltaSession,
   openHeldPromptSession,
   openStartHeldSession,
-  type SupervisorApp,
   startHeldTurn,
   waitFor,
   waitForContent,
 } from "./session-supervisor-helpers.js";
-
-const LARGE_DELTA = "x".repeat(200);
-const GAP_FRAME = "id:\nevent: replay.gap\ndata: {}\n\n";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -155,6 +155,44 @@ describe("authenticated session event stream", () => {
       await closeFixture(fixture);
     }
   });
+
+  it.each(["false", "throw"] as const)(
+    "contains a heartbeat %s writer without stopping a healthy client",
+    { timeout: 15_000 },
+    async (mode) => {
+      const opened = await openHeartbeatPair(mode);
+      const { runtime, fixture, session, failing, healthy, writes } = opened;
+      try {
+        expect(fixture.supervisor.sessionStreamSubscriberCount(session)).toBe(2);
+        expect(runtime.clock.pending()).toBe(2);
+
+        runtime.clock.advance(14_999);
+        expect(writes.get("failing")).toEqual([]);
+        expect(writes.get("healthy")).toEqual([]);
+        runtime.clock.advance(1);
+        expect(writes.get("failing")).toEqual([": keepalive\n\n"]);
+        expect(fixture.supervisor.sessionStreamSubscriberCount(session)).toBe(1);
+        expect(runtime.clock.pending()).toBe(1);
+        if (mode === "false") {
+          expect(failing.raw.writableEnded).toBe(true);
+        } else {
+          expect(failing.raw.destroyed).toBe(true);
+        }
+
+        runtime.clock.advance(15_000);
+        expect(writes.get("failing")).toEqual([": keepalive\n\n"]);
+        expect(writes.get("healthy")).toEqual([": keepalive\n\n", ": keepalive\n\n"]);
+        expect(healthy.raw.destroyed).toBe(false);
+        expect(healthy.raw.writableEnded).toBe(false);
+
+        await fixture.app.close();
+        expect(runtime.clock.pending()).toBe(0);
+        expect(fixture.supervisor.sessionStreamSubscriberCount(session)).toBe(0);
+      } finally {
+        fixture.db.close();
+      }
+    },
+  );
 
   it("pauses a false replay.gap write through heartbeat and resumes live delivery on drain", {
     timeout: 15_000,
@@ -360,325 +398,4 @@ describe("authenticated session event stream", () => {
       fixture.db.close();
     }
   });
-
-  it("rejects a request released after preClose instead of accepting a late SSE", {
-    timeout: 15_000,
-  }, async () => {
-    const runtime = createRealFakeRuntime();
-    let release!: () => void;
-    const held = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    let entered!: () => void;
-    const enteredGate = new Promise<void>((resolve) => {
-      entered = resolve;
-    });
-    let closing!: () => void;
-    const closingGate = new Promise<void>((resolve) => {
-      closing = resolve;
-    });
-    const db = openDb(":memory:");
-    const app = createApp({
-      db,
-      authRuntime: fixedRuntime(() => FIXED_NOW),
-      assembly: {
-        tokens: new TokenRegistry(),
-        runtime: runtime.runtime,
-        onError() {},
-      },
-    });
-    app.addHook("preHandler", async (request) => {
-      if (request.url.endsWith("/events")) {
-        entered();
-        await held;
-      }
-    });
-    app.addHook("preClose", (done) => {
-      closing();
-      done();
-    });
-    const cookie = await cookieFor(app, "zhangsan");
-    const session = await createSession(app, cookie);
-    const origin = await app.listen({ host: "127.0.0.1", port: 0 });
-    let req: ClientRequest | undefined;
-    let res: IncomingMessage | undefined;
-    try {
-      const response = new Promise<IncomingMessage>((resolve, reject) => {
-        req = httpRequest(
-          `${origin}/api/sessions/${session}/events`,
-          { headers: { cookie } },
-          (reply) => {
-            res = reply;
-            reply.resume();
-            resolve(reply);
-          },
-        );
-        req.on("error", (error) => {
-          reject(error);
-        });
-        req.end();
-      });
-      void response.catch(() => {});
-      await enteredGate;
-      const closed = app.close();
-      await closingGate;
-      release();
-      const closeDeadline = AbortSignal.timeout(2_000);
-      await new Promise<void>((resolve, reject) => {
-        const fail = (): void => {
-          reject(
-            new Error(
-              "app.close must reject/close a stream attaching after preClose, not strand it",
-            ),
-          );
-        };
-        closeDeadline.addEventListener("abort", fail, { once: true });
-        void closed.then(
-          () => {
-            closeDeadline.removeEventListener("abort", fail);
-            resolve();
-          },
-          (error: unknown) => {
-            closeDeadline.removeEventListener("abort", fail);
-            reject(error);
-          },
-        );
-      });
-      const lateReply = await response;
-      expect(lateReply.statusCode).toBe(502);
-      expect(lateReply.headers.connection).toBe("close");
-      expect(app.sessions.supervisor.sessionStreamSubscriberCount(session)).toBe(0);
-    } finally {
-      release();
-      res?.destroy();
-      req?.destroy();
-      try {
-        await app.close();
-      } catch {
-        /* already closed */
-      }
-      db.close();
-    }
-  });
-
-  it("closes paused and end-pending streams during app.close", {
-    timeout: 15_000,
-  }, async () => {
-    const { fixture, cookie, session } = await openBulkDeltaSession(900, LARGE_DELTA);
-    try {
-      const paused = await openEventStream(fixture, session, cookie, "1:0");
-      expect(paused.bufferedBytes()).toBeGreaterThan(0);
-      await fixture.app.close();
-      expect(fixture.supervisor.sessionStreamSubscriberCount(session)).toBe(0);
-    } finally {
-      fixture.db.close();
-    }
-  });
 });
-
-interface OpenStream {
-  abort(): void;
-  resume(): void;
-  bufferedBytes(): number;
-  preview(): string;
-  raw: ServerResponse;
-}
-
-interface GapBackpressuredStream {
-  runtime: ControlledRuntime;
-  fixture: SupervisorApp;
-  cookie: string;
-  session: string;
-  stream: OpenStream;
-  writes: string[];
-}
-
-const streamBytes = new WeakMap<OpenStream, string>();
-
-async function openEventStream(
-  fixture: SupervisorApp,
-  session: string,
-  cookie: string,
-  lastEventId?: string,
-) {
-  const controller = new AbortController();
-  const response = await fixture.app.inject({
-    method: "GET",
-    url: `/api/sessions/${session}/events`,
-    headers: {
-      cookie,
-      ...(lastEventId === undefined ? {} : { "Last-Event-ID": lastEventId }),
-    },
-    payloadAsStream: true,
-    signal: controller.signal,
-  });
-  expect(response.statusCode).toBe(200);
-  const readable = response.stream();
-  readable.pause();
-  const handle: OpenStream = {
-    raw: response.raw.res,
-    abort() {
-      controller.abort();
-      response.raw.res.destroy();
-    },
-    resume() {
-      readable.resume();
-    },
-    bufferedBytes() {
-      return readable.readableLength;
-    },
-    preview() {
-      const chunk = readable.read();
-      if (chunk === null) {
-        return collected(handle);
-      }
-      const text = Buffer.isBuffer(chunk) ? chunk.toString() : String(chunk);
-      const previous = streamBytes.get(handle) ?? "";
-      streamBytes.set(handle, previous + text);
-      return previous + text;
-    },
-  };
-  streamBytes.set(handle, "");
-  readable.on("data", (chunk: Buffer | string) => {
-    const previous = streamBytes.get(handle) ?? "";
-    streamBytes.set(handle, previous + chunk.toString());
-  });
-  return handle;
-}
-
-async function openGapBackpressuredStream(): Promise<GapBackpressuredStream> {
-  const runtime = createStartHeldRuntime();
-  const writes: string[] = [];
-  const { fixture, cookie, session } = await openBareSession(runtime.runtime, {
-    configureApp(app) {
-      app.addHook("onRequest", (request, reply, done) => {
-        if (!request.url.endsWith("/events")) {
-          done();
-          return;
-        }
-        const originalWrite = reply.raw.write.bind(reply.raw);
-        reply.raw.write = ((chunk: unknown, encoding?: unknown, callback?: unknown) => {
-          writes.push(Buffer.isBuffer(chunk) ? chunk.toString() : String(chunk));
-          if (writes.length === 1) {
-            return false;
-          }
-          return originalWrite(chunk as never, encoding as never, callback as never);
-        }) as typeof reply.raw.write;
-        done();
-      });
-    },
-  });
-  try {
-    const stream = await openEventStream(fixture, session, cookie, "");
-    return { runtime, fixture, cookie, session, stream, writes };
-  } catch (error) {
-    await closeFixture(fixture);
-    throw error;
-  }
-}
-
-async function openLiveWriteFalseDelta(holdEnd: boolean) {
-  const { fixture, cookie, session, child } = await openHeldPromptSession();
-  try {
-    const stream = await openEventStream(fixture, session, cookie, "1:2");
-    const observed = observeRaw(stream.raw, { writeFalse: true, holdEnd });
-    emitAssistantDelta(child, "!");
-    return { fixture, session, child, stream, observed };
-  } catch (error) {
-    await closeFixture(fixture);
-    throw error;
-  }
-}
-
-function observeRaw(raw: ServerResponse, options: { writeFalse?: boolean; holdEnd?: boolean }) {
-  const state = { ended: false, destroyed: false, endedCalls: 0 };
-  const originalWrite = raw.write.bind(raw);
-  const originalEnd = raw.end.bind(raw);
-  raw.write = ((chunk: unknown, encoding?: unknown, callback?: unknown) => {
-    const accepted = originalWrite(chunk as never, encoding as never, callback as never);
-    if (options.writeFalse) {
-      return false;
-    }
-    return accepted;
-  }) as typeof raw.write;
-  raw.end = ((...args: never[]) => {
-    state.endedCalls += 1;
-    if (options.holdEnd) {
-      return raw;
-    }
-    return originalEnd(...args);
-  }) as typeof raw.end;
-  raw.on("finish", () => {
-    state.ended = true;
-  });
-  raw.on("close", () => {
-    state.destroyed = raw.destroyed;
-  });
-  return {
-    get ended() {
-      return state.ended;
-    },
-    get destroyed() {
-      return state.destroyed;
-    },
-    get endedCalls() {
-      return state.endedCalls;
-    },
-  };
-}
-
-function collected(stream: OpenStream): string {
-  return streamBytes.get(stream) ?? "";
-}
-
-async function readUntil(stream: OpenStream, match: (text: string) => boolean): Promise<string> {
-  return waitFor(() => {
-    stream.resume();
-    const text = collected(stream);
-    return match(text) ? text : undefined;
-  }, "SSE bytes");
-}
-
-function eventCount(text: string): number {
-  return [...text.matchAll(/^id: .+$/gmu)].filter((match) => match[0] !== "id: ").length;
-}
-
-function lastDataId(text: string): string | undefined {
-  const matches = [...text.matchAll(/^id: (.+)$/gmu)];
-  const last = matches[matches.length - 1];
-  const id = last?.[1];
-  return id === undefined || id.length === 0 ? undefined : id;
-}
-
-async function readHttpHeaders(port: number, target: string, cookie: string): Promise<string> {
-  const socket = createConnection({ host: "127.0.0.1", port });
-  let received = "";
-  const deadline = AbortSignal.timeout(2_000);
-  try {
-    await new Promise<void>((resolve, reject) => {
-      socket.once("connect", resolve);
-      socket.once("error", reject);
-    });
-    socket.write(
-      `GET ${target} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nCookie: ${cookie}\r\nConnection: keep-alive\r\n\r\n`,
-    );
-    await new Promise<void>((resolve, reject) => {
-      const fail = (): void => {
-        reject(new Error("SSE headers must arrive before first heartbeat; no response within 2s"));
-      };
-      deadline.addEventListener("abort", fail, { once: true });
-      socket.on("data", (chunk: Buffer) => {
-        received += chunk.toString("latin1");
-        if (received.includes("\r\n\r\n")) {
-          deadline.removeEventListener("abort", fail);
-          resolve();
-        }
-      });
-      socket.once("error", reject);
-      socket.once("end", () => reject(new Error("socket ended before headers")));
-    });
-    return received.slice(0, received.indexOf("\r\n\r\n") + 4);
-  } finally {
-    socket.destroy();
-  }
-}

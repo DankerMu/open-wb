@@ -139,6 +139,11 @@ function attachEventStream(
   raw.on("error", onTransportError);
   request.raw.once("aborted", onPhysicalClose);
   raw.on("drain", onDrain);
+  if (raw.destroyed || raw.writableEnded || request.raw.aborted) {
+    onPhysicalClose();
+    return;
+  }
+
   connection.unsubscribe = () => {
     raw.off("drain", onDrain);
   };
