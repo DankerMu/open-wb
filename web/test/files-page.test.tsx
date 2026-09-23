@@ -291,8 +291,8 @@ describe("workspace page route integration", () => {
     fireEvent.click(within(newWorkspaceDialog).getByRole("button", { name: "创建" }));
     await waitFor(() => {
       expect(`${window.location.pathname}${window.location.search}`).toBe("/files?ws=workspace-2");
+      expect(screen.getByText("新空间", { exact: true })).toBeTruthy();
     });
-    expect(screen.getByText("新空间", { exact: true })).toBeTruthy();
   });
 
   it("does not let a late workspace creation close or select a newer dialog", async () => {
@@ -404,7 +404,7 @@ describe("workspace page route integration", () => {
       await router.navigate(-1);
     });
     await expectLocation("/files?ws=workspace-1");
-    expect(screen.getByText(workspace.root, { exact: true })).toBeTruthy();
+    expect(await screen.findByText(workspace.root, { exact: true })).toBeTruthy();
   });
 
   it("releases a displayed image when replaced and when the page unmounts", async () => {
