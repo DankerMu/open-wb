@@ -16,8 +16,8 @@
 - [x] 3.1 Main runs npm test --workspace web with unchanged full coverage scope; npm run build --workspace web; npm run typecheck --workspaces; scoped Biome plus deadcode/duplicate/naming/size checks. Preserve outputs and RED→GREEN evidence.
 - [x] 3.2 Main builds server and launches real service with pre-provisioned 2770 SANDBOX_ROOT; run existing make ui-walk unchanged journey with new page assertions. Fresh account shows empty copy with no unexpected browser errors.
 - [x] 3.3 Main performs throwaway Chromium real-HTTP journey: create/select workspace, expand, preview md/csv/png/zip, new directory and URL reload/fallback; save screenshots and browser/request evidence; unsupported and invalid workspace targets receive zero file/tree requests. Intentional initial auth/me 401 is narrowly correlated, never blanket console suppression.
-- [ ] 3.4 Freeze commit; expanded correctness, test-evidence+spec-compliance, invariant-state parallel static review; all reviewers end before any fix. Main executes bounded adjudication/fix gate and exact-head CI before automatic merge under Epic waiver.
-- [ ] 3.5 Archive only this child after merge; preserve unrelated main requirements and active S0b/S1a. Update parent 4.3 completion and coordinate final parent reconciliation, not premature chat route promotion.
+- [x] 3.4 Freeze commit; expanded correctness, test-evidence+spec-compliance, invariant-state parallel static review; all reviewers end before any fix. Main executes bounded adjudication/fix gate and exact-head CI before automatic merge under Epic waiver. PR229 merged daf018f; final 4127d32, CI35846461252 eight jobs green; one fix pass, fresh round2 clean.
+- [x] 3.5 Archive only this child after merge; preserve unrelated main requirements and active S0b/S1a. Update parent 4.3 completion and coordinate final parent reconciliation, not premature chat route promotion. This archive follow-up promotes only two files-web additions and two spa-shell modifications.
 
 ## Risk pack mapping
 
