@@ -14,8 +14,8 @@
 - [x] 3.1 Main runs actual Ubuntu container as nonroot runner via sg workbuddy with native sudoers and secure-path Node; preflight HOME/capability/identity, then selected Linux test non skipped GREEN and no omp-owned residual process before container teardown.
 - [x] 3.2 In disposable copies qualify direct-uid, credential-leak, HOME/agent and write/list failure classes as semantic RED, restore original GREEN. No product source edits or oracle weakening.
 - [x] 3.3 Verify macOS and Linux without opt-in report skipped, macOS opt-in still skipped, and opt-in misconfiguration fails; run unchanged full server coverage, typecheck, scoped Biome/knip/jscpd/guards.
-- [ ] 3.4 Freeze head, expanded correctness / test-evidence+spec-compliance / invariant-state static review, bounded fix gate and exact-head CI; ordinary CI skipped explicitly not treated as Linux-isolation proof.
-- [ ] 3.5 Merge and selectively archive this child; hand off executable path, sharedgroup/Node/sudo prerequisites and real Linux evidence to #132, keep #134/downgrade gate open and parent changes active.
+- [x] 3.4 Frozen2985e156 passed three expanded static seats without findings, round1 clean/zero fix passes; exact-head CI35875641054 all8success. Ordinary CI skipped explicitly is not Linux-isolation proof.
+- [x] 3.5 PR242 merged640d8bf; selectively archive this child and promote only Linux隔离证明. Prerequisites/evidence handed to #132 comment5797077642; #134 comment5797078349 retains downgrade gate, and parent changes remain active.
 
 ## Risk pack mapping
 
