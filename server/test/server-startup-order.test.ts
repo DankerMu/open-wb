@@ -24,9 +24,13 @@ import { parse } from "yaml";
 import { withOpenDb } from "./core-db-helpers.js";
 import {
   type CompiledServerEntry,
+  childUmaskHook,
   compileServerEntry,
+  denyChmodHook,
+  observeOpenDbHook,
   releaseStartupFixtures,
   reserveWildcardPort,
+  type StartedServer,
   startCompiledServer,
 } from "./server-startup-helpers.js";
 
@@ -160,7 +164,10 @@ describe("production entry private state permissions", () => {
   it("repairs a cold DB and pre-existing 0644 main/WAL/SHM to 0600 before open", async () => {
     const scratchRoot = mkdtempSync(join(tmpdir(), "open-wb-private-db-"));
     scratch.push(scratchRoot);
-    const dbPath = join(scratchRoot, "db", "dev.db");
+    const dbParent = join(scratchRoot, "db");
+    mkdirSync(dbParent, { recursive: true });
+    chmodSync(dbParent, EXISTING_DIR_MODE);
+    const dbPath = join(dbParent, "dev.db");
     const state = join(scratchRoot, "state");
     const sandbox = join(scratchRoot, "sandbox");
     const existingState = join(scratchRoot, "existing-state");
@@ -211,6 +218,7 @@ describe("production entry private state permissions", () => {
       expectLivePrivateFiles(dbPath);
       expect(lstatSync(join(state, "agent")).mode & 0o7777).toBe(SHARED_DIR_MODE);
       expect(existsSync(sandbox)).toBe(false);
+      expect(lstatSync(dbParent).mode & 0o7777).toBe(EXISTING_DIR_MODE);
     } finally {
       restoreUmask();
       await cold.dispose();
@@ -309,6 +317,91 @@ describe("production entry private state permissions", () => {
     await startDeniedPreparation(compiled, seeded, [walPath], "deny-wal.cjs");
     expect(existsSync(walPath)).toBe(true);
     expect(readOwnedMarker(seeded.dbPath)).toBe(MARKER_TITLE);
+  }, 40_000);
+
+  it.each([
+    ["main", true],
+    ["WAL sidecar", false],
+  ] as const)(
+    "fails closed when an existing %s path is a directory and leaves it unchanged",
+    async (_name, mainIsDirectory) => {
+      const scratchRoot = mkdtempSync(join(tmpdir(), "open-wb-db-dirs-"));
+      scratch.push(scratchRoot);
+      const dbParent = join(scratchRoot, "db");
+      mkdirSync(dbParent, { recursive: true });
+      const dbPath = join(dbParent, "dev.db");
+      const walPath = `${dbPath}-wal`;
+      const target = mainIsDirectory ? dbPath : walPath;
+      if (!mainIsDirectory) {
+        seedOwnedMarker(dbPath);
+      }
+      mkdirSync(target, { recursive: true });
+      writeFileSync(join(target, "keep.txt"), mainIsDirectory ? "main-keep" : "wal-keep");
+      chmodSync(target, EXISTING_DIR_MODE);
+      const port = await reserveWildcardPort();
+      const server = startCompiledServer(
+        compiled.entry,
+        compiledFixtureEnv(scratchRoot, port, join(scratchRoot, "bin", "omp"), { MODEL_ID }),
+      );
+      await expectGenericStartupFailure(server, port);
+      expect(existsSync(join(scratchRoot, "state"))).toBe(false);
+      expect(existsSync(join(scratchRoot, "sandbox"))).toBe(false);
+      expect(lstatSync(target).isDirectory()).toBe(true);
+      expect(lstatSync(target).mode & 0o7777).toBe(EXISTING_DIR_MODE);
+      expect(readFileSync(join(target, "keep.txt"), "utf8")).toBe(
+        mainIsDirectory ? "main-keep" : "wal-keep",
+      );
+      if (!mainIsDirectory) {
+        expect(lstatSync(dbPath).isFile()).toBe(true);
+        expect(lstatSync(dbPath).mode & 0o777).toBe(PRIVATE_FILE_MODE);
+      }
+    },
+    40_000,
+  );
+
+  it("repairs a wx-created 0000 main to 0600 under a child-only umask 0777", async () => {
+    const scratchRoot = mkdtempSync(join(tmpdir(), "open-wb-umask-child-"));
+    scratch.push(scratchRoot);
+    const dbParent = join(scratchRoot, "db");
+    mkdirSync(dbParent, { recursive: true });
+    chmodSync(dbParent, EXISTING_DIR_MODE);
+    const dbPath = join(dbParent, "dev.db");
+    const logs = join(scratchRoot, "logs");
+    mkdirSync(logs);
+    chmodSync(logs, EXISTING_DIR_MODE);
+    const modeLog = join(logs, "modes.jsonl");
+    const umaskLog = join(logs, "umask.txt");
+    writeFileSync(modeLog, "");
+    writeFileSync(umaskLog, "");
+    chmodSync(modeLog, 0o644);
+    chmodSync(umaskLog, 0o644);
+    const hookPath = join(scratchRoot, "child-umask.cjs");
+    writeFileSync(hookPath, childUmaskHook());
+    const port = await reserveWildcardPort();
+    const server = startCompiledServer(
+      compiled.entry,
+      compiledFixtureEnv(scratchRoot, port, join(scratchRoot, "bin", "omp"), {
+        MODEL_ID,
+        MODE_LOG: modeLog,
+        UMASK_LOG: umaskLog,
+      }),
+      { requireHook: hookPath },
+    );
+    try {
+      await server.waitForStarted();
+      const observations = readModeObservations(modeLog);
+      const firstOpen = observations[0];
+      if (firstOpen === undefined) {
+        throw new Error("openDb was not observed");
+      }
+      expect(firstOpen.path).toBe(dbPath);
+      expect(firstOpen.main).toBe(PRIVATE_FILE_MODE);
+      expectLivePrivateFiles(dbPath);
+      expect(lstatSync(dbParent).mode & 0o7777).toBe(EXISTING_DIR_MODE);
+      expect(Number.parseInt(readFileSync(umaskLog, "utf8").trim(), 8)).toBe(0o777);
+    } finally {
+      await server.dispose();
+    }
   }, 40_000);
 });
 
@@ -540,77 +633,6 @@ syncBuiltinESMExports();
 `;
 }
 
-function observeOpenDbHook(): string {
-  return `'use strict';
-const fs = require('node:fs');
-const { appendFileSync } = fs;
-const sqlite = require('node:sqlite');
-const original = sqlite.DatabaseSync;
-function DatabaseSyncObserved(...args) {
-  const path = args[0];
-  appendFileSync(process.env.MODE_LOG, JSON.stringify({
-    path,
-    main: fileMode(path),
-    wal: fileMode(path + '-wal'),
-    shm: fileMode(path + '-shm'),
-  }) + '\\n');
-  return Reflect.construct(original, args, new.target ?? original);
-}
-Object.setPrototypeOf(DatabaseSyncObserved, original);
-DatabaseSyncObserved.prototype = original.prototype;
-sqlite.DatabaseSync = DatabaseSyncObserved;
-function fileMode(path) {
-  if (path === ':memory:') {
-    return null;
-  }
-  try {
-    return fs.lstatSync(path).mode & 0o777;
-  } catch (error) {
-    if (error && error.code === 'ENOENT') {
-      return null;
-    }
-    throw error;
-  }
-}
-`;
-}
-
-function denyChmodHook(targets: string[]): string {
-  return `'use strict';
-const fs = require('node:fs');
-const { syncBuiltinESMExports } = require('node:module');
-const denied = new Set(${JSON.stringify(targets)});
-const nativeChmod = fs.chmodSync;
-const nativeFchmod = fs.fchmodSync;
-const nativeOpen = fs.openSync;
-const fds = new Set();
-fs.openSync = function observeOpen(path, flags, mode) {
-  const fd = nativeOpen.call(this, path, flags, mode);
-  if (denied.has(path)) {
-    fds.add(fd);
-  }
-  return fd;
-};
-fs.chmodSync = function deny(path, mode) {
-  if (denied.has(path)) {
-    const error = new Error('EPERM');
-    error.code = 'EPERM';
-    throw error;
-  }
-  return nativeChmod.call(this, path, mode);
-};
-fs.fchmodSync = function denyFd(fd, mode) {
-  if (fds.has(fd)) {
-    const error = new Error('EPERM');
-    error.code = 'EPERM';
-    throw error;
-  }
-  return nativeFchmod.call(this, fd, mode);
-};
-syncBuiltinESMExports();
-`;
-}
-
 function readModeObservations(path: string): Array<{
   path: string;
   main: number | null;
@@ -674,6 +696,15 @@ function expectApplicationStderr(stderr: string): void {
   expect(applicationStderr).toBe(`${JSON.stringify({ event: "server_start_failed" })}\n`);
 }
 
+async function expectGenericStartupFailure(server: StartedServer, port: number): Promise<void> {
+  const closed = await server.waitForClose();
+  expect(closed.code).toBe(1);
+  expect(closed.signal).toBeNull();
+  expect(server.stdout()).toBe("");
+  expectApplicationStderr(server.stderr());
+  await expectRefused("127.0.0.1", port);
+}
+
 function seedDeniedDb(prefix: string): { scratchRoot: string; dbPath: string } {
   const scratchRoot = mkdtempSync(join(tmpdir(), prefix));
   scratch.push(scratchRoot);
@@ -699,12 +730,7 @@ async function startDeniedPreparation(
     }),
     { requireHook: hookPath },
   );
-  const closed = await server.waitForClose();
-  expect(closed.code).toBe(1);
-  expect(closed.signal).toBeNull();
-  expect(server.stdout()).toBe("");
-  expectApplicationStderr(server.stderr());
-  await expectRefused("127.0.0.1", port);
+  await expectGenericStartupFailure(server, port);
   expect(existsSync(join(seeded.scratchRoot, "state"))).toBe(false);
 }
 

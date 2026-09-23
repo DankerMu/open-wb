@@ -52,6 +52,7 @@ export async function spawnOmp(
   ensureSharedDir(sessionDir);
   ensureSharedDir(home);
   ensureSharedDir(agent);
+  // Preserve the prior async spawn boundary; native lifecycle regression covers it.
   await Promise.resolve();
 
   const args = [

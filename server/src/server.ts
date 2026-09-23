@@ -13,7 +13,15 @@
  *   stream error 三路只 settle 一次，error 事件被消费后才移除监听，绝不抛原始 stack。
  */
 
-import { chmodSync, closeSync, constants, fchmodSync, mkdirSync, openSync } from "node:fs";
+import {
+  chmodSync,
+  closeSync,
+  constants,
+  fchmodSync,
+  mkdirSync,
+  openSync,
+  statSync,
+} from "node:fs";
 import type { AddressInfo } from "node:net";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -333,7 +341,7 @@ function preparePrivateDbMain(dbPath: string): void {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
       throw error;
     }
-    chmodSync(dbPath, PRIVATE_DB_FILE_MODE);
+    chmodExistingPrivateFile(dbPath);
     return;
   }
   try {
@@ -345,10 +353,17 @@ function preparePrivateDbMain(dbPath: string): void {
 
 function prepareExistingSidecar(path: string): void {
   try {
-    chmodSync(path, PRIVATE_DB_FILE_MODE);
+    chmodExistingPrivateFile(path);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       throw error;
     }
   }
+}
+
+function chmodExistingPrivateFile(path: string): void {
+  if (!statSync(path).isFile()) {
+    throw new Error("private db path is not a regular file");
+  }
+  chmodSync(path, PRIVATE_DB_FILE_MODE);
 }

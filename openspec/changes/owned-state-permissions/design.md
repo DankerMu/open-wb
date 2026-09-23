@@ -12,6 +12,7 @@ Non-goals: sudo policy (preserve #120), real Linux uid/PAM/proc proof (#131/#132
 3. Switch both spawnOmp four paths and writeManagedModelsYml agent creation to ensureSharedDir. Earlier model publication otherwise creates agent0755, which the helper intentionally preserves later. No duplicated directory policy.
 4. Preserve generic startup failure, sticky failure on signals, resource ownership and release, actual bound URL/models-before-success record, existing model bytes, exact argv/env and unsafe-PATH-before-mkdir guard.
 5. Trusted deployment parents remain preprovisioned with the shared group; existing modes remain untouched. Application-created missing roots/intermediates inherit the canonical helper contract. No global umask mutation, even for restrictive caller masks.
+6. Round1 confirmed existing directories at DB main/sidecar paths were incorrectly chmodded before failure. Existing paths must stat as regular files before chmod; preserve current symlink-following policy on trusted paths, reject other entry types without mutation. Do not reopen O_WRONLY for validation (FIFO could block). This closes an introduced side effect, not a general TOCTOU/link-policy expansion.
 
 ## Seams and evidence
 Actual compiled production entry + real temporary DB: cold and pre-existing0644 main/WAL/SHM become0600; actual SQLite-open boundary observes already-private files, preventing a misleading after-open chmod implementation.
@@ -21,6 +22,7 @@ Readonly parent directory alone does not reliably make owner chmod fail. State t
 Spawn boundary with native temp FS: cwd, state/sessions/owner, home, agent and missing intermediate roots2770 before spawn; include prior managed-model creation path. Existing directory modes preserved, umask unchanged, mkdir/chmod failure prevents child spawn.
 Main independent actual service smoke: startup modes and authenticated prompt creating directories, then SIGTERM releases port/DB. No host sudo.
 Oracle qualification: semantic baseline RED; isolated scratch wrong-order/missing-sidecar/missing-earlier-agent mutants when normal RED does not discriminate each high-risk defect. No production mutations.
+Round1 oracle closure: pre-existing DB parent0755 must stay0755; a forced-parent0700 scratch mutant must fail. Child-only umask0777 with pre-existing traversable DB parent qualifies actual descriptor0000→0600 repair without changing production umask. Non-file main/WAL cases must fail generically with directory modes/content preserved.
 
 ## Risks / Trade-offs
 Owner mode creation is filtered by caller umask; exact0600 before SQLite must hold without changing global umask (use descriptor mode repair if necessary). No group-readable window allowed.
