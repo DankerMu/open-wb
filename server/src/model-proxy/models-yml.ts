@@ -1,6 +1,7 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
+import { ensureSharedDir } from "../core/sandbox/dirs.js";
 
 export function deriveProxyBaseUrl(address: AddressInfo): string {
   const host = hostOf(address.address);
@@ -11,7 +12,7 @@ export async function writeManagedModelsYml(
   agentDir: string,
   options: { proxyBaseUrl: string; modelId: string },
 ): Promise<void> {
-  await mkdir(agentDir, { recursive: true });
+  ensureSharedDir(agentDir);
   const quotedUrl = JSON.stringify(options.proxyBaseUrl);
   const quotedModel = JSON.stringify(options.modelId);
   const yaml = [

@@ -13,7 +13,7 @@
  *   stream error 三路只 settle 一次，error 事件被消费后才移除监听，绝不抛原始 stack。
  */
 
-import { mkdirSync } from "node:fs";
+import { chmodSync, closeSync, constants, fchmodSync, mkdirSync, openSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -24,6 +24,8 @@ import { createApp } from "./app.js";
 import { openDb } from "./core/db/index.js";
 import { deriveProxyBaseUrl, writeManagedModelsYml } from "./model-proxy/models-yml.js";
 import { writeManagedLine } from "./startup-writer.js";
+
+const PRIVATE_DB_FILE_MODE = 0o600;
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 3000;
@@ -169,6 +171,7 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
   try {
     if (config.dbPath !== ":memory:") {
       mkdirSync(dirname(config.dbPath), { recursive: true });
+      preparePrivateDbFiles(config.dbPath);
     }
     owned.db = openDb(config.dbPath);
     owned.app = createApp({
@@ -309,5 +312,43 @@ function closeOwnedDb(owned: OwnedResources): void {
     db.close();
   } catch {
     owned.releaseFailed = true;
+  }
+}
+
+function preparePrivateDbFiles(dbPath: string): void {
+  preparePrivateDbMain(dbPath);
+  prepareExistingSidecar(`${dbPath}-wal`);
+  prepareExistingSidecar(`${dbPath}-shm`);
+}
+
+function preparePrivateDbMain(dbPath: string): void {
+  let fd: number;
+  try {
+    fd = openSync(
+      dbPath,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL,
+      PRIVATE_DB_FILE_MODE,
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+      throw error;
+    }
+    chmodSync(dbPath, PRIVATE_DB_FILE_MODE);
+    return;
+  }
+  try {
+    fchmodSync(fd, PRIVATE_DB_FILE_MODE);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function prepareExistingSidecar(path: string): void {
+  try {
+    chmodSync(path, PRIVATE_DB_FILE_MODE);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
   }
 }

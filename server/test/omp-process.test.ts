@@ -11,6 +11,7 @@ import { randomBytes } from "node:crypto";
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -108,7 +109,7 @@ describe("spawnOmp spawn contract", () => {
     expect(call.cwd).toBe(roots.cwd);
     expect(call.stdio).toEqual(["pipe", "pipe", "pipe"]);
     expect(call.shell).toBe(false);
-    expectFourDirectories(roots);
+    expectFourDirectories(roots, 0o2770);
   });
 
   it("resume launch appends --resume and a path with spaces as one argv entry", async () => {
@@ -116,7 +117,7 @@ describe("spawnOmp spawn contract", () => {
     const resumePath = join(roots.sessionDir, "resume file.jsonl");
     const call = await capture(roots, resumePath);
     expect(call.args).toEqual([...coldArgs(roots), "--resume", resumePath]);
-    expectFourDirectories(roots);
+    expectFourDirectories(roots, 0o2770);
     const cold = await capture(roots, null);
     expect(cold.args).toEqual(coldArgs(roots));
   });
@@ -160,11 +161,12 @@ describe("spawnOmp spawn contract", () => {
     mkdirSync(roots.sessionDir, { recursive: true });
     mkdirSync(roots.home, { recursive: true });
     mkdirSync(roots.agent, { recursive: true });
+    chmodSync(roots.cwd, 0o755);
+    chmodSync(roots.sessionDir, 0o755);
+    chmodSync(roots.home, 0o755);
+    chmodSync(roots.agent, 0o755);
     writeFileSync(join(roots.home, "keep.txt"), "keep");
-    const call = await capture(roots, null);
-    expect(call.command).toBe(roots.bin);
-    expect(call.args).toEqual(coldArgs(roots));
-    expectFourDirectories(roots);
+    await captureColdLaunch(roots, 0o755);
     expect(statSync(join(roots.home, "keep.txt")).isFile()).toBe(true);
   });
 
@@ -178,6 +180,14 @@ describe("spawnOmp spawn contract", () => {
     });
     expect(calls).toHaveLength(0);
     expect(statSync(roots.home).isFile()).toBe(true);
+  });
+
+  it("creates missing shared path levels at 2770 before spawn and leaves umask unchanged", async () => {
+    const roots = makeRoots();
+    await captureColdLaunch(roots, 0o2770);
+    expect(lstatSync(roots.sandboxRoot).mode & 0o7777).toBe(0o2770);
+    expect(lstatSync(roots.stateDir).mode & 0o7777).toBe(0o2770);
+    expect(lstatSync(join(roots.stateDir, "sessions")).mode & 0o7777).toBe(0o2770);
   });
 
   it("real child observes captured env, cwd, and argv under contaminated parent env", async () => {
@@ -213,7 +223,7 @@ describe("spawnOmp spawn contract", () => {
     ) {
       return;
     }
-    expectFourDirectories(roots);
+    expectFourDirectories(roots, 0o2770);
     expect(realpathSync(argvProbe.cwd)).toBe(realpathSync(argvCall.cwd ?? argvProbe.cwd));
     expect(realpathSync(argvProbe.cwd)).toBe(realpathSync(roots.cwd));
     expect(argvProbe.argv).toEqual([argvCall.command, ...argvCall.args]);
@@ -247,7 +257,7 @@ describe("spawnOmp spawn contract", () => {
     });
     expect({ ...process.env }).toEqual(parentBefore);
     expect(status).toBe(0);
-    expectFourDirectories(roots);
+    expectFourDirectories(roots, 0o2770);
     const report = JSON.parse(stdout) as ArgvProbe;
     expect(realpathSync(report.cwd)).toBe(realpathSync(roots.cwd));
     expect(report.argv).toEqual(coldArgs(roots));
@@ -462,12 +472,18 @@ function allowlist(
   return env;
 }
 
-function expectFourDirectories(roots: SpawnRoots): void {
-  expect(statSync(roots.cwd).isDirectory()).toBe(true);
-  expect(statSync(roots.sessionDir).isDirectory()).toBe(true);
-  expect(statSync(roots.home).isDirectory()).toBe(true);
-  expect(statSync(roots.agent).isDirectory()).toBe(true);
-  expect(existsSync(roots.cwd)).toBe(true);
+function expectFourDirectories(roots: SpawnRoots, mode?: number): void {
+  expect(lstatSync(roots.cwd).isDirectory()).toBe(true);
+  expect(lstatSync(roots.sessionDir).isDirectory()).toBe(true);
+  expect(lstatSync(roots.home).isDirectory()).toBe(true);
+  expect(lstatSync(roots.agent).isDirectory()).toBe(true);
+  if (mode === undefined) {
+    return;
+  }
+  expect(lstatSync(roots.cwd).mode & 0o7777).toBe(mode);
+  expect(lstatSync(roots.sessionDir).mode & 0o7777).toBe(mode);
+  expect(lstatSync(roots.home).mode & 0o7777).toBe(mode);
+  expect(lstatSync(roots.agent).mode & 0o7777).toBe(mode);
 }
 
 async function capture(
@@ -485,6 +501,15 @@ async function capture(
     throw new Error("spawnImpl was not invoked");
   }
   return call;
+}
+
+async function captureColdLaunch(roots: SpawnRoots, mode: number): Promise<void> {
+  const umaskBefore = process.umask();
+  const call = await capture(roots, null);
+  expect(call.command).toBe(roots.bin);
+  expect(call.args).toEqual(coldArgs(roots));
+  expectFourDirectories(roots, mode);
+  expect(process.umask()).toBe(umaskBefore);
 }
 
 async function captureWithSnapshot(
