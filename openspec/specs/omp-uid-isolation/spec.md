@@ -1,7 +1,7 @@
 # omp-uid-isolation Specification
 
 ## Purpose
-Define optional omp-user configuration, exact sudo spawn construction, and safe PATH preconditions while preserving direct-spawn compatibility. Filesystem permissions and real Linux uid isolation remain separate implementation and verification slices.
+Define optional omp-user configuration, exact sudo spawn construction, safe PATH preconditions, private SQLite state, and shared-directory permissions while preserving direct-spawn compatibility. Real Linux uid isolation remains a separate verification slice.
 ## Requirements
 ### Requirement: OMP_USER 配置与 sudo spawn 前缀
 Canonical server configuration SHALL accept optional OMP_USER as optional ompUser. Absent SHALL preserve same-uid direct spawn. Present SHALL match1..32 ASCII [a-z_][a-z0-9_-]{0,31} in full without trimming; invalid values SHALL fail before startup effects with one generic failure record. User configuration SHALL reach every runtime spawn generation. Present user SHALL select PATH executable sudo with exact argv ['-n','-u',user,'--preserve-env=PATH,LANG,TMPDIR,HOME,PI_CODING_AGENT_DIR,WORKBUDDY_MODEL_TOKEN','--',OMP_BIN,...existingOmpArgs]. Sudo-process env SHALL equal existing allowlist, LANG/TMPDIR optional; no upstream secrets or OMP_USER env key or credential KEY=value argv SHALL be added. Missing user SHALL preserve executable, full args, env, cwd, stdio and shell:false. Immediate sudo failure/exit SHALL use existing agent_unavailable and cleanup, without direct fallback. Directory permissions and actual uid/proc isolation are not claimed by this slice.
@@ -30,4 +30,23 @@ When ompUser is configured, canonical configuration and the spawn boundary SHALL
 - THEN configured startup fails with a generic record before effects and direct low-level sudo spawn rejects before mkdir/spawn; the workspace executable never runs
 - WHEN the same inputs omit ompUser
 - THEN the prior direct executable/args/env behavior is preserved
+
+### Requirement: 自有状态不对组可读
+For non-:memory: DB paths, the entry SHALL ensure the SQLite main file mode is0600 before openDb: create a missing file exclusively with wx and0600, close its descriptor, and repair existing main and existing -wal/-shm files to0600 before SQLite opens. Only absent sidecars SHALL be ignored; other preparation failures SHALL fail startup through existing partial-start cleanup. New WAL/SHM SHALL inherit owner-only main permissions from creation. The process SHALL NOT change umask or force DB-parent0700. Existing directory modes SHALL remain unchanged; every missing component created by the app under SANDBOX_ROOT/OMP_STATE_DIR, including roots, sessions/owner, home and agent, SHALL use canonical ensureSharedDir2770. Group ownership SHALL remain deployment-controlled, without application chown. No app configuration, DB or upstream secrets SHALL be written by these paths into shared trees; managed models.yml containing only the WORKBUDDY_MODEL_TOKEN environment variable name remains allowed.
+
+#### Scenario: 冷启动与既有数据库权限
+- WHEN real compiled entry starts with absent DB or valid existing main/WAL/SHM initially0644
+- THEN all existing files are0600 before SQLite open, live main/WAL/SHM are0600, data is retained and startup publishes normally
+- WHEN DB_PATH is :memory:
+- THEN no private DB files are created or chmodded
+
+#### Scenario: 权限准备失败关闭
+- WHEN main or existing sidecar chmod fails, or private-file creation fails
+- THEN entry exits1 with generic failure, no success record/listener/models/child leak, closes owned resources and does not delete existing data
+
+#### Scenario: 共享目录创建与兼容
+- WHEN startup publishes managed models and a session subsequently spawns in previously absent shared trees
+- THEN all newly created shared path levels including agent are2770 before use; models contain no upstream key, exact prior spawn arguments/environment remain intact
+- WHEN shared directories already exist or directory preparation fails
+- THEN existing modes are unchanged, process umask is unchanged, and failed preparation prevents spawn/publication through the existing failure path
 
