@@ -19,7 +19,8 @@ export type DeferredResponse = {
 };
 
 type FetchRouteResult = Error | Promise<Response> | Response;
-type FetchRoute = FetchRouteResult | FetchRouteResult[];
+type FetchRouteResolver = (path: string, options?: RequestInit) => FetchRouteResult;
+type FetchRoute = FetchRouteResult | FetchRouteResult[] | FetchRouteResolver;
 type FetchRoutes = Record<string, FetchRoute>;
 
 export function deferredResponse(): DeferredResponse {
@@ -34,6 +35,15 @@ export function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json" },
+  });
+}
+
+export function textPreviewResponse(text: string, size = text.length) {
+  return new Response(text, {
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "X-Workbuddy-Size": String(size),
+    },
   });
 }
 
@@ -66,9 +76,14 @@ export function expectRequestFailure(error: ApiError, status: number) {
 }
 
 function fetchRouteHandler(routes: FetchRoutes) {
-  return (path: string) => {
+  return (path: string, options?: RequestInit) => {
     const route = routes[path];
-    const result = Array.isArray(route) ? route.shift() : route;
+    const result =
+      typeof route === "function"
+        ? route(path, options)
+        : Array.isArray(route)
+          ? route.shift()
+          : route;
     if (result === undefined) {
       throw new Error(`unexpected request ${path}`);
     }
@@ -81,6 +96,21 @@ export function createFetchMock(routes: FetchRoutes) {
   return vi.fn<(path: string, options?: RequestInit) => Promise<Response>>(
     fetchRouteHandler(routes),
   );
+}
+
+export function allowWorkspaceListFetch() {
+  const fetchMock = vi.mocked(fetch);
+  const defaultHandler = fetchMock.getMockImplementation();
+  fetchMock.mockImplementation((path, options) => {
+    if (path === "/api/workspaces") {
+      return Promise.resolve(jsonResponse({ workspaces: [] }));
+    }
+    if (!defaultHandler) {
+      throw new Error(`unexpected request ${String(path)}`);
+    }
+
+    return defaultHandler(path, options);
+  });
 }
 
 export type FetchMock = ReturnType<typeof createFetchMock>;

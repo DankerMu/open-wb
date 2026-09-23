@@ -8,6 +8,7 @@ import {
   useMatches,
 } from "react-router";
 import { AuthFooter, AuthGuard, AuthProvider } from "../features/auth/index.js";
+import { FilesPage } from "../features/files/index.js";
 import { SettingsPage } from "../features/settings/index.js";
 import { ThemeProvider } from "../features/theme/index.js";
 
@@ -31,7 +32,7 @@ export const routeManifest: readonly RouteDefinition[] = [
     label: "工作空间",
     subtitle: "文件·预览·挂载",
     title: "工作空间",
-    description: "S1a 将接入工作空间与文件",
+    description: "浏览、预览与管理工作空间文件",
   },
   {
     path: "/center",
@@ -152,6 +153,8 @@ export function createAppRouter() {
         element:
           path === "/settings" ? (
             <SettingsPage />
+          ) : path === "/files" ? (
+            <FilesPage />
           ) : (
             <PlaceholderPage description={description} title={title} />
           ),

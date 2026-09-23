@@ -19,14 +19,15 @@ import {
 function createAuthenticatedFetch(
   infoResponse: Error | Response | Promise<Response> = jsonResponse(serviceInfo),
 ) {
-  return createFetchMock({
-    "/api/auth/me": jsonResponse(principal),
-    "/api/info": infoResponse,
-  });
+  return createFetchMock(authenticatedRoutes({ "/api/info": infoResponse }));
 }
 
-function authenticatedRoutes(routes: Record<string, Error | Promise<Response> | Response>) {
-  return { "/api/auth/me": jsonResponse(principal), ...routes };
+function authenticatedRoutes(routes: Parameters<typeof createFetchMock>[0]) {
+  return {
+    "/api/auth/me": jsonResponse(principal),
+    "/api/workspaces": jsonResponse({ workspaces: [] }),
+    ...routes,
+  };
 }
 
 let router: ReturnType<typeof createAppRouter> | undefined;
@@ -587,17 +588,16 @@ describe("authenticated sidebar footer", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
 
     expect(screen.queryByRole("alertdialog")).toBeNull();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls.filter(([path]) => path === "/api/auth/logout")).toHaveLength(0);
     expect(currentLocation()).toBe("/files?from=cancel#target");
     expect(screen.getByRole("heading", { level: 1, name: "工作空间" })).toBeTruthy();
   });
 
   it("admits one same-tick confirmation and returns to login after 204", async () => {
     const pendingLogout = deferredResponse();
-    const fetchMock = createFetchMock({
-      "/api/auth/me": jsonResponse(principal),
-      "/api/auth/logout": pendingLogout.promise,
-    });
+    const fetchMock = createFetchMock(
+      authenticatedRoutes({ "/api/auth/logout": pendingLogout.promise }),
+    );
     vi.stubGlobal("fetch", fetchMock);
     const requestedPath = "/files?from=logout#target";
 
@@ -608,7 +608,7 @@ describe("authenticated sidebar footer", () => {
     fireEvent.click(confirm);
     fireEvent.click(confirm);
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(confirm.disabled).toBe(true);
     expect(
       within(getFooter()).getByRole("button", { name: "退出登录" }).hasAttribute("disabled"),
@@ -621,17 +621,16 @@ describe("authenticated sidebar footer", () => {
 
   it("unmounts a pending footer logout without a late React warning", async () => {
     const pendingLogout = deferredResponse();
-    const fetchMock = createFetchMock({
-      "/api/auth/me": jsonResponse(principal),
-      "/api/auth/logout": pendingLogout.promise,
-    });
+    const fetchMock = createFetchMock(
+      authenticatedRoutes({ "/api/auth/logout": pendingLogout.promise }),
+    );
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.stubGlobal("fetch", fetchMock);
 
     const view = renderApp("/files");
     await expectAuthenticatedShell("/files");
     fireEvent.click(within(openLogoutDialog()).getByRole("button", { name: "退出" }));
-    const logoutOptions = await requestOptionsAt(fetchMock, 1);
+    const logoutOptions = await requestOptionsAt(fetchMock, 2);
     view.unmount();
     expect(logoutOptions?.signal?.aborted).toBe(true);
     pendingLogout.resolve(new Response(null, { status: 204 }));
@@ -668,10 +667,11 @@ describe("authenticated sidebar footer", () => {
     ["a malformed success", jsonResponse({ ignored: true }), "请求失败，请稍后重试"],
     ["a network failure", new Error("private transport detail"), "请求失败，请稍后重试"],
   ])("keeps the shell and enables retry after %s", async (_label, logoutResult, message) => {
-    const fetchMock = createFetchMock({
-      "/api/auth/me": jsonResponse(principal),
-      "/api/auth/logout": [logoutResult, new Response(null, { status: 204 })],
-    });
+    const fetchMock = createFetchMock(
+      authenticatedRoutes({
+        "/api/auth/logout": [logoutResult, new Response(null, { status: 204 })],
+      }),
+    );
     vi.stubGlobal("fetch", fetchMock);
     const requestedPath = "/files?from=logout-failure#target";
 
@@ -687,6 +687,6 @@ describe("authenticated sidebar footer", () => {
 
     fireEvent.click(within(openLogoutDialog()).getByRole("button", { name: "退出" }));
     await expectLoginAt(requestedPath);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 });
