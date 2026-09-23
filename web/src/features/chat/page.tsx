@@ -1,89 +1,33 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
-import { type ApiClient, ApiError, REQUEST_FAILED_MESSAGE } from "../../lib/api.js";
-import type { ChatMessageSnapshot, ChatSession } from "../../lib/session-contract.js";
+import type { ApiClient } from "../../lib/api.js";
+import type { ChatMessageSnapshot } from "../../lib/session-contract.js";
 import { useAuth } from "../auth/index.js";
 import { ConversationView } from "./conversation-view.js";
+import { errorMessage, isNotFound, isUnauthorized } from "./errors.js";
+import { ownsCreateSend, ownsHistory, ownsMutation, visibleOwnedAlert } from "./ownership.js";
+import { sessionNavigation, sessionTitle } from "./session-path.js";
 import {
   applyChatEvent,
   type ChatEvent,
-  type ChatState,
   chatStateFromSnapshot,
   connectSessionEvents,
 } from "./stream.js";
-
-type ChatListState =
-  | { status: "loading" }
-  | { status: "error"; message: string }
-  | { status: "success"; client: ApiClient; sessions: ChatSession[] };
-
-type ChatHistoryState =
-  | { status: "idle" }
-  | { status: "loading" }
-  | { status: "error"; message: string }
-  | { status: "ready"; snapshot: ChatMessageSnapshot; view: ChatState };
+import type {
+  ChatHistoryState,
+  ChatListState,
+  ChatMutationOwner,
+  ChatOwnedAlert,
+  PendingCreateSend,
+} from "./types.js";
 
 type SessionEventHandle = { close(): void };
 
-type PendingCreateSend = {
-  client: ApiClient;
-  generation: number;
-  originSessionId: string | null;
-  prompt: string;
-  sessionId: string | null;
-};
-
 const COMPOSER_LABEL = "给助手发消息";
 const GENERATING_LABEL = "生成中";
-const TITLE_FALLBACK = "新会话";
 const TERMINAL_REFRESH_GUIDANCE = "请刷新页面后重试";
 const EMPTY_SELECTION = "选择一个会话，或直接发送开始新对话";
 const MISSING_EVENT_SOURCE = "无法连接会话事件";
-
-function isUnauthorized(error: unknown) {
-  return error instanceof ApiError && error.status === 401;
-}
-
-function isNotFound(error: unknown) {
-  return error instanceof ApiError && error.status === 404;
-}
-
-function errorMessage(error: unknown) {
-  return error instanceof ApiError ? error.message : REQUEST_FAILED_MESSAGE;
-}
-
-function sessionNavigation(
-  pathname: string,
-  search: string,
-  hash: string,
-  sessionId: string | null,
-) {
-  const parameters = new URLSearchParams(search);
-  if (sessionId) {
-    parameters.set("session", sessionId);
-  } else {
-    parameters.delete("session");
-  }
-  const nextSearch = parameters.toString();
-  return { hash, pathname, search: nextSearch.length === 0 ? "" : `?${nextSearch}` };
-}
-
-function sessionTitle(session: ChatSession) {
-  return session.title && session.title.length > 0 ? session.title : TITLE_FALLBACK;
-}
-
-function ownsCreateSend(
-  pending: PendingCreateSend | null,
-  client: ApiClient,
-  sessionId: string | null,
-): pending is PendingCreateSend & { sessionId: string } {
-  return (
-    pending !== null &&
-    pending.client === client &&
-    pending.sessionId !== null &&
-    pending.sessionId === sessionId
-  );
-}
 
 export function ChatPage() {
   const { createSessionClient } = useAuth();
@@ -92,12 +36,13 @@ export function ChatPage() {
   const navigate = useNavigate();
   const requestedSessionId = new URLSearchParams(location.search).get("session");
   const [draft, setDraft] = useState("");
-  const [listState, setListState] = useState<ChatListState>({ status: "loading" });
+  const [listState, setListState] = useState<ChatListState>({ status: "loading", client });
   const [historyState, setHistoryState] = useState<ChatHistoryState>({ status: "idle" });
-  const [promptError, setPromptError] = useState<string | null>(null);
-  const [streamError, setStreamError] = useState<string | null>(null);
+  const [promptError, setPromptError] = useState<ChatOwnedAlert | null>(null);
+  const [streamError, setStreamError] = useState<ChatOwnedAlert | null>(null);
   const [creating, setCreating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [mutationOwner, setMutationOwner] = useState<ChatMutationOwner | null>(null);
   const mountedRef = useRef(false);
   const clientRef = useRef(client);
   const requestedSessionRef = useRef(requestedSessionId);
@@ -202,7 +147,7 @@ export function ChatPage() {
           ) {
             return;
           }
-          setListState({ status: "error", message: errorMessage(error) });
+          setListState({ status: "error", client: ownedClient, message: errorMessage(error) });
         });
     },
     [abortList],
@@ -210,36 +155,45 @@ export function ChatPage() {
 
   useEffect(() => {
     fencePageWork();
-    setListState({ status: "loading" });
+    setListState({ status: "loading", client });
     setHistoryState({ status: "idle" });
     setPromptError(null);
     setStreamError(null);
     setCreating(false);
     setSubmitting(false);
+    setMutationOwner(null);
     refreshList(client);
     return () => {
       abortList();
     };
   }, [abortList, client, fencePageWork, refreshList]);
 
-  const installSnapshot = useCallback((snapshot: ChatMessageSnapshot) => {
-    if (snapshot.session.id !== requestedSessionRef.current) {
+  const installSnapshot = useCallback((snapshot: ChatMessageSnapshot, ownedClient: ApiClient) => {
+    if (ownedClient !== clientRef.current || snapshot.session.id !== requestedSessionRef.current) {
       return;
     }
-    setHistoryState({ status: "ready", snapshot, view: chatStateFromSnapshot(snapshot) });
+    setHistoryState({
+      status: "ready",
+      client: ownedClient,
+      snapshot,
+      view: chatStateFromSnapshot(snapshot),
+    });
     setStreamError(null);
   }, []);
 
   const openSource = useCallback(
-    (snapshot: ChatMessageSnapshot) => {
+    (snapshot: ChatMessageSnapshot, ownedClient: ApiClient) => {
       closeSource();
       const EventSourceCtor = globalThis.EventSource;
+      const sessionId = snapshot.session.id;
       if (typeof EventSourceCtor !== "function") {
-        setStreamError(`${MISSING_EVENT_SOURCE}。${TERMINAL_REFRESH_GUIDANCE}`);
+        setStreamError({
+          client: ownedClient,
+          sessionId,
+          message: `${MISSING_EVENT_SOURCE}。${TERMINAL_REFRESH_GUIDANCE}`,
+        });
         return;
       }
-      const sessionId = snapshot.session.id;
-      const ownedClient = clientRef.current;
       const handle = connectSessionEvents(sessionId, {
         EventSourceCtor,
         initialCursor: snapshot.streamCursor,
@@ -249,19 +203,21 @@ export function ChatPage() {
         onSnapshot(next) {
           if (
             sourceSessionRef.current !== sessionId ||
+            ownedClient !== clientRef.current ||
             next.session.id !== requestedSessionRef.current
           ) {
             return;
           }
-          installSnapshot(next);
+          installSnapshot(next, ownedClient);
         },
         onEvent(event: ChatEvent) {
-          if (sourceSessionRef.current !== sessionId) {
+          if (sourceSessionRef.current !== sessionId || ownedClient !== clientRef.current) {
             return;
           }
           setHistoryState((current) => {
             if (
               current.status !== "ready" ||
+              current.client !== ownedClient ||
               current.snapshot.session.id !== sessionId ||
               sessionId !== requestedSessionRef.current
             ) {
@@ -269,16 +225,21 @@ export function ChatPage() {
             }
             return {
               status: "ready",
+              client: current.client,
               snapshot: current.snapshot,
               view: applyChatEvent(current.view, event),
             };
           });
         },
         onError(error) {
-          if (sourceSessionRef.current !== sessionId) {
+          if (sourceSessionRef.current !== sessionId || ownedClient !== clientRef.current) {
             return;
           }
-          setStreamError(`${errorMessage(error)}。${TERMINAL_REFRESH_GUIDANCE}`);
+          setStreamError({
+            client: ownedClient,
+            sessionId,
+            message: `${errorMessage(error)}。${TERMINAL_REFRESH_GUIDANCE}`,
+          });
         },
       });
       sourceRef.current = handle;
@@ -295,7 +256,7 @@ export function ChatPage() {
       historyControllerRef.current = controller;
       historyGenerationRef.current += 1;
       const generation = historyGenerationRef.current;
-      setHistoryState({ status: "loading" });
+      setHistoryState({ status: "loading", client: ownedClient, sessionId });
       setStreamError(null);
       void ownedClient
         .getMessages(sessionId, { signal: controller.signal })
@@ -309,8 +270,8 @@ export function ChatPage() {
           ) {
             return;
           }
-          installSnapshot(snapshot);
-          openSource(snapshot);
+          installSnapshot(snapshot, ownedClient);
+          openSource(snapshot, ownedClient);
         })
         .catch((error: unknown) => {
           if (
@@ -330,7 +291,12 @@ export function ChatPage() {
             });
             return;
           }
-          setHistoryState({ status: "error", message: errorMessage(error) });
+          setHistoryState({
+            status: "error",
+            client: ownedClient,
+            sessionId,
+            message: errorMessage(error),
+          });
         });
     },
     [
@@ -345,12 +311,27 @@ export function ChatPage() {
     ],
   );
 
+  const restoreOwnedDraft = useCallback(
+    (prompt: string, ownedClient: ApiClient, sessionId: string | null) => {
+      if (
+        prompt.length === 0 ||
+        ownedClient !== clientRef.current ||
+        requestedSessionRef.current !== sessionId
+      ) {
+        return;
+      }
+      setDraft((current) => (current.length === 0 ? prompt : current));
+    },
+    [],
+  );
+
   const finishCreateSend = useCallback((generation: number) => {
     if (pendingCreateSendRef.current?.generation === generation) {
       pendingCreateSendRef.current = null;
     }
     setCreating(false);
     setSubmitting(false);
+    setMutationOwner(null);
   }, []);
 
   const failOwnedPrompt = useCallback(
@@ -362,6 +343,11 @@ export function ChatPage() {
       generation: number,
       accepted: boolean,
     ) => {
+      const pending =
+        pendingCreateSendRef.current?.generation === generation
+          ? pendingCreateSendRef.current
+          : null;
+      const ownedSessionId = pending?.sessionId ?? pending?.originSessionId ?? null;
       if (
         !mountedRef.current ||
         controller.signal.aborted ||
@@ -373,18 +359,26 @@ export function ChatPage() {
         return;
       }
       if (accepted) {
-        setStreamError(`${errorMessage(error)}。${TERMINAL_REFRESH_GUIDANCE}`);
+        setStreamError({
+          client: ownedClient,
+          sessionId: ownedSessionId,
+          message: `${errorMessage(error)}。${TERMINAL_REFRESH_GUIDANCE}`,
+        });
         setSubmitting(false);
         releaseMutationIfOwned(controller);
         return;
       }
-      setPromptError(errorMessage(error));
+      restoreOwnedDraft(pending?.prompt ?? "", ownedClient, ownedSessionId);
+      setPromptError({
+        client: ownedClient,
+        sessionId: ownedSessionId,
+        message: errorMessage(error),
+      });
       finishCreateSend(generation);
       releaseMutationIfOwned(controller);
     },
-    [finishCreateSend, releaseMutationIfOwned],
+    [finishCreateSend, releaseMutationIfOwned, restoreOwnedDraft],
   );
-
   const dispatchPrompt = useCallback(
     (sessionId: string, prompt: string, generation: number, ownedClient: ApiClient) => {
       abortMutation();
@@ -393,6 +387,11 @@ export function ChatPage() {
       mutationGenerationRef.current += 1;
       const mutationGeneration = mutationGenerationRef.current;
       setSubmitting(true);
+      setMutationOwner({
+        client: ownedClient,
+        originSessionId: sessionId,
+        sessionId,
+      });
       setPromptError(null);
       void ownedClient
         .prompt(sessionId, prompt, { signal: controller.signal })
@@ -420,8 +419,8 @@ export function ChatPage() {
               ) {
                 return;
               }
-              installSnapshot(snapshot);
-              openSource(snapshot);
+              installSnapshot(snapshot, ownedClient);
+              openSource(snapshot, ownedClient);
               refreshList(ownedClient);
               finishCreateSend(generation);
               releaseMutationIfOwned(controller);
@@ -466,6 +465,7 @@ export function ChatPage() {
       abortMutation();
       setCreating(false);
       setSubmitting(false);
+      setMutationOwner(null);
     }
     if (!requestedSessionId) {
       abortHistory();
@@ -525,11 +525,12 @@ export function ChatPage() {
       createControllerRef.current = controller;
       createSendGenerationRef.current += 1;
       const generation = createSendGenerationRef.current;
+      const originSessionId = requestedSessionId;
       if (prompt !== undefined) {
         pendingCreateSendRef.current = {
           client,
           generation,
-          originSessionId: requestedSessionId,
+          originSessionId,
           prompt,
           sessionId: null,
         };
@@ -538,12 +539,17 @@ export function ChatPage() {
         pendingCreateSendRef.current = {
           client,
           generation,
-          originSessionId: requestedSessionId,
+          originSessionId,
           prompt: "",
           sessionId: null,
         };
       }
       setCreating(true);
+      setMutationOwner({
+        client,
+        originSessionId,
+        sessionId: null,
+      });
       setPromptError(null);
       void client
         .createSession({ signal: controller.signal })
@@ -565,8 +571,14 @@ export function ChatPage() {
               prompt: pendingCreateSendRef.current.prompt,
               sessionId: session.id,
             };
+            setMutationOwner({
+              client,
+              originSessionId: pendingCreateSendRef.current.originSessionId,
+              sessionId: session.id,
+            });
           } else {
             setCreating(false);
+            setMutationOwner(null);
           }
           refreshList(client);
           navigate(
@@ -585,11 +597,21 @@ export function ChatPage() {
             }
             return;
           }
+          const rejectedPrompt =
+            pendingCreateSendRef.current?.generation === generation
+              ? pendingCreateSendRef.current.prompt
+              : "";
           createControllerRef.current = null;
           pendingCreateSendRef.current = null;
+          restoreOwnedDraft(rejectedPrompt, client, originSessionId);
           setCreating(false);
           setSubmitting(false);
-          setPromptError(errorMessage(error));
+          setMutationOwner(null);
+          setPromptError({
+            client,
+            sessionId: originSessionId,
+            message: errorMessage(error),
+          });
         });
     },
     [
@@ -600,9 +622,9 @@ export function ChatPage() {
       navigate,
       refreshList,
       requestedSessionId,
+      restoreOwnedDraft,
     ],
   );
-
   const submitComposer = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
@@ -627,19 +649,24 @@ export function ChatPage() {
         prompt,
         sessionId: requestedSessionId,
       };
+      setMutationOwner({
+        client,
+        originSessionId: requestedSessionId,
+        sessionId: requestedSessionId,
+      });
       dispatchPrompt(requestedSessionId, prompt, generation, client);
     },
     [client, createAndSelect, creating, dispatchPrompt, draft, requestedSessionId, submitting],
   );
 
   useEffect(() => {
-    if (historyState.status !== "ready") {
+    if (historyState.status !== "ready" || historyState.client !== client) {
       return;
     }
     const sessionId = historyState.snapshot.session.id;
     const nextStatus = historyState.view.status;
     setListState((list) => {
-      if (list.status !== "success") {
+      if (list.status !== "success" || list.client !== historyState.client) {
         return list;
       }
       const current = list.sessions.find((session) => session.id === sessionId);
@@ -654,17 +681,20 @@ export function ChatPage() {
         ),
       };
     });
-  }, [historyState]);
+  }, [client, historyState]);
 
+  const ownedHistory = ownsHistory(historyState, client, requestedSessionId);
   const listForClient =
-    listState.status === "success" && listState.client === client ? listState : null;
-  const historyView = historyState.status === "ready" ? historyState.view : null;
+    listState.client === client && listState.status === "success" ? listState : null;
+  const historyView = ownedHistory && historyState.status === "ready" ? historyState.view : null;
+  const ownedBusy = ownsMutation(mutationOwner, client, requestedSessionId);
+  const ownedStreamError = visibleOwnedAlert(streamError, client, requestedSessionId);
   const generating =
-    creating ||
-    submitting ||
-    historyState.status === "loading" ||
+    (ownedBusy && creating) ||
+    (ownedBusy && submitting) ||
+    (ownedHistory && historyState.status === "loading") ||
     historyView?.status === "running" ||
-    Boolean(streamError);
+    Boolean(ownedStreamError);
   const sendDisabled = generating || draft.trim().length === 0;
 
   return (
@@ -677,20 +707,22 @@ export function ChatPage() {
         emptySelection={EMPTY_SELECTION}
         generating={generating}
         generatingLabel={GENERATING_LABEL}
-        historyError={historyState.status === "error" ? historyState.message : null}
+        historyError={ownedHistory && historyState.status === "error" ? historyState.message : null}
         historyView={historyView}
-        listError={listState.status === "error" ? listState.message : null}
-        listLoading={listState.status === "loading"}
+        listError={
+          listState.client === client && listState.status === "error" ? listState.message : null
+        }
+        listLoading={listState.client === client && listState.status === "loading"}
         onChangeDraft={setDraft}
         onCreateSession={() => createAndSelect()}
         onSelectSession={selectSession}
         onSubmit={submitComposer}
-        promptError={promptError}
+        promptError={visibleOwnedAlert(promptError, client, requestedSessionId)}
         requestedSessionId={requestedSessionId}
         sendDisabled={sendDisabled}
         sessions={listForClient?.sessions ?? null}
         sessionTitle={sessionTitle}
-        streamError={streamError}
+        streamError={ownedStreamError}
       />
     </section>
   );
