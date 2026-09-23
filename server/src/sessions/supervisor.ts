@@ -113,13 +113,12 @@ export class SessionSupervisor {
   }
 
   streamCursor(sessionId: string): StreamCursor {
-    const state = this.#store.runtimeState(sessionId);
-    const epoch = state?.streamEpoch ?? 0;
     const generation = this.#slots.get(sessionId)?.generation;
-    if (generation === undefined || generation.sealed) {
-      return { epoch, seq: null };
+    if (generation !== undefined && !generation.sealed) {
+      return { epoch: generation.epoch, seq: generation.ring.sequence };
     }
-    return { epoch: generation.epoch, seq: generation.ring.sequence };
+    const state = this.#store.runtimeState(sessionId);
+    return { epoch: state?.streamEpoch ?? 0, seq: null };
   }
 
   async shutdown(): Promise<void> {
