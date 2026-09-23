@@ -143,7 +143,6 @@ describe("workspace page error surfaces", () => {
       }),
     );
 
-    await screen.findByRole("button", { name: "折叠 root" });
     const dialog = await openDirectoryDialog();
     fireEvent.change(within(dialog).getByLabelText("文件夹名称"), { target: { value: "drafts" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "创建" }));
