@@ -8,6 +8,7 @@ import {
   useMatches,
 } from "react-router";
 import { AuthFooter, AuthGuard, AuthProvider } from "../features/auth/index.js";
+import { ChatPage } from "../features/chat/index.js";
 import { FilesPage } from "../features/files/index.js";
 import { SettingsPage } from "../features/settings/index.js";
 import { ThemeProvider } from "../features/theme/index.js";
@@ -25,7 +26,7 @@ export const routeManifest: readonly RouteDefinition[] = [
     path: "/",
     label: "会话",
     title: "会话",
-    description: "S0b 将接入会话与 Agent 链路",
+    description: "会话列表、消息与输入",
   },
   {
     path: "/files",
@@ -155,6 +156,8 @@ export function createAppRouter() {
             <SettingsPage />
           ) : path === "/files" ? (
             <FilesPage />
+          ) : path === "/" ? (
+            <ChatPage />
           ) : (
             <PlaceholderPage description={description} title={title} />
           ),

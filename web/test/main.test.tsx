@@ -20,6 +20,9 @@ async function loadMain(path: "/" | "/files", fetchResult?: Promise<Response>) {
       if (requestPath === "/api/workspaces") {
         return Promise.resolve(jsonResponse({ workspaces: [] }));
       }
+      if (requestPath === "/api/sessions") {
+        return Promise.resolve(jsonResponse({ sessions: [] }));
+      }
 
       throw new Error(`unexpected request ${requestPath}`);
     }),
@@ -54,7 +57,7 @@ describe("SPA root entry", () => {
 
     expect(disposeMain).toBeTypeOf("function");
     expect(await screen.findByRole("heading", { level: 1, name: "会话" })).toBeTruthy();
-    expect(screen.getByText("S0b 将接入会话与 Agent 链路", { exact: true })).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "给助手发消息" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "会话" }).getAttribute("aria-current")).toBe("page");
   });
 

@@ -105,6 +105,9 @@ export function allowWorkspaceListFetch() {
     if (path === "/api/workspaces") {
       return Promise.resolve(jsonResponse({ workspaces: [] }));
     }
+    if (path === "/api/sessions") {
+      return Promise.resolve(jsonResponse({ sessions: [] }));
+    }
     if (!defaultHandler) {
       throw new Error(`unexpected request ${String(path)}`);
     }

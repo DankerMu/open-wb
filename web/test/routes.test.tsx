@@ -7,7 +7,7 @@ const expectedPages = [
   {
     path: "/",
     title: "会话",
-    description: "S0b 将接入会话与 Agent 链路",
+    description: "选择一个会话，或直接发送开始新对话",
     currentLabel: "会话",
   },
   {
@@ -170,6 +170,14 @@ function authenticateRouter() {
         );
       }
 
+      if (path === "/api/sessions") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ sessions: [] }), {
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+
       if (path === "/api/info") {
         return Promise.resolve(
           new Response(JSON.stringify({ name: "workbuddy-app-server", version: "0.0.0" }), {
@@ -194,6 +202,10 @@ async function expectRouteShell({
 }) {
   expect(await screen.findByRole("heading", { level: 1, name: title })).toBeTruthy();
   expect(await screen.findByText(description, { exact: true })).toBeTruthy();
+  if (title === "会话") {
+    expect(screen.getByRole("textbox", { name: "给助手发消息" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "新建会话" })).toBeTruthy();
+  }
 
   const sidebar = screen.getByRole("complementary", { name: "侧栏" });
   const navigation = within(sidebar).getByRole("navigation", { name: "主导航" });

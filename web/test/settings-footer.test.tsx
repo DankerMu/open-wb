@@ -26,6 +26,7 @@ function authenticatedRoutes(routes: Parameters<typeof createFetchMock>[0]) {
   return {
     "/api/auth/me": jsonResponse(principal),
     "/api/workspaces": jsonResponse({ workspaces: [] }),
+    "/api/sessions": jsonResponse({ sessions: [] }),
     ...routes,
   };
 }
