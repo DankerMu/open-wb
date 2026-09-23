@@ -13,7 +13,7 @@ const expectedPages = [
   {
     path: "/files",
     title: "工作空间",
-    description: "S1a 将接入工作空间与文件",
+    description: "未选择工作空间",
     currentLabel: "工作空间",
   },
   {
@@ -42,7 +42,7 @@ const trailingSlashPages = [
     path: "/files/",
     canonicalPath: "/files",
     title: "工作空间",
-    description: "S1a 将接入工作空间与文件",
+    description: "未选择工作空间",
     currentLabel: "工作空间",
   },
   {
@@ -63,7 +63,7 @@ const trailingSlashPages = [
     path: "/files//",
     canonicalPath: "/files",
     title: "工作空间",
-    description: "S1a 将接入工作空间与文件",
+    description: "未选择工作空间",
     currentLabel: "工作空间",
   },
   {
@@ -84,21 +84,21 @@ const trailingSlashPages = [
     path: "/FILES",
     canonicalPath: "/files",
     title: "工作空间",
-    description: "S1a 将接入工作空间与文件",
+    description: "未选择工作空间",
     currentLabel: "工作空间",
   },
   {
     path: "/Files/",
     canonicalPath: "/files",
     title: "工作空间",
-    description: "S1a 将接入工作空间与文件",
+    description: "未选择工作空间",
     currentLabel: "工作空间",
   },
   {
     path: "/FILES//",
     canonicalPath: "/files",
     title: "工作空间",
-    description: "S1a 将接入工作空间与文件",
+    description: "未选择工作空间",
     currentLabel: "工作空间",
   },
   {
@@ -119,7 +119,7 @@ const trailingSlashPages = [
     path: "/f%69les",
     canonicalPath: "/files",
     title: "工作空间",
-    description: "S1a 将接入工作空间与文件",
+    description: "未选择工作空间",
     currentLabel: "工作空间",
   },
   {
@@ -162,6 +162,14 @@ function authenticateRouter() {
         );
       }
 
+      if (path === "/api/workspaces") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ workspaces: [] }), {
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+
       if (path === "/api/info") {
         return Promise.resolve(
           new Response(JSON.stringify({ name: "workbuddy-app-server", version: "0.0.0" }), {
@@ -185,7 +193,7 @@ async function expectRouteShell({
   currentLabel: string;
 }) {
   expect(await screen.findByRole("heading", { level: 1, name: title })).toBeTruthy();
-  expect(screen.getByText(description, { exact: true })).toBeTruthy();
+  expect(await screen.findByText(description, { exact: true })).toBeTruthy();
 
   const sidebar = screen.getByRole("complementary", { name: "侧栏" });
   const navigation = within(sidebar).getByRole("navigation", { name: "主导航" });
@@ -245,7 +253,7 @@ describe("SPA shell routes", () => {
     });
     const { navigation: updatedNavigation } = await expectRouteShell({
       title: "工作空间",
-      description: "S1a 将接入工作空间与文件",
+      description: "未选择工作空间",
       currentLabel: "工作空间",
     });
 

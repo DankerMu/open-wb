@@ -11,15 +11,28 @@ let disposeMain: (() => void) | undefined;
 
 async function loadMain(path: "/" | "/files", fetchResult?: Promise<Response>) {
   window.history.replaceState(null, "", path);
-  vi.stubGlobal("fetch", vi.fn().mockReturnValue(fetchResult ?? Promise.resolve(jsonResponse())));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((requestPath: string) => {
+      if (requestPath === "/api/auth/me") {
+        return fetchResult ?? Promise.resolve(jsonResponse());
+      }
+      if (requestPath === "/api/workspaces") {
+        return Promise.resolve(jsonResponse({ workspaces: [] }));
+      }
+
+      throw new Error(`unexpected request ${requestPath}`);
+    }),
+  );
   document.body.innerHTML = '<div id="root"></div>';
+  // The entry owns a singleton root, so each test intentionally re-evaluates it after resetModules.
   vi.resetModules();
   const main = await import("../src/main.js");
   disposeMain = main.disposeApp;
 }
 
-function jsonResponse() {
-  return new Response(JSON.stringify(authenticatedPrincipal), {
+function jsonResponse(body: unknown = authenticatedPrincipal) {
+  return new Response(JSON.stringify(body), {
     headers: { "Content-Type": "application/json" },
   });
 }
@@ -45,12 +58,14 @@ describe("SPA root entry", () => {
     expect(screen.getByRole("link", { name: "会话" }).getAttribute("aria-current")).toBe("page");
   });
 
-  it("renders the 工作空间 shell from the initial browser history", async () => {
+  it("renders the 工作空间 page from the initial browser history", async () => {
     await loadMain("/files");
 
     expect(disposeMain).toBeTypeOf("function");
     expect(await screen.findByRole("heading", { level: 1, name: "工作空间" })).toBeTruthy();
-    expect(screen.getByText("S1a 将接入工作空间与文件", { exact: true })).toBeTruthy();
+    expect(await screen.findByText("未选择工作空间", { exact: true })).toBeTruthy();
+    expect(screen.getByText("工作空间目录", { exact: true })).toBeTruthy();
+    expect(screen.getByText("未选择文件", { exact: true })).toBeTruthy();
     expect(screen.getByRole("link", { name: /工作空间/ }).getAttribute("aria-current")).toBe(
       "page",
     );
