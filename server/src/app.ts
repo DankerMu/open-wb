@@ -47,7 +47,15 @@ interface AssemblyDependencies {
   tokens?: TokenRegistry;
   upstream?: { baseUrl: string; apiKey: string } | undefined;
   runtime?: SessionSupervisorRuntime;
+  /**
+   * Must return synchronously. createApp forwards this callback and its return
+   * unchanged; a returned thenable is an owned programming error beside the source fault.
+   */
   onError?: (error: Error) => void;
+  /**
+   * Optional synchronous observer forwarded unchanged, including its return value.
+   * A returned thenable is an owned programming error. Omitted means no observer.
+   */
   onEvent?: (sessionId: string, epoch: number, event: ChatEvent<number>) => void;
 }
 

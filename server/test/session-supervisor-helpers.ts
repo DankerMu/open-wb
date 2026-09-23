@@ -397,6 +397,38 @@ export async function capturedFailure(work: () => Promise<unknown>) {
   throw new Error("expected async operation to fail");
 }
 
+export function assistantIdFor(fixture: SupervisorApp, sessionId: string): number {
+  const assistant = messageRows(fixture.db).find(
+    (row) => row.session_id === sessionId && row.role === "assistant",
+  );
+  if (assistant === undefined) {
+    throw new Error("missing assistant row");
+  }
+  return assistant.id;
+}
+
+export function containsMessage(error: unknown, message: string): boolean {
+  if (error instanceof Error && error.message.includes(message)) {
+    return true;
+  }
+  if (error === null || typeof error !== "object") {
+    return false;
+  }
+  if ("cause" in error && containsMessage(error.cause, message)) {
+    return true;
+  }
+  if ("errors" in error && Array.isArray(error.errors)) {
+    return error.errors.some((item) => containsMessage(item, message));
+  }
+  return false;
+}
+
+export async function assertRetainedFaultOnShutdown(fixture: SupervisorApp, message: string) {
+  const shutdownFailure = await capturedFailure(() => fixture.app.close());
+  expect(containsMessage(shutdownFailure, message)).toBe(true);
+  expect(fixture.db.prepare("SELECT 1 AS usable").get()).toEqual({ usable: 1 });
+}
+
 export async function closeFixture(fixture: SupervisorApp | undefined): Promise<void> {
   await fixture?.close();
 }
