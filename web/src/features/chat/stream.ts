@@ -84,6 +84,12 @@ export function applyChatEvent(state: ChatState, event: ChatEvent): ChatState {
       return startStep(state, event.data);
     case "step.end":
       return endStep(state, event.data);
+    case "error":
+      return replaceAssistant(state, event.data.messageId, (message) => ({
+        ...message,
+        status: "failed",
+        error: event.data.message,
+      }));
     case "turn.end":
       return endTurn(state, event.data.messageId, event.data.status);
     default:
@@ -139,6 +145,9 @@ function endTurn(state: ChatState, messageId: number, status: "done" | "failed")
   const next = replaceAssistant(state, messageId, (message) => ({
     ...message,
     status,
+    steps: message.steps.some((step) => step.status === "running")
+      ? message.steps.map((step) => (step.status === "running" ? { ...step, status } : step))
+      : message.steps,
   }));
   return next.status === status ? next : { ...next, status };
 }

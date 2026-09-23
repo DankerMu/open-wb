@@ -12,6 +12,33 @@ const USER_CONTENT = "\u0000\uFEFFKeep BOM 中文 😀";
 const BASH_START_DETAIL = '{"command":"echo workbuddy-smoke"}';
 const BASH_RESULT_DETAIL = '{"output":"workbuddy-smoke"}';
 const STREAMED_BODY = "Hello \u0000\uFEFF中文 😀";
+const AGENT_FAILURE = "Agent execution failed";
+
+const runningSession = {
+  id: SESSION_ID,
+  title: "saved title",
+  status: "running" as const,
+  createdAt: 1_740_000_000_000,
+  updatedAt: 1_740_000_000_023,
+};
+
+const historyUser = {
+  id: -3,
+  role: "user" as const,
+  content: USER_CONTENT,
+  status: "done" as const,
+  createdAt: -1,
+  steps: [] as [],
+};
+
+const userView = {
+  id: -3,
+  role: "user" as const,
+  content: USER_CONTENT,
+  status: "done" as const,
+  steps: [] as [],
+  error: null,
+};
 
 function deepFreeze<T>(value: T): T {
   if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
@@ -26,22 +53,9 @@ function deepFreeze<T>(value: T): T {
 describe("Chat stream reducer", () => {
   it("projects snapshot history then reduces a bash turn to exact done text and one keyed step", () => {
     const snapshot: ChatMessageSnapshot = {
-      session: {
-        id: SESSION_ID,
-        title: "saved title",
-        status: "running",
-        createdAt: 1_740_000_000_000,
-        updatedAt: 1_740_000_000_023,
-      },
+      session: runningSession,
       messages: [
-        {
-          id: -3,
-          role: "user",
-          content: USER_CONTENT,
-          status: "done",
-          createdAt: -1,
-          steps: [],
-        },
+        historyUser,
         {
           id: 0,
           role: "assistant",
@@ -70,14 +84,6 @@ describe("Chat stream reducer", () => {
     ];
     deepFreeze(events);
 
-    const userView = {
-      id: -3,
-      role: "user" as const,
-      content: USER_CONTENT,
-      status: "done" as const,
-      steps: [],
-      error: null,
-    };
     const expected: ChatState = {
       status: "done",
       messages: [
@@ -127,5 +133,86 @@ describe("Chat stream reducer", () => {
     const first = reduce(snapshot);
     expect(first).toEqual(expected);
     expect(reduce(snapshot)).toEqual(first);
+  });
+
+  it("keeps session generating on business error then settles remaining running step on failed turn.end", () => {
+    const snapshot: ChatMessageSnapshot = {
+      session: runningSession,
+      messages: [
+        historyUser,
+        {
+          id: 0,
+          role: "assistant",
+          content: STREAMED_BODY,
+          status: "running",
+          createdAt: 0,
+          steps: [
+            {
+              id: 11,
+              ordinal: 0,
+              name: "bash",
+              detail: BASH_START_DETAIL,
+              status: "running",
+            },
+          ],
+        },
+      ],
+      streamCursor: { epoch: 1, seq: null },
+    };
+    const frozenSnapshot = deepFreeze(structuredClone(snapshot));
+    const afterError = deepFreeze(
+      applyChatEvent(deepFreeze(chatStateFromSnapshot(frozenSnapshot)), {
+        type: "error",
+        data: { messageId: 0, message: AGENT_FAILURE },
+      }),
+    );
+
+    expect(afterError).toEqual({
+      status: "running",
+      messages: [
+        userView,
+        {
+          id: 0,
+          role: "assistant",
+          content: STREAMED_BODY,
+          status: "failed",
+          steps: [
+            {
+              id: 11,
+              name: "bash",
+              detail: BASH_START_DETAIL,
+              status: "running",
+            },
+          ],
+          error: AGENT_FAILURE,
+        },
+      ],
+    });
+
+    const afterEnd = deepFreeze(
+      applyChatEvent(afterError, { type: "turn.end", data: { messageId: 0, status: "failed" } }),
+    );
+    expect(afterEnd).toEqual({
+      status: "failed",
+      messages: [
+        userView,
+        {
+          id: 0,
+          role: "assistant",
+          content: STREAMED_BODY,
+          status: "failed",
+          steps: [
+            {
+              id: 11,
+              name: "bash",
+              detail: BASH_START_DETAIL,
+              status: "failed",
+            },
+          ],
+          error: AGENT_FAILURE,
+        },
+      ],
+    });
+    expect(frozenSnapshot).toEqual(snapshot);
   });
 });
