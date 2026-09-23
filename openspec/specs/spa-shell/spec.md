@@ -15,15 +15,15 @@ web workspace SHALL 具备 Vite + React 构建面：`web/index.html`、`src/main
 - THEN typecheck（JSX）、knip（vite 入口解析）、覆盖率全部通过
 
 ### Requirement: 路由 IA 与侧栏
-SPA SHALL 以 history 路由提供 `/`、`/files`、`/center`、`/settings` 四页与侧栏 4 tab（标签与副标题按 demo:1773-1778）；`/`、`/center` 为占位壳（标题 + 所属阶段说明）；`/files` 渲染 files-web 规定的工作空间页（heading `工作空间`，当前空间以 `?ws=<id>` 表示），routeManifest 描述及 routes/ui-walk 既有断言 SHALL 随真实页面同步更新；`/center` 为扁平路由（demo 的 8 tab 是页内状态而非 URL，demo:3144-3161；页内 tab 属 S1d）；demo 开发者页 `/tokens` 不移植。已认证侧栏底部 SHALL 有用户页脚，逐字展示当前 Principal 的 `account` 与 `role`（前端不伪造 display name/部门或角色映射）以及 `退出登录` 按钮。退出 SHALL 先显示可访问确认框：标题 `退出登录？`、说明 `退出后本机不再保留登录状态，未完成的任务会保留在你的沙箱中。`、按钮 `取消`/`退出`；取消不发请求，确认只调用一次 Provider-owned logout。其余 demo 用户菜单项延后见 proposal Non-goals。
+SPA SHALL 以 history 路由提供 `/`、`/files`、`/center`、`/settings` 四页与侧栏 4 tab（标签与副标题按 demo:1773-1778）；`/` 渲染 chat-web 规定的会话页（heading `会话`，当前会话由 `?session=<id>` 表示）；`/center` 为占位壳（标题 + 所属阶段说明）；`/files` 渲染 files-web 规定的工作空间页（heading `工作空间`，当前空间以 `?ws=<id>` 表示），routeManifest 描述及 routes/ui-walk 既有断言 SHALL 随真实页面同步更新；`/center` 为扁平路由（demo 的 8 tab 是页内状态而非 URL，demo:3144-3161；页内 tab 属 S1d）；demo 开发者页 `/tokens` 不移植。已认证侧栏底部 SHALL 有用户页脚，逐字展示当前 Principal 的 `account` 与 `role`（前端不伪造 display name/部门或角色映射）以及 `退出登录` 按钮。退出 SHALL 先显示可访问确认框：标题 `退出登录？`、说明 `退出后本机不再保留登录状态，未完成的任务会保留在你的沙箱中。`、按钮 `取消`/`退出`；取消不发请求，确认只调用一次 Provider-owned logout。其余 demo 用户菜单项延后见 proposal Non-goals。
 
 #### Scenario: 四路由可达
 - WHEN 已登录用户依次访问四个路由
-- THEN `/files` 显示工作空间页、空间切换器与目录树区，其余页面保持既有行为；侧栏高亮当前 tab，无浏览器控制台报错
+- THEN `/` 显示会话页、会话列表与输入框，`/files` 显示工作空间页、空间切换器与目录树区，`/center` 保持占位壳，`/settings` 保持设置页；侧栏高亮当前 tab，无浏览器控制台报错
 
 #### Scenario: 退出登录
 - WHEN 在侧栏用户页脚点击 `退出登录` 并在确认框选择 `退出`
-- THEN 恰调用一次 `POST /api/auth/logout`；204 或 current 401 均清空 Principal，并在保持当前 pathname/search/hash 不变时渲染登录页
+- THEN 恰调用一次 `POST /api/auth/logout`；204 或 current 401 均清空 Principal，会话页的连接随卸载关闭，并在保持当前 pathname/search/hash 不变时渲染登录页
 
 #### Scenario: 取消退出
 - WHEN 打开退出确认框后选择 `取消`

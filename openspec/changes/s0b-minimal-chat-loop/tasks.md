@@ -51,7 +51,7 @@ Minimal mergeable slice: 4.1 环形缓冲单独可合并保绿（纯逻辑+测�
 
 - [x] 5.1 #92/PR234 实现并经 PR238 独立归档：四个类型化 API、完整正文与 nullable streamCursor、原有401/错误合同；101新增API测试，最终web17files/406tests，全套静态/类型/build/drift及源码与归档各自CI八项通过。round2 clean、1fixpass，空列表/空title错误候选已验证；源码最终仅API/配对测试/fixture，上游#233/#237的CI修复原样集成。
 - [x] 5.2 #93/PR245 merged：纯归约器、注入式EventSource、每次open/gap全快照恢复、1000事件FIFO与游标/关闭/替代fence。28新增/434web测试，6纯函数与14受控协议case、8错误候选RED/恢复GREEN；真实Chromium同realm/foreignrealm恢复和稳定性通过，精确正文/原生重连/游标重置/零错误与订阅回收。三席首轮后补2证据缺口，round2 clean、1fixpass，同SHA CI八项全绿。独立归档交付仍由当前workflow gate管理；产品页面与logout/unmount接线属于5.3。
-- [ ] 5.3 `web/src/features/chat/page.tsx` + 路由接线（`/` 换为 ChatPage、`routeManifest` 描述更新、`?session=` 参数、**同步更新 `web/test/routes.test.tsx` 对 `/` 的占位断言**）：列表/新建/composer/消息区/步骤卡/状态徽章/错误内联 + jsdom 测试（mock fetch + 假 EventSource 一次流式对话、刷新恢复、错误提示）
+- [x] 5.3 #104/PR247 merged：根会话页与路由原子接线，左右列表/消息区、步骤三态、完整正文、输入/错误、查询恢复及账号/请求/连接所有权。24新增/458web测试；真实构建页面Chromium+HTTP/SQLite/native fake验证运行中/终态刷新、两次发送、新建/Back、离页/退出、零浏览器错误。历史/故障候选与晚到404/401副作用拒绝证明、恢复与稳定性均通过。三轮review、2fixpasses后clean，同SHA CI八项成功；独立归档门禁仍由workflow管理。真实omp18与永久对话走查见6.2/6.3。
 
 Suggested fixture level: 5.1 expanded（公共API/parser，已归档）；5.2 expanded（#214异步恢复/ordering/lifecycle及已复现首次REST→SSE窗口）；5.3 按页面/认证/路由影响评估，不以纯jsdom单面代替真实边界。
 Minimal mergeable slice: 5.1 api 扩展单独可合并保绿（四方法有配对测试即非死代码——knip 以测试 import 计）；5.2 归约器与连接器独立可合并；5.3 依赖 5.1、5.2
