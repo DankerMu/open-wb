@@ -33,6 +33,7 @@ import {
   type StartedServer,
   startCompiledServer,
 } from "./server-startup-helpers.js";
+import { sudoPrefix } from "./session-supervisor-helpers.js";
 
 const MODEL_ID = "issue-102-tracer-model";
 const STARTUP_MODULES = [
@@ -425,10 +426,12 @@ describe("production entry forwards OMP_USER to the captured spawn", () => {
       writeFileSync(hookPath, captureSpawnHook());
       const port = await reserveWildcardPort();
       const bin = join(scratchRoot, "bin", "omp");
+      const forwardedTmpdir = "/tmp/workbuddy compiled:forward $;";
       const server = startCompiledServer(
         compiled.entry,
         compiledFixtureEnv(scratchRoot, port, bin, {
           PATH: "/usr/bin:/bin",
+          TMPDIR: forwardedTmpdir,
           ...(ompUser === undefined ? {} : { OMP_USER: ompUser }),
           PROBE_TRACE: tracePath,
         }),
@@ -451,14 +454,8 @@ describe("production entry forwards OMP_USER to the captured spawn", () => {
         }
         expect(call.command).toBe(ompUser === undefined ? bin : "sudo");
         if (ompUser !== undefined) {
-          expect(call.args.slice(0, 6)).toEqual([
-            "-n",
-            "-u",
-            ompUser,
-            "--preserve-env=PATH,LANG,TMPDIR,HOME,PI_CODING_AGENT_DIR,WORKBUDDY_MODEL_TOKEN",
-            "--",
-            bin,
-          ]);
+          const prefix = sudoPrefix(ompUser, bin, forwardedTmpdir);
+          expect(call.args.slice(0, prefix.length)).toEqual(prefix);
         }
       } finally {
         await server.dispose();

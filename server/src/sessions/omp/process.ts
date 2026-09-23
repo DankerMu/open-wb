@@ -97,6 +97,7 @@ export async function spawnOmp(
           "-u",
           opts.ompUser,
           "--preserve-env=PATH,LANG,TMPDIR,HOME,PI_CODING_AGENT_DIR,WORKBUDDY_MODEL_TOKEN",
+          ...(env.TMPDIR === undefined ? [] : [`TMPDIR=${env.TMPDIR}`]),
           "--",
           opts.bin,
           ...args,

@@ -355,6 +355,18 @@ export function recordedSpawn(
   };
 }
 
+export function sudoPrefix(user: string, bin: string, tmpdir?: string): string[] {
+  return [
+    "-n",
+    "-u",
+    user,
+    "--preserve-env=PATH,LANG,TMPDIR,HOME,PI_CODING_AGENT_DIR,WORKBUDDY_MODEL_TOKEN",
+    ...(tmpdir === undefined ? [] : [`TMPDIR=${tmpdir}`]),
+    "--",
+    bin,
+  ];
+}
+
 export const OWNER_ID = "u1";
 
 async function openOwnedSession(

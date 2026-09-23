@@ -34,6 +34,7 @@ import {
   recordedSpawn,
   requiredToken,
   type SpawnCall,
+  sudoPrefix,
 } from "./session-supervisor-helpers.js";
 import type { FakeChild } from "./support/omp-rpc.js";
 
@@ -220,19 +221,12 @@ describe("真实 createApp 消费共享 registry 并先挂 proxy 再挂 sessions
 describe("真实配置经认证 prompt 抵达 spawn", () => {
   it("配置用户 omp 时捕获 sudo 前缀，未配置时保持直接 OMP_BIN", async () => {
     const roots = makeAssemblyRoots();
+    const tmpdir = process.env.TMPDIR;
     const configured = await captureAuthenticatedSpawn(roots, "omp");
     const unset = await captureAuthenticatedSpawn(roots);
     const directArgs = ompArgs(roots, unset.cwd);
     expect(configured.command).toBe("sudo");
-    expect(configured.args).toEqual([
-      "-n",
-      "-u",
-      "omp",
-      "--preserve-env=PATH,LANG,TMPDIR,HOME,PI_CODING_AGENT_DIR,WORKBUDDY_MODEL_TOKEN",
-      "--",
-      roots.bin,
-      ...directArgs,
-    ]);
+    expect(configured.args).toEqual([...sudoPrefix("omp", roots.bin, tmpdir), ...directArgs]);
     expect(unset.command).toBe(roots.bin);
     expect(unset.args).toEqual(directArgs);
     expect(configured.cwd).toBe(join(roots.sandboxRoot, "u1"));
@@ -253,6 +247,7 @@ describe("真实配置经认证 prompt 抵达 spawn", () => {
 
   it("sudo 形态子进程在就绪前退出时返回 agent_unavailable，撤销 token，且不降级直启", async () => {
     const roots = makeAssemblyRoots();
+    const tmpdir = process.env.TMPDIR;
     const tokens = new TokenRegistry();
     const calls: SpawnCall[] = [];
     const children: FakeChild[] = [];
@@ -283,13 +278,9 @@ describe("真实配置经认证 prompt 抵达 spawn", () => {
     expect(prompt.json()).toEqual(AGENT_UNAVAILABLE_ENVELOPE);
     expect(calls).toHaveLength(1);
     expect(calls[0]?.command).toBe("sudo");
-    expect(calls[0]?.args.slice(0, 6)).toEqual([
-      "-n",
-      "-u",
-      "omp",
-      "--preserve-env=PATH,LANG,TMPDIR,HOME,PI_CODING_AGENT_DIR,WORKBUDDY_MODEL_TOKEN",
-      "--",
-      roots.bin,
+    expect(calls[0]?.args).toEqual([
+      ...sudoPrefix("omp", roots.bin, tmpdir),
+      ...ompArgs(roots, calls[0]?.cwd),
     ]);
     expect(calls.some((call) => call.command === roots.bin)).toBe(false);
     const issued = calls[0]?.token;

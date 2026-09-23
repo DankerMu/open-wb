@@ -20,11 +20,16 @@ CONTEXT.md 不变量 4（网关/kb 凭证不进 omp 可读环境）在同 uid �
 
 ## 补充（2026-09-18，S1a grill 拍板）：spawn 机制与权限模型
 
-- **spawn 机制**：Linux 上 app-server 以 `sudo -n -u <OMP_USER> --preserve-env=<白名单键列表> -- <OMP_BIN> --mode rpc …`
-  启动 omp，白名单的值放在 sudo 进程自身的环境里（sudo 为 setuid root，其 `environ` 他人不可读），**绝不写进命令行**——
+- **spawn 机制**：Linux 上 app-server 以 `sudo -n -u <OMP_USER> --preserve-env=<白名单键列表> [TMPDIR=<value>] -- <OMP_BIN> --mode rpc …`
+  启动 omp。白名单仍构造在 sudo 进程自身的环境里（sudo 为 setuid root，其 `environ` 他人不可读）。凭证（会话 token、上游密钥）**绝不写进命令行**——
   `/proc/<pid>/cmdline` 对任意本机用户可读，会话 token 上命令行等于广播（与 ADR-0003「凭证不上命令行」同理；
-  本节首版写的 `VAR=val` 命令行赋值形态因此作废，2026-09-18 S1a Stage 3 审核纠正）；
-  sudoers 一行 `<app-user> ALL=(<OMP_USER>) NOPASSWD: SETENV: <OMP_BIN>`——`SETENV` 使 `--preserve-env=<列表>` 对任意变量生效，
+  本节首版写的泛化 `VAR=val` 命令行赋值形态因此作废，2026-09-18 S1a Stage 3 审核纠正）。
+  窄例外仅限非凭证 `TMPDIR`：glibc ld.so 在 setuid 二进制（sudo）进入 `main` 之前即按 secure-execution 剥离 `TMPDIR`，
+  `--preserve-env` 无法恢复已被 loader 删除的值；因此当本次 spawn 的环境白名单含 `TMPDIR`（`!== undefined`，含空串）时，
+  在 `--` 之前插入单个 argv 元素 `TMPDIR=<该白名单值>`，缺席不加。赋值必须放在 `--` 之前，才能保持既有命令匹配与二进制授权
+  （实测把赋值放到 `--` 之后会破坏该匹配）。`SETENV` 与二进制授权面不变——sudoers 一行仍为
+  `<app-user> ALL=(<OMP_USER>) NOPASSWD: SETENV: <OMP_BIN>`；`SETENV` 允许在该授权下做环境保留与命令行赋值，
+  但不能恢复 sudo 启动前已被 loader 剥离的变量。
   S0b 的环境白名单原样传入且不继承 app-server 其它环境；stdio 直通，RPC 帧层不变。`OMP_USER` 未设置时
   直接 spawn（macOS 开发机、单测）。否决项：`systemd-run --uid`（引入 systemd 与 polkit 依赖，容器内不稳）、
   自研 setuid 包装器（多一个需审计的特权二进制）。
