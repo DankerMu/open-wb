@@ -440,6 +440,38 @@ describe("chat page isolation and errors", () => {
     expect((await screen.findByRole("alert")).textContent).toBe(SESSION_BUSY);
   });
 
+  it("keeps idle history locked after accepted 202 when snapshot reconciliation fails", async () => {
+    const idle = runningSession("idle");
+    const idleSnapshot: ChatMessageSnapshot = {
+      session: idle,
+      messages: [historyUser],
+      streamCursor: { epoch: 1, seq: 0 },
+    };
+    let messageReads = 0;
+    renderChatPage(`/?session=${SESSION_ID}`, {
+      "/api/sessions": () => jsonResponse({ sessions: [idle] }),
+      [SESSION_MESSAGES]: () => {
+        messageReads += 1;
+        if (messageReads === 1) {
+          return jsonResponse(idleSnapshot);
+        }
+        return envelope(503, "unavailable", "controlled snapshot unavailable");
+      },
+      [SESSION_PROMPT]: jsonResponse(promptAccepted, 202),
+    });
+
+    await screen.findByRole("button", { name: "新建会话" });
+    const messages = await findMessageArea();
+    expect(await within(messages).findByText(historyUser.content, exactText)).toBeTruthy();
+    await typeAndSend(PROMPT);
+    expect(await screen.findByText(/controlled snapshot unavailable/)).toBeTruthy();
+    expect(await screen.findByText(/请刷新页面后重试/)).toBeTruthy();
+    expect(within(messages).getByText(historyUser.content, exactText)).toBeTruthy();
+    expect(screen.queryByText(PROMPT, { exact: true })).toBeNull();
+    expect(composer().disabled).toBe(true);
+    expect(screen.getByText("生成中", { exact: true })).toBeTruthy();
+  });
+
   it("keeps business error on the message and locks a still-running snapshot after terminal stream failure", async () => {
     const snapshot = chatSnapshot({
       content: "Hello ",
@@ -481,7 +513,9 @@ describe("chat page isolation and errors", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "新建会话" }));
     expect(await screen.findByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeTruthy();
-    expect(source.closeCount).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(source.closeCount).toBe(1);
+    });
     expect(currentLocation()).toBe(`/?session=${SESSION_ID}`);
   });
 

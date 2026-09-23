@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router";
 import { type ApiClient, ApiError, REQUEST_FAILED_MESSAGE } from "../../lib/api.js";
 import type { ChatMessageSnapshot, ChatSession } from "../../lib/session-contract.js";
 import { useAuth } from "../auth/index.js";
+import { ConversationView } from "./conversation-view.js";
 import {
   applyChatEvent,
   type ChatEvent,
@@ -38,7 +39,6 @@ const TITLE_FALLBACK = "新会话";
 const TERMINAL_REFRESH_GUIDANCE = "请刷新页面后重试";
 const EMPTY_SELECTION = "选择一个会话，或直接发送开始新对话";
 const MISSING_EVENT_SOURCE = "无法连接会话事件";
-const exactWhitespace = { whiteSpace: "pre-wrap" as const };
 
 function isUnauthorized(error: unknown) {
   return error instanceof ApiError && error.status === 401;
@@ -360,6 +360,7 @@ export function ChatPage() {
       ownedClient: ApiClient,
       error: unknown,
       generation: number,
+      accepted: boolean,
     ) => {
       if (
         !mountedRef.current ||
@@ -368,6 +369,12 @@ export function ChatPage() {
         ownedClient !== clientRef.current ||
         isUnauthorized(error)
       ) {
+        releaseMutationIfOwned(controller);
+        return;
+      }
+      if (accepted) {
+        setStreamError(`${errorMessage(error)}。${TERMINAL_REFRESH_GUIDANCE}`);
+        setSubmitting(false);
         releaseMutationIfOwned(controller);
         return;
       }
@@ -420,12 +427,12 @@ export function ChatPage() {
               releaseMutationIfOwned(controller);
             },
             (error: unknown) => {
-              failOwnedPrompt(controller, mutationGeneration, ownedClient, error, generation);
+              failOwnedPrompt(controller, mutationGeneration, ownedClient, error, generation, true);
             },
           );
         })
         .catch((error: unknown) => {
-          failOwnedPrompt(controller, mutationGeneration, ownedClient, error, generation);
+          failOwnedPrompt(controller, mutationGeneration, ownedClient, error, generation, false);
         });
     },
     [
@@ -656,79 +663,35 @@ export function ChatPage() {
     creating ||
     submitting ||
     historyState.status === "loading" ||
-    historyView?.status === "running";
+    historyView?.status === "running" ||
+    Boolean(streamError);
   const sendDisabled = generating || draft.trim().length === 0;
 
   return (
     <section>
       <h1>会话</h1>
-      {listState.status === "error" ? <p role="alert">{listState.message}</p> : null}
-      {listState.status === "loading" ? <p role="status">正在读取会话</p> : null}
-      {listForClient ? (
-        <nav aria-label="会话列表">
-          <button onClick={() => createAndSelect()} type="button">
-            新建会话
-          </button>
-          <ul>
-            {listForClient.sessions.map((session) => {
-              const selected = session.id === requestedSessionId;
-              return (
-                <li key={session.id}>
-                  <button
-                    aria-current={selected ? "true" : undefined}
-                    aria-label={sessionTitle(session)}
-                    onClick={() => selectSession(session.id)}
-                    type="button"
-                  >
-                    <strong>{sessionTitle(session)}</strong>
-                    <span role="status" aria-label={`${sessionTitle(session)} ${session.status}`}>
-                      {session.status}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </nav>
-      ) : null}
-      {historyState.status === "error" ? <p role="alert">{historyState.message}</p> : null}
-      {promptError ? <p role="alert">{promptError}</p> : null}
-      {streamError ? <p role="alert">{streamError}</p> : null}
-      {requestedSessionId && historyView ? (
-        <section aria-label="消息">
-          {historyView.messages.map((message) => (
-            <article key={message.id}>
-              <p style={exactWhitespace}>{message.content}</p>
-              {message.steps.map((step) => (
-                <section key={step.id} aria-label={step.name}>
-                  <strong>{step.name}</strong>
-                  <p>{step.detail}</p>
-                  <p role="status" aria-label={`${step.name} ${step.status}`}>
-                    {step.status}
-                  </p>
-                </section>
-              ))}
-              {message.error ? <p role="alert">{message.error}</p> : null}
-            </article>
-          ))}
-        </section>
-      ) : (
-        <p>{EMPTY_SELECTION}</p>
-      )}
-      <form onSubmit={submitComposer}>
-        <label>
-          {COMPOSER_LABEL}
-          <textarea
-            disabled={generating}
-            onChange={(event) => setDraft(event.target.value)}
-            value={draft}
-          />
-        </label>
-        {generating ? <p role="status">{GENERATING_LABEL}</p> : null}
-        <button disabled={sendDisabled} type="submit">
-          发送
-        </button>
-      </form>
+      <ConversationView
+        composerDisabled={generating}
+        composerLabel={COMPOSER_LABEL}
+        draft={draft}
+        emptySelection={EMPTY_SELECTION}
+        generating={generating}
+        generatingLabel={GENERATING_LABEL}
+        historyError={historyState.status === "error" ? historyState.message : null}
+        historyView={historyView}
+        listError={listState.status === "error" ? listState.message : null}
+        listLoading={listState.status === "loading"}
+        onChangeDraft={setDraft}
+        onCreateSession={() => createAndSelect()}
+        onSelectSession={selectSession}
+        onSubmit={submitComposer}
+        promptError={promptError}
+        requestedSessionId={requestedSessionId}
+        sendDisabled={sendDisabled}
+        sessions={listForClient?.sessions ?? null}
+        sessionTitle={sessionTitle}
+        streamError={streamError}
+      />
     </section>
   );
 }
