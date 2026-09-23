@@ -14,14 +14,14 @@
 - Domain cross-service/offline: relative same-origin endpoints, no external fetch/dependencies (1.1, 2.1).
 
 ## 1. Implementation
-- [ ] 1.1 Red-first paired public API tests and four typed methods with exact wire contract, credentials and AbortSignal.
-- [ ] 1.2 Strict session/snapshot/prompt DTO parsing preserving full text, array order, signed fields and nullable cursor; named owner types.
-- [ ] 1.3 Error-envelope, wrong-status, malformed body, network and unauthorized callback containment coverage.
-- [ ] 1.4 Minimal shared-validator extraction only if needed for 800-line cap; existing consumers and tests unchanged in behavior.
+- [x] 1.1 Red-first paired public API tests and four typed methods with exact wire contract, credentials and AbortSignal.
+- [x] 1.2 Strict session/snapshot/prompt DTO parsing preserving full text, array order, signed fields and nullable cursor; named owner types.
+- [x] 1.3 Error-envelope, wrong-status, malformed body, network and unauthorized callback containment coverage.
+- [x] 1.4 Minimal shared-validator extraction only if needed for 800-line cap; existing consumers and tests unchanged in behavior.
 
 ## 2. Verification
-- [ ] 2.1 Parent-owned real HTTP client smoke plus discriminating negative cases and restored GREEN; retain baseline/evidence hashes.
-- [ ] 2.2 Existing API reference GREEN, complete web suite/coverage, web typecheck/build, scoped Biome and repository anti-drift pass.
+- [x] 2.1 Parent-owned real HTTP client smoke plus discriminating negative cases and restored GREEN; retain baseline/evidence hashes.
+- [x] 2.2 Existing API reference GREEN, complete web suite/coverage, web typecheck/build, scoped Biome and repository anti-drift pass.
 - [ ] 2.3 Read-only source reviews and exact-head required CI pass; no weakened gates/discovery/dependency changes.
 
 ## 3. Delivery
