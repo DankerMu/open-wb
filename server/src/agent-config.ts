@@ -1,4 +1,5 @@
 import { isAbsolute, join } from "node:path";
+import { assertSafeSudoPath } from "./core/process-path.js";
 
 export const DEFAULT_OMP_BIN_RELATIVE = join("var", "omp", "omp");
 export const DEFAULT_OMP_STATE_RELATIVE = join("var", "omp-state");
@@ -45,7 +46,7 @@ export function resolveAgentSettings(
     ...(modelUpstreamBaseUrl === undefined ? {} : { modelUpstreamBaseUrl }),
     ...(modelUpstreamApiKey === undefined ? {} : { modelUpstreamApiKey }),
     modelId: env.MODEL_ID === undefined ? DEFAULT_MODEL_ID : env.MODEL_ID,
-    ...(env.OMP_USER === undefined ? {} : { ompUser: resolveOmpUser(env.OMP_USER) }),
+    ...(env.OMP_USER === undefined ? {} : { ompUser: resolveOmpUser(env.OMP_USER, env.PATH) }),
   };
 }
 
@@ -88,9 +89,10 @@ function optionalSetting(raw: string | undefined, key: string): string | undefin
   return raw;
 }
 
-function resolveOmpUser(raw: string): string {
+function resolveOmpUser(raw: string, path: string | undefined): string {
   if (raw.length < 1 || raw.length > 32 || !/^[a-z_][a-z0-9_-]{0,31}$/u.test(raw)) {
     throw new Error("OMP_USER must match [a-z_][a-z0-9_-]{0,31}");
   }
+  assertSafeSudoPath(path);
   return raw;
 }

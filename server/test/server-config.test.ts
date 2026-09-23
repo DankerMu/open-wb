@@ -1,7 +1,8 @@
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
+import { assertSafeSudoPath } from "../src/core/process-path.js";
 import { resolveServerConfig } from "../src/server.js";
 
 const REPO_ROOT = resolve(fileURLToPath(new URL("../../", import.meta.url)));
@@ -367,17 +368,20 @@ describe("resolveServerConfig — OMP_USER", () => {
   });
 
   it("接受 1 与 32 的精确用户名，不裁剪也不改写", () => {
-    expect(resolveServerConfig({ OMP_USER: "_" }, SOURCE_ENTRY).ompUser).toBe("_");
-    expect(resolveServerConfig({ OMP_USER: "a" }, SOURCE_ENTRY).ompUser).toBe("a");
+    const safe = { PATH: "/usr/bin:/opt/homebrew/bin" };
+    expect(resolveServerConfig({ ...safe, OMP_USER: "_" }, SOURCE_ENTRY).ompUser).toBe("_");
+    expect(resolveServerConfig({ ...safe, OMP_USER: "a" }, SOURCE_ENTRY).ompUser).toBe("a");
     const boundary = `_${"a".repeat(31)}`;
     expect(boundary).toHaveLength(32);
-    expect(resolveServerConfig({ OMP_USER: boundary }, SOURCE_ENTRY).ompUser).toBe(boundary);
-    expect(resolveServerConfig({ OMP_USER: "omp-user_1" }, SOURCE_ENTRY).ompUser).toBe(
+    expect(resolveServerConfig({ ...safe, OMP_USER: boundary }, SOURCE_ENTRY).ompUser).toBe(
+      boundary,
+    );
+    expect(resolveServerConfig({ ...safe, OMP_USER: "omp-user_1" }, SOURCE_ENTRY).ompUser).toBe(
       "omp-user_1",
     );
   });
 
-  it("拒绝空、大写、空格、分号、换行、非 ASCII、33 字符与 $ 会吞掉的尾换行", () => {
+  it("拒绝空、大写、空格、分号、换行、非 ASCII 与 33 字符", () => {
     for (const bad of [
       "",
       "Omp",
@@ -396,5 +400,29 @@ describe("resolveServerConfig — OMP_USER", () => {
     }
     expect("omp\n").toHaveLength(4);
     expect(`_${"a".repeat(32)}`).toHaveLength(33);
+  });
+
+  it("配置用户时拒绝缺失、空、空段、相对段与 NUL 的 PATH，绝对 PATH 原样保留", () => {
+    const safe = `/usr/bin${delimiter}/opt/homebrew/bin`;
+    expect(resolveServerConfig({ OMP_USER: "omp", PATH: safe }, SOURCE_ENTRY).ompUser).toBe("omp");
+    expect(() => assertSafeSudoPath("/usr/bin\0/bin")).toThrow();
+    for (const path of [
+      undefined,
+      "",
+      delimiter,
+      `/usr/bin${delimiter}`,
+      `${delimiter}/usr/bin`,
+      `/usr/bin${delimiter}${delimiter}/bin`,
+      "bin",
+      `/usr/bin${delimiter}bin`,
+    ]) {
+      expect(() =>
+        resolveServerConfig(
+          { OMP_USER: "omp", ...(path === undefined ? {} : { PATH: path }) },
+          SOURCE_ENTRY,
+        ),
+      ).toThrow();
+    }
+    expect(resolveServerConfig({ PATH: "bin" }, SOURCE_ENTRY).ompUser).toBeUndefined();
   });
 });

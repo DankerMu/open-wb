@@ -18,3 +18,12 @@ Canonical server configuration SHALL accept optional OMP_USER as optional ompUse
 #### Scenario: sudo 立即退出无降级
 - WHEN an injected sudo-shaped child exits before RPC ready or spawn fails
 - THEN existing agent_unavailable/nativecleanup applies, no prompt success or same-uid retry occurs; no uid isolation claim is made
+
+### Requirement: sudo 模式拒绝不安全 PATH
+When ompUser is configured, canonical configuration and the spawn boundary SHALL reject missing/empty PATH, empty or relative delimiter-separated entries, and NUL before their respective side effects. They SHALL share one canonical policy, keep valid absolute-only PATH bytes unchanged, and never resolve sudo from a sandbox-relative entry. With ompUser absent, existing direct-spawn PATH behavior SHALL remain unchanged.
+
+#### Scenario: 不得从工作空间执行伪 sudo
+- WHEN parent PATH is absent, empty, contains leading/trailing/doubled delimiters or a relative entry, and a harmless executable named sudo exists in the workspace
+- THEN configured startup fails with a generic record before effects and direct low-level sudo spawn rejects before mkdir/spawn; the workspace executable never runs
+- WHEN the same inputs omit ompUser
+- THEN the prior direct executable/args/env behavior is preserved

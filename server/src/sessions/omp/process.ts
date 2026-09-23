@@ -6,6 +6,7 @@ import { type ChildProcessWithoutNullStreams, type SpawnOptions, spawn } from "n
 import { EventEmitter } from "node:events";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { assertSafeSudoPath } from "../../core/process-path.js";
 import {
   MAX_RPC_FRAME_BYTES,
   MAX_RPC_REASSEMBLED_BYTES,
@@ -40,6 +41,9 @@ export async function spawnOmp(
   opts: SpawnOmpOpts,
   spawnImpl: SpawnImpl = spawn as SpawnImpl,
 ): Promise<ChildProcessWithoutNullStreams> {
+  if (opts.ompUser !== undefined) {
+    assertSafeSudoPath(process.env.PATH);
+  }
   const cwd = join(opts.sandboxRoot, opts.ownerId);
   const sessionDir = join(opts.stateDir, "sessions", opts.ownerId);
   const home = join(opts.stateDir, "home");

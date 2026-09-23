@@ -125,15 +125,7 @@ describe("production entry lifecycle", () => {
     chmodSync(bin, 0o755);
     const server = startCompiledServer(
       compiled.entry,
-      {
-        HOST: "127.0.0.1",
-        PORT: String(port),
-        DB_PATH: join(scratchRoot, "db", "dev.db"),
-        OMP_STATE_DIR: join(scratchRoot, "state"),
-        SANDBOX_ROOT: join(scratchRoot, "sandbox"),
-        OMP_BIN: bin,
-        MODEL_ID,
-      },
+      compiledFixtureEnv(scratchRoot, port, bin, { MODEL_ID }),
       { orderTrace: tracePath },
     );
     let exitCode: number | null = 1;
@@ -149,6 +141,61 @@ describe("production entry lifecycle", () => {
       await server.dispose();
     }
   }, 40_000);
+});
+
+describe("production entry forwards OMP_USER to the captured spawn", () => {
+  it.each([undefined, "omp"] as const)(
+    "captures the %s prompt spawn without invoking sudo",
+    async (ompUser) => {
+      const compiled = await compileServerEntry();
+      const scratchRoot = mkdtempSync(join(tmpdir(), "open-wb-omp-forward-"));
+      scratch.push(scratchRoot);
+      const tracePath = join(scratchRoot, "spawn.jsonl");
+      const hookPath = join(scratchRoot, "capture-spawn.mjs");
+      writeFileSync(hookPath, captureSpawnHook());
+      const port = await reserveWildcardPort();
+      const bin = join(scratchRoot, "bin", "omp");
+      const server = startCompiledServer(
+        compiled.entry,
+        compiledFixtureEnv(scratchRoot, port, bin, {
+          PATH: "/usr/bin:/bin",
+          ...(ompUser === undefined ? {} : { OMP_USER: ompUser }),
+          PROBE_TRACE: tracePath,
+        }),
+        { requireHook: hookPath },
+      );
+      try {
+        await server.waitForStarted();
+        const cookie = await login(port);
+        const session = await createSession(port, cookie);
+        await expectPromptStatus(port, cookie, session, "forward", 502);
+        const calls = readFileSync(tracePath, "utf8")
+          .trim()
+          .split("\n")
+          .filter((line) => line.length > 0)
+          .map((line) => JSON.parse(line) as { command: string; args: string[] });
+        expect(calls).toHaveLength(1);
+        const call = calls[0];
+        if (call === undefined) {
+          throw new Error("compiled prompt did not spawn");
+        }
+        expect(call.command).toBe(ompUser === undefined ? bin : "sudo");
+        if (ompUser !== undefined) {
+          expect(call.args.slice(0, 6)).toEqual([
+            "-n",
+            "-u",
+            ompUser,
+            "--preserve-env=PATH,LANG,TMPDIR,HOME,PI_CODING_AGENT_DIR,WORKBUDDY_MODEL_TOKEN",
+            "--",
+            bin,
+          ]);
+        }
+      } finally {
+        await server.dispose();
+      }
+    },
+    90_000,
+  );
 });
 
 describe("production entry rejects invalid OMP_USER before effects", () => {
@@ -262,9 +309,19 @@ function createSession(port: number, cookie: string): Promise<string> {
 }
 
 function prompt(port: number, cookie: string, session: string, message: string): Promise<void> {
+  return expectPromptStatus(port, cookie, session, message, 202);
+}
+
+function expectPromptStatus(
+  port: number,
+  cookie: string,
+  session: string,
+  message: string,
+  status: number,
+): Promise<void> {
   return requestJson(port, "POST", `/api/sessions/${session}/prompt`, cookie, { message }).then(
     (response) => {
-      if (response.status !== 202) {
+      if (response.status !== status) {
         throw new Error(`prompt failed: ${response.status} ${response.body}`);
       }
     },
@@ -291,4 +348,42 @@ function requestJson(
     headers: response.headers,
     body: await response.text(),
   }));
+}
+
+function captureSpawnHook(): string {
+  return `import cp from 'node:child_process';
+import { appendFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+const nativeSpawn = cp.spawn;
+cp.spawn = function capture(command, args, options) {
+  if (command === 'sudo' || command === process.env.OMP_BIN) {
+    appendFileSync(process.env.PROBE_TRACE, JSON.stringify({ command, args }) + '\\n');
+    return nativeSpawn(process.execPath, ['-e', 'process.exit(7)'], {
+      cwd: options.cwd,
+      env: options.env,
+      stdio: options.stdio,
+      shell: false,
+    });
+  }
+  return nativeSpawn(command, args, options);
+};
+syncBuiltinESMExports();
+`;
+}
+
+function compiledFixtureEnv(
+  scratchRoot: string,
+  port: number,
+  bin: string,
+  extra: Record<string, string>,
+): Record<string, string> {
+  return {
+    HOST: "127.0.0.1",
+    PORT: String(port),
+    DB_PATH: join(scratchRoot, "db", "dev.db"),
+    OMP_STATE_DIR: join(scratchRoot, "state"),
+    SANDBOX_ROOT: join(scratchRoot, "sandbox"),
+    OMP_BIN: bin,
+    ...extra,
+  };
 }

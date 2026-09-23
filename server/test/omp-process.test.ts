@@ -21,6 +21,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { assertSafeSudoPath } from "../src/core/process-path.js";
 import { type SpawnImpl, type SpawnOmpOpts, spawnOmp } from "../src/sessions/omp/process.js";
 import { recordedSpawn } from "./session-supervisor-helpers.js";
 
@@ -331,6 +332,54 @@ describe("spawnOmp spawn contract", () => {
     expect(call.env).not.toHaveProperty("LANG");
     expect(call.env).not.toHaveProperty("TMPDIR");
     expect(call.env).not.toHaveProperty("OMP_USER");
+  });
+
+  it("rejects unsafe PATH for sudo before mkdir and never runs a workspace sudo", async () => {
+    expect(() => assertSafeSudoPath("/usr/bin\0/bin")).toThrow();
+    for (const path of [
+      undefined,
+      "",
+      ":",
+      "/usr/bin:",
+      ":/usr/bin",
+      "/usr/bin::/bin",
+      "bin",
+      "/usr/bin:bin",
+    ]) {
+      const roots = makeRoots();
+      const marker = join(roots.root, "ran");
+      const decoy = join(roots.cwd, "sudo");
+      mkdirSync(roots.cwd, { recursive: true });
+      writeFileSync(
+        decoy,
+        `#!${process.execPath}\nimport{writeFileSync}from'node:fs';writeFileSync(${JSON.stringify(marker)},'ran');\n`,
+      );
+      chmodSync(decoy, 0o755);
+      const calls: SpawnCall[] = [];
+      await withContaminatedEnv({ PATH: path, LANG: undefined, TMPDIR: undefined }, async () => {
+        await expect(
+          spawnOmp(optsOf(roots, null, "omp"), capturingSpawn(roots, calls)),
+        ).rejects.toThrow();
+      });
+      expect(calls).toHaveLength(0);
+      expect(existsSync(marker)).toBe(false);
+      expect(existsSync(roots.home)).toBe(false);
+    }
+  });
+
+  it("keeps the direct spawn when PATH is absent and a workspace sudo exists", async () => {
+    const roots = makeRoots();
+    const marker = join(roots.root, "ran");
+    mkdirSync(roots.cwd, { recursive: true });
+    writeFileSync(
+      join(roots.cwd, "sudo"),
+      `#!${process.execPath}\nimport{writeFileSync}from'node:fs';writeFileSync(${JSON.stringify(marker)},'ran');\n`,
+    );
+    chmodSync(join(roots.cwd, "sudo"), 0o755);
+    const call = await capture(roots, null, { PATH: undefined });
+    expect(call.command).toBe(roots.bin);
+    expect(call.env.PATH).toBe("");
+    expect(existsSync(marker)).toBe(false);
   });
 });
 
