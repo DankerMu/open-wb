@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { connectSessionEvents } from "../src/features/chat/stream.js";
 import {
   assistantContent,
+  assistantSteps,
   CLOSED,
   CONNECTING,
   callableThenable,
@@ -427,5 +428,125 @@ describe("Chat stream recovery", () => {
     expect(source?.withCredentials).toBe(true);
     handle.close();
     expect(source?.closeCount).toBe(1);
+  });
+
+  it("delivers named step.start and step.end through the connector and resyncs a malformed step payload", async () => {
+    const observer = observeUnhandledRejections();
+    try {
+      const context = connectChat(chatSnapshot({ cursor: { epoch: 1, seq: 4 } }));
+      context.source.emitOpen();
+      context.loads[0]?.resolve(chatSnapshot({ cursor: { epoch: 1, seq: 4 } }));
+      await settle();
+
+      context.source.emitData("step.start", "1:4", {
+        messageId: 0,
+        stepId: 11,
+        name: "bash",
+        detail: '{"command":"echo workbuddy-smoke"}',
+      });
+      context.source.emitData("step.start", "1:5", {
+        messageId: 0,
+        stepId: 11,
+        name: "bash",
+        detail: '{"command":"echo workbuddy-smoke"}',
+      });
+      context.source.emitData("step.end", "1:6", {
+        messageId: 0,
+        stepId: 11,
+        status: "done",
+        detail: '{"output":"workbuddy-smoke"}',
+      });
+
+      expect(context.events).toEqual([
+        {
+          type: "step.start",
+          data: {
+            messageId: 0,
+            stepId: 11,
+            name: "bash",
+            detail: '{"command":"echo workbuddy-smoke"}',
+          },
+        },
+        {
+          type: "step.end",
+          data: {
+            messageId: 0,
+            stepId: 11,
+            status: "done",
+            detail: '{"output":"workbuddy-smoke"}',
+          },
+        },
+      ]);
+      expect(assistantSteps(context.state)).toEqual([
+        {
+          id: 11,
+          name: "bash",
+          detail: '{"output":"workbuddy-smoke"}',
+          status: "done",
+        },
+      ]);
+
+      context.source.emitNamed(
+        "step.end",
+        JSON.stringify({ messageId: 0, stepId: 11, status: "done" }),
+        "1:7",
+      );
+      expect(context.loads).toHaveLength(2);
+      expect(context.gaps).toBe(0);
+      expect(assistantSteps(context.state)).toEqual([
+        {
+          id: 11,
+          name: "bash",
+          detail: '{"output":"workbuddy-smoke"}',
+          status: "done",
+        },
+      ]);
+      context.loads[1]?.resolve(
+        chatSnapshot({ content: "recovered", cursor: { epoch: 1, seq: 7 } }),
+      );
+      await settle();
+      expect(assistantContent(context.state)).toBe("recovered");
+      expect(assistantSteps(context.state)).toEqual([]);
+      expect(observer.unhandled).toEqual([]);
+      context.handle.close();
+    } finally {
+      observer.stop();
+    }
+  });
+
+  it("keeps the successor recovery when a superseded loader rejects after abort", async () => {
+    const observer = observeUnhandledRejections();
+    const staleFailure = new Error("superseded load rejection");
+    try {
+      const context = connectChat(
+        chatSnapshot({ content: "prior", cursor: { epoch: 1, seq: 10 } }),
+      );
+      context.source.emitOpen();
+      expect(context.loads).toHaveLength(1);
+      context.source.emitGap();
+      expect(context.loads).toHaveLength(2);
+      expect(context.loads[0]?.signal.aborted).toBe(true);
+
+      context.loads[0]?.reject(staleFailure);
+      await settle();
+      expect(context.errors).toEqual([]);
+      expect(context.source.closeCount).toBe(0);
+      expect(context.snapshots).toHaveLength(0);
+
+      context.loads[1]?.resolve(
+        chatSnapshot({ content: "current", cursor: { epoch: 1, seq: 20 } }),
+      );
+      await settle();
+      expect(assistantContent(context.state)).toBe("current");
+      expect(context.snapshots).toHaveLength(1);
+      context.source.emitData("text.delta", "1:21", { messageId: 0, delta: "Z" });
+      expect(assistantContent(context.state)).toBe("currentZ");
+      expect(context.errors).toEqual([]);
+      expect(context.source.closeCount).toBe(0);
+      expect(observer.unhandled).toEqual([]);
+      context.handle.close();
+    } finally {
+      observer.stop();
+    }
   });
 });

@@ -275,3 +275,7 @@ export function connectChat(
 export function assistantContent(state: ChatState, messageId = 0) {
   return state.messages.find((message) => message.id === messageId)?.content;
 }
+
+export function assistantSteps(state: ChatState, messageId = 0) {
+  return state.messages.find((message) => message.id === messageId)?.steps;
+}
