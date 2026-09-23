@@ -13,7 +13,7 @@ import type { SessionStore } from "../src/sessions/store.js";
 import type { SessionSupervisor } from "../src/sessions/supervisor.js";
 import { TokenRegistry } from "../src/sessions/tokens.js";
 import { FIXED_NOW, fixedRuntime } from "./session-db-helpers.js";
-import { cookieFor } from "./session-rest-helpers.js";
+import { cookieFor, postPrompt } from "./session-rest-helpers.js";
 import { messageRows, sessionRow } from "./session-store-helpers.js";
 import {
   createRpcHarness,
@@ -63,8 +63,8 @@ export interface ControlledRuntime {
   children: FakeChild[];
 }
 
-export type EventSink = (sessionId: string, epoch: number, event: ChatEvent<number>) => void;
-export type ErrorSink = (error: Error) => void;
+type EventSink = (sessionId: string, epoch: number, event: ChatEvent<number>) => void;
+type ErrorSink = (error: Error) => void;
 export type ObservedEvent = { sessionId: string; epoch: number; event: ChatEvent<number> };
 
 export interface SupervisorApp {
@@ -74,6 +74,14 @@ export interface SupervisorApp {
   store: SessionStore;
   supervisor: SessionSupervisor;
   close(): Promise<void>;
+}
+
+export interface OpenSessionOptions {
+  tokens?: TokenRegistry;
+  prepare?: (db: DatabaseSync) => void;
+  onError?: ErrorSink;
+  onEvent?: EventSink;
+  configureApp?: (app: FastifyInstance) => void;
 }
 
 export function createRealFakeRuntime(
@@ -145,13 +153,11 @@ export function createControlledRuntime(
   };
 }
 
-function openSupervisorApp(input: {
+interface OpenSupervisorAppInput extends OpenSessionOptions {
   runtime: RuntimeOptions;
-  tokens?: TokenRegistry;
-  onError?: ErrorSink;
-  onEvent?: EventSink;
-  prepare?: (db: DatabaseSync) => void;
-}): SupervisorApp {
+}
+
+function openSupervisorApp(input: OpenSupervisorAppInput): SupervisorApp {
   const db = openDb(":memory:");
   input.prepare?.(db);
   const tokens = input.tokens ?? new TokenRegistry();
@@ -165,6 +171,7 @@ function openSupervisorApp(input: {
       ...(input.onEvent === undefined ? {} : { onEvent: input.onEvent }),
     },
   });
+  input.configureApp?.(app);
   const registered = app.sessions;
   return {
     app,
@@ -192,32 +199,16 @@ export interface RecordingWorld {
 
 export async function openBareSession(
   runtime: RuntimeOptions,
-  extra: {
-    tokens?: TokenRegistry;
-    prepare?: (db: DatabaseSync) => void;
-    onError?: ErrorSink;
-    onEvent?: EventSink;
-  } = {},
+  extra: OpenSessionOptions = {},
 ): Promise<{ fixture: SupervisorApp; cookie: string; session: string }> {
-  const fixture = openSupervisorApp({
-    runtime,
-    onError: extra.onError ?? (() => {}),
-    ...(extra.tokens === undefined ? {} : { tokens: extra.tokens }),
-    ...(extra.prepare === undefined ? {} : { prepare: extra.prepare }),
-    ...(extra.onEvent === undefined ? {} : { onEvent: extra.onEvent }),
-  });
+  const fixture = openSupervisorApp({ runtime, ...extra });
   const owned = await openOwnedSession(fixture);
   return { fixture, ...owned };
 }
 
 export async function openRecordingSession(
   runtime: RuntimeOptions,
-  extra: {
-    tokens?: TokenRegistry;
-    prepare?: (db: DatabaseSync) => void;
-    onError?: ErrorSink;
-    onEvent?: EventSink;
-  } = {},
+  extra: OpenSessionOptions = {},
 ): Promise<RecordingWorld> {
   const errors: Error[] = [];
   const events: ObservedEvent[] = [];
@@ -380,6 +371,123 @@ export function closeOnEof(child: FakeChild): void {
     child.endStdout();
     child.exit(0);
   });
+}
+
+export interface ControlledSession {
+  runtime: ControlledRuntime;
+  fixture: SupervisorApp;
+  cookie: string;
+  session: string;
+}
+
+export interface HeldPromptSession extends ControlledSession {
+  child: FakeChild;
+}
+
+export function createStartHeldRuntime(): ControlledRuntime {
+  let prompts = 0;
+  return createControlledRuntime((child) => {
+    closeOnEof(child);
+    child.onCommand("prompt", () => {
+      child.emitLine({ type: "agent_start" });
+      emitAssistantDelta(child, "Hello");
+      prompts += 1;
+      if (prompts > 1) {
+        child.emitLine({ type: "agent_end", messages: [], isTerminal: true });
+      }
+    });
+  });
+}
+
+function createManyDeltaRuntime(count: number, delta: string): ControlledRuntime {
+  return createControlledRuntime((child) => {
+    closeOnEof(child);
+    child.onCommand("prompt", () => {
+      child.emitLine({ type: "agent_start" });
+      for (let n = 0; n < count; n += 1) {
+        emitAssistantDelta(child, delta);
+      }
+    });
+  });
+}
+
+export function completeHeldTurn(child: { emitLine(frame: object): void }): void {
+  child.emitLine({ type: "agent_end", messages: [], isTerminal: true });
+}
+
+export async function waitForChild(runtime: ControlledRuntime): Promise<FakeChild> {
+  return waitFor(() => runtime.children[0], "controlled child");
+}
+
+export async function waitForContent(
+  fixture: SupervisorApp,
+  session: string,
+  content: string,
+): Promise<void> {
+  await waitFor(
+    () =>
+      fixture.store.getMessages(session, OWNER_ID)?.messages[1]?.content === content
+        ? true
+        : undefined,
+    `assistant content ${content}`,
+  );
+}
+
+export async function openStartHeldSession(): Promise<ControlledSession> {
+  const runtime = createStartHeldRuntime();
+  return { runtime, ...(await openBareSession(runtime.runtime)) };
+}
+
+export async function startHeldTurn(opened: ControlledSession, text = "held"): Promise<FakeChild> {
+  const response = await postPrompt(
+    opened.fixture.app,
+    opened.session,
+    opened.cookie,
+    JSON.stringify({ message: text }),
+  );
+  expect(response.statusCode).toBe(202);
+  const child = await waitForChild(opened.runtime);
+  await waitForContent(opened.fixture, opened.session, "Hello");
+  return child;
+}
+
+export async function openHeldPromptSession(text = "held"): Promise<HeldPromptSession> {
+  const opened = await openStartHeldSession();
+  return closeOnFixtureFailure(opened.fixture, async () => ({
+    ...opened,
+    child: await startHeldTurn(opened, text),
+  }));
+}
+
+export async function openBulkDeltaSession(
+  count: number,
+  delta: string,
+): Promise<ControlledSession> {
+  const runtime = createManyDeltaRuntime(count, delta);
+  const opened = { runtime, ...(await openBareSession(runtime.runtime)) };
+  return closeOnFixtureFailure(opened.fixture, async () => {
+    const response = await postPrompt(
+      opened.fixture.app,
+      opened.session,
+      opened.cookie,
+      JSON.stringify({ message: "bulk" }),
+    );
+    expect(response.statusCode).toBe(202);
+    await waitForContent(opened.fixture, opened.session, delta.repeat(count));
+    return opened;
+  });
+}
+
+async function closeOnFixtureFailure<T>(
+  fixture: SupervisorApp,
+  work: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    await fixture.close().catch(() => undefined);
+    throw error;
+  }
 }
 
 export async function waitForTurn(

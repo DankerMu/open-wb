@@ -1,11 +1,12 @@
 /**
- * Session module registration: store, supervisor, REST, and ordered teardown.
+ * Session module registration: store, supervisor, REST, SSE, and ordered teardown.
  */
 import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance } from "fastify";
 import type { ChatEvent } from "./events.js";
 import { registerSessionRoutes } from "./rest.js";
 import { createSessionStore, type SessionStore } from "./store.js";
+import { defaultSessionClock, registerSessionEventStream } from "./stream/sse.js";
 import { SessionSupervisor, type SessionSupervisorRuntime } from "./supervisor.js";
 import type { TokenRegistry } from "./tokens.js";
 
@@ -46,6 +47,11 @@ export function registerSessions(
   });
   store.reconcileOnStartup();
   registerSessionRoutes(app, { store, supervisor });
+  registerSessionEventStream(app, {
+    store,
+    supervisor,
+    clock: options.runtime.clock ?? defaultSessionClock(),
+  });
   app.addHook("preClose", (complete) => {
     void closeSessions(supervisor, store).then(
       () => {

@@ -3,10 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { postPrompt } from "./session-rest-helpers.js";
 import { messageRow } from "./session-store-helpers.js";
 import {
-  type ControlledRuntime,
   closeFixture,
   closeOnEof,
+  completeHeldTurn,
   createControlledRuntime,
+  createStartHeldRuntime,
   emitAssistantDelta,
   expectHistory,
   IDLE_MS,
@@ -16,6 +17,7 @@ import {
   requiredToken,
   type SupervisorApp,
   waitFor,
+  waitForChild,
   waitForTurn,
 } from "./session-supervisor-helpers.js";
 import { holdNextPromptWrite } from "./support/omp-rpc.js";
@@ -313,29 +315,6 @@ describe("SessionSupervisor generation streamCursor", () => {
     }
   });
 });
-
-function createStartHeldRuntime() {
-  let prompts = 0;
-  return createControlledRuntime((child) => {
-    closeOnEof(child);
-    child.onCommand("prompt", () => {
-      child.emitLine({ type: "agent_start" });
-      emitAssistantDelta(child, "Hello");
-      prompts += 1;
-      if (prompts > 1) {
-        child.emitLine({ type: "agent_end", messages: [], isTerminal: true });
-      }
-    });
-  });
-}
-
-function completeHeldTurn(child: { emitLine(frame: object): void }): void {
-  child.emitLine({ type: "agent_end", messages: [], isTerminal: true });
-}
-
-async function waitForChild(runtime: ControlledRuntime) {
-  return waitFor(() => runtime.children[0], "controlled child");
-}
 
 function assistantId(fixture: SupervisorApp, session: string): number {
   const assistant = fixture.store

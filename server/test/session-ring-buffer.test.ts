@@ -198,6 +198,22 @@ describe("RingBuffer", () => {
     expect(ring.sequence).toBe(3);
   });
 
+  it("returns the frozen latest retained record without allocating a replay array", () => {
+    const ring = new RingBuffer(3);
+    expect(ring.latest()).toBeUndefined();
+    ring.push(FIRST);
+    const first = ring.latest();
+    expect(first).toEqual({ id: "3:1", type: "turn.start", data: { messageId: 41 } });
+    ring.push(SECOND);
+    const second = ring.latest();
+    expect(second).toEqual({
+      id: "3:2",
+      type: "text.delta",
+      data: { messageId: 41, delta: "hello" },
+    });
+    expect(second).toBe(ring.latest());
+  });
+
   it("refreshes a running connection from the active turn.start through its successors", () => {
     const ring = new RingBuffer(6);
     ring.push({ type: "turn.start", data: { messageId: 1 } });
