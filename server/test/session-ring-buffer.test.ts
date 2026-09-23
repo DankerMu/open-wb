@@ -183,6 +183,21 @@ describe("RingBuffer", () => {
     expect(ring.since(null, { turnRunning: false })).toEqual({ mode: "fresh", events: [] });
   });
 
+  it("exposes the last assigned sequence without advancing it on reads", () => {
+    const ring = new RingBuffer(3);
+    expect(ring.sequence).toBe(0);
+    expect(ring.push(FIRST)).toBe("3:1");
+    expect(ring.sequence).toBe(1);
+    expect(ring.push(SECOND)).toBe("3:2");
+    expect(ring.sequence).toBe(2);
+    expect(ring.since("3:1", { turnRunning: false }).events.map((event) => event.id)).toEqual([
+      "3:2",
+    ]);
+    expect(ring.sequence).toBe(2);
+    expect(ring.push({ type: "turn.end", data: { messageId: 41, status: "done" } })).toBe("3:3");
+    expect(ring.sequence).toBe(3);
+  });
+
   it("refreshes a running connection from the active turn.start through its successors", () => {
     const ring = new RingBuffer(6);
     ring.push({ type: "turn.start", data: { messageId: 1 } });

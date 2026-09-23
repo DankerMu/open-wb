@@ -37,7 +37,7 @@ interface MessageView {
   steps: StepView[];
 }
 
-interface SessionMessageTree {
+export interface SessionMessageTree {
   session: SessionView;
   messages: MessageView[];
 }
@@ -226,10 +226,10 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
       }
       const views: MessageView[] = [];
       for (const message of messages) {
-        views.push({
-          ...toMessageView(message, decoder),
-          steps: stepsByMessage.get(message.id) ?? [],
-        });
+        const view = toMessageView(message, decoder);
+        const turn = currentTurn(activeTurns, activeSessions, message.id);
+        view.content += turn !== undefined && turn.pending.length > 0 ? turn.pending.join("") : "";
+        views.push({ ...view, steps: stepsByMessage.get(message.id) ?? [] });
       }
       return { session: toSessionView(session, decoder), messages: views };
     },

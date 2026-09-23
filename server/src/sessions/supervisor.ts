@@ -13,7 +13,13 @@ import {
   type SessionRuntimeOpts,
 } from "./omp/runtime.js";
 import type { SessionStore } from "./store.js";
+import { RingBuffer } from "./stream/ring-buffer.js";
 import type { TokenRegistry } from "./tokens.js";
+
+export interface StreamCursor {
+  epoch: number;
+  seq: number | null;
+}
 
 export interface SessionSupervisorRuntime {
   bin: string;
@@ -51,10 +57,20 @@ interface FlushFailure {
   error: unknown;
 }
 
+interface Generation {
+  epoch: number;
+  ring: RingBuffer;
+  revoked: boolean;
+  dispatchCount: number;
+  pumpCount: number;
+  sealed: boolean;
+}
+
 interface Slot {
   sessionId: string;
   runtime: SessionRuntime;
   epoch: number;
+  generation: Generation | undefined;
   claimedAssistantId: number | undefined;
   pump: Promise<void> | undefined;
   retiring: Promise<void> | undefined;
@@ -94,6 +110,16 @@ export class SessionSupervisor {
     return work.finally(() => {
       this.#admissions.delete(work);
     });
+  }
+
+  streamCursor(sessionId: string): StreamCursor {
+    const state = this.#store.runtimeState(sessionId);
+    const epoch = state?.streamEpoch ?? 0;
+    const generation = this.#slots.get(sessionId)?.generation;
+    if (generation === undefined || generation.sealed) {
+      return { epoch, seq: null };
+    }
+    return { epoch: generation.epoch, seq: generation.ring.sequence };
   }
 
   async shutdown(): Promise<void> {
@@ -181,6 +207,7 @@ export class SessionSupervisor {
       sessionId,
       runtime: undefined as unknown as SessionRuntime,
       epoch: 0,
+      generation: undefined,
       claimedAssistantId: undefined,
       pump: undefined,
       retiring: undefined,
@@ -216,6 +243,10 @@ export class SessionSupervisor {
   }
 
   async #bindDispatch(slot: Slot, text: string, assistantMessageId: number): Promise<void> {
+    const generation = slot.generation;
+    if (generation !== undefined) {
+      generation.dispatchCount += 1;
+    }
     const stream = slot.runtime.prompt(text);
     let receipt: PromptDispatchReceipt;
     try {
@@ -223,20 +254,29 @@ export class SessionSupervisor {
     } catch (error) {
       const acquisition = slot.acquisitionFault;
       slot.acquisitionFault = undefined;
+      const live = slot.generation ?? generation;
+      this.#releaseDispatch(slot, live);
       await this.#abortPreProgress(slot, stream);
       throw acquisition ?? error;
     }
     try {
       this.#store.setSessionFile(slot.sessionId, receipt.sessionFile);
     } catch (error) {
+      const live = slot.generation ?? generation;
+      this.#releaseDispatch(slot, live);
       await this.#abortPreProgress(slot, stream);
       throw error;
     }
-    const pump = this.#pump(slot, stream, assistantMessageId, receipt.requestId);
+    const pumpGeneration = slot.generation;
+    if (pumpGeneration !== undefined) {
+      pumpGeneration.pumpCount += 1;
+    }
+    const pump = this.#pump(slot, stream, assistantMessageId, receipt.requestId, pumpGeneration);
     slot.pump = pump;
     this.#pumps.add(pump);
     void pump.finally(() => {
       this.#pumps.delete(pump);
+      this.#releasePump(slot, pumpGeneration);
       if (slot.pump === pump) {
         slot.pump = undefined;
         this.#releaseClaim(slot, assistantMessageId);
@@ -272,6 +312,7 @@ export class SessionSupervisor {
     stream: AsyncIterable<OmpFrame>,
     assistantMessageId: number,
     requestId: string,
+    generation: Generation | undefined,
   ): Promise<void> {
     let mapper = createEventState({ messageId: assistantMessageId, promptRequestId: requestId });
     const toolIds = new Map<string, number>();
@@ -288,7 +329,16 @@ export class SessionSupervisor {
         }
         const applied = applyFrame(mapper, frame);
         mapper = applied.state;
-        if (!(await this.#commit(slot, assistantMessageId, applied.events, toolIds, nextOrdinal))) {
+        if (
+          !(await this.#commit(
+            slot,
+            assistantMessageId,
+            applied.events,
+            toolIds,
+            nextOrdinal,
+            generation,
+          ))
+        ) {
           return;
         }
       }
@@ -306,6 +356,7 @@ export class SessionSupervisor {
           [{ type: "turn.end", data: { messageId: assistantMessageId, status: "done" } }],
           toolIds,
           nextOrdinal,
+          generation,
         ))
       ) {
         return;
@@ -313,7 +364,14 @@ export class SessionSupervisor {
     } catch (error) {
       if (!slot.infraFaulted && !mapper.ended) {
         const applied = applyFailure(mapper, asError(error).message);
-        await this.#commit(slot, assistantMessageId, applied.events, toolIds, nextOrdinal);
+        await this.#commit(
+          slot,
+          assistantMessageId,
+          applied.events,
+          toolIds,
+          nextOrdinal,
+          generation,
+        );
       }
       if (!slot.infraFaulted) {
         await this.#retireSlot(slot);
@@ -327,6 +385,7 @@ export class SessionSupervisor {
     events: ChatEvent<string>[],
     toolIds: Map<string, number>,
     nextOrdinal: () => number,
+    generation: Generation | undefined,
   ): Promise<boolean> {
     for (const event of events) {
       try {
@@ -337,7 +396,7 @@ export class SessionSupervisor {
           toolIds,
           nextOrdinal,
         );
-        if (published !== undefined && !(await this.#publish(slot, published))) {
+        if (published !== undefined && !(await this.#publish(slot, published, generation))) {
           return false;
         }
       } catch (error) {
@@ -350,12 +409,19 @@ export class SessionSupervisor {
     return true;
   }
 
-  async #publish(slot: Slot, event: ChatEvent<number>): Promise<boolean> {
+  async #publish(
+    slot: Slot,
+    event: ChatEvent<number>,
+    generation: Generation | undefined,
+  ): Promise<boolean> {
+    if (generation !== undefined && !generation.sealed) {
+      generation.ring.push(event);
+    }
     if (this.#onEvent === undefined) {
       return true;
     }
     try {
-      const returned = this.#onEvent(slot.sessionId, slot.epoch, event);
+      const returned = this.#onEvent(slot.sessionId, generation?.epoch ?? slot.epoch, event);
       const violation = synchronousSinkViolation(returned);
       if (violation !== undefined) {
         throw violation;
@@ -379,17 +445,70 @@ export class SessionSupervisor {
           slot.acquisitionFault = error;
           throw error;
         }
+        const generation: Generation = {
+          epoch: slot.epoch,
+          ring: new RingBuffer(slot.epoch),
+          revoked: false,
+          dispatchCount: 1,
+          pumpCount: 0,
+          sealed: false,
+        };
+        slot.generation = generation;
         try {
           return this.#tokens.issue(sessionId);
         } catch (error) {
           slot.acquisitionFault = error;
+          this.#releaseDispatch(slot, generation);
+          generation.revoked = true;
+          this.#sealGeneration(slot, generation);
           throw error;
         }
       },
-      revoke: (sessionId: string) => {
-        this.#tokens.revoke(sessionId);
+      revoke: (_sessionId: string) => {
+        const generation = slot.generation;
+        if (generation !== undefined) {
+          generation.revoked = true;
+          this.#sealGeneration(slot, generation);
+        }
+        this.#tokens.revoke(slot.sessionId);
       },
     };
+  }
+
+  #releaseDispatch(slot: Slot, generation: Generation | undefined): void {
+    if (generation === undefined) {
+      return;
+    }
+    if (generation.dispatchCount > 0) {
+      generation.dispatchCount -= 1;
+    }
+    this.#sealGeneration(slot, generation);
+  }
+
+  #releasePump(slot: Slot, generation: Generation | undefined): void {
+    if (generation === undefined) {
+      return;
+    }
+    if (generation.pumpCount > 0) {
+      generation.pumpCount -= 1;
+    }
+    if (generation.dispatchCount > 0) {
+      generation.dispatchCount -= 1;
+    }
+    this.#sealGeneration(slot, generation);
+  }
+
+  #sealGeneration(slot: Slot, generation: Generation): void {
+    if (generation.sealed || generation.dispatchCount > 0 || generation.pumpCount > 0) {
+      return;
+    }
+    if (!generation.revoked && slot.retiring === undefined) {
+      return;
+    }
+    generation.sealed = true;
+    if (slot.generation === generation) {
+      slot.generation = undefined;
+    }
   }
 
   async #retireSlot(slot: Slot): Promise<void> {
@@ -399,6 +518,11 @@ export class SessionSupervisor {
     slot.retiring ??= slot.runtime.shutdown().catch((error: unknown) => {
       this.#retain(asError(error));
     });
+    const generation = slot.generation;
+    if (generation !== undefined) {
+      generation.revoked = true;
+      this.#sealGeneration(slot, generation);
+    }
     await slot.retiring;
     if (this.#slots.get(slot.sessionId) === slot) {
       this.#slots.delete(slot.sessionId);

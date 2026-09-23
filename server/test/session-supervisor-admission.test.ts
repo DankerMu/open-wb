@@ -8,6 +8,7 @@ import {
   createControlledRuntime,
   createRealFakeRuntime,
   expectCompensatedIdleSession,
+  expectHistory,
   expectRunningAdmission,
   expectSettled,
   openAdmittedSession,
@@ -46,6 +47,7 @@ describe("SessionSupervisor admission and pre-progress metadata faults", () => {
       );
       await armedHold.entered;
       expect(firstObservation.outcome).toBe("pending");
+      await expectHistory(fixture, world.cookie, session, { epoch: 1, seq: 0 });
 
       const duplicate = fixture.supervisor.prompt(session, "duplicate");
       const duplicateObservation = observePromise(duplicate);
@@ -61,6 +63,11 @@ describe("SessionSupervisor admission and pre-progress metadata faults", () => {
       expect(runtime.calls).toHaveLength(1);
       expect(runtime.children).toHaveLength(1);
       expectRunningAdmission(fixture, session, requiredToken(runtime.calls[0]?.token), admitted);
+      await waitFor(
+        () => (fixture.supervisor.streamCursor(session).seq === 1 ? true : undefined),
+        "turn.start recorded",
+      );
+      await expectHistory(fixture, world.cookie, session, { epoch: 1, seq: 1 });
     } finally {
       await closeFixture(fixture);
     }

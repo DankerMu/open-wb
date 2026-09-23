@@ -18,6 +18,7 @@ import {
   emitAssistantDelta,
   eventsFor,
   expectCompensatedIdleSession,
+  expectHistory,
   type ObservedEvent,
   OWNER_ID,
   openBareSession,
@@ -81,6 +82,7 @@ describe("SessionSupervisor adapter and pre-progress fault provenance", () => {
       await expect(fixture.supervisor.prompt(session, "registry provenance")).rejects.toBe(
         tokens.issueFailure,
       );
+      await expectHistory(fixture, cookie, session, { epoch: 1, seq: null });
       expect(fixture.store.rollbackPrompt(direct.assistantMessageId)).toBe(true);
 
       const response = await postPrompt(
@@ -90,6 +92,7 @@ describe("SessionSupervisor adapter and pre-progress fault provenance", () => {
         JSON.stringify({ message: "registry compensation" }),
       );
       expect(response.statusCode).toBe(500);
+      await expectHistory(fixture, cookie, session, { epoch: 2, seq: null });
       expect(response.json()).toEqual(INTERNAL_ERROR_ENVELOPE);
       expect(response.payload).not.toContain(tokens.issueFailure.message);
       expect(messageRows(fixture.db).filter((row) => row.session_id === session)).toEqual([]);
@@ -364,6 +367,7 @@ describe("SessionSupervisor retirement and observer containment", () => {
       );
       expect(independent.statusCode).toBe(202);
       await waitForTurn(fixture, sessionB, "done");
+      await expectHistory(fixture, cookie, sessionB, { epoch: 1, seq: 2 });
       expect(runtime.calls).toHaveLength(2);
       expect(replacementObservation.outcome).toBe("pending");
 
@@ -372,6 +376,7 @@ describe("SessionSupervisor retirement and observer containment", () => {
       const replacementResponse = await replacement;
       expect(replacementResponse.statusCode).toBe(202);
       await waitForTurn(fixture, sessionA, "done");
+      await expectHistory(fixture, cookie, sessionA, { epoch: 2, seq: 2 });
       const replacementCall = requiredCall(runtime.calls, 2);
       const replacementToken = requiredToken(replacementCall.token);
       expect(replacementToken).not.toBe(retiredToken);
@@ -381,6 +386,7 @@ describe("SessionSupervisor retirement and observer containment", () => {
 
       firstChild.nativeExit(9);
       expect(fixture.tokens.lookup(replacementToken)).toBe(sessionA);
+      await expectHistory(fixture, cookie, sessionA, { epoch: 2, seq: 2 });
     } finally {
       await fixture?.close();
     }

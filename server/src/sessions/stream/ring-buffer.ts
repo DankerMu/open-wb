@@ -33,6 +33,10 @@ export class RingBuffer {
     this.#epoch = streamEpoch;
   }
 
+  get sequence(): number {
+    return this.#nextSeq - 1;
+  }
+
   push(event: ChatEvent<number>): string {
     const seq = this.#nextSeq;
     const id = `${this.#epoch}:${seq}`;
