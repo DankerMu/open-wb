@@ -70,8 +70,14 @@ ui-walk: ## Playwright UI 走查（只消费已运行服务；不 build/start/st
 omp-fetch: ## 拉取官方 omp v18.0.10 到 var/omp/omp（SHA256 校验；已校验则跳过）
 	bash scripts/omp-fetch.sh
 
-smoke-live: override MODEL_UPSTREAM_BASE_URL := $(value MODEL_UPSTREAM_BASE_URL)
-smoke-live: override MODEL_UPSTREAM_API_KEY := $(value MODEL_UPSTREAM_API_KEY)
+ifneq ($(origin MODEL_UPSTREAM_BASE_URL),undefined)
+override MODEL_UPSTREAM_BASE_URL := $(value MODEL_UPSTREAM_BASE_URL)
+export MODEL_UPSTREAM_BASE_URL
+endif
+ifneq ($(origin MODEL_UPSTREAM_API_KEY),undefined)
+override MODEL_UPSTREAM_API_KEY := $(value MODEL_UPSTREAM_API_KEY)
+export MODEL_UPSTREAM_API_KEY
+endif
 smoke-live: ## 手动真实上游冒烟（只消费已运行服务；缺配置先失败；缺 hurl 显式失败并打印安装指引 https://hurl.dev/docs/installation.html）
 	@[ -n "$${MODEL_UPSTREAM_BASE_URL}" ] || { echo "错误：未设置 MODEL_UPSTREAM_BASE_URL" >&2; exit 1; }
 	@[ -n "$${MODEL_UPSTREAM_API_KEY}" ] || { echo "错误：未设置 MODEL_UPSTREAM_API_KEY" >&2; exit 1; }
