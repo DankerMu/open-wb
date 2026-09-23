@@ -13,12 +13,20 @@ import {
   type SessionRuntimeOpts,
 } from "./omp/runtime.js";
 import type { SessionStore } from "./store.js";
-import { RingBuffer } from "./stream/ring-buffer.js";
+import { type RetainedEvent, RingBuffer, type RingRead } from "./stream/ring-buffer.js";
 import type { TokenRegistry } from "./tokens.js";
 
 export interface StreamCursor {
   epoch: number;
   seq: number | null;
+}
+
+export type SessionStreamLiveHandler = (event: RetainedEvent) => void;
+
+export interface SessionStreamSubscription {
+  mode: "replay" | "gap" | "fresh";
+  replay: RetainedEvent[];
+  unsubscribe(): void;
 }
 
 export interface SessionSupervisorRuntime {
@@ -87,6 +95,7 @@ export class SessionSupervisor {
     | ((sessionId: string, epoch: number, event: ChatEvent<number>) => void)
     | undefined;
   readonly #slots = new Map<string, Slot>();
+  readonly #subscribers = new Map<string, Set<SessionStreamLiveHandler>>();
   readonly #claims = new Map<number, Slot>();
   readonly #admissions = new Set<Promise<void>>();
   readonly #pumps = new Set<Promise<void>>();
@@ -121,8 +130,43 @@ export class SessionSupervisor {
     return { epoch: state?.streamEpoch ?? 0, seq: null };
   }
 
+  subscribe(
+    sessionId: string,
+    lastEventId: string | null,
+    deliver: SessionStreamLiveHandler,
+  ): SessionStreamSubscription {
+    if (this.#closed) {
+      return {
+        mode: "fresh",
+        replay: [],
+        unsubscribe() {},
+      };
+    }
+    const listeners = this.#listenersFor(sessionId);
+    listeners.add(deliver);
+    let replay: RingRead;
+    try {
+      replay = this.#readReplay(sessionId, lastEventId);
+    } catch (error) {
+      this.#removeListener(sessionId, deliver);
+      throw error;
+    }
+    return {
+      mode: replay.mode,
+      replay: replay.events,
+      unsubscribe: () => {
+        this.#removeListener(sessionId, deliver);
+      },
+    };
+  }
+
+  sessionStreamSubscriberCount(sessionId: string): number {
+    return this.#subscribers.get(sessionId)?.size ?? 0;
+  }
+
   async shutdown(): Promise<void> {
     this.#closed = true;
+    this.#subscribers.clear();
     const retirements: Promise<void>[] = [];
     for (const slot of this.#slots.values()) {
       retirements.push(this.#retireSlot(slot));
@@ -415,6 +459,10 @@ export class SessionSupervisor {
   ): Promise<boolean> {
     if (generation !== undefined && !generation.sealed) {
       generation.ring.push(event);
+      const recorded = generation.ring.latest();
+      if (recorded !== undefined) {
+        this.#fanout(slot.sessionId, recorded);
+      }
     }
     if (this.#onEvent === undefined) {
       return true;
@@ -431,6 +479,53 @@ export class SessionSupervisor {
       this.#retain(asError(error));
       await this.#retireSlot(slot);
       return false;
+    }
+  }
+
+  #readReplay(sessionId: string, lastEventId: string | null): RingRead {
+    const generation = this.#slots.get(sessionId)?.generation;
+    const turnRunning = this.#store.runtimeState(sessionId)?.activeTurn !== null;
+    if (generation === undefined || generation.sealed) {
+      if (lastEventId !== null || turnRunning) {
+        return { mode: "gap", events: [] };
+      }
+      return { mode: "fresh", events: [] };
+    }
+    return generation.ring.since(lastEventId, { turnRunning });
+  }
+
+  #listenersFor(sessionId: string): Set<SessionStreamLiveHandler> {
+    const existing = this.#subscribers.get(sessionId);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const created = new Set<SessionStreamLiveHandler>();
+    this.#subscribers.set(sessionId, created);
+    return created;
+  }
+
+  #removeListener(sessionId: string, deliver: SessionStreamLiveHandler): void {
+    const listeners = this.#subscribers.get(sessionId);
+    if (listeners === undefined) {
+      return;
+    }
+    listeners.delete(deliver);
+    if (listeners.size === 0) {
+      this.#subscribers.delete(sessionId);
+    }
+  }
+
+  #fanout(sessionId: string, event: RetainedEvent): void {
+    const listeners = this.#subscribers.get(sessionId);
+    if (listeners === undefined) {
+      return;
+    }
+    for (const deliver of [...listeners]) {
+      try {
+        deliver(event);
+      } catch {
+        this.#removeListener(sessionId, deliver);
+      }
     }
   }
 

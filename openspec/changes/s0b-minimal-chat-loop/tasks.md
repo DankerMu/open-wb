@@ -41,11 +41,11 @@ Minimal mergeable slice: 3.1 迁移单独可合并保绿（独立 SQL + 形态�
 
 ## 4. chat-stream
 
-- [x] 4.1 #91/PR212 merged：固定1000条epoch/seq环形缓冲、canonical安全整数cursor、replay/gap/fresh、当前active turn.start刷新与snapshot隔离。用户确认min−1边界：保留2..1001时cursor1回放，cursor0 gap；1002条后cursor1 gap。13新增/1138服务端测试、独立compiled5cases及6400push/4046check多轮wrap、4候选mutants RED/恢复稳定性通过；compact首轮clean、同SHA CI八项全绿。SETUP/已GREEN的TDD偏离与alias测试修订留痕；SSE接线、epoch实例归属/退出丢弃仍归4.2/#103。
-- [ ] 4.2 `server/src/sessions/stream/sse.ts` + 挂入 `registerSessions`：`GET /api/sessions/:id/events`（头部、帧格式、keepalive 可注入计时、多订阅扇出、断开清理、404 先于任何帧）+ `app.inject()` raw stream 单测（断线回放/缺口/刷新中重放/双订阅）+ 对完整装配 app 断言该路由存在
+- [x] 4.1 #91/PR212 merged：固定1000条epoch/seq环形缓冲、canonical安全整数cursor、replay/gap/fresh、当前active turn.start刷新与snapshot隔离。用户确认min−1边界：保留2..1001时cursor1回放，cursor0 gap；1002条后cursor1 gap。13新增/1138服务端测试、独立compiled5cases及6400push/4046check多轮wrap、4候选mutants RED/恢复稳定性通过；compact首轮clean、同SHA CI八项全绿。SETUP/已GREEN的TDD偏离与alias测试修订留痕；SSE接线见4.2/#103，epoch实例归属/排空封口已由#214补齐。
+- [x] 4.2 #103 本地实现与验收完成，源码review/CI及独立归档门禁见 s0b-session-sse：真实owner GET events200、立即HTTP头、canonical帧/空id gap、同步ring订阅回放、双订阅、15s heartbeat与断开隔离；初始回放背压drain续传、实时背压断开重连、物理响应所有权与late-attach关闭。67files/1203tests，真实HTTP/native1000条回放及20响应清理、独立late/gap反例、7错误候选RED/恢复GREEN、5稳定性和22条204/214兼容probe通过。generation ring/快照封口由#214提供，不新增计数器；浏览器消费仍归5.x。
 
-Suggested fixture level: compact - 缓冲与 SSE 是纯协议面，inject 单 seam 可证；不触 Critical Path
-Minimal mergeable slice: 4.1 环形缓冲单独可合并保绿（纯逻辑+测试）；4.2 依赖 4.1、3.6
+Suggested fixture level: 4.1 compact；4.2 expanded — #204/#214后的真实HTTP、generation排空、背压与preClose跨层状态机；inject单面不足，需原生/真实TCP证据与白盒agent审查。
+Minimal mergeable slice: 4.1 环形缓冲单独可合并保绿（纯逻辑+测试）；4.2 依赖4.1、3.6及已合并的#204/#214，端点与实际装配/生命周期原子交付。
 
 ## 5. chat-web
 

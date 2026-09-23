@@ -37,6 +37,13 @@ export class RingBuffer {
     return this.#nextSeq - 1;
   }
 
+  latest(): RetainedEvent | undefined {
+    if (this.#count === 0) {
+      return undefined;
+    }
+    return this.#slots[(this.#head - 1 + CAPACITY) % CAPACITY];
+  }
+
   push(event: ChatEvent<number>): string {
     const seq = this.#nextSeq;
     const id = `${this.#epoch}:${seq}`;

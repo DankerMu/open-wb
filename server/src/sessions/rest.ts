@@ -17,6 +17,10 @@ export interface SessionSupervisorPort {
   streamCursor(sessionId: string): StreamCursor;
 }
 
+export interface SessionOwnerStore {
+  getMessages(sessionId: string, ownerId: string): SessionMessageTree | null;
+}
+
 interface SessionRestDependencies {
   store: SessionStore;
   supervisor: SessionSupervisorPort;
@@ -63,6 +67,20 @@ const noStoreSessionResponse: onRequestHookHandler = (_request, reply, done) => 
   done();
 };
 
+export const noStoreSessionHeaders: onRequestHookHandler = noStoreSessionResponse;
+
+export function requireOwnedSession(
+  store: SessionOwnerStore,
+  request: FastifyRequest<{ Params: SessionIdParams }>,
+): SessionMessageTree {
+  const principal = currentPrincipal(request);
+  const tree = store.getMessages(request.params.id, principal.id);
+  if (tree === null) {
+    throw new HttpError("not_found");
+  }
+  return tree;
+}
+
 export function registerSessionRoutes(
   app: FastifyInstance,
   dependencies: SessionRestDependencies,
@@ -75,11 +93,7 @@ export function registerSessionRoutes(
     RawReplyDefaultExpression<RawServerDefault>,
     { Params: SessionIdParams }
   > = (request, _reply, payload, done) => {
-    const principal = currentPrincipal(request);
-    const tree = dependencies.store.getMessages(request.params.id, principal.id);
-    if (tree === null) {
-      throw new HttpError("not_found");
-    }
+    const tree = requireOwnedSession(dependencies.store, request);
     const streamCursor = dependencies.supervisor.streamCursor(request.params.id);
     authorizedHistory.set(request, { tree, streamCursor });
     done(null, payload);
