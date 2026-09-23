@@ -49,11 +49,11 @@ Minimal mergeable slice: 4.1 环形缓冲单独可合并保绿（纯逻辑+测�
 
 ## 5. chat-web
 
-- [ ] 5.1 `web/src/lib/api.ts` 增四方法与 409/502 解析 + 单测
-- [ ] 5.2 `web/src/features/chat/stream.ts`：`applyChatEvent` 纯归约器（含 `turn.start` 重置、`error` 文案）+ `connectSessionEvents`（注入 `EventSourceCtor`、`replay.gap` 重载、关闭时机）+ 单测
+- [x] 5.1 #92/PR234 实现并经 PR238 独立归档：四个类型化 API、完整正文与 nullable streamCursor、原有401/错误合同；101新增API测试，最终web17files/406tests，全套静态/类型/build/drift及源码与归档各自CI八项通过。round2 clean、1fixpass，空列表/空title错误候选已验证；源码最终仅API/配对测试/fixture，上游#233/#237的CI修复原样集成。
+- [ ] 5.2 `web/src/features/chat/stream.ts`：纯归约器 + 注入 EventSource 连接器；完整快照/游标恢复、每次open/gap同步、1000事件队列及关闭/替代fence，真实Chromium接线证据；具体fixture见 s0b-session-events-client。
 - [ ] 5.3 `web/src/features/chat/page.tsx` + 路由接线（`/` 换为 ChatPage、`routeManifest` 描述更新、`?session=` 参数、**同步更新 `web/test/routes.test.tsx` 对 `/` 的占位断言**）：列表/新建/composer/消息区/步骤卡/状态徽章/错误内联 + jsdom 测试（mock fetch + 假 EventSource 一次流式对话、刷新恢复、错误提示）
 
-Suggested fixture level: compact - 纯前端展示与归约，jsdom 单 seam；服务端契约以 spec 信封与事件集为 oracle（mock）
+Suggested fixture level: 5.1 expanded（公共API/parser，已归档）；5.2 expanded（#214异步恢复/ordering/lifecycle及已复现首次REST→SSE窗口）；5.3 按页面/认证/路由影响评估，不以纯jsdom单面代替真实边界。
 Minimal mergeable slice: 5.1 api 扩展单独可合并保绿（四方法有配对测试即非死代码——knip 以测试 import 计）；5.2 归约器与连接器独立可合并；5.3 依赖 5.1、5.2
 
 ## 6. chat-harness

@@ -27,6 +27,11 @@
 
 ### Requirement: 事件流消费与续流
 `connectSessionEvents(id, {EventSourceCtor})` SHALL 用注入的 `EventSource` 打开 `/api/sessions/:id/events`（`withCredentials`），把未被快照覆盖的帧交给纯归约器 `applyChatEvent(state, event)`；页面加载顺序 SHALL 为先 `getMessages` 再打开连接，并传入初始快照边界。收到 `replay.gap` SHALL 缓冲到达事件并重新加载完整快照；只在当前未关闭、未被更新请求替代的恢复任务中安装快照，再按到达顺序过滤/应用队列。epoch 小于快照 epoch 的事件 SHALL 丢弃；同 epoch 且快照 seq 为 null 时全部丢弃，否则丢弃 seq≤快照 seq；更高 epoch 与同 epoch 的后继事件 SHALL 继续消费。该规则适用于全部数据事件，避免旧 turn.start 清空快照。加载期间再次出现 gap 或队列溢出 SHALL 重新同步，不静默丢失后继续追加。切换会话、卸载、未登录 SHALL 关闭连接并使在途恢复结果失效。gap 控制帧的空 id 重置浏览器续流游标；数据帧自动重连仍由 EventSource 携带 Last-Event-ID。
+每次 EventSource `open`（含首次及自动重连）SHALL 同样缓冲并同步完整快照，补齐初次REST读取后、订阅前已经完成而不被fresh订阅回放的回合。加载与同步安装由显式loadSnapshot/onSnapshot合同交接，onGap仅作真实gap通知；恢复队列上限1000条，溢出须废弃旧恢复并重新同步。业务`event:error` MessageEvent与原生网络error Event SHALL 区分，临时网络断开不伪造消息失败。具体恢复/回调所有权见 s0b-session-events-client。
+
+#### Scenario: 首次订阅前回合已完成
+- WHEN 初始快照为running/1:1，回合在fresh订阅前完成为done/X/1:3且订阅无回放
+- THEN open后的完整快照同步补齐done/X，不遗留旧running视图
 
 #### Scenario: 缺口重载
 - WHEN 快照为2048字符、游标1:1002，重载期间排队的1048字符 delta 为1:1002、后续 Z 为1:1003

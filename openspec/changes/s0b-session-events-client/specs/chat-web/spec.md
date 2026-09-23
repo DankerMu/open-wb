@@ -1,0 +1,43 @@
+## ADDED Requirements
+
+### Requirement: 纯会话视图归约
+`chatStateFromSnapshot` SHALL 从完整消息快照生成有序聊天视图，不编造 SSE 缺失的时间戳或 ordinal。`applyChatEvent(state,event)` SHALL 为确定性的纯函数，只复制改变的分支、不修改输入；未知事件类型 SHALL 保持原状态。
+归约器 SHALL 处理服务端六类事件：turn.start 重置对应 assistant 正文/步骤/错误并置 running；text.delta 原样追加；step.start 按 messageId 内的 stepId 新建 running 步骤且不重复；step.end 更新已有步骤状态和 detail；error 将对应 assistant 标记 failed 并保存原始文案，但会话保持 running 等待 turn.end；turn.end 将消息、会话和仍 running 的步骤置为其 done/failed 状态。不存在的 assistant 可按消息事件补建；不得重写 user 消息。未知 step.end 不得编造缺失的步骤名称。没有先前 turn.start 或 error 的终态 SHALL 有效。
+
+#### Scenario: 流式归约与重置
+- WHEN 对初始状态应用 turn.start、step.start(bash)、text.delta×3、step.end(done,detail)、turn.end(done)
+- THEN 得到完整正文、一条 done bash 步骤和 done 状态，输入及未改分支不被修改
+- WHEN 再次对该 assistant 应用 turn.start
+- THEN 仅该消息正文、步骤、错误清空并回到 running
+
+#### Scenario: 无 start 的合法终态与失败
+- WHEN 接收本地完成回合的单独 turn.end(done)，或 agent_start 之前的 error 然后 turn.end(failed)
+- THEN 对应 assistant 视图存在并进入正确终态；错误文案原样保留，error 本身不提前结束会话生成状态
+- WHEN 快照已有步骤随后收到 step.end
+- THEN 更新同一 messageId/stepId 的步骤而不是重复创建
+
+### Requirement: 事件流消费与续流
+`connectSessionEvents` SHALL 使用注入的 EventSourceCtor 建立编码 sessionId 的同源 events URL，并设置 withCredentials:true。调用方先取得初始完整快照并传入 initialCursor；连接器 SHALL 提供 close，并通过 loadSnapshot(signal)、同步 onSnapshot/onEvent、可选 onGap 和 onError 管理恢复与错误。API 方法和页面由其他模块拥有。
+连接器 SHALL 从命名 MessageEvent 的 data 解码负载、从 lastEventId 读取 canonical 安全整数 epoch:seq；六类数据事件均经过同一游标过滤。原生传输 error 不得被当作业务 error：CONNECTING 时保留状态并交给原生自动重连，CLOSED 时关闭并报告，不推断 HTTP 状态。已知事件的非法 payload/id SHALL 触发重新同步，未知事件类型忽略。
+每次 open（含首次连接和自动重连）、replay.gap 或1000条待处理数据队列溢出 SHALL 开启新的完整快照恢复；gap 额外调用 onGap。恢复期间排队，并以 generation/AbortController 使旧加载失效；只有仍有效且属于当前会话、未倒退的快照可安装。安装后丢弃旧 epoch，同 epoch 的 seq:null 覆盖整代，否则丢弃 seq≤边界，仅按到达顺序消费后继；已经成功交付的 watermark 继续去重。过滤包含 turn.start，不能清空已覆盖快照。
+再次 gap/溢出 SHALL 废弃旧队列并重新同步，不以截断后继续消费替代恢复。同步回调重入时仍须保持先后次序，并在关闭/替代后停止旧 drain。loadSnapshot 失败或消费者回调违反同步合同 SHALL 关闭并报告，不能留下未处理拒绝、失效安装或继续追加；不新增自动重试策略。close SHALL 幂等关闭底层源、移除监听、abort加载并使所有迟到结果失效。切换/卸载/未登录由页面生命周期调用 close。
+
+#### Scenario: 首次订阅窗口补齐
+- WHEN 初始 REST 快照是 running/1:1，而回合在首次订阅前完成为 done/X/1:3，服务端 fresh 订阅不回放
+- THEN open 后的完整快照同步仍安装 done/X/1:3，不停留在旧 running 状态
+
+#### Scenario: 精确缺口重载
+- WHEN gap 重载快照为2048字符和游标1:1002，期间排队1048字符 delta(1:1002)、旧 turn.start 以及 Z(1:1003)
+- THEN 安装快照后仅追加 Z，正文恰2049字符，旧 turn.start 不清空历史
+- WHEN 快照游标为 epoch1/seq:null，队列有 epoch1 尾帧及 epoch2 数据
+- THEN 丢弃全部 epoch1，仅按到达顺序消费 epoch2
+
+#### Scenario: 恢复所有权与队列边界
+- WHEN 加载期间再次 gap 或队列超过1000条，然后旧加载最后才完成
+- THEN 旧加载已 abort/失效，其结果不能安装；新快照及其后继负责恢复，不静默丢数据
+- WHEN close、切换或未登录后加载完成，或回调重入关闭当前连接
+- THEN 无迟到安装/交付，底层 EventSource 只关闭一次，队列和加载资源释放
+
+#### Scenario: 命名错误与原生自动续连
+- WHEN 先收到业务 event:error MessageEvent，再收到普通网络 error Event 和自动 reconnect/open
+- THEN 仅业务帧改变 assistant 错误文案；网络错误不伪造生成失败，重连由原生 EventSource 携带 Last-Event-ID，open/必要 gap 同步恢复完整视图
