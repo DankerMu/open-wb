@@ -1,0 +1,22 @@
+## Context
+Supervisor #publish and #retain currently discard callback results and contain only synchronous throws (supervisor.ts:341-353,392-399). The index/app paths forward sinks unchanged. TypeScript's void callbacks permit functions returning values and Promises. The user selected the synchronous direction from issue204; no current production consumer requires asynchronous sinks.
+
+## Goals / Non-Goals
+Reject returned thenables immediately, retain/report the violation through existing paths, and attach rejection consumption so the invalid returned work cannot become a detached rejection. Do not support awaiting sink completion, cancellation of arbitrary callback-created work, globally suppress unhandled rejections, alter runtime grace periods or change the store flush contract.
+
+## Decisions
+1. Keep existing void signatures and ordinary non-thenable return compatibility (including recorder array-push numbers). Document synchronous-only semantics on both options interfaces and the app assembly seam. A callback is invoked once.
+2. Use one private result guard shared by #publish and #retain. Detect structural thenables on object or function values; do not use instanceof Promise. Reading a throwing then getter is an owned synchronous failure. Capture/call the then method with its receiver and consume rejection without calling the sink a second time. No generic public async-adapter abstraction.
+3. Returned thenables are invalid even if already fulfilled or never settling. Report a programming error synchronously; eventual rejection is consumed, not reported again as a second sink failure. Do not await invalid work: a never-settling thenable cannot delay retirement/shutdown. Callback-created asynchronous side effects outside the returned value remain the invalid caller's responsibility, not new app-owned work.
+4. onEvent violations enter existing infraFaulted→retain→retireSlot→stop-publication flow. onError violations append to retained faults without calling onError recursively. Original synchronous thrown objects/provenance, cross-session isolation, native/token retirement and shutdown error aggregation stay unchanged.
+5. The source of truth is Supervisor; index/app must not swallow callback return values. Existing openRecordingSession test wrapper discards its extension callback return, so new negative tests must use the actual openBareSession/app assembly pass-through or another faithful existing seam. The internal onFlushError adapter calls the synchronous handleFlushError, whose error sink is guarded centrally; no store API expansion.
+
+## Evidence and Failure Model
+Parent controlled baseline: synchronous numeric-return event/error controls pass; native rejected returns produce real detached Node rejection; fulfilled/pending/structural thenables and throwing then getters are silently accepted or omit the extra retained fault. Fourteen compiled app cases are protected at /tmp/open-wb-issue204-evidence (two GREEN/twelve semantic RED). Event cases use the real fake-omp native process; error cases drive the public handleFlushError seam with a synchronous source failure. Callable thenables require their receiver to reach an underlying rejected Promise, and getter cases preserve the original thrown object.
+Defeaters: guard missing at either call site; only native Promise detection; rejected-only handling that accepts fulfilled thenables; awaiting a pending invalid sink; duplicate notification/recursive error sink; wrapper-discarded return; native/token leaks; unchanged synchronous callbacks rejected accidentally. Each maps to public negative/control cases and existing fault tests.
+
+## Risks / Trade-offs
+There is deliberately no async sink lifecycle. Thenable rejection consumption is containment of a programming violation, not supported asynchronous delivery. Observer callbacks are trusted application extensions, not a sandbox for malicious functions that never return or create unrelated detached work. Future composed recording/SSE sinks must forward external sink results into the same guard, preserving #204 regression coverage.
+
+## Reconnaissance and Execution Prompt
+References: SupervisorOptions/class references checked by LSP (options2/class10), RegisterSessionsOptions2; existing faults tests386-425/474-507 and openBareSession helper. Implement only the named guard/documentation/test scope, one semantic RED→GREEN case at a time. Existing fixture setup and original synchronous assertions stay intact. Review native/thenable containment rather than adding source-text tests.
