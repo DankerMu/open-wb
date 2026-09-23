@@ -12,7 +12,7 @@ export type ChatSession = {
   updatedAt: number;
 };
 
-type ChatStep = {
+export type ChatStep = {
   id: number;
   ordinal: number;
   name: string;
@@ -20,7 +20,7 @@ type ChatStep = {
   status: ChatDeliveryStatus;
 };
 
-type ChatMessage = {
+export type ChatMessage = {
   id: number;
   role: ChatMessageRole;
   content: string;
