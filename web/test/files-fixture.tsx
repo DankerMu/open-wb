@@ -1,8 +1,6 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { StrictMode } from "react";
-import { RouterProvider } from "react-router";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect, vi } from "vitest";
-import { createAppRouter } from "../src/routes/index.js";
+import { mountAuthenticatedApp } from "./render-app-router.js";
 import { createFetchMock, jsonResponse } from "./support.js";
 
 const principal = { id: "user-1", account: "zhangsan", role: "member" };
@@ -67,14 +65,10 @@ export function imagePreviewResponse(size = 8) {
 
 export function renderFiles(path: string, routes: FetchRoutes, strict = false) {
   disposeRouter?.();
-  window.history.replaceState(null, "", path);
   const fetchMock = createFetchMock(routes);
-  vi.stubGlobal("fetch", fetchMock);
-  const appRouter = createAppRouter();
-  disposeRouter = () => appRouter.dispose();
-  const application = <RouterProvider router={appRouter} />;
-  const view = render(strict ? <StrictMode>{application}</StrictMode> : application);
-  return { fetchMock, router: appRouter, view };
+  const mounted = mountAuthenticatedApp(path, fetchMock, strict);
+  disposeRouter = () => mounted.router.dispose();
+  return mounted;
 }
 
 export async function expectLocation(expected: string) {
