@@ -72,13 +72,8 @@ describe("authenticated session event stream lifecycle", () => {
     const rawClosedGate = new Promise<void>((resolve) => {
       rawClosed = resolve;
     });
-    let handlerReturned!: () => void;
-    const handlerReturnedGate = new Promise<void>((resolve) => {
-      handlerReturned = resolve;
-    });
     const held = await openHeldEventsTcp((_request, reply) => {
       reply.raw.once("close", rawClosed);
-      setImmediate(handlerReturned);
     });
     const connection = await connectHeldEventsTcp(held);
     try {
@@ -86,7 +81,9 @@ describe("authenticated session event stream lifecycle", () => {
       connection.req.destroy();
       await rawClosedGate;
       held.release();
-      await handlerReturnedGate;
+      await new Promise<void>((resolve) => {
+        setImmediate(resolve);
+      });
       expect(held.app.sessions.supervisor.sessionStreamSubscriberCount(held.session)).toBe(0);
       expect(held.runtime.clock.pending()).toBe(0);
     } finally {
