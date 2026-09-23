@@ -5,11 +5,7 @@ import { vi } from "vitest";
 import { createAppRouter } from "../src/routes/index.js";
 import { type FetchMock, setBrowserPath } from "./support.js";
 
-export function mountAuthenticatedApp(
-  path: string,
-  fetchMock: FetchMock,
-  strict = false,
-) {
+export function mountAuthenticatedApp(path: string, fetchMock: FetchMock, strict = false) {
   setBrowserPath(path);
   vi.stubGlobal("fetch", fetchMock);
   const appRouter = createAppRouter();
