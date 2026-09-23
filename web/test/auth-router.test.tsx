@@ -4,6 +4,7 @@ import { RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthGuard, AuthProvider, useAuth } from "../src/features/auth/index.js";
 import { createAppRouter } from "../src/routes/index.js";
+import { allowWorkspaceListFetch, createFetchMock } from "./support.js";
 
 const principal = { id: "user-1", account: "zhangsan", role: "member" };
 
@@ -90,15 +91,13 @@ async function requestSignal(
   callIndex: number,
 ): Promise<AbortSignal> {
   await waitFor(() => {
-    expect(fetchMock).toHaveBeenCalledTimes(callIndex + 1);
+    expect(fetchMock.mock.calls[callIndex]).toBeDefined();
   });
-
   const request = fetchMock.mock.calls[callIndex];
   const signal = (request?.[1] as RequestInit | undefined)?.signal;
   if (!signal) {
     throw new Error(`expected fetch call ${callIndex + 1} to include an AbortSignal`);
   }
-
   return signal;
 }
 
@@ -114,22 +113,25 @@ function currentLocation() {
   return `${window.location.pathname}${window.location.search}${window.location.hash}`;
 }
 
-type AuthStateSnapshot = Pick<ReturnType<typeof useAuth>, "error" | "principal" | "status"> & {
-  exposesApiClient: boolean;
+type AuthStateSnapshot = {
+  error: string | null;
+  principal: { account: string; id: string; role: string } | null;
+  status: "loading" | "authenticated" | "unauthenticated";
 };
 
 function AuthStateProbe({
   onReady,
   onState,
 }: {
-  onReady: (login: ReturnType<typeof useAuth>["login"]) => void;
+  onReady: (
+    login: (credentials: { account: string; password: string }) => Promise<boolean>,
+  ) => void;
   onState: (state: AuthStateSnapshot) => void;
 }) {
   const auth = useAuth();
   onReady(auth.login);
   onState({
     error: auth.error,
-    exposesApiClient: Object.hasOwn(auth, "apiClient"),
     principal: auth.principal,
     status: auth.status,
   });
@@ -140,6 +142,7 @@ let router: ReturnType<typeof createAppRouter> | undefined;
 
 function renderApp(path: string) {
   setBrowserPath(path);
+  allowWorkspaceListFetch();
   router = createAppRouter();
   return render(<RouterProvider router={router} />);
 }
@@ -165,13 +168,14 @@ function submitLogin(accountValue: string, passwordValue: string) {
 
 async function expectAuthenticatedShell(title: string, currentLabel: string) {
   expect(await screen.findByRole("heading", { level: 1, name: title })).toBeTruthy();
-  expect(screen.queryByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeNull();
+  await waitFor(() => {
+    expect(screen.queryByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeNull();
+  });
   const sidebar = screen.getByRole("complementary", { name: "侧栏" });
   const current = within(sidebar).getByRole("link", { name: new RegExp(currentLabel) });
   const currentLinks = within(sidebar)
     .getAllByRole("link")
     .filter((link) => link.getAttribute("aria-current") === "page");
-
   expect(current.getAttribute("aria-current")).toBe("page");
   expect(currentLinks).toHaveLength(1);
   expect(currentLinks[0]).toBe(current);
@@ -232,7 +236,6 @@ async function renderAuthenticatedProvider(
   vi.stubGlobal("fetch", fetchMock);
   let login: ReturnType<typeof useAuth>["login"] | undefined;
   let state: AuthStateSnapshot | undefined;
-
   render(
     <AuthProvider>
       <AuthStateProbe
@@ -242,10 +245,8 @@ async function renderAuthenticatedProvider(
       <AuthGuard>{protectedChild}</AuthGuard>
     </AuthProvider>,
   );
-
   await waitFor(() => {
     expect(state).toMatchObject({
-      exposesApiClient: false,
       principal,
       status: "authenticated",
     });
@@ -253,7 +254,6 @@ async function renderAuthenticatedProvider(
   if (!login) {
     throw new Error("expected AuthProvider to expose login");
   }
-
   const providerLogin = login;
   const originalPrincipal = state?.principal;
   if (!originalPrincipal) {
@@ -291,7 +291,6 @@ async function expectProviderOwnedLoginUnauthenticates(
   await expectLogin();
   await waitFor(() => {
     expect(fixture.readState()).toMatchObject({
-      exposesApiClient: false,
       principal: null,
       status: "unauthenticated",
     });
@@ -364,7 +363,7 @@ describe("route guard initial authentication", () => {
 
       await expectFilesShell();
       expect(currentLocation()).toBe(requestedPath);
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
     },
   );
   it("renders the authenticated files shell with one current navigation link", async () => {
@@ -381,14 +380,15 @@ describe("route guard initial authentication", () => {
     "canonicalizes %s before auth and preserves search/hash through login",
     async (initialPath, canonicalPath, currentLabel, title) => {
       const meLocations: string[] = [];
-      const fetchMock = vi
-        .fn()
-        .mockImplementationOnce(() => {
+      const fetchMock = createFetchMock({
+        "/api/auth/me": () => {
           meLocations.push(currentLocation());
-          return Promise.resolve(unauthenticatedResponse());
-        })
-        .mockResolvedValueOnce(jsonResponse(principal))
-        .mockResolvedValueOnce(jsonResponse({ name: "workbuddy-app-server", version: "0.0.0" }));
+          return unauthenticatedResponse();
+        },
+        "/api/auth/login": jsonResponse(principal),
+        "/api/workspaces": jsonResponse({ workspaces: [] }),
+        "/api/info": jsonResponse({ name: "workbuddy-app-server", version: "0.0.0" }),
+      });
       vi.stubGlobal("fetch", fetchMock);
 
       renderApp(initialPath);
@@ -406,7 +406,7 @@ describe("route guard initial authentication", () => {
       if (title === "设置") {
         await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
         expectInfoRequest(fetchMock);
-      } else expect(fetchMock).toHaveBeenCalledTimes(2);
+      } else expect(fetchMock).toHaveBeenCalledTimes(title === "工作空间" ? 3 : 2);
       expectProviderLoginRequest(fetchMock);
     },
   );
@@ -438,7 +438,7 @@ describe("route guard initial authentication", () => {
     await expectAuthenticatedShell("中心", "中心");
     expect(currentLocation()).toBe("/center?from=later#target");
     expect(initialMeSignal.aborted).toBe(false);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -478,7 +478,7 @@ describe("login form", () => {
 
       await expectFilesShell();
       expect(currentLocation()).toBe(requestedPath);
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
     },
   );
 
@@ -498,7 +498,7 @@ describe("login form", () => {
     fireEvent.submit(password.closest("form") as HTMLFormElement);
 
     await expectFilesShell();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it.each([
@@ -575,14 +575,14 @@ describe("login form", () => {
     fireEvent.submit(submit.closest("form") as HTMLFormElement);
 
     await expectFilesShell();
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/auth/login", {
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/auth/login", {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
       body: '{"account":"  Filled Account ","password":"retry-password"}',
       signal: expect.any(AbortSignal),
     });
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   it.each([
@@ -707,7 +707,6 @@ describe("auth transitions and lifecycle", () => {
 
     expect(fixture.readState()).toMatchObject({
       error: null,
-      exposesApiClient: false,
       principal,
       status: "authenticated",
     });

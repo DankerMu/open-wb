@@ -298,6 +298,13 @@ async function expectAuthenticatedRoute(
   const currentLink = sidebarLink(navigation, currentLabel);
   await expect(currentLink).toHaveAttribute("href", path);
   await expect(currentLink).toHaveAttribute("aria-current", "page");
+  if (path === "/files") {
+    const workspacePage = page.locator("main");
+    await expect(workspacePage.getByRole("button", { name: "选择工作空间" })).toBeVisible();
+    await expect(
+      workspacePage.getByRole("heading", { level: 2, name: "工作空间目录", exact: true }),
+    ).toBeVisible();
+  }
 }
 
 function sidebarLink(navigation: Locator, label: string) {

@@ -44,6 +44,7 @@ type AuthOperationRef = {
 };
 
 export type AuthContextValue = AuthState & {
+  createSessionClient(): ApiClient;
   loadServiceInfo(callerSignal: AbortSignal): Promise<ServiceInfo | null>;
   login(credentials: LoginCredentials): Promise<boolean>;
   logout(): Promise<boolean>;
@@ -124,10 +125,59 @@ function isRequestFailure(error: unknown) {
   return isApiError(error) && error.code === "request_failed";
 }
 
+function useSessionLifecycle(mountedRef: { current: boolean }, setState: SetAuthState) {
+  const epochRef = useRef(0);
+  const sessionActiveRef = useRef(false);
+  const [sessionVersion, setSessionVersion] = useState(0);
+
+  const establishSession = useCallback(
+    (principal: Principal) => {
+      epochRef.current += 1;
+      sessionActiveRef.current = true;
+      setSessionVersion(epochRef.current);
+      setState({ status: "authenticated", principal, error: null, logoutError: null });
+    },
+    [setState],
+  );
+
+  const clearSession = useCallback(() => {
+    if (!mountedRef.current) {
+      return;
+    }
+
+    if (sessionActiveRef.current) {
+      epochRef.current += 1;
+      setSessionVersion(epochRef.current);
+    }
+    sessionActiveRef.current = false;
+    setState(cleanUnauthenticatedState());
+  }, [mountedRef, setState]);
+
+  const createSessionClient = useCallback(() => {
+    const epoch = sessionVersion;
+    return createApiClient({
+      onUnauthorized: (signal) => {
+        if (
+          signal?.aborted ||
+          !mountedRef.current ||
+          !sessionActiveRef.current ||
+          epoch !== epochRef.current
+        ) {
+          return;
+        }
+
+        clearSession();
+      },
+    });
+  }, [clearSession, mountedRef, sessionVersion]);
+
+  return { clearSession, createSessionClient, establishSession };
+}
+
 function useApiClient(
   mountedRef: { current: boolean },
   operationRef: AuthOperationRef,
-  setState: SetAuthState,
+  clearSession: () => void,
 ) {
   const clientRef = useRef<ApiClient | null>(null);
 
@@ -144,7 +194,7 @@ function useApiClient(
         }
 
         operation.unauthorized = true;
-        setState(cleanUnauthenticatedState());
+        clearSession();
       },
     });
   }
@@ -157,6 +207,7 @@ function useInitialSessionCheck(
   mountedRef: { current: boolean },
   operationRef: AuthOperationRef,
   setState: SetAuthState,
+  establishSession: (principal: Principal) => void,
 ) {
   useEffect(() => {
     const operation = startOperation(operationRef, "session");
@@ -168,7 +219,7 @@ function useInitialSessionCheck(
           return;
         }
 
-        setState({ status: "authenticated", principal, error: null, logoutError: null });
+        establishSession(principal);
       })
       .catch((error: unknown) => {
         if (!isCurrentOperation(mountedRef.current, operation, operationRef.current)) {
@@ -188,7 +239,7 @@ function useInitialSessionCheck(
     return () => {
       operation.controller.abort();
     };
-  }, [apiClient, mountedRef, operationRef, setState]);
+  }, [apiClient, establishSession, mountedRef, operationRef, setState]);
 }
 
 function useLogin(
@@ -196,6 +247,7 @@ function useLogin(
   mountedRef: { current: boolean },
   operationRef: AuthOperationRef,
   setState: SetAuthState,
+  establishSession: (principal: Principal) => void,
 ) {
   return useCallback(
     async (credentials: LoginCredentials) => {
@@ -218,7 +270,7 @@ function useLogin(
           return false;
         }
 
-        setState({ status: "authenticated", principal, error: null, logoutError: null });
+        establishSession(principal);
         return true;
       } catch (error) {
         if (!isCurrentOperation(mountedRef.current, operation, operationRef.current)) {
@@ -238,7 +290,7 @@ function useLogin(
         finishOperation(operationRef, operation);
       }
     },
-    [apiClient, mountedRef, operationRef, setState],
+    [apiClient, establishSession, mountedRef, operationRef, setState],
   );
 }
 
@@ -286,6 +338,7 @@ function useLogout(
   mountedRef: { current: boolean },
   operationRef: AuthOperationRef,
   setState: SetAuthState,
+  clearSession: () => void,
 ) {
   return useCallback(async () => {
     if (operationRef.current?.kind === "logout") {
@@ -303,7 +356,7 @@ function useLogout(
         return false;
       }
 
-      setState(cleanUnauthenticatedState());
+      clearSession();
       return true;
     } catch (error) {
       if (!isCurrentOperation(mountedRef.current, operation, operationRef.current)) {
@@ -311,7 +364,7 @@ function useLogout(
       }
 
       if (operation.unauthorized) {
-        setState(cleanUnauthenticatedState());
+        clearSession();
         return true;
       }
 
@@ -324,14 +377,18 @@ function useLogout(
     } finally {
       finishOperation(operationRef, operation);
     }
-  }, [apiClient, mountedRef, operationRef, setState]);
+  }, [apiClient, clearSession, mountedRef, operationRef, setState]);
 }
 
 export function AuthProvider({ children }: PropsWithChildren) {
   const mountedRef = useRef(false);
   const operationRef = useRef<AuthOperation | null>(null);
   const [state, setState] = useState<AuthState>(initialAuthState);
-  const apiClient = useApiClient(mountedRef, operationRef, setState);
+  const { clearSession, createSessionClient, establishSession } = useSessionLifecycle(
+    mountedRef,
+    setState,
+  );
+  const apiClient = useApiClient(mountedRef, operationRef, clearSession);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -346,14 +403,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
     };
   }, []);
 
-  useInitialSessionCheck(apiClient, mountedRef, operationRef, setState);
-  const login = useLogin(apiClient, mountedRef, operationRef, setState);
+  useInitialSessionCheck(apiClient, mountedRef, operationRef, setState, establishSession);
+  const login = useLogin(apiClient, mountedRef, operationRef, setState, establishSession);
   const loadServiceInfo = useServiceInfo(apiClient, mountedRef, operationRef);
-  const logout = useLogout(apiClient, mountedRef, operationRef, setState);
+  const logout = useLogout(apiClient, mountedRef, operationRef, setState, clearSession);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ ...state, loadServiceInfo, login, logout }),
-    [loadServiceInfo, login, logout, state],
+    () => ({ ...state, createSessionClient, loadServiceInfo, login, logout }),
+    [createSessionClient, loadServiceInfo, login, logout, state],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
