@@ -13,7 +13,7 @@
 - [x] 3.3 Parent scoped Biome/typecheck/build/server suite/anti-drift exit0:68files1207tests,91.48% statements/87.51% branches,0clones and size/naming pass. Helpers/test groups were consolidated without weakening inputs/assertions/gates. Architecture/ADR/parent tasks updated after positive smoke; generated README and disposable qualification copies removed. Exact-head strict validation is retained with delivery evidence.
 
 ## 4. Delivery
-- [ ] 4.1 Expanded three-seat review, bounded2fixpasses, same-head source CI/merge, separate preserving canonical archive PR/CI before92.
+- [x] 4.1 Expanded three-seat round1 plus two fresh re-reviews completed; two fix passes, round3 clean at e2556f585336a987cc9f158fd013e494ff3474d3. Source PR228 merged as3c13c09db5e743d4e073535a71a287f20d8eca6f after CI35844796554 all8jobs succeeded. Canonical additive archive preserves all prior requirements. This checkbox records source completion and archive preparation; independent archive PR CI/merge remains an external gate before92, not an already-run result.
 
 ## Core risk mapping
 Selected entry/API→2.2/3.1 rawroute/headers; schema/types→2.1 named owner DTO and existing event IDs; concurrency/state→2.1/2.3 replay/live/generation/drain; resources→2.3 timer/response/subscriber/native cleanup; compatibility→2.1/3.2 unchanged REST/ring/sinks/cursor; errors→2.3 writefalse/throw/error isolation; auth/secrets→2.2 ownerbeforeheaders/cookie; tests/evidence→1.1/3.1/3.2 realHTTP+inject and qualifiedoracle; release/docs→3.3/4.1 assembly and archive. Not selected config (no key), fileIO (no newproductionfilesystempath).
