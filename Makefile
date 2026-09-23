@@ -2,7 +2,7 @@
 # verification 段是它的镜像，增删目标须三处同步。omp-fetch 是二进制供给前置，
 # 控制面文档行（AGENTS.md / constraints.yaml）延后到 issue #107。
 SHELL := /bin/bash
-.PHONY: setup hooks lint fmt typecheck test anti-drift guard check test-guardrails precommit dev smoke ui-walk omp-fetch
+.PHONY: setup hooks lint fmt typecheck test anti-drift guard check test-guardrails precommit dev smoke smoke-live ui-walk omp-fetch
 
 setup: ## 安装依赖 + 挂 git hooks
 	npm install
@@ -69,5 +69,19 @@ ui-walk: ## Playwright UI 走查（只消费已运行服务；不 build/start/st
 
 omp-fetch: ## 拉取官方 omp v18.0.10 到 var/omp/omp（SHA256 校验；已校验则跳过）
 	bash scripts/omp-fetch.sh
+
+ifneq ($(origin MODEL_UPSTREAM_BASE_URL),undefined)
+override MODEL_UPSTREAM_BASE_URL := $(value MODEL_UPSTREAM_BASE_URL)
+export MODEL_UPSTREAM_BASE_URL
+endif
+ifneq ($(origin MODEL_UPSTREAM_API_KEY),undefined)
+override MODEL_UPSTREAM_API_KEY := $(value MODEL_UPSTREAM_API_KEY)
+export MODEL_UPSTREAM_API_KEY
+endif
+smoke-live: ## 手动真实上游冒烟（只消费已运行服务；缺配置先失败；缺 hurl 显式失败并打印安装指引 https://hurl.dev/docs/installation.html）
+	@[ -n "$${MODEL_UPSTREAM_BASE_URL}" ] || { echo "错误：未设置 MODEL_UPSTREAM_BASE_URL" >&2; exit 1; }
+	@[ -n "$${MODEL_UPSTREAM_API_KEY}" ] || { echo "错误：未设置 MODEL_UPSTREAM_API_KEY" >&2; exit 1; }
+	@/usr/bin/env -i PATH="$$PATH" /bin/sh -c 'command -v hurl >/dev/null 2>&1' || { echo "错误：未找到 hurl；安装说明：https://hurl.dev/docs/installation.html" >&2; exit 1; }
+	/usr/bin/env -i PATH="$$PATH" hurl --test --jobs 1 --retry 0 --variable "base_url=$${SMOKE_BASE_URL}" --variable "content_pattern=^.+$$" --variable "min_bash_steps=0" smoke/chat.hurl
 
 precommit: guard
