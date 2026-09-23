@@ -36,3 +36,8 @@ Static/type/build/drift and complete web coverage suite; CI independently covers
 Strict DTO rejection intentionally follows existing client policy; future server fields require a coordinated contract update.
 Local parent/writer share OS authority: protected-file hashes and independent CI are evidence controls, not an OS verifier enclave.
 Rollback is a revert of this atomic source change; no persistent format or data migration.
+
+## Review / CI Repair Exception
+Round 1 TE-1 adds explicit empty sessions-list and empty-string title acceptance evidence; no parser change.
+Concurrent master added the #129 files page and independently fixed Markdown oracle cost in #233. CI run 35852806255 attempts 1/2 observed #235: URL reached the new workspace before the synchronous DOM query found its title. The exact merged tree passed locally; timing root cause is not claimed universally proven.
+As a narrow CI repair, web/test/files-page.test.tsx may wait for the same expected DOM title after the existing URL assertion. Keep exact text, URL assertion, inputs, test discovery and timeout unchanged; no production UI change or unrelated test refactor. Source re-review includes this exception.

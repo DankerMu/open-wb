@@ -117,6 +117,12 @@ describe("Sessions API client list contract", () => {
       signal: controller.signal,
     });
   });
+
+  it("accepts an empty session list", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ sessions: [] })));
+
+    await expect(createApiClient().listSessions()).resolves.toEqual({ sessions: [] });
+  });
 });
 
 describe("Sessions API client create contract", () => {
@@ -208,6 +214,13 @@ describe("Sessions API client snapshot domain contract", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(runningSession, 201)));
 
     await expect(createApiClient().createSession()).resolves.toEqual(runningSession);
+  });
+
+  it("accepts an empty session title", async () => {
+    const untitled = { ...idleSession, title: "" };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(untitled, 201)));
+
+    await expect(createApiClient().createSession()).resolves.toEqual(untitled);
   });
 
   it("accepts the safe-integer bounds for signed IDs, timestamps, and nonnegative fields", async () => {

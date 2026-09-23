@@ -292,7 +292,7 @@ describe("workspace page route integration", () => {
     await waitFor(() => {
       expect(`${window.location.pathname}${window.location.search}`).toBe("/files?ws=workspace-2");
     });
-    expect(screen.getByText("新空间", { exact: true })).toBeTruthy();
+    expect(await screen.findByText("新空间", { exact: true })).toBeTruthy();
   });
 
   it("does not let a late workspace creation close or select a newer dialog", async () => {
