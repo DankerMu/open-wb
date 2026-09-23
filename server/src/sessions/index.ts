@@ -13,7 +13,17 @@ export interface RegisterSessionsOptions {
   db: DatabaseSync;
   tokens: TokenRegistry;
   runtime: SessionSupervisorRuntime;
+  /**
+   * Must return synchronously. A returned thenable is retained beside the source
+   * fault without calling this sink again. registerSessions forwards the return
+   * unchanged.
+   */
   onError: (error: Error) => void;
+  /**
+   * Optional synchronous observer. Ordinary returns are ignored; a returned thenable
+   * is an owned programming error. Omitted means no observer. The return is forwarded
+   * unchanged.
+   */
   onEvent?: (sessionId: string, epoch: number, event: ChatEvent<number>) => void;
 }
 

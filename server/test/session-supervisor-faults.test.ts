@@ -5,9 +5,12 @@ import { INTERNAL_ERROR_ENVELOPE } from "./session-db-helpers.js";
 import { postPrompt } from "./session-rest-helpers.js";
 import { messageRow, messageRows, sessionRow } from "./session-store-helpers.js";
 import {
+  assertRetainedFaultOnShutdown,
+  assistantIdFor,
   capturedFailure,
   closeAfterRetainedFault,
   closeOnEof,
+  containsMessage,
   createControlledRuntime,
   createRealFakeRuntime,
   createSession,
@@ -515,22 +518,6 @@ class ThrowingTokenRegistry extends TokenRegistry {
   }
 }
 
-function assistantIdFor(fixture: SupervisorApp, sessionId: string): number {
-  const assistant = messageRows(fixture.db).find(
-    (row) => row.session_id === sessionId && row.role === "assistant",
-  );
-  if (assistant === undefined) {
-    throw new Error("missing assistant row");
-  }
-  return assistant.id;
-}
-
-async function assertRetainedFaultOnShutdown(fixture: SupervisorApp, message: string) {
-  const shutdownFailure = await capturedFailure(() => fixture.app.close());
-  expect(containsMessage(shutdownFailure, message)).toBe(true);
-  expect(fixture.db.prepare("SELECT 1 AS usable").get()).toEqual({ usable: 1 });
-}
-
 function expectUncommittedDelta(
   fixture: SupervisorApp,
   events: readonly ObservedEvent[],
@@ -542,20 +529,4 @@ function expectUncommittedDelta(
     "text.delta",
   ]);
   expect(messageRow(fixture.db, assistantId)).toMatchObject({ content: "", status: "running" });
-}
-
-function containsMessage(error: unknown, message: string): boolean {
-  if (error instanceof Error && error.message.includes(message)) {
-    return true;
-  }
-  if (error === null || typeof error !== "object") {
-    return false;
-  }
-  if ("cause" in error && containsMessage(error.cause, message)) {
-    return true;
-  }
-  if ("errors" in error && Array.isArray(error.errors)) {
-    return error.errors.some((item) => containsMessage(item, message));
-  }
-  return false;
 }

@@ -31,7 +31,17 @@ export interface SessionSupervisorOptions {
   store: SessionStore;
   tokens: TokenRegistry;
   runtime: SessionSupervisorRuntime;
+  /**
+   * Must return synchronously. A returned thenable is an owned programming error;
+   * its rejection is consumed and is not a second fault. A thrown then getter uses
+   * the existing synchronous fault path.
+   */
   onError: (error: Error) => void;
+  /**
+   * Optional and synchronous. Ordinary non-thenable returns are ignored. A returned
+   * thenable stops publication for that pump and retires its runtime through the
+   * existing ownership path. Omitted means no observer.
+   */
   onEvent?: (sessionId: string, epoch: number, event: ChatEvent<number>) => void;
 }
 
@@ -345,7 +355,11 @@ export class SessionSupervisor {
       return true;
     }
     try {
-      this.#onEvent(slot.sessionId, slot.epoch, event);
+      const returned = this.#onEvent(slot.sessionId, slot.epoch, event);
+      const violation = synchronousSinkViolation(returned);
+      if (violation !== undefined) {
+        throw violation;
+      }
       return true;
     } catch (error) {
       slot.infraFaulted = true;
@@ -394,7 +408,11 @@ export class SessionSupervisor {
   #retain(error: Error): void {
     this.#faults.push(error);
     try {
-      this.#onError(error);
+      const returned = this.#onError(error);
+      const violation = synchronousSinkViolation(returned);
+      if (violation !== undefined) {
+        this.#faults.push(violation);
+      }
     } catch (thrown) {
       this.#faults.push(asError(thrown));
     }
@@ -478,6 +496,27 @@ function throwCollected(faults: Error[]): void {
 
 function asError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
+}
+
+function synchronousSinkViolation(returned: unknown): Error | undefined {
+  if ((typeof returned !== "object" && typeof returned !== "function") || returned === null) {
+    return undefined;
+  }
+  let then: unknown;
+  try {
+    then = "then" in returned ? returned.then : undefined;
+  } catch (error) {
+    return asError(error);
+  }
+  if (typeof then !== "function") {
+    return undefined;
+  }
+  try {
+    then.call(returned, undefined, () => undefined);
+  } catch {
+    /* a throwing then is containment, not a second reported violation */
+  }
+  return new Error("session observation sink must return synchronously");
 }
 
 async function drain(stream: AsyncIterable<unknown>): Promise<void> {
