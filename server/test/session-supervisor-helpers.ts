@@ -393,6 +393,23 @@ export async function waitForTurn(
   }, `${sessionId} to become ${status}`);
 }
 
+export async function expectHistory(
+  fixture: SupervisorApp,
+  cookie: string,
+  session: string,
+  streamCursor: { epoch: number; seq: number | null },
+): Promise<void> {
+  const history = await fixture.app.inject({
+    method: "GET",
+    url: `/api/sessions/${session}/messages`,
+    headers: { cookie },
+  });
+  expect(history.statusCode).toBe(200);
+  expect(history.headers["cache-control"]).toBe("no-store");
+  expect(history.json()).toMatchObject({ streamCursor });
+  expect(fixture.supervisor.streamCursor(session)).toEqual(streamCursor);
+}
+
 export function eventsFor(events: readonly ObservedEvent[], sessionId: string): ObservedEvent[] {
   return events.filter((entry) => entry.sessionId === sessionId);
 }

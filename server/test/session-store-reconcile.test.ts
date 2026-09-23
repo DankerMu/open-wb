@@ -35,6 +35,7 @@ describe("SessionStore flush and close fault ownership", () => {
           status: "running",
         });
         expect(flushFailures).toHaveLength(1);
+        expect(store.getMessages(session.id, "u1")?.messages[1]?.content).toBe("timer pending");
         const failure = flushFailures.at(0);
         expect(failure).toMatchObject({
           sessionId: session.id,
@@ -48,6 +49,7 @@ describe("SessionStore flush and close fault ownership", () => {
           store.appendDelta(accepted.assistantMessageId, "must not grow the buffer"),
         );
         expect(repeatedAppend).toBe(retainedError);
+        expect(store.getMessages(session.id, "u1")?.messages[1]?.content).toBe("timer pending");
         expect(messageRow(db, accepted.assistantMessageId).content).toBe("");
         db.exec("DROP TRIGGER reject_timer_flush");
 
@@ -56,6 +58,7 @@ describe("SessionStore flush and close fault ownership", () => {
           content: "timer pending",
           status: "done",
         });
+        expect(store.getMessages(session.id, "u1")?.messages[1]?.content).toBe("timer pending");
         expect(sessionRow(db, session.id)).toMatchObject({ status: "done" });
         expect(flushFailures).toHaveLength(1);
       });

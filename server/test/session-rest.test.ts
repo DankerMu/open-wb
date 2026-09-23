@@ -13,6 +13,7 @@ import {
   cookieFor,
   deferred,
   EXACT_MULTIBYTE,
+  getSessionMessages,
   MESSAGE_LIMIT,
   OVERSIZED_PARSER_INPUT,
   postPrompt,
@@ -69,12 +70,12 @@ describe("session REST", () => {
       });
       expectWorkspaceResponse(listed, 200, { sessions: [body] });
 
-      const history = await app.inject({
-        method: "GET",
-        url: `/api/sessions/${body.id}/messages`,
-        headers: { cookie },
+      const history = await getSessionMessages(app, body.id, cookie);
+      expectWorkspaceResponse(history, 200, {
+        session: body,
+        messages: [],
+        streamCursor: { epoch: 0, seq: null },
       });
-      expectWorkspaceResponse(history, 200, { session: body, messages: [] });
     });
   });
 
@@ -124,10 +125,11 @@ describe("session REST", () => {
   });
 
   it("returns public history in chronological and ordinal order without internal fields", async () => {
-    await withSessionRest(async ({ app, store }) => {
+    await withSessionRest(async ({ app, store, supervisor }) => {
       const session = store.create("u1");
       store.setSessionFile(session.id, "resume/hidden.jsonl");
       expect(store.bumpStreamEpoch(session.id)).toBe(1);
+      supervisor.cursor = { epoch: 1, seq: null };
 
       vi.setSystemTime(SESSION_NOW + 5);
       const first = store.acceptPrompt(session.id, "u1", "saved title");
@@ -152,11 +154,7 @@ describe("session REST", () => {
       vi.setSystemTime(SESSION_NOW + 23);
       expect(store.finishTurn(second.assistantMessageId, "done")).toBe(true);
 
-      const history = await app.inject({
-        method: "GET",
-        url: `/api/sessions/${session.id}/messages`,
-        headers: { cookie: await cookieFor(app, "zhangsan") },
-      });
+      const history = await getSessionMessages(app, session.id, await cookieFor(app, "zhangsan"));
       expectWorkspaceResponse(history, 200, {
         session: {
           id: session.id,
@@ -214,6 +212,7 @@ describe("session REST", () => {
             ],
           },
         ],
+        streamCursor: { epoch: 1, seq: null },
       });
       expect(history.payload).not.toMatch(
         /startedAt|endedAt|owner_id|ownerId|omp_session_file|stream_epoch|streamEpoch|resume\/hidden/u,
@@ -277,6 +276,7 @@ describe("session REST", () => {
       expectWorkspaceResponse(foreignList, 200, { sessions: [] });
       expect(foreignList.payload).not.toContain(owned.id);
       expect(supervisor.calls).toEqual([]);
+      expect(supervisor.cursorCalls).toEqual([]);
       expect(persistenceSnapshot(db)).toEqual(before);
     });
   });
@@ -327,6 +327,7 @@ describe("session REST", () => {
       }
 
       expect(supervisor.calls).toEqual([]);
+      expect(supervisor.cursorCalls).toEqual([]);
       expect(persistenceSnapshot(db)).toEqual(before);
     });
   });
@@ -713,11 +714,7 @@ describe("session REST", () => {
         expect(body.userMessageId).not.toBe(first.userMessageId);
         expect(body.assistantMessageId).not.toBe(first.assistantMessageId);
 
-        const history = await app.inject({
-          method: "GET",
-          url: `/api/sessions/${session.id}/messages`,
-          headers: { cookie },
-        });
+        const history = await getSessionMessages(app, session.id, cookie);
         expect(history.statusCode).toBe(200);
         expect(history.headers["cache-control"]).toBe("no-store");
         expect(history.json()).toEqual({
@@ -762,6 +759,7 @@ describe("session REST", () => {
               steps: [],
             },
           ],
+          streamCursor: { epoch: 0, seq: null },
         });
       }
     });

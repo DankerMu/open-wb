@@ -9,10 +9,12 @@ import type {
   RawServerDefault,
 } from "fastify";
 import { HttpError } from "../core/errors/index.js";
-import type { SessionStore } from "./store.js";
+import type { SessionMessageTree, SessionStore } from "./store.js";
+import type { StreamCursor } from "./supervisor.js";
 
 export interface SessionSupervisorPort {
   prompt(sessionId: string, text: string): Promise<void>;
+  streamCursor(sessionId: string): StreamCursor;
 }
 
 interface SessionRestDependencies {
@@ -45,24 +47,9 @@ interface PublicMessage {
   steps: PublicStep[];
 }
 
-interface OwnedHistory {
-  session: PublicSession & {
-    title: string | null;
-  };
-  messages: Array<{
-    id: number;
-    role: string;
-    content: string;
-    status: string;
-    createdAt: number;
-    steps: Array<{
-      id: number;
-      ordinal: number;
-      name: string;
-      detail: string;
-      status: string;
-    }>;
-  }>;
+interface OwnedSnapshot {
+  tree: SessionMessageTree;
+  streamCursor: StreamCursor;
 }
 
 interface SessionIdParams {
@@ -80,7 +67,7 @@ export function registerSessionRoutes(
   app: FastifyInstance,
   dependencies: SessionRestDependencies,
 ): void {
-  const authorizedHistory = new WeakMap<FastifyRequest, OwnedHistory>();
+  const authorizedHistory = new WeakMap<FastifyRequest, OwnedSnapshot>();
 
   const authorizeOwnedBeforeParse: preParsingHookHandler<
     RawServerDefault,
@@ -93,7 +80,8 @@ export function registerSessionRoutes(
     if (tree === null) {
       throw new HttpError("not_found");
     }
-    authorizedHistory.set(request, tree);
+    const streamCursor = dependencies.supervisor.streamCursor(request.params.id);
+    authorizedHistory.set(request, { tree, streamCursor });
     done(null, payload);
   };
 
@@ -111,11 +99,11 @@ export function registerSessionRoutes(
     "/api/sessions/:id/messages",
     { onRequest: noStoreSessionResponse, preParsing: authorizeOwnedBeforeParse },
     async (request) => {
-      const tree = authorizedHistory.get(request);
-      if (tree === undefined) {
+      const snapshot = authorizedHistory.get(request);
+      if (snapshot === undefined) {
         throw new HttpError("not_found");
       }
-      return toPublicHistory(tree);
+      return toPublicHistory(snapshot);
     },
   );
   app.post<{ Params: SessionIdParams }>(
@@ -163,13 +151,14 @@ function toPublicSession(session: {
   };
 }
 
-function toPublicHistory(tree: OwnedHistory): {
+function toPublicHistory(snapshot: OwnedSnapshot): {
   session: PublicSession;
   messages: PublicMessage[];
+  streamCursor: StreamCursor;
 } {
   return {
-    session: toPublicSession(tree.session),
-    messages: tree.messages.map((message) => ({
+    session: toPublicSession(snapshot.tree.session),
+    messages: snapshot.tree.messages.map((message) => ({
       id: message.id,
       role: message.role,
       content: message.content,
@@ -183,6 +172,7 @@ function toPublicHistory(tree: OwnedHistory): {
         status: step.status,
       })),
     })),
+    streamCursor: snapshot.streamCursor,
   };
 }
 

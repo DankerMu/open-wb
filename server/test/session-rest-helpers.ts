@@ -26,7 +26,10 @@ export const OVERSIZED_PARSER_INPUT = oversizedParserInput;
 
 interface RecordingSupervisor extends SessionSupervisorPort {
   readonly calls: Array<{ sessionId: string; text: string }>;
+  readonly cursorCalls: string[];
+  cursor: { epoch: number; seq: number | null };
   onPrompt(handler: (sessionId: string, text: string) => Promise<void>): void;
+  onStreamCursor(handler: (sessionId: string) => { epoch: number; seq: number | null }): void;
 }
 
 export interface SessionRestFixture {
@@ -71,17 +74,32 @@ export async function withSessionRest<T>(
 
 function createSupervisor(): RecordingSupervisor {
   const calls: Array<{ sessionId: string; text: string }> = [];
+  const cursorCalls: string[] = [];
   let handler: (sessionId: string, text: string) => Promise<void> = async () => {};
-  return {
+  let cursorHandler: ((sessionId: string) => { epoch: number; seq: number | null }) | undefined;
+  const supervisor: RecordingSupervisor = {
     calls,
+    cursorCalls,
+    cursor: { epoch: 0, seq: null },
     onPrompt(next) {
       handler = next;
+    },
+    onStreamCursor(next) {
+      cursorHandler = next;
+    },
+    streamCursor(sessionId) {
+      cursorCalls.push(sessionId);
+      if (cursorHandler !== undefined) {
+        return cursorHandler(sessionId);
+      }
+      return supervisor.cursor;
     },
     async prompt(sessionId, text) {
       calls.push({ sessionId, text });
       await handler(sessionId, text);
     },
   };
+  return supervisor;
 }
 
 export function deferred<T = void>(): {
@@ -97,6 +115,14 @@ export function deferred<T = void>(): {
 
 export async function cookieFor(app: FastifyInstance, account: string): Promise<string> {
   return bearerCookie(await loginSessionId(app, account));
+}
+
+export function getSessionMessages(app: FastifyInstance, sessionId: string, cookie: string) {
+  return app.inject({
+    method: "GET",
+    url: `/api/sessions/${sessionId}/messages`,
+    headers: { cookie },
+  });
 }
 
 export function postPrompt(
