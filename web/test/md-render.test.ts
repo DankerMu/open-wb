@@ -14,7 +14,7 @@ function maxStrongDepth(root: Element): number {
     if (next > max) {
       max = next;
     }
-    for (const child of node.children) {
+    for (let child = node.firstElementChild; child; child = child.nextElementSibling) {
       visit(child, next);
     }
   };
