@@ -13,7 +13,7 @@
 - THEN 原五条回执与既有业务数据保持不变，追加032并可稳定重开；失败时本迁移DDL和回执共同回滚
 
 ### Requirement: 会话 REST
-所有 `/api/sessions*` 路由 SHALL 受既有 cookie guard 保护并按 `request.principal.id` 过滤；不存在或属他人的会话 SHALL 一律 404 `not_found`（不区分）。`POST /api/sessions` SHALL 创建 `status=idle`、`title=null` 的会话并返回 201 `{id,title,status,createdAt,updatedAt}`；`GET /api/sessions` SHALL 返回本账号会话按 `updated_at` 降序 `{sessions:[...]}`；`GET /api/sessions/:id/messages` SHALL 返回 `{session, messages:[{id,role,content,status,createdAt,steps:[{id,ordinal,name,detail,status}]}]}` 按 `created_at,id` 升序。全部响应 SHALL `Cache-Control: no-store`。
+所有 `/api/sessions*` 路由 SHALL 受既有 cookie guard 保护并按 `request.principal.id` 过滤；不存在或属他人的会话 SHALL 一律 404 `not_found`（不区分）。`POST /api/sessions` SHALL 创建 `status=idle`、`title=null` 的会话并返回 201 `{id,title,status,createdAt,updatedAt}`；`GET /api/sessions` SHALL 返回本账号会话按 `updated_at` 降序 `{sessions:[...]}`；`GET /api/sessions/:id/messages` SHALL 返回 `{session,messages:[{id,role,content,status,createdAt,steps:[{id,ordinal,name,detail,status}]}],streamCursor:{epoch,seq}}`，消息按 `created_at,id` 升序。正文 SHALL 包含该进程 store 自有的待刷尾部；读取 SHALL 不强制刷盘。历史与游标 SHALL 在 owner 校验后的同一同步步骤捕获；数值 seq 覆盖该 epoch 已记录事件，null 表示该 epoch 已封口、不会再发布事件。全部响应 SHALL `Cache-Control: no-store`。
 
 #### Scenario: 隔离
 - WHEN zhangsan 创建会话后 lisi 请求其 messages / prompt / events
@@ -42,7 +42,7 @@
 
 #### Scenario: 进行中刷盘节奏
 - WHEN 假子进程发出累计 >2KB 的 text_delta 后停顿（不发 agent_end）
-- THEN messages 端点在停顿期间返回的 `content` 非空且长度 ≥ 已发增量 − 2KB；assistant `status` 仍 `running`
+- THEN messages 端点返回全部已处理正文与对应 streamCursor，assistant `status` 仍 `running`；直接 SQLite 读取证明持久化仍按2048 UTF-8字节/2000ms策略，GET 不触发额外刷盘
 
 #### Scenario: 上游错误回合
 - WHEN 假子进程发出 `message_end{message:{role:"assistant",stopReason:"error",errorMessage:"upstream 500"}}` 后 `agent_end{isTerminal:true}`
