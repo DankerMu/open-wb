@@ -218,22 +218,22 @@ describe("Chat stream reducer", () => {
 
   it("resets a failed assistant and session to running without rewriting user history", () => {
     const snapshot: ChatMessageSnapshot = {
-      session: { ...runningSession, status: "failed" },
+      session: runningSession,
       messages: [
         historyUser,
         {
           id: 0,
           role: "assistant",
           content: STREAMED_BODY,
-          status: "failed",
+          status: "running",
           createdAt: 0,
           steps: [
             {
               id: 11,
               ordinal: 0,
               name: "bash",
-              detail: BASH_RESULT_DETAIL,
-              status: "failed",
+              detail: BASH_START_DETAIL,
+              status: "running",
             },
           ],
         },
@@ -241,13 +241,32 @@ describe("Chat stream reducer", () => {
       streamCursor: { epoch: 1, seq: null },
     };
     const frozenSnapshot = deepFreeze(structuredClone(snapshot));
-    const reset = deepFreeze(
-      applyChatEvent(deepFreeze(chatStateFromSnapshot(frozenSnapshot)), {
-        type: "turn.start",
-        data: { messageId: 0 },
-      }),
+    const afterError = applyChatEvent(deepFreeze(chatStateFromSnapshot(frozenSnapshot)), {
+      type: "error",
+      data: { messageId: 0, message: AGENT_FAILURE },
+    });
+    const dirty = deepFreeze(
+      applyChatEvent(afterError, { type: "turn.end", data: { messageId: 0, status: "failed" } }),
     );
+    expect(dirty.status).toBe("failed");
+    expect(dirty.messages[0]).toEqual(userView);
+    expect(dirty.messages[1]).toEqual({
+      id: 0,
+      role: "assistant",
+      content: STREAMED_BODY,
+      status: "failed",
+      steps: [
+        {
+          id: 11,
+          name: "bash",
+          detail: BASH_START_DETAIL,
+          status: "failed",
+        },
+      ],
+      error: AGENT_FAILURE,
+    });
 
+    const reset = applyChatEvent(dirty, { type: "turn.start", data: { messageId: 0 } });
     expect(reset.status).toBe("running");
     expect(reset.messages[0]).toEqual(userView);
     expect(reset.messages[1]).toEqual({
@@ -259,5 +278,99 @@ describe("Chat stream reducer", () => {
       error: null,
     });
     expect(frozenSnapshot).toEqual(snapshot);
+  });
+
+  it("materializes an absent assistant for a lone terminal without rewriting history", () => {
+    const snapshot: ChatMessageSnapshot = {
+      session: { ...runningSession, status: "idle" },
+      messages: [historyUser],
+      streamCursor: { epoch: 1, seq: null },
+    };
+
+    for (const status of ["done", "failed"] as const) {
+      const frozenSnapshot = deepFreeze(structuredClone(snapshot));
+      const initial = deepFreeze(chatStateFromSnapshot(frozenSnapshot));
+      const final = applyChatEvent(initial, {
+        type: "turn.end",
+        data: { messageId: 0, status },
+      });
+
+      expect(final.status).toBe(status);
+      expect(final.messages).toEqual([
+        userView,
+        {
+          id: 0,
+          role: "assistant",
+          content: "",
+          status,
+          steps: [],
+          error: null,
+        },
+      ]);
+      expect(initial.messages).toHaveLength(1);
+      expect(frozenSnapshot).toEqual(snapshot);
+    }
+  });
+
+  it("keeps the session generating after a pre-start error until the failed terminal", () => {
+    const snapshot: ChatMessageSnapshot = {
+      session: { ...runningSession, status: "idle" },
+      messages: [historyUser],
+      streamCursor: { epoch: 1, seq: null },
+    };
+    const frozenSnapshot = deepFreeze(structuredClone(snapshot));
+    const afterError = applyChatEvent(deepFreeze(chatStateFromSnapshot(frozenSnapshot)), {
+      type: "error",
+      data: { messageId: 0, message: " exact error \u0000\uFEFF中文 😀 " },
+    });
+
+    expect(afterError.status).toBe("running");
+    expect(afterError.messages).toEqual([
+      userView,
+      {
+        id: 0,
+        role: "assistant",
+        content: "",
+        status: "failed",
+        steps: [],
+        error: " exact error \u0000\uFEFF中文 😀 ",
+      },
+    ]);
+
+    const afterEnd = applyChatEvent(afterError, {
+      type: "turn.end",
+      data: { messageId: 0, status: "failed" },
+    });
+    expect(afterEnd.status).toBe("failed");
+    expect(afterEnd.messages).toHaveLength(2);
+    expect(afterEnd.messages[1]?.error).toBe(" exact error \u0000\uFEFF中文 😀 ");
+    expect(frozenSnapshot).toEqual(snapshot);
+  });
+
+  it("leaves the whole state unchanged when events target a user message", () => {
+    const snapshot: ChatMessageSnapshot = {
+      session: { ...runningSession, status: "done" },
+      messages: [historyUser],
+      streamCursor: { epoch: 1, seq: null },
+    };
+    const initial = deepFreeze(chatStateFromSnapshot(deepFreeze(structuredClone(snapshot))));
+    const events: ChatEvent[] = [
+      { type: "turn.start", data: { messageId: -3 } },
+      { type: "text.delta", data: { messageId: -3, delta: "bad" } },
+      {
+        type: "step.start",
+        data: { messageId: -3, stepId: 1, name: "bad", detail: "bad" },
+      },
+      {
+        type: "step.end",
+        data: { messageId: -3, stepId: 1, status: "failed", detail: "bad" },
+      },
+      { type: "error", data: { messageId: -3, message: "bad" } },
+      { type: "turn.end", data: { messageId: -3, status: "failed" } },
+    ];
+
+    for (const event of events) {
+      expect(applyChatEvent(initial, event)).toBe(initial);
+    }
   });
 });

@@ -67,7 +67,19 @@ export function chatStateFromSnapshot(snapshot: ChatMessageSnapshot): ChatState 
 export function applyChatEvent(state: ChatState, event: ChatEvent): ChatState {
   switch (event.type) {
     case "turn.start":
-      return startTurn(state, event.data.messageId);
+      return replaceAssistant(
+        state,
+        event.data.messageId,
+        (message) => ({
+          id: message.id,
+          role: "assistant",
+          content: "",
+          status: "running",
+          steps: [],
+          error: null,
+        }),
+        "running",
+      );
     case "text.delta":
       return replaceAssistant(state, event.data.messageId, (message) => ({
         ...message,
@@ -78,28 +90,21 @@ export function applyChatEvent(state: ChatState, event: ChatEvent): ChatState {
     case "step.end":
       return endStep(state, event.data);
     case "error":
-      return replaceAssistant(state, event.data.messageId, (message) => ({
-        ...message,
-        status: "failed",
-        error: event.data.message,
-      }));
+      return replaceAssistant(
+        state,
+        event.data.messageId,
+        (message) => ({
+          ...message,
+          status: "failed",
+          error: event.data.message,
+        }),
+        "running",
+      );
     case "turn.end":
       return endTurn(state, event.data.messageId, event.data.status);
     default:
       return state;
   }
-}
-
-function startTurn(state: ChatState, messageId: number): ChatState {
-  const next = replaceAssistant(state, messageId, (message) => ({
-    id: message.id,
-    role: "assistant",
-    content: "",
-    status: "running",
-    steps: [],
-    error: null,
-  }));
-  return next === state || next.status === "running" ? next : { ...next, status: "running" };
 }
 
 function startStep(
@@ -147,31 +152,61 @@ function endStep(
 }
 
 function endTurn(state: ChatState, messageId: number, status: "done" | "failed"): ChatState {
-  const next = replaceAssistant(state, messageId, (message) => ({
-    ...message,
+  return replaceAssistant(
+    state,
+    messageId,
+    (message) => ({
+      ...message,
+      status,
+      error: status === "done" ? null : message.error,
+      steps: message.steps.some((step) => step.status === "running")
+        ? message.steps.map((step) => (step.status === "running" ? { ...step, status } : step))
+        : message.steps,
+    }),
     status,
-    steps: message.steps.some((step) => step.status === "running")
-      ? message.steps.map((step) => (step.status === "running" ? { ...step, status } : step))
-      : message.steps,
-  }));
-  return next.status === status ? next : { ...next, status };
+  );
+}
+
+function emptyAssistant(messageId: number): ChatMessageView {
+  return {
+    id: messageId,
+    role: "assistant",
+    content: "",
+    status: "running",
+    steps: [],
+    error: null,
+  };
 }
 
 function replaceAssistant(
   state: ChatState,
   messageId: number,
   update: (message: ChatMessageView) => ChatMessageView,
+  sessionStatus?: ChatSession["status"],
 ): ChatState {
   const index = state.messages.findIndex((message) => message.id === messageId);
   const current = index < 0 ? undefined : state.messages[index];
-  if (current === undefined || current.role !== "assistant") {
+  if (current?.role === "user") {
     return state;
   }
-  const next = update(current);
-  if (next === current) {
+  const source = current ?? emptyAssistant(messageId);
+  const next = update(source);
+  if (next === source && current !== undefined) {
+    return sessionStatus === undefined || state.status === sessionStatus
+      ? state
+      : { ...state, status: sessionStatus };
+  }
+  if (next === source && current === undefined) {
     return state;
   }
   const messages = state.messages.slice();
-  messages[index] = next;
-  return { status: state.status, messages };
+  if (current === undefined) {
+    messages.push(next);
+  } else {
+    messages[index] = next;
+  }
+  return {
+    status: sessionStatus ?? state.status,
+    messages,
+  };
 }
