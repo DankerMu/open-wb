@@ -12,17 +12,19 @@
 - Domain not selected tenant sandbox/process credential isolation/SQLite migration: unchanged producer boundaries, read-only oracles.
 
 ## 1. Implementation
-- [ ] 1.1 Write paired failing tests first; expose only consumed existing named DTO types, define projected pure chat state without fabricated metadata.
-- [ ] 1.2 Implement reducer and payload decoder: complete text, steps/detail/status, required messageId, unknown types, snapshot continuation, lone terminal and error-before-start.
-- [ ] 1.3 Implement injected named-event connection, every-open/gap/overflow recovery,1000-event FIFO, cursor/watermark filtering, generation/abort/callback fences and close/error cleanup.
+- [x] 1.1 Write paired failing tests first; expose only consumed existing named DTO types, define projected pure chat state without fabricated metadata.
+- [x] 1.2 Implement reducer and payload decoder: complete text, steps/detail/status, required messageId, unknown types, snapshot continuation, lone terminal and error-before-start.
+- [x] 1.3 Implement injected named-event connection, every-open/gap/overflow recovery,1000-event FIFO, cursor/watermark filtering, generation/abort/callback fences and close/error cleanup.
 
 ## 2. Verification
-- [ ] 2.1 Qualify controlled tests for exact2049chars, sealed/higher epoch, duplicate frames, stale/closed/ignored-abort loads, repeated gap/overflow, reentrancy and failure ownership; preserve failing-before/green-after evidence honestly.
-- [ ] 2.2 Parent Chromium native EventSource with real HTTP/server/native producer verifies initial-completion window, exact text, error-interface distinction, automatic reconnect/Last-Event-ID and gap/open resync; capture browser console/error evidence without claiming product-page completion.
-- [ ] 2.3 Complete web coverage suite, scoped static/type/build/drift and strict OpenSpec pass; protected source/oracle/dependency/discovery identities intact.
+- [x] 2.1 Qualify controlled tests for exact2049chars, sealed/higher epoch, duplicate frames, stale/closed/ignored-abort loads, repeated gap/overflow, reentrancy and failure ownership; preserve failing-before/green-after evidence honestly.
+- [x] 2.2 Parent Chromium native EventSource with real HTTP/server/native producer verifies initial-completion window, exact text, error-interface distinction, automatic reconnect/Last-Event-ID and gap/open resync; capture browser console/error evidence without claiming product-page completion.
+- [x] 2.3 Complete web coverage suite, scoped static/type/build/drift and strict OpenSpec pass; protected source/oracle/dependency/discovery identities intact.
 - [ ] 2.4 Read-only independent source reviews and exact-head required CI pass with bounded fix gate.
 
 ## 3. Delivery
 - [ ] 3.1 Synchronize parent plan, merge source PR/close issue, then prepare canonical archive with recorded evidence.
 
 Archive delivery remains an external parent-workflow gate: independently validate and merge its PR/CI before #104.
+
+Local evidence: `/tmp/open-wb-issue93-evidence/`. Twenty-six new tests pass; final historical connector rejects five regressions. Six disposable cursor/recovery mutants are rejected; one initially survived incomplete stale-load assertions, then was rejected after adding no-error/no-close assertions and restoring GREEN. Four earlier public counterexamples and the captured-then getter counterexample retain semantic RED logs. Chromium native and foreign-realm lanes both pass restoration and one dedicated no-change stability trial (zero browser errors); screenshots are protocol harnesses, not the future #104 product page. Missing-module/function tracers are setup RED only. Source review, exact-head CI and independent archive delivery remain pending.

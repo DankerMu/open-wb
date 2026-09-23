@@ -29,7 +29,7 @@ export type ChatMessage = {
   steps: ChatStep[];
 };
 
-type ChatStreamCursor = {
+export type ChatStreamCursor = {
   epoch: number;
   seq: number | null;
 };

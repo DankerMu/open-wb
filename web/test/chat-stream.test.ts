@@ -50,23 +50,45 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
+function reducerSnapshot(
+  options: {
+    sessionStatus?: "idle" | "running" | "done" | "failed";
+    content?: string;
+    assistantStatus?: "running" | "done" | "failed";
+    steps?: ChatMessageSnapshot["messages"][number]["steps"];
+    includeAssistant?: boolean;
+    cursor?: { epoch: number; seq: number | null };
+  } = {},
+): ChatMessageSnapshot {
+  const messages: ChatMessageSnapshot["messages"] = [historyUser];
+  if (options.includeAssistant !== false) {
+    messages.push({
+      id: 0,
+      role: "assistant",
+      content: options.content ?? "",
+      status: options.assistantStatus ?? "running",
+      createdAt: 0,
+      steps: options.steps ?? [],
+    });
+  }
+  return {
+    session: { ...runningSession, status: options.sessionStatus ?? "running" },
+    messages,
+    streamCursor: options.cursor ?? { epoch: 1, seq: null },
+  };
+}
+
+const runningBashStep = {
+  id: 11,
+  ordinal: 0,
+  name: "bash",
+  detail: BASH_START_DETAIL,
+  status: "running" as const,
+};
+
 describe("Chat stream reducer", () => {
   it("projects snapshot history then reduces a bash turn to exact done text and one keyed step", () => {
-    const snapshot: ChatMessageSnapshot = {
-      session: runningSession,
-      messages: [
-        historyUser,
-        {
-          id: 0,
-          role: "assistant",
-          content: "",
-          status: "running",
-          createdAt: 0,
-          steps: [],
-        },
-      ],
-      streamCursor: { epoch: 1, seq: null },
-    };
+    const snapshot = reducerSnapshot();
     const events: ChatEvent[] = [
       { type: "turn.start", data: { messageId: 0 } },
       {
@@ -136,29 +158,10 @@ describe("Chat stream reducer", () => {
   });
 
   it("keeps session generating on business error then settles remaining running step on failed turn.end", () => {
-    const snapshot: ChatMessageSnapshot = {
-      session: runningSession,
-      messages: [
-        historyUser,
-        {
-          id: 0,
-          role: "assistant",
-          content: STREAMED_BODY,
-          status: "running",
-          createdAt: 0,
-          steps: [
-            {
-              id: 11,
-              ordinal: 0,
-              name: "bash",
-              detail: BASH_START_DETAIL,
-              status: "running",
-            },
-          ],
-        },
-      ],
-      streamCursor: { epoch: 1, seq: null },
-    };
+    const snapshot = reducerSnapshot({
+      content: STREAMED_BODY,
+      steps: [runningBashStep],
+    });
     const frozenSnapshot = deepFreeze(structuredClone(snapshot));
     const afterError = deepFreeze(
       applyChatEvent(deepFreeze(chatStateFromSnapshot(frozenSnapshot)), {
@@ -217,29 +220,10 @@ describe("Chat stream reducer", () => {
   });
 
   it("resets a failed assistant and session to running without rewriting user history", () => {
-    const snapshot: ChatMessageSnapshot = {
-      session: runningSession,
-      messages: [
-        historyUser,
-        {
-          id: 0,
-          role: "assistant",
-          content: STREAMED_BODY,
-          status: "running",
-          createdAt: 0,
-          steps: [
-            {
-              id: 11,
-              ordinal: 0,
-              name: "bash",
-              detail: BASH_START_DETAIL,
-              status: "running",
-            },
-          ],
-        },
-      ],
-      streamCursor: { epoch: 1, seq: null },
-    };
+    const snapshot = reducerSnapshot({
+      content: STREAMED_BODY,
+      steps: [runningBashStep],
+    });
     const frozenSnapshot = deepFreeze(structuredClone(snapshot));
     const afterError = applyChatEvent(deepFreeze(chatStateFromSnapshot(frozenSnapshot)), {
       type: "error",
@@ -281,11 +265,10 @@ describe("Chat stream reducer", () => {
   });
 
   it("materializes an absent assistant for a lone terminal without rewriting history", () => {
-    const snapshot: ChatMessageSnapshot = {
-      session: { ...runningSession, status: "idle" },
-      messages: [historyUser],
-      streamCursor: { epoch: 1, seq: null },
-    };
+    const snapshot = reducerSnapshot({
+      sessionStatus: "idle",
+      includeAssistant: false,
+    });
 
     for (const status of ["done", "failed"] as const) {
       const frozenSnapshot = deepFreeze(structuredClone(snapshot));
@@ -313,11 +296,10 @@ describe("Chat stream reducer", () => {
   });
 
   it("keeps the session generating after a pre-start error until the failed terminal", () => {
-    const snapshot: ChatMessageSnapshot = {
-      session: { ...runningSession, status: "idle" },
-      messages: [historyUser],
-      streamCursor: { epoch: 1, seq: null },
-    };
+    const snapshot = reducerSnapshot({
+      sessionStatus: "idle",
+      includeAssistant: false,
+    });
     const frozenSnapshot = deepFreeze(structuredClone(snapshot));
     const afterError = applyChatEvent(deepFreeze(chatStateFromSnapshot(frozenSnapshot)), {
       type: "error",
@@ -348,11 +330,10 @@ describe("Chat stream reducer", () => {
   });
 
   it("leaves the whole state unchanged when events target a user message", () => {
-    const snapshot: ChatMessageSnapshot = {
-      session: { ...runningSession, status: "done" },
-      messages: [historyUser],
-      streamCursor: { epoch: 1, seq: null },
-    };
+    const snapshot = reducerSnapshot({
+      sessionStatus: "done",
+      includeAssistant: false,
+    });
     const initial = deepFreeze(chatStateFromSnapshot(deepFreeze(structuredClone(snapshot))));
     const events: ChatEvent[] = [
       { type: "turn.start", data: { messageId: -3 } },
@@ -372,5 +353,76 @@ describe("Chat stream reducer", () => {
     for (const event of events) {
       expect(applyChatEvent(initial, event)).toBe(initial);
     }
+    expect(
+      applyChatEvent(initial, {
+        type: "future.event",
+        data: { messageId: -3 },
+      } as unknown as ChatEvent),
+    ).toBe(initial);
+  });
+
+  it("settles only remaining running steps and continues a snapshot step by id", () => {
+    const snapshot = reducerSnapshot({
+      content: STREAMED_BODY,
+      cursor: { epoch: 1, seq: 1 },
+      steps: [
+        { id: 3, ordinal: 0, name: "first", detail: "done", status: "done" },
+        { id: 4, ordinal: 1, name: "second", detail: "running", status: "running" },
+        { id: 5, ordinal: 2, name: "third", detail: "failed", status: "failed" },
+      ],
+    });
+    const frozenSnapshot = deepFreeze(structuredClone(snapshot));
+    const initial = deepFreeze(chatStateFromSnapshot(frozenSnapshot));
+    const continued = applyChatEvent(initial, {
+      type: "step.end",
+      data: { messageId: 0, stepId: 4, status: "done", detail: "result 世界" },
+    });
+    expect(continued.messages[1]?.steps).toEqual([
+      { id: 3, name: "first", detail: "done", status: "done" },
+      { id: 4, name: "second", detail: "result 世界", status: "done" },
+      { id: 5, name: "third", detail: "failed", status: "failed" },
+    ]);
+
+    const started = applyChatEvent(continued, {
+      type: "step.start",
+      data: { messageId: 0, stepId: 4, name: "second", detail: "duplicate" },
+    });
+    expect(started.messages[1]?.steps).toHaveLength(3);
+    expect(
+      applyChatEvent(started, {
+        type: "step.end",
+        data: { messageId: 0, stepId: 999, status: "failed", detail: "unknown" },
+      }),
+    ).toEqual(started);
+
+    const ended = applyChatEvent(started, {
+      type: "turn.end",
+      data: { messageId: 0, status: "failed" },
+    });
+    expect(ended.messages[1]?.content).toBe(STREAMED_BODY);
+    expect(ended.messages[1]?.steps.map((step) => step.status)).toEqual(["done", "done", "failed"]);
+    expect(ended.status).toBe("failed");
+    expect(frozenSnapshot).toEqual(snapshot);
+  });
+
+  it("clears a prior error on a successful terminal", () => {
+    const snapshot = reducerSnapshot({ includeAssistant: false });
+    const afterError = applyChatEvent(chatStateFromSnapshot(snapshot), {
+      type: "error",
+      data: { messageId: 0, message: AGENT_FAILURE },
+    });
+    const done = applyChatEvent(afterError, {
+      type: "turn.end",
+      data: { messageId: 0, status: "done" },
+    });
+    expect(done.status).toBe("done");
+    expect(done.messages[1]).toEqual({
+      id: 0,
+      role: "assistant",
+      content: "",
+      status: "done",
+      steps: [],
+      error: null,
+    });
   });
 });
