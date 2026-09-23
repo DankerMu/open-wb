@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { Profiler } from "react";
-import { createBrowserRouter, createMemoryRouter, RouterProvider, useLocation } from "react-router";
+import { createBrowserRouter, RouterProvider, useLocation } from "react-router";
 import { expect, vi } from "vitest";
 import { AuthFooter, AuthGuard, AuthProvider, useAuth } from "../src/features/auth/index.js";
 import { ChatPage } from "../src/features/chat/index.js";
@@ -78,6 +79,19 @@ function trackRouter(router: { dispose(): void }) {
   };
 }
 
+function mountAuthenticatedChatRouter(path: string, element: ReactElement) {
+  setBrowserPath(path);
+  const router = createBrowserRouter([
+    {
+      path: "/",
+      element,
+    },
+  ]);
+  trackRouter(router);
+  const view = render(<RouterProvider router={router} />);
+  return { router, view };
+}
+
 export function renderObservedChatPage(
   path: string,
   routes: FetchRoutes,
@@ -85,24 +99,17 @@ export function renderObservedChatPage(
 ) {
   const fetchMock = createFetchMock(authenticatedChatLifecycleRoutes(routes));
   resetFakeEventSources();
-  setBrowserPath(path);
   vi.stubGlobal("fetch", fetchMock);
   vi.stubGlobal("EventSource", FakeEventSource);
-  const router = createBrowserRouter([
-    {
-      path: "/",
-      element: (
-        <AuthProvider>
-          <AuthGuard>
-            <ObservedChatPage onCommit={onCommit} />
-            <AuthFooter />
-          </AuthGuard>
-        </AuthProvider>
-      ),
-    },
-  ]);
-  trackRouter(router);
-  const view = render(<RouterProvider router={router} />);
+  const { router, view } = mountAuthenticatedChatRouter(
+    path,
+    <AuthProvider>
+      <AuthGuard>
+        <ObservedChatPage onCommit={onCommit} />
+        <AuthFooter />
+      </AuthGuard>
+    </AuthProvider>,
+  );
   return { fetchMock, router, view };
 }
 
@@ -110,28 +117,18 @@ export function renderChatPageWithAuthProbe(path: string, routes: FetchRoutes) {
   let probe: ChatAuthProbe | undefined;
   const fetchMock = createFetchMock(authenticatedChatLifecycleRoutes(routes));
   resetFakeEventSources();
-  setBrowserPath(path);
   vi.stubGlobal("fetch", fetchMock);
   vi.stubGlobal("EventSource", FakeEventSource);
-  const router = createMemoryRouter(
-    [
-      {
-        path: "/",
-        element: (
-          <AuthProvider>
-            <ChatAuthProbe onState={(state) => (probe = state)} />
-            <AuthGuard>
-              <ChatPage />
-              <AuthFooter />
-            </AuthGuard>
-          </AuthProvider>
-        ),
-      },
-    ],
-    { initialEntries: [path] },
+  const { router, view } = mountAuthenticatedChatRouter(
+    path,
+    <AuthProvider>
+      <ChatAuthProbe onState={(state) => (probe = state)} />
+      <AuthGuard>
+        <ChatPage />
+        <AuthFooter />
+      </AuthGuard>
+    </AuthProvider>,
   );
-  trackRouter(router);
-  const view = render(<RouterProvider router={router} />);
   return {
     fetchMock,
     router,
@@ -159,6 +156,19 @@ export function typeDraft(text: string) {
 
 export function clickSend() {
   fireEvent.click(screen.getByRole("button", { name: "发送" }));
+}
+
+export async function settleDeferredResponse(
+  deferred: { resolve(response: Response): void },
+  response: Response,
+) {
+  const { setImmediate } = await import("node:timers");
+  await act(async () => {
+    deferred.resolve(response);
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+  });
 }
 
 export function cleanupChatLifecycle() {

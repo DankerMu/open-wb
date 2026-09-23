@@ -229,7 +229,7 @@ describe("chat page isolation and errors", () => {
       [SESSION_PROMPT]: envelope(502, "agent_unavailable", AGENT_UNAVAILABLE),
     });
 
-    await screen.findByRole("button", { name: "新建会话" });
+    await within(await findMessageArea()).findByText(historyUser.content, exactText);
     await typeAndSend(PROMPT);
     expect((await screen.findByRole("alert")).textContent).toBe(AGENT_UNAVAILABLE);
     expect(within(await findMessageArea()).queryByText(PROMPT, { exact: true })).toBeNull();
@@ -241,7 +241,7 @@ describe("chat page isolation and errors", () => {
       [SESSION_MESSAGES]: freshSnapshot(idleSnapshot),
       [SESSION_PROMPT]: envelope(409, "session_busy", SESSION_BUSY),
     });
-    await screen.findByRole("button", { name: "新建会话" });
+    await within(await findMessageArea()).findByText(historyUser.content, exactText);
     await typeAndSend(PROMPT);
     expect((await screen.findByRole("alert")).textContent).toBe(SESSION_BUSY);
   });
@@ -266,7 +266,6 @@ describe("chat page isolation and errors", () => {
       [SESSION_PROMPT]: jsonResponse(promptAccepted, 202),
     });
 
-    await screen.findByRole("button", { name: "新建会话" });
     const messages = await findMessageArea();
     expect(await within(messages).findByText(historyUser.content, exactText)).toBeTruthy();
     await typeAndSend(PROMPT);

@@ -27,50 +27,43 @@ type ConversationViewProps = {
 
 const exactWhitespace = { whiteSpace: "pre-wrap" as const };
 
-function SessionList({
-  onCreateSession,
+function SessionEntries({
   onSelectSession,
   requestedSessionId,
   sessions,
   sessionTitle,
 }: {
-  onCreateSession(): void;
   onSelectSession(sessionId: string): void;
   requestedSessionId: string | null;
   sessions: ChatSession[];
   sessionTitle(session: ChatSession): string;
 }) {
   return (
-    <nav aria-label="会话列表">
-      <button onClick={onCreateSession} type="button">
-        新建会话
-      </button>
-      <ul>
-        {sessions.map((session) => {
-          const selected = session.id === requestedSessionId;
-          const title = sessionTitle(session);
-          return (
-            <li key={session.id} style={{ marginBottom: "0.5rem" }}>
-              <button
-                aria-current={selected ? "true" : undefined}
-                aria-label={title}
-                onClick={() => onSelectSession(session.id)}
-                type="button"
+    <ul>
+      {sessions.map((session) => {
+        const selected = session.id === requestedSessionId;
+        const title = sessionTitle(session);
+        return (
+          <li key={session.id} style={{ marginBottom: "0.5rem" }}>
+            <button
+              aria-current={selected ? "true" : undefined}
+              aria-label={title}
+              onClick={() => onSelectSession(session.id)}
+              type="button"
+            >
+              <strong style={{ display: "block" }}>{title}</strong>
+              <span
+                aria-label={`${title} ${session.status}`}
+                role="status"
+                style={{ display: "block", marginTop: "0.25rem" }}
               >
-                <strong style={{ display: "block" }}>{title}</strong>
-                <span
-                  aria-label={`${title} ${session.status}`}
-                  role="status"
-                  style={{ display: "block", marginTop: "0.25rem" }}
-                >
-                  {session.status}
-                </span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-    </nav>
+                {session.status}
+              </span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -128,17 +121,21 @@ export function ConversationView({
 }: ConversationViewProps) {
   const listColumn: ReactNode = (
     <aside aria-label="会话侧栏" style={{ minWidth: 0 }}>
-      {listError ? <p role="alert">{listError}</p> : null}
-      {listLoading ? <p role="status">正在读取会话</p> : null}
-      {sessions ? (
-        <SessionList
-          onCreateSession={onCreateSession}
-          onSelectSession={onSelectSession}
-          requestedSessionId={requestedSessionId}
-          sessions={sessions}
-          sessionTitle={sessionTitle}
-        />
-      ) : null}
+      <nav aria-label="会话列表">
+        <button onClick={onCreateSession} type="button">
+          新建会话
+        </button>
+        {listError ? <p role="alert">{listError}</p> : null}
+        {listLoading ? <p role="status">正在读取会话</p> : null}
+        {sessions ? (
+          <SessionEntries
+            onSelectSession={onSelectSession}
+            requestedSessionId={requestedSessionId}
+            sessions={sessions}
+            sessionTitle={sessionTitle}
+          />
+        ) : null}
+      </nav>
     </aside>
   );
 

@@ -33,6 +33,19 @@ afterEach(() => {
   cleanupChatPage();
 });
 
+function listTitles(list: HTMLElement) {
+  return within(list)
+    .getAllByRole("button")
+    .filter((button) => button.getAttribute("aria-label") !== null)
+    .map((button) => button.getAttribute("aria-label"));
+}
+
+async function expectListTitles(list: HTMLElement, titles: string[]) {
+  await waitFor(() => {
+    expect(listTitles(list)).toEqual(titles);
+  });
+}
+
 describe("chat page confirmed ownership gaps", () => {
   it("keeps one completed pair when terminal events arrive before prompt 202", async () => {
     const pendingInitial = deferredResponse();
@@ -204,7 +217,6 @@ describe("chat page confirmed ownership gaps", () => {
       },
     });
 
-    await screen.findByRole("button", { name: "新建会话" });
     const messages = await findMessageArea();
     expect(await within(messages).findByText(COMPLETED_BODY, { exact: true })).toBeTruthy();
     await typeAndSend(FOLLOW_UP);
@@ -268,7 +280,8 @@ describe("chat page confirmed ownership gaps", () => {
       [OTHER_MESSAGES]: freshSnapshot(otherSnapshot()),
     });
 
-    await screen.findByRole("button", { name: "新建会话" });
+    const staleMessages = await findMessageArea();
+    expect(await within(staleMessages).findByText(COMPLETED_BODY, { exact: true })).toBeTruthy();
     await typeAndSend(PROMPT);
     const promptCall = fetchMock.mock.calls.find(([path]) => path === SESSION_PROMPT);
     await act(async () => {
@@ -307,12 +320,7 @@ describe("chat page confirmed ownership gaps", () => {
     });
 
     const list = await screen.findByRole("navigation", { name: "会话列表" });
-    expect(
-      within(list)
-        .getAllByRole("button")
-        .filter((button) => button.getAttribute("aria-label") !== null)
-        .map((button) => button.getAttribute("aria-label")),
-    ).toEqual(["other session", "older title"]);
+    await expectListTitles(list, ["other session", "older title"]);
     await typeAndSend(PROMPT);
     currentSnapshot = {
       session: {
@@ -345,14 +353,7 @@ describe("chat page confirmed ownership gaps", () => {
     pendingAccept.resolve(jsonResponse(promptAccepted, 202));
     const messages = await findMessageArea();
     expect(await within(messages).findByText(PROMPT, { exact: true })).toBeTruthy();
-    await waitFor(() => {
-      expect(
-        within(list)
-          .getAllByRole("button")
-          .filter((button) => button.getAttribute("aria-label") !== null)
-          .map((button) => button.getAttribute("aria-label")),
-      ).toEqual([PROMPT, "other session"]);
-    });
+    await expectListTitles(list, [PROMPT, "other session"]);
     expect(within(list).getByRole("status", { name: `${PROMPT} done` })).toBeTruthy();
   });
 
@@ -382,7 +383,6 @@ describe("chat page confirmed ownership gaps", () => {
       [SESSION_PROMPT]: jsonResponse(promptAccepted, 202),
     });
 
-    await screen.findByRole("button", { name: "新建会话" });
     await waitFor(() => {
       expect(FakeEventSource.instances.length).toBeGreaterThan(0);
     });
