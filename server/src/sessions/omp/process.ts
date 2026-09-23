@@ -14,7 +14,7 @@ import {
 } from "./frame.js";
 
 export interface SpawnOmpOpts {
-  /** Trusted absolute executable path from config; not a PATH lookup. Validation is future config owner #101. */
+  /** Trusted absolute executable path from config; not a PATH lookup. */
   bin: string;
   sandboxRoot: string;
   stateDir: string;
@@ -22,6 +22,7 @@ export interface SpawnOmpOpts {
   modelId: string;
   token: string;
   resumePath: string | null;
+  ompUser?: string;
 }
 
 export type SpawnImpl = (
@@ -81,7 +82,20 @@ export async function spawnOmp(
     env.TMPDIR = process.env.TMPDIR;
   }
 
-  return spawnImpl(opts.bin, args, {
+  const command = opts.ompUser === undefined ? opts.bin : "sudo";
+  const commandArgs =
+    opts.ompUser === undefined
+      ? args
+      : [
+          "-n",
+          "-u",
+          opts.ompUser,
+          "--preserve-env=PATH,LANG,TMPDIR,HOME,PI_CODING_AGENT_DIR,WORKBUDDY_MODEL_TOKEN",
+          "--",
+          opts.bin,
+          ...args,
+        ];
+  return spawnImpl(command, commandArgs, {
     cwd,
     env,
     stdio: ["pipe", "pipe", "pipe"],

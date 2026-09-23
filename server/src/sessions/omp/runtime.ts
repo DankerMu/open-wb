@@ -37,6 +37,7 @@ export interface SessionRuntimeOpts {
   ownerId: string;
   modelId: string;
   tokens: SessionTokens;
+  ompUser?: string;
   idleMs?: number;
   resumePath?: string | null;
   spawnImpl?: SpawnImpl;
@@ -111,6 +112,7 @@ export class SessionRuntime {
   readonly #stateDir: string;
   readonly #ownerId: string;
   readonly #modelId: string;
+  readonly #ompUser: string | undefined;
   readonly #tokens: SessionTokens;
   readonly #idleMs: number;
   readonly #clock: SessionClock;
@@ -136,6 +138,7 @@ export class SessionRuntime {
     this.#stateDir = opts.stateDir;
     this.#ownerId = opts.ownerId;
     this.#modelId = opts.modelId;
+    this.#ompUser = opts.ompUser;
     this.#tokens = opts.tokens;
     this.#idleMs = opts.idleMs ?? DEFAULT_IDLE_MS;
     this.#clock = opts.clock ?? systemClock;
@@ -313,6 +316,7 @@ export class SessionRuntime {
       modelId: this.#modelId,
       token,
       resumePath: this.#resumePath,
+      ...(this.#ompUser === undefined ? {} : { ompUser: this.#ompUser }),
       spawnImpl,
       ...(this.#handshakeTimeoutMs === undefined
         ? {}

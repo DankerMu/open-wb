@@ -15,6 +15,7 @@ export interface AgentSettings {
   modelUpstreamBaseUrl?: string;
   modelUpstreamApiKey?: string;
   modelId: string;
+  ompUser?: string;
 }
 
 export function resolveAgentSettings(
@@ -44,6 +45,7 @@ export function resolveAgentSettings(
     ...(modelUpstreamBaseUrl === undefined ? {} : { modelUpstreamBaseUrl }),
     ...(modelUpstreamApiKey === undefined ? {} : { modelUpstreamApiKey }),
     modelId: env.MODEL_ID === undefined ? DEFAULT_MODEL_ID : env.MODEL_ID,
+    ...(env.OMP_USER === undefined ? {} : { ompUser: resolveOmpUser(env.OMP_USER) }),
   };
 }
 
@@ -82,6 +84,13 @@ function optionalSetting(raw: string | undefined, key: string): string | undefin
   }
   if (raw.length === 0) {
     throw new Error(`${key} must not be empty`);
+  }
+  return raw;
+}
+
+function resolveOmpUser(raw: string): string {
+  if (raw.length < 1 || raw.length > 32 || !/^[a-z_][a-z0-9_-]{0,31}$/u.test(raw)) {
+    throw new Error("OMP_USER must match [a-z_][a-z0-9_-]{0,31}");
   }
   return raw;
 }

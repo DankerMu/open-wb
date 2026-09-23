@@ -1,4 +1,4 @@
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import type { ChildProcessWithoutNullStreams, SpawnOptions } from "node:child_process";
 import type { DatabaseSync } from "node:sqlite";
 import { setImmediate as waitImmediate } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -33,12 +33,18 @@ export interface RuntimeOptions {
   stateDir: string;
   modelId: string;
   idleMs: number;
+  ompUser?: string;
   clock: TestClock;
   spawnImpl: SpawnImpl;
 }
 
 export interface SpawnCall {
+  command: string;
   args: string[];
+  cwd: string | undefined;
+  env: Record<string, string>;
+  stdio: unknown;
+  shell: unknown;
   token: string | undefined;
 }
 
@@ -78,12 +84,8 @@ export function createRealFakeRuntime(
   const children: ChildProcessWithoutNullStreams[] = [];
   const temp = harness.tempOpts("issue100-runtime-unused", "session-supervisor-real-");
   let scenario = initialScenario;
-  const spawnImpl: SpawnImpl = (_command, args, options) => {
-    const token = options.env?.WORKBUDDY_MODEL_TOKEN;
-    calls.push({
-      args: [...args],
-      token: typeof token === "string" ? token : undefined,
-    });
+  const spawnImpl: SpawnImpl = (command, args, options) => {
+    calls.push(recordedSpawn(command, args, options));
     const child = harness.spawnTracked(
       [FAKE, ...args, ...(scenario === undefined ? [] : ["--scenario", scenario])],
       options,
@@ -117,16 +119,15 @@ export function createControlledRuntime(
   const calls: SpawnCall[] = [];
   const children: FakeChild[] = [];
   const temp = harness.tempOpts("issue100-controlled-unused", "session-supervisor-controlled-");
-  const spawnImpl: SpawnImpl = (_command, args, options) => {
-    const token = options.env?.WORKBUDDY_MODEL_TOKEN;
-    const call = { args: [...args], token: typeof token === "string" ? token : undefined };
+  const spawnImpl: SpawnImpl = (command, args, options) => {
+    const call = recordedSpawn(command, args, options);
     calls.push(call);
     const child = harness.fake();
     children.push(child);
     child.emitLine(DEFAULT_READY);
     child.replyHandshake();
     configure(child, call, children.length - 1);
-    return child.spawnImpl(_command, args, options);
+    return child.spawnImpl(command, args, options);
   };
   return {
     runtime: {
@@ -338,6 +339,29 @@ export async function waitFor<T>(read: () => T | undefined, description: string)
 export function resumePath(args: readonly string[]): string | undefined {
   const index = args.indexOf("--resume");
   return index === -1 ? undefined : args[index + 1];
+}
+
+export function recordedSpawn(
+  command: string,
+  args: readonly string[],
+  options: SpawnOptions,
+): SpawnCall {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(options.env ?? {})) {
+    if (value !== undefined) {
+      env[key] = value;
+    }
+  }
+  const token = env.WORKBUDDY_MODEL_TOKEN;
+  return {
+    command,
+    args: [...args],
+    cwd: typeof options.cwd === "string" ? options.cwd : undefined,
+    env,
+    stdio: options.stdio,
+    shell: options.shell,
+    token,
+  };
 }
 
 export const OWNER_ID = "u1";

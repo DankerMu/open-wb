@@ -23,6 +23,7 @@ interface AgentSettings {
   modelUpstreamBaseUrl: string | undefined;
   modelUpstreamApiKey: string | undefined;
   modelId: string | undefined;
+  ompUser: string | undefined;
 }
 
 function sevenDefaults(config: {
@@ -33,6 +34,7 @@ function sevenDefaults(config: {
   modelUpstreamBaseUrl?: string;
   modelUpstreamApiKey?: string;
   modelId?: string;
+  ompUser?: string;
 }): AgentSettings {
   return {
     ompBin: config.ompBin,
@@ -42,6 +44,7 @@ function sevenDefaults(config: {
     modelUpstreamBaseUrl: config.modelUpstreamBaseUrl,
     modelUpstreamApiKey: config.modelUpstreamApiKey,
     modelId: config.modelId,
+    ompUser: config.ompUser,
   };
 }
 
@@ -75,6 +78,7 @@ describe("resolveServerConfig — 缺省身份", () => {
       modelUpstreamBaseUrl: undefined,
       modelUpstreamApiKey: undefined,
       modelId: DEFAULT_MODEL_ID,
+      ompUser: undefined,
     });
     expect(sevenDefaults(fromDist)).toEqual(sevenDefaults(fromSource));
   });
@@ -348,5 +352,49 @@ describe("resolveServerConfig — 新路径与上游显式空值", () => {
 
     expectNamedInvalid("MODEL_UPSTREAM_BASE_URL", { MODEL_UPSTREAM_BASE_URL: "" });
     expectNamedInvalid("MODEL_UPSTREAM_API_KEY", { MODEL_UPSTREAM_API_KEY: "" });
+  });
+});
+
+describe("resolveServerConfig — OMP_USER", () => {
+  it("缺席与显式 undefined 不增加用户，其余身份保持缺省", () => {
+    const omitted = resolveServerConfig({}, SOURCE_ENTRY);
+    const explicitUndefined = resolveServerConfig({ OMP_USER: undefined }, SOURCE_ENTRY);
+    expect(omitted.ompUser).toBeUndefined();
+    expect(explicitUndefined.ompUser).toBeUndefined();
+    expect(sevenDefaults(explicitUndefined)).toEqual(sevenDefaults(omitted));
+    expect(Object.hasOwn(omitted, "ompUser")).toBe(false);
+    expect(Object.hasOwn(explicitUndefined, "ompUser")).toBe(false);
+  });
+
+  it("接受 1 与 32 的精确用户名，不裁剪也不改写", () => {
+    expect(resolveServerConfig({ OMP_USER: "_" }, SOURCE_ENTRY).ompUser).toBe("_");
+    expect(resolveServerConfig({ OMP_USER: "a" }, SOURCE_ENTRY).ompUser).toBe("a");
+    const boundary = `_${"a".repeat(31)}`;
+    expect(boundary).toHaveLength(32);
+    expect(resolveServerConfig({ OMP_USER: boundary }, SOURCE_ENTRY).ompUser).toBe(boundary);
+    expect(resolveServerConfig({ OMP_USER: "omp-user_1" }, SOURCE_ENTRY).ompUser).toBe(
+      "omp-user_1",
+    );
+  });
+
+  it("拒绝空、大写、空格、分号、换行、非 ASCII、33 字符与 $ 会吞掉的尾换行", () => {
+    for (const bad of [
+      "",
+      "Omp",
+      "omp user",
+      "root;id",
+      "omp\n",
+      "omp\r",
+      "omp用户",
+      `_${"a".repeat(32)}`,
+      " omp",
+      "omp ",
+      "1omp",
+      "-omp",
+    ]) {
+      expectInvalid({ OMP_USER: bad });
+    }
+    expect("omp\n").toHaveLength(4);
+    expect(`_${"a".repeat(32)}`).toHaveLength(33);
   });
 });

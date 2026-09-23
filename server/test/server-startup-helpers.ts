@@ -32,6 +32,7 @@ export interface StartedServer {
   stdout: () => string;
   stderr: () => string;
   waitForStarted(deadlineMs?: number): Promise<unknown>;
+  waitForClose(): Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
   /** 只向主服务发 SIGTERM，由它自己回收 runtime；返回真实退出码。 */
   stop(): Promise<number | null>;
   /** 强制回收本夹具拥有的进程组。关闭超时会抛出，不得当成已回收。 */
@@ -121,6 +122,9 @@ export function startCompiledServer(
     stderr: owned.stderr,
     waitForStarted(deadlineMs = 15_000) {
       return waitForStartedRecord(owned, deadlineMs);
+    },
+    waitForClose() {
+      return owned.closed;
     },
     stop() {
       return stopMain(owned);

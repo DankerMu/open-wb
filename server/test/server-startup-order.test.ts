@@ -3,6 +3,7 @@
  * HOST=0.0.0.0 绑定可用端口后，server_started 出现时
  * <OMP_STATE_DIR>/agent/models.yml 必须已经存在，且 baseUrl 指向该端口。
  */
+
 import {
   chmodSync,
   existsSync,
@@ -28,6 +29,8 @@ import {
 
 const MODEL_ID = "issue-102-tracer-model";
 const STARTUP_MODULES = ["core/db", "auth", "http", "model-proxy", "sessions"];
+const SQLITE_EXPERIMENTAL_WARNING =
+  "ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\n";
 const scratch: string[] = [];
 
 afterAll(async () => {
@@ -148,6 +151,50 @@ describe("production entry lifecycle", () => {
   }, 40_000);
 });
 
+describe("production entry rejects invalid OMP_USER before effects", () => {
+  it.each([
+    ["empty", ""],
+    ["uppercase", "Omp"],
+    ["space", "omp user"],
+    ["semicolon", "root;id"],
+  ])(
+    "rejects %s with one generic record and no startup effects",
+    async (_name, user) => {
+      const compiled = await compileServerEntry();
+      const scratchRoot = mkdtempSync(join(tmpdir(), "open-wb-omp-user-"));
+      scratch.push(scratchRoot);
+      const dbParent = join(scratchRoot, "db");
+      const state = join(scratchRoot, "state");
+      const sandbox = join(scratchRoot, "sandbox");
+      const port = await reserveWildcardPort();
+      const server = startCompiledServer(compiled.entry, {
+        HOST: "127.0.0.1",
+        PORT: String(port),
+        DB_PATH: join(dbParent, "dev.db"),
+        OMP_STATE_DIR: state,
+        SANDBOX_ROOT: sandbox,
+        OMP_BIN: join(scratchRoot, "bin", "omp"),
+        OMP_USER: user,
+      });
+      const closed = await server.waitForClose();
+      expect(closed.code).toBe(1);
+      expect(closed.signal).toBeNull();
+      expect(server.stdout()).toBe("");
+      const applicationStderr = server
+        .stderr()
+        .replace(/^\(node:\d+\) /u, "")
+        .replace(SQLITE_EXPERIMENTAL_WARNING, "");
+      expect(applicationStderr).toBe(`${JSON.stringify({ event: "server_start_failed" })}\n`);
+      expect(existsSync(dbParent)).toBe(false);
+      expect(existsSync(state)).toBe(false);
+      expect(existsSync(sandbox)).toBe(false);
+      expect(existsSync(join(scratchRoot, "bin"))).toBe(false);
+      await expectRefused("127.0.0.1", port);
+    },
+    90_000,
+  );
+});
+
 function expectConnectable(host: string, port: number): Promise<void> {
   return new Promise((resolve, reject) => {
     const socket = connectTcp({ host, port });
@@ -166,6 +213,20 @@ function expectConnectable(host: string, port: number): Promise<void> {
       resolve();
     });
     socket.once("error", fail);
+  });
+}
+
+function expectRefused(host: string, port: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const socket = connectTcp({ host, port });
+    socket.once("connect", () => {
+      socket.destroy();
+      reject(new Error(`unexpected listener on ${host}:${port}`));
+    });
+    socket.once("error", () => {
+      socket.destroy();
+      resolve();
+    });
   });
 }
 

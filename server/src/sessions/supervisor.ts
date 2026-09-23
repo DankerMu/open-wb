@@ -21,6 +21,7 @@ export interface SessionSupervisorRuntime {
   stateDir: string;
   modelId: string;
   idleMs?: number;
+  ompUser?: string;
   spawnImpl?: SpawnImpl;
   clock?: SessionClock;
   handshakeTimeoutMs?: number;
@@ -187,6 +188,7 @@ export class SessionSupervisor {
       tokens: this.#adapter(slot),
       resumePath,
       ...(this.#runtime.idleMs === undefined ? {} : { idleMs: this.#runtime.idleMs }),
+      ...(this.#runtime.ompUser === undefined ? {} : { ompUser: this.#runtime.ompUser }),
       ...(this.#runtime.spawnImpl === undefined ? {} : { spawnImpl: this.#runtime.spawnImpl }),
       ...(this.#runtime.clock === undefined ? {} : { clock: this.#runtime.clock }),
       ...(this.#runtime.handshakeTimeoutMs === undefined

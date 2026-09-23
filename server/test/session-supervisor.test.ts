@@ -49,6 +49,7 @@ describe("SessionSupervisor real child persistence and lifecycle", () => {
     timeout: 15_000,
   }, async () => {
     const runtime = createRealFakeRuntime();
+    runtime.runtime.ompUser = "omp";
     const terminalStates: string[] = [];
     let capture:
       | {
@@ -147,6 +148,10 @@ describe("SessionSupervisor real child persistence and lifecycle", () => {
       await waitForTurn(fixture, session, "done");
       const resumedCall = requiredCall(runtime.calls, 1);
       const resumedToken = requiredToken(resumedCall.token);
+      expect(firstCall.command).toBe("sudo");
+      expect(resumedCall.command).toBe("sudo");
+      expect(firstCall.args.slice(0, 6)).toEqual(sudoUserPrefix(runtime.runtime.bin));
+      expect(resumedCall.args.slice(0, 6)).toEqual(sudoUserPrefix(runtime.runtime.bin));
       expect(resumePath(resumedCall.args)).toBe("/tmp/open-wb-fake-session.jsonl");
       expect(resumedToken).not.toBe(firstToken);
       expect(fixture.tokens.lookup(resumedToken)).toBe(session);
@@ -572,6 +577,17 @@ function assistantFrom(tree: { messages: readonly AssistantMessage[] }) {
     throw new Error("completed turn has no assistant message");
   }
   return assistant;
+}
+
+function sudoUserPrefix(bin: string): string[] {
+  return [
+    "-n",
+    "-u",
+    "omp",
+    "--preserve-env=PATH,LANG,TMPDIR,HOME,PI_CODING_AGENT_DIR,WORKBUDDY_MODEL_TOKEN",
+    "--",
+    bin,
+  ];
 }
 
 function latestAssistantFrom(tree: { messages: readonly AssistantMessage[] }) {
