@@ -11,7 +11,7 @@
 ## 3. Acceptance and integration
 - [x] 3.1 Main proves unchanged parked #131 test fails original source for missing TMPDIR and passes corrected source non-skipped on native nonroot Linux; exact-value native checks and zero omp residuals before teardown.
 - [x] 3.2 Main runs focused/full server test coverage, typecheck/lint and corrective OpenSpec strict validation; commands exit0. Active-parent validation retains pre-existing HTTP/harness reconciliation errors, with touched spawn omissions repaired (#111 comment5795982481).
-- [ ] 3.3 Frozen SHA expanded cross-review, bounded fixes, exact-head CI green, automatic merge and selective archive; then resume #131 full oracle qualification.
+- [x] 3.3 Frozen SHA expanded cross-review clean, exact-head CI35871077882 all8green, PR240 merged as56fc05d; selective archive promotes only the corrected uid requirement. #131 resumes separately after this archive merge.
 
 ## Risk pack mapping
 - Selected Public API / CLI / script entry: 2.1,3.1 argv parser boundary.
