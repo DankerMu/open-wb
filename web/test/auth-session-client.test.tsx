@@ -1,8 +1,11 @@
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthGuard, AuthProvider, useAuth } from "../src/features/auth/index.js";
+import { FilesPage } from "../src/features/files/index.js";
 import type { ApiClient, LoginCredentials, Principal, ServiceInfo } from "../src/lib/api.js";
-import { deferredResponse, jsonResponse, textPreviewResponse } from "./support.js";
+import { authenticatedFilesRoutes, cleanupFilesFixture, workspace } from "./files-fixture.js";
+import { createFetchMock, deferredResponse, jsonResponse, textPreviewResponse } from "./support.js";
 
 const principal = { id: "user-1", account: "zhangsan", role: "member" };
 
@@ -55,6 +58,7 @@ async function renderAuthenticatedProvider(handler: FetchHandler) {
 }
 
 afterEach(() => {
+  cleanupFilesFixture();
   cleanup();
   vi.unstubAllGlobals();
   document.body.replaceChildren();
@@ -63,6 +67,57 @@ afterEach(() => {
 function expectProtectedSession(probe: AuthProbeState) {
   expect(screen.getByText("受保护页面", { exact: true })).toBeTruthy();
   expect(probe).toMatchObject({ principal, status: "authenticated" });
+}
+
+function startOldWorkspaceList(getProbe: () => AuthProbeState) {
+  const oldClient = getProbe().createSessionClient();
+  return oldClient.listWorkspaces().then(
+    () => new Error("expected the old request to reject"),
+    (error: unknown) => error,
+  );
+}
+
+async function loginWhileAuthenticated(
+  getProbe: () => AuthProbeState,
+  credentials: { account: string; password: string } = { account: "zhangsan", password: "demo" },
+) {
+  await act(async () => {
+    await expect(getProbe().login(credentials)).resolves.toBe(true);
+  });
+}
+
+async function renderMountedFilesPage(routes: Parameters<typeof createFetchMock>[0]) {
+  const fetchMock = createFetchMock(authenticatedFilesRoutes([workspace], routes));
+  vi.stubGlobal("fetch", fetchMock);
+  let probe: AuthProbeState | undefined;
+  const router = createMemoryRouter(
+    [
+      {
+        path: "/files",
+        element: (
+          <AuthProvider>
+            <SessionClientProbe onState={(state) => (probe = state)} />
+            <AuthGuard>
+              <FilesPage />
+            </AuthGuard>
+          </AuthProvider>
+        ),
+      },
+    ],
+    { initialEntries: ["/files?ws=workspace-1"] },
+  );
+  const view = render(<RouterProvider router={router} />);
+  await waitFor(() => {
+    expect(probe).toMatchObject({ principal, status: "authenticated" });
+  });
+  const getProbe = () => {
+    if (!probe) {
+      throw new Error("expected an authenticated files-page probe");
+    }
+
+    return probe;
+  };
+  return { fetchMock, getProbe, view };
 }
 
 describe("provider session-bound file client", () => {
@@ -136,17 +191,8 @@ describe("provider session-bound file client", () => {
 
       throw new Error(`unexpected request ${path}`);
     });
-    const oldClient = fixture.getProbe().createSessionClient();
-    const oldRequest = oldClient.listWorkspaces().then(
-      () => new Error("expected the old request to reject"),
-      (error: unknown) => error,
-    );
-
-    await act(async () => {
-      await expect(
-        fixture.getProbe().login({ account: "zhangsan", password: "demo" }),
-      ).resolves.toBe(true);
-    });
+    const oldRequest = startOldWorkspaceList(fixture.getProbe);
+    await loginWhileAuthenticated(fixture.getProbe);
     await act(async () => {
       late.resolve(jsonResponse({ error: { code: "unauthorized", message: "登录已失效" } }, 401));
     });
@@ -200,5 +246,127 @@ describe("provider session-bound file client", () => {
     await expect(treeRequest).resolves.toEqual({ path: "out", entries: [] });
     await expect(previewRequest).resolves.toMatchObject({ kind: "text", text: "# readme" });
     expectProtectedSession(fixture.getProbe());
+  });
+
+  it("renews a mounted files page client so old 401s are ignored and new ones clear the session", async () => {
+    const lateOldList = deferredResponse();
+    let workspaceLists = 0;
+    const fixture = await renderMountedFilesPage({
+      "/api/auth/login": jsonResponse(principal),
+      "/api/workspaces": (_path, options) => {
+        if (options?.method === "POST") {
+          throw new Error("unexpected workspace creation");
+        }
+        workspaceLists += 1;
+        if (workspaceLists === 2) {
+          return lateOldList.promise;
+        }
+        if (workspaceLists >= 3) {
+          return jsonResponse({ error: { code: "unauthorized", message: "登录已失效" } }, 401);
+        }
+        return jsonResponse({ workspaces: [workspace] });
+      },
+      "/api/workspaces/workspace-1/tree?path=": jsonResponse({
+        path: "",
+        entries: [{ name: "out", type: "dir", size: 0, mtime: 1 }],
+      }),
+      "/api/workspaces/workspace-1/tree?path=out": jsonResponse({ path: "out", entries: [] }),
+    });
+
+    await screen.findByRole("button", { name: "展开 out" });
+    fireEvent.click(screen.getByRole("button", { name: "展开 out" }));
+    await screen.findByRole("button", { name: "折叠 out" });
+    const firstWorkspaceLists = workspaceLists;
+    const oldRequest = startOldWorkspaceList(fixture.getProbe);
+    await loginWhileAuthenticated(fixture.getProbe);
+    expect(await screen.findByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeTruthy();
+    expect(fixture.getProbe()).toMatchObject({ principal: null, status: "unauthenticated" });
+    expect(screen.queryByRole("heading", { level: 1, name: "工作空间" })).toBeNull();
+    expect(workspaceLists).toBeGreaterThan(firstWorkspaceLists + 1);
+
+    await act(async () => {
+      lateOldList.resolve(
+        jsonResponse({ error: { code: "unauthorized", message: "登录已失效" } }, 401),
+      );
+    });
+    expect(await oldRequest).toBeInstanceOf(Error);
+    expect(fixture.getProbe()).toMatchObject({ principal: null, status: "unauthenticated" });
+  });
+
+  it("does not request the previous account workspace while the renewed list is pending", async () => {
+    const otherPrincipal = { id: "user-2", account: "lisi", role: "member" };
+    const otherWorkspace = {
+      id: "workspace-b",
+      name: "李四文档",
+      dir: "lisi-docs",
+      root: "/sandbox/user-2/lisi-docs",
+      createdAt: 1_726_000_000_100,
+    };
+    const lateList = deferredResponse();
+    let workspaceLists = 0;
+    const fixture = await renderMountedFilesPage({
+      "/api/auth/login": jsonResponse(otherPrincipal),
+      "/api/workspaces": (_path, options) => {
+        if (options?.method === "POST") {
+          throw new Error("unexpected workspace creation");
+        }
+        workspaceLists += 1;
+        if (workspaceLists === 1) {
+          return jsonResponse({ workspaces: [workspace] });
+        }
+        return lateList.promise;
+      },
+      "/api/workspaces/workspace-1/tree?path=": jsonResponse({
+        path: "",
+        entries: [{ name: "secret.txt", type: "file", size: 1, mtime: 1 }],
+      }),
+      "/api/workspaces/workspace-b/tree?path=": jsonResponse({ path: "", entries: [] }),
+    });
+
+    await screen.findByRole("button", { name: "secret.txt" });
+    const treeCallsBeforeRenewal = fixture.fetchMock.mock.calls.filter(
+      ([path]) => path === "/api/workspaces/workspace-1/tree?path=",
+    ).length;
+
+    await act(async () => {
+      await expect(fixture.getProbe().login({ account: "lisi", password: "demo" })).resolves.toBe(
+        true,
+      );
+    });
+    expect(await screen.findByText("正在读取工作空间", { exact: true })).toBeTruthy();
+    expect(screen.queryByText("secret.txt", { exact: true })).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "工作空间目录树" })).toBeNull();
+    expect(
+      fixture.fetchMock.mock.calls.filter(
+        ([path]) => path === "/api/workspaces/workspace-1/tree?path=",
+      ),
+    ).toHaveLength(treeCallsBeforeRenewal);
+    expect(
+      fixture.fetchMock.mock.calls.filter(
+        ([path]) => typeof path === "string" && path.startsWith("/api/workspaces/workspace-1/file"),
+      ),
+    ).toHaveLength(0);
+    expect(
+      fixture.fetchMock.mock.calls.filter(
+        ([path]) => path === "/api/workspaces/workspace-b/tree?path=",
+      ),
+    ).toHaveLength(0);
+
+    await act(async () => {
+      lateList.resolve(jsonResponse({ workspaces: [otherWorkspace] }));
+    });
+    await waitFor(() => {
+      expect(screen.getByText("李四文档", { exact: true })).toBeTruthy();
+    });
+    expect(screen.queryByText("secret.txt", { exact: true })).toBeNull();
+    expect(
+      fixture.fetchMock.mock.calls.filter(
+        ([path]) => path === "/api/workspaces/workspace-b/tree?path=",
+      ),
+    ).not.toHaveLength(0);
+    expect(fixture.getProbe()).toMatchObject({
+      principal: otherPrincipal,
+      status: "authenticated",
+    });
   });
 });

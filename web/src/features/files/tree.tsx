@@ -286,8 +286,17 @@ export function WorkspaceBrowser({
 
   const loadDirectory = useCallback(
     (path: string, refresh = false) => {
-      if ((!refresh && cacheRef.current[path]) || directoryRequestsRef.current.has(path)) {
+      if (!refresh && cacheRef.current[path]) {
         return;
+      }
+
+      const inFlight = directoryRequestsRef.current.get(path);
+      if (inFlight) {
+        if (!refresh) {
+          return;
+        }
+        inFlight.abort();
+        directoryRequestsRef.current.delete(path);
       }
 
       const controller = new AbortController();
@@ -321,9 +330,11 @@ export function WorkspaceBrowser({
           setDirectoryErrors((current) => ({ ...current, [path]: errorMessage(error) }));
         })
         .finally(() => {
-          if (directoryRequestsRef.current.get(path) === controller) {
-            directoryRequestsRef.current.delete(path);
+          if (directoryRequestsRef.current.get(path) !== controller) {
+            return;
           }
+
+          directoryRequestsRef.current.delete(path);
           if (mountedRef.current) {
             setLoadingPaths((current) => {
               const next = new Set(current);
@@ -466,6 +477,8 @@ export function WorkspaceBrowser({
       return;
     }
 
+    folderMutationRef.current?.abort();
+    folderMutationRef.current = null;
     folderSequenceRef.current += 1;
     folderDialogIdRef.current = folderSequenceRef.current;
     setFolderNotice(null);

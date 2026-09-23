@@ -1,6 +1,6 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
-import { ApiError } from "../../lib/api.js";
+import { type ApiClient, ApiError } from "../../lib/api.js";
 import { useAuth } from "../auth/index.js";
 import { WorkspaceDialog } from "./dialogs.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
@@ -10,7 +10,7 @@ import type { Workspace } from "./types.js";
 type WorkspaceListState =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "success"; workspaces: Workspace[] };
+  | { status: "success"; client: ApiClient; workspaces: Workspace[] };
 
 type WorkspaceDialogState = {
   id: number;
@@ -41,6 +41,21 @@ function workspaceNavigation(
 
   const nextSearch = parameters.toString();
   return { hash, pathname, search: nextSearch.length === 0 ? "" : `?${nextSearch}` };
+}
+
+function currentWorkspaceFromList(
+  listForClient: Extract<WorkspaceListState, { status: "success" }> | null,
+  requestedWorkspaceId: string | null,
+) {
+  if (!listForClient) {
+    return null;
+  }
+
+  return (
+    listForClient.workspaces.find((workspace) => workspace.id === requestedWorkspaceId) ??
+    listForClient.workspaces[0] ??
+    null
+  );
 }
 
 function WorkspaceSwitcher({
@@ -210,7 +225,7 @@ export function FilesPage() {
           return;
         }
 
-        setListState({ status: "success", workspaces });
+        setListState({ status: "success", client, workspaces });
       })
       .catch((error: unknown) => {
         if (
@@ -227,8 +242,9 @@ export function FilesPage() {
 
     return () => {
       controller.abort();
+      closeWorkspaceDialog();
     };
-  }, [client]);
+  }, [client, closeWorkspaceDialog]);
 
   useEffect(() => {
     const dialog = workspaceDialogRef.current;
@@ -237,19 +253,16 @@ export function FilesPage() {
     }
   }, [closeWorkspaceDialog, locationKey]);
 
+  const listForClient =
+    listState.status === "success" && listState.client === client ? listState : null;
   const requestedWorkspaceId = new URLSearchParams(location.search).get("ws");
-  const currentWorkspace =
-    listState.status === "success"
-      ? (listState.workspaces.find((workspace) => workspace.id === requestedWorkspaceId) ??
-        listState.workspaces[0] ??
-        null)
-      : null;
+  const currentWorkspace = currentWorkspaceFromList(listForClient, requestedWorkspaceId);
   const urlMatchesWorkspace = currentWorkspace
     ? requestedWorkspaceId === currentWorkspace.id
     : requestedWorkspaceId === null;
 
   useEffect(() => {
-    if (listState.status !== "success" || urlMatchesWorkspace) {
+    if (!listForClient || urlMatchesWorkspace) {
       return;
     }
 
@@ -264,7 +277,7 @@ export function FilesPage() {
     );
   }, [
     currentWorkspace?.id,
-    listState.status,
+    listForClient,
     location.hash,
     location.pathname,
     location.search,
@@ -282,6 +295,8 @@ export function FilesPage() {
   );
 
   const openWorkspaceDialog = useCallback(() => {
+    workspaceMutationRef.current?.abort();
+    workspaceMutationRef.current = null;
     workspaceSequenceRef.current += 1;
     const dialog = {
       id: workspaceSequenceRef.current,
@@ -321,7 +336,11 @@ export function FilesPage() {
           setWorkspaceDialog(null);
           setListState((current) =>
             current.status === "success"
-              ? { status: "success", workspaces: [...current.workspaces, workspace] }
+              ? {
+                  status: "success",
+                  client: current.client,
+                  workspaces: [...current.workspaces, workspace],
+                }
               : current,
           );
           navigate(
@@ -351,22 +370,24 @@ export function FilesPage() {
     [client, location.hash, location.pathname, location.search, navigate],
   );
 
-  const switcher =
-    listState.status === "success" ? (
-      <WorkspaceSwitcher
-        currentWorkspace={currentWorkspace}
-        onCreateWorkspace={openWorkspaceDialog}
-        onSelectWorkspace={selectWorkspace}
-        workspaces={listState.workspaces}
-      />
-    ) : null;
+  const switcher = listForClient ? (
+    <WorkspaceSwitcher
+      currentWorkspace={currentWorkspace}
+      onCreateWorkspace={openWorkspaceDialog}
+      onSelectWorkspace={selectWorkspace}
+      workspaces={listForClient.workspaces}
+    />
+  ) : null;
 
   return (
     <section>
       <h1>工作空间</h1>
-      {listState.status === "loading" ? <p role="status">正在读取工作空间</p> : null}
-      {listState.status === "error" ? <p role="alert">{listState.message}</p> : null}
-      {listState.status === "success" && currentWorkspace && urlMatchesWorkspace ? (
+      {listForClient ? null : listState.status === "error" ? (
+        <p role="alert">{listState.message}</p>
+      ) : (
+        <p role="status">正在读取工作空间</p>
+      )}
+      {listForClient && currentWorkspace && urlMatchesWorkspace ? (
         <WorkspaceBrowser
           client={client}
           key={currentWorkspace.id}
@@ -375,7 +396,7 @@ export function FilesPage() {
           workspace={currentWorkspace}
         />
       ) : null}
-      {listState.status === "success" && !currentWorkspace && urlMatchesWorkspace ? (
+      {listForClient && !currentWorkspace && urlMatchesWorkspace ? (
         <>
           <EmptyWorkspace
             onNewDirectory={() => setEmptyFolderError("当前工作空间没有可写目录")}

@@ -128,11 +128,13 @@ function isRequestFailure(error: unknown) {
 function useSessionLifecycle(mountedRef: { current: boolean }, setState: SetAuthState) {
   const epochRef = useRef(0);
   const sessionActiveRef = useRef(false);
+  const [sessionVersion, setSessionVersion] = useState(0);
 
   const establishSession = useCallback(
     (principal: Principal) => {
       epochRef.current += 1;
       sessionActiveRef.current = true;
+      setSessionVersion(epochRef.current);
       setState({ status: "authenticated", principal, error: null, logoutError: null });
     },
     [setState],
@@ -145,13 +147,14 @@ function useSessionLifecycle(mountedRef: { current: boolean }, setState: SetAuth
 
     if (sessionActiveRef.current) {
       epochRef.current += 1;
+      setSessionVersion(epochRef.current);
     }
     sessionActiveRef.current = false;
     setState(cleanUnauthenticatedState());
   }, [mountedRef, setState]);
 
   const createSessionClient = useCallback(() => {
-    const epoch = epochRef.current;
+    const epoch = sessionVersion;
     return createApiClient({
       onUnauthorized: (signal) => {
         if (
@@ -166,7 +169,7 @@ function useSessionLifecycle(mountedRef: { current: boolean }, setState: SetAuth
         clearSession();
       },
     });
-  }, [clearSession, mountedRef]);
+  }, [clearSession, mountedRef, sessionVersion]);
 
   return { clearSession, createSessionClient, establishSession };
 }

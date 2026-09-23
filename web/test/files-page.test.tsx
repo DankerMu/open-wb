@@ -1,132 +1,26 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { StrictMode } from "react";
-import { RouterProvider } from "react-router";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { createAppRouter } from "../src/routes/index.js";
-import { createFetchMock, deferredResponse, jsonResponse, textPreviewResponse } from "./support.js";
-
-const principal = { id: "user-1", account: "zhangsan", role: "member" };
-const workspace = {
-  id: "workspace-1",
-  name: "设计文档",
-  dir: "design-docs",
-  root: "/sandbox/user-1/design-docs",
-  createdAt: 1_726_000_000_000,
-};
-const secondWorkspace = {
-  ...workspace,
-  id: "workspace-2",
-  name: "数据分析",
-  dir: "data-analysis",
-  root: "/sandbox/user-1/data-analysis",
-};
-
-type FetchRoutes = Parameters<typeof createFetchMock>[0];
-type WorkspaceCreateRoute = (options?: RequestInit) => Error | Promise<Response> | Response;
-type WorkspaceFixture = typeof workspace;
-
-let disposeRouter: (() => void) | undefined;
-let restoreBlobUrls: (() => void) | undefined;
-
-function workspaceRoute(workspaces: readonly WorkspaceFixture[], onCreate?: WorkspaceCreateRoute) {
-  return (_path: string, options?: RequestInit) => {
-    if (options?.method === "POST") {
-      if (!onCreate) {
-        throw new Error("unexpected workspace creation");
-      }
-
-      return onCreate(options);
-    }
-
-    return jsonResponse({ workspaces });
-  };
-}
-
-function authenticatedFilesRoutes(
-  workspaces: readonly WorkspaceFixture[],
-  routes: FetchRoutes = {},
-): FetchRoutes {
-  return {
-    "/api/auth/me": () => jsonResponse(principal),
-    "/api/workspaces": workspaceRoute(workspaces),
-    ...routes,
-  };
-}
-
-function imagePreviewResponse(size = 8) {
-  return new Response(new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]), {
-    headers: {
-      "Content-Type": "image/png",
-      "X-Workbuddy-Size": String(size),
-    },
-  });
-}
-
-function renderFiles(path: string, routes: FetchRoutes, strict = false) {
-  disposeRouter?.();
-  window.history.replaceState(null, "", path);
-  const fetchMock = createFetchMock(routes);
-  vi.stubGlobal("fetch", fetchMock);
-  const appRouter = createAppRouter();
-  disposeRouter = () => appRouter.dispose();
-  const application = <RouterProvider router={appRouter} />;
-  const view = render(strict ? <StrictMode>{application}</StrictMode> : application);
-  return { fetchMock, view };
-}
-
-async function expectLocation(expected: string) {
-  await waitFor(() => {
-    expect(`${window.location.pathname}${window.location.search}${window.location.hash}`).toBe(
-      expected,
-    );
-  });
-}
-
-async function openWorkspaceDialog() {
-  fireEvent.click(screen.getByRole("button", { name: "选择工作空间" }));
-  fireEvent.click(screen.getByRole("button", { name: "＋ 新建工作空间" }));
-  return screen.findByRole("dialog", { name: "新建工作空间" });
-}
-
-async function openDirectoryDialog() {
-  fireEvent.click(screen.getByRole("button", { name: "新建" }));
-  fireEvent.click(screen.getByRole("menuitem", { name: "新建文件夹" }));
-  return screen.findByRole("dialog", { name: "新建文件夹" });
-}
-
-function stubBlobUrls(urls: string[]) {
-  const createDescriptor = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
-  const revokeDescriptor = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
-  const createObjectURL = vi.fn(() => urls.shift() ?? "blob:unexpected");
-  const revokeObjectURL = vi.fn();
-  Object.defineProperties(URL, {
-    createObjectURL: { configurable: true, value: createObjectURL },
-    revokeObjectURL: { configurable: true, value: revokeObjectURL },
-  });
-  restoreBlobUrls = () => {
-    if (createDescriptor) {
-      Object.defineProperty(URL, "createObjectURL", createDescriptor);
-    } else {
-      Reflect.deleteProperty(URL, "createObjectURL");
-    }
-    if (revokeDescriptor) {
-      Object.defineProperty(URL, "revokeObjectURL", revokeDescriptor);
-    } else {
-      Reflect.deleteProperty(URL, "revokeObjectURL");
-    }
-  };
-  return { createObjectURL, revokeObjectURL };
-}
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  authenticatedFilesRoutes,
+  cleanupFilesFixture,
+  collapseAndExpand,
+  expectLocation,
+  expectTreeRequestCount,
+  imagePreviewResponse,
+  openDirectoryDialog,
+  openWorkspaceDialog,
+  renderFiles,
+  secondWorkspace,
+  selectWorkspaceByName,
+  stubBlobUrls,
+  type WorkspaceCreateRoute,
+  workspace,
+  workspaceRoute,
+} from "./files-fixture.js";
+import { deferredResponse, jsonResponse, textPreviewResponse } from "./support.js";
 
 afterEach(() => {
-  restoreBlobUrls?.();
-  restoreBlobUrls = undefined;
-  cleanup();
-  disposeRouter?.();
-  disposeRouter = undefined;
-  vi.unstubAllGlobals();
-  document.body.replaceChildren();
-  window.history.replaceState(null, "", "/");
+  cleanupFilesFixture();
 });
 
 describe("workspace page route integration", () => {
@@ -203,17 +97,15 @@ describe("workspace page route integration", () => {
     );
 
     await screen.findByRole("button", { name: "展开 out" });
+    const tree = screen.getByRole("navigation", { name: "工作空间目录树" });
+    expect(
+      within(tree)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["root", "out", "in", "readme.md", "notes.csv", "logo.png", "archive.zip"]);
     fireEvent.click(screen.getByRole("button", { name: "展开 out" }));
-    await screen.findByRole("button", { name: "折叠 out" });
-    fireEvent.click(screen.getByRole("button", { name: "折叠 out" }));
-    fireEvent.click(screen.getByRole("button", { name: "展开 out" }));
-    await waitFor(() => {
-      expect(
-        fetchMock.mock.calls.filter(
-          ([path]) => path === "/api/workspaces/workspace-1/tree?path=out",
-        ),
-      ).toHaveLength(1);
-    });
+    await collapseAndExpand("out");
+    await expectTreeRequestCount(fetchMock, "/api/workspaces/workspace-1/tree?path=out", 1);
 
     fireEvent.click(screen.getByRole("button", { name: "readme.md" }));
     const markdownSourceButton = await screen.findByRole("button", { name: "查看源码" });
@@ -254,7 +146,14 @@ describe("workspace page route integration", () => {
     fireEvent.click(screen.getByRole("button", { name: "新建" }));
     const menu = screen.getByRole("menu");
     expect(within(menu).getAllByRole("menuitem")).toHaveLength(2);
-    fireEvent.click(within(menu).getByRole("menuitem", { name: "新建文件夹" }));
+    fireEvent.keyDown(menu, { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "新建" }));
+    expect(screen.getByRole("menu")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "新建" }));
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "新建" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "新建文件夹" }));
     const directoryDialog = await screen.findByRole("dialog", { name: "新建文件夹" });
     expect(
       within(directoryDialog)
@@ -464,9 +363,9 @@ describe("workspace page route integration", () => {
     });
     fireEvent.click(within(directoryDialog).getByRole("button", { name: "创建" }));
 
-    fireEvent.click(screen.getByRole("button", { name: "选择工作空间" }));
-    fireEvent.click(screen.getByRole("button", { name: /数据分析/ }));
+    await selectWorkspaceByName(/数据分析/);
     await screen.findByText(secondWorkspace.root, { exact: true });
+    expect(screen.getByText("未选择文件", { exact: true })).toBeTruthy();
     await act(async () => {
       lateTree.resolve(
         jsonResponse({
@@ -486,6 +385,26 @@ describe("workspace page route integration", () => {
     expect(
       fetchMock.mock.calls.filter(([path]) => path === "/api/workspaces/workspace-2/tree?path="),
     ).not.toHaveLength(0);
+  });
+
+  it("pushes user workspace selection onto history so Back restores the previous workspace", async () => {
+    const { router } = renderFiles(
+      "/files?ws=workspace-1",
+      authenticatedFilesRoutes([workspace, secondWorkspace], {
+        "/api/workspaces/workspace-1/tree?path=": jsonResponse({ path: "", entries: [] }),
+        "/api/workspaces/workspace-2/tree?path=": jsonResponse({ path: "", entries: [] }),
+      }),
+    );
+
+    await screen.findByText(workspace.root, { exact: true });
+    await selectWorkspaceByName(/数据分析/);
+    await screen.findByText(secondWorkspace.root, { exact: true });
+    await expectLocation("/files?ws=workspace-2");
+    await act(async () => {
+      await router.navigate(-1);
+    });
+    await expectLocation("/files?ws=workspace-1");
+    expect(screen.getByText(workspace.root, { exact: true })).toBeTruthy();
   });
 
   it("releases a displayed image when replaced and when the page unmounts", async () => {
