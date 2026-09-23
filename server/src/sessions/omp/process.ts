@@ -4,9 +4,9 @@
  */
 import { type ChildProcessWithoutNullStreams, type SpawnOptions, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { assertSafeSudoPath } from "../../core/process-path.js";
+import { ensureSharedDir } from "../../core/sandbox/dirs.js";
 import {
   MAX_RPC_FRAME_BYTES,
   MAX_RPC_REASSEMBLED_BYTES,
@@ -48,10 +48,12 @@ export async function spawnOmp(
   const sessionDir = join(opts.stateDir, "sessions", opts.ownerId);
   const home = join(opts.stateDir, "home");
   const agent = join(opts.stateDir, "agent");
-  await mkdir(cwd, { recursive: true });
-  await mkdir(sessionDir, { recursive: true });
-  await mkdir(home, { recursive: true });
-  await mkdir(agent, { recursive: true });
+  ensureSharedDir(cwd);
+  ensureSharedDir(sessionDir);
+  ensureSharedDir(home);
+  ensureSharedDir(agent);
+  // Preserve the prior async spawn boundary; native lifecycle regression covers it.
+  await Promise.resolve();
 
   const args = [
     "--mode",

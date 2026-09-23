@@ -164,6 +164,86 @@ export async function releaseStartupFixtures(): Promise<void> {
   }
 }
 
+export function observeOpenDbHook(): string {
+  return `'use strict';
+const fs = require('node:fs');
+const { appendFileSync, writeFileSync } = fs;
+const sqlite = require('node:sqlite');
+const original = sqlite.DatabaseSync;
+function DatabaseSyncObserved(...args) {
+  const path = args[0];
+  if (process.env.UMASK_LOG) {
+    writeFileSync(process.env.UMASK_LOG, process.umask().toString(8));
+  }
+  appendFileSync(process.env.MODE_LOG, JSON.stringify({
+    path,
+    main: fileMode(path),
+    wal: fileMode(path + '-wal'),
+    shm: fileMode(path + '-shm'),
+  }) + '\\n');
+  return Reflect.construct(original, args, new.target ?? original);
+}
+Object.setPrototypeOf(DatabaseSyncObserved, original);
+DatabaseSyncObserved.prototype = original.prototype;
+sqlite.DatabaseSync = DatabaseSyncObserved;
+function fileMode(path) {
+  if (path === ':memory:') {
+    return null;
+  }
+  try {
+    return fs.lstatSync(path).mode & 0o777;
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      return null;
+    }
+    throw error;
+  }
+}
+`;
+}
+
+export function childUmaskHook(): string {
+  return `'use strict';
+process.umask(0o777);
+${observeOpenDbHook().replace(/^'use strict';\n/u, "")}`;
+}
+
+export function denyChmodHook(targets: string[]): string {
+  return `'use strict';
+const fs = require('node:fs');
+const { syncBuiltinESMExports } = require('node:module');
+const denied = new Set(${JSON.stringify(targets)});
+const nativeChmod = fs.chmodSync;
+const nativeFchmod = fs.fchmodSync;
+const nativeOpen = fs.openSync;
+const fds = new Set();
+fs.openSync = function observeOpen(path, flags, mode) {
+  const fd = nativeOpen.call(this, path, flags, mode);
+  if (denied.has(path)) {
+    fds.add(fd);
+  }
+  return fd;
+};
+fs.chmodSync = function deny(path, mode) {
+  if (denied.has(path)) {
+    const error = new Error('EPERM');
+    error.code = 'EPERM';
+    throw error;
+  }
+  return nativeChmod.call(this, path, mode);
+};
+fs.fchmodSync = function denyFd(fd, mode) {
+  if (fds.has(fd)) {
+    const error = new Error('EPERM');
+    error.code = 'EPERM';
+    throw error;
+  }
+  return nativeFchmod.call(this, fd, mode);
+};
+syncBuiltinESMExports();
+`;
+}
+
 function track(child: ChildProcess): OwnedChild {
   let stdout = "";
   let stderr = "";

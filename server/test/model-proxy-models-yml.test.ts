@@ -1,4 +1,6 @@
 import {
+  chmodSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -85,8 +87,11 @@ describe("writeManagedModelsYml", () => {
     }
 
     expect(statSync(join(root, "absent")).isDirectory()).toBe(true);
+    expect(lstatSync(join(root, "absent")).mode & 0o7777).toBe(0o2770);
     expect(statSync(join(root, "absent", "nested")).isDirectory()).toBe(true);
+    expect(lstatSync(join(root, "absent", "nested")).mode & 0o7777).toBe(0o2770);
     expect(statSync(agentDir).isDirectory()).toBe(true);
+    expect(lstatSync(agentDir).mode & 0o7777).toBe(0o2770);
     expect(readdirSync(agentDir)).toEqual(["models.yml"]);
     expect(readFileSync(keepPath, "utf8")).toBe("unrelated-keep");
 
@@ -134,6 +139,22 @@ describe("writeManagedModelsYml", () => {
       expectedDocument(NEXT_PROXY_BASE_URL, YAML_SENSITIVE_MODEL_ID),
     );
     expect(readFileSync(join(agentDir, "keep.txt"), "utf8")).toBe("unrelated-keep");
+  });
+
+  it("leaves a pre-existing 0755 agent directory unchanged while writing models.yml", async () => {
+    const root = tempRoot();
+    const agentDir = join(root, "existing", "agent");
+    mkdirSync(agentDir, { recursive: true });
+    chmodSync(join(root, "existing"), 0o755);
+    chmodSync(agentDir, 0o755);
+    const umaskBefore = process.umask();
+    await writeManagedModelsYml(agentDir, OPTIONS);
+    expect(lstatSync(join(root, "existing")).mode & 0o7777).toBe(0o755);
+    expect(lstatSync(agentDir).mode & 0o7777).toBe(0o755);
+    expect(process.umask()).toBe(umaskBefore);
+    expect(parse(readFileSync(join(agentDir, "models.yml"), "utf8"))).toEqual(
+      expectedDocument(PROXY_BASE_URL, MODEL_ID),
+    );
   });
 
   it("rejects when a regular file occupies a needed directory path and leaves unrelated files unchanged", async () => {
