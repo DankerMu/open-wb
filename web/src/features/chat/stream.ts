@@ -67,14 +67,7 @@ export function chatStateFromSnapshot(snapshot: ChatMessageSnapshot): ChatState 
 export function applyChatEvent(state: ChatState, event: ChatEvent): ChatState {
   switch (event.type) {
     case "turn.start":
-      return replaceAssistant(state, event.data.messageId, (message) => ({
-        id: message.id,
-        role: "assistant",
-        content: "",
-        status: "running",
-        steps: [],
-        error: null,
-      }));
+      return startTurn(state, event.data.messageId);
     case "text.delta":
       return replaceAssistant(state, event.data.messageId, (message) => ({
         ...message,
@@ -95,6 +88,18 @@ export function applyChatEvent(state: ChatState, event: ChatEvent): ChatState {
     default:
       return state;
   }
+}
+
+function startTurn(state: ChatState, messageId: number): ChatState {
+  const next = replaceAssistant(state, messageId, (message) => ({
+    id: message.id,
+    role: "assistant",
+    content: "",
+    status: "running",
+    steps: [],
+    error: null,
+  }));
+  return next === state || next.status === "running" ? next : { ...next, status: "running" };
 }
 
 function startStep(

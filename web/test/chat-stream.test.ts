@@ -215,4 +215,49 @@ describe("Chat stream reducer", () => {
     });
     expect(frozenSnapshot).toEqual(snapshot);
   });
+
+  it("resets a failed assistant and session to running without rewriting user history", () => {
+    const snapshot: ChatMessageSnapshot = {
+      session: { ...runningSession, status: "failed" },
+      messages: [
+        historyUser,
+        {
+          id: 0,
+          role: "assistant",
+          content: STREAMED_BODY,
+          status: "failed",
+          createdAt: 0,
+          steps: [
+            {
+              id: 11,
+              ordinal: 0,
+              name: "bash",
+              detail: BASH_RESULT_DETAIL,
+              status: "failed",
+            },
+          ],
+        },
+      ],
+      streamCursor: { epoch: 1, seq: null },
+    };
+    const frozenSnapshot = deepFreeze(structuredClone(snapshot));
+    const reset = deepFreeze(
+      applyChatEvent(deepFreeze(chatStateFromSnapshot(frozenSnapshot)), {
+        type: "turn.start",
+        data: { messageId: 0 },
+      }),
+    );
+
+    expect(reset.status).toBe("running");
+    expect(reset.messages[0]).toEqual(userView);
+    expect(reset.messages[1]).toEqual({
+      id: 0,
+      role: "assistant",
+      content: "",
+      status: "running",
+      steps: [],
+      error: null,
+    });
+    expect(frozenSnapshot).toEqual(snapshot);
+  });
 });
