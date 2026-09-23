@@ -22,7 +22,9 @@
 ## 2. Verification
 - [x] 2.1 Parent-owned real HTTP client smoke plus discriminating negative cases and restored GREEN; retain baseline/evidence hashes.
 - [x] 2.2 Existing API reference GREEN, complete web suite/coverage, web typecheck/build, scoped Biome and repository anti-drift pass.
-- [ ] 2.3 Read-only source reviews and exact-head required CI pass; no weakened gates/discovery/dependency changes.
+- [x] 2.3 Read-only source reviews and exact-head required CI pass; no weakened gates/discovery/dependency changes.
 
 ## 3. Delivery
-- [ ] 3.1 Source PR merged, issue closed, separate OpenSpec archive PR validated and merged before next issue.
+- [x] 3.1 Source PR #234 merged and issue #92 closed; hand off the verified change to its independent OpenSpec archive PR.
+
+Archive delivery gate (tracked by the parent workflow, not self-certified by this commit): validate and merge the separate archive PR with its own exact-head CI before starting #93.
