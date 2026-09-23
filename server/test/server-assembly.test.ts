@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -18,9 +21,11 @@ import {
   closeOnEof,
   createControlledRuntime,
   createSession,
+  recordedSpawn,
   requiredToken,
   type SpawnCall,
 } from "./session-supervisor-helpers.js";
+import type { FakeChild } from "./support/omp-rpc.js";
 
 /**
  * Issue #101 assembly baseline.
@@ -45,14 +50,24 @@ type AssemblyAppOptions = CreateAppOptions & {
 
 const apps: FastifyInstance[] = [];
 const databases: DatabaseSync[] = [];
+const temps: string[] = [];
+const fakeChildren: FakeChild[][] = [];
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  for (const children of fakeChildren.splice(0)) {
+    for (const child of children) {
+      child.destroy();
+    }
+  }
   for (const app of apps.splice(0)) {
     await app.close();
   }
   for (const db of databases.splice(0)) {
     db.close();
+  }
+  for (const root of temps.splice(0)) {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -191,6 +206,87 @@ describe("真实 createApp 消费共享 registry 并先挂 proxy 再挂 sessions
     expect(live.json()).toEqual(AGENT_UNAVAILABLE_ENVELOPE);
   });
 });
+
+describe("真实配置经认证 prompt 抵达 spawn", () => {
+  it("配置用户 omp 时捕获 sudo 前缀，未配置时保持直接 OMP_BIN", async () => {
+    const roots = makeAssemblyRoots();
+    const configured = await captureAuthenticatedSpawn(roots, "omp");
+    const unset = await captureAuthenticatedSpawn(roots);
+    const directArgs = ompArgs(roots, unset.cwd);
+    expect(configured.command).toBe("sudo");
+    expect(configured.args).toEqual([
+      "-n",
+      "-u",
+      "omp",
+      "--preserve-env=PATH,LANG,TMPDIR,HOME,PI_CODING_AGENT_DIR,WORKBUDDY_MODEL_TOKEN",
+      "--",
+      roots.bin,
+      ...directArgs,
+    ]);
+    expect(unset.command).toBe(roots.bin);
+    expect(unset.args).toEqual(directArgs);
+    expect(configured.cwd).toBe(join(roots.sandboxRoot, "u1"));
+    expect(unset.cwd).toBe(configured.cwd);
+    expect(configured.stdio).toEqual(["pipe", "pipe", "pipe"]);
+    expect(unset.stdio).toEqual(["pipe", "pipe", "pipe"]);
+    expect(configured.shell).toBe(false);
+    expect(configured.env.HOME).toBe(join(roots.stateDir, "home"));
+    expect(configured.env.PI_CODING_AGENT_DIR).toBe(join(roots.stateDir, "agent"));
+    expect(configured.env.WORKBUDDY_MODEL_TOKEN).toBe(configured.token);
+    expect(unset.env.WORKBUDDY_MODEL_TOKEN).toBe(unset.token);
+    expect(allowlistWithoutToken(unset.env)).toEqual(allowlistWithoutToken(configured.env));
+    expect(JSON.stringify(configured.args)).not.toContain(configured.token ?? "");
+    expect(JSON.stringify(unset.args)).not.toContain(unset.token ?? "");
+    expect(configured.env).not.toHaveProperty("OMP_USER");
+    expect(configured.env).not.toHaveProperty("MODEL_UPSTREAM_API_KEY");
+  });
+
+  it("sudo 形态子进程在就绪前退出时返回 agent_unavailable，撤销 token，且不降级直启", async () => {
+    const roots = makeAssemblyRoots();
+    const tokens = new TokenRegistry();
+    const calls: SpawnCall[] = [];
+    const children: FakeChild[] = [];
+    fakeChildren.push(children);
+    const app = createApp({
+      db: track(openDb(":memory:")),
+      assembly: {
+        tokens,
+        runtime: {
+          bin: roots.bin,
+          sandboxRoot: roots.sandboxRoot,
+          stateDir: roots.stateDir,
+          modelId: "deepseek-v4.1-flash",
+          ompUser: "omp",
+          spawnImpl: (command, args, options) => {
+            calls.push(recordedSpawn(command, args, options));
+            const child = immediateExitChild();
+            children.push(child);
+            return child.spawnImpl(command, args, options);
+          },
+        },
+        onError: () => {},
+      },
+    });
+    apps.push(app);
+    const prompt = await promptHello(app);
+    expect(prompt.statusCode).toBe(502);
+    expect(prompt.json()).toEqual(AGENT_UNAVAILABLE_ENVELOPE);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.command).toBe("sudo");
+    expect(calls[0]?.args.slice(0, 6)).toEqual([
+      "-n",
+      "-u",
+      "omp",
+      "--preserve-env=PATH,LANG,TMPDIR,HOME,PI_CODING_AGENT_DIR,WORKBUDDY_MODEL_TOKEN",
+      "--",
+      roots.bin,
+    ]);
+    expect(calls.some((call) => call.command === roots.bin)).toBe(false);
+    const issued = calls[0]?.token;
+    expect(issued).toEqual(expect.any(String));
+    expect(tokens.lookup(issued ?? "")).toBeNull();
+  });
+});
 function spyRegistrationOrder(): string[] {
   const order: string[] = [];
   vi.spyOn(modelProxy, "registerModelProxy").mockImplementationOnce((app, options) => {
@@ -222,12 +318,7 @@ async function promptAndCaptureToken(
   cookie: string,
   calls: readonly SpawnCall[],
 ): Promise<string> {
-  const prompt = await app.inject({
-    method: "POST",
-    url: `/api/sessions/${sessionId}/prompt`,
-    headers: { cookie, "content-type": "application/json" },
-    payload: JSON.stringify({ message: "hello" }),
-  });
+  const prompt = await postHello(app, sessionId, cookie);
   expect(prompt.statusCode).toBe(202);
   return requiredToken(firstSpawn(calls).token);
 }
@@ -288,4 +379,101 @@ function runningCount(db: DatabaseSync, table: "chat_messages" | "chat_steps"): 
     throw new Error(`missing count for ${table}`);
   }
   return Number(row.count);
+}
+
+function makeAssemblyRoots(): { root: string; bin: string; sandboxRoot: string; stateDir: string } {
+  const root = mkdtempSync(join(tmpdir(), "omp-user-assembly-"));
+  temps.push(root);
+  return {
+    root,
+    bin: join(root, "spaced bin", "omp"),
+    sandboxRoot: join(root, "sandbox root"),
+    stateDir: join(root, "state dir"),
+  };
+}
+
+async function captureAuthenticatedSpawn(
+  roots: { bin: string; sandboxRoot: string; stateDir: string },
+  user?: string,
+): Promise<SpawnCall> {
+  const controlled = createControlledRuntime(() => {});
+  fakeChildren.push(controlled.children);
+  const calls = controlled.calls;
+  const app = createApp({
+    db: track(openDb(":memory:")),
+    assembly: {
+      tokens: new TokenRegistry(),
+      runtime: {
+        ...controlled.runtime,
+        bin: roots.bin,
+        sandboxRoot: roots.sandboxRoot,
+        stateDir: roots.stateDir,
+        modelId: "deepseek-v4.1-flash",
+        ...(user === undefined ? {} : { ompUser: user }),
+      },
+      onError: () => {},
+    },
+  });
+  apps.push(app);
+  const prompt = await promptHello(app);
+  expect(prompt.statusCode).toBe(202);
+  const call = calls[0];
+  if (call === undefined) {
+    throw new Error("authenticated prompt did not spawn");
+  }
+  return call;
+}
+
+async function promptHello(app: FastifyInstance) {
+  const cookie = bearerCookie(await loginSessionId(app));
+  const sessionId = await createSession(app, cookie);
+  return postHello(app, sessionId, cookie);
+}
+
+function postHello(app: FastifyInstance, sessionId: string, cookie: string) {
+  return app.inject({
+    method: "POST",
+    url: `/api/sessions/${sessionId}/prompt`,
+    headers: { cookie, "content-type": "application/json" },
+    payload: JSON.stringify({ message: "hello" }),
+  });
+}
+
+function ompArgs(
+  roots: { sandboxRoot: string; stateDir: string },
+  cwd: string | undefined,
+): string[] {
+  return [
+    "--mode",
+    "rpc",
+    "--cwd",
+    cwd ?? join(roots.sandboxRoot, "u1"),
+    "--session-dir",
+    join(roots.stateDir, "sessions", "u1"),
+    "--model",
+    "workbuddy/deepseek-v4.1-flash",
+    "--approval-mode",
+    "yolo",
+    "--no-extensions",
+    "--no-lsp",
+    "--no-pty",
+    "--no-title",
+  ];
+}
+
+function immediateExitChild(): FakeChild {
+  const runtime = createControlledRuntime((fake) => {
+    fake.pid = undefined as unknown as number;
+    fake.exit(1);
+  });
+  const spawned = runtime.children[0];
+  if (spawned === undefined) {
+    throw new Error("controlled runtime omitted child");
+  }
+  return spawned;
+}
+
+function allowlistWithoutToken(env: Record<string, string>): Record<string, string> {
+  const { WORKBUDDY_MODEL_TOKEN: _token, ...rest } = env;
+  return rest;
 }

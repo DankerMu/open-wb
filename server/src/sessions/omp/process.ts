@@ -6,6 +6,7 @@ import { type ChildProcessWithoutNullStreams, type SpawnOptions, spawn } from "n
 import { EventEmitter } from "node:events";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { assertSafeSudoPath } from "../../core/process-path.js";
 import {
   MAX_RPC_FRAME_BYTES,
   MAX_RPC_REASSEMBLED_BYTES,
@@ -14,7 +15,7 @@ import {
 } from "./frame.js";
 
 export interface SpawnOmpOpts {
-  /** Trusted absolute executable path from config; not a PATH lookup. Validation is future config owner #101. */
+  /** Trusted absolute executable path from config; not a PATH lookup. */
   bin: string;
   sandboxRoot: string;
   stateDir: string;
@@ -22,6 +23,7 @@ export interface SpawnOmpOpts {
   modelId: string;
   token: string;
   resumePath: string | null;
+  ompUser?: string;
 }
 
 export type SpawnImpl = (
@@ -39,6 +41,9 @@ export async function spawnOmp(
   opts: SpawnOmpOpts,
   spawnImpl: SpawnImpl = spawn as SpawnImpl,
 ): Promise<ChildProcessWithoutNullStreams> {
+  if (opts.ompUser !== undefined) {
+    assertSafeSudoPath(process.env.PATH);
+  }
   const cwd = join(opts.sandboxRoot, opts.ownerId);
   const sessionDir = join(opts.stateDir, "sessions", opts.ownerId);
   const home = join(opts.stateDir, "home");
@@ -81,7 +86,20 @@ export async function spawnOmp(
     env.TMPDIR = process.env.TMPDIR;
   }
 
-  return spawnImpl(opts.bin, args, {
+  const command = opts.ompUser === undefined ? opts.bin : "sudo";
+  const commandArgs =
+    opts.ompUser === undefined
+      ? args
+      : [
+          "-n",
+          "-u",
+          opts.ompUser,
+          "--preserve-env=PATH,LANG,TMPDIR,HOME,PI_CODING_AGENT_DIR,WORKBUDDY_MODEL_TOKEN",
+          "--",
+          opts.bin,
+          ...args,
+        ];
+  return spawnImpl(command, commandArgs, {
     cwd,
     env,
     stdio: ["pipe", "pipe", "pipe"],

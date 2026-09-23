@@ -459,8 +459,8 @@ export class FakeChild {
 
   destroy(): void {
     this.stdin.destroy();
-    this.stdout.destroy();
-    this.stderr.destroy();
+    this.stdout.end();
+    this.stderr.end();
     if (this.exitCode === null && this.signalCode === null) {
       this.exit(0);
     }

@@ -21,7 +21,9 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { assertSafeSudoPath } from "../src/core/process-path.js";
 import { type SpawnImpl, type SpawnOmpOpts, spawnOmp } from "../src/sessions/omp/process.js";
+import { recordedSpawn } from "./session-supervisor-helpers.js";
 
 const CALLER_TOKEN = randomBytes(32).toString("hex");
 const PARENT_TOKEN = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -251,6 +253,134 @@ describe("spawnOmp spawn contract", () => {
     expect(report.argv).toEqual(coldArgs(roots));
     expect(JSON.stringify(report.argv)).not.toContain(CALLER_TOKEN);
   });
+
+  it("keeps the direct spawn identical when user is absent or explicitly undefined", async () => {
+    const roots = makeRoots();
+    const resumePath = join(roots.sessionDir, "resume file.jsonl");
+    const parentBefore = { ...process.env };
+    const absent = await capture(roots, resumePath, {
+      LANG: "C.UTF-8",
+      TMPDIR: "/tmp/workbuddy-sentinel",
+    });
+    const explicit = await capture(
+      roots,
+      resumePath,
+      {
+        LANG: "C.UTF-8",
+        TMPDIR: "/tmp/workbuddy-sentinel",
+      },
+      undefined,
+    );
+    expect({ ...process.env }).toEqual(parentBefore);
+    expect(explicit).toEqual(absent);
+    expect(absent.command).toBe(roots.bin);
+    expect(absent.args).toEqual([...coldArgs(roots), "--resume", resumePath]);
+    expect(absent.env).toEqual(
+      allowlist(roots, { LANG: "C.UTF-8", TMPDIR: "/tmp/workbuddy-sentinel" }),
+    );
+    expect(absent.cwd).toBe(roots.cwd);
+    expect(absent.stdio).toEqual(["pipe", "pipe", "pipe"]);
+    expect(absent.shell).toBe(false);
+    expect(JSON.stringify(absent.args)).not.toContain(CALLER_TOKEN);
+    expect(JSON.stringify(absent.args)).not.toContain(PARENT_TOKEN);
+    expect(absent.env).not.toHaveProperty("OMP_USER");
+  });
+
+  it("prefixes sudo for cold and resume while preserving env values under a contaminated parent", async () => {
+    const user = "omp";
+    const optional = { LANG: "zh_CN.UTF-8", TMPDIR: "/tmp/workbuddy user" };
+    const coldRoots = makeRoots();
+    const parentBefore = { ...process.env };
+    const cold = await capture(coldRoots, null, optional, user);
+    const resumeRoots = makeRoots();
+    const resumePath = join(resumeRoots.sessionDir, "resume file.jsonl");
+    const resumed = await capture(resumeRoots, resumePath, optional, user);
+    expect({ ...process.env }).toEqual(parentBefore);
+    expect(cold.command).toBe("sudo");
+    expect(cold.args).toEqual([...sudoPrefix(user, coldRoots.bin), ...coldArgs(coldRoots)]);
+    expect(resumed.command).toBe("sudo");
+    expect(resumed.args).toEqual([
+      ...sudoPrefix(user, resumeRoots.bin),
+      ...coldArgs(resumeRoots),
+      "--resume",
+      resumePath,
+    ]);
+    expect(cold.env).toEqual(allowlist(coldRoots, optional));
+    expect(resumed.env).toEqual(allowlist(resumeRoots, optional));
+    expect(cold.cwd).toBe(coldRoots.cwd);
+    expect(resumed.cwd).toBe(resumeRoots.cwd);
+    expect(cold.stdio).toEqual(["pipe", "pipe", "pipe"]);
+    expect(resumed.stdio).toEqual(["pipe", "pipe", "pipe"]);
+    expect(cold.shell).toBe(false);
+    expect(resumed.shell).toBe(false);
+    for (const call of [cold, resumed]) {
+      expect(call.env.WORKBUDDY_MODEL_TOKEN).toBe(CALLER_TOKEN);
+      expect(JSON.stringify(call.args)).not.toContain(CALLER_TOKEN);
+      expect(JSON.stringify(call.args)).not.toContain(PARENT_TOKEN);
+      expect(JSON.stringify(call.args)).not.toContain(SENTINELS.MODEL_UPSTREAM_API_KEY);
+      expect(call.env).not.toHaveProperty("OMP_USER");
+      expect(call.env).not.toHaveProperty("MODEL_UPSTREAM_API_KEY");
+    }
+  });
+
+  it("omits absent LANG and TMPDIR from the sudo child without inventing them", async () => {
+    const roots = makeRoots();
+    const call = await capture(roots, null, { LANG: undefined, TMPDIR: undefined }, "omp_user");
+    expect(call.command).toBe("sudo");
+    expect(call.args).toEqual([...sudoPrefix("omp_user", roots.bin), ...coldArgs(roots)]);
+    expect(call.env).toEqual(allowlist(roots));
+    expect(call.env).not.toHaveProperty("LANG");
+    expect(call.env).not.toHaveProperty("TMPDIR");
+    expect(call.env).not.toHaveProperty("OMP_USER");
+  });
+
+  it("rejects unsafe PATH for sudo before mkdir and never runs a workspace sudo", async () => {
+    expect(() => assertSafeSudoPath("/usr/bin\0/bin")).toThrow();
+    for (const path of [
+      undefined,
+      "",
+      ":",
+      "/usr/bin:",
+      ":/usr/bin",
+      "/usr/bin::/bin",
+      "bin",
+      "/usr/bin:bin",
+    ]) {
+      const roots = makeRoots();
+      const marker = join(roots.root, "ran");
+      const decoy = join(roots.cwd, "sudo");
+      mkdirSync(roots.cwd, { recursive: true });
+      writeFileSync(
+        decoy,
+        `#!${process.execPath}\nimport{writeFileSync}from'node:fs';writeFileSync(${JSON.stringify(marker)},'ran');\n`,
+      );
+      chmodSync(decoy, 0o755);
+      const calls: SpawnCall[] = [];
+      await withContaminatedEnv({ PATH: path, LANG: undefined, TMPDIR: undefined }, async () => {
+        await expect(
+          spawnOmp(optsOf(roots, null, "omp"), capturingSpawn(roots, calls)),
+        ).rejects.toThrow();
+      });
+      expect(calls).toHaveLength(0);
+      expect(existsSync(marker)).toBe(false);
+      expect(existsSync(roots.home)).toBe(false);
+    }
+  });
+
+  it("keeps the direct spawn when PATH is absent and a workspace sudo exists", async () => {
+    const roots = makeRoots();
+    const marker = join(roots.root, "ran");
+    mkdirSync(roots.cwd, { recursive: true });
+    writeFileSync(
+      join(roots.cwd, "sudo"),
+      `#!${process.execPath}\nimport{writeFileSync}from'node:fs';writeFileSync(${JSON.stringify(marker)},'ran');\n`,
+    );
+    chmodSync(join(roots.cwd, "sudo"), 0o755);
+    const call = await capture(roots, null, { PATH: undefined });
+    expect(call.command).toBe(roots.bin);
+    expect(call.env.PATH).toBe("");
+    expect(existsSync(marker)).toBe(false);
+  });
 });
 
 function makeRoots(): SpawnRoots {
@@ -270,7 +400,7 @@ function makeRoots(): SpawnRoots {
   };
 }
 
-function optsOf(roots: SpawnRoots, resumePath: string | null): SpawnOmpOpts {
+function optsOf(roots: SpawnRoots, resumePath: string | null, user?: string): SpawnOmpOpts {
   return {
     bin: roots.bin,
     sandboxRoot: roots.sandboxRoot,
@@ -279,6 +409,7 @@ function optsOf(roots: SpawnRoots, resumePath: string | null): SpawnOmpOpts {
     modelId: MODEL,
     token: CALLER_TOKEN,
     resumePath,
+    ...(user === undefined ? {} : { ompUser: user }),
   };
 }
 
@@ -298,6 +429,17 @@ function coldArgs(roots: SpawnRoots): string[] {
     "--no-lsp",
     "--no-pty",
     "--no-title",
+  ];
+}
+
+function sudoPrefix(user: string, bin: string): string[] {
+  return [
+    "-n",
+    "-u",
+    user,
+    "--preserve-env=PATH,LANG,TMPDIR,HOME,PI_CODING_AGENT_DIR,WORKBUDDY_MODEL_TOKEN",
+    "--",
+    bin,
   ];
 }
 
@@ -332,10 +474,11 @@ async function capture(
   roots: SpawnRoots,
   resumePath: string | null,
   patch: Record<string, string | undefined> = {},
+  user?: string,
 ): Promise<SpawnCall> {
   const calls: SpawnCall[] = [];
   await withContaminatedEnv(patch, async () => {
-    await spawnOmp(optsOf(roots, resumePath), capturingSpawn(roots, calls));
+    await spawnOmp(optsOf(roots, resumePath, user), capturingSpawn(roots, calls));
   });
   const call = calls[0];
   if (call === undefined) {
@@ -411,19 +554,14 @@ function observedSpawnOptions(options: SpawnOptions): SpawnOptionsWithoutStdio {
 }
 
 function recordedCall(command: string, args: readonly string[], options: SpawnOptions): SpawnCall {
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(options.env ?? {})) {
-    if (value !== undefined) {
-      env[key] = value;
-    }
-  }
+  const call = recordedSpawn(command, args, options);
   return {
-    command,
-    args: [...args],
-    cwd: typeof options.cwd === "string" ? options.cwd : undefined,
-    env,
-    stdio: options.stdio,
-    shell: options.shell,
+    command: call.command,
+    args: call.args,
+    cwd: call.cwd,
+    env: call.env,
+    stdio: call.stdio,
+    shell: call.shell,
   };
 }
 

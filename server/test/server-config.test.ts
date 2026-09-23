@@ -1,7 +1,8 @@
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
+import { assertSafeSudoPath } from "../src/core/process-path.js";
 import { resolveServerConfig } from "../src/server.js";
 
 const REPO_ROOT = resolve(fileURLToPath(new URL("../../", import.meta.url)));
@@ -23,6 +24,7 @@ interface AgentSettings {
   modelUpstreamBaseUrl: string | undefined;
   modelUpstreamApiKey: string | undefined;
   modelId: string | undefined;
+  ompUser: string | undefined;
 }
 
 function sevenDefaults(config: {
@@ -33,6 +35,7 @@ function sevenDefaults(config: {
   modelUpstreamBaseUrl?: string;
   modelUpstreamApiKey?: string;
   modelId?: string;
+  ompUser?: string;
 }): AgentSettings {
   return {
     ompBin: config.ompBin,
@@ -42,6 +45,7 @@ function sevenDefaults(config: {
     modelUpstreamBaseUrl: config.modelUpstreamBaseUrl,
     modelUpstreamApiKey: config.modelUpstreamApiKey,
     modelId: config.modelId,
+    ompUser: config.ompUser,
   };
 }
 
@@ -75,6 +79,7 @@ describe("resolveServerConfig — 缺省身份", () => {
       modelUpstreamBaseUrl: undefined,
       modelUpstreamApiKey: undefined,
       modelId: DEFAULT_MODEL_ID,
+      ompUser: undefined,
     });
     expect(sevenDefaults(fromDist)).toEqual(sevenDefaults(fromSource));
   });
@@ -348,5 +353,76 @@ describe("resolveServerConfig — 新路径与上游显式空值", () => {
 
     expectNamedInvalid("MODEL_UPSTREAM_BASE_URL", { MODEL_UPSTREAM_BASE_URL: "" });
     expectNamedInvalid("MODEL_UPSTREAM_API_KEY", { MODEL_UPSTREAM_API_KEY: "" });
+  });
+});
+
+describe("resolveServerConfig — OMP_USER", () => {
+  it("缺席与显式 undefined 不增加用户，其余身份保持缺省", () => {
+    const omitted = resolveServerConfig({}, SOURCE_ENTRY);
+    const explicitUndefined = resolveServerConfig({ OMP_USER: undefined }, SOURCE_ENTRY);
+    expect(omitted.ompUser).toBeUndefined();
+    expect(explicitUndefined.ompUser).toBeUndefined();
+    expect(sevenDefaults(explicitUndefined)).toEqual(sevenDefaults(omitted));
+    expect(Object.hasOwn(omitted, "ompUser")).toBe(false);
+    expect(Object.hasOwn(explicitUndefined, "ompUser")).toBe(false);
+  });
+
+  it("接受 1 与 32 的精确用户名，不裁剪也不改写", () => {
+    const safe = { PATH: "/usr/bin:/opt/homebrew/bin" };
+    expect(resolveServerConfig({ ...safe, OMP_USER: "_" }, SOURCE_ENTRY).ompUser).toBe("_");
+    expect(resolveServerConfig({ ...safe, OMP_USER: "a" }, SOURCE_ENTRY).ompUser).toBe("a");
+    const boundary = `_${"a".repeat(31)}`;
+    expect(boundary).toHaveLength(32);
+    expect(resolveServerConfig({ ...safe, OMP_USER: boundary }, SOURCE_ENTRY).ompUser).toBe(
+      boundary,
+    );
+    expect(resolveServerConfig({ ...safe, OMP_USER: "omp-user_1" }, SOURCE_ENTRY).ompUser).toBe(
+      "omp-user_1",
+    );
+  });
+
+  it("拒绝空、大写、空格、分号、换行、非 ASCII 与 33 字符", () => {
+    for (const bad of [
+      "",
+      "Omp",
+      "omp user",
+      "root;id",
+      "omp\n",
+      "omp\r",
+      "omp用户",
+      `_${"a".repeat(32)}`,
+      " omp",
+      "omp ",
+      "1omp",
+      "-omp",
+    ]) {
+      expectInvalid({ OMP_USER: bad });
+    }
+    expect("omp\n").toHaveLength(4);
+    expect(`_${"a".repeat(32)}`).toHaveLength(33);
+  });
+
+  it("配置用户时拒绝缺失、空、空段、相对段与 NUL 的 PATH，绝对 PATH 原样保留", () => {
+    const safe = `/usr/bin${delimiter}/opt/homebrew/bin`;
+    expect(resolveServerConfig({ OMP_USER: "omp", PATH: safe }, SOURCE_ENTRY).ompUser).toBe("omp");
+    expect(() => assertSafeSudoPath("/usr/bin\0/bin")).toThrow();
+    for (const path of [
+      undefined,
+      "",
+      delimiter,
+      `/usr/bin${delimiter}`,
+      `${delimiter}/usr/bin`,
+      `/usr/bin${delimiter}${delimiter}/bin`,
+      "bin",
+      `/usr/bin${delimiter}bin`,
+    ]) {
+      expect(() =>
+        resolveServerConfig(
+          { OMP_USER: "omp", ...(path === undefined ? {} : { PATH: path }) },
+          SOURCE_ENTRY,
+        ),
+      ).toThrow();
+    }
+    expect(resolveServerConfig({ PATH: "bin" }, SOURCE_ENTRY).ompUser).toBeUndefined();
   });
 });

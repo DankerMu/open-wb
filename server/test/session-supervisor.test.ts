@@ -45,117 +45,134 @@ interface AssistantMessage {
 }
 
 describe("SessionSupervisor real child persistence and lifecycle", () => {
-  it("persists a normal child turn, reuses its generation, and resumes only after idle retirement", {
-    timeout: 15_000,
-  }, async () => {
-    const runtime = createRealFakeRuntime();
-    const terminalStates: string[] = [];
-    let capture:
-      | {
-          store: {
-            getMessages(sessionId: string, ownerId: string): { session: { status: string } } | null;
-          };
-        }
-      | undefined;
-    const { fixture, errors, events, cookie, session } = await openRecordingSession(
-      runtime.runtime,
-      {
-        onEvent(sessionId, _epoch, event) {
-          if (event.type === "turn.end") {
-            const status = capture?.store.getMessages(sessionId, OWNER_ID)?.session.status;
-            terminalStates.push(status ?? "missing");
-          }
-        },
-      },
-    );
-    capture = fixture;
-    try {
-      const firstResponse = await postPrompt(
-        fixture.app,
-        session,
-        cookie,
-        JSON.stringify({ message: "first normal turn" }),
-      );
-      expect(firstResponse.statusCode).toBe(202);
-      const firstTurn = await waitForTurn(fixture, session, "done");
-      const firstAssistant = assistantFrom(firstTurn);
-      expect(firstAssistant).toMatchObject({
-        content: "Hello from fake-omp",
-        status: "done",
-        steps: [
-          expect.objectContaining({
-            ordinal: 0,
-            name: "bash",
-            detail: '{"output":"workbuddy-smoke"}',
-            status: "done",
-          }),
-        ],
-      });
-      expect(firstAssistant.steps).toHaveLength(1);
-      expect(typeof firstAssistant.steps[0]?.id).toBe("number");
-      expect(sessionRow(fixture.db, session)).toMatchObject({
-        status: "done",
-        omp_session_file: "/tmp/open-wb-fake-session.jsonl",
-        stream_epoch: 1,
-      });
-      expect(eventsFor(events, session).map((entry) => entry.event.type)).toEqual([
-        "turn.start",
-        "text.delta",
-        "text.delta",
-        "text.delta",
-        "step.start",
-        "step.end",
-        "turn.end",
-      ]);
-      expect(terminalStates).toEqual(["done"]);
-
-      const firstCall = requiredCall(runtime.calls, 0);
-      const firstToken = requiredToken(firstCall.token);
-      expect(fixture.tokens.lookup(firstToken)).toBe(session);
-      expect(runtime.calls).toHaveLength(1);
-
-      const secondResponse = await postPrompt(
-        fixture.app,
-        session,
-        cookie,
-        JSON.stringify({ message: "reuse healthy child" }),
-      );
-      expect(secondResponse.statusCode).toBe(202);
-      await waitForTurn(fixture, session, "done");
-      expect(runtime.calls).toHaveLength(1);
-      expect(sessionRow(fixture.db, session).stream_epoch).toBe(1);
-      expect(fixture.tokens.lookup(firstToken)).toBe(session);
-
-      const firstChild = runtime.children[0];
-      if (firstChild === undefined) {
-        throw new Error("missing first fake-omp child");
+  it.each([undefined, "omp"] as const)(
+    "persists a normal child turn, reuses its generation, and resumes only after idle retirement for %s",
+    { timeout: 15_000 },
+    async (ompUser) => {
+      const runtime = createRealFakeRuntime();
+      if (ompUser !== undefined) {
+        runtime.runtime.ompUser = ompUser;
       }
-      runtime.clock.advance(IDLE_MS);
-      await waitFor(
-        () => (firstChild.exitCode !== null || firstChild.signalCode !== null ? true : undefined),
-        "idle child exit",
+      const terminalStates: string[] = [];
+      let capture:
+        | {
+            store: {
+              getMessages(
+                sessionId: string,
+                ownerId: string,
+              ): { session: { status: string } } | null;
+            };
+          }
+        | undefined;
+      const { fixture, errors, events, cookie, session } = await openRecordingSession(
+        runtime.runtime,
+        {
+          onEvent(sessionId, _epoch, event) {
+            if (event.type === "turn.end") {
+              const status = capture?.store.getMessages(sessionId, OWNER_ID)?.session.status;
+              terminalStates.push(status ?? "missing");
+            }
+          },
+        },
       );
-      expect(fixture.tokens.lookup(firstToken)).toBeNull();
+      capture = fixture;
+      try {
+        const firstResponse = await postPrompt(
+          fixture.app,
+          session,
+          cookie,
+          JSON.stringify({ message: "first normal turn" }),
+        );
+        expect(firstResponse.statusCode).toBe(202);
+        const firstTurn = await waitForTurn(fixture, session, "done");
+        const firstAssistant = assistantFrom(firstTurn);
+        expect(firstAssistant).toMatchObject({
+          content: "Hello from fake-omp",
+          status: "done",
+          steps: [
+            expect.objectContaining({
+              ordinal: 0,
+              name: "bash",
+              detail: '{"output":"workbuddy-smoke"}',
+              status: "done",
+            }),
+          ],
+        });
+        expect(firstAssistant.steps).toHaveLength(1);
+        expect(typeof firstAssistant.steps[0]?.id).toBe("number");
+        expect(sessionRow(fixture.db, session)).toMatchObject({
+          status: "done",
+          omp_session_file: "/tmp/open-wb-fake-session.jsonl",
+          stream_epoch: 1,
+        });
+        expect(eventsFor(events, session).map((entry) => entry.event.type)).toEqual([
+          "turn.start",
+          "text.delta",
+          "text.delta",
+          "text.delta",
+          "step.start",
+          "step.end",
+          "turn.end",
+        ]);
+        expect(terminalStates).toEqual(["done"]);
 
-      const afterIdle = await postPrompt(
-        fixture.app,
-        session,
-        cookie,
-        JSON.stringify({ message: "resume after idle" }),
-      );
-      expect(afterIdle.statusCode).toBe(202);
-      await waitForTurn(fixture, session, "done");
-      const resumedCall = requiredCall(runtime.calls, 1);
-      const resumedToken = requiredToken(resumedCall.token);
-      expect(resumePath(resumedCall.args)).toBe("/tmp/open-wb-fake-session.jsonl");
-      expect(resumedToken).not.toBe(firstToken);
-      expect(fixture.tokens.lookup(resumedToken)).toBe(session);
-      expect(sessionRow(fixture.db, session).stream_epoch).toBe(2);
-      expect(errors).toEqual([]);
-    } finally {
-      await fixture?.close();
-    }
-  });
+        const firstCall = requiredCall(runtime.calls, 0);
+        const firstToken = requiredToken(firstCall.token);
+        expect(fixture.tokens.lookup(firstToken)).toBe(session);
+        expect(runtime.calls).toHaveLength(1);
+
+        const secondResponse = await postPrompt(
+          fixture.app,
+          session,
+          cookie,
+          JSON.stringify({ message: "reuse healthy child" }),
+        );
+        expect(secondResponse.statusCode).toBe(202);
+        await waitForTurn(fixture, session, "done");
+        expect(runtime.calls).toHaveLength(1);
+        expect(sessionRow(fixture.db, session).stream_epoch).toBe(1);
+        expect(fixture.tokens.lookup(firstToken)).toBe(session);
+
+        const firstChild = runtime.children[0];
+        if (firstChild === undefined) {
+          throw new Error("missing first fake-omp child");
+        }
+        runtime.clock.advance(IDLE_MS);
+        await waitFor(
+          () => (firstChild.exitCode !== null || firstChild.signalCode !== null ? true : undefined),
+          "idle child exit",
+        );
+        expect(fixture.tokens.lookup(firstToken)).toBeNull();
+
+        const afterIdle = await postPrompt(
+          fixture.app,
+          session,
+          cookie,
+          JSON.stringify({ message: "resume after idle" }),
+        );
+        expect(afterIdle.statusCode).toBe(202);
+        await waitForTurn(fixture, session, "done");
+        const resumedCall = requiredCall(runtime.calls, 1);
+        const resumedToken = requiredToken(resumedCall.token);
+        expect(firstCall.command).toBe(ompUser === undefined ? runtime.runtime.bin : "sudo");
+        expect(resumedCall.command).toBe(firstCall.command);
+        if (ompUser !== undefined) {
+          expect(firstCall.args.slice(0, 6)).toEqual(sudoUserPrefix(runtime.runtime.bin, ompUser));
+          expect(resumedCall.args.slice(0, 6)).toEqual(firstCall.args.slice(0, 6));
+        } else {
+          expect(firstCall.args[0]).toBe("--mode");
+          expect(resumedCall.args.slice(0, firstCall.args.length)).toEqual(firstCall.args);
+        }
+        expect(resumePath(resumedCall.args)).toBe("/tmp/open-wb-fake-session.jsonl");
+        expect(resumedToken).not.toBe(firstToken);
+        expect(fixture.tokens.lookup(resumedToken)).toBe(session);
+        expect(sessionRow(fixture.db, session).stream_epoch).toBe(2);
+        expect(errors).toEqual([]);
+      } finally {
+        await fixture?.close();
+      }
+    },
+  );
 
   it("drains the two crash deltas, revokes the native token, and resumes at the next epoch", {
     timeout: 15_000,
@@ -572,6 +589,17 @@ function assistantFrom(tree: { messages: readonly AssistantMessage[] }) {
     throw new Error("completed turn has no assistant message");
   }
   return assistant;
+}
+
+function sudoUserPrefix(bin: string, user: string): string[] {
+  return [
+    "-n",
+    "-u",
+    user,
+    "--preserve-env=PATH,LANG,TMPDIR,HOME,PI_CODING_AGENT_DIR,WORKBUDDY_MODEL_TOKEN",
+    "--",
+    bin,
+  ];
 }
 
 function latestAssistantFrom(tree: { messages: readonly AssistantMessage[] }) {
