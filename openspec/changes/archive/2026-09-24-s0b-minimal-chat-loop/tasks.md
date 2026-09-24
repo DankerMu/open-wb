@@ -60,8 +60,36 @@ Minimal mergeable slice: 5.1 api 扩展单独可合并保绿（四方法有配�
 
 - [x] 6.1 Makefile：`smoke-live` env 门禁、原样变量和 PATH-only Hurl 形状档调用、`.PHONY`/头注释与精确 recipe/重复目标 oracle；原 `make smoke` 不变。#94 / PR #249 已合并（30f4f7941135959c6ad4aaeea41829f30122b984），十项命令边界验证及487项守卫通过，源代码 CI 35921350985 八项通过。独立规范归档另走 PR/CI；此项不声称真实 Hurl 对话已通过，`chat.hurl` 属于 #105。
 - [x] 6.2 #105 / PR#251 已原子交付verified omp-fetch、job-owned假上游、smoke/ui-walk runtime env、三文件chat.hurl/精确变量与全部oracle；四action矩阵不变，secrets禁令按用户确认仅两个harness jobs。真实18.0.10本地smoke两次各22请求、独立chat10请求、原UI1/1通过；最终守卫563PASS，真实抗终止omp/app及独立child identity反例闭环。源合并99056cf6a0d6827fa273dc9ce96140c47b25364d；review round3 clean/2fixpasses；CI35950807791八项通过，Ubuntu两job实际下载校验Linux18.0.10。独立归档另走PR/CI，#106对话UI与#107控制面仍待交付。
-- [ ] 6.3 `web/e2e/ui-walk.spec.ts` 增对话步骤（新建、发送、步骤卡、回合中刷新续流、正文、回合后刷新完整、console error oracle 不变）；本地与 CI `make ui-walk` 绿
-- [ ] 6.4 控制面三处同步：AGENTS.md 验证矩阵（`omp-fetch`/`smoke-live` 两行）与 Directory Map、`constraints.yaml verification.surfaces` 两条与 `downgrades` 一条（S0b 同 uid 窗口内 `/proc` 凭证读取向量，ADR-0010 于 S1a 关闭）、Makefile 头注释；`scripts/test-ci-harness.sh` 的 AGENTS 行、`verification.surfaces` 期望元组（八→十）与 `wanted` 同 PR 更新，三处命令字面比对由该 oracle 机械执行，`make test-guardrails` 绿
+- [x] 6.3 #106/PR255交付真实回合中reload原生续流与完成后reload；用户批准existing测试上游UUID gate扩展。post-open running恢复完成后release，期间禁止REST代替suffix；屏蔽真实text.delta与注入consoleerror反例均RED、恢复GREEN，保留exact两次401。38项fixture/legacy通过，真实本地UI反复通过，CI35960180481八项通过含Linux18.0.10UI1passed6.4s；round2clean/1fixpass。源合并36ef3245bf2d6c618a307656b1e5819d95d7dd8d，独立归档另走PR/CI。
+- [x] 6.4 #107/PR258：AGENTS 验证矩阵/Enforcement/Directory、constraints 十个 surfaces 与 S0b 同 uid 风险账本、Make 页头及 oracle 同步；不改 recipes/CI/产品/阈值。隐藏整节 Markdown 与错误 foreign-owner mutant 已闭环，round2 clean/1fixpass；26+611守卫与22独立mutants通过，源head0a73d9a8cbf76824d8f4dab851dad40552852b87 CI35969664073八项成功。独立规范归档另走PR/CI；不声称真实模型或UID隔离已验证。
 
 Suggested fixture level: none - harness 自身即验证物；CI 接线以 workflow 全绿为证
 Minimal mergeable slice: 6.1 `smoke-live` + Makefile 同步单独可合并保绿（只加目标 + oracle 同步，不改既有 smoke 文件列表，CI 不受影响）；6.2 是 CI 假上游 + `chat.hurl` 的原子一刀（hurl 用例进入 `make smoke` 与 CI 起假上游必须同 PR，否则 CI 红）；6.3 依赖 6.2；6.4 依赖 6.1、6.2（命令面定稿后同步）
+
+## Epic #81 集成验收与父规格协调（2026-09-24）
+
+- 26 个原始子 issue 全部 CLOSED；额外前置 #198/#204/#214 已随各自独立 PR 交付。全程沿用当前 worktree，无新 worktree。人工白盒等待仅按用户对本 Epic 的明确豁免跳过；功能审核仍交用户，不将代理检查冒充人工验收。
+- 最终集成基线 `b5c0edfd43523df2d422c3d9d8df6289f81092fa`，#107 源 PR258、独立归档 PR259 均已合并；后者 head `57bab19f17ae9ba8b6519e157d1f4b71feb1af95` CI35970902010 八项成功。此前各条“三文件”“仍待交付”为当时历史记录，不是当前状态。
+- 本机会话新鲜实测：`make omp-fetch` exit0 校验官方18.0.10 Darwin arm64；web/server build exit0；`bash .github/scripts/ci-compiled-server.sh smoke` exit0，四文件38请求全成功；同 wrapper `ui-walk` exit0，真实 Chromium 1/1 passed（4.2s）。均使用真实 omp、compiled app、SQLite、原生 EventSource 与本地确定性上游，不是 fake omp 或浏览器伪响应。
+- 截图专用副本仅在完成后 reload 的断言之后插入 screenshot，其余走查及 console/pageerror oracle 不变；1/1 passed（4.9s），零非预期浏览器错误，保留登录前/退出后 exact 两次401。截图 `completed-dialogue.png` 显示一对用户/助手消息、完整回复、bash done、会话 done；当前界面是基础功能样式，非视觉精修验收。三个独立 DB 的会话最终均 done。
+- 可重放证据与完整映射：`/tmp/open-wb-epic81-evidence`；含执行日志、子 issue 闭合清单、截图、源码/二进制身份与两份逐 requirement/scenario 的 canonical 映射。临时浏览器副本、DB、模型配置与沙箱在验收后清理。
+
+### 父 delta 的归档边界
+
+父 delta 是设计时历史快照，各子 change 已逐个同步 canonical；归档使用 `--skip-specs`，不再次应用旧 ADDED/MODIFIED，不产生并行规范，也不回退并发 S1a/files 交付。归档前后全部17个 canonical spec 必须逐字身份相同。两个独立只读 scout 按服务端/浏览器-harness 分工核对全部9个 capability，无缺失接受条件。
+
+| 父 capability / requirements | 当前 canonical 归属与保留演进 |
+|---|---|
+| omp-runtime：供给、spawn、RPC、生命周期 | 同名四 requirement；RPC transport/IO/dispatch receipt 补充；sessionFile 落盘由 chat-sessions supervisor 承担 |
+| model-proxy：鉴权透传、models.yml、假上游 | 同名三 requirement；TokenLookup 边界/registry 分离；启动写配置由 http-service-skeleton 装配承担 |
+| chat-sessions：schema、REST、prompt 状态机 | schema/REST 同名；状态机由持久化与刷盘、REST 受理补偿、Supervisor dispatch/ordered persistence、module teardown 覆盖；保留无损文本、同步 sink、原子 snapshot cursor |
+| chat-stream：事件集、缓冲回放、SSE | 纯协议事件归约、Pure epoch event ring、Generation-owned recording、Authenticated SSE、Atomic replay、Bounded subscriber isolation；extension UI 取消归 omp-runtime RPC IO |
+| http-service-skeleton：错误信封、装配 | 保留已晋升十一码/六 parser owner/core-errors 与十二配置项/七模块，绝不以父旧七码/四 owner/五模块覆盖 |
+| chat-web：API、会话页、流消费 | 同名三 requirement 加纯归约；every-native-open 全量恢复、cursor watermark/重入/代际边界保留 |
+| chat-harness：HTTP、UI、Make/CI、控制面 | HTTP/UI 同名；手动真实上游入口、Real-runtime CI harness ownership、对话验证控制面同步分别承载后两项；真正在途 reload gate 保留 |
+| spa-shell：路由 IA | 同名 requirement 保留会话与并发 files 工作空间真实页面，不回退为仅占位 |
+| verification-harness：HTTP/UI/CI | 同名三个 requirement 保留四文件 smoke、启动前文件夹具预置、真实在途刷新、十 surfaces 与 same-uid downgrade，以及原质量/聚合门禁 |
+
+### 待用户功能审核的范围与限制
+
+建议用户走查：登录 → 新建会话 → 发消息/查看 bash 步骤 → 回合中刷新续流 → 完成后刷新历史 → 切会话 → 退出。机器实测覆盖确定性上游下的真实端到端链路；未调用真实外部模型，`smoke-live` 仍为需配置真实上游的手动入口。同 uid `/proc`/配置凭证风险仍按 ADR0010 与 constraints downgrade 登记，不因本次验收宣称关闭。已跟踪 #227 的 REST preClose keepalive 边界不在本 Epic 新增范围；崩溃后的用户重试交互、多 tab 冲突展示与真实模型上下文校准仍按原 Not yet specified 留待后续阶段。
