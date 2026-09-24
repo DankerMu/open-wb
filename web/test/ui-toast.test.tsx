@@ -1,14 +1,21 @@
 import "./radix-platform.js";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider, useToast } from "../src/ui/index.js";
 import { blockBody, readRepoFile, ruleBody, stripComments } from "./ui-support.js";
 
 type Show = ReturnType<typeof useToast>["show"];
 
-/** 探针：把 `useToast().show` 交给测试直接调用。 */
+/** 探针挂载次数：守住“应用树不随 epoch 重挂”（每个用例前归零）。 */
+let probeMounts = 0;
+
+/** 探针：把 `useToast().show` 交给测试直接调用，并记录自身挂载次数。 */
 function Probe({ onReady }: { onReady: (show: Show) => void }) {
   onReady(useToast().show);
+  useEffect(() => {
+    probeMounts += 1;
+  }, []);
   return null;
 }
 
@@ -39,6 +46,7 @@ const region = () => screen.getByRole("region", { name: "通知" });
 describe("ToastProvider / useToast (jsdom, fake timers)", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    probeMounts = 0;
   });
 
   afterEach(() => {
@@ -132,7 +140,7 @@ describe("ToastProvider / useToast (jsdom, fake timers)", () => {
   });
 
   // Radix 1.2.23 的暂停标记挂在 Provider 上，只有 Viewport 在有 toast 时的监听能清掉它；
-  // 暂停中关掉最后一条后，新 toast 须仍按时自动关闭（epoch 重挂 Provider）。
+  // 暂停中关掉最后一条后，新 toast 须仍按时自动关闭（epoch 重挂 Provider），且应用树（children）不随之重挂。
   it.each([
     ["指针悬停", (toast: HTMLElement) => fireEvent.pointerMove(toast)],
     ["聚焦", (toast: HTMLElement) => fireEvent.focus(toast)],
@@ -146,6 +154,7 @@ describe("ToastProvider / useToast (jsdom, fake timers)", () => {
     expect(toasts()).toHaveLength(1);
     advance(2400);
     expect(toasts()).toHaveLength(0);
+    expect(probeMounts).toBe(1);
   });
 });
 
