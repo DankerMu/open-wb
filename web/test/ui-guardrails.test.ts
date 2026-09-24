@@ -27,12 +27,14 @@ describe("颜色 grep 守卫", () => {
     expect(colorHits("color: var(--wb-palette-gray-3);")).toHaveLength(1);
   });
 
-  it("features css/tsx 与 routes 无字面颜色与 --wb-palette-", () => {
+  it("features/ui 的 css/tsx 与 routes 无字面颜色与 --wb-palette-", () => {
     const features = listRepoFiles("web/src/features", (path) => /\.(css|tsx)$/.test(path));
+    const ui = listRepoFiles("web/src/ui", (path) => /\.(css|tsx)$/.test(path));
     const routes = listRepoFiles("web/src/routes", () => true);
     expect(features.length).toBeGreaterThan(0);
+    expect(ui.length).toBeGreaterThan(0);
     expect(routes.length).toBeGreaterThan(0);
-    expect(hitsIn([...features, ...routes], colorHits)).toEqual([]);
+    expect(hitsIn([...features, ...ui, ...routes], colorHits)).toEqual([]);
   });
 
   it("web/src/ui/**/*.tsx 无内联 style={", () => {

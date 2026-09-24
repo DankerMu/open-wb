@@ -61,14 +61,14 @@ export type IconName = keyof typeof ICONS;
 type IconProps = {
   name: IconName;
   size?: 12 | 14 | 16 | 18 | 20;
-  /** 有 label 时图标承载语义（role=img + 可访问名），否则为装饰（aria-hidden）。 */
+  /** 有 label 时图标承载语义（role=img + 可访问名），否则为装饰（aria-hidden）；空串视为无 label。 */
   label?: string;
 };
 
 export function Icon({ name, size = 16, label }: IconProps) {
   const Glyph = ICONS[name];
   const className = `ui-icon ui-icon-${size}`;
-  if (label === undefined) {
+  if (!label) {
     return <Glyph aria-hidden="true" className={className} size={size} />;
   }
   return <Glyph aria-label={label} className={className} role="img" size={size} />;

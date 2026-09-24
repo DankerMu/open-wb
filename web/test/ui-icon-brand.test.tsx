@@ -51,6 +51,13 @@ describe("Icon", () => {
     expect(svg.classList.contains("ui-icon-16")).toBe(false);
   });
 
+  it("label 为空串时按装饰处理：aria-hidden 且无 role", () => {
+    const { container } = render(<Icon label="" name="folder" />);
+    const svg = container.querySelector("svg");
+    expect(svg?.getAttribute("aria-hidden")).toBe("true");
+    expect(svg?.hasAttribute("role")).toBe(false);
+  });
+
   it.each([12, 14, 16, 18, 20] as const)("size=%i 输出对应的 ui-icon-<size> 类名", (size) => {
     const { container } = render(<Icon name="check" size={size} />);
     expect(container.querySelector("svg")?.classList.contains(`ui-icon-${size}`)).toBe(true);
