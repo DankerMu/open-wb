@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { trapDialogFocus } from "../../lib/dialog.js";
+import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
+import { ConfirmDialog } from "../../ui/index.js";
 import { useAuth } from "./provider.js";
 
 export function AuthFooter() {
@@ -8,9 +8,21 @@ export function AuthFooter() {
   const [pending, setPending] = useState(false);
   const mountedRef = useRef(true);
   const pendingRef = useRef(false);
-  const dialogRef = useRef<HTMLDialogElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const cancelRef = useRef<HTMLButtonElement>(null);
+  // 关闭时刻（Radix onCloseAutoFocus）才读取：trigger 可用则回 trigger，pending 禁用时回侧栏当前页链接。
+  const returnFocus = useMemo<RefObject<HTMLElement | null>>(
+    () => ({
+      get current() {
+        const trigger = triggerRef.current;
+        if (!trigger) return null;
+        return trigger.disabled
+          ? (trigger.closest("aside")?.querySelector<HTMLAnchorElement>("a[aria-current=page]") ??
+              null)
+          : trigger;
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
     mountedRef.current = true;
@@ -19,39 +31,8 @@ export function AuthFooter() {
     };
   }, []);
 
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!confirming || !dialog) {
-      return;
-    }
-
-    dialog.showModal();
-    cancelRef.current?.focus();
-
-    return () => {
-      if (dialog.open) {
-        dialog.close();
-      }
-      if (mountedRef.current) {
-        const trigger = triggerRef.current;
-        if (trigger?.disabled) {
-          trigger
-            .closest("aside")
-            ?.querySelector<HTMLAnchorElement>("a[aria-current=page]")
-            ?.focus();
-        } else {
-          trigger?.focus();
-        }
-      }
-    };
-  }, [confirming]);
-
   if (!principal) {
     return null;
-  }
-
-  function dismissConfirm() {
-    setConfirming(false);
   }
 
   async function confirmLogout() {
@@ -102,39 +83,24 @@ export function AuthFooter() {
           正在退出登录，可继续浏览或刷新确认登录状态。
         </p>
       ) : null}
-      {confirming ? (
-        <dialog
-          aria-describedby="logout-description"
-          aria-labelledby="logout-title"
-          onKeyDown={trapDialogFocus}
-          className="logout-dialog"
-          onCancel={(event) => {
-            event.preventDefault();
-            dismissConfirm();
-          }}
-          ref={dialogRef}
-          role="alertdialog"
-        >
-          <h2 id="logout-title">退出登录？</h2>
-          <p id="logout-description">
-            退出后本机不再保留登录状态，未完成的任务会保留在你的沙箱中。
-          </p>
-          {pending ? <p className="ui-muted">退出请求已发送，关闭窗口不会撤销请求。</p> : null}
-          <div className="logout-dialog-actions">
-            <button className="ui-button" onClick={dismissConfirm} ref={cancelRef} type="button">
-              {pending ? "关闭" : "取消"}
-            </button>
-            <button
-              className="ui-button ui-button-danger"
-              disabled={pending}
-              onClick={confirmLogout}
-              type="button"
-            >
-              退出
-            </button>
-          </div>
-        </dialog>
-      ) : null}
+      <ConfirmDialog
+        cancelText={pending ? "关闭" : "取消"}
+        confirmText="退出"
+        danger
+        description="退出后本机不再保留登录状态，未完成的任务会保留在你的沙箱中。"
+        onConfirm={() => {
+          void confirmLogout();
+        }}
+        onOpenChange={(open) => {
+          if (!open) setConfirming(false);
+        }}
+        open={confirming}
+        pending={pending}
+        returnFocus={returnFocus}
+        title="退出登录？"
+      >
+        {pending ? <p className="ui-muted">退出请求已发送，关闭窗口不会撤销请求。</p> : null}
+      </ConfirmDialog>
     </footer>
   );
 }
