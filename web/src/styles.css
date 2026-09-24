@@ -1,62 +1,13 @@
-/* Design tokens adapted from WorkBuddy 5.3.11
-   (wb-design-tokens-master.css / design-tokens.json), as recorded in
-   ATTRIBUTION.md §4 and resource/workbuddy-live-demo.html. Brand imagery
+/* Global reset, app skeleton and page rules. Design tokens live in
+   ./styles/tokens.css (adapted from WorkBuddy 5.3.11 via
+   resource/workbuddy-live-demo.html, see ATTRIBUTION.md §4). Brand imagery
    and upstream layout/code are not reused. */
 
+@import "./styles/tokens.css";
+@import "./ui/motion.css";
+@import "./ui/ui.css";
 @import "./features/chat/chat.css";
 @import "./features/files/files.css";
-
-:root {
-  --wb-brand-primary: #00c29a;
-  --wb-brand-primary-subtle: rgba(0, 194, 154, 0.12);
-  --wb-brand-primary-deep: #087866;
-  --wb-bg-primary: #ffffff;
-  --wb-bg-secondary: #f7f7f7;
-  --wb-sidebar-bg: #f2f2f2;
-  --wb-text-primary: rgba(0, 0, 0, 1);
-  --wb-text-secondary: rgba(0, 0, 0, 0.7);
-  --wb-text-tertiary: rgba(0, 0, 0, 0.5);
-  --wb-border-default: rgba(0, 0, 0, 0.08);
-  --wb-status-success: #0cbf5b;
-  --wb-status-error: #f64041;
-  --wb-status-error-text: #b42c3f;
-  --wb-status-error-soft-bg: rgba(246, 64, 65, 0.1);
-  --wb-shadow-dialog: 0 24px 64px rgba(15, 23, 42, 0.24), 0 8px 20px rgba(15, 23, 42, 0.1);
-  --wb-overlay: rgba(0, 0, 0, 0.4);
-  --wb-font:
-    -apple-system, blinkmacsystemfont, "Segoe UI", roboto, "Helvetica Neue", arial, "PingFang SC",
-    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  --wb-mono: ui-monospace, menlo, monaco, "SF Mono", "Cascadia Code", consolas, monospace;
-  --wb-bg-hover: rgba(0, 0, 0, 0.05);
-  --wb-bg-active: rgba(0, 0, 0, 0.08);
-  --wb-home-bg: #f2f2f2;
-  --wb-scrollbar-thumb: rgba(0, 0, 0, 0.18);
-  --wb-control-bg: rgba(0, 0, 0, 0.04);
-}
-
-[data-theme="dark"] {
-  --wb-brand-primary: #4cf0ce;
-  --wb-brand-primary-subtle: rgba(76, 240, 206, 0.16);
-  --wb-brand-primary-deep: #0dbfa3;
-  --wb-bg-primary: #1f1f1f;
-  --wb-bg-secondary: #292929;
-  --wb-sidebar-bg: #1f1f1f;
-  --wb-text-primary: rgba(255, 255, 255, 1);
-  --wb-text-secondary: rgba(255, 255, 255, 0.65);
-  --wb-text-tertiary: rgba(255, 255, 255, 0.5);
-  --wb-border-default: rgba(255, 255, 255, 0.14);
-  --wb-status-success: #43f08f;
-  --wb-status-error: #f05c5c;
-  --wb-status-error-text: #f05c5c;
-  --wb-status-error-soft-bg: rgba(240, 92, 92, 0.16);
-  --wb-shadow-dialog: 0 24px 64px rgba(0, 0, 0, 0.5), 0 8px 20px rgba(0, 0, 0, 0.3);
-  --wb-overlay: rgba(0, 0, 0, 0.6);
-  --wb-bg-hover: rgba(255, 255, 255, 0.08);
-  --wb-bg-active: rgba(255, 255, 255, 0.12);
-  --wb-home-bg: #1f1f1f;
-  --wb-scrollbar-thumb: rgba(255, 255, 255, 0.2);
-  --wb-control-bg: rgba(255, 255, 255, 0.04);
-}
 
 *,
 *::before,
@@ -83,7 +34,7 @@ body {
   font-family: var(--wb-font);
   font-size: 14px;
   line-height: 22px;
-  background: var(--wb-home-bg);
+  background: var(--wb-home-bg-primary);
   color: var(--wb-text-primary);
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
@@ -115,7 +66,7 @@ select:disabled {
 input,
 textarea,
 select {
-  background: var(--wb-control-bg);
+  background: var(--wb-color-bg-input);
   border: 1px solid var(--wb-border-default);
   border-radius: 8px;
 }
@@ -416,7 +367,7 @@ a {
   justify-content: center;
   min-height: 100dvh;
   padding: 24px;
-  background: var(--wb-home-bg);
+  background: var(--wb-home-bg-primary);
   color: var(--wb-text-secondary);
 }
 
@@ -426,7 +377,7 @@ a {
   justify-content: center;
   min-height: 100dvh;
   padding: 24px 16px;
-  background: var(--wb-home-bg);
+  background: var(--wb-home-bg-primary);
 }
 
 .login-card {

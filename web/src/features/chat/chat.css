@@ -2,7 +2,8 @@
    Visual language adapted from resource/workbuddy-live-demo.html:282-299
    (session rows), 337-415 (welcome/composer), 416-549 (transcript/steps).
    Design tokens from WorkBuddy 5.3.11 (wb-design-tokens-master.css /
-   design-tokens.json), light #00C29A / dark #4cf0ce. Shell owns :root.
+   design-tokens.json), light/dark brand colors via --wb-brand-primary in
+   web/src/styles/tokens.css. Shell owns :root.
 */
 
 .chat-page {

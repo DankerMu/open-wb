@@ -29,6 +29,14 @@
   - 用途：规划中的 agent 后端。决策（2026-08-29）：**fork 并定死在 v18.0.10 / commit `33cc6b9a`**,后续不跟进上游;减肥与集成方案见 `resource/backend-research.md` §2。
   - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本。fork 仓库须保留其 `LICENSE`;**若 omp 派生二进制进入本项目发行物**,发行物内须附带该 MIT 声明。当前仅为本地参考副本（`resource/oh-my-pi`,已 gitignore）,未分发。
 
+- **lucide / lucide-react** —— `ISC License`,版权归 Lucide Icons and Contributors（部分图标派生自 Feather,© Cole Bemis,MIT,声明同在该包 `LICENSE`）（https://github.com/lucide-icons/lucide）
+  - 用途：`web/` 前端图标,经 `web/src/ui/icon.tsx` 单一 `Icon` 组件取用,构建时打包进 `web/dist`,运行时零网络请求。
+  - 义务：ISC 要求在副本中保留版权与许可声明;`lucide-react` 包自带 `LICENSE`,**若 `web/dist` 进入本项目发行物**,发行物须附带该 ISC 声明。
+
+- **Radix UI Primitives** —— `MIT License`,版权归 WorkOS（https://github.com/radix-ui/primitives）
+  - 用途：规划中的 `web/src/ui/` 无样式交互基元（Dialog/Popover/Tooltip 等）;由 S1e 后续切片安装,当前尚未引入依赖。
+  - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;安装后随打包产物分发时须附带该 MIT 声明。
+
 ## 4. 本仓库自有内容
 
 - `app-reference/analysis/*.md` —— 结构分析文档（仓库作者）
