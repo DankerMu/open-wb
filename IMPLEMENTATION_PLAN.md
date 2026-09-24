@@ -11,7 +11,7 @@
 
 ## Scope
 
-- 功能实现清单（稳定 ID，源自 demo/PLAN §3）与 13 个实现子阶段的任务包、依赖、验收。
+- 功能实现清单（稳定 ID，源自 demo/PLAN §3）与 14 个实现子阶段的任务包、依赖、验收。
 - AGENTS.md 两个 READINESS GAP（HTTP smoke / UI 走查）的接入排期（S0a）。
 
 ## Not In Scope
@@ -111,11 +111,30 @@
 | F-OPS-3 | omp 减肥（backend-research §2.2 阶段 1→4） |
 | F-OPS-4 | 单机部署包（fuse3+rclone+模型捆包） |
 
-## Phases（13 子阶段）
+### 前端基准对齐（demo 呈现层，跨页面）
+
+> 2026-09-24 增补，依据 `docs/reviews/2026-09-24-demo-parity-audit.md`：功能类 F-ID 不覆盖外壳/组件/响应式/验收方法，
+> 已交付页面的呈现偏差与计划遗漏在此独立登记，避免"默认未来阶段会顺手补齐"。
+
+| ID | 行为 |
+|---|---|
+| F-UI-1 | 设计 token 全集（调色板 + 语义层，亮/暗）与基元组件库：按钮/输入/开关/标签/chip/Modal 栈/confirm/Drawer/Menu/锚定 Pop/Toast/空态/图标集/动效；全部页面只经基元取样式 |
+| F-UI-2 | 应用外壳：侧栏（图标 + 副标签 + 折叠 288→48 + 底部铃铛/设置/用户菜单展示形态）、顶栏三态（欢迎页隐藏 / 任务面包屑 / 页面标题 + 操作位）、响应式 1100/900/760 三档（760 以下侧栏覆盖层） |
+| F-UI-3 | 会话页对齐（已交付范围）：欢迎页 hero + 最佳实践卡 + 免责声明、composer 卡片形态（未交付控件不渲染）、用户/助手消息形态、Markdown 正文 + 流式光标、步骤卡结构化摘要（不倒 JSON）、回到最新、消息操作条（复制） |
+| F-UI-4 | 文件页对齐：树图标/大小/修改时间、根行形态、切换器弹层形态、预览头与不支持态/空目录文案、逻辑路径展示（不暴露服务器绝对路径） |
+| F-UI-5 | 登录页与设置页对齐：登录卡结构（自有品牌位 + 副标题 + 自动聚焦）、外观分段控件 + 当前生效卡、关于卡图标 |
+| F-UI-6 | demo 一致性验收 harness：Playwright 视口矩阵（1440/1024/390 × 亮/暗）、逐页 demo-vs-app 截图对产物（`make ui-shots`，人工验收输入）、肉眼可辨夹具（≥128px 图片 + 多段 md + 多行 csv）、逐页逐组件验收清单文档 |
+
+## Phases（14 子阶段）
 
 通用契约：每阶段 Verify 至少含 `make check` 绿 + 阶段专属验收；改动触碰 AGENTS.md
 Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有阶段共有：`AGENTS.md`、
 `CONTEXT.md`、`docs/architecture/system.md` §3–§6——下表只列增量。
+
+前端通用契约（2026-09-24 增补）：
+- 凡触碰 `web/` 的阶段：Verify 必含该阶段页面的 demo-vs-app 截图对（`make ui-shots`）与逐组件验收清单签收；
+  Stage 5 对 web 任务的 `Suggested fixture level` 不得只以 jsdom/mock 收口，涉及呈现的任务至少 `expanded`（真实浏览器 + 视口矩阵）。
+- demo 中无后端契约支撑的控件（麦克风、上传、审批、召唤/安装、连通测试等）在其后端阶段落地前**不渲染**；不得以禁用态/占位按钮"先摆上"。
 
 ### 里程碑 P0 — 链路骨架
 
@@ -155,12 +174,21 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 - Depends on：S1a。
 - Review attention：decision-dense（Critical Path：挂载凭证存取）。
 
+**S1e 前端基准对齐（已交付页面）**
+- Outcome：把 S0a/S0b/S1a 已交付的四页（登录、`/`、`/files`、`/settings`）按 demo 逐页逐组件对齐；建立基元组件库与 token 全集；接入视口矩阵与截图对产物；人工联合验收以截图对 + 清单签收。**不新增任何后端能力；demo 中无后端支撑的控件一律不渲染。**
+- Files/components：`web/src/ui/*`（基元）、`web/src/styles/tokens.css`、`web/src/routes`（外壳）、四个 feature 目录的呈现层、`web/e2e`、`web/playwright.config.ts`、`smoke/fixtures/sandbox`、`docs/acceptance/demo-parity-checklist.md`。
+- 覆盖：F-UI-1、F-UI-2、F-UI-3、F-UI-4、F-UI-5、F-UI-6。
+- 必读增量：`docs/reviews/2026-09-24-demo-parity-audit.md` §4（逐页 demo 行号）；demo 全局组件节（demo:570-634, 934-1142）；ATTRIBUTION.md §4（token 可用、品牌图形不可用）。
+- Verify：`make check` + `make ui-walk`（矩阵内每格无横向溢出、无 console error）+ `make ui-shots` 产物经人工按清单逐项签收（清单每项写"demo:行号 → 页面元素 → 通过/不通过"）。
+- Depends on：S0b、S1a。
+- Review attention：decision-dense（组件边界与 token 分层一次定调；之后所有 web 阶段只消费不重建）。
+
 **S1c 会话治理与分组**
 - Outcome：omp-supervisor 完整治理（每活跃会话一个、空闲回收、数量上限——池参数在此实测定参）；会话分组侧栏、三场景、fork、中断。
 - 覆盖：F-CHAT-1、F-CHAT-2、F-CHAT-7、F-OPS-1。
 - 必读增量：demo `/` 侧栏与场景交互；PLAN §5 并发资源治理。
 - Verify：并发多会话压测（回收/上限生效）；双账号会话互不可见（初步）。
-- Depends on：S0b、S1a。
+- Depends on：S0b、S1a、S1e（侧栏分组与场景要落在对齐后的外壳与基元上，避免二次返工）。
 - Review attention：decision-dense（Critical Path：spawn/回收/限额）。
 
 **S1d 中心能力面（专家/技能/连接器/模型）**
@@ -244,6 +272,7 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 | S1b | F-FILE-3 |
 | S1c | F-CHAT-1/2/7、F-OPS-1 |
 | S1d | F-CTR-EXP/SKL/CON/MOD |
+| S1e | F-UI-1/2/3/4/5/6 |
 | S2a | F-CTR-KB1/KB2 |
 | S2b | F-CTR-KB3 |
 | S2c | F-CHAT-4/5、F-CTR-KB4 |
