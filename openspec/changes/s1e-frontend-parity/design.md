@@ -18,7 +18,7 @@ Grill（2026-09-24，12 项用户拍板）：headless 库 = Radix UI Primitives�
 
 ## Decisions
 
-1. **基元层位置与依赖方向**：`web/src/ui/`（`index.ts` 在组 1 首刀创建、为唯一出口，之后各切片增量添加导出），feature 与 routes 只 `import from "../../ui"`；`ui/` 不 import 任何 feature/lib。Radix 包按需、按切片安装（1.3 dialog；1.4 dropdown-menu/popover/tooltip/radio-group；1.2 switch；1.5 toast），不装 themes/colors 包。测试用 grep 断言 `web/src/features/**` 与 `web/src/routes/**` 无 `@radix-ui` 直接 import。knip 纪律：每个新导出在同 PR 有 feature 或测试消费者；`Icon` 为单组件 + 内部 name→组件映射（不逐个再导出 lucide 图标）。
+1. **基元层位置与依赖方向**：`web/src/ui/`（`index.ts` 在组 1 首刀创建、为唯一出口，之后各切片增量添加导出），feature 与 routes 只 `import from "../../ui"`；`ui/` 不 import 任何 feature/lib。Radix 包按需、按切片安装（1.3 dialog；1.4 dropdown-menu/popover/tooltip/radio-group；1.2 switch；1.5 toast），不装 themes/colors 包。`ToastProvider`/Viewport 由 1.5 挂到应用根（`main.tsx` Provider 树），feature 只 `useToast()`。测试用 grep 断言 `web/src/features/**` 与 `web/src/routes/**` 无 `@radix-ui` 直接 import。knip 纪律：每个新导出在同 PR 有 feature 或测试消费者；`Icon` 为单组件 + 内部 name→组件映射（不逐个再导出 lucide 图标）。
 2. **token 分层**：`web/src/styles/tokens.css`（调色板 + 语义，从 demo:19-188 逐字移植；`--wb-font-heading` 去 Poppins 为唯一差异；六个 demo 缺失变量补定并注释；本仓既有 `--wb-home-bg`/`--wb-control-bg` 迁入并注明或改用等价语义 token）→ `web/src/styles.css` 只留 reset/字体栈/布局骨架 → `ui/*.css` 与 feature css 只引用语义 token。测试 grep 禁止 feature/routes 硬编码颜色与 `--wb-palette-`（同 PR 清掉 `chat.css:5` 注释里的 hex）。
 3. **图标与品牌**：`ui/icon.tsx` 单组件（`name` 联合类型约 25 个 lucide 图标），统一尺寸与 `aria-hidden`；`ui/brand-mark.tsx` 自有 mark SVG + 可选字标，侧栏/登录/设置/助手头像共用一处，资产到位后单点替换；`ATTRIBUTION.md` 增 lucide ISC 与 Radix MIT。
 4. **外壳与 heading 归属**：`routes/shell/{app-shell,sidebar,topbar}.tsx`。侧栏折叠状态 `localStorage['workbuddy-sidebar']`（读写包 try/catch，写失败静默）；折叠态 Tooltip + 每项 `aria-label`。顶栏三态由 route + `?session=` + 会话标题决定，会话标题经 chat 页通过 shell context 上报（`useTopbar({breadcrumb})`），避免 shell 反向依赖 chat 数据层。页面级 level-1 heading 归属：`/` 欢迎态 = hero（chat-web 渲染 `<h1>`）；有会话 = 顶栏面包屑容器 `<h1>`（accessible name `我的工作 / <标题>`）；其它路由 = 顶栏标题 `<h1>`。各页面删除自己的页面级 `<h1>`；内容区 Markdown 的 `<h1>` 不受此限，heading 断言以 `role=banner` 或 hero 定位、不用"全页恰一个 h1"。
@@ -61,7 +61,7 @@ Grill（2026-09-24，12 项用户拍板）：headless 库 = Radix UI Primitives�
 
 ## Migration Plan
 
-1. 组 1 首刀（token + Icon/BrandMark + motion + `ui/index.ts`）先合，视觉不变；随后各基元切片；1.6 迁移既有 dialog/menu/切换器并一次性改定位器。
+1. 组 1 首刀（token + Icon/BrandMark + motion + `ui/index.ts`）先合，视觉不变；随后各基元切片；1.6a（auth 退出确认）与 1.6b（files 对话框/菜单/切换器 + 删除 `lib/dialog.ts`）各自带本模块定位器改动。
 2. 组 3（`/api/info`）独立小 PR，先于 2.4b。
 3. 组 2 外壳（侧栏 → 顶栏/heading → 响应式）合入后再合组 4/5 页面对齐；6.1 双 project 紧随 2.3。
 4. 组 6 其余（夹具、ui-shots 脚本、控制面、清单）最后；Epic 关闭前跑一次 `make ui-shots` 并按清单签收贴入 Epic。
