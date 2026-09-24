@@ -1,0 +1,70 @@
+/* Input — adapted from resource/workbuddy-live-demo.html:606-612 (.wb-input, .wb-input--search). */
+
+.ui-input {
+  width: 100%;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--wb-border-input);
+  border-radius: 8px;
+  background: var(--wb-color-bg-input);
+  color: var(--wb-text-primary);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.ui-input:focus,
+.ui-input--search:focus-within {
+  border-color: var(--wb-brand-primary);
+}
+
+.ui-input::placeholder,
+.ui-input-search-field::placeholder {
+  color: var(--wb-text-tertiary);
+}
+
+.ui-input--search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 240px;
+  padding: 0 10px;
+}
+
+.ui-input--search .ui-icon {
+  color: var(--wb-icon-muted);
+}
+
+.ui-input-search-field {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--wb-text-primary);
+  font-size: 13px;
+}
+
+/* 重申圆角，压过 styles.css 全局 :focus-visible 的 4px（outline 沿用全局）。 */
+.ui-input:focus-visible {
+  border-radius: 8px;
+}
+
+/* search 变体焦点环归圆角容器，内层字段不画方环。 */
+.ui-input-search-field:focus-visible {
+  outline: none;
+}
+
+.ui-input--search:has(.ui-input-search-field:focus-visible) {
+  outline: 2px solid var(--wb-brand-primary);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-input {
+    transition: none;
+  }
+}

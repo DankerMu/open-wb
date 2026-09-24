@@ -1,16 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { blockBody, listRepoFiles, readRepoFile, stripComments } from "./ui-support.js";
+import {
+  blockBody,
+  COLOR_LITERAL_PATTERNS,
+  listRepoFiles,
+  readRepoFile,
+  stripComments,
+} from "./ui-support.js";
 
-/** 字面颜色与调色板引用；`(?![\w-])` 让 `#root`、`#fade-in` 这类 id 选择器不误中。 */
-const COLOR_PATTERNS = [/#[0-9a-fA-F]{3,8}(?![\w-])/, /rgba?\(/, /--wb-palette-/];
+const PALETTE_PATTERN = /--wb-palette-/;
 
-function colorHits(text: string): string[] {
+/** 按原始行扫描（不剥注释）：命中任一模式的行以 `行号: 内容` 返回。 */
+function lineHits(text: string, patterns: RegExp[]): string[] {
   return text
     .split("\n")
     .map((line, index) => ({ line, number: index + 1 }))
-    .filter(({ line }) => COLOR_PATTERNS.some((pattern) => pattern.test(line)))
+    .filter(({ line }) => patterns.some((pattern) => pattern.test(line)))
     .map(({ line, number }) => `${number}: ${line.trim()}`);
 }
+
+const literalHits = (text: string) => lineHits(text, COLOR_LITERAL_PATTERNS);
+const paletteHits = (text: string) => lineHits(text, [PALETTE_PATTERN]);
 
 function hitsIn(paths: string[], find: (text: string) => string[]): string[] {
   return paths.flatMap((path) => find(readRepoFile(path)).map((hit) => `${path}:${hit}`));
@@ -18,23 +27,33 @@ function hitsIn(paths: string[], find: (text: string) => string[]): string[] {
 
 describe("颜色 grep 守卫", () => {
   it("正则命中字面颜色与调色板，不误中 id 选择器", () => {
-    expect(colorHits("#root { color: var(--wb-text-primary); }")).toEqual([]);
-    expect(colorHits("#fade-in, #app-shell {}")).toEqual([]);
-    expect(colorHits("color: #123456;")).toHaveLength(1);
-    expect(colorHits("color: #FFF;")).toHaveLength(1);
-    expect(colorHits("background: rgba(0,0,0,.5);")).toHaveLength(1);
-    expect(colorHits("color: rgb(1 2 3);")).toHaveLength(1);
-    expect(colorHits("color: var(--wb-palette-gray-3);")).toHaveLength(1);
+    expect(literalHits("#root { color: var(--wb-text-primary); }")).toEqual([]);
+    expect(literalHits("#fade-in, #app-shell {}")).toEqual([]);
+    expect(literalHits("color: #123456;")).toHaveLength(1);
+    expect(literalHits("color: #FFF;")).toHaveLength(1);
+    expect(literalHits("background: rgba(0,0,0,.5);")).toHaveLength(1);
+    expect(literalHits("color: rgb(1 2 3);")).toHaveLength(1);
+    expect(literalHits("color: var(--wb-palette-gray-3);")).toEqual([]);
+    expect(paletteHits("color: var(--wb-palette-gray-3);")).toHaveLength(1);
+    expect(paletteHits("color: var(--wb-text-primary);")).toEqual([]);
   });
 
-  it("features/ui 的 css/tsx 与 routes 无字面颜色与 --wb-palette-", () => {
-    const features = listRepoFiles("web/src/features", (path) => /\.(css|tsx)$/.test(path));
-    const ui = listRepoFiles("web/src/ui", (path) => /\.(css|tsx)$/.test(path));
-    const routes = listRepoFiles("web/src/routes", () => true);
-    expect(features.length).toBeGreaterThan(0);
-    expect(ui.length).toBeGreaterThan(0);
-    expect(routes.length).toBeGreaterThan(0);
-    expect(hitsIn([...features, ...ui, ...routes], colorHits)).toEqual([]);
+  const features = () => listRepoFiles("web/src/features", (path) => /\.(css|tsx)$/.test(path));
+  const routes = () => listRepoFiles("web/src/routes", () => true);
+  const uiCss = () => listRepoFiles("web/src/ui", (path) => path.endsWith(".css"));
+  const uiTsx = () => listRepoFiles("web/src/ui", (path) => path.endsWith(".tsx"));
+
+  it("features/routes 与 web/src/ui 的 css/tsx 无 hex/rgba 字面颜色（含注释行）", () => {
+    const groups = [features(), routes(), uiCss(), uiTsx()];
+    for (const group of groups) expect(group.length).toBeGreaterThan(0);
+    expect(hitsIn(groups.flat(), literalHits)).toEqual([]);
+  });
+
+  it("features/routes 与 web/src/ui/**/*.tsx 无 --wb-palette-（仅 ui css 豁免）", () => {
+    // web/src/ui/**/*.css 是调色板 → 组件的唯一映射边界（demo 组件规则直接引用调色板），
+    // 故只有它可引用 --wb-palette-*；feature/routes 只用语义 token，ui tsx 只写类名。
+    const paths = [...features(), ...routes(), ...uiTsx()];
+    expect(hitsIn(paths, paletteHits)).toEqual([]);
   });
 
   it("web/src/ui/**/*.tsx 无内联 style={", () => {
@@ -90,5 +109,15 @@ describe("ATTRIBUTION.md", () => {
       .filter((line) => line.startsWith("- **"));
     expect(entries.some((line) => /\*\*[^*]*lucide[^*]*\*\*.*\bISC\b/i.test(line))).toBe(true);
     expect(entries.some((line) => /\*\*[^*]*Radix[^*]*\*\*.*\bMIT\b/.test(line))).toBe(true);
+  });
+
+  it("Radix 条目列出 web 已安装的每个 @radix-ui/* 包", () => {
+    const { dependencies } = JSON.parse(readRepoFile("web/package.json")) as {
+      dependencies: Record<string, string>;
+    };
+    const radix = Object.keys(dependencies).filter((name) => name.startsWith("@radix-ui/"));
+    expect(radix.length).toBeGreaterThan(0);
+    const attribution = readRepoFile("ATTRIBUTION.md");
+    for (const name of radix) expect(attribution).toContain(`\`${name}\``);
   });
 });

@@ -1,0 +1,49 @@
+/* Chip — adapted from resource/workbuddy-live-demo.html:622-626 (.filter-chip)。选中态 demo 的
+   字面白、近黑前景映射为 token（--wb-text-white / --wb-palette-black-90，见 design.md）。
+   欢迎页 .quick-row .qk 形态不属于本组件。 */
+
+.ui-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--wb-border-default);
+  border-radius: 14px;
+  background: var(--wb-bg-secondary);
+  color: var(--wb-text-secondary);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.ui-chip:hover {
+  border-color: var(--wb-text-tertiary);
+}
+
+.ui-chip:active {
+  opacity: 0.85;
+}
+
+.ui-chip.ui-chip--selected {
+  border-color: transparent;
+  background: var(--wb-palette-black-90);
+  color: var(--wb-text-white);
+  font-weight: 500;
+}
+
+[data-theme="dark"] .ui-chip.ui-chip--selected {
+  background: var(--wb-palette-white-90);
+  color: var(--wb-palette-black-90);
+}
+
+/* 重申圆角，压过 styles.css 全局 :focus-visible 的 4px（outline 沿用全局）。 */
+.ui-chip:focus-visible {
+  border-radius: 14px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-chip {
+    transition: none;
+  }
+}

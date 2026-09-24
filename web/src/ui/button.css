@@ -1,0 +1,146 @@
+/* Button — adapted from resource/workbuddy-live-demo.html:570-586 (.wb-btn). demo 的字面白、
+   近黑前景映射为 token（--wb-text-white / --wb-palette-black-90），映射表见
+   openspec/changes/ui-form-primitives/design.md。hover 规则一律带 :not(:disabled)，
+   loading 规则必须留在文件末尾（压过变体与深色前景色）。 */
+
+.ui-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    opacity 0.15s;
+}
+
+.ui-btn--primary {
+  background: var(--wb-palette-black-90);
+  color: var(--wb-text-white);
+}
+
+.ui-btn--primary:hover:not(:disabled) {
+  background: var(--wb-palette-black-70);
+}
+
+[data-theme="dark"] .ui-btn--primary {
+  background: var(--wb-palette-white-90);
+  color: var(--wb-palette-black-90);
+}
+
+[data-theme="dark"] .ui-btn--primary:hover:not(:disabled) {
+  background: var(--wb-palette-white-70);
+}
+
+.ui-btn--secondary {
+  background: var(--wb-bg-secondary);
+  color: var(--wb-text-primary);
+}
+
+.ui-btn--secondary:hover:not(:disabled) {
+  background: var(--wb-bg-hover);
+}
+
+.ui-btn--ghost {
+  background: transparent;
+  color: var(--wb-text-secondary);
+}
+
+.ui-btn--ghost:hover:not(:disabled) {
+  background: var(--wb-bg-hover);
+  color: var(--wb-text-primary);
+}
+
+.ui-btn--danger {
+  background: var(--wb-status-error);
+  color: var(--wb-text-white);
+}
+
+.ui-btn--danger:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.ui-btn--sm {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.ui-btn--lg {
+  height: 40px;
+  padding: 0 20px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.ui-btn--icon {
+  width: 32px;
+  padding: 0;
+}
+
+.ui-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ui-btn:active:not(:disabled) {
+  opacity: 0.82;
+  transform: translateY(0.5px);
+}
+
+/* 重申圆角，压过 styles.css 全局 :focus-visible 的 4px（outline 沿用全局）。 */
+.ui-btn:focus-visible {
+  border-radius: 8px;
+}
+
+.ui-btn--sm:focus-visible {
+  border-radius: 6px;
+}
+
+.ui-btn--lg:focus-visible {
+  border-radius: 10px;
+}
+
+/* 指示器脱离文档流居中，按钮宽高与非 loading 态一致。 */
+.ui-btn-spinner {
+  position: absolute;
+  inset: 0;
+  width: 14px;
+  height: 14px;
+  margin: auto;
+  border: 2px solid var(--wb-text-tertiary);
+  border-top-color: transparent;
+  border-radius: 50%;
+}
+
+/* 实底变体上指示器改用前景色，保证与底色的对比度。 */
+.ui-btn--primary .ui-btn-spinner,
+.ui-btn--danger .ui-btn-spinner {
+  border-color: var(--wb-text-white);
+  border-top-color: transparent;
+}
+
+[data-theme="dark"] .ui-btn--primary .ui-btn-spinner {
+  border-color: var(--wb-palette-black-90);
+  border-top-color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-btn {
+    transition: none;
+  }
+}
+
+.ui-btn.ui-btn--loading {
+  position: relative;
+  color: transparent;
+}

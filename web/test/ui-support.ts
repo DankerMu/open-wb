@@ -4,6 +4,9 @@ import { join, relative, resolve } from "node:path";
 /** 仓库根目录（web/test 上两级）。 */
 const repoRoot = resolve(import.meta.dirname, "../..");
 
+/** 颜色字面量（hex / rgb(a)）；`(?![\w-])` 让 `#root`、`#fade-in` 这类 id 选择器不误中。 */
+export const COLOR_LITERAL_PATTERNS = [/#[0-9a-fA-F]{3,8}(?![\w-])/, /rgba?\(/];
+
 export function readRepoFile(path: string): string {
   return readFileSync(join(repoRoot, path), "utf8");
 }
