@@ -59,7 +59,7 @@ Minimal mergeable slice: 5.1 api 扩展单独可合并保绿（四方法有配�
 ## 6. chat-harness
 
 - [x] 6.1 Makefile：`smoke-live` env 门禁、原样变量和 PATH-only Hurl 形状档调用、`.PHONY`/头注释与精确 recipe/重复目标 oracle；原 `make smoke` 不变。#94 / PR #249 已合并（30f4f7941135959c6ad4aaeea41829f30122b984），十项命令边界验证及487项守卫通过，源代码 CI 35921350985 八项通过。独立规范归档另走 PR/CI；此项不声称真实 Hurl 对话已通过，`chat.hurl` 属于 #105。
-- [ ] 6.2 CI：`make omp-fetch`（无 cache action，不新增第三方 action）、假上游启动脚本（`.github/scripts/ci-fake-upstream.sh`）、smoke/ui-walk job env 与顺序；`inspect-ci-workflow.js` 四 action 白名单与计数不变；同 PR 内 `smoke/chat.hurl` 落地（`content_pattern`/`min_bash_steps` 两变量）并以精确档变量纳入 `make smoke`（先起假上游再纳入，CI 不出现红窗口）；`scripts/test-ci-harness.sh` 的 workflow 精确形状（smoke/ui-walk job 步骤与 env 元组）、`make smoke` recipe 期望行（三文件 + 两变量）、`ci-compiled-server.sh`/新脚本锚点同 PR 更新，`make test-guardrails` 绿；本地以真实 v18.0.10 + 假上游跑 `make smoke` 绿
+- [x] 6.2 #105 / PR#251 已原子交付verified omp-fetch、job-owned假上游、smoke/ui-walk runtime env、三文件chat.hurl/精确变量与全部oracle；四action矩阵不变，secrets禁令按用户确认仅两个harness jobs。真实18.0.10本地smoke两次各22请求、独立chat10请求、原UI1/1通过；最终守卫563PASS，真实抗终止omp/app及独立child identity反例闭环。源合并99056cf6a0d6827fa273dc9ce96140c47b25364d；review round3 clean/2fixpasses；CI35950807791八项通过，Ubuntu两job实际下载校验Linux18.0.10。独立归档另走PR/CI，#106对话UI与#107控制面仍待交付。
 - [ ] 6.3 `web/e2e/ui-walk.spec.ts` 增对话步骤（新建、发送、步骤卡、回合中刷新续流、正文、回合后刷新完整、console error oracle 不变）；本地与 CI `make ui-walk` 绿
 - [ ] 6.4 控制面三处同步：AGENTS.md 验证矩阵（`omp-fetch`/`smoke-live` 两行）与 Directory Map、`constraints.yaml verification.surfaces` 两条与 `downgrades` 一条（S0b 同 uid 窗口内 `/proc` 凭证读取向量，ADR-0010 于 S1a 关闭）、Makefile 头注释；`scripts/test-ci-harness.sh` 的 AGENTS 行、`verification.surfaces` 期望元组（八→十）与 `wanted` 同 PR 更新，三处命令字面比对由该 oracle 机械执行，`make test-guardrails` 绿
 
