@@ -183,6 +183,9 @@ run_phase() {
     reap_phase
     return 0
   fi
+  if [ "$phase_rc" -ne 0 ]; then
+    primary_rc="$phase_rc"
+  fi
   if galive "$phase_pid"; then
     echo "cleanup failed: phase group still present after leader exit (PGID ${phase_pid})" >&2
     cleanup_rc=1
@@ -192,10 +195,6 @@ run_phase() {
   wait "$phase_pid" 2>/dev/null || true
   phase_pid=""
   phase_kind=""
-  if [ "$phase_rc" -ne 0 ]; then
-    primary_rc="$phase_rc"
-    return 0
-  fi
 }
 trap on_exit EXIT; trap 'pending=1' TERM INT; honor_cancel
 preflight="$(env -i PATH="$PATH" HOME="$proof_home" sudo -n -u omp --preserve-env=HOME,PATH -- /usr/bin/env)"
