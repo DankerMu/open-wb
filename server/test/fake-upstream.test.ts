@@ -9,6 +9,15 @@ import { createConnection, type Socket } from "node:net";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  asRecord,
+  collectContent,
+  finishReason,
+  firstChoice,
+  isJsonRecord,
+  parseDataRecords,
+  startTrackedFakeUpstream,
+} from "./fake-upstream-helpers.js";
+import {
   type FakeUpstreamServer,
   type FakeUpstreamStartOptions,
   start,
@@ -280,10 +289,7 @@ describe("fake-upstream standalone CLI", () => {
 });
 
 async function startTracked(options?: FakeUpstreamStartOptions): Promise<FakeUpstreamServer> {
-  const handle = await start(options);
-  handles.push(handle);
-  expect(handle.port).toBeGreaterThan(0);
-  return handle;
+  return startTrackedFakeUpstream(handles, options);
 }
 
 async function postChat(
@@ -326,7 +332,7 @@ function expectToolRound(response: ObservedResponse): void {
   expect(call.type).toBe("function");
   expect(call.name).toBe("bash");
   expect(JSON.parse(call.arguments)).toEqual({ command: EXPECTED_COMMAND });
-  expect(terminalFinish(chunks)).toBe("tool_calls");
+  expect(finishReason(chunks)).toBe("tool_calls");
 }
 
 function expectTextRound(response: ObservedResponse): void {
@@ -334,7 +340,7 @@ function expectTextRound(response: ObservedResponse): void {
   const parts = collectContent(chunks);
   expect(parts.length).toBeGreaterThanOrEqual(3);
   expect(parts.join("")).toBe(EXPECTED_REPLY);
-  expect(terminalFinish(chunks)).toBe("stop");
+  expect(finishReason(chunks)).toBe("stop");
 }
 
 function streamChunks(response: ObservedResponse): Array<Record<string, unknown>> {
@@ -473,62 +479,6 @@ function appendFunctionDelta(current: ReconstructedCall, value: unknown): void {
   if (typeof fn.arguments === "string") {
     current.arguments += fn.arguments;
   }
-}
-
-function collectContent(chunks: Array<Record<string, unknown>>): string[] {
-  const parts: string[] = [];
-  for (const chunk of chunks) {
-    const content = asRecord(firstChoice(chunk).delta, "delta").content;
-    if (typeof content === "string" && content.length > 0) {
-      parts.push(content);
-    }
-  }
-  return parts;
-}
-
-function terminalFinish(chunks: Array<Record<string, unknown>>): unknown {
-  const last = chunks[chunks.length - 1];
-  if (last === undefined) {
-    throw new Error("stream has no terminal chunk");
-  }
-  return firstChoice(last).finish_reason;
-}
-
-function firstChoice(chunk: Record<string, unknown>): Record<string, unknown> {
-  if (!Array.isArray(chunk.choices) || chunk.choices.length === 0) {
-    throw new Error("chunk.choices must be a nonempty array");
-  }
-  return asRecord(chunk.choices[0], "choice");
-}
-
-function parseDataRecords(text: string): string[] {
-  const records: string[] = [];
-  for (const event of text.split(/\r?\n\r?\n/u)) {
-    if (event.trim().length === 0) {
-      continue;
-    }
-    const dataLines: string[] = [];
-    for (const line of event.split(/\r?\n/u)) {
-      if (line.startsWith("data:")) {
-        dataLines.push(line.slice("data:".length).trimStart());
-      }
-    }
-    if (dataLines.length > 0) {
-      records.push(dataLines.join("\n"));
-    }
-  }
-  return records;
-}
-
-function isJsonRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function asRecord(value: unknown, label: string): Record<string, unknown> {
-  if (!isJsonRecord(value)) {
-    throw new Error(`${label} is not a JSON object`);
-  }
-  return value;
 }
 
 function spawnNode(args: string[], env: Record<string, string> = {}): CliChild {

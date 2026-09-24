@@ -1,8 +1,10 @@
+import { randomUUID } from "node:crypto";
 import {
   type ConsoleMessage,
   expect,
   type Locator,
   type Page,
+  type Request,
   type Response,
   test,
 } from "@playwright/test";
@@ -17,6 +19,10 @@ const SESSION_COOKIE = "workbuddy_session";
 const ME_PATH = "/api/auth/me";
 const UNAUTHORIZED_NETWORK_LOG =
   "Failed to load resource: the server responded with a status of 401 (Unauthorized)";
+const WALK_MARKER = "WORKBUDDY_UI_WALK:";
+const FIRST_REPLY_PART = "你好，";
+const EXPECTED_REPLY = "你好，这是 WorkBuddy 的第一条流式回复。";
+const SESSION_ID = /^[0-9a-f]{32}$/;
 
 const ROUTES = [
   { path: "/", heading: "会话", label: "会话" },
@@ -64,6 +70,12 @@ async function walkProductionOrigin(page: Page, oracle: AuthOracle): Promise<voi
     await expectAuthenticatedRoute(page, route.path, route.heading, route.label);
     await expectPrincipalFooter(page);
   }
+
+  await sidebarLink(navigation, "会话").click();
+  await expectAuthenticatedRoute(page, "/", "会话", "会话");
+  await walkHeldDialogue(page);
+  await sidebarLink(navigation, "设置").click();
+  await expectAuthenticatedRoute(page, "/settings", "设置", "设置");
 
   await expect(page.getByText(PRODUCTION_SERVICE_NAME, { exact: true })).toBeVisible();
   await expect(page.getByText(`版本 ${PRODUCTION_SERVICE_VERSION}`, { exact: true })).toBeVisible();
@@ -339,4 +351,331 @@ async function expectSessionCookieAbsent(page: Page) {
     (cookie) => cookie.name === SESSION_COOKIE,
   );
   expect(sessionCookies).toEqual([]);
+}
+
+async function walkHeldDialogue(page: Page): Promise<void> {
+  const gateId = randomUUID();
+  const prompt = `${WALK_MARKER}${gateId}`;
+  const origin = controlOrigin();
+  try {
+    await armGate(origin, gateId);
+    await page.getByRole("button", { name: "新建会话" }).click();
+    await expect.poll(() => sessionIdFromUrl(page.url())).toMatch(SESSION_ID);
+    const sessionUrl = page.url();
+    const sessionId = sessionIdFromUrl(sessionUrl);
+    await page.getByLabel("给助手发消息").fill(prompt);
+    const promptAccepted = page.waitForResponse(
+      (response) =>
+        isSessionPath(response.url(), sessionId, "prompt") &&
+        response.request().method() === "POST" &&
+        response.status() === 202,
+    );
+    await page.getByRole("button", { name: "发送" }).click();
+    const accepted = await promptAccepted;
+    const promptIds = parsePromptIds(await accepted.json());
+    await expect.poll(() => gatePhase(origin, gateId)).toBe("held");
+    const preReload = await fetchSessionSnapshot(page, sessionId);
+    expectRunningSnapshot(preReload, prompt, sessionId, promptIds);
+    await expectRunningPrefix(page, sessionId, prompt);
+
+    const postReload = watchSessionTraffic(page, sessionId);
+    try {
+      await page.reload();
+      await expect.poll(() => page.url()).toBe(sessionUrl);
+      await postReload.waitForNativeOpen();
+      const recovery = await postReload.waitForRecoveryAfterNative();
+      expectRunningSnapshot(await recovery.json(), prompt, sessionId, promptIds);
+      postReload.assertNoMessagesGetInFlight();
+      await expectRunningPrefix(page, sessionId, prompt);
+      postReload.forbidFurtherMessagesGet();
+      await releaseGate(origin, gateId);
+      await expectCompletedPair(page, sessionId, prompt);
+      postReload.assertNoForbiddenMessagesGet();
+    } finally {
+      postReload.detach();
+    }
+
+    await page.reload();
+    await expect.poll(() => page.url()).toBe(sessionUrl);
+    await expectCompletedPair(page, sessionId, prompt);
+  } finally {
+    await deleteGate(origin, gateId);
+  }
+}
+
+function controlOrigin(): string {
+  const base = process.env.MODEL_UPSTREAM_BASE_URL;
+  if (base === undefined || base.length === 0) {
+    throw new Error("MODEL_UPSTREAM_BASE_URL is required for the UI walk gate");
+  }
+  return new URL(base).origin;
+}
+
+function controlHeaders(): Record<string, string> {
+  const apiKey = process.env.MODEL_UPSTREAM_API_KEY;
+  if (apiKey === undefined || apiKey.length === 0) {
+    throw new Error("MODEL_UPSTREAM_API_KEY is required for the UI walk gate");
+  }
+  return { authorization: `Bearer ${apiKey}` };
+}
+
+function gateUrl(origin: string, id: string, action?: "release"): string {
+  const path = action === "release" ? `/__control/gates/${id}/release` : `/__control/gates/${id}`;
+  return `${origin}${path}`;
+}
+
+async function armGate(origin: string, id: string): Promise<void> {
+  const response = await fetch(gateUrl(origin, id), {
+    method: "POST",
+    headers: controlHeaders(),
+  });
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`gate arm failed: ${response.status}`);
+  }
+}
+
+async function releaseGate(origin: string, id: string): Promise<void> {
+  const response = await fetch(gateUrl(origin, id, "release"), {
+    method: "POST",
+    headers: controlHeaders(),
+  });
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`gate release failed: ${response.status}`);
+  }
+}
+
+async function deleteGate(origin: string, id: string): Promise<void> {
+  try {
+    await fetch(gateUrl(origin, id), { method: "DELETE", headers: controlHeaders() });
+  } catch {
+    /* finally must not hide the journey error */
+  }
+}
+
+async function gatePhase(origin: string, id: string): Promise<string> {
+  const response = await fetch(gateUrl(origin, id), { headers: controlHeaders() });
+  if (response.status < 200 || response.status >= 300) {
+    return `status:${response.status}`;
+  }
+  const body: unknown = await response.json();
+  if (body === null || typeof body !== "object" || !("phase" in body)) {
+    return "missing-phase";
+  }
+  return String(body.phase);
+}
+
+function sessionIdFromUrl(url: string): string {
+  return new URL(url).searchParams.get("session") ?? "";
+}
+
+function isSessionPath(
+  url: string,
+  sessionId: string,
+  endpoint: "messages" | "prompt" | "events",
+): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  return parsed.pathname === `/api/sessions/${sessionId}/${endpoint}`;
+}
+
+function watchSessionTraffic(page: Page, sessionId: string) {
+  const nativeOpens: Response[] = [];
+  const recoveryRequests: Request[] = [];
+  const pendingMessages = new Set<Request>();
+  let nativeSeen = false;
+  let forbidMessages = false;
+  let forbiddenMessages = 0;
+  const onRequest = (request: Request): void => {
+    if (!isSessionPath(request.url(), sessionId, "messages") || request.method() !== "GET") {
+      return;
+    }
+    pendingMessages.add(request);
+    if (forbidMessages) {
+      forbiddenMessages += 1;
+      return;
+    }
+    if (nativeSeen) {
+      recoveryRequests.push(request);
+    }
+  };
+  const onRequestSettled = (request: Request): void => {
+    pendingMessages.delete(request);
+  };
+  const onResponse = (response: Response): void => {
+    if (
+      response.request().method() === "GET" &&
+      isSessionPath(response.url(), sessionId, "events") &&
+      /event-stream/iu.test(response.headers()["content-type"] ?? "")
+    ) {
+      nativeOpens.push(response);
+      nativeSeen = true;
+    }
+  };
+  page.on("request", onRequest);
+  page.on("requestfinished", onRequestSettled);
+  page.on("requestfailed", onRequestSettled);
+  page.on("response", onResponse);
+  const detach = (): void => {
+    page.off("request", onRequest);
+    page.off("requestfinished", onRequestSettled);
+    page.off("requestfailed", onRequestSettled);
+    page.off("response", onResponse);
+  };
+  return {
+    detach,
+    async waitForNativeOpen(): Promise<Response> {
+      await expect.poll(() => nativeOpens.length).toBeGreaterThan(0);
+      const opened = nativeOpens[0];
+      if (opened === undefined) {
+        throw new Error("missing native event-stream after reload");
+      }
+      return opened;
+    },
+    async waitForRecoveryAfterNative(): Promise<Response> {
+      await expect.poll(() => recoveryRequests.length).toBeGreaterThan(0);
+      const started = recoveryRequests[0];
+      if (started === undefined) {
+        throw new Error("missing recovery messages GET after native SSE open");
+      }
+      await expect.poll(async () => (await started.response()) !== null).toBe(true);
+      const recovered = await started.response();
+      if (recovered === null) {
+        throw new Error("recovery messages GET produced no response");
+      }
+      await recovered.finished();
+      return recovered;
+    },
+    assertNoMessagesGetInFlight(): void {
+      expect(pendingMessages.size).toBe(0);
+    },
+    forbidFurtherMessagesGet(): void {
+      forbidMessages = true;
+    },
+    assertNoForbiddenMessagesGet(): void {
+      expect(forbiddenMessages).toBe(0);
+    },
+  };
+}
+
+async function fetchSessionSnapshot(page: Page, sessionId: string): Promise<unknown> {
+  const origin = new URL(page.url()).origin;
+  const cookie = (await page.context().cookies())
+    .filter((entry) => entry.name === SESSION_COOKIE)
+    .map((entry) => `${entry.name}=${entry.value}`)
+    .join("; ");
+  const response = await fetch(`${origin}/api/sessions/${sessionId}/messages`, {
+    headers: cookie.length === 0 ? {} : { cookie },
+  });
+  if (!response.ok) {
+    throw new Error(`pre-reload messages GET failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+function parsePromptIds(body: unknown): { userMessageId: number; assistantMessageId: number } {
+  if (body === null || typeof body !== "object") {
+    throw new Error("prompt 202 body is not an object");
+  }
+  if (!("userMessageId" in body) || !("assistantMessageId" in body)) {
+    throw new Error("prompt 202 body missing message ids");
+  }
+  const userMessageId = body.userMessageId;
+  const assistantMessageId = body.assistantMessageId;
+  if (typeof userMessageId !== "number" || typeof assistantMessageId !== "number") {
+    throw new Error("prompt 202 ids are not numbers");
+  }
+  return { userMessageId, assistantMessageId };
+}
+
+function selectedSessionStatus(page: Page) {
+  const current = page.locator('nav[aria-label="会话列表"] button[aria-current="true"]');
+  return { current, status: current.getByRole("status") };
+}
+
+function generatingStatus(page: Page) {
+  return page
+    .locator("form")
+    .getByRole("status")
+    .filter({ hasText: /^生成中$/u });
+}
+
+interface DialoguePair {
+  user: Locator;
+  assistant: Locator;
+}
+
+async function dialoguePair(page: Page, sessionId: string, prompt: string): Promise<DialoguePair> {
+  await expect.poll(() => new URL(page.url()).searchParams.get("session")).toBe(sessionId);
+  const user = page.getByRole("article", { name: "用户" });
+  const assistant = page.getByRole("article", { name: "助手" });
+  await expect(user).toHaveCount(1);
+  await expect(assistant).toHaveCount(1);
+  await expect(user.locator("p").first()).toHaveText(prompt);
+  return { user, assistant };
+}
+
+async function expectRunningPrefix(page: Page, sessionId: string, prompt: string): Promise<void> {
+  const pair = await dialoguePair(page, sessionId, prompt);
+  const selected = selectedSessionStatus(page);
+  await expect(selected.current).toHaveCount(1);
+  await expect(selected.status).toHaveText("running");
+  await expect(generatingStatus(page)).toBeVisible();
+  await expect
+    .poll(async () =>
+      (await pair.assistant.locator("p").first().innerText()).startsWith(FIRST_REPLY_PART),
+    )
+    .toBe(true);
+  await expect(pair.assistant.getByRole("region", { name: "bash" })).toBeVisible();
+  await expect(
+    page
+      .getByRole("status", { name: "bash running" })
+      .or(page.getByRole("status", { name: "bash done" })),
+  ).toBeVisible();
+}
+
+function expectRunningSnapshot(
+  body: unknown,
+  prompt: string,
+  sessionId: string,
+  ids: { userMessageId: number; assistantMessageId: number },
+): void {
+  if (body === null || typeof body !== "object") {
+    throw new Error("messages snapshot is not an object");
+  }
+  const session = "session" in body ? body.session : undefined;
+  const rawMessages = "messages" in body ? body.messages : undefined;
+  if (session === null || typeof session !== "object") {
+    throw new Error("snapshot session missing");
+  }
+  expect("id" in session ? session.id : undefined).toBe(sessionId);
+  expect("status" in session ? session.status : undefined).toBe("running");
+  if (!Array.isArray(rawMessages)) {
+    throw new Error("snapshot has no messages");
+  }
+  const messages = rawMessages.filter(
+    (message): message is Record<string, unknown> =>
+      message !== null && typeof message === "object",
+  );
+  const user = messages.find((message) => message.id === ids.userMessageId);
+  const assistant = messages.find((message) => message.id === ids.assistantMessageId);
+  expect(user?.role).toBe("user");
+  expect(user?.content).toBe(prompt);
+  expect(assistant?.role).toBe("assistant");
+  expect(typeof assistant?.content).toBe("string");
+  expect(String(assistant?.content).startsWith(FIRST_REPLY_PART)).toBe(true);
+  expect(assistant?.status).toBe("running");
+}
+
+async function expectCompletedPair(page: Page, sessionId: string, prompt: string): Promise<void> {
+  const pair = await dialoguePair(page, sessionId, prompt);
+  await expect(pair.assistant.locator("p").first()).toHaveText(EXPECTED_REPLY);
+  await expect(page.getByRole("status", { name: "bash done" })).toBeVisible();
+  const selected = selectedSessionStatus(page);
+  await expect(selected.current).toHaveCount(1);
+  await expect(selected.status).toHaveText("done");
+  await expect(generatingStatus(page)).toHaveCount(0);
 }
