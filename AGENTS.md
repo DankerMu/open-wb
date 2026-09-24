@@ -152,6 +152,7 @@ make setup    # npm install + uv sync + 挂 git hooks
 | UI 走查 | `.github/workflows/ci.yml`（job `ui-walk`） | `make ui-walk` + CI `ui-walk`/`all-checks-passed` | block |
 | omp-fetch | `scripts/omp-fetch.sh` | `make omp-fetch` | prerequisite |
 | 手动真实上游冒烟 | 本文件 Verification Matrix | `make smoke-live` | review-only |
+| uid 隔离 | `.github/workflows/ci.yml`（job `uid-isolation`） | CI `uid-isolation`/`all-checks-passed` | block |
 | Conventional commits | `.githooks/commit-msg` | pre-commit（commit-msg） | block |
 | CI 聚合门禁 | `.github/workflows/ci.yml`（all-checks-passed） | CI | block |
 | PR diff ≤400 行 | `constraints.yaml`（size_limits） | 评审检查项 | review-only |
