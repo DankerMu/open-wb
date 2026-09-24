@@ -5,10 +5,12 @@
 - [x] 2.2 Remove only normative same-uid downgrade, then add exact UID enforcement row; preserve three other entries, ten surfaces, all thresholds and runtime controls.
 - [x] 2.3 Prove missing/commented/fenced/duplicate or wrong-job/level row and reintroduced active downgrade fail, positive baseline/restored controls pass.
 ## 3. Delivery
-- [ ] 3.1 Main guardrails/anti-drift/strict validation and exact-headCI pass; no skipped native proof or implied deployment certification.
-- [ ] 3.2 Frozen expanded review, automaticmerge and selectivearchive preserving current canonicalCI/chat/UID scenarios.
+- [x] 3.1 Main guardrails/anti-drift/strict validation and exact-headCI pass; no skipped native proof or implied deployment certification.
+- [x] 3.2 Frozen expanded review, automaticmerge and selectivearchive preserving current canonicalCI/chat/UID scenarios.
 
 Local evidence: unchanged baseline705PASS/0FAIL; decoded new contract/parser compile0 and exact contract on old registry/docs exit1 at missing active UID row (ValueError at same(enforcement_rows,...), not SyntaxError or mutation setup failure). Normative constraints then AGENTS update restores make test-guardrails711PASS/0FAIL exit0, including closure reintroduction and active-row negative controls; anti-drift0/zero clones. Complete-table comment/fence mutation fixtures include the new row so their anchors remain real; all unrelated controls retained. Official prerequisite proof: master35978802687/uid107565512880 (merged8f6d033). No runtime/CI/threshold changes or deployment-certification claim.
+
+Final proof: PR264 head82b1b96b0329efbb1f0872e8fafd226536a534cc merged1591d51; CI35994736940 all9success. Review discovered foreign-peer Markdown section bypass; owned valid0/foreign0 reproduced it, fixed foreign1/restored0 and nine sibling regressions yield720PASS0FAIL. Anti-drift0/strict0; expanded3seats plus freshreview round2clean/1fixpass. Actual prerequisite master smoke count is40 (chat12), earlierPR38 (chat10), both fourfilesgreen; request count is polling-dependent. Public summary https://github.com/DankerMu/open-wb/pull/264#issuecomment-5813510607 . Owned scratch reproduction removed; evidence retained.
 
 ## Risk packs
 - Selected Public API / CLI / script entry:2.1/2.3 make test-guardrails existingentry.
