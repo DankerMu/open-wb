@@ -11,6 +11,8 @@ start_wait="${CI_START_WAIT:-0.1}"; ready_attempts="${CI_READY_ATTEMPTS:-40}"
 ready_sleep="${CI_READY_SLEEP:-0.25}"; term_wait="${CI_TERM_WAIT:-40}"; kill_wait="${CI_KILL_WAIT:-8}"
 for v in "$ready_attempts" "$term_wait" "$kill_wait"; do case "$v" in ''|*[!0-9]*) echo "invalid bound" >&2; exit 2 ;; esac; done
 for v in "$start_wait" "$ready_sleep"; do case "$v" in ''|*[!0-9.]*|*.*.*) echo "invalid bound" >&2; exit 2 ;; esac; done
+mkdir -p "$SANDBOX_ROOT/u1"
+cp -R smoke/fixtures/sandbox/u1/. "$SANDBOX_ROOT/u1/"
 [ "$prove_hurl" -eq 1 ] && { command -v hurl >/dev/null; hurl --version; }
 state="${RUNNER_TEMP}/${state_name}"; mkdir -p "$state"
 log="${state}/server.log"; origin="http://${HOST}:${PORT}"
