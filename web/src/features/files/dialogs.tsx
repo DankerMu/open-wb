@@ -70,9 +70,7 @@ function DialogSurface({ children, onCancel, pending, title, titleId }: DialogSu
       onKeyDown={trapDialogFocus}
       onCancel={(event) => {
         event.preventDefault();
-        if (!pending) {
-          onCancel();
-        }
+        onCancel();
       }}
       ref={dialogRef}
     >
@@ -201,7 +199,7 @@ function DialogForm({ children, error, onCancel, onSubmit, pending }: DialogForm
       {children}
       {pending ? (
         <p className="files-status ui-muted" role="status">
-          正在创建
+          正在创建。取消将停止等待；如请求已到达服务器，结果可在刷新后确认。
         </p>
       ) : null}
       {error ? (
@@ -210,16 +208,7 @@ function DialogForm({ children, error, onCancel, onSubmit, pending }: DialogForm
         </p>
       ) : null}
       <div className="files-dialog-actions">
-        <button
-          className="ui-button"
-          disabled={pending}
-          onClick={() => {
-            if (!pending) {
-              onCancel();
-            }
-          }}
-          type="button"
-        >
+        <button className="ui-button" onClick={onCancel} type="button">
           取消
         </button>
         <button className="ui-button ui-button-primary" disabled={pending} type="submit">

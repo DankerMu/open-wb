@@ -33,7 +33,15 @@ export function AuthFooter() {
         dialog.close();
       }
       if (mountedRef.current) {
-        triggerRef.current?.focus();
+        const trigger = triggerRef.current;
+        if (trigger?.disabled) {
+          trigger
+            .closest("aside")
+            ?.querySelector<HTMLAnchorElement>("a[aria-current=page]")
+            ?.focus();
+        } else {
+          trigger?.focus();
+        }
       }
     };
   }, [confirming]);
@@ -43,10 +51,6 @@ export function AuthFooter() {
   }
 
   function dismissConfirm() {
-    if (pendingRef.current) {
-      return;
-    }
-
     setConfirming(false);
   }
 
@@ -93,6 +97,11 @@ export function AuthFooter() {
       >
         退出登录
       </button>
+      {pending ? (
+        <p className="ui-muted" role="status">
+          正在退出登录，可继续浏览或刷新确认登录状态。
+        </p>
+      ) : null}
       {confirming ? (
         <dialog
           aria-describedby="logout-description"
@@ -110,16 +119,10 @@ export function AuthFooter() {
           <p id="logout-description">
             退出后本机不再保留登录状态，未完成的任务会保留在你的沙箱中。
           </p>
-          {pending ? <p className="ui-muted">正在退出</p> : null}
+          {pending ? <p className="ui-muted">退出请求已发送，关闭窗口不会撤销请求。</p> : null}
           <div className="logout-dialog-actions">
-            <button
-              className="ui-button"
-              disabled={pending}
-              onClick={dismissConfirm}
-              ref={cancelRef}
-              type="button"
-            >
-              取消
+            <button className="ui-button" onClick={dismissConfirm} ref={cancelRef} type="button">
+              {pending ? "关闭" : "取消"}
             </button>
             <button
               className="ui-button ui-button-danger"

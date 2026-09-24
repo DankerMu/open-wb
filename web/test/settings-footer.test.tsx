@@ -613,7 +613,7 @@ describe("authenticated sidebar footer", () => {
     expect(document.activeElement).toBe(trigger);
   });
 
-  it("blocks Escape while logout is pending", async () => {
+  it("dismisses a pending logout without duplicating or cancelling the owned request", async () => {
     const pendingLogout = deferredResponse();
     const fetchMock = createFetchMock(
       authenticatedRoutes({ "/api/auth/logout": pendingLogout.promise }),
@@ -626,7 +626,8 @@ describe("authenticated sidebar footer", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "退出" }));
     fireEvent(dialog, new Event("cancel", { cancelable: true }));
 
-    expect(screen.getByRole("alertdialog")).toBe(dialog);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "工作空间" })).toBeTruthy();
     expect(fetchMock.mock.calls.filter(([path]) => path === "/api/auth/logout")).toHaveLength(1);
     pendingLogout.resolve(new Response(null, { status: 204 }));
     await expectLoginAt("/files");

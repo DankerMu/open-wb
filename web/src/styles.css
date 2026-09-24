@@ -385,9 +385,7 @@ a {
 
 .account-copy p {
   margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .account-copy p:last-child {
