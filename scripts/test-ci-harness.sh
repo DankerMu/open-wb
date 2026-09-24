@@ -550,24 +550,73 @@ record "stubborn upstream cleanup" "$rc" 1
 assert_dead "$scratch/rt/upstream.pid" "stubborn upstream reaped"
 rm -f "$scratch/bin/bash"
 write_bin bash $'#!/bin/sh\nif [ "$1" = ".github/scripts/ci-fake-upstream.sh" ]; then echo $$ > "$RUNNER_TEMP/upstream.pid"; printf "%s\\n" "{\\"port\\":${FAKE_UPSTREAM_PORT:-19016}}"; trap "exit 0" TERM; while true; do sleep 0.05; done; fi\nexec /bin/bash "$@"'
-ok_curl; ok_make
-write_node 'child=$( ( trap "" TERM HUP INT; echo $$ > "$RUNNER_TEMP/child.pid"; while true; do sleep 0.05; done ) & echo $! ); echo $$ > "$RUNNER_TEMP/node.pid"; trap "" TERM; wait "$child"'
-set +e; out=$(run_helper smoke 2>&1); rc=$?; set -e
+ok_curl
+spawn_app_child() {
+  write_node '( trap "" TERM HUP INT; : > "$RUNNER_TEMP/child.ready"; while true; do sleep 0.05; done ) & child=$!' 'echo "$child" > "$RUNNER_TEMP/child.pid"' 'echo $$ > "$RUNNER_TEMP/node.pid"' "$1" ': > "$RUNNER_TEMP/parent.ready"' 'wait "$child"'
+}
+assert_distinct_live() {
+  parent=$(pid_of "$scratch/rt/node.pid"); child=$(pid_of "$scratch/rt/child.pid")
+  if [ -n "$parent" ] && [ -n "$child" ] && [ "$parent" != "$child" ] && kill -0 "$parent" 2>/dev/null && kill -0 "$child" 2>/dev/null; then
+    echo "PASS $1 distinct live identities parent=$parent child=$child"; pass=$((pass+1))
+  else
+    echo "FAIL $1 identities parent=$parent child=$child"; fail=$((fail+1))
+  fi
+}
+write_bin make $'#!/bin/sh\necho $$ > "$RUNNER_TEMP/make.pid"\nwhile [ ! -f "$RUNNER_TEMP/cleanup.go" ]; do sleep 0.05; done\nexit 0'
+rm -f "$scratch/rt/"*.pid "$scratch/rt/"*.mark "$scratch/rt/"*.go "$scratch/rt/"*.ready "$scratch/rt/parent.term"
+spawn_app_child 'trap "" TERM'
+start_bg "$helper" "$scratch/resist.out"; waitf "$scratch/rt/make.pid"; waitf "$scratch/rt/parent.ready"; waitf "$scratch/rt/child.ready"; waitf "$scratch/rt/node.pid"; waitf "$scratch/rt/child.pid"
+assert_distinct_live "resistant setup"
+: > "$scratch/rt/cleanup.go"
+waitp "$wp"; if wait "$wp"; then rc=0; else rc=$?; fi
 record "resistant app child reaped" "$rc" 1
-expect_txt "resistant app child KILL diagnostic" "$out" "KILL escalation for PGID"
+expect_txt "resistant app child KILL diagnostic" "$(cat "$scratch/resist.out")" "KILL escalation for PGID"
 assert_dead "$scratch/rt/node.pid" "resistant app parent reaped"
 assert_dead "$scratch/rt/child.pid" "resistant app child reaped after parent"
-write_node 'child=$( ( trap "" TERM HUP INT; echo $$ > "$RUNNER_TEMP/child.pid"; while true; do sleep 0.05; done ) & echo $! ); echo $$ > "$RUNNER_TEMP/node.pid"; trap "exit 0" TERM; wait "$child"'
-set +e; out=$(run_helper smoke 2>&1); rc=$?; set -e
+ck_sent "$sentinel" "resistant setup sentinel survived"
+rm -f "$scratch/rt/"*.pid "$scratch/rt/"*.mark "$scratch/rt/"*.go "$scratch/rt/"*.ready "$scratch/rt/parent.term"
+spawn_app_child 'trap "echo parent_term > \"$RUNNER_TEMP/parent.term\"; exit 0" TERM'
+start_bg "$helper" "$scratch/leader-first.out"; waitf "$scratch/rt/make.pid"; waitf "$scratch/rt/parent.ready"; waitf "$scratch/rt/child.ready"; waitf "$scratch/rt/node.pid"; waitf "$scratch/rt/child.pid"
+assert_distinct_live "leader-first setup"
+parent=$(pid_of "$scratch/rt/node.pid"); child=$(pid_of "$scratch/rt/child.pid")
+kill -TERM "$parent" 2>/dev/null || true
+waitf "$scratch/rt/parent.term"
+n=0; while [ "$n" -lt 80 ] && kill -0 "$parent" 2>/dev/null; do sleep 0.05; n=$((n+1)); done
+if [ -n "$child" ] && kill -0 "$child" 2>/dev/null && ! kill -0 "$parent" 2>/dev/null; then
+  echo "PASS app parent dies first child still live"; pass=$((pass+1))
+else
+  echo "FAIL app parent dies first observation parent=$(pid_of "$scratch/rt/node.pid") child=$child"; fail=$((fail+1))
+fi
+: > "$scratch/rt/cleanup.go"
+waitp "$wp"; if wait "$wp"; then rc=0; else rc=$?; fi
 record "app parent dies first still reaps child" "$rc" 1
 assert_dead "$scratch/rt/node.pid" "app parent dies first parent reaped"
 assert_dead "$scratch/rt/child.pid" "app parent dies first child reaped"
-sleep 30 & sentinel=$!
-write_node 'child=$( ( trap "" TERM HUP INT; echo $$ > "$RUNNER_TEMP/child.pid"; while true; do sleep 0.05; done ) & echo $! ); echo $$ > "$RUNNER_TEMP/node.pid"; trap "" TERM; wait "$child"'
-set +e; run_helper smoke >/dev/null 2>&1; rc=$?; set -e
+ck_sent "$sentinel" "leader-first sentinel survived"
+rm -f "$scratch/rt/"*.pid "$scratch/rt/"*.mark "$scratch/rt/"*.go "$scratch/rt/"*.ready "$scratch/rt/parent.term"
+spawn_app_child 'trap "" TERM'
+start_bg "$helper" "$scratch/resist-sent.out"; waitf "$scratch/rt/make.pid"; waitf "$scratch/rt/parent.ready"; waitf "$scratch/rt/child.ready"; waitf "$scratch/rt/node.pid"; waitf "$scratch/rt/child.pid"
+assert_distinct_live "resistant sentinel setup"
+: > "$scratch/rt/cleanup.go"
+waitp "$wp"; if wait "$wp"; then rc=0; else rc=$?; fi
 record "resistant app child with sentinel" "$rc" 1
 assert_dead "$scratch/rt/child.pid" "resistant child reaped beside sentinel"
 ck_sent "$sentinel" "resistant child sentinel survived"
+rm -f "$scratch/rt/"*.pid "$scratch/rt/"*.mark "$scratch/rt/"*.go "$scratch/rt/"*.ready "$scratch/rt/parent.term"
+ed "$helper" r 'kill -KILL -- "-$pid" 2>/dev/null || true' 'true' "$scratch/nogrp.sh"
+spawn_app_child 'trap "" TERM'
+start_bg "$scratch/nogrp.sh" "$scratch/nogrp.out"; waitf "$scratch/rt/make.pid"; waitf "$scratch/rt/parent.ready"; waitf "$scratch/rt/child.ready"; waitf "$scratch/rt/node.pid"; waitf "$scratch/rt/child.pid"
+assert_distinct_live "omit group-KILL setup"
+: > "$scratch/rt/cleanup.go"
+waitp "$wp"; if wait "$wp"; then rc=0; else rc=$?; fi
+child=$(pid_of "$scratch/rt/child.pid")
+if [ -n "$child" ] && kill -0 "$child" 2>/dev/null; then
+  echo "PASS omit descendant-group KILL mutant caught"; pass=$((pass+1))
+else
+  echo "FAIL omit descendant-group KILL mutant not caught child=$child"; fail=$((fail+1))
+fi
+reap_pids "$wp" "$(pid_of "$scratch/rt/node.pid")" "$child"
+ck_sent "$sentinel" "omit group-KILL sentinel survived"
 rm -f "$scratch/bin/bash"
 set +e; python3 -c 'import sys;s=open(sys.argv[1]).read();sys.exit(0 if "stop \"$upid\"" in s else 1)' "$helper"; rc=$?; set -e
 record "helper stop includes upid" "$rc" 0
