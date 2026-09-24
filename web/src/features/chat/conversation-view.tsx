@@ -222,14 +222,35 @@ export function ConversationView({
           <label className="chat-composer-label">
             {composerLabel}
             <textarea
+              aria-describedby="chat-send-hint"
               className="chat-composer-input"
               disabled={composerDisabled}
               onChange={(event) => onChangeDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (
+                  event.key !== "Enter" ||
+                  event.shiftKey ||
+                  event.altKey ||
+                  event.ctrlKey ||
+                  event.metaKey ||
+                  event.nativeEvent.isComposing ||
+                  event.nativeEvent.keyCode === 229
+                ) {
+                  return;
+                }
+                event.preventDefault();
+                if (!event.repeat && !sendDisabled) {
+                  event.currentTarget.form?.requestSubmit();
+                }
+              }}
               rows={3}
               value={draft}
             />
           </label>
           <div className="chat-composer-foot">
+            <span className="ui-muted" id="chat-send-hint">
+              Enter 发送 · Shift+Enter 换行
+            </span>
             {generating ? (
               <p className="chat-composer-pending" role="status">
                 {generatingLabel}
