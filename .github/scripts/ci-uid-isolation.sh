@@ -45,9 +45,15 @@ chmod 0700 "$(dirname "$DB_PATH")"
 sudo groupadd workbuddy
 sudo useradd -m -G workbuddy omp
 sudo usermod -aG workbuddy "$runner"
+command -v setfacl >/dev/null || { echo "setfacl is required to grant omp execute traversal on the runner home" >&2; exit 1; }
+runner_home="$(getent passwd "$runner" | awk -F: '{print $6}')"
+[ -n "$runner_home" ] && [ -d "$runner_home" ] || { echo "runner home unavailable" >&2; exit 1; }
+case "$GITHUB_WORKSPACE" in "$runner_home"/*) ;; *) echo "workspace is not under runner home" >&2; exit 1; esac
+case "$RUNNER_TEMP" in "$runner_home"/*) ;; *) echo "RUNNER_TEMP is not under runner home" >&2; exit 1; esac
+sudo setfacl -m u:omp:--x "$runner_home"
 sudoers_src="${job_root}/workbuddy-omp.sudoers"
 {
-  printf 'Defaults:%s secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin:%s"\n' "$runner" "$node_dir"
+  printf 'Defaults:%s secure_path="%s:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"\n' "$runner" "$node_dir"
   printf '%s ALL=(omp) NOPASSWD: SETENV: %s\n' "$runner" "$fake_rule"
   printf '%s ALL=(omp) NOPASSWD: SETENV: %s\n' "$runner" "$real_rule"
   printf '%s ALL=(omp) NOPASSWD: SETENV: /usr/bin/env\n' "$runner"
@@ -123,73 +129,6 @@ printf '%s\n' "$preflight"
 printf '%s\n' "$preflight" | grep -Fx "HOME=${proof_home}" >/dev/null || { echo "preflight HOME preservation failed" >&2; primary_rc=1; exit 1; }
 honor_cancel
 export TMPDIR="$uid_tmp"
-# Temporary CI-only probe for hosted AgentUnavailableError: stdout closed.
-# Same sg group, fake absolute binary, and production sudo prefix as the Linux test.
-# Diagnostic failure must not skip Vitest; files live under job_root and are removed.
-diag_dir="${job_root}/diag"
-mkdir -p "$diag_dir"
-sudo chgrp workbuddy "$diag_dir"
-sudo chmod 2770 "$diag_dir"
-diag_script="${diag_dir}/probe.sh"
-cat > "$diag_script" <<'PROBE'
-#!/usr/bin/env bash
-set +e
-umask 007
-diag_dir="$1"
-fake_omp="$2"
-uid_tmp="$3"
-node -v >"${diag_dir}/node-version" 2>&1
-namei -l -- "$fake_omp" >"${diag_dir}/namei-fake" 2>&1
-namei -l -- "$uid_tmp" >"${diag_dir}/namei-tmp" 2>&1
-sudo -n -u omp -- /usr/bin/env node --version >"${diag_dir}/sudo-node-version" 2>&1
-printf "%s\n" "$?" >"${diag_dir}/sudo-node-rc"
-probe_home="${diag_dir}/probe-home"
-probe_agent="${diag_dir}/probe-agent"
-probe_cwd="${diag_dir}/probe-cwd"
-probe_sessions="${diag_dir}/probe-sessions"
-mkdir -p "$probe_home" "$probe_agent" "$probe_cwd" "$probe_sessions"
-chmod 2770 "$probe_home" "$probe_agent" "$probe_cwd" "$probe_sessions" 2>/dev/null || true
-probe_lang="${LANG:-C.UTF-8}"
-: >"${diag_dir}/probe.out"
-: >"${diag_dir}/probe.err"
-printf "%s\n" '{"id":"diag-1","type":"get_state"}' >"${diag_dir}/probe.in"
-env -i PATH="$PATH" LANG="$probe_lang" TMPDIR="$uid_tmp" HOME="$probe_home" PI_CODING_AGENT_DIR="$probe_agent" WORKBUDDY_MODEL_TOKEN=uid-diag-synthetic-token sudo -n -u omp --preserve-env=PATH,LANG,TMPDIR,HOME,PI_CODING_AGENT_DIR,WORKBUDDY_MODEL_TOKEN TMPDIR="$uid_tmp" -- "$fake_omp" --mode rpc --cwd "$probe_cwd" --session-dir "$probe_sessions" --model workbuddy/deepseek-v4.1-flash --approval-mode yolo --no-extensions --no-lsp --no-pty --no-title >"${diag_dir}/probe.out" 2>"${diag_dir}/probe.err" <"${diag_dir}/probe.in" &
-probe_pid=$!
-wait_n=0
-while [ "$wait_n" -lt 40 ] && kill -0 "$probe_pid" 2>/dev/null; do sleep 0.05; wait_n=$((wait_n + 1)); done
-if kill -0 "$probe_pid" 2>/dev/null; then
-  kill -TERM "$probe_pid" 2>/dev/null || true
-  wait_n=0
-  while [ "$wait_n" -lt 20 ] && kill -0 "$probe_pid" 2>/dev/null; do sleep 0.05; wait_n=$((wait_n + 1)); done
-  if kill -0 "$probe_pid" 2>/dev/null; then kill -KILL "$probe_pid" 2>/dev/null || true; fi
-fi
-wait "$probe_pid"
-printf "%s\n" "$?" >"${diag_dir}/probe-rc"
-PROBE
-chmod 0750 "$diag_script"
-sg workbuddy -c "umask 007; bash \"$diag_script\" \"$diag_dir\" \"$fake_omp\" \"$uid_tmp\"" || true
-sanitize() { sed -E -e 's/[0-9a-fA-F]{64}/[redacted]/g' -e 's/"password":"[^"]*"/"password":"[redacted]"/g'; }
-print_diag() {
-  local label="$1" file="$2" rc="$3"
-  echo "uid-diag ${label} rc=${rc}" >&2
-  if [ -s "$file" ]; then
-    echo "uid-diag ${label} output:" >&2
-    dd if="$file" bs=2048 count=1 2>/dev/null | sanitize >&2 || true
-    echo >&2
-  fi
-}
-print_diag "node-version" "${diag_dir}/node-version" 0
-print_diag "namei-fake" "${diag_dir}/namei-fake" 0
-print_diag "namei-tmp" "${diag_dir}/namei-tmp" 0
-print_diag "sudo-env-node-version" "${diag_dir}/sudo-node-version" "$(tr -d "[:space:]" < "${diag_dir}/sudo-node-rc" 2>/dev/null || printf "%s" "missing")"
-print_diag "fake-omp-probe-stderr" "${diag_dir}/probe.err" "$(tr -d "[:space:]" < "${diag_dir}/probe-rc" 2>/dev/null || printf "%s" "missing")"
-if [ -s "${diag_dir}/probe.out" ]; then
-  echo "uid-diag fake-omp-probe stdout-bytes=$(wc -c < "${diag_dir}/probe.out" | tr -d "[:space:]")" >&2
-fi
-rm -rf "$diag_dir"
-honor_cancel
-reap_owned
-honor_cancel
 sg workbuddy -c 'umask 007; cd "${GITHUB_WORKSPACE}/server" && WORKBUDDY_UID_TEST=1 OMP_USER=omp ../node_modules/.bin/vitest run test/linux/uid-isolation.test.ts --coverage=false'
 honor_cancel
 reap_owned
