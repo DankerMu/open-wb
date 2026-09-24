@@ -220,7 +220,7 @@ describe("fake-upstream gate isolation", () => {
     expect((await waitForPrefix(first)).parts).toEqual([FIRST_PART]);
 
     const duplicate = await openChatStream(handle.port, finalMessages(firstId), DEFAULT_KEY);
-    await expectCompetingClaimRejected(duplicate);
+    expect(duplicate.response.status).toBe(409);
 
     const second = await openChatStream(handle.port, finalMessages(secondId), DEFAULT_KEY);
     expect((await waitForPrefix(second)).parts).toEqual([FIRST_PART]);
@@ -242,7 +242,6 @@ describe("fake-upstream gate isolation", () => {
     expectOk(await releaseGate(handle.port, secondId, DEFAULT_KEY));
     await drainUntil(second, FETCH_MS);
     expect(snapshot(second).parts).toEqual([...REPLY_PARTS]);
-    expect(isSuccessfulTextCompletion(duplicate.buffer.toString("utf8"))).toBe(false);
   });
 
   it("keeps the same UUID independent across imported instances", async () => {
@@ -510,16 +509,6 @@ async function drainUntil(stream: OpenStream, ms: number): Promise<string> {
     /* abort, reset, or destroy is the cleanup under test */
   }
   return stream.buffer.toString("utf8");
-}
-
-async function expectCompetingClaimRejected(stream: OpenStream): Promise<void> {
-  if (stream.response.status !== 200) {
-    expect(stream.response.status).toBeGreaterThanOrEqual(400);
-    expect(stream.response.status).not.toBe(401);
-    return;
-  }
-  const text = await drainUntil(stream, 2_000);
-  expect(isSuccessfulTextCompletion(text)).toBe(false);
 }
 
 async function pull(stream: OpenStream, idleMs?: number): Promise<"data" | "end" | "idle"> {
