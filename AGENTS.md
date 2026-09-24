@@ -42,12 +42,12 @@
 ## Directory Map
 
 ```
-server/     app-server（业务后端：SSO/会话/工作空间/权限/沙箱/审计）
+server/     app-server（业务后端：SSO/会话/工作空间/权限/沙箱/审计/对话）
 web/        浏览器 SPA（Playwright UI 走查在 web/e2e）
 kbservice/  知识库服务（P2 起吸收 RAGFlow，Apache-2.0，义务见 ATTRIBUTION.md §3）
 resource/   行为基准原型 + 后端选型研究 +（gitignore 的）上游参考克隆
 app-reference/  上游应用只读副本（gitignore；仅 analysis/ 可写）
-smoke/      Hurl HTTP 冒烟用例与深链 exact-byte fixture
+smoke/      Hurl HTTP 冒烟用例、对话链路与深链 exact-byte fixture
 scripts/    守卫脚本    .githooks/  git hooks    .github/    CI
 ```
 
@@ -88,6 +88,8 @@ make setup    # npm install + uv sync + 挂 git hooks
 | 守卫自身 | 注入违例自证 | `make test-guardrails` | 全 PASS |
 | HTTP smoke | Hurl（调用方拥有已运行服务） | `make smoke` | 退出码 0；真实 HTTP 断言全绿 |
 | UI 走查 | Playwright Chromium（调用方拥有已运行服务） | `make ui-walk` | 退出码 0；真实浏览器走查与 error oracle 全绿 |
+| omp-fetch | 官方 omp v18.0.10 二进制供给（SHA 校验） | `make omp-fetch` | 退出码 0；官方 v18.0.10 版本输出与 SHA256 校验 |
+| 手动真实上游冒烟 | Hurl（调用方拥有已运行服务与真实上游） | `make smoke-live` | 退出码 0；非空 done 回复 |
 
 每行命令必须解析到真实 Makefile 目标；无验证命令的 surface 的改动是 review-only，PR 必须写明。
 
@@ -131,7 +133,7 @@ make setup    # npm install + uv sync + 挂 git hooks
 
 ## Enforcement Index
 
-严格度：**L3**（`constraints.yaml`）。级别：`advice` < `review-only` < `warn` < `block` < `gate`；低于 `warn` 的是人的承诺，不是机器检查。
+严格度：**L3**（`constraints.yaml`）。级别：`advice` < `review-only` < `warn` < `block` < `gate`；低于 `warn` 的是人的承诺，不是机器检查。`prerequisite` 是二进制供给角色，不进入该级别序。
 
 | 规则 | 所在 | 检查点 | 级别 |
 |------|------|--------|------|
@@ -148,6 +150,8 @@ make setup    # npm install + uv sync + 挂 git hooks
 | SAST | semgrep（p/default） | CI | block |
 | HTTP smoke | `.github/workflows/ci.yml`（job `smoke`） | `make smoke` + CI `smoke`/`all-checks-passed` | block |
 | UI 走查 | `.github/workflows/ci.yml`（job `ui-walk`） | `make ui-walk` + CI `ui-walk`/`all-checks-passed` | block |
+| omp-fetch | `scripts/omp-fetch.sh` | `make omp-fetch` | prerequisite |
+| 手动真实上游冒烟 | 本文件 Verification Matrix | `make smoke-live` | review-only |
 | Conventional commits | `.githooks/commit-msg` | pre-commit（commit-msg） | block |
 | CI 聚合门禁 | `.github/workflows/ci.yml`（all-checks-passed） | CI | block |
 | PR diff ≤400 行 | `constraints.yaml`（size_limits） | 评审检查项 | review-only |

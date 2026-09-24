@@ -1,6 +1,6 @@
 # open-workbuddy 唯一命令面。所有工作流经此路由；AGENTS.md 验证矩阵与 constraints.yaml
-# verification 段是它的镜像，增删目标须三处同步。omp-fetch 是二进制供给前置，
-# 控制面文档行（AGENTS.md / constraints.yaml）延后到 issue #107。
+# verification 段是它的镜像，增删目标须三处同步。omp-fetch 是官方 v18.0.10 二进制供给前置，
+# smoke-live 是调用方拥有的真实上游手动验证；控制面文档行与 Makefile 目标同步。
 SHELL := /bin/bash
 .PHONY: setup hooks lint fmt typecheck test anti-drift guard check test-guardrails precommit dev smoke smoke-live ui-walk omp-fetch
 
