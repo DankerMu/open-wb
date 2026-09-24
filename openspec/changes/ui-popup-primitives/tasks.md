@@ -25,4 +25,4 @@
 - Selected Legacy compatibility / examples：既有手写菜单/切换器/radio 卡及其测试不动——既有 `web/test` 绿 + 3.3 ui-walk。
 - Not selected Error handling / rollback / partial outputs：无运行时错误路径（Tooltip 缺 Provider 属实现错误，由 T2 覆盖）。
 - Selected Release / packaging / dependency compatibility：四包传递依赖（popper/floating-ui/roving-focus）在 jsdom 的守卫与 ESM 兼容——2.2 测试通过 + 3.2 build。
-- Selected Documentation / migration notes：design.md Sibling surfaces 记录 #283/#302/2.5 的定位器与断言改动；ATTRIBUTION——2.4。
+- Selected Documentation / migration notes：design.md Sibling surfaces 记录 #281/#302/2.5 的定位器与断言改动；ATTRIBUTION——2.4。

@@ -60,10 +60,11 @@ describe("关闭态 (M1)", () => {
 });
 
 describe("键盘打开 (M2)", () => {
-  it("Enter 打开：menu portal 到 body、labelledby 指向 trigger、项数一致、首项获焦", async () => {
+  it("Enter 打开：menu 带 ui-menu 类且 portal 到 body、labelledby 指向 trigger、项数一致、首项获焦", async () => {
     const { trigger } = renderMenu();
     const items = await openByKeyboard(trigger);
     const menu = screen.getByRole("menu");
+    expect(menu.classList.contains("ui-menu")).toBe(true);
     expect(menu.closest("[data-radix-popper-content-wrapper]")?.parentElement).toBe(document.body);
     expect(menu.getAttribute("aria-labelledby")).toBe(trigger.id);
     expect(trigger.id).not.toBe("");

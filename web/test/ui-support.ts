@@ -70,9 +70,14 @@ export function ruleBody(css: string, selector: string): string {
   return block.body;
 }
 
+/** 在 act 内以真实计时器等待 `ms` 毫秒。 */
+export function waitMs(ms: number) {
+  return act(() => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+}
+
 /** FocusScope 卸载归还在 setTimeout(0) 里跑；每个用例结束后让出一个宏任务，避免残留计时器串到下一个用例。 */
 export function yieldMacrotask() {
-  return act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+  return waitMs(0);
 }
 
 /**
