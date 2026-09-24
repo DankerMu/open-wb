@@ -1,0 +1,26 @@
+/* Tooltip（Radix Tooltip）— demo 无 tooltip 规则（用原生 title），按 demo:558-562 .seg 选中态的
+   反转色对类比定义：浅色 black-90 底白字，深色 white-90 底 black-90 字；z-index 高于菜单。 */
+
+.ui-tooltip {
+  z-index: 1700;
+  max-width: 240px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: var(--wb-palette-black-90);
+  color: var(--wb-text-white);
+  font-size: 12px;
+  line-height: 18px;
+  box-shadow: var(--wb-shadow-popover);
+  animation: wb-pop 0.15s ease;
+}
+
+[data-theme="dark"] .ui-tooltip {
+  background: var(--wb-palette-white-90);
+  color: var(--wb-palette-black-90);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-tooltip {
+    animation: none;
+  }
+}

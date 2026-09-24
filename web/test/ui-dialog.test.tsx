@@ -1,14 +1,16 @@
 import "./radix-platform.js";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useRef, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Button, ConfirmDialog, Dialog, Drawer, Icon } from "../src/ui/index.js";
-import { blockBody, readRepoFile, stripComments, topLevelBlocks } from "./ui-support.js";
-
-/** FocusScope 卸载归还在 setTimeout(0) 里跑；每个用例结束后让出一个宏任务，避免残留计时器串到下一个用例。 */
-function yieldMacrotask() {
-  return act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
-}
+import {
+  blockBody,
+  pressPointer,
+  readRepoFile,
+  ruleBody,
+  stripComments,
+  yieldMacrotask,
+} from "./ui-support.js";
 
 afterEach(async () => {
   cleanup();
@@ -16,32 +18,12 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-/**
- * 真实浏览器里一次遮罩点击的事件序列。Radix Dialog 以 `deferPointerDownOutside` 挂 DismissableLayer：
- * 左键 pointerdown 只登记，匹配的 click 到达后才判定「外点」并关闭。
- */
-function pressOverlay(overlay: Element) {
-  fireEvent.pointerDown(overlay);
-  fireEvent.mouseDown(overlay);
-  fireEvent.pointerUp(overlay);
-  fireEvent.mouseUp(overlay);
-  fireEvent.click(overlay);
-}
-
 function activeElement() {
   return document.activeElement;
 }
 
 function closeButton() {
   return screen.getByRole("button", { name: "关闭" });
-}
-
-function ruleBody(css: string, selector: string): string {
-  const block = topLevelBlocks(css).find((candidate) =>
-    candidate.prelude.split(",").some((part) => part.trim() === selector),
-  );
-  if (!block) throw new Error(`未找到规则 ${selector}`);
-  return block.body;
 }
 
 /** 页面上的打开者按钮 + 另一个按钮（returnFocus 目标）+ 受控 Dialog。 */
@@ -304,11 +286,11 @@ describe("Dialog：遮罩 (5)", () => {
       </Dialog>,
     );
     await yieldMacrotask();
-    pressOverlay(screen.getByText("正文"));
+    pressPointer(screen.getByText("正文"));
     expect(onOpenChange).not.toHaveBeenCalled();
     const overlay = document.querySelector(".ui-dialog-overlay");
     if (!overlay) throw new Error("缺遮罩");
-    pressOverlay(overlay);
+    pressPointer(overlay);
     expect(onOpenChange).toHaveBeenCalledExactlyOnceWith(false);
   });
 
@@ -322,7 +304,7 @@ describe("Dialog：遮罩 (5)", () => {
     await yieldMacrotask();
     const overlay = document.querySelector(".ui-dialog-overlay");
     if (!overlay) throw new Error("缺遮罩");
-    pressOverlay(overlay);
+    pressPointer(overlay);
     expect(onOpenChange).not.toHaveBeenCalled();
   });
 });
@@ -457,7 +439,7 @@ describe("ConfirmDialog (7)", () => {
     await yieldMacrotask();
     const overlay = document.querySelector(".ui-dialog-overlay");
     if (!overlay) throw new Error("缺遮罩");
-    pressOverlay(overlay);
+    pressPointer(overlay);
     expect(onOpenChange).not.toHaveBeenCalled();
     fireEvent.keyDown(document, { key: "Escape" });
     expect(onOpenChange).toHaveBeenCalledExactlyOnceWith(false);
@@ -546,7 +528,7 @@ describe("Drawer (8)", () => {
     await yieldMacrotask();
     const overlay = document.querySelector(".ui-drawer-overlay");
     if (!overlay) throw new Error("缺遮罩");
-    pressOverlay(overlay);
+    pressPointer(overlay);
     expect(onOpenChange).toHaveBeenCalledTimes(3);
     expect(onOpenChange.mock.calls).toEqual([[false], [false], [false]]);
   });

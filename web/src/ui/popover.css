@@ -1,0 +1,26 @@
+/* Popover（Radix Popover）面板壳 — adapted from resource/workbuddy-live-demo.html:779-780（.pop）。
+   定位交给 Radix Popper（去掉 demo 的 position/bottom/display）；列表项/搜索框样式归消费者。 */
+
+.ui-popover {
+  z-index: 1300;
+  width: 300px;
+  max-height: min(70vh, 520px);
+  padding: 8px;
+  overflow-y: auto;
+  border: 1px solid var(--wb-border-default);
+  border-radius: 12px;
+  background: var(--wb-bg-primary);
+  box-shadow: var(--wb-shadow-popover);
+  animation: wb-pop 0.15s ease;
+}
+
+/* content 本身可获焦（无可聚焦子元素时）不画环。 */
+.ui-popover:focus-visible {
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-popover {
+    animation: none;
+  }
+}
