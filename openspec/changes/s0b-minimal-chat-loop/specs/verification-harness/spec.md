@@ -58,7 +58,7 @@ smoke 与 ui-walk SHALL 作为两个独立 Ubuntu job 进入 CI，并纳入 `all
 - **GIVEN** fresh Ubuntu runners、受 lockfile 约束的 Node dependencies、固定 Hurl archive digest、固定 omp v18.0.10 release digest 与 Playwright Chromium revision
 - **WHEN** CI 分别运行 `smoke` 与 `ui-walk`
 - **THEN** 两者都先 build Web/server、完成 omp 拉取（下载 + SHA256 校验）、启动各自的假上游，分别用 isolated DB/process/static root/omp state 启动 production server；`make smoke` 的三个 hurl 文件（public/auth/chat）与 `make ui-walk` 的完整 Chromium journey（含对话步骤）全绿，cleanup 后无残留 omp/假上游进程，job 退出 0
-- **AND** `all-checks-passed.needs` 同时包含两个 job；任一 job failure/cancelled/skipped 时 aggregate 非零；workflow 文本不含真实上游 URL 或 `secrets.` 引用
+- **AND** `all-checks-passed.needs` 同时包含两个 job；任一 job failure/cancelled/skipped 时 aggregate 非零；smoke/ui-walk 两 job 不含真实模型上游 URL 或 `secrets.` 引用；既有 secret-scan 的 GITHUB_TOKEN 按 canonical action 契约保留（#105 用户确认的范围澄清）
 
 #### Scenario: 工具、服务或测试失败不得假绿或污染 sibling job
 - **WHEN** Hurl archive digest/解压/执行失败、omp 资产 digest 不符、假上游启动失败、Chromium 安装/启动失败、server 未 ready/提前退出、任一 harness assertion 失败或 cleanup 失败

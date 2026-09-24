@@ -75,6 +75,7 @@ jobs:
       - run: npm run build --workspace server
       - name: install hurl 8.0.1
         run: bash .github/scripts/ci-install-hurl.sh
+      - run: make omp-fetch
       - name: smoke compiled server
         env:
           HOST: "127.0.0.1"
@@ -82,6 +83,12 @@ jobs:
           SMOKE_BASE_URL: "http://127.0.0.1:18016"
           DB_PATH: "${{ runner.temp }}/workbuddy-smoke/app.db"
           STATIC_ROOT: "${{ github.workspace }}/smoke/fixtures/static"
+          OMP_BIN: "${{ github.workspace }}/var/omp/omp"
+          OMP_STATE_DIR: "${{ runner.temp }}/workbuddy-smoke/omp-state"
+          SANDBOX_ROOT: "${{ runner.temp }}/workbuddy-smoke/sandbox"
+          MODEL_UPSTREAM_BASE_URL: "http://127.0.0.1:19016/v1"
+          MODEL_UPSTREAM_API_KEY: "fake"
+          FAKE_UPSTREAM_PORT: "19016"
         run: bash .github/scripts/ci-compiled-server.sh smoke
 
   ui-walk:
@@ -95,6 +102,7 @@ jobs:
       - run: npm run build --workspace web
       - run: npm run build --workspace server
       - run: npx playwright install --with-deps chromium
+      - run: make omp-fetch
       - name: ui-walk compiled server
         env:
           HOST: "127.0.0.1"
@@ -102,6 +110,12 @@ jobs:
           UI_WALK_BASE_URL: "http://127.0.0.1:18017"
           DB_PATH: "${{ runner.temp }}/workbuddy-ui-walk/app.db"
           STATIC_ROOT: "${{ github.workspace }}/web/dist"
+          OMP_BIN: "${{ github.workspace }}/var/omp/omp"
+          OMP_STATE_DIR: "${{ runner.temp }}/workbuddy-ui-walk/omp-state"
+          SANDBOX_ROOT: "${{ runner.temp }}/workbuddy-ui-walk/sandbox"
+          MODEL_UPSTREAM_BASE_URL: "http://127.0.0.1:19017/v1"
+          MODEL_UPSTREAM_API_KEY: "fake"
+          FAKE_UPSTREAM_PORT: "19017"
         run: bash .github/scripts/ci-compiled-server.sh ui-walk
 
   all-checks-passed:
