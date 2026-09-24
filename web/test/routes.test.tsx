@@ -2,30 +2,27 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAppRouter, routeManifest } from "../src/routes/index.js";
+import "./dialog-platform.js";
 
 const expectedPages = [
   {
     path: "/",
     title: "会话",
-    description: "选择一个会话，或直接发送开始新对话",
     currentLabel: "会话",
   },
   {
     path: "/files",
     title: "工作空间",
-    description: "未选择工作空间",
     currentLabel: "工作空间",
   },
   {
     path: "/center",
     title: "中心",
-    description: "S1d 将接入专家、技能、连接器、知识库、模型与权限",
     currentLabel: "中心",
   },
   {
     path: "/settings",
     title: "设置",
-    description: "当前生效：浅色",
     currentLabel: "设置",
   },
 ] as const;
@@ -42,98 +39,84 @@ const trailingSlashPages = [
     path: "/files/",
     canonicalPath: "/files",
     title: "工作空间",
-    description: "未选择工作空间",
     currentLabel: "工作空间",
   },
   {
     path: "/center/",
     canonicalPath: "/center",
     title: "中心",
-    description: "S1d 将接入专家、技能、连接器、知识库、模型与权限",
     currentLabel: "中心",
   },
   {
     path: "/settings/",
     canonicalPath: "/settings",
     title: "设置",
-    description: "当前生效：浅色",
     currentLabel: "设置",
   },
   {
     path: "/files//",
     canonicalPath: "/files",
     title: "工作空间",
-    description: "未选择工作空间",
     currentLabel: "工作空间",
   },
   {
     path: "/center///",
     canonicalPath: "/center",
     title: "中心",
-    description: "S1d 将接入专家、技能、连接器、知识库、模型与权限",
     currentLabel: "中心",
   },
   {
     path: "/settings////",
     canonicalPath: "/settings",
     title: "设置",
-    description: "当前生效：浅色",
     currentLabel: "设置",
   },
   {
     path: "/FILES",
     canonicalPath: "/files",
     title: "工作空间",
-    description: "未选择工作空间",
     currentLabel: "工作空间",
   },
   {
     path: "/Files/",
     canonicalPath: "/files",
     title: "工作空间",
-    description: "未选择工作空间",
     currentLabel: "工作空间",
   },
   {
     path: "/FILES//",
     canonicalPath: "/files",
     title: "工作空间",
-    description: "未选择工作空间",
     currentLabel: "工作空间",
   },
   {
     path: "/CeNtEr///",
     canonicalPath: "/center",
     title: "中心",
-    description: "S1d 将接入专家、技能、连接器、知识库、模型与权限",
     currentLabel: "中心",
   },
   {
     path: "/SeTTings////",
     canonicalPath: "/settings",
     title: "设置",
-    description: "当前生效：浅色",
     currentLabel: "设置",
   },
   {
     path: "/f%69les",
     canonicalPath: "/files",
     title: "工作空间",
-    description: "未选择工作空间",
     currentLabel: "工作空间",
   },
   {
     path: "/C%45NTER//",
     canonicalPath: "/center",
     title: "中心",
-    description: "S1d 将接入专家、技能、连接器、知识库、模型与权限",
     currentLabel: "中心",
   },
   {
     path: "/se%74tings///",
     canonicalPath: "/settings",
     title: "设置",
-    description: "当前生效：浅色",
     currentLabel: "设置",
   },
 ] as const;
@@ -191,17 +174,8 @@ function authenticateRouter() {
   );
 }
 
-async function expectRouteShell({
-  title,
-  description,
-  currentLabel,
-}: {
-  title: string;
-  description: string;
-  currentLabel: string;
-}) {
+async function expectRouteShell({ title, currentLabel }: { title: string; currentLabel: string }) {
   expect(await screen.findByRole("heading", { level: 1, name: title })).toBeTruthy();
-  expect(await screen.findByText(description, { exact: true })).toBeTruthy();
   if (title === "会话") {
     expect(screen.getByRole("textbox", { name: "给助手发消息" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "新建会话" })).toBeTruthy();
@@ -265,7 +239,6 @@ describe("SPA shell routes", () => {
     });
     const { navigation: updatedNavigation } = await expectRouteShell({
       title: "工作空间",
-      description: "未选择工作空间",
       currentLabel: "工作空间",
     });
 
@@ -274,36 +247,28 @@ describe("SPA shell routes", () => {
     ).toBe(false);
   });
 
-  it.each(expectedPages)(
-    "renders the $path shell",
-    async ({ path, title, description, currentLabel }) => {
-      setBrowserPath(path);
-      authenticateRouter();
-      router = createAppRouter();
-      render(<RouterProvider router={router} />);
+  it.each(expectedPages)("renders the $path shell", async ({ path, title, currentLabel }) => {
+    setBrowserPath(path);
+    authenticateRouter();
+    router = createAppRouter();
+    render(<RouterProvider router={router} />);
 
-      const { navigation, links } = await expectRouteShell({ title, description, currentLabel });
+    const { navigation, links } = await expectRouteShell({ title, currentLabel });
 
-      expect(links).toHaveLength(4);
-      expect(links.map((link) => link.getAttribute("href"))).toEqual(
-        expectedSidebarLinks.map(({ path: expectedPath }) => expectedPath),
-      );
+    expect(links).toHaveLength(4);
+    expect(links.map((link) => link.getAttribute("href"))).toEqual(
+      expectedSidebarLinks.map(({ path: expectedPath }) => expectedPath),
+    );
 
-      for (const expectedLink of expectedSidebarLinks) {
-        const label = within(navigation).getByText(expectedLink.label, { exact: true });
-        expect(label.closest("a")?.getAttribute("href")).toBe(expectedLink.path);
-      }
-
-      expect(within(navigation).getByText("文件·预览·挂载", { exact: true })).toBeTruthy();
-      expect(
-        within(navigation).getByText("专家·技能·知识库·模型·权限", { exact: true }),
-      ).toBeTruthy();
-    },
-  );
+    for (const expectedLink of expectedSidebarLinks) {
+      const label = within(navigation).getByText(expectedLink.label, { exact: true });
+      expect(label.closest("a")?.getAttribute("href")).toBe(expectedLink.path);
+    }
+  });
 
   it.each(trailingSlashPages)(
     "canonicalizes $path to the $canonicalPath shell",
-    async ({ path, canonicalPath, title, description, currentLabel }) => {
+    async ({ path, canonicalPath, title, currentLabel }) => {
       setBrowserPath(path);
       authenticateRouter();
       router = createAppRouter();
@@ -312,7 +277,7 @@ describe("SPA shell routes", () => {
       await waitFor(() => {
         expect(window.location.pathname).toBe(canonicalPath);
       });
-      await expectRouteShell({ title, description, currentLabel });
+      await expectRouteShell({ title, currentLabel });
     },
   );
 });

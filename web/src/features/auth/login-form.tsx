@@ -47,38 +47,48 @@ export function LoginForm() {
   }
 
   return (
-    <main>
-      <h1>登录 WorkBuddy</h1>
-      <form onSubmit={submit}>
-        <p>
-          <label>
-            账号
-            <input
-              autoComplete="username"
-              name="account"
-              onChange={(event) => setAccount(event.currentTarget.value)}
-              required
-              value={account}
-            />
-          </label>
-        </p>
-        <p>
-          <label>
-            密码
-            <input
-              autoComplete="current-password"
-              name="password"
-              ref={passwordRef}
-              required
-              type="password"
-            />
-          </label>
-        </p>
-        {error ? <p role="alert">{error}</p> : null}
-        <button disabled={submitting} type="submit">
-          登录
-        </button>
-      </form>
+    <main className="login-root">
+      <div className="login-card">
+        <div aria-hidden="true" className="login-brand">
+          <span className="brand-mark" />
+        </div>
+        <h1>登录 WorkBuddy</h1>
+        <form className="login-form" onSubmit={submit}>
+          <p>
+            <label>
+              账号
+              <input
+                autoComplete="username"
+                name="account"
+                onChange={(event) => setAccount(event.currentTarget.value)}
+                required
+                value={account}
+              />
+            </label>
+          </p>
+          <p>
+            <label>
+              密码
+              <input
+                autoComplete="current-password"
+                name="password"
+                ref={passwordRef}
+                required
+                type="password"
+              />
+            </label>
+          </p>
+          {error ? (
+            <p className="ui-alert" role="alert">
+              {error}
+            </p>
+          ) : null}
+          {submitting ? <p className="ui-muted">正在登录</p> : null}
+          <button className="ui-button ui-button-primary" disabled={submitting} type="submit">
+            登录
+          </button>
+        </form>
+      </div>
     </main>
   );
 }

@@ -31,6 +31,7 @@ type DirectoryTreeProps = {
   errors: Record<string, string>;
   expandedPaths: ReadonlySet<string>;
   loadingPaths: ReadonlySet<string>;
+  selectedPath: string | null;
   onSelectFile(entry: TreeEntry, path: string): void;
   onToggleDirectory(path: string): void;
 };
@@ -119,6 +120,7 @@ function DirectoryNode({
   onSelectFile,
   onToggleDirectory,
   path,
+  selectedPath,
 }: DirectoryNodeProps) {
   const entries = cache[path]?.entries;
   const expanded = expandedPaths.has(path);
@@ -126,45 +128,84 @@ function DirectoryNode({
   const error = errors[path];
 
   return (
-    <li>
+    <li className="files-tree-item">
       <button
         aria-expanded={expanded}
         aria-label={`${expanded ? "折叠" : "展开"} ${label}`}
+        className="files-tree-node"
         onClick={() => onToggleDirectory(path)}
         type="button"
       >
-        {label}
+        <svg aria-hidden="true" className="files-tree-glyph files-tree-caret" viewBox="0 0 16 16">
+          <path d="M4 6l4 5 4-5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        </svg>
+        <svg aria-hidden="true" className="files-tree-glyph" viewBox="0 0 16 16">
+          <path d="M2 4.5h4l1.5 2H14V13H2z" fill="none" stroke="currentColor" strokeWidth="1.2" />
+        </svg>
+        <span className="files-tree-name">{label}</span>
       </button>
-      {error ? <p role="alert">{error}</p> : null}
-      {expanded && loading && !entries ? <p role="status">正在读取目录</p> : null}
+      {error ? (
+        <p className="ui-alert" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {expanded && loading && !entries ? (
+        <p className="files-status ui-muted" role="status">
+          正在读取目录
+        </p>
+      ) : null}
       {expanded && entries ? (
-        <ul>
-          {entries.map((entry) => {
-            const entryPath = workspacePath(path, entry.name);
-            if (entry.type === "dir") {
-              return (
-                <DirectoryNode
-                  cache={cache}
-                  errors={errors}
-                  expandedPaths={expandedPaths}
-                  key={entryPath}
-                  label={entry.name}
-                  loadingPaths={loadingPaths}
-                  onSelectFile={onSelectFile}
-                  onToggleDirectory={onToggleDirectory}
-                  path={entryPath}
-                />
-              );
-            }
+        <ul className="files-tree-list">
+          {entries.length === 0 ? (
+            <li className="files-tree-item">
+              <p className="files-tree-folder-empty ui-muted">此文件夹为空</p>
+            </li>
+          ) : (
+            entries.map((entry) => {
+              const entryPath = workspacePath(path, entry.name);
+              if (entry.type === "dir") {
+                return (
+                  <DirectoryNode
+                    cache={cache}
+                    errors={errors}
+                    expandedPaths={expandedPaths}
+                    key={entryPath}
+                    label={entry.name}
+                    loadingPaths={loadingPaths}
+                    onSelectFile={onSelectFile}
+                    onToggleDirectory={onToggleDirectory}
+                    path={entryPath}
+                    selectedPath={selectedPath}
+                  />
+                );
+              }
 
-            return (
-              <li key={entryPath}>
-                <button onClick={() => onSelectFile(entry, entryPath)} type="button">
-                  {entry.name}
-                </button>
-              </li>
-            );
-          })}
+              return (
+                <li className="files-tree-item" key={entryPath}>
+                  <button
+                    aria-current={selectedPath === entryPath ? "true" : undefined}
+                    className={
+                      selectedPath === entryPath
+                        ? "files-tree-file files-tree-file--selected"
+                        : "files-tree-file"
+                    }
+                    onClick={() => onSelectFile(entry, entryPath)}
+                    type="button"
+                  >
+                    <svg aria-hidden="true" className="files-tree-glyph" viewBox="0 0 16 16">
+                      <path
+                        d="M5 2h5l4 4v8H5z"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.2"
+                      />
+                    </svg>
+                    <span className="files-tree-name">{entry.name}</span>
+                  </button>
+                </li>
+              );
+            })
+          )}
         </ul>
       ) : null}
     </li>
@@ -174,7 +215,7 @@ function DirectoryNode({
 function DirectoryTree(props: DirectoryTreeProps) {
   return (
     <nav aria-label="工作空间目录树">
-      <ul>
+      <ul className="files-tree-list">
         <DirectoryNode {...props} label="root" path="" />
       </ul>
     </nav>
@@ -183,9 +224,9 @@ function DirectoryTree(props: DirectoryTreeProps) {
 
 export function EmptyPreview() {
   return (
-    <div>
+    <div className="files-preview-empty ui-empty">
       <p>未选择文件</p>
-      <p>在左侧目录树中选择一个文件进行预览</p>
+      <p className="ui-muted">在左侧目录树中选择一个文件进行预览</p>
     </div>
   );
 }
@@ -199,23 +240,23 @@ export function WorkspaceColumns({
   switcher,
 }: WorkspaceColumnsProps) {
   return (
-    <div
-      style={{
-        display: "grid",
-        gap: "1rem",
-        gridTemplateColumns: "minmax(15rem, 22rem) minmax(0, 1fr)",
-      }}
-    >
-      <aside aria-label="工作空间文件" style={{ minWidth: 0 }}>
+    <div className="files-layout">
+      <aside aria-label="工作空间文件" className="files-tree">
         {switcher}
-        <div style={{ alignItems: "center", display: "flex", justifyContent: "space-between" }}>
+        <div className="files-tree-head">
           <h2>工作空间目录</h2>
           <CreationMenu onNewDirectory={onNewDirectory} onNewWorkspace={onNewWorkspace} />
         </div>
-        {folderNotice ? <p role="alert">{folderNotice}</p> : null}
-        {directory}
+        {folderNotice ? (
+          <p className="ui-alert files-notice" role="alert">
+            {folderNotice}
+          </p>
+        ) : null}
+        <div className="files-tree-scroll">{directory}</div>
       </aside>
-      <section aria-label="文件预览">{preview}</section>
+      <section aria-label="文件预览" className="files-preview">
+        {preview}
+      </section>
     </div>
   );
 }
@@ -226,7 +267,7 @@ function PreviewArea({ loading, selectedFile }: PreviewAreaProps) {
   }
 
   return (
-    <div>
+    <div className="files-preview-body">
       {selectedFile.preview ? (
         <PreviewPane
           mtime={selectedFile.entry.mtime}
@@ -236,9 +277,15 @@ function PreviewArea({ loading, selectedFile }: PreviewAreaProps) {
           size={selectedFile.entry.size}
         />
       ) : (
-        <p role="status">正在读取文件</p>
+        <p className="files-status ui-muted" role="status">
+          正在读取文件
+        </p>
       )}
-      {loading && selectedFile.preview ? <p role="status">正在读取文件</p> : null}
+      {loading && selectedFile.preview ? (
+        <p className="files-status ui-muted" role="status">
+          正在读取文件
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -549,6 +596,7 @@ export function WorkspaceBrowser({
             loadingPaths={loadingPaths}
             onSelectFile={selectFile}
             onToggleDirectory={toggleDirectory}
+            selectedPath={selectedFile?.path ?? null}
           />
         }
         folderNotice={folderNotice}

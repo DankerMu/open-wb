@@ -3,6 +3,7 @@ import { RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthGuard, AuthProvider, useAuth } from "../src/features/auth/index.js";
 import { createAppRouter } from "../src/routes/index.js";
+import "./dialog-platform.js";
 import {
   createFetchMock,
   currentLocation,
@@ -159,7 +160,6 @@ describe("settings route", () => {
     expect(screen.getByText("当前生效：浅色", { exact: true })).toBeTruthy();
     expect(await screen.findByText(serviceInfo.name, { exact: true })).toBeTruthy();
     expect(screen.getByText(`版本 ${serviceInfo.version}`, { exact: true })).toBeTruthy();
-    expect(screen.queryByText("WorkBuddy", { exact: true })).toBeNull();
     expect(screen.queryByText("5.3.11", { exact: true })).toBeNull();
   });
 
@@ -493,7 +493,7 @@ describe("AuthProvider info and logout coordination", () => {
     },
   );
 
-  it("lets a new info operation supersede pending logout without a late state write", async () => {
+  it("keeps a pending logout authoritative when settings requests service information", async () => {
     const pendingLogout = deferredResponse();
     const fixture = await renderAuthenticatedProvider();
     replaceFetchRoutes(
@@ -508,12 +508,13 @@ describe("AuthProvider info and logout coordination", () => {
 
     await expect(
       fixture.getProbe()?.loadServiceInfo(new AbortController().signal),
-    ).resolves.toEqual(serviceInfo);
+    ).resolves.toBeNull();
 
-    expect(logoutOptions?.signal?.aborted).toBe(true);
+    expect(logoutOptions?.signal?.aborted).toBe(false);
+    expect(fixture.fetchMock.mock.calls.filter(([path]) => path === "/api/info")).toHaveLength(0);
     pendingLogout.resolve(new Response(null, { status: 204 }));
-    await expect(logout).resolves.toBe(false);
-    expect(fixture.getProbe()?.principal).toEqual(principal);
+    await expect(logout).resolves.toBe(true);
+    await waitFor(() => expect(fixture.getProbe()?.principal).toBeNull());
   });
 
   it("aborts a pending logout on unmount and leaves a fresh mount clean", async () => {
@@ -592,6 +593,45 @@ describe("authenticated sidebar footer", () => {
     expect(fetchMock.mock.calls.filter(([path]) => path === "/api/auth/logout")).toHaveLength(0);
     expect(currentLocation()).toBe("/files?from=cancel#target");
     expect(screen.getByRole("heading", { level: 1, name: "工作空间" })).toBeTruthy();
+  });
+
+  it("closes the logout confirmation on Escape and restores the trigger", async () => {
+    const fetchMock = createAuthenticatedFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderApp("/files");
+    await expectAuthenticatedShell("/files");
+    const trigger = within(getFooter()).getByRole("button", { name: "退出登录" });
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole("alertdialog") as HTMLDialogElement;
+
+    expect(dialog.open).toBe(true);
+    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "取消" }));
+    fireEvent(dialog, new Event("cancel", { cancelable: true }));
+
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(fetchMock.mock.calls.filter(([path]) => path === "/api/auth/logout")).toHaveLength(0);
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("dismisses a pending logout without duplicating or cancelling the owned request", async () => {
+    const pendingLogout = deferredResponse();
+    const fetchMock = createFetchMock(
+      authenticatedRoutes({ "/api/auth/logout": pendingLogout.promise }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderApp("/files");
+    await expectAuthenticatedShell("/files");
+    const dialog = openLogoutDialog() as HTMLDialogElement;
+    fireEvent.click(within(dialog).getByRole("button", { name: "退出" }));
+    fireEvent(dialog, new Event("cancel", { cancelable: true }));
+
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "工作空间" })).toBeTruthy();
+    expect(fetchMock.mock.calls.filter(([path]) => path === "/api/auth/logout")).toHaveLength(1);
+    pendingLogout.resolve(new Response(null, { status: 204 }));
+    await expectLoginAt("/files");
   });
 
   it("admits one same-tick confirmation and returns to login after 204", async () => {

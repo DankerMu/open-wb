@@ -1,8 +1,10 @@
 import { type FormEvent, type PropsWithChildren, useEffect, useRef, useState } from "react";
+import { trapDialogFocus } from "../../lib/dialog.js";
 
 type DialogSurfaceProps = PropsWithChildren<{
   title: string;
   titleId: string;
+  pending: boolean;
   onCancel(): void;
 }>;
 
@@ -31,67 +33,136 @@ type CreationMenuProps = {
   onNewWorkspace(): void;
 };
 
-function DialogSurface({ children, onCancel, title, titleId }: DialogSurfaceProps) {
+function DialogSurface({ children, onCancel, pending, title, titleId }: DialogSurfaceProps) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) {
+      return undefined;
+    }
+
+    const active = document.activeElement;
+    returnFocusRef.current =
+      active instanceof HTMLElement && active !== dialog ? active : returnFocusRef.current;
+
+    if (!dialog.open) {
+      dialog.showModal();
+    }
+
+    return () => {
+      if (dialog.open) {
+        dialog.close();
+      }
+      const restore = returnFocusRef.current;
+      if (restore?.isConnected) {
+        restore.focus();
+      }
+    };
+  }, []);
+
   return (
-    <div
+    <dialog
+      aria-busy={pending || undefined}
       aria-labelledby={titleId}
-      aria-modal="true"
-      onKeyDown={(event) => {
-        if (event.key === "Escape") {
-          event.preventDefault();
-          onCancel();
-        }
+      className="files-dialog"
+      onKeyDown={trapDialogFocus}
+      onCancel={(event) => {
+        event.preventDefault();
+        onCancel();
       }}
-      role="dialog"
-      style={{
-        border: "1px solid currentColor",
-        marginTop: "1rem",
-        maxWidth: "28rem",
-        padding: "1rem",
-      }}
+      ref={dialogRef}
     >
       <h2 id={titleId}>{title}</h2>
       {children}
-    </div>
+    </dialog>
   );
 }
 
 export function CreationMenu({ onNewDirectory, onNewWorkspace }: CreationMenuProps) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    if (open) {
-      menuRef.current?.focus();
+    if (!open) {
+      return;
+    }
+    const firstItem = menuRef.current?.querySelector('[role="menuitem"]');
+    if (firstItem instanceof HTMLElement) {
+      firstItem.focus();
     }
   }, [open]);
 
+  function closeMenu() {
+    setOpen(false);
+    triggerRef.current?.focus();
+  }
+
+  function moveMenuFocus(event: {
+    key: string;
+    preventDefault(): void;
+    currentTarget: HTMLElement;
+  }) {
+    const items = [...event.currentTarget.querySelectorAll('[role="menuitem"]')].filter(
+      (node): node is HTMLElement => node instanceof HTMLElement,
+    );
+    if (items.length === 0) {
+      return;
+    }
+    const currentIndex = items.indexOf(document.activeElement as HTMLElement);
+    let nextIndex = currentIndex;
+    switch (event.key) {
+      case "ArrowDown":
+        nextIndex = (currentIndex + 1) % items.length;
+        break;
+      case "ArrowUp":
+        nextIndex = (Math.max(currentIndex, 0) + items.length - 1) % items.length;
+        break;
+      case "Home":
+        nextIndex = 0;
+        break;
+      case "End":
+        nextIndex = items.length - 1;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    items[nextIndex]?.focus();
+  }
+
   return (
-    <div>
+    <div className="files-menu">
       <button
         aria-expanded={open}
         aria-haspopup="menu"
         aria-label="新建"
+        className="ui-button"
         onClick={() => setOpen((current) => !current)}
+        ref={triggerRef}
         type="button"
       >
         ＋
       </button>
       {open ? (
         <div
+          className="files-menu-panel"
           onKeyDown={(event) => {
             if (event.key === "Escape") {
               event.preventDefault();
-              setOpen(false);
+              closeMenu();
+              return;
             }
+            moveMenuFocus(event);
           }}
           ref={menuRef}
           role="menu"
-          tabIndex={-1}
         >
           <button
             onClick={() => {
-              setOpen(false);
+              closeMenu();
               onNewDirectory();
             }}
             role="menuitem"
@@ -101,7 +172,7 @@ export function CreationMenu({ onNewDirectory, onNewWorkspace }: CreationMenuPro
           </button>
           <button
             onClick={() => {
-              setOpen(false);
+              closeMenu();
               onNewWorkspace();
             }}
             role="menuitem"
@@ -124,15 +195,26 @@ type DialogFormProps = PropsWithChildren<{
 
 function DialogForm({ children, error, onCancel, onSubmit, pending }: DialogFormProps) {
   return (
-    <form onSubmit={onSubmit}>
+    <form aria-busy={pending || undefined} className="files-dialog-form" onSubmit={onSubmit}>
       {children}
-      {error ? <p role="alert">{error}</p> : null}
-      <button onClick={onCancel} type="button">
-        取消
-      </button>
-      <button disabled={pending} type="submit">
-        创建
-      </button>
+      {pending ? (
+        <p className="files-status ui-muted" role="status">
+          正在创建。取消将停止等待；如请求已到达服务器，结果可在刷新后确认。
+        </p>
+      ) : null}
+      {error ? (
+        <p className="ui-alert" role="alert">
+          {error}
+        </p>
+      ) : null}
+      <div className="files-dialog-actions">
+        <button className="ui-button" onClick={onCancel} type="button">
+          取消
+        </button>
+        <button className="ui-button ui-button-primary" disabled={pending} type="submit">
+          创建
+        </button>
+      </div>
     </form>
   );
 }
@@ -160,29 +242,30 @@ export function WorkspaceDialog({ error, pending, onCancel, onCreate }: Workspac
   }
 
   return (
-    <DialogSurface onCancel={onCancel} title="新建工作空间" titleId="workspace-dialog-title">
+    <DialogSurface
+      onCancel={onCancel}
+      pending={pending}
+      title="新建工作空间"
+      titleId="workspace-dialog-title"
+    >
       <DialogForm error={message} onCancel={onCancel} onSubmit={submitWorkspace} pending={pending}>
         <p>将在你的沙箱内创建同名目录</p>
-        <p>
-          <label>
-            工作空间名称
-            <input
-              onChange={(event) => setName(event.target.value)}
-              placeholder="输入工作空间名称"
-              value={name}
-            />
-          </label>
-        </p>
-        <p>
-          <label>
-            目录名
-            <input
-              onChange={(event) => setDir(event.target.value)}
-              placeholder="留空则按名称生成"
-              value={dir}
-            />
-          </label>
-        </p>
+        <label className="files-field">
+          工作空间名称
+          <input
+            onChange={(event) => setName(event.target.value)}
+            placeholder="输入工作空间名称"
+            value={name}
+          />
+        </label>
+        <label className="files-field">
+          目录名
+          <input
+            onChange={(event) => setDir(event.target.value)}
+            placeholder="留空则按名称生成"
+            value={dir}
+          />
+        </label>
       </DialogForm>
     </DialogSurface>
   );
@@ -217,30 +300,31 @@ export function DirectoryDialog({
   }
 
   return (
-    <DialogSurface onCancel={onCancel} title="新建文件夹" titleId="directory-dialog-title">
+    <DialogSurface
+      onCancel={onCancel}
+      pending={pending}
+      title="新建文件夹"
+      titleId="directory-dialog-title"
+    >
       <DialogForm error={message} onCancel={onCancel} onSubmit={submitDirectory} pending={pending}>
-        <p>
-          <label>
-            位置
-            <select onChange={(event) => setParent(event.target.value)} value={parent}>
-              {directories.map((path) => (
-                <option key={path} value={path}>
-                  {path.length === 0 ? "根目录　root" : path}
-                </option>
-              ))}
-            </select>
-          </label>
-        </p>
-        <p>
-          <label>
-            文件夹名称
-            <input
-              onChange={(event) => setName(event.target.value)}
-              placeholder="例如 out"
-              value={name}
-            />
-          </label>
-        </p>
+        <label className="files-field">
+          位置
+          <select onChange={(event) => setParent(event.target.value)} value={parent}>
+            {directories.map((path) => (
+              <option key={path} value={path}>
+                {path.length === 0 ? "根目录　root" : path}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="files-field">
+          文件夹名称
+          <input
+            onChange={(event) => setName(event.target.value)}
+            placeholder="例如 out"
+            value={name}
+          />
+        </label>
       </DialogForm>
     </DialogSurface>
   );

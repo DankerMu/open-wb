@@ -1,5 +1,6 @@
 import { act, cleanup, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import "./dialog-platform.js";
 
 const authenticatedPrincipal = {
   id: "user-1",

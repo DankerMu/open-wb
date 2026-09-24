@@ -15,7 +15,13 @@ web workspace SHALL 具备 Vite + React 构建面：`web/index.html`、`src/main
 - THEN typecheck（JSX）、knip（vite 入口解析）、覆盖率全部通过
 
 ### Requirement: 路由 IA 与侧栏
-SPA SHALL 以 history 路由提供 `/`、`/files`、`/center`、`/settings` 四页与侧栏 4 tab（标签与副标题按 demo:1773-1778）；`/` 渲染 chat-web 规定的会话页（heading `会话`，当前会话由 `?session=<id>` 表示）；`/center` 为占位壳（标题 + 所属阶段说明）；`/files` 渲染 files-web 规定的工作空间页（heading `工作空间`，当前空间以 `?ws=<id>` 表示），routeManifest 描述及 routes/ui-walk 既有断言 SHALL 随真实页面同步更新；`/center` 为扁平路由（demo 的 8 tab 是页内状态而非 URL，demo:3144-3161；页内 tab 属 S1d）；demo 开发者页 `/tokens` 不移植。已认证侧栏底部 SHALL 有用户页脚，逐字展示当前 Principal 的 `account` 与 `role`（前端不伪造 display name/部门或角色映射）以及 `退出登录` 按钮。退出 SHALL 先显示可访问确认框：标题 `退出登录？`、说明 `退出后本机不再保留登录状态，未完成的任务会保留在你的沙箱中。`、按钮 `取消`/`退出`；取消不发请求，确认只调用一次 Provider-owned logout。其余 demo 用户菜单项延后见 proposal Non-goals。
+SPA SHALL 以 history 路由提供 `/`、`/files`、`/center`、`/settings` 四页与四个导航入口；视觉参考 demo，标签与说明仅表达已实现的功能，不宣传挂载等未交付能力。`/` 渲染 chat-web 规定的会话页（heading `会话`，当前会话由 `?session=<id>` 表示）；`/center` 明确展示暂不可用状态，不提供虚假功能按钮；`/files` 渲染 files-web 规定的工作空间页（heading `工作空间`，当前空间以 `?ws=<id>` 表示），routeManifest 描述及 routes/ui-walk 既有断言 SHALL 随真实页面同步更新；`/center` 为扁平路由（demo 的 8 tab 是页内状态而非 URL，demo:3144-3161；页内 tab 属 S1d）；demo 开发者页 `/tokens` 不移植。已认证侧栏底部 SHALL 有用户页脚，逐字展示当前 Principal 的 `account` 与 `role`（前端不伪造 display name/部门或角色映射）以及 `退出登录` 按钮。退出 SHALL 先显示可访问模态确认框：标题 `退出登录？`、说明退出后的登录状态与任务保留语义、按钮 `取消`/`退出`；取消不发请求，确认只调用一次 Provider-owned logout。其余 demo 用户菜单项延后见 proposal Non-goals。
+
+#### Scenario: 视觉与键盘可用性
+- WHEN 浏览器在桌面和390px窄屏打开登录及四个路由，并切换浅色/深色主题
+- THEN 使用本地构建的统一样式与带来源的设计token，桌面侧栏与主区并排，窄屏导航可达且页面无横向溢出；焦点/禁用/忙碌/错误状态可辨，不请求公网字体或资源
+- AND 退出模态打开时聚焦取消，Tab循环留在框内，Escape关闭并恢复到可用控件；提交中允许关闭窗口以避免网络停滞锁死应用，明确关闭不会撤销已发送的退出请求，重复退出仍被锁定
+- AND 已发送的退出请求优先于普通服务信息读取；退出进行中进入设置页不得中断该请求，服务信息可暂不可用，当前会话的退出成功仍进入登录页
 
 #### Scenario: 四路由可达
 - WHEN 已登录用户依次访问四个路由
@@ -55,7 +61,7 @@ SPA SHALL 以 history 路由提供 `/`、`/files`、`/center`、`/settings` 四�
 ### Requirement: 设置页
 设置页 SHALL 含且仅含两张设置卡：`外观`与`关于`（另有页面标题 `设置`，无 `通用` 卡）。外观卡 SHALL 提供 `浅色`、`深色`、`跟随系统` 三个可访问单选项，默认档为 `跟随系统`；所选值 SHALL 以 production key `workbuddy-theme` 持久化为 `light|dark|system`，并把解析结果 `light|dark` 写到 `document.documentElement[data-theme]`。初始 storage 缺失、未知或读取抛错时 SHALL 选择 system；写入抛错不得破坏当前内存选择或向 UI 抛错，刷新后按可读取值（不可读即 system）重新初始化。system 使用唯一 query `(prefers-color-scheme: dark)`，系统偏好 change 时实时更新；固定 light/dark 不改变。`storage` 事件只在 key 为 `workbuddy-theme` 时同步其他 tab，null/unknown 归一化为 system；所有 listener 在 owner 卸载时移除。`当前生效`行 SHALL 恰为 `当前生效：浅色|深色`。
 
-关于卡 SHALL 在 mount 时经 Provider-owned API operation 请求 `GET /api/info`（relative path、`credentials:"same-origin"`、`cache:"no-store"`），loading 显示 `正在读取服务信息`；只接受恰为 `{name:string,version:string}`、非空 name 且 version 符合共享 semver contract 的 body，成功逐字展示 name 与 `版本 <version>`。非 401 合法错误信封显示其 message；malformed/non-JSON/network 显示 `请求失败，请稍后重试`；current 401 依全局规则清 Principal。About component SHALL 在 effect cleanup 时 abort caller lifecycle signal，Provider SHALL 将其单向链接到自己的 operation controller，故离开设置 route element、更新 Provider operation或 app unmount 任一情况都 abort 传给 fetch 的 signal并移除 linkage；迟到响应不得写 UI/auth state。Provider 不感知 router/location。若 info 被 sibling operation supersede且该 operation 非 401 失败后 authenticated settings 仍 mounted，About SHALL 结束 loading并显示 `请求失败，请稍后重试`，不得永久停在 loading。不得硬编码 demo 的 `WorkBuddy`/`5.3.11` 作为成功 fallback。
+关于卡 SHALL 在 mount 时经 Provider-owned API operation 请求 `GET /api/info`（relative path、`credentials:"same-origin"`、`cache:"no-store"`），但已有退出请求进行中时 Provider SHALL 返回 null，不启动 info operation、不发起该 GET、不打断退出；About 结束 loading 并显示稳定失败提示，退出结束后的新 mount 恢复普通读取。普通读取 loading 显示 `正在读取服务信息`；只接受恰为 `{name:string,version:string}`、非空 name 且 version 符合共享 semver contract 的 body，成功逐字展示 name 与 `版本 <version>`。非 401 合法错误信封显示其 message；malformed/non-JSON/network 显示 `请求失败，请稍后重试`；current 401 依全局规则清 Principal。About component SHALL 在 effect cleanup 时 abort caller lifecycle signal，Provider SHALL 将其单向链接到自己的 operation controller，故离开设置 route element、更新 Provider operation或 app unmount 任一情况都 abort 传给 fetch 的 signal并移除 linkage；迟到响应不得写 UI/auth state。Provider 不感知 router/location。若 info 被 sibling operation supersede且该 operation 非 401 失败后 authenticated settings 仍 mounted，About SHALL 结束 loading并显示 `请求失败，请稍后重试`，不得永久停在 loading。不得硬编码 demo 的 `WorkBuddy`/`5.3.11` 作为成功 fallback。
 
 #### Scenario: 主题切换即时生效
 - WHEN 切换到 `深色`

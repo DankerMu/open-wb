@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect, vi } from "vitest";
+import "./dialog-platform.js";
 import { mountAuthenticatedApp } from "./render-app-router.js";
 import { createFetchMock, jsonResponse } from "./support.js";
 

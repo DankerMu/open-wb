@@ -698,8 +698,8 @@ export function ChatPage() {
   const sendDisabled = generating || draft.trim().length === 0;
 
   return (
-    <section>
-      <h1>会话</h1>
+    <section className="chat-page">
+      <h1 className="ui-page-heading">会话</h1>
       <ConversationView
         composerDisabled={generating}
         composerLabel={COMPOSER_LABEL}

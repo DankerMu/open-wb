@@ -15,6 +15,7 @@ import {
   jsonResponse,
   setBrowserPath,
 } from "./support.js";
+import "./dialog-platform.js";
 
 export type ChatAuthProbe = {
   login(credentials: LoginCredentials): Promise<boolean>;
