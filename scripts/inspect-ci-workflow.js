@@ -12,8 +12,8 @@ const ALLOWED = {
   "gitleaks/gitleaks-action": "v3",
 };
 const WANT = {
-  "actions/checkout@v5": 7,
-  "actions/setup-node@v5": 5,
+  "actions/checkout@v5": 8,
+  "actions/setup-node@v5": 6,
   "astral-sh/setup-uv@v7": 2,
   "gitleaks/gitleaks-action@v3": 1,
 };

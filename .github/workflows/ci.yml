@@ -118,11 +118,38 @@ jobs:
           FAKE_UPSTREAM_PORT: "19017"
         run: bash .github/scripts/ci-compiled-server.sh ui-walk
 
+  uid-isolation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version-file: .tool-versions, cache: npm }
+      - run: npm ci
+      - run: npm run build --workspace web
+      - run: npm run build --workspace server
+      - run: make omp-fetch
+      - run: bash .github/scripts/ci-install-hurl.sh
+      - name: uid-isolation
+        env:
+          HOST: "127.0.0.1"
+          PORT: "18018"
+          SMOKE_BASE_URL: "http://127.0.0.1:18018"
+          DB_PATH: "${{ runner.temp }}/workbuddy-uid-isolation/private/app.db"
+          STATIC_ROOT: "${{ github.workspace }}/smoke/fixtures/static"
+          OMP_BIN: "${{ github.workspace }}/var/omp/omp"
+          OMP_STATE_DIR: "${{ runner.temp }}/workbuddy-uid-isolation/omp-state"
+          SANDBOX_ROOT: "${{ runner.temp }}/workbuddy-uid-isolation/sandbox"
+          MODEL_UPSTREAM_BASE_URL: "http://127.0.0.1:19018/v1"
+          MODEL_UPSTREAM_API_KEY: "fake"
+          FAKE_UPSTREAM_PORT: "19018"
+        run: bash .github/scripts/ci-uid-isolation.sh
+
   all-checks-passed:
     # 聚合门禁：分支保护只指向本 job。skipped 视为失败——GitHub 把 skipped 的
     # required check 当通过，这个洞必须在这里堵死。
     if: always()
-    needs: [fast-checks, unit-tests, anti-drift, secret-scan, sast, smoke, ui-walk]
+    needs: [fast-checks, unit-tests, anti-drift, secret-scan, sast, smoke, ui-walk, uid-isolation]
     runs-on: ubuntu-latest
     steps:
       - name: verify all required jobs succeeded
