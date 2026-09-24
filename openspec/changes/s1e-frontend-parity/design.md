@@ -52,7 +52,7 @@ Grill（2026-09-24，12 项用户拍板）：headless 库 = Radix UI Primitives�
 ## Risks / Trade-offs
 
 - **Radix 引入包体积与升级面**：七个包 tree-shake 后预计 < 60 KB gzip；锁 major，`npm ci` lockfile 约束。收益是焦点/定位/键盘正确性不自己写。
-- **Radix portal 与既有定位器**：dialog/menuitem 不再在 `main` 内；组 1 迁移时一次性改 ui-walk 与 jsdom 定位，tasks 1.6 逐一列出。
+- **Radix portal 与既有定位器**：dialog/menuitem 不再在 `main` 内；组 1 迁移时一次性改 ui-walk 与 jsdom 定位，tasks 1.6a/1.6b 逐一列出。
 - **ui-walk 时长**：Playwright 段 6s → 预计 <20s；`globalTimeout` 150s 留余量；CI 15 分钟不动。
 - **页面级 heading 归属改变**：影响全部 heading 断言（jsdom + ui-walk + spec 文案）；2.2 一次性改完。
 - **`/api/info` 形状变化**是破坏性的严格校验变更：server/web/smoke/测试 fixture 必须同 PR（D7 清单）；无外部消费者。
