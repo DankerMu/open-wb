@@ -6,7 +6,7 @@
 ## 2. Implementation（TDD：先红后绿）
 - [x] 2.1 `web/test/ui-support.ts` 上收 `yieldMacrotask`/`pressPointer`/`ruleBody`，`ui-dialog.test.tsx` 改导入（既有 49 用例仍绿）；新建 `web/test/ui-menu.test.tsx`、`ui-popover-tooltip.test.tsx`、`ui-segmented-control.test.tsx`（design.md Seams M1–M8 / P1–P6 / T1–T6 / S / X / G1–G5）；先红（导入失败）。
 - [x] 2.2 `npm i -w web @radix-ui/react-dropdown-menu @radix-ui/react-popover @radix-ui/react-tooltip @radix-ui/react-radio-group`；`web/src/ui/{menu,popover,tooltip,segmented-control}.{tsx,css}`；`ui/ui.css` +4 `@import`；`index.ts` +4 组件 + `MenuItem` 类型；2.1 转绿。
-- [x] 2.3 反向注入八项各红并回退：`Menu` 去掉 `modal={false}` → (M8) 红；去掉 `loop` → (M3) 红；`Popover` 无条件 `role={contentRole}` → (P1) 红；`Tooltip` 去掉 `Provider` → (T2) 红；不透传 `side` → (T5) 红；`SegmentedControl` 去掉 `aria-label` → (G1) 红；删深色选中规则 → (S) 红；`Tooltip.Provider` 去掉 `disableHoverableContent` → (T6) 红。
+- [x] 2.3 反向注入八项各红并回退：`Menu` 去掉 `modal={false}` → (M8) 红；去掉 `loop` → (M3) 红；`Popover` 无条件 `role={contentRole}` → (P1) 红；`Tooltip` 去掉 `Provider` → (T2) 红；不透传 `side` → (T5) 红；`SegmentedControl` 去掉 `aria-label` → (G1) 红；删深色选中规则 → (S) 红；`Tooltip.Provider` 去掉 `disableHoverableContent` → (T6) 红；修复通道补证：去 `ui-menu` className → (M2) 红、`delayDuration` 0/100 → (T6) 红。
 - [x] 2.4 `ATTRIBUTION.md:37` 追加四个包全名（#278）并把"后续切片安装"改为只剩 toast；`ui-guardrails.test.ts` Radix 包断言绿。
 
 ## 3. Verification

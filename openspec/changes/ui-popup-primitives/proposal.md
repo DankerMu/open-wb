@@ -31,7 +31,7 @@ S1e 组 1 第四刀。既有 `web/src/features/files/dialogs.tsx:84-190` 手写 
 3. demo:561-562 的 `#fff`/`#111` 按 #276 先例替换为 `--wb-text-white`/`--wb-palette-black-90`（ui css 禁 hex）。
 4. `Menu` 用 `modal={false}`：Radix 默认 modal，与 demo:1056 语义不符（外点被吞、页面其它元素被 `aria-hidden`）。
 5. `Tooltip.side` 为 2.1 折叠侧栏预置（默认 `top` 与 Radix 一致）。
-6. Popover z 1300 < Dialog 1400 照搬 demo，对话框内不能开 Popover——S1e 无此消费者。
+6. Popover z 1300 < Dialog 1400 照搬 demo，Dialog（1400）/Drawer（1350/1360）之上不能开 Popover——S1e 无此消费者。
 
 ## Risk triage
 Issue type: feature

@@ -186,12 +186,12 @@ describe("Tooltip side (T5)", () => {
 });
 
 describe("Tooltip hover (T6)", () => {
-  it("pointerMove 后 250ms 仍未显示、350ms 时已显示，pointerLeave 即隐藏", async () => {
+  it("pointerMove 后 150ms 仍未显示、350ms 时已显示，pointerLeave 即隐藏", async () => {
     const trigger = renderTooltip();
     fireEvent.pointerMove(trigger, { pointerType: "mouse" });
-    await waitMs(250);
+    await waitMs(150);
     expect(screen.queryByRole("tooltip")).toBeNull();
-    await waitMs(100);
+    await waitMs(200);
     expect(screen.getByRole("tooltip").textContent).toBe("展开侧栏");
     fireEvent.pointerLeave(trigger);
     await tooltipGone(trigger);
