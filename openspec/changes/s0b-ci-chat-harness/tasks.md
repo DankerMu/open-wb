@@ -16,16 +16,18 @@
 - Domain browser selected only regression of existing journey/error oracle →2.1; new dialogue navigation/reload belongs #106.
 
 ## 1. Atomic implementation
-- [ ] 1.1 Test-only handoff: add exact workflow/Make/script expectations and meaningful runtime/oracle cases before implementation; parent records failing assertions against current behavior, not missing-file-only RED.
-- [ ] 1.2 Single implementer atomically wires pinned fetch, owned upstream, explicit runtime env, chat.hurl and three-file Make smoke; preserve existing contracts and no product changes.
+- [x] 1.1 Test-only handoff preceded production: parent observed missing three-file/workflow/ownership contract; initial malformed Python embedding was setup failure, repaired before accepting semantic RED. Missing launcher was separately classified setup RED.
+- [x] 1.2 Single implementer atomically wired verified fetch, owned upstream, explicit runtime env, chat.hurl and three-file Make smoke; product hashes and smoke-live bytes unchanged.
 
 ## 2. Parent verification
-- [ ] 2.1 Build both apps; record actual omp18.0.10 identity and Hurl8.0.1; run real three-file make smoke twice plus independent chat-only and existing make ui-walk, with exact text/bash/isolation and authentication cleanup observations.
-- [ ] 2.2 Qualify Hurl semantic faults and lifecycle failure/cancel/cleanup oracles in disposable candidates; each required wrong result fails for its intended reason, restoration passes, dedicated stable repeat passes, owned processes gone and unrelated sentinel alive.
-- [ ] 2.3 Run complete make test-guardrails, focused shell/static checks, strict OpenSpec and unchanged four-action inspection; bind oracle/source/toolchain identities and no skipped/relaxed cases.
+- [x] 2.1 Both builds passed; omp/18.0.10 and Hurl8.0.1 recorded. Final real smoke twice passed3/3 files,22 requests each; independent chat-only passed10 requests; existing UI journey passed1/1. SQLite confirms zero auth sessions, done chat and done bash.
+- [x] 2.2 Six semantically bad HTTP fixtures rejected by unchanged chat.hurl; control/multiple steps/shape-empty/restored/stability passed, each prompt POST occurred once. Independent upstream-death counterexample initially returned0, corrected to nonzero; both-mode permanent lifecycle tests and existing cancellation/sentinel cases passed. Post-teardown pinned omp process snapshot empty.
+- [x] 2.3 Complete make test-guardrails passed, CI harness542PASS/0FAIL; shell syntax, four-action inspector, naming/size guards and strict OpenSpec passed. Source/oracle/toolchain identity records retained outside checkout.
 - [ ] 2.4 Expanded independent source review and exact-head required CI pass; source CI must run real fetch/upstream for both jobs.
 
 ## 3. Delivery
 - [ ] 3.1 Merge source, close #105, sync parent6.2 receipt and prepare canonical archive without publishing #106/#107; independent archive PR/CI/merge gates next issue.
 
 User decision: the secrets ban applies to smoke/ui-walk, not existing secret-scan GITHUB_TOKEN. Evidence resides outside the candidate checkout at /tmp/open-wb-issue105-evidence; this is parent-owned evidence plus independent CI, not an OS-enforced enclave claim. Candidate writers run no validation or formatter and cannot edit fixtures/evidence. Parent owns acceptance.
+
+Local evidence: /tmp/open-wb-issue105-evidence. Initial real Hurl run exposed singleton/empty JSONPath count coercion; replaced filter-count with typed JSONPath count predicate plus absence assertion, independently qualified zero/one/many and failed-step cases. Initial parent PATH omitted pinned Node; that startup failure is environment setup evidence, not product failure. Guard quoting/stub regressions took two postimplementation repairs to542PASS. A separate subsequently discovered upstream premature-exit false-green was fixed with a permanent both-mode regression. Writer disclosed extracted Python compile/exec validation contrary to its no-validation brief; those results are not acceptance evidence, parent reran independently. UI dialogue/reload remains #106, control-plane mirrors #107.
