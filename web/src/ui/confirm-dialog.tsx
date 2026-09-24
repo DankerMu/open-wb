@@ -15,6 +15,8 @@ type ConfirmDialogProps = {
   pending?: boolean;
   onConfirm: () => void;
   returnFocus?: RefObject<HTMLElement | null> | undefined;
+  /** 渲染在 `.ui-dialog-body` 的附加内容（如 pending 提示行）；`description` 是 `<p>`，块级内容放这里。 */
+  children?: ReactNode;
 };
 
 /**
@@ -32,6 +34,7 @@ export function ConfirmDialog({
   pending = false,
   onConfirm,
   returnFocus,
+  children,
 }: ConfirmDialogProps) {
   return (
     <DialogFrame
@@ -60,6 +63,8 @@ export function ConfirmDialog({
           {title}
         </>
       }
-    />
+    >
+      {children}
+    </DialogFrame>
   );
 }

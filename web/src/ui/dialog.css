@@ -159,7 +159,9 @@
   .ui-dialog-overlay,
   .ui-dialog,
   .ui-drawer-overlay,
-  .ui-drawer {
+  .ui-drawer,
+  .ui-drawer--left,
+  .ui-drawer--right {
     animation: none;
   }
 }

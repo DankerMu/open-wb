@@ -10,6 +10,10 @@ type FocusTarget = RefObject<HTMLElement | null>;
  * 该事件、再移动焦点，此刻活动元素必是打开者（不能用 effect：子组件 effect 先于父组件跑）。
  * Radix 模态 Content 关闭时只把焦点还给 `Dialog.Trigger`，无 trigger 时落到 body；故「传了
  * `returnFocus`」或「无 trigger」时由本组件拦截并归还 `returnFocus ?? 打开者`，否则交给 Radix。
+ *
+ * 调用方指定初始焦点只能走 `initialFocus`，禁止在内容里用 React `autoFocus`：挂载时焦点若已在容器内，
+ * FocusScope 不派发 `onMountAutoFocus`（即不触发 `onOpenAutoFocus`），打开者记录不会更新而停留在
+ * 上一次打开时的旧值，关闭后焦点会被归还到错误元素。
  */
 export function useFocusHandoff({
   initialFocus,
@@ -44,7 +48,10 @@ type DialogProps = {
   title: ReactNode;
   description?: ReactNode;
   size?: "sm" | "md" | undefined;
-  /** 打开时改聚焦该元素（默认聚焦内容内首个可聚焦控件）。 */
+  /**
+   * 打开时改聚焦该元素（默认聚焦内容内首个可聚焦控件）。必须用它而非 React `autoFocus`：焦点已在
+   * 容器内时 FocusScope 不派发 `onMountAutoFocus`，打开者记录会过期，关闭后焦点归还错位。
+   */
   initialFocus?: FocusTarget | undefined;
   /** 关闭后焦点归还目标；未传且无 `trigger` 时归还打开瞬间的活动元素，有 `trigger` 时由 Radix 归还 trigger。 */
   returnFocus?: FocusTarget | undefined;

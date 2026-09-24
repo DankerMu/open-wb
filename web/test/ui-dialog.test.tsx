@@ -80,6 +80,28 @@ function TriggerHarness() {
   );
 }
 
+/** 同上，另传 returnFocus 指向对话框外的另一个按钮：此时由本组件拦截归还，不交给 Radix。 */
+function TriggerReturnFocusHarness() {
+  const [open, setOpen] = useState(false);
+  const other = useRef<HTMLButtonElement>(null);
+  return (
+    <>
+      <button ref={other} type="button">
+        其他
+      </button>
+      <Dialog
+        onOpenChange={setOpen}
+        open={open}
+        returnFocus={other}
+        title="新建"
+        trigger={<button type="button">打开对话框</button>}
+      >
+        <input aria-label="名称" />
+      </Dialog>
+    </>
+  );
+}
+
 function InitialFocusProbe() {
   const second = useRef<HTMLButtonElement>(null);
   return (
@@ -336,8 +358,8 @@ describe("Dialog：焦点归还 (6)", () => {
     await waitFor(() => expect(activeElement()).toBe(other));
   });
 
-  it("有 trigger、无 returnFocus（点击打开、未聚焦 trigger）：由 Radix 归还 trigger", async () => {
-    render(<TriggerHarness />);
+  /** 点击 trigger 打开（焦点从 body 出发、未聚焦 trigger）→ 断言已打开 → Escape 关闭；返回 trigger。 */
+  function openViaTriggerThenEscape() {
     const trigger = screen.getByRole("button", { name: "打开对话框" });
     expect(activeElement()).toBe(document.body);
     fireEvent.click(trigger);
@@ -345,7 +367,21 @@ describe("Dialog：焦点归还 (6)", () => {
     expect(activeElement()).toBe(closeButton());
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
+    return trigger;
+  }
+
+  it("有 trigger、无 returnFocus（点击打开、未聚焦 trigger）：由 Radix 归还 trigger", async () => {
+    render(<TriggerHarness />);
+    const trigger = openViaTriggerThenEscape();
     await waitFor(() => expect(activeElement()).toBe(trigger));
+  });
+
+  it("有 trigger 且传 returnFocus：关闭后焦点归还 returnFocus 而非 trigger", async () => {
+    render(<TriggerReturnFocusHarness />);
+    const other = screen.getByRole("button", { name: "其他" });
+    const trigger = openViaTriggerThenEscape();
+    await waitFor(() => expect(activeElement()).toBe(other));
+    expect(activeElement()).not.toBe(trigger);
   });
 });
 
@@ -425,6 +461,29 @@ describe("ConfirmDialog (7)", () => {
     expect(onOpenChange).not.toHaveBeenCalled();
     fireEvent.keyDown(document, { key: "Escape" });
     expect(onOpenChange).toHaveBeenCalledExactlyOnceWith(false);
+  });
+
+  it("children 渲染在 .ui-dialog-body 内（可放块级 <p>），无 DOM 嵌套告警", async () => {
+    const error = vi.spyOn(console, "error");
+    render(
+      <ConfirmDialog
+        confirmText="退出"
+        description="确认退出当前账号？"
+        onConfirm={() => {}}
+        onOpenChange={() => {}}
+        open
+        pending
+        title="退出登录？"
+      >
+        <p>退出请求已发送</p>
+      </ConfirmDialog>,
+    );
+    await yieldMacrotask();
+    const hint = screen.getByText("退出请求已发送");
+    expect(hint.tagName).toBe("P");
+    expect(hint.parentElement?.classList.contains("ui-dialog-body")).toBe(true);
+    expect(screen.getByRole("alertdialog").contains(hint)).toBe(true);
+    expect(error).not.toHaveBeenCalled();
   });
 
   it("returnFocus 透传：关闭后焦点回到其指向元素", async () => {
@@ -523,7 +582,7 @@ describe("静态契约 (9)", () => {
     expect(ruleBody(dialogCss(), selector)).toMatch(pattern);
   });
 
-  it("reduced-motion 块把四个覆盖层选择器置为 animation: none", () => {
+  it("reduced-motion 块把覆盖层与两侧抽屉选择器（六个）置为 animation: none", () => {
     const reduced = blockBody(dialogCss(), /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{/);
     const rules = [...reduced.matchAll(/([^{}]+)\{([^}]*)\}/g)].map(
       ([, selectors = "", body = ""]) => ({
@@ -531,7 +590,14 @@ describe("静态契约 (9)", () => {
         body,
       }),
     );
-    for (const name of [".ui-dialog-overlay", ".ui-dialog", ".ui-drawer-overlay", ".ui-drawer"]) {
+    for (const name of [
+      ".ui-dialog-overlay",
+      ".ui-dialog",
+      ".ui-drawer-overlay",
+      ".ui-drawer",
+      ".ui-drawer--left",
+      ".ui-drawer--right",
+    ]) {
       const covering = rules.filter(
         (rule) => rule.selectors.includes(name) && /animation:\s*none/.test(rule.body),
       );
