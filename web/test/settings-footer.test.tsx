@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthGuard, AuthProvider, useAuth } from "../src/features/auth/index.js";
 import { createAppRouter } from "../src/routes/index.js";
 import "./dialog-platform.js";
+import "./radix-platform.js";
 import {
   createFetchMock,
   currentLocation,
@@ -16,6 +17,7 @@ import {
   setBrowserPath,
   unauthorizedResponseCases,
 } from "./support.js";
+import { readRepoFile } from "./ui-support.js";
 
 function createAuthenticatedFetch(
   infoResponse: Error | Response | Promise<Response> = jsonResponse(serviceInfo),
@@ -56,7 +58,7 @@ async function expectLoginAt(path: string) {
 }
 
 function getFooter() {
-  return screen.getByRole("complementary", { name: "侧栏" });
+  return screen.getByRole("complementary", { name: "侧栏", hidden: true });
 }
 
 function openLogoutDialog() {
@@ -587,6 +589,7 @@ describe("authenticated sidebar footer", () => {
         exact: true,
       }),
     ).toBeTruthy();
+    expect(within(dialog).queryByText("退出请求已发送，关闭窗口不会撤销请求。")).toBeNull();
     fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
 
     expect(screen.queryByRole("alertdialog")).toBeNull();
@@ -603,15 +606,15 @@ describe("authenticated sidebar footer", () => {
     await expectAuthenticatedShell("/files");
     const trigger = within(getFooter()).getByRole("button", { name: "退出登录" });
     fireEvent.click(trigger);
-    const dialog = screen.getByRole("alertdialog") as HTMLDialogElement;
+    const dialog = screen.getByRole("alertdialog");
 
-    expect(dialog.open).toBe(true);
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
     expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "取消" }));
-    fireEvent(dialog, new Event("cancel", { cancelable: true }));
+    fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
 
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(fetchMock.mock.calls.filter(([path]) => path === "/api/auth/logout")).toHaveLength(0);
-    expect(document.activeElement).toBe(trigger);
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
 
   it("dismisses a pending logout without duplicating or cancelling the owned request", async () => {
@@ -623,13 +626,19 @@ describe("authenticated sidebar footer", () => {
 
     renderApp("/files");
     await expectAuthenticatedShell("/files");
-    const dialog = openLogoutDialog() as HTMLDialogElement;
+    const dialog = openLogoutDialog();
     fireEvent.click(within(dialog).getByRole("button", { name: "退出" }));
-    fireEvent(dialog, new Event("cancel", { cancelable: true }));
+    expect(within(dialog).getByRole("button", { name: "关闭" })).toBeTruthy();
+    expect(within(dialog).getByText("退出请求已发送，关闭窗口不会撤销请求。")).toBeTruthy();
+    fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
 
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(screen.getByRole("heading", { level: 1, name: "工作空间" })).toBeTruthy();
     expect(fetchMock.mock.calls.filter(([path]) => path === "/api/auth/logout")).toHaveLength(1);
+    const aside = getFooter().closest("aside") ?? getFooter();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(within(aside).getByRole("link", { current: "page" })),
+    );
     pendingLogout.resolve(new Response(null, { status: 204 }));
     await expectLoginAt("/files");
   });
@@ -652,7 +661,9 @@ describe("authenticated sidebar footer", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(confirm.disabled).toBe(true);
     expect(
-      within(getFooter()).getByRole("button", { name: "退出登录" }).hasAttribute("disabled"),
+      within(getFooter())
+        .getByRole("button", { name: "退出登录", hidden: true })
+        .hasAttribute("disabled"),
     ).toBe(true);
     pendingLogout.resolve(new Response(null, { status: 204 }));
 
@@ -729,5 +740,20 @@ describe("authenticated sidebar footer", () => {
     fireEvent.click(within(openLogoutDialog()).getByRole("button", { name: "退出" }));
     await expectLoginAt(requestedPath);
     expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe("迁移静态契约", () => {
+  it("auth 退出确认只经 ConfirmDialog，旧 <dialog> 与样式已移除", () => {
+    const footer = readRepoFile("web/src/features/auth/footer.tsx");
+    for (const legacy of ["lib/dialog", "<dialog", "showModal", "trapDialogFocus"]) {
+      expect(footer).not.toContain(legacy);
+    }
+    expect(footer).toContain("ConfirmDialog");
+    expect(footer).toContain("returnFocus");
+    expect(readRepoFile("web/src/styles.css")).not.toContain(".logout-dialog");
+    for (const file of ["web/test/settings-footer.test.tsx", "web/test/render-app-router.tsx"]) {
+      expect(readRepoFile(file)).toMatch(/^import "\.\/radix-platform\.js";$/m);
+    }
   });
 });
