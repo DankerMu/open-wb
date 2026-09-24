@@ -4,6 +4,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  CircleCheck,
   Copy,
   FileCode,
   File as FileIcon,
@@ -58,6 +59,7 @@ const ICONS = {
   "log-out": LogOut,
   "triangle-alert": TriangleAlert,
   info: Info,
+  "circle-check": CircleCheck,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

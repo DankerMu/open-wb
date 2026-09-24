@@ -65,6 +65,30 @@ describe("颜色 grep 守卫", () => {
   });
 });
 
+describe("依赖方向 grep 守卫", () => {
+  /** 静态 `from "@radix-ui/…"` 与动态 `import("@radix-ui/…")`。 */
+  const RADIX_IMPORT_PATTERNS = [/from\s+["']@radix-ui\//, /import\(\s*["']@radix-ui\//];
+  const radixHits = (text: string) => lineHits(text, RADIX_IMPORT_PATTERNS);
+
+  it("正则命中静态与动态 @radix-ui import，不命中基元出口", () => {
+    expect(radixHits('import * as X from "@radix-ui/react-toast";')).toHaveLength(1);
+    expect(radixHits("import { Root } from '@radix-ui/react-dialog';")).toHaveLength(1);
+    expect(radixHits('const X = await import("@radix-ui/react-toast");')).toHaveLength(1);
+    expect(radixHits('import { X } from "../../ui/index.js";')).toEqual([]);
+  });
+
+  it("features/routes 的 .ts/.tsx 不直接 import @radix-ui（仅 web/src/ui 可以）", () => {
+    const source = (path: string) => /\.tsx?$/.test(path);
+    const paths = [
+      ...listRepoFiles("web/src/features", source),
+      ...listRepoFiles("web/src/routes", source),
+    ];
+    expect(paths.length).toBeGreaterThan(0);
+    expect(paths.some((path) => path.startsWith("web/src/ui/"))).toBe(false);
+    expect(hitsIn(paths, radixHits)).toEqual([]);
+  });
+});
+
 describe("motion.css", () => {
   const UTILITIES = ["ui-fadein", "ui-pop", "ui-pulse", "ui-caret", "ui-spin"];
   const KEYFRAMES = ["wb-fadein", "wb-pop", "wb-pulse", "wb-caret", "wb-spin", "wb-drawer-in"];
