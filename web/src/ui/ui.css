@@ -1,5 +1,12 @@
 /* Primitive component styles (Icon sizing, BrandMark). Colors come only from
-   semantic tokens in ../styles/tokens.css. */
+   semantic tokens in ../styles/tokens.css; form primitives may also map
+   --wb-palette-* (the primitives layer is the palette → component boundary). */
+
+@import "./button.css";
+@import "./input.css";
+@import "./switch.css";
+@import "./tag.css";
+@import "./chip.css";
 
 .ui-icon {
   display: inline-block;

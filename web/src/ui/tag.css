@@ -1,0 +1,42 @@
+/* Tag — adapted from resource/workbuddy-live-demo.html:599-604 (.tag，含 :601 深色 brand 文字色)。 */
+
+.ui-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid var(--wb-border-default);
+  border-radius: 6px;
+  background: var(--wb-bg-secondary);
+  color: var(--wb-text-secondary);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.ui-tag--brand {
+  border-color: transparent;
+  background: var(--wb-brand-primary-subtle);
+  color: var(--wb-brand-primary-deep);
+}
+
+[data-theme="dark"] .ui-tag--brand {
+  color: var(--wb-brand-primary);
+}
+
+.ui-tag--success {
+  border-color: transparent;
+  background: var(--wb-status-success-soft-bg);
+  color: var(--wb-status-success-text);
+}
+
+.ui-tag--warning {
+  border-color: transparent;
+  background: var(--wb-status-warning-soft-bg);
+  color: var(--wb-status-warning-text);
+}
+
+.ui-tag--error {
+  border-color: transparent;
+  background: var(--wb-status-error-soft-bg);
+  color: var(--wb-status-error-text);
+}

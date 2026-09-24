@@ -1,0 +1,58 @@
+/* Switch (Radix Root + Thumb) — adapted from resource/workbuddy-live-demo.html:614-619 (.switch)。
+   demo thumb 阴影的字面半透明黑映射为 --wb-palette-black-20（见 design.md）；
+   选中态由 Radix 的 data-state 驱动。 */
+
+.ui-switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 32px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 99px;
+  background: var(--wb-palette-black-20);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+[data-theme="dark"] .ui-switch {
+  background: var(--wb-palette-white-20);
+}
+
+.ui-switch[data-state="checked"] {
+  background: var(--wb-brand-primary);
+}
+
+.ui-switch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 重申圆角，压过 styles.css 全局 :focus-visible 的 4px（outline 沿用全局）。 */
+.ui-switch:focus-visible {
+  border-radius: 99px;
+}
+
+.ui-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  display: block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--wb-palette-white-100);
+  box-shadow: 0 1px 2px var(--wb-palette-black-20);
+  transition: left 0.15s ease;
+}
+
+.ui-switch-thumb[data-state="checked"] {
+  left: 16px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-switch,
+  .ui-switch-thumb {
+    transition: none;
+  }
+}
