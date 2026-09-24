@@ -1,0 +1,95 @@
+/* Motion primitives — keyframes adapted from resource/workbuddy-live-demo.html:219-224
+   (wb-spin/wb-pulse/wb-fadein/wb-pop/wb-caret) and :774 (wb-drawer-in); durations
+   follow the demo's usages (.user-msg-row, .modal, .stream-caret, .conv-item-status,
+   .spin). demo 未使用的 wb-float/wb-shimmer 不移植。Visual language from WorkBuddy
+   5.3.11 via the demo, see ATTRIBUTION.md §4. */
+
+@keyframes wb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes wb-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@keyframes wb-fadein {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes wb-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes wb-caret {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes wb-drawer-in {
+  from {
+    transform: translateX(40px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.ui-fadein {
+  animation: wb-fadein 0.25s ease;
+}
+
+.ui-pop {
+  animation: wb-pop 0.2s ease;
+}
+
+.ui-pulse {
+  animation: wb-pulse 1.2s infinite;
+}
+
+.ui-caret {
+  animation: wb-caret 0.9s infinite;
+}
+
+.ui-spin {
+  animation: wb-spin 1s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-fadein,
+  .ui-pop,
+  .ui-pulse,
+  .ui-caret,
+  .ui-spin {
+    animation: none;
+    transition: none;
+  }
+}

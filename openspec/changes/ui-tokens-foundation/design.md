@@ -1,0 +1,26 @@
+# Design: ui-tokens-foundation（#275）
+
+Change surface: `web/src/styles.css`（共享全局样式入口，被 `main.tsx` 间接引用）、新 `web/src/styles/tokens.css`、新 `web/src/ui/{icon.tsx,brand-mark.tsx,motion.css,index.ts}`、`web/package.json`、`ATTRIBUTION.md`、`web/src/features/chat/chat.css`（仅头注释）。
+
+Must preserve: 既有 `styles.css:10-31,33` 的 21 个变量（`--wb-brand-primary`、`--wb-brand-primary-subtle`、`--wb-brand-primary-deep`、`--wb-bg-primary`、`--wb-bg-secondary`、`--wb-sidebar-bg`、`--wb-text-primary/secondary/tertiary`、`--wb-border-default`、`--wb-status-success`、`--wb-status-error`、`--wb-status-error-text`、`--wb-status-error-soft-bg`、`--wb-shadow-dialog`、`--wb-overlay`、`--wb-font`、`--wb-mono`、`--wb-bg-hover`、`--wb-bg-active`、`--wb-scrollbar-thumb`；暗色块 `38-55,57` 同名）在 demo 中全部存在且值仅格式不同（唯一例外：demo 暗色块未定义 `--wb-status-error-soft-bg`，名集合规则要求删除本仓的暗色覆盖值 `rgba(240,92,92,.16)`，暗色下 `.ui-alert` 背景改为继承 `:root` 的 `rgba(246,64,65,.1)`，即与 demo 一致；记入 PR 偏离记录）——保留的含义是**计算颜色相同**（demo 里 `--wb-brand-primary`、`--wb-bg-primary` 等由字面值改为 `var(--wb-palette-*)` 间接引用，允许）；三份 feature css 与 styles.css 页面规则继续解析到相同颜色；`styles.css:86,118,419,429` 四处 `--wb-home-bg`/`--wb-control-bg` 引用改为 `--wb-home-bg-primary`/`--wb-color-bg-input`（demo 值与本仓既有值逐位相同）；`[data-theme="dark"]` 由 `document.documentElement` 承载不变；`.brand-mark` 现有对勾图形与登录/侧栏用法在本切片不改（BrandMark 组件先并存，消费者迁移归 #281/#284/#300）；`web/test` 全部既有用例、`make ui-walk` 全 journey、`make smoke` 不变；`--wb-font` 仍为系统栈。
+
+Must add/change: tokens.css 两块与 demo:19-107 / 108-188 **归一化后**逐名逐值相等。归一化（测试对两侧同样施加）：去掉 `/* */` 注释、把折行值合并为一行、`\s+` 折为单空格再删除 `,`/`(`/`)`/`:` 两侧空格、hex 小写、数字字面量 `\d*\.\d+` 经 `String(Number(x))` 规范化（`.9`→`0.9`、`.10`→`0.1`、`0.10`→`0.1`；无损，biome 既补前导零也去尾零）。唯一豁免 `--wb-font-heading`：期望值 = 归一化后的 demo 值去掉前缀 `Poppins,`。六个补定变量固定为：`--wb-palette-black-60: rgba(0,0,0,.6)`、`--wb-palette-white-10: rgba(255,255,255,.1)`、`--wb-palette-white-20: rgba(255,255,255,.2)`、`--wb-palette-white-60: rgba(255,255,255,.6)`（调色板层与 demo 其它 palette 变量一样在 `:root` 与 `[data-theme="dark"]` 两块同值出现）、`--wb-text-white: var(--wb-palette-white-100)`（两块同值；demo:348/350 用于 `--wb-bg-pill-active` 深底上的文字，与 `--wb-pill-active-fg` 同值）、`--wb-home-composer-chip-bg-hover`: 浅色 `var(--wb-palette-gray-3)`、深色 `var(--wb-bg-hover)`（demo:355 chip 底色为 `--wb-bg-primary`，hover 取与 `--wb-bg-hover-light` 同档的浅灰；深色无 `--wb-bg-hover-light` 定义，取通用 hover），测试断言这六个值而非仅存在；`--wb-home-bg`/`--wb-control-bg` 删除（不迁入），消费者改用 demo 等价 token；`Icon`/`BrandMark`/motion/index 四文件；styles.css 只留 reset/骨架/页面规则并 `@import` 两个新文件；lucide-react 依赖与 ATTRIBUTION 条目。
+
+Governing invariant: feature/routes/ui 代码的任何颜色值都来自 `tokens.css` 的语义层——不出现字面颜色与 `--wb-palette-*`；`web/src/**/*.css` 引用的每个 `var(--wb-*)` 都在 tokens.css 有定义；token 名/值对 demo 归一化后逐字可追溯。已知例外（本切片不改、留给页面对齐 issue）：`styles.css:197` `color: #fff` 与 `styles.css:607-615` 主题色板 hex（外壳/设置页规则，不在守卫范围内；#284 设置页分段控件切片处理）。
+
+Sibling surfaces: `web/src/features/chat/chat.css`、`web/src/features/files/files.css`（消费者，grep 守卫覆盖）；`web/src/routes/**`（外壳样式仍在 styles.css，守卫覆盖 tsx）；`web/test/theme*.test.ts`（`data-theme` 语义不变）；`index.html`（无 `<link>` 字体）；knip/biome（新文件纳入 lint 与死代码检查）；`resource/workbuddy-live-demo.html:19-188`（只读 oracle，不改）。
+
+Seams under test: (1) 静态文本 oracle：读取 demo 与 tokens.css 两块，归一化后解析成 `Map<name,value>` 比较，另断言六个补定值；(1b) 未定义引用 oracle：`web/src/**/*.css` 全部 `var\(--wb-[a-z0-9-]+` 的名集合 ⊆ tokens.css 定义名集合；(2) 静态 grep oracle：`web/src/features/**/*.css`、`web/src/features/**/*.tsx`、`web/src/routes/**` 无 `#[0-9a-fA-F]{3,8}\b`、`rgba?\(`、`--wb-palette-`；`web/src/ui/**/*.tsx` 无 `style={`；(2b) `ATTRIBUTION.md` 文本含 `lucide` 与 `ISC`、`Radix` 与 `MIT`；(3) `motion.css` 文本：reduced-motion 块内每个 `ui-fadein|ui-pop|ui-pulse|ui-caret|ui-spin` 含 `animation: none` 与 `transition: none`；(4) RTL：`Icon` 默认 `aria-hidden="true"`、传 `label` 时 `role="img"` + 可访问名、size 类名；`BrandMark` 渲染 svg + 可选字标文本；(5) 构建产物 grep 无 `Poppins`/`fonts.googleapis`。
+
+Required evidence:
+- token 对照测试：输入 demo 两块 + tokens.css 两块 → 归一化后每个 demo 变量名在对应块存在且值相等；`--wb-font-heading` 期望为归一化 demo 值去掉前缀 `Poppins,`；六个补定变量值等于上文固定值。人为改错一个值（如 `#dff7f2`→`#dff7f3`）→ 红；把 `rgba(0, 0, 0, 0.9)` 与 demo `rgba(0,0,0,.9)` 对照 → 绿；`rgba(15, 23, 42, 0.1)` 与 demo `rgba(15,23,42,.10)` 对照 → 绿（归一化生效）。名集合双向相等：tokens.css 每块的变量名集合 == demo 对应块名集合 ∪ 六个补定名；向 tokens.css 加回 `--wb-home-bg` → 红。
+- 未定义引用守卫：当前树 → 引用集合 ⊆ 定义集合；把 styles.css 某处改回 `var(--wb-home-bg)` → 红。
+- grep 守卫：当前树 → 零命中（含清理后的 chat.css:5）；向 files.css 注入 `color: #123456` → 红；注入 `background: rgba(0,0,0,.5)` → 红；向 `ui/icon.tsx` 注入 `style={{}}` → 红。
+- ATTRIBUTION 断言：删除 lucide 行 → 红。
+- motion 文本：删除 reduced-motion 块中任一类 → 红。
+- Icon：`<Icon name="folder" />` → `svg[aria-hidden="true"]`；`<Icon name="folder" label="目录" />` → `role="img"` 且名为 `目录`；`size={12}` → 类名 `ui-icon-12`。BrandMark：`<BrandMark />` → svg 无字标；`<BrandMark wordmark />` → 文本 `WorkBuddy`。
+- `make check` exit 0；`npm run build --workspace web` 后 `grep -r "Poppins\|fonts.googleapis" web/dist` 零命中；`make ui-walk` 全绿。
+
+Non-goals: Radix 组件、任何组件迁移、页面视觉变化、Tooltip/Drawer、夹具、`ui-walk` 的 reduced-motion 断言（#295）。
+
+Review focus: (1) tokens.css 与 demo 的对照是否真的覆盖两块全部 163 行而非抽样，归一化是否只消格式差异而不吞值差异；(2) styles.css 收缩后没有丢失任何既有规则（diff 应只是移动 + import + 四处变量改名）；(3) grep 守卫的正则不误伤（`#root`/`#app` id 选择器不匹配 `#[0-9a-fA-F]{3,8}\b` 需用词边界或排除选择器上下文；`rgba(` 只在 tokens.css 允许）且不放过 tsx 内联颜色；(4) `Icon` 映射不逐个再导出 lucide 图标（knip/包体积）；(5) ATTRIBUTION 条目放在正确章节且不改第 4 节的许可边界。
