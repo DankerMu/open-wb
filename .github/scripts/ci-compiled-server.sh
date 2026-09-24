@@ -8,7 +8,7 @@ case "$mode" in
 esac
 : "${HOST:?}" "${PORT:?}" "${DB_PATH:?}" "${STATIC_ROOT:?}" "${OMP_BIN:?}" "${OMP_STATE_DIR:?}" "${SANDBOX_ROOT:?}" "${MODEL_UPSTREAM_BASE_URL:?}" "${MODEL_UPSTREAM_API_KEY:?}" "${FAKE_UPSTREAM_PORT:?}" "${RUNNER_TEMP:?}"
 start_wait="${CI_START_WAIT:-0.1}"; ready_attempts="${CI_READY_ATTEMPTS:-40}"
-ready_sleep="${CI_READY_SLEEP:-0.25}"; term_wait="${CI_TERM_WAIT:-20}"; kill_wait="${CI_KILL_WAIT:-8}"
+ready_sleep="${CI_READY_SLEEP:-0.25}"; term_wait="${CI_TERM_WAIT:-40}"; kill_wait="${CI_KILL_WAIT:-8}"
 for v in "$ready_attempts" "$term_wait" "$kill_wait"; do case "$v" in ''|*[!0-9]*) echo "invalid bound" >&2; exit 2 ;; esac; done
 for v in "$start_wait" "$ready_sleep"; do case "$v" in ''|*[!0-9.]*|*.*.*) echo "invalid bound" >&2; exit 2 ;; esac; done
 [ "$prove_hurl" -eq 1 ] && { command -v hurl >/dev/null; hurl --version; }
@@ -43,11 +43,23 @@ reap() {
   stop "$hpid"; stop "$upid"; { galive "$hpid" || alive "$hpid"; } || hpid=""
   { galive "$upid" || alive "$upid"; } || upid=""
   [ -n "$pid" ] || return 0
-  if alive "$pid"; then
-    if kill -TERM "$pid" 2>/dev/null; then wrapper_term=1; wait_until "$term_wait" alive "$pid"; fi
-    alive "$pid" && { killed=1; cleanup_rc=1; echo "cleanup failed: KILL escalation for PID ${pid}" >&2; kill -KILL "$pid" 2>/dev/null || true; wait_until "$kill_wait" alive "$pid"; }
+  if galive "$pid" || alive "$pid"; then
+    if galive "$pid"; then
+      if kill -TERM -- "-$pid" 2>/dev/null; then wrapper_term=1; fi
+    elif kill -TERM "$pid" 2>/dev/null; then
+      wrapper_term=1
+    fi
+    wait_until "$term_wait" galive "$pid"
+    wait_until "$term_wait" alive "$pid"
+    if galive "$pid" || alive "$pid"; then
+      killed=1; cleanup_rc=1; echo "cleanup failed: KILL escalation for PGID ${pid}" >&2
+      kill -KILL -- "-$pid" 2>/dev/null || true
+      kill -KILL "$pid" 2>/dev/null || true
+      wait_until "$kill_wait" galive "$pid"
+      wait_until "$kill_wait" alive "$pid"
+    fi
   fi
-  if alive "$pid"; then echo "cleanup failed: PID ${pid} still present" >&2; cleanup_rc=1; return; fi
+  if galive "$pid" || alive "$pid"; then echo "cleanup failed: PGID ${pid} still present" >&2; cleanup_rc=1; return; fi
   if wait "$pid" 2>/dev/null; then wait_rc=0; else wait_rc=$?; fi; pid=""
   if [ "$killed" -eq 1 ]; then cleanup_rc=1
   elif [ "$wrapper_term" -eq 1 ]; then [ "$wait_rc" -eq 0 ] || { echo "cleanup failed: server exited with status ${wait_rc}" >&2; cleanup_rc=1; }
@@ -80,8 +92,10 @@ if [ "$ready_up" -ne 1 ]; then
   else echo "upstream exited before readiness (pid ${upid})" >&2; fi
   dump_logs; primary_rc=1; exit 1
 fi
+set -m
 node server/dist/server.js >"$log" 2>&1 &
-pid=$!; honor_cancel; sleep "$start_wait"; honor_cancel
+pid=$!; honor_cancel; set +m; sleep "$start_wait"; honor_cancel
+if ! galive "$pid"; then echo "app PGID contract failed (pid ${pid})" >&2; cleanup_rc=1; fi
 if ! alive "$pid"; then dead_pid=$pid; wait "$pid" 2>/dev/null || true; pid=""; echo "server exited early (pid ${dead_pid})" >&2; dump_logs; primary_rc=1; exit 1; fi
 ready=0; attempts=0
 while [ "$attempts" -lt "$ready_attempts" ]; do
