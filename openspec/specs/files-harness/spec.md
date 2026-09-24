@@ -2,9 +2,7 @@
 
 ## Purpose
 Provide tracked sandbox inputs and repeatable independent HTTP evidence for workspace ownership, directory conflicts, traversal auditing and safe file previews on caller-owned running services.
-
 ## Requirements
-
 ### Requirement: 沙箱夹具与 files.hurl
 仓库 SHALL 跟踪 `smoke/fixtures/sandbox/u1/smoke-fixture/{readme.md, notes.csv, logo.png}`（readme 含一个 `# ` 标题；csv 表头 + 2 行；png 为最小合法 PNG）。`smoke/files.hurl` SHALL 从空 cookie store 独立可运行且**可重复**（Hurl 无条件分支，重复性以宽容状态码表达）：登录 zhangsan → `POST /api/workspaces {name:"smoke-fixture"}` 断言 status ∈ {201,409}（首跑 201 采用夹具目录，重跑 409）→ `GET /api/workspaces` 以 `captures` 按 name 取 id → `tree` 的 file 类条目包含 `readme.md`、`notes.csv`、`logo.png` → `POST dirs {path:"out"}` 断言 status ∈ {201,409} → 再次 `POST dirs {path:"out"}` 精确 409 `conflict` → `tree?path=../..` 403 `sandbox_denied` → `GET /api/audit?limit=1` 的 `events[0].kind == "sandbox.reject"` → `file?path=readme.md` 200 精确字节 + `text/plain; charset=utf-8` + `nosniff` → `file?path=logo.png` 200 `image/png` → `file?path=notes.csv` 200 → 登出、以 lisi 登录 → 对该空间 `tree` 404 → 登出。`make smoke` SHALL 执行 `public.hurl auth.hurl chat.hurl files.hurl` **四个**文件；`files.hurl` 只在 caller 已把夹具复制到 `<SANDBOX_ROOT>/u1/` 时成立（本切片由两个既有 CI harness job 的共享脚本负责，未来 uid-isolation job 由 #132 负责；本地由 caller 负责，Makefile `smoke` 头注释写明 `cp -R smoke/fixtures/sandbox/u1 <SANDBOX_ROOT>/`）。
 
@@ -15,3 +13,15 @@ Provide tracked sandbox inputs and repeatable independent HTTP evidence for work
 #### Scenario: 拒绝记录与当前请求一致
 - WHEN the owner records the latest audit state before requesting tree with literal path ../.. and immediately queries audit limit1 afterward
 - THEN the newest event SHALL be demonstrably new relative to that pre-request state and have sandbox.reject kind, the captured workspace identity and detail relPath ../.. / op list; even an identical retained rejection from the previous run SHALL NOT satisfy the oracle
+
+### Requirement: 走查 /files 步骤
+`make ui-walk` SHALL extend the existing serial journey after four-route traversal and before dialogue with real UI selection or creation of smoke-fixture. The caller SHALL supply tracked readme.md/notes.csv/logo.png and an absent walk-out in an owned fresh sandbox. The journey SHALL wait for loaded workspace selection and actual root file entries, assert rendered smoke-fixture heading and numbered Markdown source containing # smoke-fixture, and assert CSV name/value headers, alpha/1 and beta/2 plus two data rows. It SHALL create walk-out at root through the UI and assert a directory row. Reload SHALL retain the same nonempty ws ID, selected workspace and loaded files/walk-out. Existing browser/auth error accounting SHALL remain exact; no existing directory may substitute for creation proof.
+
+#### Scenario: 文件面走查全绿
+- **WHEN** local or CI runs the full journey against caller-owned real compiled server, tracked fixtures and real omp/fake-upstream
+- **THEN** files selection/creation, exact previews, root creation and same-workspace reload all pass, with exactly the existing two unauthorized auth/me events and zero unexpected console/page errors
+
+#### Scenario: 错误预览内容不可假绿
+- **WHEN** an isolated caller-owned fixture has an incorrect Markdown heading
+- **THEN** the real journey fails its preview assertion; restoring tracked bytes restores the full journey without weakening the error oracle
+
