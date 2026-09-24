@@ -10,6 +10,7 @@ import {
   FileText,
   Folder,
   Image as ImageIcon,
+  Info,
   LayoutGrid,
   LogOut,
   type LucideIcon,
@@ -23,6 +24,7 @@ import {
   Shield,
   Table,
   Terminal,
+  TriangleAlert,
   Wrench,
   X,
 } from "lucide-react";
@@ -54,6 +56,8 @@ const ICONS = {
   "panel-left": PanelLeft,
   "arrow-down": ArrowDown,
   "log-out": LogOut,
+  "triangle-alert": TriangleAlert,
+  info: Info,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;
