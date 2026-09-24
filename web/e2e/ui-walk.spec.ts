@@ -23,6 +23,8 @@ const WALK_MARKER = "WORKBUDDY_UI_WALK:";
 const FIRST_REPLY_PART = "你好，";
 const EXPECTED_REPLY = "你好，这是 WorkBuddy 的第一条流式回复。";
 const SESSION_ID = /^[0-9a-f]{32}$/;
+const SMOKE_FIXTURE = "smoke-fixture";
+const WALK_OUT = "walk-out";
 
 const ROUTES = [
   { path: "/", heading: "会话", label: "会话" },
@@ -70,6 +72,10 @@ async function walkProductionOrigin(page: Page, oracle: AuthOracle): Promise<voi
     await expectAuthenticatedRoute(page, route.path, route.heading, route.label);
     await expectPrincipalFooter(page);
   }
+
+  await sidebarLink(navigation, "工作空间").click();
+  await expectAuthenticatedRoute(page, "/files", "工作空间", "工作空间");
+  await walkFiles(page);
 
   await sidebarLink(navigation, "会话").click();
   await expectAuthenticatedRoute(page, "/", "会话", "会话");
@@ -353,6 +359,77 @@ async function expectSessionCookieAbsent(page: Page) {
   expect(sessionCookies).toEqual([]);
 }
 
+async function walkFiles(page: Page): Promise<void> {
+  const files = page.locator("main");
+  await files.getByRole("button", { name: "选择工作空间" }).click();
+  const switcher = files.getByRole("dialog", { name: "工作空间切换器" });
+  await expect(switcher.getByRole("button", { name: "＋ 新建工作空间" })).toBeVisible();
+  const existing = switcher.getByRole("button").filter({
+    has: page.getByText(SMOKE_FIXTURE, { exact: true }),
+  });
+  if ((await existing.count()) === 0) {
+    await switcher.getByRole("button", { name: "＋ 新建工作空间" }).click();
+    const createDialog = files.getByRole("dialog", { name: "新建工作空间" });
+    await expect(createDialog).toBeVisible();
+    await createDialog.getByLabel("工作空间名称").fill(SMOKE_FIXTURE);
+    await createDialog.getByRole("button", { name: "创建" }).click();
+  } else {
+    await existing.click();
+  }
+
+  const tree = files.getByRole("navigation", { name: "工作空间目录树" });
+  await expectRootFileButtons(tree);
+  await expect(
+    tree.getByRole("button", { name: new RegExp(`^(展开 |折叠 )?${WALK_OUT}$`) }),
+  ).toHaveCount(0);
+
+  const preview = files.getByRole("region", { name: "文件预览" });
+  await tree.getByRole("button", { name: "readme.md", exact: true }).click();
+  await expect(
+    preview.getByRole("heading", { level: 1, name: SMOKE_FIXTURE, exact: true }),
+  ).toBeVisible();
+  await preview.getByRole("button", { name: "查看源码" }).click();
+  const sourceRow = preview.getByRole("row").first();
+  await expect(sourceRow.getByRole("cell").nth(0)).toHaveText("1");
+  await expect(sourceRow.getByRole("cell").nth(1)).toHaveText(`# ${SMOKE_FIXTURE}`);
+
+  await tree.getByRole("button", { name: "notes.csv", exact: true }).click();
+  await expect(preview.getByRole("columnheader", { name: "name", exact: true })).toBeVisible();
+  await expect(preview.getByRole("columnheader", { name: "value", exact: true })).toBeVisible();
+  await expect(preview.getByRole("row")).toHaveCount(3);
+  await expect(preview.getByRole("row", { name: "alpha 1" })).toBeVisible();
+  await expect(preview.getByRole("row", { name: "beta 2" })).toBeVisible();
+  await expect(preview.getByText("共 2 行 · 大文件仅预览前若干行", { exact: true })).toBeVisible();
+
+  await files.getByRole("button", { name: "新建", exact: true }).click();
+  await files.getByRole("menuitem", { name: "新建文件夹" }).click();
+  const dirDialog = files.getByRole("dialog", { name: "新建文件夹" });
+  await dirDialog.getByLabel("位置").selectOption({ label: "根目录　root" });
+  await dirDialog.getByLabel("文件夹名称").fill(WALK_OUT);
+  await dirDialog.getByRole("button", { name: "创建" }).click();
+  await expect(tree.getByRole("button", { name: `展开 ${WALK_OUT}`, exact: true })).toBeVisible();
+
+  await expect.poll(() => workspaceIdFromUrl(page.url())).toMatch(SESSION_ID);
+  const workspaceId = workspaceIdFromUrl(page.url());
+  await page.reload();
+  await expectAuthenticatedRoute(page, "/files", "工作空间", "工作空间");
+  await expect.poll(() => workspaceIdFromUrl(page.url())).toBe(workspaceId);
+  await expect(
+    files.getByRole("button", { name: "选择工作空间" }).getByText(SMOKE_FIXTURE, { exact: true }),
+  ).toBeVisible();
+  const restored = files.getByRole("navigation", { name: "工作空间目录树" });
+  await expectRootFileButtons(restored);
+  await expect(
+    restored.getByRole("button", { name: `展开 ${WALK_OUT}`, exact: true }),
+  ).toBeVisible();
+}
+
+async function expectRootFileButtons(tree: Locator) {
+  await expect(tree.getByRole("button", { name: "readme.md", exact: true })).toBeVisible();
+  await expect(tree.getByRole("button", { name: "notes.csv", exact: true })).toBeVisible();
+  await expect(tree.getByRole("button", { name: "logo.png", exact: true })).toBeVisible();
+}
+
 async function walkHeldDialogue(page: Page): Promise<void> {
   const gateId = randomUUID();
   const prompt = `${WALK_MARKER}${gateId}`;
@@ -466,6 +543,10 @@ async function gatePhase(origin: string, id: string): Promise<string> {
 
 function sessionIdFromUrl(url: string): string {
   return new URL(url).searchParams.get("session") ?? "";
+}
+
+function workspaceIdFromUrl(url: string): string {
+  return new URL(url).searchParams.get("ws") ?? "";
 }
 
 function isSessionPath(
