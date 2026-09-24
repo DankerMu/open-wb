@@ -98,6 +98,11 @@ function twoSessionRoutes(sessionBMessages: FetchRoutes[string]): FetchRoutes {
 
 async function submitRejectedDraft() {
   await screen.findByRole("button", { name: "新建会话" });
+  await waitFor(() => {
+    expect(
+      (screen.getByRole("textbox", { name: "给助手发消息" }) as HTMLTextAreaElement).disabled,
+    ).toBe(false);
+  });
   typeDraft(MULTILINE_DRAFT);
   clickSend();
   expect((await screen.findByRole("alert")).textContent).toBe(AGENT_UNAVAILABLE);
@@ -162,14 +167,10 @@ describe("chat page draft retention on pre-acceptance rejection", () => {
   it("keeps the exact multiline draft after a definite 502 and retries once", async () => {
     let prompts = 0;
     const idle: ChatSession = { ...runningSession("idle"), title: "saved title" };
+    const initialMessages = deferredResponse();
     renderChatPage(`/?session=${SESSION_A}`, {
       "/api/sessions": () => jsonResponse({ sessions: [idle] }),
-      [SESSION_A_MESSAGES]: () =>
-        jsonResponse({
-          session: idle,
-          messages: [historyUser],
-          streamCursor: { epoch: 1, seq: 0 },
-        }),
+      [SESSION_A_MESSAGES]: () => initialMessages.promise,
       [SESSION_A_PROMPT]: () => {
         prompts += 1;
         return jsonResponse(
@@ -179,7 +180,22 @@ describe("chat page draft retention on pre-acceptance rejection", () => {
       },
     });
 
-    await submitRejectedDraft();
+    await screen.findByRole("button", { name: "新建会话" });
+    const rejectedDraft = submitRejectedDraft();
+    await act(async () => {});
+    expect(
+      (screen.getByRole("textbox", { name: "给助手发消息" }) as HTMLTextAreaElement).disabled,
+    ).toBe(true);
+    expect(prompts).toBe(0);
+    await settleDeferredResponse(
+      initialMessages,
+      jsonResponse({
+        session: idle,
+        messages: [historyUser],
+        streamCursor: { epoch: 1, seq: 0 },
+      }),
+    );
+    await rejectedDraft;
     expect(
       within(await screen.findByRole("region", { name: "消息" })).queryByText(
         MULTILINE_DRAFT,
