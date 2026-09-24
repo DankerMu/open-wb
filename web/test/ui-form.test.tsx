@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useEffect, useRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   Button,
@@ -9,7 +10,7 @@ import {
   Tag,
   type TagProps,
 } from "../src/ui/index.js";
-import { COLOR_LITERAL_PATTERNS, readRepoFile, stripComments } from "./ui-support.js";
+import { blockBody, COLOR_LITERAL_PATTERNS, readRepoFile, stripComments } from "./ui-support.js";
 
 afterEach(cleanup);
 
@@ -43,6 +44,22 @@ function selectors(css: string): string[] {
   return [...css.matchAll(/([^{}]+)\{/g)].flatMap(([, prelude = ""]) =>
     prelude.split(",").map((selector) => selector.trim()),
   );
+}
+
+/** 渲染后把 ref.current 交给 `report`，证明 `ref` 作为普通 prop 落到原生元素上。 */
+function RefProbe({
+  kind,
+  report,
+}: {
+  kind: "button" | "input" | "search";
+  report: (node: unknown) => void;
+}) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => report(kind === "button" ? buttonRef.current : inputRef.current));
+  if (kind === "button") return <Button ref={buttonRef}>x</Button>;
+  if (kind === "search") return <Input aria-label="x" ref={inputRef} variant="search" />;
+  return <Input aria-label="x" ref={inputRef} />;
 }
 
 describe("Button", () => {
@@ -104,6 +121,12 @@ describe("Button", () => {
     expect(screen.getByRole("button").hasAttribute("disabled")).toBe(true);
     expect(container.querySelector(".ui-btn-spinner")).toBeNull();
   });
+
+  it("ref 落到 <button>", () => {
+    const report = vi.fn();
+    render(<RefProbe kind="button" report={report} />);
+    expect(report.mock.lastCall?.[0]).toBeInstanceOf(HTMLButtonElement);
+  });
 });
 
 describe("Input", () => {
@@ -124,6 +147,19 @@ describe("Input", () => {
     const wrapper = container.querySelector(".ui-input.ui-input--search");
     expect(wrapper?.contains(field)).toBe(true);
     expect(wrapper?.querySelector("svg")).not.toBeNull();
+  });
+
+  it("disabled 透传", () => {
+    render(<Input aria-label="账号" disabled />);
+    expect(screen.getByRole("textbox", { name: "账号" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it.each(["input", "search"] as const)("ref 落到内层 <input>（%s）", (kind) => {
+    const report = vi.fn();
+    render(<RefProbe kind={kind} report={report} />);
+    const node = report.mock.lastCall?.[0];
+    expect(node).toBeInstanceOf(HTMLInputElement);
+    expect(node).toBe(screen.getByRole(kind === "search" ? "searchbox" : "textbox"));
   });
 });
 
@@ -198,6 +234,19 @@ describe("Chip", () => {
     expect(chip.getAttribute("aria-pressed")).toBe("false");
     expect(chip.className).toBe("ui-chip");
   });
+
+  it("disabled：禁用且点击不触发 onSelect", () => {
+    const onSelect = vi.fn();
+    render(
+      <Chip disabled onSelect={onSelect}>
+        日常
+      </Chip>,
+    );
+    const chip = screen.getByRole("button", { name: "日常" });
+    expect(chip.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(chip);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
 });
 
 describe("表单基元 css 静态契约", () => {
@@ -208,6 +257,18 @@ describe("表单基元 css 静态契约", () => {
       (block) => block.prelude === ".ui-btn-spinner",
     );
     expect(spinner?.body).toMatch(/position:\s*absolute/);
+  });
+
+  it.each([
+    ".ui-btn--primary .ui-btn-spinner",
+    ".ui-btn--danger .ui-btn-spinner",
+    '[data-theme="dark"] .ui-btn--primary .ui-btn-spinner',
+  ])("实底按钮的指示器按变体取色：%s", (selector) => {
+    const rule = topLevelBlocks(buttonCss()).find((block) =>
+      block.prelude.split(",").some((part) => part.trim() === selector),
+    );
+    expect(rule?.body).toMatch(/border-color:\s*var\(--wb-/);
+    expect(rule?.body).toMatch(/border-top-color:\s*transparent/);
   });
 
   it("button.css 最后一个规则块为 .ui-btn.ui-btn--loading 且文字透明", () => {
@@ -227,9 +288,27 @@ describe("表单基元 css 静态契约", () => {
     expect(selectors(tag)).toContain('[data-theme="dark"] .ui-tag--brand');
   });
 
-  it.each(["button", "input", "switch", "chip"])("%s.css 自带 :focus-visible 规则", (name) => {
+  it.each(["button", "input", "switch", "chip"])(
+    "%s.css 自带重申圆角的 :focus-visible 规则",
+    (name) => {
+      const css = stripComments(readRepoFile(`web/src/ui/${name}.css`));
+      const focusRules = topLevelBlocks(css).filter((block) =>
+        block.prelude.includes(":focus-visible"),
+      );
+      expect(focusRules.some((block) => /border-radius:/.test(block.body))).toBe(true);
+    },
+  );
+
+  it.each([
+    ["button", [".ui-btn"]],
+    ["input", [".ui-input"]],
+    ["switch", [".ui-switch", ".ui-switch-thumb"]],
+    ["chip", [".ui-chip"]],
+  ])("%s.css 在 reduced-motion 下关闭过渡", (name, expected) => {
     const css = stripComments(readRepoFile(`web/src/ui/${name}.css`));
-    expect(selectors(css).some((selector) => selector.endsWith(":focus-visible"))).toBe(true);
+    const body = blockBody(css, /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{/);
+    expect(selectors(body)).toEqual(expect.arrayContaining(expected));
+    expect(body).toMatch(/transition:\s*none/);
   });
 
   it("五个组件 css/tsx（含注释）无颜色字面量", () => {

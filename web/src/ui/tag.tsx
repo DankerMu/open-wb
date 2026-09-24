@@ -1,8 +1,8 @@
-import type { ComponentPropsWithoutRef } from "react";
+import type { ComponentProps } from "react";
 
 export type TagProps = {
   tone?: "brand" | "success" | "warning" | "error" | "neutral";
-} & ComponentPropsWithoutRef<"span">;
+} & ComponentProps<"span">;
 
 /** 标签基元，样式映射 demo `.tag`（tag.css）。 */
 export function Tag({ tone = "neutral", className, ...rest }: TagProps) {

@@ -122,6 +122,18 @@
   border-radius: 50%;
 }
 
+/* 实底变体上指示器改用前景色，保证与底色的对比度。 */
+.ui-btn--primary .ui-btn-spinner,
+.ui-btn--danger .ui-btn-spinner {
+  border-color: var(--wb-text-white);
+  border-top-color: transparent;
+}
+
+[data-theme="dark"] .ui-btn--primary .ui-btn-spinner {
+  border-color: var(--wb-palette-black-90);
+  border-top-color: transparent;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ui-btn {
     transition: none;

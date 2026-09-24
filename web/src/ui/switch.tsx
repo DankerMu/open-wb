@@ -1,7 +1,7 @@
 import * as SwitchPrimitive from "@radix-ui/react-switch";
-import type { ComponentPropsWithoutRef } from "react";
+import type { ComponentProps } from "react";
 
-type SwitchProps = ComponentPropsWithoutRef<typeof SwitchPrimitive.Root>;
+type SwitchProps = ComponentProps<typeof SwitchPrimitive.Root>;
 
 /**
  * 开关基元：Radix Switch（role=switch、aria-checked、data-state 由 Radix 提供），
