@@ -1,5 +1,5 @@
 ## Context
-Closure prerequisite already met: #107closed2026-09-24T07:39:14Z; #132merged8f6d033 master35978802687/uid107565512880 actualEACCES/UIDtest1passed0skip and fourfile38requestsmoke. ADR0010 explicitly permits removingregistration afterUIDjobgreen; deploymentexercise remains separate.
+Closure prerequisite already met: #107closed2026-09-24T07:39:14Z; #132merged8f6d033 master35978802687/uid107565512880 actualEACCES/UIDtest1passed0skip and four-file40-request smoke (6+6+12+16). Earlier PR35977941147 had38 (chat10); polling makes request count run-specific. ADR0010 explicitly permits removingregistration afterUIDjobgreen; deploymentexercise remains separate.
 ## Goals / Non-Goals
 Change surface: constraints.yaml → AGENTS.md → existing source-derived guardrail oracle, atomically.
 Must preserve: three other downgrades exact fields/order, ten verification surfaces, every threshold/CIstep, old actionmatrix8/6, all UID runtime/lifecycle controls and old smoke/UI behavior.
