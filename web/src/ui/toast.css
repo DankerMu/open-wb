@@ -1,0 +1,67 @@
+/* Toast（Radix Toast）— adapted from resource/workbuddy-live-demo.html:753-758
+   （.toast-stack/.toast）。Viewport 的类名落在 <ol> 上：清零列表样式；离场动画不移植。 */
+
+.ui-toast-viewport {
+  position: fixed;
+  top: 52px;
+  left: 50%;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  transform: translateX(-50%);
+  pointer-events: none;
+  outline: none;
+}
+
+.ui-toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 420px;
+  padding: 8px 14px;
+  border: 1px solid var(--wb-border-default);
+  border-radius: 10px;
+  background: var(--wb-bg-primary);
+  box-shadow: var(--wb-shadow-popover);
+  font-size: 13px;
+  pointer-events: auto;
+  animation: wb-pop 0.25s ease;
+}
+
+/* li 带 tabIndex=0 可获焦：压制全局 :focus-visible 的 4px 圆角。 */
+.ui-toast:focus-visible {
+  border-radius: 10px;
+}
+
+.ui-toast .ui-icon {
+  width: 15px;
+  height: 15px;
+}
+
+.ui-toast--success .ui-icon {
+  color: var(--wb-status-success-text);
+}
+
+.ui-toast--error .ui-icon {
+  color: var(--wb-status-error-text);
+}
+
+.ui-toast--info .ui-icon {
+  color: var(--wb-brand-primary);
+}
+
+.ui-toast-message {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-toast {
+    animation: none;
+  }
+}

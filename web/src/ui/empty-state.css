@@ -1,0 +1,41 @@
+/* EmptyState — adapted from resource/workbuddy-live-demo.html:724-728（.empty-state）。
+   图标由 Icon size=20 经本规则放大到 28px，不扩 Icon 尺寸枚举；与既有 .ui-empty 零交集。 */
+
+.ui-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 56px 20px;
+  color: var(--wb-text-secondary);
+  text-align: center;
+}
+
+.ui-empty-state-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 20px;
+  background: var(--wb-bg-hover);
+  color: var(--wb-icon-muted);
+}
+
+.ui-empty-state-icon .ui-icon {
+  width: 28px;
+  height: 28px;
+}
+
+.ui-empty-state-title {
+  margin: 0;
+  color: var(--wb-text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.ui-empty-state-desc {
+  margin: 0;
+  font-size: 12.5px;
+}

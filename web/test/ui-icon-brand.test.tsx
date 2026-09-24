@@ -33,6 +33,7 @@ const ICON_NAMES: IconName[] = [
   "log-out",
   "triangle-alert",
   "info",
+  "circle-check",
 ];
 
 describe("Icon", () => {
