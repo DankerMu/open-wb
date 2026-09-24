@@ -26,23 +26,36 @@ const ToastContext = createContext<ToastApi | null>(null);
  * 应用根的通知出口：本组件只持有队列（追加、上限 3 丢最旧、关闭即移除）；计时与 hover/focus
  * 暂停恢复、Escape/滑动关闭、`type="background"` 的 polite 播报区、Viewport region 与 F8 热键
  * 全部由 Radix Toast 提供，本文件不写定时器。样式映射 demo `.toast-stack`/`.toast`（toast.css）。
+ * `epoch`：Radix 1.2.23 的暂停标记留在其 Provider 上、只由有 toast 时的 Viewport 监听清除，
+ * 暂停中关掉最后一条会让它永远为 true；队列非空→空时 epoch +1，以 `key` 重挂 Radix Provider
+ * 归零（`children` 在其外，应用树不随之重挂）。
  */
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const [toasts, setToasts] = useState<ToastRecord[]>([]);
+  const [state, setState] = useState<{ toasts: ToastRecord[]; epoch: number }>({
+    toasts: [],
+    epoch: 0,
+  });
   const nextId = useRef(0);
   const show = useCallback(({ type, message }: { type: ToastType; message: string }) => {
-    setToasts((prev) => [...prev, { id: nextId.current++, type, message }].slice(-MAX_TOASTS));
+    setState((prev) => ({
+      ...prev,
+      toasts: [...prev.toasts, { id: nextId.current++, type, message }].slice(-MAX_TOASTS),
+    }));
   }, []);
   const dismiss = useCallback((id: number) => {
-    setToasts((prev) => prev.filter((toast) => toast.id !== id));
+    setState((prev) => {
+      const toasts = prev.toasts.filter((toast) => toast.id !== id);
+      const emptied = toasts.length === 0 && prev.toasts.length > 0;
+      return { toasts, epoch: emptied ? prev.epoch + 1 : prev.epoch };
+    });
   }, []);
   const value = useMemo(() => ({ show }), [show]);
 
   return (
     <ToastContext.Provider value={value}>
-      <ToastPrimitive.Provider duration={TOAST_DURATION_MS} label="通知">
-        {children}
-        {toasts.map((toast) => (
+      {children}
+      <ToastPrimitive.Provider duration={TOAST_DURATION_MS} key={state.epoch} label="通知">
+        {state.toasts.map((toast) => (
           <ToastPrimitive.Root
             className={`ui-toast ui-toast--${toast.type}`}
             key={toast.id}

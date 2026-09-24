@@ -56,19 +56,21 @@ describe("ToastProvider / useToast (jsdom, fake timers)", () => {
   });
 
   it.each([
-    ["success", "已复制"],
-    ["error", "复制失败"],
-    ["info", "已切换"],
+    ["success", "已复制", "lucide-circle-check"],
+    ["error", "复制失败", "lucide-triangle-alert"],
+    ["info", "已切换", "lucide-info"],
   ] as const)(
-    "(A2) show %s（%s）→ ui-toast--<type>、消息、aria-hidden 图标、polite 播报区",
-    (type, message) => {
+    "(A2) show %s（%s）→ ui-toast--<type>、消息、aria-hidden %s 图标、polite 播报区",
+    (type, message, iconClass) => {
       const show = renderToasts();
       show(type, message);
       const toast = onlyToast();
       expect(toast.classList.contains(`ui-toast--${type}`)).toBe(true);
       expect(toast.textContent).toContain(message);
       expect(toast.querySelector(".ui-toast-message")?.textContent).toBe(message);
-      expect(toast.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+      const icon = toast.querySelector("svg");
+      expect(icon?.getAttribute("aria-hidden")).toBe("true");
+      expect(icon?.classList.contains(iconClass)).toBe(true);
       expect(within(region()).getByText(message)).toBe(toast.querySelector(".ui-toast-message"));
       const statuses = screen.getAllByRole("status");
       expect(statuses.some((element) => element.getAttribute("aria-live") === "polite")).toBe(true);
@@ -126,6 +128,23 @@ describe("ToastProvider / useToast (jsdom, fake timers)", () => {
     const show = renderToasts();
     show("error", "复制失败");
     fireEvent.keyDown(onlyToast(), { key: "Escape" });
+    expect(toasts()).toHaveLength(0);
+  });
+
+  // Radix 1.2.23 的暂停标记挂在 Provider 上，只有 Viewport 在有 toast 时的监听能清掉它；
+  // 暂停中关掉最后一条后，新 toast 须仍按时自动关闭（epoch 重挂 Provider）。
+  it.each([
+    ["指针悬停", (toast: HTMLElement) => fireEvent.pointerMove(toast)],
+    ["聚焦", (toast: HTMLElement) => fireEvent.focus(toast)],
+  ] as const)("(A9) %s中 Escape 关掉最后一条后，新 toast 仍按时自动关闭", (_, pause) => {
+    const show = renderToasts();
+    show("success", "已复制");
+    pause(onlyToast());
+    fireEvent.keyDown(onlyToast(), { key: "Escape" });
+    expect(toasts()).toHaveLength(0);
+    show("info", "已切换");
+    expect(toasts()).toHaveLength(1);
+    advance(2400);
     expect(toasts()).toHaveLength(0);
   });
 });

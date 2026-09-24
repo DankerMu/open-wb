@@ -4,9 +4,9 @@
 - [x] 1.1 独立 fixture 审核 pass（revise ×2：消费者清单/A5 事件目标/rAF 事实/tasks 2.2 措辞）；`openspec validate ui-toast-primitives --strict --no-interactive` exit 0。
 
 ## 2. Implementation（TDD：先红后绿）
-- [x] 2.1 新建 `web/test/ui-toast.test.tsx`（Seams A1–A8）、`web/test/ui-empty-state.test.tsx`（E1–E4）；`ui-guardrails.test.ts` 新增依赖方向用例 (G)；`ui-icon-brand.test.tsx` 名清单 +`circle-check`；先红。
+- [x] 2.1 新建 `web/test/ui-toast.test.tsx`（Seams A1–A9）、`web/test/ui-empty-state.test.tsx`（E1–E4）；`ui-guardrails.test.ts` 新增依赖方向用例 (G)；`ui-icon-brand.test.tsx` 名清单 +`circle-check`；先红。
 - [x] 2.2 `npm i -w web @radix-ui/react-toast`；`web/src/ui/{toast,empty-state}.{tsx,css}`；`ui.css` +2 `@import`；`index.ts` +3；`icon.tsx` +`circle-check`；`main.tsx` 与 `web/test/render-app-router.tsx` 以 `ToastProvider` 包裹 `RouterProvider`；2.1 转绿；`main.test.tsx`、`render-app-router` 的两个引入方（chat-page*/files-* 两组测试）以及五处未包裹的直接挂载点（design.md Sibling surfaces）仍绿。
-- [x] 2.3 反向注入六项各红并回退：去 `.slice(-MAX_TOASTS)` → (A4)；去 `type="background"` → (A2)；`onOpenChange` 不移除 → (A3)；`useToast` 不抛错 → (A6)；`main.tsx` 去包裹 → (A8)；feature 临时直接 import `@radix-ui` → (G)。
+- [x] 2.3 反向注入八项各红并回退（修复通道 1 补：`dismiss` 不递增 `epoch` → (A9)、`ICONS.success` 改 `info` → (A2)）：去 `.slice(-MAX_TOASTS)` → (A4)；去 `type="background"` → (A2)；`onOpenChange` 不移除 → (A3)；`useToast` 不抛错 → (A6)；`main.tsx` 去包裹 → (A8)；feature 临时直接 import `@radix-ui` → (G)。
 - [x] 2.4 `ATTRIBUTION.md:37` 登记 `@radix-ui/react-toast` 并删除"toast 由 #279 安装"尾句；`ui-guardrails.test.ts` Radix 包断言绿。
 
 ## 3. Verification
