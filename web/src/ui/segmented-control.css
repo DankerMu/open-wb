@@ -1,0 +1,45 @@
+/* SegmentedControl（Radix RadioGroup）— adapted from resource/workbuddy-live-demo.html:558-562
+   （.seg/.seg button.on）。选中态挂 Radix 的 [data-state="checked"]；demo 的白/近黑字面色
+   以 --wb-text-white / --wb-palette-black-90 替代。 */
+
+.ui-seg {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 99px;
+  background: var(--wb-bg-hover-light, var(--wb-color-bg-input));
+}
+
+.ui-seg-item {
+  padding: 6px 15px;
+  border: none;
+  border-radius: 99px;
+  background: none;
+  color: var(--wb-text-secondary);
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ui-seg-item:hover {
+  color: var(--wb-text-primary);
+}
+
+.ui-seg-item[data-state="checked"] {
+  background: var(--wb-palette-black-90);
+  color: var(--wb-text-white);
+}
+
+[data-theme="dark"] .ui-seg-item[data-state="checked"] {
+  background: var(--wb-palette-white-90);
+  color: var(--wb-palette-black-90);
+}
+
+.ui-seg-item:focus-visible {
+  border-radius: 99px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-seg-item {
+    transition: none;
+  }
+}

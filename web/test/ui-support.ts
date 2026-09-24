@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
+import { act, fireEvent } from "@testing-library/react";
 
 /** 仓库根目录（web/test 上两级）。 */
 const repoRoot = resolve(import.meta.dirname, "../..");
@@ -58,4 +59,37 @@ export function topLevelBlocks(css: string): { prelude: string; body: string }[]
     }
   }
   return blocks;
+}
+
+/** 按选择器（逗号分隔列表中的任一项全等）取顶层规则块体。 */
+export function ruleBody(css: string, selector: string): string {
+  const block = topLevelBlocks(css).find((candidate) =>
+    candidate.prelude.split(",").some((part) => part.trim() === selector),
+  );
+  if (!block) throw new Error(`未找到规则 ${selector}`);
+  return block.body;
+}
+
+/** 在 act 内以真实计时器等待 `ms` 毫秒。 */
+export function waitMs(ms: number) {
+  return act(() => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+}
+
+/** FocusScope 卸载归还在 setTimeout(0) 里跑；每个用例结束后让出一个宏任务，避免残留计时器串到下一个用例。 */
+export function yieldMacrotask() {
+  return waitMs(0);
+}
+
+/**
+ * 真实浏览器里一次指针按压的完整事件序列（pointerdown→mousedown→pointerup→mouseup→click），
+ * 供 Radix DismissableLayer 外点判定：无论该层在 pointerdown 即判定还是登记后等 click 到达
+ * （`deferPointerDownOutside`），都走得通。调用前须先 `yieldMacrotask()`：DismissableLayer 的
+ * document pointerdown 监听在挂载后的 setTimeout(0) 里才注册。
+ */
+export function pressPointer(target: Element) {
+  fireEvent.pointerDown(target);
+  fireEvent.mouseDown(target);
+  fireEvent.pointerUp(target);
+  fireEvent.mouseUp(target);
+  fireEvent.click(target);
 }
