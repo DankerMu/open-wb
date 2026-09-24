@@ -301,6 +301,10 @@ function useServiceInfo(
 ) {
   return useCallback(
     async (callerSignal: AbortSignal): Promise<ServiceInfo | null> => {
+      // An informational read must not supersede the user's session-ending mutation.
+      if (operationRef.current?.kind === "logout") {
+        return null;
+      }
       const operation = startOperation(operationRef, "info");
       const abortOperation = () => operation.controller.abort();
 

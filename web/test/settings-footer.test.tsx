@@ -493,7 +493,7 @@ describe("AuthProvider info and logout coordination", () => {
     },
   );
 
-  it("lets a new info operation supersede pending logout without a late state write", async () => {
+  it("keeps a pending logout authoritative when settings requests service information", async () => {
     const pendingLogout = deferredResponse();
     const fixture = await renderAuthenticatedProvider();
     replaceFetchRoutes(
@@ -508,12 +508,13 @@ describe("AuthProvider info and logout coordination", () => {
 
     await expect(
       fixture.getProbe()?.loadServiceInfo(new AbortController().signal),
-    ).resolves.toEqual(serviceInfo);
+    ).resolves.toBeNull();
 
-    expect(logoutOptions?.signal?.aborted).toBe(true);
+    expect(logoutOptions?.signal?.aborted).toBe(false);
+    expect(fixture.fetchMock.mock.calls.filter(([path]) => path === "/api/info")).toHaveLength(0);
     pendingLogout.resolve(new Response(null, { status: 204 }));
-    await expect(logout).resolves.toBe(false);
-    expect(fixture.getProbe()?.principal).toEqual(principal);
+    await expect(logout).resolves.toBe(true);
+    await waitFor(() => expect(fixture.getProbe()?.principal).toBeNull());
   });
 
   it("aborts a pending logout on unmount and leaves a fresh mount clean", async () => {
