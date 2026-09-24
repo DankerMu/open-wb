@@ -1,0 +1,67 @@
+# Tasks: s1e-frontend-parity
+
+> 执行序按依赖排列；TDD：每条实现任务先写失败测试再实现。组 1 无外部依赖；组 3 独立；组 2 依赖 1；组 4/5 依赖 1、2；组 6 依赖 2.3（双 project）与各页面任务。任何触碰 Makefile/CI/AGENTS/constraints 的任务，`scripts/test-ci-harness.sh` 期望**同 PR 更新**。改变既有可见文本/定位的任务（heading 上收、状态中文化、用户菜单退出、Radix portal、LoginForm 读 info、夹具替换）都在正文列出同 PR 必改的 `web/test` 与 `web/e2e/ui-walk.spec.ts` 位置——PR 必须在自己的 CI 上绿，不得把红灯留给后继任务。size-guard 上限 800 行：新用例/新呈现进任务指定的新文件。
+
+## 1. ui-primitives
+
+- [ ] 1.1 首刀：`web/src/styles/tokens.css`（demo:19-188 调色板 + 语义层，亮/暗；`--wb-font-heading` 去 Poppins；六个补定变量注释；迁入或替换本仓 `--wb-home-bg`/`--wb-control-bg`）+ `web/src/ui/icon.tsx`（单组件、`name` 联合类型、内部映射，默认 `aria-hidden`，`label` 给可访问名）+ `web/src/ui/brand-mark.tsx` + `web/src/ui/motion.css`（六组关键帧 + reduced-motion 块）+ `web/src/ui/index.ts`（唯一出口，首刀导出 Icon/BrandMark）+ `styles.css` 收缩为 reset/骨架 + 清理 `chat.css:5` 注释 hex；`ATTRIBUTION.md` 增 Radix/lucide 条目；单测：token 名集合与 demo 两块逐字对照（font-heading 豁免）、feature/routes 无硬编码颜色与 `--wb-palette-` grep、`motion.css` 文本断言 reduced-motion 块含每个 `ui-*` 动效类的 `animation: none`/`transition: none`、Icon/BrandMark RTL 渲染（aria、size）
+- [ ] 1.2 `web/src/ui/{button,input,switch,tag,chip}.tsx` + css（variant/size/loading；`Switch` 基于 Radix，安装 `@radix-ui/react-switch`）+ RTL 单测（角色、禁用、loading 时 label 保留在 DOM 且类名切换）+ index 增量导出（依赖 1.1）
+- [ ] 1.3 `web/src/ui/{dialog,confirm-dialog,drawer}.tsx`（安装 `@radix-ui/react-dialog`；初始焦点、Tab 循环、Escape/遮罩策略、焦点恢复、`alertdialog` 变体、Drawer `side` left/right + `width`，默认 right 420/92vw）+ `web/test/radix-platform.ts` shim + 单测（含左侧 288 变体）+ index 增量（依赖 1.1）
+- [ ] 1.4 `web/src/ui/{menu,popover,tooltip,segmented-control}.tsx`（安装 dropdown-menu/popover/tooltip/radio-group；键盘导航、视口翻转、Popover content 可声明 role/aria-label、Tooltip `aria-describedby`、每项 `role="radio"`）+ 单测 + index 增量（依赖 1.3 的 shim）
+- [ ] 1.5 `web/src/ui/{toast,empty-state}.tsx`（安装 `@radix-ui/react-toast`；三类型、2.4s、最多 3 条、`aria-live`；EmptyState 三段）+ `ToastProvider`/Viewport 挂到应用根（`web/src/main.tsx` 的 Provider 树，jsdom 页面级 fixture 同步包裹）+ 单测 + index 增量；grep 断言 feature/routes 无 `@radix-ui` 直接 import、`web/src/ui/**/*.tsx` 无 `style={`（依赖 1.1）
+- [ ] 1.6a 迁移（auth）：`auth/footer.tsx` 退出确认 → `ConfirmDialog`（`lib/dialog.ts` 暂留给 files 使用）；**同 PR**：`settings-footer.test.tsx` 的 `HTMLDialogElement.open`/`cancel` 事件断言改 Escape keydown、页面级 fixture 引入 `radix-platform.ts`，ui-walk 退出 `alertdialog` 定位改页面范围；既有 `web/test` 与 `make ui-walk` 全绿（依赖 1.3）
+- [ ] 1.6b 迁移（files）：`files/dialogs.tsx` 两对话框 → `Dialog`、`CreationMenu` → `Menu`，`files/page.tsx` 切换器 → `Popover`（content `role="dialog"` 名 `工作空间切换器`）；删除 `web/src/lib/dialog.ts` 与 `dialog.test.tsx`；**同 PR**：ui-walk 内以 `files` 为范围的 `dialog`/`menuitem` 定位（`walkFiles` 的 `新建`/`新建文件夹` dialog、切换器）改页面范围；既有 `web/test` 与 `make ui-walk` 全绿（依赖 1.4、1.6a）
+
+Suggested fixture level: expanded - 呈现类任务（前端通用契约：涉及呈现至少 expanded）；jsdom 证角色/键盘/样式来源，`make ui-walk` 双 project 与 `make ui-shots` 证真实浏览器视觉
+Minimal mergeable slice: 1.1 首刀单独可合并保绿（新增 token/Icon/BrandMark/motion/index + styles.css 收缩后视觉不变；Icon/BrandMark 由其单测消费故 knip 绿）；1.2–1.5 各自独立可合并（各切片安装自己的 Radix 包，导出由同 PR 单测消费）；1.6a 依赖 1.3、1.6b 依赖 1.4/1.6a，各自必须带本模块的定位器改动（`lib/dialog.ts` 在 1.6b 最后删除）
+
+## 2. app-shell（spa-shell）
+
+- [ ] 2.1 `web/src/routes/shell/sidebar.tsx`：图标 + 标签 + 副标签、品牌区（`BrandMark` + 字标）、折叠 288→48 + `localStorage['workbuddy-sidebar']`（读写 try/catch）+ 折叠态 Tooltip 与 `aria-label`、底部用户区（aside 内 `<footer>`：头像首字符 + account/role + 触发按钮）+ `Menu` 只含 `退出登录`（沿用 footer 的 logout/confirm 逻辑）；`routeManifest` 增 icon 字段；jsdom 单测（折叠持久化与写失败静默、菜单项集合、退出仍恰一次 logout）；**同 PR**：ui-walk 退出步骤改为 用户区触发按钮 `用户菜单` → `menuitem 退出登录` → `alertdialog`（`sidebarFooter`/`expectPrincipalFooter` 保持 `footer` 定位），`settings-footer.test.tsx` 与 `chat-page-lifecycle.test.tsx`（`getByRole("button",{name:"退出登录"})` → 打开 `用户菜单` 后取 `menuitem`，引入 `radix-platform.ts`）的退出定位改菜单项（依赖 1.4、1.5、1.6a——退出确认已是 `ConfirmDialog`，本任务只搬入口）
+- [ ] 2.2 `web/src/routes/shell/topbar.tsx` + `useTopbar` context：三态（欢迎态 `≥761` 隐藏、`≤760` 只含 `打开导航` 窄条 / 面包屑容器 `<h1>` 名 `我的工作 / <title>` / 页面标题 `<h1>`，`role="banner"`）；四个页面删除自有页面级 `<h1>`，chat 欢迎态渲染 hero 文本 `WorkBuddy，我帮你` 为 `<h1>`（仅 hero 文本；chip/卡片/免责声明归 4.4，4.4 把该 h1 纳入 `welcome.tsx`）；**同 PR**：`web/test/routes.test.tsx`、`chat-page*`、`files-page`、`settings-footer`、`auth-router` 的 heading 断言与 `web/e2e/ui-walk.spec.ts` 的 `ROUTES` heading（`/` → `WorkBuddy，我帮你`）与 `expectAuthenticatedRoute` 定位（依赖 2.1）
+- [ ] 2.3 响应式两档：外壳侧 `≤760` 侧栏 `Drawer side="left" width=288` 覆盖层（`≤900` 文件页树栏 210 属 files feature css，归 5.3）（默认关闭、选路由即关闭、隐藏态不可聚焦、开合不写 storage）+ 顶栏 `打开导航`（含欢迎态窄条）；jsdom 用 matchMedia mock 断言挂载分支与欢迎态按钮存在；真实证据由 6.1 双 project（依赖 2.2）
+- [ ] 2.4a 登录卡结构：`login-form.tsx` 镜像 demo:1721-1752（`BrandMark` 26px、标题、副标题、字段 placeholder/autocomplete、账号 autoFocus、错误行）；jsdom 单测进新文件 `web/test/login-form.test.tsx`（依赖 1.2）
+- [ ] 2.4b 快捷登录门控：`features/auth/dev-accounts.ts` 静态三项 + LoginForm mount 时匿名 client 读一次 `/api/info`（不经 Provider operation、unmount abort、失败不重试）、仅 `auth.provider==="dev-stub"` 渲染 `演示账号` 区；`login-form.test.tsx` 三种 provider 结果、点击卡片恰一次 login body、info pending 时提交不阻塞、登录失败后快捷区不变；**同 PR**：`auth-router.test.tsx` 整体改为按路径路由的 fetch mock（覆盖全部渲染 LoginForm 的位点：8 处 `unauthenticatedResponse()` 队列、`it.each` 的 me 失败→principal 队列、`renderAuthenticatedProvider` 后 401 移交用例、canonicalLoginPaths 用例、`expectInfoRequest` 的 `NthCalledWith(3,"/api/info")` 与该文件全部 `toHaveBeenCalledTimes` 计数），并把 `describe("login form")` 迁到 `login-form.test.tsx` 以守住 size-guard 800 行；`auth-session-client.test.tsx`、`routes.test.tsx`、`main.test.tsx`、`settings-footer.test.tsx` 注册 `/api/info` 响应并核对 fetch 次序/计数断言；`files-errors.test.tsx`、`chat-page-ownership.test.tsx` 的 401 移交路径核对 fetch 计数（未注册路径经 `fetchResponse` 转为 `requestFailed(0)`，不崩）（依赖 2.4a、3.1）
+- [ ] 2.5 设置页呈现：外观卡两行（`SegmentedControl` + `当前生效` 行文案）、关于卡 `BrandMark`；`settings-footer.test.tsx` 结构断言更新（解析/类型改动属 3.1，此处不重复）（依赖 1.4、3.1）
+
+Suggested fixture level: expanded - 外壳与响应式是真实浏览器才能证明的呈现面，且 2.1/2.4b 触碰认证交互（退出、登录门控）；jsdom 证结构与状态分支，布局/溢出/覆盖层由 ui-walk 双 project 与 ui-shots 证明
+Minimal mergeable slice: 2.1 侧栏单独可合并保绿（替换现有 aside，同 PR 改退出定位器）；2.2 依赖 2.1 且必须一次性带全部 heading 断言；2.3 依赖 2.2；2.4a 独立；2.4b 依赖 2.4a、3.1；2.5 依赖 3.1
+
+## 3. service-info（http-service-skeleton）
+
+- [ ] 3.1 server：`DevStubProvider` 类型增只读 `name`（返回 `"dev-stub"`），`createDevStubProvider` 调用从 `authPlugin` 上提到 `registerAuth` 并经 options 传入子插件，`registerAuth` 在根实例 `decorate("authProviderName", provider.name)`，`app.ts` 的 fastify module 声明补 `authProviderName`，`/api/info` 返回 `{...SERVICE_INFO, auth:{provider: app.authProviderName}}`；web：`web/src/lib/api.ts` `parseServiceInfo`/`ServiceInfo` 三键严格校验；**同 PR**：`smoke/public.hurl` exact body、`server/test/{app,http-guard,http-guard-faults}.test.ts` info 期望（含 HEAD content-length）、`web/test/{support.ts,api.test.ts,api-info-logout.test.ts,auth-session-client.test.tsx,auth-router.test.tsx,routes.test.tsx,settings-footer.test.tsx}` 的 info fixture；server inject 单测三键精确形状与 decorator 来源
+
+Suggested fixture level: expanded - 公开端点 schema 变更 + 认证适配器接口变更（issue-risk-contract：public API/schema、auth 触发 expanded）；inject + mock fetch + smoke 三面证明
+Minimal mergeable slice: atomic - server 形状、web 严格校验、`public.hurl` exact body 必须同 PR（任一落后即 CI smoke/unit 红或关于卡显示失败）
+
+## 4. chat-web
+
+- [ ] 4.1 `md-render.ts` 移到 `web/src/lib/`（头注释不变，files 与 chat 共用，`md-render.test.ts` 路径随之）+ `lib/markdown-view.tsx`；助手正文经 Markdown 渲染、用户右侧气泡 `pre-wrap` + 助手左侧块 + `BrandMark` 头像、running 末尾 `ui-caret`；`chat-page.test.tsx` 断 heading/code 元素、多行用户文本换行、光标（依赖 1.1）
+- [ ] 4.2 `features/chat/step-summary.ts` `summarizeStepDetail`（JSON 首个 text/content 或首键值 / 非 JSON 首行 / 空串 / ≤120 码点）+ 表驱动单测；步骤卡头（图标 + name + `role=status` 徽章 `运行中|已完成|失败`，accessible name `<step> <状态>`）+ 摘要行 + 默认折叠 `原始输出`；**同 PR**：ui-walk `bash running|bash done` 定位改 `bash 运行中|bash 已完成`，`chat-page.test.tsx` 的 `bash running`（两处）与 `bash done` 断言改中文（依赖 1.1）
+- [ ] 4.3 composer 卡 `features/chat/composer.tsx`（textarea + 工具栏仅发送按钮；运行中按钮 aria-label `生成中` + `role=status` `生成中`；两种 placeholder）+ 会话列表项 `role=status`、aria-label `<title> <状态>`（可见点 + 视觉隐藏中文状态，running `ui-pulse`）；jsdom 单测 placeholder 随态、状态文本与可访问名；**同 PR**：ui-walk `selectedSessionStatus` 期望 `running|done` → `运行中|已完成`、`generatingStatus` 保持，`chat-page-ownership-gaps.test.tsx` 的 `getByRole("status",{name:\`${PROMPT} done\`})` → `${PROMPT} 已完成`（依赖 1.1、1.2）
+- [ ] 4.4 欢迎态 `features/chat/welcome.tsx` + `welcome-content.ts`（demo QUICK_PROMPTS 默认场景组 demo:1221-1239 + PLAYBOOKS 七项 demo:2553-2561 + prompt 映射 demo:2674，标注来源）：hero `<h1>`/chip 行/五张卡 + `换一批` 七选五轮换 + 免责声明；点击只填草稿；无场景胶囊/查看更多；`chat-page.test.tsx` 断结构、"只填不发"、轮换后集合变化（依赖 2.2 顶栏隐藏态、4.3）
+- [ ] 4.5 `features/chat/scroll-follow.tsx` `回到最新`（scroll 监听、距底 > clientHeight 显示、贴底自动跟随、点击回底）；jsdom 单测上滚不跟随/按钮出现/点击回底（依赖 1.2）
+- [ ] 4.6 助手消息操作条 `复制`（`navigator.clipboard.writeText`；API 缺失或 reject → Toast `复制失败`）；jsdom 单测成功/缺失/reject 三分支（依赖 1.5、4.1）
+
+Suggested fixture level: expanded - 会话页是 P0 验收面且 4.2/4.3 改变 ui-walk 的完成 oracle；jsdom 证结构，双 project 证布局与真实回合
+Minimal mergeable slice: 4.1 单独可合并保绿（移动 md-render 需同 PR 改 files 的 import 与测试路径）；4.2、4.3、4.5、4.6 各自独立可合并（各自带 ui-walk/jsdom 断言改动）；4.4 依赖 2.2、4.3
+
+## 5. files-web
+
+- [ ] 5.1 逻辑路径 `<account>/<dir>`（切换器卡/列表项/树根/位置下拉全部去 `root` 与绝对路径，位置下拉根项 `根目录　<空间名>`）+ 根行 `shield` + 空间名 + 切换器搜索框过滤（`搜索工作空间`，无匹配 `无匹配的工作空间`）；jsdom 单测（页面无绝对路径文本、根行文案、过滤）；**同 PR**：ui-walk `selectOption({label:"根目录　root"})` → `根目录　smoke-fixture`（依赖 1.6b）
+- [ ] 5.2 `features/files/file-meta.ts` `fileIcon(name)`/`formatSize(bytes)` 纯函数（替换 `preview.tsx` 的 `formatByteSize`）+ 树条目图标与大小列 + 预览头；表驱动单测（依赖 1.1）
+- [ ] 5.3 文案与布局：`空目录`、空树 `该工作空间暂无目录 / 点击左上角 ＋ 新建文件夹`、不支持态副行 `<name> · <size>　二进制或未识别格式`、`EmptyState` 组件化；树栏 280/210 与 760 纵向、树条目 `text-overflow: ellipsis` + `title`、预览容器 `overflow: auto`；jsdom 断文案与容器类名，宽度/截断由 6.1（依赖 1.5、2.3、5.2）
+
+Suggested fixture level: expanded - 逻辑路径涉及信息暴露面（绝对路径不出现在 UI），布局三档只能在真实浏览器证明；文案与纯函数走 jsdom
+Minimal mergeable slice: 5.1 依赖 1.6b 后单独可合并保绿（数据已在 DTO/Principal，只改呈现 + ui-walk 一处 label，jsdom 与 ui-walk 同 PR）；5.2 独立；5.3 依赖 1.5、2.3、5.2
+
+## 6. demo-parity-acceptance + verification-harness
+
+- [ ] 6.1 `web/playwright.config.ts` 双 project（`desktop-light` 1440×900 light / `mobile-dark` 390×844 dark，`workers: 1`，`globalTimeout` 150s）+ `ui-walk.spec.ts`：`WALK_OUT` → `walk-out-<project>` 补齐 ≥48 字符（断截断 + `title`）；布局断言按 project 分支（desktop 并排 + 四路由遍历中逐路由临时 1024×768 断无溢出（含 `/center`）后恢复 + `/files` 临时 880×800 断树栏 210 后恢复；mobile 覆盖层默认关闭、`打开导航` 每路由可见、`openNav()` 前置每次路由点击与每次 `expectPrincipalFooter`）；主题步骤按 project（desktop 深色 / mobile 浅色，各断 `data-theme` 与 storage、reload 持久）；逐路由 `scrollWidth <= innerWidth`；desktop 在受控回合运行中对 `.ui-pulse` 做 `emulateMedia reduce`/恢复断言 `animationName`；journey 末断静态资源（resourceType image/font/stylesheet/script）零 `requestfailed`（`net::ERR_ABORTED` 的导航/SSE 取消不计）与零非 baseURL 源请求；两 project 独立 401/console 预算；CI ui-walk job 不改（依赖 2.3、4.3、5.3）
+- [ ] 6.2 夹具替换：`logo.png` 256×256（生成脚本不入库）、`readme.md`（首行 `# smoke-fixture` + 二级标题/列表/代码块/表格）、`notes.csv` 4 行、新增 `smoke/fixtures/README.md`；**同 PR**：ui-walk csv `row` 计数 5、`共 4 行 · 大文件仅预览前若干行`、新增点击 `logo.png` 断 `naturalWidth === 256`；`smoke/files.hurl` 自引用比对自动跟随（有大小字面断言则同步）；`make smoke`/`make ui-walk` 绿（无依赖）
+- [ ] 6.3a `web/e2e/ui-shots.mjs` + `npm run ui-shots --workspace web`：六格 × 五个固定态名（`login-default`/`chat-welcome`/`chat-done`/`files-readme`/`settings-default`）× demo/app = 60 张 + `index.html`；app 主题 `addInitScript` 预置、`chat-done` 首格新建会话发固定提示并等待 `已完成` 后复用；demo 主题键/会话 id/md 文件为注明行号的常量；每张 app 截图前断横向溢出与无 workspace `root` 文本；任一失败非零且保留产物；`UI_SHOTS_OUT` 缺省由脚本计算；本地对运行中服务（omp + 假上游）实测 60 张（依赖 4.4、5.1（`files-readme` 态的无绝对路径断言）、5.3、6.2）
+- [ ] 6.3b Makefile `ui-shots` 目标（`UI_SHOTS_BASE_URL` 三行冻结、`UI_SHOTS_OUT` 仅 export、`.PHONY`、页头）+ AGENTS.md 矩阵/Enforcement 两行 + `constraints.yaml` 第十一条 surface + `test-ci-harness.sh`（受保护目标集 +1、surfaces 元组 +1、AGENTS 行 +2、`safe_overrides` +3 行、`recipes("ui-shots", …)`、`.PHONY` 整行锚点）；`make test-guardrails` 绿且 `ui-shots :` duplicate mutation 被拒（依赖 6.3a）
+- [ ] 6.4 `docs/acceptance/demo-parity-checklist.md`（由审查报告 §4 生成：demo:行号 | §4 来源行 | 期望 | 实现 file:line | 验证方式（态名 + 格 / ui-walk / jsdom）| 签收；S1e 范围外标不适用并注明来源）+ `docs/architecture/system.md` §3.3 补 `web/src/ui` 段 + Epic 签收记录模板；`make ui-shots` 一次实跑并按清单签收贴入 Epic 作为 S1e 关闭证据（依赖 2.4b、2.5、4.1、4.2、4.4、4.5、4.6、5.1、5.3、6.1、6.3b）
+
+Suggested fixture level: expanded - 新增 CLI 入口与 CI oracle/控制面/Playwright config/夹具格式变更（issue-risk-contract：script entry、production config 触发 expanded）；CI ui-walk 双 project 全绿与本地 ui-shots 产物为证
+Minimal mergeable slice: 6.2 单独可合并保绿（夹具 + ui-walk 三处断言，不依赖其他组）；6.1 依赖 2.3/4.3/5.3 已在 master；6.3a 独立于 Make/控制面可合并（npm script 本地可验）；6.3b 依赖 6.3a 且 Makefile/控制面/oracle 原子一刀（否则 test-guardrails 红）；6.4 最后
