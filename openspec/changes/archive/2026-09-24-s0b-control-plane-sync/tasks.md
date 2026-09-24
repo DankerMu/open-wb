@@ -15,9 +15,9 @@
 ## 2. Parent verification
 - [x] 2.1 Independent scratch mirror/field/enforcement/header/directory/downgrade decoy mutations reject; restore baseline; all four spacedduplicate targets reject with intended contract exit1, generators must succeed.
 - [x] 2.2 Complete make test-guardrails, shell/size/naming/strictspec; preserve exact existing runtime recipe/workflow/product/threshold identities and old positive controls.
-- [ ] 2.3 Expanded review and exact-head CI green before source merge.
+- [x] 2.3 Expanded review and exact-head CI green before source merge. PR258 head0a73d9a8cbf76824d8f4dab851dad40552852b87 round2 clean, CI35969664073 eight checks passed; 611 guard oracle cases and22 independent mutants qualified.
 
 ## 3. Delivery
-- [ ] 3.1 Merge107, update parent6.4 and independently archive via PR/CI before Epic acceptance reconciliation.
+- [x] 3.1 Merge107, update parent6.4 and independently archive via PR/CI before Epic acceptance reconciliation. Source PR258 merged; this archive delivery is isolated in its own PR, with merge gated on exact-head CI.
 
 Evidence /tmp/open-wb-issue107-evidence. Parent owns external oracle execution and fixture; writers no validation/formatting/commits, no worktrees/nestedagents. No concreteReturnType contracts. No manual real-model call necessary for mirror acceptance; rows describe future operator evidence rather than claiming that evidence here.
