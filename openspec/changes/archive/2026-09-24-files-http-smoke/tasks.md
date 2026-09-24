@@ -11,7 +11,7 @@
 ## 3. Main verification and delivery
 - [x] 3.1 Build real server/web, use pinned real omp/fake upstream and caller-owned state; run four-file make smoke twice without restart/reseed plus standalone files.hurl; decode PNG, exact preview bytes and no live auth sessions.
 - [x] 3.2 Qualify missing/corrupt fixture and request-response/security assertion failure classes with bounded semantic RED/restoredGREEN in disposable evidence paths; explicitly retain an identical old sandbox.reject event while suppressing the current request's new audit and prove RED, then restore GREEN; preserve raw command/results.
-- [ ] 3.3 Run make test-guardrails and affected static/drift gates; both actual CI smoke/ui-walk jobs and aggregate green on frozenhead; expanded3seat review before fixes, bounded gate, merge and selective archive.
+- [x] 3.3 Guardrails576PASS/0FAIL and static/drift gates exit0; frozen d79a5740 passed three expanded static seats without findings, round1clean/zero fixpasses; CI35957055888 all8success including smoke/ui-walk. PR253 merged7e00c26; selectively archive this child with current #105-promoted canonical requirements preserved.
 
 ## Risk packs
 - Selected Public API / CLI / script entry:2.1/2.2/3.1 exact Hurl/Make contract.

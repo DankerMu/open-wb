@@ -67,9 +67,10 @@ Archive coordination: #120配置/sudo与unsafe-PATH、#126私有状态、#239非
 
 ## 6. files-harness
 
-- [ ] 6.1 tracked `smoke/fixtures/sandbox/u1/smoke-fixture/{readme.md,notes.csv,logo.png}` + `smoke/files.hurl`（创建类请求断言 status ∈ {201,409} 再以 `captures` 取 id、重复建目录精确 409、越界/审计/预览/他账号 404 断言）+ `make smoke` 改为四文件 + CI smoke/ui-walk job 脚本预置夹具到 `SANDBOX_ROOT/u1/`；`scripts/test-ci-harness.sh` 的 smoke recipe 期望行、workflow 形状同 PR 更新，`make test-guardrails` 绿；本地与 CI `make smoke` 绿（依赖 3.6）；两条验证路径（CI 运行 + 静态 oracle），Stage 5 标 `Width exception: multi-path`
+- [x] 6.1 #130 / PR253 merged7e00c26，finald79a5740，CI35957055888全8green。tracked md/两行csv/合法PNG + 独立files.hurl16请求：创建201/409、列表取唯一id、重复mkdir409、越界403与相对请求前快照的新关联审计、精确预览字节、他账号404/双logout。四文件smoke同服务DBsandbox连跑两次各38请求绿，standalone绿、0auth行；共享CIhelper两模式启动前预置，guardrails576PASS/0FAIL，三席clean。Width exception: multi-path；按profile smoke/CI触发expanded，不含6.2浏览器步骤/5.5uidjob/6.3控制面。
 - [ ] 6.2 `web/e2e/ui-walk.spec.ts` 增 `/files` 步骤（选择或创建 `smoke-fixture`、三文件、md 渲染/源码、csv 表格、新建 `walk-out`、reload 保持）；本地与 CI `make ui-walk` 绿（依赖 4.3、6.1）
 - [ ] 6.3 控制面同步：AGENTS.md Directory Map（`server/` 描述含沙箱/审计/工作空间、`smoke/` 提及沙箱夹具）、Verification Matrix 行不变但 evidence 提及四文件；`test-ci-harness.sh` 的 AGENTS 锚点同 PR 更新（依赖 6.1、6.2、S0b #107 的矩阵两行）
 
 Suggested fixture level: none - harness 自身即验证物；CI 接线以 workflow 全绿为证
 Minimal mergeable slice: 6.1 是夹具 + `files.hurl` + `make smoke` 四文件 + CI 预置的原子一刀（hurl 用例进入 `make smoke` 与 CI 预置夹具必须同 PR，否则 CI 红）；6.2 依赖 6.1；6.3 依赖 6.1、6.2
+Archive coordination: files-harness「沙箱夹具与 files.hurl」已独立晋升，父最终归档去重并保留pre/post审计freshness，不能退回只看上一条kind。verification-harness四文件/两模式共享prelaunch预置建立在#105已晋升的真实omp+假上游/PGID清理完整合同上；保留其所有场景和后续控制面强化，不用旧父组合块覆盖。S0b/S1a父保持active。
