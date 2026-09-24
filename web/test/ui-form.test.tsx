@@ -10,34 +10,19 @@ import {
   Tag,
   type TagProps,
 } from "../src/ui/index.js";
-import { blockBody, COLOR_LITERAL_PATTERNS, readRepoFile, stripComments } from "./ui-support.js";
+import {
+  blockBody,
+  COLOR_LITERAL_PATTERNS,
+  readRepoFile,
+  stripComments,
+  topLevelBlocks,
+} from "./ui-support.js";
 
 afterEach(cleanup);
 
 const COMPONENTS = ["button", "input", "switch", "tag", "chip"];
 const VARIANTS: NonNullable<ButtonProps["variant"]>[] = ["primary", "secondary", "ghost", "danger"];
 const TONES: NonNullable<TagProps["tone"]>[] = ["brand", "success", "warning", "error", "neutral"];
-
-/** 顶层规则块（@media 等嵌套块作为整体一项），按出现顺序。 */
-function topLevelBlocks(css: string): { prelude: string; body: string }[] {
-  const blocks: { prelude: string; body: string }[] = [];
-  let depth = 0;
-  let start = 0;
-  let open = 0;
-  for (let index = 0; index < css.length; index += 1) {
-    if (css[index] === "{") {
-      if (depth === 0) open = index;
-      depth += 1;
-    } else if (css[index] === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        blocks.push({ prelude: css.slice(start, open).trim(), body: css.slice(open + 1, index) });
-        start = index + 1;
-      }
-    }
-  }
-  return blocks;
-}
 
 /** 文件内所有规则（含 @media 内）的逗号拆分后的选择器。 */
 function selectors(css: string): string[] {

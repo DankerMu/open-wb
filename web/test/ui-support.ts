@@ -38,3 +38,24 @@ export function blockBody(css: string, opener: RegExp): string {
   }
   throw new Error(`块 ${opener} 未闭合`);
 }
+
+/** 顶层规则块（@media 等嵌套块作为整体一项），按出现顺序。 */
+export function topLevelBlocks(css: string): { prelude: string; body: string }[] {
+  const blocks: { prelude: string; body: string }[] = [];
+  let depth = 0;
+  let start = 0;
+  let open = 0;
+  for (let index = 0; index < css.length; index += 1) {
+    if (css[index] === "{") {
+      if (depth === 0) open = index;
+      depth += 1;
+    } else if (css[index] === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        blocks.push({ prelude: css.slice(start, open).trim(), body: css.slice(open + 1, index) });
+        start = index + 1;
+      }
+    }
+  }
+  return blocks;
+}

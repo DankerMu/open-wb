@@ -1,0 +1,165 @@
+/* Dialog / ConfirmDialog / Drawer（Radix Dialog）— adapted from
+   resource/workbuddy-live-demo.html:730-738（.modal-backdrop/.modal/--sm/head/close/body/foot）、
+   772-777（.drawer-backdrop/.drawer）与 1116-1140（confirmDialog 说明文字、openDrawer）。
+   颜色只用语义 token；Drawer 宽度枚举为类名（不写内联 style）；左侧入场关键帧只属于本文件，
+   右侧复用 motion.css 的 wb-drawer-in。 */
+
+.ui-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--wb-overlay);
+  animation: wb-fadein 0.15s ease;
+}
+
+.ui-dialog {
+  display: flex;
+  flex-direction: column;
+  width: 520px;
+  max-width: 100%;
+  max-height: 82vh;
+  border-radius: 14px;
+  background: var(--wb-bg-primary);
+  box-shadow: var(--wb-shadow-dialog);
+  animation: wb-pop 0.2s ease;
+}
+
+.ui-dialog--sm {
+  width: 400px;
+}
+
+.ui-dialog:focus-visible {
+  border-radius: 14px;
+}
+
+.ui-dialog-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 20px 8px;
+}
+
+.ui-dialog-title {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* demo:735 .modal-close 的 28×28 圆角 6 与图标色；hover 底色沿用 ghost 变体。 */
+.ui-dialog-head .ui-btn--icon,
+.ui-drawer-head .ui-btn--icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  color: var(--wb-icon-secondary);
+}
+
+.ui-dialog-desc {
+  margin: 0;
+  padding: 0 20px;
+  color: var(--wb-text-secondary);
+  font-size: 13.5px;
+  line-height: 22px;
+}
+
+.ui-dialog-body {
+  padding: 8px 20px 16px;
+  overflow-y: auto;
+}
+
+.ui-dialog-foot,
+.ui-drawer-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px 16px;
+}
+
+.ui-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1350;
+  background: var(--wb-overlay);
+  animation: wb-fadein 0.15s ease;
+}
+
+.ui-drawer {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  z-index: 1360;
+  display: flex;
+  flex-direction: column;
+  max-width: 92vw;
+  background: var(--wb-bg-primary);
+  box-shadow: var(--wb-shadow-dialog);
+}
+
+.ui-drawer--right {
+  right: 0;
+  animation: wb-drawer-in 0.22s ease;
+}
+
+.ui-drawer--left {
+  left: 0;
+  animation: ui-drawer-in-left 0.22s ease;
+}
+
+.ui-drawer--w420 {
+  width: 420px;
+}
+
+.ui-drawer--w288 {
+  width: 288px;
+}
+
+.ui-drawer-head {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--wb-border-default);
+}
+
+.ui-drawer-title {
+  flex: 1;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.ui-drawer-body {
+  flex: 1;
+  padding: 16px 18px;
+  overflow-y: auto;
+}
+
+@keyframes ui-drawer-in-left {
+  from {
+    transform: translateX(-40px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-dialog-overlay,
+  .ui-dialog,
+  .ui-drawer-overlay,
+  .ui-drawer {
+    animation: none;
+  }
+}

@@ -31,6 +31,8 @@ const ICON_NAMES: IconName[] = [
   "panel-left",
   "arrow-down",
   "log-out",
+  "triangle-alert",
+  "info",
 ];
 
 describe("Icon", () => {
