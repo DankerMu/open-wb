@@ -469,7 +469,7 @@ async function walkHeldDialogue(page: Page): Promise<void> {
         response.request().method() === "POST" &&
         response.status() === 202,
     );
-    await page.getByRole("button", { name: "发送" }).click();
+    await page.getByLabel("给助手发消息").press("Enter");
     const accepted = await promptAccepted;
     const promptIds = parsePromptIds(await accepted.json());
     await expect.poll(() => gatePhase(origin, gateId)).toBe("held");

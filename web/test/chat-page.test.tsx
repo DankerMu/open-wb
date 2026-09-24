@@ -1,4 +1,4 @@
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanupChatPage, renderChatPage } from "./chat-page-support.js";
 import {
@@ -35,6 +35,25 @@ afterEach(() => {
   cleanupChatPage();
 });
 
+async function mountKeyboardComposer() {
+  const snapshot = chatSnapshot({
+    status: "done",
+    assistantStatus: "done",
+    cursor: { epoch: 1, seq: null },
+  });
+  const pending = deferredResponse();
+  const promptPath = `/api/sessions/${SESSION_ID}/prompt`;
+  const { fetchMock } = renderChatPage(`/?session=${SESSION_ID}`, {
+    "/api/sessions": () => jsonResponse({ sessions: [snapshot.session] }),
+    [messagesPath]: () => jsonResponse(snapshot),
+    [promptPath]: () => pending.promise,
+  });
+  const input = (await screen.findByRole("textbox", {
+    name: "给助手发消息",
+  })) as HTMLTextAreaElement;
+  await waitFor(() => expect(input.disabled).toBe(false));
+  return { input, fetchMock, promptPath };
+}
 describe("chat page route integration", () => {
   it("loads a deep-linked running snapshot before opening events, then streams later frames to done", async () => {
     const initialMessages = deferredResponse();
@@ -127,5 +146,37 @@ describe("chat page route integration", () => {
       (screen.getByRole("textbox", { name: "给助手发消息" }) as HTMLTextAreaElement).disabled,
     ).toBe(false);
     expect(currentLocation()).toBe(`/?session=${SESSION_ID}`);
+  });
+
+  it("sends the exact multiline draft with Enter once and keeps a pending send locked", async () => {
+    const { input, fetchMock, promptPath } = await mountKeyboardComposer();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(fetchMock.mock.calls.filter(([path]) => path === promptPath)).toHaveLength(0);
+    const text = "  第一行\n第二行  ";
+    fireEvent.change(input, { target: { value: text } });
+    expect(fireEvent.keyDown(input, { key: "Enter" })).toBe(false);
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([path]) => path === promptPath)).toHaveLength(1);
+    });
+    const sent = fetchMock.mock.calls.find(([path]) => path === promptPath);
+    expect(JSON.parse(String(sent?.[1]?.body))).toEqual({ message: text });
+    fireEvent.keyDown(input, { key: "Enter", repeat: true });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(fetchMock.mock.calls.filter(([path]) => path === promptPath)).toHaveLength(1);
+  });
+
+  it("leaves newline and IME confirmation keys alone until a deliberate Enter", async () => {
+    const { input, fetchMock, promptPath } = await mountKeyboardComposer();
+    fireEvent.change(input, { target: { value: "中文草稿" } });
+    expect(fireEvent.keyDown(input, { key: "Enter", shiftKey: true })).toBe(true);
+    expect(fireEvent.keyDown(input, { key: "Enter", isComposing: true })).toBe(true);
+    expect(fireEvent.keyDown(input, { key: "Enter", keyCode: 229 })).toBe(true);
+    fireEvent.keyDown(input, { key: "Enter", repeat: true });
+    expect(fetchMock.mock.calls.filter(([path]) => path === promptPath)).toHaveLength(0);
+    expect(input.value).toBe("中文草稿");
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([path]) => path === promptPath)).toHaveLength(1);
+    });
   });
 });
