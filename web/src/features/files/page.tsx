@@ -66,6 +66,8 @@ function WorkspaceSwitcher({
 }: WorkspaceSwitcherProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const filteredWorkspaces = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
     if (normalizedQuery.length === 0) {
@@ -77,56 +79,74 @@ function WorkspaceSwitcher({
     );
   }, [query, workspaces]);
 
+  useEffect(() => {
+    if (open) {
+      searchRef.current?.focus();
+    }
+  }, [open]);
+
+  function dismissSwitcher() {
+    setOpen(false);
+    triggerRef.current?.focus();
+  }
+
   return (
-    <div style={{ overflowWrap: "anywhere" }}>
+    <div className="files-switcher">
       <button
         aria-expanded={open}
         aria-haspopup="dialog"
         aria-label="选择工作空间"
+        className="files-switcher-trigger"
         onClick={() => setOpen((current) => !current)}
-        style={{ boxSizing: "border-box", maxWidth: "100%", textAlign: "left" }}
+        ref={triggerRef}
         type="button"
       >
-        <strong>{currentWorkspace?.name ?? "未选择工作空间"}</strong>
-        <span>{currentWorkspace?.root ?? "—"}</span>
+        <span className="files-switcher-copy">
+          <strong>{currentWorkspace?.name ?? "未选择工作空间"}</strong>
+          <span>{currentWorkspace?.root ?? "—"}</span>
+        </span>
       </button>
       {open ? (
         <div
           aria-label="工作空间切换器"
+          className="files-switcher-panel"
           onKeyDown={(event) => {
             if (event.key === "Escape") {
               event.preventDefault();
-              setOpen(false);
+              dismissSwitcher();
             }
           }}
           role="dialog"
-          style={{ border: "1px solid currentColor", marginTop: "0.5rem", padding: "0.75rem" }}
         >
-          <label>
+          <label className="files-switcher-search">
             搜索工作空间
             <input
               onChange={(event) => setQuery(event.target.value)}
               placeholder="搜索工作空间"
+              ref={searchRef}
               value={query}
             />
           </label>
-          <ul>
+          <ul className="files-switcher-list">
             {filteredWorkspaces.map((workspace) => {
               const current = workspace.id === currentWorkspace?.id;
               return (
                 <li key={workspace.id}>
                   <button
                     aria-pressed={current}
+                    className="files-switcher-item"
                     onClick={() => {
-                      setOpen(false);
+                      dismissSwitcher();
                       onSelectWorkspace(workspace.id);
                     }}
                     type="button"
                   >
-                    <strong>{workspace.name}</strong>
-                    <span>{workspace.root}</span>
+                    <span className="files-switcher-item-copy">
+                      <strong>{workspace.name}</strong>
+                      <span>{workspace.root}</span>
+                    </span>
                     {current ? (
-                      <span aria-label="当前工作空间" role="img">
+                      <span aria-label="当前工作空间" className="files-switcher-check" role="img">
                         ✓
                       </span>
                     ) : null}
@@ -135,10 +155,13 @@ function WorkspaceSwitcher({
               );
             })}
           </ul>
-          {filteredWorkspaces.length === 0 ? <p>没有匹配的工作空间</p> : null}
+          {filteredWorkspaces.length === 0 ? (
+            <p className="files-switcher-empty ui-muted">没有匹配的工作空间</p>
+          ) : null}
           <button
+            className="ui-button"
             onClick={() => {
-              setOpen(false);
+              dismissSwitcher();
               onCreateWorkspace();
             }}
             type="button"
@@ -152,10 +175,12 @@ function WorkspaceSwitcher({
 }
 
 function EmptyWorkspace({
+  folderNotice,
   onNewDirectory,
   onNewWorkspace,
   switcher,
 }: {
+  folderNotice?: string | null;
   onNewDirectory(): void;
   onNewWorkspace(): void;
   switcher: ReactNode;
@@ -163,11 +188,12 @@ function EmptyWorkspace({
   return (
     <WorkspaceColumns
       directory={
-        <>
-          <p>该工作空间暂无目录</p>
-          <p>点击左上角 ＋ 新建文件夹，或挂载本服务器/外部服务器目录</p>
-        </>
+        <div className="files-tree-empty ui-empty">
+          <p>先选择或创建工作空间</p>
+          <p className="ui-muted">使用左上角 ＋ 新建工作空间</p>
+        </div>
       }
+      folderNotice={folderNotice ?? null}
       onNewDirectory={onNewDirectory}
       onNewWorkspace={onNewWorkspace}
       preview={<EmptyPreview />}
@@ -380,12 +406,16 @@ export function FilesPage() {
   ) : null;
 
   return (
-    <section>
-      <h1>工作空间</h1>
+    <section className="files-page">
+      <h1 className="ui-page-heading">工作空间</h1>
       {listForClient ? null : listState.status === "error" ? (
-        <p role="alert">{listState.message}</p>
+        <p className="ui-alert" role="alert">
+          {listState.message}
+        </p>
       ) : (
-        <p role="status">正在读取工作空间</p>
+        <p className="files-status ui-muted" role="status">
+          正在读取工作空间
+        </p>
       )}
       {listForClient && currentWorkspace && urlMatchesWorkspace ? (
         <WorkspaceBrowser
@@ -397,14 +427,12 @@ export function FilesPage() {
         />
       ) : null}
       {listForClient && !currentWorkspace && urlMatchesWorkspace ? (
-        <>
-          <EmptyWorkspace
-            onNewDirectory={() => setEmptyFolderError("当前工作空间没有可写目录")}
-            onNewWorkspace={openWorkspaceDialog}
-            switcher={switcher}
-          />
-          {emptyFolderError ? <p role="alert">{emptyFolderError}</p> : null}
-        </>
+        <EmptyWorkspace
+          folderNotice={emptyFolderError}
+          onNewDirectory={() => setEmptyFolderError("当前工作空间没有可写目录")}
+          onNewWorkspace={openWorkspaceDialog}
+          switcher={switcher}
+        />
       ) : null}
       {workspaceDialog ? (
         <WorkspaceDialog

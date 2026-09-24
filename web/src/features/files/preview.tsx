@@ -199,7 +199,7 @@ export function CsvTable({ text }: { text: string }) {
   const parsed = parseCsv(text);
   const { headers, rows } = csvCells(parsed.headers, parsed.rows);
   return (
-    <div>
+    <div className="files-table">
       <table>
         <thead>
           <tr>
@@ -218,23 +218,25 @@ export function CsvTable({ text }: { text: string }) {
           ))}
         </tbody>
       </table>
-      <p>{`共 ${parsed.rows.length} 行 · 大文件仅预览前若干行`}</p>
+      <p className="files-table-note">{`共 ${parsed.rows.length} 行 · 大文件仅预览前若干行`}</p>
     </div>
   );
 }
 
 export function CodeView({ text }: { text: string }) {
   return (
-    <table>
-      <tbody>
-        {lineDocuments(text).map((line, lineNumber) => (
-          <tr key={line.source}>
-            <td>{lineNumber + 1}</td>
-            <td style={{ whiteSpace: "pre" }}>{line.value === "" ? "\u00a0" : line.value}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div className="files-code">
+      <table>
+        <tbody>
+          {lineDocuments(text).map((line, lineNumber) => (
+            <tr key={line.source}>
+              <td className="files-code-ln">{lineNumber + 1}</td>
+              <td className="files-code-text">{line.value === "" ? "\u00a0" : line.value}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -250,12 +252,14 @@ export function PreviewPane({ path, name, size, mtime, preview }: PreviewPanePro
   const truncatedSize =
     preview.status === "success" && preview.data.truncated ? preview.data.size : null;
   return (
-    <article>
-      <header>
-        <p>{path}</p>
-        <p>{`${formatByteSize(size)} · ${new Date(mtime).toISOString()}`}</p>
+    <article className="files-preview-pane">
+      <header className="files-preview-toolbar">
+        <p className="files-preview-path">{path}</p>
+        <p className="files-preview-meta">{`${formatByteSize(size)} · ${new Date(mtime).toISOString()}`}</p>
       </header>
-      {truncatedSize === null ? null : <p>{`预览已截断（原始大小 ${truncatedSize} B）`}</p>}
+      {truncatedSize === null ? null : (
+        <p className="files-preview-truncation ui-muted">{`预览已截断（原始大小 ${truncatedSize} B）`}</p>
+      )}
       <PreviewBody key={path} name={name} preview={preview} />
     </article>
   );
@@ -264,17 +268,25 @@ export function PreviewPane({ path, name, size, mtime, preview }: PreviewPanePro
 function PreviewBody({ name, preview }: { name: string; preview: PreviewState }) {
   if (preview.status === "unsupported") {
     return (
-      <div>
+      <div className="files-preview-empty ui-empty">
         <p>该类型不支持预览</p>
-        {preview.message ? <p>{preview.message}</p> : null}
+        {preview.message ? <p className="ui-muted">{preview.message}</p> : null}
       </div>
     );
   }
   if (preview.status === "error") {
-    return <p>{preview.message}</p>;
+    return (
+      <p className="files-preview-message ui-alert" role="alert">
+        {preview.message}
+      </p>
+    );
   }
   if (preview.data.kind === "image") {
-    return <img alt={name} src={preview.data.url} />;
+    return (
+      <div className="files-image">
+        <img alt={name} src={preview.data.url} />
+      </div>
+    );
   }
   const extension = fileExtension(name);
   if (extension === "csv") {
@@ -290,7 +302,7 @@ function PreviewBody({ name, preview }: { name: string; preview: PreviewState })
 
 function RenderedMarkdownDocument({ text }: { text: string }) {
   return (
-    <div data-markdown-body="" style={{ overflowWrap: "anywhere" }}>
+    <div className="files-md" data-markdown-body="">
       {parseMarkdown(text).map(renderBlock)}
     </div>
   );
@@ -305,10 +317,16 @@ function MarkdownPreview({ text }: { text: string }) {
     <RenderedMarkdownDocument key={text} text={text} />
   );
   return (
-    <div>
-      <button onClick={() => setShowSource((current) => !current)} type="button">
-        {showSource ? "渲染视图" : "查看源码"}
-      </button>
+    <div className="files-preview-body">
+      <div className="files-md-toolbar">
+        <button
+          className="ui-button"
+          onClick={() => setShowSource((current) => !current)}
+          type="button"
+        >
+          {showSource ? "渲染视图" : "查看源码"}
+        </button>
+      </div>
       {body}
     </div>
   );

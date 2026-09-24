@@ -31,16 +31,15 @@ export const routeManifest: readonly RouteDefinition[] = [
   {
     path: "/files",
     label: "工作空间",
-    subtitle: "文件·预览·挂载",
+    subtitle: "文件·预览",
     title: "工作空间",
     description: "浏览、预览与管理工作空间文件",
   },
   {
     path: "/center",
     label: "中心",
-    subtitle: "专家·技能·知识库·模型·权限",
     title: "中心",
-    description: "S1d 将接入专家、技能、连接器、知识库、模型与权限",
+    description: "中心暂不可用",
   },
   {
     path: "/settings",
@@ -52,15 +51,27 @@ export const routeManifest: readonly RouteDefinition[] = [
 
 function AppShell() {
   return (
-    <div>
-      <aside aria-label="侧栏">
+    <div className="app-shell">
+      <aside aria-label="侧栏" className="sidebar">
+        <div className="sidebar-brand">
+          <span aria-hidden="true" className="brand-mark" />
+          <span className="sidebar-brand-name">WorkBuddy</span>
+        </div>
         <nav aria-label="主导航">
           <ul>
             {routeManifest.map(({ label, path, subtitle }) => (
               <li key={path}>
-                <NavLink end to={path}>
-                  <span>{label}</span>
-                  {subtitle ? <span>{subtitle}</span> : null}
+                <NavLink
+                  className={({ isActive }) =>
+                    isActive ? "sidebar-link is-active" : "sidebar-link"
+                  }
+                  end
+                  to={path}
+                >
+                  <span className="sidebar-link-copy">
+                    <span>{label}</span>
+                    {subtitle ? <span className="sidebar-link-sub">{subtitle}</span> : null}
+                  </span>
                 </NavLink>
               </li>
             ))}
@@ -137,8 +148,8 @@ function ProtectedAppShell() {
 
 function PlaceholderPage({ description, title }: Pick<RouteDefinition, "description" | "title">) {
   return (
-    <section>
-      <h1>{title}</h1>
+    <section className="ui-empty">
+      <h1 className="ui-page-heading">{title}</h1>
       <p>{description}</p>
     </section>
   );

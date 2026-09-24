@@ -65,6 +65,7 @@ async function walkProductionOrigin(page: Page, oracle: AuthOracle): Promise<voi
   await expectAuthenticatedRoute(page, "/files", "工作空间", "工作空间");
   await expectPrincipalFooter(page);
   oracle.phase = "authenticated";
+  const lightBackground = await expectDesktopLayout(page);
 
   const navigation = page.getByRole("navigation", { name: "主导航" });
   for (const route of ROUTES) {
@@ -88,6 +89,9 @@ async function walkProductionOrigin(page: Page, oracle: AuthOracle): Promise<voi
 
   await page.getByRole("radio", { name: "深色", exact: true }).check();
   await expectDarkTheme(page);
+  expect(
+    await page.getByRole("main").evaluate((el) => getComputedStyle(el).backgroundColor),
+  ).not.toBe(lightBackground);
   await page.reload();
   await expectAuthenticatedRoute(page, "/settings", "设置", "设置");
   await expectDarkTheme(page);
@@ -106,6 +110,24 @@ async function walkProductionOrigin(page: Page, oracle: AuthOracle): Promise<voi
   oracle.phase = "post-logout-reload";
   await page.reload();
   await expectLoggedOutOnSettings(page);
+}
+
+async function expectDesktopLayout(page: Page): Promise<string> {
+  const sidebar = await page
+    .getByRole("complementary", { name: "侧栏", exact: true })
+    .boundingBox();
+  const main = await page.getByRole("main").boundingBox();
+  const viewportWidth = await page.evaluate(() => innerWidth);
+  expect(sidebar).not.toBeNull();
+  expect(main).not.toBeNull();
+  if (!sidebar || !main) throw new Error("Application layout is not visible");
+  expect(sidebar.width).toBeGreaterThanOrEqual(160);
+  expect(sidebar.width).toBeLessThan(viewportWidth / 3);
+  expect(main.x).toBeGreaterThanOrEqual(sidebar.x + sidebar.width - 1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    viewportWidth,
+  );
+  return page.getByRole("main").evaluate((el) => getComputedStyle(el).backgroundColor);
 }
 
 async function runWithBrowserErrorOracle(

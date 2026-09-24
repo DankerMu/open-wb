@@ -171,10 +171,6 @@ describe("workspace page route integration", () => {
     const empty = renderFiles("/files?ws=unknown&keep=1#section", authenticatedFilesRoutes([]));
 
     expect(await screen.findByText("未选择工作空间", { exact: true })).toBeTruthy();
-    expect(screen.getByText("该工作空间暂无目录", { exact: true })).toBeTruthy();
-    expect(
-      screen.getByText("点击左上角 ＋ 新建文件夹，或挂载本服务器/外部服务器目录", { exact: true }),
-    ).toBeTruthy();
     await expectLocation("/files?keep=1#section");
     fireEvent.click(screen.getByRole("button", { name: "新建" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "新建文件夹" }));

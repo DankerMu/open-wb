@@ -13,13 +13,14 @@ function AppearanceCard() {
   ] as const;
 
   return (
-    <section>
+    <section className="settings-card">
       <h2>外观</h2>
       <fieldset>
         <legend>主题</legend>
-        <div aria-label="主题" role="radiogroup">
+        <div aria-label="主题" className="theme-options" role="radiogroup">
           {themeOptions.map(([value, label]) => (
-            <label key={value}>
+            <label className="theme-option" key={value}>
+              <span aria-hidden="true" className={`theme-swatch theme-swatch-${value}`} />
               <input
                 checked={selectedTheme === value}
                 name="theme"
@@ -32,7 +33,7 @@ function AppearanceCard() {
           ))}
         </div>
       </fieldset>
-      <p>{`当前生效：${currentTheme}`}</p>
+      <p className="ui-muted">{`当前生效：${currentTheme}`}</p>
     </section>
   );
 }
@@ -74,12 +75,16 @@ function AboutCard() {
   }, [loadServiceInfo]);
 
   return (
-    <section>
+    <section className="settings-card">
       <h2>关于</h2>
       {loading ? <p>正在读取服务信息</p> : null}
-      {error ? <p role="alert">{error}</p> : null}
+      {error ? (
+        <p className="ui-alert" role="alert">
+          {error}
+        </p>
+      ) : null}
       {serviceInfo ? (
-        <p>
+        <p className="service-identity">
           <span>{serviceInfo.name}</span>
           <span>{`版本 ${serviceInfo.version}`}</span>
         </p>
@@ -90,8 +95,8 @@ function AboutCard() {
 
 export function SettingsPage() {
   return (
-    <div>
-      <h1>设置</h1>
+    <div className="settings-page">
+      <h1 className="ui-page-heading">设置</h1>
       <AppearanceCard />
       <AboutCard />
     </div>

@@ -4,6 +4,7 @@ import { RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthGuard, AuthProvider, useAuth } from "../src/features/auth/index.js";
 import { createAppRouter } from "../src/routes/index.js";
+import "./dialog-platform.js";
 import { allowWorkspaceListFetch, createFetchMock } from "./support.js";
 
 const principal = { id: "user-1", account: "zhangsan", role: "member" };

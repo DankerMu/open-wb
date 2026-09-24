@@ -15,7 +15,12 @@ web workspace SHALL 具备 Vite + React 构建面：`web/index.html`、`src/main
 - THEN typecheck（JSX）、knip（vite 入口解析）、覆盖率全部通过
 
 ### Requirement: 路由 IA 与侧栏
-SPA SHALL 以 history 路由提供 `/`、`/files`、`/center`、`/settings` 四页与侧栏 4 tab（标签与副标题按 demo:1773-1778）；`/` 渲染 chat-web 规定的会话页（heading `会话`，当前会话由 `?session=<id>` 表示）；`/center` 为占位壳（标题 + 所属阶段说明）；`/files` 渲染 files-web 规定的工作空间页（heading `工作空间`，当前空间以 `?ws=<id>` 表示），routeManifest 描述及 routes/ui-walk 既有断言 SHALL 随真实页面同步更新；`/center` 为扁平路由（demo 的 8 tab 是页内状态而非 URL，demo:3144-3161；页内 tab 属 S1d）；demo 开发者页 `/tokens` 不移植。已认证侧栏底部 SHALL 有用户页脚，逐字展示当前 Principal 的 `account` 与 `role`（前端不伪造 display name/部门或角色映射）以及 `退出登录` 按钮。退出 SHALL 先显示可访问确认框：标题 `退出登录？`、说明 `退出后本机不再保留登录状态，未完成的任务会保留在你的沙箱中。`、按钮 `取消`/`退出`；取消不发请求，确认只调用一次 Provider-owned logout。其余 demo 用户菜单项延后见 proposal Non-goals。
+SPA SHALL 以 history 路由提供 `/`、`/files`、`/center`、`/settings` 四页与四个导航入口；视觉参考 demo，标签与说明仅表达已实现的功能，不宣传挂载等未交付能力。`/` 渲染 chat-web 规定的会话页（heading `会话`，当前会话由 `?session=<id>` 表示）；`/center` 明确展示暂不可用状态，不提供虚假功能按钮；`/files` 渲染 files-web 规定的工作空间页（heading `工作空间`，当前空间以 `?ws=<id>` 表示），routeManifest 描述及 routes/ui-walk 既有断言 SHALL 随真实页面同步更新；`/center` 为扁平路由（demo 的 8 tab 是页内状态而非 URL，demo:3144-3161；页内 tab 属 S1d）；demo 开发者页 `/tokens` 不移植。已认证侧栏底部 SHALL 有用户页脚，逐字展示当前 Principal 的 `account` 与 `role`（前端不伪造 display name/部门或角色映射）以及 `退出登录` 按钮。退出 SHALL 先显示可访问模态确认框：标题 `退出登录？`、说明退出后的登录状态与任务保留语义、按钮 `取消`/`退出`；取消不发请求，确认只调用一次 Provider-owned logout。其余 demo 用户菜单项延后见 proposal Non-goals。
+
+#### Scenario: 视觉与键盘可用性
+- WHEN 浏览器在桌面和390px窄屏打开登录及四个路由，并切换浅色/深色主题
+- THEN 使用本地构建的统一样式与带来源的设计token，桌面侧栏与主区并排，窄屏导航可达且页面无横向溢出；焦点/禁用/忙碌/错误状态可辨，不请求公网字体或资源
+- AND 退出模态打开时聚焦取消，Tab循环留在框内，空闲Escape关闭并恢复触发器焦点；提交中不由Escape取消
 
 #### Scenario: 四路由可达
 - WHEN 已登录用户依次访问四个路由

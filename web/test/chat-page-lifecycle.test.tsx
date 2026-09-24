@@ -1,5 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
+import "./dialog-platform.js";
 import type { ChatMessageSnapshot, ChatSession } from "../src/lib/session-contract.js";
 import {
   cleanupChatLifecycle,

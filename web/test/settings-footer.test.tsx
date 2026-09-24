@@ -3,6 +3,7 @@ import { RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthGuard, AuthProvider, useAuth } from "../src/features/auth/index.js";
 import { createAppRouter } from "../src/routes/index.js";
+import "./dialog-platform.js";
 import {
   createFetchMock,
   currentLocation,
@@ -159,7 +160,6 @@ describe("settings route", () => {
     expect(screen.getByText("当前生效：浅色", { exact: true })).toBeTruthy();
     expect(await screen.findByText(serviceInfo.name, { exact: true })).toBeTruthy();
     expect(screen.getByText(`版本 ${serviceInfo.version}`, { exact: true })).toBeTruthy();
-    expect(screen.queryByText("WorkBuddy", { exact: true })).toBeNull();
     expect(screen.queryByText("5.3.11", { exact: true })).toBeNull();
   });
 
@@ -592,6 +592,44 @@ describe("authenticated sidebar footer", () => {
     expect(fetchMock.mock.calls.filter(([path]) => path === "/api/auth/logout")).toHaveLength(0);
     expect(currentLocation()).toBe("/files?from=cancel#target");
     expect(screen.getByRole("heading", { level: 1, name: "工作空间" })).toBeTruthy();
+  });
+
+  it("closes the logout confirmation on Escape and restores the trigger", async () => {
+    const fetchMock = createAuthenticatedFetch();
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderApp("/files");
+    await expectAuthenticatedShell("/files");
+    const trigger = within(getFooter()).getByRole("button", { name: "退出登录" });
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole("alertdialog") as HTMLDialogElement;
+
+    expect(dialog.open).toBe(true);
+    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "取消" }));
+    fireEvent(dialog, new Event("cancel", { cancelable: true }));
+
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(fetchMock.mock.calls.filter(([path]) => path === "/api/auth/logout")).toHaveLength(0);
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("blocks Escape while logout is pending", async () => {
+    const pendingLogout = deferredResponse();
+    const fetchMock = createFetchMock(
+      authenticatedRoutes({ "/api/auth/logout": pendingLogout.promise }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderApp("/files");
+    await expectAuthenticatedShell("/files");
+    const dialog = openLogoutDialog() as HTMLDialogElement;
+    fireEvent.click(within(dialog).getByRole("button", { name: "退出" }));
+    fireEvent(dialog, new Event("cancel", { cancelable: true }));
+
+    expect(screen.getByRole("alertdialog")).toBe(dialog);
+    expect(fetchMock.mock.calls.filter(([path]) => path === "/api/auth/logout")).toHaveLength(1);
+    pendingLogout.resolve(new Response(null, { status: 204 }));
+    await expectLoginAt("/files");
   });
 
   it("admits one same-tick confirmation and returns to login after 204", async () => {

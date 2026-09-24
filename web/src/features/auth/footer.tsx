@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { trapDialogFocus } from "../../lib/dialog.js";
 import { useAuth } from "./provider.js";
 
 export function AuthFooter() {
@@ -7,6 +8,9 @@ export function AuthFooter() {
   const [pending, setPending] = useState(false);
   const mountedRef = useRef(true);
   const pendingRef = useRef(false);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -15,8 +19,35 @@ export function AuthFooter() {
     };
   }, []);
 
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!confirming || !dialog) {
+      return;
+    }
+
+    dialog.showModal();
+    cancelRef.current?.focus();
+
+    return () => {
+      if (dialog.open) {
+        dialog.close();
+      }
+      if (mountedRef.current) {
+        triggerRef.current?.focus();
+      }
+    };
+  }, [confirming]);
+
   if (!principal) {
     return null;
+  }
+
+  function dismissConfirm() {
+    if (pendingRef.current) {
+      return;
+    }
+
+    setConfirming(false);
   }
 
   async function confirmLogout() {
@@ -38,30 +69,68 @@ export function AuthFooter() {
   }
 
   return (
-    <footer>
-      <p>{principal.account}</p>
-      <p>{principal.role}</p>
-      {logoutError ? <p role="alert">{logoutError}</p> : null}
-      <button disabled={pending} onClick={() => setConfirming(true)} type="button">
+    <footer className="account-footer">
+      <div className="account-identity">
+        <span aria-hidden="true" className="account-avatar">
+          {principal.account.slice(0, 1).toUpperCase()}
+        </span>
+        <div className="account-copy">
+          <p>{principal.account}</p>
+          <p>{principal.role}</p>
+        </div>
+      </div>
+      {logoutError ? (
+        <p className="ui-alert" role="alert">
+          {logoutError}
+        </p>
+      ) : null}
+      <button
+        className="ui-button"
+        disabled={pending}
+        onClick={() => setConfirming(true)}
+        ref={triggerRef}
+        type="button"
+      >
         退出登录
       </button>
       {confirming ? (
-        <div
+        <dialog
           aria-describedby="logout-description"
           aria-labelledby="logout-title"
+          onKeyDown={trapDialogFocus}
+          className="logout-dialog"
+          onCancel={(event) => {
+            event.preventDefault();
+            dismissConfirm();
+          }}
+          ref={dialogRef}
           role="alertdialog"
         >
           <h2 id="logout-title">退出登录？</h2>
           <p id="logout-description">
             退出后本机不再保留登录状态，未完成的任务会保留在你的沙箱中。
           </p>
-          <button disabled={pending} onClick={() => setConfirming(false)} type="button">
-            取消
-          </button>
-          <button disabled={pending} onClick={confirmLogout} type="button">
-            退出
-          </button>
-        </div>
+          {pending ? <p className="ui-muted">正在退出</p> : null}
+          <div className="logout-dialog-actions">
+            <button
+              className="ui-button"
+              disabled={pending}
+              onClick={dismissConfirm}
+              ref={cancelRef}
+              type="button"
+            >
+              取消
+            </button>
+            <button
+              className="ui-button ui-button-danger"
+              disabled={pending}
+              onClick={confirmLogout}
+              type="button"
+            >
+              退出
+            </button>
+          </div>
+        </dialog>
       ) : null}
     </footer>
   );

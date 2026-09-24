@@ -25,7 +25,13 @@ type ConversationViewProps = {
   streamError: string | null;
 };
 
-const exactWhitespace = { whiteSpace: "pre-wrap" as const };
+type ChatMessageView = ChatState["messages"][number];
+type ChatStepView = ChatMessageView["steps"][number];
+
+function isVerboseToolDetail(detail: string): boolean {
+  const start = detail.trimStart();
+  return start.startsWith("{") || start.startsWith("[");
+}
 
 function SessionEntries({
   onSelectSession,
@@ -39,23 +45,28 @@ function SessionEntries({
   sessionTitle(session: ChatSession): string;
 }) {
   return (
-    <ul>
+    <ul className="chat-session-list">
       {sessions.map((session) => {
         const selected = session.id === requestedSessionId;
         const title = sessionTitle(session);
         return (
-          <li key={session.id} style={{ marginBottom: "0.5rem" }}>
+          <li className="chat-session-item" key={session.id}>
             <button
               aria-current={selected ? "true" : undefined}
               aria-label={title}
+              className="chat-session-button"
               onClick={() => onSelectSession(session.id)}
               type="button"
             >
-              <strong style={{ display: "block" }}>{title}</strong>
+              <span
+                aria-hidden="true"
+                className={`chat-session-dot chat-session-dot-${session.status}`}
+              />
+              <strong className="chat-session-title">{title}</strong>
               <span
                 aria-label={`${title} ${session.status}`}
+                className={`chat-session-status chat-session-status-${session.status}`}
                 role="status"
-                style={{ display: "block", marginTop: "0.25rem" }}
               >
                 {session.status}
               </span>
@@ -67,31 +78,61 @@ function SessionEntries({
   );
 }
 
+function StepCard({ step }: { step: ChatStepView }) {
+  const detail = isVerboseToolDetail(step.detail) ? (
+    <details className="chat-step-disclosure" open>
+      <summary className="chat-step-summary">原始输出</summary>
+      <p className="chat-step-detail">{step.detail}</p>
+    </details>
+  ) : (
+    <p className="chat-step-detail">{step.detail}</p>
+  );
+  return (
+    <section aria-label={step.name} className="chat-step">
+      <div className="chat-step-head">
+        <strong className="chat-step-name">{step.name}</strong>
+        <p
+          aria-label={`${step.name} ${step.status}`}
+          className={`chat-step-status chat-step-status-${step.status}`}
+          role="status"
+        >
+          {step.status}
+        </p>
+      </div>
+      {detail}
+    </section>
+  );
+}
+
+function MessageArticle({ message }: { message: ChatMessageView }) {
+  const assistant = message.role !== "user";
+  const roleLabel = assistant ? "助手" : "用户";
+  return (
+    <article
+      aria-label={roleLabel}
+      className={assistant ? "chat-msg chat-msg-assistant" : "chat-msg chat-msg-user"}
+    >
+      <div aria-hidden="true" className="chat-msg-role">
+        {roleLabel}
+      </div>
+      <p className="chat-msg-body">{message.content}</p>
+      {message.steps.map((step) => (
+        <StepCard key={step.id} step={step} />
+      ))}
+      {message.error ? (
+        <p className="ui-alert chat-msg-error" role="alert">
+          {message.error}
+        </p>
+      ) : null}
+    </article>
+  );
+}
+
 function MessageThread({ historyView }: { historyView: ChatState }) {
   return (
-    <section aria-label="消息">
+    <section aria-label="消息" className="chat-thread">
       {historyView.messages.map((message) => (
-        <article
-          aria-label={message.role === "user" ? "用户" : "助手"}
-          key={message.id}
-          style={{
-            background: message.role === "user" ? "rgba(0, 0, 0, 0.04)" : "transparent",
-            marginBottom: "0.75rem",
-            padding: "0.5rem 0.75rem",
-          }}
-        >
-          <p style={exactWhitespace}>{message.content}</p>
-          {message.steps.map((step) => (
-            <section key={step.id} aria-label={step.name} style={{ marginTop: "0.5rem" }}>
-              <strong>{step.name}</strong>
-              <p>{step.detail}</p>
-              <p role="status" aria-label={`${step.name} ${step.status}`}>
-                {step.status}
-              </p>
-            </section>
-          ))}
-          {message.error ? <p role="alert">{message.error}</p> : null}
-        </article>
+        <MessageArticle key={message.id} message={message} />
       ))}
     </section>
   );
@@ -120,13 +161,25 @@ export function ConversationView({
   streamError,
 }: ConversationViewProps) {
   const listColumn: ReactNode = (
-    <aside aria-label="会话侧栏" style={{ minWidth: 0 }}>
-      <nav aria-label="会话列表">
-        <button onClick={onCreateSession} type="button">
+    <aside aria-label="会话侧栏" className="chat-sidebar">
+      <nav aria-label="会话列表" className="chat-session-nav">
+        <button
+          className="ui-button ui-button-primary chat-new-session"
+          onClick={onCreateSession}
+          type="button"
+        >
           新建会话
         </button>
-        {listError ? <p role="alert">{listError}</p> : null}
-        {listLoading ? <p role="status">正在读取会话</p> : null}
+        {listError ? (
+          <p className="ui-alert" role="alert">
+            {listError}
+          </p>
+        ) : null}
+        {listLoading ? (
+          <p className="ui-muted chat-session-loading" role="status">
+            正在读取会话
+          </p>
+        ) : null}
         {sessions ? (
           <SessionEntries
             onSelectSession={onSelectSession}
@@ -140,36 +193,56 @@ export function ConversationView({
   );
 
   return (
-    <div
-      style={{
-        display: "grid",
-        gap: "1rem",
-        gridTemplateColumns: "minmax(15rem, 22rem) minmax(0, 1fr)",
-      }}
-    >
+    <div className="chat-layout">
       {listColumn}
-      <div style={{ minWidth: 0 }}>
-        {historyError ? <p role="alert">{historyError}</p> : null}
-        {promptError ? <p role="alert">{promptError}</p> : null}
-        {streamError ? <p role="alert">{streamError}</p> : null}
-        {requestedSessionId && historyView ? (
-          <MessageThread historyView={historyView} />
-        ) : (
-          <p>{emptySelection}</p>
-        )}
-        <form onSubmit={onSubmit}>
-          <label>
+      <div className="chat-main">
+        {historyError ? (
+          <p className="ui-alert" role="alert">
+            {historyError}
+          </p>
+        ) : null}
+        {promptError ? (
+          <p className="ui-alert" role="alert">
+            {promptError}
+          </p>
+        ) : null}
+        {streamError ? (
+          <p className="ui-alert" role="alert">
+            {streamError}
+          </p>
+        ) : null}
+        <div className="chat-transcript">
+          {requestedSessionId && historyView ? (
+            <MessageThread historyView={historyView} />
+          ) : (
+            <p className="ui-empty chat-welcome">{emptySelection}</p>
+          )}
+        </div>
+        <form className="chat-composer" onSubmit={onSubmit}>
+          <label className="chat-composer-label">
             {composerLabel}
             <textarea
+              className="chat-composer-input"
               disabled={composerDisabled}
               onChange={(event) => onChangeDraft(event.target.value)}
+              rows={3}
               value={draft}
             />
           </label>
-          {generating ? <p role="status">{generatingLabel}</p> : null}
-          <button disabled={sendDisabled} type="submit">
-            发送
-          </button>
+          <div className="chat-composer-foot">
+            {generating ? (
+              <p className="chat-composer-pending" role="status">
+                {generatingLabel}
+              </p>
+            ) : null}
+            <button
+              className="ui-button ui-button-primary chat-send"
+              disabled={sendDisabled}
+              type="submit"
+            >
+              发送
+            </button>
+          </div>
         </form>
       </div>
     </div>
