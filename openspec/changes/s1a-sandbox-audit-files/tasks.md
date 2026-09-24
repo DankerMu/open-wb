@@ -71,9 +71,10 @@ Archive coordination: #134已晋升UID降级关闭条款，并以完整当前CI/
 
 - [x] 6.1 #130 / PR253 merged7e00c26，finald79a5740，CI35957055888全8green。tracked md/两行csv/合法PNG + 独立files.hurl16请求：创建201/409、列表取唯一id、重复mkdir409、越界403与相对请求前快照的新关联审计、精确预览字节、他账号404/双logout。四文件smoke同服务DBsandbox连跑两次各38请求绿，standalone绿、0auth行；共享CIhelper两模式启动前预置，guardrails576PASS/0FAIL，三席clean。Width exception: multi-path；按profile smoke/CI触发expanded，不含6.2浏览器步骤/5.5uidjob/6.3控制面。
 - [x] 6.2 #133 / PR262 headc364a95 merge9ebb3e7，CI35984311706九项全绿，fresh UI job107583281945完整1passed6.2s。四路由后/heldchat前真实UI选择或创建smoke-fixture、实际三文件、精确Markdown标题/编号源码与CSV两行、rootwalk-out创建、reload同ws/空间/树；原exact2auth/me401与errororacle保留。本地wrongfixture精确heading RED→恢复fullGREEN4.8s并覆盖已有空间选择；四截图零非预期错误。expanded三席clean0fixpasses；无产品/config/fixture改变。
-- [ ] 6.3 控制面同步：AGENTS.md Directory Map（`server/` 描述含沙箱/审计/工作空间、`smoke/` 提及沙箱夹具）、Verification Matrix 行不变但 evidence 提及四文件；`test-ci-harness.sh` 的 AGENTS 锚点同 PR 更新（依赖 6.1、6.2、S0b #107 的矩阵两行）
+- [x] 6.3 #135 / PR266 head9c24759 merge6bb6965，CI35998719618九项成功。AGENTS smoke目录描述增加沙箱夹具，HTTP evidence明确public/auth/chat/files四文件；server行已含沙箱/审计/工作空间/对话而保持原样，UI行/命令/十surface/UIDblock/三downgrade不变。精确oracle literal及全部wrap/peersection数据同PR更新；语义RED→722PASS0FAIL，anti-drift0/size798；机械证明parser/helper逻辑未变。nonefixture独立PASS，无新增运行时风险。
 
 Suggested fixture level: none - harness 自身即验证物；CI 接线以 workflow 全绿为证
 Minimal mergeable slice: 6.1 是夹具 + `files.hurl` + `make smoke` 四文件 + CI 预置的原子一刀（hurl 用例进入 `make smoke` 与 CI 预置夹具必须同 PR，否则 CI 红）；6.2 依赖 6.1；6.3 依赖 6.1、6.2
 Archive coordination: files-harness「沙箱夹具与 files.hurl」已独立晋升，父最终归档去重并保留pre/post审计freshness，不能退回只看上一条kind。verification-harness四文件/两模式共享prelaunch预置建立在#105已晋升的真实omp+假上游/PGID清理完整合同上；保留其所有场景和后续控制面强化，不用旧父组合块覆盖。S0b/S1a父保持active。
 Archive coordination: #133 files-harness「走查 /files 步骤」和完整当前canonical UI requirement已独立晋升；父最终归档保留真实heldchat/recovery场景、exact2auth/me401、caller freshsandbox且walk-out不存在、精确preview数据、实际根内容ready及同ws重载，不用旧父简版替换。#135仍负责控制面文案。
+Archive coordination: #135 files-harness「控制面与 oracle 同步」和当前完整CI requirement已晋升；全部24子issue均已实现，父最终归档须逐条核对canonical覆盖后只归档历史协调包，不能重放旧delta覆盖后续安全、harness或状态契约。最终人工功能验收仍属于用户。
