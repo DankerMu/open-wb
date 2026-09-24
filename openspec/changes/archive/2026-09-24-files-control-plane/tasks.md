@@ -3,11 +3,13 @@
 ## 2. Atomic wording mirror
 - [x] 2.1 Update existing oracle expectations/mutation anchors only, parse decodedPython and demonstrate semantic RED against unchanged AGENTS wording.
 - [x] 2.2 Change only smoke Directory Map and HTTP evidence cell; preserve server line, UI row, all commands/surfaces/UID enforcement/three downgrades and parser behavior.
-- [ ] 2.3 Main final guardrails/anti-drift/strict checks and exactheadCI green; negative oldwording/missingpayload cases reject for intendedreason.
+- [x] 2.3 Main final guardrails/anti-drift/strict checks and exactheadCI green; negative oldwording/missingpayload cases reject for intendedreason.
 ## 3. Delivery
-- [ ] 3.1 Complete atomicPR, automaticmerge andselectivearchive without overwriting priorcanonicalclauses; no runtimeclaims beyondexistingproof.
+- [x] 3.1 Complete atomicPR, automaticmerge andselectivearchive without overwriting priorcanonicalclauses; no runtimeclaims beyondexistingproof.
 
 Local evidence: decoded contract/parser compile0; updated oracle against old AGENTS exits1 at missing sandbox-fixture description, a semantic RED. Two documentation lines restore make test-guardrails722PASS0FAIL exit0; anti-drift0/zero clones/size798. Mechanical preservation check: after removing two added cm input cases, entire harness is byte-identical to baseline with only the two approved literal substitutions. All parser/helper logic and unrelated contracts unchanged. No runtime/temporary executable created; logs and decoded evidence retained.
+
+Final evidence: PR266 head9c2475964a8ca37a1a65555457d30c695393db15, CI35998719618 all9success, merged6bb6965. None-level fixture PASS; Main literal-preservation audit found no new executable risk, so no source cross-review under the none contract. Public summary https://github.com/DankerMu/open-wb/pull/266#issuecomment-5814066412 .
 
 ## Risk packs
 - Selected Documentation / migration notes:2.2/3.1 exact source wording andadditivecanonicalpromotion.
