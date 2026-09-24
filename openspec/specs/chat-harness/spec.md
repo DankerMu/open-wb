@@ -1,7 +1,7 @@
 # chat-harness Specification
 
 ## Purpose
-Define the manual smoke command boundary for a caller-owned service: raw configuration gates, credential-free Hurl execution, shape-only assertions, and exact Make contract protection. Automated real-omp integration and browser walkthroughs are separate capabilities until delivered.
+Define manual smoke gates and automated dialogue acceptance: credential-free Hurl invocation, exact or shape-only assertions over a caller-owned service, real pinned-omp CI integration, and bounded job-owned process cleanup. Dialogue browser walkthrough requirements remain separate until delivered.
 ## Requirements
 ### Requirement: 手动真实上游冒烟入口
 `make smoke-live` SHALL consume an already-running service without build/start/stop. If MODEL_UPSTREAM_BASE_URL or MODEL_UPSTREAM_API_KEY is absent or empty, it SHALL exit nonzero and identify the missing variable without printing its value or executing Hurl. Required values SHALL be transferred literally through Make and quoted shell expansion, without evaluating Make/shell syntax in their bytes. After gates, missing Hurl SHALL produce explicit installation guidance. Hurl SHALL run in a clean child environment containing only PATH, with `--test --jobs 1 --retry 0`, `base_url` from raw SMOKE_BASE_URL, `content_pattern=^.+$`, `min_bash_steps=0`, and only `smoke/chat.hurl`. Upstream gate values SHALL NOT appear in Hurl args/environment or diagnostics. Hurl failure SHALL propagate nonzero. Existing `make smoke` recipe SHALL remain unchanged in this slice.
@@ -18,4 +18,26 @@ The target SHALL be listed exactly once in .PHONY and the command header. The ex
 #### Scenario: Exact command guard
 - WHEN the Make oracle inspects a duplicate spaced smoke-live header, altered recipe or missing .PHONY entry
 - THEN it rejects the changed contract; the current complete guardrail suite remains green
+
+### Requirement: HTTP 冒烟对话用例
+`smoke/chat.hurl` SHALL independently start with empty cookies, login, create a session201 and send one prompt202. It SHALL poll only messages GET with bounded per-entry retries until the captured assistant and session are done; assert content matches `content_pattern`, bash step count is at least `min_bash_steps`, and every step is done. It SHALL logout, login as another account, verify session access404, logout, then verify bearer-free POST `/v1/chat/completions`401. It SHALL not require earlier smoke files or leave live authentication sessions/running turns. `make smoke` SHALL pass exact anchored fake reply and min_bash_steps1; existing smoke-live passes nonempty shape and min_bash_steps0 through the same file.
+
+#### Scenario: Real pinned runtime completes dialogue
+- WHEN compiled app uses verified real omp18.0.10 and the existing controlled upstream, and make smoke runs twice
+- THEN public/auth/chat all pass with exact reply `你好，这是 WorkBuddy 的第一条流式回复。`, at least one done bash step, completed captured assistant/session and account/proxy boundaries intact
+
+#### Scenario: Oracle rejects false completion
+- WHEN response text differs, captured assistant is not done, bash is missing or failed, a foreign account can read the session, or bearer-free proxy accepts the request
+- THEN the chat oracle fails for the corresponding semantic assertion and does not retry the POST prompt
+
+### Requirement: Real-runtime CI harness ownership
+CI smoke/ui-walk SHALL retain existing action identities/counts, setup/build/static roots and timeouts; fetch verified omp without a new cache action, start their own controlled loopback upstream before compiled app, pass explicit OMP_BIN/OMP_STATE_DIR/SANDBOX_ROOT and fake MODEL_UPSTREAM values, and invoke the existing Make target. `.github/scripts/ci-fake-upstream.sh` SHALL launch the existing Node fixture, not duplicate it. Existing cancellation/process-group/cleanup failure semantics SHALL remain; all job-owned upstream/omp processes SHALL be reaped on success, failure and cancellation. Two harness jobs SHALL not reference secrets or real model upstreams; existing secret-scan token is explicitly preserved by user decision.
+
+#### Scenario: Independent jobs remain isolated
+- WHEN smoke and ui-walk each execute with job-local paths and ports
+- THEN verified binary and ready controlled upstream precede app readiness, harness result is propagated, owned children are gone after teardown and unrelated processes remain untouched
+
+#### Scenario: Prerequisite and cleanup failures are visible
+- WHEN fetch validation fails, upstream fails to start/readiness or exits early, app or harness fails, cancellation arrives, or owned children resist termination
+- THEN the wrapper exits nonzero with bounded cleanup and credential-free diagnostics rather than silently skipping or substituting fake-omp
 
