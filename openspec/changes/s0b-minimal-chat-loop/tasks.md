@@ -60,7 +60,7 @@ Minimal mergeable slice: 5.1 api 扩展单独可合并保绿（四方法有配�
 
 - [x] 6.1 Makefile：`smoke-live` env 门禁、原样变量和 PATH-only Hurl 形状档调用、`.PHONY`/头注释与精确 recipe/重复目标 oracle；原 `make smoke` 不变。#94 / PR #249 已合并（30f4f7941135959c6ad4aaeea41829f30122b984），十项命令边界验证及487项守卫通过，源代码 CI 35921350985 八项通过。独立规范归档另走 PR/CI；此项不声称真实 Hurl 对话已通过，`chat.hurl` 属于 #105。
 - [x] 6.2 #105 / PR#251 已原子交付verified omp-fetch、job-owned假上游、smoke/ui-walk runtime env、三文件chat.hurl/精确变量与全部oracle；四action矩阵不变，secrets禁令按用户确认仅两个harness jobs。真实18.0.10本地smoke两次各22请求、独立chat10请求、原UI1/1通过；最终守卫563PASS，真实抗终止omp/app及独立child identity反例闭环。源合并99056cf6a0d6827fa273dc9ce96140c47b25364d；review round3 clean/2fixpasses；CI35950807791八项通过，Ubuntu两job实际下载校验Linux18.0.10。独立归档另走PR/CI，#106对话UI与#107控制面仍待交付。
-- [ ] 6.3 `web/e2e/ui-walk.spec.ts` 增对话步骤（新建、发送、步骤卡、回合中刷新续流、正文、回合后刷新完整、console error oracle 不变）；本地与 CI `make ui-walk` 绿
+- [x] 6.3 #106/PR255交付真实回合中reload原生续流与完成后reload；用户批准existing测试上游UUID gate扩展。post-open running恢复完成后release，期间禁止REST代替suffix；屏蔽真实text.delta与注入consoleerror反例均RED、恢复GREEN，保留exact两次401。38项fixture/legacy通过，真实本地UI反复通过，CI35960180481八项通过含Linux18.0.10UI1passed6.4s；round2clean/1fixpass。源合并36ef3245bf2d6c618a307656b1e5819d95d7dd8d，独立归档另走PR/CI。
 - [ ] 6.4 控制面三处同步：AGENTS.md 验证矩阵（`omp-fetch`/`smoke-live` 两行）与 Directory Map、`constraints.yaml verification.surfaces` 两条与 `downgrades` 一条（S0b 同 uid 窗口内 `/proc` 凭证读取向量，ADR-0010 于 S1a 关闭）、Makefile 头注释；`scripts/test-ci-harness.sh` 的 AGENTS 行、`verification.surfaces` 期望元组（八→十）与 `wanted` 同 PR 更新，三处命令字面比对由该 oracle 机械执行，`make test-guardrails` 绿
 
 Suggested fixture level: none - harness 自身即验证物；CI 接线以 workflow 全绿为证

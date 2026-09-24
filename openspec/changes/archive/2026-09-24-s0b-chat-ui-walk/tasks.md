@@ -21,10 +21,10 @@
 - [x] 2.1 Paired gate plus legacy fake/model-proxy tests38/38 passed. Five disposable wrong implementations (no hold, wrong owner release, missing disconnect cleanup, missing expiry, cap off-by-one) rejected semantically; restored11/11 and dedicated stability11/11.
 - [x] 2.2 Actual built app/official18.0.10 journey twice passed1/1: held running/prefix before and after same-session reload, post-open recovery finished before release, no further REST until native suffix/done, completed reload; screenshot browser-completed.png inspected, old browser error oracle passed.
 - [x] 2.3 Actual native text.delta suppression after reload left only prefix and failed exact final text; injected console.error failed unchanged error oracle; restored and independent stability passed. Wrong message.delta event-name initial mutant did not modify behavior, survived and receives no qualification credit. Real smoke3files/22requests, scoped static/types/knip/jscpd0clones, fullguards563PASS and strictspec passed; hashes bound externally.
-- [ ] 2.4 Expanded independent source review and exact-head CI ui-walk/all-checks passed.
+- [x] 2.4 Expanded three-seat review plus fresh round2 clean after1fixpass on18ae5d4aacd36f4cd4b3de8f5378f6a0569a5ad9; exact-head CI35960180481 eight jobs passed, Ubuntu real18.0.10 extended browser journey1passed6.4s.
 
 ## 3. Delivery
-- [ ] 3.1 Merge source/close106, update parent6.3, independently archive via PR/CI before107.
+- [x] 3.1 Source PR255 merged36ef3245bf2d6c618a307656b1e5819d95d7dd8d and closed106; parent6.3 updated and canonical archive prepared. Independent archive PR/CI/merge remains the external delivery gate before107.
 
 Evidence /tmp/open-wb-issue106-evidence. User approved fake-upstream/pairedtests/necessarytestwiring scope extension; no product code. Parent owns checks; writers skip all validation/formatting/commits and reviewers remain read-only. No concrete ReturnType-derived contracts. Characterization of verification code requires known-good/wrongbehavior discrimination, not manufactured production regressions.
 
