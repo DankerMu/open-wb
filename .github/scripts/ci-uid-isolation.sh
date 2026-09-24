@@ -54,6 +54,11 @@ sudoers_src="${job_root}/workbuddy-omp.sudoers"
 } > "$sudoers_src"
 sudo visudo -c -f "$sudoers_src"
 sudo install -m 0440 "$sudoers_src" /etc/sudoers.d/workbuddy-omp
+# GitHub-hosted runners can ship this pre-existing sudoers file with mode 0644.
+# Normalize only that file before validating the complete sudoers configuration.
+if sudo test -f /etc/sudoers.d/runner; then
+  sudo chmod 0440 /etc/sudoers.d/runner
+fi
 sudo visudo -c
 sudo chgrp workbuddy "$RUNNER_TEMP" "$job_root" "$uid_tmp" "$SANDBOX_ROOT" "$OMP_STATE_DIR"
 sudo chmod g+x "$RUNNER_TEMP"
