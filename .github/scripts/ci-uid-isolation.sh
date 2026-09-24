@@ -35,9 +35,10 @@ job_root="${RUNNER_TEMP}/workbuddy-uid-isolation"
 uid_tmp="${job_root}/tmp"
 proof_home="${job_root}/proof home:colon"
 [ "$SANDBOX_ROOT" = "$job_root/sandbox" ] && [ "$OMP_STATE_DIR" = "$job_root/omp-state" ] && [ "$(dirname "$DB_PATH")" = "$job_root/private" ] || { echo "uid-isolation paths must be job-owned" >&2; exit 1; }
-term_wait="${CI_TERM_WAIT:-40}"; kill_wait="${CI_KILL_WAIT:-8}"
+term_wait="${CI_TERM_WAIT:-40}"; kill_wait="${CI_KILL_WAIT:-8}"; ready_sleep="${CI_READY_SLEEP:-0.25}"
 for v in "$term_wait" "$kill_wait"; do case "$v" in ''|*[!0-9]*) echo "invalid bound" >&2; exit 2 ;; esac; done
-primary_rc=0; cleanup_rc=0; pending=0
+for v in "$ready_sleep"; do case "$v" in ''|*[!0-9.]*|*.*.*) echo "invalid bound" >&2; exit 2 ;; esac; done
+primary_rc=0; cleanup_rc=0; pending=0; phase_pid=""; phase_kind=""
 mkdir -p "$job_root" "$uid_tmp" "$proof_home" "$SANDBOX_ROOT/u1" "$OMP_STATE_DIR" "$(dirname "$DB_PATH")"
 touch "$DB_PATH"
 chmod 0600 "$DB_PATH"
@@ -72,7 +73,10 @@ sudo chmod 2770 "$job_root" "$uid_tmp" "$SANDBOX_ROOT" "$OMP_STATE_DIR"
 cp -R smoke/fixtures/sandbox/u1/. "$SANDBOX_ROOT/u1/"
 sudo chgrp -R workbuddy "$SANDBOX_ROOT/u1"
 sudo find "$SANDBOX_ROOT/u1" -type d -exec chmod 2770 {} +
-honor_cancel() { [ "$pending" -eq 0 ] || { pending=1; primary_rc=143; exit 143; }; }
+honor_cancel() { [ "$pending" -eq 0 ] || { trap 'pending=1' TERM INT; pending=1; primary_rc=143; exit 143; }; }
+alive() { [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null; }
+galive() { [ -n "${1:-}" ] && kill -0 -- "-$1" 2>/dev/null; }
+wait_until() { n=0; while [ "$n" -lt "$1" ] && "$2" "$3"; do sleep "$ready_sleep"; n=$((n + 1)); done; }
 owned_pids() {
   local status
   if pids="$(pgrep -u omp)"; then return 0; else
@@ -80,6 +84,41 @@ owned_pids() {
     if [ "$status" -eq 1 ]; then pids=""; return 0; fi
     cleanup_rc=1; echo "cleanup failed: cannot inspect omp uid processes" >&2; return "$status"
   fi
+}
+stop_phase() {
+  local p="$1" grace="${2:-$term_wait}"; [ -n "$p" ] || return 0
+  if galive "$p"; then
+    kill -TERM -- "-$p" 2>/dev/null || { echo "cleanup failed: TERM did not reach PGID ${p}" >&2; cleanup_rc=1; }
+    wait_until "$grace" galive "$p"
+    if galive "$p"; then
+      cleanup_rc=1; echo "cleanup failed: KILL escalation for PGID ${p}" >&2
+      kill -KILL -- "-$p" 2>/dev/null || echo "cleanup failed: KILL did not reach PGID ${p}" >&2
+      wait_until "$kill_wait" galive "$p"
+    fi
+    galive "$p" && { echo "cleanup failed: PGID ${p} still present" >&2; cleanup_rc=1; }
+  elif alive "$p"; then
+    cleanup_rc=1; echo "cleanup failed: phase PGID contract failed (pid ${p})" >&2
+    kill -TERM "$p" 2>/dev/null || true; wait_until "$grace" alive "$p"
+    alive "$p" && { echo "cleanup failed: KILL escalation for PID ${p}" >&2; kill -KILL "$p" 2>/dev/null || true; wait_until "$kill_wait" alive "$p"; }
+  fi
+  if galive "$p" || alive "$p"; then return 0; fi
+  wait "$p" 2>/dev/null || true
+}
+reap_phase() {
+  local grace="$term_wait"
+  [ -n "$phase_pid" ] || return 0
+  [ "$pending" -eq 1 ] && [ "$phase_kind" = smoke ] && grace=$((4 * (term_wait + kill_wait) + 2))
+  if galive "$phase_pid" || alive "$phase_pid"; then
+    stop_phase "$phase_pid" "$grace"
+  fi
+  if galive "$phase_pid" || alive "$phase_pid"; then
+    echo "cleanup failed: phase group still present (PGID ${phase_pid})" >&2
+    cleanup_rc=1
+    return 0
+  fi
+  wait "$phase_pid" 2>/dev/null || true
+  phase_pid=""
+  phase_kind=""
 }
 reap_owned() {
   local pids pid n
@@ -117,11 +156,46 @@ reap_owned() {
 on_exit() {
   local ec=$?
   trap 'pending=1' TERM INT; trap - EXIT
+  reap_phase
   reap_owned
   [ "$pending" -eq 1 ] && primary_rc=143
   if [ "$primary_rc" -eq 0 ] && [ "$ec" -ne 0 ]; then primary_rc=$ec; fi
   if [ "$primary_rc" -ne 0 ]; then exit "$primary_rc"; fi
   exit "$cleanup_rc"
+}
+run_phase() {
+  phase_kind="$1"; shift
+  set -m
+  "$@" &
+  phase_pid=$!
+  set +m
+  trap 'trap '\''pending=1'\'' TERM INT; pending=1; honor_cancel' TERM INT
+  honor_cancel
+  if alive "$phase_pid" && ! galive "$phase_pid"; then echo "phase PGID contract failed (pid ${phase_pid})" >&2; cleanup_rc=1; fi
+  if wait "$phase_pid"; then
+    phase_rc=0
+  else
+    phase_rc=$?
+  fi
+  trap 'pending=1' TERM INT
+  if [ "$pending" -eq 1 ]; then
+    primary_rc=143
+    reap_phase
+    return 0
+  fi
+  if galive "$phase_pid"; then
+    echo "cleanup failed: phase group still present after leader exit (PGID ${phase_pid})" >&2
+    cleanup_rc=1
+    reap_phase
+    return 0
+  fi
+  wait "$phase_pid" 2>/dev/null || true
+  phase_pid=""
+  phase_kind=""
+  if [ "$phase_rc" -ne 0 ]; then
+    primary_rc="$phase_rc"
+    return 0
+  fi
 }
 trap on_exit EXIT; trap 'pending=1' TERM INT; honor_cancel
 preflight="$(env -i PATH="$PATH" HOME="$proof_home" sudo -n -u omp --preserve-env=HOME,PATH -- /usr/bin/env)"
@@ -129,10 +203,11 @@ printf '%s\n' "$preflight"
 printf '%s\n' "$preflight" | grep -Fx "HOME=${proof_home}" >/dev/null || { echo "preflight HOME preservation failed" >&2; primary_rc=1; exit 1; }
 honor_cancel
 export TMPDIR="$uid_tmp"
-sg workbuddy -c 'umask 007; cd "${GITHUB_WORKSPACE}/server" && WORKBUDDY_UID_TEST=1 OMP_USER=omp ../node_modules/.bin/vitest run test/linux/uid-isolation.test.ts --coverage=false'
+run_phase test sg workbuddy -c 'umask 007; cd "${GITHUB_WORKSPACE}/server" && WORKBUDDY_UID_TEST=1 OMP_USER=omp ../node_modules/.bin/vitest run test/linux/uid-isolation.test.ts --coverage=false'
 honor_cancel
 reap_owned
 [ "$cleanup_rc" -eq 0 ] || exit 1
-sg workbuddy -c 'umask 007; OMP_USER=omp bash .github/scripts/ci-compiled-server.sh smoke'
+[ "$primary_rc" -eq 0 ] || exit "$primary_rc"
+run_phase smoke sg workbuddy -c 'umask 007; OMP_USER=omp bash .github/scripts/ci-compiled-server.sh smoke'
 honor_cancel
 reap_owned
