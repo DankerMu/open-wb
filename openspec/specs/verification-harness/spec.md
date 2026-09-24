@@ -97,6 +97,16 @@ smoke 与 ui-walk SHALL 作为两个独立 Ubuntu job 进入 CI，并纳入 `all
 - WHEN either smoke or ui-walk starts through the shared compiled-server helper, or a mutation deletes/reorders fixture copy or removes files.hurl from Make smoke
 - THEN both valid modes SHALL provision the tracked three files before startup and mutated wiring SHALL fail the precise source/runtime oracle; existing lifecycle and sibling-job isolation guarantees remain unchanged
 
+第三个 harness job uid-isolation SHALL 遵循 omp-uid-isolation 的正式CI要求，timeout15，隔离job-owned端口/DB/状态并复用既有工具安装及compiled-server smoke。all-checks-passed SHALL 额外依赖uid-isolation，direct job精确八个；checkout/setup-node出现次数 SHALL 分别8/6，uv及其它action数量不变。源码派生oracle SHALL 同步新job步骤/env/aggregate与helper可选OMP_USER保留；任何去掉opt-in、换uid传递、HOME门禁、共享组执行或必需依赖的候选 SHALL 被拒绝。既有两个harness jobs及全部更早场景保持不变。
+
+#### Scenario: uid job 与精确 oracle 原子接线
+- WHEN the workflow and source/runtime guardrails run on the same revision
+- THEN eight direct jobs include uid-isolation, checkout/setup-node counts are8/6, the selected Linux test is executed not skipped, real-omp four-file smoke passes under OMP_USER=omp, and failure/cancelled/skipped in that job fails the aggregate
+
+#### Scenario: 换 uid 透传保持可选
+- WHEN the existing compiled-server helper receives OMP_USER absent or present
+- THEN absent retains existing direct smoke/UI behavior without inventing an empty user, while present is preserved into the server; no fallback silently drops the user
+
 ### Requirement: 共享 Vitest 配置的 native ESM 边界
 server 与 web SHALL 通过逐字相同的完整相对 specifier `../vitest.shared.mjs` 消费唯一 tracked 根共享配置；该文件 SHALL 以 `.mjs` 自描述为 ESM，不依赖根 `package.json` 的 module type，不得保留 `.ts`/`.js` sibling、无扩展名 import、wrapper、fallback 或 warning suppression。共享配置 SHALL 继续使用 V8 coverage provider、include `src/**/*.{ts,tsx}`，且 lines/functions/branches/statements thresholds 各为 80；web SHALL 只在共享配置之上继续叠加 `environment: jsdom` 与 `e2e/**` exclusion。Makefile lint/fmt source list 与 `biome.json` 根级 include SHALL 指向同一 exact `.mjs` 文件并实际让 Biome 处理它；CI 的既有 Biome 命令、workspace test scripts、产品代码、依赖/lockfile及 Vite/Vitest versions SHALL 保持不变。
 
@@ -115,19 +125,19 @@ server 与 web SHALL 通过逐字相同的完整相对 specifier `../vitest.shar
 - **THEN** fixture inspection、Biome 或默认/native loader 验证非零，不能由 bundle loader 转译、stale artifact、fallback、lint exclusion 或输出过滤假绿
 
 ### Requirement: 第三方 CI action 使用 Node 24 runtime
-CI SHALL 只以 `actions/checkout@v5`、`actions/setup-node@v5`、`astral-sh/setup-uv@v7` 与 `gitleaks/gitleaks-action@v3` 使用这四种第三方 action；其对应 major tag 的 `action.yml` SHALL 声明 `runs.using: node24`，且 GitHub-hosted runner SHALL 满足 Node 24 action 所需的 runner v2.327.1+。七个 direct jobs 的使用矩阵 SHALL 完整且唯一：checkout 分别出现在 fast-checks、unit-tests、anti-drift、secret-scan、sast、smoke、ui-walk；setup-node 分别出现在 fast-checks、unit-tests、anti-drift、smoke、ui-walk；setup-uv 只出现在 fast-checks 与 unit-tests；gitleaks-action 只出现在 secret-scan。不得保留旧/混合 major、Node 20 fallback environment、重复/替换/旁路 action 或未受约束的同类使用点。
+CI SHALL 只以 `actions/checkout@v5`、`actions/setup-node@v5`、`astral-sh/setup-uv@v7` 与 `gitleaks/gitleaks-action@v3` 使用这四种第三方 action；其对应 major tag 的 `action.yml` SHALL 声明 `runs.using: node24`，且 GitHub-hosted runner SHALL 满足 Node 24 action 所需的 runner v2.327.1+。八个 direct jobs 的使用矩阵 SHALL 完整且唯一：checkout 分别出现在 fast-checks、unit-tests、anti-drift、secret-scan、sast、smoke、ui-walk、uid-isolation；setup-node 分别出现在 fast-checks、unit-tests、anti-drift、smoke、ui-walk、uid-isolation；setup-uv 只出现在 fast-checks 与 unit-tests；gitleaks-action 只出现在 secret-scan。不得保留旧/混合 major、Node 20 fallback environment、重复/替换/旁路 action 或未受约束的同类使用点。
 
-关键输入与顺序 SHALL 保持：每个 checkout 在所属 job 的仓库消费者前执行；五个 setup-node 均保留 exact `{ node-version-file: .tool-versions, cache: npm }` 并在 `npm ci` 前完成，只缓存 npm package-manager data 而非 `node_modules`；两个 setup-uv 在 `uv sync` / `uv run` 前安装 uv并保持 GitHub-hosted cache lookup/restore 与成功 post lifecycle，按 cache hit/miss 允许 no-save/save 分支；secret-scan 的 checkout 保留 exact `fetch-depth: 0`，随后 gitleaks-action 只以 exact `GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}` 环境运行。所有原有 run steps、job timeout、constraints mirror、质量阈值、service harness、七项 aggregate dependencies及 failure/cancelled/skipped 拒绝语义 SHALL 保持不变。
+关键输入与顺序 SHALL 保持：每个 checkout 在所属 job 的仓库消费者前执行；六个 setup-node 均保留 exact `{ node-version-file: .tool-versions, cache: npm }` 并在 `npm ci` 前完成，只缓存 npm package-manager data 而非 `node_modules`；两个 setup-uv 在 `uv sync` / `uv run` 前安装 uv并保持 GitHub-hosted cache lookup/restore 与成功 post lifecycle，按 cache hit/miss 允许 no-save/save 分支；secret-scan 的 checkout 保留 exact `fetch-depth: 0`，随后 gitleaks-action 只以 exact `GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}` 环境运行。所有原有 run steps、job timeout、constraints mirror、质量阈值、service harness、八项 aggregate dependencies及 failure/cancelled/skipped 拒绝语义 SHALL 保持不变。
 
-source-derived CI oracle SHALL 从实际传入 workflow 解析全部七个 direct jobs，校验上述 action major/矩阵/输入/顺序和无 fallback/bypass 条件；任一旧 major、遗漏、混合、重复、替换、relocation、关键 input 漂移或 `ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION` 注入均 SHALL 使 `make test-guardrails` 非零。Mutation generator SHALL 绑定 scratch source，生成失败不得充当成功 rejection；不使用目标 action 的新增 unrelated job SHALL 继续可演进。
+source-derived CI oracle SHALL 从实际传入 workflow 解析全部八个 direct jobs，校验上述 action major/矩阵/输入/顺序和无 fallback/bypass 条件；任一旧 major、遗漏、混合、重复、替换、relocation、关键 input 漂移或 `ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION` 注入均 SHALL 使 `make test-guardrails` 非零。Mutation generator SHALL 绑定 scratch source，生成失败不得充当成功 rejection；不使用目标 action 的新增 unrelated job SHALL 继续可演进。
 
 #### Scenario: 所有 direct jobs 在 Node 24 action 上完成
 - **WHEN** 新 PR CI 在 GitHub-hosted `ubuntu-latest` 执行该 workflow
-- **THEN** fast-checks、unit-tests、anti-drift、secret-scan、sast、smoke、ui-walk 与 `all-checks-passed` 均成功，所有 action post/cache steps 和原有下游 run steps实际执行
+- **THEN** fast-checks、unit-tests、anti-drift、secret-scan、sast、smoke、ui-walk、uid-isolation 与 `all-checks-passed` 均成功，所有 action post/cache steps 和原有下游 run steps实际执行
 - **AND** setup-node 从 `.tool-versions` 使用 Node 24.13.1，main step 完成 npm cache lookup/restore（允许 primary-key hit 或 miss）且 post step 成功；primary-key miss 时 SHALL 保存新 cache，hit 时 SHALL 允许明确的 `not saving cache` 结果；setup-uv 安装可执行 uv并完成其 hosted cache lifecycle，secret-scan 在 full-history checkout 后成功执行 gitleaks
 
 #### Scenario: Node 20 runtime annotation 完全消失
-- **WHEN** 查询同一 PR head SHA 上七个 direct jobs 的全部 check-run annotations 与 action step logs
+- **WHEN** 查询同一 PR head SHA 上八个 direct jobs 的全部 check-run annotations 与 action step logs
 - **THEN** `Node.js 20 is deprecated` annotation 为零，四种 action均不被列为 Node 20 target，且 workflow/job/step environment 中不存在 `ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION`
 - **AND** 项目 `.tool-versions` 的 Node 24 与 action自身的 `runs.using: node24` SHALL 作为两个独立证据记录，不得相互替代
 
