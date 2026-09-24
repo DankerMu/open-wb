@@ -21,6 +21,10 @@ strictness_profile:
       profile_default: "pre-commit block"
       chosen: "本机有 gitleaks 时 block，缺席时提示放行；CI 恒为 block"
       reason: "开发机未装 gitleaks；make setup 提示安装，CI 兜底"
+    - control: s0b_same_uid_credential_exposure
+      profile_default: "omp 与 app-server 分 uid，/proc 与配置文件凭证不可读"
+      chosen: "S0b 同 uid 仅环境白名单；/proc/<app pid>/environ 与配置文件仍可读"
+      reason: "S0b 范围接受该向量；ADR-0010 S1a ubuntu job uid-isolation 全绿并进入 all-checks-passed 时删除。不得声称仅设置 OMP_USER 即证明隔离"
 
 generated_sections:
   agents_md:
@@ -139,6 +143,14 @@ verification:
       command: "make ui-walk"
       evidence: "exit-code; Chromium journey on caller-owned service"
       required_at: "L2+"
+    omp-fetch:
+      command: "make omp-fetch"
+      evidence: "exit-code; verified official omp v18.0.10 version output and SHA256 match"
+      required_at: "prerequisite"
+    smoke-live:
+      command: "make smoke-live"
+      evidence: "exit-code; manual real-upstream nonempty done reply"
+      required_at: "manual"
   enforced_by: "AGENTS.md 验证矩阵 ↔ 本段双向镜像 + Makefile 目标存在性检查"
 
 exemptions:
