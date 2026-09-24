@@ -1,6 +1,7 @@
 export interface FakeUpstreamStartOptions {
   port?: number;
   apiKey?: string;
+  gateTtlMs?: number;
 }
 
 export interface FakeUpstreamServer {

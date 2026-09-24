@@ -14,16 +14,18 @@
 - Domain tenant/auth selected only existing account/session correctness and gate isolation →2.1,2.2; production sandbox/uid/migration/catalog not changed.
 
 ## 1. Fixture and implementation
-- [ ] 1.1 Single implementer test-only handoff for controlled upstream gate behavior; parent runs baseline and discriminator against current implementation before gate edits.
-- [ ] 1.2 Implement isolated bounded gate in existing test upstream and extend existing UI journey; preserve old fixture defaults/error oracle and no product edits.
+- [x] 1.1 Single implementer test-only handoff; parent actual HTTP test observed marked final response complete all three parts instead of first prefix (10fail/1pass), distinct from missing control endpoint setup RED.
+- [x] 1.2 Existing fixture gained isolated bounded gate and journey gained actual held reload; existing defaults/error classifier and product hashes preserved.
 
 ## 2. Parent acceptance
-- [ ] 2.1 Run paired gate tests and existing fake-upstream/model-proxy consumers; qualify identity/lifecycle wrong behavior and restoration, no hidden skips.
-- [ ] 2.2 Build actual apps and run official18.0.10 journey twice: gate-held prefix/bash/serverrunning before reload and after same-session reload, native reconnect, explicitrelease then exacttext/bashdone/sessiondone, completedreload two messages, exact browsererror oracle; retain screenshot.
-- [ ] 2.3 Qualify browser false-positive candidates and restore/stability; real three-file smoke unchanged, scoped lint/typecheck/guards/strictspec; bind protectedproduct and oracle hashes.
+- [x] 2.1 Paired gate plus legacy fake/model-proxy tests38/38 passed. Five disposable wrong implementations (no hold, wrong owner release, missing disconnect cleanup, missing expiry, cap off-by-one) rejected semantically; restored11/11 and dedicated stability11/11.
+- [x] 2.2 Actual built app/official18.0.10 journey twice passed1/1: held running/prefix before and after same-session reload, post-open recovery finished before release, no further REST until native suffix/done, completed reload; screenshot browser-completed.png inspected, old browser error oracle passed.
+- [x] 2.3 Actual native text.delta suppression after reload left only prefix and failed exact final text; injected console.error failed unchanged error oracle; restored and independent stability passed. Wrong message.delta event-name initial mutant did not modify behavior, survived and receives no qualification credit. Real smoke3files/22requests, scoped static/types/knip/jscpd0clones, fullguards563PASS and strictspec passed; hashes bound externally.
 - [ ] 2.4 Expanded independent source review and exact-head CI ui-walk/all-checks passed.
 
 ## 3. Delivery
 - [ ] 3.1 Merge source/close106, update parent6.3, independently archive via PR/CI before107.
 
 Evidence /tmp/open-wb-issue106-evidence. User approved fake-upstream/pairedtests/necessarytestwiring scope extension; no product code. Parent owns checks; writers skip all validation/formatting/commits and reviewers remain read-only. No concrete ReturnType-derived contracts. Characterization of verification code requires known-good/wrongbehavior discrimination, not manufactured production regressions.
+
+Evidence notes: first abort test read server gate before close notification; bounded actual404 observation now detects cleanup and missing-onClose mutant fails. Initial types exposed exactOptional/unsupported withResolvers/Response.timing/current locator options and one extracted type omission; final owner types compile with unchanged compiler settings. Gate tests originally duplicated existing SSE parser; canonical test-only fake-upstream-helpers.ts now serves both consumers while expected output literals remain independent of producer. Parent formatting only; writer reported no validation runs. Source diff exceeds400-line review-only guidance because user-approved gate lifecycle plus browser/paired fault oracles form this atomic verification slice; no thresholds changed.
