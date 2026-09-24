@@ -589,6 +589,7 @@ describe("authenticated sidebar footer", () => {
         exact: true,
       }),
     ).toBeTruthy();
+    expect(within(dialog).queryByText("退出请求已发送，关闭窗口不会撤销请求。")).toBeNull();
     fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
 
     expect(screen.queryByRole("alertdialog")).toBeNull();
@@ -628,6 +629,7 @@ describe("authenticated sidebar footer", () => {
     const dialog = openLogoutDialog();
     fireEvent.click(within(dialog).getByRole("button", { name: "退出" }));
     expect(within(dialog).getByRole("button", { name: "关闭" })).toBeTruthy();
+    expect(within(dialog).getByText("退出请求已发送，关闭窗口不会撤销请求。")).toBeTruthy();
     fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
 
     expect(screen.queryByRole("alertdialog")).toBeNull();
@@ -751,7 +753,7 @@ describe("迁移静态契约", () => {
     expect(footer).toContain("returnFocus");
     expect(readRepoFile("web/src/styles.css")).not.toContain(".logout-dialog");
     for (const file of ["web/test/settings-footer.test.tsx", "web/test/render-app-router.tsx"]) {
-      expect(readRepoFile(file)).toContain('import "./radix-platform.js";');
+      expect(readRepoFile(file)).toMatch(/^import "\.\/radix-platform\.js";$/m);
     }
   });
 });
