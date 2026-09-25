@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mdRender, parseMarkdown } from "../src/features/files/md-render.js";
+import { mdRender, parseMarkdown } from "../src/lib/md-render.js";
 
 function renderMarkdown(src: string): HTMLDivElement {
   const root = document.createElement("div");

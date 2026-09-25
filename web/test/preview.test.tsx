@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mdRender } from "../src/features/files/md-render.js";
 import { CodeView, CsvTable, PreviewPane } from "../src/features/files/preview.js";
+import { mdRender } from "../src/lib/md-render.js";
 
 afterEach(() => {
   cleanup();

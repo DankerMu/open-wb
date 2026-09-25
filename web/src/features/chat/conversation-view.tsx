@@ -1,5 +1,7 @@
-import type { FormEvent, ReactNode } from "react";
+import { type FormEvent, memo, type ReactNode } from "react";
+import { MarkdownView } from "../../lib/markdown-view.js";
 import type { ChatSession } from "../../lib/session-contract.js";
+import { BrandMark } from "../../ui/index.js";
 import { Composer } from "./composer.js";
 import { SESSION_STATUS_LABEL } from "./status-label.js";
 import type { ChatState } from "./stream.js";
@@ -102,29 +104,41 @@ function StepCard({ step }: { step: ChatStepView }) {
   );
 }
 
-function MessageArticle({ message }: { message: ChatMessageView }) {
+const MessageArticle = memo(function MessageArticle({ message }: { message: ChatMessageView }) {
   const assistant = message.role !== "user";
-  const roleLabel = assistant ? "助手" : "用户";
+  const steps = message.steps.map((step) => <StepCard key={step.id} step={step} />);
+  const error = message.error ? (
+    <p className="ui-alert chat-msg-error" role="alert">
+      {message.error}
+    </p>
+  ) : null;
+  if (!assistant) {
+    return (
+      <article aria-label="用户" className="chat-msg chat-msg-user">
+        <p className="chat-msg-body">{message.content}</p>
+        {steps}
+        {error}
+      </article>
+    );
+  }
   return (
-    <article
-      aria-label={roleLabel}
-      className={assistant ? "chat-msg chat-msg-assistant" : "chat-msg chat-msg-user"}
-    >
-      <div aria-hidden="true" className="chat-msg-role">
-        {roleLabel}
+    <article aria-label="助手" className="chat-msg chat-msg-assistant">
+      <span aria-hidden="true" className="chat-msg-avatar">
+        <BrandMark size={28} />
+      </span>
+      <div className="chat-msg-main">
+        <div className="chat-md">
+          <MarkdownView source={message.content} />
+          {message.status === "running" ? (
+            <span aria-hidden="true" className="ui-caret chat-caret" />
+          ) : null}
+        </div>
+        {steps}
+        {error}
       </div>
-      <p className="chat-msg-body">{message.content}</p>
-      {message.steps.map((step) => (
-        <StepCard key={step.id} step={step} />
-      ))}
-      {message.error ? (
-        <p className="ui-alert chat-msg-error" role="alert">
-          {message.error}
-        </p>
-      ) : null}
     </article>
   );
-}
+});
 
 function MessageThread({ historyView }: { historyView: ChatState }) {
   return (
