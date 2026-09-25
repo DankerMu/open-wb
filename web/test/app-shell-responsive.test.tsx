@@ -355,7 +355,7 @@ describe("视口切换与折叠偏好 (R7/R8)", () => {
   });
 });
 
-describe("覆盖层内用户区 (R9/R9b/R9c)", () => {
+describe("覆盖层内用户区 (R9/R9b/R9c/R9d)", () => {
   it("R9 菜单与确认框叠在覆盖层上，取消后覆盖层仍开、焦点回 用户菜单", async () => {
     installViewport(true);
     const { fetchMock } = mountShell("/");
@@ -398,6 +398,35 @@ describe("覆盖层内用户区 (R9/R9b/R9c)", () => {
     expect(within(reopened.dialog).queryByRole("status", { hidden: true })).toBeNull();
     expect(screen.queryByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeNull();
     expect(logoutRequests(flow.fetchMock)).toBe(1);
+  });
+
+  it("R9d 覆盖层内关闭退出失败提示，关闭覆盖层再重开不复现", async () => {
+    installViewport(true);
+    const failure = { error: { code: "forbidden", message: "无法退出当前会话" } };
+    const { fetchMock, view } = mountShell("/", {
+      "/api/auth/logout": () => jsonResponse(failure, 403),
+    });
+    await screen.findByRole("heading", { level: 1, name: HERO });
+
+    const first = await openNav();
+    const { confirm, trigger } = await openLogoutConfirm(first.dialog);
+    fireEvent.click(within(confirm).getByRole("button", { name: "退出" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog", { hidden: true })).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    const alert = within(first.dialog).getByRole("alert");
+    const dismiss = within(alert).getByRole("button", { name: "关闭提示" });
+    dismiss.focus();
+    fireEvent.click(dismiss);
+    expect(within(first.dialog).queryByRole("alert")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+
+    fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
+    await expectNavClosed(view.container, first.button);
+
+    const second = await openNav();
+    expect(within(second.dialog).getByRole("button", { name: "用户菜单" })).toBeTruthy();
+    expect(within(second.dialog).queryByRole("alert", { hidden: true })).toBeNull();
+    expect(logoutRequests(fetchMock)).toBe(1);
   });
 
   it("R9c 确认框开着时视口跨越 760：锁定态随文档流用户区保留，不再发请求", async () => {
