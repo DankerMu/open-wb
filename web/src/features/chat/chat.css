@@ -179,6 +179,209 @@
   color: var(--wb-text-primary);
 }
 
+/* Welcome state, adapted from resource/workbuddy-live-demo.html:341-359 (.hero, .quick-row),
+   402-414 (.playbooks-*, .ai-disclaimer). Playbooks and disclaimer flow below the composer
+   instead of the demo's absolute bottom pinning. Auto margins center the column while keeping
+   its top reachable when a short viewport makes it scroll. */
+.chat-main--welcome {
+  overflow-y: auto;
+}
+
+.chat-main--welcome > .chat-transcript {
+  flex: 0 0 auto;
+  overflow: visible;
+  margin-top: auto;
+}
+
+.chat-welcome-intro {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 8px;
+}
+
+.chat-quick-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 48rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.chat-quick-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--wb-color-border-secondary);
+  background: var(--wb-bg-primary);
+  color: var(--wb-text-secondary);
+  font-family: var(--wb-font);
+  font-size: 14px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
+}
+
+/* Pill radius restated over the global :focus-visible radius (same specificity, later). */
+.chat-quick-chip,
+.chat-quick-chip:focus-visible {
+  border-radius: 100px;
+}
+
+.chat-quick-chip:hover:not(:disabled) {
+  background: var(--wb-home-composer-chip-bg-hover);
+  color: var(--wb-text-primary);
+}
+
+.chat-welcome-foot {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 48rem;
+  margin: 16px auto auto;
+  padding: 0 8px 12px;
+}
+
+.chat-playbooks {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat-playbooks-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--wb-text-secondary);
+}
+
+.chat-playbooks-head > p {
+  margin: 0;
+  min-width: 0;
+}
+
+.chat-playbooks-refresh {
+  flex: none;
+  margin-left: auto;
+  padding: 2px 4px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--wb-text-secondary);
+  font-family: var(--wb-font);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chat-playbooks-refresh:hover:not(:disabled) {
+  background: var(--wb-bg-hover);
+  color: var(--wb-text-primary);
+}
+
+.chat-playbooks-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-playbooks-row > li {
+  flex: 1 1 140px;
+  max-width: 220px;
+  min-width: 0;
+}
+
+.chat-playbook-card {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--wb-border-default);
+  background: var(--wb-bg-secondary);
+  color: var(--wb-text-primary);
+  font-family: var(--wb-font);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+
+/* Card radius restated over the global :focus-visible radius (same specificity, later). */
+.chat-playbook-card,
+.chat-playbook-card:focus-visible {
+  border-radius: 12px;
+}
+
+.chat-playbook-card:hover:not(:disabled) {
+  border-color: var(--wb-text-tertiary);
+  box-shadow: var(--wb-activity-card-shadow);
+}
+
+.chat-quick-chip:disabled,
+.chat-playbooks-refresh:disabled,
+.chat-playbook-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.chat-playbook-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chat-playbook-title > .ui-icon {
+  flex: none;
+  color: var(--wb-brand-primary);
+}
+
+.chat-playbook-desc {
+  display: -webkit-box;
+  margin-top: 3px;
+  overflow: hidden;
+  font-size: 11.5px;
+  line-height: 17px;
+  color: var(--wb-text-secondary);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.chat-disclaimer {
+  margin: 12px 0 0;
+  font-size: 11px;
+  text-align: center;
+  color: var(--wb-text-secondary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-quick-chip,
+  .chat-playbook-card {
+    transition: none;
+  }
+}
+
 .chat-thread {
   box-sizing: border-box;
   width: 100%;

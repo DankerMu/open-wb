@@ -5,9 +5,12 @@ import {
   ChevronDown,
   ChevronRight,
   CircleCheck,
+  Code,
   Copy,
+  FileChartLine,
   FileCode,
   File as FileIcon,
+  FileSpreadsheet,
   FileText,
   Folder,
   Image as ImageIcon,
@@ -23,11 +26,13 @@ import {
   Send,
   Settings,
   Shield,
+  Sparkles,
   Table,
   Terminal,
   TriangleAlert,
   Wrench,
   X,
+  Zap,
 } from "lucide-react";
 
 /** 本仓用到的 lucide 图标：name → 组件的唯一映射，不逐个再导出。 */
@@ -60,6 +65,11 @@ const ICONS = {
   "triangle-alert": TriangleAlert,
   info: Info,
   "circle-check": CircleCheck,
+  code: Code,
+  "file-chart-line": FileChartLine,
+  "file-spreadsheet": FileSpreadsheet,
+  sparkles: Sparkles,
+  zap: Zap,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

@@ -266,7 +266,7 @@ describe("静态契约 (T8)", () => {
     ]) {
       expect(readRepoFile(path), path).not.toContain("<h1");
     }
-    expect(readRepoFile("web/src/features/chat/conversation-view.tsx")).toContain(HERO);
+    expect(readRepoFile("web/src/features/chat/welcome.tsx")).toContain(HERO);
     for (const path of [
       "web/src/styles.css",
       "web/src/features/chat/chat.css",

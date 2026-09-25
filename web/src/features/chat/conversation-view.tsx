@@ -3,6 +3,7 @@ import type { ChatSession } from "../../lib/session-contract.js";
 import { Composer } from "./composer.js";
 import { SESSION_STATUS_LABEL } from "./status-label.js";
 import type { ChatState } from "./stream.js";
+import { WelcomeIntro, WelcomePlaybooks } from "./welcome.js";
 
 type ConversationViewProps = {
   composerDisabled: boolean;
@@ -189,7 +190,7 @@ export function ConversationView({
   return (
     <div className="chat-layout">
       {listColumn}
-      <div className="chat-main">
+      <div className={requestedSessionId ? "chat-main" : "chat-main chat-main--welcome"}>
         {historyError ? (
           <p className="ui-alert" role="alert">
             {historyError}
@@ -211,7 +212,7 @@ export function ConversationView({
               <MessageThread historyView={historyView} />
             ) : null
           ) : (
-            <h1 className="chat-hero">WorkBuddy，我帮你</h1>
+            <WelcomeIntro disabled={composerDisabled} onPick={onChangeDraft} />
           )}
         </div>
         <Composer
@@ -223,6 +224,9 @@ export function ConversationView({
           placeholder={requestedSessionId ? "继续追问，或派一个新任务…" : "今天帮你做些什么"}
           sendDisabled={sendDisabled}
         />
+        {requestedSessionId ? null : (
+          <WelcomePlaybooks disabled={composerDisabled} onPick={onChangeDraft} />
+        )}
       </div>
     </div>
   );
