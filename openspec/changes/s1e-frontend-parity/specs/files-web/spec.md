@@ -39,6 +39,10 @@
 - WHEN 新建空间为空名或返回 409，或新建目录为空名、含任一斜线、返回 409
 - THEN 分别显示约定文案；本地无效输入零 mutation；其它 ApiError 显示 message，网络/非法信封使用既有稳定回退
 
+#### Scenario: 树条目图标与大小
+- WHEN 根一层含目录 `out` 与文件 `readme.md`（2048 B）、`notes.csv`（1536 B）、`logo.png`（90492109 B）、`归档.zip`（12 B），点击 `readme.md`
+- THEN 目录行为 `folder` 图标；四个文件依次显示 `file-text`/`table`/`image`/`archive` 图标与 `2.0 KB`、`1.5 KB`、`86.3 MB`、`12 B`；文件按钮可访问名恰为文件名；预览头显示 `file-text` 图标、路径与 `2.0 KB · <mtime>`
+
 ### Requirement: 文件界面与键盘可用性
 文件页 SHALL 只经 ui-primitives 取样式与行为（token、`Dialog`、`Menu`（含 `＋` 创建菜单，替换手写 `role="menu"`）、`Popover`、`EmptyState`、`Icon`、`Button`），桌面左右分栏（树栏 `280px`，`≤900px` 时 `210px`），`≤760px` 纵向布局（树在上、预览在下，各自内部滚动）；长路径与文件名不得撑宽页面（树条目 `text-overflow: ellipsis` + `title` 为全名），代码和表格在预览容器内部滚动（容器 `overflow: auto`）。创建对话框 SHALL 为阻止背景交互的模态，打开时聚焦首个表单控件，Tab/Shift+Tab 留在框内，Escape/取消关闭并恢复触发器焦点；请求进行中保持忙碌反馈且不得重复提交，但仍允许取消等待，通过既有 AbortController 与代际守卫防止迟到响应影响新界面。取消等待不承诺撤销服务端已完成操作，界面 SHALL 明示可刷新确认结果。既有账号/请求代际隔离与安全预览语义 SHALL 保持。
 

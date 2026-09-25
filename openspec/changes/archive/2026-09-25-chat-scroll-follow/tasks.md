@@ -9,7 +9,7 @@
 - [x] 2.3 反向注入八项各红并回退（design Required evidence）。
 
 ## 3. Verification
-- [ ] 3.0 archive PR：父 delta `s1e-frontend-parity/specs/chat-web/spec.md` 的 `回到最新` 句按子 delta 细化同步；父 Scenario「回到最新」按子 Scenario 扩写（打开位于底部、点击后继续跟随、欢迎态无按钮）；勾父 tasks 4.5。
+- [x] 3.0 archive PR：父 delta `s1e-frontend-parity/specs/chat-web/spec.md` 的 `回到最新` 句按子 delta 细化同步；父 Scenario「回到最新」按子 Scenario 扩写（打开位于底部、点击后继续跟随、欢迎态无按钮）；勾父 tasks 4.5。
 - [x] 3.1 `make check` exit 0。
 - [x] 3.2 `npm run build --workspace web` exit 0。
 - [x] 3.3 ui-walk（CI 环境变量）exit 0。
@@ -26,3 +26,5 @@
 - Not selected Error handling / rollback / partial outputs：无失败路径（ref 为空时 no-op）。
 - Not selected Release / packaging / dependency compatibility：无。
 - Not selected Documentation / migration notes：无迁移。
+
+3.0 实际：父 `回到最新` 句替换为子 delta 细化句；父 Scenario「回到最新」替换为子 Scenario；勾父 tasks 4.5（附仅布局变化不重算贴底状态的 follow-up）。
