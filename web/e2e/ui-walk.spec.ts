@@ -695,12 +695,13 @@ async function expectCompletedPair(page: Page, sessionId: string, prompt: string
   await expect(pair.assistant.locator(".chat-md")).toHaveText(EXPECTED_REPLY);
   await expect(page.getByRole("status", { name: "bash 已完成" })).toBeVisible();
   // #367：摘要仍由 args 派生；真实 omp 的 AgentToolResult 经 output 块呈现（未展开时断言文本即可，
-  // 不点击以免改变 W-scroll 所需的贴底与折叠初态）。
+  // 不点击以免改变 W-scroll 所需的贴底与折叠初态）。锚定行首证明已规范化为纯文本——
+  // 若落入紧凑 JSON 兜底，文本会以 `{"content":` 开头。
   const bash = pair.assistant.getByRole("region", { name: "bash" });
   await expect(bash.locator("p.chat-step-line")).toHaveText("command: echo workbuddy-smoke");
   await expect(bash.locator("details.chat-step-disclosure")).not.toHaveAttribute("open", "");
-  await expect(bash.locator("details.chat-step-disclosure pre.chat-step-output")).toContainText(
-    "workbuddy-smoke",
+  await expect(bash.locator("details.chat-step-disclosure pre.chat-step-output")).toHaveText(
+    /^workbuddy-smoke/u,
   );
   const selected = selectedSessionStatus(page);
   await expect(selected.current).toHaveCount(1);

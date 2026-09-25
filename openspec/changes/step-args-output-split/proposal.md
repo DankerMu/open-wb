@@ -29,7 +29,7 @@ Out of scope: backfilling old rows (data never stored); tolerant (extra-key) cli
 None.
 ### Modified Capabilities
 - `chat-stream`: MODIFIED `纯协议事件归约`, `步骤 detail 不做路径改写`.
-- `chat-sessions`: ADDED `步骤输出列迁移`; MODIFIED `会话数据 schema` (fresh-receipts scenario says "begin" instead of an exhaustive list), `会话 REST`.
+- `chat-sessions`: ADDED `步骤输出列迁移`; MODIFIED `会话数据 schema` (fresh-receipts scenario says "begin" instead of an exhaustive list), `会话 REST`, `会话文本无损读取与标题复用` (output joins the lossless fields; NULL output reads as `""`).
 - `chat-web`: ADDED `步骤 args 与输出分栏`; MODIFIED `API 客户端扩展`, `纯会话视图归约`, `会话页`, `步骤卡原始输出不做路径改写`.
 
 ## Impact
