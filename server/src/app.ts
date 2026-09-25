@@ -76,8 +76,8 @@ export interface CreateAppOptions {
   passwordSource?: PasswordSource;
   assembly?: AssemblyDependencies;
   /**
-   * listener 关停预算（毫秒），在全部模块 preClose 之后才开始计时；省略或显式
-   * `undefined` → 恰 LISTENER_CLOSE_BUDGET_MS。必须是正整数且不超过 Node 定时器上限。
+   * listener 关停预算（毫秒），在 preClose 阶段之后 Fastify 调用 server.close() 时才开始
+   * 计时；省略或显式 `undefined` → 恰 LISTENER_CLOSE_BUDGET_MS。必须是正整数且不超过 Node 定时器上限。
    */
   listenerCloseBudgetMs?: number | undefined;
   /**
@@ -88,8 +88,8 @@ export interface CreateAppOptions {
 }
 
 /**
- * listener 关停预算默认值：native 最坏 8s（TERM 5s + KILL 3s）+ listener 2s = docker 默认
- * stop grace 10s。
+ * listener 关停预算默认值：native 最坏 8s（TERM 5s + KILL 3s）+ listener 2s = 10s，恰等于
+ * docker 默认 stop grace 10s——native 最坏情况下余量为零（已知取舍，不是隐含保证）。
  */
 export const LISTENER_CLOSE_BUDGET_MS = 2_000;
 /** Node setTimeout 可表示的最大延迟；超出会被静默改成 1ms。 */
@@ -116,6 +116,8 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     logger: false,
     rewriteUrl: (request) => rewriteUntrustedUrl(request.url ?? ""),
   });
+  // 必须紧跟 fastify()：其 preClose 是第一个根 hook，任何模块 preClose 失败/超时都跳不过它。
+  registerListenerShutdown(app, listenerCloseBudget, options.onListenerForceClose);
   const staticFiles = inspectStaticRoot(staticRoot);
 
   app.decorate("db", db);
@@ -215,9 +217,6 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     return sendNotFound(reply, request);
   });
 
-  // 必须是 createApp 中最后注册的根 hook：根实例 preClose 按注册顺序执行，
-  // 因而它在所有模块（均为根 addHook）的 preClose 之后运行。
-  registerListenerShutdown(app, listenerCloseBudget, options.onListenerForceClose);
   return app;
 }
 
@@ -233,12 +232,18 @@ function validateListenerCloseBudget(budgetMs: number): number {
  * 之后才完成的 keep-alive 响应会把关停拖到 keepAliveTimeout。closing 期间每个完成的响应
  * 都在下一个宏任务再回收一次空闲连接（Node 跳过仍有未完成请求的连接，不切断在飞请求）；
  * 预算到期仍未关闭才 closeAllConnections() 并通知一次。从未 listen 的 app 全部为 no-op。
+ *
+ * Fastify 在某个根 preClose complete(err) 或超时后会跳过其后全部根 preClose，但无论结果
+ * 如何都会在 preClose 链之后经属性查找调用一次 `instance.server.close()`。因此 closing 标记
+ * 由第一个根 preClose 设置，预算由包裹 `app.server.close` 的委托在 native 关停之后才布防，
+ * 两者都不依赖 preClose 链成功。
  */
 function registerListenerShutdown(
   app: FastifyInstance,
   budgetMs: number,
   onForceClose: (() => void) | undefined,
 ): void {
+  const server = app.server;
   let closing = false;
   let closed = false;
   let budget: NodeJS.Timeout | undefined;
@@ -250,7 +255,7 @@ function registerListenerShutdown(
     if (closed) {
       return;
     }
-    app.server.closeAllConnections();
+    server.closeAllConnections();
     try {
       onForceClose?.();
     } catch {
@@ -259,20 +264,27 @@ function registerListenerShutdown(
   };
 
   app.addHook("preClose", (complete) => {
-    if (app.server.listening) {
+    if (server.listening) {
       closing = true;
-      app.server.once("close", settle);
-      app.server.closeIdleConnections();
-      budget = setTimeout(escalate, budgetMs);
-      budget.unref();
     }
     complete();
   });
+  const nativeClose = server.close;
+  server.close = function closeWithinBudget(this: typeof server, ...args) {
+    // 未 listen 时 Fastify 也会调用 close()（防泄漏），此时不布防。
+    if (server.listening && budget === undefined) {
+      closing = true;
+      server.once("close", settle);
+      budget = setTimeout(escalate, budgetMs);
+      budget.unref();
+    }
+    return nativeClose.apply(this, args);
+  } satisfies typeof server.close;
   app.addHook("onResponse", (_request, _reply, done) => {
     if (closing) {
       setImmediate(() => {
         if (!closed) {
-          app.server.closeIdleConnections();
+          server.closeIdleConnections();
         }
       });
     }

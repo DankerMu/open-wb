@@ -206,7 +206,12 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
     owned.app = createApp({
       db: owned.db,
       staticRoot: config.staticRoot,
-      onListenerForceClose: emitListenerForceClose,
+      // 启动失败一经判定，失败路径只留 generic 失败记录：强制回收不再发布。
+      onListenerForceClose: () => {
+        if (!owned.failed) {
+          emitListenerForceClose();
+        }
+      },
       assembly: {
         runtime: {
           bin: config.ompBin,

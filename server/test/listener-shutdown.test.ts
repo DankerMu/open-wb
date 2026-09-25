@@ -4,7 +4,7 @@
  * 入口级记录/退出码走真实 compiled production entry。
  */
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { Agent, request as httpRequest } from "node:http";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
@@ -27,6 +27,9 @@ const SPEC_DEFAULT_BUDGET_MS = 2_000;
 const HELD_BODY = { held: "released", filler: "x".repeat(4096) };
 const CONTINUE_LINE = "HTTP/1.1 100 Continue\r\n\r\n";
 const FORCE_CLOSE_RECORD = `${JSON.stringify({ event: "listener_force_close" })}\n`;
+const STARTUP_FAILED_RECORD = `${JSON.stringify({ event: "server_start_failed" })}\n`;
+const SQLITE_EXPERIMENTAL_WARNING =
+  "ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\n";
 
 afterAll(releaseStartupFixtures);
 
@@ -168,7 +171,7 @@ describe("listener shutdown re-drain", () => {
     });
     const held = holdRoute(app, "/drain/held");
     let probeRan = false;
-    // 根 preClose 按注册顺序执行：本探针在 createApp 的最终 hook 之后运行；
+    // 根 preClose 按注册顺序执行：本探针在 createApp 注册的全部模块 preClose 之后运行；
     // setImmediate 放行时 server.close() 的唯一一次 idle 清扫已发生。
     app.addHook("preClose", (complete) => {
       probeRan = true;
@@ -315,6 +318,128 @@ describe("listener shutdown budget", () => {
   });
 });
 
+const SUPERVISOR_SHUTDOWN_FAILURE = "supervisor shutdown failed";
+
+/** 让 sessions 模块的 preClose 以 complete(error) 结束：Fastify 随即跳过其后全部根 preClose。 */
+function failSessionsPreClose(app: FastifyInstance): void {
+  app.sessions.supervisor.shutdown = () => Promise.reject(new Error(SUPERVISOR_SHUTDOWN_FAILURE));
+}
+
+/** server.close() 同步置 listening=false；其唯一一次 idle 清扫之后才放行 barrier。 */
+function releaseAfterListenerClose(app: FastifyInstance, held: HeldRoute): void {
+  const poll = (): void => {
+    if (app.server.listening) {
+      setImmediate(poll);
+      return;
+    }
+    held.release();
+  };
+  setImmediate(poll);
+}
+
+/** 返回 rejection 的耗时与错误；resolve 或超出 deadline 都以明确信息失败。 */
+async function rejectWithin(
+  pending: Promise<unknown>,
+  startedAt: number,
+  ms: number,
+): Promise<{ settleMs: number; error: unknown }> {
+  try {
+    await settleWithin(pending, startedAt, ms);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("app.close did not settle")) {
+      throw error;
+    }
+    return { settleMs: Math.round(performance.now() - startedAt), error };
+  }
+  throw new Error("app.close resolved although a module preClose failed");
+}
+
+describe("listener shutdown with a failing module preClose", () => {
+  it("still re-drains within 2 s and surfaces the teardown failure", async () => {
+    const db = openDb(":memory:");
+    let forced = 0;
+    const app = createApp({
+      db,
+      listenerCloseBudgetMs: 10_000,
+      onListenerForceClose: () => {
+        forced += 1;
+      },
+    });
+    const held = holdRoute(app, "/drain/held-failing");
+    failSessionsPreClose(app);
+    const agent = new Agent({ keepAlive: true });
+    let closing: Promise<undefined> | undefined;
+    try {
+      const origin = await listen(app);
+      const response = keepAliveGet(agent, `${origin}/drain/held-failing`);
+      await held.entered;
+      let listenerClosed = false;
+      app.server.once("close", () => {
+        listenerClosed = true;
+      });
+      const startedAt = performance.now();
+      closing = app.close();
+      closing.catch(() => undefined);
+      releaseAfterListenerClose(app, held);
+      const received = await response;
+      expect(held.listeningAtRelease()).toBe(false);
+      expect(received.status).toBe(200);
+      expect(received.connection).toBe("keep-alive");
+      expect(Buffer.byteLength(received.body)).toBe(Number(received.contentLength));
+      expect(JSON.parse(received.body)).toEqual(HELD_BODY);
+      const { settleMs, error } = await rejectWithin(closing, startedAt, SETTLE_DEADLINE_MS);
+      console.info(`[#227] failing-preClose re-drained close rejected in ${settleMs}ms`);
+      expect(listenerClosed).toBe(true);
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe(SUPERVISOR_SHUTDOWN_FAILURE);
+      expect(forced).toBe(0);
+    } finally {
+      agent.destroy();
+      await (closing ?? app.close()).catch(() => undefined);
+      db.close();
+    }
+  });
+
+  it("still force-closes once at budget expiry and surfaces the teardown failure", async () => {
+    const db = openDb(":memory:");
+    const budgetMs = 250;
+    let forced = 0;
+    const app = createApp({
+      db,
+      listenerCloseBudgetMs: budgetMs,
+      onListenerForceClose: () => {
+        forced += 1;
+      },
+    });
+    app.post("/drain/upload-failing", async () => ({ unreachable: true }));
+    failSessionsPreClose(app);
+    let partial: PartialRequest | undefined;
+    let closing: Promise<undefined> | undefined;
+    try {
+      const origin = new URL(await listen(app));
+      partial = await openPartialRequest(Number(origin.port), "/drain/upload-failing");
+      const startedAt = performance.now();
+      closing = app.close();
+      closing.catch(() => undefined);
+      const { settleMs, error } = await rejectWithin(closing, startedAt, SETTLE_DEADLINE_MS);
+      console.info(
+        `[#227] failing-preClose forced close rejected in ${settleMs}ms (budget ${budgetMs}ms)`,
+      );
+      expect((error as Error).message).toBe(SUPERVISOR_SHUTDOWN_FAILURE);
+      expect(settleMs).toBeGreaterThanOrEqual(budgetMs - 5);
+      await partial.closed;
+      expect(partial.received()).toBe(CONTINUE_LINE);
+      expect(forced).toBe(1);
+      await pause(budgetMs + 100);
+      expect(forced).toBe(1);
+    } finally {
+      partial?.destroy();
+      await (closing ?? app.close()).catch(() => undefined);
+      db.close();
+    }
+  });
+});
+
 describe("production entry listener force close", () => {
   it("writes exactly one listener_force_close stderr record and still exits 0", async () => {
     const compiled = await compileServerEntry();
@@ -350,12 +475,93 @@ describe("production entry listener force close", () => {
       rmSync(root, { recursive: true, force: true });
     }
   }, 90_000);
+
+  it("keeps only the generic failure record when a post-listen startup failure forces close", async () => {
+    const compiled = await compileServerEntry();
+    const port = await reserveWildcardPort();
+    const root = mkdtempSync(join(tmpdir(), "open-wb-listener-close-failed-"));
+    const entered = join(root, "models-entered");
+    const release = join(root, "models-release");
+    const hook = join(root, "gated-models-write.cjs");
+    writeFileSync(hook, gatedModelsWriteHook());
+    const server = startCompiledServer(
+      compiled.entry,
+      {
+        HOST: "127.0.0.1",
+        PORT: String(port),
+        DB_PATH: join(root, "db", "dev.db"),
+        OMP_STATE_DIR: join(root, "state"),
+        SANDBOX_ROOT: join(root, "sandbox"),
+        OMP_BIN: join(root, "bin", "missing-omp"),
+        MODEL_ID: "issue-227-model",
+        MODELS_ENTERED: entered,
+        MODELS_RELEASE: release,
+      },
+      { requireHook: hook },
+    );
+    let partial: PartialRequest | undefined;
+    try {
+      // listen 已完成、models.yml 写入被扣住：此时接受一个永不补齐 body 的请求。
+      await waitForFile(entered, 15_000);
+      partial = await openPartialRequest(port, "/api/auth/login");
+      const startedAt = performance.now();
+      writeFileSync(release, "");
+      const closed = await server.waitForClose();
+      const elapsedMs = Math.round(performance.now() - startedAt);
+      console.info(`[#227] post-listen startup failure with forced close took ${elapsedMs}ms`);
+      expect(closed.code).toBe(1);
+      expect(closed.signal).toBeNull();
+      expect(server.stdout()).toBe("");
+      expect(applicationStderr(server.stderr())).toBe(STARTUP_FAILED_RECORD);
+      await partial.closed;
+      expect(partial.received()).toBe(CONTINUE_LINE);
+      // 失败路径确实走到了预算到期的强制回收，只是记录被压制。
+      expect(elapsedMs).toBeGreaterThanOrEqual(SPEC_DEFAULT_BUDGET_MS - 5);
+    } finally {
+      partial?.destroy();
+      await server.dispose();
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 90_000);
 });
 
-/** 去掉 Node 运行时自身的 warning 行，只留 application-owned stderr。 */
+/**
+ * 真实 post-listen 启动失败：写 models.yml 时先落 entered 标记并等待 release 文件，
+ * 再以 EACCES 拒绝（等价于 state 目录不可写），让测试能在失败判定前放入在飞请求。
+ */
+function gatedModelsWriteHook(): string {
+  return `'use strict';
+const fs = require('node:fs');
+const fsp = require('node:fs/promises');
+const { syncBuiltinESMExports } = require('node:module');
+const nativeWriteFile = fsp.writeFile;
+fsp.writeFile = async function gatedWriteFile(path, ...rest) {
+  if (typeof path === 'string' && path.endsWith('models.yml')) {
+    fs.writeFileSync(process.env.MODELS_ENTERED, '');
+    while (!fs.existsSync(process.env.MODELS_RELEASE)) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    const error = new Error('EACCES: permission denied');
+    error.code = 'EACCES';
+    throw error;
+  }
+  return nativeWriteFile.call(this, path, ...rest);
+};
+syncBuiltinESMExports();
+`;
+}
+
+async function waitForFile(path: string, deadlineMs: number): Promise<void> {
+  const deadline = performance.now() + deadlineMs;
+  while (!existsSync(path)) {
+    if (performance.now() > deadline) {
+      throw new Error(`timed out waiting for ${path}`);
+    }
+    await pause(10);
+  }
+}
+
+/** 与 server-startup-order.test.ts 同一精确剥离：只去掉已知的 SQLite ExperimentalWarning。 */
 function applicationStderr(stderr: string): string {
-  return stderr
-    .split(/(?<=\n)/u)
-    .filter((line) => !/^\(node:\d+\) |^\(Use `node --trace-warnings/u.test(line))
-    .join("");
+  return stderr.replace(/^\(node:\d+\) /u, "").replace(SQLITE_EXPERIMENTAL_WARNING, "");
 }
