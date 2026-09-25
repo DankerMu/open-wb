@@ -2,9 +2,7 @@
 
 ## Purpose
 定义文件工作空间与审计的浏览器 API 客户端、安全预览组件及 `/files` 页面集成契约，包括同源请求、错误信封、工作空间 URL、惰性目录树、预览元数据、图片资源所有权及用户授权的病态格式深度规范化；正式扩展的浏览器走查由 files-harness 切片维护。
-
 ## Requirements
-
 ### Requirement: API 客户端扩展
 `lib/api` SHALL 新增 `listWorkspaces()`、`createWorkspace({name, dir?})`、`listTree(workspaceId, path)`、`createDir(workspaceId, path)`、`fetchPreview(workspaceId, path) → {kind:'text'|'image', text?|url?, size, truncated}`（`size` 取自 `X-Workbuddy-Size`，文本与图片响应均带）、`listAudit({limit?, before?})`，并把 403 `sandbox_denied`、409 `conflict`、413 `preview_too_large`、415 `preview_unsupported` 解析为带 `code` 的错误对象；沿用既有 401 → 未登录态。六方法 SHALL 保持同源凭证和既有可选取消信号契约；路径作为数据进行 URL 编码。图片 URL 的释放 SHALL 由调用方在替换或卸载时负责。
 #### Scenario: 方法与错误码
@@ -102,3 +100,19 @@
 #### Scenario: 创建流程焦点闭环
 - WHEN 在 jsdom 经切换器 `＋ 新建工作空间` 打开对话框后按 Escape；经 `＋` 菜单 `新建工作空间` 打开后点击 `取消`；经 `＋` 菜单 `新建文件夹` 打开后点击 `关闭`；在 `新建文件夹` 中聚焦 `创建` 并提交、`POST …/dirs` 挂起后点击 `取消`；经 `＋` 菜单 `新建文件夹` 打开后点击遮罩；打开切换器后按 Escape；在 `新建工作空间` 中聚焦 `创建` 并提交、`POST /api/workspaces` 挂起后以 409 解决
 - THEN 切换器打开时焦点在搜索框；两个对话框打开时焦点分别在 `工作空间名称` 与 `位置`，且 `aria-modal="true"`；四种取消类关闭（Escape、`取消`、`关闭`、遮罩）后焦点依次回到 `选择工作空间`、`新建`、`新建`、`新建`，均 0 次 POST；切换器 Escape 后焦点回 `选择工作空间`；挂起期间 `创建` 禁用、焦点在对话框内的 `关闭`，取消后请求 signal 已中止、焦点回 `新建`；工作空间挂起期间 `创建` 禁用、焦点在 `关闭`，409 后显示 `同名工作空间已存在`、对话框仍开、`创建` 可用、焦点在对话框内；菜单项恰为 `新建文件夹`、`新建工作空间`，菜单 Escape 后焦点回 `新建`
+
+### Requirement: 创建浮层的焦点时序与模态清理
+经切换器或 `新建` 菜单打开的 `新建工作空间`、`新建文件夹` 对话框 SHALL 均为 `aria-modal="true"`，其初始焦点（`工作空间名称` / `位置`）SHALL 在菜单或弹层关闭后延迟一个宏任务的回焦执行之后仍然成立。任一取消类关闭（`取消`、`关闭`、Escape、点遮罩）之后，`document.body` SHALL 不残留 `pointer-events` 内联样式，应用根 SHALL 不残留 `aria-hidden`。创建请求挂起期间点遮罩 SHALL 与 `取消` 等价：关闭对话框、中止该请求、焦点回到触发器，且不再发出新请求。
+
+#### Scenario: 初始焦点经受延迟回焦
+- **WHEN** 经菜单或切换器打开 `新建工作空间`，或经菜单选择 `新建文件夹`，并等待一个宏任务
+- **THEN** 对话框为 `aria-modal="true"`，`document.activeElement` 仍为 `工作空间名称` / `位置`
+
+#### Scenario: 取消类关闭无模态残留
+- **WHEN** 经菜单路径与切换器路径各做一次取消类关闭且焦点已回到触发器
+- **THEN** `document.body.style.pointerEvents` 为空串，渲染容器无 `aria-hidden` 属性
+
+#### Scenario: 挂起期点遮罩中止请求
+- **WHEN** `新建文件夹` 提交后 `POST …/dirs` 挂起，等待一个宏任务后按压遮罩
+- **THEN** 对话框关闭，该请求 signal 已中止，焦点回到 `新建`，全程恰 1 次 POST
+
