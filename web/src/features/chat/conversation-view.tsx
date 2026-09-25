@@ -3,6 +3,7 @@ import { MarkdownView } from "../../lib/markdown-view.js";
 import type { ChatSession } from "../../lib/session-contract.js";
 import { BrandMark, Icon } from "../../ui/index.js";
 import { Composer } from "./composer.js";
+import { FollowTranscript } from "./scroll-follow.js";
 import { SESSION_STATUS_LABEL } from "./status-label.js";
 import { summarizeStepDetail } from "./step-summary.js";
 import type { ChatState } from "./stream.js";
@@ -220,15 +221,15 @@ export function ConversationView({
             {streamError}
           </p>
         ) : null}
-        <div className="chat-transcript">
-          {requestedSessionId ? (
-            historyView ? (
-              <MessageThread historyView={historyView} />
-            ) : null
-          ) : (
+        {requestedSessionId ? (
+          <FollowTranscript content={historyView} key={requestedSessionId}>
+            {historyView ? <MessageThread historyView={historyView} /> : null}
+          </FollowTranscript>
+        ) : (
+          <div className="chat-transcript">
             <WelcomeIntro disabled={composerDisabled} onPick={onChangeDraft} />
-          )}
-        </div>
+          </div>
+        )}
         <Composer
           disabled={composerDisabled}
           draft={draft}
