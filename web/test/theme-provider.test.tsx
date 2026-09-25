@@ -2,38 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { THEME_STORAGE_KEY, ThemeProvider, useTheme } from "../src/features/theme/index.js";
-
-type MediaChangeListener = (event: { matches: boolean }) => void;
-
-type FakeMediaQuery = {
-  addEventListener: ReturnType<typeof vi.fn>;
-  emit(matches: boolean): void;
-  removeEventListener: ReturnType<typeof vi.fn>;
-  matches: boolean;
-};
-
-function createMediaQuery(initialMatches: boolean): FakeMediaQuery {
-  const listeners = new Set<MediaChangeListener>();
-  return {
-    addEventListener: vi.fn((type: string, listener: MediaChangeListener) => {
-      if (type === "change") {
-        listeners.add(listener);
-      }
-    }),
-    emit(matches: boolean) {
-      this.matches = matches;
-      for (const listener of listeners) {
-        listener({ matches });
-      }
-    },
-    removeEventListener: vi.fn((type: string, listener: MediaChangeListener) => {
-      if (type === "change") {
-        listeners.delete(listener);
-      }
-    }),
-    matches: initialMatches,
-  };
-}
+import { createMediaQuery, installMatchMedia } from "./media-query-support.js";
 
 function ThemeProbe() {
   const { resolvedTheme, selectedTheme, setTheme } = useTheme();
@@ -67,14 +36,6 @@ function expectTheme(selectedTheme: string, resolvedTheme: string) {
   expect(screen.getByText(`selected:${selectedTheme}`)).toBeTruthy();
   expect(screen.getByText(`resolved:${resolvedTheme}`)).toBeTruthy();
   expect(document.documentElement.dataset.theme).toBe(resolvedTheme);
-}
-
-function installMediaQuery(mediaQuery: FakeMediaQuery) {
-  Object.defineProperty(window, "matchMedia", {
-    configurable: true,
-    value: vi.fn(() => mediaQuery),
-    writable: true,
-  });
 }
 
 afterEach(() => {
@@ -113,7 +74,7 @@ describe("ThemeProvider initialization", () => {
     ["an unknown stored value", "sepia"],
   ])("uses system and the light fallback for %s", (_label, storedTheme) => {
     const mediaQuery = createMediaQuery(false);
-    installMediaQuery(mediaQuery);
+    installMatchMedia(() => mediaQuery);
     vi.spyOn(Storage.prototype, "getItem").mockReturnValue(storedTheme);
 
     renderTheme();
@@ -123,7 +84,7 @@ describe("ThemeProvider initialization", () => {
 
   it("uses system when storage reads throw and resolves the current dark preference", () => {
     const mediaQuery = createMediaQuery(true);
-    installMediaQuery(mediaQuery);
+    installMatchMedia(() => mediaQuery);
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
       throw new Error("storage unavailable");
     });
@@ -142,7 +103,7 @@ describe("ThemeProvider initialization", () => {
     "keeps fixed %s independent of the current system preference",
     (storedTheme, matches, expected) => {
       const mediaQuery = createMediaQuery(matches);
-      installMediaQuery(mediaQuery);
+      installMatchMedia(() => mediaQuery);
       vi.spyOn(Storage.prototype, "getItem").mockReturnValue(storedTheme);
 
       renderTheme();
@@ -163,7 +124,7 @@ describe("ThemeProvider initialization", () => {
 describe("ThemeProvider selection and subscriptions", () => {
   it("immediately applies and best-effort persists each selected theme", () => {
     const mediaQuery = createMediaQuery(false);
-    installMediaQuery(mediaQuery);
+    installMatchMedia(() => mediaQuery);
     const setItem = vi.spyOn(Storage.prototype, "setItem");
 
     renderTheme();
@@ -185,7 +146,7 @@ describe("ThemeProvider selection and subscriptions", () => {
 
   it("retains its selected and resolved theme when storage writes throw", () => {
     const mediaQuery = createMediaQuery(false);
-    installMediaQuery(mediaQuery);
+    installMatchMedia(() => mediaQuery);
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("quota exceeded");
     });
@@ -198,7 +159,7 @@ describe("ThemeProvider selection and subscriptions", () => {
 
   it("tracks media changes only while system is selected and never rewrites system", () => {
     const mediaQuery = createMediaQuery(true);
-    installMediaQuery(mediaQuery);
+    installMatchMedia(() => mediaQuery);
     const setItem = vi.spyOn(Storage.prototype, "setItem");
 
     renderTheme();
@@ -221,7 +182,7 @@ describe("ThemeProvider selection and subscriptions", () => {
 
   it("syncs only the production storage key without echoing remote values", () => {
     const mediaQuery = createMediaQuery(false);
-    installMediaQuery(mediaQuery);
+    installMatchMedia(() => mediaQuery);
     const setItem = vi.spyOn(Storage.prototype, "setItem");
 
     renderTheme();
@@ -271,7 +232,7 @@ describe("ThemeProvider selection and subscriptions", () => {
 
   it("removes browser listeners and ignores manually delivered late events after unmount", () => {
     const mediaQuery = createMediaQuery(false);
-    installMediaQuery(mediaQuery);
+    installMatchMedia(() => mediaQuery);
     const addWindowListener = vi.spyOn(window, "addEventListener");
     const removeWindowListener = vi.spyOn(window, "removeEventListener");
     const setItem = vi.spyOn(Storage.prototype, "setItem");

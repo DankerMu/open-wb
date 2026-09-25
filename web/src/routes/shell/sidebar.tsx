@@ -39,29 +39,39 @@ export function useSidebarCollapsed(): readonly [boolean, () => void] {
   return [collapsed, toggle] as const;
 }
 
-type SidebarProps = {
-  collapsed: boolean;
-  onToggle: () => void;
-};
+/** 文档流变体（宽屏，可折叠）或 Drawer 内的覆盖层变体（窄屏，始终展开、选路由即关闭）。 */
+type SidebarProps =
+  | { variant?: "inline"; collapsed: boolean; onToggle: () => void }
+  | { variant: "overlay"; onNavigate: () => void };
 
 /**
  * 外壳侧栏：品牌区 + 折叠按钮、主导航、用户区（AuthFooter）。折叠态只渲染图标，
- * 链接的可访问名改由 aria-label 提供，并以 Tooltip 显示标签。
+ * 链接的可访问名改由 aria-label 提供，并以 Tooltip 显示标签。覆盖层变体不渲染品牌区
+ * （Drawer 头部已有标题与关闭），也从不读写折叠偏好。
  */
-export function Sidebar({ collapsed, onToggle }: SidebarProps) {
+export function Sidebar(props: SidebarProps) {
+  const collapsed = props.variant === "overlay" ? false : props.collapsed;
+  const onNavigate = props.variant === "overlay" ? props.onNavigate : undefined;
   return (
-    <aside aria-label="侧栏" className="sidebar" data-collapsed={collapsed ? "true" : "false"}>
-      <div className="sidebar-brand">
-        <BrandMark size={24} wordmark={!collapsed} />
-        <Button
-          aria-label={collapsed ? "展开侧栏" : "折叠侧栏"}
-          onClick={onToggle}
-          size="icon"
-          variant="ghost"
-        >
-          <Icon name="panel-left" size={16} />
-        </Button>
-      </div>
+    <aside
+      aria-label="侧栏"
+      className="sidebar"
+      data-collapsed={collapsed ? "true" : "false"}
+      data-variant={props.variant ?? "inline"}
+    >
+      {props.variant === "overlay" ? null : (
+        <div className="sidebar-brand">
+          <BrandMark size={24} wordmark={!collapsed} />
+          <Button
+            aria-label={collapsed ? "展开侧栏" : "折叠侧栏"}
+            onClick={props.onToggle}
+            size="icon"
+            variant="ghost"
+          >
+            <Icon name="panel-left" size={16} />
+          </Button>
+        </div>
+      )}
       <nav aria-label="主导航">
         <ul>
           {routeManifest.map(({ icon, label, path, subtitle }) => {
@@ -70,6 +80,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                 {...(collapsed ? { "aria-label": label } : {})}
                 className="sidebar-link"
                 end
+                onClick={onNavigate}
                 to={path}
               >
                 <Icon name={icon} size={16} />

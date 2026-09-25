@@ -10,7 +10,7 @@ import {
   type FetchMock,
   jsonResponse,
 } from "./support.js";
-import { blockBody, readRepoFile, ruleBody, stripComments, yieldMacrotask } from "./ui-support.js";
+import { readRepoFile, ruleBody, stripComments, yieldMacrotask } from "./ui-support.js";
 
 const STORAGE_KEY = "workbuddy-sidebar";
 const LABELS = ["会话", "工作空间", "中心", "设置"];
@@ -254,7 +254,6 @@ describe("manifest 与静态契约 (S10)", () => {
 
 describe("折叠态退出反馈与样式契约", () => {
   const sidebarCss = () => stripComments(readRepoFile("web/src/routes/shell/sidebar.css"));
-  const narrowCss = () => blockBody(sidebarCss(), /@media\s*\(max-width:\s*760px\)\s*\{/);
   const COLLAPSED_NOTE = '.sidebar[data-collapsed="true"] .sidebar-footer-note';
 
   /** 折叠侧栏后经用户菜单确认 退出；返回侧栏。 */
@@ -290,23 +289,12 @@ describe("折叠态退出反馈与样式契约", () => {
     expect(aside.getAttribute("data-collapsed")).toBe("true");
   });
 
-  it("折叠态 note 以 fixed 浮出 overflow 裁剪；≤760 回到文档流", () => {
+  it("折叠态 note 以 fixed 浮出 overflow 裁剪", () => {
     const floating = ruleBody(sidebarCss(), COLLAPSED_NOTE);
     expect(floating).toContain("position: fixed;");
     expect(floating).toContain("width: 240px;");
     // 半透明的 alert 底浮在主内容上需垫不透明底色。
     expect(ruleBody(sidebarCss(), `${COLLAPSED_NOTE}.ui-alert`)).toContain("var(--wb-bg-primary)");
-    expect(ruleBody(narrowCss(), COLLAPSED_NOTE)).toContain("position: static;");
-  });
-
-  it("≤760 折叠态：链接保持横条内边距、字标行不纵向堆叠", () => {
-    const narrow = narrowCss();
-    expect(ruleBody(narrow, '.sidebar[data-collapsed="true"] .sidebar-link')).toContain(
-      "padding: 6px 8px;",
-    );
-    const brand = ruleBody(narrow, '.sidebar[data-collapsed="true"] .sidebar-brand');
-    expect(brand).toContain("flex-direction: row;");
-    expect(brand).toContain("height: 40px;");
   });
 
   it("导航链接聚焦时重申 8px 圆角（压过全局 :focus-visible）", () => {
