@@ -11,6 +11,7 @@
 @import "./features/chat/chat.css";
 @import "./features/files/files.css";
 @import "./features/auth/auth.css";
+@import "./features/settings/settings.css";
 
 *,
 *::before,
@@ -221,108 +222,6 @@ a {
   color: var(--wb-text-secondary);
 }
 
-.settings-page {
-  overflow: auto;
-  padding: 24px 28px 40px;
-}
-
-.settings-card {
-  max-width: 860px;
-  margin-bottom: 16px;
-  padding: 16px;
-  border: 1px solid var(--wb-border-default);
-  border-radius: 12px;
-  background: var(--wb-bg-secondary);
-}
-
-.settings-card h2 {
-  margin: 0 0 12px;
-  font-size: 13.5px;
-  font-weight: 700;
-}
-
-.settings-card fieldset {
-  margin: 0;
-  padding: 0;
-  border: 0;
-}
-
-.settings-card legend {
-  margin-bottom: 8px;
-  color: var(--wb-text-secondary);
-  font-size: 12px;
-}
-
-.theme-options {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.theme-option {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-  padding: 12px;
-  border: 1px solid var(--wb-border-default);
-  border-radius: 10px;
-  background: var(--wb-bg-primary);
-  cursor: pointer;
-}
-
-.theme-option:hover {
-  border-color: var(--wb-text-tertiary);
-}
-
-.theme-option:has(input:checked) {
-  border-color: var(--wb-brand-primary);
-  background: var(--wb-brand-primary-subtle);
-}
-
-.theme-option input {
-  width: 16px;
-  height: 16px;
-  margin: 0;
-  accent-color: var(--wb-brand-primary);
-}
-
-.theme-swatch {
-  display: block;
-  height: 36px;
-  border-radius: 8px;
-  border: 1px solid var(--wb-border-default);
-}
-
-.theme-swatch-light {
-  background: #ffffff;
-}
-
-.theme-swatch-dark {
-  background: #1f1f1f;
-}
-
-.theme-swatch-system {
-  background: linear-gradient(90deg, #ffffff 50%, #1f1f1f 50%);
-}
-
-.settings-card .ui-muted,
-.settings-card .ui-alert {
-  margin-top: 12px;
-}
-
-.service-identity {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 0;
-}
-
-.service-identity span {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
 @media (max-width: 760px) {
   body {
     overflow: auto;
@@ -336,14 +235,5 @@ a {
 
   .app-content > main {
     overflow: visible;
-  }
-
-  .theme-options {
-    grid-template-columns: 1fr;
-  }
-
-  .settings-page {
-    padding-left: 16px;
-    padding-right: 16px;
   }
 }
