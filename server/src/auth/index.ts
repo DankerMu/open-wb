@@ -3,7 +3,11 @@ import type { DatabaseSync } from "node:sqlite";
 import fastifyCookie from "@fastify/cookie";
 import type { FastifyInstance, onRequestHookHandler, onSendHookHandler } from "fastify";
 import { AuthError, type AuthErrorCode } from "./errors.js";
-import { createDevStubProvider, type PasswordSource } from "./providers/dev-stub.js";
+import {
+  createDevStubProvider,
+  type DevStubProvider,
+  type PasswordSource,
+} from "./providers/dev-stub.js";
 import {
   clearSessionCookieOptions,
   deleteSession,
@@ -116,6 +120,8 @@ export interface AuthRegistrationOptions {
   passwordSource?: PasswordSource;
 }
 
+type AuthPluginOptions = AuthRegistrationOptions & { provider: DevStubProvider };
+
 /**
  * 注册 auth 面：request-local Principal 默认值 + cookie 解析 + login/me/logout 路由 + 共享时钟装饰。
  * 必须在 API 通配与静态托管之前调用，保持路由优先级。
@@ -128,12 +134,18 @@ export interface AuthRegistrationOptions {
  * `null` 而不是 `undefined`，否则公共类型承诺与运行时不一致。默认值必须是 `null`：
  * `decorateRequest` 对 object 默认值抛 `FST_ERR_DEC_REFERENCE_TYPE`（共享状态），对同一实例
  * 第二次 `decorateRequest("principal")` 抛 `FST_ERR_DEC_ALREADY_PRESENT`，因此这里也是唯一安装点。
+ *
+ * provider 在这里（传入实例上）创建一次并 decorate 其名称 `authProviderName`，供 info route
+ * 读取；再经 options 传入封装的 authPlugin 复用。子插件内 decorate 的值根实例读不到，
+ * 因此 provider 不在子插件里创建。
  */
 export function registerAuth(app: FastifyInstance, options: AuthRegistrationOptions): void {
+  const provider = createDevStubProvider(options.db, options.passwordSource);
   app.decorateRequest("principal", null);
   app.decorate("authNow", options.runtime.now);
+  app.decorate("authProviderName", provider.name);
   void app.register(fastifyCookie);
-  void app.register(authPlugin, options);
+  void app.register(authPlugin, { ...options, provider });
 }
 
 /**
@@ -164,11 +176,8 @@ function clearCookieOnFinalStatus(
   };
 }
 
-async function authPlugin(
-  instance: FastifyInstance,
-  options: AuthRegistrationOptions,
-): Promise<void> {
-  const provider = createDevStubProvider(options.db, options.passwordSource);
+async function authPlugin(instance: FastifyInstance, options: AuthPluginOptions): Promise<void> {
+  const { provider } = options;
 
   instance.post(
     "/api/auth/login",

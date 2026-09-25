@@ -11,6 +11,7 @@ export const authenticatedPrincipal = {
 export const serviceInfo = {
   name: "workbuddy-app-server",
   version: "0.0.0",
+  auth: { provider: "dev-stub" },
 };
 
 export type DeferredResponse = {

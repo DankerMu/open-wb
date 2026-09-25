@@ -35,6 +35,7 @@ const ERROR_CASES = [
   message: string;
 }>;
 
+const INFO_BODY = { ...SERVICE_INFO, auth: { provider: "dev-stub" } };
 const INDEX_BYTES = "<!doctype html><html><body>workbuddy spa index</body></html>\n";
 const ASSET_BYTES = "body { color: rebeccapurple; }\n";
 const DOTTED_ASSET_BYTES = "body { color: cornflowerblue; }\n";
@@ -241,8 +242,8 @@ describe("createApp", () => {
 
       const info = await app.inject({ method: "GET", url: "/api/info" });
       expect(info.statusCode).toBe(200);
-      expect(info.payload).toBe(JSON.stringify(SERVICE_INFO));
-      expect(info.json()).toEqual(SERVICE_INFO);
+      expect(info.payload).toBe(JSON.stringify(INFO_BODY));
+      expect(info.json()).toEqual(INFO_BODY);
       expectJsonContentType(info.headers);
       expect(info.headers["cache-control"]).toBeUndefined();
 
@@ -588,7 +589,7 @@ describe("createApp", () => {
 
         const info = await app.inject({ method: "GET", url: "/api/info" });
         expect(info.statusCode).toBe(200);
-        expect(info.json()).toEqual(SERVICE_INFO);
+        expect(info.json()).toEqual(INFO_BODY);
       });
     });
   });
@@ -623,7 +624,7 @@ describe("createApp", () => {
 
           const info = await app.inject({ method: "GET", url: "/api/info" });
           expect(info.statusCode, rootCase.name).toBe(200);
-          expect(info.json(), rootCase.name).toEqual(SERVICE_INFO);
+          expect(info.json(), rootCase.name).toEqual(INFO_BODY);
 
           const deepLink = await app.inject({ method: "GET", url: "/files" });
           expectNotFound(deepLink);

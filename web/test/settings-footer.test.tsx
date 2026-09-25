@@ -174,6 +174,8 @@ describe("settings route", () => {
     expect(await screen.findByText(serviceInfo.name, { exact: true })).toBeTruthy();
     expect(screen.getByText(`版本 ${serviceInfo.version}`, { exact: true })).toBeTruthy();
     expect(screen.queryByText("5.3.11", { exact: true })).toBeNull();
+    const about = screen.getByRole("heading", { level: 2, name: "关于" }).closest("section");
+    expect(about?.textContent).not.toContain(serviceInfo.auth.provider);
   });
 
   it("uses the single theme context to update appearance controls and the root immediately", async () => {

@@ -40,6 +40,8 @@ import {
   UNKNOWN_SESSION_IDS,
 } from "./session-db-helpers.js";
 
+const INFO_BODY = { ...SERVICE_INFO, auth: { provider: "dev-stub" } };
+
 /**
  * Issue #19 默认拒绝面 + 集中精确豁免表 + request-local Principal。
  * 全部经真实 `createApp + openDb(":memory:") + app.inject()`：session 点查询次数由真实
@@ -175,8 +177,8 @@ describe("集中精确豁免表：matched method + route identity 完全相等�
   const PUBLIC_ROWS: ReadonlyArray<readonly [InjectMethod, string, string]> = [
     ["GET", "/api/healthz", '{"status":"ok"}'],
     ["GET", "/api/healthz?probe=1", '{"status":"ok"}'],
-    ["GET", "/api/info", JSON.stringify(SERVICE_INFO)],
-    ["GET", "/api/info?probe=1", JSON.stringify(SERVICE_INFO)],
+    ["GET", "/api/info", JSON.stringify(INFO_BODY)],
+    ["GET", "/api/info?probe=1", JSON.stringify(INFO_BODY)],
   ];
 
   it.each(PUBLIC_ROWS)(
@@ -202,7 +204,7 @@ describe("集中精确豁免表：matched method + route identity 完全相等�
       const sessionId = await loginSessionId(app);
       const rows: ReadonlyArray<readonly [string, string]> = [
         ["/api/healthz", '{"status":"ok"}'],
-        ["/api/info", JSON.stringify(SERVICE_INFO)],
+        ["/api/info", JSON.stringify(INFO_BODY)],
       ];
       for (const [url, body] of rows) {
         const { response, activity } = await observe({

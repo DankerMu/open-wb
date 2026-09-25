@@ -4,15 +4,15 @@
 - [x] 1.1 独立 fixture 审核 pass（revise ×1）；`openspec validate service-info-auth-provider --strict --no-interactive` exit 0。
 
 ## 2. Implementation（TDD：先红后绿）
-- [ ] 2.1 新 `server/test/auth-provider-name.test.ts`（S1/S2 + W3 server 侧契约）；`auth-provider.test.ts` 追加 S4；`app.test.ts`/`http-guard.test.ts` 改三键期望（S3）；`api-info-logout.test.ts` 追加 W1/W2 与 W3 web 侧 grep；`support.ts` 与五处内联 fixture 改三键；`public.hurl` 三键。先红。
-- [ ] 2.2 server：`dev-stub.ts` `name`；`auth/index.ts` provider 上提 + `decorate("authProviderName")` + 子插件经 options 取 provider；`app.ts` module 声明 + info route。
-- [ ] 2.3 web：`api.ts` `ServiceInfo` 三键 + `parseServiceInfo` 严格校验。2.1 转绿，server/web 全绿。
-- [ ] 2.4 反向注入六项各红并回退（design Required evidence）。
+- [x] 2.1 新 `server/test/auth-provider-name.test.ts`（S1/S2 + W3 server 侧契约）；`auth-provider.test.ts` 追加 S4；`app.test.ts`/`http-guard.test.ts` 改三键期望（S3）；`api-info-logout.test.ts` 追加 W1/W2 与 W3 web 侧 grep；`support.ts` 与五处内联 fixture 改三键；`public.hurl` 三键。先红。
+- [x] 2.2 server：`dev-stub.ts` `name`；`auth/index.ts` provider 上提 + `decorate("authProviderName")` + 子插件经 options 取 provider；`app.ts` module 声明 + info route。
+- [x] 2.3 web：`api.ts` `ServiceInfo` 三键 + `parseServiceInfo` 严格校验。2.1 转绿，server/web 全绿。
+- [x] 2.4 反向注入六项各红并回退（design Required evidence）。
 
 ## 3. Verification
-- [ ] 3.1 `make check` exit 0。
-- [ ] 3.2 `npm run build --workspace web` exit 0。
-- [ ] 3.3 smoke：`public.hurl` 三键通过（本地 `make smoke` 或 CI 等价脚本）；`wc -l web/test/auth-router.test.tsx` 为 800。
+- [x] 3.1 `make check` exit 0。
+- [x] 3.2 `npm run build --workspace web` exit 0。
+- [x] 3.3 smoke：`public.hurl` 三键通过（本地 `make smoke` 或 CI 等价脚本）；`wc -l web/test/auth-router.test.tsx` 为 800。
 
 ## Risk pack mapping
 - Selected Public API / CLI / script entry：`GET /api/info` 公开响应形状变更；`ServiceInfo` 类型；`FastifyInstance.authProviderName`。证据：S1–S3、W1–W2、smoke。
