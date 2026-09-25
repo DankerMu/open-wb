@@ -10,6 +10,7 @@
 @import "./routes/shell/topbar.css";
 @import "./features/chat/chat.css";
 @import "./features/files/files.css";
+@import "./features/auth/auth.css";
 
 *,
 *::before,
@@ -186,28 +187,6 @@ a {
   background: var(--wb-bg-primary);
 }
 
-.brand-mark {
-  position: relative;
-  display: inline-block;
-  flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: var(--wb-brand-primary);
-}
-
-.brand-mark::after {
-  position: absolute;
-  content: "";
-  width: 9px;
-  height: 15px;
-  top: 4px;
-  left: 10px;
-  border-right: 2.4px solid var(--wb-bg-primary);
-  border-bottom: 2.4px solid var(--wb-bg-primary);
-  transform: rotate(40deg);
-}
-
 .app-content {
   display: flex;
   flex: 1 1 auto;
@@ -240,89 +219,6 @@ a {
   padding: 24px;
   background: var(--wb-home-bg-primary);
   color: var(--wb-text-secondary);
-}
-
-.login-root {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 100dvh;
-  padding: 24px 16px;
-  background: var(--wb-home-bg-primary);
-}
-
-.login-card {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  width: 360px;
-  max-width: 100%;
-  min-width: 0;
-  padding: 28px 24px 22px;
-  border: 1px solid var(--wb-border-default);
-  border-radius: 16px;
-  background: var(--wb-bg-primary);
-  box-shadow: var(--wb-shadow-dialog);
-}
-
-.login-brand {
-  display: flex;
-  justify-content: center;
-  color: var(--wb-brand-primary);
-}
-
-.login-brand .brand-mark {
-  margin: 4px;
-}
-
-.login-card h1 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 650;
-  line-height: 26px;
-  text-align: center;
-}
-
-.login-form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.login-form p {
-  margin: 0;
-}
-
-.login-form label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.login-form input {
-  width: 100%;
-  min-width: 0;
-  height: 36px;
-  padding: 0 12px;
-}
-
-.login-form .ui-button-primary {
-  width: 100%;
-  min-height: 36px;
-  margin-top: 4px;
-}
-
-.login-dialog {
-  width: min(400px, calc(100vw - 32px));
-  max-height: 82vh;
-  padding: 20px;
-  border: 0;
-  border-radius: 14px;
-  background: var(--wb-bg-primary);
-  color: var(--wb-text-primary);
-  box-shadow: var(--wb-shadow-dialog);
 }
 
 .settings-page {
@@ -446,7 +342,6 @@ a {
     grid-template-columns: 1fr;
   }
 
-  .login-card,
   .settings-page {
     padding-left: 16px;
     padding-right: 16px;

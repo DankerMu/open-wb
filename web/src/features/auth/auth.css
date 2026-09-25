@@ -1,0 +1,83 @@
+/* 登录页 — adapted from resource/workbuddy-live-demo.html:637-644（.login-root/.login-card/.login-brand/.login-title/.login-sub/.login-btn/.login-err）、:739-740（.form-label/.form-group）。只用语义 token；品牌位用自有 BrandMark，不复用上游 logo。 */
+
+.login-root {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100dvh;
+  padding: 24px 16px;
+  background: var(--wb-home-bg-primary);
+}
+
+.login-card {
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  padding: 28px 24px 22px;
+  border: 1px solid var(--wb-border-card);
+  border-radius: 16px;
+  background: var(--wb-bg-primary);
+  box-shadow: var(--wb-shadow-dialog);
+}
+
+.login-brand {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+
+.login-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 26px;
+  text-align: center;
+  color: var(--wb-text-primary);
+}
+
+.login-sub {
+  margin: 4px 0 18px;
+  font-size: 12px;
+  text-align: center;
+  color: var(--wb-text-tertiary);
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.login-field {
+  margin-bottom: 14px;
+}
+
+.login-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.login-err {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--wb-status-error-text);
+  background: var(--wb-status-error-soft-bg);
+}
+
+.login-btn {
+  width: 100%;
+  height: 36px;
+  margin-top: 4px;
+}
+
+@media (max-width: 760px) {
+  .login-card {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}
