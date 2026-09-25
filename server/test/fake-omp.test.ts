@@ -324,9 +324,13 @@ describe("fake-omp process contract", () => {
     await runFailingStub(sseStub(SSE_EVENT));
   });
 
-  it("fails an empty 200 round and a second tool-only round instead of an empty success", async () => {
+  it("fails an empty 200 round and a tool-only or empty answering round instead of an empty success", async () => {
     await expect(runFailingStub(sseStub(ROLE_ONLY_DONE))).resolves.toBe(1);
     await expect(runFailingStub(sseStub(TOOL_ONLY_DONE))).resolves.toBe(2);
+    let round = 0;
+    const toolThenEmpty: ProxyHandler = (request, response) =>
+      sseStub(round++ === 0 ? TOOL_ONLY_DONE : ROLE_ONLY_DONE)(request, response);
+    await expect(runFailingStub(toolThenEmpty)).resolves.toBe(2);
   });
 
   it("fails non-JSON concatenated arguments, an index gap, and an id-less call in one request", async () => {
