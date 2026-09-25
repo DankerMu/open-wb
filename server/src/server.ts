@@ -84,6 +84,10 @@ function resolveHost(raw: string | undefined): string {
   if (raw.length === 0 || /^\s+$/u.test(raw)) {
     throw new Error("HOST must be a nonempty string");
   }
+  // Fastify 对 exact "localhost" 按 DNS 全部回环地址多重绑定，次级 listener 不受有界关停约束（#340）。
+  if (raw === "localhost") {
+    return DEFAULT_HOST;
+  }
   return raw;
 }
 

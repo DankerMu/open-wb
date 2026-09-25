@@ -4,13 +4,14 @@
  * 入口级记录/退出码走真实 compiled production entry。
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { Agent, request as httpRequest } from "node:http";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { afterAll, describe, expect, it } from "vitest";
+import { parse } from "yaml";
 import { createApp, LISTENER_CLOSE_BUDGET_MS } from "../src/app.js";
 import { openDb } from "../src/core/db/index.js";
 import {
@@ -521,6 +522,60 @@ describe("production entry listener force close", () => {
       expect(elapsedMs).toBeGreaterThanOrEqual(SPEC_DEFAULT_BUDGET_MS - 5);
     } finally {
       partial?.destroy();
+      await server.dispose();
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 90_000);
+});
+
+/** 发起一次 TCP 连接：成功返回 "connected"，失败返回错误码；挂起超时视为测试失败。 */
+function connectOutcome(host: string, port: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const socket = connect({ host, port });
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error(`timed out connecting to ${host}:${port}`));
+    }, 2_000);
+    socket.once("error", (error: NodeJS.ErrnoException) => {
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(error.code ?? error.message);
+    });
+    socket.once("connect", () => {
+      clearTimeout(timer);
+      socket.destroy();
+      resolve("connected");
+    });
+  });
+}
+
+describe("production entry HOST=localhost", () => {
+  it("binds only 127.0.0.1 so the bounded shutdown drains the single listener", async () => {
+    const compiled = await compileServerEntry();
+    const port = await reserveWildcardPort();
+    const root = mkdtempSync(join(tmpdir(), "open-wb-localhost-"));
+    const server = startCompiledServer(compiled.entry, {
+      HOST: "localhost",
+      PORT: String(port),
+      DB_PATH: join(root, "db", "dev.db"),
+      OMP_STATE_DIR: join(root, "state"),
+      SANDBOX_ROOT: join(root, "sandbox"),
+      OMP_BIN: join(root, "bin", "missing-omp"),
+      MODEL_ID: "issue-340-model",
+    });
+    try {
+      const started = await server.waitForStarted();
+      expect(started).toMatchObject({ event: "server_started", host: "127.0.0.1", port });
+      const models = parse(readFileSync(join(root, "state", "agent", "models.yml"), "utf8"));
+      expect(models).toMatchObject({
+        providers: { workbuddy: { baseUrl: `http://127.0.0.1:${port}/v1` } },
+      });
+      expect(await connectOutcome("127.0.0.1", port)).toBe("connected");
+      // ::1 存在时应 ECONNREFUSED，不存在时 EADDRNOTAVAIL/ENETUNREACH；任何成功连接都是第二个 binding。
+      expect(await connectOutcome("::1", port)).not.toBe("connected");
+      expect(await server.stop()).toBe(0);
+      expect(applicationStderr(server.stderr())).toBe("");
+    } finally {
       await server.dispose();
       rmSync(root, { recursive: true, force: true });
     }
