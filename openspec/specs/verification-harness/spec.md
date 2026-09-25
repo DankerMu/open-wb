@@ -51,7 +51,7 @@ Defines HTTP smoke and browser walk-through surfaces plus their CI/control-plane
 #### Scenario: 真正回合中刷新并持久完成
 - **GIVEN** caller使用真实官方omp18.0.10、compiled app和有界隔离gate的原测试上游，gate已arm且固定提示模板携带独立UUID
 - **WHEN** 浏览器创建会话并发送，观察bash步骤与非空prefix，真实REST为running；gate保持held时reload，同session新REST和DOM保留prefix并建立native SSE，随后显式release
-- **THEN** 完整正文逐字等于`你好，这是 WorkBuddy 的第一条流式回复。`，bash和session均done，恰一user/assistant pair；完成后reload同样完整且done；exact两次auth401及零新增console/pageerror合同不变，finally清理gate
+- **THEN** 完整正文逐字等于`你好，这是 WorkBuddy 的第一条流式回复。`，bash 步骤徽章（`role=status` 名 `bash 已完成`）与会话列表当前项 status 文本均为 `已完成`，恰一user/assistant pair；完成后reload同样完整且done；exact两次auth401及零新增console/pageerror合同不变，finally清理gate
 - **AND** 不以浏览器伪造响应、fake EventSource、已完成回合的延迟展示或任意sleep冒充真正回合中刷新；其他canonical CI/HTTP requirements保持不变
 
 After the four-route traversal and before the existing held dialogue, the journey SHALL perform files-harness「走查 /files 步骤」through the real UI. Its caller-owned sandbox SHALL contain the tracked fixture and no walk-out directory. Existing auth/error, dialogue recovery, theme, logout and lifecycle scenarios remain unchanged.

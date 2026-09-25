@@ -168,7 +168,7 @@ Implementation deviations（Phase 1 记录）：
 - `.chat-step-status` 保留既有的 `line-height: 16px` 与基础色 `var(--wb-text-secondary)`；`margin-left: auto` 沿用原有写法 `margin: 0 0 0 auto`。
 - `messages.css` 头注释补上从 `chat.css` 迁来的 `demo.html:416-549 (transcript/steps)` 来源行。
 - 拆分为无操作的证据：
-  - `chat.css:385-662` 与 `messages.css:7-284` 逐字一致；
+  - 拆分检查点（步骤卡改动前）`chat.css:385-662` 与 `messages.css:7-284` 逐字一致；最终文件中步骤卡段按设计有改动，其余逐字一致；
   - 去注释、展开逗号选择器后的规则集比对为 116 → 116，零差异；
   - `ui-walk-gate.ts` 与原 523-582 行相比只多了 `export` 前缀。
 - `topbar.test.tsx` 的禁 `ui-page-heading` 列表追加了 `messages.css`。

@@ -9,7 +9,7 @@
 - [x] 2.3 反向注入九项各红并回退（design Required evidence）。
 
 ## 3. Verification
-- [ ] 3.0 archive PR：
+- [x] 3.0 archive PR：
   - 父 delta `s1e-frontend-parity/specs/chat-web/spec.md` Step cards 段补三处摘要细化（`text` 优先于 `content`、首键值 `<key>: <value>`、非对象 JSON 走文本规则并取首行 trim），并补子 Scenario「步骤卡呈现」；
   - 父 `specs/verification-harness/spec.md` 的真正回合 THEN 已是父原句，无需改；
   - 父 tasks 4.2 行删去"正文须在步骤卡之前"的移交约束（#366 已解除）；
@@ -30,3 +30,5 @@
 - Not selected Error handling / rollback / partial outputs：`JSON.parse` 失败回落文本分支。证据：S1 `{not json` 行。
 - Not selected Release / packaging / dependency compatibility：无。
 - Not selected Documentation / migration notes：无迁移。
+
+3.0 实际：父 Step cards 句同步三处细化（"non-blank" 与实现 `trim() !== ""` 一致，子 delta 同改）；子 Scenario「步骤卡呈现」并入父 delta；父 tasks 4.2 行的移交约束随勾选改写删除；#366 已由 PR #368 合并提交信息中的 `Closes #366` 自动关闭。
