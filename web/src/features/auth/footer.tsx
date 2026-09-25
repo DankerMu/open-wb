@@ -22,6 +22,11 @@ export function AuthFooter() {
     };
   }, []);
 
+  // 失败即关确认框、露出错误；不依赖发起请求的实例仍挂载（窄屏覆盖层关闭即卸载用户区）。
+  useEffect(() => {
+    if (logoutError) setConfirming(false);
+  }, [logoutError]);
+
   if (!principal) {
     return null;
   }

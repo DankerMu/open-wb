@@ -89,9 +89,9 @@ async function expectNavClosed(container: HTMLElement, button: HTMLElement) {
   await waitFor(() => expect(document.activeElement).toBe(button));
 }
 
-/** 覆盖层内经 用户菜单 → 退出登录 打开确认框。 */
-async function openLogoutConfirm(dialog: HTMLElement) {
-  const trigger = within(dialog).getByRole("button", { name: "用户菜单" });
+/** 在 `scope`（覆盖层或文档流侧栏）内经 用户菜单 → 退出登录 打开确认框。 */
+async function openLogoutConfirm(scope: HTMLElement) {
+  const trigger = within(scope).getByRole("button", { name: "用户菜单" });
   fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: "mouse" });
   fireEvent.click(await screen.findByRole("menuitem", { name: "退出登录" }));
   const confirm = await screen.findByRole("alertdialog", { name: "退出登录？" });
@@ -100,6 +100,62 @@ async function openLogoutConfirm(dialog: HTMLElement) {
 
 function logoutRequests(fetchMock: FetchMock) {
   return fetchMock.mock.calls.filter(([path]) => path === "/api/auth/logout").length;
+}
+
+/** 窄屏、logout 挂起：覆盖层内确认退出（请求恰发 1 次），确认框仍开。 */
+async function beginPendingLogout() {
+  const narrow = installViewport(true);
+  const pendingLogout = deferredResponse();
+  const { fetchMock, view } = mountShell("/", {
+    "/api/auth/logout": () => pendingLogout.promise,
+  });
+  await screen.findByRole("heading", { level: 1, name: HERO });
+  const first = await openNav();
+  const { confirm, trigger } = await openLogoutConfirm(first.dialog);
+  fireEvent.click(within(confirm).getByRole("button", { name: "退出" }));
+  expect(logoutRequests(fetchMock)).toBe(1);
+  return { fetchMock, first, narrow, pendingLogout, trigger, view };
+}
+
+type PendingLogout = Awaited<ReturnType<typeof beginPendingLogout>>;
+
+/** Escape 依次关确认框与覆盖层（发起退出的用户区随之卸载），再重开覆盖层与确认框。 */
+async function reopenOverlayConfirm({ first, trigger, view }: PendingLogout) {
+  fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(trigger));
+  fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
+  await expectNavClosed(view.container, first.button);
+
+  const second = await openNav();
+  const { confirm } = await openLogoutConfirm(second.dialog);
+  return { confirm, dialog: second.dialog };
+}
+
+/** 锁定态确认框：退出 忙碌禁用、取消 换成 关闭、用户区有在途提示、请求仍只 1 次。 */
+function expectPendingConfirm(confirm: HTMLElement, scope: HTMLElement, fetchMock: FetchMock) {
+  const confirmButton = within(confirm).getByRole("button", { name: "退出" });
+  expect(confirmButton.hasAttribute("disabled")).toBe(true);
+  expect(confirmButton.getAttribute("aria-busy")).toBe("true");
+  expect(within(confirm).getByRole("button", { name: "关闭" })).toBeTruthy();
+  // 确认框的 hideOthers 把用户区所在树设为 aria-hidden，故带 hidden 查询。
+  const note = within(scope).getByRole("status", { hidden: true });
+  expect(note.textContent).toMatch(/^正在退出登录/);
+  expect(logoutRequests(fetchMock)).toBe(1);
+}
+
+/** 挂起的 logout 以 204 落定：回到登录页，全程只发过 1 次请求。 */
+async function finishLogout({ fetchMock, pendingLogout }: PendingLogout) {
+  await act(async () => pendingLogout.resolve(new Response(null, { status: 204 })));
+  expect(await screen.findByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeTruthy();
+  expect(logoutRequests(fetchMock)).toBe(1);
+}
+
+/** 再次进入窄屏：覆盖层为关闭态，顶栏提供 打开导航。 */
+function reenterNarrow(narrow: FakeMediaQuery) {
+  act(() => narrow.emit(true));
+  expect(screen.queryByRole("dialog", { hidden: true })).toBeNull();
+  expect(navButton()).toBeTruthy();
 }
 
 function expectWideShell() {
@@ -208,6 +264,8 @@ describe("覆盖层开合 (R3/R6)", () => {
     await screen.findByRole("heading", { level: 1, name: HERO });
 
     const { button, dialog } = await openNav();
+    expect(dialog.getAttribute("data-side")).toBe("left");
+    expect(dialog.classList.contains("ui-drawer--w288")).toBe(true);
     const links = overlayLinks(dialog);
     expect(links).toHaveLength(4);
     links.forEach((link, index) => {
@@ -263,9 +321,7 @@ describe("视口切换与折叠偏好 (R7/R8)", () => {
     expect(aside.getAttribute("data-collapsed")).toBe("false");
     expect(screen.queryByRole("button", { name: "打开导航" })).toBeNull();
 
-    act(() => narrow.emit(true));
-    expect(screen.queryByRole("dialog", { hidden: true })).toBeNull();
-    expect(navButton()).toBeTruthy();
+    reenterNarrow(narrow);
     expect(setItem).not.toHaveBeenCalled();
   });
 
@@ -288,11 +344,13 @@ describe("视口切换与折叠偏好 (R7/R8)", () => {
     const aside = screen.getByRole("complementary", { name: "侧栏" });
     expect(aside.getAttribute("data-collapsed")).toBe("true");
     expect(window.localStorage.getItem(SIDEBAR_KEY)).toBe("collapsed");
+
+    reenterNarrow(narrow);
     expect(setItem).not.toHaveBeenCalled();
   });
 });
 
-describe("覆盖层内用户区 (R9/R9b)", () => {
+describe("覆盖层内用户区 (R9/R9b/R9c)", () => {
   it("R9 菜单与确认框叠在覆盖层上，取消后覆盖层仍开、焦点回 用户菜单", async () => {
     installViewport(true);
     const { fetchMock } = mountShell("/");
@@ -312,37 +370,55 @@ describe("覆盖层内用户区 (R9/R9b)", () => {
   });
 
   it("R9b 退出挂起时关闭确认框与覆盖层再重开，锁定态仍在且不再发请求", async () => {
-    installViewport(true);
-    const pendingLogout = deferredResponse();
-    const { fetchMock, view } = mountShell("/", {
-      "/api/auth/logout": () => pendingLogout.promise,
-    });
-    await screen.findByRole("heading", { level: 1, name: HERO });
+    const flow = await beginPendingLogout();
+    const reopened = await reopenOverlayConfirm(flow);
+    expectPendingConfirm(reopened.confirm, reopened.dialog, flow.fetchMock);
 
-    const first = await openNav();
-    const { confirm, trigger } = await openLogoutConfirm(first.dialog);
-    fireEvent.click(within(confirm).getByRole("button", { name: "退出" }));
-    expect(logoutRequests(fetchMock)).toBe(1);
+    await finishLogout(flow);
+  });
 
-    fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
+  it("R9b' 重开后的确认框在挂起的退出失败时关闭，错误提示可见", async () => {
+    const flow = await beginPendingLogout();
+    const reopened = await reopenOverlayConfirm(flow);
+    expectPendingConfirm(reopened.confirm, reopened.dialog, flow.fetchMock);
+
+    const failure = { error: { code: "forbidden", message: "无法退出当前会话" } };
+    await act(async () => flow.pendingLogout.resolve(jsonResponse(failure, 403)));
+    await waitFor(() => expect(screen.queryByRole("alertdialog", { hidden: true })).toBeNull());
+    // 不带 hidden：错误提示所在的覆盖层已解除遮蔽，读屏可达。
+    await waitFor(() =>
+      expect(within(reopened.dialog).getByRole("alert").textContent).toBe("无法退出当前会话"),
+    );
+    expect(screen.getByRole("dialog", { name: "导航" })).toBe(reopened.dialog);
+    expect(within(reopened.dialog).queryByRole("status", { hidden: true })).toBeNull();
+    expect(screen.queryByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeNull();
+    expect(logoutRequests(flow.fetchMock)).toBe(1);
+  });
+
+  it("R9c 确认框开着时视口跨越 760：锁定态随文档流用户区保留，不再发请求", async () => {
+    const flow = await beginPendingLogout();
+    const consoleError = vi.spyOn(console, "error");
+    const windowErrors: unknown[] = [];
+    const onError = (event: ErrorEvent) => windowErrors.push(event.error);
+    window.addEventListener("error", onError);
+
+    act(() => flow.narrow.emit(false));
+    expect(screen.queryByRole("alertdialog", { hidden: true })).toBeNull();
+    expect(screen.queryByRole("dialog", { hidden: true })).toBeNull();
+    await waitFor(() => expect(flow.view.container.hasAttribute("aria-hidden")).toBe(false));
+    const aside = screen.getByRole("complementary", { name: "侧栏" });
+
+    const { confirm } = await openLogoutConfirm(aside);
+    expectPendingConfirm(confirm, aside, flow.fetchMock);
+    fireEvent.click(within(confirm).getByRole("button", { name: "关闭" }));
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
-    await waitFor(() => expect(document.activeElement).toBe(trigger));
-    fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
-    await expectNavClosed(view.container, first.button);
+    window.removeEventListener("error", onError);
+    expect(windowErrors).toEqual([]);
+    expect(consoleError).not.toHaveBeenCalled();
 
-    const second = await openNav();
-    const reopened = await openLogoutConfirm(second.dialog);
-    const confirmButton = within(reopened.confirm).getByRole("button", { name: "退出" });
-    expect(confirmButton.hasAttribute("disabled")).toBe(true);
-    expect(confirmButton.getAttribute("aria-busy")).toBe("true");
-    expect(within(reopened.confirm).getByRole("button", { name: "关闭" })).toBeTruthy();
-    const note = within(second.dialog).getByRole("status", { hidden: true });
-    expect(note.textContent).toMatch(/^正在退出登录/);
-    expect(logoutRequests(fetchMock)).toBe(1);
+    reenterNarrow(flow.narrow);
 
-    await act(async () => pendingLogout.resolve(new Response(null, { status: 204 })));
-    expect(await screen.findByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeTruthy();
-    expect(logoutRequests(fetchMock)).toBe(1);
+    await finishLogout(flow);
   });
 });
 

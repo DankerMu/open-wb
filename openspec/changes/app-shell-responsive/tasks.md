@@ -10,7 +10,7 @@
 - [x] 2.3b `web/src/routes/shell/sidebar.tsx` 覆盖层变体（`variant: "overlay"` + `onNavigate`，无品牌区/折叠按钮，`data-variant`）；`sidebar.css` 删 `≤760` 横条块、加 `.sidebar[data-variant="overlay"]` 规则。
 - [x] 2.4 `web/src/routes/shell/topbar.tsx` `onOpenNav` + `打开导航` 按钮（header 首子节点，欢迎态窄条）；`topbar.css` 按需对齐规则。
 - [x] 2.5 `web/src/routes/shell/app-shell.tsx`：`useMediaQuery` 分支、`Drawer side="left" width=288 title="导航"`、`navOpen` 瞬时状态与宽屏复位；`styles.css` `≤760` 块删 `flex-direction: column`。2.1 转绿，`web/test` 全绿。
-- [x] 2.6 反向注入九项各红并回退（design Required evidence）。
+- [x] 2.6 反向注入十项各红并回退（第十项随 review round 1 修复轮加入）（design Required evidence）。
 
 ## 3. Verification
 - [x] 3.1 `make check` exit 0（size-guard、knip、jscpd、guardrails）。
