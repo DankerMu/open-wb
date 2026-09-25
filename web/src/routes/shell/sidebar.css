@@ -226,74 +226,18 @@
   display: none;
 }
 
-/* ≤760 横条降级（Drawer 之前的过渡形态）：宽度不随折叠变化，折叠态只呈纯图标条。 */
-@media (max-width: 760px) {
-  .sidebar,
-  .sidebar[data-collapsed="true"] {
-    width: 100%;
-    height: auto;
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    border-right: 0;
-    border-bottom: 1px solid var(--wb-color-border-primary);
-    transition: none;
-  }
+/* Drawer 内的覆盖层变体：底色、边框与标题行由 Drawer 提供，本体填满 ui-drawer-body；
+   min-height + overflow:visible 让矮视口由 ui-drawer-body 滚动而不裁掉用户区。 */
+.sidebar[data-variant="overlay"] {
+  width: 100%;
+  height: auto;
+  min-height: 100%;
+  overflow: visible;
+  background: transparent;
+  border-right: 0;
+  transition: none;
+}
 
-  .sidebar nav,
-  .sidebar[data-collapsed="true"] nav {
-    flex: 1 1 12rem;
-    padding: 0;
-  }
-
-  .sidebar nav ul {
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
-
-  .sidebar-link,
-  .sidebar[data-collapsed="true"] .sidebar-link {
-    padding: 6px 8px;
-  }
-
-  .sidebar[data-collapsed="true"] .sidebar-brand {
-    flex-direction: row;
-    height: 40px;
-    gap: 8px;
-    padding: 0;
-  }
-
-  .sidebar-link-sub {
-    display: none;
-  }
-
-  .sidebar-footer,
-  .sidebar[data-collapsed="true"] .sidebar-footer {
-    flex: 1 1 auto;
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: center;
-    margin-top: 0;
-    padding: 0;
-    border-top: 0;
-  }
-
-  /* 横条已占满宽度，提示回到文档流。 */
-  .sidebar[data-collapsed="true"] .sidebar-footer-note {
-    position: static;
-    width: auto;
-    box-shadow: none;
-  }
-
-  .sidebar[data-collapsed="true"] .sidebar-footer-note.ui-alert {
-    background: var(--wb-status-error-soft-bg);
-  }
-
-  .sidebar[data-collapsed="true"] .sidebar-footer-note.ui-muted {
-    padding: 0;
-    border: 0;
-    background: transparent;
-  }
+.sidebar[data-variant="overlay"] nav {
+  padding: 0;
 }

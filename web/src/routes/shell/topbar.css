@@ -42,3 +42,8 @@
   font-weight: 600;
   color: var(--wb-text-primary);
 }
+
+/* 窄屏 打开导航：长面包屑收缩时按钮保持原尺寸。 */
+.topbar-nav {
+  flex: none;
+}

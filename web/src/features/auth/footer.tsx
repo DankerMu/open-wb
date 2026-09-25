@@ -3,10 +3,10 @@ import { ConfirmDialog, Menu, type MenuItem } from "../../ui/index.js";
 import { useAuth } from "./provider.js";
 
 export function AuthFooter() {
-  const { logout, logoutError, principal } = useAuth();
+  const { logout, logoutError, logoutPending: pending, principal } = useAuth();
   const [confirming, setConfirming] = useState(false);
-  const [pending, setPending] = useState(false);
   const mountedRef = useRef(true);
+  // 退出在途标志归 Provider；这里只守同 tick 的重复点击（第二次不得再调 logout）。
   const pendingRef = useRef(false);
   // 用户菜单触发按钮始终可用（pending 期间也不禁用），确认框关闭后焦点直接回到它。
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -22,6 +22,11 @@ export function AuthFooter() {
     };
   }, []);
 
+  // 失败即关确认框、露出错误；不依赖发起请求的实例仍挂载（窄屏覆盖层关闭即卸载用户区）。
+  useEffect(() => {
+    if (logoutError) setConfirming(false);
+  }, [logoutError]);
+
   if (!principal) {
     return null;
   }
@@ -32,12 +37,10 @@ export function AuthFooter() {
     }
 
     pendingRef.current = true;
-    setPending(true);
     try {
       const succeeded = await logout();
       if (!succeeded && mountedRef.current) {
         setConfirming(false);
-        setPending(false);
       }
     } finally {
       pendingRef.current = false;

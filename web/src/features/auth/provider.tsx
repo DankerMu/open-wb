@@ -28,6 +28,8 @@ type AuthState = {
   principal: Principal | null;
   error: string | null;
   logoutError: string | null;
+  /** 退出请求在途；由 Provider 持有，卸载重挂的用户区（窄屏覆盖层）也能读到锁定态。 */
+  logoutPending: boolean;
 };
 
 type SetAuthState = Dispatch<SetStateAction<AuthState>>;
@@ -55,6 +57,7 @@ const initialAuthState: AuthState = {
   principal: null,
   error: null,
   logoutError: null,
+  logoutPending: false,
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -105,6 +108,7 @@ function cleanUnauthenticatedState(): AuthState {
     principal: null,
     error: null,
     logoutError: null,
+    logoutPending: false,
   };
 }
 
@@ -114,6 +118,7 @@ function unauthenticatedState(error: unknown): AuthState {
     principal: null,
     error: isApiError(error) ? error.message : REQUEST_FAILED_MESSAGE,
     logoutError: null,
+    logoutPending: false,
   };
 }
 
@@ -135,7 +140,13 @@ function useSessionLifecycle(mountedRef: { current: boolean }, setState: SetAuth
       epochRef.current += 1;
       sessionActiveRef.current = true;
       setSessionVersion(epochRef.current);
-      setState({ status: "authenticated", principal, error: null, logoutError: null });
+      setState({
+        status: "authenticated",
+        principal,
+        error: null,
+        logoutError: null,
+        logoutPending: false,
+      });
     },
     [setState],
   );
@@ -257,9 +268,7 @@ function useLogin(
 
       const operation = startOperation(operationRef, "login");
       setState((current) =>
-        current.status === "authenticated"
-          ? current
-          : { status: "unauthenticated", principal: null, error: null, logoutError: null },
+        current.status === "authenticated" ? current : cleanUnauthenticatedState(),
       );
 
       try {
@@ -337,6 +346,19 @@ function useServiceInfo(
   );
 }
 
+/** 已无退出请求在途时清除 `logoutPending`；被新的退出请求取代时不清（成功路径已由 clearSession 清）。 */
+function settleLogoutPending(
+  mountedRef: { current: boolean },
+  operationRef: AuthOperationRef,
+  setState: SetAuthState,
+) {
+  if (!mountedRef.current || operationRef.current?.kind === "logout") {
+    return;
+  }
+
+  setState((current) => (current.logoutPending ? { ...current, logoutPending: false } : current));
+}
+
 function useLogout(
   apiClient: ApiClient,
   mountedRef: { current: boolean },
@@ -351,7 +373,9 @@ function useLogout(
 
     const operation = startOperation(operationRef, "logout");
     setState((current) =>
-      current.status === "authenticated" ? { ...current, error: null, logoutError: null } : current,
+      current.status === "authenticated"
+        ? { ...current, error: null, logoutError: null, logoutPending: true }
+        : current,
     );
 
     try {
@@ -380,6 +404,7 @@ function useLogout(
       return false;
     } finally {
       finishOperation(operationRef, operation);
+      settleLogoutPending(mountedRef, operationRef, setState);
     }
   }, [apiClient, clearSession, mountedRef, operationRef, setState]);
 }

@@ -433,7 +433,6 @@ a {
   }
 
   .app-shell {
-    flex-direction: column;
     height: auto;
     min-height: 100dvh;
     overflow: visible;
