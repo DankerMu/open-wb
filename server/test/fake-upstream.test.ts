@@ -8,6 +8,7 @@ import { createServer, type Server } from "node:http";
 import { createConnection, type Socket } from "node:net";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { type ChildObserver, observeChild } from "./child-stdio-helpers.js";
 import {
   asRecord,
   collectContent,
@@ -63,7 +64,9 @@ interface CliChild {
 const handles: FakeUpstreamServer[] = [];
 const children: ChildProcessWithoutNullStreams[] = [];
 const occupiers: Server[] = [];
+/** 退出只在 'close'（stdio 已读尽）后记录（#191）。 */
 const childExits = new WeakMap<ChildProcessWithoutNullStreams, ChildExit>();
+const childObservers = new WeakMap<ChildProcessWithoutNullStreams, ChildObserver>();
 
 afterEach(async () => {
   await Promise.all(
@@ -491,13 +494,14 @@ function spawnNode(args: string[], env: Record<string, string> = {}): CliChild {
   let stderr = "";
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
+  childObservers.set(child, observeChild(child));
   child.stdout.on("data", (chunk: string) => {
     stdout += chunk;
   });
   child.stderr.on("data", (chunk: string) => {
     stderr += chunk;
   });
-  child.on("exit", (code, signal) => {
+  child.on("close", (code, signal) => {
     childExits.set(child, { code, signal });
   });
   return {
@@ -544,47 +548,42 @@ function waitForReady(
       }
       if (childExits.get(child) !== undefined) {
         cleanup();
-        reject(new Error(`child exited before ready; stdout=${stdout()} stderr=${stderr()}`));
+        reject(
+          new Error(
+            `child exited before ready; ${childObservers.get(child)?.diagnostic()}; ` +
+              `stdout=${stdout()} stderr=${stderr()}`,
+          ),
+        );
       }
     };
     const cleanup = (): void => {
       abort.removeEventListener("abort", onAbort);
       child.stdout.off("data", onChange);
       child.stderr.off("data", onChange);
-      child.off("exit", onChange);
+      child.off("close", onChange);
     };
     abort.addEventListener("abort", onAbort, { once: true });
     child.stdout.on("data", onChange);
     child.stderr.on("data", onChange);
-    child.on("exit", onChange);
+    child.on("close", onChange);
     onChange();
   });
 }
 
-function waitChildExit(child: ChildProcessWithoutNullStreams, ms = CHILD_MS): Promise<ChildExit> {
+async function waitChildExit(
+  child: ChildProcessWithoutNullStreams,
+  ms = CHILD_MS,
+): Promise<ChildExit> {
   const observed = childExits.get(child);
   if (observed !== undefined) {
-    return Promise.resolve(observed);
+    return observed;
   }
-  return new Promise((resolve, reject) => {
-    const abort = AbortSignal.timeout(ms);
-    const onAbort = (): void => {
-      child.off("exit", onExit);
-      reject(new Error("timed out waiting for child exit"));
-    };
-    const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
-      abort.removeEventListener("abort", onAbort);
-      resolve(childExits.get(child) ?? { code, signal });
-    };
-    abort.addEventListener("abort", onAbort, { once: true });
-    child.once("exit", onExit);
-    const raced = childExits.get(child);
-    if (raced !== undefined) {
-      abort.removeEventListener("abort", onAbort);
-      child.off("exit", onExit);
-      resolve(raced);
-    }
-  });
+  const observer = childObservers.get(child);
+  if (observer === undefined) {
+    throw new Error("child is not observed");
+  }
+  await observer.waitClose(ms, "timed out waiting for child exit");
+  return childExits.get(child) ?? { code: child.exitCode, signal: child.signalCode };
 }
 
 function readyPorts(text: string): number[] {

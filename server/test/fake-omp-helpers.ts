@@ -1,9 +1,11 @@
 /**
  * Issue #87 fake-omp 子进程夹具：真实 spawn + JSONL 帧收集 + 退出观察。
  * 由 fake-omp.test.ts 使用；不导入 fake-omp.mjs 本身。
+ * 退出只在 'close'（stdio 已读尽）后记录（#191），帧等待与 waitExit 不会早于尾帧。
  */
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { type ChildObserver, observeChild } from "./child-stdio-helpers.js";
 
 const FAKE = fileURLToPath(new URL("./support/fake-omp.mjs", import.meta.url));
 const OMP_FLAGS = [
@@ -27,6 +29,8 @@ export const HANDSHAKE = [
   { id: "state-1", type: "get_state" },
 ];
 export const PROMPT = { id: "req_1", type: "prompt", message: "Summarize this repo" };
+/** 早于 vitest 缺省 5s 用例超时触发，超时诊断才可见。 */
+const EXIT_MS = 4_000;
 
 export type Frame = Record<string, unknown>;
 
@@ -55,6 +59,7 @@ export interface StartOptions {
 }
 
 const exitStatuses = new WeakMap<ChildProcessWithoutNullStreams, number>();
+const observers = new WeakMap<ChildProcessWithoutNullStreams, ChildObserver>();
 
 export function startFake(options: StartOptions = {}): Session {
   const args = [...OMP_FLAGS, ...(options.extraArgs ?? [])];
@@ -82,6 +87,7 @@ export function startFake(options: StartOptions = {}): Session {
   };
   child.stdout.setEncoding("utf8");
   child.stderr.setEncoding("utf8");
+  observers.set(child, observeChild(child));
   child.stdout.on("data", (chunk: string) => {
     stdout += chunk;
     pending += chunk;
@@ -100,7 +106,6 @@ export function startFake(options: StartOptions = {}): Session {
     stderr += chunk;
     notify();
   });
-  child.on("exit", recordExit);
   child.on("close", recordExit);
   return {
     frames,
@@ -132,7 +137,11 @@ export function startFake(options: StartOptions = {}): Session {
           }
           if (observedExitStatus(child) !== undefined) {
             cleanup();
-            reject(new Error(`child exited before frame; stdout=${stdout} stderr=${stderr}`));
+            reject(
+              new Error(
+                `child exited before frame; ${diagnosticOf(child)}; stdout=${stdout} stderr=${stderr}`,
+              ),
+            );
           }
         };
         const cleanup = (): void => {
@@ -177,47 +186,26 @@ async function stopChild(child: ChildProcessWithoutNullStreams): Promise<void> {
   await waitExit(child);
 }
 
+/** 仅 'close' 记录的状态算数：exitCode/signalCode 置位时 stdout 可能尚未读尽。 */
 function observedExitStatus(child: ChildProcessWithoutNullStreams): number | undefined {
-  const recorded = exitStatuses.get(child);
-  if (recorded !== undefined) {
-    return recorded;
-  }
-  if (child.exitCode !== null) {
-    return child.exitCode;
-  }
-  return child.signalCode === null ? undefined : 1;
+  return exitStatuses.get(child);
+}
+
+function diagnosticOf(child: ChildProcessWithoutNullStreams): string {
+  return observers.get(child)?.diagnostic() ?? "unobserved child";
 }
 
 function exitStatus(code: number | null, signal: NodeJS.Signals | null): number {
   return code ?? (signal === null ? 0 : 1);
 }
 
-function waitExit(child: ChildProcessWithoutNullStreams): Promise<number> {
-  const observed = observedExitStatus(child);
-  if (observed !== undefined) {
-    return Promise.resolve(observed);
+async function waitExit(child: ChildProcessWithoutNullStreams): Promise<number> {
+  const observer = observers.get(child);
+  if (observer === undefined) {
+    throw new Error("fake omp child is not observed");
   }
-  return new Promise<number>((resolve) => {
-    const settle = (code: number | null, signal: NodeJS.Signals | null): void => {
-      child.off("exit", onExit);
-      child.off("close", onClose);
-      resolve(observedExitStatus(child) ?? exitStatus(code, signal));
-    };
-    const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
-      settle(code, signal);
-    };
-    const onClose = (code: number | null, signal: NodeJS.Signals | null): void => {
-      settle(code, signal);
-    };
-    child.once("exit", onExit);
-    child.once("close", onClose);
-    const cached = observedExitStatus(child);
-    if (cached !== undefined) {
-      child.off("exit", onExit);
-      child.off("close", onClose);
-      resolve(cached);
-    }
-  });
+  await observer.waitClose(EXIT_MS, "fake omp waitExit");
+  return observedExitStatus(child) ?? exitStatus(child.exitCode, child.signalCode);
 }
 
 export function response(id: string, command: string): (frame: Frame) => boolean {

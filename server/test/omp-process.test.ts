@@ -8,6 +8,7 @@ import {
   spawn,
 } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { once } from "node:events";
 import {
   chmodSync,
   existsSync,
@@ -24,6 +25,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { assertSafeSudoPath } from "../src/core/process-path.js";
 import { type SpawnImpl, type SpawnOmpOpts, spawnOmp } from "../src/sessions/omp/process.js";
+import { observeChild } from "./child-stdio-helpers.js";
 import { recordedSpawn, sudoPrefix } from "./session-supervisor-helpers.js";
 
 const CALLER_TOKEN = randomBytes(32).toString("hex");
@@ -62,6 +64,10 @@ const SHEBANG_PROBE = `process.stdout.write(JSON.stringify({
   argv: process.argv.slice(2),
 }));`;
 const ENV_BIN = "/usr/bin/env";
+/** 有界捕获须早于 REAL_CHILD_TEST_MS 触发，诊断才能出现在失败里。 */
+const CAPTURE_MS = 5_000;
+const REAL_CHILD_TEST_MS = 15_000;
+const LATE_OUTPUT = "written after the observed exit\n";
 
 interface SpawnCall {
   command: string;
@@ -75,6 +81,19 @@ interface SpawnCall {
 interface ArgvProbe {
   cwd: string;
   argv: string[];
+}
+
+interface ChildOutput {
+  stdout: string;
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  diagnostic: string;
+}
+
+interface Parsed<T> {
+  value: T;
+  code: number | null;
+  diagnostic: string;
 }
 
 interface SpawnRoots {
@@ -194,14 +213,16 @@ describe("spawnOmp spawn contract", () => {
     expect(lstatSync(join(roots.stateDir, "sessions")).mode & 0o7777).toBe(0o2770);
   });
 
-  it("real child observes captured env, cwd, and argv under contaminated parent env", async () => {
+  it("real child observes captured env, cwd, and argv under contaminated parent env", {
+    timeout: REAL_CHILD_TEST_MS,
+  }, async () => {
     const roots = makeRoots();
     const resumePath = join(roots.sessionDir, "resume file.jsonl");
     const parentBefore = { ...process.env };
     const argvCalls: SpawnCall[] = [];
     const envCalls: SpawnCall[] = [];
-    let argvProbe: ArgvProbe | undefined;
-    let envDump: Record<string, string> | undefined;
+    let argvProbe: Parsed<ArgvProbe> | undefined;
+    let envDump: Parsed<Record<string, string>> | undefined;
     await withContaminatedEnv({ LANG: "C.UTF-8", TMPDIR: "/tmp" }, async () => {
       const parentDuring = { ...process.env };
       argvProbe = await readArgvProbe(
@@ -228,44 +249,84 @@ describe("spawnOmp spawn contract", () => {
       return;
     }
     expectFourDirectories(roots, 0o2770);
-    expect(realpathSync(argvProbe.cwd)).toBe(realpathSync(argvCall.cwd ?? argvProbe.cwd));
-    expect(realpathSync(argvProbe.cwd)).toBe(realpathSync(roots.cwd));
-    expect(argvProbe.argv).toEqual([argvCall.command, ...argvCall.args]);
-    expect(envDump).toEqual(envCall.env);
-    expect(envDump).toEqual(allowlist(roots, { LANG: "C.UTF-8", TMPDIR: "/tmp" }));
+    const probe = argvProbe.value;
+    const env = envDump.value;
+    expect(realpathSync(probe.cwd), argvProbe.diagnostic).toBe(
+      realpathSync(argvCall.cwd ?? probe.cwd),
+    );
+    expect(realpathSync(probe.cwd), argvProbe.diagnostic).toBe(realpathSync(roots.cwd));
+    expect(probe.argv, argvProbe.diagnostic).toEqual([argvCall.command, ...argvCall.args]);
+    expect(env, envDump.diagnostic).toEqual(envCall.env);
+    expect(env, envDump.diagnostic).toEqual(allowlist(roots, { LANG: "C.UTF-8", TMPDIR: "/tmp" }));
     for (const key of FORBIDDEN_KEYS) {
-      expect(envDump).not.toHaveProperty(key);
+      expect(env, envDump.diagnostic).not.toHaveProperty(key);
     }
-    expect(JSON.stringify(argvProbe.argv)).not.toContain(CALLER_TOKEN);
+    expect(JSON.stringify(probe.argv), argvProbe.diagnostic).not.toContain(CALLER_TOKEN);
   });
 
-  it("default spawn launches the supplied bin with piped argv and cwd", async () => {
+  it("default spawn launches the supplied bin with piped argv and cwd", {
+    timeout: REAL_CHILD_TEST_MS,
+  }, async () => {
     const roots = makeRoots();
     const bin = join(roots.root, "probe.mjs");
     writeFileSync(bin, `#!${process.execPath}\n${SHEBANG_PROBE}\n`);
     chmodSync(bin, 0o755);
     const parentBefore = { ...process.env };
-    let stdout = "";
-    let status = 1;
+    let probed: Parsed<ArgvProbe> | undefined;
     await withContaminatedEnv({ LANG: "C.UTF-8", TMPDIR: "/tmp" }, async () => {
       const parentDuring = { ...process.env };
       const child = await spawnOmp({ ...optsOf(roots, null), bin });
       children.push(child);
-      child.stdout.setEncoding("utf8");
-      child.stdout.on("data", (chunk: string) => {
-        stdout += chunk;
-      });
       child.stdin.end();
-      status = await waitExit(child);
+      probed = await readArgvProbe(child);
       expect({ ...process.env }).toEqual(parentDuring);
     });
     expect({ ...process.env }).toEqual(parentBefore);
-    expect(status).toBe(0);
+    expect(probed).toBeDefined();
+    if (probed === undefined) {
+      return;
+    }
+    const { value: report, diagnostic } = probed;
+    expect(probed.code, diagnostic).toBe(0);
     expectFourDirectories(roots, 0o2770);
-    const report = JSON.parse(stdout) as ArgvProbe;
-    expect(realpathSync(report.cwd)).toBe(realpathSync(roots.cwd));
-    expect(report.argv).toEqual(coldArgs(roots));
-    expect(JSON.stringify(report.argv)).not.toContain(CALLER_TOKEN);
+    expect(realpathSync(report.cwd), diagnostic).toBe(realpathSync(roots.cwd));
+    expect(report.argv, diagnostic).toEqual(coldArgs(roots));
+    expect(JSON.stringify(report.argv), diagnostic).not.toContain(CALLER_TOKEN);
+  });
+
+  it("capture after an observed exit still returns output delivered before close", {
+    timeout: REAL_CHILD_TEST_MS,
+  }, async () => {
+    const { root } = makeRoots();
+    const go = join(root, "go");
+    const child = spawn(process.execPath, ["-e", lateWriterParent(go)], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    children.push(child);
+    await once(child, "exit");
+    const pending = captureChild(child);
+    writeFileSync(go, "");
+    const output = await pending;
+    expect(output.stdout, output.diagnostic).toBe(LATE_OUTPUT);
+    expect(output.code, output.diagnostic).toBe(0);
+    expect(output.diagnostic).toMatch(/events=exited-before-observe>stdout-data(x\d+)?>close$/);
+  });
+
+  it("reports exit code, signal, byte count and event order for unusable captures", async () => {
+    const empty = spawn(process.execPath, ["-e", "process.exit(3)"], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    children.push(empty);
+    await expect(readArgvProbe(empty)).rejects.toThrow(
+      /^unparseable argv probe output "": code=3 signal=null stdoutBytes=0 stderrBytes=0 events=exit>close$/,
+    );
+    const hung = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    children.push(hung);
+    await expect(captureChild(hung, 200)).rejects.toThrow(
+      /^child output capture: no close within 200ms; code=null signal=null stdoutBytes=0 stderrBytes=0 events=none$/,
+    );
   });
 
   it.each(["", "/tmp/workbuddy user:proof $;`\"'", "/tmp/workbuddy-sentinel"])(
@@ -597,23 +658,46 @@ function recordedCall(command: string, args: readonly string[], options: SpawnOp
   };
 }
 
-async function readChildStdout(child: ChildProcessWithoutNullStreams): Promise<string> {
+/** 输出只在 'close' 后才算完整（#191）；超时以诊断拒绝。 */
+async function captureChild(
+  child: ChildProcessWithoutNullStreams,
+  ms = CAPTURE_MS,
+): Promise<ChildOutput> {
   let stdout = "";
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (chunk: string) => {
     stdout += chunk;
   });
-  await waitExit(child);
-  return stdout;
+  const observer = observeChild(child);
+  await observer.waitClose(ms, "child output capture");
+  return {
+    stdout,
+    code: child.exitCode,
+    signal: child.signalCode,
+    diagnostic: observer.diagnostic(),
+  };
 }
 
-async function readArgvProbe(child: ChildProcessWithoutNullStreams): Promise<ArgvProbe> {
-  return JSON.parse(await readChildStdout(child)) as ArgvProbe;
+async function readArgvProbe(child: ChildProcessWithoutNullStreams): Promise<Parsed<ArgvProbe>> {
+  const output = await captureChild(child);
+  let value: ArgvProbe;
+  try {
+    value = JSON.parse(output.stdout) as ArgvProbe;
+  } catch (error) {
+    throw new Error(
+      `unparseable argv probe output ${JSON.stringify(output.stdout)}: ${output.diagnostic}`,
+      { cause: error },
+    );
+  }
+  return { value, code: output.code, diagnostic: output.diagnostic };
 }
 
-async function readEnvDump(child: ChildProcessWithoutNullStreams): Promise<Record<string, string>> {
+async function readEnvDump(
+  child: ChildProcessWithoutNullStreams,
+): Promise<Parsed<Record<string, string>>> {
+  const output = await captureChild(child);
   const env: Record<string, string> = {};
-  for (const line of (await readChildStdout(child)).split("\n")) {
+  for (const line of output.stdout.split("\n")) {
     if (line.length === 0) {
       continue;
     }
@@ -624,7 +708,22 @@ async function readEnvDump(child: ChildProcessWithoutNullStreams): Promise<Recor
       env[line.slice(0, separator)] = line.slice(separator + 1);
     }
   }
-  return env;
+  return { value: env, code: output.code, diagnostic: output.diagnostic };
+}
+
+/**
+ * 父进程立即退出；继承 stdio 的孙进程等到 `go` 出现才写 LATE_OUTPUT 并退出，
+ * 于是 'exit' 必先于管道数据被观察到，'close' 必在数据之后。
+ */
+function lateWriterParent(go: string): string {
+  const writer =
+    `const fs=require("node:fs");setTimeout(()=>process.exit(1),${CAPTURE_MS}).unref();` +
+    `const t=setInterval(()=>{if(fs.existsSync(${JSON.stringify(go)})){clearInterval(t);` +
+    `process.stdout.write(${JSON.stringify(LATE_OUTPUT)});}},10);`;
+  return (
+    `require("node:child_process").spawn(process.execPath,["-e",${JSON.stringify(writer)}],` +
+    `{stdio:"inherit"}).unref();process.exit(0);`
+  );
 }
 
 async function withContaminatedEnv(
