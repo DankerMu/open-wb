@@ -19,7 +19,7 @@
   - 每个格一张表：`1440`/`1024`/`390` × `light`/`dark`；
   - 每行一个态：`login-default`/`chat-welcome`/`chat-done`/`files-readme`/`settings-default`（常量见 `web/e2e/ui-shots.mjs:50-58`）；
   - 左列 demo，右列 app；
-  - 脚本对每张 app 截图断言无横向溢出、无工作空间绝对路径（`web/e2e/ui-shots.mjs:403-407`）。
+  - 脚本对每张 app 截图断言无横向溢出；非 chat 态（`login-default`/`files-readme`/`settings-default`）另断言无工作空间绝对路径，chat 态按 ADR-0011 不做该断言（`web/e2e/ui-shots.mjs:403-407`；豁免见 #386）。假上游的固定输出不含绝对路径，公开截图仍只用假上游。
 - **验证方式记法**：
   - `ui-shots <态名> @<格>…`：在 `index.html` 对应格的该态行左右对照；响应式项列出所有要看的格。
   - `ui-walk <步骤>（web/e2e/…:行）`：`make ui-walk` 两个 project（`desktop-light` 1440×900、`mobile-dark` 390×844）里的真实浏览器断言。
