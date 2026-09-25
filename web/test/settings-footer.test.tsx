@@ -1,10 +1,18 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { RouterProvider } from "react-router";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthGuard, AuthProvider, useAuth } from "../src/features/auth/index.js";
-import { createAppRouter } from "../src/routes/index.js";
 import "./dialog-platform.js";
 import "./radix-platform.js";
+import {
+  authenticatedRoutes,
+  createAuthenticatedFetch,
+  expectAuthenticatedShell,
+  expectLoginAt,
+  getFooter,
+  openLogoutDialog,
+  renderApp,
+  resetSettingsTestState,
+} from "./settings-support.js";
 import {
   createFetchMock,
   currentLocation,
@@ -15,68 +23,9 @@ import {
   replaceFetchRoutes,
   requestOptionsAt,
   serviceInfo,
-  setBrowserPath,
   unauthorizedResponseCases,
 } from "./support.js";
 import { readRepoFile } from "./ui-support.js";
-
-function createAuthenticatedFetch(
-  infoResponse: Error | Response | Promise<Response> = jsonResponse(serviceInfo),
-) {
-  return createFetchMock(authenticatedRoutes({ "/api/info": infoResponse }));
-}
-
-function authenticatedRoutes(routes: Parameters<typeof createFetchMock>[0]) {
-  return {
-    "/api/auth/me": jsonResponse(principal),
-    "/api/workspaces": jsonResponse({ workspaces: [] }),
-    "/api/sessions": jsonResponse({ sessions: [] }),
-    ...routes,
-  };
-}
-
-let router: ReturnType<typeof createAppRouter> | undefined;
-
-function renderApp(path: string) {
-  setBrowserPath(path);
-  router = createAppRouter();
-  return render(<RouterProvider router={router} />);
-}
-
-async function expectAuthenticatedShell(path: string) {
-  const title =
-    path === "/"
-      ? "WorkBuddy，我帮你"
-      : path === "/files"
-        ? "工作空间"
-        : path === "/center"
-          ? "中心"
-          : "设置";
-  expect(await screen.findByRole("heading", { level: 1, name: title })).toBeTruthy();
-  const sidebar = screen.getByRole("complementary", { name: "侧栏" });
-  expect(within(sidebar).getByText(principal.account, { exact: true })).toBeTruthy();
-  expect(within(sidebar).getByText(principal.role, { exact: true })).toBeTruthy();
-  expect(within(sidebar).getByRole("button", { name: "用户菜单" })).toBeTruthy();
-}
-
-async function expectLoginAt(path: string) {
-  expect(await screen.findByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeTruthy();
-  expect(currentLocation()).toBe(path);
-}
-
-function getFooter() {
-  return screen.getByRole("complementary", { name: "侧栏", hidden: true });
-}
-
-async function openLogoutDialog() {
-  fireEvent.pointerDown(within(getFooter()).getByRole("button", { name: "用户菜单" }), {
-    button: 0,
-    ctrlKey: false,
-    pointerType: "mouse",
-  });
-  fireEvent.click(await screen.findByRole("menuitem", { name: "退出登录" }));
-  return screen.getByRole("alertdialog");
-}
 
 type AuthProbe = {
   loadServiceInfo: ReturnType<typeof useAuth>["loadServiceInfo"];
@@ -126,223 +75,7 @@ async function renderAuthenticatedProvider() {
 }
 
 afterEach(() => {
-  cleanup();
-  router?.dispose();
-  router = undefined;
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-  window.localStorage.clear();
-  document.body.replaceChildren();
-  delete document.documentElement.dataset.theme;
-  setBrowserPath("/");
-});
-
-describe("settings route", () => {
-  it("mounts the theme owner before canonical navigation starts authentication", async () => {
-    window.localStorage.setItem("workbuddy-theme", "dark");
-    const pendingMe = deferredResponse();
-    const fetchMock = createFetchMock({ "/api/auth/me": pendingMe.promise });
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderApp("/SeTTings///?from=canonical#target");
-
-    await waitFor(() => {
-      expect(currentLocation()).toBe("/settings?from=canonical#target");
-    });
-    expect(document.documentElement.dataset.theme).toBe("dark");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("renders only the appearance and about cards with the returned service identity", async () => {
-    const fetchMock = createAuthenticatedFetch();
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderApp("/settings?from=deep-link#target");
-
-    await expectAuthenticatedShell("/settings");
-    expect(currentLocation()).toBe("/settings?from=deep-link#target");
-    expect(
-      screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent),
-    ).toEqual(["外观", "关于"]);
-    expect(screen.queryByRole("heading", { level: 2, name: "通用" })).toBeNull();
-    const group = screen.getByRole("radiogroup", { name: "主题" });
-    expect(within(group).getByRole("radio", { name: "浅色" })).toBeTruthy();
-    expect(within(group).getByRole("radio", { name: "深色" })).toBeTruthy();
-    expect(
-      (within(group).getByRole("radio", { name: "跟随系统" }) as HTMLInputElement).checked,
-    ).toBe(true);
-    expect(screen.getByText("当前生效：浅色", { exact: true })).toBeTruthy();
-    expect(await screen.findByText(serviceInfo.name, { exact: true })).toBeTruthy();
-    expect(screen.getByText(`版本 ${serviceInfo.version}`, { exact: true })).toBeTruthy();
-    expect(screen.queryByText("5.3.11", { exact: true })).toBeNull();
-    const about = screen.getByRole("heading", { level: 2, name: "关于" }).closest("section");
-    expect(about?.textContent).not.toContain(serviceInfo.auth.provider);
-  });
-
-  it("uses the single theme context to update appearance controls and the root immediately", async () => {
-    const fetchMock = createAuthenticatedFetch();
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderApp("/settings");
-    const group = await screen.findByRole("radiogroup", { name: "主题" });
-    fireEvent.click(within(group).getByRole("radio", { name: "深色" }));
-
-    expect((within(group).getByRole("radio", { name: "深色" }) as HTMLInputElement).checked).toBe(
-      true,
-    );
-    expect(document.documentElement.dataset.theme).toBe("dark");
-    expect(screen.getByText("当前生效：深色", { exact: true })).toBeTruthy();
-    expect(window.localStorage.getItem("workbuddy-theme")).toBe("dark");
-  });
-
-  it("shows loading until the Provider-owned info operation returns", async () => {
-    const pendingInfo = deferredResponse();
-    const fetchMock = createAuthenticatedFetch(pendingInfo.promise);
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderApp("/settings");
-
-    expect(await screen.findByText("正在读取服务信息", { exact: true })).toBeTruthy();
-    pendingInfo.resolve(jsonResponse(serviceInfo));
-    expect(await screen.findByText(serviceInfo.name, { exact: true })).toBeTruthy();
-  });
-
-  it.each([
-    [
-      "a legal non-401 envelope",
-      jsonResponse({ error: { code: "maintenance", message: "服务信息暂不可用" } }, 503),
-      "服务信息暂不可用",
-    ],
-    ["a malformed success", jsonResponse({ name: "private" }), "请求失败，请稍后重试"],
-    ["a network failure", new Error("private transport detail"), "请求失败，请稍后重试"],
-  ])("keeps the Principal and shell for %s", async (_label, infoResult, message) => {
-    const fetchMock = createAuthenticatedFetch(infoResult);
-    vi.stubGlobal("fetch", fetchMock);
-    const requestedPath = "/settings?from=info-failure#target";
-
-    renderApp(requestedPath);
-
-    await expectAuthenticatedShell("/settings");
-    expect((await screen.findByRole("alert")).textContent).toBe(message);
-    expect(currentLocation()).toBe(requestedPath);
-    expect(screen.queryByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeNull();
-  });
-
-  it.each(unauthorizedResponseCases())(
-    "transitions to login at the same URL for %s info 401",
-    async (_label, infoResponse) => {
-      const fetchMock = createAuthenticatedFetch(infoResponse);
-      vi.stubGlobal("fetch", fetchMock);
-      const requestedPath = "/settings?from=info-401#target";
-
-      renderApp(requestedPath);
-
-      await expectLoginAt(requestedPath);
-      expect(screen.queryByRole("complementary", { name: "侧栏" })).toBeNull();
-    },
-  );
-
-  it("aborts the exact info request on settings cleanup and suppresses its late response", async () => {
-    const pendingInfo = deferredResponse();
-    const fetchMock = createAuthenticatedFetch(pendingInfo.promise);
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderApp("/settings");
-    await screen.findByText("正在读取服务信息", { exact: true });
-    const requestOptions = await requestOptionsAt(fetchMock, 1);
-    const signal = requestOptions?.signal;
-    expect(signal).toBeInstanceOf(AbortSignal);
-    expect(signal?.aborted).toBe(false);
-
-    await act(async () => {
-      await router?.navigate("/files");
-    });
-    expect(signal?.aborted).toBe(true);
-    pendingInfo.resolve(jsonResponse(serviceInfo));
-
-    await waitFor(() => {
-      expect(screen.getByRole("heading", { level: 1, name: "工作空间" })).toBeTruthy();
-      expect(consoleError).not.toHaveBeenCalled();
-    });
-  });
-
-  it("settles About after failed logout supersedes pending service information", async () => {
-    const pendingInfo = deferredResponse();
-    const pendingLogout = deferredResponse();
-    const logoutError = "无法退出当前会话";
-    const fetchMock = vi.fn<(path: string, options?: RequestInit) => Promise<Response>>(
-      (path, options) => {
-        if (path === "/api/auth/me") {
-          return Promise.resolve(jsonResponse(principal));
-        }
-
-        if (path === "/api/info") {
-          return new Promise<Response>((resolve, reject) => {
-            options?.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
-              once: true,
-            });
-            void pendingInfo.promise.then(resolve);
-          });
-        }
-
-        if (path === "/api/auth/logout") {
-          return pendingLogout.promise;
-        }
-
-        throw new Error(`unexpected request ${path}`);
-      },
-    );
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    vi.stubGlobal("fetch", fetchMock);
-    const requestedPath = "/settings?from=logout-supersedes-info#target";
-
-    renderApp(requestedPath);
-    await expectAuthenticatedShell("/settings");
-    expect(await screen.findByText("正在读取服务信息", { exact: true })).toBeTruthy();
-    const infoOptions = await requestOptionsAt(fetchMock, 1);
-
-    fireEvent.click(within(await openLogoutDialog()).getByRole("button", { name: "退出" }));
-    await requestOptionsAt(fetchMock, 2);
-    expect(infoOptions?.signal).toBeInstanceOf(AbortSignal);
-    expect(infoOptions?.signal?.aborted).toBe(true);
-
-    const footer = getFooter();
-    pendingLogout.resolve(
-      jsonResponse({ error: { code: "forbidden", message: logoutError } }, 403),
-    );
-    await waitFor(() => {
-      expect(within(footer).getByRole("alert").textContent).toBe(logoutError);
-    });
-    pendingInfo.resolve(jsonResponse(serviceInfo));
-    await expectAuthenticatedShell("/settings");
-    expect(currentLocation()).toBe(requestedPath);
-    expect(within(footer).getByText(principal.account, { exact: true })).toBeTruthy();
-    expect(within(footer).getByText(principal.role, { exact: true })).toBeTruthy();
-
-    await waitFor(() => {
-      const about = screen.getByRole("heading", { level: 2, name: "关于" }).closest("section");
-      expect(about).toBeTruthy();
-      expect(
-        within(about as HTMLElement).queryByText("正在读取服务信息", { exact: true }),
-      ).toBeNull();
-      expect(within(about as HTMLElement).getByRole("alert").textContent).toBe(
-        "请求失败，请稍后重试",
-      );
-    });
-
-    await waitFor(() => {
-      const about = screen.getByRole("heading", { level: 2, name: "关于" }).closest("section");
-      expect(within(footer).getByRole("alert").textContent).toBe(logoutError);
-      expect(within(about as HTMLElement).getByRole("alert").textContent).toBe(
-        "请求失败，请稍后重试",
-      );
-      expect(
-        within(about as HTMLElement).queryByText(serviceInfo.name, { exact: true }),
-      ).toBeNull();
-      expect(consoleError).not.toHaveBeenCalled();
-    });
-  });
+  resetSettingsTestState();
 });
 
 describe("AuthProvider info and logout coordination", () => {
@@ -778,7 +511,11 @@ describe("迁移静态契约", () => {
     expect(footer).toContain("returnFocus");
     expect(footer).not.toContain("aria-current");
     expect(readRepoFile("web/src/styles.css")).not.toContain(".logout-dialog");
-    for (const file of ["web/test/settings-footer.test.tsx", "web/test/render-app-router.tsx"]) {
+    for (const file of [
+      "web/test/settings-footer.test.tsx",
+      "web/test/settings-page.test.tsx",
+      "web/test/render-app-router.tsx",
+    ]) {
       expect(readRepoFile(file)).toMatch(/^import "\.\/radix-platform\.js";$/m);
     }
   });
