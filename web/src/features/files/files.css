@@ -138,6 +138,18 @@
   color: var(--wb-text-tertiary);
 }
 
+/* Root row: shield + workspace name with the logical path as a subline (demo:3861-3878). */
+.files-tree-root-path {
+  margin: 0 0.5rem 0.35rem 1.75rem;
+  overflow: hidden;
+  font-family: var(--wb-mono);
+  font-size: 0.65rem;
+  line-height: 1.3;
+  color: var(--wb-text-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .files-tree-glyph {
   display: inline-flex;
   flex-shrink: 0;

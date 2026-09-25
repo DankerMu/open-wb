@@ -101,9 +101,10 @@ export async function openWorkspaceDialogFromMenu() {
   await chooseCreationMenuItem("新建工作空间");
   return screen.findByRole("dialog", { name: "新建工作空间" });
 }
-export async function openDirectoryDialog() {
+/** 根行可访问名为 `折叠 <空间名>`；默认按 `workspace`（设计文档）等待根列表。 */
+export async function openDirectoryDialog(workspaceName: string = workspace.name) {
   await waitFor(() => {
-    const button = screen.getByRole("button", { name: "折叠 root" });
+    const button = screen.getByRole("button", { name: `折叠 ${workspaceName}` });
     const item = button.closest("li");
     if (!item?.querySelector(":scope > ul")) {
       throw new Error("expected the initial root listing to be present");
@@ -143,6 +144,10 @@ export async function expectCreateEnabledAfterAlert(dialog: HTMLElement, message
     false,
   );
   fireEvent.click(within(dialog).getByRole("button", { name: "创建" }));
+}
+
+export function hasLucideGlyph(root: Element, name: string) {
+  return [...root.querySelectorAll("svg")].some((svg) => svg.classList.contains(`lucide-${name}`));
 }
 
 export function stubBlobUrls(urls: string[]) {

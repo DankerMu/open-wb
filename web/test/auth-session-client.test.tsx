@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthGuard, AuthProvider, useAuth } from "../src/features/auth/index.js";
@@ -366,7 +366,11 @@ describe("provider session-bound file client", () => {
       lateList.resolve(jsonResponse({ workspaces: [otherWorkspace] }));
     });
     await waitFor(() => {
-      expect(screen.getByText("李四文档", { exact: true })).toBeTruthy();
+      expect(
+        within(screen.getByRole("button", { name: "选择工作空间" })).getByText("李四文档", {
+          exact: true,
+        }),
+      ).toBeTruthy();
     });
     expect(screen.queryByText("secret.txt", { exact: true })).toBeNull();
     expect(

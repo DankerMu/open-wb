@@ -7,6 +7,7 @@ import {
   collapseAndExpand,
   expectLocation,
   expectTreeRequestCount,
+  hasLucideGlyph,
   imagePreviewResponse,
   openDirectoryDialog,
   openWorkspaceDialog,
@@ -33,6 +34,17 @@ afterEach(() => {
   cleanupFilesFixture();
 });
 
+// 切换空间会按 key 重挂 WorkspaceBrowser 与切换器卡：每次重试都重新取卡，不缓存元素。
+function workspaceCard() {
+  return within(screen.getByRole("button", { name: "选择工作空间" }));
+}
+
+async function expectCardPath(path: string) {
+  await waitFor(() => {
+    expect(workspaceCard().getByText(path, { exact: true })).toBeTruthy();
+  });
+}
+
 describe("workspace page route integration", () => {
   it("loads the authenticated account workspace, reconciles its URL, and starts the root tree", async () => {
     const { fetchMock } = renderFiles(
@@ -45,8 +57,9 @@ describe("workspace page route integration", () => {
     const heading = await screen.findByRole("heading", { level: 1, name: "工作空间" });
     expect(heading.closest("main")).toBeNull();
     expect(await screen.findByRole("button", { name: "选择工作空间" })).toBeTruthy();
-    expect(screen.getByText("设计文档", { exact: true })).toBeTruthy();
-    expect(screen.getByText(workspace.root, { exact: true })).toBeTruthy();
+    const card = within(screen.getByRole("button", { name: "选择工作空间" }));
+    expect(card.getByText("设计文档", { exact: true })).toBeTruthy();
+    expect(card.getByText("zhangsan/design-docs", { exact: true })).toBeTruthy();
     expect(screen.getByText("工作空间目录", { exact: true })).toBeTruthy();
 
     await expectLocation("/files?from=tracer&ws=workspace-1#preview");
@@ -113,7 +126,7 @@ describe("workspace page route integration", () => {
       within(tree)
         .getAllByRole("button")
         .map((button) => button.querySelector(".files-tree-name")?.textContent),
-    ).toEqual(["root", "out", "in", "readme.md", "notes.csv", "logo.png", "archive.zip"]);
+    ).toEqual(["设计文档", "out", "in", "readme.md", "notes.csv", "logo.png", "archive.zip"]);
     fireEvent.click(screen.getByRole("button", { name: "展开 out" }));
     await collapseAndExpand("out");
     await expectTreeRequestCount(fetchMock, "/api/workspaces/workspace-1/tree?path=out", 1);
@@ -170,7 +183,7 @@ describe("workspace page route integration", () => {
       within(directoryDialog)
         .getAllByRole("option")
         .map((option) => option.textContent),
-    ).toEqual(["根目录　root", "out"]);
+    ).toEqual(["根目录　设计文档", "out"]);
     fireEvent.change(within(directoryDialog).getByLabelText("文件夹名称"), {
       target: { value: "drafts" },
     });
@@ -297,7 +310,7 @@ describe("workspace page route integration", () => {
     fireEvent.click(within(newWorkspaceDialog).getByRole("button", { name: "创建" }));
     await waitFor(() => {
       expect(`${window.location.pathname}${window.location.search}`).toBe("/files?ws=workspace-2");
-      expect(screen.getByText("新空间", { exact: true })).toBeTruthy();
+      expect(workspaceCard().getByText("新空间", { exact: true })).toBeTruthy();
     });
   });
 
@@ -373,7 +386,7 @@ describe("workspace page route integration", () => {
     await act(async () => {
       await router.navigate("/files?ws=workspace-2");
     });
-    await screen.findByText(secondWorkspace.root, { exact: true });
+    await expectCardPath("zhangsan/data-analysis");
     expect(screen.queryByRole("dialog", { name: "新建文件夹" })).toBeNull();
     expect(screen.getByText("未选择文件", { exact: true })).toBeTruthy();
     await act(async () => {
@@ -406,15 +419,15 @@ describe("workspace page route integration", () => {
       }),
     );
 
-    await screen.findByText(workspace.root, { exact: true });
+    await expectCardPath("zhangsan/design-docs");
     await selectWorkspaceByName(/数据分析/);
-    await screen.findByText(secondWorkspace.root, { exact: true });
+    await expectCardPath("zhangsan/data-analysis");
     await expectLocation("/files?ws=workspace-2");
     await act(async () => {
       await router.navigate(-1);
     });
     await expectLocation("/files?ws=workspace-1");
-    expect(await screen.findByText(workspace.root, { exact: true })).toBeTruthy();
+    await expectCardPath("zhangsan/design-docs");
   });
 
   it("releases a displayed image when replaced and when the page unmounts", async () => {
@@ -444,10 +457,6 @@ describe("workspace page route integration", () => {
     expect(blobUrls.revokeObjectURL).toHaveBeenCalledWith("blob:second");
   });
 });
-
-function hasLucideGlyph(root: Element, name: string) {
-  return [...root.querySelectorAll("svg")].some((svg) => svg.classList.contains(`lucide-${name}`));
-}
 
 describe("workspace tree entry meta", () => {
   it("shows per-extension icons and trailing sizes while file names stay the accessible names", async () => {

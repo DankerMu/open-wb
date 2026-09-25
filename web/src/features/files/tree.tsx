@@ -1,9 +1,9 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ApiClient, ApiError } from "../../lib/api.js";
-import { EmptyState, Icon } from "../../ui/index.js";
+import { EmptyState, Icon, type IconName } from "../../ui/index.js";
 import { CreationMenu, DirectoryDialog } from "./dialogs.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
-import { fileIcon, formatSize } from "./file-meta.js";
+import { fileIcon, formatSize, logicalPath } from "./file-meta.js";
 import { PreviewPane } from "./preview.js";
 import type { DirectoryListing, PreviewState, TreeEntry, Workspace } from "./types.js";
 
@@ -22,13 +22,14 @@ type FolderDialogState = {
 };
 
 type WorkspaceBrowserProps = {
+  account: string;
   client: ApiClient;
   switcher: ReactNode;
   workspace: Workspace;
   onNewWorkspace(trigger: HTMLElement | null): void;
 };
 
-type DirectoryTreeProps = {
+type DirectoryTreeState = {
   cache: DirectoryCache;
   errors: Record<string, string>;
   expandedPaths: ReadonlySet<string>;
@@ -38,9 +39,17 @@ type DirectoryTreeProps = {
   onToggleDirectory(path: string): void;
 };
 
-type DirectoryNodeProps = DirectoryTreeProps & {
+type DirectoryTreeProps = DirectoryTreeState & {
+  /** 根行副行：逻辑路径 `<account>/<dir>`。 */
+  rootPath: string;
+  workspaceName: string;
+};
+
+type DirectoryNodeProps = DirectoryTreeState & {
+  icon: IconName;
   label: string;
   path: string;
+  subline?: string;
 };
 
 type PreviewAreaProps = {
@@ -117,12 +126,14 @@ function DirectoryNode({
   cache,
   errors,
   expandedPaths,
+  icon,
   label,
   loadingPaths,
   onSelectFile,
   onToggleDirectory,
   path,
   selectedPath,
+  subline,
 }: DirectoryNodeProps) {
   const entries = cache[path]?.entries;
   const expanded = expandedPaths.has(path);
@@ -143,10 +154,11 @@ function DirectoryNode({
           <path d="M4 6l4 5 4-5" fill="none" stroke="currentColor" strokeWidth="1.5" />
         </svg>
         <span className="files-tree-glyph">
-          <Icon name="folder" size={14} />
+          <Icon name={icon} size={14} />
         </span>
         <span className="files-tree-name">{label}</span>
       </button>
+      {subline ? <p className="files-tree-root-path">{subline}</p> : null}
       {error ? (
         <p className="ui-alert" role="alert">
           {error}
@@ -176,6 +188,7 @@ function DirectoryNode({
                     cache={cache}
                     errors={errors}
                     expandedPaths={expandedPaths}
+                    icon="folder"
                     key={entryPath}
                     label={entry.name}
                     loadingPaths={loadingPaths}
@@ -218,11 +231,11 @@ function DirectoryNode({
   );
 }
 
-function DirectoryTree(props: DirectoryTreeProps) {
+function DirectoryTree({ rootPath, workspaceName, ...state }: DirectoryTreeProps) {
   return (
     <nav aria-label="工作空间目录树">
       <ul className="files-tree-list">
-        <DirectoryNode {...props} label="root" path="" />
+        <DirectoryNode {...state} icon="shield" label={workspaceName} path="" subline={rootPath} />
       </ul>
     </nav>
   );
@@ -296,6 +309,7 @@ function PreviewArea({ loading, selectedFile }: PreviewAreaProps) {
 }
 
 export function WorkspaceBrowser({
+  account,
   client,
   onNewWorkspace,
   switcher,
@@ -603,7 +617,9 @@ export function WorkspaceBrowser({
             loadingPaths={loadingPaths}
             onSelectFile={selectFile}
             onToggleDirectory={toggleDirectory}
+            rootPath={logicalPath(account, workspace.dir)}
             selectedPath={selectedFile?.path ?? null}
+            workspaceName={workspace.name}
           />
         }
         folderNotice={folderNotice}
@@ -620,6 +636,7 @@ export function WorkspaceBrowser({
           onCreate={createDirectory}
           pending={folderDialog.pending}
           returnFocus={folderReturnFocusRef}
+          workspaceName={workspace.name}
         />
       ) : null}
     </>
