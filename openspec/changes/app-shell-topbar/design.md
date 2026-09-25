@@ -11,7 +11,7 @@ Must add/change:
   const TopbarContext = createContext<TopbarContextValue | null>(null);
   export function TopbarProvider({ children }) { const [breadcrumb, setBreadcrumb] = useState<string | null>(null); const value = useMemo(() => ({ breadcrumb, setBreadcrumb }), [breadcrumb]); return <TopbarContext.Provider value={value}>{children}</TopbarContext.Provider>; }
   /** 页面向 shell 上报面包屑；Provider 外 no-op。变更即更新，卸载或改为 undefined 时清空。 */
-  export function useTopbar({ breadcrumb }: { breadcrumb?: string | undefined }): void { const ctx = useContext(TopbarContext); const set = ctx?.setBreadcrumb; useEffect(() => { if (!set || breadcrumb === undefined) return; set(breadcrumb); return () => set(null); }, [set, breadcrumb]); }
+  export function useTopbar({ breadcrumb }: { breadcrumb?: string | undefined }): void { const ctx = useContext(TopbarContext); const set = ctx?.setBreadcrumb; useLayoutEffect(() => { if (!set || breadcrumb === undefined) return; set(breadcrumb); return () => set(null); }, [set, breadcrumb]); }（layout effect：`RouterProvider` 以 `startTransition` 提交，被动 effect 会晚于绘制，改 layout effect 避免导航后一帧陈旧面包屑/双 h1）
   export function useTopbarBreadcrumb(): string | null { return useContext(TopbarContext)?.breadcrumb ?? null; }
   ```
   只在 `breadcrumb` 有值时写入，清空一律由 cleanup 负责（卸载、路由切换、会话取消选中都走 cleanup）——因此"cleanup 不清空"这一注入会真实变红。StrictMode：effect 双跑为 set→clear→set，最终一致。
@@ -45,13 +45,16 @@ Must add/change:
   - 新 `web/test/topbar.test.tsx`：见 Seams。
 - `ui-walk.spec.ts`：`ROUTES` `:30` `/` 的 `heading` → `WorkBuddy，我帮你`；`:82` 硬编码的 `expectAuthenticatedRoute(page, "/", "会话", "会话")` 第三参改 `ROUTES[0].heading`；在会话创建/选中后的既有断言处增一行 `await expect(page.getByRole("banner").getByRole("heading", { level: 1 })).toHaveAccessibleName(/^我的工作 \/ /);`（净增 2 行 → 802 行；size-guard 不扫 e2e，6.1 前拆分）。
 
-Governing invariant: 每个已认证路由在任一时刻恰有一个页面级 level-1 heading，且归属固定——`/` 欢迎态（`requestedSessionId === null`）= chat hero `WorkBuddy，我帮你`（在 `main` 内），已选会话但历史未就绪/出错时不渲染 hero、`/` 有会话 = 顶栏面包屑（在 banner 内，名 `我的工作 / <服务端标题|新会话>`）、其它路由 = 顶栏页面标题（在 banner 内）；页面自身不再渲染页面级 h1（Markdown 内容 heading 除外）；顶栏只从 `useTopbar` 上报与 `routeManifest` 取信息，不 import 任何 feature 数据层；chat feature 只依赖 `lib/topbar`，不依赖 routes；欢迎态无顶栏（2.3 前任何宽度）。
+Governing invariant: 每个已认证路由在页面级标题已知时恰有一个页面级 level-1 heading（例外窗口：已选会话但标题尚未从列表/快照得知、或历史非 404 失败且列表不含该会话——此时无顶栏亦无 hero，页面级 h1 为 0，不得以 hero 填充），且归属固定——`/` 欢迎态（`requestedSessionId === null`）= chat hero `WorkBuddy，我帮你`（在 `main` 内），已选会话但历史未就绪/出错时不渲染 hero、`/` 有会话 = 顶栏面包屑（在 banner 内，名 `我的工作 / <服务端标题|新会话>`）、其它路由 = 顶栏页面标题（在 banner 内）；页面自身不再渲染页面级 h1（Markdown 内容 heading 除外）；顶栏只从 `useTopbar` 上报与 `routeManifest` 取信息，不 import 任何 feature 数据层；chat feature 只依赖 `lib/topbar`，不依赖 routes；欢迎态无顶栏（2.3 前任何宽度）。
 
 Sibling surfaces: `web/src/routes/shell/sidebar.tsx`（不动；`app-shell.tsx` 消费）；`web/src/features/chat/session-path.ts` `sessionTitle`（复用）；`web/test/chat-page-support.tsx`/`chat-page-lifecycle-support.tsx`（挂载方式决定各用例的 heading 归属，不改 support 文件）；`web/test/sidebar.test.tsx:35`、`auth-router.test.tsx` 等 `工作空间`/`设置` 断言（经路由挂载 → 顶栏 h1 同名，不改；`settings-footer.test.tsx` 只改 `:47`）；`web/test/preview.test.tsx`（Markdown h1，不动）；`web/e2e/ui-walk.spec.ts:343-360 expectAuthenticatedRoute`（不改，页面级 heading 查询仍成立）；2.3（#283：欢迎态 ≤760 窄条 + `打开导航`、Drawer）；4.4（#289：把 hero h1 纳入 `welcome.tsx`）；6.1（#295：`ui-walk.spec.ts` 拆分）。
 
 Seams under test（新文件 `web/test/topbar.test.tsx`；T1/T4/T5 经 `render-app-router.tsx` `mountAuthenticatedApp`，T2/T2b/T3/T6 复用 `chat-page-support.tsx` 的 `renderChatPage` + 会话 fixture（FakeEventSource、`/api/auth/me` 路由已备），`import "./radix-platform.js"`；先红 = `lib/topbar.js`/`shell/topbar.js` 不存在、banner 不存在）:
 - (T1) `/` 欢迎态：`queryByRole("banner")` 为 null；`getAllByRole("heading", { level: 1 })` 恰 1 个且文本 `WorkBuddy，我帮你`，位于 `main` 内；旧空态文案不存在。
 - (T2) `/?session=<id>`（fetch 路由返回含该 id 与 `title: "周报"` 的列表 + 快照）：`within(getByRole("banner")).getByRole("heading", { level: 1, name: "我的工作 / 周报" })`；`main` 内无 level-1 heading；hero 不存在。
+- (T2c) 标题未知窗口：列表为空/挂起且历史挂起 → 无 banner、无 hero、页面级 h1 为 0（钉住例外窗口）。
+- (T5b) 同页取消选中：从 `/?session=A` `router.navigate("/")`（ChatPage 不卸载）→ banner 消失、hero 出现（`chat-page-lifecycle.test.tsx:162` 处或 topbar.test）。
+- (T3b) 快照兜底：`/api/sessions` 返回 503、历史就绪 title `周报` → banner `我的工作 / 周报`（集成）；`ownedHistory` 守卫以纯函数用例直接调 `selectedSessionTitle` + `ownsHistory`（集成层只闪一次 commit，不可观测）：他人会话的陈旧快照不得泄入。另在 `chat-page-ownership.test.tsx` 的 create-send 用例（列表始终为 `[]`，标题只能来自快照）断言 banner `我的工作 / 你好`。
 - (T2b) 已选会话、历史未就绪（与 T2 共用 `expectBreadcrumbOnly` helper，避免 jscpd）：复用 `chat-page-support.tsx` 的 `renderChatPage`/deferred 历史 fixture（列表已返回、`initialMessages` 挂起，即 `chat-page.test.tsx:61-80` 状态）→ banner 内 1 个 h1（面包屑），`main` 内 0 个 level-1 heading、无 hero；`chat-page.test.tsx:80` 同步断言 `getAllByRole("heading", { level: 1 })` 长度 1。
 - (T3) 标题回退：列表项 `title: null` → banner h1 名 `我的工作 / 新会话`。
 - (T4) 其它路由：`/files` → banner h1 `工作空间`；`/settings` → `设置`；`/center` → `中心` 且 `main` 内仍有描述 `中心暂不可用`、无 h1；每个路由 `getAllByRole("heading", { level: 1 })` 长度恰 1（预览内容不在本用例）。

@@ -15,7 +15,7 @@ SPA SHALL 以 history 路由提供 `/`、`/files`、`/center`、`/settings` 四�
 
 #### Scenario: 顶栏三态
 - WHEN 依次访问 `/`（无会话）、`/?session=<id>`、`/files`
-- THEN 第一态无顶栏（任何宽度；`≤760px` 的 `打开导航` 窄条随响应式切片落地），页面 level-1 heading 为 `WorkBuddy，我帮你`；第二态顶栏面包屑容器为 level-1 heading，accessible name `我的工作 / <服务端标题>`（无标题时 `我的工作 / 新会话`），离开该会话或路由后面包屑随即清空；第三态顶栏 heading level 1 为 `工作空间` 且页面主区无第二个页面级 level 1 heading（文件预览内 Markdown 的 `<h1>` 不计）
+- THEN 第一态无顶栏（任何宽度；`≤760px` 的 `打开导航` 窄条随响应式切片落地），页面 level-1 heading 为 `WorkBuddy，我帮你`；第二态顶栏面包屑容器为 level-1 heading，accessible name `我的工作 / <服务端标题>`（无标题时 `我的工作 / 新会话`），离开该会话或路由后面包屑随即清空（含会话页不卸载、仅移除 `?session=` 的情况）；会话已选但标题尚未从列表或快照得知时既无顶栏也无 hero；第三态顶栏 heading level 1 为 `工作空间` 且页面主区无第二个页面级 level 1 heading（文件预览内 Markdown 的 `<h1>` 不计）
 
 #### Scenario: 四路由可达
 - WHEN 已登录用户依次访问四个路由
