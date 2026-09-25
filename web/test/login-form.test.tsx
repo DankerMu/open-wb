@@ -213,6 +213,29 @@ describe("login card submission", () => {
     });
     expect(fields.password.value).toBe("");
   });
+
+  it("recovers after a failed login under StrictMode and sends a real retry", async () => {
+    const fields = await openLoginPage({
+      routes: { "/api/auth/login": failedLoginResponse },
+      strict: true,
+    });
+
+    fillAndSubmit(fields);
+
+    expect((await screen.findByRole("alert")).textContent).toBe("账号或密码不正确");
+    await waitFor(() => {
+      expect(fields.button.disabled).toBe(false);
+    });
+    expect(fields.button.textContent).toBe("登录");
+    expect(fields.password.value).toBe("");
+    expect(calls(fields.fetchMock, "/api/auth/login")).toHaveLength(1);
+
+    fillAndSubmit(fields);
+
+    await waitFor(() => {
+      expect(calls(fields.fetchMock, "/api/auth/login")).toHaveLength(2);
+    });
+  });
 });
 
 describe("login card routing and scope", () => {
@@ -643,6 +666,34 @@ describe("quick login", () => {
     expectLastLoginRequest(fetchMock, '{"account":"zhangsan","password":"demo"}');
     expectPaths(fetchMock, ["/api/auth/me", "/api/info", "/api/auth/login"]);
     expect((await findQuickCards()).cards).toHaveLength(3);
+  });
+
+  it("unlocks the cards and form after a failed quick login under StrictMode", async () => {
+    const { fetchMock, password, button } = await openLoginPage({
+      routes: { ...devStubRoutes, "/api/auth/login": failedLoginResponse },
+      strict: true,
+    });
+    const { list } = await findQuickCards();
+    fireEvent.change(password, { target: { value: "stale-password" } });
+
+    fireEvent.click(within(list).getByRole("button", { name: "zhangsan 成员" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe("账号或密码不正确");
+    await waitFor(() => {
+      expectCardsDisabled(false);
+      expect(button.disabled).toBe(false);
+      expect(password.value).toBe("");
+    });
+    expect(button.textContent).toBe("登录");
+    expect(calls(fetchMock, "/api/auth/login")).toHaveLength(1);
+
+    const { list: retryList } = await findQuickCards();
+    fireEvent.click(within(retryList).getByRole("button", { name: "zhaoliu 成员" }));
+
+    await waitFor(() => {
+      expect(calls(fetchMock, "/api/auth/login")).toHaveLength(2);
+    });
+    expectLastLoginRequest(fetchMock, '{"account":"zhaoliu","password":"demo"}');
   });
 
   it("renders the quick login once under StrictMode and aborts the first read", async () => {

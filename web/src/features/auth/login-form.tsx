@@ -15,12 +15,12 @@ export function LoginForm() {
   const lockedRef = useRef(false);
   const mountedRef = useRef(true);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
       mountedRef.current = false;
-    },
-    [],
-  );
+    };
+  }, []);
 
   // 账号框 mount 即聚焦（不用 JSX 自动聚焦属性：biome a11y/noAutofocus）。
   useEffect(() => {
