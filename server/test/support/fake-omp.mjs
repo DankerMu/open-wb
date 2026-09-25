@@ -17,6 +17,7 @@ const THREE_MIB = 3 * 1024 * 1024;
 const DEFAULT_SESSION = "/tmp/open-wb-fake-session.jsonl";
 const TOOL_ID = "tool-1";
 const TOOL_NAME = "bash";
+const TOOL_OUTPUT = "workbuddy-smoke";
 const UI_ID = "ui-confirm-1";
 const DELTAS = ["Hello ", "from ", "fake-omp"];
 
@@ -285,18 +286,22 @@ async function handleUi(frame) {
 
 async function crashAfterDeltas() {
   await emit({ type: "agent_start" });
-  for (const delta of DELTAS.slice(0, 2)) {
-    await emit({
-      type: "message_update",
-      assistantMessageEvent: { type: "text_delta", delta },
-      message: { role: "assistant", content: [] },
-    });
-  }
+  await emitDeltas(DELTAS.slice(0, 2));
   process.exit(2);
 }
 
 async function completeTurn(deltas, tools) {
   await emit({ type: "agent_start" });
+  await emitDeltas(deltas);
+  if (tools) {
+    await emitToolRound([
+      { id: TOOL_ID, name: TOOL_NAME, args: { command: "echo workbuddy-smoke" } },
+    ]);
+  }
+  await finishTurn();
+}
+
+async function emitDeltas(deltas) {
   for (const delta of deltas) {
     await emit({
       type: "message_update",
@@ -304,24 +309,30 @@ async function completeTurn(deltas, tools) {
       message: { role: "assistant", content: [] },
     });
   }
-  if (tools) {
-    await emit({
-      type: "message_end",
-      message: { role: "assistant", content: [], stopReason: "toolUse" },
-    });
+}
+
+async function emitToolRound(calls) {
+  await emit({
+    type: "message_end",
+    message: { role: "assistant", content: [], stopReason: "toolUse" },
+  });
+  for (const call of calls) {
     await emit({
       type: "tool_execution_start",
-      toolCallId: TOOL_ID,
-      toolName: TOOL_NAME,
-      args: { command: "echo workbuddy-smoke" },
+      toolCallId: call.id,
+      toolName: call.name,
+      args: call.args,
     });
     await emit({
       type: "tool_execution_end",
-      toolCallId: TOOL_ID,
-      toolName: TOOL_NAME,
-      result: { output: "workbuddy-smoke" },
+      toolCallId: call.id,
+      toolName: call.name,
+      result: { output: TOOL_OUTPUT },
     });
   }
+}
+
+async function finishTurn() {
   await emit({
     type: "message_end",
     message: { role: "assistant", content: [], stopReason: "stop" },
@@ -337,6 +348,10 @@ async function failTurn(errorMessage) {
   await emit({ type: "agent_end", messages: [], isTerminal: true });
 }
 
+/**
+ * 有界两轮继电器（#166）：第一轮带 tool_calls 时报告工具帧并发唯一一次第二轮；
+ * 回答轮没有内容（空 200、第二轮仍只有 tool_calls）一律可见失败，绝不空回合成功。
+ */
 async function runProxy(message) {
   try {
     const baseUrl = loadBaseUrl();
@@ -344,11 +359,55 @@ async function runProxy(message) {
     if (typeof token !== "string" || token.length === 0) {
       throw new Error("config");
     }
-    const deltas = await postChat(baseUrl, token, message);
-    await completeTurn(deltas, false);
+    const user = { role: "user", content: message };
+    const first = await postChat(baseUrl, token, [user]);
+    if (first.calls.length > 0) {
+      await relayToolRound(baseUrl, token, user, first);
+      return;
+    }
+    if (first.deltas.length === 0) {
+      throw new Error("empty round");
+    }
+    await completeTurn(first.deltas, false);
   } catch {
     await failTurn("proxy failed");
   }
+}
+
+async function relayToolRound(baseUrl, token, user, first) {
+  const calls = Array.from(first.calls, parseToolCall);
+  await emit({ type: "agent_start" });
+  await emitDeltas(first.deltas);
+  await emitToolRound(calls);
+  const second = await postChat(baseUrl, token, [
+    user,
+    {
+      role: "assistant",
+      content: first.deltas.length > 0 ? first.deltas.join("") : null,
+      tool_calls: calls.map((call) => ({
+        id: call.id,
+        type: "function",
+        function: { name: call.name, arguments: call.arguments },
+      })),
+    },
+    ...calls.map((call) => ({ role: "tool", tool_call_id: call.id, content: TOOL_OUTPUT })),
+  ]);
+  if (second.calls.length > 0 || second.deltas.length === 0) {
+    throw new Error("no answering content");
+  }
+  await emitDeltas(second.deltas);
+  await finishTurn();
+}
+
+function parseToolCall(call) {
+  if (call === undefined || call.id.length === 0 || call.name.length === 0) {
+    throw new Error("incomplete tool call");
+  }
+  const args = JSON.parse(call.arguments);
+  if (args === null || typeof args !== "object" || Array.isArray(args)) {
+    throw new Error("tool arguments");
+  }
+  return { ...call, args };
 }
 
 function loadBaseUrl() {
@@ -433,13 +492,11 @@ function unquote(value) {
   return trimmed;
 }
 
-function postChat(baseUrl, token, message) {
+function postChat(baseUrl, token, messages) {
   const { promise, resolve, reject } = Promise.withResolvers();
   const root = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
   const endpoint = new URL("chat/completions", root);
-  const payload = Buffer.from(
-    JSON.stringify({ stream: true, messages: [{ role: "user", content: message }] }),
-  );
+  const payload = Buffer.from(JSON.stringify({ stream: true, messages }));
   const send = endpoint.protocol === "https:" ? httpsRequest : httpRequest;
   const req = send(
     endpoint,
@@ -457,7 +514,7 @@ function postChat(baseUrl, token, message) {
         reject(new Error("http"));
         return;
       }
-      readSseContent(response).then(resolve, reject);
+      readSseRound(response).then(resolve, reject);
     },
   );
   req.on("error", reject);
@@ -465,16 +522,17 @@ function postChat(baseUrl, token, message) {
   return promise;
 }
 
-async function readSseContent(stream) {
+/** 一轮 SSE：字节安全的 delta.content 与按 index 重组的 delta.tool_calls 分片。 */
+async function readSseRound(stream) {
   const decoder = new TextDecoder("utf-8", { fatal: true });
-  const state = { buffer: "", deltas: [] };
+  const state = { buffer: "", deltas: [], calls: [] };
   for await (const chunk of stream) {
     if (consumeSseText(state, decoder.decode(chunk, { stream: true }))) {
-      return state.deltas;
+      return state;
     }
   }
   if (consumeSseText(state, decoder.decode())) {
-    return state.deltas;
+    return state;
   }
   throw new Error("SSE ended before [DONE]");
 }
@@ -488,19 +546,45 @@ function consumeSseText(state, text) {
     if (data === "[DONE]") {
       return true;
     }
-    appendSseContent(state.deltas, data);
+    appendSseDelta(state, data);
     boundary = state.buffer.indexOf("\n\n");
   }
   return false;
 }
 
-function appendSseContent(deltas, data) {
+function appendSseDelta(state, data) {
   if (data.length === 0) {
     return;
   }
-  const content = JSON.parse(data)?.choices?.[0]?.delta?.content;
+  const delta = JSON.parse(data)?.choices?.[0]?.delta;
+  const content = delta?.content;
   if (typeof content === "string" && content.length > 0) {
-    deltas.push(content);
+    state.deltas.push(content);
+  }
+  if (Array.isArray(delta?.tool_calls)) {
+    for (const fragment of delta.tool_calls) {
+      appendToolFragment(state.calls, fragment);
+    }
+  }
+}
+
+/** 首个分片携带 id 与 function.name；function.arguments 按到达顺序拼接。 */
+function appendToolFragment(calls, fragment) {
+  const index = fragment?.index;
+  if (!Number.isInteger(index) || index < 0) {
+    throw new Error("tool call index");
+  }
+  calls[index] ??= { id: "", name: "", arguments: "" };
+  const call = calls[index];
+  if (typeof fragment.id === "string" && fragment.id.length > 0) {
+    call.id = fragment.id;
+  }
+  const fn = fragment.function;
+  if (typeof fn?.name === "string" && fn.name.length > 0) {
+    call.name = fn.name;
+  }
+  if (typeof fn?.arguments === "string") {
+    call.arguments += fn.arguments;
   }
 }
 

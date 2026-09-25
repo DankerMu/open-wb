@@ -6,12 +6,23 @@
  * 不读仓库 dist，不引入 jiti。
  */
 import { type ChildProcess, spawn } from "node:child_process";
-import { cpSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
+const FAKE_OMP = fileURLToPath(new URL("./support/fake-omp.mjs", import.meta.url));
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const SERVER_ROOT = join(REPO_ROOT, "server");
 const TSC = join(REPO_ROOT, "node_modules", "typescript", "bin", "tsc");
@@ -162,6 +173,217 @@ export async function releaseStartupFixtures(): Promise<void> {
   if (failures.length > 0) {
     throw new AggregateError(failures, "startup fixture did not reclaim every owned process");
   }
+}
+
+/** production 入口的显式 fixture env：全部路径落在调用方 scratch 下。 */
+export function compiledFixtureEnv(
+  scratchRoot: string,
+  port: number,
+  bin: string,
+  extra: Record<string, string>,
+): Record<string, string> {
+  return {
+    HOST: "127.0.0.1",
+    PORT: String(port),
+    DB_PATH: join(scratchRoot, "db", "dev.db"),
+    OMP_STATE_DIR: join(scratchRoot, "state"),
+    SANDBOX_ROOT: join(scratchRoot, "sandbox"),
+    OMP_BIN: bin,
+    ...extra,
+  };
+}
+
+/**
+ * 生成可执行的 fake-omp 启动器（omp spawn env 从零重建，参数只能写进启动器文本）。
+ * bearerCapture：先把收到的 WORKBUDDY_MODEL_TOKEN 写到该绝对路径，供密钥不外泄断言使用。
+ */
+export function writeFakeOmpLauncher(
+  scratchRoot: string,
+  scenario: string,
+  bearerCapture?: string,
+): string {
+  const binDir = join(scratchRoot, "bin");
+  mkdirSync(binDir, { recursive: true });
+  const bin = join(binDir, `${scenario}-omp.mjs`);
+  const capture =
+    bearerCapture === undefined
+      ? ""
+      : `import { writeFileSync } from "node:fs";
+writeFileSync(${JSON.stringify(bearerCapture)}, process.env.WORKBUDDY_MODEL_TOKEN ?? "");
+`;
+  writeFileSync(
+    bin,
+    `#!${process.execPath}
+${capture}process.argv.push("--scenario", ${JSON.stringify(scenario)});
+await import(${JSON.stringify(FAKE_OMP)});
+`,
+  );
+  chmodSync(bin, 0o755);
+  return bin;
+}
+
+export function login(port: number): Promise<string> {
+  return requestJson(port, "POST", "/api/auth/login", undefined, {
+    account: "zhangsan",
+    password: "demo",
+  }).then((response) => {
+    const cookie = response.headers.get("set-cookie");
+    if (response.status !== 200 || cookie === null || !cookie.startsWith("workbuddy_session=")) {
+      throw new Error(`login failed: ${response.status} ${response.body}`);
+    }
+    return cookie.slice(0, cookie.indexOf(";"));
+  });
+}
+
+export function createSession(port: number, cookie: string): Promise<string> {
+  return requestJson(port, "POST", "/api/sessions", cookie).then((response) => {
+    const body = JSON.parse(response.body) as { id?: unknown };
+    if (response.status !== 201 || typeof body.id !== "string") {
+      throw new Error(`session create failed: ${response.status} ${response.body}`);
+    }
+    return body.id;
+  });
+}
+
+export function prompt(
+  port: number,
+  cookie: string,
+  session: string,
+  message: string,
+): Promise<void> {
+  return expectPromptStatus(port, cookie, session, message, 202);
+}
+
+export function expectPromptStatus(
+  port: number,
+  cookie: string,
+  session: string,
+  message: string,
+  status: number,
+): Promise<void> {
+  return requestJson(port, "POST", `/api/sessions/${session}/prompt`, cookie, { message }).then(
+    (response) => {
+      if (response.status !== status) {
+        throw new Error(`prompt failed: ${response.status} ${response.body}`);
+      }
+    },
+  );
+}
+
+function requestJson(
+  port: number,
+  method: string,
+  path: string,
+  cookie: string | undefined,
+  body?: unknown,
+): Promise<{ status: number; headers: Headers; body: string }> {
+  return fetch(`http://127.0.0.1:${port}${path}`, {
+    method,
+    headers: {
+      ...(body === undefined ? {} : { "content-type": "application/json" }),
+      ...(cookie === undefined ? {} : { cookie }),
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    signal: AbortSignal.timeout(10_000),
+  }).then(async (response) => ({
+    status: response.status,
+    headers: response.headers,
+    body: await response.text(),
+  }));
+}
+
+export interface PublicAssistantMessage {
+  role: string;
+  content: string;
+  status: string;
+  steps: Array<{ name: string; status: string }>;
+}
+
+/** 以 deadline 轮询 history，直到最后一条 assistant 消息离开 running。 */
+export async function waitForTerminalAssistant(
+  port: number,
+  cookie: string,
+  session: string,
+  deadlineMs: number,
+): Promise<PublicAssistantMessage> {
+  const deadlineAt = performance.now() + deadlineMs;
+  for (;;) {
+    const response = await requestJson(port, "GET", `/api/sessions/${session}/messages`, cookie);
+    const body = JSON.parse(response.body) as { messages?: PublicAssistantMessage[] };
+    const assistant = body.messages?.findLast((message) => message.role === "assistant");
+    if (response.status === 200 && assistant !== undefined && assistant.status !== "running") {
+      return assistant;
+    }
+    if (performance.now() > deadlineAt) {
+      throw new Error(`assistant turn did not finish: ${response.status} ${response.body}`);
+    }
+    await delay(20);
+  }
+}
+
+/** 以 deadline 轮询等待标记文件出现（preload barrier 的进入/放行信号）。 */
+export async function waitForFile(path: string, deadlineMs: number): Promise<void> {
+  const deadlineAt = performance.now() + deadlineMs;
+  while (!existsSync(path)) {
+    if (performance.now() > deadlineAt) {
+      throw new Error(`timed out waiting for ${path}`);
+    }
+    await delay(10);
+  }
+}
+
+/** 继任 listener 能在同一 host:port 上绑定并关闭：原进程已释放端口。 */
+export function expectBindable(host: string, port: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const successor = createServer();
+    successor.once("error", reject);
+    successor.listen(port, host, () => {
+      successor.close((error) => (error ? reject(error) : resolve()));
+    });
+  });
+}
+
+/**
+ * 扣住真实 models.yml 写入：先落 MODELS_ENTERED 标记，再轮询等待 MODELS_RELEASE 出现。
+ * - throw（#227）：测试写 release；放行后以 EACCES 拒绝（等价于 state 目录不可写），
+ *   让测试能在失败判定前放入在飞请求。不安装 SIGTERM 监听。
+ * - call-through（#210）：写 entered 之前安装 SIGTERM 监听，由它写 release；放行后调用真实
+ *   writeFile。入口与本监听在同一次 process.emit 内同步执行，而被扣住的写入只在之后的定时器
+ *   宏任务恢复，所以 signalReceived 必然先于写入完成与其后的发布守卫。
+ */
+export function gatedModelsWriteHook(mode: "throw" | "call-through"): string {
+  const onEnter =
+    mode === "call-through"
+      ? ["    process.once('SIGTERM', () => fs.writeFileSync(process.env.MODELS_RELEASE, ''));"]
+      : [];
+  const onRelease =
+    mode === "throw"
+      ? [
+          "    const error = new Error('EACCES: permission denied');",
+          "    error.code = 'EACCES';",
+          "    throw error;",
+        ]
+      : [];
+  return [
+    "'use strict';",
+    "const fs = require('node:fs');",
+    "const fsp = require('node:fs/promises');",
+    "const { syncBuiltinESMExports } = require('node:module');",
+    "const nativeWriteFile = fsp.writeFile;",
+    "fsp.writeFile = async function gatedWriteFile(path, ...rest) {",
+    "  if (typeof path === 'string' && path.endsWith('models.yml')) {",
+    ...onEnter,
+    "    fs.writeFileSync(process.env.MODELS_ENTERED, '');",
+    "    while (!fs.existsSync(process.env.MODELS_RELEASE)) {",
+    "      await new Promise((resolve) => setTimeout(resolve, 10));",
+    "    }",
+    ...onRelease,
+    "  }",
+    "  return nativeWriteFile.call(this, path, ...rest);",
+    "};",
+    "syncBuiltinESMExports();",
+    "",
+  ].join("\n");
 }
 
 export function observeOpenDbHook(): string {
