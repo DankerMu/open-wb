@@ -12,7 +12,7 @@
 - [x] 3.1 `make check` exit 0。
 - [x] 3.2 `npm run build --workspace web` exit 0。
 - [x] 3.3 CI-env ui-walk exit 0（`2 passed`，记录时长）。
-- [ ] 3.4 archive PR：父 verification-harness「UI 走查」与晋升文本一致（父 delta 该块可改为与晋升相同或移除重复）；父 ui-primitives「图标离线、动效可禁用且归属登记」转为已晋升；勾选父 tasks 6.1；关闭 #295。
+- [x] 3.4 archive PR：父 verification-harness「UI 走查」与晋升文本一致（父 delta 该块可改为与晋升相同或移除重复）；父 ui-primitives「图标离线、动效可禁用且归属登记」转为已晋升；勾选父 tasks 6.1；关闭 #295。
 
 ## Risk pack mapping
 - Not selected Public API / CLI / script entry：`make ui-walk` 命令与 npm script 不变。
