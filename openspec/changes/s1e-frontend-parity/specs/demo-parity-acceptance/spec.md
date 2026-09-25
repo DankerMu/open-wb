@@ -14,7 +14,7 @@
 - THEN 目标非零、不 silent skip、不下载依赖、不改动 caller 的 DB/temp；`make test` 不发现 `web/e2e/**`
 
 ### Requirement: 肉眼可辨夹具
-`smoke/fixtures/sandbox/u1/smoke-fixture/` SHALL 替换为：`logo.png` 256×256 品牌色几何图形（自绘、非上游资产）、`readme.md` 含一级标题 `smoke-fixture`、二级标题、无序列表、代码块与表格各至少一个、`notes.csv` 表头 `name,value` + 4 行数据（首两行仍为 `alpha,1`、`beta,2`）。`readme.md` 首行 SHALL 仍为 `# smoke-fixture`（ui-walk 源码视图断言）。`smoke/files.hurl` 以 `file,fixtures/…;` 自引用比对字节、自动跟随，若存在长度/大小字面断言 SHALL 同 PR 更新；`web/e2e/ui-walk.spec.ts` 的 csv 行数（`row` 5、`共 4 行 · 大文件仅预览前若干行`）与新增的 logo 预览断言（点击 `logo.png` 后预览 `img` 的 `naturalWidth === 256`）SHALL 同 PR 更新；`smoke/fixtures/README.md` SHALL 记录三文件用途与 `logo.png` 的生成方式（生成脚本不入库）；`scripts/test-ci-harness.sh` 的夹具复制 oracle（`cmp -s`）与内容无关、无需改动。`make smoke`、`make ui-walk`、`make test-guardrails` 保持绿。
+`smoke/fixtures/sandbox/u1/smoke-fixture/` SHALL 替换为：`logo.png` 256×256 品牌色几何图形（自绘、非上游资产）、`readme.md` 含一级标题 `smoke-fixture`、二级标题、无序列表、代码块与表格各至少一个、`notes.csv` 表头 `name,value` + 4 行数据（首两行仍为 `alpha,1`、`beta,2`）。`readme.md` 首行 SHALL 仍为 `# smoke-fixture`（ui-walk 源码视图断言）。`smoke/files.hurl` 以 `file,fixtures/…;` 自引用比对字节、自动跟随，若存在长度/大小字面断言 SHALL 同 PR 更新；`web/e2e/ui-walk.spec.ts` 的 csv 行数（`row` 5、`共 4 行 · 大文件仅预览前若干行`）与新增的 logo 预览断言（点击 `logo.png` 后预览 `img` 的 `naturalWidth`、`naturalHeight` 均为 256）SHALL 同 PR 更新；`smoke/fixtures/README.md` SHALL 记录三文件用途与 `logo.png` 的生成方式（生成脚本不入库）；`scripts/test-ci-harness.sh` 的夹具复制 oracle（`cmp -s`）与内容无关、无需改动。`make smoke`、`make ui-walk`、`make test-guardrails` 保持绿。
 
 #### Scenario: 夹具替换后三面全绿
 - WHEN 替换夹具并更新断言后在 CI 运行 smoke、ui-walk、test-guardrails

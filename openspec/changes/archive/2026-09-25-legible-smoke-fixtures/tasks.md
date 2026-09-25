@@ -9,7 +9,7 @@
 - [x] 2.3 反向注入六项（design Required evidence）各红并回退。
 
 ## 3. Verification
-- [ ] 3.0 archive PR：勾父 tasks 6.2。父 `demo-parity-acceptance` 的「肉眼可辨夹具」在父 change 最终归档时 ADDED，这里只核对它与子 delta 的 files-harness 文本一致，不一致的地方同步到父句。
+- [x] 3.0 archive PR：勾父 tasks 6.2。父 `demo-parity-acceptance` 的「肉眼可辨夹具」在父 change 最终归档时 ADDED，这里只核对它与子 delta 的 files-harness 文本一致，不一致的地方同步到父句。
 - [x] 3.1 `make check` exit 0；新文件的 naming-guard exit 0；`git ls-files smoke/fixtures/sandbox` 恰三行。
 - [x] 3.2 `make test-guardrails` exit 0。
 - [x] 3.3 本地 `ci-compiled-server.sh smoke` 与 `ci-compiled-server.sh ui-walk`（CI 环境变量）各 exit 0；CI smoke、ui-walk、uid-isolation 三个 job 均绿。
@@ -26,3 +26,5 @@
 - Not selected Error handling / rollback / partial outputs：无。
 - Selected Release / packaging / dependency compatibility：PNG 合法，能在真实浏览器解码。证据：`file` 输出、注入 2、3.3。
 - Not selected Documentation / migration notes：README 本身即文档，不涉及迁移。
+
+3.0 实际：勾父 tasks 6.2；父 `demo-parity-acceptance`「肉眼可辨夹具」句中 `naturalWidth === 256` 与父 Scenario 及子 delta 对齐为 `naturalWidth`/`naturalHeight` 均为 256；其余与子 delta 一致，无需改。
