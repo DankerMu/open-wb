@@ -19,5 +19,5 @@
 - [x] 2.1 Argv tests green; process.ts launcher mutation red (inline-literal case).
 - [x] 2.2 Precondition tests green (missing launcher fails before effects; absent ompUser unaffected).
 - [x] 2.3 `bash scripts/test-ci-harness.sh` green incl. launcher-drop mutation; CI rule check allow/deny.
-- [ ] 2.4 CI uid-isolation job green incl. SIGKILL reaping case and `make smoke`.
+- [x] 2.4 CI uid-isolation job green incl. SIGKILL reaping case and `make smoke`.
 - [x] 2.5 `npm --workspace server run test`, `make lint`, `make typecheck`, `make anti-drift` exit 0.
