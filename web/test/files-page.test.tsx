@@ -32,7 +32,8 @@ describe("workspace page route integration", () => {
       }),
     );
 
-    expect(await screen.findByRole("heading", { level: 1, name: "工作空间" })).toBeTruthy();
+    const heading = await screen.findByRole("heading", { level: 1, name: "工作空间" });
+    expect(heading.closest("main")).toBeNull();
     expect(await screen.findByRole("button", { name: "选择工作空间" })).toBeTruthy();
     expect(screen.getByText("设计文档", { exact: true })).toBeTruthy();
     expect(screen.getByText(workspace.root, { exact: true })).toBeTruthy();

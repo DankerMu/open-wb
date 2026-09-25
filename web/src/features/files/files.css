@@ -16,12 +16,6 @@
   font-family: var(--wb-font);
 }
 
-.files-page > .ui-page-heading {
-  flex-shrink: 0;
-  padding: 18px 24px;
-  border-bottom: 1px solid var(--wb-border-default);
-}
-
 .files-status,
 .files-notice {
   margin: 0;

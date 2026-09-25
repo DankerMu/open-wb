@@ -57,7 +57,9 @@ describe("SPA root entry", () => {
     await loadMain("/");
 
     expect(disposeMain).toBeTypeOf("function");
-    expect(await screen.findByRole("heading", { level: 1, name: "会话" })).toBeTruthy();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "WorkBuddy，我帮你" }),
+    ).toBeTruthy();
     expect(screen.getByRole("textbox", { name: "给助手发消息" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "会话" }).getAttribute("aria-current")).toBe("page");
   });

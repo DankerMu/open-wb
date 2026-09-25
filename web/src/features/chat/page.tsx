@@ -2,11 +2,12 @@ import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } fro
 import { useLocation, useNavigate } from "react-router";
 import type { ApiClient } from "../../lib/api.js";
 import type { ChatMessageSnapshot } from "../../lib/session-contract.js";
+import { useTopbar } from "../../lib/topbar.js";
 import { useAuth } from "../auth/index.js";
 import { ConversationView } from "./conversation-view.js";
 import { errorMessage, isNotFound, isUnauthorized } from "./errors.js";
 import { ownsCreateSend, ownsHistory, ownsMutation, visibleOwnedAlert } from "./ownership.js";
-import { sessionNavigation, sessionTitle } from "./session-path.js";
+import { selectedSessionTitle, sessionNavigation, sessionTitle } from "./session-path.js";
 import {
   applyChatEvent,
   type ChatEvent,
@@ -26,7 +27,6 @@ type SessionEventHandle = { close(): void };
 const COMPOSER_LABEL = "给助手发消息";
 const GENERATING_LABEL = "生成中";
 const TERMINAL_REFRESH_GUIDANCE = "请刷新页面后重试";
-const EMPTY_SELECTION = "选择一个会话，或直接发送开始新对话";
 const MISSING_EVENT_SOURCE = "无法连接会话事件";
 
 export function ChatPage() {
@@ -687,6 +687,9 @@ export function ChatPage() {
   const listForClient =
     listState.client === client && listState.status === "success" ? listState : null;
   const historyView = ownedHistory && historyState.status === "ready" ? historyState.view : null;
+  useTopbar({
+    breadcrumb: selectedSessionTitle(requestedSessionId, listForClient, ownedHistory, historyState),
+  });
   const ownedBusy = ownsMutation(mutationOwner, client, requestedSessionId);
   const ownedStreamError = visibleOwnedAlert(streamError, client, requestedSessionId);
   const generating =
@@ -699,12 +702,10 @@ export function ChatPage() {
 
   return (
     <section className="chat-page">
-      <h1 className="ui-page-heading">会话</h1>
       <ConversationView
         composerDisabled={generating}
         composerLabel={COMPOSER_LABEL}
         draft={draft}
-        emptySelection={EMPTY_SELECTION}
         generating={generating}
         generatingLabel={GENERATING_LABEL}
         historyError={ownedHistory && historyState.status === "error" ? historyState.message : null}

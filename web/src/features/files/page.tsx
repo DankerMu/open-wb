@@ -407,7 +407,6 @@ export function FilesPage() {
 
   return (
     <section className="files-page">
-      <h1 className="ui-page-heading">工作空间</h1>
       {listForClient ? null : listState.status === "error" ? (
         <p className="ui-alert" role="alert">
           {listState.message}

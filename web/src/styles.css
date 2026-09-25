@@ -7,6 +7,7 @@
 @import "./ui/motion.css";
 @import "./ui/ui.css";
 @import "./routes/shell/sidebar.css";
+@import "./routes/shell/topbar.css";
 @import "./features/chat/chat.css";
 @import "./features/files/files.css";
 
@@ -176,13 +177,6 @@ a {
   min-width: 0;
 }
 
-.ui-page-heading {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  line-height: 28px;
-}
-
 .app-shell {
   display: flex;
   width: 100%;
@@ -214,7 +208,15 @@ a {
   transform: rotate(40deg);
 }
 
-.app-shell > main {
+.app-content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.app-content > main {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
@@ -224,7 +226,7 @@ a {
   background: var(--wb-bg-primary);
 }
 
-.app-shell > main > * {
+.app-content > main > * {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
@@ -326,10 +328,6 @@ a {
 .settings-page {
   overflow: auto;
   padding: 24px 28px 40px;
-}
-
-.settings-page h1 {
-  margin-bottom: 20px;
 }
 
 .settings-card {
@@ -441,7 +439,7 @@ a {
     overflow: visible;
   }
 
-  .app-shell > main {
+  .app-content > main {
     overflow: visible;
   }
 

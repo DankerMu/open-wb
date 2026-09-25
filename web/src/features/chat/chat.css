@@ -17,13 +17,6 @@
   overflow: hidden;
 }
 
-.chat-page > .ui-page-heading {
-  flex: none;
-  margin: 0;
-  padding: 18px 24px;
-  border-bottom: 1px solid var(--wb-border-default);
-}
-
 .chat-layout {
   display: grid;
   grid-template-columns: minmax(12rem, 16rem) minmax(0, 1fr);
@@ -196,11 +189,14 @@
   overflow-y: auto;
 }
 
-.chat-welcome {
-  max-width: 36rem;
-  margin: 3rem auto;
-  padding: 24px 20px;
+.chat-hero {
+  margin: 0 0 16px;
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 42px;
   text-align: center;
+  text-wrap: balance;
+  color: var(--wb-text-primary);
 }
 
 .chat-thread {

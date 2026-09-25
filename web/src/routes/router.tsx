@@ -1,24 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { createBrowserRouter, Navigate, Outlet, useLocation, useMatches } from "react-router";
+import { createBrowserRouter, Navigate, useLocation, useMatches } from "react-router";
 import { AuthGuard, AuthProvider } from "../features/auth/index.js";
 import { ChatPage } from "../features/chat/index.js";
 import { FilesPage } from "../features/files/index.js";
 import { SettingsPage } from "../features/settings/index.js";
 import { ThemeProvider } from "../features/theme/index.js";
 import { type RouteDefinition, routeManifest } from "./manifest.js";
-import { Sidebar, useSidebarCollapsed } from "./shell/sidebar.js";
-
-function AppShell() {
-  const [collapsed, toggle] = useSidebarCollapsed();
-  return (
-    <div className="app-shell">
-      <Sidebar collapsed={collapsed} onToggle={toggle} />
-      <main>
-        <Outlet />
-      </main>
-    </div>
-  );
-}
+import { AppShell } from "./shell/app-shell.js";
 
 type RouteHandle = {
   canonicalPath: RouteDefinition["path"];
@@ -80,10 +68,9 @@ function ProtectedAppShell() {
   );
 }
 
-function PlaceholderPage({ description, title }: Pick<RouteDefinition, "description" | "title">) {
+function PlaceholderPage({ description }: Pick<RouteDefinition, "description">) {
   return (
     <section className="ui-empty">
-      <h1 className="ui-page-heading">{title}</h1>
       <p>{description}</p>
     </section>
   );
@@ -93,7 +80,7 @@ export function createAppRouter() {
   return createBrowserRouter([
     {
       Component: ProtectedAppShell,
-      children: routeManifest.map(({ description, path, title }) => ({
+      children: routeManifest.map(({ description, path }) => ({
         path,
         handle: { canonicalPath: path },
         element:
@@ -104,7 +91,7 @@ export function createAppRouter() {
           ) : path === "/" ? (
             <ChatPage />
           ) : (
-            <PlaceholderPage description={description} title={title} />
+            <PlaceholderPage description={description} />
           ),
       })),
     },

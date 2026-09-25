@@ -160,6 +160,10 @@ describe("chat page selection and error ownership", () => {
       expect(currentLocation()).toBe("/");
     });
     expect(screen.queryByText(A_PROMPT_ERROR, { exact: true })).toBeNull();
+    expect(screen.queryByRole("banner")).toBeNull();
+    expect(
+      screen.getAllByRole("heading", { level: 1 }).map((heading) => heading.textContent),
+    ).toEqual(["WorkBuddy，我帮你"]);
   });
 });
 
@@ -395,7 +399,12 @@ describe("chat page ignored-abort GET, renewal, and concurrent submit", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "退出登录" }));
     fireEvent.click(screen.getByRole("button", { name: "退出" }));
     expect((await screen.findByRole("alert")).textContent).toBe("无法退出当前会话");
-    expect(screen.getByRole("heading", { level: 1, name: "会话" })).toBeTruthy();
+    expect(
+      within(screen.getByRole("banner")).getByRole("heading", {
+        level: 1,
+        name: "我的工作 / alpha",
+      }),
+    ).toBeTruthy();
     expect(screen.queryByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeNull();
     expect(currentLocation()).toBe(`/?session=${SESSION_A}`);
     expect(fetchMock.mock.calls.filter(([path]) => path === "/api/auth/logout")).toHaveLength(1);
