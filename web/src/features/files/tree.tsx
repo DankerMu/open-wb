@@ -1,7 +1,9 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ApiClient, ApiError } from "../../lib/api.js";
+import { Icon } from "../../ui/index.js";
 import { CreationMenu, DirectoryDialog } from "./dialogs.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
+import { fileIcon, formatSize } from "./file-meta.js";
 import { PreviewPane } from "./preview.js";
 import type { DirectoryListing, PreviewState, TreeEntry, Workspace } from "./types.js";
 
@@ -139,9 +141,9 @@ function DirectoryNode({
         <svg aria-hidden="true" className="files-tree-glyph files-tree-caret" viewBox="0 0 16 16">
           <path d="M4 6l4 5 4-5" fill="none" stroke="currentColor" strokeWidth="1.5" />
         </svg>
-        <svg aria-hidden="true" className="files-tree-glyph" viewBox="0 0 16 16">
-          <path d="M2 4.5h4l1.5 2H14V13H2z" fill="none" stroke="currentColor" strokeWidth="1.2" />
-        </svg>
+        <span className="files-tree-glyph">
+          <Icon name="folder" size={14} />
+        </span>
         <span className="files-tree-name">{label}</span>
       </button>
       {error ? (
@@ -192,15 +194,13 @@ function DirectoryNode({
                     onClick={() => onSelectFile(entry, entryPath)}
                     type="button"
                   >
-                    <svg aria-hidden="true" className="files-tree-glyph" viewBox="0 0 16 16">
-                      <path
-                        d="M5 2h5l4 4v8H5z"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.2"
-                      />
-                    </svg>
+                    <span className="files-tree-glyph">
+                      <Icon name={fileIcon(entry.name)} size={14} />
+                    </span>
                     <span className="files-tree-name">{entry.name}</span>
+                    <span aria-hidden="true" className="files-tree-size">
+                      {formatSize(entry.size)}
+                    </span>
                   </button>
                 </li>
               );

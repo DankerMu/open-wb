@@ -126,12 +126,24 @@
   color: var(--wb-brand-primary-deep);
 }
 
+/* Entry icons, trailing size, and preview-header icon adapted from
+ * resource/workbuddy-live-demo.html:694-706 (.fs-node icon and size, .fs-crumbs icon). */
 .files-tree-name {
+  flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
+.files-tree-size {
+  flex: none;
+  margin-left: auto;
+  white-space: nowrap;
+  font-size: 10.5px;
+  color: var(--wb-text-tertiary);
+}
+
 .files-tree-glyph {
+  display: inline-flex;
   flex-shrink: 0;
   width: 14px;
   height: 14px;
@@ -182,6 +194,12 @@
   border-bottom: 1px solid var(--wb-border-default);
   flex-shrink: 0;
   min-width: 0;
+}
+
+.files-preview-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--wb-text-secondary);
 }
 
 .files-preview-path {

@@ -18,6 +18,13 @@ import {
   workspaceRoute,
 } from "./files-fixture.js";
 import { deferredResponse, jsonResponse, textPreviewResponse } from "./support.js";
+import {
+  blockBody,
+  COLOR_LITERAL_PATTERNS,
+  listRepoFiles,
+  readRepoFile,
+  stripComments,
+} from "./ui-support.js";
 
 afterEach(() => {
   cleanupFilesFixture();
@@ -102,7 +109,7 @@ describe("workspace page route integration", () => {
     expect(
       within(tree)
         .getAllByRole("button")
-        .map((button) => button.textContent),
+        .map((button) => button.querySelector(".files-tree-name")?.textContent),
     ).toEqual(["root", "out", "in", "readme.md", "notes.csv", "logo.png", "archive.zip"]);
     fireEvent.click(screen.getByRole("button", { name: "展开 out" }));
     await collapseAndExpand("out");
@@ -429,5 +436,86 @@ describe("workspace page route integration", () => {
     expect(blobUrls.revokeObjectURL).toHaveBeenCalledWith("blob:first");
     view.unmount();
     expect(blobUrls.revokeObjectURL).toHaveBeenCalledWith("blob:second");
+  });
+});
+
+function hasLucideGlyph(root: Element, name: string) {
+  return [...root.querySelectorAll("svg")].some((svg) => svg.classList.contains(`lucide-${name}`));
+}
+
+describe("workspace tree entry meta", () => {
+  it("shows per-extension icons and trailing sizes while file names stay the accessible names", async () => {
+    renderFiles(
+      "/files?ws=workspace-1",
+      authenticatedFilesRoutes([workspace], {
+        "/api/workspaces/workspace-1/tree?path=": jsonResponse({
+          path: "",
+          entries: [
+            { name: "out", type: "dir", size: 0, mtime: 101 },
+            { name: "readme.md", type: "file", size: 2048, mtime: 102 },
+            { name: "notes.csv", type: "file", size: 1536, mtime: 103 },
+            { name: "logo.png", type: "file", size: 90_492_109, mtime: 104 },
+            { name: "归档.zip", type: "file", size: 12, mtime: 105 },
+          ],
+        }),
+        "/api/workspaces/workspace-1/file?path=readme.md": textPreviewResponse("# 说明"),
+      }),
+    );
+
+    const folder = await screen.findByRole("button", { name: "展开 out" });
+    expect(hasLucideGlyph(folder, "folder")).toBe(true);
+    expect(hasLucideGlyph(screen.getByRole("button", { name: "折叠 root" }), "folder")).toBe(true);
+    const rows = [
+      ["readme.md", "file-text", "2.0 KB"],
+      ["notes.csv", "table", "1.5 KB"],
+      ["logo.png", "image", "86.3 MB"],
+      ["归档.zip", "archive", "12 B"],
+    ] as const;
+    for (const [name, icon, size] of rows) {
+      const button = screen.getByRole("button", { name });
+      expect(hasLucideGlyph(button, icon)).toBe(true);
+      const sizeLabel = button.querySelector(".files-tree-size");
+      expect(sizeLabel?.textContent).toBe(size);
+      expect(sizeLabel?.getAttribute("aria-hidden")).toBe("true");
+    }
+
+    fireEvent.click(screen.getByRole("button", { name: "readme.md" }));
+    const toolbar = await waitFor(() => {
+      const header = document.querySelector(".files-preview-toolbar");
+      expect(header).not.toBeNull();
+      return header as HTMLElement;
+    });
+    expect(hasLucideGlyph(toolbar, "file-text")).toBe(true);
+    expect(toolbar.querySelector(".files-preview-path")?.textContent).toBe("readme.md");
+    expect(toolbar.querySelector(".files-preview-meta")?.textContent).toBe(
+      "2.0 KB · 1970-01-01T00:00:00.102Z",
+    );
+  });
+
+  it("keeps formatSize as the single size formatter and the tree glyphs on the icon primitive", () => {
+    const sources = listRepoFiles("web/src", (path) => /\.tsx?$/.test(path));
+    expect(sources.filter((path) => readRepoFile(path).includes("formatByteSize"))).toEqual([]);
+    const tree = readRepoFile("web/src/features/files/tree.tsx");
+    const preview = readRepoFile("web/src/features/files/preview.tsx");
+    for (const source of [tree, preview]) {
+      expect(source).toContain("fileIcon(");
+      expect(source).toContain("formatSize(");
+    }
+    expect(tree).not.toContain("M5 2h5l4 4v8H5z");
+    expect(tree).not.toContain("M2 4.5h4l1.5 2H14V13H2z");
+    expect(tree).toContain("size={14}");
+
+    const css = readRepoFile("web/src/features/files/files.css");
+    expect(css).toContain("demo.html:694-706");
+    const rules = stripComments(css);
+    const sizeRule = blockBody(rules, /^\.files-tree-size \{/m);
+    expect(sizeRule).toContain("var(--wb-text-tertiary)");
+    expect(sizeRule).toContain("font-size: 10.5px");
+    const nameRule = blockBody(rules, /^\.files-tree-name \{/m);
+    expect(nameRule).toContain("overflow-wrap: anywhere");
+    expect(nameRule).not.toContain("text-overflow");
+    for (const pattern of COLOR_LITERAL_PATTERNS) {
+      expect(rules).not.toMatch(pattern);
+    }
   });
 });
