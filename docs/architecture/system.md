@@ -164,6 +164,7 @@ S0b 实际流入口为 `GET /api/sessions/:id/events`（#103）：cookie/owner �
 | [0007](../adr/0007-oidc-provider-seam.md) | OIDC provider 接缝 |
 | [0008](../adr/0008-model-proxy-credentials.md) | app-server 模型代理，omp 零凭证 |
 | [0010](../adr/0010-dedicated-omp-uid.md) | omp 子进程单一专用 uid，与 app-server 分离 |
+| [0011](../adr/0011-sandbox-paths-not-browser-secret.md) | 绝对沙箱路径不属于对浏览器保密的信息（界面仍以逻辑路径展示） |
 
 ## 8. 开放问题
 
