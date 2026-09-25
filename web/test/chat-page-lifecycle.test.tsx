@@ -160,6 +160,10 @@ describe("chat page selection and error ownership", () => {
       expect(currentLocation()).toBe("/");
     });
     expect(screen.queryByText(A_PROMPT_ERROR, { exact: true })).toBeNull();
+    expect(screen.queryByRole("banner")).toBeNull();
+    expect(
+      screen.getAllByRole("heading", { level: 1 }).map((heading) => heading.textContent),
+    ).toEqual(["WorkBuddy，我帮你"]);
   });
 });
 

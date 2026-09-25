@@ -1,5 +1,10 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ownsHistory } from "../src/features/chat/ownership.js";
+import { selectedSessionTitle } from "../src/features/chat/session-path.js";
+import { chatStateFromSnapshot } from "../src/features/chat/stream.js";
+import type { ChatHistoryState } from "../src/features/chat/types.js";
+import { createApiClient } from "../src/lib/api.js";
 import type { ChatSession } from "../src/lib/session-contract.js";
 import {
   cleanupChatLifecycle,
@@ -14,7 +19,7 @@ import {
   deferredResponse,
   jsonResponse,
 } from "./support.js";
-import { readRepoFile } from "./ui-support.js";
+import { readRepoFile, ruleBody, stripComments } from "./ui-support.js";
 import "./radix-platform.js";
 
 const HERO = "WorkBuddy，我帮你";
@@ -89,6 +94,14 @@ async function expectBreadcrumbOnly(title: string) {
   expect(screen.queryByText(HERO)).toBeNull();
 }
 
+/** 欢迎态：无顶栏，hero 是 main 内唯一的 level-1 heading。 */
+async function expectWelcomeOnly() {
+  const hero = await screen.findByRole("heading", { level: 1, name: HERO });
+  expect(screen.queryByRole("banner")).toBeNull();
+  expect(screen.getAllByRole("heading", { level: 1 })).toEqual([hero]);
+  expect(hero.closest("main")).not.toBeNull();
+}
+
 function sidebarLink(label: string | RegExp) {
   const navigation = within(screen.getByRole("complementary", { name: "侧栏" })).getByRole(
     "navigation",
@@ -97,14 +110,11 @@ function sidebarLink(label: string | RegExp) {
   return within(navigation).getByRole("link", { name: label });
 }
 
-describe("顶栏三态 (T1/T2/T2b/T3)", () => {
+describe("顶栏三态 (T1/T2/T2b/T2c/T3/T3b)", () => {
   it("T1 欢迎态无顶栏，唯一 level-1 heading 为 main 内的 hero", async () => {
     mountApp("/");
 
-    const hero = await screen.findByRole("heading", { level: 1, name: HERO });
-    expect(screen.queryByRole("banner")).toBeNull();
-    expect(screen.getAllByRole("heading", { level: 1 })).toEqual([hero]);
-    expect(hero.closest("main")).not.toBeNull();
+    await expectWelcomeOnly();
     expect(screen.queryByText(OLD_EMPTY_COPY)).toBeNull();
   });
 
@@ -122,10 +132,48 @@ describe("顶栏三态 (T1/T2/T2b/T3)", () => {
     expect(screen.getByRole("textbox", { name: "给助手发消息" })).toBeTruthy();
   });
 
+  it("T2c 标题未知窗口（列表与历史均挂起）：无顶栏、无 hero，页面级 h1 为 0", async () => {
+    const history = deferredResponse();
+    renderChatPage(`/?session=${SESSION_A}`, {
+      "/api/sessions": () => deferredResponse().promise,
+      [`/api/sessions/${SESSION_A}/messages`]: () => history.promise,
+    });
+
+    expect(await screen.findByRole("textbox", { name: "给助手发消息" })).toBeTruthy();
+    expect(screen.queryByRole("banner")).toBeNull();
+    expect(screen.queryByText(HERO)).toBeNull();
+    expect(screen.queryAllByRole("heading", { level: 1 })).toHaveLength(0);
+  });
+
   it("T3 列表标题为 null 时面包屑回退 新会话", async () => {
     renderChatPage(`/?session=${SESSION_A}`, chatRoutes([session(SESSION_A, null)]));
 
     expect(await findBreadcrumb("新会话")).toBeTruthy();
+  });
+
+  it("T3b 列表 503 时以本页就绪快照标题兜底", async () => {
+    renderChatPage(`/?session=${SESSION_A}`, {
+      ...chatRoutes([session(SESSION_A, "周报")]),
+      "/api/sessions": () => jsonResponse({ error: { code: "unavailable", message: "x" } }, 503),
+    });
+
+    await expectBreadcrumbOnly("周报");
+  });
+
+  it("T3b 兜底只取本页持有的快照：他会话的陈旧快照不泄入面包屑", () => {
+    const client = createApiClient();
+    const snapshot = snapshotOf(session(SESSION_A, "周报"));
+    const ready: ChatHistoryState = {
+      status: "ready",
+      client,
+      snapshot,
+      view: chatStateFromSnapshot(snapshot),
+    };
+    const titleFor = (id: string) =>
+      selectedSessionTitle(id, null, ownsHistory(ready, client, id), ready);
+
+    expect(titleFor(SESSION_A)).toBe("周报");
+    expect(titleFor(SESSION_B)).toBeUndefined();
   });
 });
 
@@ -148,20 +196,30 @@ describe("其它路由顶栏标题 (T4)", () => {
   });
 });
 
-describe("上报次序 (T5/T6/T7)", () => {
+describe("上报次序 (T5/T5b/T6/T7)", () => {
   it("T5 离开会话到 /files 再回 会话：面包屑清空、回到欢迎态", async () => {
     mountApp(`/?session=${SESSION_A}`, chatRoutes([session(SESSION_A, "周报")]));
     await findBreadcrumb("周报");
 
     fireEvent.click(sidebarLink(/^工作空间/));
-    const banner = await screen.findByRole("banner");
-    expect(await within(banner).findByRole("heading", { level: 1, name: "工作空间" })).toBeTruthy();
-    expect(within(banner).queryByText(/我的工作/)).toBeNull();
+    await waitFor(() => {
+      const banner = screen.getByRole("banner");
+      expect(within(banner).getByRole("heading", { level: 1, name: "工作空间" })).toBeTruthy();
+      expect(within(banner).queryByText(/我的工作/)).toBeNull();
+    });
 
     fireEvent.click(sidebarLink("会话"));
-    expect(await screen.findByRole("heading", { level: 1, name: HERO })).toBeTruthy();
-    expect(screen.queryByRole("banner")).toBeNull();
-    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    await expectWelcomeOnly();
+  });
+
+  it("T5b 同页取消选中（ChatPage 不卸载）：面包屑清空、回到欢迎态", async () => {
+    const { router } = mountApp(`/?session=${SESSION_A}`, chatRoutes([session(SESSION_A, "周报")]));
+    await findBreadcrumb("周报");
+
+    await act(async () => {
+      await router.navigate("/");
+    });
+    await expectWelcomeOnly();
   });
 
   it("T6 切换会话（StrictMode）：面包屑跟随新会话标题", async () => {
@@ -224,6 +282,13 @@ describe("静态契约 (T8)", () => {
     const lib = readRepoFile("web/src/lib/topbar.tsx");
     expect(lib).not.toContain("routes/");
     expect(lib).not.toContain("features/");
+    const topbarRule = ruleBody(
+      stripComments(readRepoFile("web/src/routes/shell/topbar.css")),
+      ".topbar",
+    );
+    expect(topbarRule).toMatch(/^\s*height: 56px;$/m);
+    expect(topbarRule).toContain("flex: none;");
+    expect(ruleBody(stripComments(styles), ".app-content")).toContain("flex-direction: column;");
   });
 
   it("顶栏位于 main 之外（挂载后 main .topbar 不存在）", async () => {

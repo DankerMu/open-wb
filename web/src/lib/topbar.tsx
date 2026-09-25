@@ -1,4 +1,11 @@
-import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  type ReactNode,
+  useContext,
+  useLayoutEffect,
+  useMemo,
+  useState,
+} from "react";
 
 type TopbarContextValue = {
   breadcrumb: string | null;
@@ -14,10 +21,13 @@ export function TopbarProvider({ children }: { children: ReactNode }) {
   return <TopbarContext.Provider value={value}>{children}</TopbarContext.Provider>;
 }
 
-/** 页面向 shell 上报面包屑；Provider 外 no-op。变更即更新，卸载或改为 undefined 时清空。 */
+/**
+ * 页面向 shell 上报面包屑；Provider 外 no-op。变更即更新，卸载或改为 undefined 时清空。
+ * 用 layout effect 在绘制前同步，导航后不会闪出一帧陈旧面包屑或双 h1。
+ */
 export function useTopbar({ breadcrumb }: { breadcrumb?: string | undefined }): void {
   const set = useContext(TopbarContext)?.setBreadcrumb;
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!set || breadcrumb === undefined) return;
     set(breadcrumb);
     return () => set(null);

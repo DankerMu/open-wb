@@ -167,6 +167,10 @@ describe("chat page create and acceptance ownership", () => {
     pendingPrompt.resolve(jsonResponse(promptAccepted, 202));
     const messages = await findMessageArea();
     expect(await within(messages).findByText(PROMPT, { exact: true })).toBeTruthy();
+    const banner = await screen.findByRole("banner");
+    expect(
+      within(banner).getByRole("heading", { level: 1, name: `我的工作 / ${PROMPT}` }),
+    ).toBeTruthy();
     expect(creates).toBe(1);
     expect(prompts).toBe(1);
   });
