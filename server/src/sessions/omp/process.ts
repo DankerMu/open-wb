@@ -5,7 +5,11 @@
 import { type ChildProcessWithoutNullStreams, type SpawnOptions, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { join } from "node:path";
-import { assertSafeSudoPath } from "../../core/process-path.js";
+import {
+  assertSafeSudoPath,
+  assertSetprivExecutable,
+  SETPRIV_PATH,
+} from "../../core/process-path.js";
 import { ensureSharedDir } from "../../core/sandbox/dirs.js";
 import {
   MAX_RPC_FRAME_BYTES,
@@ -43,6 +47,7 @@ export async function spawnOmp(
 ): Promise<ChildProcessWithoutNullStreams> {
   if (opts.ompUser !== undefined) {
     assertSafeSudoPath(process.env.PATH);
+    assertSetprivExecutable();
   }
   const cwd = join(opts.sandboxRoot, opts.ownerId);
   const sessionDir = join(opts.stateDir, "sessions", opts.ownerId);
@@ -98,6 +103,11 @@ export async function spawnOmp(
           opts.ompUser,
           "--preserve-env=PATH,LANG,TMPDIR,HOME,PI_CODING_AGENT_DIR,WORKBUDDY_MODEL_TOKEN",
           ...(env.TMPDIR === undefined ? [] : [`TMPDIR=${env.TMPDIR}`]),
+          "--",
+          // setpriv execs omp in place; the kernel SIGKILLs omp when sudo dies.
+          SETPRIV_PATH,
+          "--pdeathsig",
+          "KILL",
           "--",
           opts.bin,
           ...args,

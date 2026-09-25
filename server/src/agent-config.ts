@@ -1,5 +1,5 @@
 import { isAbsolute, join } from "node:path";
-import { assertSafeSudoPath } from "./core/process-path.js";
+import { assertSafeSudoPath, assertSetprivExecutable } from "./core/process-path.js";
 
 export const DEFAULT_OMP_BIN_RELATIVE = join("var", "omp", "omp");
 export const DEFAULT_OMP_STATE_RELATIVE = join("var", "omp-state");
@@ -94,5 +94,6 @@ function resolveOmpUser(raw: string, path: string | undefined): string {
     throw new Error("OMP_USER must match [a-z_][a-z0-9_-]{0,31}");
   }
   assertSafeSudoPath(path);
+  assertSetprivExecutable();
   return raw;
 }

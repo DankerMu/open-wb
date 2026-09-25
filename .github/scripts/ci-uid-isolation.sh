@@ -5,6 +5,8 @@ set -euo pipefail
 [ "${GITHUB_ACTIONS:-}" = true ] && [ "${RUNNER_ENVIRONMENT:-}" = github-hosted ] || { echo "uid-isolation requires a disposable hosted runner" >&2; exit 1; }
 if getent group workbuddy >/dev/null; then echo "workbuddy group already exists" >&2; exit 1; fi
 if getent passwd omp >/dev/null; then echo "omp user already exists" >&2; exit 1; fi
+check_user=ompcheck
+if getent passwd "$check_user" >/dev/null; then echo "${check_user} user already exists" >&2; exit 1; fi
 : "${GITHUB_WORKSPACE:?}" "${RUNNER_TEMP:?}" "${HOST:?}" "${PORT:?}" "${DB_PATH:?}" "${STATIC_ROOT:?}" "${OMP_BIN:?}" "${OMP_STATE_DIR:?}" "${SANDBOX_ROOT:?}" "${MODEL_UPSTREAM_BASE_URL:?}" "${MODEL_UPSTREAM_API_KEY:?}" "${FAKE_UPSTREAM_PORT:?}"
 cd "$GITHUB_WORKSPACE"
 fake_omp="$GITHUB_WORKSPACE/server/test/support/fake-omp.mjs"
@@ -18,19 +20,30 @@ runner="$(id -un)"
 case "$runner" in ''|*[!a-zA-Z0-9_-]*) echo "unsafe runner identity" >&2; exit 1 ;; esac
 case "$node_dir" in *:*|*\\*|*\"*|*'
 '*) echo "unsafe Node directory for sudo secure_path" >&2; exit 1 ;; esac
-sudoers_path() {
+# The omp path is a setpriv argument in the rule: escape sudoers specials and fnmatch globs.
+sudoers_arg() {
   local value="$1"
-  value="${value//\\/\\\\}"
   value="${value// /\\ }"
   value="${value//#/\\#}"
   value="${value//,/\\,}"
   value="${value//:/\\:}"
+  value="${value//=/\\=}"
+  value="${value//\*/\\*}"
+  value="${value//\?/\\?}"
+  value="${value//\[/\\[}"
+  value="${value//]/\\]}"
   printf '%s' "$value"
 }
 case "$fake_omp$real_omp" in *'
-'*) echo "unsafe omp binary path" >&2; exit 1 ;; esac
-fake_rule="$(sudoers_path "$fake_omp")"
-real_rule="$(sudoers_path "$real_omp")"
+'*|*\\*|*"$(printf '\t')"*) echo "unsafe omp binary path" >&2; exit 1 ;; esac
+fake_rule="$(sudoers_arg "$fake_omp")"
+real_rule="$(sudoers_arg "$real_omp")"
+omp_rules() {
+  printf '%s ALL=(omp) NOPASSWD: SETENV: /usr/bin/setpriv --pdeathsig KILL -- %s *\n' "$1" "$fake_rule"
+  printf '%s ALL=(omp) NOPASSWD: SETENV: /usr/bin/setpriv --pdeathsig KILL -- %s *\n' "$1" "$real_rule"
+  printf '%s ALL=(omp) NOPASSWD: SETENV: /usr/bin/env\n' "$1"
+}
+check_allows() { sudo -n -l -U "$check_user" -u omp -- "$@" >/dev/null; }
 job_root="${RUNNER_TEMP}/workbuddy-uid-isolation"
 uid_tmp="${job_root}/tmp"
 proof_home="${job_root}/proof home:colon"
@@ -45,6 +58,7 @@ chmod 0600 "$DB_PATH"
 chmod 0700 "$(dirname "$DB_PATH")"
 sudo groupadd workbuddy
 sudo useradd -m -G workbuddy omp
+sudo useradd -M -s /usr/sbin/nologin "$check_user"
 sudo usermod -aG workbuddy "$runner"
 command -v setfacl >/dev/null || { echo "setfacl is required to grant omp execute traversal on the runner home" >&2; exit 1; }
 runner_home="$(getent passwd "$runner" | awk -F: '{print $6}')"
@@ -55,9 +69,8 @@ sudo setfacl -m u:omp:--x "$runner_home"
 sudoers_src="${job_root}/workbuddy-omp.sudoers"
 {
   printf 'Defaults:%s secure_path="%s:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"\n' "$runner" "$node_dir"
-  printf '%s ALL=(omp) NOPASSWD: SETENV: %s\n' "$runner" "$fake_rule"
-  printf '%s ALL=(omp) NOPASSWD: SETENV: %s\n' "$runner" "$real_rule"
-  printf '%s ALL=(omp) NOPASSWD: SETENV: /usr/bin/env\n' "$runner"
+  omp_rules "$runner"
+  omp_rules "$check_user"
 } > "$sudoers_src"
 sudo visudo -c -f "$sudoers_src"
 sudo install -m 0440 "$sudoers_src" /etc/sudoers.d/workbuddy-omp
@@ -67,6 +80,13 @@ if sudo test -f /etc/sudoers.d/runner; then
   sudo chmod 0440 /etc/sudoers.d/runner
 fi
 sudo visudo -c
+# The runner's preinstalled ALL rule masks argument matching; check the same generated rules on a rule-only user.
+for bin in "$fake_omp" "$real_omp"; do
+  check_allows /usr/bin/setpriv --pdeathsig KILL -- "$bin" --mode rpc || { echo "sudoers rule check failed: launcher command denied" >&2; exit 1; }
+  if check_allows "$bin" --mode rpc; then echo "sudoers rule check failed: command without launcher allowed" >&2; exit 1; fi
+  if check_allows /usr/bin/setpriv --pdeathsig KILL -- "$bin"; then echo "sudoers rule check failed: zero trailing arguments allowed" >&2; exit 1; fi
+done
+echo "sudoers rule check passed"
 sudo chgrp workbuddy "$RUNNER_TEMP" "$job_root" "$uid_tmp" "$SANDBOX_ROOT" "$OMP_STATE_DIR"
 sudo chmod g+x "$RUNNER_TEMP"
 sudo chmod 2770 "$job_root" "$uid_tmp" "$SANDBOX_ROOT" "$OMP_STATE_DIR"

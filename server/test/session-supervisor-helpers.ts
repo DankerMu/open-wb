@@ -363,6 +363,10 @@ export function sudoPrefix(user: string, bin: string, tmpdir?: string): string[]
     "--preserve-env=PATH,LANG,TMPDIR,HOME,PI_CODING_AGENT_DIR,WORKBUDDY_MODEL_TOKEN",
     ...(tmpdir === undefined ? [] : [`TMPDIR=${tmpdir}`]),
     "--",
+    "/usr/bin/setpriv",
+    "--pdeathsig",
+    "KILL",
+    "--",
     bin,
   ];
 }

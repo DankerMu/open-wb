@@ -1,4 +1,8 @@
+import { accessSync, constants } from "node:fs";
 import { delimiter, isAbsolute } from "node:path";
+
+/** Fixed sudo-mode launcher (util-linux); sudoers rules name this exact path. */
+export const SETPRIV_PATH = "/usr/bin/setpriv";
 
 /**
  * Sudo-mode PATH policy shared by configuration and spawn.
@@ -13,4 +17,16 @@ export function assertSafeSudoPath(raw: string | undefined): string {
     throw new Error("PATH must be absolute when OMP_USER is configured");
   }
   return raw;
+}
+
+/**
+ * Sudo-mode launcher precondition shared by configuration and spawn:
+ * a missing launcher fails instead of silently losing the pdeathsig guarantee.
+ */
+export function assertSetprivExecutable(): void {
+  try {
+    accessSync(SETPRIV_PATH, constants.X_OK);
+  } catch {
+    throw new Error(`${SETPRIV_PATH} must be executable when OMP_USER is configured`);
+  }
 }
