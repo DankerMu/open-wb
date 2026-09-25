@@ -2,9 +2,7 @@
 
 ## Purpose
 `web/src/ui/` 基元层：设计 token 全集（demo 逐字移植）、以 Radix UI Primitives 为行为层的组件库、图标（lucide-react 单组件映射）与动效。feature/routes 只经 `ui/index.ts` 取基元、只引用语义 token；基元层是调色板到组件的唯一映射边界。
-
 ## Requirements
-
 ### Requirement: 设计 token 全集
 `web/src/styles/tokens.css` SHALL 定义 demo（`resource/workbuddy-live-demo.html:19-188`）的调色板层（`--wb-palette-*`）与语义层（`--wb-brand-*`、`--wb-bg-*`、`--wb-text-*`、`--wb-border-*`、`--wb-status-*`、`--wb-shadow-*`、`--wb-icon-*`、`--wb-font*`、`--wb-mono`）全部 token，浅色在 `:root`、深色在 `[data-theme="dark"]`，值逐字取自 demo（"逐字"指经格式归一化——hex 小写、空白折叠、数字字面量规范化（`.10`→`0.1`）、折行合并——后相等，因 biome 会重排格式）；demo 引用但未定义的六个变量 SHALL 在此补齐为固定值并注明"demo 缺失、本仓补定"：`--wb-palette-black-60: rgba(0,0,0,.6)`、`--wb-palette-white-10: rgba(255,255,255,.1)`、`--wb-palette-white-20: rgba(255,255,255,.2)`、`--wb-palette-white-60: rgba(255,255,255,.6)`、`--wb-text-white: var(--wb-palette-white-100)`（以上两块同值）、`--wb-home-composer-chip-bg-hover`: 浅色 `var(--wb-palette-gray-3)`、深色 `var(--wb-bg-hover)`。每块的变量名集合 SHALL 恰为 demo 对应块名集合加这六个名，不得多出其它变量。文件头 SHALL 保留 token 来源说明（WorkBuddy 5.3.11 token 文件，经 demo；ATTRIBUTION.md §4）。`--wb-font-heading` 是唯一允许与 demo 值不同的变量：SHALL 去掉 `Poppins`、只列本地/系统字体栈，不得 `@import`/`<link>` 任何公网字体。仓内既有但 demo 无的 `--wb-home-bg`/`--wb-control-bg` SHALL 删除，消费者改用值相同的 demo token `--wb-home-bg-primary`/`--wb-color-bg-input`；`web/src/**/*.css` 引用的每个 `var(--wb-*)` SHALL 在 `tokens.css` 有定义（`web/test` 断言引用集合 ⊆ 定义集合）。feature 样式 SHALL 只引用语义层 token，不得直接引用 `--wb-palette-*` 或硬编码颜色（`web/test` 以 grep 断言 `web/src/features/**/*.css`、`web/src/features/**/*.tsx` 与 `web/src/routes/**` 无 `#[0-9a-fA-F]{3,8}`、`rgba?(`、`--wb-palette-`）。
 
@@ -81,3 +79,15 @@ Menu/Popover/Tooltip 的入场动画与 Menu 项过渡 SHALL 在 `prefers-reduce
 #### Scenario: 图标离线、动效可禁用且归属登记
 - WHEN `make ui-walk` 的 `desktop-light` project 在 journey 内统计 resourceType 为 `image|font|stylesheet|script` 的 `requestfailed`（导航/SSE 取消的 `net::ERR_ABORTED` 不计）与非 `baseURL` 源的请求，并在受控回合运行中对 `.ui-pulse` 元素先 `emulateMedia({reducedMotion:"reduce"})` 再恢复 `no-preference`；`web/test` 静态读取 `motion.css`
 - THEN 全 journey 零静态资源 `requestfailed`、零跨源请求（图标离线可用）；reduce 下 `animationName` 为 `none`、恢复后非 `none`；`motion.css` 的 reduced-motion 块把每个 `ui-*` 动效类置为 `animation: none` 且 `transition: none`；`ATTRIBUTION.md` 含 `lucide`/ISC 与 `Radix`/MIT 条目
+
+### Requirement: 按钮单一实现与旧类退役
+`web/src` 中所有按钮 SHALL 经 `web/src/ui/index.ts` 导出的 `Button` 渲染样式（类名 `ui-btn ui-btn--<variant> ui-btn--<size>`，调用方附加类经 `className` 透传）；旧 `.ui-button`、`.ui-button-primary`、`.ui-button-danger` 类及其规则 SHALL 从 `web/src` 移除，`web/src` 下 `.ts`/`.tsx`/`.css` 不得再出现 `ui-button`（`ui-btn` 不受影响）。本条取代「基元组件库」中 `.ui-button*`「迁移切片前不动」的过渡约定；`.ui-alert`/`.ui-muted`/`.ui-empty` 不在本条范围。迁移 SHALL 保持各按钮的可访问名、`type`、禁用态、点击行为与作为 Menu 触发器时的 ref/回焦不变。`web/test/ui-guardrails.test.ts` SHALL 有扫描 `web/src` 的 grep 守卫，并以注入样本自证其匹配式命中 `ui-button` 且不命中 `ui-btn`。
+
+#### Scenario: 旧类清零且守卫自证
+- **WHEN** 扫描 `web/src` 下全部 `.ts`/`.tsx`/`.css`，并对注入样本 `<button className="ui-button">` 与 `<button className="ui-btn ui-btn--md">` 运行同一匹配式
+- **THEN** 仓库扫描零命中，注入样本恰命中 1 条（`ui-button` 行），`ui-btn` 行不命中
+
+#### Scenario: 迁移后行为不回归
+- **WHEN** 渲染 `新建会话`、`查看源码`/`渲染视图`、`＋ 新建工作空间`、`新建`（Menu 触发器）、对话框 `取消`/`创建`
+- **THEN** 它们的类名为 `ui-btn ui-btn--primary|secondary ui-btn--md`（`新建会话`另含 `chat-new-session`），可访问名不变，`创建`仍为 submit 且挂起期禁用，`新建`菜单开合与关闭回焦不变
+
