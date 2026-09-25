@@ -15,7 +15,7 @@
 - [x] 3.3 `ci-compiled-server.sh ui-walk`（CI 环境变量）exit 0；`git diff --stat web/test/auth-router.test.tsx web/e2e` 为空。
 
 ## 4. Archive
-- [ ] 4.1 归档 docs PR 同步父 `s1e-frontend-parity/specs/spa-shell/spec.md` 登录结构句：错误行位于主按钮之上、`textContent` 恰为 message（本刀 oracle 偏差 1）。
+- [x] 4.1 归档 docs PR 同步父 `s1e-frontend-parity/specs/spa-shell/spec.md` 登录结构句：错误行位于主按钮之上、`textContent` 恰为 message（本刀 oracle 偏差 1）。
 
 ## Risk pack mapping
 - Selected Public API / CLI / script entry：登录页可访问定位器（heading、label、按钮名、alert）是 8 个 `web/test` 文件（17 处）与 ui-walk（2 处） 的入口。依据：L1/L3/L4 + 既有套件零改动。
