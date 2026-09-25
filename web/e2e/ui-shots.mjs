@@ -400,9 +400,13 @@ function probeRootLeaks(forbidden) {
   return [...hits];
 }
 
-async function assertAppDom(page) {
+// 溢出断言覆盖全部 app 态；root 泄漏断言只守非 chat 态的呈现规则——按 ADR-0011 绝对沙箱路径
+// 不是保密信息，chat 态的步骤卡原始输出与助手正文出现路径属合法。
+async function assertAppDom(page, state) {
   const overflow = await page.evaluate(probeOverflow);
-  const leaks = await page.evaluate(probeRootLeaks, workspaceRoots);
+  const leaks = state.startsWith("chat-")
+    ? []
+    : await page.evaluate(probeRootLeaks, workspaceRoots);
   const problems = [...overflow, ...leaks.map((where) => `workspace root 绝对路径出现在 ${where}`)];
   if (problems.length > 0) throw new Error(`断言失败：${problems.join("；")}`);
 }
@@ -485,7 +489,7 @@ async function runState(page, tracker, run, cell, source, state) {
   try {
     await STEPS[source][state](page, run, cell, tracker);
     await waitToastQuiet(page, source);
-    if (source === "app") await assertAppDom(page);
+    if (source === "app") await assertAppDom(page, state);
     await page.screenshot({ path: join(run.outDir, result.file), fullPage: false });
     result.shot = true;
   } catch (error) {

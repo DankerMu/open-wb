@@ -22,6 +22,8 @@ const GENERIC_FAILURE_EVENTS: ChatEvent<string>[] = [
 ];
 const BASH_DETAIL = '{"command":"echo workbuddy-smoke"}';
 const READ_DETAIL = '{"path":"README.md"}';
+const SANDBOX_PATH = "/srv/workbuddy/sandbox/u1/demo/a.md";
+const SANDBOX_DETAIL = `{"path":"${SANDBOX_PATH}"}`;
 const NEWLINE_RESULT_DETAIL = '{"ok":true,"stdout":"workbuddy-smoke\\n"}';
 const LINE_SEPARATOR_DETAIL = '{"note":"a\\u2028b\\u2029c"}';
 const ASTRAL_ARGS = {
@@ -606,6 +608,25 @@ describe("session event mapping — step identity and stale inputs", () => {
     ]);
     expect(applyFrame(secondEnd.state, { type: "agent_end", messages: [] }).events).toEqual([
       { type: "turn.end", data: { messageId: OTHER_MESSAGE_ID, status: "done" } },
+    ]);
+  });
+});
+
+describe("session event mapping — absolute sandbox paths stay verbatim (ADR-0011)", () => {
+  it("keeps an absolute sandbox path from args unchanged in the step.start detail", () => {
+    let state = bind();
+    ({ state } = applyFrame(state, { type: "agent_start" }));
+    const started = applyFrame(state, toolStart("call_path", "read", { path: SANDBOX_PATH }));
+    expect(started.events).toEqual([
+      {
+        type: "step.start",
+        data: {
+          messageId: MESSAGE_ID,
+          stepId: "call_path",
+          name: "read",
+          detail: SANDBOX_DETAIL,
+        },
+      },
     ]);
   });
 });

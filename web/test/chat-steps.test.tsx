@@ -16,6 +16,8 @@ const messagesPath = `/api/sessions/${SESSION_ID}/messages`;
 const BASH_START = '{"command":"echo workbuddy-smoke"}';
 const BASH_END = '{"output":"workbuddy-smoke"}';
 const READ_START = "plain line\nsecond";
+const SANDBOX_PATH = "/srv/workbuddy/sandbox/u1/demo/a.md";
+const SANDBOX_DETAIL = `{"path":"${SANDBOX_PATH}"}`;
 
 afterEach(() => {
   cleanupChatPage();
@@ -118,6 +120,29 @@ describe("(S2) step cards render icon, Chinese badge, summary and collapsed raw 
     const messagesImport = styles.indexOf('@import "./features/chat/messages.css";');
     expect(chatImport).toBeGreaterThanOrEqual(0);
     expect(messagesImport).toBeGreaterThan(chatImport);
+  });
+});
+
+describe("step cards keep absolute sandbox paths verbatim (ADR-0011)", () => {
+  it("shows the absolute path unchanged in the summary line and the 原始输出 details", async () => {
+    const snapshot: ChatMessageSnapshot = chatSnapshot({
+      status: "done",
+      content: "读完了",
+      assistantStatus: "done",
+      steps: [{ id: 21, ordinal: 0, name: "read", detail: SANDBOX_DETAIL, status: "done" }],
+    });
+    renderChatPage(`/?session=${SESSION_ID}`, {
+      "/api/sessions": () => jsonResponse({ sessions: [snapshot.session] }),
+      [messagesPath]: () => jsonResponse(snapshot),
+    });
+
+    const read = await screen.findByRole("region", { name: "read" });
+    expect(within(read).getByRole("status", { name: "read 已完成" }).textContent).toBe("已完成");
+    expect(read.querySelector("p.chat-step-line")?.textContent).toBe(`path: ${SANDBOX_PATH}`);
+    const disclosure = read.querySelector("details.chat-step-disclosure") as HTMLDetailsElement;
+    expect(disclosure.querySelector("summary")?.textContent).toBe("原始输出");
+    expect(disclosure.textContent).toContain(SANDBOX_PATH);
+    expect(disclosure.querySelector("pre.chat-step-detail")?.textContent).toBe(SANDBOX_DETAIL);
   });
 });
 
