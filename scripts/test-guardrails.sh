@@ -119,5 +119,39 @@ elif printf '%s\n' "$bad_out" | grep -F "BLOCK" | grep -F "禁用命名后缀" |
 else
   echo "FAIL(缺少 BLOCK/路径或已提交) $bad_desc"; fail=$((fail+1))
 fi
+# 重复代码门：真实 .jscpd.json 只在重复行占比 >3% 时拒绝（threshold reporter），不因存在克隆就拒绝。
+# a.ts/b.ts 共享 12 行同块（jscpd 计 11 行重复），c.ts 为唯一填充行，决定占比。
+mk_dup_fixture() { # $1 目录, $2 c.ts 填充行数
+  mkdir -p "$1/server"
+  seq 12 | sed 's/.*/export function dup&(x: number): number { return x * & + 7; }/' > "$1/server/a.ts"
+  cp "$1/server/a.ts" "$1/server/b.ts"
+  seq "$2" | sed 's/.*/export const v& = &;/' > "$1/server/c.ts"
+}
+jscpd_bin="node_modules/.bin/jscpd"
+mk_dup_fixture "$tmp/dup-below" 400 # 11/424 = 2.59%
+mk_dup_fixture "$tmp/dup-above" 150 # 11/174 = 6.32%
+expect_accept "重复代码门放行阈值内克隆(2.59%)" "$jscpd_bin" --config .jscpd.json "$tmp/dup-below"
+dup_out=$("$jscpd_bin" --config .jscpd.json "$tmp/dup-above" 2>&1)
+dup_rc=$?
+dup_desc="重复代码门拒绝超阈值克隆(6.32%)并报告 threshold 诊断"
+if [ "$dup_rc" -eq 0 ]; then
+  echo "FAIL(应拒绝却放行) $dup_desc"; fail=$((fail+1))
+elif printf '%s\n' "$dup_out" | grep -F "too many duplicates" | grep -F "over threshold" >/dev/null; then
+  echo "PASS $dup_desc"; pass=$((pass+1))
+else
+  echo "FAIL(缺少 too many duplicates/over threshold) $dup_desc"; fail=$((fail+1))
+fi
+node -e 'const fs=require("fs");const c=JSON.parse(fs.readFileSync(".jscpd.json","utf8"));c.exitCode=1;fs.writeFileSync(process.argv[1],JSON.stringify(c,null,2)+"\n")' "$tmp/exitcode.json"
+ec_out=$("$jscpd_bin" --config "$tmp/exitcode.json" "$tmp/dup-below" 2>&1)
+ec_rc=$?
+ec_desc="真实配置+exitCode:1 因检出克隆拒绝同一阈值内夹具"
+if [ "$ec_rc" -eq 0 ]; then
+  echo "FAIL(应拒绝却放行) $ec_desc"; fail=$((fail+1))
+elif printf '%s\n' "$ec_out" | grep -F "Clone found" >/dev/null \
+  && ! printf '%s\n' "$ec_out" | grep -F "over threshold" >/dev/null; then
+  echo "PASS $ec_desc"; pass=$((pass+1))
+else
+  echo "FAIL(非克隆存在导致的拒绝) $ec_desc"; fail=$((fail+1))
+fi
 echo "guardrail self-test: $pass PASS / $fail FAIL"
 [ "$fail" -eq 0 ] && bash scripts/test-ci-harness.sh
