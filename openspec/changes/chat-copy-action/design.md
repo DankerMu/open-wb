@@ -14,7 +14,7 @@ Sibling surfaces：
 - 助手块三种状态：running 不渲染；done、failed 在原文非空时渲染。
 - 用户消息不渲染操作条。
 - `ToastProvider`：`web/src/main.tsx` 应用根，测试侧 `web/test/render-app-router.tsx`。本刀不挂 Provider。
-- 不挂 ToastProvider 的挂载路径：`web/test/chat-page-lifecycle-support.tsx:83-93` 直接挂 ChatPage，使用方为 `topbar.test.tsx` T7（:243「Provider 外裸挂 ChatPage」）与 `chat-page-lifecycle.test.tsx:115,276`。它们的快照中没有已完成且正文非空的助手消息（T7 用 `chatSnapshot` 默认的空 content，另两处只有用户消息），所以不会渲染 `MessageActions`，`useToast()` 不会在 Provider 外被调用。本刀不改这些 fixture；以后若给它们加上助手正文，须同时挂 ToastProvider。
+- 不挂 ToastProvider 的挂载路径：`web/test/chat-page-lifecycle-support.tsx:83-93` 直接挂 ChatPage，使用方为 `topbar.test.tsx` T7（:243「Provider 外裸挂 ChatPage」）与 `chat-page-lifecycle.test.tsx:115,276`。它们的快照中没有已完成且正文非空的助手消息（T7 用 `chatSnapshot` 默认的空 content，另两处只有用户消息），所以不会渲染 `MessageActions`，`useToast()` 不会在 Provider 外被调用。本刀不改这些 fixture；以后若给它们加上助手正文，须同时挂 ToastProvider。同类的无 Provider 挂载还有 `web/test/routes.test.tsx:236,261,282` 与 `web/test/settings-support.tsx:35`（均直接 `render(<RouterProvider …/>)`）；它们的快照同样没有已完成且正文非空的助手消息，web 全量绿可证。
 - `MessageArticle` 是 `memo` 组件：`MessageActions` 只依赖 `message.content`，`useToast()` 的 value 由 `useMemo` 保持稳定，不破坏 memo。
 - 服务端与存储：无，纯呈现。
 
@@ -87,9 +87,9 @@ Must add/change：
 |---|---|---|
 | C1 | 成功 | done 回合，content 为 `RAW`，`writeText = vi.fn().mockResolvedValue(undefined)`。点击 `getByRole("button", { name: "复制" })` 后：`writeText` 恰被调用 1 次，参数 `toBe(RAW)`；出现 `已复制到剪贴板`（`ui-toast--success`）；不出现 `复制失败` |
 | C2 | API 缺失 | 不定义 `navigator.clipboard`。点击后出现 `复制失败`（`ui-toast--error`）；不出现 `已复制到剪贴板`；`settle()` 后 `unhandled` 为空 |
-| C3 | reject | `writeText = vi.fn().mockRejectedValue(new DOMException("denied", "NotAllowedError"))`，开启 `observeUnhandledRejections()`。点击后出现 `复制失败`（error），`writeText` 被调用 1 次；`settle()` 后 `unhandled` 为空；`finally` 中 `stop()` |
-| C3b | 同步抛错 | `writeText = vi.fn(() => { throw new Error("sync"); })`。点击后出现 `复制失败`（error）；`settle()` 后 `observeUnhandledRejections().unhandled` 为空（同步抛错发生在 async 函数内，会变成 rejection，检测方式与 C3 相同） |
-| C4 | 渲染条件 | running 助手（content 为非空的 `"进行中"`，确保只由 running 条件拦下）：无 `复制` 按钮。done 助手 content `""`：无按钮。failed 助手 content `"部分"`：有按钮。用户消息 article 内无按钮。按钮 `title` 为 `复制`，内含 `svg.ui-icon` 且带 `aria-hidden="true"`，按钮可访问名恰为 `复制` |
+| C3 | reject | `writeText = vi.fn().mockRejectedValue(new DOMException("denied", "NotAllowedError"))`，开启 `observeUnhandledRejections()`。点击后出现 `复制失败`（error），`writeText` 被调用 1 次；`settle()` 后 `unhandled` 为空；`已复制到剪贴板` 不出现（恰一条 Toast）；`finally` 中 `stop()` |
+| C3b | 同步抛错 | `writeText = vi.fn(() => { throw new Error("sync"); })`。点击后出现 `复制失败`（error）且 `已复制到剪贴板` 不出现；`settle()` 后 `observeUnhandledRejections().unhandled` 为空（同步抛错发生在 async 函数内，会变成 rejection，检测方式与 C3 相同） |
+| C4 | 渲染条件 | running 助手（content 为非空的 `"进行中"`，确保只由 running 条件拦下）：无 `复制` 按钮。done 助手 content `""`：无按钮。failed 助手 content `"部分"`：有按钮，且 `.chat-msg-actions` 是 `.chat-msg-main` 的 `lastElementChild`。用户消息 article 内无按钮。按钮 `title` 为 `复制`，内含 `svg.ui-icon` 且带 `aria-hidden="true"`，按钮可访问名恰为 `复制` |
 | C5 | 多条助手消息 | 快照含两轮（两条助手，content 分别为 `一` 与 `二`）。点击第一条助手 article 内的按钮后，`writeText` 最后一次调用参数为 `一`；点击第二条后为 `二` |
 | C6 | 静态 | `messages.css` 中 `.chat-msg-actions` 规则含 `display: flex`；`.chat-msg-action` 规则含 `width: 26px`，其 `color` 为 `var(--wb-...)` 形式的 token；存在 `.chat-msg-action:hover:not(:disabled)` 规则且含 `color: var(--wb-text-secondary)`；`messages.css` 无字面颜色（M5 已覆盖，C6 不重复） |
 
@@ -105,6 +105,8 @@ Must add/change：
 6. 失败 Toast 的 `type` 改为 `"success"` → C2 红（class 断言）。
 7. 所有按钮都复制最后一条助手消息的原文 → C5 红。
 8. catch 中先弹 `复制失败` 再 `throw`（rethrow）→ C3 只因 `unhandled` 非空而变红，Toast 断言仍绿。这一项证明未捕获 rejection 的检测器能单独抓到逃逸。
+9. （fix pass 1 补）成功 Toast 早于 `await`：`const pending = navigator.clipboard.writeText(text); toast.show({ type: "success", … }); await pending;` → C3 红（reject 时出现了 `已复制到剪贴板`）。C2/C3b 因同步抛错走不到成功 Toast，不要求变红。
+10. （fix pass 1 补）`<MessageActions>` 挪到 `{steps}` 之前 → C4 failed 用例红（`.chat-msg-main` 的 `lastElementChild` 不再是 `.chat-msg-actions`）。
 
 Seams under test：`MessageActions` 的点击处理（剪贴板 → Toast）；`conversation-view.tsx` 的渲染条件（status 与 content）。
 
@@ -117,3 +119,4 @@ Review focus：失败路径收敛与无逃逸（C2、C3、C3b、注入 8）；�
 ## Implementation deviations
 - `messages.css` 的新规则插在文件末尾 `@media (max-width: 760px)` 块之前，而不是字面上的文件最末：保持移动端媒体查询收尾的既有布局。它们仍然位于所有 ui css 之后，特异性与覆盖顺序跟设计一致；无行为差异。
 - 除此之外无偏差。C4 拆成三个 `it`（running、空正文、failed 加用户消息）。C6 在设计列出的断言之外，还断言 `.chat-msg-action:focus-visible` 的圆角为 `6px`，用来覆盖 Review focus 里的 focus-visible 圆角项。
+- fix pass 1：C4 failed 用例的快照多带一个 done 状态的 `bash` 步骤（`detail` 为空），并断言 `.chat-msg-main > .chat-step` 存在。设计 C4 行没写步骤；但原 fixture 的 `steps` 为空、`error` 为 null，`{steps}{error}` 不产生任何 DOM，注入 10 把 `<MessageActions>` 挪到它们之前后 `lastElementChild` 不变，用例仍绿（实测 9/9 绿）。加上步骤后，注入 10 让该用例在 `lastElementChild` 断言处变红。`error` 无法经快照注入（`session-contract.ts:110` 只接受六个键），所以选步骤。

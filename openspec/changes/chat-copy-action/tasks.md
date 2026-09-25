@@ -6,7 +6,7 @@
 ## 2. Implementation（TDD：先红后绿）
 - [x] 2.1 `web/test/chat-copy.test.tsx` C1–C6。先红。
 - [x] 2.2 `message-actions.tsx`；`conversation-view.tsx` 装配；`messages.css` 样式。2.1 转绿，`web/test` 全绿。
-- [x] 2.3 反向注入八项各红并回退（design Required evidence）。
+- [x] 2.3 反向注入十项（fix pass 1 补 9、10）各红并回退（design Required evidence）。
 
 ## 3. Verification
 - [ ] 3.0 archive PR：父 delta `s1e-frontend-parity/specs/chat-web/spec.md` Messages 段的操作条句按子 delta 细化同步；把子 Scenario「复制助手原文」并入父 delta；勾父 tasks 4.6。

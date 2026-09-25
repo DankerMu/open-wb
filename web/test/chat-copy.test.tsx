@@ -98,6 +98,7 @@ describe("(C3) writeText rejects", () => {
       mountSnapshot(doneSnapshot(RAW));
       await clickCopy();
       await expectToast(FAILED, "error");
+      expect(toastRegion().queryByText(COPIED)).toBeNull();
       expect(writeText).toHaveBeenCalledTimes(1);
       await settle();
       expect(observer.unhandled).toEqual([]);
@@ -118,6 +119,7 @@ describe("(C3b) writeText throws synchronously", () => {
       mountSnapshot(doneSnapshot(RAW));
       await clickCopy();
       await expectToast(FAILED, "error");
+      expect(toastRegion().queryByText(COPIED)).toBeNull();
       await settle();
       expect(observer.unhandled).toEqual([]);
     } finally {
@@ -148,6 +150,7 @@ describe("(C4) render conditions", () => {
         status: "failed",
         content: "部分",
         assistantStatus: "failed",
+        steps: [{ id: 11, ordinal: 0, name: "bash", detail: "", status: "done" }],
         cursor: { epoch: 1, seq: null },
       }),
     );
@@ -158,6 +161,10 @@ describe("(C4) render conditions", () => {
     const icon = button.querySelector("svg.ui-icon");
     expect(icon).not.toBeNull();
     expect(icon?.getAttribute("aria-hidden")).toBe("true");
+    const actions = button.closest(".chat-msg-actions");
+    expect(actions).not.toBeNull();
+    expect(article.querySelector(".chat-msg-main > .chat-step")).not.toBeNull();
+    expect(article.querySelector(".chat-msg-main")?.lastElementChild).toBe(actions);
     const user = screen.getByRole("article", { name: "用户" });
     expect(within(user).queryByRole("button")).toBeNull();
   });

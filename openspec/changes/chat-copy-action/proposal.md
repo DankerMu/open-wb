@@ -7,7 +7,7 @@
 
 已有依据：
 - 父 delta 的 Messages 段写明："每条助手消息有一个只含 `复制` 的操作条，经 `navigator.clipboard.writeText` 复制原文；剪贴板 API 缺失或 reject 时弹 Toast `复制失败`，异常不外泄"。
-- 已晋升的 Messages 句也写了"`复制` copies the raw text"。但 #286 只交付了渲染部分，操作条那句没有随它晋升。
+- 已晋升的 Messages 句不含操作条：#286 只交付渲染部分，父 delta 中的操作条句（含 "`复制` copies the raw text" 一语）没有随它晋升，本刀补上。
 
 ## What Changes
 - **新 `web/src/features/chat/message-actions.tsx`**：导出 `MessageActions({ text })`。
