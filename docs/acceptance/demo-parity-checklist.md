@@ -12,6 +12,7 @@
 - **运行方式**：`make ui-shots` 只消费调用方已经在运行的服务，不负责 build/start/stop。对服务的要求：
   - 使用 dev-stub 认证；
   - `smoke/fixtures/sandbox/u1` 夹具已复制进沙箱根（`Makefile:60`）；
+  - 模型上游为仓库假上游 `server/test/support/fake-upstream.mjs`（启动方式同 `.github/scripts/ci-fake-upstream.sh`）：`chat-done` 态的回复正文与 bash 步骤卡都来自它的固定输出，接真实模型端点时 CH-19、CH-25–CH-27 无法按本清单判定；
   - 会话回合能跑到 `已完成`（`chat-done` 态依赖它）。
 
   服务地址由 `UI_SHOTS_BASE_URL` 指定（缺省值见 `Makefile:73`）。产物缺省写到 `var/ui-shots/<UTC 时间戳>/`，内容为 60 张 PNG 和一个 `index.html`：
@@ -23,8 +24,9 @@
   - `ui-shots <态名> @<格>…`：在 `index.html` 对应格的该态行左右对照；响应式项列出所有要看的格。
   - `ui-walk <步骤>（web/e2e/…:行）`：`make ui-walk` 两个 project（`desktop-light` 1440×900、`mobile-dark` 390×844）里的真实浏览器断言。
   - `jsdom web/test/<文件>:行`：`make check` 中的 vitest 用例。
+  - `手动：@<格> <操作>，对照 demo:<行>`：截图对不含覆盖层（对话框、菜单、弹层）打开态，外观部分在运行中的应用里按同一视口与主题手动打开后对照。
 
-  键盘、焦点、Esc 栈、reduced-motion、Toast 时序、流式这类截图对看不到的交互，只用后两种方式验证。
+  键盘、焦点、Esc 栈、reduced-motion、Toast 时序、流式这类截图对看不到的交互，只用 ui-walk 与 jsdom 验证。
 
 ## 签收规则
 
@@ -47,8 +49,9 @@
 4. **结论只能由签收人本人给出**，途径是 Epic #274 评论，或在与 agent 的对话中逐项/批量明确给出。
    - agent 不代签，自身判断只以「agent 预审」标注出现在 PR/Epic 评论中。
    - archive PR 只照抄签收人的结论写入签收格，每项或每批注明出处：评论链接，或「签收人对话确认 <日期>」。
-5. 不通过项一律开 issue，不在本清单所属 change 内修代码。
-6. 实跑 `make ui-shots` 的提交 SHA 与上面的生成时 master 不同时，在文末签收记录里写明实跑 SHA。
+5. 只能用 jsdom 判定的项（如页面中无消费者的基元 SH-04/SH-05/SH-06），以所引用例的断言存在、且在记录的 SHA 上 `make check` 为绿作为通过依据。
+6. 不通过项一律开 issue，不在本清单所属 change 内修代码。
+7. 实跑 `make ui-shots` 的提交 SHA 与上面的生成时 master 不同时，在文末签收记录里写明实跑 SHA。
 
 ## 范围判定
 
@@ -93,17 +96,17 @@
 | 编号 | demo:行号 | §4 来源 | 期望（可观察） | 实现 file:line | 验证方式 | 签收 |
 |---|---|---|---|---|---|---|
 | SH-01 | demo:19-188 | §4.1#1 | 亮、暗两格中，app 的页面底色、卡片与输入底色、主/次文字色、边框色、品牌强调色都与 demo 同格一致（token 名与值从 demo 逐字移植）。唯一允许的差异：标题字体栈不含 Poppins | `web/src/styles/tokens.css:10`、`web/src/styles/tokens.css:130` | ui-shots settings-default @1440-light @1440-dark；ui-shots files-readme @1440-light @1440-dark；jsdom `web/test/ui-tokens.test.ts:90` | 待签 |
-| SH-02 | demo:570-585 | §4.1#2 | 会话列的 `新建会话` 为 primary：亮色深底白字，暗色浅底深字。文件页 `＋`（可访问名 `新建`）为 secondary 浅底。按钮高 32、圆角 8。退出确认框里 `取消` 为 ghost、`退出` 为 danger 红底 | `web/src/ui/button.tsx:11` | ui-shots chat-welcome @1440-light @1440-dark；ui-shots files-readme @1440-light；jsdom `web/test/ui-form.test.tsx:74` | 待签 |
+| SH-02 | demo:570-585 | §4.1#2 | 会话列的 `新建会话` 为 primary：亮色深底白字，暗色浅底深字。文件页 `＋`（可访问名 `新建`）为 secondary 浅底。按钮高 32、圆角 8。退出确认框里 `取消` 类名含 `ui-btn--ghost`、`退出` 含 `ui-btn--danger`（用例断言） | `web/src/ui/button.tsx:11` | ui-shots chat-welcome @1440-light @1440-dark；ui-shots files-readme @1440-light；jsdom `web/test/ui-form.test.tsx:74`、`web/test/ui-dialog.test.tsx:404` | 待签 |
 | SH-03 | demo:606-612 | §4.1#2 | 登录页 `账号`、`密码` 两个输入框与 demo 同形：高度、圆角、底色、边框、占位符颜色一致，亮暗随主题变化 | `web/src/ui/input.tsx:12` | ui-shots login-default @1440-light @1440-dark；jsdom `web/test/ui-form.test.tsx:118` | 待签 |
 | SH-04 | demo:614-619 | §4.1#2 | 开关为 `role="switch"` 的 32×18 轨道加圆点；点击回调新状态，禁用时不响应。S1e 页面没有开关消费者，只用 jsdom 判定 | `web/src/ui/switch.tsx:10` | jsdom `web/test/ui-form.test.tsx:152` | 待签 |
 | SH-05 | demo:599-604 | §4.1#2 | 标签有 brand/success/warning/error/neutral 五种色调（高 20、圆角 6），暗色下 brand 文字色有覆盖。S1e 页面没有消费者，只用 jsdom 判定 | `web/src/ui/tag.tsx:8` | jsdom `web/test/ui-form.test.tsx:194`、`web/test/ui-form.test.tsx:271` | 待签 |
 | SH-06 | demo:621-626 | §4.1#2 | 筛选 chip 为 `<button>` 胶囊；选中时深底白字，且 `aria-pressed="true"`。只对应 demo 的 `.filter-chip`，欢迎页 chip 行见 CH-02。S1e 页面没有消费者，只用 jsdom 判定 | `web/src/ui/chip.tsx:9` | jsdom `web/test/ui-form.test.tsx:201` | 待签 |
-| SH-07 | demo:730-738 | §4.1#2 | 文件页 `＋` → `新建文件夹` 打开模态：遮罩上居中白底圆角卡片，标题为 h2，右上有 `关闭`。打开即聚焦首个表单控件，Tab 在框内循环；Escape、遮罩、`关闭`、`取消` 均关闭，并把焦点还给触发器 | `web/src/ui/dialog.tsx:180` | ui-walk 新建文件夹挂起（`web/e2e/ui-walk.spec.ts:211-212`、`web/e2e/ui-walk.spec.ts:235-251`）；jsdom `web/test/ui-dialog.test.tsx:132` | 待签 |
+| SH-07 | demo:730-738 | §4.1#2 | 文件页 `＋` → `新建文件夹` 打开模态：遮罩上居中白底圆角卡片，标题为 h2，右上有 `关闭`。打开即聚焦首个表单控件，Tab 在框内循环；Escape、遮罩、`关闭`、`取消` 均关闭，并把焦点还给触发器 | `web/src/ui/dialog.tsx:180` | 手动：@1440-light 在 `/files` 点 `新建` → `新建文件夹`，对照 demo:731-736 的外观；ui-walk 新建文件夹挂起（`web/e2e/ui-walk.spec.ts:211-212`、`web/e2e/ui-walk.spec.ts:235-251`）；jsdom `web/test/ui-dialog.test.tsx:132` | 待签 |
 | SH-08 | demo:1116-1128 | §4.1#2 | 侧栏 `用户菜单` → `退出登录` 弹出 `alertdialog`：宽 400，标题 `退出登录？` 前有警示图标；说明为「退出后本机不再保留登录状态，未完成的任务会保留在你的沙箱中。」；按钮为 `取消`/`退出`（红底）；没有右上关闭，点遮罩不关闭，Escape 等同取消 | `web/src/ui/confirm-dialog.tsx:29`、`web/src/features/auth/footer.tsx:76` | ui-walk 退出确认（`web/e2e/ui-walk.spec.ts:107-117`）；jsdom `web/test/ui-dialog.test.tsx:388` | 待签 |
 | SH-09 | demo:772-777 | §4.1#2 | 窄屏下点顶栏 `打开导航`，左侧滑出 288 宽抽屉（标题 `导航`、右上 `关闭`、带遮罩）；Escape、遮罩、`关闭` 均关闭，焦点回到 `打开导航`。右侧变体默认宽 420，最大 92vw | `web/src/ui/drawer.tsx:22`、`web/src/routes/shell/app-shell.tsx:27` | ui-walk 打开导航（`web/e2e/ui-walk-layout.ts:187-195`）；jsdom `web/test/ui-dialog.test.tsx:483`、`web/test/app-shell-responsive.test.tsx:295` | 待签 |
-| SH-10 | demo:761-770 | §4.1#2 | 侧栏 `用户菜单` 与文件页 `新建` 打开下拉菜单：白底、圆角、带阴影，菜单项可带图标，悬停高亮。键盘打开时焦点落在首项，上下/Home/End 环绕移动，Enter 选中；Escape 关闭并回焦触发器 | `web/src/ui/menu.tsx:24`、`web/src/features/auth/footer.tsx:52`、`web/src/features/files/dialogs.tsx:40` | ui-walk 用户菜单与新建菜单（`web/e2e/ui-walk.spec.ts:107-109`、`web/e2e/ui-walk.spec.ts:211-212`）；jsdom `web/test/ui-menu.test.tsx:63` | 待签 |
-| SH-11 | demo:779-780 | §4.1#2 | 文件页点 `选择工作空间` 卡，弹出锚定在卡片旁、宽 300 的弹层（圆角、阴影）。打开即聚焦弹层内首个输入；Escape 或点外部关闭，焦点回到卡片。弹层内容见 FI-02–FI-04 | `web/src/ui/popover.tsx:23`、`web/src/features/files/page.tsx:90` | ui-walk 工作空间切换器（`web/e2e/ui-walk.spec.ts:162-164`）；jsdom `web/test/ui-popover-tooltip.test.tsx:80` | 待签 |
-| SH-12 | demo:753-758、demo:1044-1052 | §4.1#2 | 视口顶部 52px 处居中浮出通知条（类型图标 + 文案），成功/失败/信息三色图标。2.4s 自动消失，悬停或聚焦时暂停，最多同时 3 条。示例：助手消息点 `复制` 后出现 `已复制到剪贴板` | `web/src/ui/toast.tsx:33`、`web/src/features/chat/message-actions.tsx:9` | jsdom `web/test/ui-toast.test.tsx:91`、`web/test/chat-copy.test.tsx:63` | 待签 |
+| SH-10 | demo:761-770 | §4.1#2 | 侧栏 `用户菜单` 与文件页 `新建` 打开下拉菜单：白底、圆角、带阴影，菜单项可带图标，悬停高亮。键盘打开时焦点落在首项，上下/Home/End 环绕移动，Enter 选中；Escape 关闭并回焦触发器 | `web/src/ui/menu.tsx:24`、`web/src/features/auth/footer.tsx:52`、`web/src/features/files/dialogs.tsx:40` | 手动：@1440-light 打开侧栏 `用户菜单`，对照 demo:761-765 的外观；ui-walk 用户菜单与新建菜单（`web/e2e/ui-walk.spec.ts:107-109`、`web/e2e/ui-walk.spec.ts:211-212`）；jsdom `web/test/ui-menu.test.tsx:63`、`web/test/ui-popover-tooltip.test.tsx:216` | 待签 |
+| SH-11 | demo:779-780 | §4.1#2 | 文件页点 `选择工作空间` 卡，弹出锚定在卡片旁、宽 300 的弹层（圆角、阴影）。打开即聚焦弹层内首个输入；Escape 或点外部关闭，焦点回到卡片。弹层内容见 FI-02–FI-04 | `web/src/ui/popover.tsx:23`、`web/src/features/files/page.tsx:90` | 手动：@1440-light 在 `/files` 点 `选择工作空间`，对照 demo:779 的外观；ui-walk 工作空间切换器（`web/e2e/ui-walk.spec.ts:162-164`）；jsdom `web/test/ui-popover-tooltip.test.tsx:80` | 待签 |
+| SH-12 | demo:753-758、demo:1044-1052 | §4.1#2 | `toast.css` 中通知区位于顶部 52px、z-index 2000，成功/失败/信息三类各有 circle-check/triangle-alert/info 图标与对应颜色；2.4s 到期移除，悬停或聚焦时暂停，同时最多 3 条（丢最旧）。示例：助手消息点 `复制` 后出现 `已复制到剪贴板` | `web/src/ui/toast.tsx:33`、`web/src/features/chat/message-actions.tsx:9` | jsdom `web/test/ui-toast.test.tsx:66`、`web/test/ui-toast.test.tsx:91`、`web/test/ui-toast.test.tsx:100`、`web/test/ui-toast.test.tsx:108`、`web/test/ui-toast.test.tsx:176`、`web/test/chat-copy.test.tsx:63` | 待签 |
 | SH-13 | demo:724-728 | §4.1#2 | 空态居中三段式：可选的 64px 圆角图标框、标题、说明，以及可选的操作区。文件页各空态都用它（见 FI-26–FI-30） | `web/src/ui/empty-state.tsx:13` | jsdom `web/test/ui-empty-state.test.tsx:9`、`web/test/files-empty-layout.test.tsx:25` | 待签 |
 | SH-14 | demo:934-1031 | §4.1#2 | 侧栏导航、chip、发送、文件类型、步骤卡等处的图标都是同一套线性图标，默认装饰性（不读屏）。图标随产物打包，离线可用，页面无跨源请求 | `web/src/ui/icon.tsx:84` | ui-shots chat-welcome @1440-light @1440-dark；ui-shots files-readme @1440-light；jsdom `web/test/ui-icon-brand.test.tsx:74` | 待签 |
 | SH-15 | demo:1773-1778、demo:1791-1795 | §4.1#3 | 宽屏侧栏宽 288。主导航自上而下为 `会话`/`工作空间`/`中心`/`设置`，图标依次为 message-square/folder/layout-grid/settings；当前路由项高亮 | `web/src/routes/shell/sidebar.tsx:75-106`、`web/src/routes/manifest.ts:13` | ui-shots chat-welcome @1440-light @1440-dark @1024-light；ui-shots settings-default @1024-dark；jsdom `web/test/sidebar.test.tsx:84` | 待签 |
@@ -122,7 +125,7 @@
 | SH-28 | demo:892-896 | §4.1#5 | S1e 页面没有 1100 档元素：demo 的 1100 断点只作用于 `/center` 面板 | — | 核对 `openspec/specs/spa-shell/spec.md:18`（响应式段） | 不适用（S1d，偏差留痕 3） |
 | SH-29 | demo:307-310 | §4.1#5 | 宽度 ≤760 时侧栏不在文档流里，主区占满宽度；顶栏最左是 `打开导航`（汉堡图标）。点它弹出左侧 288 覆盖层：展开态，没有品牌区与折叠按钮；选中路由即关闭。demo 的 390 截图为折叠后的浮层侧栏 | `web/src/routes/shell/app-shell.tsx:26-32`、`web/src/routes/shell/topbar.tsx:25-35`、`web/src/lib/viewport.ts:4` | ui-shots chat-welcome @390-light @390-dark；ui-shots files-readme @390-light；ui-shots settings-default @390-dark；ui-walk 打开导航（`web/e2e/ui-walk-layout.ts:187-195`）；jsdom `web/test/app-shell-responsive.test.tsx:265` | 待签 |
 | SH-30 | demo:305-310 | §4.1#5 | 六个格、五个态的 app 截图都没有横向溢出。脚本逐张断言；`index.html` 中无失败标注即为通过 | `web/e2e/ui-shots.mjs:373` | ui-shots login-default @1440-light @1024-light @390-light；ui-shots chat-done @390-dark；ui-shots files-readme @1024-dark @390-light；ui-walk 逐路由 1024 无溢出（`web/e2e/ui-walk-layout.ts:98-105`） | 待签 |
-| SH-31 | demo:4142 | §4.1#2、§4.1#6 | 覆盖层叠放时，每按一次 Escape 只关最上层：导航覆盖层 → 用户菜单 → 退出确认框逐层叠开，第一次 Escape 只关确认框（覆盖层仍在），第二次才关覆盖层 | `web/src/ui/dialog.tsx:133`、`web/src/ui/drawer.tsx:33` | jsdom `web/test/app-shell-responsive.test.tsx:129-133`、`web/test/ui-dialog.test.tsx:243` | 待签 |
+| SH-31 | demo:4142 | §4.1#2、§4.1#6 | 覆盖层叠放时，每按一次 Escape 只关最上层：导航覆盖层 → 用户菜单 → 退出确认框逐层叠开，第一次 Escape 只关确认框（覆盖层仍在），第二次才关覆盖层 | `web/src/ui/dialog.tsx:133`、`web/src/ui/drawer.tsx:33` | jsdom `web/test/app-shell-responsive.test.tsx:377`（Escape 两次的辅助 `web/test/app-shell-responsive.test.tsx:129-133`）、`web/test/ui-dialog.test.tsx:243` | 待签 |
 | SH-32 | demo:1786、demo:4141 | §4.1#6 | ⌘K 不打开命令面板，侧栏无 ⌘K 搜索按钮 | — | ui-shots chat-welcome @1440-light | 不适用（明确不做，Non-goals） |
 | SH-33 | demo:2620-2621 | §4.1#6 | 输入框中无修饰 Enter 发送，Shift+Enter 换行，输入法组字中不发送 | — | jsdom `web/test/chat-page.test.tsx:175`、`web/test/chat-page.test.tsx:192` | 不适用（已实现，S0b · #270） |
 | SH-34 | demo:222、demo:730 | §4.1#7 | 对话框与抽屉的遮罩淡入；`prefers-reduced-motion: reduce` 时无动画 | `web/src/ui/motion.css:23`、`web/src/ui/dialog.css:16` | jsdom `web/test/ui-guardrails.test.ts:113`、`web/test/ui-dialog.test.tsx:567` | 待签 |
@@ -178,15 +181,15 @@
 | CH-16 | demo:1864、demo:1909-1920 | §4.3#5 | 会话条目没有「更多」按钮，也没有重命名/置顶/删除菜单 | — | ui-shots chat-done @1440-light | 不适用（Non-goals：条目更多菜单 → S1c） |
 | CH-17 | demo:421、demo:2380 | §4.3#6 | 用户消息为右对齐气泡，右下角是小圆角，保留原文的换行与空白 | `web/src/features/chat/conversation-view.tsx:117-124`、`web/src/features/chat/messages.css:28` | ui-shots chat-done @1440-light @1440-dark @390-dark；jsdom `web/test/chat-messages.test.tsx:83` | 待签 |
 | CH-18 | demo:424-427、demo:2400-2405 | §4.3#6 | 助手消息为左侧 28px 自有 mark 头像（装饰性）加无底色正文块，步骤卡在正文之后。等价说明：demo 头像是上游 app 图标，这里以自有品牌 mark 替代 | `web/src/features/chat/conversation-view.tsx:126-145` | ui-shots chat-done @1440-light @1440-dark @390-dark；jsdom `web/test/chat-messages.test.tsx:152` | 待签 |
-| CH-19 | demo:428-445、demo:2390 | §4.3#6 | 助手正文按 Markdown 渲染：标题、列表、代码块、表格。源 HTML 作为文本显示，链接不跳转。`chat-done` 态正文为 `你好，这是 WorkBuddy 的第一条流式回复。` | `web/src/lib/markdown-view.tsx:139`、`web/src/features/chat/conversation-view.tsx:132-133` | ui-shots chat-done @1440-light；jsdom `web/test/chat-messages.test.tsx:65` | 待签 |
+| CH-19 | demo:428-445、demo:2390 | §4.3#6 | 助手正文按 Markdown 渲染：标题、列表、代码块、表格。源 HTML 作为文本显示，链接不跳转。`chat-done` 态正文为假上游的固定回复 `你好，这是 WorkBuddy 的第一条流式回复。` | `web/src/lib/markdown-view.tsx:139`、`web/src/features/chat/conversation-view.tsx:132-133` | ui-shots chat-done @1440-light；jsdom `web/test/chat-messages.test.tsx:65` | 待签 |
 | CH-20 | demo:446、demo:2390 | §4.1#7、§4.3#6 | 助手运行中，正文末尾有品牌色闪烁竖条光标；完成或失败后消失 | `web/src/features/chat/conversation-view.tsx:134-136`、`web/src/ui/motion.css:78-80` | jsdom `web/test/chat-messages.test.tsx:101`、`web/test/chat-messages.test.tsx:132` | 待签 |
 | CH-21 | demo:2383-2386 | §4.3#6 | 助手消息不渲染「深度思考过程」折叠块 | — | ui-shots chat-done @1440-light | 不适用（计划遗漏，未归属 → #404） |
 | CH-22 | demo:528-530、demo:2395 | §4.3#6 | 已完成且正文非空的助手消息末尾有操作条，只有一个复制图标按钮（名称与 tooltip 都是 `复制`）。点击后复制 Markdown 原文，弹出 Toast `已复制到剪贴板`；剪贴板不可用时弹出 `复制失败`。运行中的消息、正文为空的消息、用户消息都没有操作条 | `web/src/features/chat/message-actions.tsx:4-27`、`web/src/features/chat/conversation-view.tsx:140-142` | ui-shots chat-done @1440-light @1440-dark；jsdom `web/test/chat-copy.test.tsx:63`、`web/test/chat-copy.test.tsx:76`、`web/test/chat-copy.test.tsx:132` | 待签 |
 | CH-23 | demo:2396 | §4.3#6 | 操作条不渲染「重新生成」 | — | ui-shots chat-done @1440-light | 不适用（Non-goals：重新生成 → S1c） |
 | CH-24 | demo:2393 | §4.3#6 | 助手消息下方不渲染追问 chip | — | ui-shots chat-done @1440-light | 不适用（计划遗漏，未归属 → #404） |
-| CH-25 | demo:448-458、demo:2218-2231 | §4.3#7 | 每个步骤是一张卡片，卡头为图标（`bash` 用 terminal，其它用 wrench）、步骤名，以及状态徽章 `运行中`/`已完成`/`失败`。徽章可访问名为 `<步骤名> <状态>`；卡片中不出现伪造的耗时或 todo | `web/src/features/chat/conversation-view.tsx:79-97` | ui-shots chat-done @1440-light @1440-dark；ui-walk 步骤徽章（`web/e2e/ui-walk.spec.ts:481-487`）；jsdom `web/test/chat-steps.test.tsx:45` | 待签 |
-| CH-26 | demo:461-471、demo:2215-2217、demo:2232-2238 | §4.3#7 | 卡头下方一行摘要：JSON detail 依次取 `text`、`content`、首个 `key: value`，否则取首个非空行，截断到 120 码点；不整段倒出 JSON | `web/src/features/chat/conversation-view.tsx:98`、`web/src/features/chat/step-summary.ts:33` | ui-shots chat-done @1440-light；jsdom `web/test/step-summary.test.ts:35`、`web/test/chat-steps.test.tsx:45` | 待签 |
-| CH-27 | demo:2224-2232 | §4.3#7 | 摘要下方是默认折叠的 `原始输出`，展开后显示完整的原始 detail | `web/src/features/chat/conversation-view.tsx:99-104` | ui-shots chat-done @1440-light；jsdom `web/test/chat-steps.test.tsx:45` | 待签 |
+| CH-25 | demo:448-458、demo:2218-2231 | §4.3#7 | 每个步骤是一张卡片，卡头为图标（`bash` 用 terminal，其它用 wrench）、步骤名，以及状态徽章 `运行中`/`已完成`/`失败`。徽章可访问名为 `<步骤名> <状态>`；卡片中不出现伪造的耗时或 todo。`chat-done` 中的 bash 步骤卡来自假上游固定发出的一次 bash 调用（`echo workbuddy-smoke`） | `web/src/features/chat/conversation-view.tsx:79-97` | ui-shots chat-done @1440-light @1440-dark；ui-walk 步骤徽章（`web/e2e/ui-walk.spec.ts:481-487`）；jsdom `web/test/chat-steps.test.tsx:45` | 待签 |
+| CH-26 | demo:461-471、demo:2215-2217、demo:2232-2238 | §4.3#7 | 卡头下方一行摘要：JSON detail 依次取 `text`、`content`、首个 `key: value`，否则取首个非空行，截断到 120 码点；不整段倒出 JSON。`chat-done` 中这一步来自假上游固定发出的 bash 调用（`echo workbuddy-smoke`） | `web/src/features/chat/conversation-view.tsx:98`、`web/src/features/chat/step-summary.ts:33` | ui-shots chat-done @1440-light；jsdom `web/test/step-summary.test.ts:35`、`web/test/chat-steps.test.tsx:45` | 待签 |
+| CH-27 | demo:2224-2232 | §4.3#7 | 摘要下方是默认折叠的 `原始输出`，展开后显示完整的原始 detail。`chat-done` 中这一步来自假上游固定发出的 bash 调用（`echo workbuddy-smoke`） | `web/src/features/chat/conversation-view.tsx:99-104` | ui-shots chat-done @1440-light；jsdom `web/test/chat-steps.test.tsx:45` | 待签 |
 | CH-28 | demo:2223 | §4.3#7 | 步骤卡没有「已停止」态 | — | jsdom `web/test/chat-steps.test.tsx:45` | 不适用（Non-goals：停止生成 → S1c） |
 | CH-29 | demo:2875-2902 | §4.3#8 | 助手消息不渲染知识库检索卡 | — | ui-shots chat-done @1440-light | 不适用（S2c，审计计划归属） |
 | CH-30 | demo:2407-2418 | §4.3#9 | 不渲染审批条（允许/拒绝） | — | ui-shots chat-done @1440-light | 不适用（Non-goals：审批条 → S1c） |
@@ -194,7 +197,7 @@
 | CH-32 | demo:2468-2476 | §4.3#10 | 助手消息不渲染文件变更卡 | — | ui-shots chat-done @1440-light | 不适用（计划遗漏，未归属 → #403） |
 | CH-33 | demo:2504 | §4.3#11 | 会话中上滚超过一屏时，底部居中浮出 `回到最新`（带 chevron-down 图标）；点击后滚回底部并隐藏。贴底时新内容自动跟随；欢迎态没有该按钮 | `web/src/features/chat/scroll-follow.tsx:58-73` | jsdom `web/test/chat-scroll-follow.test.tsx:146`、`web/test/chat-scroll-follow.test.tsx:157`、`web/test/chat-scroll-follow.test.tsx:238` | 待签 |
 | CH-34 | demo:2054-2058 | §4.3#12 | 打开他人或不存在的会话 ID（GET 返回 404）时，移除 `?session=` 回到欢迎态，不弹 toast，也不建立事件流 | — | jsdom `web/test/chat-page-ownership.test.tsx:212` | 不适用（chat-web spec：越权 404 回欢迎态，无 toast） |
-| CH-35 | demo:2545 | §4.3#2 | chip 行末尾不渲染展开 `›` 按钮 | — | ui-shots chat-welcome @1440-light；核对 `openspec/specs/chat-web/spec.md:72` | 不适用（chat-web spec：默认场景静态单行 chip；按场景展开随场景胶囊 → S1c） |
+| CH-35 | demo:2545 | §4.3#2 | chip 行末尾不渲染展开 `›` 按钮 | — | ui-shots chat-welcome @1440-light；核对 `openspec/specs/chat-web/spec.md:72` | 不适用（chat-web spec：默认场景静态单行 chip，`openspec/specs/chat-web/spec.md:72`） |
 | CH-36 | demo:2584 | §4.3#4 | composer 旁不渲染吉祥物图形 | — | ui-shots chat-welcome @1440-light | 不适用（上游品牌图形，父 Non-goals 明确不做；审计 §4.1#8） |
 
 ## §4.4 文件 `/files`
@@ -204,7 +207,7 @@
 | FI-01 | demo:660-665、demo:3845-3849 | §4.4#1 | 树栏顶部是切换器卡：layout-grid 图标、空间名 `smoke-fixture`，下方等宽小字为逻辑路径 `zhangsan/smoke-fixture`。页面任何文本、`title`、`aria-*`、placeholder 都不含服务器绝对路径。等价说明：demo 在这里显示服务器目录，files-web spec 规定改为逻辑路径 | `web/src/features/files/page.tsx:95-106`、`web/src/features/files/file-meta.ts:43` | ui-shots files-readme @1440-light @1440-dark @390-light；jsdom `web/test/files-logical-path.test.tsx:116`、`web/test/files-logical-path.test.tsx:161` | 待签 |
 | FI-02 | demo:3592 | §4.4#1 | 点切换器卡弹出切换器，首行是搜索框 `搜索工作空间` 并获焦。按空间名或逻辑路径做大小写无关过滤；无匹配时显示 `无匹配的工作空间`。Escape 关闭，焦点回到卡片 | `web/src/features/files/page.tsx:90-117` | ui-walk 工作空间切换器（`web/e2e/ui-walk.spec.ts:162-164`）；jsdom `web/test/files-logical-path.test.tsx:193`、`web/test/files-overlays.test.tsx:52` | 待签 |
 | FI-03 | demo:3593-3597 | §4.4#1 | 弹层列表每项为空间名加逻辑路径，当前空间右侧有 `✓`；选中其它项即切换空间，并更新 `?ws=` | `web/src/features/files/page.tsx:118-145` | ui-walk 选择 smoke-fixture（`web/e2e/ui-walk.spec.ts:165-176`）；jsdom `web/test/files-logical-path.test.tsx:193` | 待签 |
-| FI-04 | demo:3599 | §4.4#1 | 弹层底部有按钮 `＋ 新建工作空间`，点击打开新建工作空间对话框（见 FI-15） | `web/src/features/files/page.tsx:149-156` | ui-walk 新建工作空间入口（`web/e2e/ui-walk.spec.ts:164-171`）；jsdom `web/test/files-overlays.test.tsx:52` | 待签 |
+| FI-04 | demo:3599 | §4.4#1 | 弹层底部有按钮 `＋ 新建工作空间`，点击打开新建工作空间对话框（见 FI-15） | `web/src/features/files/page.tsx:149-156` | jsdom `web/test/files-overlays.test.tsx:52`；ui-walk 新建工作空间入口（`web/e2e/ui-walk.spec.ts:164-171`，条件分支：仅 smoke-fixture 不存在时执行） | 待签 |
 | FI-05 | demo:3600 | §4.4#1 | 弹层不渲染「挂载目录到当前空间」 | — | jsdom `web/test/files-overlays.test.tsx:52` | 不适用（Non-goals：挂载目录 → S1b） |
 | FI-06 | demo:680-684、demo:3865-3873 | §4.4#2 | 树根行为 shield 图标加空间名 `smoke-fixture`（不再显示字面 `root`），可访问名为 `折叠 smoke-fixture`；下一行等宽小字 `zhangsan/smoke-fixture` | `web/src/features/files/tree.tsx:238`、`web/src/features/files/tree.tsx:144-161` | ui-shots files-readme @1440-light @1024-dark；jsdom `web/test/files-logical-path.test.tsx:169` | 待签 |
 | FI-07 | demo:3870 | §4.4#2 | 根行不渲染在线/离线圆点 | — | ui-shots files-readme @1440-light | 不适用（Non-goals：只读/在线标记 → S1b） |
@@ -215,7 +218,7 @@
 | FI-12 | demo:3882-3884 | §4.4#3 | 目录首次展开时请求该层，折叠后再展开复用缓存 | — | jsdom `web/test/files-page.test.tsx:80` | 不适用（已实现，S1a） |
 | FI-13 | demo:3852、demo:3952-3957 | §4.4#3 | `工作空间目录` 标题右侧有 `＋` 按钮（可访问名 `新建`），打开的下拉菜单恰两项 `新建文件夹`、`新建工作空间`。Escape 关闭后焦点回到 `新建`；demo 的「挂载目录」项见 FI-16 | `web/src/features/files/dialogs.tsx:37-53`、`web/src/features/files/tree.tsx:264-267` | ui-walk 新建菜单（`web/e2e/ui-walk.spec.ts:211-212`）；jsdom `web/test/files-overlays.test.tsx:77`、`web/test/files-overlays.test.tsx:159` | 待签 |
 | FI-14 | demo:3987-3995 | §4.4#3 | `新建文件夹` 以模态对话框呈现：字段为 `位置`（下拉，根项为 `根目录　<空间名>`）与 `文件夹名称`，打开时聚焦 `位置`。Escape、遮罩、`关闭`、`取消` 均取消，焦点回到 `新建`。提交中 `创建` 禁用，焦点留在框内；此时取消会中止请求 | `web/src/features/files/dialogs.tsx:186-218` | ui-walk 新建文件夹挂起（`web/e2e/ui-walk.spec.ts:235-251`）；jsdom `web/test/files-overlays.test.tsx:96`、`web/test/files-overlays.test.tsx:116`、`web/test/files-logical-path.test.tsx:212` | 待签 |
-| FI-15 | demo:3609-3612 | §4.4#3 | `新建工作空间` 以模态对话框呈现：说明 `将在你的沙箱内创建同名目录`，字段为 `工作空间名称`、`目录名`，打开时聚焦 `工作空间名称`。取消类关闭后，焦点回到发起入口（`选择工作空间` 或 `新建`）。提交中 `创建` 禁用；409 时显示 `同名工作空间已存在`，对话框保持打开 | `web/src/features/files/dialogs.tsx:122-150` | ui-walk 新建工作空间（`web/e2e/ui-walk.spec.ts:164-171`）；jsdom `web/test/files-overlays.test.tsx:52`、`web/test/files-overlays.test.tsx:137` | 待签 |
+| FI-15 | demo:3609-3612 | §4.4#3 | `新建工作空间` 以模态对话框呈现：说明 `将在你的沙箱内创建同名目录`，字段为 `工作空间名称`、`目录名`，打开时聚焦 `工作空间名称`。取消类关闭后，焦点回到发起入口（`选择工作空间` 或 `新建`）。提交中 `创建` 禁用；409 时显示 `同名工作空间已存在`，对话框保持打开 | `web/src/features/files/dialogs.tsx:122-150` | jsdom `web/test/files-overlays.test.tsx:52`、`web/test/files-overlays.test.tsx:137`；ui-walk 新建工作空间（`web/e2e/ui-walk.spec.ts:164-171`，条件分支：仅 smoke-fixture 不存在时执行） | 待签 |
 | FI-16 | demo:3954 | §4.4#3 | `＋` 菜单不含「挂载目录」 | — | jsdom `web/test/files-overlays.test.tsx:77` | 不适用（Non-goals：挂载目录 → S1b） |
 | FI-17 | demo:3960-3975、demo:3989-3990 | §4.4#3 | 位置下拉只列根和已加载的目录，不额外递归请求 | — | jsdom `web/test/files-page.test.tsx:80` | 不适用（已实现，S1a） |
 | FI-18 | demo:3999-4000 | §4.4#3 | 名称为空时提示 `请填写文件夹名称`；含 `/` 或 `\` 时提示 `名称不能包含路径分隔符` | — | jsdom `web/test/files-page.test.tsx:230` | 不适用（已实现，S1a） |
@@ -230,7 +233,7 @@
 | FI-27 | demo:3910 | §4.4#5 | 空间根一层为空时，树区空态显示 `该工作空间暂无目录` / `点击左上角 ＋ 新建文件夹`。demo 的「或挂载…」半句按 files-web spec 不渲染 | `web/src/features/files/tree.tsx:175-177` | jsdom `web/test/files-empty-layout.test.tsx:25` | 待签 |
 | FI-28 | demo:3877 | §4.4#5 | 展开一个空目录后，其下显示灰字 `空目录` | `web/src/features/files/tree.tsx:179` | jsdom `web/test/files-empty-layout.test.tsx:48` | 待签 |
 | FI-29 | demo:3912 | §4.4#5 | 未选文件时，预览区空态显示 `未选择文件` / `在左侧目录树中选择一个文件进行预览` | `web/src/features/files/tree.tsx:244-249` | jsdom `web/test/files-empty-layout.test.tsx:25` | 待签 |
-| FI-30 | demo:3847 | §4.4#5 | 账号没有任何空间时，切换器卡显示 `未选择工作空间`，树区空态显示 `先选择或创建工作空间` / `使用左上角 ＋ 新建工作空间`；此时 `＋` 菜单仍可新建工作空间 | `web/src/features/files/page.tsx:163-186` | jsdom `web/test/files-empty-layout.test.tsx:74` | 待签 |
+| FI-30 | demo:3847 | §4.4#5 | 账号没有任何空间时，切换器卡显示 `未选择工作空间`，树区空态显示 `先选择或创建工作空间` / `使用左上角 ＋ 新建工作空间`；此时 `＋` 菜单仍可新建工作空间 | `web/src/features/files/page.tsx:103`、`web/src/features/files/page.tsx:163-186` | jsdom `web/test/files-empty-layout.test.tsx:74` | 待签 |
 | FI-31 | demo:667 | §4.4#6 | 宽屏时树栏宽 280，预览区在右侧占满剩余宽度，两栏各自滚动 | `web/src/features/files/files.css:27-29` | ui-shots files-readme @1440-light @1440-dark @1024-light；ui-walk 树栏 280（`web/e2e/ui-walk-layout.ts:118`） | 待签 |
 | FI-32 | demo:723 | §4.1#5、§4.4#6 | 视口 ≤900（且 >760）时树栏收窄为 210，页面无横向溢出。ui-shots 没有这一档，由 ui-walk 在 880 宽下断言 | `web/src/features/files/files.css:586-590` | ui-walk 树栏 210（`web/e2e/ui-walk-layout.ts:119-122`）；jsdom `web/test/files-empty-layout.test.tsx:108` | 待签 |
 | FI-33 | demo:307-310 | §4.4#6 | ≤760 时文件页改为纵向布局，树在上、预览在下，页面无横向溢出。长文件名单行省略，`title` 为全名 | `web/src/features/files/files.css:592-596` | ui-shots files-readme @390-light @390-dark；ui-walk 纵向堆叠（`web/e2e/ui-walk-layout.ts:111-116`）；ui-walk 长名截断（`web/e2e/ui-walk-layout.ts:147-157`） | 待签 |
@@ -252,7 +255,7 @@
 
 | 编号 | demo:行号 | §4 来源 | 期望（可观察） | 实现 file:line | 验证方式 | 签收 |
 |---|---|---|---|---|---|---|
-| CT-01 | demo:3144-3161、demo:1756 | §4.6 | `/center` 只显示占位 `中心暂不可用`，没有 专家/技能/连接器/知识库/模型/权限/审计/账号 八个 tab，也没有任何功能按钮；路由只有四个，没有 `/tokens` 开发者页 | — | jsdom `web/test/routes.test.tsx:256`、`web/test/routes.test.tsx:214` | 不适用（S1d/S2a-c/S3a-b；`/tokens` 明确不做，Non-goals） |
+| CT-01 | demo:3144-3161、demo:1756 | §4.6 | `/center` 只显示占位 `中心暂不可用`，没有 专家/技能/连接器/知识库/模型/权限/审计/账号 八个 tab，也没有任何功能按钮；路由只有四个，没有 `/tokens` 开发者页 | — | jsdom `web/test/topbar.test.tsx:199`（`中心暂不可用`）、`web/test/routes.test.tsx:214`（只有四条路由） | 不适用（S1d/S2a-c/S3a-b；`/tokens` 明确不做，Non-goals） |
 
 ## §4.7 demo 无后端控件
 
@@ -260,13 +263,13 @@
 |---|---|---|---|---|---|---|
 | NB-01 | demo:2594、demo:2720-2731 | §4.7:麦克风语音、§4.3#4 | composer 不渲染麦克风按钮与录音提示 | — | ui-shots chat-welcome @1440-light | 不适用（demo 无后端，Non-goals 明确不做） |
 | NB-02 | demo:3667、demo:3689 | §4.7:上传本地文件 | 不渲染「上传本地文件」入口 | — | ui-shots chat-welcome @1440-light | 不适用（demo 无后端，S2c 附件） |
-| NB-03 | demo:3184、demo:3426 | §4.7:召唤专家 | 不渲染「召唤」按钮（`/center` 为占位） | — | jsdom `web/test/routes.test.tsx:256` | 不适用（demo 无后端，S1d） |
-| NB-04 | demo:3203、demo:3431 | §4.7:安装技能 | 不渲染「安装」按钮 | — | jsdom `web/test/routes.test.tsx:256` | 不适用（demo 无后端，S1d） |
-| NB-05 | demo:3216、demo:3438-3440 | §4.7:连接器 | 不渲染连接器「连接」按钮 | — | jsdom `web/test/routes.test.tsx:256` | 不适用（demo 无后端，S1d） |
-| NB-06 | demo:3462 | §4.7:测试连通并保存 | 不渲染「接入内网模型 / 测试连通并保存」 | — | jsdom `web/test/routes.test.tsx:256` | 不适用（demo 无后端，S1d） |
+| NB-03 | demo:3184、demo:3426 | §4.7:召唤专家 | 不渲染「召唤」按钮（`/center` 为占位） | — | `/center` 为占位页（见 CT-01）：jsdom `web/test/topbar.test.tsx:199` | 不适用（demo 无后端，S1d） |
+| NB-04 | demo:3203、demo:3431 | §4.7:安装技能 | 不渲染「安装」按钮 | — | `/center` 为占位页（见 CT-01）：jsdom `web/test/topbar.test.tsx:199` | 不适用（demo 无后端，S1d） |
+| NB-05 | demo:3216、demo:3438-3440 | §4.7:连接器 | 不渲染连接器「连接」按钮 | — | `/center` 为占位页（见 CT-01）：jsdom `web/test/topbar.test.tsx:199` | 不适用（demo 无后端，S1d） |
+| NB-06 | demo:3462 | §4.7:测试连通并保存 | 不渲染「接入内网模型 / 测试连通并保存」 | — | `/center` 为占位页（见 CT-01）：jsdom `web/test/topbar.test.tsx:199` | 不适用（demo 无后端，S1d） |
 | NB-07 | demo:4026 | §4.7:测试连通并挂载 | 不渲染「挂载目录 / 测试连通并挂载」 | — | jsdom `web/test/files-overlays.test.tsx:77` | 不适用（demo 无后端，S1b） |
 | NB-08 | demo:2254、demo:2415 | §4.7:审批 15s 自动通过 | 没有审批倒计时与自动允许 | — | ui-shots chat-done @1440-light | 不适用（demo 无后端，Non-goals：审批条 → S1c） |
-| NB-09 | demo:2340、demo:2821、demo:3096 | §4.7:知识库入库与相似度 | 没有知识库入库、切片与相似度展示 | — | jsdom `web/test/routes.test.tsx:256` | 不适用（demo 无后端，S2a-c） |
+| NB-09 | demo:2340、demo:2821、demo:3096 | §4.7:知识库入库与相似度 | 没有知识库入库、切片与相似度展示 | — | `/center` 为占位页（见 CT-01）：jsdom `web/test/topbar.test.tsx:199` | 不适用（demo 无后端，S2a-c） |
 | NB-10 | demo:1917 | §4.7:导出记录、§4.3#5 | 没有「导出记录」入口 | — | ui-shots chat-done @1440-light | 不适用（demo 无后端，Non-goals 明确不做） |
 | NB-11 | demo:2458 | §4.7:在编辑器中打开 | 没有产物卡「在编辑器中打开」按钮 | — | ui-shots chat-done @1440-light | 不适用（demo 无后端，计划遗漏，未归属 → #403） |
 | NB-12 | demo:2474 | §4.7:查看详情 | 没有文件变更卡「查看详情」按钮 | — | ui-shots chat-done @1440-light | 不适用（demo 无后端，计划遗漏，未归属 → #403） |
