@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import {
-  type ConsoleMessage,
   expect,
   type Locator,
   type Page,
@@ -10,23 +9,36 @@ import {
 } from "@playwright/test";
 import { holdRoute } from "./route-hold.js";
 import { armGate, controlOrigin, deleteGate, gatePhase, releaseGate } from "./ui-walk-gate.js";
+import {
+  clickRoute,
+  DEV_ACCOUNT,
+  expectAuthenticatedRoute,
+  expectDesktopLayout,
+  expectPrincipalFooter,
+  expectReducedMotionToggle,
+  expectRouteViewports,
+  expectScrollableX,
+  expectTruncatedRow,
+  mainBackground,
+  openSidebar,
+  switchTheme,
+  type WalkProject,
+  walkProject,
+  walkSidebarCollapse,
+} from "./ui-walk-layout.js";
+import { type AuthOracle, runWithBrowserErrorOracle } from "./ui-walk-oracle.js";
 
-const DEV_ACCOUNT = "zhangsan";
 const DEV_PASSWORD = "demo";
-const DEV_ROLE = "成员";
 const PRODUCTION_SERVICE_NAME = "workbuddy-app-server";
 const PRODUCTION_SERVICE_VERSION = "0.0.0";
-const THEME_STORAGE_KEY = "workbuddy-theme";
 const SESSION_COOKIE = "workbuddy_session";
-const ME_PATH = "/api/auth/me";
-const UNAUTHORIZED_NETWORK_LOG =
-  "Failed to load resource: the server responded with a status of 401 (Unauthorized)";
 const WALK_MARKER = "WORKBUDDY_UI_WALK:";
 const FIRST_REPLY_PART = "你好，";
 const EXPECTED_REPLY = "你好，这是 WorkBuddy 的第一条流式回复。";
 const SESSION_ID = /^[0-9a-f]{32}$/;
 const SMOKE_FIXTURE = "smoke-fixture";
-const WALK_OUT = "walk-out";
+// 目录名按 project 区分，补齐到恰 64 字符（≥48）以触发树行省略。
+const WALK_OUT_LENGTH = 64;
 
 const ROUTES = [
   { path: "/", heading: "WorkBuddy，我帮你", label: "会话" },
@@ -35,72 +47,65 @@ const ROUTES = [
   { path: "/settings", heading: "设置", label: "设置" },
 ] as const;
 
-type AuthPhase = "initial" | "authenticated" | "post-logout-reload";
-
-type AuthOracle = {
-  productionOrigin: string;
-  page: Page;
-  phase: AuthPhase;
-  initialUnauthorized: number;
-  postLogoutUnauthorized: number;
-  expectedConsole: number;
-  unexpectedMe: string[];
-  unexpectedConsole: string[];
-  pageErrors: string[];
-};
-
 test.describe.configure({ mode: "serial" });
 
-test("fresh browser journey logs in, walks four routes, persists dark theme, and logs out", async ({
+test("fresh browser journey logs in, walks four routes, persists theme, and logs out", async ({
   baseURL,
   page,
-}) => {
-  await runWithBrowserErrorOracle(page, baseURL, (oracle) => walkProductionOrigin(page, oracle));
+}, testInfo) => {
+  const project = walkProject(testInfo.project.name);
+  const options = { watchAssets: project === "desktop-light" };
+  await runWithBrowserErrorOracle(page, baseURL, options, (oracle) =>
+    walkProductionOrigin(page, oracle, project),
+  );
 });
 
-async function walkProductionOrigin(page: Page, oracle: AuthOracle): Promise<void> {
+function walkOutName(project: WalkProject): string {
+  return `walk-out-${project}-`.padEnd(WALK_OUT_LENGTH, "x");
+}
+
+async function walkProductionOrigin(
+  page: Page,
+  oracle: AuthOracle,
+  project: WalkProject,
+): Promise<void> {
   await page.goto("/files");
   await expect(page.getByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeVisible();
   await page.getByLabel("账号").fill(DEV_ACCOUNT);
   await page.getByLabel("密码").fill(DEV_PASSWORD);
   await page.getByRole("button", { name: "登录" }).click();
-  await expectAuthenticatedRoute(page, "/files", "工作空间", "工作空间");
-  await expectPrincipalFooter(page);
+  await expectAuthenticatedRoute(page, project, "/files", "工作空间", "工作空间");
+  await expectPrincipalFooter(page, project);
   oracle.phase = "authenticated";
-  const lightBackground = await expectDesktopLayout(page);
+  const initialBackground = await mainBackground(page);
+  if (project === "desktop-light") await expectDesktopLayout(page);
 
-  const navigation = page.getByRole("navigation", { name: "主导航" });
   for (const route of ROUTES) {
-    await sidebarLink(navigation, route.label).click();
-    await expectAuthenticatedRoute(page, route.path, route.heading, route.label);
-    await expectPrincipalFooter(page);
+    await clickRoute(page, project, route.label);
+    await expectAuthenticatedRoute(page, project, route.path, route.heading, route.label);
+    await expectPrincipalFooter(page, project);
+    await expectRouteViewports(page, project, route.path);
   }
 
-  await sidebarLink(navigation, "工作空间").click();
-  await expectAuthenticatedRoute(page, "/files", "工作空间", "工作空间");
-  await walkFiles(page);
+  await clickRoute(page, project, "工作空间");
+  await expectAuthenticatedRoute(page, project, "/files", "工作空间", "工作空间");
+  await walkFiles(page, project);
 
-  await sidebarLink(navigation, "会话").click();
-  await expectAuthenticatedRoute(page, "/", ROUTES[0].heading, "会话");
-  await walkHeldDialogue(page);
-  await sidebarLink(navigation, "设置").click();
-  await expectAuthenticatedRoute(page, "/settings", "设置", "设置");
+  await clickRoute(page, project, "会话");
+  await expectAuthenticatedRoute(page, project, "/", ROUTES[0].heading, "会话");
+  await walkHeldDialogue(page, project);
+  await clickRoute(page, project, "设置");
+  await expectAuthenticatedRoute(page, project, "/settings", "设置", "设置");
 
   await expect(page.getByText(PRODUCTION_SERVICE_NAME, { exact: true })).toBeVisible();
   await expect(page.getByText(`版本 ${PRODUCTION_SERVICE_VERSION}`, { exact: true })).toBeVisible();
 
-  await walkSidebarCollapse(page);
+  // 覆盖层变体无折叠按钮，折叠只在 desktop 走查。
+  if (project === "desktop-light") await walkSidebarCollapse(page);
+  await switchTheme(page, project, initialBackground);
 
-  await page.getByRole("radio", { name: "深色", exact: true }).check();
-  await expectDarkTheme(page);
-  expect(
-    await page.getByRole("main").evaluate((el) => getComputedStyle(el).backgroundColor),
-  ).not.toBe(lightBackground);
-  await page.reload();
-  await expectAuthenticatedRoute(page, "/settings", "设置", "设置");
-  await expectDarkTheme(page);
-
-  await sidebarFooter(page).getByRole("button", { name: "用户菜单" }).click();
+  const sidebar = await openSidebar(page, project);
+  await sidebar.locator("footer").getByRole("button", { name: "用户菜单" }).click();
   await page.getByRole("menuitem", { name: "退出登录" }).click();
   const dialog = page.getByRole("alertdialog");
   await expect(dialog.getByRole("heading", { name: "退出登录？" })).toBeVisible();
@@ -138,275 +143,6 @@ async function confirmLogoutByKeyboardWhileHeld(page: Page, dialog: Locator): Pr
   }
 }
 
-// 仍在 authenticated 阶段：reload 只产生 200 的 /api/auth/me，oracle 放行。
-async function walkSidebarCollapse(page: Page): Promise<void> {
-  const sidebar = page.getByRole("complementary", { name: "侧栏", exact: true });
-  await sidebar.getByRole("button", { name: "折叠侧栏" }).click();
-  await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(48);
-  await page.reload();
-  await expectAuthenticatedRoute(page, "/settings", "设置", "设置");
-  await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(48);
-  await sidebar.getByRole("button", { name: "展开侧栏" }).click();
-  await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(288);
-  await expectPrincipalFooter(page);
-}
-
-async function expectDesktopLayout(page: Page): Promise<string> {
-  const sidebar = await page
-    .getByRole("complementary", { name: "侧栏", exact: true })
-    .boundingBox();
-  const main = await page.getByRole("main").boundingBox();
-  const viewportWidth = await page.evaluate(() => innerWidth);
-  expect(sidebar).not.toBeNull();
-  expect(main).not.toBeNull();
-  if (!sidebar || !main) throw new Error("Application layout is not visible");
-  expect(sidebar.width).toBeGreaterThanOrEqual(160);
-  expect(sidebar.width).toBeLessThan(viewportWidth / 3);
-  expect(main.x).toBeGreaterThanOrEqual(sidebar.x + sidebar.width - 1);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
-    viewportWidth,
-  );
-  return page.getByRole("main").evaluate((el) => getComputedStyle(el).backgroundColor);
-}
-
-async function runWithBrowserErrorOracle(
-  page: Page,
-  baseURL: string | undefined,
-  journey: (oracle: AuthOracle) => Promise<void>,
-): Promise<void> {
-  const oracle = attachAuthOracle(page, baseURL);
-  let journeyError: unknown;
-  try {
-    await journey(oracle);
-  } catch (error) {
-    journeyError = error;
-  }
-  throwCombinedFailure(journeyError, collectOracleFailures(oracle));
-}
-
-function attachAuthOracle(page: Page, baseURL: string | undefined): AuthOracle {
-  const oracle: AuthOracle = {
-    productionOrigin: configuredOrigin(baseURL),
-    page,
-    phase: "initial",
-    initialUnauthorized: 0,
-    postLogoutUnauthorized: 0,
-    expectedConsole: 0,
-    unexpectedMe: [],
-    unexpectedConsole: [],
-    pageErrors: [],
-  };
-  page.on("response", (response) => classifyMeResponse(oracle, response));
-  page.on("console", (message) => classifyConsoleMessage(oracle, message));
-  page.on("pageerror", (error) => {
-    oracle.pageErrors.push(`pageerror: ${error.stack ?? error.message}`);
-  });
-  return oracle;
-}
-
-function configuredOrigin(baseURL: string | undefined): string {
-  if (!baseURL) {
-    throw new Error("Playwright baseURL is required for origin-bound auth oracle");
-  }
-
-  return new URL(baseURL).origin;
-}
-
-function classifyMeResponse(oracle: AuthOracle, response: Response): void {
-  const url = parseAbsoluteUrl(response.url());
-  if (!url || url.pathname !== ME_PATH) {
-    return;
-  }
-
-  const method = response.request().method();
-  const status = response.status();
-  if (recordBoundUnauthorizedMe(oracle, url, method, status)) {
-    return;
-  }
-  if (isAllowedAuthenticatedMe(oracle, url, method, status)) {
-    return;
-  }
-
-  oracle.unexpectedMe.push(
-    `${method} ${url.origin}${url.pathname} status=${status} phase=${oracle.phase}`,
-  );
-}
-
-function recordBoundUnauthorizedMe(
-  oracle: AuthOracle,
-  url: URL,
-  method: string,
-  status: number,
-): boolean {
-  if (!isBoundUnauthorizedMe(oracle, url, method, status)) {
-    return false;
-  }
-  if (oracle.phase === "initial" && oracle.initialUnauthorized === 0) {
-    oracle.initialUnauthorized = 1;
-    return true;
-  }
-  if (oracle.phase === "post-logout-reload" && oracle.postLogoutUnauthorized === 0) {
-    oracle.postLogoutUnauthorized = 1;
-    return true;
-  }
-  return false;
-}
-
-function isBoundUnauthorizedMe(
-  oracle: AuthOracle,
-  url: URL,
-  method: string,
-  status: number,
-): boolean {
-  return method === "GET" && status === 401 && isProductionMeUrl(oracle, url);
-}
-
-function isAllowedAuthenticatedMe(
-  oracle: AuthOracle,
-  url: URL,
-  method: string,
-  status: number,
-): boolean {
-  return (
-    oracle.phase === "authenticated" &&
-    method === "GET" &&
-    status === 200 &&
-    isProductionMeUrl(oracle, url)
-  );
-}
-
-function classifyConsoleMessage(oracle: AuthOracle, message: ConsoleMessage): void {
-  if (message.type() !== "error") {
-    return;
-  }
-
-  if (isExpectedUnauthorizedNetworkLog(oracle, message)) {
-    oracle.expectedConsole += 1;
-    return;
-  }
-
-  oracle.unexpectedConsole.push(`console.error: ${message.text()}`);
-}
-
-function isExpectedUnauthorizedNetworkLog(oracle: AuthOracle, message: ConsoleMessage): boolean {
-  if (message.text() !== UNAUTHORIZED_NETWORK_LOG) {
-    return false;
-  }
-
-  const url = parseAbsoluteUrl(message.location().url);
-  return url !== null && isProductionMeUrl(oracle, url);
-}
-
-function isProductionMeUrl(oracle: AuthOracle, url: URL): boolean {
-  if (url.origin !== oracle.productionOrigin || url.pathname !== ME_PATH) {
-    return false;
-  }
-
-  const pageOrigin = pageOriginIfHttp(oracle.page);
-  return pageOrigin === null || url.origin === pageOrigin;
-}
-
-function pageOriginIfHttp(page: Page): string | null {
-  const url = parseAbsoluteUrl(page.url());
-  if (!url || (url.protocol !== "http:" && url.protocol !== "https:")) {
-    return null;
-  }
-
-  return url.origin;
-}
-
-function parseAbsoluteUrl(value: string): URL | null {
-  try {
-    return new URL(value);
-  } catch {
-    return null;
-  }
-}
-
-function collectOracleFailures(oracle: AuthOracle): string[] {
-  const failures = [
-    ...oracle.pageErrors,
-    ...oracle.unexpectedMe.map((entry) => `unexpected /api/auth/me: ${entry}`),
-    ...oracle.unexpectedConsole,
-  ];
-  if (oracle.initialUnauthorized !== 1) {
-    failures.push(
-      `expected exactly one initial GET ${ME_PATH} 401 from ${oracle.productionOrigin}, got ${oracle.initialUnauthorized}`,
-    );
-  }
-  if (oracle.postLogoutUnauthorized !== 1) {
-    failures.push(
-      `expected exactly one post-logout-reload GET ${ME_PATH} 401 from ${oracle.productionOrigin}, got ${oracle.postLogoutUnauthorized}`,
-    );
-  }
-  const boundUnauthorized = oracle.initialUnauthorized + oracle.postLogoutUnauthorized;
-  if (oracle.expectedConsole > boundUnauthorized) {
-    failures.push(
-      `expected unauthorized console errors ${oracle.expectedConsole} exceed bound /api/auth/me 401 responses ${boundUnauthorized}`,
-    );
-  }
-  return failures;
-}
-
-function throwCombinedFailure(journeyError: unknown, captured: string[]): void {
-  if (captured.length === 0) {
-    if (journeyError !== undefined) {
-      throw journeyError;
-    }
-    return;
-  }
-
-  const browserFailure = new Error(`Browser errors:\n${captured.join("\n")}`);
-  if (journeyError !== undefined) {
-    throw new AggregateError([journeyError, browserFailure], "UI walk failed with browser errors");
-  }
-  throw browserFailure;
-}
-
-async function expectAuthenticatedRoute(
-  page: Page,
-  path: string,
-  heading: string,
-  currentLabel: string,
-) {
-  await expect.poll(() => new URL(page.url()).pathname).toBe(path);
-  await expect(page.getByRole("heading", { level: 1, name: heading, exact: true })).toBeVisible();
-  const navigation = page.getByRole("navigation", { name: "主导航" });
-  const currentLinks = navigation.locator("[aria-current=page]");
-  await expect(currentLinks).toHaveCount(1);
-  const currentLink = sidebarLink(navigation, currentLabel);
-  await expect(currentLink).toHaveAttribute("href", path);
-  await expect(currentLink).toHaveAttribute("aria-current", "page");
-  if (path === "/files") {
-    const workspacePage = page.locator("main");
-    await expect(workspacePage.getByRole("button", { name: "选择工作空间" })).toBeVisible();
-    await expect(
-      workspacePage.getByRole("heading", { level: 2, name: "工作空间目录", exact: true }),
-    ).toBeVisible();
-  }
-}
-
-function sidebarLink(navigation: Locator, label: string) {
-  return navigation.getByRole("link", { name: label });
-}
-
-function sidebarFooter(page: Page) {
-  return page.getByRole("complementary", { name: "侧栏" }).locator("footer");
-}
-
-async function expectPrincipalFooter(page: Page) {
-  const footer = sidebarFooter(page);
-  await expect(footer.getByText(DEV_ACCOUNT, { exact: true })).toBeVisible();
-  await expect(footer.getByText(DEV_ROLE, { exact: true })).toBeVisible();
-}
-
-async function expectDarkTheme(page: Page) {
-  await expect(page.getByRole("radio", { name: "深色", exact: true })).toBeChecked();
-  await expect(page.getByText("当前生效：深色", { exact: true })).toBeVisible();
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  expect(await page.evaluate((key) => localStorage.getItem(key), THEME_STORAGE_KEY)).toBe("dark");
-}
-
 async function expectLoggedOutOnSettings(page: Page) {
   await expect.poll(() => new URL(page.url()).pathname).toBe("/settings");
   await expect(page.getByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeVisible();
@@ -420,7 +156,8 @@ async function expectSessionCookieAbsent(page: Page) {
   expect(sessionCookies).toEqual([]);
 }
 
-async function walkFiles(page: Page): Promise<void> {
+async function walkFiles(page: Page, project: WalkProject): Promise<void> {
+  const walkOut = walkOutName(project);
   const files = page.locator("main");
   await files.getByRole("button", { name: "选择工作空间" }).click();
   const switcher = page.getByRole("dialog", { name: "工作空间切换器" });
@@ -441,7 +178,7 @@ async function walkFiles(page: Page): Promise<void> {
   const tree = files.getByRole("navigation", { name: "工作空间目录树" });
   await expectRootFileButtons(tree);
   await expect(
-    tree.getByRole("button", { name: new RegExp(`^(展开 |折叠 )?${WALK_OUT}$`) }),
+    tree.getByRole("button", { name: new RegExp(`^(展开 |折叠 )?${walkOut}$`) }),
   ).toHaveCount(0);
 
   const preview = files.getByRole("region", { name: "文件预览" });
@@ -453,6 +190,7 @@ async function walkFiles(page: Page): Promise<void> {
   const sourceRow = preview.getByRole("row").first();
   await expect(sourceRow.getByRole("cell").nth(0)).toHaveText("1");
   await expect(sourceRow.getByRole("cell").nth(1)).toHaveText(`# ${SMOKE_FIXTURE}`);
+  await expectScrollableX(preview.locator(".files-code"));
 
   await tree.getByRole("button", { name: "notes.csv", exact: true }).click();
   await expect(preview.getByRole("columnheader", { name: "name", exact: true })).toBeVisible();
@@ -461,6 +199,7 @@ async function walkFiles(page: Page): Promise<void> {
   await expect(preview.getByRole("row", { name: "alpha 1" })).toBeVisible();
   await expect(preview.getByRole("row", { name: "beta 2" })).toBeVisible();
   await expect(preview.getByText("共 4 行 · 大文件仅预览前若干行", { exact: true })).toBeVisible();
+  await expectScrollableX(preview.locator(".files-table"));
 
   await tree.getByRole("button", { name: "logo.png", exact: true }).click();
   const logo = preview.getByRole("img", { name: "logo.png", exact: true });
@@ -471,13 +210,15 @@ async function walkFiles(page: Page): Promise<void> {
 
   await files.getByRole("button", { name: "新建", exact: true }).click();
   await page.getByRole("menuitem", { name: "新建文件夹" }).click();
-  await createWalkOutWhileHeld(page);
-  await expect(tree.getByRole("button", { name: `展开 ${WALK_OUT}`, exact: true })).toBeVisible();
+  await createWalkOutWhileHeld(page, walkOut);
+  const walkOutRow = tree.getByRole("button", { name: `展开 ${walkOut}`, exact: true });
+  await expect(walkOutRow).toBeVisible();
+  await expectTruncatedRow(page, project, walkOutRow, walkOut);
 
   await expect.poll(() => workspaceIdFromUrl(page.url())).toMatch(SESSION_ID);
   const workspaceId = workspaceIdFromUrl(page.url());
   await page.reload();
-  await expectAuthenticatedRoute(page, "/files", "工作空间", "工作空间");
+  await expectAuthenticatedRoute(page, project, "/files", "工作空间", "工作空间");
   await expect.poll(() => workspaceIdFromUrl(page.url())).toBe(workspaceId);
   await expect(
     files.getByRole("button", { name: "选择工作空间" }).getByText(SMOKE_FIXTURE, { exact: true }),
@@ -485,16 +226,16 @@ async function walkFiles(page: Page): Promise<void> {
   const restored = files.getByRole("navigation", { name: "工作空间目录树" });
   await expectRootFileButtons(restored);
   await expect(
-    restored.getByRole("button", { name: `展开 ${WALK_OUT}`, exact: true }),
+    restored.getByRole("button", { name: `展开 ${walkOut}`, exact: true }),
   ).toBeVisible();
 }
 
 // 键盘提交 walk-out，并在 POST …/dirs 挂起期间证明：`创建` 被原生禁用引发 focus fixup 后，
 // 焦点被救回到模态内的 `关闭`，Tab/Shift+Tab 不逃出对话框。先断言请求确被挂起，再断言焦点。
-async function createWalkOutWhileHeld(page: Page): Promise<void> {
+async function createWalkOutWhileHeld(page: Page, walkOut: string): Promise<void> {
   const dialog = page.getByRole("dialog", { name: "新建文件夹" });
   await dialog.getByLabel("位置").selectOption({ label: `根目录　${SMOKE_FIXTURE}` });
-  await dialog.getByLabel("文件夹名称").fill(WALK_OUT);
+  await dialog.getByLabel("文件夹名称").fill(walkOut);
   const create = await holdRoute(page, "**/api/workspaces/*/dirs");
   try {
     await dialog.getByRole("button", { name: "创建" }).press("Enter");
@@ -515,7 +256,7 @@ async function expectRootFileButtons(tree: Locator) {
   await expect(tree.getByRole("button", { name: "logo.png", exact: true })).toBeVisible();
 }
 
-async function walkHeldDialogue(page: Page): Promise<void> {
+async function walkHeldDialogue(page: Page, project: WalkProject): Promise<void> {
   const gateId = randomUUID();
   const prompt = `${WALK_MARKER}${gateId}`;
   const origin = controlOrigin();
@@ -541,6 +282,7 @@ async function walkHeldDialogue(page: Page): Promise<void> {
     const preReload = await fetchSessionSnapshot(page, sessionId);
     expectRunningSnapshot(preReload, prompt, sessionId, promptIds);
     await expectRunningPrefix(page, sessionId, prompt);
+    if (project === "desktop-light") await expectReducedMotionToggle(page);
 
     const postReload = watchSessionTraffic(page, sessionId);
     try {
