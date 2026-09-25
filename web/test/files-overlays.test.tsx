@@ -167,6 +167,28 @@ describe("files creation overlays focus loop", () => {
   });
 });
 
+describe("files buttons render through the Button primitive", () => {
+  it("O8 styles 新建, ＋ 新建工作空间, 取消 and 创建 as ui-btn variants", async () => {
+    renderWorkspace();
+    const menuTrigger = await screen.findByRole("button", { name: "新建" });
+    expect(menuTrigger.className).toBe("ui-btn ui-btn--secondary ui-btn--md");
+
+    fireEvent.click(screen.getByRole("button", { name: "选择工作空间" }));
+    const switcher = await screen.findByRole("dialog", { name: "工作空间切换器" });
+    const newWorkspace = within(switcher).getByRole("button", { name: "＋ 新建工作空间" });
+    expect(newWorkspace.className).toBe("ui-btn ui-btn--secondary ui-btn--md");
+
+    fireEvent.click(newWorkspace);
+    const dialog = await screen.findByRole("dialog", { name: "新建工作空间" });
+    expect(within(dialog).getByRole("button", { name: "取消" }).className).toBe(
+      "ui-btn ui-btn--secondary ui-btn--md",
+    );
+    const create = within(dialog).getByRole("button", { name: "创建" }) as HTMLButtonElement;
+    expect(create.className).toBe("ui-btn ui-btn--primary ui-btn--md");
+    expect(create.type).toBe("submit");
+  });
+});
+
 describe("files overlays come only from primitives", () => {
   it("O7 leaves no hand-written dialog, menu, or focus trap in web/src", () => {
     const legacy = ["<dialog", 'role="menu"', "showModal", "trapDialogFocus", "lib/dialog"];
@@ -183,10 +205,10 @@ describe("files overlays come only from primitives", () => {
     const primitiveImport = (names: string) =>
       new RegExp(`import \\{ ${names} \\} from "\\.\\./\\.\\./ui/index\\.js";`);
     expect(readRepoFile("web/src/features/files/dialogs.tsx")).toMatch(
-      primitiveImport("Dialog, Menu"),
+      primitiveImport("Button, Dialog, Menu"),
     );
     expect(readRepoFile("web/src/features/files/page.tsx")).toMatch(
-      primitiveImport("EmptyState, Icon, Popover"),
+      primitiveImport("Button, EmptyState, Icon, Popover"),
     );
   });
 });

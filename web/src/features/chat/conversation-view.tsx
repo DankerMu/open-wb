@@ -1,7 +1,7 @@
 import { type FormEvent, memo, type ReactNode } from "react";
 import { MarkdownView } from "../../lib/markdown-view.js";
 import type { ChatSession } from "../../lib/session-contract.js";
-import { BrandMark, Icon } from "../../ui/index.js";
+import { BrandMark, Button, Icon } from "../../ui/index.js";
 import { Composer } from "./composer.js";
 import { MessageActions } from "./message-actions.js";
 import { FollowTranscript } from "./scroll-follow.js";
@@ -177,13 +177,9 @@ export function ConversationView({
   const listColumn: ReactNode = (
     <aside aria-label="会话侧栏" className="chat-sidebar">
       <nav aria-label="会话列表" className="chat-session-nav">
-        <button
-          className="ui-button ui-button-primary chat-new-session"
-          onClick={onCreateSession}
-          type="button"
-        >
+        <Button className="chat-new-session" onClick={onCreateSession} variant="primary">
           新建会话
-        </button>
+        </Button>
         {listError ? (
           <p className="ui-alert" role="alert">
             {listError}

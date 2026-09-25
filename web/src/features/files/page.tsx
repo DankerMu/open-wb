@@ -1,7 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { type ApiClient, ApiError } from "../../lib/api.js";
-import { EmptyState, Icon, Popover } from "../../ui/index.js";
+import { Button, EmptyState, Icon, Popover } from "../../ui/index.js";
 import { useAuth } from "../auth/index.js";
 import { WorkspaceDialog } from "./dialogs.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
@@ -146,16 +146,14 @@ function WorkspaceSwitcher({
           {filteredWorkspaces.length === 0 ? (
             <p className="files-switcher-empty ui-muted">无匹配的工作空间</p>
           ) : null}
-          <button
-            className="ui-button"
+          <Button
             onClick={() => {
               setOpen(false);
               onCreateWorkspace(triggerRef.current);
             }}
-            type="button"
           >
             ＋ 新建工作空间
-          </button>
+          </Button>
         </div>
       </Popover>
     </div>

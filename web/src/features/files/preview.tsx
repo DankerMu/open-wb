@@ -8,7 +8,7 @@
 import { useState } from "react";
 import type { ApiClient } from "../../lib/api.js";
 import { MarkdownView } from "../../lib/markdown-view.js";
-import { EmptyState, Icon } from "../../ui/index.js";
+import { Button, EmptyState, Icon } from "../../ui/index.js";
 import { parseCsv } from "./csv.js";
 import { fileIcon, formatSize } from "./file-meta.js";
 
@@ -194,13 +194,9 @@ function MarkdownPreview({ text }: { text: string }) {
   return (
     <div className="files-preview-body">
       <div className="files-md-toolbar">
-        <button
-          className="ui-button"
-          onClick={() => setShowSource((current) => !current)}
-          type="button"
-        >
+        <Button onClick={() => setShowSource((current) => !current)}>
           {showSource ? "渲染视图" : "查看源码"}
-        </button>
+        </Button>
       </div>
       {body}
     </div>

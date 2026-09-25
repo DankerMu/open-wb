@@ -344,6 +344,13 @@ describe("welcome state", () => {
     expect(precedes(region, disclaimer)).toBe(true);
   });
 
+  it("styles 新建会话 as a full-width primary ui-btn", async () => {
+    await mountWelcome();
+    expect(screen.getByRole("button", { name: "新建会话" }).className).toBe(
+      "ui-btn ui-btn--primary ui-btn--md chat-new-session",
+    );
+  });
+
   it("(W2) fills the draft from a card or chip without sending", async () => {
     const { fetchMock } = await mountWelcome();
     fireEvent.click(cardNamed("内容创作"));

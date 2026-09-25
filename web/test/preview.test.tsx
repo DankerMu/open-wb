@@ -188,6 +188,17 @@ describe("PreviewPane Markdown", () => {
     expect(screen.getByRole("button", { name: "查看源码" })).toBeTruthy();
   });
 
+  it("styles the 查看源码/渲染视图 toggle as a secondary ui-btn in both modes", () => {
+    render(textPreview("readme.md", "# 样式"));
+
+    const toggle = screen.getByRole("button", { name: "查看源码" });
+    expect(toggle.className).toBe("ui-btn ui-btn--secondary ui-btn--md");
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: "渲染视图" }).className).toBe(
+      "ui-btn ui-btn--secondary ui-btn--md",
+    );
+  });
+
   it("replaces same-path document content without resetting the chosen mode", () => {
     const path = "docs/readme.md";
     const view = render(textPreview("readme.md", "# 初始", { path }));
