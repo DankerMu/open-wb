@@ -8,11 +8,11 @@
 - Schema, File IO, Auth/secrets, Release, Documentation — not selected: no data, path, credential, dependency or doc surface.
 
 ## 1. Implementation
-- [ ] 1.1 `app.ts`: final preClose hook (closing flag, closeIdleConnections, budget timer), completed-response re-drain while closing, onClose timer cleanup; `LISTENER_CLOSE_BUDGET_MS = 2_000`; options `listenerCloseBudgetMs` (validated) and `onListenerForceClose` (guarded).
-- [ ] 1.2 `server.ts`: pass `onListenerForceClose` writing one `{"event":"listener_force_close"}` stderr line via `writeManagedLine`; exit code semantics unchanged.
+- [x] 1.1 `app.ts`: first root preClose hook (closing flag) and `server.close` wrapper (budget timer), completed-response re-drain while closing, onClose timer cleanup; `LISTENER_CLOSE_BUDGET_MS = 2_000`; options `listenerCloseBudgetMs` (validated) and `onListenerForceClose` (guarded).
+- [x] 1.2 `server.ts`: pass `onListenerForceClose` writing one `{"event":"listener_force_close"}` stderr line via `writeManagedLine`; exit code semantics unchanged.
 
 ## 2. Verification
-- [ ] 2.1 Real-listen re-drain test per design (barrier released from a post-createApp probe preClose hook or after `listening === false`; budget ≥10 s and notifier never called) — RED on pre-fix source (2 s deadline), GREEN after; record settle ms; 200 body complete before close.
-- [ ] 2.2 Budget escalation test (short budget, never-finishing request): forced close once, notifier once; normal close never notifies; invalid budget option throws.
-- [ ] 2.3 Entry-level stderr record + exit code 0 on forced close (state the chosen seam).
-- [ ] 2.4 `server-startup-order.test.ts` order contract, SSE tests and full `npm --workspace server run test` green; `make lint`, `make typecheck`, `make anti-drift` exit 0.
+- [x] 2.1 Real-listen re-drain test per design (barrier released from a post-createApp probe preClose hook or after `listening === false`; budget ≥10 s and notifier never called) — RED on pre-fix source (2 s deadline), GREEN after; record settle ms; 200 body complete before close.
+- [x] 2.2 Budget escalation test (short budget, never-finishing request): forced close once, notifier once; normal close never notifies; invalid budget option throws.
+- [x] 2.3 Entry-level stderr record + exit code 0 on forced close (state the chosen seam).
+- [x] 2.4 `server-startup-order.test.ts` order contract, SSE tests and full `npm --workspace server run test` green; `make lint`, `make typecheck`, `make anti-drift` exit 0.
