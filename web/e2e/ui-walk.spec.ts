@@ -743,7 +743,7 @@ async function expectRunningPrefix(page: Page, sessionId: string, prompt: string
   const pair = await dialoguePair(page, sessionId, prompt);
   const selected = selectedSessionStatus(page);
   await expect(selected.current).toHaveCount(1);
-  await expect(selected.status).toHaveText("running");
+  await expect(selected.status).toHaveText("运行中");
   await expect(generatingStatus(page)).toBeVisible();
   await expect
     .poll(async () =>
@@ -797,6 +797,6 @@ async function expectCompletedPair(page: Page, sessionId: string, prompt: string
   await expect(page.getByRole("status", { name: "bash done" })).toBeVisible();
   const selected = selectedSessionStatus(page);
   await expect(selected.current).toHaveCount(1);
-  await expect(selected.status).toHaveText("done");
+  await expect(selected.status).toHaveText("已完成");
   await expect(generatingStatus(page)).toHaveCount(0);
 }

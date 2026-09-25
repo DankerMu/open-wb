@@ -354,7 +354,7 @@ describe("chat page confirmed ownership gaps", () => {
     const messages = await findMessageArea();
     expect(await within(messages).findByText(PROMPT, { exact: true })).toBeTruthy();
     await expectListTitles(list, [PROMPT, "other session"]);
-    expect(within(list).getByRole("status", { name: `${PROMPT} done` })).toBeTruthy();
+    expect(within(list).getByRole("status", { name: `${PROMPT} 已完成` })).toBeTruthy();
   });
 
   it("closes the live source before post-202 reconciliation history resolves", async () => {

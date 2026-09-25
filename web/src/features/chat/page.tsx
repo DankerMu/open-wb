@@ -24,8 +24,6 @@ import type {
 
 type SessionEventHandle = { close(): void };
 
-const COMPOSER_LABEL = "给助手发消息";
-const GENERATING_LABEL = "生成中";
 const TERMINAL_REFRESH_GUIDANCE = "请刷新页面后重试";
 const MISSING_EVENT_SOURCE = "无法连接会话事件";
 
@@ -704,10 +702,8 @@ export function ChatPage() {
     <section className="chat-page">
       <ConversationView
         composerDisabled={generating}
-        composerLabel={COMPOSER_LABEL}
         draft={draft}
         generating={generating}
-        generatingLabel={GENERATING_LABEL}
         historyError={ownedHistory && historyState.status === "error" ? historyState.message : null}
         historyView={historyView}
         listError={
