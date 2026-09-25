@@ -80,7 +80,9 @@ describe("chat page create and acceptance ownership", () => {
       },
     });
 
-    expect(await screen.findByRole("heading", { level: 1, name: "会话" })).toBeTruthy();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "WorkBuddy，我帮你" }),
+    ).toBeTruthy();
     await screen.findByRole("button", { name: "新建会话" });
     await typeAndSend(PROMPT);
     await expectChatLocation(`/?session=${CREATED_SESSION_ID}`);
@@ -213,7 +215,9 @@ describe("chat page isolation and errors", () => {
     await expectChatLocation(`/?from=keep#hash`);
     expect(FakeEventSource.instances).toHaveLength(0);
     expect(screen.queryByText("other user", { exact: true })).toBeNull();
-    expect(screen.getByText("选择一个会话，或直接发送开始新对话", { exact: true })).toBeTruthy();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "WorkBuddy，我帮你" }),
+    ).toBeTruthy();
   });
 
   it("shows a 502 envelope without speculative rows and keeps 409 on the busy session", async () => {

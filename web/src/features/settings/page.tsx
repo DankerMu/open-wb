@@ -96,7 +96,6 @@ function AboutCard() {
 export function SettingsPage() {
   return (
     <div className="settings-page">
-      <h1 className="ui-page-heading">设置</h1>
       <AppearanceCard />
       <AboutCard />
     </div>

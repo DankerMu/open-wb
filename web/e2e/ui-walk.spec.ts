@@ -27,7 +27,7 @@ const SMOKE_FIXTURE = "smoke-fixture";
 const WALK_OUT = "walk-out";
 
 const ROUTES = [
-  { path: "/", heading: "会话", label: "会话" },
+  { path: "/", heading: "WorkBuddy，我帮你", label: "会话" },
   { path: "/files", heading: "工作空间", label: "工作空间" },
   { path: "/center", heading: "中心", label: "中心" },
   { path: "/settings", heading: "设置", label: "设置" },
@@ -79,7 +79,7 @@ async function walkProductionOrigin(page: Page, oracle: AuthOracle): Promise<voi
   await walkFiles(page);
 
   await sidebarLink(navigation, "会话").click();
-  await expectAuthenticatedRoute(page, "/", "会话", "会话");
+  await expectAuthenticatedRoute(page, "/", ROUTES[0].heading, "会话");
   await walkHeldDialogue(page);
   await sidebarLink(navigation, "设置").click();
   await expectAuthenticatedRoute(page, "/settings", "设置", "设置");
@@ -476,6 +476,8 @@ async function walkHeldDialogue(page: Page): Promise<void> {
     await armGate(origin, gateId);
     await page.getByRole("button", { name: "新建会话" }).click();
     await expect.poll(() => sessionIdFromUrl(page.url())).toMatch(SESSION_ID);
+    const crumb = page.getByRole("banner").getByRole("heading", { level: 1 });
+    await expect(crumb).toHaveAccessibleName(/^我的工作 \/ /);
     const sessionUrl = page.url();
     const sessionId = sessionIdFromUrl(sessionUrl);
     await page.getByLabel("给助手发消息").fill(prompt);

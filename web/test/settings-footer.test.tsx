@@ -44,7 +44,13 @@ function renderApp(path: string) {
 
 async function expectAuthenticatedShell(path: string) {
   const title =
-    path === "/" ? "会话" : path === "/files" ? "工作空间" : path === "/center" ? "中心" : "设置";
+    path === "/"
+      ? "WorkBuddy，我帮你"
+      : path === "/files"
+        ? "工作空间"
+        : path === "/center"
+          ? "中心"
+          : "设置";
   expect(await screen.findByRole("heading", { level: 1, name: title })).toBeTruthy();
   const sidebar = screen.getByRole("complementary", { name: "侧栏" });
   expect(within(sidebar).getByText(principal.account, { exact: true })).toBeTruthy();

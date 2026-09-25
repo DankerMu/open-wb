@@ -1,0 +1,43 @@
+# Spec delta: chat-web（#282 app-shell-topbar）
+
+> 会话页 heading 归属跟随 spa-shell 顶栏；其余会话页要求不变。
+
+## MODIFIED Requirements
+
+### Requirement: 会话页
+`/` SHALL render the account-owned session list, new-session action, message area and labeled composer. The page-level level-1 heading follows spa-shell: in welcome state it is the hero `WorkBuddy，我帮你` rendered by the chat page (replacing the former empty-selection copy); with a selected session it is the topbar breadcrumb container (accessible name `我的工作 / <title>`), the title being reported by the chat page via `useTopbar({ breadcrumb: sessionTitle(selected) })` as soon as the selected session is known and cleared when none is selected or the page unmounts; the page SHALL NOT render its own page-level `<h1>` (headings inside rendered Markdown are content, not page headings). List SHALL retain server updatedAt-descending order and show server title or `新会话` and status. Selection/new SHALL update `?session=<id>` while preserving unrelated search/hash; refresh and Back SHALL restore the selected session. Missing selection (no `?session=`) or an inaccessible target that has been replace-removed SHALL show the welcome state (hero `WorkBuddy，我帮你`) and composer, never auto-select first session; a selected session whose history is pending or failed renders neither hero nor a page-level heading of its own (the breadcrumb owns it). An inaccessible initial GET404 SHALL replace-remove the session parameter and SHALL NOT open EventSource; other errors SHALL remain visible without displaying another session's history.
+Page SHALL derive its API client from the current auth session, load complete history before opening EventSource, seed the exact snapshot cursor, and use existing pure reducer/connector. All callbacks SHALL be synchronous. Account renewal, session selection, unmount and successful/current401 logout SHALL abort/fence page requests and close the old connection; late responses and ignored-abort loads SHALL NOT mutate UI, navigate or open sources. Pending/failed logout SHALL preserve canonical authenticated behavior.
+A user send with no session SHALL create once, select its returned ID and prompt that session once. Empty-whitespace sends SHALL be disabled, and duplicate submits SHALL NOT create concurrent turns. User-initiated navigation SHALL invalidate stale mutation continuations; the create-send operation's own URL handoff SHALL NOT lose its prompt. After successful acceptance the page SHALL reconcile authoritative history and reconnect from that snapshot, without appending duplicate rows or demoting an already finished turn. Failed502 SHALL NOT introduce speculative messages. Session title/order SHALL refresh from server, not duplicate server truncation logic.
+Messages SHALL preserve complete text and whitespace using safe rendering. Steps SHALL display name/detail and running/done/failed; no fabricated time or todo state. Business errors SHALL display inline on the message;409/502 SHALL display envelope message. Composer SHALL be disabled from submit through running turn until terminal authoritative state, with `生成中`. Current401 SHALL hand off to login. Terminal connector failure SHALL expose a safe error and refresh guidance, preserve last history, and not invent completion or automatically retry; a still-running authoritative status remains locked until reloaded.
+
+#### Scenario: 输入框键盘发送
+- WHEN 可发送的草稿在输入框收到无修饰的 Enter
+- THEN 通过同一表单受理路径发送一次原始草稿；Shift+Enter 保留换行，输入法 composing 或确认键码229不发送，长按重复Enter不新增提交；空草稿及生成中仍不可发送
+
+#### Scenario: Once-only create and streaming conversation
+- WHEN an empty page user sends `你好` and the accepted turn emits start, step start/end, three deltas and done
+- THEN exactly one session and prompt are created, URL selects that ID, user and assistant appear in server order without duplicates, text grows, step detail/status changes, server title appears and composer unlocks at done
+
+#### Scenario: Completed before acceptance response
+- WHEN SSE turn.end arrives before prompt202 resolves and subsequent history reports the completed turn
+- THEN acceptance reconciliation preserves one user/assistant pair and final content/status, never re-locks completed state or appends the user after the assistant
+
+#### Scenario: Deep-link snapshot and covered replay
+- WHEN `/?session=<id>` loads a running snapshot and EventSource opens with covered start/step/text and newer frames
+- THEN snapshot GET completes before source construction, covered frames never erase/duplicate history, only successors append, and list selection matches the URL
+
+#### Scenario: Selection and stale operation isolation
+- WHEN a history/create/prompt/recovery request ignoring abort completes after user selects another session, navigates away or renews authentication
+- THEN the old source is closed, owned signals are aborted and stale completion cannot install history, alter current errors, navigate, dispatch another prompt or create a source
+
+#### Scenario: Inaccessible and empty targets
+- WHEN no session is selected or initial history returns404 for an unknown/foreign ID
+- THEN the page shows the welcome state (hero `WorkBuddy，我帮你`) and composer, no first-session fallback and no source for the inaccessible target; invalid query removal preserves other search/hash
+
+#### Scenario: Error and stream ownership
+- WHEN prompt rejects409/502, named business error arrives, or connector terminates while last snapshot is running
+- THEN exact API/business messages are visible,502 introduces no speculative rows, connector failure gives safe refresh guidance without false terminal state, and temporary native reconnect errors do not become business failures
+
+#### Scenario: Logout and page compatibility
+- WHEN confirmed logout succeeds/current401 clears auth, or page unmounts under StrictMode
+- THEN owned source/request lifecycles close without late UI writes or unhandled rejection; failed logout preserves authenticated page, and routes/main/settings-footer fixtures still exercise honest successful root loading

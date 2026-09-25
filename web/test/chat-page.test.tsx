@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanupChatPage, renderChatPage } from "./chat-page-support.js";
 import {
@@ -77,7 +77,11 @@ describe("chat page route integration", () => {
       },
     });
 
-    expect(await screen.findByRole("heading", { level: 1, name: "会话" })).toBeTruthy();
+    const banner = await screen.findByRole("banner");
+    expect(
+      await within(banner).findByRole("heading", { level: 1, name: "我的工作 / saved title" }),
+    ).toBeTruthy();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     expect(await screen.findByRole("textbox", { name: "给助手发消息" })).toBeTruthy();
     expect(await screen.findByRole("button", { name: "新建会话" })).toBeTruthy();
 
@@ -102,7 +106,11 @@ describe("chat page route integration", () => {
 
     expect(await screen.findByText(historyUser.content, exactText)).toBeTruthy();
     expect(screen.getByText(SNAPSHOT_ASSISTANT, exactText)).toBeTruthy();
-    expect(screen.getByText("saved title", { exact: true })).toBeTruthy();
+    expect(
+      within(screen.getByRole("navigation", { name: "会话列表" })).getByText("saved title", {
+        exact: true,
+      }),
+    ).toBeTruthy();
     expect(screen.getByText("bash", { exact: true })).toBeTruthy();
     expect(screen.getByText(BASH_START_DETAIL, { exact: true })).toBeTruthy();
     expect(screen.getByRole("status", { name: "bash running" })).toBeTruthy();

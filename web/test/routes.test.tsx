@@ -7,7 +7,7 @@ import "./dialog-platform.js";
 const expectedPages = [
   {
     path: "/",
-    title: "会话",
+    title: "WorkBuddy，我帮你",
     currentLabel: "会话",
   },
   {
@@ -176,7 +176,7 @@ function authenticateRouter() {
 
 async function expectRouteShell({ title, currentLabel }: { title: string; currentLabel: string }) {
   expect(await screen.findByRole("heading", { level: 1, name: title })).toBeTruthy();
-  if (title === "会话") {
+  if (title === "WorkBuddy，我帮你") {
     expect(screen.getByRole("textbox", { name: "给助手发消息" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "新建会话" })).toBeTruthy();
   }

@@ -6,7 +6,6 @@ type ConversationViewProps = {
   composerDisabled: boolean;
   composerLabel: string;
   draft: string;
-  emptySelection: string;
   generating: boolean;
   generatingLabel: string;
   historyError: string | null;
@@ -142,7 +141,6 @@ export function ConversationView({
   composerDisabled,
   composerLabel,
   draft,
-  emptySelection,
   generating,
   generatingLabel,
   historyError,
@@ -212,10 +210,12 @@ export function ConversationView({
           </p>
         ) : null}
         <div className="chat-transcript">
-          {requestedSessionId && historyView ? (
-            <MessageThread historyView={historyView} />
+          {requestedSessionId ? (
+            historyView ? (
+              <MessageThread historyView={historyView} />
+            ) : null
           ) : (
-            <p className="ui-empty chat-welcome">{emptySelection}</p>
+            <h1 className="chat-hero">WorkBuddy，我帮你</h1>
           )}
         </div>
         <form className="chat-composer" onSubmit={onSubmit}>

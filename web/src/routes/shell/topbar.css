@@ -1,0 +1,44 @@
+/* 外壳顶栏 — adapted from resource/workbuddy-live-demo.html:313-314（.workbuddy-topbar 高度/内边距/
+   底色与 --page 底边）、:315-316（.crumbs 与当前项 b）。只用语义 token；不移植 demo 的面板按钮、
+   搜索条与 z-index 叠层。 */
+
+.topbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 56px;
+  min-height: 56px;
+  padding: 0 12px 0 16px;
+  background: var(--wb-home-bg-secondary);
+  border-bottom: 1px solid var(--wb-border-card);
+}
+
+.topbar-title {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--wb-text-primary);
+}
+
+.topbar-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 400;
+  color: var(--wb-text-secondary);
+}
+
+.topbar-crumb-current {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--wb-text-primary);
+}
