@@ -2,7 +2,9 @@
 
 ## Purpose
 `web/src/ui/` 基元层：设计 token 全集（demo 逐字移植）、以 Radix UI Primitives 为行为层的组件库、图标（lucide-react 单组件映射）与动效。feature/routes 只经 `ui/index.ts` 取基元、只引用语义 token；基元层是调色板到组件的唯一映射边界。
+
 ## Requirements
+
 ### Requirement: 设计 token 全集
 `web/src/styles/tokens.css` SHALL 定义 demo（`resource/workbuddy-live-demo.html:19-188`）的调色板层（`--wb-palette-*`）与语义层（`--wb-brand-*`、`--wb-bg-*`、`--wb-text-*`、`--wb-border-*`、`--wb-status-*`、`--wb-shadow-*`、`--wb-icon-*`、`--wb-font*`、`--wb-mono`）全部 token，浅色在 `:root`、深色在 `[data-theme="dark"]`，值逐字取自 demo（"逐字"指经格式归一化——hex 小写、空白折叠、数字字面量规范化（`.10`→`0.1`）、折行合并——后相等，因 biome 会重排格式）；demo 引用但未定义的六个变量 SHALL 在此补齐为固定值并注明"demo 缺失、本仓补定"：`--wb-palette-black-60: rgba(0,0,0,.6)`、`--wb-palette-white-10: rgba(255,255,255,.1)`、`--wb-palette-white-20: rgba(255,255,255,.2)`、`--wb-palette-white-60: rgba(255,255,255,.6)`、`--wb-text-white: var(--wb-palette-white-100)`（以上两块同值）、`--wb-home-composer-chip-bg-hover`: 浅色 `var(--wb-palette-gray-3)`、深色 `var(--wb-bg-hover)`。每块的变量名集合 SHALL 恰为 demo 对应块名集合加这六个名，不得多出其它变量。文件头 SHALL 保留 token 来源说明（WorkBuddy 5.3.11 token 文件，经 demo；ATTRIBUTION.md §4）。`--wb-font-heading` 是唯一允许与 demo 值不同的变量：SHALL 去掉 `Poppins`、只列本地/系统字体栈，不得 `@import`/`<link>` 任何公网字体。仓内既有但 demo 无的 `--wb-home-bg`/`--wb-control-bg` SHALL 删除，消费者改用值相同的 demo token `--wb-home-bg-primary`/`--wb-color-bg-input`；`web/src/**/*.css` 引用的每个 `var(--wb-*)` SHALL 在 `tokens.css` 有定义（`web/test` 断言引用集合 ⊆ 定义集合）。feature 样式 SHALL 只引用语义层 token，不得直接引用 `--wb-palette-*` 或硬编码颜色（`web/test` 以 grep 断言 `web/src/features/**/*.css`、`web/src/features/**/*.tsx` 与 `web/src/routes/**` 无 `#[0-9a-fA-F]{3,8}`、`rgba?(`、`--wb-palette-`）。
 
@@ -32,6 +34,7 @@ Menu/Popover/Tooltip 的入场动画与 Menu 项过渡 SHALL 在 `prefers-reduce
 既有手写 `<dialog>` 的迁移 SHALL 分两刀且行为等价：auth 侧（`web/src/features/auth/footer.tsx`）的退出确认 SHALL 由 `ConfirmDialog` 渲染（`danger`、`confirmText="退出"`、`cancelText` 在 pending 时为 `关闭` 否则 `取消`、`pending` 透传为确认按钮 loading、pending 提示行经 `children`），feature 不再持有 `<dialog>`/焦点循环/键盘处理代码，`returnFocus` SHALL 在关闭时刻按 trigger 是否禁用归还到 trigger 或 `aside` 内 `a[aria-current=page]`（两支各有断言）；退出语义（标题 `退出登录？`、说明文案、恰一次 `POST /api/auth/logout`、同 tick 双击去重、pending 中关闭不取消请求、失败回滚并显示 `alert`、卸载中止请求）SHALL 与迁移前一致；`styles.css` 的 `.logout-dialog*` 规则 SHALL 随之删除。jsdom 侧因 Radix portal 与 `hideOthers` 的定位改法 SHALL 为：打开期间取页面元素用 `{ hidden: true }`、原生 `HTMLDialogElement.open`/`cancel` 事件改为 `aria-modal` 断言与 Escape keydown、焦点归还断言经 `waitFor`；渲染该 footer 并打开对话框的测试 SHALL 引入 `web/test/radix-platform.ts`。files 侧（`files/dialogs.tsx`、`files/page.tsx`）与 `web/src/lib/dialog.ts` 由后续切片迁移。
 `ATTRIBUTION.md` §3 的 Radix 条目 SHALL 列出当前已安装的 Radix 包。
 
+`Dialog` 与 `ConfirmDialog` SHALL 在忙碌期间把焦点留在模态内：`Dialog` 接受可选 `busy`（默认 false），`ConfirmDialog` 以 `pending` 作为 `busy`；`busy` 由 false 变 true 的那次提交之后，若活动元素是内容内已禁用的控件，或活动元素为 `document.body`/空，焦点 SHALL 移到内容内首个未禁用的可聚焦控件（`ConfirmDialog` 在 children 无可聚焦元素时即取消按钮；auth 退出在 pending 时把该按钮文案设为 `关闭`）；活动元素是内容内未禁用的控件或在内容外的其他元素时不移动；`busy` 保持为 true 的后续渲染不再移动焦点。`Button` `loading` 的原生禁用语义不变。真实浏览器中，确认按钮被原生禁用引发 focus fixup 后，Tab/Shift+Tab 仍停在模态内，背景 SHALL NOT 经键盘获焦。
 #### Scenario: 出口与品牌
 - WHEN 在 jsdom 渲染 `<BrandMark />` 与 `<BrandMark wordmark />`，并静态 grep `web/src/ui/**/*.tsx`
 - THEN `BrandMark` 渲染 svg，仅 `wordmark` 时出现文本 `WorkBuddy`；`web/src/ui/**/*.tsx` 无 `style={`；`Icon`/`BrandMark`/`Button`/`Input`/`Switch`/`Tag`/`Chip` 可从 `web/src/ui/index.ts` 导入
@@ -60,10 +63,13 @@ Menu/Popover/Tooltip 的入场动画与 Menu 项过渡 SHALL 在 `prefers-reduce
 - WHEN 在 jsdom（引入 `radix-platform.ts`）渲染已登录应用并点击侧栏 `退出登录`，分别执行：点击 `取消`；按 Escape；点击 `退出` 后按 Escape（logout 挂起）；同 tick 双击 `退出`；确认后卸载；logout 返回 403 后再次打开并成功；并静态读取 `footer.tsx`、`styles.css`
 - THEN `alertdialog` 标题 `heading` `退出登录？`、说明文案存在、`aria-modal="true"`、初始焦点在 `取消`；`取消`/Escape 关闭且 0 次 logout，Escape 后焦点回 trigger；pending 中 `关闭` 按钮存在、Escape 关闭后请求仍在（恰 1 次）且页面 heading 仍在、焦点回到 `aside` 内 `aria-current="page"` 的链接（trigger 已禁用），204 后回登录页；双击恰 1 次 logout、确认按钮 disabled、trigger disabled；卸载后请求 signal aborted 且无 `console.error`；403 后对话框关闭、footer `alert` 显示错误、重试可成功；`footer.tsx` 不含 `lib/dialog`/`<dialog`/`trapDialogFocus` 且含 `ConfirmDialog`，`styles.css` 不含 `.logout-dialog`；CI `make ui-walk` 退出段（定位已为页面范围，不改）通过，经 `render-app-router` 打开退出对话框的既有 `chat-page-lifecycle` 用例不改仍绿
 
+#### Scenario: 忙碌期焦点留在模态内
+- WHEN 在 jsdom（引入 `radix-platform.ts`）渲染受控 `<ConfirmDialog open confirmText="退出" …>`，先聚焦 `退出` 再以 `pending` 由 false 变 true 重渲染；另一轮先把焦点移到 `document.body`（`退出` 失焦）再翻转 `pending`；渲染受控 `<Dialog open busy={false} footer={<Button type="submit">创建</Button>} …>`（body 含 input），聚焦 input 后翻转 `busy`，再以聚焦的 `创建` 被禁用的形态翻转 `busy`；在 `ConfirmDialog` 焦点已被救回后令其失焦（活动元素为 `document.body`），再以 `pending` 仍为 true 重渲染
+- THEN `ConfirmDialog` 两轮翻转后活动元素均为取消按钮；`Dialog` 中聚焦未禁用 input 时翻转不移动焦点，聚焦的提交按钮被禁用时焦点落到内容内首个未禁用的可聚焦控件；`pending` 保持 true 的重渲染不移动焦点（活动元素仍为 `document.body`）；真实浏览器由 `make ui-walk` 退出段证明（见 verification-harness）
+
 ### Requirement: 动效与图标
 `Icon` SHALL 是单一组件：`name` 为本仓用到的 lucide 图标名联合类型，内部维护 name→组件映射、不逐个再导出 lucide 图标；size `12|14|16|18|20`（类名 `ui-icon-<size>`）；默认 `aria-hidden="true"`，传 `label` 时为 `role="img"` 且以 `label` 为可访问名。`web/src/ui/motion.css` SHALL 提供 demo 的 `wb-fadein`、`wb-pop`、`wb-pulse`、`wb-caret`、`wb-spin`、`wb-drawer-in` 关键帧与对应工具类（`ui-fadein`、`ui-pop`、`ui-pulse`、`ui-caret`、`ui-spin`），并在 `prefers-reduced-motion: reduce` 下把每个工具类置为 `animation: none` 与 `transition: none`；demo 未使用的 `wb-float`/`wb-shimmer` 不移植。图标 SHALL 全部经 `Icon` 取自 `lucide-react`（ISC，打包进产物，运行时零网络请求），`ATTRIBUTION.md` SHALL 新增 lucide（ISC）与 Radix UI Primitives（MIT）条目。
 
 #### Scenario: 图标可访问、动效可禁用、归属登记
 - WHEN 在 jsdom 渲染 `<Icon name="folder" />` 与 `<Icon name="folder" label="目录" size={12} />`，并静态读取 `motion.css` 与 `ATTRIBUTION.md`
 - THEN 第一个 svg `aria-hidden="true"`；第二个 `role="img"`、可访问名 `目录`、类名含 `ui-icon-12`；`motion.css` 的 reduced-motion 块覆盖全部五个 `ui-*` 工具类；`ATTRIBUTION.md` 含 `lucide`/ISC 与 `Radix`/MIT 条目
-

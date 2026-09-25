@@ -2,7 +2,9 @@
 
 ## Purpose
 Defines HTTP smoke and browser walk-through surfaces plus their CI/control-plane wiring, shared test-harness invariants, and guard/oracle contracts.
+
 ## Requirements
+
 ### Requirement: HTTP smoke（hurl）
 `smoke/` 下 SHALL 有彼此独立、无需跨文件 cookie 或文件顺序的 Hurl 用例：`public.hurl` 覆盖 healthz、info、默认守卫 401、显式伪造 session id 401 与深链 fallback；`auth.hurl` 覆盖登录成功/凭证错误/停用（逐字断言 `$.error.message`）、已认证 API 404、登出与登出后 401；`chat.hurl` 独立覆盖登录、创建201、prompt202、完成正文与步骤、他账号404及代理无 bearer401。`make smoke` SHALL 只对已运行服务执行public/auth/chat/files 四个 top-level 文件：唯一输入 `SMOKE_BASE_URL` 缺省为 `http://127.0.0.1:3000`，并作为 `base_url` 传给单 job、全局 retry0 的 test-mode Hurl（仅 messages GET 允许有界 per-entry retry）；目标不得 build/start/stop 服务或安装工具。Hurl SHALL 仅从 caller PATH 发现并在只含 PATH 的 clean child environment 中运行，不能继承 ambient Hurl option/variable、credential、proxy 或 config/home state。深链 exact-byte 合同只在 caller 以 `STATIC_ROOT=<repo>/smoke/fixtures/static` 启动服务时成立，不以 default `make dev`/`web/dist` 为绿路径。本机缺 Hurl 时目标 SHALL 在任何请求前非零退出并打印命名 `hurl` 的官方安装指引。`make smoke` SHALL 传入 `content_pattern=^你好，这是 WorkBuddy 的第一条流式回复。$` 与 `min_bash_steps=1`；手动 smoke-live 保持其既有形状档契约不变。
 
@@ -40,7 +42,7 @@ Defines HTTP smoke and browser walk-through surfaces plus their CI/control-plane
 - **WHEN** 对 `/files` 执行 `make ui-walk`，以 `zhangsan`/`demo` 登录，再依次访问 `/`、`/files`、`/center`、`/settings`
 - **THEN** 登录后仍在 `/files`，每一路由显示对应页面标题且恰有一个当前导航项；页脚显示 exact `zhangsan`/`成员`
 - **AND** 选择 `深色` 后根元素 `data-theme=dark`、`workbuddy-theme=dark`，reload 后仍选中深色且显示 `当前生效：深色`
-- **AND** 点击 `退出登录`、在 `alertdialog` 中点击 `退出` 后原 `/settings` 显示 `登录 WorkBuddy`，session cookie 被清除，reload 后仍未登录
+- **AND** 点击 `退出登录` 后，在 `alertdialog` 中以键盘 Tab 聚焦 `退出` 并按 Enter，`POST /api/auth/logout` 被 route 挂起期间：活动元素为 `关闭` 按钮；依次按 Tab、Shift+Tab、Tab 后活动元素每次都仍在 `alertdialog` 内，URL 仍为 `/settings`；放行请求后原 `/settings` 显示 `登录 WorkBuddy`，session cookie 被清除，reload 后仍未登录
 - **AND** 恰有两次 expected `/api/auth/me` 401；除与其 exact path/text 绑定的 Chromium transport diagnostic 外无 browser console error，且无 page error，Playwright 退出码为 0
 
 #### Scenario: 目标边界与失败传播
@@ -218,4 +220,3 @@ Test assertions that depend on the complete stdout or stderr of a real child pro
 #### Scenario: Capture diagnostics
 - **WHEN** a capture times out, or the child exits with empty or unparseable output
 - **THEN** the reported failure includes exit code, signal, byte count and event order
-

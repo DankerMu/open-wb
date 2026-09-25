@@ -9,7 +9,7 @@
 - [x] 2.3 反向注入七项（fix pass 1 补 7）各红并回退（design Required evidence）。
 
 ## 3. Verification
-- [ ] 3.0 archive PR：
+- [x] 3.0 archive PR：
   - 父 delta `ui-primitives` 三条需求由 `## ADDED` 改为 `## MODIFIED`，以晋升文本为底（三条均已晋升，父最终归档不再冲突），并同步本刀的忙碌期焦点句与 Scenario；
   - 父 `verification-harness`「UI 走查（Playwright）」块同步退出行；
   - 关闭 #315；
@@ -30,3 +30,5 @@
 - Selected Error handling / rollback / partial outputs：救回触发后 logout 失败（403）时，footer 关闭模态，焦点经 `returnFocus` 回到 `用户菜单` trigger（不是留在模态内）。证据：fix pass 1 新增 settings-footer 用例（先聚焦 `退出` 再点击，断言救回到 `关闭`，403 后断言对话框消失且焦点回到 trigger），以及对应反向注入；settings-footer 既有 403 用例不回归。
 - Not selected Release / packaging / dependency compatibility：不升级 Radix。
 - Not selected Documentation / migration notes：#302 的接入说明放在 archive PR 留言。
+
+3.0 实际：proposal Error handling 行按 re-review F1-residual 改正；父 ui-primitives delta 三条需求由 ADDED 改为 MODIFIED，以晋升文本为底，并保留父尚未交付的 Scenario（「组件可访问且样式只来自 token」「既有对话框迁移不回归」「图标离线、动效可禁用且归属登记」）；父 verification-harness 退出行同步；父 tasks 1.6b 增加 `Dialog busy={pending}`、真实浏览器焦点断言，以及 FOCUSABLE 口径与无匹配回退的复核要求；#302 留言。

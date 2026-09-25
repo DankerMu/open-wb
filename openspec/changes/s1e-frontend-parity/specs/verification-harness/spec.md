@@ -12,7 +12,7 @@
 - **WHEN** 对 `/files` 执行 `make ui-walk`，以 `zhangsan`/`demo` 登录，再依次访问 `/`、`/files`、`/center`、`/settings`
 - **THEN** 登录后仍在 `/files`，每一路由的 level-1 heading 符合 spa-shell 顶栏三态（`/` 欢迎态为 `WorkBuddy，我帮你`，其余为 `工作空间`/`中心`/`设置`）且恰有一个当前导航项；侧栏用户区（`mobile-dark` 在覆盖层打开后）显示 exact `zhangsan`/`成员`
 - **AND** `desktop-light` 选择 `深色` 后根元素 `data-theme=dark`、`workbuddy-theme=dark`，reload 后仍选中深色且显示 `当前生效：深色`；`mobile-dark` 选择 `浅色` 后 `data-theme=light`、`workbuddy-theme=light`，reload 后仍选中浅色且显示 `当前生效：浅色`
-- **AND** 打开用户菜单、选择 `menuitem` `退出登录`、在 `alertdialog` 中点击 `退出` 后原 `/settings` 显示 `登录 WorkBuddy`，session cookie 被清除，reload 后仍未登录
+- **AND** 打开用户菜单、选择 `menuitem` `退出登录` 后，在 `alertdialog` 中以键盘 Tab 聚焦 `退出` 并按 Enter，`POST /api/auth/logout` 被 route 挂起期间：活动元素为 `关闭` 按钮；依次按 Tab、Shift+Tab、Tab 后活动元素每次都仍在 `alertdialog` 内，URL 仍为 `/settings`；放行请求后原 `/settings` 显示 `登录 WorkBuddy`，session cookie 被清除，reload 后仍未登录
 - **AND** 恰有两次 expected `/api/auth/me` 401；除与其 exact path/text 绑定的 Chromium transport diagnostic 外无 browser console error，且无 page error，Playwright 退出码为 0
 - **AND** `desktop-light` 与 `mobile-dark` 两个 project 各自独立完成上述全部步骤；窄屏 project 经汉堡按钮打开覆盖层导航，每一路由无横向溢出；`desktop-light` 的 1024 逐路由无溢出、880 宽树栏为 210px、reduced-motion 切换与静态资源零 `requestfailed`/零跨源请求成立；两 project 的 401 计数与 console/page error 预算各自独立成立
 
