@@ -9,7 +9,7 @@
 - [x] 2.3 反向注入十项各红并回退（design Required evidence）。
 
 ## 3. Verification
-- [ ] 3.0 archive PR 同步父 delta `s1e-frontend-parity/specs/files-web/spec.md` 左栏句：补"文件条目的可访问名恰为文件名"，预览头"文件名" → "文件图标、路径"（父 Scenario「树条目图标、大小与空目录」已是本刀 Scenario 的超集，不另同步）。
+- [x] 3.0 archive PR 同步父 delta `s1e-frontend-parity/specs/files-web/spec.md` 左栏句：补"文件条目的可访问名恰为文件名"，预览头"文件名" → "文件图标、路径"（父 Scenario「树条目图标、大小与空目录」已是本刀 Scenario 的超集，不另同步）。
 - [x] 3.1 `make check` exit 0。
 - [x] 3.2 `npm run build --workspace web` exit 0。
 - [x] 3.3 ui-walk（CI 环境变量）exit 0。

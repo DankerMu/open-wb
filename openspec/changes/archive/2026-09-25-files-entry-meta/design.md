@@ -20,17 +20,17 @@ Must add/change:
 - `file-meta.ts`：
   ```ts
   import type { IconName } from "../../ui/index.js";
-  const ICON_BY_EXTENSION: Record<string, IconName> = {
-    png: "image", jpg: "image", jpeg: "image",
-    zip: "archive", tar: "archive", gz: "archive",
-    csv: "table",
-    md: "file-text", txt: "file-text", log: "file-text",
-    json: "file-code", js: "file-code", ts: "file-code", tsx: "file-code", html: "file-code",
-  };
+  const ICON_BY_EXTENSION = new Map<string, IconName>([   // Map：只查自有条目，`x.constructor` 等不会命中 Object.prototype
+    ["png", "image"], ["jpg", "image"], ["jpeg", "image"],
+    ["zip", "archive"], ["tar", "archive"], ["gz", "archive"],
+    ["csv", "table"],
+    ["md", "file-text"], ["txt", "file-text"], ["log", "file-text"],
+    ["json", "file-code"], ["js", "file-code"], ["ts", "file-code"], ["tsx", "file-code"], ["html", "file-code"],
+  ]);
   export function fileIcon(name: string): IconName {
     const dot = name.lastIndexOf(".");
     if (dot < 0) return "file";   // 与 supportsPreview（tree.tsx:81-87）、fileExtension（preview.tsx:38-41）同一规则
-    return ICON_BY_EXTENSION[name.slice(dot + 1).toLowerCase()] ?? "file";
+    return ICON_BY_EXTENSION.get(name.slice(dot + 1).toLowerCase()) ?? "file";
   }
   const UNITS = ["KB", "MB", "GB"] as const;
   export function formatSize(bytes: number): string {
