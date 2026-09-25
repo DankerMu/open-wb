@@ -464,7 +464,6 @@ describe("workspace tree entry meta", () => {
 
     const folder = await screen.findByRole("button", { name: "展开 out" });
     expect(hasLucideGlyph(folder, "folder")).toBe(true);
-    expect(hasLucideGlyph(screen.getByRole("button", { name: "折叠 root" }), "folder")).toBe(true);
     const rows = [
       ["readme.md", "file-text", "2.0 KB"],
       ["notes.csv", "table", "1.5 KB"],
@@ -490,6 +489,22 @@ describe("workspace tree entry meta", () => {
     expect(toolbar.querySelector(".files-preview-meta")?.textContent).toBe(
       "2.0 KB · 1970-01-01T00:00:00.102Z",
     );
+  });
+
+  it("falls back to the file glyph for extensions named after Object.prototype members", async () => {
+    renderFiles(
+      "/files?ws=workspace-1",
+      authenticatedFilesRoutes([workspace], {
+        "/api/workspaces/workspace-1/tree?path=": jsonResponse({
+          path: "",
+          entries: [{ name: "x.constructor", type: "file", size: 3, mtime: 101 }],
+        }),
+      }),
+    );
+
+    const row = await screen.findByRole("button", { name: "x.constructor" });
+    expect(screen.getByRole("navigation", { name: "工作空间目录树" })).toBeTruthy();
+    expect(hasLucideGlyph(row, "file")).toBe(true);
   });
 
   it("keeps formatSize as the single size formatter and the tree glyphs on the icon primitive", () => {

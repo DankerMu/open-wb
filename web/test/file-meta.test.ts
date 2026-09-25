@@ -25,6 +25,12 @@ describe("fileIcon", () => {
     ["a.", "file"],
     ["README", "file"],
     [".md", "file-text"],
+    ["x.constructor", "file"],
+    ["x.Constructor", "file"],
+    ["a.__PROTO__", "file"],
+    ["a.toString", "file"],
+    ["a.hasOwnProperty", "file"],
+    [".constructor", "file"],
   ])("%s -> %s", (name, icon) => {
     expect(fileIcon(name)).toBe(icon);
   });
