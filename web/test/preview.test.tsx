@@ -471,7 +471,7 @@ describe("PreviewPane unsupported error and truncation", () => {
       <PreviewPane
         mtime={FILE_MTIME}
         name="归档.zip"
-        path="归档.zip"
+        path="nested/归档.zip"
         preview={{ status: "unsupported" }}
         size={91}
       />,

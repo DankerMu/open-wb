@@ -238,6 +238,14 @@
   justify-content: center;
 }
 
+.files-preview-empty .ui-empty-state {
+  min-width: 0;
+}
+
+.files-preview-empty .ui-empty-state-desc {
+  overflow-wrap: anywhere;
+}
+
 .files-md-toolbar {
   display: flex;
   justify-content: flex-end;

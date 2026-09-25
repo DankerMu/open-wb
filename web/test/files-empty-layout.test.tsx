@@ -127,6 +127,12 @@ describe("files long names and layout rules", () => {
     expect(nameRule).not.toContain("overflow-wrap");
     expect(blockBody(rules, /^\.files-code,\n\.files-table \{/m)).toContain("overflow: auto");
     expect(blockBody(rules, /^\.files-md \{/m)).toContain("overflow: auto");
+    expect(blockBody(rules, /^\.files-preview-empty \.ui-empty-state \{/m)).toContain(
+      "min-width: 0",
+    );
+    expect(blockBody(rules, /^\.files-preview-empty \.ui-empty-state-desc \{/m)).toContain(
+      "overflow-wrap: anywhere",
+    );
 
     const tree = readRepoFile("web/src/features/files/tree.tsx");
     const page = readRepoFile("web/src/features/files/page.tsx");
