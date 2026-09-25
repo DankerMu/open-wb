@@ -9,6 +9,7 @@ import {
   createFetchMock,
   currentLocation,
   deferredResponse,
+  expectPaths,
   jsonResponse,
   authenticatedPrincipal as principal,
   replaceFetchRoutes,
@@ -755,7 +756,15 @@ describe("authenticated sidebar footer", () => {
 
     fireEvent.click(within(await openLogoutDialog()).getByRole("button", { name: "退出" }));
     await expectLoginAt(requestedPath);
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    await waitFor(() =>
+      expectPaths(fetchMock, [
+        "/api/auth/me",
+        "/api/workspaces",
+        "/api/auth/logout",
+        "/api/auth/logout",
+        "/api/info",
+      ]),
+    );
   });
 });
 
