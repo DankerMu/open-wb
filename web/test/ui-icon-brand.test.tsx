@@ -34,6 +34,11 @@ const ICON_NAMES: IconName[] = [
   "triangle-alert",
   "info",
   "circle-check",
+  "code",
+  "file-chart-line",
+  "file-spreadsheet",
+  "sparkles",
+  "zap",
 ];
 
 describe("Icon", () => {
