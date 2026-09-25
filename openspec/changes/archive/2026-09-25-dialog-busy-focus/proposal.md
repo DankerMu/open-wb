@@ -56,7 +56,7 @@ Selected risk packs:
 - Public API / CLI / script entry：`Dialog` 新增可选 `busy`。
 - Concurrency / shared state / ordering：`busy` 翻转、Chromium focus fixup 与 layout effect 三者的先后。
 - Legacy compatibility / examples：现有焦点归还、初始焦点、Tab 循环，以及 settings-footer、chat-page-lifecycle 用例。
-- Error handling / rollback / partial outputs：logout 失败回滚后焦点仍在模态内，归还行为不回归。
+- Error handling / rollback / partial outputs：logout 失败即关闭模态，焦点经 `returnFocus` 回到 `用户菜单` trigger（救回触发后同样如此，见 fix pass 1 用例），归还行为不回归。
 Evidence floor:
 - `make check` exit 0（含 web 全量）；
 - jsdom B1–B5；
