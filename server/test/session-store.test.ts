@@ -1,5 +1,6 @@
 import { constants } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
+import { HttpError } from "../src/core/errors/index.js";
 import {
   captureThrown,
   expectHttpError,
@@ -7,6 +8,7 @@ import {
   HEX32,
   messageRows,
   persistenceSnapshot,
+  sessionId,
   sessionRow,
   stepRows,
   withFakeClock,
@@ -328,6 +330,48 @@ describe("SessionStore admission, metadata, and compensation", () => {
           activeTurn: accepted,
         });
         expect(store.finishTurn(accepted.assistantMessageId, "done")).toBe(true);
+      });
+    });
+  });
+
+  it("throws the generic receipt error without writes when trusted metadata targets an absent session", () => {
+    withFakeClock(FIXED_NOW, () => {
+      withSessionStore(({ db, store }) => {
+        const session = store.create("u1");
+        expect(store.bumpStreamEpoch(session.id)).toBe(1);
+        store.setSessionFile(session.id, "resume/present.jsonl");
+        const before = persistenceSnapshot(db);
+        const absent = sessionId("f");
+        const writes = [
+          [() => store.bumpStreamEpoch(absent), "stream epoch update must change exactly 1 row"],
+          [
+            () => store.setSessionFile(absent, "resume/absent.jsonl"),
+            "session file update must change exactly 1 row",
+          ],
+        ] as const;
+
+        for (const [write, message] of writes) {
+          const error = captureThrown(write);
+          expect(error).toBeInstanceOf(Error);
+          expect(error).not.toBeInstanceOf(HttpError);
+          expect(error).toMatchObject({ message });
+          expect(persistenceSnapshot(db)).toEqual(before);
+          expect(db.isTransaction).toBe(false);
+        }
+
+        db.exec("BEGIN");
+        try {
+          db.prepare("UPDATE chat_sessions SET title = ? WHERE id = ?").run("caller", session.id);
+          for (const [write] of writes) {
+            expect(captureThrown(write)).not.toBeInstanceOf(HttpError);
+            expect(db.isTransaction).toBe(true);
+          }
+          expect(sessionRow(db, session.id).title).toBe("caller");
+        } finally {
+          db.exec("ROLLBACK");
+        }
+        expect(persistenceSnapshot(db)).toEqual(before);
+        expect(store.bumpStreamEpoch(session.id)).toBe(2);
       });
     });
   });

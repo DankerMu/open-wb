@@ -334,6 +334,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
       return true;
     },
 
+    // Trusted supervisor write: callers own session existence; missing row = receipt error.
     bumpStreamEpoch(sessionId) {
       assertOpen(closed);
       return runOwnedTransaction(db, "stream epoch rollback failed", () => {
@@ -346,14 +347,12 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
         );
         const row = db
           .prepare("SELECT stream_epoch FROM chat_sessions WHERE id = ?")
-          .get(sessionId) as { stream_epoch: number } | undefined;
-        if (row === undefined) {
-          throw new HttpError("not_found");
-        }
+          .get(sessionId) as { stream_epoch: number };
         return Number(row.stream_epoch);
       });
     },
 
+    // Trusted supervisor write: callers own session existence; missing row = receipt error.
     setSessionFile(sessionId, sessionFile) {
       assertOpen(closed);
       runOwnedTransaction(db, "session file rollback failed", () => {
