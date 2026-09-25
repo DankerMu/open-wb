@@ -12,7 +12,7 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   timeout: 30_000,
-  globalTimeout: 60_000,
+  globalTimeout: 150_000,
   forbidOnly: true,
   reporter: "list",
   outputDir: join(tmpdir(), "workbuddy-ui-walk-results"),
@@ -25,10 +25,19 @@ export default defineConfig({
     actionTimeout: 10_000,
     navigationTimeout: 15_000,
   },
+  // 不用 devices[...] 预设：isMobile/hasTouch/UA 会改变交互语义，这里只要视口与配色。
   projects: [
     {
-      name: "chromium",
-      use: { browserName: "chromium" },
+      name: "desktop-light",
+      use: {
+        browserName: "chromium",
+        viewport: { width: 1440, height: 900 },
+        colorScheme: "light",
+      },
+    },
+    {
+      name: "mobile-dark",
+      use: { browserName: "chromium", viewport: { width: 390, height: 844 }, colorScheme: "dark" },
     },
   ],
 });
