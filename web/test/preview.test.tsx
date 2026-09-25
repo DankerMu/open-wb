@@ -478,23 +478,28 @@ describe("PreviewPane unsupported error and truncation", () => {
     );
 
     expect(screen.getByText("该类型不支持预览")).toBeTruthy();
-    expect(screen.queryByText("二进制或未识别格式")).toBeNull();
+    expect(document.querySelector(".ui-empty-state-desc")?.textContent).toBe(
+      "归档.zip · 91 B\u3000二进制或未识别格式",
+    );
     expect(screen.getByText(`91 B · ${FILE_MTIME_ISO}`)).toBeTruthy();
   });
 
-  it("keeps a supplied unsupported message as literal text", () => {
+  it("keeps a markup-like unsupported file name as literal text", () => {
+    const name = '<img src=x onerror="alert(1)">.zip';
     render(
       <PreviewPane
         mtime={FILE_MTIME}
-        name="归档.zip"
-        path="归档.zip"
-        preview={{ message: '<img src=x onerror="alert(1)">', status: "unsupported" }}
+        name={name}
+        path={name}
+        preview={{ status: "unsupported" }}
         size={91}
       />,
     );
 
     expect(screen.getByText("该类型不支持预览")).toBeTruthy();
-    expect(screen.getByText('<img src=x onerror="alert(1)">')).toBeTruthy();
+    expect(document.querySelector(".ui-empty-state-desc")?.textContent).toBe(
+      `${name} · 91 B\u3000二进制或未识别格式`,
+    );
     expect(document.querySelector("img")).toBeNull();
   });
 

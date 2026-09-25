@@ -2,6 +2,8 @@
  * Files workspace presentation.
  * Visual language from resource/workbuddy-live-demo.html:655-728 (layout,
  * tree, preview, empty) and 729-741 (dialog/form chrome), using shell tokens.
+ * Empty-state copy from resource/workbuddy-live-demo.html:3854,3877,3910,3919;
+ * the 210px tree column follows demo:723 (@media (max-width:900px) .fs-tree).
  * No demo JavaScript, imagery, or upstream brand assets.
  */
 
@@ -67,14 +69,6 @@
   padding: 0.15rem 0.4rem 0.75rem;
 }
 
-.files-tree-empty {
-  margin: 0.75rem 0.85rem;
-}
-
-.files-tree-empty p {
-  margin: 0 0 0.35rem;
-}
-
 .files-tree-list {
   list-style: none;
   margin: 0;
@@ -131,7 +125,9 @@
 .files-tree-name {
   flex: 1;
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .files-tree-size {
@@ -236,17 +232,10 @@
 
 .files-preview-empty {
   flex: 1;
+  min-height: 0;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
-  padding: 3rem 1.25rem;
-  text-align: center;
-}
-
-.files-preview-empty p {
-  margin: 0;
 }
 
 .files-md-toolbar {
@@ -638,6 +627,12 @@
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
+}
+
+@media (max-width: 900px) {
+  .files-layout {
+    grid-template-columns: 210px minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 760px) {

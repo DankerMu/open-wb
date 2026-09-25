@@ -527,8 +527,8 @@ describe("workspace tree entry meta", () => {
     expect(sizeRule).toContain("var(--wb-text-tertiary)");
     expect(sizeRule).toContain("font-size: 10.5px");
     const nameRule = blockBody(rules, /^\.files-tree-name \{/m);
-    expect(nameRule).toContain("overflow-wrap: anywhere");
-    expect(nameRule).not.toContain("text-overflow");
+    expect(nameRule).toContain("text-overflow: ellipsis");
+    expect(nameRule).not.toContain("overflow-wrap");
     for (const pattern of COLOR_LITERAL_PATTERNS) {
       expect(rules).not.toMatch(pattern);
     }
