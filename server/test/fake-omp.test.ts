@@ -3,17 +3,36 @@
  * Protocol pin: can1357/oh-my-pi@33cc6b9a043a74e00a157e72ca909272796d8461
  * Local: resource/oh-my-pi/docs/rpc.md, packages/coding-agent/src/modes/rpc/rpc-types.ts,
  * packages/agent/src/types.ts, packages/ai/src/types.ts (AssistantMessage.stopReason/errorMessage).
- * docs/architecture/rpc.md is absent (#141); this suite does not import the fixture.
+ * docs/architecture/rpc.md is absent (#141); this suite does not import fake-omp.mjs.
+ * call-proxy's two-round contract (#166) runs against the real #88 fake upstream.
  */
-import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import {
+  createServer,
+  request as httpRequest,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import {
+  asRecord,
+  closeSession,
+  type Frame,
+  HANDSHAKE,
+  isTextDelta,
+  PROMPT,
+  response,
+  type Session,
+  startFake,
+  startPromptedSession,
+  stopFakeChildren,
+} from "./fake-omp-helpers.js";
+import { startTrackedFakeUpstream } from "./fake-upstream-helpers.js";
+import type { FakeUpstreamServer } from "./support/fake-upstream.mjs";
 
-const FAKE = fileURLToPath(new URL("./support/fake-omp.mjs", import.meta.url));
 const MAX_FRAME = 1_048_576;
 const MAX_REASSEMBLED = 67_108_864;
 const THREE_MIB = 3 * 1024 * 1024;
@@ -40,37 +59,20 @@ if (typeof PARENT_UID !== "number" || typeof PARENT_GID !== "number") {
 }
 const PROC_ENVIRON = process.platform === "linux" ? "readable" : "ENOENT";
 const MISSING_PID = "1".repeat(18);
-const OMP_FLAGS = [
-  "--mode",
-  "rpc",
-  "--cwd",
-  "/tmp",
-  "--session-dir",
-  "/tmp/sessions",
-  "--model",
-  "workbuddy/deepseek-v4.1-flash",
-  "--approval-mode",
-  "yolo",
-  "--no-extensions",
-  "--no-lsp",
-  "--no-pty",
-  "--no-title",
-];
 const RESUME = "/tmp/open-wb-fake-session.jsonl";
-const HANDSHAKE = [
-  { id: "protocol-1", type: "negotiate_protocol", protocolVersion: 2 },
-  { id: "state-1", type: "get_state" },
-];
-const PROMPT = { id: "req_1", type: "prompt", message: "Summarize this repo" };
+/** #88 fake-upstream 契约的固定工具参数与回复文本（model-proxy 假上游夹具契约）。 */
+const FIXTURE_TOOL_ARGS = '{"command":"echo workbuddy-smoke"}';
+const FIXTURE_TEXT = "你好，这是 WorkBuddy 的第一条流式回复。";
+const TOOL_OUTPUT = "workbuddy-smoke";
+const ROLE_ONLY_DONE = 'data: {"choices":[{"delta":{"role":"assistant"}}]}\n\ndata: [DONE]\n\n';
+const TOOL_ONLY_DONE = `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_stub","type":"function","function":{"name":"bash","arguments":"{}"}}]}}]}\n\ndata: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]\n\n`;
 
-type Frame = Record<string, unknown>;
-
-const children: ChildProcessWithoutNullStreams[] = [];
 const servers: Server[] = [];
+const upstreams: FakeUpstreamServer[] = [];
 const temps: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(children.splice(0).map(stopChild));
+  await stopFakeChildren();
   await Promise.all(
     servers.splice(0).map(
       (server) =>
@@ -79,6 +81,7 @@ afterEach(async () => {
         }),
     ),
   );
+  await Promise.all(upstreams.splice(0).map((upstream) => upstream.close()));
   for (const dir of temps.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -295,33 +298,83 @@ describe("fake-omp process contract", () => {
     await expectVisibleFailure(malformed);
     await closeSession(malformed);
 
-    const httpProxy = await startProxy(async (_request, response) => {
+    await runFailingStub(async (_request, response) => {
       response.writeHead(500, { "content-type": "application/json" });
       response.end('{"error":"upstream"}');
     });
-    const httpFail = await startPromptedSession({
-      scenario: "call-proxy",
-      env: {
-        PI_CODING_AGENT_DIR: tempAgentDir(managedYaml(httpProxy.origin, "flash")),
-        WORKBUDDY_MODEL_TOKEN: TOKEN,
-      },
-    });
-    await expectVisibleFailure(httpFail);
-    await closeSession(httpFail);
+    await runFailingStub(sseStub(SSE_EVENT));
+  });
 
-    const eofProxy = await startProxy(async (_request, response) => {
-      response.writeHead(200, { "content-type": "text/event-stream" });
-      response.end(Buffer.from(SSE_EVENT, "utf8"));
-    });
-    const eof = await startPromptedSession({
+  it("fails an empty 200 round and a second tool-only round instead of an empty success", async () => {
+    await expect(runFailingStub(sseStub(ROLE_ONLY_DONE))).resolves.toBe(1);
+    await expect(runFailingStub(sseStub(TOOL_ONLY_DONE))).resolves.toBe(2);
+  });
+
+  it("relays the #88 fixture tool round and answering round with the upstream call id", async () => {
+    const upstream = await startTrackedFakeUpstream(upstreams, { apiKey: TOKEN });
+    const recorded: RecordedExchange[] = [];
+    const forwarder = await startProxy((request, response) =>
+      forwardRecorded(upstream.port, request, response, recorded),
+    );
+    const session = await startPromptedSession({
       scenario: "call-proxy",
       env: {
-        PI_CODING_AGENT_DIR: tempAgentDir(managedYaml(eofProxy.origin, "flash")),
+        PI_CODING_AGENT_DIR: tempAgentDir(managedYaml(`"${forwarder.origin}/v1"`, "flash")),
         WORKBUDDY_MODEL_TOKEN: TOKEN,
       },
     });
-    await expectVisibleFailure(eof);
-    await closeSession(eof);
+    const end = await session.wait(
+      (frame) => frame.type === "agent_end" && frame.isTerminal !== false,
+    );
+    expect(recorded).toHaveLength(2);
+    const [first, second] = recorded.map((exchange) => asRecord(JSON.parse(exchange.request)));
+    expect(first).toEqual({ stream: true, messages: [{ role: "user", content: PROMPT.message }] });
+    const start = session.frames.find((frame) => frame.type === "tool_execution_start");
+    const callId = String(start?.toolCallId);
+    expect(callId).toMatch(/^call_[0-9a-f-]{36}$/u);
+    expect(recorded[0]?.response).toContain(`"id":"${callId}"`);
+    expect(start).toEqual({
+      type: "tool_execution_start",
+      toolCallId: callId,
+      toolName: "bash",
+      args: JSON.parse(FIXTURE_TOOL_ARGS),
+    });
+    expect(session.frames.filter((frame) => frame.type === "tool_execution_end")).toEqual([
+      {
+        type: "tool_execution_end",
+        toolCallId: callId,
+        toolName: "bash",
+        result: { output: TOOL_OUTPUT },
+      },
+    ]);
+    expect(second?.stream).toBe(true);
+    expect(second?.messages).toEqual([
+      { role: "user", content: PROMPT.message },
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: callId,
+            type: "function",
+            function: { name: "bash", arguments: FIXTURE_TOOL_ARGS },
+          },
+        ],
+      },
+      { role: "tool", tool_call_id: callId, content: TOOL_OUTPUT },
+    ]);
+    const deltas = session.frames
+      .filter(isTextDelta)
+      .map((frame) => String(asRecord(frame.assistantMessageEvent).delta));
+    expect(deltas.length).toBeGreaterThanOrEqual(3);
+    expect(deltas.join("")).toBe(FIXTURE_TEXT);
+    const stopReasons = session.frames
+      .filter((frame) => frame.type === "message_end")
+      .map((frame) => asRecord(frame.message).stopReason);
+    expect(stopReasons).toEqual(["toolUse", "stop"]);
+    expect(session.frames.at(-1)).toBe(end);
+    expect(`${session.stdout}${session.stderr}`).not.toContain(TOKEN);
+    await closeSession(session);
   });
 
   it("reports identity, sorted env keys, HOME/agent, and probe file content", async () => {
@@ -350,204 +403,7 @@ describe("fake-omp process contract", () => {
   });
 });
 
-interface Session {
-  frames: Frame[];
-  stdout: string;
-  stderr: string;
-  write(messages: Frame | Frame[]): void;
-  wait(predicate: (frame: Frame) => boolean, ms?: number): Promise<Frame>;
-  closeStdin(): void;
-  waitExit(): Promise<number>;
-}
-
-interface StartOptions {
-  scenario?: string;
-  extraArgs?: string[];
-  env?: NodeJS.ProcessEnv;
-  prompt?: Frame;
-}
-
 type ProxyHandler = (request: IncomingMessage, response: ServerResponse) => Promise<void>;
-
-const exitStatuses = new WeakMap<ChildProcessWithoutNullStreams, number>();
-
-function startFake(options: StartOptions = {}): Session {
-  const args = [...OMP_FLAGS, ...(options.extraArgs ?? [])];
-  if (options.scenario !== undefined) {
-    args.push("--scenario", options.scenario);
-  }
-  const child = spawn(process.execPath, [FAKE, ...args], {
-    stdio: ["pipe", "pipe", "pipe"],
-    env: { PATH: process.env.PATH ?? "/usr/bin", ...options.env },
-  });
-  children.push(child);
-  const frames: Frame[] = [];
-  let stdout = "";
-  let stderr = "";
-  let pending = "";
-  const listeners = new Set<() => void>();
-  const notify = (): void => {
-    for (const listener of listeners) {
-      listener();
-    }
-  };
-  const recordExit = (code: number | null, signal: NodeJS.Signals | null): void => {
-    exitStatuses.set(child, exitStatus(code, signal));
-    notify();
-  };
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
-  child.stdout.on("data", (chunk: string) => {
-    stdout += chunk;
-    pending += chunk;
-    let newline = pending.indexOf("\n");
-    while (newline !== -1) {
-      const line = pending.slice(0, newline).trim();
-      pending = pending.slice(newline + 1);
-      if (line.length > 0) {
-        frames.push(JSON.parse(line) as Frame);
-      }
-      newline = pending.indexOf("\n");
-    }
-    notify();
-  });
-  child.stderr.on("data", (chunk: string) => {
-    stderr += chunk;
-    notify();
-  });
-  child.on("exit", recordExit);
-  child.on("close", recordExit);
-  return {
-    frames,
-    get stdout() {
-      return stdout;
-    },
-    get stderr() {
-      return stderr;
-    },
-    write(messages: Frame | Frame[]) {
-      const list = Array.isArray(messages) ? messages : [messages];
-      for (const message of list) {
-        child.stdin.write(`${JSON.stringify(message)}\n`);
-      }
-    },
-    wait(predicate, ms = 8_000) {
-      return new Promise<Frame>((resolve, reject) => {
-        const abort = AbortSignal.timeout(ms);
-        const onAbort = (): void => {
-          cleanup();
-          reject(new Error(`timed out waiting for frame; got ${JSON.stringify(frames)}`));
-        };
-        const onChange = (): void => {
-          const match = frames.find(predicate);
-          if (match !== undefined) {
-            cleanup();
-            resolve(match);
-            return;
-          }
-          if (observedExitStatus(child) !== undefined) {
-            cleanup();
-            reject(new Error(`child exited before frame; stdout=${stdout} stderr=${stderr}`));
-          }
-        };
-        const cleanup = (): void => {
-          abort.removeEventListener("abort", onAbort);
-          listeners.delete(onChange);
-        };
-        abort.addEventListener("abort", onAbort, { once: true });
-        listeners.add(onChange);
-        onChange();
-      });
-    },
-    closeStdin() {
-      child.stdin.end();
-    },
-    waitExit() {
-      return waitExit(child);
-    },
-  };
-}
-
-async function startPromptedSession(options: StartOptions = {}): Promise<Session> {
-  const prompt = options.prompt ?? PROMPT;
-  const session = startFake(options);
-  await session.wait((frame) => frame.type === "ready");
-  session.write(HANDSHAKE);
-  await session.wait(response("protocol-1", "negotiate_protocol"));
-  await session.wait(response("state-1", "get_state"));
-  session.write(prompt);
-  await session.wait(response(String(prompt.id), "prompt"));
-  return session;
-}
-
-async function closeSession(session: Session): Promise<void> {
-  session.closeStdin();
-  await session.waitExit();
-}
-
-async function stopChild(child: ChildProcessWithoutNullStreams): Promise<void> {
-  if (observedExitStatus(child) === undefined) {
-    child.kill("SIGKILL");
-  }
-  await waitExit(child);
-}
-
-function observedExitStatus(child: ChildProcessWithoutNullStreams): number | undefined {
-  const recorded = exitStatuses.get(child);
-  if (recorded !== undefined) {
-    return recorded;
-  }
-  if (child.exitCode !== null) {
-    return child.exitCode;
-  }
-  return child.signalCode === null ? undefined : 1;
-}
-
-function exitStatus(code: number | null, signal: NodeJS.Signals | null): number {
-  return code ?? (signal === null ? 0 : 1);
-}
-
-function waitExit(child: ChildProcessWithoutNullStreams): Promise<number> {
-  const observed = observedExitStatus(child);
-  if (observed !== undefined) {
-    return Promise.resolve(observed);
-  }
-  return new Promise<number>((resolve) => {
-    const settle = (code: number | null, signal: NodeJS.Signals | null): void => {
-      child.off("exit", onExit);
-      child.off("close", onClose);
-      resolve(observedExitStatus(child) ?? exitStatus(code, signal));
-    };
-    const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
-      settle(code, signal);
-    };
-    const onClose = (code: number | null, signal: NodeJS.Signals | null): void => {
-      settle(code, signal);
-    };
-    child.once("exit", onExit);
-    child.once("close", onClose);
-    const cached = observedExitStatus(child);
-    if (cached !== undefined) {
-      child.off("exit", onExit);
-      child.off("close", onClose);
-      resolve(cached);
-    }
-  });
-}
-
-function response(id: string, command: string): (frame: Frame) => boolean {
-  return (frame) => frame.type === "response" && frame.id === id && frame.command === command;
-}
-
-function isTextDelta(frame: Frame): boolean {
-  return (
-    frame.type === "message_update" && asRecord(frame.assistantMessageEvent).type === "text_delta"
-  );
-}
-
-function asRecord(value: unknown): Frame {
-  return value !== null && typeof value === "object" ? (value as Frame) : {};
-}
 
 function decodeChunks(frames: Frame[]): { bytes: Buffer; text: string; json: Frame } {
   const chunks = frames.filter((frame) => frame.type === "rpc_chunk");
@@ -654,6 +510,81 @@ function collectRequest(request: IncomingMessage): Promise<string> {
     request.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     request.on("error", reject);
   });
+}
+
+interface RecordedExchange {
+  request: string;
+  response: string;
+}
+
+/** 测试自有转发器：原样转发请求体与 bearer 到 #88 夹具，并记录每轮请求/响应文本。 */
+async function forwardRecorded(
+  port: number,
+  request: IncomingMessage,
+  response: ServerResponse,
+  recorded: RecordedExchange[],
+): Promise<void> {
+  const body = await collectRequest(request);
+  const exchange = { request: body, response: "" };
+  recorded.push(exchange);
+  const chunks: Buffer[] = [];
+  await new Promise<void>((resolve, reject) => {
+    const upstream = httpRequest(
+      {
+        host: "127.0.0.1",
+        port,
+        method: request.method,
+        path: request.url,
+        headers: {
+          authorization: request.headers.authorization,
+          "content-type": request.headers["content-type"],
+          "content-length": String(Buffer.byteLength(body)),
+        },
+      },
+      (upstreamResponse) => {
+        response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
+        upstreamResponse.on("data", (chunk: Buffer) => {
+          chunks.push(chunk);
+          response.write(chunk);
+        });
+        upstreamResponse.once("end", () => {
+          exchange.response = Buffer.concat(chunks).toString("utf8");
+          response.end(resolve);
+        });
+        upstreamResponse.once("error", reject);
+      },
+    );
+    upstream.once("error", reject);
+    upstream.end(body);
+  });
+}
+
+/** 固定 SSE 载荷的 200 stub（先读完请求体）。 */
+function sseStub(payload: string): ProxyHandler {
+  return async (request, response) => {
+    await collectRequest(request);
+    response.writeHead(200, { "content-type": "text/event-stream" });
+    response.end(Buffer.from(payload, "utf8"));
+  };
+}
+
+/** call-proxy 打到 stub 必须可见失败；返回 stub 收到的请求数（证明没有多余轮次）。 */
+async function runFailingStub(handler: ProxyHandler): Promise<number> {
+  let requests = 0;
+  const stub = await startProxy(async (request, response) => {
+    requests += 1;
+    await handler(request, response);
+  });
+  const session = await startPromptedSession({
+    scenario: "call-proxy",
+    env: {
+      PI_CODING_AGENT_DIR: tempAgentDir(managedYaml(stub.origin, "flash")),
+      WORKBUDDY_MODEL_TOKEN: TOKEN,
+    },
+  });
+  await expectVisibleFailure(session);
+  await closeSession(session);
+  return requests;
 }
 
 async function writeFragmentedSse(

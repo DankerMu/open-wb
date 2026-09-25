@@ -2,8 +2,11 @@
  * Issue #102：真实 compiled production 入口。
  * HOST=0.0.0.0 绑定可用端口后，server_started 出现时
  * <OMP_STATE_DIR>/agent/models.yml 必须已经存在，且 baseUrl 指向该端口。
+ * #166：经 models.yml、token registry 与代理的完整 fake-omp call-proxy 回合；
+ * #210：models.yml 写入被扣住时交付 SIGTERM，不得迟发任何启动记录。
  */
 
+import { randomBytes } from "node:crypto";
 import {
   chmodSync,
   existsSync,
@@ -18,22 +21,33 @@ import {
 import { connect as connectTcp } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { withOpenDb } from "./core-db-helpers.js";
+import { startTrackedFakeUpstream } from "./fake-upstream-helpers.js";
 import {
   type CompiledServerEntry,
   childUmaskHook,
+  compiledFixtureEnv,
   compileServerEntry,
+  createSession,
   denyChmodHook,
+  expectBindable,
+  expectPromptStatus,
+  gatedModelsWriteHook,
+  login,
   observeOpenDbHook,
+  prompt,
   releaseStartupFixtures,
   reserveWildcardPort,
   type StartedServer,
   startCompiledServer,
+  waitForFile,
+  waitForTerminalAssistant,
+  writeFakeOmpLauncher,
 } from "./server-startup-helpers.js";
 import { sudoPrefix } from "./session-supervisor-helpers.js";
+import type { FakeUpstreamServer } from "./support/fake-upstream.mjs";
 
 const MODEL_ID = "issue-102-tracer-model";
 const STARTUP_MODULES = [
@@ -51,10 +65,14 @@ const EXISTING_DIR_MODE = 0o755;
 const MARKER_TITLE = "owned-state-marker";
 const SQLITE_EXPERIMENTAL_WARNING =
   "ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\n";
+/** #88 fake-upstream 契约的固定回复文本。 */
+const FIXTURE_TEXT = "你好，这是 WorkBuddy 的第一条流式回复。";
 const scratch: string[] = [];
+const upstreams: FakeUpstreamServer[] = [];
 
 afterAll(async () => {
   await releaseStartupFixtures();
+  await Promise.all(upstreams.splice(0).map((upstream) => upstream.close()));
   for (const root of scratch.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
@@ -138,11 +156,7 @@ describe("production entry lifecycle", () => {
     const scratchRoot = mkdtempSync(join(tmpdir(), "open-wb-startup-order-"));
     scratch.push(scratchRoot);
     const tracePath = join(scratchRoot, "order.log");
-    const binDir = join(scratchRoot, "bin");
-    mkdirSync(binDir);
-    const bin = join(binDir, "hang-omp.mjs");
-    writeFileSync(bin, hangEofLauncher());
-    chmodSync(bin, 0o755);
+    const bin = writeFakeOmpLauncher(scratchRoot, "hang-eof");
     const server = startCompiledServer(
       compiled.entry,
       compiledFixtureEnv(scratchRoot, port, bin, { MODEL_ID }),
@@ -161,6 +175,83 @@ describe("production entry lifecycle", () => {
       await server.dispose();
     }
   }, 40_000);
+
+  it("relays a full call-proxy turn without leaking the upstream key or runtime bearer", async () => {
+    const compiled = await compileServerEntry();
+    const port = await reserveWildcardPort();
+    const scratchRoot = mkdtempSync(join(tmpdir(), "open-wb-proxy-turn-"));
+    scratch.push(scratchRoot);
+    const upstreamKey = `upstream-sentinel-${randomBytes(23).toString("hex")}`;
+    const upstream = await startTrackedFakeUpstream(upstreams, { apiKey: upstreamKey });
+    const bearerPath = join(scratchRoot, "runtime-bearer.txt");
+    const bin = writeFakeOmpLauncher(scratchRoot, "call-proxy", bearerPath);
+    const server = startCompiledServer(
+      compiled.entry,
+      compiledFixtureEnv(scratchRoot, port, bin, {
+        MODEL_ID,
+        MODEL_UPSTREAM_BASE_URL: `http://127.0.0.1:${upstream.port}`,
+        MODEL_UPSTREAM_API_KEY: upstreamKey,
+      }),
+    );
+    try {
+      await server.waitForStarted();
+      const cookie = await login(port);
+      const session = await createSession(port, cookie);
+      await prompt(port, cookie, session, "hello through the proxy");
+      const assistant = await waitForTerminalAssistant(port, cookie, session, 15_000);
+      expect(assistant).toMatchObject({ content: FIXTURE_TEXT, status: "done" });
+      expect(assistant.steps).toMatchObject([{ name: "bash", status: "done" }]);
+      const bearer = readFileSync(bearerPath, "utf8");
+      expect(bearer).toMatch(/^[0-9a-f]{64}$/iu);
+      const modelsText = readFileSync(join(scratchRoot, "state", "agent", "models.yml"), "utf8");
+      expect(modelsText).toContain("apiKey: WORKBUDDY_MODEL_TOKEN");
+      expect(await server.stop()).toBe(0);
+      for (const secret of [upstreamKey, bearer]) {
+        expect(modelsText).not.toContain(secret);
+        expect(server.stdout()).not.toContain(secret);
+        expect(server.stderr()).not.toContain(secret);
+      }
+    } finally {
+      await server.dispose();
+    }
+  }, 90_000);
+
+  it("publishes nothing when SIGTERM arrives while the models.yml write is held", async () => {
+    const compiled = await compileServerEntry();
+    const port = await reserveWildcardPort();
+    const scratchRoot = mkdtempSync(join(tmpdir(), "open-wb-held-write-"));
+    scratch.push(scratchRoot);
+    const tracePath = join(scratchRoot, "order.log");
+    const entered = join(scratchRoot, "write-entered");
+    const observed = join(scratchRoot, "signal-observed");
+    const hook = join(scratchRoot, "gated-models-write.cjs");
+    writeFileSync(hook, gatedModelsWriteHook("call-through"));
+    const server = startCompiledServer(
+      compiled.entry,
+      compiledFixtureEnv(scratchRoot, port, join(scratchRoot, "bin", "omp"), {
+        MODEL_ID,
+        MODELS_ENTERED: entered,
+        MODELS_RELEASE: observed,
+      }),
+      { orderTrace: tracePath, requireHook: hook },
+    );
+    try {
+      await waitForFile(entered, 15_000);
+      expect(existsSync(observed)).toBe(false);
+      await server.stop();
+      expect(await server.waitForClose()).toEqual({ code: 0, signal: null });
+      expect(existsSync(observed)).toBe(true);
+      expect(server.stdout()).toBe("");
+      expect(applicationStderr(server.stderr())).toBe("");
+      expect(
+        parse(readFileSync(join(scratchRoot, "state", "agent", "models.yml"), "utf8")),
+      ).toMatchObject({ providers: { workbuddy: { baseUrl: `http://127.0.0.1:${port}/v1` } } });
+      expect(readFileSync(tracePath, "utf8")).toBe("listener-close\ndb-close\n");
+      await expectBindable("127.0.0.1", port);
+    } finally {
+      await server.dispose();
+    }
+  }, 90_000);
 });
 
 describe("production entry private state permissions", () => {
@@ -544,79 +635,6 @@ function expectRefused(host: string, port: number): Promise<void> {
   });
 }
 
-function hangEofLauncher(): string {
-  const fake = fileURLToPath(new URL("./support/fake-omp.mjs", import.meta.url));
-  return `#!${process.execPath}
-process.argv.push("--scenario", "hang-eof");
-await import(${JSON.stringify(fake)});
-`;
-}
-
-function login(port: number): Promise<string> {
-  return requestJson(port, "POST", "/api/auth/login", undefined, {
-    account: "zhangsan",
-    password: "demo",
-  }).then((response) => {
-    const cookie = response.headers.get("set-cookie");
-    if (response.status !== 200 || cookie === null || !cookie.startsWith("workbuddy_session=")) {
-      throw new Error(`login failed: ${response.status} ${response.body}`);
-    }
-    return cookie.slice(0, cookie.indexOf(";"));
-  });
-}
-
-function createSession(port: number, cookie: string): Promise<string> {
-  return requestJson(port, "POST", "/api/sessions", cookie).then((response) => {
-    const body = JSON.parse(response.body) as { id?: unknown };
-    if (response.status !== 201 || typeof body.id !== "string") {
-      throw new Error(`session create failed: ${response.status} ${response.body}`);
-    }
-    return body.id;
-  });
-}
-
-function prompt(port: number, cookie: string, session: string, message: string): Promise<void> {
-  return expectPromptStatus(port, cookie, session, message, 202);
-}
-
-function expectPromptStatus(
-  port: number,
-  cookie: string,
-  session: string,
-  message: string,
-  status: number,
-): Promise<void> {
-  return requestJson(port, "POST", `/api/sessions/${session}/prompt`, cookie, { message }).then(
-    (response) => {
-      if (response.status !== status) {
-        throw new Error(`prompt failed: ${response.status} ${response.body}`);
-      }
-    },
-  );
-}
-
-function requestJson(
-  port: number,
-  method: string,
-  path: string,
-  cookie: string | undefined,
-  body?: unknown,
-): Promise<{ status: number; headers: Headers; body: string }> {
-  return fetch(`http://127.0.0.1:${port}${path}`, {
-    method,
-    headers: {
-      ...(body === undefined ? {} : { "content-type": "application/json" }),
-      ...(cookie === undefined ? {} : { cookie }),
-    },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    signal: AbortSignal.timeout(10_000),
-  }).then(async (response) => ({
-    status: response.status,
-    headers: response.headers,
-    body: await response.text(),
-  }));
-}
-
 function captureSpawnHook(): string {
   return `import cp from 'node:child_process';
 import { appendFileSync } from 'node:fs';
@@ -694,11 +712,13 @@ function readOwnedMarker(dbPath: string): string {
   });
 }
 
+/** 只去掉已知的 SQLite ExperimentalWarning。 */
+function applicationStderr(stderr: string): string {
+  return stderr.replace(/^\(node:\d+\) /u, "").replace(SQLITE_EXPERIMENTAL_WARNING, "");
+}
+
 function expectApplicationStderr(stderr: string): void {
-  const applicationStderr = stderr
-    .replace(/^\(node:\d+\) /u, "")
-    .replace(SQLITE_EXPERIMENTAL_WARNING, "");
-  expect(applicationStderr).toBe(`${JSON.stringify({ event: "server_start_failed" })}\n`);
+  expect(applicationStderr(stderr)).toBe(`${JSON.stringify({ event: "server_start_failed" })}\n`);
 }
 
 async function expectGenericStartupFailure(server: StartedServer, port: number): Promise<void> {
@@ -737,21 +757,4 @@ async function startDeniedPreparation(
   );
   await expectGenericStartupFailure(server, port);
   expect(existsSync(join(seeded.scratchRoot, "state"))).toBe(false);
-}
-
-function compiledFixtureEnv(
-  scratchRoot: string,
-  port: number,
-  bin: string,
-  extra: Record<string, string>,
-): Record<string, string> {
-  return {
-    HOST: "127.0.0.1",
-    PORT: String(port),
-    DB_PATH: join(scratchRoot, "db", "dev.db"),
-    OMP_STATE_DIR: join(scratchRoot, "state"),
-    SANDBOX_ROOT: join(scratchRoot, "sandbox"),
-    OMP_BIN: bin,
-    ...extra,
-  };
 }

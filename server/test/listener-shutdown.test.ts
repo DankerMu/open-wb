@@ -4,7 +4,7 @@
  * 入口级记录/退出码走真实 compiled production entry。
  */
 
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { Agent, request as httpRequest } from "node:http";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
@@ -15,9 +15,11 @@ import { createApp, LISTENER_CLOSE_BUDGET_MS } from "../src/app.js";
 import { openDb } from "../src/core/db/index.js";
 import {
   compileServerEntry,
+  gatedModelsWriteHook,
   releaseStartupFixtures,
   reserveWildcardPort,
   startCompiledServer,
+  waitForFile,
 } from "./server-startup-helpers.js";
 
 /** 与 issue 反例同一 deadline。 */
@@ -483,7 +485,7 @@ describe("production entry listener force close", () => {
     const entered = join(root, "models-entered");
     const release = join(root, "models-release");
     const hook = join(root, "gated-models-write.cjs");
-    writeFileSync(hook, gatedModelsWriteHook());
+    writeFileSync(hook, gatedModelsWriteHook("throw"));
     const server = startCompiledServer(
       compiled.entry,
       {
@@ -524,42 +526,6 @@ describe("production entry listener force close", () => {
     }
   }, 90_000);
 });
-
-/**
- * 真实 post-listen 启动失败：写 models.yml 时先落 entered 标记并等待 release 文件，
- * 再以 EACCES 拒绝（等价于 state 目录不可写），让测试能在失败判定前放入在飞请求。
- */
-function gatedModelsWriteHook(): string {
-  return `'use strict';
-const fs = require('node:fs');
-const fsp = require('node:fs/promises');
-const { syncBuiltinESMExports } = require('node:module');
-const nativeWriteFile = fsp.writeFile;
-fsp.writeFile = async function gatedWriteFile(path, ...rest) {
-  if (typeof path === 'string' && path.endsWith('models.yml')) {
-    fs.writeFileSync(process.env.MODELS_ENTERED, '');
-    while (!fs.existsSync(process.env.MODELS_RELEASE)) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    const error = new Error('EACCES: permission denied');
-    error.code = 'EACCES';
-    throw error;
-  }
-  return nativeWriteFile.call(this, path, ...rest);
-};
-syncBuiltinESMExports();
-`;
-}
-
-async function waitForFile(path: string, deadlineMs: number): Promise<void> {
-  const deadline = performance.now() + deadlineMs;
-  while (!existsSync(path)) {
-    if (performance.now() > deadline) {
-      throw new Error(`timed out waiting for ${path}`);
-    }
-    await pause(10);
-  }
-}
 
 /** 与 server-startup-order.test.ts 同一精确剥离：只去掉已知的 SQLite ExperimentalWarning。 */
 function applicationStderr(stderr: string): string {
