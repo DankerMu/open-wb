@@ -21,6 +21,14 @@ SPA SHALL 以 history 路由提供 `/`、`/files`、`/center`、`/settings` 四�
 - WHEN 点击折叠按钮、reload、再展开；随后打开用户菜单
 - THEN 折叠后侧栏宽 48px、导航只显示图标且 hover/聚焦出现 Tooltip 标签，`localStorage.workbuddy-sidebar=collapsed`，reload 保持折叠；菜单只含 `退出登录` 一项，Escape 关闭并恢复触发器焦点
 
+#### Scenario: 窄屏导航覆盖层
+- WHEN jsdom 以 `(max-width: 760px)` 匹配的 `matchMedia` mock 挂载已认证应用于 `/`、点击顶栏 `打开导航`，在覆盖层中选择 `工作空间`，随后再打开并按 Escape；再在覆盖层内经 `用户菜单` → `退出登录` → `退出` 发起一个挂起的退出请求，Escape 关闭确认框与覆盖层后重开
+- THEN 挂载时无文档流侧栏、无 `dialog`、无 `主导航`，顶栏只含 `打开导航`，唯一 level-1 heading 为 hero；点击后出现 accessible name `导航` 的 `dialog`，其内主导航四项标签可见且无折叠按钮；选择后 `dialog` 消失、顶栏 heading 为 `工作空间`、焦点回到 `打开导航`、应用根节点不再 `aria-hidden`；Escape 同样关闭并归还焦点；覆盖层内 `用户菜单` 可打开且选择 `退出登录` 弹出确认框时覆盖层保持打开；退出请求挂起期间关闭确认框与覆盖层再重开，确认框仍为忙碌禁用 + `关闭`、状态提示仍在且不再发请求
+
+#### Scenario: 覆盖层不触碰折叠偏好
+- WHEN `localStorage.workbuddy-sidebar=collapsed` 时在 `≤760px` 打开覆盖层并选择路由，随后媒体查询 change 为不匹配，再 change 回匹配
+- THEN 覆盖层始终为展开态、storage 值仍为 `collapsed` 且无任何写入；切回宽屏后文档流侧栏以折叠态渲染、覆盖层与 `打开导航` 消失；再次进入窄屏时覆盖层处于关闭态
+
 #### Scenario: 顶栏三态
 - WHEN 依次访问 `/`（无会话）、`/?session=<id>`、`/files`
 - THEN 第一态 `≥761px` 无顶栏、`≤760px` 顶栏只含 `打开导航`，页面 level-1 heading 为 `WorkBuddy，我帮你`；第二态顶栏面包屑容器为 level-1 heading，accessible name `我的工作 / <服务端标题>`；第三态顶栏 heading level 1 为 `工作空间` 且页面主区无第二个页面级 level 1 heading（文件预览内 Markdown 的 `<h1>` 不计）
