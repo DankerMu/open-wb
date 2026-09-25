@@ -107,6 +107,11 @@ Must add/change：
    4. 执行 `hurl --test --variable base_url=http://127.0.0.1:<port> smoke/files.hurl`，预期只有 `files.hurl` 中 `file,fixtures/sandbox/u1/smoke-fixture/notes.csv;` 这条断言失败。
    5. 把该文件恢复成仓库版本后重跑同一条命令，应当通过。最后停掉服务。
 
+Review-round 补充（orchestrator 验证，PR #377 评论记录）：注入 1、3 分别停在第一条失败断言，因此另补两项，只改断言或只改夹具中的一处：
+- 1b：夹具不动，把 `:441` 的文案改为 `共 3 行 · 大文件仅预览前若干行` → ui-walk exit 2，失败在 `:441`（元素不存在）。
+- 3b：在夹具 `readme.md` 前加一个空行（渲染出的 h1 仍在）→ ui-walk exit 2，失败在 `:433`（期望 `# smoke-fixture`，实际 `" "`）。
+两项回退后都已用 `cmp` 核对一致。
+
 ## Test plan / verification
 - `make check` exit 0。注意：它的 naming-guard 只扫 `server/web/kbservice/scripts`（`Makefile:34`），size-guard 只看 `.ts/.tsx/.py`。
 - `bash scripts/naming-guard.sh smoke/fixtures/README.md smoke/fixtures/sandbox/u1/smoke-fixture/*` exit 0（新文件的命名检查）。
