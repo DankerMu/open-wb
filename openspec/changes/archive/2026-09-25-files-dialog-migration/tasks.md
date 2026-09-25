@@ -14,7 +14,7 @@
 - [x] 3.1 `make check` exit 0。
 - [x] 3.2 `npm run build --workspace web` exit 0。
 - [x] 3.3 ui-walk（CI 环境变量）exit 0。
-- [ ] 3.4 archive PR：父 `ui-primitives` 中「既有对话框迁移不回归」由父独有转为已晋升（父 delta 以晋升文本为底同步迁移句）；父 `files-web`「文件界面与键盘可用性」同步本刀新增句与 Scenario；勾选父 tasks 1.6b；关闭 #302。
+- [x] 3.4 archive PR：父 `ui-primitives` 中「既有对话框迁移不回归」由父独有转为已晋升（父 delta 以晋升文本为底同步迁移句）；父 `files-web`「文件界面与键盘可用性」同步本刀新增句与 Scenario；勾选父 tasks 1.6b；关闭 #302。
 
 ## Risk pack mapping
 - Not selected Public API / CLI / script entry：不改基元 API；files 组件为 feature 内部。

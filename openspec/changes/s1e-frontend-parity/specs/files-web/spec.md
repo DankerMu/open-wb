@@ -44,7 +44,7 @@
 - THEN 目录行为 `folder` 图标；四个文件依次显示 `file-text`/`table`/`image`/`archive` 图标与 `2.0 KB`、`1.5 KB`、`86.3 MB`、`12 B`；文件按钮可访问名恰为文件名；预览头显示 `file-text` 图标、路径与 `2.0 KB · <mtime>`
 
 ### Requirement: 文件界面与键盘可用性
-文件页 SHALL 只经 ui-primitives 取样式与行为（token、`Dialog`、`Menu`（含 `＋` 创建菜单，替换手写 `role="menu"`）、`Popover`、`EmptyState`、`Icon`、`Button`），桌面左右分栏（树栏 `280px`，`≤900px` 时 `210px`），`≤760px` 纵向布局（树在上、预览在下，各自内部滚动）；长路径与文件名不得撑宽页面（树条目 `text-overflow: ellipsis` + `title` 为全名），代码和表格在预览容器内部滚动（容器 `overflow: auto`）。创建对话框 SHALL 为阻止背景交互的模态，打开时聚焦首个表单控件，Tab/Shift+Tab 留在框内，Escape/取消关闭并恢复触发器焦点；请求进行中保持忙碌反馈且不得重复提交，但仍允许取消等待，通过既有 AbortController 与代际守卫防止迟到响应影响新界面。取消等待不承诺撤销服务端已完成操作，界面 SHALL 明示可刷新确认结果。既有账号/请求代际隔离与安全预览语义 SHALL 保持。
+文件页 SHALL 只经 ui-primitives 取样式与行为（token、`Dialog`、`Menu`（含 `＋` 创建菜单，替换手写 `role="menu"`）、`Popover`、`EmptyState`、`Icon`、`Button`），桌面左右分栏（树栏 `280px`，`≤900px` 时 `210px`），`≤760px` 纵向布局（树在上、预览在下，各自内部滚动）；长路径与文件名不得撑宽页面（树条目 `text-overflow: ellipsis` + `title` 为全名），代码和表格在预览容器内部滚动（容器 `overflow: auto`）。创建对话框 SHALL 为阻止背景交互的模态，打开时聚焦首个表单控件，Tab/Shift+Tab 留在框内，Escape/取消关闭并恢复触发器焦点；请求进行中保持忙碌反馈且不得重复提交，但仍允许取消等待，通过既有 AbortController 与代际守卫防止迟到响应影响新界面。取消等待不承诺撤销服务端已完成操作，界面 SHALL 明示可刷新确认结果。创建对话框 SHALL 经 `Dialog` 基元渲染并以请求进行中作为 `busy`：打开时的首个表单控件为 `新建工作空间` 的 `工作空间名称`、`新建文件夹` 的 `位置`；右上 `关闭`、Escape、遮罩点击与 `取消` 同义；取消类关闭后焦点 SHALL 回到发起该流程的触发器——经切换器 `＋ 新建工作空间` 打开时为 `选择工作空间`，经 `＋` 菜单打开时为 `新建`；提交按钮因请求进行中被禁用后焦点 SHALL 仍在对话框内。`＋` 菜单与切换器 SHALL 分别经 `Menu` 与 `Popover` 基元（切换器打开时聚焦搜索框，Escape 关闭后焦点回 `选择工作空间`）。既有账号/请求代际隔离与安全预览语义 SHALL 保持。既有账号/请求代际隔离与安全预览语义 SHALL 保持。
 
 #### Scenario: 创建弹窗的键盘闭环
 - WHEN 用户以键盘打开创建弹窗、循环 Tab、按 Escape
@@ -57,3 +57,7 @@
 #### Scenario: 三档宽度布局
 - WHEN 在 1440、1024、880、390 宽度打开已选空间的 `/files`，树中含一个名称 ≥48 字符的目录
 - THEN 1440 与 1024 树栏 280px 且并排，880 树栏 210px 且并排，390 纵向堆叠；各宽度 `document.documentElement.scrollWidth <= innerWidth`（1440/880/390 由 `make ui-walk` 断言——880 为 `desktop-light` project 内临时 viewport，1024 由 `make ui-shots` 每格断言）；超长目录名行 `scrollWidth <= clientWidth` 且 `title` 为全名；csv/代码预览容器计算样式 `overflow-x` 为 `auto`
+
+#### Scenario: 创建流程焦点闭环
+- WHEN 在 jsdom 经切换器 `＋ 新建工作空间` 打开对话框后按 Escape；经 `＋` 菜单 `新建工作空间` 打开后点击 `取消`；经 `＋` 菜单 `新建文件夹` 打开后点击 `关闭`；在 `新建文件夹` 中聚焦 `创建` 并提交、`POST …/dirs` 挂起后点击 `取消`；经 `＋` 菜单 `新建文件夹` 打开后点击遮罩；打开切换器后按 Escape；在 `新建工作空间` 中聚焦 `创建` 并提交、`POST /api/workspaces` 挂起后以 409 解决
+- THEN 切换器打开时焦点在搜索框；两个对话框打开时焦点分别在 `工作空间名称` 与 `位置`，且 `aria-modal="true"`；四种取消类关闭（Escape、`取消`、`关闭`、遮罩）后焦点依次回到 `选择工作空间`、`新建`、`新建`、`新建`，均 0 次 POST；切换器 Escape 后焦点回 `选择工作空间`；挂起期间 `创建` 禁用、焦点在对话框内的 `关闭`，取消后请求 signal 已中止、焦点回 `新建`；工作空间挂起期间 `创建` 禁用、焦点在 `关闭`，409 后显示 `同名工作空间已存在`、对话框仍开、`创建` 可用、焦点在对话框内；菜单项恰为 `新建文件夹`、`新建工作空间`，菜单 Escape 后焦点回 `新建`
