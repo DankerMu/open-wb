@@ -79,7 +79,7 @@ async function expectRouteLayout(page: Page, project: WalkProject): Promise<void
   }
 }
 
-async function withViewport(
+export async function withViewport(
   page: Page,
   size: { width: number; height: number },
   check: () => Promise<void>,

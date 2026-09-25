@@ -248,3 +248,179 @@ describe("(F8) button presentation", () => {
     expect(button.parentElement?.classList.contains("chat-transcript-frame")).toBe(true);
   });
 });
+
+/* Spy ResizeObserver for R1–R5: installed on globalThis before mount and restored afterwards.
+   `resizeElement` is a no-op when no instance observes the element, so on a source without an
+   observer the R cases fail on their assertions rather than crash. */
+class SpyResizeObserver {
+  static instances: SpyResizeObserver[] = [];
+  readonly observed = new Set<Element>();
+  readonly history: Element[] = [];
+  disconnects = 0;
+
+  constructor(private readonly callback: ResizeObserverCallback) {
+    SpyResizeObserver.instances.push(this);
+  }
+
+  observe(target: Element) {
+    this.observed.add(target);
+    this.history.push(target);
+  }
+
+  unobserve(target: Element) {
+    this.observed.delete(target);
+  }
+
+  disconnect() {
+    this.disconnects += 1;
+    this.observed.clear();
+  }
+
+  fire() {
+    this.callback([], this as unknown as ResizeObserver);
+  }
+}
+
+/** Observers created for a follow transcript (other components may observe other elements). */
+function followObservers(): SpyResizeObserver[] {
+  return SpyResizeObserver.instances.filter((spy) =>
+    spy.history.some((target) => target instanceof HTMLElement && isTranscript(target)),
+  );
+}
+
+function resizeElement(element: Element) {
+  act(() => {
+    for (const spy of SpyResizeObserver.instances) {
+      if (spy.observed.has(element)) spy.fire();
+    }
+  });
+}
+
+function thread(): HTMLElement {
+  const element = transcript().firstElementChild;
+  if (!(element instanceof HTMLElement) || !element.matches("section.chat-thread")) {
+    throw new Error("expected section.chat-thread as the transcript's content root");
+  }
+  return element;
+}
+
+function distance(): number {
+  return metrics.scrollHeight - metrics.scrollTop - metrics.clientHeight;
+}
+
+describe("(R) size changes without a content change", () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, "ResizeObserver");
+
+  beforeEach(() => {
+    SpyResizeObserver.instances = [];
+    Object.defineProperty(globalThis, "ResizeObserver", {
+      configurable: true,
+      writable: true,
+      value: SpyResizeObserver,
+    });
+  });
+
+  afterEach(() => {
+    cleanupChatPage();
+    if (original) Object.defineProperty(globalThis, "ResizeObserver", original);
+    else Reflect.deleteProperty(globalThis, "ResizeObserver");
+  });
+
+  it("(R1) re-sticks a pinned transcript when its container shrinks", async () => {
+    await openLongSession();
+    metrics.clientHeight = 452;
+    expect(distance()).toBe(48);
+    resizeElement(transcript());
+    expect(metrics.scrollTop).toBe(2548);
+    expect(distance()).toBeLessThanOrEqual(4);
+    expect(jumpButton()).toBeNull();
+  });
+
+  it("(R2) keeps a scrolled-up position and shows 回到最新 once growth exceeds a viewport", async () => {
+    await openLongSession();
+    userScroll(2200);
+    expect(jumpButton()).toBeNull();
+    metrics.scrollHeight = 3300;
+    resizeElement(thread());
+    expect(metrics.scrollTop).toBe(2200);
+    expect(jumpButton()).not.toBeNull();
+  });
+
+  it("(R3) keeps following when the content root grows while pinned", async () => {
+    await openLongSession();
+    metrics.scrollHeight = 3600;
+    resizeElement(thread());
+    expect(metrics.scrollTop).toBe(3100);
+    expect(distance()).toBeLessThanOrEqual(4);
+    expect(jumpButton()).toBeNull();
+  });
+
+  it("(R4) binds the content root once it renders and disconnects on unmount", async () => {
+    metrics.scrollHeight = 500;
+    const history = deferredResponse();
+    const { fetchMock } = renderChatPage(`/?session=${SESSION_ID}`, {
+      "/api/sessions": () => jsonResponse({ sessions: [runningSnapshot().session] }),
+      [SESSION_MESSAGES]: () => history.promise,
+    });
+    await waitFor(() => expect(calls(fetchMock, SESSION_MESSAGES)).toHaveLength(1));
+    const [spy] = followObservers();
+    expect(followObservers()).toHaveLength(1);
+    expect(transcript().firstElementChild).toBeNull();
+    expect([...(spy?.observed ?? [])]).toEqual([transcript()]);
+    await act(async () => {
+      metrics.scrollHeight = 3000;
+      history.resolve(jsonResponse(runningSnapshot()));
+    });
+    await waitFor(() => expect(assistantText()).toContain("起始"));
+    expect([...(spy?.observed ?? [])]).toEqual([transcript(), thread()]);
+    const observedThread = thread();
+    await growAndStream(3200, "增量一");
+    expect(thread()).toBe(observedThread);
+    expect(spy?.history).toHaveLength(2);
+    expect(spy?.disconnects).toBe(0);
+    cleanupChatPage();
+    expect(followObservers()).toHaveLength(1);
+    expect(spy?.disconnects).toBe(1);
+    expect(spy?.observed.size).toBe(0);
+  });
+
+  it("(R4) disconnects on a session switch and observes the new session's content root", async () => {
+    const other = deferredResponse();
+    const mounted = renderChatPage(`/?session=${SESSION_ID}`, {
+      "/api/sessions": () =>
+        jsonResponse({ sessions: [runningSnapshot().session, otherIdleSession()] }),
+      [SESSION_MESSAGES]: () => jsonResponse(runningSnapshot()),
+      [OTHER_MESSAGES]: () => other.promise,
+    });
+    await waitFor(() => expect(assistantText()).toContain("起始"));
+    const [first] = followObservers();
+    expect(followObservers()).toHaveLength(1);
+    await act(async () => {
+      await mounted.router.navigate(`/?session=${OTHER_SESSION_ID}`);
+    });
+    await waitFor(() => expect(calls(mounted.fetchMock, OTHER_MESSAGES)).toHaveLength(1));
+    expect(first?.disconnects).toBe(1);
+    expect(first?.observed.size).toBe(0);
+    const [, second] = followObservers();
+    expect(followObservers()).toHaveLength(2);
+    expect([...(second?.observed ?? [])]).toEqual([transcript()]);
+    await act(async () => {
+      metrics.scrollHeight = 4000;
+      other.resolve(jsonResponse(otherSnapshot()));
+    });
+    expect(await screen.findByText("other user", { exact: true })).toBeTruthy();
+    expect([...(second?.observed ?? [])]).toEqual([transcript(), thread()]);
+    expect(second?.disconnects).toBe(0);
+    expect(metrics.scrollTop).toBe(3500);
+  });
+
+  it("(R5) degrades to content-only follow without ResizeObserver", async () => {
+    Reflect.deleteProperty(globalThis, "ResizeObserver");
+    expect(typeof globalThis.ResizeObserver).toBe("undefined");
+    await openLongSession();
+    await growAndStream(3200, "增量一");
+    expect(metrics.scrollTop).toBe(2700);
+    expect(jumpButton()).toBeNull();
+    expect(SpyResizeObserver.instances).toHaveLength(0);
+  });
+});
