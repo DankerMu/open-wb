@@ -9,7 +9,7 @@
 - [x] 2.3 反向注入八项各红并回退（design Required evidence）。
 
 ## 3. Verification
-- [ ] 3.0 archive PR 同步父 delta `s1e-frontend-parity/specs/chat-web/spec.md` Messages 段：补"头像为装饰性（`aria-hidden`）""源 HTML 转义且不注入"两处扩展；"preserve complete text (whitespace per Markdown semantics; `复制` copies the raw text)"改为"visible text following Markdown semantics (markup consumed, link destinations dropped); `复制` copies the raw text"。
+- [x] 3.0 archive PR 同步父 delta `s1e-frontend-parity/specs/chat-web/spec.md` Messages 段：补"头像为装饰性（`aria-hidden`）""源 HTML 转义且不注入"两处扩展；"preserve complete text (whitespace per Markdown semantics; `复制` copies the raw text)"改为"visible text following Markdown semantics (markup consumed, link destinations dropped); `复制` copies the raw text"。
 - [x] 3.1 `make check` exit 0。
 - [x] 3.2 `npm run build --workspace web` exit 0。
 - [x] 3.3 ui-walk（CI 环境变量）exit 0。
@@ -26,3 +26,5 @@
 - Not selected Error handling / rollback / partial outputs：错误呈现不改。
 - Not selected Release / packaging / dependency compatibility：无。
 - Not selected Documentation / migration notes：无迁移。
+
+3.0 实际同步：父 delta Messages 段三处措辞（"visible text" 句沿用子 delta 的 "with visible text …" 写法并保留 `复制` 分句）；子 Scenario「消息呈现与流式光标」并入父 delta（父为整段替换）；父 tasks 4.2 行记录正文在步骤卡之前与先拆 `chat.css`。
