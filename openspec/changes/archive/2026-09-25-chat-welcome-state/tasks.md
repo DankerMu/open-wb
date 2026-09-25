@@ -9,7 +9,7 @@
 - [x] 2.3 反向注入九项各红并回退（design Required evidence）。
 
 ## 3. Verification
-- [ ] 3.0 archive PR：父 delta `s1e-frontend-parity/specs/chat-web/spec.md` 的 Welcome state 段与 Scenario 原句照搬，无扩展则不同步；若实现偏离（如卡片可访问名、组件拆分）影响 spec 文本，同步之。
+- [x] 3.0 archive PR：父 delta `s1e-frontend-parity/specs/chat-web/spec.md` 的 Welcome state 段与 Scenario 原句照搬，无扩展则不同步；若实现偏离（如卡片可访问名、组件拆分）影响 spec 文本，同步之。实际：Welcome 段补锁定期禁用句（子/父 delta 同步），其余偏离不触及 spec 文本。
 - [x] 3.1 `make check` exit 0。
 - [x] 3.2 `npm run build --workspace web` exit 0。
 - [x] 3.3 ui-walk（CI 环境变量）exit 0。
