@@ -1,9 +1,10 @@
 import { type FormEvent, memo, type ReactNode } from "react";
 import { MarkdownView } from "../../lib/markdown-view.js";
 import type { ChatSession } from "../../lib/session-contract.js";
-import { BrandMark } from "../../ui/index.js";
+import { BrandMark, Icon } from "../../ui/index.js";
 import { Composer } from "./composer.js";
 import { SESSION_STATUS_LABEL } from "./status-label.js";
+import { summarizeStepDetail } from "./step-summary.js";
 import type { ChatState } from "./stream.js";
 import { WelcomeIntro, WelcomePlaybooks } from "./welcome.js";
 
@@ -29,11 +30,6 @@ type ConversationViewProps = {
 
 type ChatMessageView = ChatState["messages"][number];
 type ChatStepView = ChatMessageView["steps"][number];
-
-function isVerboseToolDetail(detail: string): boolean {
-  const start = detail.trimStart();
-  return start.startsWith("{") || start.startsWith("[");
-}
 
 function SessionEntries({
   onSelectSession,
@@ -79,27 +75,31 @@ function SessionEntries({
 }
 
 function StepCard({ step }: { step: ChatStepView }) {
-  const detail = isVerboseToolDetail(step.detail) ? (
-    <details className="chat-step-disclosure" open>
-      <summary className="chat-step-summary">原始输出</summary>
-      <p className="chat-step-detail">{step.detail}</p>
-    </details>
-  ) : (
-    <p className="chat-step-detail">{step.detail}</p>
-  );
+  const label = SESSION_STATUS_LABEL[step.status];
+  const summary = summarizeStepDetail(step.detail);
+  const pulse = step.status === "running" ? " ui-pulse" : "";
   return (
     <section aria-label={step.name} className="chat-step">
       <div className="chat-step-head">
+        <span className="chat-step-icon">
+          <Icon name={step.name === "bash" ? "terminal" : "wrench"} size={14} />
+        </span>
         <strong className="chat-step-name">{step.name}</strong>
         <p
-          aria-label={`${step.name} ${step.status}`}
-          className={`chat-step-status chat-step-status-${step.status}`}
+          aria-label={`${step.name} ${label}`}
+          className={`chat-step-status chat-step-status-${step.status}${pulse}`}
           role="status"
         >
-          {step.status}
+          {label}
         </p>
       </div>
-      {detail}
+      {summary === "" ? null : <p className="chat-step-line">{summary}</p>}
+      {step.detail === "" ? null : (
+        <details className="chat-step-disclosure">
+          <summary className="chat-step-summary">原始输出</summary>
+          <pre className="chat-step-detail">{step.detail}</pre>
+        </details>
+      )}
     </section>
   );
 }

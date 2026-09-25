@@ -58,7 +58,7 @@ async function assistantArticle(): Promise<HTMLElement> {
 }
 
 function chatCss(): string {
-  return stripComments(readRepoFile("web/src/features/chat/chat.css"));
+  return stripComments(readRepoFile("web/src/features/chat/messages.css"));
 }
 
 describe("(M1) assistant Markdown renders through the shared safe renderer", () => {
@@ -207,8 +207,8 @@ describe("(M5) static contract", () => {
     expect(injecting).toEqual([]);
   });
 
-  it("chat.css carries no literal colors", () => {
-    const raw = readRepoFile("web/src/features/chat/chat.css");
+  it("messages.css carries no literal colors", () => {
+    const raw = readRepoFile("web/src/features/chat/messages.css");
     for (const pattern of COLOR_LITERAL_PATTERNS) {
       expect(raw).not.toMatch(pattern);
     }

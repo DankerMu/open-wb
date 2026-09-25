@@ -129,7 +129,7 @@ describe("chat page route integration", () => {
     ).toBeTruthy();
     expect(screen.getByText("bash", { exact: true })).toBeTruthy();
     expect(screen.getByText(BASH_START_DETAIL, { exact: true })).toBeTruthy();
-    expect(screen.getByRole("status", { name: "bash running" })).toBeTruthy();
+    expect(screen.getByRole("status", { name: "bash 运行中" })).toBeTruthy();
     expect(screen.getByText("生成中", { exact: true })).toBeTruthy();
     expect(
       (screen.getByRole("textbox", { name: "给助手发消息" }) as HTMLTextAreaElement).disabled,
@@ -163,8 +163,8 @@ describe("chat page route integration", () => {
     expect(screen.getByText(historyUser.content, exactText)).toBeTruthy();
     expect(screen.getByText(BASH_RESULT_DETAIL, { exact: true })).toBeTruthy();
     expect(screen.queryByText(BASH_START_DETAIL, { exact: true })).toBeNull();
-    expect(screen.queryByRole("status", { name: "bash running" })).toBeNull();
-    expect(screen.getByRole("status", { name: "bash done" })).toBeTruthy();
+    expect(screen.queryByRole("status", { name: "bash 运行中" })).toBeNull();
+    expect(screen.getByRole("status", { name: "bash 已完成" })).toBeTruthy();
     expect(screen.queryByText("生成中", { exact: true })).toBeNull();
     expect(
       (screen.getByRole("textbox", { name: "给助手发消息" }) as HTMLTextAreaElement).disabled,
