@@ -210,6 +210,37 @@ describe("SessionRuntime native drain, stale callbacks and transport errors", ()
     expect(world.child.stdout.destroyed).toBe(true);
   });
 
+  it("still reclaims a held stdout pipe when a live child emits error before exiting (#327)", async () => {
+    const world = openWired();
+    const pending = collectUntilError(world.runtime.prompt("held-error"));
+    await world.waitPrompt();
+    const child = world.child;
+    const signals: NodeJS.Signals[] = [];
+    const kill = child.kill.bind(child);
+    child.kill = (signal: NodeJS.Signals = "SIGKILL") => {
+      signals.push(signal);
+      return kill(signal);
+    };
+    const shutdown = world.runtime.shutdown();
+    const settled = observePromise(shutdown);
+    child.emit("error", Object.assign(new Error("kill EPERM"), { code: "EPERM" }));
+    child.nativeExit(7);
+    await waitImmediate();
+    expect(signals).toEqual([]);
+    expect(settled.outcome).toBe("pending");
+    world.clock.advance(7_999);
+    await waitImmediate();
+    expect(child.stdout.destroyed).toBe(false);
+    expect(settled.outcome).toBe("pending");
+    world.clock.advance(1);
+    await shutdown;
+    expect(child.stdout.destroyed).toBe(true);
+    expect(signals).toEqual([]);
+    expect(world.tokens.revoked).toEqual([world.tokens.issued[0]]);
+    expect(world.tokens.live.get(SESSION_ID)).toBeUndefined();
+    expect((await pending).error).toBeInstanceOf(AgentUnavailableError);
+  });
+
   it("ignores stale generation frames and exit after a successor starts", async () => {
     const world = openWired();
     const first = collectUntilError(world.runtime.prompt("old"));
