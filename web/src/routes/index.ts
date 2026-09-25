@@ -1,1 +1,2 @@
-export { createAppRouter, routeManifest } from "./router.js";
+export { routeManifest } from "./manifest.js";
+export { createAppRouter } from "./router.js";

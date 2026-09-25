@@ -87,6 +87,8 @@ async function walkProductionOrigin(page: Page, oracle: AuthOracle): Promise<voi
   await expect(page.getByText(PRODUCTION_SERVICE_NAME, { exact: true })).toBeVisible();
   await expect(page.getByText(`版本 ${PRODUCTION_SERVICE_VERSION}`, { exact: true })).toBeVisible();
 
+  await walkSidebarCollapse(page);
+
   await page.getByRole("radio", { name: "深色", exact: true }).check();
   await expectDarkTheme(page);
   expect(
@@ -96,7 +98,8 @@ async function walkProductionOrigin(page: Page, oracle: AuthOracle): Promise<voi
   await expectAuthenticatedRoute(page, "/settings", "设置", "设置");
   await expectDarkTheme(page);
 
-  await sidebarFooter(page).getByRole("button", { name: "退出登录" }).click();
+  await sidebarFooter(page).getByRole("button", { name: "用户菜单" }).click();
+  await page.getByRole("menuitem", { name: "退出登录" }).click();
   const dialog = page.getByRole("alertdialog");
   await expect(dialog.getByRole("heading", { name: "退出登录？" })).toBeVisible();
   await expect(
@@ -110,6 +113,19 @@ async function walkProductionOrigin(page: Page, oracle: AuthOracle): Promise<voi
   oracle.phase = "post-logout-reload";
   await page.reload();
   await expectLoggedOutOnSettings(page);
+}
+
+// 仍在 authenticated 阶段：reload 只产生 200 的 /api/auth/me，oracle 放行。
+async function walkSidebarCollapse(page: Page): Promise<void> {
+  const sidebar = page.getByRole("complementary", { name: "侧栏", exact: true });
+  await sidebar.getByRole("button", { name: "折叠侧栏" }).click();
+  await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(48);
+  await page.reload();
+  await expectAuthenticatedRoute(page, "/settings", "设置", "设置");
+  await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(48);
+  await sidebar.getByRole("button", { name: "展开侧栏" }).click();
+  await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(288);
+  await expectPrincipalFooter(page);
 }
 
 async function expectDesktopLayout(page: Page): Promise<string> {
