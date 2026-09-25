@@ -108,16 +108,18 @@ describe("SessionStore steps and terminal identity", () => {
           ordinal: 0,
           name: "real step",
           detail: "started",
+          output: null,
           status: "running",
           started_at: FIXED_NOW + 3,
           ended_at: null,
         });
 
         vi.setSystemTime(FIXED_NOW + 4);
-        expect(store.finishStep(stepId, "done", "finished detail")).toBe(true);
+        expect(store.finishStep(stepId, "done", "finished output")).toBe(true);
         const terminalStep = stepRow(db, stepId);
         expect(terminalStep).toMatchObject({
-          detail: "finished detail",
+          detail: "started",
+          output: "finished output",
           status: "done",
           ended_at: FIXED_NOW + 4,
         });
@@ -142,13 +144,19 @@ describe("SessionStore steps and terminal identity", () => {
           detail: "original failure",
         });
         vi.setSystemTime(FIXED_NOW + 6);
-        expect(store.finishStep(alreadyFailed, "failed")).toBe(true);
+        expect(store.finishStep(alreadyFailed, "failed", "boom")).toBe(true);
         vi.setSystemTime(FIXED_NOW + 7);
         const stillRunning = store.startStep(accepted.assistantMessageId, {
           ordinal: 1,
           name: "settle on finish",
           detail: "waiting",
         });
+
+        const liveSteps = store.getMessages(session.id, "u1")?.messages[1]?.steps;
+        expect(liveSteps?.map((step) => [step.detail, step.output, step.status])).toEqual([
+          ["original failure", "boom", "failed"],
+          ["waiting", "", "running"],
+        ]);
 
         vi.setSystemTime(FIXED_NOW + 8);
         expect(store.finishTurn(accepted.assistantMessageId, "done")).toBe(true);
@@ -162,11 +170,13 @@ describe("SessionStore steps and terminal identity", () => {
         });
         expect(stepRow(db, alreadyFailed)).toMatchObject({
           detail: "original failure",
+          output: "boom",
           status: "failed",
           ended_at: FIXED_NOW + 6,
         });
         expect(stepRow(db, stillRunning)).toMatchObject({
           detail: "waiting",
+          output: null,
           status: "done",
           ended_at: FIXED_NOW + 8,
         });
@@ -191,7 +201,7 @@ describe("SessionStore steps and terminal identity", () => {
         const second = store.acceptPrompt(session.id, "u1", "second turn");
         const beforeStaleCallbacks = persistenceSnapshot(db);
         expect(store.appendDelta(first.assistantMessageId, "late body")).toBe(false);
-        expect(store.finishStep(firstStep, "failed", "late detail")).toBe(false);
+        expect(store.finishStep(firstStep, "failed", "late output")).toBe(false);
         expect(store.finishTurn(first.assistantMessageId, "failed")).toBe(false);
         vi.advanceTimersByTime(2_000);
         expect(persistenceSnapshot(db)).toEqual(beforeStaleCallbacks);

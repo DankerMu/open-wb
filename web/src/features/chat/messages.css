@@ -280,8 +280,10 @@
   color: var(--wb-text-secondary);
 }
 
-/* The pre resets its user-agent margin; only the gap under the summary remains. */
-.chat-step-detail {
+/* The pre resets its user-agent margin; only the gap under the summary remains.
+   Args (detail) and tool output share the same wrap/scroll rules, args first (issue 367). */
+.chat-step-detail,
+.chat-step-output {
   margin: 6px 0 0;
   max-height: 12rem;
   overflow: auto;

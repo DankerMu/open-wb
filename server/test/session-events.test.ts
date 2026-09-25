@@ -24,13 +24,8 @@ const BASH_DETAIL = '{"command":"echo workbuddy-smoke"}';
 const READ_DETAIL = '{"path":"README.md"}';
 const SANDBOX_PATH = "/srv/workbuddy/sandbox/u1/demo/a.md";
 const SANDBOX_DETAIL = `{"path":"${SANDBOX_PATH}"}`;
-const NEWLINE_RESULT_DETAIL = '{"ok":true,"stdout":"workbuddy-smoke\\n"}';
+const NEWLINE_RESULT_OUTPUT = '{"ok":true,"stdout":"workbuddy-smoke\\n"}';
 const LINE_SEPARATOR_DETAIL = '{"note":"a\\u2028b\\u2029c"}';
-const ASTRAL_ARGS = {
-  k: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa𝄞z",
-} as const;
-const ASTRAL_DETAIL_120 =
-  '{"k":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa𝄞';
 
 type EventState = ReturnType<typeof createEventState>;
 
@@ -183,7 +178,7 @@ describe("session event mapping — normal stream and noise filter", () => {
           messageId: MESSAGE_ID,
           stepId: "call_bash",
           status: "done",
-          detail: NEWLINE_RESULT_DETAIL,
+          output: NEWLINE_RESULT_OUTPUT,
         },
       },
       { type: "text.delta", data: { messageId: MESSAGE_ID, delta: "world" } },
@@ -193,7 +188,7 @@ describe("session event mapping — normal stream and noise filter", () => {
           messageId: MESSAGE_ID,
           stepId: "call_read",
           status: "done",
-          detail: '{"text":"# Open WorkBuddy"}',
+          output: '{"text":"# Open WorkBuddy"}',
         },
       },
       { type: "turn.end", data: { messageId: MESSAGE_ID, status: "done" } },
@@ -285,7 +280,7 @@ describe("session event mapping — first failure through maintenance", () => {
           messageId: MESSAGE_ID,
           stepId: "call_fail",
           status: "failed",
-          detail: '{"stderr":"boom"}',
+          output: '{"stderr":"boom"}',
         },
       },
       { type: "turn.end", data: { messageId: MESSAGE_ID, status: "done" } },
@@ -450,7 +445,7 @@ describe("session event mapping — step identity and stale inputs", () => {
           messageId: MESSAGE_ID,
           stepId: "__proto__",
           status: "failed",
-          detail: '{"ok":true}',
+          output: '{"ok":true}',
         },
       },
     ]);
@@ -474,7 +469,7 @@ describe("session event mapping — step identity and stale inputs", () => {
           messageId: MESSAGE_ID,
           stepId: "constructor",
           status: "done",
-          detail: '{"text":"pkg"}',
+          output: '{"text":"pkg"}',
         },
       },
     ]);
@@ -486,7 +481,7 @@ describe("session event mapping — step identity and stale inputs", () => {
     ]);
   });
 
-  it("preserves initial detail when result is absent, summarizes explicit null, and truncates at 120 Unicode points", () => {
+  it("yields empty output for absent and null results, escapes line separators in detail, and keeps missing args empty", () => {
     let state = bind();
     ({ state } = applyFrame(state, { type: "agent_start" }));
     ({ state } = applyFrame(state, toolStart("call_keep", "bash", { command: "keep" })));
@@ -498,7 +493,7 @@ describe("session event mapping — step identity and stale inputs", () => {
           messageId: MESSAGE_ID,
           stepId: "call_keep",
           status: "done",
-          detail: '{"command":"keep"}',
+          output: "",
         },
       },
     ]);
@@ -513,7 +508,7 @@ describe("session event mapping — step identity and stale inputs", () => {
           messageId: MESSAGE_ID,
           stepId: "call_null",
           status: "done",
-          detail: "null",
+          output: "",
         },
       },
     ]);
@@ -536,20 +531,7 @@ describe("session event mapping — step identity and stale inputs", () => {
     ]);
     state = separators.state;
 
-    const astral = applyFrame(state, toolStart("call_astral", "wide", ASTRAL_ARGS));
-    expect(astral.events).toEqual([
-      {
-        type: "step.start",
-        data: {
-          messageId: MESSAGE_ID,
-          stepId: "call_astral",
-          name: "wide",
-          detail: ASTRAL_DETAIL_120,
-        },
-      },
-    ]);
-
-    const missingArgs = applyFrame(astral.state, toolStart("call_empty", "bash"));
+    const missingArgs = applyFrame(state, toolStart("call_empty", "bash"));
     expect(missingArgs.events).toEqual([
       {
         type: "step.start",
@@ -580,7 +562,7 @@ describe("session event mapping — step identity and stale inputs", () => {
           messageId: MESSAGE_ID,
           stepId: "shared",
           status: "done",
-          detail: '{"from":"first"}',
+          output: '{"from":"first"}',
         },
       },
     ]);
@@ -593,7 +575,7 @@ describe("session event mapping — step identity and stale inputs", () => {
           messageId: OTHER_MESSAGE_ID,
           stepId: "shared",
           status: "done",
-          detail: '{"from":"second"}',
+          output: '{"from":"second"}',
         },
       },
     ]);
@@ -609,6 +591,31 @@ describe("session event mapping — step identity and stale inputs", () => {
     expect(applyFrame(secondEnd.state, { type: "agent_end", messages: [] }).events).toEqual([
       { type: "turn.end", data: { messageId: OTHER_MESSAGE_ID, status: "done" } },
     ]);
+  });
+});
+
+describe("session event mapping — real AgentToolResult output (#367)", () => {
+  it("normalizes content text/image blocks into output and keeps detail off step.end", () => {
+    const { events } = applyAll(bind(), [
+      { type: "agent_start" },
+      toolStart("call_real", "bash", { command: "echo a" }),
+      toolEnd("call_real", "bash", {
+        result: {
+          content: [
+            { type: "text", text: "a" },
+            { type: "image", data: "iVBORw0KGgoAAAA", mimeType: "image/png" },
+            { type: "text", text: "b" },
+          ],
+          details: { exitCode: 0 },
+          providerMetadata: { vendor: "x" },
+        },
+      }),
+    ]);
+    expect(events.at(-1)).toEqual({
+      type: "step.end",
+      data: { messageId: MESSAGE_ID, stepId: "call_real", status: "done", output: "a\n[图片]\nb" },
+    });
+    expect(events.at(-1)?.data).not.toHaveProperty("detail");
   });
 });
 
@@ -628,6 +635,24 @@ describe("session event mapping — absolute sandbox paths stay verbatim (ADR-00
         },
       },
     ]);
+  });
+  it("keeps an absolute sandbox path from a result text block unchanged in the step.end output", () => {
+    const { events } = applyAll(bind(), [
+      { type: "agent_start" },
+      toolStart("call_path", "read", { path: SANDBOX_PATH }),
+      toolEnd("call_path", "read", {
+        result: { content: [{ type: "text", text: `wrote ${SANDBOX_PATH}` }] },
+      }),
+    ]);
+    expect(events.at(-1)).toEqual({
+      type: "step.end",
+      data: {
+        messageId: MESSAGE_ID,
+        stepId: "call_path",
+        status: "done",
+        output: `wrote ${SANDBOX_PATH}`,
+      },
+    });
   });
 });
 

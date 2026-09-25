@@ -35,6 +35,7 @@ const snapshotStep = {
   ordinal: 0,
   name: "first work",
   detail: SNAPSHOT_CONTENT,
+  output: `out\n${SNAPSHOT_CONTENT}`,
   status: "running" as const,
 };
 
@@ -251,6 +252,7 @@ describe("Sessions API client snapshot domain contract", () => {
               ordinal: SAFE_INTEGER_MAX,
               name: "",
               detail: "",
+              output: "",
               status: "failed" as const,
             },
           ],
@@ -403,10 +405,34 @@ describe("Sessions API client snapshot rejection contract", () => {
                 id: -7,
                 ordinal: 0,
                 name: "first work",
+                output: "",
                 status: "running",
               },
             ],
           },
+        ],
+      },
+    ],
+    [
+      "a missing step output",
+      {
+        ...snapshot,
+        messages: [
+          snapshot.messages[0],
+          {
+            ...snapshot.messages[1],
+            steps: [{ id: -7, ordinal: 0, name: "first work", detail: "", status: "running" }],
+          },
+        ],
+      },
+    ],
+    [
+      "a non-string step output",
+      {
+        ...snapshot,
+        messages: [
+          snapshot.messages[0],
+          { ...snapshot.messages[1], steps: [{ ...snapshotStep, output: null }] },
         ],
       },
     ],

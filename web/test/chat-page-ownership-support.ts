@@ -14,7 +14,7 @@ export const AGENT_UNAVAILABLE = "Agent 运行时不可用";
 export const SESSION_BUSY = "会话正在生成，请稍候";
 export const BUSINESS_ERROR = "Agent execution failed";
 export const BASH_START_DETAIL = '{"command":"echo workbuddy-smoke"}';
-export const BASH_RESULT_DETAIL = '{"output":"workbuddy-smoke"}';
+export const BASH_OUTPUT = "workbuddy-smoke";
 export const STREAMED_BODY = "Hello \u0000\uFEFF中文 😀";
 export const exactText = { exact: true, collapseWhitespace: false, trim: false } as const;
 export const promptAccepted = { userMessageId: -3, assistantMessageId: 0 };
@@ -131,7 +131,8 @@ export function completedCreatedSnapshot(): ChatMessageSnapshot {
             id: 11,
             ordinal: 0,
             name: "bash",
-            detail: BASH_RESULT_DETAIL,
+            detail: BASH_START_DETAIL,
+            output: BASH_OUTPUT,
             status: "done",
           },
         ],

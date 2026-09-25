@@ -430,89 +430,98 @@ describe("Chat stream recovery", () => {
     expect(source?.closeCount).toBe(1);
   });
 
-  it("delivers named step.start and step.end through the connector and resyncs a malformed step payload", async () => {
-    const observer = observeUnhandledRejections();
-    try {
-      const context = connectChat(chatSnapshot({ cursor: { epoch: 1, seq: 4 } }));
-      context.source.emitOpen();
-      context.loads[0]?.resolve(chatSnapshot({ cursor: { epoch: 1, seq: 4 } }));
-      await settle();
+  it.each([
+    ["missing output", { messageId: 0, stepId: 11, status: "done" }],
+    // #367 之前的服务端形态：step.end 仍带 detail、无 output。
+    ["legacy detail-only end", { messageId: 0, stepId: 11, status: "done", detail: "legacy" }],
+    [
+      "output plus legacy detail",
+      { messageId: 0, stepId: 11, status: "done", output: "x", detail: "legacy" },
+    ],
+  ])(
+    "delivers named step.start and step.end through the connector and resyncs a malformed step payload (%s)",
+    async (_name, malformed) => {
+      const observer = observeUnhandledRejections();
+      try {
+        const context = connectChat(chatSnapshot({ cursor: { epoch: 1, seq: 4 } }));
+        context.source.emitOpen();
+        context.loads[0]?.resolve(chatSnapshot({ cursor: { epoch: 1, seq: 4 } }));
+        await settle();
 
-      context.source.emitData("step.start", "1:4", {
-        messageId: 0,
-        stepId: 11,
-        name: "bash",
-        detail: '{"command":"echo workbuddy-smoke"}',
-      });
-      context.source.emitData("step.start", "1:5", {
-        messageId: 0,
-        stepId: 11,
-        name: "bash",
-        detail: '{"command":"echo workbuddy-smoke"}',
-      });
-      context.source.emitData("step.end", "1:6", {
-        messageId: 0,
-        stepId: 11,
-        status: "done",
-        detail: '{"output":"workbuddy-smoke"}',
-      });
+        context.source.emitData("step.start", "1:4", {
+          messageId: 0,
+          stepId: 11,
+          name: "bash",
+          detail: '{"command":"echo workbuddy-smoke"}',
+        });
+        context.source.emitData("step.start", "1:5", {
+          messageId: 0,
+          stepId: 11,
+          name: "bash",
+          detail: '{"command":"echo workbuddy-smoke"}',
+        });
+        context.source.emitData("step.end", "1:6", {
+          messageId: 0,
+          stepId: 11,
+          status: "done",
+          output: "workbuddy-smoke",
+        });
 
-      expect(context.events).toEqual([
-        {
-          type: "step.start",
-          data: {
-            messageId: 0,
-            stepId: 11,
+        expect(context.events).toEqual([
+          {
+            type: "step.start",
+            data: {
+              messageId: 0,
+              stepId: 11,
+              name: "bash",
+              detail: '{"command":"echo workbuddy-smoke"}',
+            },
+          },
+          {
+            type: "step.end",
+            data: {
+              messageId: 0,
+              stepId: 11,
+              status: "done",
+              output: "workbuddy-smoke",
+            },
+          },
+        ]);
+        expect(assistantSteps(context.state)).toEqual([
+          {
+            id: 11,
             name: "bash",
             detail: '{"command":"echo workbuddy-smoke"}',
-          },
-        },
-        {
-          type: "step.end",
-          data: {
-            messageId: 0,
-            stepId: 11,
+            output: "workbuddy-smoke",
             status: "done",
-            detail: '{"output":"workbuddy-smoke"}',
           },
-        },
-      ]);
-      expect(assistantSteps(context.state)).toEqual([
-        {
-          id: 11,
-          name: "bash",
-          detail: '{"output":"workbuddy-smoke"}',
-          status: "done",
-        },
-      ]);
+        ]);
 
-      context.source.emitNamed(
-        "step.end",
-        JSON.stringify({ messageId: 0, stepId: 11, status: "done" }),
-        "1:7",
-      );
-      expect(context.loads).toHaveLength(2);
-      expect(context.gaps).toBe(0);
-      expect(assistantSteps(context.state)).toEqual([
-        {
-          id: 11,
-          name: "bash",
-          detail: '{"output":"workbuddy-smoke"}',
-          status: "done",
-        },
-      ]);
-      context.loads[1]?.resolve(
-        chatSnapshot({ content: "recovered", cursor: { epoch: 1, seq: 7 } }),
-      );
-      await settle();
-      expect(assistantContent(context.state)).toBe("recovered");
-      expect(assistantSteps(context.state)).toEqual([]);
-      expect(observer.unhandled).toEqual([]);
-      context.handle.close();
-    } finally {
-      observer.stop();
-    }
-  });
+        context.source.emitNamed("step.end", JSON.stringify(malformed), "1:7");
+        expect(context.loads).toHaveLength(2);
+        expect(context.gaps).toBe(0);
+        expect(assistantSteps(context.state)).toEqual([
+          {
+            id: 11,
+            name: "bash",
+            detail: '{"command":"echo workbuddy-smoke"}',
+            output: "workbuddy-smoke",
+            status: "done",
+          },
+        ]);
+        context.loads[1]?.resolve(
+          chatSnapshot({ content: "recovered", cursor: { epoch: 1, seq: 7 } }),
+        );
+        await settle();
+        expect(assistantContent(context.state)).toBe("recovered");
+        expect(assistantSteps(context.state)).toEqual([]);
+        expect(observer.unhandled).toEqual([]);
+        context.handle.close();
+      } finally {
+        observer.stop();
+      }
+    },
+  );
 
   it("keeps the successor recovery when a superseded loader rejects after abort", async () => {
     const observer = observeUnhandledRejections();

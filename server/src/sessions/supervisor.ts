@@ -674,14 +674,14 @@ function persistEvent(
       if (stepId === undefined) {
         return undefined;
       }
-      store.finishStep(stepId, event.data.status, event.data.detail);
+      store.finishStep(stepId, event.data.status, event.data.output);
       return {
         type: "step.end",
         data: {
           messageId: event.data.messageId,
           stepId,
           status: event.data.status,
-          detail: event.data.detail,
+          output: event.data.output,
         },
       };
     }

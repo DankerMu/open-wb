@@ -557,7 +557,7 @@ END`);
     }
   });
 
-  it("受信任迁移目录恰好按序登记六个真实迁移", () => {
+  it("受信任迁移目录恰好按序登记七个真实迁移", () => {
     withOpenDb(join(tempDir(), "app.db"), (db) => {
       expect(ledgerFilenames(db)).toEqual([...TRACKED_MIGRATION_FILENAMES]);
     });

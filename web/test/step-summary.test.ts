@@ -9,7 +9,12 @@ const CASES: readonly (readonly [string, string, string])[] = [
     '{"command":"echo workbuddy-smoke"}',
     "command: echo workbuddy-smoke",
   ],
-  ["first key of a result object", '{"output":"workbuddy-smoke"}', "output: workbuddy-smoke"],
+  ["first key of a path args object", '{"path":"README.md"}', "path: README.md"],
+  [
+    "server-truncated args are no longer JSON and fall back to the first line",
+    '{"command":"echo hi…（已截断）',
+    '{"command":"echo hi…（已截断）',
+  ],
   ["text wins over the first key", '{"a":1,"text":"hello"}', "hello"],
   [
     "blank text is skipped for the first line of content",

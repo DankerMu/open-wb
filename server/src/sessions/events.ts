@@ -16,21 +16,23 @@ export type ChatEvent<StepId extends string | number = number> =
         messageId: number;
         stepId: StepId;
         status: "done" | "failed";
-        detail: string;
+        output: string;
       };
     }
   | { type: "turn.end"; data: { messageId: number; status: "done" | "failed" } }
   | { type: "error"; data: { messageId: number; message: string } };
 
 const GENERIC_FAILURE = "Agent execution failed";
-const MAX_DETAIL_POINTS = 120;
+// detail（args）与 output（result 文本）各自的码点上限；环形缓冲最坏成本见 #367 design D3。
+const MAX_STEP_POINTS = 4096;
+const TRUNCATED_MARK = "…（已截断）";
+const IMAGE_PLACEHOLDER = "[图片]";
 const NO_TOOLS: readonly ToolEntry[] = Object.freeze([]);
 const NO_IDS: readonly string[] = Object.freeze([]);
 
 interface ToolEntry {
   readonly id: string;
   readonly name: string;
-  readonly detail: string;
 }
 
 interface EventState {
@@ -136,10 +138,10 @@ function applyToolStart(state: EventState, frame: OmpFrame): ApplyResult {
   ) {
     return { state, events: [] };
   }
-  const detail = "args" in frame ? summarize(frame.args) : "";
+  const detail = "args" in frame ? truncateStep(serializeArgs(frame.args)) : "";
   return {
     state: evolve(state, {
-      running: Object.freeze([...state.running, { id, name, detail }]),
+      running: Object.freeze([...state.running, { id, name }]),
     }),
     events: [
       {
@@ -158,11 +160,10 @@ function applyToolEnd(state: EventState, frame: OmpFrame): ApplyResult {
   if (id === undefined) {
     return { state, events: [] };
   }
-  const entry = findRunning(state, id);
-  if (entry === undefined) {
+  if (findRunning(state, id) === undefined) {
     return { state, events: [] };
   }
-  const detail = "result" in frame ? summarize(frame.result) : entry.detail;
+  const output = truncateStep(normalizeOutput(frame.result));
   const status = frame.isError === true ? "failed" : "done";
   return {
     state: evolve(state, {
@@ -172,7 +173,7 @@ function applyToolEnd(state: EventState, frame: OmpFrame): ApplyResult {
     events: [
       {
         type: "step.end",
-        data: { messageId: state.messageId, stepId: id, status, detail },
+        data: { messageId: state.messageId, stepId: id, status, output },
       },
     ],
   };
@@ -278,7 +279,8 @@ function findRunning(state: EventState, id: string): ToolEntry | undefined {
   return undefined;
 }
 
-function summarize(value: unknown): string {
+/** 紧凑单行 JSON：U+2028/U+2029 转义，保证 detail 不含行分隔符。 */
+function serializeArgs(value: unknown): string {
   if (value === undefined) {
     return "";
   }
@@ -286,10 +288,39 @@ function summarize(value: unknown): string {
   if (typeof json !== "string") {
     return "";
   }
-  return truncateCodepoints(
-    json.replaceAll("\u2028", "\\u2028").replaceAll("\u2029", "\\u2029"),
-    MAX_DETAIL_POINTS,
-  );
+  return json.replaceAll("\u2028", "\\u2028").replaceAll("\u2029", "\\u2029");
+}
+
+/**
+ * AgentToolResult 取 content 中 text 块原文与 image 占位，以 \n 连接，其余字段（details、
+ * providerMetadata、图片 base64 等）一律丢弃；缺省/null 为空串，字符串原样，其余走紧凑 JSON。
+ */
+function normalizeOutput(result: unknown): string {
+  if (result === undefined || result === null) {
+    return "";
+  }
+  if (typeof result === "string") {
+    return result;
+  }
+  const record = asRecord(result);
+  if (record === undefined || !Object.hasOwn(record, "content") || !Array.isArray(record.content)) {
+    return serializeArgs(result);
+  }
+  const parts: string[] = [];
+  for (const item of record.content as unknown[]) {
+    const block = asRecord(item);
+    if (block?.type === "text" && typeof block.text === "string") {
+      parts.push(block.text);
+    } else if (block?.type === "image") {
+      parts.push(IMAGE_PLACEHOLDER);
+    }
+  }
+  return parts.join("\n");
+}
+
+function truncateStep(text: string): string {
+  const kept = truncateCodepoints(text, MAX_STEP_POINTS);
+  return kept.length === text.length ? text : kept + TRUNCATED_MARK;
 }
 
 function truncateCodepoints(text: string, max: number): string {

@@ -379,7 +379,7 @@ describe("fake-omp process contract", () => {
         type: "tool_execution_end",
         toolCallId: id,
         toolName: name,
-        result: { output: TOOL_OUTPUT },
+        result: { content: [{ type: "text", text: TOOL_OUTPUT }], details: { exitCode: 0 } },
       })),
     );
     expect(requests).toHaveLength(2);
@@ -439,7 +439,7 @@ describe("fake-omp process contract", () => {
         type: "tool_execution_end",
         toolCallId: callId,
         toolName: "bash",
-        result: { output: TOOL_OUTPUT },
+        result: { content: [{ type: "text", text: TOOL_OUTPUT }], details: { exitCode: 0 } },
       },
     ]);
     expect(second?.stream).toBe(true);

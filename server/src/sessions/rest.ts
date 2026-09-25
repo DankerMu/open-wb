@@ -39,6 +39,7 @@ interface PublicStep {
   ordinal: number;
   name: string;
   detail: string;
+  output: string;
   status: string;
 }
 
@@ -183,6 +184,7 @@ function toPublicHistory(snapshot: OwnedSnapshot): {
         ordinal: step.ordinal,
         name: step.name,
         detail: step.detail,
+        output: step.output,
         status: step.status,
       })),
     })),

@@ -11,6 +11,7 @@ type ChatStepView = {
   id: ChatStep["id"];
   name: ChatStep["name"];
   detail: ChatStep["detail"];
+  output: ChatStep["output"];
   status: ChatStep["status"];
 };
 
@@ -29,14 +30,14 @@ export type ChatState = {
 };
 
 type ChatMessageTarget = { messageId: number };
-type ChatStepTarget = ChatMessageTarget & { stepId: number; detail: string };
+type ChatStepTarget = ChatMessageTarget & { stepId: number };
 type ChatTerminalStatus = "done" | "failed";
 
 export type ChatEvent =
   | { type: "turn.start"; data: ChatMessageTarget }
   | { type: "text.delta"; data: ChatMessageTarget & { delta: string } }
-  | { type: "step.start"; data: ChatStepTarget & { name: string } }
-  | { type: "step.end"; data: ChatStepTarget & { status: ChatTerminalStatus } }
+  | { type: "step.start"; data: ChatStepTarget & { name: string; detail: string } }
+  | { type: "step.end"; data: ChatStepTarget & { status: ChatTerminalStatus; output: string } }
   | { type: "turn.end"; data: ChatMessageTarget & { status: ChatTerminalStatus } }
   | { type: "error"; data: ChatMessageTarget & { message: string } };
 
@@ -90,6 +91,7 @@ export function chatStateFromSnapshot(snapshot: ChatMessageSnapshot): ChatState 
         id: step.id,
         name: step.name,
         detail: step.detail,
+        output: step.output,
         status: step.status,
       })),
       error: null,
@@ -152,7 +154,7 @@ function startStep(
       ...message,
       steps: [
         ...message.steps,
-        { id: data.stepId, name: data.name, detail: data.detail, status: "running" },
+        { id: data.stepId, name: data.name, detail: data.detail, output: "", status: "running" },
       ],
     };
   });
@@ -164,7 +166,7 @@ function endStep(
     messageId: number;
     stepId: number;
     status: "done" | "failed";
-    detail: string;
+    output: string;
   },
 ): ChatState {
   return replaceAssistant(state, data.messageId, (message) => {
@@ -174,10 +176,12 @@ function endStep(
       return message;
     }
     const steps = message.steps.slice();
+    // detail 固定为 step.start/快照中的 args，step.end 只带回状态与输出（#367）。
     steps[index] = {
       id: current.id,
       name: current.name,
-      detail: data.detail,
+      detail: current.detail,
+      output: data.output,
       status: data.status,
     };
     return { ...message, steps };
@@ -649,18 +653,18 @@ function decodeStepStart(value: unknown): ChatEvent | undefined {
 }
 
 function decodeStepEnd(value: unknown): ChatEvent | undefined {
-  return hasExactlyKeys(value, ["messageId", "stepId", "status", "detail"]) &&
+  return hasExactlyKeys(value, ["messageId", "stepId", "status", "output"]) &&
     isSafeInteger(value.messageId) &&
     isSafeInteger(value.stepId) &&
     isTerminalStatus(value.status) &&
-    typeof value.detail === "string"
+    typeof value.output === "string"
     ? {
         type: "step.end",
         data: {
           messageId: value.messageId,
           stepId: value.stepId,
           status: value.status,
-          detail: value.detail,
+          output: value.output,
         },
       }
     : undefined;

@@ -23,6 +23,7 @@ interface StepView {
   ordinal: number;
   name: string;
   detail: string;
+  output: string;
   status: StepStatus;
   startedAt: number;
   endedAt: number | null;
@@ -80,7 +81,7 @@ export interface SessionStore {
   setSessionFile(sessionId: string, sessionFile: string | null): void;
   appendDelta(assistantMessageId: number, delta: string): boolean;
   startStep(assistantMessageId: number, input: StartStepInput): number;
-  finishStep(stepId: number, status: FinishStatus, detail?: string): boolean;
+  finishStep(stepId: number, status: FinishStatus, output: string): boolean;
   finishTurn(assistantMessageId: number, status: FinishStatus): boolean;
   reconcileOnStartup(): void;
   runtimeState(sessionId: string): SessionRuntimeState | null;
@@ -113,6 +114,7 @@ type StepDbRow = {
   ordinal: number;
   name: Uint8Array;
   detail: Uint8Array;
+  output: Uint8Array | null;
   status: StepStatus;
   started_at: number;
   ended_at: number | null;
@@ -151,7 +153,7 @@ const SESSION_COLUMNS =
 const MESSAGE_COLUMNS =
   "id, session_id, role, CAST(content AS BLOB) AS content, status, created_at";
 const STEP_COLUMNS =
-  "s.id, s.message_id, s.ordinal, CAST(s.name AS BLOB) AS name, CAST(s.detail AS BLOB) AS detail, s.status, s.started_at, s.ended_at";
+  "s.id, s.message_id, s.ordinal, CAST(s.name AS BLOB) AS name, CAST(s.detail AS BLOB) AS detail, CAST(s.output AS BLOB) AS output, s.status, s.started_at, s.ended_at";
 const INSERT_SESSION =
   "INSERT INTO chat_sessions(id, owner_id, title, status, created_at, updated_at) VALUES (?, ?, NULL, 'idle', ?, ?)";
 const INSERT_MESSAGE =
@@ -423,7 +425,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
       return stepId;
     },
 
-    finishStep(stepId, status, detail) {
+    finishStep(stepId, status, output) {
       assertOpen(closed);
       const assistantMessageId = activeSteps.get(stepId);
       if (assistantMessageId === undefined) {
@@ -438,19 +440,15 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
         const receipt = db
           .prepare(
             `UPDATE chat_steps
-           SET status = ?, detail = COALESCE(?, detail), ended_at = ?
+           SET status = ?, output = ?, ended_at = ?
            WHERE id = ? AND message_id = ? AND status = 'running'`,
           )
-          .run(status, detail ?? null, Date.now(), stepId, turn.assistantMessageId);
+          .run(status, output, Date.now(), stepId, turn.assistantMessageId);
         requireAtMostOne(receipt.changes, "step finish");
         return hasChanges(receipt.changes);
       });
-      if (!changed) {
-        activeSteps.delete(stepId);
-        return false;
-      }
       activeSteps.delete(stepId);
-      return true;
+      return changed;
     },
 
     finishTurn(assistantMessageId, status) {
@@ -551,6 +549,7 @@ function toStepView(row: StepDbRow, decoder: TextDecoder): StepView {
     ordinal: Number(row.ordinal),
     name: decoder.decode(row.name),
     detail: decoder.decode(row.detail),
+    output: row.output === null ? "" : decoder.decode(row.output),
     status: row.status,
     startedAt: Number(row.started_at),
     endedAt: row.ended_at === null ? null : Number(row.ended_at),
