@@ -11,7 +11,7 @@ type ConfirmDialogProps = {
   cancelText?: string;
   confirmText: string;
   danger?: boolean;
-  /** 确认进行中：确认按钮 loading（禁用 + aria-busy）。 */
+  /** 确认进行中：确认按钮 loading（禁用 + aria-busy）；忙碌期焦点救回到取消按钮。 */
   pending?: boolean;
   onConfirm: () => void;
   returnFocus?: RefObject<HTMLElement | null> | undefined;
@@ -38,6 +38,7 @@ export function ConfirmDialog({
 }: ConfirmDialogProps) {
   return (
     <DialogFrame
+      busy={pending}
       closeOnEscape
       closeOnOverlay={false}
       description={description}

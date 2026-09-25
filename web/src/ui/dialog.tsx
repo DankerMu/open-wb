@@ -1,5 +1,5 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { type ReactElement, type ReactNode, type RefObject, useRef } from "react";
+import { type ReactElement, type ReactNode, type RefObject, useLayoutEffect, useRef } from "react";
 import { Button } from "./button.js";
 import { Icon } from "./icon.js";
 
@@ -42,6 +42,39 @@ export function useFocusHandoff({
   };
 }
 
+const FOCUSABLE =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * 忙碌上升沿的焦点救回：活动元素是内容内已禁用控件，或已被 focus fixup 到 body 时，移到内容内首个可用控件。
+ * 活动元素是内容内可用控件、或在内容外的其他元素（非 fixup 造成）时不动；`busy` 保持为 true 的后续渲染不触发。
+ *
+ * 时序与两个分支：Chromium（实测 151，Playwright 1.62 自带）在设置 `disabled` 的当下同步把焦点 fixup 到
+ * body，所以 commit 后的 layout effect 看到的已是 `body`，走 body 分支（ui-walk 退出段即此路径）。
+ * 「内容内已禁用」分支给 fixup 延后（如经 `ClearFocusedElementSoon` 0 延迟定时器任务的 Blink 路径）或
+ * 不做 fixup（jsdom）的环境：离散事件的 commit 与 layout effect 在该定时器任务之前跑完。用 layout effect
+ * 是为了与禁用同一次 commit、在绘制与下一次按键之前完成救回（`auth/provider.tsx:375` 的 setState 在
+ * `await` 之前）。
+ *
+ * `wasBusy` 实际只在 mount 时起作用：依赖是 `[busy, content]`，`content` 是稳定的 ref，effect 只在
+ * `busy` 变化时重跑。以 `busy=true` 首次挂载不救回；且 Radix Portal 首次 commit 时内容尚未挂上，`root` 为 null。
+ */
+function useBusyFocusRescue(content: RefObject<HTMLElement | null>, busy: boolean) {
+  const wasBusy = useRef(busy);
+  useLayoutEffect(() => {
+    const rising = busy && !wasBusy.current;
+    wasBusy.current = busy;
+    const root = content.current;
+    if (!rising || !root) return;
+    const active = document.activeElement;
+    const lost =
+      active === null ||
+      active === document.body ||
+      (root.contains(active) && (active as HTMLButtonElement).disabled === true);
+    if (lost) root.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+  }, [busy, content]);
+}
+
 type DialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -57,6 +90,11 @@ type DialogProps = {
   returnFocus?: FocusTarget | undefined;
   /** false 时 Escape/遮罩点击不关闭，且不渲染右上 `关闭` 按钮。 */
   dismissible?: boolean | undefined;
+  /**
+   * 忙碌期（如提交中）由调用方传入；由 false 变 true 时，若焦点所在控件被禁用（或已被 fixup 到 body），
+   * 就把焦点救回内容内首个可用控件，防止焦点逃出模态。
+   */
+  busy?: boolean | undefined;
   footer?: ReactNode;
   trigger?: ReactElement | undefined;
   children?: ReactNode;
@@ -86,8 +124,11 @@ export function DialogFrame({
   showClose,
   closeOnEscape,
   closeOnOverlay,
+  busy,
 }: DialogFrameProps) {
   const focus = useFocusHandoff({ initialFocus, returnFocus, hasTrigger: Boolean(trigger) });
+  const contentRef = useRef<HTMLDivElement>(null);
+  useBusyFocusRescue(contentRef, busy ?? false);
   return (
     <DialogPrimitive.Root onOpenChange={onOpenChange} open={open}>
       {trigger && <DialogPrimitive.Trigger asChild>{trigger}</DialogPrimitive.Trigger>}
@@ -104,6 +145,7 @@ export function DialogFrame({
             onPointerDownOutside={(event) => {
               if (!closeOnOverlay) event.preventDefault();
             }}
+            ref={contentRef}
             role={role}
             {...(description ? {} : { "aria-describedby": undefined })}
           >
