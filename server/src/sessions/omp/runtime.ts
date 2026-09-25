@@ -667,9 +667,16 @@ export class SessionRuntime {
   }
 }
 
+// A child that never obtained a pid (spawn failed) is never live, whether or not
+// Node has reported the failure yet; 'error' alone never means "dead" (#205).
 function liveChild(gen: Generation): ChildProcessWithoutNullStreams | undefined {
   const child = gen.child ?? gen.proc.child;
-  if (child === undefined || child.exitCode !== null || child.signalCode !== null) {
+  if (
+    child === undefined ||
+    typeof child.pid !== "number" ||
+    child.exitCode !== null ||
+    child.signalCode !== null
+  ) {
     return undefined;
   }
   return child;
