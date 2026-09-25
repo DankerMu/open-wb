@@ -100,7 +100,9 @@ describe("files long names and layout rules", () => {
     const dirButton = await screen.findByRole("button", { name: `展开 ${LONG_DIR}` });
     expect(dirButton.getAttribute("title")).toBe(LONG_DIR);
     expect(screen.getByRole("button", { name: LONG_FILE }).getAttribute("title")).toBe(LONG_FILE);
-    expect(screen.getByRole("button", { name: "折叠 root" }).getAttribute("title")).toBe("root");
+    expect(screen.getByRole("button", { name: "折叠 设计文档" }).getAttribute("title")).toBe(
+      "设计文档",
+    );
   });
 
   it("E5 pins the tree column widths, the narrow column layout, ellipsis names, and scrolling previews", () => {

@@ -115,7 +115,11 @@ describe("workspace page error surfaces", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "创建" }));
     await expectCreateEnabledAfterAlert(dialog, "工作空间创建失败");
     await waitFor(() => {
-      expect(screen.getByText("可重试空间", { exact: true })).toBeTruthy();
+      expect(
+        within(screen.getByRole("button", { name: "选择工作空间" })).getByText("可重试空间", {
+          exact: true,
+        }),
+      ).toBeTruthy();
     });
     expect(
       fetchMock.mock.calls.filter(

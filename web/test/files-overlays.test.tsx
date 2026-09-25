@@ -186,7 +186,7 @@ describe("files overlays come only from primitives", () => {
       primitiveImport("Dialog, Menu"),
     );
     expect(readRepoFile("web/src/features/files/page.tsx")).toMatch(
-      primitiveImport("EmptyState, Popover"),
+      primitiveImport("EmptyState, Icon, Popover"),
     );
   });
 });

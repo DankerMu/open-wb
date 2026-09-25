@@ -493,7 +493,7 @@ async function walkFiles(page: Page): Promise<void> {
 // 焦点被救回到模态内的 `关闭`，Tab/Shift+Tab 不逃出对话框。先断言请求确被挂起，再断言焦点。
 async function createWalkOutWhileHeld(page: Page): Promise<void> {
   const dialog = page.getByRole("dialog", { name: "新建文件夹" });
-  await dialog.getByLabel("位置").selectOption({ label: "根目录　root" });
+  await dialog.getByLabel("位置").selectOption({ label: `根目录　${SMOKE_FIXTURE}` });
   await dialog.getByLabel("文件夹名称").fill(WALK_OUT);
   const create = await holdRoute(page, "**/api/workspaces/*/dirs");
   try {

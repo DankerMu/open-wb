@@ -19,6 +19,8 @@ type WorkspaceDialogProps = {
 
 type DirectoryDialogProps = {
   directories: readonly string[];
+  /** 根项显示 `根目录　<空间名>`，不显示字面 root 或绝对路径。 */
+  workspaceName: string;
   error: string | null;
   pending: boolean;
   returnFocus: ReturnFocus;
@@ -156,6 +158,7 @@ export function DirectoryDialog({
   error,
   pending,
   returnFocus,
+  workspaceName,
   onCancel,
   onCreate,
 }: DirectoryDialogProps) {
@@ -200,7 +203,7 @@ export function DirectoryDialog({
           >
             {directories.map((path) => (
               <option key={path} value={path}>
-                {path.length === 0 ? "根目录　root" : path}
+                {path.length === 0 ? `根目录　${workspaceName}` : path}
               </option>
             ))}
           </select>

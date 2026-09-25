@@ -1,10 +1,11 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { type ApiClient, ApiError } from "../../lib/api.js";
-import { EmptyState, Popover } from "../../ui/index.js";
+import { EmptyState, Icon, Popover } from "../../ui/index.js";
 import { useAuth } from "../auth/index.js";
 import { WorkspaceDialog } from "./dialogs.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
+import { logicalPath } from "./file-meta.js";
 import { EmptyPreview, WorkspaceBrowser, WorkspaceColumns } from "./tree.js";
 import type { Workspace } from "./types.js";
 
@@ -21,6 +22,7 @@ type WorkspaceDialogState = {
 };
 
 type WorkspaceSwitcherProps = {
+  account: string;
   currentWorkspace: Workspace | null;
   workspaces: readonly Workspace[];
   /** 回调带上切换器触发器，供对话框在取消类关闭后把焦点还给它。 */
@@ -61,6 +63,7 @@ function currentWorkspaceFromList(
 }
 
 function WorkspaceSwitcher({
+  account,
   currentWorkspace,
   onCreateWorkspace,
   onSelectWorkspace,
@@ -76,9 +79,11 @@ function WorkspaceSwitcher({
     }
 
     return workspaces.filter((workspace) =>
-      workspace.name.toLocaleLowerCase().includes(normalizedQuery),
+      [workspace.name, logicalPath(account, workspace.dir)].some((text) =>
+        text.toLocaleLowerCase().includes(normalizedQuery),
+      ),
     );
-  }, [query, workspaces]);
+  }, [account, query, workspaces]);
 
   return (
     <div className="files-switcher">
@@ -93,9 +98,10 @@ function WorkspaceSwitcher({
             ref={triggerRef}
             type="button"
           >
+            <Icon name="layout-grid" size={16} />
             <span className="files-switcher-copy">
               <strong>{currentWorkspace?.name ?? "未选择工作空间"}</strong>
-              <span>{currentWorkspace?.root ?? "—"}</span>
+              <span>{currentWorkspace ? logicalPath(account, currentWorkspace.dir) : "—"}</span>
             </span>
           </button>
         }
@@ -125,7 +131,7 @@ function WorkspaceSwitcher({
                   >
                     <span className="files-switcher-item-copy">
                       <strong>{workspace.name}</strong>
-                      <span>{workspace.root}</span>
+                      <span>{logicalPath(account, workspace.dir)}</span>
                     </span>
                     {current ? (
                       <span aria-label="当前工作空间" className="files-switcher-check" role="img">
@@ -138,7 +144,7 @@ function WorkspaceSwitcher({
             })}
           </ul>
           {filteredWorkspaces.length === 0 ? (
-            <p className="files-switcher-empty ui-muted">没有匹配的工作空间</p>
+            <p className="files-switcher-empty ui-muted">无匹配的工作空间</p>
           ) : null}
           <button
             className="ui-button"
@@ -182,7 +188,7 @@ function EmptyWorkspace({
 }
 
 export function FilesPage() {
-  const { createSessionClient } = useAuth();
+  const { createSessionClient, principal } = useAuth();
   const client = useMemo(() => createSessionClient(), [createSessionClient]);
   const location = useLocation();
   const navigate = useNavigate();
@@ -380,8 +386,14 @@ export function FilesPage() {
     [client, location.hash, location.pathname, location.search, navigate],
   );
 
+  // 同 auth/footer 口径：/files 只挂在认证路由下，无 principal 时不渲染（不造回退文案）。
+  if (!principal) {
+    return null;
+  }
+
   const switcher = listForClient ? (
     <WorkspaceSwitcher
+      account={principal.account}
       currentWorkspace={currentWorkspace}
       onCreateWorkspace={openWorkspaceDialog}
       onSelectWorkspace={selectWorkspace}
@@ -402,6 +414,7 @@ export function FilesPage() {
       )}
       {listForClient && currentWorkspace && urlMatchesWorkspace ? (
         <WorkspaceBrowser
+          account={principal.account}
           client={client}
           key={currentWorkspace.id}
           onNewWorkspace={openWorkspaceDialog}

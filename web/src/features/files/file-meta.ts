@@ -38,3 +38,8 @@ export function formatSize(bytes: number): string {
   }
   return `${value.toFixed(1)} ${UNITS[unit]}`;
 }
+
+/** 界面上的空间位置：`<account>/<dir>`；服务器返回的绝对 `root` 属内部布局，不渲染。 */
+export function logicalPath(account: string, dir: string): string {
+  return `${account}/${dir}`;
+}
