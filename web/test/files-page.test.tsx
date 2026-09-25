@@ -311,7 +311,14 @@ describe("workspace page route integration", () => {
     await waitFor(() => {
       expect(`${window.location.pathname}${window.location.search}`).toBe("/files?ws=workspace-2");
       expect(workspaceCard().getByText("新空间", { exact: true })).toBeTruthy();
+      expect(workspaceCard().getByText("zhangsan/new-workspace", { exact: true })).toBeTruthy();
+      expect(
+        within(screen.getByRole("navigation", { name: "工作空间目录树" })).getByRole("button", {
+          name: "折叠 新空间",
+        }),
+      ).toBeTruthy();
     });
+    expect(document.body.innerHTML).not.toContain(createdWorkspace.root);
   });
 
   it("does not let a late workspace creation close or select a newer dialog", async () => {

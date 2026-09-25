@@ -366,12 +366,13 @@ describe("provider session-bound file client", () => {
       lateList.resolve(jsonResponse({ workspaces: [otherWorkspace] }));
     });
     await waitFor(() => {
-      expect(
-        within(screen.getByRole("button", { name: "选择工作空间" })).getByText("李四文档", {
-          exact: true,
-        }),
-      ).toBeTruthy();
+      const card = within(screen.getByRole("button", { name: "选择工作空间" }));
+      expect(card.getByText("李四文档", { exact: true })).toBeTruthy();
+      expect(card.getByText("lisi/lisi-docs", { exact: true })).toBeTruthy();
     });
+    expect(screen.getByRole("button", { name: "选择工作空间" }).textContent).not.toContain(
+      "zhangsan/",
+    );
     expect(screen.queryByText("secret.txt", { exact: true })).toBeNull();
     expect(
       fixture.fetchMock.mock.calls.filter(

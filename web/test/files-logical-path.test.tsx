@@ -47,6 +47,7 @@ function renderAnalytics() {
         ],
       }),
       [`/api/workspaces/${analytics.id}/tree?path=out`]: jsonResponse({ path: "out", entries: [] }),
+      [`/api/workspaces/${designDocs.id}/tree?path=`]: jsonResponse({ path: "", entries: [] }),
     }),
   );
 }
@@ -132,8 +133,29 @@ describe("files page shows logical paths instead of the server root", () => {
     fireEvent.click(within(directoryDialog).getByRole("button", { name: "取消" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "新建文件夹" })).toBeNull());
 
-    await openWorkspaceDialogFromMenu();
+    const workspaceDialog = await openWorkspaceDialogFromMenu();
     expectNoAbsoluteRoot("new workspace dialog open");
+    fireEvent.click(within(workspaceDialog).getByRole("button", { name: "取消" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "新建工作空间" })).toBeNull());
+
+    // 切换会按 key 重挂树与切换器卡：每次重试都重新查询，不缓存元素。
+    fireEvent.click(within(openSwitcher()).getByRole("button", { name: /设计文档/ }));
+    await waitFor(() => {
+      const root = within(tree()).getByRole("button", { name: "折叠 设计文档" });
+      expect(root.nextElementSibling?.textContent).toBe("zhangsan/design-docs");
+      expect(within(switcherCard()).getByText("设计文档", { exact: true })).toBeTruthy();
+      expect(
+        within(switcherCard()).getByText("zhangsan/design-docs", { exact: true }),
+      ).toBeTruthy();
+    });
+    expect(within(tree()).queryByRole("button", { name: /数据分析/ })).toBeNull();
+    expectNoAbsoluteRoot("after switch");
+
+    fireEvent.click(within(tree()).getByRole("button", { name: "折叠 设计文档" }));
+    await waitFor(() =>
+      expect(within(tree()).getByRole("button", { name: "展开 设计文档" })).toBeTruthy(),
+    );
+    expectNoAbsoluteRoot("after collapse");
   });
 
   it("L3 renders the switcher card as layout-grid icon, workspace name, and logical path", async () => {
