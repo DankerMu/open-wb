@@ -1,7 +1,7 @@
 # spa-shell Specification
 
 ## Purpose
-TBD - created by archiving change s0a-service-skeleton. Update Purpose after archive.
+Defines the React SPA build, four-route shell, authentication guard, settings/theme behavior, and workspace-page integration.
 ## Requirements
 ### Requirement: web 构建工具链
 web workspace SHALL 具备 Vite + React 构建面：`web/index.html`、`src/main.tsx` 入口、`vite.config.ts`（@vitejs/plugin-react，outDir=dist）、tsconfig JSX（react-jsx）、vitest jsdom 环境、knip entry 同步；`npm run build --workspace web` SHALL 可复现产出 `web/dist`，且 `make check` 全链（lint/typecheck/test/anti-drift）保持绿。

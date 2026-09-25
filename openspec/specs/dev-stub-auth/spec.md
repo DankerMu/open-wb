@@ -1,7 +1,7 @@
 # dev-stub-auth Specification
 
 ## Purpose
-TBD - created by archiving change s0a-service-skeleton. Update Purpose after archive.
+Defines the provider-independent authentication seam and SQLite-backed dev-stub account/session contracts, including login, current-session, logout, guard, and no-store response behavior.
 ## Requirements
 ### Requirement: provider 接缝
 auth 模块 SHALL 以 `authenticate(req) → Principal | null` 为对外唯一认证判定出口（ADR-0007 接缝）；Principal SHALL 恰为 `{id:string,account:string,role:string}`。dev-stub 凭证适配器 SHALL 落在 `server/src/auth/providers/dev-stub.ts`；cookie/session 读取 SHALL 是 provider 无关的共享实现，且不得 import dev-stub provider——S3a 增加 OIDC 适配器时接缝、session storage 与调用方不变。
