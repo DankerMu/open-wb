@@ -442,7 +442,9 @@ describe("welcome state", () => {
     fireEvent.change(input, { target: { value: "hello" } });
     fireEvent.click(screen.getByRole("button", { name: "发送" }));
     await expectChatLocation(`/?session=${CREATED_SESSION_ID}`);
-    expect(screen.queryByRole("group", { name: "快捷任务" })).toBeNull();
+    await waitFor(() => {
+      expect(screen.queryByRole("group", { name: "快捷任务" })).toBeNull();
+    });
     expect(welcomeInput()).toBe(input);
   });
 });
