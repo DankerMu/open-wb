@@ -1,8 +1,9 @@
 # open-workbuddy 唯一命令面。所有工作流经此路由；AGENTS.md 验证矩阵与 constraints.yaml
 # verification 段是它的镜像，增删目标须三处同步。omp-fetch 是官方 v18.0.10 二进制供给前置，
-# smoke-live 是调用方拥有的真实上游手动验证；控制面文档行与 Makefile 目标同步。
+# smoke-live 是调用方拥有的真实上游手动验证，ui-shots 是调用方拥有服务的手动 demo 截图对；
+# 控制面文档行与 Makefile 目标同步。
 SHELL := /bin/bash
-.PHONY: setup hooks lint fmt typecheck test anti-drift guard check test-guardrails precommit dev smoke smoke-live ui-walk omp-fetch
+.PHONY: setup hooks lint fmt typecheck test anti-drift guard check test-guardrails precommit dev smoke smoke-live ui-walk omp-fetch ui-shots
 
 setup: ## 安装依赖 + 挂 git hooks
 	npm install
@@ -68,6 +69,17 @@ override UI_WALK_BASE_URL := $(value UI_WALK_BASE_URL)
 export UI_WALK_BASE_URL
 ui-walk: ## Playwright UI 走查（只消费已运行服务；不 build/start/stop/install）
 	npm run ui-walk --workspace web
+
+UI_SHOTS_BASE_URL ?= http://127.0.0.1:3000
+# 与 smoke/ui-walk 相同：$(value) 冻结成 raw 字面后 export；配方不把该值插进 shell 语法。
+override UI_SHOTS_BASE_URL := $(value UI_SHOTS_BASE_URL)
+export UI_SHOTS_BASE_URL
+# UI_SHOTS_OUT 不设缺省（无 ?=）：同样冻结后 export；未设置时导出空串，脚本按未设置取
+# var/ui-shots/<UTC 时间戳>/（Make 不用 $(shell)）。
+override UI_SHOTS_OUT := $(value UI_SHOTS_OUT)
+export UI_SHOTS_OUT
+ui-shots: ## demo 与 app 截图对（只消费已运行服务；不 build/start/stop/install；产物供人工按清单签收）
+	npm run --silent ui-shots --workspace web
 
 omp-fetch: ## 拉取官方 omp v18.0.10 到 var/omp/omp（SHA256 校验；已校验则跳过）
 	bash scripts/omp-fetch.sh

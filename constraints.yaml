@@ -147,6 +147,10 @@ verification:
       command: "make smoke-live"
       evidence: "exit-code; manual real-upstream nonempty done reply"
       required_at: "manual"
+    ui-shots:
+      command: "make ui-shots"
+      evidence: "exit-code; demo-vs-app screenshot pairs for manual checklist sign-off"
+      required_at: "manual"
   enforced_by: "AGENTS.md 验证矩阵 ↔ 本段双向镜像 + Makefile 目标存在性检查"
 
 exemptions:
