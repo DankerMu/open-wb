@@ -48,7 +48,7 @@ Minimal mergeable slice: 4.1 单独可合并保绿（移动 md-render 需同 PR 
 
 ## 5. files-web
 
-- [ ] 5.1 逻辑路径 `<account>/<dir>`（切换器卡/列表项/树根/位置下拉全部去 `root` 与绝对路径，位置下拉根项 `根目录　<空间名>`）+ 根行 `shield` + 空间名 + 切换器搜索框过滤（`搜索工作空间`，无匹配 `无匹配的工作空间`）；jsdom 单测（页面无绝对路径文本、根行文案、过滤）；**同 PR**：ui-walk `selectOption({label:"根目录　root"})` → `根目录　smoke-fixture`（依赖 1.6b）
+- [x] 5.1 #292 / PR #385 merge 65946f0（archive 2026-09-25-files-logical-path；`logicalPath` 放 `file-meta.ts`；切换器卡 `Icon layout-grid` 由本刀认领（5.2/5.3 未覆盖）；过滤大小写无关、不外泄面含 `placeholder` 与下拉选项；`FilesPage` 无 principal 时返回 null；fix pass 1 补切换/新建后的树根与不外泄断言；API/审计/步骤卡的绝对路径暴露转 #386 待决策）逻辑路径 `<account>/<dir>`（切换器卡/列表项/树根/位置下拉全部去 `root` 与绝对路径，位置下拉根项 `根目录　<空间名>`）+ 根行 `shield` + 空间名 + 切换器搜索框过滤（`搜索工作空间`，无匹配 `无匹配的工作空间`）；jsdom 单测（页面无绝对路径文本、根行文案、过滤）；**同 PR**：ui-walk `selectOption({label:"根目录　root"})` → `根目录　smoke-fixture`（依赖 1.6b）
 - [x] 5.2 #293 / PR #352 merge dbbaf65（archive 2026-09-25-files-entry-meta；`fileIcon` 用 Map 查表防原型键；预览头为图标 + 路径；F4 no-`text-overflow` 断言由 5.3 #294 反转）：`features/files/file-meta.ts` `fileIcon(name)`/`formatSize(bytes)` 纯函数（替换 `preview.tsx` 的 `formatByteSize`）+ 树条目图标与大小列 + 预览头；表驱动单测（依赖 1.1）
 - [x] 5.3 #294 / PR #356 merge 1a1773c（archive 2026-09-25-files-empty-states-layout；空根 `EmptyState` 置于树区、预览区保持 `未选择文件`；删未赋值的 unsupported `message?`；顺带 `.files-preview-empty .ui-empty-state{min-width:0}` + 副行 `overflow-wrap:anywhere`；父 delta 同步无空间文案、`EmptyState` 标注与两个子 Scenario）：文案与布局：`空目录`、空树 `该工作空间暂无目录 / 点击左上角 ＋ 新建文件夹`、不支持态副行 `<name> · <size>　二进制或未识别格式`、`EmptyState` 组件化；树栏 280/210 与 760 纵向、树条目 `text-overflow: ellipsis` + `title`、预览容器 `overflow: auto`；jsdom 断文案与容器类名，宽度/截断由 6.1（依赖 1.5、2.3、5.2）
 

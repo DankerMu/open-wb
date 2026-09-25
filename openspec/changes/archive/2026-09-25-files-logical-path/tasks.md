@@ -13,7 +13,7 @@
 - [x] 3.1 `make check` exit 0。
 - [x] 3.2 `npm run build --workspace web` exit 0。
 - [x] 3.3 ui-walk（CI 环境变量）exit 0。
-- [ ] 3.4 archive PR：父 `files-web`「工作空间页」块以晋升文本为底同步（保留父独有表述；本刀更严格的措辞——过滤"大小写无关"、不外泄清单含 `placeholder` 与下拉选项——同步进父 delta，不得回退为父原文）；勾选父 tasks 5.1；关闭 #292。
+- [x] 3.4 archive PR：父 `files-web`「工作空间页」块以晋升文本为底同步（保留父独有表述；本刀更严格的措辞——过滤"大小写无关"、不外泄清单含 `placeholder` 与下拉选项——同步进父 delta，不得回退为父原文）；勾选父 tasks 5.1；关闭 #292。
 
 ## Risk pack mapping
 - Not selected Public API / CLI / script entry：无。
