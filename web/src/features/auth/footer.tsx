@@ -61,12 +61,12 @@ export function AuthFooter() {
         }
       />
       {logoutError ? (
-        <p className="ui-alert" role="alert">
+        <p className="ui-alert sidebar-footer-note" role="alert">
           {logoutError}
         </p>
       ) : null}
       {pending ? (
-        <p className="ui-muted" role="status">
+        <p className="ui-muted sidebar-footer-note" role="status">
           正在退出登录，可继续浏览或刷新确认登录状态。
         </p>
       ) : null}

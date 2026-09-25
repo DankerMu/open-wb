@@ -127,6 +127,32 @@
   padding: 12px 4px;
 }
 
+/* 折叠态页脚列仅约 40px 宽，错误/进行中提示改为贴侧栏右侧浮出：fixed 脱离 .sidebar 的
+   overflow 裁剪（祖先无 transform/filter）；层级高于主内容、低于对话框。 */
+.sidebar[data-collapsed="true"] .sidebar-footer-note {
+  position: fixed;
+  bottom: 16px;
+  left: 56px;
+  z-index: 1100;
+  width: 240px;
+  margin: 0;
+  box-shadow: var(--wb-shadow-popover);
+}
+
+/* ui-alert 的 soft 底是半透明，浮在主内容上会透字：在其下垫一层不透明底色，保留原色调。 */
+.sidebar[data-collapsed="true"] .sidebar-footer-note.ui-alert {
+  background:
+    linear-gradient(var(--wb-status-error-soft-bg), var(--wb-status-error-soft-bg)),
+    var(--wb-bg-primary);
+}
+
+.sidebar[data-collapsed="true"] .sidebar-footer-note.ui-muted {
+  padding: 8px 10px;
+  border: 1px solid var(--wb-color-border-primary);
+  border-radius: 8px;
+  background: var(--wb-bg-primary);
+}
+
 .sidebar-user {
   display: flex;
   align-items: center;
@@ -149,6 +175,10 @@
 /* outline 沿用 styles.css 全局 :focus-visible，这里只重申圆角（同 button.css 写法）。 */
 .sidebar-user:focus-visible {
   border-radius: 10px;
+}
+
+.sidebar-link:focus-visible {
+  border-radius: 8px;
 }
 
 .sidebar-avatar {
@@ -223,8 +253,16 @@
     flex-wrap: wrap;
   }
 
-  .sidebar-link {
+  .sidebar-link,
+  .sidebar[data-collapsed="true"] .sidebar-link {
     padding: 6px 8px;
+  }
+
+  .sidebar[data-collapsed="true"] .sidebar-brand {
+    flex-direction: row;
+    height: 40px;
+    gap: 8px;
+    padding: 0;
   }
 
   .sidebar-link-sub {
@@ -240,5 +278,22 @@
     margin-top: 0;
     padding: 0;
     border-top: 0;
+  }
+
+  /* 横条已占满宽度，提示回到文档流。 */
+  .sidebar[data-collapsed="true"] .sidebar-footer-note {
+    position: static;
+    width: auto;
+    box-shadow: none;
+  }
+
+  .sidebar[data-collapsed="true"] .sidebar-footer-note.ui-alert {
+    background: var(--wb-status-error-soft-bg);
+  }
+
+  .sidebar[data-collapsed="true"] .sidebar-footer-note.ui-muted {
+    padding: 0;
+    border: 0;
+    background: transparent;
   }
 }

@@ -6,22 +6,25 @@ import { mountAuthenticatedApp } from "./render-app-router.js";
 import {
   authenticatedPrincipal,
   createFetchMock,
+  deferredResponse,
   type FetchMock,
   jsonResponse,
 } from "./support.js";
-import { readRepoFile, yieldMacrotask } from "./ui-support.js";
+import { blockBody, readRepoFile, ruleBody, stripComments, yieldMacrotask } from "./ui-support.js";
 
 const STORAGE_KEY = "workbuddy-sidebar";
 const LABELS = ["会话", "工作空间", "中心", "设置"];
 
 let disposeRouter: (() => void) | undefined;
 
-function mountFiles(): FetchMock {
+function mountFiles(
+  logout: () => Promise<Response> | Response = () => new Response(null, { status: 204 }),
+): FetchMock {
   const fetchMock = createFetchMock({
     "/api/auth/me": () => jsonResponse(authenticatedPrincipal),
     "/api/workspaces": () => jsonResponse({ workspaces: [] }),
     "/api/sessions": () => jsonResponse({ sessions: [] }),
-    "/api/auth/logout": () => new Response(null, { status: 204 }),
+    "/api/auth/logout": logout,
   });
   const mounted = mountAuthenticatedApp("/files", fetchMock);
   disposeRouter = () => mounted.router.dispose();
@@ -246,5 +249,67 @@ describe("manifest 与静态契约 (S10)", () => {
     expect(styles).not.toContain(".account-footer");
     expect(styles).not.toContain(".sidebar-link");
     expect(styles).toContain("routes/shell/sidebar.css");
+  });
+});
+
+describe("折叠态退出反馈与样式契约", () => {
+  const sidebarCss = () => stripComments(readRepoFile("web/src/routes/shell/sidebar.css"));
+  const narrowCss = () => blockBody(sidebarCss(), /@media\s*\(max-width:\s*760px\)\s*\{/);
+  const COLLAPSED_NOTE = '.sidebar[data-collapsed="true"] .sidebar-footer-note';
+
+  /** 折叠侧栏后经用户菜单确认 退出；返回侧栏。 */
+  async function collapseAndConfirmLogout() {
+    const aside = await findSidebar();
+    toggleSidebar(aside, "折叠侧栏");
+    await openUserMenu();
+    const dialog = await selectLogout();
+    fireEvent.click(within(dialog).getByRole("button", { name: "退出" }));
+    return aside;
+  }
+
+  it("折叠态退出失败：错误提示以浮出 note 呈现，确认框关闭、侧栏仍折叠", async () => {
+    const message = "无法退出当前会话";
+    mountFiles(() => jsonResponse({ error: { code: "forbidden", message } }, 403));
+    const aside = await collapseAndConfirmLogout();
+
+    const alert = await within(aside).findByRole("alert");
+    expect(alert.textContent).toBe(message);
+    expect(alert.classList.contains("sidebar-footer-note")).toBe(true);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(aside.getAttribute("data-collapsed")).toBe("true");
+  });
+
+  it("折叠态退出进行中：状态提示以浮出 note 呈现", async () => {
+    const pendingLogout = deferredResponse();
+    mountFiles(() => pendingLogout.promise);
+    const aside = await collapseAndConfirmLogout();
+
+    const status = await within(aside).findByRole("status", { hidden: true });
+    expect(status.textContent).toBe("正在退出登录，可继续浏览或刷新确认登录状态。");
+    expect(status.classList.contains("sidebar-footer-note")).toBe(true);
+    expect(aside.getAttribute("data-collapsed")).toBe("true");
+  });
+
+  it("折叠态 note 以 fixed 浮出 overflow 裁剪；≤760 回到文档流", () => {
+    const floating = ruleBody(sidebarCss(), COLLAPSED_NOTE);
+    expect(floating).toContain("position: fixed;");
+    expect(floating).toContain("width: 240px;");
+    // 半透明的 alert 底浮在主内容上需垫不透明底色。
+    expect(ruleBody(sidebarCss(), `${COLLAPSED_NOTE}.ui-alert`)).toContain("var(--wb-bg-primary)");
+    expect(ruleBody(narrowCss(), COLLAPSED_NOTE)).toContain("position: static;");
+  });
+
+  it("≤760 折叠态：链接保持横条内边距、字标行不纵向堆叠", () => {
+    const narrow = narrowCss();
+    expect(ruleBody(narrow, '.sidebar[data-collapsed="true"] .sidebar-link')).toContain(
+      "padding: 6px 8px;",
+    );
+    const brand = ruleBody(narrow, '.sidebar[data-collapsed="true"] .sidebar-brand');
+    expect(brand).toContain("flex-direction: row;");
+    expect(brand).toContain("height: 40px;");
+  });
+
+  it("导航链接聚焦时重申 8px 圆角（压过全局 :focus-visible）", () => {
+    expect(ruleBody(sidebarCss(), ".sidebar-link:focus-visible")).toContain("border-radius: 8px;");
   });
 });
