@@ -347,6 +347,32 @@
   }
 }
 
+/* Assistant action row — adapted from resource/workbuddy-live-demo.html:528-530 (.msg-actions). */
+.chat-msg-actions {
+  display: flex;
+  gap: 2px;
+  margin-top: 8px;
+}
+
+/* Overrides the ui-btn--icon size (same specificity, loaded later). */
+.chat-msg-action {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 6px;
+  color: var(--wb-icon-muted);
+}
+
+/* Radius restated over the ui-btn focus-visible radius (same specificity, later). */
+.chat-msg-action,
+.chat-msg-action:focus-visible {
+  border-radius: 6px;
+}
+
+.chat-msg-action:hover:not(:disabled) {
+  color: var(--wb-text-secondary);
+}
+
 @media (max-width: 760px) {
   .chat-msg-user {
     max-width: 100%;

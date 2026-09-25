@@ -3,6 +3,7 @@ import { MarkdownView } from "../../lib/markdown-view.js";
 import type { ChatSession } from "../../lib/session-contract.js";
 import { BrandMark, Icon } from "../../ui/index.js";
 import { Composer } from "./composer.js";
+import { MessageActions } from "./message-actions.js";
 import { FollowTranscript } from "./scroll-follow.js";
 import { SESSION_STATUS_LABEL } from "./status-label.js";
 import { summarizeStepDetail } from "./step-summary.js";
@@ -136,6 +137,9 @@ const MessageArticle = memo(function MessageArticle({ message }: { message: Chat
         </div>
         {steps}
         {error}
+        {message.status !== "running" && message.content !== "" ? (
+          <MessageActions text={message.content} />
+        ) : null}
       </div>
     </article>
   );
