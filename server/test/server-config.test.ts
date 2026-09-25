@@ -184,6 +184,13 @@ describe("resolveServerConfig — HOST", () => {
       port: 8080,
     });
   });
+
+  it("exact localhost 规范为 127.0.0.1；其它写法原样透传", () => {
+    expect(resolveServerConfig({ HOST: "localhost" }, SOURCE_ENTRY).host).toBe("127.0.0.1");
+    expect(resolveServerConfig({ HOST: "LOCALHOST" }, SOURCE_ENTRY).host).toBe("LOCALHOST");
+    expect(resolveServerConfig({ HOST: " localhost " }, SOURCE_ENTRY).host).toBe(" localhost ");
+    expect(resolveServerConfig({ HOST: "::1" }, SOURCE_ENTRY).host).toBe("::1");
+  });
 });
 
 describe("resolveServerConfig — DB_PATH", () => {
