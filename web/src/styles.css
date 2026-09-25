@@ -117,46 +117,6 @@ a {
   }
 }
 
-.ui-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 32px;
-  padding: 0 14px;
-  border-radius: 8px;
-  border: 1px solid var(--wb-border-default);
-  background: var(--wb-bg-secondary);
-  color: var(--wb-text-primary);
-  font-size: 13px;
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.ui-button:hover:not(:disabled) {
-  background: var(--wb-bg-hover);
-}
-
-.ui-button-primary {
-  background: var(--wb-text-primary);
-  border-color: transparent;
-  color: var(--wb-bg-primary);
-}
-
-.ui-button-primary:hover:not(:disabled) {
-  opacity: 0.88;
-}
-
-.ui-button-danger {
-  background: var(--wb-status-error);
-  border-color: transparent;
-  color: #fff;
-}
-
-.ui-button-danger:hover:not(:disabled) {
-  opacity: 0.88;
-}
-
 .ui-alert {
   margin: 0;
   padding: 8px 10px;

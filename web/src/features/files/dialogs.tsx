@@ -1,5 +1,5 @@
 import { type FormEvent, type PropsWithChildren, type RefObject, useRef, useState } from "react";
-import { Dialog, Menu } from "../../ui/index.js";
+import { Button, Dialog, Menu } from "../../ui/index.js";
 
 type ReturnFocus = RefObject<HTMLElement | null>;
 
@@ -43,9 +43,9 @@ export function CreationMenu({ onNewDirectory, onNewWorkspace }: CreationMenuPro
         { label: "新建工作空间", onSelect: () => onNewWorkspace(triggerRef.current) },
       ]}
       trigger={
-        <button aria-label="新建" className="ui-button" ref={triggerRef} type="button">
+        <Button aria-label="新建" ref={triggerRef}>
           ＋
-        </button>
+        </Button>
       }
     />
   );
@@ -73,12 +73,10 @@ function DialogForm({ children, error, onCancel, onSubmit, pending }: DialogForm
         </p>
       ) : null}
       <div className="files-dialog-actions">
-        <button className="ui-button" onClick={onCancel} type="button">
-          取消
-        </button>
-        <button className="ui-button ui-button-primary" disabled={pending} type="submit">
+        <Button onClick={onCancel}>取消</Button>
+        <Button disabled={pending} type="submit" variant="primary">
           创建
-        </button>
+        </Button>
       </div>
     </form>
   );

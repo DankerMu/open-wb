@@ -89,6 +89,23 @@ describe("依赖方向 grep 守卫", () => {
   });
 });
 
+describe("旧按钮类 grep 守卫", () => {
+  /** 词边界：`ui-button`、`ui-button-primary` 命中，`ui-btn*` 不命中。 */
+  const legacyButtonHits = (text: string) => lineHits(text, [/\bui-button\b/]);
+
+  it("正则命中注入的 ui-button 行，不命中 ui-btn 行", () => {
+    const sample = ['<button className="ui-button">', '<button className="ui-btn ui-btn--md">'];
+    expect(legacyButtonHits(sample.join("\n"))).toEqual(['1: <button className="ui-button">']);
+    expect(legacyButtonHits(sample[1] ?? "")).toEqual([]);
+  });
+
+  it("web/src 的 .ts/.tsx/.css 不再出现 ui-button（按钮只经 Button 基元）", () => {
+    const paths = listRepoFiles("web/src", (path) => /\.(tsx?|css)$/.test(path));
+    expect(paths.length).toBeGreaterThan(0);
+    expect(hitsIn(paths, legacyButtonHits)).toEqual([]);
+  });
+});
+
 describe("motion.css", () => {
   const UTILITIES = ["ui-fadein", "ui-pop", "ui-pulse", "ui-caret", "ui-spin"];
   const KEYFRAMES = ["wb-fadein", "wb-pop", "wb-pulse", "wb-caret", "wb-spin", "wb-drawer-in"];
