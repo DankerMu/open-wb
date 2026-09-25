@@ -604,7 +604,7 @@ describe("quick login", () => {
     fillAndSubmit(fields);
 
     expect(await screen.findByText("受保护内容", { exact: true })).toBeTruthy();
-    expect(infoSignal.aborted).toBe(true);
+    await waitFor(() => expect(infoSignal.aborted).toBe(true));
   });
 
   it("keeps the quick login cards usable after a failed login", async () => {
