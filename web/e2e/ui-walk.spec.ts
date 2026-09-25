@@ -8,6 +8,7 @@ import {
   type Response,
   test,
 } from "@playwright/test";
+import { holdRoute } from "./route-hold.js";
 import { armGate, controlOrigin, deleteGate, gatePhase, releaseGate } from "./ui-walk-gate.js";
 
 const DEV_ACCOUNT = "zhangsan";
@@ -119,17 +120,7 @@ async function walkProductionOrigin(page: Page, oracle: AuthOracle): Promise<voi
 // 键盘确认退出，并在 POST /api/auth/logout 挂起期间证明：确认按钮被原生禁用引发 focus fixup 后，
 // 焦点仍被救回到模态内的 `关闭`，Tab/Shift+Tab 不逃到背景、路由不变。放行后由调用方断言登出。
 async function confirmLogoutByKeyboardWhileHeld(page: Page, dialog: Locator): Promise<void> {
-  let release!: () => void;
-  const held = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  // 放行后须等处理器的 continue 完成再 unroute：unroute 清空拦截模式会让挂起请求被自动放行，
-  // 与处理器随后的 continue 竞争（Route is already handled）。
-  let forwarded: Promise<void> | undefined;
-  await page.route("**/api/auth/logout", (route) => {
-    forwarded = held.then(() => route.continue());
-    return forwarded;
-  });
+  const logout = await holdRoute(page, "**/api/auth/logout");
   try {
     await expect(dialog.getByRole("button", { name: "取消" })).toBeFocused();
     await page.keyboard.press("Tab");
@@ -141,12 +132,10 @@ async function confirmLogoutByKeyboardWhileHeld(page: Page, dialog: Locator): Pr
       expect(await dialog.evaluate((el) => el.contains(document.activeElement)), key).toBe(true);
     }
     expect(new URL(page.url()).pathname).toBe("/settings");
-    await expect.poll(() => forwarded !== undefined, "logout request held by route").toBe(true);
+    await expect.poll(() => logout.held(), "logout request held by route").toBe(true);
   } finally {
-    release();
+    await logout.release();
   }
-  await forwarded;
-  await page.unroute("**/api/auth/logout");
 }
 
 // 仍在 authenticated 阶段：reload 只产生 200 的 /api/auth/me，oracle 放行。
@@ -434,14 +423,14 @@ async function expectSessionCookieAbsent(page: Page) {
 async function walkFiles(page: Page): Promise<void> {
   const files = page.locator("main");
   await files.getByRole("button", { name: "选择工作空间" }).click();
-  const switcher = files.getByRole("dialog", { name: "工作空间切换器" });
+  const switcher = page.getByRole("dialog", { name: "工作空间切换器" });
   await expect(switcher.getByRole("button", { name: "＋ 新建工作空间" })).toBeVisible();
   const existing = switcher.getByRole("button").filter({
     has: page.getByText(SMOKE_FIXTURE, { exact: true }),
   });
   if ((await existing.count()) === 0) {
     await switcher.getByRole("button", { name: "＋ 新建工作空间" }).click();
-    const createDialog = files.getByRole("dialog", { name: "新建工作空间" });
+    const createDialog = page.getByRole("dialog", { name: "新建工作空间" });
     await expect(createDialog).toBeVisible();
     await createDialog.getByLabel("工作空间名称").fill(SMOKE_FIXTURE);
     await createDialog.getByRole("button", { name: "创建" }).click();
@@ -481,11 +470,8 @@ async function walkFiles(page: Page): Promise<void> {
     .toEqual([256, 256]);
 
   await files.getByRole("button", { name: "新建", exact: true }).click();
-  await files.getByRole("menuitem", { name: "新建文件夹" }).click();
-  const dirDialog = files.getByRole("dialog", { name: "新建文件夹" });
-  await dirDialog.getByLabel("位置").selectOption({ label: "根目录　root" });
-  await dirDialog.getByLabel("文件夹名称").fill(WALK_OUT);
-  await dirDialog.getByRole("button", { name: "创建" }).click();
+  await page.getByRole("menuitem", { name: "新建文件夹" }).click();
+  await createWalkOutWhileHeld(page);
   await expect(tree.getByRole("button", { name: `展开 ${WALK_OUT}`, exact: true })).toBeVisible();
 
   await expect.poll(() => workspaceIdFromUrl(page.url())).toMatch(SESSION_ID);
@@ -501,6 +487,26 @@ async function walkFiles(page: Page): Promise<void> {
   await expect(
     restored.getByRole("button", { name: `展开 ${WALK_OUT}`, exact: true }),
   ).toBeVisible();
+}
+
+// 键盘提交 walk-out，并在 POST …/dirs 挂起期间证明：`创建` 被原生禁用引发 focus fixup 后，
+// 焦点被救回到模态内的 `关闭`，Tab/Shift+Tab 不逃出对话框。先断言请求确被挂起，再断言焦点。
+async function createWalkOutWhileHeld(page: Page): Promise<void> {
+  const dialog = page.getByRole("dialog", { name: "新建文件夹" });
+  await dialog.getByLabel("位置").selectOption({ label: "根目录　root" });
+  await dialog.getByLabel("文件夹名称").fill(WALK_OUT);
+  const create = await holdRoute(page, "**/api/workspaces/*/dirs");
+  try {
+    await dialog.getByRole("button", { name: "创建" }).press("Enter");
+    await expect.poll(() => create.held(), "walk-out creation held by route").toBe(true);
+    await expect(dialog.getByRole("button", { name: "关闭" })).toBeFocused();
+    for (const key of ["Tab", "Shift+Tab", "Tab"]) {
+      await page.keyboard.press(key);
+      expect(await dialog.evaluate((el) => el.contains(document.activeElement)), key).toBe(true);
+    }
+  } finally {
+    await create.release();
+  }
 }
 
 async function expectRootFileButtons(tree: Locator) {

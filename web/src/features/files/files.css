@@ -463,18 +463,11 @@
 }
 
 .files-switcher-panel {
-  position: static;
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
   max-height: min(22rem, 70vh);
-  margin-top: 0.35rem;
-  padding: 0.55rem;
   overflow: hidden;
-  border: 1px solid var(--wb-border-default);
-  border-radius: 12px;
-  background: var(--wb-bg-primary);
-  box-shadow: var(--wb-shadow-dialog);
 }
 
 .files-switcher-search {
@@ -547,65 +540,6 @@
 .files-switcher-empty {
   margin: 0.25rem 0.35rem;
   font-size: 0.75rem;
-}
-
-.files-menu {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0.25rem;
-}
-
-.files-menu-panel {
-  position: static;
-  display: flex;
-  flex-direction: column;
-  min-width: 11rem;
-  padding: 0.25rem;
-  border: 1px solid var(--wb-border-default);
-  border-radius: 10px;
-  background: var(--wb-bg-primary);
-  box-shadow: var(--wb-shadow-dialog);
-}
-
-.files-menu-panel [role="menuitem"] {
-  width: 100%;
-  margin: 0;
-  padding: 0.45rem 0.65rem;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--wb-text-primary);
-  font: inherit;
-  font-size: 0.8rem;
-  text-align: left;
-  cursor: pointer;
-}
-
-.files-menu-panel [role="menuitem"]:hover {
-  background: var(--wb-brand-primary-subtle);
-}
-
-.files-dialog {
-  width: min(28rem, calc(100% - 2rem));
-  max-height: min(82vh, 40rem);
-  padding: 0;
-  border: 0;
-  border-radius: 14px;
-  background: var(--wb-bg-primary);
-  color: var(--wb-text-primary);
-  box-shadow: var(--wb-shadow-dialog);
-  font-family: var(--wb-font);
-}
-
-.files-dialog::backdrop {
-  background: var(--wb-overlay);
-}
-
-.files-dialog h2 {
-  margin: 0;
-  padding: 1rem 1.25rem 0.35rem;
-  font-size: 1rem;
 }
 
 .files-dialog-form {

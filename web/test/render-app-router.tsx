@@ -4,7 +4,6 @@ import { RouterProvider } from "react-router";
 import { vi } from "vitest";
 import { createAppRouter } from "../src/routes/index.js";
 import { ToastProvider } from "../src/ui/index.js";
-import "./dialog-platform.js";
 import "./radix-platform.js";
 import { type FetchMock, setBrowserPath } from "./support.js";
 

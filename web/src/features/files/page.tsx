@@ -1,7 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { type ApiClient, ApiError } from "../../lib/api.js";
-import { EmptyState } from "../../ui/index.js";
+import { EmptyState, Popover } from "../../ui/index.js";
 import { useAuth } from "../auth/index.js";
 import { WorkspaceDialog } from "./dialogs.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
@@ -23,7 +23,8 @@ type WorkspaceDialogState = {
 type WorkspaceSwitcherProps = {
   currentWorkspace: Workspace | null;
   workspaces: readonly Workspace[];
-  onCreateWorkspace(): void;
+  /** 回调带上切换器触发器，供对话框在取消类关闭后把焦点还给它。 */
+  onCreateWorkspace(trigger: HTMLElement | null): void;
   onSelectWorkspace(id: string): void;
 };
 
@@ -67,7 +68,6 @@ function WorkspaceSwitcher({
 }: WorkspaceSwitcherProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const searchRef = useRef<HTMLInputElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const filteredWorkspaces = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -80,51 +80,32 @@ function WorkspaceSwitcher({
     );
   }, [query, workspaces]);
 
-  useEffect(() => {
-    if (open) {
-      searchRef.current?.focus();
-    }
-  }, [open]);
-
-  function dismissSwitcher() {
-    setOpen(false);
-    triggerRef.current?.focus();
-  }
-
   return (
     <div className="files-switcher">
-      <button
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        aria-label="选择工作空间"
-        className="files-switcher-trigger"
-        onClick={() => setOpen((current) => !current)}
-        ref={triggerRef}
-        type="button"
+      <Popover
+        contentLabel="工作空间切换器"
+        onOpenChange={setOpen}
+        open={open}
+        trigger={
+          <button
+            aria-label="选择工作空间"
+            className="files-switcher-trigger"
+            ref={triggerRef}
+            type="button"
+          >
+            <span className="files-switcher-copy">
+              <strong>{currentWorkspace?.name ?? "未选择工作空间"}</strong>
+              <span>{currentWorkspace?.root ?? "—"}</span>
+            </span>
+          </button>
+        }
       >
-        <span className="files-switcher-copy">
-          <strong>{currentWorkspace?.name ?? "未选择工作空间"}</strong>
-          <span>{currentWorkspace?.root ?? "—"}</span>
-        </span>
-      </button>
-      {open ? (
-        <div
-          aria-label="工作空间切换器"
-          className="files-switcher-panel"
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              dismissSwitcher();
-            }
-          }}
-          role="dialog"
-        >
+        <div className="files-switcher-panel">
           <label className="files-switcher-search">
             搜索工作空间
             <input
               onChange={(event) => setQuery(event.target.value)}
               placeholder="搜索工作空间"
-              ref={searchRef}
               value={query}
             />
           </label>
@@ -137,7 +118,7 @@ function WorkspaceSwitcher({
                     aria-pressed={current}
                     className="files-switcher-item"
                     onClick={() => {
-                      dismissSwitcher();
+                      setOpen(false);
                       onSelectWorkspace(workspace.id);
                     }}
                     type="button"
@@ -162,15 +143,15 @@ function WorkspaceSwitcher({
           <button
             className="ui-button"
             onClick={() => {
-              dismissSwitcher();
-              onCreateWorkspace();
+              setOpen(false);
+              onCreateWorkspace(triggerRef.current);
             }}
             type="button"
           >
             ＋ 新建工作空间
           </button>
         </div>
-      ) : null}
+      </Popover>
     </div>
   );
 }
@@ -183,7 +164,7 @@ function EmptyWorkspace({
 }: {
   folderNotice?: string | null;
   onNewDirectory(): void;
-  onNewWorkspace(): void;
+  onNewWorkspace(trigger: HTMLElement | null): void;
   switcher: ReactNode;
 }) {
   return (
@@ -212,6 +193,7 @@ export function FilesPage() {
   const listSequenceRef = useRef(0);
   const mountedRef = useRef(false);
   const workspaceDialogRef = useRef<WorkspaceDialogState | null>(null);
+  const workspaceReturnFocusRef = useRef<HTMLElement | null>(null);
   const workspaceMutationRef = useRef<AbortController | null>(null);
   const workspaceSequenceRef = useRef(0);
 
@@ -318,19 +300,23 @@ export function FilesPage() {
     [closeWorkspaceDialog, location.hash, location.pathname, location.search, navigate],
   );
 
-  const openWorkspaceDialog = useCallback(() => {
-    workspaceMutationRef.current?.abort();
-    workspaceMutationRef.current = null;
-    workspaceSequenceRef.current += 1;
-    const dialog = {
-      id: workspaceSequenceRef.current,
-      error: null,
-      location: locationKey,
-      pending: false,
-    };
-    workspaceDialogRef.current = dialog;
-    setWorkspaceDialog(dialog);
-  }, [locationKey]);
+  const openWorkspaceDialog = useCallback(
+    (trigger: HTMLElement | null) => {
+      workspaceReturnFocusRef.current = trigger;
+      workspaceMutationRef.current?.abort();
+      workspaceMutationRef.current = null;
+      workspaceSequenceRef.current += 1;
+      const dialog = {
+        id: workspaceSequenceRef.current,
+        error: null,
+        location: locationKey,
+        pending: false,
+      };
+      workspaceDialogRef.current = dialog;
+      setWorkspaceDialog(dialog);
+    },
+    [locationKey],
+  );
 
   const createWorkspace = useCallback(
     (input: { name: string; dir?: string }) => {
@@ -437,6 +423,7 @@ export function FilesPage() {
           onCancel={closeWorkspaceDialog}
           onCreate={createWorkspace}
           pending={workspaceDialog.pending}
+          returnFocus={workspaceReturnFocusRef}
         />
       ) : null}
     </section>
