@@ -320,10 +320,7 @@ export class SessionSupervisor {
     void pump.finally(() => {
       this.#pumps.delete(pump);
       this.#releasePump(slot, pumpGeneration);
-      if (slot.pump === pump) {
-        slot.pump = undefined;
-        this.#releaseClaim(slot, assistantMessageId);
-      }
+      releasePumpExit(this.#claims, slot, pump, assistantMessageId);
     });
   }
 
@@ -339,15 +336,6 @@ export class SessionSupervisor {
     }
     slot.claimedAssistantId = assistantMessageId;
     this.#claims.set(assistantMessageId, slot);
-  }
-
-  #releaseClaim(slot: Slot, assistantMessageId: number): void {
-    if (this.#claims.get(assistantMessageId) === slot) {
-      this.#claims.delete(assistantMessageId);
-    }
-    if (slot.claimedAssistantId === assistantMessageId) {
-      slot.claimedAssistantId = undefined;
-    }
   }
 
   async #pump(
@@ -607,7 +595,7 @@ export class SessionSupervisor {
 
   async #retireSlot(slot: Slot): Promise<void> {
     if (slot.claimedAssistantId !== undefined) {
-      this.#releaseClaim(slot, slot.claimedAssistantId);
+      releaseClaim(this.#claims, slot, slot.claimedAssistantId);
     }
     slot.retiring ??= slot.runtime.shutdown().catch((error: unknown) => {
       this.#retain(asError(error));
@@ -700,6 +688,40 @@ function persistEvent(
     case "turn.end":
       store.finishTurn(assistantMessageId, event.data.status);
       return event;
+  }
+}
+
+interface ClaimSlot {
+  claimedAssistantId: number | undefined;
+  pump: Promise<void> | undefined;
+}
+
+/**
+ * Pump exit always releases its own turn's claim, even after a newer pump took the
+ * slot (issue #219); only the slot's current-pump registration is identity-gated.
+ */
+export function releasePumpExit<S extends ClaimSlot>(
+  claims: Map<number, S>,
+  slot: S,
+  pump: Promise<void>,
+  assistantMessageId: number,
+): void {
+  if (slot.pump === pump) {
+    slot.pump = undefined;
+  }
+  releaseClaim(claims, slot, assistantMessageId);
+}
+
+function releaseClaim<S extends ClaimSlot>(
+  claims: Map<number, S>,
+  slot: S,
+  assistantMessageId: number,
+): void {
+  if (claims.get(assistantMessageId) === slot) {
+    claims.delete(assistantMessageId);
+  }
+  if (slot.claimedAssistantId === assistantMessageId) {
+    slot.claimedAssistantId = undefined;
   }
 }
 
