@@ -2,9 +2,7 @@
 
 ## Purpose
 定义浏览器会话页、API 客户端、纯事件归约与有界 SSE 快照恢复：完整正文和步骤呈现、查询选择、严格响应/事件校验、账号与操作所有权、错误归属及关闭治理。
-
 ## Requirements
-
 ### Requirement: API 客户端扩展
 `ApiClient` SHALL 提供 `listSessions()`、`createSession()`、`getMessages(id)`、`prompt(id, message)`，分别返回类型化的会话列表、会话、完整消息快照和接受回合的消息 ID。四方法 SHALL 使用既有 same-origin 请求、可选 AbortSignal、错误信封与 401 通知机制；GET SHALL 禁止缓存，路径 ID SHALL 编码。成功状态 SHALL 分别为 200、201、200、202；新建会话不发送 body，prompt SHALL 原样发送 JSON `{message}`。
 返回对象 SHALL 按公开 DTO 严格校验，不接受缺字段、多字段、错误枚举或非安全整数；消息时间戳和消息/步骤 ID SHALL 允许有符号安全整数，session 时间戳、epoch、非 null seq 和 ordinal SHALL 非负。`getMessages` SHALL 保留完整正文、步骤、顺序和 `streamCursor:{epoch:number,seq:number|null}`，不得截断、过滤、规范化文本或将 null/缺失游标默认成 0。409/502 SHALL 保留 `ApiError` 的 status/code/message；非法响应和网络异常 SHALL 使用既有不泄露响应内容的 request_failed 错误。
@@ -128,3 +126,19 @@ Business errors SHALL display inline on the message;409/502 SHALL display envelo
 #### Scenario: 复制助手原文
 - WHEN 一次已完成回合的助手正文为含 Markdown 标记的原文，点击该助手消息的 `复制`；再分别在剪贴板 API 缺失、`writeText` reject 时点击
 - THEN 剪贴板写入恰为该条助手的原始 Markdown 文本并出现 Toast `已复制到剪贴板`；API 缺失或 reject 时出现 Toast `复制失败` 且无未捕获异常；running 助手、空正文助手与用户消息均无 `复制` 按钮
+
+### Requirement: 转录区尺寸变化触发贴底重算
+会话转录区的滚动容器或其内容根发生尺寸变化（容器变矮或变高、内容自行变高，例如 transcript 上方出现 alert、展开步骤卡 `原始输出`、视口高度变化）而消息内容未变时，SHALL 执行与内容更新相同的只读重算：更新前处于贴底（距底 ≤4px）或刚点击 `回到最新` 的转录 SHALL 回到底部；用户已上滚时 SHALL NOT 改变滚动位置，并在距底超过一屏（`clientHeight`）时显示 `回到最新`。贴底状态仍只由用户滚动与点击 `回到最新` 写入。运行环境没有 `ResizeObserver` 时 SHALL 退化为仅在内容更新时重算且不报错；观察在组件卸载或切换会话时 SHALL 解除。
+
+#### Scenario: 贴底时容器变矮仍贴底
+- **WHEN** 转录处于贴底，随后其上方出现 alert 或视口变矮使滚动容器变矮
+- **THEN** 转录回到底部（距底 ≤4px），最后一行可见
+
+#### Scenario: 贴底时展开原始输出继续跟随
+- **WHEN** 转录处于贴底时展开最后一张步骤卡的 `原始输出`
+- **THEN** 转录跟随到底部（距底 ≤4px）
+
+#### Scenario: 上滚时尺寸变化不拽回
+- **WHEN** 用户已上滚超过一屏，随后视口高度变化或内容变高
+- **THEN** 滚动位置不变，`回到最新` 可见
+
