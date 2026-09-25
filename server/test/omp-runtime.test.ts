@@ -25,11 +25,16 @@ import {
   observePromise,
 } from "./support/omp-rpc.js";
 import {
+  type ChildObservation,
+  capturePromptWrites,
   collectPrompt,
   collectUntilError,
   createClock,
   createTokens,
+  observeChild,
   observeIteratorResult,
+  requireIteratorReturn,
+  settlesWithin,
   type TestClock,
   type TokenBook,
 } from "./support/omp-runtime.js";
@@ -360,6 +365,66 @@ describe("SessionRuntime failed acquisition, delayed shutdown and iterator retur
     expect(() => world.runtime.prompt("closed")).toThrow(AgentUnavailableError);
   });
 
+  it("settles shutdown at clock 0 when it races a missing-binary spawn failure", {
+    timeout: 15_000,
+  }, async () => {
+    const world = openWorld({ spawnFailure: "missing-bin", shutdownInSpawn: true });
+    const pending = collectUntilError(world.runtime.prompt("boot"));
+    const { shutting } = await waitShutdownInSpawn(world);
+    expect(await settlesWithin(shutting, 1_000)).toBe(true);
+    expect(world.clock.nowMs).toBe(0);
+    expect(world.clock.pending()).toBe(0);
+    expect(world.kills).toEqual([]);
+    expect(world.children).toHaveLength(0);
+    expect(world.tokens.issued).toHaveLength(1);
+    expect(world.tokens.revoked).toEqual(world.tokens.issued);
+    expect(world.tokens.live.get(SESSION_ID)).toBeUndefined();
+    const result = await pending;
+    expect(result.error).toBeInstanceOf(AgentUnavailableError);
+    expect((result.error as AgentUnavailableError).code).toBe("agent_unavailable");
+    expect(() => world.runtime.prompt("closed")).toThrow(AgentUnavailableError);
+  });
+
+  it("retires a pid-less child that never reports failure at clock 0", {
+    timeout: 15_000,
+  }, async () => {
+    const world = openWorld({ spawnFailure: "pid-less" });
+    const pending = collectUntilError(world.runtime.prompt("boot"));
+    expect(await settlesWithin(pending, 1_000)).toBe(true);
+    const result = await pending;
+    expect(result.error).toBeInstanceOf(AgentUnavailableError);
+    const shutting = world.runtime.shutdown();
+    expect(await settlesWithin(shutting, 1_000)).toBe(true);
+    expect(world.clock.nowMs).toBe(0);
+    expect(world.clock.pending()).toBe(0);
+    // Only OmpProcess#failStartup's handshake-failure SIGKILL; the runtime retire never signals.
+    expect(world.kills).toEqual(["SIGKILL"]);
+    expect(world.children).toHaveLength(0);
+    expect(world.tokens.issued).toHaveLength(1);
+    expect(world.tokens.revoked).toEqual(world.tokens.issued);
+    expect(world.tokens.live.get(SESSION_ID)).toBeUndefined();
+  });
+
+  it("keeps TERM at 5000 and KILL at 8000 for a live child that emitted error", {
+    timeout: 15_000,
+  }, async () => {
+    const { child, observed, world } = await openHangTerm();
+    child.emit("error", new Error("simulated kill/IPC failure on a live child"));
+    expect(hasTerminated(child)).toBe(false);
+    const shutting = world.runtime.shutdown();
+    await waitImmediate();
+    expect(observed.stdinEnded).toBe(true);
+    await advanceHangTermGrace(world, observed, child);
+    expect(hasTerminated(child)).toBe(false);
+    world.clock.advance(1);
+    await observed.exit;
+    await shutting;
+    expect(observed.signals).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(observed.exits[0]?.signal).toBe("SIGKILL");
+    expect(world.tokens.revoked).toEqual(world.tokens.issued);
+    expect(world.tokens.live.get(SESSION_ID)).toBeUndefined();
+  });
+
   it("settles a parked next after iterator return and reclaims the child", {
     timeout: 15_000,
   }, async () => {
@@ -457,17 +522,7 @@ interface SpawnCall {
   env: Record<string, string>;
 }
 
-interface ChildObservation {
-  child: ChildProcessWithoutNullStreams;
-  signals: NodeJS.Signals[];
-  exits: OmpExit[];
-  exit: Promise<OmpExit>;
-  ready: Promise<void>;
-  agentEnd: Promise<void>;
-  stdinEnded: boolean;
-}
-
-type SpawnFailure = "missing-bin" | "sync-throw" | "obstructed-dir";
+type SpawnFailure = "missing-bin" | "sync-throw" | "obstructed-dir" | "pid-less";
 
 interface World {
   runtime: SessionRuntime;
@@ -545,16 +600,17 @@ function openWorld(
       return originalKill(signal);
     }) as typeof child.kill;
     capturePromptWrites(child, prompts);
-    harness.children.push(child);
-    if (world.spawnFailure !== undefined) {
-      return child;
+    if (world.spawnFailure !== "pid-less") {
+      harness.children.push(child);
     }
-    children.push(child);
-    const watch = observeChild(child);
-    observed.push(watch);
-    spawnWaiters.splice(0).forEach((resolve) => {
-      resolve(watch);
-    });
+    if (world.spawnFailure === undefined) {
+      children.push(child);
+      const watch = observeChild(child);
+      observed.push(watch);
+      spawnWaiters.splice(0).forEach((resolve) => {
+        resolve(watch);
+      });
+    }
     if (options.shutdownInSpawn) {
       world.shutdownInSpawn = world.runtime.shutdown();
     }
@@ -617,14 +673,6 @@ async function advanceHangTermGrace(
   expect(observed.signals).toEqual(["SIGTERM"]);
 }
 
-function requireIteratorReturn<T>(iterator: AsyncIterator<T>): () => Promise<IteratorResult<T>> {
-  const cancel = iterator.return;
-  if (cancel === undefined) {
-    throw new Error("async iterator return is required for cancellation");
-  }
-  return () => cancel.call(iterator);
-}
-
 function captureSpawnCall(
   args: readonly string[],
   env: Parameters<SpawnImpl>[2]["env"],
@@ -645,6 +693,9 @@ function spawnWorldChild(
   spawnFailure: SpawnFailure | undefined,
   scenario: string | undefined,
 ): ChildProcessWithoutNullStreams {
+  if (spawnFailure === "pid-less") {
+    return spawnPidlessFake(command, args, spawnOptions);
+  }
   if (spawnFailure === "missing-bin") {
     return spawn(command, args, {
       cwd: typeof spawnOptions.cwd === "string" ? spawnOptions.cwd : undefined,
@@ -662,78 +713,33 @@ function spawnWorldChild(
   });
 }
 
-function capturePromptWrites(child: ChildProcessWithoutNullStreams, prompts: string[]): void {
-  const originalWrite = child.stdin.write.bind(child.stdin);
-  child.stdin.write = ((chunk: string | Uint8Array, ...rest: unknown[]) => {
-    const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
-    for (const line of text.split("\n")) {
-      if (line.length === 0) {
-        continue;
-      }
-      const frame = JSON.parse(line) as { type?: string; message?: string };
-      if (frame.type === "prompt" && typeof frame.message === "string") {
-        prompts.push(frame.message);
-      }
-    }
-    return originalWrite(chunk, ...(rest as []));
-  }) as typeof child.stdin.write;
+/**
+ * A spawn result that never obtained a pid and never reports failure: no 'error',
+ * no exitCode/signalCode, and kill() is a no-op returning false like a handle-less
+ * Node ChildProcess. Its stdout ends so the handshake fails as a closed transport.
+ */
+function spawnPidlessFake(
+  command: string,
+  args: readonly string[],
+  spawnOptions: Parameters<SpawnImpl>[2],
+): ChildProcessWithoutNullStreams {
+  const fake = harness.fake();
+  (fake as { pid: number | undefined }).pid = undefined;
+  fake.kill = () => false;
+  const child = fake.spawnImpl(command, args, spawnOptions);
+  fake.endStdout();
+  return child;
 }
 
-function observeChild(child: ChildProcessWithoutNullStreams): ChildObservation {
-  const signals: NodeJS.Signals[] = [];
-  const exits: OmpExit[] = [];
-  const originalKill = child.kill.bind(child);
-  child.kill = ((signal?: NodeJS.Signals) => {
-    signals.push(signal ?? "SIGTERM");
-    return originalKill(signal);
-  }) as typeof child.kill;
-  const exit = new Promise<OmpExit>((resolve) => {
-    child.once("exit", (code, signal) => {
-      const seen = { code, signal };
-      exits.push(seen);
-      resolve(seen);
-    });
-  });
-  const watch: ChildObservation = {
-    child,
-    signals,
-    exits,
-    exit,
-    ready: Promise.resolve(),
-    agentEnd: Promise.resolve(),
-    stdinEnded: false,
-  };
-  child.stdin.on("finish", () => {
-    watch.stdinEnded = true;
-  });
-  child.stdin.on("close", () => {
-    watch.stdinEnded = true;
-  });
-  const marker = Buffer.from("no-ready-hang:handlers-ready");
-  watch.ready = new Promise<void>((resolve) => {
-    let buffered = Buffer.alloc(0);
-    const onData = (chunk: Buffer) => {
-      buffered = Buffer.concat([buffered, chunk]);
-      if (buffered.includes(marker)) {
-        child.stderr.off("data", onData);
-        resolve();
-      }
-    };
-    child.stderr.on("data", onData);
-  });
-  const agentEndMarker = Buffer.from('"type":"agent_end"');
-  watch.agentEnd = new Promise<void>((resolve) => {
-    let buffered = Buffer.alloc(0);
-    const onData = (chunk: Buffer) => {
-      buffered = Buffer.concat([buffered, chunk]);
-      if (buffered.includes(agentEndMarker)) {
-        child.stdout.off("data", onData);
-        resolve();
-      }
-    };
-    child.stdout.on("data", onData);
-  });
-  return watch;
+async function waitShutdownInSpawn(world: World): Promise<{ shutting: Promise<void> }> {
+  for (let waited = 0; waited < 1_000 && world.shutdownInSpawn === undefined; waited += 5) {
+    await waitTimeout(5);
+  }
+  if (world.shutdownInSpawn === undefined) {
+    throw new Error("shutdown was not started inside spawnImpl");
+  }
+  // Boxed: an async function returning the bare promise would await shutdown itself.
+  return { shutting: world.shutdownInSpawn };
 }
 
 function resumeOf(args: string[] | undefined): string | undefined {
