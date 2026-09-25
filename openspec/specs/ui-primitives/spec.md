@@ -77,3 +77,7 @@ Menu/Popover/Tooltip 的入场动画与 Menu 项过渡 SHALL 在 `prefers-reduce
 #### Scenario: 图标可访问、动效可禁用、归属登记
 - WHEN 在 jsdom 渲染 `<Icon name="folder" />` 与 `<Icon name="folder" label="目录" size={12} />`，并静态读取 `motion.css` 与 `ATTRIBUTION.md`
 - THEN 第一个 svg `aria-hidden="true"`；第二个 `role="img"`、可访问名 `目录`、类名含 `ui-icon-12`；`motion.css` 的 reduced-motion 块覆盖全部五个 `ui-*` 工具类；`ATTRIBUTION.md` 含 `lucide`/ISC 与 `Radix`/MIT 条目
+
+#### Scenario: 图标离线、动效可禁用且归属登记
+- WHEN `make ui-walk` 的 `desktop-light` project 在 journey 内统计 resourceType 为 `image|font|stylesheet|script` 的 `requestfailed`（导航/SSE 取消的 `net::ERR_ABORTED` 不计）与非 `baseURL` 源的请求，并在受控回合运行中对 `.ui-pulse` 元素先 `emulateMedia({reducedMotion:"reduce"})` 再恢复 `no-preference`；`web/test` 静态读取 `motion.css`
+- THEN 全 journey 零静态资源 `requestfailed`、零跨源请求（图标离线可用）；reduce 下 `animationName` 为 `none`、恢复后非 `none`；`motion.css` 的 reduced-motion 块把每个 `ui-*` 动效类置为 `animation: none` 且 `transition: none`；`ATTRIBUTION.md` 含 `lucide`/ISC 与 `Radix`/MIT 条目
