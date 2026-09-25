@@ -1,6 +1,7 @@
 /* Chat presentation.
-   Visual language adapted from resource/workbuddy-live-demo.html:282-299
-   (session rows), 337-415 (welcome/composer), 416-549 (transcript/steps).
+   Visual language adapted from resource/workbuddy-live-demo.html:282-298
+   (session rows), 337-362 (welcome), 363-378 (composer card),
+   416-549 (transcript/steps).
    Design tokens from WorkBuddy 5.3.11 (wb-design-tokens-master.css /
    design-tokens.json), light/dark brand colors via --wb-brand-primary in
    web/src/styles/tokens.css. Shell owns :root.
@@ -76,13 +77,12 @@
   min-width: 0;
 }
 
+/* Session row: status dot + title, adapted from
+   resource/workbuddy-live-demo.html:282-298 (.conv-item / .conv-item-status). */
 .chat-session-button {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  grid-template-rows: auto auto;
-  column-gap: 8px;
-  row-gap: 2px;
+  display: flex;
   align-items: center;
+  gap: 8px;
   width: 100%;
   padding: 8px 10px;
   border: 1px solid transparent;
@@ -102,16 +102,21 @@
   border-color: var(--wb-border-default);
 }
 
+.chat-session-status {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
 .chat-session-dot {
-  grid-row: 1 / span 2;
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: var(--wb-text-tertiary);
 }
 
 .chat-session-dot-running {
-  background: var(--wb-brand-primary);
+  background: var(--wb-status-warning);
 }
 
 .chat-session-dot-done {
@@ -128,6 +133,7 @@
 
 .chat-session-title {
   display: block;
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -139,32 +145,6 @@
 
 .chat-session-button[aria-current="true"] .chat-session-title {
   color: var(--wb-brand-primary-deep);
-}
-
-.chat-session-status {
-  grid-column: 2;
-  justify-self: start;
-  margin: 0;
-  padding: 1px 6px;
-  border-radius: 999px;
-  font-family: var(--wb-mono);
-  font-size: 11px;
-  line-height: 16px;
-  color: var(--wb-text-secondary);
-  background: var(--wb-bg-primary);
-}
-
-.chat-session-status-running {
-  color: var(--wb-brand-primary-deep);
-  background: var(--wb-brand-primary-subtle);
-}
-
-.chat-session-status-done {
-  color: var(--wb-status-success);
-}
-
-.chat-session-status-failed {
-  color: var(--wb-status-error);
 }
 
 .chat-main {
@@ -348,58 +328,82 @@
   box-sizing: border-box;
 }
 
-.chat-composer-label {
+/* Composer card, adapted from resource/workbuddy-live-demo.html:363-378
+   (.composer-main / .cp-foot / .btn-send); the send button uses the Button primary variant. */
+.chat-composer-card {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-  font-size: 13px;
-  color: var(--wb-text-secondary);
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--wb-border-default);
+  border-radius: 16px;
+  background: var(--wb-bg-primary);
+  box-shadow: var(--wb-shadow-input);
+}
+
+.chat-composer-card:focus-within {
+  border-color: var(--wb-color-border-focus);
 }
 
 .chat-composer-input {
   box-sizing: border-box;
   width: 100%;
-  min-height: 4.5rem;
-  max-height: 8rem;
-  padding: 10px 12px;
+  min-height: 52px;
+  max-height: 160px;
+  padding: 0;
   resize: none;
-  border: 1px solid var(--wb-border-default);
-  border-radius: 12px;
-  background: var(--wb-bg-primary);
+  border: none;
+  background: transparent;
   color: var(--wb-text-primary);
   font-family: var(--wb-font);
   font-size: 15px;
-  line-height: 1.7;
+  line-height: 1.75;
   overflow-x: hidden;
   overflow-y: auto;
   overflow-wrap: anywhere;
 }
 
-.chat-composer-input:disabled {
+.chat-composer-input::placeholder {
   color: var(--wb-text-tertiary);
-  background: var(--wb-bg-secondary);
 }
 
-.chat-composer-foot {
+.chat-composer-input:disabled {
+  color: var(--wb-text-tertiary);
+}
+
+.chat-composer-toolbar {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
-  min-width: 0;
+  gap: 8px;
+  min-height: 32px;
 }
 
 .chat-composer-pending {
   margin: 0;
   min-width: 0;
-  flex: 1;
   font-size: 13px;
   color: var(--wb-brand-primary-deep);
 }
 
 .chat-send {
-  margin-left: auto;
   flex: none;
+  margin-left: auto;
+  width: 32px;
+  height: 32px;
+}
+
+/* Round send button; restates the radius over .ui-btn:focus-visible (same specificity, later). */
+.chat-send,
+.chat-send:focus-visible {
+  border-radius: 50%;
+}
+
+.chat-composer-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--wb-text-tertiary);
+  text-align: center;
 }
 
 @media (max-width: 760px) {
@@ -420,7 +424,6 @@
   }
 
   .chat-composer-input {
-    min-height: 3.5rem;
     max-height: 6rem;
   }
 

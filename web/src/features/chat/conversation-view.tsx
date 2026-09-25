@@ -1,13 +1,13 @@
 import type { FormEvent, ReactNode } from "react";
 import type { ChatSession } from "../../lib/session-contract.js";
+import { Composer } from "./composer.js";
+import { SESSION_STATUS_LABEL } from "./status-label.js";
 import type { ChatState } from "./stream.js";
 
 type ConversationViewProps = {
   composerDisabled: boolean;
-  composerLabel: string;
   draft: string;
   generating: boolean;
-  generatingLabel: string;
   historyError: string | null;
   historyView: ChatState | null;
   listError: string | null;
@@ -48,6 +48,8 @@ function SessionEntries({
       {sessions.map((session) => {
         const selected = session.id === requestedSessionId;
         const title = sessionTitle(session);
+        const label = SESSION_STATUS_LABEL[session.status];
+        const pulse = session.status === "running" ? " ui-pulse" : "";
         return (
           <li className="chat-session-item" key={session.id}>
             <button
@@ -57,18 +59,14 @@ function SessionEntries({
               onClick={() => onSelectSession(session.id)}
               type="button"
             >
-              <span
-                aria-hidden="true"
-                className={`chat-session-dot chat-session-dot-${session.status}`}
-              />
-              <strong className="chat-session-title">{title}</strong>
-              <span
-                aria-label={`${title} ${session.status}`}
-                className={`chat-session-status chat-session-status-${session.status}`}
-                role="status"
-              >
-                {session.status}
+              <span aria-label={`${title} ${label}`} className="chat-session-status" role="status">
+                <span
+                  aria-hidden="true"
+                  className={`chat-session-dot chat-session-dot-${session.status}${pulse}`}
+                />
+                <span className="ui-sr-only">{label}</span>
               </span>
+              <strong className="chat-session-title">{title}</strong>
             </button>
           </li>
         );
@@ -139,10 +137,8 @@ function MessageThread({ historyView }: { historyView: ChatState }) {
 
 export function ConversationView({
   composerDisabled,
-  composerLabel,
   draft,
   generating,
-  generatingLabel,
   historyError,
   historyView,
   listError,
@@ -218,53 +214,15 @@ export function ConversationView({
             <h1 className="chat-hero">WorkBuddy，我帮你</h1>
           )}
         </div>
-        <form className="chat-composer" onSubmit={onSubmit}>
-          <label className="chat-composer-label">
-            {composerLabel}
-            <textarea
-              aria-describedby="chat-send-hint"
-              className="chat-composer-input"
-              disabled={composerDisabled}
-              onChange={(event) => onChangeDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (
-                  event.key !== "Enter" ||
-                  event.shiftKey ||
-                  event.altKey ||
-                  event.ctrlKey ||
-                  event.metaKey ||
-                  event.nativeEvent.isComposing ||
-                  event.nativeEvent.keyCode === 229
-                ) {
-                  return;
-                }
-                event.preventDefault();
-                if (!event.repeat && !sendDisabled) {
-                  event.currentTarget.form?.requestSubmit();
-                }
-              }}
-              rows={3}
-              value={draft}
-            />
-          </label>
-          <div className="chat-composer-foot">
-            <span className="ui-muted" id="chat-send-hint">
-              Enter 发送 · Shift+Enter 换行
-            </span>
-            {generating ? (
-              <p className="chat-composer-pending" role="status">
-                {generatingLabel}
-              </p>
-            ) : null}
-            <button
-              className="ui-button ui-button-primary chat-send"
-              disabled={sendDisabled}
-              type="submit"
-            >
-              发送
-            </button>
-          </div>
-        </form>
+        <Composer
+          disabled={composerDisabled}
+          draft={draft}
+          generating={generating}
+          onChangeDraft={onChangeDraft}
+          onSubmit={onSubmit}
+          placeholder={requestedSessionId ? "继续追问，或派一个新任务…" : "今天帮你做些什么"}
+          sendDisabled={sendDisabled}
+        />
       </div>
     </div>
   );
