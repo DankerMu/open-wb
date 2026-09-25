@@ -2,6 +2,7 @@
 // 只消费 caller 已启动的服务与仓库内 demo：不 build/start/stop 服务、不下载浏览器、不清理 caller 状态。
 
 import { mkdir, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { env } from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -12,6 +13,7 @@ const REPO_ROOT = resolve(import.meta.dirname, "..", "..");
 const REPO_FILE_PATH = pathToFileURL(REPO_ROOT).pathname;
 const DEMO_URL = pathToFileURL(join(REPO_ROOT, "resource", "workbuddy-live-demo.html")).href;
 const DEFAULT_BASE_URL = "http://127.0.0.1:3000";
+const HOME_DIR = homedir();
 
 const ACCOUNT = "zhangsan";
 const PASSWORD = "demo";
@@ -66,7 +68,9 @@ function messageOf(error) {
 function redact(text) {
   let out = String(text);
   for (const root of workspaceRoots) out = out.replaceAll(root, "<workspace-root>");
-  return out.replaceAll(REPO_FILE_PATH, "<repo>").replaceAll(REPO_ROOT, "<repo>");
+  out = out.replaceAll(REPO_FILE_PATH, "<repo>").replaceAll(REPO_ROOT, "<repo>");
+  // 家目录最后替换（仓库常位于其下，长前缀先生效）；空串或 "/" 不替换。
+  return HOME_DIR.length > 1 ? out.replaceAll(HOME_DIR, "~") : out;
 }
 
 function firstLine(text) {
@@ -156,18 +160,35 @@ async function ensureSmokeFixture(api) {
   return { smokeId: fixture.id, roots };
 }
 
-async function preflight(baseUrl) {
+async function withApi(baseUrl, task) {
   const api = await request.newContext({ baseURL: baseUrl, timeout: REQUEST_TIMEOUT_MS });
   try {
-    await checkHealth(api);
-    const login = await api.post("/api/auth/login", {
-      data: { account: ACCOUNT, password: PASSWORD },
-    });
-    await expectOk(login, "POST /api/auth/login");
-    return await ensureSmokeFixture(api);
+    return await task(api);
   } finally {
     await api.dispose();
   }
+}
+
+async function loginAndFixture(api) {
+  const login = await api.post("/api/auth/login", {
+    data: { account: ACCOUNT, password: PASSWORD },
+  });
+  await expectOk(login, "POST /api/auth/login");
+  return await ensureSmokeFixture(api);
+}
+
+// 写 caller DB 的步骤（登录建会话、按需建 smoke-fixture）在浏览器启动、输出目录创建都成功之后才做。
+async function prepareRun(baseUrl, outDir) {
+  await mkdir(outDir, { recursive: true });
+  const fixture = await withApi(baseUrl, loginAndFixture);
+  workspaceRoots.push(...fixture.roots.sort((a, b) => b.length - a.length));
+  return {
+    baseUrl,
+    outDir,
+    smokeId: fixture.smokeId,
+    session: { attempted: false, id: "", reason: "首格未执行" },
+    results: new Map(),
+  };
 }
 
 async function launchBrowser() {
@@ -496,34 +517,40 @@ async function openContext(browser, run, cell, source) {
 // 上下文级失败：未执行的态逐个记失败；全部态已执行（如关闭失败）则记到最后一态。
 function markContextFailure(results, cell, source, error) {
   const reason = `${cellLabel(cell)} ${source} 上下文失败：${messageOf(error)}`;
+  if (results.length === STATES.length) {
+    results.at(-1)?.reasons.push(reason);
+    return;
+  }
   for (const state of STATES.slice(results.length)) {
     const result = newResult(source, state, cell);
     result.reasons.push(reason);
     results.push(result);
   }
-  if (results.length === STATES.length) results.at(-1)?.reasons.push(reason);
 }
 
 async function runSource(browser, run, cell, source) {
   let context;
+  let tracker;
   const results = [];
   try {
     context = await openContext(browser, run, cell, source);
     const page = await context.newPage();
-    const tracker = attachErrorTracker(page, source, run.baseUrl);
+    tracker = attachErrorTracker(page, source, run.baseUrl);
     for (const state of STATES) {
       results.push(await runState(page, tracker, run, cell, source, state));
     }
-    // 关闭后再归并，迟到的 console/pageerror 也计入其发生时的态。
     const closing = context;
     context = undefined;
     await closing.close();
-    for (const result of results) result.reasons.push(...trackerErrorsFor(tracker, result.state));
   } catch (error) {
     markContextFailure(results, cell, source, error);
   } finally {
     // 只在已记失败的路径上仍打开；关闭失败不再覆盖已记录的原因。
     await context?.close().catch(() => undefined);
+  }
+  // 关闭（无论成败）后再归并，迟到的 console/pageerror 也计入其发生时的态。
+  if (tracker) {
+    for (const result of results) result.reasons.push(...trackerErrorsFor(tracker, result.state));
   }
   return results;
 }
@@ -625,28 +652,41 @@ function reportSummary(run) {
   if (failed.length > 0 || results.length !== expected || shots !== expected) process.exitCode = 1;
 }
 
+// 矩阵、index.html、关闭浏览器逐步都执行；保留最先出现的错误，汇总后再抛出。
+async function runAndFinish(browser, run) {
+  let failure;
+  try {
+    await runMatrix(browser, run);
+  } catch (error) {
+    failure = error;
+  }
+  try {
+    await writeIndex(run);
+  } catch (error) {
+    failure ??= error;
+  }
+  await browser.close().catch((error) => {
+    failure ??= error;
+  });
+  reportSummary(run);
+  if (failure !== undefined) throw failure;
+}
+
 async function main() {
   const baseUrl = resolveBaseUrl();
   const outDir = resolveOutDir();
   console.log(`ui-shots: 输出目录 ${displayPath(outDir)}`);
-  const fixture = await preflight(baseUrl);
-  workspaceRoots.push(...fixture.roots.sort((a, b) => b.length - a.length));
+  await withApi(baseUrl, checkHealth);
   const browser = await launchBrowser();
-  const run = {
-    baseUrl,
-    outDir,
-    smokeId: fixture.smokeId,
-    session: { attempted: false, id: "", reason: "首格未执行" },
-    results: new Map(),
-  };
+  let run;
   try {
-    await mkdir(outDir, { recursive: true });
-    await runMatrix(browser, run);
-  } finally {
-    await writeIndex(run);
-    await browser.close();
+    run = await prepareRun(baseUrl, outDir);
+  } catch (error) {
+    // 建目录/登录/fixture 失败（D3）：关闭浏览器、非零、不写 index.html（已建的空目录保留）。
+    await browser.close().catch(() => undefined);
+    throw error;
   }
-  reportSummary(run);
+  await runAndFinish(browser, run);
 }
 
 main().catch((error) => {
