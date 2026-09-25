@@ -1,5 +1,5 @@
 import { tmpdir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { assertSafeSudoPath } from "../src/core/process-path.js";
@@ -287,6 +287,20 @@ describe("resolveServerConfig — 新增七项缺省与逐项覆盖", () => {
         modelId: "model-bytes",
         repoRoot: REPO_ROOT,
       });
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
+  it("裸名 OMP_BIN 绑 repo root 成绝对路径，不随 cwd 分裂（#148）", () => {
+    const expected = join(REPO_ROOT, "omp");
+    const fromRepo = resolveServerConfig({ OMP_BIN: "omp" }, SOURCE_ENTRY).ompBin;
+    expect(fromRepo).toBe(expected);
+    expect(isAbsolute(fromRepo)).toBe(true);
+    const originalCwd = process.cwd();
+    try {
+      process.chdir(tmpdir());
+      expect(resolveServerConfig({ OMP_BIN: "omp" }, SOURCE_ENTRY).ompBin).toBe(expected);
     } finally {
       process.chdir(originalCwd);
     }
