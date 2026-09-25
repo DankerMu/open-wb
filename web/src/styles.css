@@ -9,6 +9,7 @@
 @import "./routes/shell/sidebar.css";
 @import "./routes/shell/topbar.css";
 @import "./features/chat/chat.css";
+@import "./features/chat/messages.css";
 @import "./features/files/files.css";
 @import "./features/auth/auth.css";
 @import "./features/settings/settings.css";
