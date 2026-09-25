@@ -57,6 +57,13 @@ kb-service 只认 kb_id 集合，不认用户——租户过滤是 app-server `k
 `lib/sse`（Last-Event-ID 重连）、`lib/theme`（已有）。每路由一个 feature 目录，不做全局状态库，
 按需 React context。
 
+`web/src/ui` 是基元层：按钮、输入、开关、标签、chip、Dialog、ConfirmDialog、Drawer、Menu、Popover、
+Toast、Tooltip、空态、分段控件、图标和品牌 mark。交互行为依赖 Radix Primitives
+（Dialog/DropdownMenu/Popover/RadioGroup/Switch/Toast/Tooltip），图标取自 lucide-react。
+token 定义在 `web/src/styles/tokens.css`（调色板 + 语义层，亮/暗两套），动效定义在
+`ui/motion.css`（受 `prefers-reduced-motion` 控制），二者都归这一层。feature 只经 `ui/index.ts`
+使用基元，不直接依赖 Radix；demo 中没有后端契约的控件不渲染。
+
 ## 4. 依赖规则
 
 ```mermaid
