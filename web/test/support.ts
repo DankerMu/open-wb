@@ -123,6 +123,32 @@ export function replaceFetchRoutes(fetchMock: FetchMock, routes: FetchRoutes) {
   fetchMock.mockImplementation(fetchRouteHandler(routes));
 }
 
+type FetchCall = FetchMock["mock"]["calls"][number];
+
+/** 全部请求路径，按调用顺序；断言多重集合时先 sort。 */
+export function paths(fetchMock: FetchMock): string[] {
+  return fetchMock.mock.calls.map(([path]) => path);
+}
+
+/** 断言全部请求路径的多重集合（与顺序无关，但约束总量，杂散请求会使其失败）。 */
+export function expectPaths(fetchMock: FetchMock, expected: readonly string[]) {
+  expect(paths(fetchMock).sort()).toEqual([...expected].sort());
+}
+
+/** 按路径筛出的请求，按调用顺序。 */
+export function calls(fetchMock: FetchMock, path: string): FetchCall[] {
+  return fetchMock.mock.calls.filter(([calledPath]) => calledPath === path);
+}
+
+export function lastCall(fetchMock: FetchMock, path: string): FetchCall {
+  const request = calls(fetchMock, path).at(-1);
+  if (!request) {
+    throw new Error(`expected a ${path} request`);
+  }
+
+  return request;
+}
+
 export async function requestOptionsAt(fetchMock: FetchMock, callIndex: number) {
   await waitFor(() => {
     expect(fetchMock).toHaveBeenCalledTimes(callIndex + 1);

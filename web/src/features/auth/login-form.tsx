@@ -1,6 +1,8 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { BrandMark, Button, Icon, Input } from "../../ui/index.js";
+import { DEV_PASSWORD } from "./dev-accounts.js";
 import { useAuth } from "./provider.js";
+import { QuickLogin } from "./quick-login.js";
 
 export function LoginForm() {
   const { error, login } = useAuth();
@@ -25,16 +27,9 @@ export function LoginForm() {
     accountRef.current?.focus();
   }, []);
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  /** 表单提交与快捷卡共用：同一把锁、同一错误行、同样回填账号并清空密码。 */
+  async function performLogin(submittedAccount: string, password: string) {
     if (lockedRef.current) {
-      return;
-    }
-
-    const formData = new FormData(event.currentTarget);
-    const submittedAccount = formData.get("account");
-    const password = formData.get("password");
-    if (typeof submittedAccount !== "string" || typeof password !== "string") {
       return;
     }
 
@@ -53,6 +48,22 @@ export function LoginForm() {
         setSubmitting(false);
       }
     }
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (lockedRef.current) {
+      return;
+    }
+
+    const formData = new FormData(event.currentTarget);
+    const submittedAccount = formData.get("account");
+    const password = formData.get("password");
+    if (typeof submittedAccount !== "string" || typeof password !== "string") {
+      return;
+    }
+
+    await performLogin(submittedAccount, password);
   }
 
   return (
@@ -103,6 +114,12 @@ export function LoginForm() {
             {submitting ? "正在登录" : "登录"}
           </Button>
         </form>
+        <QuickLogin
+          disabled={submitting}
+          onPick={(picked) => {
+            void performLogin(picked, DEV_PASSWORD);
+          }}
+        />
       </div>
     </main>
   );

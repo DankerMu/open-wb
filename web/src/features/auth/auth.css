@@ -1,15 +1,16 @@
-/* 登录页 — adapted from resource/workbuddy-live-demo.html:637-644（.login-root/.login-card/.login-brand/.login-title/.login-sub/.login-btn/.login-err）、:739-740（.form-label/.form-group）。只用语义 token；品牌位用自有 BrandMark，不复用上游 logo。 */
+/* 登录页 — adapted from resource/workbuddy-live-demo.html:637-644（.login-root/.login-card/.login-brand/.login-title/.login-sub/.login-btn/.login-err）、:739-740（.form-label/.form-group）、:645-650（.login-hint/.login-quick/.login-quick-item）。只用语义 token；品牌位用自有 BrandMark，不复用上游 logo。 */
 
+/* 可滚动容器 + 卡片 margin:auto 居中：内容高于视口时顶部不被裁切（demo 的 flex 居中会裁）。 */
 .login-root {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 100dvh;
+  height: 100dvh;
+  overflow-y: auto;
   padding: 24px 16px;
   background: var(--wb-home-bg-primary);
 }
 
 .login-card {
+  margin: auto;
   width: 360px;
   max-width: calc(100vw - 32px);
   padding: 28px 24px 22px;
@@ -73,6 +74,86 @@
   width: 100%;
   height: 36px;
   margin-top: 4px;
+}
+
+.login-hint {
+  margin: 12px 0 0;
+  font-size: 11.5px;
+  line-height: 18px;
+  text-align: center;
+  color: var(--wb-text-tertiary);
+}
+
+.login-hint b {
+  font-weight: 600;
+  color: var(--wb-text-secondary);
+}
+
+.login-quick {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 14px 0 0;
+  padding: 14px 0 0;
+  border-top: 1px solid var(--wb-border-default);
+  list-style: none;
+}
+
+.login-quick-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--wb-text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.login-quick-item:hover:not(:disabled) {
+  background: var(--wb-bg-hover);
+  border-color: var(--wb-border-default);
+}
+
+.login-quick-item:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* 头像几何同侧栏 .sidebar-avatar，brand-primary 平涂（demo 为 palette 渐变）。 */
+.login-quick-avatar {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--wb-brand-primary);
+  color: var(--wb-bg-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.login-quick-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.login-quick-account {
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 18px;
+}
+
+.login-quick-role {
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--wb-text-secondary);
 }
 
 @media (max-width: 760px) {

@@ -1,11 +1,34 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthGuard, AuthProvider, useAuth } from "../src/features/auth/index.js";
 import { createAppRouter } from "../src/routes/index.js";
+import {
+  anonymousGetInit,
+  expectAuthenticatedShell,
+  expectFilesShell,
+  expectLastLoginRequest,
+  expectLogin,
+  getLoginForm,
+  requestSignal,
+  submitLogin,
+  unauthenticatedResponse,
+} from "./auth-router-support.js";
 import "./dialog-platform.js";
-import { allowWorkspaceListFetch, createFetchMock, serviceInfo } from "./support.js";
+import {
+  allowWorkspaceListFetch,
+  calls,
+  createFetchMock,
+  currentLocation,
+  deferredResponse,
+  expectPaths,
+  type FetchMock,
+  jsonResponse,
+  lastCall,
+  serviceInfo,
+  setBrowserPath,
+} from "./support.js";
 
 const principal = { id: "user-1", account: "zhangsan", role: "member" };
 
@@ -63,55 +86,12 @@ const canonicalLoginPaths = [
     "设置",
   ],
 ] as const;
-
-type DeferredResponse = { promise: Promise<Response>; resolve: (response: Response) => void };
-
-function deferredResponse(): DeferredResponse {
-  let resolve!: (response: Response) => void;
-  const promise = new Promise<Response>((resolvePromise) => (resolve = resolvePromise));
-  return { promise, resolve };
-}
-
-function jsonResponse(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
 function observedJsonResponse(body: unknown, status = 200) {
   const json = vi.fn().mockResolvedValue(body);
   return {
     json,
     response: { ok: status >= 200 && status < 300, status, json } as unknown as Response,
   };
-}
-
-async function requestSignal(
-  fetchMock: ReturnType<typeof vi.fn>,
-  callIndex: number,
-): Promise<AbortSignal> {
-  await waitFor(() => {
-    expect(fetchMock.mock.calls[callIndex]).toBeDefined();
-  });
-  const request = fetchMock.mock.calls[callIndex];
-  const signal = (request?.[1] as RequestInit | undefined)?.signal;
-  if (!signal) {
-    throw new Error(`expected fetch call ${callIndex + 1} to include an AbortSignal`);
-  }
-  return signal;
-}
-
-function unauthenticatedResponse(message = "登录已失效") {
-  return jsonResponse({ error: { code: "unauthorized", message } }, 401);
-}
-
-function setBrowserPath(path: string) {
-  window.history.replaceState(null, "", path);
-}
-
-function currentLocation() {
-  return `${window.location.pathname}${window.location.search}${window.location.hash}`;
 }
 
 type AuthStateSnapshot = {
@@ -148,79 +128,23 @@ function renderApp(path: string) {
   return render(<RouterProvider router={router} />);
 }
 
-async function expectLogin() {
-  expect(await screen.findByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeTruthy();
-}
-
-function getLoginForm() {
-  const account = screen.getByLabelText("账号") as HTMLInputElement;
-  const password = screen.getByLabelText("密码") as HTMLInputElement;
-  const submit = screen.getByRole("button", { name: "登录" }) as HTMLButtonElement;
-  return { account, password, submit };
-}
-
-function submitLogin(accountValue: string, passwordValue: string) {
-  const { account, password, submit } = getLoginForm();
-  fireEvent.change(account, { target: { value: accountValue } });
-  fireEvent.change(password, { target: { value: passwordValue } });
-  fireEvent.submit(submit.closest("form") as HTMLFormElement);
-  return { account, password, submit };
-}
-
-async function expectAuthenticatedShell(title: string, currentLabel: string) {
-  expect(await screen.findByRole("heading", { level: 1, name: title })).toBeTruthy();
-  await waitFor(() => {
-    expect(screen.queryByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeNull();
-  });
-  const sidebar = screen.getByRole("complementary", { name: "侧栏" });
-  const current = within(sidebar).getByRole("link", { name: new RegExp(currentLabel) });
-  const currentLinks = within(sidebar)
-    .getAllByRole("link")
-    .filter((link) => link.getAttribute("aria-current") === "page");
-  expect(current.getAttribute("aria-current")).toBe("page");
-  expect(currentLinks).toHaveLength(1);
-  expect(currentLinks[0]).toBe(current);
-}
-
-async function expectFilesShell() {
-  await expectAuthenticatedShell("工作空间", "工作空间");
-}
-
 async function expectOnlyLoading() {
   expect((await screen.findByRole("status")).textContent).toBe("正在检查登录状态");
   expect(screen.queryByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeNull();
   expect(screen.queryByRole("complementary", { name: "侧栏" })).toBeNull();
 }
-function expectMeRequest(fetchMock: ReturnType<typeof vi.fn>, callIndex = 1) {
-  expect(fetchMock).toHaveBeenNthCalledWith(callIndex, "/api/auth/me", {
-    method: "GET",
-    credentials: "same-origin",
-    cache: "no-store",
-    signal: expect.any(AbortSignal),
-  });
+
+/** 恰一个 `/api/auth/me` 请求，且为匿名 GET 形状。 */
+function expectMeRequest(fetchMock: FetchMock) {
+  expect(calls(fetchMock, "/api/auth/me")).toEqual([["/api/auth/me", anonymousGetInit]]);
 }
 
-const expectInfoRequest = (fetchMock: ReturnType<typeof vi.fn>) =>
-  expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/info", {
-    method: "GET",
-    credentials: "same-origin",
-    cache: "no-store",
-    signal: expect.any(AbortSignal),
-  });
-
-function expectProviderLoginRequest(fetchMock: ReturnType<typeof vi.fn>) {
-  const callIndex = fetchMock.mock.calls.findLastIndex(([path]) => path === "/api/auth/login") + 1;
-  expect(fetchMock).toHaveBeenNthCalledWith(callIndex, "/api/auth/login", {
-    method: "POST",
-    credentials: "same-origin",
-    headers: { "Content-Type": "application/json" },
-    body: '{"account":"zhangsan","password":"demo"}',
-    signal: expect.any(AbortSignal),
-  });
+function expectProviderLoginRequest(fetchMock: FetchMock) {
+  expectLastLoginRequest(fetchMock, '{"account":"zhangsan","password":"demo"}');
 }
 
 type AuthTransitionFixture = {
-  fetchMock: ReturnType<typeof vi.fn>;
+  fetchMock: FetchMock;
   login(): Promise<boolean>;
   originalPrincipal: NonNullable<AuthStateSnapshot["principal"]>;
   readState(): AuthStateSnapshot | undefined;
@@ -230,10 +154,10 @@ async function renderAuthenticatedProvider(
   loginResponse: Response,
   protectedChild: ReactNode = <p>受保护内容</p>,
 ): Promise<AuthTransitionFixture> {
-  const fetchMock = vi
-    .fn()
-    .mockResolvedValueOnce(jsonResponse(principal))
-    .mockResolvedValueOnce(loginResponse);
+  const fetchMock = createFetchMock({
+    "/api/auth/me": jsonResponse(principal),
+    "/api/auth/login": loginResponse,
+  });
   vi.stubGlobal("fetch", fetchMock);
   let login: ReturnType<typeof useAuth>["login"] | undefined;
   let state: AuthStateSnapshot | undefined;
@@ -275,7 +199,6 @@ async function settleProviderLogin(operation: () => Promise<boolean>) {
 
 async function submitProviderLogin(fixture: AuthTransitionFixture) {
   expect(await settleProviderLogin(fixture.login)).toBe(false);
-  expect(fixture.fetchMock).toHaveBeenCalledTimes(2);
   expectProviderLoginRequest(fixture.fetchMock);
 }
 
@@ -297,6 +220,7 @@ async function expectProviderOwnedLoginUnauthenticates(
     });
     expect(screen.queryByText("受保护内容", { exact: true })).toBeNull();
     expect(currentLocation()).toBe(requestedPath);
+    expectPaths(fixture.fetchMock, ["/api/auth/me", "/api/auth/login", "/api/info"]);
   });
   expect((await screen.findByRole("alert")).textContent).toBe(message);
 }
@@ -315,7 +239,7 @@ describe("route guard initial authentication", () => {
     "keeps %s unchanged while loading and after an unauthenticated me result",
     async (path) => {
       const pendingMe = deferredResponse();
-      const fetchMock = vi.fn().mockReturnValue(pendingMe.promise);
+      const fetchMock = createFetchMock({ "/api/auth/me": pendingMe.promise });
       vi.stubGlobal("fetch", fetchMock);
       const requestedPath = `${path}?from=deep-link#target`;
 
@@ -344,12 +268,10 @@ describe("route guard initial authentication", () => {
   ])(
     "keeps the exact URL, shows stable fallback, and permits login after initial %s",
     async (_label, meResult) => {
-      const fetchMock = vi
-        .fn()
-        .mockImplementationOnce(() =>
-          meResult instanceof Error ? Promise.reject(meResult) : Promise.resolve(meResult),
-        )
-        .mockResolvedValueOnce(jsonResponse(principal));
+      const fetchMock = createFetchMock({
+        "/api/auth/me": meResult,
+        "/api/auth/login": jsonResponse(principal),
+      });
       vi.stubGlobal("fetch", fetchMock);
       const requestedPath = "/files?from=initial-failure#target";
 
@@ -364,11 +286,11 @@ describe("route guard initial authentication", () => {
 
       await expectFilesShell();
       expect(currentLocation()).toBe(requestedPath);
-      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expectPaths(fetchMock, ["/api/auth/me", "/api/info", "/api/auth/login", "/api/workspaces"]);
     },
   );
   it("renders the authenticated files shell with one current navigation link", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(principal));
+    const fetchMock = createFetchMock({ "/api/auth/me": jsonResponse(principal) });
     vi.stubGlobal("fetch", fetchMock);
 
     renderApp("/files");
@@ -388,7 +310,7 @@ describe("route guard initial authentication", () => {
         },
         "/api/auth/login": jsonResponse(principal),
         "/api/workspaces": jsonResponse({ workspaces: [] }),
-        "/api/info": jsonResponse(serviceInfo),
+        "/api/info": () => jsonResponse(serviceInfo),
       });
       vi.stubGlobal("fetch", fetchMock);
 
@@ -397,41 +319,48 @@ describe("route guard initial authentication", () => {
       await expectLogin();
       expect(currentLocation()).toBe(canonicalPath);
       expect(meLocations).toEqual([canonicalPath]);
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await waitFor(() => expectPaths(fetchMock, ["/api/auth/me", "/api/info"]));
       expectMeRequest(fetchMock);
 
       submitLogin("zhangsan", "demo");
 
       await expectAuthenticatedShell(title, currentLabel);
       expect(currentLocation()).toBe(canonicalPath);
+      const loginPaths = ["/api/auth/me", "/api/info", "/api/auth/login"];
       if (title === "设置") {
-        await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-        expectInfoRequest(fetchMock);
-      } else expect(fetchMock).toHaveBeenCalledTimes(title === "工作空间" ? 3 : 2);
+        await waitFor(() => expectPaths(fetchMock, [...loginPaths, "/api/info"]));
+        expect(calls(fetchMock, "/api/info")).toHaveLength(2);
+        expect(lastCall(fetchMock, "/api/info")).toEqual(["/api/info", anonymousGetInit]);
+      } else {
+        expectPaths(
+          fetchMock,
+          title === "工作空间" ? [...loginPaths, "/api/workspaces"] : loginPaths,
+        );
+      }
       expectProviderLoginRequest(fetchMock);
     },
   );
 
   it("preserves trailing-slash canonicalization after a successful me", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(principal));
+    const fetchMock = createFetchMock({ "/api/auth/me": jsonResponse(principal) });
     vi.stubGlobal("fetch", fetchMock);
 
     renderApp("/center/?keep=1#target");
 
     await expectAuthenticatedShell("中心", "中心");
     expect(currentLocation()).toBe("/center?keep=1#target");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expectPaths(fetchMock, ["/api/auth/me"]);
     expectMeRequest(fetchMock);
   });
 
   it("canonicalizes later repeated-slash navigation without remounting the provider", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(principal));
+    const fetchMock = createFetchMock({ "/api/auth/me": jsonResponse(principal) });
     vi.stubGlobal("fetch", fetchMock);
 
     renderApp("/files");
     await expectFilesShell();
     expectMeRequest(fetchMock);
-    const initialMeSignal = await requestSignal(fetchMock, 0);
+    const initialMeSignal = await requestSignal(fetchMock, "/api/auth/me");
 
     window.history.pushState(null, "", "/C%45nTeR///?from=later#target");
     window.dispatchEvent(new PopStateEvent("popstate"));
@@ -439,175 +368,7 @@ describe("route guard initial authentication", () => {
     await expectAuthenticatedShell("中心", "中心");
     expect(currentLocation()).toBe("/center?from=later#target");
     expect(initialMeSignal.aborted).toBe(false);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
-});
-
-describe("login form", () => {
-  it.each([
-    ["the bare files route", "/files"],
-    ["a files deep link", "/files?from=deep-link#target"],
-  ])(
-    "submits once while pending and restores %s after a Principal response",
-    async (_label, requestedPath) => {
-      const pendingLogin = deferredResponse();
-      const fetchMock = vi
-        .fn()
-        .mockResolvedValueOnce(unauthenticatedResponse())
-        .mockReturnValueOnce(pendingLogin.promise);
-      vi.stubGlobal("fetch", fetchMock);
-
-      renderApp(requestedPath);
-      await expectLogin();
-      const { account, password, submit } = getLoginForm();
-      fireEvent.change(account, { target: { value: "  ZhangSan " } });
-      fireEvent.change(password, { target: { value: "demo" } });
-      fireEvent.submit(submit.closest("form") as HTMLFormElement);
-      fireEvent.submit(submit.closest("form") as HTMLFormElement);
-
-      expect(submit.disabled).toBe(true);
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-      expect(fetchMock).toHaveBeenLastCalledWith("/api/auth/login", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: '{"account":"  ZhangSan ","password":"demo"}',
-        signal: expect.any(AbortSignal),
-      });
-
-      pendingLogin.resolve(jsonResponse(principal));
-
-      await expectFilesShell();
-      expect(currentLocation()).toBe(requestedPath);
-      expect(fetchMock).toHaveBeenCalledTimes(3);
-    },
-  );
-
-  it("uses the native form submit seam for Enter", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(unauthenticatedResponse())
-      .mockResolvedValueOnce(jsonResponse(principal));
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderApp("/files");
-    await expectLogin();
-    const { account, password } = getLoginForm();
-    fireEvent.change(account, { target: { value: "zhangsan" } });
-    fireEvent.change(password, { target: { value: "demo" } });
-    fireEvent.keyDown(password, { key: "Enter", code: "Enter" });
-    fireEvent.submit(password.closest("form") as HTMLFormElement);
-
-    await expectFilesShell();
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-  });
-
-  it.each([
-    [
-      "the account-disabled message",
-      jsonResponse(
-        { error: { code: "account_disabled", message: "该账号已停用，请联系管理员" } },
-        403,
-      ),
-      "该账号已停用，请联系管理员",
-    ],
-    [
-      "the invalid-credentials message",
-      jsonResponse({ error: { code: "invalid_credentials", message: "账号或密码不正确" } }, 401),
-      "账号或密码不正确",
-    ],
-  ])(
-    "shows %s, retains the account, clears the password, and permits retry",
-    async (_label, loginResponse, message) => {
-      const fetchMock = vi
-        .fn()
-        .mockResolvedValueOnce(unauthenticatedResponse())
-        .mockResolvedValueOnce(loginResponse);
-      vi.stubGlobal("fetch", fetchMock);
-
-      renderApp("/files");
-      await expectLogin();
-      const { account, password, submit } = getLoginForm();
-      fireEvent.change(account, { target: { value: "wangwu" } });
-      fireEvent.change(password, { target: { value: "demo" } });
-      fireEvent.submit(submit.closest("form") as HTMLFormElement);
-
-      expect((await screen.findByRole("alert")).textContent).toBe(message);
-      expect(account.value).toBe("wangwu");
-      expect(password.value).toBe("");
-      expect(submit.disabled).toBe(false);
-      expect(screen.queryByRole("complementary", { name: "侧栏" })).toBeNull();
-    },
-  );
-
-  it("uses browser-filled DOM values and permits a real retry after failure", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(unauthenticatedResponse())
-      .mockResolvedValueOnce(
-        jsonResponse(
-          { error: { code: "account_disabled", message: "该账号已停用，请联系管理员" } },
-          403,
-        ),
-      )
-      .mockResolvedValueOnce(jsonResponse(principal));
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderApp("/files");
-    await expectLogin();
-    const { account, password, submit } = getLoginForm();
-    account.value = "  Filled Account ";
-    password.value = "filled-password";
-    fireEvent.submit(submit.closest("form") as HTMLFormElement);
-
-    expect((await screen.findByRole("alert")).textContent).toBe("该账号已停用，请联系管理员");
-    expect(fetchMock).toHaveBeenLastCalledWith("/api/auth/login", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: '{"account":"  Filled Account ","password":"filled-password"}',
-      signal: expect.any(AbortSignal),
-    });
-    expect(account.value).toBe("  Filled Account ");
-    expect(password.value).toBe("");
-    expect(submit.disabled).toBe(false);
-
-    password.value = "retry-password";
-    fireEvent.submit(submit.closest("form") as HTMLFormElement);
-
-    await expectFilesShell();
-    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/auth/login", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: '{"account":"  Filled Account ","password":"retry-password"}',
-      signal: expect.any(AbortSignal),
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(4);
-  });
-
-  it.each([
-    ["a malformed login response", () => Promise.resolve(jsonResponse({ account: "zhangsan" }))],
-    ["a network failure", () => Promise.reject(new Error("private transport failure"))],
-  ])("shows the stable fallback for %s", async (_label, loginResult) => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(unauthenticatedResponse())
-      .mockImplementationOnce(loginResult);
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderApp("/files");
-    await expectLogin();
-    const { account, password, submit } = getLoginForm();
-    fireEvent.change(account, { target: { value: "zhangsan" } });
-    fireEvent.change(password, { target: { value: "demo" } });
-    fireEvent.submit(submit.closest("form") as HTMLFormElement);
-
-    expect((await screen.findByRole("alert")).textContent).toBe("请求失败，请稍后重试");
-    expect(account.value).toBe("zhangsan");
-    expect(password.value).toBe("");
-    expect(submit.disabled).toBe(false);
-    expect(screen.queryByRole("complementary", { name: "侧栏" })).toBeNull();
+    expectPaths(fetchMock, ["/api/auth/me", "/api/workspaces"]);
   });
 });
 
@@ -624,10 +385,10 @@ describe("auth transitions and lifecycle", () => {
       const pendingMe = deferredResponse();
       const stale = staleResponse();
       const newerPrincipal = { id: "user-2", account: "lisi", role: "admin" };
-      const fetchMock = vi
-        .fn()
-        .mockReturnValueOnce(pendingMe.promise)
-        .mockResolvedValueOnce(jsonResponse(newerPrincipal));
+      const fetchMock = createFetchMock({
+        "/api/auth/me": pendingMe.promise,
+        "/api/auth/login": jsonResponse(newerPrincipal),
+      });
       vi.stubGlobal("fetch", fetchMock);
       let login: ReturnType<typeof useAuth>["login"] | undefined;
       let state: AuthStateSnapshot | undefined;
@@ -642,9 +403,9 @@ describe("auth transitions and lifecycle", () => {
       );
 
       await waitFor(() => {
-        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expectPaths(fetchMock, ["/api/auth/me"]);
       });
-      const staleSignal = await requestSignal(fetchMock, 0);
+      const staleSignal = await requestSignal(fetchMock, "/api/auth/me");
       expect(staleSignal.aborted).toBe(false);
       if (!login) {
         throw new Error("expected AuthProvider to expose login");
@@ -654,7 +415,7 @@ describe("auth transitions and lifecycle", () => {
       expect(
         await settleProviderLogin(() => providerLogin({ account: "lisi", password: "demo" })),
       ).toBe(true);
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expectPaths(fetchMock, ["/api/auth/me", "/api/auth/login"]);
       expect(staleSignal.aborted).toBe(true);
       expect(state).toMatchObject({ principal: newerPrincipal, status: "authenticated" });
       const currentPrincipal = state?.principal;
@@ -705,6 +466,7 @@ describe("auth transitions and lifecycle", () => {
     expect(currentLocation()).toBe(requestedPath);
 
     await submitProviderLogin(fixture);
+    expectPaths(fixture.fetchMock, ["/api/auth/me", "/api/auth/login"]);
 
     expect(fixture.readState()).toMatchObject({
       error: null,
@@ -723,13 +485,13 @@ describe("auth transitions and lifecycle", () => {
       { error: { code: "unauthorized", message: "登录已失效" } },
       401,
     );
-    const fetchMock = vi.fn().mockReturnValue(pendingMe.promise);
+    const fetchMock = createFetchMock({ "/api/auth/me": pendingMe.promise });
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.stubGlobal("fetch", fetchMock);
 
     const view = renderApp("/files");
     await expectOnlyLoading();
-    const signal = await requestSignal(fetchMock, 0);
+    const signal = await requestSignal(fetchMock, "/api/auth/me");
     expect(signal.aborted).toBe(false);
     view.unmount();
     expect(signal.aborted).toBe(true);
@@ -745,17 +507,17 @@ describe("auth transitions and lifecycle", () => {
   it("aborts pending login without a late state update", async () => {
     const pendingLogin = deferredResponse();
     const latePrincipal = observedJsonResponse(principal);
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(unauthenticatedResponse())
-      .mockReturnValueOnce(pendingLogin.promise);
+    const fetchMock = createFetchMock({
+      "/api/auth/me": unauthenticatedResponse(),
+      "/api/auth/login": pendingLogin.promise,
+    });
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.stubGlobal("fetch", fetchMock);
 
     const view = renderApp("/files");
     await expectLogin();
     submitLogin("zhangsan", "demo");
-    const signal = await requestSignal(fetchMock, 1);
+    const signal = await requestSignal(fetchMock, "/api/auth/login");
     expect(signal.aborted).toBe(false);
     view.unmount();
     expect(signal.aborted).toBe(true);
@@ -770,11 +532,10 @@ describe("auth transitions and lifecycle", () => {
 
   it("starts a fresh mount without an old Principal, error, or password", async () => {
     const firstPendingLogin = deferredResponse();
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(unauthenticatedResponse())
-      .mockReturnValueOnce(firstPendingLogin.promise)
-      .mockResolvedValueOnce(unauthenticatedResponse());
+    const fetchMock = createFetchMock({
+      "/api/auth/me": [unauthenticatedResponse(), unauthenticatedResponse()],
+      "/api/auth/login": firstPendingLogin.promise,
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const firstView = renderApp("/files");
