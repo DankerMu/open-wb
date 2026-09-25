@@ -7,7 +7,8 @@
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --coverage",
-    "ui-walk": "playwright test"
+    "ui-walk": "playwright test",
+    "ui-shots": "node e2e/ui-shots.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.23",
