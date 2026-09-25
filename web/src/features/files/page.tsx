@@ -1,6 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { type ApiClient, ApiError } from "../../lib/api.js";
+import { EmptyState } from "../../ui/index.js";
 import { useAuth } from "../auth/index.js";
 import { WorkspaceDialog } from "./dialogs.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
@@ -188,10 +189,7 @@ function EmptyWorkspace({
   return (
     <WorkspaceColumns
       directory={
-        <div className="files-tree-empty ui-empty">
-          <p>先选择或创建工作空间</p>
-          <p className="ui-muted">使用左上角 ＋ 新建工作空间</p>
-        </div>
+        <EmptyState description="使用左上角 ＋ 新建工作空间" title="先选择或创建工作空间" />
       }
       folderNotice={folderNotice ?? null}
       onNewDirectory={onNewDirectory}

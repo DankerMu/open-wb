@@ -1,6 +1,6 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ApiClient, ApiError } from "../../lib/api.js";
-import { Icon } from "../../ui/index.js";
+import { EmptyState, Icon } from "../../ui/index.js";
 import { CreationMenu, DirectoryDialog } from "./dialogs.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
 import { fileIcon, formatSize } from "./file-meta.js";
@@ -136,6 +136,7 @@ function DirectoryNode({
         aria-label={`${expanded ? "折叠" : "展开"} ${label}`}
         className="files-tree-node"
         onClick={() => onToggleDirectory(path)}
+        title={label}
         type="button"
       >
         <svg aria-hidden="true" className="files-tree-glyph files-tree-caret" viewBox="0 0 16 16">
@@ -160,7 +161,11 @@ function DirectoryNode({
         <ul className="files-tree-list">
           {entries.length === 0 ? (
             <li className="files-tree-item">
-              <p className="files-tree-folder-empty ui-muted">此文件夹为空</p>
+              {path === "" ? (
+                <EmptyState description="点击左上角 ＋ 新建文件夹" title="该工作空间暂无目录" />
+              ) : (
+                <p className="files-tree-folder-empty ui-muted">空目录</p>
+              )}
             </li>
           ) : (
             entries.map((entry) => {
@@ -192,6 +197,7 @@ function DirectoryNode({
                         : "files-tree-file"
                     }
                     onClick={() => onSelectFile(entry, entryPath)}
+                    title={entry.name}
                     type="button"
                   >
                     <span className="files-tree-glyph">
@@ -224,9 +230,8 @@ function DirectoryTree(props: DirectoryTreeProps) {
 
 export function EmptyPreview() {
   return (
-    <div className="files-preview-empty ui-empty">
-      <p>未选择文件</p>
-      <p className="ui-muted">在左侧目录树中选择一个文件进行预览</p>
+    <div className="files-preview-empty">
+      <EmptyState description="在左侧目录树中选择一个文件进行预览" title="未选择文件" />
     </div>
   );
 }

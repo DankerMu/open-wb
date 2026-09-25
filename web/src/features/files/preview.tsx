@@ -7,7 +7,7 @@
  */
 import { type KeyboardEvent, type MouseEvent, type ReactNode, useState } from "react";
 import type { ApiClient } from "../../lib/api.js";
-import { Icon } from "../../ui/index.js";
+import { EmptyState, Icon } from "../../ui/index.js";
 import { parseCsv } from "./csv.js";
 import { fileIcon, formatSize } from "./file-meta.js";
 import { type MdBlock, type MdInline, parseMarkdown } from "./md-render.js";
@@ -17,7 +17,7 @@ type FilePreviewSuccess = Awaited<ReturnType<ApiClient["fetchPreview"]>>;
 type PreviewState =
   | { status: "success"; data: FilePreviewSuccess }
   | { status: "error"; message: string }
-  | { status: "unsupported"; message?: string };
+  | { status: "unsupported" };
 
 type PreviewPaneProps = {
   path: string;
@@ -255,17 +255,27 @@ export function PreviewPane({ path, name, size, mtime, preview }: PreviewPanePro
       {truncatedSize === null ? null : (
         <p className="files-preview-truncation ui-muted">{`预览已截断（原始大小 ${truncatedSize} B）`}</p>
       )}
-      <PreviewBody key={path} name={name} preview={preview} />
+      <PreviewBody key={path} name={name} preview={preview} size={size} />
     </article>
   );
 }
 
-function PreviewBody({ name, preview }: { name: string; preview: PreviewState }) {
+function PreviewBody({
+  name,
+  preview,
+  size,
+}: {
+  name: string;
+  preview: PreviewState;
+  size: number;
+}) {
   if (preview.status === "unsupported") {
     return (
-      <div className="files-preview-empty ui-empty">
-        <p>该类型不支持预览</p>
-        {preview.message ? <p className="ui-muted">{preview.message}</p> : null}
+      <div className="files-preview-empty">
+        <EmptyState
+          description={`${name} · ${formatSize(size)}\u3000二进制或未识别格式`}
+          title="该类型不支持预览"
+        />
       </div>
     );
   }

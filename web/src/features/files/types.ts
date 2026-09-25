@@ -35,4 +35,4 @@ type FilePreview =
 export type PreviewState =
   | { status: "success"; data: FilePreview }
   | { status: "error"; message: string }
-  | { status: "unsupported"; message?: string };
+  | { status: "unsupported" };
