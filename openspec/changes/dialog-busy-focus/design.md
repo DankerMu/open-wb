@@ -84,11 +84,12 @@ Must add/change：
 ## Required evidence
 每项单独注入并跑对应命令，确认变红后回退：
 1. 去掉 `useBusyFocusRescue` 调用 → B1、B2、B4 红；且 CI 环境变量下的 `ci-compiled-server.sh ui-walk` 在第 4 步（`关闭` 未获焦）或第 5 步（焦点逃出）变红。**这一项证明 e2e 能在真实浏览器里观测到原缺陷**，必须实跑。
-2. 只保留 `active === document.body` 分支，去掉"内容内已禁用控件"分支 → B1、B4 红；预期 ui-walk 也红，因为 Chromium 走的是"已禁用"分支，见时序注释。
-3. 只保留"已禁用"分支，去掉 body 分支 → B2 红；ui-walk 大概率保持绿，这是预期，如实记录。
+2. 只保留 `active === document.body` 分支，去掉"内容内已禁用控件"分支 → B1、B4 红；预期 ui-walk 也红，因为 Chromium 走的是"已禁用"分支，见时序注释。**实测相反：ui-walk 保持绿，见偏差 1。**
+3. 只保留"已禁用"分支，去掉 body 分支 → B2 红；ui-walk 大概率保持绿，这是预期，如实记录。**实测相反：ui-walk 红，见偏差 1。**
 4. 同时去掉上升沿判断和依赖数组，让 effect 每次 commit 都跑，只要 busy 为 true 就救回 → B5 红。只去掉 `rising` 而保留 `[busy, content]` 不会变红，因为 effect 本就只在 busy 变化时运行。
 5. 救回条件放宽为"总是聚焦首个可用控件" → B3 红。
 6. `ConfirmDialog` 不传 `busy` → B1、B2 红，ui-walk 红。
+7. （fix pass 1 补）`useFocusHandoff` 的 `onCloseAutoFocus` 不再归还焦点（去掉 `returnFocus`/opener 的 `.focus()`）→ 新增 settings-footer「救回后 403」用例在焦点回到 trigger 的断言处红。
 
 ## Test plan / verification
 - `(cd web && npx vitest run test/ui-dialog-busy.test.tsx test/ui-dialog.test.tsx test/settings-footer.test.tsx)` 全绿。
@@ -112,4 +113,9 @@ Review focus：救回条件（不在非 fixup 场景抢焦点）；layout effect
    - 按设计第 7 步 `release()` 后立即 `page.unroute(...)`，实跑报 `route.continue: Route is already handled!`：Playwright 1.62 的 `unroute` 默认行为会清空拦截模式，挂起的请求被自动放行，与处理器随后的 `continue` 竞争。
    - 最小修复：处理器把 `held.then(() => route.continue())` 存为 `forwarded` 并返回；`try` 末尾加 `expect.poll(() => forwarded !== undefined)`，证明请求确被 route 挂住；`finally` 里 `release()` 后，先 `await forwarded` 再 `unroute`。挂起期断言与 401 oracle 不变。
    - 第 2–7 步抽成同文件内的 `confirmLogoutByKeyboardWhileHeld`（文件 782 行 ≤ 800，未拆出 `ui-walk-logout.ts`）。
-3. **B5 的前置步骤复用 B1。** 所以在无救回（实现前、注入 1、注入 6）时，B5 在其前置断言（活动元素为 `关闭`）处红，而不是在"仍为 body"的断言处红。注入 4 下 B5 在末条断言（`:115`，活动元素仍为 `body`）处红，符合设计。
+3. **B5 的前置步骤复用 B1。** 所以在无救回（实现前、注入 1、注入 6）时，B5 在其前置断言（`:109`，活动元素为 `关闭`）处红，而不是在"仍为 body"的断言处红。注入 4 下 B5 在末条断言（`:115`，活动元素仍为 `body`）处红，符合设计。
+   - 行号更正（fix pass 1 按 `web/test/ui-dialog-busy.test.tsx` 现文件复跑注入 1 核对）：先红记录中的"B4 :105、B5 :111"应为 B4 `:103`（活动元素为算出的首个可用控件）、B5 `:109`（前置断言）；B1 `:72`、B2 `:82` 不变。行为结论不变。
+4. **fix pass 1（评审 F1）：补"救回触发后 logout 403"用例。**
+   - 新增 `web/test/settings-footer.test.tsx`「returns focus to the trigger when logout 403 follows the busy focus rescue」（`:503`，文件 552 行 ≤ 800，未移到 `ui-dialog-busy.test.tsx`）：聚焦 `退出` 后点击并挂起 logout，断言焦点救回到 `关闭`（`:520`）；放行 403 后断言 `alertdialog` 消失、焦点回到 `用户菜单` trigger（`:527`）、footer alert 为 `无法退出当前会话`。
+   - 注入 7（`onCloseAutoFocus` 去掉 `.focus()` 归还）→ 新用例在 `:527` 红；注入 6（`ConfirmDialog` 不传 `busy`）→ 新用例在 `:520` 红（B1 `:72`、B2 `:82`、B5 `:109` 同红）。两者回退后与原文件逐字节一致。
+   - `confirm-dialog.tsx` 的 `pending` JSDoc 改为：救回到内容内首个未禁用的可聚焦控件，`children` 不含可聚焦元素时即取消按钮（不再断言总是取消按钮）。

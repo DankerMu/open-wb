@@ -11,7 +11,10 @@ type ConfirmDialogProps = {
   cancelText?: string;
   confirmText: string;
   danger?: boolean;
-  /** 确认进行中：确认按钮 loading（禁用 + aria-busy）；忙碌期焦点救回到取消按钮。 */
+  /**
+   * 确认进行中：确认按钮 loading（禁用 + aria-busy）。作为 `busy` 传给 DialogFrame：上升沿时若焦点已丢，
+   * 救回到内容内首个未禁用的可聚焦控件——`children` 不含可聚焦元素时即取消按钮。
+   */
   pending?: boolean;
   onConfirm: () => void;
   returnFocus?: RefObject<HTMLElement | null> | undefined;

@@ -6,7 +6,7 @@
 ## 2. Implementation（TDD：先红后绿）
 - [x] 2.1 B1–B5 与 ui-walk 退出段改写；先红（ui-walk 在无救回时红，同时即为注入 1 的真实浏览器证据）。
 - [x] 2.2 `useBusyFocusRescue` + `Dialog`/`DialogFrame` `busy` + `ConfirmDialog` 传 `busy`；2.1 转绿，`web/test` 全绿。
-- [x] 2.3 反向注入六项各红并回退（design Required evidence）。
+- [x] 2.3 反向注入七项（fix pass 1 补 7）各红并回退（design Required evidence）。
 
 ## 3. Verification
 - [ ] 3.0 archive PR：
@@ -27,6 +27,6 @@
 - Selected Concurrency / shared state / ordering：busy 上升沿 × fixup 时序。证据：B1、B2、B5，注入 1–4，3.3。
 - Not selected Resource limits / large input / discovery：无。
 - Selected Legacy compatibility / examples：焦点归还、初始焦点、Tab 循环，settings-footer、chat-page-lifecycle。证据：`web/test` 全绿，ui-walk 401 oracle。
-- Selected Error handling / rollback / partial outputs：logout 失败回滚后焦点仍在模态内（`关闭` 由 `取消` 同一元素改文案，按钮恢复可用）；settings-footer 403 用例不回归。证据：`web/test` 全绿。
+- Selected Error handling / rollback / partial outputs：救回触发后 logout 失败（403）时，footer 关闭模态，焦点经 `returnFocus` 回到 `用户菜单` trigger（不是留在模态内）。证据：fix pass 1 新增 settings-footer 用例（先聚焦 `退出` 再点击，断言救回到 `关闭`，403 后断言对话框消失且焦点回到 trigger），以及对应反向注入；settings-footer 既有 403 用例不回归。
 - Not selected Release / packaging / dependency compatibility：不升级 Radix。
 - Not selected Documentation / migration notes：#302 的接入说明放在 archive PR 留言。

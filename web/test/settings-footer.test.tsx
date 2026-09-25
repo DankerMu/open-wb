@@ -499,6 +499,36 @@ describe("authenticated sidebar footer", () => {
       ]),
     );
   });
+
+  it("returns focus to the trigger when logout 403 follows the busy focus rescue", async () => {
+    const pendingLogout = deferredResponse();
+    const fetchMock = createFetchMock(
+      authenticatedRoutes({ "/api/auth/logout": pendingLogout.promise }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const requestedPath = "/files?from=logout-rescue#target";
+
+    renderApp(requestedPath);
+    await expectAuthenticatedShell("/files");
+    const trigger = within(getFooter()).getByRole("button", { name: "用户菜单", hidden: true });
+    const dialog = await openLogoutDialog();
+    const confirm = within(dialog).getByRole("button", { name: "退出" });
+    confirm.focus();
+    expect(document.activeElement).toBe(confirm);
+    fireEvent.click(confirm);
+    // 已聚焦的 退出 随 pending 被禁用，救回把焦点移到同一取消按钮（pending 文案 关闭）。
+    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "关闭" }));
+
+    pendingLogout.resolve(
+      jsonResponse({ error: { code: "forbidden", message: "无法退出当前会话" } }, 403),
+    );
+
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(screen.getByRole("alert").textContent).toBe("无法退出当前会话");
+    expect(currentLocation()).toBe(requestedPath);
+    expect(fetchMock.mock.calls.filter(([path]) => path === "/api/auth/logout")).toHaveLength(1);
+  });
 });
 
 describe("迁移静态契约", () => {
