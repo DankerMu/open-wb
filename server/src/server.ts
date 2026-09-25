@@ -131,12 +131,25 @@ function resolveSettingPath(raw: string, repoRoot: string): string {
   return isAbsolute(raw) ? raw : join(repoRoot, raw);
 }
 
-/** 失败记录：generic application stderr 一行；sink 不可用时吞掉（退出码已定，不递归/不抛原始 stack）。 */
-async function emitStartupFailed(): Promise<void> {
+/** 失败记录：generic application stderr 一行；退出码已定。 */
+function emitStartupFailed(): Promise<void> {
+  return emitStderrRecord("server_start_failed");
+}
+
+/**
+ * listener 预算到期强制回收的 generic 记录（#227）。升级不是失败：不改退出码。
+ * 以 void 调用，写入被拒绝也不会成为未处理 rejection。
+ */
+function emitListenerForceClose(): void {
+  void emitStderrRecord("listener_force_close");
+}
+
+/** generic application stderr 一行；sink 不可用时吞掉（不递归/不抛原始 stack）。 */
+async function emitStderrRecord(event: string): Promise<void> {
   try {
-    await writeManagedLine(process.stderr, `${JSON.stringify({ event: "server_start_failed" })}\n`);
+    await writeManagedLine(process.stderr, `${JSON.stringify({ event })}\n`);
   } catch {
-    // Sink unavailable: generic line is physically impossible; nonzero already decided.
+    // Sink unavailable: the generic line is physically impossible; exit code is decided elsewhere.
   }
 }
 
@@ -193,6 +206,7 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
     owned.app = createApp({
       db: owned.db,
       staticRoot: config.staticRoot,
+      onListenerForceClose: emitListenerForceClose,
       assembly: {
         runtime: {
           bin: config.ompBin,

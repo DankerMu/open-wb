@@ -75,7 +75,25 @@ export interface CreateAppOptions {
   authRuntime?: AuthRuntime;
   passwordSource?: PasswordSource;
   assembly?: AssemblyDependencies;
+  /**
+   * listener 关停预算（毫秒），在全部模块 preClose 之后才开始计时；省略或显式
+   * `undefined` → 恰 LISTENER_CLOSE_BUDGET_MS。必须是正整数且不超过 Node 定时器上限。
+   */
+  listenerCloseBudgetMs?: number | undefined;
+  /**
+   * 仅在预算到期、仍有连接未关而被强制回收时同步调用一次。createApp 自身不写任何记录；
+   * 同步抛错被吞掉，不影响关停。
+   */
+  onListenerForceClose?: (() => void) | undefined;
 }
+
+/**
+ * listener 关停预算默认值：native 最坏 8s（TERM 5s + KILL 3s）+ listener 2s = docker 默认
+ * stop grace 10s。
+ */
+export const LISTENER_CLOSE_BUDGET_MS = 2_000;
+/** Node setTimeout 可表示的最大延迟；超出会被静默改成 1ms。 */
+const TIMER_MAX_MS = 2_147_483_647;
 
 /**
  * 装配可注入的 HTTP app。调用方拥有 db 的完整生命周期；本函数不监听也不关闭它。
@@ -91,6 +109,9 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     passwordSource,
   } = options;
   const sessionTtl = validateSessionTtl(sessionTtlMs);
+  const listenerCloseBudget = validateListenerCloseBudget(
+    options.listenerCloseBudgetMs ?? LISTENER_CLOSE_BUDGET_MS,
+  );
   const app = fastify({
     logger: false,
     rewriteUrl: (request) => rewriteUntrustedUrl(request.url ?? ""),
@@ -194,7 +215,73 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     return sendNotFound(reply, request);
   });
 
+  // 必须是 createApp 中最后注册的根 hook：根实例 preClose 按注册顺序执行，
+  // 因而它在所有模块（均为根 addHook）的 preClose 之后运行。
+  registerListenerShutdown(app, listenerCloseBudget, options.onListenerForceClose);
   return app;
+}
+
+function validateListenerCloseBudget(budgetMs: number): number {
+  if (!Number.isSafeInteger(budgetMs) || budgetMs <= 0 || budgetMs > TIMER_MAX_MS) {
+    throw new Error(`listener close budget must be an integer in 1..${TIMER_MAX_MS} ms`);
+  }
+  return budgetMs;
+}
+
+/**
+ * 有界、无损的 listener 关停：Node server.close() 只在调用瞬间回收一次空闲连接，
+ * 之后才完成的 keep-alive 响应会把关停拖到 keepAliveTimeout。closing 期间每个完成的响应
+ * 都在下一个宏任务再回收一次空闲连接（Node 跳过仍有未完成请求的连接，不切断在飞请求）；
+ * 预算到期仍未关闭才 closeAllConnections() 并通知一次。从未 listen 的 app 全部为 no-op。
+ */
+function registerListenerShutdown(
+  app: FastifyInstance,
+  budgetMs: number,
+  onForceClose: (() => void) | undefined,
+): void {
+  let closing = false;
+  let closed = false;
+  let budget: NodeJS.Timeout | undefined;
+  const settle = (): void => {
+    closed = true;
+    clearTimeout(budget);
+  };
+  const escalate = (): void => {
+    if (closed) {
+      return;
+    }
+    app.server.closeAllConnections();
+    try {
+      onForceClose?.();
+    } catch {
+      // 通知方故障不得打断关停；记录与否由通知方自己负责。
+    }
+  };
+
+  app.addHook("preClose", (complete) => {
+    if (app.server.listening) {
+      closing = true;
+      app.server.once("close", settle);
+      app.server.closeIdleConnections();
+      budget = setTimeout(escalate, budgetMs);
+      budget.unref();
+    }
+    complete();
+  });
+  app.addHook("onResponse", (_request, _reply, done) => {
+    if (closing) {
+      setImmediate(() => {
+        if (!closed) {
+          app.server.closeIdleConnections();
+        }
+      });
+    }
+    done();
+  });
+  app.addHook("onClose", (_instance, done) => {
+    settle();
+    done();
+  });
 }
 
 interface StaticFiles {
