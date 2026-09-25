@@ -9,7 +9,7 @@ HTTP 200
 # info：exact 200 + exact service identity。
 GET {{base_url}}/api/info
 HTTP 200
-{"name":"workbuddy-app-server","version":"0.0.0"}
+{"name":"workbuddy-app-server","version":"0.0.0","auth":{"provider":"dev-stub"}}
 
 # 无 cookie 访问受保护 unknown API：exact 401 unauthorized 信封。
 GET {{base_url}}/api/no-such

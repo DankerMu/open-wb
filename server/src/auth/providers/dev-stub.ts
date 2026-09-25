@@ -33,6 +33,7 @@ interface AccountRow {
 }
 
 export interface DevStubProvider {
+  readonly name: "dev-stub";
   verify(
     accountInput: string,
     password: string,
@@ -109,6 +110,7 @@ export function createDevStubProvider(
   passwordSource: PasswordSource = scrypt,
 ): DevStubProvider {
   return {
+    name: "dev-stub",
     async verify(accountInput, password) {
       const account = normalizeAccount(accountInput);
       const row = db.prepare(FIND_ACCOUNT_SQL).get(account) as AccountRow | undefined;

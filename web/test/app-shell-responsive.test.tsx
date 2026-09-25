@@ -55,7 +55,12 @@ function mountShell(path: string, routes: Routes = {}) {
   vi.stubGlobal("EventSource", FakeEventSource);
   const fetchMock = createFetchMock({
     "/api/auth/me": () => jsonResponse(authenticatedPrincipal),
-    "/api/info": () => jsonResponse({ name: "workbuddy-app-server", version: "0.0.0" }),
+    "/api/info": () =>
+      jsonResponse({
+        name: "workbuddy-app-server",
+        version: "0.0.0",
+        auth: { provider: "dev-stub" },
+      }),
     "/api/sessions": () => jsonResponse({ sessions: [] }),
     "/api/workspaces": () => jsonResponse({ workspaces: [] }),
     "/api/auth/logout": () => new Response(null, { status: 204 }),

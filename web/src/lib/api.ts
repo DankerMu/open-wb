@@ -24,6 +24,7 @@ export type Principal = {
 export type ServiceInfo = {
   name: string;
   version: string;
+  auth: { provider: string };
 };
 
 export type LoginCredentials = {
@@ -180,11 +181,11 @@ function parsePrincipal(value: unknown): Principal | null {
 }
 
 function parseServiceInfo(value: unknown): ServiceInfo | null {
-  if (!hasExactlyKeys(value, ["name", "version"])) {
+  if (!hasExactlyKeys(value, ["name", "version", "auth"])) {
     return null;
   }
 
-  const { name, version } = value;
+  const { auth, name, version } = value;
   if (typeof name !== "string" || name.length === 0 || typeof version !== "string") {
     return null;
   }
@@ -193,7 +194,16 @@ function parseServiceInfo(value: unknown): ServiceInfo | null {
     return null;
   }
 
-  return { name, version };
+  if (!hasExactlyKeys(auth, ["provider"])) {
+    return null;
+  }
+
+  const { provider } = auth;
+  if (typeof provider !== "string" || provider.length === 0) {
+    return null;
+  }
+
+  return { name, version, auth: { provider } };
 }
 
 function parseWorkspace(value: unknown): Workspace | null {

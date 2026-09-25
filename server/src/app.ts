@@ -45,6 +45,7 @@ declare module "fastify" {
   interface FastifyInstance {
     db: DatabaseSync;
     authNow: () => number;
+    authProviderName: string;
     sessions: { store: SessionStore; supervisor: SessionSupervisor };
   }
 }
@@ -144,7 +145,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
 
   app.all("/api", (request, reply) => sendNotFound(reply, request));
   app.get("/api/healthz", () => ({ status: "ok" }));
-  app.get("/api/info", () => SERVICE_INFO);
+  app.get("/api/info", () => ({ ...SERVICE_INFO, auth: { provider: app.authProviderName } }));
   app.all("/api/*", (request, reply) => sendNotFound(reply, request));
 
   if (staticFiles !== undefined) {

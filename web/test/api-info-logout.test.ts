@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApiClient } from "../src/lib/api.js";
 import { captureApiError, expectRequestFailure, jsonResponse, serviceInfo } from "./support.js";
+import { listRepoFiles, readRepoFile } from "./ui-support.js";
+
+function omitInfoKey(key: string): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(serviceInfo).filter(([name]) => name !== key));
+}
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -26,9 +31,18 @@ describe("ServiceInfo API contract", () => {
   });
 
   it.each([
-    ["a missing name", { version: "0.0.0" }],
-    ["a missing version", { name: "workbuddy-app-server" }],
+    ["a missing name", omitInfoKey("name")],
+    ["a missing version", omitInfoKey("version")],
     ["an extra field", { ...serviceInfo, source: "private" }],
+    ["the legacy two-key shape", omitInfoKey("auth")],
+    ["auth replaced by a flat provider", { ...omitInfoKey("auth"), provider: "dev-stub" }],
+    ["a null auth", { ...serviceInfo, auth: null }],
+    ["an array auth", { ...serviceInfo, auth: [] }],
+    ["a string auth", { ...serviceInfo, auth: "dev-stub" }],
+    ["an empty auth", { ...serviceInfo, auth: {} }],
+    ["an empty provider", { ...serviceInfo, auth: { provider: "" } }],
+    ["a non-string provider", { ...serviceInfo, auth: { provider: 3 } }],
+    ["an extra auth field", { ...serviceInfo, auth: { provider: "dev-stub", extra: 1 } }],
     ["a non-string name", { ...serviceInfo, name: 3 }],
     ["an empty name", { ...serviceInfo, name: "" }],
     ["a non-string version", { ...serviceInfo, version: 3 }],
@@ -45,6 +59,39 @@ describe("ServiceInfo API contract", () => {
     const error = await captureApiError(createApiClient().getInfo());
 
     expectRequestFailure(error, 200);
+  });
+
+  it("rejects an auth object carrying an own __proto__ key", async () => {
+    const body = `{"name":"workbuddy-app-server","version":"0.0.0","auth":{"provider":"dev-stub","__proto__":{}}}`;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(body, { status: 200 })));
+
+    const error = await captureApiError(createApiClient().getInfo());
+
+    expectRequestFailure(error, 200);
+  });
+
+  it("accepts the exact three-key body and returns the provider name", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(serviceInfo)));
+
+    await expect(createApiClient().getInfo()).resolves.toEqual({
+      name: "workbuddy-app-server",
+      version: "0.0.0",
+      auth: { provider: "dev-stub" },
+    });
+  });
+
+  it("accepts any non-empty provider name without enumerating values", async () => {
+    const body = { ...serviceInfo, auth: { provider: "oidc" } };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(body)));
+
+    await expect(createApiClient().getInfo()).resolves.toEqual(body);
+  });
+
+  it("keeps no two-key info literal in web tests", () => {
+    const legacyLiteral = ['name: "workbuddy-app-server"', 'version: "0.0.0" }'].join(", ");
+    const files = listRepoFiles("web/test", (path) => /\.tsx?$/u.test(path));
+    expect(files.length).toBeGreaterThan(0);
+    expect(files.filter((path) => readRepoFile(path).includes(legacyLiteral))).toEqual([]);
   });
 
   it.each(["0.0.0", "1.2.3", "10.20.30-alpha.1", "1.2.3-A-z.9-"])(

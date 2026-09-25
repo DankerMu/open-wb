@@ -72,6 +72,12 @@ async function withDb<T>(action: (db: DatabaseSync) => Promise<T>): Promise<T> {
 }
 
 describe("dev-stub provider verification seam", () => {
+  it("provider 自报名称 dev-stub", async () => {
+    await withDb(async (db) => {
+      expect(createDevStubProvider(db).name).toBe("dev-stub");
+    });
+  });
+
   it("正确密码：以真实 scrypt 从 seed hash 验证并返回 exact Principal", async () => {
     await withDb(async (db) => {
       const provider = createDevStubProvider(db);

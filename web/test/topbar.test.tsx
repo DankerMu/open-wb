@@ -69,7 +69,12 @@ function mountApp(path: string, routes: FetchRoutes = {}) {
     "/api/auth/me": () => jsonResponse(authenticatedPrincipal),
     "/api/sessions": () => jsonResponse({ sessions: [] }),
     "/api/workspaces": () => jsonResponse({ workspaces: [] }),
-    "/api/info": () => jsonResponse({ name: "workbuddy-app-server", version: "0.0.0" }),
+    "/api/info": () =>
+      jsonResponse({
+        name: "workbuddy-app-server",
+        version: "0.0.0",
+        auth: { provider: "dev-stub" },
+      }),
     ...routes,
   });
   const mounted = mountAuthenticatedApp(path, fetchMock);

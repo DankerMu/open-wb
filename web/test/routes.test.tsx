@@ -163,9 +163,16 @@ function authenticateRouter() {
 
       if (path === "/api/info") {
         return Promise.resolve(
-          new Response(JSON.stringify({ name: "workbuddy-app-server", version: "0.0.0" }), {
-            headers: { "Content-Type": "application/json" },
-          }),
+          new Response(
+            JSON.stringify({
+              name: "workbuddy-app-server",
+              version: "0.0.0",
+              auth: { provider: "dev-stub" },
+            }),
+            {
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
         );
       }
 

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthGuard, AuthProvider, useAuth } from "../src/features/auth/index.js";
 import { createAppRouter } from "../src/routes/index.js";
 import "./dialog-platform.js";
-import { allowWorkspaceListFetch, createFetchMock } from "./support.js";
+import { allowWorkspaceListFetch, createFetchMock, serviceInfo } from "./support.js";
 
 const principal = { id: "user-1", account: "zhangsan", role: "member" };
 
@@ -388,7 +388,7 @@ describe("route guard initial authentication", () => {
         },
         "/api/auth/login": jsonResponse(principal),
         "/api/workspaces": jsonResponse({ workspaces: [] }),
-        "/api/info": jsonResponse({ name: "workbuddy-app-server", version: "0.0.0" }),
+        "/api/info": jsonResponse(serviceInfo),
       });
       vi.stubGlobal("fetch", fetchMock);
 

@@ -238,11 +238,21 @@ describe("provider session-bound file client", () => {
     );
 
     await act(async () => {
-      info.resolve(jsonResponse({ name: "workbuddy-app-server", version: "0.0.0" }));
+      info.resolve(
+        jsonResponse({
+          name: "workbuddy-app-server",
+          version: "0.0.0",
+          auth: { provider: "dev-stub" },
+        }),
+      );
       tree.resolve(jsonResponse({ path: "out", entries: [] }));
       preview.resolve(textPreviewResponse("# readme"));
     });
-    await expect(serviceInfo).resolves.toEqual({ name: "workbuddy-app-server", version: "0.0.0" });
+    await expect(serviceInfo).resolves.toEqual({
+      name: "workbuddy-app-server",
+      version: "0.0.0",
+      auth: { provider: "dev-stub" },
+    });
     await expect(treeRequest).resolves.toEqual({ path: "out", entries: [] });
     await expect(previewRequest).resolves.toMatchObject({ kind: "text", text: "# readme" });
     expectProtectedSession(fixture.getProbe());
