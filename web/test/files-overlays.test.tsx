@@ -48,9 +48,23 @@ function dialogGone(name: string) {
   return waitFor(() => expect(screen.queryByRole("dialog", { name })).toBeNull());
 }
 
+type View = ReturnType<typeof renderFiles>["view"];
+
+/** 模态期：Radix Dialog `hideOthers` 标记 RTL 容器，DismissableLayer 禁用外部指针。 */
+function expectModalSet(view: View) {
+  expect(view.container.getAttribute("aria-hidden")).toBe("true");
+  expect(document.body.style.pointerEvents).toBe("none");
+}
+
+/** 取消类关闭且焦点已归还后：body 无 pointer-events 残留，应用根无 aria-hidden 残留。 */
+function expectModalCleared(view: View) {
+  expect(document.body.style.pointerEvents).toBe("");
+  expect(view.container.hasAttribute("aria-hidden")).toBe(false);
+}
+
 describe("files creation overlays focus loop", () => {
   it("O1 returns focus to 选择工作空间 after the switcher path and after a bare switcher Escape", async () => {
-    const { fetchMock } = renderWorkspace();
+    const { fetchMock, view } = renderWorkspace();
     const switcherTrigger = await screen.findByRole("button", { name: "选择工作空间" });
 
     fireEvent.click(switcherTrigger);
@@ -59,10 +73,13 @@ describe("files creation overlays focus loop", () => {
     fireEvent.click(within(switcher).getByRole("button", { name: "＋ 新建工作空间" }));
     const dialog = await screen.findByRole("dialog", { name: "新建工作空间" });
     expect(dialog.getAttribute("aria-modal")).toBe("true");
-    await focusedOn(within(dialog).getByLabelText("工作空间名称"));
+    await yieldMacrotask();
+    expect(document.activeElement).toBe(within(dialog).getByLabelText("工作空间名称"));
+    expectModalSet(view);
     fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
     await dialogGone("新建工作空间");
     await focusedOn(switcherTrigger);
+    expectModalCleared(view);
     expect(posts(fetchMock, "/api/workspaces")).toHaveLength(0);
 
     await yieldMacrotask();
@@ -75,7 +92,7 @@ describe("files creation overlays focus loop", () => {
   });
 
   it("O2 lists exactly two menu items and returns focus to 新建 after cancelling from the menu path", async () => {
-    const { fetchMock } = renderWorkspace();
+    const { fetchMock, view } = renderWorkspace();
     const menuTrigger = await screen.findByRole("button", { name: "新建" });
 
     pressPointer(menuTrigger);
@@ -87,9 +104,13 @@ describe("files creation overlays focus loop", () => {
     ).toEqual(["新建文件夹", "新建工作空间"]);
     fireEvent.click(within(menu).getByRole("menuitem", { name: "新建工作空间" }));
     const dialog = await screen.findByRole("dialog", { name: "新建工作空间" });
+    await yieldMacrotask();
+    expectModalSet(view);
+    expect(document.activeElement).toBe(within(dialog).getByLabelText("工作空间名称"));
     fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
     await dialogGone("新建工作空间");
     await focusedOn(menuTrigger);
+    expectModalCleared(view);
     expect(posts(fetchMock, "/api/workspaces")).toHaveLength(0);
   });
 
@@ -98,7 +119,9 @@ describe("files creation overlays focus loop", () => {
     const menuTrigger = await screen.findByRole("button", { name: "新建" });
 
     const dialog = await openDirectoryDialog();
-    await focusedOn(within(dialog).getByLabelText("位置"));
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    await yieldMacrotask();
+    expect(document.activeElement).toBe(within(dialog).getByLabelText("位置"));
     fireEvent.click(within(dialog).getByRole("button", { name: "关闭" }));
     await dialogGone("新建文件夹");
     await focusedOn(menuTrigger);
@@ -164,6 +187,30 @@ describe("files creation overlays focus loop", () => {
     fireEvent.keyDown(await screen.findByRole("menu"), { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
     await focusedOn(menuTrigger);
+  });
+
+  it("O9 aborts a held folder create on an overlay press and returns focus to 新建", async () => {
+    const held = deferredResponse();
+    const { fetchMock } = renderWorkspace({ [DIRS_PATH]: () => held.promise });
+    const menuTrigger = await screen.findByRole("button", { name: "新建" });
+
+    const dialog = await openDirectoryDialog();
+    fireEvent.change(within(dialog).getByLabelText("文件夹名称"), { target: { value: "held" } });
+    const create = within(dialog).getByRole("button", { name: "创建" }) as HTMLButtonElement;
+    create.focus();
+    fireEvent.click(create);
+    await waitFor(() => expect(create.disabled).toBe(true));
+    expect(posts(fetchMock, DIRS_PATH)).toHaveLength(1);
+
+    await yieldMacrotask();
+    const overlay = document.querySelector(".ui-dialog-overlay");
+    if (!overlay) throw new Error("expected the dialog overlay");
+    pressPointer(overlay);
+    await dialogGone("新建文件夹");
+    const [request] = posts(fetchMock, DIRS_PATH);
+    expect(request?.[1]?.signal?.aborted).toBe(true);
+    await focusedOn(menuTrigger);
+    expect(posts(fetchMock, DIRS_PATH)).toHaveLength(1);
   });
 });
 
