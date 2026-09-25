@@ -9,7 +9,7 @@
 - [x] 2.3 反向注入十项（fix pass 1 补 9、10）各红并回退（design Required evidence）。
 
 ## 3. Verification
-- [ ] 3.0 archive PR：父 delta `s1e-frontend-parity/specs/chat-web/spec.md` Messages 段的操作条句按子 delta 细化同步；把子 Scenario「复制助手原文」并入父 delta；勾父 tasks 4.6。
+- [x] 3.0 archive PR：父 delta `s1e-frontend-parity/specs/chat-web/spec.md` Messages 段的操作条句按子 delta 细化同步；把子 Scenario「复制助手原文」并入父 delta；勾父 tasks 4.6。
 - [x] 3.1 `make check` exit 0。
 - [x] 3.2 `npm run build --workspace web` exit 0。
 - [x] 3.3 ui-walk（CI 环境变量）exit 0。
@@ -26,3 +26,5 @@
 - Selected Error handling / rollback / partial outputs：API 缺失、reject、同步抛错三条路径收敛为 Toast，无未捕获异常。证据：C2、C3、C3b。
 - Not selected Release / packaging / dependency compatibility：无。
 - Not selected Documentation / migration notes：无迁移。
+
+3.0 实际：父 Messages 段操作条句替换为子 delta 细化句；子 Scenario「复制助手原文」并入父 delta（置于「回到最新」之后）；勾父 tasks 4.6。
