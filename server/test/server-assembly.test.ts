@@ -37,6 +37,7 @@ import {
   sudoPrefix,
 } from "./session-supervisor-helpers.js";
 import type { FakeChild } from "./support/omp-rpc.js";
+import { useSetprivStub } from "./support/setpriv.js";
 
 /**
  * Issue #101/#128 assembly baseline.
@@ -219,6 +220,7 @@ describe("真实 createApp 消费共享 registry 并先挂 proxy 再挂 sessions
 });
 
 describe("真实配置经认证 prompt 抵达 spawn", () => {
+  useSetprivStub();
   it("配置用户 omp 时捕获 sudo 前缀，未配置时保持直接 OMP_BIN", async () => {
     const roots = makeAssemblyRoots();
     const tmpdir = process.env.TMPDIR;

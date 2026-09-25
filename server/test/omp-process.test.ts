@@ -27,6 +27,7 @@ import { assertSafeSudoPath } from "../src/core/process-path.js";
 import { type SpawnImpl, type SpawnOmpOpts, spawnOmp } from "../src/sessions/omp/process.js";
 import { observeChild } from "./child-stdio-helpers.js";
 import { recordedSpawn, sudoPrefix } from "./session-supervisor-helpers.js";
+import { useSetprivStub } from "./support/setpriv.js";
 
 const CALLER_TOKEN = randomBytes(32).toString("hex");
 const PARENT_TOKEN = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -109,6 +110,7 @@ interface SpawnRoots {
 
 const children: ChildProcessWithoutNullStreams[] = [];
 const temps: string[] = [];
+useSetprivStub();
 
 afterEach(async () => {
   await Promise.all(children.splice(0).map(stopChild));
@@ -399,7 +401,19 @@ describe("spawnOmp spawn contract", () => {
     const roots = makeRoots();
     const call = await capture(roots, null, { LANG: undefined, TMPDIR: undefined }, "omp_user");
     expect(call.command).toBe("sudo");
-    expect(call.args).toEqual([...sudoPrefix("omp_user", roots.bin), ...coldArgs(roots)]);
+    expect(call.args).toEqual([
+      "-n",
+      "-u",
+      "omp_user",
+      "--preserve-env=PATH,LANG,TMPDIR,HOME,PI_CODING_AGENT_DIR,WORKBUDDY_MODEL_TOKEN",
+      "--",
+      "/usr/bin/setpriv",
+      "--pdeathsig",
+      "KILL",
+      "--",
+      roots.bin,
+      ...coldArgs(roots),
+    ]);
     expect(call.env).toEqual(allowlist(roots));
     expect(call.env).not.toHaveProperty("LANG");
     expect(call.env).not.toHaveProperty("TMPDIR");

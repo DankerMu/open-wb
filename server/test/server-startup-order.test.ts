@@ -514,7 +514,7 @@ describe("production entry forwards OMP_USER to the captured spawn", () => {
       scratch.push(scratchRoot);
       const tracePath = join(scratchRoot, "spawn.jsonl");
       const hookPath = join(scratchRoot, "capture-spawn.mjs");
-      writeFileSync(hookPath, captureSpawnHook());
+      writeFileSync(hookPath, captureSpawnHook("present"));
       const port = await reserveWildcardPort();
       const bin = join(scratchRoot, "bin", "omp");
       const forwardedTmpdir = "/tmp/workbuddy compiled:forward $;";
@@ -558,29 +558,39 @@ describe("production entry forwards OMP_USER to the captured spawn", () => {
 
 describe("production entry rejects invalid OMP_USER before effects", () => {
   it.each([
-    ["empty", ""],
-    ["uppercase", "Omp"],
-    ["space", "omp user"],
-    ["semicolon", "root;id"],
-  ])(
+    ["empty", "", undefined],
+    ["uppercase", "Omp", undefined],
+    ["space", "omp user", undefined],
+    ["semicolon", "root;id", undefined],
+    ["valid user without /usr/bin/setpriv", "omp", "ENOENT"],
+  ] as const)(
     "rejects %s with one generic record and no startup effects",
-    async (_name, user) => {
+    async (_name, user, setpriv) => {
       const compiled = await compileServerEntry();
       const scratchRoot = mkdtempSync(join(tmpdir(), "open-wb-omp-user-"));
       scratch.push(scratchRoot);
+      const hookPath = join(scratchRoot, "missing-setpriv.mjs");
+      if (setpriv !== undefined) {
+        writeFileSync(hookPath, captureSpawnHook(setpriv));
+      }
       const dbParent = join(scratchRoot, "db");
       const state = join(scratchRoot, "state");
       const sandbox = join(scratchRoot, "sandbox");
       const port = await reserveWildcardPort();
-      const server = startCompiledServer(compiled.entry, {
-        HOST: "127.0.0.1",
-        PORT: String(port),
-        DB_PATH: join(dbParent, "dev.db"),
-        OMP_STATE_DIR: state,
-        SANDBOX_ROOT: sandbox,
-        OMP_BIN: join(scratchRoot, "bin", "omp"),
-        OMP_USER: user,
-      });
+      const server = startCompiledServer(
+        compiled.entry,
+        {
+          HOST: "127.0.0.1",
+          PORT: String(port),
+          DB_PATH: join(dbParent, "dev.db"),
+          OMP_STATE_DIR: state,
+          SANDBOX_ROOT: sandbox,
+          OMP_BIN: join(scratchRoot, "bin", "omp"),
+          OMP_USER: user,
+          PATH: "/usr/bin:/bin",
+        },
+        setpriv === undefined ? {} : { requireHook: hookPath },
+      );
       const closed = await server.waitForClose();
       expect(closed.code).toBe(1);
       expect(closed.signal).toBeNull();
@@ -635,10 +645,16 @@ function expectRefused(host: string, port: number): Promise<void> {
   });
 }
 
-function captureSpawnHook(): string {
+/** Also replaces fs.accessSync for /usr/bin/setpriv only (Issue #351 launcher precondition). */
+function captureSpawnHook(setpriv: "present" | "ENOENT"): string {
   return `import cp from 'node:child_process';
-import { appendFileSync } from 'node:fs';
+import fs, { appendFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
+const nativeAccess = fs.accessSync;
+fs.accessSync = function access(path, mode) {
+  if (path !== '/usr/bin/setpriv') return nativeAccess.call(this, path, mode);
+  if (${JSON.stringify(setpriv)} !== 'present') throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+};
 const nativeSpawn = cp.spawn;
 cp.spawn = function capture(command, args, options) {
   if (command === 'sudo' || command === process.env.OMP_BIN) {

@@ -1,13 +1,17 @@
 /**
  * Issue #131 Linux uid isolation: real SessionRuntime → native sudo → fake-omp probe.
+ * Issue #351: retire's SIGKILL of sudo reaps omp through setpriv --pdeathsig KILL.
  * Non-Linux / unset WORKBUDDY_UID_TEST skip; opted-in missing OMP_USER fails.
  */
+import { type ChildProcessWithoutNullStreams, spawn, spawnSync } from "node:child_process";
 import { chmodSync, lstatSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { OmpFrame } from "../../src/sessions/omp/frame.js";
+import type { OmpExit } from "../../src/sessions/omp/process.js";
 import { SessionRuntime } from "../../src/sessions/omp/runtime.js";
 import { TokenRegistry } from "../../src/sessions/tokens.js";
 import { listOneLevel } from "../../src/workspaces/tree.js";
@@ -35,6 +39,11 @@ const REQUIRED_CHILD_ENV_KEYS = [
   "WORKBUDDY_MODEL_TOKEN",
 ] as const;
 const REPORT_LABELS = ["uid", "gid", "env", "home", "agent", "environ", "wrote"] as const;
+/** fake-omp argv ends with the appended scenario; pgrep -u matches the effective uid only. */
+const HANG_PATTERN = "scenario hang-term$";
+/** runtime.ts TERM@5 s + KILL@8 s budget plus scheduling slack. */
+const RETIRE_LIMIT_MS = 11_000;
+const REAP_POLL_MS = 2_000;
 
 interface OwnedLayout {
   ownedRoot: string;
@@ -76,8 +85,71 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
         await releaseIsolation(runtime, ownedRoot, previous);
       }
     });
+
+    it("reaps omp when retire escalates to SIGKILL of sudo", { timeout: 30_000 }, async () => {
+      const ompUser = requireOmpUser();
+      const previous = snapshotParentEnv();
+      let ownedRoot: string | undefined;
+      let runtime: SessionRuntime | undefined;
+      try {
+        applyParentEnv(previous);
+        ownedRoot = mkdtempSync(join(tmpdir(), "uid-reap-"));
+        const layout = createOwnedLayout(ownedRoot);
+        const sudoExits: OmpExit[] = [];
+        runtime = new SessionRuntime({
+          sessionId: `${SESSION_ID}-reap`,
+          bin: FAKE,
+          sandboxRoot: layout.sandboxRoot,
+          stateDir: layout.stateDir,
+          ownerId: OWNER_ID,
+          modelId: MODEL_ID,
+          tokens: new TokenRegistry(),
+          ompUser,
+          spawnImpl: (command, args, options) => {
+            expect(command).toBe("sudo");
+            const child = spawn(command, [...args, "--scenario", "hang-term"], options);
+            child.once("exit", (code, signal) => sudoExits.push({ code, signal }));
+            return child as ChildProcessWithoutNullStreams;
+          },
+        });
+        await collectPrompt(runtime.prompt("hang-term"));
+        expect(ompUserHangPids(ompUser)).toHaveLength(1);
+        const started = Date.now();
+        await runtime.shutdown();
+        expect(Date.now() - started).toBeLessThan(RETIRE_LIMIT_MS);
+        expect(sudoExits).toEqual([{ code: null, signal: "SIGKILL" }]);
+        await expectReaped(ompUser);
+      } finally {
+        await releaseIsolation(runtime, ownedRoot, previous);
+      }
+    });
   },
 );
+
+/** pgrep status 1 is "no match"; any other failure is an observation failure, never empty. */
+function ompUserHangPids(ompUser: string): string[] {
+  const result = spawnSync("pgrep", ["-u", ompUser, "-f", HANG_PATTERN], { encoding: "utf8" });
+  if (result.error !== undefined) {
+    throw result.error;
+  }
+  if (result.status === 1) {
+    return [];
+  }
+  if (result.status !== 0) {
+    throw new Error(`pgrep failed with status ${String(result.status)}`);
+  }
+  return result.stdout.split("\n").filter((line) => line.length > 0);
+}
+
+async function expectReaped(ompUser: string): Promise<void> {
+  const deadline = Date.now() + REAP_POLL_MS;
+  let pids = ompUserHangPids(ompUser);
+  while (pids.length > 0 && Date.now() < deadline) {
+    await sleep(50);
+    pids = ompUserHangPids(ompUser);
+  }
+  expect(pids).toEqual([]);
+}
 
 function requireOmpUser(): string {
   const ompUser = process.env.OMP_USER;

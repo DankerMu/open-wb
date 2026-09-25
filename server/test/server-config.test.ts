@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { assertSafeSudoPath } from "../src/core/process-path.js";
 import { resolveServerConfig } from "../src/server.js";
+import { useSetprivStub } from "./support/setpriv.js";
 
 const REPO_ROOT = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const SOURCE_ENTRY = pathToFileURL(join(REPO_ROOT, "server", "src", "server.ts")).href;
@@ -371,6 +372,7 @@ describe("resolveServerConfig — 新路径与上游显式空值", () => {
 });
 
 describe("resolveServerConfig — OMP_USER", () => {
+  useSetprivStub();
   it("缺席与显式 undefined 不增加用户，其余身份保持缺省", () => {
     const omitted = resolveServerConfig({}, SOURCE_ENTRY);
     const explicitUndefined = resolveServerConfig({ OMP_USER: undefined }, SOURCE_ENTRY);

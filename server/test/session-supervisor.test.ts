@@ -28,6 +28,7 @@ import {
   waitFor,
   waitForTurn,
 } from "./session-supervisor-helpers.js";
+import { useSetprivStub } from "./support/setpriv.js";
 
 interface AssistantStep {
   id: number;
@@ -46,6 +47,7 @@ interface AssistantMessage {
 }
 
 describe("SessionSupervisor real child persistence and lifecycle", () => {
+  useSetprivStub();
   it.each([undefined, "omp"] as const)(
     "persists a normal child turn, reuses its generation, and resumes only after idle retirement for %s",
     { timeout: 15_000 },
