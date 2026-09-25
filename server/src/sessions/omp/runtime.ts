@@ -335,7 +335,11 @@ export class SessionRuntime {
       child.kill("SIGKILL");
       return child;
     }
+    // Only a pid-less child's 'error' is a spawn failure; a live one's is e.g. kill EPERM (#327).
     child.once("error", () => {
+      if (typeof child.pid === "number") {
+        return;
+      }
       gen.spawnFailed = true;
       gen.child = undefined;
       gen.spawnWait.resolve(undefined);
