@@ -9,7 +9,7 @@
 - [x] 2.3 反向注入各项变红并回退（design Required evidence）。
 
 ## 3. Verification
-- [ ] 3.0 archive PR 同步父 delta `s1e-frontend-parity/specs/files-web/spec.md`：无空间句补树区文案（父 Scenario「无空间空态」只说"树区空态文案"，补出具体文案）；空根与不支持态注明 `EmptyState`。
+- [x] 3.0 archive PR 同步父 delta `s1e-frontend-parity/specs/files-web/spec.md`：无空间句补树区文案（父 Scenario「无空间空态」只说"树区空态文案"，补出具体文案）；空根与不支持态注明 `EmptyState` 与"大小与树条目同一格式"；子 Scenario「空目录与空态文案」「长名截断与布局规则」并入父 delta（父为整段替换，否则归档时丢失）。
 - [x] 3.1 `make check` exit 0。
 - [x] 3.2 `npm run build --workspace web` exit 0。
 - [x] 3.3 ui-walk（CI 环境变量）exit 0。

@@ -59,6 +59,7 @@ Must add/change:
     }
     ```
     760 块把 `.files-layout` 改为 `display:flex; flex-direction:column`，`grid-template-columns` 不再生效，两块无冲突。
+  - （审查后顺带，PR #356 第二提交）`.files-preview-empty .ui-empty-state { min-width: 0; }` 与 `.files-preview-empty .ui-empty-state-desc { overflow-wrap: anywhere; }`：居中横向 flex 中长名副行可收缩换行；E5 钉住。
   - 删除 `.files-tree-empty` 与 `.files-tree-empty p`、`.files-preview-empty p`。`.files-preview-empty` 改为 `flex:1; min-height:0; display:flex; align-items:center; justify-content:center;`（padding 与 gap 由 `.ui-empty-state` 提供）。
   - 更新文件头来源注释：补 `resource/workbuddy-live-demo.html:3854,3877,3910,3919`（空态文案）与 900 断点 `demo:723`（`@media (max-width:900px){ .fs-tree{width:210px} }`）。
 
