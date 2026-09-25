@@ -67,6 +67,6 @@ CONTEXT.md 不变量 4（网关/kb 凭证不进 omp 可读环境）在同 uid �
 - **残留风险**：
   - `sudo -l` 无法在 runner 上证明 `SETENV` 与 `TMPDIR=` 命令行赋值（同被预置 `ALL` 规则掩盖），由 Linux 测试与 `make smoke` 实跑覆盖。
   - sudo 在 fork 之后、setpriv 执行 `prctl` 之前被 SIGKILL（例如关停与 spawn 竞速）时 omp 仍会成为孤儿；窗口极小。
-  - 启用 `log_output`、或有 tty 时的 `use_pty` 会让 sudo 插入一个 monitor 进程，pdeathsig 绑定到 monitor 而非被杀的 sudo，
+  - 启用任何 sudo I/O 日志（`log_input`/`log_output` 或第三方 I/O log 插件，无 tty 时同样生效）、或有 tty 时的 `use_pty`，都会让 sudo 插入一个 monitor 进程，pdeathsig 绑定到 monitor 而非被杀的 sudo，
     保证失效；部署不得为该规则开启这些选项（服务无 tty 时默认 `use_pty` 不分配 pty，实测无影响）。
   - 只覆盖 omp 进程本身：omp 派生的工具子进程（如 bash）仍可能存活，与直连模式相同（残留，不是回归）。
