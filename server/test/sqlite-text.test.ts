@@ -24,7 +24,7 @@ const CONTENT_WITH_NUL = `hello${NUL}suffix`;
 const ASSISTANT_WITH_NUL = `delta${NUL}tail`;
 const STEP_NAME_WITH_NUL = `step${NUL}name`;
 const STEP_DETAIL_WITH_NUL = `detail${NUL}body`;
-const STEP_FINISH_WITH_NUL = `done${NUL}ok`;
+const STEP_OUTPUT_WITH_NUL = `done${NUL}\uFEFFok 😀\nline`;
 const RESUME_WITH_NUL = `resume/${NUL}file.jsonl`;
 const BOM_TEXT = `\uFEFFKeep BOM 中文 😀`;
 const ORDINARY_TEXT = `café 中文 😀`;
@@ -178,7 +178,7 @@ describe("SessionStore lossless free-text reads", () => {
     });
   });
 
-  it("returns complete NUL-containing step name and finish detail", () => {
+  it("returns complete NUL-containing step name, start detail, and finish output", () => {
     withSessionStore(({ store }) => {
       const session = store.create("u1");
       const accepted = store.acceptPrompt(session.id, "u1", "plain prompt");
@@ -187,13 +187,14 @@ describe("SessionStore lossless free-text reads", () => {
         name: STEP_NAME_WITH_NUL,
         detail: STEP_DETAIL_WITH_NUL,
       });
-      expect(store.finishStep(stepId, "done", STEP_FINISH_WITH_NUL)).toBe(true);
+      expect(store.finishStep(stepId, "done", STEP_OUTPUT_WITH_NUL)).toBe(true);
       expect(store.finishTurn(accepted.assistantMessageId, "done")).toBe(true);
       expect(store.getMessages(session.id, "u1")?.messages[1]?.steps[0]).toEqual(
         expect.objectContaining({
           id: stepId,
           name: STEP_NAME_WITH_NUL,
-          detail: STEP_FINISH_WITH_NUL,
+          detail: STEP_DETAIL_WITH_NUL,
+          output: STEP_OUTPUT_WITH_NUL,
         }),
       );
     });

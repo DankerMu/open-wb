@@ -96,10 +96,11 @@ function StepCard({ step }: { step: ChatStepView }) {
         </p>
       </div>
       {summary === "" ? null : <p className="chat-step-line">{summary}</p>}
-      {step.detail === "" ? null : (
+      {step.detail === "" && step.output === "" ? null : (
         <details className="chat-step-disclosure">
           <summary className="chat-step-summary">原始输出</summary>
-          <pre className="chat-step-detail">{step.detail}</pre>
+          {step.detail === "" ? null : <pre className="chat-step-detail">{step.detail}</pre>}
+          {step.output === "" ? null : <pre className="chat-step-output">{step.output}</pre>}
         </details>
       )}
     </section>

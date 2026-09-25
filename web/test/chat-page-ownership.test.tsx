@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { ChatMessageSnapshot } from "../src/lib/session-contract.js";
 import {
   AGENT_UNAVAILABLE,
-  BASH_RESULT_DETAIL,
+  BASH_OUTPUT,
   BASH_START_DETAIL,
   BUSINESS_ERROR,
   CREATED_MESSAGES,
@@ -116,7 +116,7 @@ describe("chat page create and acceptance ownership", () => {
         messageId: 0,
         stepId: 11,
         status: "done",
-        detail: BASH_RESULT_DETAIL,
+        output: BASH_OUTPUT,
       });
       source.emitData("text.delta", "1:4", { messageId: 0, delta: "Hello " });
       source.emitData("text.delta", "1:5", { messageId: 0, delta: "\u0000\uFEFF中文" });
@@ -128,7 +128,8 @@ describe("chat page create and acceptance ownership", () => {
     expect(await within(messages).findByText(STREAMED_BODY, exactText)).toBeTruthy();
     expect(within(messages).getByText(PROMPT, { exact: true })).toBeTruthy();
     expect(within(messages).getByText("bash", { exact: true })).toBeTruthy();
-    expect(within(messages).getByText(BASH_RESULT_DETAIL, { exact: true })).toBeTruthy();
+    expect(within(messages).getByText(BASH_START_DETAIL, { exact: true })).toBeTruthy();
+    expect(within(messages).getByText(BASH_OUTPUT, { exact: true })).toBeTruthy();
     expect(composer().disabled).toBe(false);
   });
 
@@ -288,7 +289,16 @@ describe("chat page isolation and errors", () => {
   it("keeps business error on the message and locks a still-running snapshot after terminal stream failure", async () => {
     const snapshot = chatSnapshot({
       content: "Hello ",
-      steps: [{ id: 11, ordinal: 0, name: "bash", detail: BASH_START_DETAIL, status: "running" }],
+      steps: [
+        {
+          id: 11,
+          ordinal: 0,
+          name: "bash",
+          detail: BASH_START_DETAIL,
+          output: "",
+          status: "running",
+        },
+      ],
       cursor: { epoch: 1, seq: 3 },
     });
     const { messages, source } = await mountRunningSnapshot(snapshot);

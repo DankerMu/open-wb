@@ -27,7 +27,7 @@ import {
 import { currentLocation, deferredResponse, jsonResponse } from "./support.js";
 
 const BASH_START_DETAIL = '{"command":"echo workbuddy-smoke"}';
-const BASH_RESULT_DETAIL = '{"output":"workbuddy-smoke"}';
+const BASH_OUTPUT = "workbuddy-smoke";
 const SNAPSHOT_ASSISTANT = "Hello ";
 const STREAMED_BODY = "Hello \u0000\uFEFF中文 😀";
 const exactText = { exact: true, collapseWhitespace: false, trim: false } as const;
@@ -41,6 +41,7 @@ const runningSnapshot = chatSnapshot({
       ordinal: 0,
       name: "bash",
       detail: BASH_START_DETAIL,
+      output: "",
       status: "running",
     },
   ],
@@ -154,15 +155,15 @@ describe("chat page route integration", () => {
         messageId: 0,
         stepId: 11,
         status: "done",
-        detail: BASH_RESULT_DETAIL,
+        output: BASH_OUTPUT,
       });
       source.emitData("turn.end", "1:7", { messageId: 0, status: "done" });
     });
 
     expect(await screen.findByText(STREAMED_BODY, exactText)).toBeTruthy();
     expect(screen.getByText(historyUser.content, exactText)).toBeTruthy();
-    expect(screen.getByText(BASH_RESULT_DETAIL, { exact: true })).toBeTruthy();
-    expect(screen.queryByText(BASH_START_DETAIL, { exact: true })).toBeNull();
+    expect(screen.getByText(BASH_OUTPUT, { exact: true })).toBeTruthy();
+    expect(screen.getByText(BASH_START_DETAIL, { exact: true })).toBeTruthy();
     expect(screen.queryByRole("status", { name: "bash 运行中" })).toBeNull();
     expect(screen.getByRole("status", { name: "bash 已完成" })).toBeTruthy();
     expect(screen.queryByText("生成中", { exact: true })).toBeNull();

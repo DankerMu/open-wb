@@ -17,6 +17,7 @@ export type ChatStep = {
   ordinal: number;
   name: string;
   detail: string;
+  output: string;
   status: ChatDeliveryStatus;
 };
 
@@ -88,22 +89,23 @@ export function parseSession(value: unknown): ChatSession | null {
 }
 
 function parseStep(value: unknown): ChatStep | null {
-  if (!hasExactlyKeys(value, ["id", "ordinal", "name", "detail", "status"])) {
+  if (!hasExactlyKeys(value, ["id", "ordinal", "name", "detail", "output", "status"])) {
     return null;
   }
 
-  const { detail, id, name, ordinal, status } = value;
+  const { detail, id, name, ordinal, output, status } = value;
   if (
     !isSafeInteger(id) ||
     !isNonNegativeSafeInteger(ordinal) ||
     typeof name !== "string" ||
     typeof detail !== "string" ||
+    typeof output !== "string" ||
     !isDeliveryStatus(status)
   ) {
     return null;
   }
 
-  return { id, ordinal, name, detail, status };
+  return { id, ordinal, name, detail, output, status };
 }
 
 function parseMessage(value: unknown): ChatMessage | null {

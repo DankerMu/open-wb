@@ -10,7 +10,7 @@ import type { ChatMessageSnapshot } from "../src/lib/session-contract.js";
 const SESSION_ID = "0123456789abcdef0123456789abcdef";
 const USER_CONTENT = "\u0000\uFEFFKeep BOM 中文 😀";
 const BASH_START_DETAIL = '{"command":"echo workbuddy-smoke"}';
-const BASH_RESULT_DETAIL = '{"output":"workbuddy-smoke"}';
+const BASH_OUTPUT = "workbuddy-smoke";
 const STREAMED_BODY = "Hello \u0000\uFEFF中文 😀";
 const AGENT_FAILURE = "Agent execution failed";
 
@@ -83,6 +83,7 @@ const runningBashStep = {
   ordinal: 0,
   name: "bash",
   detail: BASH_START_DETAIL,
+  output: "",
   status: "running" as const,
 };
 
@@ -100,7 +101,7 @@ describe("Chat stream reducer", () => {
       { type: "text.delta", data: { messageId: 0, delta: "\u0000\uFEFF中文 😀" } },
       {
         type: "step.end",
-        data: { messageId: 0, stepId: 11, status: "done", detail: BASH_RESULT_DETAIL },
+        data: { messageId: 0, stepId: 11, status: "done", output: BASH_OUTPUT },
       },
       { type: "turn.end", data: { messageId: 0, status: "done" } },
     ];
@@ -119,7 +120,8 @@ describe("Chat stream reducer", () => {
             {
               id: 11,
               name: "bash",
-              detail: BASH_RESULT_DETAIL,
+              detail: BASH_START_DETAIL,
+              output: BASH_OUTPUT,
               status: "done",
             },
           ],
@@ -157,6 +159,28 @@ describe("Chat stream reducer", () => {
     expect(reduce(snapshot)).toEqual(first);
   });
 
+  it("keeps the start detail on step.end and stores the end output (#367)", () => {
+    const started = deepFreeze(
+      applyChatEvent(deepFreeze(chatStateFromSnapshot(reducerSnapshot())), {
+        type: "step.start",
+        data: { messageId: 0, stepId: 11, name: "bash", detail: BASH_START_DETAIL },
+      }),
+    );
+    const ended = applyChatEvent(started, {
+      type: "step.end",
+      data: { messageId: 0, stepId: 11, status: "done", output: "workbuddy-smoke" },
+    });
+    expect(ended.messages[1]?.steps).toEqual([
+      {
+        id: 11,
+        name: "bash",
+        detail: BASH_START_DETAIL,
+        output: "workbuddy-smoke",
+        status: "done",
+      },
+    ]);
+  });
+
   it("keeps session generating on business error then settles remaining running step on failed turn.end", () => {
     const snapshot = reducerSnapshot({
       content: STREAMED_BODY,
@@ -184,6 +208,7 @@ describe("Chat stream reducer", () => {
               id: 11,
               name: "bash",
               detail: BASH_START_DETAIL,
+              output: "",
               status: "running",
             },
           ],
@@ -209,6 +234,7 @@ describe("Chat stream reducer", () => {
               id: 11,
               name: "bash",
               detail: BASH_START_DETAIL,
+              output: "",
               status: "failed",
             },
           ],
@@ -244,6 +270,7 @@ describe("Chat stream reducer", () => {
           id: 11,
           name: "bash",
           detail: BASH_START_DETAIL,
+          output: "",
           status: "failed",
         },
       ],
@@ -344,7 +371,7 @@ describe("Chat stream reducer", () => {
       },
       {
         type: "step.end",
-        data: { messageId: -3, stepId: 1, status: "failed", detail: "bad" },
+        data: { messageId: -3, stepId: 1, status: "failed", output: "bad" },
       },
       { type: "error", data: { messageId: -3, message: "bad" } },
       { type: "turn.end", data: { messageId: -3, status: "failed" } },
@@ -366,21 +393,21 @@ describe("Chat stream reducer", () => {
       content: STREAMED_BODY,
       cursor: { epoch: 1, seq: 1 },
       steps: [
-        { id: 3, ordinal: 0, name: "first", detail: "done", status: "done" },
-        { id: 4, ordinal: 1, name: "second", detail: "running", status: "running" },
-        { id: 5, ordinal: 2, name: "third", detail: "failed", status: "failed" },
+        { id: 3, ordinal: 0, name: "first", detail: "done", output: "ok", status: "done" },
+        { id: 4, ordinal: 1, name: "second", detail: "running", output: "", status: "running" },
+        { id: 5, ordinal: 2, name: "third", detail: "failed", output: "err", status: "failed" },
       ],
     });
     const frozenSnapshot = deepFreeze(structuredClone(snapshot));
     const initial = deepFreeze(chatStateFromSnapshot(frozenSnapshot));
     const continued = applyChatEvent(initial, {
       type: "step.end",
-      data: { messageId: 0, stepId: 4, status: "done", detail: "result 世界" },
+      data: { messageId: 0, stepId: 4, status: "done", output: "result 世界" },
     });
     expect(continued.messages[1]?.steps).toEqual([
-      { id: 3, name: "first", detail: "done", status: "done" },
-      { id: 4, name: "second", detail: "result 世界", status: "done" },
-      { id: 5, name: "third", detail: "failed", status: "failed" },
+      { id: 3, name: "first", detail: "done", output: "ok", status: "done" },
+      { id: 4, name: "second", detail: "running", output: "result 世界", status: "done" },
+      { id: 5, name: "third", detail: "failed", output: "err", status: "failed" },
     ]);
 
     const started = applyChatEvent(continued, {
@@ -391,7 +418,7 @@ describe("Chat stream reducer", () => {
     expect(
       applyChatEvent(started, {
         type: "step.end",
-        data: { messageId: 0, stepId: 999, status: "failed", detail: "unknown" },
+        data: { messageId: 0, stepId: 999, status: "failed", output: "unknown" },
       }),
     ).toEqual(started);
 

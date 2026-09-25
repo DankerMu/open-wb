@@ -141,7 +141,7 @@ describe("RingBuffer", () => {
     });
     ring.push({
       type: "step.end",
-      data: { messageId: 4, stepId: 12, status: "failed", detail: "missing" },
+      data: { messageId: 4, stepId: 12, status: "failed", output: "missing" },
     });
     ring.push({ type: "error", data: { messageId: 4, message: "stopped" } });
 
@@ -156,7 +156,7 @@ describe("RingBuffer", () => {
         {
           id: "11:2",
           type: "step.end",
-          data: { messageId: 4, stepId: 12, status: "failed", detail: "missing" },
+          data: { messageId: 4, stepId: 12, status: "failed", output: "missing" },
         },
         { id: "11:3", type: "error", data: { messageId: 4, message: "stopped" } },
       ],

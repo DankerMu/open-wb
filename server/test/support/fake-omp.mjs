@@ -327,7 +327,7 @@ async function emitToolRound(calls) {
       type: "tool_execution_end",
       toolCallId: call.id,
       toolName: call.name,
-      result: { output: TOOL_OUTPUT },
+      result: { content: [{ type: "text", text: TOOL_OUTPUT }], details: { exitCode: 0 } },
     });
   }
 }

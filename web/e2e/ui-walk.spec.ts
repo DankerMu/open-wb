@@ -426,6 +426,7 @@ async function walkScrollFollow(page: Page, project: WalkProject): Promise<void>
         });
       }
       await expect(summary.locator("xpath=..")).toHaveAttribute("open", "");
+      await expect(summary.locator("xpath=..").locator("pre.chat-step-output")).toBeVisible();
       await expect
         .poll(async () => (await transcriptMetrics(transcript)).threadHeight, "W-scroll 2: grew")
         .toBeGreaterThan(before.threadHeight);
@@ -693,6 +694,14 @@ async function expectCompletedPair(page: Page, sessionId: string, prompt: string
   const pair = await dialoguePair(page, sessionId, prompt);
   await expect(pair.assistant.locator(".chat-md")).toHaveText(EXPECTED_REPLY);
   await expect(page.getByRole("status", { name: "bash 已完成" })).toBeVisible();
+  // #367：摘要仍由 args 派生；真实 omp 的 AgentToolResult 经 output 块呈现（未展开时断言文本即可，
+  // 不点击以免改变 W-scroll 所需的贴底与折叠初态）。
+  const bash = pair.assistant.getByRole("region", { name: "bash" });
+  await expect(bash.locator("p.chat-step-line")).toHaveText("command: echo workbuddy-smoke");
+  await expect(bash.locator("details.chat-step-disclosure")).not.toHaveAttribute("open", "");
+  await expect(bash.locator("details.chat-step-disclosure pre.chat-step-output")).toContainText(
+    "workbuddy-smoke",
+  );
   const selected = selectedSessionStatus(page);
   await expect(selected.current).toHaveCount(1);
   await expect(selected.status).toHaveText("已完成");

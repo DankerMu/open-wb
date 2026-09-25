@@ -14,7 +14,7 @@ import {
 
 const messagesPath = `/api/sessions/${SESSION_ID}/messages`;
 const BASH_START = '{"command":"echo workbuddy-smoke"}';
-const BASH_END = '{"output":"workbuddy-smoke"}';
+const BASH_OUTPUT = "workbuddy-smoke";
 const READ_START = "plain line\nsecond";
 const SANDBOX_PATH = "/srv/workbuddy/sandbox/u1/demo/a.md";
 const SANDBOX_DETAIL = `{"path":"${SANDBOX_PATH}"}`;
@@ -28,8 +28,8 @@ function mountRunningSteps() {
     content: "处理中",
     assistantStatus: "running",
     steps: [
-      { id: 11, ordinal: 0, name: "bash", detail: BASH_START, status: "running" },
-      { id: 12, ordinal: 1, name: "read", detail: READ_START, status: "running" },
+      { id: 11, ordinal: 0, name: "bash", detail: BASH_START, output: "", status: "running" },
+      { id: 12, ordinal: 1, name: "read", detail: READ_START, output: "", status: "running" },
     ],
     cursor: { epoch: 1, seq: 3 },
   });
@@ -60,6 +60,7 @@ describe("(S2) step cards render icon, Chinese badge, summary and collapsed raw 
     expect(disclosure.open).toBe(false);
     expect(disclosure.querySelector("summary")?.textContent).toBe("原始输出");
     expect(disclosure.querySelector("pre.chat-step-detail")?.textContent).toBe(BASH_START);
+    expect(disclosure.querySelector("pre.chat-step-output")).toBeNull();
 
     const read = screen.getByRole("region", { name: "read" });
     expect(hasIcon(read, "wrench")).toBe(true);
@@ -76,25 +77,35 @@ describe("(S2) step cards render icon, Chinese badge, summary and collapsed raw 
         messageId: 0,
         stepId: 11,
         status: "done",
-        detail: BASH_END,
+        output: BASH_OUTPUT,
       });
       source.emitData("step.end", "1:5", {
         messageId: 0,
         stepId: 12,
         status: "failed",
-        detail: "",
+        output: "",
       });
     });
 
     const doneBadge = await within(bash).findByRole("status", { name: "bash 已完成" });
     expect(doneBadge.textContent).toBe("已完成");
     expect(doneBadge.className).not.toContain("ui-pulse");
-    expect(bash.querySelector("p.chat-step-line")?.textContent).toBe("output: workbuddy-smoke");
-    expect(bash.querySelector("pre.chat-step-detail")?.textContent).toBe(BASH_END);
+    expect(bash.querySelector("p.chat-step-line")?.textContent).toBe(
+      "command: echo workbuddy-smoke",
+    );
+    const ended = bash.querySelector("details.chat-step-disclosure") as HTMLDetailsElement;
+    expect(ended.open).toBe(false);
+    expect(
+      [...ended.querySelectorAll("pre")].map((pre) => [pre.className, pre.textContent]),
+    ).toEqual([
+      ["chat-step-detail", BASH_START],
+      ["chat-step-output", BASH_OUTPUT],
+    ]);
 
     expect(within(read).getByRole("status", { name: "read 失败" }).textContent).toBe("失败");
-    expect(read.querySelector(".chat-step-line")).toBeNull();
-    expect(read.querySelector("details")).toBeNull();
+    expect(read.querySelector("p.chat-step-line")?.textContent).toBe("plain line");
+    expect(read.querySelector("pre.chat-step-detail")?.textContent).toBe(READ_START);
+    expect(read.querySelector("pre.chat-step-output")).toBeNull();
     expect(screen.queryByRole("status", { name: /running|done|failed/ })).toBeNull();
   });
 
@@ -123,13 +134,107 @@ describe("(S2) step cards render icon, Chinese badge, summary and collapsed raw 
   });
 });
 
+describe("step cards split args and output under 原始输出 (#367)", () => {
+  function preBlocks(card: HTMLElement): string[][] {
+    return [...card.querySelectorAll("details.chat-step-disclosure pre")].map((pre) => [
+      pre.className,
+      pre.textContent ?? "",
+    ]);
+  }
+
+  it("renders an old row with detail only, a failed step with its error output, and hides empty steps", async () => {
+    const snapshot: ChatMessageSnapshot = chatSnapshot({
+      status: "done",
+      content: "完成",
+      assistantStatus: "done",
+      steps: [
+        {
+          id: 31,
+          ordinal: 0,
+          name: "legacy",
+          detail: '{"text":"old"}',
+          output: "",
+          status: "done",
+        },
+        {
+          id: 32,
+          ordinal: 1,
+          name: "bash",
+          detail: '{"command":"false"}',
+          output: "boom",
+          status: "failed",
+        },
+        { id: 33, ordinal: 2, name: "empty", detail: "", output: "", status: "done" },
+        { id: 34, ordinal: 3, name: "noargs", detail: "", output: "only output", status: "done" },
+      ],
+    });
+    renderChatPage(`/?session=${SESSION_ID}`, {
+      "/api/sessions": () => jsonResponse({ sessions: [snapshot.session] }),
+      [messagesPath]: () => jsonResponse(snapshot),
+    });
+
+    const legacy = await screen.findByRole("region", { name: "legacy" });
+    expect(legacy.querySelector("p.chat-step-line")?.textContent).toBe("old");
+    expect(preBlocks(legacy)).toEqual([["chat-step-detail", '{"text":"old"}']]);
+
+    const failed = screen.getByRole("region", { name: "bash" });
+    expect(within(failed).getByRole("status", { name: "bash 失败" }).textContent).toBe("失败");
+    expect(failed.querySelector("p.chat-step-line")?.textContent).toBe("command: false");
+    expect(preBlocks(failed)).toEqual([
+      ["chat-step-detail", '{"command":"false"}'],
+      ["chat-step-output", "boom"],
+    ]);
+
+    const empty = screen.getByRole("region", { name: "empty" });
+    expect(empty.querySelector("details")).toBeNull();
+    expect(empty.querySelector(".chat-step-line")).toBeNull();
+
+    const noArgs = screen.getByRole("region", { name: "noargs" });
+    expect(noArgs.querySelector(".chat-step-line")).toBeNull();
+    expect(preBlocks(noArgs)).toEqual([["chat-step-output", "only output"]]);
+  });
+
+  it("keeps the args summary after a long multi-line output arrives on step.end", async () => {
+    mountRunningSteps();
+    const bash = await screen.findByRole("region", { name: "bash" });
+    await waitFor(() => expect(latestSource().url).toBe(`/api/sessions/${SESSION_ID}/events`));
+    const longOutput = `${"x".repeat(150)}\nsecond line\n\n  indented 😀`;
+    act(() => {
+      latestSource().emitOpen();
+      latestSource().emitData("step.end", "1:4", {
+        messageId: 0,
+        stepId: 11,
+        status: "done",
+        output: longOutput,
+      });
+    });
+    await within(bash).findByRole("status", { name: "bash 已完成" });
+    expect(bash.querySelector("p.chat-step-line")?.textContent).toBe(
+      "command: echo workbuddy-smoke",
+    );
+    expect(preBlocks(bash)).toEqual([
+      ["chat-step-detail", BASH_START],
+      ["chat-step-output", longOutput],
+    ]);
+  });
+});
+
 describe("step cards keep absolute sandbox paths verbatim (ADR-0011)", () => {
   it("shows the absolute path unchanged in the summary line and the 原始输出 details", async () => {
     const snapshot: ChatMessageSnapshot = chatSnapshot({
       status: "done",
       content: "读完了",
       assistantStatus: "done",
-      steps: [{ id: 21, ordinal: 0, name: "read", detail: SANDBOX_DETAIL, status: "done" }],
+      steps: [
+        {
+          id: 21,
+          ordinal: 0,
+          name: "read",
+          detail: SANDBOX_DETAIL,
+          output: `# a.md at ${SANDBOX_PATH}`,
+          status: "done",
+        },
+      ],
     });
     renderChatPage(`/?session=${SESSION_ID}`, {
       "/api/sessions": () => jsonResponse({ sessions: [snapshot.session] }),
@@ -143,6 +248,9 @@ describe("step cards keep absolute sandbox paths verbatim (ADR-0011)", () => {
     expect(disclosure.querySelector("summary")?.textContent).toBe("原始输出");
     expect(disclosure.textContent).toContain(SANDBOX_PATH);
     expect(disclosure.querySelector("pre.chat-step-detail")?.textContent).toBe(SANDBOX_DETAIL);
+    expect(disclosure.querySelector("pre.chat-step-output")?.textContent).toBe(
+      `# a.md at ${SANDBOX_PATH}`,
+    );
   });
 });
 

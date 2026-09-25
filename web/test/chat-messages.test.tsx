@@ -152,7 +152,7 @@ describe("(M4) avatar and assistant block structure", () => {
   it("leads the assistant block with a decorative BrandMark and keeps steps after the text", async () => {
     mountSnapshot(
       doneSnapshot("完成", [
-        { id: 11, ordinal: 0, name: "bash", detail: "echo ok", status: "done" },
+        { id: 11, ordinal: 0, name: "bash", detail: "echo ok", output: "ok", status: "done" },
       ]),
     );
     const article = await assistantArticle();

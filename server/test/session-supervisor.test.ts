@@ -35,6 +35,7 @@ interface AssistantStep {
   ordinal: number;
   name: string;
   detail: string;
+  output: string;
   status: string;
 }
 
@@ -45,6 +46,10 @@ interface AssistantMessage {
   status: string;
   steps: readonly AssistantStep[];
 }
+
+// fake-omp 真实形态：args 来自 fake-upstream 的 bash 调用，result 为 AgentToolResult 文本块。
+const TOOL_ARGS = '{"command":"echo workbuddy-smoke"}';
+const TOOL_OUTPUT = "workbuddy-smoke";
 
 describe("SessionSupervisor real child persistence and lifecycle", () => {
   useSetprivStub();
@@ -97,12 +102,40 @@ describe("SessionSupervisor real child persistence and lifecycle", () => {
             expect.objectContaining({
               ordinal: 0,
               name: "bash",
-              detail: '{"output":"workbuddy-smoke"}',
+              detail: TOOL_ARGS,
+              output: TOOL_OUTPUT,
               status: "done",
             }),
           ],
         });
         expect(firstAssistant.steps).toHaveLength(1);
+        const stepEvents = eventsFor(events, session)
+          .map((entry) => entry.event)
+          .filter((event) => event.type === "step.start" || event.type === "step.end");
+        expect(stepEvents.map((event) => event.data)).toEqual([
+          expect.objectContaining({ detail: TOOL_ARGS }),
+          {
+            messageId: firstAssistant.id,
+            stepId: firstAssistant.steps[0]?.id,
+            status: "done",
+            output: TOOL_OUTPUT,
+          },
+        ]);
+        const restHistory = await fixture.app.inject({
+          method: "GET",
+          url: `/api/sessions/${session}/messages`,
+          headers: { cookie },
+        });
+        expect(restHistory.json().messages.at(-1).steps).toEqual([
+          {
+            id: firstAssistant.steps[0]?.id,
+            ordinal: 0,
+            name: "bash",
+            detail: TOOL_ARGS,
+            output: TOOL_OUTPUT,
+            status: "done",
+          },
+        ]);
         expect(typeof firstAssistant.steps[0]?.id).toBe("number");
         expect(sessionRow(fixture.db, session)).toMatchObject({
           status: "done",
@@ -352,7 +385,7 @@ describe("SessionSupervisor real child persistence and lifecycle", () => {
           type: "tool_execution_end",
           toolCallId: reusedToolCallId,
           toolName: "bash",
-          result: { output: "a" },
+          result: { content: [{ type: "text", text: "a" }], details: { exitCode: 0 } },
         });
         child.emitLine({
           type: "tool_execution_end",
@@ -365,7 +398,7 @@ describe("SessionSupervisor real child persistence and lifecycle", () => {
           type: "tool_execution_end",
           toolCallId: reusedToolCallId,
           toolName: "bash",
-          result: { output: "b" },
+          result: { content: [{ type: "text", text: "b" }] },
         });
       }
       child.emitLine({ type: "agent_end", messages: [], isTerminal: true });
@@ -417,7 +450,7 @@ describe("SessionSupervisor real child persistence and lifecycle", () => {
             messageId: firstAssistant.id,
             stepId: firstDbSteps[0]?.id,
             status: "done",
-            detail: '{"output":"a"}',
+            output: "a",
           },
         },
         {
@@ -426,7 +459,7 @@ describe("SessionSupervisor real child persistence and lifecycle", () => {
             messageId: firstAssistant.id,
             stepId: firstDbSteps[1]?.id,
             status: "done",
-            detail: '{"text":"ok"}',
+            output: '{"text":"ok"}',
           },
         },
       ]);
@@ -473,7 +506,7 @@ describe("SessionSupervisor real child persistence and lifecycle", () => {
             messageId: secondAssistant.id,
             stepId: secondDbSteps[0]?.id,
             status: "done",
-            detail: '{"output":"b"}',
+            output: "b",
           },
         },
       ]);

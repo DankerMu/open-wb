@@ -45,6 +45,7 @@ export interface StepRow {
   ordinal: number;
   name: string;
   detail: string;
+  output: string | null;
   status: string;
   started_at: number;
   ended_at: number | null;
@@ -88,7 +89,7 @@ const INSERT_STEP =
 const SESSION_COLUMNS =
   "id, owner_id, title, status, omp_session_file, stream_epoch, created_at, updated_at";
 const MESSAGE_COLUMNS = "id, session_id, role, content, status, created_at";
-const STEP_COLUMNS = "id, message_id, ordinal, name, detail, status, started_at, ended_at";
+const STEP_COLUMNS = "id, message_id, ordinal, name, detail, output, status, started_at, ended_at";
 
 export function withSessionStore<T>(
   run: (harness: SessionStoreHarness) => T,
