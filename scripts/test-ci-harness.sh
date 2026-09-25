@@ -94,7 +94,9 @@ ccopy() { local source_root="$root"; contract_copy="$scratch/contract"; rm -rf "
 record() { if [ "$2" -eq "$3" ]; then echo "PASS $1 (rc=$2)"; pass=$((pass+1)); else echo "FAIL $1 (rc=$2 want=$3)"; fail=$((fail+1)); fi; }
 expect_txt() { if printf '%s\n' "$2" | grep -F -- "$3" >/dev/null; then echo "PASS $1"; pass=$((pass+1)); else echo "FAIL $1"; fail=$((fail+1)); fi; }
 reject_txt() { if printf '%s\n' "$2" | grep -F -- "$3" >/dev/null; then echo "FAIL $1"; fail=$((fail+1)); else echo "PASS $1"; pass=$((pass+1)); fi; }
-scratch=$(mktemp -d); trap 'rm -rf "$scratch"' EXIT; mkdir -p "$scratch/bin" "$scratch/rt" "$scratch/static" "$scratch/install"
+# Fixtures run from $scratch; cases that KILL a helper orphan its children, so reap by path before removing it.
+reap_scratch() { local re n=0 left; re=$(printf '%s' "$scratch/" | sed 's/[][\.*^$+?(){}|]/\\&/g'); left=$(pgrep -f "$re" || true); while [ -n "$left" ] && [ "$n" -lt 40 ]; do kill -KILL $left 2>/dev/null || true; sleep 0.05; left=$(pgrep -f "$re" || true); n=$((n+1)); done; [ -z "$left" ] || { echo "FAIL fixture processes survived reap: $left" >&2; exit 1; }; }
+scratch=$(mktemp -d); trap 'reap_scratch; rm -rf "$scratch"' EXIT; mkdir -p "$scratch/bin" "$scratch/rt" "$scratch/static" "$scratch/install"
 write_bin() { printf '%s\n' "$2" > "$scratch/bin/$1"; chmod +x "$scratch/bin/$1"; }
 up_coop='  *fake-upstream.mjs) echo $$ > "$RUNNER_TEMP/upstream.pid"; printf "%s\n" "{\"port\":${FAKE_UPSTREAM_PORT:-19016}}"; trap "exit 0" TERM; while true; do sleep 0.05; done ;;'
 write_node() { printf '%s\n' '#!/bin/sh' 'case "$1" in' "$up_coop" 'esac' 'echo $$ > "$RUNNER_TEMP/node.pid"' "$@" > "$scratch/bin/node"; chmod +x "$scratch/bin/node"; }
