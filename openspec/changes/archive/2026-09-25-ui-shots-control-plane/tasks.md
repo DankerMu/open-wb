@@ -10,7 +10,7 @@
 
 ## 3. Verification
 - [x] 3.1 `make check` exit 0；`make test-guardrails` exit 0。
-- [ ] 3.2 archive PR：verification-harness「CI 接线与控制面同步」、demo-parity-acceptance「ui-shots 截图对产物」「控制面同步」晋升；父 delta 对应块与晋升文本一致（或改为与晋升相同），并同步父 `tasks.md` 6.3b 与父 `design.md` 决策 14 中「`UI_SHOTS_OUT` 仅 export」为冻结后 export；勾选父 tasks 6.3b；关闭 #298。
+- [x] 3.2 archive PR（PR #393 merge 88120fd；review r1 not-clean（correctness P2 oracle 绕过）→ fix pass 1 0abe499 → r2 clean，残余 P2 记入 #392；首轮 CI ui-walk flake 登记 #395）：verification-harness「CI 接线与控制面同步」、demo-parity-acceptance「ui-shots 截图对产物」「控制面同步」晋升；父 delta 对应块与晋升文本一致（或改为与晋升相同），并同步父 `tasks.md` 6.3b 与父 `design.md` 决策 14 中「`UI_SHOTS_OUT` 仅 export」为冻结后 export；勾选父 tasks 6.3b；关闭 #298。
 
 ## Risk pack mapping
 - Selected Public API / CLI / script entry：新 target `ui-shots` 与 env。证据：Required evidence 3–4、D7 配方/PHONY mutation。
