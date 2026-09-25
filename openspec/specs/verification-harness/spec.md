@@ -2,9 +2,7 @@
 
 ## Purpose
 Defines HTTP smoke and browser walk-through surfaces plus their CI/control-plane wiring, shared test-harness invariants, and guard/oracle contracts.
-
 ## Requirements
-
 ### Requirement: HTTP smoke（hurl）
 `smoke/` 下 SHALL 有彼此独立、无需跨文件 cookie 或文件顺序的 Hurl 用例：`public.hurl` 覆盖 healthz、info、默认守卫 401、显式伪造 session id 401 与深链 fallback；`auth.hurl` 覆盖登录成功/凭证错误/停用（逐字断言 `$.error.message`）、已认证 API 404、登出与登出后 401；`chat.hurl` 独立覆盖登录、创建201、prompt202、完成正文与步骤、他账号404及代理无 bearer401。`make smoke` SHALL 只对已运行服务执行public/auth/chat/files 四个 top-level 文件：唯一输入 `SMOKE_BASE_URL` 缺省为 `http://127.0.0.1:3000`，并作为 `base_url` 传给单 job、全局 retry0 的 test-mode Hurl（仅 messages GET 允许有界 per-entry retry）；目标不得 build/start/stop 服务或安装工具。Hurl SHALL 仅从 caller PATH 发现并在只含 PATH 的 clean child environment 中运行，不能继承 ambient Hurl option/variable、credential、proxy 或 config/home state。深链 exact-byte 合同只在 caller 以 `STATIC_ROOT=<repo>/smoke/fixtures/static` 启动服务时成立，不以 default `make dev`/`web/dist` 为绿路径。本机缺 Hurl 时目标 SHALL 在任何请求前非零退出并打印命名 `hurl` 的官方安装指引。`make smoke` SHALL 传入 `content_pattern=^你好，这是 WorkBuddy 的第一条流式回复。$` 与 `min_bash_steps=1`；手动 smoke-live 保持其既有形状档契约不变。
 
@@ -221,3 +219,15 @@ Test assertions that depend on the complete stdout or stderr of a real child pro
 #### Scenario: Capture diagnostics
 - **WHEN** a capture times out, or the child exits with empty or unparseable output
 - **THEN** the reported failure includes exit code, signal, byte count and event order
+
+### Requirement: Web assertions await the committed outcome they check
+Web unit-test assertions on DOM that changes only after a route transition commits, or on a side effect performed in a React passive-effect cleanup, SHALL wait for that outcome itself with a bounded retrying wait (`waitFor`/`findBy*`), not assert it synchronously after awaiting an earlier proxy signal such as `window.location` or the appearance of the next tree. Such waits SHALL NOT be implemented by raising timeouts, adding test retries, or deleting assertions, and assertions that depend on the handoff (for example element identity) SHALL run after the wait.
+
+#### Scenario: Route commit lags the URL
+- **WHEN** a test navigates, the URL already reflects the new location, and React commits the new location in a later transition
+- **THEN** the assertion that the previous view's DOM is gone retries until the commit and passes, and the dependent identity assertion runs afterwards
+
+#### Scenario: Passive cleanup lags the committed tree
+- **WHEN** a successful login replaces the login form with protected content and the form's in-flight request is aborted in a passive-effect cleanup scheduled after the commit
+- **THEN** the abort assertion retries until the cleanup runs and passes, without a timeout or retry change
+
