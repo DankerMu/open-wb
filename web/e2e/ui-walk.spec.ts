@@ -177,9 +177,9 @@ async function walkFiles(page: Page, project: WalkProject): Promise<void> {
 
   const tree = files.getByRole("navigation", { name: "工作空间目录树" });
   await expectRootFileButtons(tree);
-  await expect(
-    tree.getByRole("button", { name: new RegExp(`^(展开 |折叠 )?${walkOut}$`) }),
-  ).toHaveCount(0);
+  for (const name of [walkOut, `展开 ${walkOut}`, `折叠 ${walkOut}`]) {
+    await expect(tree.getByRole("button", { name, exact: true })).toHaveCount(0);
+  }
 
   const preview = files.getByRole("region", { name: "文件预览" });
   await tree.getByRole("button", { name: "readme.md", exact: true }).click();

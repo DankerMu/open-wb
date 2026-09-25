@@ -62,6 +62,11 @@ async function expectNoHorizontalOverflow(page: Page): Promise<void> {
     innerWidth,
   ]);
   expect(scrollWidth, "document scrollWidth <= innerWidth").toBeLessThanOrEqual(viewportWidth);
+  // >760px 时 body/.app-shell/main 均 overflow:hidden，文档宽度恒不溢出；路由内容须在 main 上复核。
+  const [mainScroll, mainClient] = await page
+    .getByRole("main")
+    .evaluate((el) => [el.scrollWidth, el.clientWidth]);
+  expect(mainScroll, "main scrollWidth <= clientWidth").toBeLessThanOrEqual(mainClient ?? 0);
 }
 
 // 每路由的外壳断言：无横向溢出、主区可见；窄屏另断 `打开导航` 可见且覆盖层默认关闭。
