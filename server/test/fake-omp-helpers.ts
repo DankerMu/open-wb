@@ -233,3 +233,27 @@ export function isTextDelta(frame: Frame): boolean {
 export function asRecord(value: unknown): Frame {
   return value !== null && typeof value === "object" ? (value as Frame) : {};
 }
+
+/** OpenAI 兼容 SSE：每个 delta 一个事件，末尾 `[DONE]`。 */
+export function sse(deltas: Frame[]): string {
+  const events = deltas.map((delta) => `data: ${JSON.stringify({ choices: [{ delta }] })}\n\n`);
+  return `${events.join("")}data: [DONE]\n\n`;
+}
+
+/** delta.tool_calls 分片：id/name 只在调用方给出时出现（首片）。 */
+export function fragment(index: number, args: string, id?: string, name?: string): Frame {
+  return {
+    index,
+    ...(id === undefined ? {} : { id, type: "function" }),
+    function: { ...(name === undefined ? {} : { name }), arguments: args },
+  };
+}
+
+/** 落在 `char` 的 UTF-8 编码内部的字节偏移，用于强制跨写入切开多字节字符。 */
+export function splitInside(payload: Buffer, char: string, into: number): number {
+  const start = payload.indexOf(Buffer.from(char, "utf8"));
+  if (start < 0) {
+    throw new Error(`missing ${char} in test payload`);
+  }
+  return start + into;
+}

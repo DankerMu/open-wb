@@ -4,7 +4,8 @@
  * Local: resource/oh-my-pi/docs/rpc.md, packages/coding-agent/src/modes/rpc/rpc-types.ts,
  * packages/agent/src/types.ts, packages/ai/src/types.ts (AssistantMessage.stopReason/errorMessage).
  * docs/architecture/rpc.md is absent (#141); this suite does not import fake-omp.mjs.
- * call-proxy's two-round contract (#166) runs against the real #88 fake upstream.
+ * call-proxy's two-round contract (#166) runs against the real #88 fake upstream;
+ * fragment reassembly and malformed tool calls run against test-owned SSE stubs.
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import {
@@ -21,11 +22,14 @@ import {
   asRecord,
   closeSession,
   type Frame,
+  fragment,
   HANDSHAKE,
   isTextDelta,
   PROMPT,
   response,
   type Session,
+  splitInside,
+  sse,
   startFake,
   startPromptedSession,
   stopFakeChildren,
@@ -66,6 +70,21 @@ const FIXTURE_TEXT = "你好，这是 WorkBuddy 的第一条流式回复。";
 const TOOL_OUTPUT = "workbuddy-smoke";
 const ROLE_ONLY_DONE = 'data: {"choices":[{"delta":{"role":"assistant"}}]}\n\ndata: [DONE]\n\n';
 const TOOL_ONLY_DONE = `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_stub","type":"function","function":{"name":"bash","arguments":"{}"}}]}}]}\n\ndata: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]\n\n`;
+/** 分片工具轮：index 1 先到、id/name 只在首片、arguments 各 ≥3 片交错，首片与正文同块。 */
+const ROUND1_TEXT = "Let me look. ";
+const BASH_ARGS = '{"command":"echo 你好"}';
+const READ_ARGS = '{"path":"/tmp/α.txt"}';
+const FRAGMENTED_ROUND = sse([
+  { content: ROUND1_TEXT, tool_calls: [fragment(1, "", "call_b", "read")] },
+  { tool_calls: [fragment(0, '{"comm', "call_a", "bash")] },
+  { tool_calls: [fragment(1, '{"pa')] },
+  { tool_calls: [fragment(1, 'th":"/tmp/')] },
+  { tool_calls: [fragment(0, 'and":"echo ')] },
+  { tool_calls: [fragment(1, 'α.txt"}')] },
+  { tool_calls: [fragment(0, '你好"}')] },
+]);
+const ANSWER_DELTAS = ["工具", "已跑完", "。"];
+const ANSWER_ROUND = sse(ANSWER_DELTAS.map((content) => ({ content })));
 
 const servers: Server[] = [];
 const upstreams: FakeUpstreamServer[] = [];
@@ -245,7 +264,7 @@ describe("fake-omp process contract", () => {
 
   it("POSTs a bearer completion through forced fragmented UTF-8 SSE delivery", async () => {
     const captured: ProxyCapture[] = [];
-    const splitAt = splitInsideEmoji(SSE_DONE);
+    const splitAt = splitInside(SSE_DONE, "🌍", 2);
     const proxy = await startProxy(async (request, response) => {
       captured.push({
         url: request.url ?? "",
@@ -310,6 +329,76 @@ describe("fake-omp process contract", () => {
     await expect(runFailingStub(sseStub(TOOL_ONLY_DONE))).resolves.toBe(2);
   });
 
+  it("fails non-JSON concatenated arguments, an index gap, and an id-less call in one request", async () => {
+    const nonJson = sse([
+      { tool_calls: [fragment(0, '{"command":', "call_x", "bash")] },
+      { tool_calls: [fragment(0, "nope")] },
+    ]);
+    const gap = sse([{ tool_calls: [fragment(1, "{}", "call_y", "bash")] }]);
+    const noId = sse([{ tool_calls: [fragment(0, "{}", undefined, "bash")] }]);
+    await expect(runFailingStub(sseStub(nonJson))).resolves.toBe(1);
+    await expect(runFailingStub(sseStub(gap))).resolves.toBe(1);
+    await expect(runFailingStub(sseStub(noId))).resolves.toBe(1);
+  });
+
+  it("reassembles interleaved tool-call fragments by index and relays both calls", async () => {
+    const requests: string[] = [];
+    const stub = await startProxy(async (request, response) => {
+      requests.push(await collectRequest(request));
+      if (requests.length === 1) {
+        const payload = Buffer.from(FRAGMENTED_ROUND, "utf8");
+        await writeFragmentedSse(response, payload, splitInside(payload, "你", 1));
+        return;
+      }
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end(ANSWER_ROUND);
+    });
+    const session = await promptThroughStub(stub.origin);
+    const end = await session.wait(
+      (frame) => frame.type === "agent_end" && frame.isTerminal !== false,
+    );
+    const calls = [
+      { id: "call_a", name: "bash", args: BASH_ARGS },
+      { id: "call_b", name: "read", args: READ_ARGS },
+    ];
+    const ofType = (type: string): Frame[] => session.frames.filter((frame) => frame.type === type);
+    expect(ofType("tool_execution_start")).toEqual(
+      calls.map(({ id, name, args }) => ({
+        type: "tool_execution_start",
+        toolCallId: id,
+        toolName: name,
+        args: JSON.parse(args),
+      })),
+    );
+    expect(ofType("tool_execution_end")).toEqual(
+      calls.map(({ id, name }) => ({
+        type: "tool_execution_end",
+        toolCallId: id,
+        toolName: name,
+        result: { output: TOOL_OUTPUT },
+      })),
+    );
+    expect(requests).toHaveLength(2);
+    expect(asRecord(JSON.parse(requests[1] ?? "{}")).messages).toEqual([
+      { role: "user", content: PROMPT.message },
+      {
+        role: "assistant",
+        content: ROUND1_TEXT,
+        tool_calls: calls.map(({ id, name, args }) => ({
+          id,
+          type: "function",
+          function: { name, arguments: args },
+        })),
+      },
+      ...calls.map(({ id }) => ({ role: "tool", tool_call_id: id, content: TOOL_OUTPUT })),
+    ]);
+    const deltas = session.frames
+      .filter(isTextDelta)
+      .map((frame) => String(asRecord(frame.assistantMessageEvent).delta));
+    expect(deltas).toEqual([ROUND1_TEXT, ...ANSWER_DELTAS]);
+    await expectRelayedTail(session, end);
+  });
+
   it("relays the #88 fixture tool round and answering round with the upstream call id", async () => {
     const upstream = await startTrackedFakeUpstream(upstreams, { apiKey: TOKEN });
     const recorded: RecordedExchange[] = [];
@@ -329,7 +418,9 @@ describe("fake-omp process contract", () => {
     expect(recorded).toHaveLength(2);
     const [first, second] = recorded.map((exchange) => asRecord(JSON.parse(exchange.request)));
     expect(first).toEqual({ stream: true, messages: [{ role: "user", content: PROMPT.message }] });
-    const start = session.frames.find((frame) => frame.type === "tool_execution_start");
+    const starts = session.frames.filter((frame) => frame.type === "tool_execution_start");
+    expect(starts).toHaveLength(1);
+    const start = starts[0];
     const callId = String(start?.toolCallId);
     expect(callId).toMatch(/^call_[0-9a-f-]{36}$/u);
     expect(recorded[0]?.response).toContain(`"id":"${callId}"`);
@@ -368,13 +459,7 @@ describe("fake-omp process contract", () => {
       .map((frame) => String(asRecord(frame.assistantMessageEvent).delta));
     expect(deltas.length).toBeGreaterThanOrEqual(3);
     expect(deltas.join("")).toBe(FIXTURE_TEXT);
-    const stopReasons = session.frames
-      .filter((frame) => frame.type === "message_end")
-      .map((frame) => asRecord(frame.message).stopReason);
-    expect(stopReasons).toEqual(["toolUse", "stop"]);
-    expect(session.frames.at(-1)).toBe(end);
-    expect(`${session.stdout}${session.stderr}`).not.toContain(TOKEN);
-    await closeSession(session);
+    await expectRelayedTail(session, end);
   });
 
   it("reports identity, sorted env keys, HOME/agent, and probe file content", async () => {
@@ -575,16 +660,31 @@ async function runFailingStub(handler: ProxyHandler): Promise<number> {
     requests += 1;
     await handler(request, response);
   });
-  const session = await startPromptedSession({
-    scenario: "call-proxy",
-    env: {
-      PI_CODING_AGENT_DIR: tempAgentDir(managedYaml(stub.origin, "flash")),
-      WORKBUDDY_MODEL_TOKEN: TOKEN,
-    },
-  });
+  const session = await promptThroughStub(stub.origin);
   await expectVisibleFailure(session);
   await closeSession(session);
   return requests;
+}
+
+function promptThroughStub(origin: string): Promise<Session> {
+  return startPromptedSession({
+    scenario: "call-proxy",
+    env: {
+      PI_CODING_AGENT_DIR: tempAgentDir(managedYaml(origin, "flash")),
+      WORKBUDDY_MODEL_TOKEN: TOKEN,
+    },
+  });
+}
+
+/** 两轮继电器收尾：stopReason 恰为 [toolUse, stop]、agent_end 为最后一帧、输出无 token。 */
+async function expectRelayedTail(session: Session, end: Frame): Promise<void> {
+  const stopReasons = session.frames
+    .filter((frame) => frame.type === "message_end")
+    .map((frame) => asRecord(frame.message).stopReason);
+  expect(stopReasons).toEqual(["toolUse", "stop"]);
+  expect(session.frames.at(-1)).toBe(end);
+  expect(`${session.stdout}${session.stderr}`).not.toContain(TOKEN);
+  await closeSession(session);
 }
 
 async function writeFragmentedSse(
@@ -599,14 +699,6 @@ async function writeFragmentedSse(
   });
   await new Promise<void>((resolve) => setImmediate(resolve));
   response.end(payload.subarray(splitAt));
-}
-
-function splitInsideEmoji(payload: Buffer): number {
-  const start = payload.indexOf(Buffer.from("🌍", "utf8"));
-  if (start < 0) {
-    throw new Error("missing emoji test payload");
-  }
-  return start + 2;
 }
 
 function tempAgentDir(yaml: string): string {
