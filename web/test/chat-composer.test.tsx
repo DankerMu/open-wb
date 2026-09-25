@@ -79,7 +79,7 @@ describe("(C2) composer card structure", () => {
     const send = within(form).getByRole("button", { name: "发送" }) as HTMLButtonElement;
     expect(buttons[0]).toBe(send);
     expect(send.type).toBe("submit");
-    expect(send.querySelector("svg")).not.toBeNull();
+    expect(send.querySelector("svg")?.classList.contains("lucide-send")).toBe(true);
     expect(card.contains(send)).toBe(true);
     expect(toolbar.contains(send)).toBe(true);
     expect(card.lastElementChild).toBe(toolbar);
@@ -95,6 +95,11 @@ describe("(C2) composer card structure", () => {
     expect(card.contains(hint)).toBe(false);
     expect(hint.id).not.toBe("");
     expect(input.getAttribute("aria-describedby")).toBe(hint.id);
+    // 卡 + 提示行之外不渲染任何东西（无工作区/权限页脚）。
+    const children = Array.from(form.children);
+    expect(children).toHaveLength(2);
+    expect(children[0]).toBe(card);
+    expect(children[1]).toBe(hint);
   });
 
   it("(C6) submits once through requestSubmit when Enter is pressed", async () => {
@@ -175,7 +180,7 @@ describe("(C4) session list status element", () => {
 describe("(C5) static contract", () => {
   it("composer uses the Icon/Button primitives and no role other than status", () => {
     const source = readRepoFile("web/src/features/chat/composer.tsx");
-    for (const needle of ["Icon", "Button", "ui-sr-only", '"生成中"', '"发送"']) {
+    for (const needle of ['<Icon name="send" />', "Button", "ui-sr-only", '"生成中"', '"发送"']) {
       expect(source).toContain(needle);
     }
     const roles = source.match(/role=/g) ?? [];
