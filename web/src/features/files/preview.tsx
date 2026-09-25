@@ -7,7 +7,9 @@
  */
 import { type KeyboardEvent, type MouseEvent, type ReactNode, useState } from "react";
 import type { ApiClient } from "../../lib/api.js";
+import { Icon } from "../../ui/index.js";
 import { parseCsv } from "./csv.js";
+import { fileIcon, formatSize } from "./file-meta.js";
 import { type MdBlock, type MdInline, parseMarkdown } from "./md-render.js";
 
 type FilePreviewSuccess = Awaited<ReturnType<ApiClient["fetchPreview"]>>;
@@ -24,16 +26,6 @@ type PreviewPaneProps = {
   mtime: number;
   preview: PreviewState;
 };
-
-function formatByteSize(size: number): string {
-  if (size >= 1_048_576) {
-    return `${(size / 1_048_576).toFixed(1)} MB`;
-  }
-  if (size >= 1024) {
-    return `${Math.round(size / 1024)} KB`;
-  }
-  return `${size} B`;
-}
 
 function fileExtension(name: string): string {
   const separator = name.lastIndexOf(".");
@@ -254,8 +246,11 @@ export function PreviewPane({ path, name, size, mtime, preview }: PreviewPanePro
   return (
     <article className="files-preview-pane">
       <header className="files-preview-toolbar">
+        <span className="files-preview-icon">
+          <Icon name={fileIcon(name)} size={16} />
+        </span>
         <p className="files-preview-path">{path}</p>
-        <p className="files-preview-meta">{`${formatByteSize(size)} · ${new Date(mtime).toISOString()}`}</p>
+        <p className="files-preview-meta">{`${formatSize(size)} · ${new Date(mtime).toISOString()}`}</p>
       </header>
       {truncatedSize === null ? null : (
         <p className="files-preview-truncation ui-muted">{`预览已截断（原始大小 ${truncatedSize} B）`}</p>
