@@ -6,6 +6,7 @@
 @import "./styles/tokens.css";
 @import "./ui/motion.css";
 @import "./ui/ui.css";
+@import "./routes/shell/sidebar.css";
 @import "./features/chat/chat.css";
 @import "./features/files/files.css";
 
@@ -191,26 +192,6 @@ a {
   background: var(--wb-bg-primary);
 }
 
-.sidebar {
-  display: flex;
-  flex-direction: column;
-  flex-shrink: 0;
-  width: 224px;
-  min-width: 0;
-  height: 100%;
-  padding: 16px 12px 12px;
-  background: var(--wb-sidebar-bg);
-  border-right: 1px solid var(--wb-border-default);
-}
-
-.sidebar-brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  margin: 0 4px 16px;
-}
-
 .brand-mark {
   position: relative;
   display: inline-block;
@@ -231,118 +212,6 @@ a {
   border-right: 2.4px solid var(--wb-bg-primary);
   border-bottom: 2.4px solid var(--wb-bg-primary);
   transform: rotate(40deg);
-}
-
-.sidebar-brand-name {
-  overflow: hidden;
-  color: var(--wb-text-primary);
-  font-size: 15px;
-  font-weight: 650;
-  line-height: 20px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sidebar nav {
-  flex: 1 1 auto;
-  min-height: 0;
-  min-width: 0;
-  overflow: auto;
-}
-
-.sidebar nav ul {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.sidebar-link {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  padding: 8px 10px;
-  border-radius: 8px;
-  color: var(--wb-text-primary);
-}
-
-.sidebar-link:hover {
-  background: var(--wb-bg-hover);
-}
-
-.sidebar-link.is-active,
-.sidebar-link[aria-current="page"] {
-  background: var(--wb-brand-primary-subtle);
-  color: var(--wb-brand-primary-deep);
-  font-weight: 600;
-}
-
-.sidebar-link-copy {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.sidebar-link-copy span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sidebar-link-sub {
-  color: var(--wb-text-tertiary);
-  font-size: 11px;
-  font-weight: 400;
-  line-height: 16px;
-}
-
-.account-footer {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-  margin-top: auto;
-  padding-top: 12px;
-  border-top: 1px solid var(--wb-border-default);
-}
-
-.account-identity {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.account-avatar {
-  display: inline-flex;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: var(--wb-brand-primary);
-  color: var(--wb-bg-primary);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.account-copy {
-  min-width: 0;
-}
-
-.account-copy p {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-.account-copy p:last-child {
-  color: var(--wb-text-secondary);
-  font-size: 11px;
-  line-height: 14px;
 }
 
 .app-shell > main {
@@ -570,50 +439,6 @@ a {
     height: auto;
     min-height: 100dvh;
     overflow: visible;
-  }
-
-  .sidebar {
-    width: 100%;
-    height: auto;
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    border-right: 0;
-    border-bottom: 1px solid var(--wb-border-default);
-  }
-
-  .sidebar-brand {
-    margin: 0;
-  }
-
-  .sidebar nav {
-    flex: 1 1 12rem;
-    overflow: visible;
-  }
-
-  .sidebar nav ul {
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
-
-  .sidebar-link {
-    padding: 6px 8px;
-  }
-
-  .sidebar-link-sub {
-    display: none;
-  }
-
-  .account-footer {
-    flex: 1 1 auto;
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: center;
-    margin-top: 0;
-    padding-top: 0;
-    border-top: 0;
   }
 
   .app-shell > main {

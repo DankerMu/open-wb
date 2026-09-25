@@ -1,0 +1,244 @@
+/* 外壳侧栏 — adapted from resource/workbuddy-live-demo.html:232-247（.sidebar 与折叠态）、
+   :259-268（.sidebar-tab 图标/标签/高亮）、:295（.sidebar-tab-sub）、:301-304（.sidebar-footer
+   与用户名/角色）、:651-654（.sb-user 整块触发按钮）。只用语义 token：头像沿用本仓既有的
+   brand-primary 平涂（不移植 demo 的 palette 渐变）；折叠态以 data-collapsed 驱动。 */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  width: 288px;
+  height: 100%;
+  overflow: hidden;
+  background: var(--wb-sidebar-bg);
+  border-right: 1px solid var(--wb-color-border-primary);
+  transition: width 0.25s ease-out;
+}
+
+.sidebar[data-collapsed="true"] {
+  width: 48px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar {
+    transition: none;
+  }
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 40px;
+  padding: 0 8px 0 12px;
+}
+
+.sidebar[data-collapsed="true"] .sidebar-brand {
+  flex-direction: column;
+  justify-content: center;
+  height: auto;
+  gap: 4px;
+  padding: 8px 4px;
+}
+
+.sidebar nav {
+  padding: 8px 12px;
+}
+
+.sidebar[data-collapsed="true"] nav {
+  padding: 8px 4px;
+}
+
+.sidebar nav ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  color: var(--wb-text-primary);
+  font-size: 14px;
+  line-height: 20px;
+  text-decoration: none;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.sidebar-link .ui-icon {
+  flex-shrink: 0;
+  color: var(--wb-icon-secondary);
+}
+
+.sidebar-link:hover {
+  background: var(--wb-todo-menu-bg-hover);
+}
+
+.sidebar-link[aria-current="page"] {
+  background: var(--wb-todo-menu-bg-hover);
+  font-weight: 600;
+}
+
+.sidebar-link[aria-current="page"] .ui-icon {
+  color: var(--wb-icon-primary);
+}
+
+.sidebar-link-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-link-sub {
+  flex-shrink: 0;
+  margin-left: auto;
+  font-size: 11px;
+  line-height: 20px;
+  color: var(--wb-text-secondary);
+}
+
+.sidebar[data-collapsed="true"] .sidebar-link {
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.sidebar-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: auto;
+  padding: 12px;
+  border-top: 1px solid var(--wb-color-border-primary);
+}
+
+.sidebar[data-collapsed="true"] .sidebar-footer {
+  align-items: center;
+  padding: 12px 4px;
+}
+
+.sidebar-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sidebar-user:hover {
+  background: var(--wb-bg-hover);
+}
+
+/* outline 沿用 styles.css 全局 :focus-visible，这里只重申圆角（同 button.css 写法）。 */
+.sidebar-user:focus-visible {
+  border-radius: 10px;
+}
+
+.sidebar-avatar {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--wb-brand-primary);
+  color: var(--wb-bg-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.sidebar-user-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sidebar-user-account {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-user-role {
+  color: var(--wb-text-secondary);
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.sidebar[data-collapsed="true"] .sidebar-user {
+  justify-content: center;
+  padding: 2px 0;
+}
+
+.sidebar[data-collapsed="true"] .sidebar-user-copy {
+  display: none;
+}
+
+/* ≤760 横条降级（Drawer 之前的过渡形态）：宽度不随折叠变化，折叠态只呈纯图标条。 */
+@media (max-width: 760px) {
+  .sidebar,
+  .sidebar[data-collapsed="true"] {
+    width: 100%;
+    height: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-right: 0;
+    border-bottom: 1px solid var(--wb-color-border-primary);
+    transition: none;
+  }
+
+  .sidebar nav,
+  .sidebar[data-collapsed="true"] nav {
+    flex: 1 1 12rem;
+    padding: 0;
+  }
+
+  .sidebar nav ul {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .sidebar-link {
+    padding: 6px 8px;
+  }
+
+  .sidebar-link-sub {
+    display: none;
+  }
+
+  .sidebar-footer,
+  .sidebar[data-collapsed="true"] .sidebar-footer {
+    flex: 1 1 auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-top: 0;
+    padding: 0;
+    border-top: 0;
+  }
+}

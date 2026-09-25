@@ -387,7 +387,12 @@ describe("chat page ignored-abort GET, renewal, and concurrent submit", () => {
     });
 
     expect(await screen.findByText(SESSION_A_TEXT, { exact: true })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "退出登录" }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: "用户菜单" }), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "退出登录" }));
     fireEvent.click(screen.getByRole("button", { name: "退出" }));
     expect((await screen.findByRole("alert")).textContent).toBe("无法退出当前会话");
     expect(screen.getByRole("heading", { level: 1, name: "会话" })).toBeTruthy();
