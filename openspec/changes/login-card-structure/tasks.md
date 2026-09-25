@@ -4,15 +4,15 @@
 - [x] 1.1 独立 fixture 审核 pass（revise ×1）；`openspec validate login-card-structure --strict --no-interactive` exit 0。
 
 ## 2. Implementation（TDD：先红后绿）
-- [ ] 2.1 新增 `web/test/login-form.test.tsx`（L1–L8 含 L2b）。先红。
-- [ ] 2.2 `web/src/features/auth/login-form.tsx` 结构对齐：BrandMark 26 + 字标、副标题、`Input` + `label htmlFor`、placeholder/autocomplete、mount 聚焦 effect、`Button` 主按钮换文案、`login-err` 错误行 + Icon；提交逻辑不变。
-- [ ] 2.3 新 `web/src/features/auth/auth.css`（demo 来源头注释）；`styles.css` `@import` 并删 `.brand-mark*`、`.login-*`、`.login-dialog`、`≤760` 的 `.login-card` 选择器；`brand-mark.tsx:7` 注释同步。2.1 转绿，`web/test` 全绿。
-- [ ] 2.4 反向注入七项各红并回退（design Required evidence）。
+- [x] 2.1 新增 `web/test/login-form.test.tsx`（L1–L8 含 L2b）。先红。
+- [x] 2.2 `web/src/features/auth/login-form.tsx` 结构对齐：BrandMark 26 + 字标、副标题、`Input` + `label htmlFor`、placeholder/autocomplete、mount 聚焦 effect、`Button` 主按钮换文案、`login-err` 错误行 + Icon；提交逻辑不变。
+- [x] 2.3 新 `web/src/features/auth/auth.css`（demo 来源头注释）；`styles.css` `@import` 并删 `.brand-mark*`、`.login-*`、`.login-dialog`、`≤760` 的 `.login-card` 选择器；`brand-mark.tsx:7` 注释同步。2.1 转绿，`web/test` 全绿。
+- [x] 2.4 反向注入七项各红并回退（design Required evidence）。
 
 ## 3. Verification
-- [ ] 3.1 `make check` exit 0。
-- [ ] 3.2 `npm run build --workspace web` exit 0。
-- [ ] 3.3 `ci-compiled-server.sh ui-walk`（CI 环境变量）exit 0；`git diff --stat web/test/auth-router.test.tsx web/e2e` 为空。
+- [x] 3.1 `make check` exit 0。
+- [x] 3.2 `npm run build --workspace web` exit 0。
+- [x] 3.3 `ci-compiled-server.sh ui-walk`（CI 环境变量）exit 0；`git diff --stat web/test/auth-router.test.tsx web/e2e` 为空。
 
 ## 4. Archive
 - [ ] 4.1 归档 docs PR 同步父 `s1e-frontend-parity/specs/spa-shell/spec.md` 登录结构句：错误行位于主按钮之上、`textContent` 恰为 message（本刀 oracle 偏差 1）。

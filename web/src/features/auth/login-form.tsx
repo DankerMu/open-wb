@@ -1,11 +1,15 @@
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, useEffect, useId, useRef, useState } from "react";
+import { BrandMark, Button, Icon, Input } from "../../ui/index.js";
 import { useAuth } from "./provider.js";
 
 export function LoginForm() {
   const { error, login } = useAuth();
   const [account, setAccount] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const accountRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
+  const accountId = useId();
+  const passwordId = useId();
   const lockedRef = useRef(false);
   const mountedRef = useRef(true);
 
@@ -15,6 +19,11 @@ export function LoginForm() {
     },
     [],
   );
+
+  // 账号框 mount 即聚焦（不用 JSX 自动聚焦属性：biome a11y/noAutofocus）。
+  useEffect(() => {
+    accountRef.current?.focus();
+  }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -49,44 +58,50 @@ export function LoginForm() {
   return (
     <main className="login-root">
       <div className="login-card">
-        <div aria-hidden="true" className="login-brand">
-          <span className="brand-mark" />
+        <div className="login-brand">
+          <BrandMark size={26} wordmark />
         </div>
-        <h1>登录 WorkBuddy</h1>
+        <h1 className="login-title">登录 WorkBuddy</h1>
+        <p className="login-sub">内网统一身份 · 本实例不出网</p>
         <form className="login-form" onSubmit={submit}>
-          <p>
-            <label>
+          <div className="login-field">
+            <label className="login-label" htmlFor={accountId}>
               账号
-              <input
-                autoComplete="username"
-                name="account"
-                onChange={(event) => setAccount(event.currentTarget.value)}
-                required
-                value={account}
-              />
             </label>
-          </p>
-          <p>
-            <label>
+            <Input
+              autoComplete="username"
+              id={accountId}
+              name="account"
+              onChange={(event) => setAccount(event.currentTarget.value)}
+              placeholder="域账号，如 zhangsan"
+              ref={accountRef}
+              required
+              value={account}
+            />
+          </div>
+          <div className="login-field">
+            <label className="login-label" htmlFor={passwordId}>
               密码
-              <input
-                autoComplete="current-password"
-                name="password"
-                ref={passwordRef}
-                required
-                type="password"
-              />
             </label>
-          </p>
+            <Input
+              autoComplete="current-password"
+              id={passwordId}
+              name="password"
+              placeholder="密码"
+              ref={passwordRef}
+              required
+              type="password"
+            />
+          </div>
           {error ? (
-            <p className="ui-alert" role="alert">
+            <p className="login-err" role="alert">
+              <Icon name="triangle-alert" size={12} />
               {error}
             </p>
           ) : null}
-          {submitting ? <p className="ui-muted">正在登录</p> : null}
-          <button className="ui-button ui-button-primary" disabled={submitting} type="submit">
-            登录
-          </button>
+          <Button className="login-btn" disabled={submitting} type="submit" variant="primary">
+            {submitting ? "正在登录" : "登录"}
+          </Button>
         </form>
       </div>
     </main>
