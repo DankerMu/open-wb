@@ -401,35 +401,177 @@
   max-width: 100%;
 }
 
+/* Messages adapted from resource/workbuddy-live-demo.html:420-446
+   (.user-msg-row, .msg-user, .assistant-*, .stream-caret). */
 .chat-msg-user {
   align-self: flex-end;
-  width: min(100%, 36rem);
-  padding: 10px 14px 12px;
+  max-width: 80%;
+  padding: 10px 15px;
   border-radius: 16px 16px 4px 16px;
-  background: var(--wb-bg-secondary);
-  border: 1px solid var(--wb-border-default);
+  background: var(--wb-bg-hover-light);
 }
 
-.chat-msg-assistant {
-  align-self: stretch;
-  padding: 4px 2px 8px;
-}
-
-.chat-msg-role {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--wb-text-tertiary);
-}
-
-.chat-msg-body {
+.chat-msg-user .chat-msg-body {
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
   font-size: 14px;
-  line-height: 1.7;
+  line-height: 1.65;
   color: var(--wb-text-primary);
+}
+
+.chat-msg-assistant {
+  flex-direction: row;
+  gap: 10px;
+  align-self: stretch;
+}
+
+.chat-msg-avatar {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin-top: 2px;
+  display: flex;
+}
+
+.chat-msg-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat-md {
+  font-size: 14px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+  color: var(--wb-text-primary);
+}
+
+.chat-md p {
+  margin: 0 0 10px;
+}
+
+.chat-md p:last-child {
+  margin-bottom: 0;
+}
+
+.chat-md h1,
+.chat-md h2,
+.chat-md h3,
+.chat-md h4 {
+  margin: 16px 0 8px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.chat-md h1 {
+  font-size: 18px;
+}
+
+.chat-md h2 {
+  font-size: 16px;
+}
+
+.chat-md h3 {
+  font-size: 15px;
+}
+
+.chat-md h4 {
+  font-size: 14px;
+}
+
+.chat-md ul,
+.chat-md ol {
+  margin: 0 0 10px;
+  padding-left: 22px;
+}
+
+.chat-md li {
+  margin: 3px 0;
+}
+
+.chat-md code {
+  font-family: var(--wb-mono);
+  font-size: 12.5px;
+  background: var(--wb-code-bg);
+  border: 1px solid var(--wb-code-border);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.chat-md pre {
+  overflow-x: auto;
+  margin: 0 0 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--wb-code-border);
+  border-radius: 8px;
+  background: var(--wb-code-bg);
+  tab-size: 2;
+}
+
+.chat-md pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  line-height: 20px;
+}
+
+.chat-md blockquote {
+  margin: 0 0 10px;
+  padding: 2px 12px;
+  border-left: 3px solid var(--wb-brand-primary);
+  border-radius: 0 6px 6px 0;
+  background: var(--wb-brand-primary-subtle);
+  color: var(--wb-text-secondary);
+}
+
+.chat-md table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 0 0 10px;
+  font-size: 13px;
+}
+
+.chat-md th,
+.chat-md td {
+  border: 1px solid var(--wb-border-default);
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.chat-md th {
+  background: var(--wb-bg-hover);
+  font-weight: 600;
+}
+
+.chat-md strong {
+  font-weight: 600;
+}
+
+.chat-md a {
+  color: var(--wb-brand-primary);
+  cursor: default;
+}
+
+.chat-md hr {
+  border: none;
+  border-top: 1px solid var(--wb-border-default);
+  margin: 12px 0;
+}
+
+/* Animation comes from .ui-caret; motion.css disables it under reduced motion. */
+.chat-caret {
+  display: inline-block;
+  width: 7px;
+  height: 15px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  border-radius: 1px;
+  background: var(--wb-brand-primary);
 }
 
 .chat-msg-error {
@@ -631,7 +773,7 @@
   }
 
   .chat-msg-user {
-    width: 100%;
+    max-width: 100%;
   }
 
   .chat-thread,
