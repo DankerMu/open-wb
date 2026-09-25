@@ -15,7 +15,6 @@ import {
   submitLogin,
   unauthenticatedResponse,
 } from "./auth-router-support.js";
-import "./dialog-platform.js";
 import {
   allowWorkspaceListFetch,
   calls,

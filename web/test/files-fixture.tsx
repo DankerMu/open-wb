@@ -1,8 +1,9 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect, vi } from "vitest";
-import "./dialog-platform.js";
+import "./radix-platform.js";
 import { mountAuthenticatedApp } from "./render-app-router.js";
 import { createFetchMock, jsonResponse } from "./support.js";
+import { pressPointer, yieldMacrotask } from "./ui-support.js";
 
 const principal = { id: "user-1", account: "zhangsan", role: "member" };
 export const workspace = {
@@ -86,9 +87,18 @@ export async function openWorkspaceDialog() {
   return screen.findByRole("dialog", { name: "新建工作空间" });
 }
 
+/**
+ * 经 `＋` 菜单选一项：Radix DropdownMenu 在 pointerdown 打开（click 不打开）。先让出一个宏任务：
+ * 上一个覆盖层卸载时的焦点归还在 setTimeout(0) 里跑，若落在已打开的菜单之外会把它关掉。
+ */
+export async function chooseCreationMenuItem(item: "新建文件夹" | "新建工作空间") {
+  await yieldMacrotask();
+  pressPointer(screen.getByRole("button", { name: "新建" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: item }));
+}
+
 export async function openWorkspaceDialogFromMenu() {
-  fireEvent.click(screen.getByRole("button", { name: "新建" }));
-  fireEvent.click(screen.getByRole("menuitem", { name: "新建工作空间" }));
+  await chooseCreationMenuItem("新建工作空间");
   return screen.findByRole("dialog", { name: "新建工作空间" });
 }
 export async function openDirectoryDialog() {
@@ -99,8 +109,7 @@ export async function openDirectoryDialog() {
       throw new Error("expected the initial root listing to be present");
     }
   });
-  fireEvent.click(screen.getByRole("button", { name: "新建" }));
-  fireEvent.click(screen.getByRole("menuitem", { name: "新建文件夹" }));
+  await chooseCreationMenuItem("新建文件夹");
   return screen.findByRole("dialog", { name: "新建文件夹" });
 }
 

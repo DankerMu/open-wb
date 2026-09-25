@@ -2,6 +2,7 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest";
 import {
   authenticatedFilesRoutes,
+  chooseCreationMenuItem,
   cleanupFilesFixture,
   collapseAndExpand,
   expectLocation,
@@ -22,8 +23,10 @@ import {
   blockBody,
   COLOR_LITERAL_PATTERNS,
   listRepoFiles,
+  pressPointer,
   readRepoFile,
   stripComments,
+  yieldMacrotask,
 } from "./ui-support.js";
 
 afterEach(() => {
@@ -151,18 +154,18 @@ describe("workspace page route integration", () => {
       ),
     ).toHaveLength(0);
 
-    fireEvent.click(screen.getByRole("button", { name: "新建" }));
-    const menu = screen.getByRole("menu");
+    const menuTrigger = screen.getByRole("button", { name: "新建" });
+    pressPointer(menuTrigger);
+    const menu = await screen.findByRole("menu");
     expect(within(menu).getAllByRole("menuitem")).toHaveLength(2);
     fireEvent.keyDown(menu, { key: "Escape" });
-    expect(screen.queryByRole("menu")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "新建" }));
-    expect(screen.getByRole("menu")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "新建" }));
-    expect(screen.queryByRole("menu")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "新建" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "新建文件夹" }));
-    const directoryDialog = await screen.findByRole("dialog", { name: "新建文件夹" });
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    await yieldMacrotask();
+    pressPointer(menuTrigger);
+    expect(await screen.findByRole("menu")).toBeTruthy();
+    pressPointer(menuTrigger);
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    const directoryDialog = await openDirectoryDialog();
     expect(
       within(directoryDialog)
         .getAllByRole("option")
@@ -180,8 +183,7 @@ describe("workspace page route integration", () => {
 
     expect(await screen.findByText("未选择工作空间", { exact: true })).toBeTruthy();
     await expectLocation("/files?keep=1#section");
-    fireEvent.click(screen.getByRole("button", { name: "新建" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "新建文件夹" }));
+    await chooseCreationMenuItem("新建文件夹");
     expect((await screen.findByRole("alert")).textContent).toBe("当前工作空间没有可写目录");
     empty.view.unmount();
 
@@ -339,7 +341,7 @@ describe("workspace page route integration", () => {
     const lateImage = deferredResponse();
     const lateTree = deferredResponse();
     const blobUrls = stubBlobUrls(["blob:late-image"]);
-    const { fetchMock } = renderFiles(
+    const { fetchMock, router } = renderFiles(
       "/files?ws=workspace-1",
       authenticatedFilesRoutes([workspace, secondWorkspace], {
         "/api/workspaces/workspace-1/tree?path=": () =>
@@ -367,8 +369,12 @@ describe("workspace page route integration", () => {
     });
     fireEvent.click(within(directoryDialog).getByRole("button", { name: "创建" }));
 
-    await selectWorkspaceByName(/数据分析/);
+    // 模态打开期间背景不可达：经地址栏/前进后退的真实路径换空间，树按 key 重挂并中止目录请求。
+    await act(async () => {
+      await router.navigate("/files?ws=workspace-2");
+    });
     await screen.findByText(secondWorkspace.root, { exact: true });
+    expect(screen.queryByRole("dialog", { name: "新建文件夹" })).toBeNull();
     expect(screen.getByText("未选择文件", { exact: true })).toBeTruthy();
     await act(async () => {
       lateTree.resolve(

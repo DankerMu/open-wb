@@ -25,7 +25,7 @@ type WorkspaceBrowserProps = {
   client: ApiClient;
   switcher: ReactNode;
   workspace: Workspace;
-  onNewWorkspace(): void;
+  onNewWorkspace(trigger: HTMLElement | null): void;
 };
 
 type DirectoryTreeProps = {
@@ -51,8 +51,8 @@ type PreviewAreaProps = {
 type WorkspaceColumnsProps = {
   directory: ReactNode;
   folderNotice?: string | null;
-  onNewDirectory(): void;
-  onNewWorkspace(): void;
+  onNewDirectory(trigger: HTMLElement | null): void;
+  onNewWorkspace(trigger: HTMLElement | null): void;
   preview: ReactNode;
   switcher: ReactNode;
 };
@@ -314,6 +314,7 @@ export function WorkspaceBrowser({
   const expandedPathsRef = useRef<ReadonlySet<string>>(new Set([""]));
   const folderDialogIdRef = useRef<number | null>(null);
   const folderMutationRef = useRef<AbortController | null>(null);
+  const folderReturnFocusRef = useRef<HTMLElement | null>(null);
   const folderSequenceRef = useRef(0);
   const mountedRef = useRef(false);
   const ownedImageUrlRef = useRef<string | null>(null);
@@ -523,7 +524,7 @@ export function WorkspaceBrowser({
     setFolderDialog(null);
   }, []);
 
-  const openFolderDialog = useCallback(() => {
+  const openFolderDialog = useCallback((trigger: HTMLElement | null) => {
     if (!cacheRef.current[""]) {
       setFolderNotice("当前工作空间没有可写目录");
       return;
@@ -533,6 +534,7 @@ export function WorkspaceBrowser({
     folderMutationRef.current = null;
     folderSequenceRef.current += 1;
     folderDialogIdRef.current = folderSequenceRef.current;
+    folderReturnFocusRef.current = trigger;
     setFolderNotice(null);
     setFolderDialog({ id: folderSequenceRef.current, error: null, pending: false });
   }, []);
@@ -617,6 +619,7 @@ export function WorkspaceBrowser({
           onCancel={closeFolderDialog}
           onCreate={createDirectory}
           pending={folderDialog.pending}
+          returnFocus={folderReturnFocusRef}
         />
       ) : null}
     </>

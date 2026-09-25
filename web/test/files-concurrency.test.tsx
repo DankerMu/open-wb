@@ -28,11 +28,18 @@ function postBodies(fetchMock: ReturnType<typeof renderFiles>["fetchMock"], path
 async function submitNamedWorkspace(dialog: HTMLElement, name: string) {
   fireEvent.change(within(dialog).getByLabelText("工作空间名称"), { target: { value: name } });
   fireEvent.click(within(dialog).getByRole("button", { name: "创建" }));
+  return dialog;
 }
 
 async function submitNamedDirectory(dialog: HTMLElement, name: string) {
   fireEvent.change(within(dialog).getByLabelText("文件夹名称"), { target: { value: name } });
   fireEvent.click(within(dialog).getByRole("button", { name: "创建" }));
+  return dialog;
+}
+
+/** 模态挂起期背景不可达：真实路径是先 `取消`（中止等待）再重开。 */
+function cancelPending(dialog: HTMLElement) {
+  fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
 }
 
 describe("workspace page concurrency", () => {
@@ -40,7 +47,7 @@ describe("workspace page concurrency", () => {
     ["the switcher", "选择工作空间", openWorkspaceDialog, "第一空间", "第二空间"],
     ["the plus menu", "新建", openWorkspaceDialogFromMenu, "菜单第一", "菜单第二"],
   ] as const)(
-    "issues a second workspace POST after reopening from %s while the first create is pending",
+    "issues a second workspace POST after cancelling the pending create and reopening from %s",
     async (_label, readyName, openDialog, firstName, secondName) => {
       const firstCreate = deferredResponse();
       const secondCreate = deferredResponse();
@@ -57,7 +64,7 @@ describe("workspace page concurrency", () => {
       );
 
       await screen.findByRole("button", { name: readyName });
-      await submitNamedWorkspace(await openDialog(), firstName);
+      cancelPending(await submitNamedWorkspace(await openDialog(), firstName));
       await submitNamedWorkspace(await openDialog(), secondName);
       await waitFor(() => {
         expect(postBodies(fetchMock, "/api/workspaces")).toEqual([
@@ -68,7 +75,7 @@ describe("workspace page concurrency", () => {
     },
   );
 
-  it("issues a second folder POST after reopening the dialog while the first create is pending", async () => {
+  it("issues a second folder POST after cancelling the pending create and reopening the dialog", async () => {
     const firstCreate = deferredResponse();
     const secondCreate = deferredResponse();
     let creates = 0;
@@ -84,7 +91,7 @@ describe("workspace page concurrency", () => {
     );
 
     await screen.findByRole("button", { name: "新建" });
-    await submitNamedDirectory(await openDirectoryDialog(), "alpha");
+    cancelPending(await submitNamedDirectory(await openDirectoryDialog(), "alpha"));
     await submitNamedDirectory(await openDirectoryDialog(), "beta");
     await waitFor(() => {
       expect(postBodies(fetchMock, "/api/workspaces/workspace-1/dirs")).toEqual([
