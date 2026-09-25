@@ -12,7 +12,7 @@ SessionSupervisor SHALL release each turn's claim when that turn's pump finishes
 - **THEN** B is admitted and completes, and a later prompt on the session is admitted normally
 
 ### Requirement: Trusted metadata writes on missing sessions
-`bumpStreamEpoch` and `setSessionFile` are trusted-supervisor-only writes whose callers own session existence; no current code path deletes chat_sessions rows (the latent account cascade would violate that invariant for a live slot). For a missing session both SHALL throw the generic receipt Error (not a typed HttpError), write nothing, and leave caller-owned transaction semantics unchanged. They SHALL NOT contain unreachable typed-error branches.
+`bumpStreamEpoch` and `setSessionFile` are trusted-supervisor-only writes whose callers SHALL own session existence; a row disappearing under a live supervisor slot is an invariant violation, not a client-facing condition. For a missing session both SHALL throw the generic receipt Error (not a typed HttpError), write nothing, and leave caller-owned transaction semantics unchanged. They SHALL NOT contain unreachable typed-error branches.
 
 #### Scenario: Metadata write for an absent session
 - **WHEN** bumpStreamEpoch or setSessionFile is called with a session id that has no row
