@@ -435,10 +435,17 @@ async function walkFiles(page: Page): Promise<void> {
   await tree.getByRole("button", { name: "notes.csv", exact: true }).click();
   await expect(preview.getByRole("columnheader", { name: "name", exact: true })).toBeVisible();
   await expect(preview.getByRole("columnheader", { name: "value", exact: true })).toBeVisible();
-  await expect(preview.getByRole("row")).toHaveCount(3);
+  await expect(preview.getByRole("row")).toHaveCount(5);
   await expect(preview.getByRole("row", { name: "alpha 1" })).toBeVisible();
   await expect(preview.getByRole("row", { name: "beta 2" })).toBeVisible();
-  await expect(preview.getByText("共 2 行 · 大文件仅预览前若干行", { exact: true })).toBeVisible();
+  await expect(preview.getByText("共 4 行 · 大文件仅预览前若干行", { exact: true })).toBeVisible();
+
+  await tree.getByRole("button", { name: "logo.png", exact: true }).click();
+  const logo = preview.getByRole("img", { name: "logo.png", exact: true });
+  await expect(logo).toBeVisible();
+  await expect
+    .poll(() => logo.evaluate((img: HTMLImageElement) => [img.naturalWidth, img.naturalHeight]))
+    .toEqual([256, 256]);
 
   await files.getByRole("button", { name: "新建", exact: true }).click();
   await files.getByRole("menuitem", { name: "新建文件夹" }).click();
