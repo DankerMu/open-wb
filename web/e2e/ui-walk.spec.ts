@@ -109,11 +109,44 @@ async function walkProductionOrigin(page: Page, oracle: AuthOracle): Promise<voi
     }),
   ).toBeVisible();
   await expect(dialog.getByRole("button", { name: "取消" })).toBeVisible();
-  await dialog.getByRole("button", { name: "退出" }).click();
+  await confirmLogoutByKeyboardWhileHeld(page, dialog);
   await expectLoggedOutOnSettings(page);
   oracle.phase = "post-logout-reload";
   await page.reload();
   await expectLoggedOutOnSettings(page);
+}
+
+// 键盘确认退出，并在 POST /api/auth/logout 挂起期间证明：确认按钮被原生禁用引发 focus fixup 后，
+// 焦点仍被救回到模态内的 `关闭`，Tab/Shift+Tab 不逃到背景、路由不变。放行后由调用方断言登出。
+async function confirmLogoutByKeyboardWhileHeld(page: Page, dialog: Locator): Promise<void> {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  // 放行后须等处理器的 continue 完成再 unroute：unroute 清空拦截模式会让挂起请求被自动放行，
+  // 与处理器随后的 continue 竞争（Route is already handled）。
+  let forwarded: Promise<void> | undefined;
+  await page.route("**/api/auth/logout", (route) => {
+    forwarded = held.then(() => route.continue());
+    return forwarded;
+  });
+  try {
+    await expect(dialog.getByRole("button", { name: "取消" })).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(dialog.getByRole("button", { name: "退出" })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(dialog.getByRole("button", { name: "关闭" })).toBeFocused();
+    for (const key of ["Tab", "Shift+Tab", "Tab"]) {
+      await page.keyboard.press(key);
+      expect(await dialog.evaluate((el) => el.contains(document.activeElement)), key).toBe(true);
+    }
+    expect(new URL(page.url()).pathname).toBe("/settings");
+    await expect.poll(() => forwarded !== undefined, "logout request held by route").toBe(true);
+  } finally {
+    release();
+  }
+  await forwarded;
+  await page.unroute("**/api/auth/logout");
 }
 
 // 仍在 authenticated 阶段：reload 只产生 200 的 /api/auth/me，oracle 放行。
