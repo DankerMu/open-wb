@@ -127,6 +127,28 @@
   padding: 12px 4px;
 }
 
+/* 退出失败提示：文字占满、关闭按钮贴行尾（进行中提示 ui-muted 不带按钮，不受影响）。 */
+.sidebar-footer-note.ui-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.sidebar-footer-note-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* 沿用对话框关闭钮的紧凑尺寸，压成 20px 以贴合 12px 的提示行高。 */
+.sidebar-footer-note.ui-alert .ui-btn--icon {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  color: inherit;
+}
+
 /* 折叠态页脚列仅约 40px 宽，错误/进行中提示改为贴侧栏右侧浮出：fixed 脱离 .sidebar 的
    overflow 裁剪（祖先无 transform/filter）；层级高于主内容、低于对话框。 */
 .sidebar[data-collapsed="true"] .sidebar-footer-note {

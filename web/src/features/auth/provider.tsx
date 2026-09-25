@@ -47,6 +47,8 @@ type AuthOperationRef = {
 
 export type AuthContextValue = AuthState & {
   createSessionClient(): ApiClient;
+  /** 关闭用户区的退出失败提示；由 Provider 持有，窄屏覆盖层卸载重挂的用户区也不再复现。 */
+  dismissLogoutError(): void;
   loadServiceInfo(callerSignal: AbortSignal): Promise<ServiceInfo | null>;
   login(credentials: LoginCredentials): Promise<boolean>;
   logout(): Promise<boolean>;
@@ -436,10 +438,17 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const login = useLogin(apiClient, mountedRef, operationRef, setState, establishSession);
   const loadServiceInfo = useServiceInfo(apiClient, mountedRef, operationRef);
   const logout = useLogout(apiClient, mountedRef, operationRef, setState, clearSession);
+  const dismissLogoutError = useCallback(() => {
+    setState((current) =>
+      current.status === "authenticated" && current.logoutError !== null
+        ? { ...current, logoutError: null }
+        : current,
+    );
+  }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ ...state, createSessionClient, loadServiceInfo, login, logout }),
-    [createSessionClient, loadServiceInfo, login, logout, state],
+    () => ({ ...state, createSessionClient, dismissLogoutError, loadServiceInfo, login, logout }),
+    [createSessionClient, dismissLogoutError, loadServiceInfo, login, logout, state],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

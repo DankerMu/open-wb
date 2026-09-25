@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ConfirmDialog, Menu, type MenuItem } from "../../ui/index.js";
+import { Button, ConfirmDialog, Icon, Menu, type MenuItem } from "../../ui/index.js";
 import { useAuth } from "./provider.js";
 
 export function AuthFooter() {
-  const { logout, logoutError, logoutPending: pending, principal } = useAuth();
+  const { dismissLogoutError, logout, logoutError, logoutPending: pending, principal } = useAuth();
   const [confirming, setConfirming] = useState(false);
   const mountedRef = useRef(true);
   // 退出在途标志归 Provider；这里只守同 tick 的重复点击（第二次不得再调 logout）。
@@ -65,7 +65,19 @@ export function AuthFooter() {
       />
       {logoutError ? (
         <p className="ui-alert sidebar-footer-note" role="alert">
-          {logoutError}
+          <span className="sidebar-footer-note-text">{logoutError}</span>
+          <Button
+            aria-label="关闭提示"
+            onClick={() => {
+              dismissLogoutError();
+              // 按钮随提示卸载，焦点交给 用户菜单，不落回 body。
+              triggerRef.current?.focus();
+            }}
+            size="icon"
+            variant="ghost"
+          >
+            <Icon name="x" />
+          </Button>
         </p>
       ) : null}
       {pending ? (

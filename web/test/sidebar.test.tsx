@@ -289,6 +289,66 @@ describe("折叠态退出反馈与样式契约", () => {
     expect(aside.getAttribute("data-collapsed")).toBe("true");
   });
 
+  /** 退出失败后等确认框关闭、焦点回 用户菜单，返回浮出的 alert。 */
+  async function awaitLogoutFailure(aside: HTMLElement) {
+    const alert = await within(aside).findByRole("alert");
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(userMenuTrigger()));
+    return alert;
+  }
+
+  /** 先把焦点移到 关闭提示 上（jsdom 的 click 不移焦点），再点击。 */
+  function dismissLogoutNote(alert: HTMLElement) {
+    const dismiss = within(alert).getByRole("button", { name: "关闭提示" });
+    dismiss.focus();
+    fireEvent.click(dismiss);
+  }
+
+  it("折叠态关闭退出失败提示：提示消失、焦点回 用户菜单、仍折叠且不发请求", async () => {
+    const message = "无法退出当前会话";
+    const fetchMock = mountFiles(() =>
+      jsonResponse({ error: { code: "forbidden", message } }, 403),
+    );
+    const aside = await collapseAndConfirmLogout();
+    const alert = await awaitLogoutFailure(aside);
+
+    dismissLogoutNote(alert);
+
+    expect(within(aside).queryByRole("alert")).toBeNull();
+    expect(document.activeElement).toBe(userMenuTrigger());
+    expect(aside.getAttribute("data-collapsed")).toBe("true");
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBe("collapsed");
+    expect(logoutCalls(fetchMock)).toHaveLength(1);
+  });
+
+  it("关闭提示后再次以相同 message 退出失败：提示重新出现", async () => {
+    const message = "无法退出当前会话";
+    const fetchMock = mountFiles(() =>
+      jsonResponse({ error: { code: "forbidden", message } }, 403),
+    );
+    const aside = await collapseAndConfirmLogout();
+    dismissLogoutNote(await awaitLogoutFailure(aside));
+    expect(within(aside).queryByRole("alert")).toBeNull();
+
+    await openUserMenu();
+    const dialog = await selectLogout();
+    fireEvent.click(within(dialog).getByRole("button", { name: "退出" }));
+
+    const alert = await awaitLogoutFailure(aside);
+    expect(alert.textContent).toBe(message);
+    expect(logoutCalls(fetchMock)).toHaveLength(2);
+  });
+
+  it("折叠态退出进行中：状态提示无 关闭提示 按钮", async () => {
+    const pendingLogout = deferredResponse();
+    mountFiles(() => pendingLogout.promise);
+    const aside = await collapseAndConfirmLogout();
+
+    // 确认框仍开着，hideOthers 把侧栏设为 aria-hidden，故带 hidden 查询以免空过。
+    expect(await within(aside).findByRole("status", { hidden: true })).toBeTruthy();
+    expect(within(aside).queryByRole("button", { name: "关闭提示", hidden: true })).toBeNull();
+  });
+
   it("折叠态 note 以 fixed 浮出 overflow 裁剪", () => {
     const floating = ruleBody(sidebarCss(), COLLAPSED_NOTE);
     expect(floating).toContain("position: fixed;");
