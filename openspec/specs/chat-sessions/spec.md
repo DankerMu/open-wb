@@ -12,7 +12,7 @@ NoIFNOTEXISTS silentconflict acceptance or migration-ownedtransaction SHALL bypa
 
 #### Scenario: Fresh schema and receipts
 - WHEN openDb opens :memory: or a new file database
-- THEN receipts are0010,002,010,030,031,032 in order and allthree tablecolumns/defaults/keys/indexconstraints exist and govern actualwrites
+- THEN receipts begin0010,002,010,030,031,032 in order (later migrations such as033 may follow) and allthree tablecolumns/defaults/keys/indexconstraints exist and govern actualwrites
 
 #### Scenario: Domain rejection
 - WHEN writes violate sessionidshape, requirednullability, table-specificrole/status enums, nonnegativeintegerstream_epoch/ordinal or sessiontimestamps
@@ -83,14 +83,14 @@ reconcileOnStartup SHALL explicitly andatomically setallrunning session/message/
 - THEN noneofthestatuschangescommit
 
 ### Requirement: 会话文本无损读取与标题复用
-SessionStore SHALL preserve complete text values, including embedded U+0000, leading U+FEFF, non-ASCII and astral characters, across list/getMessages titles, user and assistant content, step name/detail, and trusted runtimeState ompSessionFile. Public outputs SHALL remain strings or the existing nullable values. Empty string and SQL NULL SHALL remain distinct. Appended content and finish/close flushes SHALL retain the complete concatenated value.
+SessionStore SHALL preserve complete text values, including embedded U+0000, leading U+FEFF, non-ASCII and astral characters, across list/getMessages titles, user and assistant content, step name/detail/output, and trusted runtimeState ompSessionFile. Public outputs SHALL remain strings or the existing nullable values. Empty string and SQL NULL SHALL remain distinct, except that a NULL step output (pre-033 rows and unfinished steps) is read as an empty string in step views. Appended content and finish/close flushes SHALL retain the complete concatenated value.
 Admission SHALL reuse an existing title without truncating its suffix, retain the complete previousTitle for rollbackPrompt, and keep the persisted title storage class TEXT. The first-title Unicode-prefix rule SHALL remain unchanged. The fix SHALL NOT claim recovery of suffixes already overwritten by older admissions.
 Lossless reading SHALL respect the actual database text encoding. Existing UTF-8, UTF-16le and UTF-16be databases SHALL remain readable without changing encoding, schema, unrelated data or migration receipts. Per-connection encoding selection SHALL NOT leak between databases. Leading U+FEFF SHALL be preserved; no new fatal invalid-byte policy, character stripping or input rejection SHALL be introduced. Failed encoding/SQL reads SHALL propagate rather than silently selecting a guessed encoding.
 Owner isolation, order, status transitions, epoch/resume independence, transaction boundaries and compensation/flush errors SHALL remain as already specified. The shared text-read implementation SHALL have one canonical owner in core/db and no per-consumer alternate decoding implementation.
 
 #### Scenario: All free-text read surfaces
 - WHEN a real store accepts text containing U+0000, persists assistant deltas and steps, and records trusted resume metadata containing that character
-- THEN getMessages/list/runtimeState return complete values for content/title/name/detail/resume, including text after the NUL, without leaking internal fields into public views
+- THEN getMessages/list/runtimeState return complete values for content/title/name/detail/output/resume, including text after the NUL, without leaking internal fields into public views
 
 #### Scenario: Title reuse and compensation retain physical bytes
 - WHEN a completed session title is a + U+0000 + b, a second prompt is admitted and then rolled back before progress
@@ -113,7 +113,7 @@ Owner isolation, order, status transitions, epoch/resume independence, transacti
 ### Requirement: 会话 REST
 registerSessionRoutes(app,{store,supervisor}) SHALL register GET/POST /api/sessions, GET /api/sessions/:id/messages and POST /api/sessions/:id/prompt. All SHALL use the existing cookie guard and authenticated principal.id; all matched responses SHALL carry Cache-Control:no-store without changing sibling routes. Unauthenticated requests SHALL return401 before body parsing. Unknown or foreign id-scoped requests SHALL return identical404 not_found before body parsing, with no writes or supervisor dispatch.
 Id-scoped authorization SHALL use the existing owner-scoped store.getMessages(sessionId,principal.id) null result before parsing; acceptPrompt SHALL independently recheck ownership on admission. REST SHALL NOT use the trusted-supervisor-only runtimeState accessor for authorization.
-POST /api/sessions SHALL return201 {id,title:null,status:"idle",createdAt,updatedAt}. GET /api/sessions SHALL return200 {sessions:[...]} restricted to the owner and ordered updatedAt descending with the store's stable tie-break. GET messages SHALL return200 {session,messages:[{id,role,content,status,createdAt,steps:[{id,ordinal,name,detail,status}]}],streamCursor:{epoch,seq}}, ordered createdAt/id and step ordinal. Session views SHALL contain only id,title,status,createdAt,updatedAt; Only the declared streamCursor boundary SHALL expose the generation epoch; other internal ownership/runtime fields and step timing fields SHALL NOT leak. The complete owner-scoped tree and synchronous supervisor.streamCursor(sessionId) SHALL be captured together in the same preParsing stack before done, with no await between them; the handler SHALL serialize only that cached pair. streamCursor SHALL NOT replace owner authorization.
+POST /api/sessions SHALL return201 {id,title:null,status:"idle",createdAt,updatedAt}. GET /api/sessions SHALL return200 {sessions:[...]} restricted to the owner and ordered updatedAt descending with the store's stable tie-break. GET messages SHALL return200 {session,messages:[{id,role,content,status,createdAt,steps:[{id,ordinal,name,detail,output,status}]}],streamCursor:{epoch,seq}}, ordered createdAt/id and step ordinal; step output SHALL be a string, empty for a running step or a stored NULL. Session views SHALL contain only id,title,status,createdAt,updatedAt; Only the declared streamCursor boundary SHALL expose the generation epoch; other internal ownership/runtime fields and step timing fields SHALL NOT leak. The complete owner-scoped tree and synchronous supervisor.streamCursor(sessionId) SHALL be captured together in the same preParsing stack before done, with no await between them; the handler SHALL serialize only that cached pair. streamCursor SHALL NOT replace owner authorization.
 
 #### Scenario: Create list and empty history
 - WHEN an authenticated account creates a session and reads its list and history
@@ -272,4 +272,15 @@ SessionSupervisor SHALL release each turn's claim when that turn's pump finishes
 #### Scenario: Metadata write for an absent session
 - **WHEN** bumpStreamEpoch or setSessionFile is called with a session id that has no row
 - **THEN** it throws a non-HttpError receipt Error and no row changes
+
+### Requirement: 步骤输出列迁移
+Migration `033_chat_step_output.sql` SHALL add a nullable `output TEXT` column (no default) to `chat_steps` with `ALTER TABLE … ADD COLUMN` inside the existing runner-owned transaction, appended as the seventh receipt after `032` without changing ledger validation. Existing rows SHALL keep every prior column value and read `output` as NULL; no backfill. `startStep` SHALL write detail and leave output NULL; `finishStep` SHALL set only status, output and ended_at (detail is never updated after start). Store reads SHALL return output losslessly under the same complete-text rule as detail, mapping NULL to an empty string in step views. The trusted-migration count assertions SHALL grow by one.
+
+#### Scenario: Fresh and upgraded schema
+- WHEN openDb opens a new database, and separately a database holding the six prior receipts plus chat rows with steps
+- THEN receipts end with `032` then `033`; `chat_steps` has `output` TEXT nullable without default after `ended_at`; prior steps keep id/detail/status/timestamps and read output as NULL; reopening leaves the catalog stable
+
+#### Scenario: Step persistence keeps args
+- WHEN a step starts with detail D and then finishes failed with output O
+- THEN the stored row has detail D, output O, status failed and an ended_at; getMessages returns both; a step that is still running returns output `""`
 
