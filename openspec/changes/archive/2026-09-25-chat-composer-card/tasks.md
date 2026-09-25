@@ -9,7 +9,7 @@
 - [x] 2.3 反向注入十三项各红并回退（design Required evidence）。
 
 ## 3. Verification
-- [ ] 3.0 archive PR 同步父 delta `s1e-frontend-parity/specs/chat-web/spec.md` 会话页状态句（加 `idle` → `未开始`），防止父变更整体归档时回退。
+- [x] 3.0 archive PR 同步父 delta `s1e-frontend-parity/specs/chat-web/spec.md` 会话页状态句（加 `idle` → `未开始`），防止父变更整体归档时回退。
 - [x] 3.1 `make check` exit 0。
 - [x] 3.2 `npm run build --workspace web` exit 0。
 - [x] 3.3 ui-walk（CI 环境变量）exit 0。
