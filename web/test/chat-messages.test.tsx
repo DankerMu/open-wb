@@ -100,9 +100,14 @@ describe("(M2) user bubble keeps the raw text", () => {
 describe("(M3) streaming caret lifecycle", () => {
   it("shows a trailing decorative caret while running and drops it at done", async () => {
     mountSnapshot(
-      chatSnapshot({ content: "进行中", assistantStatus: "running", cursor: { epoch: 1, seq: 3 } }),
+      chatSnapshot({
+        content: "# 进行中\n\n正文",
+        assistantStatus: "running",
+        cursor: { epoch: 1, seq: 3 },
+      }),
     );
     const article = await assistantArticle();
+    expect(within(article).getByRole("heading", { level: 1, name: "进行中" })).toBeTruthy();
     const body = article.querySelector(".chat-md");
     expect(body).not.toBeNull();
     const caret = body?.lastElementChild;
@@ -121,7 +126,21 @@ describe("(M3) streaming caret lifecycle", () => {
     await waitFor(() => {
       expect(document.querySelector(".ui-caret")).toBeNull();
     });
-    expect(within(article).getByText("进行中！", exactText)).toBeTruthy();
+    expect(within(article).getByText("正文！", exactText)).toBeTruthy();
+  });
+
+  it("shows no caret on a failed assistant turn", async () => {
+    mountSnapshot(
+      chatSnapshot({
+        status: "failed",
+        content: "x",
+        assistantStatus: "failed",
+        cursor: { epoch: 1, seq: null },
+      }),
+    );
+    const article = await assistantArticle();
+    expect(within(article).getByText("x", exactText)).toBeTruthy();
+    expect(document.querySelector(".ui-caret")).toBeNull();
   });
 
   it("paints the caret with the brand token", () => {

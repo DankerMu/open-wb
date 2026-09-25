@@ -137,6 +137,6 @@ function renderBlock(block: MdBlock): ReactNode {
 }
 
 export function MarkdownView({ source }: { source: string }) {
-  const blocks = useMemo(() => parseMarkdown(source), [source]);
-  return <>{blocks.map(renderBlock)}</>;
+  const rendered = useMemo(() => parseMarkdown(source).map(renderBlock), [source]);
+  return <>{rendered}</>;
 }

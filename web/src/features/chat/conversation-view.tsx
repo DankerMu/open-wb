@@ -1,4 +1,4 @@
-import type { FormEvent, ReactNode } from "react";
+import { type FormEvent, memo, type ReactNode } from "react";
 import { MarkdownView } from "../../lib/markdown-view.js";
 import type { ChatSession } from "../../lib/session-contract.js";
 import { BrandMark } from "../../ui/index.js";
@@ -104,7 +104,7 @@ function StepCard({ step }: { step: ChatStepView }) {
   );
 }
 
-function MessageArticle({ message }: { message: ChatMessageView }) {
+const MessageArticle = memo(function MessageArticle({ message }: { message: ChatMessageView }) {
   const assistant = message.role !== "user";
   const steps = message.steps.map((step) => <StepCard key={step.id} step={step} />);
   const error = message.error ? (
@@ -138,7 +138,7 @@ function MessageArticle({ message }: { message: ChatMessageView }) {
       </div>
     </article>
   );
-}
+});
 
 function MessageThread({ historyView }: { historyView: ChatState }) {
   return (
