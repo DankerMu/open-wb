@@ -78,9 +78,9 @@ Runtime config/DB/app/listen/models.yml/success-record任一步失败 SHALL不�
 - WHEN API route 抛出未分类的 programmer error
 - THEN 返回 5xx，且 body 不得声称十一个 typed semantic code 中任一个
 
-#### Scenario: 未来路由身份在共享映射器中的归属
-- WHEN genuine allowlisted Fastify content-parser error is mapped for POST matched /api/sessions/:id/prompt or /v1/chat/completions, /api/workspaces or /api/workspaces/:id/dirs before those product routes are implemented
-- THEN the mapper returns exact400 bad_request without rawdetails; nonPOST, lookalike/raw-concrete identities and registered unowned routes staygeneric500; this change SHALL NOT mount any of these product endpoints
+#### Scenario: 产品路由身份在共享映射器中的归属
+- WHEN genuine allowlisted Fastify content-parser error is mapped for the production-mounted POST matched /api/sessions/:id/prompt, /v1/chat/completions, /api/workspaces or /api/workspaces/:id/dirs
+- THEN the mapper returns exact400 bad_request without rawdetails; nonPOST, lookalike/raw-concrete identities and registered unowned routes staygeneric500; ownership is decided solely by the shared mapper's exact six-identity set, not by whichever module registered the route
 
 #### Scenario: Cache policy remains route-owned
 - WHEN each of the eleven typed errors passes through an existing no-store-owning route and the shared mapper
@@ -89,11 +89,11 @@ Runtime config/DB/app/listen/models.yml/success-record任一步失败 SHALL不�
 - THEN it SHALL NOT inherit auth no-store or clear-cookie side effects; this additive mapper change SHALL NOT install a global cache hook
 
 #### Scenario: 工作空间 parser owner 的真实 HTTP 边界
-- WHEN test-only matched POST /api/workspaces and /api/workspaces/:id/dirs receive genuine malformed/empty/unsupported/oversized content-parser errors through createApp with a real login cookie
-- THEN exact400 bad_request is returned before their handlers run; the six-owner policy retains existing four owners and does not mount product workspace routes
-- WHEN the same parser failures hit a registered non-POST or lookalike route, or an owner handler throws a forged parser/code/status/validation-shaped programmer error
+- WHEN the production POST /api/workspaces and /api/workspaces/:id/dirs routes mounted by createApp (16 KiB body limit, route-owned no-store) receive genuine malformed/empty/unsupported/oversized content-parser errors with a real login cookie
+- THEN exact400 bad_request is returned before their handlers run, with the route's own no-store preserved; the six-owner policy covers these two identities alongside the four existing owners
+- WHEN the same parser failures hit a registered non-POST or lookalike route (proved by explicitly registered test probes), or an owner handler throws a forged parser/code/status/validation-shaped programmer error
 - THEN the existing generic500 boundary remains and raw internal details are not disclosed
-- WHEN unauthenticated requests hit those test-only protected workspace routes with invalid bodies
+- WHEN unauthenticated requests hit those protected production workspace routes with invalid bodies
 - THEN the existing guard returns401 before parser or handler work
 
 ### Requirement: core/db 迁移基座
