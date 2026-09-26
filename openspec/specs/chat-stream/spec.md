@@ -2,7 +2,9 @@
 
 ## Purpose
 定义从解码后的omp帧到消息绑定聊天事件的纯归约，以及每会话epoch事件环形缓冲和回放判定。归约覆盖工具/request关联、噪声过滤、摘要、失败记忆与终态顺序；缓冲覆盖有界保留、游标缺口与当前回合刷新。SSE端点与流生命周期接线由后续#103补充。
+
 ## Requirements
+
 ### Requirement: 纯协议事件归约
 The module SHALL provide createEventState({messageId,promptRequestId}), pure applyFrame(state,frame) and pure applyFailure(state,message), returning {state,events}. State SHALL belong to one accepted assistant message and exact RPC request identity, without IO, clocks, randomness, store/runtime imports or mutation of caller inputs. Events SHALL use {type,data} with these payloads: turn.start{messageId}, text.delta{messageId,delta}, step.start{messageId,stepId,name,detail}, step.end{messageId,stepId,status:"done"|"failed",output}, error{messageId,message}, turn.end{messageId,status:"done"|"failed"}. messageId SHALL be the caller-supplied numeric assistant ID; text/name/detail/output/error fields SHALL be strings. ChatEvent<StepId> SHALL permit string tool-call identities in mapper output and numeric persisted identities for later Supervisor publication; the mapper SHALL NOT fabricate database IDs or perform publication.
 The first agent_start SHALL emit turn.start; later duplicate starts SHALL NOT reset state. Only text_delta assistant updates SHALL emit exact text.delta. Thinking/toolcall/turn noise, extension UI requests, successful prompt ACKs, prompt_result and unrelated/malformed frames SHALL be filtered with unchanged state. Extension UI replies and local-only successful runtime completion are outside this pure mapping slice.
@@ -160,3 +162,13 @@ Transport writers SHALL be synchronous and contain each client's failures withou
 - **WHEN** 映射器收到已知调用的 `tool_execution_end`，其 result 的 text 块含 `<SANDBOX_ROOT>/<ownerId>/<dir>/a.md` 形态的绝对路径且不超过 output 上限
 - **THEN** `step.end` 的 output 包含该路径原文
 
+### Requirement: 审批事件发布
+会话事件联合 SHALL 新增两类由 supervisor（而非纯归约器）产生的事件：`approval.request{messageId,approvalId,tool,title,expiresAt}` 与 `approval.resolved{messageId,approvalId,decision}`，其中 `messageId` 为当前回合的助手消息数字 id，`approvalId` 为 `chat_approvals.id`，`tool`/`title` 为字符串，`expiresAt` 为 epoch ms 整数，`decision` ∈ `allow|deny|timeout`。二者 SHALL 是普通 ring 事件：进入该回合 generation 的同一 RingBuffer，消费一个正常 `<epoch>:<seq>` id，受既有保留、`min−1` 回放、`replay.gap` 与「从活跃 turn.start 起刷新」规则约束，不需要 ring 或 SSE 端点的任何特殊处理；SSE 以 `event:approval.request`/`event:approval.resolved` 帧投递。
+
+#### Scenario: Request and resolution are ordered ring events
+- **WHEN** a bound turn's ring receives turn.start, `approval.request{messageId,approvalId,tool,title,expiresAt}`, `approval.resolved{messageId,approvalId,decision:"allow"}` and turn.end in that order
+- **THEN** the four events carry consecutive sequence ids with both approval payloads unchanged and before turn.end; an SSE subscriber reconnecting with the id preceding the request receives `event:approval.request`, `event:approval.resolved` and turn.end in order exactly once
+
+#### Scenario: Refresh during a pending approval
+- **WHEN** a client connects without a cursor while the turn is running and its approval is still pending
+- **THEN** replay starts at the retained turn.start and includes the `approval.request` event, so the client can render the approval bar without a snapshot round trip; a resolved event published later arrives live with the next sequence
