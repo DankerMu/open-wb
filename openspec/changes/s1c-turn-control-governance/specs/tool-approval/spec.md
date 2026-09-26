@@ -5,6 +5,21 @@
 
 ## MODIFIED Requirements
 
+### Requirement: 审批请求识别
+omp 子进程 SHALL 按 omp-runtime 修订后的 spawn 契约以 `--approval-mode write` 启动。`OmpProcess` 收到 `extension_ui_request` 时 SHALL 分流：`method==="select"` 且 `options` 恰为 `["Approve","Deny"]`（顺序与内容精确）且 `title` 以 `Allow tool: ` 开头 → 视为审批请求向上抛出而不自动应答；其它任何 `extension_ui_request`（含 `confirm`/`input`/`editor`、options 不同的 `select`、title 不匹配的 `select`）SHALL 维持既有行为，立即以 `{type:"extension_ui_response",id,cancelled:true}` 回绝。工具名 SHALL 取 `title` 首行 `Allow tool: <name>` 的 `<name>`（去首尾空白），解析为空则记为 `unknown`，但仍走审批流。审批帧 SHALL 不进入 `applyFrame` 归约（归约器对其无事件、无状态变化）。
+
+#### Scenario: 识别为审批
+- **WHEN** fake-omp `approval` 脚本在 bash 的 `tool_execution_start` 之后、执行前发 `extension_ui_request{id:"r1",method:"select",title:"Allow tool: bash\nCommand: echo workbuddy-smoke",options:["Approve","Deny"]}`
+- **THEN** stdin 未收到 `cancelled` 应答；supervisor 收到审批请求，`tool="bash"`，`title` 为原文
+
+#### Scenario: 非审批 UI 请求仍回绝
+- **WHEN** 子进程发 `extension_ui_request{method:"confirm"}`、`{method:"input"}`、`{method:"select",options:["A","B"]}` 或 `{method:"select",title:"Pick one",options:["Approve","Deny"]}`
+- **THEN** 每个都立即收到对应 id 的 `cancelled:true`，无 `chat_approvals` 行、无 `approval.*` 事件
+
+#### Scenario: 工具名解析失败
+- **WHEN** 审批 `title` 为 `Allow tool: ` 后紧跟换行
+- **THEN** 仍落库为审批，`tool="unknown"`，流程与正常审批一致
+
 ### Requirement: chat_approvals 持久化
 迁移 `034_chat_turn_control.sql` SHALL 新建 `chat_approvals(id INTEGER PRIMARY KEY AUTOINCREMENT, message_id INTEGER NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE, request_id TEXT NOT NULL, tool TEXT NOT NULL, title TEXT NOT NULL, requested_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, decision TEXT NULL CHECK (decision IN ('allow','deny','timeout')), decided_at INTEGER NULL, UNIQUE(message_id, request_id))`。supervisor 收到审批请求 SHALL 先插入一行（`decision` NULL、`requested_at`=注入时钟 now、`expires_at = requested_at + 60000`），再发布事件；同一消息上已存在的审批行（无论 pending 或已结算）SHALL 不被新请求改写或覆盖，一条 assistant 消息可有多行审批。结算 SHALL 以 compare-and-set（`UPDATE … WHERE id=? AND decision IS NULL`）把 `decision`/`decided_at` 一次性写入，此后不可再改；CAS 未命中者即为"已结算"。同一 `(message_id, request_id)` 重复请求 SHALL 被 UNIQUE 拒绝而不产生第二行。删除消息（regenerate 删旧助手行、删会话）SHALL 级联删除其审批行。
 
@@ -25,21 +40,6 @@
 - **THEN** SQLite 拒绝该写入，既有行不变
 
 ## ADDED Requirements
-
-### Requirement: 审批请求识别
-omp 子进程 SHALL 按 omp-runtime 修订后的 spawn 契约以 `--approval-mode write` 启动。`OmpProcess` 收到 `extension_ui_request` 时 SHALL 分流：`method==="select"` 且 `options` 恰为 `["Approve","Deny"]`（顺序与内容精确）且 `title` 以 `Allow tool: ` 开头 → 视为审批请求向上抛出而不自动应答；其它任何 `extension_ui_request`（含 `confirm`/`input`/`editor`、options 不同的 `select`、title 不匹配的 `select`）SHALL 维持既有行为，立即以 `{type:"extension_ui_response",id,cancelled:true}` 回绝。工具名 SHALL 取 `title` 首行 `Allow tool: <name>` 的 `<name>`（去首尾空白），解析为空则记为 `unknown`，但仍走审批流。审批帧 SHALL 不进入 `applyFrame` 归约（归约器对其无事件、无状态变化）。
-
-#### Scenario: 识别为审批
-- **WHEN** fake-omp `approval` 脚本在 bash 的 `tool_execution_start` 之后、执行前发 `extension_ui_request{id:"r1",method:"select",title:"Allow tool: bash\nCommand: echo workbuddy-smoke",options:["Approve","Deny"]}`
-- **THEN** stdin 未收到 `cancelled` 应答；supervisor 收到审批请求，`tool="bash"`，`title` 为原文
-
-#### Scenario: 非审批 UI 请求仍回绝
-- **WHEN** 子进程发 `extension_ui_request{method:"confirm"}`、`{method:"input"}`、`{method:"select",options:["A","B"]}` 或 `{method:"select",title:"Pick one",options:["Approve","Deny"]}`
-- **THEN** 每个都立即收到对应 id 的 `cancelled:true`，无 `chat_approvals` 行、无 `approval.*` 事件
-
-#### Scenario: 工具名解析失败
-- **WHEN** 审批 `title` 为 `Allow tool: ` 后紧跟换行
-- **THEN** 仍落库为审批，`tool="unknown"`，流程与正常审批一致
 
 ### Requirement: 审批事件
 supervisor SHALL 在审批行持久化之后、经既有 generation ring 发布 `approval.request{messageId, approvalId, tool, title, expiresAt}`（消费一个 seq；omp 在 `tool_execution_start` 之后、工具执行之前下发审批 select，故该事件位于对应 `step.start` 之后、该步骤 `step.end` 之前）；每条审批结算后（该会话存在可发布的 generation ring 时，见停止与终态对挂起审批的结算）SHALL 发布恰一个 `approval.resolved{messageId, approvalId, decision}`，`decision ∈ {allow,deny,timeout}`。同一回合可有多条审批同时挂起（omp 并行执行多个工具时各自下发 select），其 `approval.request`/`approval.resolved` 可与其它步骤的 `step.*`、`text.delta` 事件交错；每条审批事件 SHALL 只作用于自身 `approvalId`，后到的 `approval.request` SHALL 不覆盖先前审批。两类事件 SHALL 进入 ring 回放、SSE 扇出与 `Last-Event-ID` 语义与其它事件一致；web `stream.ts` 联合类型 SHALL 同步。
