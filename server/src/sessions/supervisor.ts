@@ -35,6 +35,8 @@ export interface SessionSupervisorRuntime {
   stateDir: string;
   modelId: string;
   idleMs?: number;
+  /** Global live-process cap resolved by agent-config; carried only, enforcement is #463. */
+  maxProcesses?: number;
   ompUser?: string;
   spawnImpl?: SpawnImpl;
   clock?: SessionClock;

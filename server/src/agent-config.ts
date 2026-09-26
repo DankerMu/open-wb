@@ -6,12 +6,16 @@ export const DEFAULT_OMP_STATE_RELATIVE = join("var", "omp-state");
 export const DEFAULT_SANDBOX_RELATIVE = join("var", "sandbox");
 export const DEFAULT_OMP_IDLE_MS = 600_000;
 export const DEFAULT_MODEL_ID = "deepseek-v4.1-flash";
-const MAX_OMP_IDLE_MS = 2_147_483_647;
+const DEFAULT_OMP_MAX_PROCESSES = 16;
+/** 两个正整数键的共同上界（原生计时器上限）。 */
+const MAX_POSITIVE_SETTING = 2_147_483_647;
 
 export interface AgentSettings {
   ompBin: string;
   ompStateDir: string;
   ompIdleMs: number;
+  /** supervisor 全局活进程上限（4.1 消费）。 */
+  ompMaxProcesses: number;
   sandboxRoot: string;
   modelUpstreamBaseUrl?: string;
   modelUpstreamApiKey?: string;
@@ -36,7 +40,12 @@ export function resolveAgentSettings(
       repoRoot,
       "OMP_STATE_DIR",
     ),
-    ompIdleMs: resolveIdleMs(env.OMP_IDLE_MS),
+    ompIdleMs: resolvePositiveInteger(env.OMP_IDLE_MS, DEFAULT_OMP_IDLE_MS, "OMP_IDLE_MS"),
+    ompMaxProcesses: resolvePositiveInteger(
+      env.OMP_MAX_PROCESSES,
+      DEFAULT_OMP_MAX_PROCESSES,
+      "OMP_MAX_PROCESSES",
+    ),
     sandboxRoot: resolveOwnedPath(
       env.SANDBOX_ROOT,
       DEFAULT_SANDBOX_RELATIVE,
@@ -65,18 +74,19 @@ function resolveOwnedPath(
   return isAbsolute(raw) ? raw : join(repoRoot, raw);
 }
 
-function resolveIdleMs(raw: string | undefined): number {
+/** canonical ASCII decimal 正整数 1..2147483647；错误只命名键，不回显输入值。 */
+function resolvePositiveInteger(raw: string | undefined, fallback: number, key: string): number {
   if (raw === undefined) {
-    return DEFAULT_OMP_IDLE_MS;
+    return fallback;
   }
   if (!/^[0-9]+$/u.test(raw) || (raw.length > 1 && raw.startsWith("0"))) {
-    throw new Error("OMP_IDLE_MS must be a canonical ASCII decimal");
+    throw new Error(`${key} must be a canonical ASCII decimal`);
   }
-  const idleMs = Number(raw);
-  if (!Number.isSafeInteger(idleMs) || idleMs < 1 || idleMs > MAX_OMP_IDLE_MS) {
-    throw new Error("OMP_IDLE_MS must be within 1..2147483647");
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1 || value > MAX_POSITIVE_SETTING) {
+    throw new Error(`${key} must be within 1..${MAX_POSITIVE_SETTING}`);
   }
-  return idleMs;
+  return value;
 }
 
 function optionalSetting(raw: string | undefined, key: string): string | undefined {
