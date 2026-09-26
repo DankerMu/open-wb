@@ -497,6 +497,66 @@ async function walkScrollFollow(page: Page, project: WalkProject): Promise<void>
           `clientHeight ${after.clientHeight}, 回到最新 ${after.distance > after.clientHeight ? "visible" : "absent"}`,
       );
     });
+
+    await test.step("W-scroll 4: a taller viewport that reaches the bottom hides 回到最新", async () => {
+      const jump = page.getByRole("button", { name: "回到最新" });
+      let height = step3Height;
+      const start = await transcriptMetrics(transcript);
+      expect(start.scrollTop, "W-scroll 4: still scrolled to top").toBe(0);
+      if (start.distance <= start.clientHeight) {
+        // 距底 > clientHeight 需要 clientHeight < scrollHeight / 2（scrollTop 为 0）。
+        const client = Math.ceil(start.scrollHeight / 2) - 1;
+        expect(client, "W-scroll 4: shrunk clientHeight").toBeGreaterThanOrEqual(
+          SCROLL_MIN_CLIENT_PX,
+        );
+        height -= start.clientHeight - client;
+        await page.setViewportSize({ width: original.width, height });
+        await expect
+          .poll(async () => {
+            const m = await transcriptMetrics(transcript);
+            return m.distance > m.clientHeight;
+          }, "W-scroll 4: scrolled up more than a viewport")
+          .toBe(true);
+      }
+      await expect(jump).toBeVisible();
+      const before = await transcriptMetrics(transcript);
+      const grown = height + before.scrollHeight - before.clientHeight;
+      expect(grown, "W-scroll 4: taller viewport height").toBeLessThanOrEqual(2000);
+      await transcript.evaluate((el) => {
+        const counter = globalThis as unknown as { walkScrollEvents?: number };
+        counter.walkScrollEvents = 0;
+        el.addEventListener("scroll", () => {
+          counter.walkScrollEvents = (counter.walkScrollEvents ?? 0) + 1;
+        });
+      });
+      await page.setViewportSize({ width: original.width, height: grown });
+      await expect
+        .poll(async () => {
+          const m = await transcriptMetrics(transcript);
+          return m.scrollHeight <= m.clientHeight;
+        }, "W-scroll 4: transcript no longer overflows")
+        .toBe(true);
+      // 两帧后读取：保证本次尺寸变化的 ResizeObserver 回调已投递。
+      await transcript.evaluate(
+        () =>
+          new Promise<void>((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+          }),
+      );
+      const after = await transcriptMetrics(transcript);
+      const scrolls = await page.evaluate(
+        () => (globalThis as unknown as { walkScrollEvents?: number }).walkScrollEvents ?? 0,
+      );
+      expect(after.scrollTop, "W-scroll 4: position kept").toBe(0);
+      expect(scrolls, "W-scroll 4: no scroll event").toBe(0);
+      await expect(jump).toHaveCount(0);
+      console.log(
+        `ui-walk W-scroll ${project}: step4 viewport height ${step3Height} -> ${height} ` +
+          `(clientHeight ${before.clientHeight}, scrollHeight ${before.scrollHeight}, ` +
+          `distance ${before.distance}) -> ${grown} (clientHeight ${after.clientHeight}, ` +
+          `scrollHeight ${after.scrollHeight}), 回到最新 absent`,
+      );
+    });
   });
 }
 

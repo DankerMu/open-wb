@@ -18,8 +18,10 @@ function distanceFromBottom(el: HTMLElement): number {
   return el.scrollHeight - el.scrollTop - el.clientHeight;
 }
 
-/* Read-only recompute after a layout change (content update, container or content resize):
-   it reads `pinned` but never writes it, and may only raise the jump button. */
+/* Recompute after a layout change (content update, container or content resize). A pinned
+   transcript is scrolled to the bottom. An unpinned one keeps its `scrollTop`: if the change
+   brought it within the tolerance of the bottom it is pinned and the jump button hidden, as a
+   user scroll to the bottom would; otherwise the button may only be raised. It never unpins. */
 function settle(
   el: HTMLElement,
   pinned: RefObject<boolean>,
@@ -29,7 +31,13 @@ function settle(
     el.scrollTop = el.scrollHeight;
     return;
   }
-  if (distanceFromBottom(el) > el.clientHeight) setShowJump(true);
+  const distance = distanceFromBottom(el);
+  if (distance <= PIN_TOLERANCE_PX) {
+    pinned.current = true;
+    setShowJump(false);
+    return;
+  }
+  if (distance > el.clientHeight) setShowJump(true);
 }
 
 function useScrollFollow(ref: RefObject<HTMLDivElement | null>, content: unknown) {
