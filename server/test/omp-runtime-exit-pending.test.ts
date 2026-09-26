@@ -327,19 +327,37 @@ describe("SessionRuntime reports every native exit once, after revocation", () =
   it("X7 never reports a generation that obtained no pid", REAL, async () => {
     const dir = mkdtempSync(join(tmpdir(), "omp-exit-absent-"));
     harness.temps.push(dir);
+    // ENOENT arrives as error + close(-2, null), never 'exit'; the close is a later macrotask, so it
+    // is captured at spawn time and awaited before asserting that no onExit happened.
+    let closed: Promise<unknown> | undefined;
+    const absent: SpawnImpl = (command, args, options) => {
+      const child = realSpawn(command, args, options);
+      // Not events.once: it rejects on the 'error' (ENOENT) that precedes this close.
+      closed = new Promise((resolve) => {
+        child.once("close", (code, signal) => {
+          resolve([code, signal]);
+        });
+      });
+      return child;
+    };
     const refuse: SpawnImpl = () => {
       throw new Error("spawnImpl refused before a child existed");
     };
     const cases: RealOptions[] = [
-      { bin: join(dir, "absent-omp"), spawnImpl: realSpawn },
+      { bin: join(dir, "absent-omp"), spawnImpl: absent },
       { spawnImpl: refuse },
     ];
     for (const options of cases) {
+      closed = undefined;
       const world = openReal(options);
       const failed = await collectUntilError(world.runtime.prompt("boot"));
       expect(failed.error).toBeInstanceOf(AgentUnavailableError);
       expect(world.real.clock.nowMs).toBe(0);
       await world.runtime.shutdown();
+      if (options.spawnImpl === absent) {
+        expect(await closed).toEqual([-2, null]);
+        await waitImmediate();
+      }
       expect(world.exits).toEqual([]);
     }
   });
@@ -635,24 +653,28 @@ describe("SessionRuntime approval gate over synthetic frames", () => {
     };
     const world = openWired([() => {}, early]);
     // (a) between turns on the current generation.
+    const beforeA = world.forwarded.length;
     const one = await iterateTo(world.runtime, isPromptAck, "one");
     const idle = childAt(world, 0);
     idle.emitLine(TERMINAL);
     await drain(one);
     idle.emitLine(approvalSelect("rIdle"));
     await waitImmediate();
-    expect.soft(world.forwarded.map((request) => request.id)).toEqual([]);
+    expect.soft(world.forwarded.slice(beforeA).map((request) => request.id)).toEqual([]);
     idle.exit(0);
     // (b) the next generation surfaces rEarly during get_state, before its turn is bound or sent.
+    const beforeB = world.forwarded.length;
     const two = await iterateTo(world.runtime, isPromptAck, "two");
     const current = childAt(world, 1);
     current.emitLine(TERMINAL);
     await drain(two);
-    expect.soft(world.forwarded.map((request) => request.id)).toEqual([]);
+    expect.soft(world.forwarded.slice(beforeB).map((request) => request.id)).toEqual([]);
     // (c) positive control: the sent turn of the current generation is forwarded.
+    const beforeC = world.forwarded.length;
     const three = await iterateTo(world.runtime, isPromptAck, "three");
     current.emitLine(approvalSelect("rTurn"));
     expect((await three.next()).value).toMatchObject({ id: "rTurn" });
+    expect(world.forwarded.slice(beforeC).map((request) => request.id)).toEqual(["rTurn"]);
     expect(world.forwarded.map((request) => request.id)).toEqual(["rTurn"]);
     expect(world.answers).toEqual([]);
   });
