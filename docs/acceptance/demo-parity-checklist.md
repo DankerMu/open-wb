@@ -7,7 +7,7 @@
 
 - **差距来源**：`docs/reviews/2026-09-24-demo-parity-audit.md` §3 分类规则、§4.1–4.7 映射表。`§4.x#n` 指该小节表格的第 n 个数据行（从 1 起）；§4.6、§4.7 是段落，分别记 `§4.6`、`§4.7:<控件名>`。同一组件出现在两行时只列一项，来源列两行都注。
 - **行为基准**：`resource/workbuddy-live-demo.html`（只读，共 4154 行）；`demo:N` 即其第 N 行。
-- **范围与决策**：`IMPLEMENTATION_PLAN.md:121-126`（F-UI-1..6）、`IMPLEMENTATION_PLAN.md:276`（S1e ↔ F-UI）；父 change `openspec/changes/s1e-frontend-parity/`，包括 proposal「偏差留痕」1–6 与 Non-goals、grill 结论（`openspec/changes/s1e-frontend-parity/design.md:7`）、tasks 各项 merge 注记；已晋升 spec `openspec/specs/{ui-primitives,spa-shell,chat-web,files-web,files-harness,verification-harness,demo-parity-acceptance}/spec.md`。
+- **范围与决策**：`IMPLEMENTATION_PLAN.md:121-126`（F-UI-1..6）、`IMPLEMENTATION_PLAN.md:276`（S1e ↔ F-UI）；父 change `openspec/changes/s1e-frontend-parity/`（2026-09-26 已归档至 `openspec/changes/archive/2026-09-26-s1e-frontend-parity/`，本清单内该前缀的 `path:行` 均钉在生成时 master），包括 proposal「偏差留痕」1–6 与 Non-goals、grill 结论（`openspec/changes/s1e-frontend-parity/design.md:7`）、tasks 各项 merge 注记；已晋升 spec `openspec/specs/{ui-primitives,spa-shell,chat-web,files-web,files-harness,verification-harness,demo-parity-acceptance}/spec.md`。
 - **生成时 master**：`9a40ca8`。清单里的 `path:行` 缺省都指向这个提交；`9a40ca8` 之后更新过的条目带 `（@#NNN）` 后缀，表示该条目的 `path:行` 指向 issue/PR #NNN 合并后紧接着的 master，没有后缀的条目仍钉在 `9a40ca8`。
 - **运行方式**：`make ui-shots` 只消费调用方已经在运行的服务，不负责 build/start/stop。对服务的要求：
   - 使用 dev-stub 认证；
