@@ -4,6 +4,7 @@
  * can1357/oh-my-pi@33cc6b9a043a74e00a157e72ca909272796d8461
  * Local oracle: resource/oh-my-pi/docs/rpc.md (docs/architecture/rpc.md tracked by #141).
  */
+import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
@@ -21,12 +22,24 @@ const TOOL_OUTPUT = "workbuddy-smoke";
 const UI_ID = "ui-confirm-1";
 const DELTAS = ["Hello ", "from ", "fake-omp"];
 const ABORT_SCENARIOS = new Set(["abort-ok", "abort-ignored"]);
+/**
+ * `branch` 场景的固定用户 entry 列表（#457）：进程生命周期内不变，不随 --resume、branch 或 prompt
+ * 变化。后续消费者（#465 regenerate / #466 fork / #488 command）逐字依赖 entryId 与 text。
+ */
+const BRANCH_MESSAGES = Object.freeze([
+  Object.freeze({ entryId: "fake-entry-1", text: "first question" }),
+  Object.freeze({ entryId: "fake-entry-2", text: "second question" }),
+]);
+/** omp v18.0.10 agent-session.ts:8628-8629 的未知 entry 错误文本。 */
+const UNKNOWN_ENTRY = "Invalid entry ID for branching";
 
-const { scenario, resume } = parseArgs(process.argv.slice(2));
+const { scenario, resume, sessionDir } = parseArgs(process.argv.slice(2));
 let protocol = 1;
 let pendingUi = false;
 /** abort-* 回合三态：idle（首个 prompt 挂起回合）→ pending（等 abort）→ done（其后 prompt 走缺省路径）。 */
 let abortTurn = "idle";
+/** 当前会话文件：初值同既有 resume/缺省；只有 branch 场景的成功 branch 会切换它。 */
+let currentSession = resume ?? DEFAULT_SESSION;
 let queue = Promise.resolve();
 
 if (scenario !== "no-ready" && scenario !== "no-ready-hang") {
@@ -68,14 +81,17 @@ if (scenario === "no-ready-hang") {
 function parseArgs(argv) {
   let selected = "normal";
   let sessionFile;
+  let dir;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--scenario") {
       selected = argv[++i] ?? selected;
     } else if (argv[i] === "--resume") {
       sessionFile = argv[++i];
+    } else if (argv[i] === "--session-dir") {
+      dir = argv[++i];
     }
   }
-  return { scenario: selected, resume: sessionFile };
+  return { scenario: selected, resume: sessionFile, sessionDir: dir };
 }
 
 function emit(frame) {
@@ -109,6 +125,9 @@ async function dispatch(frame) {
     get_state: handleState,
     prompt: handlePrompt,
     ...(ABORT_SCENARIOS.has(scenario) ? { abort: handleAbort } : {}),
+    ...(scenario === "branch"
+      ? { get_branch_messages: handleBranchMessages, branch: handleBranch }
+      : {}),
   };
   const handler = handlers[type];
   if (handler) {
@@ -183,8 +202,53 @@ function sessionState() {
     data.sessionFile = "/tmp/open-wb-new-session.jsonl";
     return data;
   }
-  data.sessionFile = resume ?? DEFAULT_SESSION;
+  data.sessionFile = currentSession;
   return data;
+}
+
+/** 同 omp v18.0.10 rpc-mode.ts:1347-1349：列表包在 data.messages 里。 */
+async function handleBranchMessages(frame) {
+  await emit({
+    id: frame.id,
+    type: "response",
+    command: "get_branch_messages",
+    success: true,
+    data: { messages: BRANCH_MESSAGES },
+  });
+}
+
+/**
+ * 已知 entry：wx 写出 session-dir 直属的新 .jsonl（不覆盖、不 mkdir），写成功后才切换当前文件，
+ * 再回 data:{text, cancelled:false}（rpc-mode.ts:488-491,1101-1105）。未知/缺失/非字符串 entryId
+ * 回显 id 的错误帧（rpc-mode.ts:401,754-755）。写异常转错误帧，避免 reject 卡死串行 queue。
+ */
+async function handleBranch(frame) {
+  const entry = BRANCH_MESSAGES.find((message) => message.entryId === frame.entryId);
+  if (entry === undefined) {
+    await emitBranchError(frame.id, UNKNOWN_ENTRY);
+    return;
+  }
+  let next;
+  try {
+    next = join(sessionDir, `branch-${randomUUID()}.jsonl`);
+    const header = JSON.stringify({ type: "session", parentSession: currentSession });
+    writeFileSync(next, `${header}\n`, { flag: "wx" });
+  } catch (error) {
+    await emitBranchError(frame.id, String(error?.message ?? error));
+    return;
+  }
+  currentSession = next;
+  await emit({
+    id: frame.id,
+    type: "response",
+    command: "branch",
+    success: true,
+    data: { text: entry.text, cancelled: false },
+  });
+}
+
+async function emitBranchError(id, error) {
+  await emit({ id, type: "response", command: "branch", success: false, error });
 }
 
 function unicodePad() {
