@@ -128,7 +128,7 @@ Business errors SHALL display inline on the message;409/502 SHALL display envelo
 - THEN 剪贴板写入恰为该条助手的原始 Markdown 文本并出现 Toast `已复制到剪贴板`；API 缺失或 reject 时出现 Toast `复制失败` 且无未捕获异常；running 助手、空正文助手与用户消息均无 `复制` 按钮
 
 ### Requirement: 转录区尺寸变化触发贴底重算
-会话转录区的滚动容器或其内容根发生尺寸变化（容器变矮或变高、内容自行变高，例如 transcript 上方出现 alert、展开步骤卡 `原始输出`、视口高度变化）而消息内容未变时，SHALL 执行与内容更新相同的只读重算：更新前处于贴底（距底 ≤4px）或刚点击 `回到最新` 的转录 SHALL 回到底部；用户已上滚时 SHALL NOT 改变滚动位置，并在距底超过一屏（`clientHeight`）时显示 `回到最新`。贴底状态仍只由用户滚动与点击 `回到最新` 写入。运行环境没有 `ResizeObserver` 时 SHALL 退化为仅在内容更新时重算且不报错；观察在组件卸载或切换会话时 SHALL 解除。
+会话转录区的滚动容器或其内容根发生尺寸变化（容器变矮或变高、内容自行变高，例如 transcript 上方出现 alert、展开步骤卡 `原始输出`、视口高度变化）而消息内容未变时，SHALL 执行与内容更新相同的重算（不改写未贴底转录的滚动位置）：更新前处于贴底（距底 ≤4px）或刚点击 `回到最新` 的转录 SHALL 回到底部；用户已上滚时 SHALL NOT 改变滚动位置：尺寸变化后距底超过一屏（`clientHeight`）时显示 `回到最新`；距底落在 `(4px, clientHeight]` 时保持按钮原有显隐（滞回）；距底 ≤4px（含转录不再溢出）时视为已到达底部，与用户滚动到底相同：SHALL 恢复贴底并隐藏 `回到最新`，此后的内容更新继续跟随。贴底状态由用户滚动、点击 `回到最新`，以及重算（内容更新或尺寸变化）使转录到达底部（距底 ≤4px）写入；重算只能把贴底置为 true，SHALL NOT 将其置为 false。运行环境没有 `ResizeObserver` 时 SHALL 退化为仅在内容更新时重算且不报错；观察在组件卸载或切换会话时 SHALL 解除。
 
 #### Scenario: 贴底时容器变矮仍贴底
 - **WHEN** 转录处于贴底，随后其上方出现 alert 或视口变矮使滚动容器变矮
@@ -141,6 +141,14 @@ Business errors SHALL display inline on the message;409/502 SHALL display envelo
 #### Scenario: 上滚时尺寸变化不拽回
 - **WHEN** 用户已上滚超过一屏，随后视口高度变化或内容变高
 - **THEN** 滚动位置不变，`回到最新` 可见
+
+#### Scenario: 上滚后尺寸变化使转录到达底部
+- **WHEN** 用户上滚超过一屏使 `回到最新` 出现，随后视口变高或内容变短，使转录距底 ≤4px（含不再溢出），且没有 scroll 事件
+- **THEN** `回到最新` 消失、滚动位置不被改写；此后再到达的内容更新使转录自动贴底
+
+#### Scenario: 尺寸变化后距底仍在一屏内时保持按钮
+- **WHEN** `回到最新` 已显示，尺寸变化后距底落在 `(4px, clientHeight]`
+- **THEN** `回到最新` 仍显示，滚动位置不变
 
 ### Requirement: 步骤卡原始输出不做路径改写
 按 ADR-0011，步骤卡 `原始输出` 内的完整 detail 与 output SHALL 原样展示其中出现的绝对沙箱路径，不做前缀替换、隐藏或其它改写；摘要行派生、120 码点截断与折叠默认状态不受影响。files 页、外壳、标题与 aria 属性不渲染 workspace `root` 的呈现规则不因此放宽。
