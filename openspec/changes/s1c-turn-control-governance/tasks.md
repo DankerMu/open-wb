@@ -77,7 +77,7 @@ Minimal mergeable slice: 6.1（atomic：`abort-ok` 与 `abort-ignored` 是同一
 
 ## 7. chat-web
 
-- [ ] 7.0a 纯搬迁、行为不变：`web/src/lib/api.ts`（749 行）拆出 `web/src/lib/api-sessions.ts`（会话族方法）。验证：`bash scripts/size-guard.sh` 退出 0、web 既有测试不改动全绿、`knip` 零新增
+- [x] 7.0a 纯搬迁、行为不变：`web/src/lib/api.ts`（749 行）拆出 `web/src/lib/api-sessions.ts`（会话族方法）。验证：`bash scripts/size-guard.sh` 退出 0、web 既有测试不改动全绿、`knip` 零新增
 - [ ] 7.0b 纯搬迁、行为不变：`web/src/features/chat/page.tsx`（734 行）拆出 `web/src/features/chat/turn-actions.ts`（stop/regenerate/fork/approval 的 handler 与 fence 落点，先搬既有 prompt handler/fence 辅助）；`stream.ts` 不在本刀拆分，审批归约落在 5.3 新建的 `web/src/features/chat/stream-approvals.ts`。验证：`bash scripts/size-guard.sh` 退出 0、web 既有测试不改动全绿、`knip` 零新增
 - [ ] 7.1 `web/src/lib/api-sessions.ts` + `session-contract.ts` + `stream.ts` + `status-label.ts`：四个新 API 方法（stop 202 解析 JSON `{}`、204 无 body）；会话/消息/步骤 status 联合加 `stopped`、`hasExactlyKeys` 键集更新；`status-label.ts` 穷举 Record 补 `stopped: "已停止"`；归约 `turn.end stopped`；503/409 信封文案透出。验证：新建 web 测试文件断言解析三态（done/failed/stopped）、归约 `turn.end stopped`、`status-label` 穷举
 - [ ] 7.2 `composer.tsx` + `page.tsx`/`turn-actions.ts` + `conversation-view.tsx` + `web/src/ui/icon.tsx`：运行中 `停止` 按钮（aria-label `停止`，Icon `square`；恰调一次 stop，202 → Toast `已停止生成`，204 无 toast）；`square`/`refresh-cw`/`git-branch` 三个 lucide 图标注册进 `icon.tsx`；会话点/步骤徽章/composer 的 `已停止` 文案；status 为 `stopped` 的助手消息正文末渲染 `role="status"` 徽章 `已停止`（accessible name `助手消息 已停止`），正文为空时显示占位 `（已停止生成）`；503 `agent_capacity` 内联文案并解锁 composer。验证：新建 jsdom 测试文件覆盖运行中点停止一次、202/204 两分支、stopped 徽章与空正文占位、容量错误
