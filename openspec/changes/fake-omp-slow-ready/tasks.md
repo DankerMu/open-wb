@@ -163,7 +163,7 @@
 | Pack | Selected | 理由 → 证据 |
 |---|---|---|
 | Public API / CLI / script entry | yes | 新 argv knob `--ready-delay-ms`：取值、缺省、非法值、位置无关，其它 scenario 忽略 → E2、E3、E5、G1 |
-| Concurrency / shared state / ordering | yes | 计时器与 stdin 关闭竞态；ready 位于串行 queue 队头；`[PROMPT, ABORT]` 一次写入 → E4、E6、G3 |
+| Concurrency / shared state / ordering | yes | 计时器与 stdin 关闭竞态；ready 位于串行 queue 队头；`[PROMPT, ABORT]` 一次写入 → E4（延迟期内关闭）、E6、G3（到期后关闭走既有路径；`readyTimer` 清空语句被删的变异经 `startFake` 不可观测，见 G3「能力边界」） |
 | Legacy compatibility / examples | yes | 纯拆分加一个新 scenario，既有 scenario 与既有消费测试零变化 → S2、S3、S4、G1、G2 |
 | Error handling / rollback / partial outputs | yes | 非法 knob 不得部分运行，延迟期间关闭不得输出半截 → E4、E5（stdout 为空） |
 | Auth / permissions / secrets | yes | CI `uid-isolation` 以 omp uid 执行 fake；新模块须可读，sudoers 不变 → PR head 的 `uid-isolation` job 链接；call-proxy token 路径由 S3 (a)–(g) 与既有测试守护 |

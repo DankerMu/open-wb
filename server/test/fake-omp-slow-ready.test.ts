@@ -262,7 +262,7 @@ describe("fake-omp slow-ready guards", () => {
 
   it("G3 closing stdin after the delay takes the existing exit path; 0 is a valid knob", async () => {
     const { session } = await readyAfter({ extraArgs: KNOB(0), scenario: "slow-ready" });
-    // 同一 tick：误判为仍在延迟中的 close 分支会直接退出，丢掉 queue 里的两条响应。
+    // 只守 knob 0 合法、到期后 close 走既有路径并发出排队响应；父进程持续读 stdout 时 readyTimer 清空语句被删的变异不可观测。
     session.write(HANDSHAKE);
     session.closeStdin();
     expect(await session.waitExit()).toBe(0);
