@@ -10,7 +10,7 @@ export function deriveProxyBaseUrl(address: AddressInfo): string {
 
 export async function writeManagedModelsYml(
   agentDir: string,
-  options: { proxyBaseUrl: string; modelId: string },
+  options: { proxyBaseUrl: string; modelId: string; reasoning?: boolean },
 ): Promise<void> {
   ensureSharedDir(agentDir);
   const quotedUrl = JSON.stringify(options.proxyBaseUrl);
@@ -26,6 +26,13 @@ export async function writeManagedModelsYml(
     `        name: ${quotedModel}`,
     "        contextWindow: 128000",
     "        maxTokens: 8192",
+    ...(options.reasoning === true
+      ? [
+          "        reasoning: true",
+          "        compat:",
+          "          reasoningContentField: reasoning_content",
+        ]
+      : []),
     "",
   ].join("\n");
   await writeFile(join(agentDir, "models.yml"), yaml);

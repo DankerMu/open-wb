@@ -58,7 +58,7 @@ export interface ServerConfig extends AgentSettings {
   repoRoot: string;
 }
 
-/** 纯配置 seam：消费十三项自有 key，agent 九项经 resolveAgentSettings，未知 key 忽略；repo root 由 entry identity 推导。 */
+/** 纯配置 seam：消费十四项自有 key，agent 十项经 resolveAgentSettings，未知 key 忽略；repo root 由 entry identity 推导。 */
 export function resolveServerConfig(
   env: Record<string, string | undefined>,
   entryUrl: string,
@@ -279,6 +279,7 @@ async function publishStarted(owned: OwnedResources, config: ServerConfig): Prom
   await writeManagedModelsYml(join(config.ompStateDir, "agent"), {
     proxyBaseUrl: deriveProxyBaseUrl(address),
     modelId: config.modelId,
+    reasoning: config.modelReasoning,
   });
   if (owned.signalReceived || owned.app === undefined) {
     return;

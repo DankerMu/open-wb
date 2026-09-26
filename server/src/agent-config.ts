@@ -21,6 +21,8 @@ export interface AgentSettings {
   modelUpstreamApiKey?: string;
   modelId: string;
   ompUser?: string;
+  /** 托管 models.yml 是否声明 reasoning（MODEL_REASONING，缺省 on）。 */
+  modelReasoning: boolean;
 }
 
 export function resolveAgentSettings(
@@ -56,6 +58,7 @@ export function resolveAgentSettings(
     ...(modelUpstreamApiKey === undefined ? {} : { modelUpstreamApiKey }),
     modelId: env.MODEL_ID === undefined ? DEFAULT_MODEL_ID : env.MODEL_ID,
     ...(env.OMP_USER === undefined ? {} : { ompUser: resolveOmpUser(env.OMP_USER, env.PATH) }),
+    modelReasoning: resolveOnOff(env.MODEL_REASONING, true, "MODEL_REASONING"),
   };
 }
 
@@ -87,6 +90,20 @@ function resolvePositiveInteger(raw: string | undefined, fallback: number, key: 
     throw new Error(`${key} must be within 1..${MAX_POSITIVE_SETTING}`);
   }
   return value;
+}
+
+/** 只接受精确 on/off（不 trim、不改大小写）；错误只命名键，不回显输入值。 */
+function resolveOnOff(raw: string | undefined, fallback: boolean, key: string): boolean {
+  if (raw === undefined) {
+    return fallback;
+  }
+  if (raw === "on") {
+    return true;
+  }
+  if (raw === "off") {
+    return false;
+  }
+  throw new Error(`${key} must be exactly on or off`);
 }
 
 function optionalSetting(raw: string | undefined, key: string): string | undefined {
