@@ -10,7 +10,7 @@ import type { ApiClient } from "../../lib/api.js";
 import { MarkdownView } from "../../lib/markdown-view.js";
 import { Button, EmptyState, Icon } from "../../ui/index.js";
 import { parseCsv } from "./csv.js";
-import { fileIcon, formatSize } from "./file-meta.js";
+import { fileIcon, formatMtime, formatSize } from "./file-meta.js";
 
 type FilePreviewSuccess = Awaited<ReturnType<ApiClient["fetchPreview"]>>;
 
@@ -120,7 +120,7 @@ export function PreviewPane({ path, name, size, mtime, preview }: PreviewPanePro
           <Icon name={fileIcon(name)} size={16} />
         </span>
         <p className="files-preview-path">{path}</p>
-        <p className="files-preview-meta">{`${formatSize(size)} · ${new Date(mtime).toISOString()}`}</p>
+        <p className="files-preview-meta">{`${formatSize(size)} · ${formatMtime(mtime)}`}</p>
       </header>
       {truncatedSize === null ? null : (
         <p className="files-preview-truncation ui-muted">{`预览已截断（原始大小 ${truncatedSize} B）`}</p>

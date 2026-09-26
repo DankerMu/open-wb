@@ -1,5 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
+import { formatMtime } from "../src/features/files/file-meta.js";
 import {
   authenticatedFilesRoutes,
   chooseCreationMenuItem,
@@ -509,7 +510,7 @@ describe("workspace tree entry meta", () => {
     expect(hasLucideGlyph(toolbar, "file-text")).toBe(true);
     expect(toolbar.querySelector(".files-preview-path")?.textContent).toBe("readme.md");
     expect(toolbar.querySelector(".files-preview-meta")?.textContent).toBe(
-      "2.0 KB · 1970-01-01T00:00:00.102Z",
+      `2.0 KB · ${formatMtime(102)}`,
     );
   });
 

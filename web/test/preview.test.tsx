@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { formatMtime } from "../src/features/files/file-meta.js";
 import { CodeView, CsvTable, PreviewPane } from "../src/features/files/preview.js";
 import { mdRender } from "../src/lib/md-render.js";
 
@@ -9,7 +10,7 @@ afterEach(() => {
 });
 
 const FILE_MTIME = 1_726_000_000_000;
-const FILE_MTIME_ISO = new Date(FILE_MTIME).toISOString();
+const FILE_MTIME_TEXT = formatMtime(FILE_MTIME);
 
 function textPreview(
   name: string,
@@ -154,7 +155,10 @@ describe("PreviewPane metadata", () => {
     render(textPreview("notes.txt", "hello", { path: "docs/notes.txt", size: 42 }));
 
     expect(screen.getByText("docs/notes.txt")).toBeTruthy();
-    expect(screen.getByText(`42 B · ${FILE_MTIME_ISO}`)).toBeTruthy();
+    expect(screen.getByText(`42 B · ${FILE_MTIME_TEXT}`)).toBeTruthy();
+    const meta = document.querySelector(".files-preview-meta")?.textContent ?? "";
+    expect(meta).toMatch(/^\S+ \S+ · \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    expect(meta).not.toMatch(/T\d{2}:|Z$/);
   });
 });
 
@@ -492,7 +496,7 @@ describe("PreviewPane unsupported error and truncation", () => {
     expect(document.querySelector(".ui-empty-state-desc")?.textContent).toBe(
       "归档.zip · 91 B\u3000二进制或未识别格式",
     );
-    expect(screen.getByText(`91 B · ${FILE_MTIME_ISO}`)).toBeTruthy();
+    expect(screen.getByText(`91 B · ${FILE_MTIME_TEXT}`)).toBeTruthy();
   });
 
   it("keeps a markup-like unsupported file name as literal text", () => {
@@ -526,14 +530,14 @@ describe("PreviewPane unsupported error and truncation", () => {
     );
 
     expect(screen.getByText("路径不在沙箱内")).toBeTruthy();
-    expect(screen.getByText(`91 B · ${FILE_MTIME_ISO}`)).toBeTruthy();
+    expect(screen.getByText(`91 B · ${FILE_MTIME_TEXT}`)).toBeTruthy();
   });
 
   it("shows a truncation banner with original total bytes rather than text length", () => {
     render(textPreview("notes.txt", "short", { originalSize: 12_345, size: 42, truncated: true }));
 
     expect(screen.getByText("预览已截断（原始大小 12345 B）")).toBeTruthy();
-    expect(screen.getByText(`42 B · ${FILE_MTIME_ISO}`)).toBeTruthy();
+    expect(screen.getByText(`42 B · ${FILE_MTIME_TEXT}`)).toBeTruthy();
     expect(screen.queryByText("预览已截断（原始大小 5 B）")).toBeNull();
     expect(screen.queryByText("预览已截断（原始大小 12 KB）")).toBeNull();
   });

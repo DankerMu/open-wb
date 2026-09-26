@@ -237,6 +237,7 @@
 | FI-31 | demo:667 | §4.4#6 | 宽屏时树栏宽 280，预览区在右侧占满剩余宽度，两栏各自滚动 | `web/src/features/files/files.css:27-29` | ui-shots files-readme @1440-light @1440-dark @1024-light；ui-walk 树栏 280（`web/e2e/ui-walk-layout.ts:118`） | 待签 |
 | FI-32 | demo:723 | §4.1#5、§4.4#6 | 视口 ≤900（且 >760）时树栏收窄为 210，页面无横向溢出。ui-shots 没有这一档，由 ui-walk 在 880 宽下断言 | `web/src/features/files/files.css:586-590` | ui-walk 树栏 210（`web/e2e/ui-walk-layout.ts:119-122`）；jsdom `web/test/files-empty-layout.test.tsx:108` | 待签 |
 | FI-33 | demo:307-310 | §4.4#6 | ≤760 时文件页改为纵向布局，树在上、预览在下，页面无横向溢出。长文件名单行省略，`title` 为全名 | `web/src/features/files/files.css:592-596` | ui-shots files-readme @390-light @390-dark；ui-walk 纵向堆叠（`web/e2e/ui-walk-layout.ts:111-116`）；ui-walk 长名截断（`web/e2e/ui-walk-layout.ts:147-157`） | 待签 |
+| FI-34 | demo:3916、demo:1532-1540 | §4.4#4 | 预览头的修改时间显示为查看者本地时区 `YYYY-MM-DD HH:mm`（24 小时制、各段补零），不含 ISO 的 `T`/`Z` 与毫秒。等价说明：demo 样例是相对时间（`今天 09:12`），按用户决定（2026-09-25）app 显示绝对本地时间 | `web/src/features/files/file-meta.ts:45`、`web/src/features/files/preview.tsx:123`（@#421） | jsdom `web/test/file-meta.test.ts:68`、`web/test/preview.test.tsx:154`；ui-shots files-readme @1440-light（@#421） | 待签 |
 
 ## §4.5 设置 `/settings`
 
