@@ -31,6 +31,7 @@ import { type AgentSettings, resolveAgentSettings } from "./agent-config.js";
 import { createApp } from "./app.js";
 import { openDb } from "./core/db/index.js";
 import { deriveProxyBaseUrl, writeManagedModelsYml } from "./model-proxy/models-yml.js";
+import type { SessionSupervisorRuntime } from "./sessions/supervisor.js";
 import { writeManagedLine } from "./startup-writer.js";
 
 const PRIVATE_DB_FILE_MODE = 0o600;
@@ -57,7 +58,7 @@ export interface ServerConfig extends AgentSettings {
   repoRoot: string;
 }
 
-/** 纯配置 seam：消费十二项自有 key，agent 八项经 resolveAgentSettings，未知 key 忽略；repo root 由 entry identity 推导。 */
+/** 纯配置 seam：消费十三项自有 key，agent 九项经 resolveAgentSettings，未知 key 忽略；repo root 由 entry identity 推导。 */
 export function resolveServerConfig(
   env: Record<string, string | undefined>,
   entryUrl: string,
@@ -70,6 +71,19 @@ export function resolveServerConfig(
     staticRoot: resolveStaticRoot(env.STATIC_ROOT, repoRoot),
     repoRoot,
     ...resolveAgentSettings(env, repoRoot),
+  };
+}
+
+/** 纯 seam：sessions 模块的 runtime settings；idle 期限与进程上限同一对象、唯一来源为已解析 config。 */
+export function sessionRuntimeOf(config: ServerConfig): SessionSupervisorRuntime {
+  return {
+    bin: config.ompBin,
+    sandboxRoot: config.sandboxRoot,
+    stateDir: config.ompStateDir,
+    modelId: config.modelId,
+    idleMs: config.ompIdleMs,
+    maxProcesses: config.ompMaxProcesses,
+    ...(config.ompUser === undefined ? {} : { ompUser: config.ompUser }),
   };
 }
 
@@ -217,14 +231,7 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
         }
       },
       assembly: {
-        runtime: {
-          bin: config.ompBin,
-          sandboxRoot: config.sandboxRoot,
-          stateDir: config.ompStateDir,
-          modelId: config.modelId,
-          idleMs: config.ompIdleMs,
-          ...(config.ompUser === undefined ? {} : { ompUser: config.ompUser }),
-        },
+        runtime: sessionRuntimeOf(config),
         ...(config.modelUpstreamBaseUrl !== undefined && config.modelUpstreamApiKey !== undefined
           ? {
               upstream: {
