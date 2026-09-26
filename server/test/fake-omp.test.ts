@@ -751,7 +751,7 @@ async function expectProbeTurn(session: Session, expectedDelta: string): Promise
 }
 
 function expectedProbeReport(environ: string, wrote: string): string {
-  return `uid=${String(PARENT_UID)} gid=${String(PARENT_GID)} env=${PROBE_ENV_KEYS} home=${PROBE_HOME} agent=${PROBE_AGENT} environ=${environ} wrote=${wrote}`;
+  return `uid=${String(PARENT_UID)} gid=${String(PARENT_GID)} env=${PROBE_ENV_KEYS} home=${PROBE_HOME} agent=${PROBE_AGENT} environ=${environ} wrote=${wrote} frames=negotiate_protocol,get_state,prompt`;
 }
 
 function managedYaml(baseUrl: string, modelId: string): string {
