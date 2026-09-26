@@ -23,8 +23,8 @@ import {
   expectSessionListInSidebar,
   expectTruncatedRow,
   expectWelcomeFirstScreen,
-  mainBackground,
   openSidebar,
+  pageBackground,
   selectFirstSessionInOverlay,
   switchTheme,
   type WalkProject,
@@ -83,7 +83,7 @@ async function walkProductionOrigin(
   await expectAuthenticatedRoute(page, project, "/files", "工作空间", "工作空间");
   await expectPrincipalFooter(page, project);
   oracle.phase = "authenticated";
-  const initialBackground = await mainBackground(page);
+  const initialBackground = await pageBackground(page);
   if (project === "desktop-light") await expectDesktopLayout(page);
 
   for (const route of ROUTES) {

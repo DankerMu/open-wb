@@ -53,8 +53,9 @@ export async function expectDesktopLayout(page: Page): Promise<void> {
   await expectNoHorizontalOverflow(page);
 }
 
-export function mainBackground(page: Page): Promise<string> {
-  return page.getByRole("main").evaluate((el) => getComputedStyle(el).backgroundColor);
+/** Page background: `body` is its only source; the shell and `main` paint nothing (#420). */
+export function pageBackground(page: Page): Promise<string> {
+  return page.locator("body").evaluate((el) => getComputedStyle(el).backgroundColor);
 }
 
 async function expectNoHorizontalOverflow(page: Page): Promise<void> {
@@ -390,6 +391,6 @@ async function expectTheme(page: Page, choice: ThemeChoice, initialBackground: s
     choice.value,
   );
   await expect
-    .poll(() => mainBackground(page), "main background differs from the initial theme")
+    .poll(() => pageBackground(page), "page background differs from the initial theme")
     .not.toBe(initialBackground);
 }

@@ -32,7 +32,6 @@
   flex: 1;
   overflow: hidden;
   border: 1px solid var(--wb-border-default);
-  background: var(--wb-bg-primary);
 }
 
 .files-tree {
@@ -182,7 +181,6 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--wb-bg-primary);
 }
 
 .files-preview-pane {

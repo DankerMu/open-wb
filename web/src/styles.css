@@ -39,7 +39,7 @@ body {
   font-family: var(--wb-font);
   font-size: 14px;
   line-height: 22px;
-  background: var(--wb-home-bg-primary);
+  background: var(--wb-home-bg-secondary);
   color: var(--wb-text-primary);
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
@@ -146,7 +146,6 @@ a {
   height: 100%;
   min-height: 100dvh;
   overflow: hidden;
-  background: var(--wb-bg-primary);
 }
 
 .app-content {
@@ -164,7 +163,6 @@ a {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--wb-bg-primary);
 }
 
 .app-content > main > * {

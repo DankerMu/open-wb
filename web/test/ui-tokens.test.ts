@@ -125,3 +125,22 @@ describe("未定义引用守卫", () => {
     expect(undefinedRefs).toEqual([]);
   });
 });
+
+describe("外壳页面底色（#420）", () => {
+  // 只锚顶层基础规则（行首选择器），@media 内缩进的同名规则不算。
+  const styles = stripComments(readRepoFile("web/src/styles.css"));
+  const files = stripComments(readRepoFile("web/src/features/files/files.css"));
+
+  it("body 是唯一页面底色来源：var(--wb-home-bg-secondary)（demo:195）", () => {
+    expect(blockBody(styles, /^body \{/m)).toContain("background: var(--wb-home-bg-secondary);");
+  });
+
+  it.each([
+    [".app-shell", styles, /^\.app-shell \{/m],
+    [".app-content > main", styles, /^\.app-content > main \{/m],
+    [".files-layout", files, /^\.files-layout \{/m],
+    [".files-preview", files, /^\.files-preview \{/m],
+  ])("%s 不自涂底色（demo:210-213、666、702）", (_selector, css, opener) => {
+    expect(blockBody(css, opener)).not.toMatch(/\bbackground[\w-]*\s*:/);
+  });
+});
