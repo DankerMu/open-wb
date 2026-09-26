@@ -10,7 +10,7 @@
   - 生产者：runner 事务（`BEGIN`/`COMMIT`/ROLLBACK）——不改，但 034 不得自带事务语句或 `PRAGMA foreign_keys`。
   - 存储：`sqlite_sequence`（DROP 会删行 → 必须在 DROP 前读、RENAME 后写）；`sqlite_master` 中 FK 文本（RENAME 在 `legacy_alter_table=OFF` 下改写）。
   - 消费者：`server/src/sessions/store.ts` 读写三表（既有列集与顺序不变故无需改）。
-  - 既有迁移测试（允许的最小联动，不删断言、不放宽其它条件）：`server/test/core-db-helpers.ts` 增 `MIGRATION_034`，`TRACKED_MIGRATION_FILENAMES`/`COMPLETE_CATALOG` 回执与 `sequenceRows` 7→8；`core-db-chat-schema.test.ts:214-216` 与 `core-db-chat-step-output.test.ts:57` 的种子过滤条件再排除 034（否则 034 在 033 之前的 schema 上执行）；`core-db-chat-schema.test.ts` `columnInfo(db,"chat_sessions")` 期望末尾加 `parent_session_id` 行；其余回执/计数断言改期望值。
+  - 既有迁移测试（允许的最小联动，不删断言、不放宽其它条件）：`server/test/core-db-helpers.ts` 增 `MIGRATION_034`，`TRACKED_MIGRATION_FILENAMES`/`COMPLETE_CATALOG` 回执与 `sequenceRows` 7→8；`core-db-chat-schema.test.ts:214-216` 与 `core-db-chat-step-output.test.ts:57` 的种子过滤条件再排除 034（否则 034 在 033 之前的 schema 上执行）；`core-db-chat-schema.test.ts` `columnInfo(db,"chat_sessions")` 期望末尾加 `parent_session_id` 行；其余回执/计数断言改期望值。实施追加（PR #496 偏离记录）：`auth-schema.test.ts` 业务表精确清单加 `chat_approvals`；`core-db-chat-schema.test.ts` 的 `expectCascadeFk(chat_sessions)`（断言恰一条 FK）改为内联两条 `foreign_key_list` 断言（`owner_id` CASCADE + `parent_session_id` SET NULL）；高水位经连接私有 TEMP 表跨 DROP 暂存。
   - `sqlite_sequence` 空表语义：表从未插入过行时 `max(seq,max(id))` 为 NULL，步骤 (5) SHALL 不写该表的序列行（与 AUTOINCREMENT 从未使用时一致），绝不写 `seq` 为 NULL 的行。
   - 失败路径：中途冲突对象（预建 `chat_messages_next` 或 `chat_approvals`）→ runner 回滚。
 - **Seams under test**：`openDb`（公共入口）+ 原始 SQL 探查（`PRAGMA foreign_key_list`/`foreign_key_check`/`sqlite_sequence`/`sqlite_master`），真实临时文件 SQLite，不 mock 迁移。

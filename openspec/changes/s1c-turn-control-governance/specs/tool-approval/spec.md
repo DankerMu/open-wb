@@ -3,6 +3,27 @@
 ## Purpose
 定义 exec 档工具调用的用户审批链路：审批请求识别、`chat_approvals` 持久化、`approval.request`/`approval.resolved` 事件、作答 REST、60s 超时自动允许、与停止的次序、非作答路径的终态结算、审计留痕、快照恢复与 web 审批条。同一回合可同时存在多条挂起审批，每条按 `approvalId` 独立作答、计时与结算。
 
+## MODIFIED Requirements
+
+### Requirement: chat_approvals 持久化
+迁移 `034_chat_turn_control.sql` SHALL 新建 `chat_approvals(id INTEGER PRIMARY KEY AUTOINCREMENT, message_id INTEGER NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE, request_id TEXT NOT NULL, tool TEXT NOT NULL, title TEXT NOT NULL, requested_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, decision TEXT NULL CHECK (decision IN ('allow','deny','timeout')), decided_at INTEGER NULL, UNIQUE(message_id, request_id))`。supervisor 收到审批请求 SHALL 先插入一行（`decision` NULL、`requested_at`=注入时钟 now、`expires_at = requested_at + 60000`），再发布事件；同一消息上已存在的审批行（无论 pending 或已结算）SHALL 不被新请求改写或覆盖，一条 assistant 消息可有多行审批。结算 SHALL 以 compare-and-set（`UPDATE … WHERE id=? AND decision IS NULL`）把 `decision`/`decided_at` 一次性写入，此后不可再改；CAS 未命中者即为"已结算"。同一 `(message_id, request_id)` 重复请求 SHALL 被 UNIQUE 拒绝而不产生第二行。删除消息（regenerate 删旧助手行、删会话）SHALL 级联删除其审批行。
+
+#### Scenario: 落库形状
+- **WHEN** 审批请求到达，注入时钟为 T
+- **THEN** `chat_approvals` 恰一行：`message_id` 为当前 running assistant id、`request_id="r1"`、`tool="bash"`、`title` 原文、`requested_at=T`、`expires_at=T+60000`、`decision`/`decided_at` NULL
+
+#### Scenario: 同一消息多行审批
+- **WHEN** 同一回合内先后到达 `request_id` 为 `r1`、`r2` 的两个审批请求
+- **THEN** `chat_approvals` 中该 assistant 消息恰有两行，`id` 按到达顺序递增，`r1` 行在 `r2` 到达后字段不变
+
+#### Scenario: 级联删除
+- **WHEN** 对含审批记录的会话执行 regenerate（删旧助手行）或删除会话
+- **THEN** 对应 `chat_approvals` 行不存在，无孤儿行
+
+#### Scenario: 重复请求与决定值域
+- **WHEN** 对同一 `(message_id, request_id)` 插入第二行，或写入 allow/deny/timeout 以外的 `decision`
+- **THEN** SQLite 拒绝该写入，既有行不变
+
 ## ADDED Requirements
 
 ### Requirement: 审批请求识别
@@ -19,21 +40,6 @@ omp 子进程 SHALL 按 omp-runtime 修订后的 spawn 契约以 `--approval-mod
 #### Scenario: 工具名解析失败
 - **WHEN** 审批 `title` 为 `Allow tool: ` 后紧跟换行
 - **THEN** 仍落库为审批，`tool="unknown"`，流程与正常审批一致
-
-### Requirement: chat_approvals 持久化
-迁移 `034_chat_turn_control.sql` SHALL 新建 `chat_approvals(id INTEGER PRIMARY KEY AUTOINCREMENT, message_id INTEGER NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE, request_id TEXT NOT NULL, tool TEXT NOT NULL, title TEXT NOT NULL, requested_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, decision TEXT NULL CHECK (decision IN ('allow','deny','timeout')), decided_at INTEGER NULL, UNIQUE(message_id, request_id))`。supervisor 收到审批请求 SHALL 先插入一行（`decision` NULL、`requested_at`=注入时钟 now、`expires_at = requested_at + 60000`），再发布事件；同一消息上已存在的审批行（无论 pending 或已结算）SHALL 不被新请求改写或覆盖，一条 assistant 消息可有多行审批。结算 SHALL 以 compare-and-set（`UPDATE … WHERE id=? AND decision IS NULL`）把 `decision`/`decided_at` 一次性写入，此后不可再改；CAS 未命中者即为"已结算"。同一 `(message_id, request_id)` 重复请求 SHALL 被 UNIQUE 拒绝而不产生第二行。删除消息（regenerate 删旧助手行、删会话）SHALL 级联删除其审批行。
-
-#### Scenario: 落库形状
-- **WHEN** 审批请求到达，注入时钟为 T
-- **THEN** `chat_approvals` 恰一行：`message_id` 为当前 running assistant id、`request_id="r1"`、`tool="bash"`、`title` 原文、`requested_at=T`、`expires_at=T+60000`、`decision`/`decided_at` NULL
-
-#### Scenario: 同一消息多行审批
-- **WHEN** 同一回合内先后到达 `request_id` 为 `r1`、`r2` 的两个审批请求
-- **THEN** `chat_approvals` 中该 assistant 消息恰有两行，`id` 按到达顺序递增，`r1` 行在 `r2` 到达后字段不变
-
-#### Scenario: 级联删除
-- **WHEN** 对含审批记录的会话执行 regenerate（删旧助手行）或删除会话
-- **THEN** 对应 `chat_approvals` 行不存在，无孤儿行
 
 ### Requirement: 审批事件
 supervisor SHALL 在审批行持久化之后、经既有 generation ring 发布 `approval.request{messageId, approvalId, tool, title, expiresAt}`（消费一个 seq；omp 在 `tool_execution_start` 之后、工具执行之前下发审批 select，故该事件位于对应 `step.start` 之后、该步骤 `step.end` 之前）；每条审批结算后（该会话存在可发布的 generation ring 时，见停止与终态对挂起审批的结算）SHALL 发布恰一个 `approval.resolved{messageId, approvalId, decision}`，`decision ∈ {allow,deny,timeout}`。同一回合可有多条审批同时挂起（omp 并行执行多个工具时各自下发 select），其 `approval.request`/`approval.resolved` 可与其它步骤的 `step.*`、`text.delta` 事件交错；每条审批事件 SHALL 只作用于自身 `approvalId`，后到的 `approval.request` SHALL 不覆盖先前审批。两类事件 SHALL 进入 ring 回放、SSE 扇出与 `Last-Event-ID` 语义与其它事件一致；web `stream.ts` 联合类型 SHALL 同步。
