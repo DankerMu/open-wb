@@ -4,15 +4,12 @@ import {
   isPlainJsonObject,
   parseJsonArray,
 } from "./api-json.js";
-import {
-  type ChatMessageSnapshot,
-  type ChatPromptAccepted,
-  type ChatSession,
-  type ChatSessionList,
-  parseMessageSnapshot,
-  parsePromptAccepted,
-  parseSession,
-  parseSessionList,
+import { createSessionMethods } from "./api-sessions.js";
+import type {
+  ChatMessageSnapshot,
+  ChatPromptAccepted,
+  ChatSession,
+  ChatSessionList,
 } from "./session-contract.js";
 
 export type Principal = {
@@ -342,10 +339,6 @@ function workspaceEndpoint(workspaceId: string, endpoint: "tree" | "dirs" | "fil
   return `/api/workspaces/${encodeURIComponent(workspaceId)}/${endpoint}`;
 }
 
-function sessionEndpoint(sessionId: string, endpoint: "messages" | "prompt") {
-  return `/api/sessions/${encodeURIComponent(sessionId)}/${endpoint}`;
-}
-
 function parsePreviewSize(value: string | null): number | null {
   if (value === null || !/^\d+$/.test(value)) {
     return null;
@@ -515,73 +508,12 @@ async function logoutRequest(
 
 export function createApiClient({ onUnauthorized }: ApiClientOptions = {}): ApiClient {
   return {
-    async listSessions(options) {
-      const response = await request(
-        "/api/sessions",
-        getRequestOptions(options?.signal),
-        onUnauthorized,
-        200,
-      );
-      const sessions = parseSessionList(response);
-      if (!sessions) {
-        throw requestFailed(200);
-      }
-
-      return sessions;
-    },
-
-    async createSession(options) {
-      const response = await request(
-        "/api/sessions",
-        {
-          ...requestOptions(options?.signal),
-          method: "POST",
-        },
-        onUnauthorized,
-        201,
-      );
-      const session = parseSession(response);
-      if (!session) {
-        throw requestFailed(201);
-      }
-
-      return session;
-    },
-
-    async getMessages(sessionId, options) {
-      const response = await request(
-        sessionEndpoint(sessionId, "messages"),
-        getRequestOptions(options?.signal),
-        onUnauthorized,
-        200,
-      );
-      const snapshot = parseMessageSnapshot(response);
-      if (!snapshot) {
-        throw requestFailed(200);
-      }
-
-      return snapshot;
-    },
-
-    async prompt(sessionId, message, options) {
-      const response = await request(
-        sessionEndpoint(sessionId, "prompt"),
-        {
-          ...requestOptions(options?.signal),
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message }),
-        },
-        onUnauthorized,
-        202,
-      );
-      const accepted = parsePromptAccepted(response);
-      if (!accepted) {
-        throw requestFailed(202);
-      }
-
-      return accepted;
-    },
+    ...createSessionMethods(onUnauthorized, {
+      getRequestOptions,
+      request,
+      requestFailed,
+      requestOptions,
+    }),
 
     async listWorkspaces(options) {
       const response = await request(
