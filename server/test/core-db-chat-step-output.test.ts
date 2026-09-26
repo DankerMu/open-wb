@@ -15,6 +15,7 @@ import {
   ledgerFilenames,
   MIGRATION_032,
   MIGRATION_033,
+  MIGRATION_034,
   removeTempDirs,
   TRACKED_MIGRATION_FILENAMES,
   tempDir,
@@ -54,7 +55,9 @@ function stepRows(db: DatabaseSync, columns: string) {
 }
 
 function seedPre033Database(path: string): void {
-  const assets = trackedMigrationAssets().filter((asset) => asset.filename !== MIGRATION_033);
+  const assets = trackedMigrationAssets().filter(
+    (asset) => asset.filename !== MIGRATION_033 && asset.filename !== MIGRATION_034,
+  );
   const filenames = assets.map((asset) => asset.filename);
   expect(filenames).toEqual(TRACKED_MIGRATION_FILENAMES.slice(0, 6));
   expect(filenames.at(-1)).toBe(MIGRATION_032);

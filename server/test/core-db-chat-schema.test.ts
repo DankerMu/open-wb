@@ -18,6 +18,7 @@ import {
   MIGRATION_031,
   MIGRATION_032,
   MIGRATION_033,
+  MIGRATION_034,
   MIGRATION_0010,
   migrationReceiptExists,
   removeTempDirs,
@@ -212,7 +213,10 @@ function expectRequiredIndex(
 
 function seedPre032Database(path: string): void {
   const assets = trackedMigrationAssets().filter(
-    (asset) => asset.filename !== MIGRATION_032 && asset.filename !== MIGRATION_033,
+    (asset) =>
+      asset.filename !== MIGRATION_032 &&
+      asset.filename !== MIGRATION_033 &&
+      asset.filename !== MIGRATION_034,
   );
   const filenames = assets.map((asset) => asset.filename);
   expect(filenames).toEqual([...HISTORICAL_FILENAMES]);
@@ -288,6 +292,7 @@ describe("core/db chat schema", () => {
         ["stream_epoch", "INTEGER", 1, "0", 0, 0],
         ["created_at", "INTEGER", 1, null, 0, 0],
         ["updated_at", "INTEGER", 1, null, 0, 0],
+        ["parent_session_id", "TEXT", 0, null, 0, 0],
       ]);
       expect(columnInfo(db, "chat_messages")).toEqual([
         ["id", "INTEGER", 0, null, 1, 0],
@@ -308,7 +313,20 @@ describe("core/db chat schema", () => {
         ["ended_at", "INTEGER", 0, null, 0, 0],
         ["output", "TEXT", 0, null, 0, 0],
       ]);
-      expectCascadeFk(db, "chat_sessions", "accounts", "owner_id");
+      expect(db.prepare("PRAGMA foreign_key_list('chat_sessions')").all()).toEqual([
+        expect.objectContaining({
+          table: "chat_sessions",
+          from: "parent_session_id",
+          to: "id",
+          on_delete: "SET NULL",
+        }),
+        expect.objectContaining({
+          table: "accounts",
+          from: "owner_id",
+          to: "id",
+          on_delete: "CASCADE",
+        }),
+      ]);
       expectCascadeFk(db, "chat_messages", "chat_sessions", "session_id");
       expectCascadeFk(db, "chat_steps", "chat_messages", "message_id");
       expectRequiredIndex(
