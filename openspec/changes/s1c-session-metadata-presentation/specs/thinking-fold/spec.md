@@ -58,7 +58,7 @@ SessionSupervisor SHALL 对同一助手消息的 thinking 增量做合并：在�
 
 #### Scenario: 真 omp 帧到达
 - **WHEN** CI smoke 以真 omp v18.0.10、`MODEL_REASONING` 缺省与受控假上游运行 `make smoke`，`smoke/session-meta.hurl` 发送含 `WORKBUDDY_THINK` 的 prompt
-- **THEN** 回合结束后快照助手消息 `thinking` 恰为 `先读需求，再列要点，最后作答。`，正文仍恰为 `你好，这是 WorkBuddy 的第一条流式回复。`；`smoke/chat.hurl` 的无标记回合 `thinking` 为 `null` 且其既有断言不变
+- **THEN** 回合结束后快照助手消息 `thinking` 恰为 `先读需求，再列要点，最后作答。`，正文仍恰为 `你好，这是 WorkBuddy 的第一条流式回复。`；`smoke/chat.hurl` 既有断言不变（该文件不断言 `thinking`）；「上游未返回思考增量 → `thinking` 为 `null`」由服务端集成测试以不含 thinking 帧的 fake 场景（如 A 的 `abort-ok`）证明
 
 #### Scenario: 关闭 reasoning
 - **WHEN** 以 `MODEL_REASONING=off` 启动，托管 `models.yml` 被写出
