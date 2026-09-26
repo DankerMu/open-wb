@@ -202,6 +202,51 @@ describe("侧栏会话列表区 (S11)", () => {
     expect(screen.getAllByRole("button", { name: "新建会话" })).toHaveLength(1);
   });
 
+  /** 只替换 GET /api/sessions 的应答挂载 /，返回侧栏 会话列表 nav 与 main。 */
+  async function mountChatList(sessions: () => Promise<Response> | Response) {
+    const fetchMock = createFetchMock({
+      "/api/auth/me": () => jsonResponse(authenticatedPrincipal),
+      "/api/workspaces": () => jsonResponse({ workspaces: [] }),
+      "/api/sessions": sessions,
+      "/api/info": () =>
+        jsonResponse({
+          name: "workbuddy-app-server",
+          version: "0.0.0",
+          auth: { provider: "dev-stub" },
+        }),
+    });
+    const mounted = mountAuthenticatedApp("/", fetchMock);
+    disposeRouter = () => mounted.router.dispose();
+    await screen.findByRole("heading", { level: 1, name: "WorkBuddy，我帮你" });
+    const aside = screen.getByRole("complementary", { name: "侧栏" });
+    const list = within(aside).getByRole("navigation", { name: "会话列表" });
+    return { list, main: screen.getByRole("main") };
+  }
+
+  it("列表 GET 503：错误 alert 在侧栏 会话列表 内，文本即信封 message，main 内没有", async () => {
+    const { list, main } = await mountChatList(() =>
+      jsonResponse({ error: { code: "unavailable", message: "会话列表不可用" } }, 503),
+    );
+
+    expect((await within(list).findByRole("alert")).textContent).toBe("会话列表不可用");
+    expect(within(list).queryByText("正在读取会话", { exact: true })).toBeNull();
+    expect(within(main).queryByRole("alert")).toBeNull();
+    expect(within(main).queryByText("会话列表不可用", { exact: true })).toBeNull();
+  });
+
+  it("列表请求未决：正在读取会话 status 在侧栏 会话列表 内，main 内没有", async () => {
+    const pending = deferredResponse();
+    const { list, main } = await mountChatList(() => pending.promise);
+
+    const loading = await within(list).findByText("正在读取会话", { exact: true });
+    expect(loading.getAttribute("role")).toBe("status");
+    expect(within(main).queryByText("正在读取会话", { exact: true })).toBeNull();
+
+    pending.resolve(jsonResponse({ sessions: [LIST_SESSION] }));
+    await within(list).findByRole("button", { name: LIST_SESSION.title });
+    expect(within(list).queryByText("正在读取会话", { exact: true })).toBeNull();
+  });
+
   it("sidebar.css 的主导航规则不再匹配列表区的 nav；列表区不另设滚动层", () => {
     const css = stripComments(readRepoFile("web/src/routes/shell/sidebar.css"));
     const preludes = topLevelBlocks(css).map((block) => block.prelude);

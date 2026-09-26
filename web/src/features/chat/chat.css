@@ -63,10 +63,10 @@
   overflow-y: auto;
 }
 
-/* The nav overlay scrolls its Drawer body as a whole, so the list must not add a nested scroller. */
+/* The nav overlay scrolls its Drawer body as a whole; `flex: none` keeps the list at content height
+   so its own `overflow-y: auto` never engages (no nested scroller). */
 .sidebar[data-variant="overlay"] .chat-session-list {
   flex: none;
-  overflow-y: visible;
 }
 
 .chat-session-item {
