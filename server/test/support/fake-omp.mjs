@@ -6,10 +6,9 @@
  */
 import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
-import { request as httpRequest } from "node:http";
-import { request as httpsRequest } from "node:https";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
+import { loadBaseUrl, parseToolCall, postChat } from "./fake-omp-proxy.mjs";
 
 const MAX_FRAME = 1_048_576;
 const MAX_REASSEMBLED = 67_108_864;
@@ -21,7 +20,8 @@ const TOOL_NAME = "bash";
 const TOOL_OUTPUT = "workbuddy-smoke";
 const UI_ID = "ui-confirm-1";
 const DELTAS = ["Hello ", "from ", "fake-omp"];
-const ABORT_SCENARIOS = new Set(["abort-ok", "abort-ignored"]);
+/** slow-ready（#461）：扣住 ready 之后行为与 abort-ok 完全一致。 */
+const ABORT_SCENARIOS = new Set(["abort-ok", "abort-ignored", "slow-ready"]);
 /** 审批门控场景（#458）：仅最后一个 `--approval-mode` 恰为 write 时门控，否则同 normal。 */
 const APPROVAL_SCENARIOS = new Set(["approval", "approval-parallel", "approval-then-abort"]);
 const CALL_1 = { id: TOOL_ID, name: TOOL_NAME, args: { command: "echo workbuddy-smoke" } };
@@ -37,7 +37,12 @@ const BRANCH_MESSAGES = Object.freeze([
 /** omp v18.0.10 agent-session.ts:8628-8629 的未知 entry 错误文本。 */
 const UNKNOWN_ENTRY = "Invalid entry ID for branching";
 
-const { scenario, resume, sessionDir, approvalMode } = parseArgs(process.argv.slice(2));
+const { scenario, resume, sessionDir, approvalMode, delay } = parseArgs(process.argv.slice(2));
+/**
+ * `--ready-delay-ms <n>`（#461）：与 `--scenario` 的位置无关，取最后一次出现的值；只有 slow-ready 解析它
+ * （缺省 500，非法值在求值时抛错、退出 1 且零帧），其它 scenario 忽略。延迟期间关闭 stdin 零帧退出 0。
+ */
+const readyDelayMs = scenario === "slow-ready" ? parseReadyDelay(delay) : 0;
 const gated = APPROVAL_SCENARIOS.has(scenario) && approvalMode === "write";
 const abortable = ABORT_SCENARIOS.has(scenario) || (gated && scenario !== "approval");
 let protocol = 1;
@@ -53,9 +58,11 @@ let currentSession = resume ?? DEFAULT_SESSION;
 /** 入站帧 type 记录（probe `frames=`）：按 stdin 行序、在串行 queue 内追加，按进程累积。 */
 const inbound = [];
 let queue = Promise.resolve();
+let readyTimer; // 仅在 slow-ready 扣住 ready 期间有值
+const readyGate = scenario === "slow-ready" ? delayReady(readyDelayMs) : Promise.resolve();
 
 if (scenario !== "no-ready" && scenario !== "no-ready-hang") {
-  queue = queue.then(() =>
+  queue = readyGate.then(() =>
     emit({
       type: "ready",
       protocolVersion: 1,
@@ -73,6 +80,9 @@ rl.on("line", (line) => {
 rl.on("close", () => {
   if (scenario === "hang-eof" || scenario === "hang-term" || scenario === "no-ready-hang") {
     return;
+  }
+  if (readyTimer !== undefined) {
+    process.exit(0);
   }
   queue.then(
     () => process.exit(0),
@@ -95,6 +105,7 @@ function parseArgs(argv) {
   let sessionFile;
   let dir;
   let mode;
+  let delay;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--scenario") {
       selected = argv[++i] ?? selected;
@@ -104,9 +115,30 @@ function parseArgs(argv) {
       dir = argv[++i];
     } else if (argv[i] === "--approval-mode") {
       mode = argv[++i];
+    } else if (argv[i] === "--ready-delay-ms") {
+      delay = argv[++i] ?? "";
     }
   }
-  return { scenario: selected, resume: sessionFile, sessionDir: dir, approvalMode: mode };
+  return { scenario: selected, resume: sessionFile, sessionDir: dir, approvalMode: mode, delay };
+}
+
+function parseReadyDelay(raw) {
+  if (raw === undefined) {
+    return 500;
+  }
+  if (/^\d+$/u.test(raw) && Number(raw) <= 2_147_483_647) {
+    return Number(raw);
+  }
+  throw new Error(`invalid --ready-delay-ms: ${JSON.stringify(raw)}`);
+}
+
+function delayReady(ms) {
+  const { promise, resolve } = Promise.withResolvers();
+  readyTimer = setTimeout(() => {
+    readyTimer = undefined;
+    resolve();
+  }, ms);
+  return promise;
 }
 
 function emit(frame) {
@@ -591,203 +623,4 @@ async function relayToolRound(baseUrl, token, user, first) {
   }
   await emitDeltas(second.deltas);
   await finishTurn();
-}
-
-function parseToolCall(call) {
-  if (call === undefined || call.id.length === 0 || call.name.length === 0) {
-    throw new Error("incomplete tool call");
-  }
-  const args = JSON.parse(call.arguments);
-  if (args === null || typeof args !== "object" || Array.isArray(args)) {
-    throw new Error("tool arguments");
-  }
-  return { ...call, args };
-}
-
-function loadBaseUrl() {
-  const dir = process.env.PI_CODING_AGENT_DIR;
-  if (typeof dir !== "string" || dir.length === 0) {
-    throw new Error("config");
-  }
-  let text;
-  try {
-    text = readFileSync(join(dir, "models.yml"), "utf8");
-  } catch {
-    throw new Error("config");
-  }
-  return parseWorkbuddyBaseUrl(text);
-}
-
-function parseWorkbuddyBaseUrl(text) {
-  if (/^providers:\s*\[/mu.test(text)) {
-    throw new Error("config");
-  }
-  const fields = collectWorkbuddyFields(text);
-  const { api, apiKey, baseUrl, hasModel } = fields;
-  if (
-    api !== "openai-completions" ||
-    apiKey !== "WORKBUDDY_MODEL_TOKEN" ||
-    typeof baseUrl !== "string" ||
-    !/^https?:\/\//u.test(baseUrl) ||
-    !hasModel
-  ) {
-    throw new Error("config");
-  }
-  return baseUrl;
-}
-
-function collectWorkbuddyFields(text) {
-  const fields = { hasModel: false };
-  let section = "";
-  for (const raw of text.split(/\r?\n/u)) {
-    const line = raw.trim();
-    if (line.length === 0 || line.startsWith("#")) {
-      continue;
-    }
-    const indent = raw.match(/^ */u)[0].length;
-    section = nextSection(section, indent, line);
-    applyWorkbuddyLine(fields, section, indent, line);
-  }
-  return fields;
-}
-
-function nextSection(section, indent, line) {
-  if (indent === 0) {
-    return line === "providers:" ? "providers" : "";
-  }
-  if (section.startsWith("providers") && indent === 2) {
-    return line === "workbuddy:" ? "workbuddy" : "providers";
-  }
-  return section;
-}
-
-function applyWorkbuddyLine(fields, section, indent, line) {
-  if (section !== "workbuddy") {
-    return;
-  }
-  if (indent === 4) {
-    const match = /^([A-Za-z]+):\s*(.*)$/u.exec(line);
-    if (match && match[1] !== "models") {
-      fields[match[1]] = unquote(match[2]);
-    }
-    return;
-  }
-  if (indent >= 6 && /(^-\s*id:|^id:)/u.test(line)) {
-    fields.hasModel = true;
-  }
-}
-
-function unquote(value) {
-  const trimmed = value.trim();
-  const quote = trimmed[0];
-  if ((quote === '"' || quote === "'") && trimmed.endsWith(quote) && trimmed.length >= 2) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
-}
-
-function postChat(baseUrl, token, messages) {
-  const { promise, resolve, reject } = Promise.withResolvers();
-  const root = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
-  const endpoint = new URL("chat/completions", root);
-  const payload = Buffer.from(JSON.stringify({ stream: true, messages }));
-  const send = endpoint.protocol === "https:" ? httpsRequest : httpRequest;
-  const req = send(
-    endpoint,
-    {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${token}`,
-        "content-type": "application/json",
-        "content-length": String(payload.byteLength),
-      },
-    },
-    (response) => {
-      if (response.statusCode !== 200) {
-        response.resume();
-        reject(new Error("http"));
-        return;
-      }
-      readSseRound(response).then(resolve, reject);
-    },
-  );
-  req.on("error", reject);
-  req.end(payload);
-  return promise;
-}
-
-/** 一轮 SSE：字节安全的 delta.content 与按 index 重组的 delta.tool_calls 分片。 */
-async function readSseRound(stream) {
-  const decoder = new TextDecoder("utf-8", { fatal: true });
-  const state = { buffer: "", deltas: [], calls: [] };
-  for await (const chunk of stream) {
-    if (consumeSseText(state, decoder.decode(chunk, { stream: true }))) {
-      return state;
-    }
-  }
-  if (consumeSseText(state, decoder.decode())) {
-    return state;
-  }
-  throw new Error("SSE ended before [DONE]");
-}
-
-function consumeSseText(state, text) {
-  state.buffer += text;
-  let boundary = state.buffer.indexOf("\n\n");
-  while (boundary !== -1) {
-    const data = eventData(state.buffer.slice(0, boundary));
-    state.buffer = state.buffer.slice(boundary + 2);
-    if (data === "[DONE]") {
-      return true;
-    }
-    appendSseDelta(state, data);
-    boundary = state.buffer.indexOf("\n\n");
-  }
-  return false;
-}
-
-function appendSseDelta(state, data) {
-  if (data.length === 0) {
-    return;
-  }
-  const delta = JSON.parse(data)?.choices?.[0]?.delta;
-  const content = delta?.content;
-  if (typeof content === "string" && content.length > 0) {
-    state.deltas.push(content);
-  }
-  if (Array.isArray(delta?.tool_calls)) {
-    for (const fragment of delta.tool_calls) {
-      appendToolFragment(state.calls, fragment);
-    }
-  }
-}
-
-/** 首个分片携带 id 与 function.name；function.arguments 按到达顺序拼接。 */
-function appendToolFragment(calls, fragment) {
-  const index = fragment?.index;
-  if (!Number.isInteger(index) || index < 0) {
-    throw new Error("tool call index");
-  }
-  calls[index] ??= { id: "", name: "", arguments: "" };
-  const call = calls[index];
-  if (typeof fragment.id === "string" && fragment.id.length > 0) {
-    call.id = fragment.id;
-  }
-  const fn = fragment.function;
-  if (typeof fn?.name === "string" && fn.name.length > 0) {
-    call.name = fn.name;
-  }
-  if (typeof fn?.arguments === "string") {
-    call.arguments += fn.arguments;
-  }
-}
-
-function eventData(event) {
-  const lines = [];
-  for (const line of event.split("\n")) {
-    if (line.startsWith("data:")) {
-      lines.push(line.slice(5).trimStart());
-    }
-  }
-  return lines.join("\n");
 }
