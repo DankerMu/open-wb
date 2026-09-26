@@ -1,5 +1,5 @@
 /**
- * Issue #83 pure protocol event mapping.
+ * Issue #83 pure protocol event mapping; #455 adds the interrupted outcome and applyStop.
  */
 import type { OmpFrame } from "./omp/frame.js";
 
@@ -19,7 +19,7 @@ export type ChatEvent<StepId extends string | number = number> =
         output: string;
       };
     }
-  | { type: "turn.end"; data: { messageId: number; status: "done" | "failed" } }
+  | { type: "turn.end"; data: { messageId: number; status: "done" | "failed" | "stopped" } }
   | { type: "error"; data: { messageId: number; message: string } }
   | {
       type: "approval.request";
@@ -49,12 +49,19 @@ interface ToolEntry {
   readonly name: string;
 }
 
+/** 至多记住一个结局（首个胜出）：失败走 error + turn.end failed，中断走单独的 turn.end stopped。 */
+type Outcome =
+  | { readonly kind: "failure"; readonly message: string }
+  | { readonly kind: "interrupted" };
+
+const INTERRUPTED: Outcome = Object.freeze({ kind: "interrupted" });
+
 interface EventState {
   readonly messageId: number;
   readonly promptRequestId: string;
   readonly started: boolean;
   readonly ended: boolean;
-  readonly failure: string | undefined;
+  readonly outcome: Outcome | undefined;
   readonly running: readonly ToolEntry[];
   readonly finished: readonly string[];
 }
@@ -73,7 +80,7 @@ export function createEventState(input: {
     promptRequestId: input.promptRequestId,
     started: false,
     ended: false,
-    failure: undefined,
+    outcome: undefined,
     running: NO_TOOLS,
     finished: NO_IDS,
   });
@@ -108,6 +115,14 @@ export function applyFailure(state: EventState, message: string): ApplyResult {
     return { state, events: [] };
   }
   return failTurn(state, message);
+}
+
+/** Supervisor 有界退回用：未终态即合成恰一个 turn.end stopped，不看 started 与已记住结局。 */
+export function applyStop(state: EventState): ApplyResult {
+  if (state.ended) {
+    return { state, events: [] };
+  }
+  return stopTurn(state);
 }
 
 function applyAgentStart(state: EventState): ApplyResult {
@@ -202,21 +217,28 @@ function applyMessageEnd(state: EventState, frame: OmpFrame): ApplyResult {
   ) {
     return { state, events: [] };
   }
-  if (state.failure !== undefined) {
+  if (state.outcome !== undefined) {
     return { state, events: [] };
   }
-  return {
-    state: evolve(state, { failure: nonemptyString(message.errorMessage) ?? GENERIC_FAILURE }),
-    events: [],
-  };
+  const outcome: Outcome =
+    message.stopReason === "aborted"
+      ? INTERRUPTED
+      : Object.freeze({
+          kind: "failure",
+          message: nonemptyString(message.errorMessage) ?? GENERIC_FAILURE,
+        });
+  return { state: evolve(state, { outcome }), events: [] };
 }
 
 function applyAgentEnd(state: EventState, frame: OmpFrame): ApplyResult {
   if (frame.isTerminal === false) {
     return { state, events: [] };
   }
-  if (state.failure !== undefined) {
-    return failTurn(state, state.failure);
+  if (state.outcome?.kind === "failure") {
+    return failTurn(state, state.outcome.message);
+  }
+  if (state.outcome?.kind === "interrupted") {
+    return stopTurn(state);
   }
   return {
     state: evolve(state, { ended: true }),
@@ -247,12 +269,19 @@ function failTurn(state: EventState, message: unknown): ApplyResult {
   };
 }
 
+function stopTurn(state: EventState): ApplyResult {
+  return {
+    state: evolve(state, { ended: true }),
+    events: [{ type: "turn.end", data: { messageId: state.messageId, status: "stopped" } }],
+  };
+}
+
 function evolve(
   state: EventState,
   patch: {
     started?: boolean;
     ended?: boolean;
-    failure?: string;
+    outcome?: Outcome;
     running?: readonly ToolEntry[];
     finished?: readonly string[];
   },
@@ -262,7 +291,7 @@ function evolve(
     promptRequestId: state.promptRequestId,
     started: patch.started ?? state.started,
     ended: patch.ended ?? state.ended,
-    failure: patch.failure ?? state.failure,
+    outcome: patch.outcome ?? state.outcome,
     running: patch.running ?? state.running,
     finished: patch.finished ?? state.finished,
   });

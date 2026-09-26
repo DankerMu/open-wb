@@ -238,14 +238,16 @@ describe("session event mapping — first failure through maintenance", () => {
     expect(applyFailure(state, "late supervisor").events).toEqual([]);
   });
 
-  it("emits the first aborted generic fallback once isTerminal is true, ignoring a later errorMessage", () => {
+  it("ends stopped without error once isTerminal is true when aborted precedes a later errorMessage", () => {
     let state = bind();
     ({ state } = applyFrame(state, { type: "agent_start" }));
     ({ state } = applyFrame(state, assistantEnd("aborted", "")));
     ({ state } = applyFrame(state, assistantEnd("error", "second failure")));
     ({ state } = applyFrame(state, { type: "agent_end", messages: [], isTerminal: false }));
     const terminal = applyFrame(state, { type: "agent_end", messages: [], isTerminal: true });
-    expect(terminal.events).toEqual(GENERIC_FAILURE_EVENTS);
+    expect(terminal.events).toEqual([
+      { type: "turn.end", data: { messageId: MESSAGE_ID, status: "stopped" } },
+    ]);
   });
 
   it("does not fail the turn for a tool isError or a non-assistant error stopReason", () => {
