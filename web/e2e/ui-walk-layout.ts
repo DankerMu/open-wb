@@ -1,7 +1,8 @@
 // Shell layout, navigation and theme helpers for the UI walk.
 // Project branches live here so the journey in ui-walk.spec.ts stays a single path.
 
-import { expect, type Locator, type Page } from "@playwright/test";
+import { type Browser, expect, type Locator, type Page, test } from "@playwright/test";
+import { isExpectedUnauthorizedNetworkLog } from "./ui-walk-oracle.js";
 
 export const DEV_ACCOUNT = "zhangsan";
 const DEV_ROLE = "成员";
@@ -454,4 +455,107 @@ async function expectTheme(page: Page, choice: ThemeChoice, initialBackground: s
   await expect
     .poll(() => pageBackground(page), "page background differs from the initial theme")
     .not.toBe(initialBackground);
+}
+
+// #429 首帧前主题：存储值 × 系统配色 → 首帧应写入的 data-theme。
+const PRE_PAINT_CASES = [
+  { stored: "dark", colorScheme: "light", expected: "dark" },
+  { stored: "system", colorScheme: "dark", expected: "dark" },
+  { stored: "light", colorScheme: "dark", expected: "light" },
+] as const;
+
+type PrePaintCase = (typeof PRE_PAINT_CASES)[number];
+// 读取前先 takeRecords，未投递的记录也按序并入。
+type PrePaintWindow = { __readPrePaint: () => string[] };
+
+export async function expectPrePaintTheme(browser: Browser, baseURL: string | undefined) {
+  if (!baseURL) throw new Error("Playwright baseURL is required for the pre-paint theme check");
+  for (const entry of PRE_PAINT_CASES) {
+    await test.step(`stored ${entry.stored} + ${entry.colorScheme} scheme`, () =>
+      expectPrePaintCase(browser, new URL(baseURL).origin, entry));
+  }
+}
+
+// 全新 context：从文档创建起用同一 MutationObserver 记录 data-theme 写入与 LINK/#root 插入的顺序。
+async function expectPrePaintCase(browser: Browser, origin: string, entry: PrePaintCase) {
+  const context = await browser.newContext({ colorScheme: entry.colorScheme });
+  try {
+    await context.addInitScript(
+      ({ key, value }) => {
+        if (location.protocol !== "about:") localStorage.setItem(key, value);
+        const records: string[] = [];
+        const label = (node: Node) => {
+          if (!(node instanceof Element)) return null;
+          if (node.tagName === "LINK" && node.getAttribute("rel") === "stylesheet") return "LINK";
+          return node.id === "root" ? "#root" : null;
+        };
+        const record = (mutation: MutationRecord) => {
+          if (mutation.type === "attributes") {
+            const target = mutation.target as Element;
+            records.push(`data-theme=${target.getAttribute("data-theme")}`);
+          }
+          for (const node of mutation.addedNodes) {
+            const name = label(node);
+            if (name) records.push(name);
+          }
+        };
+        const observer = new MutationObserver((mutations) => {
+          for (const mutation of mutations) record(mutation);
+        });
+        observer.observe(document, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          attributeFilter: ["data-theme"],
+        });
+        const read = () => {
+          for (const mutation of observer.takeRecords()) record(mutation);
+          return [...records];
+        };
+        Object.assign(window, { __readPrePaint: read });
+      },
+      { key: THEME_STORAGE_KEY, value: entry.stored },
+    );
+    const page = await context.newPage();
+    const pageErrors: string[] = [];
+    const consoleErrors: { text: string; allowed: boolean }[] = [];
+    const binding = { productionOrigin: origin, page };
+    page.on("pageerror", (error) => pageErrors.push(error.stack ?? error.message));
+    page.on("console", (message) => {
+      if (message.type() !== "error") return;
+      const text = `${message.text()} @ ${message.location().url}`;
+      consoleErrors.push({ text, allowed: isExpectedUnauthorizedNetworkLog(binding, message) });
+    });
+    await page.goto("/files");
+    await expect(page.getByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeVisible();
+    const records = await page.evaluate(() =>
+      (window as unknown as PrePaintWindow).__readPrePaint(),
+    );
+    expectPrePaintRecords(records, entry.expected);
+    expect(pageErrors, "no pageerror").toEqual([]);
+    const consoleDetail = `console errors: ${JSON.stringify(consoleErrors)}`;
+    expect(consoleErrors.length, consoleDetail).toBeLessThanOrEqual(1);
+    expect(
+      consoleErrors.filter((error) => !error.allowed),
+      `only the /api/auth/me 401 network log is allowed; ${consoleDetail}`,
+    ).toEqual([]);
+  } finally {
+    await context.close();
+  }
+}
+
+function expectPrePaintRecords(records: string[], expected: string) {
+  const detail = JSON.stringify(records);
+  const themes = records.filter((record) => record.startsWith("data-theme="));
+  const firstTheme = records.findIndex((record) => record.startsWith("data-theme="));
+  const link = records.indexOf("LINK");
+  const root = records.indexOf("#root");
+  expect(link, `stylesheet LINK recorded: ${detail}`).toBeGreaterThanOrEqual(0);
+  expect(root, `#root recorded: ${detail}`).toBeGreaterThanOrEqual(0);
+  expect(firstTheme, `data-theme recorded: ${detail}`).toBeGreaterThanOrEqual(0);
+  expect(firstTheme, `data-theme precedes the stylesheet LINK: ${detail}`).toBeLessThan(link);
+  expect(firstTheme, `data-theme precedes #root: ${detail}`).toBeLessThan(root);
+  expect(themes, `every data-theme record is ${expected}: ${detail}`).toEqual(
+    themes.map(() => `data-theme=${expected}`),
+  );
 }
