@@ -9,7 +9,7 @@
 - 纯归约 `applyFrame`（`events.ts`）把 `message_end{stopReason:"aborted"}` 记为失败，`agent_end` 时发 `error` + `turn.end failed`。
 - `store.ts` `finishTurn` 只接受 `done|failed`；三表 CHECK 枚举不含 `stopped`，SQLite 不能 ALTER CHECK。
 - web 解析（`web/src/lib/session-contract.ts`、`stream.ts`）用 `hasExactlyKeys`，任何新字段/新枚举值都要 server+web 同刀，否则旧页面把整个响应判为非法。
-- omp v18.0.10 协议事实（`resource/oh-my-pi/`）：`abort` 帧 → `message_end{stopReason:"aborted"}` → `agent_end` → `response{command:"abort"}`，之后可继续 prompt；`get_branch_messages` 返回 `[{entryId,text}]`（仅用户消息）；`branch{entryId}` 写新会话文件（内容为该用户消息之前的历史）、进程切到新文件、返回 `{text}`；无原生 regenerate；审批以 `extension_ui_request{method:"select",title:"Allow tool: <name>…",options:["Approve","Deny"]}` 下发、无超时无默认、应答 `{value:"Approve"}` 即允许，其它一律视为拒绝；`abort` 会等待未应答的 select（agent loop 无竞速）；`--approval-mode` 不能运行时改。
+- omp v18.0.10 协议事实（`resource/oh-my-pi/`）：`abort` 帧 → `message_end{stopReason:"aborted"}` → `agent_end` → `response{command:"abort"}`，之后可继续 prompt；`get_branch_messages` 返回 `data:{messages:[{entryId,text}]}`（仅用户消息）；`branch{entryId}` 写新会话文件（内容为该用户消息之前的历史）、进程切到新文件、返回 `data:{text,cancelled}`，未知 entry 为 `success:false,error:"Invalid entry ID for branching"`；无原生 regenerate；审批以 `extension_ui_request{method:"select",title:"Allow tool: <name>…",options:["Approve","Deny"]}` 下发、无超时无默认、应答 `{value:"Approve"}` 即允许，其它一律视为拒绝；`abort` 会等待未应答的 select（agent loop 无竞速）；`--approval-mode` 不能运行时改。
 - 审计（`core/audit`）只有 `emit(db,event)`；现有 kind 为 `sandbox.reject`、`workspace.create`。
 
 **Oracle 差异（显式记录）**：`docs/architecture/system.md:36` `sessions` 行写"omp-supervisor（每活跃会话 spawn、空闲回收、数量上限）"，数量上限至今未实现；本 change 实现后该行随 tasks 9.1 补一句（全局上限/最久空闲驱逐/审批经 host 应答）。`IMPLEMENTATION_PLAN.md:207-208` S1c Outcome 把审批条写为"允许/拒绝/超时自动通过"，与 grill 结论一致（超时自动允许）。
