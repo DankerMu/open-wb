@@ -72,10 +72,13 @@
 - **THEN** prompt 返回 502，受理对被移除、`status`/`updatedAt` 复原，而标题仍为 `季度汇报`
 
 ### Requirement: 会话删除
-`DELETE /api/sessions/:id` SHALL 受既有 cookie guard 与 owner 预检（未认证 401、不存在或属他人 404 `not_found`，先于任何 supervisor 调用），响应 no-store，成功为 204 无 body。该路由不读取 body、不属于 content-parser 归属集。执行 SHALL 同步完成以下序列，任一步失败即停止后续步骤：
+`DELETE /api/sessions/:id` SHALL 受既有 cookie guard 与 owner 预检（未认证 401、不存在或属他人 404 `not_found`，先于任何 supervisor 调用），响应 no-store，成功为 204 无 body。该路由不读取 body、不属于 content-parser 归属集：携带的格式良好的 body 被忽略，不改变 204/404/409 行为；body 引发的 content-parser 错误按 http-service-skeleton「统一错误信封」的非归属已注册路由语义为通用 500，不执行任何删除步骤。执行 SHALL 同步完成以下序列，任一步失败即停止后续步骤：
 1. 若该会话的控制占用正被 regenerate、fork、stop 或另一 DELETE 持有，SHALL 409 `session_busy`，无任何副作用；否则登记控制占用（chat-sessions「Supervisor dispatch and generation binding」），持有至本次调用结束，并在每一种结束路径（204、409、5xx、异常）上释放。持有期间同一会话的 prompt、regenerate、fork 与 DELETE SHALL 409 `session_busy`；stop 不受占用阻塞，按其自身规则返回 202/204。
-2. 若会话 `status="running"`：SHALL 在本次 DELETE 已持有的控制占用之下（不重新登记、不释放）执行与 `POST /api/sessions/:id/stop` 相同的停止序列（挂起审批以 `deny` 结算 → `abort` 帧，或派发前登记停止意图），然后等待该回合终态落库（`turn.end` 已发布）；该等待由 A 的有界退回保证：`abort` 写出后 `OMP_ABORT_GRACE_MS`（8000 ms）内未见 `agent_end` 即 retire 并以 `stopped` 结算，retire 本身按既有 5000/8000 ms 升级。
-3. 调用 supervisor 公开的 `retire(sessionId)`：存活进程经既有有界 retire 序列退出（token 撤销、名额释放），该会话的 slot 与事件环丢弃，所有 SSE 订阅者的响应结束且不再收到事件。
+2. 若会话 `status="running"`：SHALL 在本次 DELETE 已持有的控制占用之下（不重新登记、不释放）执行与 `POST /api/sessions/:id/stop` 相同的停止序列（挂起审批以 `deny` 结算 → `abort` 帧，或派发前登记停止意图），并同时记录该回合的「停止已在途」（turn-control「停止生成 REST」）：等待期间用户对同一回合的 stop 按 A 的规则返回 202 `{}`，不写第二帧 `abort`、不重复结算审批。随后 SHALL 等待以下两者之一出现，出现即进入第 3 步：
+   - (a) 该回合终态落库（`turn.end` 已发布）。该等待由 A 的有界退回保证：`abort` 写出后 `OMP_ABORT_GRACE_MS`（8000 ms）内未见 `agent_end` 即 retire 并以 `stopped` 结算，retire 本身按既有 5000/8000 ms 升级。
+   - (b) 该回合的受理被补偿：停止意图登记后 runtime 获取或派发失败（例如空间根缺失的 `agent_unavailable`、池满 `agent_capacity`、握手失败），prompt 请求按其无停止意图时相同的失败路径返回它自己的 502/503，受理对被移除、会话状态复原，停止意图随之丢弃且不写 `abort`；此时不会有 `turn.end`。该 prompt 的失败属于该 prompt 请求，不是本 DELETE 的步骤失败；会话此时已非 running、无存活 generation，DELETE 照常继续。
+   获取要么成功派发后经 (a) 结束，要么失败经 (b) 结束，二者都在既有上界内出现，删除不另设计时器。
+3. 调用 supervisor 公开的 `retire(sessionId)`：存活进程经既有有界 retire 序列退出（token 撤销、名额释放），该会话的 slot 与事件环丢弃，所有 SSE 订阅者的响应结束且不再收到事件。自本步开始至本次调用结束（删除墓碑期，含 retire 完成与第 4 步删行之间的窗口），已通过 owner 预检的新事件流订阅 SHALL 立即结束且不写任何事件；第 4 步失败时墓碑随控制占用一同解除，此后订阅恢复既有行为。
 4. 单个 SQLite 事务：读取 `omp_session_file` 与该会话消息数，删除会话行——消息、步骤、审批随外键级联删除，以其为源的 fork 会话 `parent_session_id` 由外键置 NULL 且这些会话保留——并在同一事务写一条 `session.delete` 审计；审计失败则整个事务回滚。store SHALL 在删除时确认该会话无活跃回合/缓冲/步骤内存状态（此时应已结算；若仍存在视为不变量破坏，通用失败且不删除）。
 5. 若第 4 步读到的 `omp_session_file` 非 NULL，SHALL unlink 该文件：`ENOENT` 视为成功；其它错误经服务错误通道报告，响应仍为 204（行已删除，残留文件不影响任何会话）。regenerate/fork 产生的旧分支 `.jsonl` 不在清理范围内。
 6. 返回 204。
@@ -91,6 +94,18 @@
 - **THEN** 该审批先以 `deny` 结算（审计有 `session.approval decision=deny`），fake-omp 收到 `abort`，订阅者在响应结束前收到 `approval.resolved{decision:"deny"}` 与恰一个 `turn.end{status:"stopped"}`；之后子进程退出、行被删除、响应 204
 - **WHEN** fake-omp 以 `abort-ignored` 忽略 `abort`，注入时钟推进过 8000 ms
 - **THEN** 进程被退役、回合以 `stopped` 结算，DELETE 随后完成 204，无 `error` 事件
+- **WHEN** fake-omp 以 `abort-ignored` 使 DELETE 停在等待终态，此时 owner 对同一会话 `POST …/stop`
+- **THEN** stop 返回 202 `{}`；fake-omp 自始至终恰收到一帧 `abort`；注入时钟推进过 8000 ms 后 DELETE 完成 204
+
+#### Scenario: 删除时停止意图遇获取失败
+- **WHEN** 会话在 fake-omp `slow-ready` 下受理 prompt（仍在获取/握手、`abort()` 返回 false），owner 此时 DELETE 使停止意图被登记，随后测试注入的获取失败使该次派发不发生
+- **THEN** prompt 返回其失败对应的 502/503，受理对被补偿、会话状态复原，fake-omp 未收到 `prompt` 或 `abort` 帧；DELETE 随后 204 且 `GET /api/audit` 恰新增一条 `session.delete`；此后该 id 的 DELETE、PATCH 与 `GET …/messages` 均为 404（而非 409 `session_busy`），无残留控制占用，其它会话的 prompt 照常 202
+
+#### Scenario: 删除墓碑期新订阅立即结束
+- **WHEN** DELETE 已完成第 3 步 retire、第 4 步删除事务尚未执行时，测试在该窗口内以同一 owner 对该会话发起新的 `GET /api/sessions/:id/events`
+- **THEN** 该订阅响应立即结束且不含任何事件；DELETE 完成 204 后同一订阅请求为 404
+- **WHEN** 同一窗口内发起新订阅，而随后测试令删除事务中的审计写入失败
+- **THEN** 窗口内的订阅仍立即结束且无事件；DELETE 为通用 5xx，此后对该会话的新订阅正常建立（不立即结束）
 
 #### Scenario: 删除期间的并发请求
 - **WHEN** DELETE 正在等待被停止回合终态时，对同一会话发 prompt、regenerate、fork 与第二个 DELETE

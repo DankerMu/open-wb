@@ -1,7 +1,7 @@
 # Spec: turn-artifacts
 
 ## Purpose
-定义「这一轮改了哪些文件」的端到端契约：从 omp `edit`/`write` 工具结束帧的 `details` 推导候选变更，在绑定工作空间根内做 realpath 归属判定与相对化，`chat_steps.changes` 持久化与 `files.changed` 事件，快照步骤 `changes`，以及 web 的文件变更卡、按扩展名派生的产物卡（html/img/code）与顶栏产物面板。纯归约器侧映射见 chat-stream `纯协议事件归约`，web DTO/事件解析见 chat-web；本 spec 拥有推导、归属、上限、持久化次序与呈现。
+定义「这一轮改了哪些文件」的端到端契约：从 omp `edit`/`write` 工具结束帧的 `details` 推导候选变更，在绑定工作空间根内做 realpath 归属判定与相对化，`chat_steps.changes` 持久化与 `files.changed` 事件，快照步骤 `changes`，以及 web 的文件变更卡、按扩展名派生的产物卡（HTML、图片、代码）与顶栏产物面板。纯归约器侧映射见 chat-stream `纯协议事件归约`，web DTO/事件解析见 chat-web；本 spec 拥有推导、归属、上限、持久化次序与呈现。
 
 ## ADDED Requirements
 
@@ -82,7 +82,7 @@ SessionSupervisor SHALL 在持久化前对候选做归属判定（归约器无 I
 - **THEN** Dialog 内显示 `文件超过 1 MiB，仅预览前 1 MiB`
 
 #### Scenario: 图片下载与代码复制
-- **WHEN** 变更含 `img/chart.PNG` 与 `src/app.ts`，分别点击 `下载 chart.PNG` 与 `复制代码 app.ts`
+- **WHEN** 变更含 `assets/chart.PNG` 与 `src/app.ts`，分别点击 `下载 chart.PNG` 与 `复制代码 app.ts`
 - **THEN** 前者卡片标签 `PNG`，触发以 `chart.PNG` 为文件名的下载且其 Blob URL 随后被撤销；后者卡片标签 `TS`，剪贴板写入恰为预览 API 返回的文本并 Toast `已复制到剪贴板`
 
 #### Scenario: 不派生与失败
