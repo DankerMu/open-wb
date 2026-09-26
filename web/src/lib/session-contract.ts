@@ -1,8 +1,8 @@
 import { hasExactlyKeys, isNonNegativeSafeInteger, parseJsonArray } from "./api-json.js";
 
-type ChatSessionStatus = "idle" | "running" | "done" | "failed";
+type ChatSessionStatus = "idle" | "running" | "done" | "failed" | "stopped";
 type ChatMessageRole = "user" | "assistant";
-type ChatDeliveryStatus = "running" | "done" | "failed";
+type ChatDeliveryStatus = "running" | "done" | "failed" | "stopped";
 
 export type ChatSession = {
   id: string;
@@ -50,6 +50,28 @@ export type ChatPromptAccepted = {
   assistantMessageId: number;
 };
 
+export type ChatRegenerateAccepted = {
+  assistantMessageId: number;
+};
+
+export type ChatSessionFork = {
+  session: ChatSession;
+  draft: string;
+};
+
+type ChatApprovalDecision = "allow" | "deny" | "timeout";
+
+type ChatApproval = {
+  id: number;
+  tool: string;
+  title: string;
+  requestedAt: number;
+  expiresAt: number;
+  decision: ChatApprovalDecision | null;
+};
+
+export type ChatSettledApproval = ChatApproval & { decision: ChatApprovalDecision };
+
 const SESSION_ID = /^[0-9a-f]{32}$/;
 
 function isSafeInteger(value: unknown): value is number {
@@ -57,7 +79,7 @@ function isSafeInteger(value: unknown): value is number {
 }
 
 function isSessionStatus(value: unknown): value is ChatSessionStatus {
-  return value === "idle" || value === "running" || value === "done" || value === "failed";
+  return value === "idle" || isDeliveryStatus(value);
 }
 
 function isMessageRole(value: unknown): value is ChatMessageRole {
@@ -65,7 +87,11 @@ function isMessageRole(value: unknown): value is ChatMessageRole {
 }
 
 function isDeliveryStatus(value: unknown): value is ChatDeliveryStatus {
-  return value === "running" || value === "done" || value === "failed";
+  return value === "running" || value === "done" || value === "failed" || value === "stopped";
+}
+
+function isApprovalDecision(value: unknown): value is ChatApprovalDecision {
+  return value === "allow" || value === "deny" || value === "timeout";
 }
 
 export function parseSession(value: unknown): ChatSession | null {
@@ -180,4 +206,54 @@ export function parsePromptAccepted(value: unknown): ChatPromptAccepted | null {
   }
 
   return { userMessageId, assistantMessageId };
+}
+
+export function isStopAccepted(value: unknown): boolean {
+  return hasExactlyKeys(value, []);
+}
+
+export function parseRegenerateAccepted(value: unknown): ChatRegenerateAccepted | null {
+  if (!hasExactlyKeys(value, ["assistantMessageId"]) || !isSafeInteger(value.assistantMessageId)) {
+    return null;
+  }
+
+  return { assistantMessageId: value.assistantMessageId };
+}
+
+export function parseSessionFork(value: unknown): ChatSessionFork | null {
+  if (!hasExactlyKeys(value, ["session", "draft"]) || typeof value.draft !== "string") {
+    return null;
+  }
+
+  const session = parseSession(value.session);
+  return session ? { session, draft: value.draft } : null;
+}
+
+function parseApproval(value: unknown): ChatApproval | null {
+  if (!hasExactlyKeys(value, ["id", "tool", "title", "requestedAt", "expiresAt", "decision"])) {
+    return null;
+  }
+
+  const { decision, expiresAt, id, requestedAt, title, tool } = value;
+  if (
+    !isSafeInteger(id) ||
+    typeof tool !== "string" ||
+    typeof title !== "string" ||
+    !isSafeInteger(requestedAt) ||
+    !isSafeInteger(expiresAt) ||
+    (decision !== null && !isApprovalDecision(decision))
+  ) {
+    return null;
+  }
+
+  return { id, tool, title, requestedAt, expiresAt, decision };
+}
+
+export function parseSettledApproval(value: unknown): ChatSettledApproval | null {
+  const approval = parseApproval(value);
+  if (!approval || approval.decision === null) {
+    return null;
+  }
+
+  return { ...approval, decision: approval.decision };
 }
