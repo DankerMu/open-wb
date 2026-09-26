@@ -41,7 +41,7 @@ IMPLEMENTATION_PLAN.md S1c 的第一刀（2026-09-26 grill 拍板把 S1c 切为�
 9. 删除：级联 + 删 `.jsonl` + 先 retire 活进程。
 10. 助理任务/项目：不渲染。
 11. 导出记录：不做。
-12. 依赖方向：B 不依赖 A。
+12. 依赖方向：B 排在 A 之后实施（原「B 不依赖 A」经 2026-09-26 B grill 修订：迁移账本连续前缀校验要求 035 在 034 之后，且 A/B 共改同一批文件；见 B proposal「与 grill 拍板的有意修订」）。
 13. composer footer 只显示工作空间；「允许完全访问」→ Non-Goals（S3b）。
 
 ## Non-goals
