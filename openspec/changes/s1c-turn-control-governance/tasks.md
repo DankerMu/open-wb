@@ -30,11 +30,11 @@ Width exception: merged-tasks - 2.1b（argv 切到 `write`）一经合入，真 
 
 ## 3. chat-stream — 归约与审批事件
 
-- [ ] 3.1 `server/src/sessions/events.ts`：`message_end{stopReason:"aborted"}` 记为中断，终止 `agent_end` 发 `turn.end{status:"stopped"}` 且无 `error`；新增纯 `applyStop(state)`（有界退回用，恰一次）；`turn.end.status` 联合加 `stopped`；审批 `extension_ui_request` 不进归约。同 PR 把 `store.ts` `FinishStatus` 放宽为 `done|failed|stopped`，并实现 stopped 结算（`finishTurn(stopped)` 把仍 running 的步骤结算为 `stopped`，助手消息与会话为 `stopped`）；`supervisor.ts:689` 的 `turn.end` 穷举随之通过。验证：新建表驱动测试文件覆盖 aborted/error/正常三路与 `applyStop` 幂等；新建 store 测试证明 `finishTurn(stopped)` 三表落为 `stopped`、已 settled 步骤不变
+- [x] 3.1 `server/src/sessions/events.ts`：`message_end{stopReason:"aborted"}` 记为中断，终止 `agent_end` 发 `turn.end{status:"stopped"}` 且无 `error`；新增纯 `applyStop(state)`（有界退回用，恰一次）；`turn.end.status` 联合加 `stopped`；审批 `extension_ui_request` 不进归约。同 PR 把 `store.ts` `FinishStatus` 放宽为 `done|failed|stopped`，并实现 stopped 结算（`finishTurn(stopped)` 把仍 running 的步骤结算为 `stopped`，助手消息与会话为 `stopped`）；`supervisor.ts:689` 的 `turn.end` 穷举随之通过。验证：新建表驱动测试文件覆盖 aborted/error/正常三路与 `applyStop` 幂等；新建 store 测试证明 `finishTurn(stopped)` 三表落为 `stopped`、已 settled 步骤不变
 - [x] 3.2 `ChatEvent` 联合新增 `approval.request{messageId,approvalId,tool,title,expiresAt}`、`approval.resolved{messageId,approvalId,decision}`；ring/SSE 无改动即透传。验证：新建测试文件断言两事件入 ring、`Last-Event-ID` 回放包含它们
 
 Suggested fixture level: expanded - 公共 SSE 事件联合（`turn.end.status` 与两类新事件）是 server/web 共享契约，且 3.1 同刀改持久化结算状态，属 expanded 硬触发项
-Minimal mergeable slice: 3.1（atomic：归约联合加 `stopped` 使 supervisor 的 `turn.end` 穷举要求 store 同时接受 `stopped`，任一侧单独合入类型不通过）依赖 1.1、4.0a（1.1：CHECK 放行 `stopped`，4.0a：`store.ts` 798 行无余量须先拆出，server 只有在 5.1a 路由存在后才会真的发 `turn.end stopped`，故单独合入保绿）；3.2（atomic：两类审批事件进同一 `ChatEvent` 联合、同一 ring 测试文件，4.3 同时生产两者、5.3 同时归约两者）无前置依赖、独立可合并（类型 + ring 测试）
+Minimal mergeable slice: 3.1（atomic：归约联合加 `stopped` 使 supervisor 的 `turn.end` 穷举要求 store 同时接受 `stopped`，任一侧单独合入类型不通过）依赖 1.1、4.0a（1.1：CHECK 放行 `stopped`，4.0a：`store.ts` 798 行无余量须先拆出，server 只有在 5.1a 路由存在后才会真的发 `turn.end stopped`，故单独合入保绿；另依赖 7.1——omp v18.0.10 内部 TTSR/StreamingEditGuard/loop-guard 的 silent-abort 会在 server 发 `abort` 前产出 `message_end aborted`，3.1 一合入即可能落盘 `stopped`，故 web 解析须先行，见 #547 评审）；3.2（atomic：两类审批事件进同一 `ChatEvent` 联合、同一 ring 测试文件，4.3 同时生产两者、5.3 同时归约两者）无前置依赖、独立可合并（类型 + ring 测试）
 
 ## 4. omp-pool / turn-control / tool-approval — supervisor
 
