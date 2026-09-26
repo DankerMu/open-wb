@@ -19,6 +19,7 @@ import {
   MIGRATION_032,
   MIGRATION_033,
   MIGRATION_034,
+  MIGRATION_035,
   MIGRATION_0010,
   migrationReceiptExists,
   removeTempDirs,
@@ -216,7 +217,8 @@ function seedPre032Database(path: string): void {
     (asset) =>
       asset.filename !== MIGRATION_032 &&
       asset.filename !== MIGRATION_033 &&
-      asset.filename !== MIGRATION_034,
+      asset.filename !== MIGRATION_034 &&
+      asset.filename !== MIGRATION_035,
   );
   const filenames = assets.map((asset) => asset.filename);
   expect(filenames).toEqual([...HISTORICAL_FILENAMES]);
@@ -293,6 +295,9 @@ describe("core/db chat schema", () => {
         ["created_at", "INTEGER", 1, null, 0, 0],
         ["updated_at", "INTEGER", 1, null, 0, 0],
         ["parent_session_id", "TEXT", 0, null, 0, 0],
+        ["workspace_id", "TEXT", 0, null, 0, 0],
+        ["scene", "TEXT", 0, null, 0, 0],
+        ["pinned_at", "INTEGER", 0, null, 0, 0],
       ]);
       expect(columnInfo(db, "chat_messages")).toEqual([
         ["id", "INTEGER", 0, null, 1, 0],
@@ -301,6 +306,7 @@ describe("core/db chat schema", () => {
         ["content", "TEXT", 1, "''", 0, 0],
         ["status", "TEXT", 1, null, 0, 0],
         ["created_at", "INTEGER", 1, null, 0, 0],
+        ["thinking", "TEXT", 0, null, 0, 0],
       ]);
       expect(columnInfo(db, "chat_steps")).toEqual([
         ["id", "INTEGER", 0, null, 1, 0],
@@ -312,6 +318,7 @@ describe("core/db chat schema", () => {
         ["started_at", "INTEGER", 1, null, 0, 0],
         ["ended_at", "INTEGER", 0, null, 0, 0],
         ["output", "TEXT", 0, null, 0, 0],
+        ["changes", "TEXT", 0, null, 0, 0],
       ]);
       expect(db.prepare("PRAGMA foreign_key_list('chat_sessions')").all()).toEqual([
         expect.objectContaining({
@@ -325,6 +332,12 @@ describe("core/db chat schema", () => {
           from: "owner_id",
           to: "id",
           on_delete: "CASCADE",
+        }),
+        expect.objectContaining({
+          table: "workspaces",
+          from: "workspace_id",
+          to: "id",
+          on_delete: "SET NULL",
         }),
       ]);
       expectCascadeFk(db, "chat_messages", "chat_sessions", "session_id");
@@ -680,6 +693,12 @@ describe("core/db chat schema", () => {
     );
     expect(upgraded.receipts[6]).toEqual(
       expect.objectContaining({ sequence: 7, filename: MIGRATION_033 }),
+    );
+    expect(upgraded.receipts[7]).toEqual(
+      expect.objectContaining({ sequence: 8, filename: MIGRATION_034 }),
+    );
+    expect(upgraded.receipts[8]).toEqual(
+      expect.objectContaining({ sequence: 9, filename: MIGRATION_035 }),
     );
     expect(upgraded.business).toEqual(before.business);
     expectRepeatedOpenStable(file, (db) => {

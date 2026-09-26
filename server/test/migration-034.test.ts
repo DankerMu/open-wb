@@ -23,6 +23,7 @@ import {
   MIGRATION_032,
   MIGRATION_033,
   MIGRATION_034,
+  MIGRATION_035,
   MIGRATION_0010,
   migrationReceiptExists,
   removeTempDirs,
@@ -45,6 +46,7 @@ const RECEIPTS_033 = [
   MIGRATION_033,
 ] as const;
 const RECEIPTS_034 = [...RECEIPTS_033, MIGRATION_034] as const;
+const RECEIPTS_035 = [...RECEIPTS_034, MIGRATION_035] as const;
 const CHECK_FAILED = /CHECK constraint failed/;
 const UNIQUE_APPROVAL =
   /UNIQUE constraint failed: chat_approvals\.message_id, chat_approvals\.request_id/;
@@ -78,7 +80,7 @@ const STEP_COLUMNS = [
   "output",
 ] as const;
 
-// [name, type, notnull, dflt_value, pk] in declaration order (032 + 033 + 034).
+// [name, type, notnull, dflt_value, pk] in declaration order (032 + 033 + 034, then the 035 tail).
 const TABLE_INFO: Record<string, Array<[string, string, number, string | null, number]>> = {
   chat_sessions: [
     ["id", "TEXT", 1, null, 1],
@@ -90,6 +92,9 @@ const TABLE_INFO: Record<string, Array<[string, string, number, string | null, n
     ["created_at", "INTEGER", 1, null, 0],
     ["updated_at", "INTEGER", 1, null, 0],
     ["parent_session_id", "TEXT", 0, null, 0],
+    ["workspace_id", "TEXT", 0, null, 0],
+    ["scene", "TEXT", 0, null, 0],
+    ["pinned_at", "INTEGER", 0, null, 0],
   ],
   chat_messages: [
     ["id", "INTEGER", 0, null, 1],
@@ -98,6 +103,7 @@ const TABLE_INFO: Record<string, Array<[string, string, number, string | null, n
     ["content", "TEXT", 1, "''", 0],
     ["status", "TEXT", 1, null, 0],
     ["created_at", "INTEGER", 1, null, 0],
+    ["thinking", "TEXT", 0, null, 0],
   ],
   chat_steps: [
     ["id", "INTEGER", 0, null, 1],
@@ -109,6 +115,7 @@ const TABLE_INFO: Record<string, Array<[string, string, number, string | null, n
     ["started_at", "INTEGER", 1, null, 0],
     ["ended_at", "INTEGER", 0, null, 0],
     ["output", "TEXT", 0, null, 0],
+    ["changes", "TEXT", 0, null, 0],
   ],
   chat_approvals: [
     ["id", "INTEGER", 0, null, 1],
@@ -127,6 +134,7 @@ const FOREIGN_KEYS: Record<string, Array<Record<string, string>>> = {
   chat_sessions: [
     { from: "owner_id", table: "accounts", to: "id", on_delete: "CASCADE" },
     { from: "parent_session_id", table: "chat_sessions", to: "id", on_delete: "SET NULL" },
+    { from: "workspace_id", table: "workspaces", to: "id", on_delete: "SET NULL" },
   ],
   chat_messages: [{ from: "session_id", table: "chat_sessions", to: "id", on_delete: "CASCADE" }],
   chat_steps: [{ from: "message_id", table: "chat_messages", to: "id", on_delete: "CASCADE" }],
@@ -218,7 +226,9 @@ const EXPECTED_STEPS = STEPS.filter(([id]) => KEPT_STEP_IDS.includes(id)).map((r
 );
 
 function seed033Database(path: string, seed: (db: DatabaseSync) => void): void {
-  const assets = trackedMigrationAssets().filter((asset) => asset.filename !== MIGRATION_034);
+  const assets = trackedMigrationAssets().filter(
+    (asset) => asset.filename !== MIGRATION_034 && asset.filename !== MIGRATION_035,
+  );
   const filenames = assets.map((asset) => asset.filename);
   expect(filenames).toEqual([...RECEIPTS_033]);
   withDatabase(path, (db) => {
@@ -355,8 +365,9 @@ function indexes(db: DatabaseSync, table: string) {
 }
 
 function expect034Receipts(db: DatabaseSync): void {
-  expect(ledgerFilenames(db)).toEqual([...RECEIPTS_034]);
-  expect(ledgerRows(db).at(-1)).toEqual([8, MIGRATION_034]);
+  expect(ledgerFilenames(db)).toEqual([...RECEIPTS_035]);
+  expect(ledgerRows(db)[7]).toEqual([8, MIGRATION_034]);
+  expect(ledgerRows(db).at(-1)).toEqual([9, MIGRATION_035]);
 }
 
 function expect034Schema(db: DatabaseSync): void {

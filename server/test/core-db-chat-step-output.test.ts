@@ -16,6 +16,7 @@ import {
   MIGRATION_032,
   MIGRATION_033,
   MIGRATION_034,
+  MIGRATION_035,
   removeTempDirs,
   TRACKED_MIGRATION_FILENAMES,
   tempDir,
@@ -56,7 +57,10 @@ function stepRows(db: DatabaseSync, columns: string) {
 
 function seedPre033Database(path: string): void {
   const assets = trackedMigrationAssets().filter(
-    (asset) => asset.filename !== MIGRATION_033 && asset.filename !== MIGRATION_034,
+    (asset) =>
+      asset.filename !== MIGRATION_033 &&
+      asset.filename !== MIGRATION_034 &&
+      asset.filename !== MIGRATION_035,
   );
   const filenames = assets.map((asset) => asset.filename);
   expect(filenames).toEqual(TRACKED_MIGRATION_FILENAMES.slice(0, 6));
@@ -124,7 +128,9 @@ describe("core/db chat step output migration", () => {
     withOpenDb(file, (db) => {
       expect(ledgerFilenames(db)).toEqual([...TRACKED_MIGRATION_FILENAMES]);
       expect(ledgerFilenames(db).filter((name) => name === MIGRATION_033)).toHaveLength(1);
-      expect(stepRows(db, "*")).toEqual(PRE_033_STEPS.map((step) => ({ ...step, output: null })));
+      expect(stepRows(db, "*")).toEqual(
+        PRE_033_STEPS.map((step) => ({ ...step, output: null, changes: null })),
+      );
       const store = createSessionStore(db, { onFlushError: () => undefined });
       const tree = store.getMessages(SESSION_ID, "u1");
       expect(tree?.messages[1]?.steps.map((step) => [step.detail, step.output])).toEqual([
@@ -136,7 +142,9 @@ describe("core/db chat step output migration", () => {
 
     expectRepeatedOpenStable(file, (db) => {
       expect(ledgerFilenames(db)).toEqual([...TRACKED_MIGRATION_FILENAMES]);
-      expect(stepRows(db, "*")).toEqual(PRE_033_STEPS.map((step) => ({ ...step, output: null })));
+      expect(stepRows(db, "*")).toEqual(
+        PRE_033_STEPS.map((step) => ({ ...step, output: null, changes: null })),
+      );
     });
   });
 });
