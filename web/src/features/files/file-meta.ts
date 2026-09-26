@@ -39,6 +39,15 @@ export function formatSize(bytes: number): string {
   return `${value.toFixed(1)} ${UNITS[unit]}`;
 }
 
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+/** 查看者本地时区 `YYYY-MM-DD HH:mm`（24 小时制、各段补零），取 `Date` 本地分量拼接；非有限值显示 `—`。 */
+export function formatMtime(ms: number): string {
+  if (!Number.isFinite(ms)) return "—";
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
 /** 界面上的空间位置：`<account>/<dir>`；服务器返回的绝对 `root` 属内部布局，不渲染。 */
 export function logicalPath(account: string, dir: string): string {
   return `${account}/${dir}`;
