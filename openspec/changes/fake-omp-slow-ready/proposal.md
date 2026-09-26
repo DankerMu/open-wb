@@ -49,7 +49,7 @@ Evidence floor: 提交 1（纯拆分）：既有测试零 diff 全绿，新旧�
   - 形式：拆分是本 PR 的第一个独立提交，先验证全绿，再加 `slow-ready`。仍是一个 PR。
 - **拆分缝选 call-proxy 上游客户端，不选派单建议的审批状态机**。派单建议的切法是审批 factory：`abortTurn`/`deferredAbort`/`pendingSelects`/`approvedAny` 要经 getter/setter 跨模块，`handlePrompt`/`dispatch`/`handleAbort` 仍然读写它们，这不是纯搬迁；逐字节对照的面会是整个回合状态机；主文件只降到约 703 行。proxy 尾段是纯函数：没有模块状态，没有回调，只依赖 `node:` 内建模块。主文件因此降到 593 行，余量更大。
 - **ADDED 模块划分 requirement 不在父 delta 里**：沿用 session-store-split 先例与 carry-forward（#452）的要求。归档时原样推进，父 delta 不需要对账。
-- **延迟期间 stdin 关闭 = 立即退出、零帧**：issue 验收写「不挂起」。如果把延迟放进 queue 再等关闭，「不挂起」就变成「挂起整段延迟」，而 knob 没有上限。父 delta 括号里的「`ready` does eventually arrive」按稳态描述理解，不适用于关闭的情形。
+- **延迟期间 stdin 关闭 = 立即退出、零帧**：issue 验收写「不挂起」。如果把延迟放进 queue 再等关闭，「不挂起」就变成「挂起整段延迟」，而 knob 没有上限。父 delta 括号里的「`ready` does eventually arrive」按稳态描述理解，不适用于关闭的情形。第三种做法是关闭时立刻补发 ready 再退出，同样不采用：它会在不足 n ms 时发出 ready，破坏「ready 不早于 n ms」这一消费者依赖的唯一保证，而且对已经不再写入的父进程毫无用处。
 - **非法 knob 抛错退出**：issue 规定取值为「非负整数」。如果静默回落到 500，这条约束就形同虚设，下游计时用例可能因错误的理由通过。超过 2147483647 的值会让 `setTimeout` 溢出成 1ms，所以也算非法。
 - **消费者编号**：2.2b = #488，4.2b = #490（`gh issue view` 核对）。
 
