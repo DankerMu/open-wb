@@ -8,6 +8,7 @@ const DEV_ROLE = "成员";
 const THEME_STORAGE_KEY = "workbuddy-theme";
 const SIDEBAR = { name: "侧栏", exact: true } as const;
 const NAV_OVERLAY = { name: "导航", exact: true } as const;
+const WIDE_DESKTOP = { width: 1440, height: 900 } as const;
 const NARROW_DESKTOP = { width: 1024, height: 768 } as const;
 const MEDIUM_DESKTOP = { width: 880, height: 800 } as const;
 
@@ -103,6 +104,59 @@ export async function expectRouteViewports(
   if (path === "/files") await expectFilesColumns(page, project);
   if (project !== "desktop-light") return;
   await withViewport(page, NARROW_DESKTOP, () => expectRouteLayout(page, project));
+}
+
+// #424 欢迎态首屏：≥761px 五张最佳实践卡同一行（offsetTop 相同）；免责声明底边不超出视口，
+// 也不被 .chat-main 裁掉。desktop 在 1440×900 与 1024×768 各测一次，mobile 即 390×844。
+export async function expectWelcomeFirstScreen(page: Page, project: WalkProject): Promise<void> {
+  if (project === "mobile-dark") {
+    await expectDisclaimerInView(page, viewportLabel(page));
+    return;
+  }
+  for (const size of [WIDE_DESKTOP, NARROW_DESKTOP]) {
+    await withViewport(page, size, async () => {
+      await expectPlaybooksOneRow(page, viewportLabel(page));
+      await expectDisclaimerInView(page, viewportLabel(page));
+    });
+  }
+}
+
+function viewportLabel(page: Page): string {
+  const size = page.viewportSize();
+  return size ? `${size.width}x${size.height}` : "unknown viewport";
+}
+
+async function expectPlaybooksOneRow(page: Page, label: string): Promise<void> {
+  const cards = page
+    .getByRole("region", { name: "最佳实践案例" })
+    .locator(".chat-playbooks-row > li");
+  await expect(cards).toHaveCount(5);
+  // 各卡 offsetTop 相对首卡的差值；全 0 即单行，失败时直接显示换行形态（如 [0,0,x,x,y]）。
+  await expect
+    .poll(
+      () =>
+        cards.evaluateAll((items) => {
+          const tops = items.map((li) => (li as HTMLElement).offsetTop);
+          return tops.map((top) => top - (tops[0] ?? 0));
+        }),
+      `${label}: five playbook cards share one offsetTop`,
+    )
+    .toEqual([0, 0, 0, 0, 0]);
+}
+
+async function expectDisclaimerInView(page: Page, label: string): Promise<void> {
+  const disclaimer = page.getByText("内容由 AI 生成，请核实重要信息", { exact: true });
+  await expect(disclaimer).toBeVisible();
+  await expect
+    .poll(
+      () =>
+        disclaimer.evaluate((el) => {
+          const clip = el.closest(".chat-main")?.getBoundingClientRect().bottom ?? innerHeight;
+          return Math.ceil(el.getBoundingClientRect().bottom - Math.min(innerHeight, clip));
+        }),
+      `${label}: disclaimer bottom - min(innerHeight, .chat-main bottom) <= 0`,
+    )
+    .toBeLessThanOrEqual(0);
 }
 
 async function expectFilesColumns(page: Page, project: WalkProject): Promise<void> {
@@ -201,7 +255,7 @@ export async function openSidebar(page: Page, project: WalkProject): Promise<Loc
 }
 
 // 只断言不点路由：mobile 断言后按 Escape 关闭覆盖层，避免 Radix aria-hidden 影响后续定位。
-async function inspectSidebar(
+export async function inspectSidebar(
   page: Page,
   project: WalkProject,
   inspect: (sidebar: Locator) => Promise<void>,
@@ -210,6 +264,63 @@ async function inspectSidebar(
   if (project === "desktop-light") return;
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog", NAV_OVERLAY)).toHaveCount(0);
+}
+
+function sessionList(sidebar: Locator): Locator {
+  return sidebar.getByRole("navigation", { name: "会话列表" });
+}
+
+// #424：会话列表区在侧栏内 主导航 → 列表 → 用户区，main 内没有；mobile 关闭覆盖层后列表不在 DOM。
+export async function expectSessionListInSidebar(page: Page, project: WalkProject): Promise<void> {
+  const main = page.getByRole("main");
+  await expect(main.getByRole("navigation", { name: "会话列表" })).toHaveCount(0);
+  await expect(main.getByRole("button", { name: "新建会话" })).toHaveCount(0);
+  await inspectSidebar(page, project, async (sidebar) => {
+    await expect(sessionList(sidebar).getByRole("button", { name: "新建会话" })).toBeVisible();
+    const ordered = await sidebar.evaluate((aside) => {
+      const nav = aside.querySelector('nav[aria-label="主导航"]');
+      const list = aside.querySelector('nav[aria-label="会话列表"]');
+      const footer = aside.querySelector("footer");
+      if (!nav || !list || !footer) return false;
+      const after = (a: Node, b: Node) =>
+        Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+      return after(nav, list) && after(list, footer);
+    });
+    expect(ordered, "sidebar order: 主导航 → 会话列表 → footer").toBe(true);
+  });
+  if (project === "mobile-dark") {
+    await expect(page.locator('nav[aria-label="会话列表"]')).toHaveCount(0);
+  }
+}
+
+// 经侧栏 新建会话：mobile 先开覆盖层，点击后覆盖层随即关闭（列表经 onNavigate 关闭它）。
+export async function createSessionFromSidebar(page: Page, project: WalkProject): Promise<void> {
+  const sidebar = await openSidebar(page, project);
+  await sessionList(sidebar).getByRole("button", { name: "新建会话" }).click();
+  if (project === "mobile-dark") {
+    await expect(page.getByRole("dialog", NAV_OVERLAY)).toHaveCount(0);
+  }
+}
+
+// mobile 在覆盖层里选中列表首项：覆盖层关闭、URL 写入 ?session=。
+export async function selectFirstSessionInOverlay(page: Page): Promise<void> {
+  const sidebar = await openSidebar(page, "mobile-dark");
+  await sessionList(sidebar).locator("button.chat-session-button").first().click();
+  await expect(page.getByRole("dialog", NAV_OVERLAY)).toHaveCount(0);
+  await expect.poll(() => new URL(page.url()).searchParams.get("session") ?? "").not.toBe("");
+}
+
+// 当前会话项的状态：侧栏里恰一项 aria-current，其 status 文本为 `text`（mobile 经覆盖层查看）。
+export async function expectSelectedSessionStatus(
+  page: Page,
+  project: WalkProject,
+  text: string,
+): Promise<void> {
+  await inspectSidebar(page, project, async (sidebar) => {
+    const current = sessionList(sidebar).locator('button[aria-current="true"]');
+    await expect(current).toHaveCount(1);
+    await expect(current.getByRole("status")).toHaveText(text);
+  });
 }
 
 export async function clickRoute(page: Page, project: WalkProject, label: string): Promise<void> {

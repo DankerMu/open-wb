@@ -61,7 +61,7 @@ export function WelcomePlaybooks({ disabled, onPick }: WelcomeProps) {
               >
                 <span className="chat-playbook-title">
                   <Icon name={item.icon} size={12} />
-                  {item.title}
+                  <span className="chat-playbook-title-text">{item.title}</span>
                 </span>
                 <span className="chat-playbook-desc">{item.desc}</span>
               </button>

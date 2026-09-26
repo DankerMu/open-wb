@@ -1,6 +1,6 @@
 /* Chat presentation.
    Visual language adapted from resource/workbuddy-live-demo.html:282-298
-   (session rows), 337-362 (welcome), 363-378 (composer card).
+   (session rows), 337-362 (welcome), 363-378 (composer card), 408-409 (playbook row).
    Design tokens from WorkBuddy 5.3.11 (wb-design-tokens-master.css /
    design-tokens.json), light/dark brand colors via --wb-brand-primary in
    web/src/styles/tokens.css. Shell owns :root.
@@ -17,10 +17,10 @@
   overflow: hidden;
 }
 
+/* Single full-width column: the session list lives in the shell sidebar (issue 424). */
 .chat-layout {
   display: grid;
-  grid-template-columns: minmax(12rem, 16rem) minmax(0, 1fr);
-  gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
   padding: 16px 20px 20px;
   min-width: 0;
   min-height: 0;
@@ -28,25 +28,16 @@
   overflow: hidden;
 }
 
-.chat-sidebar {
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--wb-bg-secondary);
-  border: 1px solid var(--wb-border-default);
-  border-radius: 12px;
-}
-
+/* Session list, rendered in the shell sidebar list area (.sidebar-main, demo:274) and sitting
+   directly on the sidebar background: 新建会话 stays pinned on top, the list below is the only
+   scroll container. */
 .chat-session-nav {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 10px;
   min-height: 0;
-  height: 100%;
-  padding: 12px;
-  overflow: hidden;
+  padding: 4px 0 12px;
 }
 
 .chat-new-session {
@@ -70,6 +61,12 @@
   flex: 1;
   overflow-x: hidden;
   overflow-y: auto;
+}
+
+/* The nav overlay scrolls its Drawer body as a whole; `flex: none` keeps the list at content height
+   so its own `overflow-y: auto` never engages (no nested scroller). */
+.sidebar[data-variant="overlay"] .chat-session-list {
+  flex: none;
 }
 
 .chat-session-item {
@@ -286,9 +283,11 @@
   color: var(--wb-text-primary);
 }
 
+/* ≥761px: one row per demo:408-409. No `overflow: hidden` (it would clip the global focus ring);
+   flex: 1 1 0 + min-width: 0 already keeps the row inside its box. ≤760px wraps (see below). */
 .chat-playbooks-row {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 10px;
   margin: 0;
   padding: 0;
@@ -296,7 +295,7 @@
 }
 
 .chat-playbooks-row > li {
-  flex: 1 1 140px;
+  flex: 1 1 0;
   max-width: 220px;
   min-width: 0;
 }
@@ -353,6 +352,14 @@
 .chat-playbook-title > .ui-icon {
   flex: none;
   color: var(--wb-brand-primary);
+}
+
+/* A bare text node in the flex title cannot ellipsize; the narrowest ≥761px card is ~75px. */
+.chat-playbook-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat-playbook-desc {
@@ -472,20 +479,26 @@
 }
 
 @media (max-width: 760px) {
+  /* The shell height is auto here (styles.css ≤760 block), so a grid row would take the
+     transcript's content height; a flex column with a zero-basis .chat-main keeps the
+     transcript as the scroll container. */
   .chat-layout {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-  }
-
-  .chat-sidebar {
-    flex: none;
-    max-height: 9.5rem;
   }
 
   .chat-main {
     flex: 1 1 0;
     min-height: 0;
+  }
+
+  /* The demo squeezes a single row to ~60px cards at 390; keep wrapping here instead. */
+  .chat-playbooks-row {
+    flex-wrap: wrap;
+  }
+
+  .chat-playbooks-row > li {
+    flex: 1 1 140px;
   }
 
   .chat-composer-input {

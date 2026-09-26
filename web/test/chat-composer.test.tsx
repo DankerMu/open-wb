@@ -3,7 +3,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanupChatPage, renderChatPage } from "./chat-page-support.js";
 import { chatSnapshot, FakeEventSource, latestSource, SESSION_ID } from "./chat-stream-support.js";
 import { deferredResponse, jsonResponse } from "./support.js";
-import { COLOR_LITERAL_PATTERNS, readRepoFile, ruleBody, stripComments } from "./ui-support.js";
+import {
+  blockBody,
+  COLOR_LITERAL_PATTERNS,
+  readRepoFile,
+  ruleBody,
+  stripComments,
+} from "./ui-support.js";
 
 const COMPOSER_NAME = "给助手发消息";
 const HINT = "Enter 发送 · Shift+Enter 换行";
@@ -190,11 +196,34 @@ describe("(C5) static contract", () => {
     expect(buttonTag).not.toContain("role");
   });
 
-  it("conversation view maps session status through SESSION_STATUS_LABEL", () => {
-    const source = readRepoFile("web/src/features/chat/conversation-view.tsx");
+  it("session nav maps session status through SESSION_STATUS_LABEL", () => {
+    const source = readRepoFile("web/src/features/chat/session-nav.tsx");
     expect(source).not.toMatch(/>\s*\{session\.status\}\s*</);
     expect(source).toContain("SESSION_STATUS_LABEL");
     expect(source).toContain("ui-pulse");
+    // 列表只经侧栏槽位渲染：主区视图不再持有会话列表。
+    const view = readRepoFile("web/src/features/chat/conversation-view.tsx");
+    expect(view).not.toContain("会话列表");
+    expect(view).not.toContain("新建会话");
+  });
+
+  it("chat.css: single-column layout, one-row playbooks at ≥761px, wrap kept at ≤760px", () => {
+    const css = stripComments(readRepoFile("web/src/features/chat/chat.css"));
+    expect(ruleBody(css, ".chat-layout")).toContain("grid-template-columns: minmax(0, 1fr);");
+    expect(css).not.toContain(".chat-sidebar");
+    const row = ruleBody(css, ".chat-playbooks-row");
+    expect(row).toContain("flex-wrap: nowrap;");
+    expect(row).not.toContain("overflow");
+    const card = ruleBody(css, ".chat-playbooks-row > li");
+    expect(card).toContain("flex: 1 1 0;");
+    expect(card).toContain("min-width: 0;");
+    expect(card).toContain("max-width: 220px;");
+    expect(ruleBody(css, ".chat-playbook-title-text")).toContain("text-overflow: ellipsis;");
+    const narrow = blockBody(css, /@media\s*\(max-width:\s*760px\)\s*\{/);
+    expect(ruleBody(narrow, ".chat-playbooks-row")).toContain("flex-wrap: wrap;");
+    expect(ruleBody(narrow, ".chat-playbooks-row > li")).toContain("flex: 1 1 140px;");
+    expect(ruleBody(narrow, ".chat-layout")).not.toContain("gap");
+    expect(ruleBody(css, ".chat-session-nav")).not.toContain("overflow");
   });
 
   it("chat.css drops the badge and visible-label styles and keeps the round focus ring", () => {
@@ -219,8 +248,11 @@ describe("(C5) static contract", () => {
 
   it("ui-walk expects the Chinese session status", () => {
     const walk = readRepoFile("web/e2e/ui-walk.spec.ts");
-    expect(walk).toContain('toHaveText("运行中")');
-    expect(walk).toContain('toHaveText("已完成")');
+    expect(walk).toContain('expectSelectedSessionStatus(page, project, "运行中")');
+    expect(walk).toContain('expectSelectedSessionStatus(page, project, "已完成")');
+    expect(readRepoFile("web/e2e/ui-walk-layout.ts")).toContain(
+      'current.getByRole("status")).toHaveText(text)',
+    );
     expect(walk).not.toContain('toHaveText("running")');
     expect(walk).not.toContain('toHaveText("done")');
   });

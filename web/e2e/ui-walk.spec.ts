@@ -11,6 +11,7 @@ import { holdRoute } from "./route-hold.js";
 import { armGate, controlOrigin, deleteGate, gatePhase, releaseGate } from "./ui-walk-gate.js";
 import {
   clickRoute,
+  createSessionFromSidebar,
   DEV_ACCOUNT,
   expectAuthenticatedRoute,
   expectDesktopLayout,
@@ -18,9 +19,13 @@ import {
   expectReducedMotionToggle,
   expectRouteViewports,
   expectScrollableX,
+  expectSelectedSessionStatus,
+  expectSessionListInSidebar,
   expectTruncatedRow,
+  expectWelcomeFirstScreen,
   mainBackground,
   openSidebar,
+  selectFirstSessionInOverlay,
   switchTheme,
   type WalkProject,
   walkProject,
@@ -95,6 +100,17 @@ async function walkProductionOrigin(
   await clickRoute(page, project, "会话");
   await expectAuthenticatedRoute(page, project, "/", ROUTES[0].heading, "会话");
   await walkHeldDialogue(page, project);
+  // 放在建会话之后：列表非空时仍须满足首屏约束（#424）。
+  await clickRoute(page, project, "会话");
+  await expectAuthenticatedRoute(page, project, "/", ROUTES[0].heading, "会话");
+  await test.step("session list in sidebar and welcome first screen (#424)", async () => {
+    await expectSessionListInSidebar(page, project);
+    await expectWelcomeFirstScreen(page, project);
+    if (project === "mobile-dark") {
+      await selectFirstSessionInOverlay(page);
+      await expect(page.getByRole("article", { name: "助手" }).first()).toBeVisible();
+    }
+  });
   await clickRoute(page, project, "设置");
   await expectAuthenticatedRoute(page, project, "/settings", "设置", "设置");
 
@@ -263,7 +279,7 @@ async function walkHeldDialogue(page: Page, project: WalkProject): Promise<void>
   const origin = controlOrigin();
   try {
     await armGate(origin, gateId);
-    await page.getByRole("button", { name: "新建会话" }).click();
+    await createSessionFromSidebar(page, project);
     await expect.poll(() => sessionIdFromUrl(page.url())).toMatch(SESSION_ID);
     const crumb = page.getByRole("banner").getByRole("heading", { level: 1 });
     await expect(crumb).toHaveAccessibleName(/^我的工作 \/ /);
@@ -282,7 +298,7 @@ async function walkHeldDialogue(page: Page, project: WalkProject): Promise<void>
     await expect.poll(() => gatePhase(origin, gateId)).toBe("held");
     const preReload = await fetchSessionSnapshot(page, sessionId);
     expectRunningSnapshot(preReload, prompt, sessionId, promptIds);
-    await expectRunningPrefix(page, sessionId, prompt);
+    await expectRunningPrefix(page, project, sessionId, prompt);
     if (project === "desktop-light") await expectReducedMotionToggle(page);
 
     const postReload = watchSessionTraffic(page, sessionId);
@@ -293,10 +309,10 @@ async function walkHeldDialogue(page: Page, project: WalkProject): Promise<void>
       const recovery = await postReload.waitForRecoveryAfterNative();
       expectRunningSnapshot(await recovery.json(), prompt, sessionId, promptIds);
       postReload.assertNoMessagesGetInFlight();
-      await expectRunningPrefix(page, sessionId, prompt);
+      await expectRunningPrefix(page, project, sessionId, prompt);
       postReload.forbidFurtherMessagesGet();
       await releaseGate(origin, gateId);
-      await expectCompletedPair(page, sessionId, prompt);
+      await expectCompletedPair(page, project, sessionId, prompt);
       postReload.assertNoForbiddenMessagesGet();
     } finally {
       postReload.detach();
@@ -304,7 +320,7 @@ async function walkHeldDialogue(page: Page, project: WalkProject): Promise<void>
 
     await page.reload();
     await expect.poll(() => page.url()).toBe(sessionUrl);
-    await expectCompletedPair(page, sessionId, prompt);
+    await expectCompletedPair(page, project, sessionId, prompt);
     await walkScrollFollow(page, project);
   } finally {
     await deleteGate(origin, gateId);
@@ -611,11 +627,6 @@ function parsePromptIds(body: unknown): { userMessageId: number; assistantMessag
   return { userMessageId, assistantMessageId };
 }
 
-function selectedSessionStatus(page: Page) {
-  const current = page.locator('nav[aria-label="会话列表"] button[aria-current="true"]');
-  return { current, status: current.getByRole("status") };
-}
-
 function generatingStatus(page: Page) {
   return page
     .locator("form")
@@ -638,11 +649,15 @@ async function dialoguePair(page: Page, sessionId: string, prompt: string): Prom
   return { user, assistant };
 }
 
-async function expectRunningPrefix(page: Page, sessionId: string, prompt: string): Promise<void> {
+// 列表状态在侧栏里读：mobile 开覆盖层读完即关，再查 main（覆盖层开着时应用根被 aria-hidden）。
+async function expectRunningPrefix(
+  page: Page,
+  project: WalkProject,
+  sessionId: string,
+  prompt: string,
+): Promise<void> {
   const pair = await dialoguePair(page, sessionId, prompt);
-  const selected = selectedSessionStatus(page);
-  await expect(selected.current).toHaveCount(1);
-  await expect(selected.status).toHaveText("运行中");
+  await expectSelectedSessionStatus(page, project, "运行中");
   await expect(generatingStatus(page)).toBeVisible();
   await expect
     .poll(async () =>
@@ -690,7 +705,12 @@ function expectRunningSnapshot(
   expect(assistant?.status).toBe("running");
 }
 
-async function expectCompletedPair(page: Page, sessionId: string, prompt: string): Promise<void> {
+async function expectCompletedPair(
+  page: Page,
+  project: WalkProject,
+  sessionId: string,
+  prompt: string,
+): Promise<void> {
   const pair = await dialoguePair(page, sessionId, prompt);
   await expect(pair.assistant.locator(".chat-md")).toHaveText(EXPECTED_REPLY);
   await expect(page.getByRole("status", { name: "bash 已完成" })).toBeVisible();
@@ -703,8 +723,6 @@ async function expectCompletedPair(page: Page, sessionId: string, prompt: string
   await expect(bash.locator("details.chat-step-disclosure pre.chat-step-output")).toHaveText(
     /^workbuddy-smoke/u,
   );
-  const selected = selectedSessionStatus(page);
-  await expect(selected.current).toHaveCount(1);
-  await expect(selected.status).toHaveText("已完成");
+  await expectSelectedSessionStatus(page, project, "已完成");
   await expect(generatingStatus(page)).toHaveCount(0);
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Outlet } from "react-router";
+import { SidebarSlotProvider } from "../../lib/sidebar-slot.js";
 import { TopbarProvider } from "../../lib/topbar.js";
 import { SHELL_NARROW_QUERY, useMediaQuery } from "../../lib/viewport.js";
 import { Drawer } from "../../ui/index.js";
@@ -9,6 +10,7 @@ import { Topbar } from "./topbar.js";
 /**
  * 已认证外壳：侧栏 + 内容列（顶栏在 `main` 之外，页面经 Outlet 渲染进 `main`）。窄屏时侧栏不在
  * 文档流中，改由顶栏 `打开导航` 打开的 Drawer 覆盖层承载；覆盖层开合是瞬时状态，不碰折叠偏好。
+ * 侧栏列表区经 SidebarSlotProvider 由页面上报（槽位 state 在 Provider 内，不随上报重渲染本组件）。
  */
 export function AppShell() {
   const [collapsed, toggle] = useSidebarCollapsed();
@@ -22,21 +24,23 @@ export function AppShell() {
   const closeNav = useCallback(() => setNavOpen(false), []);
   return (
     <TopbarProvider>
-      <div className="app-shell">
-        {narrow ? (
-          <Drawer onOpenChange={setNavOpen} open={navOpen} side="left" title="导航" width={288}>
-            <Sidebar onNavigate={closeNav} variant="overlay" />
-          </Drawer>
-        ) : (
-          <Sidebar collapsed={collapsed} onToggle={toggle} />
-        )}
-        <div className="app-content">
-          <Topbar onOpenNav={narrow ? openNav : undefined} />
-          <main>
-            <Outlet />
-          </main>
+      <SidebarSlotProvider>
+        <div className="app-shell">
+          {narrow ? (
+            <Drawer onOpenChange={setNavOpen} open={navOpen} side="left" title="导航" width={288}>
+              <Sidebar onNavigate={closeNav} variant="overlay" />
+            </Drawer>
+          ) : (
+            <Sidebar collapsed={collapsed} onToggle={toggle} />
+          )}
+          <div className="app-content">
+            <Topbar onOpenNav={narrow ? openNav : undefined} />
+            <main>
+              <Outlet />
+            </main>
+          </div>
         </div>
-      </div>
+      </SidebarSlotProvider>
     </TopbarProvider>
   );
 }
