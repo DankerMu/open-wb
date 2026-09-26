@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { THEME_STORAGE_KEY } from "../src/features/theme/index.js";
 import { loadTheme, type MatchMedia, resolveTheme } from "../src/lib/theme.js";
+import { createMediaQuery } from "./media-query-support.js";
 import { readRepoFile } from "./ui-support.js";
 
 // #429：web/index.html 的首帧前内联脚本须与 theme.ts（loadTheme + resolveTheme）逐输入一致。
-const THEME_STORAGE_KEY = "workbuddy-theme";
 const SYSTEM_DARK_QUERY = "(prefers-color-scheme: dark)";
 
 type StoredCase = { name: string; getItem: (key: string) => string | null };
@@ -23,8 +24,8 @@ const STORED: StoredCase[] = [
 ];
 
 const MEDIA: MediaCase[] = [
-  { name: "system dark", matchMedia: (query) => ({ matches: query === SYSTEM_DARK_QUERY }) },
-  { name: "system light", matchMedia: () => ({ matches: false }) },
+  { name: "system dark", matchMedia: (query) => createMediaQuery(query === SYSTEM_DARK_QUERY) },
+  { name: "system light", matchMedia: () => createMediaQuery(false) },
   {
     name: "matchMedia throws",
     matchMedia: () => {
@@ -38,10 +39,12 @@ function headDocument(): Document {
   return new DOMParser().parseFromString(readRepoFile("web/index.html"), "text/html");
 }
 
+const CLASSIC_INLINE_SCRIPT = "script:not([src]):not([type])";
+
 function inlineScript(): string {
-  const script = headDocument().head.querySelector("script:not([src]):not([type])");
-  expect(script, "web/index.html <head> has a classic inline script").not.toBeNull();
-  return script?.textContent ?? "";
+  const scripts = headDocument().head.querySelectorAll(CLASSIC_INLINE_SCRIPT);
+  expect(scripts, "web/index.html <head> has exactly one classic inline script").toHaveLength(1);
+  return scripts[0]?.textContent ?? "";
 }
 
 // provider.tsx resolveBrowserTheme/getMediaQuery：matchMedia 缺失或抛错按不匹配（浅色）。
@@ -69,9 +72,14 @@ function runInlineScript(source: string, stored: StoredCase, media: MediaCase) {
 }
 
 describe("首帧前主题内联脚本", () => {
-  it("是 <head> 内样式表 <link> 之前的经典脚本", () => {
+  it("读取 ThemeProvider 的同一存储键（防键名漂移）", () => {
+    expect(inlineScript()).toContain(JSON.stringify(THEME_STORAGE_KEY));
+  });
+
+  it("是 <head> 内样式表 <link> 之前唯一的经典脚本", () => {
+    inlineScript();
     const head = headDocument().head;
-    const script = head.querySelector("script:not([src]):not([type])");
+    const script = head.querySelector(CLASSIC_INLINE_SCRIPT);
     const link = head.querySelector('link[rel="stylesheet"]');
     expect(script).not.toBeNull();
     expect(link).not.toBeNull();
