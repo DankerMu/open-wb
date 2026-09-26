@@ -2,6 +2,26 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // 首帧前主题（#429）：规则同 web/src/lib/theme.ts（loadTheme + resolveTheme），
+      // matchMedia 缺失或抛错按浅色（provider.tsx resolveBrowserTheme）；挂载后由 ThemeProvider 接管。
+      (() => {
+        let theme = null;
+        try {
+          theme = window.localStorage.getItem("workbuddy-theme");
+        } catch {}
+        if (theme !== "light" && theme !== "dark") {
+          try {
+            theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+          } catch {
+            theme = "light";
+          }
+        }
+        try {
+          document.documentElement.dataset.theme = theme;
+        } catch {}
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="stylesheet" href="/src/styles.css" />
     <title>WorkBuddy</title>

@@ -15,6 +15,7 @@ import {
   DEV_ACCOUNT,
   expectAuthenticatedRoute,
   expectDesktopLayout,
+  expectPrePaintTheme,
   expectPrincipalFooter,
   expectReducedMotionToggle,
   expectRouteViewports,
@@ -64,6 +65,15 @@ test("fresh browser journey logs in, walks four routes, persists theme, and logs
   await runWithBrowserErrorOracle(page, baseURL, options, (oracle) =>
     walkProductionOrigin(page, oracle, project),
   );
+});
+
+// #429：独立 test、独立 context，不进旅程的 oracle；只在 desktop-light 跑。
+test("cold load writes the stored theme before the stylesheet and #root", async ({
+  baseURL,
+  browser,
+}, testInfo) => {
+  test.skip(testInfo.project.name === "mobile-dark", "pre-paint theme runs on desktop-light only");
+  await expectPrePaintTheme(browser, baseURL);
 });
 
 function walkOutName(project: WalkProject): string {

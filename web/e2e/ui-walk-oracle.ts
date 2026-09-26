@@ -26,6 +26,9 @@ export type AuthOracle = {
   foreignRequests: string[];
 };
 
+/** The inputs the /api/auth/me origin binding needs: the baseURL origin and the page under test. */
+export type OriginBinding = Pick<AuthOracle, "productionOrigin" | "page">;
+
 export type OracleOptions = {
   /** Account static-asset requestfailed and non-baseURL-origin requests from the first goto. */
   watchAssets: boolean;
@@ -177,7 +180,11 @@ function classifyConsoleMessage(oracle: AuthOracle, message: ConsoleMessage): vo
   oracle.unexpectedConsole.push(`console.error: ${message.text()}`);
 }
 
-function isExpectedUnauthorizedNetworkLog(oracle: AuthOracle, message: ConsoleMessage): boolean {
+/** The single Chromium network log a bound GET /api/auth/me 401 produces; reused by the pre-paint check. */
+export function isExpectedUnauthorizedNetworkLog(
+  oracle: OriginBinding,
+  message: ConsoleMessage,
+): boolean {
   if (message.text() !== UNAUTHORIZED_NETWORK_LOG) {
     return false;
   }
@@ -186,7 +193,7 @@ function isExpectedUnauthorizedNetworkLog(oracle: AuthOracle, message: ConsoleMe
   return url !== null && isProductionMeUrl(oracle, url);
 }
 
-function isProductionMeUrl(oracle: AuthOracle, url: URL): boolean {
+function isProductionMeUrl(oracle: OriginBinding, url: URL): boolean {
   if (url.origin !== oracle.productionOrigin || url.pathname !== ME_PATH) {
     return false;
   }
