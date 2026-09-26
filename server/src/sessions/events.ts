@@ -20,7 +20,21 @@ export type ChatEvent<StepId extends string | number = number> =
       };
     }
   | { type: "turn.end"; data: { messageId: number; status: "done" | "failed" } }
-  | { type: "error"; data: { messageId: number; message: string } };
+  | { type: "error"; data: { messageId: number; message: string } }
+  | {
+      type: "approval.request";
+      data: {
+        messageId: number;
+        approvalId: number;
+        tool: string;
+        title: string;
+        expiresAt: number;
+      };
+    }
+  | {
+      type: "approval.resolved";
+      data: { messageId: number; approvalId: number; decision: "allow" | "deny" | "timeout" };
+    };
 
 const GENERIC_FAILURE = "Agent execution failed";
 // detail（args）与 output（result 文本）各自的码点上限；环形缓冲最坏成本见 #367 design D3。
