@@ -10,7 +10,13 @@ import {
   type FetchMock,
   jsonResponse,
 } from "./support.js";
-import { readRepoFile, ruleBody, stripComments, yieldMacrotask } from "./ui-support.js";
+import {
+  readRepoFile,
+  ruleBody,
+  stripComments,
+  topLevelBlocks,
+  yieldMacrotask,
+} from "./ui-support.js";
 
 const STORAGE_KEY = "workbuddy-sidebar";
 const LABELS = ["会话", "工作空间", "中心", "设置"];
@@ -96,6 +102,115 @@ describe("侧栏展开态 (S1)", () => {
     expect(within(links[1] as HTMLElement).getByText("文件·预览", { exact: true })).toBeTruthy();
     expect(within(aside).getByText("WorkBuddy", { exact: true })).toBeTruthy();
     expect(within(aside).getByRole("button", { name: "折叠侧栏" })).toBeTruthy();
+  });
+});
+
+const LIST_SESSION = {
+  id: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  title: "周报",
+  status: "done",
+  createdAt: 1_740_000_000_000,
+  updatedAt: 1_740_000_000_100,
+} as const;
+
+function mountChat(path = "/", strict = false) {
+  const fetchMock = createFetchMock({
+    "/api/auth/me": () => jsonResponse(authenticatedPrincipal),
+    "/api/workspaces": () => jsonResponse({ workspaces: [] }),
+    "/api/sessions": () => jsonResponse({ sessions: [LIST_SESSION] }),
+    "/api/info": () =>
+      jsonResponse({
+        name: "workbuddy-app-server",
+        version: "0.0.0",
+        auth: { provider: "dev-stub" },
+      }),
+  });
+  const mounted = mountAuthenticatedApp(path, fetchMock, strict);
+  disposeRouter = () => mounted.router.dispose();
+}
+
+async function findChatSidebar() {
+  expect(await screen.findByRole("heading", { level: 1, name: "WorkBuddy，我帮你" })).toBeTruthy();
+  const aside = screen.getByRole("complementary", { name: "侧栏" });
+  await within(aside).findByRole("button", { name: LIST_SESSION.title });
+  return aside;
+}
+
+function follows(first: Element, second: Element) {
+  return Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
+}
+
+function expectNoSessionList() {
+  expect(screen.queryByRole("navigation", { name: "会话列表" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "新建会话" })).toBeNull();
+}
+
+describe("侧栏会话列表区 (S11)", () => {
+  it("/ 展开态：新建会话 与 会话列表 在侧栏 主导航 之后、用户区之前，main 内没有", async () => {
+    mountChat();
+    const aside = await findChatSidebar();
+
+    const mainNav = within(aside).getByRole("navigation", { name: "主导航" });
+    const list = within(aside).getByRole("navigation", { name: "会话列表" });
+    const create = within(list).getByRole("button", { name: "新建会话" });
+    const footer = aside.querySelector("footer");
+    if (!footer) throw new Error("侧栏缺用户区");
+    expect(follows(mainNav, list)).toBe(true);
+    expect(follows(list, footer)).toBe(true);
+    expect(list.closest(".sidebar-main")?.parentElement).toBe(aside);
+    expect(create.className).toContain("chat-new-session");
+    const main = screen.getByRole("main");
+    expect(within(main).queryByRole("navigation", { name: "会话列表" })).toBeNull();
+    expect(within(main).queryByRole("button", { name: "新建会话" })).toBeNull();
+    expect(screen.getAllByRole("navigation", { name: "会话列表" })).toHaveLength(1);
+  });
+
+  it("折叠态不渲染列表区；展开后恢复", async () => {
+    mountChat();
+    const aside = await findChatSidebar();
+
+    toggleSidebar(aside, "折叠侧栏");
+    expectNoSessionList();
+    expect(aside.querySelector(".sidebar-main")).toBeNull();
+
+    toggleSidebar(aside, "展开侧栏");
+    expect(within(aside).getByRole("navigation", { name: "会话列表" })).toBeTruthy();
+    expect(within(aside).getByRole("button", { name: LIST_SESSION.title })).toBeTruthy();
+  });
+
+  it("离开 / 后清空列表区；/files、/settings 直挂也无列表", async () => {
+    mountChat();
+    const aside = await findChatSidebar();
+
+    fireEvent.click(within(aside).getByRole("link", { name: /^工作空间/ }));
+    expect(await screen.findByRole("heading", { level: 1, name: "工作空间" })).toBeTruthy();
+    expectNoSessionList();
+    expect(aside.querySelector(".sidebar-main")?.childElementCount).toBe(0);
+    cleanup();
+    disposeRouter?.();
+
+    mountChat("/settings");
+    expect(await screen.findByRole("heading", { level: 1, name: "设置" })).toBeTruthy();
+    expectNoSessionList();
+  });
+
+  it("StrictMode 双挂载后只有一份列表", async () => {
+    mountChat("/", true);
+    await findChatSidebar();
+
+    expect(screen.getAllByRole("navigation", { name: "会话列表" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "新建会话" })).toHaveLength(1);
+  });
+
+  it("sidebar.css 的主导航规则不再匹配列表区的 nav；列表区不另设滚动层", () => {
+    const css = stripComments(readRepoFile("web/src/routes/shell/sidebar.css"));
+    const preludes = topLevelBlocks(css).map((block) => block.prelude);
+    expect(preludes.filter((prelude) => /(^|[\s>+~])nav\b/.test(prelude))).toEqual([]);
+    expect(preludes).toContain(".sidebar-nav");
+    const area = ruleBody(css, ".sidebar-main");
+    expect(area).toContain("flex: 1;");
+    expect(area).toContain("min-height: 0;");
+    expect(area).not.toContain("overflow");
   });
 });
 

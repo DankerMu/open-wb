@@ -16,7 +16,13 @@ import {
   type FetchMock,
   jsonResponse,
 } from "./support.js";
-import { blockBody, readRepoFile, stripComments, yieldMacrotask } from "./ui-support.js";
+import {
+  blockBody,
+  pressPointer,
+  readRepoFile,
+  stripComments,
+  yieldMacrotask,
+} from "./ui-support.js";
 import "./radix-platform.js";
 
 const HERO = "WorkBuddy，我帮你";
@@ -304,6 +310,86 @@ describe("覆盖层开合 (R3/R6)", () => {
     const second = await openNav();
     fireEvent.click(within(second.dialog).getByRole("button", { name: "关闭" }));
     await expectNavClosed(view.container, second.button);
+  });
+});
+
+const SESSION_B = "dddddddddddddddddddddddddddddddd";
+
+function listSession(id: string, title: string, updatedAt: number) {
+  return { ...chatSnapshot().session, id, status: "done" as const, title, updatedAt };
+}
+
+/** 两个会话；选中会话的历史挂起（只验证导航与覆盖层），新建返回 SESSION_B 并被选中。 */
+function listRoutes(): Routes {
+  return {
+    "/api/sessions": (_path, options) =>
+      options?.method === "POST"
+        ? jsonResponse(listSession(SESSION_B, "新建的", 3), 201)
+        : jsonResponse({
+            sessions: [listSession(SESSION, "周报", 2), listSession(SESSION_B, "复盘", 1)],
+          }),
+    [`/api/sessions/${SESSION}/messages`]: () => deferredResponse().promise,
+    [`/api/sessions/${SESSION_B}/messages`]: () => deferredResponse().promise,
+  };
+}
+
+function follows(first: Element, second: Element) {
+  return Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
+}
+
+describe("覆盖层会话列表区 (R11/R12)", () => {
+  it("R11 列表在主导航之后；选择会话关闭覆盖层、写 ?session=、归还焦点；新建会话同样关闭", async () => {
+    installViewport(true);
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+    const { fetchMock, view } = mountShell("/", listRoutes());
+    await screen.findByRole("heading", { level: 1, name: HERO });
+    expect(screen.queryByRole("navigation", { name: "会话列表", hidden: true })).toBeNull();
+    expect(screen.queryByRole("button", { name: "新建会话", hidden: true })).toBeNull();
+
+    const first = await openNav();
+    const mainNav = within(first.dialog).getByRole("navigation", { name: "主导航" });
+    const list = within(first.dialog).getByRole("navigation", { name: "会话列表" });
+    const footer = first.dialog.querySelector("aside footer");
+    if (!footer) throw new Error("覆盖层缺用户区");
+    expect(follows(mainNav, list)).toBe(true);
+    expect(follows(list, footer)).toBe(true);
+    fireEvent.click(await within(list).findByRole("button", { name: "复盘" }));
+    await expectNavClosed(view.container, first.button);
+    expect(new URL(window.location.href).searchParams.get("session")).toBe(SESSION_B);
+    expect(screen.queryByRole("navigation", { name: "会话列表", hidden: true })).toBeNull();
+
+    const second = await openNav();
+    const current = await within(second.dialog).findByRole("button", { name: "复盘" });
+    expect(current.getAttribute("aria-current")).toBe("true");
+    fireEvent.click(within(second.dialog).getByRole("button", { name: "新建会话" }));
+    await expectNavClosed(view.container, second.button);
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true),
+    );
+    expect(setItem).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem(SIDEBAR_KEY)).toBeNull();
+  });
+
+  it("R12 在列表区非交互处按下指针不关闭覆盖层；按遮罩则关闭（对照）", async () => {
+    installViewport(true);
+    const { view } = mountShell("/", {
+      "/api/sessions": () => deferredResponse().promise,
+    });
+    await screen.findByRole("heading", { level: 1, name: HERO });
+
+    const { button, dialog } = await openNav();
+    const list = within(dialog).getByRole("navigation", { name: "会话列表" });
+    const loading = within(list).getByText("正在读取会话", { exact: true });
+    await yieldMacrotask();
+    pressPointer(list);
+    pressPointer(loading);
+    await yieldMacrotask();
+    expect(screen.getByRole("dialog", { name: "导航" })).toBe(dialog);
+
+    const overlay = document.querySelector(".ui-drawer-overlay");
+    if (!overlay) throw new Error("缺遮罩");
+    pressPointer(overlay);
+    await expectNavClosed(view.container, button);
   });
 });
 

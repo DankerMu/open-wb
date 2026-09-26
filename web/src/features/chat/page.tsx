@@ -2,11 +2,13 @@ import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } fro
 import { useLocation, useNavigate } from "react-router";
 import type { ApiClient } from "../../lib/api.js";
 import type { ChatMessageSnapshot } from "../../lib/session-contract.js";
+import { useSidebarSlot } from "../../lib/sidebar-slot.js";
 import { useTopbar } from "../../lib/topbar.js";
 import { useAuth } from "../auth/index.js";
 import { ConversationView } from "./conversation-view.js";
 import { errorMessage, isNotFound, isUnauthorized } from "./errors.js";
 import { ownsCreateSend, ownsHistory, ownsMutation, visibleOwnedAlert } from "./ownership.js";
+import { SessionNav } from "./session-nav.js";
 import { selectedSessionTitle, sessionNavigation, sessionTitle } from "./session-path.js";
 import {
   applyChatEvent,
@@ -697,6 +699,20 @@ export function ChatPage() {
     historyView?.status === "running" ||
     Boolean(ownedStreamError);
   const sendDisabled = generating || draft.trim().length === 0;
+  // 列表渲染进 shell 侧栏列表区（issue 424）；数据、回调与 fence 仍留在本页闭包里。
+  useSidebarSlot(
+    <SessionNav
+      listError={
+        listState.client === client && listState.status === "error" ? listState.message : null
+      }
+      listLoading={listState.client === client && listState.status === "loading"}
+      onCreateSession={() => createAndSelect()}
+      onSelectSession={selectSession}
+      requestedSessionId={requestedSessionId}
+      sessions={listForClient?.sessions ?? null}
+      sessionTitle={sessionTitle}
+    />,
+  );
 
   return (
     <section className="chat-page">
@@ -706,19 +722,11 @@ export function ChatPage() {
         generating={generating}
         historyError={ownedHistory && historyState.status === "error" ? historyState.message : null}
         historyView={historyView}
-        listError={
-          listState.client === client && listState.status === "error" ? listState.message : null
-        }
-        listLoading={listState.client === client && listState.status === "loading"}
         onChangeDraft={setDraft}
-        onCreateSession={() => createAndSelect()}
-        onSelectSession={selectSession}
         onSubmit={submitComposer}
         promptError={visibleOwnedAlert(promptError, client, requestedSessionId)}
         requestedSessionId={requestedSessionId}
         sendDisabled={sendDisabled}
-        sessions={listForClient?.sessions ?? null}
-        sessionTitle={sessionTitle}
         streamError={ownedStreamError}
       />
     </section>

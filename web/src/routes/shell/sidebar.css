@@ -1,6 +1,6 @@
 /* 外壳侧栏 — adapted from resource/workbuddy-live-demo.html:232-247（.sidebar 与折叠态）、
-   :259-268（.sidebar-tab 图标/标签/高亮）、:295（.sidebar-tab-sub）、:301-304（.sidebar-footer
-   与用户名/角色）、:651-654（.sb-user 整块触发按钮）。只用语义 token：头像沿用本仓既有的
+   :259-268（.sidebar-tab 图标/标签/高亮）、:274（.sidebar-main 列表区）、:295（.sidebar-tab-sub）、
+   :301-304（.sidebar-footer 与用户名/角色）、:651-654（.sb-user 整块触发按钮）。只用语义 token：头像沿用本仓既有的
    brand-primary 平涂（不移植 demo 的 palette 渐变）；折叠态以 data-collapsed 驱动。 */
 
 .sidebar {
@@ -42,15 +42,16 @@
   padding: 8px 4px;
 }
 
-.sidebar nav {
+/* 只作用于主导航：列表区里的 nav.chat-session-nav 由会话页自己的样式负责。 */
+.sidebar-nav {
   padding: 8px 12px;
 }
 
-.sidebar[data-collapsed="true"] nav {
+.sidebar[data-collapsed="true"] .sidebar-nav {
   padding: 8px 4px;
 }
 
-.sidebar nav ul {
+.sidebar-nav ul {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -111,6 +112,16 @@
 .sidebar[data-collapsed="true"] .sidebar-link {
   justify-content: center;
   padding: 8px 0;
+}
+
+/* 列表区（demo:274）：占据主导航与用户区之间的剩余高度；滚动由其中的列表自己承担
+   （置顶的 `新建会话` 不随列表滚动），折叠态不渲染。 */
+.sidebar-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0 12px;
 }
 
 .sidebar-footer {
@@ -260,6 +271,10 @@
   transition: none;
 }
 
-.sidebar[data-variant="overlay"] nav {
+.sidebar[data-variant="overlay"] .sidebar-nav {
   padding: 0;
+}
+
+.sidebar[data-variant="overlay"] .sidebar-main {
+  padding: 8px 0 0;
 }

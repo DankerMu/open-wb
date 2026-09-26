@@ -182,12 +182,18 @@ function authenticateRouter() {
 
 async function expectRouteShell({ title, currentLabel }: { title: string; currentLabel: string }) {
   expect(await screen.findByRole("heading", { level: 1, name: title })).toBeTruthy();
+  const sidebar = screen.getByRole("complementary", { name: "侧栏" });
+  // 会话列表区只在 / 的侧栏里（#424）；其它路由侧栏与 main 都没有。
+  const list = within(sidebar).queryByRole("navigation", { name: "会话列表" });
   if (title === "WorkBuddy，我帮你") {
     expect(screen.getByRole("textbox", { name: "给助手发消息" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "新建会话" })).toBeTruthy();
+    expect(list).not.toBeNull();
+    expect(within(list as HTMLElement).getByRole("button", { name: "新建会话" })).toBeTruthy();
+  } else {
+    expect(list).toBeNull();
   }
+  expect(within(screen.getByRole("main")).queryByRole("button", { name: "新建会话" })).toBeNull();
 
-  const sidebar = screen.getByRole("complementary", { name: "侧栏" });
   const navigation = within(sidebar).getByRole("navigation", { name: "主导航" });
   const links = within(navigation).getAllByRole("link");
   const currentLinks = links.filter((link) => link.getAttribute("aria-current") === "page");

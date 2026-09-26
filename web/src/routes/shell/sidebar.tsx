@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { NavLink } from "react-router";
 import { AuthFooter } from "../../features/auth/index.js";
+import { SidebarNavigateProvider, useSidebarSlotContent } from "../../lib/sidebar-slot.js";
 import { BrandMark, Button, Icon, Tooltip } from "../../ui/index.js";
 import { routeManifest } from "../manifest.js";
 
@@ -45,9 +46,22 @@ type SidebarProps =
   | { variant: "overlay"; onNavigate: () => void };
 
 /**
- * 外壳侧栏：品牌区 + 折叠按钮、主导航、用户区（AuthFooter）。折叠态只渲染图标，
- * 链接的可访问名改由 aria-label 提供，并以 Tooltip 显示标签。覆盖层变体不渲染品牌区
- * （Drawer 头部已有标题与关闭），也从不读写折叠偏好。
+ * 列表区（demo:274 .sidebar-main）：渲染页面经槽位上报的节点（目前只有会话页）。单独成组件，
+ * 每次上报只重渲染这里而非整个侧栏；覆盖层把关闭回调经 context 交给列表。
+ */
+function SidebarListArea({ onNavigate }: { onNavigate: (() => void) | undefined }) {
+  const content = useSidebarSlotContent();
+  return (
+    <div className="sidebar-main">
+      <SidebarNavigateProvider onNavigate={onNavigate}>{content}</SidebarNavigateProvider>
+    </div>
+  );
+}
+
+/**
+ * 外壳侧栏：品牌区 + 折叠按钮、主导航、列表区、用户区（AuthFooter）。折叠态只渲染图标，
+ * 链接的可访问名改由 aria-label 提供，并以 Tooltip 显示标签，且不渲染列表区（demo:241）。
+ * 覆盖层变体不渲染品牌区（Drawer 头部已有标题与关闭），也从不读写折叠偏好。
  */
 export function Sidebar(props: SidebarProps) {
   const collapsed = props.variant === "overlay" ? false : props.collapsed;
@@ -72,7 +86,7 @@ export function Sidebar(props: SidebarProps) {
           </Button>
         </div>
       )}
-      <nav aria-label="主导航">
+      <nav aria-label="主导航" className="sidebar-nav">
         <ul>
           {routeManifest.map(({ icon, label, path, subtitle }) => {
             const link = (
@@ -104,6 +118,7 @@ export function Sidebar(props: SidebarProps) {
           })}
         </ul>
       </nav>
+      {collapsed ? null : <SidebarListArea onNavigate={onNavigate} />}
       <AuthFooter />
     </aside>
   );

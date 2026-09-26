@@ -6,6 +6,7 @@ import { expect, vi } from "vitest";
 import { AuthFooter, AuthGuard, AuthProvider, useAuth } from "../src/features/auth/index.js";
 import { ChatPage } from "../src/features/chat/index.js";
 import type { LoginCredentials, Principal } from "../src/lib/api.js";
+import { SidebarSlotProvider, useSidebarSlotContent } from "../src/lib/sidebar-slot.js";
 import type { FetchRoutes } from "./chat-page-support.js";
 import { cleanupChatPage } from "./chat-page-support.js";
 import { FakeEventSource, resetFakeEventSources } from "./chat-stream-support.js";
@@ -38,6 +39,11 @@ function ChatAuthProbe({ onState }: { onState(state: ChatAuthProbe): void }) {
     status: auth.status,
   });
   return null;
+}
+
+// 裸挂 ChatPage 时代替 shell 侧栏渲染槽位节点（会话列表），列表断言照常可查。
+function SidebarSlotHost() {
+  return <aside aria-label="侧栏">{useSidebarSlotContent()}</aside>;
 }
 
 function ObservedChatPage({ onCommit }: { onCommit: (html: string, location: string) => void }) {
@@ -105,7 +111,10 @@ export function renderObservedChatPage(
     path,
     <AuthProvider>
       <AuthGuard>
-        <ObservedChatPage onCommit={onCommit} />
+        <SidebarSlotProvider>
+          <ObservedChatPage onCommit={onCommit} />
+          <SidebarSlotHost />
+        </SidebarSlotProvider>
         <AuthFooter />
       </AuthGuard>
     </AuthProvider>,
@@ -124,7 +133,10 @@ export function renderChatPageWithAuthProbe(path: string, routes: FetchRoutes) {
     <AuthProvider>
       <ChatAuthProbe onState={(state) => (probe = state)} />
       <AuthGuard>
-        <ChatPage />
+        <SidebarSlotProvider>
+          <ChatPage />
+          <SidebarSlotHost />
+        </SidebarSlotProvider>
         <AuthFooter />
       </AuthGuard>
     </AuthProvider>,
