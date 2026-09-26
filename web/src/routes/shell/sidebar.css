@@ -75,6 +75,13 @@
     color 0.15s ease;
 }
 
+/* 覆盖须在声明之后：@media 不加特异性，上方 .sidebar 的 reduce 块在本规则之前，放那里无效（issue 423）。 */
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-link {
+    transition: none;
+  }
+}
+
 .sidebar-link .ui-icon {
   flex-shrink: 0;
   color: var(--wb-icon-secondary);

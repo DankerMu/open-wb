@@ -14,12 +14,13 @@ const MEDIUM_DESKTOP = { width: 880, height: 800 } as const;
 
 export type WalkProject = "desktop-light" | "mobile-dark";
 
-type ThemeChoice = { label: "深色" | "浅色"; value: "dark" | "light" };
+// textPrimary：该主题的 --wb-text-primary 计算值（web/src/styles/tokens.css）。
+type ThemeChoice = { label: "深色" | "浅色"; value: "dark" | "light"; textPrimary: string };
 
 // 每个 project 选与 colorScheme 相反的主题，保证选择后背景确实变化。
 const THEME_CHOICE: Record<WalkProject, ThemeChoice> = {
-  "desktop-light": { label: "深色", value: "dark" },
-  "mobile-dark": { label: "浅色", value: "light" },
+  "desktop-light": { label: "深色", value: "dark", textPrimary: "rgb(255, 255, 255)" },
+  "mobile-dark": { label: "浅色", value: "light", textPrimary: "rgb(0, 0, 0)" },
 };
 
 export function walkProject(name: string): WalkProject {
@@ -376,11 +377,71 @@ export async function switchTheme(
   initialBackground: string,
 ): Promise<void> {
   const choice = THEME_CHOICE[project];
+  await expectReducedMotionThemeSwitch(page, project, choice);
   await page.getByRole("radio", { name: choice.label, exact: true }).check();
   await expectTheme(page, choice, initialBackground);
   await page.reload();
   await expectAuthenticatedRoute(page, project, "/settings", "设置", "设置");
   await expectTheme(page, choice, initialBackground);
+}
+
+type TextProbe = { color: string; animations: number };
+type SwitchProbe = {
+  reduce: boolean;
+  before: string | undefined;
+  after: string | undefined;
+  headings: TextProbe[];
+  titles: TextProbe[];
+  links: TextProbe[];
+};
+
+// #423：reduce 下点选主题后同一任务内同步读取——继承色文字须已是目标主题色、且无过渡在跑。
+// 点击与读取在同一次 evaluate 里，中间不让出帧（locator.click 后再 evaluate 会漏掉过渡）。
+async function expectReducedMotionThemeSwitch(
+  page: Page,
+  project: WalkProject,
+  choice: ThemeChoice,
+): Promise<void> {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const radio = page.getByRole("radio", { name: choice.label, exact: true });
+  const probe: SwitchProbe = await radio.evaluate((element) => {
+    const read = (selector: string) =>
+      [...document.querySelectorAll(selector)].map((el) => ({
+        color: getComputedStyle(el).color,
+        animations: el.getAnimations().length,
+      }));
+    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const before = document.documentElement.dataset.theme;
+    (element as HTMLElement).click();
+    return {
+      reduce,
+      before,
+      after: document.documentElement.dataset.theme,
+      headings: read(".settings-sec-h"),
+      titles: read(".settings-row-title"),
+      links: read(".sidebar-link"),
+    };
+  });
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  const detail = JSON.stringify(probe);
+  expect(probe.reduce, "prefers-reduced-motion: reduce is emulated").toBe(true);
+  expect(probe.before, `theme before the click is not the target: ${detail}`).not.toBe(
+    choice.value,
+  );
+  expect(probe.after, `theme switches within the click task: ${detail}`).toBe(choice.value);
+  expect(probe.headings, ".settings-sec-h count").toHaveLength(2);
+  expect(probe.titles, ".settings-row-title count").toHaveLength(3);
+  if (project === "desktop-light")
+    expect(probe.links.length, ".sidebar-link count").toBeGreaterThan(0);
+  const text = [...probe.headings, ...probe.titles];
+  expect(
+    text.map((entry) => entry.color),
+    `inherited text colour is the target theme's --wb-text-primary: ${detail}`,
+  ).toEqual(text.map(() => choice.textPrimary));
+  expect(
+    [...text, ...probe.links].map((entry) => entry.animations),
+    `no transition runs after the reduced-motion theme switch: ${detail}`,
+  ).toEqual([...text, ...probe.links].map(() => 0));
 }
 
 async function expectTheme(page: Page, choice: ThemeChoice, initialBackground: string) {
