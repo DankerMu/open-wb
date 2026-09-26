@@ -206,7 +206,7 @@
 ## Risks / Trade-offs
 
 - [DMXAPI 不返回 reasoning，或拒绝 reasoning 请求参数/历史 `reasoning_content`] → 折叠块在 null 时不渲染；`MODEL_REASONING=off` 为部署开关；Open Questions 1 以真实端点关闭。
-- [edit 的 `details` 形状只由源码与 fake-omp 证明，真二进制未进 CI] → write 形状由 `make ui-walk` 真 omp 证明；edit 形状与 hashline `details.path` 绝对性由 B 自己的一次真二进制手工核对关闭（Open Questions 2，tasks 9.3(2)），相对/绝对两种都已按 D6 规则处理。
+- [edit 的 `details` 形状只由源码与 fake-omp 证明，真二进制未进 CI] → write 形状由 `make ui-walk` 真 omp 证明；edit 形状与 hashline `details.path` 绝对性由 B 自己的一次真二进制手工核对关闭（Open Questions 2，tasks 9.3b），相对/绝对两种都已按 D6 规则处理。
 - [删除 running 会话最长约 16 s] → 确认对话框 pending 态禁止重复提交；上界由 A 的有界退回保证，不另设计时器。
 - [unlink 失败或 app uid 无权删除 omp uid 文件] → 行已删、响应 204，经错误通道上报；Open Questions 3 以 uid-isolation 用例与 VPS 关闭。
 - [HTML 预览执行任意脚本] → sandbox 恰为 `allow-scripts`，不透明源读不到 cookie 与 API 响应；`SameSite=Lax` 挡住带凭证的跨站写；站点目前未设 CSP（`server/src` 无 `Content-Security-Policy`），srcdoc 不受影响。
