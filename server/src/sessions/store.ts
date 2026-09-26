@@ -19,11 +19,11 @@ import {
   toStepView,
 } from "./store-branch.js";
 
-type SessionStatus = "idle" | "running" | "done" | "failed";
+type SessionStatus = "idle" | "running" | "done" | "failed" | "stopped";
 export type MessageRole = "user" | "assistant";
-export type MessageStatus = "done" | "running" | "failed";
-export type StepStatus = "running" | "done" | "failed";
-export type FinishStatus = "done" | "failed";
+export type MessageStatus = "done" | "running" | "failed" | "stopped";
+export type StepStatus = "running" | "done" | "failed" | "stopped";
+export type FinishStatus = "done" | "failed" | "stopped";
 
 interface SessionView {
   id: string;
@@ -96,7 +96,8 @@ export interface SessionStore {
   setSessionFile(sessionId: string, sessionFile: string | null): void;
   appendDelta(assistantMessageId: number, delta: string): boolean;
   startStep(assistantMessageId: number, input: StartStepInput): number;
-  finishStep(stepId: number, status: FinishStatus, output: string): boolean;
+  // step.end 不扩展：stopped 步骤只由 finishTurn 结算（output 保持 NULL）。
+  finishStep(stepId: number, status: "done" | "failed", output: string): boolean;
   finishTurn(assistantMessageId: number, status: FinishStatus): boolean;
   reconcileOnStartup(): void;
   runtimeState(sessionId: string): SessionRuntimeState | null;

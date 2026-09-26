@@ -1,0 +1,43 @@
+# Design: turn-stopped-reduction（#455）
+
+父设计：D2「归约器」段、D6「`stopped` 枚举」跨端次序、Risks「`stopped` 步骤无 output」。
+
+- **Change surface**：`server/src/sessions/events.ts`（`ChatEvent` 的 `turn.end.status`、`EventState` 中断记忆、`applyMessageEnd`/`applyAgentEnd`、新导出 `applyStop`）；`server/src/sessions/store.ts` 类型（`SessionStatus`/`MessageStatus`/`StepStatus`/`FinishStatus`，`finishStep` 参数类型）。`store-approvals.ts` `finishOwnedTurn` 运行时零改动（它按 `status` 参数通写三表，034 CHECK 已放行 `stopped`）；`supervisor.ts` 零 diff。
+- **Must preserve**：
+  - `events.ts:83-85` 与 `:106-109` 终态短路（`ended` 后原 state 引用、零事件）；`:99-100,227-232` `response` 只认 `command:"prompt"`+绑定 id 的失败（`response{command:"abort"}` 已被过滤）；`:101-102` default 过滤全部 `extension_ui_request`（审批形状亦然）；`:196-212` 首个被记住者胜出；`:214-225` 非终止 `agent_end` 不终止、无记忆 → `turn.end done`、失败 → `error`+`turn.end failed`（`:234-248` `failTurn` 形状不变）；state/返回值冻结、不累积正文、调用方输入不被修改。
+  - `store-approvals.ts:26-70` 终态事务：残留正文条件刷盘、三条 UPDATE 的 `status='running'` 守卫、`runningSteps` 计数校验、步骤结算**不写 output**（NULL，读回 `""`）；`store.ts:240-242` 受理只拒 `running`；`:290-325` rollback 恢复受理时读到的 `previousStatus`；`:496-498` `close()` 仍以 `failed` 收尾；`:452-462` 对账不变。
+  - `supervisor.ts:643-693` `persistEvent`：`:679` `finishStep(stepId, step.end.status, …)`、`:690-691` `finishTurn(id, turn.end.status)` 原样。
+- **Must add/change**：
+  - 中断与失败分开记忆（形状自定，例如 `outcome: undefined | {kind:"failure",message} | {kind:"interrupted"}`），不变量：至多一个被记住、首个胜出；终止 `agent_end` 遇中断 → `evolve(ended)` + 恰 `[turn.end{messageId,status:"stopped"}]`，无 `error`。
+  - `applyStop(state)`：未终态 → `ended:true` 的新冻结 state + 恰 `[turn.end stopped]`（不看 `started`、不看已记住原因）；已终态 → `{state, events:[]}`。
+  - `turn.end.status: "done"|"failed"|"stopped"`；`FinishStatus = "done"|"failed"|"stopped"`；`SessionStatus`/`MessageStatus`/`StepStatus` 加 `stopped`（仅类型：行现在可为 `stopped`，`Turn.previousStatus`/`AdmissionDbRow` 读回它；`rest.ts:32,43,50` 为 `string`，不动）。
+  - **`finishStep` 参数保持 `"done"|"failed"`**（单独别名或内联）：父 spec「`step.end.status` SHALL NOT be widened」，stopped 步骤只由 `finishTurn` 结算且 output 为 NULL。
+- **Governing invariant**：一个回合恰一个 `turn.end`；`stopped` 永不伴随 `error`；`stopped` 回合落盘后与 `done`/`failed` 同为可再受理的终态。
+- **Atomicity**（切片不可再拆的证据）：只改 `events.ts` → `make typecheck` 在 `supervisor.ts:691` 报 `"stopped"` 不可赋给 `FinishStatus`；只改 `store.ts` 类型可过但无可观察行为。
+- **Sibling surfaces**：
+  - **必然变红的既有断言（唯一）**：`server/test/session-events.test.ts:241-248`「emits the first aborted generic fallback once isTerminal is true, ignoring a later errorMessage」——aborted 先于 error，现期望 `GENERIC_FAILURE_EVENTS`，新语义为 `[{type:"turn.end",data:{messageId:MESSAGE_ID,status:"stopped"}}]`。允许的编辑：`:248` 期望值改为该字面量，`:241` 标题改写为描述新语义；`GENERIC_FAILURE_EVENTS` 仍被 `:364,:381` 使用，常量不删。其余既有测试零改动（`:223` 先 error 后 aborted 仍 failed）。
+  - 测试 helper：`session-store-helpers.ts` 的 `SessionSeed`/`MessageSeed`/`StepSeed` 联合不含 `stopped`，不改；新测试只经 store API（accept → finishTurn）产生 `stopped` 行，不 seed。
+  - web（本刀全部不触碰，均归 7.1 #472 放宽）：
+    - `web/src/features/chat/stream.ts:34,191` 终态只收 `done|failed`；
+    - `web/src/lib/session-contract.ts:3,5`（`ChatSessionStatus`/`ChatDeliveryStatus` 无 `stopped`）与 `:59-71`（`isSessionStatus`/`isDeliveryStatus` 拒绝 `stopped` → `parseSession`/`parseStep` 返回 null，一个 `stopped` 行即令 `GET /api/sessions` 列表与 `/messages` 快照整体解析失败）；
+    - `web/src/features/chat/status-label.ts`（父 D6 点名，`Record<ChatSession["status"],string>` 无 `stopped` 项）。
+    - 不可达论证：server 目前只写 `type:"prompt"`（`server/src/sessions/omp/runtime.ts:187`），`shutdown()` 先 `#failActiveTurn` 再 retire（`:160-172`），故 SIGTERM 引起的 aborted 帧到不了活跃归约器；`message_end aborted` 只在 omp 收到 `abort` 帧后出现，而 server 写 `abort` 始于 2.2b #488 / 4.2a #473，`stopped` 行在此之前不会产生 → D6 web-parse-before-server-emit 成立。本刀不新增 web 测试。
+  - `ring-buffer.ts:58` turn.end 特判与 status 无关；`app.ts`/`sessions/index.ts` `onEvent` 签名随联合自然扩展。
+  - knip：`applyStop` 在 #473 前无 `src` 调用方；`knip.json` 把 `server/test/**/*.test.ts` 列为 entry，新归约测试的 import 即满足，无需豁免。
+  - `supervisor.ts:377-395` 流无终态结束时合成 `turn.end done`（既有行为，对已记住失败同样如此）——不改，停止路径归 #473。
+- **Seams under test**（新建两个文件，名称建议 `server/test/session-events-stop.test.ts`、`server/test/session-store-stopped.test.ts`）：
+  - 归约：直接调 `createEventState`/`applyFrame`/`applyFailure`/`applyStop`；复用 `session-events.test.ts` 的冻结输入与 `structuredClone` 比较手法（本地重写小 helper，不 import 既有测试文件）。
+  - store：`withSessionStore` + `withFakeClock` + `messageRow`/`sessionRow`/`stepRow`/`persistenceSnapshot`（`session-store-helpers.ts`）；原子性用 `CREATE TEMP TRIGGER … RAISE(ABORT)`（先例 `session-store-reconcile.test.ts:100-132`）。
+  - GET 读回（spec「停止落盘形状」末句）：同一 store 测试文件内用 `withSessionRest`（`session-rest-helpers.ts:42`，真实 `registerSessionRoutes` + 真 store、stub supervisor）+ `getSessionMessages`/`GET /api/sessions` inject；REST 源码零改动。该 fixture 只假 `Date`（`toFake:["Date"]`），2000ms 刷盘计时器为真：`appendDelta`×2 → `finishTurn(stopped)` 须在任何 `await app.inject` 前同步完成（同 `session-rest.test.ts:135-140`）。
+  - 类型：`expectTypeOf`（先例 `session-approval-events.test.ts:240-244`）。
+- **Required evidence**（M=41，bound prompt id；R=红先行，G=守护恒绿）：
+  - R：`agent_start` → `message_end{role:assistant,stopReason:"aborted"}` → `agent_end{isTerminal:false}` → `agent_start` → `message_end{stopReason:"stop"}` → 各步零事件；`agent_end{}`（缺省 isTerminal）→ 恰 `[turn.end{M,"stopped"}]`；其后 `response{command:"abort"}`、`agent_end`、`applyFailure`、`applyStop` → 零事件且 state `===` 不变。
+  - R：aborted → error → 终止 `agent_end` → `[turn.end stopped]`（无 error）。G：error("upstream 500") → aborted → `[error "upstream 500", turn.end failed]`；无记忆 → `[turn.end done]`。
+  - R：`applyStop` 分别作用于 fresh state、仅 `agent_start`、已记住 error、已记住 aborted、有 running tool 的 state → 各恰 `[turn.end{M,"stopped"}]`，无 error；输入 state 冻结且与调用前 `structuredClone` 相等；返回 state `ended`；随后 `applyFrame(agent_end)`/`applyFailure`/`applyStop` 零事件、state 引用不变；修改返回事件不影响后续输出。
+  - G：`extension_ui_request{method:"select",title:"Allow tool: bash…",options:["Approve","Deny"]}` 与 `{method:"confirm"}` 在 bound 回合中 → 零事件、state 深等不变。
+  - R（typecheck）：`Extract<ChatEvent,{type:"turn.end"}>["data"]["status"]` 等于 `"done"|"failed"|"stopped"`；`Parameters<SessionStore["finishTurn"]>[1]` 等于三值；G（typecheck）：`Parameters<SessionStore["finishStep"]>[1]` 等于 `"done"|"failed"`。
+  - store（运行时 G、typecheck R——`finishTurn(id,"stopped")` 调用未放宽前 tsc 报错）：受理 → `appendDelta("ab")`、`appendDelta("cd")`（未达阈值、未刷盘）→ 步骤 A `finishStep(done,"ok")`、步骤 B running → `finishTurn(id,"stopped")` 返回 true → 助手 `content="abcd"`/`stopped`、会话 `stopped` 且 `updated_at`=结算时刻、B `stopped`/`output` NULL（视图 `""`）/`ended_at`=结算时刻、A 行逐字不变 → 再 `acceptPrompt` 成功 → `rollbackPrompt` true → 会话 `status="stopped"`、title/`updated_at` 恢复。
+  - store 原子性（G）：TEMP TRIGGER 拒绝 `chat_steps` `NEW.status='stopped'` → `finishTurn(stopped)` 抛 `ERR_SQLITE_ERROR`、`persistenceSnapshot` 与之前相等（正文未刷、三表仍 running）；DROP 后重试成功一次、正文不重复。
+  - REST（G）：同形回合 `stopped` 结算后 `GET /api/sessions` 列表该会话 `status:"stopped"`；`GET …/messages` 助手 `status:"stopped"`、`content` 两段拼接、步骤 `status:"stopped"`、`output:""`。
+- **Non-goals**：审批 deny 结算与审计（4.6 #474）；supervisor 发 `abort`、grace/retire、调用 `applyStop`（4.2a #473）；stop REST（5.1a #475）；web（7.1 #472）；`step.end.status` 扩展；对账对 `stopped` 的断言（#473）。
+- **Review focus**：首个原因胜出跨两种原因成立；`applyStop` 恰一次且之后三类输入全静默；`finishStep` 未随 `FinishStatus` 放宽；`supervisor.ts`、`store-approvals.ts` 零 diff；既有测试只动 `session-events.test.ts:241,248`。
