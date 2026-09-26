@@ -103,6 +103,21 @@ SessionRuntime SHALL lazily acquire one child generation on the first prompt, re
 - **WHEN** old frame/exit/timer callbacks arrive after retirement, or transport failure interrupts an active turn
 - **THEN** old callbacks cannot affect the new child, token or turn; transport failure is sanitized, fails the current turn and reclaims its generation rather than silently yielding success
 
+### Requirement: 审批请求经 SessionRuntime 转接
+SessionRuntime SHALL accept an optional synchronous constructor callback `onApproval(request)` and SHALL forward to it, synchronously and unchanged, each approval request (`{id, title, tool}`, see 「RPC IO and child observation」) surfaced by the `OmpProcess` of a generation, but only when that generation is still the runtime's current generation and a prompt turn whose `prompt` frame has been written is active on that generation — the same generation/turn gate that decides whether a child frame joins the active turn. An approval request surfaced by a generation that is no longer current, or arriving while no such turn is active on the current generation (between turns, or before the turn's `prompt` frame is written), SHALL be dropped: it is not forwarded and not answered, and it simply ends with that child like any unanswered approval. Forwarding SHALL NOT mark the approval pending and SHALL NOT affect the idle timer by itself; `markPending`/`clearPending` remain explicit owner calls. SessionRuntime SHALL expose `respondApproval(id, decision)` that passes the owner's `allow`/`deny` answer unchanged to the current generation's `OmpProcess.respondApproval`, and SHALL be a no-op — no frame, no throw, no spawn — when the runtime has no current generation (before the first acquisition, after retirement, after shutdown) or when the current generation's `OmpProcess` no longer accepts input (for example while it is retiring). SessionRuntime SHALL NOT answer an approval request on its own and SHALL NOT write `extension_ui_response` itself; `OmpProcess` remains its only writer.
+
+#### Scenario: Approval requests reach the owner only from the active turn of the current generation
+- **WHEN** the real fake `approval` scenario, spawned with `--approval-mode write`, surfaces select `r1` during an active prompt turn of the current generation, and separately an approval-shaped select is surfaced between turns, before the turn's `prompt` frame is written, or by a generation that is no longer current
+- **THEN** `onApproval` is called exactly once with `{id:"r1", title, tool:"bash"}` carrying the original title; the other requests are never forwarded and no `extension_ui_response` is written for them
+
+#### Scenario: respondApproval passes through to the current generation
+- **WHEN** the owner calls `respondApproval("r1","allow")` on the runtime for the forwarded request, then calls it again, and separately calls it before any generation exists, while the generation is retiring and after shutdown
+- **THEN** exactly one `extension_ui_response{id:"r1",value:"Approve"}` reaches the child, which proceeds to finish the tool call and the turn; every other call writes nothing, throws nothing and spawns no child
+
+#### Scenario: Forwarding alone does not suspend idle expiry
+- **WHEN** an approval request is forwarded and the owner does not call `markPending`, and the injected clock then advances by the idle duration
+- **THEN** the generation is retired on idle expiry as usual, no answer is written for the outstanding approval, and `onExit` reports the child's actual exit once
+
 ## ADDED Requirements
 
 ### Requirement: 相关命令 API 与回合中断
