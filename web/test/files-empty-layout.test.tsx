@@ -1,10 +1,13 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   authenticatedFilesRoutes,
   cleanupFilesFixture,
+  expectLocation,
+  openWorkspaceDialogFromMenu,
   renderFiles,
   workspace,
+  workspaceRoute,
 } from "./files-fixture.js";
 import { jsonResponse } from "./support.js";
 import { blockBody, COLOR_LITERAL_PATTERNS, readRepoFile, stripComments } from "./ui-support.js";
@@ -77,6 +80,47 @@ describe("files empty states", () => {
     const title = await screen.findByText("先选择或创建工作空间", { exact: true });
     const guidance = screen.getByText("使用左上角 ＋ 新建工作空间", { exact: true });
     expect(guidance.closest(".ui-empty-state")).toBe(emptyStateOf(title));
+  });
+
+  // 只走 `新建` 菜单入口：切换器的 `＋ 新建工作空间` 直接调 openWorkspaceDialog，
+  // 不经空态分支的 onNewWorkspace，走它会让「空态下 ＋ 菜单仍可新建」这条证据失去意义。
+  it("E3b creates the first workspace from the 新建 menu when the account has no workspace", async () => {
+    const firstWorkspace = {
+      ...workspace,
+      id: "workspace-first",
+      name: "首个空间",
+      dir: "first-space",
+      root: "/sandbox/user-1/first-space",
+    };
+    const createBodies: unknown[] = [];
+    renderFiles(
+      "/files",
+      authenticatedFilesRoutes([], {
+        "/api/workspaces": workspaceRoute([], (options) => {
+          createBodies.push(options?.body);
+          return jsonResponse(firstWorkspace, 201);
+        }),
+        "/api/workspaces/workspace-first/tree?path=": jsonResponse({ path: "", entries: [] }),
+      }),
+    );
+
+    expect(await screen.findByText("未选择工作空间", { exact: true })).toBeTruthy();
+    expect(await screen.findByText("先选择或创建工作空间", { exact: true })).toBeTruthy();
+    const dialog = await openWorkspaceDialogFromMenu();
+    fireEvent.change(within(dialog).getByLabelText("工作空间名称"), {
+      target: { value: "首个空间" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "创建" }));
+
+    await expectLocation("/files?ws=workspace-first");
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "新建工作空间" })).toBeNull();
+      const card = screen.getByRole("button", { name: "选择工作空间" });
+      expect(within(card).getByText("首个空间", { exact: true })).toBeTruthy();
+      expect(screen.queryByText("先选择或创建工作空间")).toBeNull();
+      expect(screen.queryByText("未选择工作空间")).toBeNull();
+    });
+    expect(createBodies).toEqual(['{"name":"首个空间"}']);
   });
 });
 

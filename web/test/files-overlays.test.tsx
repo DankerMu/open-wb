@@ -73,6 +73,7 @@ describe("files creation overlays focus loop", () => {
     fireEvent.click(within(switcher).getByRole("button", { name: "＋ 新建工作空间" }));
     const dialog = await screen.findByRole("dialog", { name: "新建工作空间" });
     expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(within(dialog).getByText("将在你的沙箱内创建同名目录", { exact: true })).toBeTruthy();
     await yieldMacrotask();
     expect(document.activeElement).toBe(within(dialog).getByLabelText("工作空间名称"));
     expectModalSet(view);
@@ -104,6 +105,7 @@ describe("files creation overlays focus loop", () => {
     ).toEqual(["新建文件夹", "新建工作空间"]);
     fireEvent.click(within(menu).getByRole("menuitem", { name: "新建工作空间" }));
     const dialog = await screen.findByRole("dialog", { name: "新建工作空间" });
+    expect(within(dialog).getByText("将在你的沙箱内创建同名目录", { exact: true })).toBeTruthy();
     await yieldMacrotask();
     expectModalSet(view);
     expect(document.activeElement).toBe(within(dialog).getByLabelText("工作空间名称"));
