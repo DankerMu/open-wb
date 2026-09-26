@@ -32,6 +32,8 @@ export interface Generation {
   spawnFailed: boolean;
   revoked: boolean;
   retiring: Promise<void> | undefined;
+  /** Owner-marked pending approval ids; non-empty suspends idle; dropped with the generation. */
+  pending: Set<string | number>;
   drainTimer: unknown;
   graceTimer: unknown;
 }
