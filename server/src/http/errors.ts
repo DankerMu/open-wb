@@ -14,6 +14,8 @@ const HTTP_ERROR_STATUSES = Object.freeze({
   conflict: 409,
   preview_too_large: 413,
   preview_unsupported: 415,
+  agent_capacity: 503,
+  approval_settled: 409,
 } as const satisfies Record<HttpErrorCode, number>);
 
 export function sendHttpError(reply: FastifyReply, code: HttpErrorCode): FastifyReply {
@@ -37,9 +39,11 @@ const ALLOWED_FASTIFY_REQUEST_ERROR_CODES = new Set([
   "FST_ERR_CTP_BODY_TOO_LARGE",
 ]);
 
-/** 受信 content-parser owner 的 exact 路由身份：POST login（#9）、POST logout（#10）、
- * POST /api/sessions/:id/prompt、POST /v1/chat/completions、POST /api/workspaces
- * 与 POST /api/workspaces/:id/dirs。 */
+/** 受信 content-parser owner 的 exact 十条路由身份：POST login（#9）、POST logout（#10）、
+ * POST /api/sessions/:id/prompt、POST /v1/chat/completions、POST /api/workspaces、
+ * POST /api/workspaces/:id/dirs，以及回合控制四条（#450）POST /api/sessions/:id/stop、
+ * POST /api/sessions/:id/regenerate、POST /api/sessions/:id/fork 与
+ * POST /api/sessions/:id/approvals/:approvalId。模板须与 Fastify 路由注册逐字一致。 */
 const CONTENT_PARSER_OWNED_ROUTES = new Set([
   "/api/auth/login",
   "/api/auth/logout",
@@ -47,12 +51,15 @@ const CONTENT_PARSER_OWNED_ROUTES = new Set([
   "/v1/chat/completions",
   "/api/workspaces",
   "/api/workspaces/:id/dirs",
+  "/api/sessions/:id/stop",
+  "/api/sessions/:id/regenerate",
+  "/api/sessions/:id/fork",
+  "/api/sessions/:id/approvals/:approvalId",
 ]);
 
 /**
  * 构造函数-backed CTP 错误的 route-owner 结果：仅 matched identity 恰为
- * POST /api/auth/login、POST /api/auth/logout、POST /api/sessions/:id/prompt、
- * POST /v1/chat/completions、POST /api/workspaces 或 POST /api/workspaces/:id/dirs
+ * CONTENT_PARSER_OWNED_ROUTES 十条之一（method === POST 且 route template 精确命中）
  * 时归一 exact 400；matched /api
  * 或 /api/* catch-all 与 unmatched non-GET（routeOptions.url undefined 且
  * method != GET）恢复 typed not_found 404；其他已注册 route 保持 generic 5xx。

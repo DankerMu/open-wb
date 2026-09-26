@@ -14,6 +14,8 @@ export const HTTP_ERROR_MESSAGES = Object.freeze({
   conflict: "同名资源已存在",
   preview_too_large: "文件过大，无法预览",
   preview_unsupported: "该类型不支持预览",
+  agent_capacity: "Agent 容量已满，请稍后重试",
+  approval_settled: "该审批已处理",
 });
 
 export type HttpErrorCode = keyof typeof HTTP_ERROR_MESSAGES;
