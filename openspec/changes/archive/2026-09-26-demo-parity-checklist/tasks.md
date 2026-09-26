@@ -11,8 +11,8 @@
 
 ## 3. Verification
 - [x] 3.1 `make check` exit 0。
-- [ ] 3.2 docs PR 合并后：`make ui-shots` 实跑一次，产物交签收人，并附"agent 预审"意见（D7）。
-- [ ] 3.3 签收人以本人发言给出结论后：archive PR（`Closes #301`）照抄签收值并注明出处；Epic #274 贴签收表（不通过项附 issue；记录 ui-shots 实跑 SHA）；本 change 晋升 demo-parity-acceptance「逐页验收清单与签收」，父 delta 该块由 ADDED 改为 MODIFIED 且与晋升文本一致；勾选父 tasks 6.4。
+- [x] 3.2 docs PR 合并后：`make ui-shots` 实跑一次，产物交签收人，并附"agent 预审"意见（D7）。
+- [x] 3.3 签收人以本人发言给出结论后：archive PR（`Closes #301`）照抄签收值并注明出处；Epic #274 贴签收表（不通过项附 issue；记录 ui-shots 实跑 SHA）；本 change 晋升 demo-parity-acceptance「逐页验收清单与签收」，父 delta 该块由 ADDED 改为 MODIFIED 且与晋升文本一致；勾选父 tasks 6.4。
 
 ## Risk pack mapping
 - Not selected Public API / CLI / script entry：无。
