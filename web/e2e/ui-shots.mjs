@@ -307,6 +307,10 @@ async function appFiles(page, run) {
 async function appSettings(page) {
   await page.goto("/settings");
   await visible(page.getByRole("heading", { level: 1, name: "设置", exact: true }));
+  // 关于卡名称来自 /api/info：等它渲染后再断言文字色（#423）。
+  await visible(
+    page.getByRole("region", { name: "关于", exact: true }).locator(".settings-row-title"),
+  );
 }
 
 // ---------- demo 态（D6） ----------
@@ -400,14 +404,50 @@ function probeRootLeaks(forbidden) {
   return [...hits];
 }
 
+// 各主题的 --wb-text-primary 计算值（web/src/styles/tokens.css）。
+const TEXT_PRIMARY = { light: "rgb(0, 0, 0)", dark: "rgb(255, 255, 255)" };
+const SETTINGS_TEXT = [
+  { selector: ".settings-sec-h", count: 2 },
+  { selector: ".settings-row-title", count: 3 }, // 第三个是关于卡名称
+];
+
+// #423：继承色文字须已解析为本格主题色，且没有残留过渡/动画（reduce 下不得新建过渡）。
+function probeSettingsText({ groups, expected }) {
+  const failures = [];
+  for (const { selector, count } of groups) {
+    const elements = [...document.querySelectorAll(selector)];
+    if (elements.length !== count)
+      failures.push(`${selector} 共 ${elements.length} 个，期望 ${count}`);
+    elements.forEach((element, index) => {
+      const color = getComputedStyle(element).color;
+      if (color !== expected)
+        failures.push(`${selector}[${index}] 文字色 ${color}，期望 ${expected}`);
+      const running = element.getAnimations().length;
+      if (running > 0) failures.push(`${selector}[${index}] 残留 ${running} 个过渡/动画`);
+    });
+  }
+  return failures;
+}
+
 // 溢出断言覆盖全部 app 态；root 泄漏断言只守非 chat 态的呈现规则——按 ADR-0011 绝对沙箱路径
 // 不是保密信息，chat 态的步骤卡原始输出与助手正文出现路径属合法。
-async function assertAppDom(page, state) {
+async function assertAppDom(page, state, cell) {
+  const settingsText =
+    state === "settings-default"
+      ? await page.evaluate(probeSettingsText, {
+          groups: SETTINGS_TEXT,
+          expected: TEXT_PRIMARY[cell.theme],
+        })
+      : [];
   const overflow = await page.evaluate(probeOverflow);
   const leaks = state.startsWith("chat-")
     ? []
     : await page.evaluate(probeRootLeaks, workspaceRoots);
-  const problems = [...overflow, ...leaks.map((where) => `workspace root 绝对路径出现在 ${where}`)];
+  const problems = [
+    ...settingsText,
+    ...overflow,
+    ...leaks.map((where) => `workspace root 绝对路径出现在 ${where}`),
+  ];
   if (problems.length > 0) throw new Error(`断言失败：${problems.join("；")}`);
 }
 
@@ -489,7 +529,7 @@ async function runState(page, tracker, run, cell, source, state) {
   try {
     await STEPS[source][state](page, run, cell, tracker);
     await waitToastQuiet(page, source);
-    if (source === "app") await assertAppDom(page, state);
+    if (source === "app") await assertAppDom(page, state, cell);
     await page.screenshot({ path: join(run.outDir, result.file), fullPage: false });
     result.shot = true;
   } catch (error) {
