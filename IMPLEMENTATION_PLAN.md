@@ -307,6 +307,19 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 
 ## Next Step
 
-对首个阶段跑 `/stage-change-pipeline`（S0a）：Stage 1 读本文对应节收集上下文，
-压测门禁的 grill 分支种子 = 本文 Open Decisions 表 + 该阶段 Review attention 标注；
+> 2026-09-26 更新。已关闭：S0a、S0b（#81）、S1a（#111）、S1e（#274），账本见 `docs/stage-pipeline-log.jsonl`。
+
+依赖已满足、可启动的子阶段：S1c（依赖 S0b/S1a/S1e）、S1b（依赖 S1a）、S2a（依赖 S1a）。其余全部链在这三者之后。
+
+- **主线 S1c**：对其跑 `/stage-change-pipeline`。grill 种子：本文 Open Decisions 的 omp 池参数；
+  S1c 现承载 F-CHAT-1/2/7/9/10 + F-OPS-1 加 S0b/S1e 移交项（fork、重新生成、审批条、对话内搜索、场景胶囊、
+  分组侧栏与条目菜单、停止生成、composer footer、顶栏重命名），宽度已触及 Risks「切片过宽」一条——grill 首问是否按
+  后端契约切为治理侧（池上限/回收、中断/继续、重新生成、审批条、fork）与呈现侧（分组/场景/搜索/产物卡/思考折叠）两个 change。
+  需先核实的事实：omp v18.0.10 非 yolo 审批模式下工具审批提示在 rpc 模式是否经 `extension_ui_request confirm` 帧下发；
+  F-CHAT-9 不能依赖"审计写记录"——审计现只发 `sandbox.reject` 与 `workspace.create`，omp 写文件不经 `sandbox.resolve`，
+  文件变更只能从工具帧推导或新建机制。
+- **并行 S2a spike**：研究性质，无需 grill 门禁，独立 worktree 起；产出 api.db 解耦可行性、Infinity PoC、deepdoc 模型清单三项结论。
+- **S1b 前置**：测试 VPS 尚无 rclone/sshfs；首任务在 VPS 验证 app-server uid 挂载 + omp uid 可读写（`allow_other`）+
+  rclone 配置对 omp 不可读三者同时成立，结论决定 ADR-0003 是否需补充，之后再排 S1b 流水线。
+
 单 issue 的实现/修复/合并走 `/subagent-workflow`。
