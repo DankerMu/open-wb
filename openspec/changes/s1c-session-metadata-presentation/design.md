@@ -1,0 +1,231 @@
+# Design: s1c-session-metadata-presentation
+
+## Context
+
+见 proposal.md「Why」。**baseline = change A 的 delta；A 先归档；A delta 若在审核后变动，B 重新同步。** 本设计引用的现状行号以 master `c710f8d` 为准；A 尚未实施，凡涉及 A 新增/拆出的模块（`store-branch.ts`、`turn-control.ts`、`pool.ts`、`api-sessions.ts`、`turn-actions.ts`、`stream-approvals.ts` 等）均以 A 的 design/specs/tasks 为准。
+
+现状接缝：
+
+- **会话行与投影**：`server/src/sessions/store.ts` `SESSION_COLUMNS`（:151-152）、`INSERT_SESSION`（:157-158，只写 id/owner/NULL title/idle/时间戳）、`toSessionView`（:526-534，五键）；列表 `ORDER BY updated_at DESC, id ASC`（:187）。标题只在 `acceptPrompt` 且原标题为 NULL 时写入 18 码点前缀（:261-262、:559-570）；`rollbackPrompt` **无条件**把标题恢复为 `previousTitle`（:326-333）。内存态 `activeTurns/activeSessions/activeSteps`（:163-165）；正文刷盘阈值 `FLUSH_BYTES=2048`/`FLUSH_MS=2000`（:149-150）。
+- **REST**：`server/src/sessions/rest.ts` `POST /api/sessions`（:109）不读 body 且不在 parser 归属集；`authorizeOwnedBeforeParse`（:91-101）在 preParsing 做 owner 校验。`server/src/http/errors.ts` 归属集为 URL 集合（:43-50），且仅 `request.method === "POST"` 时映射（:69）。
+- **spawn**：`server/src/sessions/omp/process.ts:52` `cwd = join(sandboxRoot, ownerId)` 并对其 `ensureSharedDir`，不经工作空间；supervisor `#dispatchNew` 只从 `runtimeState` 拿 `ownerId`。`server/src/app.ts` 先 `registerSessions`（:151）后 `createWorkspaceStore`（:159），会话模块拿不到 `rootOf`。
+- **归约与发布**：`server/src/sessions/events.ts` 只把 `text_delta` 映射为 `text.delta`（:113-116），thinking 帧被过滤（promoted `openspec/specs/chat-stream/spec.md:7`；`server/test/session-events.test.ts:98-128` 把 `thinking_delta` 列为噪声帧）；`normalizeOutput` 丢弃 `result.details`（:294-319）。`persistEvent`（`supervisor.ts:641-692`）单事件进、单事件出。text.delta **逐条发布、缓冲落库**。ring 容量 1000（`stream/ring-buffer.ts:7`）。
+- **订阅与回收**：`supervisor.subscribe(sessionId, lastEventId, deliver)`（:133-160）无按连接关闭句柄；`#retireSlot`（:596-612）私有；`sse.ts` 的 `endOwned` 为文件私有。
+- **web**：`session-contract.ts` 会话严格五键（:72）；`stream.ts` 只为 `DATA_EVENTS`（:67-74）注册监听（:273），未知事件类型根本不进解码器；`FollowTranscript`（`scroll-follow.tsx:103-116`）无按消息滚动 API；`useTopbar` 只有 `breadcrumb`（`lib/topbar.tsx:10-35`），`Topbar` 只渲染导航钮与 h1（`routes/shell/topbar.tsx:36-48`）；`/files` 只认 `?ws=`（`features/files/page.tsx:268`），无路径深链。
+- **omp 事实**（vendored v18.0.10，`resource/oh-my-pi/packages`）：`ai/src/providers/openai-completions.ts:1149-1174` 对响应中 `reasoning_content|reasoning|reasoning_text` 的解析**无条件**；模型级 `reasoning` 只作用于请求侧——请求 reasoning effort（:232）与回放历史助手轮次时按 `compat.reasoningContentField` 写回思考字段（:2085-2150，缺省 `reasoning_content`）；`models.yml` 模型级 `reasoning` 键合法（`coding-agent/src/config/custom-models.ts:85,130`）。`EditToolDetails{diff, path?, perFileResults?}`（`coding-agent/src/edit/renderer.ts:58-97`），diff 行形如 `+N|…`/`-N|…`/` N|…`（`edit/diff.ts:54-56`）；`WriteToolDetails{resolvedPath?}`（`tools/write.ts:314-324`）；`ast_edit` 的 details 是另一形状 `AstEditToolDetails{applied, fileReplacements, files, …}`，无 `diff`/`path`/`perFileResults`（`tools/ast-edit.ts:153-175`）。`--approval-mode write` 下只有 exec 档工具请求审批，`write` 普通路径为 write 档（`tools/write.ts:515-560`、`tools/approval.ts:39,100`）。`--resume` 采用会话文件头记录的 cwd（`coding-agent/src/main.ts:728-775,1697-1712`，Stage 1 facts）。
+
+**次序约束**：
+
+1. 迁移账本要求回执为已发现文件的连续前缀（`server/src/core/db/migration-ledger.ts:375-384`）→ `035` 必须在 A 的 `034` 合入（#449）之后合入，成为第九条回执。
+2. A 的 fork 以**显式列名**插入会话行并拷贝消息/步骤行（A design D4）→ B 的新列必须可空，且 B 要改 A 的 `store-branch.ts` 插入与拷贝列表（D14）。
+3. A/B 共改 `events.ts`、`session-contract.ts`、`stream.ts`、`conversation-view.tsx`、`page.tsx`、`rest.ts`、`supervisor.ts`、`http/errors.ts`、`app.ts` → B 的实施 issue 逐条 `Depends on` A 的对应 issue（proposal「与 grill 拍板的有意修订」）。
+
+**B 重述的 A 基线条文**（B 的 delta 以整段重述替换，基线为 A 的重述文本）：chat-sessions「会话 REST」（路由清单加 PATCH/DELETE；`POST /api/sessions` 与会话视图由五键改八键）与「会话持久化与回合刷盘」（rollback 标题规则）；omp-runtime「子进程 spawn 契约」的 `--cwd`；http-service-skeleton「统一错误信封」（十条 → 十二条，按 method + route 判定）与「服务启动与装配」（`MODEL_REASONING` 为第十四个启动配置键）；chat-stream「纯协议事件归约」的 thinking 过滤句；omp-test-harness「假 omp 进程契约」与「假 omp probe 回报」。A **新增**的 turn-control「从此处分叉 REST」仍写「five public fields only」：A 未归档前 B 无法 MODIFY 一个尚不存在于 promoted 的 Requirement，故由 session-metadata 承载八键 fork 响应场景，并在 Migration Plan 安排 A 归档后补 turn-control 的 MODIFIED delta。
+
+**Oracle 差异（显式记录）**：`IMPLEMENTATION_PLAN.md:209` 要求 F-CHAT-9「结合沙箱审计中的写记录」——审计不记 omp 写入（`IMPLEMENTATION_PLAN.md:336`），本 change 只从工具帧推导（D6）；同一行「卡片 `打开`/`查看详情` 跳 `/files` 预览」与 proposal「跳 `/files` 该空间该路径」——`/files` 无路径参数（`features/files/page.tsx:268`），`查看详情` 只跳 `/files?ws=<id>`，不新增 files 页深链（相对 proposal 的偏差，proposal 须回写）。`:210` 要求 thinking「持久化与回放缓冲规则与 step detail 一致」——本 change 取同一「有界 + 截断标记」原则，但上限为 32768 码点而非 4096，发布按 2048 B/2 s 合并（D5）。
+
+**范围外**：omp RPC 把以 `/` 开头的 prompt 当内建 slash 命令执行（`/session delete`、`/rename`、`/move` 可绕过本 change 的元数据契约），由 issue #497 单独跟踪，本 change 不拦截、不依赖其修复。
+
+## Goals / Non-Goals
+
+**Goals:**
+- 会话可在创建时绑定所有者自己的工作空间，绑定会话的 omp 进程以该空间根为 cwd；场景、置顶、重命名、删除有服务端契约，绑定与删除可审计。
+- 侧栏按「置顶任务 / 任务 / 空间」三分区互斥呈现，可按状态×时间筛选，条目菜单可重命名/置顶/删除。
+- 模型 reasoning 流式可见、可持久、可回放且有界；edit/write 工具在绑定空间内改动的文件逐回复可见，并派生产物卡与产物面板。
+- 对话内搜索可定位到消息。
+- 跨端契约按 D11 次序落地，`make check`/`make smoke`/`make ui-walk` 全绿。
+
+**Non-Goals:**
+- 会话内切换场景入口（S1d）；「允许完全访问」权限开关与 composer footer 权限段（S3b）；`助理任务`分区与「项目/专家团」分组；导出对话记录；追问 chip（#404）；顶栏「更多」；产物卡「在编辑器中打开」（`IMPLEMENTATION_PLAN.md:157-158`）。
+- 场景决定默认专家与工具面（F-CHAT-1 原文；S1c 无专家/工具面契约，归后续阶段）。
+- bash/heredoc/脚本等非 edit/write 途径的文件写入不进 `files.changed`（`ast_edit` 在 v18.0.10 下按 D6 规则不产生候选）。
+- 跨会话搜索；步骤输出、thinking、审批条、文件变更与产物卡内的搜索；产物卡图片缩略图/尺寸。
+- `/files` 按路径深链（`查看详情` 只落到空间）。
+- 任何 omp 集成面新增（不使用 omp `artifact://`、不新增 RPC 命令）；拦截 slash 命令（#497）。
+- 侧栏 `新建会话` 改名为 demo 的 `新建任务`，分区可折叠，筛选状态持久化。
+
+## Decisions
+
+### D1 迁移 035：五列 ADD COLUMN，不重建
+- **决定**：新增 `server/src/core/db/migrations/035_chat_session_metadata.sql`，只含五条 `ALTER TABLE … ADD COLUMN`（事务与回执归 runner，不含 BEGIN/COMMIT）：
+  - `chat_sessions.workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL`
+  - `chat_sessions.scene TEXT CHECK (scene IS NULL OR scene IN ('office','code','design'))`
+  - `chat_sessions.pinned_at INTEGER CHECK (pinned_at IS NULL OR (typeof(pinned_at) = 'integer' AND pinned_at >= 0))`
+  - `chat_messages.thinking TEXT`
+  - `chat_steps.changes TEXT`（JSON 数组文本，D6）
+
+  全部无 DEFAULT（即 NULL）、无 NOT NULL、无索引；CHECK 只加在 `scene`/`pinned_at`。旧行读作 NULL，不回填。回执为 A 的 `034` 之后的**第九条**。SQLite `ADD COLUMN` 规则逐条满足：不带 PRIMARY KEY/UNIQUE；外键开启时带 REFERENCES 的列默认值必须为 NULL（满足）；CHECK 对既有行求值（NULL 通过）。这些规则由迁移单测在 node:sqlite 内置版本上实证：新库与「带数据的 034 库」升级后五列存在且可空、旧行全 NULL、`PRAGMA foreign_key_check` 为空；直接删除一行 `workspaces` 后引用它的会话 `workspace_id` 变 NULL 而会话仍在；`scene='other'`、`pinned_at=-1`、`pinned_at=1.5` 被拒。
+  测试常量同 PR 更新：`server/test/core-db-helpers.ts:13-23` 增 `MIGRATION_035` 进 `TRACKED_MIGRATION_FILENAMES`，:70-77 回执表增 `[9, MIGRATION_035]` 且 `sequenceRows` 为 9；`core-db-chat-schema.test.ts` 的顺序断言（:664 附近，A 已改到第八条）追加第九条。新用例写进新文件 `server/test/core-db-session-metadata.test.ts`（`core-db-chat-schema.test.ts` 已 731 行）。
+- **为什么**：五列都是新增可空元数据，不改既有 CHECK，033（`ALTER TABLE chat_steps ADD COLUMN output TEXT`）即先例；重建表已由 A 的 034 承担一次，没有理由再来一次。可空是 A 显式列插入的硬约束。
+- **备选**：(a) 并入 A 的 034 重建——把 B 绑到已审核完的 A 上，否决；(b) 独立 `session_meta` 表——每个查询多一次 join、fork 还要多拷一张表；(c) `scene NOT NULL DEFAULT 'office'`——A 的显式列 fork 插入会静默拿到默认值，且「未设置」与「日常办公」不可区分。
+- **所有者一致性**：FK 只保证工作空间存在，不保证与会话同属一个所有者；所有者一致由 REST 经所有者作用域的 `rootOf` 校验保证（D2）。当前没有删除/转移工作空间的路由，`ON DELETE SET NULL` 只在账号级联删除时触发。
+
+### D2 元数据 REST：POST body、单一 PATCH、parser 归属集十二条
+- **决定 `POST /api/sessions`**：
+  - 列入 content-parser 归属集，body limit 16 KiB（与工作空间路由先例一致）。无 body（无 Content-Type 且无内容）与 JSON `{}` → 201，`scene`/`workspaceId`/`pinnedAt` 均为 null（既有调用方不受影响）。有 body 时必须是 `application/json` 对象，键为 `{workspaceId, scene}` 的子集；多余键、`workspaceId` 非字符串（含 `null`——不绑定就省略该键）、`scene` 不在三值内（含 `null` 与大小写变体）、数组/`null` 根值 → 400 `bad_request`；malformed/empty JSON、非 JSON media、超限 → 400（归属集映射）。
+  - `workspaceId` 是字符串但 `rootOf({id: owner}, workspaceId)` 为 null（不存在、属他人、形态不合法）→ 404 `not_found`，三者响应逐字相同，不写任何行。
+  - 插入与审计同一事务：绑定时 store 经注入的 `audit.emit`（A 已注入，见 A chat-sessions「Session module registration」）写 `{kind:"session.bind", actorId: owner, title:"绑定工作空间", workspaceId, detail:{sessionId, scene}}`；未绑定的创建与 fork 继承不审计。
+  - 响应 201 为八键 DTO `{id,title,status,createdAt,updatedAt,scene,workspaceId,pinnedAt}`。
+- **决定 `PATCH /api/sessions/:id`**：
+  - owner 校验在 preParsing（复用 `requireOwnedSession`，不捕获快照/游标），未认证 401、不存在或属他人 404，均先于 body 解析；body limit 16 KiB。
+  - body 为 `application/json` 对象，`{title?, scene?, pinned?}` 的**非空**子集；`{}`、多余键（含 `workspaceId`——绑定不可改）、类型不符 → 400，任一字段不合法整体 400、不写任何列。`title`：`String.prototype.trim` 一次后 1..80 个 Unicode 码点（按码点计），存 trim 后文本；`scene` 三值之一（`null` → 400）；`pinned` 布尔：`true` → `pinned_at = COALESCE(pinned_at, now)`（已置顶保持原时刻），`false` → NULL。
+  - 单条所有者作用域 `UPDATE … WHERE id=? AND owner_id=?`，只写所给列，**不改 `updated_at`**、`status`、`workspace_id`、`omp_session_file`、`stream_epoch`；影响行数 0 → 404。响应 200 八键 DTO。任何 status（含 running）与控制占用期间都允许——元数据不与 omp 交互。不审计。
+- **重命名与 `rollbackPrompt`**：`acceptPrompt` 只在标题为 NULL 时写前缀，故重命名永远不会被后续 prompt 覆盖。补偿规则（chat-sessions「会话持久化与回合刷盘」）：受理时 Turn 记录 `titleSetByPrompt`（本次是否写入了前缀）；PATCH 写 `title` 时若该会话有活跃 Turn，把其 `titleTouched` 置为 true；`rollbackPrompt` 仅当 `titleSetByPrompt && !titleTouched` 时把标题恢复为 `previousTitle`（NULL），否则保留当前标题；status 与 `updated_at` 的恢复不变。测试：未命名会话受理 prompt → PATCH 标题 → 注入派发失败触发补偿 → 502、受理对移除、status/`updatedAt` 复原而标题仍为 PATCH 值；不 PATCH 时补偿后标题回到 null。
+- **`http/errors.ts`**：归属集由 URL 集合改为 `method + matched route` 精确身份集合，判定为身份命中（去掉 :69 的 POST-only 门）：A 的十条加 `POST /api/sessions`、`PATCH /api/sessions/:id` 共**十二条**，`PATCH /api/sessions/:id` 以 PATCH 归属、其余十一条以 POST 归属；错误码表不变（十三码）。`DELETE /api/sessions/:id` 不入归属集（D3）。
+- **web API 客户端**（A 拆出的 `web/src/lib/api-sessions.ts`）：`createSession(body?)` 提供 body 时以 `application/json` 发送、无参时不带 body；`patchSession(id, patch)` 原样发送非空子集，空对象时不发请求、以 `TypeError` 拒绝；`deleteSession(id)` 无 body，恰 204 视为成功（不轮询，200 视为无效响应）。
+- **为什么**：单一 PATCH 让重命名/置顶/场景共用一条校验与一个响应形状（grill）；不改 `updated_at` 是因为侧栏排序与「今天/更早」筛选语义是「最近活动」，置顶或改名不是活动，否则一次置顶就把会话推到列表顶端。按「方法+路由」判定归属，避免同一路由的 DELETE 被 PATCH 的 parser 映射顺带覆盖。用显式 `titleTouched` 而不是比较标题值，PATCH 写入与前缀相同的文本时也不会被补偿抹掉。
+- **备选**：三条动词路由（`/rename`、`/pin`、`/scene`）——多两倍路由与测试面，否决；PATCH 返回 204——前端要再拉列表才能拿到 `pinnedAt`，否决。
+
+### D3 删除：占用 → 停止 → 等终态 → retire（含订阅者）→ 删行 → 删文件
+- **决定**：`DELETE /api/sessions/:id`：cookie guard 401；preParsing `requireOwnedSession` → 404，均先于任何 supervisor 调用；响应 no-store。然后调用 supervisor `deleteSession(sessionId, ownerId)`（编排落新模块 `server/src/sessions/session-delete.ts`），同步完成以下序列，任一步失败即停止后续步骤：
+  1. **同步段**：该会话的控制占用正被 regenerate/fork/stop/另一 DELETE 持有 → 409 `session_busy`，无副作用；否则登记 A 的控制占用（持有至调用结束，每一种结束路径都释放）并把会话放入**删除墓碑集**。持有期间同会话 prompt/regenerate/fork/DELETE 按 A 规则 409；stop 不受占用阻塞，按其自身规则返回 202/204。
+  2. **running 时**：以删除已持有的占用（不重新登记、不释放）执行与 stop 相同的停止序列——挂起审批以 `deny` 结算 → `abort`，或派发前登记停止意图（A turn-control「停止生成 REST」）；随后等待该回合终态落库（`turn.end` 已发布）。上界由 A 保证：`OMP_ABORT_GRACE_MS`（8000）内 `agent_end` 未到即有界退回 retire 并以 `stopped` 结算，retire 本身按既有 5000/8000 ms 升级；删除不另设计时器。非 running 直接进入第 3 步。
+  3. **`retire(sessionId)`**（supervisor 新公开方法）：有 slot → 既有 `#retireSlot`（关停进程、token 撤销、封存 generation、经 A 的 `onExit` 释放池名额），丢弃 slot 与事件环；然后对该会话每个订阅者调用其关闭回调并清空订阅集。`subscribe` 为此增第四参 `onEnd`，`sse.ts` 传入调用 `endOwned(connection)` 的闭包：连接以 `raw.end()` 结束，**不写任何事件**。墓碑期内的新 `subscribe` 立即得到已关闭订阅（sse.ts 随即 `endOwned`），关闭 retire 与删行之间的竞态窗口。
+  4. **store `deleteSession`**：先确认该会话无活跃回合/缓冲/步骤内存态（此时应已结算；若仍存在视为不变量破坏，通用失败且不删除）；单事务读出 `omp_session_file` 与消息数 → `DELETE FROM chat_sessions WHERE id=? AND owner_id=?`（FK 级联消息 → 步骤/审批；以其为源的 fork 会话 `parent_session_id` 置 NULL 且保留）→ 审计 `{kind:"session.delete", actorId: owner, title:"删除会话", workspaceId: <被删会话的 workspace_id>, detail:{sessionId, ompSessionFile, messageCount}}`；审计失败整个事务回滚。
+  5. **提交后**删文件：`omp_session_file` 非 NULL → `unlink`；ENOENT 视为成功；其它错误经服务错误通道（supervisor `onError`）上报，响应仍为 204（行已删，残留文件不影响任何会话）。只删当前文件，A 的 regenerate/fork 留下的旧分支文件不删（Not yet specified）。
+  6. `finally` 释放占用与墓碑；返回 204 无 body。
+
+  第 2–4 步失败（终态落库或删除事务的存储错误）→ 通用 5xx，会话行保留（进程可能已退役，下次 prompt 按既有 `--resume` 惰性获取）。删除完成后该 id 的 messages、事件流、PATCH、DELETE 与未知 id 相同地 404，列表不再含它。
+- **客户端行为**：删除成功后 toast `任务已删除`、从列表移除；若删的是当前会话，页面关闭其事件流、以 replace 移除 `?session=`（保留其它 search/hash）回到欢迎态，不显示错误；失败关闭确认框、toast 信封 message（如 409 `会话正在生成，请稍候`）并重新读取列表。其它标签页的 EventSource 在服务端 `end` 后自动重连，`GET …/events` 得 404，浏览器置 `readyState=CLOSED`，走 `stream.ts` 既有 `fail(CONNECTION_FAILURE)` 路径；本 change 不为此新增 UI。
+- **body**：DELETE 不读取 body、不入 parser 归属集（proposal）。客户端从不发送 body；Fastify 对带 Content-Type 的 DELETE 仍会运行默认 parser，格式良好的 body 被忽略，malformed body 走既有「非归属已注册路由」语义（通用 5xx），与其它非归属路由一致，不为此扩大归属集。
+- **超时**：`server/src` 未配置 Fastify `requestTimeout`，删除最长约 16 s 加提交时间，远小于 Node HTTP 默认 `requestTimeout` 300 s。
+- **为什么**：先提交后删文件——反之若提交失败，行会指向已删文件、下次 `--resume` 失败；先 retire 再 unlink——omp 空闲时仍持有 `.jsonl` fd（Stage 1 facts）。墓碑 + 占用把「删除期间再冒出进程或订阅」排除在外，而不是靠事后清理。残留内存态按不变量破坏处理而不是静默清掉，因为那意味着终态路径有 bug，删行只会把它掩盖成悬空写入。
+- **备选**：202 异步删除——前端要轮询、失败不可见；软删除标记——所有查询都要带过滤条件且 `.jsonl` 永不释放；running 时直接 409 让用户先停——grill 选择删除内含停止。
+
+### D4 空间绑定 cwd：派发时解析空间根，缺失即失败
+- **决定**：`RegisterSessionsOptions` 增 `workspaceRootOf(ownerId, workspaceId): string | null`，由 `app.ts` 以工作空间 store 的 `rootOf({id: ownerId}, workspaceId)` 包装传入；`app.ts` 把 `createWorkspaceStore` 移到 `registerSessions` 之前（其余装配次序不变）。`store.runtimeState` 返回值增 `workspaceId`（仍是 supervisor 专用可信访问器，REST 不用它做授权）。supervisor 在 `#dispatchNew`、A 的 regenerate 惰性获取与 fork 临时进程处统一计算 `cwd`：`workspaceId === null` → `join(sandboxRoot, ownerId)`（与现状相同）；否则 `workspaceRootOf(ownerId, workspaceId)`，返回 null 或该路径不是已存在目录（`statSync().isDirectory()`）→ 不调用 `spawnOmp`、不创建目录、不回退所有者根，抛 `agent_unavailable` 502，prompt 走既有补偿（受理对移除、状态复原）。`SessionRuntimeOpts` 与 `SpawnOmpOpts` 增必填 `cwd`，`process.ts:52` 改用 `opts.cwd`，子进程 spawn 的 `cwd` 选项与 `--cwd` 参数取同一值；`mkdir -p` 只保留给 session-dir/home/agent 与所有者根 cwd（绑定空间根由工作空间 store 以 2770/setgid 建立，ADR-0010）。
+- **不可变**：绑定只在创建（或 fork 继承）时写入，PATCH 带 `workspaceId` 即 400；omp `--resume` 以会话文件头 cwd 为准，首个 prompt 冷启动后即使传入不同 `--cwd` 也不迁移——两者一致。宿主对同一会话的每次 spawn 仍传入同一规则取得的 `cwd`。035 之前的旧会话 `workspace_id` 为 NULL，行为不变。
+- **sudo 模式**：`--cwd` 值变深，但 sudoers 行 `… -- <OMP_BIN> *`（`docs/adr/0010-dedicated-omp-uid.md:55`）尾部 `*` 覆盖任意尾参，不需改部署。
+- **为什么**：cwd 是 omp 唯一的工作目录入口（无 set_cwd RPC），在 spawn 时注入是唯一可执行的绑定；把 `rootOf` 注入而不是让 sessions import workspaces，保持模块单向依赖。空间根缺失时不创建、不回退：首次 spawn 写入文件头的 cwd 此后不可改，回退会把绑定会话永久钉在错误目录，而 mkdir 会造出一个应用不知道的空目录。
+- **备选**：cwd 仍为所有者根、在 prompt 里提示「在 X 目录工作」——不可强制，文件变更归属（D6）也失去依据。
+
+### D5 深度思考：纯归约映射 + supervisor 合并器 + 有界落库
+- **决定（归约，纯）**：`applyFrame` 对回合内（`agent_start` 之后、终态之前）assistant `message_update` 中 `assistantMessageEvent.type === "thinking_delta"` 且 `delta` 为非空字符串产出 `thinking.delta{messageId, delta}`。`thinking_start`/`thinking_end` 帧与 `message_end` 内的 `thinking`/`redactedThinking` 块不产生事件、不作为来源（只认增量帧）。chat-stream「纯协议事件归约」中 thinking 过滤句据此重述，`server/test/session-events.test.ts:98-128` 把 `thinking_delta` 从噪声帧列表移出。
+- **决定（合并、落库、发布）**：新模块 `server/src/sessions/thinking-buffer.ts`，每条助手消息一个缓冲，时钟注入（`SessionClock`）。以下任一时刻把整段缓冲作为**一条** `thinking.delta` 先落库再发布：累计达 2048 UTF-8 字节；自缓冲首段起 2000 ms（与 text.delta 刷盘同值）；即将发布同一回合任何其它事件（`text.delta`、`step.start`、`step.end`、`files.changed`、`approval.*`、`error`、`turn.end`）之前；回合进入终态（含 `applyFailure`/`applyStop` 退回、崩溃与优雅关停）之前。定时刷出投递到 pump 的同一串行提交链，不与帧提交交错。落库 = `store.appendThinking(assistantMessageId, chunk)`（新模块 `store-thinking.ts`，单条 `UPDATE chat_messages SET thinking = COALESCE(thinking,'') || ?`），返回实际落库片段；随后在**同一同步段内**（中间无 await）发布该片段，使 A 的「preParsing 同栈捕获快照与游标」规则下快照 `thinking` 恰等于已发布片段之和。落库失败不发布，沿既有 owned error-sink 路径处理。ring 中 `thinking.delta` 与同回合其它事件的相对次序等于上游帧到达次序，此外不作次序保证。
+- **上限**：保存与发布共享同一上限 32768 个 Unicode 码点（不拆代理对）：使累计超限的那一次合并只保留恰好填满上限的前缀并紧接追加 `…（已截断）`（与 events.ts 的 `TRUNCATED_MARK` 同文），该次发布的 `delta` 即「前缀 + 标记」；此后同一消息的 thinking 既不落库也不发布。累计恰为 32768 码点时不加标记。实时视图与重载快照逐字相同。
+- **与 text.delta 的关系**：text.delta「逐条发布、缓冲落库」不变；thinking「合并发布、发布前落库」是**新增**要求，不改写既有 text 规则。
+- **ring 代价**：每条消息 thinking 事件按字节触发至多约 ⌈32768×4/2048⌉ = 64 条，另加每 2 s 最多一条时间触发，对 1000 容量可接受；超出 ring 的回放走既有 `replay.gap` → 快照。
+- **快照与 web**：消息 DTO 增 `thinking: string | null`（用户消息恒 null，无 reasoning 的助手消息 null）；regenerate 删除旧助手行时 thinking 随行删除。web 新文件 `features/chat/stream-thinking.ts` 解码与归约（追加到消息 `thinking`），`thinking-block.tsx` 渲染 `<details class="thinking-block">`，summary `深度思考过程`（前置装饰 `chevron-right`），主体纯文本 `pre-wrap`（不经 Markdown）；消息 running 时展开，进入 `done|failed|stopped` 时收起，快照打开的终态消息为收起，两次状态迁移之间用户手动开合保留；null/空串不渲染；不参与搜索与 `复制`。
+- **助手块次序**（chat-web「会话页」）：思考折叠块 → 审批条 → 正文 → 步骤卡 → 错误 → 文件变更卡 → 产物卡 → `已停止` 徽章 → 操作行（文件变更卡在产物卡之前，是相对 demo `msgHTML` 的有意偏差）。
+- **models.yml**：`writeManagedModelsYml(agentDir, {proxyBaseUrl, modelId, reasoning})` 在 `reasoning === true` 时为唯一模型条目写 `reasoning: true` 与 `compat:` 块下的 `reasoningContentField: reasoning_content`，`false` 时两者皆省略。`MODEL_REASONING` 为 `server/src/agent-config.ts` 解析的第十四个启动配置键：缺省 `on`；只接受精确 `on`/`off`，其它值（含空串）启动失败（同 `OMP_IDLE_MS` 纪律）。**该声明不门控宿主 thinking 链路**：omp 对响应 reasoning 字段的解析无条件，某条消息是否有 thinking 只取决于上游是否返回思考增量；声明只影响供应商侧（请求 reasoning、按 `reasoningContentField` 回放历史思考——DeepSeek 类上游会校验历史 `reasoning_content`）。「模型无 reasoning 不渲染」即上游未返回思考增量时 `thinking` 为 null。
+- **取证**：服务端单测用 fake-omp `thinking` 场景（D12）；真 omp 链路用 fake-upstream 的 `WORKBUDDY_THINK` 标记（D13），与 `MODEL_REASONING` 取值无关。fake-omp 的代理中继（`fake-omp.mjs:559-568` 只读 `delta.content`/`tool_calls`）不在该链路上，不改。DMXAPI 是否真的返回 reasoning 由 Open Questions 1 关闭。
+- **为什么**：reasoning 常比正文长一个数量级，逐条发布会挤占 1000 条 ring 并放大 SSE 写入；合并器必须在纯归约之外，因为它需要时钟（promoted chat-stream 规定归约无 IO/时钟）。上限 32K 取「有界 + 截断标记」原则（#367），数值比 step detail 大是因为推理文本天然更长。
+- **备选**：只在 `message_end` 从 content 块取整段 thinking 落库——回合中途刷新看不到推理，流式展开失效；逐条发布——见上。
+
+### D6 files.changed：从 edit/write 的 `details` 推导，按空间根归属
+- **决定（候选提取，纯归约）**：只对已知 running 调用的 `tool_execution_end` 推导，且帧与 `result` 均非 `isError`、`result.details` 为普通对象（读取不访问原型）。纯函数落新模块 `server/src/sessions/file-changes.ts`，由 `events.ts` 调用：
+  - `edit`：`details.perFileResults` 为非空数组 → 其中 `path` 为非空字符串且 `diff` 为字符串的每一项各一个候选；否则 `details.path` 非空字符串且 `details.diff` 为字符串 → 一个候选。`kind:"edit"`，`added` = diff 按 `\n` 切分后匹配 `^\+\d+\|` 的行数，`removed` = 匹配 `^-\d+\|` 的行数（上下文行与其它行不计）。不解释 `move`/`sourcePath`（默认 hashline 模式不产生）。
+  - `write`：`details.resolvedPath` 为非空字符串 → `{kind:"write", added:null, removed:null}`。
+  - `ast_edit`：其 details 为 `AstEditToolDetails`，无 `diff`/`path`/`perFileResults`（`tools/ast-edit.ts:153-175`），按上述规则恒不产生候选，turn-artifacts spec 的工具集合因此只列 `edit`/`write`。bash、read、memory_edit 等永不产生。
+  有候选时归约器在该调用 `step.end` 之前、同一返回结果中紧邻输出 `files.changed{messageId, stepId:<toolCallId 字符串>, files:[{path:<details 原始路径>, added, removed, kind}]}`（候选按出现次序）；无候选不输出。`normalizeOutput` 仍丢弃 details，`step.end` payload 不变。
+- **归属判定（supervisor，IO）**：会话未绑定 → 丢弃整条事件，不落库不发布，步骤 `changes` 保持 NULL。绑定时逐个候选：绝对路径原样，相对路径以会话 `--cwd`（空间根）拼接；取 realpath，路径不存在（如 edit 删除了文件）时取父目录 realpath 再拼文件名，两者都失败丢弃；结果必须严格位于空间根 realpath + 路径分隔符之内（根自身、根外、经符号链接逃出的一律丢弃）；保存为相对空间根、`/` 分隔的路径，UTF-8 超过 1024 字节丢弃；同一步骤内同一相对路径合并为一项（`added`/`removed` 求和，位置取首次出现）；合并后超过 50 项只保留派生次序前 50 项，其余静默丢弃（事件形状固定，不记丢弃数）；无幸存项 → 不落库、不发布。
+- **持久化与发布次序**：`persistEvent` 保持一进一出——内部 `files.changed` 事件在该处完成归属判定，无幸存项返回 `undefined`（不发布）；有幸存项时经独立的 store 写入 `setStepChanges(stepId, json)`（`store-metadata.ts`，单条 `UPDATE chat_steps SET changes = ?`）提交该步骤行的 `chat_steps.changes`（JSON 数组文本，元素键恰为 `path/added/removed/kind`），提交成功后以数字步骤 id 发布 `files.changed`；随后下一个内部事件 `step.end` 照既有路径经 `finishStep` 落库并发布——`finishStep` 从不读写 `changes`。`setStepChanges` 失败不发布该事件，沿 owned error-sink 路径处理，ring 序号不推进。`files.changed` 是普通 ring 事件（保留、`min−1` 回放、`replay.gap`、活跃 turn.start 刷新规则同其它事件）。未收到工具结束帧即被停止/失败结算的步骤 `changes` 为 NULL。
+- **快照**：步骤 DTO 增 `changes: {path, added, removed, kind}[] | null`，无变更的步骤（含全部非 edit/write 步骤与未绑定会话的步骤）为 `null`。
+- **取证分工**：`±` 行数只由 fake-omp `edit-write` 场景驱动的服务端集成测试证明；真 omp 链路（`WORKBUDDY_WRITE`）只能证明 write 变更（`写入`、无行数）。
+- **为什么**：`details` 是工具帧里唯一结构化的写入信息，审计不记 omp 写入（`IMPLEMENTATION_PLAN.md:336`）；realpath 前缀校验与 `core/sandbox` 的解析纪律一致，保证卡片只指向空间内真实路径。每步最多 50 个路径 × 2 次同步 realpath，提交路径上的 IO 有界。
+- **备选**：监听空间根的文件系统事件——能覆盖 bash，但无法可靠归属到步骤且平台相关；回合前后目录快照比对——代价随空间大小增长。
+
+### D7 web 分区侧栏、欢迎页场景与 composer footer
+- **分区（纯函数，新文件 `features/chat/session-groups.ts`）**：筛选后的会话按 置顶 > 空间 > 任务 **互斥**归入恰一个分区：`pinnedAt` 非 null → `置顶任务`（标签无计数，demo:1873）；否则 `workspaceId` 非 null → `空间 (n)`，按工作空间分子组，子组标签为空间名、顺序为 `GET /api/workspaces` 的返回顺序，`workspaceId` 不在已读列表中（含读取中或失败）的会话归入末位 `未知空间` 子组；其余 → `任务 (n)`。分区顺序 置顶任务 → 任务 → 空间；分区与子组内保持服务端列表顺序（`updatedAt` 降序、id 升序）；每个分区/子组为带 accessible name 的 `role="group"`；`n` 为筛选后条目数；空分区/子组不渲染；筛选后无任何会话（含账号尚无会话）只渲染 `没有匹配的任务`。分区不可折叠。
+- **筛选**：`筛选任务` 按钮打开 Popover，两个 `role="radiogroup"`：`状态`（`全部`/`进行中`/`已完成`）与 `时间`（`全部时间`/`今天`/`更早`），默认全部；选择立即生效、弹层保持打开。`进行中` = `running`；`已完成` = `done|failed|stopped`（`idle` 只在「全部」下出现——相对 demo:1844「非 running 即已完成」的有意偏差）；`今天` = `updatedAt` 本地日历日等于当前本地日历日，`更早` 为其余；两组取交集。筛选状态只存页面内存（切换会话保留，刷新复位，不写 storage），只影响侧栏条目。
+- **条目与菜单**：保留选择按钮、`新会话` 标题回退与状态元素，行尾 `更多操作：<显示标题>` 图标按钮（`more-horizontal`）打开 Menu：`重命名`（pencil）、`置顶任务`|`取消置顶`（star）、`删除`（trash，danger），任何状态可用；不渲染 `导出记录` 与 `助理任务` 分区。
+- **对话框**：重命名 Dialog 标题 `重命名任务`，输入框 accessible name `任务名称`（初值为服务端 title，null 为空），trim 后为空时 `保存` 禁用；保存/Enter → PATCH → 更新列表与面包屑、toast `已重命名`；失败 Dialog 保持打开并以 `role="alert"` 显示信封 message。置顶/取消 → PATCH → toast `已更新置顶状态`。删除 ConfirmDialog 标题 `删除任务`、说明 `确定要删除「<显示标题>」吗？删除后不可恢复。`、确认 `删除`（danger，请求中忙碌）；结果处理见 D3。列表刷新（`ChatPage.refreshList`）并行拉取会话与工作空间列表。
+- **欢迎页场景胶囊**：hero 与快捷任务行之间的 `场景` 组，三个按钮 `日常办公`/`代码开发`/`创意设计`（`file-text`/`code`/`palette`，`aria-pressed`），默认日常办公；切换 → 快捷任务换为该场景清单（`welcome-content.ts` 按 demo:1221-1239 增三组）并 toast `已切换到「<场景名>」场景`，再点已选场景无变化。选中场景为页面内存状态。S1c 不在侧栏或会话页渲染场景标签。
+- **composer footer**：只在欢迎态 composer 卡片内、工具栏之后渲染按钮 `任务启动于 <空间名>`/`任务启动于 未选择`（`folder`）；点击打开 Popover：`搜索工作空间` 输入框（空间名大小写不敏感子串过滤）、始终保留的 `未选择` 项、各空间（名称 + ADR-0011 逻辑路径 `<account>/<dir>`，按返回顺序），无匹配 `没有匹配的工作空间`，读取中 `正在读取工作空间`；不渲染权限元素、`新建工作空间`、`挂载目录到当前空间`。选中空间为页面内存状态。欢迎态首次发送与侧栏 `新建会话` 都以 `POST /api/sessions {scene, workspaceId?}` 创建。
+- **为什么**：分区与筛选是纯前端派生，服务端只需提供三列；互斥分区让计数与条目一一对应（grill）；「未知空间」子组避免把绑定会话误报为未绑定任务。
+- **备选**：置顶会话同时出现在原分区——计数重复、菜单操作对象歧义，grill 否决。
+
+### D8 顶栏 actions 插槽
+- **决定**：`lib/topbar.tsx` 的 context 增 `actions: readonly TopbarAction[]`，`TopbarAction = {key, label, icon: IconName, expanded?: boolean, onSelect(trigger: HTMLElement): void}`；`useTopbar({breadcrumb, actions})` 在 layout effect 中上报，Provider 只在 `key/label/icon/expanded` 浅比较有变化时 setState，`onSelect` 经 ref 读取最新闭包——页面每次渲染产生新回调不会触发上报循环。卸载或不提供 `actions` 时清空。`routes/shell/topbar.tsx` 在 h1 之后渲染 `.topbar-actions`：每项为 ghost icon Button，accessible name 与 Tooltip 为 `label`，`expanded` 定义时带 `aria-expanded`；h1 的 accessible name 不含这些按钮。
+- 会话页在顶栏第二态（有当前会话且标题已知）按 DOM 顺序注入 `重命名`（pencil，打开 D7 同一重命名 Dialog）、`对话内搜索`（search，`aria-expanded` 反映搜索框）、`产物面板`（package）；欢迎态不注入。搜索框由会话页渲染在 `main` 内转录区之上（顶栏下方），不进 shell。产物面板为 `ui/drawer.tsx` 右侧 Drawer（D10）。
+- **为什么**：顶栏归 shell，页面只能经上报通道注入；描述符而非 ReactNode 让比较可行、避免 effect 循环。
+- **备选**：页面用 portal 直接渲染进顶栏 DOM——绕过 shell 的布局与焦点顺序约束，否决。
+
+### D9 对话内搜索
+- **决定**：纯前端、不发请求。纯函数 `features/chat/search-match.ts` `matchMessages(messages, query)`：查询为空串无匹配；否则对转录顺序中每条消息（用户与助手，含流式中的部分正文）的 `content`（Markdown 源文本）与查询各自 `toLowerCase()` 后做子串判断；步骤 detail/output、thinking、审批、文件变更与产物卡、错误文案不参与。组件 `conversation-search.tsx` 为 `role="search"`（accessible name `对话内搜索`），打开即聚焦：输入框 `搜索对话内容`、计数器 `i/n`（`aria-live="polite"`，无匹配 `0/0`，无当前匹配 `i=0`）、`上一个`/`下一个`（`n=0` 时禁用）/`关闭`。Enter/`下一个` 前进、Shift+Enter/`上一个` 后退，首尾循环；Escape、`关闭` 或再次点顶栏按钮关闭并清空查询与高亮、焦点还给顶栏按钮。查询变化 → 当前为第一条匹配并滚动高亮；消息集合变化（流式、新回合、快照重载）→ 重算 `n`，原当前仍匹配则保持并更新 `i`，否则清空当前（`0/n`、无高亮）直到下一次前进/后退，重算不触发滚动。切换会话、回到欢迎态或卸载即关闭并清空。
+- **滚动与高亮**：`FollowTranscript` 增 `handleRef` 暴露 `scrollToMessage(id)`：在自身 `.chat-transcript` 内查 `[data-message-id="<id>"]` 并 `scrollIntoView({block: "center"})`；贴底跟随与 `回到最新` 规则照旧（跳到非底部消息后新内容不把视图拽回底部）。当前匹配消息的 `<article>` 带 `aria-current="true"` 与类 `chat-msg--search-current`，同一时刻至多一条。按匹配**消息**计数、滚动高亮且不显示 demo 的 `第 i / n 处匹配` toast，均为留痕偏差（proposal）。
+- **为什么**：消息全在客户端状态里，服务端搜索无收益；消息级粒度避免在 Markdown 渲染树里做字符级高亮。
+- **备选**：浏览器 find（`window.find`）——非标准、无计数。
+
+### D10 文件变更卡、产物卡与产物面板
+- **按消息汇总**：一条助手消息只汇总其**已结束**步骤（status 非 running）的 `changes`：按路径去重，同一路径取步骤 ordinal 最大者的值，位置取首次出现处。running 步骤的 `files.changed` 先进状态，但卡片在该步骤 `step.end` 后才出现。
+- **文件变更卡**（`file-changes-card.tsx`，`role="group"`）：卡头 `文件变更（N 个）`；每行 `kind:"edit"` 时 `added>0` 显示 `+added`、`removed>0` 显示 `-removed`，`kind:"write"` 显示 `写入`；随后是逻辑路径 `<account>/<dir>/<path>`（account 取当前 Principal，dir 取该会话 `workspaceId` 在工作空间列表中的 `dir`，不渲染绝对根）；行尾 `查看详情 <逻辑路径>` 按钮（chevron-right）导航到 `/files?ws=<workspaceId>`。会话空间不可解析（不在列表中）时行只显示相对路径、无 `查看详情`，也不渲染产物卡。
+- **产物卡**（`artifact-card.tsx`，位于文件变更卡之后，同一汇总与顺序）：按末段文件名最后一个 `.` 之后的扩展名（大小写不敏感）派生——`html` → globe、标签 `HTML`、`打开网页预览`、卡脚 `可交互预览`；`png` → 标签 `PNG`、`jpg/jpeg` → 标签 `JPG`，`img`、`下载`；`md/txt/log/csv/json/js/ts/tsx` → file-code、标签为大写扩展名、`复制代码`；其它扩展名不派生。不渲染 `在编辑器中打开`。
+- **正文按需拉取、不存副本**：只在点击时调用既有 `fetchPreview(workspaceId, path)`，不预取；拉取期间按钮禁用、不并发；卸载或切换会话 abort 进行中的拉取并撤销已建 Blob URL。HTML → 文本 → Dialog（标题为文件名）内 `<iframe sandbox="allow-scripts" srcdoc={文本} title={文件名}>`，sandbox 恰为 `allow-scripts`；响应带截断标记时 iframe 上方显示 `文件超过 1 MiB，仅预览前 1 MiB`。图片 → Blob URL → `download=<文件名>` 的临时链接触发下载后撤销。代码 → 文本 → `navigator.clipboard.writeText` → toast `已复制到剪贴板`，剪贴板不可用或失败 → `复制失败`，响应带截断标记 → 不写剪贴板、toast `文件过大，无法复制`。预览失败（404/415/网络）→ toast 信封 message，不开 Dialog、无未处理拒绝。
+- **产物面板**：点击顶栏 `产物面板` 时按当前视图全部已结束步骤的 `changes` 按路径聚合（同一路径取最新：消息次序靠后优先，同消息内 ordinal 大者优先；位置取首次出现）；为空 → 只 toast `当前任务暂无产物`、不开抽屉；否则打开右侧 Drawer（宽 420，accessible name `产物面板`），每行同文件变更卡行，可派生产物卡的扩展名附同名操作按钮（行为同产物卡）；关闭后焦点还给按钮。
+- **为什么**：不新增服务端端点与存储（grill）；iframe 无 same-origin 时处于不透明源，读不到应用 cookie 与 API 响应，且会话 cookie `SameSite=Lax`（`server/src/auth/session.ts:41`）使 iframe 发起的跨站写请求不带凭证。`查看详情` 只落到空间是因为 `/files` 没有路径参数，加深链是 files-web 的新契约，不在本 change 的 grill 范围。
+- **备选**：服务端渲染 HTML 预览端点——多一个需要 CSP 与鉴权设计的面，grill 否决。
+
+### D11 跨端落刀次序
+- **新事件类型可先发**：`thinking.delta`、`files.changed` 对未升级的 web 是未知类型，`stream.ts` 只为 `DATA_EVENTS` 注册监听，事件不会进入解码器——server 可先于 web 发出（server-emit-before-web-parse 安全）。web 解码器在 `stream-thinking.ts`/`stream-artifacts.ts`，`stream.ts`（717 行）只增 `DATA_EVENTS` 条目与接线。
+- **DTO 键扩展必须同刀**：会话八键、消息 `thinking`、步骤 `changes` 在 `hasExactlyKeys` 下是破坏性变更 → server 投影（列表、创建、PATCH、快照、A 的 fork 201）与 web `session-contract.ts` 同一 PR（与 A tasks 5.3 同类的多路径宽度例外）。该 PR 之前 035 已合入（列存在、投影未暴露）；之后才上事件与呈现。
+- **为什么**：部署为同一产物，无滚动窗口；次序只为保证每个合入点主干全绿。
+
+### D12 fake-omp 场景与 probe `cwd=`
+- **决定**：`server/test/support/fake-omp.mjs` 在 A 的八个 S1c 场景之外新增两个（共十个）：
+  - `thinking`：`agent_start` 后依次发 `thinking_start{contentIndex:0}`、恰三段 `thinking_delta`（`先读需求，`、`再列要点，`、`最后作答。`，拼接为具名常量 `先读需求，再列要点，最后作答。`）、`thinking_end`，再发至少三段正文 delta、content 含 thinking 块与文本块的 assistant `message_end{stop}`、终止 `agent_end`；任何 `--approval-mode` 下都无工具帧与 `extension_ui_request`。
+  - `edit-write`：一个带两个工具调用的 `message_end{toolUse}`，然后 `edit`（args 恰 `{input:…}` 无 path，end 帧 `details:{path:"<cwd>/notes.md", diff:"+1|a\n+2|b\n-3|c\n 4|d"}`，计 2 增 1 删）与 `write`（args `{path:"out/report.html", content:…}`，end 帧 `details:{resolvedPath:"<cwd>/out/report.html"}`、无 diff），再 `message_end{stop}` 与 `agent_end`。`<cwd>` 为 fixture 自身 `process.cwd()`；每个 end 帧之前真实写出所报告的文件（创建 `out/`），宿主 realpath 检查看到真文件；宿主测试通过选择子进程工作目录把路径放到绑定空间根之内或之外。无审批请求。
+- **probe**：回报在末尾 `frames=` 之后追加 ` cwd=<process.cwd()>`（`cwd=` 成为最后一个字段）。两个消费方同 PR 更新：`server/test/fake-omp.test.ts` 的 `expectedProbeReport` 精确串；`server/test/linux/uid-isolation.test.ts` 的 `REPORT_LABELS` 以 `"frames", "cwd"` 结尾（最后标签取余下全部，含空格的路径不影响 ` cwd=` 切分）。
+- **为什么**：fake-omp 是服务端测试的真实子进程边界；`cwd=` 让「绑定会话以空间根 spawn」在真实子进程上可断言，而不是断言 argv 字符串。
+
+### D13 验证 harness
+- **fake-upstream 标记**（`server/test/support/fake-upstream.mjs`，与既有 `WORKBUDDY_UI_WALK:<uuid>` 同一「最后 user 文本子串」查找，可互相组合）：`WORKBUDDY_THINK` → 作答轮（历史已有 `tool` 消息）在不变的正文分片之前先发三个 `reasoning_content` 分片，拼接恰为 `先读需求，再列要点，最后作答。`；`WORKBUDDY_WRITE` → 工具轮（`toolFrames` :366 旁新增分支）改发 `write {"path":"workbuddy-report.html", …}` 而非 bash——write 档在 `--approval-mode write` 下不触发审批，真 omp 以 `--cwd` 解析相对路径并在 `details.resolvedPath` 报告绝对路径。无标记请求逐字节不变。
+- **`smoke/session-meta.hurl`**（新，只进 `make smoke`、不进 `make smoke-live`）：独立登录 `zhangsan`，按 `smoke/files.hurl:17-32` 的幂等模式创建或采用工作空间 `smoke-sessions`；覆盖 POST body（绑定、404、400）、PATCH 三字段与 400 形状、`WORKBUDDY_THINK` prompt 经 A 的审批作答后 done、快照助手 `thinking` 恰为 `先读需求，再列要点，最后作答。` 且 PATCH 设的标题未被首个 prompt 覆盖、DELETE 204 → 404 → 再 DELETE 404 → 列表不含。可重跑（`make smoke` 跑两遍）。
+- **同 PR 的契约面**：`Makefile:64` smoke 配方在 `smoke/files.hurl` 之后追加 `smoke/session-meta.hurl`（`smoke-live` 不变）；`scripts/test-ci-harness.sh` 中匹配四文件精确串的变异断言（:122、:123、:126）随之改为以 `smoke/files.hurl smoke/session-meta.hurl` 结尾，并补「遗漏/前置/加入 smoke-live/第二行」四类候选的拒绝断言；`AGENTS.md:89` Verification Matrix 的 HTTP smoke 证据由四文件改五文件，oracle 中对该行的变异断言（:145）同步。
+- **ui-walk**：新建 `web/e2e/ui-walk-sessions.spec.ts`（`ui-walk.spec.ts` 已 799 行）；`web/playwright.config.ts:10` `testMatch` 改为 `"ui-walk*.spec.ts"`（辅助模块 `ui-walk-gate.ts`、`ui-walk-layout.ts`、`ui-walk-oracle.ts`、`route-hold.ts` 不以 `.spec.ts` 结尾，不被选中）；`globalTimeout` 由 `150_000` 改为 `300_000`（`workers: 1`、两个 project，两份 spec 各跑两个视口），其余配置不变。走查以 `WORKBUDDY_THINK WORKBUDDY_WRITE 会话走查 <uuid>` 驱动（无审批条）：场景胶囊与 footer 选空间 → 绑定的 `code` 会话、思考折叠块文本、`写入` 行的文件变更卡、sandbox 仅 `allow-scripts` 的 HTML 预览、置顶后侧栏由 `空间 › <空间名>` 移到 `置顶任务`、重命名刷新后保持、搜索 `1/1` 高亮与 `0/0`、删除后 toast `任务已删除` 且 REST 404。真 omp + 假上游，不以 fake-omp 替代；`ui-walk.spec.ts` 两个 project 照常通过。
+- **为什么**：`make smoke`/`make ui-walk` 消费已运行的真 omp + 假上游，无法选择 fake-omp 场景，受控上游标记是唯一确定性手段。edit 无法由假上游确定性驱动（hashline 需要先 read 取锚点），`±` 行数只由 fake-omp `edit-write` 证明。
+
+### D14 fork 继承
+- **决定**：B 修改 A 的 `server/src/sessions/store-branch.ts`：fork 新会话行的显式列插入增加 `workspace_id`、`scene`（取源会话值），`pinned_at` 为 NULL；分叉点前消息/步骤的显式列拷贝语句分别增加 `chat_messages.thinking` 与 `chat_steps.changes`，否则分叉历史静默丢失思考与文件变更。A 的 fork 201 `{session, draft}` 中的 `session` 随 D11 变为八键（场景由 session-metadata 承载，见 Context）。fork 继承绑定不写 `session.bind` 审计。regenerate 删除旧助手行时其 thinking/changes 一并消失，新助手行 thinking 为 NULL；regenerate 与 fork 临时进程的 cwd 按 D4 计算（`--resume` 下以文件头 cwd 为准，fork 会话 cwd 必然等于源空间根）。
+- **为什么**：fork 的语义是「从此处继续同一件事」，空间与场景属于这件事；置顶是用户对某一条目的组织动作，不应复制（grill）。
+
+### 模块拆分（size-guard）
+- **事实**：`scripts/size-guard.sh` 硬限 800 行。master 上接近上限的：`server/src/sessions/store.ts` 798、`omp/runtime.ts` 797、`supervisor.ts` 770、`omp/process.ts` 732、`web/src/lib/md-render.ts` 797、`web/src/lib/api.ts` 749（A 拆出 `api-sessions.ts`）、`web/src/features/chat/page.tsx` 734（A 拆出 `turn-actions.ts`）、`stream.ts` 717、`web/e2e/ui-walk.spec.ts` 799；测试 `server/test/session-rest.test.ts` 769、`core-db-chat-schema.test.ts` 731。A 已占用的新文件名（`omp/commands.ts`、`omp/ui-requests.ts`、`pool.ts`、`turn-control.ts`、`approvals.ts`、`store-approvals.ts`、`store-branch.ts`、`turn-actions.ts`、`api-sessions.ts`、`stream-approvals.ts`）B 不复用。
+- **决定**：B 的新代码落新模块，既有大文件只加接线：
+  - 服务端：`sessions/rest-metadata.ts`（POST body 解析、PATCH、DELETE 路由）、`sessions/store-metadata.ts`（创建含绑定、PATCH、删除事务与审计、`setStepChanges`）、`sessions/store-thinking.ts`（`appendThinking` 与上限）、`sessions/thinking-buffer.ts`（合并器）、`sessions/file-changes.ts`（候选提取、diff 计数、归属判定）、`sessions/session-delete.ts`（删除编排、墓碑）。`store.ts` 只改列与投影（`finishStep` 不涉及 `changes`）与 `rollbackPrompt` 标题规则；`supervisor.ts` 只加 `retire`、`subscribe` 的 `onEnd`、合并器与 `files.changed` 的 `persistEvent` 分支接线；`process.ts`/`runtime.ts` 只透传 `cwd`。
+  - web：`features/chat/session-groups.ts`、`session-sidebar.tsx`、`session-filter.tsx`、`session-menu.tsx`、`rename-dialog.tsx`、`session-actions.ts`（重命名/置顶/删除 handler）、`scene-pills.tsx`、`composer-footer.tsx`、`thinking-block.tsx`、`stream-thinking.ts`、`stream-artifacts.ts`、`file-changes-card.tsx`、`artifact-card.tsx`、`artifacts-panel.tsx`、`conversation-search.tsx`、`search-match.ts`；`session-nav.tsx` 由 `session-sidebar.tsx` 取代并删除（knip 零新增）；`ui/icon.tsx` 增 `star`、`pencil`、`trash`、`more-horizontal`、`package`、`download`、`globe`、`palette`、`chevron-up`、`filter`、`search`、`folder`、`code`（master 已注册 `img`/`file-code`/`file-text`/`chevron-right`；A 的 7.2 注册 `square`/`refresh-cw`/`git-branch`）。
+  - 测试一律新文件：`server/test/core-db-session-metadata.test.ts`、`session-metadata-rest.test.ts`、`session-delete.test.ts`、`session-thinking-files.test.ts`（supervisor + fake-omp）、`file-changes.test.ts`；web 侧 `session-groups.test.ts`、`search-match.test.ts`、`chat-page-sessions.test.tsx`、`chat-page-artifacts.test.tsx`；ui-walk 见 D13。
+- **验证**：每刀 `bash scripts/size-guard.sh` 退出 0，knip 零新增。
+
+## Sketch seams under test
+
+- **`SessionSupervisor` + 真实 fake-omp 子进程（最高 seam）**：`thinking` 场景的合并发布（三段小 delta 在首个 text.delta 前被刷出为一条 `thinking.delta`、快照 `thinking` 等于已发布片段之和）与 32K 上限截断；`edit-write` 场景下 cwd 在空间根内（两条事件、`files.changed` 先于 `step.end`、`chat_steps.changes` 已提交）、cwd 在根外（无事件）、未绑定会话（无事件）；running 会话 DELETE 走 stop → 终态 → retire → 订阅者被 `end` 且无事件 → 行与文件消失；probe `cwd=` 绑定为空间根、未绑定为所有者根；空间根缺失时 502 且未 spawn、未建目录。理由：合并时序、进程回收与 cwd 只有真实子进程能证明。
+- **Fastify `app.inject()` + 真实 SQLite**：POST body/PATCH/DELETE 的 201/200/204/400/401/404/409 与八键形状、parser 归属（十二条 method + route 身份，含同路由 DELETE 不被 PATCH 映射覆盖）、`session.bind`/`session.delete` 审计与行同事务、`rollbackPrompt` 不回滚 PATCH 过的标题、035 在带数据的 034 库上升级及 ADD COLUMN 规则实证。理由：既有 HTTP 契约唯一证明点。
+- **纯函数**：`applyFrame`（thinking 映射；`server/test/session-events.test.ts:98-128` 的噪声帧列表移出 `thinking_delta`；edit/write 的 `files.changed` 紧邻 `step.end`）、候选提取与 diff `+N|`/`-N|` 计数、web `partitionSessions`/筛选、`matchMessages`。理由：成本最低，覆盖边角。
+- **web jsdom 页面 fixture**：侧栏分区与菜单对话框、欢迎页胶囊与 footer、思考折叠开合、文件变更卡/产物卡动作、顶栏 actions 顺序、搜索跳转与高亮、删除当前会话回欢迎态。理由：既有 `chat-page*.test.tsx` 路径。
+- **`make smoke`（`session-meta.hurl`）与 `make ui-walk`（`ui-walk-sessions.spec.ts`）**：真 omp + 受控假上游的端到端证据（thinking 帧到达、write 变更与 cwd 绑定），CI 已有 job。
+
+## Risks / Trade-offs
+
+- [DMXAPI 不返回 reasoning，或拒绝 reasoning 请求参数/历史 `reasoning_content`] → 折叠块在 null 时不渲染；`MODEL_REASONING=off` 为部署开关；Open Questions 1 以真实端点关闭。
+- [edit 的 `details` 形状只由源码与 fake-omp 证明，真二进制未进 CI] → write 形状由 `make ui-walk` 真 omp 证明；edit 形状与 hashline `details.path` 绝对性在 A tasks 9.3 同一次真二进制手工验证中核对（Open Questions 2），相对/绝对两种都已按 D6 规则处理。
+- [删除 running 会话最长约 16 s] → 确认对话框 pending 态禁止重复提交；上界由 A 的有界退回保证，不另设计时器。
+- [unlink 失败或 app uid 无权删除 omp uid 文件] → 行已删、响应 204，经错误通道上报；Open Questions 3 以 uid-isolation 用例与 VPS 关闭。
+- [HTML 预览执行任意脚本] → sandbox 恰为 `allow-scripts`，不透明源读不到 cookie 与 API 响应；`SameSite=Lax` 挡住带凭证的跨站写；站点目前未设 CSP（`server/src` 无 `Content-Security-Policy`），srcdoc 不受影响。
+- [thinking 挤占 ring] → 合并发布 + 32K 上限；溢出走既有 `replay.gap` → 快照。
+- [提交路径上的同步 realpath] → 每步至多 50 路径；未绑定会话零 IO。
+- [web 严格解析遇新键] → D11：DTO 键同 PR，新事件类型先发安全。
+- [A 的 delta 在审核或实施中变动] → B 的 specs 以 A 为基线，A 变动即重新同步（Context 首句）；B 实施 issue 逐条 `Depends on` A。
+- [ui-walk 总时长] → `globalTimeout` 300 s 覆盖两份 spec × 两个视口；合入前在 CI 记录实测值。
+- [工作空间列表读取失败时绑定会话显示在 `未知空间`] → 刷新即恢复，不伪造空间名，不误归「任务」。
+
+## Migration Plan
+
+- 新增 `035_chat_session_metadata.sql`，`openDb` 顺序执行，回执追加为第九条（须在 034 之后部署）。迁移不可逆，升级前备份 DB 文件；回滚 = 恢复备份 + 回退代码（与 032/034 同纪律）。
+- 无数据回填：旧会话 `workspace_id/scene/pinned_at` 为 NULL（任务分区、无场景、未置顶），旧消息 `thinking` 与旧步骤 `changes` 为 NULL（快照 `null`）。
+- 配置：新增可选 `MODEL_REASONING`（`on|off`，缺省 `on`）；`models.yml` 在每次服务启动时重写（`server/src/server.ts:272`），无需手工迁移。sudo 模式 sudoers 行不变（D4）。
+- 规格次序：A 归档后、B 实施前，补 `openspec/changes/s1c-session-metadata-presentation/specs/turn-control/spec.md`，以 MODIFIED 整段重述「从此处分叉 REST」，把场景中的五键会话视图改为八键并写入继承规则（此前由 session-metadata 的 fork 场景承载）。
+- 部署顺序：A 全量先于 B；B 的 DTO 同刀 PR 与 035 之间主干始终可部署。
+
+## Not yet specified
+
+- 删除会话时 A 的 regenerate/fork 遗留的旧分支 `.jsonl`，以及 omp 在会话文件旁创建的 artifacts 目录，如何识别与清理（omp 无 delete_session RPC，归属关系只在文件名与头信息里）。
+- 绑定空间的目录被外部删除或改名后如何恢复：本 change 只规定派发时 502 且不回退、不重建（D4），用户侧的修复路径（重建同名目录、改绑、提示文案）与 `--resume` 采用文件头 cwd 的交互尚说不清问题边界。
+- 模型只返回 `redactedThinking`（加密推理）时折叠块应呈现什么。
+
+## Open Questions
+
+- **DMXAPI `deepseek-v4.1-flash` 在声明 `reasoning: true`（及 `compat.reasoningContentField`）后是否返回 `reasoning_content`、是否接受 omp 随之发送的请求参数与历史思考字段**：以本机真实端点（`MODEL_REASONING=on`）跑一次 `make smoke-live` 并读回一条消息快照的 `thinking` 关闭；接受且返回 → 维持默认 on；拒绝请求 → 部署设 `off` 并在本节记录；接受但不返回 → 「模型无 reasoning 不渲染」成立，维持 on。结论只改部署配置与本节，不改代码。
+- **hashline 模式 edit `details.path` 是否为绝对路径**：随 A tasks 9.3 的真二进制手工验证一并核对；D6 已同时处理绝对与相对，结论只影响代码注释与 fixture 文档。
+- **app uid 能否删除 omp uid 写入的 `.jsonl`（2770 目录 + umask 007 推断可行）**：在 CI `uid-isolation` job（Linux、`OMP_USER` sudo 模式）新增「删除会话后会话文件不存在」用例关闭；测试 VPS 上的部署演练再确认一次。
+- **A 新增 Requirement 的重述时机**：turn-control「从此处分叉 REST」的五键 → 八键只能在 A 归档后以 MODIFIED delta 落地（Migration Plan 规格次序一步）；若 A 归档晚于 B 的 Stage 5，B 的实施 issue 以 session-metadata 的 fork 场景为验收依据，归档时再补齐。

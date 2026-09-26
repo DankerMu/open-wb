@@ -1,0 +1,152 @@
+# Spec delta: omp-test-harness（S1c B 修改）
+
+> 本 delta 按仓内先例**整段重述**被修改的 Requirement（含其全部 Scenario）；基线为 change A（`s1c-turn-control-governance`）对同名 Requirement 的重述文本（A 先于 B 归档），归档时以本文整段替换同名 Requirement，未在此重述的 Requirement（含 A 新增的「假 omp 入站帧记录」）不变。B 相对 A：假 omp 场景八 → 十（`thinking`、`edit-write`），probe 回报末尾增 `cwd=`；另新增受控上游的思考/写入标记。
+
+## MODIFIED Requirements
+
+### Requirement: 假 omp 进程契约
+The standalone zero-dependency Node fixture SHALL expose JSONL stdin/stdout frames matching omp v18.0.10 commit 33cc6b9a043a74e00a157e72ca909272796d8461 for its supported commands, with explicit argv-selected scenarios. It SHALL not replace production code or contact a real model service in its contract tests.
+For S1c turn control the fixture SHALL additionally parse `--session-dir <dir>` and `--approval-mode <mode>` from argv and support ten scripted scenarios (`abort-ok`, `abort-ignored`, `branch`, `approval`, `approval-parallel`, `approval-then-abort`, `approval-chain-abort-ignored`, `slow-ready`, and for S1c session metadata/presentation `thinking`, `edit-write`). `abort-ok`: after prompt ack, `agent_start` and two text deltas the turn waits; on an inbound `abort` frame it emits `message_end` with `stopReason` `aborted`, terminal `agent_end` and `response{command:"abort"}` echoing the abort id, then accepts a further prompt as a normal turn; an `abort` read before `agent_start` and the two deltas have been emitted is honored right after them, so the host always sees `agent_start`, the two deltas, `message_end aborted`, `agent_end` in that order. `abort-ignored`: same held turn, but inbound `abort` produces no frame at all and the process stays alive until stdin closes or a signal arrives (bounded-fallback probe). `branch`: `get_branch_messages` responds with a fixed deterministic list of at least two user entries `[{entryId,text}]` documented in the fixture; `branch{entryId}` for a known entry writes a real new nonempty `.jsonl` file under the `--session-dir` directory (distinct from the resumed/default path), switches the process to it so every subsequent `get_state.sessionFile` returns that new path, and responds `{text}` with that entry's text; an unknown `entryId` yields an error response and leaves `sessionFile` unchanged. `approval`: when argv contains `--approval-mode write`, a prompt turn emits `agent_start`, text deltas and `message_end stopReason toolUse`, then `tool_execution_start` for bash, and only then (mirroring real omp, where the agent loop emits `tool_execution_start` before the tool wrapper asks) emits `extension_ui_request{id, method:"select", title:"Allow tool: bash\n…", options:["Approve","Deny"]}` (exactly the recognizer shape of omp-runtime) and emits no further frame until a matching `extension_ui_response{id}` arrives; `{value:"Approve"}` continues with the normal `tool_execution_end` and completion, any other value or `cancelled` emits `tool_execution_end` with `isError: true` before completing; without `--approval-mode write` the same scenario behaves as `normal` and emits no select. `approval-then-abort`: like `approval`, but after the select's answer and that answer's `tool_execution_end` (with `isError: true` for any value other than `Approve` or for `cancelled`) the turn is held exactly like `abort-ok` — no completion frame — until an inbound `abort`, which is then honored with `message_end aborted`, terminal `agent_end` and `response{command:"abort"}` echoing the abort id, after which a further prompt is accepted as a normal turn; an `abort` arriving while the select is still pending produces no frame until the select is answered and is honored right after that answer's `tool_execution_end`. A host that writes `Deny` and then `abort` (the stop order) therefore gets a deterministic aborted end. `approval-parallel`: when argv contains `--approval-mode write`, a prompt turn emits `agent_start`, text deltas and one `message_end stopReason toolUse` carrying two bash tool calls, then two `tool_execution_start` frames for bash with distinct `toolCallId`s, and then two `extension_ui_request` selects of the same recognizer shape with distinct `id`s (one per tool call, in tool-call order) back to back, before either is answered; each select is answered independently and in any order: a matching `extension_ui_response{id}` emits the `tool_execution_end` of that select's own tool call only (successful for `Approve`, `isError: true` for any other value or `cancelled`), the other call stays pending. Once both are answered: if at least one answer was `Approve` and no `abort` has arrived, the turn continues to its normal text, assistant `message_end` and terminal `agent_end`; if every answer was a denial (`Deny`, any other value or `cancelled`) and no `abort` has arrived, the turn is held exactly like `abort-ok` — no completion frame — until an inbound `abort`, which is then honored (modelling the model's follow-up call during which a host's stop, which denies every pending select before writing `abort`, lands). An `abort` arriving while either select is still pending produces no frame of its own until both are answered: each answer still emits its own tool call's `tool_execution_end` immediately as above, and after the last one, instead of the normal completion and whatever the answers were, the abort is honored with `message_end aborted`, terminal `agent_end` and `response{command:"abort"}` echoing the abort id. Without `--approval-mode write` it behaves as `normal`. `approval-chain-abort-ignored`: when argv contains `--approval-mode write`, a prompt turn starts exactly like `approval` (`agent_start`, text deltas, `message_end stopReason toolUse`, bash `tool_execution_start`, then a first select of the recognizer shape); once that select is answered with any value or `cancelled` it emits that call's `tool_execution_end` (`isError: true` unless `Approve`), then a second bash `tool_execution_start` with a distinct `toolCallId` and a second select of the same recognizer shape with a distinct `id`, and emits nothing further until that select is answered; an answer to the second select emits its `tool_execution_end` likewise, after which the turn stays held without completing. Any inbound `abort`, at any point, produces no frame at all and the process stays alive until stdin closes or a signal arrives (like `abort-ignored`), so a host can observe a bounded retire while an approval is still pending; without `--approval-mode write` it behaves as `normal`. `slow-ready`: the `ready` frame is withheld until a delay has elapsed, then emitted with the normal fields, after which the process behaves exactly as `abort-ok` (a prompt is held after `agent_start` and two text deltas until an inbound `abort`, which it honors; the prompt after that aborted turn completes as a normal turn); the delay in milliseconds is taken from argv `--ready-delay-ms <n>` (non-negative integer; default 500 when absent) so a host test can make the owner acquire/handshake window observable and act (e.g. stop) while the prompt is still awaiting dispatch; inbound frames are not expected before `ready`, and stdin closing during the delay exits the process cleanly (unlike `no-ready`/`no-ready-hang`, `ready` does eventually arrive). The knob is independent of `--scenario` ordering (the server test `spawnImpl` in `server/test/session-supervisor-helpers.ts` appends `--scenario <name>` after the production argv, and `server/test/linux/uid-isolation.test.ts` `HANG_PATTERN` matches only `scenario hang-term$`, so neither is affected). `thinking`: after prompt ack the turn emits `agent_start`, then `message_update` frames whose `assistantMessageEvent` is, in order, `thinking_start{contentIndex:0, partial}`, exactly three `thinking_delta{contentIndex:0, delta, partial}` with `delta` values `先读需求，`, `再列要点，`, `最后作答。` (none a prefix of another; their concatenation `先读需求，再列要点，最后作答。` is the deterministic thinking text, documented as a named constant in the fixture), and `thinking_end{contentIndex:0, content:"先读需求，再列要点，最后作答。", partial}`; then at least three `text_delta` frames (contentIndex 1) carrying the fixture's normal reply deltas, an assistant `message_end` with `stopReason` `stop` whose `message.content` holds `{type:"thinking", thinking:"先读需求，再列要点，最后作答。"}` followed by the text block, and terminal `agent_end`; it emits no tool frames and no `extension_ui_request` under any `--approval-mode`. `edit-write`: after prompt ack the turn emits `agent_start`, text deltas and one assistant `message_end` with `stopReason` `toolUse` carrying two tool calls, then for the first call `tool_execution_start{toolCallId, toolName:"edit", args:{input:<fixed hashline input documented in the fixture>}}` (hashline-mode args carry no `path` key, exactly like omp's default edit mode, so the path is observable only in `details`) and `tool_execution_end{toolCallId, toolName:"edit", result:{content:[{type:"text",text:…}], details:{path:"<cwd>/notes.md", diff:"+1|a\n+2|b\n-3|c\n 4|d"}}}` — the `details.diff` uses omp's `+N|`/`-N|`/` N|` line format (not unified diff) and therefore counts 2 added and 1 removed lines; then for the second call `tool_execution_start{toolCallId, toolName:"write", args:{path:"out/report.html", content:<fixed html documented in the fixture>}}` and `tool_execution_end{toolCallId, toolName:"write", result:{content:[…], details:{resolvedPath:"<cwd>/out/report.html"}}}` with no `diff` key (omp's write tool reports no diff); then assistant `message_end` with `stopReason` `stop` and terminal `agent_end`. `<cwd>` is the fixture's own `process.cwd()` at the time of the turn, so a host test places the reported paths inside or outside a bound workspace root by choosing the child's working directory (the production spawn sets it to `--cwd`; a test `spawnImpl` may choose another). Before emitting each `tool_execution_end` the fixture actually writes the file it reports — `<cwd>/notes.md` with the documented post-edit content and `<cwd>/out/report.html` (creating `out/`) with the documented html — so realpath-based host checks see real files; if a write fails that call's `tool_execution_end` carries `isError: true` and no `details`, and the turn still completes. With `--approval-mode write` neither `edit` nor `write` is an exec-tier tool, so `edit-write` emits no `extension_ui_request` under any `--approval-mode`. Existing scenarios and defaults SHALL remain unchanged.
+
+#### Scenario: 默认握手与完整回合
+- WHEN a spawned fixture receives negotiate_protocol version 2, get_state and prompt with request ids
+- THEN ready advertises supported transport; successful responses echo ids, negotiation data has protocolVersion 2, get_state data has nonempty sessionFile; prompt ack precedes a turn containing at least three message_update.assistantMessageEvent text_delta frames, matching tool_execution_start/end, assistant message_end and terminal agent_end
+
+#### Scenario: 握手故障与进程退出
+- WHEN no-ready or missing-session is selected
+- THEN respectively no ready frame is emitted or get_state omits sessionFile, while the difference is observable through a real subprocess
+- WHEN idle normal stdin closes
+- THEN the process exits cleanly without leaking resources
+
+#### Scenario: 字节级分块与交错
+- WHEN chunked get_state follows successful v2 negotiation
+- THEN rpc_chunk frames are individually within 1MiB and concatenate decoded bytes into the exact greater-than-3MiB Unicode JSON object; chunkId/index/count/byteLength are consistent
+- WHEN interleaved is selected
+- THEN an unrelated frame deliberately interrupts that sequence so downstream decoders can reject it
+
+#### Scenario: 回合失败与交互取消
+- WHEN crash or error is selected and a prompt is accepted
+- THEN crash exits nonzero without terminal completion, while error emits assistant stopReason error with errorMessage before terminal agent_end
+- WHEN extension-ui is selected
+- THEN a confirm request is emitted, and terminal completion waits for a matching cancelled extension_ui_response
+
+#### Scenario: 真实代理承载
+- WHEN call-proxy reads the managed providers.workbuddy configuration and receives a prompt
+- THEN it POSTs the prompt messages with stream true to baseUrl/chat/completions using the environment WORKBUDDY_MODEL_TOKEN bearer; if the streamed response carries tool calls it reassembles them, reports each as matching tool_execution_start/end frames carrying the upstream tool call id and name, and POSTs one second request whose messages are the original user message, the assistant tool-call message and a role tool result for that call id; streamed content of the answering round maps to text_delta without byte-boundary corruption, and the turn ends successfully after DONE
+- WHEN a 200 response ends without content or tool calls, or the second round again yields only tool calls
+- THEN the assistant message ends with stopReason error rather than a successful empty turn
+- WHEN configuration is invalid or the local HTTP request fails
+- THEN the failure is observable without a fabricated successful reply or a token leak into stdout/stderr
+
+#### Scenario: abort 收尾与忽略
+- **WHEN** `abort-ok` accepts a prompt and then receives `abort` with request id X
+- **THEN** after the two deltas no completion is emitted until the abort; then `message_end` with `stopReason` `aborted`, `agent_end` and `response{id:X, command:"abort"}` follow in that order, and a subsequent prompt completes as a normal turn
+- **WHEN** `abort-ignored` receives `abort` in the same position
+- **THEN** no frame is emitted afterwards, the process does not exit on its own, and it still exits when stdin closes or SIGTERM arrives
+
+#### Scenario: branch 产生真实新会话文件
+- **WHEN** `branch` is spawned with `--session-dir <dir>` and `--resume <old>`, receives `get_branch_messages`, then `branch{entryId}` for the last listed entry, then `get_state`
+- **THEN** the list is the fixed documented user entries; a new nonempty `.jsonl` file exists under `<dir>` that is not `<old>`; the branch response `text` equals that entry's text; `get_state.sessionFile` equals the new path
+- **WHEN** `branch` is sent an unknown `entryId`
+- **THEN** an error response is returned, no file is created and `get_state.sessionFile` is unchanged
+
+#### Scenario: 审批 select 门控 bash
+- **WHEN** `approval` is spawned with `--approval-mode write` and accepts a prompt
+- **THEN** `tool_execution_start` for bash is followed by a `select` request with options exactly `["Approve","Deny"]` and title starting `Allow tool: bash`, and no further frame arrives until it is answered
+- **WHEN** the response value is `Approve`
+- **THEN** a successful `tool_execution_end` and normal completion follow
+- **WHEN** the response value is `Deny` or the response is `cancelled`
+- **THEN** `tool_execution_end` carries `isError: true` and the turn still completes with `agent_end`
+- **WHEN** `approval` is spawned with `--approval-mode yolo`
+- **THEN** the turn matches the `normal` scenario and no `extension_ui_request` is emitted
+
+#### Scenario: 并行审批各自应答
+- **WHEN** `approval-parallel` is spawned with `--approval-mode write` and accepts a prompt
+- **THEN** two bash `tool_execution_start` frames with distinct `toolCallId`s are followed by two `select` requests with distinct ids, both emitted before any answer, and no further frame arrives until an answer
+- **WHEN** the second select is answered `Deny` first and then the first select is answered `Approve`
+- **THEN** after the `Deny` exactly one `tool_execution_end` arrives, for the second tool call, with `isError: true`, and nothing else until the other answer; after the `Approve` the first tool call's `tool_execution_end` arrives without `isError`, followed by normal completion and terminal `agent_end` — only the denied step is `isError`
+- **WHEN** both selects are pending and an `abort` with request id X arrives, then the first select and then the second are answered `Deny`
+- **THEN** no frame follows the `abort` until the first answer; each `Deny` is followed by exactly its own tool call's `tool_execution_end` with `isError: true`; after the second one `message_end` with `stopReason` `aborted`, terminal `agent_end` and `response{id:X, command:"abort"}` follow in that order, with no normal completion
+- **WHEN** both selects are answered `Deny` with no `abort` yet, and an `abort` with request id X arrives afterwards
+- **THEN** after the two `tool_execution_end` frames with `isError: true` nothing is emitted until the `abort`; then `message_end` with `stopReason` `aborted`, terminal `agent_end` and `response{id:X, command:"abort"}` follow in that order
+- **WHEN** `approval-parallel` is spawned with `--approval-mode yolo`
+- **THEN** the turn matches the `normal` scenario and no `extension_ui_request` is emitted
+
+#### Scenario: 延迟握手
+- **WHEN** `slow-ready` is spawned with `--ready-delay-ms 300`
+- **THEN** no frame is emitted during the first 300 ms, then `ready` with the normal fields is emitted, `negotiate_protocol` and `get_state` behave exactly as in `normal`, and a prompt behaves exactly as in `abort-ok`: after its ack, `agent_start` and two text deltas no completion is emitted until an `abort` arrives, then `message_end` with `stopReason` `aborted`, `agent_end` and `response{command:"abort"}` follow in that order, and the next prompt completes as a normal turn
+- **WHEN** `slow-ready` is spawned without `--ready-delay-ms`, or its stdin closes before the delay elapses
+- **THEN** respectively `ready` arrives after the 500 ms default, or the process exits cleanly (exit code 0) without hanging
+
+#### Scenario: select 挂起时 abort 被延后
+- **WHEN** `approval-then-abort` has a pending select and receives `abort`
+- **THEN** nothing is emitted until `extension_ui_response` for the select arrives; then `tool_execution_end` (isError for Deny), `message_end aborted`, `agent_end` and `response{command:"abort"}` follow in that order, so a host that answers Deny before abort can be proven by frame order
+- **WHEN** `approval-then-abort` has its select answered `Deny` and only afterwards receives `abort`
+- **THEN** `tool_execution_end` with `isError: true` follows the answer, nothing further is emitted until the `abort`, and then `message_end aborted`, `agent_end` and `response{command:"abort"}` follow in that order
+
+#### Scenario: 审批链上 abort 被忽略
+- **WHEN** `approval-chain-abort-ignored` is spawned with `--approval-mode write`, accepts a prompt, its first select is answered `Deny` and an `abort` arrives
+- **THEN** the first tool call's `tool_execution_end` carries `isError: true`, then a second bash `tool_execution_start` with a distinct `toolCallId` and a second `select` with a distinct id and the recognizer shape follow, whether the `abort` arrived before or after them; no frame is ever emitted in response to the `abort`, no completion is emitted, the process does not exit on its own, and it still exits when stdin closes or SIGTERM arrives
+- **WHEN** `approval-chain-abort-ignored` is spawned with `--approval-mode yolo`
+- **THEN** the turn matches the `normal` scenario and no `extension_ui_request` is emitted
+
+#### Scenario: 思考帧场景
+- **WHEN** `thinking` is spawned (with or without `--approval-mode write`) and accepts a prompt after the normal handshake
+- **THEN** after the ack and `agent_start` the frames are `thinking_start`, three `thinking_delta` whose deltas concatenate to exactly `先读需求，再列要点，最后作答。`, `thinking_end` whose `content` equals that text, then at least three `text_delta`, an assistant `message_end` with `stopReason` `stop` whose content holds the thinking block before the text block, and terminal `agent_end`; no tool frame and no `extension_ui_request` is emitted, and a following prompt behaves the same
+
+#### Scenario: 编辑与写入工具帧
+- **WHEN** `edit-write` is spawned with `--approval-mode write` and working directory `<dir>`, and accepts a prompt
+- **THEN** one `message_end` with `stopReason` `toolUse` is followed by the edit `tool_execution_start` (args exactly `{input:…}`, no `path`) and its `tool_execution_end` whose `result.details` is exactly `{path:"<dir>/notes.md", diff:"+1|a\n+2|b\n-3|c\n 4|d"}`, then the write `tool_execution_start` (args `{path:"out/report.html",content:…}`) and its `tool_execution_end` whose `result.details` is exactly `{resolvedPath:"<dir>/out/report.html"}`, then assistant `message_end` `stop` and terminal `agent_end`; both files exist under `<dir>` when their end frames arrive, and no `extension_ui_request` is emitted
+- **WHEN** the same scenario runs in a different working directory `<other>`
+- **THEN** every reported path is rooted at `<other>` instead, with the diff and frame order unchanged
+
+
+### Requirement: 假 omp probe 回报
+For prompt `probe:<pid>:<writePath>`, the fake omp SHALL first attempt to write UTF-8 `probe` at the complete writePath using its own credentials, then attempt to read `/proc/<pid>/environ`. It SHALL emit one text delta with fields in order `uid=<uid> gid=<gid> env=<comma-separated sorted environment keys> home=<HOME> agent=<PI_CODING_AGENT_DIR> environ=<readable|errno> wrote=<ok|errno> frames=<inbound frame record> cwd=<process.cwd()>`, based on its own process and actual IO outcomes; the `frames=` value is exactly the inbound frame record defined by Requirement `假 omp 入站帧记录`, and the trailing `cwd=` value (S1c B) is the fixture's `process.cwd()` verbatim at report time — the child's actual working directory, which the production spawn sets to the `--cwd` value (omp-runtime `子进程 spawn 契约`); Node reports it as the physical path, so hosts compare it with the realpath of the directory they chose. Adding `frames=` (S1c A) and then `cwd=` (S1c B) changes the exact probe string, so its two consumers SHALL be updated in the same change as each addition: the expected-report builder `expectedProbeReport` in `server/test/fake-omp.test.ts` (exact string equality) and `REPORT_LABELS` in `server/test/linux/uid-isolation.test.ts`, which gains `"frames"` (A) and then `"cwd"` (B) so that after B the labels end `…, "wrote", "frames", "cwd"` and `cwd` is the last label consumed by `parseLabeledReport` (the last label takes the remainder, so spaces or `=` inside the cwd path are safe, and the comma-joined, space-free `frames` value keeps both the ` frames=` and the ` cwd=` split unambiguous); the Linux uid-isolation job SHALL stay green. It SHALL reuse normal prompt acknowledgement and assistant stop/terminal agent_end frames even when either IO operation fails. It SHALL not disclose arbitrary environment values or proc contents. Non-probe behavior SHALL remain unchanged.
+
+#### Scenario: 同 uid 成功
+- WHEN an ordinary Linux real child receives a probe for its same-uid parent with a writable test-owned path containing colons and spaces
+- THEN identity equals that of the parent, environment keys are sorted, HOME/agent equal supplied values, environ is readable, wrote is ok, and exact file content is probe before normal completion
+
+#### Scenario: IO 失败独立回报
+- WHEN the destination parent does not exist or the target proc pid does not exist
+- THEN the failed operation reports ENOENT, the other operation is still attempted and truthfully reported, and the process emits its normal terminal completion
+
+#### Scenario: 非 Linux 不伪造证明
+- WHEN the child runs on macOS without procfs
+- THEN it reports the actual proc read errno while identity, environment, file content and terminal behavior remain verifiable; this result is not reported as Linux readability or uid isolation proof
+
+#### Scenario: 非 probe 兼容
+- WHEN an existing non-probe prompt/scenario is exercised
+- THEN the #87 handshake, scenario-specific frame sequence, and normal shutdown remain unchanged
+
+#### Scenario: probe 报告带 frames 字段
+- **WHEN** a `normal` child completes the handshake (`negotiate_protocol`, `get_state`) and then receives a probe prompt
+- **THEN** the delta contains ` wrote=<ok|errno> frames=negotiate_protocol,get_state,prompt` immediately followed by the ` cwd=` field, `expectedProbeReport` in `fake-omp.test.ts` equals the whole delta exactly, and `parseLabeledReport` in `uid-isolation.test.ts` yields `wrote` without the frames suffix and `frames` as its own label
+
+#### Scenario: 入站帧次序回报
+- **WHEN** an `approval-then-abort` child receives a prompt, a `select` answer `Deny`, then `abort`, and afterwards receives a probe prompt
+- **THEN** the probe delta's `frames` field ends with `…,prompt,extension_ui_response,abort,prompt` (the value before the ` cwd=` label), listing types only, and the preceding fields keep their order and semantics
+
+#### Scenario: probe 报告带 cwd 字段
+- **WHEN** a `normal` child is spawned with working directory `<dir>` whose path contains a space, completes the handshake and receives a probe prompt
+- **THEN** the delta ends with ` frames=negotiate_protocol,get_state,prompt cwd=<realpath of dir>`, `expectedProbeReport` equals the whole delta exactly, `parseLabeledReport` yields `frames` without the cwd suffix and `cwd` equal to the realpath of `<dir>` including the space, and the Linux uid-isolation job (where the child's cwd is the owner sandbox root) stays green with `REPORT_LABELS` ending `"frames", "cwd"`
+
+
+## ADDED Requirements
+
+### Requirement: 受控上游思考与写入标记
+The existing loopback fake-upstream (`server/test/support/fake-upstream.mjs`, the controlled upstream behind real omp in `make smoke`, `make ui-walk` and their CI jobs) SHALL additionally honour two markers found as substrings of the last user message text, selected by the same last-user-text lookup as `WORKBUDDY_UI_WALK:<uuid>` and combinable with it and with each other. `WORKBUDDY_THINK`: the answering text round (the request whose history already holds a `tool` role message) SHALL emit, after the `role` chunk and before the first `content` chunk, exactly three chunks whose `delta` is `{reasoning_content:<part>}` with parts `先读需求，`, `再列要点，`, `最后作答。` (the same deterministic thinking text as the fake omp `thinking` scenario), leaving the content chunks, finish reason and `[DONE]` unchanged; under an armed gate these reasoning chunks are part of the prefix sent before the hold and release is unchanged. `WORKBUDDY_WRITE`: the tool round (history without a `tool` role message) SHALL issue one `write` tool call with arguments exactly `{"path":"workbuddy-report.html","content":"<!doctype html><title>WorkBuddy</title><h1>WorkBuddy</h1>\n"}` instead of the bash call; the answering round is unchanged. Real omp in `--approval-mode write` treats that plain-path `write` as write tier, so it raises no approval, resolves the relative path against the session's `--cwd` (the bound workspace root for a bound session), writes the file and reports the absolute `details.resolvedPath`. The error marker keeps its precedence. Requests carrying neither marker SHALL receive byte-for-byte the frames they receive today (bash tool round, fixed reply, no reasoning chunk), so the existing `chat.hurl`, ui-walk journey and gate requirement are unaffected. The fixture test suite SHALL cover both markers, their combination with a gate, and the unmarked default.
+Because the model proxy relays the upstream SSE bytes unchanged and omp's openai-completions provider maps `delta.reasoning_content` to `thinking_start`/`thinking_delta`/`thinking_end` unconditionally on the response side (vendored `ai/src/providers/openai-completions.ts:1150-1175`, independent of the model entry's `reasoning` declaration), a `WORKBUDDY_THINK` turn through real omp yields thinking frames regardless of `MODEL_REASONING`; the fixture proves frame arrival through real omp, not the behaviour of any real model.
+
+#### Scenario: 思考标记产生 reasoning 块
+- **WHEN** a chat-completions request whose history holds a `tool` message and whose last user text contains `WORKBUDDY_THINK` is sent, with and without an armed gate for its `WORKBUDDY_UI_WALK:<uuid>` marker
+- **THEN** the stream is the role chunk, three `reasoning_content` chunks concatenating to exactly `先读需求，再列要点，最后作答。`, then the unchanged content chunks, finish and `[DONE]`; with an armed gate the reasoning chunks and the first content prefix are sent before the hold and release sends the unchanged remainder exactly once
+
+#### Scenario: 写入标记替换 bash 工具轮
+- **WHEN** a request without `tool` history whose last user text contains `WORKBUDDY_WRITE` is sent, and separately the same request without the marker
+- **THEN** the marked request streams one `write` tool call with the exact documented arguments and finish reason `tool_calls`, no bash call; the unmarked request streams the unchanged bash tool call
+
+#### Scenario: 无标记请求字节不变
+- **WHEN** requests without either marker are sent for the tool round and the answering round, with and without a gate
+- **THEN** the frames are identical to the pre-change fixture output (no `reasoning_content` key, bash tool call, fixed reply), and every existing gate scenario passes unchanged
