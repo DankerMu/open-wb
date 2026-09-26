@@ -78,12 +78,12 @@
 | 偏差留痕 3 | 响应式 1100 档 | `不适用（S1d，偏差留痕 3）` |
 | 偏差留痕 4 | 侧栏通知铃铛、底部设置快捷 | `不适用（grill 删除，偏差留痕 4）` |
 | 偏差留痕 1 | ui-shots 进 CI | 不作清单项 |
-| Non-goals → S1c | 场景胶囊与按场景切换、会话分组侧栏与条目更多菜单、停止生成（含已停止态）、重新生成、对话内搜索、审批条、composer footer「任务启动于 <空间> / 权限」、顶栏会话重命名 | `不适用（Non-goals：<组件> → S1c）` |
+| Non-goals → S1c | 场景胶囊与按场景切换、会话分组侧栏与条目更多菜单、停止生成（含已停止态）、重新生成、对话内搜索、审批条、composer footer「任务启动于 <空间> / 权限」、顶栏会话重命名、产物卡、文件变更卡、顶栏产物面板（#403）、深度思考折叠（#404） | `不适用（Non-goals：<组件> → S1c）` |
 | Non-goals → S2c / S1d / S1b | 附件按钮（S2c）；模型切换 chip（S1d）；挂载目录、只读/在线标记、卸载（S1b） | `不适用（Non-goals：<组件> → <阶段>）` |
 | 审计计划归属 | 知识库检索卡（S2c） | `不适用（S2c，审计计划归属）` |
-| Non-goals 明确不做 | 麦克风、⌘K 命令面板、导出对话记录、赞/踩、上游品牌 logo 资产、`/tokens` 页、非 dev-stub 环境下的快捷登录卡 | `不适用（明确不做，Non-goals）` |
+| Non-goals 明确不做 | 麦克风、⌘K 命令面板、导出对话记录、赞/踩、上游品牌 logo 资产、`/tokens` 页、非 dev-stub 环境下的快捷登录卡、顶栏「更多」（#403）、追问 chip（#404） | `不适用（明确不做，Non-goals）` |
 | 已实现且无 F-UI 认领 | 登录错误文案与 Enter 提交、登录中、Enter 发送、目录懒加载与名称校验/去重、md/csv/json/代码/图片预览主体、关于卡名称与版本、主题即时生效/持久化/跟随系统/跨 tab | `不适用（已实现，<交付阶段>）` |
-| 计划遗漏、未归属 | 产物卡、文件变更卡、顶栏产物/更多入口（#403）；深度思考折叠、追问 chip（#404） | `不适用（计划遗漏，未归属 → #<issue>）` |
+| 计划遗漏、未归属 | 无。原有的产物卡、文件变更卡、顶栏产物/更多入口（#403）与深度思考折叠、追问 chip（#404）已于 2026-09-26 决议，改记入上面的 Non-goals → S1c 或明确不做（行保留，避免后续行号漂移） | — |
 | 已晋升 spec 排除 | 越权访问提示；欢迎页 `查看更多` | `不适用（chat-web spec：<依据>）` |
 | orchestrator 裁决（D3 未点名） | 侧栏窗口圆点、侧栏版本字样、侧栏「筛选任务」、宽屏顶栏折叠按钮、chip 行展开 `›`、composer 吉祥物 | 逐项写裁决来源（SH-40–SH-43、CH-35、CH-36） |
 | §4.6 | `/center` 各 tab | `不适用（S1d/S2a-c/S3a-b）` |
@@ -120,8 +120,8 @@
 | SH-23 | demo:1966-1971 | §4.1#4 | `/files` 顶栏标题为 `工作空间`，`/settings` 为 `设置`，均为 h1。右侧操作位为空（demo 同为空槽）。390 格标题左侧另有 `打开导航` | `web/src/routes/shell/topbar.tsx:43`、`web/src/routes/manifest.ts:26` | ui-shots files-readme @1440-light @390-dark；ui-shots settings-default @1440-dark @390-light；jsdom `web/test/topbar.test.tsx:186` | 待签 |
 | SH-24 | demo:1942 | §4.1#4 | 面包屑旁不渲染重命名（铅笔）按钮 | — | ui-shots chat-done @1440-light | 不适用（Non-goals：顶栏会话重命名 → S1c） |
 | SH-25 | demo:1945-1952 | §4.1#4、§4.3#11 | 顶栏不渲染对话内搜索按钮与搜索框 | — | ui-shots chat-done @1440-light | 不适用（Non-goals：对话内搜索 → S1c） |
-| SH-26 | demo:1953 | §4.1#4 | 顶栏不渲染产物面板按钮 | — | ui-shots chat-done @1440-light | 不适用（计划遗漏，未归属 → #403） |
-| SH-27 | demo:1954 | §4.1#4 | 顶栏不渲染「更多」按钮 | — | ui-shots chat-done @1440-light | 不适用（计划遗漏，未归属 → #403） |
+| SH-26 | demo:1953 | §4.1#4 | 顶栏不渲染产物面板按钮 | — | ui-shots chat-done @1440-light | 不适用（Non-goals：顶栏产物面板 → S1c） |
+| SH-27 | demo:1954 | §4.1#4 | 顶栏不渲染「更多」按钮 | — | ui-shots chat-done @1440-light | 不适用（明确不做，Non-goals） |
 | SH-28 | demo:892-896 | §4.1#5 | S1e 页面没有 1100 档元素：demo 的 1100 断点只作用于 `/center` 面板 | — | 核对 `openspec/specs/spa-shell/spec.md:18`（响应式段） | 不适用（S1d，偏差留痕 3） |
 | SH-29 | demo:307-310 | §4.1#5 | 宽度 ≤760 时侧栏不在文档流里，主区占满宽度；顶栏最左是 `打开导航`（汉堡图标）。点它弹出左侧 288 覆盖层：展开态，没有品牌区与折叠按钮；选中路由即关闭。demo 的 390 截图为折叠后的浮层侧栏 | `web/src/routes/shell/app-shell.tsx:26-32`、`web/src/routes/shell/topbar.tsx:25-35`、`web/src/lib/viewport.ts:4` | ui-shots chat-welcome @390-light @390-dark；ui-shots files-readme @390-light；ui-shots settings-default @390-dark；ui-walk 打开导航（`web/e2e/ui-walk-layout.ts:187-195`）；jsdom `web/test/app-shell-responsive.test.tsx:265` | 待签 |
 | SH-30 | demo:305-310 | §4.1#5 | 六个格、五个态的 app 截图都没有横向溢出。脚本逐张断言；`index.html` 中无失败标注即为通过 | `web/e2e/ui-shots.mjs:373` | ui-shots login-default @1440-light @1024-light @390-light；ui-shots chat-done @390-dark；ui-shots files-readme @1024-dark @390-light；ui-walk 逐路由 1024 无溢出（`web/e2e/ui-walk-layout.ts:98-105`） | 待签 |
@@ -183,18 +183,18 @@
 | CH-18 | demo:424-427、demo:2400-2405 | §4.3#6 | 助手消息为左侧 28px 自有 mark 头像（装饰性）加无底色正文块，步骤卡在正文之后。等价说明：demo 头像是上游 app 图标，这里以自有品牌 mark 替代 | `web/src/features/chat/conversation-view.tsx:126-145` | ui-shots chat-done @1440-light @1440-dark @390-dark；jsdom `web/test/chat-messages.test.tsx:152` | 待签 |
 | CH-19 | demo:428-445、demo:2390 | §4.3#6 | 助手正文按 Markdown 渲染：标题、列表、代码块、表格。源 HTML 作为文本显示，链接不跳转。`chat-done` 态正文为假上游的固定回复 `你好，这是 WorkBuddy 的第一条流式回复。` | `web/src/lib/markdown-view.tsx:139`、`web/src/features/chat/conversation-view.tsx:132-133` | ui-shots chat-done @1440-light；jsdom `web/test/chat-messages.test.tsx:65` | 待签 |
 | CH-20 | demo:446、demo:2390 | §4.1#7、§4.3#6 | 助手运行中，正文末尾有品牌色闪烁竖条光标；完成或失败后消失 | `web/src/features/chat/conversation-view.tsx:134-136`、`web/src/ui/motion.css:78-80` | jsdom `web/test/chat-messages.test.tsx:101`、`web/test/chat-messages.test.tsx:132` | 待签 |
-| CH-21 | demo:2383-2386 | §4.3#6 | 助手消息不渲染「深度思考过程」折叠块 | — | ui-shots chat-done @1440-light | 不适用（计划遗漏，未归属 → #404） |
+| CH-21 | demo:2383-2386 | §4.3#6 | 助手消息不渲染「深度思考过程」折叠块 | — | ui-shots chat-done @1440-light | 不适用（Non-goals：深度思考折叠 → S1c） |
 | CH-22 | demo:528-530、demo:2395 | §4.3#6 | 已完成且正文非空的助手消息末尾有操作条，只有一个复制图标按钮（名称与 tooltip 都是 `复制`）。点击后复制 Markdown 原文，弹出 Toast `已复制到剪贴板`；剪贴板不可用时弹出 `复制失败`。运行中的消息、正文为空的消息、用户消息都没有操作条 | `web/src/features/chat/message-actions.tsx:4-27`、`web/src/features/chat/conversation-view.tsx:140-142` | ui-shots chat-done @1440-light @1440-dark；jsdom `web/test/chat-copy.test.tsx:63`、`web/test/chat-copy.test.tsx:76`、`web/test/chat-copy.test.tsx:132` | 待签 |
 | CH-23 | demo:2396 | §4.3#6 | 操作条不渲染「重新生成」 | — | ui-shots chat-done @1440-light | 不适用（Non-goals：重新生成 → S1c） |
-| CH-24 | demo:2393 | §4.3#6 | 助手消息下方不渲染追问 chip | — | ui-shots chat-done @1440-light | 不适用（计划遗漏，未归属 → #404） |
+| CH-24 | demo:2393 | §4.3#6 | 助手消息下方不渲染追问 chip | — | ui-shots chat-done @1440-light | 不适用（明确不做，Non-goals） |
 | CH-25 | demo:448-458、demo:2218-2231 | §4.3#7 | 每个步骤是一张卡片，卡头为图标（`bash` 用 terminal，其它用 wrench）、步骤名，以及状态徽章 `运行中`/`已完成`/`失败`。徽章可访问名为 `<步骤名> <状态>`；卡片中不出现伪造的耗时或 todo。`chat-done` 中的 bash 步骤卡来自假上游固定发出的一次 bash 调用（`echo workbuddy-smoke`） | `web/src/features/chat/conversation-view.tsx:79-97` | ui-shots chat-done @1440-light @1440-dark；ui-walk 步骤徽章（`web/e2e/ui-walk.spec.ts:481-487`）；jsdom `web/test/chat-steps.test.tsx:45` | 待签 |
 | CH-26 | demo:461-471、demo:2215-2217、demo:2232-2238 | §4.3#7 | 卡头下方一行摘要：JSON detail 依次取 `text`、`content`、首个 `key: value`，否则取首个非空行，截断到 120 码点；不整段倒出 JSON。`chat-done` 中这一步来自假上游固定发出的 bash 调用（`echo workbuddy-smoke`） | `web/src/features/chat/conversation-view.tsx:98`、`web/src/features/chat/step-summary.ts:33` | ui-shots chat-done @1440-light；jsdom `web/test/step-summary.test.ts:35`、`web/test/chat-steps.test.tsx:45` | 待签 |
 | CH-27 | demo:2224-2232 | §4.3#7 | 摘要下方是默认折叠的 `原始输出`，展开后显示工具参数（detail）与工具输出（output）两块，参数在前、各自为空时不渲染。`chat-done` 中这一步来自假上游固定发出的 bash 调用（`echo workbuddy-smoke`） | `web/src/features/chat/conversation-view.tsx:99-104` | ui-shots chat-done @1440-light；jsdom `web/test/chat-steps.test.tsx:45` | 待签 |
 | CH-28 | demo:2223 | §4.3#7 | 步骤卡没有「已停止」态 | — | jsdom `web/test/chat-steps.test.tsx:45` | 不适用（Non-goals：停止生成 → S1c） |
 | CH-29 | demo:2875-2902 | §4.3#8 | 助手消息不渲染知识库检索卡 | — | ui-shots chat-done @1440-light | 不适用（S2c，审计计划归属） |
 | CH-30 | demo:2407-2418 | §4.3#9 | 不渲染审批条（允许/拒绝） | — | ui-shots chat-done @1440-light | 不适用（Non-goals：审批条 → S1c） |
-| CH-31 | demo:2419-2466 | §4.3#10 | 助手消息不渲染产物卡（code/html/img） | — | ui-shots chat-done @1440-light | 不适用（计划遗漏，未归属 → #403） |
-| CH-32 | demo:2468-2476 | §4.3#10 | 助手消息不渲染文件变更卡 | — | ui-shots chat-done @1440-light | 不适用（计划遗漏，未归属 → #403） |
+| CH-31 | demo:2419-2466 | §4.3#10 | 助手消息不渲染产物卡（code/html/img） | — | ui-shots chat-done @1440-light | 不适用（Non-goals：产物卡 → S1c） |
+| CH-32 | demo:2468-2476 | §4.3#10 | 助手消息不渲染文件变更卡 | — | ui-shots chat-done @1440-light | 不适用（Non-goals：文件变更卡 → S1c） |
 | CH-33 | demo:2504 | §4.3#11 | 会话中上滚超过一屏时，底部居中浮出 `回到最新`（带 chevron-down 图标）；点击后滚回底部并隐藏。贴底时新内容自动跟随；欢迎态没有该按钮 | `web/src/features/chat/scroll-follow.tsx:58-73` | jsdom `web/test/chat-scroll-follow.test.tsx:146`、`web/test/chat-scroll-follow.test.tsx:157`、`web/test/chat-scroll-follow.test.tsx:238` | 待签 |
 | CH-34 | demo:2054-2058 | §4.3#12 | 打开他人或不存在的会话 ID（GET 返回 404）时，移除 `?session=` 回到欢迎态，不弹 toast，也不建立事件流 | — | jsdom `web/test/chat-page-ownership.test.tsx:212` | 不适用（chat-web spec：越权 404 回欢迎态，无 toast） |
 | CH-35 | demo:2545 | §4.3#2 | chip 行末尾不渲染展开 `›` 按钮 | — | ui-shots chat-welcome @1440-light；核对 `openspec/specs/chat-web/spec.md:72` | 不适用（chat-web spec：默认场景静态单行 chip，`openspec/specs/chat-web/spec.md:72`） |
@@ -272,8 +272,8 @@
 | NB-08 | demo:2254、demo:2415 | §4.7:审批 15s 自动通过 | 没有审批倒计时与自动允许 | — | ui-shots chat-done @1440-light | 不适用（demo 无后端，Non-goals：审批条 → S1c） |
 | NB-09 | demo:2340、demo:2821、demo:3096 | §4.7:知识库入库与相似度 | 没有知识库入库、切片与相似度展示 | — | `/center` 为占位页（见 CT-01）：jsdom `web/test/topbar.test.tsx:199` | 不适用（demo 无后端，S2a-c） |
 | NB-10 | demo:1917 | §4.7:导出记录、§4.3#5 | 没有「导出记录」入口 | — | ui-shots chat-done @1440-light | 不适用（demo 无后端，Non-goals 明确不做） |
-| NB-11 | demo:2458 | §4.7:在编辑器中打开 | 没有产物卡「在编辑器中打开」按钮 | — | ui-shots chat-done @1440-light | 不适用（demo 无后端，计划遗漏，未归属 → #403） |
-| NB-12 | demo:2474 | §4.7:查看详情 | 没有文件变更卡「查看详情」按钮 | — | ui-shots chat-done @1440-light | 不适用（demo 无后端，计划遗漏，未归属 → #403） |
+| NB-11 | demo:2458 | §4.7:在编辑器中打开 | 没有产物卡「在编辑器中打开」按钮 | — | ui-shots chat-done @1440-light | 不适用（demo 无后端，明确不做，Non-goals） |
+| NB-12 | demo:2474 | §4.7:查看详情 | 没有文件变更卡「查看详情」按钮 | — | ui-shots chat-done @1440-light | 不适用（demo 无后端，Non-goals → S1c：跳 `/files` 预览） |
 | NB-13 | demo:2371-2372、demo:2397-2398 | §4.7:赞/踩、§4.3#6 | 助手操作条没有赞/踩按钮 | — | ui-shots chat-done @1440-light | 不适用（demo 无后端，Non-goals 明确不做） |
 
 ## Epic 签收记录模板
