@@ -25,7 +25,7 @@ S1c 的会话页在 change A（`s1c-turn-control-governance`，Epic #448）之�
 
 **与 IMPLEMENTATION_PLAN S1c 的偏离**：`:209` 写 F-CHAT-9 「结合沙箱审计中的写记录」——审计只记 `sandbox.reject`/`workspace.create`/`dir.create`，omp 写文件不经 `sandbox.resolve`（`IMPLEMENTATION_PLAN.md:336`），本 change 只从工具帧推导；`:209` 「卡片 `打开`/`查看详情` 跳 `/files` 预览」——html 卡改为会话内 sandbox iframe 预览（grill），`查看详情` 仍跳 `/files`。
 
-**与 grill 拍板的有意修订（留痕）**：A 的 proposal 第 12 条「B 不依赖 A」被本轮 grill 推翻——迁移账本要求 035 在 034 之后（`migration-ledger.ts` 连续前缀校验），A 的重建配方按显式列名复制，A/B 共改 `events.ts`/`session-contract.ts`/`conversation-view.tsx`/`page.tsx`；结论：B 的 spec/设计先行，实施 issue 逐条 `Depends on` A。另：grill「顶栏入口」分支按「对话内搜索」「重命名」「产物面板」列举三按钮，Stage 2 依 demo:1942-1953（铅笔紧贴标题）定 DOM 次序为 重命名 → 对话内搜索 → 产物面板，视为对列举顺序的澄清而非推翻 的对应 issue（迁移 → #449；归约 → #455/#453；前端 → #471/#489/#472；删除 → #473/#490；fork 继承 → #466）。
+**与 grill 拍板的有意修订（留痕）**：A 的 proposal 第 12 条「B 不依赖 A」被本轮 grill 推翻——迁移账本要求 035 在 034 之后（`migration-ledger.ts` 连续前缀校验），A 的重建配方按显式列名复制，A/B 共改 `events.ts`/`session-contract.ts`/`conversation-view.tsx`/`page.tsx`；结论：B 的 spec/设计先行，实施 issue 逐条 `Depends on` A 的对应 issue（迁移 → #449；归约 → #455/#453；前端 → #471/#489/#472；删除 → #473/#490；fork 继承 → #466）。另：grill「顶栏入口」分支按「对话内搜索」「重命名」「产物面板」列举三按钮，Stage 2 依 demo:1942-1953（铅笔紧贴标题）定 DOM 次序为 重命名 → 对话内搜索 → 产物面板，视为对列举顺序的澄清而非推翻。
 
 **与 demo 的有意偏差（留痕）**：
 1. 对话内搜索跳转时滚动并消息级高亮（demo 只 toast）；计数为匹配消息数（demo 为匹配处数）。
