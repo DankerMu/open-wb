@@ -6,7 +6,7 @@ Define the application server's startup, health, persistence and static-serving 
 ## Requirements
 
 ### Requirement: 服务启动与装配
-系统 SHALL 以 `server/src/app.ts` 装配 Fastify 实例，并以 `server/src/server.ts` 作为唯一 production listen/DB ownership 入口；import该module只暴露pure config seam，不得mkdir/open/listen或注册signal，只有ESM main guard命中的执行路径可启动。唯一配置源为 own environment keys `HOST`、`PORT`、`DB_PATH`、`STATIC_ROOT`、`OMP_BIN`、`OMP_STATE_DIR`、`OMP_IDLE_MS`、`SANDBOX_ROOT`、`MODEL_UPSTREAM_BASE_URL`、`MODEL_UPSTREAM_API_KEY`、`MODEL_ID`、`OMP_USER`：缺省值分别为 `127.0.0.1`、`3000`、repo-root `var/dev.db`、repo-root `web/dist`、repo-root `var/omp/omp`、repo-root `var/omp-state`、`600000`、repo-root `var/sandbox`、未配置、未配置、`deepseek-v4.1-flash`、未配置（同uid直接spawn）；relative DB/static/omp/state/sandbox path SHALL 相对由 entry module identity 推导的repo root，不得随shell/npm workspace cwd分裂。`PORT` SHALL只接受canonical ASCII decimal `1..65535`；HOST missing取默认、empty或whitespace-only非法且不得trim/coerce；exact `localhost` SHALL 规范为 `127.0.0.1` 以保证单一 listener binding，其它nonempty string原样交listen；DB/static/omp/state/sandbox path explicit empty非法。`OMP_IDLE_MS` SHALL只接受canonical ASCII decimal整数1..2147483647（原生计时器上限，用户明确批准超限启动失败）；非法值的配置错误SHALL命名该键而不含输入值。`MODEL_UPSTREAM_BASE_URL`/`MODEL_UPSTREAM_API_KEY`缺省合法，显式empty非法；未同时配置时代理仍先鉴权（无效bearer401，通过鉴权后502），不得阻止服务启动。OMP_USER及仅sudo模式的安全PATH前置条件 SHALL遵守主omp-uid-isolation规范，不在本切片重定义。全部config SHALL在任何filesystem/database/listen effect前验证。
+系统 SHALL 以 `server/src/app.ts` 装配 Fastify 实例，并以 `server/src/server.ts` 作为唯一 production listen/DB ownership 入口；import该module只暴露pure config seam，不得mkdir/open/listen或注册signal，只有ESM main guard命中的执行路径可启动。唯一配置源为 own environment keys `HOST`、`PORT`、`DB_PATH`、`STATIC_ROOT`、`OMP_BIN`、`OMP_STATE_DIR`、`OMP_IDLE_MS`、`OMP_MAX_PROCESSES`、`SANDBOX_ROOT`、`MODEL_UPSTREAM_BASE_URL`、`MODEL_UPSTREAM_API_KEY`、`MODEL_ID`、`OMP_USER`：缺省值分别为 `127.0.0.1`、`3000`、repo-root `var/dev.db`、repo-root `web/dist`、repo-root `var/omp/omp`、repo-root `var/omp-state`、`600000`、`16`、repo-root `var/sandbox`、未配置、未配置、`deepseek-v4.1-flash`、未配置（同uid直接spawn）；relative DB/static/omp/state/sandbox path SHALL 相对由 entry module identity 推导的repo root，不得随shell/npm workspace cwd分裂。`PORT` SHALL只接受canonical ASCII decimal `1..65535`；HOST missing取默认、empty或whitespace-only非法且不得trim/coerce；exact `localhost` SHALL 规范为 `127.0.0.1` 以保证单一 listener binding，其它nonempty string原样交listen；DB/static/omp/state/sandbox path explicit empty非法。`OMP_IDLE_MS` SHALL只接受canonical ASCII decimal整数1..2147483647（原生计时器上限，用户明确批准超限启动失败）；`OMP_MAX_PROCESSES` SHALL 遵守与 `OMP_IDLE_MS` 相同的解析纪律（canonical ASCII decimal 正整数 1..2147483647，缺省 16，empty/`0`/非 canonical/超限均为启动失败），经 `agent-config.ts` 同一 resolver 解析为 supervisor 的全局活进程上限；非法值的配置错误SHALL命名该键而不含输入值。`MODEL_UPSTREAM_BASE_URL`/`MODEL_UPSTREAM_API_KEY`缺省合法，显式empty非法；未同时配置时代理仍先鉴权（无效bearer401，通过鉴权后502），不得阻止服务启动。OMP_USER及仅sudo模式的安全PATH前置条件 SHALL遵守主omp-uid-isolation规范，不在本切片重定义。全部config SHALL在任何filesystem/database/listen effect前验证。
 
 对于non-`:memory:` DB path，入口SHALL recursive创建且只创建missing `dirname(DB_PATH)`，随后依主omp-uid-isolation「自有状态不对组可读」在openDb前准备exact主文件与既有sidecars为0600，再由唯一`openDb`打开exact file；不得创建`STATIC_ROOT`；监听成功后只额外创建`<OMP_STATE_DIR>/agent`并写托管models.yml，sandbox/session子目录仍由首次spawn或workspace创建按需经canonical ensureSharedDir创建，OMP_BIN目录不由启动创建。Exact `:memory:` SHALL保留SQLite特殊identity且不得mkdir。DB parent为existing non-directory、不可创建/写入或DB/migration不合法 SHALL走同一partial-start failure cleanup，不得fallback到默认路径。
 
@@ -17,34 +17,34 @@ Runtime config/DB/app/listen/models.yml/success-record任一步失败 SHALL不�
 失败清理 SHALL关闭当前入口已拥有的app/DB；每个entry SHALL把同一AbortSignal传给Fastify listen，SIGINT/SIGTERM只对pending bind执行abort；已绑定时SHALL经共享幂等shutdown先完成所有runtime原生退出及store回收，再停止listener，最后关闭唯一DB handle。不得让同一AbortSignal的Node原生close绕过runtime先行归属；重复/混合signal不得在清理期间重新abort已绑定listener。干净取消正常退出；已确定真实失败保持nonzero，不得被signal抹去failure record或降为0。Signal落在listen invoke与实际bind之间时不得后到绑定、不得输出success/failure record，port/DB须可由successor立即复用。`.gitignore` SHALL排除default `var/` runtime output，knip SHALL把`src/server.ts`识别为entry。
 
 #### Scenario: 干净启动与一致命令面
-- WHEN 从repo root执行`make dev`或`npm run start --workspace server`，或build后从foreign cwd直接执行absolute `dist/server.js`，且未设置十二项应用配置
-- THEN 三种启动形状消费同一entry/config identity，监听`127.0.0.1:3000`；只在repo-root recursive创建`var/`并使`var/dev.db`完成tracked migrations；创建`var/omp-state/agent/models.yml`且baseUrl为实际端口的可连接回环地址；不创建missing `web/dist`/sandbox/bin；`GET /api/healthz`返回exact200；application stdout只在listen成功后出现上述exact startup record；SIGTERM后端口与DB均可立即由后继进程重用
+- **WHEN** 从repo root执行`make dev`或`npm run start --workspace server`，或build后从foreign cwd直接执行absolute `dist/server.js`，且未设置十三项应用配置
+- **THEN** 三种启动形状消费同一entry/config identity，监听`127.0.0.1:3000`，supervisor 的活进程上限为 16；只在repo-root recursive创建`var/`并使`var/dev.db`完成tracked migrations；创建`var/omp-state/agent/models.yml`且baseUrl为实际端口的可连接回环地址；不创建missing `web/dist`/sandbox/bin；`GET /api/healthz`返回exact200；application stdout只在listen成功后出现上述exact startup record；SIGTERM后端口与DB均可立即由后继进程重用
 
 #### Scenario: override、非法配置与部分启动失败
-- WHEN以可用custom host/port、absolute或relative DB/static/omp/state/sandbox路径及模型配置启动
-- THENoverride逐项原样生效，relative path仍绑定repo root；只创建non-memory DB的exact parent与托管agent目录、绝不创建STATIC_ROOT或误建default DB；HOST=0.0.0.0时models.yml的baseUrl为http://127.0.0.1:<实际端口>/v1，IPv6通配绑定使用http://[::1]:<实际端口>/v1；build output中的完整migration tree与tracked source inventory/bytes一致，health/info/auth/static合同保持
-- WHEN`PORT`为empty/whitespace/sign/fraction/exponent/zero/out-of-range，HOST为empty/whitespace-only，DB/static/omp/state/sandbox path为explicit empty，OMP_IDLE_MS为empty/0/abc/负数/小数/非canonical或大于2147483647的整数，上游变量为explicit empty，或import `server.ts`但不命中main guard
-- THENmain-path非法config在任何filesystem/database/listen副作用前nonzero，application stderr恰一行上述generic failure record且无success；import-without-main保持silent且无filesystem/database/listen/signal副作用
-- WHENDB parent为file/不可创建、DB file创建/chmod失败、DB open/migration失败、HOST由listen拒绝、port已占用、models.yml不可写或post-listen stdout sink失败
-- THEN进程nonzero且stderr可写时只有generic failure record；stdout EPIPE不得输出raw stack；关闭所有已拥有的app/DB，不遗留可监听server、活跃omp原生子进程或active SQLite handle，parent/static/default路径无额外副作用；stderr同时不可写时允许无record但同样nonzero/cleanup
-- WHEN SIGINT/SIGTERM 落在listen invoke后、实际bind前，或成功后重复/混合到达
-- THEN pending bind由同一AbortSignal取消且无startup record，或已绑定listener幂等关闭；两种情况下均完成已拥有runtime原生退出后释放port、最后关DB；干净取消正常退出，successor可立即复用exact port/DB
+- **WHEN** 以可用custom host/port、absolute或relative DB/static/omp/state/sandbox路径、`OMP_MAX_PROCESSES` 及模型配置启动
+- **THEN** override逐项原样生效（含上限值），relative path仍绑定repo root；只创建non-memory DB的exact parent与托管agent目录、绝不创建STATIC_ROOT或误建default DB；HOST=0.0.0.0时models.yml的baseUrl为http://127.0.0.1:<实际端口>/v1，IPv6通配绑定使用http://[::1]:<实际端口>/v1；build output中的完整migration tree与tracked source inventory/bytes一致，health/info/auth/static合同保持
+- **WHEN** `PORT`为empty/whitespace/sign/fraction/exponent/zero/out-of-range，HOST为empty/whitespace-only，DB/static/omp/state/sandbox path为explicit empty，OMP_IDLE_MS为empty/0/abc/负数/小数/非canonical或大于2147483647的整数，OMP_MAX_PROCESSES为empty/0/abc/负数/小数/非canonical（如`016`、`+8`）或大于2147483647的整数，上游变量为explicit empty，或import `server.ts`但不命中main guard
+- **THEN** main-path非法config在任何filesystem/database/listen副作用前nonzero，application stderr恰一行上述generic failure record且无success；import-without-main保持silent且无filesystem/database/listen/signal副作用
+- **WHEN** DB parent为file/不可创建、DB file创建/chmod失败、DB open/migration失败、HOST由listen拒绝、port已占用、models.yml不可写或post-listen stdout sink失败
+- **THEN** 进程nonzero且stderr可写时只有generic failure record；stdout EPIPE不得输出raw stack；关闭所有已拥有的app/DB，不遗留可监听server、活跃omp原生子进程或active SQLite handle，parent/static/default路径无额外副作用；stderr同时不可写时允许无record但同样nonzero/cleanup
+- **WHEN** SIGINT/SIGTERM 落在listen invoke后、实际bind前，或成功后重复/混合到达
+- **THEN** pending bind由同一AbortSignal取消且无startup record，或已绑定listener幂等关闭；两种情况下均完成已拥有runtime原生退出后释放port、最后关DB；干净取消正常退出，successor可立即复用exact port/DB
 
 #### Scenario: Signal during managed model publication
-- WHEN a clean signal arrives while the post-listen model write is pending
-- THEN owned IO is settled without a startup/shutdown await cycle; no late success/failure record is emitted solely because of cancellation, no cleared app handle is dereferenced, and no resource is abandoned; a genuine writer failure remains a truthful nonzero generic failure
+- **WHEN** a clean signal arrives while the post-listen model write is pending
+- **THEN** owned IO is settled without a startup/shutdown await cycle; no late success/failure record is emitted solely because of cancellation, no cleared app handle is dereferenced, and no resource is abandoned; a genuine writer failure remains a truthful nonzero generic failure
 
 #### Scenario: Full proxy turn keeps both credentials out of output
-- WHEN the actual production entry uses a unique64-character upstream key and fake-omp call-proxy reads the generated models.yml, authenticates with its actual runtime bearer, and completes a real local upstream streamed turn before SIGTERM
-- THEN the persisted assistant content equals the upstream deltas and the turn is done; complete application stdout/stderr contains neither the upstream sentinel nor that bearer; models.yml contains only the WORKBUDDY_MODEL_TOKEN variable name, never either credential value
+- **WHEN** the actual production entry uses a unique64-character upstream key and fake-omp call-proxy reads the generated models.yml, authenticates with its actual runtime bearer, and completes a real local upstream streamed turn before SIGTERM
+- **THEN** the persisted assistant content equals the upstream deltas and the turn is done; complete application stdout/stderr contains neither the upstream sentinel nor that bearer; models.yml contains only the WORKBUDDY_MODEL_TOKEN variable name, never either credential value
 
 #### Scenario: 完整装配路由与惰性根
-- WHEN actual compiled entry starts using configured SANDBOX_ROOT before any session spawn or workspace creation
-- THEN startup reports the exact seven modules in actual registration order; authenticated GET /api/workspaces and GET /api/audit return200 with their real shapes/no-store, anonymous requests return401, and SANDBOX_ROOT/u1 does not exist
+- **WHEN** actual compiled entry starts using configured SANDBOX_ROOT before any session spawn or workspace creation
+- **THEN** startup reports the exact seven modules in actual registration order; authenticated GET /api/workspaces and GET /api/audit return200 with their real shapes/no-store, anonymous requests return401, and SANDBOX_ROOT/u1 does not exist
 
 #### Scenario: HOST=localhost 单一 binding
-- WHEN 以 HOST=localhost 启动编译入口
-- THEN 服务只在 127.0.0.1:<port> 可连接、[::1]:<port> 连接失败，startup record 的 host 为 127.0.0.1，models.yml baseUrl 为 http://127.0.0.1:<port>/v1，唯一 listener 受既有有界关停约束；大小写或写法不同的 `LOCALHOST` 等其它值仍原样交 listen
+- **WHEN** 以 HOST=localhost 启动编译入口
+- **THEN** 服务只在 127.0.0.1:<port> 可连接、[::1]:<port> 连接失败，startup record 的 host 为 127.0.0.1，models.yml baseUrl 为 http://127.0.0.1:<port>/v1，唯一 listener 受既有有界关停约束；大小写或写法不同的 `LOCALHOST` 等其它值仍原样交 listen
 
 ### Requirement: 健康与服务信息端点
 系统 SHALL 提供 `GET /api/healthz`（无需认证）与 `GET /api/info`（无需认证，返回 exact SERVICE_INFO 与认证 provider 名）；info 成功 body SHALL 恰为 `{name:string,version:string,auth:{provider:string}}`，`name` 非空且 `version` 符合 `server/src/service-info.ts` 的 semver 规则，`auth.provider` 为 `registerAuth` 实际装配的认证 provider 对象的 `name`（provider 类型——现为 `DevStubProvider`——新增只读 `name`；dev-stub provider 为 `dev-stub`；S3a 的 OIDC 适配器为 `oidc`），由 `registerAuth` 在根实例上 `decorate("authProviderName", provider.name)`（provider 在 `registerAuth` 创建后传入封装的 auth 子插件，而非在子插件内创建，否则根实例读不到）暴露给 info route，不由 route、`createApp` 参数或 UI 硬编码，只读、不含任何配置值或密钥。可注入 app 装配 SHALL 接收 caller-owned SQLite handle、以名为 `db` 的 Fastify decorator 保持同一对象 identity，并不得在 `app.close()` 时关闭该 handle。
@@ -153,25 +153,25 @@ The canonical HttpError class, error codes and messages SHALL reside in core/err
 
 ### Requirement: Shared agent module assembly
 createApp SHALL always register model-proxy then sessions then workspaces then accounts after auth and the HTTP guard, before catch-all/static routes, using one shared TokenRegistry. Sessions SHALL reconcile before accepting requests. App close SHALL reuse the existing module preClose cleanup without closing caller-owned DB. No startup process or agent directories SHALL be created by merely configuring/registering modules; lazy runtime spawn retains directory ownership. The seven-module startup record SHALL correspond to the actual composition, not only a hardcoded list. Post-listen model publication and active-runtime signal cleanup belong to the production entry lifecycle above; merely constructing the injectable app SHALL remain free of these startup effects. SSE remains outside this requirement (issue #103).
-createApp SHALL create exactly one workspace store with its caller-owned DB, runtime.sandboxRoot, canonical ensureSharedDir and raw emit(db,event). It SHALL bind audit.emit as event=>emit(db,event), create the synchronous sandbox facade with store.rootOf and that audit, registerWorkspaces(app,{store,sandbox,audit}), then registerAccounts(app,{db}). It SHALL NOT introduce a second sandboxRoot setting, optional module-registration bypass, alternate store/audit implementation, or eager owner directories. Existing synchronous onError/onEvent return-value ownership and all #204 sink semantics SHALL remain unchanged.
+createApp SHALL create exactly one workspace store with its caller-owned DB, runtime.sandboxRoot, canonical ensureSharedDir and raw emit(db,event). It SHALL bind audit.emit as event=>emit(db,event), create the synchronous sandbox facade with store.rootOf and that audit, registerWorkspaces(app,{store,sandbox,audit}), then registerAccounts(app,{db}). It SHALL NOT introduce a second sandboxRoot setting, optional module-registration bypass, alternate store/audit implementation, or eager owner directories. Existing synchronous onError/onEvent return-value ownership and all #204 sink semantics SHALL remain unchanged. The resolved `OMP_MAX_PROCESSES` value SHALL reach the sessions module as its supervisor process cap through the same runtime settings object as `OMP_IDLE_MS`, without a second configuration path.
 
 #### Scenario: Authenticated session and bearer proxy coexist
-- WHEN a real createApp is created with caller DB and injected trusted runtime/registry settings
-- THEN session routes use cookie/owner guards, proxy uses the same runtime-issued bearer rather than cookie auth, health/info/static behavior remains unchanged and app.close leaves DB usable
+- **WHEN** a real createApp is created with caller DB and injected trusted runtime/registry settings
+- **THEN** session routes use cookie/owner guards, proxy uses the same runtime-issued bearer rather than cookie auth, health/info/static behavior remains unchanged and app.close leaves DB usable
 #### Scenario: Missing upstream remains an available app
-- WHEN either upstream setting is absent
-- THEN startup and authenticated session CRUD remain available; invalid bearer receives401 before parser/config work, a registered live bearer receives502 and the secret value is absent from startup/failure output
+- **WHEN** either upstream setting is absent
+- **THEN** startup and authenticated session CRUD remain available; invalid bearer receives401 before parser/config work, a registered live bearer receives502 and the secret value is absent from startup/failure output
 #### Scenario: Pure source and compiled configuration identity
-- WHEN the existing pure resolver receives defaults/overrides for all twelve application keys at source and compiled entry URLs from unrelated cwd
-- THEN each existing default and override (including optional ompUser) is observed unchanged, path identity remains rooted at the entry's repository and unknown environment keys are ignored without filesystem/listen/signal side effects
+- **WHEN** the existing pure resolver receives defaults/overrides for all thirteen application keys at source and compiled entry URLs from unrelated cwd
+- **THEN** each existing default and override (including optional ompUser and the process cap defaulting to 16) is observed unchanged, path identity remains rooted at the entry's repository and unknown environment keys are ignored without filesystem/listen/signal side effects
 
 #### Scenario: 同一真实装配贯穿租户与审计
-- WHEN an owner creates a workspace through the production createApp and lists/tree-reads it, another owner requests the same workspace with a traversal path, then its real owner attempts traversal
-- THEN the created root is under the injected runtime.sandboxRoot; foreign access returns404 without adding a denial event, owner traversal returns403 only after canonical sandbox.reject audit is committed on the same DB and visible via /api/audit; unauthorized calls return401 before parser effects
+- **WHEN** an owner creates a workspace through the production createApp and lists/tree-reads it, another owner requests the same workspace with a traversal path, then its real owner attempts traversal
+- **THEN** the created root is under the injected runtime.sandboxRoot; foreign access returns404 without adding a denial event, owner traversal returns403 only after canonical sandbox.reject audit is committed on the same DB and visible via /api/audit; unauthorized calls return401 before parser effects
 
 #### Scenario: 既有消费者原子切换
-- WHEN all createApp callers and HTTP contract fixtures use the completed composition
-- THEN production modules are registered exactly once; test-only stand-ins no longer occupy their paths, no registration bypass is added, real parser/cache/foreign404/native500 coverage is preserved, and app.close leaves caller DB usable
+- **WHEN** all createApp callers and HTTP contract fixtures use the completed composition
+- **THEN** production modules are registered exactly once; test-only stand-ins no longer occupy their paths, no registration bypass is added, real parser/cache/foreign404/native500 coverage is preserved, and app.close leaves caller DB usable
 
 ### Requirement: Bounded lossless listener shutdown
 From the start of shutdown, each response that completes SHALL trigger reclamation of idle keep-alive connections, so a request that finishes after `preClose` does not hold shutdown until the keep-alive timeout. The drain SHALL be bounded by a named listener budget (default 2000 ms) armed when the listener close begins after the `preClose` phase, so it never shortens the native runtime shutdown budget; neither the reclamation nor the budget SHALL depend on every `preClose` hook succeeding or finishing in time. Only when the budget expires with connections still open SHALL the app force-close remaining connections and invoke its optional force-close callback exactly once; the injectable app SHALL NOT write the record itself. The production entry SHALL supply that callback so its application-owned stderr receives exactly one LF-terminated exact JSON `{"event":"listener_force_close"}` with no extra keys, written through the managed writer; this SHALL NOT change the shutdown exit code. Once a startup failure has been decided, the production entry SHALL NOT emit this record, so a failed startup keeps only its generic failure record. The listener SHALL NOT force-close connections by default, and the runtime → listener → database shutdown order SHALL be preserved.
