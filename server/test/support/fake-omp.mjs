@@ -50,6 +50,8 @@ let approvedAny = false;
 let deferredAbort;
 /** 当前会话文件：初值同既有 resume/缺省；只有 branch 场景的成功 branch 会切换它。 */
 let currentSession = resume ?? DEFAULT_SESSION;
+/** 入站帧 type 记录（probe `frames=`）：按 stdin 行序、在串行 queue 内追加，按进程累积。 */
+const inbound = [];
 let queue = Promise.resolve();
 
 if (scenario !== "no-ready" && scenario !== "no-ready-hang") {
@@ -126,6 +128,9 @@ async function onLine(line) {
   } catch {
     await emit({ type: "response", command: "parse", success: false, error: "invalid json" });
     return;
+  }
+  if (typeof frame?.type === "string") {
+    inbound.push(frame.type);
   }
   await dispatch(frame);
 }
@@ -351,7 +356,7 @@ function probeReport(message) {
     environ = error.code;
   }
   const env = Object.keys(process.env).sort().join(",");
-  return `uid=${process.getuid()} gid=${process.getgid()} env=${env} home=${process.env.HOME ?? ""} agent=${process.env.PI_CODING_AGENT_DIR ?? ""} environ=${environ} wrote=${wrote}`;
+  return `uid=${process.getuid()} gid=${process.getgid()} env=${env} home=${process.env.HOME ?? ""} agent=${process.env.PI_CODING_AGENT_DIR ?? ""} environ=${environ} wrote=${wrote} frames=${inbound.join(",")}`;
 }
 
 async function requestConfirm() {
