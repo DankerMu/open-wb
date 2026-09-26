@@ -20,10 +20,13 @@ const TOOL_NAME = "bash";
 const TOOL_OUTPUT = "workbuddy-smoke";
 const UI_ID = "ui-confirm-1";
 const DELTAS = ["Hello ", "from ", "fake-omp"];
+const ABORT_SCENARIOS = new Set(["abort-ok", "abort-ignored"]);
 
 const { scenario, resume } = parseArgs(process.argv.slice(2));
 let protocol = 1;
 let pendingUi = false;
+/** abort-* 回合三态：idle（首个 prompt 挂起回合）→ pending（等 abort）→ done（其后 prompt 走缺省路径）。 */
+let abortTurn = "idle";
 let queue = Promise.resolve();
 
 if (scenario !== "no-ready" && scenario !== "no-ready-hang") {
@@ -105,6 +108,7 @@ async function dispatch(frame) {
     negotiate_protocol: handleNegotiate,
     get_state: handleState,
     prompt: handlePrompt,
+    ...(ABORT_SCENARIOS.has(scenario) ? { abort: handleAbort } : {}),
   };
   const handler = handlers[type];
   if (handler) {
@@ -221,6 +225,10 @@ async function handlePrompt(frame) {
     "call-proxy": () => runProxy(frame.message),
     "hang-prompt": () => {},
   };
+  if (ABORT_SCENARIOS.has(scenario) && abortTurn === "idle") {
+    await holdTurn();
+    return;
+  }
   const turn = turns[scenario];
   if (turn) {
     await turn();
@@ -282,6 +290,29 @@ async function handleUi(frame) {
   }
   pendingUi = false;
   await completeTurn(DELTAS, true);
+}
+
+/**
+ * 发完 agent_start 与两段 delta 后返回：回合只记在 abortTurn，不 await abort，
+ * 否则串行队列里的 abort 行永远排不到。
+ */
+async function holdTurn() {
+  await emit({ type: "agent_start" });
+  await emitDeltas(DELTAS.slice(0, 2));
+  abortTurn = "pending";
+}
+
+async function handleAbort(frame) {
+  if (scenario !== "abort-ok" || abortTurn !== "pending") {
+    return;
+  }
+  await emit({
+    type: "message_end",
+    message: { role: "assistant", content: [], stopReason: "aborted" },
+  });
+  await emit({ type: "agent_end", messages: [], isTerminal: true });
+  await emit({ id: frame.id, type: "response", command: "abort", success: true });
+  abortTurn = "done";
 }
 
 async function crashAfterDeltas() {
