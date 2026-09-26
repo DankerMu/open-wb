@@ -5,15 +5,6 @@
 
 ## MODIFIED Requirements
 
-### Requirement: agent_capacity 错误码
-`core/errors` 定义映射 SHALL 新增 `agent_capacity`(503, `Agent 容量已满，请稍后重试`)，随 `approval_settled` 一并把 typed 错误码由十一码扩为十三码；HTTP 映射器、既有"意外错误不伪装"与 no-store 路由归属规则对新码同样成立。
-
-#### Scenario: 信封形状
-- **WHEN** 路由抛出 `HttpError("agent_capacity")`
-- **THEN** 响应 503，body 恰为 `{error:{code:"agent_capacity",message:"Agent 容量已满，请稍后重试"}}`，无 Fastify 默认字段；伪造 `statusCode:503` 的普通 Error 仍为 generic 5xx
-
-## ADDED Requirements
-
 ### Requirement: OMP_MAX_PROCESSES 配置
 应用配置 SHALL 新增可选键 `OMP_MAX_PROCESSES`，缺省值 `16`。其解析纪律 SHALL 与 `OMP_IDLE_MS` 完全一致：只接受 canonical ASCII decimal 正整数 `1..2147483647`（无符号、无空白、无小数/指数、除 `0` 外无前导零），非法或超限值 SHALL 在任何 filesystem/database/listen 副作用前使启动失败，配置错误消息 SHALL 命名 `OMP_MAX_PROCESSES` 而不含输入值。该值 SHALL 经 `agent-config` 同一纯解析器进入 supervisor，不得由 supervisor 直接读 `process.env`。
 
@@ -24,6 +15,15 @@
 #### Scenario: 非法值启动失败
 - **WHEN** `OMP_MAX_PROCESSES` 为空串、`0`、`abc`、`-1`、`1.5`、`+3`、`016`、` 8`、`2147483648`
 - **THEN** 启动 nonzero，stderr 恰一行既有 generic failure record，错误命名该键且不含输入值，无任何 filesystem/database/listen 副作用
+
+### Requirement: agent_capacity 错误码
+`core/errors` 定义映射 SHALL 新增 `agent_capacity`(503, `Agent 容量已满，请稍后重试`)，随 `approval_settled` 一并把 typed 错误码由十一码扩为十三码；HTTP 映射器、既有"意外错误不伪装"与 no-store 路由归属规则对新码同样成立。
+
+#### Scenario: 信封形状
+- **WHEN** 路由抛出 `HttpError("agent_capacity")`
+- **THEN** 响应 503，body 恰为 `{error:{code:"agent_capacity",message:"Agent 容量已满，请稍后重试"}}`，无 Fastify 默认字段；伪造 `statusCode:503` 的普通 Error 仍为 generic 5xx
+
+## ADDED Requirements
 
 ### Requirement: 活进程集合与上限不变量
 supervisor SHALL 维护"活进程集合"：每个已 spawn 且尚未退出的 omp 子进程恰占一个名额，无论它是会话 slot 的常驻进程、regenerate 复用/新起的会话进程，还是 fork 的临时进程。任一时刻活进程数 SHALL ≤ `OMP_MAX_PROCESSES`。集合中每个进程 SHALL 记录最近活动时刻（与 runtime 空闲计时器同源：子进程帧到达或 prompt 受理即刷新）与是否"在回合中"；回合中定义为：该进程已受理 prompt 且尚未收到终止 `agent_end`（含挂起审批期间），**或**该进程所属会话（fork 临时进程则为其源会话）持有 turn-control 定义的控制占用——自 regenerate/fork/stop 预检通过起、至派发完成或响应返回止，覆盖各次 `get_branch_messages`/`branch`/`get_state` 请求之间的间隙。回合中的进程 SHALL 永不成为驱逐候选。
