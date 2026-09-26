@@ -702,7 +702,7 @@ describe("POST /api/auth/logout", () => {
   });
 });
 
-describe("HTTP typed error map 恰十一码（auth 域只复用既有 unauthorized）", () => {
+describe("HTTP typed error map 恰十三码（auth 域只复用既有 unauthorized）", () => {
   const codes = {
     bad_request: { statusCode: 400, message: "请求格式不正确" },
     invalid_credentials: { statusCode: 401, message: "账号或密码不正确" },
@@ -715,6 +715,8 @@ describe("HTTP typed error map 恰十一码（auth 域只复用既有 unauthoriz
     conflict: { statusCode: 409, message: "同名资源已存在" },
     preview_too_large: { statusCode: 413, message: "文件过大，无法预览" },
     preview_unsupported: { statusCode: 415, message: "该类型不支持预览" },
+    agent_capacity: { statusCode: 503, message: "Agent 容量已满，请稍后重试" },
+    approval_settled: { statusCode: 409, message: "该审批已处理" },
   } as const satisfies Record<HttpErrorCode, { statusCode: number; message: string }>;
 
   /**
