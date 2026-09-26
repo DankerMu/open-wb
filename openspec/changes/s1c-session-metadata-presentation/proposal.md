@@ -16,7 +16,7 @@ S1c 的会话页在 change A（`s1c-turn-control-governance`，Epic #448）之�
 - **对话内搜索**：纯前端；顶栏按钮展开搜索框（`搜索对话内容`，计数器 `i/n`，上一个/下一个/关闭，Enter/Shift+Enter/Esc）；只搜消息正文（Markdown 源文本，大小写不敏感子串），计数为匹配消息数；跳转时滚动到该消息并做消息级高亮（相对 demo 只 toast 的偏差留痕）。`FollowTranscript` 暴露按消息 id 滚动的接口。
 - **fork 继承**：A 的 fork 新会话行继承源会话 `workspace_id` 与 `scene`，不继承 `pinned_at`（B 改 A 的 `store-branch.ts` 插入列表；omp `--resume` 使 fork 会话 cwd 必然等于源空间根）。
 - **web 契约同步**：会话/消息/步骤 DTO 键集扩展；SSE 事件联合增 `thinking.delta`、`files.changed`（新事件类型，旧页面按未知类型忽略）；`hasExactlyKeys` 严格解析随字段同步。
-- **验证 harness 延伸**：fake-omp 新增 `thinking`（thinking_start/delta/end + 正文）、`edit-write`（一次 edit `+N|/-N|` diff + 一次 write `resolvedPath`）场景，probe 回报增 `cwd=` 字段；新增 `smoke/session-meta.hurl`（POST 绑定空间、PATCH 三字段、DELETE 级联；Makefile `smoke` 配方追加该文件 + `scripts/test-ci-harness.sh` oracle 同 PR）；ui-walk 新建 `web/e2e/ui-walk-sessions.spec.ts`（`ui-walk.spec.ts` 已 799 行）并把 Playwright `testMatch` 改为 glob，走查分区侧栏/重命名/置顶/删除/场景胶囊/思考折叠/文件变更卡/搜索。
+- **验证 harness 延伸**：fake-omp 新增 `thinking`（thinking_start/delta/end + 正文）、`edit-write`（一次 edit `+N|/-N|` diff + 一次 write `resolvedPath`）场景，probe 回报增 `cwd=` 字段；fake-upstream（`server/test/support/fake-upstream.mjs`）新增 prompt 文本标记 `WORKBUDDY_THINK`（作答前发三段 `reasoning_content`）与 `WORKBUDDY_WRITE`（工具轮以 `write` 代替 bash）——`make smoke`/`make ui-walk` 消费的是真 omp + 假上游，无法选择 fake-omp 场景，受控上游标记是真运行时取证的唯一确定性手段；新增 `smoke/session-meta.hurl`（POST 绑定空间、PATCH 三字段、DELETE 级联；Makefile `smoke` 配方追加该文件 + `scripts/test-ci-harness.sh` oracle + `AGENTS.md` Verification Matrix 的 HTTP smoke 证据行同 PR）；ui-walk 新建 `web/e2e/ui-walk-sessions.spec.ts`（`ui-walk.spec.ts` 已 799 行）并把 Playwright `testMatch` 改为 glob `ui-walk*.spec.ts`、`globalTimeout` 150 s → 300 s，走查分区侧栏/重命名/置顶/删除/场景胶囊/思考折叠/文件变更卡/搜索。
 - **文档**：`docs/architecture/system.md` §3.1 与 `IMPLEMENTATION_PLAN.md` S1c 节留痕；A 的 proposal「change B 预定决策」第 12 条「B 不依赖 A」改为「B 排在 A 之后实施（2026-09-26 B grill 修订）」；`CONTEXT.md` 增「任务」术语（= 未绑定空间的会话在侧栏的分区名）。
 
 ## 功能覆盖声明
@@ -54,10 +54,10 @@ S1c 的会话页在 change A（`s1c-turn-control-governance`，Epic #448）之�
 - `chat-sessions`：会话数据 schema（035 五列，作为 A 034 之后的第九条回执）、会话 REST（八条路由 → 十条：PATCH、DELETE；`POST /api/sessions` 带 body；DTO 八键）、Session module registration and teardown（`runtimeState` 带空间根；删除路径的 retire 与订阅者关闭）、Supervisor dispatch（`--cwd` 取空间根）、fork 行继承。
 - `chat-stream`：事件联合增 `thinking.delta`、`files.changed`；`thinking_delta` 不再丢弃；`tool_execution_end.details` 对 edit/write 读取；持久化与回放纪律。
 - `chat-web`：DTO 严格键集（会话八键、消息 `thinking`、步骤 `changes`）；事件归约；会话页助手消息块新增折叠块/文件变更卡/产物卡；顶栏入口；欢迎页胶囊；composer footer；搜索。
-- `http-service-skeleton`：parser-owner 归属集 A 的十条 → 十二条，parser 错误映射覆盖 PATCH；错误码表不变（复用 `bad_request`/`not_found`/`session_busy`）。
+- `http-service-skeleton`：parser-owner 归属集 A 的十条 → 十二条（按「方法 + 路由」判定），parser 错误映射覆盖 PATCH；服务启动与装配新增第十四个配置键 `MODEL_REASONING`；错误码表不变（复用 `bad_request`/`not_found`/`session_busy`）。
 - `omp-runtime`：spawn 契约 `--cwd` 由所有者根改为「绑定空间根，未绑定为所有者根」。
-- `omp-test-harness`：新增 `thinking`、`edit-write` 场景，probe `cwd=` 字段。
-- `model-proxy`：托管 `models.yml` 模型条目增 `reasoning: true`（可配置关闭）。
+- `omp-test-harness`：新增 `thinking`、`edit-write` 场景，probe `cwd=` 字段；受控上游 `WORKBUDDY_THINK`/`WORKBUDDY_WRITE` 标记。
+- `model-proxy`：托管 `models.yml` 模型条目增 `reasoning: true` 与 `compat.reasoningContentField`（`MODEL_REASONING=off` 时省略）；该声明只影响 omp 请求侧与历史回放，不门控宿主 thinking 链路。
 - `spa-shell`：顶栏 `actions` 插槽。
 - `chat-harness`：新增 `smoke/session-meta.hurl` 与 `web/e2e/ui-walk-sessions.spec.ts`，Makefile `smoke` 配方与 harness oracle 同步，Playwright `testMatch` 改 glob。
 
@@ -65,6 +65,6 @@ S1c 的会话页在 change A（`s1c-turn-control-governance`，Epic #448）之�
 
 - **服务端**：`server/src/core/db/migrations/035_chat_session_metadata.sql`（新）；`sessions/rest.ts`（PATCH/DELETE/POST body）、`sessions/store.ts` 或新拆 `store-metadata.ts`（元数据读写、删除、`runtimeState` 空间根）、`sessions/supervisor.ts`（公开 `retire(sessionId)`、订阅者关闭）、`sessions/events.ts`（thinking/files 归约，或新拆 `events-artifacts.ts`）、`sessions/omp/process.ts`（`--cwd`）、A 的 `store-branch.ts`（fork 继承）、`http/errors.ts`（PATCH 映射 + 归属集）、`model-proxy/models-yml.ts`（reasoning）、`core/audit`（两类新 kind）。
 - **web**：`features/chat/session-nav.tsx` → 分区组件族（新文件）、`session-contract.ts`、`stream.ts` 接线 + 新 `stream-artifacts.ts`/`stream-thinking.ts`、`conversation-view.tsx`、新 `thinking-block.tsx`/`file-changes-card.tsx`/`artifact-card.tsx`/`artifacts-panel.tsx`/`conversation-search.tsx`/`session-menu.tsx`/`scene-pills.tsx`/`composer-footer.tsx`、`lib/topbar.tsx` + `routes/shell/topbar.tsx`、`lib/api-sessions.ts`（A 拆出）、`scroll-follow.tsx`、`ui/icon.tsx`（star/pencil/trash/more-horizontal/package/download/globe 等 lucide 名）。
-- **harness**：`server/test/support/fake-omp.mjs`（两场景 + `cwd=`，`expectedProbeReport`/`REPORT_LABELS` 同 PR）、`smoke/session-meta.hurl`、Makefile `smoke` 配方 + `scripts/test-ci-harness.sh`、`web/playwright.config.ts` testMatch、`web/e2e/ui-walk-sessions.spec.ts`。
+- **harness**：`server/test/support/fake-omp.mjs`（两场景 + `cwd=`，`expectedProbeReport`/`REPORT_LABELS` 同 PR）、`server/test/support/fake-upstream.mjs`（两标记）、`smoke/session-meta.hurl`、Makefile `smoke` 配方 + `scripts/test-ci-harness.sh` + `AGENTS.md` 证据行、`web/playwright.config.ts` testMatch/globalTimeout、`web/e2e/ui-walk-sessions.spec.ts`。
 - **依赖 change A**：实施 issue 逐条 `Depends on` A 的 #449/#455/#453/#466/#471/#489/#472/#473/#490；A 归档在 B 之前。
 - **配置**：新增 `MODEL_REASONING`（`on|off`，默认 `on`）。不新增 Make 目标、CI job。
