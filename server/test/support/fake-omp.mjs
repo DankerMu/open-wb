@@ -22,6 +22,10 @@ const TOOL_OUTPUT = "workbuddy-smoke";
 const UI_ID = "ui-confirm-1";
 const DELTAS = ["Hello ", "from ", "fake-omp"];
 const ABORT_SCENARIOS = new Set(["abort-ok", "abort-ignored"]);
+/** 审批门控场景（#458）：仅最后一个 `--approval-mode` 恰为 write 时门控，否则同 normal。 */
+const APPROVAL_SCENARIOS = new Set(["approval", "approval-parallel", "approval-then-abort"]);
+const CALL_1 = { id: TOOL_ID, name: TOOL_NAME, args: { command: "echo workbuddy-smoke" } };
+const CALL_2 = { id: "tool-2", name: TOOL_NAME, args: { command: "echo workbuddy-smoke-2" } };
 /**
  * `branch` 场景的固定用户 entry 列表（#457）：进程生命周期内不变，不随 --resume、branch 或 prompt
  * 变化。后续消费者（#465 regenerate / #466 fork / #488 command）逐字依赖 entryId 与 text。
@@ -33,11 +37,17 @@ const BRANCH_MESSAGES = Object.freeze([
 /** omp v18.0.10 agent-session.ts:8628-8629 的未知 entry 错误文本。 */
 const UNKNOWN_ENTRY = "Invalid entry ID for branching";
 
-const { scenario, resume, sessionDir } = parseArgs(process.argv.slice(2));
+const { scenario, resume, sessionDir, approvalMode } = parseArgs(process.argv.slice(2));
+const gated = APPROVAL_SCENARIOS.has(scenario) && approvalMode === "write";
+const abortable = ABORT_SCENARIOS.has(scenario) || (gated && scenario !== "approval");
 let protocol = 1;
 let pendingUi = false;
-/** abort-* 回合三态：idle（首个 prompt 挂起回合）→ pending（等 abort）→ done（其后 prompt 走缺省路径）。 */
+/** abort-* 回合三态：idle（首个 prompt 挂起回合）→ pending（等 abort）→ done（其后 prompt 走缺省路径）；门控回合另有 selecting。 */
 let abortTurn = "idle";
+/** 门控回合状态：挂起的 select id → 调用；是否有过 Approve；selecting 态记下的首个 abort。 */
+const pendingSelects = new Map();
+let approvedAny = false;
+let deferredAbort;
 /** 当前会话文件：初值同既有 resume/缺省；只有 branch 场景的成功 branch 会切换它。 */
 let currentSession = resume ?? DEFAULT_SESSION;
 let queue = Promise.resolve();
@@ -82,6 +92,7 @@ function parseArgs(argv) {
   let selected = "normal";
   let sessionFile;
   let dir;
+  let mode;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--scenario") {
       selected = argv[++i] ?? selected;
@@ -89,9 +100,11 @@ function parseArgs(argv) {
       sessionFile = argv[++i];
     } else if (argv[i] === "--session-dir") {
       dir = argv[++i];
+    } else if (argv[i] === "--approval-mode") {
+      mode = argv[++i];
     }
   }
-  return { scenario: selected, resume: sessionFile, sessionDir: dir };
+  return { scenario: selected, resume: sessionFile, sessionDir: dir, approvalMode: mode };
 }
 
 function emit(frame) {
@@ -120,11 +133,11 @@ async function onLine(line) {
 async function dispatch(frame) {
   const type = frame?.type;
   const handlers = {
-    extension_ui_response: handleUi,
+    extension_ui_response: gated ? handleSelect : handleUi,
     negotiate_protocol: handleNegotiate,
     get_state: handleState,
     prompt: handlePrompt,
-    ...(ABORT_SCENARIOS.has(scenario) ? { abort: handleAbort } : {}),
+    ...(abortable ? { abort: handleAbort } : {}),
     ...(scenario === "branch"
       ? { get_branch_messages: handleBranchMessages, branch: handleBranch }
       : {}),
@@ -289,6 +302,10 @@ async function handlePrompt(frame) {
     "call-proxy": () => runProxy(frame.message),
     "hang-prompt": () => {},
   };
+  if (gated && abortTurn === "idle") {
+    await openSelects(scenario === "approval-parallel" ? [CALL_1, CALL_2] : [CALL_1]);
+    return;
+  }
   if (ABORT_SCENARIOS.has(scenario) && abortTurn === "idle") {
     await holdTurn();
     return;
@@ -366,16 +383,84 @@ async function holdTurn() {
   abortTurn = "pending";
 }
 
-async function handleAbort(frame) {
-  if (scenario !== "abort-ok" || abortTurn !== "pending") {
+/** 同 omp v18.0.10 先发 start 再由 wrapper.ts:332 询问；发完 select 即返回，不等应答以免堵住串行队列。 */
+async function openSelects(calls) {
+  await emit({ type: "agent_start" });
+  await emitDeltas(DELTAS);
+  const content = calls.map((call) => ({
+    type: "toolCall",
+    id: call.id,
+    name: call.name,
+    arguments: call.args,
+  }));
+  await emit({
+    type: "message_end",
+    message: { role: "assistant", content, stopReason: "toolUse" },
+  });
+  for (const call of calls) {
+    await emit(toolStart(call));
+  }
+  for (const [index, call] of calls.entries()) {
+    const id = `r${index + 1}`;
+    pendingSelects.set(id, call);
+    const title = `Allow tool: ${call.name}\nCommand: ${call.args.command}`;
+    await emit({
+      type: "extension_ui_request",
+      id,
+      method: "select",
+      title,
+      options: ["Approve", "Deny"],
+    });
+  }
+  abortTurn = "selecting";
+}
+
+/** 未知或已答 id 静默忽略（rpc-mode.ts:280-285）；每条应答只结束自己的调用。 */
+async function handleSelect(frame) {
+  const call = pendingSelects.get(frame.id);
+  if (call === undefined) {
     return;
   }
+  pendingSelects.delete(frame.id);
+  const approved = !frame.cancelled && frame.value === "Approve";
+  approvedAny ||= approved;
+  await emit(toolEnd(call, approved));
+  if (pendingSelects.size === 0) {
+    await settleSelects();
+  }
+}
+
+/** 最后一条应答之后：延后的 abort 优先；否则 approval 或有 Approve 的 parallel 正常完成，其余挂起等 abort。 */
+async function settleSelects() {
+  if (deferredAbort !== undefined) {
+    await emitAbortedEnd(deferredAbort.id);
+  } else if (scenario === "approval" || (scenario === "approval-parallel" && approvedAny)) {
+    await finishTurn();
+    abortTurn = "done";
+  } else {
+    abortTurn = "pending";
+  }
+}
+
+/** 一个回合只记第一个 abort：selecting 态延后，pending 态兑现，其余状态无帧。 */
+async function handleAbort(frame) {
+  if (abortTurn === "selecting") {
+    deferredAbort ??= { id: frame.id };
+    return;
+  }
+  if (scenario === "abort-ignored" || abortTurn !== "pending") {
+    return;
+  }
+  await emitAbortedEnd(frame.id);
+}
+
+async function emitAbortedEnd(id) {
   await emit({
     type: "message_end",
     message: { role: "assistant", content: [], stopReason: "aborted" },
   });
   await emit({ type: "agent_end", messages: [], isTerminal: true });
-  await emit({ id: frame.id, type: "response", command: "abort", success: true });
+  await emit({ id, type: "response", command: "abort", success: true });
   abortTurn = "done";
 }
 
@@ -389,9 +474,7 @@ async function completeTurn(deltas, tools) {
   await emit({ type: "agent_start" });
   await emitDeltas(deltas);
   if (tools) {
-    await emitToolRound([
-      { id: TOOL_ID, name: TOOL_NAME, args: { command: "echo workbuddy-smoke" } },
-    ]);
+    await emitToolRound([CALL_1]);
   }
   await finishTurn();
 }
@@ -412,19 +495,30 @@ async function emitToolRound(calls) {
     message: { role: "assistant", content: [], stopReason: "toolUse" },
   });
   for (const call of calls) {
-    await emit({
-      type: "tool_execution_start",
-      toolCallId: call.id,
-      toolName: call.name,
-      args: call.args,
-    });
-    await emit({
-      type: "tool_execution_end",
-      toolCallId: call.id,
-      toolName: call.name,
-      result: { content: [{ type: "text", text: TOOL_OUTPUT }], details: { exitCode: 0 } },
-    });
+    await emit(toolStart(call));
+    await emit(toolEnd(call));
   }
+}
+
+function toolStart(call) {
+  return {
+    type: "tool_execution_start",
+    toolCallId: call.id,
+    toolName: call.name,
+    args: call.args,
+  };
+}
+
+/** 成功帧同既有工具轮（无 isError）；拒绝帧同 wrapper.ts:337-340 与 agent-loop.ts:2625-2631。 */
+function toolEnd(call, approved = true) {
+  const text = approved ? TOOL_OUTPUT : `Tool call denied by user: ${call.name}`;
+  return {
+    type: "tool_execution_end",
+    toolCallId: call.id,
+    toolName: call.name,
+    result: { content: [{ type: "text", text }], details: approved ? { exitCode: 0 } : {} },
+    ...(approved ? {} : { isError: true }),
+  };
 }
 
 async function finishTurn() {
