@@ -3,6 +3,15 @@
 ## Purpose
 定义 omp 子进程的全局数量治理：`OMP_MAX_PROCESSES` 硬上限、串行化准入、最久空闲驱逐、`agent_capacity` 拒绝，以及任何原因的进程退出即释放名额（修复空闲回收后的 slot 泄漏）。
 
+## MODIFIED Requirements
+
+### Requirement: agent_capacity 错误码
+`core/errors` 定义映射 SHALL 新增 `agent_capacity`(503, `Agent 容量已满，请稍后重试`)，随 `approval_settled` 一并把 typed 错误码由十一码扩为十三码；HTTP 映射器、既有"意外错误不伪装"与 no-store 路由归属规则对新码同样成立。
+
+#### Scenario: 信封形状
+- **WHEN** 路由抛出 `HttpError("agent_capacity")`
+- **THEN** 响应 503，body 恰为 `{error:{code:"agent_capacity",message:"Agent 容量已满，请稍后重试"}}`，无 Fastify 默认字段；伪造 `statusCode:503` 的普通 Error 仍为 generic 5xx
+
 ## ADDED Requirements
 
 ### Requirement: OMP_MAX_PROCESSES 配置
@@ -69,9 +78,3 @@ runtime SHALL 向 supervisor 接线 `onExit`：子进程因任何原因退出（
 - **WHEN** 会话 A 的子进程在回合中被外部 kill，或 supervisor 整体关停
 - **THEN** 该进程退出后立即从活进程集合移除，A 的回合按既有规则以 `failed` 收尾；关停后活进程集合为空且不留任何 slot
 
-### Requirement: agent_capacity 错误码
-`core/errors` 定义映射 SHALL 新增 `agent_capacity`(503, `Agent 容量已满，请稍后重试`)，随 `approval_settled` 一并把 typed 错误码由十一码扩为十三码；HTTP 映射器、既有"意外错误不伪装"与 no-store 路由归属规则对新码同样成立。
-
-#### Scenario: 信封形状
-- **WHEN** 路由抛出 `HttpError("agent_capacity")`
-- **THEN** 响应 503，body 恰为 `{error:{code:"agent_capacity",message:"Agent 容量已满，请稍后重试"}}`，无 Fastify 默认字段；伪造 `statusCode:503` 的普通 Error 仍为 generic 5xx
