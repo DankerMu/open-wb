@@ -16,6 +16,8 @@ Evidence floor: 新建 `server/test/fake-omp-approval.test.ts`（真实子进程
   - 既有 `abortTurn` 状态增加 `selecting` 态，abort 三帧抽成共用的 `emitAbortedEnd(id)`。abort-ok/abort-ignored/extension-ui 与缺省行为逐字节不变。
 - 新建 `server/test/fake-omp-approval.test.ts`：真实子进程，只用未改动的 `server/test/fake-omp-helpers.ts`。
 
+- spec 自写一句「每进程只门控首个回合」：父 delta 的 `approval`/`approval-parallel` 段没有这条规则，而 fixture 与消费者（#460/#473 回合后 probe）依赖它；归档 PR 同步补入父 delta（#565 评审 P2）。
+
 ## Capabilities
 - MODIFIED `omp-test-harness`「假 omp 进程契约」：以当前主 spec 为底（已含 abort-ok/abort-ignored/branch），并入父 delta 的三部分，均逐字：argv `--approval-mode <mode>`，`approval`/`approval-then-abort`/`approval-parallel` 三段，Scenario「审批 select 门控 bash」「并行审批各自应答」「select 挂起时 abort 被延后」。以下部分不在本 delta，由对应 issue 归档时并入：`approval-chain-abort-ignored`（6.6 #470）、`slow-ready`（6.5 #461）、probe `frames=`/入站帧记录（6.4 #459）。
 

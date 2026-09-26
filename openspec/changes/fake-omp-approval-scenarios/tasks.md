@@ -51,6 +51,8 @@
 - 6.6 #470：复用 select 形状、`r1`/`r2`、拒绝帧与状态机。
 - 6.5 #461：复用 `emitAbortedEnd`。
 
+- 非契约格：门控回合已结算为 `done`（如 `approval-parallel` 一条 Approve 后另一条 Deny 而完成）之后到达的 abort 不回任何帧；真实 omp 在任何状态都回 `success(id,"abort")`（`rpc-mode.ts:1086-1088`）。消费者不得依赖该格（例如「部分审批后 stop」须另行扩展夹具）。多条审批的用例须每个门控回合用一个新进程。
+
 ### 必需证据
 新建 `server/test/fake-omp-approval.test.ts`，只用 `fake-omp-helpers.ts` 的 `startFake`/`startPromptedSession`/`HANDSHAKE`/`PROMPT`/`response`/`isTextDelta`/`asRecord`/`closeSession`/`stopFakeChildren`，helper 不改。
 - 约定：`WRITE = ["--approval-mode","write"]`；`QUIET_MS = 300`；`afterEach(stopFakeChildren)`。
