@@ -22,8 +22,18 @@ const UI_ID = "ui-confirm-1";
 const DELTAS = ["Hello ", "from ", "fake-omp"];
 /** slow-ready（#461）：扣住 ready 之后行为与 abort-ok 完全一致。 */
 const ABORT_SCENARIOS = new Set(["abort-ok", "abort-ignored", "slow-ready"]);
-/** 审批门控场景（#458）：仅最后一个 `--approval-mode` 恰为 write 时门控，否则同 normal。 */
-const APPROVAL_SCENARIOS = new Set(["approval", "approval-parallel", "approval-then-abort"]);
+/**
+ * 审批门控场景（#458）：仅最后一个 `--approval-mode` 恰为 write 时门控，否则同 normal。
+ * approval-chain-abort-ignored（#470）：r1 应答后再开 C2/r2，r2 应答后永久挂起；abort 一律无帧。
+ */
+const APPROVAL_SCENARIOS = new Set([
+  "approval",
+  "approval-parallel",
+  "approval-then-abort",
+  "approval-chain-abort-ignored",
+]);
+/** 任何状态下 abort 都不产生帧、也不被延后记录的场景。 */
+const IGNORE_ABORT = new Set(["abort-ignored", "approval-chain-abort-ignored"]);
 const CALL_1 = { id: TOOL_ID, name: TOOL_NAME, args: { command: "echo workbuddy-smoke" } };
 const CALL_2 = { id: "tool-2", name: TOOL_NAME, args: { command: "echo workbuddy-smoke-2" } };
 /**
@@ -438,21 +448,27 @@ async function openSelects(calls) {
     await emit(toolStart(call));
   }
   for (const [index, call] of calls.entries()) {
-    const id = `r${index + 1}`;
-    pendingSelects.set(id, call);
-    const title = `Allow tool: ${call.name}\nCommand: ${call.args.command}`;
-    await emit({
-      type: "extension_ui_request",
-      id,
-      method: "select",
-      title,
-      options: ["Approve", "Deny"],
-    });
+    await emitSelect(`r${index + 1}`, call);
   }
   abortTurn = "selecting";
 }
 
-/** 未知或已答 id 静默忽略（rpc-mode.ts:280-285）；每条应答只结束自己的调用。 */
+async function emitSelect(id, call) {
+  pendingSelects.set(id, call);
+  const title = `Allow tool: ${call.name}\nCommand: ${call.args.command}`;
+  await emit({
+    type: "extension_ui_request",
+    id,
+    method: "select",
+    title,
+    options: ["Approve", "Deny"],
+  });
+}
+
+/**
+ * 未知或已答 id 静默忽略（rpc-mode.ts:280-285）；每条应答只结束自己的调用。
+ * approval-chain-abort-ignored：C1 结束后同步开出 C2 与 r2 并返回，仍为 selecting。
+ */
 async function handleSelect(frame) {
   const call = pendingSelects.get(frame.id);
   if (call === undefined) {
@@ -462,6 +478,11 @@ async function handleSelect(frame) {
   const approved = !frame.cancelled && frame.value === "Approve";
   approvedAny ||= approved;
   await emit(toolEnd(call, approved));
+  if (scenario === "approval-chain-abort-ignored" && call === CALL_1) {
+    await emit(toolStart(CALL_2));
+    await emitSelect("r2", CALL_2);
+    return;
+  }
   if (pendingSelects.size === 0) {
     await settleSelects();
   }
@@ -479,13 +500,19 @@ async function settleSelects() {
   }
 }
 
-/** 一个回合只记第一个 abort：selecting 态延后，pending 态兑现，其余状态无帧。 */
+/**
+ * 一个回合只记第一个 abort：selecting 态延后，pending 态兑现，其余状态无帧。
+ * IGNORE_ABORT 必须先于 selecting 分支判断，否则 r1 挂起时的 abort 会被延后兑现（#470）。
+ */
 async function handleAbort(frame) {
+  if (IGNORE_ABORT.has(scenario)) {
+    return;
+  }
   if (abortTurn === "selecting") {
     deferredAbort ??= { id: frame.id };
     return;
   }
-  if (scenario === "abort-ignored" || abortTurn !== "pending") {
+  if (abortTurn !== "pending") {
     return;
   }
   await emitAbortedEnd(frame.id);
