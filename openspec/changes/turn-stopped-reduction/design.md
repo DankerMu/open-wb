@@ -21,7 +21,7 @@
     - `web/src/features/chat/stream.ts:34,191` 终态只收 `done|failed`；
     - `web/src/lib/session-contract.ts:3,5`（`ChatSessionStatus`/`ChatDeliveryStatus` 无 `stopped`）与 `:59-71`（`isSessionStatus`/`isDeliveryStatus` 拒绝 `stopped` → `parseSession`/`parseStep` 返回 null，一个 `stopped` 行即令 `GET /api/sessions` 列表与 `/messages` 快照整体解析失败）；
     - `web/src/features/chat/status-label.ts`（父 D6 点名，`Record<ChatSession["status"],string>` 无 `stopped` 项）。
-    - 不可达论证：server 目前只写 `type:"prompt"`（`server/src/sessions/omp/runtime.ts:187`），`shutdown()` 先 `#failActiveTurn` 再 retire（`:160-172`），故 SIGTERM 引起的 aborted 帧到不了活跃归约器；`message_end aborted` 只在 omp 收到 `abort` 帧后出现，而 server 写 `abort` 始于 2.2b #488 / 4.2a #473，`stopped` 行在此之前不会产生 → D6 web-parse-before-server-emit 成立。本刀不新增 web 测试。
+    - **落刀次序门槛（D6 web-parse-before-server-emit）**：`stopped` 行**并非**只在 server 写 `abort` 后才出现——omp v18.0.10 的 TTSR（`ttsr.enabled`/`ttsr.builtinRules` 默认 true、`ttsr.interruptMode` 默认 `always`）及 StreamingEditGuard/loop-guard 会在内部中断流，发出 `message_end{role:assistant,stopReason:"aborted",errorId:"silent-abort"}` → `agent_end{isTerminal:false}` 后继续；本刀起此类回合归约为 `turn.end stopped` 并落盘 `stopped`（master 上同一回合被记为 `failed`，同为误判但不破坏 web 解析）。server 自身路径：目前只写 `type:"prompt"`（`server/src/sessions/omp/runtime.ts:187`），`shutdown()` 先 `#failActiveTurn` 再 retire（`:160-172`）。故本 PR **须在 7.1 #472（web 解析 `stopped`）合入 master 之后再合入**；本刀不新增 web 测试。omp 内部 silent-abort 被判为回合结局属父设计 D2 的既有语义缺口，不在本刀修正（范围外，已上报）。
   - `ring-buffer.ts:58` turn.end 特判与 status 无关；`app.ts`/`sessions/index.ts` `onEvent` 签名随联合自然扩展。
   - knip：`applyStop` 在 #473 前无 `src` 调用方；`knip.json` 把 `server/test/**/*.test.ts` 列为 entry，新归约测试的 import 即满足，无需豁免。
   - `supervisor.ts:377-395` 流无终态结束时合成 `turn.end done`（既有行为，对已记住失败同样如此）——不改，停止路径归 #473。

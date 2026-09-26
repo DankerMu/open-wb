@@ -32,6 +32,7 @@ Evidence floor: 新建归约表驱动测试（aborted/error/正常三路、首�
 - `turn-control`「stopped 终态」重述 #449 已交付的 CHECK 句，使该 requirement 在新 capability 中完整，后续无 issue 需补回。
 - 既有测试 `session-events.test.ts:241-248`（aborted 先于 error 期望 failed）与新契约直接冲突，必须改期望值与标题（issue「既有测试不改动」的唯一例外）。
 - `turn-control`「中断帧归约与有界退回」的 `applyStop` 句为自写（父句把 supervisor grace/retire 与纯函数写在同一句，逐字引入会多承诺 #473 的行为）；#473 归档时以父 delta 原句整句替换。
+- 合并次序：omp 内部中断（TTSR 等 silent-abort）在 server 发 `abort` 之前即可产生 `stopped` 行，故本 PR 须在 7.1 #472 之后合入（父 D6 web-parse-before-server-emit）。
 
 ## Non-goals
 - pending 审批的 deny 结算与审计（4.6 #474）；supervisor 发 `abort`、`OMP_ABORT_GRACE_MS` 有界退回与调用 `applyStop`（4.2a #473）；stop REST（5.1a #475）；web 解析 `stopped`（7.1 #472）；`step.end.status` 扩展。
