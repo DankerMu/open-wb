@@ -17,6 +17,13 @@ import {
   type OmpFrame,
   RpcChunkDecoder,
 } from "./frame.js";
+import {
+  type ApprovalDecision,
+  type ApprovalRequest,
+  answerFrame,
+  approvalRequest,
+  cancelFrame,
+} from "./ui-requests.js";
 
 export interface SpawnOmpOpts {
   /** Trusted absolute executable path from config; not a PATH lookup. */
@@ -158,6 +165,7 @@ interface PendingRequest {
 
 interface OmpEvents {
   frame: [OmpFrame];
+  approval: [ApprovalRequest];
   exit: [OmpExit];
   error: [Error];
 }
@@ -172,6 +180,7 @@ export class OmpProcess {
   readonly handshakeTimeoutMs: number;
   readonly #events = new EventEmitter();
   readonly #pending = new Map<string, PendingRequest>();
+  readonly #approvals = new Set<string>();
   readonly #decoder = new RpcChunkDecoder();
   readonly #ready: Promise<void>;
   #settleReady: ((error?: Error) => void) | undefined;
@@ -237,6 +246,17 @@ export class OmpProcess {
     const command = typeof frame.type === "string" ? frame.type : "";
     const id = typeof frame.id === "string" && frame.id.length > 0 ? frame.id : this.#id();
     return this.#request(command, { ...frame, id });
+  }
+
+  /** Owner-only approval answer: one frame per surfaced id; a no-op once input is unwritable. */
+  respondApproval(id: string, decision: ApprovalDecision): void {
+    const input = this.#child?.stdin;
+    if (!this.#approvals.delete(id) || !input || input.writableEnded || input.destroyed) {
+      return;
+    }
+    void this.#write(answerFrame(id, decision)).catch((error: unknown) => {
+      this.#failIo(error);
+    });
   }
 
   closeInput(): void {
@@ -556,11 +576,15 @@ export class OmpProcess {
       typeof frame.id === "string" &&
       !this.#writesClosed
     ) {
-      void this.#write({ type: "extension_ui_response", id: frame.id, cancelled: true }).catch(
-        (error: unknown) => {
+      const approval = approvalRequest(frame, frame.id);
+      if (approval !== undefined) {
+        this.#approvals.add(approval.id);
+        this.#events.emit("approval", approval);
+      } else {
+        void this.#write(cancelFrame(frame.id)).catch((error: unknown) => {
           this.#failIo(error);
-        },
-      );
+        });
+      }
     }
     if (frame.type !== "response" || typeof frame.id !== "string") {
       return;
@@ -597,6 +621,7 @@ export class OmpProcess {
   #forbidCommands(error: Error): void {
     const already = this.#writesClosed;
     this.#writesClosed = true;
+    this.#approvals.clear();
     this.#clearTimer();
     this.#settleReady?.(error);
     if (!this.#started) {
@@ -612,6 +637,7 @@ export class OmpProcess {
     }
     this.#fatal = error;
     this.#writesClosed = true;
+    this.#approvals.clear();
     this.#stdoutClosed = true;
     this.#clearTimer();
     this.#clearInput();
@@ -642,6 +668,7 @@ export class OmpProcess {
     const firstFailure = this.#fatal === undefined && !this.#writesClosed;
     this.#fatal = unavailable;
     this.#writesClosed = true;
+    this.#approvals.clear();
     this.#clearTimer();
     if (this.#nativeExit === undefined) {
       this.#stdoutClosed = true;
