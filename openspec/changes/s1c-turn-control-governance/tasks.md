@@ -108,5 +108,8 @@ Minimal mergeable slice: 8.1a（atomic：首轮作答条目、`skip_turn_control
 
 - [ ] 9.1 `docs/architecture/system.md` §3.1 `sessions` 行补"全局上限/最久空闲驱逐/审批经 host 应答"一句；`IMPLEMENTATION_PLAN.md:207-216` S1c 节标注 change A 归属与偏差留痕引用。验证：`make check` 全绿
 
-Suggested fixture level: none - 文档，无运行时行为
-Minimal mergeable slice: 9.1（atomic：两处文档各一句话，描述的是组 1–8 全部合入后的同一事实，拆开无独立交付价值）依赖组 1–8 全部 task（随末尾 PR 或独立 docs PR）
+- [ ] 9.2 池定参实测（IMPLEMENTATION_PLAN「池参数在此实测定参」、grill openItem 1）：在测试 VPS（Linux x86_64，地址/凭据只在本地私有注记与 GitHub Secrets，不进任何被跟踪文件）以真 omp v18.0.10 + 假上游并发起 N 个会话（N 取 8、16、24），记录单 omp 进程 RSS、达到 `OMP_MAX_PROCESSES` 时的驱逐与 503 行为、空闲回收后的进程数回落；结论写回 `design.md` Open Questions 第一项（关闭或改默认值；若改默认值须同 PR 改 `agent-config.ts` 默认并更新 omp-pool spec 中的「默认 16」）。验证：design Open Questions 该项标「已关闭」并附数据表（N、RSS 中位数、峰值进程数、驱逐次数）；`make check` 全绿
+- [ ] 9.3 真二进制手工验证（grill openItem 2、design Open Questions 第二项 (a)(b)(c)）：本机以真 omp v18.0.10 二进制 + 假上游跑一次——(a) select 挂起时发 `abort` 是否被阻塞至 select 应答；(b) `get_branch_messages` 返回的 `text` 是否与 SQLite 用户消息 content 逐字相等；(c) `prompt` 帧后紧接 `abort`（早于 `agent_start`）时用户消息条目是否仍写入 `.jsonl`。三项结论各一行写回 design Open Questions；若 (a) 为否则 fake `approval-then-abort`/`approval-parallel` 的 abort 延后规则改为立即兑现并同 PR 更新 omp-test-harness spec 与 6.3；若 (c) 为否则回 Stage 2 重开 D2 停止意图方案（不得静默改 spec）。验证：design Open Questions 第二项三行结论标「已验证」并注明二进制 SHA256 与日期；`make check` 全绿
+
+Suggested fixture level: none - 文档与手工验证记录，无运行时行为（9.2/9.3 若触发默认值或 fake 规则变更，该变更走各自组的 fixture）
+Minimal mergeable slice: 9.1（atomic：两处文档各一句话，描述的是组 1–8 全部合入后的同一事实，拆开无独立交付价值）依赖组 1–8 全部 task 与 9.2、9.3（随末尾 PR 或独立 docs PR）；9.2（atomic：一次实测产出一张数据表与一个结论，拆开无独立交付价值）依赖 1.3、4.1、2.1b；9.3（atomic：三项在同一次真二进制会话中验证，拆开只是重复起进程）依赖 4.2b、4.4、4.5、2.1b

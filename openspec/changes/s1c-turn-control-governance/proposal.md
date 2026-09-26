@@ -18,6 +18,8 @@ IMPLEMENTATION_PLAN.md S1c 的第一刀（2026-09-26 grill 拍板把 S1c 切为�
 
 覆盖 F-OPS-1（每活跃会话一个、空闲回收、数量上限）、F-CHAT-7（生成中断；「继续」由 demo 无对应控件，以"停止后可继续发 prompt"承担）、F-CHAT-6 的 fork 子项，以及 S1e grill 移交的重新生成与审批条。**与 IMPLEMENTATION_PLAN S1c Outcome 的偏离**：会话分组侧栏、三场景、对话内搜索、回合产物呈现（F-CHAT-9）、深度思考折叠（F-CHAT-10）按 2026-09-26 grill 切入 change B，不在本 change——即 F-CHAT-1（三场景）、F-CHAT-2（会话分组侧栏）、F-CHAT-9（回合产物呈现）、F-CHAT-10（深度思考折叠）→ change B `s1c-session-metadata-presentation`。
 
+**与 grill 拍板的有意偏差（留痕）**：fork 分支 grill 原文为「原会话进程与文件不动」；本 change 改为「原会话**文件**不动、不被发帧，但其存活 idle 进程在临时进程启动前 retire」——原因见 design D4「同一文件不并存两个进程」：源会话回合结束后进程要到 `OMP_IDLE_MS` 才回收，若不先 retire，临时进程 `--resume` 同一 `.jsonl` 会与之并存；数据全在文件里，retire 无损，下次 prompt 以 `--resume` 重起。
+
 **与 demo 的有意偏差（留痕）**：
 1. 审批超时 60s（demo 15s），方向同 demo 为自动允许；拒绝真实生效（demo 拒绝后仍照常输出，是演示缺陷）。
 2. 停止后会话状态为 `stopped`（demo 停止后侧栏点仍为 running，是演示缺陷）。

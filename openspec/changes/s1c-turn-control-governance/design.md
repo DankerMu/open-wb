@@ -93,7 +93,7 @@
 - `turn.end.status` 联合 `done|failed|stopped`；新增事件 `approval.request`、`approval.resolved`（payload 为单条审批，按 `approvalId` 寻址）；会话/消息/步骤 status 联合加 `stopped`；消息快照加 `approvals: Approval[]`。content-parser 归属集六 → 十（加 stop、regenerate、fork、approvals 四条路由）。无兼容期（同仓同部署，无第三方消费者）。
 - 归约器（web）：`approval.request` 以 `approvalId` 为键增入对应消息的 `approvals`（不覆盖旧条）；`approval.resolved` 以 `approvalId` 更新 decision（未知 id 忽略）；`turn.end stopped` 结算消息与会话为 stopped。
 - **跨端落刀次序**（web `hasExactlyKeys` 严格解析，任一侧先行都会让会话页整体失效）：
-  - `stopped` 枚举：server 侧 `store.ts` `FinishStatus` 放宽为 `done|failed|stopped` 与 stopped 步骤结算随归约器（tasks 3.1）同刀，`supervisor.ts:689` 的 `turn.end` 穷举随之通过；web 解析与 `status-label.ts` 的 `stopped: "已停止"`（tasks 7.1）**先于** server 真正发出 `turn.end stopped`（tasks 4.2、5.1a）合入——即 web-parse-before-server-emit。
+  - `stopped` 枚举：server 侧 `store.ts` `FinishStatus` 放宽为 `done|failed|stopped` 与 stopped 步骤结算随归约器（tasks 3.1）同刀，`supervisor.ts:689` 的 `turn.end` 穷举随之通过；web 解析与 `status-label.ts` 的 `stopped: "已停止"`（tasks 7.1）**先于** server 真正发出 `turn.end stopped`（tasks 4.2a/4.2b、5.1a）合入——即 web-parse-before-server-emit。
   - `approvals` 快照键：server 投影与 web `session-contract.ts` 键集 + 新建 `features/chat/stream-approvals.ts` 归约（`stream.ts` 只增接线调用）是同一个跨端 task（tasks 5.3），同 PR 合入。
 
 ### D7 fake-omp 是全部服务端测试的真实边界
@@ -153,5 +153,5 @@
 ## Open Questions
 
 - `OMP_MAX_PROCESSES` 的生产建议值：在测试 VPS 上以真实 omp 起 8/16 个空闲与回合中进程测 RSS，写入本节关闭项；不改架构。
-- 真二进制行为验证（abort 阻塞 + branch 文本对齐）：以 `make smoke-live` 前置的真二进制手工验证一次——(a) abort 是否确实被未应答 select 阻塞，结论只影响 D2 的注释与 fake-omp `approval-then-abort` 是否保留；(b) `get_branch_messages` 返回的 `text` 是否与 SQLite 中用户消息 content 逐字相等（regenerate/fork 的对齐判据），并由 tasks 8.1c 的 regenerate/fork hurl 条目在 `make smoke` 中持续证明；(c) 真实 omp 在 `prompt` 帧后紧接 `abort`（可能早于 `agent_start`）时，用户消息条目是否仍写入 `.jsonl` 历史（否则派发前停止后的 regenerate/fork 对齐失败）——同一次真二进制手工验证覆盖该窗口；tasks 8.1b 的停止条目（`make smoke`，真 omp）另对停止后的助手 regenerate 断言 202 且完成，是 CI 内对「停止后历史仍可对齐」的唯一真 omp 探针（其停止点在审批挂起时，已过 `agent_start`，故不替代手工验证）。
+- 真二进制行为验证（abort 阻塞 + branch 文本对齐）：以 `make smoke-live` 前置的真二进制手工验证一次——(a) abort 是否确实被未应答 select 阻塞，结论只影响 D2 的注释与 fake-omp `approval-then-abort` 是否保留；(b) `get_branch_messages` 返回的 `text` 是否与 SQLite 中用户消息 content 逐字相等（regenerate/fork 的对齐判据），并由 tasks 8.1c/8.1d 的 regenerate/fork hurl 条目在 `make smoke` 中持续证明；(c) 真实 omp 在 `prompt` 帧后紧接 `abort`（可能早于 `agent_start`）时，用户消息条目是否仍写入 `.jsonl` 历史（否则派发前停止后的 regenerate/fork 对齐失败）——同一次真二进制手工验证覆盖该窗口；tasks 8.1b 的停止条目（`make smoke`，真 omp）另对停止后的助手 regenerate 断言 202 且完成，是 CI 内对「停止后历史仍可对齐」的唯一真 omp 探针（其停止点在审批挂起时，已过 `agent_start`，故不替代手工验证）。
 - ~~034 重建迁移在 `PRAGMA foreign_keys=ON` 下 `DROP TABLE` 子表顺序~~ **已关闭**：以 chat-sessions delta 中 MODIFIED 整段重述 032 schema Requirement（034 取代 032 列集与 CHECK）与 D2 迁移配方 (1)–(6) 回答——事务内 `PRAGMA foreign_keys` 无效故不使用；`_next` 表 FK 指向 `_next` 父表、子表优先 DROP、父表优先 RENAME，旧表 DROP 时无可级联行，runner 无需改动。
