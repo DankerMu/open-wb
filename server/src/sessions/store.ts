@@ -3,12 +3,27 @@ import { randomBytes } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { createSqliteTextDecoder } from "../core/db/index.js";
 import { HttpError } from "../core/errors/index.js";
+import { cancelTimer, finishOwnedTurn, reconcileStatuses, releaseTurn } from "./store-approvals.js";
+import {
+  decodeNullableText,
+  hasChanges,
+  INSERT_MESSAGE,
+  MESSAGE_COLUMNS,
+  type MessageDbRow,
+  requireAtMostOne,
+  requireChanges,
+  runOwnedTransaction,
+  STEP_COLUMNS,
+  type StepDbRow,
+  toMessageView,
+  toStepView,
+} from "./store-branch.js";
 
 type SessionStatus = "idle" | "running" | "done" | "failed";
-type MessageRole = "user" | "assistant";
-type MessageStatus = "done" | "running" | "failed";
-type StepStatus = "running" | "done" | "failed";
-type FinishStatus = "done" | "failed";
+export type MessageRole = "user" | "assistant";
+export type MessageStatus = "done" | "running" | "failed";
+export type StepStatus = "running" | "done" | "failed";
+export type FinishStatus = "done" | "failed";
 
 interface SessionView {
   id: string;
@@ -18,7 +33,7 @@ interface SessionView {
   updatedAt: number;
 }
 
-interface StepView {
+export interface StepView {
   id: number;
   ordinal: number;
   name: string;
@@ -29,7 +44,7 @@ interface StepView {
   endedAt: number | null;
 }
 
-interface MessageView {
+export interface MessageView {
   id: number;
   role: MessageRole;
   content: string;
@@ -99,27 +114,6 @@ type SessionDbRow = {
   updated_at: number;
 };
 
-type MessageDbRow = {
-  id: number;
-  session_id: string;
-  role: MessageRole;
-  content: Uint8Array;
-  status: MessageStatus;
-  created_at: number;
-};
-
-type StepDbRow = {
-  id: number;
-  message_id: number;
-  ordinal: number;
-  name: Uint8Array;
-  detail: Uint8Array;
-  output: Uint8Array | null;
-  status: StepStatus;
-  started_at: number;
-  ended_at: number | null;
-};
-
 type RuntimeDbRow = {
   owner_id: string;
   omp_session_file: Uint8Array | null;
@@ -128,7 +122,7 @@ type RuntimeDbRow = {
 
 type AdmissionDbRow = Pick<SessionDbRow, "id" | "owner_id" | "title" | "status" | "updated_at">;
 
-type Turn = {
+export type Turn = {
   sessionId: string;
   ownerId: string;
   userMessageId: number;
@@ -150,14 +144,8 @@ const FLUSH_BYTES = 2_048;
 const FLUSH_MS = 2_000;
 const SESSION_COLUMNS =
   "id, owner_id, CAST(title AS BLOB) AS title, status, CAST(omp_session_file AS BLOB) AS omp_session_file, stream_epoch, created_at, updated_at";
-const MESSAGE_COLUMNS =
-  "id, session_id, role, CAST(content AS BLOB) AS content, status, created_at";
-const STEP_COLUMNS =
-  "s.id, s.message_id, s.ordinal, CAST(s.name AS BLOB) AS name, CAST(s.detail AS BLOB) AS detail, CAST(s.output AS BLOB) AS output, s.status, s.started_at, s.ended_at";
 const INSERT_SESSION =
   "INSERT INTO chat_sessions(id, owner_id, title, status, created_at, updated_at) VALUES (?, ?, NULL, 'idle', ?, ?)";
-const INSERT_MESSAGE =
-  "INSERT INTO chat_messages(session_id, role, content, status, created_at) VALUES (?, ?, ?, ?, ?)";
 
 export function createSessionStore(db: DatabaseSync, options: SessionStoreOptions): SessionStore {
   const activeTurns = new Map<number, Turn>();
@@ -519,10 +507,6 @@ function assertOpen(closed: boolean): void {
   }
 }
 
-function decodeNullableText(decoder: TextDecoder, bytes: Uint8Array | null): string | null {
-  return bytes === null ? null : decoder.decode(bytes);
-}
-
 function toSessionView(row: SessionDbRow, decoder: TextDecoder): SessionView {
   return {
     id: row.id,
@@ -530,29 +514,6 @@ function toSessionView(row: SessionDbRow, decoder: TextDecoder): SessionView {
     status: row.status,
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
-  };
-}
-
-function toMessageView(row: MessageDbRow, decoder: TextDecoder): Omit<MessageView, "steps"> {
-  return {
-    id: Number(row.id),
-    role: row.role,
-    content: decoder.decode(row.content),
-    status: row.status,
-    createdAt: Number(row.created_at),
-  };
-}
-
-function toStepView(row: StepDbRow, decoder: TextDecoder): StepView {
-  return {
-    id: Number(row.id),
-    ordinal: Number(row.ordinal),
-    name: decoder.decode(row.name),
-    detail: decoder.decode(row.detail),
-    output: row.output === null ? "" : decoder.decode(row.output),
-    status: row.status,
-    startedAt: Number(row.started_at),
-    endedAt: row.ended_at === null ? null : Number(row.ended_at),
   };
 }
 
@@ -579,14 +540,6 @@ function currentTurn(
     return undefined;
   }
   return turn;
-}
-
-function cancelTimer(turn: Turn): void {
-  turn.timerGeneration += 1;
-  if (turn.timer !== undefined) {
-    clearTimeout(turn.timer);
-    turn.timer = undefined;
-  }
 }
 
 function armFlushTimer(
@@ -648,151 +601,4 @@ function flushPending(db: DatabaseSync, turn: Turn): void {
   turn.faulted = false;
   turn.fault = undefined;
   cancelTimer(turn);
-}
-
-function finishOwnedTurn(
-  db: DatabaseSync,
-  turn: Turn,
-  status: FinishStatus,
-  activeTurns: Map<number, Turn>,
-  activeSessions: Map<string, number>,
-  activeSteps: Map<number, number>,
-): void {
-  turn.progress = true;
-  cancelTimer(turn);
-  const content = turn.pending.length === 0 ? undefined : turn.pending.join("");
-  const now = Date.now();
-  try {
-    runOwnedTransaction(db, "turn finish rollback failed", () => {
-      if (content !== undefined) {
-        requireChanges(
-          db
-            .prepare(
-              "UPDATE chat_messages SET content = content || ? WHERE id = ? AND session_id = ? AND status = 'running'",
-            )
-            .run(content, turn.assistantMessageId, turn.sessionId).changes,
-          1,
-          "terminal content flush",
-        );
-      }
-      requireChanges(
-        db
-          .prepare(
-            "UPDATE chat_messages SET status = ? WHERE id = ? AND session_id = ? AND status = 'running'",
-          )
-          .run(status, turn.assistantMessageId, turn.sessionId).changes,
-        1,
-        "assistant terminal status",
-      );
-      requireChanges(
-        db
-          .prepare(
-            "UPDATE chat_sessions SET status = ?, updated_at = ? WHERE id = ? AND status = 'running'",
-          )
-          .run(status, now, turn.sessionId).changes,
-        1,
-        "session terminal status",
-      );
-      const runningSteps = countRows(
-        db,
-        "SELECT COUNT(*) AS count FROM chat_steps WHERE message_id = ? AND status = 'running'",
-        turn.assistantMessageId,
-      );
-      requireChanges(
-        db
-          .prepare(
-            "UPDATE chat_steps SET status = ?, ended_at = ? WHERE message_id = ? AND status = 'running'",
-          )
-          .run(status, now, turn.assistantMessageId).changes,
-        runningSteps,
-        "remaining step settlement",
-      );
-    });
-  } catch (error) {
-    turn.faulted = true;
-    turn.fault = error;
-    throw error;
-  }
-  turn.pending = [];
-  turn.pendingBytes = 0;
-  releaseTurn(turn, activeTurns, activeSessions, activeSteps);
-}
-
-function releaseTurn(
-  turn: Turn,
-  activeTurns: Map<number, Turn>,
-  activeSessions: Map<string, number>,
-  activeSteps: Map<number, number>,
-): void {
-  cancelTimer(turn);
-  activeTurns.delete(turn.assistantMessageId);
-  activeSessions.delete(turn.sessionId);
-  for (const [stepId, assistantMessageId] of activeSteps) {
-    if (assistantMessageId === turn.assistantMessageId) {
-      activeSteps.delete(stepId);
-    }
-  }
-}
-
-function reconcileStatuses(
-  db: DatabaseSync,
-  table: "chat_sessions" | "chat_messages" | "chat_steps",
-): void {
-  const running = countRows(db, `SELECT COUNT(*) AS count FROM ${table} WHERE status = 'running'`);
-  requireChanges(
-    db.prepare(`UPDATE ${table} SET status = 'failed' WHERE status = 'running'`).run().changes,
-    running,
-    `${table} startup reconciliation`,
-  );
-}
-
-function countRows(db: DatabaseSync, sql: string, ...params: (string | number)[]): number {
-  const row = db.prepare(sql).get(...params) as { count: number | bigint } | undefined;
-  if (row === undefined) {
-    throw new Error("count query returned no row");
-  }
-  return Number(row.count);
-}
-
-function hasChanges(changes: number | bigint): boolean {
-  return changes === 1 || changes === 1n;
-}
-
-function requireAtMostOne(changes: number | bigint, operation: string): void {
-  if (changes !== 0 && changes !== 0n && !hasChanges(changes)) {
-    throw new Error(`${operation} must change at most one row`);
-  }
-}
-
-function requireChanges(changes: number | bigint, expected: number, operation: string): void {
-  if (changes !== expected && changes !== BigInt(expected)) {
-    throw new Error(`${operation} must change exactly ${expected} row${expected === 1 ? "" : "s"}`);
-  }
-}
-
-function runOwnedTransaction<T>(
-  db: DatabaseSync,
-  rollbackFailureMessage: string,
-  work: () => T,
-): T {
-  db.exec("BEGIN");
-  try {
-    const value = work();
-    db.exec("COMMIT");
-    return value;
-  } catch (error) {
-    rollbackOwnedTransaction(db, error, rollbackFailureMessage);
-    throw error;
-  }
-}
-
-function rollbackOwnedTransaction(db: DatabaseSync, originalError: unknown, message: string): void {
-  if (!db.isTransaction) {
-    return;
-  }
-  try {
-    db.exec("ROLLBACK");
-  } catch (rollbackError) {
-    throw new AggregateError([originalError, rollbackError], message, { cause: originalError });
-  }
 }
