@@ -152,9 +152,10 @@
   - 期望 negotiate 响应 `success:true`，`await expect(session.wait(f => f.type === "ready", QUIET_MS)).rejects.toThrow(/timed out/)`，closeStdin 后退出码 0。
   - `no-ready-hang` 由既有 `omp-runtime.test.ts:330` 与 `omp-rpc.test.ts:67` 零改动守护。
 - **G3** 延迟到期后关闭 stdin 走既有路径，且 knob `0` 合法：
-  - 输入：`readyAfter({extraArgs: KNOB(0), scenario:"slow-ready"})`，然后 `closeStdin()`。
-  - 期望 `waitExit()` 为 0，stdout 恰为 ready 一行。
-  - 未实现时同样为绿（未知 scenario 走 `normal`），所以它是守卫：`readyTimer` 清空后，close 分支不得误判为仍在延迟中；`0` 不得被当成非法值。
+  - 输入：`readyAfter({extraArgs: KNOB(0), scenario:"slow-ready"})`，然后在同一 tick 内写 `HANDSHAKE` 并 `closeStdin()`。
+  - 期望 `waitExit()` 为 0，stdout 恰为 ready 加两条 HANDSHAKE 响应。
+  - 能力边界：父进程持续读 stdout 时，close 事件到达前排队的响应早已写完，所以「删掉 `readyTimer` 清空语句」这个变异经 `startFake` 不可观测（实测 10/10 仍绿）。只有暂停读 stdout 制造回压才能区分，那需要自建 spawn，偏离「全部经 `startFake`」。取舍：不追这个变异，G3 只守「knob `0` 合法、到期后既有退出路径发出排队响应」。PR body 记录这一点。
+  - 未实现时同样为绿（未知 scenario 走 `normal`），所以它是守卫：`0` 不得被当成非法值，到期后 close 走既有路径。
 - 既有测试零 diff 全绿，名单见 design.md「Sibling surfaces」。
 
 ## Risk packs

@@ -20,7 +20,8 @@ const TOOL_NAME = "bash";
 const TOOL_OUTPUT = "workbuddy-smoke";
 const UI_ID = "ui-confirm-1";
 const DELTAS = ["Hello ", "from ", "fake-omp"];
-const ABORT_SCENARIOS = new Set(["abort-ok", "abort-ignored"]);
+/** slow-ready（#461）：扣住 ready 之后行为与 abort-ok 完全一致。 */
+const ABORT_SCENARIOS = new Set(["abort-ok", "abort-ignored", "slow-ready"]);
 /** 审批门控场景（#458）：仅最后一个 `--approval-mode` 恰为 write 时门控，否则同 normal。 */
 const APPROVAL_SCENARIOS = new Set(["approval", "approval-parallel", "approval-then-abort"]);
 const CALL_1 = { id: TOOL_ID, name: TOOL_NAME, args: { command: "echo workbuddy-smoke" } };
@@ -36,7 +37,12 @@ const BRANCH_MESSAGES = Object.freeze([
 /** omp v18.0.10 agent-session.ts:8628-8629 的未知 entry 错误文本。 */
 const UNKNOWN_ENTRY = "Invalid entry ID for branching";
 
-const { scenario, resume, sessionDir, approvalMode } = parseArgs(process.argv.slice(2));
+const { scenario, resume, sessionDir, approvalMode, delay } = parseArgs(process.argv.slice(2));
+/**
+ * `--ready-delay-ms <n>`（#461）：与 `--scenario` 的位置无关，取最后一次出现的值；只有 slow-ready 解析它
+ * （缺省 500，非法值在求值时抛错、退出 1 且零帧），其它 scenario 忽略。延迟期间关闭 stdin 零帧退出 0。
+ */
+const readyDelayMs = scenario === "slow-ready" ? parseReadyDelay(delay) : 0;
 const gated = APPROVAL_SCENARIOS.has(scenario) && approvalMode === "write";
 const abortable = ABORT_SCENARIOS.has(scenario) || (gated && scenario !== "approval");
 let protocol = 1;
@@ -52,9 +58,11 @@ let currentSession = resume ?? DEFAULT_SESSION;
 /** 入站帧 type 记录（probe `frames=`）：按 stdin 行序、在串行 queue 内追加，按进程累积。 */
 const inbound = [];
 let queue = Promise.resolve();
+let readyTimer; // 仅在 slow-ready 扣住 ready 期间有值
+const readyGate = scenario === "slow-ready" ? delayReady(readyDelayMs) : Promise.resolve();
 
 if (scenario !== "no-ready" && scenario !== "no-ready-hang") {
-  queue = queue.then(() =>
+  queue = readyGate.then(() =>
     emit({
       type: "ready",
       protocolVersion: 1,
@@ -72,6 +80,9 @@ rl.on("line", (line) => {
 rl.on("close", () => {
   if (scenario === "hang-eof" || scenario === "hang-term" || scenario === "no-ready-hang") {
     return;
+  }
+  if (readyTimer !== undefined) {
+    process.exit(0);
   }
   queue.then(
     () => process.exit(0),
@@ -94,6 +105,7 @@ function parseArgs(argv) {
   let sessionFile;
   let dir;
   let mode;
+  let delay;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--scenario") {
       selected = argv[++i] ?? selected;
@@ -103,9 +115,30 @@ function parseArgs(argv) {
       dir = argv[++i];
     } else if (argv[i] === "--approval-mode") {
       mode = argv[++i];
+    } else if (argv[i] === "--ready-delay-ms") {
+      delay = argv[++i] ?? "";
     }
   }
-  return { scenario: selected, resume: sessionFile, sessionDir: dir, approvalMode: mode };
+  return { scenario: selected, resume: sessionFile, sessionDir: dir, approvalMode: mode, delay };
+}
+
+function parseReadyDelay(raw) {
+  if (raw === undefined) {
+    return 500;
+  }
+  if (/^\d+$/u.test(raw) && Number(raw) <= 2_147_483_647) {
+    return Number(raw);
+  }
+  throw new Error(`invalid --ready-delay-ms: ${JSON.stringify(raw)}`);
+}
+
+function delayReady(ms) {
+  const { promise, resolve } = Promise.withResolvers();
+  readyTimer = setTimeout(() => {
+    readyTimer = undefined;
+    resolve();
+  }, ms);
+  return promise;
 }
 
 function emit(frame) {
