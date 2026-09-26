@@ -8,8 +8,11 @@ import { createSessionMethods } from "./api-sessions.js";
 import type {
   ChatMessageSnapshot,
   ChatPromptAccepted,
+  ChatRegenerateAccepted,
   ChatSession,
+  ChatSessionFork,
   ChatSessionList,
+  ChatSettledApproval,
 } from "./session-contract.js";
 
 export type Principal = {
@@ -135,6 +138,22 @@ export type ApiClient = {
     message: string,
     options?: ApiRequestOptions,
   ): Promise<ChatPromptAccepted>;
+  stopSession(sessionId: string, options?: ApiRequestOptions): Promise<"stopping" | "idle">;
+  regenerateSession(
+    sessionId: string,
+    options?: ApiRequestOptions,
+  ): Promise<ChatRegenerateAccepted>;
+  forkSession(
+    sessionId: string,
+    messageId: number,
+    options?: ApiRequestOptions,
+  ): Promise<ChatSessionFork>;
+  decideApproval(
+    sessionId: string,
+    approvalId: number,
+    decision: "allow" | "deny",
+    options?: ApiRequestOptions,
+  ): Promise<ChatSettledApproval>;
 };
 
 export type ApiClientOptions = {
@@ -509,7 +528,10 @@ async function logoutRequest(
 export function createApiClient({ onUnauthorized }: ApiClientOptions = {}): ApiClient {
   return {
     ...createSessionMethods(onUnauthorized, {
+      fetchResponse,
       getRequestOptions,
+      isSuccessfulStatus,
+      parseJsonResponse,
       request,
       requestFailed,
       requestOptions,

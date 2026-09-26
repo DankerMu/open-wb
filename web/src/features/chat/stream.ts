@@ -31,14 +31,15 @@ export type ChatState = {
 
 type ChatMessageTarget = { messageId: number };
 type ChatStepTarget = ChatMessageTarget & { stepId: number };
-type ChatTerminalStatus = "done" | "failed";
+type ChatStepEndStatus = "done" | "failed";
+type ChatTurnEndStatus = ChatStepEndStatus | "stopped";
 
 export type ChatEvent =
   | { type: "turn.start"; data: ChatMessageTarget }
   | { type: "text.delta"; data: ChatMessageTarget & { delta: string } }
   | { type: "step.start"; data: ChatStepTarget & { name: string; detail: string } }
-  | { type: "step.end"; data: ChatStepTarget & { status: ChatTerminalStatus; output: string } }
-  | { type: "turn.end"; data: ChatMessageTarget & { status: ChatTerminalStatus } }
+  | { type: "step.end"; data: ChatStepTarget & { status: ChatStepEndStatus; output: string } }
+  | { type: "turn.end"; data: ChatMessageTarget & { status: ChatTurnEndStatus } }
   | { type: "error"; data: ChatMessageTarget & { message: string } };
 
 type ChatEventType = ChatEvent["type"];
@@ -188,14 +189,14 @@ function endStep(
   });
 }
 
-function endTurn(state: ChatState, messageId: number, status: "done" | "failed"): ChatState {
+function endTurn(state: ChatState, messageId: number, status: ChatTurnEndStatus): ChatState {
   return replaceAssistant(
     state,
     messageId,
     (message) => ({
       ...message,
       status,
-      error: status === "done" ? null : message.error,
+      error: status === "failed" ? message.error : null,
       steps: message.steps.some((step) => step.status === "running")
         ? message.steps.map((step) => (step.status === "running" ? { ...step, status } : step))
         : message.steps,
@@ -656,7 +657,7 @@ function decodeStepEnd(value: unknown): ChatEvent | undefined {
   return hasExactlyKeys(value, ["messageId", "stepId", "status", "output"]) &&
     isSafeInteger(value.messageId) &&
     isSafeInteger(value.stepId) &&
-    isTerminalStatus(value.status) &&
+    isStepEndStatus(value.status) &&
     typeof value.output === "string"
     ? {
         type: "step.end",
@@ -673,7 +674,7 @@ function decodeStepEnd(value: unknown): ChatEvent | undefined {
 function decodeTurnEnd(value: unknown): ChatEvent | undefined {
   return hasExactlyKeys(value, ["messageId", "status"]) &&
     isSafeInteger(value.messageId) &&
-    isTerminalStatus(value.status)
+    isTurnEndStatus(value.status)
     ? { type: "turn.end", data: { messageId: value.messageId, status: value.status } }
     : undefined;
 }
@@ -690,8 +691,12 @@ function isSafeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value);
 }
 
-function isTerminalStatus(value: unknown): value is ChatTerminalStatus {
+function isStepEndStatus(value: unknown): value is ChatStepEndStatus {
   return value === "done" || value === "failed";
+}
+
+function isTurnEndStatus(value: unknown): value is ChatTurnEndStatus {
+  return isStepEndStatus(value) || value === "stopped";
 }
 
 type CapturedThenable = {
