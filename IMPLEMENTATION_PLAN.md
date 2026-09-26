@@ -22,10 +22,27 @@
 
 ## What Already Exists
 
-- 工程控制面全绿：`make check`、守卫、CI 聚合器、分支保护（AGENTS.md Enforcement Index）。
-- 脚手架：`server/`（service-info）、`web/`（theme）、`kbservice/`（包骨架），各带测试与 80% 覆盖率门禁。
-- 决策资产：`docs/adr/0001`–`0008`、`docs/architecture/system.md`（模块图/依赖规则/目录结构）、
-  `resource/backend-research.md`（RAGFlow 吸收清单、omp 减肥五阶段）。
+> 2026-09-26 更新（S0a/S0b/S1a/S1e 关闭后）。原 2026-08-30 版只记脚手架；本节以已晋升 spec（`openspec/specs/`，19 份）为事实源。
+
+- 工程控制面：`make check`（lint/typecheck/test/anti-drift）、`make test-guardrails`、`make omp-fetch`；CI `ci.yml` 九个 job
+  （fast-checks / unit-tests / anti-drift / secret-scan / sast / smoke / ui-walk / uid-isolation / all-checks-passed）+ 分支保护。
+- 运行时验证 harness（调用方拥有已运行服务）：`make smoke`（`smoke/{public,auth,chat,files}.hurl`）、`make smoke-live`（真实上游）、
+  `make ui-walk`（Playwright 双 project：1440 亮 / 390 暗）、`make ui-shots`（六格 × 五态 demo-vs-app 截图对，人工签收输入）；
+  控制面同步由 `scripts/test-ci-harness.sh` oracle 守住。
+- app-server（S0a/S0b/S1a）：Fastify 装配与错误信封、dev-stub 认证 + session cookie、SQLite WAL + 迁移（`002`–`033`）、
+  `core/sandbox`（resolve/越界拒绝 + `sandbox.reject` 审计）、`core/audit`（只追加 + 游标分页 + 只读端点）、
+  `workspaces`（CRUD/树/新建目录/预览）、`sessions`（omp `--mode rpc` 子进程、SSE + 序号回放 + 环形缓冲、
+  SQLite 会话/消息/步骤含 args/output 双字段、`--resume`、空闲回收 `idleMs`）、`model-proxy`（omp 环境零凭证）、
+  Linux 专用 omp uid（sudo + `setpriv --pdeathsig`，CI `uid-isolation` 证明）。**尚无**：中断/fork 端点、会话数上限、场景/分组字段、挂载。
+- web SPA（S0a/S0b/S1a/S1e）：React + Vite，四路由（`/`、`/files`、`/center` 占位、`/settings`）；`web/src/ui` 基元层
+  （token 全集亮/暗、按钮/输入/开关/标签/chip/Dialog/ConfirmDialog/Drawer/Menu/Popover/Tooltip/Toast/空态/分段控件/图标/品牌 mark）；
+  外壳（侧栏折叠 + 用户菜单、顶栏三态、900/760 两档响应式）；会话页（欢迎态、Markdown 消息 + 流式光标、步骤卡、回到最新、复制）；
+  文件页（逻辑路径、条目元数据、空态、创建对话框）；登录页与设置页对齐 demo。demo 一致性清单 81/81 签收（`docs/acceptance/`）。
+- kbservice：仍为包骨架（`dependencies = []`），S2a 起填。
+- 决策资产：`docs/adr/0001`–`0011`（0010 专用 omp uid、0011 沙箱路径非浏览器秘密）、`docs/architecture/system.md`、
+  `resource/backend-research.md`；`docs/stage-pipeline-log.jsonl` 四阶段账本。
+- 环境：测试 VPS（Ubuntu 24.04，fuse3/docker 就绪，rclone/sshfs 未装；连接信息在本地 `CLAUDE.local.md`）；
+  开发期模型上游为公网 OpenAI 兼容替身，单测/CI 打仓库假上游 `server/test/support/fake-upstream.mjs`。
 - 行为基准：live demo 全路由可交互。
 
 ## Constraints
