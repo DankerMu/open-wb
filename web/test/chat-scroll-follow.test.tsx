@@ -249,7 +249,7 @@ describe("(F8) button presentation", () => {
   });
 });
 
-/* Spy ResizeObserver for R1–R5: installed on globalThis before mount and restored afterwards.
+/* Spy ResizeObserver for R1–R8: installed on globalThis before mount and restored afterwards.
    `resizeElement` is a no-op when no instance observes the element, so on a source without an
    observer the R cases fail on their assertions rather than crash. */
 class SpyResizeObserver {
@@ -422,5 +422,48 @@ describe("(R) size changes without a content change", () => {
     expect(metrics.scrollTop).toBe(2700);
     expect(jumpButton()).toBeNull();
     expect(SpyResizeObserver.instances).toHaveLength(0);
+  });
+
+  it("(R6) a resize that brings a scrolled-up transcript to the bottom pins it and hides 回到最新", async () => {
+    await openLongSession();
+    userScroll(0);
+    expect(jumpButton()).not.toBeNull();
+    metrics.clientHeight = 3000;
+    expect(distance()).toBe(0);
+    resizeElement(transcript());
+    expect(metrics.scrollTop).toBe(0);
+    expect(jumpButton()).toBeNull();
+    await growAndStream(3500, "增量一");
+    expect(distance()).toBeLessThanOrEqual(4);
+    expect(jumpButton()).toBeNull();
+  });
+
+  it("(R7) keeps 回到最新 and the position when a resize leaves the distance within a viewport", async () => {
+    await openLongSession();
+    userScroll(1000);
+    expect(jumpButton()).not.toBeNull();
+    metrics.clientHeight = 1800;
+    expect(distance()).toBe(200);
+    resizeElement(transcript());
+    expect(metrics.scrollTop).toBe(1000);
+    expect(jumpButton()).not.toBeNull();
+    await growAndStream(3100, "增量一");
+    expect(metrics.scrollTop).toBe(1000);
+    expect(jumpButton()).not.toBeNull();
+  });
+
+  /* At distance 0 `scrollTop` is already at its clamp, so R6 cannot see a stray write; at the
+     4px tolerance edge but still overflowing, a write to the bottom would move it. */
+  it("(R8) pins at exactly the 4px tolerance without writing scrollTop", async () => {
+    await openLongSession();
+    userScroll(0);
+    expect(jumpButton()).not.toBeNull();
+    metrics.clientHeight = 2996;
+    expect(distance()).toBe(4);
+    resizeElement(transcript());
+    expect(metrics.scrollTop).toBe(0);
+    expect(jumpButton()).toBeNull();
+    await growAndStream(3500, "增量一");
+    expect(distance()).toBeLessThanOrEqual(4);
   });
 });
