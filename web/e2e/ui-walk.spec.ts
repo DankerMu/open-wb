@@ -296,9 +296,10 @@ async function walkHeldDialogue(page: Page, project: WalkProject): Promise<void>
     const accepted = await promptAccepted;
     const promptIds = parsePromptIds(await accepted.json());
     await expect.poll(() => gatePhase(origin, gateId)).toBe("held");
+    // held 先于首块入库翻转；supervisor 先 persistEvent 再 #publish，UI 见首块即证明快照已含它。
+    await expectRunningPrefix(page, project, sessionId, prompt);
     const preReload = await fetchSessionSnapshot(page, sessionId);
     expectRunningSnapshot(preReload, prompt, sessionId, promptIds);
-    await expectRunningPrefix(page, project, sessionId, prompt);
     if (project === "desktop-light") await expectReducedMotionToggle(page);
 
     const postReload = watchSessionTraffic(page, sessionId);
