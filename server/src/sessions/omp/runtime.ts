@@ -26,6 +26,7 @@ import {
   type SpawnImpl,
 } from "./process.js";
 import { FrameStream } from "./prompt-stream.js";
+import type { ApprovalDecision, ApprovalRequest } from "./ui-requests.js";
 
 const DEFAULT_IDLE_MS = 600_000;
 const TERM_GRACE_MS = 5_000;
@@ -57,6 +58,7 @@ export interface SessionRuntimeOpts {
   spawnImpl?: SpawnImpl;
   clock?: SessionClock;
   onExit?: (exit: OmpExit) => void;
+  onApproval?: (request: ApprovalRequest) => void;
   handshakeTimeoutMs?: number;
 }
 
@@ -92,6 +94,7 @@ export class SessionRuntime {
   readonly #clock: SessionClock;
   readonly #userSpawn: SpawnImpl;
   readonly #onExit: ((exit: OmpExit) => void) | undefined;
+  readonly #onApproval: ((request: ApprovalRequest) => void) | undefined;
   readonly #handshakeTimeoutMs: number | undefined;
   #resumePath: string | null;
   #sessionFile: string | undefined;
@@ -118,6 +121,7 @@ export class SessionRuntime {
     this.#clock = opts.clock ?? systemClock;
     this.#userSpawn = opts.spawnImpl ?? (spawn as SpawnImpl);
     this.#onExit = opts.onExit;
+    this.#onApproval = opts.onApproval;
     this.#handshakeTimeoutMs = opts.handshakeTimeoutMs;
     this.#resumePath = opts.resumePath ?? null;
     this.#sessionFile = nonempty(this.#resumePath);
@@ -170,6 +174,30 @@ export class SessionRuntime {
       return this.#retired;
     }
     await this.#retire(gen);
+  }
+
+  /** Suspend idle expiry while any approval id is pending on the current generation. */
+  markPending(approvalId: string | number): void {
+    const gen = this.#generation;
+    if (gen === undefined || gen.pending.has(approvalId)) {
+      return;
+    }
+    gen.pending.add(approvalId);
+    this.#clearIdle();
+  }
+
+  /** Clearing the last pending id re-arms the full idle duration; absent ids are a no-op. */
+  clearPending(approvalId: string | number): void {
+    const gen = this.#generation;
+    if (gen === undefined || !gen.pending.delete(approvalId) || gen.pending.size > 0) {
+      return;
+    }
+    this.#resetIdle();
+  }
+
+  /** Owner answer, passed synchronously to the current generation; a no-op without one. */
+  respondApproval(id: string, decision: ApprovalDecision): void {
+    this.#generation?.proc.respondApproval(id, decision);
   }
 
   async #runPrompt(text: string, turn: Turn): Promise<void> {
@@ -251,6 +279,7 @@ export class SessionRuntime {
       spawnFailed: false,
       revoked: false,
       retiring: undefined,
+      pending: new Set<string | number>(),
       drainTimer: undefined,
       graceTimer: undefined,
     };
@@ -338,6 +367,9 @@ export class SessionRuntime {
     gen.proc.on("frame", (frame) => {
       this.#onFrame(gen, frame);
     });
+    gen.proc.on("approval", (request) => {
+      this.#forwardApproval(gen, request);
+    });
     gen.proc.on("error", (error) => {
       this.#onTransportError(gen, error);
     });
@@ -365,6 +397,19 @@ export class SessionRuntime {
       void this.#retire(gen);
     }
   }
+
+  /** Same generation/turn gate as #onFrame; forwarding never marks pending or touches idle. */
+  #forwardApproval(gen: Generation, request: ApprovalRequest): void {
+    if (this.#generation !== gen) {
+      return;
+    }
+    const turn = this.#turn;
+    if (turn === undefined || turn.genId !== gen.id || !turn.sent) {
+      return;
+    }
+    this.#onApproval?.(request);
+  }
+
   #onNativeExit(gen: Generation, exit: OmpExit): void {
     if (gen.native !== undefined) {
       return;
@@ -372,6 +417,7 @@ export class SessionRuntime {
     gen.native = exit;
     gen.nativeWait.resolve(exit);
     this.#revoke(gen);
+    this.#onExit?.(exit);
     if (this.#generation === gen && gen.retiring === undefined) {
       this.#watchHeldPipe(gen);
     }
@@ -381,7 +427,6 @@ export class SessionRuntime {
     this.#clearDrain(gen);
     const turn = this.#turn;
     if (turn !== undefined && turn.genId === gen.id) {
-      this.#onExit?.(gen.native ?? { code: null, signal: null });
       this.#failTurn(turn, new AgentUnavailableError("child exited"));
     }
     if (this.#generation === gen) {
@@ -622,7 +667,7 @@ export class SessionRuntime {
   #resetIdle(): void {
     this.#clearIdle();
     const gen = this.#generation;
-    if (this.#closed || gen === undefined || gen.retiring !== undefined) {
+    if (this.#closed || gen === undefined || gen.retiring !== undefined || gen.pending.size > 0) {
       return;
     }
     this.#idleTimer = this.#clock.setTimeout(() => {
