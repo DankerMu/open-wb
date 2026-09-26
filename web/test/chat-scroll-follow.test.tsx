@@ -249,7 +249,7 @@ describe("(F8) button presentation", () => {
   });
 });
 
-/* Spy ResizeObserver for R1–R7: installed on globalThis before mount and restored afterwards.
+/* Spy ResizeObserver for R1–R8: installed on globalThis before mount and restored afterwards.
    `resizeElement` is a no-op when no instance observes the element, so on a source without an
    observer the R cases fail on their assertions rather than crash. */
 class SpyResizeObserver {
@@ -452,14 +452,14 @@ describe("(R) size changes without a content change", () => {
     expect(jumpButton()).not.toBeNull();
   });
 
-  /* At distance 0 `scrollTop` is already at its clamp, so R6 cannot see a stray write; within
-     the tolerance but still overflowing, a write to the bottom would move it. */
-  it("(R8) pins within the 4px tolerance without writing scrollTop", async () => {
+  /* At distance 0 `scrollTop` is already at its clamp, so R6 cannot see a stray write; at the
+     4px tolerance edge but still overflowing, a write to the bottom would move it. */
+  it("(R8) pins at exactly the 4px tolerance without writing scrollTop", async () => {
     await openLongSession();
     userScroll(0);
     expect(jumpButton()).not.toBeNull();
-    metrics.clientHeight = 2998;
-    expect(distance()).toBe(2);
+    metrics.clientHeight = 2996;
+    expect(distance()).toBe(4);
     resizeElement(transcript());
     expect(metrics.scrollTop).toBe(0);
     expect(jumpButton()).toBeNull();
