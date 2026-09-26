@@ -5,6 +5,7 @@ Define the standalone fake omp protocol fixture and its real-child probe reporti
 ## Requirements
 ### Requirement: 假 omp 进程契约
 The standalone zero-dependency Node fixture SHALL expose JSONL stdin/stdout frames matching omp v18.0.10 commit 33cc6b9a043a74e00a157e72ca909272796d8461 for its supported commands, with explicit argv-selected scenarios. It SHALL not replace production code or contact a real model service in its contract tests.
+For S1c turn control the fixture SHALL additionally support the argv-selected scripted scenarios `abort-ok` and `abort-ignored`. `abort-ok`: after prompt ack, `agent_start` and two text deltas the turn waits; on an inbound `abort` frame it emits `message_end` with `stopReason` `aborted`, terminal `agent_end` and `response{command:"abort"}` echoing the abort id, then accepts a further prompt as a normal turn; an `abort` read before `agent_start` and the two deltas have been emitted is honored right after them, so the host always sees `agent_start`, the two deltas, `message_end aborted`, `agent_end` in that order. `abort-ignored`: same held turn, but inbound `abort` produces no frame at all and the process stays alive until stdin closes or a signal arrives (bounded-fallback probe). Existing scenarios and defaults SHALL remain unchanged.
 
 #### Scenario: 默认握手与完整回合
 - WHEN a spawned fixture receives negotiate_protocol version 2, get_state and prompt with request ids
@@ -35,6 +36,12 @@ The standalone zero-dependency Node fixture SHALL expose JSONL stdin/stdout fram
 - THEN the assistant message ends with stopReason error rather than a successful empty turn
 - WHEN configuration is invalid or the local HTTP request fails
 - THEN the failure is observable without a fabricated successful reply or a token leak into stdout/stderr
+
+#### Scenario: abort 收尾与忽略
+- **WHEN** `abort-ok` accepts a prompt and then receives `abort` with request id X
+- **THEN** after the two deltas no completion is emitted until the abort; then `message_end` with `stopReason` `aborted`, `agent_end` and `response{id:X, command:"abort"}` follow in that order, and a subsequent prompt completes as a normal turn
+- **WHEN** `abort-ignored` receives `abort` in the same position
+- **THEN** no frame is emitted afterwards, the process does not exit on its own, and it still exits when stdin closes or SIGTERM arrives
 
 ### Requirement: 假 omp probe 回报
 For prompt `probe:<pid>:<writePath>`, the fake omp SHALL first attempt to write UTF-8 `probe` at the complete writePath using its own credentials, then attempt to read `/proc/<pid>/environ`. It SHALL emit one text delta with fields in order `uid=<uid> gid=<gid> env=<comma-separated sorted environment keys> home=<HOME> agent=<PI_CODING_AGENT_DIR> environ=<readable|errno> wrote=<ok|errno>`, based on its own process and actual IO outcomes. It SHALL reuse normal prompt acknowledgement and assistant stop/terminal agent_end frames even when either IO operation fails. It SHALL not disclose arbitrary environment values or proc contents. Non-probe behavior SHALL remain unchanged.
