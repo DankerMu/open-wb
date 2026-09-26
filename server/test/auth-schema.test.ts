@@ -497,6 +497,7 @@ function expectAuthSchema(db: DatabaseSync): void {
     "accounts",
     "audit_events",
     "auth_sessions",
+    "chat_approvals",
     "chat_messages",
     "chat_sessions",
     "chat_steps",
