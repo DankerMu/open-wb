@@ -4,18 +4,26 @@
  */
 import { type ChildProcessWithoutNullStreams, type SpawnOptions, spawn } from "node:child_process";
 import {
+  awaitChild,
+  clearDrain,
+  clearGrace,
+  closeStdin,
   deferredExit,
   deferredReceipt,
   deferredSpawn,
-  destroyStdio,
+  drainHeld,
   type Generation,
   isLocalComplete,
   isMatchingFailure,
   isTerminalEnd,
+  KILL_GRACE_MS,
   liveChild,
-  raceDelay,
-  stdoutEnded,
+  signalLive,
+  stateSessionFile,
+  TERM_GRACE_MS,
   type Turn,
+  waitNative,
+  watchHeldPipe,
 } from "./commands.js";
 import type { OmpFrame } from "./frame.js";
 import {
@@ -35,9 +43,6 @@ import { FrameStream } from "./prompt-stream.js";
 import type { ApprovalDecision, ApprovalRequest } from "./ui-requests.js";
 
 const DEFAULT_IDLE_MS = 600_000;
-const TERM_GRACE_MS = 5_000;
-const KILL_GRACE_MS = 3_000;
-const SHUTDOWN_BUDGET_MS = TERM_GRACE_MS + KILL_GRACE_MS;
 
 export interface SessionClock {
   now(): number;
@@ -119,6 +124,7 @@ export class SessionRuntime {
   #nextGen = 0;
   #nextRequest = 0;
   #idleTimer: unknown;
+  #commanding = false;
   #closed = false;
   #retired: Promise<void> = Promise.resolve();
 
@@ -151,7 +157,7 @@ export class SessionRuntime {
     if (this.#closed) {
       throw new AgentUnavailableError("runtime shutdown");
     }
-    if (this.#turn !== undefined) {
+    if (this.#turn !== undefined || this.#commanding) {
       throw new SessionBusyError();
     }
     const stream = new FrameStream();
@@ -216,9 +222,69 @@ export class SessionRuntime {
     this.#generation?.proc.respondApproval(id, decision);
   }
 
+  /** Writes `abort` only after the turn's receipt resolved on its live, non-retiring generation. */
+  abort(): Promise<OmpFrame> | false {
+    const turn = this.#turn;
+    const gen = this.#generation;
+    if (
+      turn === undefined ||
+      !turn.receiptSettled ||
+      gen === undefined ||
+      gen.id !== turn.genId ||
+      gen.retiring !== undefined ||
+      liveChild(gen) === undefined
+    ) {
+      return false;
+    }
+    return gen.proc.request({ type: "abort", id: this.#nextId() });
+  }
+
+  /** Correlated out-of-turn request on the prompt acquisition path; resolves the response data. */
+  command(
+    frame:
+      | { type: "get_branch_messages" }
+      | { type: "get_state" }
+      | { type: "branch"; entryId: string },
+  ): Promise<unknown> {
+    if (this.#closed) {
+      throw new AgentUnavailableError("runtime shutdown");
+    }
+    if (this.#turn !== undefined || this.#commanding) {
+      throw new SessionBusyError();
+    }
+    this.#commanding = true;
+    this.#resetIdle();
+    return this.#runCommand(frame).finally(() => {
+      this.#commanding = false;
+      this.#resetIdle();
+    });
+  }
+
+  async #runCommand(frame: OmpFrame): Promise<unknown> {
+    try {
+      const gen = await this.#readyGeneration(() => {
+        if (this.#closed) {
+          throw new AgentUnavailableError("runtime shutdown");
+        }
+      });
+      const response = await gen.proc.request({ ...frame, id: this.#nextId() });
+      if (response.success !== true) {
+        throw new AgentUnavailableError(`${String(frame.type)} failed`);
+      }
+      const sessionFile = stateSessionFile(frame, response);
+      if (sessionFile !== undefined && this.#generation === gen) {
+        this.#sessionFile = sessionFile;
+        this.#resumePath = sessionFile;
+      }
+      return response.data;
+    } catch (error) {
+      throw error instanceof AgentUnavailableError ? error : new AgentUnavailableError();
+    }
+  }
+
   async #runPrompt(text: string, turn: Turn): Promise<void> {
     try {
-      const gen = await this.#readyGeneration(turn);
+      const gen = await this.#readyGeneration(() => this.#assertTurn(turn));
       this.#assertTurn(turn);
       turn.genId = gen.id;
       turn.requestId = this.#nextId();
@@ -243,23 +309,26 @@ export class SessionRuntime {
       }
     }
   }
-  async #readyGeneration(turn: Turn): Promise<Generation> {
+  /** The single acquisition path for prompt and command; `assert` throws once the caller is stale. */
+  async #readyGeneration(assert: () => void): Promise<Generation> {
     await this.#retired;
-    this.#assertTurn(turn);
+    assert();
     const current = this.#generation;
     if (current !== undefined && current.retiring === undefined && current.native === undefined) {
       return current;
     }
     if (current !== undefined) {
       await this.#retire(current);
-      this.#assertTurn(turn);
+      assert();
     }
     const gen = await this.#acquire();
-    if (this.#closed || this.#turn !== turn) {
+    try {
+      assert();
+    } catch (error) {
       if (this.#generation === gen) {
         void this.#retire(gen);
       }
-      throw new AgentUnavailableError("runtime shutdown");
+      throw error;
     }
     return gen;
   }
@@ -374,7 +443,7 @@ export class SessionRuntime {
       this.#onNativeExit(gen, { code, signal });
     });
     if (this.#closed || gen.retiring !== undefined) {
-      this.#closeStdin(gen);
+      closeStdin(gen);
     }
     return child;
   }
@@ -484,12 +553,12 @@ export class SessionRuntime {
     this.#revoke(gen);
     this.#onExit?.(exit);
     if (this.#generation === gen && gen.retiring === undefined) {
-      this.#watchHeldPipe(gen);
+      watchHeldPipe(this.#clock, gen, () => this.#generation === gen);
     }
   }
 
   #onLogicalExit(gen: Generation): void {
-    this.#clearDrain(gen);
+    clearDrain(this.#clock, gen);
     const turn = this.#turn;
     if (turn !== undefined && turn.genId === gen.id) {
       this.#failTurn(turn, new AgentUnavailableError("child exited"));
@@ -506,7 +575,7 @@ export class SessionRuntime {
     }
     const turn = this.#turn;
     const active = turn !== undefined && turn.genId === gen.id;
-    if (error instanceof OmpProtocolError && !active) {
+    if (error instanceof OmpProtocolError && !active && !this.#commanding) {
       return;
     }
     if (active && turn !== undefined) {
@@ -590,15 +659,15 @@ export class SessionRuntime {
 
   async #runRetire(gen: Generation): Promise<void> {
     this.#clearIdle();
-    this.#clearDrain(gen);
-    this.#clearGrace(gen);
+    clearDrain(this.#clock, gen);
+    clearGrace(this.#clock, gen);
     const started = this.#clock.now();
-    this.#closeStdin(gen);
-    const firstWait = this.#waitNative(gen, TERM_GRACE_MS);
-    const child = await this.#awaitChild(gen);
-    this.#closeStdin(gen);
+    closeStdin(gen);
+    const firstWait = waitNative(this.#clock, gen, TERM_GRACE_MS);
+    const child = await awaitChild(gen);
+    closeStdin(gen);
     if (child === undefined && gen.native === undefined && liveChild(gen) === undefined) {
-      this.#clearGrace(gen);
+      clearGrace(this.#clock, gen);
       this.#revoke(gen);
       this.#dropGeneration(gen);
       return;
@@ -606,17 +675,17 @@ export class SessionRuntime {
     const first = await firstWait;
     if (liveChild(gen) === undefined || first === "exit") {
       this.#revoke(gen);
-      await this.#drainHeld(gen, started);
+      await drainHeld(this.#clock, gen, started);
       this.#dropGeneration(gen);
       return;
     }
-    this.#signal(gen, "SIGTERM");
-    if ((await this.#waitNative(gen, KILL_GRACE_MS)) === "exit") {
+    signalLive(gen, "SIGTERM");
+    if ((await waitNative(this.#clock, gen, KILL_GRACE_MS)) === "exit") {
       await this.#finishDead(gen, started);
       return;
     }
     if (liveChild(gen) !== undefined) {
-      this.#signal(gen, "SIGKILL");
+      signalLive(gen, "SIGKILL");
     }
     if (gen.native === undefined) {
       await gen.nativeWait.promise;
@@ -624,102 +693,12 @@ export class SessionRuntime {
     await this.#finishDead(gen, started);
   }
 
-  async #awaitChild(gen: Generation): Promise<ChildProcessWithoutNullStreams | undefined> {
-    if (gen.spawnFailed) {
-      return undefined;
-    }
-    if (gen.child !== undefined || gen.native !== undefined) {
-      return liveChild(gen) ?? gen.child;
-    }
-    const spawned = await gen.spawnWait.promise;
-    if (gen.spawnFailed) {
-      return undefined;
-    }
-    return liveChild(gen) ?? spawned ?? gen.child;
-  }
-
-  #closeStdin(gen: Generation): void {
-    (gen.child ?? gen.proc.child)?.stdin.end();
-  }
-
-  #signal(gen: Generation, signal: NodeJS.Signals): void {
-    if (liveChild(gen) === undefined) {
-      return;
-    }
-    gen.proc.kill(signal);
-  }
-
   async #finishDead(gen: Generation, started: number): Promise<void> {
-    this.#clearGrace(gen);
+    clearGrace(this.#clock, gen);
     this.#revoke(gen);
-    await this.#drainHeld(gen, started);
+    await drainHeld(this.#clock, gen, started);
     this.#dropGeneration(gen);
   }
-  async #drainHeld(gen: Generation, started: number): Promise<void> {
-    const child = gen.child;
-    if (child === undefined || child.stdout.readableEnded || child.stdout.destroyed) {
-      return;
-    }
-    const remaining = SHUTDOWN_BUDGET_MS - Math.max(0, this.#clock.now() - started);
-    if (remaining <= 0) {
-      destroyStdio(child);
-      return;
-    }
-    const ended = stdoutEnded(child);
-    if ((await raceDelay(this.#clock, ended, remaining)) === "timeout") {
-      destroyStdio(child);
-    }
-  }
-
-  #watchHeldPipe(gen: Generation): void {
-    const child = gen.child;
-    if (child === undefined || child.stdout.readableEnded || child.stdout.destroyed) {
-      return;
-    }
-    this.#clearDrain(gen);
-    gen.drainTimer = this.#clock.setTimeout(() => {
-      if (this.#generation === gen && !child.stdout.readableEnded && !child.stdout.destroyed) {
-        destroyStdio(child);
-      }
-    }, SHUTDOWN_BUDGET_MS);
-  }
-
-  #clearDrain(gen: Generation): void {
-    if (gen.drainTimer !== undefined) {
-      this.#clock.clearTimeout(gen.drainTimer);
-      gen.drainTimer = undefined;
-    }
-  }
-
-  #clearGrace(gen: Generation): void {
-    if (gen.graceTimer !== undefined) {
-      this.#clock.clearTimeout(gen.graceTimer);
-      gen.graceTimer = undefined;
-    }
-  }
-
-  async #waitNative(gen: Generation, ms: number): Promise<"exit" | "timeout"> {
-    if (gen.native !== undefined) {
-      return "exit";
-    }
-    return new Promise((resolve) => {
-      gen.graceTimer = this.#clock.setTimeout(() => {
-        gen.graceTimer = undefined;
-        resolve("timeout");
-      }, ms);
-      void gen.nativeWait.promise.then(
-        () => {
-          this.#clearGrace(gen);
-          resolve("exit");
-        },
-        () => {
-          this.#clearGrace(gen);
-          resolve("exit");
-        },
-      );
-    });
-  }
-
   #revoke(gen: Generation): void {
     if (gen.revoked || this.#issuedGenId !== gen.id) {
       return;
