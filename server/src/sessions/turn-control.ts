@@ -2,6 +2,7 @@
  * Turn control: event persistence, post-failure stream draining, and the #473 stop of a
  * dispatched turn (Deny the entry snapshot of pending approvals, write `abort`, then wait
  * OMP_ABORT_GRACE_MS on the injected clock for agent_end before falling back to retire).
+ * A stop before the dispatch receipt (#490) registers an intent, honored once the receipt is.
  */
 import { HttpError } from "../core/errors/index.js";
 import type { ChatEvent } from "./events.js";
@@ -33,6 +34,8 @@ interface StopEntry {
   promise: Promise<void>;
   timer: unknown;
   expired: boolean;
+  /** Stop arrived before the dispatch receipt: `abort` is owed once the receipt is honored. */
+  intent: boolean;
 }
 
 /** Per-turn (assistantMessageId) stop state: one abort, one grace, one fallback per turn. */
@@ -40,14 +43,26 @@ export class TurnStops {
   readonly #ports: StopPorts;
   readonly #clock: SessionClock;
   readonly #entries = new Map<number, StopEntry>();
+  /** Per-turn dispatch phase, from the prompt's first claim check until `release`. */
+  readonly #phases = new Map<number, "dispatching" | "dispatched">();
 
   constructor(ports: StopPorts) {
     this.#ports = ports;
     this.#clock = ports.clock ?? systemClock;
   }
 
-  /** Resolves once `abort` is written; a repeated stop of the same turn joins the first. */
-  stop(slot: Slot, assistantMessageId: number): Promise<void> {
+  /** The turn's prompt entered dispatch; never downgrades a turn already dispatched. */
+  open(assistantMessageId: number): void {
+    if (!this.#phases.has(assistantMessageId)) {
+      this.#phases.set(assistantMessageId, "dispatching");
+    }
+  }
+
+  /**
+   * Resolves once `abort` is written, or once the intent is registered when the turn has no
+   * dispatched prompt yet (`slot` undefined: no runtime to ask); a repeated stop joins the first.
+   */
+  stop(slot: Slot | undefined, assistantMessageId: number): Promise<void> {
     const existing = this.#entries.get(assistantMessageId);
     if (existing !== undefined) {
       return existing.promise;
@@ -57,7 +72,7 @@ export class TurnStops {
       adopt = resolve;
     });
     // Registered before #run: a re-entrant stop from a synchronous publish joins this promise.
-    const entry: StopEntry = { promise, timer: undefined, expired: false };
+    const entry: StopEntry = { promise, timer: undefined, expired: false, intent: false };
     this.#entries.set(assistantMessageId, entry);
     adopt(this.#run(slot, assistantMessageId, entry));
     return promise;
@@ -68,8 +83,33 @@ export class TurnStops {
     return this.#entries.get(assistantMessageId)?.expired === true;
   }
 
-  /** Turn end: revoke the grace and forget the turn. */
+  /**
+   * Receipt honored and pump registered: synchronous, never throws. A registered intent writes
+   * its one `abort` on this slot's runtime; a `false` answer (child gone) drops it.
+   */
+  dispatched(slot: Slot, assistantMessageId: number): void {
+    this.#phases.set(assistantMessageId, "dispatched");
+    const entry = this.#entries.get(assistantMessageId);
+    if (entry?.intent !== true) {
+      return;
+    }
+    entry.intent = false;
+    const answer = slot.runtime.abort();
+    if (answer === false) {
+      this.#drop(assistantMessageId);
+      return;
+    }
+    this.#arm(slot, assistantMessageId, entry, answer);
+  }
+
+  /** Turn end or failed dispatch: revoke the grace and forget the turn and its phase. */
   release(assistantMessageId: number): void {
+    this.#phases.delete(assistantMessageId);
+    this.#drop(assistantMessageId);
+  }
+
+  /** Forget this turn's stop (grace, intent) but keep its phase. */
+  #drop(assistantMessageId: number): void {
     const entry = this.#entries.get(assistantMessageId);
     if (entry !== undefined) {
       this.#clock.clearTimeout(entry.timer);
@@ -78,20 +118,31 @@ export class TurnStops {
   }
 
   /** The snapshot read and the first deny call run before any await (synchronous prefix). */
-  async #run(slot: Slot, assistantMessageId: number, entry: StopEntry): Promise<void> {
-    try {
-      for (const approvalId of this.#ports.pending(slot)) {
-        await this.#ports.deny(slot.sessionId, approvalId).catch(skipSettled);
+  async #run(slot: Slot | undefined, assistantMessageId: number, entry: StopEntry): Promise<void> {
+    if (slot !== undefined) {
+      try {
+        for (const approvalId of this.#ports.pending(slot)) {
+          await this.#ports.deny(slot.sessionId, approvalId).catch(skipSettled);
+        }
+      } catch (error) {
+        this.#drop(assistantMessageId);
+        throw error;
       }
-    } catch (error) {
-      this.release(assistantMessageId);
-      throw error;
     }
-    const answer = slot.runtime.abort();
-    if (answer === false) {
-      this.release(assistantMessageId);
+    const answer = slot === undefined ? false : slot.runtime.abort();
+    if (slot === undefined || answer === false) {
+      if (this.#phases.get(assistantMessageId) === "dispatching") {
+        entry.intent = true;
+      } else {
+        this.#drop(assistantMessageId);
+      }
       return;
     }
+    this.#arm(slot, assistantMessageId, entry, answer);
+  }
+
+  /** The abort's rejection is consumed in this same synchronous segment; then the grace. */
+  #arm(slot: Slot, assistantMessageId: number, entry: StopEntry, answer: Promise<unknown>): void {
     answer.catch(() => undefined);
     entry.timer = this.#clock.setTimeout(() => {
       this.#expire(slot, assistantMessageId, entry);
