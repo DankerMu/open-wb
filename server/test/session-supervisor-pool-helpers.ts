@@ -7,8 +7,9 @@ import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { setImmediate as waitImmediate } from "node:timers/promises";
-import { expect } from "vitest";
+import { expect, vi } from "vitest";
 import type { SpawnImpl } from "../src/sessions/omp/process.js";
+import { SessionRuntime } from "../src/sessions/omp/runtime.js";
 import { postPrompt } from "./session-rest-helpers.js";
 import {
   closeOnEof,
@@ -250,4 +251,39 @@ export function holdAfterHello(fake: FakeChild): void {
     fake.emitLine({ type: "agent_start" });
     emitAssistantDelta(fake, "Hello");
   });
+}
+
+export interface RuntimeSpy {
+  /** The runtime that served the n-th `prompt` call (public-method identity, no private access). */
+  prompted(index: number): SessionRuntime;
+  /** Runtimes whose `shutdown()` has been called so far, in call order. */
+  shutdowns(): SessionRuntime[];
+  restore(): void;
+}
+
+/** Pass-through spies on the public `prompt`/`shutdown` methods; call `restore()` in `finally`. */
+export function spyRuntimes(): RuntimeSpy {
+  const prompt = vi.spyOn(SessionRuntime.prototype, "prompt");
+  const shutdown = vi.spyOn(SessionRuntime.prototype, "shutdown");
+  return {
+    prompted(index) {
+      const runtime = prompt.mock.contexts[index] as SessionRuntime | undefined;
+      if (runtime === undefined) {
+        throw new Error(`missing runtime prompt ${String(index)}`);
+      }
+      return runtime;
+    },
+    shutdowns: () => [...(shutdown.mock.contexts as SessionRuntime[])],
+    restore() {
+      prompt.mockRestore();
+      shutdown.mockRestore();
+    },
+  };
+}
+
+/** Exactly one `shutdown()` so far, on the very runtime (identity) that served prompt `index`. */
+export function expectShutdownOf(spy: RuntimeSpy, index: number): void {
+  const calls = spy.shutdowns();
+  expect(calls).toHaveLength(1);
+  expect(calls[0]).toBe(spy.prompted(index));
 }

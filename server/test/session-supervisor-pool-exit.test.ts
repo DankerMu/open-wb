@@ -14,7 +14,7 @@ import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import { AgentUnavailableError, type OmpExit } from "../src/sessions/omp/process.js";
 import { SessionRuntime } from "../src/sessions/omp/runtime.js";
 import { AGENT_UNAVAILABLE_ENVELOPE } from "./session-rest-helpers.js";
-import { sessionRow } from "./session-store-helpers.js";
+import { messageRows, sessionRow } from "./session-store-helpers.js";
 import {
   capturedFailure,
   createControlledRuntime,
@@ -33,6 +33,7 @@ import {
   child,
   completed,
   countAtExit,
+  expectShutdownOf,
   expectWithinCap,
   holdAfterHello,
   isLive,
@@ -41,6 +42,7 @@ import {
   sampleSpawns,
   send,
   settledTurn,
+  spyRuntimes,
   switchSpawns,
   waitExited,
 } from "./session-supervisor-pool-helpers.js";
@@ -64,14 +66,17 @@ describe("SessionSupervisor process exit releases capacity", () => {
   it("E1 idle expiry frees the slot so another session spawns without eviction", REAL, async () => {
     const rt = createRealFakeRuntime();
     const liveAtSpawn = sampleSpawns(rt);
+    const runtimes = spyRuntimes();
     const world = await openPool(rt.runtime, 1, 2);
     try {
       const [a, b] = world.sessions as [string, string];
       presetSessionFile(world.fixture.db, a, A_FILE);
       await completed(world, a, "a one");
+      expect(runtimes.shutdowns()).toEqual([]);
       rt.clock.advance(IDLE_MS);
       await waitExited(child(rt.children, 0), "A idle exit");
       expect(world.fixture.supervisor.liveProcessCount()).toBe(0);
+      expectShutdownOf(runtimes, 0);
 
       await completed(world, b, "b one");
       expect(rt.calls).toHaveLength(2);
@@ -90,6 +95,7 @@ describe("SessionSupervisor process exit releases capacity", () => {
       expect(world.errors).toEqual([]);
     } finally {
       await world.fixture.close();
+      runtimes.restore();
     }
   });
 
@@ -155,6 +161,7 @@ describe("SessionSupervisor process exit releases capacity", () => {
     async () => {
       const rt = createRealFakeRuntime();
       const liveAtSpawn = sampleSpawns(rt);
+      const runtimes = spyRuntimes();
       const world = await openPool(rt.runtime, 1, 2);
       try {
         const [a, b] = world.sessions as [string, string];
@@ -162,8 +169,10 @@ describe("SessionSupervisor process exit releases capacity", () => {
         await completed(world, a, "a one");
         const childA = child(rt.children, 0);
         const atExit = countAtExit(childA, world.fixture);
+        expect(runtimes.shutdowns()).toEqual([]);
         process.kill(requiredPid(childA.pid), "SIGKILL");
         expect(await atExit).toBe(0);
+        expectShutdownOf(runtimes, 0);
 
         await completed(world, b, "b one");
         expect(liveAtSpawn[1]).toEqual([]);
@@ -179,6 +188,7 @@ describe("SessionSupervisor process exit releases capacity", () => {
         expect(world.errors).toEqual([]);
       } finally {
         await world.fixture.close();
+        runtimes.restore();
       }
     },
   );
@@ -217,6 +227,7 @@ describe("SessionSupervisor process exit releases capacity", () => {
       autoComplete(fake);
     });
     const liveAtSpawn = sampleSpawns(rt);
+    const runtimes = spyRuntimes();
     const world = await openPool(rt.runtime, 1, 2);
     try {
       const [a, b] = world.sessions as [string, string];
@@ -230,6 +241,7 @@ describe("SessionSupervisor process exit releases capacity", () => {
       childA.nativeExit(1);
       expect(supervisor.liveProcessCount()).toBe(0);
       expect(supervisor.streamCursor(a)).toEqual({ epoch: 1, seq: 2 });
+      expect(runtimes.shutdowns()).toEqual([]);
 
       emitAssistantDelta(childA, "!");
       await waitForContent(world.fixture, a, "Hello!");
@@ -240,6 +252,7 @@ describe("SessionSupervisor process exit releases capacity", () => {
       });
       childA.emitLine({ type: "agent_end", messages: [], isTerminal: true });
       await settledTurn(world, a, "failed");
+      expectShutdownOf(runtimes, 0);
       childA.endStdout();
       await waitFor(
         () => (supervisor.streamCursor(a).seq === null ? true : undefined),
@@ -262,6 +275,7 @@ describe("SessionSupervisor process exit releases capacity", () => {
         first.endStdout();
       }
       await world.fixture.close();
+      runtimes.restore();
     }
   });
 
@@ -308,6 +322,47 @@ describe("SessionSupervisor process exit releases capacity", () => {
       await world.fixture.close();
     }
   });
+
+  it(
+    "E8 shutdown during an eviction wait rejects the admitted prompt without spawning",
+    REAL,
+    async () => {
+      const rt = createRealFakeRuntime("hang-eof");
+      const world = await openPool(rt.runtime, 1, 2);
+      try {
+        const [a, b] = world.sessions as [string, string];
+        await completed(world, a, "a one");
+        rt.setScenario("hang-prompt");
+        const pendingB = send(world, b, "b waits on A eviction");
+        const childA = child(rt.children, 0);
+        await waitFor(
+          () => (childA.stdin.writableEnded ? true : undefined),
+          "A eviction stdin EOF",
+        );
+        const shutdown = world.fixture.supervisor.shutdown();
+        rt.clock.advance(5_000);
+        const rejected = await pendingB;
+        expect(rejected.statusCode).toBe(502);
+        expect(rejected.json()).toEqual(AGENT_UNAVAILABLE_ENVELOPE);
+        expect(messageRows(world.fixture.db).filter((row) => row.session_id === b)).toEqual([]);
+        expect(sessionRow(world.fixture.db, b)).toMatchObject({
+          status: "idle",
+          omp_session_file: null,
+          stream_epoch: 0,
+        });
+        expect(childA.signalCode).toBe("SIGTERM");
+        expect(rt.calls).toHaveLength(1);
+        expect(world.fixture.supervisor.liveProcessCount()).toBe(0);
+        await expect(shutdown).resolves.toBeUndefined();
+      } finally {
+        // hang-eof ignores stdin EOF; a failed assertion must not leave shutdown on the fake clock.
+        for (const spawned of rt.children.filter(isLive)) {
+          spawned.kill("SIGKILL");
+        }
+        await world.fixture.close();
+      }
+    },
+  );
 });
 
 function requiredPid(pid: number | undefined): number {
