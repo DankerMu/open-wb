@@ -4,6 +4,10 @@ import type { OmpExit, OmpProcess } from "./process.js";
 import type { FrameStream } from "./prompt-stream.js";
 import type { PromptDispatchReceipt, SessionClock } from "./runtime.js";
 
+export const TERM_GRACE_MS = 5_000;
+export const KILL_GRACE_MS = 3_000;
+const SHUTDOWN_BUDGET_MS = TERM_GRACE_MS + KILL_GRACE_MS;
+
 interface NativeWaiter {
   promise: Promise<OmpExit>;
   resolve: (exit: OmpExit) => void;
@@ -66,7 +70,7 @@ export function liveChild(gen: Generation): ChildProcessWithoutNullStreams | und
   return child;
 }
 
-export function stdoutEnded(child: ChildProcessWithoutNullStreams): Promise<void> {
+function stdoutEnded(child: ChildProcessWithoutNullStreams): Promise<void> {
   return new Promise((resolve) => {
     if (child.stdout.readableEnded || child.stdout.destroyed) {
       resolve();
@@ -77,13 +81,13 @@ export function stdoutEnded(child: ChildProcessWithoutNullStreams): Promise<void
   });
 }
 
-export function destroyStdio(child: ChildProcessWithoutNullStreams): void {
+function destroyStdio(child: ChildProcessWithoutNullStreams): void {
   child.stdout.destroy();
   child.stderr.destroy();
   child.stdin.destroy();
 }
 
-export function raceDelay(
+function raceDelay(
   clock: SessionClock,
   done: Promise<unknown>,
   ms: number,
@@ -99,6 +103,110 @@ export function raceDelay(
       },
       () => {
         clock.clearTimeout(timer);
+        resolve("exit");
+      },
+    );
+  });
+}
+
+export async function awaitChild(
+  gen: Generation,
+): Promise<ChildProcessWithoutNullStreams | undefined> {
+  if (gen.spawnFailed) {
+    return undefined;
+  }
+  if (gen.child !== undefined || gen.native !== undefined) {
+    return liveChild(gen) ?? gen.child;
+  }
+  const spawned = await gen.spawnWait.promise;
+  if (gen.spawnFailed) {
+    return undefined;
+  }
+  return liveChild(gen) ?? spawned ?? gen.child;
+}
+
+export function closeStdin(gen: Generation): void {
+  (gen.child ?? gen.proc.child)?.stdin.end();
+}
+
+export function signalLive(gen: Generation, signal: NodeJS.Signals): void {
+  if (liveChild(gen) === undefined) {
+    return;
+  }
+  gen.proc.kill(signal);
+}
+
+export async function drainHeld(
+  clock: SessionClock,
+  gen: Generation,
+  started: number,
+): Promise<void> {
+  const child = gen.child;
+  if (child === undefined || child.stdout.readableEnded || child.stdout.destroyed) {
+    return;
+  }
+  const remaining = SHUTDOWN_BUDGET_MS - Math.max(0, clock.now() - started);
+  if (remaining <= 0) {
+    destroyStdio(child);
+    return;
+  }
+  const ended = stdoutEnded(child);
+  if ((await raceDelay(clock, ended, remaining)) === "timeout") {
+    destroyStdio(child);
+  }
+}
+
+export function watchHeldPipe(
+  clock: SessionClock,
+  gen: Generation,
+  isCurrent: () => boolean,
+): void {
+  const child = gen.child;
+  if (child === undefined || child.stdout.readableEnded || child.stdout.destroyed) {
+    return;
+  }
+  clearDrain(clock, gen);
+  gen.drainTimer = clock.setTimeout(() => {
+    if (isCurrent() && !child.stdout.readableEnded && !child.stdout.destroyed) {
+      destroyStdio(child);
+    }
+  }, SHUTDOWN_BUDGET_MS);
+}
+
+export function clearDrain(clock: SessionClock, gen: Generation): void {
+  if (gen.drainTimer !== undefined) {
+    clock.clearTimeout(gen.drainTimer);
+    gen.drainTimer = undefined;
+  }
+}
+
+export function clearGrace(clock: SessionClock, gen: Generation): void {
+  if (gen.graceTimer !== undefined) {
+    clock.clearTimeout(gen.graceTimer);
+    gen.graceTimer = undefined;
+  }
+}
+
+export async function waitNative(
+  clock: SessionClock,
+  gen: Generation,
+  ms: number,
+): Promise<"exit" | "timeout"> {
+  if (gen.native !== undefined) {
+    return "exit";
+  }
+  return new Promise((resolve) => {
+    gen.graceTimer = clock.setTimeout(() => {
+      gen.graceTimer = undefined;
+      resolve("timeout");
+    }, ms);
+    void gen.nativeWait.promise.then(
+      () => {
+        clearGrace(clock, gen);
+        resolve("exit");
+      },
+      () => {
+        clearGrace(clock, gen);
         resolve("exit");
       },
     );
@@ -155,6 +263,12 @@ export function isMatchingFailure(frame: OmpFrame, requestId: string): boolean {
     frame.command === "prompt" &&
     frame.success === false
   );
+}
+
+/** A `get_state` response's nonempty `sessionFile`; undefined for any other command. */
+export function stateSessionFile(request: OmpFrame, response: OmpFrame): string | undefined {
+  const file = request.type === "get_state" ? asRecord(response.data).sessionFile : undefined;
+  return typeof file === "string" && file.length > 0 ? file : undefined;
 }
 
 function asRecord(value: unknown): OmpFrame {
