@@ -1,6 +1,7 @@
 /**
  * Issue #100 session supervisor: dispatch, persistence, and owned lifecycle.
  */
+import { DEFAULT_OMP_MAX_PROCESSES } from "../agent-config.js";
 import { HttpError } from "../core/errors/index.js";
 import { applyFailure, applyFrame, type ChatEvent, createEventState } from "./events.js";
 import type { OmpFrame } from "./omp/frame.js";
@@ -12,7 +13,15 @@ import {
   SessionRuntime,
   type SessionRuntimeOpts,
 } from "./omp/runtime.js";
-import { type Generation, releaseClaim, releasePumpExit, type Slot } from "./pool.js";
+import {
+  type Generation,
+  type PoolEntry,
+  ProcessPool,
+  releaseClaim,
+  releasePumpExit,
+  type Slot,
+  turnFree,
+} from "./pool.js";
 import type { SessionStore } from "./store.js";
 import { type RetainedEvent, RingBuffer, type RingRead } from "./stream/ring-buffer.js";
 import type { TokenRegistry } from "./tokens.js";
@@ -39,7 +48,7 @@ export interface SessionSupervisorRuntime {
   stateDir: string;
   modelId: string;
   idleMs?: number;
-  /** Global live-process cap resolved by agent-config; carried only, enforcement is #463. */
+  /** Global live-process cap resolved by agent-config; undefined → DEFAULT_OMP_MAX_PROCESSES (16). */
   maxProcesses?: number;
   ompUser?: string;
   spawnImpl?: SpawnImpl;
@@ -65,6 +74,14 @@ export interface SessionSupervisorOptions {
   onEvent?: (sessionId: string, epoch: number, event: ChatEvent<number>) => void;
 }
 
+/** The slot's capacity entry was released; the dispatch falls back to one fresh admission. */
+class ReadmissionRequired extends Error {
+  constructor() {
+    super("session process must be re-admitted");
+    this.name = "ReadmissionRequired";
+  }
+}
+
 interface FlushFailure {
   sessionId: string;
   assistantMessageId: number;
@@ -85,6 +102,7 @@ export class SessionSupervisor {
   readonly #admissions = new Set<Promise<void>>();
   readonly #pumps = new Set<Promise<void>>();
   readonly #faults: Error[] = [];
+  readonly #pool: ProcessPool;
   #closed = false;
 
   constructor(options: SessionSupervisorOptions) {
@@ -93,6 +111,11 @@ export class SessionSupervisor {
     this.#runtime = options.runtime;
     this.#onError = options.onError;
     this.#onEvent = options.onEvent;
+    const clock = options.runtime.clock;
+    this.#pool = new ProcessPool(
+      options.runtime.maxProcesses ?? DEFAULT_OMP_MAX_PROCESSES,
+      clock === undefined ? () => Date.now() : () => clock.now(),
+    );
   }
 
   prompt(sessionId: string, text: string): Promise<void> {
@@ -149,6 +172,11 @@ export class SessionSupervisor {
     return this.#subscribers.get(sessionId)?.size ?? 0;
   }
 
+  /** Admitted, not yet released process entries (read-only observation). */
+  liveProcessCount(): number {
+    return this.#pool.size;
+  }
+
   async shutdown(): Promise<void> {
     this.#closed = true;
     this.#subscribers.clear();
@@ -199,15 +227,11 @@ export class SessionSupervisor {
       throw new HttpError("session_busy");
     }
     const live = this.#slots.get(sessionId);
+    const dispatchNew = () =>
+      this.#dispatchNew(sessionId, text, state.ownerId, state.ompSessionFile, assistantMessageId);
     try {
-      if (live === undefined || live.retiring !== undefined) {
-        await this.#dispatchNew(
-          sessionId,
-          text,
-          state.ownerId,
-          state.ompSessionFile,
-          assistantMessageId,
-        );
+      if (live === undefined || live.retiring !== undefined || !this.#pool.holds(live.entry)) {
+        await dispatchNew();
         return;
       }
       this.#claim(live, assistantMessageId);
@@ -217,7 +241,10 @@ export class SessionSupervisor {
         if (live.pump === undefined) {
           await this.#retireSlot(live);
         }
-        throw error;
+        if (!(error instanceof ReadmissionRequired)) {
+          throw error;
+        }
+        await dispatchNew();
       }
     } catch (error) {
       throw this.#translate(error);
@@ -241,8 +268,25 @@ export class SessionSupervisor {
       retiring: undefined,
       acquisitionFault: undefined,
       infraFaulted: false,
+      entry: undefined,
     };
     this.#claim(slot, assistantMessageId);
+    let entry: PoolEntry;
+    try {
+      entry = await this.#pool.admit({
+        busy: () => !turnFree(slot),
+        retire: () => this.#retireSlot(slot),
+      });
+    } catch (error) {
+      releaseClaim(this.#claims, slot, assistantMessageId);
+      throw error;
+    }
+    if (this.#closed) {
+      this.#pool.release(entry);
+      releaseClaim(this.#claims, slot, assistantMessageId);
+      throw new HttpError("agent_unavailable");
+    }
+    slot.entry = entry;
     const opts: SessionRuntimeOpts = {
       sessionId,
       bin: this.#runtime.bin,
@@ -252,6 +296,9 @@ export class SessionSupervisor {
       modelId: this.#runtime.modelId,
       tokens: this.#adapter(slot),
       resumePath,
+      onExit: () => {
+        this.#onProcessExit(slot);
+      },
       ...(this.#runtime.idleMs === undefined ? {} : { idleMs: this.#runtime.idleMs }),
       ...(this.#runtime.ompUser === undefined ? {} : { ompUser: this.#runtime.ompUser }),
       ...(this.#runtime.spawnImpl === undefined ? {} : { spawnImpl: this.#runtime.spawnImpl }),
@@ -270,7 +317,16 @@ export class SessionSupervisor {
     }
   }
 
+  /** Synchronous, never throws or writes stdin: free the capacity, retire only outside a turn. */
+  #onProcessExit(slot: Slot): void {
+    this.#pool.release(slot.entry);
+    if (turnFree(slot)) {
+      void this.#retireSlot(slot);
+    }
+  }
+
   async #bindDispatch(slot: Slot, text: string, assistantMessageId: number): Promise<void> {
+    this.#pool.touch(slot.entry);
     const generation = slot.generation;
     if (generation !== undefined) {
       generation.dispatchCount += 1;
@@ -306,6 +362,10 @@ export class SessionSupervisor {
       this.#pumps.delete(pump);
       this.#releasePump(slot, pumpGeneration);
       releasePumpExit(this.#claims, slot, pump, assistantMessageId);
+      this.#pool.touch(slot.entry);
+      if (!this.#pool.holds(slot.entry) && turnFree(slot)) {
+        void this.#retireSlot(slot);
+      }
     });
   }
 
@@ -343,6 +403,7 @@ export class SessionSupervisor {
         if (slot.infraFaulted) {
           break;
         }
+        this.#pool.touch(slot.entry);
         const applied = applyFrame(mapper, frame);
         mapper = applied.state;
         if (
@@ -506,6 +567,10 @@ export class SessionSupervisor {
     return {
       issue: (sessionId: string) => {
         slot.acquisitionFault = undefined;
+        if (!this.#pool.holds(slot.entry)) {
+          slot.acquisitionFault = new ReadmissionRequired();
+          throw slot.acquisitionFault;
+        }
         try {
           slot.epoch = this.#store.bumpStreamEpoch(sessionId);
         } catch (error) {
@@ -591,6 +656,7 @@ export class SessionSupervisor {
       this.#sealGeneration(slot, generation);
     }
     await slot.retiring;
+    this.#pool.release(slot.entry);
     if (this.#slots.get(slot.sessionId) === slot) {
       this.#slots.delete(slot.sessionId);
     }

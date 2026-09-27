@@ -33,6 +33,7 @@ export interface RuntimeOptions {
   stateDir: string;
   modelId: string;
   idleMs: number;
+  maxProcesses?: number;
   ompUser?: string;
   clock: TestClock;
   spawnImpl: SpawnImpl;
