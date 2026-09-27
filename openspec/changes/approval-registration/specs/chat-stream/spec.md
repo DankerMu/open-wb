@@ -4,6 +4,7 @@
 > - 次序括注「作答、超时与停止路径」裁为作答与超时；「（含停止前的 deny 与超时 allow）」裁为「（含超时 allow）」。停止路径 → #473。
 > - 「回合在没有子进程应答的情况下终止时……」一整句（崩溃、传输失败、`applyStop` 退回、优雅关停、启动对账的 `deny` 结算）→ #474；Scenario「Settlement without a child answer」→ #474，未收录。
 > - Scenario「Request and resolution are ordered ring events」取父 delta 的持久化提交措辞（本刀交付）；「Refresh during a pending approval」与主 spec 相同。
+> - 与父 delta 的分歧（#597 review，归档时父块同步）：Scenario「Persistence failure publishes nothing」的失败出口拆为「插入/超时失败走 owned error sink；作答失败以原错误拒绝调用方、审批保持 pending」。
 
 ## MODIFIED Requirements
 
@@ -20,7 +21,7 @@
 
 #### Scenario: Persistence failure publishes nothing
 - **WHEN** the pending insert, or the transaction writing the decision together with its audit row, fails in SQLite
-- **THEN** no `approval.request` respectively `approval.resolved` event enters the ring, no frame is written to the child for that decision, the failure follows the existing owned error-sink path and the ring sequence is not advanced by the failed publication
+- **THEN** no `approval.request` respectively `approval.resolved` event enters the ring, no frame is written to the child for that decision, the ring sequence is not advanced by the failed publication; a failed pending insert or timeout settlement follows the existing owned error-sink path, while a failed owner answer rejects the caller with the original error and leaves the approval pending
 
 #### Scenario: Parallel approvals coexist
 - **WHEN** real fake-omp (`approval-parallel`) raises two approval selects in one turn and the owner answers the second (`deny`) before the first (`allow`), so the fake completes the turn normally

@@ -2,6 +2,7 @@
 
 > 只含本 issue（父 tasks 4.3）交付的部分。被裁掉的段落与 Scenario 保留父标题，由后续刀原位补回：
 > - 「chat_approvals 持久化」：以主 spec 为底，并入父 delta 的登记与 CAS 句、Scenario「落库形状」「同一消息多行审批」（逐字）；Scenario「级联删除」保持主 spec 措辞（父文的 regenerate 删旧助手行 → #465）。
+> - 与父 delta 的分歧（#597 review，归档时父块同步）：「审批事件」的 resolved 发布条件由「该会话存在可发布的 generation ring」收窄为「该审批登记时所属的 generation 的 ring 尚未封口」。
 > - 「审批事件」（父 ADDED，多刀分担）：去掉括注里对「停止与终态对挂起审批的结算」的引用（该 Requirement → #473/#474），去掉「web `stream.ts` 联合类型 SHALL 同步」（→ #476）；Scenario「两条并行审批分别作答」去掉快照子句（→ #476）。
 > - 「审批作答 REST」（父 ADDED）：只收结算部分。路由、body、媒体类型、鉴权与 parser 归属、200/no-store、错误码表句 → #468；「作答与超时、停止、崩溃……共用」一句裁为作答与超时（停止 → #473，崩溃/有界退回/关停/对账 → #474）；Scenario「作答与进程退出竞争」→ #474，「形态、鉴权与归属」→ #468，未收录；「允许」「拒绝」「已结算与重复作答」去掉 HTTP 状态与信封，改述为结算结果。
 > - 「超时自动允许」：「被停止或其它非作答路径结算的审批」取消计时器一句 → #473/#474。
@@ -32,7 +33,7 @@
 ## ADDED Requirements
 
 ### Requirement: 审批事件
-supervisor SHALL 在审批行持久化之后、经既有 generation ring 发布 `approval.request{messageId, approvalId, tool, title, expiresAt}`（消费一个 seq；omp 在 `tool_execution_start` 之后、工具执行之前下发审批 select，故该事件位于对应 `step.start` 之后、该步骤 `step.end` 之前）；每条审批结算后（该会话存在可发布的 generation ring 时）SHALL 发布恰一个 `approval.resolved{messageId, approvalId, decision}`，`decision ∈ {allow,deny,timeout}`。同一回合可有多条审批同时挂起（omp 并行执行多个工具时各自下发 select），其 `approval.request`/`approval.resolved` 可与其它步骤的 `step.*`、`text.delta` 事件交错；每条审批事件 SHALL 只作用于自身 `approvalId`，后到的 `approval.request` SHALL 不覆盖先前审批。两类事件 SHALL 进入 ring 回放、SSE 扇出与 `Last-Event-ID` 语义与其它事件一致。
+supervisor SHALL 在审批行持久化之后、经既有 generation ring 发布 `approval.request{messageId, approvalId, tool, title, expiresAt}`（消费一个 seq；omp 在 `tool_execution_start` 之后、工具执行之前下发审批 select，故该事件位于对应 `step.start` 之后、该步骤 `step.end` 之前）；每条审批结算后（该审批登记时所属的 generation 的 ring 尚未封口时）SHALL 发布恰一个 `approval.resolved{messageId, approvalId, decision}`，`decision ∈ {allow,deny,timeout}`。同一回合可有多条审批同时挂起（omp 并行执行多个工具时各自下发 select），其 `approval.request`/`approval.resolved` 可与其它步骤的 `step.*`、`text.delta` 事件交错；每条审批事件 SHALL 只作用于自身 `approvalId`，后到的 `approval.request` SHALL 不覆盖先前审批。两类事件 SHALL 进入 ring 回放、SSE 扇出与 `Last-Event-ID` 语义与其它事件一致。
 
 #### Scenario: 事件序与回放
 - **WHEN** fake-omp `approval` 脚本（`--approval-mode write`）的审批请求于注入时钟 T 到达后用户 allow，回合继续到 `agent_end`

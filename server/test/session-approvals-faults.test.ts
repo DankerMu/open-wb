@@ -283,6 +283,32 @@ describe("late settlements never reach a successor process", () => {
   );
 });
 
+describe("vanished approval rows", () => {
+  it(
+    "R21 expiry of a cascade-deleted approval row is a silent miss, not a fault",
+    REAL,
+    async () => {
+      const world = await open("approval");
+      const row = await pendingApproval(world);
+      // The rows a message-delete cascade removes. Deleting the running assistant row itself would
+      // also break the store's own terminal writes, which is unrelated to the approval timer.
+      world.fixture.db
+        .prepare("DELETE FROM chat_approvals WHERE message_id = ?")
+        .run(row.message_id);
+      expect(approvalRows(world.fixture.db)).toEqual([]);
+
+      world.clock.advance(TTL_MS);
+      await settle();
+
+      expect(world.errors).toEqual([]);
+      expectRunning(world, 0);
+      expectQuiet(world);
+      expect(world.timersDueAt(T + TTL_MS)).toBe(0);
+      await expect(world.fixture.app.close()).resolves.toBeUndefined();
+    },
+  );
+});
+
 describe("shutdown", () => {
   it("R18 shutdown revokes approval timers without settling them", REAL, async () => {
     const world = await openApprovalWorld("approval");

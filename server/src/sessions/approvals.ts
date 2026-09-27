@@ -131,24 +131,34 @@ export class ApprovalRegistry {
     this.#registrations.clear();
   }
 
-  /** Timer callback: synchronous and never throws; a failed transaction takes the fault sink. */
+  /**
+   * Timer callback: synchronous and never throws. A settled or vanished row (not_found: its
+   * message was deleted, cascading the approval) is a silent miss; a failed transaction drops the
+   * registration and takes the fault sink.
+   */
   #expire(approvalId: number, registration: Registration): void {
+    let settled: ApprovalView | null;
     try {
-      const settled = this.#store.settleApproval(
+      settled = this.#store.settleApproval(
         registration.sessionId,
         approvalId,
         "timeout",
         registration.expiresAt,
       );
-      if (settled === null) {
+    } catch (error) {
+      if (!(error instanceof HttpError && error.code === "not_found")) {
         this.#registrations.delete(approvalId);
-        registration.slot.runtime.clearPending(approvalId);
+        this.#fault(registration.slot, asError(error));
         return;
       }
-      void this.#finish(approvalId, registration, "timeout");
-    } catch (error) {
-      this.#fault(registration.slot, asError(error));
+      settled = null;
     }
+    if (settled === null) {
+      this.#registrations.delete(approvalId);
+      registration.slot.runtime.clearPending(approvalId);
+      return;
+    }
+    void this.#finish(approvalId, registration, "timeout");
   }
 
   /** After the committed settlement: answer, stop the timer, clear pending, then publish. */
