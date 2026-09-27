@@ -49,6 +49,8 @@ Evidence floor: 新建 `server/test/session-stop-intent.test.ts`（I1–I5）、
 7. **`#prompt` 在 `:264`（已关停）与 `:267`（并发重复 prompt）两处 throw 不清阶段标记**：前者关停后 stop 已被拒绝，残留标记惰性；后者的标记属于抢到 claim 的那次调用。经 REST 两者都不产生悬挂意图（`acceptPrompt` 对 running 会话抛 `session_busy`）。只经代码审查。
 8. **不写「prompt 在派发回执续体之前完成」用例**：不可达。回执在 prompt 写回调里兑现（`runtime.ts:297-298`，`process.ts:369-377`），owner 续体在该微任务链上运行；任何子进程帧都要等下一次 stdout I/O。可达的对应情形是「兑现的 `abort` 晚于回合正常完成」（I4，`done` 不被改写）与「兑现后崩溃」（I5，`failed` 不被改写）。
 
+9. **I3 在后一次 stop 之前加前置断言**（实现期补入，PR #605 评审记录）：断言意图已由派发回执本身兑现（`abortCount===1`、grace 已布）。不加这两条的话，master 上后一次 stop 会走 #473 的已派发路径，观测完全相同，I3 做不到先红。
+
 ## Open questions（上报编排者，本刀不处理）
 - prompt 写被背压（管道缓冲满）时，select 可能先于 owner 续体被转交（`runtime.ts:541` 以 `turn.sent` 为闸），兑现的 `abort` 会遇到未应答的 select，回合落到 #473 的有界退回，残留审批由 #474 结算。现有 fake 与真实管道都构造不出，不测。
 - carry-forward #603：`TurnStops.#run` 的 deny 循环后无复查。本刀不引入真实 await，前提不变；#465 若给 stop 加 claim 持有，仍须补 `entries.get(id) === entry` 守卫与用例。

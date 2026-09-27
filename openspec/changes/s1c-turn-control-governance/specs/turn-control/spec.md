@@ -40,6 +40,14 @@
 - **WHEN** 匿名请求、他人会话、不存在会话调用 stop
 - **THEN** 分别 401、404、404（后两者响应一致），无 supervisor 调用与数据变更
 
+#### Scenario: 获取失败丢弃停止意图
+- **WHEN** fake-omp 以 `no-ready-hang` 脚本运行，会话发出 prompt 后、握手超时之前调用 stop，随后握手超时、该进程经既有获取失败路径关停；另一会话以同一脚本发出 prompt 但不调用 stop，作为对照
+- **THEN** 两个 prompt 以同一既有错误结束（响应状态码、错误信封、受理对补偿后的消息与会话状态均与对照相同）；两个子进程收到的入站帧相同，且都不含 `abort`；两个会话都没有 `turn.end` 或 `error` 事件
+
+#### Scenario: 准入与前代退役等待期间停止
+- **WHEN** 会话的 prompt 已受理但尚未取得可派发的进程时调用 stop：该 prompt 仍在进程池准入中，或在等待该会话上一进程退役完成；或 stop 在该 prompt 的获取/握手期间登记了停止意图，随后该 prompt 因上一进程已退出而改在新进程上重新准入
+- **THEN** stop 正常返回，此刻不写任何帧；该 prompt 在其最终取得的进程上照常派发，派发回执兑现后该进程恰收到一帧 `abort`，回合以恰一个 `turn.end(stopped)` 收尾，不产生 `error`；已退役的上一进程没有收到 `abort`
+
 ### Requirement: 中断帧归约与有界退回
 归约器 SHALL 把 assistant `message_end{stopReason:"aborted"}` 记为"已中断"而非失败：其后终止 `agent_end`（`isTerminal` 缺省或 true）SHALL 恰发一次 `turn.end{messageId,status:"stopped"}`，不发 `error`；`stopReason:"error"` 的既有 `error` + `turn.end failed` 路径不变；同一回合先 error 后 aborted 或反之，SHALL 以首个被记住的原因为准。`turn.end.status` 联合 SHALL 为 `done|failed|stopped`。supervisor 在发出 `abort` 后 SHALL 启动有界等待：内部常量 `OMP_ABORT_GRACE_MS = 8000`（不做配置，注入时钟），期限内 `agent_end` 未到达 SHALL 退回既有 retire 路径关停该进程，并以新增纯函数 `applyStop(state)`（与 `applyFailure` 对称）合成恰一个 `turn.end{status:"stopped"}`；退回后到达的迟到帧或进程退出 SHALL 不再产生 `error`/`turn.end failed`，会话仍以 `stopped` 收尾。`agent_end` 在期限内到达 SHALL 取消该等待且不 retire 进程，进程可继续受理下一 prompt。
 
