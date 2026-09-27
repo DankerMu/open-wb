@@ -7,7 +7,7 @@
 Issue type: refactor
 Fixture level: expanded
 Upstream suggested level: expanded（agree，但理由不同：issue 给的理由不适用本刀。本刀无呈现改动，不需要视口矩阵；也不涉 7.1 的跨端解析。采用 expanded 的理由是：草稿镜像实测 biome `useExhaustiveDependencies` 强制改四个依赖数组，搬迁块因此不能逐字；这些非逐字胶水须有 allowed-edit 清单；搬迁的又是 generation/abort 所有权 fence，属共享状态面）
-Blast radius: 会话页全部发送路径。所有权 fence（mounted/abort/generation/client/requested session 五重门控）或 hook 次序若漂移，过期响应会改写 UI、丢草稿，或让 composer 永久锁定。
+Blast radius: 会话页全部发送路径。所有权 fence（mounted/abort/generation/client/requested session 五重门控）的条件如果漂移，过期响应会改写 UI、丢草稿，或让 composer 永久锁定。hook 调用位置对本刀没有行为影响，因为 `useTurnActions` 只含 `useCallback`；等 7.2+ 在 hook 内加入 state 或 effect 后，位置才会影响行为。
 Selected risk packs: Concurrency / shared state / ordering（fence 门控与 hook 调用次序）；Legacy compatibility / examples（`index.ts` 导出面与导入方不变）；Error handling / rollback / partial outputs（受理前失败退回草稿、受理后失败给刷新指引）
 Evidence floor: `web/test/**` 零 diff，web 套件 55 文件 / 1080 例全绿，全局覆盖率不降；design 的 D1/D2/D3 输出与期望完全一致；`bash scripts/size-guard.sh` 0 且 `page.tsx` ≤ 623；`make lint`、`make typecheck`、`make anti-drift`（knip 零新增）、`npm run build --workspace web` 0。
 

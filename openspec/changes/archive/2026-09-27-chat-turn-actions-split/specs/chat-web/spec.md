@@ -13,7 +13,7 @@
 - prompt 派发、受理前后的失败回退与草稿恢复；
 - 停止、重新生成、分叉与审批作答。
 
-这些 handler SHALL 以只由 `ChatPage` 调用的 hook 或辅助函数形式提供，`turn-actions.ts` SHALL 不渲染 UI。
+这些 handler SHALL 以只由 `ChatPage` 调用的 hook 或辅助函数形式提供，`turn-actions.ts` SHALL 不渲染 UI。fence 状态（ref、generation 计数器，以及 `releaseMutationIfOwned`、`abortMutation` 这类页面级 fence 函数）SHALL 仍由 `ChatPage` 持有，并注入给这些 handler。「会话页」要求中所说的页面持有所有权 fence，指的就是这些状态由组件持有。
 
 `page.tsx` 与 `turn-actions.ts` 之间的值导入 SHALL 只沿 `page.tsx → turn-actions.ts` 方向，`turn-actions.ts` SHALL 不导入 `./page.js`。`turn-actions.ts` 的导出 SHALL 只供 `page.tsx` 使用，不经 `index.ts` 对外暴露，也不新增未被引用的导出。
 
