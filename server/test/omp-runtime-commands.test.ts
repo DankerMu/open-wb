@@ -145,34 +145,49 @@ interface FakeWorld {
   tokens: TokenBook;
   exits: OmpExit[];
   inbound: OmpFrame[];
+  spawns: number;
 }
 
-/** FakeChild wired world: handshake and every `get_state` answered; prompt/abort/branch reads recorded, never answered. */
+/** FakeChild wired world: handshake and every `get_state` answered; prompt/abort/branch reads recorded, never answered. Each respawn gets a fresh child. */
 function openFake(): FakeWorld {
-  const clock = createClock();
-  const tokens = createTokens(TOKEN);
-  const exits: OmpExit[] = [];
   const inbound: OmpFrame[] = [];
-  const child = harness.fake();
-  child.emitLine(DEFAULT_READY);
-  child.replyHandshake();
-  for (const type of ["prompt", "abort", "get_branch_messages"]) {
-    child.onCommand(type, (frame) => {
-      inbound.push(frame);
-    });
-  }
-  const runtime = new SessionRuntime({
+  const bind = (child: FakeChild): FakeChild => {
+    child.emitLine(DEFAULT_READY);
+    child.replyHandshake();
+    for (const type of ["prompt", "abort", "get_branch_messages"]) {
+      child.onCommand(type, (frame) => {
+        inbound.push(frame);
+      });
+    }
+    return child;
+  };
+  const world: FakeWorld = {
+    runtime: undefined as unknown as SessionRuntime,
+    child: bind(harness.fake()),
+    clock: createClock(),
+    tokens: createTokens(TOKEN),
+    exits: [],
+    inbound,
+    spawns: 0,
+  };
+  world.runtime = new SessionRuntime({
     sessionId: SESSION_ID,
     ...harness.tempOpts(TOKEN, "omp-rt-commands-"),
-    tokens,
+    tokens: world.tokens,
     idleMs: IDLE_MS,
-    clock,
-    spawnImpl: child.spawnImpl,
+    clock: world.clock,
+    spawnImpl: (command, args, options) => {
+      world.spawns += 1;
+      if (world.spawns > 1) {
+        world.child = bind(harness.fake());
+      }
+      return world.child.spawnImpl(command, args, options);
+    },
     onExit: (exit) => {
-      exits.push(exit);
+      world.exits.push(exit);
     },
   });
-  return { runtime, child, clock, tokens, exits, inbound };
+  return world;
 }
 
 async function until(predicate: () => boolean, ms = 8_000): Promise<void> {
@@ -666,6 +681,41 @@ describe("SessionRuntime command()", () => {
 
     world.child.endStdout();
     await world.runtime.shutdown();
+  });
+});
+
+describe("SessionRuntime command() protocol failure", () => {
+  it("C9 a protocol error during an in-flight command retires the generation and frees the claim", async () => {
+    const world = openFake();
+    await world.runtime.command({ type: "get_state" });
+    const first = world.child;
+    first.onCommand("get_state", (frame) => {
+      world.inbound.push(frame);
+    });
+    let stdinEnded = false;
+    first.stdin.on("finish", () => {
+      stdinEnded = true;
+    });
+    const inFlight = world.runtime.command({ type: "get_state" });
+    const rejected = expect(inFlight).rejects.toBeInstanceOf(AgentUnavailableError);
+    await until(() => world.inbound.some((frame) => frame.type === "get_state"));
+
+    first.emitRaw("{not json\n");
+    await waitImmediate();
+    expect(stdinEnded).toBe(true);
+    first.exit(0);
+    await rejected;
+    first.endStdout();
+    expect(world.clock.nowMs).toBe(0);
+    expect(world.tokens.revoked).toEqual([world.tokens.issued[0]]);
+
+    await until(() => world.exits.length === 1);
+    const turn = world.runtime.prompt("after protocol error");
+    await until(() => world.inbound.some((frame) => frame.type === "prompt"));
+    expect(world.spawns).toBe(2);
+    expect(world.tokens.issued).toHaveLength(2);
+    world.child.emitLine(TERMINAL);
+    expect(await collectPrompt(turn)).toEqual([TERMINAL]);
   });
 });
 

@@ -205,6 +205,14 @@
   - 收尾：FakeChild 的 stdout 未结束，`#drainHeld` 会等 8000ms 预算（注入时钟），所以先 `child.endStdout()`，再 `await shutdown()`。
   - 数字依据：`#resetIdle` 以 `this.#idleMs` 装定时器（`runtime.ts:738-749`）；`createClock().advance` 触发所有 `due ≤ target` 的定时器（`support/omp-runtime.ts:62-92`）。
   - 变异 M8：删掉 command 入口处的 `#resetIdle()`，C8 变红。截止仍停在 10_000，第二次 `advance(9_999)` 时 stdin 已结束。
+- **C9 R command 在途时的协议错误（FakeChild 布线世界；PR #601 评审 P2 补入）**：
+  - 输入：`const c = command({type:"get_state"})` 的帧写出后，子进程经 `emitRaw("{not json\n")` 写出一个畸形行。此时没有活跃回合，`hadChunks` 为 false，`OmpProcess` 不会 reject 这条在途请求。
+  - 期望：全程不推进注入时钟。
+    - generation 立即进入退役（stdin 结束）。
+    - 子进程对 EOF 退出（`child.exit(0)`）后，`c` 以 `AgentUnavailableError` 拒绝。
+    - 下一次 `prompt()` 不抛 `SessionBusyError`，并经新 spawn 获取。
+  - 实现：`#onTransportError` 对协议错误的「回合外忽略」加上条件「且没有在途 command」，否则同样 `void this.#retire(gen)`。
+  - 变异 M9：去掉这个条件，C9 变红（`c` 一直挂起，直到空闲回收）。
 
 ### 守护（G）
 - **G1 G**：`commands.ts` 中凡引用 `./runtime.js` 的语句都是 `import type`（按语句提取，正则同 `omp-runtime-exit-pending.test.ts:686-687`）；`runtime.ts` 中 `this.#acquire(` 恰出现一次。

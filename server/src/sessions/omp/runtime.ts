@@ -575,7 +575,7 @@ export class SessionRuntime {
     }
     const turn = this.#turn;
     const active = turn !== undefined && turn.genId === gen.id;
-    if (error instanceof OmpProtocolError && !active) {
+    if (error instanceof OmpProtocolError && !active && !this.#commanding) {
       return;
     }
     if (active && turn !== undefined) {

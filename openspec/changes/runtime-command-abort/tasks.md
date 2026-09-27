@@ -28,7 +28,7 @@
 - [ ] 搬迁先于功能（可分两个 commit）：第 1 步后 `runtime.ts` ≤705，第 2 步后目标 ≤770、硬上限 785；超过 785 先停下上报（design「行数」）。`commands.ts` 对 `./runtime.js` 只有 `import type`；`runtime.ts`/`commands.ts` 不出现 `extension_ui_response`，对 `./ui-requests.js` 只有语句级 `import type`。
 - [ ] 新测试只写进一个新建文件 `server/test/omp-runtime-commands.test.ts`（≤800 行），只经公开 API；argv 记录、stdin tap、`--compact-silent` 追加都在该文件内包装 `createRealFakeRuntime(...).runtime.spawnImpl` 完成；FakeChild 世界照 `omp-dispatch.test.ts:245-282`（A2）与 `omp-runtime-io.test.ts:319-363`（A7、C8）。
 - [ ] 既有测试允许的改动：**无**（design「Sibling surfaces」已逐一核对）。
-- [ ] 红/绿：A1–A7、C1–C8 在未改源码时失败，失败原因是 `abort`/`command` 不存在，记录失败输出。S1、G1 为守护，恒绿。变异 M1–M8 逐一临时施加，确认对应用例变红，结果记入 PR body。
+- [ ] 红/绿：A1–A7、C1–C8 在未改源码时失败（C9 为评审补入，在首版实现上先红），失败原因是 `abort`/`command` 不存在，记录失败输出。S1、G1 为守护，恒绿。变异 M1–M9 逐一临时施加，确认对应用例变红，结果记入 PR body。
 - [ ] 实测 `wc -l server/src/sessions/omp/{runtime,commands}.ts server/test/omp-runtime-commands.test.ts`（第 1 步后与第 2 步后各一次），记入 PR body。
 - [ ] `npm test --workspace server`（覆盖率 ≥80%，Node 24 按 `.tool-versions`）、`make lint`、`make typecheck`、`make anti-drift`（knip 零新增、jscpd 不升高）、`bash scripts/size-guard.sh`，全部退出 0；`openspec validate runtime-command-abort --strict --no-interactive` 通过。
 - [ ] PR body 标注「Critical Path：请求白盒审查」，列出 proposal「偏离与决定」各条与 Open questions。
