@@ -4,7 +4,7 @@
 import { DEFAULT_OMP_MAX_PROCESSES } from "../agent-config.js";
 import { HttpError } from "../core/errors/index.js";
 import { ApprovalRegistry } from "./approvals.js";
-import { applyFailure, applyFrame, type ChatEvent, createEventState } from "./events.js";
+import { applyFailure, applyFrame, applyStop, type ChatEvent, createEventState } from "./events.js";
 import type { OmpFrame } from "./omp/frame.js";
 import { AgentUnavailableError, OmpProtocolError, type SpawnImpl } from "./omp/process.js";
 import {
@@ -26,7 +26,7 @@ import {
 import type { ApprovalView, SessionStore } from "./store.js";
 import { type RetainedEvent, RingBuffer, type RingRead } from "./stream/ring-buffer.js";
 import type { TokenRegistry } from "./tokens.js";
-import { drain, persistEvent } from "./turn-control.js";
+import { drain, persistEvent, TurnStops } from "./turn-control.js";
 
 export { releasePumpExit } from "./pool.js";
 
@@ -105,6 +105,7 @@ export class SessionSupervisor {
   readonly #faults: Error[] = [];
   readonly #pool: ProcessPool;
   readonly #approvals: ApprovalRegistry;
+  readonly #stops: TurnStops;
   #closed = false;
 
   constructor(options: SessionSupervisorOptions) {
@@ -127,6 +128,12 @@ export class SessionSupervisor {
         slot.infraFaulted = true;
         void this.#retireSlot(slot);
       },
+    });
+    this.#stops = new TurnStops({
+      clock,
+      pending: (slot) => this.#approvals.pendingFor(slot),
+      deny: (sessionId, approvalId) => this.#approvals.decide(sessionId, approvalId, "deny"),
+      retire: (slot) => this.#retireSlot(slot),
     });
   }
 
@@ -195,6 +202,18 @@ export class SessionSupervisor {
       return Promise.reject(new HttpError("agent_unavailable"));
     }
     return this.#approvals.decide(sessionId, approvalId, decision);
+  }
+
+  /** Stops the dispatched turn (#473): resolves once `abort` is written, not at agent_end. */
+  stop(sessionId: string): Promise<void> {
+    if (this.#closed) {
+      return Promise.reject(new HttpError("agent_unavailable"));
+    }
+    const slot = this.#slots.get(sessionId);
+    const turn = slot?.claimedAssistantId;
+    return slot === undefined || turn === undefined
+      ? Promise.resolve()
+      : this.#stops.stop(slot, turn);
   }
 
   async shutdown(): Promise<void> {
@@ -385,6 +404,7 @@ export class SessionSupervisor {
     void pump.finally(() => {
       this.#pumps.delete(pump);
       this.#releasePump(slot, pumpGeneration);
+      this.#stops.release(assistantMessageId);
       releasePumpExit(this.#claims, slot, pump, assistantMessageId);
       this.#pool.touch(slot.entry);
       if (!this.#pool.holds(slot.entry) && turnFree(slot)) {
@@ -465,7 +485,7 @@ export class SessionSupervisor {
       }
     } catch (error) {
       if (!slot.infraFaulted && !mapper.ended) {
-        const applied = applyFailure(mapper, asError(error).message);
+        const applied = this.#failure(mapper, assistantMessageId, error);
         await this.#commit(
           slot,
           assistantMessageId,
@@ -479,6 +499,13 @@ export class SessionSupervisor {
         await this.#retireSlot(slot);
       }
     }
+  }
+
+  /** Pump catch outcome: a stop past its grace ends `stopped` without error (#473). */
+  #failure(mapper: ReturnType<typeof createEventState>, turn: number, error: unknown) {
+    return this.#stops.expired(turn)
+      ? applyStop(mapper)
+      : applyFailure(mapper, asError(error).message);
   }
 
   async #commit(

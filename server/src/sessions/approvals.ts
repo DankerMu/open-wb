@@ -106,6 +106,17 @@ export class ApprovalRegistry {
     return Promise.resolve(true);
   }
 
+  /** Read-only snapshot for stop (#473): this slot's registered approvalIds, ascending. */
+  pendingFor(slot: Slot): number[] {
+    const ids: number[] = [];
+    for (const [approvalId, registration] of this.#registrations) {
+      if (registration.slot === slot) {
+        ids.push(approvalId);
+      }
+    }
+    return ids.sort((a, b) => a - b);
+  }
+
   /** CAS, audit, frame, timer and pending bookkeeping all complete before the first await. */
   async decide(
     sessionId: string,
