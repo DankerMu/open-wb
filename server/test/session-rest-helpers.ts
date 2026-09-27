@@ -98,6 +98,9 @@ function createSupervisor(): RecordingSupervisor {
       calls.push({ sessionId, text });
       await handler(sessionId, text);
     },
+    decide() {
+      return Promise.reject(new Error("unexpected decide call"));
+    },
   };
   return supervisor;
 }
