@@ -106,6 +106,12 @@ Runtime config/DB/app/listen/models.yml/success-record任一步失败 SHALL不�
 - **WHEN** unauthenticated requests hit those protected production workspace routes with invalid bodies
 - **THEN** the existing guard returns401 before parser or handler work
 
+#### Scenario: 回合控制 parser owner 的真实 HTTP 边界
+- **WHEN** the production POST /api/sessions/:id/approvals/:approvalId route mounted by createApp receives genuine malformed/empty/unsupported/oversized content-parser errors with a real owner cookie
+- **THEN** exact400 bad_request with the route's no-store is returned before any supervisor call, omp frame or database write
+- **WHEN** malformed, empty or unsupported-media inputs arrive unauthenticated on that route, or with a foreign/unknown session id
+- **THEN** 401 respectively the identical 404 is returned before parser or handler work
+
 ### Requirement: core/db 迁移基座
 `core/db` SHALL 暴露 `openDb(path)`：打开 SQLite（WAL）、按文件序执行 `migrations/*.sql`、以迁移版本表保证幂等。
 

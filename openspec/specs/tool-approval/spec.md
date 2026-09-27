@@ -2,7 +2,9 @@
 
 ## Purpose
 定义 exec 档工具调用的用户审批链路：审批请求识别、`chat_approvals` 持久化、`approval.request`/`approval.resolved` 事件、作答 REST、60s 超时自动允许、与停止的次序、非作答路径的终态结算、审计留痕、快照恢复与 web 审批条。同一回合可同时存在多条挂起审批，每条按 `approvalId` 独立作答、计时与结算。
+
 ## Requirements
+
 ### Requirement: chat_approvals 持久化
 迁移 `034_chat_turn_control.sql` SHALL 新建 `chat_approvals(id INTEGER PRIMARY KEY AUTOINCREMENT, message_id INTEGER NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE, request_id TEXT NOT NULL, tool TEXT NOT NULL, title TEXT NOT NULL, requested_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, decision TEXT NULL CHECK (decision IN ('allow','deny','timeout')), decided_at INTEGER NULL, UNIQUE(message_id, request_id))`。supervisor 收到审批请求 SHALL 先插入一行（`decision` NULL、`requested_at`=注入时钟 now、`expires_at = requested_at + 60000`），再发布事件；同一消息上已存在的审批行（无论 pending 或已结算）SHALL 不被新请求改写或覆盖，一条 assistant 消息可有多行审批。结算 SHALL 以 compare-and-set（`UPDATE … WHERE id=? AND decision IS NULL`）把 `decision`/`decided_at` 一次性写入，此后不可再改；CAS 未命中者即为"已结算"。同一 `(message_id, request_id)` 重复请求 SHALL 被 UNIQUE 拒绝而不产生第二行。删除消息（regenerate 删旧助手行、删会话）SHALL 级联删除其审批行。
 
@@ -49,19 +51,29 @@ supervisor SHALL 在审批行持久化之后、经既有 generation ring 发布 
 - **THEN** 两个 `approval.request` 的 `approvalId` 不同且都保留；fake-omp 先收到 `extension_ui_response{id:"r2",value:"Deny"}`、后收到 `{id:"r1",value:"Approve"}`，每个 id 恰一帧；发布两个 `approval.resolved`，分别携带各自 `approvalId` 与 `deny`/`allow`；`r2` 对应步骤 `failed`、`r1` 对应步骤 `done`
 
 ### Requirement: 审批作答 REST
-`approvalId` 不属于该会话的消息 SHALL 一律 404 `not_found`，无写入。结算 SHALL 以 `decision IS NULL` 为条件的 CAS 执行，作答与超时共用这同一 CAS：`decision` 已非 NULL（已 allow/deny/timeout，同一审批第二次作答，或该消息所属进程已退出/回合已终态而被非作答路径结算为 `deny`）SHALL 以 `approval_settled`（409）拒绝，无写入、不向 omp 发帧；并发作答时 CAS 的后到者 SHALL 以 `approval_settled` 拒绝。CAS 命中时 SHALL 依序：在同一 SQLite 事务内写入 `decision`/`decided_at=now` 与审计行 → 向 omp 发 `{type:"extension_ui_response", id:<request_id>, value: decision==="allow" ? "Approve" : "Deny"}` → 取消该 `approvalId` 的超时计时器 → 发布 `approval.resolved` → 返回已结算的审批对象 `{id, tool, title, requestedAt, expiresAt, decision}`。`deny` 后 omp 对该工具产出 `tool_execution_end{isError:true}` 时，仅该步骤 `failed`，回合按既有规则可以 `done` 收尾。
+`POST /api/sessions/:id/approvals/:approvalId` SHALL 只接受 `application/json` 且 body 恰为 `{decision:"allow"|"deny"}`，其 content-parser 错误由归属集映射为 400 `bad_request`；其它形态（缺键/多键/其它值）400。受 cookie guard 与 owner 校验：未认证 401；会话不存在/属他人、或 `approvalId` 不属于该会话的消息 SHALL 一律 404 `not_found`；未认证 401、会话 404 与非 canonical 正十进制整数 `approvalId` 的 404 SHALL 在 body 解析前返回，`approvalId` 不属于该会话的 404 SHALL 先于任何写入与发帧；均无写入。结算 SHALL 以 `decision IS NULL` 为条件的 CAS 执行，作答与超时共用这同一 CAS：`decision` 已非 NULL（已 allow/deny/timeout，同一审批第二次作答，或该消息所属进程已退出/回合已终态而被非作答路径结算为 `deny`）SHALL 409 `approval_settled`，无写入、不向 omp 发帧；并发作答时 CAS 的后到者 SHALL 409。CAS 命中时 SHALL 依序：在同一 SQLite 事务内写入 `decision`/`decided_at=now` 与审计行 → 向 omp 发 `{type:"extension_ui_response", id:<request_id>, value: decision==="allow" ? "Approve" : "Deny"}` → 取消该 `approvalId` 的超时计时器 → 发布 `approval.resolved` → 200，body 恰为已结算的审批对象 `{id, tool, title, requestedAt, expiresAt, decision}`（与快照 `approvals` 数组元素同形）。`deny` 后 omp 对该工具产出 `tool_execution_end{isError:true}` 时，仅该步骤 `failed`，回合按既有规则可以 `done` 收尾。session supervisor 关停开始后到达结算端口的作答 SHALL 以 `agent_unavailable`（502）拒绝，无写入、不向 omp 发帧。`core/errors` SHALL 新增 `approval_settled`(409, `该审批已处理`)，响应 no-store。
 
 #### Scenario: 允许
 - **WHEN** pending 审批收到 `{decision:"allow"}`
-- **THEN** 结算结果为 `{id,tool:"bash",title,requestedAt,expiresAt,decision:"allow"}`；fake-omp 收到 `extension_ui_response{id:"r1",value:"Approve"}`；发布 `approval.resolved{decision:"allow"}`；随后 bash 步骤 `done`，回合 `done`
+- **THEN** 200 `{id,tool:"bash",title,requestedAt,expiresAt,decision:"allow"}`；fake-omp 收到 `extension_ui_response{id:"r1",value:"Approve"}`；发布 `approval.resolved{decision:"allow"}`；随后 bash 步骤 `done`，回合 `done`
 
 #### Scenario: 拒绝
 - **WHEN** pending 审批收到 `{decision:"deny"}`
-- **THEN** 结算结果 `decision:"deny"`；fake-omp 收到 `value:"Deny"` 并发 `tool_execution_end{isError:true}`；该步骤 `failed`、assistant 与会话最终 `done`（非 `failed`）
+- **THEN** 200 `decision:"deny"`；fake-omp 收到 `value:"Deny"` 并发 `tool_execution_end{isError:true}`；该步骤 `failed`、assistant 与会话最终 `done`（非 `failed`）
 
 #### Scenario: 已结算与重复作答
 - **WHEN** 对已 allow、已 deny、已 timeout 的审批再次作答，或对同一 pending 审批并发两次作答
-- **THEN** 后到者以 `approval_settled`（409，`该审批已处理`）拒绝；`chat_approvals` 该行 `decision` 与首次一致；omp 只收到一帧应答
+- **THEN** 后到者 409 `{error:{code:"approval_settled",message:"该审批已处理"}}`；`chat_approvals` 该行 `decision` 与首次一致；omp 只收到一帧应答
+
+#### Scenario: 形态、鉴权与归属
+- **WHEN** body 为 `{decision:"maybe"}`、`{}`、`{decision:"allow",x:1}` 或非 JSON
+- **THEN** 400 `bad_request`，无写入
+- **WHEN** 匿名、他人会话、不存在的 approvalId、或 approvalId 属于另一会话
+- **THEN** 401 或一致的 404，无写入、无入站帧
+
+#### Scenario: 关停后作答
+- **WHEN** 审批挂起时 session supervisor 已开始关停，随后 owner 对该审批作答 allow
+- **THEN** 502 `{error:{code:"agent_unavailable",message:"Agent 运行时不可用"}}` 且 no-store；该请求不改变该行 `decision`/`decided_at`，不新增审计行，不写出 `extension_ui_response`
 
 ### Requirement: 超时自动允许
 每条 pending 审批 SHALL 由 supervisor 以注入时钟、按 `approvalId` 各自启动独立的 60000ms 计时器（自该审批 `requested_at` 起）；到期时该审批若仍 pending SHALL 经同一 CAS 结算为 `decision="timeout"`、`decided_at=expires_at`（与审计同一事务），向 omp 发该审批 `request_id` 的 `value:"Approve"`，发布 `approval.resolved{decision:"timeout"}`。59999ms 时 SHALL 无任何结算。某条审批到期 SHALL 不影响同回合其它审批的计时器与状态。已由用户作答的审批 SHALL 取消其计时器，到期不再动作。每条审批登记时 supervisor SHALL 调用 runtime `markPending(approvalId)`、结算时调用 `clearPending(approvalId)`；只要该进程仍有任一 pending 审批，runtime 空闲计时器 SHALL 暂停，最后一条 pending 审批结算后 SHALL 从该结算时刻起以完整空闲期限重置；挂起审批的进程在 omp-pool 中视为"在回合中"，不可被驱逐。
@@ -88,4 +100,3 @@ supervisor SHALL 在审批行持久化之后、经既有 generation ring 发布 
 #### Scenario: 三种决定各一条
 - **WHEN** 三条审批分别以 allow、deny、timeout 结算
 - **THEN** `GET /api/audit?limit=3` 的 `events[*].kind` 均为 `session.approval`，`detail.decision` 分别为 `allow`/`deny`/`timeout`，`detail.tool`/`sessionId`/`messageId` 与请求一致；审批 pending 期间 audit 行数不变
-
