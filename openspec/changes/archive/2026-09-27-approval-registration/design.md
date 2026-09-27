@@ -145,3 +145,5 @@ stdout 闸门的可行性：`spawnTracked`（`support/omp-rpc.ts:54-63`）不在
 3. 身份：发帧、`clearPending` 与发布一律取登记时捕获的 slot/generation，绝不按 `sessionId` 重新查找。
 4. `onApproval` 与计时器回调在任何输入下同步、不抛；`onExit` 未被触碰。
 5. 行数：`supervisor.ts` ≤755，实测 `wc -l` 记入 PR body；`approvals.ts` 不值导入 `./supervisor.js`，不经 `index.ts` 导出，knip 零新增。
+
+> 归档补记（#597 review）：修复轮新增 R21——审批行被级联删除后到期：`#expire` 把 `not_found` 当作 CAS 未命中（删登记 + `clearPending`，不上报故障）；变异「`not_found` 走 fault」→ R21 红（修复前 `world.errors` 含 `HttpError not_found`）。fault 分支先删登记再上报（无测试钉住，仅内存）。
