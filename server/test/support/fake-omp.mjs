@@ -55,6 +55,14 @@ const BRANCH_MESSAGES = Object.freeze([
 ]);
 /** omp v18.0.10 agent-session.ts:8628-8629 的未知 entry 错误文本。 */
 const UNKNOWN_ENTRY = "Invalid entry ID for branching";
+/**
+ * `slash` 场景（#552）只识别这两个精确 message（`===`，不 trim）：omp v18.0.10 内建命令的本地完成
+ * （rpc-mode.ts:1019-1054）。`/todo` 无参输出同 slash-commands/helpers/todo.ts:246-260；`/compact`
+ * 经 runCommandInBackground（builtin-lifecycle.ts:140-190），回执先于输出。
+ */
+const TODO_OUTPUT = "No todos. Use /todo append <task> to start one.";
+const COMPACT_OUTPUT = "Compaction complete.";
+const COMPACT_DELAY_MS = 50;
 /** 取值型 argv → parseArgs 结果字段。 */
 const VALUE_ARGS = new Map([
   ["--scenario", "scenario"],
@@ -64,8 +72,24 @@ const VALUE_ARGS = new Map([
   ["--ready-delay-ms", "delay"],
   ["--thinking-repeat", "repeat"],
 ]);
+/** 布尔 argv → parseArgs 结果字段（缺省 false）。 */
+const FLAG_ARGS = new Map([
+  ["--hold-after-thinking", "hold"],
+  ["--compact-silent", "silent"],
+]);
 
-const { scenario, resume, sessionDir, approvalMode, delay, repeat, hold } = parseArgs();
+const { scenario, resume, sessionDir, approvalMode, delay, repeat, hold, silent, entries } =
+  parseArgs();
+/**
+ * `branch` 实际列表（#552）：固定两条之后按 argv 序追加每个 `--branch-entry` 值（原样）。顶层算一次并
+ * 冻结；无旋钮时即 BRANCH_MESSAGES，逐字不变。非 branch 场景不读它。
+ */
+const branchMessages = Object.freeze([
+  ...BRANCH_MESSAGES,
+  ...entries.map((text, index) =>
+    Object.freeze({ entryId: `fake-entry-${BRANCH_MESSAGES.length + 1 + index}`, text }),
+  ),
+]);
 /**
  * `--ready-delay-ms <n>`（#461）：与 `--scenario` 的位置无关，取最后一次出现的值；只有 slow-ready 解析它
  * （缺省 500，非法值在求值时抛错、退出 1 且零帧），其它 scenario 忽略。延迟期间关闭 stdin 零帧退出 0。
@@ -85,6 +109,8 @@ let abortTurn = "idle";
 const pendingSelects = new Map();
 let approvedAny = false;
 let deferredAbort;
+/** slash：未出队的 `/compact` 输出，按定时器句柄登记；abort 清空它即取消（输出出队时才判定）。 */
+const pendingOutputs = new Set();
 /** 当前会话文件：初值同既有 resume/缺省；只有 branch 场景的成功 branch 会切换它。 */
 let currentSession = resume ?? DEFAULT_SESSION;
 /** 入站帧 type 记录（probe `frames=`）：按 stdin 行序、在串行 queue 内追加，按进程累积。 */
@@ -132,15 +158,23 @@ if (scenario === "no-ready-hang") {
   process.stderr.write("no-ready-hang:handlers-ready\n");
 }
 
-/** 单遍扫描：取值型参数一律吃掉紧随其后的 token（`argv[++i]`），无论它长什么样。 */
+/**
+ * 单遍扫描：取值型参数一律吃掉紧随其后的 token（`argv[++i]`），无论它长什么样。
+ * `--branch-entry` 同样吃掉下一 token 但按序累积（可重复）；位于末尾缺值时不追加。
+ */
 function parseArgs(argv = process.argv.slice(2)) {
-  const parsed = { scenario: "normal", hold: false };
+  const parsed = { scenario: "normal", hold: false, silent: false, entries: [] };
   for (let i = 0; i < argv.length; i++) {
     const key = VALUE_ARGS.get(argv[i]);
     if (key !== undefined) {
       parsed[key] = argv[++i] ?? missingValue(parsed, key);
-    } else if (argv[i] === "--hold-after-thinking") {
-      parsed.hold = true;
+    } else if (argv[i] === "--branch-entry") {
+      const text = argv[++i];
+      if (text !== undefined) {
+        parsed.entries.push(text);
+      }
+    } else if (FLAG_ARGS.has(argv[i])) {
+      parsed[FLAG_ARGS.get(argv[i])] = true;
     }
   }
   return parsed;
@@ -207,6 +241,7 @@ async function dispatch(frame) {
     get_state: handleState,
     prompt: handlePrompt,
     ...(abortable ? { abort: handleAbort } : {}),
+    ...(scenario === "slash" ? { abort: handleSlashAbort } : {}),
     ...(scenario === "branch"
       ? { get_branch_messages: handleBranchMessages, branch: handleBranch }
       : {}),
@@ -295,7 +330,7 @@ async function handleBranchMessages(frame) {
     type: "response",
     command: "get_branch_messages",
     success: true,
-    data: { messages: BRANCH_MESSAGES },
+    data: { messages: branchMessages },
   });
 }
 
@@ -305,7 +340,7 @@ async function handleBranchMessages(frame) {
  * 回显 id 的错误帧（rpc-mode.ts:401,754-755）。写异常转错误帧，避免 reject 卡死串行 queue。
  */
 async function handleBranch(frame) {
-  const entry = BRANCH_MESSAGES.find((message) => message.entryId === frame.entryId);
+  const entry = branchMessages.find((message) => message.entryId === frame.entryId);
   if (entry === undefined) {
     await emitBranchError(frame.id, UNKNOWN_ENTRY);
     return;
@@ -355,14 +390,21 @@ async function emitChunked(frame) {
   }
 }
 
+/** prompt 回执；agentInvoked:false 即内建命令本地完成（rpc-mode.ts:1019-1054）。 */
+async function promptAck(id, agentInvoked) {
+  await emit({ id, type: "response", command: "prompt", success: true, data: { agentInvoked } });
+}
+
+function isSlashCommand(message) {
+  return scenario === "slash" && (message === "/todo" || message === "/compact");
+}
+
 async function handlePrompt(frame) {
-  await emit({
-    id: frame.id,
-    type: "response",
-    command: "prompt",
-    success: true,
-    data: { agentInvoked: true },
-  });
+  if (isSlashCommand(frame.message)) {
+    await slashTurn(frame);
+    return;
+  }
+  await promptAck(frame.id, true);
   const turns = {
     crash: () => process.exit(2),
     "crash-after-deltas": () => crashAfterDeltas(),
@@ -550,6 +592,37 @@ async function emitAbortedEnd(id) {
   await emit({ type: "agent_end", messages: [], isTerminal: true });
   await emit({ id, type: "response", command: "abort", success: true });
   abortTurn = "done";
+}
+
+/**
+ * slash 内建命令，无 agent_start/agent_end。`/compact` 回执之后才登记定时器；到期回调不移出登记，
+ * 只把输出追加到串行 queue（不与进行中的回合帧交错），出队时仍登记才发——在它之前处理的 abort 都能取消它。
+ */
+async function slashTurn(frame) {
+  if (frame.message === "/todo") {
+    await emit({ type: "command_output", text: TODO_OUTPUT });
+    await promptAck(frame.id, false);
+    return;
+  }
+  await promptAck(frame.id, false);
+  if (silent) {
+    return;
+  }
+  const timer = setTimeout(() => {
+    queue = queue.then(() =>
+      pendingOutputs.delete(timer) ? emit({ type: "command_output", text: COMPACT_OUTPUT }) : null,
+    );
+  }, COMPACT_DELAY_MS);
+  pendingOutputs.add(timer);
+}
+
+/** slash：abort 任何时刻都回执（无 data，rpc-mode.ts:1086-1088），并取消全部未发出的 `/compact` 输出。 */
+async function handleSlashAbort(frame) {
+  for (const timer of pendingOutputs) {
+    clearTimeout(timer);
+  }
+  pendingOutputs.clear();
+  await emit({ id: frame.id, type: "response", command: "abort", success: true });
 }
 
 async function crashAfterDeltas() {
