@@ -5,10 +5,19 @@
  * Local oracle: resource/oh-my-pi/docs/rpc.md (docs/architecture/rpc.md tracked by #141).
  */
 import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { loadBaseUrl, parseToolCall, postChat } from "./fake-omp-proxy.mjs";
+import {
+  ANSWER_DELTAS,
+  editWriteSteps,
+  parseThinkingRepeat,
+  stepEnd,
+  thinkingContent,
+  thinkingFrames,
+  toolUseEnd,
+} from "./fake-omp-thinking.mjs";
 
 const MAX_FRAME = 1_048_576;
 const MAX_REASSEMBLED = 67_108_864;
@@ -46,15 +55,28 @@ const BRANCH_MESSAGES = Object.freeze([
 ]);
 /** omp v18.0.10 agent-session.ts:8628-8629 的未知 entry 错误文本。 */
 const UNKNOWN_ENTRY = "Invalid entry ID for branching";
+/** 取值型 argv → parseArgs 结果字段。 */
+const VALUE_ARGS = new Map([
+  ["--scenario", "scenario"],
+  ["--resume", "resume"],
+  ["--session-dir", "sessionDir"],
+  ["--approval-mode", "approvalMode"],
+  ["--ready-delay-ms", "delay"],
+  ["--thinking-repeat", "repeat"],
+]);
 
-const { scenario, resume, sessionDir, approvalMode, delay } = parseArgs(process.argv.slice(2));
+const { scenario, resume, sessionDir, approvalMode, delay, repeat, hold } = parseArgs();
 /**
  * `--ready-delay-ms <n>`（#461）：与 `--scenario` 的位置无关，取最后一次出现的值；只有 slow-ready 解析它
  * （缺省 500，非法值在求值时抛错、退出 1 且零帧），其它 scenario 忽略。延迟期间关闭 stdin 零帧退出 0。
  */
 const readyDelayMs = scenario === "slow-ready" ? parseReadyDelay(delay) : 0;
+/** #518：`--thinking-repeat <n>`（非法值同上零帧退出）与 `--hold-after-thinking` 只作用于 thinking。 */
+const thinkingRepeat = scenario === "thinking" ? parseThinkingRepeat(repeat) : 1;
+const holdThinking = scenario === "thinking" && hold;
 const gated = APPROVAL_SCENARIOS.has(scenario) && approvalMode === "write";
-const abortable = ABORT_SCENARIOS.has(scenario) || (gated && scenario !== "approval");
+const abortable =
+  ABORT_SCENARIOS.has(scenario) || (gated && scenario !== "approval") || holdThinking;
 let protocol = 1;
 let pendingUi = false;
 /** abort-* 回合三态：idle（首个 prompt 挂起回合）→ pending（等 abort）→ done（其后 prompt 走缺省路径）；门控回合另有 selecting。 */
@@ -110,26 +132,26 @@ if (scenario === "no-ready-hang") {
   process.stderr.write("no-ready-hang:handlers-ready\n");
 }
 
-function parseArgs(argv) {
-  let selected = "normal";
-  let sessionFile;
-  let dir;
-  let mode;
-  let delay;
+/** 单遍扫描：取值型参数一律吃掉紧随其后的 token（`argv[++i]`），无论它长什么样。 */
+function parseArgs(argv = process.argv.slice(2)) {
+  const parsed = { scenario: "normal", hold: false };
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--scenario") {
-      selected = argv[++i] ?? selected;
-    } else if (argv[i] === "--resume") {
-      sessionFile = argv[++i];
-    } else if (argv[i] === "--session-dir") {
-      dir = argv[++i];
-    } else if (argv[i] === "--approval-mode") {
-      mode = argv[++i];
-    } else if (argv[i] === "--ready-delay-ms") {
-      delay = argv[++i] ?? "";
+    const key = VALUE_ARGS.get(argv[i]);
+    if (key !== undefined) {
+      parsed[key] = argv[++i] ?? missingValue(parsed, key);
+    } else if (argv[i] === "--hold-after-thinking") {
+      parsed.hold = true;
     }
   }
-  return { scenario: selected, resume: sessionFile, sessionDir: dir, approvalMode: mode, delay };
+  return parsed;
+}
+
+/** 缺值：--scenario 保留原值；--ready-delay-ms/--thinking-repeat 记 ""（按非法处理）；其余 undefined。 */
+function missingValue(parsed, key) {
+  if (key === "scenario") {
+    return parsed.scenario;
+  }
+  return key === "delay" || key === "repeat" ? "" : undefined;
 }
 
 function parseReadyDelay(raw) {
@@ -348,6 +370,8 @@ async function handlePrompt(frame) {
     "extension-ui": () => requestConfirm(),
     "call-proxy": () => runProxy(frame.message),
     "hang-prompt": () => {},
+    thinking: () => thinkingTurn(),
+    "edit-write": () => editWriteTurn(),
   };
   if (gated && abortTurn === "idle") {
     await openSelects(scenario === "approval-parallel" ? [CALL_1, CALL_2] : [CALL_1]);
@@ -543,13 +567,55 @@ async function completeTurn(deltas, tools) {
   await finishTurn();
 }
 
-async function emitDeltas(deltas) {
+/** `index` 缺省时事件无 contentIndex 键（JSON 省略 undefined），既有场景逐字节不变。 */
+async function emitDeltas(deltas, index) {
   for (const delta of deltas) {
     await emit({
       type: "message_update",
-      assistantMessageEvent: { type: "text_delta", delta },
+      assistantMessageEvent: { type: "text_delta", contentIndex: index, delta },
       message: { role: "assistant", content: [] },
     });
+  }
+}
+
+async function emitThinking(times) {
+  for (const frame of thinkingFrames(times)) {
+    await emit(frame);
+  }
+}
+
+/** hold 下 thinking_end 后挂起（每个回合都挂起）；串行 queue 保证早到的 abort 在置 pending 之后才被处理。 */
+async function thinkingTurn() {
+  await emit({ type: "agent_start" });
+  await emitThinking(thinkingRepeat);
+  if (holdThinking) {
+    abortTurn = "pending";
+    return;
+  }
+  await emitDeltas(DELTAS, 1);
+  await finishTurn(thinkingContent(thinkingRepeat, DELTAS.join("")));
+}
+
+/** 两个旋钮不作用于此：恒 repeat=1、不挂起。每个 end 帧之前真实写出它报告的文件。 */
+async function editWriteTurn() {
+  await emit({ type: "agent_start" });
+  await emitThinking(1);
+  const steps = editWriteSteps(process.cwd());
+  await emit(toolUseEnd(steps));
+  for (const step of steps) {
+    await emit(toolStart(step.call));
+    await emit(stepEnd(step, writeStepFile(step)));
+  }
+  await emitDeltas(ANSWER_DELTAS);
+  await finishTurn();
+}
+
+function writeStepFile(step) {
+  try {
+    mkdirSync(dirname(step.file), { recursive: true });
+    writeFileSync(step.file, step.content, "utf8");
+  } catch (error) {
+    return String(error?.code ?? error);
   }
 }
 
@@ -585,10 +651,11 @@ function toolEnd(call, approved = true) {
   };
 }
 
-async function finishTurn() {
+/** content 缺省为 []，既有回合逐字节不变；thinking 回合传入 [thinking 块, 文本块]。 */
+async function finishTurn(content = []) {
   await emit({
     type: "message_end",
-    message: { role: "assistant", content: [], stopReason: "stop" },
+    message: { role: "assistant", content, stopReason: "stop" },
   });
   await emit({ type: "agent_end", messages: [], isTerminal: true });
 }
