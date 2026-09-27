@@ -496,19 +496,27 @@ describe("fake omp knobs on other scenarios", () => {
   });
 });
 
-describe("fake omp thinking module split", () => {
-  it("keeps the pure builder module node-only, statically imported and within line budgets", () => {
-    const module = readFileSync(THINKING, "utf8");
-    const imports = module.split("\n").filter((line) => line.startsWith("import"));
-    expect(imports.length).toBeGreaterThan(0);
-    for (const line of imports) {
-      expect(line).toMatch(/from "node:[a-z/]+";$/);
+/** 叶子模块只许 `node:` 静态导入：不回引主程序、不互引、无动态导入/shebang/顶层可变状态。 */
+function expectNodeOnlyLeaf(file: string): void {
+  const module = readFileSync(file, "utf8");
+  const imports = module.split("\n").filter((line) => line.startsWith("import"));
+  expect(imports.length, file).toBeGreaterThan(0);
+  for (const line of imports) {
+    expect(line, file).toMatch(/from "node:[a-z/]+";$/);
+  }
+  expect(imports.join("\n"), file).not.toMatch(/fake-omp(-proxy|-thinking)?\.mjs/);
+  expect(module, file).not.toMatch(/\bimport\(|\brequire\(/);
+  expect(module.startsWith("#!"), file).toBe(false);
+  expect(module, file).not.toMatch(/^let /m);
+}
+
+describe("fake omp module split", () => {
+  it("keeps proxy and thinking modules node-only leaves, statically imported by main and within line budgets", () => {
+    for (const leaf of [PROXY, THINKING]) {
+      expectNodeOnlyLeaf(leaf);
     }
-    expect(imports.join("\n")).not.toMatch(/fake-omp\.mjs|fake-omp-proxy\.mjs/);
-    expect(module).not.toMatch(/\bimport\(|\brequire\(/);
-    expect(module.startsWith("#!")).toBe(false);
-    expect(module).not.toMatch(/^let /m);
     const main = readFileSync(MAIN, "utf8");
+    expect(main).toMatch(/^import \{[^}]+\} from "\.\/fake-omp-proxy\.mjs";$/m);
     expect(main).toMatch(/^import \{[^}]+\} from "\.\/fake-omp-thinking\.mjs";$/m);
     for (const file of [MAIN, PROXY, THINKING]) {
       const check = spawnSync(process.execPath, ["--check", file], { encoding: "utf8" });
