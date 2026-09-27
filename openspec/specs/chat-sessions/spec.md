@@ -2,9 +2,7 @@
 
 ## Purpose
 定义会话、消息与执行步骤的 schema 和追加迁移，以及账号隔离的存储视图、原子受理与补偿、正文刷盘、步骤和终态、故障恢复、关闭及显式启动对账契约。REST/runtime/SSE装配由后续变更增补。
-
 ## Requirements
-
 ### Requirement: 会话数据 schema
 Migration032_chat_sessions.sql SHALL atomically create chat_sessions, chat_messages and chat_steps using the existing runner-owned transaction. Existing0010/002/010/030/031 receipts and business data SHALL remain unchanged;032 SHALL append as the sixth receipt without changing ledger validation.
 chat_sessions SHALL have id TEXT NOTNULL PRIMARYKEY constrained to32 lowercasehex characters withoutNUL; owner_id TEXT NOTNULL referencing accounts(id) ONDELETECASCADE; nullable title/omp_session_file TEXT; status TEXT NOTNULL in(idle,running,done,failed,stopped); stream_epoch INTEGER NOTNULL DEFAULT0 and nonnegativeinteger; created_at/updated_at INTEGER NOTNULL nonnegativeepochms; and an owner_id,updated_atDESC index.
@@ -339,3 +337,24 @@ Migration `034_chat_turn_control.sql` SHALL run inside the existing runner-owned
 #### Scenario: 模块划分可持续验证
 - **WHEN** 运行 `bash scripts/size-guard.sh`、`knip` 与 server 测试
 - **THEN** size-guard 退出 0，knip 无未引用导出，`store-approvals.ts`/`store-branch.ts` 对 `store.ts` 只有 `import type`，store 相关测试全绿
+
+### Requirement: 会话 supervisor 源码模块划分
+`server/src/sessions/` 下的会话 supervisor 实现 SHALL 保持每个源文件 ≤800 行（`scripts/size-guard.sh`）。
+
+`SessionSupervisor` 及其端口类型（`SessionSupervisorOptions`、`SessionSupervisorRuntime`、`StreamCursor`、`SessionStreamSubscription`、`SessionStreamLiveHandler`）SHALL 保持从 `supervisor.ts` 导出。`supervisor.ts` 是会话派发与回合生命周期的唯一公共入口。
+
+`pool.ts` 与 `turn-control.ts` 的导出 SHALL 只供 `sessions/` 内的 supervisor 模块使用，不经 `sessions/index.ts` 对外暴露。两个模块的职责如下：
+- `pool.ts` SHALL 承载 slot 登记：活 slot 与 generation 的记录形状、按回合认领的释放（`releaseClaim`/`releasePumpExit`），以及进程池的准入、驱逐与名额。
+- `turn-control.ts` SHALL 承载回合派发辅助：回合事件到 store 的落库映射、预进度失败后的帧排空，以及 stop/regenerate/fork 的回合控制编排。
+
+值导入 SHALL 无环。`pool.ts`/`turn-control.ts` 对 `supervisor.ts` SHALL 只允许类型导入。新模块 SHALL 不新增未被引用的导出。
+
+#### Scenario: 模块划分可持续验证
+- **WHEN** 运行 `bash scripts/size-guard.sh`、`knip` 与 server 测试
+- **THEN** 同时满足以下各项：
+  - size-guard 退出 0；
+  - knip 报告无未引用导出；
+  - `pool.ts`/`turn-control.ts` 不值导入 `./supervisor.js`；
+  - 既有调用方仍从 `sessions/supervisor.js` 取得 `SessionSupervisor` 及其端口类型；
+  - supervisor 相关测试全绿。
+
