@@ -38,7 +38,17 @@ const REQUIRED_CHILD_ENV_KEYS = [
   "PI_CODING_AGENT_DIR",
   "WORKBUDDY_MODEL_TOKEN",
 ] as const;
-const REPORT_LABELS = ["uid", "gid", "env", "home", "agent", "environ", "wrote", "frames"] as const;
+const REPORT_LABELS = [
+  "uid",
+  "gid",
+  "env",
+  "home",
+  "agent",
+  "environ",
+  "wrote",
+  "frames",
+  "cwd",
+] as const;
 /** fake-omp argv ends with the appended scenario; pgrep -u matches the effective uid only. */
 const HANG_PATTERN = "scenario hang-term$";
 /** runtime.ts TERM@5 s + KILL@8 s budget plus scheduling slack. */
@@ -300,6 +310,7 @@ function parseLabeledReport(report: string): Record<(typeof REPORT_LABELS)[numbe
     environ: requiredValue(values, 5),
     wrote: requiredValue(values, 6),
     frames: requiredValue(values, 7),
+    cwd: requiredValue(values, 8),
   };
 }
 

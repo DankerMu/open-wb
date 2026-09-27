@@ -88,7 +88,7 @@ function deltaAfter(frames: Frame[], id: string): string {
 
 function framesOf(delta: string): string {
   expect(delta.split(" frames=")).toHaveLength(2);
-  const match = / wrote=\S+ frames=([^ ]*)$/u.exec(delta);
+  const match = / wrote=\S+ frames=([^ ]*) cwd=/u.exec(delta);
   expect(match).not.toBeNull();
   return match?.[1] ?? "";
 }

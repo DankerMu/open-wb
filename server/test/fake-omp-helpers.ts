@@ -56,6 +56,8 @@ export interface StartOptions {
   extraArgs?: string[];
   env?: NodeJS.ProcessEnv;
   prompt?: Frame;
+  /** 子进程工作目录；缺省不传 spawn 的 `cwd`（继承 vitest 进程）。 */
+  cwd?: string;
 }
 
 const exitStatuses = new WeakMap<ChildProcessWithoutNullStreams, number>();
@@ -69,6 +71,7 @@ export function startFake(options: StartOptions = {}): Session {
   const child = spawn(process.execPath, [FAKE, ...args], {
     stdio: ["pipe", "pipe", "pipe"],
     env: { PATH: process.env.PATH ?? "/usr/bin", ...options.env },
+    ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
   });
   children.push(child);
   const frames: Frame[] = [];
