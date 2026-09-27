@@ -104,7 +104,7 @@ server 每条消息恒有 `approvals`：按 `id` 升序、恰六键、只含本�
 | ID | 输入 | 期望 |
 |---|---|---|
 | W1 解析通过（红） | 快照含 stopped 会话/消息/步骤；user `[]`；assistant A `[]`；B 单 pending；C 两条 `[{id:7,decision:"timeout"},{id:8,decision:null}]` | `getMessages` resolve 值 `toEqual` 输入，数组顺序不变 |
-| W2 整体拒绝（红） | 以 W1 为底逐项替换：user 缺 `approvals`；assistant 缺 `approvals`；`approvals:null`；`approvals:{}`；元素多 `decidedAt`；元素缺 `requestedAt`；`decision:"maybe"`；`tool:1`；元素 id `2**53`；`[8,7]` 乱序；`[7,7]` 重复；user `approvals` 含一条合法元素 | 每项都是 `expectRequestFailure(…, 200)`；W1 底样本通过作为对照 |
+| W2 整体拒绝（master 恒绿：六键集已拒绝任何七键消息，拒绝原因不同；以 W1 为对照——W1 同底样本在 master 红、实现后绿；乱序/重复两例另由 M5 证明） | 以 W1 为底逐项替换：user 缺 `approvals`；assistant 缺 `approvals`；`approvals:null`；`approvals:{}`；元素多 `decidedAt`；元素缺 `requestedAt`；`decision:"maybe"`；`tool:1`；元素 id `2**53`；`[8,7]` 乱序；`[7,7]` 重复；user `approvals` 含一条合法元素 | 每项都是 `expectRequestFailure(…, 200)`；W1 底样本通过作为对照 |
 | W3 快照 → 视图（红） | `chatStateFromSnapshot(deepFreeze(W1))` | 每条视图 `approvals` `toStrictEqual` 输入去掉 `requestedAt` 后的逐项映射（顺序不变），user `[]`；输入未被修改 |
 | W4 请求与结算（红） | running 快照，assistant id 0，`approvals:[]`；request{0,7,bash,TITLE,E} → resolved{0,7,allow} | 第一步 `approvals` `toStrictEqual([{id:7,tool:"bash",title:TITLE,expiresAt:E,decision:null}])`，`status==="running"`，`messages[0]` 与输入同一引用；第二步只有 `decision` 变为 `allow` |
 | W5 同一引用（红） | 基于 W4 第一步状态 S：resolved(8)；对 `approvals:[]` 的消息 resolved(7)；对不存在的消息 99 resolved（`toBe` 输入）；另起一子例：对不存在的消息 99 request(7) → 补建 assistant 99，其 `approvals` 恰为那一条 pending（与 `step.start` 等事件对未知 assistant 的既有行为一致，钉住语义）；对 user 消息 -3 request 与 resolved；再次 request(7)。基于 W4 第二步状态：重放 request(7)、重放 resolved(7,allow) | 除「消息 99 request(7)」子例外，每次都 `toBe` 输入，消息数不变，resolved 不补建；重放 request 不把 `allow` 改回 null。「消息 99 request(7)」子例：结果不 `toBe` 输入，消息数 +1，`messages.at(-1)` `toStrictEqual` `{id:99, role:"assistant", content:"", status:"running", steps:[], approvals:[{id:7,tool,title,expiresAt,decision:null}], error:null}`，会话 `status` 不变，原有各消息保持同一引用 |
@@ -116,7 +116,7 @@ server 每条消息恒有 `approvals`：按 `id` 升序、恰六键、只含本�
 | W11 非法 → 重同步（红） | 每项用一个按 W9 安装好的新连接发送：request 多键、缺 `expiresAt`、`approvalId:1.5`、`approvalId:2**53`、`messageId:"0"`、`title:1`；resolved `decision:null`、`"maybe"`、`"Allow"`、多键；合法 request 配 id `"1:01"` | 每项都使 `loads` 长度 +1，`events` 不增（master 上无监听，`loads` 不增，所以红） |
 | W12 守卫（恒绿） | 既有 web 全量 | 除允许清单外零 diff 全绿；`future.event` 仍被忽略 |
 
-**红/绿**：S1–S10、W1–W11 在 master 上为红，先对 master 跑红并记录。以下变异逐一临时施加，失败输出记入 PR body：投影按 `requested_at` 排序 → S3；去掉 `role='assistant'` → S5；handler 内另行读取审批 → S6；投影多出 `decided_at` → S2/S7 的 `toStrictEqual`；web 不检升序 → W2；resolved 未命中时仍复制 → W5；request 接线传 `"running"` → W7。
+**红/绿**：S1–S10、W1、W3–W11 在 master 上为红（W2 例外，见其行），先对 master 跑红并记录。以下变异逐一临时施加，失败输出记入 PR body：投影按 `requested_at` 排序 → S3；去掉 `role='assistant'` → S5；handler 内另行读取审批 → S6；投影多出 `decided_at` → S2/S7 的 `toStrictEqual`；web 不检升序 → W2；resolved 未命中时仍复制 → W5；request 接线传 `"running"` → W7。
 
 ## Non-goals
 见 proposal Non-goals。
