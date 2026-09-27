@@ -221,7 +221,7 @@
 
 ## Risks / Trade-offs
 
-- [DMXAPI 不返回 reasoning，或拒绝 reasoning 请求参数/历史 `reasoning_content`] → 折叠块在 null 时不渲染；`MODEL_REASONING=off` 为部署开关；Open Questions 1 以真实端点关闭。
+- [DMXAPI 不返回 reasoning，或拒绝 reasoning 请求参数/历史 `reasoning_content`] → 折叠块在 null 时不渲染；`MODEL_REASONING=off` 为部署开关，但只对不在 omp 内置目录中的 `MODEL_ID` 生效：`off` 只省略 `reasoning`/`compat` 声明，目录能模糊命中 reasoning 条目的 id（如 `deepseek-v4-flash`、`deepseek-r1`）由 omp 回退为目录值（v18.0.10 `config/custom-models.ts:130`），仍按推理模型请求——推理模型不关思考（#580 决议，不改写出）；默认 `deepseek-v4.1-flash` 无目录命中，`off` 生效；Open Questions 1 以真实端点关闭。
 - [edit 的 `details` 形状只由源码与 fake-omp 证明，真二进制未进 CI] → write 形状由 `make ui-walk` 真 omp 证明；edit 形状与 hashline `details.path` 绝对性由 B 自己的一次真二进制手工核对关闭（Open Questions 2，tasks 9.3b），相对/绝对两种都已按 D6 规则处理。
 - [删除 running 会话最长约 16 s] → 确认对话框 pending 态禁止重复提交；上界由 A 的有界退回保证，不另设计时器。
 - [unlink 失败或 app uid 无权删除 omp uid 文件] → 行已删、响应 204，经错误通道上报；Open Questions 3 以 uid-isolation 用例与 VPS 关闭。
@@ -253,7 +253,7 @@
 
 ## Open Questions
 
-- **DMXAPI `deepseek-v4.1-flash` 在声明 `reasoning: true`（及 `compat.reasoningContentField`）后是否返回 `reasoning_content`、是否接受 omp 随之发送的请求参数与历史思考字段**：以本机真实端点（`MODEL_REASONING=on`）跑一次 `make smoke-live` 并读回一条消息快照的 `thinking` 关闭；接受且返回 → 维持默认 on；拒绝请求 → 部署设 `off` 并在本节记录；接受但不返回 → 「模型无 reasoning 不渲染」成立，维持 on。结论只改部署配置与本节，不改代码。
+- **DMXAPI `deepseek-v4.1-flash` 在声明 `reasoning: true`（及 `compat.reasoningContentField`）后是否返回 `reasoning_content`、是否接受 omp 随之发送的请求参数与历史思考字段**：以本机真实端点（`MODEL_REASONING=on`）跑一次 `make smoke-live` 并读回一条消息快照的 `thinking` 关闭；接受且返回 → 维持默认 on；拒绝请求 → 部署设 `off` 并在本节记录（仅对目录未命中的 `MODEL_ID` 有效，见 Risks；目录命中的推理模型不关思考，#580）；接受但不返回 → 「模型无 reasoning 不渲染」成立，维持 on。结论只改部署配置与本节，不改代码。
 - **hashline 模式 edit `details.path` 是否为绝对路径**：由 B 自行做一次真二进制手工核对（不依赖 change A 的任何 issue——A 的真二进制验证范围不含 edit，真 omp + 假上游也无法确定性驱动 edit）：本机官方 omp v18.0.10 + 真实端点（同 `make smoke-live` 的配置方式，凭据只在 shell env），在一个绑定工作空间的会话里 prompt 模型编辑该空间内一个已存在的文件，从 omp 会话 `.jsonl` 读出该步骤 `tool_execution_end.result.details`（宿主持久化的 `changes` 已相对化，只作旁证），记录 `details.path` 是否为绝对路径；结论连同日期与二进制 SHA256 写回本节与 `server/src/sessions/file-changes.ts` 的注释。D6 已同时处理绝对与相对，结论只影响代码注释与 fixture 文档。
 - **app uid 能否删除 omp uid 写入的 `.jsonl`（2770 目录 + umask 007 推断可行）**：在 CI `uid-isolation` job（Linux、`OMP_USER` sudo 模式）新增「删除会话后会话文件不存在」用例关闭；测试 VPS 上的部署演练再确认一次。
 - **A 新增 Requirement 的重述时机**：turn-control「从此处分叉 REST」的五键 → 八键只能在 A 归档后以 MODIFIED delta 落地（Migration Plan 规格次序一步）；若 A 归档晚于 B 的 Stage 5，B 的实施 issue 以 session-metadata 的 fork 场景为验收依据，归档时再补齐。
