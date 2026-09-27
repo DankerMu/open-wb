@@ -1,0 +1,53 @@
+# Design: chat-turn-actions-split（#489）
+
+父设计为「模块拆分（size-guard）」。下文行号均指 base（`BASE=56fc402a0b31fec517f9334e2f91869d76c6a025`，即当前 origin/master）的 `web/src/features/chat/page.tsx`，该文件共 734 行。
+
+- **Change surface**：`page.tsx` → 新建 `web/src/features/chat/turn-actions.ts`。
+- **Must preserve**：
+  - 导出面不变：`index.ts:1` 仍为 `export { ChatPage } from "./page.js";`，`page.tsx` 的唯一导出仍是 `ChatPage`（:32）。
+  - 导入方全部不改：`web/src/routes/router.tsx:4`、`web/test/chat-page-lifecycle-support.tsx:7`。
+  - `ChatPage` 的 hook 调用序列逐项不变：`useTurnActions` 恰好位于原 314 行处，在 `loadHistory`（251-312）之后、选中 effect（449）之前；内部依次调用四个 `useCallback`，与原 314/328/337/382 同序。
+  - 四个回调体逐字不变，包括五重门控条件（`mountedRef`/`signal.aborted`/generation/`clientRef`/`requestedSessionRef`，见 352-356、399-406、412-418）、`accepted` 分支（361-370）和 `.then(ok, err)` 两段式（410-431）。
+  - 源码文本守卫仍然成立：`web/test/topbar.test.tsx:262,285-287` 断言 `page.tsx` 含 `useTopbar(`，不含 `<h1` 与 `routes/`。这些文本都不在搬迁块内，搬后仍在 `page.tsx`。
+- **Must add/change**：
+  - `turn-actions.ts` 按以下顺序组成：
+    - 1 行职责注释。
+    - import 5 行：`react` 的 `type Dispatch, type RefObject, type SetStateAction, useCallback`；`import type { ApiClient }`（`../../lib/api.js`）；`import type { ChatMessageSnapshot }`（`../../lib/session-contract.js`）；`{ errorMessage, isUnauthorized }`（`./errors.js`）；`import type { ChatMutationOwner, ChatOwnedAlert, PendingCreateSend }`（`./types.js`）。
+    - `export const TERMINAL_REFRESH_GUIDANCE`，从原 :29 逐字搬来，只加 `export`。
+    - 非导出类型 `TurnActionDeps`，18 个成员按字母序：`abortMutation`、`clientRef`、`closeSource`、`installSnapshot`、`mountedRef`、`mutationControllerRef`、`mutationGenerationRef`、`openSource`、`pendingCreateSendRef`、`refreshList`、`releaseMutationIfOwned`、`requestedSessionRef`、`setCreating`、`setDraft`、`setMutationOwner`、`setPromptError`、`setStreamError`、`setSubmitting`。其中 ref 的类型为 `RefObject<…>`，setter 为 `Dispatch<SetStateAction<…>>`，回调为原签名。
+    - `export function useTurnActions({ <同序解构> }: TurnActionDeps) {`，函数体为原 314-447，最后是 `return { dispatchPrompt, restoreOwnedDraft };`。
+  - 搬迁块内只允许两类改动，其余字节不变（缩进同为 2 格）：
+    - 四个依赖数组补入回调体读取的 ref 对象与 setter。实际集合由 biome `useExhaustiveDependencies` 决定，必须补入的是 ref 对象本身，**禁止**补 `x.current`（那样会改变记忆化语义）。期望结果见 D3。
+    - `finishCreateSend` 因依赖数组变长，由 biome 从 `useCallback((generation) => {…}, [])` 重排为多行。
+  - `page.tsx` 的改动：
+    - 删去 :29 与 314-447。
+    - 在 `./stream.js` 的 import 之后、`./types.js` 之前（biome 排序）加一行 `import { TERMINAL_REFRESH_GUIDANCE, useTurnActions } from "./turn-actions.js";`。
+    - 在原 314 处放入 20 行调用：`const { dispatchPrompt, restoreOwnedDraft } = useTurnActions({ <18 项同名简写> });`。
+    - `MISSING_EVENT_SOURCE`（:30）与其余代码原地不动。
+  - 依赖方向：值导入只有 `page.tsx → turn-actions.ts`；`turn-actions.ts` 对 `./page.js` 零导入。
+  - 行数：已在 base 的草稿镜像中实测，均经 biome 格式化。`page.tsx` 为 620 行，上限 ≤ 623，给 7.2–7.4 的页面侧接线留出 180 行；`turn-actions.ts` 为 210 行，允许 ±3。
+- **Governing invariant**：对同一用户操作与响应序列，会话页的请求、中止、generation 递增、状态写入、导航与 EventSource 开关次序完全一致。依据是：被补入依赖的值（`useRef` 对象、`useState` setter）身份在整个组件生命周期内恒定，所以四个回调的记忆化身份与 base 相同（base 上它们本就恒定）。
+- **Sibling surfaces**：
+  - `createAndSelect`/`submitComposer`/选中 effect/派发驱动 effect（:509）调用 hook 返回的 `restoreOwnedDraft`/`dispatchPrompt`，零改动。
+  - `errors.ts`、`types.ts`、`ownership.ts`、`stream.ts` 零改动。
+  - 覆盖率门禁为全局 80%，不按文件计（`vitest.shared.mjs` 未设 `perFile`）。镜像实测：`turn-actions.ts` 行 92% / 分支 78%，未覆盖的分支在 base 的 `page.tsx` 上同样未覆盖；全局 stmts/branch/funcs 与 base 相同，都是 96.26/91.68/99.49。
+  - **必然破坏的既有测试：无。允许的既有测试编辑：无。**
+- **Seams under test**：既有 web vitest 套件原样使用，它通过页面级 jsdom fixture 走 `ChatPage`：`chat-page.test.tsx`、`chat-page-ownership.test.tsx`、`chat-page-ownership-gaps.test.tsx`、`chat-page-lifecycle.test.tsx`、`topbar.test.tsx`。本刀不新增测试，全部检查都属于 guards, always green，没有 red-first。
+- **Required evidence**：见 tasks.md S1–S4。各检查的输入和期望如下：
+  - D1/D2 两条 diff，期望输出为空；
+  - D3 的期望为 4 行固定输出；
+  - 模块边界 grep，期望计数固定；
+  - `git diff --stat $BASE -- web/test`，期望输出为空；
+  - web 套件，期望 55 文件 / 1080 例全绿，与 base 相同；
+  - `wc -l`，期望为 620/210（±3）；
+  - size-guard、knip、jscpd、naming-guard、lint、typecheck、build，期望全部退出 0。镜像实测 knip 与 jscpd（web 17 clones / 0.49%）均与 base 相同。
+- **7.2+ 注意**：
+  - 新 handler 所需的 `navigate`/`location`（fork）、toast（stop）以及新增状态，届时作为 `TurnActionDeps` 成员或 hook 内状态加入。本刀不预加任何成员，禁止占位。
+  - 若 7.2+ 需要搬 `createAndSelect`/`submitComposer`，须连同其前面的 effect 一起论证 hook 次序。
+- **Non-goals**：见 proposal。
+- **Review focus**：
+  - D1/D2 为空，D3 与期望逐行一致，即块体只差依赖数组；
+  - 依赖数组中无 `.current`；
+  - `useTurnActions` 调用位于原 314 处，hook 次序不变；
+  - `turn-actions.ts` 不含 `useEffect`/`useState`/`useRef`/`useMemo`，也不导入 `./page.js`；
+  - 没有测试 diff，没有新行为。

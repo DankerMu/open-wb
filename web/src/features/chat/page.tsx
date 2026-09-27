@@ -16,6 +16,7 @@ import {
   chatStateFromSnapshot,
   connectSessionEvents,
 } from "./stream.js";
+import { TERMINAL_REFRESH_GUIDANCE, useTurnActions } from "./turn-actions.js";
 import type {
   ChatHistoryState,
   ChatListState,
@@ -26,7 +27,6 @@ import type {
 
 type SessionEventHandle = { close(): void };
 
-const TERMINAL_REFRESH_GUIDANCE = "请刷新页面后重试";
 const MISSING_EVENT_SOURCE = "无法连接会话事件";
 
 export function ChatPage() {
@@ -311,140 +311,26 @@ export function ChatPage() {
     ],
   );
 
-  const restoreOwnedDraft = useCallback(
-    (prompt: string, ownedClient: ApiClient, sessionId: string | null) => {
-      if (
-        prompt.length === 0 ||
-        ownedClient !== clientRef.current ||
-        requestedSessionRef.current !== sessionId
-      ) {
-        return;
-      }
-      setDraft((current) => (current.length === 0 ? prompt : current));
-    },
-    [],
-  );
-
-  const finishCreateSend = useCallback((generation: number) => {
-    if (pendingCreateSendRef.current?.generation === generation) {
-      pendingCreateSendRef.current = null;
-    }
-    setCreating(false);
-    setSubmitting(false);
-    setMutationOwner(null);
-  }, []);
-
-  const failOwnedPrompt = useCallback(
-    (
-      controller: AbortController,
-      mutationGeneration: number,
-      ownedClient: ApiClient,
-      error: unknown,
-      generation: number,
-      accepted: boolean,
-    ) => {
-      const pending =
-        pendingCreateSendRef.current?.generation === generation
-          ? pendingCreateSendRef.current
-          : null;
-      const ownedSessionId = pending?.sessionId ?? pending?.originSessionId ?? null;
-      if (
-        !mountedRef.current ||
-        controller.signal.aborted ||
-        mutationGeneration !== mutationGenerationRef.current ||
-        ownedClient !== clientRef.current ||
-        isUnauthorized(error)
-      ) {
-        releaseMutationIfOwned(controller);
-        return;
-      }
-      if (accepted) {
-        setStreamError({
-          client: ownedClient,
-          sessionId: ownedSessionId,
-          message: `${errorMessage(error)}。${TERMINAL_REFRESH_GUIDANCE}`,
-        });
-        setSubmitting(false);
-        releaseMutationIfOwned(controller);
-        return;
-      }
-      restoreOwnedDraft(pending?.prompt ?? "", ownedClient, ownedSessionId);
-      setPromptError({
-        client: ownedClient,
-        sessionId: ownedSessionId,
-        message: errorMessage(error),
-      });
-      finishCreateSend(generation);
-      releaseMutationIfOwned(controller);
-    },
-    [finishCreateSend, releaseMutationIfOwned, restoreOwnedDraft],
-  );
-  const dispatchPrompt = useCallback(
-    (sessionId: string, prompt: string, generation: number, ownedClient: ApiClient) => {
-      abortMutation();
-      const controller = new AbortController();
-      mutationControllerRef.current = controller;
-      mutationGenerationRef.current += 1;
-      const mutationGeneration = mutationGenerationRef.current;
-      setSubmitting(true);
-      setMutationOwner({
-        client: ownedClient,
-        originSessionId: sessionId,
-        sessionId,
-      });
-      setPromptError(null);
-      void ownedClient
-        .prompt(sessionId, prompt, { signal: controller.signal })
-        .then(() => {
-          if (
-            !mountedRef.current ||
-            controller.signal.aborted ||
-            mutationGeneration !== mutationGenerationRef.current ||
-            pendingCreateSendRef.current?.generation !== generation ||
-            ownedClient !== clientRef.current ||
-            requestedSessionRef.current !== sessionId
-          ) {
-            return;
-          }
-          closeSource();
-          return ownedClient.getMessages(sessionId, { signal: controller.signal }).then(
-            (snapshot) => {
-              if (
-                !mountedRef.current ||
-                controller.signal.aborted ||
-                mutationGeneration !== mutationGenerationRef.current ||
-                pendingCreateSendRef.current?.generation !== generation ||
-                ownedClient !== clientRef.current ||
-                requestedSessionRef.current !== sessionId
-              ) {
-                return;
-              }
-              installSnapshot(snapshot, ownedClient);
-              openSource(snapshot, ownedClient);
-              refreshList(ownedClient);
-              finishCreateSend(generation);
-              releaseMutationIfOwned(controller);
-            },
-            (error: unknown) => {
-              failOwnedPrompt(controller, mutationGeneration, ownedClient, error, generation, true);
-            },
-          );
-        })
-        .catch((error: unknown) => {
-          failOwnedPrompt(controller, mutationGeneration, ownedClient, error, generation, false);
-        });
-    },
-    [
-      abortMutation,
-      closeSource,
-      failOwnedPrompt,
-      finishCreateSend,
-      installSnapshot,
-      openSource,
-      refreshList,
-      releaseMutationIfOwned,
-    ],
-  );
+  const { dispatchPrompt, restoreOwnedDraft } = useTurnActions({
+    abortMutation,
+    clientRef,
+    closeSource,
+    installSnapshot,
+    mountedRef,
+    mutationControllerRef,
+    mutationGenerationRef,
+    openSource,
+    pendingCreateSendRef,
+    refreshList,
+    releaseMutationIfOwned,
+    requestedSessionRef,
+    setCreating,
+    setDraft,
+    setMutationOwner,
+    setPromptError,
+    setStreamError,
+    setSubmitting,
+  });
 
   useEffect(() => {
     const pending = pendingCreateSendRef.current;
