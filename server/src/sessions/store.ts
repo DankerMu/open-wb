@@ -1,9 +1,17 @@
 import { Buffer } from "node:buffer";
 import { randomBytes } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import type { emit } from "../core/audit/index.js";
 import { createSqliteTextDecoder } from "../core/db/index.js";
 import { HttpError } from "../core/errors/index.js";
-import { cancelTimer, finishOwnedTurn, reconcileStatuses, releaseTurn } from "./store-approvals.js";
+import {
+  cancelTimer,
+  finishOwnedTurn,
+  insertPendingApproval,
+  reconcileStatuses,
+  releaseTurn,
+  settlePendingApproval,
+} from "./store-approvals.js";
 import {
   decodeNullableText,
   hasChanges,
@@ -78,6 +86,32 @@ interface FlushError {
 
 export interface SessionStoreOptions {
   onFlushError: (failure: FlushError) => void;
+  /** core/audit emit bound per call to this DB; settling an approval without it fails closed. */
+  emit?: typeof emit;
+}
+
+export type ApprovalOutcome = "allow" | "deny" | "timeout";
+
+/** One settled approval, the shape `decide` resolves with (snapshot-compatible). */
+export interface ApprovalView {
+  id: number;
+  tool: string;
+  title: string;
+  requestedAt: number;
+  expiresAt: number;
+  decision: ApprovalOutcome;
+}
+
+export interface ApprovalInput {
+  requestId: string;
+  tool: string;
+  title: string;
+}
+
+export interface PendingApproval {
+  approvalId: number;
+  messageId: number;
+  expiresAt: number;
 }
 
 interface StartStepInput {
@@ -100,6 +134,15 @@ export interface SessionStore {
   finishStep(stepId: number, status: "done" | "failed", output: string): boolean;
   finishTurn(assistantMessageId: number, status: FinishStatus): boolean;
   reconcileOnStartup(): void;
+  /** Pending row on the session's running assistant; expires 60000ms after `requestedAt`. */
+  insertApproval(sessionId: string, input: ApprovalInput, requestedAt: number): PendingApproval;
+  /** CAS + audit in one transaction; null when already settled; not_found if not this session's. */
+  settleApproval(
+    sessionId: string,
+    approvalId: number,
+    decision: ApprovalOutcome,
+    decidedAt: number,
+  ): ApprovalView | null;
   runtimeState(sessionId: string): SessionRuntimeState | null;
   close(): void;
 }
@@ -459,6 +502,25 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
         reconcileStatuses(db, "chat_sessions");
         reconcileStatuses(db, "chat_messages");
         reconcileStatuses(db, "chat_steps");
+      });
+    },
+
+    insertApproval(sessionId, input, requestedAt) {
+      assertOpen(closed);
+      const assistantMessageId = activeSessions.get(sessionId);
+      if (assistantMessageId === undefined) {
+        throw new HttpError("not_found");
+      }
+      return insertPendingApproval(db, sessionId, assistantMessageId, input, requestedAt);
+    },
+
+    settleApproval(sessionId, approvalId, decision, decidedAt) {
+      assertOpen(closed);
+      return settlePendingApproval(db, options.emit, {
+        sessionId,
+        approvalId,
+        decision,
+        decidedAt,
       });
     },
 

@@ -3,6 +3,7 @@
  */
 import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance } from "fastify";
+import { emit } from "../core/audit/index.js";
 import type { ChatEvent } from "./events.js";
 import { registerSessionRoutes } from "./rest.js";
 import { createSessionStore, type SessionStore } from "./store.js";
@@ -37,6 +38,7 @@ export function registerSessions(
     onFlushError: (failure) => {
       supervisor.handleFlushError(failure);
     },
+    emit,
   });
   supervisor = new SessionSupervisor({
     store,
