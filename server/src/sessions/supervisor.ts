@@ -204,16 +204,17 @@ export class SessionSupervisor {
     return this.#approvals.decide(sessionId, approvalId, decision);
   }
 
-  /** Stops the dispatched turn (#473): resolves once `abort` is written, not at agent_end. */
+  /** Stops the active turn (#473/#490): resolves once `abort` is written or the intent is kept. */
   stop(sessionId: string): Promise<void> {
     if (this.#closed) {
       return Promise.reject(new HttpError("agent_unavailable"));
     }
-    const slot = this.#slots.get(sessionId);
-    const turn = slot?.claimedAssistantId;
-    return slot === undefined || turn === undefined
-      ? Promise.resolve()
-      : this.#stops.stop(slot, turn);
+    const turn = this.#store.runtimeState(sessionId)?.activeTurn?.assistantMessageId;
+    if (turn === undefined) {
+      return Promise.resolve();
+    }
+    const slot = this.#claims.get(turn);
+    return this.#stops.stop(this.#slots.get(sessionId) === slot ? slot : undefined, turn);
   }
 
   async shutdown(): Promise<void> {
@@ -256,6 +257,7 @@ export class SessionSupervisor {
     if (claimed !== undefined) {
       throw new HttpError("session_busy");
     }
+    this.#stops.open(assistantMessageId);
     const existing = this.#slots.get(sessionId);
     if (existing?.retiring !== undefined) {
       await existing.retiring;
@@ -287,6 +289,7 @@ export class SessionSupervisor {
         await dispatchNew();
       }
     } catch (error) {
+      this.#stops.release(assistantMessageId);
       throw this.#translate(error);
     }
   }
@@ -411,6 +414,7 @@ export class SessionSupervisor {
         void this.#retireSlot(slot);
       }
     });
+    this.#stops.dispatched(slot, assistantMessageId);
   }
 
   async #abortPreProgress(slot: Slot, stream: AsyncIterable<unknown>): Promise<void> {
