@@ -5,6 +5,21 @@
 
 ## MODIFIED Requirements
 
+### Requirement: 审批快照
+`GET /api/sessions/:id/messages` 的每条消息 SHALL 带 `approvals` 字段，类型为数组：assistant 消息为该消息全部 `chat_approvals` 行按 `id` 升序的投影 `{id, tool, title, requestedAt, expiresAt, decision}`（`decision` 为 `"allow"|"deny"|"timeout"|null`）；user 消息与无审批记录的 assistant 消息为 `[]`。web `session-contract.ts` 的 `hasExactlyKeys` SHALL 同步（消息键集含 `approvals`，数组元素键集恰为上述六键）；归约器 SHALL 以 `approval.request` 按 `approvalId` 为键向对应消息 `approvals` 插入一条 `decision:null` 记录（同一 `approvalId` 重复到达——如回放——SHALL 不产生第二条、不覆盖其它审批），以 `approval.resolved` 只更新同一 `approvalId` 记录的 `decision`，并保持按 `id` 升序。刷新后 pending 审批 SHALL 可从快照恢复并继续作答。
+
+#### Scenario: 刷新后继续作答
+- **WHEN** 审批挂起时重新加载页面并请求 messages
+- **THEN** running assistant 消息 `approvals=[{id,tool:"bash",title,requestedAt,expiresAt,decision:null}]`，其它消息 `approvals:[]`；页面渲染审批条；此时作答 allow 返回 200 且回合继续
+
+#### Scenario: 历史决定可见
+- **WHEN** 回合已 `done` 且审批曾以 deny 结算
+- **THEN** 快照该消息 `approvals[0].decision="deny"`，web 显示 `已拒绝执行`
+
+#### Scenario: 多条审批的快照与归约
+- **WHEN** 同一消息先后收到 `approval.request` `a1`、`a2`，随后收到 `approval.resolved{approvalId:a2,decision:"deny"}`，再重连回放同一批事件
+- **THEN** 该消息 `approvals` 为 `[{id:a1,decision:null},{id:a2,decision:"deny"}]`（按 `id` 升序、无重复）；`a1` 仍可作答；重新拉取的快照与归约结果一致
+
 ### Requirement: 停止与终态对挂起审批的结算
 任何回合进入终态时，其 assistant 消息上 SHALL 不残留 `decision` NULL 的审批。审批的全部结算路径 SHALL 恰为以下六条，均经同一 `decision IS NULL` CAS、均在结算落库的同一 SQLite 事务内写审计：
 1. 用户作答（见审批作答 REST）：`allow`/`deny`，向 omp 发对应帧；
@@ -135,21 +150,6 @@ omp 子进程 SHALL 按 omp-runtime 修订后的 spawn 契约以 `--approval-mod
 - **THEN** SQLite 拒绝该写入，既有行不变
 
 ## ADDED Requirements
-
-### Requirement: 审批快照
-`GET /api/sessions/:id/messages` 的每条消息 SHALL 带 `approvals` 字段，类型为数组：assistant 消息为该消息全部 `chat_approvals` 行按 `id` 升序的投影 `{id, tool, title, requestedAt, expiresAt, decision}`（`decision` 为 `"allow"|"deny"|"timeout"|null`）；user 消息与无审批记录的 assistant 消息为 `[]`。web `session-contract.ts` 的 `hasExactlyKeys` SHALL 同步（消息键集含 `approvals`，数组元素键集恰为上述六键）；归约器 SHALL 以 `approval.request` 按 `approvalId` 为键向对应消息 `approvals` 插入一条 `decision:null` 记录（同一 `approvalId` 重复到达——如回放——SHALL 不产生第二条、不覆盖其它审批），以 `approval.resolved` 只更新同一 `approvalId` 记录的 `decision`，并保持按 `id` 升序。刷新后 pending 审批 SHALL 可从快照恢复并继续作答。
-
-#### Scenario: 刷新后继续作答
-- **WHEN** 审批挂起时重新加载页面并请求 messages
-- **THEN** running assistant 消息 `approvals=[{id,tool:"bash",title,requestedAt,expiresAt,decision:null}]`，其它消息 `approvals:[]`；页面渲染审批条；此时作答 allow 返回 200 且回合继续
-
-#### Scenario: 历史决定可见
-- **WHEN** 回合已 `done` 且审批曾以 deny 结算
-- **THEN** 快照该消息 `approvals[0].decision="deny"`，web 显示 `已拒绝执行`
-
-#### Scenario: 多条审批的快照与归约
-- **WHEN** 同一消息先后收到 `approval.request` `a1`、`a2`，随后收到 `approval.resolved{approvalId:a2,decision:"deny"}`，再重连回放同一批事件
-- **THEN** 该消息 `approvals` 为 `[{id:a1,decision:null},{id:a2,decision:"deny"}]`（按 `id` 升序、无重复）；`a1` 仍可作答；重新拉取的快照与归约结果一致
 
 ### Requirement: web 审批条
 web SHALL 在 assistant 消息内按 `approvals` 数组为每条审批各渲染一个审批条，同一消息的多个审批条按 `id` 升序纵向排列，各自独立交互。`decision:null` 的审批条 SHALL 显示：头部标题 `需要你的确认`；工具名徽章（取自 `tool`，即 title 首行 `Allow tool: <name>` 的解析结果）；正文为 `title` **全文**，以 `white-space: pre-wrap` 保留换行；按钮 `允许`/`拒绝`；以 `expiresAt` 与本地时钟计算的单句动态倒计时文案 `（<n>s 内未操作将自动允许）`，`<n>` 为剩余整秒并随时间递减（初值 60）。`allow`/`timeout` 显示 `已允许执行`，`deny` 显示 `已拒绝执行`，均无按钮、无倒计时。点击按钮 SHALL 以该条的 `approvalId` 调用作答 REST；409 `approval_settled` SHALL 使该审批条按随后到达的 `approval.resolved` 或重新拉取的快照更新为终态文案。会话 running 且存在 pending 审批时 composer 仍显示 `停止`。
