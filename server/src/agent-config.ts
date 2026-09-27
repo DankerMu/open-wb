@@ -6,7 +6,7 @@ export const DEFAULT_OMP_STATE_RELATIVE = join("var", "omp-state");
 export const DEFAULT_SANDBOX_RELATIVE = join("var", "sandbox");
 export const DEFAULT_OMP_IDLE_MS = 600_000;
 export const DEFAULT_MODEL_ID = "deepseek-v4.1-flash";
-const DEFAULT_OMP_MAX_PROCESSES = 16;
+export const DEFAULT_OMP_MAX_PROCESSES = 16;
 /** 两个正整数键的共同上界（原生计时器上限）。 */
 const MAX_POSITIVE_SETTING = 2_147_483_647;
 
