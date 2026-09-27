@@ -19,6 +19,12 @@ import {
 } from "./commands.js";
 import type { OmpFrame } from "./frame.js";
 import {
+  decideLocalCompletion,
+  LOCAL_COMMAND_GRACE_MS,
+  type LocalSignal,
+  type LocalState,
+} from "./local-command.js";
+import {
   AgentUnavailableError,
   type OmpExit,
   OmpProcess,
@@ -73,6 +79,13 @@ export class SessionBusyError extends Error {
   }
 }
 
+/** A turn waiting for a late `command_output` after its local-only outcome (design D15). */
+interface LocalWait {
+  turn: Turn;
+  since: number;
+  timer: unknown;
+}
+
 const systemClock: SessionClock = {
   now: () => Date.now(),
   setTimeout: (callback, ms) => setTimeout(callback, ms),
@@ -101,6 +114,7 @@ export class SessionRuntime {
   #generation: Generation | undefined;
   #issuedGenId: number | undefined;
   #turn: Turn | undefined;
+  #localWait: LocalWait | undefined;
   #pendingReceipts = new Set<Turn>();
   #nextGen = 0;
   #nextRequest = 0;
@@ -150,6 +164,8 @@ export class SessionRuntime {
       sent: false,
       dispatched,
       receiptSettled: false,
+      slashText: text.startsWith("/"),
+      commandOutputSeen: false,
     };
     this.#turn = turn;
     this.#pendingReceipts.add(turn);
@@ -388,13 +404,62 @@ export class SessionRuntime {
       return;
     }
     turn.stream.push(frame);
-    if (isLocalComplete(frame, turn.requestId) || isTerminalEnd(frame)) {
+    if (isTerminalEnd(frame)) {
       this.#completeTurn(turn);
       return;
     }
     if (isMatchingFailure(frame, turn.requestId)) {
       this.#failTurn(turn, new AgentUnavailableError("prompt failed"));
       void this.#retire(gen);
+      return;
+    }
+    this.#onLocalFrame(turn, frame);
+  }
+
+  /** Local-only completion: a `/` turn without output waits for it or for the grace. */
+  #onLocalFrame(turn: Turn, frame: OmpFrame): void {
+    const decision = decideLocalCompletion(
+      this.#localState(turn, 0),
+      localSignal(frame, turn.requestId),
+    );
+    if (frame.type === "command_output") {
+      turn.commandOutputSeen = true;
+    }
+    if (decision === "complete") {
+      this.#completeTurn(turn);
+    } else if (decision === "await") {
+      this.#awaitOutput(turn);
+    }
+  }
+
+  #awaitOutput(turn: Turn): void {
+    const wait: LocalWait = { turn, since: this.#clock.now(), timer: undefined };
+    const tick = (): void => {
+      if (this.#localWait !== wait || this.#turn !== turn) {
+        return;
+      }
+      const elapsedMs = this.#clock.now() - wait.since;
+      if (decideLocalCompletion(this.#localState(turn, elapsedMs), "grace-tick") === "complete") {
+        this.#completeTurn(turn);
+        return;
+      }
+      // Wall clock behind the timer (rounding, rollback): re-arm and replace the handle.
+      wait.timer = this.#clock.setTimeout(tick, Math.max(1, LOCAL_COMMAND_GRACE_MS - elapsedMs));
+    };
+    this.#localWait = wait;
+    wait.timer = this.#clock.setTimeout(tick, LOCAL_COMMAND_GRACE_MS);
+  }
+
+  #localState(turn: Turn, elapsedMs: number): LocalState {
+    const awaiting = this.#localWait?.turn === turn;
+    return { slashText: turn.slashText, outputSeen: turn.commandOutputSeen, awaiting, elapsedMs };
+  }
+
+  #clearLocalWait(): void {
+    const wait = this.#localWait;
+    if (wait !== undefined) {
+      this.#localWait = undefined;
+      this.#clock.clearTimeout(wait.timer);
     }
   }
 
@@ -455,6 +520,7 @@ export class SessionRuntime {
       return;
     }
     this.#turn = undefined;
+    this.#clearLocalWait();
     turn.stream.end();
   }
 
@@ -463,6 +529,7 @@ export class SessionRuntime {
       return;
     }
     this.#turn = undefined;
+    this.#clearLocalWait();
     this.#rejectReceipt(turn, error);
     turn.stream.fail(error);
   }
@@ -479,6 +546,7 @@ export class SessionRuntime {
       return;
     }
     this.#turn = undefined;
+    this.#clearLocalWait();
     this.#rejectReceipt(turn, new AgentUnavailableError("runtime shutdown"));
     const gen = this.#generation;
     if (gen !== undefined && (turn.sent || !gen.acquired)) {
@@ -510,6 +578,9 @@ export class SessionRuntime {
     turn.dispatched.reject(error);
   }
   #retire(gen: Generation): Promise<void> {
+    if (this.#localWait?.turn.genId === gen.id) {
+      this.#clearLocalWait();
+    }
     gen.retiring ??= this.#runRetire(gen);
     if (this.#generation === gen) {
       this.#retired = gen.retiring;
@@ -688,6 +759,13 @@ export class SessionRuntime {
     this.#nextRequest += 1;
     return `rt-${this.#nextRequest}`;
   }
+}
+
+function localSignal(frame: OmpFrame, requestId: string): LocalSignal {
+  if (isLocalComplete(frame, requestId)) {
+    return "local-outcome";
+  }
+  return frame.type === "command_output" ? "command-output" : "other";
 }
 
 function nonempty(value: string | null): string | undefined {
