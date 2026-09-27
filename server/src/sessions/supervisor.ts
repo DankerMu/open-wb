@@ -3,6 +3,7 @@
  */
 import { DEFAULT_OMP_MAX_PROCESSES } from "../agent-config.js";
 import { HttpError } from "../core/errors/index.js";
+import { ApprovalRegistry } from "./approvals.js";
 import { applyFailure, applyFrame, type ChatEvent, createEventState } from "./events.js";
 import type { OmpFrame } from "./omp/frame.js";
 import { AgentUnavailableError, OmpProtocolError, type SpawnImpl } from "./omp/process.js";
@@ -22,7 +23,7 @@ import {
   type Slot,
   turnFree,
 } from "./pool.js";
-import type { SessionStore } from "./store.js";
+import type { ApprovalView, SessionStore } from "./store.js";
 import { type RetainedEvent, RingBuffer, type RingRead } from "./stream/ring-buffer.js";
 import type { TokenRegistry } from "./tokens.js";
 import { drain, persistEvent } from "./turn-control.js";
@@ -103,6 +104,7 @@ export class SessionSupervisor {
   readonly #pumps = new Set<Promise<void>>();
   readonly #faults: Error[] = [];
   readonly #pool: ProcessPool;
+  readonly #approvals: ApprovalRegistry;
   #closed = false;
 
   constructor(options: SessionSupervisorOptions) {
@@ -116,6 +118,16 @@ export class SessionSupervisor {
       options.runtime.maxProcesses ?? DEFAULT_OMP_MAX_PROCESSES,
       clock === undefined ? () => Date.now() : () => clock.now(),
     );
+    this.#approvals = new ApprovalRegistry({
+      store: this.#store,
+      clock,
+      publish: (slot, event, generation) => this.#publish(slot, event, generation),
+      fault: (slot, error) => {
+        this.#retain(error);
+        slot.infraFaulted = true;
+        void this.#retireSlot(slot);
+      },
+    });
   }
 
   prompt(sessionId: string, text: string): Promise<void> {
@@ -177,8 +189,14 @@ export class SessionSupervisor {
     return this.#pool.size;
   }
 
+  /** Owner answer to one pending approval of this session (#464); REST is #468. */
+  decide(sessionId: string, approvalId: number, decision: "allow" | "deny"): Promise<ApprovalView> {
+    return this.#approvals.decide(sessionId, approvalId, decision);
+  }
+
   async shutdown(): Promise<void> {
     this.#closed = true;
+    this.#approvals.close();
     this.#subscribers.clear();
     const retirements: Promise<void>[] = [];
     for (const slot of this.#slots.values()) {
@@ -299,6 +317,9 @@ export class SessionSupervisor {
       onExit: () => {
         this.#onProcessExit(slot);
       },
+      onApproval: (request) => {
+        this.#approvals.register(slot, request);
+      },
       ...(this.#runtime.idleMs === undefined ? {} : { idleMs: this.#runtime.idleMs }),
       ...(this.#runtime.ompUser === undefined ? {} : { ompUser: this.#runtime.ompUser }),
       ...(this.#runtime.spawnImpl === undefined ? {} : { spawnImpl: this.#runtime.spawnImpl }),
@@ -414,7 +435,8 @@ export class SessionSupervisor {
             toolIds,
             nextOrdinal,
             generation,
-          ))
+          )) ||
+          !(await this.#approvals.publishRequest(slot, frame))
         ) {
           return;
         }
