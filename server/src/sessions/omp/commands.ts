@@ -45,6 +45,10 @@ export interface Turn {
   sent: boolean;
   dispatched: ReceiptWaiter;
   receiptSettled: boolean;
+  /** Dispatched wire text starts with `/` (local-command.ts). */
+  slashText: boolean;
+  /** A `command_output` frame arrived since this prompt was written. */
+  commandOutputSeen: boolean;
 }
 
 // A child that never obtained a pid (spawn failed) is never live, whether or not
