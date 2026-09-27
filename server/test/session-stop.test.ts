@@ -247,10 +247,13 @@ describe("stop on the dispatched path (#473)", () => {
       const { stdin } = spawnedAt(world, 0);
       await Promise.all([stop(world), stop(world)]);
       expect(abortCount(stdin)).toBe(1);
+      expect(world.timersDueAt(T + GRACE_MS)).toBe(1);
 
       world.clock.advance(4_000);
       await stop(world);
       expect(abortCount(stdin)).toBe(1);
+      expect(world.timersDueAt(T + GRACE_MS)).toBe(1);
+      expect(world.timersDueAt(T + 4_000 + GRACE_MS)).toBe(0);
       world.clock.advance(3_999);
       await settle();
       expect(turnEnds(world)).toEqual([]);
