@@ -45,6 +45,7 @@ const snapshot = {
     {
       id: -3,
       role: "user" as const,
+      approvals: [],
       content: SNAPSHOT_CONTENT,
       status: "done" as const,
       createdAt: -1,
@@ -53,6 +54,7 @@ const snapshot = {
     {
       id: 0,
       role: "assistant" as const,
+      approvals: [],
       content: "",
       status: "running" as const,
       createdAt: 0,
@@ -235,6 +237,7 @@ describe("Sessions API client snapshot domain contract", () => {
         {
           id: -SAFE_INTEGER_MAX,
           role: "user" as const,
+          approvals: [],
           content: "",
           status: "failed" as const,
           createdAt: -SAFE_INTEGER_MAX,
@@ -243,6 +246,7 @@ describe("Sessions API client snapshot domain contract", () => {
         {
           id: SAFE_INTEGER_MAX,
           role: "assistant" as const,
+          approvals: [],
           content: SNAPSHOT_CONTENT,
           status: "done" as const,
           createdAt: SAFE_INTEGER_MAX,

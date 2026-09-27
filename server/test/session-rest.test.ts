@@ -170,6 +170,7 @@ describe("session REST", () => {
             content: "saved title",
             status: "done",
             createdAt: SESSION_NOW + 5,
+            approvals: [],
             steps: [],
           },
           {
@@ -178,6 +179,7 @@ describe("session REST", () => {
             content: "first answer",
             status: "done",
             createdAt: SESSION_NOW + 5,
+            approvals: [],
             steps: [],
           },
           {
@@ -186,6 +188,7 @@ describe("session REST", () => {
             content: "second turn",
             status: "done",
             createdAt: SESSION_NOW + 20,
+            approvals: [],
             steps: [],
           },
           {
@@ -194,6 +197,7 @@ describe("session REST", () => {
             content: "",
             status: "done",
             createdAt: SESSION_NOW + 20,
+            approvals: [],
             steps: [
               {
                 id: firstStep,
@@ -734,6 +738,7 @@ describe("session REST", () => {
               content: "saved title",
               status: "done",
               createdAt: SESSION_NOW + 4,
+              approvals: [],
               steps: [],
             },
             {
@@ -742,6 +747,7 @@ describe("session REST", () => {
               content: `${terminal} answer`,
               status: terminal,
               createdAt: SESSION_NOW + 4,
+              approvals: [],
               steps: [],
             },
             {
@@ -750,6 +756,7 @@ describe("session REST", () => {
               content: "follow up",
               status: "done",
               createdAt: SESSION_NOW + 12,
+              approvals: [],
               steps: [],
             },
             {
@@ -758,6 +765,7 @@ describe("session REST", () => {
               content: "",
               status: "running",
               createdAt: SESSION_NOW + 12,
+              approvals: [],
               steps: [],
             },
           ],

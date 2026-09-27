@@ -5,6 +5,7 @@ import type { emit } from "../core/audit/index.js";
 import { createSqliteTextDecoder } from "../core/db/index.js";
 import { HttpError } from "../core/errors/index.js";
 import {
+  approvalsBySession,
   cancelTimer,
   finishOwnedTurn,
   insertPendingApproval,
@@ -59,6 +60,8 @@ export interface MessageView {
   status: MessageStatus;
   createdAt: number;
   steps: StepView[];
+  /** Every approval row of this message in ascending id order; `[]` for user messages. */
+  approvals: ApprovalEntry[];
 }
 
 export interface SessionMessageTree {
@@ -92,13 +95,18 @@ export interface SessionStoreOptions {
 
 export type ApprovalOutcome = "allow" | "deny" | "timeout";
 
-/** One settled approval, the shape `decide` resolves with (snapshot-compatible). */
-export interface ApprovalView {
+/** One snapshot approval element; `decision` stays null while the approval is pending. */
+export interface ApprovalEntry {
   id: number;
   tool: string;
   title: string;
   requestedAt: number;
   expiresAt: number;
+  decision: ApprovalOutcome | null;
+}
+
+/** One settled approval, the shape `decide` resolves with (a snapshot element, never pending). */
+export interface ApprovalView extends ApprovalEntry {
   decision: ApprovalOutcome;
 }
 
@@ -258,12 +266,17 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
           current.push(view);
         }
       }
+      const approvalsByMessage = approvalsBySession(db, sessionId, decoder);
       const views: MessageView[] = [];
       for (const message of messages) {
         const view = toMessageView(message, decoder);
         const turn = currentTurn(activeTurns, activeSessions, message.id);
         view.content += turn !== undefined && turn.pending.length > 0 ? turn.pending.join("") : "";
-        views.push({ ...view, steps: stepsByMessage.get(message.id) ?? [] });
+        views.push({
+          ...view,
+          steps: stepsByMessage.get(message.id) ?? [],
+          approvals: approvalsByMessage.get(message.id) ?? [],
+        });
       }
       return { session: toSessionView(session, decoder), messages: views };
     },

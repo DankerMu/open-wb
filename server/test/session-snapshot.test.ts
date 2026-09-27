@@ -131,6 +131,7 @@ describe("session REST snapshot capture", () => {
             content: "cached cursor",
             status: "done",
             createdAt: SESSION_NOW,
+            approvals: [],
             steps: [],
           },
           {
@@ -139,6 +140,7 @@ describe("session REST snapshot capture", () => {
             content: "hello",
             status: "running",
             createdAt: SESSION_NOW,
+            approvals: [],
             steps: [],
           },
         ],

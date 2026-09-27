@@ -20,6 +20,7 @@ export const CLOSED = 2;
 export const historyUser = {
   id: -3,
   role: "user" as const,
+  approvals: [] as [],
   content: USER_CONTENT,
   status: "done" as const,
   createdAt: -1,
@@ -29,6 +30,7 @@ export const historyUser = {
 export const userView = {
   id: -3,
   role: "user" as const,
+  approvals: [] as [],
   content: USER_CONTENT,
   status: "done" as const,
   steps: [] as [],
@@ -65,6 +67,7 @@ export function chatSnapshot(
       {
         id: 0,
         role: "assistant",
+        approvals: [],
         content: options.content ?? "",
         status: options.assistantStatus ?? "running",
         createdAt: 0,

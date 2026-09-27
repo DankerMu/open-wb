@@ -70,6 +70,7 @@ describe("SessionStore owner-scoped persisted views", () => {
               content: "owner-visible prompt",
               status: "done",
               createdAt: FIXED_NOW + 20,
+              approvals: [],
               steps: [],
             },
             {
@@ -78,6 +79,7 @@ describe("SessionStore owner-scoped persisted views", () => {
               content: "",
               status: "running",
               createdAt: FIXED_NOW + 20,
+              approvals: [],
               steps: [
                 {
                   id: firstStepId,

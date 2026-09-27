@@ -28,6 +28,7 @@ export type ChatMessage = {
   status: ChatDeliveryStatus;
   createdAt: number;
   steps: ChatStep[];
+  approvals: ChatApproval[];
 };
 
 export type ChatStreamCursor = {
@@ -135,11 +136,13 @@ function parseStep(value: unknown): ChatStep | null {
 }
 
 function parseMessage(value: unknown): ChatMessage | null {
-  if (!hasExactlyKeys(value, ["id", "role", "content", "status", "createdAt", "steps"])) {
+  if (
+    !hasExactlyKeys(value, ["id", "role", "content", "status", "createdAt", "steps", "approvals"])
+  ) {
     return null;
   }
 
-  const { content, createdAt, id, role, status, steps } = value;
+  const { approvals, content, createdAt, id, role, status, steps } = value;
   if (
     !isSafeInteger(id) ||
     !isMessageRole(role) ||
@@ -151,11 +154,30 @@ function parseMessage(value: unknown): ChatMessage | null {
   }
 
   const parsedSteps = parseJsonArray(steps, parseStep);
-  if (!parsedSteps) {
+  const parsedApprovals = parseMessageApprovals(approvals, role);
+  if (!parsedSteps || !parsedApprovals) {
     return null;
   }
 
-  return { id, role, content, status, createdAt, steps: parsedSteps };
+  return { id, role, content, status, createdAt, steps: parsedSteps, approvals: parsedApprovals };
+}
+
+/** Strictly ascending, duplicate-free ids; a user message never carries approvals. */
+function parseMessageApprovals(value: unknown, role: ChatMessageRole): ChatApproval[] | null {
+  const approvals = parseJsonArray(value, parseApproval);
+  if (!approvals || (role === "user" && approvals.length > 0)) {
+    return null;
+  }
+
+  let previous: number | undefined;
+  for (const approval of approvals) {
+    if (previous !== undefined && approval.id <= previous) {
+      return null;
+    }
+    previous = approval.id;
+  }
+
+  return approvals;
 }
 
 function parseStreamCursor(value: unknown): ChatStreamCursor | null {
