@@ -6,8 +6,15 @@ const PATHS = new Set(["/chat/completions", "/v1/chat/completions"]);
 const DEFAULT_KEY = "fake";
 const ERROR_MARKER = "WORKBUDDY_FAKE_ERROR";
 const WALK_MARKER = "WORKBUDDY_UI_WALK:";
+const THINK_MARKER = "WORKBUDDY_THINK";
+const WRITE_MARKER = "WORKBUDDY_WRITE";
 const TOOL_ARGS = '{"command":"echo workbuddy-smoke"}';
 const REPLY_PARTS = ["你好，", "这是 WorkBuddy 的", "第一条流式回复。"];
+const THINK_PARTS = ["先读需求，", "再列要点，", "最后作答。"];
+const WRITE_ARGS = JSON.stringify({
+  path: "workbuddy-report.html",
+  content: "<!doctype html><title>WorkBuddy</title><h1>WorkBuddy</h1>\n",
+});
 const GATE_PREFIX = "/__control/gates/";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const WALK_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/iu;
@@ -103,16 +110,19 @@ function serveChat(response, gates, parsed) {
   const created = Math.floor(Date.now() / 1000);
   const model = typeof parsed.model === "string" ? parsed.model : "fake";
   if (!hasToolRole(parsed.messages)) {
-    writeSse(response, toolFrames(id, created, model));
+    const write = lastUserTextFrom(parsed.messages).includes(WRITE_MARKER);
+    writeSse(response, toolFrames(id, created, model, write));
     return;
   }
   serveFinal(response, gates, parsed.messages, id, created, model);
 }
 
 function serveFinal(response, gates, messages, id, created, model) {
-  const walkId = walkGateId(lastUserTextFrom(messages));
+  const text = lastUserTextFrom(messages);
+  const think = text.includes(THINK_MARKER);
+  const walkId = walkGateId(text);
   if (walkId === undefined) {
-    writeSse(response, textFrames(id, created, model));
+    writeSse(response, textFrames(id, created, model, think));
     return;
   }
   const gate = gates.get(walkId);
@@ -121,10 +131,10 @@ function serveFinal(response, gates, messages, id, created, model) {
     return;
   }
   if (gate !== undefined && gate.phase === "armed") {
-    holdFinal(response, gates, walkId, id, created, model);
+    holdFinal(response, gates, walkId, id, created, model, think);
     return;
   }
-  writeSse(response, textFrames(id, created, model));
+  writeSse(response, textFrames(id, created, model, think));
 }
 
 function handleControl(request, response, path, expectedKey, gates, ttlMs) {
@@ -251,10 +261,10 @@ function releaseHeld(controlResponse, gates, id) {
   writeJson(controlResponse, 200, { phase: "released" });
 }
 
-function holdFinal(response, gates, walkId, completionId, created, model) {
+function holdFinal(response, gates, walkId, completionId, created, model, think) {
   const gate = gates.get(walkId);
   if (gate === undefined || gate.phase !== "armed") {
-    writeSse(response, textFrames(completionId, created, model));
+    writeSse(response, textFrames(completionId, created, model, think));
     return;
   }
   const remaining = [];
@@ -268,6 +278,7 @@ function holdFinal(response, gates, walkId, completionId, created, model) {
   writeSseHeaders(response);
   writeSseFrames(response, [
     chunk(completionId, created, model, { role: "assistant" }, null),
+    ...thinkFrames(completionId, created, model, think),
     chunk(completionId, created, model, { content: REPLY_PARTS[0] }, null),
   ]);
   const onClose = () => {
@@ -363,7 +374,7 @@ function hasToolRole(messages) {
   );
 }
 
-function toolFrames(id, created, model) {
+function toolFrames(id, created, model, write) {
   const callId = `call_${randomUUID()}`;
   return [
     chunk(
@@ -377,7 +388,9 @@ function toolFrames(id, created, model) {
             index: 0,
             id: callId,
             type: "function",
-            function: { name: "bash", arguments: TOOL_ARGS },
+            function: write
+              ? { name: "write", arguments: WRITE_ARGS }
+              : { name: "bash", arguments: TOOL_ARGS },
           },
         ],
       },
@@ -387,13 +400,23 @@ function toolFrames(id, created, model) {
   ];
 }
 
-function textFrames(id, created, model) {
-  const frames = [chunk(id, created, model, { role: "assistant" }, null)];
+function textFrames(id, created, model, think) {
+  const frames = [
+    chunk(id, created, model, { role: "assistant" }, null),
+    ...thinkFrames(id, created, model, think),
+  ];
   for (const part of REPLY_PARTS) {
     frames.push(chunk(id, created, model, { content: part }, null));
   }
   frames.push(chunk(id, created, model, {}, "stop"));
   return frames;
+}
+
+function thinkFrames(id, created, model, think) {
+  if (!think) {
+    return [];
+  }
+  return THINK_PARTS.map((part) => chunk(id, created, model, { reasoning_content: part }, null));
 }
 
 function chunk(id, created, model, delta, finishReason) {
