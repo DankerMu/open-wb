@@ -1,0 +1,45 @@
+# Design: supervisor-split（#487）
+
+父设计为「模块拆分（size-guard）」。下文行号均指 base（`BASE=e23febbe4c889c8d515496e51b51efd3bd207b69`，即当前 origin/master）的 `server/src/sessions/supervisor.ts`，该文件共 772 行。
+
+- **Change surface**：从 `supervisor.ts` 拆出新文件 `sessions/pool.ts` 与 `sessions/turn-control.ts`。
+- **Must preserve**：
+  - `supervisor.ts` 的导出集合逐字不变：`StreamCursor`（19-22）、`SessionStreamLiveHandler`（24）、`SessionStreamSubscription`（26-30）、`SessionSupervisorRuntime`（32-44）、`SessionSupervisorOptions`（46-62）、`SessionSupervisor`（91-641），以及 `releasePumpExit`（705，改为从 `pool.js` 再导出，函数身份不变）。
+  - `SessionSupervisor` 全部方法原地、逐字不变。
+  - carry-forward #451：`#dispatchNew` 中按名逐字段拷贝 runtime 字段到 `SessionRuntimeOpts` 的代码（263-279）不动。
+  - carry-forward #453：`persistEvent` 连同其非穷举 `switch` 逐字搬迁。`ChatEvent` 已含 `approval.request/resolved`（`events.ts:24-36`），这两类事件落入隐式 `undefined` 分支，`#commit` 因此不发布它们。本刀**不**把 switch 改成穷举。4.3（#464）必须经 `#publish` 发布审批事件，不得走 `#commit`/`persistEvent`。
+  - carry-forward #454（审批行类型取自 `store.ts`）：本刀不涉及任何 store 类型。
+- **既有导入方（全部不改）**：
+  - 源码：`server/src/app.ts:39`、`server.ts:34`、`sessions/index.ts:10`、`sessions/rest.ts:13`、`sessions/stream/sse.ts:9`。
+  - 测试：`server/test/session-supervisor-helpers.ts:13`、`session-supervisor-claims.test.ts:2`（值导入 `releasePumpExit`）、`session-approval-events.test.ts:10`、`server-assembly.test.ts:14`。
+- **Must add/change**（搬迁清单）。块体逐字搬移，只允许两类改动：一是加 `export` 关键字，二是每个新文件顶部加 ≤3 行的职责注释和 type-only import。
+  - `pool.ts`（slot 登记）← `Generation`（70-77）、`Slot`（79-89）、`ClaimSlot`（696-699）、`releasePumpExit` 连同其文档注释（701-715）、`releaseClaim`（717-728）。给 `Generation`、`Slot`、`releaseClaim` 加 `export`；`releasePumpExit` 原本已有 `export`；`ClaimSlot` 不导出。import 只有 `import type { SessionRuntime } from "./omp/runtime.js"` 和 `import type { RingBuffer } from "./stream/ring-buffer.js"` 两行。
+  - `turn-control.ts`（回合派发辅助）← `persistEvent`（643-694）、`drain`（764-772），两者都加 `export`。import 只有 `import type { ChatEvent } from "./events.js"` 和 `import type { SessionStore } from "./store.js"` 两行。
+  - `supervisor.ts`：删去 70-90、643-729、763-772，另加三行（经 biome organizeImports 排序后）：
+    - `import { type Generation, releaseClaim, releasePumpExit, type Slot } from "./pool.js";`，位于 `./omp/runtime.js` 之后；
+    - `import { drain, persistEvent } from "./turn-control.js";`，位于 `./tokens.js` 之后；
+    - `export { releasePumpExit } from "./pool.js";`，位于 import 块之后，biome 会在它前面补一个空行。
+  - 留在 `supervisor.ts` 的有：`FlushFailure`（64-68）、`throwCollected`/`asError`/`synchronousSinkViolation`（730-762，故障收容，不属于任何落点），以及全部类方法（含 `#releaseDispatch`/`#releasePump`/`#sealGeneration`，见 proposal 偏离 3）。
+  - 依赖方向（有向无环）：值导入只有 `supervisor.ts → pool.ts` 和 `supervisor.ts → turn-control.ts`。新模块对 `supervisor.ts` 零导入，类型导入也没有。新模块对 `omp/`、`stream/`、`events.ts`、`store.ts` 只有 `import type`。
+  - 行数：已在 base 的草稿镜像中实测，均经 biome 格式化。`supervisor.ts` 为 658 行（772 − 118 + 3 + 1 个空行），上限 ≤ 661，给 4.1–4.6 的接线留出约 140 行；`pool.ts` 为 60 行，`turn-control.ts` 为 68 行，允许 ±3 行。
+- **Governing invariant**：对同一调用序列，`SessionSupervisor` 的派发、认领与释放、落库与发布、retire 和故障收集行为完全一致。
+- **Sibling surfaces**：
+  - `events.ts`（`ChatEvent`/`applyFrame`）零改动。
+  - `store.ts` 的 `SessionStore` 写方法由 `persistEvent` 调用，零改动。
+  - `session-supervisor-claims.test.ts` 直接单测 `releasePumpExit`，靠再导出保持可用。
+  - **必然破坏的既有测试：无。允许的既有测试编辑：无。**
+  - rebase 风险：S1c-B 的 #516（4.3a，supervisor 公开 `retire` 与订阅者 `onEnd`）可能并行修改 `supervisor.ts`。若实施前 origin/master 已前进，实施者按新 base 重算上述行段，并更新 tasks S2 中的 `BASE` 与 sed 行段；搬迁清单（按符号列出）不变。
+- **Seams under test**：既有 supervisor 套件原样使用，它通过 `session-supervisor-helpers.ts` 走真实 fake-omp 子进程和真实 SQLite；另有 `releasePumpExit` 的直接单测。本刀不新增测试，全部检查都属于 guards, always green，没有 red-first。
+- **Required evidence**：见 tasks.md S1–S4。各检查的输入和期望如下：
+  - 三条 diff，输入为 base 行段与新文件，期望输出为空；
+  - 模块边界 grep，期望计数为 0；
+  - `git diff --stat $BASE -- server/test`，期望输出为空；
+  - server 套件，期望 97 文件 / 1638 例（1636 passed + 2 skipped），与 base 相同；
+  - `wc -l`，期望为 658/60/68（±3）；
+  - size-guard、knip、jscpd、lint、typecheck、build，期望全部退出 0。
+- **Non-goals**：见 proposal。
+- **Review focus**：
+  - 块体逐字，由 S2 机械核对；
+  - `supervisor.ts` 导出集合不变（含 `releasePumpExit` 再导出）；
+  - 新模块不导入 `supervisor.ts`；
+  - 没有测试 diff，没有新行为。
