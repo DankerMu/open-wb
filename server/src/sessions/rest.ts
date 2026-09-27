@@ -9,12 +9,13 @@ import type {
   RawServerDefault,
 } from "fastify";
 import { HttpError } from "../core/errors/index.js";
-import type { SessionMessageTree, SessionStore } from "./store.js";
+import type { ApprovalView, SessionMessageTree, SessionStore } from "./store.js";
 import type { StreamCursor } from "./supervisor.js";
 
 export interface SessionSupervisorPort {
   prompt(sessionId: string, text: string): Promise<void>;
   streamCursor(sessionId: string): StreamCursor;
+  decide(sessionId: string, approvalId: number, decision: "allow" | "deny"): Promise<ApprovalView>;
 }
 
 export interface SessionOwnerStore {
@@ -61,7 +62,13 @@ interface SessionIdParams {
   id: string;
 }
 
+interface ApprovalParams {
+  id: string;
+  approvalId: string;
+}
+
 const MESSAGE_LIMIT = 32_768;
+const CANONICAL_APPROVAL_ID = /^[1-9][0-9]*$/;
 
 const noStoreSessionResponse: onRequestHookHandler = (_request, reply, done) => {
   reply.header("Cache-Control", "no-store");
@@ -97,6 +104,17 @@ export function registerSessionRoutes(
     const tree = requireOwnedSession(dependencies.store, request);
     const streamCursor = dependencies.supervisor.streamCursor(request.params.id);
     authorizedHistory.set(request, { tree, streamCursor });
+    done(null, payload);
+  };
+
+  const authorizeApprovalBeforeParse: preParsingHookHandler<
+    RawServerDefault,
+    RawRequestDefaultExpression<RawServerDefault>,
+    RawReplyDefaultExpression<RawServerDefault>,
+    { Params: ApprovalParams }
+  > = (request, _reply, payload, done) => {
+    requireOwnedSession(dependencies.store, request);
+    parseApprovalId(request.params.approvalId);
     done(null, payload);
   };
 
@@ -138,6 +156,17 @@ export function registerSessionRoutes(
         userMessageId: accepted.userMessageId,
         assistantMessageId: accepted.assistantMessageId,
       });
+    },
+  );
+  app.post<{ Params: ApprovalParams }>(
+    "/api/sessions/:id/approvals/:approvalId",
+    { onRequest: noStoreSessionResponse, preParsing: authorizeApprovalBeforeParse },
+    async (request) => {
+      const decision = parseDecision(request.body);
+      const approvalId = parseApprovalId(request.params.approvalId);
+      return toPublicApproval(
+        await dependencies.supervisor.decide(request.params.id, approvalId, decision),
+      );
     },
   );
 }
@@ -192,7 +221,30 @@ function toPublicHistory(snapshot: OwnedSnapshot): {
   };
 }
 
-function parsePromptMessage(body: unknown): string {
+function toPublicApproval(approval: ApprovalView): ApprovalView {
+  return {
+    id: approval.id,
+    tool: approval.tool,
+    title: approval.title,
+    requestedAt: approval.requestedAt,
+    expiresAt: approval.expiresAt,
+    decision: approval.decision,
+  };
+}
+
+/** Canonical positive safe integer; anything else (incl. a missing param) is the session 404. */
+function parseApprovalId(raw: unknown): number {
+  if (typeof raw !== "string" || !CANONICAL_APPROVAL_ID.test(raw)) {
+    throw new HttpError("not_found");
+  }
+  const approvalId = Number(raw);
+  if (!Number.isSafeInteger(approvalId)) {
+    throw new HttpError("not_found");
+  }
+  return approvalId;
+}
+
+function requirePlainRecord(body: unknown): Record<string, unknown> {
   if (
     typeof body !== "object" ||
     body === null ||
@@ -201,7 +253,24 @@ function parsePromptMessage(body: unknown): string {
   ) {
     throw new HttpError("bad_request");
   }
-  const record = body as Record<string, unknown>;
+  return body as Record<string, unknown>;
+}
+
+function parseDecision(body: unknown): "allow" | "deny" {
+  const record = requirePlainRecord(body);
+  const decision = record.decision;
+  if (
+    Object.keys(record).length !== 1 ||
+    !Object.hasOwn(record, "decision") ||
+    (decision !== "allow" && decision !== "deny")
+  ) {
+    throw new HttpError("bad_request");
+  }
+  return decision;
+}
+
+function parsePromptMessage(body: unknown): string {
+  const record = requirePlainRecord(body);
   if (
     Object.keys(record).length !== 1 ||
     !Object.hasOwn(record, "message") ||

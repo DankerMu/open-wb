@@ -191,6 +191,9 @@ export class SessionSupervisor {
 
   /** Owner answer to one pending approval of this session (#464); REST is #468. */
   decide(sessionId: string, approvalId: number, decision: "allow" | "deny"): Promise<ApprovalView> {
+    if (this.#closed) {
+      return Promise.reject(new HttpError("agent_unavailable"));
+    }
     return this.#approvals.decide(sessionId, approvalId, decision);
   }
 
