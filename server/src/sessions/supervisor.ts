@@ -12,9 +12,13 @@ import {
   SessionRuntime,
   type SessionRuntimeOpts,
 } from "./omp/runtime.js";
+import { type Generation, releaseClaim, releasePumpExit, type Slot } from "./pool.js";
 import type { SessionStore } from "./store.js";
 import { type RetainedEvent, RingBuffer, type RingRead } from "./stream/ring-buffer.js";
 import type { TokenRegistry } from "./tokens.js";
+import { drain, persistEvent } from "./turn-control.js";
+
+export { releasePumpExit } from "./pool.js";
 
 export interface StreamCursor {
   epoch: number;
@@ -65,27 +69,6 @@ interface FlushFailure {
   sessionId: string;
   assistantMessageId: number;
   error: unknown;
-}
-
-interface Generation {
-  epoch: number;
-  ring: RingBuffer;
-  revoked: boolean;
-  dispatchCount: number;
-  pumpCount: number;
-  sealed: boolean;
-}
-
-interface Slot {
-  sessionId: string;
-  runtime: SessionRuntime;
-  epoch: number;
-  generation: Generation | undefined;
-  claimedAssistantId: number | undefined;
-  pump: Promise<void> | undefined;
-  retiring: Promise<void> | undefined;
-  acquisitionFault: unknown;
-  infraFaulted: boolean;
 }
 
 export class SessionSupervisor {
@@ -640,93 +623,6 @@ export class SessionSupervisor {
   }
 }
 
-function persistEvent(
-  store: SessionStore,
-  assistantMessageId: number,
-  event: ChatEvent<string>,
-  toolIds: Map<string, number>,
-  nextOrdinal: () => number,
-): ChatEvent<number> | undefined {
-  switch (event.type) {
-    case "turn.start":
-    case "error":
-      return event;
-    case "text.delta":
-      store.appendDelta(assistantMessageId, event.data.delta);
-      return event;
-    case "step.start": {
-      const stepId = store.startStep(assistantMessageId, {
-        ordinal: nextOrdinal(),
-        name: event.data.name,
-        detail: event.data.detail,
-      });
-      toolIds.set(event.data.stepId, stepId);
-      return {
-        type: "step.start",
-        data: {
-          messageId: event.data.messageId,
-          stepId,
-          name: event.data.name,
-          detail: event.data.detail,
-        },
-      };
-    }
-    case "step.end": {
-      const stepId = toolIds.get(event.data.stepId);
-      if (stepId === undefined) {
-        return undefined;
-      }
-      store.finishStep(stepId, event.data.status, event.data.output);
-      return {
-        type: "step.end",
-        data: {
-          messageId: event.data.messageId,
-          stepId,
-          status: event.data.status,
-          output: event.data.output,
-        },
-      };
-    }
-    case "turn.end":
-      store.finishTurn(assistantMessageId, event.data.status);
-      return event;
-  }
-}
-
-interface ClaimSlot {
-  claimedAssistantId: number | undefined;
-  pump: Promise<void> | undefined;
-}
-
-/**
- * Pump exit always releases its own turn's claim, even after a newer pump took the
- * slot (issue #219); only the slot's current-pump registration is identity-gated.
- */
-export function releasePumpExit<S extends ClaimSlot>(
-  claims: Map<number, S>,
-  slot: S,
-  pump: Promise<void>,
-  assistantMessageId: number,
-): void {
-  if (slot.pump === pump) {
-    slot.pump = undefined;
-  }
-  releaseClaim(claims, slot, assistantMessageId);
-}
-
-function releaseClaim<S extends ClaimSlot>(
-  claims: Map<number, S>,
-  slot: S,
-  assistantMessageId: number,
-): void {
-  if (claims.get(assistantMessageId) === slot) {
-    claims.delete(assistantMessageId);
-  }
-  if (slot.claimedAssistantId === assistantMessageId) {
-    slot.claimedAssistantId = undefined;
-  }
-}
-
 function throwCollected(faults: Error[]): void {
   if (faults.length === 1) {
     throw faults[0];
@@ -759,14 +655,4 @@ function synchronousSinkViolation(returned: unknown): Error | undefined {
     /* a throwing then is containment, not a second reported violation */
   }
   return new Error("session observation sink must return synchronously");
-}
-
-async function drain(stream: AsyncIterable<unknown>): Promise<void> {
-  try {
-    for await (const _frame of stream) {
-      /* discard buffered frames after pre-progress failure */
-    }
-  } catch {
-    /* iterator already failed */
-  }
 }
