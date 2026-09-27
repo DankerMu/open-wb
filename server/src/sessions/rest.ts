@@ -16,6 +16,7 @@ export interface SessionSupervisorPort {
   prompt(sessionId: string, text: string): Promise<void>;
   streamCursor(sessionId: string): StreamCursor;
   decide(sessionId: string, approvalId: number, decision: "allow" | "deny"): Promise<ApprovalView>;
+  stop(sessionId: string): Promise<void>;
 }
 
 export interface SessionOwnerStore {
@@ -69,6 +70,8 @@ interface ApprovalParams {
 
 const MESSAGE_LIMIT = 32_768;
 const CANONICAL_APPROVAL_ID = /^[1-9][0-9]*$/;
+/** Fastify 拒绝 bodyLimit 0（须 >0），故取最小合法值；显式 no-body 校验负责 0 字节合同。 */
+const STOP_BODY_LIMIT = 1;
 
 const noStoreSessionResponse: onRequestHookHandler = (_request, reply, done) => {
   reply.header("Cache-Control", "no-store");
@@ -118,6 +121,16 @@ export function registerSessionRoutes(
     done(null, payload);
   };
 
+  const authorizeSessionBeforeParse: preParsingHookHandler<
+    RawServerDefault,
+    RawRequestDefaultExpression<RawServerDefault>,
+    RawReplyDefaultExpression<RawServerDefault>,
+    { Params: SessionIdParams }
+  > = (request, _reply, payload, done) => {
+    requireOwnedSession(dependencies.store, request);
+    done(null, payload);
+  };
+
   app.get("/api/sessions", { onRequest: noStoreSessionResponse }, async (request) => {
     const principal = currentPrincipal(request);
     return {
@@ -156,6 +169,26 @@ export function registerSessionRoutes(
         userMessageId: accepted.userMessageId,
         assistantMessageId: accepted.assistantMessageId,
       });
+    },
+  );
+  app.post<{ Params: SessionIdParams }>(
+    "/api/sessions/:id/stop",
+    {
+      bodyLimit: STOP_BODY_LIMIT,
+      onRequest: noStoreSessionResponse,
+      preParsing: authorizeSessionBeforeParse,
+    },
+    async (request, reply) => {
+      if (request.body !== undefined) {
+        throw new HttpError("bad_request");
+      }
+      // Status read and supervisor.stop share one synchronous segment: no await in between.
+      const tree = requireOwnedSession(dependencies.store, request);
+      if (tree.session.status !== "running") {
+        return reply.code(204).send();
+      }
+      await dependencies.supervisor.stop(request.params.id);
+      return reply.code(202).send({});
     },
   );
   app.post<{ Params: ApprovalParams }>(
