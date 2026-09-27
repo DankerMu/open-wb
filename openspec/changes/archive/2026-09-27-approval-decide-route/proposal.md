@@ -52,7 +52,8 @@ Evidence floor: 新建 `server/test/session-approval-rest.test.ts`（inject 与 
 5. **canonical `approvalId`** = 匹配 `/^[1-9][0-9]*$/` 且 `Number.isSafeInteger`；不满足即在 preParsing 抛 `HttpError("not_found")`，与未知会话同一信封。
 
 ## Open questions（上报编排者）
-- 归档 #468 时，父 tool-approval「审批作答 REST」要吸收偏离 1 的关停句与 Scenario「关停后作答」，并把偏离 2 的措辞写进父块（否则 #473/#474 从父 delta 逐字推进时会重新引入「均在 body 解析前」）。
+- 归档 #468 时，父 tool-approval「审批作答 REST」要吸收偏离 1 的关停句与 Scenario「关停后作答」，并把偏离 2 的措辞写进父块（否则 #473/#474 从父 delta 逐字推进时会重新引入「均在 body 解析前」）。同一偏离在 chat-sessions「会话 REST」的措辞也在归档时同步进父块。
+- http-service-skeleton parser-owner Scenario 第二个 WHEN 的收窄（超限输入由 inject 覆盖）由 #468 归档同步进父块；后续 5.1a/5.1b/5.2b 补回路由时沿用收窄后的措辞。
 - `s1c-session-metadata-presentation`（change B）的 chat-sessions「会话 REST」与 http-service-skeleton「统一错误信封」以 change A 的父文整段重述。这是既有的 A/B 次序约束，与本刀无新冲突。
 - #475/#467/#469 同样 MODIFIED「会话 REST」与「统一错误信封」，后归档者须以推进后的主 spec 为底。
 
