@@ -100,3 +100,21 @@ supervisor SHALL 在审批行持久化之后、经既有 generation ring 发布 
 #### Scenario: 三种决定各一条
 - **WHEN** 三条审批分别以 allow、deny、timeout 结算
 - **THEN** `GET /api/audit?limit=3` 的 `events[*].kind` 均为 `session.approval`，`detail.decision` 分别为 `allow`/`deny`/`timeout`，`detail.tool`/`sessionId`/`messageId` 与请求一致；审批 pending 期间 audit 行数不变
+
+### Requirement: 停止与终态对挂起审批的结算
+审批的结算路径 SHALL 包括以下三条，均经同一 `decision IS NULL` CAS、均在结算落库的同一 SQLite 事务内写审计：
+1. 用户作答（见审批作答 REST）：`allow`/`deny`，向 omp 发对应帧；
+2. 超时（见超时自动允许）：`timeout`，向 omp 发 `Approve`；
+3. 停止：`deny`，向 omp 发 `Deny`。
+
+第 1–3 条的次序 SHALL 为：结算落库与审计（同一事务）→ 向 omp 发帧 → 发布 `approval.resolved`。
+
+停止：`POST /api/sessions/:id/stop` 的路由契约（鉴权、归属、202 `{}`/204、停止意图）由 turn-control 定义；本 Requirement 只定义其对挂起审批的结算。对 running 会话，supervisor SHALL 在发送 `abort` 之前，对该会话**全部** pending 审批逐条按上述第 3 条次序结算为 `deny` 并发 `value:"Deny"`；pending 集合 SHALL 以进入 stop 调用时读取的快照为准，写入 `abort` 前不重读——快照之后新到达的审批（如 Deny 后模型的后续调用）留给有界退回或其它非作答路径结算；全部快照项结算完毕后才写入 `abort` 帧。fake-omp probe 记录的入站帧序 SHALL 证明每条 `extension_ui_response(Deny)` 都先于 `abort`。
+
+#### Scenario: 先 Deny 后 abort
+- **WHEN** fake-omp `approval-then-abort` 脚本中 select 挂起时调用 stop
+- **THEN** probe `frames=` 显示 `extension_ui_response` 先于 `abort`（probe 只记帧类型）；该应答为 `{id:"r1",value:"Deny"}` 由 fake-omp 随之发出的 `tool_execution_end{isError:true}` 证明；`approval.resolved{decision:"deny"}` 先于该回合唯一的 `turn.end(stopped)`
+
+#### Scenario: 停止拒绝全部挂起审批
+- **WHEN** `approval-parallel` 中 `r1`、`r2` 均挂起时调用 stop
+- **THEN** probe `frames=` 显示两帧 `extension_ui_response` 然后恰一帧 `abort`（probe 只记帧类型）；两帧的 `id`/`value` 分别为 `{id:"r1",value:"Deny"}`、`{id:"r2",value:"Deny"}`，按审批 `id` 升序，由 fake-omp 的 `tool_execution_end` 到达顺序（各 select 应答后立即发出）证明；发布两个 `approval.resolved{decision:"deny"}`，均先于 `turn.end(stopped)`

@@ -5,6 +5,41 @@
 
 ## MODIFIED Requirements
 
+### Requirement: 停止生成 REST
+`POST /api/sessions/:id/stop` SHALL 受既有 cookie guard 与 owner 校验：未认证 401（先于 body 解析）、不存在或属他人 404 `not_found`，均在任何 supervisor 调用前；响应 `Cache-Control: no-store`。该路由 SHALL 是无 body 路由且列入 content-parser 归属集（与 logout 先例一致）：content-parser 错误（malformed/empty JSON、unsupported media、超出最小 body limit）SHALL 映射为 400 `bad_request`，任何被解析出的 body SHALL 400 `bad_request`，均在认证之后、任何 supervisor 调用之前，无写入、无帧。
+
+会话 `status="running"` 时 SHALL 调用 supervisor stop；stop 在其调用期间持有该会话的控制占用（调用返回即释放；停止意图路径上的 `abort` 帧在调用返回之后才写出，不在占用内），并：先按 tool-approval 规范以 `deny` 结算该会话全部挂起审批（以进入 stop 时读取的快照为准，写 `abort` 前不重读）（每条结算落库与审计同一事务 → 发 `Deny` → 发布 `approval.resolved`），再处理中断，返回 202，body 恰为 JSON 空对象 `{}`；不等待 `agent_end`。中断 SHALL 分两种：
+- prompt 已派发（runtime 存在活跃回合）：对该会话进程调用 `abort()` 写出 `{type:"abort"}`，写入成功后返回 202。
+- prompt 尚未派发（runtime 仍在获取/握手，`abort()` 返回 `false`，即尚无已派发的回合）：supervisor SHALL 为该回合登记"停止意图"，此刻不写任何帧，stop 随即返回 202 `{}`；该次派发 SHALL 照常进行——握手完成后 `prompt` 帧照常写出，用户消息照常进入 omp 会话历史，仍在等待派发回执的 prompt（或 regenerate）请求 SHALL 以 202 返回其原本的受理 body。supervisor 本就等待的该 `prompt` 派发回执兑现后，SHALL 立即对同一 generation 再次调用 `abort()` 写出 `{type:"abort"}`；此后与上一条完全相同：回合经归约器的普通中断路径（`message_end{stopReason:"aborted"}` → `agent_end` → 恰一个 `turn.end{messageId,status:"stopped"}`）收尾，`agent_end` 未在 `OMP_ABORT_GRACE_MS` 内到达则走有界退回（见中断帧归约与有界退回）。停止意图路径本身 SHALL 不调用 `applyStop`、不直接 `finishTurn(stopped)`：一个回合的 `turn.end` 恰由一条路径发出。被停止的 assistant 正文为 abort 生效前已到达的 text.delta（可能为空）。停止意图登记期间 runtime 获取或派发失败（派发回执拒绝）时，SHALL 走该请求在无停止意图时完全相同的失败路径（prompt → 既有受理对补偿与既有错误响应；regenerate → 其自身规则），停止意图随之丢弃、不写 `abort`。若该回合已先被其它路径终态结算（如崩溃 `failed`），停止意图 SHALL 不改写其终态。
+
+会话非 running（`idle`/`done`/`failed`/`stopped`）SHALL 返回 204 无 body，不写任何行、不向进程发帧（幂等）。supervisor SHALL 记录该回合的停止已在途：同一回合再次 stop SHALL 不写第二帧 `abort`、不重复结算审批，返回 202 `{}`。
+
+#### Scenario: 运行中停止
+- **WHEN** 回合进行中调用 stop，fake-omp 以 `abort-ok` 脚本应答
+- **THEN** 202，body 恰为 `{}`；fake-omp stdin 收到恰一帧 `{type:"abort"}`；随后浏览器事件序列以 `turn.end{messageId,status:"stopped"}` 结束且不含 `error`；`GET /api/sessions` 中该会话 `status="stopped"`
+
+#### Scenario: 非运行中停止幂等
+- **WHEN** 对 `idle`、`done`、`failed`、`stopped` 会话分别调用 stop
+- **THEN** 204、响应无 body；消息表行数与 `updated_at` 不变、无入站帧
+
+#### Scenario: 同一回合二次停止
+- **WHEN** fake-omp 以 `abort-ignored` 脚本运行，回合中调用 stop，在 `abort` 已发出而 `agent_end` 未到、有界退回尚未触发时再次调用 stop
+- **THEN** 两次均 202 `{}`；fake-omp stdin 记录恰一帧 `abort`；无第二次审批结算；最终恰一个 `turn.end(stopped)`
+
+#### Scenario: 派发前停止
+- **WHEN** fake-omp 以 `slow-ready` 脚本运行（`--ready-delay-ms` 使获取/握手窗口可观察），会话发出 prompt（REST 仍在等待派发回执、会话已为 running）时调用 stop，随后握手完成；该回合结束后对同一会话发一个 probe prompt
+- **THEN** stop 在握手完成前返回 202 `{}`；该 prompt 请求返回 202 `{userMessageId,assistantMessageId}`；该回合的 assistant 与会话为 `stopped`，SSE 该回合恰一个 `turn.end(stopped)`、无 `error`、无 `turn.end(failed)`；probe prompt 在同一进程上 202 且正常完成，其报告的 `frames=` 恰为 `negotiate_protocol,get_state,prompt,abort,prompt`（`abort` 紧随被停止回合的 `prompt`，末个 `prompt` 为 probe）
+
+#### Scenario: abort 返回 false 走停止意图
+- **WHEN** supervisor 对 running 会话调用 runtime `abort()` 而它因 prompt 尚未派发返回 `false`
+- **THEN** 此刻不写 `abort` 帧，stop 仍返回 202 `{}`；该回合派发回执兑现后 supervisor 对同一 generation 再次调用 `abort()`，入站帧序为该回合的 `prompt` 后恰一帧 `abort`；回合经 `message_end aborted` → `agent_end` 以恰一个 `turn.end(stopped)` 收尾（不经 `applyStop` 合成）；不产生 `error` 或 `turn.end(failed)`
+
+#### Scenario: body 与鉴权
+- **WHEN** 已认证 owner 以 `{}`、`{"x":1}`、malformed JSON 或 `text/plain` body 调用 stop
+- **THEN** 400 `bad_request`，无 supervisor 调用、无写入、无入站帧
+- **WHEN** 匿名请求、他人会话、不存在会话调用 stop
+- **THEN** 分别 401、404、404（后两者响应一致），无 supervisor 调用与数据变更
+
 ### Requirement: 中断帧归约与有界退回
 归约器 SHALL 把 assistant `message_end{stopReason:"aborted"}` 记为"已中断"而非失败：其后终止 `agent_end`（`isTerminal` 缺省或 true）SHALL 恰发一次 `turn.end{messageId,status:"stopped"}`，不发 `error`；`stopReason:"error"` 的既有 `error` + `turn.end failed` 路径不变；同一回合先 error 后 aborted 或反之，SHALL 以首个被记住的原因为准。`turn.end.status` 联合 SHALL 为 `done|failed|stopped`。supervisor 在发出 `abort` 后 SHALL 启动有界等待：内部常量 `OMP_ABORT_GRACE_MS = 8000`（不做配置，注入时钟），期限内 `agent_end` 未到达 SHALL 退回既有 retire 路径关停该进程，并以新增纯函数 `applyStop(state)`（与 `applyFailure` 对称）合成恰一个 `turn.end{status:"stopped"}`；退回后到达的迟到帧或进程退出 SHALL 不再产生 `error`/`turn.end failed`，会话仍以 `stopped` 收尾。`agent_end` 在期限内到达 SHALL 取消该等待且不 retire 进程，进程可继续受理下一 prompt。
 
@@ -66,41 +101,6 @@ supervisor SHALL 按 `sessionId` 维护"控制占用"（control claim）。regen
 #### Scenario: 失败后释放占用
 - **WHEN** regenerate 因分支文本不一致 502、因池满 503，或 fork 因对齐失败 502 结束
 - **THEN** 响应返回时占用已释放：随后对该会话的合法 prompt 返回 202
-
-### Requirement: 停止生成 REST
-`POST /api/sessions/:id/stop` SHALL 受既有 cookie guard 与 owner 校验：未认证 401（先于 body 解析）、不存在或属他人 404 `not_found`，均在任何 supervisor 调用前；响应 `Cache-Control: no-store`。该路由 SHALL 是无 body 路由且列入 content-parser 归属集（与 logout 先例一致）：content-parser 错误（malformed/empty JSON、unsupported media、超出最小 body limit）SHALL 映射为 400 `bad_request`，任何被解析出的 body SHALL 400 `bad_request`，均在认证之后、任何 supervisor 调用之前，无写入、无帧。
-
-会话 `status="running"` 时 SHALL 调用 supervisor stop；stop 在其调用期间持有该会话的控制占用（调用返回即释放；停止意图路径上的 `abort` 帧在调用返回之后才写出，不在占用内），并：先按 tool-approval 规范以 `deny` 结算该会话全部挂起审批（以进入 stop 时读取的快照为准，写 `abort` 前不重读）（每条结算落库与审计同一事务 → 发 `Deny` → 发布 `approval.resolved`），再处理中断，返回 202，body 恰为 JSON 空对象 `{}`；不等待 `agent_end`。中断 SHALL 分两种：
-- prompt 已派发（runtime 存在活跃回合）：对该会话进程调用 `abort()` 写出 `{type:"abort"}`，写入成功后返回 202。
-- prompt 尚未派发（runtime 仍在获取/握手，`abort()` 返回 `false`，即尚无已派发的回合）：supervisor SHALL 为该回合登记"停止意图"，此刻不写任何帧，stop 随即返回 202 `{}`；该次派发 SHALL 照常进行——握手完成后 `prompt` 帧照常写出，用户消息照常进入 omp 会话历史，仍在等待派发回执的 prompt（或 regenerate）请求 SHALL 以 202 返回其原本的受理 body。supervisor 本就等待的该 `prompt` 派发回执兑现后，SHALL 立即对同一 generation 再次调用 `abort()` 写出 `{type:"abort"}`；此后与上一条完全相同：回合经归约器的普通中断路径（`message_end{stopReason:"aborted"}` → `agent_end` → 恰一个 `turn.end{messageId,status:"stopped"}`）收尾，`agent_end` 未在 `OMP_ABORT_GRACE_MS` 内到达则走有界退回（见中断帧归约与有界退回）。停止意图路径本身 SHALL 不调用 `applyStop`、不直接 `finishTurn(stopped)`：一个回合的 `turn.end` 恰由一条路径发出。被停止的 assistant 正文为 abort 生效前已到达的 text.delta（可能为空）。停止意图登记期间 runtime 获取或派发失败（派发回执拒绝）时，SHALL 走该请求在无停止意图时完全相同的失败路径（prompt → 既有受理对补偿与既有错误响应；regenerate → 其自身规则），停止意图随之丢弃、不写 `abort`。若该回合已先被其它路径终态结算（如崩溃 `failed`），停止意图 SHALL 不改写其终态。
-
-会话非 running（`idle`/`done`/`failed`/`stopped`）SHALL 返回 204 无 body，不写任何行、不向进程发帧（幂等）。supervisor SHALL 记录该回合的停止已在途：同一回合再次 stop SHALL 不写第二帧 `abort`、不重复结算审批，返回 202 `{}`。
-
-#### Scenario: 运行中停止
-- **WHEN** 回合进行中调用 stop，fake-omp 以 `abort-ok` 脚本应答
-- **THEN** 202，body 恰为 `{}`；fake-omp stdin 收到恰一帧 `{type:"abort"}`；随后浏览器事件序列以 `turn.end{messageId,status:"stopped"}` 结束且不含 `error`；`GET /api/sessions` 中该会话 `status="stopped"`
-
-#### Scenario: 非运行中停止幂等
-- **WHEN** 对 `idle`、`done`、`failed`、`stopped` 会话分别调用 stop
-- **THEN** 204、响应无 body；消息表行数与 `updated_at` 不变、无入站帧
-
-#### Scenario: 同一回合二次停止
-- **WHEN** fake-omp 以 `abort-ignored` 脚本运行，回合中调用 stop，在 `abort` 已发出而 `agent_end` 未到、有界退回尚未触发时再次调用 stop
-- **THEN** 两次均 202 `{}`；fake-omp probe 记录恰一帧 `abort`；无第二次审批结算；最终恰一个 `turn.end(stopped)`
-
-#### Scenario: 派发前停止
-- **WHEN** fake-omp 以 `slow-ready` 脚本运行（`--ready-delay-ms` 使获取/握手窗口可观察），会话发出 prompt（REST 仍在等待派发回执、会话已为 running）时调用 stop，随后握手完成；该回合结束后对同一会话发一个 probe prompt
-- **THEN** stop 在握手完成前返回 202 `{}`；该 prompt 请求返回 202 `{userMessageId,assistantMessageId}`；该回合的 assistant 与会话为 `stopped`，SSE 该回合恰一个 `turn.end(stopped)`、无 `error`、无 `turn.end(failed)`；probe prompt 在同一进程上 202 且正常完成，其报告的 `frames=` 恰为 `negotiate_protocol,get_state,prompt,abort,prompt`（`abort` 紧随被停止回合的 `prompt`，末个 `prompt` 为 probe）
-
-#### Scenario: abort 返回 false 走停止意图
-- **WHEN** supervisor 对 running 会话调用 runtime `abort()` 而它因 prompt 尚未派发返回 `false`
-- **THEN** 此刻不写 `abort` 帧，stop 仍返回 202 `{}`；该回合派发回执兑现后 supervisor 对同一 generation 再次调用 `abort()`，入站帧序为该回合的 `prompt` 后恰一帧 `abort`；回合经 `message_end aborted` → `agent_end` 以恰一个 `turn.end(stopped)` 收尾（不经 `applyStop` 合成）；不产生 `error` 或 `turn.end(failed)`
-
-#### Scenario: body 与鉴权
-- **WHEN** 已认证 owner 以 `{}`、`{"x":1}`、malformed JSON 或 `text/plain` body 调用 stop
-- **THEN** 400 `bad_request`，无 supervisor 调用、无写入、无入站帧
-- **WHEN** 匿名请求、他人会话、不存在会话调用 stop
-- **THEN** 分别 401、404、404（后两者响应一致），无 supervisor 调用与数据变更
 
 ### Requirement: 重新生成 REST
 `POST /api/sessions/:id/regenerate` SHALL 受 cookie guard 与 owner 校验（401/404 同 stop），响应 no-store。该路由 SHALL 是无 body 路由且列入 content-parser 归属集：content-parser 错误与任何被解析出的 body SHALL 400 `bad_request`，在认证之后、任何 supervisor 调用之前，无写入。前置校验：会话 `status="running"` 或该会话持有控制占用 SHALL 409 `session_busy`；`status ∈ {done,failed,stopped}` 且末条消息 `role="assistant"` 且其前一条为 `role="user"` 方可执行，否则（含 `idle` 无消息、末条为 user）400 `bad_request`；校验阶段不写任何行。校验通过即登记控制占用（见会话级控制占用），并记下预检读到的末条 assistant id。
