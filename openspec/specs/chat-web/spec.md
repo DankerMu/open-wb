@@ -2,7 +2,9 @@
 
 ## Purpose
 定义浏览器会话页、API 客户端、纯事件归约与有界 SSE 快照恢复：完整正文和步骤呈现、查询选择、严格响应/事件校验、账号与操作所有权、错误归属及关闭治理。
+
 ## Requirements
+
 ### Requirement: API 客户端扩展
 `ApiClient` SHALL 提供 `listSessions()`、`createSession()`、`getMessages(id)`、`prompt(id, message)`，分别返回类型化的会话列表、会话、完整消息快照和接受回合的消息 ID；并 SHALL 提供 S1c 回合控制四方法 `stopSession(id)`、`regenerateSession(id)`、`forkSession(id, messageId)`、`decideApproval(id, approvalId, decision)`。八方法 SHALL 使用既有 same-origin 请求、可选 AbortSignal、错误信封与 401 通知机制；GET SHALL 禁止缓存，路径 ID（会话 id、`approvalId`）SHALL 编码。原四方法成功状态 SHALL 分别为 200、201、200、202；新建会话不发送 body，prompt SHALL 原样发送 JSON `{message}`。
 回合控制四方法的合同：`stopSession(id)` POST `/api/sessions/:id/stop` 不发送 body，202 的 body SHALL 按 JSON 严格解析为空对象 `{}`（多字段、非对象或非 JSON 按非法响应处理）并解析为 `"stopping"`（已受理停止），204 无 body、不读取响应体并解析为 `"idle"`（会话非 running，幂等），返回 `Promise<"stopping"|"idle">`，调用方据此决定是否提示；`regenerateSession(id)` POST `/api/sessions/:id/regenerate` 不发送 body，202 返回严格解析的 `{assistantMessageId}`（安全整数）；`forkSession(id, messageId)` POST `/api/sessions/:id/fork` 原样发送 JSON `{messageId}`，201 返回严格解析的 `{session, draft}`，`session` 复用会话 DTO 解析、`draft` 为字符串（允许空串）；`decideApproval(id, approvalId, decision)` POST `/api/sessions/:id/approvals/:approvalId` 原样发送 JSON `{decision}`（`decision ∈ {"allow","deny"}`），200 返回严格解析的已结算审批对象（形状同消息快照 `approvals` 数组元素且 `decision` 非 null）。
@@ -200,3 +202,24 @@ Business errors SHALL display inline on the message;409/502 SHALL display envelo
 - **WHEN** 运行 `bash scripts/size-guard.sh`、`knip` 与 web 测试
 - **THEN** size-guard 退出 0，knip 无未引用导出，`api-sessions.ts` 对 `./api.js` 只有 `import type`，既有调用方仍从 `lib/api.js` 取得 `createApiClient`/`ApiClient`/`ApiError`，web 测试全绿
 
+### Requirement: 会话页源码模块划分
+`web/src/features/chat/` 下的会话页实现 SHALL 保持每个源文件 ≤800 行（`scripts/size-guard.sh`）。
+
+`ChatPage` SHALL 保持定义在 `page.tsx`，并经 `index.ts` 导出。`index.ts` 是会话页 feature 的唯一公共入口。
+
+`turn-actions.ts` SHALL 承载会话页回合操作的 handler 及其所有权 fence，包括：
+- prompt 派发、受理前后的失败回退与草稿恢复；
+- 停止、重新生成、分叉与审批作答。
+
+这些 handler SHALL 以只由 `ChatPage` 调用的 hook 或辅助函数形式提供，`turn-actions.ts` SHALL 不渲染 UI。fence 状态（ref、generation 计数器，以及 `releaseMutationIfOwned`、`abortMutation` 这类页面级 fence 函数）SHALL 仍由 `ChatPage` 持有，并注入给这些 handler。「会话页」要求中所说的页面持有所有权 fence，指的就是这些状态由组件持有。
+
+`page.tsx` 与 `turn-actions.ts` 之间的值导入 SHALL 只沿 `page.tsx → turn-actions.ts` 方向，`turn-actions.ts` SHALL 不导入 `./page.js`。`turn-actions.ts` 的导出 SHALL 只供 `page.tsx` 使用，不经 `index.ts` 对外暴露，也不新增未被引用的导出。
+
+#### Scenario: 模块划分可持续验证
+- **WHEN** 运行 `bash scripts/size-guard.sh`、`knip` 与 web 测试
+- **THEN** 同时满足以下各项：
+  - size-guard 退出 0；
+  - knip 报告无未引用导出；
+  - `turn-actions.ts` 不导入 `./page.js`；
+  - 既有调用方仍从 `features/chat/index.js` 取得 `ChatPage`；
+  - web 测试全绿。

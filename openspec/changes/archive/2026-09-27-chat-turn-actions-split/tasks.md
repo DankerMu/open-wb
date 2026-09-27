@@ -10,17 +10,25 @@
   - `git diff --stat ${BASE} -- web server` 恰好列出 `web/src/features/chat/{page.tsx,turn-actions.ts}` 两个文件；本 child change 目录随同一 PR 提交，不计入此项；
   - `wc -l` 依次为 620、210，偏差 ±3 行以内；偏差更大须在 PR body 说明；
   - `page.tsx` ≤ 623 行。
-- [ ] S2 搬迁恒等：D1、D2 输出为空，D3 恰好输出下面 4 行。在仓库根目录用 bash 运行。`BASE=56fc402a0b31fec517f9334e2f91869d76c6a025`。
+- [ ] S2 搬迁恒等：D1、D2、D4 输出为空，两处 DEPS 计数均为 4，D3 恰好输出下面 4 行。在仓库根目录用 bash 运行。`BASE=56fc402a0b31fec517f9334e2f91869d76c6a025`。
   ```sh
   F=web/src/features/chat
   norm() { tr -d '[:space:]' | sed -E 's/\},\[[A-Za-z,]*\],?\)/},[DEPS])/g'; }
   # D1：块体恒等。去掉空白并把依赖数组归一为 [DEPS] 后比较，两侧各恰有 4 处 [DEPS]
   diff <(git show ${BASE}:$F/page.tsx | sed -n '314,447p' | norm) \
        <(awk '/^}: TurnActionDeps\) \{$/{f=1;next} /^  return \{ dispatchPrompt, restoreOwnedDraft \};$/{f=0} f' $F/turn-actions.ts | norm)
-  # D2：page.tsx 其余部分恒等
-  diff <(git show ${BASE}:$F/page.tsx | sed -e '29d' -e '314,447d') \
+  # D2：page.tsx 其余部分恒等；搬迁块与 hook 调用都替换为占位行，所以位置也被直接校验
+  diff <(git show ${BASE}:$F/page.tsx | sed -e '29d' -e '314,447c\
+__TURN_ACTIONS__') \
        <(sed -e '/^import { TERMINAL_REFRESH_GUIDANCE, useTurnActions } from "\.\/turn-actions\.js";$/d' \
-             -e '/= useTurnActions({$/,/^  });$/d' $F/page.tsx)
+             -e '/= useTurnActions({$/,/^  });$/c\
+__TURN_ACTIONS__' $F/page.tsx)
+  # D1 补充：两侧各恰 4 处 [DEPS]（D1 的 diff 为空不能单独证明这一点）
+  git show ${BASE}:$F/page.tsx | sed -n '314,447p' | norm | grep -o DEPS | wc -l   # 期望 4
+  awk '/^}: TurnActionDeps\) \{$/{f=1;next} /^  return \{ dispatchPrompt, restoreOwnedDraft \};$/{f=0} f' $F/turn-actions.ts | norm | grep -o DEPS | wc -l   # 期望 4
+  # D4：调用实参与 hook 形参逐项同名（18 个同名简写，无 `a: b` 重绑定），输出须为空
+  diff <(sed -n '/= useTurnActions({$/,/^  });$/p' $F/page.tsx | sed '1d;$d;s/^ *//;s/,$//') \
+       <(sed -n '/^export function useTurnActions({$/,/^}: TurnActionDeps) {$/p' $F/turn-actions.ts | sed '1d;$d;s/^ *//;s/,$//')
   # D3：依赖数组逐项核对（相对 base 只补入 ref 对象与 setter，无 .current）
   tr -d '[:space:]' < $F/turn-actions.ts | grep -oE '\},\[[A-Za-z,]*\],?\)'
   ```
@@ -51,7 +59,7 @@
 
 | Pack | Selected | 理由 → 证据 |
 |---|---|---|
-| Concurrency / shared state / ordering | yes | generation/abort/client/requested-session 门控随搬迁跨文件；依赖数组改为显式列出稳定引用；hook 调用次序须不变 → S2 D1/D2/D3 + `chat-page-lifecycle.test.tsx`/`chat-page-ownership-gaps.test.tsx` 零 diff 全绿 |
+| Concurrency / shared state / ordering | yes | generation/abort/client/requested-session 门控随搬迁跨文件；依赖数组改为显式列出稳定引用；hook 调用位置 → 只由 S2 D2（占位行替换，直接校验位置）守护。`useTurnActions` 只含 `useCallback`，移位没有行为效应，既有测试看不到它的位置（PR #609 评审中的信息性变异已证实）；fence 门控的漂移由 D1 与 `chat-page-lifecycle.test.tsx`/`chat-page-ownership-gaps.test.tsx` 零 diff 全绿守护 |
 | Legacy compatibility / examples | yes | `index.ts:1` 导出面、`router.tsx:4` 与 `chat-page-lifecycle-support.tsx:7` 导入方、`topbar.test.tsx:285-287` 源码守卫不变 → S3 + S4 + `make typecheck` |
 | Error handling / rollback / partial outputs | yes | 受理前失败要恢复草稿并显示 promptError，受理后失败只给 streamError 加刷新指引 → S2 + `chat-page-ownership.test.tsx:228,258,282,316`、`chat-page-lifecycle.test.tsx:170,217` 零 diff 全绿 |
 | Public API / CLI / script entry | no | 无 HTTP/CLI 变化；TS 导出面归 Legacy 包 |
