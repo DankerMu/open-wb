@@ -192,7 +192,7 @@ async function probeFrames(run: RealRun): Promise<string> {
         asRecord(frame.assistantMessageEvent).type === "text_delta",
     );
   const text = String(asRecord(delta?.assistantMessageEvent).delta);
-  return / frames=(\S*)$/u.exec(text)?.[1] ?? `<no frames= in ${text}>`;
+  return / frames=(\S*) cwd=/u.exec(text)?.[1] ?? `<no frames= in ${text}>`;
 }
 
 function toolEnd(frames: OmpFrame[]): OmpFrame | undefined {

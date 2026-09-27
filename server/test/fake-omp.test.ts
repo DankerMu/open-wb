@@ -7,7 +7,14 @@
  * call-proxy's two-round contract (#166) runs against the real #88 fake upstream;
  * fragment reassembly and malformed tool calls run against test-owned SSE stubs.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import {
   createServer,
   request as httpRequest,
@@ -751,7 +758,7 @@ async function expectProbeTurn(session: Session, expectedDelta: string): Promise
 }
 
 function expectedProbeReport(environ: string, wrote: string): string {
-  return `uid=${String(PARENT_UID)} gid=${String(PARENT_GID)} env=${PROBE_ENV_KEYS} home=${PROBE_HOME} agent=${PROBE_AGENT} environ=${environ} wrote=${wrote} frames=negotiate_protocol,get_state,prompt`;
+  return `uid=${String(PARENT_UID)} gid=${String(PARENT_GID)} env=${PROBE_ENV_KEYS} home=${PROBE_HOME} agent=${PROBE_AGENT} environ=${environ} wrote=${wrote} frames=negotiate_protocol,get_state,prompt cwd=${realpathSync(process.cwd())}`;
 }
 
 function managedYaml(baseUrl: string, modelId: string): string {

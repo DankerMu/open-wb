@@ -398,7 +398,7 @@ function probeReport(message) {
     environ = error.code;
   }
   const env = Object.keys(process.env).sort().join(",");
-  return `uid=${process.getuid()} gid=${process.getgid()} env=${env} home=${process.env.HOME ?? ""} agent=${process.env.PI_CODING_AGENT_DIR ?? ""} environ=${environ} wrote=${wrote} frames=${inbound.join(",")}`;
+  return `uid=${process.getuid()} gid=${process.getgid()} env=${env} home=${process.env.HOME ?? ""} agent=${process.env.PI_CODING_AGENT_DIR ?? ""} environ=${environ} wrote=${wrote} frames=${inbound.join(",")} cwd=${process.cwd()}`;
 }
 
 async function requestConfirm() {

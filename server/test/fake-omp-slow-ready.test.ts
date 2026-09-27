@@ -226,7 +226,7 @@ describe("fake-omp slow-ready", () => {
     const at = await waitAfter(session, probeAck, isTextDelta);
     const report = String(asRecord(session.frames[at]?.assistantMessageEvent).delta);
     expect(report.split(" frames=")).toHaveLength(2);
-    expect(/ frames=([^ ]*)$/u.exec(report)?.[1]).toBe(
+    expect(/ frames=([^ ]*) cwd=/u.exec(report)?.[1]).toBe(
       "negotiate_protocol,get_state,prompt,abort,prompt",
     );
     const end = await waitAfter(session, probeAck, (frame) => frame.type === "agent_end");
