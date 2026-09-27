@@ -101,6 +101,9 @@ function createSupervisor(): RecordingSupervisor {
     decide() {
       return Promise.reject(new Error("unexpected decide call"));
     },
+    stop() {
+      return Promise.reject(new Error("unexpected stop call"));
+    },
   };
   return supervisor;
 }
