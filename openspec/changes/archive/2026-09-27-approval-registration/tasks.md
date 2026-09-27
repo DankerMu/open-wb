@@ -33,3 +33,5 @@
 - [ ] 实测 `wc -l server/src/sessions/{supervisor,store,store-approvals,approvals}.ts` 与新测试文件，记入 PR body；`supervisor.ts` ≤755（硬上限 760）。
 - [ ] `npm test --workspace server`（覆盖率 ≥80%）、`make lint`、`make typecheck`、`make anti-drift`、`bash scripts/size-guard.sh`、knip 零新增，全部退出 0；`openspec validate approval-registration --strict --no-interactive` 通过。
 - [ ] PR body 标注「Critical Path：请求白盒审查」，列出 proposal「偏离与决定」各条与 Open questions。
+
+> 归档补记（#597 review）：修复轮新增 R21——审批行被级联删除后到期：`#expire` 把 `not_found` 当作 CAS 未命中（删登记 + `clearPending`，不上报故障）；变异「`not_found` 走 fault」→ R21 红（修复前 `world.errors` 含 `HttpError not_found`）。fault 分支先删登记再上报（无测试钉住，仅内存）。

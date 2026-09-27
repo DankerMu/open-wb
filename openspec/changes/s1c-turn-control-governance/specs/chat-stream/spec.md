@@ -17,7 +17,7 @@
 
 #### Scenario: Persistence failure publishes nothing
 - **WHEN** the pending insert, or the transaction writing the decision together with its audit row, fails in SQLite
-- **THEN** no `approval.request` respectively `approval.resolved` event enters the ring, no frame is written to the child for that decision, the failure follows the existing owned error-sink path and the ring sequence is not advanced by the failed publication
+- **THEN** no `approval.request` respectively `approval.resolved` event enters the ring, no frame is written to the child for that decision, the ring sequence is not advanced by the failed publication; a failed pending insert or timeout settlement follows the existing owned error-sink path, while a failed owner answer rejects the caller with the original error and leaves the approval pending
 
 #### Scenario: Parallel approvals coexist
 - **WHEN** real fake-omp (`approval-parallel`) raises two approval selects in one turn and the owner answers the second (`deny`) before the first (`allow`), so the fake completes the turn normally
