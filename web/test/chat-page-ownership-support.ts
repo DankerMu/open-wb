@@ -90,6 +90,7 @@ export function runningCreatedSnapshot(): ChatMessageSnapshot {
       {
         id: -3,
         role: "user",
+        approvals: [],
         content: PROMPT,
         status: "done",
         createdAt: -1,
@@ -98,6 +99,7 @@ export function runningCreatedSnapshot(): ChatMessageSnapshot {
       {
         id: 0,
         role: "assistant",
+        approvals: [],
         content: "",
         status: "running",
         createdAt: 0,
@@ -115,6 +117,7 @@ export function completedCreatedSnapshot(): ChatMessageSnapshot {
       {
         id: -3,
         role: "user",
+        approvals: [],
         content: PROMPT,
         status: "done",
         createdAt: -1,
@@ -123,6 +126,7 @@ export function completedCreatedSnapshot(): ChatMessageSnapshot {
       {
         id: 0,
         role: "assistant",
+        approvals: [],
         content: STREAMED_BODY,
         status: "done",
         createdAt: 0,
@@ -159,6 +163,7 @@ export function otherSnapshot(): ChatMessageSnapshot {
       {
         id: -5,
         role: "user",
+        approvals: [],
         content: "other user",
         status: "done",
         createdAt: -2,

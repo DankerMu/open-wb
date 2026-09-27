@@ -56,6 +56,7 @@ describe("chat page confirmed ownership gaps", () => {
     const priorUser = {
       id: -9,
       role: "user" as const,
+      approvals: [] as [],
       content: "prior distinct user",
       status: "done" as const,
       createdAt: -5,
@@ -73,6 +74,7 @@ describe("chat page confirmed ownership gaps", () => {
         {
           id: -4,
           role: "user",
+          approvals: [],
           content: PROMPT,
           status: "done",
           createdAt: 1,
@@ -81,6 +83,7 @@ describe("chat page confirmed ownership gaps", () => {
         {
           id: 1,
           role: "assistant",
+          approvals: [],
           content: COMPLETED_BODY,
           status: "done",
           createdAt: 2,
@@ -192,6 +195,7 @@ describe("chat page confirmed ownership gaps", () => {
         {
           id: -4,
           role: "user",
+          approvals: [],
           content: FOLLOW_UP,
           status: "done",
           createdAt: 1,
@@ -200,6 +204,7 @@ describe("chat page confirmed ownership gaps", () => {
         {
           id: 1,
           role: "assistant",
+          approvals: [],
           content: "second",
           status: "done",
           createdAt: 2,
@@ -236,6 +241,7 @@ describe("chat page confirmed ownership gaps", () => {
         {
           id: -6,
           role: "user",
+          approvals: [],
           content: secondUser,
           status: "done",
           createdAt: 3,
@@ -244,6 +250,7 @@ describe("chat page confirmed ownership gaps", () => {
         {
           id: 2,
           role: "assistant",
+          approvals: [],
           content: "third",
           status: "done",
           createdAt: 4,
@@ -334,6 +341,7 @@ describe("chat page confirmed ownership gaps", () => {
         {
           id: -4,
           role: "user",
+          approvals: [],
           content: PROMPT,
           status: "done",
           createdAt: 1,
@@ -342,6 +350,7 @@ describe("chat page confirmed ownership gaps", () => {
         {
           id: 0,
           role: "assistant",
+          approvals: [],
           content: COMPLETED_BODY,
           status: "done",
           createdAt: 2,

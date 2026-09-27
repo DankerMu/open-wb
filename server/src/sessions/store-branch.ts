@@ -33,7 +33,10 @@ export function decodeNullableText(decoder: TextDecoder, bytes: Uint8Array | nul
   return bytes === null ? null : decoder.decode(bytes);
 }
 
-export function toMessageView(row: MessageDbRow, decoder: TextDecoder): Omit<MessageView, "steps"> {
+export function toMessageView(
+  row: MessageDbRow,
+  decoder: TextDecoder,
+): Omit<MessageView, "steps" | "approvals"> {
   return {
     id: Number(row.id),
     role: row.role,

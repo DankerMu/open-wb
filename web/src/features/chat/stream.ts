@@ -6,6 +6,15 @@ import type {
   ChatStep,
   ChatStreamCursor,
 } from "../../lib/session-contract.js";
+import {
+  approvalViews,
+  type ChatApprovalEvent,
+  type ChatApprovalView,
+  decodeApprovalRequest,
+  decodeApprovalResolved,
+  requestApproval,
+  resolveApproval,
+} from "./stream-approvals.js";
 
 type ChatStepView = {
   id: ChatStep["id"];
@@ -21,6 +30,7 @@ type ChatMessageView = {
   content: ChatMessage["content"];
   status: ChatMessage["status"];
   steps: ChatStepView[];
+  approvals: ChatApprovalView[];
   error: string | null;
 };
 
@@ -40,7 +50,8 @@ export type ChatEvent =
   | { type: "step.start"; data: ChatStepTarget & { name: string; detail: string } }
   | { type: "step.end"; data: ChatStepTarget & { status: ChatStepEndStatus; output: string } }
   | { type: "turn.end"; data: ChatMessageTarget & { status: ChatTurnEndStatus } }
-  | { type: "error"; data: ChatMessageTarget & { message: string } };
+  | { type: "error"; data: ChatMessageTarget & { message: string } }
+  | ChatApprovalEvent;
 
 type ChatEventType = ChatEvent["type"];
 
@@ -72,6 +83,8 @@ const DATA_EVENTS = [
   "step.end",
   "turn.end",
   "error",
+  "approval.request",
+  "approval.resolved",
 ] as const satisfies readonly ChatEventType[];
 const QUEUE_CAP = 1000;
 const CANONICAL_CURSOR = /^(0|[1-9][0-9]*):(0|[1-9][0-9]*)$/;
@@ -95,6 +108,7 @@ export function chatStateFromSnapshot(snapshot: ChatMessageSnapshot): ChatState 
         output: step.output,
         status: step.status,
       })),
+      approvals: approvalViews(message.approvals),
       error: null,
     })),
   };
@@ -112,6 +126,7 @@ export function applyChatEvent(state: ChatState, event: ChatEvent): ChatState {
           content: "",
           status: "running",
           steps: [],
+          approvals: [],
           error: null,
         }),
         "running",
@@ -138,6 +153,11 @@ export function applyChatEvent(state: ChatState, event: ChatEvent): ChatState {
       );
     case "turn.end":
       return endTurn(state, event.data.messageId, event.data.status);
+    // approval.* only add/settle one entry by approvalId; the session status is left untouched.
+    case "approval.request":
+      return replaceAssistant(state, event.data.messageId, (m) => requestApproval(m, event.data));
+    case "approval.resolved":
+      return replaceAssistant(state, event.data.messageId, (m) => resolveApproval(m, event.data));
     default:
       return state;
   }
@@ -212,6 +232,7 @@ function emptyAssistant(messageId: number): ChatMessageView {
     status: "running",
     content: "",
     steps: [],
+    approvals: [],
     error: null,
   };
 }
@@ -618,6 +639,10 @@ function decodeEvent(type: ChatEventType, value: unknown): ChatEvent | undefined
       return decodeTurnEnd(value);
     case "error":
       return decodeError(value);
+    case "approval.request":
+      return decodeApprovalRequest(value);
+    case "approval.resolved":
+      return decodeApprovalResolved(value);
   }
 }
 

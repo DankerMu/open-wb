@@ -9,7 +9,7 @@ import type {
   RawServerDefault,
 } from "fastify";
 import { HttpError } from "../core/errors/index.js";
-import type { ApprovalView, SessionMessageTree, SessionStore } from "./store.js";
+import type { ApprovalEntry, ApprovalView, SessionMessageTree, SessionStore } from "./store.js";
 import type { StreamCursor } from "./supervisor.js";
 
 export interface SessionSupervisorPort {
@@ -51,6 +51,7 @@ interface PublicMessage {
   content: string;
   status: string;
   createdAt: number;
+  approvals: ApprovalEntry[];
   steps: PublicStep[];
 }
 
@@ -241,6 +242,7 @@ function toPublicHistory(snapshot: OwnedSnapshot): {
       content: message.content,
       status: message.status,
       createdAt: message.createdAt,
+      approvals: message.approvals.map(toPublicApproval),
       steps: message.steps.map((step) => ({
         id: step.id,
         ordinal: step.ordinal,
@@ -254,7 +256,7 @@ function toPublicHistory(snapshot: OwnedSnapshot): {
   };
 }
 
-function toPublicApproval(approval: ApprovalView): ApprovalView {
+function toPublicApproval(approval: ApprovalEntry): ApprovalEntry {
   return {
     id: approval.id,
     tool: approval.tool,

@@ -3,6 +3,7 @@ import type { emit as auditEmit } from "../core/audit/index.js";
 import { createSqliteTextDecoder } from "../core/db/index.js";
 import { HttpError } from "../core/errors/index.js";
 import type {
+  ApprovalEntry,
   ApprovalInput,
   ApprovalOutcome,
   ApprovalView,
@@ -24,6 +25,16 @@ type ApprovalDbRow = {
   title: Uint8Array;
   requested_at: number;
   expires_at: number;
+};
+
+type SnapshotApprovalDbRow = {
+  id: number;
+  message_id: number;
+  tool: Uint8Array;
+  title: Uint8Array;
+  requested_at: number;
+  expires_at: number;
+  decision: ApprovalOutcome | null;
 };
 
 interface Settlement {
@@ -66,6 +77,46 @@ export function insertPendingApproval(
     return Number(receipt.lastInsertRowid);
   });
   return { approvalId, messageId: assistantMessageId, expiresAt };
+}
+
+/**
+ * Snapshot projection: every approval row of the session's assistant messages, keyed by message
+ * and in ascending id order. User messages never carry rows here, whatever the table holds.
+ */
+export function approvalsBySession(
+  db: DatabaseSync,
+  sessionId: string,
+  decoder: TextDecoder,
+): Map<number, ApprovalEntry[]> {
+  const rows = db
+    .prepare(
+      `SELECT a.id, a.message_id, CAST(a.tool AS BLOB) AS tool, CAST(a.title AS BLOB) AS title,
+              a.requested_at, a.expires_at, a.decision
+         FROM chat_approvals AS a
+         JOIN chat_messages AS m ON m.id = a.message_id
+        WHERE m.session_id = ? AND m.role = 'assistant'
+        ORDER BY a.id ASC`,
+    )
+    .all(sessionId) as unknown as SnapshotApprovalDbRow[];
+  const byMessage = new Map<number, ApprovalEntry[]>();
+  for (const row of rows) {
+    const messageId = Number(row.message_id);
+    const entry: ApprovalEntry = {
+      id: Number(row.id),
+      tool: decoder.decode(row.tool),
+      title: decoder.decode(row.title),
+      requestedAt: Number(row.requested_at),
+      expiresAt: Number(row.expires_at),
+      decision: row.decision,
+    };
+    const current = byMessage.get(messageId);
+    if (current === undefined) {
+      byMessage.set(messageId, [entry]);
+    } else {
+      current.push(entry);
+    }
+  }
+  return byMessage;
 }
 
 /**
