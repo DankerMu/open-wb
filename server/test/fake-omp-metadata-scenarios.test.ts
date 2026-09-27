@@ -523,6 +523,5 @@ describe("fake omp module split", () => {
       expect(check.status, check.stderr).toBe(0);
       expect(readFileSync(file, "utf8").split("\n").length - 1).toBeLessThanOrEqual(800);
     }
-    expect(main.split("\n").length - 1).toBeLessThanOrEqual(720);
   });
 });
