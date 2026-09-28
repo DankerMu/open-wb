@@ -1,14 +1,14 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessageSnapshot } from "../src/lib/session-contract.js";
 import { Icon } from "../src/ui/index.js";
-import { OTHER_SESSION_ID } from "./chat-page-ownership-support.js";
 import {
-  cleanupChatPage,
-  expectChatLocation,
-  type FetchRoutes,
-  renderChatPage,
-} from "./chat-page-support.js";
+  cleanupChatLifecycle,
+  renderChatPageWithAuthProbe,
+  renewAccount,
+} from "./chat-page-lifecycle-support.js";
+import { OTHER_SESSION_ID } from "./chat-page-ownership-support.js";
+import { expectChatLocation, type FetchRoutes, renderChatPage } from "./chat-page-support.js";
 import {
   chatSnapshot,
   FakeEventSource,
@@ -29,6 +29,7 @@ const STOPPED_TOAST = "已停止生成";
 const BADGE = "助手消息 已停止";
 const PLACEHOLDER = "（已停止生成）";
 const UNAVAILABLE_502 = { error: { code: "agent_unavailable", message: "Agent 运行时不可用" } };
+const OTHER_502 = { error: { code: "agent_unavailable", message: "当前会话停止失败" } };
 const CAPACITY_503 = { error: { code: "agent_capacity", message: "Agent 容量已满，请稍后重试" } };
 
 type Snapshot = ChatMessageSnapshot;
@@ -63,7 +64,7 @@ type Page = { snapshot: Snapshot; messages: () => Response | Promise<Response> }
 /** 选中会话、读完历史并 open 实时源（open 会再拉一次快照），此后事件从 `1:1` 起。 */
 async function mountPage(initial: Snapshot, routes: FetchRoutes = {}, extra: Snapshot[] = []) {
   const page: Page = { snapshot: initial, messages: () => jsonResponse(page.snapshot) };
-  const { fetchMock } = renderChatPage(`/?session=${SESSION_ID}`, {
+  const { fetchMock, router } = renderChatPage(`/?session=${SESSION_ID}`, {
     "/api/sessions": () =>
       jsonResponse({ sessions: [initial.session, ...extra.map(({ session }) => session)] }),
     [MESSAGES]: () => page.messages(),
@@ -75,7 +76,7 @@ async function mountPage(initial: Snapshot, routes: FetchRoutes = {}, extra: Sna
     source.emitOpen();
   });
   await flush();
-  return { fetchMock, page, source };
+  return { fetchMock, page, router, source };
 }
 
 async function flush(rounds = 3) {
@@ -138,8 +139,24 @@ function follows(first: Element, second: Element) {
 }
 
 afterEach(() => {
-  cleanupChatPage();
+  cleanupChatLifecycle();
+  vi.restoreAllMocks();
 });
+
+/** 当前（未过期）stop 的内联错误；迟到结果若越过围栏写 promptError，会把它顶掉。 */
+async function showCurrentStopError() {
+  await waitFor(() => expect(stopButton().disabled).toBe(false));
+  fireEvent.click(stopButton());
+  await flush();
+  expect(screen.getByRole("alert").textContent).toBe(OTHER_502.error.message);
+}
+
+function expectOnlyCurrentAlert() {
+  expect(screen.getAllByRole("alert").map((alert) => alert.textContent)).toEqual([
+    OTHER_502.error.message,
+  ]);
+  expect(toastText(STOPPED_TOAST)).toBeNull();
+}
 
 describe("stop button: layout and outcomes", () => {
   it("S1 replaces send with an enabled round 停止 button after the 生成中 status", async () => {
@@ -326,7 +343,7 @@ describe("stop button: ownership and fences", () => {
       {
         [STOP]: () => stopA.promise,
         [OTHER_MESSAGES]: () => jsonResponse(other),
-        [OTHER_STOP]: noContent,
+        [OTHER_STOP]: () => jsonResponse(OTHER_502, 502),
       },
       [other],
     );
@@ -337,17 +354,66 @@ describe("stop button: ownership and fences", () => {
     fireEvent.click(within(nav()).getByRole("button", { name: "other session" }));
     await expectChatLocation(`/?session=${OTHER_SESSION_ID}`);
     await flush();
-    await waitFor(() => expect(stopButton().disabled).toBe(false));
-    fireEvent.click(stopButton());
-    await flush();
+    await showCurrentStopError();
     expect(calls(fetchMock, OTHER_STOP)).toHaveLength(1);
     expect(calls(fetchMock, STOP)).toHaveLength(1);
 
     stopA.resolve(late());
     await flush();
+    expectOnlyCurrentAlert();
+    expectRunningComposer();
+  });
+
+  it.each([
+    ["202", () => accepted()],
+    ["502", () => jsonResponse(UNAVAILABLE_502, 502)],
+  ])("S7b drops a late %s from the old client after account renewal", async (_, late) => {
+    const stale = deferredResponse();
+    let stops = 0;
+    const snapshot = runningR();
+    const { fetchMock, getProbe } = renderChatPageWithAuthProbe(`/?session=${SESSION_ID}`, {
+      "/api/sessions": () => jsonResponse({ sessions: [snapshot.session] }),
+      [MESSAGES]: () => jsonResponse(snapshot),
+      [STOP]: () => {
+        stops += 1;
+        return stops === 1 ? stale.promise : jsonResponse(OTHER_502, 502);
+      },
+    });
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    fireEvent.click(stopButton());
+    await flush();
+    expect(stopButton().disabled).toBe(true);
+
+    await renewAccount(getProbe);
+    expect(await screen.findByText("lisi", { exact: true })).toBeTruthy();
+    await flush();
+    await showCurrentStopError();
+    expect(calls(fetchMock, STOP)).toHaveLength(2);
+
+    stale.resolve(late());
+    await flush();
+    expectOnlyCurrentAlert();
+    expectRunningComposer();
+  });
+
+  it("S7c drops a stop result that lands after the chat page unmounted", async () => {
+    const stale = deferredResponse();
+    const { router } = await mountPage(runningR(), { [STOP]: () => stale.promise });
+    fireEvent.click(stopButton());
+    await flush();
+
+    await act(async () => {
+      await router.navigate("/center");
+    });
+    expect(await screen.findByText("中心暂不可用")).toBeTruthy();
+    expect(document.querySelector("form.chat-composer")).toBeNull();
+    const consoleError = vi.spyOn(console, "error");
+
+    stale.resolve(accepted());
+    await flush();
     expect(toastText(STOPPED_TOAST)).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
-    expectRunningComposer();
+    expect(consoleError).not.toHaveBeenCalled();
   });
 
   it("S8 leaves an in-flight prompt and its acceptance reconcile untouched", async () => {
