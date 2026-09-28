@@ -106,6 +106,12 @@ function createSupervisor(): RecordingSupervisor {
     stop() {
       return Promise.reject(new Error("unexpected stop call"));
     },
+    regenerate() {
+      return Promise.reject(new Error("unexpected regenerate call"));
+    },
+    controlHeld() {
+      return false;
+    },
   };
   return supervisor;
 }

@@ -17,6 +17,8 @@ export interface SessionSupervisorPort {
   streamCursor(sessionId: string): StreamCursor;
   decide(sessionId: string, approvalId: number, decision: "allow" | "deny"): Promise<ApprovalView>;
   stop(sessionId: string): Promise<void>;
+  regenerate(sessionId: string, ownerId: string): Promise<{ assistantMessageId: number }>;
+  controlHeld(sessionId: string): boolean;
 }
 
 export interface SessionOwnerStore {
@@ -72,7 +74,7 @@ interface ApprovalParams {
 const MESSAGE_LIMIT = 32_768;
 const CANONICAL_APPROVAL_ID = /^[1-9][0-9]*$/;
 /** Fastify 拒绝 bodyLimit 0（须 >0），故取最小合法值；显式 no-body 校验负责 0 字节合同。 */
-const STOP_BODY_LIMIT = 1;
+const BODYLESS_BODY_LIMIT = 1;
 
 const noStoreSessionResponse: onRequestHookHandler = (_request, reply, done) => {
   reply.header("Cache-Control", "no-store");
@@ -159,6 +161,10 @@ export function registerSessionRoutes(
     async (request, reply) => {
       const principal = currentPrincipal(request);
       const text = parsePromptMessage(request.body);
+      // Claim check and admission share one synchronous segment: no await in between.
+      if (dependencies.supervisor.controlHeld(request.params.id)) {
+        throw new HttpError("session_busy");
+      }
       const accepted = dependencies.store.acceptPrompt(request.params.id, principal.id, text);
       try {
         await dependencies.supervisor.prompt(request.params.id, text);
@@ -175,7 +181,7 @@ export function registerSessionRoutes(
   app.post<{ Params: SessionIdParams }>(
     "/api/sessions/:id/stop",
     {
-      bodyLimit: STOP_BODY_LIMIT,
+      bodyLimit: BODYLESS_BODY_LIMIT,
       onRequest: noStoreSessionResponse,
       preParsing: authorizeSessionBeforeParse,
     },
@@ -190,6 +196,25 @@ export function registerSessionRoutes(
       }
       await dependencies.supervisor.stop(request.params.id);
       return reply.code(202).send({});
+    },
+  );
+  app.post<{ Params: SessionIdParams }>(
+    "/api/sessions/:id/regenerate",
+    {
+      bodyLimit: BODYLESS_BODY_LIMIT,
+      onRequest: noStoreSessionResponse,
+      preParsing: authorizeSessionBeforeParse,
+    },
+    async (request, reply) => {
+      if (request.body !== undefined) {
+        throw new HttpError("bad_request");
+      }
+      const principal = currentPrincipal(request);
+      const { assistantMessageId } = await dependencies.supervisor.regenerate(
+        request.params.id,
+        principal.id,
+      );
+      return reply.code(202).send({ assistantMessageId });
     },
   );
   app.post<{ Params: ApprovalParams }>(
