@@ -12,6 +12,7 @@ import { WelcomeIntro, WelcomePlaybooks } from "./welcome.js";
 
 type AnswerApproval = ComponentProps<typeof ApprovalBars>["onAnswer"];
 type StopTurn = ComponentProps<typeof Composer>["onStop"];
+type Regenerate = ComponentProps<typeof MessageActions>["regenerate"];
 
 type ConversationViewProps = {
   composerDisabled: boolean;
@@ -21,6 +22,7 @@ type ConversationViewProps = {
   historyView: ChatState | null;
   onAnswerApproval: AnswerApproval;
   onChangeDraft(value: string): void;
+  onRegenerate(): Promise<boolean>;
   onStop: StopTurn;
   onSubmit(event: FormEvent<HTMLFormElement>): void;
   promptError: string | null;
@@ -31,6 +33,9 @@ type ConversationViewProps = {
 
 type ChatMessageView = ChatState["messages"][number];
 type ChatStepView = ChatMessageView["steps"][number];
+
+/** Sessions whose last assistant message may be regenerated (a running or `idle` one may not). */
+const REGENERABLE: ReadonlySet<ChatState["status"]> = new Set(["done", "failed", "stopped"]);
 
 function StepCard({ step }: { step: ChatStepView }) {
   const label = SESSION_STATUS_LABEL[step.status];
@@ -66,9 +71,11 @@ function StepCard({ step }: { step: ChatStepView }) {
 const MessageArticle = memo(function MessageArticle({
   message,
   onAnswerApproval,
+  regenerate,
 }: {
   message: ChatMessageView;
   onAnswerApproval: AnswerApproval;
+  regenerate: Regenerate;
 }) {
   const assistant = message.role !== "user";
   const stopped = message.status === "stopped";
@@ -111,8 +118,8 @@ const MessageArticle = memo(function MessageArticle({
             已停止
           </p>
         ) : null}
-        {message.status !== "running" && message.content !== "" ? (
-          <MessageActions text={message.content} />
+        {message.status !== "running" && (message.content !== "" || regenerate) ? (
+          <MessageActions regenerate={regenerate} text={message.content} />
         ) : null}
       </div>
     </article>
@@ -120,16 +127,29 @@ const MessageArticle = memo(function MessageArticle({
 });
 
 function MessageThread({
+  composerDisabled,
   historyView,
   onAnswerApproval,
+  onRegenerate,
 }: {
+  composerDisabled: boolean;
   historyView: ChatState;
   onAnswerApproval: AnswerApproval;
+  onRegenerate(): Promise<boolean>;
 }) {
+  const last = historyView.messages.at(-1);
+  const eligible = last?.role === "assistant" && REGENERABLE.has(historyView.status);
   return (
     <section aria-label="消息" className="chat-thread">
       {historyView.messages.map((message) => (
-        <MessageArticle key={message.id} message={message} onAnswerApproval={onAnswerApproval} />
+        <MessageArticle
+          key={message.id}
+          message={message}
+          onAnswerApproval={onAnswerApproval}
+          regenerate={
+            eligible && message === last ? { disabled: composerDisabled, onRegenerate } : undefined
+          }
+        />
       ))}
     </section>
   );
@@ -143,6 +163,7 @@ export function ConversationView({
   historyView,
   onAnswerApproval,
   onChangeDraft,
+  onRegenerate,
   onStop,
   onSubmit,
   promptError,
@@ -171,7 +192,12 @@ export function ConversationView({
         {requestedSessionId ? (
           <FollowTranscript content={historyView} key={requestedSessionId}>
             {historyView ? (
-              <MessageThread historyView={historyView} onAnswerApproval={onAnswerApproval} />
+              <MessageThread
+                composerDisabled={composerDisabled}
+                historyView={historyView}
+                onAnswerApproval={onAnswerApproval}
+                onRegenerate={onRegenerate}
+              />
             ) : null}
           </FollowTranscript>
         ) : (
