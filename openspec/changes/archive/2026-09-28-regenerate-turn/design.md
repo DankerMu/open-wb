@@ -28,7 +28,7 @@
     - 成员：`held(id)`；`hold(id)`，返回只生效一次的 release；`during(id, fn)`。
     - `during` 同步 hold，`fn` 同步抛错时先释放再原样同步抛出，否则在返回 Promise 的 `.finally` 释放。
   - `Regenerations`：regenerate 编排，按预检 / RPC 段 / 提交段三个方法拆分（biome 认知复杂度 ≤15）。
-    - 端口：`store`、`controls`、`stops`；`closed()`（读 `#closed`）；`acquire`（见 supervisor）、`dispatch`（`#claim` + `#bindDispatch`）、`settled`（`approvals.settled`）。
+    - 端口：`store`、`controls`、`stops`；`closed()`（读 `#closed`）、`live(slot)`（`pool.holds(slot.entry)`，fix pass 1）；`acquire`（见 supervisor）、`dispatch`（`#claim` + `#bindDispatch`）、`settled`（`approvals.settled`）。
 - **`supervisor.ts`（≤705 → ≤775，硬上限 798）**
   - 新增 `#controls`。
   - `#prompt` 同步前缀（`:251-259`，在 `#stops.open` `:260` 之前）的拒绝条件改为 `claimed !== undefined || #controls.held(sessionId)`，结果 `session_busy`（carry-forward :64）。
@@ -79,7 +79,7 @@
      - `command({type:"get_state"})`：取 `sessionFile`。
      - (c) 中任何失败都映射为 `HttpError("agent_unavailable")`，不再浮出 `ReadmissionRequired`。
    - (d) 提交段。`get_state` 应答到 `acceptRegenerate` 之间只经过微任务：`command()` 的 `.finally`（`runtime.ts:257-260`）、`#runCommand` 的 await/return（`:270-279`）、`use` 包装里的 await。没有 I/O 或宏任务边界，外部请求插不进来。从下面第一步起到 `dispatch` 调用，是一个无 await 的同步段：
-     - **先查 `closed()`**：为真则抛 `HttpError("agent_unavailable")`，按提交前失败处理，retire，行与文件不动。shutdown 可能在最后一个应答途中开始，`runtime.ts:263-283` 不在应答时查 closed，`OmpProcess` 也不因 stdin 关闭拒绝在途请求（`process.ts:262-264,541-553`）；不查会先提交 CAS，再在 `runtime.prompt()` 抛 closed（`runtime.ts:157-159`），经 (e) 把新行结算 `failed`，旧回答已删。守卫同 `#prompt` 的 `supervisor.ts:265-267`。
+     - **先查 `closed()` 与 `live(slot)`**（后者 fix pass 1：子进程回完 `get_state` 后同段退出时，`#onProcessExit` 已释放名额但因占用保留 slot，不查则 CAS 照提交、派发失败、旧回答被删；F2(c)/M18）：为真则抛 `HttpError("agent_unavailable")`，按提交前失败处理，retire，行与文件不动。shutdown 可能在最后一个应答途中开始，`runtime.ts:263-283` 不在应答时查 closed，`OmpProcess` 也不因 stdin 关闭拒绝在途请求（`process.ts:262-264,541-553`）；不查会先提交 CAS，再在 `runtime.prompt()` 抛 closed（`runtime.ts:157-159`），经 (e) 把新行结算 `failed`，旧回答已删。守卫同 `#prompt` 的 `supervisor.ts:265-267`。
      - `acceptRegenerate(...)`：CAS 未命中时抛 `HttpError("session_busy")`。其它任何非 `HttpError` 异常（SQLite/事务错误）映射为 `HttpError("agent_unavailable")`，依据 turn-control「branch 之后提交之前失败」的「事务写入抛错 → 502」。这一步在 regenerate 上覆盖 prompt 路径的 provenance 规则（`#translate`，`supervisor.ts:739-750`，把通用错误原样透传）。
      - `stops.open(newId)`；
      - `dispatch(slot, branchText, newId)`。
@@ -184,6 +184,10 @@ regenerate 对 SQLite 只做一次写入，即步骤 (d) 的单事务；此后�
     - reject 为 502 `agent_unavailable`；行与 `omp_session_file` 不变；子进程退出；
     - 删触发器后 prompt 202，`--resume <P>`（不是 branch 文件）。
   - M16：`acceptRegenerate` 的非 `HttpError` 不映射时 reject 为原始 SQLite 错误，不是 `agent_unavailable`，变红。
+- **fix pass 1 追加证据**（PR #622 评审）：
+  - R5b CAS 原子性：真实回合播种（a1 带步骤与已结算审批）后建 `BEFORE INSERT ... WHEN NEW.role='assistant' AND NEW.status='running'` 触发器 → reject `agent_unavailable`，快照（含 `stream_epoch`、步骤、审批）逐字不变；`DROP TRIGGER` 后 prompt `--resume <原文件>` 202。M19：去掉 `runOwnedTransaction` 包裹 → DELETE 未回滚，变红。
+  - R8d `during` 同步抛错释放：`runtimeState` 注入一次同步抛错 → `stop` 同步抛出、`controlHeld === false`、随后 prompt 202。M17：catch 不 release → 变红。
+  - F2(c) 应答后同段退出：`exitAfterState` 先回 BRANCHED 再 `nativeExit(1)`+`endStdout()` → reject `agent_unavailable`，快照含 `omp_session_file` 不变，spawn 1 次，随后 prompt `--resume P` 202。M18：去掉 `live(slot)` → 旧行被删、文件被改，变红（修复前即红）。
 - **R6 复核失败**（R）
   - 输入：扣住 branch 后的 `get_state`，其间分两例 SQL 改写：`status='running'`；或插入一条更新的 assistant。
   - 期望：
@@ -270,7 +274,7 @@ regenerate 对 SQLite 只做一次写入，即步骤 (d) 的单事务；此后�
 - 回合结束后无 `turn.end` 的在线刷新：Open question。
 
 ## Review focus
-- (d) 段：closed 检查 → CAS → `open` → `#claim` → `#bindDispatch` 之间无 await；`get_state` 应答到 closed 检查之间只有微任务。
+- (d) 段：closed/live 检查 → CAS → `open` → `#claim` → `#bindDispatch` 之间无 await；`get_state` 应答到 closed 检查之间只有微任务。
 - `acceptRegenerate` 的错误映射：`session_busy` 原样，其它一律 `agent_unavailable`（R5/M16）。
 - `ReadmissionRequired` 只从首个命令浮出；`use` 不会在提交后重跑。
 - 首个命令新取得 generation 时恰一次 `releaseDispatch`（F7）。

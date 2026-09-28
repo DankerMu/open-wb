@@ -55,7 +55,7 @@ supervisor SHALL 维护"活进程集合"：每个已 spawn 且尚未退出的 om
 - **THEN** 同一时刻另一会话的 prompt 准入不得再 spawn：若无可驱逐者则 503 `agent_capacity`；临时进程关停后该 prompt 可以 202
 
 #### Scenario: 控制占用期间不可驱逐
-- **WHEN** `OMP_MAX_PROCESSES=1`，会话 A 的 regenerate 已取得进程并收到 `get_branch_messages` 应答、尚未发出 `branch`（此刻无回合），会话 B 发 prompt
+- **WHEN** `OMP_MAX_PROCESSES=1`，会话 A 的 regenerate 已取得进程并已发出 `branch`、其应答尚未到达（此刻无回合），会话 B 发 prompt
 - **THEN** B 返回 503 `agent_capacity`，A 的进程未收到任何信号，A 的 regenerate 照常完成；A 回合结束后 B 再次 prompt 可驱逐 A 并 202
 
 #### Scenario: 上限恒成立
