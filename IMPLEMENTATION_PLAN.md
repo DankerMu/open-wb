@@ -210,6 +210,15 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
   - **深度思考折叠（F-CHAT-10）**：服务端把上游 `thinking_delta` 映射为独立事件（如 `thinking.delta`），持久化与回放缓冲规则与 step detail 一致（对齐 #367 的结论）；模型无 reasoning 时不渲染折叠块。
   - 本阶段 change 须写明上述事件名与形状、持久化/回放策略。
 - 覆盖：F-CHAT-1、F-CHAT-2、F-CHAT-7、F-CHAT-9、F-CHAT-10、F-OPS-1。
+- Change 归属（2026-09-28 留痕）：本阶段按 2026-09-26 grill 切为两个 change。
+  - **change A `s1c-turn-control-governance`**（epic #448，已交付）：F-OPS-1（进程池上限 / 最久空闲驱逐 / 空闲回收；`OMP_MAX_PROCESSES` 默认 16 经测试 VPS 实测保留，#494）、F-CHAT-7 中断（停止 → `stopped`）、F-CHAT-6 的 fork 子项、重新生成、审批条。
+  - **change B `s1c-session-metadata-presentation`**：F-CHAT-1（三场景）、F-CHAT-2（会话分组侧栏）、F-CHAT-9（回合产物呈现）、F-CHAT-10（深度思考折叠），以及对话内搜索。
+  - change A proposal「功能覆盖声明」记录了与上文 Outcome 的偏离；「与 demo 的有意偏差」记录了四条留痕：
+    1. 审批超时 60s 自动允许（demo 15s）；
+    2. `stopped` 为独立终态；
+    3. fork 入口在用户消息；
+    4. 审批条只在真实 exec 调用时出现。
+  - 已知限制：派发后约 1ms 内写入的 abort 会使真实 omp 静默丢弃整轮（用户消息不入 `.jsonl`、8s 兜底后才 `stopped`、该消息 regenerate/fork 502），D2 回 Stage 2（#650）；突发并发冷启动会触发握手超时 502（#652）。
 - 必读增量：demo `/` 侧栏与场景交互；PLAN §5 并发资源治理。
 - Verify：并发多会话压测（回收/上限生效）；双账号会话互不可见（初步）。
 - Depends on：S0b、S1a、S1e（侧栏分组与场景要落在对齐后的外壳与基元上，避免二次返工）。
@@ -332,7 +341,7 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
   S1c 现承载 F-CHAT-1/2/7/9/10 + F-OPS-1 加 S0b/S1e 移交项（fork、重新生成、审批条、对话内搜索、场景胶囊、
   分组侧栏与条目菜单、停止生成、composer footer、顶栏重命名），宽度已触及 Risks「切片过宽」一条——grill 首问是否按
   后端契约切为治理侧（池上限/回收、中断/继续、重新生成、审批条、fork）与呈现侧（分组/场景/搜索/产物卡/思考折叠）两个 change。
-  需先核实的事实：omp v18.0.10 非 yolo 审批模式下工具审批提示在 rpc 模式是否经 `extension_ui_request confirm` 帧下发；
+  需先核实的事实：omp v18.0.10 非 yolo 审批模式下工具审批提示在 rpc 模式是否经 `extension_ui_request confirm` 帧下发（已核实：经 `extension_ui_request` 的 `select` 帧下发，选项 Approve/Deny，见 #481、#495）；
   F-CHAT-9 不能依赖"审计写记录"——审计现只发 `sandbox.reject` 与 `workspace.create`，omp 写文件不经 `sandbox.resolve`，
   文件变更只能从工具帧推导或新建机制。
 - **并行 S2a spike**：研究性质，无需 grill 门禁，独立 worktree 起；产出 api.db 解耦可行性、Infinity PoC、deepdoc 模型清单三项结论。
