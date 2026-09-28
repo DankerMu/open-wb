@@ -2,12 +2,12 @@
  * Issue #465 regenerate over real fake-omp `branch` children (production createApp assembly,
  * real SQLite): the normal regenerate with its cascade and new session file (R1), a reclaimed
  * session acquiring a normal generation (R2), the control claim in every holdable RPC gap (R3),
- * text mismatch (R4), transaction write fault (R5), CAS recheck failure (R6), prechecks (R7),
- * stop and the claim (R8), idle-reclaim re-admission (R9), shutdown before the commit (R10) and
+ * text mismatch (R4), transaction write fault before (R5) and after (R5b) the delete, CAS recheck failure (R6), prechecks (R7),
+ * stop and the claim (R8, R8d its synchronous throw), idle-reclaim re-admission (R9), shutdown before the commit (R10) and
  * shutdown mid-command (G). Oracles: SQL rows, per-child stdin frames and stdout replies, spawn
  * argv, published events and the public supervisor surface.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import type { RetainedEvent } from "../src/sessions/stream/ring-buffer.js";
 import { REAL, settle, spawnedAt } from "./session-approval-helpers.js";
@@ -224,6 +224,36 @@ describe("regenerate over real fake-omp branch children (#465)", () => {
     },
   );
 
+  it(
+    "R5b an insert fault after the delete rolls the whole CAS back on a live slot",
+    REAL,
+    async () => {
+      const world = worlds.track(await openRegenWorld());
+      const { db } = world.fixture;
+      await answered(world);
+      const old = assistantIdFor(world.fixture, world.session);
+      const file = sessionFile(db, world.session);
+      const stepsOf = "SELECT COUNT(*) AS count FROM chat_steps WHERE message_id = ?";
+      expect(count(db, stepsOf, old)).toBeGreaterThan(0);
+      db.prepare(
+        "INSERT INTO chat_approvals(message_id, request_id, tool, title, requested_at, expires_at, decision, decided_at) VALUES (?, 'r5b', 'bash', 'run ls', 70, 60070, 'allow', 80)",
+      ).run(old);
+      db.exec(
+        "CREATE TRIGGER r5b_no_insert BEFORE INSERT ON chat_messages WHEN NEW.role = 'assistant' AND NEW.status = 'running' BEGIN SELECT RAISE(ABORT, 'r5b'); END",
+      );
+      const before = snapshot(db, world.session, true);
+
+      expect(await rejectedCode(regenerate(world))).toBe("agent_unavailable");
+
+      expect(snapshot(db, world.session, true)).toEqual(before);
+      expect(types(spawnedAt(world, 0).stdin)).toContain("branch");
+      await waitDead(world, 0);
+      expect(held(world)).toBe(false);
+      db.exec("DROP TRIGGER r5b_no_insert");
+      await promptsAgain(world, "after insert fault", file);
+    },
+  );
+
   const rewrites = [
     [
       "status rewritten to running",
@@ -345,6 +375,21 @@ describe("regenerate over real fake-omp branch children (#465)", () => {
     await regenerate(world);
     await waitForTurn(world.fixture, world.session, "done");
     expect(world.rt.calls).toHaveLength(1);
+  });
+
+  it("R8d a synchronous stop fault is rethrown as is and releases the claim", REAL, async () => {
+    const world = worlds.track(await openRegenWorld());
+    const { store, supervisor } = world.fixture;
+    seedDone(world);
+    vi.spyOn(store, "runtimeState").mockImplementationOnce(() => {
+      throw new Error("r8d");
+    });
+
+    expect(() => supervisor.stop(world.session)).toThrow("r8d");
+
+    expect(held(world)).toBe(false);
+    expect((await sendPrompt(world, "after stop fault")).statusCode).toBe(202);
+    await waitForTurn(world.fixture, world.session, "done");
   });
 
   it("R9 a regenerate racing idle retirement is re-admitted once", REAL, async () => {

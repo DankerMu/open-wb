@@ -208,6 +208,8 @@ interface RegeneratePorts {
   controls: ControlClaims;
   stops: TurnStops;
   closed(): boolean;
+  /** Whether the slot still holds its pool entry (false once the supervisor saw its exit). */
+  live(slot: Slot): boolean;
   /** Live-slot reuse or one fresh admission (`retiring` wait and closed check included). */
   acquire<T>(sessionId: string, resume: Resume, use: (slot: Slot) => Promise<T>): Promise<T>;
   /** `#claim` + `#bindDispatch` of the new assistant id on this slot. */
@@ -312,7 +314,7 @@ export class Regenerations {
     throw new HttpError("agent_unavailable");
   }
 
-  /** (d): closed check → CAS → open → dispatch in one synchronous segment. */
+  /** (d): closed and liveness checks → CAS → open → dispatch in one synchronous segment. */
   #commit(
     slot: Slot,
     plan: RegeneratePlan,
@@ -320,7 +322,7 @@ export class Regenerations {
     sessionFile: string,
   ): Promise<{ assistantMessageId: number }> {
     const { store, stops } = this.#ports;
-    if (this.#ports.closed()) {
+    if (this.#ports.closed() || !this.#ports.live(slot)) {
       throw new HttpError("agent_unavailable");
     }
     let assistantMessageId: number;

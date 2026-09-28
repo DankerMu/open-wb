@@ -255,6 +255,8 @@ export interface ChildScript {
   exitOnState?: boolean;
   /** Inside the `branch` handler: reply, then nativeExit(1) + endStdout in the same segment. */
   exitAfterBranch?: boolean;
+  /** Inside the post-branch `get_state` handler: reply, then nativeExit(1) + endStdout likewise. */
+  exitAfterState?: boolean;
   /** Ignore stdin EOF: stdout stays open (retirement pending) until the test ends it. */
   keepStdout?: boolean;
   /** `prompt` behaviour: reply one delta and end (`complete`), or start and hold (`hold`). */
@@ -299,6 +301,10 @@ function scriptChild(child: FakeChild, script: ChildScript): ScriptedChild {
       return;
     }
     child.emitLine(ok(frame, { sessionFile: states === 1 ? DEFAULT_SESSION : BRANCHED }));
+    if (states > 1 && script.exitAfterState === true) {
+      child.nativeExit(1);
+      child.endStdout();
+    }
   });
   child.onCommand("get_branch_messages", (frame) => {
     child.emitLine(

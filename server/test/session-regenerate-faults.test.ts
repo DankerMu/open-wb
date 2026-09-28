@@ -1,7 +1,7 @@
 /**
  * Issue #465 regenerate faults and windows over scripted FakeChild processes (production createApp
  * assembly, real SQLite): empty branch list (F1), process exit before the post-branch get_state
- * (F2), the claim excluding eviction (F3), a full pool (F4), a stop intent across the post-commit
+ * reply or in its segment (F2), the claim excluding eviction (F3), a full pool (F4), a stop intent across the post-commit
  * dispatch (F5), a post-commit dispatch failure (F6) and the dispatch-count balance that seals a
  * regenerate's generation (F7). Oracles: SQL rows, recorded stdin frames, spawn argv, pool
  * envelopes, published events and the public supervisor surface.
@@ -75,6 +75,7 @@ describe("regenerate faults over scripted FakeChild processes (#465)", () => {
   const exits = [
     ["(a) exit inside the post-branch get_state", { exitOnState: true }],
     ["(b) exit in the same segment as the branch reply", { exitAfterBranch: true }],
+    ["(c) exit in the same segment as the post-branch get_state reply", { exitAfterState: true }],
   ] as const;
   for (const [name, script] of exits) {
     it(`F2 ${name}: agent_unavailable, one spawn, rows kept`, async () => {

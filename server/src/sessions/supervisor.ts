@@ -139,6 +139,7 @@ export class SessionSupervisor {
       controls: this.#controls,
       stops: this.#stops,
       closed: () => this.#closed,
+      live: (slot) => this.#pool.holds(slot.entry),
       acquire: async (sessionId, resume, use) => {
         await this.#slots.get(sessionId)?.retiring;
         if (this.#closed) {
