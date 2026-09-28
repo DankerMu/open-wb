@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance } from "fastify";
 import { vi } from "vitest";
+import { emit } from "../src/core/audit/index.js";
 import { registerAuthGuard } from "../src/http/index.js";
 import { registerSessionRoutes, type SessionSupervisorPort } from "../src/sessions/rest.js";
 import { createSessionStore, type SessionStore } from "../src/sessions/store.js";
@@ -53,6 +54,7 @@ export async function withSessionRest<T>(
           onFlushError(failure) {
             throw new Error(`unexpected flush error: ${String(failure.error)}`);
           },
+          emit,
         });
         registerSessionRoutes(app, { store, supervisor });
         try {

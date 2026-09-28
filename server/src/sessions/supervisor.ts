@@ -23,7 +23,7 @@ import {
   type Slot,
   turnFree,
 } from "./pool.js";
-import type { ApprovalView, SessionStore } from "./store.js";
+import type { ApprovalView, SessionStore, SettledApproval } from "./store.js";
 import { type RetainedEvent, RingBuffer, type RingRead } from "./stream/ring-buffer.js";
 import type { TokenRegistry } from "./tokens.js";
 import { drain, persistEvent, TurnStops } from "./turn-control.js";
@@ -522,13 +522,18 @@ export class SessionSupervisor {
   ): Promise<boolean> {
     for (const event of events) {
       try {
+        const settled: SettledApproval[] = [];
         const published = persistEvent(
           this.#store,
           assistantMessageId,
           event,
           toolIds,
           nextOrdinal,
+          settled,
         );
+        if (settled.length > 0 && !(await this.#approvals.settled(settled))) {
+          return false;
+        }
         if (published !== undefined && !(await this.#publish(slot, published, generation))) {
           return false;
         }

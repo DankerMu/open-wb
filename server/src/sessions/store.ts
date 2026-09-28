@@ -9,7 +9,7 @@ import {
   cancelTimer,
   finishOwnedTurn,
   insertPendingApproval,
-  reconcileStatuses,
+  reconcileRunning,
   releaseTurn,
   settlePendingApproval,
 } from "./store-approvals.js";
@@ -110,6 +110,13 @@ export interface ApprovalView extends ApprovalEntry {
   decision: ApprovalOutcome;
 }
 
+/** One pending approval a terminal transaction settled (committed) to `deny`. */
+export interface SettledApproval {
+  messageId: number;
+  approvalId: number;
+  decision: "deny";
+}
+
 export interface ApprovalInput {
   requestId: string;
   tool: string;
@@ -140,7 +147,12 @@ export interface SessionStore {
   startStep(assistantMessageId: number, input: StartStepInput): number;
   // step.end 不扩展：stopped 步骤只由 finishTurn 结算（output 保持 NULL）。
   finishStep(stepId: number, status: "done" | "failed", output: string): boolean;
-  finishTurn(assistantMessageId: number, status: FinishStatus): boolean;
+  /** Pending approvals denied in the terminal transaction are appended to `settled` once committed. */
+  finishTurn(
+    assistantMessageId: number,
+    status: FinishStatus,
+    settled?: SettledApproval[],
+  ): boolean;
   reconcileOnStartup(): void;
   /** Pending row on the session's running assistant; expires 60000ms after `requestedAt`. */
   insertApproval(sessionId: string, input: ApprovalInput, requestedAt: number): PendingApproval;
@@ -204,6 +216,8 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
   const activeSessions = new Map<string, number>();
   const activeSteps = new Map<number, number>();
   let closed = false;
+  const finish = (turn: Turn, status: FinishStatus): SettledApproval[] =>
+    finishOwnedTurn(db, options.emit, turn, status, activeTurns, activeSessions, activeSteps);
 
   return {
     create(ownerId) {
@@ -496,13 +510,14 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
       return changed;
     },
 
-    finishTurn(assistantMessageId, status) {
+    finishTurn(assistantMessageId, status, settled) {
       assertOpen(closed);
       const turn = currentTurn(activeTurns, activeSessions, assistantMessageId);
       if (turn === undefined) {
         return false;
       }
-      finishOwnedTurn(db, turn, status, activeTurns, activeSessions, activeSteps);
+      const entries = finish(turn, status);
+      settled?.push(...entries);
       return true;
     },
 
@@ -511,10 +526,9 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
       if (activeTurns.size > 0) {
         throw new Error("cannot reconcile while a turn is active");
       }
+      const now = Date.now();
       runOwnedTransaction(db, "startup reconciliation rollback failed", () => {
-        reconcileStatuses(db, "chat_sessions");
-        reconcileStatuses(db, "chat_messages");
-        reconcileStatuses(db, "chat_steps");
+        reconcileRunning(db, options.emit, now);
       });
     },
 
@@ -570,7 +584,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
         cancelTimer(turn);
       }
       for (const turn of turns) {
-        finishOwnedTurn(db, turn, "failed", activeTurns, activeSessions, activeSteps);
+        finish(turn, "failed");
       }
       closed = true;
     },
