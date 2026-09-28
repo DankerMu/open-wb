@@ -79,6 +79,61 @@ HTTP 204
 [Asserts]
 body == ""
 
+# (2) 对已 done 的首会话 regenerate：exact 202，新 assistantMessageId 不同于首轮助手。bodyless：无 Content-Type、无 body；不重试。
+POST {{base_url}}/api/sessions/{{session_id}}/regenerate
+[Options]
+skip: {{skip_turn_control}}
+HTTP 202
+[Captures]
+regen_assistant_id: jsonpath "$.assistantMessageId"
+[Asserts]
+jsonpath "$.assistantMessageId" != {{assistant_id}}
+
+# (2) 新助手审批轮询：有界 retry（约 20s，须 < 60s 自动允许）直到恰一条 pending bash 审批。
+GET {{base_url}}/api/sessions/{{session_id}}/messages
+[Options]
+skip: {{skip_turn_control}}
+retry: 40
+retry-interval: 500ms
+HTTP 200
+[Captures]
+regen_approval_id: jsonpath "$.messages[?(@.id=={{regen_assistant_id}})].approvals[0].id"
+[Asserts]
+jsonpath "$.messages[?(@.id=={{regen_assistant_id}})].approvals" count == 1
+jsonpath "$.messages[?(@.id=={{regen_assistant_id}})].approvals[0].decision" == null
+jsonpath "$.messages[?(@.id=={{regen_assistant_id}})].approvals[0].tool" == "bash"
+
+# (2) 作答 allow：exact 200，不重试；409 即真实故障。
+POST {{base_url}}/api/sessions/{{session_id}}/approvals/{{regen_approval_id}}
+Content-Type: application/json
+[Options]
+skip: {{skip_turn_control}}
+{"decision":"allow"}
+HTTP 200
+[Asserts]
+jsonpath "$.id" == {{regen_approval_id}}
+jsonpath "$.decision" == "allow"
+
+# (2) 轮询至 done（≥90s）：恰一条 user 与一条 assistant（即 regenerate 捕获 id，旧助手行不留），
+# 正文匹配 content_pattern，bash 步骤 done，步骤全 done，审批为作答的 allow（非 60s 超时自动允许）。
+GET {{base_url}}/api/sessions/{{session_id}}/messages
+[Options]
+skip: {{skip_turn_control}}
+retry: 180
+retry-interval: 500ms
+HTTP 200
+[Asserts]
+jsonpath "$.session.status" == "done"
+jsonpath "$.messages" count == 2
+jsonpath "$.messages[0].role" == "user"
+jsonpath "$.messages[1].role" == "assistant"
+jsonpath "$.messages[1].id" == {{regen_assistant_id}}
+jsonpath "$.messages[1].status" == "done"
+jsonpath "$.messages[1].content" matches "{{content_pattern}}"
+jsonpath "$.messages[1].steps[?(@.name=='bash')].status" == "done"
+jsonpath "$.messages[1].steps[?(@.status!='done')]" not exists
+jsonpath "$.messages[1].approvals[0].decision" == "allow"
+
 # (4) 第二会话（受控上游只在历史无 tool result 的轮次发 bash）：创建 exact 201 idle；捕获会话 id。
 POST {{base_url}}/api/sessions
 [Options]
