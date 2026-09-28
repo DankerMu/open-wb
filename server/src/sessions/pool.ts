@@ -251,6 +251,30 @@ export function generationTokens(
   };
 }
 
+/**
+ * Fork temporary process (#466): no generation, no epoch, no ring. The token is issued once and only
+ * while the entry is held, so a dead child is never lazily re-spawned outside the pool.
+ */
+export function temporaryTokens(
+  pool: ProcessPool,
+  entry: PoolEntry,
+  tokens: TokenRegistry,
+): SessionRuntimeOpts["tokens"] {
+  let issued = false;
+  return {
+    issue: (sessionId: string) => {
+      if (issued || !pool.holds(entry)) {
+        throw new Error("fork temporary process cannot be re-acquired");
+      }
+      issued = true;
+      return tokens.issue(sessionId);
+    },
+    revoke: (sessionId: string) => {
+      tokens.revoke(sessionId);
+    },
+  };
+}
+
 export function releaseDispatch(slot: Slot, generation: Generation | undefined): void {
   if (generation === undefined) {
     return;

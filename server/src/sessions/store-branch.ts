@@ -157,6 +157,82 @@ export function replaceLastAssistant(
   });
 }
 
+const FORK_SOURCE = "SELECT status FROM chat_sessions WHERE id = ? AND owner_id = ?";
+const FORK_LAST_ASSISTANT =
+  "SELECT id FROM chat_messages WHERE session_id = ? AND role = 'assistant' ORDER BY created_at DESC, id DESC LIMIT 1";
+const FORK_POINT =
+  "SELECT created_at FROM chat_messages WHERE id = ? AND session_id = ? AND role = 'user'";
+const FORK_SESSION =
+  "INSERT INTO chat_sessions(id, owner_id, title, status, omp_session_file, parent_session_id, created_at, updated_at) SELECT ?, owner_id, title, 'idle', ?, id, ?, ? FROM chat_sessions WHERE id = ?";
+const FORK_HISTORY =
+  "SELECT id, role, status FROM chat_messages WHERE session_id = ? AND (created_at < ? OR (created_at = ? AND id < ?)) ORDER BY created_at ASC, id ASC";
+const FORK_MESSAGE =
+  "INSERT INTO chat_messages(session_id, role, content, status, created_at) SELECT ?, role, content, status, created_at FROM chat_messages WHERE id = ?";
+const FORK_STEPS =
+  "INSERT INTO chat_steps(message_id, ordinal, name, detail, output, status, started_at, ended_at) SELECT ?, ordinal, name, detail, output, status, started_at, ended_at FROM chat_steps WHERE message_id = ? ORDER BY ordinal ASC, id ASC";
+const FORK_APPROVALS =
+  "INSERT INTO chat_approvals(message_id, request_id, tool, title, requested_at, expires_at, decision, decided_at) SELECT ?, request_id, tool, title, requested_at, expires_at, decision, decided_at FROM chat_approvals WHERE message_id = ? ORDER BY id ASC";
+const FORK_STATUS =
+  "UPDATE chat_sessions SET status = ?, updated_at = ? WHERE id = ? AND status = 'idle'";
+
+export interface ForkCommit {
+  sourceId: string;
+  sessionId: string;
+  ownerId: string;
+  /** The fork point: a user message of the source; it and everything after it stay behind. */
+  messageId: number;
+  expectedAssistantId: number | null;
+  sessionFile: string;
+}
+
+/**
+ * Fork CAS (#466), one transaction: unless the source is gone, running, has another last assistant
+ * than the prechecked one or lost the fork point (session_busy, no write), insert the new session
+ * and copy, by explicit columns, every message before the fork point with its steps and approvals.
+ * The new session takes the last copied assistant's status (a `running` one fails the whole copy).
+ */
+export function copyForkHistory(db: DatabaseSync, input: ForkCommit, now: number): void {
+  const { sourceId, sessionId, ownerId, messageId, expectedAssistantId, sessionFile } = input;
+  runOwnedTransaction(db, "fork copy rollback failed", () => {
+    const source = db.prepare(FORK_SOURCE).get(sourceId, ownerId) as { status: string } | undefined;
+    const last = db.prepare(FORK_LAST_ASSISTANT).get(sourceId) as { id: number } | undefined;
+    const point = db.prepare(FORK_POINT).get(messageId, sourceId) as
+      | { created_at: number }
+      | undefined;
+    if (
+      source === undefined ||
+      source.status === "running" ||
+      (last === undefined ? null : Number(last.id)) !== expectedAssistantId ||
+      point === undefined
+    ) {
+      throw new HttpError("session_busy");
+    }
+    const inserted = db.prepare(FORK_SESSION).run(sessionId, sessionFile, now, now, sourceId);
+    requireChanges(inserted.changes, 1, "fork session insert");
+    const at = Number(point.created_at);
+    const history = db.prepare(FORK_HISTORY).all(sourceId, at, at, messageId) as Array<{
+      id: number;
+      role: MessageRole;
+      status: MessageStatus;
+    }>;
+    let status: MessageStatus | undefined;
+    for (const message of history) {
+      const copied = db.prepare(FORK_MESSAGE).run(sessionId, message.id);
+      requireChanges(copied.changes, 1, "fork message copy");
+      const copy = Number(copied.lastInsertRowid);
+      db.prepare(FORK_STEPS).run(copy, message.id);
+      db.prepare(FORK_APPROVALS).run(copy, message.id);
+      status = message.role === "assistant" ? message.status : status;
+    }
+    if (status === "running") {
+      throw new Error("fork copies a running assistant");
+    }
+    if (status !== undefined) {
+      requireChanges(db.prepare(FORK_STATUS).run(status, now, sessionId).changes, 1, "fork status");
+    }
+  });
+}
+
 function rollbackOwnedTransaction(db: DatabaseSync, originalError: unknown, message: string): void {
   if (!db.isTransaction) {
     return;
