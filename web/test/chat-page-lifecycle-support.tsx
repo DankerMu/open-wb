@@ -7,6 +7,7 @@ import { AuthFooter, AuthGuard, AuthProvider, useAuth } from "../src/features/au
 import { ChatPage } from "../src/features/chat/index.js";
 import type { LoginCredentials, Principal } from "../src/lib/api.js";
 import { SidebarSlotProvider, useSidebarSlotContent } from "../src/lib/sidebar-slot.js";
+import { ToastProvider } from "../src/ui/index.js";
 import type { FetchRoutes } from "./chat-page-support.js";
 import { cleanupChatPage } from "./chat-page-support.js";
 import { FakeEventSource, resetFakeEventSources } from "./chat-stream-support.js";
@@ -94,7 +95,11 @@ function mountAuthenticatedChatRouter(path: string, element: ReactElement) {
     },
   ]);
   trackRouter(router);
-  const view = render(<RouterProvider router={router} />);
+  const view = render(
+    <ToastProvider>
+      <RouterProvider router={router} />
+    </ToastProvider>,
+  );
   return { router, view };
 }
 

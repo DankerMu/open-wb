@@ -354,7 +354,7 @@ describe("chat page ignored-abort GET, renewal, and concurrent submit", () => {
     await screen.findByRole("button", { name: "新建会话" });
     typeDraft("first");
     clickSend();
-    const pendingSend = screen.getByRole("button", { name: "生成中" }) as HTMLButtonElement;
+    const pendingSend = screen.getByRole("button", { name: "停止" }) as HTMLButtonElement;
     expect(pendingSend.disabled).toBe(true);
     fireEvent.click(pendingSend);
     expect(creates).toBe(1);

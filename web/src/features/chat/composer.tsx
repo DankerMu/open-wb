@@ -1,25 +1,32 @@
-import { type FormEvent, useId } from "react";
-import { Button, Icon } from "../../ui/index.js";
+import { type FormEvent, useId, useState } from "react";
+import { Button, Icon, useToast } from "../../ui/index.js";
+
+type StopTurn = () => Promise<"stopping" | null>;
 
 type ComposerProps = {
   disabled: boolean;
   draft: string;
   generating: boolean;
   onChangeDraft(value: string): void;
+  onStop: StopTurn;
   onSubmit(event: FormEvent<HTMLFormElement>): void;
   placeholder: string;
   sendDisabled: boolean;
+  /** 当前选中会话；null（欢迎态建会话途中）时停止键禁用。 */
+  stopSessionId: string | null;
 };
 
-/** 输入卡：textarea 在上，底部工具栏只有圆形发送按钮；提示行在卡外。 */
+/** 输入卡：textarea 在上，底部工具栏只有圆形发送按钮（生成中换成停止键）；提示行在卡外。 */
 export function Composer({
   disabled,
   draft,
   generating,
   onChangeDraft,
+  onStop,
   onSubmit,
   placeholder,
   sendDisabled,
+  stopSessionId,
 }: ComposerProps) {
   const inputId = useId();
   const hintId = useId();
@@ -62,21 +69,56 @@ export function Composer({
               生成中
             </p>
           ) : null}
-          <Button
-            aria-label={generating ? "生成中" : "发送"}
-            className="chat-send"
-            disabled={sendDisabled}
-            size="icon"
-            type="submit"
-            variant="primary"
-          >
-            <Icon name="send" />
-          </Button>
+          {generating ? (
+            <StopButton key={stopSessionId ?? ""} onStop={onStop} sessionId={stopSessionId} />
+          ) : (
+            <Button
+              aria-label="发送"
+              className="chat-send"
+              disabled={sendDisabled}
+              size="icon"
+              type="submit"
+              variant="primary"
+            >
+              <Icon name="send" />
+            </Button>
+          )}
         </div>
       </div>
       <p className="chat-composer-hint" id={hintId}>
         Enter 发送 · Shift+Enter 换行
       </p>
     </form>
+  );
+}
+
+/**
+ * 生成中替换发送键的圆形停止键：只在自己的 stop 请求在途时禁用，任何响应后（仍 running 时）恢复可点；
+ * 解锁与「已停止」呈现只来自权威状态（`turn.end stopped` 或快照），从不来自 stop 响应本身。
+ */
+function StopButton({ onStop, sessionId }: { onStop: StopTurn; sessionId: string | null }) {
+  const toast = useToast();
+  const [pending, setPending] = useState(false);
+  return (
+    <Button
+      aria-label="停止"
+      className="chat-send"
+      disabled={pending || sessionId === null}
+      onClick={() => {
+        setPending(true);
+        void onStop().then((result) => {
+          if (result === "stopping") {
+            toast.show({ type: "info", message: "已停止生成" });
+          }
+          setPending(false);
+        });
+      }}
+      size="icon"
+      title="停止"
+      type="button"
+      variant="primary"
+    >
+      <Icon name="square" size={12} />
+    </Button>
   );
 }

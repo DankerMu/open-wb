@@ -127,6 +127,10 @@
   background: var(--wb-text-tertiary);
 }
 
+.chat-session-dot-stopped {
+  background: var(--wb-text-secondary);
+}
+
 .chat-session-title {
   display: block;
   flex: 1;
