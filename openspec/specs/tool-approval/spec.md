@@ -17,7 +17,7 @@
 - **THEN** `chat_approvals` 中该 assistant 消息恰有两行，`id` 按到达顺序递增，`r1` 行在 `r2` 到达后字段不变
 
 #### Scenario: 级联删除
-- **WHEN** 删除含审批记录的助手消息，或删除其所属会话
+- **WHEN** 对含审批记录的会话执行 regenerate（删旧助手行）或删除会话
 - **THEN** 对应 `chat_approvals` 行不存在，无孤儿行
 
 #### Scenario: 重复请求与决定值域
