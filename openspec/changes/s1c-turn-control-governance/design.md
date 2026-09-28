@@ -84,7 +84,7 @@
   - 快照：`GET /api/sessions/:id/messages` 的每条消息带 `approvals: Approval[]`（`Approval = {id, tool, title, requestedAt, expiresAt, decision}`，按 id 升序；用户消息与无记录的助手消息为 `[]`）。作答 REST 200 body 为快照同形的单条 `Approval`；stop 202 body 为 `{}`。
   - 审计：每次结算 `emit({kind:"session.approval", actorId: <owner_id>, title:"工具执行审批", detail:{sessionId, messageId, tool, decision}})`，所有结算路径都审计；pending 不审计。
   - 事件次序：omp 在审批 select 之前已发 `tool_execution_start`，故单条序列为 `step.start → approval.request → approval.resolved → step.end`；并行审批时各条序列交错。Deny 时该步骤以 `isError` 结束为 `failed`。
-  - web 审批条（已定）：一条助手消息按 `approvals` id 顺序纵向渲染多个审批条；pending 头部 `需要你的确认` + 工具名徽章（title 首行 `Allow tool: <name>` 解析）+ 正文为 title **全文**（`white-space: pre-wrap`，不截断）+ 单句动态倒计时 `（<n>s 内未操作将自动允许）`（由 `expiresAt` 实时计算，初值 60）+ `允许`/`拒绝`；已结算为 `已允许执行`（allow/timeout）/`已拒绝执行`（deny）。
+  - web 审批条（已定）：一条助手消息按 `approvals` id 顺序纵向渲染多个审批条；pending 头部 `需要你的确认` + 工具名徽章（取自 `tool` 字段，即 server 对 title 首行 `Allow tool: <name>` 的解析结果；web 不重解析）+ 正文为 title **全文**（`white-space: pre-wrap`，不截断）+ 单句动态倒计时 `（<n>s 内未操作将自动允许）`（由 `expiresAt` 实时计算，初值 60）+ `允许`/`拒绝`；已结算为 `已允许执行`（allow/timeout）/`已拒绝执行`（deny）。
 - **为什么**：超时方向是用户拍板（grill Q7）；持久化让刷新后仍可作答且历史可见 `已允许执行/已拒绝执行`；停止先 Deny 是因为 omp 的 `abort` 会等 select（agent loop 无竞速），并行审批时漏掉任何一条都会让 abort 挂住；审计与落库同事务使"有决定必有审计"成为存储不变量而不是调用方纪律。识别规则贴 omp 源码事实（`wrapper.ts` 用 `select(formatApprovalPrompt(), ["Approve","Deny"])`），无专用帧可用。
 - **备选**：不持久化（内存）——刷新丢失、历史不可见；`always-ask`——每回合多次审批（grill 否决）；超时拒绝——用户明确选自动允许；单条 `approval | null` 快照——并行审批时后到的请求遮蔽先到的，先到那条无法作答。
 - **风险**：识别规则依赖 omp 内部 UI 文案；omp 冻结 v18.0.10，升版本前不会变；fake-omp 与真实二进制 smoke 都断言同一形状。
