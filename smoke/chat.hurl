@@ -32,10 +32,36 @@ assistant_id: jsonpath "$.assistantMessageId"
 jsonpath "$.userMessageId" exists
 jsonpath "$.assistantMessageId" exists
 
-# 轮询 messages：仅本 GET 有界 retry，直到 captured assistant 与 session 均为 done。
+# 审批轮询：有界 retry（约 20s，须 < 60s 自动允许）直到 captured assistant 恰一条 pending bash 审批。
 GET {{base_url}}/api/sessions/{{session_id}}/messages
 [Options]
+skip: {{skip_turn_control}}
 retry: 40
+retry-interval: 500ms
+HTTP 200
+[Captures]
+approval_id: jsonpath "$.messages[?(@.id=={{assistant_id}})].approvals[0].id"
+[Asserts]
+jsonpath "$.messages[?(@.id=={{assistant_id}})].approvals" count == 1
+jsonpath "$.messages[?(@.id=={{assistant_id}})].approvals[0].decision" == null
+jsonpath "$.messages[?(@.id=={{assistant_id}})].approvals[0].tool" == "bash"
+
+# 作答 allow：exact 200，不重试；409 即真实故障。
+POST {{base_url}}/api/sessions/{{session_id}}/approvals/{{approval_id}}
+Content-Type: application/json
+[Options]
+skip: {{skip_turn_control}}
+{"decision":"allow"}
+HTTP 200
+[Asserts]
+jsonpath "$.id" == {{approval_id}}
+jsonpath "$.tool" == "bash"
+jsonpath "$.decision" == "allow"
+
+# 轮询 messages：仅 GET 有界 retry（≥90s，覆盖 60s 自动允许），直到 captured assistant 与 session 均为 done。
+GET {{base_url}}/api/sessions/{{session_id}}/messages
+[Options]
+retry: 180
 retry-interval: 500ms
 HTTP 200
 [Asserts]

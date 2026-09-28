@@ -61,7 +61,7 @@ export SMOKE_BASE_URL
 # Make 不预置夹具、不 start/stop 服务。
 smoke: ## Hurl HTTP 冒烟（只消费已运行服务；缺 hurl 显式失败并打印安装指引 https://hurl.dev/docs/installation.html）
 	@/usr/bin/env -i PATH="$$PATH" /bin/sh -c 'command -v hurl >/dev/null 2>&1' || { echo "错误：未找到 hurl；安装说明：https://hurl.dev/docs/installation.html" >&2; exit 1; }
-	/usr/bin/env -i PATH="$$PATH" hurl --test --jobs 1 --retry 0 --variable "base_url=$${SMOKE_BASE_URL}" --variable "content_pattern=^你好，这是 WorkBuddy 的第一条流式回复。$$" --variable "min_bash_steps=1" smoke/public.hurl smoke/auth.hurl smoke/chat.hurl smoke/files.hurl
+	/usr/bin/env -i PATH="$$PATH" hurl --test --jobs 1 --retry 0 --variable "base_url=$${SMOKE_BASE_URL}" --variable "content_pattern=^你好，这是 WorkBuddy 的第一条流式回复。$$" --variable "min_bash_steps=1" --variable "skip_turn_control=false" smoke/public.hurl smoke/auth.hurl smoke/chat.hurl smoke/files.hurl
 
 UI_WALK_BASE_URL ?= http://127.0.0.1:3000
 # 与 smoke 相同：$(value) 冻结成 raw 字面后 export；配方不把该值插进 shell 语法。
@@ -96,6 +96,6 @@ smoke-live: ## 手动真实上游冒烟（只消费已运行服务；缺配置�
 	@[ -n "$${MODEL_UPSTREAM_BASE_URL}" ] || { echo "错误：未设置 MODEL_UPSTREAM_BASE_URL" >&2; exit 1; }
 	@[ -n "$${MODEL_UPSTREAM_API_KEY}" ] || { echo "错误：未设置 MODEL_UPSTREAM_API_KEY" >&2; exit 1; }
 	@/usr/bin/env -i PATH="$$PATH" /bin/sh -c 'command -v hurl >/dev/null 2>&1' || { echo "错误：未找到 hurl；安装说明：https://hurl.dev/docs/installation.html" >&2; exit 1; }
-	/usr/bin/env -i PATH="$$PATH" hurl --test --jobs 1 --retry 0 --variable "base_url=$${SMOKE_BASE_URL}" --variable "content_pattern=^.+$$" --variable "min_bash_steps=0" smoke/chat.hurl
+	/usr/bin/env -i PATH="$$PATH" hurl --test --jobs 1 --retry 0 --variable "base_url=$${SMOKE_BASE_URL}" --variable "content_pattern=^.+$$" --variable "min_bash_steps=0" --variable "skip_turn_control=true" smoke/chat.hurl
 
 precommit: guard

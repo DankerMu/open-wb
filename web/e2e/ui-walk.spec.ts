@@ -8,6 +8,7 @@ import {
   test,
 } from "@playwright/test";
 import { holdRoute } from "./route-hold.js";
+import { allowFirstApproval, expectAllowedBar, generatingStatus } from "./ui-walk-approval.js";
 import { armGate, controlOrigin, deleteGate, gatePhase, releaseGate } from "./ui-walk-gate.js";
 import {
   clickRoute,
@@ -305,6 +306,7 @@ async function walkHeldDialogue(page: Page, project: WalkProject): Promise<void>
     await page.getByLabel("给助手发消息").press("Enter");
     const accepted = await promptAccepted;
     const promptIds = parsePromptIds(await accepted.json());
+    await allowFirstApproval(page, origin, gateId);
     await expect.poll(() => gatePhase(origin, gateId)).toBe("held");
     // held 先于首块入库翻转；supervisor 先 persistEvent 再 #publish，UI 见首块即证明快照已含它。
     await expectRunningPrefix(page, project, sessionId, prompt);
@@ -332,6 +334,7 @@ async function walkHeldDialogue(page: Page, project: WalkProject): Promise<void>
     await page.reload();
     await expect.poll(() => page.url()).toBe(sessionUrl);
     await expectCompletedPair(page, project, sessionId, prompt);
+    await expectAllowedBar(page);
     await walkScrollFollow(page, project);
   } finally {
     await deleteGate(origin, gateId);
@@ -696,13 +699,6 @@ function parsePromptIds(body: unknown): { userMessageId: number; assistantMessag
     throw new Error("prompt 202 ids are not numbers");
   }
   return { userMessageId, assistantMessageId };
-}
-
-function generatingStatus(page: Page) {
-  return page
-    .locator("form")
-    .getByRole("status")
-    .filter({ hasText: /^生成中$/u });
 }
 
 interface DialoguePair {
