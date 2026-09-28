@@ -49,10 +49,11 @@ Evidence floor: 新建 `web/test/chat-fork-button.test.tsx`（≤800 行）中 d
 ## Orchestrator decisions（原 Open questions，已裁定）
 - ABA 令牌：保留（复用既有 `historyGenerationRef`，一次比较；证据 F8）。
 - 放置：接受气泡内放置、CSS 零改动（demo 无 fork 控件；真浏览器外观由 8.2d ui-walk 收口）。
-- 被围栏挡下的 201 与 201 body 解析失败：只释放锁，不刷新列表。
+- 被围栏挡下的 201：只释放锁，不刷新列表。201 body 解析失败走偏离 5 的失败分支（内联 `请求失败，请稍后重试` 并释放锁，不刷新列表、不导航）。
 - 4 处既有测试期望改动（`chat-copy.test.tsx:169`、`chat-regenerate-button.test.tsx:195/210/222`）：接受，只改期望、不增行，PR body 偏离清单列出。
 - Welcome state 措辞差异（主 spec `S1c` vs 父 delta change B）：不归本刀，留待 #486 收尾对账。
 - carry-forward :107（fork 草稿为 omp 回显文本）：只记录，归 #494/#495。
+- 单槽 fork 锁（review 后裁定接受，与 #478 偏离 5 同形）：另一会话的 fork 覆盖槽位时，源会话在 fork 在途期间解锁；其上再 fork/prompt 被 server 源会话控制占用以 409 拒绝，不写行。
 
 ## Non-goals
 - `重新生成`（7.3a #478，已合入）、停止与 `stopped` 呈现（7.2 #477）、审批条（7.4 #480）。

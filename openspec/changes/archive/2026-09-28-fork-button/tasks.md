@@ -5,7 +5,7 @@
 - [ ] 7.3b `message-actions.tsx` + `page.tsx`/`turn-actions.ts` + `conversation-view.tsx`：用户消息操作条 `从此处分叉`（Icon `git-branch`；恰调一次 fork → 跳转 `?session=<new>` → composer 草稿填 `draft` 不发送）。验证：新建 jsdom 测试文件覆盖跳转、草稿不发送与失败分支
 - [ ] （本 fixture 追加，见 proposal 偏离 1）fork 锁是 `page.tsx` 中的独立状态 `forkOwner`，每个分支按身份释放，只进 `composerDisabled`/`sendDisabled`，不进 `generating`；不写 prompt 的 mutation 字段与 `regenerateOwner`；`turn-actions.ts` 不新增 hook。验证：design F2（锁定期无 `停止`/`生成中`、`发送` disabled）、F4、F7，G1
 - [ ] （本 fixture 追加，见 proposal 偏离 2、3、4）201 续体先查 `ownsSessionWrite` 与历史令牌 `historyGenerationRef`，通过后在同一同步段内依次 `setDraft` → `refreshList` → `selectSession`；被挡下时只释放锁。验证：design F2、F3、F6、F8、F9、F10
-- [ ] （本 fixture 追加，见 proposal 偏离 5）失败只内联信封（网络失败与 201 解析失败为 `请求失败，请稍后重试`）并释放锁；不导航、不改草稿、不刷新列表、不对账。验证：design F5、F6-409、F9-409
+- [ ] （本 fixture 追加，见 proposal 偏离 5）失败只内联信封（网络失败与 201 解析失败为 `请求失败，请稍后重试`）并释放锁；不导航、不改草稿、不刷新列表、不对账。验证：design F5、F6-409、F9-409（201 解析失败无专用页面用例：api 层 `web/test/api-turn-control.test.ts:220` 钉 `requestFailed(201)`，页面层与 F5-network 同一分支）
 - [ ] （本 fixture 追加，见 proposal 偏离 6、7）操作行是 user article 的末子元素，CSS 零 diff；design「Sibling surfaces」列出的 4 处既有断言改为按名查询，行数不增。验证：design F1、G2
 
 ## Risk packs
