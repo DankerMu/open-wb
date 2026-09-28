@@ -85,7 +85,7 @@
    - (e) `finally`，每条路径都执行：
      - `await temp.shutdown()`（有界 retire；`runtime.ts:186-197`）；
      - `pool.release(entry)`（幂等，兜住无 pid 失败：runtime 对这种进程不调 `onExit`）；
-     - `tokens.revoke(plan.sessionId)`（幂等，兜住 carry-forward :46 的无 pid close 路径可能跳过 runtime 撤销）；
+     - `tokens.revoke(plan.sessionId)`（幂等，兜住 carry-forward :46 的无 pid close 路径可能跳过 runtime 撤销；fix pass 1 实证：只有「无 pid 子进程握手成功后命令中 close」这一条路径仅靠此处撤销，F13/M23）；
      - `#temps.delete(temp)`。
 
      这里的 await 等子进程退出，是真实的 I/O 边界。
@@ -132,7 +132,7 @@
 | :10/:11 | approvals 拷贝与新会话插入的接线留在 `store.ts`；`store-branch.ts` 不值导入 `store.ts`/`store-approvals.ts` | 事务与插入 SQL 在 `store-branch.ts`，只值导入 `HttpError`；视图映射留在 `store.ts`（偏离 3） |
 | :30 | 按序号+文本对齐；原会话文件不动；9.3 真二进制首条 user fork | `entryAt(data, ordinal, text)`（R6/M8/M9）；R1 断言文件字节与 mtime；9.3 → Open question |
 | :42/:45 | owner 回调同步、不抛，不在 onExit 内作答 | 临时进程 `onExit` 只 `pool.release`，不传 `onApproval` |
-| :46 | 无 pid close 路径可能跳过 token 撤销 | (e) 无条件 `tokens.revoke(sessionId)`；R1 `lookup === null` |
+| :46 | 无 pid close 路径可能跳过 token 撤销 | (e) 无条件 `tokens.revoke(sessionId)`；F13/M23（`missing`/`throw`/握手前 close 由 runtime 自行撤销，R10 另断言其结果） |
 | :53 | `PoolMember.retire` 永不 reject | 临时进程成员 `retire` 带 `.catch(noop)` |
 | :63 | branch 后恒跟 get_state；帧为字面量 | 共用 `branchTo`（`turn-control.ts:296-315` 原体） |
 | :64 | `#prompt` 在 `#commanding` 期间同步 busy 会 retire 活 slot | 临时进程不是 slot；占用在 `#prompt` 派发前拒绝源会话（`supervisor.ts:288-291`，R5/M7） |
@@ -350,6 +350,9 @@
     - 调 `fixture.close()`，等 `sessionStreamSubscriberCount === 0`（`#closed` 已为真），然后对 B 执行 `endStdout()`+`exit(0)`。
   - 期望：fork `agent_unavailable`；`rt.calls.length === 1`（没有临时进程被 spawn）；close resolve；`liveProcessCount() === 0`；无新行。
   - M22：去掉准入后的 `closed()` 复查 → shutdown 开始后仍构造临时进程并 spawn（它不在 `Forks.close()` 当时的快照里），`calls.length === 2`，变红。
+- **fix pass 1 追加证据**（PR #624 评审）：
+  - F12 branch 报告源文件：FakeChild 的 branch 后 `get_state` 回源路径 → `#commit` 在 closed 检查之后、事务之前以 `agent_unavailable` 拒绝（`branched.sessionFile === plan.file`），各表行数、源行与源文件字节/mtime 不变，claim 释放，`liveProcessCount() === 0`，临时 token 已撤销。M24：去掉该检查 → fork 成功且两会话共用一个文件，变红（修复前即红）。oh-my-pi 的 `branch` 总写新文件，正常 fork 不受影响；v18.0.10 实测归 9.3。
+  - F13 无 pid 子进程握手后命令中 close：`#spawnFor` 不给无 pid 子进程挂 exit 监听、`#onLogicalExit` 只清空 generation，`shutdown()` 无 generation 早退 → 只有 fork `finally` 的 `tokens.revoke` 撤销临时 token。M23：删除该 revoke → `lookup(token)` 非 null，变红。R10 追加真实无 pid spawn（`missing`/`throw`）的 token 已撤销断言（由 runtime 自行撤销）。
 - **G**：Sibling surfaces 全部零 diff 全绿；size-guard、knip、jscpd 无新增。
 
 ## Non-goals
