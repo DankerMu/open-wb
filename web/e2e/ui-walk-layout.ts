@@ -305,10 +305,16 @@ export async function createSessionFromSidebar(page: Page, project: WalkProject)
   }
 }
 
-// mobile 在覆盖层里选中列表首项：覆盖层关闭、URL 写入 ?session=。
+// mobile 在覆盖层里选中列表首个有消息的会话：覆盖层关闭、URL 写入 ?session=。跳过 `未开始`——
+// 列表按 updated_at 倒序，分叉出的空会话排在最前（#492）。
 export async function selectFirstSessionInOverlay(page: Page): Promise<void> {
   const sidebar = await openSidebar(page, "mobile-dark");
-  await sessionList(sidebar).locator("button.chat-session-button").first().click();
+  const idle = page.getByRole("status", { name: / 未开始$/u });
+  await sessionList(sidebar)
+    .locator("button.chat-session-button")
+    .filter({ hasNot: idle })
+    .first()
+    .click();
   await expect(page.getByRole("dialog", NAV_OVERLAY)).toHaveCount(0);
   await expect.poll(() => new URL(page.url()).searchParams.get("session") ?? "").not.toBe("");
 }
