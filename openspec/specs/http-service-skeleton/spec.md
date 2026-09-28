@@ -107,9 +107,9 @@ Runtime config/DB/app/listen/models.yml/success-record任一步失败 SHALL不�
 - **THEN** the existing guard returns401 before parser or handler work
 
 #### Scenario: 回合控制 parser owner 的真实 HTTP 边界
-- **WHEN** the production POST /api/sessions/:id/approvals/:approvalId route mounted by createApp receives genuine malformed/empty/unsupported/oversized content-parser errors with a real owner cookie
+- **WHEN** the production POST /api/sessions/:id/fork and /api/sessions/:id/approvals/:approvalId routes mounted by createApp receive genuine malformed/empty/unsupported/oversized content-parser errors with a real owner cookie
 - **THEN** exact400 bad_request with the route's no-store is returned before any supervisor call, omp frame or database write
-- **WHEN** malformed, empty or unsupported-media inputs arrive unauthenticated on the stop, regenerate or approvals route, or with a foreign/unknown session id
+- **WHEN** malformed, empty or unsupported-media inputs arrive unauthenticated on any of the four routes, or with a foreign/unknown session id
 - **THEN** 401 respectively the identical 404 is returned before parser or handler work
 
 #### Scenario: bodyless 归属路由拒绝任何 body
