@@ -109,6 +109,9 @@ function createSupervisor(): RecordingSupervisor {
     regenerate() {
       return Promise.reject(new Error("unexpected regenerate call"));
     },
+    fork() {
+      return Promise.reject(new Error("unexpected fork call"));
+    },
     controlHeld() {
       return false;
     },

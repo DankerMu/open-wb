@@ -10,7 +10,9 @@ import type {
 } from "fastify";
 import { HttpError } from "../core/errors/index.js";
 import type { ApprovalEntry, ApprovalView, SessionMessageTree, SessionStore } from "./store.js";
-import type { StreamCursor } from "./supervisor.js";
+import type { SessionSupervisor, StreamCursor } from "./supervisor.js";
+
+type ForkResult = Awaited<ReturnType<SessionSupervisor["fork"]>>;
 
 export interface SessionSupervisorPort {
   prompt(sessionId: string, text: string): Promise<void>;
@@ -18,6 +20,7 @@ export interface SessionSupervisorPort {
   decide(sessionId: string, approvalId: number, decision: "allow" | "deny"): Promise<ApprovalView>;
   stop(sessionId: string): Promise<void>;
   regenerate(sessionId: string, ownerId: string): Promise<{ assistantMessageId: number }>;
+  fork(sessionId: string, ownerId: string, messageId: number): Promise<ForkResult>;
   controlHeld(sessionId: string): boolean;
 }
 
@@ -75,6 +78,11 @@ const MESSAGE_LIMIT = 32_768;
 const CANONICAL_APPROVAL_ID = /^[1-9][0-9]*$/;
 /** Fastify 拒绝 bodyLimit 0（须 >0），故取最小合法值；显式 no-body 校验负责 0 字节合同。 */
 const BODYLESS_BODY_LIMIT = 1;
+/**
+ * The longest valid fork body is ~30 bytes (`{"messageId":9007199254740991}`). 1 KiB keeps every
+ * oversized body a deterministic owned 400: Fastify rejects on content-length before reading.
+ */
+const FORK_BODY_LIMIT = 1_024;
 
 const noStoreSessionResponse: onRequestHookHandler = (_request, reply, done) => {
   reply.header("Cache-Control", "no-store");
@@ -217,6 +225,23 @@ export function registerSessionRoutes(
       return reply.code(202).send({ assistantMessageId });
     },
   );
+  app.post<{ Params: SessionIdParams }>(
+    "/api/sessions/:id/fork",
+    {
+      bodyLimit: FORK_BODY_LIMIT,
+      onRequest: noStoreSessionResponse,
+      preParsing: authorizeSessionBeforeParse,
+    },
+    async (request, reply) => {
+      const messageId = parseForkMessageId(request.body);
+      const principal = currentPrincipal(request);
+      const result = await dependencies.supervisor.fork(request.params.id, principal.id, messageId);
+      return reply.code(201).send({
+        session: toPublicSession(result.session),
+        draft: result.draft,
+      });
+    },
+  );
   app.post<{ Params: ApprovalParams }>(
     "/api/sessions/:id/approvals/:approvalId",
     { onRequest: noStoreSessionResponse, preParsing: authorizeApprovalBeforeParse },
@@ -327,6 +352,22 @@ function parseDecision(body: unknown): "allow" | "deny" {
     throw new HttpError("bad_request");
   }
   return decision;
+}
+
+/** Exactly `{messageId}` with a positive safe integer; ownership and role are the supervisor's. */
+function parseForkMessageId(body: unknown): number {
+  const record = requirePlainRecord(body);
+  const messageId = record.messageId;
+  if (
+    Object.keys(record).length !== 1 ||
+    !Object.hasOwn(record, "messageId") ||
+    typeof messageId !== "number" ||
+    !Number.isSafeInteger(messageId) ||
+    messageId <= 0
+  ) {
+    throw new HttpError("bad_request");
+  }
+  return messageId;
 }
 
 function parsePromptMessage(body: unknown): string {
