@@ -55,7 +55,7 @@ supervisor SHALL 维护"活进程集合"：每个已 spawn 且尚未退出的 om
 
 #### Scenario: fork 先退回源会话进程
 - **WHEN** `OMP_MAX_PROCESSES=1`，会话 A 完成回合且其进程仍存活，对 A 的用户消息 fork
-- **THEN** A 的进程先经 retire 退出，临时进程随后准入并 spawn；fork 兑现；以真实子进程观察任一时刻活 omp 子进程数 ≤1；无 503、无其它会话被驱逐
+- **THEN** A 的进程先经 retire 退出，临时进程随后准入并 spawn；fork 201；以真实子进程观察任一时刻活 omp 子进程数 ≤1；无 503、无其它会话被驱逐
 
 #### Scenario: 驱逐中的进程不会被重复选中
 - **WHEN** 一次准入正在等待被驱逐进程的 shutdown 完成，另一次准入到达

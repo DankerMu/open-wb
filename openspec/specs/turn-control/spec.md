@@ -100,7 +100,7 @@ supervisor SHALL 按 `sessionId` 维护"控制占用"（control claim）。regen
 
 #### Scenario: fork 各 RPC 间隙的并发请求
 - **WHEN** fork 执行中，分别在临时进程已准入而 `ready` 未到、`get_branch_messages` 应答未到、`branch` 应答未到、`get_state` 应答未到、临时进程关停未完成（事务提交前）时向**源**会话注入 prompt、regenerate 或 fork
-- **THEN** 每个注入请求均 409 `session_busy`，源会话行、`omp_session_file` 与文件不变，无额外 spawn；原 fork 照常兑现
+- **THEN** 每个注入请求均 409 `session_busy`，源会话行、`omp_session_file` 与文件不变，无额外 spawn；原 fork 照常 201
 
 #### Scenario: 失败后释放占用
 - **WHEN** regenerate 因分支文本不一致 502、因池满 503，或 fork 因对齐失败 502 结束
@@ -148,13 +148,13 @@ supervisor SHALL 按 `sessionId` 维护"控制占用"（control claim）。regen
 - **THEN** 503 `agent_capacity`，无行变更
 
 ### Requirement: 从此处分叉 REST
-`messageId` SHALL 属于该会话且 `role="user"`，否则 400 `bad_request`；原会话 `status="running"` 或持有控制占用 SHALL 409 `session_busy`；原会话 `omp_session_file` 为 NULL SHALL 502 `agent_unavailable`。校验通过即对原会话登记控制占用（见会话级控制占用），并记下预检读到的原会话末条 assistant id。
+`POST /api/sessions/:id/fork` SHALL 只接受 `application/json` 且 body 恰为 `{messageId:number}`，其 content-parser 错误由归属集映射为 400 `bad_request`；受 cookie guard 与 owner 校验（401/404 同 stop），响应 no-store。`messageId` SHALL 属于该会话且 `role="user"`，否则 400 `bad_request`；原会话 `status="running"` 或持有控制占用 SHALL 409 `session_busy`；原会话 `omp_session_file` 为 NULL SHALL 502 `agent_unavailable`。校验通过即对原会话登记控制占用（见会话级控制占用），并记下预检读到的原会话末条 assistant id。
 
-执行序：若原会话有存活 idle 进程，SHALL 先经既有 retire 序列关停它并等待其退出（数据在会话文件中，无损；名额随退出释放）→ 经 omp-pool 准入起**临时** `SessionRuntime`（同一 spawn 契约、`--resume <原 omp_session_file>`、不绑定任何会话 slot、计入活进程集合）→ `get_branch_messages` → 在返回列表中取序号等于该 user 消息在 SQLite 该会话 user 消息中序号（按 `created_at,id` 升序，从 0 起）的项，其 `text` SHALL 等于该消息 `content`，序号越界或文本不等 SHALL 502 → `branch{entryId}` → `get_state` 取新文件 → 关停临时进程（既有有界 retire，token 撤销）→ SQLite 单事务：先以 CAS 复核源会话 `status` 仍非 running 且其末条 assistant id 仍等于预检读到的 id，复核失败 SHALL 不写任何行并 409 `session_busy`；复核通过则插入新会话行（`owner_id` 同、`title` 复制、`parent_session_id`=原会话 id（列为 `TEXT NULL REFERENCES chat_sessions(id) ON DELETE SET NULL`，删除原会话时分叉会话保留且该列置 NULL）、`omp_session_file`=新文件、`stream_epoch=0`），把原会话中 `(created_at,id)` 严格早于分叉点 user 消息的全部 `chat_messages` 及其 `chat_steps` 与 `chat_approvals` 拷贝到新会话（新 id、保持顺序、`content`/`status`/`created_at`/步骤 `ordinal`/`name`/`detail`/`output`/`status`/时间原值；审批 `request_id`/`tool`/`title`/`requested_at`/`expires_at`/`decision`/`decided_at` 原值，指向拷贝后的新消息 id），分叉点 user 消息本身不拷贝；新会话 `status` SHALL 置为拷贝历史中末条 assistant 消息的状态（`done`/`failed`/`stopped` 之一；该消息仍为 `running` 时视为事务失败），未拷贝任何消息时为 `idle`。fork 调用以 `{session:{id,title,status,createdAt,updatedAt}, draft:<branch 返回的 text>}` 兑现，`session` 为既有公共视图（反映上述最终 `status`），不暴露 `parent_session_id`。准入 503、`branch` 前后任何失败、文本/序号不一致 SHALL 不留下新会话行（新会话不存在于 `GET /api/sessions`）并关停临时进程。原会话的行、`omp_session_file` 与会话文件 SHALL 全程不被改写（只读取以复制）；原会话进程 SHALL 不被发送任何帧，其存活 idle 进程在临时进程启动前被 retire（fork 失败时不恢复，下次 prompt 按既有 `--resume` 懒 spawn）。fork 调用兑现或拒绝之前，临时进程 SHALL 已退出并释放名额。
+执行序：若原会话有存活 idle 进程，SHALL 先经既有 retire 序列关停它并等待其退出（数据在会话文件中，无损；名额随退出释放）→ 经 omp-pool 准入起**临时** `SessionRuntime`（同一 spawn 契约、`--resume <原 omp_session_file>`、不绑定任何会话 slot、计入活进程集合）→ `get_branch_messages` → 在返回列表中取序号等于该 user 消息在 SQLite 该会话 user 消息中序号（按 `created_at,id` 升序，从 0 起）的项，其 `text` SHALL 等于该消息 `content`，序号越界或文本不等 SHALL 502 → `branch{entryId}` → `get_state` 取新文件 → 关停临时进程（既有有界 retire，token 撤销）→ SQLite 单事务：先以 CAS 复核源会话 `status` 仍非 running 且其末条 assistant id 仍等于预检读到的 id，复核失败 SHALL 不写任何行并 409 `session_busy`；复核通过则插入新会话行（`owner_id` 同、`title` 复制、`parent_session_id`=原会话 id（列为 `TEXT NULL REFERENCES chat_sessions(id) ON DELETE SET NULL`，删除原会话时分叉会话保留且该列置 NULL）、`omp_session_file`=新文件、`stream_epoch=0`），把原会话中 `(created_at,id)` 严格早于分叉点 user 消息的全部 `chat_messages` 及其 `chat_steps` 与 `chat_approvals` 拷贝到新会话（新 id、保持顺序、`content`/`status`/`created_at`/步骤 `ordinal`/`name`/`detail`/`output`/`status`/时间原值；审批 `request_id`/`tool`/`title`/`requested_at`/`expires_at`/`decision`/`decided_at` 原值，指向拷贝后的新消息 id），分叉点 user 消息本身不拷贝；新会话 `status` SHALL 置为拷贝历史中末条 assistant 消息的状态（`done`/`failed`/`stopped` 之一；该消息仍为 `running` 时视为事务失败），未拷贝任何消息时为 `idle`。响应 201 `{session:{id,title,status,createdAt,updatedAt}, draft:<branch 返回的 text>}`，`session` 为既有公共视图（反映上述最终 `status`），不暴露 `parent_session_id`。准入 503、`branch` 前后任何失败、文本/序号不一致 SHALL 不留下新会话行（新会话不存在于 `GET /api/sessions`）并关停临时进程。原会话的行、`omp_session_file` 与会话文件 SHALL 全程不被改写（只读取以复制）；原会话进程 SHALL 不被发送任何帧，其存活 idle 进程在临时进程启动前被 retire（fork 失败时不恢复，下次 prompt 按既有 `--resume` 懒 spawn）。响应返回之前，临时进程 SHALL 已退出并释放名额。
 
 #### Scenario: 正常分叉
 - **WHEN** 原会话 `done`、历史 u1(`"first question"`)→a1→u2(`"second question"`)→a2（a1 为 `done`），对 u2 调用 fork，fake-omp `branch` 脚本对 `get_branch_messages` 返回 `{messages:[{entryId:"fake-entry-1",text:"first question"},{entryId:"fake-entry-2",text:"second question"}]}` 并在 `branch{entryId:"fake-entry-2"}` 后创建新会话文件
-- **THEN** fork 兑现 `{session:{id:<新>,title:<原 title>,status:"done",...},draft:"second question"}`；新会话 messages 为 u1、a1（含 a1 步骤与审批，新 id，顺序与内容相同）、`streamCursor:{epoch:0,seq:null}`；`chat_sessions.parent_session_id`=原 id；`omp_session_file` 为新文件路径；原会话行与文件不变；临时进程已退出且原会话进程未收到任何帧；`GET /api/sessions` 同时列出两会话
+- **THEN** 201 `{session:{id:<新>,title:<原 title>,status:"done",...},draft:"second question"}`；新会话 messages 为 u1、a1（含 a1 步骤与审批，新 id，顺序与内容相同）、`streamCursor:{epoch:0,seq:null}`；`chat_sessions.parent_session_id`=原 id；`omp_session_file` 为新文件路径；原会话行与文件不变；临时进程已退出且原会话进程未收到任何帧；`GET /api/sessions` 同时列出两会话
 
 #### Scenario: 新会话状态随拷贝历史
 - **WHEN** 对首条 user 消息 u1 调用 fork，或对 u2 调用 fork 而 a1 为 `stopped`（或 `failed`）
@@ -166,10 +166,10 @@ supervisor SHALL 按 `sessionId` 维护"控制占用"（control claim）。regen
 
 #### Scenario: 源会话存活进程先退出
 - **WHEN** `OMP_MAX_PROCESSES=1`，原会话刚完成回合且其进程仍存活（未到 `OMP_IDLE_MS`），对其 u1 调用 fork
-- **THEN** fork 兑现；以真实子进程观察，原会话进程在临时进程 spawn 之前已退出，任一时刻活 omp 子进程数 ≤1，不出现两个进程同时打开原会话文件；原会话进程未收到任何帧（仅 stdin 关闭与既有升级序列）；随后原会话 prompt 以 `--resume <原 omp_session_file>` 重 spawn 并 202
+- **THEN** 201；以真实子进程观察，原会话进程在临时进程 spawn 之前已退出，任一时刻活 omp 子进程数 ≤1，不出现两个进程同时打开原会话文件；原会话进程未收到任何帧（仅 stdin 关闭与既有升级序列）；随后原会话 prompt 以 `--resume <原 omp_session_file>` 重 spawn 并 202
 
 #### Scenario: 非法目标与运行中
-- **WHEN** `messageId` 为 assistant 消息、属他会话或不存在
+- **WHEN** `messageId` 为 assistant 消息、属他会话、不存在，或 body 形态不为 `{messageId:number}`
 - **THEN** 400 `bad_request`，无新会话行、无进程 spawn
 - **WHEN** 原会话 running 时 fork
 - **THEN** 409 `session_busy`，无新会话行、无进程 spawn、原会话进程未被 retire
@@ -186,4 +186,4 @@ supervisor SHALL 按 `sessionId` 维护"控制占用"（control claim）。regen
 - **WHEN** `OMP_MAX_PROCESSES=1` 且另一会话在回合中时 fork
 - **THEN** 503 `agent_capacity`，无新会话行
 - **WHEN** `OMP_MAX_PROCESSES=1` 且无其它活进程时 fork 成功
-- **THEN** fork 兑现时活进程数为 0，随后对新会话发 prompt 以 `--resume <新文件>` spawn 并 202
+- **THEN** 201 返回时活进程数为 0，随后对新会话发 prompt 以 `--resume <新文件>` spawn 并 202
