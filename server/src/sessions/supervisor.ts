@@ -16,15 +16,20 @@ import {
 } from "./omp/runtime.js";
 import {
   type Generation,
+  generationTokens,
   type PoolEntry,
   ProcessPool,
+  ReadmissionRequired,
   releaseClaim,
+  releaseDispatch,
+  releasePump,
   releasePumpExit,
   type Slot,
+  sealGeneration,
   turnFree,
 } from "./pool.js";
 import type { ApprovalView, SessionStore, SettledApproval } from "./store.js";
-import { type RetainedEvent, RingBuffer, type RingRead } from "./stream/ring-buffer.js";
+import type { RetainedEvent, RingRead } from "./stream/ring-buffer.js";
 import type { TokenRegistry } from "./tokens.js";
 import { drain, persistEvent, TurnStops } from "./turn-control.js";
 
@@ -73,14 +78,6 @@ export interface SessionSupervisorOptions {
    * existing ownership path. Omitted means no observer.
    */
   onEvent?: (sessionId: string, epoch: number, event: ChatEvent<number>) => void;
-}
-
-/** The slot's capacity entry was released; the dispatch falls back to one fresh admission. */
-class ReadmissionRequired extends Error {
-  constructor() {
-    super("session process must be re-admitted");
-    this.name = "ReadmissionRequired";
-  }
 }
 
 interface FlushFailure {
@@ -337,7 +334,7 @@ export class SessionSupervisor {
       stateDir: this.#runtime.stateDir,
       ownerId,
       modelId: this.#runtime.modelId,
-      tokens: this.#adapter(slot),
+      tokens: generationTokens(slot, this.#pool, this.#store, this.#tokens),
       resumePath,
       onExit: () => {
         this.#onProcessExit(slot);
@@ -385,7 +382,7 @@ export class SessionSupervisor {
       const acquisition = slot.acquisitionFault;
       slot.acquisitionFault = undefined;
       const live = slot.generation ?? generation;
-      this.#releaseDispatch(slot, live);
+      releaseDispatch(slot, live);
       await this.#abortPreProgress(slot, stream);
       throw acquisition ?? error;
     }
@@ -393,7 +390,7 @@ export class SessionSupervisor {
       this.#store.setSessionFile(slot.sessionId, receipt.sessionFile);
     } catch (error) {
       const live = slot.generation ?? generation;
-      this.#releaseDispatch(slot, live);
+      releaseDispatch(slot, live);
       await this.#abortPreProgress(slot, stream);
       throw error;
     }
@@ -406,7 +403,7 @@ export class SessionSupervisor {
     this.#pumps.add(pump);
     void pump.finally(() => {
       this.#pumps.delete(pump);
-      this.#releasePump(slot, pumpGeneration);
+      releasePump(slot, pumpGeneration);
       this.#stops.release(assistantMessageId);
       releasePumpExit(this.#claims, slot, pump, assistantMessageId);
       this.#pool.touch(slot.entry);
@@ -624,86 +621,6 @@ export class SessionSupervisor {
     }
   }
 
-  #adapter(slot: Slot): { issue(sessionId: string): string; revoke(sessionId: string): void } {
-    return {
-      issue: (sessionId: string) => {
-        slot.acquisitionFault = undefined;
-        if (!this.#pool.holds(slot.entry)) {
-          slot.acquisitionFault = new ReadmissionRequired();
-          throw slot.acquisitionFault;
-        }
-        try {
-          slot.epoch = this.#store.bumpStreamEpoch(sessionId);
-        } catch (error) {
-          slot.acquisitionFault = error;
-          throw error;
-        }
-        const generation: Generation = {
-          epoch: slot.epoch,
-          ring: new RingBuffer(slot.epoch),
-          revoked: false,
-          dispatchCount: 1,
-          pumpCount: 0,
-          sealed: false,
-        };
-        slot.generation = generation;
-        try {
-          return this.#tokens.issue(sessionId);
-        } catch (error) {
-          slot.acquisitionFault = error;
-          this.#releaseDispatch(slot, generation);
-          generation.revoked = true;
-          this.#sealGeneration(slot, generation);
-          throw error;
-        }
-      },
-      revoke: (_sessionId: string) => {
-        const generation = slot.generation;
-        if (generation !== undefined) {
-          generation.revoked = true;
-          this.#sealGeneration(slot, generation);
-        }
-        this.#tokens.revoke(slot.sessionId);
-      },
-    };
-  }
-
-  #releaseDispatch(slot: Slot, generation: Generation | undefined): void {
-    if (generation === undefined) {
-      return;
-    }
-    if (generation.dispatchCount > 0) {
-      generation.dispatchCount -= 1;
-    }
-    this.#sealGeneration(slot, generation);
-  }
-
-  #releasePump(slot: Slot, generation: Generation | undefined): void {
-    if (generation === undefined) {
-      return;
-    }
-    if (generation.pumpCount > 0) {
-      generation.pumpCount -= 1;
-    }
-    if (generation.dispatchCount > 0) {
-      generation.dispatchCount -= 1;
-    }
-    this.#sealGeneration(slot, generation);
-  }
-
-  #sealGeneration(slot: Slot, generation: Generation): void {
-    if (generation.sealed || generation.dispatchCount > 0 || generation.pumpCount > 0) {
-      return;
-    }
-    if (!generation.revoked && slot.retiring === undefined) {
-      return;
-    }
-    generation.sealed = true;
-    if (slot.generation === generation) {
-      slot.generation = undefined;
-    }
-  }
-
   async #retireSlot(slot: Slot): Promise<void> {
     if (slot.claimedAssistantId !== undefined) {
       releaseClaim(this.#claims, slot, slot.claimedAssistantId);
@@ -714,7 +631,7 @@ export class SessionSupervisor {
     const generation = slot.generation;
     if (generation !== undefined) {
       generation.revoked = true;
-      this.#sealGeneration(slot, generation);
+      sealGeneration(slot, generation);
     }
     await slot.retiring;
     this.#pool.release(slot.entry);
