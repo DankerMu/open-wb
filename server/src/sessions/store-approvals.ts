@@ -9,6 +9,7 @@ import type {
   ApprovalView,
   FinishStatus,
   PendingApproval,
+  SettledApproval,
   Turn,
 } from "./store.js";
 import { countRows, hasChanges, requireChanges, runOwnedTransaction } from "./store-branch.js";
@@ -36,6 +37,8 @@ type SnapshotApprovalDbRow = {
   expires_at: number;
   decision: ApprovalOutcome | null;
 };
+
+type PendingDbRow = Pick<ApprovalDbRow, "id" | "session_id" | "owner_id" | "tool">;
 
 interface Settlement {
   sessionId: string;
@@ -183,20 +186,74 @@ export function cancelTimer(turn: Turn): void {
   }
 }
 
+/**
+ * Non-answer settlement inside the caller's owned transaction: each NULL row of the message, in
+ * id order, becomes `deny` with its audit row. Only when rows exist does a missing emit throw.
+ */
+function settlePendingForMessage(
+  db: DatabaseSync,
+  emit: typeof auditEmit | undefined,
+  messageId: number,
+  decision: "deny",
+  decidedAt: number,
+): SettledApproval[] {
+  const rows = db
+    .prepare(
+      `SELECT a.id, m.session_id, s.owner_id, CAST(a.tool AS BLOB) AS tool
+         FROM chat_approvals AS a
+         JOIN chat_messages AS m ON m.id = a.message_id
+         JOIN chat_sessions AS s ON s.id = m.session_id
+        WHERE a.message_id = ? AND a.decision IS NULL
+        ORDER BY a.id ASC`,
+    )
+    .all(messageId) as unknown as PendingDbRow[];
+  if (rows.length === 0) {
+    return [];
+  }
+  if (emit === undefined) {
+    throw new Error("terminal approval settlement requires an audit emit");
+  }
+  const decoder = createSqliteTextDecoder(db);
+  const settled: SettledApproval[] = [];
+  for (const row of rows) {
+    const approvalId = Number(row.id);
+    requireChanges(
+      db
+        .prepare(
+          "UPDATE chat_approvals SET decision = ?, decided_at = ? WHERE id = ? AND decision IS NULL",
+        )
+        .run(decision, decidedAt, approvalId).changes,
+      1,
+      "terminal approval settlement",
+    );
+    emit(db, {
+      kind: "session.approval",
+      actorId: row.owner_id,
+      title: AUDIT_TITLE,
+      detail: { sessionId: row.session_id, messageId, tool: decoder.decode(row.tool), decision },
+    });
+    settled.push({ messageId, approvalId, decision });
+  }
+  return settled;
+}
+
+/** Terminal flip and pending-approval `deny` in one transaction; the settled rows once committed. */
 export function finishOwnedTurn(
   db: DatabaseSync,
+  emit: typeof auditEmit | undefined,
   turn: Turn,
   status: FinishStatus,
   activeTurns: Map<number, Turn>,
   activeSessions: Map<string, number>,
   activeSteps: Map<number, number>,
-): void {
+): SettledApproval[] {
   turn.progress = true;
   cancelTimer(turn);
   const content = turn.pending.length === 0 ? undefined : turn.pending.join("");
   const now = Date.now();
+  let settled: SettledApproval[];
   try {
-    runOwnedTransaction(db, "turn finish rollback failed", () => {
+    settled = runOwnedTransaction(db, "turn finish rollback failed", () => {
       if (content !== undefined) {
         requireChanges(
           db
@@ -240,6 +297,7 @@ export function finishOwnedTurn(
         runningSteps,
         "remaining step settlement",
       );
+      return settlePendingForMessage(db, emit, turn.assistantMessageId, "deny", now);
     });
   } catch (error) {
     turn.faulted = true;
@@ -249,6 +307,7 @@ export function finishOwnedTurn(
   turn.pending = [];
   turn.pendingBytes = 0;
   releaseTurn(turn, activeTurns, activeSessions, activeSteps);
+  return settled;
 }
 
 export function releaseTurn(
@@ -267,7 +326,26 @@ export function releaseTurn(
   }
 }
 
-export function reconcileStatuses(
+/** Startup reconciliation (caller's transaction): deny running messages' approvals, then flip. */
+export function reconcileRunning(
+  db: DatabaseSync,
+  emit: typeof auditEmit | undefined,
+  decidedAt: number,
+): void {
+  const running = db
+    .prepare(
+      "SELECT id FROM chat_messages WHERE role = 'assistant' AND status = 'running' ORDER BY id",
+    )
+    .all() as Array<{ id: number }>;
+  for (const message of running) {
+    settlePendingForMessage(db, emit, Number(message.id), "deny", decidedAt);
+  }
+  reconcileStatuses(db, "chat_sessions");
+  reconcileStatuses(db, "chat_messages");
+  reconcileStatuses(db, "chat_steps");
+}
+
+function reconcileStatuses(
   db: DatabaseSync,
   table: "chat_sessions" | "chat_messages" | "chat_steps",
 ): void {

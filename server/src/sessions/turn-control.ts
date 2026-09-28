@@ -8,7 +8,7 @@ import { HttpError } from "../core/errors/index.js";
 import type { ChatEvent } from "./events.js";
 import type { SessionClock } from "./omp/runtime.js";
 import type { Slot } from "./pool.js";
-import type { SessionStore } from "./store.js";
+import type { SessionStore, SettledApproval } from "./store.js";
 
 const OMP_ABORT_GRACE_MS = 8000;
 
@@ -177,6 +177,7 @@ export function persistEvent(
   event: ChatEvent<string>,
   toolIds: Map<string, number>,
   nextOrdinal: () => number,
+  settled: SettledApproval[],
 ): ChatEvent<number> | undefined {
   switch (event.type) {
     case "turn.start":
@@ -219,7 +220,7 @@ export function persistEvent(
       };
     }
     case "turn.end":
-      store.finishTurn(assistantMessageId, event.data.status);
+      store.finishTurn(assistantMessageId, event.data.status, settled);
       return event;
   }
 }

@@ -11,7 +11,7 @@ import type { OmpFrame } from "./omp/frame.js";
 import type { SessionClock } from "./omp/runtime.js";
 import type { ApprovalRequest } from "./omp/ui-requests.js";
 import type { Generation, Slot } from "./pool.js";
-import type { ApprovalOutcome, ApprovalView, SessionStore } from "./store.js";
+import type { ApprovalOutcome, ApprovalView, SessionStore, SettledApproval } from "./store.js";
 
 type RequestEvent = Extract<ChatEvent<number>, { type: "approval.request" }>;
 
@@ -134,12 +134,38 @@ export class ApprovalRegistry {
     return settled;
   }
 
-  /** Shutdown: revoke every approval timer without settling (terminal deny is #474's). */
+  /**
+   * Terminal settlement (#474), after the store committed `deny` with the turn's terminal flip:
+   * no frame; stop the timer, clear pending, then publish. False once a publication fails.
+   */
+  async settled(entries: readonly SettledApproval[]): Promise<boolean> {
+    for (const { approvalId, decision } of entries) {
+      const registration = this.#registrations.get(approvalId);
+      if (registration === undefined) {
+        continue;
+      }
+      this.#clock.clearTimeout(registration.timer);
+      registration.slot.runtime.clearPending(approvalId);
+      const requested =
+        registration.requestPublished || (await this.#publishRequestOnce(registration));
+      this.#registrations.delete(approvalId);
+      const messageId = registration.request.data.messageId;
+      const resolved = { messageId, approvalId, decision };
+      if (
+        !requested ||
+        !(await this.#emit(registration, { type: "approval.resolved", data: resolved }))
+      ) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /** Shutdown: revoke every approval timer; registrations stay for the pumps' terminal deny. */
   close(): void {
     for (const registration of this.#registrations.values()) {
       this.#clock.clearTimeout(registration.timer);
     }
-    this.#registrations.clear();
   }
 
   /**
