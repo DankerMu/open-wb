@@ -3,9 +3,10 @@
  * omp process pool: live-process registry, serialized admission, least-recently-active eviction.
  */
 import { HttpError } from "../core/errors/index.js";
-import type { SessionRuntime } from "./omp/runtime.js";
+import type { SessionRuntime, SessionRuntimeOpts } from "./omp/runtime.js";
 import type { SessionStore } from "./store.js";
 import { RingBuffer } from "./stream/ring-buffer.js";
+import type { SessionSupervisorRuntime } from "./supervisor.js";
 import type { TokenRegistry } from "./tokens.js";
 
 export interface Generation {
@@ -168,6 +169,37 @@ export class ReadmissionRequired extends Error {
     super("session process must be re-admitted");
     this.name = "ReadmissionRequired";
   }
+}
+
+type PerRuntime = Pick<SessionRuntimeOpts, "sessionId" | "ownerId" | "tokens" | "onApproval"> & {
+  resumePath: string | null;
+  onExit: () => void;
+};
+
+/** The one SessionRuntime option assembly (spawn contract inputs) from the supervisor runtime. */
+export function sessionRuntimeOpts(
+  base: SessionSupervisorRuntime,
+  per: PerRuntime,
+): SessionRuntimeOpts {
+  return {
+    sessionId: per.sessionId,
+    bin: base.bin,
+    sandboxRoot: base.sandboxRoot,
+    stateDir: base.stateDir,
+    ownerId: per.ownerId,
+    modelId: base.modelId,
+    tokens: per.tokens,
+    resumePath: per.resumePath,
+    onExit: per.onExit,
+    ...(per.onApproval === undefined ? {} : { onApproval: per.onApproval }),
+    ...(base.idleMs === undefined ? {} : { idleMs: base.idleMs }),
+    ...(base.ompUser === undefined ? {} : { ompUser: base.ompUser }),
+    ...(base.spawnImpl === undefined ? {} : { spawnImpl: base.spawnImpl }),
+    ...(base.clock === undefined ? {} : { clock: base.clock }),
+    ...(base.handshakeTimeoutMs === undefined
+      ? {}
+      : { handshakeTimeoutMs: base.handshakeTimeoutMs }),
+  };
 }
 
 export function generationTokens(

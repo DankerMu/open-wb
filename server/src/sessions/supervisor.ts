@@ -4,6 +4,7 @@
 import { DEFAULT_OMP_MAX_PROCESSES } from "../agent-config.js";
 import { HttpError } from "../core/errors/index.js";
 import { ApprovalRegistry } from "./approvals.js";
+import { Regenerations } from "./branching.js";
 import { applyFailure, applyFrame, applyStop, type ChatEvent, createEventState } from "./events.js";
 import type { OmpFrame } from "./omp/frame.js";
 import { AgentUnavailableError, OmpProtocolError, type SpawnImpl } from "./omp/process.js";
@@ -12,7 +13,6 @@ import {
   SessionBusyError,
   type SessionClock,
   SessionRuntime,
-  type SessionRuntimeOpts,
 } from "./omp/runtime.js";
 import {
   type Generation,
@@ -26,12 +26,13 @@ import {
   releasePumpExit,
   type Slot,
   sealGeneration,
+  sessionRuntimeOpts,
   turnFree,
 } from "./pool.js";
 import type { ApprovalView, SessionStore, SettledApproval } from "./store.js";
 import type { RetainedEvent, RingRead } from "./stream/ring-buffer.js";
 import type { TokenRegistry } from "./tokens.js";
-import { ControlClaims, drain, persistEvent, Regenerations, TurnStops } from "./turn-control.js";
+import { ControlClaims, drain, persistEvent, TurnStops } from "./turn-control.js";
 
 export { releasePumpExit } from "./pool.js";
 
@@ -389,30 +390,20 @@ export class SessionSupervisor {
       throw new HttpError("agent_unavailable");
     }
     slot.entry = entry;
-    const opts: SessionRuntimeOpts = {
-      sessionId,
-      bin: this.#runtime.bin,
-      sandboxRoot: this.#runtime.sandboxRoot,
-      stateDir: this.#runtime.stateDir,
-      ownerId,
-      modelId: this.#runtime.modelId,
-      tokens: generationTokens(slot, this.#pool, this.#store, this.#tokens),
-      resumePath,
-      onExit: () => {
-        this.#onProcessExit(slot);
-      },
-      onApproval: (request) => {
-        this.#approvals.register(slot, request);
-      },
-      ...(this.#runtime.idleMs === undefined ? {} : { idleMs: this.#runtime.idleMs }),
-      ...(this.#runtime.ompUser === undefined ? {} : { ompUser: this.#runtime.ompUser }),
-      ...(this.#runtime.spawnImpl === undefined ? {} : { spawnImpl: this.#runtime.spawnImpl }),
-      ...(this.#runtime.clock === undefined ? {} : { clock: this.#runtime.clock }),
-      ...(this.#runtime.handshakeTimeoutMs === undefined
-        ? {}
-        : { handshakeTimeoutMs: this.#runtime.handshakeTimeoutMs }),
-    };
-    slot.runtime = new SessionRuntime(opts);
+    slot.runtime = new SessionRuntime(
+      sessionRuntimeOpts(this.#runtime, {
+        sessionId,
+        ownerId,
+        resumePath,
+        tokens: generationTokens(slot, this.#pool, this.#store, this.#tokens),
+        onExit: () => {
+          this.#onProcessExit(slot);
+        },
+        onApproval: (request) => {
+          this.#approvals.register(slot, request);
+        },
+      }),
+    );
     this.#slots.set(sessionId, slot);
     try {
       return await use(slot);
