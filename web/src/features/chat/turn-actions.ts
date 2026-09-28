@@ -1,4 +1,4 @@
-// 会话页回合操作：prompt 派发及其所有权 fence、审批作答、停止、重新生成（由 ChatPage 调用；fork 的落点）。
+// 会话页回合操作：prompt 派发及其所有权 fence、审批作答、停止、重新生成、从此处分叉（由 ChatPage 调用）。
 import { type Dispatch, type RefObject, type SetStateAction, useCallback } from "react";
 import { type ApiClient, ApiError } from "../../lib/api.js";
 import type { ChatMessageSnapshot } from "../../lib/session-contract.js";
@@ -24,6 +24,7 @@ type TurnActionDeps = {
   abortMutation: () => void;
   clientRef: RefObject<ApiClient>;
   closeSource: () => void;
+  historyGenerationRef: RefObject<number>;
   installSnapshot: (snapshot: ChatMessageSnapshot, ownedClient: ApiClient) => void;
   mountedRef: RefObject<boolean>;
   mutationControllerRef: RefObject<AbortController | null>;
@@ -33,8 +34,10 @@ type TurnActionDeps = {
   refreshList: (ownedClient: ApiClient) => void;
   releaseMutationIfOwned: (controller: AbortController) => void;
   requestedSessionRef: RefObject<string | null>;
+  selectSession: (sessionId: string | null) => void;
   setCreating: Dispatch<SetStateAction<boolean>>;
   setDraft: Dispatch<SetStateAction<string>>;
+  setForkOwner: Dispatch<SetStateAction<ChatMutationOwner | null>>;
   setMutationOwner: Dispatch<SetStateAction<ChatMutationOwner | null>>;
   setPromptError: Dispatch<SetStateAction<ChatOwnedAlert | null>>;
   setRegenerateOwner: Dispatch<SetStateAction<ChatMutationOwner | null>>;
@@ -46,6 +49,7 @@ export function useTurnActions({
   abortMutation,
   clientRef,
   closeSource,
+  historyGenerationRef,
   installSnapshot,
   mountedRef,
   mutationControllerRef,
@@ -55,8 +59,10 @@ export function useTurnActions({
   refreshList,
   releaseMutationIfOwned,
   requestedSessionRef,
+  selectSession,
   setCreating,
   setDraft,
+  setForkOwner,
   setMutationOwner,
   setPromptError,
   setRegenerateOwner,
@@ -358,5 +364,50 @@ export function useTurnActions({
     setStreamError,
   ]);
 
-  return { answerApproval, dispatchPrompt, regenerateTurn, restoreOwnedDraft, stopTurn };
+  // Regenerate's lock shape plus the history token (no reload since the click: ABA). Never rejects.
+  const forkTurn = useCallback(
+    (messageId: number): Promise<void> => {
+      const ownedClient = clientRef.current;
+      const sessionId = requestedSessionRef.current;
+      if (sessionId === null) {
+        return Promise.resolve();
+      }
+      const generation = historyGenerationRef.current;
+      const owner = { client: ownedClient, originSessionId: sessionId, sessionId };
+      const release = () => setForkOwner((current) => (current === owner ? null : current));
+      const owned = () =>
+        ownsSessionWrite(ownedClient, sessionId) && historyGenerationRef.current === generation;
+      setPromptError(null);
+      setForkOwner(owner);
+      return ownedClient.forkSession(sessionId, messageId).then(
+        (fork) => {
+          release();
+          if (owned()) {
+            setDraft(fork.draft);
+            refreshList(ownedClient);
+            selectSession(fork.session.id);
+          }
+        },
+        (error: unknown) => {
+          release();
+          if (owned() && !isUnauthorized(error)) {
+            setPromptError({ client: ownedClient, sessionId, message: errorMessage(error) });
+          }
+        },
+      );
+    },
+    [
+      clientRef,
+      historyGenerationRef,
+      ownsSessionWrite,
+      refreshList,
+      requestedSessionRef,
+      selectSession,
+      setDraft,
+      setForkOwner,
+      setPromptError,
+    ],
+  );
+
+  return { answerApproval, dispatchPrompt, forkTurn, regenerateTurn, restoreOwnedDraft, stopTurn };
 }

@@ -166,7 +166,7 @@ describe("(C4) render conditions", () => {
     expect(article.querySelector(".chat-msg-main > .chat-step")).not.toBeNull();
     expect(article.querySelector(".chat-msg-main")?.lastElementChild).toBe(actions);
     const user = screen.getByRole("article", { name: "用户" });
-    expect(within(user).queryByRole("button")).toBeNull();
+    expect(within(user).queryByRole("button", { name: "复制" })).toBeNull();
   });
 });
 
