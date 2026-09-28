@@ -13,9 +13,9 @@
 |---|---|---|
 | Public API / CLI / script entry | yes | 首个消费 `POST /api/sessions/:id/approvals/:approvalId` 的 UI。请求路径与 body 必须对准该条 id，不能串到别的审批或别的会话 → A3、A7、A8、A12 |
 | Concurrency / shared state / ordering | yes | 多条审批独立作答；作答与在途 prompt 共存；409 对账与实时源、`loadHistory` 交错；每秒 tick → A7、A11、A12、A12b、A13、A5b |
-| Error handling / rollback / partial outputs | yes | 409 静默对账、其它信封内联并解禁、401 交接、对账失败静默；不乐观更新 → A3、A5、A5b、A6 |
+| Error handling / rollback / partial outputs | yes | 409 静默对账、其它信封内联并解禁、对账失败静默；不乐观更新 → A3、A5、A5b、A6；401 交接只经代码审查（`isUnauthorized` 分支不写 UI） |
 | Legacy compatibility / examples | yes | 既有页面行为与测试零 diff；`approvals: []` 时 DOM 不变；助手块结构守卫 → G3、design「Sibling surfaces」 |
-| Auth / permissions / secrets | yes | 作答只发往当前 client 与当前选中会话；切换会话或账号后，迟到的结果不写 UI；401 走既有登录交接（页面卸载后由 `mountedRef` 围栏兜底，只经代码审查）；切会话迟到结果 → A12、A12b；owner 校验在 server（#468），本刀不改 |
+| Auth / permissions / secrets | yes | 作答只发往当前 client 与当前选中会话；切换会话或账号后，迟到的结果不写 UI；401 走既有登录交接（页面卸载后由 `mountedRef` 围栏兜底，只经代码审查）；切会话迟到结果 → A12、A12b；账号续期后迟到的 409 → A12c；owner 校验在 server（#468），本刀不改 |
 | Config / project setup | no | 无配置变化 |
 | File IO / path safety / overwrite | no | 不涉文件 |
 | Schema / columns / units / field names | no | 只读 #476 已定形的视图字段 `{id,tool,title,expiresAt,decision}`，不改解析与键集（`session-contract.ts`、`stream-approvals.ts` 零 diff） |

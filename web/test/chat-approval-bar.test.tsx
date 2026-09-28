@@ -2,17 +2,17 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessageSnapshot } from "../src/lib/session-contract.js";
 import {
+  cleanupChatLifecycle,
+  renderChatPageWithAuthProbe,
+  renewAccount,
+} from "./chat-page-lifecycle-support.js";
+import {
   OTHER_MESSAGES,
   OTHER_SESSION_ID,
   otherIdleSession,
   otherSnapshot,
 } from "./chat-page-ownership-support.js";
-import {
-  cleanupChatPage,
-  expectChatLocation,
-  type FetchRoutes,
-  renderChatPage,
-} from "./chat-page-support.js";
+import { expectChatLocation, type FetchRoutes, renderChatPage } from "./chat-page-support.js";
 import {
   chatSnapshot,
   FakeEventSource,
@@ -172,7 +172,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  cleanupChatPage();
+  cleanupChatLifecycle();
   vi.useRealTimers();
 });
 
@@ -187,6 +187,16 @@ describe("approval bar: pending, countdown and settled headers", () => {
     const group = groups[0] as HTMLElement;
     expect(group.querySelector(".chat-approval-tool")?.textContent).toBe("bash");
     expect(group.querySelector(".chat-approval-body")?.textContent).toBe(TITLE);
+    // 条渲染在同一 `.chat-msg-main` 内、正文 `.chat-md` 之上
+    const main = article.querySelector(".chat-msg-main");
+    const list = main?.querySelector(".chat-approvals");
+    const text = main?.querySelector(".chat-md");
+    expect(list?.contains(group)).toBe(true);
+    expect(list?.parentElement).toBe(main);
+    expect(text?.parentElement).toBe(main);
+    expect(
+      (list as Element).compareDocumentPosition(text as Element) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     const sentences = countdowns(group);
     expect(sentences).toHaveLength(1);
     expect(sentences[0]?.textContent).toBe("（60s 内未操作将自动允许）");
@@ -544,6 +554,50 @@ describe("approval bar: ownership fences", () => {
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getByText("other user", { exact: true })).toBeTruthy();
     expect(screen.queryAllByRole("group", { name: ALLOWED })).toHaveLength(0);
+  });
+
+  it("A12c drops a late 409 after account renewal kept the same session selected", async () => {
+    const answer = deferredResponse();
+    const page: PageRoutes = {
+      snapshot: snapshotWith([]),
+      messages: () => jsonResponse(page.snapshot),
+    };
+    const { fetchMock, getProbe } = renderChatPageWithAuthProbe(`/?session=${SESSION_ID}`, {
+      "/api/sessions": () => jsonResponse({ sessions: [page.snapshot.session] }),
+      [MESSAGES]: () => page.messages(),
+      [approvalPath(7)]: () => answer.promise,
+    });
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    const source = latestSource();
+    act(() => {
+      source.emitOpen();
+    });
+    await flush();
+    emitRequest(source, 1, 7);
+    page.snapshot = snapshotWith([approval(7)], 1);
+    fireEvent.click(button(bars()[0] as HTMLElement, "允许"));
+    await flush();
+    expect(bodies(fetchMock, approvalPath(7))).toEqual([{ decision: "allow" }]);
+
+    await renewAccount(getProbe);
+    expect(await screen.findByText("lisi", { exact: true })).toBeTruthy();
+    await flush();
+    expect(FakeEventSource.instances).toHaveLength(2);
+    const renewed = latestSource();
+    expect(renewed.url).toBe(EVENTS_URL);
+    expect(source.closeCount).toBeGreaterThan(0);
+    act(() => {
+      renewed.emitOpen();
+    });
+    await flush();
+    const reads = calls(fetchMock, MESSAGES).length;
+
+    answer.resolve(jsonResponse(SETTLED_409, 409));
+    await flush();
+    expect(calls(fetchMock, MESSAGES)).toHaveLength(reads);
+    expect(renewed.closeCount).toBe(0);
+    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("A13 answering leaves an in-flight prompt and its acceptance reconcile untouched", async () => {

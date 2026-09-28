@@ -116,6 +116,7 @@
 | A11 计时器生命周期（红） | A1 时；A3 resolved 后 | `vi.getTimerCount()` 为 1；resolved 后为 0（无 pending 不留 interval）。若 RTL 轮询干扰计数，改用 `vi.spyOn(globalThis, "setInterval")` 与 `clearInterval` 的调用次数作证：只调 1 次 set，resolved 后 clear 1 次 |
 | A12 围栏（红） | A1 后点 `允许`，POST 用 `deferredResponse` 挂起；导航到另一会话后令其 409 | 旧会话无对账 GET，无新 source 指向旧会话，无 alert |
 | A12b 对账 GET 阶段围栏（红） | A1 后点 `允许`，POST 立即 409 `approval_settled`；对账 GET 用 `deferredResponse` 挂起；导航到会话 B，待 B 的源建好后令 GET_A 返回快照 | B 源 `closeCount === 0`；导航后无新建 URL 指向 A 的 `FakeEventSource`；无 alert；视图仍为 B（`openSource` 自身不查 `requestedSessionRef`，只有 `installSnapshot` 自检，故漏掉 GET 阶段围栏会关掉 B 的源） |
+| A12c 账号续期围栏（fix pass 1） | `renderChatPageWithAuthProbe` 下 A1 后点 `允许`，POST 挂起；`renewAccount` 续期（同一会话仍选中、新 client 源建好）后令其 409 `approval_settled` | 无 messages GET；新源 `closeCount === 0`；source 数量不增；无 alert（`openSource` 不查 client，漏掉 client 臂会关新账号的源） |
 | A13 不动 prompt fence（红） | done 会话发 prompt，prompt POST 挂起；旧源送 `turn.start{2}` 与 `approval.request{2,9,…}`；点 `允许` → 200；再令 prompt 202 `{userMessageId:1,assistantMessageId:2}` | prompt 的受理对账照常发生：messages GET +1 并安装、开新源。复用 `abortMutation` 的变异会中止 prompt，不再对账，因此红 |
 | G1 CSS（`pre-wrap` 红，颜色恒绿） | `ruleBody(stripComments(messages.css), ".chat-approval-body")` | 含 `white-space: pre-wrap;`；既有颜色守卫全绿 |
 | G2 源码守卫（恒绿） | `readRepoFile("web/src/features/chat/turn-actions.ts")` | 不含 `useState(`、`useEffect(`、`useRef(`、`useMemo(`、`./page.js` |
@@ -135,6 +136,8 @@
 - 作答前调 `abortMutation` → A13；
 - 失败后不解禁 → A6；
 - 去掉对账 GET 阶段围栏 → A12b；
+- `ownsAnswer` 去掉 client 臂 → A12c；
+- `<ApprovalBars>` 挪到正文之后 → A1（`compareDocumentPosition`）；
 - 只在 POST 响应后才禁用 → A3；
 - approvals 变化时复位 `sent` → A3。
 
