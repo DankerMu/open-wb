@@ -35,7 +35,7 @@ import {
   withViewport,
 } from "./ui-walk-layout.js";
 import { type AuthOracle, runWithBrowserErrorOracle } from "./ui-walk-oracle.js";
-import { walkStop } from "./ui-walk-stop.js";
+import { walkRegenerate, walkStop } from "./ui-walk-stop.js";
 
 const DEV_PASSWORD = "demo";
 const PRODUCTION_SERVICE_NAME = "workbuddy-app-server";
@@ -337,7 +337,8 @@ async function walkHeldDialogue(page: Page, project: WalkProject): Promise<void>
     await expectCompletedPair(page, project, sessionId, prompt);
     await expectAllowedBar(page);
     await walkScrollFollow(page, project);
-    await walkStop(page, project, sessionId);
+    const stopGate = await walkStop(page, project, sessionId);
+    await walkRegenerate(page, project, sessionId, stopGate);
   } finally {
     await deleteGate(origin, gateId);
   }
