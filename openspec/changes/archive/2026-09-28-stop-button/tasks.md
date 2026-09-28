@@ -16,7 +16,7 @@
 | Concurrency / shared state / ordering | yes | stop 与在途 prompt 共存；stop 与 SSE `turn.end`、gap 重装交错；切会话时的在途 stop；审批挂起时停止 → S4、S6、S7、S8 |
 | Error handling / rollback / partial outputs | yes | 错误信封内联并恢复可点；204 不写视图；S7 类残局下不卡死；容量 503 不留投机行、恢复草稿 → S3、S4、S5、S12 |
 | Legacy compatibility / examples | yes | composer 结构与 `生成中` status 元素是 e2e 与多份既有测试的锚点；发送键在非 running 时不变；三处 allowed-edit 之外零 diff → S1、G2、G3，design「Sibling surfaces」 |
-| Auth / permissions / secrets | yes | stop 只打当前 client 与当前选中会话；切会话/续期后迟到结果不写 UI；401 走既有登录交接（只经代码审查：`isUnauthorized` 分支不写 UI）；owner 校验在 server（#475） → S7 |
+| Auth / permissions / secrets | yes | stop 只打当前 client 与当前选中会话；切会话/续期后迟到结果不写 UI；401 走既有登录交接（只经代码审查：`isUnauthorized` 分支不写 UI）；owner 校验在 server（#475） → S7（切会话）、S7b（续期）、S7c（卸载） |
 | Config / project setup | no | 无配置变化 |
 | File IO / path safety / overwrite | no | 不涉文件 |
 | Schema / columns / units / field names | no | 只读 #472 已定形的 `stopped` 联合与 `stopSession` 返回值；`session-contract.ts`、`stream.ts`、`api-sessions.ts` 零 diff |

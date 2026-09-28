@@ -150,7 +150,7 @@ supervisor SHALL 在审批行持久化之后、经既有 generation ring 发布 
 - **THEN** 该消息 `approvals` 为 `[{id:a1,decision:null},{id:a2,decision:"deny"}]`（按 `id` 升序、无重复）；`a1` 仍可作答；重新拉取的快照与归约结果一致
 
 ### Requirement: web 审批条
-web SHALL 在 assistant 消息内按 `approvals` 数组为每条审批各渲染一个审批条，同一消息的多个审批条按 `id` 升序纵向排列，各自独立交互。`decision:null` 的审批条 SHALL 显示：头部标题 `需要你的确认`；工具名徽章（取自 `tool`，即 title 首行 `Allow tool: <name>` 的解析结果）；正文为 `title` **全文**，以 `white-space: pre-wrap` 保留换行；按钮 `允许`/`拒绝`；以 `expiresAt` 与本地时钟计算的单句动态倒计时文案 `（<n>s 内未操作将自动允许）`，`<n>` 为剩余整秒并随时间递减（初值 60）。`allow`/`timeout` 显示 `已允许执行`，`deny` 显示 `已拒绝执行`，均无按钮、无倒计时。点击按钮 SHALL 以该条的 `approvalId` 调用作答 REST；409 `approval_settled` SHALL 使该审批条按随后到达的 `approval.resolved` 或重新拉取的快照更新为终态文案。
+web SHALL 在 assistant 消息内按 `approvals` 数组为每条审批各渲染一个审批条，同一消息的多个审批条按 `id` 升序纵向排列，各自独立交互。`decision:null` 的审批条 SHALL 显示：头部标题 `需要你的确认`；工具名徽章（取自 `tool`，即 title 首行 `Allow tool: <name>` 的解析结果）；正文为 `title` **全文**，以 `white-space: pre-wrap` 保留换行；按钮 `允许`/`拒绝`；以 `expiresAt` 与本地时钟计算的单句动态倒计时文案 `（<n>s 内未操作将自动允许）`，`<n>` 为剩余整秒并随时间递减（初值 60）。`allow`/`timeout` 显示 `已允许执行`，`deny` 显示 `已拒绝执行`，均无按钮、无倒计时。点击按钮 SHALL 以该条的 `approvalId` 调用作答 REST；409 `approval_settled` SHALL 使该审批条按随后到达的 `approval.resolved` 或重新拉取的快照更新为终态文案。会话 running 且存在 pending 审批时 composer 仍显示 `停止`。
 
 #### Scenario: 审批条交互
 - **WHEN** 页面级 fixture 收到 `approval.request{title:"Allow tool: bash\nReason: run ls"}` 且注入时钟距 `expiresAt` 剩 42s
