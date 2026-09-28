@@ -7,7 +7,7 @@
     - 新会话行在 CAS 事务内插入，「删除新会话行」改为「不留下新会话行」（偏离 1）；
     - 编排落在 `branching.ts`（偏离 2）；
     - 「201」为 supervisor 兑现 `{session, draft}`，REST 归 #469。
-  - 验证：design R1–R10、F1–F11、G1。
+  - 验证：design R1–R10、F1–F13、G1。
 - [ ] （本 fixture 追加，非父 tasks 原文，见 proposal 偏离 2）前置纯移动，独立首个 commit：
   - `Regenerations` 簇（`turn-control.ts:204-363`）移入 `branching.ts`；
   - `SessionRuntimeOpts` 组装（`supervisor.ts:392-415`）抽成 `pool.ts` 的 `sessionRuntimeOpts`。
@@ -33,7 +33,7 @@
 | Config / project setup | no | 无配置项；cap 语义沿用 #463 |
 | File IO / path safety / overwrite | yes | 源会话文件只读、临时进程 `--resume` 源文件、新文件只写进新会话行 → R1（字节与 mtime 不变、新文件路径）、R6/F2（源文件与 `omp_session_file` 不变）、R1/F7 后续 `--resume <新文件>` |
 | Schema / columns / units / field names | yes | 无 schema 变更；新会话行 `parent_session_id`/`stream_epoch=0`，显式列拷贝消息/步骤/审批（TEXT 字节原样）→ R1 逐字段比对、R2 三态、F4 回滚；守护 `migration-034.test.ts` |
-| Auth / permissions / secrets | yes | owner 由 `getMessages(sessionId, ownerId)` 兜底（R7 他人 → `not_found`）；临时 token 键为新会话 id，fork 结束即撤销 → R1 `tokens.lookup(...) === null`；REST 鉴权归 #469 |
+| Auth / permissions / secrets | yes | owner 由 `getMessages(sessionId, ownerId)` 兜底（R7 他人 → `not_found`）；临时 token 键为新会话 id，fork 结束即撤销 → R1、R10、F13 `tokens.lookup(...) === null`（F13/M23 钉住 fork 自身的撤销）；REST 鉴权归 #469 |
 | Concurrency / shared state / ordering | yes | 本刀核心：源先 retire 再准入、占用挡住源会话新请求、间隙注入、CAS 复核、shutdown 竞争 → R3、R4、R5、R9、F2、F3、F6、F9、F11；M5–M7、M11、M14、M18、M20、M22 |
 | Resource limits / large input / discovery | yes | 临时进程计入上限、不可驱逐、每条路径释放名额、无 pid 失败释放 → F7、F8、F10、R10、G1；M12、M19、M21 |
 | Legacy compatibility / examples | yes | regenerate/prompt/stop/池既有行为不变 → Sibling surfaces 全部零 diff；前置纯移动 commit 单独零 diff |
@@ -57,8 +57,8 @@
 - [ ] 新测试只写进新建文件 `server/test/session-fork.test.ts`、`server/test/session-fork-faults.test.ts`、`server/test/session-fork-helpers.ts`，各 ≤800 行；不 import `pool.ts`/`turn-control.ts`/`branching.ts`/`store-branch.ts`，不访问私有字段。
 - [ ] 既有测试允许的改动：**无**（design「Sibling surfaces」所列全部零 diff 全绿）。
 - [ ] 红/绿：
-  - R1–R10、F1–F11 在去掉对应机制时失败，记录失败输出；G1 为恒绿不变量；
-  - M1–M22 逐一临时变异，确认对应用例变红，结果记入 PR body。
+  - R1–R10、F1–F13 在去掉对应机制时失败，记录失败输出；G1 为恒绿不变量；
+  - M1–M24 逐一临时变异，确认对应用例变红，结果记入 PR body。
 - [ ] 实测 `wc -l` 六个源文件与三个新测试文件，与 proposal Impact 对照，记入 PR body（`supervisor.ts` 起点 767，终点 ≤798）。
 - [ ] `npm test --workspace server`（覆盖率 ≥80%）、`make lint`、`make typecheck`、`make anti-drift`、`bash scripts/size-guard.sh` 全部退出 0；`openspec validate fork-session --strict --no-interactive` 通过。
 - [ ] PR body：
