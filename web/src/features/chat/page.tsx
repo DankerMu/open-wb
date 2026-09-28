@@ -43,6 +43,7 @@ export function ChatPage() {
   const [creating, setCreating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [mutationOwner, setMutationOwner] = useState<ChatMutationOwner | null>(null);
+  const [regenerateOwner, setRegenerateOwner] = useState<ChatMutationOwner | null>(null);
   const mountedRef = useRef(false);
   const clientRef = useRef(client);
   const requestedSessionRef = useRef(requestedSessionId);
@@ -311,26 +312,28 @@ export function ChatPage() {
     ],
   );
 
-  const { answerApproval, dispatchPrompt, restoreOwnedDraft, stopTurn } = useTurnActions({
-    abortMutation,
-    clientRef,
-    closeSource,
-    installSnapshot,
-    mountedRef,
-    mutationControllerRef,
-    mutationGenerationRef,
-    openSource,
-    pendingCreateSendRef,
-    refreshList,
-    releaseMutationIfOwned,
-    requestedSessionRef,
-    setCreating,
-    setDraft,
-    setMutationOwner,
-    setPromptError,
-    setStreamError,
-    setSubmitting,
-  });
+  const { answerApproval, dispatchPrompt, regenerateTurn, restoreOwnedDraft, stopTurn } =
+    useTurnActions({
+      abortMutation,
+      clientRef,
+      closeSource,
+      installSnapshot,
+      mountedRef,
+      mutationControllerRef,
+      mutationGenerationRef,
+      openSource,
+      pendingCreateSendRef,
+      refreshList,
+      releaseMutationIfOwned,
+      requestedSessionRef,
+      setCreating,
+      setDraft,
+      setMutationOwner,
+      setPromptError,
+      setRegenerateOwner,
+      setStreamError,
+      setSubmitting,
+    });
 
   useEffect(() => {
     const pending = pendingCreateSendRef.current;
@@ -581,6 +584,7 @@ export function ChatPage() {
   const generating =
     (ownedBusy && creating) ||
     (ownedBusy && submitting) ||
+    ownsMutation(regenerateOwner, client, requestedSessionId) ||
     (ownedHistory && historyState.status === "loading") ||
     historyView?.status === "running" ||
     Boolean(ownedStreamError);
@@ -610,6 +614,7 @@ export function ChatPage() {
         historyView={historyView}
         onAnswerApproval={answerApproval}
         onChangeDraft={setDraft}
+        onRegenerate={regenerateTurn}
         onStop={stopTurn}
         onSubmit={submitComposer}
         promptError={visibleOwnedAlert(promptError, client, requestedSessionId)}

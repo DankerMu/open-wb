@@ -1,4 +1,4 @@
-// 会话页回合操作：prompt 派发及其所有权 fence、审批作答、停止（由 ChatPage 调用；regenerate/fork 的落点）。
+// 会话页回合操作：prompt 派发及其所有权 fence、审批作答、停止、重新生成（由 ChatPage 调用；fork 的落点）。
 import { type Dispatch, type RefObject, type SetStateAction, useCallback } from "react";
 import { type ApiClient, ApiError } from "../../lib/api.js";
 import type { ChatMessageSnapshot } from "../../lib/session-contract.js";
@@ -10,6 +10,14 @@ export const TERMINAL_REFRESH_GUIDANCE = "请刷新页面后重试";
 /** 409 `approval_settled`: the approval was already settled server-side (by `code`, not status). */
 function isApprovalSettled(error: unknown) {
   return error instanceof ApiError && error.status === 409 && error.code === "approval_settled";
+}
+
+/**
+ * Regenerate rejections that prove no server commit (409/400/503, or 401 handed to login). Anything
+ * else, 502 included, may follow a commit that deleted the old answer, so the page reconciles.
+ */
+function isUncommittedRegenerate(error: unknown) {
+  return error instanceof ApiError && [400, 401, 409, 503].includes(error.status);
 }
 
 type TurnActionDeps = {
@@ -29,6 +37,7 @@ type TurnActionDeps = {
   setDraft: Dispatch<SetStateAction<string>>;
   setMutationOwner: Dispatch<SetStateAction<ChatMutationOwner | null>>;
   setPromptError: Dispatch<SetStateAction<ChatOwnedAlert | null>>;
+  setRegenerateOwner: Dispatch<SetStateAction<ChatMutationOwner | null>>;
   setStreamError: Dispatch<SetStateAction<ChatOwnedAlert | null>>;
   setSubmitting: Dispatch<SetStateAction<boolean>>;
 };
@@ -50,6 +59,7 @@ export function useTurnActions({
   setDraft,
   setMutationOwner,
   setPromptError,
+  setRegenerateOwner,
   setStreamError,
   setSubmitting,
 }: TurnActionDeps) {
@@ -211,8 +221,8 @@ export function useTurnActions({
     ],
   );
 
-  // Approval answers and stop never touch the prompt mutation fence: writes that must not abort a
-  // prompt. Their late results are fenced by client, selected session and mount only.
+  // Approval answers, stop and regenerate never touch the prompt mutation fence: writes that must
+  // not abort a prompt. Their late results are fenced by client, selected session and mount only.
   const ownsSessionWrite = useCallback(
     (ownedClient: ApiClient, sessionId: string) =>
       mountedRef.current &&
@@ -221,7 +231,7 @@ export function useTurnActions({
     [clientRef, mountedRef, requestedSessionRef],
   );
 
-  /** Silent reconcile after 409: the old source stays open until the snapshot is in hand. */
+  /** Silent reconcile (approval 409, regenerate 502): old source stays open until the snapshot. */
   const reconcileSettled = useCallback(
     (ownedClient: ApiClient, sessionId: string) => {
       void ownedClient.getMessages(sessionId).then(
@@ -288,5 +298,65 @@ export function useTurnActions({
     );
   }, [clientRef, ownsSessionWrite, requestedSessionRef, setPromptError]);
 
-  return { answerApproval, dispatchPrompt, restoreOwnedDraft, stopTurn };
+  // Page-level lock (never the prompt fence) released by identity on every branch; never rejects.
+  const regenerateTurn = useCallback((): Promise<boolean> => {
+    const ownedClient = clientRef.current;
+    const sessionId = requestedSessionRef.current;
+    if (sessionId === null) {
+      return Promise.resolve(false);
+    }
+    const owner: ChatMutationOwner = { client: ownedClient, originSessionId: sessionId, sessionId };
+    const release = () => setRegenerateOwner((current) => (current === owner ? null : current));
+    const owned = () => ownsSessionWrite(ownedClient, sessionId);
+    const fail = (error: unknown, write: typeof setPromptError, suffix = "") => {
+      if (owned() && !isUnauthorized(error)) {
+        write({ client: ownedClient, sessionId, message: `${errorMessage(error)}${suffix}` });
+      }
+      release();
+    };
+    setPromptError(null);
+    setRegenerateOwner(owner);
+    return ownedClient.regenerateSession(sessionId).then(
+      () => {
+        if (!owned()) {
+          release();
+          return false;
+        }
+        closeSource();
+        void ownedClient.getMessages(sessionId).then(
+          (snapshot) => {
+            if (owned()) {
+              installSnapshot(snapshot, ownedClient);
+              openSource(snapshot, ownedClient);
+              refreshList(ownedClient);
+            }
+            release();
+          },
+          (error: unknown) => fail(error, setStreamError, `。${TERMINAL_REFRESH_GUIDANCE}`),
+        );
+        return true;
+      },
+      (error: unknown) => {
+        fail(error, setPromptError);
+        if (owned() && !isUncommittedRegenerate(error)) {
+          reconcileSettled(ownedClient, sessionId);
+        }
+        return false;
+      },
+    );
+  }, [
+    clientRef,
+    closeSource,
+    installSnapshot,
+    openSource,
+    ownsSessionWrite,
+    reconcileSettled,
+    refreshList,
+    requestedSessionRef,
+    setPromptError,
+    setRegenerateOwner,
+    setStreamError,
+  ]);
+
+  return { answerApproval, dispatchPrompt, regenerateTurn, restoreOwnedDraft, stopTurn };
 }
