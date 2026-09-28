@@ -4,7 +4,9 @@
  */
 import { HttpError } from "../core/errors/index.js";
 import type { SessionRuntime } from "./omp/runtime.js";
-import type { RingBuffer } from "./stream/ring-buffer.js";
+import type { SessionStore } from "./store.js";
+import { RingBuffer } from "./stream/ring-buffer.js";
+import type { TokenRegistry } from "./tokens.js";
 
 export interface Generation {
   epoch: number;
@@ -157,5 +159,98 @@ export class ProcessPool {
       }
     }
     return best;
+  }
+}
+
+/** The slot's capacity entry was released; the dispatch falls back to one fresh admission. */
+export class ReadmissionRequired extends Error {
+  constructor() {
+    super("session process must be re-admitted");
+    this.name = "ReadmissionRequired";
+  }
+}
+
+export function generationTokens(
+  slot: Slot,
+  pool: ProcessPool,
+  store: SessionStore,
+  tokens: TokenRegistry,
+): { issue(sessionId: string): string; revoke(sessionId: string): void } {
+  return {
+    issue: (sessionId: string) => {
+      slot.acquisitionFault = undefined;
+      if (!pool.holds(slot.entry)) {
+        slot.acquisitionFault = new ReadmissionRequired();
+        throw slot.acquisitionFault;
+      }
+      try {
+        slot.epoch = store.bumpStreamEpoch(sessionId);
+      } catch (error) {
+        slot.acquisitionFault = error;
+        throw error;
+      }
+      const generation: Generation = {
+        epoch: slot.epoch,
+        ring: new RingBuffer(slot.epoch),
+        revoked: false,
+        dispatchCount: 1,
+        pumpCount: 0,
+        sealed: false,
+      };
+      slot.generation = generation;
+      try {
+        return tokens.issue(sessionId);
+      } catch (error) {
+        slot.acquisitionFault = error;
+        releaseDispatch(slot, generation);
+        generation.revoked = true;
+        sealGeneration(slot, generation);
+        throw error;
+      }
+    },
+    revoke: (_sessionId: string) => {
+      const generation = slot.generation;
+      if (generation !== undefined) {
+        generation.revoked = true;
+        sealGeneration(slot, generation);
+      }
+      tokens.revoke(slot.sessionId);
+    },
+  };
+}
+
+export function releaseDispatch(slot: Slot, generation: Generation | undefined): void {
+  if (generation === undefined) {
+    return;
+  }
+  if (generation.dispatchCount > 0) {
+    generation.dispatchCount -= 1;
+  }
+  sealGeneration(slot, generation);
+}
+
+export function releasePump(slot: Slot, generation: Generation | undefined): void {
+  if (generation === undefined) {
+    return;
+  }
+  if (generation.pumpCount > 0) {
+    generation.pumpCount -= 1;
+  }
+  if (generation.dispatchCount > 0) {
+    generation.dispatchCount -= 1;
+  }
+  sealGeneration(slot, generation);
+}
+
+export function sealGeneration(slot: Slot, generation: Generation): void {
+  if (generation.sealed || generation.dispatchCount > 0 || generation.pumpCount > 0) {
+    return;
+  }
+  if (!generation.revoked && slot.retiring === undefined) {
+    return;
+  }
+  generation.sealed = true;
+  if (slot.generation === generation) {
+    slot.generation = undefined;
   }
 }

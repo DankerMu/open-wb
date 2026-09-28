@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { HttpError } from "../core/errors/index.js";
 import type { MessageRole, MessageStatus, MessageView, StepStatus, StepView } from "./store.js";
 
 export type MessageDbRow = {
@@ -101,6 +102,59 @@ export function runOwnedTransaction<T>(
     rollbackOwnedTransaction(db, error, rollbackFailureMessage);
     throw error;
   }
+}
+
+const CAS_SESSION =
+  "SELECT owner_id, CAST(title AS BLOB) AS title, status, updated_at FROM chat_sessions WHERE id = ?";
+const CAS_LAST_TWO =
+  "SELECT id FROM chat_messages WHERE session_id = ? ORDER BY created_at DESC, id DESC LIMIT 2";
+const CAS_MOVE =
+  "UPDATE chat_sessions SET omp_session_file = ?, status = 'running', updated_at = ? WHERE id = ?";
+
+type CasSessionRow = {
+  owner_id: string;
+  title: Uint8Array | null;
+  status: MessageStatus | "idle";
+  updated_at: number;
+};
+
+/**
+ * Regenerate CAS (#465), one transaction: unless the session is running or its last message is no
+ * longer the prechecked assistant (session_busy, no write), delete that assistant (steps and
+ * approvals cascade), insert a running empty assistant and move the session to `sessionFile`.
+ */
+export function replaceLastAssistant(
+  db: DatabaseSync,
+  decoder: TextDecoder,
+  input: { sessionId: string; expectedAssistantId: number; sessionFile: string; now: number },
+) {
+  const { sessionId, expectedAssistantId, sessionFile, now } = input;
+  return runOwnedTransaction(db, "regenerate replacement rollback failed", () => {
+    const session = db.prepare(CAS_SESSION).get(sessionId) as CasSessionRow | undefined;
+    const [last, user] = db.prepare(CAS_LAST_TWO).all(sessionId) as Array<{ id: number }>;
+    if (
+      session === undefined ||
+      session.status === "running" ||
+      Number(last?.id) !== expectedAssistantId ||
+      user === undefined
+    ) {
+      throw new HttpError("session_busy");
+    }
+    const deleted = db.prepare("DELETE FROM chat_messages WHERE id = ?").run(expectedAssistantId);
+    requireChanges(deleted.changes, 1, "regenerate assistant delete");
+    const inserted = db.prepare(INSERT_MESSAGE).run(sessionId, "assistant", "", "running", now);
+    requireChanges(inserted.changes, 1, "regenerate assistant insert");
+    const moved = db.prepare(CAS_MOVE).run(sessionFile, now, sessionId);
+    requireChanges(moved.changes, 1, "regenerate session update");
+    return {
+      ownerId: session.owner_id,
+      userMessageId: Number(user.id),
+      assistantMessageId: Number(inserted.lastInsertRowid),
+      previousStatus: session.status,
+      previousTitle: decodeNullableText(decoder, session.title),
+      previousUpdatedAt: Number(session.updated_at),
+    };
+  });
 }
 
 function rollbackOwnedTransaction(db: DatabaseSync, originalError: unknown, message: string): void {
