@@ -13,6 +13,7 @@ import {
   FileSpreadsheet,
   FileText,
   Folder,
+  GitBranch,
   Image as ImageIcon,
   Info,
   LayoutGrid,
@@ -22,11 +23,13 @@ import {
   MessageSquare,
   PanelLeft,
   Plus,
+  RefreshCw,
   Search,
   Send,
   Settings,
   Shield,
   Sparkles,
+  Square,
   Table,
   Terminal,
   TriangleAlert,
@@ -70,6 +73,9 @@ const ICONS = {
   "file-spreadsheet": FileSpreadsheet,
   sparkles: Sparkles,
   zap: Zap,
+  square: Square,
+  "refresh-cw": RefreshCw,
+  "git-branch": GitBranch,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

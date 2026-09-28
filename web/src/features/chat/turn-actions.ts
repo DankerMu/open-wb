@@ -1,4 +1,4 @@
-// 会话页回合操作：prompt 派发及其所有权 fence、审批作答（由 ChatPage 调用；stop/regenerate/fork 的落点）。
+// 会话页回合操作：prompt 派发及其所有权 fence、审批作答、停止（由 ChatPage 调用；regenerate/fork 的落点）。
 import { type Dispatch, type RefObject, type SetStateAction, useCallback } from "react";
 import { type ApiClient, ApiError } from "../../lib/api.js";
 import type { ChatMessageSnapshot } from "../../lib/session-contract.js";
@@ -211,8 +211,9 @@ export function useTurnActions({
     ],
   );
 
-  // Approval answers never touch the prompt mutation fence: a write that must not abort a prompt.
-  const ownsAnswer = useCallback(
+  // Approval answers and stop never touch the prompt mutation fence: writes that must not abort a
+  // prompt. Their late results are fenced by client, selected session and mount only.
+  const ownsSessionWrite = useCallback(
     (ownedClient: ApiClient, sessionId: string) =>
       mountedRef.current &&
       ownedClient === clientRef.current &&
@@ -225,7 +226,7 @@ export function useTurnActions({
     (ownedClient: ApiClient, sessionId: string) => {
       void ownedClient.getMessages(sessionId).then(
         (snapshot) => {
-          if (!ownsAnswer(ownedClient, sessionId)) {
+          if (!ownsSessionWrite(ownedClient, sessionId)) {
             return;
           }
           installSnapshot(snapshot, ownedClient);
@@ -234,7 +235,7 @@ export function useTurnActions({
         () => undefined,
       );
     },
-    [installSnapshot, openSource, ownsAnswer],
+    [installSnapshot, openSource, ownsSessionWrite],
   );
 
   /** Resolves `true` when the bar may answer again (inline error shown); never rejects. */
@@ -249,7 +250,7 @@ export function useTurnActions({
       return ownedClient.decideApproval(sessionId, approvalId, decision).then(
         () => false,
         (error: unknown) => {
-          if (!ownsAnswer(ownedClient, sessionId) || isUnauthorized(error)) {
+          if (!ownsSessionWrite(ownedClient, sessionId) || isUnauthorized(error)) {
             return false;
           }
           if (isApprovalSettled(error)) {
@@ -261,8 +262,31 @@ export function useTurnActions({
         },
       );
     },
-    [clientRef, ownsAnswer, reconcileSettled, requestedSessionRef, setPromptError],
+    [clientRef, ownsSessionWrite, reconcileSettled, requestedSessionRef, setPromptError],
   );
 
-  return { answerApproval, dispatchPrompt, restoreOwnedDraft };
+  /**
+   * Resolves `"stopping"` on 202 for the still-owned session, else `null`; never rejects. 204
+   * (`"idle"`) writes nothing: the composer follows the next authoritative event or snapshot.
+   */
+  const stopTurn = useCallback((): Promise<"stopping" | null> => {
+    const ownedClient = clientRef.current;
+    const sessionId = requestedSessionRef.current;
+    if (sessionId === null) {
+      return Promise.resolve(null);
+    }
+    setPromptError(null);
+    return ownedClient.stopSession(sessionId).then(
+      (result) =>
+        result === "stopping" && ownsSessionWrite(ownedClient, sessionId) ? result : null,
+      (error: unknown) => {
+        if (ownsSessionWrite(ownedClient, sessionId) && !isUnauthorized(error)) {
+          setPromptError({ client: ownedClient, sessionId, message: errorMessage(error) });
+        }
+        return null;
+      },
+    );
+  }, [clientRef, ownsSessionWrite, requestedSessionRef, setPromptError]);
+
+  return { answerApproval, dispatchPrompt, restoreOwnedDraft, stopTurn };
 }

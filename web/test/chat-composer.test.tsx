@@ -119,7 +119,7 @@ describe("(C2) composer card structure", () => {
 });
 
 describe("(C3) generating state", () => {
-  it("names the disabled send button 生成中 and shows the toolbar status until done", async () => {
+  it("replaces send with 停止 and shows the toolbar status until done", async () => {
     const running = chatSnapshot({ cursor: { epoch: 1, seq: 3 } });
     renderChatPage(`/?session=${SESSION_ID}`, {
       "/api/sessions": () => jsonResponse({ sessions: [running.session] }),
@@ -130,8 +130,8 @@ describe("(C3) generating state", () => {
       latestSource().emitOpen();
     });
 
-    const pending = (await screen.findByRole("button", { name: "生成中" })) as HTMLButtonElement;
-    expect(pending.disabled).toBe(true);
+    const pending = (await screen.findByRole("button", { name: "停止" })) as HTMLButtonElement;
+    expect(pending.disabled).toBe(false);
     expect(screen.queryByRole("button", { name: "发送" })).toBeNull();
     const input = screen.getByRole("textbox", { name: COMPOSER_NAME });
     const { toolbar } = composerParts(input);
@@ -186,7 +186,7 @@ describe("(C4) session list status element", () => {
 describe("(C5) static contract", () => {
   it("composer uses the Icon/Button primitives and no role other than status", () => {
     const source = readRepoFile("web/src/features/chat/composer.tsx");
-    for (const needle of ['<Icon name="send" />', "Button", "ui-sr-only", '"生成中"', '"发送"']) {
+    for (const needle of ['<Icon name="send" />', "Button", "ui-sr-only", "生成中", '"发送"']) {
       expect(source).toContain(needle);
     }
     const roles = source.match(/role=/g) ?? [];

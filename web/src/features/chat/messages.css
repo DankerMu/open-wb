@@ -200,6 +200,22 @@
   margin: 0;
 }
 
+/* Stopped assistant message: empty-body placeholder (demo:2330-2335) and trailing status badge. */
+.chat-md .chat-msg-stopped-empty {
+  color: var(--wb-text-tertiary);
+}
+
+.chat-msg-stopped {
+  align-self: flex-start;
+  margin: 0;
+  padding: 1px 8px;
+  border: 1px solid var(--wb-border-default);
+  border-radius: 999px;
+  font-size: 11.5px;
+  line-height: 16px;
+  color: var(--wb-text-secondary);
+}
+
 /* Approval bars adapted from resource/workbuddy-live-demo.html:475-490 (.approval, .appr-*);
    the demo .bar/.cd countdown and the literal-colored .appr-btn are replaced by one countdown
    sentence and ui Button variants. The fieldset reset mirrors .chat-quick-row (chat.css). */
@@ -334,6 +350,11 @@
 
 .chat-step-status-failed {
   color: var(--wb-status-error-text);
+}
+
+/* Stopped badge color from resource/workbuddy-live-demo.html:458 (.exec-head .st-stop). */
+.chat-step-status-stopped {
+  color: var(--wb-text-secondary);
 }
 
 .chat-step-line {

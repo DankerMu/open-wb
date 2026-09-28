@@ -11,6 +11,7 @@ import type { ChatState } from "./stream.js";
 import { WelcomeIntro, WelcomePlaybooks } from "./welcome.js";
 
 type AnswerApproval = ComponentProps<typeof ApprovalBars>["onAnswer"];
+type StopTurn = ComponentProps<typeof Composer>["onStop"];
 
 type ConversationViewProps = {
   composerDisabled: boolean;
@@ -20,6 +21,7 @@ type ConversationViewProps = {
   historyView: ChatState | null;
   onAnswerApproval: AnswerApproval;
   onChangeDraft(value: string): void;
+  onStop: StopTurn;
   onSubmit(event: FormEvent<HTMLFormElement>): void;
   promptError: string | null;
   requestedSessionId: string | null;
@@ -69,6 +71,7 @@ const MessageArticle = memo(function MessageArticle({
   onAnswerApproval: AnswerApproval;
 }) {
   const assistant = message.role !== "user";
+  const stopped = message.status === "stopped";
   const steps = message.steps.map((step) => <StepCard key={step.id} step={step} />);
   const error = message.error ? (
     <p className="ui-alert chat-msg-error" role="alert">
@@ -92,13 +95,22 @@ const MessageArticle = memo(function MessageArticle({
       <div className="chat-msg-main">
         <ApprovalBars approvals={message.approvals} onAnswer={onAnswerApproval} />
         <div className="chat-md">
-          <MarkdownView source={message.content} />
+          {stopped && message.content === "" ? (
+            <p className="chat-msg-stopped-empty">（已停止生成）</p>
+          ) : (
+            <MarkdownView source={message.content} />
+          )}
           {message.status === "running" ? (
             <span aria-hidden="true" className="ui-caret chat-caret" />
           ) : null}
         </div>
         {steps}
         {error}
+        {stopped ? (
+          <p aria-label="助手消息 已停止" className="chat-msg-stopped" role="status">
+            已停止
+          </p>
+        ) : null}
         {message.status !== "running" && message.content !== "" ? (
           <MessageActions text={message.content} />
         ) : null}
@@ -131,6 +143,7 @@ export function ConversationView({
   historyView,
   onAnswerApproval,
   onChangeDraft,
+  onStop,
   onSubmit,
   promptError,
   requestedSessionId,
@@ -171,9 +184,11 @@ export function ConversationView({
           draft={draft}
           generating={generating}
           onChangeDraft={onChangeDraft}
+          onStop={onStop}
           onSubmit={onSubmit}
           placeholder={requestedSessionId ? "继续追问，或派一个新任务…" : "今天帮你做些什么"}
           sendDisabled={sendDisabled}
+          stopSessionId={requestedSessionId}
         />
         {requestedSessionId ? null : (
           <WelcomePlaybooks disabled={composerDisabled} onPick={onChangeDraft} />
