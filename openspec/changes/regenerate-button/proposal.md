@@ -65,6 +65,7 @@ Evidence floor: 新建 `web/test/chat-regenerate-button.test.tsx`（≤800 行�
    - 按身份释放保证 A 的迟到结果不会解锁 B（design R10）。
 6. **`重新生成` 在 composer 锁定期间禁用（`disabled={composerDisabled}`），不隐藏。** 可见性只由「末条 + 会话终态」决定。这样恰一次与「prompt 在途不可点」由同一条件得到。
 7. **issue 验收「分叉继承 done|failed|stopped 的会话末条助手可见」**：web 看不到 `parent_session_id`（严格解析不入视图）。分叉会话在 web 中与同状态普通会话无从区分，所以由 done/failed/stopped 三态用例覆盖，不单设用例。真实分叉路径归 #479 与 8.2d。
+8. **regenerate POST 返回 502（或非 `ApiError`）时，内联信封、释放锁之外再静默对账**（`reconcileSettled`，仍归属才调）。server 在事务提交后派发失败也返回 502：旧助手行已删、新行与会话结算为 failed，不复活旧行（turn-control「重新生成 REST」，`server/src/sessions/branching.ts:126-157`）。web 无法区分提交前后，所以一律以快照为准；提交前的 502 只是重装同一快照。409/400/503/401 证明未提交，不对账。代价：`turn-actions.ts` 350 → 362，超出 Impact 的 ≤350 预算。证据 design R4-502a/b。
 
 ## Orchestrator decisions（原 Open questions，已裁定）
 - 偏离 3：采纳推荐——202 后 GET 失败沿用 prompt accepted 失败语义（`streamError` + 刷新引导，composer 按既有终端失败规则锁定）。
@@ -72,6 +73,7 @@ Evidence floor: 新建 `web/test/chat-regenerate-button.test.tsx`（≤800 行�
 - 偏离 4：记入 carry-forward，交 8.2c/#483/#485 走查注意；本刀不修。
 - 偏离 2：父 turn-control「回合控制 web 呈现」的 `assistantMessageId` 替换措辞在 #478 归档对账时改为「受理后对账替换」。
 - `refreshList` 保留（与 prompt 受理同尾段），R3 的列表 GET +1 为证据。
+- 偏离 8（PR #632 review 第 1 轮 integration P2）：采纳——502 与非 `ApiError` 的 POST 失败静默对账，409/400/503/401 不对账；R4 拆出 R4-502a/b；`turn-actions.ts` 预算放宽到 362。
 
 ## Non-goals
 - `从此处分叉`（7.3b #479）；停止按钮与 `stopped` 呈现（7.2 #477，已合入）；审批条（7.4 #480）。

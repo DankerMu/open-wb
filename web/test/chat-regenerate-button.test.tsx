@@ -275,6 +275,8 @@ describe("regenerate button: request, lock and reconcile", () => {
     expect(source.closeCount).toBe(1);
     expect(calls(fetchMock, MESSAGES)).toHaveLength(reads + 1);
     expectTranscript(["旧回答"]);
+    expectLocked();
+    expect(regenButton().disabled).toBe(true);
 
     messages.reply = () => jsonResponse(N);
     reconcile.resolve(jsonResponse(N));
@@ -316,7 +318,6 @@ describe("regenerate button: request, lock and reconcile", () => {
   it.each([
     ["409", envelope("session_busy", "会话正在生成，请稍候"), 409],
     ["400", envelope("bad_request", "请求无效"), 400],
-    ["502", UNAVAILABLE, 502],
     ["503", envelope("agent_capacity", "Agent 容量已满，请稍后重试"), 503],
   ] as const)("R4 shows a %s envelope inline and unlocks", async (_, body, status) => {
     const { fetchMock, source } = await mount(D, { [REGEN]: () => jsonResponse(body, status) });
@@ -333,6 +334,40 @@ describe("regenerate button: request, lock and reconcile", () => {
     expect(calls(fetchMock, MESSAGES)).toHaveLength(reads);
     expect(source.closeCount).toBe(0);
     expect(regenButton().disabled).toBe(false);
+  });
+
+  /** 502 may follow a server commit (old row deleted, new row failed): reconcile from the snapshot. */
+  async function failWith502(reconciled: Snapshot) {
+    const mounted = await mount(D, { [REGEN]: () => jsonResponse(UNAVAILABLE, 502) });
+    await waitFor(() => expect(textarea().disabled).toBe(false));
+    const reads = calls(mounted.fetchMock, MESSAGES).length;
+    mounted.messages.reply = () => jsonResponse(reconciled);
+    fireEvent.click(regenButton());
+    await flush();
+    expect(calls(mounted.fetchMock, REGEN)).toHaveLength(1);
+    expect(alerts()).toEqual([UNAVAILABLE.error.message]);
+    expect(screen.queryByText(REGEN_TOAST)).toBeNull();
+    expectUnlocked();
+    expect(calls(mounted.fetchMock, MESSAGES)).toHaveLength(reads + 1);
+    expect(mounted.source.closeCount).toBe(1);
+    expect(FakeEventSource.instances).toHaveLength(2);
+  }
+
+  it("R4-502a reconciles a pre-commit 502 back to the unchanged transcript", async () => {
+    await failWith502(D);
+    expectTranscript(["旧回答"]);
+    expect(regenButton().disabled).toBe(false);
+  });
+
+  it("R4-502b reconciles a post-commit 502 to the failed replacement row", async () => {
+    await failWith502(snapshotOf("failed", [historyUser, message(9, "assistant", "failed")]));
+    expect(screen.queryByText("旧回答")).toBeNull();
+    expect(userArticles()).toHaveLength(1);
+    const [article, ...others] = assistantArticles();
+    expect(others).toHaveLength(0);
+    const buttons = regenButtons(article);
+    expect(buttons).toHaveLength(1);
+    expect((buttons[0] as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("R5 keeps the refresh guidance after a failed reconcile GET but releases the lock", async () => {

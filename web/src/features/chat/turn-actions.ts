@@ -12,6 +12,14 @@ function isApprovalSettled(error: unknown) {
   return error instanceof ApiError && error.status === 409 && error.code === "approval_settled";
 }
 
+/**
+ * Regenerate rejections that prove no server commit (409/400/503, or 401 handed to login). Anything
+ * else, 502 included, may follow a commit that deleted the old answer, so the page reconciles.
+ */
+function isUncommittedRegenerate(error: unknown) {
+  return error instanceof ApiError && [400, 401, 409, 503].includes(error.status);
+}
+
 type TurnActionDeps = {
   abortMutation: () => void;
   clientRef: RefObject<ApiClient>;
@@ -223,7 +231,7 @@ export function useTurnActions({
     [clientRef, mountedRef, requestedSessionRef],
   );
 
-  /** Silent reconcile after 409: the old source stays open until the snapshot is in hand. */
+  /** Silent reconcile (approval 409, regenerate 502): old source stays open until the snapshot. */
   const reconcileSettled = useCallback(
     (ownedClient: ApiClient, sessionId: string) => {
       void ownedClient.getMessages(sessionId).then(
@@ -330,6 +338,9 @@ export function useTurnActions({
       },
       (error: unknown) => {
         fail(error, setPromptError);
+        if (owned() && !isUncommittedRegenerate(error)) {
+          reconcileSettled(ownedClient, sessionId);
+        }
         return false;
       },
     );
@@ -339,6 +350,7 @@ export function useTurnActions({
     installSnapshot,
     openSource,
     ownsSessionWrite,
+    reconcileSettled,
     refreshList,
     requestedSessionRef,
     setPromptError,

@@ -12,6 +12,7 @@
     5. POST reject：
        - `ownsSessionWrite(ownedClient, sessionId) && !isUnauthorized(error)` 时 `setPromptError({client, sessionId, message: errorMessage(error)})`；
        - 然后 `release()`，resolve `false`。
+       - 错误不是 409/400/503/401（即 502 与任何非 `ApiError`）且仍归属时，另调既有 `reconcileSettled(ownedClient, sessionId)`（GET → `installSnapshot` + `openSource`，自带 `ownsSessionWrite` 围栏）。事务提交后的派发失败同样返回 502，此时旧助手行已删、新行与会话为 failed（turn-control「重新生成 REST」，`server/src/sessions/branching.ts:126-157`），转录只能来自快照（proposal 偏离 8）。
     6. 202，**围栏一**：`!ownsSessionWrite(...)` 时 `release()`，resolve `false`。不 `closeSource`，不发 GET。
     7. 202 且仍归属：
        - `closeSource()`，发 `ownedClient.getMessages(sessionId)`，resolve `true`（Toast 在 202 时出，不等 GET）。
@@ -75,8 +76,10 @@ D = done 会话 `saved title`，消息为 `historyUser` 加助手 id 0（done，
 |---|---|---|
 | R1 可用性矩阵（红） | `it.each` 挂载：(a) D；(b) 会话 failed，助手 failed `""`；(c) 会话 stopped，助手 stopped `""`；(d) running 快照；(e) 会话 `idle`，[u, a done `x`]；(f) done，[u, a1 done `一`, u, a2 done `二`]；(g) done，[u, a done `一`, u] | (a)(b)(c)：末条助手 article 内恰一个 `重新生成`，可用、`type="button"`、`title="重新生成"`、含 `svg.lucide-refresh-cw`；(a) 中它排在 `复制` 之后（文档序）。(d)(e)(g)：全页无 `重新生成`。(f)：只有 a2 有，a1 只有 `复制`。所有用户 article 内无按钮 |
 | R2 空正文行规则（红） | 会话 stopped，[u, a1 stopped `""`, u, a2 stopped `""`]；另挂 done，[u, a1 done `""`, u, a2 done `答`] | 第一例：a1 无 `.chat-msg-actions`；a2 的操作条恰一个按钮 `重新生成`、无 `复制`，正文区为 `（已停止生成）`。第二例：a1 无操作条；a2 有 `复制` 与 `重新生成` |
-| R3 恰一次、锁定与对账替换（红） | D；REGEN 与对账 GET 均 `deferredResponse`；连续两次 `fireEvent.click(重新生成)`（各自 act）；resolve REGEN 202 `{assistantMessageId:5}`；然后 resolve GET 为 N；新 source `emitOpen`（此时 messages 路由仍返回 N）后依次 `text.delta{5,"新"}`、`text.delta{5,"回答"}`、`turn.end{5,"done"}`（`1:4`–`1:6`）；最后输入 `继续` 发送（prompt 202，messages 路由改返回含新一轮的快照） | REGEN resolve 前：REGEN 调用恰 1 次，POST 且无 body；`重新生成` disabled；textarea disabled；toolbar 有 `停止` 与 `生成中`、无 `发送`。202 后、GET 未返回时：`正在重新生成…` 出现；旧 source `closeCount === 1`；转录仍为 `旧回答`、助手 article 1 个（无本地合成）。GET 返回后：助手 article 恰 1 个、用户 article 恰 1 个，无 `旧回答`，无 `重新生成`（running），`/api/sessions` GET +1，新 source 已建。delta 后该唯一助手 article 正文 `新回答`（id 错位会追加第二行，所以助手 article 仍为 1 个）。`turn.end` 后回到 `发送`，`重新生成` 与 `复制` 重新出现。发送 `继续`：prompt 恰 1 次、受理对账照常（regenerate 未残留 mutation 状态） |
-| R4 失败信封（红） | `it.each` D；REGEN 分别返回 409 `session_busy`、400 `bad_request`、502 `agent_unavailable`、503 `agent_capacity`（`Agent 容量已满，请稍后重试`） | `role=alert` 文本恰为信封 message；无 `正在重新生成…`；textarea 可用；toolbar 为 `发送`、无 `停止`/`生成中`；转录仍为 `旧回答`（助手 article 1 个）；messages GET 次数不变；source `closeCount === 0`；`重新生成` 再次可用 |
+| R3 恰一次、锁定与对账替换（红） | D；REGEN 与对账 GET 均 `deferredResponse`；连续两次 `fireEvent.click(重新生成)`（各自 act）；resolve REGEN 202 `{assistantMessageId:5}`；然后 resolve GET 为 N；新 source `emitOpen`（此时 messages 路由仍返回 N）后依次 `text.delta{5,"新"}`、`text.delta{5,"回答"}`、`turn.end{5,"done"}`（`1:4`–`1:6`）；最后输入 `继续` 发送（prompt 202，messages 路由改返回含新一轮的快照） | REGEN resolve 前：REGEN 调用恰 1 次，POST 且无 body；`重新生成` disabled；textarea disabled；toolbar 有 `停止` 与 `生成中`、无 `发送`。202 后、GET 未返回时：`正在重新生成…` 出现；旧 source `closeCount === 1`；转录仍为 `旧回答`、助手 article 1 个（无本地合成）；composer 仍锁定（textarea disabled，`停止`/`生成中` 在，无 `发送`），`重新生成` disabled。GET 返回后：助手 article 恰 1 个、用户 article 恰 1 个，无 `旧回答`，无 `重新生成`（running），`/api/sessions` GET +1，新 source 已建。delta 后该唯一助手 article 正文 `新回答`（id 错位会追加第二行，所以助手 article 仍为 1 个）。`turn.end` 后回到 `发送`，`重新生成` 与 `复制` 重新出现。发送 `继续`：prompt 恰 1 次、受理对账照常（regenerate 未残留 mutation 状态） |
+| R4 失败信封（红） | `it.each` D；REGEN 分别返回 409 `session_busy`、400 `bad_request`、503 `agent_capacity`（`Agent 容量已满，请稍后重试`） | `role=alert` 文本恰为信封 message；无 `正在重新生成…`；textarea 可用；toolbar 为 `发送`、无 `停止`/`生成中`；转录仍为 `旧回答`（助手 article 1 个）；messages GET 次数不变；source `closeCount === 0`；`重新生成` 再次可用 |
+| R4-502a 提交前 502 对账（红） | D；REGEN 返回 502 `agent_unavailable`；messages 路由仍返回 D | `role=alert` 恰为 502 信封 message；无 `正在重新生成…`；composer 解锁（`发送` 在）；messages GET +1；旧 source `closeCount === 1`，新 source 已建；转录仍为 `旧回答`；`重新生成` 可用 |
+| R4-502b 提交后 502 对账（红） | D；REGEN 返回 502；messages 路由返回会话 failed、同一条用户行加新 id 的助手行（failed、空正文） | `role=alert` 恰为 502 信封 message；composer 解锁；messages GET +1、新 source 已建；无 `旧回答`；助手 article 与用户 article 各恰 1 个；新助手行上 `重新生成` 可见且可用 |
 | R5 202 后 GET 失败不卡死（红） | D + B；REGEN 202，对账 GET 返回 502 `Agent 运行时不可用`；然后点侧栏 B，再点回 `saved title`（此时 messages 返回 D） | GET 失败后：`role=alert` 含 `Agent 运行时不可用。请刷新页面后重试`；无未处理 rejection（`observeUnhandledRejections`）。切回 A 后：无 alert，textarea 可用，`发送` 在，`重新生成` 可用（残留锁的变异 → 仍锁定 → 红） |
 | R6 regenerate 在途时停止（红） | D；REGEN 挂起；点 `重新生成`；点 toolbar `停止`，STOP 返回 204；然后 REGEN 返回 202，GET 返回 N | `停止` 可用；STOP 调用恰 1 次；无 `已停止生成`、无 alert；REGEN 202 后对账照常（messages GET +1、新 source、转录为 N）（carry-forward :101 记录） |
 | R7 prompt 在途时不可点（红） | D；输入 `继续` 发送，prompt 挂起 | `重新生成` 可见且 disabled；点击不产生 REGEN 请求；prompt 202 后受理对账照常 |
@@ -101,6 +104,8 @@ D = done 会话 `saved title`，消息为 `historyUser` 加助手 id 0（done，
 - 按钮不受 `composerDisabled` 约束 → R3（第二次点击多发一次）、R7；
 - 202 时本地合成新行，或 GET 前改写视图 → R3 的「GET 未返回时仍为 `旧回答`」；
 - 错误分支不释放锁 → R4；GET 失败分支不释放 → R5；
+- 202 时即释放锁（`release()` 挪到 `closeSource` 之后、GET 回调不再释放）→ R3 的「GET 未返回时仍锁定」；
+- POST 失败后不对账 → R4-502a、R4-502b；409/400/503 也对账 → R4-409/400/503；
 - 借用 `setSubmitting`/`setMutationOwner`/`mutationControllerRef` 作锁 → R5 或 R10（以实测为准，记入 PR body）；
 - 去掉围栏一 → R8-202、R11-202、R12；去掉围栏二 → R9-200；GET 失败分支不查归属 → R9-502；错误分支不查归属 → R8-409、R11-409；释放不比身份 → R10；Toast 不经 handler 结果门控 → R8-202、R12。
 
@@ -112,4 +117,4 @@ D = done 会话 `saved title`，消息为 `historyUser` 加助手 id 0（done，
 2. 锁是 page 级独立状态，每个分支按身份释放。不写 prompt 的 mutation 字段，`turn-actions.ts` 仍无 hook（R3 末段、R5、R10、G1）。
 3. 可用性只看「末条消息 + 会话状态」；空正文末条有操作条但无 `复制`（R1、R2）。
 4. 替换只来自快照：202 后到 GET 前视图不变，`assistantMessageId` 不入视图（R3）。
-5. 失败信封内联并解锁、无 Toast、转录不变；GET 失败走既有终端失败语义且可恢复（R4、R5）。
+5. 失败信封内联并解锁、无 Toast；409/400/503 转录不变，502 与非 `ApiError` 静默对账快照（可能已在 server 提交）；GET 失败走既有终端失败语义且可恢复（R4、R4-502a/b、R5）。
