@@ -1,11 +1,16 @@
-// 会话页回合操作：prompt 派发及其所有权 fence（由 ChatPage 调用；stop/regenerate/fork/approval 的落点）。
+// 会话页回合操作：prompt 派发及其所有权 fence、审批作答（由 ChatPage 调用；stop/regenerate/fork 的落点）。
 import { type Dispatch, type RefObject, type SetStateAction, useCallback } from "react";
-import type { ApiClient } from "../../lib/api.js";
+import { type ApiClient, ApiError } from "../../lib/api.js";
 import type { ChatMessageSnapshot } from "../../lib/session-contract.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
 import type { ChatMutationOwner, ChatOwnedAlert, PendingCreateSend } from "./types.js";
 
 export const TERMINAL_REFRESH_GUIDANCE = "请刷新页面后重试";
+
+/** 409 `approval_settled`: the approval was already settled server-side (by `code`, not status). */
+function isApprovalSettled(error: unknown) {
+  return error instanceof ApiError && error.status === 409 && error.code === "approval_settled";
+}
 
 type TurnActionDeps = {
   abortMutation: () => void;
@@ -206,5 +211,58 @@ export function useTurnActions({
     ],
   );
 
-  return { dispatchPrompt, restoreOwnedDraft };
+  // Approval answers never touch the prompt mutation fence: a write that must not abort a prompt.
+  const ownsAnswer = useCallback(
+    (ownedClient: ApiClient, sessionId: string) =>
+      mountedRef.current &&
+      ownedClient === clientRef.current &&
+      requestedSessionRef.current === sessionId,
+    [clientRef, mountedRef, requestedSessionRef],
+  );
+
+  /** Silent reconcile after 409: the old source stays open until the snapshot is in hand. */
+  const reconcileSettled = useCallback(
+    (ownedClient: ApiClient, sessionId: string) => {
+      void ownedClient.getMessages(sessionId).then(
+        (snapshot) => {
+          if (!ownsAnswer(ownedClient, sessionId)) {
+            return;
+          }
+          installSnapshot(snapshot, ownedClient);
+          openSource(snapshot, ownedClient);
+        },
+        () => undefined,
+      );
+    },
+    [installSnapshot, openSource, ownsAnswer],
+  );
+
+  /** Resolves `true` when the bar may answer again (inline error shown); never rejects. */
+  const answerApproval = useCallback(
+    (approvalId: number, decision: "allow" | "deny"): Promise<boolean> => {
+      const ownedClient = clientRef.current;
+      const sessionId = requestedSessionRef.current;
+      if (sessionId === null) {
+        return Promise.resolve(false);
+      }
+      setPromptError(null);
+      return ownedClient.decideApproval(sessionId, approvalId, decision).then(
+        () => false,
+        (error: unknown) => {
+          if (!ownsAnswer(ownedClient, sessionId) || isUnauthorized(error)) {
+            return false;
+          }
+          if (isApprovalSettled(error)) {
+            reconcileSettled(ownedClient, sessionId);
+            return false;
+          }
+          setPromptError({ client: ownedClient, sessionId, message: errorMessage(error) });
+          return true;
+        },
+      );
+    },
+    [clientRef, ownsAnswer, reconcileSettled, requestedSessionRef, setPromptError],
+  );
+
+  return { answerApproval, dispatchPrompt, restoreOwnedDraft };
 }

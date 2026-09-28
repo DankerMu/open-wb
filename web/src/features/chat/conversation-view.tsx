@@ -1,6 +1,7 @@
-import { type FormEvent, memo } from "react";
+import { type ComponentProps, type FormEvent, memo } from "react";
 import { MarkdownView } from "../../lib/markdown-view.js";
 import { BrandMark, Icon } from "../../ui/index.js";
+import { ApprovalBars } from "./approval-bar.js";
 import { Composer } from "./composer.js";
 import { MessageActions } from "./message-actions.js";
 import { FollowTranscript } from "./scroll-follow.js";
@@ -9,12 +10,15 @@ import { summarizeStepDetail } from "./step-summary.js";
 import type { ChatState } from "./stream.js";
 import { WelcomeIntro, WelcomePlaybooks } from "./welcome.js";
 
+type AnswerApproval = ComponentProps<typeof ApprovalBars>["onAnswer"];
+
 type ConversationViewProps = {
   composerDisabled: boolean;
   draft: string;
   generating: boolean;
   historyError: string | null;
   historyView: ChatState | null;
+  onAnswerApproval: AnswerApproval;
   onChangeDraft(value: string): void;
   onSubmit(event: FormEvent<HTMLFormElement>): void;
   promptError: string | null;
@@ -57,7 +61,13 @@ function StepCard({ step }: { step: ChatStepView }) {
   );
 }
 
-const MessageArticle = memo(function MessageArticle({ message }: { message: ChatMessageView }) {
+const MessageArticle = memo(function MessageArticle({
+  message,
+  onAnswerApproval,
+}: {
+  message: ChatMessageView;
+  onAnswerApproval: AnswerApproval;
+}) {
   const assistant = message.role !== "user";
   const steps = message.steps.map((step) => <StepCard key={step.id} step={step} />);
   const error = message.error ? (
@@ -80,6 +90,7 @@ const MessageArticle = memo(function MessageArticle({ message }: { message: Chat
         <BrandMark size={28} />
       </span>
       <div className="chat-msg-main">
+        <ApprovalBars approvals={message.approvals} onAnswer={onAnswerApproval} />
         <div className="chat-md">
           <MarkdownView source={message.content} />
           {message.status === "running" ? (
@@ -96,11 +107,17 @@ const MessageArticle = memo(function MessageArticle({ message }: { message: Chat
   );
 });
 
-function MessageThread({ historyView }: { historyView: ChatState }) {
+function MessageThread({
+  historyView,
+  onAnswerApproval,
+}: {
+  historyView: ChatState;
+  onAnswerApproval: AnswerApproval;
+}) {
   return (
     <section aria-label="消息" className="chat-thread">
       {historyView.messages.map((message) => (
-        <MessageArticle key={message.id} message={message} />
+        <MessageArticle key={message.id} message={message} onAnswerApproval={onAnswerApproval} />
       ))}
     </section>
   );
@@ -112,6 +129,7 @@ export function ConversationView({
   generating,
   historyError,
   historyView,
+  onAnswerApproval,
   onChangeDraft,
   onSubmit,
   promptError,
@@ -139,7 +157,9 @@ export function ConversationView({
         ) : null}
         {requestedSessionId ? (
           <FollowTranscript content={historyView} key={requestedSessionId}>
-            {historyView ? <MessageThread historyView={historyView} /> : null}
+            {historyView ? (
+              <MessageThread historyView={historyView} onAnswerApproval={onAnswerApproval} />
+            ) : null}
           </FollowTranscript>
         ) : (
           <div className="chat-transcript">
