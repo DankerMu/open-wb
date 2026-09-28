@@ -3,7 +3,7 @@ import { MarkdownView } from "../../lib/markdown-view.js";
 import { BrandMark, Icon } from "../../ui/index.js";
 import { ApprovalBars } from "./approval-bar.js";
 import { Composer } from "./composer.js";
-import { MessageActions } from "./message-actions.js";
+import { ForkAction, MessageActions } from "./message-actions.js";
 import { FollowTranscript } from "./scroll-follow.js";
 import { SESSION_STATUS_LABEL } from "./status-label.js";
 import { summarizeStepDetail } from "./step-summary.js";
@@ -22,6 +22,7 @@ type ConversationViewProps = {
   historyView: ChatState | null;
   onAnswerApproval: AnswerApproval;
   onChangeDraft(value: string): void;
+  onFork(messageId: number): Promise<void>;
   onRegenerate(): Promise<boolean>;
   onStop: StopTurn;
   onSubmit(event: FormEvent<HTMLFormElement>): void;
@@ -69,12 +70,16 @@ function StepCard({ step }: { step: ChatStepView }) {
 }
 
 const MessageArticle = memo(function MessageArticle({
+  forkDisabled,
   message,
   onAnswerApproval,
+  onFork,
   regenerate,
 }: {
+  forkDisabled: boolean;
   message: ChatMessageView;
   onAnswerApproval: AnswerApproval;
+  onFork(messageId: number): Promise<void>;
   regenerate: Regenerate;
 }) {
   const assistant = message.role !== "user";
@@ -91,6 +96,7 @@ const MessageArticle = memo(function MessageArticle({
         <p className="chat-msg-body">{message.content}</p>
         {steps}
         {error}
+        <ForkAction disabled={forkDisabled} onFork={() => void onFork(message.id)} />
       </article>
     );
   }
@@ -130,11 +136,13 @@ function MessageThread({
   composerDisabled,
   historyView,
   onAnswerApproval,
+  onFork,
   onRegenerate,
 }: {
   composerDisabled: boolean;
   historyView: ChatState;
   onAnswerApproval: AnswerApproval;
+  onFork(messageId: number): Promise<void>;
   onRegenerate(): Promise<boolean>;
 }) {
   const last = historyView.messages.at(-1);
@@ -143,9 +151,11 @@ function MessageThread({
     <section aria-label="消息" className="chat-thread">
       {historyView.messages.map((message) => (
         <MessageArticle
+          forkDisabled={message.role === "user" && composerDisabled}
           key={message.id}
           message={message}
           onAnswerApproval={onAnswerApproval}
+          onFork={onFork}
           regenerate={
             eligible && message === last ? { disabled: composerDisabled, onRegenerate } : undefined
           }
@@ -163,6 +173,7 @@ export function ConversationView({
   historyView,
   onAnswerApproval,
   onChangeDraft,
+  onFork,
   onRegenerate,
   onStop,
   onSubmit,
@@ -196,6 +207,7 @@ export function ConversationView({
                 composerDisabled={composerDisabled}
                 historyView={historyView}
                 onAnswerApproval={onAnswerApproval}
+                onFork={onFork}
                 onRegenerate={onRegenerate}
               />
             ) : null}

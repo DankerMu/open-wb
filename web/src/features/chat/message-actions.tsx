@@ -1,4 +1,4 @@
-/* Assistant message action row (S1e 4.6 / parent design D8; S1c 7.3a): 复制 when the text is non-empty, adapted from resource/workbuddy-live-demo.html:2394-2395 and :1188-1191 (copyText) without the execCommand fallback, then 重新生成 on the regenerate-eligible last message (demo:2396, toast demo:2485). */
+/* Message action rows (S1e 4.6 / parent design D8; S1c 7.3a/7.3b). Assistant: 复制 when the text is non-empty, adapted from resource/workbuddy-live-demo.html:2394-2395 and :1188-1191 (copyText) without the execCommand fallback, then 重新生成 on the regenerate-eligible last message (demo:2396, toast demo:2485). User: a single 从此处分叉 (no toast). */
 import { Button, Icon, useToast } from "../../ui/index.js";
 
 /** `onRegenerate` resolves `true` on a still-owned 202 (toast) and never rejects. */
@@ -54,6 +54,26 @@ export function MessageActions({
           <Icon name="refresh-cw" size={12} />
         </Button>
       ) : null}
+    </div>
+  );
+}
+
+/** The user message row: one 从此处分叉; `onFork` settles every branch itself and never rejects. */
+export function ForkAction({ disabled, onFork }: { disabled: boolean; onFork: () => void }) {
+  return (
+    <div className="chat-msg-actions">
+      <Button
+        aria-label="从此处分叉"
+        className="chat-msg-action"
+        disabled={disabled}
+        onClick={onFork}
+        size="icon"
+        title="从此处分叉"
+        type="button"
+        variant="ghost"
+      >
+        <Icon name="git-branch" size={12} />
+      </Button>
     </div>
   );
 }

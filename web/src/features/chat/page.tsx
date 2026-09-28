@@ -29,6 +29,12 @@ type SessionEventHandle = { close(): void };
 
 const MISSING_EVENT_SOURCE = "无法连接会话事件";
 
+/** A fork in flight locks the composer without being a running turn (no 停止/生成中). */
+function composerLocks(generating: boolean, forkLocked: boolean, draft: string) {
+  const composerDisabled = generating || forkLocked;
+  return { composerDisabled, sendDisabled: composerDisabled || draft.trim().length === 0 };
+}
+
 export function ChatPage() {
   const { createSessionClient } = useAuth();
   const client = useMemo(() => createSessionClient(), [createSessionClient]);
@@ -44,6 +50,7 @@ export function ChatPage() {
   const [submitting, setSubmitting] = useState(false);
   const [mutationOwner, setMutationOwner] = useState<ChatMutationOwner | null>(null);
   const [regenerateOwner, setRegenerateOwner] = useState<ChatMutationOwner | null>(null);
+  const [forkOwner, setForkOwner] = useState<ChatMutationOwner | null>(null);
   const mountedRef = useRef(false);
   const clientRef = useRef(client);
   const requestedSessionRef = useRef(requestedSessionId);
@@ -312,11 +319,19 @@ export function ChatPage() {
     ],
   );
 
-  const { answerApproval, dispatchPrompt, regenerateTurn, restoreOwnedDraft, stopTurn } =
+  const selectSession = useCallback(
+    (sessionId: string | null) => {
+      navigate(sessionNavigation(location.pathname, location.search, location.hash, sessionId));
+    },
+    [location.hash, location.pathname, location.search, navigate],
+  );
+
+  const { answerApproval, dispatchPrompt, forkTurn, regenerateTurn, restoreOwnedDraft, stopTurn } =
     useTurnActions({
       abortMutation,
       clientRef,
       closeSource,
+      historyGenerationRef,
       installSnapshot,
       mountedRef,
       mutationControllerRef,
@@ -326,8 +341,10 @@ export function ChatPage() {
       refreshList,
       releaseMutationIfOwned,
       requestedSessionRef,
+      selectSession,
       setCreating,
       setDraft,
+      setForkOwner,
       setMutationOwner,
       setPromptError,
       setRegenerateOwner,
@@ -397,13 +414,6 @@ export function ChatPage() {
     }
     dispatchPrompt(pending.sessionId, pending.prompt, pending.generation, pending.client);
   }, [client, dispatchPrompt, requestedSessionId]);
-
-  const selectSession = useCallback(
-    (sessionId: string | null) => {
-      navigate(sessionNavigation(location.pathname, location.search, location.hash, sessionId));
-    },
-    [location.hash, location.pathname, location.search, navigate],
-  );
 
   const createAndSelect = useCallback(
     (prompt?: string) => {
@@ -588,7 +598,8 @@ export function ChatPage() {
     (ownedHistory && historyState.status === "loading") ||
     historyView?.status === "running" ||
     Boolean(ownedStreamError);
-  const sendDisabled = generating || draft.trim().length === 0;
+  const forkLocked = ownsMutation(forkOwner, client, requestedSessionId);
+  const { composerDisabled, sendDisabled } = composerLocks(generating, forkLocked, draft);
   // 列表渲染进 shell 侧栏列表区（issue 424）；数据、回调与 fence 仍留在本页闭包里。
   useSidebarSlot(
     <SessionNav
@@ -607,13 +618,14 @@ export function ChatPage() {
   return (
     <section className="chat-page">
       <ConversationView
-        composerDisabled={generating}
+        composerDisabled={composerDisabled}
         draft={draft}
         generating={generating}
         historyError={ownedHistory && historyState.status === "error" ? historyState.message : null}
         historyView={historyView}
         onAnswerApproval={answerApproval}
         onChangeDraft={setDraft}
+        onFork={forkTurn}
         onRegenerate={regenerateTurn}
         onStop={stopTurn}
         onSubmit={submitComposer}

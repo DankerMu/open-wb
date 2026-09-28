@@ -192,7 +192,7 @@ describe("regenerate button: availability", () => {
       expect(copy.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     }
     for (const user of userArticles()) {
-      expect(within(user).queryAllByRole("button")).toHaveLength(0);
+      expect(regenButtons(user)).toHaveLength(0);
     }
   });
 
@@ -207,7 +207,7 @@ describe("regenerate button: availability", () => {
     expect(assistantArticles().length).toBeGreaterThan(0);
     expect(regenButtons()).toHaveLength(0);
     for (const user of userArticles()) {
-      expect(within(user).queryAllByRole("button")).toHaveLength(0);
+      expect(regenButtons(user)).toHaveLength(0);
     }
   });
 
@@ -219,7 +219,7 @@ describe("regenerate button: availability", () => {
     expect(regenButtons(a2)).toHaveLength(1);
     expect(regenButtons()).toHaveLength(1);
     for (const user of userArticles()) {
-      expect(within(user).queryAllByRole("button")).toHaveLength(0);
+      expect(regenButtons(user)).toHaveLength(0);
     }
   });
 
