@@ -94,7 +94,7 @@ Minimal mergeable slice: 7.0a（atomic：单一源文件 `api.ts` 的一次纯�
 
 - [x] 8.1a `smoke/chat.hurl` 审批作答：既有首轮用例在 prompt 后轮询快照到 `approvals` 中出现 `decision === null` 的条目，`POST …/approvals/:id {decision:"allow"}` 再等 done（轮询上限覆盖 60s）；回合控制条目以 `[Options] skip: {{skip_turn_control}}` 模板化；Makefile `smoke`（`--variable "skip_turn_control=false"`）/`smoke-live`（`true`）各加一个 `--variable`，`scripts/test-ci-harness.sh` oracle 同 PR 跟随。验证：`make test-guardrails` 绿、`make smoke` 绿
 - [x] 8.1b `smoke/chat.hurl` 停止：新建第二会话 prompt → pending 审批时 `POST …/stop` 202 → 轮询 status 至 `stopped` → 断言无 running 步骤、bash 步骤 `failed`（已拒绝）、assistant 与 session 为 `stopped` → 对该已停止会话 `POST …/regenerate` → 202（`assistantMessageId` 不同于被停止的助手）→ 轮询新助手 `approvals` 出现一条 pending 并 `allow`（200）→ 轮询至 done（真实 omp 下被停止回合的用户消息在 `.jsonl` 历史中、regenerate 对齐成功）→ 再 prompt 202；已 done 的首会话 stop → 204。验证：`make smoke` 绿
-- [ ] 8.1c `smoke/chat.hurl` regenerate（真 omp + 假上游）：首会话 done 后 `regenerate` → 202 → 轮询新助手 `approvals` 出现一条 pending 并 `allow`（200）→ 轮询 done → messages 中用户消息恰一条、助手消息恰一条且 id 变化。验证：`make smoke` 绿
+- [x] 8.1c `smoke/chat.hurl` regenerate（真 omp + 假上游）：首会话 done 后 `regenerate` → 202 → 轮询新助手 `approvals` 出现一条 pending 并 `allow`（200）→ 轮询 done → messages 中用户消息恰一条、助手消息恰一条且 id 变化。验证：`make smoke` 绿
 - [ ] 8.1d `smoke/chat.hurl` fork（真 omp + 假上游）：对首会话首条用户消息 `fork` → 201、`draft` 等于该用户文本、新会话 `session.status` 为 `idle`、新会话 messages 为空。验证：`make smoke` 绿
 - [x] 8.2a `web/e2e/ui-walk*.ts`（真 omp + 假上游）审批：首轮 running bash 步骤与审批条 `需要你的确认` 同时可见（不断言先后）→ 点 `允许` → `已允许执行` → 回合完成。验证：`make ui-walk` 两个 project 全绿
 - [ ] 8.2b ui-walk 停止：同会话第二个受控 prompt 在 `held` 时点 `停止` → Toast `已停止生成`、会话 `已停止`、助手消息徽章 `助手消息 已停止` 可见、composer 解锁。验证：`make ui-walk` 两个 project 全绿
