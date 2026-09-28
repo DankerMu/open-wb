@@ -28,6 +28,7 @@ Content-Type: application/json
 HTTP 202
 [Captures]
 assistant_id: jsonpath "$.assistantMessageId"
+user_message_id: jsonpath "$.userMessageId"
 [Asserts]
 jsonpath "$.userMessageId" exists
 jsonpath "$.assistantMessageId" exists
@@ -133,6 +134,29 @@ jsonpath "$.messages[1].content" matches "{{content_pattern}}"
 jsonpath "$.messages[1].steps[?(@.name=='bash')].status" == "done"
 jsonpath "$.messages[1].steps[?(@.status!='done')]" not exists
 jsonpath "$.messages[1].approvals[0].decision" == "allow"
+
+# (3) 对已 regenerate 的首会话首条（唯一）用户消息 fork：exact 201，draft 为该用户文本，新会话 idle；捕获新会话 id。
+# JSON body {messageId}，须带 Content-Type；不重试。
+POST {{base_url}}/api/sessions/{{session_id}}/fork
+Content-Type: application/json
+[Options]
+skip: {{skip_turn_control}}
+{"messageId":{{user_message_id}}}
+HTTP 201
+[Captures]
+fork_session_id: jsonpath "$.session.id"
+[Asserts]
+jsonpath "$.draft" == "你好"
+jsonpath "$.session.status" == "idle"
+
+# (3) 分叉会话快照：exact 200，零消息，会话 idle。fork 在 201 前已提交，故不重试；不对分叉会话 prompt。
+GET {{base_url}}/api/sessions/{{fork_session_id}}/messages
+[Options]
+skip: {{skip_turn_control}}
+HTTP 200
+[Asserts]
+jsonpath "$.messages" count == 0
+jsonpath "$.session.status" == "idle"
 
 # (4) 第二会话（受控上游只在历史无 tool result 的轮次发 bash）：创建 exact 201 idle；捕获会话 id。
 POST {{base_url}}/api/sessions
