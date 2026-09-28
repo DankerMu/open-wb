@@ -200,6 +200,84 @@
   margin: 0;
 }
 
+/* Approval bars adapted from resource/workbuddy-live-demo.html:475-490 (.approval, .appr-*);
+   the demo .bar/.cd countdown and the literal-colored .appr-btn are replaced by one countdown
+   sentence and ui Button variants. The fieldset reset mirrors .chat-quick-row (chat.css). */
+.chat-approvals {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chat-approval {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 13px 16px;
+  border: 1px solid var(--wb-border-default);
+  border-left: 3px solid var(--wb-status-warning);
+  border-radius: 12px;
+  background: var(--wb-status-warning-soft-bg);
+}
+
+.chat-approval--allow {
+  border-left-color: var(--wb-status-success);
+  background: var(--wb-status-success-soft-bg);
+}
+
+.chat-approval--deny {
+  border-left-color: var(--wb-status-error);
+  background: var(--wb-status-error-soft-bg);
+}
+
+.chat-approval-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--wb-status-warning-text);
+}
+
+.chat-approval--allow .chat-approval-head {
+  color: var(--wb-status-success-text);
+}
+
+.chat-approval--deny .chat-approval-head {
+  color: var(--wb-status-error-text);
+}
+
+.chat-approval-tool {
+  font-weight: 400;
+}
+
+.chat-approval-body {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--wb-text-secondary);
+}
+
+.chat-approval-countdown {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--wb-text-secondary);
+}
+
+.chat-approval-ops {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
 .chat-step {
   display: flex;
   flex-direction: column;

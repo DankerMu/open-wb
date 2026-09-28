@@ -311,7 +311,7 @@ export function ChatPage() {
     ],
   );
 
-  const { dispatchPrompt, restoreOwnedDraft } = useTurnActions({
+  const { answerApproval, dispatchPrompt, restoreOwnedDraft } = useTurnActions({
     abortMutation,
     clientRef,
     closeSource,
@@ -608,6 +608,7 @@ export function ChatPage() {
         generating={generating}
         historyError={ownedHistory && historyState.status === "error" ? historyState.message : null}
         historyView={historyView}
+        onAnswerApproval={answerApproval}
         onChangeDraft={setDraft}
         onSubmit={submitComposer}
         promptError={visibleOwnedAlert(promptError, client, requestedSessionId)}
