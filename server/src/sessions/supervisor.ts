@@ -31,7 +31,7 @@ import {
 import type { ApprovalView, SessionStore, SettledApproval } from "./store.js";
 import type { RetainedEvent, RingRead } from "./stream/ring-buffer.js";
 import type { TokenRegistry } from "./tokens.js";
-import { drain, persistEvent, TurnStops } from "./turn-control.js";
+import { ControlClaims, drain, persistEvent, Regenerations, TurnStops } from "./turn-control.js";
 
 export { releasePumpExit } from "./pool.js";
 
@@ -97,12 +97,14 @@ export class SessionSupervisor {
   readonly #slots = new Map<string, Slot>();
   readonly #subscribers = new Map<string, Set<SessionStreamLiveHandler>>();
   readonly #claims = new Map<number, Slot>();
-  readonly #admissions = new Set<Promise<void>>();
+  readonly #admissions = new Set<Promise<unknown>>();
   readonly #pumps = new Set<Promise<void>>();
   readonly #faults: Error[] = [];
   readonly #pool: ProcessPool;
   readonly #approvals: ApprovalRegistry;
   readonly #stops: TurnStops;
+  readonly #controls = new ControlClaims();
+  readonly #regenerations: Regenerations;
   #closed = false;
 
   constructor(options: SessionSupervisorOptions) {
@@ -132,17 +134,47 @@ export class SessionSupervisor {
       deny: (sessionId, approvalId) => this.#approvals.decide(sessionId, approvalId, "deny"),
       retire: (slot) => this.#retireSlot(slot),
     });
+    this.#regenerations = new Regenerations({
+      store: this.#store,
+      controls: this.#controls,
+      stops: this.#stops,
+      closed: () => this.#closed,
+      acquire: async (sessionId, resume, use) => {
+        await this.#slots.get(sessionId)?.retiring;
+        if (this.#closed) {
+          throw new HttpError("agent_unavailable");
+        }
+        return this.#onSlot(sessionId, resume, undefined, use);
+      },
+      dispatch: (slot, text, assistantMessageId) => {
+        this.#claim(slot, assistantMessageId);
+        return this.#bindDispatch(slot, text, assistantMessageId);
+      },
+      settled: (settled) => this.#approvals.settled(settled),
+    });
   }
 
   prompt(sessionId: string, text: string): Promise<void> {
     if (this.#closed) {
       return Promise.reject(new HttpError("agent_unavailable"));
     }
-    const work = this.#prompt(sessionId, text);
-    this.#admissions.add(work);
-    return work.finally(() => {
-      this.#admissions.delete(work);
+    return this.#track(this.#prompt(sessionId, text));
+  }
+
+  /** Regenerates the last answer (#465); REST is #467. Every failure is a rejection. */
+  regenerate(sessionId: string, ownerId: string): Promise<{ assistantMessageId: number }> {
+    if (this.#closed) {
+      return Promise.reject(new HttpError("agent_unavailable"));
+    }
+    const work = this.#regenerations.run(sessionId, ownerId).catch((error: unknown) => {
+      throw this.#translate(error);
     });
+    return this.#track(work);
+  }
+
+  /** Synchronous: whether a regenerate or stop holds this session's control claim. */
+  controlHeld(sessionId: string): boolean {
+    return this.#controls.held(sessionId);
   }
 
   streamCursor(sessionId: string): StreamCursor {
@@ -206,12 +238,14 @@ export class SessionSupervisor {
     if (this.#closed) {
       return Promise.reject(new HttpError("agent_unavailable"));
     }
-    const turn = this.#store.runtimeState(sessionId)?.activeTurn?.assistantMessageId;
-    if (turn === undefined) {
-      return Promise.resolve();
-    }
-    const slot = this.#claims.get(turn);
-    return this.#stops.stop(this.#slots.get(sessionId) === slot ? slot : undefined, turn);
+    return this.#controls.during(sessionId, () => {
+      const turn = this.#store.runtimeState(sessionId)?.activeTurn?.assistantMessageId;
+      if (turn === undefined) {
+        return Promise.resolve();
+      }
+      const slot = this.#claims.get(turn);
+      return this.#stops.stop(this.#slots.get(sessionId) === slot ? slot : undefined, turn);
+    });
   }
 
   async shutdown(): Promise<void> {
@@ -251,7 +285,7 @@ export class SessionSupervisor {
     }
     const assistantMessageId = state.activeTurn.assistantMessageId;
     const claimed = this.#claims.get(assistantMessageId);
-    if (claimed !== undefined) {
+    if (claimed !== undefined || this.#controls.held(sessionId)) {
       throw new HttpError("session_busy");
     }
     this.#stops.open(assistantMessageId);
@@ -265,39 +299,59 @@ export class SessionSupervisor {
     if (this.#claims.has(assistantMessageId)) {
       throw new HttpError("session_busy");
     }
-    const live = this.#slots.get(sessionId);
-    const dispatchNew = () =>
-      this.#dispatchNew(sessionId, text, state.ownerId, state.ompSessionFile, assistantMessageId);
     try {
-      if (live === undefined || live.retiring !== undefined || !this.#pool.holds(live.entry)) {
-        await dispatchNew();
-        return;
-      }
-      this.#claim(live, assistantMessageId);
-      try {
-        await this.#bindDispatch(live, text, assistantMessageId);
-      } catch (error) {
-        if (live.pump === undefined) {
-          await this.#retireSlot(live);
-        }
-        if (!(error instanceof ReadmissionRequired)) {
-          throw error;
-        }
-        await dispatchNew();
-      }
+      await this.#onSlot(sessionId, state, assistantMessageId, (slot) =>
+        this.#bindDispatch(slot, text, assistantMessageId),
+      );
     } catch (error) {
       this.#stops.release(assistantMessageId);
       throw this.#translate(error);
     }
   }
 
-  async #dispatchNew(
+  #track<T>(work: Promise<T>): Promise<T> {
+    this.#admissions.add(work);
+    return work.finally(() => {
+      this.#admissions.delete(work);
+    });
+  }
+
+  /** Live-slot reuse (claimed when `claim` is set); one fresh admission on re-admission. */
+  async #onSlot<T>(
     sessionId: string,
-    text: string,
+    resume: { ownerId: string; ompSessionFile: string | null },
+    claim: number | undefined,
+    use: (slot: Slot) => Promise<T>,
+  ): Promise<T> {
+    const live = this.#slots.get(sessionId);
+    const fresh = () =>
+      this.#onNewSlot(sessionId, resume.ownerId, resume.ompSessionFile, claim, use);
+    if (live === undefined || live.retiring !== undefined || !this.#pool.holds(live.entry)) {
+      return fresh();
+    }
+    if (claim !== undefined) {
+      this.#claim(live, claim);
+    }
+    try {
+      return await use(live);
+    } catch (error) {
+      if (live.pump === undefined) {
+        await this.#retireSlot(live);
+      }
+      if (!(error instanceof ReadmissionRequired)) {
+        throw error;
+      }
+      return fresh();
+    }
+  }
+
+  async #onNewSlot<T>(
+    sessionId: string,
     ownerId: string,
     resumePath: string | null,
-    assistantMessageId: number,
-  ): Promise<void> {
+    claim: number | undefined,
+    use: (slot: Slot) => Promise<T>,
+  ): Promise<T> {
     const slot: Slot = {
       sessionId,
       runtime: undefined as unknown as SessionRuntime,
@@ -310,20 +364,27 @@ export class SessionSupervisor {
       infraFaulted: false,
       entry: undefined,
     };
-    this.#claim(slot, assistantMessageId);
+    const unclaim = () => {
+      if (claim !== undefined) {
+        releaseClaim(this.#claims, slot, claim);
+      }
+    };
+    if (claim !== undefined) {
+      this.#claim(slot, claim);
+    }
     let entry: PoolEntry;
     try {
       entry = await this.#pool.admit({
-        busy: () => !turnFree(slot),
+        busy: () => !turnFree(slot) || this.#controls.held(sessionId),
         retire: () => this.#retireSlot(slot),
       });
     } catch (error) {
-      releaseClaim(this.#claims, slot, assistantMessageId);
+      unclaim();
       throw error;
     }
     if (this.#closed) {
       this.#pool.release(entry);
-      releaseClaim(this.#claims, slot, assistantMessageId);
+      unclaim();
       throw new HttpError("agent_unavailable");
     }
     slot.entry = entry;
@@ -353,17 +414,20 @@ export class SessionSupervisor {
     slot.runtime = new SessionRuntime(opts);
     this.#slots.set(sessionId, slot);
     try {
-      await this.#bindDispatch(slot, text, assistantMessageId);
+      return await use(slot);
     } catch (error) {
       await this.#retireSlot(slot);
       throw error;
     }
   }
 
-  /** Synchronous, never throws or writes stdin: free the capacity, retire only outside a turn. */
+  /**
+   * Synchronous, never throws or writes stdin: free the capacity, retire only outside a turn and
+   * outside a control claim (whose own failure path or pump end then retires the slot).
+   */
   #onProcessExit(slot: Slot): void {
     this.#pool.release(slot.entry);
-    if (turnFree(slot)) {
+    if (turnFree(slot) && !this.#controls.held(slot.sessionId)) {
       void this.#retireSlot(slot);
     }
   }

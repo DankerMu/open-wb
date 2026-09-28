@@ -19,6 +19,7 @@ import {
   INSERT_MESSAGE,
   MESSAGE_COLUMNS,
   type MessageDbRow,
+  replaceLastAssistant,
   requireAtMostOne,
   requireChanges,
   runOwnedTransaction,
@@ -141,6 +142,8 @@ export interface SessionStore {
   getMessages(sessionId: string, ownerId: string): SessionMessageTree | null;
   acceptPrompt(sessionId: string, ownerId: string, text: string): AcceptedPrompt;
   rollbackPrompt(assistantMessageId: number): boolean;
+  /** Regenerate CAS + Turn registration (#465); session_busy on a CAS miss. The new assistant id. */
+  acceptRegenerate(sessionId: string, expectedAssistantId: number, sessionFile: string): number;
   bumpStreamEpoch(sessionId: string): number;
   setSessionFile(sessionId: string, sessionFile: string | null): void;
   appendDelta(assistantMessageId: number, delta: string): boolean;
@@ -336,26 +339,26 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
           previousUpdatedAt: Number(session.updated_at),
         };
       });
-      const turn: Turn = {
-        sessionId,
-        ownerId,
-        userMessageId: accepted.userMessageId,
-        assistantMessageId: accepted.assistantMessageId,
-        previousStatus: accepted.previousStatus,
-        previousTitle: accepted.previousTitle,
-        previousUpdatedAt: accepted.previousUpdatedAt,
-        pending: [],
-        pendingBytes: 0,
-        progress: false,
-        timer: undefined,
-        timerGeneration: 0,
-        faulted: false,
-        fault: undefined,
-        notified: false,
-      };
-      activeTurns.set(turn.assistantMessageId, turn);
-      activeSessions.set(turn.sessionId, turn.assistantMessageId);
+      const turn = openTurn(
+        { sessionId, ownerId, ...accepted },
+        false,
+        activeTurns,
+        activeSessions,
+      );
       return { userMessageId: turn.userMessageId, assistantMessageId: turn.assistantMessageId };
+    },
+
+    acceptRegenerate(sessionId, expectedAssistantId, sessionFile) {
+      assertOpen(closed);
+      const replaced = replaceLastAssistant(db, createSqliteTextDecoder(db), {
+        sessionId,
+        expectedAssistantId,
+        sessionFile,
+        now: Date.now(),
+      });
+      // progress: rollbackPrompt must refuse; its userMessageId is the kept, existing user row.
+      return openTurn({ sessionId, ...replaced }, true, activeTurns, activeSessions)
+        .assistantMessageId;
     },
 
     rollbackPrompt(assistantMessageId) {
@@ -605,6 +608,28 @@ function toSessionView(row: SessionDbRow, decoder: TextDecoder): SessionView {
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   };
+}
+
+function openTurn(
+  admitted: ReturnType<typeof replaceLastAssistant> & { sessionId: string },
+  progress: boolean,
+  activeTurns: Map<number, Turn>,
+  activeSessions: Map<string, number>,
+): Turn {
+  const turn: Turn = {
+    ...admitted,
+    pending: [],
+    pendingBytes: 0,
+    progress,
+    timer: undefined,
+    timerGeneration: 0,
+    faulted: false,
+    fault: undefined,
+    notified: false,
+  };
+  activeTurns.set(turn.assistantMessageId, turn);
+  activeSessions.set(turn.sessionId, turn.assistantMessageId);
+  return turn;
 }
 
 function titlePrefix(text: string): string {

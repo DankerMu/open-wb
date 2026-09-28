@@ -1,0 +1,48 @@
+# Spec delta: chat-sessions（#465 regenerate 的 supervisor 编排与控制占用）
+
+> 以主 spec「Supervisor dispatch and generation binding」原文为底，只并入父 delta 同名块中本 issue（4.4）交付的部分；主 spec 六个 Scenario 原样保留（主 spec 为无加粗 `- WHEN` 格式，照抄）。
+> - 首段：并入「On the prompt path …」限定、regenerate 的 supervisor 自有事务与补偿句、控制占用句。裁剪如下：
+>   - 「Regenerate and fork (Requirement「会话 REST」) are … their …」裁为只含 regenerate 的单数句；
+>   - 补偿括注去掉「removing a pre-created fork session row」；
+>   - 控制占用句去掉 fork。
+>
+>   fork 部分 → #466；「（Requirement「会话 REST」）」引注随 REST 路由 → #467，由它按父文恢复合并措辞。
+> - 首段自写一句（父 delta 没有，归档时须采纳）：regenerate 路径上 turn-control「重新生成 REST」的失败映射优先于本段「Storage … faults SHALL remain generic」，即事务存储故障与提交后派发失败 → `agent_unavailable`，复核失败 → `session_busy`。
+> - 第三段：并入 regenerate 的 epoch 子句与「Regenerate SHALL acquire …」句；fork 临时进程句 → #466。
+> - Scenario：
+>   - 「Regenerate on a reclaimed session」：WHEN 由「the owner posts regenerate」改为 supervisor 层「regenerate is called for it」，REST 形状 → #467；
+>   - 「Control claim excludes concurrent turn operations」：去掉 fork，保留父标题。注入 prompt 走现有 REST 路由，即 `acceptPrompt` → supervisor 拒绝 → `rollbackPrompt`。「no row … change」断言结束后的行与注入前逐字相同；受理前拒绝、不写任何行归 #467。
+>   - 「Fork temporary runtime is not a generation」→ #466，未收录。
+
+## MODIFIED Requirements
+
+### Requirement: Supervisor dispatch and generation binding
+SessionSupervisor SHALL implement the existing prompt(sessionId,text):Promise<void> port using the already-admitted store.runtimeState active pair, owner and resume metadata. On the prompt path it SHALL neither admit nor compensate a pair itself. Regenerate is a supervisor-owned admission and compensation path: the supervisor SHALL perform its single final SQLite transaction (including the control-claim recheck) and its failure compensation (retiring the process, or settling a dispatched regenerate assistant row `failed`). The supervisor SHALL hold a per-session control claim for regenerate and stop from a passed precheck until dispatch completes or the response is returned; while it is held, prompt and regenerate on that session SHALL be rejected with session_busy (a stop after regenerate has dispatched proceeds normally because the session is then `running`), and the claimed session's process counts as in-turn for the process cap. It SHALL reject duplicate supervisor admission and close new admission during shutdown. Runtime SessionBusyError SHALL become canonical session_busy; AgentUnavailableError and OmpProtocolError SHALL become agent_unavailable. Storage, registry and unknown adapter faults SHALL remain generic failures: acquisition-specific adapter provenance SHALL take precedence over the runtime's sanitized error. On the regenerate path the failure mapping of turn-control「重新生成 REST」takes precedence over this rule: a storage fault of its final transaction, and any dispatch failure after that transaction commits, SHALL reject with agent_unavailable; a failed control-claim recheck SHALL reject with session_busy.
+The supervisor SHALL await the exact runtime dispatch receipt and persist the validated sessionFile before resolving the REST port, without consuming business frames first. Pre-progress failure SHALL retire/discard that runtime before rejecting so REST can compensate. No post-progress error SHALL reject the already-accepted REST operation.
+Every runtime generation acquisition, including idle re-spawn, crash recovery and a regenerate on a session whose process has been reclaimed or evicted, SHALL increment stream_epoch exactly once via the existing store method before shared-token issuance; reuse of a live generation SHALL not increment it. Regenerate SHALL acquire that normal generation (epoch+1, a fresh ring) through the same lazy acquisition path as prompt. Failed acquisition may advance epoch independently of REST compensation. Runtime SHALL retain token-revocation ownership; native exit SHALL make that generation token invalid, without stale callbacks revoking a newer token. No requestId SHALL be guessed from an ACK.
+#### Scenario: Cold start and reuse
+- WHEN an owner prompts a new session and later prompts the same healthy runtime again
+- THEN both requests return202 after dispatch, sessionFile is stored, one generation/epoch/token is used and no duplicate native child is spawned
+#### Scenario: Failed acquisition compensation
+- WHEN binary acquisition or nonempty-sessionFile handshake fails
+- THEN prompt returns502, no business frames are persisted/published, the child/token is retired and REST restores prior pair/title/status/history while independent generation metadata may advance
+#### Scenario: Idle and crash re-spawn
+- WHEN a runtime is retired by idle or by a mid-turn crash and another prompt arrives
+- THEN the next generation uses the persisted resume path, epoch increases once, the old token is invalid and its late callbacks cannot revoke the new token
+#### Scenario: Retiring instance cannot revoke replacement
+- WHEN a transport-failed runtime's native exit is delayed and a new prompt is admitted for that session
+- THEN replacement acquisition waits for prior retirement/pump settlement, no replacement token is issued while the old instance can revoke, and later stale callbacks cannot invalidate the replacement; other sessions remain usable
+#### Scenario: Generation adapter failure provenance
+- WHEN epoch persistence or shared-registry issuance throws during runtime acquisition
+- THEN the original generic failure is retained despite runtime sanitization, REST does not report502, its unprogressed admission is compensated, and no token/child remains leaked
+#### Scenario: Dispatch metadata storage fault
+- WHEN the prompt write succeeds but persisting validated sessionFile fails before any business frame is consumed
+- THEN the runtime is retired, REST receives a generic failure and compensates its unprogressed admission; no background work continues against removed rows
+
+#### Scenario: Regenerate on a reclaimed session
+- **WHEN** a done session's process has been retired by idle or eviction and regenerate is called for it
+- **THEN** the process is re-acquired through the prompt path with `--resume`, `streamCursor.epoch` is the previous value plus one, and an SSE subscriber of the new generation receives turn.start followed by turn.end for the new assistant message
+
+#### Scenario: Control claim excludes concurrent turn operations
+- **WHEN** a regenerate holds the control claim (the fake held between `get_branch_messages` and `branch`, and between `branch` and `get_state`) and a prompt or regenerate arrives for the same session
+- **THEN** each concurrent request returns409 session_busy with no row, file or process change; after the claimed operation finishes the claim is released and a later prompt is admitted
