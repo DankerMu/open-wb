@@ -201,9 +201,11 @@ export async function walkFork(
     expect(forkedId()).not.toBe(sessionId);
     mark("url");
 
-    await expect(main.getByRole("region", { name: "消息" })).toBeVisible();
-    await expect(main.getByRole("article")).toHaveCount(0);
-    await expect(main.getByRole("button", { name: "重新生成", exact: true })).toHaveCount(0);
+    const transcript = main
+      .getByRole("region", { name: "消息" })
+      .filter({ hasNot: page.getByRole("article") });
+    await expect(transcript).toBeVisible();
+    await expect(transcript.getByRole("button", { name: "重新生成", exact: true })).toHaveCount(0);
     mark("empty transcript");
     await expect(page.getByLabel("给助手发消息")).toHaveValue(prompt);
     await expect(

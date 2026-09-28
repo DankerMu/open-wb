@@ -36,7 +36,7 @@ Evidence floor: `make ui-walk` 两个 project 全绿（本机 CI 脚本连跑 �
 - 交付后整块与父 delta 同名块**逐字一致**（`cmp` 通过，design「Spec 对账」）；父块不缺主 spec 已有的任何文字。
 
 ## Impact
-- CI `ui-walk` job：每个 project 的旅程多约 0.6s。
+- CI `ui-walk` job：每个 project 的旅程多约 0.6s（本机）/ 1.4s（CI 实测 fork 201）。
   - 本机实测旅程：master（#485）12.1/12.6s；本刀 12.1–12.7s（desktop）/ 13.1–13.2s（mobile）；满载（14 核 `yes` ×14）13.5/14.3s；单测上限 30s（`playwright.config.ts:14`）。
   - 步骤耗时几乎全在服务端 fork（临时 omp 进程 `--resume` → `get_branch_messages` → `branch` → `get_state`）：POST 于步骤起 +19–23ms 发出，201 于 +560–611ms 到达（满载 782/1314ms）；其后各断言合计 ≤35ms。
 - 分叉不弹 Toast（`message-actions.tsx:61-79` `ForkAction` 不调 `useToast`，文件头注释「no toast」），无需 #643 类等待。
@@ -51,8 +51,8 @@ Evidence floor: `make ui-walk` 两个 project 全绿（本机 CI 脚本连跑 �
    - 关：侧栏 `未开始` 断言之后。空转录（历史已装载）、侧栏新项（列表刷新已渲染）都在那个回调的下游，回调里或其触发的渲染/effect 里的任何同步发送此时已发出。
    - 承重性（E2）：M5（DOM 断言都过了才发送）只有这条红，3/3（每遍两个 project）。
    - M6a（产品代码在回调里立即发送）先红于空转录，M6b 去掉网络断言仍红于同处，各 1 遍、两个 project 均 Received 2。这依赖服务端先处理 prompt 插入、再响应新会话首个 messages GET：浏览器侧次序有利（POST 与跳转同一回调、先于 GET 发出），但仍是服务端竞态，不是保证。`toHaveCount(0)` 一旦见 0 即通过，所以对窗口内发出的请求，不依赖竞态的守护是网络观察。
-   - **残余**：M6c（产品代码 `setTimeout` 300ms 后发送）两个 project 全绿、整条旅程全绿。窗口在 201 之后约 25–35ms 关闭，晚于此的定时发送不在本步骤可见范围。现有 `forkTurn` 没有定时器，这类回归需要刻意引入；不加固定 sleep 延长窗口（任何有限 sleep 都有同样的残余）。见 Open questions。
-4. **空转录非空洞**：先断言 `region 消息` 存在且可见（`<section aria-label="消息">` 只在 `historyView` 就绪后渲染，`conversation-view.tsx:151`、`:203-213`），再断言 0 条 article。历史加载中 section 不存在，0 条 article 不能被加载态满足。E0 用的是 `toBeVisible()`（空 section 有非零盒子，全部实测通过）；论证只依赖「存在」，实现改用 `toHaveCount(1)` 同样成立。
+   - **残余**：M6c（产品代码 `setTimeout` 300ms 后发送）两个 project 全绿、整条旅程全绿。窗口在 201 之后约 10–85ms 关闭（本机与 CI 实测），晚于此的定时发送不在本步骤可见范围。现有 `forkTurn` 没有定时器，这类回归需要刻意引入；不加固定 sleep 延长窗口（任何有限 sleep 都有同样的残余）。见 Open questions。
+4. **空转录非空洞（原子匹配）**：用一个 locator 同时要求「`region 消息` 可见」与「其内没有 article」——`main.getByRole("region", { name: "消息" }).filter({ hasNot: page.getByRole("article") })` → `toBeVisible()`，再在该 region 内断言没有 `重新生成`。不能拆成先 `toBeVisible` 再 `toHaveCount(0)` 两次断言：路由用 `startTransition` 提交，URL 先于 DOM 变化，第一次断言可能命中源会话尚未卸载的旧 region；提交后 `historyView` 为 null、section 卸载（`page.tsx:585-588`、`conversation-view.tsx:203-213`），此时 `toHaveCount(0)` 会被加载态空洞满足（PR #648 第 1 轮 correctness / test-evidence 席位 P2）。原子 locator 下，旧 region 有 article 不匹配，加载中没有 region 也不匹配，只有已装载且为空的分叉会话能通过。
 5. **首条用户正文守护**：点击前断言首条用户 `.chat-msg-body` 恰为 `prompt`，把「草稿 = 首条模板 prompt」绑定到被点的那条消息上。M3b 证明草稿断言会区分分叉点。
 6. **偏离 issue PR Boundary「既有 journey 不改」**：只改 helper 的选择条件、断言零改动，原因是分叉会话按 `updated_at` 排在最前。**`selectFirstSessionInOverlay` 跳过 `未开始` 会话**（carry-forward :140）。列表 `ORDER BY updated_at DESC`（`server/src/sessions/store.ts:248`），分叉行插入时 `created_at = updated_at = now`（`store-branch.ts:166`、`:210`），空分叉排第一，原 `.first()` 点到它，`:123` `article 助手` 5s 找不到（M7，只红 mobile）。空会话按定义就是 `idle`（chat-web：`idle` 仅当无历史），「跳过 `未开始`」与「选一个有消息的会话」等价。#424 断言意图（mobile 能从覆盖层选会话并看到其消息）不变；E0 诊断确认 mobile 选中的是本 project 的走查会话。
 7. **常量重复**。首条 prompt 由调用方传入，不在 `ui-walk-stop.ts` 重新拼接；会话 id 正则在模块内再定义一次，不从 spec 导出（同 #484 决定 3）。

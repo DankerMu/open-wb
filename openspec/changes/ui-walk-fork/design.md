@@ -37,7 +37,7 @@
 ## 行数预算（显式）
 - 本刀：798 + 0（import 行复用）+ 1（调用行）= **799/800**，biome 格式化后实测 799。helper 修复在 `ui-walk-layout.ts`，spec 零行。
 - 之后 spec 只剩 1 行余量；再加步骤须先做纯搬迁（如 `walkScrollFollow` 族）。
-- `ui-walk-stop.ts` 157 → 226 行，`ui-walk-layout.ts` 561 → 567 行，远低于 800。
+- `ui-walk-stop.ts` 157 → 228 行（fix pass 1 后），`ui-walk-layout.ts` 561 → 567 行，远低于 800。
 
 ## Must preserve
 - 停止、重新生成步骤的全部断言与次序；`walkStop`/`walkRegenerate` 零改动。
@@ -52,17 +52,17 @@
 2. `page.on("request", onRequest)`：记录 method 为 POST 且 pathname 匹配 `PROMPT_PATH` 的请求路径，不限会话（决定 3）。
 3. 先挂 `sessionPost(page, sessionId, "fork")`，点 `fork`，断言 **201**；解析 201 体取 `session.id`。走查不发任何 raw HTTP fork。
 4. URL：`expect.poll(() => URL 的 session 参数).toBe(body.session.id)`；再断言它匹配 `SESSION_ID` 且 `≠ sessionId`。
-5. 空转录（决定 4）：`main` 内 `region 消息` 可见（E0 所用；论证只依赖存在，`toHaveCount(1)` 亦可） → `main` 内 `article` 数量 0 → `main` 内 `button 重新生成`（`exact`）数量 0。
+5. 空转录（决定 4，原子）：`main.getByRole("region", { name: "消息" }).filter({ hasNot: page.getByRole("article") })` → `toBeVisible()`；再在该 region 内 `button 重新生成`（`exact`）数量 0。不拆成「region 可见」+「article 数量 0」两次断言。
 6. 草稿：`getByLabel("给助手发消息")` `toHaveValue(prompt)`（精确相等）；form 内 `发送`（`exact`）可用——草稿非空且 fork 锁已释放（`page.tsx:33-35`）。
 7. 侧栏：`inspectSidebar(page, project, …)`，`navigation 会话列表` 内 `button[aria-current="true"]` 数量 1，读其 `aria-label` 作 `<title>`，其 `role=status` 的 accessible name 须为 `<title> 未开始`。
 8. `expect(prompts, "no prompt POST after fork").toEqual([])`；`finally` 里 `page.off`。
 
-**观察窗口**：开于步骤 2（点击之前），关于步骤 8（侧栏断言之后）。实测窗口在 201 之后约 25–35ms 关闭。理由与残余见 proposal 决定 3。
+**观察窗口**：开于步骤 2（点击之前），关于步骤 8（侧栏断言之后）。实测窗口在 201 之后约 10–45ms（本机）/ 32–82ms（CI）关闭。理由与残余见 proposal 决定 3。
 
 **不等 Toast**：分叉无 Toast（`message-actions.tsx:61-79`）。mobile 侧栏检查仍经 `inspectSidebar`（开覆盖层、Escape 关闭），E0 全绿。
 
 **超时**
-- expect 默认 5s；`waitForResponse` 与点击用 `actionTimeout` 10s（`playwright.config.ts:25`）；fork 201 实测最长 1.31s（满载）；单测 30s（本机满载最长 14.3s）。
+- expect 默认 5s；`waitForResponse` 与点击用 `actionTimeout` 10s（`playwright.config.ts:25`）；fork 201 实测本机最长 1.31s（满载）、CI 约 1.4s；单测 30s（本机满载最长 14.3s）。
 
 ## Governing invariant
 步骤通过时，浏览器停在一个新的、服务端为 `idle` 且零消息的会话上，composer 持有首条用户消息的原文；点击以来（至侧栏断言），页面没有为任何会话发出 prompt POST。
@@ -87,12 +87,13 @@
 - **E2**：每个变异单独施加（M6 系列另需改 `turn-actions.ts` 并重建 web，测后还原、重建并核对 `web/dist`）。
   - M1 R 删掉点击：两个 project 红于 fork `waitForResponse` 超时（10s）。E0 实测如此。
   - M2 R 草稿期望改为 `prompt.slice(0, -1)`：两个 project 红于 `toHaveValue`（Received 完整 prompt）——精确相等，不是前缀/包含。E0 实测如此。
-  - M3 R 改点第二条用户消息（`users.nth(1)`）的 `从此处分叉`：两个 project 红于空转录 `article` 数量（Received 2：分叉点之前的 1 用户 + 1 助手）。E0 实测如此。
-  - M3b R M3 再删掉 `article` 数量与 `重新生成` 数量两条断言：两个 project 红于 `toHaveValue`（Received 第二条 prompt `WORKBUDDY_UI_WALK:<第二个 gate id>`）——草稿断言独立区分分叉点。E0 实测如此。
+  - M3 R 改点第二条用户消息（`users.nth(1)`）的 `从此处分叉`：两个 project 红于空转录（分叉会话带分叉点之前的 1 用户 + 1 助手）。E0 两步写法下为 `article` 数量 Received 2；fix pass 1 原子写法下实测为 `toBeVisible` `element(s) not found`。
+  - M3b R M3 再删掉空转录断言（原子 locator 与 `重新生成` 数量）：两个 project 红于 `toHaveValue`（Received 第二条 prompt `WORKBUDDY_UI_WALK:<第二个 gate id>`）——草稿断言独立区分分叉点。E0 实测如此。
   - M4 R 侧栏期望改为 `<title> 已完成`：两个 project 红于 `toHaveAccessibleName`（Received `WORKBUDDY_UI_WALK: 未开始`）。E0 实测如此。
   - M5 R 在步骤 8 之前插入 `composer.press("Enter")`（草稿与侧栏断言都已通过后发送）：两个 project 红于 `no prompt POST after fork`（Received `["/api/sessions/<fork id>/prompt"]`）——只有网络观察能抓到。E0 3 遍，两个 project 均红（6/6）。
-  - M6a R 产品代码自动发送：`forkTurn` 在 `selectSession(...)` 之后加 `void ownedClient.prompt(fork.session.id, fork.draft).catch(() => undefined);`：两个 project 先红于空转录 `article` 数量（Received 2）。E0 1 遍。
-  - M6b R M6a 且删掉步骤 8：仍红于同处（E0 1 遍，两个 project）。这是有利次序下的观察，不是保证：空转录能否抓到取决于服务端先处理 prompt 插入还是先响应新会话首个 messages GET（`toHaveCount(0)` 一旦见 0 即通过）。窗口内发出的请求，由网络观察无竞态地守护；其独有承重由 M5 证明。
+  - M8 R（fix pass 1 新增，证明原子性）：在 M3 基础上（点第二条用户消息的 `从此处分叉`，分叉会话带 1 用户 + 1 助手），把草稿期望改为第二条 prompt（让 M3b 的草稿断言不再兜底），并用 `page.route` 把分叉会话的 `GET /api/sessions/<fork id>/messages` 延迟约 300ms。原子 locator 下两个 project 须红于空转录（旧 region 有 article、加载中无 region、新 region 有 article，三者都不匹配）。另在 fix 前的两步写法上跑同一变异作对照，如实记录其结果（预期可能空洞通过，概率性，不要求必现）。
+  - M6a R 产品代码自动发送：`forkTurn` 在 `selectSession(...)` 之后加 `void ownedClient.prompt(fork.session.id, fork.draft).catch(() => undefined);`：两个 project 先红于空转录（E0 两步写法 Received 2；fix pass 1 原子写法 `element(s) not found`）。E0 1 遍。
+  - M6b R M6a 且删掉步骤 8：仍红于同处（E0 1 遍，两个 project）。这是有利次序下的观察，不是保证：空转录能否抓到取决于服务端先处理 prompt 插入还是先响应新会话首个 messages GET（原子 locator 一旦见到空的已装载 region 即通过）。窗口内发出的请求，由网络观察无竞态地守护；其独有承重由 M5 证明。
   - M6c G 产品代码延迟发送：同 M6a 但包在 `setTimeout(…, 300)` 里：两个 project 全绿、整条旅程全绿。窗口外的定时发送不可见（决定 3 残余），PR body 如实记录。
   - M7 R 还原 `selectFirstSessionInOverlay`：desktop 绿，`mobile-dark` 红于 `ui-walk.spec.ts:123`（`article 助手` 5s 未找到）。E0 实测如此。
 - **E3 G**：`make lint`、`make typecheck` 绿；`wc -l web/e2e/ui-walk.spec.ts` ≤800（预期 799）。
@@ -104,6 +105,6 @@
 
 ## Review focus
 1. 「无 prompt POST」的网络观察：监听先于点击、不限会话；窗口的因果终点（侧栏断言）与 M6c 残余（决定 3）。
-2. 空转录先等 `消息` region 可见再数 article，不被加载态满足（决定 4）。
+2. 空转录是一个原子 locator（`消息` region 且其内无 article），不被源会话旧 region 或加载态满足（决定 4）。
 3. 定位不靠会话名：URL 与 201 体交叉核对、侧栏只看 `aria-current`；按钮限定首条用户 article，点击前等可用。
 4. `selectFirstSessionInOverlay` 跳过 `未开始` 保住 #424 断言意图，spec 零行；spec 799/800，import 行复用。

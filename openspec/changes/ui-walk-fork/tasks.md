@@ -5,7 +5,7 @@
 - [ ] 8.2d ui-walk 分叉：用户消息点 `从此处分叉` → 跳转新会话、composer 草稿为该用户文本。验证：`make ui-walk` 两个 project 全绿；CI 不传 `OMP_MAX_PROCESSES`
 - [ ] （本 fixture 追加，见 design「Must add/change」1、3；决定 2、5）首条用户 `.chat-msg-body` 恰为首条模板 prompt；该 article 内 `从此处分叉`（`exact`）等到可用再点；先挂 `waitForResponse` 再点，断言 **201**。验证：design E1、E2 M1/M3
 - [ ] （本 fixture 追加，design 4；决定 2）URL `?session=` 轮询到等于 201 体 `session.id`，且匹配会话 id 格式、≠ 走查会话。不按会话名定位（分叉复制标题）。验证：design E1
-- [ ] （本 fixture 追加，design 5；决定 4）`main` 内 `region 消息` 先可见，再断言 `article` 数量 0、`重新生成` 数量 0。验证：design E2 M3/M6a
+- [ ] （本 fixture 追加，design 5；决定 4）空转录用一个原子 locator：`main` 内 `region 消息` 且其内无 `article` 可见，再在该 region 内断言 `重新生成` 数量 0。验证：design E2 M3/M6a/M8
 - [ ] （本 fixture 追加，design 6–7）composer 草稿 `toHaveValue(prompt)` 精确相等、form 内 `发送` 可用；`inspectSidebar` 内 `aria-current` 项状态元素名为 `<aria-label> 未开始`。不等 Toast（分叉无 Toast）。验证：design E2 M2/M3b/M4
 - [ ] （本 fixture 追加，design 2、8；决定 3）点击前挂 `page.on("request")` 记录任何会话的 prompt POST，侧栏断言后断言为空，`finally` 里 `page.off`；不加 sleep。验证：design E2 M5（承重，6/6）、M6a/M6b（立即发送在有利次序下两道都抓，非保证）、M6c（如实记录窗口外残余，恒绿）
 - [ ] （本 fixture 追加；决定 6）`selectFirstSessionInOverlay` 跳过 `未开始` 会话，`ui-walk.spec.ts:121-124` 的 #424 断言不改。验证：design E0-4、E2 M7
