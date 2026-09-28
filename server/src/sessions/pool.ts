@@ -3,9 +3,10 @@
  * omp process pool: live-process registry, serialized admission, least-recently-active eviction.
  */
 import { HttpError } from "../core/errors/index.js";
-import type { SessionRuntime } from "./omp/runtime.js";
+import type { SessionRuntime, SessionRuntimeOpts } from "./omp/runtime.js";
 import type { SessionStore } from "./store.js";
 import { RingBuffer } from "./stream/ring-buffer.js";
+import type { SessionSupervisorRuntime } from "./supervisor.js";
 import type { TokenRegistry } from "./tokens.js";
 
 export interface Generation {
@@ -170,6 +171,37 @@ export class ReadmissionRequired extends Error {
   }
 }
 
+type PerRuntime = Pick<SessionRuntimeOpts, "sessionId" | "ownerId" | "tokens" | "onApproval"> & {
+  resumePath: string | null;
+  onExit: () => void;
+};
+
+/** The one SessionRuntime option assembly (spawn contract inputs) from the supervisor runtime. */
+export function sessionRuntimeOpts(
+  base: SessionSupervisorRuntime,
+  per: PerRuntime,
+): SessionRuntimeOpts {
+  return {
+    sessionId: per.sessionId,
+    bin: base.bin,
+    sandboxRoot: base.sandboxRoot,
+    stateDir: base.stateDir,
+    ownerId: per.ownerId,
+    modelId: base.modelId,
+    tokens: per.tokens,
+    resumePath: per.resumePath,
+    onExit: per.onExit,
+    ...(per.onApproval === undefined ? {} : { onApproval: per.onApproval }),
+    ...(base.idleMs === undefined ? {} : { idleMs: base.idleMs }),
+    ...(base.ompUser === undefined ? {} : { ompUser: base.ompUser }),
+    ...(base.spawnImpl === undefined ? {} : { spawnImpl: base.spawnImpl }),
+    ...(base.clock === undefined ? {} : { clock: base.clock }),
+    ...(base.handshakeTimeoutMs === undefined
+      ? {}
+      : { handshakeTimeoutMs: base.handshakeTimeoutMs }),
+  };
+}
+
 export function generationTokens(
   slot: Slot,
   pool: ProcessPool,
@@ -215,6 +247,30 @@ export function generationTokens(
         sealGeneration(slot, generation);
       }
       tokens.revoke(slot.sessionId);
+    },
+  };
+}
+
+/**
+ * Fork temporary process (#466): no generation, no epoch, no ring. The token is issued once and only
+ * while the entry is held, so a dead child is never lazily re-spawned outside the pool.
+ */
+export function temporaryTokens(
+  pool: ProcessPool,
+  entry: PoolEntry,
+  tokens: TokenRegistry,
+): SessionRuntimeOpts["tokens"] {
+  let issued = false;
+  return {
+    issue: (sessionId: string) => {
+      if (issued || !pool.holds(entry)) {
+        throw new Error("fork temporary process cannot be re-acquired");
+      }
+      issued = true;
+      return tokens.issue(sessionId);
+    },
+    revoke: (sessionId: string) => {
+      tokens.revoke(sessionId);
     },
   };
 }

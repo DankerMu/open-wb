@@ -4,6 +4,7 @@
 import { DEFAULT_OMP_MAX_PROCESSES } from "../agent-config.js";
 import { HttpError } from "../core/errors/index.js";
 import { ApprovalRegistry } from "./approvals.js";
+import { type ForkResult, Forks, Regenerations } from "./branching.js";
 import { applyFailure, applyFrame, applyStop, type ChatEvent, createEventState } from "./events.js";
 import type { OmpFrame } from "./omp/frame.js";
 import { AgentUnavailableError, OmpProtocolError, type SpawnImpl } from "./omp/process.js";
@@ -12,7 +13,6 @@ import {
   SessionBusyError,
   type SessionClock,
   SessionRuntime,
-  type SessionRuntimeOpts,
 } from "./omp/runtime.js";
 import {
   type Generation,
@@ -26,12 +26,13 @@ import {
   releasePumpExit,
   type Slot,
   sealGeneration,
+  sessionRuntimeOpts,
   turnFree,
 } from "./pool.js";
 import type { ApprovalView, SessionStore, SettledApproval } from "./store.js";
 import type { RetainedEvent, RingRead } from "./stream/ring-buffer.js";
 import type { TokenRegistry } from "./tokens.js";
-import { ControlClaims, drain, persistEvent, Regenerations, TurnStops } from "./turn-control.js";
+import { ControlClaims, drain, persistEvent, TurnStops } from "./turn-control.js";
 
 export { releasePumpExit } from "./pool.js";
 
@@ -105,6 +106,7 @@ export class SessionSupervisor {
   readonly #stops: TurnStops;
   readonly #controls = new ControlClaims();
   readonly #regenerations: Regenerations;
+  readonly #forks: Forks;
   #closed = false;
 
   constructor(options: SessionSupervisorOptions) {
@@ -153,6 +155,18 @@ export class SessionSupervisor {
       },
       settled: (settled) => this.#approvals.settled(settled),
     });
+    this.#forks = new Forks({
+      store: this.#store,
+      controls: this.#controls,
+      pool: this.#pool,
+      tokens: this.#tokens,
+      config: this.#runtime,
+      closed: () => this.#closed,
+      retireSource: (sessionId) => {
+        const slot = this.#slots.get(sessionId);
+        return slot === undefined ? Promise.resolve() : this.#retireSlot(slot);
+      },
+    });
   }
 
   prompt(sessionId: string, text: string): Promise<void> {
@@ -164,16 +178,15 @@ export class SessionSupervisor {
 
   /** Regenerates the last answer (#465); REST is #467. Every failure is a rejection. */
   regenerate(sessionId: string, ownerId: string): Promise<{ assistantMessageId: number }> {
-    if (this.#closed) {
-      return Promise.reject(new HttpError("agent_unavailable"));
-    }
-    const work = this.#regenerations.run(sessionId, ownerId).catch((error: unknown) => {
-      throw this.#translate(error);
-    });
-    return this.#track(work);
+    return this.#control(() => this.#regenerations.run(sessionId, ownerId));
   }
 
-  /** Synchronous: whether a regenerate or stop holds this session's control claim. */
+  /** Forks at a user message of the session (#466); REST is #469. Every failure is a rejection. */
+  fork(sessionId: string, ownerId: string, messageId: number): Promise<ForkResult> {
+    return this.#control(() => this.#forks.run(sessionId, ownerId, messageId));
+  }
+
+  /** Synchronous: whether a regenerate, fork or stop holds this session's control claim. */
   controlHeld(sessionId: string): boolean {
     return this.#controls.held(sessionId);
   }
@@ -253,7 +266,8 @@ export class SessionSupervisor {
     this.#closed = true;
     this.#approvals.close();
     this.#subscribers.clear();
-    const retirements: Promise<void>[] = [];
+    // Temporary fork processes are not slots; closing them first lets a held command return.
+    const retirements: Promise<void>[] = [this.#forks.close()];
     for (const slot of this.#slots.values()) {
       retirements.push(this.#retireSlot(slot));
     }
@@ -308,6 +322,17 @@ export class SessionSupervisor {
       this.#stops.release(assistantMessageId);
       throw this.#translate(error);
     }
+  }
+
+  /** The regenerate/fork entry: closed check, error translation, tracked for shutdown. */
+  #control<T>(run: () => Promise<T>): Promise<T> {
+    if (this.#closed) {
+      return Promise.reject(new HttpError("agent_unavailable"));
+    }
+    const work = run().catch((error: unknown) => {
+      throw this.#translate(error);
+    });
+    return this.#track(work);
   }
 
   #track<T>(work: Promise<T>): Promise<T> {
@@ -389,30 +414,20 @@ export class SessionSupervisor {
       throw new HttpError("agent_unavailable");
     }
     slot.entry = entry;
-    const opts: SessionRuntimeOpts = {
-      sessionId,
-      bin: this.#runtime.bin,
-      sandboxRoot: this.#runtime.sandboxRoot,
-      stateDir: this.#runtime.stateDir,
-      ownerId,
-      modelId: this.#runtime.modelId,
-      tokens: generationTokens(slot, this.#pool, this.#store, this.#tokens),
-      resumePath,
-      onExit: () => {
-        this.#onProcessExit(slot);
-      },
-      onApproval: (request) => {
-        this.#approvals.register(slot, request);
-      },
-      ...(this.#runtime.idleMs === undefined ? {} : { idleMs: this.#runtime.idleMs }),
-      ...(this.#runtime.ompUser === undefined ? {} : { ompUser: this.#runtime.ompUser }),
-      ...(this.#runtime.spawnImpl === undefined ? {} : { spawnImpl: this.#runtime.spawnImpl }),
-      ...(this.#runtime.clock === undefined ? {} : { clock: this.#runtime.clock }),
-      ...(this.#runtime.handshakeTimeoutMs === undefined
-        ? {}
-        : { handshakeTimeoutMs: this.#runtime.handshakeTimeoutMs }),
-    };
-    slot.runtime = new SessionRuntime(opts);
+    slot.runtime = new SessionRuntime(
+      sessionRuntimeOpts(this.#runtime, {
+        sessionId,
+        ownerId,
+        resumePath,
+        tokens: generationTokens(slot, this.#pool, this.#store, this.#tokens),
+        onExit: () => {
+          this.#onProcessExit(slot);
+        },
+        onApproval: (request) => {
+          this.#approvals.register(slot, request);
+        },
+      }),
+    );
     this.#slots.set(sessionId, slot);
     try {
       return await use(slot);

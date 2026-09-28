@@ -14,7 +14,9 @@ import {
   settlePendingApproval,
 } from "./store-approvals.js";
 import {
+  copyForkHistory,
   decodeNullableText,
+  type ForkCommit,
   hasChanges,
   INSERT_MESSAGE,
   MESSAGE_COLUMNS,
@@ -144,6 +146,8 @@ export interface SessionStore {
   rollbackPrompt(assistantMessageId: number): boolean;
   /** Regenerate CAS + Turn registration (#465); session_busy on a CAS miss. The new assistant id. */
   acceptRegenerate(sessionId: string, expectedAssistantId: number, sessionFile: string): number;
+  /** Fork CAS + insert + copy (#466); session_busy on a CAS miss. The new session's view. */
+  commitFork(input: ForkCommit): SessionView;
   bumpStreamEpoch(sessionId: string): number;
   setSessionFile(sessionId: string, sessionFile: string | null): void;
   appendDelta(assistantMessageId: number, delta: string): boolean;
@@ -359,6 +363,18 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
       // progress: rollbackPrompt must refuse; its userMessageId is the kept, existing user row.
       return openTurn({ sessionId, ...replaced }, true, activeTurns, activeSessions)
         .assistantMessageId;
+    },
+
+    commitFork(input) {
+      assertOpen(closed);
+      copyForkHistory(db, input, Date.now());
+      const row = db
+        .prepare(`SELECT ${SESSION_COLUMNS} FROM chat_sessions WHERE id = ?`)
+        .get(input.sessionId) as unknown as SessionDbRow | undefined;
+      if (row === undefined) {
+        throw new Error("forked session row missing");
+      }
+      return toSessionView(row, createSqliteTextDecoder(db));
     },
 
     rollbackPrompt(assistantMessageId) {
