@@ -57,7 +57,7 @@
 7. 侧栏：`inspectSidebar(page, project, …)`，`navigation 会话列表` 内 `button[aria-current="true"]` 数量 1，读其 `aria-label` 作 `<title>`，其 `role=status` 的 accessible name 须为 `<title> 未开始`。
 8. `expect(prompts, "no prompt POST after fork").toEqual([])`；`finally` 里 `page.off`。
 
-**观察窗口**：开于步骤 2（点击之前），关于步骤 8（侧栏断言之后）。实测窗口在 201 之后约 10–45ms（本机）/ 32–82ms（CI）关闭。理由与残余见 proposal 决定 3。
+**观察窗口**：开于步骤 2（点击之前），关于步骤 8（侧栏断言之后）。实测窗口在 201 之后约 10–45ms（本机）/ 32–85ms（CI）关闭。理由与残余见 proposal 决定 3。
 
 **不等 Toast**：分叉无 Toast（`message-actions.tsx:61-79`）。mobile 侧栏检查仍经 `inspectSidebar`（开覆盖层、Escape 关闭），E0 全绿。
 
