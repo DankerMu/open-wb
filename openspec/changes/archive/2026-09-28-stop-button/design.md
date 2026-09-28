@@ -85,6 +85,8 @@ running 快照 R：会话 `saved title` running。消息为 `historyUser` 加助
 | S5 错误信封（红） | R；点 `停止` → 502 `{error:{code:"agent_unavailable",message:"Agent 运行时不可用"}}`；再点 → STOP 挂起 | 第一次：`role=alert` 文本 `Agent 运行时不可用`；无 Toast；`停止` 恢复可用；textarea 仍禁用。第二次点击时 alert 立即消失（点击时 `setPromptError(null)`），STOP 调用共 2 次 |
 | S6 pending 审批下停止（红） | R 后 `approval.request{messageId:0,approvalId:7,tool:"bash",title:"Allow tool: bash",expiresAt:now+60000}`；点 `停止` → 202；`approval.resolved{0,7,"deny"}`；`turn.end{0,"stopped"}` | 审批条 `需要你的确认` 可见、按钮可用时，`停止` 可用且 textarea 禁用（「有 pending 审批时 `停止` 可用」）；点击后 STOP 恰 1 次；resolved 后条为 `已拒绝执行`；`turn.end` 后徽章 `助手消息 已停止` 出现，composer 回到 `发送` |
 | S7 会话围栏（红） | A=R；STOP_A 挂起；点 `停止`；切到同样 running 的会话 B；再令 STOP_A 返回 202；另一轮令 STOP_A 返回 502 | 切到 B 后 B 的 `停止` 可用（按会话 key，不继承 A 的在途禁用）；点击 B 只发 B 的 stop 路径。A 迟到的 202 → 无 Toast；A 迟到的 502 → 无 `role=alert` |
+| S7b 续期围栏（红，fix pass 1） | 同一会话保持选中；旧 client 的 STOP 挂起；`renewAccount` 换 client；新 client 点 `停止` 得 502 内联错误；再令旧 STOP 返回 202 / 502 | alert 恰为新 client 那一条；无 `已停止生成` Toast；composer 仍锁定 |
+| S7c 卸载围栏（红，fix pass 1） | STOP 挂起；`router.navigate("/center")` 卸载 ChatPage（ToastProvider 保留）；再令 STOP 返回 202 | 无 Toast、无 alert、无 `console.error` |
 | S8 不动 prompt fence（红） | done 会话；输入 `继续` 发送，prompt POST 挂起；此时 `停止` 可用，点击 → 202；再令 prompt 202 `{userMessageId:1,assistantMessageId:2}` | prompt 的受理对账照常：messages GET +1、安装快照、新建 source。「stop 调 `abortMutation`」的变异 → 对账不发生 → 红 |
 | S9 无会话（红） | 欢迎态输入 `hi` 发送，create POST 挂起 | toolbar 内 `停止` 存在且 `disabled`；点击不产生任何 `/stop` 请求；`生成中` 在 |
 | S10 快照矩阵（红） | 快照：会话 `failed`；消息依次为 u、a1（stopped，`部分回答`，步骤 `bash` stopped）、u、a2（stopped，`""`）、u、a3（done，`完成回答`）、u、a4（failed，`""`） | 四个助手 article 中，名 `助手消息 已停止` 的 status 个数依次为 1、1、0、0；`（已停止生成）` 只出现在 a2；a1 正文 `部分回答`、无占位；a1/a2 内无 `role=alert`；a1 有 `复制`，a2 无 `复制`（占位没写进 content）；a1 的徽章跟在 `.chat-md` 之后、`.chat-msg-actions` 之前（`compareDocumentPosition`）；侧栏 `saved title 失败`；步骤 `bash 已停止`；toolbar 为 `发送`、无 `生成中` |
@@ -106,7 +108,7 @@ running 快照 R：会话 `saved title` running。消息为 `historyUser` 加助
 - 204 时对账 GET、写入视图或出 Toast → S3；
 - stop 调 `abortMutation` 或写 mutation 状态 → S8；
 - 按钮 `type="submit"` → S1（`type="button"` 断言；S2 抓不到：R 状态下 textarea 禁用、草稿为空，`submitComposer` 空草稿直接 return，`page.tsx:514-521`）；
-- 去掉结果围栏 → S7；
+- 去掉 202 分支结果围栏 → S7-202、S7b-202、S7c；去掉错误分支围栏 → S7-502、S7b-502（S7 先给 B 一条内联错误）；去掉 `ownsSessionWrite` 的挂载检查 → S7c；
 - 按钮不按会话 key：jsdom 中不变红（切会话时有一帧 `ownsHistory` 为假，`StopButton` 卸载、`pending` 清零，`ownership.ts:22-32`），`key` 属防御性写法，靠代码审查；S7 的行为断言保留；
 - 占位写进 content → S10（a2 出现 `复制`）；
 - 徽章不按 status 判断（done/failed 也渲染）→ S10；
@@ -118,6 +120,6 @@ running 快照 R：会话 `saved title` running。消息为 `historyUser` 加助
 ## Review focus
 1. 不存在持久「停止中」状态：禁用只覆盖在途请求，任何响应后若仍 running 即可再点（S4）；解锁与 `已停止` 只来自权威状态。
 2. 204 不写视图、不对账（S3）；`"idle"` 字面量不出现在任何 `setHistoryState`/视图写路径。
-3. stop handler 只复用 `ownsAnswer` 围栏，不碰 prompt fence，不给 `turn-actions.ts` 加 hook 状态（S7、S8、G1）。
+3. stop handler 只复用 `ownsAnswer` 围栏（实现中改名为 `ownsSessionWrite`，与审批作答共用），不碰 prompt fence，不给 `turn-actions.ts` 加 hook 状态（S7、S8、G1）。
 4. 停止键 `type="button"`、按会话 key、无会话时禁用；`生成中` status 元素原样（S1、S2、S7、S9，e2e 锚点）。
 5. 占位只是呈现，content 不变；徽章只给 `stopped`；CSS 只用 token；allowed-edit 之外的既有测试零 diff（S10、S13、G3）。
