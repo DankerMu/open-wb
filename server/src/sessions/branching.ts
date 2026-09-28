@@ -298,9 +298,13 @@ export class Forks {
     return branched;
   }
 
-  /** After the temporary process exited: closed check, then the one transaction. */
+  /** After the temporary process exited: closed and shared-file checks, then the one transaction. */
   #commit(plan: ForkPlan, branched: Branched): ForkResult {
     if (this.#ports.closed()) {
+      throw new HttpError("agent_unavailable");
+    }
+    // Direct invariant: the new session never shares the source's session file.
+    if (branched.sessionFile === plan.file) {
       throw new HttpError("agent_unavailable");
     }
     let session: ForkResult["session"];

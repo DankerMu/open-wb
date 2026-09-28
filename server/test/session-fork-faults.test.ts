@@ -4,8 +4,11 @@
  * reply's segment (F1), the commit-time CAS recheck (F2), the temporary shutdown gap (F3), a fault
  * mid-transaction (F4), a still-running copied assistant (F5), shutdown during the temporary
  * shutdown (F6), the cap (F7, F8), shutdown of an in-flight temporary process (F9), no lazy
- * re-spawn after an exit (F10) and shutdown while admission waits on an eviction (F11). Oracles:
- * SQL rows, recorded stdin frames, spawn count, pool envelopes and the public supervisor surface.
+ * re-spawn after an exit (F10), shutdown while admission waits on an eviction (F11), a branch that
+ * reports the source's own file (F12) and a scripted pid-less child that handshakes, then closes
+ * mid-command (F13; no real spawn does this: the runtime binds no native exit to a pid-less child,
+ * so only the fork's own revoke clears its token). Oracles: SQL rows, recorded stdin frames,
+ * spawn count, pool envelopes, tokens and the public supervisor surface.
  */
 import type { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
@@ -50,6 +53,7 @@ import {
   waitForTurn,
 } from "./session-supervisor-helpers.js";
 import { expectCapacity, isLive } from "./session-supervisor-pool-helpers.js";
+import type { FakeChild } from "./support/omp-rpc.js";
 
 const worlds = forkWorlds();
 
@@ -68,6 +72,16 @@ function heldBranch(world: Scripted) {
     () => (world.scripted[0]?.release === undefined ? undefined : world.scripted[0]),
     "held branch",
   );
+}
+
+/** Outermost spawnImpl wrapper: `configure` runs on each scripted child right after its script. */
+function afterScript(world: Scripted, configure: (child: FakeChild) => void): void {
+  const inner = world.rt.runtime.spawnImpl;
+  world.rt.runtime.spawnImpl = (command, args, options) => {
+    const spawned = inner(command, args, options);
+    configure(scriptedAt(world.scripted, world.scripted.length - 1).child);
+    return spawned;
+  };
 }
 
 /** The session's turn ended `done`, then a few macrotasks for its pump to release. */
@@ -331,5 +345,70 @@ describe("fork faults over scripted FakeChild processes (#466)", () => {
     await expect(closing).resolves.toBeUndefined();
     expect(supervisor.liveProcessCount()).toBe(0);
     expect(atClose.value).toEqual(rows);
+  });
+
+  it("F12 a branch that reports the source's own file is agent_unavailable", async () => {
+    const world = await openForkScripted(worlds, [{}]);
+    const { db, supervisor, tokens } = world.fixture;
+    const seeded = seedTwoTurns(world);
+    afterScript(world, (child) => {
+      child.onCommand("get_state", (frame) => {
+        const data = { sessionFile: seeded.file };
+        child.emitLine({
+          id: frame.id,
+          type: "response",
+          command: "get_state",
+          success: true,
+          data,
+        });
+      });
+    });
+    const { before, rows } = baseline(world);
+
+    await expectForkRejected(world, forkAt(world, seeded.u2), "agent_unavailable", rows);
+
+    const sent = types(scriptedAt(world.scripted, 0).frames);
+    expect(sent.filter((type) => type === "get_state")).toHaveLength(2);
+    expect(sent).toContain("branch");
+    expect(snapshot(db, world.session, true)).toEqual(before);
+    expect(sessionFile(db, world.session)).toBe(seeded.file);
+    seeded.unchanged();
+    expect(supervisor.liveProcessCount()).toBe(0);
+    expect(world.rt.calls).toHaveLength(1);
+    expect(tokens.lookup(requiredToken(requiredCall(world.rt.calls, 0).token))).toBeNull();
+  });
+
+  it("F13 a pid-less child closing mid-command: the fork revokes the token", async () => {
+    const world = await openForkScripted(worlds, [{}]);
+    const { db, supervisor, tokens } = world.fixture;
+    const seeded = seedTwoTurns(world);
+    const atSpawn: Array<string | null> = [];
+    afterScript(world, (child) => {
+      if (atSpawn.length > 0) {
+        return;
+      }
+      atSpawn.push(tokens.lookup(requiredToken(requiredCall(world.rt.calls, 0).token)));
+      Object.assign(child, { pid: undefined });
+      child.onCommand("get_branch_messages", () => {
+        child.exit(1);
+      });
+    });
+    const { before, rows } = baseline(world);
+
+    await expectForkRejected(world, forkAt(world, seeded.u2), "agent_unavailable", rows);
+
+    expect(atSpawn).toHaveLength(1);
+    expect(atSpawn[0]).toEqual(expect.any(String));
+    expect(atSpawn[0]).not.toBe(world.session);
+    expect(tokens.lookup(requiredToken(requiredCall(world.rt.calls, 0).token))).toBeNull();
+    expect(types(scriptedAt(world.scripted, 0).frames)).toEqual([
+      "negotiate_protocol",
+      "get_state",
+      "get_branch_messages",
+    ]);
+    expect(supervisor.liveProcessCount()).toBe(0);
+    expect(snapshot(db, world.session, true)).toEqual(before);
+    seeded.unchanged();
+    expect((await forkAt(world, seeded.u2)).draft).toBe(QUESTION);
   });
 });

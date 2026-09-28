@@ -407,17 +407,31 @@ describe("fork over real fake-omp branch children (#466)", () => {
     expect(epochOf(db, world.session)).toBe(epoch + 1);
   });
 
-  it("R10 pid-less spawn failures release the temporary quota", REAL, async () => {
+  it("R10 pid-less spawn failures release the temporary quota and token", REAL, async () => {
     const world = worlds.track(await openCappedWorld(1));
-    const { db, supervisor } = world.fixture;
+    const { db, supervisor, tokens } = world.fixture;
     const modes = switchSpawns(world.rt.runtime);
+    // Outermost: sees every attempt, `throw` included, which never reaches `rt.calls`.
+    const issued: Array<{ token: string; live: string | null }> = [];
+    const switched = world.rt.runtime.spawnImpl;
+    world.rt.runtime.spawnImpl = (command, args, options) => {
+      const token = requiredToken(options.env?.WORKBUDDY_MODEL_TOKEN);
+      issued.push({ token, live: tokens.lookup(token) });
+      return switched(command, args, options);
+    };
     const seeded = seedTwoTurns(world);
     const rows = rowCounts(db);
 
     for (const mode of ["missing", "throw"] as const) {
       modes.mode = mode;
+      const before = issued.length;
       await expectForkRejected(world, forkAt(world, seeded.u2), "agent_unavailable", rows);
       expect(supervisor.liveProcessCount()).toBe(0);
+      expect(issued).toHaveLength(before + 1);
+      const attempt = issued[before];
+      expect(attempt?.live).toEqual(expect.any(String));
+      expect(attempt?.live).not.toBe(world.session);
+      expect(tokens.lookup(attempt?.token ?? "")).toBeNull();
     }
     modes.mode = "valid";
     const result = await forkAt(world, seeded.u2);
