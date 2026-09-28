@@ -164,7 +164,7 @@
     |---|---|---|---|---|---|---|---|
     | 8 | 274.5 / 261.6 | 285.3 | 207 / 197 | 8 | 0 | 0 | 60.2s |
     | 16 | 271.7 / 261.5 | 291.3 | 198 / 194 | 16 | 0 | 0 | 60.1s |
-    | 24 | 275.7 / 261.9 | 288.2 | 203 / 199 | 16（上限） | 8（+1 次被驱逐会话 `--resume` 再入） | 8 次 | 60.0s |
+    | 24 | 275.7 / 261.9 | 288.2 | 203 / 199 | 16（上限） | 9（会话 17–24 各 1 次，加被驱逐会话 1 以 `--resume` 再入 1 次） | 8 次 | 60.0s |
 
   - N=24 按 D1 工作：
     - 16 个进程全在回合中时，第 17 个会话 prompt 于 43ms 内得到 503 `agent_capacity`；另 7 个并发 prompt 同样 503，并回滚为 idle、0 条消息。
@@ -174,7 +174,7 @@
     - 16 个常驻加服务端实测约 3.2 GB，约为 7.4Gi 的 43%。在该混部机上满载后仍余约 2.0 GB。
     - 24 个约 4.8 GB，独占机器可行，但混部时余量不足。默认 16 保持不变，`agent-config.ts` 与 omp-pool spec 不改。
   - 附带发现（不属本项）：
-    - 16 个会话同时冷启动时，并发 spawn 的 ready 耗时随并发数线性增长（K=16 约 9.4s），超过 10s 握手超时，多数返回 502 `agent_unavailable`，且服务端无日志。这是准入并发与超时问题，与上限取值无关，另见 #652。
+    - 16 个会话同时冷启动时，并发 spawn 的 ready 耗时随并发数线性增长（K=16 约 9.4s），加上 ready 之后的 `negotiate_protocol`/`get_state` 即超出 10s 握手超时（实测 502 出现在约 10.2s），多数返回 502 `agent_unavailable`，且服务端无日志。这是准入并发与超时问题，与上限取值无关，另见 #652。
     - 全新 `OMP_STATE_DIR` 首次启动时一次性解压 natives，VmHWM 约 1.07 GB，此后约 290 MB。
 - ~~真二进制行为验证（abort 阻塞 + branch 文本对齐）：以 `make smoke-live` 前置的真二进制手工验证一次——(a) abort 是否确实被未应答 select 阻塞，结论只影响 D2 的注释与 fake-omp `approval-then-abort` 是否保留；(b) `get_branch_messages` 返回的 `text` 是否与 SQLite 中用户消息 content 逐字相等（regenerate/fork 的对齐判据），并由 tasks 8.1c/8.1d 的 regenerate/fork hurl 条目在 `make smoke` 中持续证明；(c) 真实 omp 在 `prompt` 帧后紧接 `abort`（可能早于 `agent_start`）时，用户消息条目是否仍写入 `.jsonl` 历史（否则派发前停止后的 regenerate/fork 对齐失败）——同一次真二进制手工验证覆盖该窗口；tasks 8.1b 的停止条目（`make smoke`，真 omp）另对停止后的助手 regenerate 断言 202 且完成，是 CI 内对「停止后历史仍可对齐」的唯一真 omp 探针（其停止点在审批挂起时，已过 `agent_start`，故不替代手工验证）。~~ **已验证**（2026-09-28，官方 release omp v18.0.10，SHA256 `bf026b63aa3b0acb0afbed8083f76bcec134bf56ffdbbe80fb73a7e079fe278a`，本机 darwin-arm64 + 仓内假上游；独立 RPC 驱动与真实服务端端到端各一轮，#495）：
   - (a) **是**。select 挂起时写入的 `abort` 被阻塞：10s 内无任何帧，应答 `Deny` 后 39ms 内到达 `agent_end` 与 abort 应答。abort 是被延后而非被丢弃，fake-omp `approval-then-abort`/`approval-parallel` 的延后规则保留。
