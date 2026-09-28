@@ -97,7 +97,7 @@ Minimal mergeable slice: 7.0a（atomic：单一源文件 `api.ts` 的一次纯�
 - [x] 8.1c `smoke/chat.hurl` regenerate（真 omp + 假上游）：首会话 done 后 `regenerate` → 202 → 轮询新助手 `approvals` 出现一条 pending 并 `allow`（200）→ 轮询 done → messages 中用户消息恰一条、助手消息恰一条且 id 变化。验证：`make smoke` 绿
 - [x] 8.1d `smoke/chat.hurl` fork（真 omp + 假上游）：对首会话首条用户消息 `fork` → 201、`draft` 等于该用户文本、新会话 `session.status` 为 `idle`、新会话 messages 为空。验证：`make smoke` 绿
 - [x] 8.2a `web/e2e/ui-walk*.ts`（真 omp + 假上游）审批：首轮 running bash 步骤与审批条 `需要你的确认` 同时可见（不断言先后）→ 点 `允许` → `已允许执行` → 回合完成。验证：`make ui-walk` 两个 project 全绿
-- [ ] 8.2b ui-walk 停止：同会话第二个受控 prompt 在 `held` 时点 `停止` → Toast `已停止生成`、会话 `已停止`、助手消息徽章 `助手消息 已停止` 可见、composer 解锁。验证：`make ui-walk` 两个 project 全绿
+- [x] 8.2b ui-walk 停止：同会话第二个受控 prompt 在 `held` 时点 `停止` → Toast `已停止生成`、会话 `已停止`、助手消息徽章 `助手消息 已停止` 可见、composer 解锁。验证：`make ui-walk` 两个 project 全绿
 - [ ] 8.2c ui-walk 重新生成：末条助手消息点 `重新生成` → 回合完成且旧回答被替换。验证：`make ui-walk` 两个 project 全绿；CI 不传 `OMP_MAX_PROCESSES`
 - [ ] 8.2d ui-walk 分叉：用户消息点 `从此处分叉` → 跳转新会话、composer 草稿为该用户文本。验证：`make ui-walk` 两个 project 全绿；CI 不传 `OMP_MAX_PROCESSES`
 
