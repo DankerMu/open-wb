@@ -98,7 +98,7 @@ Minimal mergeable slice: 7.0a（atomic：单一源文件 `api.ts` 的一次纯�
 - [x] 8.1d `smoke/chat.hurl` fork（真 omp + 假上游）：对首会话首条用户消息 `fork` → 201、`draft` 等于该用户文本、新会话 `session.status` 为 `idle`、新会话 messages 为空。验证：`make smoke` 绿
 - [x] 8.2a `web/e2e/ui-walk*.ts`（真 omp + 假上游）审批：首轮 running bash 步骤与审批条 `需要你的确认` 同时可见（不断言先后）→ 点 `允许` → `已允许执行` → 回合完成。验证：`make ui-walk` 两个 project 全绿
 - [x] 8.2b ui-walk 停止：同会话第二个受控 prompt 在 `held` 时点 `停止` → Toast `已停止生成`、会话 `已停止`、助手消息徽章 `助手消息 已停止` 可见、composer 解锁。验证：`make ui-walk` 两个 project 全绿
-- [ ] 8.2c ui-walk 重新生成：末条助手消息点 `重新生成` → 回合完成且旧回答被替换。验证：`make ui-walk` 两个 project 全绿；CI 不传 `OMP_MAX_PROCESSES`
+- [x] 8.2c ui-walk 重新生成：末条助手消息点 `重新生成` → 回合完成且旧回答被替换。验证：`make ui-walk` 两个 project 全绿；CI 不传 `OMP_MAX_PROCESSES`
 - [ ] 8.2d ui-walk 分叉：用户消息点 `从此处分叉` → 跳转新会话、composer 草稿为该用户文本。验证：`make ui-walk` 两个 project 全绿；CI 不传 `OMP_MAX_PROCESSES`
 
 Note: `make smoke-live` 以 `skip_turn_control=true` 跳过作答与回合控制条目；真模型若调 bash，每次审批经 60s 超时自动允许，最坏等待 60s×N——手动目标，接受（与 chat-harness Note 一致）。
