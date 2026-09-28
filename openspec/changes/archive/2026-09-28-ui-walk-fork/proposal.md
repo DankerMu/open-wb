@@ -41,7 +41,7 @@ Evidence floor: `make ui-walk` 两个 project 全绿（本机 CI 脚本连跑 �
   - 步骤耗时几乎全在服务端 fork（临时 omp 进程 `--resume` → `get_branch_messages` → `branch` → `get_state`）：POST 于步骤起 +19–23ms 发出，201 于 +560–611ms 到达（满载 782/1314ms）；其后各断言合计 ≤35ms。
 - 分叉不弹 Toast（`message-actions.tsx:61-79` `ForkAction` 不调 `useToast`，文件头注释「no toast」），无需 #643 类等待。
 - 走查结束时页面停在空的分叉会话、composer 带未发送草稿。调用点之后的 `ui-walk.spec.ts:115-150` 实测不受影响（design E0-3）。
-- 行数：`ui-walk.spec.ts` 799/800；`ui-walk-stop.ts` 157 → 226；`ui-walk-layout.ts` 561 → 567。
+- 行数：`ui-walk.spec.ts` 799/800；`ui-walk-stop.ts` 157 → 228（fix pass 1 后）；`ui-walk-layout.ts` 561 → 567。
 
 ## 决定与偏离
 1. **步骤放进 `ui-walk-stop.ts`、复用 import 行**（carry-forward :136、:140）。spec 只剩 2 行余量；import 行加名字不增行，调用 1 行 → 799。
@@ -50,7 +50,7 @@ Evidence floor: `make ui-walk` 两个 project 全绿（本机 CI 脚本连跑 �
    - 开：点击前 `page.on("request")`，记录**任何**会话的 `POST /api/sessions/<id>/prompt`（点击时还不知道新 id；自动发送若发生，与 `setDraft`/`refreshList`/`selectSession` 同在 `turn-actions.ts:383-389` 的回调里，监听必须先于它）。断言 0 条，是「新会话无 prompt POST」的超集。
    - 关：侧栏 `未开始` 断言之后。空转录（历史已装载）、侧栏新项（列表刷新已渲染）都在那个回调的下游，回调里或其触发的渲染/effect 里的任何同步发送此时已发出。
    - 承重性（E2）：M5（DOM 断言都过了才发送）只有这条红，3/3（每遍两个 project）。
-   - M6a（产品代码在回调里立即发送）先红于空转录，M6b 去掉网络断言仍红于同处，各 1 遍、两个 project 均 Received 2。这依赖服务端先处理 prompt 插入、再响应新会话首个 messages GET：浏览器侧次序有利（POST 与跳转同一回调、先于 GET 发出），但仍是服务端竞态，不是保证。`toHaveCount(0)` 一旦见 0 即通过，所以对窗口内发出的请求，不依赖竞态的守护是网络观察。
+   - M6a（产品代码在回调里立即发送）先红于空转录，M6b 去掉网络断言仍红于同处，各 1 遍、两个 project 均红（两步写法下 Received 2；fix pass 1 原子写法下 `element(s) not found`）。这依赖服务端先处理 prompt 插入、再响应新会话首个 messages GET：浏览器侧次序有利（POST 与跳转同一回调、先于 GET 发出），但仍是服务端竞态，不是保证。原子 locator 一旦见到已装载的空 region 即通过，所以对窗口内发出的请求，不依赖竞态的守护是网络观察。
    - **残余**：M6c（产品代码 `setTimeout` 300ms 后发送）两个 project 全绿、整条旅程全绿。窗口在 201 之后约 10–85ms 关闭（本机与 CI 实测），晚于此的定时发送不在本步骤可见范围。现有 `forkTurn` 没有定时器，这类回归需要刻意引入；不加固定 sleep 延长窗口（任何有限 sleep 都有同样的残余）。见 Open questions。
 4. **空转录非空洞（原子匹配）**：用一个 locator 同时要求「`region 消息` 可见」与「其内没有 article」——`main.getByRole("region", { name: "消息" }).filter({ hasNot: page.getByRole("article") })` → `toBeVisible()`，再在该 region 内断言没有 `重新生成`。不能拆成先 `toBeVisible` 再 `toHaveCount(0)` 两次断言：路由用 `startTransition` 提交，URL 先于 DOM 变化，第一次断言可能命中源会话尚未卸载的旧 region；提交后 `historyView` 为 null、section 卸载（`page.tsx:585-588`、`conversation-view.tsx:203-213`），此时 `toHaveCount(0)` 会被加载态空洞满足（PR #648 第 1 轮 correctness / test-evidence 席位 P2）。原子 locator 下，旧 region 有 article 不匹配，加载中没有 region 也不匹配，只有已装载且为空的分叉会话能通过。
 5. **首条用户正文守护**：点击前断言首条用户 `.chat-msg-body` 恰为 `prompt`，把「草稿 = 首条模板 prompt」绑定到被点的那条消息上。M3b 证明草稿断言会区分分叉点。
