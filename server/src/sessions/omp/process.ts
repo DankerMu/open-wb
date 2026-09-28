@@ -77,7 +77,7 @@ export async function spawnOmp(
     "--model",
     `workbuddy/${opts.modelId}`,
     "--approval-mode",
-    "yolo",
+    "write",
     "--no-extensions",
     "--no-lsp",
     "--no-pty",

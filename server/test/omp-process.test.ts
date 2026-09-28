@@ -527,7 +527,7 @@ function coldArgs(roots: SpawnRoots): string[] {
     "--model",
     `workbuddy/${MODEL}`,
     "--approval-mode",
-    "yolo",
+    "write",
     "--no-extensions",
     "--no-lsp",
     "--no-pty",

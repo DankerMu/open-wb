@@ -655,7 +655,7 @@ function ompArgs(
     "--model",
     "workbuddy/deepseek-v4.1-flash",
     "--approval-mode",
-    "yolo",
+    "write",
     "--no-extensions",
     "--no-lsp",
     "--no-pty",
