@@ -16,7 +16,7 @@
 
 - [x] 3.1 `make check`（Node 24.13.1）、`bash scripts/size-guard.sh` 退出 0；`wc -l` 记录 `stream.ts`、`page.tsx`。
 - [x] 3.2 `openspec validate unknown-turn-resync --strict --no-interactive` 通过。
-- [ ] 3.3（编排者）归档 PR：ADDED 需求在两个父 change 中没有同名项，无需同步；归档后确认。
+- [x] 3.3（编排者）归档 PR：ADDED 需求在两个父 change 中没有同名项，无需同步；归档后确认。
 
 ## Risk packs
 
