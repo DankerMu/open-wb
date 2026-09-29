@@ -28,9 +28,10 @@ import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
 import { type AgentSettings, resolveAgentSettings } from "./agent-config.js";
-import { createApp } from "./app.js";
+import { type AssemblyDependencies, createApp } from "./app.js";
 import { openDb } from "./core/db/index.js";
 import { deriveProxyBaseUrl, writeManagedModelsYml } from "./model-proxy/models-yml.js";
+import type { HandshakeTimeoutRecord } from "./sessions/omp/spawn-gate.js";
 import type { SessionSupervisorRuntime } from "./sessions/supervisor.js";
 import { writeManagedLine } from "./startup-writer.js";
 
@@ -58,7 +59,7 @@ export interface ServerConfig extends AgentSettings {
   repoRoot: string;
 }
 
-/** 纯配置 seam：消费十四项自有 key，agent 十项经 resolveAgentSettings，未知 key 忽略；repo root 由 entry identity 推导。 */
+/** 纯配置 seam：消费十五项自有 key，agent 十一项经 resolveAgentSettings，未知 key 忽略；repo root 由 entry identity 推导。 */
 export function resolveServerConfig(
   env: Record<string, string | undefined>,
   entryUrl: string,
@@ -74,7 +75,7 @@ export function resolveServerConfig(
   };
 }
 
-/** 纯 seam：sessions 模块的 runtime settings；idle 期限与进程上限同一对象、唯一来源为已解析 config。 */
+/** 纯 seam：sessions 模块的 runtime settings；idle 期限与两个上限同一对象、唯一来源为已解析 config。 */
 export function sessionRuntimeOf(config: ServerConfig): SessionSupervisorRuntime {
   return {
     bin: config.ompBin,
@@ -83,8 +84,29 @@ export function sessionRuntimeOf(config: ServerConfig): SessionSupervisorRuntime
     modelId: config.modelId,
     idleMs: config.ompIdleMs,
     maxProcesses: config.ompMaxProcesses,
+    spawnConcurrency: config.ompSpawnConcurrency,
     ...(config.ompUser === undefined ? {} : { ompUser: config.ompUser }),
   };
+}
+
+/**
+ * 纯 seam：main 路径交给 createApp 的完整 assembly（runtime、可选 upstream、log）。构造本身零输出；
+ * log 把每条握手超时记录写成 application stderr 一行 JSON，写失败吞掉。
+ */
+export function appAssemblyOf(config: ServerConfig): AssemblyDependencies {
+  return {
+    runtime: sessionRuntimeOf(config),
+    ...(config.modelUpstreamBaseUrl !== undefined && config.modelUpstreamApiKey !== undefined
+      ? { upstream: { baseUrl: config.modelUpstreamBaseUrl, apiKey: config.modelUpstreamApiKey } }
+      : {}),
+    log: writeHandshakeTimeout,
+  };
+}
+
+function writeHandshakeTimeout(record: HandshakeTimeoutRecord): void {
+  void writeManagedLine(process.stderr, `${JSON.stringify(record)}\n`).catch(() => {
+    // Sink unavailable: the record is observation only and never changes the request or exit code.
+  });
 }
 
 function repoRootOf(entryUrl: string): string {
@@ -230,17 +252,7 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
           emitListenerForceClose();
         }
       },
-      assembly: {
-        runtime: sessionRuntimeOf(config),
-        ...(config.modelUpstreamBaseUrl !== undefined && config.modelUpstreamApiKey !== undefined
-          ? {
-              upstream: {
-                baseUrl: config.modelUpstreamBaseUrl,
-                apiKey: config.modelUpstreamApiKey,
-              },
-            }
-          : {}),
-      },
+      assembly: appAssemblyOf(config),
     });
     await owned.app.listen({
       host: config.host,

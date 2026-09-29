@@ -35,6 +35,7 @@ import { registerModelProxy } from "./model-proxy/index.js";
 import { SERVICE_INFO } from "./service-info.js";
 import type { ChatEvent } from "./sessions/events.js";
 import { registerSessions } from "./sessions/index.js";
+import type { SpawnLog } from "./sessions/omp/spawn-gate.js";
 import type { SessionStore } from "./sessions/store.js";
 import type { SessionSupervisor, SessionSupervisorRuntime } from "./sessions/supervisor.js";
 import { TokenRegistry } from "./sessions/tokens.js";
@@ -50,7 +51,7 @@ declare module "fastify" {
   }
 }
 
-interface AssemblyDependencies {
+export interface AssemblyDependencies {
   tokens?: TokenRegistry;
   upstream?: { baseUrl: string; apiKey: string } | undefined;
   runtime?: SessionSupervisorRuntime;
@@ -64,6 +65,8 @@ interface AssemblyDependencies {
    * A returned thenable is an owned programming error. Omitted means no observer.
    */
   onEvent?: (sessionId: string, epoch: number, event: ChatEvent<number>) => void;
+  /** Optional synchronous handshake-timeout record sink, forwarded unchanged; not an onError fault. */
+  log?: SpawnLog;
 }
 
 export interface CreateAppOptions {
@@ -154,6 +157,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     runtime,
     onError: assembly?.onError ?? ((error) => observeSessionFault(app, error)),
     ...(assembly?.onEvent === undefined ? {} : { onEvent: assembly.onEvent }),
+    ...(assembly?.log === undefined ? {} : { log: assembly.log }),
   });
   app.decorate("sessions", registered);
   const store = createWorkspaceStore(db, {

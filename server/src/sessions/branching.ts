@@ -12,6 +12,7 @@ import {
   type ProcessPool,
   releaseDispatch,
   type Slot,
+  type SpawnShared,
   sessionRuntimeOpts,
   temporaryTokens,
 } from "./pool.js";
@@ -161,6 +162,8 @@ interface ForkPorts {
   pool: ProcessPool;
   tokens: TokenRegistry;
   config: SessionSupervisorRuntime;
+  /** The supervisor's spawn gate and log: the temporary process queues on the same permits. */
+  spawn: SpawnShared;
   closed(): boolean;
   /** Retires the source's registered slot (if any) and resolves once it exited; never rejects. */
   retireSource(sessionId: string): Promise<void>;
@@ -254,7 +257,7 @@ export class Forks {
       throw new HttpError("agent_unavailable");
     }
     const runtime = new SessionRuntime(
-      sessionRuntimeOpts(this.#ports.config, {
+      sessionRuntimeOpts(this.#ports.config, this.#ports.spawn, {
         sessionId: plan.sessionId,
         ownerId: plan.ownerId,
         resumePath: plan.file,

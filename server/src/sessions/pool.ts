@@ -176,9 +176,13 @@ type PerRuntime = Pick<SessionRuntimeOpts, "sessionId" | "ownerId" | "tokens" | 
   onExit: () => void;
 };
 
+/** Supervisor-owned, shared by every session and fork runtime: one gate instance, one log port. */
+export type SpawnShared = Required<Pick<SessionRuntimeOpts, "spawnGate" | "log">>;
+
 /** The one SessionRuntime option assembly (spawn contract inputs) from the supervisor runtime. */
 export function sessionRuntimeOpts(
   base: SessionSupervisorRuntime,
+  shared: SpawnShared,
   per: PerRuntime,
 ): SessionRuntimeOpts {
   return {
@@ -199,6 +203,8 @@ export function sessionRuntimeOpts(
     ...(base.handshakeTimeoutMs === undefined
       ? {}
       : { handshakeTimeoutMs: base.handshakeTimeoutMs }),
+    spawnGate: shared.spawnGate,
+    log: shared.log,
   };
 }
 

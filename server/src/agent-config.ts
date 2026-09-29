@@ -1,3 +1,4 @@
+import { availableParallelism } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { assertSafeSudoPath, assertSetprivExecutable } from "./core/process-path.js";
 
@@ -7,7 +8,7 @@ export const DEFAULT_SANDBOX_RELATIVE = join("var", "sandbox");
 export const DEFAULT_OMP_IDLE_MS = 600_000;
 export const DEFAULT_MODEL_ID = "deepseek-v4.1-flash";
 export const DEFAULT_OMP_MAX_PROCESSES = 16;
-/** 两个正整数键的共同上界（原生计时器上限）。 */
+/** 正整数键的共同上界（原生计时器上限）。 */
 const MAX_POSITIVE_SETTING = 2_147_483_647;
 
 export interface AgentSettings {
@@ -16,6 +17,8 @@ export interface AgentSettings {
   ompIdleMs: number;
   /** supervisor 全局活进程上限（4.1 消费）。 */
   ompMaxProcesses: number;
+  /** supervisor 并发 spawn 上限（OMP_SPAWN_CONCURRENCY，缺省 os.availableParallelism()）。 */
+  ompSpawnConcurrency: number;
   sandboxRoot: string;
   modelUpstreamBaseUrl?: string;
   modelUpstreamApiKey?: string;
@@ -47,6 +50,11 @@ export function resolveAgentSettings(
       env.OMP_MAX_PROCESSES,
       DEFAULT_OMP_MAX_PROCESSES,
       "OMP_MAX_PROCESSES",
+    ),
+    ompSpawnConcurrency: resolvePositiveInteger(
+      env.OMP_SPAWN_CONCURRENCY,
+      availableParallelism(),
+      "OMP_SPAWN_CONCURRENCY",
     ),
     sandboxRoot: resolveOwnedPath(
       env.SANDBOX_ROOT,
