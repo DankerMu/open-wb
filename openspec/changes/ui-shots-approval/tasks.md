@@ -7,7 +7,7 @@
 ## 2. 验证
 
 - [x] 2.1 `make check`（Node 24.13.1）退出 0（含 lint/typecheck 对 `web/e2e` 的覆盖，如有）。
-- [x] 2.2（编排者）真实运行：本机 darwin omp v18.0.10（SHA256 校验）+ 编译产物服务 + `.github/scripts/ci-fake-upstream.sh` 假上游 + fresh DB + 夹具复制到 `<SANDBOX_ROOT>/u1/` + `npm run build --workspace web` 的 `web/dist`：`make ui-shots` 退出 0、`UI_SHOTS_OUT` 下恰 60 张 PNG 与 `index.html`；「作答而非自动允许」的判据：跑完后查 `DB_PATH` 的 `chat_approvals`，每行 `decision = 'allow'`（无 `timeout`），且 `decided_at - requested_at` 远小于 60000ms（记录最大值）；两侧均记录 `make ui-shots` 总耗时；同环境 master 作对照（预期 chat-done 三格失败、54/60、非零退出）。PR 附耗时与产物计数。
+- [x] 2.2（编排者）真实运行：本机 darwin omp v18.0.10（SHA256 校验）+ 编译产物服务 + `.github/scripts/ci-fake-upstream.sh` 假上游 + fresh DB + 夹具复制到 `<SANDBOX_ROOT>/u1/` + `npm run build --workspace web` 的 `web/dist`：`make ui-shots` 退出 0、`UI_SHOTS_OUT` 下恰 60 张 PNG 与 `index.html`；「作答而非自动允许」的判据：跑完后查 `DB_PATH` 的 `chat_approvals`，每行 `decision = 'allow'`（无 `timeout`），且 `decided_at - requested_at` 远小于 60000ms（记录最大值）；两侧均记录 `make ui-shots` 总耗时；同环境 master 作对照（实测 app 侧 chat-done 六格失败——首格 60s 超时、其余 5 格依赖失败，54/60、非零退出）。PR 附耗时与产物计数。
 - [x] 2.3 `openspec validate ui-shots-approval --strict --no-interactive` 通过。
 - [ ] 2.4（编排者）归档 PR：父 change 均无 demo-parity-acceptance delta，无需同步。
 
