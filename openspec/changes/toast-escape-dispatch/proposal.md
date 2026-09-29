@@ -25,6 +25,7 @@ Evidence floor: 诊断测试的候选 A 变体（T1-real-microtask、T1-real-mac
 
 ## Capabilities
 - ADDED ui-primitives「Escape 分派不受 Toast 层栈影响」。
+- MODIFIED ui-primitives「基元组件库」：只给 Toast 的 Escape 关闭措辞加「事件目标在通知区内」的限定，与新需求一致（审查第 1 轮 integration 指出的字面冲突）。
 
 ## Impact
 - `web/src/ui/toast.tsx`、`drawer.tsx`、`dialog.tsx`（及新 hook 文件）。无服务端改动。
