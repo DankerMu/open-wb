@@ -64,7 +64,7 @@ Required evidence（新文件 `server/test/session-approvals-infra-fault.test.ts
 - 既有：R15、R16a、R16b、R18、`session-settlement*.test.ts`、`session-stop*.test.ts` 零 diff 全绿。如果 R16b 在新行为下期望必须变化（例如 r2 从未断言变为 deny），只允许把缺口补成更强的断言，并在报告里列出。
 
 Non-goals: 见 proposal。另外：
-- 双重故障残留：结算事务失败的行、故障前登记已被删除的行，在重启对账前仍为 NULL，owner 的 `allow` 仍能命中 CAS。要堵住它（例如 `decide` 拒绝没有活动登记的 NULL 行）属于范围决策，本刀不做，记入工作说明。
+- 残留：结算事务失败的行、故障前登记已被删除的行（例如超时事务单次失败的审批：`#expire` 在 `#fault` 之前删登记，这是单一故障而非双重故障；瞬时错误如 SQLITE_BUSY 同样落入），在重启对账前仍为 NULL，owner 的 `allow` 仍能命中 CAS。要堵住它（例如 `decide` 拒绝没有活动登记的 NULL 行）属于范围决策，本刀不做，记入工作说明。
 
 Review focus:
 1. `abandon` 只在 infra 路径调用，非 infra retire 零行为变化。

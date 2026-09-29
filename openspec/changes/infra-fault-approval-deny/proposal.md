@@ -24,12 +24,12 @@ Selected risk packs: Error handling / rollback / partial outputs；Concurrency /
 Evidence floor: 新测试 F1–F4（真实 fake-omp 子进程、真实 SQLite trigger 注入故障、注入时钟）；既有 R15/R16a/R16b/R18 与 `session-settlement*.test.ts` 全绿；`make check`
 
 ## What Changes
-- `server/src/sessions/approvals.ts`：新增 `abandon(slot)`。对该 slot 的每条登记：撤销计时器、删除登记、`clearPending`，再经 store `settleApproval(sessionId, approvalId, "deny", now)` 做 `decision IS NULL` CAS 结算，结算与审计在同一事务内完成。不向 omp 发帧，不发布事件（generation 已封口）。返回结算失败的错误，由 supervisor 保留。
-- `server/src/sessions/supervisor.ts`：`#retireSlot` 在 `slot.infraFaulted` 为真时，于封口 generation 之后、await 关停之前调用 `abandon(slot)`，并把返回的错误交给 `#retain`。非 infra 的 retire 路径行为不变。
-- spec：MODIFIED tool-approval「停止与终态对挂起审批的结算」，结算路径由六条增为七条，新增第 7 条「基础设施故障 retire：`deny`」。
+- `server/src/sessions/approvals.ts`：新增 `abandon(slot)`。对该 slot 的每条登记：撤销计时器、删除登记、`clearPending`，再经 store `settleApproval(sessionId, approvalId, "deny", now)` 做 `decision IS NULL` CAS 结算，结算与审计在同一事务内完成。不向 omp 发帧，不发布事件（generation 已撤销，其 sink 可能正是故障源；pump 仍活着时封口可能推迟）。返回结算失败的错误，由 supervisor 保留。
+- `server/src/sessions/supervisor.ts`：`#retireSlot` 在 `slot.infraFaulted` 为真时，于撤销 generation（`sealGeneration`）之后、await 关停之前调用 `abandon(slot)`，并把返回的错误交给 `#retain`。非 infra 的 retire 路径行为不变。
+- spec：MODIFIED tool-approval「停止与终态对挂起审批的结算」，结算路径由六条增为七条，新增第 7 条「基础设施故障 retire：`deny`」；MODIFIED「审批事件」，把第 7 条从「每条结算发布恰一个 `approval.resolved`」中排除。
 
 ## Capabilities
-- MODIFIED tool-approval「停止与终态对挂起审批的结算」。
+- MODIFIED tool-approval「停止与终态对挂起审批的结算」、「审批事件」。
 
 ## Impact
 - `supervisor.ts` 782 → 目标 ≤788（硬上限 798）；`approvals.ts` 241 → 约 275。实测行数记入报告。
@@ -38,6 +38,6 @@ Evidence floor: 新测试 F1–F4（真实 fake-omp 子进程、真实 SQLite tr
 
 ## Non-goals
 - infraFaulted 回合本身在 store 中一直 running、直到优雅关停或重启才翻转终态的问题：issue 的 Out of scope。
-- 双重故障残留：结算事务失败的行、故障前登记已被删除的行在对账前仍为 NULL，见 design Non-goals。
+- 残留：结算事务失败的行、故障前登记已被删除的行（例如超时事务单次失败的审批，`#expire` 在 `#fault` 之前删登记）在对账前仍为 NULL，见 design Non-goals。
 - 审批 TTL 数值；select 挂起时 stdin EOF 的真实 omp 行为。
 - 非 infra 的 retire 路径：崩溃与有界退回由 pump 终态结算，关停由 `close()` 与 pump 终态结算，二者都已覆盖。

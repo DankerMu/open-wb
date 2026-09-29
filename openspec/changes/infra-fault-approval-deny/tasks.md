@@ -15,7 +15,12 @@
 
 - [ ] 3.1 `npm test --workspace server`（覆盖率 ≥80%）、`make lint`、`make typecheck`、`make anti-drift`、`bash scripts/size-guard.sh` 全部退出 0；`wc -l server/src/sessions/{supervisor,approvals}.ts` 记入报告（supervisor ≤798）。
 - [ ] 3.2 `openspec validate infra-fault-approval-deny --strict --no-interactive` 通过。
-- [ ] 3.3（编排者）归档 PR：定点同步父 change `s1c-turn-control-governance` 的 tool-approval delta 中同名需求。
+- [ ] 3.3（编排者）归档 PR：定点同步父 change `s1c-turn-control-governance` 的 tool-approval delta 中「停止与终态对挂起审批的结算」与「审批事件」两条需求。
+
+## 4. 审查修复（第 1 轮 test-evidence P2）
+
+- [ ] 4.1（编排者）spec delta 增 MODIFIED「审批事件」排除第 7 条；「封口」措辞改为「撤销」；残留从「双重故障」改为包含单一故障。
+- [ ] 4.2 F1a 在 infra 退役后与 `clock.advance` 后各断言 `approval.resolved` 为空；变异（`abandon` 内发布 `approval.resolved`）使 F1a 变红。
 
 ## Risk packs
 
