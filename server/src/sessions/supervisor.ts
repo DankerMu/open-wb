@@ -1,6 +1,7 @@
 /**
  * Issue #100 session supervisor: dispatch, persistence, and owned lifecycle.
  */
+import { availableParallelism } from "node:os";
 import { DEFAULT_OMP_MAX_PROCESSES } from "../agent-config.js";
 import { HttpError } from "../core/errors/index.js";
 import { ApprovalRegistry } from "./approvals.js";
@@ -14,6 +15,7 @@ import {
   type SessionClock,
   SessionRuntime,
 } from "./omp/runtime.js";
+import { SpawnGate, type SpawnLog } from "./omp/spawn-gate.js";
 import {
   type Generation,
   generationTokens,
@@ -25,6 +27,7 @@ import {
   releasePump,
   releasePumpExit,
   type Slot,
+  type SpawnShared,
   sealGeneration,
   sessionRuntimeOpts,
   turnFree,
@@ -57,6 +60,8 @@ export interface SessionSupervisorRuntime {
   idleMs?: number;
   /** Global live-process cap resolved by agent-config; undefined → DEFAULT_OMP_MAX_PROCESSES (16). */
   maxProcesses?: number;
+  /** Concurrent spawn cap resolved by agent-config; undefined → os.availableParallelism(). */
+  spawnConcurrency?: number;
   ompUser?: string;
   spawnImpl?: SpawnImpl;
   clock?: SessionClock;
@@ -79,6 +84,8 @@ export interface SessionSupervisorOptions {
    * existing ownership path. Omitted means no observer.
    */
   onEvent?: (sessionId: string, epoch: number, event: ChatEvent<number>) => void;
+  /** Synchronous handshake-timeout record sink, never an onError fault; omitted → discarded. */
+  log?: SpawnLog;
 }
 
 interface FlushFailure {
@@ -102,6 +109,7 @@ export class SessionSupervisor {
   readonly #pumps = new Set<Promise<void>>();
   readonly #faults: Error[] = [];
   readonly #pool: ProcessPool;
+  readonly #spawn: SpawnShared;
   readonly #approvals: ApprovalRegistry;
   readonly #stops: TurnStops;
   readonly #controls = new ControlClaims();
@@ -120,6 +128,10 @@ export class SessionSupervisor {
       options.runtime.maxProcesses ?? DEFAULT_OMP_MAX_PROCESSES,
       clock === undefined ? () => Date.now() : () => clock.now(),
     );
+    this.#spawn = {
+      spawnGate: new SpawnGate(options.runtime.spawnConcurrency ?? availableParallelism()),
+      log: options.log ?? (() => {}),
+    };
     this.#approvals = new ApprovalRegistry({
       store: this.#store,
       clock,
@@ -161,6 +173,7 @@ export class SessionSupervisor {
       pool: this.#pool,
       tokens: this.#tokens,
       config: this.#runtime,
+      spawn: this.#spawn,
       closed: () => this.#closed,
       retireSource: (sessionId) => {
         const slot = this.#slots.get(sessionId);
@@ -415,7 +428,7 @@ export class SessionSupervisor {
     }
     slot.entry = entry;
     slot.runtime = new SessionRuntime(
-      sessionRuntimeOpts(this.#runtime, {
+      sessionRuntimeOpts(this.#runtime, this.#spawn, {
         sessionId,
         ownerId,
         resumePath,

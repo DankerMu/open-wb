@@ -1,5 +1,6 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { OmpFrame } from "./frame.js";
+import type { LocalSignal } from "./local-command.js";
 import { AgentUnavailableError, type OmpExit, type OmpProcess } from "./process.js";
 import type { FrameStream } from "./prompt-stream.js";
 import type { PromptDispatchReceipt, SessionClock } from "./runtime.js";
@@ -305,7 +306,14 @@ export function isTerminalEnd(frame: OmpFrame): boolean {
   return frame.type === "agent_end" && frame.isTerminal !== false;
 }
 
-export function isLocalComplete(frame: OmpFrame, requestId: string): boolean {
+export function localSignal(frame: OmpFrame, requestId: string): LocalSignal {
+  if (isLocalComplete(frame, requestId)) {
+    return "local-outcome";
+  }
+  return frame.type === "command_output" ? "command-output" : "other";
+}
+
+function isLocalComplete(frame: OmpFrame, requestId: string): boolean {
   if (frame.id !== requestId) {
     return false;
   }

@@ -5,6 +5,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance } from "fastify";
 import { emit } from "../core/audit/index.js";
 import type { ChatEvent } from "./events.js";
+import type { SpawnLog } from "./omp/spawn-gate.js";
 import { registerSessionRoutes } from "./rest.js";
 import { createSessionStore, type SessionStore } from "./store.js";
 import { defaultSessionClock, registerSessionEventStream } from "./stream/sse.js";
@@ -27,6 +28,8 @@ export interface RegisterSessionsOptions {
    * unchanged.
    */
   onEvent?: (sessionId: string, epoch: number, event: ChatEvent<number>) => void;
+  /** Optional synchronous handshake-timeout record sink, forwarded unchanged; omitted → discarded. */
+  log?: SpawnLog;
 }
 
 export function registerSessions(
@@ -46,6 +49,7 @@ export function registerSessions(
     runtime: options.runtime,
     onError: options.onError,
     ...(options.onEvent === undefined ? {} : { onEvent: options.onEvent }),
+    ...(options.log === undefined ? {} : { log: options.log }),
   });
   store.reconcileOnStartup();
   registerSessionRoutes(app, { store, supervisor });

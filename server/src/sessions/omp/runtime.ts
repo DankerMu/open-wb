@@ -16,12 +16,12 @@ import {
   drainHeld,
   dropDeferredAbort,
   type Generation,
-  isLocalComplete,
   isMatchingFailure,
   isTerminalEnd,
   isTurnStart,
   KILL_GRACE_MS,
   liveChild,
+  localSignal,
   openDeferredAbort,
   signalLive,
   stateSessionFile,
@@ -31,12 +31,7 @@ import {
   watchHeldPipe,
 } from "./commands.js";
 import type { OmpFrame } from "./frame.js";
-import {
-  decideLocalCompletion,
-  LOCAL_COMMAND_GRACE_MS,
-  type LocalSignal,
-  type LocalState,
-} from "./local-command.js";
+import { decideLocalCompletion, LOCAL_COMMAND_GRACE_MS, type LocalState } from "./local-command.js";
 import {
   AgentUnavailableError,
   type OmpExit,
@@ -45,6 +40,7 @@ import {
   type SpawnImpl,
 } from "./process.js";
 import { FrameStream } from "./prompt-stream.js";
+import { reportHandshakeTimeout, type SpawnGate, type SpawnLog } from "./spawn-gate.js";
 import type { ApprovalDecision, ApprovalRequest } from "./ui-requests.js";
 
 const DEFAULT_IDLE_MS = 600_000;
@@ -76,6 +72,8 @@ export interface SessionRuntimeOpts {
   onExit?: (exit: OmpExit) => void;
   onApproval?: (request: ApprovalRequest) => void;
   handshakeTimeoutMs?: number;
+  spawnGate?: SpawnGate;
+  log?: SpawnLog;
 }
 
 export type PromptDispatchReceipt = { requestId: string; sessionFile: string };
@@ -119,6 +117,9 @@ export class SessionRuntime {
   readonly #onExit: ((exit: OmpExit) => void) | undefined;
   readonly #onApproval: ((request: ApprovalRequest) => void) | undefined;
   readonly #handshakeTimeoutMs: number | undefined;
+  readonly #spawnGate: SpawnGate | undefined;
+  readonly #log: SpawnLog | undefined;
+  #cancelQueued: (() => void) | undefined;
   #resumePath: string | null;
   #sessionFile: string | undefined;
   #generation: Generation | undefined;
@@ -148,6 +149,8 @@ export class SessionRuntime {
     this.#onExit = opts.onExit;
     this.#onApproval = opts.onApproval;
     this.#handshakeTimeoutMs = opts.handshakeTimeoutMs;
+    this.#spawnGate = opts.spawnGate;
+    this.#log = opts.log;
     this.#resumePath = opts.resumePath ?? null;
     this.#sessionFile = nonempty(this.#resumePath);
   }
@@ -195,6 +198,7 @@ export class SessionRuntime {
       return this.#retired;
     }
     this.#closed = true;
+    this.#cancelQueued?.();
     this.#clearIdle();
     this.#failActiveTurn(new AgentUnavailableError("runtime shutdown"));
     this.#rejectPendingReceipts(new AgentUnavailableError("runtime shutdown"));
@@ -345,60 +349,72 @@ export class SessionRuntime {
       throw new AgentUnavailableError("runtime shutdown");
     }
   }
+  /** A gate permit is held from grant until boot settles, and returned on every exit path. */
   async #acquire(): Promise<Generation> {
-    if (this.#closed) {
-      throw new AgentUnavailableError("runtime shutdown");
-    }
-    this.#nextGen += 1;
-    const id = this.#nextGen;
-    const token = this.#tokens.issue(this.#sessionId);
-    this.#issuedGenId = id;
-    const nativeWait = deferredExit();
-    const spawnWait = deferredSpawn();
-    const proc = this.#openProcess(token, (command, args, options) =>
-      this.#spawnFor(id, command, args, options),
-    );
-    const boot = proc.start();
-    const gen: Generation = {
-      id,
-      proc,
-      child: undefined,
-      native: undefined,
-      nativeWait,
-      spawnWait,
-      boot,
-      acquired: false,
-      spawnFailed: false,
-      revoked: false,
-      retiring: undefined,
-      pending: new Set<string | number>(),
-      drainTimer: undefined,
-      graceTimer: undefined,
-    };
-    this.#generation = gen;
-    this.#bindProcess(gen);
-    void boot.then(
-      () => {},
-      () => {
-        gen.spawnWait.resolve(undefined);
-      },
-    );
+    const began = performance.now();
+    const ticket = this.#closed ? undefined : this.#spawnGate?.acquire();
+    this.#cancelQueued = ticket?.cancel;
+    const release = ticket === undefined ? () => {} : await ticket.granted;
     try {
-      const started = await boot;
-      gen.acquired = true;
-      if (this.#closed || this.#generation !== gen) {
-        await this.#retire(gen);
+      if (this.#closed) {
         throw new AgentUnavailableError("runtime shutdown");
       }
-      this.#sessionFile = started.sessionFile;
-      this.#resumePath = started.sessionFile;
-      this.#resetIdle();
-      return gen;
-    } catch (error) {
-      if (this.#generation === gen) {
-        await this.#retire(gen);
+      this.#nextGen += 1;
+      const id = this.#nextGen;
+      const token = this.#tokens.issue(this.#sessionId);
+      this.#issuedGenId = id;
+      const nativeWait = deferredExit();
+      const spawnWait = deferredSpawn();
+      const proc = this.#openProcess(token, (command, args, options) =>
+        this.#spawnFor(id, command, args, options),
+      );
+      const boot = proc.start();
+      const gen: Generation = {
+        id,
+        proc,
+        child: undefined,
+        native: undefined,
+        nativeWait,
+        spawnWait,
+        boot,
+        acquired: false,
+        spawnFailed: false,
+        revoked: false,
+        retiring: undefined,
+        pending: new Set<string | number>(),
+        drainTimer: undefined,
+        graceTimer: undefined,
+      };
+      this.#generation = gen;
+      this.#bindProcess(gen);
+      void boot.then(
+        () => {},
+        () => {
+          gen.spawnWait.resolve(undefined);
+        },
+      );
+      try {
+        const started = await boot;
+        release();
+        gen.acquired = true;
+        if (this.#closed || this.#generation !== gen) {
+          await this.#retire(gen);
+          throw new AgentUnavailableError("runtime shutdown");
+        }
+        this.#sessionFile = started.sessionFile;
+        this.#resumePath = started.sessionFile;
+        this.#resetIdle();
+        return gen;
+      } catch (error) {
+        release();
+        reportHandshakeTimeout(this.#log, this.#sessionId, began, error);
+        if (this.#generation === gen) {
+          await this.#retire(gen);
+        }
+        throw sanitizeError(error);
       }
-      throw sanitizeError(error);
+    } finally {
+      release();
     }
   }
 
@@ -763,13 +779,6 @@ export class SessionRuntime {
     this.#nextRequest += 1;
     return `rt-${this.#nextRequest}`;
   }
-}
-
-function localSignal(frame: OmpFrame, requestId: string): LocalSignal {
-  if (isLocalComplete(frame, requestId)) {
-    return "local-outcome";
-  }
-  return frame.type === "command_output" ? "command-output" : "other";
 }
 
 function nonempty(value: string | null): string | undefined {
