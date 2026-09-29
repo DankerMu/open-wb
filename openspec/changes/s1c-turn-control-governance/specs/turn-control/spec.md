@@ -106,8 +106,8 @@ supervisor SHALL 按 `sessionId` 维护"控制占用"（control claim）。regen
 `POST /api/sessions/:id/stop` SHALL 受既有 cookie guard 与 owner 校验：未认证 401（先于 body 解析）、不存在或属他人 404 `not_found`，均在任何 supervisor 调用前；响应 `Cache-Control: no-store`。该路由 SHALL 是无 body 路由且列入 content-parser 归属集（与 logout 先例一致）：content-parser 错误（malformed/empty JSON、unsupported media、超出最小 body limit）SHALL 映射为 400 `bad_request`，任何被解析出的 body SHALL 400 `bad_request`，均在认证之后、任何 supervisor 调用之前，无写入、无帧。
 
 会话 `status="running"` 时 SHALL 调用 supervisor stop；stop 在其调用期间持有该会话的控制占用（调用返回即释放；停止意图路径上的 `abort` 帧在调用返回之后才写出，不在占用内），并：先按 tool-approval 规范以 `deny` 结算该会话全部挂起审批（以进入 stop 时读取的快照为准，写 `abort` 前不重读）（每条结算落库与审计同一事务 → 发 `Deny` → 发布 `approval.resolved`），再处理中断，返回 202，body 恰为 JSON 空对象 `{}`；不等待 `agent_end`。中断 SHALL 分两种：
-- prompt 已派发（runtime 存在活跃回合）：对该会话进程调用 `abort()` 写出 `{type:"abort"}`，写入成功后返回 202。
-- prompt 尚未派发（runtime 仍在获取/握手，`abort()` 返回 `false`，即尚无已派发的回合）：supervisor SHALL 为该回合登记"停止意图"，此刻不写任何帧，stop 随即返回 202 `{}`；该次派发 SHALL 照常进行——握手完成后 `prompt` 帧照常写出，用户消息照常进入 omp 会话历史，仍在等待派发回执的 prompt（或 regenerate）请求 SHALL 以 202 返回其原本的受理 body。supervisor 本就等待的该 `prompt` 派发回执兑现后，SHALL 立即对同一 generation 再次调用 `abort()` 写出 `{type:"abort"}`；此后与上一条完全相同：回合经归约器的普通中断路径（`message_end{stopReason:"aborted"}` → `agent_end` → 恰一个 `turn.end{messageId,status:"stopped"}`）收尾，`agent_end` 未在 `OMP_ABORT_GRACE_MS` 内到达则走有界退回（见中断帧归约与有界退回）。停止意图路径本身 SHALL 不调用 `applyStop`、不直接 `finishTurn(stopped)`：一个回合的 `turn.end` 恰由一条路径发出。被停止的 assistant 正文为 abort 生效前已到达的 text.delta（可能为空）。停止意图登记期间 runtime 获取或派发失败（派发回执拒绝）时，SHALL 走该请求在无停止意图时完全相同的失败路径（prompt → 既有受理对补偿与既有错误响应；regenerate → 其自身规则），停止意图随之丢弃、不写 `abort`。若该回合已先被其它路径终态结算（如崩溃 `failed`），停止意图 SHALL 不改写其终态。
+- prompt 已派发（runtime 存在活跃回合）：对该会话进程调用 `abort()`，随即返回 202。`{type:"abort"}` 帧由 runtime 在该回合已开始（收到 `agent_start` 或本地完成应答）之后写出（见 omp-runtime「相关命令 API 与回合中断」）：真 omp 在回合开始前收到 `abort` 会静默丢弃整轮，用户消息不入会话历史，其后的 regenerate/fork 对齐随之失效。stop 不等待该帧写出；`OMP_ABORT_GRACE_MS` 从 `abort()` 被调用时起算。
+- prompt 尚未派发（runtime 仍在获取/握手，`abort()` 返回 `false`，即尚无已派发的回合）：supervisor SHALL 为该回合登记"停止意图"，此刻不写任何帧，stop 随即返回 202 `{}`；该次派发 SHALL 照常进行——握手完成后 `prompt` 帧照常写出，用户消息照常进入 omp 会话历史，仍在等待派发回执的 prompt（或 regenerate）请求 SHALL 以 202 返回其原本的受理 body。supervisor 本就等待的该 `prompt` 派发回执兑现后，SHALL 立即对同一 generation 再次调用 `abort()`，`{type:"abort"}` 帧同样在该回合已开始之后才写出；此后与上一条完全相同：回合经归约器的普通中断路径（`message_end{stopReason:"aborted"}` → `agent_end` → 恰一个 `turn.end{messageId,status:"stopped"}`）收尾，`agent_end` 未在 `OMP_ABORT_GRACE_MS` 内到达则走有界退回（见中断帧归约与有界退回）。停止意图路径本身 SHALL 不调用 `applyStop`、不直接 `finishTurn(stopped)`：一个回合的 `turn.end` 恰由一条路径发出。被停止的 assistant 正文为 abort 生效前已到达的 text.delta（可能为空）。停止意图登记期间 runtime 获取或派发失败（派发回执拒绝）时，SHALL 走该请求在无停止意图时完全相同的失败路径（prompt → 既有受理对补偿与既有错误响应；regenerate → 其自身规则），停止意图随之丢弃、不写 `abort`。若该回合已先被其它路径终态结算（如崩溃 `failed`），停止意图 SHALL 不改写其终态。
 
 会话非 running（`idle`/`done`/`failed`/`stopped`）SHALL 返回 204 无 body，不写任何行、不向进程发帧（幂等）。supervisor SHALL 记录该回合的停止已在途：同一回合再次 stop SHALL 不写第二帧 `abort`、不重复结算审批，返回 202 `{}`。
 
@@ -151,8 +151,16 @@ supervisor SHALL 按 `sessionId` 维护"控制占用"（control claim）。regen
 - **WHEN** 同样登记了停止意图，但提交后的派发失败
 - **THEN** 新 assistant 行与会话为 `failed`，regenerate 以 502 `agent_unavailable` 拒绝；进程未收到 `abort`；已删除的旧 assistant 行未被复活
 
+#### Scenario: 派发后极早停止
+- **WHEN** fake-omp 以 `abort-ok --start-delay-ms 300` 运行（回合在 prompt ack 后 300ms 才开始；此前读到的 `abort` 按真 omp 语义静默丢弃整轮），会话 prompt 的派发回执兑现后立即调用 stop；另以 `slow-ready --ready-delay-ms 300 --start-delay-ms 300` 在握手期间调用 stop；两者都在该回合结束后发一个 probe prompt
+- **THEN** stop 均返回；不推进注入时钟，该回合的 assistant 与会话为 `stopped`，SSE 恰一个 `turn.end(stopped)`、无 `error`，未经有界退回；probe prompt 在同一进程上正常完成，其 `frames=` 恰为 `negotiate_protocol,get_state,prompt,abort,prompt`
+
+#### Scenario: 回合迟迟不开始时仍有界收尾
+- **WHEN** fake-omp 以 `abort-ok --start-delay-ms 60000` 运行，派发回执兑现后调用 stop，注入时钟推进 `OMP_ABORT_GRACE_MS`
+- **THEN** 进程不收到 `abort` 帧；回合经有界退回以恰一个 `turn.end(stopped)` 收尾，不产生 `error`，没有未处理的 Promise 拒绝
+
 ### Requirement: 中断帧归约与有界退回
-归约器 SHALL 把 assistant `message_end{stopReason:"aborted"}` 记为"已中断"而非失败：其后终止 `agent_end`（`isTerminal` 缺省或 true）SHALL 恰发一次 `turn.end{messageId,status:"stopped"}`，不发 `error`；`stopReason:"error"` 的既有 `error` + `turn.end failed` 路径不变；同一回合先 error 后 aborted 或反之，SHALL 以首个被记住的原因为准。`turn.end.status` 联合 SHALL 为 `done|failed|stopped`。supervisor 在发出 `abort` 后 SHALL 启动有界等待：内部常量 `OMP_ABORT_GRACE_MS = 8000`（不做配置，注入时钟），期限内 `agent_end` 未到达 SHALL 退回既有 retire 路径关停该进程，并以新增纯函数 `applyStop(state)`（与 `applyFailure` 对称）合成恰一个 `turn.end{status:"stopped"}`；退回后到达的迟到帧或进程退出 SHALL 不再产生 `error`/`turn.end failed`，会话仍以 `stopped` 收尾。`agent_end` 在期限内到达 SHALL 取消该等待且不 retire 进程，进程可继续受理下一 prompt。
+归约器 SHALL 把 assistant `message_end{stopReason:"aborted"}` 记为"已中断"而非失败：其后终止 `agent_end`（`isTerminal` 缺省或 true）SHALL 恰发一次 `turn.end{messageId,status:"stopped"}`，不发 `error`；`stopReason:"error"` 的既有 `error` + `turn.end failed` 路径不变；同一回合先 error 后 aborted 或反之，SHALL 以首个被记住的原因为准。`turn.end.status` 联合 SHALL 为 `done|failed|stopped`。supervisor 在调用 runtime `abort()` 取得 abort Promise 时 SHALL 启动有界等待（`abort` 帧可能推迟到回合开始后才写出，见停止生成 REST；等待不因推迟而顺延，回合迟迟不开始时同样有界）：内部常量 `OMP_ABORT_GRACE_MS = 8000`（不做配置，注入时钟），期限内 `agent_end` 未到达 SHALL 退回既有 retire 路径关停该进程，并以新增纯函数 `applyStop(state)`（与 `applyFailure` 对称）合成恰一个 `turn.end{status:"stopped"}`；退回后到达的迟到帧或进程退出 SHALL 不再产生 `error`/`turn.end failed`，会话仍以 `stopped` 收尾。`agent_end` 在期限内到达 SHALL 取消该等待且不 retire 进程，进程可继续受理下一 prompt。
 
 #### Scenario: 原生 abort 收尾
 - **WHEN** `abort` 发出后 fake-omp 依次发 `message_end{stopReason:"aborted"}`、`agent_end{isTerminal:true}`、`response{command:"abort"}`
