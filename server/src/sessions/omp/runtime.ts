@@ -5,19 +5,24 @@
 import { type ChildProcessWithoutNullStreams, type SpawnOptions, spawn } from "node:child_process";
 import {
   awaitChild,
+  canAbort,
   clearDrain,
   clearGrace,
   closeStdin,
+  deferAbort,
   deferredExit,
   deferredReceipt,
   deferredSpawn,
   drainHeld,
+  dropDeferredAbort,
   type Generation,
   isLocalComplete,
   isMatchingFailure,
   isTerminalEnd,
+  isTurnStart,
   KILL_GRACE_MS,
   liveChild,
+  openDeferredAbort,
   signalLive,
   stateSessionFile,
   TERM_GRACE_MS,
@@ -172,6 +177,8 @@ export class SessionRuntime {
       receiptSettled: false,
       slashText: text.startsWith("/"),
       commandOutputSeen: false,
+      started: false,
+      deferredAbort: undefined,
     };
     this.#turn = turn;
     this.#pendingReceipts.add(turn);
@@ -222,20 +229,20 @@ export class SessionRuntime {
     this.#generation?.proc.respondApproval(id, decision);
   }
 
-  /** Writes `abort` only after the turn's receipt resolved on its live, non-retiring generation. */
+  /**
+   * `false` until the turn's receipt resolved on its live, non-retiring generation. Writes `abort`
+   * only once the turn started (#650); before that the call is deferred to the start.
+   */
   abort(): Promise<OmpFrame> | false {
     const turn = this.#turn;
     const gen = this.#generation;
-    if (
-      turn === undefined ||
-      !turn.receiptSettled ||
-      gen === undefined ||
-      gen.id !== turn.genId ||
-      gen.retiring !== undefined ||
-      liveChild(gen) === undefined
-    ) {
+    if (turn === undefined || !turn.receiptSettled || !canAbort(gen, turn)) {
       return false;
     }
+    return turn.started ? this.#writeAbort(gen) : deferAbort(turn);
+  }
+
+  #writeAbort(gen: Generation): Promise<OmpFrame> {
     return gen.proc.request({ type: "abort", id: this.#nextId() });
   }
 
@@ -483,6 +490,12 @@ export class SessionRuntime {
       return;
     }
     this.#onLocalFrame(turn, frame);
+    if (!turn.started && isTurnStart(frame, turn.requestId)) {
+      // After #onLocalFrame: a start frame that also ended the turn rejects instead (#650).
+      turn.started = true;
+      const open = this.#turn === turn && canAbort(gen, turn);
+      openDeferredAbort(turn, open ? () => this.#writeAbort(gen) : undefined);
+    }
   }
 
   /** Local-only completion: a `/` turn without output waits for it or for the grace. */
@@ -550,6 +563,7 @@ export class SessionRuntime {
     }
     gen.native = exit;
     gen.nativeWait.resolve(exit);
+    this.#dropDeferred(gen);
     this.#revoke(gen);
     this.#onExit?.(exit);
     if (this.#generation === gen && gen.retiring === undefined) {
@@ -590,6 +604,7 @@ export class SessionRuntime {
     }
     this.#turn = undefined;
     this.#clearLocalWait();
+    dropDeferredAbort(turn);
     turn.stream.end();
   }
 
@@ -599,6 +614,7 @@ export class SessionRuntime {
     }
     this.#turn = undefined;
     this.#clearLocalWait();
+    dropDeferredAbort(turn);
     this.#rejectReceipt(turn, error);
     turn.stream.fail(error);
   }
@@ -616,6 +632,7 @@ export class SessionRuntime {
     }
     this.#turn = undefined;
     this.#clearLocalWait();
+    dropDeferredAbort(turn);
     this.#rejectReceipt(turn, new AgentUnavailableError("runtime shutdown"));
     const gen = this.#generation;
     if (gen !== undefined && (turn.sent || !gen.acquired)) {
@@ -650,6 +667,7 @@ export class SessionRuntime {
     if (this.#localWait?.turn.genId === gen.id) {
       this.#clearLocalWait();
     }
+    this.#dropDeferred(gen);
     gen.retiring ??= this.#runRetire(gen);
     if (this.#generation === gen) {
       this.#retired = gen.retiring;
@@ -699,6 +717,13 @@ export class SessionRuntime {
     await drainHeld(this.#clock, gen, started);
     this.#dropGeneration(gen);
   }
+  /** Retiring or exited: the generation's turn can no longer start there (#650). */
+  #dropDeferred(gen: Generation): void {
+    if (this.#turn?.genId === gen.id) {
+      dropDeferredAbort(this.#turn);
+    }
+  }
+
   #revoke(gen: Generation): void {
     if (gen.revoked || this.#issuedGenId !== gen.id) {
       return;

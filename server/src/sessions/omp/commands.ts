@@ -1,6 +1,6 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { OmpFrame } from "./frame.js";
-import type { OmpExit, OmpProcess } from "./process.js";
+import { AgentUnavailableError, type OmpExit, type OmpProcess } from "./process.js";
 import type { FrameStream } from "./prompt-stream.js";
 import type { PromptDispatchReceipt, SessionClock } from "./runtime.js";
 
@@ -21,6 +21,12 @@ interface SpawnWaiter {
 interface ReceiptWaiter {
   promise: Promise<PromptDispatchReceipt>;
   resolve: (receipt: PromptDispatchReceipt) => void;
+  reject: (error: Error) => void;
+}
+
+interface AbortWaiter {
+  promise: Promise<OmpFrame>;
+  resolve: (response: Promise<OmpFrame>) => void;
   reject: (error: Error) => void;
 }
 
@@ -53,6 +59,10 @@ export interface Turn {
   slashText: boolean;
   /** A `command_output` frame arrived since this prompt was written. */
   commandOutputSeen: boolean;
+  /** `agent_start` or the local-only outcome arrived: an `abort` may be written (#650). */
+  started: boolean;
+  /** `abort()` after the receipt but before the start: written at the start, else rejected. */
+  deferredAbort: AbortWaiter | undefined;
 }
 
 // A child that never obtained a pid (spawn failed) is never live, whether or not
@@ -237,6 +247,58 @@ export function deferredReceipt(): ReceiptWaiter {
     reject = fail;
   });
   return { promise, resolve, reject };
+}
+
+/**
+ * omp v18.0.10 drops a prompt still pre-processing when `abort` arrives (generation bail, #650):
+ * the turn has started once its `agent_start` or its local-only outcome reached the runtime.
+ */
+export function isTurnStart(frame: OmpFrame, requestId: string): boolean {
+  return frame.type === "agent_start" || isLocalComplete(frame, requestId);
+}
+
+/** The turn's one deferred abort; a repeated call before the start gets the same Promise. */
+export function deferAbort(turn: Turn): Promise<OmpFrame> {
+  if (turn.deferredAbort === undefined) {
+    let resolve!: (response: Promise<OmpFrame>) => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<OmpFrame>((settle, fail) => {
+      resolve = settle;
+      reject = fail;
+    });
+    void promise.catch(() => {});
+    turn.deferredAbort = { promise, resolve, reject };
+  }
+  return turn.deferredAbort.promise;
+}
+
+/**
+ * Settles the deferred abort at most once: with the response of the one frame `write` sends, or,
+ * when `write` is absent (the gate closed), with `AgentUnavailableError` and no frame.
+ */
+export function openDeferredAbort(turn: Turn, write: (() => Promise<OmpFrame>) | undefined): void {
+  const waiter = turn.deferredAbort;
+  turn.deferredAbort = undefined;
+  if (waiter !== undefined && write !== undefined) {
+    waiter.resolve(write());
+  } else {
+    waiter?.reject(new AgentUnavailableError("turn ended before it started"));
+  }
+}
+
+/** The turn can no longer start on a live generation: reject the deferred abort, write nothing. */
+export function dropDeferredAbort(turn: Turn): void {
+  openDeferredAbort(turn, undefined);
+}
+
+/** `abort()`'s gate, re-checked at the start frame: the turn's own live, non-retiring generation. */
+export function canAbort(gen: Generation | undefined, turn: Turn): gen is Generation {
+  return (
+    gen !== undefined &&
+    gen.id === turn.genId &&
+    gen.retiring === undefined &&
+    liveChild(gen) !== undefined
+  );
 }
 
 export function isTerminalEnd(frame: OmpFrame): boolean {

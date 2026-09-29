@@ -1,7 +1,8 @@
 /**
  * Turn control: event persistence, post-failure stream draining, and the #473 stop of a
- * dispatched turn (Deny the entry snapshot of pending approvals, write `abort`, then wait
- * OMP_ABORT_GRACE_MS on the injected clock for agent_end before falling back to retire).
+ * dispatched turn (Deny the entry snapshot of pending approvals, ask the runtime to `abort` — it
+ * writes the frame once the turn started, #650 — then wait OMP_ABORT_GRACE_MS from that call on
+ * the injected clock for agent_end before falling back to retire).
  * A stop before the dispatch receipt (#490) registers an intent, honored once the receipt is.
  * The #465 per-session control claim lives here; the regenerate orchestration is in
  * branching.ts.
@@ -61,8 +62,9 @@ export class TurnStops {
   }
 
   /**
-   * Resolves once `abort` is written, or once the intent is registered when the turn has no
-   * dispatched prompt yet (`slot` undefined: no runtime to ask); a repeated stop joins the first.
+   * Resolves once `abort` is requested (the runtime writes it when the turn starts, #650), or once
+   * the intent is registered when the turn has no dispatched prompt yet (`slot` undefined: no
+   * runtime to ask); a repeated stop joins the first.
    */
   stop(slot: Slot | undefined, assistantMessageId: number): Promise<void> {
     const existing = this.#entries.get(assistantMessageId);

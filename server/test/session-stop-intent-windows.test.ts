@@ -110,6 +110,8 @@ describe("stop intent across re-admission and eviction (#490)", () => {
       await early.prompt;
       expect(world.rt.calls).toHaveLength(2);
       const second = spawnedAt(world, 1);
+      // #650: the intent's abort is written once the turn's agent_start arrives.
+      await waitFor(() => (abortCount(second.stdin) === 1 ? true : undefined), "abort");
       expect(frameTypes(afterPrompt(second.stdin))).toEqual(["abort"]);
       await expectStoppedSecondTurn(world, early, first.stdin);
     },
@@ -139,6 +141,8 @@ describe("stop intent across re-admission and eviction (#490)", () => {
       expect((await promptB).statusCode).toBe(202);
       const newA = promptedWith(world, "a two");
       expect(newA).not.toBe(oldA);
+      // #650: the intent's abort is written once the turn's agent_start arrives.
+      await waitFor(() => (abortCount(newA?.stdin ?? []) === 1 ? true : undefined), "abort");
       expect(frameTypes(afterPrompt(newA?.stdin ?? []))).toEqual(["abort"]);
       await expectStoppedSecondTurn(world, early, oldA.stdin);
 
