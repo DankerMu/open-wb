@@ -260,6 +260,20 @@ async function waitDoneConversation(page) {
   await pollUntil(async () => (await generating.count()) === 0, ACTION_TIMEOUT_MS, "生成中 消失");
 }
 
+// omp 以 --approval-mode write 运行时回合会挂工具审批：出现即作答 允许；回合先结束则跳过。
+async function answerApproval(page, finished, remaining) {
+  const assistant = page.getByRole("article", { name: "助手" });
+  const pending = assistant.getByRole("group", { name: "需要你的确认" });
+  await pollUntil(
+    async () => (await pending.isVisible()) || (await finished.isVisible()),
+    remaining(),
+    "审批条或回合结束",
+  );
+  if (!(await pending.isVisible())) return;
+  await pending.getByRole("button", { name: "允许", exact: true }).click({ timeout: remaining() });
+  await visible(assistant.getByRole("group", { name: "已允许执行" }), remaining());
+}
+
 async function createDoneSession(page) {
   await page.getByRole("button", { name: "新建会话" }).click();
   await pollUntil(() => sessionFromUrl(page.url()) !== "", ACTION_TIMEOUT_MS, "URL 出现 session");
@@ -267,10 +281,14 @@ async function createDoneSession(page) {
   const input = page.getByLabel("给助手发消息");
   await input.fill(CHAT_PROMPT);
   await input.press("Enter");
+  const deadline = Date.now() + CHAT_DONE_TIMEOUT_MS;
+  const remaining = () => Math.max(1, deadline - Date.now());
   const status = page
     .locator('nav[aria-label="会话列表"] button[aria-current="true"]')
     .getByRole("status");
-  await visible(status.filter({ hasText: /^(已完成|失败)$/u }), CHAT_DONE_TIMEOUT_MS);
+  const finished = status.filter({ hasText: /^(已完成|失败)$/u });
+  await answerApproval(page, finished, remaining);
+  await visible(finished, remaining());
   const text = await status.textContent();
   if (text !== "已完成") throw new Error(`chat-done 回合结束状态为 ${text}`);
   await waitDoneConversation(page);
