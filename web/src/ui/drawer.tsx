@@ -2,6 +2,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import type { ReactNode } from "react";
 import { Button } from "./button.js";
 import { useFocusHandoff } from "./dialog.js";
+import { useEscapeFallback } from "./escape-fallback.js";
 import { Icon } from "./icon.js";
 
 type DrawerProps = {
@@ -17,7 +18,8 @@ type DrawerProps = {
 
 /**
  * 侧滑面板：同一 Radix Dialog 行为层（Escape/遮罩/右上 `关闭` 关闭），样式映射 demo `.drawer`
- * （dialog.css）。无 trigger，关闭后焦点总是归还打开者（侧栏覆盖层依赖此路径）。
+ * （dialog.css）。无 trigger，关闭后焦点总是归还打开者（侧栏覆盖层依赖此路径）。Toast 占住层栈时
+ * Escape 由 `useEscapeFallback` 兜底关闭。
  */
 export function Drawer({
   open,
@@ -29,6 +31,7 @@ export function Drawer({
   children,
 }: DrawerProps) {
   const focus = useFocusHandoff({});
+  const fallback = useEscapeFallback({ canClose: true, onOpenChange });
   return (
     <DialogPrimitive.Root onOpenChange={onOpenChange} open={open}>
       <DialogPrimitive.Portal>
@@ -39,7 +42,10 @@ export function Drawer({
           className={`ui-drawer ui-drawer--${side} ui-drawer--w${width}`}
           data-side={side}
           onCloseAutoFocus={focus.onCloseAutoFocus}
+          onEscapeKeyDown={fallback.onEscapeKeyDown}
+          onKeyDown={fallback.onKeyDown}
           onOpenAutoFocus={focus.onOpenAutoFocus}
+          ref={fallback.ref}
         >
           <div className="ui-drawer-head">
             <DialogPrimitive.Title className="ui-drawer-title">{title}</DialogPrimitive.Title>

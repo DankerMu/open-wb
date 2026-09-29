@@ -25,7 +25,8 @@ const ToastContext = createContext<ToastApi | null>(null);
 /**
  * 应用根的通知出口：本组件只持有队列（追加、上限 3 丢最旧、关闭即移除）；计时与 hover/focus
  * 暂停恢复、Escape/滑动关闭、`type="background"` 的 polite 播报区、Viewport region 与 F8 热键
- * 全部由 Radix Toast 提供，本文件不写定时器。样式映射 demo `.toast-stack`/`.toast`（toast.css）。
+ * 全部由 Radix Toast 提供，本文件不写定时器（Escape 只在目标位于通知区内时放行，见下）。
+ * 样式映射 demo `.toast-stack`/`.toast`（toast.css）。
  * `epoch`：Radix 1.2.23 的暂停标记留在其 Provider 上、只由有 toast 时的 Viewport 监听清除，
  * 暂停中关掉最后一条会让它永远为 true；队列非空→空时 epoch +1，以 `key` 重挂 Radix Provider
  * 归零（`children` 在其外，应用树不随之重挂）。
@@ -50,6 +51,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     });
   }, []);
   const value = useMemo(() => ({ show }), [show]);
+  const viewport = useRef<HTMLOListElement>(null);
+  // 目标不在通知区（viewport 的 ol，含其内 toast）时拦下 Radix 的关闭：被动通知不吃全局 Escape，
+  // 也不抢覆盖层的 Escape（issue 643）。Radix 既从层的 document 监听、也从 toast 自身的 onKeyDown 调本回调，
+  // A7 类路径（向 toast 派发、不移焦点）只能按事件目标判定，不能用 document.activeElement。
+  const keepUnlessInViewport = useCallback((event: KeyboardEvent) => {
+    const target = event.target;
+    if (!(target instanceof Node) || !viewport.current?.contains(target)) event.preventDefault();
+  }, []);
 
   return (
     <ToastContext.Provider value={value}>
@@ -59,6 +68,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           <ToastPrimitive.Root
             className={`ui-toast ui-toast--${toast.type}`}
             key={toast.id}
+            onEscapeKeyDown={keepUnlessInViewport}
             onOpenChange={(open) => {
               if (!open) dismiss(toast.id);
             }}
@@ -71,7 +81,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             </ToastPrimitive.Description>
           </ToastPrimitive.Root>
         ))}
-        <ToastPrimitive.Viewport className="ui-toast-viewport" label="通知" />
+        <ToastPrimitive.Viewport className="ui-toast-viewport" label="通知" ref={viewport} />
       </ToastPrimitive.Provider>
     </ToastContext.Provider>
   );
