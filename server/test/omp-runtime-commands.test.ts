@@ -309,8 +309,11 @@ describe("SessionRuntime abort()", () => {
     await turn.dispatched;
     const pending = world.runtime.abort();
     expect(pending).toBeInstanceOf(Promise);
+    // #650: the abort frame waits for the turn's agent_start.
+    world.child.emitLine({ type: "agent_start" });
     await until(() => world.inbound.length === 2);
     expect(world.inbound.map((frame) => frame.type)).toEqual(["prompt", "abort"]);
+    expect(await iterator.next()).toEqual({ done: false, value: { type: "agent_start" } });
 
     const abortId = String(world.inbound[1]?.id);
     const response = { id: abortId, type: "response", command: "abort", success: true };

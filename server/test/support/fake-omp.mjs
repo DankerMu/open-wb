@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
+import { parseArgs, parseDelay } from "./fake-omp-argv.mjs";
 import { loadBaseUrl, parseToolCall, postChat } from "./fake-omp-proxy.mjs";
 import {
   ANSWER_DELTAS,
@@ -31,6 +32,7 @@ const UI_ID = "ui-confirm-1";
 const DELTAS = ["Hello ", "from ", "fake-omp"];
 /** slow-ready（#461）：扣住 ready 之后行为与 abort-ok 完全一致。 */
 const ABORT_SCENARIOS = new Set(["abort-ok", "abort-ignored", "slow-ready"]);
+const START_SCENARIOS = new Set(["abort-ok", "slow-ready"]);
 /**
  * 审批门控场景（#458）：仅最后一个 `--approval-mode` 恰为 write 时门控，否则同 normal。
  * approval-chain-abort-ignored（#470）：r1 应答后再开 C2/r2，r2 应答后永久挂起；abort 一律无帧。
@@ -63,23 +65,10 @@ const UNKNOWN_ENTRY = "Invalid entry ID for branching";
 const TODO_OUTPUT = "No todos. Use /todo append <task> to start one.";
 const COMPACT_OUTPUT = "Compaction complete.";
 const COMPACT_DELAY_MS = 50;
-/** 取值型 argv → parseArgs 结果字段。 */
-const VALUE_ARGS = new Map([
-  ["--scenario", "scenario"],
-  ["--resume", "resume"],
-  ["--session-dir", "sessionDir"],
-  ["--approval-mode", "approvalMode"],
-  ["--ready-delay-ms", "delay"],
-  ["--thinking-repeat", "repeat"],
-]);
-/** 布尔 argv → parseArgs 结果字段（缺省 false）。 */
-const FLAG_ARGS = new Map([
-  ["--hold-after-thinking", "hold"],
-  ["--compact-silent", "silent"],
-]);
 
-const { scenario, resume, sessionDir, approvalMode, delay, repeat, hold, silent, entries } =
-  parseArgs();
+const argv = parseArgs(process.argv.slice(2));
+const { scenario, resume, sessionDir, approvalMode, delay, startDelay, repeat, hold } = argv;
+const { silent, entries } = argv;
 /**
  * `branch` 实际列表（#552）：固定两条之后按 argv 序追加每个 `--branch-entry` 值（原样）。顶层算一次并
  * 冻结；无旋钮时即 BRANCH_MESSAGES，逐字不变。非 branch 场景不读它。
@@ -93,8 +82,10 @@ const branchMessages = Object.freeze([
 /**
  * `--ready-delay-ms <n>`（#461）：与 `--scenario` 的位置无关，取最后一次出现的值；只有 slow-ready 解析它
  * （缺省 500，非法值在求值时抛错、退出 1 且零帧），其它 scenario 忽略。延迟期间关闭 stdin 零帧退出 0。
+ * `--start-delay-ms <n>`（#650）同一规则、缺省 0，只有 START_SCENARIOS 解析它（abort-ignored 等忽略）。
  */
-const readyDelayMs = scenario === "slow-ready" ? parseReadyDelay(delay) : 0;
+const readyDelayMs = scenario === "slow-ready" ? parseDelay(delay, "--ready-delay-ms", 500) : 0;
+const startMs = START_SCENARIOS.has(scenario) ? parseDelay(startDelay, "--start-delay-ms", 0) : 0;
 /** #518：`--thinking-repeat <n>`（非法值同上零帧退出）与 `--hold-after-thinking` 只作用于 thinking。 */
 const thinkingRepeat = scenario === "thinking" ? parseThinkingRepeat(repeat) : 1;
 const holdThinking = scenario === "thinking" && hold;
@@ -103,8 +94,12 @@ const abortable =
   ABORT_SCENARIOS.has(scenario) || (gated && scenario !== "approval") || holdThinking;
 let protocol = 1;
 let pendingUi = false;
-/** abort-* 回合三态：idle（首个 prompt 挂起回合）→ pending（等 abort）→ done（其后 prompt 走缺省路径）；门控回合另有 selecting。 */
+/**
+ * abort-* 回合：idle（首个 prompt 挂起回合）→ [starting（start-delay 窗口，回合未开始）] → pending（等 abort）
+ * → done（其后 prompt 走缺省路径）；门控回合另有 selecting。
+ */
 let abortTurn = "idle";
+let startTimer; // 仅在 starting 期间有值
 /** 门控回合状态：挂起的 select id → 调用；是否有过 Approve；selecting 态记下的首个 abort。 */
 const pendingSelects = new Map();
 let approvedAny = false;
@@ -156,46 +151,6 @@ if (scenario === "hang-term" || scenario === "no-ready-hang") {
 }
 if (scenario === "no-ready-hang") {
   process.stderr.write("no-ready-hang:handlers-ready\n");
-}
-
-/**
- * 单遍扫描：取值型参数一律吃掉紧随其后的 token（`argv[++i]`），无论它长什么样。
- * `--branch-entry` 同样吃掉下一 token 但按序累积（可重复）；位于末尾缺值时不追加。
- */
-function parseArgs(argv = process.argv.slice(2)) {
-  const parsed = { scenario: "normal", hold: false, silent: false, entries: [] };
-  for (let i = 0; i < argv.length; i++) {
-    const key = VALUE_ARGS.get(argv[i]);
-    if (key !== undefined) {
-      parsed[key] = argv[++i] ?? missingValue(parsed, key);
-    } else if (argv[i] === "--branch-entry") {
-      const text = argv[++i];
-      if (text !== undefined) {
-        parsed.entries.push(text);
-      }
-    } else if (FLAG_ARGS.has(argv[i])) {
-      parsed[FLAG_ARGS.get(argv[i])] = true;
-    }
-  }
-  return parsed;
-}
-
-/** 缺值：--scenario 保留原值；--ready-delay-ms/--thinking-repeat 记 ""（按非法处理）；其余 undefined。 */
-function missingValue(parsed, key) {
-  if (key === "scenario") {
-    return parsed.scenario;
-  }
-  return key === "delay" || key === "repeat" ? "" : undefined;
-}
-
-function parseReadyDelay(raw) {
-  if (raw === undefined) {
-    return 500;
-  }
-  if (/^\d+$/u.test(raw) && Number(raw) <= 2_147_483_647) {
-    return Number(raw);
-  }
-  throw new Error(`invalid --ready-delay-ms: ${JSON.stringify(raw)}`);
 }
 
 function delayReady(ms) {
@@ -420,7 +375,7 @@ async function handlePrompt(frame) {
     return;
   }
   if (ABORT_SCENARIOS.has(scenario) && abortTurn === "idle") {
-    await holdTurn();
+    await (startMs > 0 ? delayHoldTurn() : holdTurn());
     return;
   }
   const turn = turns[scenario];
@@ -496,6 +451,15 @@ async function holdTurn() {
   abortTurn = "pending";
 }
 
+/** ack 后 startMs 才把开回合排进串行 queue（期间照常读 stdin）；出队时仍为 starting 才开，否则已被 abort 丢弃。 */
+function delayHoldTurn() {
+  abortTurn = "starting";
+  startTimer = setTimeout(() => {
+    startTimer = undefined;
+    queue = queue.then(() => (abortTurn === "starting" ? holdTurn() : null));
+  }, startMs);
+}
+
 /** 同 omp v18.0.10 先发 start 再由 wrapper.ts:332 询问；发完 select 即返回，不等应答以免堵住串行队列。 */
 async function openSelects(calls) {
   await emit({ type: "agent_start" });
@@ -567,7 +531,7 @@ async function settleSelects() {
 }
 
 /**
- * 一个回合只记第一个 abort：selecting 态延后，pending 态兑现，其余状态无帧。
+ * 一个回合只记第一个 abort：selecting 态延后，starting 态丢弃整轮，pending 态兑现，其余状态无帧。
  * IGNORE_ABORT 必须先于 selecting 分支判断，否则 r1 挂起时的 abort 会被延后兑现（#470）。
  */
 async function handleAbort(frame) {
@@ -578,10 +542,22 @@ async function handleAbort(frame) {
     deferredAbort ??= { id: frame.id };
     return;
   }
+  if (abortTurn === "starting") {
+    await dropStartingTurn(frame.id);
+    return;
+  }
   if (abortTurn !== "pending") {
     return;
   }
   await emitAbortedEnd(frame.id);
+}
+
+/** 回合开始前的 abort（#495 实测）：只回执 success，该回合永不发 agent_start/delta/message_end/agent_end。 */
+async function dropStartingTurn(id) {
+  clearTimeout(startTimer);
+  startTimer = undefined;
+  abortTurn = "done";
+  await emit({ id, type: "response", command: "abort", success: true });
 }
 
 async function emitAbortedEnd(id) {

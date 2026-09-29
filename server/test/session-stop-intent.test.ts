@@ -176,6 +176,11 @@ describe("stop intent before the dispatch receipt (#490)", () => {
       const early = stopBeforeDispatch(world);
       await Promise.all(early.stops);
       await early.prompt;
+      // #650: the intent's abort is written once the turn's agent_start arrives.
+      await waitFor(
+        () => (abortCount(spawnedAt(world, 0).stdin) === 1 ? true : undefined),
+        "abort",
+      );
       expect(frameTypes(afterPrompt(spawnedAt(world, 0).stdin))).toEqual(["abort"]);
 
       await waitForEvent(world, "turn.end");
@@ -205,7 +210,8 @@ describe("stop intent before the dispatch receipt (#490)", () => {
         "crashed process released",
       );
       await settle();
-      expect(abortCount(afterPrompt(spawnedAt(world, 0).stdin))).toBe(1);
+      // #650: `crash` exits before any agent_start, so the honored intent's abort is never written.
+      expect(abortCount(afterPrompt(spawnedAt(world, 0).stdin))).toBe(0);
       expect(turnEnds(world)).toEqual([ended(early.assistantMessageId, "failed")]);
       expect(ofType(sessionEvents(world), "error")).toHaveLength(1);
       const failed = await history(world);
