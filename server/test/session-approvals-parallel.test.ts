@@ -1,8 +1,10 @@
 /**
  * Issue #464 parallel approvals, per-approval timers and ring order (R11–R13, R19). Real fake-omp
- * `approval`/`approval-parallel` children; a test-side stdout gate holds `r2`'s select (R12) or
- * merges `tool_execution_start` with its select into one stdout write (R13, R19) so the frame-order
- * race is reproduced deterministically. SSE is the real endpoint; ids are `<epoch>:<seq>`.
+ * `approval`/`approval-parallel` children, which (like omp v18.0.10, #620) emit each select before
+ * its `tool_execution_start`; a test-side stdout gate holds `r2`'s select (R12), or merges the select
+ * with its tool start (R13) or the text deltas through the tool start (R19) into one stdout write so
+ * the frame-order race is reproduced deterministically. SSE is the real endpoint; ids are
+ * `<epoch>:<seq>`.
  */
 import { afterEach, describe, expect, it } from "vitest";
 import type { ChatEvent } from "../src/sessions/events.js";
@@ -14,6 +16,7 @@ import {
   assistantSteps,
   DENIED_OUTPUT,
   isSelect,
+  isTextDeltaLine,
   isToolStart,
   ofType,
   openApprovalWorld,
@@ -83,14 +86,17 @@ function pair(rows: ApprovalRow[]): [ApprovalRow, ApprovalRow] {
   return [first, second];
 }
 
-/** Waits until the gate holds the merged `tool_execution_start` + select, then writes both at once. */
+/** Waits until the gate holds the select and then its `tool_execution_start`, then writes all at once. */
 async function releaseMerged(world: ApprovalWorld): Promise<void> {
   const spawned = await waitFor(() => world.spawned[0], "gated child");
   await waitFor(
-    () => (spawned.gate.held().includes('"type":"extension_ui_request"') ? true : undefined),
-    "held tool start and select",
+    () => (isToolStart(spawned.gate.held()) ? true : undefined),
+    "held select and tool start",
   );
-  expect(isToolStart(spawned.gate.held())).toBe(true);
+  const held = spawned.gate.held();
+  const select = held.indexOf('"type":"extension_ui_request"');
+  expect(select).toBeGreaterThanOrEqual(0);
+  expect(select).toBeLessThan(held.indexOf('"type":"tool_execution_start"'));
   spawned.gate.release();
 }
 
@@ -141,6 +147,12 @@ describe("parallel approvals", () => {
         "deny",
         "allow",
       ]);
+      // Like omp v18.0.10 (#620): both selects precede both tool starts.
+      expect(
+        frames
+          .filter((frame) => frame.event === "approval.request" || frame.event === "step.start")
+          .map((frame) => frame.event),
+      ).toEqual(["approval.request", "approval.request", "step.start", "step.start"]);
       const turnEnds = frames.filter((frame) => frame.event === "turn.end");
       expect(turnEnds).toHaveLength(1);
       expect(frames[frames.length - 1]).toBe(turnEnds[0]);
@@ -203,14 +215,16 @@ describe("parallel approvals", () => {
 
 describe("approval ring order", () => {
   it(
-    "R13 request follows step.start, resolved is adjacent, and Last-Event-ID replays",
+    "R13 request precedes step.start, resolved follows it adjacently, and Last-Event-ID replays",
     REAL,
     async () => {
-      const world = await open("approval", { hold: isToolStart });
+      const world = await open("approval", { hold: isSelect("r1") });
       await prompted(world);
       await releaseMerged(world);
       const [row] = await waitForRows(world, 1);
       await waitForEvent(world, "approval.request");
+      // decide publishes resolved outside the pump: answer only once step.start(bash) is in the ring.
+      await waitForEvent(world, "step.start");
       if (row === undefined) {
         throw new Error("missing approval row");
       }
@@ -229,9 +243,9 @@ describe("approval ring order", () => {
         (frame) =>
           frame.event === "step.end" && frame.data.stepId === frames[stepStart]?.data.stepId,
       );
-      expect(stepStart).toBeGreaterThan(0);
-      expect(request).toBeGreaterThan(stepStart);
-      expect(resolved).toBeGreaterThan(request);
+      expect(request).toBeGreaterThan(0);
+      expect(stepStart).toBeGreaterThan(request);
+      expect(resolved).toBeGreaterThan(stepStart);
       expect(stepEnd).toBeGreaterThan(resolved);
       expect(frames[stepEnd]?.data.status).toBe("done");
       expect(frames.filter((frame) => frame.event.startsWith("approval."))).toHaveLength(2);
@@ -255,19 +269,26 @@ describe("approval ring order", () => {
       expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
       expect(new Set(seqs).size).toBe(seqs.length);
       expect(new Set(frames.map((frame) => frame.id.split(":")[0])).size).toBe(1);
-      expect(seqOf(frames[request]) + 1).toBe(seqOf(frames[resolved]));
+      expect(seqOf(frames[request]) + 1).toBe(seqOf(frames[stepStart]));
+      expect(seqOf(frames[stepStart]) + 1).toBe(seqOf(frames[resolved]));
 
       const afterRequest = await sse(world, frames[request]?.id);
-      expect(afterRequest[0]?.event).toBe("approval.resolved");
+      expect(afterRequest[0]?.event).toBe("step.start");
       expect(afterRequest.map((frame) => frame.id)).toEqual(
         frames.slice(request + 1).map((frame) => frame.id),
+      );
+      const afterStart = await sse(world, frames[stepStart]?.id);
+      expect(afterStart[0]?.event).toBe("approval.resolved");
+      expect(afterStart.map((frame) => frame.id)).toEqual(
+        frames.slice(stepStart + 1).map((frame) => frame.id),
       );
       const beforeRequest = await sse(world, frames[request - 1]?.id);
       expect(beforeRequest.map((frame) => [frame.id, frame.event])).toEqual(
         frames.slice(request).map((frame) => [frame.id, frame.event]),
       );
-      expect(beforeRequest.slice(0, 2).map((frame) => frame.event)).toEqual([
+      expect(beforeRequest.slice(0, 3).map((frame) => frame.event)).toEqual([
         "approval.request",
+        "step.start",
         "approval.resolved",
       ]);
     },
@@ -279,21 +300,26 @@ describe("approval ring order", () => {
     async () => {
       let world: ApprovalWorld | undefined;
       let decided: Promise<unknown> | undefined;
+      let requestsAtDecide: number | undefined;
+      // The select arrives in the same chunk as the held text deltas: the process layer has
+      // registered it before the pump publishes the first text.delta, which is where we settle.
       const onEvent = (sessionId: string, _epoch: number, event: ChatEvent<number>): void => {
         if (world === undefined || decided !== undefined) {
           return;
         }
-        if (event.type === "step.start" && event.data.name === "bash") {
+        if (event.type === "text.delta") {
+          requestsAtDecide = ofType(sessionEvents(world, sessionId), "approval.request").length;
           const [row] = approvalRows(world.fixture.db, sessionId);
           decided = world.fixture.supervisor.decide(sessionId, row?.id ?? -1, "allow");
           decided.catch(() => undefined);
         }
       };
-      world = await open("approval", { hold: isToolStart, onEvent });
+      world = await open("approval", { hold: isTextDeltaLine, onEvent });
       await prompted(world);
       await releaseMerged(world);
       await waitForTurn(world.fixture, world.session, "done");
       await expect(decided).resolves.toMatchObject({ decision: "allow" });
+      expect(requestsAtDecide).toBe(0);
 
       const order = sessionEvents(world)
         .map((entry) => entry.event)
@@ -303,7 +329,9 @@ describe("approval ring order", () => {
             (event.type === "step.start" && event.data.name === "bash"),
         )
         .map((event) => event.type);
-      expect(order).toEqual(["step.start", "approval.request", "approval.resolved"]);
+      // The settlement backfills the request inside the text.delta publication and publishes
+      // resolved a few microtasks later, before the pump has worked through to the tool start.
+      expect(order).toEqual(["approval.request", "approval.resolved", "step.start"]);
       expect(responses(spawnedAt(world, 0))).toEqual([
         { type: "extension_ui_response", id: "r1", value: "Approve" },
       ]);

@@ -1,7 +1,7 @@
 /**
  * Issue #460 approval select recognition and respondApproval (parent s1c-turn-control-governance 2.1a).
- * Oracles: fake-omp approval scenarios (#458, gated only under `--approval-mode write`, swapped from
- * the production `yolo` inside this file) with their probe `frames=` inbound record (#459), FakeChild
+ * Oracles: fake-omp approval scenarios (#458, gated only under `--approval-mode write`, which is the
+ * production spawn argv) with their probe `frames=` inbound record (#459), FakeChild
  * synthetic frames, and the injected clock for SessionRuntime idle/shutdown paths.
  */
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
@@ -37,7 +37,7 @@ const QUIET_MS = 300;
 const REAL = { timeout: 20_000 };
 const harness = createRpcHarness();
 
-/** Test-side argv swap (no-op once #481 ships `write`) plus a synchronous record of every stdin line. */
+/** The production argv as spawned plus a synchronous record of every stdin line. */
 interface Launch {
   real: RealFakeRuntime;
   spawnImpl: SpawnImpl;
@@ -63,11 +63,8 @@ function launch(scenario: string): Launch {
   const inner = real.runtime.spawnImpl;
   const out: Launch = { real, spawnImpl: inner, argv: [], written: [], watches: [] };
   out.spawnImpl = (command, args, options) => {
-    const swapped = args.map((arg, index) =>
-      index > 0 && args[index - 1] === "--approval-mode" && arg === "yolo" ? "write" : arg,
-    );
-    out.argv.push(swapped);
-    const child = inner(command, swapped, options);
+    out.argv.push([...args]);
+    const child = inner(command, args, options);
     recordStdin(child, out.written);
     out.watches.push(observeChild(child));
     return child;
@@ -433,6 +430,9 @@ describe("SessionRuntime never answers an outstanding approval", () => {
         throw new Error("turn ended before the r1 approval select");
       }
       if (isUi("r1")(step.value)) {
+        // omp v18.0.10 (#620): tool-1's start follows r1 unanswered, the last frame before an answer.
+        const start = await iterator.next();
+        expect(start.value).toMatchObject({ type: "tool_execution_start", toolCallId: "tool-1" });
         return iterator;
       }
     }

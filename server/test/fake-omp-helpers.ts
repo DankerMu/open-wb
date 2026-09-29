@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { type ChildObserver, observeChild } from "./child-stdio-helpers.js";
 
 const FAKE = fileURLToPath(new URL("./support/fake-omp.mjs", import.meta.url));
+/** 与生产 spawn argv（src/sessions/omp/process.ts）一致：缺省即 `--approval-mode write`（#620）。 */
 const OMP_FLAGS = [
   "--mode",
   "rpc",
@@ -18,7 +19,7 @@ const OMP_FLAGS = [
   "--model",
   "workbuddy/deepseek-v4.1-flash",
   "--approval-mode",
-  "yolo",
+  "write",
   "--no-extensions",
   "--no-lsp",
   "--no-pty",

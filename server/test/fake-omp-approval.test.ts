@@ -1,9 +1,10 @@
 /**
  * Issue #458 fake-omp approval scenarios (parent s1c-turn-control-governance 6.3).
  * 只有最后一个 `--approval-mode` 恰为 `write` 时，`approval`/`approval-parallel`/`approval-then-abort`
- * 才门控：先 tool_execution_start，再发 select{r1,r2}，每条应答只结束自己的调用；select 挂起时的
- * abort 延后到最后一条 tool_execution_end 之后兑现。帧形状钉在 omp v18.0.10（见 change tasks.md）。
- * 真实子进程；帧读取复用 fake-omp-helpers.ts。
+ * 才门控：同 omp v18.0.10 实测（#620），先发全部 select{r1,r2}，再发全部 tool_execution_start（不等
+ * 作答）；每条应答只结束自己的调用，每个 tool_execution_end 之后紧跟该调用的 toolResult message_end；
+ * select 挂起时的 abort 延后到最后一条应答之后兑现，审批回合以实测的空 aborted 回合收尾。
+ * 真实子进程；帧读取复用 fake-omp-helpers.ts（缺省 argv 即生产的 write，非门控基线显式传 yolo）。
  */
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -21,6 +22,7 @@ import {
 } from "./fake-omp-helpers.js";
 
 const WRITE = ["--approval-mode", "write"];
+const YOLO = ["--approval-mode", "yolo"];
 const QUIET_MS = 300;
 const ABORT = { type: "abort", id: "req_abort" };
 
@@ -58,31 +60,61 @@ const SELECT_R2 = {
   options: ["Approve", "Deny"],
 };
 
-function okEnd(toolCallId: string): Frame {
+/** 该调用的 toolResult message_end：content 同 end 的 result.content，isError 恒为布尔。 */
+function toolResult(toolCallId: string, text: string, isError: boolean): Frame {
+  const content = [{ type: "text", text }];
   return {
-    type: "tool_execution_end",
-    toolCallId,
-    toolName: "bash",
-    result: { content: [{ type: "text", text: "workbuddy-smoke" }], details: { exitCode: 0 } },
+    type: "message_end",
+    message: { role: "toolResult", toolCallId, toolName: "bash", content, isError },
   };
 }
 
-function deniedEnd(toolCallId: string): Frame {
-  return {
-    type: "tool_execution_end",
-    toolCallId,
-    toolName: "bash",
-    result: { content: [{ type: "text", text: "Tool call denied by user: bash" }], details: {} },
-    isError: true,
-  };
+/** 成功结束（无 isError 键）及其 toolResult。 */
+function okEnd(toolCallId: string): Frame[] {
+  return [
+    {
+      type: "tool_execution_end",
+      toolCallId,
+      toolName: "bash",
+      result: { content: [{ type: "text", text: "workbuddy-smoke" }], details: { exitCode: 0 } },
+    },
+    toolResult(toolCallId, "workbuddy-smoke", false),
+  ];
+}
+
+/** 拒绝结束（`isError: true`）及其 toolResult。 */
+function deniedEnd(toolCallId: string): Frame[] {
+  const text = "Tool call denied by user: bash";
+  return [
+    {
+      type: "tool_execution_end",
+      toolCallId,
+      toolName: "bash",
+      result: { content: [{ type: "text", text }], details: {} },
+      isError: true,
+    },
+    toolResult(toolCallId, text, true),
+  ];
 }
 
 const STOP = [
   { type: "message_end", message: { role: "assistant", content: [], stopReason: "stop" } },
   { type: "agent_end", messages: [], isTerminal: true },
 ];
+/** 审批回合经 abort 收尾（omp v18.0.10 Deny→abort 实测）：空 aborted 回合，再 agent_end 与回执。 */
 const ABORTED = [
-  { type: "message_end", message: { role: "assistant", content: [], stopReason: "aborted" } },
+  { type: "turn_end" },
+  { type: "turn_start" },
+  {
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [],
+      stopReason: "aborted",
+      errorMessage: "Interrupted by user",
+    },
+  },
+  { type: "turn_end" },
   { type: "agent_end", messages: [], isTerminal: true },
   { id: "req_abort", type: "response", command: "abort", success: true },
 ];
@@ -95,7 +127,7 @@ function delta(text: string): Frame {
   };
 }
 
-/** SELECTED(k)：agent_start、3 段 delta、toolUse message_end、k 个 start、k 个 select。 */
+/** SELECTED(k)：agent_start、3 段 delta、toolUse message_end、k 个 select、k 个 start。 */
 function selected(parallel: boolean): Frame[] {
   const blocks = [{ type: "toolCall", id: "tool-1", name: "bash", arguments: C1_ARGS }];
   if (parallel) {
@@ -107,7 +139,7 @@ function selected(parallel: boolean): Frame[] {
     delta("from "),
     delta("fake-omp"),
     { type: "message_end", message: { role: "assistant", content: blocks, stopReason: "toolUse" } },
-    ...(parallel ? [START_C1, START_C2, SELECT_R1, SELECT_R2] : [START_C1, SELECT_R1]),
+    ...(parallel ? [SELECT_R1, SELECT_R2, START_C1, START_C2] : [SELECT_R1, START_C1]),
   ];
 }
 
@@ -170,7 +202,7 @@ describe("fake-omp approval (--approval-mode write)", () => {
   it("gates bash behind an r1 select and completes normally after Approve", async () => {
     const session = await startGated("approval");
     const from = session.frames.length;
-    await step(session, reply("r1", { value: "Approve" }), [okEnd("tool-1"), ...STOP]);
+    await step(session, reply("r1", { value: "Approve" }), [...okEnd("tool-1"), ...STOP]);
     expect("isError" in asRecord(session.frames[from])).toBe(false);
     await closeSession(session);
   });
@@ -182,7 +214,7 @@ describe("fake-omp approval (--approval-mode write)", () => {
     { name: "cancelled with Approve", body: { cancelled: true, value: "Approve" } },
   ])("ends r1 with the denied frame then completes for $name", async ({ body }) => {
     const session = await startGated("approval");
-    await step(session, reply("r1", body), [deniedEnd("tool-1"), ...STOP]);
+    await step(session, reply("r1", body), [...deniedEnd("tool-1"), ...STOP]);
     await closeSession(session);
   });
 
@@ -195,7 +227,7 @@ describe("fake-omp approval (--approval-mode write)", () => {
       { id: "state-2", type: "response", command: "get_state", success: true },
     ]);
     await step(session, reply("no-such", { value: "Approve" }), []);
-    await step(session, reply("r1", { value: "Approve" }), [okEnd("tool-1"), ...STOP]);
+    await step(session, reply("r1", { value: "Approve" }), [...okEnd("tool-1"), ...STOP]);
     await step(session, reply("r1", { value: "Deny" }), []);
     await expectDefaultTurn(session);
   });
@@ -216,16 +248,16 @@ describe("fake-omp approval scenarios without write mode", () => {
   }
 
   it.each(["approval", "approval-parallel", "approval-then-abort"])(
-    "%s under yolo (default or last flag) matches normal byte for byte",
+    "%s under yolo (explicit or last flag) matches normal byte for byte",
     async (scenario) => {
-      const [baseline, byDefault, lastYolo] = await Promise.all([
+      const [baseline, explicit, lastYolo] = await Promise.all([
         runToAbortReply(),
-        runToAbortReply(scenario),
-        runToAbortReply(scenario, [...WRITE, "--approval-mode", "yolo"]),
+        runToAbortReply(scenario, YOLO),
+        runToAbortReply(scenario, [...WRITE, ...YOLO]),
       ]);
-      expect(byDefault).toEqual(baseline);
+      expect(explicit).toEqual(baseline);
       expect(lastYolo).toEqual(baseline);
-      for (const frames of [byDefault, lastYolo]) {
+      for (const frames of [explicit, lastYolo]) {
         expect(frames.some((frame) => frame.type === "extension_ui_request")).toBe(false);
         expect(frames.at(-1)).toEqual({
           type: "response",
@@ -241,8 +273,8 @@ describe("fake-omp approval scenarios without write mode", () => {
 describe("fake-omp approval-parallel", () => {
   it("answers each select independently: Deny r2 then Approve r1 completes", async () => {
     const session = await startGated("approval-parallel");
-    await step(session, reply("r2", { value: "Deny" }), [deniedEnd("tool-2")]);
-    await step(session, reply("r1", { value: "Approve" }), [okEnd("tool-1"), ...STOP]);
+    await step(session, reply("r2", { value: "Deny" }), deniedEnd("tool-2"));
+    await step(session, reply("r1", { value: "Approve" }), [...okEnd("tool-1"), ...STOP]);
     await closeSession(session);
   });
 
@@ -251,25 +283,25 @@ describe("fake-omp approval-parallel", () => {
       name: "abort then Deny r1, Deny r2",
       steps: [
         [ABORT, []],
-        [reply("r1", { value: "Deny" }), [deniedEnd("tool-1")]],
-        [reply("r2", { value: "Deny" }), [deniedEnd("tool-2"), ...ABORTED]],
+        [reply("r1", { value: "Deny" }), deniedEnd("tool-1")],
+        [reply("r2", { value: "Deny" }), [...deniedEnd("tool-2"), ...ABORTED]],
       ],
     },
     {
       name: "abort then Approve r1, Approve r2",
       steps: [
         [ABORT, []],
-        [reply("r1", { value: "Approve" }), [okEnd("tool-1")]],
-        [reply("r2", { value: "Approve" }), [okEnd("tool-2"), ...ABORTED]],
+        [reply("r1", { value: "Approve" }), okEnd("tool-1")],
+        [reply("r2", { value: "Approve" }), [...okEnd("tool-2"), ...ABORTED]],
       ],
     },
     {
       name: "Deny r2, repeated r2, abort, then Approve r1",
       steps: [
-        [reply("r2", { value: "Deny" }), [deniedEnd("tool-2")]],
+        [reply("r2", { value: "Deny" }), deniedEnd("tool-2")],
         [reply("r2", { value: "Approve" }), []],
         [ABORT, []],
-        [reply("r1", { value: "Approve" }), [okEnd("tool-1"), ...ABORTED]],
+        [reply("r1", { value: "Approve" }), [...okEnd("tool-1"), ...ABORTED]],
       ],
     },
   ] as { name: string; steps: [Frame, Frame[]][] }[])(
@@ -285,8 +317,8 @@ describe("fake-omp approval-parallel", () => {
 
   it("holds the turn after two denials until abort, ignoring a spare answer", async () => {
     const session = await startGated("approval-parallel");
-    await step(session, reply("r1", { value: "Deny" }), [deniedEnd("tool-1")]);
-    await step(session, reply("r2", { value: "Deny" }), [deniedEnd("tool-2")]);
+    await step(session, reply("r1", { value: "Deny" }), deniedEnd("tool-1"));
+    await step(session, reply("r2", { value: "Deny" }), deniedEnd("tool-2"));
     await step(session, reply("r1", { value: "Approve" }), []);
     await step(session, ABORT, ABORTED);
     await expectDefaultTurn(session);
@@ -297,7 +329,7 @@ describe("fake-omp approval-then-abort", () => {
   it("defers an abort received while r1 is pending until the Deny end frame", async () => {
     const session = await startGated("approval-then-abort");
     await step(session, ABORT, []);
-    await step(session, reply("r1", { value: "Deny" }), [deniedEnd("tool-1"), ...ABORTED]);
+    await step(session, reply("r1", { value: "Deny" }), [...deniedEnd("tool-1"), ...ABORTED]);
     await expectDefaultTurn(session);
   });
 
@@ -306,7 +338,7 @@ describe("fake-omp approval-then-abort", () => {
     { name: "Approve", body: { value: "Approve" }, end: okEnd("tool-1") },
   ])("holds after the $name end frame until a later abort", async ({ body, end }) => {
     const session = await startGated("approval-then-abort");
-    await step(session, reply("r1", body), [end]);
+    await step(session, reply("r1", body), end);
     await step(session, ABORT, ABORTED);
     await closeSession(session);
   });
@@ -323,7 +355,7 @@ describe("fake-omp approval-then-abort", () => {
     await session.wait(response(String(PROMPT.id), "prompt"));
     const ack = session.frames.findIndex(response(String(PROMPT.id), "prompt"));
     await expectNext(session, ack + 1, selected(false));
-    await step(session, reply("r1", { value: "Deny" }), [deniedEnd("tool-1"), ...ABORTED]);
+    await step(session, reply("r1", { value: "Deny" }), [...deniedEnd("tool-1"), ...ABORTED]);
     await closeSession(session);
   });
 });
@@ -365,13 +397,13 @@ describe("existing scenarios under --approval-mode write", () => {
   }
 
   it.each(cases.map((entry) => ({ name: entry.scenario ?? "normal", ...entry })))(
-    "$name emits identical frames with and without write",
+    "$name emits identical frames under yolo and write",
     async ({ scenario, script }) => {
-      const [plain, write] = await Promise.all([
-        run(scenario, script, []),
+      const [yolo, write] = await Promise.all([
+        run(scenario, script, YOLO),
         run(scenario, script, WRITE),
       ]);
-      expect(write).toEqual(plain);
+      expect(write).toEqual(yolo);
     },
   );
 });

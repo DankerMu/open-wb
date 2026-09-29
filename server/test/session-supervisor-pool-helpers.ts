@@ -66,13 +66,6 @@ export function expectWithinCap(liveAtSpawn: readonly number[][], cap: number): 
   expect(Math.max(0, ...liveAtSpawn.map((live) => live.length))).toBeLessThanOrEqual(cap - 1);
 }
 
-/** Every real spawn gets `--approval-mode write` appended (fake-omp: last occurrence wins). */
-export function gateApprovals(runtime: RuntimeOptions): void {
-  const inner = runtime.spawnImpl;
-  runtime.spawnImpl = (command, args, options) =>
-    inner(command, [...args, "--approval-mode", "write"], options);
-}
-
 type SpawnMode = "missing" | "throw" | "valid";
 
 export interface SpawnModes {

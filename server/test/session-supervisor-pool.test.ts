@@ -23,7 +23,6 @@ import {
   completed,
   expectCapacity,
   expectWithinCap,
-  gateApprovals,
   holdAfterHello,
   isLive,
   openPool,
@@ -231,7 +230,6 @@ describe("SessionSupervisor process pool admission", () => {
 
   it("A7 rejects with 503 while the only process holds a pending approval", REAL, async () => {
     const rt = createRealFakeRuntime("approval");
-    gateApprovals(rt.runtime);
     const stdout = tapStdout(rt.runtime);
     const liveAtSpawn = sampleSpawns(rt);
     const world = await openPool(rt.runtime, 1, 2);

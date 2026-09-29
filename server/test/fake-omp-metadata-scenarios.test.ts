@@ -38,6 +38,7 @@ const PARTS = ["先读需求，", "再列要点，", "最后作答。"];
 const TEXT = "先读需求，再列要点，最后作答。";
 const PARTIAL = { role: "assistant", content: [] };
 const WRITE_MODE = ["--approval-mode", "write"];
+const YOLO_MODE = ["--approval-mode", "yolo"];
 const ABORT = { type: "abort", id: "req_abort" };
 const PROMPT_2 = { id: "req_2", type: "prompt", message: "again" };
 const QUIET_MS = 250;
@@ -204,7 +205,7 @@ function expectThinkingTurn(frames: Frame[]): void {
 
 describe("fake omp thinking scenario", () => {
   it.each([
-    ["default argv (yolo)", []],
+    ["--approval-mode yolo", YOLO_MODE],
     ["--approval-mode write", WRITE_MODE],
   ])("emits thinking frames, text, stop with thinking block under %s", async (_label, extra) => {
     const session = await startPromptedSession({ scenario: "thinking", extraArgs: extra });
@@ -429,7 +430,7 @@ describe("fake omp edit-write scenario", () => {
 
   it("emits no extension_ui_request under yolo either", async () => {
     const dir = tempDir();
-    const { session, frames, edit, write } = await runEditWrite(dir, []);
+    const { session, frames, edit, write } = await runEditWrite(dir, YOLO_MODE);
     expectEditWriteTurn(frames, dir);
     expect(edit.exists && write.exists).toBe(true);
     expect(session.frames.some((frame) => frame.type === "extension_ui_request")).toBe(false);
