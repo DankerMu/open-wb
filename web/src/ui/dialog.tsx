@@ -1,6 +1,7 @@
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { type ReactElement, type ReactNode, type RefObject, useLayoutEffect, useRef } from "react";
 import { Button } from "./button.js";
+import { useEscapeFallback } from "./escape-fallback.js";
 import { Icon } from "./icon.js";
 
 type FocusTarget = RefObject<HTMLElement | null>;
@@ -127,8 +128,15 @@ export function DialogFrame({
   busy,
 }: DialogFrameProps) {
   const focus = useFocusHandoff({ initialFocus, returnFocus, hasTrigger: Boolean(trigger) });
-  const contentRef = useRef<HTMLDivElement>(null);
-  useBusyFocusRescue(contentRef, busy ?? false);
+  // ConfirmDialog 恒 closeOnEscape（Escape = 取消）；Dialog 由 dismissible 决定。
+  const fallback = useEscapeFallback({
+    canClose: closeOnEscape,
+    onOpenChange,
+    onEscape: (event) => {
+      if (!closeOnEscape) event.preventDefault();
+    },
+  });
+  useBusyFocusRescue(fallback.ref, busy ?? false);
   return (
     <DialogPrimitive.Root onOpenChange={onOpenChange} open={open}>
       {trigger && <DialogPrimitive.Trigger asChild>{trigger}</DialogPrimitive.Trigger>}
@@ -138,14 +146,13 @@ export function DialogFrame({
             aria-modal="true"
             className={`ui-dialog ui-dialog--${size}`}
             onCloseAutoFocus={focus.onCloseAutoFocus}
-            onEscapeKeyDown={(event) => {
-              if (!closeOnEscape) event.preventDefault();
-            }}
+            onEscapeKeyDown={fallback.onEscapeKeyDown}
+            onKeyDown={fallback.onKeyDown}
             onOpenAutoFocus={focus.onOpenAutoFocus}
             onPointerDownOutside={(event) => {
               if (!closeOnOverlay) event.preventDefault();
             }}
-            ref={contentRef}
+            ref={fallback.ref}
             role={role}
             {...(description ? {} : { "aria-describedby": undefined })}
           >
