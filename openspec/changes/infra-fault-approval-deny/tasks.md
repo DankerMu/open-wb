@@ -19,8 +19,8 @@
 
 ## 4. 审查修复（第 1 轮 test-evidence P2）
 
-- [ ] 4.1（编排者）spec delta 增 MODIFIED「审批事件」排除第 7 条；「封口」措辞改为「撤销」；残留从「双重故障」改为包含单一故障。
-- [ ] 4.2 F1a 在 infra 退役后与 `clock.advance` 后各断言 `approval.resolved` 为空；变异（`abandon` 内发布 `approval.resolved`）使 F1a 变红。
+- [x] 4.1（编排者）spec delta 增 MODIFIED「审批事件」排除第 7 条；「封口」措辞改为「撤销」；残留从「双重故障」改为包含单一故障。
+- [x] 4.2 F1a 在 infra 退役后与 `clock.advance` 后各断言 `approval.resolved` 为空；变异（`abandon` 内发布 `approval.resolved`）使 F1a 变红。
 
 ## Risk packs
 

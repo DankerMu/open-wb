@@ -14,6 +14,7 @@ import {
   approvalRows,
   auditCount,
   isToolStart,
+  ofType,
   openApprovalWorld,
   pendingApproval,
   prompted,
@@ -133,11 +134,13 @@ describe("infra-fault retire denies pending approvals (#619)", () => {
       expect(world.errors).toHaveLength(1);
       expect(containsMessage(world.errors[0], STEP_BLOCKED)).toBe(true);
       expectDenied(world, row);
+      expect(ofType(world.events, "approval.resolved")).toEqual([]);
 
       world.clock.advance(TTL_MS + 1);
       await settle();
 
       expectDenied(world, row);
+      expect(ofType(world.events, "approval.resolved")).toEqual([]);
       expect(world.errors).toHaveLength(1);
       expect(world.timersDueAt(T + TTL_MS)).toBe(0);
       await assertRetainedFaultOnShutdown(world.fixture, STEP_BLOCKED);
@@ -161,11 +164,13 @@ describe("infra-fault retire denies pending approvals (#619)", () => {
       expect(world.errors).toHaveLength(1);
       expect(containsMessage(world.errors[0], SINK_BROKEN)).toBe(true);
       expectDenied(world, row);
+      expect(ofType(world.events, "approval.resolved")).toEqual([]);
 
       world.clock.advance(TTL_MS + 1);
       await settle();
 
       expectDenied(world, row);
+      expect(ofType(world.events, "approval.resolved")).toEqual([]);
       expect(world.errors).toHaveLength(1);
       await assertRetainedFaultOnShutdown(world.fixture, SINK_BROKEN);
     },
