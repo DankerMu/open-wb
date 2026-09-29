@@ -16,7 +16,7 @@
 - [x] 3.1 `make check`（Node 24.13.1）、`bash scripts/size-guard.sh` 退出 0。
 - [x] 3.2 `openspec validate toast-escape-dispatch --strict --no-interactive` 通过。
 - [x] 3.3（编排者）真实浏览器 mobile-dark ≥10 次连跑（design「Required evidence」末条）。
-- [ ] 3.4（编排者）归档 PR：ADDED 需求，父 change 均无 ui-primitives delta，无需同步。
+- [x] 3.4（编排者）归档 PR：ADDED 需求，父 change 均无 ui-primitives delta，无需同步。
 
 ## Risk packs
 
