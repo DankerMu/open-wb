@@ -15,6 +15,7 @@ import {
   type ChatEvent,
   chatStateFromSnapshot,
   connectSessionEvents,
+  isUnknownTurn,
 } from "./stream.js";
 import { TERMINAL_REFRESH_GUIDANCE, useTurnActions } from "./turn-actions.js";
 import type {
@@ -25,7 +26,16 @@ import type {
   PendingCreateSend,
 } from "./types.js";
 
-type SessionEventHandle = { close(): void };
+type SessionEventHandle = { close(): void; resync(): void };
+type ReadyHistory = Extract<ChatHistoryState, { status: "ready" }>;
+/**
+ * `resync` marks the connection whose unknown-turn event asked for a fresh snapshot (issue 633).
+ * Set by a pure updater, consumed by an effect; every installed snapshot replaces the state and
+ * clears it.
+ */
+type PageHistoryState =
+  | Exclude<ChatHistoryState, ReadyHistory>
+  | (ReadyHistory & { resync?: { source: SessionEventHandle } });
 
 const MISSING_EVENT_SOURCE = "无法连接会话事件";
 
@@ -43,7 +53,7 @@ export function ChatPage() {
   const requestedSessionId = new URLSearchParams(location.search).get("session");
   const [draft, setDraft] = useState("");
   const [listState, setListState] = useState<ChatListState>({ status: "loading", client });
-  const [historyState, setHistoryState] = useState<ChatHistoryState>({ status: "idle" });
+  const [historyState, setHistoryState] = useState<PageHistoryState>({ status: "idle" });
   const [promptError, setPromptError] = useState<ChatOwnedAlert | null>(null);
   const [streamError, setStreamError] = useState<ChatOwnedAlert | null>(null);
   const [creating, setCreating] = useState(false);
@@ -202,7 +212,7 @@ export function ChatPage() {
         });
         return;
       }
-      const handle = connectSessionEvents(sessionId, {
+      const handle: SessionEventHandle = connectSessionEvents(sessionId, {
         EventSourceCtor,
         initialCursor: snapshot.streamCursor,
         loadSnapshot(signal) {
@@ -231,12 +241,14 @@ export function ChatPage() {
             ) {
               return current;
             }
-            return {
-              status: "ready",
-              client: current.client,
-              snapshot: current.snapshot,
-              view: applyChatEvent(current.view, event),
-            };
+            if (isUnknownTurn(current.view, event)) {
+              // Not reduced: the recovery snapshot brings the turn. One request per connection
+              // until a snapshot install replaces this state.
+              return current.resync?.source === handle
+                ? current
+                : { ...current, resync: { source: handle } };
+            }
+            return { ...current, view: applyChatEvent(current.view, event) };
           });
         },
         onError(error) {
@@ -581,6 +593,14 @@ export function ChatPage() {
       };
     });
   }, [client, historyState]);
+
+  const resyncRequest = historyState.status === "ready" ? historyState.resync : undefined;
+  useEffect(() => {
+    // Only the connection that delivered the unknown turn, and only while it is still current.
+    if (resyncRequest !== undefined && resyncRequest.source === sourceRef.current) {
+      resyncRequest.source.resync();
+    }
+  }, [resyncRequest]);
 
   const ownedHistory = ownsHistory(historyState, client, requestedSessionId);
   const listForClient =
