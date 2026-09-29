@@ -182,6 +182,8 @@ describe("stop on the dispatched path (#473)", () => {
     async () => {
       const world = await open("approval-then-abort");
       const row = await pendingApproval(world);
+      // The select precedes its tool start (#620): stop only once step.start(bash) is delivered.
+      await waitForEvent(world, "step.start");
       const { stdin } = spawnedAt(world, 0);
       await stop(world);
       expectAnswersThenAbort(stdin, [["r1", "Deny"]]);

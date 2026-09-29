@@ -37,11 +37,7 @@ import {
   waitFor,
   waitForTurn,
 } from "./session-supervisor-helpers.js";
-import {
-  gateApprovals,
-  presetSessionFile,
-  sampleSpawns,
-} from "./session-supervisor-pool-helpers.js";
+import { presetSessionFile, sampleSpawns } from "./session-supervisor-pool-helpers.js";
 
 export const FIRST = "first question";
 
@@ -247,7 +243,6 @@ export async function openCappedWorld(cap: number, mixed = false) {
   if (mixed) {
     mixedScenarios(rt);
   }
-  gateApprovals(rt.runtime);
   const liveAtSpawn = sampleSpawns(rt);
   rt.runtime.maxProcesses = cap;
   const world = await openRecordingSession(rt.runtime);

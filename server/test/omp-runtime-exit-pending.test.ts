@@ -1,9 +1,9 @@
 /**
  * Issue #462 SessionRuntime exit reporting, pending-approval idle suspension and approval
  * forwarding (parent s1c-turn-control-governance 2.2a). Oracles: Node's own child exit/signal
- * observation, the injected clock, the token book at callback time, the gated fake-omp approval
- * scenarios (argv swapped to `--approval-mode write` here) and FakeChild synthetic frames for the
- * two gate branches a real child cannot reach.
+ * observation, the injected clock, the token book at callback time, the fake-omp approval scenarios
+ * (gated by the production argv `--approval-mode write`) and FakeChild synthetic frames for the two
+ * gate branches a real child cannot reach.
  */
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
@@ -74,7 +74,7 @@ interface RealOptions {
   spawnImpl?: SpawnImpl;
 }
 
-/** Real fake-omp children; argv `yolo` becomes `write` so the approval scenarios open selects. */
+/** Real fake-omp children on the production argv (`--approval-mode write` gates approvals). */
 function openReal(options: RealOptions = {}): RealWorld {
   const real = createRealFakeRuntime(options.scenario);
   const tokens = createTokens(TOKEN);
@@ -90,11 +90,8 @@ function openReal(options: RealOptions = {}): RealWorld {
   };
   const base = options.spawnImpl ?? real.runtime.spawnImpl;
   const spawnImpl: SpawnImpl = (command, args, spawnOptions) => {
-    const writeMode = args.map((arg, at) =>
-      arg === "yolo" && args[at - 1] === "--approval-mode" ? "write" : arg,
-    );
-    world.argv.push(writeMode);
-    const child = base(command, writeMode, spawnOptions);
+    world.argv.push([...args]);
+    const child = base(command, args, spawnOptions);
     tapStdin(child, world.stdin);
     world.watches.push(observeChild(child));
     return child;
@@ -230,6 +227,14 @@ const isUi =
   (id: string) =>
   (frame: OmpFrame): boolean =>
     frame.type === "extension_ui_request" && frame.id === id;
+
+/** omp v18.0.10 (#620): tool-1's start follows the r1 select unanswered, the last frame before r1 is answered. */
+async function iterateToR1Start(runtime: SessionRuntime): Promise<AsyncIterator<OmpFrame>> {
+  const iterator = await iterateTo(runtime, isUi("r1"));
+  const start = await iterator.next();
+  expect(start.value).toMatchObject({ type: "tool_execution_start", toolCallId: "tool-1" });
+  return iterator;
+}
 
 const isPromptAck = (frame: OmpFrame): boolean =>
   frame.type === "response" && frame.command === "prompt";
@@ -392,7 +397,7 @@ describe("SessionRuntime pending approvals suspend idle expiry", () => {
     REAL,
     async () => {
       const world = openReal({ scenario: "approval", mark: true });
-      const iterator = await iterateTo(world.runtime, isUi("r1"));
+      const iterator = await iterateToR1Start(world.runtime);
       const next = pendingNext(iterator);
       const argv = world.argv[0] ?? [];
       expect(argv[argv.indexOf("--approval-mode") + 1]).toBe("write");
@@ -475,7 +480,7 @@ describe("SessionRuntime pending approvals suspend idle expiry", () => {
 describe("SessionRuntime forwards approvals of the active turn and passes answers through", () => {
   it("F1 forwards the real r1 request once, unchanged, and answers nothing", REAL, async () => {
     const world = openReal({ scenario: "approval" });
-    const iterator = await iterateTo(world.runtime, isUi("r1"));
+    const iterator = await iterateToR1Start(world.runtime);
     expect(world.forwarded).toEqual([{ id: "r1", title: T, tool: "bash" }]);
     expect(await settlesWithin(pendingNext(iterator), QUIET_MS)).toBe(false);
     expect(uiAnswers(world.stdin)).toEqual([]);

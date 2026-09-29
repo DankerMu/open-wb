@@ -1,6 +1,7 @@
 /**
  * Issue #464 approval-registration test plumbing. Every world runs the production assembly
- * (createApp → registerSessions) over real fake-omp children gated with `--approval-mode write`.
+ * (createApp → registerSessions) over real fake-omp children under the production argv
+ * (`--approval-mode write`, so the approval scenarios gate).
  * The spawn wrapper records each child's stdin frames and can hold stdout lines (released as one
  * write, line boundaries and EOF preserved). Oracles are SQLite rows, stdin frames, the recorded
  * onEvent stream and real SSE bytes, never supervisor internals.
@@ -24,7 +25,6 @@ import {
   type RecordingWorld,
   waitFor,
 } from "./session-supervisor-helpers.js";
-import { gateApprovals } from "./session-supervisor-pool-helpers.js";
 import type { TestClock } from "./support/omp-runtime.js";
 
 export const T = 1_700_000_000_000;
@@ -91,7 +91,6 @@ export async function openApprovalWorld(
   if (options.idleMs !== undefined) {
     rt.runtime.idleMs = options.idleMs;
   }
-  gateApprovals(rt.runtime);
   const spawned: SpawnedChild[] = [];
   let hold = options.hold;
   const inner = rt.runtime.spawnImpl;
@@ -373,6 +372,10 @@ export function seqOf(frame: SseFrame | undefined): number {
 
 export function isToolStart(line: string): boolean {
   return line.includes('"type":"tool_execution_start"');
+}
+
+export function isTextDeltaLine(line: string): boolean {
+  return line.includes('"type":"text_delta"');
 }
 
 export function isSelect(requestId: string): LineMatch {

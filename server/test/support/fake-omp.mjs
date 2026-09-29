@@ -35,7 +35,8 @@ const ABORT_SCENARIOS = new Set(["abort-ok", "abort-ignored", "slow-ready"]);
 const START_SCENARIOS = new Set(["abort-ok", "slow-ready"]);
 /**
  * 审批门控场景（#458）：仅最后一个 `--approval-mode` 恰为 write 时门控，否则同 normal。
- * approval-chain-abort-ignored（#470）：r1 应答后再开 C2/r2，r2 应答后永久挂起；abort 一律无帧。
+ * approval-chain-abort-ignored（#470）：r1 应答后再开 r2/C2，r2 应答后永久挂起；abort 一律无帧。
+ * 帧序同 omp v18.0.10 实测（#620）：select 先于 tool_execution_start；每个 end 后紧跟其 toolResult。
  */
 const APPROVAL_SCENARIOS = new Set([
   "approval",
@@ -460,7 +461,7 @@ function delayHoldTurn() {
   }, startMs);
 }
 
-/** 同 omp v18.0.10 先发 start 再由 wrapper.ts:332 询问；发完 select 即返回，不等应答以免堵住串行队列。 */
+/** 同 omp v18.0.10 实测：先发全部 select，再发全部 start（不等作答）；随即返回，以免堵住串行队列。 */
 async function openSelects(calls) {
   await emit({ type: "agent_start" });
   await emitDeltas(DELTAS);
@@ -474,11 +475,11 @@ async function openSelects(calls) {
     type: "message_end",
     message: { role: "assistant", content, stopReason: "toolUse" },
   });
-  for (const call of calls) {
-    await emit(toolStart(call));
-  }
   for (const [index, call] of calls.entries()) {
     await emitSelect(`r${index + 1}`, call);
+  }
+  for (const call of calls) {
+    await emit(toolStart(call));
   }
   abortTurn = "selecting";
 }
@@ -497,7 +498,7 @@ async function emitSelect(id, call) {
 
 /**
  * 未知或已答 id 静默忽略（rpc-mode.ts:280-285）；每条应答只结束自己的调用。
- * approval-chain-abort-ignored：C1 结束后同步开出 C2 与 r2 并返回，仍为 selecting。
+ * approval-chain-abort-ignored：C1 结束后同步开出 r2 与 C2 并返回，仍为 selecting。
  */
 async function handleSelect(frame) {
   const call = pendingSelects.get(frame.id);
@@ -507,10 +508,14 @@ async function handleSelect(frame) {
   pendingSelects.delete(frame.id);
   const approved = !frame.cancelled && frame.value === "Approve";
   approvedAny ||= approved;
-  await emit(toolEnd(call, approved));
+  const end = toolEnd(call, approved);
+  await emit(end);
+  const { content } = end.result;
+  const message = { role: "toolResult", toolCallId: call.id, toolName: call.name, content };
+  await emit({ type: "message_end", message: { ...message, isError: !approved } });
   if (scenario === "approval-chain-abort-ignored" && call === CALL_1) {
-    await emit(toolStart(CALL_2));
     await emitSelect("r2", CALL_2);
+    await emit(toolStart(CALL_2));
     return;
   }
   if (pendingSelects.size === 0) {
@@ -560,11 +565,21 @@ async function dropStartingTurn(id) {
   await emit({ id, type: "response", command: "abort", success: true });
 }
 
+/**
+ * 门控进程里只有审批回合会走到这里：按 omp v18.0.10 Deny→abort 实测多一个空 aborted 回合
+ * （turn_end、turn_start、带 errorMessage 的 aborted message_end、turn_end）。其余场景逐字节不变。
+ */
 async function emitAbortedEnd(id) {
-  await emit({
-    type: "message_end",
-    message: { role: "assistant", content: [], stopReason: "aborted" },
-  });
+  const message = { role: "assistant", content: [], stopReason: "aborted" };
+  if (gated) {
+    await emit({ type: "turn_end" });
+    await emit({ type: "turn_start" });
+    message.errorMessage = "Interrupted by user";
+  }
+  await emit({ type: "message_end", message });
+  if (gated) {
+    await emit({ type: "turn_end" });
+  }
   await emit({ type: "agent_end", messages: [], isTerminal: true });
   await emit({ id, type: "response", command: "abort", success: true });
   abortTurn = "done";

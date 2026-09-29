@@ -1,8 +1,9 @@
 /**
  * Issue #470 fake-omp `approval-chain-abort-ignored`（父 s1c-turn-control-governance 6.6）。
- * 仅最后一个 `--approval-mode` 恰为 write 时门控：开头同 `approval`（r1），r1 任意应答后依次发 C1 结束帧、
- * C2 start 与 r2 select；r2 应答后发 C2 结束帧并永久挂起。任何时刻的 abort 都不产生帧、不被延后兑现；
- * 进程只在 stdin 关闭或 SIGTERM 时退出。帧形状钉在 omp v18.0.10（见 change tasks.md）。真实子进程。
+ * 仅最后一个 `--approval-mode` 恰为 write 时门控：开头同 `approval`（r1 select 先于 C1 start，#620），
+ * r1 任意应答后依次发 C1 结束帧、C1 toolResult、r2 select 与 C2 start；r2 应答后发 C2 结束帧与其
+ * toolResult 并永久挂起。任何时刻的 abort 都不产生帧、不被延后兑现；进程只在 stdin 关闭或 SIGTERM 时
+ * 退出。帧形状钉在 omp v18.0.10（见 change tasks.md）。真实子进程；缺省 argv 即生产的 write。
  */
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { once } from "node:events";
@@ -25,6 +26,7 @@ import {
 const FAKE = fileURLToPath(new URL("./support/fake-omp.mjs", import.meta.url));
 const CHAIN = "approval-chain-abort-ignored";
 const WRITE = ["--approval-mode", "write"];
+const YOLO = ["--approval-mode", "yolo"];
 const QUIET_MS = 300;
 const ABORT = { type: "abort", id: "req_abort" };
 
@@ -65,7 +67,15 @@ function end(call: Call, approved: boolean): Frame {
   return { ...base, result: { content, details: {} }, isError: true };
 }
 
-/** ack 之后的门控前缀：agent_start、三段 delta、toolUse message_end（仅 C1 块）、C1 start、r1 select。 */
+/** end 之后紧跟的 toolResult message_end：content 同 end 的 result.content，isError 恒为布尔。 */
+function ended(call: Call, approved: boolean): Frame[] {
+  const frame = end(call, approved);
+  const { content } = asRecord(frame.result);
+  const message = { role: "toolResult", toolCallId: call.id, toolName: "bash", content };
+  return [frame, { type: "message_end", message: { ...message, isError: !approved } }];
+}
+
+/** ack 之后的门控前缀：agent_start、三段 delta、toolUse message_end（仅 C1 块）、r1 select、C1 start。 */
 const PREFIX: Frame[] = [
   { type: "agent_start" },
   ...["Hello ", "from ", "fake-omp"].map((delta) => ({
@@ -81,13 +91,13 @@ const PREFIX: Frame[] = [
       stopReason: "toolUse",
     },
   },
-  start(C1),
   select("r1", C1),
+  start(C1),
 ];
 
-/** r1 应答后恰好新增的三帧。 */
+/** r1 应答后恰好新增的四帧。 */
 function chained(approved: boolean): Frame[] {
-  return [end(C1, approved), start(C2), select("r2", C2)];
+  return [...ended(C1, approved), select("r2", C2), start(C2)];
 }
 
 function answer(id: string, reply: Frame): Frame {
@@ -167,7 +177,7 @@ describe("fake-omp approval-chain-abort-ignored under write", () => {
     await send(session, answer("r1", first), chained(firstOk));
     expect("isError" in asRecord(session.frames[c1End])).toBe(!firstOk);
     const c2End = session.frames.length;
-    await send(session, answer("r2", second), [end(C2, secondOk)]);
+    await send(session, answer("r2", second), ended(C2, secondOk));
     expect("isError" in asRecord(session.frames[c2End])).toBe(!secondOk);
     await send(session, ABORT, []);
     expectUnfinished(session);
@@ -223,7 +233,7 @@ describe("fake-omp approval-chain-abort-ignored under write", () => {
   it.each(timings)("never honours an abort written %s", async (_timing, reachR2) => {
     const session = await reachR2();
     // TAIL：只有 r2 答完才会结算，错误记下的延后 abort 只在这一步暴露。
-    await send(session, answer("r2", { value: "Deny" }), [end(C2, false)]);
+    await send(session, answer("r2", { value: "Deny" }), ended(C2, false));
     expectUnfinished(session);
   });
 
@@ -296,8 +306,8 @@ describe("fake-omp approval-chain-abort-ignored without write", () => {
   it("behaves exactly like normal under yolo, including the last --approval-mode", async () => {
     const [baseline, yolo, lastYolo] = await Promise.all([
       settledFrames(),
-      settledFrames({ scenario: CHAIN }),
-      settledFrames({ scenario: CHAIN, extraArgs: [...WRITE, "--approval-mode", "yolo"] }),
+      settledFrames({ scenario: CHAIN, extraArgs: YOLO }),
+      settledFrames({ scenario: CHAIN, extraArgs: [...WRITE, ...YOLO] }),
     ]);
     for (const frames of [yolo, lastYolo]) {
       expect(frames).toEqual(baseline);
