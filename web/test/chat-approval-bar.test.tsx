@@ -618,6 +618,27 @@ describe("approval bar: ownership fences", () => {
     await flush();
     expect(calls(fetchMock, PROMPT_PATH)).toHaveLength(1);
 
+    // #633：新回合事件先于 202 到达且末条助手已 done，页面不本地追加，而是恢复一次快照；
+    // 权威快照（游标 1:2）带助手 2 与待审批 9，审批条随快照装入后出现。
+    page.snapshot = {
+      session: { ...done.session, status: "running" },
+      messages: [
+        ...done.messages,
+        { ...historyUser, id: 1, content: "继续", createdAt: 1 },
+        {
+          ...historyUser,
+          id: 2,
+          role: "assistant",
+          status: "running",
+          content: "",
+          createdAt: 2,
+          approvals: [approval(9)],
+        },
+      ],
+      streamCursor: { epoch: 1, seq: 2 },
+    };
+    // 首次加载 + open 恢复。
+    expect(calls(fetchMock, MESSAGES)).toHaveLength(2);
     act(() => {
       source.emitData("turn.start", "1:1", { messageId: 2 });
     });
@@ -630,6 +651,9 @@ describe("approval bar: ownership fences", () => {
         expiresAt: T0 + 60_000,
       });
     });
+    await flush();
+    expect(calls(fetchMock, MESSAGES)).toHaveLength(3);
+    expect(assistants()).toHaveLength(2);
     const turn = assistants()[1] as HTMLElement;
     const group = within(turn).getByRole("group", { name: PENDING });
     fireEvent.click(button(group, "允许"));
@@ -637,12 +661,8 @@ describe("approval bar: ownership fences", () => {
     expect(bodies(fetchMock, approvalPath(9))).toEqual([{ decision: "allow" }]);
 
     const reads = calls(fetchMock, MESSAGES).length;
+    expect(reads).toBe(3);
     const sources = FakeEventSource.instances.length;
-    page.snapshot = {
-      ...done,
-      session: { ...done.session, status: "running" },
-      streamCursor: { epoch: 1, seq: 2 },
-    };
     prompt.resolve(jsonResponse({ userMessageId: 1, assistantMessageId: 2 }, 202));
     await flush();
     expect(calls(fetchMock, MESSAGES)).toHaveLength(reads + 1);

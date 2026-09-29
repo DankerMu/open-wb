@@ -270,6 +270,27 @@ function replaceAssistant(
   };
 }
 
+const SETTLED_TURN: ReadonlySet<ChatMessage["status"]> = new Set(["done", "failed", "stopped"]);
+
+/**
+ * True when `event` targets a message this view does not hold while its last assistant has
+ * settled: a turn the view never saw (e.g. another tab regenerated). The page resyncs instead
+ * of letting the reducer append it (issue 633).
+ */
+export function isUnknownTurn(view: ChatState, event: ChatEvent): boolean {
+  const { messageId } = event.data;
+  let lastAssistant: ChatMessageView | undefined;
+  for (const message of view.messages) {
+    if (message.id === messageId) {
+      return false;
+    }
+    if (message.role === "assistant") {
+      lastAssistant = message;
+    }
+  }
+  return lastAssistant !== undefined && SETTLED_TURN.has(lastAssistant.status);
+}
+
 export function connectSessionEvents(sessionId: string, options: SessionEventsOptions) {
   const ownedInitial = copyCursor(options.initialCursor);
   const source = new options.EventSourceCtor(
@@ -555,7 +576,12 @@ export function connectSessionEvents(sessionId: string, options: SessionEventsOp
     return !closed && token === generation;
   }
 
-  return { close };
+  /** On-demand full-snapshot recovery (same path as open, without `onGap`); no-op once closed. */
+  function resync() {
+    beginRecovery();
+  }
+
+  return { close, resync };
 }
 
 function copyCursor(cursor: ChatStreamCursor): ChatStreamCursor {
