@@ -161,6 +161,30 @@ export class ApprovalRegistry {
     return true;
   }
 
+  /**
+   * Infra-fault retire (#619), synchronous and never throws: for each of the slot's registrations,
+   * revoke timer, registration and pending first, then CAS-settle `deny` with its audit. No frame
+   * (the process is exiting), no event (the generation is revoked; its sink may be the fault). A
+   * settled or vanished row is a silent miss; any other failed transaction is returned to retain.
+   */
+  abandon(slot: Slot): Error[] {
+    const failures: Error[] = [];
+    const owned = [...this.#registrations].filter(([, registration]) => registration.slot === slot);
+    for (const [approvalId, registration] of owned) {
+      this.#clock.clearTimeout(registration.timer);
+      this.#registrations.delete(approvalId);
+      slot.runtime.clearPending(approvalId);
+      try {
+        this.#store.settleApproval(registration.sessionId, approvalId, "deny", this.#clock.now());
+      } catch (error) {
+        if (!(error instanceof HttpError && error.code === "not_found")) {
+          failures.push(asError(error));
+        }
+      }
+    }
+    return failures;
+  }
+
   /** Shutdown: revoke every approval timer; registrations stay for the pumps' terminal deny. */
   close(): void {
     for (const registration of this.#registrations.values()) {

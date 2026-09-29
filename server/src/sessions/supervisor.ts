@@ -713,6 +713,9 @@ export class SessionSupervisor {
       generation.revoked = true;
       sealGeneration(slot, generation);
     }
+    if (slot.infraFaulted) {
+      for (const error of this.#approvals.abandon(slot)) this.#retain(error);
+    }
     await slot.retiring;
     this.#pool.release(slot.entry);
     if (this.#slots.get(slot.sessionId) === slot) {
