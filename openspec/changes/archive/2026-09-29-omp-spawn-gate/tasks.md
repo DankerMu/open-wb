@@ -19,8 +19,8 @@
 
 - [x] 3.1 `make check`（Node 24.13.1）、`bash scripts/size-guard.sh` 退出 0；`wc -l` 记录 `runtime.ts`、`supervisor.ts`、`process.ts`、`spawn-gate.ts`。
 - [x] 3.2 `openspec validate omp-spawn-gate --strict --no-interactive` 通过。
-- [ ] 3.3（编排者）测试 VPS 复测：官方 omp v18.0.10 linux-x64（SHA256 校验）+ 编译产物，缺省配置冷态 16 会话并发 prompt 多轮无握手超时 502；同机 master 对照。结果进 PR，不写机器地址或用户名。
-- [ ] 3.4（编排者）归档 PR：定点同步父 change `s1c-turn-control-governance` 与 `s1c-session-metadata-presentation` 的 http-service-skeleton delta 中「服务启动与装配」「Shared agent module assembly」两条需求。
+- [x] 3.3（编排者）测试 VPS 复测：官方 omp v18.0.10 linux-x64（SHA256 校验）+ 编译产物，缺省配置冷态 16 会话并发 prompt 多轮无握手超时 502；同机 master 对照。结果进 PR，不写机器地址或用户名。
+- [x] 3.4（编排者）归档 PR：定点同步父 change `s1c-turn-control-governance` 与 `s1c-session-metadata-presentation` 的 http-service-skeleton delta 中「服务启动与装配」「Shared agent module assembly」两条需求。
 
 ## Risk packs
 
@@ -40,5 +40,5 @@
 
 ## 通用纪律
 
-- [ ] 源码边界：`omp/spawn-gate.ts`（新）、`omp/runtime.ts`、`pool.ts`、`supervisor.ts`、`branching.ts`（仅在必要时接线）、`sessions/index.ts`、`app.ts`、`server.ts`、`agent-config.ts`、`docs/architecture/system.md`；`omp/process.ts`、store、approvals、web、fake-omp 零 diff。确需改动时先停下上报。
-- [ ] 不提交、不推送、不开 PR；报告改动文件、验证命令与结果、偏离（逐条写「内容/原因/影响」，没有就写「无偏离」）。
+- [x] 源码边界：`omp/spawn-gate.ts`（新）、`omp/runtime.ts`、`pool.ts`、`supervisor.ts`、`branching.ts`（仅在必要时接线）、`sessions/index.ts`、`app.ts`、`server.ts`、`agent-config.ts`、`docs/architecture/system.md`；`omp/process.ts`、store、approvals、web、fake-omp 零 diff。确需改动时先停下上报。
+- [x] 不提交、不推送、不开 PR；报告改动文件、验证命令与结果、偏离（逐条写「内容/原因/影响」，没有就写「无偏离」）。
