@@ -36,6 +36,7 @@ import {
   throwCollected,
   translateSupervisorError,
 } from "./supervisor-faults.js";
+import { type SessionStreamLiveHandler, SubscriberTable } from "./supervisor-subscribers.js";
 import type { TokenRegistry } from "./tokens.js";
 import { ControlClaims, drain, persistEvent, TurnStops } from "./turn-control.js";
 
@@ -46,7 +47,7 @@ export interface StreamCursor {
   seq: number | null;
 }
 
-export type SessionStreamLiveHandler = (event: RetainedEvent) => void;
+export type { SessionStreamLiveHandler } from "./supervisor-subscribers.js";
 
 export interface SessionStreamSubscription {
   mode: "replay" | "gap" | "fresh";
@@ -107,10 +108,7 @@ export class SessionSupervisor {
     | ((sessionId: string, epoch: number, event: ChatEvent<number>) => void)
     | undefined;
   readonly #slots = new Map<string, Slot>();
-  readonly #subscribers = new Map<
-    string,
-    Map<SessionStreamLiveHandler, (() => void) | undefined>
-  >();
+  readonly #subscribers = new SubscriberTable();
   readonly #claims = new Map<number, Slot>();
   readonly #admissions = new Set<Promise<unknown>>();
   readonly #pumps = new Set<Promise<void>>();
@@ -244,26 +242,25 @@ export class SessionSupervisor {
         unsubscribe() {},
       };
     }
-    const listeners = this.#listenersFor(sessionId);
-    listeners.set(deliver, onEnd);
+    this.#subscribers.add(sessionId, deliver, onEnd);
     let replay: RingRead;
     try {
       replay = this.#readReplay(sessionId, lastEventId);
     } catch (error) {
-      this.#removeListener(sessionId, deliver);
+      this.#subscribers.remove(sessionId, deliver);
       throw error;
     }
     return {
       mode: replay.mode,
       replay: replay.events,
       unsubscribe: () => {
-        this.#removeListener(sessionId, deliver);
+        this.#subscribers.remove(sessionId, deliver);
       },
     };
   }
 
   sessionStreamSubscriberCount(sessionId: string): number {
-    return this.#subscribers.get(sessionId)?.size ?? 0;
+    return this.#subscribers.count(sessionId);
   }
 
   /** Admitted, not yet released process entries (read-only observation). */
@@ -317,26 +314,21 @@ export class SessionSupervisor {
   }
 
   /**
-   * Deletion's recycle primitive: retires the live generation (bounded runtime shutdown, token
-   * revocation, cap release, generation seal), awaits native exit, drops the slot and its ring,
-   * then ends every subscriber through its onEnd without publishing an event. Writes no SQLite
-   * row; without a live slot it only ends subscribers. Precondition: the session is not running
-   * (`activeTurn === null`) — a running turn's shutdown failure path would persist and publish.
+   * Deletion's recycle primitive: first drains the in-flight pump (so a terminal event persisted
+   * just before still reaches the subscribers, #526), then retires the live generation (bounded
+   * runtime shutdown, token revocation, cap release, generation seal), awaits native exit, drops
+   * the slot and its ring, then ends every subscriber through its onEnd without publishing an
+   * event. Writes no SQLite row; without a live slot it only ends subscribers. Precondition: the
+   * session is not running (`activeTurn === null`) — a running turn's shutdown failure path would
+   * persist and publish.
    */
   async retire(sessionId: string): Promise<void> {
     const slot = this.#slots.get(sessionId);
     if (slot !== undefined) {
+      await slot.pump?.catch(() => undefined);
       await this.#retireSlot(slot);
     }
-    const listeners = this.#subscribers.get(sessionId);
-    this.#subscribers.delete(sessionId);
-    for (const onEnd of listeners?.values() ?? []) {
-      try {
-        onEnd?.();
-      } catch {
-        /* one subscriber's close cannot keep the others open (mirrors #fanout) */
-      }
-    }
+    this.#subscribers.endAll(sessionId);
   }
 
   handleFlushError(failure: FlushFailure): void {
@@ -538,6 +530,8 @@ export class SessionSupervisor {
     slot.pump = pump;
     this.#pumps.add(pump);
     void pump.finally(() => {
+      // Every non-fault pump exit already released its turn: a still-active one is an orphan.
+      this.#store.faultTurn(assistantMessageId, new Error("turn outlived its event pump"));
       this.#pumps.delete(pump);
       releasePump(slot, pumpGeneration);
       this.#stops.release(assistantMessageId);
@@ -689,7 +683,7 @@ export class SessionSupervisor {
       generation.ring.push(event);
       const recorded = generation.ring.latest();
       if (recorded !== undefined) {
-        this.#fanout(slot.sessionId, recorded);
+        this.#subscribers.fanout(slot.sessionId, recorded);
       }
     }
     if (this.#onEvent === undefined) {
@@ -720,41 +714,6 @@ export class SessionSupervisor {
       return { mode: "fresh", events: [] };
     }
     return generation.ring.since(lastEventId, { turnRunning });
-  }
-
-  #listenersFor(sessionId: string): Map<SessionStreamLiveHandler, (() => void) | undefined> {
-    const existing = this.#subscribers.get(sessionId);
-    if (existing !== undefined) {
-      return existing;
-    }
-    const created = new Map<SessionStreamLiveHandler, (() => void) | undefined>();
-    this.#subscribers.set(sessionId, created);
-    return created;
-  }
-
-  #removeListener(sessionId: string, deliver: SessionStreamLiveHandler): void {
-    const listeners = this.#subscribers.get(sessionId);
-    if (listeners === undefined) {
-      return;
-    }
-    listeners.delete(deliver);
-    if (listeners.size === 0) {
-      this.#subscribers.delete(sessionId);
-    }
-  }
-
-  #fanout(sessionId: string, event: RetainedEvent): void {
-    const listeners = this.#subscribers.get(sessionId);
-    if (listeners === undefined) {
-      return;
-    }
-    for (const deliver of [...listeners.keys()]) {
-      try {
-        deliver(event);
-      } catch {
-        this.#removeListener(sessionId, deliver);
-      }
-    }
   }
 
   async #retireSlot(slot: Slot): Promise<void> {

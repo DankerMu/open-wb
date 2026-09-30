@@ -36,6 +36,20 @@ export function decodeNullableText(decoder: TextDecoder, bytes: Uint8Array | nul
   return bytes === null ? null : decoder.decode(bytes);
 }
 
+/** A prompt admission's session title: the text's first 18 code points. */
+export function titlePrefix(text: string): string {
+  let end = 0;
+  let count = 0;
+  for (const character of text) {
+    end += character.length;
+    count += 1;
+    if (count === 18) {
+      return text.slice(0, end);
+    }
+  }
+  return text;
+}
+
 export function toMessageView(
   row: MessageDbRow,
   decoder: TextDecoder,

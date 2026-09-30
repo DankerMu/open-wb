@@ -186,6 +186,55 @@ export function cancelTimer(turn: Turn): void {
   }
 }
 
+/** Appends the turn's buffered deltas; a failure faults the turn (and its release signal). */
+export function flushPending(db: DatabaseSync, turn: Turn): void {
+  if (turn.pending.length === 0) {
+    return;
+  }
+  const content = turn.pending.join("");
+  try {
+    runOwnedTransaction(db, "delta flush rollback failed", () => {
+      requireChanges(
+        db
+          .prepare(
+            "UPDATE chat_messages SET content = content || ? WHERE id = ? AND session_id = ? AND status = 'running'",
+          )
+          .run(content, turn.assistantMessageId, turn.sessionId).changes,
+        1,
+        "delta flush",
+      );
+    });
+  } catch (error) {
+    cancelTimer(turn);
+    faultTurnSignal(turn, error);
+    throw error;
+  }
+  turn.pending = [];
+  turn.pendingBytes = 0;
+  turn.faulted = false;
+  turn.fault = undefined;
+  cancelTimer(turn);
+}
+
+/** The Turn's one-shot release signal (#526); a rejection nobody awaits is consumed here. */
+export function turnSignal(): Pick<Turn, "released" | "release" | "fail"> {
+  let release!: () => void;
+  let fail!: (error: unknown) => void;
+  const released = new Promise<void>((resolve, reject) => {
+    release = resolve;
+    fail = reject;
+  });
+  released.catch(() => undefined);
+  return { released, release, fail };
+}
+
+/** Marks the turn faulted with `error` and rejects its release signal (no-op once settled). */
+export function faultTurnSignal(turn: Turn, error: unknown): void {
+  turn.faulted = true;
+  turn.fault = error;
+  turn.fail(error);
+}
+
 /**
  * Non-answer settlement inside the caller's owned transaction: each NULL row of the message, in
  * id order, becomes `deny` with its audit row. Only when rows exist does a missing emit throw.
@@ -300,8 +349,7 @@ export function finishOwnedTurn(
       return settlePendingForMessage(db, emit, turn.assistantMessageId, "deny", now);
     });
   } catch (error) {
-    turn.faulted = true;
-    turn.fault = error;
+    faultTurnSignal(turn, error);
     throw error;
   }
   turn.pending = [];
@@ -317,6 +365,7 @@ export function releaseTurn(
   activeSteps: Map<number, number>,
 ): void {
   cancelTimer(turn);
+  turn.release();
   activeTurns.delete(turn.assistantMessageId);
   activeSessions.delete(turn.sessionId);
   for (const [stepId, assistantMessageId] of activeSteps) {

@@ -27,7 +27,7 @@
     - 删除 4.3b 的过渡 409 分支。
 - **并发推理**：
   - DELETE 持有占用期间：prompt（`rest.ts:193`）、regenerate/fork（`branching.ts:73/206`）、第二个 DELETE（`controlHeld`）均 409；用户 stop 不经占用检查（`rest.ts:222-225`），`supervisor.stop` 汇入 DELETE 的 entry → 202 `{}`、无第二帧 `abort`、无重复 `deny`。
-  - (a) abort-ok：`abort` → `agent_end` → pump `#commit` 落库 `stopped`（释放 store 回合，`turnReleased` resolve）→ 可能 `await approvals.settled` → `#publish` 扇出 `turn.end` → pump 结束。DELETE 续体在释放后运行，加入墓碑、`retire` 先等 pump，故订阅者先收到 `turn.end{stopped}`，再被 `onEnd` 结束。
+  - (a) abort-ok：`abort` → `agent_end` → pump `#commit` 落库 `stopped`（释放 store 回合，`turnReleased` resolve）→ 可能 `await approvals.settled` → `#publish` 扇出 `turn.end` → pump 结束。DELETE 续体在释放后运行，加入墓碑、`retire` 先等 pump，故订阅者先收到 `turn.end{stopped}`，再被 `onEnd` 结束。（实现中查明：即使不排空，`sealGeneration` 在 `pumpCount > 0` 时不封存（`pool.ts:311`），订阅者也要等 `#retireSlot` 完成才被结束，顺序同样成立但依赖时序；排空把它变成构造保证。）
   - (a) abort-ignored：grace 到期 `#expire` 置 `expired` 并 retire slot（封存 generation，`turn.end` 不再扇出——A 既有语义），pump 走 catch → `applyStop` → 落库 `stopped` → 释放 → DELETE 继续；`retire` 汇入已在进行的退役。
   - (b) 停止意图 + 获取失败：`stop` 在 `dispatching` 阶段登记意图后 resolve；获取失败 → `#prompt` 释放 stop entry 并拒绝 → `rest.ts:200` `rollbackPrompt` 移除受理对、释放 store 回合 → `turnReleased` resolve → DELETE 以非 running 状态继续；无 pump、无 `abort` 帧。
   - (b') 停止意图 + 获取成功：`dispatched()` 写出意图欠下的 `abort`，随后同 (a)。
@@ -35,7 +35,7 @@
 - **Sibling surfaces**：web 删除确认框的 pending 态（7.2b）依赖本刀的最长等待（约 8 s grace + 退役升级）；SSE 订阅者收到 `turn.end{stopped}` 后因 `onEnd` 结束；`GET /api/audit` 可见 `session.approval decision=deny` 与 `session.delete`。
 - **残余**：
   - 终态落库失败后的会话保持 running/faulted，DELETE 反复 5xx 直至重启对账——与 A 的 infraFault 语义一致，不在本刀修复。
-  - abort-ignored 路径订阅者收不到 `turn.end`（A 既有：grace 退回封存 generation 后不再发布）。
+  - abort-ignored 路径订阅者是否收到宽限后的 `turn.end{stopped}`：证据 2 在 onEvent 上观察到了该事件，SSE 侧未单独取证。
 - **Required evidence**（`server/test/session-delete.test.ts`，必要时拆出同目录新测试文件；production `createApp` + 真实 fake-omp 场景（`createRealFakeRuntime` 的 `--scenario` 选择，`session-supervisor-helpers.ts:88-120`）或受控 runtime + `app.inject()` + SSE 夹具；可复用 `session-stop-helpers.ts`/`session-stop-intent-helpers.ts`（含 `handshakeBound` `:84`）的既有造数；会话文件须在所有者会话目录内（沿用 #525 造数约束）；时钟推进用注入时钟；触发 retained fault 的用例按 `session-stop-faults.test.ts` 用 `closeAfterRetainedFault` 收尾。「删除前一刻的状态」经 `CREATE TEMP TABLE` + `CREATE TEMP TRIGGER … BEFORE DELETE ON chat_sessions` 把 `OLD.status` 与该会话助手消息状态写入临时表观察。RED：除证据 11（门禁）外全部在实现前红（过渡 409、`turnReleased`/`faultTurn` 不存在）；证据 5 中「占用下并发 409」本身为 characterization，其「原 DELETE 完成 204」为 RED；以实际运行记录）：
   1. 挂起审批 + 停止（「删除运行中的会话先停止」第一条）：fake `approval-then-abort` + `--approval-mode write`（`abort-ok` 不产生审批，`fake-omp.mjs:34/41-46`；该场景把 abort 推迟到 Deny 的 end 帧之后，`fake-omp-approval.test.ts:329-333`），回合进行中有一条挂起审批，两个 SSE 订阅已打开 → DELETE → 审批行 `decision=deny` 且审计有 `session.approval`（`decision:"deny"`）；fake 收到 `Deny` 先于 `abort`，且恰一帧 `abort`；每个订阅者在连接结束前依次收到 `approval.resolved{decision:"deny"}` 与恰一个 `turn.end{status:"stopped"}`，之后无事件；临时表记录删除前会话与助手消息为 `stopped`；子进程退出；行被删除；审计 `session.delete`；204。
   2. abort-ignored（第二条）：DELETE 挂起在等待终态；推进前断言 DELETE 未返回；推进注入时钟过 8000 ms → 进程退役、回合以 `stopped` 落库（临时表）、无 `error` 事件；DELETE 204；行已删。
@@ -46,5 +46,5 @@
   7. 纯 abort-ok 与过渡取代（issue 验收第一条 + Scenario「运行中删除的过渡拒绝」改写内容）：fake `abort-ok` 回合进行中、一个订阅 → DELETE 不返回 409；临时表记录删除前会话与助手消息为 `stopped`；订阅者先收到 `turn.end{status:"stopped"}` 再连接结束；204。#525 其余证据全绿；`session-retire.test.ts`、stop/intent/admission 测试全绿。
   8. 孤儿回合（P1）：fake `approval` 场景 + `CREATE TEMP TRIGGER … BEFORE INSERT ON chat_approvals BEGIN SELECT RAISE(ABORT,'x'); END` 使审批落库失败（slot infraFaulted、pump 退出、回合未释放）→ DELETE 通用 5xx（有界返回，不挂起）；`controlHeld` 为 false；会话行保留；再次 DELETE 同样 5xx 且立即返回。
   9. store 单元：`turnReleased` 对无回合会话立即 resolve；受理后 `rollbackPrompt` → resolve；受理后注入 flush 失败 → reject 为该错误；受理后以触发器使补偿事务失败 → `rollbackPrompt` 抛出且 `turnReleased` reject；`faultTurn` 使在途回合的等待 reject、对已 faulted 回合再次 `turnReleased` 立即 reject。
-  10. retire 排空（chat-sessions「Session module registration and teardown」新增句）：受控 runtime / supervisor 级用例，让回合终态时仍有挂起审批，使 pump 在 `#commit` 的 `await approvals.settled` 处让出（`supervisor.ts:659-671`）；在 store 释放后立即调用 `retire` → 订阅者先收到 `approval.resolved` 与 `turn.end` 再被 `onEnd` 结束；去掉排空时该用例变红（记录变异结果）。
+  10. retire 排空（chat-sessions「Session module registration and teardown」新增句）：受控 runtime / supervisor 级用例，让回合终态时仍有挂起审批，使 pump 在 `#commit` 的 `await approvals.settled` 处让出（`supervisor.ts:659-671`）；在 store 释放后立即调用 `retire` → 订阅者先收到 `approval.resolved` 与 `turn.end` 再被 `onEnd` 结束；锁定「`turn.end` 先于连接结束」的排序契约。实现中查明去掉排空该用例不变红（`sealGeneration` 在 `pumpCount > 0` 时不封存，见并发推理），故为 characterization；变异结果在 PR 记录。
   11. 门禁：`npm test --workspace server`（覆盖率 ≥80%）、`make lint`、`make typecheck`、`make anti-drift`（knip 零新增）、`bash scripts/size-guard.sh` 退出 0；PR 记录 `store.ts`、`store-approvals.ts`、`supervisor.ts`（及抽出模块）、`session-delete.ts` 与测试文件前后行数。

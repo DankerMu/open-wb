@@ -7,11 +7,14 @@ import { HttpError } from "../core/errors/index.js";
 import {
   approvalsBySession,
   cancelTimer,
+  faultTurnSignal,
   finishOwnedTurn,
+  flushPending,
   insertPendingApproval,
   reconcileRunning,
   releaseTurn,
   settlePendingApproval,
+  turnSignal,
 } from "./store-approvals.js";
 import {
   copyForkHistory,
@@ -27,6 +30,7 @@ import {
   runOwnedTransaction,
   STEP_COLUMNS,
   type StepDbRow,
+  titlePrefix,
   toMessageView,
   toStepView,
 } from "./store-branch.js";
@@ -189,6 +193,10 @@ export interface SessionStore {
     decidedAt: number,
   ): ApprovalView | null;
   runtimeState(sessionId: string): SessionRuntimeState | null;
+  /** No turn → resolved; else settles with the in-flight turn's release (resolve) or fault. */
+  turnReleased(sessionId: string): Promise<void>;
+  /** Faults the still-active turn (first fault wins); a released or unknown id is a no-op. */
+  faultTurn(assistantMessageId: number, error: Error): void;
   close(): void;
 }
 
@@ -232,6 +240,10 @@ export type Turn = {
   faulted: boolean;
   fault: unknown;
   notified: boolean;
+  /** One-shot (#526): resolved by releaseTurn, rejected by the first fault; never unhandled. */
+  released: Promise<void>;
+  release: () => void;
+  fail: (error: unknown) => void;
 };
 
 const FLUSH_BYTES = 2_048;
@@ -420,32 +432,41 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
       }
       // Only this admission's own prefix goes back to NULL; a PATCHed or pre-existing title stays.
       const restoreTitle = turn.previousTitle === null && !turn.titleTouched;
-      runOwnedTransaction(db, "prompt rollback compensation failed", () => {
-        requireChanges(
-          db
-            .prepare("DELETE FROM chat_messages WHERE id = ? AND session_id = ?")
-            .run(turn.assistantMessageId, turn.sessionId).changes,
-          1,
-          "assistant rollback delete",
-        );
-        requireChanges(
-          db
-            .prepare("DELETE FROM chat_messages WHERE id = ? AND session_id = ?")
-            .run(turn.userMessageId, turn.sessionId).changes,
-          1,
-          "user rollback delete",
-        );
-        requireChanges(
-          db
-            .prepare(
-              "UPDATE chat_sessions SET status = ?, updated_at = ?, title = CASE WHEN ? THEN NULL ELSE title END WHERE id = ?",
-            )
-            .run(turn.previousStatus, turn.previousUpdatedAt, restoreTitle ? 1 : 0, turn.sessionId)
-            .changes,
-          1,
-          "session rollback restore",
-        );
-      });
+      try {
+        runOwnedTransaction(db, "prompt rollback compensation failed", () => {
+          requireChanges(
+            db
+              .prepare("DELETE FROM chat_messages WHERE id = ? AND session_id = ?")
+              .run(turn.assistantMessageId, turn.sessionId).changes,
+            1,
+            "assistant rollback delete",
+          );
+          requireChanges(
+            db
+              .prepare("DELETE FROM chat_messages WHERE id = ? AND session_id = ?")
+              .run(turn.userMessageId, turn.sessionId).changes,
+            1,
+            "user rollback delete",
+          );
+          requireChanges(
+            db
+              .prepare(
+                "UPDATE chat_sessions SET status = ?, updated_at = ?, title = CASE WHEN ? THEN NULL ELSE title END WHERE id = ?",
+              )
+              .run(
+                turn.previousStatus,
+                turn.previousUpdatedAt,
+                restoreTitle ? 1 : 0,
+                turn.sessionId,
+              ).changes,
+            1,
+            "session rollback restore",
+          );
+        });
+      } catch (error) {
+        faultTurnSignal(turn, error);
+        throw error;
+      }
       releaseTurn(turn, activeTurns, activeSessions, activeSteps);
       return true;
     },
@@ -640,6 +661,23 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
       };
     },
 
+    turnReleased(sessionId) {
+      const assistantMessageId = activeSessions.get(sessionId);
+      const turn =
+        assistantMessageId === undefined ? undefined : activeTurns.get(assistantMessageId);
+      if (turn === undefined) {
+        return Promise.resolve();
+      }
+      return turn.faulted ? Promise.reject(turn.fault) : turn.released;
+    },
+
+    faultTurn(assistantMessageId, error) {
+      const turn = activeTurns.get(assistantMessageId);
+      if (turn !== undefined && !turn.faulted) {
+        faultTurnSignal(turn, error);
+      }
+    },
+
     close() {
       if (closed) {
         return;
@@ -692,23 +730,11 @@ function openTurn(
     faulted: false,
     fault: undefined,
     notified: false,
+    ...turnSignal(),
   };
   activeTurns.set(turn.assistantMessageId, turn);
   activeSessions.set(turn.sessionId, turn.assistantMessageId);
   return turn;
-}
-
-function titlePrefix(text: string): string {
-  let end = 0;
-  let count = 0;
-  for (const character of text) {
-    end += character.length;
-    count += 1;
-    if (count === 18) {
-      return text.slice(0, end);
-    }
-  }
-  return text;
 }
 
 function currentTurn(
@@ -752,34 +778,4 @@ function armFlushTimer(
       }
     }
   }, FLUSH_MS);
-}
-
-function flushPending(db: DatabaseSync, turn: Turn): void {
-  if (turn.pending.length === 0) {
-    return;
-  }
-  const content = turn.pending.join("");
-  try {
-    runOwnedTransaction(db, "delta flush rollback failed", () => {
-      requireChanges(
-        db
-          .prepare(
-            "UPDATE chat_messages SET content = content || ? WHERE id = ? AND session_id = ? AND status = 'running'",
-          )
-          .run(content, turn.assistantMessageId, turn.sessionId).changes,
-        1,
-        "delta flush",
-      );
-    });
-  } catch (error) {
-    cancelTimer(turn);
-    turn.faulted = true;
-    turn.fault = error;
-    throw error;
-  }
-  turn.pending = [];
-  turn.pendingBytes = 0;
-  turn.faulted = false;
-  turn.fault = undefined;
-  cancelTimer(turn);
 }
