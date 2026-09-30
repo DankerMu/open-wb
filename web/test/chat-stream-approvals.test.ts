@@ -53,6 +53,7 @@ function userMessage(approvals: SnapshotApproval[] = []): SnapshotMessage {
     createdAt: -1,
     steps: [],
     approvals,
+    thinking: null,
   };
 }
 
@@ -61,7 +62,16 @@ function assistantMessage(
   approvals: SnapshotApproval[],
   status: SnapshotMessage["status"] = "running",
 ): SnapshotMessage {
-  return { id, role: "assistant", content: "", status, createdAt: id, steps: [], approvals };
+  return {
+    id,
+    role: "assistant",
+    content: "",
+    status,
+    createdAt: id,
+    steps: [],
+    approvals,
+    thinking: null,
+  };
 }
 
 /** W1 base: stopped session/message/step, user [], assistants with [], one pending, two rows. */
@@ -73,7 +83,17 @@ function parsedSnapshot(): Snapshot {
       {
         ...assistantMessage(0, [], "stopped"),
         content: "partial",
-        steps: [{ id: 2, ordinal: 0, name: "bash", detail: "ls", output: "o", status: "stopped" }],
+        steps: [
+          {
+            id: 2,
+            ordinal: 0,
+            name: "bash",
+            detail: "ls",
+            output: "o",
+            status: "stopped",
+            changes: null,
+          },
+        ],
       },
       assistantMessage(1, [approval(5, null)], "done"),
       assistantMessage(2, [approval(7, "timeout"), approval(8, null)], "done"),

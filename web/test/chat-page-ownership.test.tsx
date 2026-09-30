@@ -297,6 +297,7 @@ describe("chat page isolation and errors", () => {
           detail: BASH_START_DETAIL,
           output: "",
           status: "running",
+          changes: null,
         },
       ],
       cursor: { epoch: 1, seq: 3 },

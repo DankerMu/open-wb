@@ -117,9 +117,12 @@ describe("fork over real fake-omp branch children (#466)", () => {
     expect(Object.keys(result.session).sort()).toEqual([
       "createdAt",
       "id",
+      "pinnedAt",
+      "scene",
       "status",
       "title",
       "updatedAt",
+      "workspaceId",
     ]);
     expect(result.session).toMatchObject({ title: FIRST, status: "done" });
     const fresh = result.session.id;

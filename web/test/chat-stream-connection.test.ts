@@ -31,6 +31,7 @@ function completedSnapshot(): ChatMessageSnapshot {
         status: "done",
         createdAt: 0,
         steps: [],
+        thinking: null,
       },
     ],
     streamCursor: { epoch: 1, seq: 3 },

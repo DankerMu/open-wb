@@ -9,6 +9,7 @@ export type MessageDbRow = {
   content: Uint8Array;
   status: MessageStatus;
   created_at: number;
+  thinking: Uint8Array | null;
 };
 
 export type StepDbRow = {
@@ -21,12 +22,13 @@ export type StepDbRow = {
   status: StepStatus;
   started_at: number;
   ended_at: number | null;
+  changes: Uint8Array | null;
 };
 
 export const MESSAGE_COLUMNS =
-  "id, session_id, role, CAST(content AS BLOB) AS content, status, created_at";
+  "id, session_id, role, CAST(content AS BLOB) AS content, status, created_at, CAST(thinking AS BLOB) AS thinking";
 export const STEP_COLUMNS =
-  "s.id, s.message_id, s.ordinal, CAST(s.name AS BLOB) AS name, CAST(s.detail AS BLOB) AS detail, CAST(s.output AS BLOB) AS output, s.status, s.started_at, s.ended_at";
+  "s.id, s.message_id, s.ordinal, CAST(s.name AS BLOB) AS name, CAST(s.detail AS BLOB) AS detail, CAST(s.output AS BLOB) AS output, s.status, s.started_at, s.ended_at, CAST(s.changes AS BLOB) AS changes";
 export const INSERT_MESSAGE =
   "INSERT INTO chat_messages(session_id, role, content, status, created_at) VALUES (?, ?, ?, ?, ?)";
 
@@ -42,6 +44,7 @@ export function toMessageView(
     id: Number(row.id),
     role: row.role,
     content: decoder.decode(row.content),
+    thinking: decodeNullableText(decoder, row.thinking),
     status: row.status,
     createdAt: Number(row.created_at),
   };
@@ -54,6 +57,10 @@ export function toStepView(row: StepDbRow, decoder: TextDecoder): StepView {
     name: decoder.decode(row.name),
     detail: decoder.decode(row.detail),
     output: row.output === null ? "" : decoder.decode(row.output),
+    changes:
+      row.changes === null
+        ? null
+        : (JSON.parse(decoder.decode(row.changes)) as NonNullable<StepView["changes"]>),
     status: row.status,
     startedAt: Number(row.started_at),
     endedAt: row.ended_at === null ? null : Number(row.ended_at),

@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { NULL_SESSION_META } from "./session-meta-fixtures.js";
 import {
   cookieFor,
   getSessionMessages,
@@ -123,6 +124,7 @@ describe("session REST snapshot capture", () => {
           status: "running",
           createdAt: SESSION_NOW,
           updatedAt: SESSION_NOW,
+          ...NULL_SESSION_META,
         },
         messages: [
           {
@@ -133,6 +135,7 @@ describe("session REST snapshot capture", () => {
             createdAt: SESSION_NOW,
             approvals: [],
             steps: [],
+            thinking: null,
           },
           {
             id: accepted.assistantMessageId,
@@ -142,6 +145,7 @@ describe("session REST snapshot capture", () => {
             createdAt: SESSION_NOW,
             approvals: [],
             steps: [],
+            thinking: null,
           },
         ],
         streamCursor: { epoch: 1, seq: 1002 },

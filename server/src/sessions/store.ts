@@ -37,12 +37,25 @@ export type MessageStatus = "done" | "running" | "failed" | "stopped";
 export type StepStatus = "running" | "done" | "failed" | "stopped";
 export type FinishStatus = "done" | "failed" | "stopped";
 
+type SessionScene = "office" | "code" | "design";
+
 interface SessionView {
   id: string;
   title: string | null;
   status: SessionStatus;
   createdAt: number;
   updatedAt: number;
+  scene: SessionScene | null;
+  workspaceId: string | null;
+  pinnedAt: number | null;
+}
+
+/** One `chat_steps.changes` element; element validity is the writer's (3.4) job. */
+interface FileChangeView {
+  path: string;
+  added: number | null;
+  removed: number | null;
+  kind: "edit" | "write";
 }
 
 export interface StepView {
@@ -51,6 +64,7 @@ export interface StepView {
   name: string;
   detail: string;
   output: string;
+  changes: FileChangeView[] | null;
   status: StepStatus;
   startedAt: number;
   endedAt: number | null;
@@ -60,6 +74,7 @@ export interface MessageView {
   id: number;
   role: MessageRole;
   content: string;
+  thinking: string | null;
   status: MessageStatus;
   createdAt: number;
   steps: StepView[];
@@ -183,6 +198,9 @@ type SessionDbRow = {
   stream_epoch: number;
   created_at: number;
   updated_at: number;
+  workspace_id: string | null;
+  scene: SessionScene | null;
+  pinned_at: number | null;
 };
 
 type RuntimeDbRow = {
@@ -214,7 +232,7 @@ export type Turn = {
 const FLUSH_BYTES = 2_048;
 const FLUSH_MS = 2_000;
 const SESSION_COLUMNS =
-  "id, owner_id, CAST(title AS BLOB) AS title, status, CAST(omp_session_file AS BLOB) AS omp_session_file, stream_epoch, created_at, updated_at";
+  "id, owner_id, CAST(title AS BLOB) AS title, status, CAST(omp_session_file AS BLOB) AS omp_session_file, stream_epoch, created_at, updated_at, workspace_id, scene, pinned_at";
 const INSERT_SESSION =
   "INSERT INTO chat_sessions(id, owner_id, title, status, created_at, updated_at) VALUES (?, ?, NULL, 'idle', ?, ?)";
 
@@ -238,7 +256,16 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
           "session create",
         );
       });
-      return { id, title: null, status: "idle", createdAt: now, updatedAt: now };
+      return {
+        id,
+        title: null,
+        status: "idle",
+        createdAt: now,
+        updatedAt: now,
+        scene: null,
+        workspaceId: null,
+        pinnedAt: null,
+      };
     },
 
     list(ownerId) {
@@ -623,6 +650,9 @@ function toSessionView(row: SessionDbRow, decoder: TextDecoder): SessionView {
     status: row.status,
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
+    scene: row.scene,
+    workspaceId: row.workspace_id,
+    pinnedAt: row.pinned_at === null ? null : Number(row.pinned_at),
   };
 }
 

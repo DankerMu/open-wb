@@ -4,6 +4,7 @@
  */
 import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import type { SessionStore } from "../src/sessions/store.js";
+import { NULL_SESSION_META } from "./session-meta-fixtures.js";
 import {
   cookieFor,
   getSessionMessages,
@@ -162,6 +163,7 @@ describe("session REST — stopped read-back", () => {
             status: "stopped",
             createdAt: SESSION_NOW,
             updatedAt: SESSION_NOW,
+            ...NULL_SESSION_META,
           },
         ],
       });
@@ -174,6 +176,7 @@ describe("session REST — stopped read-back", () => {
           status: "stopped",
           createdAt: SESSION_NOW,
           updatedAt: SESSION_NOW,
+          ...NULL_SESSION_META,
         },
         messages: [
           {
@@ -184,6 +187,7 @@ describe("session REST — stopped read-back", () => {
             createdAt: SESSION_NOW,
             approvals: [],
             steps: [],
+            thinking: null,
           },
           {
             id: accepted.assistantMessageId,
@@ -200,8 +204,10 @@ describe("session REST — stopped read-back", () => {
                 detail: '{"command":"sleep 9"}',
                 output: "",
                 status: "stopped",
+                changes: null,
               },
             ],
+            thinking: null,
           },
         ],
         streamCursor: { epoch: 0, seq: null },

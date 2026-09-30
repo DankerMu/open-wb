@@ -16,6 +16,7 @@ import {
   SESSION_ID,
   settle,
 } from "./chat-stream-support.js";
+import { NULL_SESSION_META } from "./session-meta-fixtures.js";
 import {
   calls,
   currentLocation,
@@ -53,7 +54,7 @@ function message(id: number, role: Message["role"], status: Message["status"], c
 }
 
 function session(id: string, status: ChatSession["status"], title: string, updatedAt: number) {
-  return { id, title, status, createdAt: 1_740_000_000_000, updatedAt };
+  return { id, title, status, createdAt: 1_740_000_000_000, updatedAt, ...NULL_SESSION_META };
 }
 
 function snapshotOf(

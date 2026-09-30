@@ -38,7 +38,15 @@ type SnapshotStep = SnapshotMessage["steps"][number];
 type Status = SnapshotMessage["status"];
 
 function bashStep(status: SnapshotStep["status"]): SnapshotStep {
-  return { id: 11, ordinal: 0, name: "bash", detail: '{"command":"sleep 9"}', output: "", status };
+  return {
+    id: 11,
+    ordinal: 0,
+    name: "bash",
+    detail: '{"command":"sleep 9"}',
+    output: "",
+    status,
+    changes: null,
+  };
 }
 
 /** 快照 R：`saved title` running，助手 0 running、空正文、一条 running `bash` 步骤，cursor `1:0`。 */

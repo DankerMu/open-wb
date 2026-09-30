@@ -477,6 +477,7 @@ describe("approval bar: snapshot restore", () => {
       status: "done" as const,
       createdAt: id,
       steps: [] as [],
+      thinking: null,
     });
     const snapshot: ChatMessageSnapshot = {
       ...chatSnapshot({ status: "done", cursor: { epoch: 1, seq: null } }),

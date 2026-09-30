@@ -2,6 +2,7 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanupChatPage, renderChatPage } from "./chat-page-support.js";
 import { chatSnapshot, FakeEventSource, latestSource, SESSION_ID } from "./chat-stream-support.js";
+import { NULL_SESSION_META } from "./session-meta-fixtures.js";
 import { deferredResponse, jsonResponse } from "./support.js";
 import {
   blockBody,
@@ -162,6 +163,7 @@ describe("(C4) session list status element", () => {
       status,
       createdAt: 1_740_000_000_000,
       updatedAt: 1_740_000_000_100 - index,
+      ...NULL_SESSION_META,
     }));
     renderChatPage("/", { "/api/sessions": () => jsonResponse({ sessions }) });
     const nav = await screen.findByRole("navigation", { name: "会话列表" });

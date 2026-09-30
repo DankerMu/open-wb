@@ -6,6 +6,7 @@ import {
   connectSessionEvents,
 } from "../src/features/chat/stream.js";
 import type { ChatMessageSnapshot } from "../src/lib/session-contract.js";
+import { NULL_SESSION_META } from "./session-meta-fixtures.js";
 
 export const SESSION_ID = "0123456789abcdef0123456789abcdef";
 export const ENCODED_SESSION_ID = "sess/%#?+ 中";
@@ -22,6 +23,7 @@ export const historyUser = {
   role: "user" as const,
   approvals: [] as [],
   content: USER_CONTENT,
+  thinking: null,
   status: "done" as const,
   createdAt: -1,
   steps: [] as [],
@@ -44,6 +46,7 @@ export function runningSession(status: "idle" | "running" | "done" | "failed" = 
     status,
     createdAt: 1_740_000_000_000,
     updatedAt: 1_740_000_000_023,
+    ...NULL_SESSION_META,
   };
 }
 
@@ -72,6 +75,7 @@ export function chatSnapshot(
         status: options.assistantStatus ?? "running",
         createdAt: 0,
         steps: options.steps ?? [],
+        thinking: null,
       },
     ],
     streamCursor: options.cursor ?? { epoch: 1, seq: 0 },

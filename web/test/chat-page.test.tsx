@@ -42,6 +42,7 @@ const runningSnapshot = chatSnapshot({
       name: "bash",
       detail: BASH_START_DETAIL,
       output: "",
+      changes: null,
       status: "running",
     },
   ],

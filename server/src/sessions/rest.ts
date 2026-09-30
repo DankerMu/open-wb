@@ -9,7 +9,13 @@ import type {
   RawServerDefault,
 } from "fastify";
 import { HttpError } from "../core/errors/index.js";
-import type { ApprovalEntry, ApprovalView, SessionMessageTree, SessionStore } from "./store.js";
+import type {
+  ApprovalEntry,
+  ApprovalView,
+  SessionMessageTree,
+  SessionStore,
+  StepView,
+} from "./store.js";
 import type { SessionSupervisor, StreamCursor } from "./supervisor.js";
 
 type ForkResult = Awaited<ReturnType<SessionSupervisor["fork"]>>;
@@ -39,6 +45,9 @@ interface PublicSession {
   status: string;
   createdAt: number;
   updatedAt: number;
+  scene: string | null;
+  workspaceId: string | null;
+  pinnedAt: number | null;
 }
 
 interface PublicStep {
@@ -47,6 +56,7 @@ interface PublicStep {
   name: string;
   detail: string;
   output: string;
+  changes: StepView["changes"];
   status: string;
 }
 
@@ -54,6 +64,7 @@ interface PublicMessage {
   id: number;
   role: string;
   content: string;
+  thinking: string | null;
   status: string;
   createdAt: number;
   approvals: ApprovalEntry[];
@@ -263,19 +274,16 @@ function currentPrincipal(request: FastifyRequest): { id: string } {
   return principal;
 }
 
-function toPublicSession(session: {
-  id: string;
-  title: string | null;
-  status: string;
-  createdAt: number;
-  updatedAt: number;
-}): PublicSession {
+function toPublicSession(session: PublicSession): PublicSession {
   return {
     id: session.id,
     title: session.title,
     status: session.status,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
+    scene: session.scene,
+    workspaceId: session.workspaceId,
+    pinnedAt: session.pinnedAt,
   };
 }
 
@@ -290,6 +298,7 @@ function toPublicHistory(snapshot: OwnedSnapshot): {
       id: message.id,
       role: message.role,
       content: message.content,
+      thinking: message.thinking,
       status: message.status,
       createdAt: message.createdAt,
       approvals: message.approvals.map(toPublicApproval),
@@ -299,6 +308,7 @@ function toPublicHistory(snapshot: OwnedSnapshot): {
         name: step.name,
         detail: step.detail,
         output: step.output,
+        changes: step.changes,
         status: step.status,
       })),
     })),

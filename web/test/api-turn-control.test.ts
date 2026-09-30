@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type ApiClient, createApiClient } from "../src/lib/api.js";
+import { NULL_SESSION_META } from "./session-meta-fixtures.js";
 import {
   captureApiError,
   expectRequestFailure,
@@ -19,6 +20,7 @@ const stoppedSession = {
   status: "stopped" as const,
   createdAt: 1_740_000_000_000,
   updatedAt: 1_740_000_000_023,
+  ...NULL_SESSION_META,
 };
 
 const settledApproval = {
@@ -271,6 +273,7 @@ describe("Stopped status in sessions and snapshots", () => {
         status: "done" as const,
         createdAt: -1,
         steps: [],
+        thinking: null,
       },
       {
         id: 0,
@@ -287,8 +290,10 @@ describe("Stopped status in sessions and snapshots", () => {
             detail: "ls",
             output: "o",
             status: "stopped" as const,
+            changes: null,
           },
         ],
+        thinking: null,
       },
     ],
     streamCursor: { epoch: 1, seq: 7 },

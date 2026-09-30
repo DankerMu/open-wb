@@ -44,6 +44,7 @@ import {
   subscribeQuietly,
   turn,
 } from "./session-fork-helpers.js";
+import { SESSION_VIEW_KEYS } from "./session-meta-fixtures.js";
 import {
   epochOf,
   HOLD,
@@ -85,7 +86,7 @@ import {
 
 const ROUTE = "/api/sessions/:id/fork";
 const JSON_TYPE = "application/json";
-const SESSION_KEYS = ["id", "title", "status", "createdAt", "updatedAt"];
+const SESSION_KEYS = SESSION_VIEW_KEYS;
 
 const worlds = forkWorlds();
 

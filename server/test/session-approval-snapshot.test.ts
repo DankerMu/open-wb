@@ -29,7 +29,16 @@ import { waitForTurn } from "./session-supervisor-helpers.js";
 const T = 1_700_000_000_000;
 const E = T + 60_000;
 const TITLE_U = "Allow tool: bash\nCommand: echo 中文 😀\u0000尾";
-const MESSAGE_KEYS = ["approvals", "content", "createdAt", "id", "role", "status", "steps"];
+const MESSAGE_KEYS = [
+  "approvals",
+  "content",
+  "createdAt",
+  "id",
+  "role",
+  "status",
+  "steps",
+  "thinking",
+];
 
 interface SnapshotApproval {
   id: number;

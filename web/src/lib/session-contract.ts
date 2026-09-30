@@ -3,6 +3,13 @@ import { hasExactlyKeys, isNonNegativeSafeInteger, parseJsonArray } from "./api-
 type ChatSessionStatus = "idle" | "running" | "done" | "failed" | "stopped";
 type ChatMessageRole = "user" | "assistant";
 type ChatDeliveryStatus = "running" | "done" | "failed" | "stopped";
+type ChatSessionScene = "office" | "code" | "design";
+
+type ChatSessionMeta = {
+  scene: ChatSessionScene | null;
+  workspaceId: string | null;
+  pinnedAt: number | null;
+};
 
 export type ChatSession = {
   id: string;
@@ -10,7 +17,11 @@ export type ChatSession = {
   status: ChatSessionStatus;
   createdAt: number;
   updatedAt: number;
-};
+} & ChatSessionMeta;
+
+type ChatFileChange =
+  | { path: string; added: number; removed: number; kind: "edit" }
+  | { path: string; added: null; removed: null; kind: "write" };
 
 export type ChatStep = {
   id: number;
@@ -18,6 +29,7 @@ export type ChatStep = {
   name: string;
   detail: string;
   output: string;
+  changes: ChatFileChange[] | null;
   status: ChatDeliveryStatus;
 };
 
@@ -25,6 +37,7 @@ export type ChatMessage = {
   id: number;
   role: ChatMessageRole;
   content: string;
+  thinking: string | null;
   status: ChatDeliveryStatus;
   createdAt: number;
   steps: ChatStep[];
@@ -74,6 +87,8 @@ type ChatApproval = {
 export type ChatSettledApproval = ChatApproval & { decision: ChatApprovalDecision };
 
 const SESSION_ID = /^[0-9a-f]{32}$/;
+const WORKSPACE_ID = /^[0-9a-f]{32}$/;
+const MAX_FILE_CHANGES = 50;
 
 function isSafeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value);
@@ -95,58 +110,127 @@ function isApprovalDecision(value: unknown): value is ChatApprovalDecision {
   return value === "allow" || value === "deny" || value === "timeout";
 }
 
+function isSessionScene(value: unknown): value is ChatSessionScene {
+  return value === "office" || value === "code" || value === "design";
+}
+
+function parseSessionMeta(value: Record<string, unknown>): ChatSessionMeta | null {
+  const { pinnedAt, scene, workspaceId } = value;
+  if (
+    (scene !== null && !isSessionScene(scene)) ||
+    (workspaceId !== null &&
+      (typeof workspaceId !== "string" || !WORKSPACE_ID.test(workspaceId))) ||
+    (pinnedAt !== null && !isNonNegativeSafeInteger(pinnedAt))
+  ) {
+    return null;
+  }
+
+  return { scene, workspaceId, pinnedAt };
+}
+
 export function parseSession(value: unknown): ChatSession | null {
-  if (!hasExactlyKeys(value, ["id", "title", "status", "createdAt", "updatedAt"])) {
+  if (
+    !hasExactlyKeys(value, [
+      "id",
+      "title",
+      "status",
+      "createdAt",
+      "updatedAt",
+      "scene",
+      "workspaceId",
+      "pinnedAt",
+    ])
+  ) {
     return null;
   }
 
   const { createdAt, id, status, title, updatedAt } = value;
+  const meta = parseSessionMeta(value);
   if (
     typeof id !== "string" ||
     !SESSION_ID.test(id) ||
     (title !== null && typeof title !== "string") ||
     !isSessionStatus(status) ||
     !isNonNegativeSafeInteger(createdAt) ||
-    !isNonNegativeSafeInteger(updatedAt)
+    !isNonNegativeSafeInteger(updatedAt) ||
+    !meta
   ) {
     return null;
   }
 
-  return { id, title, status, createdAt, updatedAt };
+  return { id, title, status, createdAt, updatedAt, ...meta };
 }
 
-function parseStep(value: unknown): ChatStep | null {
-  if (!hasExactlyKeys(value, ["id", "ordinal", "name", "detail", "output", "status"])) {
+/** `edit` carries non-negative line counts; `write` carries exactly null counts. */
+function parseFileChange(value: unknown): ChatFileChange | null {
+  if (!hasExactlyKeys(value, ["path", "added", "removed", "kind"])) {
     return null;
   }
 
-  const { detail, id, name, ordinal, output, status } = value;
+  const { added, kind, path, removed } = value;
+  if (typeof path !== "string" || path.length === 0) {
+    return null;
+  }
+
+  if (kind === "edit" && isNonNegativeSafeInteger(added) && isNonNegativeSafeInteger(removed)) {
+    return { path, added, removed, kind };
+  }
+
+  return kind === "write" && added === null && removed === null
+    ? { path, added, removed, kind }
+    : null;
+}
+
+/** 1..50 valid changes, else null: `[]` and oversize arrays reject the whole step. */
+function parseFileChanges(value: unknown): ChatFileChange[] | null {
+  const changes = parseJsonArray(value, parseFileChange);
+  return changes && changes.length > 0 && changes.length <= MAX_FILE_CHANGES ? changes : null;
+}
+
+function parseStep(value: unknown): ChatStep | null {
+  if (!hasExactlyKeys(value, ["id", "ordinal", "name", "detail", "output", "changes", "status"])) {
+    return null;
+  }
+
+  const { changes, detail, id, name, ordinal, output, status } = value;
+  const parsedChanges = changes === null ? null : parseFileChanges(changes);
   if (
     !isSafeInteger(id) ||
     !isNonNegativeSafeInteger(ordinal) ||
     typeof name !== "string" ||
     typeof detail !== "string" ||
     typeof output !== "string" ||
+    (changes !== null && !parsedChanges) ||
     !isDeliveryStatus(status)
   ) {
     return null;
   }
 
-  return { id, ordinal, name, detail, output, status };
+  return { id, ordinal, name, detail, output, changes: parsedChanges, status };
 }
 
 function parseMessage(value: unknown): ChatMessage | null {
   if (
-    !hasExactlyKeys(value, ["id", "role", "content", "status", "createdAt", "steps", "approvals"])
+    !hasExactlyKeys(value, [
+      "id",
+      "role",
+      "content",
+      "thinking",
+      "status",
+      "createdAt",
+      "steps",
+      "approvals",
+    ])
   ) {
     return null;
   }
 
-  const { approvals, content, createdAt, id, role, status, steps } = value;
+  const { approvals, content, createdAt, id, role, status, steps, thinking } = value;
   if (
     !isSafeInteger(id) ||
     !isMessageRole(role) ||
     typeof content !== "string" ||
+    !isMessageThinking(thinking, role) ||
     !isDeliveryStatus(status) ||
     !isSafeInteger(createdAt)
   ) {
@@ -159,7 +243,21 @@ function parseMessage(value: unknown): ChatMessage | null {
     return null;
   }
 
-  return { id, role, content, status, createdAt, steps: parsedSteps, approvals: parsedApprovals };
+  return {
+    id,
+    role,
+    content,
+    thinking,
+    status,
+    createdAt,
+    steps: parsedSteps,
+    approvals: parsedApprovals,
+  };
+}
+
+/** A string or null on assistant messages; a user message never carries thinking. */
+function isMessageThinking(value: unknown, role: ChatMessageRole): value is string | null {
+  return value === null || (role === "assistant" && typeof value === "string");
 }
 
 /** Strictly ascending, duplicate-free ids; a user message never carries approvals. */

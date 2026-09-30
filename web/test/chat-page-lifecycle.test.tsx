@@ -14,6 +14,7 @@ import {
 } from "./chat-page-lifecycle-support.js";
 import { type FetchRoutes, renderChatPage } from "./chat-page-support.js";
 import { historyUser, latestSource, runningSession, SESSION_ID } from "./chat-stream-support.js";
+import { NULL_SESSION_META } from "./session-meta-fixtures.js";
 import { currentLocation, deferredResponse, jsonResponse, replaceFetchRoutes } from "./support.js";
 
 const SESSION_A = SESSION_ID;
@@ -64,6 +65,7 @@ function snapshotFor(session: ChatSession, content: string): ChatMessageSnapshot
         status: "done",
         createdAt: -2,
         steps: [],
+        thinking: null,
       },
     ],
     streamCursor: { epoch: 1, seq: 0 },
@@ -78,6 +80,7 @@ function emptyCreatedSnapshot(sessionId: string): ChatMessageSnapshot {
       status: "idle",
       createdAt: 1,
       updatedAt: 1,
+      ...NULL_SESSION_META,
     },
     messages: [],
     streamCursor: { epoch: 1, seq: 0 },
@@ -338,6 +341,7 @@ describe("chat page ignored-abort GET, renewal, and concurrent submit", () => {
               status: "idle",
               createdAt: 1,
               updatedAt: 1,
+              ...NULL_SESSION_META,
             },
             201,
           );
@@ -366,6 +370,7 @@ describe("chat page ignored-abort GET, renewal, and concurrent submit", () => {
           status: "idle",
           createdAt: 1,
           updatedAt: 1,
+          ...NULL_SESSION_META,
         },
         201,
       ),
@@ -425,6 +430,7 @@ describe("chat page ignored-abort GET, renewal, and concurrent submit", () => {
               status: "idle",
               createdAt: 1,
               updatedAt: 1,
+              ...NULL_SESSION_META,
             },
             201,
           );
