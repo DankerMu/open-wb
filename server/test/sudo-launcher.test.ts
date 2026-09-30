@@ -45,6 +45,7 @@ function spawnRoots(): { opts: SpawnOmpOpts; cwd: string; home: string } {
       sandboxRoot,
       stateDir,
       ownerId: "u1",
+      cwd: join(sandboxRoot, "u1"),
       modelId: "deepseek-v4.1-flash",
       token: "t".repeat(64),
       resumePath: null,

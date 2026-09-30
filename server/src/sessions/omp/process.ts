@@ -35,8 +35,8 @@ export interface SpawnOmpOpts {
   token: string;
   resumePath: string | null;
   ompUser?: string;
-  /** Caller-resolved working directory, default the owner root; any other cwd must already exist. */
-  cwd?: string;
+  /** Caller-resolved working directory; only the owner root is created, any other must exist. */
+  cwd: string;
 }
 
 export type SpawnImpl = (
@@ -59,7 +59,7 @@ export async function spawnOmp(
     assertSetprivExecutable();
   }
   const ownerRoot = join(opts.sandboxRoot, opts.ownerId);
-  const cwd = opts.cwd ?? ownerRoot;
+  const cwd = opts.cwd;
   const sessionDir = join(opts.stateDir, "sessions", opts.ownerId);
   const home = join(opts.stateDir, "home");
   const agent = join(opts.stateDir, "agent");

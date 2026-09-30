@@ -133,6 +133,7 @@ describe("SessionStore admission, metadata, and compensation", () => {
           ompSessionFile: null,
           streamEpoch: 0,
           activeTurn: accepted,
+          workspaceId: null,
         });
         expect(sessionRow(db, session.id)).toMatchObject({
           title: "😀".repeat(18),
@@ -161,6 +162,7 @@ describe("SessionStore admission, metadata, and compensation", () => {
           ompSessionFile: "resume/turn.jsonl",
           streamEpoch: 1,
           activeTurn: null,
+          workspaceId: null,
         });
         expect(store.rollbackPrompt(accepted.assistantMessageId)).toBe(false);
       });
@@ -339,6 +341,7 @@ describe("SessionStore admission, metadata, and compensation", () => {
           ompSessionFile: "recovered.jsonl",
           streamEpoch: 1,
           activeTurn: accepted,
+          workspaceId: null,
         });
         expect(store.finishTurn(accepted.assistantMessageId, "done")).toBe(true);
       });
