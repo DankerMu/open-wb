@@ -62,6 +62,10 @@ export async function withSessionRest<T>(
           supervisor,
           metadata: createSessionMetadataStore(db, { emit }),
           workspaceRootOf: () => null,
+          deleter: {
+            deleteSession: () =>
+              Promise.reject(new Error("session-rest harness does not serve DELETE")),
+          },
         });
         try {
           return await action({ app, db, store, supervisor });

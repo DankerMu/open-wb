@@ -1,20 +1,34 @@
 /**
  * Issue #131 Linux uid isolation: real SessionRuntime → native sudo → fake-omp probe.
  * Issue #351: retire's SIGKILL of sudo reaps omp through setpriv --pdeathsig KILL.
+ * Issue #525: DELETE unlinks the omp-uid-written branch file from the app-uid session dir.
  * Non-Linux / unset WORKBUDDY_UID_TEST skip; opted-in missing OMP_USER fails.
  */
 import { type ChildProcessWithoutNullStreams, spawn, spawnSync } from "node:child_process";
-import { chmodSync, lstatSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import type { FastifyInstance } from "fastify";
 import { describe, expect, it } from "vitest";
+import { createApp } from "../../src/app.js";
+import { openDb } from "../../src/core/db/index.js";
 import type { OmpFrame } from "../../src/sessions/omp/frame.js";
 import type { OmpExit } from "../../src/sessions/omp/process.js";
 import { SessionRuntime } from "../../src/sessions/omp/runtime.js";
 import { TokenRegistry } from "../../src/sessions/tokens.js";
 import { listOneLevel } from "../../src/workspaces/tree.js";
+import { FIXED_NOW, fixedRuntime } from "../session-db-helpers.js";
+import { cookieFor } from "../session-rest-helpers.js";
 import { collectPrompt } from "../support/omp-runtime.js";
 
 const FAKE = fileURLToPath(new URL("../support/fake-omp.mjs", import.meta.url));
@@ -54,6 +68,9 @@ const HANG_PATTERN = "scenario hang-term$";
 /** runtime.ts TERM@5 s + KILL@8 s budget plus scheduling slack. */
 const RETIRE_LIMIT_MS = 11_000;
 const REAP_POLL_MS = 2_000;
+/** The fake's fixed branch list ends with this text; regenerate matches only the last entry. */
+const BRANCH_QUESTION = "second question";
+const TURN_LIMIT_MS = 20_000;
 
 interface OwnedLayout {
   ownedRoot: string;
@@ -135,8 +152,122 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
         await releaseIsolation(runtime, ownedRoot, previous);
       }
     });
+
+    it("deletes a sudo-mode session and the branch file omp wrote", {
+      timeout: 60_000,
+    }, async () => {
+      const ompUser = requireOmpUser();
+      const parentUid = requireParentUid();
+      const previous = snapshotParentEnv();
+      const db = openDb(":memory:");
+      const errors: Error[] = [];
+      let ownedRoot: string | undefined;
+      let app: FastifyInstance | undefined;
+      try {
+        applyParentEnv(previous);
+        ownedRoot = mkdtempSync(join(tmpdir(), "uid-delete-"));
+        const layout = createOwnedLayout(ownedRoot);
+        app = createApp({
+          db,
+          authRuntime: fixedRuntime(() => FIXED_NOW),
+          assembly: {
+            tokens: new TokenRegistry(),
+            runtime: {
+              bin: FAKE,
+              sandboxRoot: layout.sandboxRoot,
+              stateDir: layout.stateDir,
+              modelId: MODEL_ID,
+              idleMs: 60_000,
+              ompUser,
+              spawnImpl: (command, args, options) => {
+                expect(command).toBe("sudo");
+                const child = spawn(command, [...args, "--scenario", "branch"], options);
+                return child as ChildProcessWithoutNullStreams;
+              },
+            },
+            onError(error) {
+              errors.push(error);
+            },
+          },
+        });
+        const cookie = await cookieFor(app, "zhangsan");
+        const session = await createOwnedSession(app, cookie);
+        await runToDone(
+          app,
+          cookie,
+          session,
+          "prompt",
+          JSON.stringify({ message: BRANCH_QUESTION }),
+        );
+        await runToDone(app, cookie, session, "regenerate");
+        const file = sessionFileOf(db, session);
+        expect(file.startsWith(join(layout.stateDir, "sessions", OWNER_ID, "branch-"))).toBe(true);
+        expect(statSync(file).uid).not.toBe(parentUid);
+
+        const deleted = await app.inject({
+          method: "DELETE",
+          url: `/api/sessions/${session}`,
+          headers: { cookie },
+        });
+
+        expect(deleted.statusCode).toBe(204);
+        expect(existsSync(file)).toBe(false);
+        expect(errors).toEqual([]);
+      } finally {
+        try {
+          await app?.close();
+        } finally {
+          db.close();
+          await releaseIsolation(undefined, ownedRoot, previous);
+        }
+      }
+    });
   },
 );
+
+async function createOwnedSession(app: FastifyInstance, cookie: string): Promise<string> {
+  const created = await app.inject({ method: "POST", url: "/api/sessions", headers: { cookie } });
+  expect(created.statusCode).toBe(201);
+  return (created.json() as { id: string }).id;
+}
+
+/** One accepted prompt or regenerate (202), then the session polled until it reads `done`. */
+async function runToDone(
+  app: FastifyInstance,
+  cookie: string,
+  session: string,
+  action: "prompt" | "regenerate",
+  payload?: string,
+): Promise<void> {
+  const accepted = await app.inject({
+    method: "POST",
+    url: `/api/sessions/${session}/${action}`,
+    headers: payload === undefined ? { cookie } : { cookie, "content-type": "application/json" },
+    ...(payload === undefined ? {} : { payload }),
+  });
+  expect(accepted.statusCode).toBe(202);
+  const deadline = Date.now() + TURN_LIMIT_MS;
+  while (sessionStatus(app, session) !== "done") {
+    if (Date.now() >= deadline) {
+      throw new Error(`${action} did not reach done`);
+    }
+    await sleep(50);
+  }
+}
+
+function sessionStatus(app: FastifyInstance, session: string): string | undefined {
+  return app.sessions.store.getMessages(session, OWNER_ID)?.session.status;
+}
+
+function sessionFileOf(db: ReturnType<typeof openDb>, session: string): string {
+  const row = db.prepare("SELECT omp_session_file FROM chat_sessions WHERE id = ?").get(session) as
+    | { omp_session_file: unknown }
+    | undefined;
+  if (typeof row?.omp_session_file !== "string") {
+    throw new Error("session has no omp_session_file");
+  }
+  return row.omp_session_file;
+}
 
 /** pgrep status 1 is "no match"; any other failure is an observation failure, never empty. */
 function ompUserHangPids(ompUser: string): string[] {

@@ -4,6 +4,9 @@
  * share one SQLite transaction, so an audit failure leaves no session row. Ownership of the
  * workspace is the route's job. A PATCH is one owner-scoped UPDATE of only the given columns: it
  * never touches `updated_at`, `status`, `workspace_id`, the generation columns or message rows.
+ * A delete (#525) reads the file and message count, deletes the owner's row (messages, steps and
+ * approvals cascade; fork children's `parent_session_id` is set NULL by the foreign keys) and
+ * writes its `session.delete` audit in one transaction: an audit failure keeps the row.
  */
 import { randomBytes } from "node:crypto";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
@@ -11,6 +14,7 @@ import type { emit as canonicalEmit } from "../core/audit/index.js";
 import { createSqliteTextDecoder } from "../core/db/index.js";
 import { SESSION_COLUMNS, type SessionDbRow, type SessionView, toSessionView } from "./store.js";
 import {
+  decodeNullableText,
   hasChanges,
   requireAtMostOne,
   requireChanges,
@@ -46,10 +50,27 @@ export interface SessionMetadataStore {
   createSession(ownerId: string, input: SessionCreateInput): CreatedSessionView;
   /** The updated eight-key view; null when no row of this owner matched (unknown or deleted). */
   patchSession(ownerId: string, sessionId: string, patch: SessionPatch): SessionView | null;
+  /** The deleted row's file and message count; null when no row of this owner matched. */
+  deleteSession(ownerId: string, sessionId: string): DeletedSession | null;
+}
+
+interface DeletedSession {
+  ompSessionFile: string | null;
+  messageCount: number;
+}
+
+interface DeletedRow {
+  omp_session_file: Uint8Array | null;
+  workspace_id: string | null;
 }
 
 const INSERT_SESSION =
   "INSERT INTO chat_sessions(id, owner_id, title, status, created_at, updated_at, workspace_id, scene) VALUES (?, ?, NULL, 'idle', ?, ?, ?, ?)";
+
+const SELECT_DELETED =
+  "SELECT CAST(omp_session_file AS BLOB) AS omp_session_file, workspace_id FROM chat_sessions WHERE id = ? AND owner_id = ?";
+const COUNT_MESSAGES = "SELECT COUNT(*) AS n FROM chat_messages WHERE session_id = ?";
+const DELETE_SESSION = "DELETE FROM chat_sessions WHERE id = ? AND owner_id = ?";
 
 const SET_TITLE = "title = ?";
 const SET_SCENE = "scene = ?";
@@ -111,6 +132,34 @@ export function createSessionMetadataStore(
         throw new Error("patched session row missing");
       }
       return toSessionView(row, createSqliteTextDecoder(db));
+    },
+
+    deleteSession(ownerId, sessionId) {
+      const decoder = createSqliteTextDecoder(db);
+      return runOwnedTransaction(db, "session delete rollback failed", () => {
+        const row = db.prepare(SELECT_DELETED).get(sessionId, ownerId) as unknown as
+          | DeletedRow
+          | undefined;
+        if (row === undefined) {
+          return null;
+        }
+        const ompSessionFile = decodeNullableText(decoder, row.omp_session_file);
+        const counted = db.prepare(COUNT_MESSAGES).get(sessionId) as { n: number | bigint };
+        const messageCount = Number(counted.n);
+        requireChanges(
+          db.prepare(DELETE_SESSION).run(sessionId, ownerId).changes,
+          1,
+          "session delete",
+        );
+        options.emit(db, {
+          kind: "session.delete",
+          actorId: ownerId,
+          title: "删除会话",
+          ...(row.workspace_id === null ? {} : { workspaceId: row.workspace_id }),
+          detail: { sessionId, ompSessionFile, messageCount },
+        });
+        return { ompSessionFile, messageCount };
+      });
     },
   };
 }

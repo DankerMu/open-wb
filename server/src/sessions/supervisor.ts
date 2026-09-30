@@ -8,13 +8,8 @@ import { ApprovalRegistry } from "./approvals.js";
 import { type ForkResult, Forks, Regenerations, type Resume } from "./branching.js";
 import { applyFailure, applyFrame, applyStop, type ChatEvent, createEventState } from "./events.js";
 import type { OmpFrame } from "./omp/frame.js";
-import { AgentUnavailableError, OmpProtocolError, type SpawnImpl } from "./omp/process.js";
-import {
-  type PromptDispatchReceipt,
-  SessionBusyError,
-  type SessionClock,
-  SessionRuntime,
-} from "./omp/runtime.js";
+import type { SpawnImpl } from "./omp/process.js";
+import { type PromptDispatchReceipt, type SessionClock, SessionRuntime } from "./omp/runtime.js";
 import { SpawnGate, type SpawnLog } from "./omp/spawn-gate.js";
 import {
   type Generation,
@@ -35,7 +30,12 @@ import {
 import { sessionCwdResolver, type WorkspaceRootOf } from "./session-cwd.js";
 import type { ApprovalView, SessionStore, SettledApproval } from "./store.js";
 import type { RetainedEvent, RingRead } from "./stream/ring-buffer.js";
-import { asError, synchronousSinkViolation, throwCollected } from "./supervisor-faults.js";
+import {
+  asError,
+  synchronousSinkViolation,
+  throwCollected,
+  translateSupervisorError,
+} from "./supervisor-faults.js";
 import type { TokenRegistry } from "./tokens.js";
 import { ControlClaims, drain, persistEvent, TurnStops } from "./turn-control.js";
 
@@ -209,6 +209,14 @@ export class SessionSupervisor {
     return this.#control(() => this.#forks.run(sessionId, ownerId, messageId));
   }
 
+  /**
+   * Registers one hold on the session's control claim (#465); the returned release takes effect
+   * once.
+   */
+  holdControl(sessionId: string): () => void {
+    return this.#controls.hold(sessionId);
+  }
+
   /** Synchronous: whether a regenerate, fork or stop holds this session's control claim. */
   controlHeld(sessionId: string): boolean {
     return this.#controls.held(sessionId);
@@ -367,7 +375,7 @@ export class SessionSupervisor {
       );
     } catch (error) {
       this.#stops.release(assistantMessageId);
-      throw this.#translate(error);
+      throw translateSupervisorError(error);
     }
   }
 
@@ -377,7 +385,7 @@ export class SessionSupervisor {
       return Promise.reject(new HttpError("agent_unavailable"));
     }
     const work = run().catch((error: unknown) => {
-      throw this.#translate(error);
+      throw translateSupervisorError(error);
     });
     return this.#track(work);
   }
@@ -782,18 +790,5 @@ export class SessionSupervisor {
     } catch (thrown) {
       this.#faults.push(asError(thrown));
     }
-  }
-
-  #translate(error: unknown): unknown {
-    if (error instanceof HttpError) {
-      return error;
-    }
-    if (error instanceof SessionBusyError) {
-      return new HttpError("session_busy");
-    }
-    if (error instanceof AgentUnavailableError || error instanceof OmpProtocolError) {
-      return new HttpError("agent_unavailable");
-    }
-    return error;
   }
 }

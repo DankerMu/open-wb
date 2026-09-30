@@ -8,6 +8,7 @@ import type { ChatEvent } from "./events.js";
 import type { SpawnLog } from "./omp/spawn-gate.js";
 import { registerSessionRoutes } from "./rest.js";
 import type { WorkspaceRootOf } from "./session-cwd.js";
+import { createSessionDeleter } from "./session-delete.js";
 import { createSessionStore, type SessionStore } from "./store.js";
 import { createSessionMetadataStore } from "./store-metadata.js";
 import { defaultSessionClock, registerSessionEventStream } from "./stream/sse.js";
@@ -61,16 +62,19 @@ export function registerSessions(
   });
   store.reconcileOnStartup();
   const metadata = createSessionMetadataStore(options.db, { emit });
+  const deleter = createSessionDeleter({ store, supervisor, metadata, onError: options.onError });
   registerSessionRoutes(app, {
     store,
     supervisor,
     metadata,
     workspaceRootOf: options.workspaceRootOf,
+    deleter,
   });
   registerSessionEventStream(app, {
     store,
     supervisor,
     clock: options.runtime.clock ?? defaultSessionClock(),
+    isDeleting: (sessionId) => deleter.isDeleting(sessionId),
   });
   app.addHook("preClose", (complete) => {
     void closeSessions(supervisor, store).then(
