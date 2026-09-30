@@ -39,32 +39,33 @@ const ALLOWED_FASTIFY_REQUEST_ERROR_CODES = new Set([
   "FST_ERR_CTP_BODY_TOO_LARGE",
 ]);
 
-/** 受信 content-parser owner 的 exact 十条路由身份：POST login（#9）、POST logout（#10）、
- * POST /api/sessions/:id/prompt、POST /v1/chat/completions、POST /api/workspaces、
- * POST /api/workspaces/:id/dirs，以及回合控制四条（#450）POST /api/sessions/:id/stop、
- * POST /api/sessions/:id/regenerate、POST /api/sessions/:id/fork 与
- * POST /api/sessions/:id/approvals/:approvalId。模板须与 Fastify 路由注册逐字一致。 */
+/** 受信 content-parser owner 的 exact 十二条 `<METHOD> <route template>` 身份：POST login（#9）、
+ * POST logout（#10）、prompt、chat completions、两条工作空间、回合控制四条（#450），以及会话
+ * 元数据（#512）POST /api/sessions 与 PATCH /api/sessions/:id。method 是身份的一部分：
+ * DELETE /api/sessions/:id 与 PATCH 同模板但不在集合内。模板须与 Fastify 路由注册逐字一致，
+ * method 按 Fastify 原样（大写）比较、不做大小写归一。 */
 const CONTENT_PARSER_OWNED_ROUTES = new Set([
-  "/api/auth/login",
-  "/api/auth/logout",
-  "/api/sessions/:id/prompt",
-  "/v1/chat/completions",
-  "/api/workspaces",
-  "/api/workspaces/:id/dirs",
-  "/api/sessions/:id/stop",
-  "/api/sessions/:id/regenerate",
-  "/api/sessions/:id/fork",
-  "/api/sessions/:id/approvals/:approvalId",
+  "POST /api/auth/login",
+  "POST /api/auth/logout",
+  "POST /api/sessions/:id/prompt",
+  "POST /v1/chat/completions",
+  "POST /api/workspaces",
+  "POST /api/workspaces/:id/dirs",
+  "POST /api/sessions/:id/stop",
+  "POST /api/sessions/:id/regenerate",
+  "POST /api/sessions/:id/fork",
+  "POST /api/sessions/:id/approvals/:approvalId",
+  "POST /api/sessions",
+  "PATCH /api/sessions/:id",
 ]);
 
 /**
- * 构造函数-backed CTP 错误的 route-owner 结果：仅 matched identity 恰为
- * CONTENT_PARSER_OWNED_ROUTES 十条之一（method === POST 且 route template 精确命中）
- * 时归一 exact 400；matched /api
- * 或 /api/* catch-all 与 unmatched non-GET（routeOptions.url undefined 且
- * method != GET）恢复 typed not_found 404；其他已注册 route 保持 generic 5xx。
- * 显式 typed HttpError 保持 route-independent。方法/URL 边界基于实际路由匹配，
- * 不做 raw URL/statusCode/code-prefix 分类。
+ * 构造函数-backed CTP 错误的 route-owner 结果：仅 `${method} ${route template}` 恰为
+ * CONTENT_PARSER_OWNED_ROUTES 十二条之一时归一 exact 400（无单独的 POST 门；同模板的
+ * 其他方法不被覆盖）；matched /api 或 /api/* catch-all 与 unmatched non-GET
+ * （routeOptions.url undefined 且 method != GET）恢复 typed not_found 404；其他已注册
+ * route 保持 generic 5xx。显式 typed HttpError 保持 route-independent。方法/URL 边界
+ * 基于实际路由匹配，不做 raw URL/statusCode/code-prefix 分类。
  */
 function routeOwnerResult(request: FastifyRequest, error: unknown): HttpErrorCode | null {
   if (!isConstructorBackedContentParserError(error)) {
@@ -72,11 +73,7 @@ function routeOwnerResult(request: FastifyRequest, error: unknown): HttpErrorCod
   }
 
   const routeUrl = request.routeOptions.url;
-  if (
-    request.method === "POST" &&
-    routeUrl !== undefined &&
-    CONTENT_PARSER_OWNED_ROUTES.has(routeUrl)
-  ) {
+  if (routeUrl !== undefined && CONTENT_PARSER_OWNED_ROUTES.has(`${request.method} ${routeUrl}`)) {
     return "bad_request";
   }
 

@@ -163,7 +163,7 @@ describe("伪造新码形状的普通对象不被误标（守卫）", () => {
   );
 });
 
-describe("content-parser 归属集恰十条身份（共享 handleHttpError 接缝）", () => {
+describe("content-parser 归属集恰十二条身份（共享 handleHttpError 接缝）", () => {
   const OWNER_CASES = [...LEGACY_OWNERS, ...TURN_CONTROL_OWNERS].flatMap((url) =>
     ALLOWLISTED_CTP_CODES.map((ctpCode) => [url, ctpCode] as const),
   );
@@ -187,7 +187,6 @@ describe("content-parser 归属集恰十条身份（共享 handleHttpError 接�
     ["POST", "/api/sessions/:id/approvals/:approvalId/"],
     ["POST", "/api/sessions/abc/stop"],
     ["POST", "/api/sessions/abc/approvals/ap1"],
-    ["POST", "/api/sessions"],
   ] as const;
 
   it.each(NON_OWNER_CASES)("守卫：%s %s 保持 generic 500 且不回显细节", (method, url) => {
