@@ -361,6 +361,37 @@ describe("DELETE session file path validation (evidence 13)", () => {
     expect(lstatSync(junction).isSymbolicLink()).toBe(true);
     expect(world.errors).toEqual([]);
   });
+
+  // The omp string and the resolved target differ on every platform (the junction is a middle
+  // component), so a failed unlink's reported path shows which one was touched, even where the
+  // tmpdir is not a symlink.
+  it("an unlink via a symlinked middle component fails on the resolved target, not the omp path", async () => {
+    const world = await openRealWorld();
+    const { app, db } = world.fixture;
+    const dir = ownerSessionDir(world.rt.runtime.stateDir);
+    const resolved = ownedFile(dir, "x.jsonl");
+    const junction = join(ownedDir(), "j");
+    symlinkSync(dir, junction);
+    const file = join(junction, "x.jsonl");
+    const target = join(realpathSync(dir), "x.jsonl");
+    expect(file).not.toBe(target);
+    presetFile(db, world.session, file);
+    const mode = statSync(dir).mode & 0o7777;
+    chmodSync(dir, 0o500);
+    try {
+      expectDeleted(await sendDelete(app, world.session, world.cookie));
+    } finally {
+      chmodSync(dir, mode);
+    }
+
+    expect(sessionState(db, world.session).row).toBeUndefined();
+    expect(world.errors).toHaveLength(1);
+    const reported = world.errors[0] as NodeJS.ErrnoException;
+    expect([reported.code, reported.path]).toEqual(["EACCES", target]);
+    expect(reported.path).not.toBe(file);
+    expect(existsSync(resolved)).toBe(true);
+    expect(lstatSync(junction).isSymbolicLink()).toBe(true);
+  });
 });
 
 describe("DELETE request bodies (evidence 4)", () => {
