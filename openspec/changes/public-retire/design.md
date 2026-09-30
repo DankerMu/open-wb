@@ -9,7 +9,7 @@
   - `#retireSlot` 本身零改动（关停、token 撤销 `generation.revoked`、`sealGeneration`、`infraFaulted` 时 abandon 审批、`#pool.release`、同一 slot 才从 `#slots` 删除）。
   - `sse.ts` 其它路径（replay/gap/背压/心跳/物理断开/closing）逐字不变；`onEnd` 只经 `endOwned`，不经 `writeFrame`/`writeLive`/`gapFrame`。
   - 三个搬迁函数逐字搬迁、行为不变；`approvals.ts`/`index.ts` 各自的 `asError` 副本不动（非本刀范围）。
-  - `session-supervisor-subscribe.test.ts`、`session-sse.test.ts` 及其它既有测试零改动全绿。
+  - `session-supervisor-subscribe.test.ts`、`session-sse.test.ts` 及其它既有测试零改动全绿。唯一例外（实施期发现）：`server/test/session-approval-events.test.ts:147/:172` 以 spy 断言 `sse.ts` 的 `subscribe` 调用为三参 `toHaveBeenCalledWith(session, cursor, expect.any(Function))`；`sse.ts` 按父 tasks「4.3a 主动改 `stream/sse.ts` 传入 `onEnd`，为新增实参」必然使其变为四参，两处只在期望值中补一个 `expect.any(Function)`（仅改期望值，帧与行为断言不动）。
 - **Must add/change**：
   - 订阅集：`#subscribers: Map<string, Map<SessionStreamLiveHandler, (() => void) | undefined>>`；`subscribe` 第四参 `onEnd?: () => void`，以 `listeners.set(deliver, onEnd)` 登记；`#removeListener` 用 `delete`；`#fanout` 迭代 `[...listeners.keys()]`；`sessionStreamSubscriberCount` 用 `.size`。同一 `deliver` 重复订阅按 Map 键去重（与 Set 现状相同）。
   - `retire`（公开，`Promise<void>`，文档注释注明「删除的回收原语：结束订阅者但不发事件，不写任何 SQLite 行」）：

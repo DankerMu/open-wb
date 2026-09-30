@@ -34,6 +34,7 @@ import {
 } from "./pool.js";
 import type { ApprovalView, SessionStore, SettledApproval } from "./store.js";
 import type { RetainedEvent, RingRead } from "./stream/ring-buffer.js";
+import { asError, synchronousSinkViolation, throwCollected } from "./supervisor-faults.js";
 import type { TokenRegistry } from "./tokens.js";
 import { ControlClaims, drain, persistEvent, TurnStops } from "./turn-control.js";
 
@@ -103,7 +104,10 @@ export class SessionSupervisor {
     | ((sessionId: string, epoch: number, event: ChatEvent<number>) => void)
     | undefined;
   readonly #slots = new Map<string, Slot>();
-  readonly #subscribers = new Map<string, Set<SessionStreamLiveHandler>>();
+  readonly #subscribers = new Map<
+    string,
+    Map<SessionStreamLiveHandler, (() => void) | undefined>
+  >();
   readonly #claims = new Map<number, Slot>();
   readonly #admissions = new Set<Promise<unknown>>();
   readonly #pumps = new Set<Promise<void>>();
@@ -217,6 +221,7 @@ export class SessionSupervisor {
     sessionId: string,
     lastEventId: string | null,
     deliver: SessionStreamLiveHandler,
+    onEnd?: () => void,
   ): SessionStreamSubscription {
     if (this.#closed) {
       return {
@@ -226,7 +231,7 @@ export class SessionSupervisor {
       };
     }
     const listeners = this.#listenersFor(sessionId);
-    listeners.add(deliver);
+    listeners.set(deliver, onEnd);
     let replay: RingRead;
     try {
       replay = this.#readReplay(sessionId, lastEventId);
@@ -295,6 +300,29 @@ export class SessionSupervisor {
     }
     this.#slots.clear();
     throwCollected(this.#faults);
+  }
+
+  /**
+   * Deletion's recycle primitive: retires the live generation (bounded runtime shutdown, token
+   * revocation, cap release, generation seal), awaits native exit, drops the slot and its ring,
+   * then ends every subscriber through its onEnd without publishing an event. Writes no SQLite
+   * row; without a live slot it only ends subscribers. Precondition: the session is not running
+   * (`activeTurn === null`) — a running turn's shutdown failure path would persist and publish.
+   */
+  async retire(sessionId: string): Promise<void> {
+    const slot = this.#slots.get(sessionId);
+    if (slot !== undefined) {
+      await this.#retireSlot(slot);
+    }
+    const listeners = this.#subscribers.get(sessionId);
+    this.#subscribers.delete(sessionId);
+    for (const onEnd of listeners?.values() ?? []) {
+      try {
+        onEnd?.();
+      } catch {
+        /* one subscriber's close cannot keep the others open (mirrors #fanout) */
+      }
+    }
   }
 
   handleFlushError(failure: FlushFailure): void {
@@ -679,12 +707,12 @@ export class SessionSupervisor {
     return generation.ring.since(lastEventId, { turnRunning });
   }
 
-  #listenersFor(sessionId: string): Set<SessionStreamLiveHandler> {
+  #listenersFor(sessionId: string): Map<SessionStreamLiveHandler, (() => void) | undefined> {
     const existing = this.#subscribers.get(sessionId);
     if (existing !== undefined) {
       return existing;
     }
-    const created = new Set<SessionStreamLiveHandler>();
+    const created = new Map<SessionStreamLiveHandler, (() => void) | undefined>();
     this.#subscribers.set(sessionId, created);
     return created;
   }
@@ -705,7 +733,7 @@ export class SessionSupervisor {
     if (listeners === undefined) {
       return;
     }
-    for (const deliver of [...listeners]) {
+    for (const deliver of [...listeners.keys()]) {
       try {
         deliver(event);
       } catch {
@@ -761,38 +789,4 @@ export class SessionSupervisor {
     }
     return error;
   }
-}
-
-function throwCollected(faults: Error[]): void {
-  if (faults.length === 1) {
-    throw faults[0];
-  }
-  if (faults.length > 1) {
-    throw new AggregateError(faults, "session supervisor shutdown failed");
-  }
-}
-
-function asError(value: unknown): Error {
-  return value instanceof Error ? value : new Error(String(value));
-}
-
-function synchronousSinkViolation(returned: unknown): Error | undefined {
-  if ((typeof returned !== "object" && typeof returned !== "function") || returned === null) {
-    return undefined;
-  }
-  let then: unknown;
-  try {
-    then = "then" in returned ? returned.then : undefined;
-  } catch (error) {
-    return asError(error);
-  }
-  if (typeof then !== "function") {
-    return undefined;
-  }
-  try {
-    then.call(returned, undefined, () => undefined);
-  } catch {
-    /* a throwing then is containment, not a second reported violation */
-  }
-  return new Error("session observation sink must return synchronously");
 }
