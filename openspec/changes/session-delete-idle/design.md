@@ -1,0 +1,54 @@
+# Design: session-delete-idle（#525）
+
+父设计：D3「删除：占用 → 停止 → 等终态 → retire（含订阅者）→ 删行 → 删文件」、「落刀次序（三刀）」、Open Questions 3。行号为 origin/master（a86daed）。
+
+- **Change surface**：新建 `server/src/sessions/session-delete.ts`；`server/src/sessions/store-metadata.ts`（全文 140 行，增 `deleteSession`）；`server/src/sessions/rest-metadata.ts`（全文 195 行，增 DELETE 路由，依赖增 `deleter`）；`server/src/sessions/stream/sse.ts:19-23`（`SessionEventStreamOptions` 增 `isDeleting`）、`:154-162`（`subscribe` 之前的墓碑检查）；`server/src/sessions/supervisor.ts:212-215` 附近（增公开 `holdControl`）、`:787-798`（`#translate` 移出）；`server/src/sessions/supervisor-faults.ts`（接收 `translateSupervisorError`）；`server/src/sessions/rest.ts:40-45`（`SessionRestDependencies` 增 `deleter`）、`:167-171`（透传）；`server/src/sessions/index.ts:62-74`（构造 deleter、装配路由与 SSE）；`server/test/session-rest-helpers.ts:59`（harness 接线一处）；新建 `server/test/session-delete.test.ts`；`server/test/linux/uid-isolation.test.ts`（新增一例）。
+- **Must preserve**：
+  - `POST`/`PATCH /api/sessions*` 与其余会话路由、cookie guard（401 先于解析）、no-store、`http/errors.ts` 归属集（DELETE 不入集）与错误码表不变。
+  - `ControlClaims` 语义不变（计数、每个持有者只释放自己的一次）；prompt/regenerate/fork 对占用的 409 规则、stop 不受占用阻塞，均沿用 A。`holdControl` 只是 `#controls.hold` 的公开出口。
+  - `supervisor.retire` 语义不变（#516）；`subscribe` 的既有调用方不变。
+  - `#translate` 移出后的映射逐字相同（HttpError 原样、`SessionBusyError` → `session_busy`、`AgentUnavailableError`/`OmpProtocolError` → `agent_unavailable`、其余原样）；移出后若 supervisor.ts 某些 import 不再使用须删除（lint）。
+  - 既有测试文件断言零改动；唯一既有测试改动为 `session-rest-helpers.ts:59` 接线一处（加 `deleter` 桩，见下）。
+  - `store.ts`、`omp/`、web 不改。
+- **Must add/change**：
+  - `supervisor.ts`：
+    - `/** Registers one hold on the session's control claim (#465); the returned release takes effect once. */ holdControl(sessionId: string): () => void { return this.#controls.hold(sessionId); }`
+    - `#translate` → `supervisor-faults.ts` 导出的 `translateSupervisorError(error: unknown): unknown`，两处调用点（`:370`、`:380`）改为调用它。`bash scripts/size-guard.sh` 须仍退出 0（现 799 行）。
+  - `session-delete.ts`：
+    - 导出接口 `SessionDeleter { deleteSession(sessionId: string, ownerId: string): Promise<void>; isDeleting(sessionId: string): boolean }` 与工厂 `createSessionDeleter(deps: { store: Pick<SessionStore, "getMessages" | "runtimeState">; supervisor: Pick<SessionSupervisor, "controlHeld" | "holdControl" | "retire">; metadata: Pick<SessionMetadataStore, "deleteSession">; onError: (error: Error) => void })`。墓碑集 `Set<string>` 属实例。
+    - `deleteSession` 次序（同步段直到第一个 `await`）：
+      1. `supervisor.controlHeld(id)` → `throw new HttpError("session_busy")`（无副作用）。
+      2. `const release = supervisor.holdControl(id)`；以下全部在 `try { … } finally { release() }` 内。
+      3. `const tree = store.getMessages(id, ownerId)`；null → `not_found`（并发删除或账号删除）。`tree.session.status === "running"` → `session_busy`（过渡行为；`finally` 释放占用，墓碑尚未加入）。
+      4. `tombstones.add(id)`；以下在 `try { … } finally { tombstones.delete(id) }` 内（墓碑先于占用解除）。
+      5. `await supervisor.retire(id)`。
+      6. `store.runtimeState(id)?.activeTurn` 非 null → `throw new Error("session delete: active turn survived retire")`（不变量破坏，通用 5xx，不删行）。此处读 `runtimeState` 是授权之后的内存态检查，不是授权（chat-sessions「会话 REST」禁止的是以它做授权）。
+      7. `const removed = metadata.deleteSession(ownerId, id)`；null → `not_found`。
+      8. `removed.ompSessionFile !== null` → `await unlink(path)`（`node:fs/promises`）；`ENOENT` 忽略；其它错误 `onError(asError(error))` 后继续（仍 204）。
+    - 不设计时器、不写帧、不结算审批；除第 5 步外无 `await`。
+  - `store-metadata.ts`：`deleteSession(ownerId, sessionId): { ompSessionFile: string | null; messageCount: number } | null`——`runOwnedTransaction(db, "session delete rollback failed", () => { SELECT CAST(omp_session_file AS BLOB), workspace_id FROM chat_sessions WHERE id = ? AND owner_id = ?（无行 → 返回 null，不写任何东西）; SELECT COUNT(*) FROM chat_messages WHERE session_id = ?; requireChanges(DELETE FROM chat_sessions WHERE id = ? AND owner_id = ?, 1); emit(db, { kind: "session.delete", actorId: ownerId, title: "删除会话", workspaceId: <workspace_id 或 null>, detail: { sessionId, ompSessionFile, messageCount } }) })`。`omp_session_file` 按 `createSqliteTextDecoder` 解码（同 store 先例）。级联与 `parent_session_id` SET NULL 由既有外键完成（`core/db/index.ts:28` 已开 `PRAGMA foreign_keys = ON`；`034`/`032` 迁移定义）。
+  - `rest-metadata.ts`：依赖增 `deleter: Pick<SessionDeleter, "deleteSession">`；`app.delete<{ Params: SessionIdParams }>("/api/sessions/:id", { onRequest: noStoreMetadataResponse, preParsing: authorizeOwnedBeforeParse }, async (request, reply) => { await dependencies.deleter.deleteSession(request.params.id, createPrincipal(request).id); return reply.code(204).send(); })`。不设 `bodyLimit`、不读 `request.body`；带 Content-Type 的 body 由 Fastify 默认 parser 解析：格式良好 → 忽略；malformed/空 JSON/不支持媒体/超默认 1 MiB → 非归属已注册路由的通用 500（`http/errors.ts` 既有映射），handler 不执行。
+  - `rest.ts`：`SessionRestDependencies` 增 `deleter: Pick<SessionDeleter, "deleteSession">`，透传给 `registerSessionMetadataRoutes`。
+  - `stream/sse.ts`：`SessionEventStreamOptions` 增 `isDeleting: (sessionId: string) => boolean`；在 `attachEventStream` 中 `:154` 的 `isClosing()` 检查之后、`options.supervisor.subscribe(...)` 之前：`if (options.isDeleting(sessionId)) { endOwned(connection, options.clock); return; }`——200 SSE 头已写出，连接立即结束，零事件，未调用 `subscribe`。
+  - `index.ts`：supervisor 与 metadata 构造后 `const deleter = createSessionDeleter({ store, supervisor, metadata, onError: options.onError })`；`registerSessionRoutes(app, { …, deleter })`；`registerSessionEventStream(app, { …, isDeleting: (id) => deleter.isDeleting(id) })`。
+  - `server/test/session-rest-helpers.ts:59`：`registerSessionRoutes` 调用加 `deleter: { deleteSession: () => Promise.reject(new Error("session-rest harness does not serve DELETE")) }`（该 harness 的用例不发 DELETE）。
+  - 认知复杂度 ≤15；`session-delete.ts` 按步骤拆小函数。
+- **并发推理（Concurrency pack）**：第 1–4 步同一同步段，与 prompt/regenerate/fork/DELETE 的占用检查互斥；持有期间 prompt 路由（`rest.ts:190` 同步检查 `controlHeld`）、regenerate/fork（`branching.ts:73/206`）与第二个 DELETE 均 409；stop 对非 running 会话按 A 规则 204、不经占用。唯一 `await` 在 `retire`（与 unlink）：墓碑自第 4 步生效，retire 期间到达的 `GET …/events` 通过 owner 预检后在 `subscribe` 前被拦截；retire 结束到删行之间无 `await`，故不存在未被墓碑覆盖的窗口。删除事务失败 → 两个 `finally` 依次解除墓碑与占用，之后订阅与 prompt 恢复既有行为（进程已退役，下次 prompt 懒获取、`--resume`）。running 会话在第 3 步被拒，此时尚未加入墓碑、未调用任何 supervisor 写入。
+- **Sibling surfaces**：`accounts` 的 `GET /api/audit`（`server/src/accounts/index.ts:13`）按既有规则返回新 kind；web `deleteSession`（5.1，`web/src/lib/api-sessions.ts`）已按 204 解析；`smoke/` 不改（8.1）。
+- **跨 uid（Open Questions 3）**：`--session-dir <OMP_STATE_DIR>/sessions/<ownerId>` 由宿主（app uid）经 `ensureSharedDir` 以共享目录模式创建（`omp/process.ts:63-70`、`core/sandbox/dirs.ts:12-30`），CI 中 `OMP_STATE_DIR` 为 `2770`、组 `workbuddy`（`.github/scripts/ci-uid-isolation.sh:90-92`）。unlink 需要对所在目录的写权限：app uid 为该目录属主，故预期可删 omp uid 写出的 `.jsonl`。若 omp 在该目录下再建子目录且不给组写权限，CI 用例会失败——那是本刀要暴露的真实部署问题，按实际结果在 PR 记录，不在测试里放宽。
+- **残余**：
+  - `store-metadata` 仍不感知 SessionStore `closed`（同 4.1/4.2）。
+  - unlink 期间（提交后）墓碑仍在：其间新订阅立即结束，行已删除后它本就会 404，无可观察差异。
+- **Required evidence**（`server/test/session-delete.test.ts`：production `createApp`（`session-supervisor-helpers.ts` 的 `openBareSession`/`openRecordingSession`，真实 fake-omp 或受控 runtime）+ `app.inject()` + 真实 SQLite；SSE 订阅用 `session-sse-helpers.ts` 既有夹具；审计经 `GET /api/audit`（管理员与非管理员账号，沿用 #523 测试的账号做法）与 SQL。「行不变」= 以 SQL 读该会话行全部列前后深相等，且其 `chat_messages`/`chat_steps`/`chat_approvals` 行数不变。RED：除证据 1 的「未知 id 404 / 匿名 401」与证据 4 的 malformed body（实现前 DELETE 命中 `/api/*` catch-all，状态码可能偶然相符——以实际运行记录，no-store 断言使其红）外，全部在实现前红）：
+  1. 鉴权：匿名 DELETE → 401 + no-store；第二账号对第一账号会话、第一账号对未知 id → 同一 404（状态码、`cache-control`、`content-type`、`content-length`、body 逐字节相等，均带 no-store）；两者均无 supervisor 调用（`supervisor.retire`/`holdControl` spy 调用数为 0，或 spawn/存活进程数不变）、无写入。
+  2. 删除空闲会话（「删除空闲会话」）：`done` 会话含两轮消息、步骤与一条 `allow` 审批（fake-omp `approval` 场景）、存活 idle 进程、两个打开的 SSE 订阅、`omp_session_file` 指向存在的文件；另有一个以它为源的 fork 会话（`POST …/fork`）→ DELETE 204 无 body + no-store；子进程已退出；两个订阅的响应已结束且未收到任何事件；该会话的 `chat_sessions`/`chat_messages`/`chat_steps`/`chat_approvals` 行为 0；文件已不存在；fork 会话仍在 `GET /api/sessions` 且 SQL `parent_session_id` 为 NULL；`GET /api/audit`（管理员）恰新增一条 `session.delete`，`detail` 恰为 `{sessionId, ompSessionFile:<该路径>, messageCount:4}`、`workspaceId:null`、`actorId` 为 owner；非管理员账号的 `GET /api/audit` 不含它；随后该 id 的 `GET …/messages`、`GET …/events`、PATCH、DELETE 均为与未知 id 相同的 404，`GET /api/sessions` 不再列出；另一个会话的进程与行不受影响。
+  3. 会话文件缺失与从未派发：`omp_session_file` 指向的文件已被测试删除 → 204、审计一条、`onError` 未被调用；从未 prompt 的会话 → 204、审计 `ompSessionFile:null`、`messageCount:0`、无 spawn。
+  4. body：带格式良好 JSON body（`{"x":1}`）的 DELETE → 204，与无 body 相同；经 production `createApp` 带 `Content-Type: application/json` 的 malformed body → 通用 500 信封（非 400），会话行、审计行数与存活进程不变，随后无 body 的 DELETE → 204。
+  5. 墓碑窗口（「删除墓碑期新订阅立即结束」第一条）：受控 runtime 使空闲子进程在 EOF 后不退出（DELETE 停在 `retire` 的等待中，由测试推进注入时钟或放行退出）；窗口内以 owner 发起 `GET …/events` → 200 后立即结束、零事件（且未注册为订阅者：`sessionStreamSubscriberCount` 为 0）；放行后 DELETE 204；同一订阅请求再发 → 404。
+  6. 审计失败（「删除墓碑期新订阅立即结束」第二条 +「删除事务失败保留会话」）：`CREATE TEMP TRIGGER … BEFORE INSERT ON audit_events WHEN NEW.kind = 'session.delete' BEGIN SELECT RAISE(ABORT, 'x'); END`；同证据 5 的窗口内发起订阅 → 立即结束、零事件；DELETE → 通用 5xx；会话/消息/步骤/审批行与 `omp_session_file` 文件都保留、行不变；`controlHeld` 为 false；之后新 `GET …/events` 正常建立（不立即结束：能收到后续 prompt 的事件）；之后 prompt → 202（进程懒获取）。另以 `BEFORE DELETE ON chat_sessions` 触发器注入删除失败 → 同样 5xx、行保留、占用释放。
+  7. 并发占用（「删除期间的并发请求」）：regenerate 或 fork 持有占用时（沿用 A 测试中挂起 regenerate/fork 的做法）DELETE → 409 `session_busy` + no-store，会话行与进程不变、无审计；以及 DELETE 停在 retire 窗口（证据 5 机制）时，对同一会话的 prompt、regenerate、fork 与第二个 DELETE → 均 409 `session_busy`、无行变化，原 DELETE 放行后 204。
+  8. running 过渡（「运行中删除的过渡拒绝」）：`openHeldPromptSession` 挂起回合 + 一个打开的订阅 → DELETE 409 `session_busy` + no-store；进程存活、行不变、订阅未结束、无审计、`controlHeld` 为 false；`completeHeldTurn` 后 prompt → 202 完成，再 DELETE → 204。
+  9. unlink 非 ENOENT：以 SQL 把 `omp_session_file` 改为一个存在的**目录**路径（unlink 目录确定失败）→ 204、行已删、审计一条、`onError` 恰收到一次该错误；目录仍在。
+  10. 「审计形状」整轮：`POST /api/workspaces` 建 W，`{workspaceId:W.id, scene:"office"}` 创建，fake-omp `thinking` 场景 prompt 至 done，DELETE → `GET /api/audit?limit=2` 依次为 `session.delete`（`title:"删除会话"`、`workspaceId:W.id`、`detail:{sessionId, ompSessionFile:<路径>, messageCount:2}`）与 `session.bind`（`title:"绑定工作空间"`、`workspaceId:W.id`、`detail:{sessionId, scene:"office"}`），`actorId` 均为 owner；非管理员不可见。
+  11. `server/test/linux/uid-isolation.test.ts` 新增「sudo 模式删除会话后会话文件不存在」：production `createApp`，runtime 选项含 `ompUser`（沿用该文件的 layout/env 夹具），prompt 至 done（文件由 omp uid 写出，断言其存在且属主 uid ≠ 当前 uid），DELETE → 204，文件不存在、`onError` 未被调用。本地非 Linux 跳过（既有 `describe.skipIf`），由 PR CI `uid-isolation` job 执行。
+  12. 回归：既有测试文件断言零改动全绿；`npm test --workspace server`（覆盖率 ≥80%）、`make lint`、`make typecheck`、`make anti-drift`（knip 零新增）、`bash scripts/size-guard.sh` 退出 0；PR 记录 `supervisor.ts`、`rest-metadata.ts`、`store-metadata.ts`、`sse.ts` 前后行数与 `#translate` 移出前后的映射一致性（既有 supervisor 测试全绿即证据）。
