@@ -9,7 +9,7 @@
  * every exit path.
  */
 import { lstat, realpath, unlink } from "node:fs/promises";
-import { dirname, isAbsolute } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { HttpError } from "../core/errors/index.js";
 import { ompSessionDir } from "./omp/process.js";
 import type { SessionStore } from "./store.js";
@@ -110,10 +110,14 @@ export function createSessionDeleter(deps: SessionDeleterDependencies): SessionD
 
 /**
  * The row is already gone, so nothing here throws. `path` is omp-reported and was never validated
- * on write: it is unlinked only when absolute, its parent's realpath is the owner's session dir and
- * `lstat` (no symlink follow) says regular file; anything else is reported and left alone. ENOENT at
- * any step is success. Residual: the dir is group-writable (2770) and Node has no `unlinkat`, so
- * between the checks and `unlink` the name can only be swapped for another entry of that same dir.
+ * on write: it must be absolute and its parent's realpath must be the owner's session dir; from then
+ * on only `target` (that realpath joined with the basename) is touched, so no component of the omp
+ * string is re-resolved. `target` is unlinked only when `lstat` (no symlink follow) says regular
+ * file; anything else is reported and left alone. ENOENT at any step is success. Residual: `sessions`
+ * and `sessions/<ownerId>` are group-writable (2770) and Node has no `unlinkat`, so between realpath
+ * and `unlink` the omp group can still rename-swap `sessions/<ownerId>` (or an ancestor up to
+ * stateDir) for a symlink; that means replacing the owner's whole session dir, and closing it needs
+ * a dir fd / `unlinkat` or tighter `sessions/` ownership.
  */
 async function removeSessionFile(path: string, sessionDir: string, report: Report): Promise<void> {
   if (!isAbsolute(path)) {
@@ -126,11 +130,12 @@ async function removeSessionFile(path: string, sessionDir: string, report: Repor
       report(new Error(OUTSIDE_SESSION_DIR));
       return;
     }
-    if (!(await lstat(path)).isFile()) {
+    const target = join(expected, basename(path));
+    if (!(await lstat(target)).isFile()) {
       report(new Error(NOT_REGULAR_FILE));
       return;
     }
-    await unlink(path);
+    await unlink(target);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       report(error);

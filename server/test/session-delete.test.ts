@@ -5,8 +5,16 @@
  * "Row unchanged" = every `chat_sessions` column plus the session's message/step/approval counts
  * deep-equal before and after (`sessionState`).
  */
-import { chmodSync, existsSync, lstatSync, mkdirSync, statSync, symlinkSync } from "node:fs";
-import { isAbsolute, join, relative } from "node:path";
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  realpathSync,
+  statSync,
+  symlinkSync,
+} from "node:fs";
+import { basename, isAbsolute, join, relative } from "node:path";
 import type { LightMyRequestResponse } from "fastify";
 import { describe, expect, it, vi } from "vitest";
 import { REAL, settle } from "./session-approval-helpers.js";
@@ -23,6 +31,7 @@ import {
   NOT_FOUND_WIRE,
   openLingeringWorld,
   openRealWorld,
+  ownedDir,
   ownedFile,
   ownerSessionDir,
   parkedDelete,
@@ -260,7 +269,10 @@ describe("DELETE file edge cases (evidence 3, 9)", () => {
   });
 });
 
-/** A read-only (0500) owner session dir makes the unlink of a real file in it fail with EACCES. */
+/**
+ * A read-only (0500) owner session dir makes the unlink of a real file in it fail with EACCES. The
+ * unlink runs on the resolved target, so the reported path is under the session dir's realpath.
+ */
 async function expectUnlinkFailureReported(world: RealWorld): Promise<void> {
   const { app, db } = world.fixture;
   const dir = ownerSessionDir(world.rt.runtime.stateDir);
@@ -279,7 +291,10 @@ async function expectUnlinkFailureReported(world: RealWorld): Promise<void> {
   expect(auditRows(db)).toBe(audits + 1);
   expect(world.errors).toHaveLength(1);
   const reported = world.errors[0] as NodeJS.ErrnoException;
-  expect([reported.code, reported.path]).toEqual(["EACCES", file]);
+  expect([reported.code, reported.path]).toEqual([
+    "EACCES",
+    join(realpathSync(dir), basename(file)),
+  ]);
   expect(existsSync(file)).toBe(true);
 }
 
@@ -319,6 +334,26 @@ describe("DELETE session file path validation (evidence 13)", () => {
       expect(existsSync(survivor)).toBe(true);
     }
     expect(lstatSync(link).isSymbolicLink()).toBe(true);
+  });
+
+  it("a symlinked middle component resolving to the session dir deletes the resolved file", async () => {
+    const world = await openRealWorld();
+    const { app, db } = world.fixture;
+    const dir = ownerSessionDir(world.rt.runtime.stateDir);
+    const resolved = ownedFile(dir, "x.jsonl");
+    const junction = join(ownedDir(), "j");
+    symlinkSync(dir, junction);
+    const file = join(junction, "x.jsonl");
+    presetFile(db, world.session, file);
+    const admin = await cookieFor(app, "lisi");
+
+    expectDeleted(await sendDelete(app, world.session, world.cookie));
+
+    expect(sessionState(db, world.session).row).toBeUndefined();
+    expect((await auditEvents(app, admin, 1))[0]).toEqual(deleteEvent(world.session, file, 0));
+    expect(existsSync(resolved)).toBe(false);
+    expect(lstatSync(junction).isSymbolicLink()).toBe(true);
+    expect(world.errors).toEqual([]);
   });
 });
 

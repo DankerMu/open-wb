@@ -80,7 +80,7 @@ export function track(fixture: SupervisorApp, fakes: FakeChild[] = []): void {
 }
 
 /** A fresh test-owned directory (removed after the case). */
-function ownedDir(): string {
+export function ownedDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "open-wb-525-"));
   dirs.push(dir);
   return dir;
