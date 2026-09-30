@@ -108,6 +108,7 @@ function openReal(scenario: string, options: RealOptions = {}): RealWorld {
     ...real.runtime,
     sessionId: SESSION_ID,
     ownerId: "u1",
+    cwd: join(real.runtime.sandboxRoot, "u1"),
     tokens,
     idleMs: options.idleMs ?? IDLE_MS,
     resumePath: options.resumePath ?? null,

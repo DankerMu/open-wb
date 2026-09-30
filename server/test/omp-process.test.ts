@@ -509,6 +509,7 @@ function optsOf(roots: SpawnRoots, resumePath: string | null, user?: string): Sp
     sandboxRoot: roots.sandboxRoot,
     stateDir: roots.stateDir,
     ownerId: OWNER,
+    cwd: roots.cwd,
     modelId: MODEL,
     token: CALLER_TOKEN,
     resumePath,

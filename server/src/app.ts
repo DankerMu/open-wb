@@ -151,20 +151,21 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     tokens,
     ...(assembly?.upstream === undefined ? {} : { upstream: assembly.upstream }),
   });
-  const registered = registerSessions(app, {
-    db,
-    tokens,
-    runtime,
-    onError: assembly?.onError ?? ((error) => observeSessionFault(app, error)),
-    ...(assembly?.onEvent === undefined ? {} : { onEvent: assembly.onEvent }),
-    ...(assembly?.log === undefined ? {} : { log: assembly.log }),
-  });
-  app.decorate("sessions", registered);
   const store = createWorkspaceStore(db, {
     sandboxRoot: runtime.sandboxRoot,
     ensureSharedDir,
     emit,
   });
+  const registered = registerSessions(app, {
+    db,
+    tokens,
+    runtime,
+    workspaceRootOf: (ownerId, workspaceId) => store.rootOf({ id: ownerId }, workspaceId),
+    onError: assembly?.onError ?? ((error) => observeSessionFault(app, error)),
+    ...(assembly?.onEvent === undefined ? {} : { onEvent: assembly.onEvent }),
+    ...(assembly?.log === undefined ? {} : { log: assembly.log }),
+  });
+  app.decorate("sessions", registered);
   const audit = { emit: (event: Parameters<typeof emit>[1]) => emit(db, event) };
   const sandbox = createSandbox({ rootOf: store.rootOf, audit });
   registerWorkspaces(app, { store, sandbox, audit });

@@ -115,6 +115,7 @@ function gatedRuntime(
     sandboxRoot: temp.sandboxRoot,
     stateDir: temp.stateDir,
     ownerId: "u1",
+    cwd: temp.cwd,
     modelId: temp.modelId,
     tokens: createTokens(`wb-652-${sessionId}`),
     clock,

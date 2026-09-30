@@ -7,6 +7,7 @@ import { emit } from "../core/audit/index.js";
 import type { ChatEvent } from "./events.js";
 import type { SpawnLog } from "./omp/spawn-gate.js";
 import { registerSessionRoutes } from "./rest.js";
+import type { WorkspaceRootOf } from "./session-cwd.js";
 import { createSessionStore, type SessionStore } from "./store.js";
 import { defaultSessionClock, registerSessionEventStream } from "./stream/sse.js";
 import { SessionSupervisor, type SessionSupervisorRuntime } from "./supervisor.js";
@@ -16,6 +17,11 @@ export interface RegisterSessionsOptions {
   db: DatabaseSync;
   tokens: TokenRegistry;
   runtime: SessionSupervisorRuntime;
+  /**
+   * The workspace store's owner-scoped rootOf (createApp's one store), used only to resolve a
+   * bound session's omp cwd; sessions never builds a workspace store or computes a root itself.
+   */
+  workspaceRootOf: WorkspaceRootOf;
   /**
    * Must return synchronously. A returned thenable is retained beside the source
    * fault without calling this sink again. registerSessions forwards the return
@@ -47,6 +53,7 @@ export function registerSessions(
     store,
     tokens: options.tokens,
     runtime: options.runtime,
+    workspaceRootOf: options.workspaceRootOf,
     onError: options.onError,
     ...(options.onEvent === undefined ? {} : { onEvent: options.onEvent }),
     ...(options.log === undefined ? {} : { log: options.log }),

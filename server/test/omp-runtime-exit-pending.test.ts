@@ -101,6 +101,7 @@ function openReal(options: RealOptions = {}): RealWorld {
     ...(options.bin === undefined ? {} : { bin: options.bin }),
     sessionId: SESSION_ID,
     ownerId: "u1",
+    cwd: join(real.runtime.sandboxRoot, "u1"),
     tokens,
     idleMs: IDLE_MS,
     spawnImpl,

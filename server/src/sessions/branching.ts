@@ -21,7 +21,7 @@ import type { SessionSupervisorRuntime } from "./supervisor.js";
 import type { TokenRegistry } from "./tokens.js";
 import type { ControlClaims, TurnStops } from "./turn-control.js";
 
-type Resume = { ownerId: string; ompSessionFile: string | null };
+export type Resume = { ownerId: string; ompSessionFile: string | null; workspaceId: string | null };
 
 interface RegeneratePorts {
   store: SessionStore;
@@ -165,6 +165,8 @@ interface ForkPorts {
   /** The supervisor's spawn gate and log: the temporary process queues on the same permits. */
   spawn: SpawnShared;
   closed(): boolean;
+  /** The session cwd resolution (session-cwd.ts), shared with the supervisor's acquisitions. */
+  cwdOf(ownerId: string, workspaceId: string | null): string;
   /** Retires the source's registered slot (if any) and resolves once it exited; never rejects. */
   retireSource(sessionId: string): Promise<void>;
 }
@@ -180,6 +182,7 @@ interface ForkPlan {
   text: string;
   expectedAssistantId: number | null;
   file: string;
+  workspaceId: string | null;
 }
 
 export type ForkResult = { session: ReturnType<SessionStore["commitFork"]>; draft: string };
@@ -241,12 +244,15 @@ export class Forks {
       text: user.content,
       expectedAssistantId: assistant?.id ?? null,
       file: resume.ompSessionFile,
+      workspaceId: resume.workspaceId,
     };
   }
 
   async #fork(plan: ForkPlan, retired: Promise<void>): Promise<ForkResult> {
     const { pool, controls, tokens } = this.#ports;
     await retired;
+    // Before admission: an unusable root fails the fork without taking (or evicting) capacity.
+    const cwd = this.#ports.cwdOf(plan.ownerId, plan.workspaceId);
     let temp: SessionRuntime | undefined;
     const entry = await pool.admit({
       busy: () => controls.held(plan.sourceId),
@@ -260,6 +266,7 @@ export class Forks {
       sessionRuntimeOpts(this.#ports.config, this.#ports.spawn, {
         sessionId: plan.sessionId,
         ownerId: plan.ownerId,
+        cwd,
         resumePath: plan.file,
         tokens: temporaryTokens(pool, entry, tokens),
         onExit: () => {

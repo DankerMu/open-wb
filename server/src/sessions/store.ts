@@ -97,6 +97,7 @@ interface SessionRuntimeState {
   ompSessionFile: string | null;
   streamEpoch: number;
   activeTurn: AcceptedPrompt | null;
+  workspaceId: string | null;
 }
 
 interface FlushError {
@@ -207,6 +208,7 @@ type RuntimeDbRow = {
   owner_id: string;
   omp_session_file: Uint8Array | null;
   stream_epoch: number;
+  workspace_id: string | null;
 };
 
 type AdmissionDbRow = Pick<SessionDbRow, "id" | "owner_id" | "title" | "status" | "updated_at">;
@@ -601,7 +603,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
       const decoder = createSqliteTextDecoder(db);
       const row = db
         .prepare(
-          "SELECT owner_id, CAST(omp_session_file AS BLOB) AS omp_session_file, stream_epoch FROM chat_sessions WHERE id = ? LIMIT 1",
+          "SELECT owner_id, CAST(omp_session_file AS BLOB) AS omp_session_file, stream_epoch, workspace_id FROM chat_sessions WHERE id = ? LIMIT 1",
         )
         .get(sessionId) as unknown as RuntimeDbRow | undefined;
       if (row === undefined) {
@@ -618,6 +620,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
           turn === undefined
             ? null
             : { userMessageId: turn.userMessageId, assistantMessageId: turn.assistantMessageId },
+        workspaceId: row.workspace_id,
       };
     },
 

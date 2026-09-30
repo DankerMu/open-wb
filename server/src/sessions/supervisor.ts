@@ -5,7 +5,7 @@ import { availableParallelism } from "node:os";
 import { DEFAULT_OMP_MAX_PROCESSES } from "../agent-config.js";
 import { HttpError } from "../core/errors/index.js";
 import { ApprovalRegistry } from "./approvals.js";
-import { type ForkResult, Forks, Regenerations } from "./branching.js";
+import { type ForkResult, Forks, Regenerations, type Resume } from "./branching.js";
 import { applyFailure, applyFrame, applyStop, type ChatEvent, createEventState } from "./events.js";
 import type { OmpFrame } from "./omp/frame.js";
 import { AgentUnavailableError, OmpProtocolError, type SpawnImpl } from "./omp/process.js";
@@ -32,6 +32,7 @@ import {
   sessionRuntimeOpts,
   turnFree,
 } from "./pool.js";
+import { sessionCwdResolver, type WorkspaceRootOf } from "./session-cwd.js";
 import type { ApprovalView, SessionStore, SettledApproval } from "./store.js";
 import type { RetainedEvent, RingRead } from "./stream/ring-buffer.js";
 import { asError, synchronousSinkViolation, throwCollected } from "./supervisor-faults.js";
@@ -73,6 +74,8 @@ export interface SessionSupervisorOptions {
   store: SessionStore;
   tokens: TokenRegistry;
   runtime: SessionSupervisorRuntime;
+  /** The workspace store's owner-scoped rootOf: a bound session's cwd (session-cwd.ts). */
+  workspaceRootOf: WorkspaceRootOf;
   /**
    * Must return synchronously. A returned thenable is an owned programming error;
    * its rejection is consumed and is not a second fault. A thrown then getter uses
@@ -119,6 +122,7 @@ export class SessionSupervisor {
   readonly #controls = new ControlClaims();
   readonly #regenerations: Regenerations;
   readonly #forks: Forks;
+  readonly #cwdOf: ReturnType<typeof sessionCwdResolver>;
   #closed = false;
 
   constructor(options: SessionSupervisorOptions) {
@@ -127,6 +131,7 @@ export class SessionSupervisor {
     this.#runtime = options.runtime;
     this.#onError = options.onError;
     this.#onEvent = options.onEvent;
+    this.#cwdOf = sessionCwdResolver(options.runtime.sandboxRoot, options.workspaceRootOf);
     const clock = options.runtime.clock;
     this.#pool = new ProcessPool(
       options.runtime.maxProcesses ?? DEFAULT_OMP_MAX_PROCESSES,
@@ -179,6 +184,7 @@ export class SessionSupervisor {
       config: this.#runtime,
       spawn: this.#spawn,
       closed: () => this.#closed,
+      cwdOf: this.#cwdOf,
       retireSource: (sessionId) => {
         const slot = this.#slots.get(sessionId);
         return slot === undefined ? Promise.resolve() : this.#retireSlot(slot);
@@ -386,13 +392,12 @@ export class SessionSupervisor {
   /** Live-slot reuse (claimed when `claim` is set); one fresh admission on re-admission. */
   async #onSlot<T>(
     sessionId: string,
-    resume: { ownerId: string; ompSessionFile: string | null },
+    resume: Resume,
     claim: number | undefined,
     use: (slot: Slot) => Promise<T>,
   ): Promise<T> {
     const live = this.#slots.get(sessionId);
-    const fresh = () =>
-      this.#onNewSlot(sessionId, resume.ownerId, resume.ompSessionFile, claim, use);
+    const fresh = () => this.#onNewSlot(sessionId, resume, claim, use);
     if (live === undefined || live.retiring !== undefined || !this.#pool.holds(live.entry)) {
       return fresh();
     }
@@ -414,11 +419,12 @@ export class SessionSupervisor {
 
   async #onNewSlot<T>(
     sessionId: string,
-    ownerId: string,
-    resumePath: string | null,
+    resume: Resume,
     claim: number | undefined,
     use: (slot: Slot) => Promise<T>,
   ): Promise<T> {
+    // First, before any claim or admission: an unusable root spawns nothing and holds nothing.
+    const cwd = this.#cwdOf(resume.ownerId, resume.workspaceId);
     const slot: Slot = {
       sessionId,
       runtime: undefined as unknown as SessionRuntime,
@@ -458,8 +464,9 @@ export class SessionSupervisor {
     slot.runtime = new SessionRuntime(
       sessionRuntimeOpts(this.#runtime, this.#spawn, {
         sessionId,
-        ownerId,
-        resumePath,
+        ownerId: resume.ownerId,
+        cwd,
+        resumePath: resume.ompSessionFile,
         tokens: generationTokens(slot, this.#pool, this.#store, this.#tokens),
         onExit: () => {
           this.#onProcessExit(slot);

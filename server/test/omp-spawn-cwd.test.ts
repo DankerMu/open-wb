@@ -1,6 +1,6 @@
 /**
- * Issue #513 optional spawn cwd: argv `--cwd` and the child's working directory are one value,
- * defaulting to the owner root; only the owner root is created by spawn.
+ * Issue #513 spawn cwd: argv `--cwd` and the child's working directory are one value (required
+ * since #521; the owner root is passed explicitly); only the owner root is created by spawn.
  */
 import type { SpawnOptions } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
@@ -80,7 +80,7 @@ function recorder(watch: readonly string[]): { calls: Recorded[]; spawnImpl: Spa
   return { calls, spawnImpl };
 }
 
-function spawnOpts(roots: Roots, cwd?: string, ompUser?: string): SpawnOmpOpts {
+function spawnOpts(roots: Roots, cwd = roots.ownerRoot, ompUser?: string): SpawnOmpOpts {
   return {
     bin: roots.bin,
     sandboxRoot: roots.sandboxRoot,
@@ -89,7 +89,7 @@ function spawnOpts(roots: Roots, cwd?: string, ompUser?: string): SpawnOmpOpts {
     modelId: MODEL,
     token: TOKEN,
     resumePath: null,
-    ...(cwd === undefined ? {} : { cwd }),
+    cwd,
     ...(ompUser === undefined ? {} : { ompUser }),
   };
 }
@@ -137,9 +137,9 @@ function expectOwnDirsPresent(call: Recorded, roots: Roots): void {
 }
 
 describe("spawnOmp cwd (direct)", () => {
-  it("defaults --cwd and the spawn cwd option to the owner root with the exact contract argv", async () => {
+  it("passes an explicit owner root as --cwd and the spawn cwd option with the exact contract argv", async () => {
     const roots = makeRoots();
-    const call = await launch(roots);
+    const call = await launch(roots, roots.ownerRoot);
     expect(call.command).toBe(roots.bin);
     expect(cwdArg(call.args)).toBe(roots.ownerRoot);
     expect(call.options.cwd).toBe(roots.ownerRoot);
@@ -164,10 +164,10 @@ describe("spawnOmp cwd (direct)", () => {
     expect(call.options.shell).toBe(false);
   });
 
-  it("creates a missing owner root and the three state dirs by default (characterization)", async () => {
+  it("creates a missing owner root and the three state dirs for an explicit owner root cwd", async () => {
     const roots = makeRoots();
     expect(existsSync(roots.ownerRoot)).toBe(false);
-    const call = await launch(roots);
+    const call = await launch(roots, roots.ownerRoot);
     expectOwnDirsPresent(call, roots);
   });
 
@@ -247,7 +247,7 @@ describe("spawnOmp cwd (sudo)", () => {
 });
 
 describe("SessionRuntime cwd wiring", () => {
-  async function firstSpawn(roots: Roots, cwd?: string): Promise<Recorded> {
+  async function firstSpawn(roots: Roots, cwd = roots.ownerRoot): Promise<Recorded> {
     const calls: Recorded[] = [];
     let recorded: (call: Recorded) => void = () => {};
     const first = new Promise<Recorded>((resolve) => {
@@ -274,7 +274,7 @@ describe("SessionRuntime cwd wiring", () => {
       tokens: createTokens("cwd"),
       spawnImpl,
       handshakeTimeoutMs: 60_000,
-      ...(cwd === undefined ? {} : { cwd }),
+      cwd,
     });
     const stream = runtime.prompt("hello");
     stream.dispatched.catch(() => {});
@@ -291,12 +291,5 @@ describe("SessionRuntime cwd wiring", () => {
     const call = await firstSpawn(roots, proj);
     expect(cwdArg(call.args)).toBe(proj);
     expect(call.options.cwd).toBe(proj);
-  });
-
-  it("falls back to the owner root when no cwd is given", async () => {
-    const roots = makeRoots();
-    const call = await firstSpawn(roots);
-    expect(cwdArg(call.args)).toBe(roots.ownerRoot);
-    expect(call.options.cwd).toBe(roots.ownerRoot);
   });
 });

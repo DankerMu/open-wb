@@ -79,6 +79,7 @@ function open(scenario: string, extraArgs: string[], idleMs = 600_000): World {
     ...real.runtime,
     sessionId: "sess-abort-start-650",
     ownerId: "u1",
+    cwd: `${real.runtime.sandboxRoot}/u1`,
     tokens,
     idleMs,
     resumePath: null,

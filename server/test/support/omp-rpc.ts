@@ -70,6 +70,7 @@ export class RpcHarness {
       sandboxRoot: join(root, "sandbox"),
       stateDir: join(root, "state"),
       ownerId: "u1",
+      cwd: join(root, "sandbox", "u1"),
       modelId: "deepseek-v4.1-flash",
       token,
       resumePath: null,
