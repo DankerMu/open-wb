@@ -21,7 +21,7 @@ Evidence floor: 新建 `server/test/session-delete.test.ts` 覆盖 design「Requ
 - 测试：新建 `server/test/session-delete.test.ts`；`server/test/linux/uid-isolation.test.ts` 新增一例。
 
 ## Capabilities
-- ADDED `session-metadata`「会话删除」：父 delta 全文，但第 2 步改写为本刀的过渡行为（running → 409 `session_busy`、释放占用、无其它副作用），「第 2–4 步失败」相应改为「第 3–4 步失败」；删去 Scenario「删除运行中的会话先停止」「删除时停止意图遇获取失败」与「删除期间的并发请求」的第一组 WHEN/THEN（均属 4.3c）；新增 Scenario「运行中删除的过渡拒绝」。4.3c（#526）以父 delta 全文 MODIFIED 本 Requirement、移除过渡行为。
+- ADDED `session-metadata`「会话删除」：父 delta 全文，但第 2 步改写为本刀的过渡行为（running → 409 `session_busy`、释放占用、无其它副作用），「第 2–4 步失败」相应改为「第 3–4 步失败」；删去 Scenario「删除运行中的会话先停止」「删除时停止意图遇获取失败」与「删除期间的并发请求」的第一组 WHEN/THEN（均属 4.3c）；新增 Scenario「运行中删除的过渡拒绝」。4.3c（#526）以父 delta 全文 MODIFIED 本 Requirement、移除过渡行为——届时删去本刀的 Scenario「运行中删除的过渡拒绝」是有意、声明式的移除（过渡行为不再成立），不适用「MODIFIED 不得丢弃既有 Scenario」的保留规则，须在 #526 的 proposal 中写明。
 - MODIFIED `session-metadata`「会话元数据审计」：父 delta 全文（`session.delete` 条目、「两类事件」、Scenario「审计形状」），并保留 main 的 Scenario「绑定审计形状」（MODIFIED 不得丢弃既有 Scenario；父 change 归档前 rebase 时取舍）。
 - MODIFIED `chat-sessions`「会话 REST」：main 原文 + DELETE 路由（十路由）、「PATCH 与 DELETE 分别遵循『会话元数据修改』『会话删除』」、Owner isolation Scenario 的 DELETE；组 10、fork 继承（4.4）、`stopped` 句、「id-scoped requests」措辞漂移不并入。
 - MODIFIED `http-service-skeleton`「统一错误信封」：main 原文 + DELETE 非归属句与 Scenario「会话元数据 parser owner 的真实 HTTP 边界」的 DELETE 两组 WHEN/THEN。
@@ -32,7 +32,8 @@ Evidence floor: 新建 `server/test/session-delete.test.ts` 覆盖 design「Requ
   1. issue 写「不改 `supervisor.ts`，只消费 A #473 的控制占用登记 API」，但 A 的占用（`ControlClaims`）是 supervisor 私有字段 `#controls`（`supervisor.ts:122`），无公开登记入口；prompt 路由（`rest.ts:190`）、`#prompt`（`supervisor.ts:350`）与 regenerate/fork（`branching.ts:73/206`）读的都是这一实例，DELETE 必须登记到同一实例才能让它们 409。故新增一个公开方法 `holdControl`（不改占用语义），并把纯函数 `#translate` 移出以守住 size-guard（现 799 行）。
   2. issue 写「`session-delete.ts` 导出 `isDeleting(sessionId)`」；为避免模块级可变全局（同进程多 app、测试间串扰），墓碑集随 deleter 实例创建，`isDeleting` 为实例方法，经 `registerSessionEventStream` 的必填选项注入 sse.ts。
   3. issue 把「无活跃回合内存态」检查放在 store `deleteSession` 内；改在 `session-delete.ts` 于删除事务调用前经 `store.runtimeState(id).activeTurn` 完成（同一同步段、紧邻事务），免于把 SessionStore 注入 metadata store。
-  4. `index.ts` 之外，`server/test/session-rest-helpers.ts:59` 的独立路由 harness 需接线一处（路由依赖新增 `deleter`），与 #523 先例相同；既有测试断言零改动。
+  4. issue/tasks 原文为「登记占用后加入墓碑，running → 409 时释放占用与墓碑」；本刀在 running 检查通过后才加入墓碑（与 spec 第 3 步「自本步开始」一致），running 的 409 只需释放占用，外部不可观察差异。
+  5. `index.ts` 之外，`server/test/session-rest-helpers.ts:60` 的独立路由 harness 需接线一处（路由依赖新增 `deleter`），与 #523 先例相同；既有测试断言零改动。
 - 依赖：#516（4.3a）、#523/#524（4.1/4.2）、#518（6.1 fake `thinking`）、A #467/#473 均已合并。
 
 ## Non-goals
