@@ -13,8 +13,8 @@ Evidence floor: `server/test/session-metadata-rest.test.ts` 追加 PATCH 用例�
 
 ## What Changes
 - `server/src/sessions/rest-metadata.ts`：注册函数改名 `registerSessionMetadataRoutes`，在 POST 之外新增 `PATCH /api/sessions/:id`（preParsing owner 预检、16 KiB `bodyLimit`、no-store、手写 exact validator、200 八键）；写入 `title` 成功后同步通知 SessionStore 标记在途受理。
-- `server/src/sessions/store-metadata.ts`：新增 `ownsSession(ownerId, sessionId)` 与 `patchSession(ownerId, sessionId, patch)`（单条所有者作用域 UPDATE，只写所给列）。
-- `server/src/sessions/store.ts`：Turn 增 `titleTouched`；SessionStore 增 `noteTitleWrite(sessionId)`；`rollbackPrompt` 仅当受理本身写了前缀（`previousTitle === null`）且未被标记时把标题恢复为 NULL，否则保留当前标题；为复用八键投影导出 `SESSION_COLUMNS`、`SessionDbRow`、`toSessionView`（仅加 `export`）。
+- `server/src/sessions/store-metadata.ts`：新增 `patchSession(ownerId, sessionId, patch)`（单条所有者作用域 UPDATE，只写所给列，0 行 → null）。
+- `server/src/sessions/store.ts`：Turn 增 `titleTouched`；SessionStore 增 `noteTitleWrite(sessionId)`；`rollbackPrompt` 仅当受理本身写了前缀（`previousTitle === null`）且未被标记时把标题恢复为 NULL，否则保留当前标题；为复用八键投影导出 `SessionView`、`SESSION_COLUMNS`、`SessionDbRow`、`toSessionView`（仅加 `export`）。
 - `server/src/sessions/rest.ts`：调用改名后的注册函数并传入 `store`。
 - 测试：追加一个既有新文件（4.1 建）、新建一个；其余既有测试文件零改动。
 
@@ -27,11 +27,11 @@ Evidence floor: `server/test/session-metadata-rest.test.ts` 追加 PATCH 用例�
 - MODIFIED `http-service-skeleton`「统一错误信封」：main 原文 + PATCH content-parser 句与 Scenario「会话元数据 parser owner 的真实 HTTP 边界」的 PATCH 一组 WHEN/THEN；DELETE 句与其 WHEN/THEN（4.3b）不并入。
 
 ## Impact
-- server：`rest-metadata.ts`、`store-metadata.ts`、`store.ts`（Turn 标志、`noteTitleWrite`、`rollbackPrompt` 条件、三处 `export`）、`rest.ts`（一处调用）。不触碰 `supervisor.ts`、`omp/`、`http/errors.ts`、`index.ts`、web。
+- server：`rest-metadata.ts`、`store-metadata.ts`、`store.ts`（Turn 标志、`noteTitleWrite`、`rollbackPrompt` 条件、四处 `export`）、`rest.ts`（一处调用）。不触碰 `supervisor.ts`、`omp/`、`http/errors.ts`、`index.ts`、web。
 - 与 issue 的偏差：
-  - issue 写「preParsing 复用 `requireOwnedSession`」，但它在 `rest.ts`，`rest-metadata.ts` 不得 import `rest.ts`（单向依赖，4.1 已定）；改用 `store-metadata.ownsSession` 的单行所有者查询，语义同为「不存在或属他人 → 同一 404，先于解析，不捕获快照/游标」。
+  - issue 写「preParsing 复用 `requireOwnedSession`」，但它在 `rest.ts`，`rest-metadata.ts` 不得 import `rest.ts`（单向依赖，4.1 已定）；改为经注入的 `store.getMessages(id, principal.id) === null` → 404，与 `requireOwnedSession` 同一语义与 chat-sessions「会话 REST」的 id-scoped 授权句，不捕获快照/游标。
   - issue 写 Turn 增 `titleSetByPrompt`；受理写前缀当且仅当 `previousTitle === null`（`store.ts:356-357`），故由其派生，不另存字段。
-  - `store.ts` 除 Turn/`rollbackPrompt` 外新增 `noteTitleWrite` 方法与三处 `export`（为 `patchSession` 复用八键投影，避免复制 `toSessionView`）。
+  - `store.ts` 除 Turn/`rollbackPrompt` 外新增 `noteTitleWrite` 方法与四处 `export`（为 `patchSession` 复用八键投影，避免复制 `toSessionView`）。
 - 依赖：#523（4.1）已合并并归档（#687/#688）。
 
 ## Non-goals

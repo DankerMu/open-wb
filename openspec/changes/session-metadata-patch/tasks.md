@@ -9,7 +9,7 @@
 | Pack | Selected | 理由 → 证据 |
 |---|---|---|
 | Public API / CLI / script entry | yes | PATCH body 合同与 200 八键 → 证据 1、3、4 |
-| Auth / permissions / secrets | yes | owner 预检先于解析、404 不可区分 → 证据 6 |
+| Auth / permissions / secrets | yes | owner 预检先于解析、404 不可区分且 no-store → 证据 6 |
 | Error handling / rollback / partial outputs | yes | 整体 400 零写入、补偿不撤销重命名 → 证据 3、4、5、8 |
 | Concurrency / shared state / ordering | yes | 在途受理与 PATCH 共享 `titleTouched`、运行中修改 → 证据 2、8 |
 | Resource limits / large input / discovery | yes | 16 KiB `bodyLimit` → 证据 5 |
