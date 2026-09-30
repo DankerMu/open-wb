@@ -184,13 +184,13 @@ const FORK_LAST_ASSISTANT =
 const FORK_POINT =
   "SELECT created_at FROM chat_messages WHERE id = ? AND session_id = ? AND role = 'user'";
 const FORK_SESSION =
-  "INSERT INTO chat_sessions(id, owner_id, title, status, omp_session_file, parent_session_id, created_at, updated_at) SELECT ?, owner_id, title, 'idle', ?, id, ?, ? FROM chat_sessions WHERE id = ?";
+  "INSERT INTO chat_sessions(id, owner_id, title, status, omp_session_file, parent_session_id, created_at, updated_at, workspace_id, scene) SELECT ?, owner_id, title, 'idle', ?, id, ?, ?, workspace_id, scene FROM chat_sessions WHERE id = ?";
 const FORK_HISTORY =
   "SELECT id, role, status FROM chat_messages WHERE session_id = ? AND (created_at < ? OR (created_at = ? AND id < ?)) ORDER BY created_at ASC, id ASC";
 const FORK_MESSAGE =
-  "INSERT INTO chat_messages(session_id, role, content, status, created_at) SELECT ?, role, content, status, created_at FROM chat_messages WHERE id = ?";
+  "INSERT INTO chat_messages(session_id, role, content, status, created_at, thinking) SELECT ?, role, content, status, created_at, thinking FROM chat_messages WHERE id = ?";
 const FORK_STEPS =
-  "INSERT INTO chat_steps(message_id, ordinal, name, detail, output, status, started_at, ended_at) SELECT ?, ordinal, name, detail, output, status, started_at, ended_at FROM chat_steps WHERE message_id = ? ORDER BY ordinal ASC, id ASC";
+  "INSERT INTO chat_steps(message_id, ordinal, name, detail, output, status, started_at, ended_at, changes) SELECT ?, ordinal, name, detail, output, status, started_at, ended_at, changes FROM chat_steps WHERE message_id = ? ORDER BY ordinal ASC, id ASC";
 const FORK_APPROVALS =
   "INSERT INTO chat_approvals(message_id, request_id, tool, title, requested_at, expires_at, decision, decided_at) SELECT ?, request_id, tool, title, requested_at, expires_at, decision, decided_at FROM chat_approvals WHERE message_id = ? ORDER BY id ASC";
 const FORK_STATUS =
