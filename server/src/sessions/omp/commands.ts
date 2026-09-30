@@ -9,6 +9,10 @@ export const TERM_GRACE_MS = 5_000;
 export const KILL_GRACE_MS = 3_000;
 const SHUTDOWN_BUDGET_MS = TERM_GRACE_MS + KILL_GRACE_MS;
 
+export function nonempty(value: string | null): string | undefined {
+  return value !== null && value.length > 0 ? value : undefined;
+}
+
 interface NativeWaiter {
   promise: Promise<OmpExit>;
   resolve: (exit: OmpExit) => void;

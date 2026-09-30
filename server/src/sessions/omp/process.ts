@@ -4,7 +4,7 @@
  */
 import { type ChildProcessWithoutNullStreams, type SpawnOptions, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   assertSafeSudoPath,
   assertSetprivExecutable,
@@ -35,6 +35,8 @@ export interface SpawnOmpOpts {
   token: string;
   resumePath: string | null;
   ompUser?: string;
+  /** Caller-resolved working directory, default the owner root; any other cwd must already exist. */
+  cwd?: string;
 }
 
 export type SpawnImpl = (
@@ -56,11 +58,15 @@ export async function spawnOmp(
     assertSafeSudoPath(process.env.PATH);
     assertSetprivExecutable();
   }
-  const cwd = join(opts.sandboxRoot, opts.ownerId);
+  const ownerRoot = join(opts.sandboxRoot, opts.ownerId);
+  const cwd = opts.cwd ?? ownerRoot;
   const sessionDir = join(opts.stateDir, "sessions", opts.ownerId);
   const home = join(opts.stateDir, "home");
   const agent = join(opts.stateDir, "agent");
-  ensureSharedDir(cwd);
+  // Only the owner root is ours to create; a missing bound cwd must not be silently rebuilt.
+  if (resolve(cwd) === resolve(ownerRoot)) {
+    ensureSharedDir(ownerRoot);
+  }
   ensureSharedDir(sessionDir);
   ensureSharedDir(home);
   ensureSharedDir(agent);

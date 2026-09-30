@@ -22,6 +22,7 @@ import {
   KILL_GRACE_MS,
   liveChild,
   localSignal,
+  nonempty,
   openDeferredAbort,
   signalLive,
   stateSessionFile,
@@ -65,6 +66,7 @@ export interface SessionRuntimeOpts {
   modelId: string;
   tokens: SessionTokens;
   ompUser?: string;
+  cwd?: string;
   idleMs?: number;
   resumePath?: string | null;
   spawnImpl?: SpawnImpl;
@@ -110,6 +112,7 @@ export class SessionRuntime {
   readonly #ownerId: string;
   readonly #modelId: string;
   readonly #ompUser: string | undefined;
+  readonly #cwd: string | undefined;
   readonly #tokens: SessionTokens;
   readonly #idleMs: number;
   readonly #clock: SessionClock;
@@ -142,6 +145,7 @@ export class SessionRuntime {
     this.#ownerId = opts.ownerId;
     this.#modelId = opts.modelId;
     this.#ompUser = opts.ompUser;
+    this.#cwd = opts.cwd;
     this.#tokens = opts.tokens;
     this.#idleMs = opts.idleMs ?? DEFAULT_IDLE_MS;
     this.#clock = opts.clock ?? systemClock;
@@ -428,6 +432,7 @@ export class SessionRuntime {
       token,
       resumePath: this.#resumePath,
       ...(this.#ompUser === undefined ? {} : { ompUser: this.#ompUser }),
+      ...(this.#cwd === undefined ? {} : { cwd: this.#cwd }),
       spawnImpl,
       ...(this.#handshakeTimeoutMs === undefined
         ? {}
@@ -779,10 +784,6 @@ export class SessionRuntime {
     this.#nextRequest += 1;
     return `rt-${this.#nextRequest}`;
   }
-}
-
-function nonempty(value: string | null): string | undefined {
-  return value !== null && value.length > 0 ? value : undefined;
 }
 
 function sanitizeError(error: unknown): Error {
