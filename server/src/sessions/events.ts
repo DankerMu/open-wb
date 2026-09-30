@@ -1,16 +1,10 @@
 /**
  * Issue #83 pure protocol event mapping; #455 adds the interrupted outcome and applyStop;
- * #514 maps assistant thinking_delta to thinking.delta and declares files.changed (no producer yet).
+ * #514 maps assistant thinking_delta to thinking.delta and declares files.changed;
+ * #515 emits raw edit/write candidates as files.changed immediately before their step.end.
  */
+import { type FileChange, fileChangeCandidates } from "./file-changes.js";
 import type { OmpFrame } from "./omp/frame.js";
-
-/** One file of a `files.changed` event: `added`/`removed` are counts for edit, null for write. */
-interface FileChange {
-  path: string;
-  added: number | null;
-  removed: number | null;
-  kind: "edit" | "write";
-}
 
 export type ChatEvent<StepId extends string | number = number> =
   | { type: "turn.start"; data: { messageId: number } }
@@ -206,22 +200,28 @@ function applyToolEnd(state: EventState, frame: OmpFrame): ApplyResult {
   if (id === undefined) {
     return { state, events: [] };
   }
-  if (findRunning(state, id) === undefined) {
+  const entry = findRunning(state, id);
+  if (entry === undefined) {
     return { state, events: [] };
   }
+  const { messageId } = state;
   const output = truncateStep(normalizeOutput(frame.result));
-  const status = frame.isError === true ? "failed" : "done";
+  const failed = frame.isError === true;
+  const stepEnd: ChatEvent<string> = {
+    type: "step.end",
+    data: { messageId, stepId: id, status: failed ? "failed" : "done", output },
+  };
+  // 工具名以 tool_execution_start 登记的为准；失败帧不推导候选。
+  const files = failed ? [] : fileChangeCandidates(entry.name, frame.result);
   return {
     state: evolve(state, {
       running: Object.freeze(state.running.filter((tool) => tool.id !== id)),
       finished: Object.freeze([...state.finished, id]),
     }),
-    events: [
-      {
-        type: "step.end",
-        data: { messageId: state.messageId, stepId: id, status, output },
-      },
-    ],
+    events:
+      files.length === 0
+        ? [stepEnd]
+        : [{ type: "files.changed", data: { messageId, stepId: id, files } }, stepEnd],
   };
 }
 
