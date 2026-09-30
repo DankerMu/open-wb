@@ -125,11 +125,6 @@ describe("session event mapping — normal stream and noise filter", () => {
       textDelta("world", "assistant"),
       {
         type: "message_update",
-        assistantMessageEvent: { type: "thinking_delta", delta: "hmm" },
-        message: { role: "assistant", content: [] },
-      },
-      {
-        type: "message_update",
         assistantMessageEvent: { type: "toolcall_delta", delta: "{" },
         message: { role: "assistant", content: [] },
       },

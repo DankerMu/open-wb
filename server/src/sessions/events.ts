@@ -1,11 +1,22 @@
 /**
- * Issue #83 pure protocol event mapping; #455 adds the interrupted outcome and applyStop.
+ * Issue #83 pure protocol event mapping; #455 adds the interrupted outcome and applyStop;
+ * #514 maps assistant thinking_delta to thinking.delta and declares files.changed (no producer yet).
  */
 import type { OmpFrame } from "./omp/frame.js";
+
+/** One file of a `files.changed` event: `added`/`removed` are counts for edit, null for write. */
+interface FileChange {
+  path: string;
+  added: number | null;
+  removed: number | null;
+  kind: "edit" | "write";
+}
 
 export type ChatEvent<StepId extends string | number = number> =
   | { type: "turn.start"; data: { messageId: number } }
   | { type: "text.delta"; data: { messageId: number; delta: string } }
+  | { type: "thinking.delta"; data: { messageId: number; delta: string } }
+  | { type: "files.changed"; data: { messageId: number; stepId: StepId; files: FileChange[] } }
   | {
       type: "step.start";
       data: { messageId: number; stepId: StepId; name: string; detail: string };
@@ -94,7 +105,7 @@ export function applyFrame(state: EventState, frame: OmpFrame): ApplyResult {
     case "agent_start":
       return applyAgentStart(state);
     case "message_update":
-      return applyTextDelta(state, frame);
+      return applyAssistantUpdate(state, frame);
     case "tool_execution_start":
       return applyToolStart(state, frame);
     case "tool_execution_end":
@@ -135,22 +146,28 @@ function applyAgentStart(state: EventState): ApplyResult {
   };
 }
 
-function applyTextDelta(state: EventState, frame: OmpFrame): ApplyResult {
+/**
+ * text_delta（任意字符串）→ text.delta；thinking_delta（非空字符串）→ thinking.delta；同一 started 门与
+ * assistant 角色门，逐帧恰一条，不累积。其余更新（thinking_start/end、toolcall_* 等）无事件、状态原样。
+ */
+function applyAssistantUpdate(state: EventState, frame: OmpFrame): ApplyResult {
   if (!state.started) {
-    return { state, events: [] };
-  }
-  const event = asRecord(frame.assistantMessageEvent);
-  if (event?.type !== "text_delta" || typeof event.delta !== "string") {
     return { state, events: [] };
   }
   const message = asRecord(frame.message);
   if (message !== undefined && message.role !== undefined && message.role !== "assistant") {
     return { state, events: [] };
   }
-  return {
-    state,
-    events: [{ type: "text.delta", data: { messageId: state.messageId, delta: event.delta } }],
-  };
+  const event = asRecord(frame.assistantMessageEvent);
+  const { messageId } = state;
+  if (event?.type === "text_delta" && typeof event.delta === "string") {
+    return { state, events: [{ type: "text.delta", data: { messageId, delta: event.delta } }] };
+  }
+  const thinking = event?.type === "thinking_delta" ? nonemptyString(event.delta) : undefined;
+  if (thinking !== undefined) {
+    return { state, events: [{ type: "thinking.delta", data: { messageId, delta: thinking } }] };
+  }
+  return { state, events: [] };
 }
 
 function applyToolStart(state: EventState, frame: OmpFrame): ApplyResult {

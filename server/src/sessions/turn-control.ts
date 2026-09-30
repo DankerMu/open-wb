@@ -266,6 +266,11 @@ export function persistEvent(
     case "turn.end":
       store.finishTurn(assistantMessageId, event.data.status, settled);
       return event;
+    // #514: neither stored nor published (no ring sequence, no raw path on SSE) until the
+    // thinking (3.3) and file-change (3.4) supervisor slices replace these branches.
+    case "thinking.delta":
+    case "files.changed":
+      return undefined;
   }
 }
 
