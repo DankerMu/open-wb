@@ -9,6 +9,7 @@ import type { SpawnLog } from "./omp/spawn-gate.js";
 import { registerSessionRoutes } from "./rest.js";
 import type { WorkspaceRootOf } from "./session-cwd.js";
 import { createSessionStore, type SessionStore } from "./store.js";
+import { createSessionMetadataStore } from "./store-metadata.js";
 import { defaultSessionClock, registerSessionEventStream } from "./stream/sse.js";
 import { SessionSupervisor, type SessionSupervisorRuntime } from "./supervisor.js";
 import type { TokenRegistry } from "./tokens.js";
@@ -59,7 +60,13 @@ export function registerSessions(
     ...(options.log === undefined ? {} : { log: options.log }),
   });
   store.reconcileOnStartup();
-  registerSessionRoutes(app, { store, supervisor });
+  const metadata = createSessionMetadataStore(options.db, { emit });
+  registerSessionRoutes(app, {
+    store,
+    supervisor,
+    metadata,
+    workspaceRootOf: options.workspaceRootOf,
+  });
   registerSessionEventStream(app, {
     store,
     supervisor,

@@ -9,6 +9,8 @@ import type {
   RawServerDefault,
 } from "fastify";
 import { HttpError } from "../core/errors/index.js";
+import { registerSessionCreateRoute } from "./rest-metadata.js";
+import type { WorkspaceRootOf } from "./session-cwd.js";
 import type {
   ApprovalEntry,
   ApprovalView,
@@ -16,6 +18,7 @@ import type {
   SessionStore,
   StepView,
 } from "./store.js";
+import type { SessionMetadataStore } from "./store-metadata.js";
 import type { SessionSupervisor, StreamCursor } from "./supervisor.js";
 
 type ForkResult = Awaited<ReturnType<SessionSupervisor["fork"]>>;
@@ -37,6 +40,8 @@ export interface SessionOwnerStore {
 interface SessionRestDependencies {
   store: SessionStore;
   supervisor: SessionSupervisorPort;
+  metadata: SessionMetadataStore;
+  workspaceRootOf: WorkspaceRootOf;
 }
 
 interface PublicSession {
@@ -159,9 +164,9 @@ export function registerSessionRoutes(
       sessions: dependencies.store.list(principal.id).map(toPublicSession),
     };
   });
-  app.post("/api/sessions", { onRequest: noStoreSessionResponse }, async (request, reply) => {
-    const principal = currentPrincipal(request);
-    return reply.code(201).send(toPublicSession(dependencies.store.create(principal.id)));
+  registerSessionCreateRoute(app, {
+    metadata: dependencies.metadata,
+    workspaceRootOf: dependencies.workspaceRootOf,
   });
   app.get<{ Params: SessionIdParams }>(
     "/api/sessions/:id/messages",

@@ -5,6 +5,7 @@ import { emit } from "../src/core/audit/index.js";
 import { registerAuthGuard } from "../src/http/index.js";
 import { registerSessionRoutes, type SessionSupervisorPort } from "../src/sessions/rest.js";
 import { createSessionStore, type SessionStore } from "../src/sessions/store.js";
+import { createSessionMetadataStore } from "../src/sessions/store-metadata.js";
 import { bearerCookie, loginSessionId } from "./auth-lifecycle-helpers.js";
 import { PARSER_INPUTS, withStandaloneAuthApp } from "./http-guard-helpers.js";
 
@@ -56,7 +57,12 @@ export async function withSessionRest<T>(
           },
           emit,
         });
-        registerSessionRoutes(app, { store, supervisor });
+        registerSessionRoutes(app, {
+          store,
+          supervisor,
+          metadata: createSessionMetadataStore(db, { emit }),
+          workspaceRootOf: () => null,
+        });
         try {
           return await action({ app, db, store, supervisor });
         } finally {
