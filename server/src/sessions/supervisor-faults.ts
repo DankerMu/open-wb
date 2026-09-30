@@ -1,6 +1,11 @@
 /**
- * Session supervisor fault plumbing: shutdown fault aggregation and the synchronous-sink check.
+ * Session supervisor fault plumbing: shutdown fault aggregation, the synchronous-sink check and
+ * the regenerate/fork/prompt error translation.
  */
+import { HttpError } from "../core/errors/index.js";
+import { AgentUnavailableError, OmpProtocolError } from "./omp/process.js";
+import { SessionBusyError } from "./omp/runtime.js";
+
 export function throwCollected(faults: Error[]): void {
   if (faults.length === 1) {
     throw faults[0];
@@ -33,4 +38,21 @@ export function synchronousSinkViolation(returned: unknown): Error | undefined {
     /* a throwing then is containment, not a second reported violation */
   }
   return new Error("session observation sink must return synchronously");
+}
+
+/**
+ * The prompt/regenerate/fork rejection: an HttpError as is, a runtime busy error as `session_busy`,
+ * a runtime or protocol failure as `agent_unavailable`, anything else unchanged.
+ */
+export function translateSupervisorError(error: unknown): unknown {
+  if (error instanceof HttpError) {
+    return error;
+  }
+  if (error instanceof SessionBusyError) {
+    return new HttpError("session_busy");
+  }
+  if (error instanceof AgentUnavailableError || error instanceof OmpProtocolError) {
+    return new HttpError("agent_unavailable");
+  }
+  return error;
 }

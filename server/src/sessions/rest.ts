@@ -11,6 +11,7 @@ import type {
 import { HttpError } from "../core/errors/index.js";
 import { registerSessionMetadataRoutes } from "./rest-metadata.js";
 import type { WorkspaceRootOf } from "./session-cwd.js";
+import type { SessionDeleter } from "./session-delete.js";
 import type {
   ApprovalEntry,
   ApprovalView,
@@ -42,6 +43,7 @@ interface SessionRestDependencies {
   supervisor: SessionSupervisorPort;
   metadata: SessionMetadataStore;
   workspaceRootOf: WorkspaceRootOf;
+  deleter: Pick<SessionDeleter, "deleteSession">;
 }
 
 interface PublicSession {
@@ -168,6 +170,7 @@ export function registerSessionRoutes(
     metadata: dependencies.metadata,
     workspaceRootOf: dependencies.workspaceRootOf,
     store: dependencies.store,
+    deleter: dependencies.deleter,
   });
   app.get<{ Params: SessionIdParams }>(
     "/api/sessions/:id/messages",

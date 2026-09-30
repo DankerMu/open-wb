@@ -20,6 +20,8 @@ export interface SessionEventStreamOptions {
   store: SessionOwnerStore;
   supervisor: SessionSupervisor;
   clock: SessionClock;
+  /** A session in its delete tombstone (#525): the stream ends before subscribing, no event. */
+  isDeleting: (sessionId: string) => boolean;
 }
 
 interface SessionIdParams {
@@ -156,6 +158,10 @@ function attachEventStream(
     if (!raw.destroyed) {
       raw.destroy();
     }
+    return;
+  }
+  if (options.isDeleting(sessionId)) {
+    endOwned(connection, options.clock);
     return;
   }
 

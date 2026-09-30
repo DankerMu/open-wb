@@ -4,7 +4,9 @@
  * owner-scoped `workspaceRootOf`; unknown, foreign and malformed ids share one 404.
  * `PATCH /api/sessions/:id` (#524): a non-empty exact `{title?, scene?, pinned?}` body, owner
  * checked before parsing; a title write marks the session's in-flight admission so its rollback
- * keeps the new title. Imports nothing from `rest.ts` (it imports this).
+ * keeps the new title. `DELETE /api/sessions/:id` (#525): owner checked before parsing, no body
+ * read (not a parser owner), the deletion itself is `session-delete.ts`; 204 with no body.
+ * Imports nothing from `rest.ts` (it imports this).
  */
 import type {
   FastifyInstance,
@@ -17,6 +19,7 @@ import type {
 } from "fastify";
 import { HttpError } from "../core/errors/index.js";
 import type { WorkspaceRootOf } from "./session-cwd.js";
+import type { SessionDeleter } from "./session-delete.js";
 import type { SessionStore } from "./store.js";
 import type {
   SessionCreateInput,
@@ -29,6 +32,7 @@ interface SessionMetadataRouteDependencies {
   metadata: SessionMetadataStore;
   workspaceRootOf: WorkspaceRootOf;
   store: Pick<SessionStore, "getMessages" | "noteTitleWrite">;
+  deleter: Pick<SessionDeleter, "deleteSession">;
 }
 
 interface SessionIdParams {
@@ -102,6 +106,16 @@ export function registerSessionMetadataRoutes(
         dependencies.store.noteTitleWrite(request.params.id);
       }
       return reply.code(200).send(view);
+    },
+  );
+  // No bodyLimit and no body read: a well-formed body is ignored; a parser failure stays the
+  // generic non-owner 500 before this handler runs.
+  app.delete<{ Params: SessionIdParams }>(
+    "/api/sessions/:id",
+    { onRequest: noStoreMetadataResponse, preParsing: authorizeOwnedBeforeParse },
+    async (request, reply) => {
+      await dependencies.deleter.deleteSession(request.params.id, createPrincipal(request).id);
+      return reply.code(204).send();
     },
   );
 }
