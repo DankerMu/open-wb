@@ -463,7 +463,7 @@ export function ChatPage() {
       });
       setPromptError(null);
       void client
-        .createSession({ signal: controller.signal })
+        .createSession(undefined, { signal: controller.signal })
         .then((session) => {
           if (
             !mountedRef.current ||

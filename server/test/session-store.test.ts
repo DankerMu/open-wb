@@ -1,6 +1,7 @@
 import { constants } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 import { HttpError } from "../src/core/errors/index.js";
+import { NULL_SESSION_META } from "./session-meta-fixtures.js";
 import {
   captureThrown,
   expectHttpError,
@@ -36,6 +37,7 @@ describe("SessionStore owner-scoped persisted views", () => {
           status: "idle",
           createdAt: FIXED_NOW,
           updatedAt: FIXED_NOW,
+          ...NULL_SESSION_META,
         });
         expect(oldest.id).toMatch(HEX32);
         expect(new Set([oldest.id, foreign.id, firstTie.id, secondTie.id]).size).toBe(4);
@@ -62,6 +64,7 @@ describe("SessionStore owner-scoped persisted views", () => {
             status: "running",
             createdAt: FIXED_NOW,
             updatedAt: FIXED_NOW + 20,
+            ...NULL_SESSION_META,
           },
           messages: [
             {
@@ -72,6 +75,7 @@ describe("SessionStore owner-scoped persisted views", () => {
               createdAt: FIXED_NOW + 20,
               approvals: [],
               steps: [],
+              thinking: null,
             },
             {
               id: accepted.assistantMessageId,
@@ -90,6 +94,7 @@ describe("SessionStore owner-scoped persisted views", () => {
                   status: "running",
                   startedAt: FIXED_NOW + 22,
                   endedAt: null,
+                  changes: null,
                 },
                 {
                   id: secondStepId,
@@ -100,8 +105,10 @@ describe("SessionStore owner-scoped persisted views", () => {
                   status: "running",
                   startedAt: FIXED_NOW + 21,
                   endedAt: null,
+                  changes: null,
                 },
               ],
+              thinking: null,
             },
           ],
         });

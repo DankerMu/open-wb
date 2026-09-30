@@ -134,6 +134,7 @@ describe("SessionSupervisor real child persistence and lifecycle", () => {
             detail: TOOL_ARGS,
             output: TOOL_OUTPUT,
             status: "done",
+            changes: null,
           },
         ]);
         expect(typeof firstAssistant.steps[0]?.id).toBe("number");

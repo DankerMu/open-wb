@@ -111,6 +111,19 @@ type ApiRequestOptions = {
   signal?: AbortSignal;
 };
 
+type ChatSessionScene = NonNullable<ChatSession["scene"]>;
+
+type ChatSessionCreateInput = {
+  workspaceId?: string;
+  scene?: ChatSessionScene;
+};
+
+type ChatSessionPatch = {
+  title?: string;
+  scene?: ChatSessionScene;
+  pinned?: boolean;
+};
+
 export type ApiClient = {
   getMe(options?: ApiRequestOptions): Promise<Principal>;
   getInfo(options?: ApiRequestOptions): Promise<ServiceInfo>;
@@ -131,7 +144,13 @@ export type ApiClient = {
   ): Promise<FilePreview>;
   listAudit(filter?: AuditFilter, options?: ApiRequestOptions): Promise<AuditList>;
   listSessions(options?: ApiRequestOptions): Promise<ChatSessionList>;
-  createSession(options?: ApiRequestOptions): Promise<ChatSession>;
+  createSession(input?: ChatSessionCreateInput, options?: ApiRequestOptions): Promise<ChatSession>;
+  patchSession(
+    sessionId: string,
+    patch: ChatSessionPatch,
+    options?: ApiRequestOptions,
+  ): Promise<ChatSession>;
+  deleteSession(sessionId: string, options?: ApiRequestOptions): Promise<void>;
   getMessages(sessionId: string, options?: ApiRequestOptions): Promise<ChatMessageSnapshot>;
   prompt(
     sessionId: string,

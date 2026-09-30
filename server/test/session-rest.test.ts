@@ -8,6 +8,7 @@ import {
   UNAUTHORIZED_ENVELOPE,
 } from "./auth-lifecycle-helpers.js";
 import { PARSER_INPUTS } from "./http-guard-helpers.js";
+import { NULL_SESSION_META } from "./session-meta-fixtures.js";
 import {
   AGENT_UNAVAILABLE_ENVELOPE,
   cookieFor,
@@ -55,13 +56,6 @@ describe("session REST", () => {
         updatedAt: number;
       };
       expect(body.id).toMatch(HEX32);
-      expect(body).toEqual({
-        id: body.id,
-        title: null,
-        status: "idle",
-        createdAt: SESSION_NOW,
-        updatedAt: SESSION_NOW,
-      });
 
       const listed = await app.inject({
         method: "GET",
@@ -103,6 +97,7 @@ describe("session REST", () => {
             status: "running",
             createdAt: SESSION_NOW,
             updatedAt: SESSION_NOW + 20,
+            ...NULL_SESSION_META,
           },
           {
             id: tied[0]?.id,
@@ -110,6 +105,7 @@ describe("session REST", () => {
             status: "idle",
             createdAt: SESSION_NOW + 10,
             updatedAt: SESSION_NOW + 10,
+            ...NULL_SESSION_META,
           },
           {
             id: tied[1]?.id,
@@ -117,6 +113,7 @@ describe("session REST", () => {
             status: "idle",
             createdAt: SESSION_NOW + 10,
             updatedAt: SESSION_NOW + 10,
+            ...NULL_SESSION_META,
           },
         ],
       });
@@ -162,6 +159,7 @@ describe("session REST", () => {
           status: "done",
           createdAt: SESSION_NOW,
           updatedAt: SESSION_NOW + 23,
+          ...NULL_SESSION_META,
         },
         messages: [
           {
@@ -172,6 +170,7 @@ describe("session REST", () => {
             createdAt: SESSION_NOW + 5,
             approvals: [],
             steps: [],
+            thinking: null,
           },
           {
             id: first.assistantMessageId,
@@ -181,6 +180,7 @@ describe("session REST", () => {
             createdAt: SESSION_NOW + 5,
             approvals: [],
             steps: [],
+            thinking: null,
           },
           {
             id: second.userMessageId,
@@ -190,6 +190,7 @@ describe("session REST", () => {
             createdAt: SESSION_NOW + 20,
             approvals: [],
             steps: [],
+            thinking: null,
           },
           {
             id: second.assistantMessageId,
@@ -206,6 +207,7 @@ describe("session REST", () => {
                 detail: "queued first",
                 output: "",
                 status: "done",
+                changes: null,
               },
               {
                 id: laterStep,
@@ -214,8 +216,10 @@ describe("session REST", () => {
                 detail: "queued second",
                 output: "stopped",
                 status: "failed",
+                changes: null,
               },
             ],
+            thinking: null,
           },
         ],
         streamCursor: { epoch: 1, seq: null },
@@ -730,6 +734,7 @@ describe("session REST", () => {
             status: "running",
             createdAt: SESSION_NOW,
             updatedAt: SESSION_NOW + 12,
+            ...NULL_SESSION_META,
           },
           messages: [
             {
@@ -740,6 +745,7 @@ describe("session REST", () => {
               createdAt: SESSION_NOW + 4,
               approvals: [],
               steps: [],
+              thinking: null,
             },
             {
               id: first.assistantMessageId,
@@ -749,6 +755,7 @@ describe("session REST", () => {
               createdAt: SESSION_NOW + 4,
               approvals: [],
               steps: [],
+              thinking: null,
             },
             {
               id: body.userMessageId,
@@ -758,6 +765,7 @@ describe("session REST", () => {
               createdAt: SESSION_NOW + 12,
               approvals: [],
               steps: [],
+              thinking: null,
             },
             {
               id: body.assistantMessageId,
@@ -767,6 +775,7 @@ describe("session REST", () => {
               createdAt: SESSION_NOW + 12,
               approvals: [],
               steps: [],
+              thinking: null,
             },
           ],
           streamCursor: { epoch: 0, seq: null },

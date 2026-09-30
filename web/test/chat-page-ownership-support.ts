@@ -3,6 +3,7 @@ import { expect } from "vitest";
 import type { ChatMessageSnapshot, ChatSession } from "../src/lib/session-contract.js";
 import { renderChatPage } from "./chat-page-support.js";
 import { latestSource, SESSION_ID } from "./chat-stream-support.js";
+import { NULL_SESSION_META } from "./session-meta-fixtures.js";
 import { jsonResponse } from "./support.js";
 
 export const CREATED_SESSION_ID = "fedcba9876543210fedcba9876543210";
@@ -58,6 +59,7 @@ export function idleCreatedSession(): ChatSession {
     status: "idle",
     createdAt: 1_740_000_000_000,
     updatedAt: 1_740_000_000_000,
+    ...NULL_SESSION_META,
   };
 }
 
@@ -95,6 +97,7 @@ export function runningCreatedSnapshot(): ChatMessageSnapshot {
         status: "done",
         createdAt: -1,
         steps: [],
+        thinking: null,
       },
       {
         id: 0,
@@ -104,6 +107,7 @@ export function runningCreatedSnapshot(): ChatMessageSnapshot {
         status: "running",
         createdAt: 0,
         steps: [],
+        thinking: null,
       },
     ],
     streamCursor: { epoch: 1, seq: 0 },
@@ -122,6 +126,7 @@ export function completedCreatedSnapshot(): ChatMessageSnapshot {
         status: "done",
         createdAt: -1,
         steps: [],
+        thinking: null,
       },
       {
         id: 0,
@@ -138,8 +143,10 @@ export function completedCreatedSnapshot(): ChatMessageSnapshot {
             detail: BASH_START_DETAIL,
             output: BASH_OUTPUT,
             status: "done",
+            changes: null,
           },
         ],
+        thinking: null,
       },
     ],
     streamCursor: { epoch: 1, seq: 7 },
@@ -153,6 +160,7 @@ export function otherIdleSession(): ChatSession {
     status: "idle",
     createdAt: 1_740_000_000_000,
     updatedAt: 1_740_000_000_100,
+    ...NULL_SESSION_META,
   };
 }
 
@@ -168,6 +176,7 @@ export function otherSnapshot(): ChatMessageSnapshot {
         status: "done",
         createdAt: -2,
         steps: [],
+        thinking: null,
       },
     ],
     streamCursor: { epoch: 1, seq: null },
@@ -181,6 +190,7 @@ export function olderListedSession(): ChatSession {
     status: "idle",
     createdAt: 1_740_000_000_000,
     updatedAt: 1_740_000_000_010,
+    ...NULL_SESSION_META,
   };
 }
 

@@ -6,6 +6,7 @@ import {
   chatStateFromSnapshot,
 } from "../src/features/chat/stream.js";
 import type { ChatMessageSnapshot } from "../src/lib/session-contract.js";
+import { NULL_SESSION_META } from "./session-meta-fixtures.js";
 
 const SESSION_ID = "0123456789abcdef0123456789abcdef";
 const USER_CONTENT = "\u0000\uFEFFKeep BOM 中文 😀";
@@ -20,6 +21,7 @@ const runningSession = {
   status: "running" as const,
   createdAt: 1_740_000_000_000,
   updatedAt: 1_740_000_000_023,
+  ...NULL_SESSION_META,
 };
 
 const historyUser = {
@@ -30,6 +32,7 @@ const historyUser = {
   status: "done" as const,
   createdAt: -1,
   steps: [] as [],
+  thinking: null,
 };
 
 const userView = {
@@ -72,6 +75,7 @@ function reducerSnapshot(
       status: options.assistantStatus ?? "running",
       createdAt: 0,
       steps: options.steps ?? [],
+      thinking: null,
     });
   }
   return {
@@ -88,6 +92,7 @@ const runningBashStep = {
   detail: BASH_START_DETAIL,
   output: "",
   status: "running" as const,
+  changes: null,
 };
 
 describe("Chat stream reducer", () => {
@@ -404,9 +409,33 @@ describe("Chat stream reducer", () => {
       content: STREAMED_BODY,
       cursor: { epoch: 1, seq: 1 },
       steps: [
-        { id: 3, ordinal: 0, name: "first", detail: "done", output: "ok", status: "done" },
-        { id: 4, ordinal: 1, name: "second", detail: "running", output: "", status: "running" },
-        { id: 5, ordinal: 2, name: "third", detail: "failed", output: "err", status: "failed" },
+        {
+          id: 3,
+          ordinal: 0,
+          name: "first",
+          detail: "done",
+          output: "ok",
+          status: "done",
+          changes: null,
+        },
+        {
+          id: 4,
+          ordinal: 1,
+          name: "second",
+          detail: "running",
+          output: "",
+          status: "running",
+          changes: null,
+        },
+        {
+          id: 5,
+          ordinal: 2,
+          name: "third",
+          detail: "failed",
+          output: "err",
+          status: "failed",
+          changes: null,
+        },
       ],
     });
     const frozenSnapshot = deepFreeze(structuredClone(snapshot));

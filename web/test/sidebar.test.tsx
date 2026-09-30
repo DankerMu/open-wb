@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import "./radix-platform.js";
 import { routeManifest } from "../src/routes/manifest.js";
 import { mountAuthenticatedApp } from "./render-app-router.js";
+import { NULL_SESSION_META } from "./session-meta-fixtures.js";
 import {
   authenticatedPrincipal,
   createFetchMock,
@@ -111,6 +112,7 @@ const LIST_SESSION = {
   status: "done",
   createdAt: 1_740_000_000_000,
   updatedAt: 1_740_000_000_100,
+  ...NULL_SESSION_META,
 } as const;
 
 function mountChat(path = "/", strict = false) {

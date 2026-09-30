@@ -17,6 +17,7 @@ const bashStep = {
   detail: "ls",
   output: "o",
   status: "running" as const,
+  changes: null,
 };
 
 const readStep = {
@@ -26,6 +27,7 @@ const readStep = {
   detail: "a.txt",
   output: "text",
   status: "done" as const,
+  changes: null,
 };
 
 function runningState() {

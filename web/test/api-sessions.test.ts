@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type ApiClient, createApiClient } from "../src/lib/api.js";
+import { NULL_SESSION_META } from "./session-meta-fixtures.js";
 import {
   captureApiError,
   expectRequestFailure,
@@ -21,6 +22,7 @@ const idleSession = {
   status: "idle" as const,
   createdAt: 1_740_000_000_000,
   updatedAt: 1_740_000_000_000,
+  ...NULL_SESSION_META,
 };
 
 const runningSession = {
@@ -37,6 +39,7 @@ const snapshotStep = {
   detail: SNAPSHOT_CONTENT,
   output: `out\n${SNAPSHOT_CONTENT}`,
   status: "running" as const,
+  changes: null,
 };
 
 const snapshot = {
@@ -50,6 +53,7 @@ const snapshot = {
       status: "done" as const,
       createdAt: -1,
       steps: [],
+      thinking: null,
     },
     {
       id: 0,
@@ -59,6 +63,7 @@ const snapshot = {
       status: "running" as const,
       createdAt: 0,
       steps: [snapshotStep],
+      thinking: null,
     },
   ],
   streamCursor: { epoch: 1, seq: null as number | null },
@@ -78,7 +83,8 @@ const sessionMethods = [
   ],
   [
     "createSession",
-    (client: ApiClient, options?: { signal?: AbortSignal }) => client.createSession(options),
+    (client: ApiClient, options?: { signal?: AbortSignal }) =>
+      client.createSession(undefined, options),
     201,
     idleSession,
   ],
@@ -134,9 +140,9 @@ describe("Sessions API client create contract", () => {
     const controller = new AbortController();
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(createApiClient().createSession({ signal: controller.signal })).resolves.toEqual(
-      idleSession,
-    );
+    await expect(
+      createApiClient().createSession(undefined, { signal: controller.signal }),
+    ).resolves.toEqual(idleSession);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith("/api/sessions", {
@@ -242,6 +248,7 @@ describe("Sessions API client snapshot domain contract", () => {
           status: "failed" as const,
           createdAt: -SAFE_INTEGER_MAX,
           steps: [],
+          thinking: null,
         },
         {
           id: SAFE_INTEGER_MAX,
@@ -258,8 +265,10 @@ describe("Sessions API client snapshot domain contract", () => {
               detail: "",
               output: "",
               status: "failed" as const,
+              changes: null,
             },
           ],
+          thinking: null,
         },
       ],
       streamCursor: { epoch: SAFE_INTEGER_MAX, seq: SAFE_INTEGER_MAX },

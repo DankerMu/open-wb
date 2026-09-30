@@ -150,7 +150,17 @@ describe("(C4) render conditions", () => {
         status: "failed",
         content: "部分",
         assistantStatus: "failed",
-        steps: [{ id: 11, ordinal: 0, name: "bash", detail: "", output: "", status: "done" }],
+        steps: [
+          {
+            id: 11,
+            ordinal: 0,
+            name: "bash",
+            detail: "",
+            output: "",
+            status: "done",
+            changes: null,
+          },
+        ],
         cursor: { epoch: 1, seq: null },
       }),
     );

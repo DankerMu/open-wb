@@ -31,8 +31,21 @@ type SessionTransport = {
 
 type SessionEndpoint = "messages" | "prompt" | "stop" | "regenerate" | "fork";
 
+function sessionPath(sessionId: string) {
+  return `/api/sessions/${encodeURIComponent(sessionId)}`;
+}
+
 function sessionEndpoint(sessionId: string, endpoint: SessionEndpoint) {
-  return `/api/sessions/${encodeURIComponent(sessionId)}/${endpoint}`;
+  return `${sessionPath(sessionId)}/${endpoint}`;
+}
+
+/** `undefined` or an input with no own keys sends no body, exactly like the bodyless create. */
+function createSessionBody(input: object | undefined): RequestInit {
+  if (input === undefined || Object.keys(input).length === 0) {
+    return {};
+  }
+
+  return { headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) };
 }
 
 function approvalEndpoint(sessionId: string, approvalId: number) {
@@ -54,6 +67,8 @@ export function createSessionMethods(
   ApiClient,
   | "listSessions"
   | "createSession"
+  | "patchSession"
+  | "deleteSession"
   | "getMessages"
   | "prompt"
   | "stopSession"
@@ -77,12 +92,13 @@ export function createSessionMethods(
       return sessions;
     },
 
-    async createSession(options) {
+    async createSession(input, options) {
       const response = await request(
         "/api/sessions",
         {
           ...requestOptions(options?.signal),
           method: "POST",
+          ...createSessionBody(input),
         },
         onUnauthorized,
         201,
@@ -93,6 +109,45 @@ export function createSessionMethods(
       }
 
       return session;
+    },
+
+    async patchSession(sessionId, patch, options) {
+      if (Object.keys(patch).length === 0) {
+        throw new TypeError("patchSession requires at least one field");
+      }
+
+      const response = await request(
+        sessionPath(sessionId),
+        {
+          ...requestOptions(options?.signal),
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        },
+        onUnauthorized,
+        200,
+      );
+      const session = parseSession(response);
+      if (!session) {
+        throw requestFailed(200);
+      }
+
+      return session;
+    },
+
+    async deleteSession(sessionId, options) {
+      const init: RequestInit = { ...requestOptions(options?.signal), method: "DELETE" };
+      const response = await fetchResponse(sessionPath(sessionId), init);
+      if (response.status === 204) {
+        return;
+      }
+
+      if (isSuccessfulStatus(response.status)) {
+        throw requestFailed(response.status);
+      }
+
+      await parseJsonResponse(response, options?.signal, onUnauthorized);
+      throw requestFailed(response.status);
     },
 
     async getMessages(sessionId, options) {

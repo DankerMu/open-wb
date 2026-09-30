@@ -25,6 +25,7 @@ import {
   NOT_FOUND_ENVELOPE,
   UNAUTHORIZED_ENVELOPE,
 } from "./session-db-helpers.js";
+import { NULL_SESSION_META, SESSION_VIEW_KEYS } from "./session-meta-fixtures.js";
 import {
   AGENT_UNAVAILABLE_ENVELOPE,
   cookieFor,
@@ -129,7 +130,14 @@ function endedSession(store: SessionStore, status: FinishStatus): string {
 }
 
 function forkedSession(status: Forked["session"]["status"]): Forked["session"] {
-  return { id: FORKED_ID, title: "forked title", status, createdAt: 11, updatedAt: 12 };
+  return {
+    id: FORKED_ID,
+    title: "forked title",
+    status,
+    createdAt: 11,
+    updatedAt: 12,
+    ...NULL_SESSION_META,
+  };
 }
 
 /** A 201 whose payload is exactly `{session:<five keys>, draft}`, with no-store. */
@@ -145,6 +153,7 @@ function expectForked(
       status: session.status,
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
+      ...NULL_SESSION_META,
     },
     draft,
   };
@@ -155,7 +164,7 @@ function expectForked(
   }).toEqual({ status: 201, cacheControl: "no-store", payload: JSON.stringify(expected) });
   const body = JSON.parse(response.payload) as { session: object; draft: unknown };
   expect(Object.keys(body)).toEqual(["session", "draft"]);
-  expect(Object.keys(body.session)).toEqual(["id", "title", "status", "createdAt", "updatedAt"]);
+  expect(Object.keys(body.session)).toEqual(SESSION_VIEW_KEYS);
   expect(typeof body.draft).toBe("string");
 }
 

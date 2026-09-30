@@ -61,6 +61,7 @@ describe("chat page confirmed ownership gaps", () => {
       status: "done" as const,
       createdAt: -5,
       steps: [] as [],
+      thinking: null,
     };
     const idleSnapshot: ChatMessageSnapshot = {
       session: { ...runningSession("idle"), title: "saved title" },
@@ -79,6 +80,7 @@ describe("chat page confirmed ownership gaps", () => {
           status: "done",
           createdAt: 1,
           steps: [],
+          thinking: null,
         },
         {
           id: 1,
@@ -88,6 +90,7 @@ describe("chat page confirmed ownership gaps", () => {
           status: "done",
           createdAt: 2,
           steps: [],
+          thinking: null,
         },
       ],
       streamCursor: { epoch: 2, seq: 3 },
@@ -200,6 +203,7 @@ describe("chat page confirmed ownership gaps", () => {
           status: "done",
           createdAt: 1,
           steps: [],
+          thinking: null,
         },
         {
           id: 1,
@@ -209,6 +213,7 @@ describe("chat page confirmed ownership gaps", () => {
           status: "done",
           createdAt: 2,
           steps: [],
+          thinking: null,
         },
       ],
       streamCursor: { epoch: 1, seq: 6 },
@@ -246,6 +251,7 @@ describe("chat page confirmed ownership gaps", () => {
           status: "done",
           createdAt: 3,
           steps: [],
+          thinking: null,
         },
         {
           id: 2,
@@ -255,6 +261,7 @@ describe("chat page confirmed ownership gaps", () => {
           status: "done",
           createdAt: 4,
           steps: [],
+          thinking: null,
         },
       ],
       streamCursor: { epoch: 1, seq: 9 },
@@ -346,6 +353,7 @@ describe("chat page confirmed ownership gaps", () => {
           status: "done",
           createdAt: 1,
           steps: [],
+          thinking: null,
         },
         {
           id: 0,
@@ -355,6 +363,7 @@ describe("chat page confirmed ownership gaps", () => {
           status: "done",
           createdAt: 2,
           steps: [],
+          thinking: null,
         },
       ],
       streamCursor: { epoch: 1, seq: 3 },
