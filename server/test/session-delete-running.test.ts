@@ -139,11 +139,11 @@ describe("DELETE of a running session stops it first (evidence 1–3)", () => {
   );
 
   it(
-    "2 abort-ignored: DELETE waits out the 8000 ms grace, then the stopped turn is deleted",
+    "2 abort-ignored: DELETE waits out the 8000 ms grace untombstoned, then deletes the stopped turn",
     REAL,
     async () => {
       const world = await open("abort-ignored");
-      const { db } = world.fixture;
+      const { db, supervisor } = world.fixture;
       await heldTurn(world);
       const assistant = assistantIdFor(world.fixture, world.session);
       const deletes = observeDeletes(db);
@@ -153,6 +153,13 @@ describe("DELETE of a running session stops it first (evidence 1–3)", () => {
       const { pending } = await parkedDelete(world);
       const observed = observePromise(pending);
       expect(abortCount(stdin)).toBe(1);
+      // The tombstone starts at retire, after the wait: a stream opened during the wait subscribes.
+      const subscribers = supervisor.sessionStreamSubscriberCount(world.session);
+      const stream = await openEventStream(world.fixture, world.session, world.cookie);
+      stream.resume();
+      await settle();
+      expect(stream.raw.writableEnded).toBe(false);
+      expect(supervisor.sessionStreamSubscriberCount(world.session)).toBe(subscribers + 1);
       world.clock.advance(GRACE_MS - 1);
       await settle();
       expect(observed.outcome).toBe("pending");
@@ -161,6 +168,9 @@ describe("DELETE of a running session stops it first (evidence 1–3)", () => {
 
       world.clock.advance(1);
       expectDeleted(await pending);
+      await settle();
+      expect(stream.raw.writableEnded).toBe(true);
+      expect(supervisor.sessionStreamSubscriberCount(world.session)).toBe(0);
       expect(deletes()).toEqual(stopped(world.session));
       expect(turnEnds(world)).toEqual([ended(assistant, "stopped")]);
       expectNoError(world);
@@ -389,10 +399,13 @@ describe("store turn release signal (evidence 9)", () => {
     }
   });
 
-  it("9b a delta flush fault rejects the wait with that error, also after a later good flush", async () => {
+  it("9b a delta flush fault rejects the wait with that error; later appends and faults keep it", async () => {
     const { db, store, id } = openStore();
     try {
       const { assistantMessageId } = store.acceptPrompt(id, OWNER_ID, "flush");
+      const content = () =>
+        db.prepare("SELECT content FROM chat_messages WHERE id = ?").get(assistantMessageId);
+      const persisted = content();
       const waiting = store.turnReleased(id);
       db.exec(`CREATE TEMP TRIGGER block_flush BEFORE UPDATE OF content ON chat_messages
         BEGIN SELECT RAISE(ABORT, '${FLUSH_BLOCKED}'); END`);
@@ -401,6 +414,12 @@ describe("store turn release signal (evidence 9)", () => {
       await expect(waiting).rejects.toBe(thrown);
       await expect(store.turnReleased(id)).rejects.toBe(thrown);
       db.exec("DROP TRIGGER block_flush");
+      // Sticky: with the trigger gone a flush-sized append still rethrows and writes nothing.
+      expect(captureThrown(() => store.appendDelta(assistantMessageId, "y".repeat(2_048)))).toBe(
+        thrown,
+      );
+      expect(content()).toEqual(persisted);
+      await expect(store.turnReleased(id)).rejects.toBe(thrown);
       store.faultTurn(assistantMessageId, new Error("orphan"));
       await expect(store.turnReleased(id)).rejects.toBe(thrown);
     } finally {

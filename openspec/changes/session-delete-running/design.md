@@ -13,7 +13,7 @@
   - `store.ts` / `store-approvals.ts`：
     - Turn 增一个一次性结算的信号（例如 `released: Promise<void>` 及其 `resolve`/`reject`，在 `openTurn` 创建；`released.catch(() => undefined)` 防未处理拒绝）。
     - `releaseTurn`（`store-approvals.ts:313`）调用 resolve。
-    - 两处置 `faulted = true` 的地方（`store.ts:776` delta flush、`store-approvals.ts:303` 终态落库）调用 reject(该错误)；已 settle 的 promise 再 resolve/reject 无效（之后 flush 重试成功不改变 DELETE 已得到的失败）。
+    - 两处置 `faulted = true` 的地方（`store.ts:776` delta flush、`store-approvals.ts:303` 终态落库）调用 reject(该错误)；已 settle 的 promise 再 resolve/reject 无效。（实现中查明：flush 故障是 sticky 的——故障后 `appendDelta` 先重抛原错误、flush 定时器不再启动，故「故障后重试成功」经公开 API 不可达，证据 9b 断言的是这一行为。）
     - `rollbackPrompt` 的补偿事务失败（`store.ts:423-448` 在 `releaseTurn` 之前抛出）时，同样置该回合 `faulted`/`fault` 并 reject 其信号，再原样抛出。
     - `SessionStore.faultTurn(assistantMessageId, error): void`：对仍在途的该回合置 `faulted`/`fault` 并 reject 其信号（无该回合 → no-op）；供 supervisor 标记孤儿回合。
     - `SessionStore.turnReleased(sessionId): Promise<void>`：无在途回合 → `Promise.resolve()`；在途回合已 `faulted` → `Promise.reject(turn.fault)`；否则返回该回合的 `released`。不查库、不 `assertOpen`。
