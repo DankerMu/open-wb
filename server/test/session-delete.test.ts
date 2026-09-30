@@ -5,8 +5,8 @@
  * "Row unchanged" = every `chat_sessions` column plus the session's message/step/approval counts
  * deep-equal before and after (`sessionState`).
  */
-import { existsSync, mkdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, existsSync, lstatSync, mkdirSync, statSync, symlinkSync } from "node:fs";
+import { isAbsolute, join, relative } from "node:path";
 import type { LightMyRequestResponse } from "fastify";
 import { describe, expect, it, vi } from "vitest";
 import { REAL, settle } from "./session-approval-helpers.js";
@@ -23,8 +23,8 @@ import {
   NOT_FOUND_WIRE,
   openLingeringWorld,
   openRealWorld,
-  ownedDir,
   ownedFile,
+  ownerSessionDir,
   parkedDelete,
   presetFile,
   release,
@@ -60,6 +60,10 @@ const worlds = regenWorlds();
 
 const MALFORMED = { payload: '{"x": ', contentType: JSON_TYPE };
 const WELL_FORMED = { payload: '{"x":1}', contentType: JSON_TYPE };
+const OUTSIDE_SESSION_DIR = "session delete: session file outside the owner session dir";
+const NOT_REGULAR_FILE = "session delete: session file is not a regular file";
+
+type RealWorld = Awaited<ReturnType<typeof openRealWorld>>;
 
 /** The same id-scoped request for `session` and for an unknown id, as compared wires. */
 async function idScopedWires(world: RecordingWorld, session: string) {
@@ -219,7 +223,7 @@ describe("DELETE file edge cases (evidence 3, 9)", () => {
   it("a missing session file and a never-prompted session both delete without error", async () => {
     const world = await openRealWorld();
     const { app, db } = world.fixture;
-    const missing = join(ownedDir(), "missing.jsonl");
+    const missing = join(ownerSessionDir(world.rt.runtime.stateDir), "missing.jsonl");
     presetFile(db, world.session, missing);
     const fresh = await createSession(app, world.cookie);
     const admin = await cookieFor(app, "lisi");
@@ -243,21 +247,78 @@ describe("DELETE file edge cases (evidence 3, 9)", () => {
   });
 
   it("an unlink failure other than ENOENT is reported once and the DELETE is still 204", async () => {
+    await expectUnlinkFailureReported(await openRealWorld());
+  });
+
+  it("a throwing error channel does not turn the committed DELETE into a 5xx", async () => {
+    const world = await openRealWorld(undefined, {
+      onError() {
+        throw new Error("error channel down");
+      },
+    });
+    await expectUnlinkFailureReported(world);
+  });
+});
+
+/** A read-only (0500) owner session dir makes the unlink of a real file in it fail with EACCES. */
+async function expectUnlinkFailureReported(world: RealWorld): Promise<void> {
+  const { app, db } = world.fixture;
+  const dir = ownerSessionDir(world.rt.runtime.stateDir);
+  const file = ownedFile(dir);
+  presetFile(db, world.session, file);
+  const audits = auditRows(db);
+  const mode = statSync(dir).mode & 0o7777;
+  chmodSync(dir, 0o500);
+  try {
+    expectDeleted(await sendDelete(app, world.session, world.cookie));
+  } finally {
+    chmodSync(dir, mode);
+  }
+
+  expect(sessionState(db, world.session).row).toBeUndefined();
+  expect(auditRows(db)).toBe(audits + 1);
+  expect(world.errors).toHaveLength(1);
+  const reported = world.errors[0] as NodeJS.ErrnoException;
+  expect([reported.code, reported.path]).toEqual(["EACCES", file]);
+  expect(existsSync(file)).toBe(true);
+}
+
+describe("DELETE session file path validation (evidence 13)", () => {
+  it("an outside file, a relative path and a symlink are each reported once, never unlinked", async () => {
     const world = await openRealWorld();
     const { app, db } = world.fixture;
-    const dir = ownedDir();
-    presetFile(db, world.session, dir);
-    const audits = auditRows(db);
+    const dir = ownerSessionDir(world.rt.runtime.stateDir);
+    const outside = ownedFile();
+    // Resolved against the app cwd it names a real file inside the session dir: only the
+    // absolute-path check keeps it.
+    const inside = ownedFile(dir, "inside.jsonl");
+    const target = ownedFile();
+    const link = join(dir, "link.jsonl");
+    symlinkSync(target, link);
+    const cases = [
+      { file: outside, message: OUTSIDE_SESSION_DIR },
+      { file: relative(process.cwd(), inside), message: OUTSIDE_SESSION_DIR },
+      { file: link, message: NOT_REGULAR_FILE },
+    ];
+    expect(cases.map(({ file }) => isAbsolute(file))).toEqual([true, false, true]);
+    const admin = await cookieFor(app, "lisi");
 
-    expectDeleted(await sendDelete(app, world.session, world.cookie));
+    for (const [index, { file }] of cases.entries()) {
+      const session = await createSession(app, world.cookie);
+      presetFile(db, session, file);
 
-    expect(sessionState(db, world.session).row).toBeUndefined();
-    expect(auditRows(db)).toBe(audits + 1);
-    expect(world.errors).toHaveLength(1);
-    const reported = world.errors[0] as NodeJS.ErrnoException;
-    expect(reported.path).toBe(dir);
-    expect(reported.code).not.toBe("ENOENT");
-    expect(statSync(dir).isDirectory()).toBe(true);
+      expectDeleted(await sendDelete(app, session, world.cookie));
+
+      expect(sessionState(db, session).row).toBeUndefined();
+      expect((await auditEvents(app, admin, 1))[0]).toEqual(deleteEvent(session, file, 0));
+      expect(world.errors.map((error) => error.message)).toEqual(
+        cases.slice(0, index + 1).map(({ message }) => message),
+      );
+    }
+    for (const survivor of [outside, inside, target]) {
+      expect(existsSync(survivor)).toBe(true);
+    }
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
   });
 });
 
@@ -266,7 +327,7 @@ describe("DELETE request bodies (evidence 4)", () => {
     const world = await openRealWorld();
     const { app, db, supervisor } = world.fixture;
     await turn(world, "hi");
-    presetFile(db, world.session, ownedFile());
+    presetFile(db, world.session, ownedFile(ownerSessionDir(world.rt.runtime.stateDir)));
     const [child] = world.rt.children;
     const bodyless = await createSession(app, world.cookie);
     const withBody = await createSession(app, world.cookie);
@@ -462,6 +523,11 @@ describe("DELETE of a running session (evidence 8)", () => {
     expect(supervisor.sessionStreamSubscriberCount(opened.session)).toBe(1);
     expect(auditRows(db)).toBe(audits);
     expect(supervisor.controlHeld(opened.session)).toBe(false);
+    // No tombstone survives the rejection: a new subscription is established, not ended.
+    const fresh = await openEventStream(opened.fixture, opened.session, opened.cookie);
+    await settle();
+    expect(fresh.raw.writableEnded).toBe(false);
+    expect(supervisor.sessionStreamSubscriberCount(opened.session)).toBe(2);
 
     completeHeldTurn(opened.child);
     await waitForTurn(opened.fixture, opened.session, "done");
@@ -475,7 +541,7 @@ describe("DELETE of a running session (evidence 8)", () => {
     expect(again.statusCode).toBe(202);
     await waitForTurn(opened.fixture, opened.session, "done");
     await settle();
-    const file = ownedFile();
+    const file = ownedFile(ownerSessionDir(opened.runtime.runtime.stateDir));
     presetFile(db, opened.session, file);
     expectDeleted(await sendDelete(app, opened.session, opened.cookie));
     expect(existsSync(file)).toBe(false);
@@ -504,7 +570,7 @@ describe("DELETE audit shape over a full round (evidence 10)", () => {
     expect(created.statusCode).toBe(201);
     const id = (created.json() as { id: string }).id;
     await turn(world, "think", id);
-    const file = ownedFile();
+    const file = ownedFile(ownerSessionDir(world.rt.runtime.stateDir));
     presetFile(db, id, file);
 
     expectDeleted(await sendDelete(app, id, world.cookie));

@@ -3,11 +3,12 @@
  * registerSessions assembly (real fake-omp or a controlled FakeChild runtime), a real in-memory
  * SQLite and `app.inject()`. Oracles: status/headers/bytes, SQLite rows, `GET /api/audit` per
  * account role, child liveness, file existence and the public supervisor surface. Every file a
- * DELETE may unlink is a test-owned mkdtemp path or a `branch-*.jsonl` under the test stateDir;
- * the fake's shared `/tmp/open-wb-fake-session.jsonl` is never created, deleted or asserted.
+ * DELETE may unlink lives in the owner session dir `<stateDir>/sessions/u1` (a test-written file
+ * or a fake `branch-*.jsonl`); files outside it are test-owned mkdtemp paths that must survive.
+ * The fake's shared `/tmp/open-wb-fake-session.jsonl` is never created, deleted or asserted.
  */
 import { Buffer } from "node:buffer";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -20,6 +21,7 @@ import {
   createControlledRuntime,
   createRealFakeRuntime,
   emitAssistantDelta,
+  type OpenSessionOptions,
   OWNER_ID,
   openRecordingSession,
   type RecordingWorld,
@@ -78,17 +80,27 @@ export function track(fixture: SupervisorApp, fakes: FakeChild[] = []): void {
 }
 
 /** A fresh test-owned directory (removed after the case). */
-export function ownedDir(): string {
+function ownedDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "open-wb-525-"));
   dirs.push(dir);
   return dir;
 }
 
-/** A real test-owned session file. */
-export function ownedFile(): string {
-  const file = join(ownedDir(), "owned.jsonl");
+/** A real test-written session file in `dir` (default: a fresh test-owned mkdtemp dir). */
+export function ownedFile(dir: string = ownedDir(), name = "owned.jsonl"): string {
+  const file = join(dir, name);
   writeFileSync(file, '{"type":"session","id":"owned"}\n');
   return file;
+}
+
+/**
+ * The owner's omp session dir under `stateDir` (the independent oracle for the path the deleter
+ * accepts), created if no spawn has made it yet.
+ */
+export function ownerSessionDir(stateDir: string): string {
+  const dir = join(stateDir, "sessions", OWNER_ID);
+  mkdirSync(dir, { recursive: true });
+  return dir;
 }
 
 export interface DeleteBody {
@@ -217,20 +229,20 @@ export function presetFile(db: DatabaseSync, session: string, file: string): voi
 }
 
 /** Real fake-omp world (production createApp), tracked for teardown. */
-export async function openRealWorld(scenario?: string) {
+export async function openRealWorld(scenario?: string, extra?: OpenSessionOptions) {
   const rt = createRealFakeRuntime(scenario);
-  const world = await openRecordingSession(rt.runtime);
+  const world = await openRecordingSession(rt.runtime, extra);
   track(world.fixture);
   return { ...world, rt };
 }
 
 /**
  * Controlled world whose first child ignores stdin EOF (a retire of it parks until `release`);
- * later children exit on EOF. Every handshake reports the test-owned `file`, so a prompt stores
- * it as `omp_session_file`. Each prompt runs one delta to `done`.
+ * later children exit on EOF. Every handshake reports the test-written `file` in the owner session
+ * dir, so a prompt stores it as `omp_session_file`. Each prompt runs one delta to `done`.
  */
 export async function openLingeringWorld() {
-  const file = ownedFile();
+  let file = "";
   const rt = createControlledRuntime((child, _call, ordinal) => {
     child.replyHandshake({ sessionFile: file });
     if (ordinal > 0) {
@@ -242,6 +254,7 @@ export async function openLingeringWorld() {
       completeHeldTurn(child);
     });
   });
+  file = ownedFile(ownerSessionDir(rt.runtime.stateDir));
   const world = await openRecordingSession(rt.runtime);
   track(world.fixture, rt.children);
   return { ...world, rt, file };

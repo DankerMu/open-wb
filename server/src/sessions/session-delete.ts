@@ -2,12 +2,16 @@
  * Session deletion, non-running path (#525, parent D3 "删除"). One call runs, in this order: the
  * control-claim check and hold → owner recheck (a running session is a transitional 409) →
  * tombstone → supervisor `retire` → the in-memory active-turn invariant → one delete + audit
- * transaction → post-commit unlink of the session file. Everything up to `retire` is one
- * synchronous segment. The tombstone set belongs to this deleter instance; the SSE route asks
- * `isDeleting` before it subscribes. The tombstone is lifted before the claim on every exit path.
+ * transaction → post-commit removal of the session file (validated first: the path is
+ * omp-reported and must name a regular file directly inside the owner's session dir). Everything
+ * up to `retire` is one synchronous segment. The tombstone set belongs to this deleter instance;
+ * the SSE route asks `isDeleting` before it subscribes. The tombstone is lifted before the claim on
+ * every exit path.
  */
-import { unlink } from "node:fs/promises";
+import { lstat, realpath, unlink } from "node:fs/promises";
+import { dirname, isAbsolute } from "node:path";
 import { HttpError } from "../core/errors/index.js";
+import { ompSessionDir } from "./omp/process.js";
 import type { SessionStore } from "./store.js";
 import type { SessionMetadataStore } from "./store-metadata.js";
 import type { SessionSupervisor } from "./supervisor.js";
@@ -22,12 +26,27 @@ interface SessionDeleterDependencies {
   store: Pick<SessionStore, "getMessages" | "runtimeState">;
   supervisor: Pick<SessionSupervisor, "controlHeld" | "holdControl" | "retire">;
   metadata: Pick<SessionMetadataStore, "deleteSession">;
-  /** The session module's synchronous service error channel (unlink failures only). */
+  /** `OMP_STATE_DIR`; the owner's session dir under it bounds what a delete may unlink. */
+  stateDir: string;
+  /** The session module's synchronous service error channel (session file removal only). */
   onError: (error: Error) => void;
 }
 
+type Report = (error: unknown) => void;
+
+const OUTSIDE_SESSION_DIR = "session delete: session file outside the owner session dir";
+const NOT_REGULAR_FILE = "session delete: session file is not a regular file";
+
 export function createSessionDeleter(deps: SessionDeleterDependencies): SessionDeleter {
   const tombstones = new Set<string>();
+
+  const report: Report = (error) => {
+    try {
+      deps.onError(asError(error));
+    } catch {
+      // A failing error channel must not turn a committed delete into a 5xx.
+    }
+  };
 
   /** Held by regenerate, fork, stop or another DELETE → 409 with no side effect. */
   const claim = (sessionId: string): (() => void) => {
@@ -60,7 +79,11 @@ export function createSessionDeleter(deps: SessionDeleterDependencies): SessionD
       throw new HttpError("not_found");
     }
     if (removed.ompSessionFile !== null) {
-      await unlinkReported(removed.ompSessionFile, deps.onError);
+      await removeSessionFile(
+        removed.ompSessionFile,
+        ompSessionDir(deps.stateDir, ownerId),
+        report,
+      );
     }
   };
 
@@ -85,13 +108,32 @@ export function createSessionDeleter(deps: SessionDeleterDependencies): SessionD
   };
 }
 
-/** The row is already gone: ENOENT is success, any other failure is reported and not thrown. */
-async function unlinkReported(path: string, onError: (error: Error) => void): Promise<void> {
+/**
+ * The row is already gone, so nothing here throws. `path` is omp-reported and was never validated
+ * on write: it is unlinked only when absolute, its parent's realpath is the owner's session dir and
+ * `lstat` (no symlink follow) says regular file; anything else is reported and left alone. ENOENT at
+ * any step is success. Residual: the dir is group-writable (2770) and Node has no `unlinkat`, so
+ * between the checks and `unlink` the name can only be swapped for another entry of that same dir.
+ */
+async function removeSessionFile(path: string, sessionDir: string, report: Report): Promise<void> {
+  if (!isAbsolute(path)) {
+    report(new Error(OUTSIDE_SESSION_DIR));
+    return;
+  }
   try {
+    const [parent, expected] = await Promise.all([realpath(dirname(path)), realpath(sessionDir)]);
+    if (parent !== expected) {
+      report(new Error(OUTSIDE_SESSION_DIR));
+      return;
+    }
+    if (!(await lstat(path)).isFile()) {
+      report(new Error(NOT_REGULAR_FILE));
+      return;
+    }
     await unlink(path);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      onError(asError(error));
+      report(error);
     }
   }
 }

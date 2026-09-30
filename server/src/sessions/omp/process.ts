@@ -45,6 +45,11 @@ export type SpawnImpl = (
   options: SpawnOptions,
 ) => ChildProcessWithoutNullStreams;
 
+/** The owner's omp session directory (`--session-dir`); the single source of this path. */
+export function ompSessionDir(stateDir: string, ownerId: string): string {
+  return join(stateDir, "sessions", ownerId);
+}
+
 /**
  * Prepare owned directories then spawn the omp child.
  * Await this call: it settles after directory preparation and spawnImpl return.
@@ -60,7 +65,7 @@ export async function spawnOmp(
   }
   const ownerRoot = join(opts.sandboxRoot, opts.ownerId);
   const cwd = opts.cwd;
-  const sessionDir = join(opts.stateDir, "sessions", opts.ownerId);
+  const sessionDir = ompSessionDir(opts.stateDir, opts.ownerId);
   const home = join(opts.stateDir, "home");
   const agent = join(opts.stateDir, "agent");
   // Only the owner root is ours to create; a missing bound cwd must not be silently rebuilt.
