@@ -1,5 +1,7 @@
 /**
- * Issue #100 session supervisor: dispatch, persistence, and owned lifecycle.
+ * Issue #100 session supervisor: dispatch, persistence, and owned lifecycle. #519: thinking deltas
+ * are merged per slot (thinking-buffer.ts) and flushed before any other event of the slot enters
+ * the ring.
  */
 import { availableParallelism } from "node:os";
 import { DEFAULT_OMP_MAX_PROCESSES } from "../agent-config.js";
@@ -37,6 +39,7 @@ import {
   translateSupervisorError,
 } from "./supervisor-faults.js";
 import { type SessionStreamLiveHandler, SubscriberTable } from "./supervisor-subscribers.js";
+import { ThinkingBuffers } from "./thinking-buffer.js";
 import type { TokenRegistry } from "./tokens.js";
 import { ControlClaims, drain, persistEvent, TurnStops } from "./turn-control.js";
 
@@ -117,6 +120,7 @@ export class SessionSupervisor {
   readonly #spawn: SpawnShared;
   readonly #approvals: ApprovalRegistry;
   readonly #stops: TurnStops;
+  readonly #thinking: ThinkingBuffers;
   readonly #controls = new ControlClaims();
   readonly #regenerations: Regenerations;
   readonly #forks: Forks;
@@ -143,11 +147,13 @@ export class SessionSupervisor {
       store: this.#store,
       clock,
       publish: (slot, event, generation) => this.#publish(slot, event, generation),
-      fault: (slot, error) => {
-        this.#retain(error);
-        slot.infraFaulted = true;
-        void this.#retireSlot(slot);
-      },
+      fault: (slot, error) => this.#faultSlot(slot, error),
+    });
+    this.#thinking = new ThinkingBuffers({
+      clock,
+      append: (messageId, chunk) => this.#store.appendThinking(messageId, chunk),
+      publish: (slot, event, generation) => this.#pushNow(slot, event, generation),
+      fault: (slot, error) => this.#faultSlot(slot, error),
     });
     this.#stops = new TurnStops({
       clock,
@@ -648,6 +654,13 @@ export class SessionSupervisor {
     generation: Generation | undefined,
   ): Promise<boolean> {
     for (const event of events) {
+      // Taken before persistEvent: merged, stored and published by the slot's thinking buffer.
+      if (event.type === "thinking.delta") {
+        if (!this.#thinking.add(slot, generation, assistantMessageId, event.data.delta)) {
+          return false;
+        }
+        continue;
+      }
       try {
         const settled: SettledApproval[] = [];
         const published = persistEvent(
@@ -674,11 +687,25 @@ export class SessionSupervisor {
     return true;
   }
 
+  /**
+   * Every non-thinking publication: the slot's buffered thinking is flushed first, in the same
+   * synchronous segment as this event's ring push (no await between them), so a timer or a REST
+   * settlement cannot interleave and the ring keeps the upstream arrival order.
+   */
   async #publish(
     slot: Slot,
     event: ChatEvent<number>,
     generation: Generation | undefined,
   ): Promise<boolean> {
+    if (this.#thinking.flush(slot) && this.#pushNow(slot, event, generation)) {
+      return true;
+    }
+    await this.#retireSlot(slot);
+    return false;
+  }
+
+  /** The one ring push: ring, fanout and observer, synchronously; a sink failure faults. */
+  #pushNow(slot: Slot, event: ChatEvent<number>, generation: Generation | undefined): boolean {
     if (generation !== undefined && !generation.sealed) {
       generation.ring.push(event);
       const recorded = generation.ring.latest();
@@ -697,11 +724,16 @@ export class SessionSupervisor {
       }
       return true;
     } catch (error) {
-      slot.infraFaulted = true;
-      this.#retain(asError(error));
-      await this.#retireSlot(slot);
+      this.#faultSlot(slot, asError(error));
       return false;
     }
+  }
+
+  /** Owned error sink: retain, mark the slot infra-faulted and retire it without awaiting. */
+  #faultSlot(slot: Slot, error: Error): void {
+    slot.infraFaulted = true;
+    this.#retain(error);
+    void this.#retireSlot(slot);
   }
 
   #readReplay(sessionId: string, lastEventId: string | null): RingRead {
@@ -729,7 +761,10 @@ export class SessionSupervisor {
       sealGeneration(slot, generation);
     }
     if (slot.infraFaulted) {
+      this.#thinking.discard(slot);
       for (const error of this.#approvals.abandon(slot)) this.#retain(error);
+    } else {
+      this.#thinking.clearTimer(slot);
     }
     await slot.retiring;
     this.#pool.release(slot.entry);

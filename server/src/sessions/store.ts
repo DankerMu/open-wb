@@ -34,6 +34,7 @@ import {
   toMessageView,
   toStepView,
 } from "./store-branch.js";
+import { appendThinking as appendThinkingText } from "./store-thinking.js";
 
 type SessionStatus = "idle" | "running" | "done" | "failed" | "stopped";
 export type MessageRole = "user" | "assistant";
@@ -173,6 +174,8 @@ export interface SessionStore {
   bumpStreamEpoch(sessionId: string): number;
   setSessionFile(sessionId: string, sessionFile: string | null): void;
   appendDelta(assistantMessageId: number, delta: string): boolean;
+  /** Bounded thinking append (#519, store-thinking.ts): the fragment stored, "" once capped. */
+  appendThinking(messageId: number, chunk: string): string;
   startStep(assistantMessageId: number, input: StartStepInput): number;
   // step.end 不扩展：stopped 步骤只由 finishTurn 结算（output 保持 NULL）。
   finishStep(stepId: number, status: "done" | "failed", output: string): boolean;
@@ -533,6 +536,11 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
         armFlushTimer(db, turn, activeTurns, options.onFlushError);
       }
       return true;
+    },
+
+    appendThinking(messageId, chunk) {
+      assertOpen(closed);
+      return appendThinkingText(db, messageId, chunk);
     },
 
     startStep(assistantMessageId, input) {
