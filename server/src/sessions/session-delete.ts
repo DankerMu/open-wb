@@ -1,18 +1,21 @@
 /**
- * Session deletion, non-running path (#525, parent D3 "删除"). One call runs, in this order: the
- * control-claim check and hold → owner recheck (a running session is a transitional 409) →
- * tombstone → supervisor `retire` → the in-memory active-turn invariant → one delete + audit
- * transaction → post-commit removal of the session file (validated first: the path is
- * omp-reported and must name a regular file directly inside the owner's session dir). Everything
- * up to `retire` is one synchronous segment. The tombstone set belongs to this deleter instance;
- * the SSE route asks `isDeleting` before it subscribes. The tombstone is lifted before the claim on
- * every exit path.
+ * Session deletion (#525 non-running path, #526 running path; parent D3 "删除"). One call runs,
+ * in this order: the control-claim check and hold → owner recheck → for a running session, under
+ * that same claim, the supervisor stop (Deny pending approvals, then `abort`, or a stop intent
+ * before the dispatch receipt) and the wait for the store to release the turn (terminal state
+ * persisted, or the admission compensated; a faulted turn rejects → generic 5xx) → tombstone →
+ * supervisor `retire` → the in-memory active-turn invariant → one delete + audit transaction →
+ * post-commit removal of the session file (validated first: the path is omp-reported and must
+ * name a regular file directly inside the owner's session dir). From the tombstone up to `retire`
+ * is one synchronous segment. The tombstone set belongs to this deleter instance; the SSE route
+ * asks `isDeleting` before it subscribes. The tombstone is lifted before the claim on every exit
+ * path. No timer of its own: the bounds are the stop grace, retire escalation and acquisition's.
  */
 import { lstat, realpath, unlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { HttpError } from "../core/errors/index.js";
 import { ompSessionDir } from "./omp/process.js";
-import type { SessionStore } from "./store.js";
+import type { SessionStore, SessionView } from "./store.js";
 import type { SessionMetadataStore } from "./store-metadata.js";
 import type { SessionSupervisor } from "./supervisor.js";
 import { asError } from "./supervisor-faults.js";
@@ -23,8 +26,8 @@ export interface SessionDeleter {
 }
 
 interface SessionDeleterDependencies {
-  store: Pick<SessionStore, "getMessages" | "runtimeState">;
-  supervisor: Pick<SessionSupervisor, "controlHeld" | "holdControl" | "retire">;
+  store: Pick<SessionStore, "getMessages" | "runtimeState" | "turnReleased">;
+  supervisor: Pick<SessionSupervisor, "controlHeld" | "holdControl" | "retire" | "stop">;
   metadata: Pick<SessionMetadataStore, "deleteSession">;
   /** `OMP_STATE_DIR`; the owner's session dir under it bounds what a delete may unlink. */
   stateDir: string;
@@ -56,15 +59,13 @@ export function createSessionDeleter(deps: SessionDeleterDependencies): SessionD
     return deps.supervisor.holdControl(sessionId);
   };
 
-  /** Rechecked under the claim: gone (concurrent delete) → 404; running → transitional 409. */
-  const requireIdle = (sessionId: string, ownerId: string): void => {
+  /** Rechecked under the claim: gone (concurrent delete) → 404; otherwise its status. */
+  const requireOwned = (sessionId: string, ownerId: string): SessionView["status"] => {
     const tree = deps.store.getMessages(sessionId, ownerId);
     if (tree === null) {
       throw new HttpError("not_found");
     }
-    if (tree.session.status === "running") {
-      throw new HttpError("session_busy");
-    }
+    return tree.session.status;
   };
 
   const retireAndRemove = async (sessionId: string, ownerId: string): Promise<void> => {
@@ -91,7 +92,11 @@ export function createSessionDeleter(deps: SessionDeleterDependencies): SessionD
     async deleteSession(sessionId, ownerId) {
       const release = claim(sessionId);
       try {
-        requireIdle(sessionId, ownerId);
+        if (requireOwned(sessionId, ownerId) === "running") {
+          // A user stop meanwhile joins this one (same turn entry: one Deny snapshot, one abort).
+          await deps.supervisor.stop(sessionId);
+          await deps.store.turnReleased(sessionId);
+        }
         tombstones.add(sessionId);
         try {
           await retireAndRemove(sessionId, ownerId);

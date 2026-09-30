@@ -1,8 +1,9 @@
 /**
  * Issue #525 DELETE /api/sessions/:id, non-running path (parent s1c-session-metadata-presentation
  * tasks 4.3b, design D3): owner precheck, control claim, retire, tombstone, one delete + audit
- * transaction, post-commit unlink. Evidence numbers follow the fixture design "Required evidence".
- * "Row unchanged" = every `chat_sessions` column plus the session's message/step/approval counts
+ * transaction, post-commit unlink. Evidence numbers follow the fixture design "Required evidence";
+ * its transitional running 409 (evidence 8) is replaced by #526 evidence 7 (the rest of the running
+ * path is session-delete-running.test.ts). "Row unchanged" = every `chat_sessions` column plus the session's message/step/approval counts
  * deep-equal before and after (`sessionState`).
  */
 import {
@@ -17,7 +18,7 @@ import {
 import { basename, isAbsolute, join, relative } from "node:path";
 import type { LightMyRequestResponse } from "fastify";
 import { describe, expect, it, vi } from "vitest";
-import { REAL, settle } from "./session-approval-helpers.js";
+import { REAL, settle, spawnedAt } from "./session-approval-helpers.js";
 import { expectEnvelope, postSessionAction } from "./session-bodyless-rest-helpers.js";
 import { INTERNAL_ERROR_ENVELOPE, UNAUTHORIZED_ENVELOPE } from "./session-db-helpers.js";
 import {
@@ -44,6 +45,11 @@ import {
   wireShape,
 } from "./session-delete-helpers.js";
 import {
+  expectStoppedTail,
+  observeDeletes,
+  presetOwnedFile,
+} from "./session-delete-running-helpers.js";
+import {
   FIRST,
   heldRegenerate,
   insertApproval,
@@ -54,11 +60,11 @@ import {
 import { HOLD, QUESTION, regenWorlds } from "./session-regenerate-helpers.js";
 import { cookieFor, postPrompt, SESSION_BUSY_ENVELOPE } from "./session-rest-helpers.js";
 import { collected, openEventStream, readUntil } from "./session-sse-helpers.js";
+import { heldTurn, openStopWorld } from "./session-stop-helpers.js";
 import {
-  completeHeldTurn,
+  assistantIdFor,
   createSession,
   OWNER_ID,
-  openHeldPromptSession,
   type RecordingWorld,
   waitForTurn,
 } from "./session-supervisor-helpers.js";
@@ -538,49 +544,39 @@ describe("DELETE and concurrent control (evidence 7)", () => {
   });
 });
 
-describe("DELETE of a running session (evidence 8)", () => {
-  it("is a transitional 409 that leaves process, rows and stream untouched", async () => {
-    const opened = await openHeldPromptSession();
-    track(opened.fixture);
-    const { app, db, supervisor } = opened.fixture;
-    const stream = await openEventStream(opened.fixture, opened.session, opened.cookie);
-    await settle();
-    const before = sessionState(db, opened.session);
-    expect(before.row).toMatchObject({ status: "running" });
-    const audits = auditRows(db);
+describe("DELETE of a running session (#526 evidence 7, supersedes the transitional 409)", () => {
+  it(
+    "stops the turn first: stopped rows before deletion, the stream sees turn.end, then 204",
+    REAL,
+    async () => {
+      const world = await openStopWorld("abort-ok");
+      track(world.fixture);
+      const { app, db, supervisor } = world.fixture;
+      await heldTurn(world);
+      const assistant = assistantIdFor(world.fixture, world.session);
+      const stream = await openEventStream(world.fixture, world.session, world.cookie);
+      stream.resume();
+      await settle();
+      expect(sessionState(db, world.session).row).toMatchObject({ status: "running" });
+      expect(supervisor.sessionStreamSubscriberCount(world.session)).toBe(1);
+      const deletes = observeDeletes(db);
+      const file = presetOwnedFile(world);
 
-    const response = await sendDelete(app, opened.session, opened.cookie);
+      expectDeleted(await sendDelete(app, world.session, world.cookie));
 
-    expectEnvelope(response, 409, SESSION_BUSY_ENVELOPE);
-    expect(isLive(opened.child)).toBe(true);
-    expect(sessionState(db, opened.session)).toEqual(before);
-    expect(stream.raw.writableEnded).toBe(false);
-    expect(supervisor.sessionStreamSubscriberCount(opened.session)).toBe(1);
-    expect(auditRows(db)).toBe(audits);
-    expect(supervisor.controlHeld(opened.session)).toBe(false);
-    // No tombstone survives the rejection: a new subscription is established, not ended.
-    const fresh = await openEventStream(opened.fixture, opened.session, opened.cookie);
-    await settle();
-    expect(fresh.raw.writableEnded).toBe(false);
-    expect(supervisor.sessionStreamSubscriberCount(opened.session)).toBe(2);
-
-    completeHeldTurn(opened.child);
-    await waitForTurn(opened.fixture, opened.session, "done");
-    await settle();
-    const again = await postPrompt(
-      app,
-      opened.session,
-      opened.cookie,
-      JSON.stringify({ message: "again" }),
-    );
-    expect(again.statusCode).toBe(202);
-    await waitForTurn(opened.fixture, opened.session, "done");
-    await settle();
-    const file = ownedFile(ownerSessionDir(opened.runtime.runtime.stateDir));
-    presetFile(db, opened.session, file);
-    expectDeleted(await sendDelete(app, opened.session, opened.cookie));
-    expect(existsSync(file)).toBe(false);
-  });
+      expect(deletes()).toEqual([
+        { id: world.session, session: "stopped", assistants: "stopped", approvals: null },
+      ]);
+      await settle();
+      expectStoppedTail(stream, assistant);
+      expect(supervisor.sessionStreamSubscriberCount(world.session)).toBe(0);
+      expect(supervisor.controlHeld(world.session)).toBe(false);
+      expect(isLive(spawnedAt(world, 0).child)).toBe(false);
+      expect(sessionState(db, world.session).row).toBeUndefined();
+      expect(existsSync(file)).toBe(false);
+      expect(world.errors).toEqual([]);
+    },
+  );
 });
 
 describe("DELETE audit shape over a full round (evidence 10)", () => {
