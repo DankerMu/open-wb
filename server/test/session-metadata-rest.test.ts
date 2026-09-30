@@ -9,23 +9,29 @@
  */
 import { Buffer } from "node:buffer";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance, LightMyRequestResponse } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
+import { emit } from "../src/core/audit/index.js";
+import { createSessionMetadataStore } from "../src/sessions/store-metadata.js";
 import { expectEnvelope } from "./session-bodyless-rest-helpers.js";
 import {
   BAD_REQUEST_ENVELOPE,
   INTERNAL_ERROR_ENVELOPE,
   NOT_FOUND_ENVELOPE,
+  UNAUTHORIZED_ENVELOPE,
 } from "./session-db-helpers.js";
-import { cookieFor } from "./session-rest-helpers.js";
+import { cookieFor, postPrompt, UNKNOWN_SESSION_ID } from "./session-rest-helpers.js";
 import {
   createRealFakeRuntime,
   OWNER_ID,
   openBareSession,
   type RealFakeRuntime,
+  requiredCall,
   type SupervisorApp,
+  waitFor,
+  waitForTurn,
 } from "./session-supervisor-helpers.js";
 
 const JSON_TYPE = "application/json";
@@ -455,5 +461,253 @@ describe("POST /api/sessions audit atomicity and visibility", () => {
     expectEnvelope(response, 500, INTERNAL_ERROR_ENVELOPE);
     expect(rowCounts(world.db)).toEqual(before);
     expect(world.rt.calls).toEqual([]);
+  });
+});
+
+/*
+ * Issue #524 PATCH /api/sessions/:id (parent tasks 4.2, design D2 "PATCH 决定"): rename, scene and
+ * pin through the same production assembly. "Row unchanged" = every `chat_sessions` column of the
+ * target plus its `chat_messages` count deep-equal before and after.
+ */
+interface PatchWorld extends World {
+  fixture: SupervisorApp;
+  session: string;
+}
+
+interface PatchRequest {
+  payload?: string;
+  contentType?: string;
+  /** null sends no cookie (anonymous). */
+  cookie?: string | null;
+}
+
+const FULL_ROW =
+  "SELECT title, status, created_at, updated_at, workspace_id, scene, pinned_at, omp_session_file, stream_epoch FROM chat_sessions WHERE id = ?";
+const VALID_TITLE: PatchRequest = {
+  payload: JSON.stringify({ title: "x" }),
+  contentType: JSON_TYPE,
+};
+const MALFORMED: PatchRequest = { payload: '{"title": ', contentType: JSON_TYPE };
+
+async function openPatchWorld(): Promise<PatchWorld> {
+  const rt = createRealFakeRuntime();
+  const { fixture, cookie, session } = await openBareSession(rt.runtime);
+  fixtures.push(fixture);
+  mkdirSync(rt.runtime.sandboxRoot, { recursive: true });
+  return { app: fixture.app, db: fixture.db, cookie, rt, fixture, session };
+}
+
+function patchRaw(world: World, id: string, request: PatchRequest = {}) {
+  const headers: Record<string, string> = {};
+  const cookie = request.cookie === undefined ? world.cookie : request.cookie;
+  if (cookie !== null) {
+    headers.cookie = cookie;
+  }
+  if (request.contentType !== undefined) {
+    headers["content-type"] = request.contentType;
+  }
+  const payload = request.payload === undefined ? {} : { payload: request.payload };
+  return world.app.inject({ method: "PATCH", url: `/api/sessions/${id}`, headers, ...payload });
+}
+
+function patchJson(world: World, id: string, value: unknown): Promise<LightMyRequestResponse> {
+  return patchRaw(world, id, { payload: JSON.stringify(value), contentType: JSON_TYPE });
+}
+
+function rowState(db: DatabaseSync, id: string) {
+  const messages = db
+    .prepare("SELECT COUNT(*) AS n FROM chat_messages WHERE session_id = ?")
+    .get(id) as { n: number };
+  return { row: db.prepare(FULL_ROW).get(id), messages: Number(messages.n) };
+}
+
+/** 200 + no-store + exactly the eight keys in wire order. */
+function expectPatched(response: LightMyRequestResponse): CreatedSession {
+  expect(response.statusCode).toBe(200);
+  expect(response.headers["cache-control"]).toBe("no-store");
+  const body = response.json() as CreatedSession;
+  expect(Object.keys(body)).toEqual([...EIGHT_KEYS]);
+  return body;
+}
+
+async function listedIds(world: World): Promise<string[]> {
+  const listed = await world.app.inject({
+    method: "GET",
+    url: "/api/sessions",
+    headers: { cookie: world.cookie },
+  });
+  return (listed.json() as { sessions: CreatedSession[] }).sessions.map((session) => session.id);
+}
+
+async function laterThan(ms: number): Promise<void> {
+  await waitFor(() => (Date.now() > ms ? true : undefined), `clock past ${String(ms)}`);
+}
+
+describe("PATCH /api/sessions/:id metadata writes", () => {
+  it("E1 rename, scene, pin, re-pin and unpin keep updatedAt, order, audit and spawns", async () => {
+    const world = await openPatchWorld();
+    const id = world.session;
+    const prompt = await postPrompt(world.app, id, world.cookie, JSON.stringify({ message: "hi" }));
+    expect(prompt.statusCode).toBe(202);
+    const done = (await waitForTurn(world.fixture, id, "done")).session;
+    await laterThan(done.updatedAt);
+    const newer = expectCreated(await postCreate(world), { scene: null, workspaceId: null });
+    expect(await listedIds(world)).toEqual([newer.id, id]);
+    const before = rowState(world.db, id);
+    const audits = rowCounts(world.db).audits;
+    const calls = world.rt.calls.length;
+
+    const renamed = expectPatched(await patchJson(world, id, { title: "  季度 汇报  " }));
+    expect(renamed).toEqual({ ...done, title: "季度 汇报" });
+    const rescened = expectPatched(await patchJson(world, id, { scene: "design" }));
+    expect(rescened).toEqual({ ...renamed, scene: "design" });
+    const pinStart = Date.now();
+    const pinned = expectPatched(await patchJson(world, id, { pinned: true }));
+    const pinEnd = Date.now();
+    expect(pinned).toEqual({ ...rescened, pinnedAt: expect.any(Number) });
+    expect(pinned.pinnedAt).toBeGreaterThanOrEqual(pinStart);
+    expect(pinned.pinnedAt).toBeLessThanOrEqual(pinEnd);
+    expect(rowState(world.db, id).row).toMatchObject({ pinned_at: pinned.pinnedAt });
+    await laterThan(pinned.pinnedAt ?? pinEnd);
+    expect(expectPatched(await patchJson(world, id, { pinned: true }))).toEqual(pinned);
+    const unpinned = expectPatched(await patchJson(world, id, { pinned: false }));
+    expect(unpinned).toEqual({ ...pinned, pinnedAt: null });
+
+    expect(rowState(world.db, id)).toEqual({
+      row: { ...(before.row as object), title: "季度 汇报", scene: "design", pinned_at: null },
+      messages: before.messages,
+    });
+    expect(await listedIds(world)).toEqual([newer.id, id]);
+    expect(rowCounts(world.db).audits).toBe(audits);
+    expect(world.rt.calls).toHaveLength(calls);
+  });
+
+  it("E3 title length is 1..80 code points after one trim", async () => {
+    const world = await openPatchWorld();
+    const id = world.session;
+    const exact = `${"😀".repeat(40)}${"a".repeat(40)}`;
+    expect(exact.length).toBe(120);
+    expect(expectPatched(await patchJson(world, id, { title: exact })).title).toBe(exact);
+    const reversed = `${"a".repeat(40)}${"😀".repeat(40)}`;
+    const padded = expectPatched(await patchJson(world, id, { title: `\u3000 ${reversed}\n\t` }));
+    expect(padded.title).toBe(reversed);
+    const before = rowState(world.db, id);
+    expect(before.row).toMatchObject({ title: reversed });
+
+    for (const title of [`${"😀".repeat(41)}${"a".repeat(40)}`, "", "   ", 123]) {
+      expectEnvelope(await patchJson(world, id, { title }), 400, BAD_REQUEST_ENVELOPE);
+    }
+    expect(rowState(world.db, id)).toEqual(before);
+  });
+});
+
+describe("PATCH /api/sessions/:id body validation", () => {
+  it("E4 every non-subset, mistyped or bodyless request is a no-store 400 with no write", async () => {
+    const world = await openPatchWorld();
+    const id = world.session;
+    const before = rowState(world.db, id);
+    const shapes: unknown[] = [
+      {},
+      { pinned: "yes" },
+      { scene: null },
+      { scene: "chat" },
+      { status: "done" },
+      { title: "a", extra: 1 },
+      { title: "ok", scene: "bad" },
+      [],
+      null,
+      "x",
+    ];
+
+    for (const shape of shapes) {
+      expectEnvelope(await patchJson(world, id, shape), 400, BAD_REQUEST_ENVELOPE);
+    }
+    expectEnvelope(await patchRaw(world, id), 400, BAD_REQUEST_ENVELOPE);
+    expect(rowState(world.db, id)).toEqual(before);
+  });
+
+  it("E5 parser failures are owned 400s; a padded body of exactly 16 KiB is accepted", async () => {
+    const world = await openPatchWorld();
+    const id = world.session;
+    const before = rowState(world.db, id);
+    const failures: PatchRequest[] = [
+      MALFORMED,
+      { payload: "", contentType: JSON_TYPE },
+      { payload: '{"title":"x"}', contentType: "text/plain" },
+      { payload: "binary", contentType: "application/octet-stream" },
+      {
+        payload: JSON.stringify({ title: "x", pad: "x".repeat(BODY_LIMIT) }),
+        contentType: JSON_TYPE,
+      },
+      { payload: paddedSceneBody(BODY_LIMIT + 1), contentType: JSON_TYPE },
+    ];
+
+    for (const request of failures) {
+      expectEnvelope(await patchRaw(world, id, request), 400, BAD_REQUEST_ENVELOPE);
+    }
+    expect(rowState(world.db, id)).toEqual(before);
+
+    const boundary = { payload: paddedSceneBody(BODY_LIMIT), contentType: JSON_TYPE };
+    expect(expectPatched(await patchRaw(world, id, boundary)).scene).toBe("code");
+  });
+});
+
+describe("PATCH /api/sessions/:id ownership and binding", () => {
+  it("E6 anonymous is 401; foreign and unknown ids are identical 404s before parsing", async () => {
+    const world = await openPatchWorld();
+    const id = world.session;
+    const other = await cookieFor(world.app, "zhaoliu");
+    const before = rowState(world.db, id);
+
+    for (const body of [VALID_TITLE, MALFORMED]) {
+      const anonymous = await patchRaw(world, id, { ...body, cookie: null });
+      expectEnvelope(anonymous, 401, UNAUTHORIZED_ENVELOPE);
+    }
+    const envelope = JSON.stringify(NOT_FOUND_ENVELOPE);
+    const expected = {
+      status: 404,
+      cacheControl: "no-store",
+      contentType: "application/json; charset=utf-8",
+      contentLength: String(Buffer.byteLength(envelope, "utf8")),
+      body: envelope,
+    };
+    for (const body of [VALID_TITLE, MALFORMED]) {
+      expect(wireShape(await patchRaw(world, id, { ...body, cookie: other }))).toEqual(expected);
+      expect(wireShape(await patchRaw(world, UNKNOWN_SESSION_ID, body))).toEqual(expected);
+    }
+    expect(rowState(world.db, id)).toEqual(before);
+  });
+
+  it("E6 the owner-scoped store update reports null for a foreign owner and a deleted row", async () => {
+    const world = await openPatchWorld();
+    const metadata = createSessionMetadataStore(world.db, { emit });
+    const before = rowState(world.db, world.session);
+
+    expect(metadata.patchSession("u2", world.session, { title: "x" })).toBeNull();
+    expect(rowState(world.db, world.session)).toEqual(before);
+    world.db.prepare("DELETE FROM chat_sessions WHERE id = ?").run(world.session);
+    expect(metadata.patchSession(OWNER_ID, world.session, { title: "x" })).toBeNull();
+  });
+
+  it("E7 workspaceId is not patchable and the next prompt still runs in the bound root", async () => {
+    const world = await openPatchWorld();
+    const workspace = await createWorkspace(world, "proj");
+    const second = await createWorkspace(world, "other");
+    const bound = expectCreated(await postJson(world, { workspaceId: workspace.id }), {
+      scene: null,
+      workspaceId: workspace.id,
+    });
+    const before = rowState(world.db, bound.id);
+
+    for (const shape of [{ workspaceId: second.id }, { title: "x", workspaceId: null }]) {
+      expectEnvelope(await patchJson(world, bound.id, shape), 400, BAD_REQUEST_ENVELOPE);
+    }
+    expect(rowState(world.db, bound.id)).toEqual(before);
+
+    const prompt = postPrompt(world.app, bound.id, world.cookie, JSON.stringify({ message: "hi" }));
+    expect((await prompt).statusCode).toBe(202);
+    await waitForTurn(world.fixture, bound.id, "done");
+    const cwd = requiredCall(world.rt.calls, 0).cwd ?? "";
+    expect(realpathSync(cwd)).toBe(realpathSync(workspace.root));
   });
 });

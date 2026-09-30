@@ -9,7 +9,7 @@ import type {
   RawServerDefault,
 } from "fastify";
 import { HttpError } from "../core/errors/index.js";
-import { registerSessionCreateRoute } from "./rest-metadata.js";
+import { registerSessionMetadataRoutes } from "./rest-metadata.js";
 import type { WorkspaceRootOf } from "./session-cwd.js";
 import type {
   ApprovalEntry,
@@ -164,9 +164,10 @@ export function registerSessionRoutes(
       sessions: dependencies.store.list(principal.id).map(toPublicSession),
     };
   });
-  registerSessionCreateRoute(app, {
+  registerSessionMetadataRoutes(app, {
     metadata: dependencies.metadata,
     workspaceRootOf: dependencies.workspaceRootOf,
+    store: dependencies.store,
   });
   app.get<{ Params: SessionIdParams }>(
     "/api/sessions/:id/messages",

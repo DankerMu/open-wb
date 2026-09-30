@@ -39,7 +39,7 @@ export type FinishStatus = "done" | "failed" | "stopped";
 
 type SessionScene = "office" | "code" | "design";
 
-interface SessionView {
+export interface SessionView {
   id: string;
   title: string | null;
   status: SessionStatus;
@@ -160,6 +160,8 @@ export interface SessionStore {
   getMessages(sessionId: string, ownerId: string): SessionMessageTree | null;
   acceptPrompt(sessionId: string, ownerId: string, text: string): AcceptedPrompt;
   rollbackPrompt(assistantMessageId: number): boolean;
+  /** A metadata PATCH wrote the title: an in-flight admission's rollback keeps it (no-op if idle). */
+  noteTitleWrite(sessionId: string): void;
   /** Regenerate CAS + Turn registration (#465); session_busy on a CAS miss. The new assistant id. */
   acceptRegenerate(sessionId: string, expectedAssistantId: number, sessionFile: string): number;
   /** Fork CAS + insert + copy (#466); session_busy on a CAS miss. The new session's view. */
@@ -190,7 +192,7 @@ export interface SessionStore {
   close(): void;
 }
 
-type SessionDbRow = {
+export type SessionDbRow = {
   id: string;
   owner_id: string;
   title: Uint8Array | null;
@@ -224,6 +226,7 @@ export type Turn = {
   pending: string[];
   pendingBytes: number;
   progress: boolean;
+  titleTouched: boolean;
   timer: NodeJS.Timeout | undefined;
   timerGeneration: number;
   faulted: boolean;
@@ -233,7 +236,7 @@ export type Turn = {
 
 const FLUSH_BYTES = 2_048;
 const FLUSH_MS = 2_000;
-const SESSION_COLUMNS =
+export const SESSION_COLUMNS =
   "id, owner_id, CAST(title AS BLOB) AS title, status, CAST(omp_session_file AS BLOB) AS omp_session_file, stream_epoch, created_at, updated_at, workspace_id, scene, pinned_at";
 const INSERT_SESSION =
   "INSERT INTO chat_sessions(id, owner_id, title, status, created_at, updated_at) VALUES (?, ?, NULL, 'idle', ?, ?)";
@@ -415,6 +418,8 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
       if (turn.progress) {
         throw new Error("cannot roll back a progressed prompt");
       }
+      // Only this admission's own prefix goes back to NULL; a PATCHed or pre-existing title stays.
+      const restoreTitle = turn.previousTitle === null && !turn.titleTouched;
       runOwnedTransaction(db, "prompt rollback compensation failed", () => {
         requireChanges(
           db
@@ -432,8 +437,10 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
         );
         requireChanges(
           db
-            .prepare("UPDATE chat_sessions SET status = ?, title = ?, updated_at = ? WHERE id = ?")
-            .run(turn.previousStatus, turn.previousTitle, turn.previousUpdatedAt, turn.sessionId)
+            .prepare(
+              "UPDATE chat_sessions SET status = ?, updated_at = ?, title = CASE WHEN ? THEN NULL ELSE title END WHERE id = ?",
+            )
+            .run(turn.previousStatus, turn.previousUpdatedAt, restoreTitle ? 1 : 0, turn.sessionId)
             .changes,
           1,
           "session rollback restore",
@@ -441,6 +448,15 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
       });
       releaseTurn(turn, activeTurns, activeSessions, activeSteps);
       return true;
+    },
+
+    noteTitleWrite(sessionId) {
+      const assistantMessageId = activeSessions.get(sessionId);
+      const turn =
+        assistantMessageId === undefined ? undefined : activeTurns.get(assistantMessageId);
+      if (turn !== undefined) {
+        turn.titleTouched = true;
+      }
     },
 
     // Trusted supervisor write: callers own session existence; missing row = receipt error.
@@ -646,7 +662,7 @@ function assertOpen(closed: boolean): void {
   }
 }
 
-function toSessionView(row: SessionDbRow, decoder: TextDecoder): SessionView {
+export function toSessionView(row: SessionDbRow, decoder: TextDecoder): SessionView {
   return {
     id: row.id,
     title: decodeNullableText(decoder, row.title),
@@ -670,6 +686,7 @@ function openTurn(
     pending: [],
     pendingBytes: 0,
     progress,
+    titleTouched: false,
     timer: undefined,
     timerGeneration: 0,
     faulted: false,
