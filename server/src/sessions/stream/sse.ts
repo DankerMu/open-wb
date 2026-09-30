@@ -159,16 +159,23 @@ function attachEventStream(
     return;
   }
 
-  const subscription = options.supervisor.subscribe(sessionId, lastEventId, (event) => {
-    if (connection.logicalClosed) {
-      return;
-    }
-    if (connection.phase === "replay" || connection.paused) {
+  const subscription = options.supervisor.subscribe(
+    sessionId,
+    lastEventId,
+    (event) => {
+      if (connection.logicalClosed) {
+        return;
+      }
+      if (connection.phase === "replay" || connection.paused) {
+        endOwned(connection, options.clock);
+        return;
+      }
+      writeLive(connection, event, options.clock);
+    },
+    () => {
       endOwned(connection, options.clock);
-      return;
-    }
-    writeLive(connection, event, options.clock);
-  });
+    },
+  );
   const releaseTransport = connection.unsubscribe;
   connection.unsubscribe = () => {
     releaseTransport();

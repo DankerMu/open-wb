@@ -144,7 +144,12 @@ describe("approval events are ordinary ring events", () => {
     const stream = await openEventStream(world.fixture, world.session, world.cookie, "3:1");
     const frames = await readFrames(stream, "turn.end");
 
-    expect(world.subscribe).toHaveBeenCalledWith(world.session, "3:1", expect.any(Function));
+    expect(world.subscribe).toHaveBeenCalledWith(
+      world.session,
+      "3:1",
+      expect.any(Function),
+      expect.any(Function),
+    );
     expect(frames).toEqual([
       {
         id: "3:2",
@@ -169,7 +174,12 @@ describe("approval events are ordinary ring events", () => {
     const stream = await openEventStream(world.fixture, world.session, world.cookie);
     const replayed = await readFrames(stream, "approval.request");
 
-    expect(world.subscribe).toHaveBeenCalledWith(world.session, null, expect.any(Function));
+    expect(world.subscribe).toHaveBeenCalledWith(
+      world.session,
+      null,
+      expect.any(Function),
+      expect.any(Function),
+    );
     expect(replayed).toEqual([
       { id: "3:1", event: "turn.start", data: { messageId: 1 } },
       {
