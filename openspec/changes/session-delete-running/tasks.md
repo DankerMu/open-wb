@@ -9,8 +9,8 @@
 | Pack | Selected | 理由 → 证据 |
 |---|---|---|
 | Public API / CLI / script entry | yes | DELETE running：停止后 204、失败 5xx → 证据 1、2、4、6 |
-| Concurrency / shared state / ordering | yes | 占用下 stop、并发 stop 汇合、(a)/(b) 等待、pump 排空后才封存 → 证据 1、3、4、5 |
-| Error handling / rollback / partial outputs | yes | 终态落库失败 5xx、获取失败补偿、faulted 不挂起 → 证据 4、6、8 |
+| Concurrency / shared state / ordering | yes | 占用下 stop、并发 stop 汇合、(a)/(b) 等待、pump 排空后才封存 → 证据 1、3、4、5、10 |
+| Error handling / rollback / partial outputs | yes | 终态落库失败 5xx、获取失败补偿、孤儿回合与 faulted 不挂起 → 证据 4、6、8、9 |
 | Legacy compatibility / examples | yes | retire 与 stop/admission 既有行为不变 → 证据 7 |
 | Auth / permissions / secrets | no | 鉴权沿用 4.3b，未改 |
 | File IO / path safety / overwrite | no | unlink 与校验沿用 4.3b，未改 |
