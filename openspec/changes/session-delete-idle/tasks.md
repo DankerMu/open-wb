@@ -12,7 +12,7 @@
 | Auth / permissions / secrets | yes | owner 预检先于 supervisor、审计可见规则、跨 uid unlink → 证据 1、2、10、11 |
 | Concurrency / shared state / ordering | yes | 控制占用、墓碑窗口、retire 期间并发请求 → 证据 5、6、7、8 |
 | Error handling / rollback / partial outputs | yes | 删除事务/审计失败整体回滚、占用与墓碑释放、unlink 失败上报 → 证据 6、9 |
-| File IO / path safety / overwrite | yes | 提交后 unlink、ENOENT、非 ENOENT、跨 uid → 证据 2、3、9、11 |
+| File IO / path safety / overwrite | yes | 提交后 unlink、unlink 前路径校验、ENOENT、非 ENOENT、跨 uid → 证据 2、3、9、11、13 |
 | Legacy compatibility / examples | yes | 既有路由与测试冻结、`#translate` 移出映射不变 → 证据 12 |
 | Resource limits / large input / discovery | no | 不设 bodyLimit（非归属，默认 1 MiB → 通用 500，证据 4 覆盖 malformed） |
 | Schema / columns / units / field names | no | 外键与列由 032/034/035 提供 |

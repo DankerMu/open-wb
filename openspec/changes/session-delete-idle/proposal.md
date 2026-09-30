@@ -33,7 +33,8 @@ Evidence floor: 新建 `server/test/session-delete.test.ts` 覆盖 design「Requ
   2. issue 写「`session-delete.ts` 导出 `isDeleting(sessionId)`」；为避免模块级可变全局（同进程多 app、测试间串扰），墓碑集随 deleter 实例创建，`isDeleting` 为实例方法，经 `registerSessionEventStream` 的必填选项注入 sse.ts。
   3. issue 把「无活跃回合内存态」检查放在 store `deleteSession` 内；改在 `session-delete.ts` 于删除事务调用前经 `store.runtimeState(id).activeTurn` 完成（同一同步段、紧邻事务），免于把 SessionStore 注入 metadata store。
   4. issue/tasks 原文为「登记占用后加入墓碑，running → 409 时释放占用与墓碑」；本刀在 running 检查通过后才加入墓碑（与 spec 第 3 步「自本步开始」一致），running 的 409 只需释放占用，外部不可观察差异。
-  5. `index.ts` 之外，`server/test/session-rest-helpers.ts:60` 的独立路由 harness 需接线一处（路由依赖新增 `deleter`），与 #523 先例相同；既有测试断言零改动。
+  5. 父 delta「会话删除」第 5 步直接 unlink `omp_session_file`；该值由 omp 上报、写入时未经校验，app uid 直接 unlink 违反「沙箱外写/删一律拒绝」（PR #691 review P1）。本刀在 spec 第 5 步加 unlink 前校验（绝对路径、目录 realpath 为所有者会话目录、lstat 普通文件；否则不删、上报、仍 204）与 Scenario「会话文件路径不在所有者会话目录内」；父 change 归档前 rebase 须同步。为取得会话目录的单一来源，`omp/process.ts` 导出 `ompSessionDir`。
+  6. `index.ts` 之外，`server/test/session-rest-helpers.ts:60` 的独立路由 harness 需接线一处（路由依赖新增 `deleter`），与 #523 先例相同；既有测试断言零改动。
 - 依赖：#516（4.3a）、#523/#524（4.1/4.2）、#518（6.1 fake `thinking`）、A #467/#473 均已合并。
 
 ## Non-goals

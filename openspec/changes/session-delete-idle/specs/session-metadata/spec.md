@@ -6,7 +6,7 @@
 2. 若会话 `status="running"`：SHALL 409 `session_busy`，释放第 1 步登记的控制占用，无任何其它副作用（不结算审批、不写帧、不 retire、不写行、不写审计）。这是运行中删除的过渡行为；停止后删除的路径由后续变更定义并替换本步。
 3. 调用 supervisor 公开的 `retire(sessionId)`：存活进程经既有有界 retire 序列退出（token 撤销、名额释放），该会话的 slot 与事件环丢弃，所有 SSE 订阅者的响应结束且不再收到事件。自本步开始至本次调用结束（删除墓碑期，含 retire 完成与第 4 步删行之间的窗口），已通过 owner 预检的新事件流订阅 SHALL 立即结束且不写任何事件；第 4 步失败时墓碑随控制占用一同解除，此后订阅恢复既有行为。
 4. 单个 SQLite 事务：读取 `omp_session_file` 与该会话消息数，删除会话行——消息、步骤、审批随外键级联删除，以其为源的 fork 会话 `parent_session_id` 由外键置 NULL 且这些会话保留——并在同一事务写一条 `session.delete` 审计；审计失败则整个事务回滚。store SHALL 在删除时确认该会话无活跃回合/缓冲/步骤内存状态（此时应已结算；若仍存在视为不变量破坏，通用失败且不删除）。
-5. 若第 4 步读到的 `omp_session_file` 非 NULL，SHALL unlink 该文件：`ENOENT` 视为成功；其它错误经服务错误通道报告，响应仍为 204（行已删除，残留文件不影响任何会话）。regenerate/fork 产生的旧分支 `.jsonl` 不在清理范围内。
+5. 若第 4 步读到的 `omp_session_file` 非 NULL：该值由 omp 上报、写入时未经宿主校验，故宿主 SHALL 仅在它是绝对路径、其所在目录的 realpath 等于该会话所有者的 omp 会话目录（`<OMP_STATE_DIR>/sessions/<ownerId>`）的 realpath、且它本身（`lstat`，不跟随符号链接）是普通文件时才 unlink；不满足任一条件 SHALL NOT unlink 任何路径，并经服务错误通道报告。`ENOENT`（校验或 unlink 时已不存在）视为成功；其它错误经服务错误通道报告。以上任何情况响应仍为 204（行已删除，残留文件不影响任何会话），错误通道自身的失败也不改变该响应。regenerate/fork 产生的旧分支 `.jsonl` 不在清理范围内。
 6. 返回 204。
 
 第 3–4 步失败（例如删除事务的存储错误）SHALL 返回通用 5xx，会话行保持存在（进程可能已被退役，下次 prompt 按既有 `--resume` 懒获取）。删除完成后该 id 的 `GET /api/sessions/:id/messages`、事件流订阅、PATCH、DELETE SHALL 与未知 id 相同地 404，`GET /api/sessions` 不再列出它；其它会话的进程、行与订阅不受影响。
@@ -32,6 +32,10 @@
 #### Scenario: 会话文件缺失与从未派发
 - **WHEN** owner 删除 `omp_session_file` 指向的文件已不存在的会话，以及一个从未 prompt 过（`omp_session_file` 为 NULL、无进程）的会话
 - **THEN** 两者均 204、行被删除、审计各一条（后者 `ompSessionFile=null`、`messageCount=0`），无错误报告
+
+#### Scenario: 会话文件路径不在所有者会话目录内
+- **WHEN** 被删会话的 `omp_session_file` 分别为所有者会话目录之外的一个已存在文件、一个相对路径、会话目录内指向目录外文件的符号链接
+- **THEN** 三者均 204、行被删除、审计各一条；目录外文件、符号链接及其目标都仍存在；每次经服务错误通道恰报告一次
 
 #### Scenario: 删除事务失败保留会话
 - **WHEN** 测试令删除事务中的审计写入失败
