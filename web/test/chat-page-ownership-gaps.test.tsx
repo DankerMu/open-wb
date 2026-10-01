@@ -34,10 +34,9 @@ afterEach(() => {
 });
 
 function listTitles(list: HTMLElement) {
-  return within(list)
-    .getAllByRole("button")
-    .filter((button) => button.getAttribute("aria-label") !== null)
-    .map((button) => button.getAttribute("aria-label"));
+  return Array.from(list.querySelectorAll("button.chat-session-button")).map((button) =>
+    button.getAttribute("aria-label"),
+  );
 }
 
 async function expectListTitles(list: HTMLElement, titles: string[]) {

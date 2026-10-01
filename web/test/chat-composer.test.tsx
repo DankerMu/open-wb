@@ -199,7 +199,7 @@ describe("(C5) static contract", () => {
   });
 
   it("session nav maps session status through SESSION_STATUS_LABEL", () => {
-    const source = readRepoFile("web/src/features/chat/session-nav.tsx");
+    const source = readRepoFile("web/src/features/chat/session-sidebar.tsx");
     expect(source).not.toMatch(/>\s*\{session\.status\}\s*</);
     expect(source).toContain("SESSION_STATUS_LABEL");
     expect(source).toContain("ui-pulse");

@@ -59,18 +59,19 @@ nav[aria-label="会话列表"].chat-session-nav
   p.chat-session-loading[role="status"]         ← 「正在读取会话」
   p.chat-session-empty「没有匹配的任务」          ← sessions 已读取且筛选后为空
   div.chat-session-groups                        ← 唯一滚动容器；筛选后非空时渲染
-    div[role="group"][aria-labelledby]  置顶任务 → ul.chat-session-list
-    div[role="group"][aria-labelledby]  任务 (n) → ul.chat-session-list
-    div[role="group"][aria-labelledby]  空间 (n)
-      div[role="group"][aria-labelledby]  <空间名>|未知空间 → ul.chat-session-list
+    fieldset[aria-labelledby]  置顶任务 → ul.chat-session-list
+    fieldset[aria-labelledby]  任务 (n) → ul.chat-session-list
+    fieldset[aria-labelledby]  空间 (n)
+      fieldset[aria-labelledby]  <空间名>|未知空间 → ul.chat-session-list
 ```
 - 条目结构与 `session-nav.tsx` 的 `SessionEntries` 逐字相同（`li.chat-session-item` > `button.chat-session-button`、`aria-current`、`aria-label` 为标题、`role="status"` 状态元素与 `SESSION_STATUS_LABEL`/`ui-pulse`），留在本文件内（`chat-composer.test.tsx:202` 读本文件源码断言这三处）。
+- 分区/子组用 `<fieldset>`（隐式 `role="group"`，同 `approval-bar.tsx`）：Biome `lint/a11y/useSemanticElements` 不接受 `div[role="group"]`；CSS 把 fieldset 复位成普通块（含 `min-inline-size: 0`，否则长标题撑破省略）。
 - 分区/子组的 accessible name 来自可见标签元素（`aria-labelledby`，id 用 `useId`），所以名称恰为 `置顶任务`、`任务 (2)`、`空间 (2)`、空间名。
 - 渲染时 `filterSessions(sessions, filter, Date.now())` 再 `groupSessions(…)`；不 memo、不设定时器。
 - props：`listError`、`listLoading`、`sessions`、`requestedSessionId`、`onCreateSession`、`onSelectSession`、`filter`、`onFilterChange`、`workspaces`。
 
 ### D5 `session-filter.tsx`
-`Popover`（非受控，`contentLabel="筛选任务"`），trigger 为 ghost 图标 `Button`（`aria-label="筛选任务"`、`title="筛选任务"`（demo:1787 的 title）、`Icon filter`）。content：可见小标题 `状态` + `SegmentedControl label="状态"`（`全部`/`进行中`/`已完成`），可见小标题 `时间` + `SegmentedControl label="时间"`（`全部时间`/`今天`/`更早`）；`onValueChange` 直接回调 `onChange({ ...value, status|time })`，不关闭弹层。本文件不写键盘、焦点或关闭处理代码，全部来自两个基元。不套 `Tooltip`（`Popover` 的 trigger 必须是能接 ref 的单一元素，基元 `Tooltip` 不转发）。
+`Popover`（非受控，`contentLabel="筛选任务"`），trigger 为 ghost 图标 `Button`（类 `chat-session-filter-trigger`、`aria-label="筛选任务"`、`title="筛选任务"`（demo:1787 的 title）、`Icon filter`）。content：可见小标题 `状态` + `SegmentedControl label="状态"`（`全部`/`进行中`/`已完成`），可见小标题 `时间` + `SegmentedControl label="时间"`（`全部时间`/`今天`/`更早`）；`onValueChange` 直接回调 `onChange({ ...value, status|time })`，不关闭弹层。本文件不写键盘、焦点或关闭处理代码，全部来自两个基元。不套 `Tooltip`（`Popover` 的 trigger 必须是能接 ref 的单一元素，基元 `Tooltip` 不转发）。
 
 ### D6 样式（`chat.css`）
 `.chat-session-nav` 规则不动（仍无 `overflow`）。`.chat-session-list` 去掉 `flex: 1`/`min-height`/`overflow-*`，这三项与覆盖层的 `flex: none` 规则移到 `.chat-session-groups`。新增 `.chat-session-toolbar`（一行：`新建会话` 占满余宽、筛选按钮不收缩；`.chat-new-session` 的 `width: 100%` 改为 `flex: 1; min-width: 0`）、分区标签（demo:275 `.sidebar-section-label`：11px、次要文字色）、子组标签左缩进 8px（demo:1889）、`.chat-session-empty`。只用既有 token。
@@ -116,7 +117,7 @@ nav[aria-label="会话列表"].chat-session-nav
 
 实现前后各跑一次并记录：RED 集合 = G1–G5、S1–S10、S12；S11 实现前即绿。
 
-一次性真实浏览器观察（不入库，结果写进 PR 与 #715）：390×844 打开导航覆盖层 → `筛选任务`，记录单选项是否可见、`document.elementFromPoint` 是否命中；1440×900 同一操作作对照。
+一次性真实浏览器观察（不入库，结果写进 PR 与 #715）：390×844 打开导航覆盖层 → `筛选任务`，记录单选项是否可见、`document.elementFromPoint` 是否命中；1440×900 同一操作作对照。结果（Chromium，`vite build` 产物 + 路由级 mock API）：1440×900 命中单选项、点击生效、分区为 `置顶任务`/`任务 (1)`/`空间 (2)`（`项目A`、`未知空间`）、无横向滚动；390×844 `elementFromPoint` 命中的是 Drawer 内的会话条目而非单选项、点击超时（弹层与包装层 z-index 1300，Drawer 1360、遮罩 1350）——残留 1 属实。
 
 ## 已知残留
 1. **`≤760px` 覆盖层内弹层被遮挡（#715）**：`.ui-popover` z-index 1300（`web/src/ui/popover.css:5`，ui-primitives「基元组件库」与 `ui-popover-tooltip.test.tsx:218` 钉住）低于 `.ui-drawer-overlay` 1350 / `.ui-drawer` 1360（`web/src/ui/dialog.css:90`、`:99`）。弹层 portal 到 `body`，所以在导航覆盖层内打开的筛选弹层画在遮罩之下。jsdom 不计算层叠，S8 看不到；8.2a/8.2b 不在 `mobile-dark` 打开筛选，ui-walk 也不会报。修法属 ui-primitives（改层级或给 `Popover` 加 `container`），不在本刀的文件边界内；`≥761px` 不受影响。
