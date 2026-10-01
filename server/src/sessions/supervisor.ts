@@ -94,6 +94,8 @@ export interface SessionSupervisorOptions {
   onEvent?: (sessionId: string, epoch: number, event: ChatEvent<number>) => void;
   /** Synchronous handshake-timeout record sink, never an onError fault; omitted → discarded. */
   log?: SpawnLog;
+  /** The platform skills right now, for the branch-family command check (branching.ts). */
+  skills: () => readonly { name: string }[];
 }
 
 interface FlushFailure {
@@ -179,6 +181,7 @@ export class SessionSupervisor {
         return this.#bindDispatch(slot, text, assistantMessageId);
       },
       settled: (settled) => this.#approvals.settled(settled),
+      skills: options.skills,
     });
     this.#forks = new Forks({
       store: this.#store,
@@ -193,6 +196,7 @@ export class SessionSupervisor {
         const slot = this.#slots.get(sessionId);
         return slot === undefined ? Promise.resolve() : this.#retireSlot(slot);
       },
+      skills: options.skills,
     });
   }
 

@@ -10,6 +10,7 @@ import { registerSessionRoutes } from "./rest.js";
 import { registerCommandRoutes } from "./rest-commands.js";
 import type { WorkspaceRootOf } from "./session-cwd.js";
 import { createSessionDeleter } from "./session-delete.js";
+import { listSkills } from "./slash-commands.js";
 import { createSessionStore, type SessionStore } from "./store.js";
 import { createSessionMetadataStore } from "./store-metadata.js";
 import { defaultSessionClock, registerSessionEventStream } from "./stream/sse.js";
@@ -64,6 +65,7 @@ export function registerSessions(
     runtime: options.runtime,
     workspaceRootOf: options.workspaceRootOf,
     onError: options.onError,
+    skills: () => listSkills(options.agentDir),
     ...(options.onEvent === undefined ? {} : { onEvent: options.onEvent }),
     ...(options.log === undefined ? {} : { log: options.log }),
   });
