@@ -6,6 +6,7 @@
  * the snapshot projection). The merge buffer's timer is the only 2000 ms timer on the injected
  * clock (idle 10000 ms, stop grace 8000 ms, text flush on real timers).
  */
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ChatEvent } from "../src/sessions/events.js";
@@ -21,6 +22,7 @@ import {
   waitForEvent,
 } from "./session-approval-helpers.js";
 import { openEventStream, readUntil } from "./session-sse-helpers.js";
+import { messageRow, messageRows, sessionRow, sessionRows } from "./session-store-helpers.js";
 import {
   assistantIdFor,
   closeAfterRetainedFault,
@@ -95,13 +97,25 @@ async function openWorld(
   return { ...world, clock: runtime.clock, bufferTimers };
 }
 
-/** fake-omp `scenario` with `extraArgs` appended to every spawn's argv. */
-function fakeRuntime(scenario: string | undefined, extraArgs: string[] = []): RuntimeOptions {
+/** fake-omp `scenario` with `extraArgs` appended to every spawn's argv; `spawned` collects them. */
+function fakeRuntime(
+  scenario: string | undefined,
+  extraArgs: string[] = [],
+  spawned: ChildProcessWithoutNullStreams[] = [],
+): RuntimeOptions {
   const { runtime } = createRealFakeRuntime(scenario);
   const inner: SpawnImpl = runtime.spawnImpl;
-  runtime.spawnImpl = (command, args, options) => inner(command, [...args, ...extraArgs], options);
+  runtime.spawnImpl = (command, args, options) => {
+    const child = inner(command, [...args, ...extraArgs], options);
+    spawned.push(child);
+    return child;
+  };
   return runtime;
 }
+
+const REJECT_THINKING = `CREATE TEMP TRIGGER reject_thinking
+  BEFORE UPDATE OF thinking ON chat_messages
+  BEGIN SELECT RAISE(ABORT, '${SENTINEL}'); END`;
 
 /** The raw column, not the snapshot projection. */
 function thinkingColumn(db: DatabaseSync, messageId: number): string | null {
@@ -255,12 +269,17 @@ describe("S3 cap", () => {
   it("past 32768 code points exactly one marked thinking.delta ends the message's thinking", {
     timeout: 60_000,
   }, async () => {
-    const world = await openWorld(fakeRuntime("thinking", ["--thinking-repeat", "2185"]));
+    // 6900 deltas of 5 code points / 15 bytes: a byte-threshold flush every 137 deltas (685 code
+    // points). The 48th crosses the cap (32880 > 32768); the 49th and 50th and the closing flush
+    // of the last 50 deltas find the column capped and publish nothing.
+    const world = await openWorld(fakeRuntime("thinking", ["--thinking-repeat", "2300"]));
     await prompted(world);
     await waitForTurn(world.fixture, world.session, "done");
 
     const assistant = assistantIdFor(world.fixture, world.session);
     const published = thinkingDeltas(world);
+    expect(published).toHaveLength(48);
+    expect(published).not.toContain("");
     const marked = published.filter((delta) => delta.endsWith(MARK));
     expect(marked).toHaveLength(1);
     expect(published.at(-1)).toBe(marked[0]);
@@ -269,6 +288,8 @@ describe("S3 cap", () => {
     expect([...(column ?? "")].length).toBe(CAP + [...MARK].length);
     expect(column?.startsWith(THOUGHT.repeat(Math.floor(CAP / [...THOUGHT].length)))).toBe(true);
     expect(world.fixture.supervisor.streamCursor(world.session).seq).toBe(events(world).length);
+    // turn.start, 48 thinking.delta, three text.delta, turn.end.
+    expect(events(world)).toHaveLength(53);
     expect(world.errors).toEqual([]);
   });
 });
@@ -293,6 +314,33 @@ describe("S4 flush before the terminal", () => {
     expect(world.bufferTimers()).toBe(0);
     expect(world.errors).toEqual([]);
   });
+
+  it(
+    "a held buffer is published and saved before the failure events of a crash",
+    REAL,
+    async () => {
+      const spawned: ChildProcessWithoutNullStreams[] = [];
+      const world = await openWorld(fakeRuntime("thinking", ["--hold-after-thinking"], spawned));
+      await prompted(world);
+      await waitForBufferTimer(world);
+      const assistant = assistantIdFor(world.fixture, world.session);
+      expect(events(world)).toEqual([{ type: "turn.start", data: { messageId: assistant } }]);
+      expect(thinkingColumn(world.fixture.db, assistant)).toBeNull();
+
+      expect(spawned).toHaveLength(1);
+      expect(spawned[0]?.kill("SIGKILL")).toBe(true);
+      await waitForTurn(world.fixture, world.session, "failed");
+      expect(types(world)).toEqual(["turn.start", "thinking.delta", "error", "turn.end"]);
+      expect(thinkingDeltas(world)).toEqual([THOUGHT]);
+      expect(events(world).at(-1)).toEqual({
+        type: "turn.end",
+        data: { messageId: assistant, status: "failed" },
+      });
+      expect(thinkingColumn(world.fixture.db, assistant)).toBe(THOUGHT);
+      expect(world.bufferTimers()).toBe(0);
+      expect(world.errors).toEqual([]);
+    },
+  );
 });
 
 describe("S5 persistence failure", () => {
@@ -304,9 +352,7 @@ describe("S5 persistence failure", () => {
         fakeRuntime("thinking", ["--hold-after-thinking"]),
         {
           prepare(db) {
-            db.exec(`CREATE TEMP TRIGGER reject_thinking
-            BEFORE UPDATE OF thinking ON chat_messages
-            BEGIN SELECT RAISE(ABORT, '${SENTINEL}'); END`);
+            db.exec(REJECT_THINKING);
           },
         },
         true,
@@ -331,6 +377,52 @@ describe("S5 persistence failure", () => {
       expect(thinkingDeltas(world)).toEqual([]);
       expect(thinkingColumn(world.fixture.db, assistant)).toBeNull();
       stream.abort();
+    },
+  );
+
+  it(
+    "a failing flush before turn.end leaves the turn running: no terminal is stored or published",
+    REAL,
+    async () => {
+      let db: DatabaseSync | undefined;
+      /** Message and session status read inside the error sink, the instant the flush failed. */
+      const atFault: Array<{ message: string; session: string }> = [];
+      const world = await openWorld(
+        fakeRuntime("thinking", ["--hold-after-thinking"]),
+        {
+          prepare(opened) {
+            db = opened;
+            opened.exec(REJECT_THINKING);
+          },
+          onError(error) {
+            if (db !== undefined && containsMessage(error, SENTINEL)) {
+              const session = sessionRows(db)[0];
+              const message = messageRows(db).find((row) => row.role === "assistant");
+              atFault.push({ message: String(message?.status), session: String(session?.status) });
+            }
+          },
+        },
+        true,
+      );
+      await prompted(world);
+      await waitForBufferTimer(world);
+      const assistant = assistantIdFor(world.fixture, world.session);
+      const started = [{ type: "turn.start", data: { messageId: assistant } }];
+      expect(events(world)).toEqual(started);
+
+      expect(await ownerPost(world, "stop")).toBe(202);
+      await waitFor(
+        () => (world.errors.some((error) => containsMessage(error, SENTINEL)) ? true : undefined),
+        "thinking write sentinel in the error sink",
+      );
+      expect(atFault).toEqual([{ message: "running", session: "running" }]);
+
+      await settle();
+      expect(events(world)).toEqual(started);
+      expect(thinkingColumn(world.fixture.db, assistant)).toBeNull();
+      expect(messageRow(world.fixture.db, assistant).status).toBe("running");
+      expect(sessionRow(world.fixture.db, world.session).status).toBe("running");
+      expect(world.bufferTimers()).toBe(0);
     },
   );
 });

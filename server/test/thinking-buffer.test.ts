@@ -207,6 +207,30 @@ describe("M3 explicit flush", () => {
     expect(world.column()).toBe("abc");
   });
 
+  it("a flush after the column is capped calls append, publishes nothing and returns true", () => {
+    const world = openBufferWorld();
+    const full = "想".repeat(CAP);
+    expect(appendThinking(world.db, world.messageId, full)).toBe(full);
+    expect(appendThinking(world.db, world.messageId, "x")).toBe(MARK);
+    const capped = `${full}${MARK}`;
+    expect(world.column()).toBe(capped);
+
+    expect(add(world, "后")).toBe(true);
+    expect(world.buffers.flush(world.slot)).toBe(true);
+    expect(world.appends).toEqual(["后"]);
+    expect(world.published).toEqual([]);
+    expect(world.column()).toBe(capped);
+    expect(world.clock.pending()).toBe(0);
+
+    // The byte-threshold flush takes the same path.
+    const chunk = "b".repeat(2048);
+    expect(add(world, chunk)).toBe(true);
+    expect(world.appends).toEqual(["后", chunk]);
+    expect(world.published).toEqual([]);
+    expect(world.faults).toEqual([]);
+    expect(world.column()).toBe(capped);
+  });
+
   it("returns the publish port's false", () => {
     const { db, messageId } = openMessageDb();
     const buffers = new ThinkingBuffers({
@@ -227,7 +251,10 @@ describe("M3 explicit flush", () => {
 describe("M4 appendThinking cap", () => {
   it("40000 code points cut at an astral character keep 32768 whole code points plus the mark", () => {
     const { db, messageId } = openMessageDb();
-    const head = "思".repeat(CAP - 1);
+    // Astral characters below the cap: counting the stored text in UTF-16 units would already
+    // read it as over the cap and store nothing more.
+    const head = `${"😀".repeat(100)}${"思".repeat(CAP - 101)}`;
+    expect(head.length).toBe(CAP + 99);
     const tail = `${"😀".repeat(3)}${"b".repeat(40_000 - CAP - 2)}`;
     expect(points(head) + points(tail)).toBe(40_000);
 
@@ -246,7 +273,8 @@ describe("M4 appendThinking cap", () => {
 
   it("exactly 32768 code points stay whole; the next chunk writes only the mark, then nothing", () => {
     const { db, messageId } = openMessageDb();
-    const half = "想".repeat(CAP / 2);
+    const half = `😀${"想".repeat(CAP / 2 - 1)}`;
+    expect(points(half)).toBe(CAP / 2);
     expect(appendThinking(db, messageId, half)).toBe(half);
     expect(appendThinking(db, messageId, half)).toBe(half);
     expect(thinkingOf(db, messageId)).toBe(half + half);

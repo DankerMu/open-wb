@@ -654,11 +654,17 @@ export class SessionSupervisor {
     generation: Generation | undefined,
   ): Promise<boolean> {
     for (const event of events) {
-      // Taken before persistEvent: merged, stored and published by the slot's thinking buffer.
-      if (event.type === "thinking.delta") {
-        if (!this.#thinking.add(slot, generation, assistantMessageId, event.data.delta)) {
-          return false;
-        }
+      // thinking.delta never reaches persistEvent: the slot's buffer merges, stores and publishes
+      // it. Any other event flushes that buffer before it is persisted, so a failing flush cannot
+      // leave a stored terminal the ring never gets.
+      const thinking = event.type === "thinking.delta";
+      const buffered = thinking
+        ? this.#thinking.add(slot, generation, assistantMessageId, event.data.delta)
+        : this.#thinking.flush(slot);
+      if (!buffered) {
+        return false;
+      }
+      if (thinking) {
         continue;
       }
       try {
@@ -690,7 +696,8 @@ export class SessionSupervisor {
   /**
    * Every non-thinking publication: the slot's buffered thinking is flushed first, in the same
    * synchronous segment as this event's ring push (no await between them), so a timer or a REST
-   * settlement cannot interleave and the ring keeps the upstream arrival order.
+   * settlement cannot interleave and the ring keeps the upstream arrival order. A no-op on
+   * the pump path (#commit already flushed); the approval publications rely on it.
    */
   async #publish(
     slot: Slot,
