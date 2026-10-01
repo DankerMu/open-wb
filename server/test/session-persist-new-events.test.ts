@@ -1,26 +1,15 @@
 /**
- * Issue #514 publication gate: until the thinking (3.3) and file-change (3.4) supervisor slices
- * land, `persistEvent` neither stores nor publishes `thinking.delta` / `files.changed`, so they
- * consume no ring sequence and write no row. Real subprocess uses the fake-omp `thinking`
- * scenario (frame shapes checked against omp v18.0.10).
+ * Issue #514 publication gate: `persistEvent` neither stores nor publishes `thinking.delta` /
+ * `files.changed`. Since #519 the supervisor takes `thinking.delta` into its merge buffer before
+ * `persistEvent` (covered by session-thinking.test.ts); `files.changed` stays unpublished until the
+ * file-change slice (3.4) lands.
  */
 import { describe, expect, it, vi } from "vitest";
 import type { ChatEvent } from "../src/sessions/events.js";
 import type { SessionStore, SettledApproval } from "../src/sessions/store.js";
 import { persistEvent } from "../src/sessions/turn-control.js";
-import { postPrompt } from "./session-rest-helpers.js";
-import {
-  assistantIdFor,
-  createRealFakeRuntime,
-  eventsFor,
-  openRecordingSession,
-  waitForContent,
-  waitForTurn,
-} from "./session-supervisor-helpers.js";
 
 const ASSISTANT_ID = 41;
-/** fake-omp DELTAS joined (support/fake-omp.mjs); copied, not imported. */
-const ANSWER = "Hello from fake-omp";
 
 const THINKING: ChatEvent<string> = {
   type: "thinking.delta",
@@ -91,47 +80,4 @@ describe("persistEvent — thinking.delta and files.changed are neither stored n
       expect(result.settled).toEqual([]);
     });
   }
-});
-
-describe("supervisor — a real thinking turn", () => {
-  it("publishes no thinking.delta, spends no ring sequence on it and stores no thinking", {
-    timeout: 15_000,
-  }, async () => {
-    const runtime = createRealFakeRuntime("thinking");
-    const world = await openRecordingSession(runtime.runtime);
-    try {
-      const response = await postPrompt(
-        world.fixture.app,
-        world.session,
-        world.cookie,
-        JSON.stringify({ message: "think first" }),
-      );
-      expect(response.statusCode).toBe(202);
-      await waitForTurn(world.fixture, world.session, "done");
-      await waitForContent(world.fixture, world.session, ANSWER);
-
-      const assistant = assistantIdFor(world.fixture, world.session);
-      const observed = eventsFor(world.events, world.session);
-      expect(observed.map((entry) => entry.event)).toEqual([
-        { type: "turn.start", data: { messageId: assistant } },
-        { type: "text.delta", data: { messageId: assistant, delta: "Hello " } },
-        { type: "text.delta", data: { messageId: assistant, delta: "from " } },
-        { type: "text.delta", data: { messageId: assistant, delta: "fake-omp" } },
-        { type: "turn.end", data: { messageId: assistant, status: "done" } },
-      ]);
-      const epoch = observed[0]?.epoch;
-      expect(world.fixture.supervisor.streamCursor(world.session)).toEqual({
-        epoch,
-        seq: observed.length,
-      });
-      expect(
-        world.fixture.db
-          .prepare("SELECT content, thinking FROM chat_messages WHERE id = ?")
-          .get(assistant),
-      ).toEqual({ content: ANSWER, thinking: null });
-      expect(world.errors).toEqual([]);
-    } finally {
-      await world.fixture.close();
-    }
-  });
 });

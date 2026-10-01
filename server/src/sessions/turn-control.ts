@@ -266,8 +266,9 @@ export function persistEvent(
     case "turn.end":
       store.finishTurn(assistantMessageId, event.data.status, settled);
       return event;
-    // #514: neither stored nor published (no ring sequence, no raw path on SSE) until the
-    // thinking (3.3) and file-change (3.4) supervisor slices replace these branches.
+    // thinking.delta never reaches here: the supervisor's merge buffer (#519) takes it first.
+    // files.changed: neither stored nor published (no ring sequence, no raw path on SSE) until
+    // the file-change (3.4) supervisor slice replaces this branch.
     case "thinking.delta":
     case "files.changed":
       return undefined;

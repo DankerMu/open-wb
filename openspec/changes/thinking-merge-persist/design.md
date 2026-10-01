@@ -1,0 +1,50 @@
+# Design: thinking-merge-persist（#519）
+
+父设计：D5（合并、落库、发布、上限、ring 代价、取证分层）。行号为 origin/master（424022c）。
+
+- **Change surface**：新建 `server/src/sessions/store-thinking.ts`、`server/src/sessions/thinking-buffer.ts`；`server/src/sessions/supervisor.ts`（构造 :125-160、`#commit` :642-675、`#publish` :677-705、`#retireSlot` :719-738；753 行）；`server/src/sessions/store.ts`（挂 `appendThinking`；781 行）；`server/src/sessions/events.ts:47`（导出 `TRUNCATED_MARK`）；`server/src/sessions/turn-control.ts:268-270`（注释）；新建 `server/test/thinking-buffer.test.ts`、`server/test/session-thinking.test.ts`；`server/test/session-persist-new-events.test.ts`（删 :96-137 describe 及随之未用的 import、改头注释）。
+- **Governing invariant**：任一时刻 `chat_messages.thinking`（NULL 视为空）恰等于该消息已入 ring（或 generation 已封存时已交给 `#onEvent`）的 `thinking.delta` 片段按序拼接；为此每次冲刷是一个同步段：`appendThinking` 成功返回片段 → 立即 `ring.push` + fanout + `#onEvent`，中间无 await。A 的「preParsing 同栈捕获快照与游标」据此让快照 `thinking` 与游标一致。
+- **Must preserve**：
+  - text.delta「逐条发布、缓冲落库」（`store.ts` `FLUSH_BYTES`/`FLUSH_MS`、`appendDelta`）逐字不变；非 thinking 事件的持久化与发布次序不变。
+  - `persistEvent`（`turn-control.ts`）逻辑不变：对 `thinking.delta` 仍返回 `undefined`（supervisor 在调用前截走），对 `files.changed` 仍返回 `undefined`（3.4）；`session-persist-new-events.test.ts:70-94` 单测保持。
+  - owned error-sink 纪律：落库/sink 失败 → `slot.infraFaulted = true`、`#retain`、`#retireSlot`，返回 false 终止当前提交；ring 序号不因失败事件推进。
+  - `#publish` 在 generation 已封存时不入 ring 但仍调 `#onEvent`（既有语义）。pump 存活期间 generation 不会被封存（`sealGeneration` 要求 `pumpCount === 0`，`pool.ts:311-322`），故关停、崩溃、stop 宽限到期都经 pump catch → `#failure` → `#commit` → `#publish`，终态入 ring 前先冲刷；回合不带终态结束只有 infraFault 一种（按 `discard` 处理）。
+  - 归约器（`events.ts` 规则）、`stream/`、ring 容量 1000、web 不变；既有 supervisor/SSE/store/approval/stop 测试全绿。
+- **Must add/change**：
+  - `store-thinking.ts`：`appendThinking(db, messageId, chunk): string`。读取当前列（`SELECT thinking`），以 Unicode 码点计数（JS `[...s]`，代理对计 1）得 `n`：`n > 32768`（已带标记）→ 返回 `""` 不写；`n + len(chunk) <= 32768` → 追加整段；否则追加 `chunk` 的前 `32768 - n` 个码点（可为空）+ `TRUNCATED_MARK` 并返回该片段。写入为单条 `UPDATE chat_messages SET thinking = COALESCE(thinking,'') || ? WHERE id = ?`，须恰改 1 行（`requireChanges`），否则抛错。`chunk` 为空串时返回 `""` 不写。`store.ts` 以一行委托挂 `appendThinking(messageId, chunk)`（`assertOpen` 同其它方法）。
+  - `events.ts`：`export const TRUNCATED_MARK`（单一来源，store-thinking 引用）。
+  - `thinking-buffer.ts`：`ThinkingBuffers`，构造端口 `{clock: SessionClock | undefined（缺省 systemClock，同 ApprovalRegistry）, append(messageId, chunk): string, publish(slot, event, generation): boolean（同步入 ring + fanout + `#onEvent`；sink 失败时经 fault 处理并返回 false，不 await）, fault(slot, error): void}`；每 slot 至多一个缓冲 `{messageId, generation, text, bytes, timer}`。
+    - `add(slot, generation, messageId, delta)`：拼接；首段时以 `clock.setTimeout(…, 2000)` 布计时；累计 UTF-8 字节（`Buffer.byteLength`）≥ 2048 → 立即 `flush`；返回 `boolean`（同步）。
+    - `flush(slot)`：无缓冲 → `true`；否则清计时器、取出文本、清空缓冲，同步调用 `append`（抛错 → `fault(slot, error)`，返回 `false`，不发布）；片段为空 → `true`；否则 `return publish(slot, {type:"thinking.delta", data:{messageId, delta: 片段}}, generation)`。`flush` 全程同步、无 await，返回 `boolean`。
+    - 计时器回调：`slot.infraFaulted` 或缓冲已不存在 → 无操作；否则 `flush(slot)`（失败经 `fault` 处理）。
+    - `discard(slot)`：清计时器、丢弃缓冲（infraFault 退役时）。`clearTimer(slot)`：只清计时器（普通退役；缓冲留待终态事件发布前冲刷）。
+  - `supervisor.ts`：
+    - 构造 `ThinkingBuffers`，`publish` 端口为同步的 `#pushNow`（入 ring + fanout + `#onEvent` 同步段；sink 失败 → retain + infraFaulted + `void #retireSlot`，返回 false），`fault` 端口同 ApprovalRegistry 的 `fault`（retain + infraFaulted + `void #retireSlot`）。
+    - `#commit`：事件为 `thinking.delta` → `if (!buffers.add(slot, generation, id, delta)) return false; continue;`（不调 `persistEvent`）。其余每个事件在 `persistEvent` **之前**同步执行 `if (!buffers.flush(slot)) return false;`（冲刷到落库/发布之间无 await）：冲刷失败时该事件既不落库也不发布——否则 `turn.end` 已 `finishTurn` 而终态未入 ring，库与 ring 分叉。`#publish` 内的冲刷保留（审批 publish 端口与计时器路径仍需要），在 pump 路径上为无操作。
+    - `#publish(slot, event, generation)`：若 `event.type !== "thinking.delta"`，在首个 await 之前、入 ring 之前同步执行 `if (!this.#buffers.flush(slot)) return false;`，随后既有入 ring 逻辑；冲刷与触发事件入 ring 之间**不得有 await**（否则计时器回调或 REST 结算可插入二者之间），故 ring 中 `thinking.delta` 紧先于触发它的事件。既有 `#publish` 的 sink 失败路径（await retire）保持。
+    - `#retireSlot`：在 `await slot.retiring` 之前的同步段（与 `approvals.abandon` 同处）执行：`slot.infraFaulted` → `buffers.discard(slot)`；否则 `buffers.clearTimer(slot)`。
+    - 回合结束（`turn.end` 发布后）缓冲必为空且无计时器；新回合从空缓冲开始。
+    - 单一入 ring 点：`#publish` 改为「同步冲刷 → `#pushNow`（同步入 ring + fanout + `#onEvent`）→ 失败则 `await #retireSlot`」，不复制 ring-push 函数体；可抽 `#faultSlot(slot, error)`（retain + infraFaulted + `void #retireSlot`）供审批 fault 端口与 thinking fault/publish 端口共用。`supervisor.ts` ≤ 800 行（`bash scripts/size-guard.sh`，预计约 785）。
+- **并发推理**：pump 串行处理帧，`#commit` 完成前不取下一帧，故缓冲只含已到达帧；计时器回调与 REST 结算在 pump 的 await 间隙运行，但每次冲刷/发布都是同步段，不会被其它段插入；pump 路径上触发事件在 `#commit` 的 `persistEvent` 之前先冲刷（审批端口与计时器路径在 `#publish`/回调中冲刷），故 ring 中 thinking 与其它事件的相对次序等于到达次序。`#commit` 冲刷后缓冲为空且 pump 串行，`approvals.settled` 的 await 期间不存在 thinking 计时器；带结算的 `turn.end` 的 ring 次序为 `thinking.delta` → `approval.*` → `turn.end`。
+- **Sibling surfaces**：SSE 回放与 `replay.gap`（`stream/ring-buffer.ts`）无特殊处理；快照 `thinking` 投影（5.1，`store-branch.ts` `MESSAGE_COLUMNS`）；fork 拷贝 `thinking`（#527）；web 7.4 消费；delete running（#526）经 stop → 终态事件发布前冲刷。
+- **残余**：infraFault 退役时缓冲内容丢弃（回合已故障，列保留已落库部分，仍满足不变量）；每条消息 thinking 事件约 ≤ 64（字节触发）+ 每 2 s 一条（时间触发），超出 ring 走既有 `replay.gap`。
+- **Required evidence**（RED：M1–M7 在实现前红（模块不存在）；S1、S3–S7 红（现为不发布/不落库）；S2、S8 为 characterization；以实际运行记录。fake-omp 旋钮 `--thinking-repeat`/`--hold-after-thinking` 经新测试文件内包一层 `spawnImpl` 追加参数（照 `session-approval-helpers.ts:95-102` 写法），既有 helper 不改；时钟用可注入的手动 TestClock；「缓冲计时器已布上」一律以包一层 `clock.setTimeout`、只记录 `ms === 2000` 的计时器识别（照 `session-approval-helpers.ts:120-137` `trackTimers`；注入时钟上 idle 为 10000 ms、stop 宽限 8000 ms，text 落库计时器走真实 timer），S8 推进时钟保持在 10000 ms 以内）：
+  - 模块级 `thinking-buffer.test.ts`（`ThinkingBuffers` + 注入手动时钟 + 记录型 publish/fault 端口；`appendThinking` 用真实 SQLite `openDb` 内存库并插入一条助手消息）：
+    - M1 字节阈值：多段合计首次 ≥ 2048 UTF-8 字节（含多字节字符）的那段 `add` 后立即恰一次 publish，delta 为全部拼接；此后的段进入新缓冲，未到阈值前不发布。
+    - M2 时钟阈值：首段后推进 1999 ms 无发布；到 2000 ms 发布一次缓冲内容；中途追加的段不重置计时；发布后新首段重新计时。
+    - M3 显式冲刷：非空缓冲 `flush` 发布一次；空缓冲 `flush` 不调 append、不发布；`flush` 后计时器已清（推进时钟无发布）。上限后冲刷：列经 `appendThinking` 已带标记，再 `add` + `flush`（及一次字节阈值 `add`）→ append 端口被调、无 publish、返回 `true`、列不变。
+    - M4 上限（直接调 `appendThinking`）：合计 40000 码点、截断点落在星体字符处 → 列 = 前 32768 码点（无孤立代理项）+ `…（已截断）`，越限那次返回值 = 到限前缀 + 标记，之后返回 `""` 且列不变（以 TEMP TRIGGER 计数或 `changes()` 证明未执行 UPDATE）；恰 32768 码点 → 全文无标记；恰满后再来一段 → 返回并写入仅标记；再之后 `""`。到限前已落库文本含星体字符（以 UTF-16 单元计 `used` 即红）。
+    - M5 append 失败（TEMP TRIGGER `BEFORE UPDATE OF thinking ON chat_messages … RAISE(ABORT,…)`）→ `fault` 被调用一次、无 publish、缓冲已清、计时器已清。
+    - M6 `discard` 后推进时钟无 append/publish；`clearTimer` 后缓冲仍在，随后 `flush` 发布其内容。
+    - M7 与 step 截断同文：`TRUNCATED_MARK` 由 `events.ts` 导出，store-thinking 引用之（import 断言即可）。
+  - supervisor 级 `session-thinking.test.ts`（`createRealFakeRuntime(<scenario>)` + `openRecordingSession`；直接读 `chat_messages.thinking` 列，不经快照投影）：
+    - S1 合并与落库：`thinking` 场景 → 记录事件恰为 `turn.start`、`thinking.delta{delta:"先读需求，再列要点，最后作答。"}`、既有三条 `text.delta`、`turn.end done`；`streamCursor.seq` === 记录事件数（id 连续）；`onEvent` 收到 `thinking.delta` 的同一同步回调内读 `chat_messages.thinking` 已等于该片段（先落库后发布的正面证据）；终态列 = 该串；无错误。
+    - S2 无 reasoning：`abort-ok`（或其它无 thinking 帧的场景）完成的回合 → 无 `thinking.delta`，列为 NULL。
+    - S3 上限：`--thinking-repeat <n>` 使合计 > 32768 码点 → 恰一条 `thinking.delta` 以 `…（已截断）` 结尾且为该消息最后一条 thinking；全部已发布 thinking 片段拼接 === 列值；列码点数 = 32768 + 标记长度。`n` 取到越限那次冲刷之后至少还有一次字节阈值冲刷（上限后发布）：`thinking.delta` 条数恰为到越限那次（含）为止的冲刷数、无空 `delta`、`streamCursor.seq` === 记录事件数。
+    - S4 终态前冲刷：`--hold-after-thinking` 挂起；先等缓冲计时器已布上（TestClock 待触发计时器数增加）并断言已记录事件恰为 `[turn.start]`、列为 NULL（证明缓冲未冲刷），再 `POST …/stop` → `thinking.delta` 先于 `turn.end stopped` 入 ring，列已为该串。崩溃前刷出（characterization）：同样挂起且缓冲未冲刷时 SIGKILL 子进程 → 记录事件恰为 `turn.start`、`thinking.delta`、`error`、`turn.end failed`；`thinking.delta` 恰一条，为该串的非空前缀（kill 可能落在子进程三次写入之间），列严格等于该条 delta。
+    - S5 落库失败：`--hold-after-thinking` + TEMP TRIGGER（`BEFORE UPDATE OF thinking ON chat_messages … RAISE(ABORT,…)`）；缓冲计时器布上后推进时钟 2000 ms，使冲刷失败发生在计时器回调中（此时 pump 挂在等下一帧，`pumpCount > 0`，generation 未封存）；在同一 tick 同步断言：`streamCursor(session).seq === 1`、已记录事件恰为 `[turn.start]`、错误进入 owned error-sink（含触发器的 sentinel 文本）；可另开 SSE 订阅断言只收到 `<epoch>:1`。收尾按 `session-supervisor-faults.test.ts` 的 `closeAfterRetainedFault` 先例。终态冲刷失败（RED：现为 `stopped`）：同一 TRIGGER、缓冲未冲刷时 `POST …/stop` → 在 error-sink 收到 sentinel 的同一同步回调内读库，助手消息与会话状态仍为 `running`；无 `thinking.delta`、无 `turn.end` 记录，列为 NULL。
+    - S6 回放与刷新：回合 running 且 `thinking.delta` 已入 ring 时（`--hold-after-thinking` + 触发冲刷的方式由实现选择：注入时钟推进 2000 ms 或 `--thinking-repeat` 越过 2048 字节），SSE 带 `thinking.delta` 前一 id 重连 → 按序恰重放一次；无游标连接的回放从活跃 `turn.start` 起包含它（`session-sse-helpers.ts` 的 `openEventStream`/`readUntil`/`lastDataId`）。
+    - S7 其它事件前冲刷（经 `#publish` 漏斗）：受控 runtime（`createControlledRuntime` 或同类既有夹具）在 `thinking_delta` 后发 `tool_execution_start` → ring 中 `thinking.delta` 紧先于 `step.start`；另一回合 `thinking_delta` 后到审批 select 帧 → `thinking.delta` 紧先于 `approval.request`；再一回合 `agent_start` → 审批 select 帧（`approval.request` 发布时缓冲为空）→ `thinking_delta` → 经 REST 结算该审批 → `thinking.delta` 紧先于 `approval.resolved`（`session-approval-helpers.ts` 既有造数）。若后一路径无法以既有夹具构造，实现须在 PR 说明原因，审阅以白盒核对 `ApprovalRegistry` publish 端口经 `#publish` 为准。
+    - S8 计时器生命周期：回合 `turn.end` 后缓冲为空、无待触发计时器（推进时钟 ≥ 2000 ms 无新事件、无新 UPDATE）；slot 退役后同样无迟到发布。
+  - 既有：`session-persist-new-events.test.ts` 删除的 describe 以外全部既有测试零改动全绿。
+  - 门禁：`npm test --workspace server`、`make lint`、`make typecheck`、`make anti-drift`（knip 零新增）、`bash scripts/size-guard.sh` 退出 0；PR 记录 `supervisor.ts`、`store.ts` 前后行数。
