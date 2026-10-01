@@ -331,12 +331,17 @@ describe("S4 flush before the terminal", () => {
       expect(spawned[0]?.kill("SIGKILL")).toBe(true);
       await waitForTurn(world.fixture, world.session, "failed");
       expect(types(world)).toEqual(["turn.start", "thinking.delta", "error", "turn.end"]);
-      expect(thinkingDeltas(world)).toEqual([THOUGHT]);
+      // The timer is armed by the first of the child's three thinking writes, so the kill may land
+      // before the rest: whatever had arrived is published once and is exactly what was saved.
+      const [flushed, ...rest] = thinkingDeltas(world);
+      expect(rest).toEqual([]);
+      expect(flushed).not.toBe("");
+      expect(THOUGHT.startsWith(String(flushed))).toBe(true);
       expect(events(world).at(-1)).toEqual({
         type: "turn.end",
         data: { messageId: assistant, status: "failed" },
       });
-      expect(thinkingColumn(world.fixture.db, assistant)).toBe(THOUGHT);
+      expect(thinkingColumn(world.fixture.db, assistant)).toBe(flushed);
       expect(world.bufferTimers()).toBe(0);
       expect(world.errors).toEqual([]);
     },
