@@ -1,6 +1,6 @@
 /* 外壳顶栏 — adapted from resource/workbuddy-live-demo.html:313-314（.workbuddy-topbar 高度/内边距/
-   底色与 --page 底边）、:315-316（.crumbs 与当前项 b）。只用语义 token；不移植 demo 的面板按钮、
-   搜索条与 z-index 叠层。 */
+   底色与 --page 底边）、:315-316（.crumbs 与当前项 b）、:321（.tb-right）。只用语义 token；
+   不移植 demo 的面板按钮、搜索条与 z-index 叠层。 */
 
 .topbar {
   flex: none;
@@ -45,5 +45,14 @@
 
 /* 窄屏 打开导航：长面包屑收缩时按钮保持原尺寸。 */
 .topbar-nav {
+  flex: none;
+}
+
+/* 页面注入的 actions：靠右，长标题收缩时按钮保持原尺寸。 */
+.topbar-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   flex: none;
 }
