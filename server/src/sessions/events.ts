@@ -1,7 +1,8 @@
 /**
  * Issue #83 pure protocol event mapping; #455 adds the interrupted outcome and applyStop;
  * #514 maps assistant thinking_delta to thinking.delta and declares files.changed;
- * #515 emits raw edit/write candidates as files.changed immediately before their step.end.
+ * #515 emits raw edit/write candidates as files.changed immediately before their step.end;
+ * #554 maps command_output to turn.start (first time) + text.delta, so a command reply is the body.
  */
 import { type FileChange, fileChangeCandidates } from "./file-changes.js";
 import type { OmpFrame } from "./omp/frame.js";
@@ -67,6 +68,8 @@ interface EventState {
   readonly promptRequestId: string;
   readonly started: boolean;
   readonly ended: boolean;
+  /** 本回合已归约过 command_output：其后的输出以 "\n" 起头。只记布尔，不存正文。 */
+  readonly commandOutputSeen: boolean;
   readonly outcome: Outcome | undefined;
   readonly running: readonly ToolEntry[];
   readonly finished: readonly string[];
@@ -86,6 +89,7 @@ export function createEventState(input: {
     promptRequestId: input.promptRequestId,
     started: false,
     ended: false,
+    commandOutputSeen: false,
     outcome: undefined,
     running: NO_TOOLS,
     finished: NO_IDS,
@@ -109,6 +113,8 @@ export function applyFrame(state: EventState, frame: OmpFrame): ApplyResult {
       return applyMessageEnd(state, frame);
     case "agent_end":
       return applyAgentEnd(state, frame);
+    case "command_output":
+      return applyCommandOutput(state, frame);
     case "response":
       return applyPromptFailure(state, frame);
     default:
@@ -264,6 +270,24 @@ function applyAgentEnd(state: EventState, frame: OmpFrame): ApplyResult {
   };
 }
 
+/**
+ * 内建 slash 命令的回复（无 id、无 agent_start/agent_end）：未 started 先补 turn.start，再恰一条
+ * text.delta——首条为 text，其后为 "\n" + text。text 非字符串即过滤、状态原样；后到的 agent_start 不重置。
+ */
+function applyCommandOutput(state: EventState, frame: OmpFrame): ApplyResult {
+  const { text } = frame;
+  if (typeof text !== "string") {
+    return { state, events: [] };
+  }
+  const { messageId } = state;
+  const delta = state.commandOutputSeen ? `\n${text}` : text;
+  const events: ChatEvent<string>[] = state.started
+    ? []
+    : [{ type: "turn.start", data: { messageId } }];
+  events.push({ type: "text.delta", data: { messageId, delta } });
+  return { state: evolve(state, { started: true, commandOutputSeen: true }), events };
+}
+
 function applyPromptFailure(state: EventState, frame: OmpFrame): ApplyResult {
   if (frame.command !== "prompt" || frame.success !== false || frame.id !== state.promptRequestId) {
     return { state, events: [] };
@@ -299,6 +323,7 @@ function evolve(
   patch: {
     started?: boolean;
     ended?: boolean;
+    commandOutputSeen?: boolean;
     outcome?: Outcome;
     running?: readonly ToolEntry[];
     finished?: readonly string[];
@@ -309,6 +334,7 @@ function evolve(
     promptRequestId: state.promptRequestId,
     started: patch.started ?? state.started,
     ended: patch.ended ?? state.ended,
+    commandOutputSeen: patch.commandOutputSeen ?? state.commandOutputSeen,
     outcome: patch.outcome ?? state.outcome,
     running: patch.running ?? state.running,
     finished: patch.finished ?? state.finished,
