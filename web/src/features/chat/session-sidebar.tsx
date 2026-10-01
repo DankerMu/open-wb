@@ -8,6 +8,7 @@ import {
   groupSessions,
   type SessionFilter as SessionFilterValue,
 } from "./session-groups.js";
+import { SessionMenu } from "./session-menu.js";
 import { sessionTitle } from "./session-path.js";
 import { SESSION_STATUS_LABEL } from "./status-label.js";
 
@@ -17,19 +18,28 @@ type SessionSidebarProps = {
   listLoading: boolean;
   onCreateSession(): void;
   onFilterChange(filter: SessionFilterValue): void;
+  /** `trigger` 是该条目的「更多」按钮：重命名 Dialog 关闭后把焦点还给它。 */
+  onRenameSession(session: ChatSession, trigger: HTMLElement | null): void;
   onSelectSession(sessionId: string): void;
+  onTogglePin(session: ChatSession): void;
   requestedSessionId: string | null;
   sessions: ChatSession[] | null;
   workspaces: readonly { id: string; name: string }[] | null;
 };
 
-type EntriesProps = {
+type EntriesProps = Pick<SessionSidebarProps, "onRenameSession" | "onTogglePin"> & {
   onSelect(sessionId: string): void;
   requestedSessionId: string | null;
   sessions: ChatSession[];
 };
 
-function SessionEntries({ onSelect, requestedSessionId, sessions }: EntriesProps) {
+function SessionEntries({
+  onRenameSession,
+  onSelect,
+  onTogglePin,
+  requestedSessionId,
+  sessions,
+}: EntriesProps) {
   return (
     <ul className="chat-session-list">
       {sessions.map((session) => {
@@ -55,6 +65,12 @@ function SessionEntries({ onSelect, requestedSessionId, sessions }: EntriesProps
               </span>
               <strong className="chat-session-title">{title}</strong>
             </button>
+            <SessionMenu
+              onRename={(trigger) => onRenameSession(session, trigger)}
+              onTogglePin={() => onTogglePin(session)}
+              session={session}
+              title={title}
+            />
           </li>
         );
       })}
@@ -92,7 +108,8 @@ function SessionGroup({
 /**
  * 侧栏列表区：`新建会话`、`筛选任务` 与「置顶任务 / 任务 / 空间」三分区列表，由 ChatPage 经侧栏
  * 槽位上报、在 shell 侧栏内渲染（issue 424、530）。数据、筛选值与回调都来自 ChatPage（槽位节点
- * 会随折叠与覆盖层关闭卸载）；覆盖层内选择或新建后调用侧栏提供的关闭回调，筛选不调用。
+ * 会随折叠与覆盖层关闭卸载）；覆盖层内选择或新建后调用侧栏提供的关闭回调，筛选与条目的
+ * 「更多」菜单（issue 531）不调用。
  * 「今天」的当前时间取渲染时刻，不设定时器。
  */
 export function SessionSidebar({
@@ -101,7 +118,9 @@ export function SessionSidebar({
   listLoading,
   onCreateSession,
   onFilterChange,
+  onRenameSession,
   onSelectSession,
+  onTogglePin,
   requestedSessionId,
   sessions,
   workspaces,
@@ -112,10 +131,12 @@ export function SessionSidebar({
   const spaceCount = spaces.reduce((total, space) => total + space.sessions.length, 0);
   const entries = (items: ChatSession[]) => (
     <SessionEntries
+      onRenameSession={onRenameSession}
       onSelect={(sessionId) => {
         onSelectSession(sessionId);
         onNavigate?.();
       }}
+      onTogglePin={onTogglePin}
       requestedSessionId={requestedSessionId}
       sessions={items}
     />

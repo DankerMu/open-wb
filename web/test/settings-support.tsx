@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { RouterProvider } from "react-router";
 import { expect, vi } from "vitest";
 import { createAppRouter } from "../src/routes/index.js";
+import { ToastProvider } from "../src/ui/index.js";
 import {
   createFetchMock,
   currentLocation,
@@ -32,7 +33,11 @@ let router: ReturnType<typeof createAppRouter> | undefined;
 export function renderApp(path: string) {
   setBrowserPath(path);
   router = createAppRouter();
-  return render(<RouterProvider router={router} />);
+  return render(
+    <ToastProvider>
+      <RouterProvider router={router} />
+    </ToastProvider>,
+  );
 }
 
 /** 当前挂载的 router（供用例 `navigate`）。 */
