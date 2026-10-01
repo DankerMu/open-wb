@@ -221,6 +221,33 @@ describe("GET /api/commands", () => {
     }
   });
 
+  it("serves a skill installed after an earlier response from the same app", async () => {
+    const { app, stateDir } = openWorld();
+    const cookie = await loginSessionPair(app);
+
+    const before = await app.inject({ method: "GET", url: ROUTE, headers: { cookie } });
+    writeSkill(join(ompAgentDir(stateDir), "skills"), "late", ["description: installed later"]);
+    const after = await app.inject({ method: "GET", url: ROUTE, headers: { cookie } });
+
+    expect(before.statusCode).toBe(200);
+    expect(before.payload).toBe(JSON.stringify({ commands: BUILTIN_ENTRIES }));
+    expect(after.statusCode).toBe(200);
+    expect(after.payload).toBe(
+      JSON.stringify({
+        commands: [
+          ...BUILTIN_ENTRIES,
+          {
+            name: "skill:late",
+            label: "late",
+            description: "installed later",
+            hint: "可选参数",
+            source: "skill",
+          },
+        ],
+      }),
+    );
+  });
+
   it("reads the directory the spawn exports as PI_CODING_AGENT_DIR", async () => {
     const { app, root, stateDir } = openWorld();
     const calls: SpawnCall[] = [];

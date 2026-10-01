@@ -4,7 +4,16 @@
  * `<agentDir>/skills` tree. Expected values are the literals of chat-sessions「Slash 命令白名单与
  * 命令目录」 and its Scenarios; nothing here is derived from the module under test.
  */
-import fs, { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import fs, {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -41,6 +50,12 @@ function skillFile(lines: readonly string[], body = "正文"): string {
 function writeSkill(skillsDir: string, entry: string, content: string): void {
   mkdirSync(join(skillsDir, entry), { recursive: true });
   writeFileSync(join(skillsDir, entry, "SKILL.md"), content);
+}
+
+/** An ASCII-only SKILL.md of exactly `bytes` bytes: a valid frontmatter, then padding. */
+function paddedSkill(description: string, bytes: number): string {
+  const head = `---\ndescription: ${description}\n---\n`;
+  return head + "x".repeat(bytes - head.length);
 }
 
 /** `listSkills` over an agentDir whose skills are exactly `entries` (entry name → SKILL.md). */
@@ -81,6 +96,7 @@ describe("classifyPrompt and toWireText", () => {
     ["/todo append 买菜", { kind: "builtin", name: "todo" }],
     ["/compact:focus 保留结论", { kind: "builtin", name: "compact" }],
     ["/skill:weekly-report 写周报", { kind: "skill", name: "weekly-report" }],
+    ["/skill:weekly-report", { kind: "skill", name: "weekly-report" }],
     ["/todo\t制表", { kind: "builtin", name: "todo" }],
     ["/compact\n换行", { kind: "builtin", name: "compact" }],
   ])("whitelisted %j keeps its class and passes through unchanged", (text, expected) => {
@@ -310,6 +326,7 @@ describe("listSkills", () => {
         syncBuiltinESMExports();
         expect(listSkills(agentDir)).toEqual([{ name: "weekly-report", description: "aa-copy" }]);
       }
+      expect(readdir).toHaveBeenCalled();
     } finally {
       readdir.mockRestore();
       syncBuiltinESMExports();
@@ -351,5 +368,79 @@ describe("listSkills", () => {
     writeSkill(skillsDir, "locked", skillFile(["description: locked"]));
     chmodSync(join(skillsDir, "locked", "SKILL.md"), 0o000);
     expect(listSkills(agentDir)).toEqual([{ name: "kept", description: "kept" }]);
+  });
+
+  it.skipIf(process.getuid?.() === 0)("returns [] when the skills directory is unreadable", () => {
+    const { agentDir, skillsDir } = makeRoot();
+    writeSkill(skillsDir, "kept", skillFile(["description: kept"]));
+    chmodSync(skillsDir, 0o000);
+    try {
+      expect(listSkills(agentDir)).toEqual([]);
+    } finally {
+      chmodSync(skillsDir, 0o755);
+    }
+  });
+
+  it("reads a SKILL.md of exactly 262144 bytes and skips one of 262145 bytes", () => {
+    const atCap = paddedSkill("at the cap", 262144);
+    const overCap = paddedSkill("over the cap", 262145);
+    expect(Buffer.byteLength(atCap)).toBe(262144);
+    expect(Buffer.byteLength(overCap)).toBe(262145);
+
+    expect(listOf({ "at-cap": atCap, "over-cap": overCap })).toEqual([
+      { name: "at-cap", description: "at the cap" },
+    ]);
+  });
+
+  // Before the bounded read this case never returned: do not run it against older sources.
+  it.skipIf(process.platform === "win32")(
+    "skips a SKILL.md that is a FIFO without blocking",
+    () => {
+      const { agentDir, skillsDir } = makeRoot();
+      writeSkill(skillsDir, "kept", skillFile(["description: kept"]));
+      mkdirSync(join(skillsDir, "pipe"));
+      execFileSync("mkfifo", [join(skillsDir, "pipe", "SKILL.md")]);
+
+      expect(listSkills(agentDir)).toEqual([{ name: "kept", description: "kept" }]);
+    },
+  );
+
+  // Before the bounded read this case exhausted memory: do not run it against older sources.
+  it.skipIf(!existsSync("/dev/zero"))("skips a SKILL.md symlinked to /dev/zero", () => {
+    const { agentDir, skillsDir } = makeRoot();
+    writeSkill(skillsDir, "kept", skillFile(["description: kept"]));
+    mkdirSync(join(skillsDir, "zero"));
+    symlinkSync("/dev/zero", join(skillsDir, "zero", "SKILL.md"));
+
+    expect(listSkills(agentDir)).toEqual([{ name: "kept", description: "kept" }]);
+  });
+
+  it("skips a SKILL.md that is a directory", () => {
+    const { agentDir, skillsDir } = makeRoot();
+    writeSkill(skillsDir, "kept", skillFile(["description: kept"]));
+    mkdirSync(join(skillsDir, "dir", "SKILL.md"), { recursive: true });
+
+    expect(listSkills(agentDir)).toEqual([{ name: "kept", description: "kept" }]);
+  });
+
+  it("follows a SKILL.md symlinked to a regular file", () => {
+    const { root, agentDir, skillsDir } = makeRoot();
+    writeFileSync(join(root, "elsewhere.md"), skillFile(["description: through a link"]));
+    mkdirSync(join(skillsDir, "file-link"), { recursive: true });
+    symlinkSync(join(root, "elsewhere.md"), join(skillsDir, "file-link", "SKILL.md"));
+
+    expect(listSkills(agentDir)).toEqual([{ name: "file-link", description: "through a link" }]);
+  });
+
+  it("keeps the last of several thousand repeated block-scalar names", () => {
+    const lines: string[] = [];
+    for (let index = 0; index < 5000; index += 1) {
+      lines.push("name: >", `  name-${index}`);
+    }
+    lines.push("description: |", "  甲", "  乙");
+
+    expect(listOf({ repeated: skillFile(lines) })).toEqual([
+      { name: "name-4999", description: "甲\n乙" },
+    ]);
   });
 });

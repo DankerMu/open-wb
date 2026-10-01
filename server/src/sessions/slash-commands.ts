@@ -2,12 +2,14 @@
  * Slash command whitelist (#551, parent D15). omp runs any text starting with `/` through an exact
  * builtin lookup, so the host decides here, and only here, what a `/`-prefixed prompt is: one of
  * the two whitelisted builtins, a `/skill:<name>` invocation of a platform skill, or plain text.
- * `toWireText` prefixes one U+0020 to plain text so omp's `startsWith("/")` gate is false.
+ * `toWireText` prefixes one U+0020 to plain text so omp's `startsWith("/")` gate is false. That
+ * stops builtins and templates only: omp's skill dispatch `trimStart()`s first
+ * (`extensibility/skills.ts:455`), so a `/skill:<name>` omp knows but the host does not list runs.
  * `listSkills` reads `<agentDir>/skills/<entry>/SKILL.md` the way omp v18.0.10 discovers user-level
  * skills (`discovery/helpers.ts` scanSkillsFromDir), with a line-based frontmatter reader instead
  * of a YAML library: a skill it cannot read is left out and its `/skill:` stays plain text.
  */
-import { readdirSync, readFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, openSync, readdirSync, readSync } from "node:fs";
 import { join } from "node:path";
 import { compareMigrationFilenames as compareCodePoints } from "../core/db/migration-assets.js";
 
@@ -45,6 +47,8 @@ export const BUILTIN_COMMANDS: readonly BuiltinCommand[] = [
 ];
 
 const SKILL_PREFIX = "/skill:";
+/** SKILL.md read cap: the omp uid can write the agent dir (ADR-0010); real ones stay under 51 KB. */
+const SKILL_MD_MAX_BYTES = 262144;
 /** Host rule (omp validates nothing): `/skill:<name>` ends at the first U+0020, `/` is a path. */
 const SKILL_NAME = /^[^\s/]+$/;
 const TOP_LEVEL_KEY = /^(name|description|enabled):(.*)$/;
@@ -55,8 +59,9 @@ const QUOTED = /^(["'])(.*)\1$/;
  * The platform skills omp would load from `<agentDir>/skills`, sorted by name in code-point order.
  * Recomputed on every call. Any failure to enumerate the directory yields `[]`; an entry whose
  * SKILL.md cannot be read is skipped (entry types are not inspected: a symlinked directory is
- * followed and a regular file fails the read). Entries sharing a name collapse to the one with the
- * smallest SKILL.md path, omp's first-wins order.
+ * followed and a regular file fails the read), and so is a SKILL.md that is not a regular file of
+ * at most `SKILL_MD_MAX_BYTES`. Entries sharing a name collapse to the one with the smallest
+ * SKILL.md path, omp's first-wins order.
  */
 export function listSkills(agentDir: string): Skill[] {
   const skillsDir = join(agentDir, "skills");
@@ -112,10 +117,13 @@ export function toWireText(text: string, skills: readonly { name: string }[]): s
 
 /** omp's drop rules for a user-level skill, plus the host name rule; null when it is not listed. */
 function readSkill(path: string, entry: string): Skill | null {
-  let content: string;
+  let content: string | null;
   try {
-    content = readFileSync(path, "utf8");
+    content = readBounded(path);
   } catch {
+    return null;
+  }
+  if (content === null) {
     return null;
   }
   const frontmatter = readFrontmatter(content);
@@ -128,6 +136,33 @@ function readSkill(path: string, entry: string): Skill | null {
     return null;
   }
   return { name, description: frontmatter.description };
+}
+
+/**
+ * The UTF-8 content of a regular file (symlinks followed) of at most `SKILL_MD_MAX_BYTES`, else
+ * null. `O_NONBLOCK` makes opening a FIFO return at once, and the read stops at the size `fstat`
+ * reported, so neither a writer-less pipe, a device nor a growing file can hold the event loop.
+ */
+function readBounded(path: string): string | null {
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.size > SKILL_MD_MAX_BYTES) {
+      return null;
+    }
+    const buffer = Buffer.alloc(stat.size);
+    let length = 0;
+    while (length < buffer.length) {
+      const read = readSync(fd, buffer, length, buffer.length - length, null);
+      if (read === 0) {
+        break;
+      }
+      length += read;
+    }
+    return buffer.toString("utf8", 0, length);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /**
@@ -166,7 +201,8 @@ function scalarValue(block: readonly string[], next: number, raw: string): strin
     return QUOTED.exec(raw)?.[2] ?? raw;
   }
   const lines: string[] = [];
-  for (const line of block.slice(next)) {
+  for (let index = next; index < block.length; index += 1) {
+    const line = block[index] ?? "";
     if (!/^\s+\S/.test(line)) {
       break;
     }
