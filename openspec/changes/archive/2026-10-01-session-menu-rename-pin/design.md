@@ -79,7 +79,7 @@ export const CHAT_TOPBAR_ACTIONS = [
 5. 既有测试的断言零 diff。唯一的既有文件改动是夹具形状：`web/test/routes.test.tsx` 三处 `render(<RouterProvider …/>)` 与 `web/test/settings-support.tsx` 的 `renderApp` 外包一层 `ToastProvider`，与 `main.tsx` 的根结构一致（实现时发现：这两个夹具此前缺 Provider 而未暴露）。
 
 ## Required evidence
-`web/test/chat-page-session-rename-pin.test.tsx`（M1–M7、M13、M14、M16）与 `web/test/chat-page-session-pin.test.tsx`（M8–M12、M15），共用 `web/test/chat-page-session-meta-support.tsx`——单文件会超过 800 行（首行引入 `./radix-platform.js`；全部 RED，除注明者）。「Enter」在 jsdom 里的输入是 `fireEvent.submit(form)`——jsdom 不做隐式表单提交、仓库没有 user-event，先例 `web/test/login-form.test.tsx:325-336`；真实按键由一次性浏览器观察覆盖。M15 以字面量 `await import()` 取 `topbar-actions.js` 并放在 pin 文件：Vite 在转换期解析 `import()` 的字面量说明符，所在文件在实现前照样无法收集；非字面量说明符则 knip 看不到引用。实现前 pin 文件整体收集失败计 RED，M16 前半在 rename-pin 文件里可观察。另含 D2 的 401 分支两条（重命名 401 只复位忙碌、置顶 401 不提示）。
+`web/test/chat-page-session-rename-pin.test.tsx`（M1–M7、M13、M14、M16）与 `web/test/chat-page-session-pin.test.tsx`（M8–M12、M15，以及 M13 的置顶侧 fence 用例），共用 `web/test/chat-page-session-meta-support.tsx`——单文件会超过 800 行（首行引入 `./radix-platform.js`；全部 RED，除注明者）。「Enter」在 jsdom 里的输入是 `fireEvent.submit(form)`——jsdom 不做隐式表单提交、仓库没有 user-event，先例 `web/test/login-form.test.tsx:325-336`；真实按键由一次性浏览器观察覆盖。M15 以字面量 `await import()` 取 `topbar-actions.js` 并放在 pin 文件：Vite 在转换期解析 `import()` 的字面量说明符，所在文件在实现前照样无法收集；非字面量说明符则 knip 看不到引用。实现前 pin 文件整体收集失败计 RED，M16 前半在 rename-pin 文件里可观察。另含 D2 的 401 分支两条（重命名 401 只复位忙碌、置顶 401 不提示）。
 - M1 菜单：未置顶会话的 `更多操作：<标题>` 打开后 `menuitem` 恰为 `重命名`、`置顶任务`；已置顶会话为 `重命名`、`取消置顶`；无 `删除`、`导出记录`；`running` 会话的菜单同样可打开且两项可用；`title: null` 的会话按钮名为 `更多操作：新会话`；每个条目恰一个「更多」按钮，且它不在 `button.chat-session-button` 内。
 - M2 行菜单重命名成功：输入初值为服务端标题、打开时焦点在输入框；改为 `  周报整理  ` 点 `保存` → 恰一次 `PATCH /api/sessions/<id>`、body 文本恰为 `{"title":"周报整理"}`、`Content-Type: application/json`；Dialog 消失；条目按钮名与顶栏 heading `我的工作 / 周报整理` 更新；Toast `已重命名`；焦点在该条目的 `更多操作：周报整理` 按钮；全程无 `/api/sessions` 列表请求。
 - M3 禁用与 Enter：输入全空白 → `保存` 禁用、Enter 不发请求；`title: null` 会话打开时输入为空且 `保存` 禁用；输入有效文本后 Enter → 恰一次 PATCH（等价 `保存`）。
@@ -117,6 +117,7 @@ export const CHAT_TOPBAR_ACTIONS = [
 3. 顶栏 `重命名` 关闭 Dialog 后焦点回到该按钮会弹出 Tooltip（Radix 聚焦即显；#714 已记）。
 4. 当前会话不在已读取列表里且快照未就绪时没有顶栏 `重命名`（标题未知即第一态，spa-shell 既有规则）。
 5. 筛选生效时被置顶/重命名的条目仍按筛选显示或隐藏；不为此加提示。
+6. 同一会话的同类请求里，后发出的失败而先发出的 200 晚于它到达时，先发出的成功被序号 fence 丢弃（规格：只采用最后发出者）；服务端已生效的值到下一次列表读取才显示。
 
 ## Seams under test
 - jsdom 页面 fixture（`renderChatPage` / `renderChatPageWithAuthProbe` + `createFetchMock`）：菜单、Dialog、Toast、列表与顶栏的联动，请求体与次数，时序（挂起、乱序、重读、续期、卸载），覆盖层。
