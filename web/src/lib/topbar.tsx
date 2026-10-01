@@ -21,7 +21,7 @@ export type TopbarAction = {
   key: string;
   label: string;
   icon: IconName;
-  expanded?: boolean;
+  expanded?: boolean | undefined;
   onSelect(trigger: HTMLElement): void;
 };
 
@@ -74,6 +74,8 @@ export function TopbarProvider({ children }: { children: ReactNode }) {
  * 页面向 shell 上报面包屑与 actions；Provider 外 no-op。变更即更新，卸载时清空；面包屑改为
  * undefined 时清空，未提供 `actions` 与空数组都上报为空。
  * 用 layout effect 在绘制前同步，导航后不会闪出一帧陈旧面包屑、陈旧按钮或双 h1。
+ * 同一时刻只允许一个已挂载调用方，面包屑与 actions 必须由同一次调用上报（只报面包屑的另一
+ * 调用方每次渲染都会把 actions 压回空）。
  */
 export function useTopbar({
   breadcrumb,
@@ -91,12 +93,18 @@ export function useTopbar({
   }, [set, breadcrumb]);
   const setActions = context?.setActions;
   const latestActions = context?.latestActions;
+  const reported = context?.actions;
   // `actions` 每次渲染都是新数组：本 effect 无依赖、无 cleanup，每次渲染先记下最新的 onSelect，
   // 再只在可比较字段有变化时换 state——带 cleanup 会每次先清空再上报，state 必变而成环。
   useLayoutEffect(() => {
-    if (!setActions || !latestActions) return;
+    if (!setActions || !latestActions || !reported) return;
     const next = actions ?? NO_ACTIONS;
     latestActions.current = next;
+    // 先与渲染期读到的 state 比：即便更新函数返回 prev，React 也会把这次 update 挂在 Provider 的
+    // hook 队列里直到它下次渲染，流式期间每次渲染的 `actions` 与 `onSelect` 闭包都会被留住。
+    if (sameActions(reported, next)) return;
+    // 渲染期快照可能陈旧（路由交接时读到的是旧页的列表），以更新函数里的当前 state 为准；
+    // 因快照陈旧而跳过时，旧页的卸载清空会改变 context，本组件重渲染后 effect 重跑。
     setActions((prev) => (sameActions(prev, next) ? prev : next));
   });
   useLayoutEffect(() => {

@@ -42,6 +42,22 @@ function Page({ report }: { report: Report }) {
   return <p>页面</p>;
 }
 
+/**
+ * 后续会话页的写法：`expanded` 由条件算出，无值时是显式 `undefined` 而不是省略键——
+ * `exactOptionalPropertyTypes` 下这个字面量能通过类型检查本身就是断言（`make typecheck` 覆盖测试文件）。
+ */
+function ConditionalPage({ open }: { open: boolean }) {
+  const descriptor: TopbarAction = {
+    key: "sample",
+    label: LABEL,
+    icon: "search",
+    expanded: open ? true : undefined,
+    onSelect: () => undefined,
+  };
+  useTopbar({ breadcrumb: "T", actions: [descriptor] });
+  return <p>页面</p>;
+}
+
 /** 与 AppShell 同构的最小外壳：顶栏在 main 之外；`narrow` 时传入 `打开导航` 回调。 */
 function Shell({ narrow, children }: { narrow: boolean; children: ReactNode }) {
   return (
@@ -129,6 +145,17 @@ describe("顶栏 actions 插槽：渲染契约 (E1–E4)", () => {
     expect(screen.getAllByRole("heading", { level: 1 })).toEqual([heading]);
     expect(heading.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
     expect(button.closest(".topbar-actions")).not.toBeNull();
+  });
+
+  it("E2 显式 expanded: undefined 与省略键等价：按钮没有 aria-expanded，有值后带上", () => {
+    const view = render(tree(SESSION_PATH, <ConditionalPage open={false} />));
+    expect(actionButton().hasAttribute("aria-expanded")).toBe(false);
+
+    view.rerender(tree(SESSION_PATH, <ConditionalPage open={true} />));
+    expect(actionButton().getAttribute("aria-expanded")).toBe("true");
+
+    view.rerender(tree(SESSION_PATH, <ConditionalPage open={false} />));
+    expect(actionButton().hasAttribute("aria-expanded")).toBe(false);
   });
 
   it.each([
@@ -277,6 +304,44 @@ describe("顶栏 actions 插槽：上报与更新 (E5–E6)", () => {
   });
 });
 
+describe("顶栏 actions 插槽：节点身份 (E14)", () => {
+  it("E14 expanded 由 false 变 true：同一 key 的按钮仍是同一个 DOM 节点", () => {
+    const view = mount(SESSION_PATH, { breadcrumb: "T", actions: [action({ expanded: false })] });
+    const before = actionButton();
+    expect(before.getAttribute("aria-expanded")).toBe("false");
+
+    view.report({ breadcrumb: "T", actions: [action({ expanded: true })] });
+    expect(actionButton()).toBe(before);
+    expect(before.getAttribute("aria-expanded")).toBe("true");
+    expect(before.isConnected).toBe(true);
+  });
+
+  it("E14 label 变化：同一 key 的按钮仍是同一个 DOM 节点", () => {
+    const view = mount(SESSION_PATH, { breadcrumb: "T", actions: [action()] });
+    const before = actionButton();
+
+    view.report({ breadcrumb: "T", actions: [action({ label: "改名后" })] });
+    expect(actionButton("改名后")).toBe(before);
+    expect(before.isConnected).toBe(true);
+  });
+
+  it("E14 数组调换顺序：各 key 的按钮仍是各自原来的 DOM 节点", () => {
+    const first = action({ key: "first", label: "操作甲" });
+    const second = action({ key: "second", label: "操作乙", icon: "copy" });
+    const view = mount(SESSION_PATH, { breadcrumb: "T", actions: [first, second] });
+    const firstBefore = actionButton("操作甲");
+    const secondBefore = actionButton("操作乙");
+
+    view.report({ breadcrumb: "T", actions: [second, first] });
+    expect(actionLabels()).toEqual(["操作乙", "操作甲"]);
+    expect(actionButton("操作甲")).toBe(firstBefore);
+    expect(actionButton("操作乙")).toBe(secondBefore);
+    // 节点没被就地改写成对方：图标仍是各自的。
+    expect(firstBefore.querySelector("svg")?.classList.contains("lucide-search")).toBe(true);
+    expect(secondBefore.querySelector("svg")?.classList.contains("lucide-copy")).toBe(true);
+  });
+});
+
 describe("顶栏 actions 插槽：无 actions 与清空 (E7–E9)", () => {
   it.each([
     ["第二态 宽屏", SESSION_PATH, { breadcrumb: "T" }, false, CRUMB],
@@ -411,20 +476,44 @@ describe("图标注册表与样式 (E10)", () => {
 });
 
 /** 路由交接用的两张测试页：组件类型不同，导航时旧页真实卸载、新页真实挂载。 */
-function SessionTestPage({ onSelect }: { onSelect: () => void }) {
-  useTopbar({
-    breadcrumb: "T",
-    actions: [action({ key: "session", label: "会话操作", expanded: false, onSelect })],
-  });
+function SessionTestPage({ descriptor }: { descriptor: TopbarAction }) {
+  useTopbar({ breadcrumb: "T", actions: [descriptor] });
   return <p>会话测试页</p>;
 }
 
-function FilesTestPage({ onSelect }: { onSelect: () => void }) {
-  useTopbar({ actions: [action({ key: "files", label: "文件操作", icon: "copy", onSelect })] });
+function FilesTestPage({ descriptor }: { descriptor: TopbarAction }) {
+  useTopbar({ actions: [descriptor] });
   return <p>文件测试页</p>;
 }
 
-describe("顶栏 actions 插槽：边界 (E11–E13)", () => {
+/** 同一 MemoryRouter 内挂两张测试页（起始在会话页）；返回 `go(path)` 做导航。 */
+function mountRoutes(session: TopbarAction, files: TopbarAction, strict = false) {
+  const router = createMemoryRouter(
+    [
+      {
+        element: (
+          <Shell narrow={false}>
+            <Outlet />
+          </Shell>
+        ),
+        children: [
+          { path: "/", element: <SessionTestPage descriptor={session} /> },
+          { path: FILES_PATH, element: <FilesTestPage descriptor={files} /> },
+        ],
+      },
+    ],
+    { initialEntries: [SESSION_PATH] },
+  );
+  disposeRouter = () => router.dispose();
+  const app = <RouterProvider router={router} />;
+  render(strict ? <StrictMode>{app}</StrictMode> : app);
+  return (path: string) =>
+    act(async () => {
+      await router.navigate(path);
+    });
+}
+
+describe("顶栏 actions 插槽：边界 (E11–E13, E15)", () => {
   it("E11 Provider 外：useTopbar({actions}) 不抛，单挂 Topbar 渲染 heading 且无 .topbar-actions", () => {
     const consoleError = vi.spyOn(console, "error");
     render(
@@ -461,32 +550,16 @@ describe("顶栏 actions 插槽：边界 (E11–E13)", () => {
   it("E13 路由交接：旧页卸载清空不擦掉新页的上报，导航回去同理", async () => {
     const selectSession = vi.fn();
     const selectFiles = vi.fn();
-    const router = createMemoryRouter(
-      [
-        {
-          element: (
-            <Shell narrow={false}>
-              <Outlet />
-            </Shell>
-          ),
-          children: [
-            { path: "/", element: <SessionTestPage onSelect={selectSession} /> },
-            { path: FILES_PATH, element: <FilesTestPage onSelect={selectFiles} /> },
-          ],
-        },
-      ],
-      { initialEntries: [SESSION_PATH] },
+    const go = mountRoutes(
+      action({ key: "session", label: "会话操作", expanded: false, onSelect: selectSession }),
+      action({ key: "files", label: "文件操作", icon: "copy", onSelect: selectFiles }),
     );
-    disposeRouter = () => router.dispose();
-    render(<RouterProvider router={router} />);
 
     expect(screen.getByText("会话测试页")).toBeTruthy();
     expect(actionLabels()).toEqual(["会话操作"]);
     expect(bannerHeading(CRUMB)).toBeTruthy();
 
-    await act(async () => {
-      await router.navigate(FILES_PATH);
-    });
+    await go(FILES_PATH);
     expect(screen.getByText("文件测试页")).toBeTruthy();
     expect(screen.queryByText("会话测试页")).toBeNull();
     expect(actionLabels()).toEqual(["文件操作"]);
@@ -497,9 +570,7 @@ describe("顶栏 actions 插槽：边界 (E11–E13)", () => {
     expect(selectFiles).toHaveBeenCalledTimes(1);
     expect(selectSession).not.toHaveBeenCalled();
 
-    await act(async () => {
-      await router.navigate(SESSION_PATH);
-    });
+    await go(SESSION_PATH);
     expect(screen.getByText("会话测试页")).toBeTruthy();
     expect(actionLabels()).toEqual(["会话操作"]);
     expect(queryActionButton("文件操作")).toBeNull();
@@ -509,4 +580,48 @@ describe("顶栏 actions 插槽：边界 (E11–E13)", () => {
     expect(selectSession).toHaveBeenCalledTimes(1);
     expect(selectFiles).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    ["", false],
+    ["（StrictMode）", true],
+  ])(
+    "E15%s 路由交接且两页描述符的可比较字段完全相同：点击调用新页的回调，导航回去同理",
+    async (_mode, strict) => {
+      const consoleError = vi.spyOn(console, "error");
+      const selectSession = vi.fn();
+      const selectFiles = vi.fn();
+      const go = mountRoutes(
+        action({ expanded: false, onSelect: selectSession }),
+        action({ expanded: false, onSelect: selectFiles }),
+        strict,
+      );
+
+      expect(screen.getByText("会话测试页")).toBeTruthy();
+      expect(bannerHeading(CRUMB)).toBeTruthy();
+      expect(actionLabels()).toEqual([LABEL]);
+      fireEvent.click(actionButton());
+      expect(selectSession).toHaveBeenCalledTimes(1);
+      expect(selectFiles).not.toHaveBeenCalled();
+
+      await go(FILES_PATH);
+      expect(screen.getByText("文件测试页")).toBeTruthy();
+      expect(screen.queryByText("会话测试页")).toBeNull();
+      expect(bannerHeading("工作空间")).toBeTruthy();
+      expect(actionLabels()).toEqual([LABEL]);
+      expect(actionButton().getAttribute("aria-expanded")).toBe("false");
+      fireEvent.click(actionButton());
+      expect(selectFiles).toHaveBeenCalledTimes(1);
+      expect(selectSession).toHaveBeenCalledTimes(1);
+
+      await go(SESSION_PATH);
+      expect(screen.getByText("会话测试页")).toBeTruthy();
+      expect(screen.queryByText("文件测试页")).toBeNull();
+      expect(bannerHeading(CRUMB)).toBeTruthy();
+      expect(actionLabels()).toEqual([LABEL]);
+      fireEvent.click(actionButton());
+      expect(selectSession).toHaveBeenCalledTimes(2);
+      expect(selectFiles).toHaveBeenCalledTimes(1);
+      expect(consoleError).not.toHaveBeenCalled();
+    },
+  );
 });
