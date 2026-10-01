@@ -2,7 +2,7 @@
 
 ## 7. web — 三分区侧栏与筛选（父 tasks 7.1）
 
-- [x] 7.1 新建 `web/src/features/chat/session-groups.ts`（纯函数：筛选 状态 全部/进行中=`running`/已完成=`done|failed|stopped` × 时间 全部时间/今天=本地日历日/更早，取交集；分区 置顶 > 空间（按 `workspaceId` 分子组、顺序为工作空间列表顺序、不在列表 → 末位 `未知空间`）> 任务，互斥、保持服务端顺序）+ `session-sidebar.tsx`（取代并删除 `session-nav.tsx`；分区 `置顶任务`（无计数）/`任务 (n)`/`空间 (n)` 及子组为带名 `role="group"`，空分区不渲染，无任何会话 → `没有匹配的任务`；保留选择按钮、`新会话` 标题回退与状态元素；`新建会话` 名称不变）+ `session-filter.tsx`（`筛选任务` Popover，两个 `role="radiogroup"`，选择即生效、弹层保持打开，Escape 关闭且焦点回到 `筛选任务`，状态只在页面内存）+ `workspace-list.ts`（`useWorkspaceList`，design D3）；`ChatPage.refreshList` 并行触发工作空间读取，读取失败只影响归组（全部落 `未知空间`）、会话列表照常渲染。保留 design「Must-preserve」的 DOM 钩子。既有测试改动限 design D7 的封闭清单。验证：新建 `web/test/session-groups.test.ts`（G1–G5）与 `web/test/chat-page-sidebar.test.tsx`（S1–S12）；CI `ui-walk` 两个 project 全绿
+- [x] 7.1 新建 `web/src/features/chat/session-groups.ts`（纯函数：筛选 状态 全部/进行中=`running`/已完成=`done|failed|stopped` × 时间 全部时间/今天=本地日历日/更早，取交集；分区 置顶 > 空间（按 `workspaceId` 分子组、顺序为工作空间列表顺序、不在列表 → 末位 `未知空间`）> 任务，互斥、保持服务端顺序）+ `session-sidebar.tsx`（取代并删除 `session-nav.tsx`；分区 `置顶任务`（无计数）/`任务 (n)`/`空间 (n)` 及子组为带名 `role="group"`，空分区不渲染，无任何会话 → `没有匹配的任务`；保留选择按钮、`新会话` 标题回退与状态元素；`新建会话` 名称不变）+ `session-filter.tsx`（`筛选任务` Popover，两个 `role="radiogroup"`，选择即生效、弹层保持打开，Escape 关闭且焦点回到 `筛选任务`，状态只在页面内存）+ `workspace-list.ts`（`useWorkspaceList`，design D3）；`ChatPage.refreshList` 并行触发工作空间读取，读取失败只影响归组（全部落 `未知空间`）、会话列表照常渲染。保留 design「Must-preserve」的 DOM 钩子。既有测试改动限 design D7 的封闭清单。验证：新建 `web/test/session-groups.test.ts`（G1–G5）与 `web/test/chat-page-sidebar.test.tsx`（S1–S12 及 design「评审后补充」的 S2b/S7b/S8b/S12b）；CI `ui-walk` 两个 project 全绿
 
 ## Risk packs
 
