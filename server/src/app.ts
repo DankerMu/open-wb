@@ -35,6 +35,7 @@ import { registerModelProxy } from "./model-proxy/index.js";
 import { SERVICE_INFO } from "./service-info.js";
 import type { ChatEvent } from "./sessions/events.js";
 import { registerSessions } from "./sessions/index.js";
+import { ompAgentDir } from "./sessions/omp/process.js";
 import type { SpawnLog } from "./sessions/omp/spawn-gate.js";
 import type { SessionStore } from "./sessions/store.js";
 import type { SessionSupervisor, SessionSupervisorRuntime } from "./sessions/supervisor.js";
@@ -161,6 +162,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     tokens,
     runtime,
     workspaceRootOf: (ownerId, workspaceId) => store.rootOf({ id: ownerId }, workspaceId),
+    agentDir: ompAgentDir(runtime.stateDir),
     onError: assembly?.onError ?? ((error) => observeSessionFault(app, error)),
     ...(assembly?.onEvent === undefined ? {} : { onEvent: assembly.onEvent }),
     ...(assembly?.log === undefined ? {} : { log: assembly.log }),

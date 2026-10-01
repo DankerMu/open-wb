@@ -44,6 +44,8 @@ interface SessionRestDependencies {
   metadata: SessionMetadataStore;
   workspaceRootOf: WorkspaceRootOf;
   deleter: Pick<SessionDeleter, "deleteSession">;
+  /** The omp agent directory of the slash whitelist; no route reads it yet. */
+  agentDir: string;
 }
 
 interface PublicSession {

@@ -62,6 +62,7 @@ export async function withSessionRest<T>(
           supervisor,
           metadata: createSessionMetadataStore(db, { emit }),
           workspaceRootOf: () => null,
+          agentDir: "/nonexistent/omp-agent",
           deleter: {
             deleteSession: () =>
               Promise.reject(new Error("session-rest harness does not serve DELETE")),
