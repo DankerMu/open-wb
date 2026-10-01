@@ -35,6 +35,7 @@ Evidence floor: 新建 `web/test/session-groups.test.ts` 与 `web/test/chat-page
 6. **外点关闭不归还焦点**：父文「Escape 或点击外部关闭并把焦点还给 `筛选任务`」对外点不成立——`Popover` 是 Radix 非模态弹层，外部交互关闭时不把焦点拉回 trigger（`@radix-ui/react-popover` `PopoverContentNonModal.onCloseAutoFocus`）。子 delta 写成「Escape 关闭并归还焦点；外点关闭、不归还焦点」。父文应同步采纳。
 7. **筛选呈现用 `SegmentedControl`**：两个单选组直接用既有基元（Radix RadioGroup：`radiogroup`/`radio`/`aria-checked`、方向键），而非 demo:1828-1851 的竖排菜单项；feature 不得绕过 `web/src/ui/index.ts` 直接引 Radix。已写进子 delta 作为有意偏差。
 8. 子 delta 另写明三处父文未写的可观察行为：筛选按钮与单选项不关闭导航覆盖层；筛选状态在折叠/展开侧栏与关闭/重开覆盖层后保留（状态归会话页而非槽位节点）；「今天」的当前时间取渲染时刻、不设定时器。新增 Scenario「筛选跨覆盖层保留」。
+9. 子 delta 相对父文的另外三处文字差异，父文应同步采纳：空态句加「会话列表已读取而…」的前提与「会话列表读取中或读取失败时沿用 chat-web 既有的 `正在读取会话` 与错误提示，不渲染该文本」；筛选状态的复位条件写成「刷新或离开会话页复位」（父文只写「刷新复位」）；`筛选任务` 按钮注明 `Icon filter`（父文只引 demo:1787）。
 
 ## Impact
 - web：四个新产品文件、一个删除、`page.tsx` 接线、`chat.css`、两个新测试文件、design D7 封闭清单内的既有测试改动。server 与 `web/e2e/**` 无改动。

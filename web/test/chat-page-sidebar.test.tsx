@@ -2,13 +2,25 @@ import "./radix-platform.js";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SHELL_NARROW_QUERY } from "../src/lib/viewport.js";
-import { settleDeferredResponse } from "./chat-page-lifecycle-support.js";
-import { cleanupChatPage, type FetchRoutes, renderChatPage } from "./chat-page-support.js";
+import {
+  cleanupChatLifecycle,
+  renderChatPageWithAuthProbe,
+  renewAccount,
+  settleDeferredResponse,
+} from "./chat-page-lifecycle-support.js";
+import { type FetchRoutes, renderChatPage } from "./chat-page-support.js";
 import { chatSnapshot, settle } from "./chat-stream-support.js";
 import { createMediaQuery, installMatchMedia, uninstallMatchMedia } from "./media-query-support.js";
 import { NULL_SESSION_META } from "./session-meta-fixtures.js";
 import { calls, currentLocation, deferredResponse, jsonResponse } from "./support.js";
-import { listRepoFiles, pressPointer, readRepoFile, yieldMacrotask } from "./ui-support.js";
+import {
+  listRepoFiles,
+  pressPointer,
+  readRepoFile,
+  ruleBody,
+  stripComments,
+  yieldMacrotask,
+} from "./ui-support.js";
 
 const HERO = "WorkBuddy，我帮你";
 const FILTER = "筛选任务";
@@ -39,7 +51,7 @@ beforeEach(() => {
 
 // 弹层/覆盖层的 FocusScope 在卸载后的宏任务里归还焦点，先让出一轮再清 mock 与 DOM。
 afterEach(async () => {
-  cleanupChatPage();
+  cleanupChatLifecycle();
   uninstallMatchMedia();
   await yieldMacrotask();
   vi.useRealTimers();
@@ -49,7 +61,7 @@ afterEach(async () => {
 
 function listed(
   id: string,
-  title: string,
+  title: string | null,
   overrides: {
     pinnedAt?: number | null;
     status?: "idle" | "running" | "done" | "failed" | "stopped";
@@ -250,6 +262,8 @@ describe("三分区侧栏 (S1)", () => {
         expect(within(nav).getAllByRole("button", { name: title })).toHaveLength(1);
       }
       expect(nav.textContent).not.toContain("助理任务");
+      // 前端不渲染空间根路径：夹具里两个空间的 root 都不在列表区文本里。
+      for (const id of [W1, W2]) expect(nav.textContent).not.toContain(workspace(id, "").root);
       expect(screen.getAllByRole("navigation", { name: "会话列表" })).toHaveLength(1);
     },
   );
@@ -425,15 +439,57 @@ describe("状态与时间筛选 (S2–S4, S9, S10)", () => {
     expect(window.localStorage.length).toBe(0);
     expect(window.sessionStorage.length).toBe(0);
   });
+
+  it("S2 今天 的当前时间取渲染时刻：时钟跨到次日后重新渲染，今天 不再匹配任何会话", async () => {
+    renderChatPage("/", sidebarRoutes(FILTER_FIXTURE));
+    const nav = await findList("进行中的");
+    await openFilter(nav);
+    choose("今天");
+    expect(titles(nav)).toEqual(["进行中的", "完成的", "未开始的"]);
+
+    // 不设定时器：时钟前进本身不触发渲染，经一次真实交互（切走再切回）才重新取当前时间。
+    vi.setSystemTime(new Date(2026, 4, 21, 0, 0, 1));
+    choose("全部时间");
+    expect(titles(nav)).toHaveLength(5);
+    choose("今天");
+    expect(within(nav).getByText(EMPTY, { exact: true })).toBeTruthy();
+    expect(within(nav).queryAllByRole("group")).toEqual([]);
+    expect(titles(nav)).toEqual([]);
+    choose("更早");
+    expect(titles(nav)).toHaveLength(5);
+  });
+
+  it("S8 对照 离开会话页复位：经主导航去 /files 再回 / 后单选回到 全部 / 全部时间，列表完整", async () => {
+    renderChatPage("/", sidebarRoutes(FILTER_FIXTURE));
+    const nav = await findList("进行中的");
+    await openFilter(nav);
+    choose("已完成");
+    choose("今天");
+    expect(titles(nav)).toEqual(["完成的"]);
+    await escapeFilter();
+
+    const aside = screen.getByRole("complementary", { name: "侧栏" });
+    fireEvent.click(within(aside).getByRole("link", { name: /^工作空间/ }));
+    await screen.findByRole("heading", { level: 1, name: "工作空间" });
+    expect(screen.queryByRole("navigation", { name: "会话列表" })).toBeNull();
+    fireEvent.click(within(aside).getByRole("link", { name: "会话" }));
+
+    const restored = await findList("进行中的");
+    expect(titles(restored)).toEqual(["进行中的", "完成的", "未开始的", "失败的", "停止的"]);
+    await openFilter(restored);
+    expect(checked("全部")).toBe("true");
+    expect(checked("全部时间")).toBe("true");
+  });
 });
 
 describe("工作空间读取与归组 (S5–S7)", () => {
   const BOUND = [listed(B, "绑定会话", { workspaceId: W1 }), listed(D, "普通任务")];
 
-  it("S5 工作空间读取 500：会话照常渲染，绑定会话在 空间 (1) > 未知空间，列表区没有 alert", async () => {
+  it("S5 工作空间读取 500：会话照常渲染，同一空间的两个绑定会话在 空间 (2) > 未知空间（计条目数），列表区没有 alert", async () => {
+    const sessions = [...BOUND, listed(E, "另一个绑定会话", { workspaceId: W1 })];
     const { fetchMock } = renderChatPage(
       "/",
-      sidebarRoutes(BOUND, () =>
+      sidebarRoutes(sessions, () =>
         jsonResponse({ error: { code: "internal", message: "工作空间不可用" } }, 500),
       ),
     );
@@ -441,8 +497,8 @@ describe("工作空间读取与归组 (S5–S7)", () => {
     await waitFor(() => expect(workspaceRequests(fetchMock)).toBe(1));
     await act(settle);
 
-    expect(groupLabels(nav)).toEqual(["任务 (1)", "空间 (1)", UNKNOWN]);
-    expect(titles(group(group(nav, "空间 (1)"), UNKNOWN))).toEqual(["绑定会话"]);
+    expect(groupLabels(nav)).toEqual(["任务 (1)", "空间 (2)", UNKNOWN]);
+    expect(titles(group(group(nav, "空间 (2)"), UNKNOWN))).toEqual(["绑定会话", "另一个绑定会话"]);
     expect(titles(group(nav, "任务 (1)"))).toEqual(["普通任务"]);
     expect(within(nav).queryByRole("alert")).toBeNull();
     expect(nav.textContent).not.toContain("工作空间不可用");
@@ -506,6 +562,40 @@ describe("工作空间读取与归组 (S5–S7)", () => {
     await settleDeferredResponse(first, workspaceList(workspace(W1, "第一次的名字")));
     expect(groupLabels(nav)).toEqual(["任务 (2)", "空间 (1)", "第二次的名字"]);
     expect(nav.textContent).not.toContain("第一次的名字");
+  });
+});
+
+describe("换账号后不沿用上一账号的工作空间列表 (D3)", () => {
+  it("S7 对照 换账号：新账号的工作空间响应挂起时绑定会话归 未知空间、不露出上一账号的空间名；到达后按新名归组", async () => {
+    const pending = deferredResponse();
+    let renewed = false;
+    const { getProbe } = renderChatPageWithAuthProbe("/", {
+      "/api/sessions": () =>
+        jsonResponse({
+          sessions: [
+            renewed
+              ? listed(D, "乙的会话", { workspaceId: W1 })
+              : listed(B, "甲的会话", { workspaceId: W1 }),
+          ],
+        }),
+      "/api/workspaces": () =>
+        renewed ? pending.promise : workspaceList(workspace(W1, "甲的空间")),
+    });
+    const nav = await findList("甲的会话");
+    await within(nav).findByRole("group", { name: "甲的空间" });
+
+    // 同一工作空间 id：若沿用上一账号的列表，乙的会话会落进「甲的空间」。
+    renewed = true;
+    await renewAccount(getProbe);
+    const list = await findList("乙的会话");
+    expect(groupLabels(list)).toEqual(["空间 (1)", UNKNOWN]);
+    expect(titles(group(list, UNKNOWN))).toEqual(["乙的会话"]);
+    expect(list.textContent).not.toContain("甲的空间");
+    expect(list.textContent).not.toContain("甲的会话");
+
+    await settleDeferredResponse(pending, workspaceList(workspace(W1, "乙的空间")));
+    expect(groupLabels(list)).toEqual(["空间 (1)", "乙的空间"]);
+    expect(titles(group(list, "乙的空间"))).toEqual(["乙的会话"]);
   });
 });
 
@@ -586,7 +676,11 @@ describe("既有 DOM 钩子保持 (S11)", () => {
     renderChatPage(
       `/?session=${B}`,
       sidebarRoutes(
-        [listed(B, "选中的"), listed(A, "运行中的", { status: "running" })],
+        [
+          listed(B, "选中的"),
+          listed(A, "运行中的", { status: "running" }),
+          listed(C, null, { status: "idle" }),
+        ],
         undefined,
         { [messagesPath(B)]: () => deferredResponse().promise },
       ),
@@ -609,7 +703,9 @@ describe("既有 DOM 钩子保持 (S11)", () => {
     expect(within(nav).getByRole("button", { name: "新建会话" }).className).toBe(
       "ui-btn ui-btn--primary ui-btn--md chat-new-session",
     );
-    expect(titles(nav)).toEqual(["选中的", "运行中的"]);
+    // 无标题会话回退为 新会话：选择按钮与状态元素的名称都用回退标题。
+    expect(titles(nav)).toEqual(["选中的", "运行中的", "新会话"]);
+    expect(within(nav).getByRole("status", { name: "新会话 未开始" }).textContent).toBe("未开始");
     const selected = within(nav).getByRole("button", { name: "选中的" });
     const other = within(nav).getByRole("button", { name: "运行中的" });
     expect(selected.classList.contains("chat-session-button")).toBe(true);
@@ -628,7 +724,7 @@ describe("既有 DOM 钩子保持 (S11)", () => {
     const loading = within(loadingNav).getByText("正在读取会话", { exact: true });
     expect(loading.getAttribute("role")).toBe("status");
     expect(within(loadingNav).queryByText(EMPTY, { exact: true })).toBeNull();
-    cleanupChatPage();
+    cleanupChatLifecycle();
 
     renderChatPage(
       "/",
@@ -655,5 +751,18 @@ describe("旧列表组件已移除 (S12)", () => {
     expect(readRepoFile("web/src/features/chat/session-sidebar.tsx")).toContain(
       'className="chat-session-nav"',
     );
+  });
+
+  it("S12 静态样式：分区容器是唯一滚动容器，覆盖层内不滚动，列表与 nav 自身无 overflow", () => {
+    const css = stripComments(readRepoFile("web/src/features/chat/chat.css"));
+    const groups = ruleBody(css, ".chat-session-groups");
+    expect(groups).toContain("overflow-y: auto;");
+    expect(groups).toContain("min-height: 0;");
+    expect(ruleBody(css, '.sidebar[data-variant="overlay"] .chat-session-groups')).toContain(
+      "flex: none;",
+    );
+    expect(ruleBody(css, ".chat-session-list")).not.toContain("overflow");
+    expect(ruleBody(css, ".chat-session-nav")).not.toContain("overflow");
+    expect(css).not.toContain('.sidebar[data-variant="overlay"] .chat-session-list');
   });
 });
