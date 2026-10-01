@@ -8,8 +8,10 @@ import { useAuth } from "../auth/index.js";
 import { ConversationView } from "./conversation-view.js";
 import { errorMessage, isNotFound, isUnauthorized } from "./errors.js";
 import { ownsCreateSend, ownsHistory, ownsMutation, visibleOwnedAlert } from "./ownership.js";
+import { RenameDialog } from "./rename-dialog.js";
+import { useSessionActions } from "./session-actions.js";
 import { DEFAULT_SESSION_FILTER } from "./session-groups.js";
-import { selectedSessionTitle, sessionNavigation } from "./session-path.js";
+import { selectedSession, sessionNavigation } from "./session-path.js";
 import { SessionSidebar } from "./session-sidebar.js";
 import {
   applyChatEvent,
@@ -18,6 +20,7 @@ import {
   connectSessionEvents,
   isUnknownTurn,
 } from "./stream.js";
+import { chatTopbar } from "./topbar-actions.js";
 import { TERMINAL_REFRESH_GUIDANCE, useTurnActions } from "./turn-actions.js";
 import type {
   ChatHistoryState,
@@ -65,6 +68,7 @@ export function ChatPage() {
   const [forkOwner, setForkOwner] = useState<ChatMutationOwner | null>(null);
   const [sessionFilter, setSessionFilter] = useState(DEFAULT_SESSION_FILTER);
   const { refresh: refreshWorkspaces, workspaces } = useWorkspaceList(client);
+  const sessionActions = useSessionActions(client, setListState, setHistoryState);
   const mountedRef = useRef(false);
   const clientRef = useRef(client);
   const requestedSessionRef = useRef(requestedSessionId);
@@ -611,9 +615,8 @@ export function ChatPage() {
   const listForClient =
     listState.client === client && listState.status === "success" ? listState : null;
   const historyView = ownedHistory && historyState.status === "ready" ? historyState.view : null;
-  useTopbar({
-    breadcrumb: selectedSessionTitle(requestedSessionId, listForClient, ownedHistory, historyState),
-  });
+  const selected = selectedSession(requestedSessionId, listForClient, ownedHistory, historyState);
+  useTopbar(chatTopbar(selected, sessionActions.openRename));
   const ownedBusy = ownsMutation(mutationOwner, client, requestedSessionId);
   const ownedStreamError = visibleOwnedAlert(streamError, client, requestedSessionId);
   const generating =
@@ -635,7 +638,9 @@ export function ChatPage() {
       listLoading={listState.client === client && listState.status === "loading"}
       onCreateSession={() => createAndSelect()}
       onFilterChange={setSessionFilter}
+      onRenameSession={sessionActions.openRename}
       onSelectSession={selectSession}
+      onTogglePin={sessionActions.togglePin}
       requestedSessionId={requestedSessionId}
       sessions={listForClient?.sessions ?? null}
       workspaces={workspaces}
@@ -661,6 +666,7 @@ export function ChatPage() {
         sendDisabled={sendDisabled}
         streamError={ownedStreamError}
       />
+      <RenameDialog rename={sessionActions.rename} />
     </section>
   );
 }

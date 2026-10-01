@@ -5,7 +5,7 @@
 - `page.tsx` **666 行**（本刀上限 676）。`useTopbar({ breadcrumb: selectedSessionTitle(...) })` 在 `page.tsx:614-616`，是全页唯一的 `useTopbar` 调用（#529 的单调用方规则）。
 - `patchSession(id, patch, options?)`（`web/src/lib/api-sessions.ts:114-136`）：空对象抛 `TypeError`；200 返回解析后的八键视图。服务端 PATCH 不改 `updated_at`/`status`（session-metadata「会话元数据修改」）。
 - `Menu`（`web/src/ui/menu.tsx`）：`items: {label, onSelect, icon?}[]`，`modal={false}`，关闭后焦点回 trigger。`Dialog`（`web/src/ui/dialog.tsx`）：`busy`、`initialFocus`、`returnFocus`（`RefObject`）、`dismissible`。Menu → Dialog 的既有写法：`web/src/features/files/dialogs.tsx:36-45`（`onSelect` 把 trigger 元素交给调用方作 `returnFocus`）。
-- `useToast()` 已在 `composer.tsx`、`message-actions.tsx` 使用，所有挂载会话页的夹具都有 `ToastProvider`。
+- `useToast()` 已在 `composer.tsx`、`message-actions.tsx` 使用，但那是叶子组件（欢迎态与无消息时不挂载）。生产入口 `main.tsx` 与 `render-app-router.tsx`、`chat-page-lifecycle-support.tsx` 有 `ToastProvider`；`web/test/routes.test.tsx`（三处）与 `web/test/settings-support.tsx` 的 `renderApp` 把 `createAppRouter()` 裸挂在 `RouterProvider` 下，没有 Provider——页面级 hook 调用 `useToast()` 后这两个夹具必须补上（Must-preserve 5）。
 - 层级：Menu 1600、Dialog 1400 均高于导航 Drawer 1360（`menu.css:6`、`dialog.css:10`、`:99`）；本刀不用 `Popover`，不受 #715 影响。
 
 ## Governing invariant
@@ -35,7 +35,7 @@
 | `const sessionActions = useSessionActions(client, setListState, setHistoryState)` | +1 |
 | `useTopbar({ breadcrumb: selectedSessionTitle(…) })`（3 行）→ `const selected = selectedSession(…)` + `useTopbar(chatTopbar(selected, sessionActions.openRename))` | −1 |
 | 槽位 props：`onRenameSession`、`onTogglePin` | +2 |
-| `{sessionActions.rename ? <RenameDialog {...sessionActions.rename} /> : null}` | +1 |
+| `<RenameDialog rename={sessionActions.rename} />`（空判断在组件内：内联三元会让 `ChatPage` 的认知复杂度到 16，超过 Biome 上限 15） | +1 |
 实际行数以格式化后为准，PR 记录 666 与合入后行数。`types.ts`、`turn-actions.ts`、`stream.ts`、`workspace-list.ts`、`session-groups.ts`、`session-filter.tsx`、`web/src/lib/**`、`web/src/ui/**`、`web/src/routes/**` 零 diff。
 
 ### D2 `session-actions.ts`：`useSessionActions(client, setListState, setHistoryState)`
@@ -76,10 +76,10 @@ export const CHAT_TOPBAR_ACTIONS = [
 2. 选择会话与 `新建会话` 仍调用 `onNavigate`；「更多」按钮、菜单项、Dialog 都不调用。
 3. `selectedSessionTitle` 的签名与结果（`topbar.test.tsx:178`）；无选中会话时 `useTopbar` 不上报面包屑与 actions（顶栏三态既有断言）。
 4. `/api/sessions`、`/api/workspaces` 的请求次数与时机不变；本刀不触发 `refreshList`。
-5. 既有测试零 diff。
+5. 既有测试的断言零 diff。唯一的既有文件改动是夹具形状：`web/test/routes.test.tsx` 三处 `render(<RouterProvider …/>)` 与 `web/test/settings-support.tsx` 的 `renderApp` 外包一层 `ToastProvider`，与 `main.tsx` 的根结构一致（实现时发现：这两个夹具此前缺 Provider 而未暴露）。
 
 ## Required evidence
-`web/test/chat-page-session-rename-pin.test.tsx`（首行引入 `./radix-platform.js`；全部 RED，除注明者）。「Enter」在 jsdom 里的输入是 `fireEvent.submit(form)`——jsdom 不做隐式表单提交、仓库没有 user-event，先例 `web/test/login-form.test.tsx:325-336`；真实按键由一次性浏览器观察覆盖。M15 用动态 `import()` 取 `topbar-actions.js`，使实现前其余用例照常运行（M16 前半可观察）。
+`web/test/chat-page-session-rename-pin.test.tsx`（M1–M7、M13、M14、M16）与 `web/test/chat-page-session-pin.test.tsx`（M8–M12、M15），共用 `web/test/chat-page-session-meta-support.tsx`——单文件会超过 800 行（首行引入 `./radix-platform.js`；全部 RED，除注明者）。「Enter」在 jsdom 里的输入是 `fireEvent.submit(form)`——jsdom 不做隐式表单提交、仓库没有 user-event，先例 `web/test/login-form.test.tsx:325-336`；真实按键由一次性浏览器观察覆盖。M15 静态导入 `topbar-actions.js` 并放在 pin 文件：Vite 在转换期解析 `import()` 的字面量说明符，动态导入同样让所在文件在实现前无法收集；非字面量说明符则 knip 看不到引用。实现前 pin 文件整体收集失败计 RED，M16 前半在 rename-pin 文件里可观察。另含 D2 的 401 分支两条（重命名 401 只复位忙碌、置顶 401 不提示）。
 - M1 菜单：未置顶会话的 `更多操作：<标题>` 打开后 `menuitem` 恰为 `重命名`、`置顶任务`；已置顶会话为 `重命名`、`取消置顶`；无 `删除`、`导出记录`；`running` 会话的菜单同样可打开且两项可用；`title: null` 的会话按钮名为 `更多操作：新会话`；每个条目恰一个「更多」按钮，且它不在 `button.chat-session-button` 内。
 - M2 行菜单重命名成功：输入初值为服务端标题、打开时焦点在输入框；改为 `  周报整理  ` 点 `保存` → 恰一次 `PATCH /api/sessions/<id>`、body 文本恰为 `{"title":"周报整理"}`、`Content-Type: application/json`；Dialog 消失；条目按钮名与顶栏 heading `我的工作 / 周报整理` 更新；Toast `已重命名`；焦点在该条目的 `更多操作：周报整理` 按钮；全程无 `/api/sessions` 列表请求。
 - M3 禁用与 Enter：输入全空白 → `保存` 禁用、Enter 不发请求；`title: null` 会话打开时输入为空且 `保存` 禁用；输入有效文本后 Enter → 恰一次 PATCH（等价 `保存`）。
@@ -93,13 +93,13 @@ export const CHAT_TOPBAR_ACTIONS = [
 - M11 迟到响应不回退状态（Scenario「迟到的元数据响应」）：`running` 会话置顶请求挂起 → 触发一次列表重读（点 `新建会话`，`page.tsx:499`；返回该会话 `done`）→ 置顶响应到达（视图 `status: "running"`、`pinnedAt` 非 null）→ 条目在 `置顶任务` 且状态元素名为 `<标题> 已完成`。
 - M12 乱序：同一会话在第一次置顶响应返回前再点一次 `置顶任务`（无乐观更新，两次请求体都是 `{"pinned":true}`）；第二次的响应（`pinnedAt` 非 null）先到 → 条目进 `置顶任务`；第一次的响应（`pinnedAt: null`）后到 → 被丢弃，条目仍在 `置顶任务`，全程只有一条 `已更新置顶状态`。跨类：重命名请求中关闭 Dialog → 对同一会话 `置顶任务`；置顶响应先到（进 `置顶任务`），重命名响应后到（其视图 `pinnedAt: null`、`title` 为新标题）→ 条目仍在 `置顶任务` 且标题更新，两条 Toast 各出现一次。镜像：置顶请求挂起 → 顶栏重命名成功（标题已更新）→ 置顶响应到达（其视图 `title` 为旧标题、`pinnedAt` 非 null）→ 条目进 `置顶任务` 且标题仍为新值。
 - M13 fence：重命名 PATCH 挂起时续期为另一 client（`renderChatPageWithAuthProbe` + `renewAccount`）→ 旧响应到达后无 Toast、新账号的列表不变、没有 Dialog；PATCH 挂起时卸载页面 → 响应到达不抛错、无 React 警告。
-- M14 `≤760px` 覆盖层：`导航` 内条目 `更多操作` → `重命名` → Dialog 打开且 `导航` dialog 仍在 DOM；保存成功后 `导航` 仍在、条目名已更新；`置顶任务` 同样不关闭覆盖层。（Dialog 打开期间 Drawer 被 `hideOthers`，查询需 `hidden: true`。）
+- M14 `≤760px` 覆盖层：`导航` 内条目 `更多操作` → `重命名` → Dialog 打开且 `导航` dialog 仍在 DOM；保存成功后 `导航` 仍在、条目名已更新；`置顶任务` 同样不关闭覆盖层。（Dialog 打开期间 Drawer 被 `hideOthers` 标为 `aria-hidden`，其 accessible name 算作空串，按名称查不到；断言按元素「仍在 DOM 中」。）
 - M15 `CHAT_TOPBAR_ACTIONS`：`key` 次序恰为 `rename`、`search`、`artifacts`，标签 `重命名`、`对话内搜索`、`产物面板`，图标 `pencil`、`search`、`package`；`chatTopbarActions({ artifacts, rename })` 返回次序为 `rename`、`artifacts`（按常量而非入参键序），`expanded` 透传，未给的槽位不出现。
 - M16 （保持项，实现前后皆绿）`selectedSessionTitle` 的既有行为由 `topbar.test.tsx` 覆盖；本文件只断言选择按钮仍调用选择（点击条目按钮 → `?session=` 改变）且菜单按钮点击不改变 `?session=`——后半句 RED（按钮不存在）。
 
 实现前后各跑一次并记录：RED 集合 = M1–M15 与 M16 后半；既有套件实现前后皆绿、零 diff。
 
-一次性真实浏览器观察（不入库，写进 PR）：1440×900 与 390×844 各做一次「行菜单 → 重命名 → 保存」与「置顶 → 取消置顶」，记录菜单与 Dialog 是否可见可点（`elementFromPoint`）、「更多」按钮在两种视口的可见性、长标题下行内两个按钮不溢出；真实键盘 Enter 三项：有效文本提交一次、全空白不提交、在输入框内 Enter 提交后焦点仍在输入框时再按 Enter 不重发（鼠标点 `保存` 后焦点会被救回到 `关闭`，那条路径上 Enter 是关闭 Dialog，同样不重发）。
+一次性真实浏览器观察（不入库，写进 PR；结果：两种视口全部符合，详见 PR）：1440×900 与 390×844 各做一次「行菜单 → 重命名 → 保存」与「置顶 → 取消置顶」，记录菜单与 Dialog 是否可见可点（`elementFromPoint`）、「更多」按钮在两种视口的可见性、长标题下行内两个按钮不溢出；真实键盘 Enter 三项：有效文本提交一次、全空白不提交、在输入框内 Enter 提交后焦点仍在输入框时再按 Enter 不重发（鼠标点 `保存` 后焦点会被救回到 `关闭`，那条路径上 Enter 是关闭 Dialog，同样不重发）。
 
 ## 已知残留
 1. 置顶/取消置顶后条目换了父节点（分区）而重挂，菜单关闭时归还给旧「更多」按钮的焦点随之落到 `body`；不把焦点移到迁移后的条目（规格未要求）。

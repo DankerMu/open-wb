@@ -9,7 +9,7 @@ Fixture level: expanded
 Upstream suggested level: expanded (agree)
 Blast radius: 所有视口的侧栏条目行（新增同级按钮）；会话页顶栏第二态（首次注入 `actions`）；`listState`/快照会话的元数据写入路径；`CHAT_TOPBAR_ACTIONS` 是 7.6/7.7 的共同前提；`page.tsx` 行数预算（666 → ≤676）。
 Selected risk packs: Public API / CLI / script entry（`CHAT_TOPBAR_ACTIONS` 槽位次序与 builder 形状）；Concurrency / shared state / ordering（PATCH 在途时的列表刷新、乱序响应、账号切换与卸载、槽位节点卸载）；Error handling / rollback / partial outputs（失败保留 Dialog、置顶失败列表不变）；Schema / columns / units / field names（请求体恰为 `{title}`/`{pinned}`、只合并该请求修改的键）；Legacy compatibility / examples（既有条目钩子与既有测试零 diff）
-Evidence floor: 新建 `web/test/chat-page-session-rename-pin.test.tsx` 覆盖 design「Required evidence」；既有测试零 diff 全绿；`npm test --workspace web`、`make lint`、`make typecheck`、`make anti-drift`、`bash scripts/size-guard.sh` 退出 0；CI `ui-walk` 两个 project 全绿（既有走查，回归门）。真实浏览器 + 视口矩阵验收由 8.2b 承担；本刀另附一次 390×844 与 1440×900 的一次性真实浏览器观察（不入库）。
+Evidence floor: 新建 `web/test/chat-page-session-rename-pin.test.tsx`、`chat-page-session-pin.test.tsx`（及共用 support 模块）覆盖 design「Required evidence」；既有测试断言零 diff 全绿（两个夹具补 `ToastProvider`，偏差 6）；`npm test --workspace web`、`make lint`、`make typecheck`、`make anti-drift`、`bash scripts/size-guard.sh` 退出 0；CI `ui-walk` 两个 project 全绿（既有走查，回归门）。真实浏览器 + 视口矩阵验收由 8.2b 承担；本刀另附一次 390×844 与 1440×900 的一次性真实浏览器观察（不入库）。
 
 ## What Changes
 - 新建 `web/src/features/chat/session-menu.tsx`：行尾 `更多操作：<显示标题>` 按钮 + `Menu` 两项。
@@ -20,7 +20,7 @@ Evidence floor: 新建 `web/test/chat-page-session-rename-pin.test.tsx` 覆盖 d
 - `session-path.ts`：加 `selectedSession()`，`selectedSessionTitle` 改为其薄封装（签名不变）。
 - `page.tsx`：hook、`useTopbar` 的 `actions`、侧栏两个回调、`<RenameDialog>`（666 → ≤676）。
 - `chat.css`：条目行布局与「更多」按钮、Dialog 表单样式。
-- 新建 `web/test/chat-page-session-rename-pin.test.tsx`。
+- 新建 `web/test/chat-page-session-rename-pin.test.tsx`、`web/test/chat-page-session-pin.test.tsx`、`web/test/chat-page-session-meta-support.tsx`；`web/test/routes.test.tsx`、`web/test/settings-support.tsx` 的挂载补 `ToastProvider`。
 
 ## Capabilities
 - ADDED `session-sidebar`「会话条目菜单与重命名」（菜单两项、重命名、置顶、顶栏重命名入口）。
@@ -34,8 +34,9 @@ Evidence floor: 新建 `web/test/chat-page-session-rename-pin.test.tsx` 覆盖 d
 3. **请求中可关闭、请求不取消**：父文只写「请求中 Dialog 忙碌、`保存` 禁用」，没说能否关闭。既有先例是可关闭（spa-shell 退出确认「提交中允许关闭窗口以避免网络停滞锁死应用」、`features/files/dialogs.tsx` 的 `取消` 在 pending 时可用），`lib/api.ts` 没有请求超时。子 delta 写明：请求中仍可关闭；请求不取消，迟到的 200 照常合并并提示，失败改用 Toast；重开是全新状态。这与两个先例都不完全相同（退出确认重开后仍忙碌锁定；files 的 `取消` 是停止等待、结果丢弃），取的是「可关闭」这一点，结果处理是本刀自己的规则。父文应同步采纳。
 4. **「以响应视图更新」写明为只合并该请求修改的键**：整体替换条目会让迟到的 PATCH 响应把已刷新的 `status` 改回旧值（PATCH 在 `running` 时可用，回合结束会 `refreshList`），也会让先发后到的重命名响应把刚成功的置顶改回去。子 delta 加一段规则与 Scenario「迟到的元数据响应」；并写明同一会话的同类多请求只采用最后发出者、账号切换/离开页面后丢弃。父文应同步采纳。
 5. **裁掉 7.2b 及之后的部分**：`删除` 菜单项、ConfirmDialog 段、Scenario「删除当前会话」不并入（「三项对任何状态可用」写成两项）；顶栏段的「DOM 顺序为 `重命名`、`对话内搜索`、`产物面板`」写成「次序由 `CHAT_TOPBAR_ACTIONS` 固定，当前只有 `重命名` 产出按钮」；Scenario「顶栏重命名入口」的 THEN 只断言 `重命名` 存在、无 `更多`（三按钮全序归 7.7）。chat-web 的 `exactly three icon buttons` 同样改写；其 Scenario「顶栏入口」「助手块次序」「斜杠命令候选」、场景胶囊与 footer 句均不并入。
-6. 子 delta 另加父文未写的可观察行为：打开时焦点在输入框、成功后焦点回到打开它的按钮、再次提交清除失败提示、置顶失败的非信封文案、「更多」按钮与菜单项不关闭导航覆盖层、欢迎态不上报 `actions`；新增 Scenario「重命名请求中」「迟到的元数据响应」。
-7. spa-shell 插槽段保留 #529 留下的三处 main 独有措辞（#714 的 rebase 备注）；末句改为「`重命名` 归 session-sidebar（另两个槽位由后续能力规定，当前不产出按钮）」，7.6/7.7 落地后换回父文原句。
+6. **两个既有测试夹具补 `ToastProvider`**：issue 写「既有测试零 diff」。`useSessionActions` 是页面级 hook，`ChatPage` 一挂载就调用 `useToast()`；`web/test/routes.test.tsx`（三处）与 `web/test/settings-support.tsx` 裸挂 `RouterProvider`、没有 Provider（此前只有叶子组件用 Toast，欢迎态不挂载，一直没暴露）。夹具改成与 `main.tsx` 相同的根结构；断言不变。不为迁就夹具把 `useToast()` 下沉到叶子或让它容忍缺 Provider。
+7. 子 delta 另加父文未写的可观察行为：打开时焦点在输入框、成功后焦点回到打开它的按钮、再次提交清除失败提示、置顶失败的非信封文案、「更多」按钮与菜单项不关闭导航覆盖层、欢迎态不上报 `actions`；新增 Scenario「重命名请求中」「迟到的元数据响应」。
+8. spa-shell 插槽段保留 #529 留下的三处 main 独有措辞（#714 的 rebase 备注）；末句改为「`重命名` 归 session-sidebar（另两个槽位由后续能力规定，当前不产出按钮）」，7.6/7.7 落地后换回父文原句。
 
 ## Impact
 - web：四个新产品文件、`session-sidebar.tsx`/`session-path.ts`/`page.tsx`/`chat.css` 改动、一个新测试文件。server、shell（`web/src/lib/topbar.tsx`、`web/src/routes/**`）、`web/src/ui/**`、`web/e2e/**` 无改动。
