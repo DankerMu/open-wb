@@ -79,7 +79,7 @@ export const CHAT_TOPBAR_ACTIONS = [
 5. 既有测试的断言零 diff。唯一的既有文件改动是夹具形状：`web/test/routes.test.tsx` 三处 `render(<RouterProvider …/>)` 与 `web/test/settings-support.tsx` 的 `renderApp` 外包一层 `ToastProvider`，与 `main.tsx` 的根结构一致（实现时发现：这两个夹具此前缺 Provider 而未暴露）。
 
 ## Required evidence
-`web/test/chat-page-session-rename-pin.test.tsx`（M1–M7、M13、M14、M16）与 `web/test/chat-page-session-pin.test.tsx`（M8–M12、M15），共用 `web/test/chat-page-session-meta-support.tsx`——单文件会超过 800 行（首行引入 `./radix-platform.js`；全部 RED，除注明者）。「Enter」在 jsdom 里的输入是 `fireEvent.submit(form)`——jsdom 不做隐式表单提交、仓库没有 user-event，先例 `web/test/login-form.test.tsx:325-336`；真实按键由一次性浏览器观察覆盖。M15 静态导入 `topbar-actions.js` 并放在 pin 文件：Vite 在转换期解析 `import()` 的字面量说明符，动态导入同样让所在文件在实现前无法收集；非字面量说明符则 knip 看不到引用。实现前 pin 文件整体收集失败计 RED，M16 前半在 rename-pin 文件里可观察。另含 D2 的 401 分支两条（重命名 401 只复位忙碌、置顶 401 不提示）。
+`web/test/chat-page-session-rename-pin.test.tsx`（M1–M7、M13、M14、M16）与 `web/test/chat-page-session-pin.test.tsx`（M8–M12、M15），共用 `web/test/chat-page-session-meta-support.tsx`——单文件会超过 800 行（首行引入 `./radix-platform.js`；全部 RED，除注明者）。「Enter」在 jsdom 里的输入是 `fireEvent.submit(form)`——jsdom 不做隐式表单提交、仓库没有 user-event，先例 `web/test/login-form.test.tsx:325-336`；真实按键由一次性浏览器观察覆盖。M15 以字面量 `await import()` 取 `topbar-actions.js` 并放在 pin 文件：Vite 在转换期解析 `import()` 的字面量说明符，所在文件在实现前照样无法收集；非字面量说明符则 knip 看不到引用。实现前 pin 文件整体收集失败计 RED，M16 前半在 rename-pin 文件里可观察。另含 D2 的 401 分支两条（重命名 401 只复位忙碌、置顶 401 不提示）。
 - M1 菜单：未置顶会话的 `更多操作：<标题>` 打开后 `menuitem` 恰为 `重命名`、`置顶任务`；已置顶会话为 `重命名`、`取消置顶`；无 `删除`、`导出记录`；`running` 会话的菜单同样可打开且两项可用；`title: null` 的会话按钮名为 `更多操作：新会话`；每个条目恰一个「更多」按钮，且它不在 `button.chat-session-button` 内。
 - M2 行菜单重命名成功：输入初值为服务端标题、打开时焦点在输入框；改为 `  周报整理  ` 点 `保存` → 恰一次 `PATCH /api/sessions/<id>`、body 文本恰为 `{"title":"周报整理"}`、`Content-Type: application/json`；Dialog 消失；条目按钮名与顶栏 heading `我的工作 / 周报整理` 更新；Toast `已重命名`；焦点在该条目的 `更多操作：周报整理` 按钮；全程无 `/api/sessions` 列表请求。
 - M3 禁用与 Enter：输入全空白 → `保存` 禁用、Enter 不发请求；`title: null` 会话打开时输入为空且 `保存` 禁用；输入有效文本后 Enter → 恰一次 PATCH（等价 `保存`）。
@@ -97,7 +97,17 @@ export const CHAT_TOPBAR_ACTIONS = [
 - M15 `CHAT_TOPBAR_ACTIONS`：`key` 次序恰为 `rename`、`search`、`artifacts`，标签 `重命名`、`对话内搜索`、`产物面板`，图标 `pencil`、`search`、`package`；`chatTopbarActions({ artifacts, rename })` 返回次序为 `rename`、`artifacts`（按常量而非入参键序），`expanded` 透传，未给的槽位不出现。
 - M16 （保持项，实现前后皆绿）`selectedSessionTitle` 的既有行为由 `topbar.test.tsx` 覆盖；本文件只断言选择按钮仍调用选择（点击条目按钮 → `?session=` 改变）且菜单按钮点击不改变 `?session=`——后半句 RED（按钮不存在）。
 
-实现前后各跑一次并记录：RED 集合 = M1–M15 与 M16 后半；既有套件实现前后皆绿、零 diff。
+评审后补充（fix pass 1，各以一次产品代码变异确认会红，记录在 PR）：
+- 被 fence 的失败响应不提示：M12 同类乱序的先发后到响应为 409；置顶请求挂起时离开会话页或续期后 409 到达。
+- 重命名的同类取代：#1 挂起 → 关闭 → 重开提交 #2 → #2 的 200 先到、#1 的 200 后到 → 标题停在 #2、只有一条 `已重命名`。
+- 请求中点遮罩关闭，迟到的 200 照常合并并提示。
+- M1 钉住「更多」按钮图标（`lucide-ellipsis`）与显隐样式（悬停媒体块内 `opacity: 0`，`:hover`/`:focus-within`/`[data-state="open"]` 为 1，无 `display: none`/`visibility: hidden`）。
+- `≤760px` 覆盖层内重命名 Dialog 按 Escape：只关 Dialog、`导航` 仍是同一元素、焦点回到该条目的「更多」按钮；Dialog 打开后才出现 Toast 的变体走 Escape 兜底分支；随后在同一覆盖层置顶仍成功。
+- 跨会话 token：A 的重命名挂起 → 关闭 → 打开 B 的重命名 → A 的迟到 200/400 不动 B 的 Dialog。
+- 切换会话后点顶栏 `重命名`：初值与 PATCH 路径都是当前会话。
+- 续期后在新 client 上打开重命名是全新状态并能成功提交；新 client 的 401 进入登录流程。
+
+实现前后各跑一次并记录：RED 集合 = M1–M15、M16 后半与两条 401 用例；既有套件实现前后皆绿（两个夹具补 `ToastProvider` 之外零 diff）。
 
 一次性真实浏览器观察（不入库，写进 PR；结果：两种视口全部符合，详见 PR）：1440×900 与 390×844 各做一次「行菜单 → 重命名 → 保存」与「置顶 → 取消置顶」，记录菜单与 Dialog 是否可见可点（`elementFromPoint`）、「更多」按钮在两种视口的可见性、长标题下行内两个按钮不溢出；真实键盘 Enter 三项：有效文本提交一次、全空白不提交、在输入框内 Enter 提交后焦点仍在输入框时再按 Enter 不重发（鼠标点 `保存` 后焦点会被救回到 `关闭`，那条路径上 Enter 是关闭 Dialog，同样不重发）。
 

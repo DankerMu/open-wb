@@ -1,7 +1,11 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect, vi } from "vitest";
 import { SHELL_NARROW_QUERY } from "../src/lib/viewport.js";
-import { cleanupChatLifecycle } from "./chat-page-lifecycle-support.js";
+import {
+  cleanupChatLifecycle,
+  renderChatPageWithAuthProbe,
+  renewAccount,
+} from "./chat-page-lifecycle-support.js";
 import { type FetchRoutes, renderChatPage } from "./chat-page-support.js";
 import { chatSnapshot } from "./chat-stream-support.js";
 import { createMediaQuery, installMatchMedia, uninstallMatchMedia } from "./media-query-support.js";
@@ -21,6 +25,8 @@ export const PINNED_TOAST = "已更新置顶状态";
 export const REQUEST_FAILED = "请求失败，请稍后重试";
 export const PIN = "置顶任务";
 export const UNPIN = "取消置顶";
+export const FIRST_ACCOUNT_TASK = "甲的任务";
+export const SECOND_ACCOUNT_TASK = "乙的任务";
 
 type SessionStatus = "idle" | "running" | "done" | "failed" | "stopped";
 
@@ -56,7 +62,7 @@ export function envelope(status: number, message: string) {
 }
 
 /** 列表读取 + 每个会话的就绪快照（快照会话即该视图）；`extra` 追加或覆盖。 */
-export function sessionRoutes(sessions: readonly SessionView[], extra: FetchRoutes = {}) {
+function sessionRoutes(sessions: readonly SessionView[], extra: FetchRoutes = {}) {
   const routes: FetchRoutes = { "/api/sessions": () => jsonResponse({ sessions }) };
   for (const session of sessions) {
     routes[messagesPath(session.id)] = () =>
@@ -72,6 +78,38 @@ export function mountSessions(
   strict = false,
 ) {
   return renderChatPage(path, sessionRoutes(sessions, extra), strict);
+}
+
+/**
+ * 裸挂会话页（带续期探针）：两个账号各有一条会话，id 同为 A——按 id 合并而不看 client 的实现会把
+ * 旧账号的响应写进新账号的列表。`patch` 是 `PATCH /api/sessions/<A>` 的路由；`renew()` 续期为
+ * 第二个账号并返回它的列表区。
+ */
+export async function mountTwoAccounts(patch: FetchRoutes[string]) {
+  let renewed = false;
+  const { fetchMock, getProbe } = renderChatPageWithAuthProbe(
+    "/",
+    sessionRoutes([], {
+      "/api/sessions": () =>
+        jsonResponse({
+          sessions: [view(A, renewed ? SECOND_ACCOUNT_TASK : FIRST_ACCOUNT_TASK)],
+        }),
+      [patchPath(A)]: patch,
+    }),
+  );
+  const nav = await findList(FIRST_ACCOUNT_TASK);
+  const renew = async () => {
+    renewed = true;
+    await renewAccount(getProbe);
+    return findList(SECOND_ACCOUNT_TASK);
+  };
+  return { fetchMock, nav, renew };
+}
+
+/** 经路由离开会话页（去 `/center`）并等占位页出现：此时 ChatPage 已卸载。 */
+export async function leaveChatPage(router: ReturnType<typeof renderChatPage>["router"]) {
+  await act(() => router.navigate("/center"));
+  expect(await screen.findByText("中心暂不可用")).toBeTruthy();
 }
 
 /** 只让外壳断点查询匹配：侧栏改由 `打开导航` 覆盖层承载。 */
@@ -93,6 +131,17 @@ export async function findList(title: string) {
   const nav = await screen.findByRole("navigation", { name: "会话列表" });
   await within(nav).findByRole("button", { name: title });
   return nav;
+}
+
+/** `≤760px`：点 `打开导航`，返回覆盖层与其中的列表区（等到 `title` 条目出现）。 */
+export async function openNavOverlay(title: string) {
+  const open = screen.getByRole("button", { name: "打开导航" });
+  open.focus();
+  fireEvent.click(open);
+  const overlay = await screen.findByRole("dialog", { name: "导航" });
+  const nav = within(overlay).getByRole("navigation", { name: "会话列表" });
+  await within(nav).findByRole("button", { name: title });
+  return { nav, overlay };
 }
 
 /** 选择按钮的标题，按文档顺序（Dialog 打开期间列表被 aria-hidden，故直接读 DOM）。 */
@@ -175,6 +224,15 @@ export function typeTitle({ input }: RenameControls, text: string) {
 export function saveTitle(controls: RenameControls, text: string) {
   typeTitle(controls, text);
   fireEvent.click(controls.save);
+}
+
+/** 条目菜单 → `重命名` → 提交 `text`，请求中点 `取消` 关闭 Dialog，等焦点回到「更多」按钮。 */
+export async function submitRenameThenCancel(scope: HTMLElement, title: string, text: string) {
+  const controls = await openRename(scope, title);
+  saveTitle(controls, text);
+  fireEvent.click(controls.cancel);
+  await waitFor(() => expect(renameDialog()).toBeNull());
+  await focusOn(controls.trigger);
 }
 
 /** 发往 `PATCH /api/sessions/<id>` 的请求，按调用顺序。 */

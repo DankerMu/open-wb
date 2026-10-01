@@ -22,7 +22,7 @@
 
 ## 通用纪律（继承父 tasks.md）
 - [x] 新测试进新文件（两个测试文件 + 一个 support 模块）；既有测试断言零 diff，仅两个夹具补 `ToastProvider`。
-- [x] RED 集合 = M1–M15 与 M16 后半。实现前后各跑一次并记录命令与结果。
+- [x] RED 集合 = M1–M15、M16 后半与两条 401 用例。实现前后各跑一次并记录命令与结果。
 - [x] `page.tsx`：666 → ≤676，PR 记录两个数。
 - [x] `npm test --workspace web`、`make lint`、`make typecheck`、`make anti-drift`（knip 零新增）、`bash scripts/size-guard.sh` 退出 0；`openspec validate session-menu-rename-pin --strict --no-interactive` 通过。
 - [x] 一次性真实浏览器观察（1440×900 与 390×844）结果写进 PR。

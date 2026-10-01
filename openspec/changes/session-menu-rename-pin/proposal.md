@@ -35,11 +35,12 @@ Evidence floor: 新建 `web/test/chat-page-session-rename-pin.test.tsx`、`chat-
 4. **「以响应视图更新」写明为只合并该请求修改的键**：整体替换条目会让迟到的 PATCH 响应把已刷新的 `status` 改回旧值（PATCH 在 `running` 时可用，回合结束会 `refreshList`），也会让先发后到的重命名响应把刚成功的置顶改回去。子 delta 加一段规则与 Scenario「迟到的元数据响应」；并写明同一会话的同类多请求只采用最后发出者、账号切换/离开页面后丢弃。父文应同步采纳。
 5. **裁掉 7.2b 及之后的部分**：`删除` 菜单项、ConfirmDialog 段、Scenario「删除当前会话」不并入（「三项对任何状态可用」写成两项）；顶栏段的「DOM 顺序为 `重命名`、`对话内搜索`、`产物面板`」写成「次序由 `CHAT_TOPBAR_ACTIONS` 固定，当前只有 `重命名` 产出按钮」；Scenario「顶栏重命名入口」的 THEN 只断言 `重命名` 存在、无 `更多`（三按钮全序归 7.7）。chat-web 的 `exactly three icon buttons` 同样改写；其 Scenario「顶栏入口」「助手块次序」「斜杠命令候选」、场景胶囊与 footer 句均不并入。
 6. **两个既有测试夹具补 `ToastProvider`**：issue 写「既有测试零 diff」。`useSessionActions` 是页面级 hook，`ChatPage` 一挂载就调用 `useToast()`；`web/test/routes.test.tsx`（三处）与 `web/test/settings-support.tsx` 裸挂 `RouterProvider`、没有 Provider（此前只有叶子组件用 Toast，欢迎态不挂载，一直没暴露）。夹具改成与 `main.tsx` 相同的根结构；断言不变。不为迁就夹具把 `useToast()` 下沉到叶子或让它容忍缺 Provider。
-7. 子 delta 另加父文未写的可观察行为：打开时焦点在输入框、成功后焦点回到打开它的按钮、再次提交清除失败提示、置顶失败的非信封文案、「更多」按钮与菜单项不关闭导航覆盖层、欢迎态不上报 `actions`；新增 Scenario「重命名请求中」「迟到的元数据响应」。
-8. spa-shell 插槽段保留 #529 留下的三处 main 独有措辞（#714 的 rebase 备注）；末句改为「`重命名` 归 session-sidebar（另两个槽位由后续能力规定，当前不产出按钮）」，7.6/7.7 落地后换回父文原句。
+7. **测试拆成两个文件 + 一个 support 模块**：issue 的 PR Boundary 只列 `chat-page-session-rename-pin.test.tsx` 一个；M1–M16 合计超过 800 行（size-guard），置顶与 `CHAT_TOPBAR_ACTIONS` 的用例落 `chat-page-session-pin.test.tsx`，共用夹具落 `chat-page-session-meta-support.tsx`。
+8. 子 delta 另加父文未写的可观察行为：打开时焦点在输入框、成功后焦点回到打开它的按钮、再次提交清除失败提示、置顶失败的非信封文案、「更多」按钮与菜单项不关闭导航覆盖层、欢迎态不上报 `actions`；新增 Scenario「重命名请求中」「迟到的元数据响应」。
+9. spa-shell 插槽段保留 #529 留下的三处 main 独有措辞（#714 的 rebase 备注）；末句改为「`重命名` 归 session-sidebar（另两个槽位由后续能力规定，当前不产出按钮）」，7.6/7.7 落地后换回父文原句。
 
 ## Impact
-- web：四个新产品文件、`session-sidebar.tsx`/`session-path.ts`/`page.tsx`/`chat.css` 改动、一个新测试文件。server、shell（`web/src/lib/topbar.tsx`、`web/src/routes/**`）、`web/src/ui/**`、`web/e2e/**` 无改动。
+- web：四个新产品文件、`session-sidebar.tsx`/`session-path.ts`/`page.tsx`/`chat.css` 改动、两个新测试文件与一个共用 support 模块、两个既有夹具的挂载补 `ToastProvider`。server、shell（`web/src/lib/topbar.tsx`、`web/src/routes/**`）、`web/src/ui/**`、`web/e2e/**` 无改动。
 - 运行时：无新增常驻请求；用户操作各发一个 `PATCH /api/sessions/:id`。
 - 依赖：#530（7.1）、#529（7.0）、#524（4.2）、A #489 已合并。
 

@@ -11,9 +11,12 @@ import {
   crumb,
   entryTitles,
   envelope,
+  FIRST_ACCOUNT_TASK,
   findList,
+  leaveChatPage,
   messagesPath,
   mountSessions,
+  mountTwoAccounts,
   openEntryMenu,
   openRename,
   openTopbarRename,
@@ -28,8 +31,10 @@ import {
   RENAMED_TOAST,
   REQUEST_FAILED,
   renameDialog,
+  SECOND_ACCOUNT_TASK,
   type SessionView,
   saveTitle,
+  submitRenameThenCancel,
   toasts,
   UNPIN,
   view,
@@ -42,6 +47,7 @@ const MIDDLE = "任务二";
 const LAST = "任务三";
 const NEW = "周报整理";
 const PINNED_GROUP = "置顶任务";
+const CONFLICT = "会话状态冲突";
 const CREATED = "f".repeat(32);
 
 /** `任务` 分区里的三条会话，服务端顺序 A、B、C；被操作的是中间的 B。 */
@@ -103,12 +109,12 @@ describe("置顶与取消置顶 (M8, M9)", () => {
 
   it("M9 置顶失败：409 信封以 Toast 显示 message，非信封失败为 请求失败，请稍后重试；分区与顺序不变", async () => {
     const { fetchMock } = mountTasks({
-      [patchPath(B)]: [envelope(409, "会话状态冲突"), new Response("bad gateway", { status: 502 })],
+      [patchPath(B)]: [envelope(409, CONFLICT), new Response("bad gateway", { status: 502 })],
     });
     const nav = await findList(MIDDLE);
 
     await chooseEntryAction(nav, MIDDLE, PIN);
-    await waitFor(() => expect(toasts()).toEqual(["会话状态冲突"]));
+    await waitFor(() => expect(toasts()).toEqual([CONFLICT]));
     expectUnpinned(nav);
     expect((await openEntryMenu(nav, MIDDLE)).items.map((item) => item.textContent)).toEqual([
       "重命名",
@@ -116,7 +122,7 @@ describe("置顶与取消置顶 (M8, M9)", () => {
     ]);
 
     fireEvent.click(screen.getByRole("menuitem", { name: PIN }));
-    await waitFor(() => expect(toasts()).toEqual(["会话状态冲突", REQUEST_FAILED]));
+    await waitFor(() => expect(toasts()).toEqual([CONFLICT, REQUEST_FAILED]));
     expectUnpinned(nav);
     expect(patchRequests(fetchMock, B)).toEqual([
       patchOf('{"pinned":true}'),
@@ -195,29 +201,65 @@ describe("迟到与乱序的元数据响应 (M11, M12)", () => {
     expect(within(nav).queryByRole("status", { name: `${MIDDLE} 运行中` })).toBeNull();
   });
 
-  it("M12 同类乱序：两次 置顶任务，后发的响应先到并生效；先发的响应（pinnedAt:null）后到被丢弃，只提示一次", async () => {
+  it.each([
+    ["200 视图（pinnedAt:null）", () => jsonResponse(view(B, MIDDLE))],
+    ["409 信封", () => envelope(409, CONFLICT)],
+  ] as const)(
+    "M12 同类乱序：两次 置顶任务，后发的响应先到并生效；先发的响应（%s）后到被丢弃，只提示一次",
+    async (_kind, late) => {
+      const first = deferredResponse();
+      const second = deferredResponse();
+      const { fetchMock } = mountTasks({ [patchPath(B)]: [first.promise, second.promise] });
+      const nav = await findList(MIDDLE);
+
+      await chooseEntryAction(nav, MIDDLE, PIN);
+      // 不乐观更新：第一次响应返回前菜单项仍是 置顶任务。
+      await chooseEntryAction(nav, MIDDLE, PIN);
+      expect(patchRequests(fetchMock, B)).toEqual([
+        patchOf('{"pinned":true}'),
+        patchOf('{"pinned":true}'),
+      ]);
+      expectUnpinned(nav);
+
+      await settleDeferredResponse(second, jsonResponse(PINNED_B));
+      expectMiddlePinned(nav);
+      expect(toasts()).toEqual([PINNED_TOAST]);
+
+      await settleDeferredResponse(first, late());
+      await yieldMacrotask();
+      expectMiddlePinned(nav);
+      expect(toasts()).toEqual([PINNED_TOAST]);
+    },
+  );
+
+  it("M12 同类乱序（重命名）：#1 请求中关闭并重开后提交 #2；#2 的 200 先到并生效，#1 的 200 后到被丢弃，只提示一次", async () => {
     const first = deferredResponse();
     const second = deferredResponse();
-    const { fetchMock } = mountTasks({ [patchPath(B)]: [first.promise, second.promise] });
+    const { fetchMock } = mountTasks(
+      { [patchPath(B)]: [first.promise, second.promise] },
+      `/?session=${B}`,
+    );
     const nav = await findList(MIDDLE);
+    await crumb(MIDDLE);
 
-    await chooseEntryAction(nav, MIDDLE, PIN);
-    // 不乐观更新：第一次响应返回前菜单项仍是 置顶任务。
-    await chooseEntryAction(nav, MIDDLE, PIN);
+    await submitRenameThenCancel(nav, MIDDLE, "第一次的名字");
+    saveTitle(await openRename(nav, MIDDLE), "第二次的名字");
     expect(patchRequests(fetchMock, B)).toEqual([
-      patchOf('{"pinned":true}'),
-      patchOf('{"pinned":true}'),
+      patchOf('{"title":"第一次的名字"}'),
+      patchOf('{"title":"第二次的名字"}'),
     ]);
-    expectUnpinned(nav);
 
-    await settleDeferredResponse(second, jsonResponse(PINNED_B));
-    expectMiddlePinned(nav);
-    expect(toasts()).toEqual([PINNED_TOAST]);
+    await settleDeferredResponse(second, jsonResponse(view(B, "第二次的名字")));
+    await waitFor(() => expect(renameDialog()).toBeNull());
+    expect(await crumb("第二次的名字")).toBeTruthy();
+    expect(entryTitles(nav)).toEqual([FIRST, "第二次的名字", LAST]);
+    expect(toasts()).toEqual([RENAMED_TOAST]);
 
-    await settleDeferredResponse(first, jsonResponse(view(B, MIDDLE)));
+    await settleDeferredResponse(first, jsonResponse(view(B, "第一次的名字")));
     await yieldMacrotask();
-    expectMiddlePinned(nav);
-    expect(toasts()).toEqual([PINNED_TOAST]);
+    expect(await crumb("第二次的名字")).toBeTruthy();
+    expect(entryTitles(nav)).toEqual([FIRST, "第二次的名字", LAST]);
+    expect(toasts()).toEqual([RENAMED_TOAST]);
   });
 
   it("M12 跨类：重命名请求中关闭 Dialog 后置顶；置顶响应先到，重命名响应（pinnedAt:null）后到只改标题", async () => {
@@ -226,10 +268,7 @@ describe("迟到与乱序的元数据响应 (M11, M12)", () => {
     const { fetchMock } = mountTasks({ [patchPath(B)]: [rename.promise, pin.promise] });
     const nav = await findList(MIDDLE);
 
-    const controls = await openRename(nav, MIDDLE);
-    saveTitle(controls, NEW);
-    fireEvent.click(controls.cancel);
-    await waitFor(() => expect(renameDialog()).toBeNull());
+    await submitRenameThenCancel(nav, MIDDLE, NEW);
     await chooseEntryAction(nav, MIDDLE, PIN);
     expect(patchRequests(fetchMock, B)).toEqual([
       patchOf(`{"title":"${NEW}"}`),
@@ -272,33 +311,70 @@ describe("迟到与乱序的元数据响应 (M11, M12)", () => {
   });
 });
 
+describe("fence：置顶的失败响应 (M13)", () => {
+  it("M13 置顶 PATCH 挂起时离开会话页：迟到的 409 信封不提示", async () => {
+    const patch = deferredResponse();
+    const { router } = mountTasks({ [patchPath(B)]: () => patch.promise });
+    const nav = await findList(MIDDLE);
+    await chooseEntryAction(nav, MIDDLE, PIN);
+
+    await leaveChatPage(router);
+    await settleDeferredResponse(patch, envelope(409, CONFLICT));
+    await yieldMacrotask();
+    expect(toasts()).toEqual([]);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("M13 置顶 PATCH 挂起时续期为另一 client：迟到的 409 信封不提示，新账号的列表不变", async () => {
+    const patch = deferredResponse();
+    const { fetchMock, nav, renew } = await mountTwoAccounts(() => patch.promise);
+    await chooseEntryAction(nav, FIRST_ACCOUNT_TASK, PIN);
+    expect(patchRequests(fetchMock, A)).toEqual([patchOf('{"pinned":true}')]);
+
+    const list = await renew();
+    await settleDeferredResponse(patch, envelope(409, CONFLICT));
+    await yieldMacrotask();
+    expect(toasts()).toEqual([]);
+    expect(entryTitles(list)).toEqual([SECOND_ACCOUNT_TASK]);
+    expect(partition(list, PINNED_GROUP)).toBeNull();
+  });
+});
+
 describe("401 交给既有的登录失效处理 (D2)", () => {
   const unauthorized = () =>
     jsonResponse({ error: { code: "unauthorized", message: "登录已失效" } }, 401);
+
+  async function expectLoginWithoutToast() {
+    expect(await screen.findByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeTruthy();
+    await yieldMacrotask();
+    expect(toasts()).toEqual([]);
+  }
 
   it("D2 置顶收到 401：进入登录页，不以 Toast 显示该失败", async () => {
     mountTasks({ [patchPath(B)]: unauthorized });
     const nav = await findList(MIDDLE);
 
     await chooseEntryAction(nav, MIDDLE, PIN);
-    expect(await screen.findByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeTruthy();
-    await yieldMacrotask();
-    expect(toasts()).toEqual([]);
+    await expectLoginWithoutToast();
   });
 
   it("D2 重命名请求中关闭 Dialog 后收到 401：进入登录页，不以 Toast 显示该失败", async () => {
     const patch = deferredResponse();
     mountTasks({ [patchPath(B)]: () => patch.promise });
     const nav = await findList(MIDDLE);
-    const controls = await openRename(nav, MIDDLE);
-    saveTitle(controls, NEW);
-    fireEvent.click(controls.cancel);
-    await waitFor(() => expect(renameDialog()).toBeNull());
+    await submitRenameThenCancel(nav, MIDDLE, NEW);
 
     await settleDeferredResponse(patch, unauthorized());
-    expect(await screen.findByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeTruthy();
-    await yieldMacrotask();
-    expect(toasts()).toEqual([]);
+    await expectLoginWithoutToast();
+  });
+
+  it("M13 续期后新账号的重命名由新 client 发出：它收到的 401 使当前登录失效（旧 client 的 401 会被忽略）", async () => {
+    const { fetchMock, renew } = await mountTwoAccounts(unauthorized);
+    const list = await renew();
+
+    saveTitle(await openRename(list, SECOND_ACCOUNT_TASK), NEW);
+    await expectLoginWithoutToast();
+    expect(patchRequests(fetchMock, A)).toEqual([patchOf(`{"title":"${NEW}"}`)]);
   });
 });
 
