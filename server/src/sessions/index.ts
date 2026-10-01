@@ -7,6 +7,7 @@ import { emit } from "../core/audit/index.js";
 import type { ChatEvent } from "./events.js";
 import type { SpawnLog } from "./omp/spawn-gate.js";
 import { registerSessionRoutes } from "./rest.js";
+import { registerCommandRoutes } from "./rest-commands.js";
 import type { WorkspaceRootOf } from "./session-cwd.js";
 import { createSessionDeleter } from "./session-delete.js";
 import { createSessionStore, type SessionStore } from "./store.js";
@@ -24,6 +25,12 @@ export interface RegisterSessionsOptions {
    * bound session's omp cwd; sessions never builds a workspace store or computes a root itself.
    */
   workspaceRootOf: WorkspaceRootOf;
+  /**
+   * The omp agent directory whose `skills/` the slash whitelist lists. The caller passes
+   * `ompAgentDir(stateDir)` for the same stateDir as `runtime`, i.e. the spawn's
+   * `PI_CODING_AGENT_DIR`; sessions never computes it a second way.
+   */
+  agentDir: string;
   /**
    * Must return synchronously. A returned thenable is retained beside the source
    * fault without calling this sink again. registerSessions forwards the return
@@ -75,7 +82,9 @@ export function registerSessions(
     metadata,
     workspaceRootOf: options.workspaceRootOf,
     deleter,
+    agentDir: options.agentDir,
   });
+  registerCommandRoutes(app, { agentDir: options.agentDir });
   registerSessionEventStream(app, {
     store,
     supervisor,

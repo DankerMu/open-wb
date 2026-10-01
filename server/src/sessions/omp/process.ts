@@ -50,6 +50,11 @@ export function ompSessionDir(stateDir: string, ownerId: string): string {
   return join(stateDir, "sessions", ownerId);
 }
 
+/** The omp agent directory (`PI_CODING_AGENT_DIR`); the single source of this path. */
+export function ompAgentDir(stateDir: string): string {
+  return join(stateDir, "agent");
+}
+
 /**
  * Prepare owned directories then spawn the omp child.
  * Await this call: it settles after directory preparation and spawnImpl return.
@@ -67,7 +72,7 @@ export async function spawnOmp(
   const cwd = opts.cwd;
   const sessionDir = ompSessionDir(opts.stateDir, opts.ownerId);
   const home = join(opts.stateDir, "home");
-  const agent = join(opts.stateDir, "agent");
+  const agent = ompAgentDir(opts.stateDir);
   // Only the owner root is ours to create; a missing bound cwd must not be silently rebuilt.
   if (resolve(cwd) === resolve(ownerRoot)) {
     ensureSharedDir(ownerRoot);
