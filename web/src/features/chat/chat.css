@@ -29,8 +29,8 @@
 }
 
 /* Session list, rendered in the shell sidebar list area (.sidebar-main, demo:274) and sitting
-   directly on the sidebar background: 新建会话 stays pinned on top, the list below is the only
-   scroll container. */
+   directly on the sidebar background: the 新建会话 / 筛选任务 row stays pinned on top, the
+   partition container below (.chat-session-groups) is the only scroll container. */
 .chat-session-nav {
   display: flex;
   flex: 1;
@@ -40,14 +40,96 @@
   padding: 4px 0 12px;
 }
 
-.chat-new-session {
+.chat-session-toolbar {
+  display: flex;
   flex: none;
-  width: 100%;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-new-session {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-session-filter-trigger {
+  flex: none;
+}
+
+/* 筛选任务 popover body: two labelled segmented controls (demo:1828-1851 groups 状态 / 时间). */
+.chat-session-filter {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px;
+}
+
+.chat-session-filter-title {
+  color: var(--wb-text-secondary);
+  font-size: 11px;
+  font-weight: 500;
 }
 
 .chat-session-loading {
   flex: none;
   margin: 0;
+}
+
+.chat-session-empty {
+  flex: none;
+  margin: 0;
+  padding: 0 8px;
+  color: var(--wb-text-secondary);
+  font-size: 12px;
+  line-height: 32px;
+}
+
+/* Partitions (置顶任务 / 任务 / 空间) scroll together: one container for all of them. */
+.chat-session-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  flex: 1;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* The nav overlay scrolls its Drawer body as a whole; `flex: none` keeps the partitions at content
+   height so their own `overflow-y: auto` never engages (no nested scroller). */
+.sidebar[data-variant="overlay"] .chat-session-groups {
+  flex: none;
+}
+
+/* Partition / workspace subgroup: a fieldset (role=group) reset to a plain block. Label adapted
+   from resource/workbuddy-live-demo.html:275 (.sidebar-section-label); subgroup labels indent 8px
+   (demo:1889). */
+.chat-session-group {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.chat-session-group-label {
+  overflow: hidden;
+  padding: 0 4px;
+  color: var(--wb-text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 28px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-session-group-label-nested {
+  padding-left: 8px;
 }
 
 .chat-session-list {
@@ -57,16 +139,6 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-height: 0;
-  flex: 1;
-  overflow-x: hidden;
-  overflow-y: auto;
-}
-
-/* The nav overlay scrolls its Drawer body as a whole; `flex: none` keeps the list at content height
-   so its own `overflow-y: auto` never engages (no nested scroller). */
-.sidebar[data-variant="overlay"] .chat-session-list {
-  flex: none;
 }
 
 .chat-session-item {

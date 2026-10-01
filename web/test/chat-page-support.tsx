@@ -17,6 +17,7 @@ let disposeRouter: (() => void) | undefined;
 function authenticatedChatRoutes(routes: FetchRoutes = {}): FetchRoutes {
   return {
     "/api/auth/me": () => jsonResponse(authenticatedPrincipal),
+    "/api/workspaces": () => jsonResponse({ workspaces: [] }),
     ...routes,
   };
 }

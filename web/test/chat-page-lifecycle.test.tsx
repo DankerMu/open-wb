@@ -300,6 +300,7 @@ describe("chat page ignored-abort GET, renewal, and concurrent submit", () => {
       "/api/auth/me": () => jsonResponse({ id: "user-2", account: "lisi", role: "member" }),
       "/api/auth/login": () => jsonResponse({ id: "user-2", account: "lisi", role: "member" }),
       "/api/sessions": () => jsonResponse({ sessions: [sessionB()] }),
+      "/api/workspaces": () => jsonResponse({ workspaces: [] }),
       [SESSION_B_MESSAGES]: () => jsonResponse(snapshotFor(sessionB(), SESSION_B_TEXT)),
     });
     await renewAccount(getProbe);

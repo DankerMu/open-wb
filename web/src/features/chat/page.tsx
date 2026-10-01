@@ -8,8 +8,9 @@ import { useAuth } from "../auth/index.js";
 import { ConversationView } from "./conversation-view.js";
 import { errorMessage, isNotFound, isUnauthorized } from "./errors.js";
 import { ownsCreateSend, ownsHistory, ownsMutation, visibleOwnedAlert } from "./ownership.js";
-import { SessionNav } from "./session-nav.js";
-import { selectedSessionTitle, sessionNavigation, sessionTitle } from "./session-path.js";
+import { DEFAULT_SESSION_FILTER } from "./session-groups.js";
+import { selectedSessionTitle, sessionNavigation } from "./session-path.js";
+import { SessionSidebar } from "./session-sidebar.js";
 import {
   applyChatEvent,
   type ChatEvent,
@@ -25,6 +26,7 @@ import type {
   ChatOwnedAlert,
   PendingCreateSend,
 } from "./types.js";
+import { useWorkspaceList } from "./workspace-list.js";
 
 type SessionEventHandle = { close(): void; resync(): void };
 type ReadyHistory = Extract<ChatHistoryState, { status: "ready" }>;
@@ -61,6 +63,8 @@ export function ChatPage() {
   const [mutationOwner, setMutationOwner] = useState<ChatMutationOwner | null>(null);
   const [regenerateOwner, setRegenerateOwner] = useState<ChatMutationOwner | null>(null);
   const [forkOwner, setForkOwner] = useState<ChatMutationOwner | null>(null);
+  const [sessionFilter, setSessionFilter] = useState(DEFAULT_SESSION_FILTER);
+  const { refresh: refreshWorkspaces, workspaces } = useWorkspaceList(client);
   const mountedRef = useRef(false);
   const clientRef = useRef(client);
   const requestedSessionRef = useRef(requestedSessionId);
@@ -167,8 +171,9 @@ export function ChatPage() {
           }
           setListState({ status: "error", client: ownedClient, message: errorMessage(error) });
         });
+      refreshWorkspaces(ownedClient);
     },
-    [abortList],
+    [abortList, refreshWorkspaces],
   );
 
   useEffect(() => {
@@ -622,16 +627,18 @@ export function ChatPage() {
   const { composerDisabled, sendDisabled } = composerLocks(generating, forkLocked, draft);
   // 列表渲染进 shell 侧栏列表区（issue 424）；数据、回调与 fence 仍留在本页闭包里。
   useSidebarSlot(
-    <SessionNav
+    <SessionSidebar
+      filter={sessionFilter}
       listError={
         listState.client === client && listState.status === "error" ? listState.message : null
       }
       listLoading={listState.client === client && listState.status === "loading"}
       onCreateSession={() => createAndSelect()}
+      onFilterChange={setSessionFilter}
       onSelectSession={selectSession}
       requestedSessionId={requestedSessionId}
       sessions={listForClient?.sessions ?? null}
-      sessionTitle={sessionTitle}
+      workspaces={workspaces}
     />,
   );
 

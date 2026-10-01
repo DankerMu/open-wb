@@ -74,6 +74,7 @@ function authenticatedChatLifecycleRoutes(routes: FetchRoutes = {}): FetchRoutes
   return {
     "/api/auth/me": () => jsonResponse(authenticatedPrincipal),
     "/api/auth/login": () => jsonResponse(secondPrincipal),
+    "/api/workspaces": () => jsonResponse({ workspaces: [] }),
     ...routes,
   };
 }
