@@ -2,7 +2,9 @@
  * Branch-family orchestration on the supervisor's ports: precheck and control claim,
  * get_branch_messages → branch → get_state and the final transaction. Regenerate (#465) then
  * dispatches on the session's own process; fork (#466) runs the commands on a temporary process
- * admitted after the source's process retired, shuts it down and only then commits.
+ * admitted after the source's process retired, shuts it down and only then commits. Both pick the
+ * branch entry by wire candidates (#555): a whitelisted command turn has no entry and is refused,
+ * escaped text has one with a leading space.
  */
 import { randomBytes } from "node:crypto";
 import { HttpError } from "../core/errors/index.js";
@@ -16,6 +18,7 @@ import {
   sessionRuntimeOpts,
   temporaryTokens,
 } from "./pool.js";
+import { classifyPrompt } from "./slash-commands.js";
 import type { SessionStore, SettledApproval } from "./store.js";
 import type { SessionSupervisorRuntime } from "./supervisor.js";
 import type { TokenRegistry } from "./tokens.js";
@@ -23,7 +26,12 @@ import type { ControlClaims, TurnStops } from "./turn-control.js";
 
 export type Resume = { ownerId: string; ompSessionFile: string | null; workspaceId: string | null };
 
-interface RegeneratePorts {
+interface SkillsPort {
+  /** The platform skills right now (never cached); called only to judge content starting with `/`. */
+  skills(): readonly { name: string }[];
+}
+
+interface RegeneratePorts extends SkillsPort {
   store: SessionStore;
   controls: ControlClaims;
   stops: TurnStops;
@@ -77,7 +85,8 @@ export class Regenerations {
     if (
       !TERMINAL.has(tree.session.status) ||
       user?.role !== "user" ||
-      assistant?.role !== "assistant"
+      assistant?.role !== "assistant" ||
+      isCommand(user.content, this.#ports)
     ) {
       throw new HttpError("bad_request");
     }
@@ -105,7 +114,8 @@ export class Regenerations {
         releaseDispatch(slot, slot.generation);
       }
     }
-    const entryId = entryAt(data, -1, question);
+    // Only the last pair is compared: earlier entries are not read.
+    const entryId = entryFor(branchEntries(data).at(-1), question);
     if (entryId === undefined) {
       throw new HttpError("agent_unavailable");
     }
@@ -156,7 +166,7 @@ export class Regenerations {
 
 type Branched = { text: string; sessionFile: string };
 
-interface ForkPorts {
+interface ForkPorts extends SkillsPort {
   store: SessionStore;
   controls: ControlClaims;
   pool: ProcessPool;
@@ -177,9 +187,9 @@ interface ForkPlan {
   sessionId: string;
   ownerId: string;
   messageId: number;
-  /** The fork point's index among the source's user messages, and its text. */
-  ordinal: number;
+  /** The fork point's stored content, and the source's user messages in order to align it. */
   text: string;
+  users: readonly StoredUser[];
   expectedAssistantId: number | null;
   file: string;
   workspaceId: string | null;
@@ -223,13 +233,15 @@ export class Forks {
       throw new HttpError("not_found");
     }
     const users = tree.messages.filter((message) => message.role === "user");
-    const ordinal = users.findIndex((message) => message.id === messageId);
-    const user = users[ordinal];
+    const user = users.find((message) => message.id === messageId);
     if (user === undefined) {
       throw new HttpError("bad_request");
     }
     if (busy || tree.session.status === "running") {
       throw new HttpError("session_busy");
+    }
+    if (isCommand(user.content, this.#ports)) {
+      throw new HttpError("bad_request");
     }
     if (resume.ompSessionFile === null) {
       throw new HttpError("agent_unavailable");
@@ -240,8 +252,8 @@ export class Forks {
       sessionId: randomBytes(16).toString("hex"),
       ownerId,
       messageId,
-      ordinal,
       text: user.content,
+      users,
       expectedAssistantId: assistant?.id ?? null,
       file: resume.ompSessionFile,
       workspaceId: resume.workspaceId,
@@ -288,7 +300,7 @@ export class Forks {
     return this.#commit(plan, branched);
   }
 
-  /** get_branch_messages → ordinal + text alignment → branch → get_state on the temporary process. */
+  /** get_branch_messages → first-fit alignment → branch → get_state on the temporary process. */
   async #branch(runtime: SessionRuntime, entry: PoolEntry, plan: ForkPlan): Promise<Branched> {
     let data: unknown;
     try {
@@ -296,7 +308,7 @@ export class Forks {
     } catch {
       throw new HttpError("agent_unavailable");
     }
-    const entryId = entryAt(data, plan.ordinal, plan.text);
+    const entryId = alignBranchEntries(plan.users, branchEntries(data)).get(plan.messageId);
     if (entryId === undefined) {
       throw new HttpError("agent_unavailable");
     }
@@ -330,7 +342,8 @@ export class Forks {
     } catch (error) {
       throw error instanceof HttpError ? error : new HttpError("agent_unavailable");
     }
-    return { session, draft: branched.text };
+    // The stored content, not the branch text: an escaped entry carries the wire-side space.
+    return { session, draft: plan.text };
   }
 }
 
@@ -359,11 +372,55 @@ async function branchTo(runtime: SessionRuntime, entryId: string): Promise<Branc
   throw new HttpError("agent_unavailable");
 }
 
-/** The entryId at `index` of a get_branch_messages answer, only when its text is `text`. */
-function entryAt(data: unknown, index: number, text: string): string | undefined {
+type StoredUser = { id: number; content: string };
+
+/** A whitelisted command turn left no omp `user` entry; the skill list is read only for `/` text. */
+function isCommand(content: string, ports: SkillsPort): boolean {
+  return content.startsWith("/") && classifyPrompt(content, ports.skills()).kind !== "text";
+}
+
+/**
+ * Whether an entry's text is a wire candidate of stored user content: the content itself (sent
+ * verbatim before the prompt route escaped) or, for `/` text, its escaped form. Text only — the
+ * current skill set is never consulted, so installing or removing a skill moves no alignment.
+ */
+function matches(entryText: string, content: string): boolean {
+  return entryText === content || (content.startsWith("/") && entryText === ` ${content}`);
+}
+
+/** The entries of a get_branch_messages answer; anything but a list is no entry. */
+function branchEntries(data: unknown): readonly unknown[] {
   const messages = record(data)?.messages;
-  const entry = record(Array.isArray(messages) ? messages.at(index) : undefined);
-  return typeof entry?.entryId === "string" && entry.text === text ? entry.entryId : undefined;
+  return Array.isArray(messages) ? messages : [];
+}
+
+/** The entryId of `entry` when it is well formed and its text is a wire candidate of `content`. */
+function entryFor(entry: unknown, content: string): string | undefined {
+  const { entryId, text } = record(entry) ?? {};
+  return typeof entryId === "string" && typeof text === "string" && matches(text, content)
+    ? entryId
+    : undefined;
+}
+
+/**
+ * First-fit from the front: a user message matching the current entry takes it and both advance;
+ * one that does not is skipped (a command or other local-only turn) and consumes no entry. An
+ * entry is never skipped, so a malformed one aligns nothing from there on.
+ */
+function alignBranchEntries(
+  users: readonly StoredUser[],
+  entries: readonly unknown[],
+): Map<number, string> {
+  const aligned = new Map<number, string>();
+  let next = 0;
+  for (const user of users) {
+    const entryId = entryFor(entries[next], user.content);
+    if (entryId !== undefined) {
+      aligned.set(user.id, entryId);
+      next += 1;
+    }
+  }
+  return aligned;
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
