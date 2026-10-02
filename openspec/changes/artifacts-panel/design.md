@@ -87,9 +87,9 @@ useEffect(() => {
   if (!busy && document.activeElement === document.body) opener.current?.focus();
 }, [busy]);
 ```
-- 起因：按钮在拉取中 `disabled`，Chromium 当即把焦点移到 `body`（`web/src/ui/dialog.tsx:53-55` 的记录）。图片/代码操作结束后焦点留在 `body`；在抽屉里，成功或失败 Toast 在屏期间（`TOAST_DURATION_MS` 2400）Radix 的 Escape 监听在 Toast 层，抽屉的 `useEscapeFallback` 又只认目标在抽屉内的按键——这段时间 Escape 关不掉抽屉（Chromium 实测：两次 Escape 抽屉都还在，Toast 消失后才恢复）。
+- 起因：按钮在拉取中 `disabled`，Chromium 当即把焦点移到 `body`（`web/src/ui/dialog.tsx:53-55` 的记录）。图片/代码操作结束后焦点留在 `body`；在抽屉里，成功或失败 Toast 在屏期间（`TOAST_DURATION_MS` 2400）Radix 的 Escape 监听在 Toast 层，抽屉的 `useEscapeFallback` 又只认目标在抽屉内的按键——这段时间 Escape 关不掉抽屉（Chromium 实测：两次 Escape 抽屉都还在，Toast 消失后才恢复）。加 D9 之后复测：复制与下载完成后焦点在行按钮上，Toast 在屏时一次 Escape 即关闭抽屉、焦点回到 `产物面板`。
 - 行为：`busy` 回到 `false` 的那次提交之后，若活动元素是 `body`，聚焦被点的按钮（此时它已恢复可用）。活动元素不是 `body`（用户已把焦点移到别处，或 html 预览 Dialog 已接走焦点）时不动。挂载时 `opener.current` 为空，不动。
-- html：预览 Dialog 的焦点由 Dialog 自己管（打开时聚焦内部、关闭时经 `returnFocus` 归还）；Dialog 内容是子组件，它的挂载 effect 先于本 effect，本 effect 看到的活动元素已在 Dialog 里。
+- html：`busy` 回到 `false` 的那次提交里预览 Dialog 的内容还没挂载（Radix 晚一轮渲染），所以本 effect 也会先把焦点放回行按钮，随后 Dialog 接走焦点（`focusin` 次序：行按钮 → Dialog 的 `关闭`）；关闭时经 `returnFocus` 归还。终态不变，只多一次瞬时聚焦。
 - 抽屉关闭或卡片卸载后不会再跑（组件已卸载）。
 - 产物卡同样生效（7.5b 残留 8 消失），proposal 偏差 11。
 
@@ -137,7 +137,7 @@ useEffect(() => {
 - P9 空间不可解析：会话空间不在列表里、列表读取中、列表读取失败，而视图里有 `a.md`、`out/index.html` 两个变更 → 点击后抽屉打开（不是 Toast），两行只显示相对路径 `a.md`、`out/index.html`，抽屉里没有 `查看详情`，也没有任何操作按钮；「读取中」一例在列表到达后（抽屉不关）行变成逻辑路径并出现 `查看详情` 与操作按钮。
 - P10 会话归属：抽屉打开时路由导航到另一个会话 → 抽屉消失；再导航回原会话（历史重新读取完成后）→ 抽屉不自动出现，点 `产物面板` 才出现。换账号（`renewAccount`）→ 抽屉消失。
 - P11 `查看详情`：点抽屉里某行的 `查看详情` → 路由到 `/files?ws=<空间 id>`，抽屉消失。
-- P13 焦点归还（D9；jsdom 不做「禁用即失焦」，用 `blur()` 模拟）：
+- P13 焦点归还（D9；在 `web/test/chat-page-artifacts-panel-focus.test.tsx`。jsdom 不做「禁用即失焦」，而且对已禁用的按钮 `blur()` 无效，所以在同一个 `act` 批里点击后立刻 `blur()`，赶在禁用提交之前让活动元素成为 `body`）：
   - 抽屉里：`focus()` 再点 `复制代码 app.ts`，响应挂起时对该按钮 `blur()`（活动元素成为 `body`）；响应返回、Toast `已复制到剪贴板` 出现后，`document.activeElement` 是该按钮（`waitFor`）。随后 Toast 仍在屏时 `fireEvent.keyDown(document.activeElement, { key: "Escape" })` → 抽屉消失，焦点回到 `产物面板` 按钮。
   - 对照（不抢焦点）：同样流程但挂起时把焦点移到抽屉脚部的 `关闭` 按钮 → 响应返回后活动元素仍是脚部 `关闭`。
   - 失败路径：404 → Toast 信封 message 之后活动元素是该按钮。
@@ -145,9 +145,9 @@ useEffect(() => {
   - html：挂起时 `blur()` → 预览打开后活动元素在预览 Dialog 内（不是行里的按钮）；关闭预览后是行里的按钮。
 - P12 静态与护栏：`.artifacts-panel-list` 的规则在 `messages.css`、`chat.css` 不含 `artifacts-panel`（护栏）；`web/src/features/chat/artifacts-panel.tsx` 的源码不含 `fetchPreview`、`sandbox`、`clipboard`、`createObjectURL`（复用而非复制的静态证据）。
 
-基线运行：测试不导入实现前不存在的模块（全是页面级），直接在基线树上跑；P1 的欢迎态一句、P1 单元断言里 `chatTopbar(undefined, …)` 恰为 `{}` 一句（运行时忽略多余实参）与 P12 的 `chat.css` 一句是实现前就成立的护栏，其余应为红；报告里逐条列出基线即绿的用例。
+基线运行：测试不导入实现前不存在的模块（全是页面级），直接在基线树上跑；P1 的欢迎态一句、P1 单元断言里 `chatTopbar(undefined, …)` 恰为 `{}` 一句（运行时忽略多余实参）与 P12 的 `chat.css` 一句是实现前就成立的护栏，其余应为红；报告里逐条列出基线即绿的用例。P13 的对照例与 html 例在加 D9 之前就绿（护栏）。
 
-变异自检（实现者在沙箱里做，做完还原，写进报告；每个至少打红一例）：聚合取首次值（`if (!byPath.has(path))`）；位置取最后（先 `delete` 再 `set`）；只聚合最后一条助手消息；计入 running 步骤；打开时拍快照（聚合存进 state）；空也开抽屉；非空也只 Toast；`open()` 不调 `trigger.focus()`；传 `expanded: true/false`；`artifacts` 槽排到 `rename` 之前（改 `chatTopbarActions` 入参次序不应有影响——这一条预期**存活**，由 M15 钉常量次序；改常量次序则 P1 与 M15 红）；欢迎态也上报 actions（P1 的单元断言）；空间不可解析时弹 Toast 而不开抽屉；空间不可解析时照样渲染操作按钮；操作按钮放在 `查看详情` 之前；行里另写一份 `fetchPreview` 调用（P12 的静态断言）；去掉渲染期的 `view === null` 校正；脚部 `关闭` 不关；`width={288}`；`side="left"`；标题不是 `产物面板`；Toast 文案或类型改动（`error`）；`FileChangeRow` 不渲染 `children`；去掉 D9 的 effect（P13 红）；D9 不判断活动元素、无条件聚焦（P13 的对照与 html 例红）；`useChangeSpace` 的前缀用 `workspace.root`（既有 C9/C11 与 P2 都应红）。
+变异自检（实现者在沙箱里做，做完还原，写进报告；每个至少打红一例）：聚合取首次值（`if (!byPath.has(path))`）；位置取最后（先 `delete` 再 `set`）；只聚合最后一条助手消息；计入 running 步骤；打开时拍快照（聚合存进 state）；空也开抽屉；非空也只 Toast；`open()` 不调 `trigger.focus()`；传 `expanded: true/false`；`artifacts` 槽排到 `rename` 之前（改 `chatTopbarActions` 入参次序不应有影响——这一条预期**存活**，由 M15 钉常量次序；改常量次序则 P1 与 M15 红）；欢迎态也上报 actions（P1 的单元断言）；空间不可解析时弹 Toast 而不开抽屉；空间不可解析时照样渲染操作按钮；操作按钮放在 `查看详情` 之前；行里另写一份 `fetchPreview` 调用（P12 的静态断言）；去掉渲染期的 `view === null` 校正；脚部 `关闭` 不关；`width={288}`；`side="left"`；标题不是 `产物面板`；Toast 文案或类型改动（`error`）；`FileChangeRow` 不渲染 `children`；去掉 D9 的 effect（P13 的复制、404、产物卡三例红）；D9 不判断活动元素、无条件聚焦（P13 的对照例红；html 例看不出来——交付代码在 html 路径上本来也先聚焦行按钮）；去掉 `!busy` 条件（等价变异，存活：`busy` 为真时按钮已禁用，`focus()` 是空操作）；`useChangeSpace` 的前缀用 `workspace.root`（既有 C9/C11 与 P2 都应红）。
 
 ## 已知残留
 1. #522 合入前服务端不产生 `changes`，真实链路上点 `产物面板` 只会弹「暂无产物」；真实浏览器与跨进程证据归 #522、8.2a。
@@ -157,7 +157,8 @@ useEffect(() => {
 5. 抽屉打开期间若聚合变空（只可能来自重同步换来的快照里变更消失），抽屉保持打开、列表为空，不自动关闭也不补 Toast。
 6. 同名不同目录的文件：行里有完整逻辑路径可分辨，但两行的操作按钮 accessible name 相同（`复制代码 index.ts`）（7.5b 残留 13）。
 7. `查看详情` 只到空间，不定位到文件（7.5a）。
-8. 窄屏（抽屉 `max-width: 92vw`）下一行是计数 + 路径省略 + 两个 26px 按钮；没有做真实视口验证之前不保证长计数不挤压路径。
+8. 窄屏（抽屉 `max-width: 92vw`，390 宽时为 359px）下一行是计数 + 路径省略 + 两个 26px 按钮；Chromium 一次性观察里 `+3 -1` 加两个按钮时路径还有 186px、行不溢出；更长的计数未验证。
+10. Radix 的 Escape 监听从抽屉层交到预览层要等一轮渲染（`escape-fallback.ts` 记录的 issue 643 类窗口）：jsdom 里预览刚挂载就按 Escape 会把抽屉和预览一起关掉，所以 P7 在按键前让出一个宏任务；Chromium 里脚本在 iframe 一挂上就按 Escape 也只关预览，这个窗口没有复现。
 
 9. 历史还在读取或读取失败时点 `产物面板` 弹的也是「当前任务暂无产物」（此时视图为空）；读取中这句话不够准确，但规格只定义了这一种空态反馈。
 
