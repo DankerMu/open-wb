@@ -153,12 +153,12 @@ Guardrails（`make test-guardrails`）：
 - **H2**：空 cookie 单独跑 `smoke/session-meta.hurl` 退出 0（34 请求）；之后 `GET /api/sessions` 无 `冒烟会话`、无 null 标题、无 `running`。
 - **H3**：N1–N4 各自退出 4，失败点依次为 4d+5 的 `thinking`、1a 的键数、6b 的 `detail.sessionId`、7h 的 `session.title`。负对照是改一行的临时副本单独跑（不是整条 `make smoke`）；交付文件在负对照前后逐字节相同。
 - 真 omp v18.0.10 下的观察：`thinking` 三分片逐字合并到达；审批轮询与 done 轮询各只重试 1 次；done 之后立刻 DELETE 返回 204，下一个请求即读到 `session.delete` 审计，该会话的 omp 进程随之退出，服务日志无报错；绑定会话的 omp 以空间根为 `--cwd`。
-- **H4**：PR #742 的 CI run 37017996819（head `56bae2b`）九项检查全部通过；`smoke` 与 `uid-isolation` 两个 job 的日志都是 `Success smoke/session-meta.hurl (34 request(s) …)`、`Executed files: 5`、`Executed requests: 100`——绑定工作空间的回合在 `OMP_USER=omp` 下通过（确认命令：`gh run view 37017996819 --repo DankerMu/open-wb --log | grep -E 'Success smoke/|Executed files:'`）。
+- **H4**：PR #742 的两轮 CI 九项检查全部通过。第一轮 run 37017996819（head `56bae2b`）：`smoke` 与 `uid-isolation` 两个 job 都是 `Success smoke/session-meta.hurl (34 request(s) …)`、`Executed files: 5`、`Executed requests: 100`。fix pass 1 之后 run 37020498826（head `91a9249`）：两个 job 都是 36 请求、5 文件、102 请求。绑定工作空间的回合在 `OMP_USER=omp` 下通过（确认命令：`gh run view 37020498826 --repo DankerMu/open-wb --log | grep -E 'Success smoke/|Executed'`）。
 - **fix pass 1**（评审采纳的两处覆盖缺口，只改 `smoke/session-meta.hurl`：285 → 310 行，32 → 34 个条目，一次运行 36 次请求）：
   - 八键逐键点名：第一轮只断言键数与其中五个键的值，`createdAt`/`updatedAt` 的键名没有被点到，键数对而键名改了的 DTO 会通过。现在 1a、2d、3a 三处都把八个键逐个断言（先对真实服务核过形状：`id` 32 位小写 hex，时间戳与置顶后的 `pinnedAt` 是整数）。
   - 越权创建不留会话：第一轮只断言 404。现在以 `lisi` 自己的会话列表条数在三次越权尝试前后相等来证明（7b′、7e′）。
   - 复验：形态 (a) 两次、形态 (b) 两遍加单独一遍均退出 0（5 文件 102 请求）；编排者在真实仓库上形态 (a) 两次同样通过；`make test-guardrails` 816 PASS / 0 FAIL。负对照 N5（把 1a 的 `$.createdAt` 改成不存在的 `$.created_at`）失败在 1a，N6（把后置条数期望改成观测值加一）失败在 7e′——它们只说明新断言确实被求值，不能代替一个行为异常的服务端。
-- 耗时：`make smoke` 由四文件 66 请求约 8.3 s 变为五文件 100 请求约 8–10 s；`session-meta.hurl` 自身约 1.6 s。
+- 耗时：`make smoke` 由四文件 66 请求约 8.3 s 变为五文件约 8–10 s（第一轮 100 请求，fix pass 1 之后 102 请求）；`session-meta.hurl` 自身约 1.6 s。
 
 ## 已知残留
 1. **第二遍（409 采用）路径只有本地证据**：CI 每个 job 只跑一遍。
