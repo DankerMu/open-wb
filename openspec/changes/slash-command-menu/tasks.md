@@ -2,7 +2,7 @@
 
 ## 10. chat-web — `/` 命令候选（父 tasks 10.5）
 
-- [ ] 10.5 `web/src/lib/api-commands.ts`（新：`listCommands()` GET `/api/commands`，响应体恰 `{commands}`、元素严格五键；`api.ts` 接线）+ `web/src/features/chat/slash-menu-state.ts`（新，纯函数：`isOpen`、`filter`、`pickText`、`reduce`）+ `slash-menu.tsx`（新：`useSlashMenu` 的边沿触发拉取与缓存、按键拦截、选中；私有 `SlashMenu` 面板 `role="listbox"`）+ `composer.tsx` 可选 `slashMenu` 插槽与可选 `interceptKeyDown`（都不传时逐字同现状）+ `conversation-view.tsx` 透传 + `page.tsx` 接线（≤ +10 行）+ `messages.css` 面板样式（`chat.css` 已到行数上限，零 diff）。验证：新建 `web/test/api-commands.test.ts`（A1–A4）、`web/test/slash-menu-state.test.ts`（M1–M11）、`web/test/chat-page-slash.test.tsx`（J1–J14）；既有测试零 diff
+- [x] 10.5 `web/src/lib/api-commands.ts`（新：`listCommands()` GET `/api/commands`，响应体恰 `{commands}`、元素严格五键；`api.ts` 接线）+ `web/src/features/chat/slash-menu-state.ts`（新，纯函数：`isOpen`、`filter`、`pickText`、`reduce`）+ `slash-menu.tsx`（新：`useSlashMenu` 的边沿触发拉取与缓存、按键拦截、选中；私有 `SlashMenu` 面板 `role="listbox"`）+ `composer.tsx` 可选 `slashMenu` 插槽与可选 `interceptKeyDown`（都不传时逐字同现状）+ `conversation-view.tsx` 透传 + `page.tsx` 接线（≤ +10 行）+ `messages.css` 面板样式（`chat.css` 已到行数上限，零 diff）。验证：新建 `web/test/api-commands.test.ts`（A1–A4）、`web/test/slash-menu-state.test.ts`（M1–M11）、`web/test/chat-page-slash.test.tsx`（J1–J14）；既有测试零 diff
 
 ## Risk packs
 
@@ -22,8 +22,8 @@
 | Documentation / migration notes | no | spec delta 即文档 |
 
 ## 通用纪律（继承父 tasks.md）
-- [ ] 新测试进新文件；既有测试文件零 diff。
-- [ ] RED 集合 = A、M、J 中依赖新行为的用例；实现前就成立的护栏逐条标出。实现前后各跑一次并记录命令与结果。
-- [ ] `page.tsx` 697 → ≤ 707、`api.ts` 722 → ≤ 800、`conversation-view.tsx`、`composer.tsx` 的前后行数写进 PR。
-- [ ] `npm test --workspace web`、`make lint`、`make typecheck`、`make anti-drift`（knip 零新增、jscpd 克隆数 178 不增）、`bash scripts/size-guard.sh` 退出 0；`openspec validate slash-command-menu --strict --no-interactive` 通过。
-- [ ] 真实浏览器走查不在本刀（#557）；编排者做一次一次性的 Chromium 观察（面板位置、点击后的焦点、390px 无横向溢出），结果写进 PR，不作为门禁。
+- [x] 新测试进新文件；既有测试文件零 diff。
+- [x] RED 集合 = A、M、J 中依赖新行为的用例；实现前就成立的护栏逐条标出。实现前后各跑一次并记录命令与结果。
+- [x] `page.tsx` 697 → ≤ 707、`api.ts` 722 → ≤ 800、`conversation-view.tsx`、`composer.tsx` 的前后行数写进 PR。
+- [x] `npm test --workspace web`、`make lint`、`make typecheck`、`make anti-drift`（knip 零新增、jscpd 克隆数 178 不增）、`bash scripts/size-guard.sh` 退出 0；`openspec validate slash-command-menu --strict --no-interactive` 通过。
+- [x] 真实浏览器走查不在本刀（#557）；编排者做一次一次性的 Chromium 观察（面板位置、点击后的焦点、390px 无横向溢出），结果写进 PR，不作为门禁。

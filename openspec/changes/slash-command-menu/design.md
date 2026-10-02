@@ -172,7 +172,7 @@ RED：三个新测试文件在实现前全部失败（模块不存在 / 面板�
 12. 返回前就渲染空面板 / 用过期目录 → J8、J12。
 13. `mousedown` 的 `preventDefault` 只挂在 option 上（面板空白处会抢焦点）/ 完全不挂 → J10；点击取高亮项而不是被点的项 → J10；listbox 或 option 用 `tabIndex={0}` → J1。
 14. `Shift+Tab` / `Shift+Enter` 被当作选中 → J10。
-15. `aria-activedescendant` 不随高亮更新 / `aria-selected` 全为 true → J1、J4。
+15. `aria-activedescendant` 不随高亮更新 → J4（J1 杀不了：初始高亮本来就在首项）；`aria-selected` 全为 true → J1、J4。
 16. `enabled` 为假时仍显示 → J11。
 17. 解析放过多余键 / 缺 `hint` / 错误枚举 / 响应体多键 → A2；把 `hint` 解析成必须为字符串 → A1（`hint: null`）。
 18. 请求带查询串或不带 `no-store` → A1。
@@ -188,6 +188,28 @@ RED：三个新测试文件在实现前全部失败（模块不存在 / 面板�
 6. **候选很多时没有分组或搜索以外的手段**：只有前缀过滤与滚动。
 7. **`Esc` 在面板打开时被 `preventDefault`**：事件照常冒泡；页面上的覆盖层（Dialog、Drawer）都是模态的，composer 获得焦点时没有别的 `Escape` 逻辑在听。
 8. **面板可以在输入框未聚焦时出现**：fork 等路径把 `/todo` 这样的文本回填进 draft 时条件成立。此时点击选项不会把焦点移进输入框（规格说的是「不移走焦点」），键盘操作需要先聚焦输入框。
+
+9. **`Shift+Esc` 也关闭面板**：规格只写了 `Shift+Enter`、`Shift+Tab` 与带 `Ctrl/Alt/Meta` 的按键不拦截，没有写 `Shift+Esc`；实现先判 `Escape` 再判 `Shift`。
+10. **选项没有 hover 样式**：只有 `cursor: pointer`。键盘高亮是面板里唯一的高亮，避免与鼠标悬停同时出现两处。
+11. **目录里重名的条目**：解析不做去重（服务端保证内建名与 `skill:<名>` 不重复）；重名时 React 只给 key 告警，第二条仍可点击选中。
+
+## 交付记录（实现后补记）
+- **abort effect 读 `client`**：只依赖 `[client]`、清理函数只碰 ref 的 effect 过不了 Biome 的 `useExhaustiveDependencies`，所以清理函数里比对 `call.current?.client === client` 再 abort。拉取 effect 依赖 `[client, wanted]`、无清理；调用记录在成功后保留（后续上升沿不再拉取），失败时只在记录仍是自己时清掉——被 abort 的旧请求迟到的 reject 不会清掉新 client 的在途记录（J12 第三例）。
+- **超出 Required evidence 的用例**：整页 J11（切到 running 会话后面板消失、draft 保留——夹具版测不出 `page.tsx` 把 `enabled` 接错）、一个 StrictMode 用例、`Ctrl/Alt/Meta` 不拦截的用例。
+- **测试 support**：`web/test/chat-page-slash-support.tsx`（页面测试不拆是 857 行）；目录夹具由它导出，`api-commands.test.ts` 与 `slash-menu-state.test.ts` 也从它取，避免三份目录字面量变成 jscpd 克隆。
+- **行数**（`wc -l`）：`page.tsx` 697 → 700、`api.ts` 722 → 725、`conversation-view.tsx` 316 → 322、`composer.tsx` 128 → 136、`messages.css` 744 → 789、`chat.css` 797 零 diff；新文件 `api-commands.ts` 68、`slash-menu-state.ts` 55、`slash-menu.tsx` 169；测试 154 / 147 / 775 + support 296。（Context 里的 798 与 745 是 `split("\n").length` 口径，比 `wc -l` 多 1。）
+- **RED**（基线 + 仅测试）：三个文件全部失败——A1–A4 22 例 `listCommands is not a function`，M 与 J 两个文件因模块不存在而收集失败。「实现前就成立的护栏」在纯基线上观察不到（文件收集失败）；用一个不接线的 hook 桩做的诊断运行里 43 例 40 红 3 绿，绿的三例都是 J13（不传拦截器照旧提交、两种卡片无包裹元素）；J5、J9、J11 的否定断言在基线成立，但各自所在用例因同例的肯定断言为红。
+- **GREEN**：`npm test --workspace web` 86 文件 / 1792 例；`make lint`、`make typecheck`、`make anti-drift`（knip 零新增、jscpd 178）、`bash scripts/size-guard.sh`、`openspec validate slash-command-menu --strict --no-interactive` 均退出 0。三个新产品文件的语句与分支覆盖率 100%。三个新测试文件连跑三次稳定。
+- **变异**：上面 20 条的全部变体 42 个加实现者自加的 5 个，47 个全部被杀。
+- **J5 的判别力**：页面没有乐观气泡，「用户气泡显示 `/help`」来自测试桩返回的快照；有判别力的是请求体的 `message` 为 `/help`。
+- **J10 的判别力**：`fireEvent.click` 在 jsdom 里不移动焦点；判别力在 option 与 listbox 容器上的 `mousedown` 都被 `preventDefault`。
+- **Chromium 一次性观察**（production build + `vite preview`，`/api/**` 由 Playwright 路由桩应答，16 条目录；1440×900 欢迎态 / 已选会话 / 暗色，390×844 欢迎态 / 已选会话；脚本与截图不入库）：
+  - 面板是卡片的第一个子元素、在输入框上方、宽度随卡片（726/752、324/350）；高度 220px 封顶、内部滚动；页面与面板都没有横向溢出；390px 下 hint 换到第二行。
+  - `↓` 15 次到末项时该项在面板可视范围内；再 `↓` 回到首项；光标位置不动。
+  - `Esc` 关闭、焦点仍在输入框；再输入重现。
+  - **真实鼠标点击**选项：draft 变为 `/todo `、面板关闭、焦点仍在输入框（随后键入的字符接在 draft 后）、无 prompt 请求。按在面板边缘同样不抢焦点。
+  - `Tab` 选中高亮项且焦点不离开输入框；面板关闭时 `Tab` 照常移到发送键。
+  - 每次页面装配 `/api/commands` 恰一次；无控制台错误；暗色下高亮与 hint 取自暗色 token。
 
 ## Seams under test
 - 纯函数直接调用（M 系列）。
