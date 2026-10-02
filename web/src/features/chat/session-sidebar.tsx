@@ -17,8 +17,9 @@ type SessionSidebarProps = {
   listError: string | null;
   listLoading: boolean;
   onCreateSession(): void;
+  /** `trigger` 是该条目的「更多」按钮：确认框与重命名 Dialog 关闭后把焦点还给它。 */
+  onDeleteSession(session: ChatSession, trigger: HTMLElement | null): void;
   onFilterChange(filter: SessionFilterValue): void;
-  /** `trigger` 是该条目的「更多」按钮：重命名 Dialog 关闭后把焦点还给它。 */
   onRenameSession(session: ChatSession, trigger: HTMLElement | null): void;
   onSelectSession(sessionId: string): void;
   onTogglePin(session: ChatSession): void;
@@ -27,13 +28,17 @@ type SessionSidebarProps = {
   workspaces: readonly { id: string; name: string }[] | null;
 };
 
-type EntriesProps = Pick<SessionSidebarProps, "onRenameSession" | "onTogglePin"> & {
+type EntriesProps = Pick<
+  SessionSidebarProps,
+  "onDeleteSession" | "onRenameSession" | "onTogglePin"
+> & {
   onSelect(sessionId: string): void;
   requestedSessionId: string | null;
   sessions: ChatSession[];
 };
 
 function SessionEntries({
+  onDeleteSession,
   onRenameSession,
   onSelect,
   onTogglePin,
@@ -66,6 +71,7 @@ function SessionEntries({
               <strong className="chat-session-title">{title}</strong>
             </button>
             <SessionMenu
+              onDelete={(trigger) => onDeleteSession(session, trigger)}
               onRename={(trigger) => onRenameSession(session, trigger)}
               onTogglePin={() => onTogglePin(session)}
               session={session}
@@ -109,7 +115,7 @@ function SessionGroup({
  * 侧栏列表区：`新建会话`、`筛选任务` 与「置顶任务 / 任务 / 空间」三分区列表，由 ChatPage 经侧栏
  * 槽位上报、在 shell 侧栏内渲染（issue 424、530）。数据、筛选值与回调都来自 ChatPage（槽位节点
  * 会随折叠与覆盖层关闭卸载）；覆盖层内选择或新建后调用侧栏提供的关闭回调，筛选与条目的
- * 「更多」菜单（issue 531）不调用。
+ * 「更多」菜单（issue 531、532）不调用。
  * 「今天」的当前时间取渲染时刻，不设定时器。
  */
 export function SessionSidebar({
@@ -117,6 +123,7 @@ export function SessionSidebar({
   listError,
   listLoading,
   onCreateSession,
+  onDeleteSession,
   onFilterChange,
   onRenameSession,
   onSelectSession,
@@ -131,6 +138,7 @@ export function SessionSidebar({
   const spaceCount = spaces.reduce((total, space) => total + space.sessions.length, 0);
   const entries = (items: ChatSession[]) => (
     <SessionEntries
+      onDeleteSession={onDeleteSession}
       onRenameSession={onRenameSession}
       onSelect={(sessionId) => {
         onSelectSession(sessionId);

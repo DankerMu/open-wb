@@ -6,6 +6,7 @@ import { useSidebarSlot } from "../../lib/sidebar-slot.js";
 import { useTopbar } from "../../lib/topbar.js";
 import { useAuth } from "../auth/index.js";
 import { ConversationView } from "./conversation-view.js";
+import { DeleteDialog } from "./delete-dialog.js";
 import { errorMessage, isNotFound, isUnauthorized } from "./errors.js";
 import { ownsCreateSend, ownsHistory, ownsMutation, visibleOwnedAlert } from "./ownership.js";
 import { RenameDialog } from "./rename-dialog.js";
@@ -68,7 +69,6 @@ export function ChatPage() {
   const [forkOwner, setForkOwner] = useState<ChatMutationOwner | null>(null);
   const [sessionFilter, setSessionFilter] = useState(DEFAULT_SESSION_FILTER);
   const { refresh: refreshWorkspaces, workspaces } = useWorkspaceList(client);
-  const sessionActions = useSessionActions(client, setListState, setHistoryState);
   const mountedRef = useRef(false);
   const clientRef = useRef(client);
   const requestedSessionRef = useRef(requestedSessionId);
@@ -179,6 +179,12 @@ export function ChatPage() {
     },
     [abortList, refreshWorkspaces],
   );
+  const sessionActions = useSessionActions(client, setListState, setHistoryState, {
+    abortHistory,
+    closeSource,
+    refreshList,
+    requestedSessionRef,
+  });
 
   useEffect(() => {
     fencePageWork();
@@ -637,6 +643,7 @@ export function ChatPage() {
       }
       listLoading={listState.client === client && listState.status === "loading"}
       onCreateSession={() => createAndSelect()}
+      onDeleteSession={sessionActions.openDelete}
       onFilterChange={setSessionFilter}
       onRenameSession={sessionActions.openRename}
       onSelectSession={selectSession}
@@ -667,6 +674,7 @@ export function ChatPage() {
         streamError={ownedStreamError}
       />
       <RenameDialog rename={sessionActions.rename} />
+      <DeleteDialog remove={sessionActions.remove} />
     </section>
   );
 }

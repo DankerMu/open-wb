@@ -94,7 +94,7 @@ describe("置顶与取消置顶 (M8, M9)", () => {
       expect(within(nav).getAllByRole("button", { name: MIDDLE })).toHaveLength(1);
 
       const { items, menu } = await openEntryMenu(nav, MIDDLE);
-      expect(items.map((item) => item.textContent)).toEqual(["重命名", UNPIN]);
+      expect(items.map((item) => item.textContent)).toEqual(["重命名", UNPIN, "删除"]);
       fireEvent.click(within(menu).getByRole("menuitem", { name: UNPIN }));
       await waitFor(() => expect(toasts()).toEqual([PINNED_TOAST, PINNED_TOAST]));
       expect(patchRequests(fetchMock, B)).toEqual([
@@ -116,10 +116,8 @@ describe("置顶与取消置顶 (M8, M9)", () => {
     await chooseEntryAction(nav, MIDDLE, PIN);
     await waitFor(() => expect(toasts()).toEqual([CONFLICT]));
     expectUnpinned(nav);
-    expect((await openEntryMenu(nav, MIDDLE)).items.map((item) => item.textContent)).toEqual([
-      "重命名",
-      PIN,
-    ]);
+    const reopened = (await openEntryMenu(nav, MIDDLE)).items.map((item) => item.textContent);
+    expect(reopened).toEqual(["重命名", PIN, "删除"]);
 
     fireEvent.click(screen.getByRole("menuitem", { name: PIN }));
     await waitFor(() => expect(toasts()).toEqual([CONFLICT, REQUEST_FAILED]));
