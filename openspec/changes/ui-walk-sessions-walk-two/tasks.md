@@ -27,4 +27,4 @@ Fixture level: expanded
 - [x] 改动只有 `web/e2e/ui-walk-sessions.spec.ts`；其它被跟踪文件零 diff。
 - [x] 没有 RED 阶段；负对照 N1–N16 在两个 project 上逐条记录失败所在的步骤，#540 仍适用的负对照在 `desktop-light` 重跑。
 - [x] `make lint`、`make typecheck`、`make anti-drift`（jscpd 179 不增）、`bash scripts/size-guard.sh`、`npm test --workspace web`、`make test-guardrails` 退出 0；`openspec validate ui-walk-sessions-walk-two --strict --no-interactive` 通过。
-- [ ] 实测时长（本地全新状态、复用状态；CI）写进 PR。
+- [x] 实测时长（本地全新状态、复用状态；CI）写进 PR。

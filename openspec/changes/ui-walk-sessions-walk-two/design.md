@@ -52,7 +52,7 @@
 次序固定：
 1. 点顶栏 `对话内搜索`（按 role）→ `search` `对话内搜索` 可见，`搜索对话内容` 获得焦点，按钮的 `aria-expanded` 为 `true`。
 2. 记录（`mark` 日志）此刻用户消息的 `article` 是否已在视口内——只是记录，供判断 `toBeInViewport` 在该 project 有没有判别力。
-3. `fill(uuid)` → 计数文本恰为 `1/1`；用户消息的 `article` 有 `aria-current="true"` 且 `toBeInViewport`；带 `aria-current="true"` 的 `article` 全页恰一个。
+3. `fill(uuid)` → 计数文本恰为 `1/1`；用户消息的 `article` 有 `aria-current="true"` 且 `toBeInViewport({ ratio: 1 })`（fix pass 1：完整可见）；带 `aria-current="true"` 的 `article` 全页恰一个。
 4. `fill("WorkBuddy")` → 计数恰为 `1/2`（按消息计数：提示词与固定回复各一条）。
 5. `fill` 一个不会命中的词（含另一个新 UUID）→ 计数恰为 `0/0`；带 `aria-current` 的 `article` 计数 0。
 6. `fill(uuid)` → 再次 `1/1` 与高亮（给 `Esc` 一个「之前有高亮」的前提）。
@@ -124,16 +124,26 @@
 - **E8 CI**：PR 的 `ui-walk` job 通过；从日志记录四条旅程各自的时长、总时长与新旅程的分步累计。
 
 ## 已知残留
-1. **「滚入视图」没有断言级的真实浏览器证据**：`desktop-light` 上用户消息搜索前已完整在视口内（位置不变）；`mobile-dark` 上搜索前被转录框顶部裁掉约 39 px、`1/1` 之后完整可见（`mark` 日志里消息的 y 从 54–77 变到 128）——位移只在日志里，不是断言；`toBeInViewport`（任意相交）在两个 project 上搜索前都会通过。滚动行为由 jsdom 的对话内搜索测试证明。
+1. **「滚入视图」只在 `mobile-dark` 上有断言级证据**：断言是 `toBeInViewport({ ratio: 1 })`。mobile 上搜索前用户消息被转录框顶部裁掉约 39 px（可见比 0.64），`1/1` 之后完整可见；对照「把断言挪到搜索之前」在 mobile 失败（`viewport ratio 0.6395`）、在 desktop 通过。`desktop-light` 上消息前后都完整可见，那里分辨不出滚动。这依赖 390×844 下两条消息的布局——布局变到 mobile 上也不裁切时断言仍会通过，只是不再有判别力（`mark` 日志里的前后位置可查）。
 1a. **「助手消息没有 `aria-current`」按排除法断言**：全页带 `aria-current="true"` 的 `article` 恰一个且用户消息带它；没有对助手 article 的直接否定断言（N8 证明它会咬）。
 2. **只走行菜单**：顶栏的 `重命名` 入口不在走查里。
 3. **只删除 done 会话**：running 会话的 UI 删除没有真实浏览器证据（服务端集成测试覆盖 REST 路径）。
 4. **Toast 只断言 `任务已删除`**；`已更新置顶状态`、`已重命名` 不断言。
 5. **失败路径上的重连 404**：页面仍在会话页时 `finally` 删除，约 3 s 后事件流重连进 404，会给已失败的运行多加一条 oracle 错误。
 6. **取消置顶**不走（菜单项的文案变化有断言，点击没有）。
-6a. **有断言而没有负对照的句子**：「保存后对话框关闭」（`取消` 同样关框）、reload 前的顶栏标题、reload 后 DOM 上的置顶分区（N6 只打 REST）、`0/0` 时无当前匹配、`Esc` 之后高亮清除（N10 先失败在搜索框）、URL 与欢迎态、`1/2`。都是对真实 DOM 的肯定或计数断言。
+6a. **有断言而没有负对照的句子**：「保存后对话框关闭」（`取消` 同样关框）、reload 前的顶栏标题、reload 后 DOM 上的置顶分区与侧栏条目名（N6 只打 REST）、REST 回读的 `title`、`取消置顶` 可见、当前匹配恰一条、`0/0` 时无当前匹配、`Esc` 之后高亮清除与 `aria-expanded` 为 false（N10 先失败在搜索框）、删除后选中条目计数 0、URL 与欢迎态、`1/2`。都是对真实 DOM 或真实响应的肯定或计数断言。
 7. **测试超时不清理**（同 #540）。
 8. **每测试 30 s**：#557 还要加第 10 步的两个真实回合。实测（本地）：复用状态下新旅程 4.2–4.3 s（desktop）/ 5.6–5.7 s（mobile）；全新状态 6.3 s / 5.6 s，完整 `make ui-walk` 36 s。第 7–11 步合计约 1.7 s（desktop）/ 2.6 s（mobile）。
+
+## 评审与 fix pass 1
+第一轮三席无 P0 / P1。采纳三处，都只动 spec 文件：
+- 第 9 步 `toBeInViewport()` → `toBeInViewport({ ratio: 1 })`（覆盖缺口：默认 ratio 是「任意相交」，mobile 上被裁切的消息搜索前也满足）。对照见残留 1。
+- 第 8 步 `expectPinnedAs` 断言行菜单触发按钮的完整名字 `更多操作：<新标题>`（此前只匹配前缀）。对照：期望旧标题 → 第 8 步失败，两个 project。
+- `expectSelectedIn` 先断言目标分区、再断言全列表恰一条（置顶不是乐观更新，全列表计数原先会被迁移前的 DOM 满足）。对照 N1 现在报在目标分区计数那一行。
+
+fix 后：长驻栈连续五遍 10/10（desktop 4.2–4.4 s、mobile 5.6–5.7 s）；全新状态完整 `make ui-walk` `5 passed, 1 skipped`，36.4 s；jscpd 179；文件 566 行。
+
+CI（第一轮 head，run 37057793920 的 `ui-walk` job，1 分 44 秒）：`5 passed, 1 skipped`，47.5 s；新旅程 6.7 s（desktop，201 路径）/ 7.6 s（mobile），旧旅程 13.7 s / 16.9 s；新旅程分步累计 desktop：第 6 步 +3991、第 7 步 +4528、第 8 步 +5201、第 11 步 +5996、登出 +6614 ms；mobile：+3226、+4337、+5424、+6600、+7577 ms。每测试 30 s 余约 22 s。
 
 ## Seams under test
 - 真实浏览器对编译后的应用、真 omp 与受控上游；没有任何桩。
