@@ -358,15 +358,15 @@ function sections(sidebar: Locator): Sections {
   };
 }
 
-// 会话按选中项定位（建会话后的标题每次运行都相同）：全列表恰一条，在 `home` 里，不在 `others` 的
-// 任何一个里；不存在的分区计数自然为 0。
+// 会话按选中项定位（建会话后的标题每次运行都相同）：在 `home` 里，全列表恰一条，不在 `others` 的
+// 任何一个里；不存在的分区计数自然为 0。先断言 `home`：条目迁移之前的 DOM 也满足全列表恰一条。
 async function expectSelectedIn(
   list: Locator,
   home: Locator,
   others: readonly Locator[],
 ): Promise<void> {
-  await expect(list.locator(CURRENT_SESSION)).toHaveCount(1);
   await expect(home.locator(CURRENT_SESSION)).toHaveCount(1);
+  await expect(list.locator(CURRENT_SESSION)).toHaveCount(1);
   for (const section of others) {
     await expect(section.locator(CURRENT_SESSION)).toHaveCount(0);
   }
@@ -422,6 +422,7 @@ async function step8Rename(
     const { list, pinned, tasks, spaces } = sections(sidebar);
     await expectSelectedIn(list, pinned, [spaces, tasks]);
     await expect(list.locator(CURRENT_SESSION)).toHaveAccessibleName(title);
+    await expect(rowMenu(sidebar)).toHaveAccessibleName(`更多操作：${title}`);
   };
   await inspectSidebar(page, project, async (sidebar) => {
     await rowMenu(sidebar).click();
@@ -466,7 +467,7 @@ async function step9Search(page: Page, uuid: string, mark: (point: string) => vo
     await field.fill(uuid);
     await expect(counter).toHaveText("1/1");
     await expect(user).toHaveAttribute("aria-current", "true");
-    await expect(user).toBeInViewport();
+    await expect(user).toBeInViewport({ ratio: 1 });
     await expect(page.locator(CURRENT_MATCH)).toHaveCount(1);
   };
 
@@ -474,7 +475,8 @@ async function step9Search(page: Page, uuid: string, mark: (point: string) => vo
   await expect(search).toBeVisible();
   await expect(field).toBeFocused();
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
-  // 只是记录：用户消息本来就在视口内的 project 上，`toBeInViewport` 对「滚动发生过」没有判别力。
+  // 记录搜索前后的位置。`toBeInViewport({ ratio: 1 })` 在 mobile-dark 上有判别力（搜索前用户消息
+  // 顶部被转录框裁掉，命中后完整可见）；desktop-light 上它前后都完整可见，分辨不出滚动。
   mark(`step 9 user message before search: ${await describePosition(page, user)}`);
   await expectUuidMatch();
   mark(`step 9 user message at 1/1: ${await describePosition(page, user)}`);
