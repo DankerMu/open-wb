@@ -397,9 +397,11 @@
 
 /* File-change card adapted from resource/workbuddy-live-demo.html:519-526 (.file-changes-card,
    .file-changes-head, .file-change-*); the head carries no icon. The fieldset reset mirrors
-   .chat-approval and the 查看详情 button reuses .chat-msg-action. The artifact card shares the frame. */
+   .chat-approval and the 查看详情 button reuses .chat-msg-action. The artifact card and the list of
+   the 产物面板 drawer (issue 537, a div: the fieldset reset is a no-op there) share the frame. */
 .file-changes-card,
-.artifact-card {
+.artifact-card,
+.artifacts-panel-list {
   min-width: 0;
   min-inline-size: 0;
   margin: 0;

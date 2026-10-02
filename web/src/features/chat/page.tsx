@@ -5,6 +5,7 @@ import type { ChatMessageSnapshot } from "../../lib/session-contract.js";
 import { useSidebarSlot } from "../../lib/sidebar-slot.js";
 import { useTopbar } from "../../lib/topbar.js";
 import { useAuth } from "../auth/index.js";
+import { useArtifactsPanel } from "./artifacts-panel.js";
 import { ConversationView } from "./conversation-view.js";
 import { DeleteDialog } from "./delete-dialog.js";
 import { errorMessage, isNotFound, isUnauthorized } from "./errors.js";
@@ -629,7 +630,9 @@ export function ChatPage() {
     listState.client === client && listState.status === "success" ? listState : null;
   const historyView = ownedHistory && historyState.status === "ready" ? historyState.view : null;
   const selected = selectedSession(requestedSessionId, listForClient, ownedHistory, historyState);
-  useTopbar(chatTopbar(selected, sessionActions.openRename));
+  const workspace = workspaces?.find((item) => item.id === selected?.workspaceId);
+  const artifacts = useArtifactsPanel(client, historyView, workspace);
+  useTopbar(chatTopbar(selected, sessionActions.openRename, artifacts.open));
   const ownedBusy = ownsMutation(mutationOwner, client, requestedSessionId);
   const ownedStreamError = visibleOwnedAlert(streamError, client, requestedSessionId);
   const generating =
@@ -681,10 +684,11 @@ export function ChatPage() {
         sendDisabled={sendDisabled}
         streamError={ownedStreamError}
         welcome={welcome}
-        workspace={workspaces?.find((item) => item.id === selected?.workspaceId)}
+        workspace={workspace}
       />
       <RenameDialog rename={sessionActions.rename} />
       <DeleteDialog remove={sessionActions.remove} />
+      {artifacts.panel}
     </section>
   );
 }

@@ -21,29 +21,34 @@ function discard(result: FilePreview) {
   if (result.kind === "image") URL.revokeObjectURL(result.url);
 }
 
-/**
- * One card. It owns at most one preview request at a time (`controller`): the request starts on a
- * click, disables every action of the card while in flight and is aborted on unmount, after which
- * its late result has no effect except that a Blob URL it brought is revoked.
- */
-function ArtifactCard({
-  artifact,
-  client,
-  path,
-  workspaceId,
-}: {
+type ArtifactActionProps = {
   artifact: Artifact;
   client: ApiClient;
   path: string;
   workspaceId: string;
-}) {
+};
+
+/**
+ * The action of one artifact, shared by its card and by a 产物面板 row. It owns at most one preview
+ * request at a time (`controller`): the request starts on a click, disables every button of the
+ * action while in flight and is aborted on unmount, after which its late result has no effect
+ * except that a Blob URL it brought is revoked. `button` is the icon button, `dialog` the html
+ * preview; `busy`, `label` and `onAction` serve any further button of the same action.
+ */
+function useArtifactAction({ artifact, client, path, workspaceId }: ArtifactActionProps) {
   const toast = useToast();
-  const headId = useId();
   const opener = useRef<HTMLButtonElement | null>(null);
   const controller = useRef<AbortController | null>(null);
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<{ text: string; truncated: boolean } | null>(null);
   useEffect(() => () => controller.current?.abort(), []);
+  // A browser moves focus to `body` when the focused button is disabled by `busy`; once the request
+  // ended, hand it back to the clicked button unless focus has gone elsewhere (issue 537).
+  useEffect(() => {
+    if (!busy && document.activeElement === document.body) {
+      opener.current?.focus({ preventScroll: true });
+    }
+  }, [busy]);
 
   /** Clicks a temporary link; the URL is revoked a task later so the browser can still read it. */
   function download(url: string) {
@@ -112,28 +117,73 @@ function ArtifactCard({
     opener.current = event.currentTarget;
     void run();
   };
+  const button = (
+    <Button
+      aria-label={label}
+      className="chat-msg-action"
+      disabled={busy}
+      onClick={onAction}
+      size="icon"
+      title={label}
+      variant="ghost"
+    >
+      <Icon name={traits.actionIcon} size={12} />
+    </Button>
+  );
+  const dialog = (
+    <Dialog
+      onOpenChange={(open) => {
+        if (!open) setPreview(null);
+      }}
+      open={preview !== null}
+      returnFocus={opener}
+      size="md"
+      title={artifact.name}
+    >
+      {preview?.truncated ? (
+        <p className="artifact-preview-note">文件超过 1 MiB，仅预览前 1 MiB</p>
+      ) : null}
+      {preview === null ? null : (
+        <iframe
+          className="artifact-preview-frame"
+          sandbox="allow-scripts"
+          srcDoc={preview.text}
+          title={artifact.name}
+        />
+      )}
+    </Dialog>
+  );
+  return { busy, label, onAction, button, dialog };
+}
+
+/** The icon button of an artifact's action and its html preview dialog, for a 产物面板 row. */
+export function ArtifactAction(props: ArtifactActionProps) {
+  const { button, dialog } = useArtifactAction(props);
+  return (
+    <>
+      {button}
+      {dialog}
+    </>
+  );
+}
+
+/** One card: file icon, name, type label and the action; an html card repeats the action in its foot. */
+function ArtifactCard(props: ArtifactActionProps) {
+  const { artifact } = props;
+  const headId = useId();
+  const { busy, label, onAction, button, dialog } = useArtifactAction(props);
   return (
     <>
       <fieldset aria-labelledby={headId} className="artifact-card">
         <div className="artifact-head">
           <span className={`artifact-file-icon artifact-file-icon--${artifact.kind}`}>
-            <Icon name={traits.icon} size={14} />
+            <Icon name={TRAITS[artifact.kind].icon} size={14} />
           </span>
           <span className="artifact-title" id={headId}>
             {artifact.name}
           </span>
           <span className="artifact-lang">{artifact.label}</span>
-          <Button
-            aria-label={label}
-            className="chat-msg-action"
-            disabled={busy}
-            onClick={onAction}
-            size="icon"
-            title={label}
-            variant="ghost"
-          >
-            <Icon name={traits.actionIcon} size={12} />
-          </Button>
+          {button}
         </div>
         {artifact.kind === "html" ? (
           <div className="artifact-foot">
@@ -150,27 +200,7 @@ function ArtifactCard({
           </div>
         ) : null}
       </fieldset>
-      <Dialog
-        onOpenChange={(open) => {
-          if (!open) setPreview(null);
-        }}
-        open={preview !== null}
-        returnFocus={opener}
-        size="md"
-        title={artifact.name}
-      >
-        {preview?.truncated ? (
-          <p className="artifact-preview-note">文件超过 1 MiB，仅预览前 1 MiB</p>
-        ) : null}
-        {preview === null ? null : (
-          <iframe
-            className="artifact-preview-frame"
-            sandbox="allow-scripts"
-            srcDoc={preview.text}
-            title={artifact.name}
-          />
-        )}
-      </Dialog>
+      {dialog}
     </>
   );
 }
