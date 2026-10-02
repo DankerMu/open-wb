@@ -1,3 +1,4 @@
+import { type Command, createCommandMethods } from "./api-commands.js";
 import {
   hasExactlyKeys,
   isNonNegativeSafeInteger,
@@ -173,6 +174,7 @@ export type ApiClient = {
     decision: "allow" | "deny",
     options?: ApiRequestOptions,
   ): Promise<ChatSettledApproval>;
+  listCommands(options?: ApiRequestOptions): Promise<Command[]>;
 };
 
 export type ApiClientOptions = {
@@ -555,6 +557,7 @@ export function createApiClient({ onUnauthorized }: ApiClientOptions = {}): ApiC
       requestFailed,
       requestOptions,
     }),
+    ...createCommandMethods(onUnauthorized, { getRequestOptions, request, requestFailed }),
 
     async listWorkspaces(options) {
       const response = await request(
