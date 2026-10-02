@@ -27,7 +27,6 @@ const EXPECTED_THINKING = "先读需求，再列要点，最后作答。";
 const EXPECTED_CHANGES = [{ path: REPORT_FILE, added: null, removed: null, kind: "write" }];
 const SCENE_PILLS = ["日常办公", "代码开发", "创意设计"];
 const CODE_CHIPS = ["日常开发", "网站开发", "Agent 应用", "Skill 开发", "CI/CD"];
-const SCENE_TOAST = "已切换到「代码开发」场景";
 const HEX_ID = /^[0-9a-f]{32}$/;
 const SPACES_SECTION = /^空间 \(\d+\)$/u;
 const TASKS_SECTION = /^任务 \(\d+\)$/u;
@@ -75,8 +74,8 @@ async function walkSessionMeta(
 
   await step1Login(page, oracle, project);
   // 会话页只在挂载与建会话后读空间列表：先确保空间存在，再进入 `/`。
-  const workspaceId = await step1EnsureWorkspace(page);
-  mark("step 1");
+  const { id: workspaceId, ensured } = await step1EnsureWorkspace(page);
+  mark(`step 1 (POST /api/workspaces ${ensured})`);
   try {
     await page.goto("/");
     await expect(
@@ -118,8 +117,9 @@ async function step1Login(page: Page, oracle: AuthOracle, project: WalkProject):
   oracle.phase = "authenticated";
 }
 
-// 201（全新状态）或 409（已存在）；id 与 dir 从列表读，dir 等于名字是逻辑路径的前提。
-async function step1EnsureWorkspace(page: Page): Promise<string> {
+// 201（全新状态）或 409（已存在），状态码随 step 1 的日志行输出；id 与 dir 从列表读，dir 等于名字是
+// 逻辑路径的前提。
+async function step1EnsureWorkspace(page: Page): Promise<{ id: string; ensured: number }> {
   const ensured = await page.request.post("/api/workspaces", { data: { name: WORKSPACE_NAME } });
   expect([201, 409], "POST /api/workspaces status").toContain(ensured.status());
   const listed = await page.request.get("/api/workspaces");
@@ -129,7 +129,7 @@ async function step1EnsureWorkspace(page: Page): Promise<string> {
   expect(named.map((workspace) => workspace.dir)).toEqual([WORKSPACE_NAME]);
   const id = named[0]?.id ?? "";
   expect(id).toMatch(HEX_ID);
-  return id;
+  return { id, ensured: ensured.status() };
 }
 
 async function expectPressed(pills: Locator, pressed: readonly string[]): Promise<void> {
@@ -163,8 +163,7 @@ async function step2PickWorkspace(page: Page): Promise<void> {
   ).toBeVisible();
 }
 
-// 只观测 `POST /api/sessions`；返回会话 id。场景 Toast 显示期间 mobile 导航覆盖层按 Escape 关不掉
-// （#643），所以先等它消失再经侧栏读状态。
+// 只观测 `POST /api/sessions`；返回会话 id。
 async function step3SendPrompt(
   page: Page,
   project: WalkProject,
@@ -193,9 +192,6 @@ async function step3SendPrompt(
   await expect(assistant.locator(".chat-md")).toHaveText(EXPECTED_REPLY, {
     timeout: TURN_DONE_TIMEOUT_MS,
   });
-  await expect(
-    page.getByRole("region", { name: /通知/u }).getByText(SCENE_TOAST, { exact: true }),
-  ).toHaveCount(0);
   await expectSelectedSessionStatus(page, project, "已完成");
   await expect(
     assistant.getByRole("region", { name: "write" }).getByRole("status", { name: "write 已完成" }),
@@ -295,11 +291,25 @@ async function step5ArtifactsDrawer(page: Page): Promise<void> {
   await expect(drawer).toHaveCount(0);
 }
 
-// 文件页只认 `ws`（没有 path 参数），落到空间；随后以真实导航回到会话。
+// 文件页只认 `ws`（没有 path 参数），落到空间；随后以真实导航回到会话。`ws` 缺失或未知时文件页自己
+// 把 URL 改写成第一个空间（全新状态下正是本空间），落定后的 URL 证明不了按钮的目标：断言点击后的
+// 第一次导航，URL 在事件回调里同步读（之后再读可能已是改写后的地址）。
 async function step5ViewDetails(page: Page, workspaceId: string, sessionId: string): Promise<void> {
+  let target = "";
+  const navigated = page.waitForEvent("framenavigated", (frame) => {
+    if (frame !== page.mainFrame()) return false;
+    target = frame.url();
+    return true;
+  });
   await fileChangesCard(page)
     .getByRole("button", { name: `查看详情 ${LOGICAL_PATH}`, exact: true })
     .click();
+  await navigated;
+  const first = new URL(target);
+  expect(
+    `${first.pathname}${first.search}${first.hash}`,
+    "查看详情: first navigation after the click",
+  ).toBe(`/files?ws=${workspaceId}`);
   await expect.poll(() => new URL(page.url()).pathname).toBe("/files");
   await expect.poll(() => new URL(page.url()).searchParams.get("ws")).toBe(workspaceId);
   await expect(
