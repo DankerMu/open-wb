@@ -128,7 +128,12 @@ export function renderObservedChatPage(
   return { fetchMock, router, view };
 }
 
-export function renderChatPageWithAuthProbe(path: string, routes: FetchRoutes) {
+/** `onCommit`（可选）在会话页每次提交后收到整页 HTML，用来断言续期途中的中间提交。 */
+export function renderChatPageWithAuthProbe(
+  path: string,
+  routes: FetchRoutes,
+  onCommit?: (html: string, location: string) => void,
+) {
   let probe: ChatAuthProbe | undefined;
   const fetchMock = createFetchMock(authenticatedChatLifecycleRoutes(routes));
   resetFakeEventSources();
@@ -140,7 +145,7 @@ export function renderChatPageWithAuthProbe(path: string, routes: FetchRoutes) {
       <ChatAuthProbe onState={(state) => (probe = state)} />
       <AuthGuard>
         <SidebarSlotProvider>
-          <ChatPage />
+          {onCommit ? <ObservedChatPage onCommit={onCommit} /> : <ChatPage />}
           <SidebarSlotHost />
         </SidebarSlotProvider>
         <AuthFooter />

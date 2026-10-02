@@ -1,6 +1,7 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect } from "vitest";
 import { sessionPromptPath } from "./chat-page-lifecycle-support.js";
+import { composer } from "./chat-page-ownership-support.js";
 import {
   envelope,
   messagesPath,
@@ -63,16 +64,19 @@ export function createRejected() {
 type WelcomeFixture = {
   /** 取代缺省的 `POST /api/sessions` 处理（挂起、拒绝）。 */
   create?: () => Promise<Response> | Response;
+  /** 挂载时已在列表里的会话（排在新建会话之后），各带一份空历史快照。 */
+  existing?: readonly SessionView[];
   /** `/api/workspaces` 路由；缺省恒返回 项目A 与 客服。 */
   workspaces?: FetchRoutes[string];
 };
 
 /**
  * 欢迎态路由：`POST /api/sessions` 像服务端那样把请求体里的 `scene`/`workspaceId` 写进新会话并排到
- * 列表首位；新会话的历史为空快照，其 prompt 挂起。
+ * 列表首位；各会话的历史为空快照，新会话的 prompt 挂起。
  */
 export function welcomeRoutes({
   create,
+  existing = [],
   workspaces = () => workspaceList(PROJECT_A, SUPPORT),
 }: WelcomeFixture = {}): FetchRoutes {
   const created: (Omit<SessionView, "scene" | "workspaceId"> & {
@@ -82,7 +86,7 @@ export function welcomeRoutes({
   const routes: FetchRoutes = {
     "/api/sessions": (_path, options) => {
       if (options?.method !== "POST") {
-        return jsonResponse({ sessions: [...created].reverse() });
+        return jsonResponse({ sessions: [...[...created].reverse(), ...existing] });
       }
       if (create) return create();
       const id = CREATED_IDS[created.length];
@@ -101,13 +105,13 @@ export function welcomeRoutes({
     },
     "/api/workspaces": workspaces,
   };
+  const snapshotOf = (session: unknown) =>
+    jsonResponse({ session, messages: [], streamCursor: { epoch: 1, seq: 0 } });
+  for (const session of existing) {
+    routes[messagesPath(session.id)] = () => snapshotOf(session);
+  }
   for (const id of CREATED_IDS) {
-    routes[messagesPath(id)] = () =>
-      jsonResponse({
-        session: created.find((session) => session.id === id),
-        messages: [],
-        streamCursor: { epoch: 1, seq: 0 },
-      });
+    routes[messagesPath(id)] = () => snapshotOf(created.find((session) => session.id === id));
     routes[sessionPromptPath(id)] = () => new Promise<Response>(() => {});
   }
   return routes;
@@ -146,6 +150,38 @@ export function createRequests(fetchMock: FetchMock) {
 /** 一次创建请求的期望形状：请求体文本逐字节相等。 */
 export function createOf(body: string) {
   return { body, contentType: "application/json" };
+}
+
+/** 发往 `POST /api/sessions/<id>/prompt` 的请求的 `[method, body]`，按调用顺序。 */
+export function promptRequests(fetchMock: FetchMock, sessionId: string) {
+  return calls(fetchMock, sessionPromptPath(sessionId)).map(([, options]) => [
+    options?.method,
+    options?.body,
+  ]);
+}
+
+/** composer 的 `<form>`。 */
+export function composerForm() {
+  const form = composer().closest("form");
+  if (!form) throw new Error("输入框不在表单内");
+  return form;
+}
+
+/** 会话页的卡片结构：卡片与工具栏都存在（不对 `undefined` 做恒真比较），工具栏是卡片的最后一个子元素。 */
+export function expectToolbarEndsCard() {
+  const card = composer().closest(".chat-composer-card");
+  if (!card) throw new Error("输入框不在 .chat-composer-card 内");
+  const toolbar = card.querySelector(".chat-composer-toolbar");
+  expect(toolbar).not.toBeNull();
+  expect(card.lastElementChild).toBe(toolbar);
+}
+
+/** 从侧栏选中既有会话 `title`（id 为 `sessionId`），等欢迎态的胶囊与 footer 卸载。 */
+export async function openExistingSession(nav: HTMLElement, title: string, sessionId: string) {
+  fireEvent.click(within(nav).getByRole("button", { name: title }));
+  await waitFor(() => expect(currentLocation()).toBe(`/?session=${sessionId}`));
+  await waitFor(() => expect(sceneGroup()).toBeNull());
+  expect(queryFooterButton()).toBeNull();
 }
 
 export function sceneGroup() {

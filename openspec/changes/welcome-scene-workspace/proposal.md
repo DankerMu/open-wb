@@ -37,7 +37,7 @@ Evidence floor: 新建 `web/test/chat-page-welcome-scene.test.tsx` 覆盖 design
 ## 与 issue / 父 delta 的偏差（父 change 归档前 rebase 适用）
 1. **`≤760px` 快捷任务行改为单行横向滚动**：父文与 issue 都没提。实测（Chromium，master 构建）390×844 欢迎态只剩 56px 空余；加上胶囊（36 + 12）与 footer（卡片内再加一行）后免责声明超出首屏约 17px，违反 chat-web「390×844 下免责声明位于首屏内」（CI `ui-walk` `expectWelcomeFirstScreen` 会红）。日常办公六项在 390 宽下换成三行（112px）；改为单行滚动收回 80px。只压各处间距的方案实测只剩约 7px 余量，CI 的字体差异就能吃掉。`≥761px` 不变。已写进 chat-web 子 delta；父文应同步采纳。
 2. **`workspace-list.ts`、`welcome.tsx`、`composer.tsx`、`conversation-view.tsx`、`chat.css` 有改动，新建 `welcome-options.ts`**：issue 的 PR Boundary 列了「欢迎态/composer 接线按需」，没列 `workspace-list.ts` 与第三个新文件。footer 要区分「读取中」与「读取失败（并显示文案）」，而 7.1 的 `useWorkspaceList` 把失败折叠成 `null`、丢掉了错误；本刀给它的返回值加 `error`，`workspaces`/`refresh` 的语义与时机不变。场景与空间状态、生效空间解析与 body 构造放进 `welcome-options.ts`，否则 `page.tsx` 超预算。
-3. **一处既有断言改动**：issue 写「既有测试零 diff」。`web/test/chat-page.test.tsx:338-340` 断言三个场景名不在页面上，正是本刀改写的那句规格；删除这三行，其余不动，文件不增行。
+3. **一处既有断言改动**：issue 写「既有测试零 diff」。`web/test/chat-page.test.tsx:338-340` 断言三个场景名不在页面上，正是本刀改写的那句规格；删除这三行，其余不动，文件不增行。评审后补充：`web/test/chat-page-lifecycle-support.tsx` 的 `renderChatPageWithAuthProbe` 加一个可选参数（+5 行，design「fix pass 1 记录」）。
 4. **选中空间不在当前列表里时按 `未选择` 处理**：父文没说。列表会被重读（创建会话、分叉等之后），选中的空间可能已被删除；读取可能失败；账号可能切换。子 delta 写明：按钮显示 `任务启动于 未选择` 且创建请求不带 `workspaceId`，按钮文本与请求体始终一致；空间重新出现在列表里时选择恢复。
 5. **状态的生命周期写明**：父文「离开欢迎态再回来保留，刷新复位」；子 delta 写成「选中会话后再回到欢迎态保留；刷新或离开会话页复位」（状态在 `ChatPage`，路由离开即卸载；同 7.1 筛选状态的先例）。
 6. 子 delta 另加父文未写的可观察行为：切换提示为 info Toast；快捷任务图标的可用键集合；查询去首尾空白、每次打开弹层查询为空；打开弹层不另发请求；读取失败以 `role="alert"` 显示；composer 锁定时已打开的弹层关闭；未选空间时 body 不含 `workspaceId` 键。

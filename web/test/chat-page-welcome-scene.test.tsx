@@ -31,10 +31,12 @@ import {
   CREATE_REJECTED,
   CREATED_IDS,
   choose,
+  composerForm,
   createOf,
   createRejected,
   createRequests,
   DESIGN_LABELS,
+  expectToolbarEndsCard,
   follows,
   footerButton,
   HERO,
@@ -42,6 +44,7 @@ import {
   mountWelcome,
   NO_MATCH,
   OFFICE_LABELS,
+  openExistingSession,
   openPicker,
   options,
   PROJECT_A,
@@ -49,6 +52,7 @@ import {
   pickerDialog,
   pickOption,
   pressedScenes,
+  promptRequests,
   queryFooterButton,
   quickLabels,
   quickRow,
@@ -69,7 +73,7 @@ import {
   workspacesRead,
 } from "./chat-page-welcome-scene-support.js";
 import { settle } from "./chat-stream-support.js";
-import { currentLocation, deferredResponse } from "./support.js";
+import { currentLocation, deferredResponse, type FetchMock } from "./support.js";
 import {
   blockBody,
   readRepoFile,
@@ -83,12 +87,24 @@ const UNSELECTED_BUTTON = "任务启动于 未选择";
 const PROJECT_A_BUTTON = "任务启动于 项目A";
 const OFFICE_BODY = '{"scene":"office"}';
 const UNAVAILABLE = "服务暂不可用";
+/** 续期后侧栏账号区的标记（`renewAccount` 登录为 `lisi`）。 */
+const NEW_ACCOUNT = '<span class="sidebar-user-account">lisi</span>';
 
 // 弹层的 FocusScope 在卸载后的宏任务里归还焦点，清理里先让出一轮。
 afterEach(cleanupSessionMeta);
 
 function pageText() {
   return document.body.textContent ?? "";
+}
+
+/** 整页标记（含属性与 portal 内容）：绝对根路径不得以任何形式进入 DOM。 */
+function pageHtml() {
+  return document.body.innerHTML;
+}
+
+/** 至今发出的请求总数（任意路径、任意方法）。 */
+function requestCount(fetchMock: FetchMock) {
+  return fetchMock.mock.calls.length;
 }
 
 function send(text: string) {
@@ -119,8 +135,10 @@ describe("场景胶囊 (W1–W4)", () => {
     expect(quickLabels()).toEqual(OFFICE_LABELS);
   });
 
-  it("W2 切换到 代码开发：选中态与快捷任务替换、一条 info Toast；点 网站开发 只填草稿不发送；再点已选场景无变化", async () => {
+  it("W2 切换到 代码开发（X7 不发任何请求）：选中态与快捷任务替换、一条 info Toast；点 网站开发 只填草稿不发送；再点已选场景无变化", async () => {
     const { fetchMock } = await mountWelcome();
+    await workspacesRead(fetchMock, 1);
+    const requests = requestCount(fetchMock);
     const expectCodeSceneWithOneToast = () => {
       expect(pressedScenes()).toEqual(["false", "true", "false"]);
       expect(quickLabels()).toEqual(CODE_LABELS);
@@ -130,6 +148,8 @@ describe("场景胶囊 (W1–W4)", () => {
     expectCodeSceneWithOneToast();
     const shown = Array.from(document.querySelectorAll(".ui-toast"));
     expect(shown.map((toast) => toast.classList.contains("ui-toast--info"))).toEqual([true]);
+    await act(settle);
+    expect(requestCount(fetchMock)).toBe(requests);
 
     fireEvent.click(within(quickRow()).getByRole("button", { name: "网站开发" }));
     await act(settle);
@@ -139,14 +159,20 @@ describe("场景胶囊 (W1–W4)", () => {
 
     selectScene("代码开发");
     expectCodeSceneWithOneToast();
+    await act(settle);
+    expect(requestCount(fetchMock)).toBe(requests);
   });
 
-  it("W2 切换到 创意设计：五项快捷任务与对应 Toast", async () => {
-    await mountWelcome();
+  it("W2 切换到 创意设计（X7 不发任何请求）：五项快捷任务与对应 Toast", async () => {
+    const { fetchMock } = await mountWelcome();
+    await workspacesRead(fetchMock, 1);
+    const requests = requestCount(fetchMock);
     selectScene("创意设计");
     expect(pressedScenes()).toEqual(["false", "false", "true"]);
     expect(quickLabels()).toEqual(DESIGN_LABELS);
     expect(toasts()).toEqual(["已切换到「创意设计」场景"]);
+    await act(settle);
+    expect(requestCount(fetchMock)).toBe(requests);
   });
 
   it("W3 静态清单：三组场景的值、文案与图标；office 引用既有清单；code 与 design 各五项", () => {
@@ -189,11 +215,13 @@ describe("场景胶囊 (W1–W4)", () => {
 });
 
 describe("composer footer 空间选择 (W5–W9)", () => {
-  it("W5 选择空间后创建绑定会话：footer 在卡片末尾，弹层列出逻辑路径且不发请求，过滤、选择、焦点、再打开、绑定创建与侧栏归组", async () => {
+  it("W5 选择空间后创建绑定会话（X7、X9）：footer 在卡片末尾，按钮为 type=button 带 folder 图标，弹层列出逻辑路径且不发请求，过滤、选择、焦点、再打开、绑定创建与侧栏归组", async () => {
     const { fetchMock } = await mountWelcome();
     await workspacesRead(fetchMock, 1);
+    const requests = requestCount(fetchMock);
     const trigger = footerButton(UNSELECTED_BUTTON);
     expect(trigger.type).toBe("button");
+    expect(trigger.querySelector("svg")?.classList.contains("lucide-folder")).toBe(true);
     const card = trigger.closest(".chat-composer-card");
     expect(card?.lastElementChild?.contains(trigger)).toBe(true);
     expect(card?.lastElementChild?.previousElementSibling).toBe(
@@ -210,7 +238,8 @@ describe("composer footer 空间选择 (W5–W9)", () => {
     ]);
     await act(settle);
     expect(workspaceRequests(fetchMock)).toBe(1);
-    expect(pageText()).not.toContain(ROOT_MARK);
+    expect(requestCount(fetchMock)).toBe(requests);
+    expect(pageHtml()).not.toContain(ROOT_MARK);
 
     search(dialog, "项目");
     expect(options(dialog)).toEqual([
@@ -228,7 +257,9 @@ describe("composer footer 空间选择 (W5–W9)", () => {
       [SUPPORT_OPTION, "false"],
     ]);
     await choose(reopened, PROJECT_A_OPTION);
+    await act(settle);
     expect(workspaceRequests(fetchMock)).toBe(1);
+    expect(requestCount(fetchMock)).toBe(requests);
 
     send("你好");
     await waitFor(() => expect(currentLocation()).toBe(`/?session=${CREATED_IDS[0]}`));
@@ -241,7 +272,7 @@ describe("composer footer 空间选择 (W5–W9)", () => {
     expect(entryTitles(nav)).toEqual(["新会话"]);
     await waitFor(() => expect(queryFooterButton()).toBeNull());
     expect(sceneGroup()).toBeNull();
-    expect(pageText()).not.toContain(ROOT_MARK);
+    expect(pageHtml()).not.toContain(ROOT_MARK);
   });
 
   it("W6 无权限元素与无匹配：footer 只有一个按钮；搜索无匹配只剩 未选择 与提示；按名称过滤（去首尾空白、不分大小写、不匹配逻辑路径）", async () => {
@@ -277,23 +308,25 @@ describe("composer footer 空间选择 (W5–W9)", () => {
     }
   });
 
-  it("W7 读取中：弹层显示 正在读取工作空间 与可选的 未选择，选择后弹层关闭、按钮不变", async () => {
+  it("W7 读取中（X4 三态互斥）：弹层显示 正在读取工作空间 与可选的 未选择，没有无匹配提示与 alert；选择后弹层关闭、按钮不变", async () => {
     await mountWelcome({ workspaces: () => deferredResponse().promise });
     const dialog = await openPicker();
     expect(within(dialog).getByText(LOADING, { exact: true })).toBeTruthy();
     expect(within(dialog).queryByRole("alert")).toBeNull();
+    expect(dialog.textContent).not.toContain(NO_MATCH);
     expect(options(dialog)).toEqual([[UNSELECTED, "true"]]);
 
     await choose(dialog, UNSELECTED);
     expect(footerButton().textContent).toBe(UNSELECTED_BUTTON);
   });
 
-  it("W7 读取失败：alert 恰为信封 message；失败后的重读在途显示 正在读取工作空间 且无 alert；重读成功后显示列表", async () => {
+  it("W7 读取失败（X4 三态互斥）：alert 恰为信封 message，没有无匹配与读取中提示；失败后的重读在途显示 正在读取工作空间 且无 alert；重读成功后显示列表", async () => {
     const second = deferredResponse();
     const mounted = await mountWelcome({ workspaces: [unavailable(), second.promise] });
     const failed = await openPicker();
     expect((await within(failed).findByRole("alert")).textContent).toBe(UNAVAILABLE);
     expect(within(failed).queryByText(LOADING, { exact: true })).toBeNull();
+    expect(failed.textContent).not.toContain(NO_MATCH);
     expect(options(failed)).toEqual([[UNSELECTED, "true"]]);
     await choose(failed, UNSELECTED);
 
@@ -301,6 +334,7 @@ describe("composer footer 空间选择 (W5–W9)", () => {
     const rereading = await openPicker();
     expect(within(rereading).getByText(LOADING, { exact: true })).toBeTruthy();
     expect(within(rereading).queryByRole("alert")).toBeNull();
+    expect(rereading.textContent).not.toContain(NO_MATCH);
     expect(pageText()).not.toContain(UNAVAILABLE);
 
     await settleDeferredResponse(second, workspaceList(PROJECT_A, SUPPORT));
@@ -313,10 +347,12 @@ describe("composer footer 空间选择 (W5–W9)", () => {
     expect(within(rereading).queryByText(LOADING, { exact: true })).toBeNull();
   });
 
-  it("W7 非信封失败：alert 为 请求失败，请稍后重试，未选择 仍在", async () => {
+  it("W7 非信封失败（X4 三态互斥）：alert 为 请求失败，请稍后重试，没有无匹配与读取中提示，未选择 仍在", async () => {
     await mountWelcome({ workspaces: () => new Response("oops", { status: 500 }) });
     const dialog = await openPicker();
     expect((await within(dialog).findByRole("alert")).textContent).toBe(REQUEST_FAILED);
+    expect(dialog.textContent).not.toContain(LOADING);
+    expect(dialog.textContent).not.toContain(NO_MATCH);
     expect(options(dialog)).toEqual([[UNSELECTED, "true"]]);
   });
 
@@ -364,9 +400,7 @@ describe("锁定、会话页与状态生命周期 (W10–W14)", () => {
     await waitFor(() => expect(options(dialog)).toHaveLength(3));
 
     typeDraft("你好");
-    const form = composer().closest("form");
-    if (!form) throw new Error("输入框不在表单内");
-    fireEvent.submit(form);
+    fireEvent.submit(composerForm());
     await waitFor(() => expect(pickerDialog()).toBeNull());
     expect(composer().disabled).toBe(true);
     expect(footerButton().disabled).toBe(true);
@@ -380,31 +414,24 @@ describe("锁定、会话页与状态生命周期 (W10–W14)", () => {
     expect(footerButton().getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("W11 会话页：欢迎态有 场景 组与 footer，选中会话后两者都不渲染、卡片末元素是工具栏", async () => {
+  it("W11 会话页（X9 卡片须存在）：欢迎态有 场景 组与 footer，选中会话后两者都不渲染、卡片末元素是工具栏", async () => {
     mountSessions("/", [view(A, "既有会话")]);
     const nav = await findList("既有会话");
     expect(scenePills()).toHaveLength(3);
     expect(footerButton().textContent).toBe(UNSELECTED_BUTTON);
 
-    fireEvent.click(within(nav).getByRole("button", { name: "既有会话" }));
-    await waitFor(() => expect(currentLocation()).toBe(`/?session=${A}`));
-    await waitFor(() => expect(sceneGroup()).toBeNull());
-    expect(queryFooterButton()).toBeNull();
-    const card = composer().closest(".chat-composer-card");
-    expect(card?.lastElementChild).toBe(card?.querySelector(".chat-composer-toolbar"));
+    await openExistingSession(nav, "既有会话", A);
+    expectToolbarEndsCard();
   });
 
-  it("W11（保持项）深链会话页：没有 场景 组与 任务启动于 按钮，卡片末元素是工具栏", async () => {
+  it("W11（保持项，X9 卡片须存在）深链会话页：没有 场景 组与 任务启动于 按钮，卡片末元素是工具栏", async () => {
     mountSessions(`/?session=${A}`, [view(A, "既有会话")]);
     await findList("既有会话");
     await screen.findByText("回答", { exact: true });
     expect(sceneGroup()).toBeNull();
     expect(queryFooterButton()).toBeNull();
     expect(document.querySelector(".chat-workspace-picker")).toBeNull();
-    const card = composer().closest(".chat-composer-card");
-    const toolbar = card?.querySelector(".chat-composer-toolbar");
-    expect(toolbar).not.toBeNull();
-    expect(card?.lastElementChild).toBe(toolbar);
+    expectToolbarEndsCard();
   });
 
   /** 一个既有会话 + 两个空间；选 代码开发 与 项目A。 */
@@ -482,7 +509,7 @@ describe("锁定、会话页与状态生命周期 (W10–W14)", () => {
     expect(footerButton().textContent).toBe(PROJECT_A_BUTTON);
   });
 
-  it("W13 账号切换：新账号列表挂起时按钮立即为 未选择、不露出上一账号的空间；列表到达后发送的 body 不带 workspaceId", async () => {
+  it("W13 账号切换（X2 不改选直接发送）：新账号列表挂起时按钮立即为 未选择、不露出上一账号的空间；列表到达后直接发送的 body 不带 workspaceId", async () => {
     const pending = deferredResponse();
     let renewed = false;
     const { fetchMock, getProbe } = renderChatPageWithAuthProbe(
@@ -509,7 +536,6 @@ describe("锁定、会话页与状态生命周期 (W10–W14)", () => {
       [UNSELECTED, "true"],
       ["Alphalisi/misc", "false"],
     ]);
-    await choose(dialog, UNSELECTED);
     expect(footerButton().textContent).toBe(UNSELECTED_BUTTON);
 
     send("你好");
@@ -538,15 +564,113 @@ describe("锁定、会话页与状态生命周期 (W10–W14)", () => {
   });
 });
 
-describe("静态样式", () => {
-  it("≤760px 媒体块内 .chat-quick-row 单行横向滚动；该规则不出现在媒体块之外", () => {
-    const css = stripComments(readRepoFile("web/src/features/chat/chat.css"));
-    const narrow = ruleBody(
-      blockBody(css, /@media\s*\(max-width:\s*760px\)\s*\{/),
-      ".chat-quick-row",
+describe("评审后补充 (X1、X3、X5、X6)", () => {
+  const CODE_WITH_PROJECT_A = createOf(`{"scene":"code","workspaceId":"${PROJECT_A.id}"}`);
+
+  /**
+   * 一个既有会话 + 欢迎态夹具：选 代码开发 与 项目A，从侧栏选中既有会话（胶囊与 footer 卸载），
+   * 再在会话页点侧栏 新建会话 并等它被选中。
+   */
+  async function createFromSessionPage(workspaces?: Response[]) {
+    const mounted = await mountWelcome({
+      existing: [view(A, "既有会话")],
+      ...(workspaces ? { workspaces } : {}),
+    });
+    const nav = await findList("既有会话");
+    selectScene("代码开发");
+    await pickOption(PROJECT_A_OPTION);
+    await openExistingSession(nav, "既有会话", A);
+
+    fireEvent.click(screen.getByRole("button", { name: "新建会话" }));
+    await waitFor(() => expect(currentLocation()).toBe(`/?session=${CREATED_IDS[0]}`));
+    return mounted;
+  }
+
+  it("X1 会话页创建：选 代码开发 与 项目A 后选中既有会话，再点侧栏 新建会话，body 带同样的 scene 与 workspaceId", async () => {
+    const { fetchMock } = await createFromSessionPage();
+    expect(createRequests(fetchMock)).toEqual([CODE_WITH_PROJECT_A]);
+  });
+
+  it("X1 变体：创建后的工作空间重读失败，在会话页再点 新建会话，body 只剩 scene", async () => {
+    const { fetchMock } = await createFromSessionPage([
+      workspaceList(PROJECT_A, SUPPORT),
+      unavailable(),
+      workspaceList(PROJECT_A, SUPPORT),
+    ]);
+    await workspacesRead(fetchMock, 2);
+    expect(sceneGroup()).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "新建会话" }));
+    await waitFor(() => expect(currentLocation()).toBe(`/?session=${CREATED_IDS[1]}`));
+    expect(createRequests(fetchMock)).toEqual([CODE_WITH_PROJECT_A, createOf('{"scene":"code"}')]);
+  });
+
+  it("X3 搜索框回车：有草稿时在 搜索工作空间 上按 Enter 不提交 composer，弹层仍在、草稿不变；弹层不在表单内", async () => {
+    const { fetchMock } = await mountWelcome();
+    typeDraft("你好");
+    const dialog = await openPicker();
+    await waitFor(() => expect(options(dialog)).toHaveLength(3));
+    const box = searchBox(dialog);
+    expect(composerForm().contains(dialog)).toBe(false);
+    expect(box.form).toBeNull();
+
+    fireEvent.keyDown(box, { code: "Enter", key: "Enter" });
+    await act(settle);
+    expect(fetchMock.mock.calls.filter(([, request]) => request?.method === "POST")).toEqual([]);
+    expect(pickerDialog()).toBe(dialog);
+    expect(composer().value).toBe("你好");
+    expect(composer().disabled).toBe(false);
+    expect(currentLocation()).toBe("/");
+  });
+
+  it("X5 上一账号的读取失败不带到新账号：续期后新账号读取挂起，弹层为 正在读取工作空间、无 alert；换账号的那次提交起就不再显示", async () => {
+    let renewed = false;
+    const commits: string[] = [];
+    const { getProbe } = renderChatPageWithAuthProbe(
+      "/",
+      welcomeRoutes({
+        workspaces: () => (renewed ? deferredResponse().promise : unavailable()),
+      }),
+      (html) => commits.push(html),
     );
+    await screen.findByRole("heading", { level: 1, name: HERO });
+    const dialog = await openPicker();
+    expect((await within(dialog).findByRole("alert")).textContent).toBe(UNAVAILABLE);
+
+    renewed = true;
+    await renewAccount(getProbe);
+    expect(pickerDialog()).toBe(dialog);
+    expect(within(dialog).getByText(LOADING, { exact: true })).toBeTruthy();
+    expect(within(dialog).queryByRole("alert")).toBeNull();
+    expect(pageText()).not.toContain(UNAVAILABLE);
+    expect(options(dialog)).toEqual([[UNSELECTED, "true"]]);
+    // 失败文案只对读到它的账号可见：侧栏已显示新账号的每一次提交里都没有它，
+    // 而不是等新账号的读取开始后才清掉。
+    const asNewAccount = commits.filter((html) => html.includes(NEW_ACCOUNT));
+    expect(asNewAccount.length).toBeGreaterThan(0);
+    expect(asNewAccount.some((html) => html.includes(UNAVAILABLE))).toBe(false);
+  });
+
+  it("X6 场景不改变 prompt：选 创意设计 后发送 你好，prompt 请求体只有 message", async () => {
+    const { fetchMock } = await mountWelcome();
+    selectScene("创意设计");
+    send("你好");
+    const sessionId = `${CREATED_IDS[0]}`;
+    await waitFor(() => expect(promptRequests(fetchMock, sessionId)).toHaveLength(1));
+    expect(createRequests(fetchMock)).toEqual([createOf('{"scene":"design"}')]);
+    expect(promptRequests(fetchMock, sessionId)).toEqual([["POST", '{"message":"你好"}']]);
+  });
+});
+
+describe("静态样式", () => {
+  it("≤760px 媒体块内 .chat-quick-row 单行横向滚动且不超出容器、chip 不收缩（X8）；该规则不出现在媒体块之外", () => {
+    const css = stripComments(readRepoFile("web/src/features/chat/chat.css"));
+    const media = blockBody(css, /@media\s*\(max-width:\s*760px\)\s*\{/);
+    const narrow = ruleBody(media, ".chat-quick-row");
     expect(narrow).toContain("flex-wrap: nowrap;");
     expect(narrow).toContain("overflow-x: auto;");
+    expect(narrow).toContain("max-width: 100%;");
+    expect(ruleBody(media, ".chat-quick-chip")).toContain("flex: none;");
 
     const outside = topLevelBlocks(css)
       .filter(({ prelude }) => prelude.split(",").some((part) => part.trim() === ".chat-quick-row"))

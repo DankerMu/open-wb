@@ -109,6 +109,7 @@ useWelcomeOptions(workspaces: readonly Workspace[] | null, workspacesError: stri
 - X7 选择不发请求：切换场景前后 `fetch` 的调用总数不变。
 - X8 静态样式补全：`(max-width: 760px)` 块内 `.chat-quick-row` 含 `max-width: 100%`，`.chat-quick-chip` 含 `flex: none`。
 - X9 footer 按钮：`type="button"`、图标类含 `lucide-folder`；W5 的「不含 `root`」改读 `innerHTML`；W11 两例先断言 `.chat-composer-card` 存在。
+fix pass 1 记录：X5 按原文的终态断言杀不死「`error` 去掉 client 归属门」的变异（换 client 的 effect 在同一个 `act` 内就重读并清掉 error），另加逐次提交断言——侧栏已显示新账号的每一次提交都不含上一账号的失败文案；为此 `web/test/chat-page-lifecycle-support.tsx` 的 `renderChatPageWithAuthProbe` 加可选第三参 `onCommit`（既有 support 文件 +5 行，纯增量）。测试文件 559 → 683 行（29 例），support 243 → 279。
 
 实现记录：
 - 测试落 `web/test/chat-page-welcome-scene.test.tsx`（24 例）与 `web/test/chat-page-welcome-scene-support.tsx`。W6 另加纯路径查询（`misc`、`kefu`、`zhangsan` 不命中）——W5 的 `项目` 同时命中名称与路径，区分不了「也按路径过滤」；W11 拆成「欢迎态 → 选中会话」（RED）与深链保持项（实现前后皆绿）。
