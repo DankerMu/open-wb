@@ -29,6 +29,8 @@ export interface Slot {
   acquisitionFault: unknown;
   infraFaulted: boolean;
   entry: PoolEntry | undefined;
+  /** The workspace root a bound session's process runs in; null for an unbound session. */
+  workspaceRoot: string | null;
 }
 
 interface ClaimSlot {

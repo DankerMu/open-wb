@@ -446,6 +446,7 @@ export class SessionSupervisor {
       acquisitionFault: undefined,
       infraFaulted: false,
       entry: undefined,
+      workspaceRoot: resume.workspaceId === null ? null : cwd,
     };
     const unclaim = () => {
       if (claim !== undefined) {
@@ -658,9 +659,8 @@ export class SessionSupervisor {
     generation: Generation | undefined,
   ): Promise<boolean> {
     for (const event of events) {
-      // thinking.delta never reaches persistEvent: the slot's buffer merges, stores and publishes
-      // it. Any other event flushes that buffer before it is persisted, so a failing flush cannot
-      // leave a stored terminal the ring never gets.
+      // thinking.delta goes to the slot's buffer, never to persistEvent; any other event (also
+      // files.changed) flushes it first, so a failed flush leaves no stored terminal off the ring.
       const thinking = event.type === "thinking.delta";
       const buffered = thinking
         ? this.#thinking.add(slot, generation, assistantMessageId, event.data.delta)
@@ -680,6 +680,7 @@ export class SessionSupervisor {
           toolIds,
           nextOrdinal,
           settled,
+          slot.workspaceRoot,
         );
         if (settled.length > 0 && !(await this.#approvals.settled(settled))) {
           return false;

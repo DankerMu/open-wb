@@ -9,6 +9,7 @@
  */
 import { HttpError } from "../core/errors/index.js";
 import type { ChatEvent } from "./events.js";
+import { ownedChanges } from "./file-changes-ownership.js";
 import type { SessionClock } from "./omp/runtime.js";
 import type { Slot } from "./pool.js";
 import type { SessionStore, SettledApproval } from "./store.js";
@@ -222,6 +223,7 @@ export function persistEvent(
   toolIds: Map<string, number>,
   nextOrdinal: () => number,
   settled: SettledApproval[],
+  workspaceRoot: string | null,
 ): ChatEvent<number> | undefined {
   switch (event.type) {
     case "turn.start":
@@ -266,11 +268,22 @@ export function persistEvent(
     case "turn.end":
       store.finishTurn(assistantMessageId, event.data.status, settled);
       return event;
+    // An unregistered call or an unbound session drops the event before any filesystem access;
+    // otherwise the files owned by the workspace root are stored first, then returned to publish.
+    case "files.changed": {
+      const stepId = toolIds.get(event.data.stepId);
+      if (stepId === undefined || workspaceRoot === null) {
+        return undefined;
+      }
+      const files = ownedChanges(workspaceRoot, event.data.files);
+      if (files.length === 0) {
+        return undefined;
+      }
+      store.setStepChanges(stepId, JSON.stringify(files));
+      return { type: "files.changed", data: { messageId: event.data.messageId, stepId, files } };
+    }
     // thinking.delta never reaches here: the supervisor's merge buffer (#519) takes it first.
-    // files.changed: neither stored nor published (no ring sequence, no raw path on SSE) until
-    // the file-change (3.4) supervisor slice replaces this branch.
     case "thinking.delta":
-    case "files.changed":
       return undefined;
   }
 }

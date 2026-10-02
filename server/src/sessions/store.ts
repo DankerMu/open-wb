@@ -34,6 +34,7 @@ import {
   toMessageView,
   toStepView,
 } from "./store-branch.js";
+import { setStepChanges as setStepChangesText } from "./store-changes.js";
 import { appendThinking as appendThinkingText } from "./store-thinking.js";
 
 type SessionStatus = "idle" | "running" | "done" | "failed" | "stopped";
@@ -177,6 +178,8 @@ export interface SessionStore {
   /** Bounded thinking append (#519, store-thinking.ts): the fragment stored, "" once capped. */
   appendThinking(messageId: number, chunk: string): string;
   startStep(assistantMessageId: number, input: StartStepInput): number;
+  /** Owned file changes of a still-running step (#522, store-changes.ts); throws off one row. */
+  setStepChanges(stepId: number, json: string): void;
   // step.end 不扩展：stopped 步骤只由 finishTurn 结算（output 保持 NULL）。
   finishStep(stepId: number, status: "done" | "failed", output: string): boolean;
   /** Pending approvals denied in the terminal transaction are appended to `settled` once committed. */
@@ -575,6 +578,11 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
       });
       activeSteps.set(stepId, turn.assistantMessageId);
       return stepId;
+    },
+
+    setStepChanges(stepId, json) {
+      assertOpen(closed);
+      setStepChangesText(db, stepId, json);
     },
 
     finishStep(stepId, status, output) {
