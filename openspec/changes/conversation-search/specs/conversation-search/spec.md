@@ -32,7 +32,7 @@
 - **THEN** 新会话页面无搜索框、无高亮，`对话内搜索` 按钮 `aria-expanded="false"`；选回原会话后同样无搜索框，再次打开时输入框为空
 
 ### Requirement: 跳转与消息级高亮
-成为当前匹配的消息 SHALL 被滚动到转录区可视范围内，并获得消息级高亮：该消息的 `<article>` 带 `aria-current="true"` 与类名 `chat-msg--search-current`，同一时刻至多一条消息带此标记；当前匹配改变、清空或搜索框关闭时移除。`FollowTranscript`（`web/src/features/chat/scroll-follow.tsx`）SHALL 经 `handleRef` 暴露 `scrollToMessage(id)`：在自身 `.chat-transcript` 内查 `[data-message-id="<id>"]`，找到则 `scrollIntoView({ block: "center" })`，并在同一次调用内按滚动后的位置同步重算贴底状态（规则与用户滚动相同：距底 ≤4px 为贴底并隐藏 `回到最新`；否则解除贴底，距底超过一屏时显示 `回到最新`），不依赖浏览器随后派发的 scroll 事件；找不到该消息时不做任何事。跳转后转录区的贴底跟随与 `回到最新` 规则照旧（跳转到非底部消息后新内容不把视图拽回底部，`回到最新` 按距底规则出现；跳转到贴底位置的消息后仍继续跟随）。这是与 demo 的有意偏差：demo 只更新计数并 Toast `第 i / n 处匹配`、不滚动不高亮，且按匹配处数计数（demo:2022-2031）；本能力按匹配消息计数、滚动并高亮、不显示该 Toast。
+成为当前匹配的消息 SHALL 被滚动到转录区可视范围内，并获得消息级高亮：该消息的 `<article>` 带 `aria-current="true"` 与类名 `chat-msg--search-current`，同一时刻至多一条消息带此标记；当前匹配改变、清空或搜索框关闭时移除。`FollowTranscript`（`web/src/features/chat/scroll-follow.tsx`）SHALL 经 `handleRef` 暴露 `scrollToMessage(id)`：在自身 `.chat-transcript` 内查 `[data-message-id="<id>"]`，找到则 `scrollIntoView({ block: "center" })`，并在同一次调用内按滚动后的位置同步重算贴底状态（规则与用户滚动相同：距底 ≤4px 为贴底并隐藏 `回到最新`；否则解除贴底，距底超过一屏时显示 `回到最新`），不依赖浏览器随后派发的 scroll 事件；找不到该消息时不做任何事。跳转后转录区的贴底跟随与 `回到最新` 规则照旧（跳转到非底部消息后新内容不把视图拽回底部，`回到最新` 按距底规则出现；跳转到贴底位置的消息后仍继续跟随）。这是与 demo 的有意偏差：demo 只更新计数并 Toast `第 i / n 处匹配`、不滚动不高亮（demo:2022-2031）；本能力滚动并高亮、不显示该 Toast（计数口径与 demo 相同，都按匹配消息计数）。
 
 #### Scenario: 跳转滚动并高亮
 - **WHEN** 一个超过三屏的会话中第一条与最后一条消息匹配查询，转录区贴底，输入查询后按 Enter

@@ -11,8 +11,8 @@
 - 基元：`Input variant="search"`（`web/src/ui/input.tsx`）渲染 `div.ui-input.ui-input--search`（宽 240px，`input.css:26-32`）内含搜索图标与 `input[type=search]`，`className` 落在根 div，`ref` 与其余属性落在内层 input。图标 `search`、`chevron-up`、`chevron-down`、`x` 已注册（`web/src/ui/icon.tsx`）。feature 里的图标按钮写法：`<Button aria-label title size="icon" variant="ghost">`（`message-actions.tsx:26-35`）。
 - 输入法：`composer.tsx:55-56` 用 `event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229` 跳过组合期间的 Enter。
 - 侧栏的当前会话按钮也带 `aria-current="true"`（`web/test/chat-page-session-rename-pin.test.tsx:180`）——测试里判断高亮要限定在 `article` 上。
-- 既有测试对 banner 按钮的整表断言：`web/test/chat-page-session-rename-pin.test.tsx:470,487,527,539`、`web/test/chat-page-artifacts-panel.test.tsx:101,108,265`；`chatTopbar` 的单元调用在 `chat-page-artifacts-panel.test.tsx:123-131`。`web/test/chat-scroll-follow.test.tsx:15-58` 的滚动度量 mock 是该文件私有的。jscpd 扫 `web/**/*.{ts,tsx}`（含测试），当前 178 个克隆。
-- demo：`resource/workbuddy-live-demo.html:1945-1952`（搜索框与按钮）、`:2002-2031`（开合、Enter/Shift+Enter/Escape、计数与 toast）、`:323-328`（样式）。
+- 既有测试对 banner 按钮的整表断言：`web/test/chat-page-session-rename-pin.test.tsx:470,487,527,539`、`web/test/chat-page-artifacts-panel.test.tsx:101,108,265`；`chatTopbar` 的单元调用在 `chat-page-artifacts-panel.test.tsx:123-131`。`web/test/chat-scroll-follow.test.tsx:15-58` 的滚动度量 mock 是该文件私有的。jscpd 扫 `web/**/*.{ts,tsx}`（含测试），门禁是重复占比 ≤3%；当前 178 个克隆，子刀沿用「克隆数不增」的自我约束。
+- demo：`resource/workbuddy-live-demo.html:1945-1952`（搜索框与按钮）、`:2002-2031`（开合、Enter/Shift+Enter/Escape、计数与 toast；`:2020` 每条消息至多计一次，即 demo 也按匹配消息计数）、`:323-328`（样式）。
 
 ## Decisions
 
@@ -72,13 +72,13 @@ export function useConversationSearch(
   <div aria-label="对话内搜索" className="chat-search" role="search">
     <Input aria-label="搜索对话内容" className="chat-search-field" placeholder="搜索对话内容"
            variant="search" ref={input} value={query} onChange=… onKeyDown=… />
-    <span aria-live="polite" className="chat-search-count">{index + 1}/{total}</span>
+    <span aria-live="polite" className="chat-search-count">{`${index + 1}/${total}`}</span>
     <Button aria-label="上一个" title="上一个" disabled={total === 0} size="icon" variant="ghost">…chevron-up</Button>
     <Button aria-label="下一个" …>…chevron-down</Button>
     <Button aria-label="关闭" …>…x</Button>
   </div>
   ```
-  挂载 effect 里 `input.current?.focus()`。`onKeyDown`：组合输入（`isComposing` 或 `keyCode === 229`）直接返回；`Enter` → `preventDefault()`，`shiftKey ? 后退 : 前进`；`Escape` → `preventDefault()`（`type="search"` 的原生行为是清空输入）后关闭。按键只挂在输入框上（规格「焦点在输入框时」）。
+  计数器的子节点是**一个**模板字符串（写成 `{a}/{b}` 会渲染成三个文本节点，非 atomic 的 live region 只播报变化的那个节点，`1/3`→`2/3` 会被读成「2」）。挂载 effect 里 `input.current?.focus()`。`onKeyDown`：组合输入（`isComposing` 或 `keyCode === 229`）直接返回；`Enter` → `preventDefault()`，`shiftKey ? 后退 : 前进`；`Escape` → `preventDefault()`（`type="search"` 的原生行为是清空输入）后关闭。按键只挂在输入框上（规格「焦点在输入框时」）。
   - `role="search"` 显式写在 `div` 上：`<search>` 元素的隐式 role 在 jsdom 的查询与旧浏览器里不可靠。若 Biome `useSemanticElements` 报，用 `biome-ignore` 附这条理由。
 - hook 体内的分支拆成小函数（如 `stepTarget(matches, index, dir)`），保持每个函数的认知复杂度 ≤15。实现者可以调整内部形状，但「状态一份、以 `selected?.id` 为键、滚动只在处理器里、`=== null` 判断」是硬约束。
 
@@ -112,7 +112,7 @@ useTopbar(chatTopbar(selected, sessionActions.openRename, search.slot, artifacts
 
 ### D8 既有测试的改动
 - `web/test/chat-page-session-rename-pin.test.tsx:470,487,527`：`["重命名", "产物面板"]` → `["重命名", "对话内搜索", "产物面板"]`；`:539`：`["打开导航", "重命名", "产物面板"]` → `["打开导航", "重命名", "对话内搜索", "产物面板"]`。
-- `web/test/chat-page-artifacts-panel.test.tsx:101,108,265`：同样的整表断言；P1（`:123-131` 起）的两个 `chatTopbar(...)` 调用补上 `search` 参数，产出列表的期望多一项（`search`，带 `expanded`），「`artifacts` 不带 `expanded`」的断言保留。
+- `web/test/chat-page-artifacts-panel.test.tsx:101,108,265`：同样的整表断言；P1 的两个 `chatTopbar(...)` 调用（`:124`、`:131`）补上 `search` 参数；`:133` 的键序期望多一项 `search`；`:134` 起取 `artifacts` 的下标由 `report.actions?.[1]` 变 `[2]`，「`artifacts` 不带 `expanded`」的断言保留。
 - 其它既有测试零 diff，`web/test/chat-scroll-follow.test.tsx` 尤其不动。新测试需要的滚动度量 mock 与 `scrollIntoView` stub 写在新的 support 里；jscpd 若报新克隆，改新写的那份的形状，不去抽既有文件。
 
 ## Governing invariant
@@ -143,29 +143,30 @@ useTopbar(chatTopbar(selected, sessionActions.openRename, search.slot, artifacts
 - **U4** 结果保持转录次序；id `0` 与负数原样返回。
 
 `web/test/chat-page-search*.test.tsx`（真实 `AppShell` + `ChatPage`，banner 在场）：
-- **S1 打开**：点击 `对话内搜索` → `main` 内出现 `role="search"`（名 `对话内搜索`），不在 banner 内，DOM 上位于 `.chat-transcript` 之前；输入框（名与 placeholder `搜索对话内容`）是 `document.activeElement`；计数器 `0/0` 且 `aria-live="polite"`；`上一个`/`下一个` 禁用、`关闭` 可用；顶栏按钮 `aria-expanded` 由 `"false"` 变 `"true"`。
+- **S1 打开**：点击 `对话内搜索` → `main` 内出现 `role="search"`（名 `对话内搜索`），不在 banner 内，且就是 `.chat-main` 的 `firstElementChild`；输入框（`role="searchbox"`，名与 placeholder `搜索对话内容`）是 `document.activeElement`；区域内子节点次序为输入框、计数器、`上一个`、`下一个`、`关闭`，三个按钮的图标类分别含 `lucide-chevron-up`、`lucide-chevron-down`、`lucide-x`；计数器 `0/0` 且 `aria-live="polite"`；`上一个`/`下一个` 禁用、`关闭` 可用；顶栏按钮 `aria-expanded` 由 `"false"` 变 `"true"`。
 - **S2 计数**（Scenario「计数为匹配消息数」）：输入 `REPORT` → `1/2`；输入 `不存在` → `0/0` 且两按钮禁用；从打开到结束 `fetchMock` 调用数与 `EventSource` 实例数不变。
 - **S3 键盘循环与关闭**（Scenario）：3 条匹配，Enter×3、Shift+Enter → `2/3`、`3/3`、`1/3`、`3/3`；Escape → 无 `role="search"`、无 `article[aria-current]`、无 `.chat-msg--search-current`、焦点在顶栏按钮、`aria-expanded="false"`；再打开 → 输入框空、`0/0`。
 - **S4 按钮**：`下一个`/`上一个` 的循环与按键一致；`关闭`（`fireEvent.click`，事先不聚焦任何按钮）→ 关闭且焦点在顶栏按钮；再点顶栏按钮（已打开时）→ 关闭、清空、焦点在顶栏按钮。
 - **S5 组合输入**（Scenario）：`keyDown` 带 `isComposing: true` 的 Enter 与 Escape、带 `keyCode: 229` 的 Enter → 计数器不变、搜索框仍在；随后普通 Enter 生效。
 - **S6 标记**：每条消息的 `article` 都带 `data-message-id`，值等于消息 id（含 `-3` 与 `0`）；任一时刻 `article[aria-current="true"]` 至多一条，且它同时带 `chat-msg--search-current`；非当前消息没有 `aria-current` 属性；当前为 id `0` 的消息时高亮与 `i` 正确（真值判断的变异在此失败）。
 - **S7 跳转调用**：`scrollIntoView` stub 记录（目标的 `data-message-id`、参数）：输入有匹配的查询 → 恰一次，目标为第一条匹配，参数 `{ block: "center" }`；Enter → 再一次，目标为下一条；输入无匹配的查询 → 不调用；全程无 Toast。
-- **S8 流式更新不抢滚动**（Scenario）：运行中会话，当前为第 1 条（`1/1`）；流式增量使助手正文新出现匹配 → `1/2`、高亮仍在原消息、`scrollIntoView` 调用数不变、`scrollTop` 不变。
-- **S9 原当前不再匹配**（Scenario）：快照重载（经 `web/test/chat-unknown-turn.test.tsx` 那条 resync 路径或等效的 ready→ready 重载）后当前消息正文不再含查询 → `0/n`、无高亮、`scrollIntoView` 调用数不变；Enter → `1/n`、第一条匹配高亮；另一组从无当前按 Shift+Enter → `n/n`、末条高亮。
+- **S8 流式更新不抢滚动**（Scenario）：运行中会话，输入查询使当前为第 1 条（`1/1`，stub 把 `scrollTop` 设到非底部位置）；随后内容变高并到达流式增量、助手正文新出现匹配 → `1/2`、高亮仍在原消息、`scrollIntoView` 调用数不变、`scrollTop` 保持在跳转后的值。
+- **S9 原当前不再匹配**（Scenario）：快照重载（经 `web/test/chat-unknown-turn.test.tsx` 那条 resync 路径或等效的 ready→ready 重载）后当前消息正文不再含查询 → `0/n`、无高亮、`scrollIntoView` 调用数不变；**再重载一次使该消息重新匹配** → 仍是 `0/n`、无 `article[aria-current]`、`scrollIntoView` 调用数不变（「只派生、不清 `currentId`」的实现在此失败；重载可用 `FakeEventSource.emitGap()`，`web/test/chat-stream-support.ts:193`）；Enter → `1/n`、第一条匹配高亮；另一组从无当前按 Shift+Enter → `n/n`、末条高亮。
 - **S10 跳走后不拽回**（Scenario「跳转滚动并高亮」第二组）：度量 mock 下转录贴底；`scrollIntoView` stub 把 `scrollTop` 设到顶部且**不派发 scroll 事件**；输入查询 → `回到最新` 出现；随后内容变高并到达流式增量 → `scrollTop` 保持、`回到最新` 仍在。（去掉 D2 的同步重算，此用例必须失败。）
 - **S11 跳到底部仍跟随**（Scenario）：stub 把 `scrollTop` 设到距底 ≤4px → `回到最新` 不出现；内容变高并到达增量 → `scrollTop` 跟到新的底部。（把同步重算换成「无条件解除贴底」，此用例必须失败。）
 - **S12 切换会话**（Scenario）：搜索框打开且有高亮时在侧栏选另一会话 → 无 `role="search"`、无 `article[aria-current]`、按钮 `aria-expanded="false"`；选回原会话 → 仍无搜索框；再打开 → 输入框空。
 - **S13 欢迎态**：搜索框打开时导航到 `/` → 无搜索框；banner 无这些按钮；再进入会话 → 关闭态。
 - **S14 全序**（Scenario「顶栏入口」「顶栏重命名入口」）：`/?session=<id>` 且标题已知 → banner 内 heading 之后恰三个按钮，次序 `重命名` → `对话内搜索` → `产物面板`，无 `更多`，`对话内搜索` 的图标类含 `lucide-search`、带 `aria-expanded="false"`，另两个按钮不带 `aria-expanded`；≤760px → `["打开导航", "重命名", "对话内搜索", "产物面板"]`；欢迎态无任何这些按钮。
-- **S15 历史未读到**：历史请求挂起（标题来自列表）时打开 → `0/0`；输入查询后历史到达 → `0/n`（无当前、无高亮、`scrollIntoView` 未被调用）；Enter → `1/n`。
+- **S15 历史未读到**：历史请求挂起（标题来自列表）时打开 → `0/0`；输入查询后历史到达 → `0/n`（无当前、无高亮、`scrollIntoView` 未被调用）；Enter → `1/n`。另一组历史读取失败（页面上有 `role="alert"`）时打开 → 搜索框在该 alert 之前（仍是 `.chat-main` 的第一个子节点）、计数器 `0/0`、输入查询不抛错。
 - **S16 `chatTopbar` 单元**：`chatTopbar(undefined, …)` 为 `{}`；有会话时产出三项，键序 `rename`、`search`、`artifacts`，只有 `search` 带 `expanded`（值原样透传），`search` 的 `onSelect` 收到 trigger。
+- **S17 找不到消息节点**：直接渲染 `FollowTranscript`（带 `handleRef`，子节点里有一个 `data-message-id="1"` 的元素），`scrollToMessage(1)` 调用 stub 一次、`scrollToMessage(999)` 不抛错、不调用 `scrollIntoView`、`回到最新` 的显隐不变。
 - 既有：`chat-scroll-follow.test.tsx` 零 diff 全绿；D8 列出的期望更新后两个既有文件全绿。
 
 实现前就成立的护栏（不计入 RED）：无（U、S 全部依赖新文件或新按钮）；D8 的既有断言在实现前为绿、实现后需按 D8 更新。
 
 ## 真实浏览器观察（Chromium，一次性，结果进 PR）
 jsdom 没有布局，下面这些只能在浏览器里看（mock API，1440 / 390 / dark）：
-1. 超过三屏、首末两条消息匹配、转录贴底：输入查询后第一条匹配的 `article` 矩形落在 `.chat-transcript` 的可视矩形内、带 `aria-current`；`回到最新` 出现；`window.scrollY` 与 `document.scrollingElement.scrollTop` 仍为 0（`scrollIntoView` 没有滚动外层）。Enter 后最后一条在可视范围内、`回到最新` 消失。
+1. 超过三屏、首末两条消息匹配、转录贴底：输入查询后第一条匹配的 `article` 矩形落在 `.chat-transcript` 的可视矩形内、带 `aria-current`；`回到最新` 出现；`window.scrollY`、`document.scrollingElement.scrollTop` 以及四个 `overflow: hidden` 的祖先（`.chat-page`、`.chat-layout`、`.chat-main`、`main`）的 `scrollTop` 仍为 0（`scrollIntoView` 也会滚动 `overflow: hidden` 的祖先，这里确认没有）。Enter 后最后一条在可视范围内、`回到最新` 消失。
 2. 390px：搜索框不溢出（`documentElement.scrollWidth <= clientWidth`，`关闭` 按钮在视口内）；顶栏三按钮与标题不重叠。
 3. Escape 在 `type="search"` 输入框里关闭搜索框（不是只清空）；焦点落在顶栏 `对话内搜索` 按钮；Tab 次序为输入框 → `上一个` → `下一个` → `关闭`。
 4. 浅色与深色下高亮消息的底色都与未高亮的不同（计算样式），用户气泡与助手消息各看一次；高亮的外扩没有被转录区裁成不可辨。
