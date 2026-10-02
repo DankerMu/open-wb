@@ -8,7 +8,7 @@
 - `web/src/lib/api.ts`：`fetchPreview(workspaceId, path, { signal })`（`:140`、`:632`）返回 `{kind:"text", text, size, truncated}` 或 `{kind:"image", url, size, truncated}`；`url` 是 `URL.createObjectURL` 建的 Blob URL，归调用方撤销（`:459`）；`truncated` 取自响应头 `X-Workbuddy-Truncated: 1`（`:412`）。类型 `FilePreview` 不导出，按 `web/src/features/files/preview.tsx:15` 的写法取 `Awaited<ReturnType<ApiClient["fetchPreview"]>>`。失败抛 `ApiError`；401 时 client 自己通知未登录。
 - 服务端 `server/src/workspaces/preview.ts:31-52`：文本类超过上限截断并带标记；图片超过上限直接报 `preview_too_large`，**图片不会被截断**；其它扩展名报 `preview_unsupported`。可预览集合与 `web/src/features/files/tree.tsx:69-82` 一致。
 - `chat/errors.ts`：`errorMessage(error)`（`ApiError` → 信封 message，否则 `请求失败，请稍后重试`）、`isUnauthorized(error)`。
-- `Dialog`（`web/src/ui/dialog.tsx`）：`open`/`onOpenChange`/`title`/`size`（`sm` 400px、`md` 520px）；没有 trigger 时关闭后焦点还给 `returnFocus ?? 打开瞬间的活动元素`（`:38-43`）；Chromium 在按钮 `disabled` 生效的当下把焦点移到 body（`:53-55` 的记录），所以「拉取中禁用、拉取完再开 Dialog」的流程里打开瞬间的活动元素是 body，必须显式传 `returnFocus`；内容经 portal 渲染在 `.chat-msg-main` 之外。
+- `Dialog`（`web/src/ui/dialog.tsx`）：`open`/`onOpenChange`/`title`/`size`（`sm` 400px、`md` 520px）；没有 trigger 时关闭后焦点还给 `returnFocus ?? 打开瞬间的活动元素`（`:37-42`）；Chromium 在按钮 `disabled` 生效的当下把焦点移到 body（`:53-55` 的记录），所以「拉取中禁用、拉取完再开 Dialog」的流程里打开瞬间的活动元素是 body，必须显式传 `returnFocus`；内容经 portal 渲染在 `.chat-msg-main` 之外。
 - 图标：`globe`、`download`、`package`、`file-code`、`image`、`copy`、`chevron-right` 均已注册（`web/src/ui/icon.tsx`）；demo 用的 `externalLink`/`arrowUpRight` 没有注册。
 - 颜色守卫（`web/test/ui-guardrails.test.ts:46-57`）：features 下的 `.css`/`.tsx` 不许出现 hex/`rgb()`/`rgba()` 字面量（注释也算）与 `--wb-palette-*`。
 - 既有测试 `web/test/chat-page-file-changes.test.tsx` 的 C13：对 `.chat-msg-main` 的全子元素做 `toEqual`，夹具路径 `out/index.html`、空间可解析。support 的 `cards()` 选 `.file-changes-card`，G5 用 `[class*="file-change"]`。
@@ -95,7 +95,7 @@ async function run() {
 1. 文件内容只在用户点了产物卡的操作之后才拉取，请求只用会话空间 id 与空间内相对路径。
 2. 取回的 HTML 只进 `sandbox` 恰为 `allow-scripts` 的 `srcdoc` iframe，不进应用自己的 DOM。
 3. 本卡拿到的每个 Blob URL 恰撤销一次（下载后、类型不符、卸载后才回来，三条路径各自撤销）。
-4. 每张卡至多一个在途请求；卸载即 abort，此后不再有任何 UI 副作用（Toast、Dialog、剪贴板、下载）。
+4. 每张卡至多一个在途拉取；卸载即 abort，被 abort 的拉取不再产生任何 UI 副作用（Toast、Dialog、剪贴板、下载）。拉取已完成、正在等剪贴板写入时卸载不在此列：写入照常完成并出 Toast（复制确实发生了）。
 
 ## Sibling surfaces
 - `FileChangesCard`：共用 `summarizeChanges` 与「空间可解析」规则；两者对同一条消息必须给出同一批路径、同一次序（A2、A14）。
@@ -113,9 +113,9 @@ async function run() {
 
 - A1 `artifactKind` 表：`out/index.html` → html/`HTML`/`index.html`；`assets/chart.PNG` → image/`PNG`/`chart.PNG`；`a.jpg`、`b.JPEG` → image/`JPG`；`md`、`txt`、`log`、`csv`、`json`、`js`、`ts`、`tsx` 各一 → code/大写扩展名；`main.py`、`Makefile`、`a.tar.gz`、`trailing.`、`dir.html/readme` → `null`。
 - A2 派生与不预取：一条消息的变更为 `src/app.ts`（edit）、`main.py`、`out/index.html`、`assets/chart.PNG` → 文件变更卡四行；其后按汇总次序恰有三张产物卡，group 名为 `app.ts`、`index.html`、`chart.PNG`，标签 `TS`、`HTML`、`PNG`；此时对 `/file` 的请求数为 0；页面 `innerHTML` 不含空间绝对根；没有 `在编辑器中打开`；卡片内没有 iframe 与 img。
-- A3 html（Scenario「html 预览隔离」）：有两个名为 `打开网页预览 index.html` 的按钮、卡脚文本含 `可交互预览`；点卡头那个 → 恰一次 `GET /api/workspaces/<空间 id>/file?path=out%2Findex.html`；出现标题 `index.html` 的 dialog，内有 iframe，其 `getAttribute("sandbox")` 恰为 `allow-scripts`、`srcdoc` 恰为取回文本、`title` 为 `index.html`；没有截断提示。关闭 Dialog 后 iframe 消失。另一例**不预先 focus**，用 `fireEvent.click` 点卡脚那个按钮同样打开；点 `关闭` 后 `document.activeElement` 是卡脚那个按钮（不是卡头那个，也不是 body）。
+- A3 html（Scenario「html 预览隔离」）：有两个名为 `打开网页预览 index.html` 的按钮、卡脚文本含 `可交互预览`；点卡头那个 → 恰一次 `GET /api/workspaces/<空间 id>/file?path=out%2Findex.html`；出现标题 `index.html` 的 dialog，内有 iframe，其 `getAttribute("sandbox")` 恰为 `allow-scripts`、`srcdoc` 恰为取回文本、`title` 为 `index.html`；没有截断提示。关闭 Dialog 后 iframe 消失。另一例**不预先 focus**，用 `fireEvent.click` 点卡脚那个按钮同样打开；点 `关闭` 后（`await waitFor`：Radix 在卸载后的定时器里归还焦点，先例 `web/test/ui-dialog.test.tsx:323-331`）`document.activeElement` 是卡脚那个按钮（不是卡头那个，也不是 body）。
 - A4 截断：预览响应带 `X-Workbuddy-Truncated: 1` → dialog 内 `文件超过 1 MiB，仅预览前 1 MiB` 在 iframe 之前（文档顺序）。
-- A5 图片（Scenario「图片下载与代码复制」）：点 `下载 chart.PNG` → 请求的 `path` 为 `assets/chart.PNG`；`click` spy 恰被调用一次，当时该 `<a>` 的 `download` 为 `chart.PNG`、`href` 为 stub 返回的 Blob URL；`revokeObjectURL` 在点击那一刻尚未被调用，`click` 返回之后的同一个宏任务内也尚未被调用（spy 里 `queueMicrotask` 采样调用数为 0），一个宏任务之后以该 URL 被调用恰一次；临时链接不留在文档里。
+- A5 图片（Scenario「图片下载与代码复制」）：点 `下载 chart.PNG` → 请求的 `path` 为 `assets/chart.PNG`；`click` spy 恰被调用一次，当时该 `<a>` 的 `download` 为 `chart.PNG`、`href` 为 stub 返回的 Blob URL；`revokeObjectURL` 在点击那一刻尚未被调用，`click` 返回之后的同一个宏任务内也尚未被调用（spy 里 `setTimeout(采样, 0)`：它先于实现的定时器入队，同延时先进先出，采到的调用数为 0），一个宏任务之后以该 URL 被调用恰一次；临时链接不留在文档里。
 - A6 代码：点 `复制代码 app.ts` → `clipboard.writeText` 的参数恰为预览文本；Toast `已复制到剪贴板`。
 - A7 代码的失败分支：剪贴板不存在、`writeText` 同步抛错、返回 rejected promise → 三者都是 Toast `复制失败`；预览截断 → `writeText` 未被调用、Toast `文件过大，无法复制`。
 - A8 预览失败（Scenario「不派生与失败」）：`复制代码 gone.md` 得 404 信封 → Toast 为信封 message，`writeText` 未被调用，没有 dialog，无未处理拒绝；按钮恢复可点，再点会发第二个请求。html 卡得 415 → Toast 信封 message、没有 dialog。图片卡得 413 → Toast、`click` spy 未被调用。`fetch` 拒绝（网络错误）→ Toast `请求失败，请稍后重试`。
@@ -124,7 +124,7 @@ async function run() {
 - A11 卸载与切换会话（Scenario 后半）：图片预览挂起时切到另一个会话 → 该请求的 `signal.aborted` 为真；随后让挂起的响应以图片返回 → `revokeObjectURL` 以该 URL 被调用，`click` spy 未被调用，没有任何 Toast。代码预览（`复制代码 app.ts`）挂起时切会话，随后文本返回 → `writeText` 未被调用、没有任何 Toast。再一例走拒绝路径：fetch 路由用 resolver 返回一个在 `options.signal` abort 时拒绝的 promise（真实 `fetch` 的行为；`deferredResponse` 只有 `resolve`），点 `复制代码 app.ts` 后切会话 → 没有任何 Toast、无未处理拒绝。
 - A12 换账号与 401：预览挂起时换账号（`renderChatPageWithAuthProbe` + `renewAccount`；该搭法默认的 `/api/workspaces` 返回 `[]`，要覆盖成含会话空间的列表，否则没有卡可点）→ 请求被 abort、无 Toast；预览得 401 → 不出错误 Toast。
 - A13 次序（Scenario「助手块次序」）：`stopped` 助手消息带 `thinking`、一条已结算审批、正文 `部分回答`、带 `out/index.html` 变更的已结束 `write` 步骤、空间可解析 → `.chat-msg-main` 的**全部**子元素按序为 `details.thinking-block`、`div.chat-approvals`、`.chat-md`、步骤卡、`fieldset.file-changes-card`、`fieldset.artifact-card`、`已停止` 徽章、操作行；`复制` 的参数恰为 `部分回答`。
-- A14 不渲染的情形：会话空间不在列表里、会话未绑定、列表读取中、列表读取失败 → 文件变更卡仍在、没有 `.artifact-card`（列表读取成功后出现）；user 消息没有产物卡；running 步骤的变更在 `step.end` 之前没有产物卡、之后出现；只有 `main.py` 的消息没有产物卡。其中「空间不在列表里」「未绑定」「读取失败」「user 消息」「只有 `main.py`」五例只有否定断言，是实现前就成立的护栏（报告里逐条标出）；「读取中 → 读取成功后出现」「`step.end` 之后出现」是带正向对照的 RED 用例。
+- A14 不渲染的情形：会话空间不在列表里、会话未绑定、列表读取中、列表读取失败 → 文件变更卡仍在、没有 `.artifact-card`（列表读取成功后出现）；user 消息没有产物卡（夹具照 `chat-page-file-changes.test.tsx:714-726` 给 user 消息挂一个已结束、可派生的变更步骤，否则杀不掉「user 消息也渲染」）；running 步骤的变更在 `step.end` 之前没有产物卡、之后出现；只有 `main.py` 的消息没有产物卡。其中「空间不在列表里」「未绑定」「读取失败」「user 消息」「只有 `main.py`」五例只有否定断言，是实现前就成立的护栏（报告里逐条标出）；「读取中 → 读取成功后出现」「`step.end` 之后出现」是带正向对照的 RED 用例。
 - A15 静态样式：`.artifact-preview-frame` 含 `border: 0`；三种图标块用 D6 列的 token；`chat.css` 不含 `artifact-`（护栏）。
 
 基线运行：测试导入实现前不存在的 `artifactKind`，跑基线时在沙箱里临时给 `stream-artifacts.ts` 加一个抛错的同名导出（不进补丁），让各用例逐例给出红绿；报告里逐条列出基线即绿的护栏。
