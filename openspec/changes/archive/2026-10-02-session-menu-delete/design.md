@@ -13,7 +13,7 @@
 列表里的条目只因两件事消失：一次列表读取的整表替换，或属于当前 client 的 `DELETE` 得到 204。删除不做乐观更新；对每个 (client, 会话) 同一时刻至多一个在途 `DELETE`。「是否为当前选中会话」在响应到达时读取，页面收尾（关闭事件流 → replace 移除 `?session=`）只在那一刻它确是当前会话时发生。不属于当前 client 或页面已卸载时到达的响应一律丢弃。
 
 ## Sibling surfaces
-- `requestedSessionId` 的 effect（`page.tsx:376-425`）：replace 之后由它完成其余收尾（abort 历史读取、历史置 `idle`、清 `streamError`、清在途 create/send）。本刀不改它，也不在 hook 里重复这些步骤。
+- `requestedSessionId` 的 effect（`page.tsx:376-425`）：replace 之后由它完成其余收尾（abort 历史读取、历史置 `idle`、清 `streamError`、清在途 create/send）。本刀不改它；hook 只在 `navigate` 之前同步中止历史读取并关闭事件流（D2），其余步骤不重复。
 - `page.tsx:582-604`（事件流把当前会话 `status` 同步进 `listState`）：条目移除后 `find` 不到即原样返回，不会把条目加回来。
 - `refreshList`（`page.tsx:143-181`，整表替换）及其调用点 `page.tsx:192`、`:503`、`turn-actions.ts:196`、`:337`、`:387`：在 DELETE 之前发出、晚于 204 到达的读取会把条目带回来（已知残留 2）。
 - `selectedSession()`（`session-path.ts`）：条目移除后、replace 生效前的那一次渲染里回退到快照会话，顶栏仍显示标题；effect 把历史置 `idle` 后进入欢迎态。
@@ -99,6 +99,8 @@ const sessionActions = useSessionActions(client, setListState, setHistoryState, 
 - F6 历史读取在途时删除当前会话：挂载 `/?session=<A>` 且 `GET …/messages` 挂起 → 删除 A → 同一 `act` 内先后放行 204 与快照 → 没有新建 EventSource、回欢迎态、无错误。
 F1–F6 落在 `web/test/chat-page-session-delete-concurrency.test.tsx`（10 例）；F4 的「确认框开着时槽位节点卸载」用视口跨越 760px 的两个方向实现。
 
+复审（round 2，clean）留下的未覆盖项：`page.abortHistory()` 相对「是否当前会话」判定的位置没有用例钉住——若被挪到判定之前，删除非当前会话会中止当前会话仍在途的历史读取。补法：挂载 `/?session=<A>` 且 A 的快照挂起 → 删除 B 得 204 → 放行 A 的快照，断言 A 的内容与事件流出现。
+
 实现记录：R6 的 409 信封、500 非信封与「失败后可再次确认」合在一个用例里；「location 取响应到达时的值」没有可区分的用例（会话切换不改变其它 search/hash，确认时与响应时算出的目标 URL 相同）。一次性真实浏览器观察两种视口全部符合，详见 PR。
 
 实现前后各跑一次并记录：RED 集合 = R1–R13；既有套件实现前后皆绿（实现后以更新过的三处断言计）。
@@ -114,7 +116,7 @@ F1–F6 落在 `web/test/chat-page-session-delete-concurrency.test.tsx`（10 例
 6. `≤760px` 覆盖层内删除当前会话后覆盖层不自动关闭（程序化导航不关闭它）；用户看到的是少了一条的列表。
 7. 当前会话的删除在途时点 `新建会话`：204 的 replace 先于创建响应到达时，既有 effect（`page.tsx:388-396`）中止这次创建；服务端可能已建出空会话，下一次列表读取才出现（「创建在途时离开」的既有行为）。
 8. `requestedSessionRef` 与 location 是「最近一次渲染」的值：204 恰好落在用户点选另一会话与那次导航渲染之间时，仍按旧会话判定并 replace 回欢迎态，用户的选择被覆盖（毫秒级窗口，再点一次即可；页面既有的渲染时 ref 约定，不在本刀改）。
-9. `turn-actions.ts` 里不带 signal 的快照读取（`reconcileSettled`、重新生成后的读取）若在 204 与下一次渲染之间到达，会为已删会话装入快照并打开事件流，随后由既有 effect 关闭；无可见错误。
+9. `turn-actions.ts` 里的快照读取（`reconcileSettled`、重新生成后的读取，以及 `dispatchPrompt` 发送成功后的读取）若在 204 与下一次渲染之间到达，会为已删会话装入快照并打开事件流，随后由既有 effect 关闭；无可见错误。
 
 ## Seams under test
 - jsdom 页面 fixture（`renderChatPage` / `renderChatPageWithAuthProbe` + `createFetchMock` + `FakeEventSource`）：菜单、确认框、Toast、列表、URL 与事件流连接的联动，请求方法与次数，时序（挂起、关闭重开、切换会话、续期、卸载），覆盖层。

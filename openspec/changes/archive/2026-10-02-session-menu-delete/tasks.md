@@ -2,7 +2,7 @@
 
 ## 7. web — 条目菜单删除与删除当前会话回欢迎态（父 tasks 7.2b）
 
-- [x] 7.2b `session-menu.tsx` 增 `删除`（danger）项 + `session-actions.ts` 删除 handler + 新建 `delete-dialog.tsx`：ConfirmDialog 标题 `删除任务`、说明 `确定要删除「<显示标题>」吗？删除后不可恢复。`、确认 `删除` 请求中忙碌（可关闭、重开仍忙碌）；204 → toast `任务已删除`、移出列表，若响应到达时为当前会话则关闭事件流、以 replace 移除 `?session=`（保留其它 search/hash）回欢迎态；失败 → 关闭确认框、toast 信封 message、重新读取列表；409 `session_busy` 显示其信封文案。`session-sidebar.tsx` 透传回调、`page.tsx` 接线（672 → ≤682）。验证：新建 `web/test/chat-page-session-delete.test.tsx`（R1–R13）；既有测试除三处「恰两项」断言外零 diff（proposal「偏差」2）；CI `ui-walk` 两个 project 全绿
+- [x] 7.2b `session-menu.tsx` 增 `删除`（danger）项 + `session-actions.ts` 删除 handler + 新建 `delete-dialog.tsx`：ConfirmDialog 标题 `删除任务`、说明 `确定要删除「<显示标题>」吗？删除后不可恢复。`、确认 `删除` 请求中忙碌（可关闭、重开仍忙碌）；204 → toast `任务已删除`、移出列表，若响应到达时为当前会话则关闭事件流、以 replace 移除 `?session=`（保留其它 search/hash）回欢迎态；失败 → 关闭确认框、toast 信封 message、重新读取列表；409 `session_busy` 显示其信封文案。`session-sidebar.tsx` 透传回调、`page.tsx` 接线（672 → ≤682）。验证：新建 `web/test/chat-page-session-delete.test.tsx`（R1–R13）与 `web/test/chat-page-session-delete-concurrency.test.tsx`（F1–F6，评审后补充）；既有测试除三处「恰两项」断言外零 diff（proposal「偏差」2）；CI `ui-walk` 两个 project 全绿
 
 ## Risk packs
 
@@ -23,6 +23,6 @@
 ## 通用纪律（继承父 tasks.md）
 - [x] 新测试进新文件；既有测试只改 proposal「偏差」2 列出的三处断言，两个文件不增行。
 - [x] RED 集合 = R1–R13。实现前后各跑一次并记录命令与结果。
-- [x] `page.tsx`：672 → ≤682，PR 记录两个数。
+- [x] `page.tsx`：672 → 680（上限 682）。
 - [x] `npm test --workspace web`、`make lint`、`make typecheck`、`make anti-drift`（knip 零新增、jscpd 零新增）、`bash scripts/size-guard.sh` 退出 0；`openspec validate session-menu-delete --strict --no-interactive` 通过。
 - [x] 一次性真实浏览器观察（1440×900 与 390×844）结果写进 PR。
