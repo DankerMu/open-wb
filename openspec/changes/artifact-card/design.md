@@ -34,7 +34,7 @@ export function artifactKind(path: string): Artifact | null
 - 只有 html 有卡脚 `div.artifact-foot`：文本 `可交互预览` 与一个 `<button type="button" className="artifact-link" aria-label="打开网页预览 <文件名>">打开网页预览</button>`，与卡头按钮同一个处理函数。
 - 卡片里没有 iframe、没有图片、没有代码正文，也没有 `在编辑器中打开`。
 - 类名都不含 `file-change`。
-- html 的预览 Dialog 由这张卡自己持有：`<Dialog open={preview !== null} onOpenChange={(open) => { if (!open) setPreview(null); }} returnFocus={opener} size="md" title={artifact.name}>`（`opener` 是这张卡的 `useRef<HTMLButtonElement | null>`，记下被点的那个按钮，见 D4），内容为可选的截断提示 `p.artifact-preview-note`（`文件超过 1 MiB，仅预览前 1 MiB`）在前，`<iframe className="artifact-preview-frame" sandbox="allow-scripts" srcDoc={preview.text} title={artifact.name} />` 在后。`sandbox` 是写死的字符串字面量。
+- html 的预览 Dialog 由这张卡自己持有：`<Dialog open={preview !== null} onOpenChange={(open) => { if (!open) setPreview(null); }} returnFocus={opener} size="md" title={artifact.name}>`（`opener` 是这张卡的 `useRef<HTMLButtonElement | null>`，记下被点的那个按钮，见 D4），内容为可选的截断提示 `p.artifact-preview-note`（`文件超过 1 MiB，仅预览前 1 MiB`）在前，`<iframe className="artifact-preview-frame" sandbox="allow-scripts" srcDoc={preview.text} title={artifact.name} />` 在后。`sandbox` 是写死的字符串字面量。三类卡都挂着这个 Dialog（关闭时不产生 DOM），只有 html 卡会 `setPreview` 打开它。
 
 ### D4 拉取纪律（本刀的重点，照此实现）
 ```tsx
@@ -50,7 +50,7 @@ async function run() {
   try {
     const result = await client.fetchPreview(workspaceId, path, { signal: own.signal });
     if (own.signal.aborted) {                     // 卸载之后才回来
-      if (result.kind === "image") URL.revokeObjectURL(result.url);
+      discard(result);                            // 图片则撤销其 Blob URL
       return;
     }
     await deliver(result);
@@ -66,6 +66,8 @@ async function run() {
   }
 }
 ```
+`discard(result)` 是模块级小函数（`if (result.kind === "image") URL.revokeObjectURL(result.url)`），「卸载之后才回来」与「类型不符」两处共用：把这个判断内联在 `run()` 里时 Biome 报认知复杂度 16 > 15（`make lint` 退出 2），提出来之后行为不变。
+
 按钮的 `onClick={(event) => { opener.current = event.currentTarget; void run(); }}`（html 的两个按钮共用；关闭预览后焦点回到被点的那个）；`busy` 时这张卡的所有操作按钮 `disabled`（html 有两个）。
 
 `deliver(result)`：
@@ -76,7 +78,7 @@ async function run() {
 
 路径走查：
 - 点击前：没有任何 `/file` 请求（不预取）。
-- 拉取中再点：`controller.current` 非空，直接返回；按钮本就禁用。React 对离散事件同步提交，禁用在下一次点击之前已生效，所以这道门单独去掉在测试里看不出来（防御性的：保证一张卡任何时刻只有一个 controller）；「去掉门且不禁用」可杀。
+- 拉取中再点：`controller.current` 非空，直接返回；按钮本就禁用。真实的两次点击是两个离散事件，React 各自同步提交，禁用在第二次点击之前已生效；这道门是防御性的（保证一张卡任何时刻只有一个 controller），只有在同一个 `act` 批里连点卡头与卡脚两个按钮（禁用尚未提交）时才由它拦住第二个请求，A10 有这一例。
 - 失败（404/415/413/网络）：`catch` 出 Toast，`finally` 复位，可再点。401：不出 Toast（client 已通知未登录）。
 - 卸载、切换会话、换账号：三者都会卸载消息列表（`FollowTranscript` 以会话 id 为 key；换账号时历史不再属于当前 client），清理函数 abort。之后真实的 `fetch` 拒绝，`api.ts:468-473` 把它包成 `ApiError(request_failed)` → `catch` 里 `aborted` 为真，不出 Toast（没有这个判断就会弹 `请求失败，请稍后重试`）；若响应已经回来（Blob URL 已建）→ 走「卸载之后才回来」分支撤销。`finally` 不再 `setState`。
 - 整个处理函数经 `void run()` 调用，内部 `try/catch` 包住全部 await，不留下未处理拒绝。
@@ -86,7 +88,7 @@ async function run() {
 - `conversation-view.tsx`：`client` 经 `ConversationView` → `MessageThread` → `MessageArticle`；助手分支在 `<FileChangesCard>` 之后、`已停止` 徽章之前渲染 `<ArtifactCards client={client} steps={message.steps} workspace={workspace} />`。user 分支不渲染。`ArtifactCards` 自己再算一次 `summarizeChanges`（纯函数），不改 `FileChangesCard`。
 
 ### D6 样式（`messages.css`，590 行）
-按 demo:502-515，颜色只用既有语义 token：卡片同文件变更卡的边框/圆角/底色，带 fieldset 复位；卡头 `display: flex; align-items: center; gap: 8px; padding: 9px 12px`，有卡脚时带底边；图标块 22×22、圆角 6px，html 用 `--wb-status-warning-soft-bg` + `--wb-status-warning-text`，代码用 `--wb-brand-primary-subtle` + `--wb-brand-primary`，图片用 `--wb-bg-tertiary` + `--wb-text-secondary`（proposal 偏差 6）；标题等宽、13px、600、`flex: 1; min-width: 0` 加省略号；标签 10.5px、次要文字色、1px 边框、圆角 4px；卡脚 `padding: 8px 12px; border-top; font-size: 12px`，链接按钮无底无边、品牌色、`margin-left: auto`、hover 下划线、`:disabled` 时不可点的样式。预览 iframe：`display: block; width: 100%; height: 60vh; border: 0; background: white`——取回的网页默认按白底写，深色主题下透明的 iframe 会让默认的黑字落在深色对话框上；这里用 CSS 关键字 `white`（不是字面 hex，守卫不拦，也没有「恒为白色的背景」语义 token）。不写 `transition`、`outline`。`chat.css` 不动。
+按 demo:502-515，颜色只用既有语义 token：卡片同文件变更卡的边框/圆角/底色，带 fieldset 复位（`.artifact-card` 并入 `.file-changes-card` 那条规则的选择器，不另抄一块）；卡头 `display: flex; align-items: center; gap: 8px; padding: 9px 12px`（卡头自己不带底边：卡片不内嵌预览，卡头下面只可能是卡脚，分隔线只画卡脚的顶边一条）；图标块 22×22、圆角 6px，html 用 `--wb-status-warning-soft-bg` + `--wb-status-warning-text`，代码用 `--wb-brand-primary-subtle` + `--wb-brand-primary`，图片用 `--wb-bg-tertiary` + `--wb-text-secondary`（proposal 偏差 6）；标题等宽、13px、600、`flex: 1; min-width: 0` 加省略号；标签 10.5px、次要文字色、1px 边框、圆角 4px；卡脚 `padding: 8px 12px; border-top; font-size: 12px`，链接按钮无底无边、`--wb-brand-primary-deep`（demo:515 的取值）、`margin-left: auto`、hover 下划线、`:disabled` 时不可点的样式。预览 iframe：`display: block; width: 100%; height: 60vh; border: 0; background: white`——取回的网页默认按白底写，深色主题下透明的 iframe 会让默认的黑字落在深色对话框上；这里用 CSS 关键字 `white`（不是字面 hex，守卫不拦，也没有「恒为白色的背景」语义 token）。不写 `transition`、`outline`。`chat.css` 不动。
 
 ### D7 既有测试的改动
 `web/test/chat-page-file-changes.test.tsx` 的 C13 共三处：`:673-681`、`:703-709` 两份期望列表各插入产物卡一项（`fieldset.artifact-card`，在文件变更卡之后）；`:684` 的 `已停止` 徽章下标 `parts[5]` → `parts[6]`。若还有别的既有用例因产物卡出现而变红，停下报告。
@@ -120,7 +122,7 @@ async function run() {
 - A7 代码的失败分支：剪贴板不存在、`writeText` 同步抛错、返回 rejected promise → 三者都是 Toast `复制失败`；预览截断 → `writeText` 未被调用、Toast `文件过大，无法复制`。
 - A8 预览失败（Scenario「不派生与失败」）：`复制代码 gone.md` 得 404 信封 → Toast 为信封 message，`writeText` 未被调用，没有 dialog，无未处理拒绝；按钮恢复可点，再点会发第二个请求。html 卡得 415 → Toast 信封 message、没有 dialog。图片卡得 413 → Toast、`click` spy 未被调用。`fetch` 拒绝（网络错误）→ Toast `请求失败，请稍后重试`。
 - A9 类型不符：代码卡拿到图片响应 → `revokeObjectURL` 以该 URL 被调用、Toast `请求失败，请稍后重试`、`writeText` 未被调用；图片卡拿到文本响应 → Toast、`click` spy 未被调用；html 卡拿到图片响应 → 没有 dialog、URL 被撤销。
-- A10 拉取中（Scenario「拉取中与卸载」前半）：响应挂起时，这张 html 卡的两个按钮都 `disabled`，另一张卡的按钮仍可点；对已禁用按钮再 `fireEvent.click` 不产生第二个请求（这一句对「去掉 `controller.current` 门」不敏感，见 D4）；响应返回后两个按钮恢复。
+- A10 拉取中（Scenario「拉取中与卸载」前半）：响应挂起时，这张 html 卡的两个按钮都 `disabled`，另一张卡的按钮仍可点；对已禁用按钮再 `fireEvent.click` 不产生第二个请求；另一例在同一个 `act` 批里连点卡头与卡脚按钮，只发一个请求（杀「单独去门」）；响应返回后两个按钮恢复。
 - A11 卸载与切换会话（Scenario 后半）：图片预览挂起时切到另一个会话 → 该请求的 `signal.aborted` 为真；随后让挂起的响应以图片返回 → `revokeObjectURL` 以该 URL 被调用，`click` spy 未被调用，没有任何 Toast。代码预览（`复制代码 app.ts`）挂起时切会话，随后文本返回 → `writeText` 未被调用、没有任何 Toast。再一例走拒绝路径：fetch 路由用 resolver 返回一个在 `options.signal` abort 时拒绝的 promise（真实 `fetch` 的行为；`deferredResponse` 只有 `resolve`），点 `复制代码 app.ts` 后切会话 → 没有任何 Toast、无未处理拒绝。
 - A12 换账号与 401：预览挂起时换账号（`renderChatPageWithAuthProbe` + `renewAccount`；该搭法默认的 `/api/workspaces` 返回 `[]`，要覆盖成含会话空间的列表，否则没有卡可点）→ 请求被 abort、无 Toast；预览得 401 → 不出错误 Toast。
 - A13 次序（Scenario「助手块次序」）：`stopped` 助手消息带 `thinking`、一条已结算审批、正文 `部分回答`、带 `out/index.html` 变更的已结束 `write` 步骤、空间可解析 → `.chat-msg-main` 的**全部**子元素按序为 `details.thinking-block`、`div.chat-approvals`、`.chat-md`、步骤卡、`fieldset.file-changes-card`、`fieldset.artifact-card`、`已停止` 徽章、操作行；`复制` 的参数恰为 `部分回答`。
@@ -129,7 +131,7 @@ async function run() {
 
 基线运行：测试导入实现前不存在的 `artifactKind`，跑基线时在沙箱里临时给 `stream-artifacts.ts` 加一个抛错的同名导出（不进补丁），让各用例逐例给出红绿；报告里逐条列出基线即绿的护栏。
 
-变异自检（实现者在沙箱里做，做完还原，写进报告；每个至少打红一例）：`sandbox` 改成 `allow-scripts allow-same-origin`；去掉 `sandbox`；挂载时预取；`srcDoc` 换成经 `URL.createObjectURL` 的 `src`；卡片里内嵌 iframe；去掉拉取中的不并发门（`controller.current` 判断）且按钮不禁用（单独去门不可杀，见 D4）；`busy` 只禁用被点的那个按钮；卸载时不 abort；卸载后才回来的图片不撤销；迟到检查只管图片（卸载后才回来的文本照样写剪贴板）；不传 `returnFocus`；`returnFocus` 恒指卡头按钮；下载后不撤销；点击前就撤销；`click()` 返回后同步撤销（不延后）；截断的文本照样复制；截断时不显示提示；失败时照样开 Dialog；abort 也出 Toast；401 出 Toast；类型不符的图片不撤销；标签用原始扩展名（`chart.PNG` 的 `PNG` 看不出来，用 `app.ts` → `ts`）；`jpeg` 的标签为 `JPEG`；文件名取整条路径；请求用 `workspace.dir` 或逻辑路径而非空间 id 与相对路径；空间不可解析时照样渲染；产物卡放到文件变更卡之前；放到 `已停止` 徽章之后；user 消息也渲染；计入 running 步骤的变更。
+变异自检（实现者在沙箱里做，做完还原，写进报告；每个至少打红一例）：`sandbox` 改成 `allow-scripts allow-same-origin`；去掉 `sandbox`；挂载时预取；`srcDoc` 换成经 `URL.createObjectURL` 的 `src`；卡片里内嵌 iframe；去掉拉取中的不并发门（`controller.current` 判断）且按钮不禁用；单独去门；`busy` 只禁用被点的那个按钮；卸载时不 abort；卸载后才回来的图片不撤销；迟到检查只管图片（卸载后才回来的文本照样写剪贴板）；不传 `returnFocus`；`returnFocus` 恒指卡头按钮；下载后不撤销；点击前就撤销；`click()` 返回后同步撤销（不延后）；截断的文本照样复制；截断时不显示提示；失败时照样开 Dialog；abort 也出 Toast；401 出 Toast；类型不符的图片不撤销；标签用原始扩展名（`chart.PNG` 的 `PNG` 看不出来，用 `app.ts` → `ts`）；`jpeg` 的标签为 `JPEG`；文件名取整条路径；请求用 `workspace.dir` 或逻辑路径而非空间 id 与相对路径；空间不可解析时照样渲染；产物卡放到文件变更卡之前；放到 `已停止` 徽章之后；user 消息也渲染；计入 running 步骤的变更。
 
 ## 已知残留
 1. #522 合入前服务端不产生 `changes`，产物卡只在快照已带 `changes` 时出现；真实链路与真实浏览器证据归 #522、8.2a。
