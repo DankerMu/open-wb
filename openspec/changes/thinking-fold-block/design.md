@@ -86,6 +86,20 @@ export function ThinkingBlock({ running, text }: { running: boolean; text: strin
 
 点 summary 是真实交互：jsdom 29 给 `summary` 实现了激活行为，点击同步翻转 `open`。测试不 fake `setTimeout`。
 
+## 评审轮 1 追加的证据（fix pass 1，只改测试）
+三席均无 P0/P1，产品代码零改动。T8 第二例被 F1 取代（原例重同步返回逐字相同的快照，分不清「快照已安装」与「快照被丢弃」）。
+- F1：done 消息由用户展开；重同步返回状态与思考相同、正文 `答` → `答复` 的快照 → `/messages` 读数 +1、正文变为 `答复`、折叠块同一 DOM 节点且仍展开。
+- F2：running 消息由用户收起；重同步返回仍 running、思考更长的快照 → 同一节点、仍收起、主体文本为新思考。
+- F3：running 消息未动；重同步返回已 done 的快照（断线期间回合结束）→ 收起。
+- F4：用户收起后依次到达 `approval.request`、`approval.resolved`、`step.end` → 同一节点、仍收起。
+- F5（连接器）：快照 `thinking` 为 `旧`、游标 1:5；`turn.start`(1:2)、thinking.delta(1:5, `旧`)、thinking.delta(1:6, `想`) → 只交付 1:6，`thinking` 恰为 `旧想`（被覆盖的帧含会复位思考的 `turn.start` 都被过滤，不重复追加）。
+- F6（页面）：末条助手已 done 时到达视图里没有的 messageId 的 thinking.delta → 页面重同步，不凭这条 delta 造出助手块或折叠块；新快照装入后新 running 助手的折叠块展开、文本不重复。
+- F7：`failed` 消息的 `.chat-msg-main` 子元素次序为折叠块、`.chat-md`、错误文案、操作行。
+
+变异：每次渲染回写 `open` → F1/F2/F4；调用处 `key={message.thinking}` → F2；`isUnknownTurn` 不认 thinking.delta → F6；thinking.delta 跳过游标过滤 → F5；折叠块放到错误之后 → F7；`open` 恒真 → F3。测试文件 509 → 655 行，27 → 32 例。
+
+一次性真实浏览器观察（Chromium，构建产物 + 路由 mock，脚本不入库；1440×900 与 390×844）：终态消息的折叠块初始收起，点击展开，事件流重连引发的同快照重同步后仍展开，再点收起；running 快照初始展开，手动收起后重同步仍收起；主体 `white-space: pre-wrap`，展开时图标旋转 90°，无页面级横向滚动。
+
 ## 实现记录
 - 行数：`stream.ts` 773 → 787；`conversation-view.tsx` 258 → 262；`messages.css` 486 → 530；新文件 `stream-thinking.ts` 28、`thinking-block.tsx` 15；`page.tsx` 688、`chat.css` 797 零 diff。
 - 测试：`web/test/chat-thinking.test.tsx` 509 行 27 例。基线上 24 红 3 绿，绿的三例是 T1 的未知类型护栏、T5「指向 user 消息返回同一引用」（基线走 `default` 分支天然成立，没有变异能打红它）、T12 的「`chat.css` 不含 `thinking-`」。
@@ -97,7 +111,8 @@ export function ThinkingBlock({ running, text }: { running: boolean; text: strin
 2. 终态消息收到 thinking.delta 仍会追加（归约器不按状态设门，与 `text.delta` 一致）；服务端在 `turn.end` 之前冲刷，正常不会发生。
 3. `isSafeInteger` 在 `stream.ts`、`stream-approvals.ts` 之外多一份三行的私有拷贝（低于 jscpd 的最小片段）。
 4. 折叠块收起时主体仍在 DOM 里（`<details>` 的原生行为），浏览器的页内查找会自动展开它。
-5. 真实浏览器下的呈现由 8.2a 的 ui-walk 走查承担，本刀不做一次性浏览器观察。
+5. 贴底状态下展开一条长思考（展开增高超过 summary 到转录区顶的距离，约 22–25 行），视口跳到底部，summary 滚出可视区（Chromium 实测：390×844、120 行思考，summary 从 442px 到 −1964px）。原因是主规格 chat-web「转录区尺寸变化触发贴底重算」要求贴底时任何内容增高都继续跟随，而思考主体没有高度上限。已另立 issue #725，由 owner 选方案，本刀不改。
+6. ui-walk 里的折叠块步骤归 8.2a。
 
 ## Seams under test
 - 纯函数：`chatStateFromSnapshot`、`applyChatEvent`。

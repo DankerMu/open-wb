@@ -3,6 +3,7 @@
  * T1–T12 of openspec/changes/thinking-fold-block/design.md. Seams: `chatStateFromSnapshot` /
  * `applyChatEvent` on frozen inputs, `connectSessionEvents` over the fake EventSource, the jsdom
  * chat page, and the static CSS text. Expected values are literals from the spec deltas.
+ * F1–F7 close the evidence gaps of review round 1 (resync snapshots, covered replay, unknown turn).
  */
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -23,7 +24,7 @@ import {
   SESSION_ID,
   settle,
 } from "./chat-stream-support.js";
-import { calls, jsonResponse } from "./support.js";
+import { calls, deferredResponse, jsonResponse } from "./support.js";
 import { blockBody, readRepoFile, ruleBody, stripComments } from "./ui-support.js";
 
 type Snapshot = ChatMessageSnapshot;
@@ -57,14 +58,19 @@ function assistant(id: number, status: Status, fields: Partial<Message> = {}): M
   return { id, role: "assistant", status, ...base, ...fields };
 }
 
-/** Session in `status` holding `historyUser` (id -3) and `assistants`; stream cursor `1:3`. */
-function sessionSnapshot(status: Snapshot["session"]["status"], ...assistants: Message[]) {
+/** Session in `status` holding `historyUser` (id -3) and `later`; stream cursor `1:3`. */
+function sessionSnapshot(status: Snapshot["session"]["status"], ...later: Message[]) {
   const snapshot: Snapshot = {
     streamCursor: { epoch: 1, seq: 3 },
     session: { ...chatSnapshot().session, status },
-    messages: [historyUser, ...assistants],
+    messages: [historyUser, ...later],
   };
   return snapshot;
+}
+
+/** `snapshot` with its stream cursor moved to `1:seq`. */
+function atSeq(snapshot: Snapshot, seq: number): Snapshot {
+  return { ...snapshot, streamCursor: { epoch: 1, seq } };
 }
 
 /** One assistant (id 0) whose status follows the session's. */
@@ -132,6 +138,26 @@ describe("thinking.delta through the connector", () => {
 
     expect(connector.events).toEqual([]);
     expect(connector.loads).toHaveLength(1);
+    expect(connector.errors).toEqual([]);
+  });
+
+  it("F5 drops replayed frames the snapshot covers and appends only the successor delta", async () => {
+    const snapshot = atSeq(turnSnapshot("running", { thinking: "旧" }), 5);
+    const connector = connectChat(snapshot);
+    connector.source.emitOpen();
+    connector.source.emitData("turn.start", "1:2", { messageId: 0 });
+    connector.source.emitData("thinking.delta", "1:5", { messageId: 0, delta: "旧" });
+    connector.source.emitData("thinking.delta", "1:6", { messageId: 0, delta: "想" });
+    expect(connector.events).toEqual([]);
+
+    connector.loads.at(-1)?.resolve(snapshot);
+    await settle();
+
+    expect(connector.events).toStrictEqual([
+      { type: "thinking.delta", data: { messageId: 0, delta: "想" } },
+    ]);
+    expect(messageOf(connector.state).thinking).toBe("旧想");
+    expect([connector.loads.length, connector.snapshots.length]).toEqual([1, 1]);
     expect(connector.errors).toEqual([]);
   });
 
@@ -247,22 +273,44 @@ describe("thinking snapshot mapping and reduction", () => {
 
 /** Opens the session, lets the live source recover once; events then start at `1:4`. */
 async function mountThread(snapshot: Snapshot) {
+  let reply = (): Response | Promise<Response> => jsonResponse(snapshot);
   const { fetchMock } = renderChatPage(`/?session=${SESSION_ID}`, {
     "/api/sessions": () => jsonResponse({ sessions: [snapshot.session] }),
-    [MESSAGES]: () => jsonResponse(snapshot),
+    [MESSAGES]: () => reply(),
   });
   await screen.findAllByRole("article", { name: "助手" });
   const source = latestSource();
   await reopen(source);
-  return { source, reads: () => calls(fetchMock, MESSAGES).length };
+  return {
+    source,
+    reads: () => calls(fetchMock, MESSAGES).length,
+    /** Every later `/messages` read is answered by `next`. */
+    serve(next: typeof reply) {
+      reply = next;
+    },
+  };
+}
+
+type Thread = Awaited<ReturnType<typeof mountThread>>;
+
+async function flush() {
+  for (let round = 0; round < 3; round += 1) {
+    await act(settle);
+  }
 }
 
 /** A (re)opened source reloads the full snapshot: the page's resync path. */
 async function reopen(source: FakeEventSource) {
   act(() => source.emitOpen());
-  for (let round = 0; round < 3; round += 1) {
-    await act(settle);
-  }
+  await flush();
+}
+
+/** The source reopens while `/messages` answers `next`: exactly one more snapshot read. */
+async function resyncWith(thread: Thread, next: Snapshot) {
+  const before = thread.reads();
+  thread.serve(() => jsonResponse(next));
+  await reopen(thread.source);
+  expect(thread.reads()).toBe(before + 1);
 }
 
 function emit(source: FakeEventSource, seq: number, type: string, data: Record<string, unknown>) {
@@ -292,6 +340,11 @@ function fold() {
 
 function bodyText(block = fold()) {
   return block.querySelector("div.thinking-body")?.textContent;
+}
+
+/** Rendered answer text (`.chat-md`) of the first assistant. */
+function answerText() {
+  return articles()[0]?.querySelector(".chat-md")?.textContent;
 }
 
 function toggle(block = fold()) {
@@ -390,22 +443,107 @@ describe("深度思考过程 fold on the chat page", () => {
     expect(bodyText()).toBe("一二三");
   });
 
-  it("T8 keeps a done fold expanded by the user across a same-snapshot resync", async () => {
-    const { reads, source } = await mountThread(
-      turnSnapshot("done", { content: "答", thinking: "想过" }),
-    );
+  it("F1 keeps a done fold expanded by the user when a resync installs a changed answer", async () => {
+    const thread = await mountThread(turnSnapshot("done", { content: "答", thinking: "想过" }));
     const block = fold();
     expect(block.open).toBe(false);
     toggle();
     expect(block.open).toBe(true);
-    const before = reads();
+    expect(answerText()).toBe("答");
 
-    await reopen(source);
+    await resyncWith(thread, turnSnapshot("done", { content: "答复", thinking: "想过" }));
 
-    expect(reads()).toBe(before + 1);
+    expect(answerText()).toBe("答复");
     expect(fold()).toBe(block);
     expect(block.open).toBe(true);
     expect(bodyText()).toBe("想过");
+  });
+
+  it("F2 keeps a running fold collapsed by the user when a resync brings longer thinking", async () => {
+    const thread = await mountThread(turnSnapshot("running", { thinking: "想到一半" }));
+    const block = fold();
+    expect(block.open).toBe(true);
+    toggle();
+    expect(block.open).toBe(false);
+
+    await resyncWith(thread, turnSnapshot("running", { thinking: "想到一半，又想了一步" }));
+
+    expect(fold()).toBe(block);
+    expect(block.open).toBe(false);
+    expect(bodyText()).toBe("想到一半，又想了一步");
+  });
+
+  it("F3 collapses an untouched running fold when a resync finds the turn done", async () => {
+    const thread = await mountThread(turnSnapshot("running", { thinking: "断线前的思考" }));
+    const block = fold();
+    expect(block.open).toBe(true);
+
+    await resyncWith(thread, turnSnapshot("done", { content: "答", thinking: "断线前的思考" }));
+
+    expect(answerText()).toBe("答");
+    expect(fold()).toBe(block);
+    expect(block.open).toBe(false);
+    expect(bodyText()).toBe("断线前的思考");
+  });
+
+  it("F4 keeps the fold collapsed by the user through approval and step.end events", async () => {
+    const step: Message["steps"][number] = { ...BASH_STEP, output: "", status: "running" };
+    const { source } = await mountThread(
+      turnSnapshot("running", { thinking: "先想一想", steps: [step] }),
+    );
+    const article = within(articles()[0] as HTMLElement);
+    const block = fold();
+    toggle();
+    const expectStillCollapsed = () => expect([fold(), block.open]).toEqual([block, false]);
+    expectStillCollapsed();
+    expect(article.getByRole("status", { name: "bash 运行中" })).toBeTruthy();
+
+    const { id: approvalId, tool, title, expiresAt } = SETTLED_APPROVAL;
+    emit(source, 4, "approval.request", { approvalId, tool, title, expiresAt });
+    expect(article.getByRole("group", { name: "需要你的确认" })).toBeTruthy();
+    expectStillCollapsed();
+
+    emit(source, 5, "approval.resolved", { approvalId, decision: "allow" });
+    expect(article.getByRole("group", { name: "已允许执行" })).toBeTruthy();
+    expectStillCollapsed();
+
+    emit(source, 6, "step.end", { stepId: step.id, status: "done", output: "a.md" });
+    expect(article.getByRole("status", { name: "bash 已完成" })).toBeTruthy();
+    expectStillCollapsed();
+    expect(bodyText()).toBe("先想一想");
+  });
+
+  it("F6 resyncs on a thinking.delta for an unknown turn instead of fabricating a message", async () => {
+    const thread = await mountThread(turnSnapshot("done", { content: "答" }));
+    const pending = deferredResponse();
+    thread.serve(() => pending.promise);
+    const before = thread.reads();
+
+    emit(thread.source, 4, "thinking.delta", { messageId: 2, delta: "新一轮的思考" });
+    await flush();
+
+    expect(thread.reads()).toBe(before + 1);
+    expect(articles()).toHaveLength(1);
+    expect(answerText()).toBe("答");
+    expect(document.querySelector("details.thinking-block")).toBeNull();
+
+    const followUp: Message = { ...historyUser, id: 1, content: "再问", createdAt: 1 };
+    const next = sessionSnapshot(
+      "running",
+      assistant(0, "done", { content: "答" }),
+      followUp,
+      assistant(2, "running", { thinking: "新一轮的思考" }),
+    );
+    pending.resolve(jsonResponse(atSeq(next, 4)));
+    await flush();
+
+    expect(thread.reads()).toBe(before + 1);
+    expect(articles()).toHaveLength(2);
+    expect(foldOf(articles()[0])).toBeNull();
+    const block = foldOf(articles()[1]);
+    expect(block?.open).toBe(true);
+    expect(block?.querySelector("div.thinking-body")?.textContent).toBe("新一轮的思考");
+    expect(screen.queryAllByRole("alert")).toEqual([]);
   });
 
   it("T9 opens a running snapshot message and collapses on turn.end stopped", async () => {
@@ -423,7 +561,7 @@ describe("深度思考过程 fold on the chat page", () => {
     expect(bodyText()).toBe("快照里的思考");
   });
 
-  it("T9 collapses on error followed by turn.end failed", async () => {
+  it("T9 F7 collapses on error then turn.end failed, fold above answer above error", async () => {
     const { source } = await mountThread(turnSnapshot("running", { thinking: "想到一半" }));
     const block = fold();
     expect(block.open).toBe(true);
@@ -436,6 +574,14 @@ describe("深度思考过程 fold on the chat page", () => {
     expect(fold()).toBe(block);
     expect(block.open).toBe(false);
     expect(bodyText()).toBe("想到一半");
+    const main = mainOf(articles()[0] as HTMLElement);
+    expect([...main.children].map((part) => `${part.localName}.${part.className}`)).toEqual([
+      "details.thinking-block",
+      "div.chat-md",
+      "p.ui-alert chat-msg-error",
+      "div.chat-msg-actions",
+    ]);
+    expect(screen.getByRole("alert")).toBe(main.children[2]);
   });
 
   it("T9 removes the fold when the same message starts a new turn", async () => {
