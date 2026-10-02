@@ -4,7 +4,7 @@ Fixture level: expanded
 
 ## 8. chat-harness — UI 走查会话元数据，走查一（父 tasks 8.2a）
 
-- [ ] 8.2a 新建 `web/e2e/ui-walk-sessions.spec.ts`（按 chat-harness「UI 走查会话元数据」第 1–6 步：UI 登录 `zhangsan` → 经页面请求上下文确保空间 `ui-walk-sessions`（201|409）→ 欢迎态点 `代码开发` → footer 选该空间 → 发送 `WORKBUDDY_THINK WORKBUDDY_WRITE 会话走查 <uuid>`，观测 `POST /api/sessions` 请求体 → 折叠块 → 文件变更卡 / 产物卡预览 / 产物面板 / `查看详情` → 侧栏 `空间 › ui-walk-sessions`；`finally` 删除会话；UI 登出）+ `web/playwright.config.ts` 两行（`testMatch` → `"ui-walk*.spec.ts"`、`globalTimeout` → `300_000`）。验证：`make ui-walk` 两个 project 全绿，`ui-walk.spec.ts` 照常通过；design「Required evidence」E1–E10
+- [x] 8.2a 新建 `web/e2e/ui-walk-sessions.spec.ts`（按 chat-harness「UI 走查会话元数据」第 1–6 步：UI 登录 `zhangsan` → 经页面请求上下文确保空间 `ui-walk-sessions`（201|409）→ 欢迎态点 `代码开发` → footer 选该空间 → 发送 `WORKBUDDY_THINK WORKBUDDY_WRITE 会话走查 <uuid>`，观测 `POST /api/sessions` 请求体 → 折叠块 → 文件变更卡 / 产物卡预览 / 产物面板 / `查看详情` → 侧栏 `空间 › ui-walk-sessions`；`finally` 删除会话；UI 登出）+ `web/playwright.config.ts` 两行（`testMatch` → `"ui-walk*.spec.ts"`、`globalTimeout` → `300_000`）。验证：`make ui-walk` 两个 project 全绿，`ui-walk.spec.ts` 照常通过；design「Required evidence」E1–E10
 
 ## Risk packs
 
@@ -24,7 +24,7 @@ Fixture level: expanded
 | Documentation / migration notes | no | spec delta 即文档；AGENTS.md 的 ui-walk 行不含文件名 |
 
 ## 通用纪律（继承父 tasks.md）
-- [ ] 改动只有 `web/e2e/ui-walk-sessions.spec.ts`（新）与 `web/playwright.config.ts` 的两行；其它被跟踪文件零 diff。
-- [ ] 没有 RED 阶段（产品行为已在 master）；负对照 N1–N12 逐条记录失败所在的步骤。
-- [ ] `make lint`、`make typecheck`、`make anti-drift`（jscpd 至多 178 → 180，且新增的只落在登录块或登出块）、`bash scripts/size-guard.sh`、`npm test --workspace web`、`make test-guardrails` 退出 0；`openspec validate ui-walk-sessions-walk-one --strict --no-interactive` 通过。
+- [x] 改动只有 `web/e2e/ui-walk-sessions.spec.ts`（新）与 `web/playwright.config.ts` 的两行；其它被跟踪文件零 diff。
+- [x] 没有 RED 阶段（产品行为已在 master）；负对照 N1–N12 逐条记录失败所在的步骤。
+- [x] `make lint`、`make typecheck`、`make anti-drift`（jscpd 至多 178 → 180，且新增的只落在登录块或登出块）、`bash scripts/size-guard.sh`、`npm test --workspace web`、`make test-guardrails` 退出 0；`openspec validate ui-walk-sessions-walk-one --strict --no-interactive` 通过。
 - [ ] 实测时长（本地全新状态、复用状态；CI）写进 PR。

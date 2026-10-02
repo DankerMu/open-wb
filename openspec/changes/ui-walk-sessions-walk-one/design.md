@@ -121,6 +121,22 @@ test("…", async ({ baseURL, page }, testInfo) => {
 9. **仍订阅着已删会话的页面会重连出 404**：这是产品现状（别处删除当前打开的会话时，页面没有对「会话已不存在」的处理），本旅程用「先离开再删」避开；#557 的第 11 步经 UI 删除，由页面自己离开会话。
 10. **jscpd 可能 178 → 至多 180**（登录、登出块各至多一个，见 proposal 偏差 10a）。
 
+## 交付记录（实现后补记）
+- **文件**：`web/e2e/ui-walk-sessions.spec.ts` 364 行；`web/playwright.config.ts` 恰两行。其它被跟踪文件零 diff。
+- **E1 / E2**：配置 diff 恰两行；`npx playwright test --list` 为「6 tests in 2 files」，每个 project 新 spec 1 条、旧 spec 2 条。
+- **E3 全新状态**（CI 同款包装，官方 omp v18.0.10；实现者两次、编排者在真实仓库一次，三个不同的 `RUNNER_TEMP`）：均退出 0，`5 passed, 1 skipped`。时长：新旅程 `desktop-light` 4.1–4.8 s、`mobile-dark` 4.8–4.9 s；旧旅程 10.4–10.5 s / 12.9–13.1 s；Playwright 总计 33.3–34.0 s（改动前的基线是 24.9 s）。201 / 409 两条路径是推断而非日志：spec 接受两者但不打印走了哪条；依据是运行后沙箱里出现了夹具里没有的 `ui-walk-sessions` 目录，且 Playwright 先跑 `desktop-light`。
+- **E4 / E6 复用状态**（长驻栈，只跑新 spec）：连续五遍 10/10 通过，单条 4.4–4.9 s，一遍总计 9.7–10.0 s。
+- **E5 残留清点**：运行前后 `zhangsan` 的会话总数相同（4）、`running` 0、绑定该空间的 0、名为 `ui-walk-sessions` 的空间恰 1。
+- **预算**：第 1–6 步加登录、清理、登出共约 4.8 s，其中真实回合约 2.7 s；每测试 30 s 还剩约 25 s 给 #541 / #557。分步计时由 spec 的 `console.log` 打进运行日志（先例 `ui-walk-stop.ts`）。
+- **E7 负对照**（长驻栈，`desktop-light`）：N1–N12 全部失败在预期的位置；N1–N10、N12 前后会话总数 4 → 4、`running` 0，清理的 DELETE 都是 204。
+  - N1 → 第 4 步 `toHaveText`；N2、N3 → 第 3 步请求体 `toStrictEqual`（N3 的实际请求体没有 `workspaceId` 键）；N4 → 第 4 步折叠块计数 0；N5 → 第 3 步等回合完成的断言 10 s 超时；N6 → 第 5 步逻辑路径；N7 → 第 5 步 `sandbox`；N8 → 第 6 步分区计数；N9 → REST 回读；N10 → oracle「expected exactly one post-logout-reload … 401, got 0」；N11 → 旅程通过而清点 4 → 5（手工删除后回到 4）；N12 → oracle `console.error: Failed to load resource: the server responded with a status of 404 (Not Found)`。
+  - **N5 另有探针**：被删时会话与助手消息都是 `running`、有一条未决的 bash 审批，DELETE 返回 204，之后不在列表里——proposal 偏差 3（不实现 409 回退）的实证。
+  - **N12 与规格的括注一致**：不离开会话页、DELETE 后停留 5 s，重连 404 出现。N1–N9 的失败路径上页面都还在会话页，但没有出现这条 404——测试在约 3 s 的重连窗口之前就结束了。
+- **E8 门禁**（真实仓库）：`make lint`、`make typecheck`、`make anti-drift`、`bash scripts/size-guard.sh`、`npm test --workspace web`（86 文件 / 1795 例）、`make test-guardrails`（oracle 816 PASS）、`openspec validate` 退出 0。**jscpd 179**（基线 178）：唯一新增的克隆是登录块，`web/e2e/ui-walk-sessions.spec.ts` 111–117 行与 `web/e2e/ui-walk.spec.ts` 89–95 行；登出块没有克隆。
+- **E9**：禁用模式的清点零命中。
+- **相对 D2 的小出入**：点场景胶囊之前多断言一次初态（`true/false/false`）；多断言用户气泡文本等于提示词；预览 iframe 用 `locator.contentFrame()`；离开会话页只等 `/settings` 的 h1；等回合完成的显式超时取 10 s，是全文件唯一的显式超时；空间选项按其中的精确文本过滤而不是按拼接的可访问名（与旧旅程选 `smoke-fixture` 的写法一致）；第一版的 `test()` 包装段与旧 spec 构成一个不在登录 / 登出块上的克隆，改成本文 D2 给出的写法后消失。
+- **观察**：390px 下顶栏 `产物面板`、footer 触发按钮、Popover、Dialog、抽屉都可直接操作；场景 Toast（2400 ms）在真实回合期间自然消失，mobile 读侧栏之前先等它消失。抽屉与 Dialog 的焦点归还没有验证（本刀不要求）。
+
 ## Seams under test
 - 真实浏览器（Playwright Chromium）对编译后的应用、真 omp 与受控上游；没有任何桩。
 - REST 回读经 `page.request`（与页面同一 cookie），不经过 error oracle 的监听。
