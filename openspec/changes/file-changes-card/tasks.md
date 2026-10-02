@@ -12,7 +12,7 @@
 | Schema / columns / units / field names | yes | payload 严格键集与元素规则；步骤视图新增必有键 `changes` → C2、C5、既有套件的整对象断言 |
 | Concurrency / shared state / ordering | yes | `files.changed` 先于 `step.end` 到达、running 步骤不出卡、同一路径多步骤的先后 → C3、C7、C8、C10 |
 | Error handling / rollback / partial outputs | yes | 非法 payload → 重同步；空间列表读取中/失败/未绑定 → 降级为相对路径 → C2、C11 |
-| Legacy compatibility / examples | yes | 步骤卡呈现不变、`startStep`/`endStep` 挪文件后行为不变、助手块次序、`复制` → C13、C14、既有 `chat-stream*`/`chat-steps` 套件 |
+| Legacy compatibility / examples | yes | 步骤卡呈现不变、`startStep`/`endStep` 挪文件后行为不变（含引用同一性）、助手块次序、`复制` → C4 的挪文件护栏、C13、C14、既有 `chat-stream*`/`chat-steps` 套件 |
 | File IO / path safety / overwrite | yes | 只显示逻辑路径，绝对 `root` 不进任何文本与属性 → C9、C11 |
 | Auth / permissions / secrets | no | 只读本账号既有数据 |
 | Config / project setup | no | 无 |

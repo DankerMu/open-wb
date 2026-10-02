@@ -18,5 +18,5 @@
 - **THEN** 卡头为 `文件变更（1 个）`，该行显示 `+4` 与 `-2`
 
 #### Scenario: 空间不可解析
-- **WHEN** 会话 `workspaceId` 不在 `listWorkspaces` 结果中，或会话未绑定空间，或空间列表读取失败
+- **WHEN** 会话 `workspaceId` 不在 `listWorkspaces` 结果中，或会话未绑定空间，或空间列表读取中或读取失败
 - **THEN** 卡片行只显示相对路径，无 `查看详情` 按钮
