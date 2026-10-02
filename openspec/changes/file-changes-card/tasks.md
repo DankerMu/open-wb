@@ -2,7 +2,7 @@
 
 ## 7. web — files.changed 解码归约与文件变更卡（父 tasks 7.5a）
 
-- [ ] 7.5a 新建 `stream-artifacts.ts`（`files.changed` 严格解码与归约：按 `stepId` 设置步骤 `changes`，后到覆盖；按消息汇总的纯函数）+ `stream-steps.ts`（`startStep`/`endStep` 与步骤视图类型自 `stream.ts` 挪出，步骤视图加 `changes`）+ `file-changes-card.tsx`（一条助手消息只汇总**已结束**步骤的 `changes`，按路径去重取靠后步骤的值、位置取首次；卡头 `文件变更（N 个）`；行 `+a`/`-d`（>0 才显）或 `写入` + 逻辑路径 `<account>/<dir>/<path>` + `查看详情 <逻辑路径>` 按钮 → `/files?ws=<workspaceId>`；空间不可解析时只显相对路径、无 `查看详情`）+ `conversation-view.tsx` 助手块插入文件变更卡位（错误之后、`已停止` 徽章之前）+ `stream.ts` 接线 + `session-contract.ts` 导出 `parseFileChanges` + `page.tsx` 传 `workspace` + `messages.css` 样式。验证：新建 `web/test/chat-page-file-changes.test.tsx`（C1–C15）；既有测试只改 proposal「偏差」1 列出的步骤视图字面量
+- [ ] 7.5a 新建 `stream-artifacts.ts`（`files.changed` 严格解码与归约：按 `stepId` 设置步骤 `changes`，后到覆盖；按消息汇总的纯函数）+ `stream-steps.ts`（`startStep`/`endStep` 与步骤视图类型自 `stream.ts` 挪出，另有两处共用的 `updateStep`；步骤视图加 `changes`）+ `file-changes-card.tsx`（一条助手消息只汇总**已结束**步骤的 `changes`，按路径去重取靠后步骤的值、位置取首次；卡头 `文件变更（N 个）`；行 `+a`/`-d`（>0 才显）或 `写入` + 逻辑路径 `<account>/<dir>/<path>` + `查看详情 <逻辑路径>` 按钮 → `/files?ws=<workspaceId>`；空间不可解析时只显相对路径、无 `查看详情`）+ `conversation-view.tsx` 助手块插入文件变更卡位（错误之后、`已停止` 徽章之前）+ `stream.ts` 接线 + `session-contract.ts` 导出 `parseFileChanges` + `page.tsx` 传 `workspace` + `messages.css` 样式。验证：新建 `web/test/chat-page-file-changes.test.tsx`（C1–C15）；既有测试只改 proposal「偏差」1 列出的步骤视图字面量
 
 ## Risk packs
 

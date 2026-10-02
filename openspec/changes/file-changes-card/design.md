@@ -104,7 +104,7 @@ export function summarizeChanges(steps: readonly ChatStepView[]): FileChanges[nu
 - C14 其它面：user 消息（即使视图里带步骤）不渲染卡片；没有任何 `changes` 的消息不渲染卡片（这两条是护栏）；`role="group"` 的 accessible name 恰为卡头文本。
 - C15 静态样式：`.file-change-path` 含 `text-overflow: ellipsis` 与 `min-width: 0`；`.file-change-add`/`.file-change-del` 用上述两个 token；`chat.css` 不含 `file-change`（护栏）。
 
-基线运行：测试文件导入实现前不存在的 `stream-artifacts.js`，直接跑会在导入阶段整个失败。跑基线时在沙箱里临时放一个不导出任何东西的空壳 `stream-artifacts.ts`（不进补丁），让各用例逐例给出红绿；报告里逐条列出基线即绿的护栏。
+基线运行：测试文件导入实现前不存在的 `stream-artifacts.js`，直接跑会在导入阶段整个失败。跑基线时在沙箱里临时放一个空壳 `stream-artifacts.ts`（不进补丁；若不导出任何东西仍在导入阶段整体失败，就让它导出同名的抛错函数），让各用例逐例给出红绿；报告里逐条列出基线即绿的护栏。
 
 变异自检（实现者在沙箱里做，做完还原，写进报告；每个至少打红一例）：去掉 `DATA_EVENTS` 的新条目；解码接受 `[]`；解码不查顶层键集；解码不用 `parseFileChanges`（放过未知 `kind`）；`endStep` 把 `changes` 置回 `null`；`startStep` 不设 `changes`；`setStepChanges` 追加而非替换；`setStepChanges` 对不存在的步骤造一个步骤；files.changed 一支传 `"running"` 作会话状态（由 C3 的 `done` 会话一例与 C4 打红）；快照映射不带 `changes`；`summarizeChanges` 计入 running 步骤；取首次的值而非最后的值；位置取最后而非首次；空汇总也渲染卡片；前缀用 `workspace.root`；不可解析时仍渲染 `查看详情`；导航到不带 `ws` 的 `/files`；卡片放到错误之前；卡片放到 `已停止` 徽章之后；`added: 0` 也显示 `+0`；user 消息也渲染卡片。
 
