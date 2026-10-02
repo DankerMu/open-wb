@@ -4,9 +4,10 @@
 # → (3) PATCH title/scene/pinned、多余键 400、列表反映、取消置顶
 # → (4) WORKBUDDY_THINK prompt → 作答唯一 bash 审批 → 仅 messages GET 有界重试至 done
 # → (5) thinking 逐字、bash 步骤 done、标题仍为 PATCH 所设
-# → (6) DELETE 204 + session.delete 审计 → messages 404 → 列表不含 → 再 DELETE 404
-# → (7) lisi 绑定他人空间 / PATCH / DELETE 均 404 且 lisi 的会话数不变 → zhangsan 复核并删除无绑定会话 → 登出。
-# 只由 make smoke 运行（smoke-live 不跑本文件），不使用 skip_turn_control；slash 白名单步骤由后续 issue 追加。
+# → (6) GET /api/commands 恰两条内建 → /todo 回合：omp 原文、无步骤 → /session 冒烟 回合：正文按原样落库、固定回复、无步骤
+# → (7) DELETE 204 + session.delete 审计 → messages 404 → 列表不含 → 再 DELETE 404
+# → (8) lisi 绑定他人空间 / PATCH / DELETE 均 404 且 lisi 的会话数不变 → zhangsan 复核并删除无绑定会话 → 登出。
+# 只由 make smoke 运行（smoke-live 不跑本文件），不使用 skip_turn_control。
 # 可重跑：工作空间保留供下次采用，自建会话在文件内删除，不留下 live authentication session 与 running 回合。
 # 库与 SANDBOX_ROOT 必须同生命周期：库在而空间目录被清掉时，创建仍成功，但 (4) 的回合会因空间根不存在而失败。
 
@@ -196,13 +197,80 @@ jsonpath "$.messages[?(@.id=={{assistant_id}})].approvals[0].decision" == "allow
 jsonpath "$.session.status" == "done"
 jsonpath "$.session.title" == "冒烟会话"
 
-# (6) 删除已 done 的会话：exact 204、空 body。不重试。
+# (6) 命令目录：exact 200，恰两条内建，name 依次 compact、todo（冒烟状态目录不装 skill）。
+GET {{base_url}}/api/commands
+HTTP 200
+[Asserts]
+jsonpath "$.commands" count == 2
+jsonpath "$.commands[0].name" == "compact"
+jsonpath "$.commands[0].source" == "builtin"
+jsonpath "$.commands[1].name" == "todo"
+jsonpath "$.commands[1].source" == "builtin"
+
+# (6) 白名单内的 /todo：exact 202；捕获用户与助手消息 id。不重试本 POST。
+POST {{base_url}}/api/sessions/{{session_id}}/prompt
+Content-Type: application/json
+{"message":"/todo"}
+HTTP 202
+[Captures]
+todo_assistant_id: jsonpath "$.assistantMessageId"
+todo_user_id: jsonpath "$.userMessageId"
+[Asserts]
+jsonpath "$.userMessageId" exists
+jsonpath "$.assistantMessageId" exists
+
+# (6) 轮询 messages：仅 GET 有界 retry（约 20s；内建命令不经模型、没有审批），直到 /todo 的助手与 session 均为 done。
+# 正文逐字为真 omp 的 command_output；steps、approvals 为空数组（按 id 过滤出唯一一条消息后，count 数的是该数组的元素，
+# 消息或字段缺失时不通过）；用户正文 /todo；标题不被本回合改动。
+GET {{base_url}}/api/sessions/{{session_id}}/messages
+[Options]
+retry: 40
+retry-interval: 500ms
+HTTP 200
+[Asserts]
+jsonpath "$.messages[?(@.id=={{todo_assistant_id}})].status" == "done"
+jsonpath "$.messages[?(@.id=={{todo_assistant_id}})].content" == "No todos. Use /todo append <task> to start one."
+jsonpath "$.messages[?(@.id=={{todo_assistant_id}})].steps" count == 0
+jsonpath "$.messages[?(@.id=={{todo_assistant_id}})].approvals" count == 0
+jsonpath "$.messages[?(@.id=={{todo_user_id}})].content" == "/todo"
+jsonpath "$.session.status" == "done"
+jsonpath "$.session.title" == "冒烟会话"
+
+# (6) 白名单外的 /session（omp 的真内建，不转义会被 omp 当命令执行）：exact 202；捕获用户与助手消息 id。不重试本 POST。
+POST {{base_url}}/api/sessions/{{session_id}}/prompt
+Content-Type: application/json
+{"message":"/session 冒烟"}
+HTTP 202
+[Captures]
+session_cmd_assistant_id: jsonpath "$.assistantMessageId"
+session_cmd_user_id: jsonpath "$.userMessageId"
+[Asserts]
+jsonpath "$.userMessageId" exists
+jsonpath "$.assistantMessageId" exists
+
+# (6) 轮询 messages：仅 GET 有界 retry（约 20s，须 < 60s 自动允许：出现待审批即失败），直到该助手与 session 均为 done。
+# 用户正文按所发文本落库（无前导空格）；助手正文匹配 content_pattern（由模型作答，而非 omp 的 /session usage 文本）；
+# 会话里已有 (4) 的工具结果，受控上游不再发工具轮：steps、approvals 为空数组。
+GET {{base_url}}/api/sessions/{{session_id}}/messages
+[Options]
+retry: 40
+retry-interval: 500ms
+HTTP 200
+[Asserts]
+jsonpath "$.messages[?(@.id=={{session_cmd_user_id}})].content" == "/session 冒烟"
+jsonpath "$.messages[?(@.id=={{session_cmd_assistant_id}})].status" == "done"
+jsonpath "$.messages[?(@.id=={{session_cmd_assistant_id}})].content" matches "{{content_pattern}}"
+jsonpath "$.messages[?(@.id=={{session_cmd_assistant_id}})].steps" count == 0
+jsonpath "$.messages[?(@.id=={{session_cmd_assistant_id}})].approvals" count == 0
+jsonpath "$.session.status" == "done"
+
+# (7) 删除已 done 的会话：exact 204、空 body。不重试。
 DELETE {{base_url}}/api/sessions/{{session_id}}
 HTTP 204
 [Asserts]
 body == ""
 
-# (6) 最新审计是本次会话的 session.delete。
+# (7) 最新审计是本次会话的 session.delete。
 GET {{base_url}}/api/audit?limit=1
 HTTP 200
 [Asserts]
@@ -211,30 +279,30 @@ jsonpath "$.events[0].kind" == "session.delete"
 jsonpath "$.events[0].actorId" == "u1"
 jsonpath "$.events[0].detail.sessionId" == "{{session_id}}"
 
-# (6) 删除后读该会话：exact 404 not_found。
+# (7) 删除后读该会话：exact 404 not_found。
 GET {{base_url}}/api/sessions/{{session_id}}/messages
 HTTP 404
 {"error":{"code":"not_found","message":"请求的资源不存在"}}
 
-# (6) 列表不再含该会话。
+# (7) 列表不再含该会话。
 GET {{base_url}}/api/sessions
 HTTP 200
 [Asserts]
 jsonpath "$.sessions[?(@.id=='{{session_id}}')]" not exists
 
-# (6) 再次删除：exact 404 not_found。不重试。
+# (7) 再次删除：exact 404 not_found。不重试。
 DELETE {{base_url}}/api/sessions/{{session_id}}
 HTTP 404
 {"error":{"code":"not_found","message":"请求的资源不存在"}}
 
-# (7) 本账号登出：exact 204 + clear cookie。
+# (8) 本账号登出：exact 204 + clear cookie。
 POST {{base_url}}/api/auth/logout
 HTTP 204
 [Asserts]
 header "Set-Cookie" == "workbuddy_session=; Max-Age=0; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax"
 body == ""
 
-# (7) 他账号登录。
+# (8) 他账号登录。
 POST {{base_url}}/api/auth/login
 Content-Type: application/json
 {"account":"lisi","password":"demo"}
@@ -243,45 +311,45 @@ HTTP 200
 cookie "workbuddy_session" matches "^[0-9a-f]{64}$"
 {"id":"u3","account":"lisi","role":"管理员"}
 
-# (7) 越权尝试之前：记下 lisi 自己的会话数（服务归调用方所有，不假定为 0）。
+# (8) 越权尝试之前：记下 lisi 自己的会话数（服务归调用方所有，不假定为 0）。
 GET {{base_url}}/api/sessions
 HTTP 200
 [Captures]
 lisi_session_count: jsonpath "$.sessions" count
 
-# (7) 他账号绑定 zhangsan 的工作空间建会话：exact 404 not_found（他人空间与未知空间不可区分）。不重试。
+# (8) 他账号绑定 zhangsan 的工作空间建会话：exact 404 not_found（他人空间与未知空间不可区分）。不重试。
 POST {{base_url}}/api/sessions
 Content-Type: application/json
 {"workspaceId":"{{workspace_id}}"}
 HTTP 404
 {"error":{"code":"not_found","message":"请求的资源不存在"}}
 
-# (7) 他账号 PATCH zhangsan 的会话：exact 404 not_found。不重试。
+# (8) 他账号 PATCH zhangsan 的会话：exact 404 not_found。不重试。
 PATCH {{base_url}}/api/sessions/{{other_id}}
 Content-Type: application/json
 {"title":"x"}
 HTTP 404
 {"error":{"code":"not_found","message":"请求的资源不存在"}}
 
-# (7) 他账号 DELETE zhangsan 的会话：exact 404 not_found。不重试。
+# (8) 他账号 DELETE zhangsan 的会话：exact 404 not_found。不重试。
 DELETE {{base_url}}/api/sessions/{{other_id}}
 HTTP 404
 {"error":{"code":"not_found","message":"请求的资源不存在"}}
 
-# (7) 越权尝试之后：lisi 的会话数不变（被拒的绑定创建没有留下会话行）。
+# (8) 越权尝试之后：lisi 的会话数不变（被拒的绑定创建没有留下会话行）。
 GET {{base_url}}/api/sessions
 HTTP 200
 [Asserts]
 jsonpath "$.sessions" count == {{lisi_session_count}}
 
-# (7) 他账号登出。
+# (8) 他账号登出。
 POST {{base_url}}/api/auth/logout
 HTTP 204
 [Asserts]
 header "Set-Cookie" == "workbuddy_session=; Max-Age=0; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax"
 body == ""
 
-# (7) 属主重新登录。
+# (8) 属主重新登录。
 POST {{base_url}}/api/auth/login
 Content-Type: application/json
 {"account":"zhangsan","password":"demo"}
@@ -290,19 +358,19 @@ HTTP 200
 cookie "workbuddy_session" matches "^[0-9a-f]{64}$"
 {"id":"u1","account":"zhangsan","role":"成员"}
 
-# (7) 无绑定会话仍在且标题仍为 null：他账号的 PATCH/DELETE 没有生效。
+# (8) 无绑定会话仍在且标题仍为 null：他账号的 PATCH/DELETE 没有生效。
 GET {{base_url}}/api/sessions/{{other_id}}/messages
 HTTP 200
 [Asserts]
 jsonpath "$.session.title" == null
 
-# (7) 属主删除无绑定会话：exact 204、空 body。不重试。
+# (8) 属主删除无绑定会话：exact 204、空 body。不重试。
 DELETE {{base_url}}/api/sessions/{{other_id}}
 HTTP 204
 [Asserts]
 body == ""
 
-# (7) 属主登出：exact 204 + clear cookie。
+# (8) 属主登出：exact 204 + clear cookie。
 POST {{base_url}}/api/auth/logout
 HTTP 204
 [Asserts]

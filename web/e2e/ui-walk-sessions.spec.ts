@@ -1,6 +1,8 @@
-// UI walk, session metadata (chat-harness「UI 走查会话元数据」steps 1–9 and 11): one serial journey
+// UI walk, session metadata (chat-harness「UI 走查会话元数据」steps 1–11): one serial journey
 // per project against the real stack — compiled app, real omp, controlled upstream driven by the
 // prompt markers WORKBUDDY_THINK / WORKBUDDY_WRITE. Nothing is fulfilled, faked or slept on.
+// Step 10 sends two more turns in the same session: `/todo` (answered by omp itself) and an escaped
+// `/session …` (answered by the model; no tool round, the session already holds a tool result).
 // Step 11 deletes the session through the UI; `finally` deletes it again over REST (404 by then,
 // 204 when a step failed first). The journey ends with a UI logout, which the error oracle needs
 // for its second expected /api/auth/me 401.
@@ -25,6 +27,10 @@ const REPORT_FILE = "workbuddy-report.html";
 const LOGICAL_PATH = "zhangsan/ui-walk-sessions/workbuddy-report.html";
 const EXPECTED_REPLY = "你好，这是 WorkBuddy 的第一条流式回复。";
 const EXPECTED_THINKING = "先读需求，再列要点，最后作答。";
+// 真 omp 对无参数 `/todo` 的原文（新会话没有 todo）；`<task>` 在页面上是转义后的文本。
+const TODO_REPLY = "No todos. Use /todo append <task> to start one.";
+const SLASH_LABELS = ["整理上下文", "任务清单"];
+const APPROVAL_BARS = ["需要你的确认", "已允许执行", "已拒绝执行"];
 const EXPECTED_CHANGES = [{ path: REPORT_FILE, added: null, removed: null, kind: "write" }];
 const SCENE_PILLS = ["日常办公", "代码开发", "创意设计"];
 const CODE_CHIPS = ["日常开发", "网站开发", "Agent 应用", "Skill 开发", "CI/CD"];
@@ -35,7 +41,7 @@ const CURRENT_SESSION = 'button[aria-current="true"]';
 const CURRENT_MATCH = 'article[aria-current="true"]';
 // 建会话后的标题：提示词的前 18 个码点，每次运行都相同。
 const INITIAL_TITLE = "WORKBUDDY_THINK WO";
-// 真 omp 的两轮回合（write 工具轮 + 思考与回复轮）；只有等回合完成的那条断言带显式超时。
+// 真 omp 的两轮回合（write 工具轮 + 思考与回复轮）；只有等回合完成的那条断言（`expectTurnDone`）带显式超时。
 const TURN_DONE_TIMEOUT_MS = 10_000;
 
 /** 建会话的 201 一到就记下 id，`finally` 凭它删除——先于对该请求的任何断言。 */
@@ -45,6 +51,8 @@ type SessionSnapshot = {
   session: { id: string; scene: string | null; workspaceId: string | null; status: string };
   messages: {
     role: string;
+    content: string;
+    status: string;
     thinking: string | null;
     steps: { name: string; changes: unknown }[];
   }[];
@@ -107,6 +115,8 @@ async function walkSessionMeta(
     mark("step 8");
     await step9Search(page, uuid, mark);
     mark("step 9");
+    await step10Slash(page, sessionId);
+    mark("step 10");
     await step11Delete(page, project, sessionId, renamed);
     mark("step 11");
   } finally {
@@ -184,6 +194,14 @@ async function step2PickWorkspace(page: Page): Promise<void> {
   ).toBeVisible();
 }
 
+// 回合完成：该助手消息的正文恰为 `reply`（文件里唯一带显式超时的断言），且没有任何一种审批条。
+async function expectTurnDone(assistant: Locator, reply: string): Promise<void> {
+  await expect(assistant.locator(".chat-md")).toHaveText(reply, { timeout: TURN_DONE_TIMEOUT_MS });
+  for (const name of APPROVAL_BARS) {
+    await expect(assistant.getByRole("group", { name })).toHaveCount(0);
+  }
+}
+
 // 只观测 `POST /api/sessions`；返回会话 id。
 async function step3SendPrompt(
   page: Page,
@@ -210,16 +228,11 @@ async function step3SendPrompt(
 
   const user = page.getByRole("article", { name: "用户" });
   const assistant = page.getByRole("article", { name: "助手" });
-  await expect(assistant.locator(".chat-md")).toHaveText(EXPECTED_REPLY, {
-    timeout: TURN_DONE_TIMEOUT_MS,
-  });
+  await expectTurnDone(assistant, EXPECTED_REPLY);
   await expectSelectedSessionStatus(page, project, "已完成");
   await expect(
     assistant.getByRole("region", { name: "write" }).getByRole("status", { name: "write 已完成" }),
   ).toBeVisible();
-  for (const name of ["需要你的确认", "已允许执行", "已拒绝执行"]) {
-    await expect(assistant.getByRole("group", { name })).toHaveCount(0);
-  }
   await expect(user).toHaveCount(1);
   await expect(assistant).toHaveCount(1);
   await expect(user.locator(".chat-msg-body")).toHaveText(prompt);
@@ -241,15 +254,19 @@ async function step4ThinkingFold(page: Page): Promise<void> {
   await expect(fold.locator(".thinking-body")).toHaveText(EXPECTED_THINKING);
 }
 
+async function readSnapshot(page: Page, sessionId: string): Promise<SessionSnapshot> {
+  const response = await page.request.get(`/api/sessions/${sessionId}/messages`);
+  expect(response.status(), "GET messages status").toBe(200);
+  return (await response.json()) as SessionSnapshot;
+}
+
 // 第 4、5 步在 DOM 上看到的值，经页面的请求上下文从服务端回读。
 async function expectServerSnapshot(
   page: Page,
   sessionId: string,
   workspaceId: string,
 ): Promise<void> {
-  const response = await page.request.get(`/api/sessions/${sessionId}/messages`);
-  expect(response.status(), "GET messages status").toBe(200);
-  const snapshot = (await response.json()) as SessionSnapshot;
+  const snapshot = await readSnapshot(page, sessionId);
   expect(snapshot.session).toMatchObject({
     id: sessionId,
     scene: "code",
@@ -502,6 +519,85 @@ async function describePosition(page: Page, message: Locator): Promise<string> {
   const shown = Math.max(0, Math.min(bottom, frameBottom) - Math.max(top, frameTop));
   const range = (from: number, to: number) => `${Math.round(from)}..${Math.round(to)}`;
   return `${Math.round(shown)}/${Math.round(box.height)}px in viewport (message y ${range(top, bottom)}, transcript y ${range(frameTop, frameBottom)})`;
+}
+
+// 第 10 步的一个回合：`Enter` 发出草稿；第 `index` 条（从 0 数）用户消息的正文是 `sent`，同序号的助手消息
+// 到达 `reply`，没有步骤卡、没有审批条；回合结束后输入框解锁并清空。
+async function sendSlashTurn(
+  page: Page,
+  index: number,
+  sent: string,
+  reply: string,
+): Promise<void> {
+  const composer = page.getByLabel("给助手发消息");
+  const user = page.getByRole("article", { name: "用户" });
+  const assistant = page.getByRole("article", { name: "助手" });
+  await composer.press("Enter");
+  await expect(user).toHaveCount(index + 1);
+  await expect(user.nth(index).locator(".chat-msg-body")).toHaveText(sent);
+  await expect(assistant).toHaveCount(index + 1);
+  await expectTurnDone(assistant.nth(index), reply);
+  // 步骤卡是助手消息里唯一的 `region`。
+  await expect(assistant.nth(index).getByRole("region")).toHaveCount(0);
+  await expect(composer).toBeEnabled();
+  await expect(composer).toHaveValue("");
+}
+
+// 次序有判别力：候选目录在第一次输入 `/` 时才取，`Enter` 之前先断言面板里恰一项——面板没出来时
+// `Enter` 会把 `/t` 当普通消息发出去；「`/session` 没有候选」先对不含空白的草稿断言（仍是候选态、目录
+// 已加载），含空白的草稿本来就不开面板。DOM 的文本断言会归一空白，逐字的正文从服务端回读。
+async function step10Slash(page: Page, sessionId: string): Promise<void> {
+  const composer = page.getByLabel("给助手发消息");
+  const listbox = page.getByRole("listbox", { name: "命令候选", exact: true });
+  const options = listbox.getByRole("option");
+  // `option` 的可访问名是 label、描述与 hint 的拼接，按 label 的类名取文本。
+  const labels = listbox.locator(".chat-slash-label");
+  const user = page.getByRole("article", { name: "用户" });
+  const assistant = page.getByRole("article", { name: "助手" });
+  // `session` 是白名单外的真 omp 内建：不转义会被 omp 当命令执行。
+  const escaped = `/session ${randomUUID()}`;
+
+  await composer.fill("/");
+  await expect(listbox).toBeVisible();
+  await expect(options).toHaveCount(2);
+  await expect(labels).toHaveText(SLASH_LABELS);
+  await expect(composer).toBeFocused();
+  await composer.fill("/t");
+  await expect(options).toHaveCount(1);
+  await expect(labels).toHaveText(["任务清单"]);
+  // 面板开着：`Enter` 选中而不发送。
+  await composer.press("Enter");
+  await expect(composer).toHaveValue("/todo ");
+  await expect(listbox).toHaveCount(0);
+  await expect(user).toHaveCount(1);
+  await expect(assistant).toHaveCount(1);
+  await expect(composer).toBeFocused();
+  await sendSlashTurn(page, 1, "/todo", TODO_REPLY);
+
+  await composer.fill("/session");
+  await expect(listbox).toHaveCount(0);
+  await composer.fill(escaped);
+  await expect(listbox).toHaveCount(0);
+  await sendSlashTurn(page, 2, escaped, EXPECTED_REPLY);
+
+  const { messages } = await readSnapshot(page, sessionId);
+  expect(messages.map((message) => message.role)).toEqual([
+    "user",
+    "assistant",
+    "user",
+    "assistant",
+    "user",
+    "assistant",
+  ]);
+  const [, , todoUser, todoReply, escapedUser, escapedReply] = messages;
+  expect(todoUser?.content).toBe("/todo");
+  expect(todoReply?.content).toBe(TODO_REPLY);
+  expect(todoReply?.steps).toEqual([]);
+  expect(todoReply?.status).toBe("done");
+  expect(escapedUser?.content).toBe(escaped);
+  expect(escapedReply?.content).toBe(EXPECTED_REPLY);
+  expect(escapedReply?.steps).toEqual([]);
+  expect(escapedReply?.status).toBe("done");
 }
 
 // 确认框渲染在页面层。204 之后：条目移除、Toast、URL 去掉 `session`、回到欢迎态。Toast 按类名与
