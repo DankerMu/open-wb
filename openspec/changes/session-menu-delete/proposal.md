@@ -29,7 +29,7 @@ Evidence floor: 新建 `web/test/chat-page-session-delete.test.tsx` 覆盖 desig
 
 ## 与 issue / 父 delta 的偏差（父 change 归档前 rebase 适用）
 1. **新建 `delete-dialog.tsx`，`session-sidebar.tsx` 有改动**：issue 的 PR Boundary 只列 `session-menu.tsx`、`session-actions.ts`、`page.tsx` 与新测试文件。确认框必须挂在页面主树（侧栏槽位节点随折叠与 `≤760px` 覆盖层关闭而卸载，同 7.2a 的 `RenameDialog`）；「无打开的删除则不渲染」的判断放进 `ChatPage` 会让它的认知复杂度超过 Biome 上限（7.2a 已遇到），故落独立组件。`session-sidebar.tsx` 只是把回调透传给 `SessionMenu`。
-2. **三处既有断言改动**：issue 写「既有测试零 diff」。`chat-page-session-rename-pin.test.tsx:138-148`（M1）与 `chat-page-session-pin.test.tsx:97`、`:119-122` 钉的是 7.2a 的「菜单恰两项、无 `删除`」，正是本刀改写的那句规格；改为三项，其余断言不动，两个文件不增行。
+2. **三处既有断言改动**：issue 写「既有测试零 diff」。`chat-page-session-rename-pin.test.tsx:138-148`（M1，连同 `:99` 的用例标题）与 `chat-page-session-pin.test.tsx:97`、`:119-122` 钉的是 7.2a 的「菜单恰两项、无 `删除`」，正是本刀改写的那句规格；改为三项，其余断言不动，两个文件不增行。
 3. **请求中可关闭、请求不取消、重开仍忙碌**：父文只写「请求中确认按钮忙碌禁用」。`ConfirmDialog` 的 `取消` 与 Escape 在 pending 时可用（`web/src/ui/confirm-dialog.tsx:50`），`lib/api.ts` 没有请求超时，running 会话的删除最长约 16 s（父 design D3）。子 delta 照 spa-shell 退出确认的先例（`web/src/features/auth/footer.tsx:88-105`）：请求中取消按钮文案为 `关闭`、框内显示 `删除请求已发送，关闭窗口不会撤销请求。`、再次对同一会话打开仍忙碌（不发第二个 DELETE）。父文应同步采纳。
 4. **「当前选中会话」在响应到达时判定**：父文没说以哪一刻为准。删除请求在途时用户可以切换会话；按发出时判定会把用户从刚切过去的会话踢回欢迎态，或让被删会话的页面留在原地。子 delta 写明以响应到达时为准，并加 Scenario「删除请求中」。
 5. **删除成功同时关闭为该会话打开的重命名 Dialog**：父文未写。请求中关闭确认框后可以对同一会话打开重命名；会话删掉后这个 Dialog 没有对象。

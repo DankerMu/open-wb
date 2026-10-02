@@ -75,19 +75,19 @@ const sessionActions = useSessionActions(client, setListState, setHistoryState, 
 新建 `web/test/chat-page-session-delete.test.tsx`（首行引入 `./radix-platform.js`；复用 `chat-page-session-meta-support.tsx` 的 `mountSessions`、`mountTwoAccounts`、`openEntryMenu`、`chooseEntryAction`、`toasts` 等；DELETE 专用的查询与请求断言写在新文件里，既有 support 模块不增行；新文件超过 800 行时拆出 `chat-page-session-delete-support.tsx`）。`DELETE` 与 `PATCH` 同路径，`createFetchMock` 只按路径路由，方法从 `options.method` 断言。确认框以 `role="alertdialog"`、name `删除任务` 定位，框内的 `删除` 用 `within()`（与菜单项同名）。全部 RED，除注明者。
 - R1 菜单三项：未置顶、已置顶、`running`、`title: null` 四种会话的菜单 `menuitem` 文本恰为 `重命名`、`置顶任务`|`取消置顶`、`删除`；`删除` 项带 `ui-menu-item--danger`、图标类含 `lucide-trash`、无 `aria-disabled`/`data-disabled`；无 `导出记录`。
 - R2 确认框与取消：选择 `删除` → `alertdialog` name `删除任务`，说明文本恰为 `确定要删除「<标题>」吗？删除后不可恢复。`（`title: null` 的会话为 `「新会话」`），按钮恰为 `取消`、`删除`，`删除` 是 danger 变体且可用，无 `删除请求已发送` 提示；点 `取消` → 确认框消失、没有 `DELETE`、焦点回到该条目的「更多」按钮、列表不变；另一例按 Escape 结果相同。
-- R3 删除当前且 `running` 的会话（Scenario 第一组）：挂载 `/?from=keep&session=<A>#hash`，A 为 `running` 且事件流已连接；确认 → 恰一次发往 `/api/sessions/<A>` 的请求，`method` 为 `DELETE`、无 `body`、无 `Content-Type`。DELETE 挂起期间：确认按钮 `disabled` 且 `aria-busy="true"`、取消按钮文案为 `关闭`、提示 `删除请求已发送，关闭窗口不会撤销请求。` 可见；条目仍在列表、URL 不变、事件流未关闭、没有 Toast。204 → 确认框消失；A 的条目消失、其余条目次序不变；Toast 恰为 `任务已删除`；location 恰为 `/?from=keep#hash` 且 `history.length` 与删除前相同；hero heading `WorkBuddy，我帮你` 可见；页面内没有 `role="alert"`；A 的 `FakeEventSource` `readyState` 为 CLOSED 且之后没有新建 EventSource；204 之后 `/api/sessions/<A>/messages` 与 `/api/sessions` 的请求数不再增加。
+- R3 删除当前且 `running` 的会话（Scenario 第一组）：挂载 `/?from=keep&session=<A>#hash`，A 为 `running` 且事件流已连接；确认 → 恰一次发往 `/api/sessions/<A>` 的请求，`method` 为 `DELETE`、无 `body`、无 `Content-Type`。DELETE 挂起期间：确认按钮 `disabled` 且 `aria-busy="true"`、取消按钮文案为 `关闭`、提示 `删除请求已发送，关闭窗口不会撤销请求。` 可见；条目仍在列表、URL 不变、事件流未关闭、没有 Toast。204 → 确认框消失；A 的条目消失、其余条目次序不变；Toast 恰为 `任务已删除`；location 恰为 `/?from=keep#hash` 且 `history.length` 与删除前相同（replace，不是 push）；关闭先于导航：A 的 `FakeEventSource` 的 `close()` 被调用的那一刻 location 仍含 `session=<A>`（spy `close`，在调用时读取 location）；hero heading `WorkBuddy，我帮你` 可见；页面内没有 `role="alert"`；A 的 `FakeEventSource` `readyState` 为 CLOSED 且之后没有新建 EventSource；204 之后 `/api/sessions/<A>/messages` 与 `/api/sessions` 的请求数不再增加。
 - R4 删除非当前会话（第二组）：`/?session=<A>` 下删除 B → B 的条目消失、Toast `任务已删除`；location 仍为 `/?session=<A>`、顶栏 heading 仍为 `我的工作 / <A 标题>`、A 的会话内容仍在、A 的事件流未关闭。另一例欢迎态（`/`）下删除 → 条目消失、location 仍为 `/`、hero 仍在。
 - R5 `done` 会话为当前会话时删除：同 R3 的 204 结果（回欢迎态、事件流关闭、replace）。
 - R6 失败（第三组）：DELETE 返回 409 信封 `{code:"session_busy", message:"会话正在生成，请稍候"}` → 确认框消失、焦点回到「更多」按钮、Toast 恰为该 message；`/api/sessions` 多一次读取且列表显示这次读取的结果（第二次读取返回不同的标题以证明装入）；条目仍在、location 不变、事件流未关闭。非信封失败（500 非 JSON）→ Toast `请求失败，请稍后重试`，同样重读列表。失败后可以再次打开同一会话的 `删除`，确认按钮可用（在途标记已清），再次确认发出第二个 `DELETE`。
 - R7 200 不算成功：DELETE 返回 200 → Toast `请求失败，请稍后重试`、列表重读、条目仍在、location 不变。
 - R8 请求中关闭与重开（Scenario「删除请求中」第一组）：DELETE 挂起 → 点 `关闭` → 确认框消失、焦点回到「更多」按钮；再从菜单选 `删除` → 确认按钮仍 `disabled` 且 `aria-busy`、取消按钮为 `关闭`、提示可见；全程恰一个 `DELETE`；204 → 重开的确认框消失、条目消失、Toast `任务已删除`。另一例：关闭后不重开，409 到达 → Toast 该 message、列表重读、没有确认框。跨会话：A 的 DELETE 挂起 → 关闭 → 打开 B 的 `删除`（确认按钮可用、取消按钮为 `取消`、无提示）→ A 的 204 到达 → B 的确认框仍在且仍可用、A 的条目消失；镜像：A 的 409 到达 → B 的确认框仍在。
 - R9 响应到达时判定当前会话（第二组）：当前为 A，A 的 DELETE 挂起 → 关闭确认框 → 选择 B（location `/?session=<B>`）→ 204 → A 的条目消失、Toast；location 仍为 `/?session=<B>`、B 的事件流未关闭、B 的内容仍在。镜像：当前为 B，A 的 DELETE 挂起 → 关闭 → 选择 A → 204 → location `/`（replace）、hero 可见、A 的事件流已关闭。
-- R10 fence：`mountTwoAccounts` 下 A 的 DELETE 挂起时续期为另一 client → 旧 204 到达：没有 Toast、新账号的列表仍含 `乙的任务`、location 不变；另一例旧 409 到达：没有 Toast、`/api/sessions` 请求数不因它增加。续期后在新 client 上打开 A 的 `删除`：确认按钮可用（旧 client 的在途标记不沿用），确认后成功。DELETE 挂起时离开会话页（`leaveChatPage`）→ 响应到达不抛错、没有 Toast、没有 React 警告。
+- R10 fence：两个账号各有一条 id 同为 A 的会话，挂载在 `/?session=<A>`（`mountTwoAccounts` 写死 `/`，没有当前会话时观察不到「不导航」；新文件自带这个挂载，写法同它）；A 的 DELETE 挂起时续期为另一 client → 旧 204 到达：没有 Toast、新账号的列表仍含 `乙的任务`、location 仍为 `/?session=<A>`、新 client 为 A 打开的事件流未关闭；另一例旧 409 到达：没有 Toast、`/api/sessions` 请求数不因它增加。续期后在新 client 上打开 A 的 `删除`：确认按钮可用（旧 client 的在途标记不沿用），确认后成功。DELETE 挂起时离开会话页（`leaveChatPage`）→ 响应到达不抛错、没有 Toast、没有 React 警告、location 仍为 `/center`。
 - R11 401：DELETE 返回 401 → 没有错误 Toast、`/api/sessions` 请求数不因它增加。
 - R12 重命名 Dialog 随删除关闭：A 的 DELETE 挂起 → 关闭确认框 → 打开 A 的 `重命名` → 204 → `重命名任务` Dialog 消失。另一例此时打开的是 B 的 `重命名` → 204 后它仍在。
 - R13 `≤760px` 覆盖层：`导航` 内条目 `更多操作` → `删除` → 确认框出现且 `导航` 元素仍在 DOM；Escape → 只关确认框、没有 `DELETE`、`导航` 仍是同一元素、焦点回到该条目的「更多」按钮；再次 `删除` 并确认（当前会话）→ 204 后 `导航` 仍是同一元素、条目消失、location 不含 `?session=`。（确认框打开期间 Drawer 被标为 `aria-hidden`，按元素「仍在 DOM 中」断言，同 7.2a M14。）
 
-既有断言更新（非 RED 新增，随实现改为三项）：`chat-page-session-rename-pin.test.tsx:138-148`、`chat-page-session-pin.test.tsx:97`、`:119-122`。
+既有断言更新（非 RED 新增，随实现改为三项）：`chat-page-session-rename-pin.test.tsx:138-148` 与 `:99` 的用例标题、`chat-page-session-pin.test.tsx:97`、`:119-122`（多行数组加一项会多一行，改写成不增行的形式）。
 
 实现前后各跑一次并记录：RED 集合 = R1–R13；既有套件实现前后皆绿（实现后以更新过的三处断言计）。
 
@@ -100,6 +100,7 @@ const sessionActions = useSessionActions(client, setListState, setHistoryState, 
 4. 被删会话的在途重命名/置顶响应到达时不改列表，但 `已重命名`/`已更新置顶状态` 或失败 Toast 照常出现。
 5. DELETE 得到 404（会话已在别处删除）按一般失败处理：Toast 信封 message 并重读列表；若它是当前会话，页面停在该 URL，直到用户离开（其它标签页删除后的既有状态，父 design D3 不为此新增 UI）。
 6. `≤760px` 覆盖层内删除当前会话后覆盖层不自动关闭（程序化导航不关闭它）；用户看到的是少了一条的列表。
+7. 当前会话的删除在途时点 `新建会话`：204 的 replace 先于创建响应到达时，既有 effect（`page.tsx:388-396`）中止这次创建；服务端可能已建出空会话，下一次列表读取才出现（「创建在途时离开」的既有行为）。
 
 ## Seams under test
 - jsdom 页面 fixture（`renderChatPage` / `renderChatPageWithAuthProbe` + `createFetchMock` + `FakeEventSource`）：菜单、确认框、Toast、列表、URL 与事件流连接的联动，请求方法与次数，时序（挂起、关闭重开、切换会话、续期、卸载），覆盖层。
