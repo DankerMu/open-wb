@@ -33,7 +33,7 @@
 3. **`stream.ts` 的改动不止 `DATA_EVENTS`**：issue 写「`stream.ts` 只在 `DATA_EVENTS` 增 `thinking.delta` 并接线」。视图类型、`chatStateFromSnapshot`、两处复位字面量、`ChatEvent` 联合、`decodeEvent` 与 `applyChatEvent` 各一处也必须动（接线的全部落点）；解码与追加的逻辑本身在新模块。
 4. **只并入父 delta 的 thinking 部分**：归约器是九类不是十类（`files.changed` 归 7.5a）；步骤视图不加 `changes`；Assistant block order 与 Scenario「助手块次序」不含文件变更卡与产物卡；父 Scenario「思考与文件变更归约」「思考与文件变更事件严格解码」在子 delta 里叫「思考归约」「思考事件严格解码」，7.5a 再并入文件变更部分并改回父名。
 5. **thinking-fold「深度思考折叠块呈现」去掉「不参与对话内搜索（见 conversation-search）」一句**：主规格还没有 conversation-search，这句由 7.7 加回。
-6. 子 delta 另加父文未写的可观察行为：从快照打开 running 消息为展开；手动选择不被「同状态的快照重新同步」重置；解码拒绝面列全（`delta` 空串、非字符串、缺失、多键、`messageId` 非安全整数）；thinking.delta 不改会话状态。
+6. 子 delta 另加父文未写的可观察行为：从快照打开 running 消息为展开；手动选择不被「同状态的快照重新同步」重置；「进入终态时收起」写明是由 `running` 进入（`error` 置 `failed` 之后的 `turn.end` 是终态到终态，不再次收起）；解码拒绝面列全（`delta` 空串、非字符串、缺失、多键、`messageId` 非安全整数）；thinking.delta 不改会话状态。
 
 ## Impact
 - web：两个新产品文件、`stream.ts`/`conversation-view.tsx`/`messages.css` 改动、一个新测试文件、五个既有测试文件各加若干行 `thinking: null`。server、shell、`page.tsx` 无改动。

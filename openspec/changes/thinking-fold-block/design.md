@@ -50,7 +50,7 @@ export function ThinkingBlock({ running, text }: { running: boolean; text: strin
 
 没有「状态未变却重新挂载」的路径：`MessageArticle` 以 `message.id` 为 key（`conversation-view.tsx:159`），连接器重同步、发送后的对账都经 `installSnapshot` 换视图而不卸载 `MessageThread`；只有换会话/换账号的 `loadHistory` 会卸载，那属于「从快照打开」。
 
-评审比较过「`useState` + `onToggle` + `key={message.status}`」的写法：在 jsdom 29 + React 19 下每一步的 `open` 与无状态写法相同，多出来的只有状态迁移时的重新挂载（焦点丢失）。不采用。
+评审比较过「`useState` + `onToggle` + `key={message.status}`」的写法：在 jsdom 29 + React 19 下，除终态 → 终态那一步外（带 `key` 的会再收起一次，见已知残留 1），每一步的 `open` 与无状态写法相同，多出来的是状态迁移时的重新挂载（焦点丢失）。不采用。
 
 - 主体是 `div` 里的一个文本节点（React 转义），不经 `MarkdownView`。类名沿用 demo 的 `thinking-block`/`thinking-body`（规格钉了前者）。
 - `Icon` 不带 label 即装饰性（`aria-hidden`，根元素类名 `ui-icon`，`web/src/ui/icon.tsx:109-114`）。
