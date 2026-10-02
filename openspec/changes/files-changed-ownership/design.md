@@ -4,12 +4,12 @@
 - `events.ts:14`：`ChatEvent<StepId>` 含 `files.changed{messageId, stepId, files: FileChange[]}`；归约器（`:231`）在成功的 `edit`/`write` 结束帧的 `step.end` 之前、同一返回结果里输出它，`stepId` 是 toolCallId 字符串，`files[].path` 是 `details` 里的原始路径（`file-changes.ts`，99 行，纯函数，文件头写明「路径保持原样，解析、归属、上限与持久化属于 supervisor」）。
 - `turn-control.ts:218-276` `persistEvent(store, assistantMessageId, event, toolIds, nextOrdinal, settled)`：一进一出、switch 无 default。`step.start` 调 `store.startStep` 并登记 `toolIds.set(toolCallId, 数字步骤 id)`；`step.end` 查不到登记返回 `undefined`，否则 `store.finishStep` 后返回数字 id 的事件。`:269-274` 的 `thinking.delta`/`files.changed` 分支恒返回 `undefined`（注释写着等 3.4 替换）。唯一的产品调用方是 `supervisor.ts:676`；测试 `server/test/session-persist-new-events.test.ts:55` 直接调用它（六个实参）。
 - `supervisor.ts`（**799 行**，上限 800）：
-  - `#onNewSlot`（`:430-498`）：`const cwd = this.#cwdOf(resume.ownerId, resume.workspaceId)`（`:437`）；slot 字面量 `:438-449`；`cwd` 传给 `SessionRuntime`（`:478`）。`Resume = { ownerId, ompSessionFile, workspaceId: string | null }`（`branching.ts:27`）。
-  - `#pump`（`:572-642`）逐帧 `applyFrame` → `#commit`；`#commit`（`:652-697`）对每个事件：先处理 thinking 缓冲（`:661-672`，其中 `:661-663` 是 3 行注释），再在 `try` 里 `persistEvent(...)`（`:676-683`，每个实参一行）→ 有返回值则 `await this.#publish(...)`；`catch`（`:690-695`）置 `slot.infraFaulted = true`、`this.#retain(asError(error))`、`await this.#retireSlot(slot)`、返回 `false`——这就是 owned error-sink 路径，`#publish` 没被调用，ring 序号不动。
+  - `#onNewSlot`（`:430-496`）：`const cwd = this.#cwdOf(resume.ownerId, resume.workspaceId)`（`:437`）；slot 字面量 `:438-449`；`cwd` 传给 `SessionRuntime`（`:478`）。`Resume = { ownerId, ompSessionFile, workspaceId: string | null }`（`branching.ts:27`）。
+  - `#pump`（`:571-643`）逐帧 `applyFrame` → `#commit`；`#commit`（`:652-698`）对每个事件：先处理 thinking 缓冲（`:661-672`，其中 `:661-663` 是 3 行注释），再在 `try` 里 `persistEvent(...)`（`:676-683`，每个实参一行）→ 有返回值则 `await this.#publish(...)`；`catch`（`:690-695`）置 `slot.infraFaulted = true`、`this.#retain(asError(error))`、`await this.#retireSlot(slot)`、返回 `false`——这就是 owned error-sink 路径，`#publish` 没被调用，ring 序号不动。
 - `session-cwd.ts`：未绑定会话的 cwd 是 `join(sandboxRoot, ownerId)`（所有者根）；绑定会话的 cwd 是 workspace store 的 `rootOf` 给出的空间根（已是目录，否则抛错不 spawn）。**两种会话都有 cwd，所以带到分支的必须是「空间根或 null」，不能是 cwd。**
 - `pool.ts:21-32` `interface Slot`；产品里唯一的字面量在 `supervisor.ts:438-449`（测试里两处用 `as unknown as Slot`，不受新字段影响）。
-- `chat_sessions.workspace_id` 创建后不可变（`store-metadata.ts:6`：元数据 PATCH 从不触碰它），进程的 `--cwd` 在 spawn 时固定，所以空间根在 slot 的生命周期内不变。
-- `store.ts`（**789 行**）：`SessionStore` 接口 `:177-181`（`appendThinking`、`startStep`、`finishStep`）；实现 `:541-601`。`finishStep` 的 SQL 是 `UPDATE chat_steps SET status = ?, output = ?, ended_at = ? WHERE id = ? AND message_id = ? AND status = 'running'`，不读写 `changes`。拆出去的写入模块以 `store-thinking.ts`（45 行，`appendThinking(db, messageId, chunk)`，`store.ts:541-544` 里 `assertOpen(closed)` 后转调）为样板；`requireChanges(changes, 1, operation)` 在 `store-branch.ts:102`。
+- `chat_sessions.workspace_id` 创建后不会被改写（`store-metadata.ts:6`：元数据 PATCH 从不触碰它），进程的 `--cwd` 在 spawn 时固定，所以空间根在 slot 的生命周期内不变。唯一能改它的是外键的 `ON DELETE SET NULL`（迁移 035），而 workspace store 目前没有删除操作（`server/src/workspaces/store.ts:35-39`）；删空间的功能落地时须退役存活的 slot。
+- `store.ts`（**789 行**）：`SessionStore` 接口 `:177-181`（`appendThinking`、`startStep`、`finishStep`）；实现 `:541-604`（`finishStep` 在 `:580-604`）。`finishStep` 的 SQL 是 `UPDATE chat_steps SET status = ?, output = ?, ended_at = ? WHERE id = ? AND message_id = ? AND status = 'running'`，不读写 `changes`。拆出去的写入模块以 `store-thinking.ts`（45 行，`appendThinking(db, messageId, chunk)`，`store.ts:541-544` 里 `assertOpen(closed)` 后转调）为样板；`requireChanges(changes, 1, operation)` 在 `store-branch.ts:102`。
 - 快照读取：`store-branch.ts:77` 对 `chat_steps.changes` 直接 `JSON.parse`，不校验——元素合法性是写入端（本刀）的责任（`store.ts:58` 的注释）。web 对它严格解析（`web/src/lib/session-contract.ts:164-188`）：元素键恰为 `path/added/removed/kind`；`path` 非空字符串；`edit` 的 `added`/`removed` 为非负安全整数；`write` 的两者为 `null`；数组 1..50 项。违反任何一条，web 会丢掉整个快照步骤或把事件当作畸形而触发重同步。
 - `stream/`、`rest.ts` 里没有按事件类型的登记（`grep files.changed|thinking.delta` 无命中）：ring 与 SSE 端点对事件类型透明，3.3 也没有改它们。
 - fake-omp `edit-write` 场景（`server/test/support/fake-omp.mjs:664-675`、`fake-omp-thinking.mjs:76-99`）：思考 → `edit`（`details:{path:<cwd>/notes.md, diff:"+1|a\n+2|b\n-3|c\n 4|d"}`）→ `write`（`details:{resolvedPath:<cwd>/out/report.html}`）→ 正文；两个文件真实写到子进程的 `process.cwd()` 下，路径都是**绝对路径**。
@@ -21,23 +21,29 @@
 ### D1 `file-changes-ownership.ts`（新，唯一做文件系统访问的地方）
 ```ts
 export function ownedChanges(root: string, files: readonly FileChange[]): FileChange[]
+/** 纯判断：`real` 严格位于 `realRoot` 之内且相对路径不超过 1024 字节时返回相对路径。 */
+export function ownedPath(realRoot: string, real: string): string | undefined
 ```
-1. `realRoot = realpathSync(root)`；抛错 → 返回 `[]`（根在 spawn 之后被移走等）。`prefix = realRoot + sep`。
+1. **根必须是规范路径**：`realpathSync(root)` 抛错或结果 `!== root` → 返回 `[]`。生产里的根来自 workspace store 的 `rootOf`，本身就是 realpath（`server/src/workspaces/store.ts:212-224` → `core/sandbox/resolve.ts:18`）；不等只可能是根在 spawn 之后被移走并换成了符号链接（所有者根与空间根对 omp uid 组可写，`core/sandbox/dirs.ts:10`），此时整条丢弃。
 2. 逐个候选（保持输入次序）：
-   - `target = isAbsolute(file.path) ? file.path : join(root, file.path)`。
+   - `target = resolve(root, file.path)`（`node:path`）：绝对路径原样、相对路径拼根，并做词法规范化——折叠 `.`、`..`、重复与结尾的分隔符。**之后的 `realpathSync`、`lstatSync`、`dirname`、`basename` 都只用 `target`。** 不规范化的话，`dangling/`（悬空符号链接加结尾斜杠）会让 `lstat` 跟随链接报「无条目」，回落后把链接名当成空间内文件留下。
    - `real = resolveReal(target)`（见下）；`undefined` → 跳过。
-   - `real.startsWith(prefix)` 不成立 → 跳过（根自身、根外、兄弟前缀 `…/ws2`、经符号链接逃出的都落在这里）。
-   - `path = real.slice(prefix.length)`（服务端只跑在 POSIX 上，分隔符即 `/`；非空由前缀判定保证）。
-   - `Buffer.byteLength(path, "utf8") > 1024` → 跳过。
+   - `path = ownedPath(root, real)`；`undefined` → 跳过。
    - 合并：`Map<string, FileChange>`（插入序即首次出现的位置）。首次出现 → 新建 `{ path, added, removed, kind }`（**键按此次序**）；再次出现 → 位置与 `kind` 不变，`kind === "edit"` 时 `added`/`removed` 各自相加（把 `null` 当 0），`kind === "write"` 时保持 `null`。同一事件来自同一次工具调用，`kind` 实际不会不同；规则写死是为了任何输入下产出的元素都满足 Context 里 web 的校验。
 3. 返回 `[...map.values()].slice(0, 50)`——**先合并后截断**。
-4. 不修改入参，返回的对象全是新建的。
+4. 不修改入参，返回的对象全是新建的；任何输入下都不抛错。
 
-`resolveReal(target): string | undefined`：
-- `try { return realpathSync(target) } catch {}`；
-- 失败后 `lstatSync(target, { throwIfNoEntry: false })`：抛错或返回了条目（悬空符号链接、链接环、无权限）→ `undefined`；确实没有条目 → `try { return join(realpathSync(dirname(target)), basename(target)) } catch { return undefined }`。
-- NUL 字节使 `realpathSync`/`lstatSync` 抛 `ERR_INVALID_ARG_VALUE`，落在「抛错 → 丢弃」里，不需要单独判断。
-- 回落分支里 `basename` 不会是 `..`：`<dir>/..` 只要 `<dir>` 存在，realpath 就已成功；`<dir>` 不存在则父目录 realpath 失败。
+`ownedPath(realRoot, real)`（不碰文件系统，便于在任何平台上取边界值的证据）：
+- `prefix = realRoot + sep`；`real.startsWith(prefix)` 不成立 → `undefined`（根自身、根外、兄弟前缀 `…/ws2`、经符号链接逃出的都落在这里）。
+- `path = real.slice(prefix.length)`（服务端只跑在 POSIX 上，分隔符即 `/`；非空由前缀判定保证）。
+- `Buffer.byteLength(path, "utf8") > 1024` → `undefined`；否则返回 `path`。
+
+`resolveReal(target): string | undefined`（模块私有）：
+- `try { return realpathSync(target) } catch {}`——**用 JS 版 `realpathSync`，不用 `.native`**。
+- 失败后 `lstatSync(target, { throwIfNoEntry: false })`：抛错或返回了条目（悬空符号链接、链接环、无权限、ENOTDIR）→ `undefined`；确实没有条目 → `try { return join(realpathSync(dirname(target)), basename(target)) } catch { return undefined }`。（Node 24 实测：ENOENT 返回 `undefined`；ENOTDIR、EACCES、ELOOP 抛错；悬空链接返回条目。）
+- NUL 字节与过长路径使这些调用抛错（`ERR_INVALID_ARG_VALUE`、`ENAMETOOLONG`），落在「抛错 → 丢弃」里，不需要单独判断。
+
+`..` 的语义是**词法折叠**（`link/../x.md` 即 `x.md`，不管 `link` 是不是符号链接），与 Node 工具链惯用的 `path.resolve(cwd, arg)` 一致；内核语义下它可能指向别处，见「已知残留」7。
 
 不创建、不读取、不写入任何文件；每个候选 1–3 次同步元数据调用。
 
@@ -72,7 +78,11 @@ case "files.changed": {
 - `Slot` 增 `workspaceRoot: string | null`（带一行注释：绑定会话进程所在的空间根，未绑定为 `null`）。
 - `#onNewSlot` 的 slot 字面量加一行 `workspaceRoot: resume.workspaceId === null ? null : cwd,`（+1）。
 - `#commit` 的 `persistEvent(...)` 调用末尾加实参 `slot.workspaceRoot`（+1）。
-- `:661-663` 的 3 行注释改写成 2 行并带上 `files.changed`（−1）。净 +1，落在 800。不做其它改动、不搬代码。
+- `:661-663` 的 3 行注释改写成下面 2 行（−1；每行 ≤100 列，超了就再缩措辞，不许回到 3 行）。净 +1，落在 800（size-guard 只拦 `> 800`）。不做其它改动、不搬代码。
+  ```ts
+      // thinking.delta goes to the slot's buffer, never to persistEvent; any other event (also
+      // files.changed) flushes it first, so a failed flush leaves no stored terminal off the ring.
+  ```
 - 失败路径不需要新代码：`setStepChanges` 或 `ownedChanges` 抛出的任何错误都被 `#commit` 既有的 `catch` 接住（Context），`#publish` 没被调用，所以「不发布、ring 序号不推进、走 owned error-sink」由既有结构给出。
 - 次序不需要新代码：归约器在同一个返回结果里把 `files.changed` 排在 `step.end` 之前，`#commit` 按序处理，`step.end` 走既有的 `finishStep`。
 
@@ -91,7 +101,7 @@ case "files.changed": {
 - thinking 缓冲（`#commit` 开头）：`files.changed` 与其它非 thinking 事件一样先冲刷缓冲，F1 的次序断言覆盖。
 - 审批（`#approvals.publishRequest`、REST 结算）：`files.changed` 与 `step.end` 之间隔着一个 `await this.#publish(...)`；另一路发布（审批结算）理论上可以插到两者之间——见「已知残留」2。
 - regenerate / 删会话：步骤行随消息删除（FK），`changes` 一并消失；无新代码。
-- fork：分叉复制历史消息；步骤是否随之复制由既有 `store-branch.ts` 决定，本刀不改（若复制步骤行，`changes` 列是否带过去见「已知残留」3，实现者核对后在报告里写明）。
+- fork：`store-branch.ts:193` 的 `FORK_STEPS` 连同 `changes` 一起复制步骤行，`:187` 复制 `workspace_id`，所以相对路径在分叉出的会话里仍然有效；本刀不改。
 - web：`stream-artifacts.ts`/`session-contract.ts` 已按本契约解析；本刀不改 web。
 
 ## Must-preserve
@@ -103,16 +113,16 @@ case "files.changed": {
 
 `server/test/file-changes-ownership.test.ts`（真实临时目录，合成候选；每个用例自建并清理目录）：
 - **O1** 空间内绝对路径的 `edit` → `[{path:"notes.md", added:2, removed:1, kind:"edit"}]`；`Object.keys` 恰为 `["path","added","removed","kind"]`；`write` → `added`/`removed` 为 `null`；嵌套目录给出 `/` 分隔的相对路径。
-- **O2** 相对路径以根拼接；`./a/../b.md` 落在 `b.md`。
+- **O2** 相对路径以根拼接；`./a/../b.md` 落在 `b.md`；`link/../x.md`（`link` 是指向空间外目录的符号链接）按词法折叠落在 `x.md`；带结尾分隔符的合法文件写法（`sub/`、`sub//`，`sub` 是空间内已存在的条目）与不带的结果相同。
 - **O3** Scenario「多文件与重复路径」：`a.md`(+1)、`b.md`(−1)、`a.md`(+1) → `[{a.md,2,0},{b.md,0,1}]`，位置取首次；同一文件的两种写法（绝对与相对）合并为一项。
 - **O4** 同一路径的两个 `write` 候选合并后仍是 `null`/`null`。
 - **O5** 上限：60 个不同的合法候选 → 派生次序前 50；51 个候选、第 51 个与第 1 个同路径 → 50 项且第 1 项的计数已求和（先合并后截断）。
-- **O6** 长度：恰 1024 字节的相对路径保留、1025 字节丢弃；字符数不足 1024 而 UTF-8 超过 1024 字节的中文路径丢弃。构造时每个分量在文件系统单分量上限内、父目录真实存在，使丢弃只归因于字节数规则。
-- **O7** Scenario「空间外与符号链接逃逸」：`/etc/passwd`、`../other/x.md`（兄弟目录真实存在）、空间根自身（绝对路径与相对的 `.`）、与根同前缀的兄弟目录 `<root>2/x.md`、空间内指向空间外目录的符号链接下的 `link/x.md`（存在与不存在各一）、空间内指向空间外已存在文件的符号链接、空间内指向空间外的悬空符号链接——同批合法路径保留，其余全部丢弃；这些非法候选单独出现 → `[]`。
+- **O6** 长度（`ownedPath`，不碰文件系统——macOS 的 `PATH_MAX` 是 1024，根加 1024 字节的相对路径在真实目录里建不出来）：相对路径恰 1024 字节 → 返回；1025 字节 → `undefined`；字符数不足 1024 而 UTF-8 超过 1024 字节的中文路径 → `undefined`；根自身、根外、兄弟前缀 → `undefined`。另用真实目录证明一条较长（约 600 字节、多级目录）的合法路径经 `ownedChanges` 保留。
+- **O7** Scenario「空间外与符号链接逃逸」：`/etc/passwd`、`../other/x.md`（兄弟目录真实存在）、空间根自身（绝对路径与相对的 `.`）、与根同前缀的兄弟目录 `<root>2/x.md`、空间内指向空间外目录的符号链接下的 `link/x.md`（存在与不存在各一）、空间内指向空间外已存在文件的符号链接、空间内指向空间外的悬空符号链接（`dangling` 以及 `dangling/`、`dangling//`、`dangling/./`，相对与绝对写法各一）、符号链接环（`loop` 与 `loop/x.md`）——同批合法路径保留，其余全部丢弃；这些非法候选单独出现 → `[]`。
 - **O8** Scenario「不存在的文件按父目录判定」：已存在目录下不存在的文件保留；父目录也不存在的丢弃。
-- **O9** 根以非规范形式给出（指向空间根的符号链接别名）：经别名或经规范路径给出的候选都判为空间内，相对路径相对的是根的 realpath。
+- **O9** Scenario「空间根不是规范路径」：根以符号链接别名给出（别名指向一个真实目录，候选在该目录下）→ `[]`；根目录被移走并在原路径放一个指向空间外目录的符号链接 → `[]`。（O 系列其余用例的根一律先取 realpath——macOS 的 tmpdir 是 `/var` → `/private/var`。）
 - **O10** 根不存在 → `[]`，不抛错。
-- **O11** 含 NUL 字节的路径丢弃，不抛错；同批合法路径保留。
+- **O11** 含 NUL 字节的路径、超过文件系统路径上限的路径丢弃，不抛错；同批合法路径保留。
 - **O12** 空间内指向空间内文件的符号链接 → 保存真实位置的相对路径，并与直接写法合并。
 - **O13** 不修改入参（深比较入参前后一致），返回的是新对象。
 
@@ -129,22 +139,23 @@ case "files.changed": {
 - **F2** 同一回合以早于 `thinking.delta` 的游标重连 → `thinking.delta`、两条 `files.changed`、两条 `step.end` 各恰回放一次且次序不变；随后 `GET /api/sessions/:id/messages` 的助手 `thinking` 与两步 `changes` 与事件流等值。
 - **F3** 绑定会话、子进程 cwd 被替换为空间根之外的目录 → 无 `files.changed`；两步 `changes` 为 NULL；两条 `step.end` 照常（状态与 output 与 F1 相同）；`errors` 为空。
 - **F4** 未绑定会话 → 无 `files.changed`、`changes` 为 NULL、`step.end` 照常、`errors` 为空。
-- **F5** TEMP TRIGGER `BEFORE UPDATE OF changes ON chat_steps … RAISE(ABORT, …)`：ring 里没有 `files.changed`，最后一个事件的 seq 之后没有被消耗的序号（下一次发布的 id 与之连续，或 ring 的游标停在 `step.start`）；`errors` 含该 SQLite 错误；该步骤 `changes` 为 NULL。
+- **F5** TEMP TRIGGER `BEFORE UPDATE OF changes ON chat_steps … RAISE(ABORT, …)`：预先打开的 SSE 流收到的 id 序列止于该步骤的 `step.start`（其后没有 `files.changed`、也没有被消耗掉的序号——失败后 slot 被退役、generation 封存，所以判据取自流上实际收到的 id，写法同 `session-thinking.test.ts:353-385`）；`errors` 含该 SQLite 错误；该步骤 `changes` 为 NULL。
 
-既有：`server/test/session-persist-new-events.test.ts` 按 D5 更新后全绿；其它 server 测试零 diff 全绿。
+既有：`server/test/session-persist-new-events.test.ts` 按 D5 更新后全绿；其它 server 测试零 diff 全绿。Scenario「失败与非 edit/write 工具」的归约器一侧由既有的 `server/test/file-changes.test.ts` 与归约器测试覆盖（这些情形不产生 `files.changed`，本刀的分支无从触发）；`changes` 为 NULL 由 F3/F4 的列断言与列默认值给出。
 
 实现前就成立的护栏（不计入 RED）：P6；F3、F4 里「无 `files.changed`、列为 NULL」的断言（实现前一切都被丢弃）。其余在实现前为红。
 
 ## 变异自检（实现者在沙箱里做，脚本与日志不入库）
 每个变异至少使一个用例变红：
 1. 前缀判定去掉 `+ sep`（`startsWith(realRoot)`）→ O7（兄弟前缀）。
-2. 用未经 realpath 的 `root` 做前缀 → O9（macOS 上 F1 也会红）。
+2. 去掉「根的 realpath 必须等于自身」的检查（改用 realpath 结果继续判定）→ O9。
+2b. 候选用 `join`/原串而不做 `resolve` 规范化 → O7（`dangling/`）。
 3. 去掉父目录回落 → O8。
-4. realpath 失败后不做 `lstat`、直接回落 → O7（悬空符号链接）。
+4. realpath 失败后不做 `lstat`、直接回落 → O7（悬空符号链接）；`lstat` 抛错时当作「无条目」继续回落 → O7（符号链接环）。
 5. 对候选只做词法规范化、不取 realpath → O7（符号链接目录）、O12。
 6. 先截断后合并 → O5。
-7. 用 `path.length` 代替 `Buffer.byteLength` → O6（中文路径）。
-8. 上限 `>` 写成 `>=` → O6（恰 1024 字节）。
+7. `ownedPath`：用 `path.length` 代替 `Buffer.byteLength` → O6（中文路径）。
+8. `ownedPath`：上限 `>` 写成 `>=` → O6（恰 1024 字节）。
 9. 合并时不求和 / 位置取最后一次 → O3。
 10. 相对路径不拼根（当作相对进程 cwd）→ O2。
 11. `persistEvent`：`workspaceRoot === null` 时仍判定 → P2；未登记的 toolCallId 仍落库 → P3。
@@ -154,12 +165,15 @@ case "files.changed": {
 15. `supervisor.ts`：slot 的 `workspaceRoot` 恒为 `cwd`（未绑定也判定）→ F4；恒为 `null` → F1。
 
 ## 已知残留
-1. **候选数不设上限**：上限 50 在合并之后才截断，每个候选都要做 1–3 次同步文件系统调用，候选数只受 omp 单帧大小约束；父 D6 的「IO 有界」不成立（proposal 偏差 8）。候选来自 omp 实际执行过的 `edit`（`perFileResults` 每项对应一次真实的文件修改），不是模型可以随意填写的文本，所以实际规模是「一次 edit 调用改了多少文件」。本刀不另设候选数上限（那会改变规格里「派生次序前 50」的含义）。
+1. **候选数不设上限**：上限 50 在合并之后才截断，每个候选都要做 1–3 次同步文件系统调用，候选数只受 omp 单帧大小约束；父 D6 的「IO 有界」不成立（proposal 偏差 8）。候选来自 omp 实际执行过的 `edit`（`perFileResults` 每项对应一次真实的文件修改），不是模型可以随意填写的文本，所以实际规模是「一次 edit 调用改了多少文件」。本刀不另设候选数上限（那会改变规格里「派生次序前 50」的含义）。量级：omp 单帧重组上限是 64 MiB（`server/src/sessions/omp/frame.ts:4`），按每个候选几十字节估，一帧理论上可带百万级候选，全部在唯一的事件循环上同步解析，会阻塞所有会话数秒。对诚实的 omp 不会出现；是否加原始候选数上限由父 change 决定。
 2. **`files.changed` 与 `step.end` 之间可能插入别的发布**：两者之间有一个 `await this.#publish(...)`，审批结算等另一路发布理论上可以落在中间。「紧先于」对 pump 自己的事件流成立；这是既有的发布结构，不是本刀引入的。
-3. **fork 后的步骤 `changes`**：是否随分叉复制由既有 `store-branch.ts` 决定，本刀不改；实现者核对并在报告里写明现状。
+3. **判定的是路径，不是文件类型或身份**：目录路径会被当作变更保留（工具不会报告目录）；macOS 上大小写或 NFC/NFD 写法不同的同一文件不合并（realpath 不规范化大小写）；硬链接到空间外文件的空间内条目会被保留（固有限制）。
 4. **判定与实际写入之间有时间窗**：归属按事件到达时的文件系统状态判定；之后空间内的文件被换成指向空间外的符号链接，已保存的相对路径不会被重新判定。预览接口（`core/sandbox/resolve`）在读取时拒绝符号链接，所以不会借此读到空间外内容。
 5. **只覆盖 POSIX**：路径分隔符按 `/` 处理（服务端不在 Windows 上运行）。
-6. **集成测试只走绝对路径分支**：fake 的 `edit-write` 发的是绝对路径；相对路径、`perFileResults`、合并与上限只有单元层证据（O2、O3、O5）。真 omp 链路（ui-walk 的 `WORKBUDDY_WRITE`）归 8.2a。
+6. **集成测试只走绝对路径分支**：fake 的 `edit-write` 发的是绝对路径；相对路径、`perFileResults`、合并与上限只有单元层证据（O2、O3、O5）。真 omp 的 `edit` `details.path` 是相对、绝对还是原始参数没有核对；真 omp 链路（ui-walk 的 `WORKBUDDY_WRITE`）归 8.2a。
+7. **`..` 按词法折叠**：`link/../x.md` 记为 `x.md`。若工具把原串直接交给系统调用（内核先跟随 `link`），实际触及的是别处的文件，卡片却指向空间内的同名路径。不泄露路径或内容（卡片只带空间内相对路径，预览按该相对路径在空间内读取）；与 Node 工具链的 `path.resolve` 惯例一致。
+8. **权限类失败（EACCES）没有用例**：需要非 root 且可控的目录权限，CI 的 `uid-isolation` 以 root 运行；它与符号链接环走同一个「`lstat` 抛错 → 丢弃」分支，由环的用例间接覆盖。
+9. **1024 字节边界在真实目录上没有证据**：macOS 的 `PATH_MAX` 限制了可构造的路径长度，边界值由不碰文件系统的 `ownedPath` 取证（O6）。
 
 ## Seams under test
 - 真实临时目录 + 真实 `realpathSync`/`lstatSync`：O 系列不 mock 文件系统。
