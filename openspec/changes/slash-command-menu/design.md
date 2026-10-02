@@ -58,14 +58,14 @@ export function useSlashMenu(
 ): { menu: ReactNode; interceptKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): boolean };
 ```
 - **条件**：`wanted = enabled && isOpen(draft)`。
-- **目录**：按 `client` 身份保存（`client` 变了就当作没有目录，旧请求的结果丢弃）。拉取是**边沿触发**，放在本 hook 唯一的 effect 里，依赖为 `[client, wanted]`（`wanted` 还会被 `enabled` 翻转、fork 回填 draft 等不经按键处理器的路径改变，所以不能放在处理器里）：effect 在 `wanted` 为真、当前 `client` 没有目录且没有在途请求时发一次 `listCommands({ signal })`。于是「边沿」= `wanted` 由假变真，或 `wanted` 为真时 `client` 变化。成功 → 存下；失败 → 不存、不报错（不 toast、不 inline、不 `console.error`），等下一次边沿——`wanted` 保持为真期间的继续输入不重跑 effect。在途期间 `wanted` 的反复变化不追加调用，也**不** abort（`wanted` 变假时请求继续，结果照常存下）；只在卸载或 `client` 变化时 abort，其结果不落状态。
+- **目录**：按 `client` 身份保存（`client` 变了就当作没有目录，旧请求的结果丢弃）。拉取是**边沿触发**，放在一个依赖为 `[client, wanted]` 的 effect 里，这个 effect 不带 abort 清理（它的清理函数在 `wanted` 每次翻转时都会跑）；abort 由另一个只依赖 `[client]` 的 effect 的清理函数负责（先例 `artifact-card.tsx`）（`wanted` 还会被 `enabled` 翻转、fork 回填 draft 等不经按键处理器的路径改变，所以不能放在处理器里）：effect 在 `wanted` 为真、当前 `client` 没有目录且没有在途请求时发一次 `listCommands({ signal })`。于是「边沿」= `wanted` 由假变真，或 `wanted` 为真时 `client` 变化。成功 → 存下；失败 → 不存、不报错（不 toast、不 inline、不 `console.error`），等下一次边沿——`wanted` 保持为真期间的继续输入不重跑 effect。在途期间 `wanted` 的反复变化不追加调用，也**不** abort（`wanted` 变假时请求继续，结果照常存下）；只在卸载或 `client` 变化时 abort，其结果不落状态。
 - **菜单状态**：`SlashMenuState` 跟随 `draft`（渲染期用 `reduce(state, {type:"draft", draft})` 同步，写法同 #538 的渲染期重置；不用 effect）。
 - **可见**：`wanted && 目录已有 && !dismissed && matches.length > 0`，其中 `matches = filter(目录, draft)`。不可见时 `menu` 为 `null`、`interceptKeyDown` 恒返回 `false`。高亮下标按 `index < matches.length ? index : 0` 取用（`client` 变化后新目录可能更短而 draft 没变）。
 - **`interceptKeyDown(event)`**（返回 `true` 表示已处理，`Composer` 不再走自己的 Enter 逻辑）：
   - 不可见，或组合态（`event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229`）→ `false`，不 `preventDefault`。
   - 带 `Ctrl`/`Alt`/`Meta` → `false`。
   - `ArrowDown` / `ArrowUp`（无 Shift）→ `move`，`preventDefault`，把新的高亮项滚入面板可视范围（`scrollIntoView({ block: "nearest" })`，在处理器里做，不放 effect），`true`。
-  - `Enter`（无 Shift）或 `Tab`（无 Shift）→ `setDraft(pickText(matches[index].name))`，`preventDefault`，`true`。
+  - `Enter`（无 Shift）或 `Tab`（无 Shift）→ `setDraft(pickText(<高亮项>.name))`（高亮项按上面兜底后的下标取），`preventDefault`，`true`。
   - `Escape` → `dismiss`，`preventDefault`，`true`。
   - 其它 → `false`。
 - **`SlashMenu`**（模块私有）：
@@ -152,7 +152,7 @@ interceptKeyDown?(event: KeyboardEvent<HTMLTextAreaElement>): boolean;
 - **J13** `Composer` 插槽契约：传 `interceptKeyDown` 返回 `false` 时 Enter 照旧提交；返回 `true` 时不提交；面板不可见时 `.chat-composer-card` 的子元素恰为 `label`、`textarea`、`.chat-composer-toolbar`（欢迎态另有 footer）——没有空的包裹元素。
 - **J14** CSS 契约（静态读 `messages.css`，写法同 #538 的 S18，用 `web/test/ui-support.ts` 的 `ruleBody`）：`.chat-slash` 有 `max-height` 与 `overflow-y: auto`；`.chat-slash-option--active` 设置了背景且取自 token；`.chat-slash-hint` 的颜色取自 token；新增规则里没有裸色值。
 
-J11–J13 可以用一个挂载 `useSlashMenu` + `Composer` 的小测试夹具（放在测试文件或 support 里）而不走整页。
+J11、J13 可以用一个挂载 `useSlashMenu` + `Composer` 的小测试夹具（放在测试文件或 support 里）而不走整页；J12 走整页。J10 的 `document.activeElement` 断言在 jsdom 下不判别（`fireEvent` 不移动焦点），判别力在同一用例的 `preventDefault` 断言上，两者都保留。
 
 RED：三个新测试文件在实现前全部失败（模块不存在 / 面板不存在）。实现前就成立的护栏逐条标出（预期：J5 的「`/help` 原样发送并显示气泡」、J11 的「无面板」、J13 的「返回 `false` 照旧提交」若夹具不依赖新 prop、J9 里的否定断言）。既有测试在实现前后都绿，`chat.css` 与全部既有测试文件零 diff。
 
@@ -175,9 +175,9 @@ RED：三个新测试文件在实现前全部失败（模块不存在 / 面板�
 15. `aria-activedescendant` 不随高亮更新 / `aria-selected` 全为 true → J1、J4。
 16. `enabled` 为假时仍显示 → J11。
 17. 解析放过多余键 / 缺 `hint` / 错误枚举 / 响应体多键 → A2；把 `hint` 解析成必须为字符串 → A1（`hint: null`）。
+18. 请求带查询串或不带 `no-store` → A1。
 19. `client` 变化后沿用旧目录 / 不重新拉取 → J12；高亮下标越界不兜底 → J12。
 20. 面板不可见时渲染空包裹元素 → J13。
-18. 请求带查询串或不带 `no-store` → A1。
 
 ## 已知残留
 1. **不是完整的 ARIA combobox**：`aria-activedescendant` 在 listbox 上而焦点在输入框，读屏器不会随 `↑/↓` 播报高亮项，输入框也没有 `aria-expanded`/`aria-controls`。要做对需要给 `Composer` 再开 prop 面（或把 id 交给输入框），超出父规格给的两个 prop。
