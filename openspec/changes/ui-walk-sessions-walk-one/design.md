@@ -45,7 +45,7 @@ test("…", async ({ baseURL, page }, testInfo) => {
 3. **`try`**：
    - **进入欢迎态**：真实导航到 `/`（h1 `WorkBuddy，我帮你`）。
    - **第 2 步**：点 `代码开发`；三个胶囊的 `aria-pressed` 为 `false/true/false`；`快捷任务` 的按钮文本序列恰为代码场景五项。footer 触发按钮名为 `任务启动于 未选择` → 打开 → `搜索工作空间` 输入 `ui-walk-sessions` → 选中该项 → Popover 关闭、触发按钮名为 `任务启动于 ui-walk-sessions`。
-   - **第 3 步**：`const created = page.waitForRequest(POST /api/sessions)`（只观测；全文件不得出现 `route.fulfill`、`page.route`）→ 填入提示词、`Enter` → `const request = await created; const response = await request.response()`，断言状态 201 并**立刻**从响应体取 `id` 记进外层变量供 `finally` 使用（先于对请求体的任何断言——请求体断言失败时会话已经建好）→ `request.postDataJSON()` 深等于 `{ workspaceId, scene: "code" }`（键集合也相等）→ URL 的 `session` 参数等于该 id → 助手消息的 `.chat-md` 文本恰为固定回复（这一条是等回合完成的断言，可带显式 `{ timeout }`，取值照 `ui-walk-stop.ts` 的先例；其余断言用默认超时）；选中会话的状态为 `已完成`（`expectSelectedSessionStatus`）；`write` 步骤徽章 `已完成`；助手消息内 `需要你的确认`、`已允许执行`、`已拒绝执行` 三种 group 计数都是 0；转录恰一条用户消息、一条助手消息。
+   - **第 3 步**：`const created = page.waitForRequest(POST /api/sessions)`（只观测；全文件不得出现 `route.fulfill`、`page.route`）→ 填入提示词、`Enter` → `const request = await created; const response = await request.response()`（先断言非空），断言状态 201 并**立刻**从响应体取顶层的 `id`（建会话的响应体就是八键会话视图，不嵌在 `session` 下） 记进外层变量供 `finally` 使用（先于对请求体的任何断言——请求体断言失败时会话已经建好）→ `request.postDataJSON()` 深等于 `{ workspaceId, scene: "code" }`（键集合也相等）→ URL 的 `session` 参数等于该 id → 助手消息的 `.chat-md` 文本恰为固定回复（这一条是等回合完成的断言，可带显式 `{ timeout }`，取值照 `ui-walk-stop.ts` 的先例；其余断言用默认超时）；选中会话的状态为 `已完成`（`expectSelectedSessionStatus`）；`write` 步骤徽章 `已完成`；助手消息内 `需要你的确认`、`已允许执行`、`已拒绝执行` 三种 group 计数都是 0；转录恰一条用户消息、一条助手消息。
    - **第 4 步**：`details.thinking-block` 恰一个、无 `open` 属性、位于 `.chat-md` 之前（同一父元素内的先后）；summary 文本 `深度思考过程`；点 summary 后 `open`，`.thinking-body` 文本恰为该常量。
    - **REST 回读**：`page.request.get("/api/sessions/<id>/messages")` → `session.scene === "code"`、`session.workspaceId === <id>`、`session.status === "done"`；助手消息 `thinking` 恰为常量、`steps` 恰一条且 `name === "write"`、`changes` 深等于 `[{path:"workbuddy-report.html",added:null,removed:null,kind:"write"}]`。
    - **第 5 步**：变更卡 group `文件变更（1 个）` 恰一行；`.file-change-path` 文本恰为 `zhangsan/ui-walk-sessions/workbuddy-report.html`；`.file-change-kind` 文本 `写入`；`.file-change-add`、`.file-change-del` 计数 0。产物卡：`.artifact-lang` 文本 `HTML`；点卡内底部的 `打开网页预览`（限定在产物卡内、取文字链接那一个）→ Dialog `workbuddy-report.html` → iframe 的 `sandbox` 属性**字符串**恰为 `allow-scripts` → `frameLocator` 内 heading `WorkBuddy` 可见 → 关闭 Dialog。顶栏 `产物面板` → 抽屉内恰一行、路径同上 → 关闭抽屉（消失后再继续）。**最后**点变更卡的 `查看详情` → URL 为 `/files` 且 `ws` 参数等于空间 id、`选择工作空间` 按钮含 `ui-walk-sessions` → 真实导航回 `/?session=<id>`，等到助手消息的固定回复重新可见。
@@ -56,7 +56,7 @@ test("…", async ({ baseURL, page }, testInfo) => {
 5. **登出**（在 `/settings` 上）：经 UI（`用户菜单` → `退出登录` → 确认 `退出`）→ 登录页可见 → `oracle.phase = "post-logout-reload"` → `reload()` → 登录页仍可见。不重复旧旅程里「请求挂起期间的焦点陷阱」那一段——那是旧旅程自己的证据。
 
 约束：
-- 不 `import` `ui-walk.spec.ts`（它是测试文件）；需要的私有常量与小函数在新文件里自写。**jscpd**：登录与登出块按本旅程自己的需要自然地写（比旧旅程短），不为躲检测而打乱写法，也不改旧文件。若 jscpd 因此多报一个只落在登录 / 登出块上的克隆（178 → 179），接受并在报告里给出该克隆的两端行号；出现任何其它新增克隆则停下来报告。
+- 不 `import` `ui-walk.spec.ts`（它是测试文件）；需要的私有常量与小函数在新文件里自写。**jscpd**：登录与登出块按本旅程自己的需要自然地写（比旧旅程短），不为躲检测而打乱写法，也不改旧文件。若 jscpd 因此多报克隆且都只落在登录块或登出块上（两块不相邻，各至多一个：178 → 至多 180），接受并在报告里给出每个克隆的两端行号；出现任何其它新增克隆则停下来报告。
 - 不用 `waitForTimeout`、不用 `page.route` / `route.fulfill` / `route.continue`、不替换 `EventSource`、不 arm gate、不读 `MODEL_UPSTREAM_*`。等待一律是对可观察状态的 `expect`（自动重试）或 `waitForRequest` / `waitForResponse`。
 - 每个 project 用 `crypto.randomUUID()` 生成自己的 UUID。
 - Toast（场景切换）不作断言；若它挡住后续操作（mobile 的侧栏浮层由 `inspectSidebar` 用 `Escape` 关闭），等它消失再继续，写法照既有辅助。
@@ -70,7 +70,7 @@ test("…", async ({ baseURL, page }, testInfo) => {
 ## Governing invariant
 1. `web/playwright.config.ts` 的 diff 恰两行；`npx playwright test --list` 恰列出每个 project 的 `ui-walk-sessions.spec.ts` 一条与 `ui-walk.spec.ts` 两条，共 6 条，没有来自辅助模块的条目。
 2. 新旅程的每个断言都依赖服务端真实状态：没有 route fulfillment、假 EventSource 或睡眠。
-3. 旅程结束后（成功或失败）不留下它建的会话行或 running 回合。
+3. 旅程结束后（成功或某一步断言失败）不留下它建的会话行或 running 回合；测试超时除外（见已知残留 8）。
 4. `ui-walk.spec.ts` 与全部既有 e2e 辅助零 diff，且在新 spec 先跑的前提下两个 project 照常通过。
 5. `web/src`、`server`、`Makefile`、`.github`、`AGENTS.md`、`scripts` 零 diff。
 
@@ -82,7 +82,7 @@ test("…", async ({ baseURL, page }, testInfo) => {
 - `web/test` 里读 `ui-walk.spec.ts` 源码的两个测试：旧文件零 diff，不受影响。
 
 ## Must-preserve
-- `make test-guardrails`、`npm test --workspace web`、`make lint`、`make typecheck`、`make anti-drift`（jscpd 178，至多因登录 / 登出块到 179；knip 零新增）、`bash scripts/size-guard.sh` 全绿。
+- `make test-guardrails`、`npm test --workspace web`、`make lint`、`make typecheck`、`make anti-drift`（jscpd 178，至多因登录、登出块各一个到 180；knip 零新增）、`bash scripts/size-guard.sh` 全绿。
 - CI ui-walk job 的身份、步骤与 `timeout-minutes: 15` 不变。
 
 ## Required evidence
@@ -92,9 +92,9 @@ test("…", async ({ baseURL, page }, testInfo) => {
 - **E4 复用状态**（长驻栈，只跑新 spec：`cd web && UI_WALK_BASE_URL=… npx playwright test ui-walk-sessions.spec.ts`）：两个 project 都走 409、文件被覆盖写，通过。完整的 `make ui-walk` 不能在复用的沙箱上重跑（旧旅程的 `walk-out-*` 前提），所以复用状态只验证新 spec。
 - **E5 残留清点**（长驻栈，E4 / E6 之后）：以 `zhangsan` 查 `GET /api/sessions`：没有 `workspaceId` 为该空间的会话、没有 `running` 会话；`GET /api/workspaces` 里名为 `ui-walk-sessions` 的恰一条。
 - **E6 稳定性**：长驻栈上只跑新 spec（两个 project）连续五遍全绿；记录每遍每条的时长，最大值须明显低于 30 s（给出数字）。
-- **E7 负对照**（沙箱里改新 spec 的一处，在长驻栈上只跑新 spec 的 `desktop-light`，记录失败所在的步骤与旅程错误的消息，然后还原；脚本与日志不入库）。每条都必须失败在预期的步骤；N1–N9 每条之后做一次 E5 式清点，确认**失败路径上会话也被删除**：
+- **E7 负对照**（沙箱里改新 spec 的一处，在长驻栈上只跑新 spec 的 `desktop-light`，记录失败所在的步骤与旅程错误的消息，然后还原；脚本与日志不入库）。每条都必须失败在预期的步骤；N1–N9 每条之后做一次清点，确认**失败路径上会话也被删除**。清点口径：`GET /api/sessions` 的总条数与运行前相同、没有 `running` 会话、且（能从失败输出或服务端取到时）本次建的会话 id 不在列表里——N3 建的是未绑定会话，只按「绑定该空间」数看不见它：
   - N1 期望的思考文本改一个字 → 第 4 步。
-  - N2 期望的请求体 `scene` 改成 `"office"` → 第 3 步的请求体断言（此时会话已建、回合在跑；清点须为空）。
+  - N2 期望的请求体 `scene` 改成 `"office"` → 第 3 步的请求体断言（此时会话已建；随后的 DELETE 与页面的 prompt 派发竞争，两种先后残留都应为零——这条不算 running 路径的证据，那是 N5）。
   - N3 不选空间（跳过 Popover 选择）→ 第 3 步的请求体断言（实际请求体是 `{scene:"code"}`，没有 `workspaceId` 键）。
   - N4 提示词去掉 `WORKBUDDY_THINK` → 第 4 步（没有折叠块）。
   - N5 提示词去掉 `WORKBUDDY_WRITE` → 第 3 步：上游改发 bash，回合停在待决审批上，固定回复不出现（首个失败的是等回合完成的那条断言）。其后的清点证明「带待决审批的 running 回合被 DELETE → 204、不留会话」——这是 proposal 偏差 3 的实证。
@@ -104,7 +104,7 @@ test("…", async ({ baseURL, page }, testInfo) => {
   - N9 REST 回读的 `changes` 期望里 `kind` 改成 `"edit"` → REST 回读。
   - N10 去掉登出收尾 → oracle 报「expected exactly one post-logout-reload … 401」。
   - N11 把清理辅助函数整体去掉（DELETE 与「列表不含该 id」两句一起）→ 旅程通过，但 E5 式清点发现一条绑定该空间的残留会话（说明清点有判别力）；做完后手工 DELETE 该残留并再清点一次。
-  - N12（观察性，允许在这条负对照里显式等待）去掉「离开会话页」一步，DELETE 之后在会话页停留 5 s 再登出 → oracle 报意外的 console error（`/api/sessions/<id>/events` 404）。若观察不到，照实记录现象与时序。
+  - N12（观察性，允许在这条负对照里显式等待）去掉「离开会话页」一步，DELETE 之后在会话页停留 5 s 再登出 → oracle 报意外的 console error（消息形如 `console.error: Failed to load resource … 404`，不含 URL）。若观察不到，照实记录现象与时序——那样规格里「would reconnect its event stream into a 404」的括注要在合入前改弱。
 - **E8 门禁**：`make lint`、`make typecheck`、`make anti-drift`、`bash scripts/size-guard.sh`、`npm test --workspace web`、`make test-guardrails`、`openspec validate ui-walk-sessions-walk-one --strict --no-interactive` 退出 0。
 - **E9 源码清点**：新 spec 里 `rg -n "waitForTimeout|page\.route|\.fulfill|EventSource|setTimeout|test\.slow|MODEL_UPSTREAM"` 零命中。
 - **E10 CI**：PR 的 `ui-walk` job 通过；从日志记录 Playwright 的总时长与四条旅程各自的时长（「CI 记录实测总时长」）。
@@ -119,7 +119,7 @@ test("…", async ({ baseURL, page }, testInfo) => {
 7. **登出收尾是简化版**：不重复旧旅程的键盘确认与焦点陷阱断言。
 8. **测试超时不清理**：30 s 超时触发时浏览器 context 已关闭，`finally` 里的 `page.request` 不可用，会话会留下；下一次运行不受影响（见 3），残留靠清点发现。
 9. **仍订阅着已删会话的页面会重连出 404**：这是产品现状（别处删除当前打开的会话时，页面没有对「会话已不存在」的处理），本旅程用「先离开再删」避开；#557 的第 11 步经 UI 删除，由页面自己离开会话。
-10. **jscpd 可能 178 → 179**（登录 / 登出块，见 proposal 偏差 10a）。
+10. **jscpd 可能 178 → 至多 180**（登录、登出块各至多一个，见 proposal 偏差 10a）。
 
 ## Seams under test
 - 真实浏览器（Playwright Chromium）对编译后的应用、真 omp 与受控上游；没有任何桩。
