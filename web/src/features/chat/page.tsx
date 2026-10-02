@@ -180,6 +180,7 @@ export function ChatPage() {
     [abortList, refreshWorkspaces],
   );
   const sessionActions = useSessionActions(client, setListState, setHistoryState, {
+    abortHistory,
     closeSource,
     refreshList,
     requestedSessionRef,

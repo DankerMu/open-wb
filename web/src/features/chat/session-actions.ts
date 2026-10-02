@@ -33,8 +33,9 @@ type DeleteState = { client: ApiClient; sessionId: string; title: string };
 /** DELETE 在途的会话 id，属于 `client`；只经 `deletingIds` 读取。 */
 type DeletingState = { client: ApiClient; ids: readonly string[] };
 
-/** 页面交给删除收尾用的句柄：关闭事件流、重读列表、当前选中的会话 id（响应到达时读取）。 */
+/** 页面交给删除收尾用的句柄：中止历史读取、关闭事件流、重读列表、当前选中的会话 id（响应到达时读取）。 */
 type PageHandles = {
+  abortHistory(): void;
   closeSource(): void;
   refreshList(client: ApiClient): void;
   requestedSessionRef: RefObject<string | null>;
@@ -283,6 +284,8 @@ export function useSessionActions(
           setState((opening) => closedFor(opening, client, sessionId));
           toast.show({ type: "success", message: "任务已删除" });
           if (page.requestedSessionRef.current !== sessionId) return;
+          // 仍在途的历史读取若在 navigate 与下一次渲染之间得到 200，会为已删会话重开事件流：先中止它。
+          page.abortHistory();
           page.closeSource();
           const { pathname, search, hash } = locationRef.current;
           navigate(sessionNavigation(pathname, search, hash, null), { replace: true });

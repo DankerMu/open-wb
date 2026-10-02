@@ -1,5 +1,6 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect } from "vitest";
+import { SHELL_NARROW_QUERY } from "../src/lib/viewport.js";
 import { renderChatPageWithAuthProbe, renewAccount } from "./chat-page-lifecycle-support.js";
 import {
   A,
@@ -20,6 +21,7 @@ import {
 } from "./chat-page-session-meta-support.js";
 import type { FetchRoutes } from "./chat-page-support.js";
 import { CLOSED, chatSnapshot, FakeEventSource } from "./chat-stream-support.js";
+import { createMediaQuery, installMatchMedia } from "./media-query-support.js";
 import { currentLocation, deferredResponse, jsonResponse } from "./support.js";
 import { yieldMacrotask } from "./ui-support.js";
 
@@ -99,6 +101,22 @@ export async function deleteEntry(scope: HTMLElement, title: string) {
   return controls;
 }
 
+/**
+ * 条目菜单 → `删除` → 确认，DELETE 挂起（确认框处于忙碌态）。`close` 为真时随即点 `关闭`，等确认框
+ * 消失、焦点回到该条目的「更多」按钮。
+ */
+export async function confirmPending(scope: HTMLElement, title: string, close: boolean) {
+  const controls = await openDelete(scope, title);
+  fireEvent.click(controls.confirm);
+  expectConfirmBusy(controls);
+  if (close) {
+    fireEvent.click(controls.cancel);
+    await confirmGone();
+    await focusOn(controls.trigger);
+  }
+  return controls;
+}
+
 /** 关闭打开着的条目菜单。 */
 export async function closeMenu(menu: HTMLElement) {
   fireEvent.keyDown(menu, { key: "Escape" });
@@ -122,6 +140,26 @@ export function expectConfirmBusy({ buttons, cancel, confirm, dialog }: ConfirmC
   expect(confirm.disabled).toBe(true);
   expect(confirm.getAttribute("aria-busy")).toBe("true");
   expect(within(dialog).getByText(PENDING_HINT).tagName).toBe("P");
+}
+
+/** 当前显示的 Toast，按出现顺序：`[文案, 含该文案的 .ui-toast 元素上的类型修饰类]`。 */
+export function toastTypes() {
+  return Array.from(document.querySelectorAll(".ui-toast-message"), (message) => [
+    message.textContent,
+    Array.from(message.closest(".ui-toast")?.classList ?? []).filter((name) =>
+      name.startsWith("ui-toast--"),
+    ),
+  ]);
+}
+
+/**
+ * 外壳断点查询交给返回的 `FakeMediaQuery`（初值 `narrow`；`emit` 让视口在用例中途跨越 760px），
+ * 其它查询恒不匹配。
+ */
+export function installShellViewport(narrow: boolean) {
+  const shell = createMediaQuery(narrow);
+  installMatchMedia((query) => (query === SHELL_NARROW_QUERY ? shell : createMediaQuery(false)));
+  return shell;
 }
 
 /** `sessionId` 最近一次打开的事件流连接。 */
@@ -198,8 +236,8 @@ export async function selectEntry(nav: HTMLElement, title: string, sessionId: st
 }
 
 /**
- * 在 `path` 挂载 `SESSIONS`，确认删除 A 而 DELETE 挂起（确认框处于忙碌态）。`close` 为真时随即点
- * `关闭`，等确认框消失、焦点回到 A 的「更多」按钮。`extra` 追加或覆盖路由。
+ * 在 `path` 挂载 `SESSIONS`，确认删除 A 而 DELETE 挂起（`confirmPending`；`close` 同它）。`extra`
+ * 追加或覆盖路由。
  */
 export async function pendingDelete(
   path: string,
@@ -213,14 +251,7 @@ export async function pendingDelete(
   const nav = await findList(CURRENT);
   const requested = new URLSearchParams(path.split("?")[1]).get("session");
   if (requested) await findStream(requested);
-  const controls = await openDelete(nav, CURRENT);
-  fireEvent.click(controls.confirm);
-  expectConfirmBusy(controls);
-  if (close) {
-    fireEvent.click(controls.cancel);
-    await confirmGone();
-    await focusOn(controls.trigger);
-  }
+  const controls = await confirmPending(nav, CURRENT, close);
   return { ...mounted, controls, nav, request };
 }
 

@@ -97,6 +97,7 @@ const sessionActions = useSessionActions(client, setListState, setHistoryState, 
 - F4 槽位节点卸载：DELETE 挂起 → 关闭确认框 → 折叠侧栏（列表区卸载）→ 204 → Toast `任务已删除`、当前会话则回欢迎态；展开后条目已消失。`≤760px` 变体：关闭导航覆盖层后 204 到达，重开覆盖层条目已消失。另一例槽位节点卸载时确认框仍开着：确认框不随之消失，`取消` 可关闭。
 - F5 顶栏 `重命名`：当前会话的 DELETE 挂起 → 关闭确认框 → 顶栏 `重命名` 打开 Dialog → 204 → Dialog 消失、回欢迎态。
 - F6 历史读取在途时删除当前会话：挂载 `/?session=<A>` 且 `GET …/messages` 挂起 → 删除 A → 同一 `act` 内先后放行 204 与快照 → 没有新建 EventSource、回欢迎态、无错误。
+F1–F6 落在 `web/test/chat-page-session-delete-concurrency.test.tsx`（10 例）；F4 的「确认框开着时槽位节点卸载」用视口跨越 760px 的两个方向实现。
 
 实现记录：R6 的 409 信封、500 非信封与「失败后可再次确认」合在一个用例里；「location 取响应到达时的值」没有可区分的用例（会话切换不改变其它 search/hash，确认时与响应时算出的目标 URL 相同）。一次性真实浏览器观察两种视口全部符合，详见 PR。
 
