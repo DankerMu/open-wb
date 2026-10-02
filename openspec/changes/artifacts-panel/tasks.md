@@ -2,7 +2,7 @@
 
 ## 7. web — 顶栏产物面板 Drawer（父 tasks 7.6）
 
-- [x] 7.6 新建 `artifacts-panel.tsx`（填入 `CHAT_TOPBAR_ACTIONS` 的 `产物面板` 槽（package）→ 按当前视图全部已结束步骤 `changes` 按路径聚合（消息靠后优先、同消息 ordinal 大者优先、位置取首次）；为空 → 只 toast `当前任务暂无产物`；否则右侧 `ui/drawer.tsx` Drawer（宽 420，accessible name `产物面板`），每行同文件变更卡行，可派生扩展名附同名操作按钮（行为同 7.5b）；关闭后焦点还给按钮）+ `topbar-actions.ts` 槽位填充 + `page.tsx` 接线 + 自 `file-changes-card.tsx`、`artifact-card.tsx` 抽出可复用的行与操作（两张卡的 DOM 与行为不变）+ `messages.css`。验证：新建 `web/test/chat-page-artifacts-panel.test.tsx`（P1–P12）与 `web/test/chat-page-artifacts-panel-focus.test.tsx`（P13、Q1–Q5）；既有测试只改 proposal「偏差」1 的四处
+- [x] 7.6 新建 `artifacts-panel.tsx`（填入 `CHAT_TOPBAR_ACTIONS` 的 `产物面板` 槽（package）→ 按当前视图全部已结束步骤 `changes` 按路径聚合（消息靠后优先、同消息 ordinal 大者优先、位置取首次）；为空 → 只 toast `当前任务暂无产物`；否则右侧 `ui/drawer.tsx` Drawer（宽 420，accessible name `产物面板`），每行同文件变更卡行，可派生扩展名附同名操作按钮（行为同 7.5b）；关闭后焦点还给按钮）+ `topbar-actions.ts` 槽位填充 + `page.tsx` 接线 + 自 `file-changes-card.tsx`、`artifact-card.tsx` 抽出可复用的行与操作（两张卡的 DOM 与行为不变）+ `messages.css`。验证：新建 `web/test/chat-page-artifacts-panel.test.tsx`（P1–P12，含评审后的 Q2、Q4）与 `web/test/chat-page-artifacts-panel-focus.test.tsx`（P13、Q1、Q3、Q5）；既有测试只改 proposal「偏差」1 的四处
 
 ## Risk packs
 

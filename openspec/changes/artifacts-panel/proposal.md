@@ -10,7 +10,7 @@
 - `web/src/features/chat/file-changes-card.tsx`：把「一行」与「空间前缀推导」抽成可复用导出，卡片自己改用它们；DOM 与行为不变。
 - `web/src/features/chat/artifact-card.tsx`：把操作逻辑（拉取纪律、预览 Dialog、下载、复制）抽成可复用导出，卡片自己改用它；DOM 与行为不变。
 - `web/src/features/chat/messages.css`：抽屉内列表的样式。
-- 新建 `web/test/chat-page-artifacts-panel.test.tsx`（P1–P12）、`web/test/chat-page-artifacts-panel-focus.test.tsx`（P13 与评审后追加的 Q 例）与共用的 `chat-page-artifacts-panel-support.tsx`。
+- 新建 `web/test/chat-page-artifacts-panel.test.tsx`（P1–P12）、`web/test/chat-page-artifacts-panel-focus.test.tsx`（P13 与评审后追加的 Q1、Q3、Q5；Q2、Q4 在前一个文件里）与共用的 `chat-page-artifacts-panel-support.tsx`。
 - ADDED `turn-artifacts`「产物面板」；MODIFIED `turn-artifacts`「产物卡」（拉取结束后的焦点归还）；MODIFIED `chat-web`「会话页」（顶栏 actions 句与新增 Scenario「顶栏入口」）；MODIFIED `session-sidebar`「会话条目菜单与重命名」与 `spa-shell`「路由 IA 与侧栏」（槽位现状句）。
 
 ## Non-goals

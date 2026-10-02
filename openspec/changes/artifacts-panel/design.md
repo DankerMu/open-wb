@@ -144,7 +144,7 @@ useEffect(() => {
   - 失败路径：404 → Toast 信封 message 之后活动元素是该按钮。
   - 产物卡（转录里）：`下载 chart.PNG` 挂起时 `blur()` → 完成后活动元素是该按钮。
   - html：挂起时 `blur()` → 预览打开后活动元素在预览 Dialog 内（不是行里的按钮）；关闭预览后是行里的按钮。
-- 评审第 1 轮后追加（Q1–Q5）：Q1 焦点归还的 `focus` 调用带 `{ preventScroll: true }`（spy `HTMLElement.prototype.focus`）；Q2 即上面 P3 的跨消息夹具；Q3 html 卡点卡脚按钮、预览 404 → 焦点回卡脚按钮而非卡头；Q4 路由导航关掉抽屉后焦点在 `产物面板` 按钮上；Q5 预览开着时导航到别的会话 → 两个 dialog 都消失，`body` 的 `pointer-events` 与应用根的 `aria-hidden` 已释放，新会话的 `产物面板` 按钮可用。追加变异：去掉 `preventScroll`（Q1）；逐消息汇总后跨消息「位置取最后」合并（Q2）；D9 恒聚焦卡头按钮（Q3）；`open()` 不调 `trigger.focus()`（Q4、P6）。
+- 评审第 1 轮后追加（Q1–Q5）：Q1 焦点归还的 `focus` 调用带 `{ preventScroll: true }`（spy `HTMLElement.prototype.focus`）；Q2 即上面 P3 的跨消息夹具；Q3 html 卡点卡脚按钮、预览 404 → 焦点回卡脚按钮而非卡头；Q4 路由导航关掉抽屉后焦点在 `产物面板` 按钮上；Q5 预览开着时导航到别的会话 → 两个 dialog 都消失，`body` 的 `pointer-events` 与应用根的 `aria-hidden` 已释放，新会话的 `产物面板` 按钮可用。追加变异：去掉 `preventScroll`（Q1）；逐消息汇总后跨消息「位置取最后」合并（Q2）；D9 恒聚焦卡头按钮（Q3）；`open()` 不调 `trigger.focus()`（Q4、P6、P8、P13 的复制例）。
 - P12 静态与护栏：`.artifacts-panel-list` 的规则在 `messages.css`、`chat.css` 不含 `artifacts-panel`（护栏）；`web/src/features/chat/artifacts-panel.tsx` 的源码不含 `fetchPreview`、`sandbox`、`clipboard`、`createObjectURL`（复用而非复制的静态证据）。
 
 基线运行：测试不导入实现前不存在的模块（全是页面级），直接在基线树上跑；P1 的欢迎态一句、P1 单元断言里 `chatTopbar(undefined, …)` 恰为 `{}` 一句（运行时忽略多余实参）与 P12 的 `chat.css` 一句是实现前就成立的护栏，其余应为红；报告里逐条列出基线即绿的用例。P13 的对照例与 html 例在加 D9 之前就绿（护栏）。
@@ -169,6 +169,8 @@ useEffect(() => {
 13. 「关闭后焦点归还 `产物面板` 按钮」以按钮仍在为前提：当前会话不在已加载的列表里而视图又没了（列表读取失败时切走）时按钮已卸载，焦点落在 `body`。
 14. Safari 点击按钮不聚焦，`open()` 里的 `trigger.focus()` 会触发 Tooltip 的 `onFocus`；抽屉关闭、焦点还给按钮后 `产物面板` 的 Tooltip 会弹出并停留到失焦（与 `重命名` 的归还路径同一模式）。Safari 未验证。
 15. 8.2a 提示：抽屉里有两个名为 `关闭` 的按钮，Playwright strict 模式下要按容器（`.ui-drawer-foot`）限定。
+
+16. html 路径关闭预览时的焦点归还走 `web/src/ui/dialog.tsx:40` 的 `focus()`，不带 `preventScroll`：转录里的 html 卡若在预览打开期间被流式顶出视口，关闭预览会把转录滚回卡片并解除贴底跟随（#536 起就有；要修得动 `web/src/ui/**`，不在本刀范围）。
 
 ## Seams under test
 - jsdom 页面 fixture（顶栏按钮、Drawer、嵌套 Dialog、Toast、路由）。
