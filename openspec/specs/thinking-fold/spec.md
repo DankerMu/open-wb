@@ -2,9 +2,7 @@
 
 ## Purpose
 定义模型深度思考（reasoning）从 omp 帧到会话页折叠块的端到端契约：`thinking.delta` 事件的合并发布、`chat_messages.thinking` 的有界持久化与快照、回放、web `深度思考过程` 折叠块，以及托管 `models.yml` 声明 reasoning 与真 omp smoke 取证这一前提。纯归约器侧的帧映射见 chat-stream `纯协议事件归约`，web 侧 DTO/事件解析见 chat-web，`models.yml` 写法见 model-proxy `托管 models.yml`；本 spec 拥有它们之间的合并、上限、次序与呈现规则。
-
 ## Requirements
-
 ### Requirement: thinking.delta 合并发布与持久化
 纯归约器 SHALL 把回合内（`agent_start` 之后、终态之前）助手消息的每个 `message_update{assistantMessageEvent:{type:"thinking_delta",delta}}`（`delta` 为非空字符串）映射为一条 `thinking.delta{messageId,delta}`（映射规则见 chat-stream）；`thinking_start`/`thinking_end` 帧、`message_end.message.content[]` 中的 `thinking`/`redactedThinking` 块 SHALL 不产生任何事件，也不作为 thinking 来源（只认增量帧；只在 `message_end` 给出整块思考而无增量帧的上游，其思考不落库、不呈现）。
 SessionSupervisor SHALL 对同一助手消息的 thinking 增量做合并：在内存缓冲中按到达顺序拼接，在下列任一时刻把整段缓冲作为**一条** `thinking.delta` 先落库再发布（与既有「先持久化/缓冲、后入 ring」纪律一致）：缓冲累计达到 2048 UTF-8 字节；自缓冲中第一段增量起经过 2000ms（注入时钟，与 text.delta 刷盘节奏同值）；即将发布同一回合的任何其它事件（`text.delta`、`step.start`、`step.end`、`files.changed`、`approval.*`、`error`、`turn.end`）之前；回合进入终态（含 `applyFailure`/`applyStop` 退回、崩溃与优雅关停）之前。由此 ring 中 `thinking.delta` 与同回合其它事件的相对次序等于上游帧到达次序；除此之外不作任何次序保证——只有上游先于正文发送 thinking 时，`thinking.delta` 才先于该回合第一条 `text.delta`。落库失败 SHALL 不发布该条事件，并沿既有 owned error-sink 路径处理。
@@ -36,3 +34,21 @@ SessionSupervisor SHALL 对同一助手消息的 thinking 增量做合并：在�
 #### Scenario: 回放与刷新
 - **WHEN** 客户端带 `thinking.delta` 之前的游标重连，另一客户端在回合 running 时无游标连接
 - **THEN** 前者按序重放该 `thinking.delta` 恰一次；后者从活跃 turn.start 起的回放包含它；落库失败的 thinking 不进入 ring、不推进序号
+
+### Requirement: 深度思考折叠块呈现
+会话页 SHALL 在助手消息内、所有其它消息内容（审批条、正文）之前渲染深度思考折叠块：`<details class="thinking-block">`，`<summary>` 可见文本 `深度思考过程`（前置装饰性 `Icon chevron-right`），主体为 thinking 原文，以纯文本呈现（`white-space: pre-wrap`，不经 Markdown 渲染、不注入 HTML）。`thinking` 为 `null` 或空串时 SHALL 不渲染该块。折叠态：消息 status 为 `running` 时展开（`open`），消息由 `running` 进入任一终态（`done|failed|stopped`）时收起；从快照打开一条已终态消息时为收起，从快照打开一条 running 消息时为展开；两次状态迁移之间用户手动展开/收起的选择 SHALL 保留，不被随后到达的 `thinking.delta`、其它事件或同状态的快照重新同步重置。截断标记 `…（已截断）` 作为原文的一部分逐字显示。流式期间主体随 `thinking.delta` 增长；折叠块不参与复制（`复制` 仍只复制正文）。
+
+#### Scenario: 流式展开、终态收起
+- **WHEN** running 助手消息先收到 `thinking.delta{delta:"先想一想"}`，再收到正文 delta 与 `turn.end done`
+- **THEN** 折叠块在正文之前出现、`summary` 文本为 `深度思考过程`、处于展开态且主体为 `先想一想`；`turn.end done` 后折叠块收起、主体文本不变，正文与 `复制` 按钮行为不变
+
+#### Scenario: 快照中的思考与截断标记
+- **WHEN** 以 `/?session=<id>` 加载快照：一条 done 助手消息 `thinking` 以 `…（已截断）` 结尾，另一条 `thinking` 为 `null`，还有一条 `thinking` 为空串
+- **THEN** 第一条渲染收起的折叠块，展开后主体末尾逐字显示 `…（已截断）`；后两条不渲染折叠块
+
+#### Scenario: 用户手动切换保留
+- **WHEN** running 期间用户收起折叠块，随后又到达两条 `thinking.delta`
+- **THEN** 折叠块保持收起，展开后主体包含新增文本
+- **WHEN** 用户展开一条 done 消息的折叠块，随后页面以一份该消息状态与思考不变、正文不同的快照重新同步
+- **THEN** 正文更新为新快照的内容，折叠块保持展开
+

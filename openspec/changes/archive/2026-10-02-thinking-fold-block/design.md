@@ -92,7 +92,7 @@ export function ThinkingBlock({ running, text }: { running: boolean; text: strin
 - F2：running 消息由用户收起；重同步返回仍 running、思考更长的快照 → 同一节点、仍收起、主体文本为新思考。
 - F3：running 消息未动；重同步返回已 done 的快照（断线期间回合结束）→ 收起。
 - F4：用户收起后依次到达 `approval.request`、`approval.resolved`、`step.end` → 同一节点、仍收起。
-- F5（连接器）：快照 `thinking` 为 `旧`、游标 1:5；`turn.start`(1:2)、thinking.delta(1:5, `旧`)、thinking.delta(1:6, `想`) → 只交付 1:6，`thinking` 恰为 `旧想`（被覆盖的帧含会复位思考的 `turn.start` 都被过滤，不重复追加）。
+- F5（连接器）：快照 `thinking` 为 `旧`、游标 1:5；`turn.start`(1:2)、thinking.delta(1:5, `旧`)、thinking.delta(1:6, `想`) → `onEvent` 只收到 1:6（钉住「被覆盖的帧不交付」的是这条：过滤整体失效时 `turn.start` 先复位再追加，`thinking` 同样是 `旧想`），`thinking` 为 `旧想`。
 - F6（页面）：末条助手已 done 时到达视图里没有的 messageId 的 thinking.delta → 页面重同步，不凭这条 delta 造出助手块或折叠块；新快照装入后新 running 助手的折叠块展开、文本不重复。
 - F7：`failed` 消息的 `.chat-msg-main` 子元素次序为折叠块、`.chat-md`、错误文案、操作行。
 
