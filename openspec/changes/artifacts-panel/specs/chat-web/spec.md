@@ -114,4 +114,4 @@ Business errors SHALL display inline on the message;400/409/502/503 SHALL displa
 
 #### Scenario: 顶栏入口
 - **WHEN** 选中一个会话，随后回到欢迎态
-- **THEN** 选中时顶栏 banner 内在面包屑之外恰有按序排列的 `重命名`、`产物面板` 两个按钮；欢迎态顶栏不渲染这些按钮（`≥761px` 仍无顶栏）
+- **THEN** 选中时顶栏的 actions 区（面包屑之后；`≤760px` 时 banner 里另有 `打开导航`）恰有按序排列的 `重命名`、`产物面板` 两个按钮；欢迎态顶栏不渲染这些按钮（`≥761px` 仍无顶栏）
