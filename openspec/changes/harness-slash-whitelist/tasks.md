@@ -4,8 +4,8 @@ Fixture level: expanded
 
 ## 10. chat-harness — slash 白名单的真实栈证据（父 tasks 10.6）
 
-- [x] 10.6a `smoke/session-meta.hurl`：thinking 断言之后、DELETE 之前插入第 6 步——`GET /api/commands` 200，`commands` 恰两条、`source` 均 `builtin`、`name` 依次 `compact`、`todo`；`POST …/prompt {"message":"/todo"}` 202 → 有界轮询到 done → 助手 `content` 恰为 `No todos. Use /todo append <task> to start one.`、`steps` 为空、用户 `content` 为 `/todo`；`POST …/prompt {"message":"/session 冒烟"}` 202 → 有界轮询到 done → 用户 `content` 恰为所发文本、助手 `content` 匹配 `content_pattern`、`steps` 为空。原第 6、7 步的注释标号顺延为 7、8，页头注释同步。两个 POST 与 `GET /api/commands` 不带 retry。验证：design「Required evidence」H1–H4
-- [x] 10.6b `web/e2e/ui-walk-sessions.spec.ts`：`step9Search` 与 `step11Delete` 之间加 `step10Slash`——`/` → `命令候选` 恰两项 `整理上下文`、`任务清单`；`/t` → 恰一项；`Enter` → 草稿 `/todo `、未发送；`Enter` 发送 → 用户气泡 `/todo`、助手正文恰为 omp 原文、无步骤卡、无审批条、composer 解锁；`/session` 无候选 → `/session <uuid2>` 无候选 → `Enter` → 气泡原文、固定回复、无步骤卡；REST 回读。`finally` 不改。验证：design「Required evidence」U1–U6
+- [x] 10.6a `smoke/session-meta.hurl`：thinking 断言之后、DELETE 之前插入第 6 步——`GET /api/commands` 200，`commands` 恰两条、`source` 均 `builtin`、`name` 依次 `compact`、`todo`；`POST …/prompt {"message":"/todo"}` 202 → 有界轮询到 done → 助手 `content` 恰为 `No todos. Use /todo append <task> to start one.`、`steps` 为空、用户 `content` 为 `/todo`；`POST …/prompt {"message":"/session WORKBUDDY_THINK 冒烟"}` 202 → 有界轮询到 done → 用户 `content` 恰为所发文本、助手 `content` 匹配 `content_pattern`、`thinking` 恰为 `先读需求，再列要点，最后作答。`、`steps` 为空。原第 6、7 步的注释标号顺延为 7、8，页头注释同步。两个 POST 与 `GET /api/commands` 不带 retry。验证：design「Required evidence」H1–H4
+- [x] 10.6b `web/e2e/ui-walk-sessions.spec.ts`：`step9Search` 与 `step11Delete` 之间加 `step10Slash`——`/` → `命令候选` 恰两项 `整理上下文`、`任务清单`；`/t` → 恰一项；`Enter` → 草稿 `/todo `、未发送；`Enter` 发送 → 用户气泡 `/todo`、助手正文恰为 omp 原文、无步骤卡、无审批条、composer 解锁；`/session` 无候选 → `/session WORKBUDDY_THINK <uuid2>` 无候选 → `Enter` → 气泡原文、固定回复、无步骤卡；REST 回读。`finally` 不改。验证：design「Required evidence」U1–U6
 
 ## Risk packs
 
@@ -27,5 +27,5 @@ Fixture level: expanded
 ## 通用纪律（继承父 tasks.md）
 - [x] 改动只有 `smoke/session-meta.hurl` 与 `web/e2e/ui-walk-sessions.spec.ts`；其它被跟踪文件零 diff。
 - [x] 没有 RED 阶段；负对照逐条记录失败所在的条目 / 步骤。
-- [x] design E 节列的门禁全部退出 0；`openspec validate harness-slash-whitelist --strict --no-interactive` 通过。
+- [x] design「Required evidence › 门禁」G1、G2 全部退出 0；`openspec validate harness-slash-whitelist --strict --no-interactive` 通过。
 - [ ] 实测时长（`make smoke` 一次运行、新旅程两个 project、CI）写进 PR。
