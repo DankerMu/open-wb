@@ -25,12 +25,14 @@ export function chatTopbarActions(slots: ChatTopbarSlots): TopbarAction[] {
 }
 
 /**
- * 会话页给 `useTopbar` 的上报：有当前会话时为面包屑标题、`重命名` 与 `产物面板`；没有（欢迎态，或
- * 标题尚未得知）时为空上报。不 memo：shell 按描述符的可比较字段判断是否更新。
+ * 会话页给 `useTopbar` 的上报：有当前会话时为面包屑标题、`重命名`、`对话内搜索` 与 `产物面板`；没有
+ * （欢迎态，或标题尚未得知）时为空上报。参数次序同槽位次序；`search` 原样填入槽位（`expanded` 反映
+ * 搜索框是否打开）。不 memo：shell 按描述符的可比较字段判断是否更新。
  */
 export function chatTopbar(
   selected: ChatSession | undefined,
   openRename: (session: ChatSession, trigger: HTMLElement) => void,
+  search: { expanded: boolean; onSelect(trigger: HTMLElement): void },
   openArtifacts: (trigger: HTMLElement) => void,
 ): Parameters<typeof useTopbar>[0] {
   if (!selected) return {};
@@ -38,6 +40,7 @@ export function chatTopbar(
     breadcrumb: sessionTitle(selected),
     actions: chatTopbarActions({
       rename: { onSelect: (trigger) => openRename(selected, trigger) },
+      search,
       artifacts: { onSelect: openArtifacts },
     }),
   };

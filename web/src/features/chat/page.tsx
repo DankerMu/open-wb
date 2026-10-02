@@ -6,6 +6,7 @@ import { useSidebarSlot } from "../../lib/sidebar-slot.js";
 import { useTopbar } from "../../lib/topbar.js";
 import { useAuth } from "../auth/index.js";
 import { useArtifactsPanel } from "./artifacts-panel.js";
+import { useConversationSearch } from "./conversation-search.js";
 import { ConversationView } from "./conversation-view.js";
 import { DeleteDialog } from "./delete-dialog.js";
 import { errorMessage, isNotFound, isUnauthorized } from "./errors.js";
@@ -632,7 +633,8 @@ export function ChatPage() {
   const selected = selectedSession(requestedSessionId, listForClient, ownedHistory, historyState);
   const workspace = workspaces?.find((item) => item.id === selected?.workspaceId);
   const artifacts = useArtifactsPanel(client, historyView, workspace);
-  useTopbar(chatTopbar(selected, sessionActions.openRename, artifacts.open));
+  const search = useConversationSearch(selected?.id, historyView);
+  useTopbar(chatTopbar(selected, sessionActions.openRename, search.slot, artifacts.open));
   const ownedBusy = ownsMutation(mutationOwner, client, requestedSessionId);
   const ownedStreamError = visibleOwnedAlert(streamError, client, requestedSessionId);
   const generating =
@@ -681,6 +683,7 @@ export function ChatPage() {
         onSubmit={submitComposer}
         promptError={visibleOwnedAlert(promptError, client, requestedSessionId)}
         requestedSessionId={requestedSessionId}
+        search={search}
         sendDisabled={sendDisabled}
         streamError={ownedStreamError}
         welcome={welcome}

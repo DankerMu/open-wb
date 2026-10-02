@@ -1,4 +1,4 @@
-import { type ComponentProps, type FormEvent, memo } from "react";
+import { type ComponentProps, type FormEvent, memo, type ReactNode, type Ref } from "react";
 import type { ApiClient } from "../../lib/api.js";
 import { MarkdownView } from "../../lib/markdown-view.js";
 import { BrandMark, Icon } from "../../ui/index.js";
@@ -8,7 +8,7 @@ import { Composer } from "./composer.js";
 import { ComposerFooter } from "./composer-footer.js";
 import { FileChangesCard } from "./file-changes-card.js";
 import { ForkAction, MessageActions } from "./message-actions.js";
-import { FollowTranscript } from "./scroll-follow.js";
+import { FollowTranscript, type TranscriptHandle } from "./scroll-follow.js";
 import { SESSION_STATUS_LABEL } from "./status-label.js";
 import { summarizeStepDetail } from "./step-summary.js";
 import type { ChatState } from "./stream.js";
@@ -37,6 +37,8 @@ type ConversationViewProps = {
   onSubmit(event: FormEvent<HTMLFormElement>): void;
   promptError: string | null;
   requestedSessionId: string | null;
+  /** 对话内搜索：搜索框（未打开时为 null）、当前匹配的消息 id、交给转录区的句柄。 */
+  search: { box: ReactNode; currentId: number | null; handleRef: Ref<TranscriptHandle> };
   sendDisabled: boolean;
   streamError: string | null;
   /** 欢迎态的场景与空间选择（状态在会话页）；有当前会话时不渲染对应控件。 */
@@ -50,6 +52,10 @@ type ChatStepView = ChatMessageView["steps"][number];
 
 /** Sessions whose last assistant message may be regenerated (a running or `idle` one may not). */
 const REGENERABLE: ReadonlySet<ChatState["status"]> = new Set(["done", "failed", "stopped"]);
+
+/** The marker of the in-conversation search's current match, and its absence on other messages. */
+const CURRENT_MATCH = { ariaCurrent: "true", className: " chat-msg--search-current" } as const;
+const NOT_CURRENT = { ariaCurrent: undefined, className: "" } as const;
 
 function StepCard({ step }: { step: ChatStepView }) {
   const label = SESSION_STATUS_LABEL[step.status];
@@ -84,6 +90,7 @@ function StepCard({ step }: { step: ChatStepView }) {
 
 const MessageArticle = memo(function MessageArticle({
   client,
+  current,
   forkDisabled,
   message,
   onAnswerApproval,
@@ -92,6 +99,8 @@ const MessageArticle = memo(function MessageArticle({
   workspace,
 }: {
   client: ApiClient;
+  /** 对话内搜索的当前匹配：带 `aria-current="true"` 与高亮类；其余消息两者都不出现。 */
+  current: boolean;
   forkDisabled: boolean;
   message: ChatMessageView;
   onAnswerApproval: AnswerApproval;
@@ -101,6 +110,7 @@ const MessageArticle = memo(function MessageArticle({
 }) {
   const assistant = message.role !== "user";
   const stopped = message.status === "stopped";
+  const mark = current ? CURRENT_MATCH : NOT_CURRENT;
   const steps = message.steps.map((step) => <StepCard key={step.id} step={step} />);
   const error = message.error ? (
     <p className="ui-alert chat-msg-error" role="alert">
@@ -109,7 +119,12 @@ const MessageArticle = memo(function MessageArticle({
   ) : null;
   if (!assistant) {
     return (
-      <article aria-label="用户" className="chat-msg chat-msg-user">
+      <article
+        aria-current={mark.ariaCurrent}
+        aria-label="用户"
+        className={`chat-msg chat-msg-user${mark.className}`}
+        data-message-id={message.id}
+      >
         <p className="chat-msg-body">{message.content}</p>
         {steps}
         {error}
@@ -118,7 +133,12 @@ const MessageArticle = memo(function MessageArticle({
     );
   }
   return (
-    <article aria-label="助手" className="chat-msg chat-msg-assistant">
+    <article
+      aria-current={mark.ariaCurrent}
+      aria-label="助手"
+      className={`chat-msg chat-msg-assistant${mark.className}`}
+      data-message-id={message.id}
+    >
       <span aria-hidden="true" className="chat-msg-avatar">
         <BrandMark size={28} />
       </span>
@@ -157,6 +177,7 @@ const MessageArticle = memo(function MessageArticle({
 function MessageThread({
   client,
   composerDisabled,
+  currentId,
   historyView,
   onAnswerApproval,
   onFork,
@@ -165,6 +186,7 @@ function MessageThread({
 }: {
   client: ApiClient;
   composerDisabled: boolean;
+  currentId: number | null;
   historyView: ChatState;
   onAnswerApproval: AnswerApproval;
   onFork(messageId: number): Promise<void>;
@@ -178,6 +200,7 @@ function MessageThread({
       {historyView.messages.map((message) => (
         <MessageArticle
           client={client}
+          current={message.id === currentId}
           forkDisabled={message.role === "user" && composerDisabled}
           key={message.id}
           message={message}
@@ -208,6 +231,7 @@ export function ConversationView({
   onSubmit,
   promptError,
   requestedSessionId,
+  search,
   sendDisabled,
   streamError,
   welcome,
@@ -216,6 +240,7 @@ export function ConversationView({
   return (
     <div className="chat-layout">
       <div className={requestedSessionId ? "chat-main" : "chat-main chat-main--welcome"}>
+        {search.box}
         {historyError ? (
           <p className="ui-alert" role="alert">
             {historyError}
@@ -232,11 +257,16 @@ export function ConversationView({
           </p>
         ) : null}
         {requestedSessionId ? (
-          <FollowTranscript content={historyView} key={requestedSessionId}>
+          <FollowTranscript
+            content={historyView}
+            handleRef={search.handleRef}
+            key={requestedSessionId}
+          >
             {historyView ? (
               <MessageThread
                 client={client}
                 composerDisabled={composerDisabled}
+                currentId={search.currentId}
                 historyView={historyView}
                 onAnswerApproval={onAnswerApproval}
                 onFork={onFork}
