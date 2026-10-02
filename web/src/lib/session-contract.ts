@@ -182,7 +182,7 @@ function parseFileChange(value: unknown): ChatFileChange | null {
 }
 
 /** 1..50 valid changes, else null: `[]` and oversize arrays reject the whole step. */
-function parseFileChanges(value: unknown): ChatFileChange[] | null {
+export function parseFileChanges(value: unknown): ChatFileChange[] | null {
   const changes = parseJsonArray(value, parseFileChange);
   return changes && changes.length > 0 && changes.length <= MAX_FILE_CHANGES ? changes : null;
 }

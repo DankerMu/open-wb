@@ -3,7 +3,6 @@ import type {
   ChatMessage,
   ChatMessageSnapshot,
   ChatSession,
-  ChatStep,
   ChatStreamCursor,
 } from "../../lib/session-contract.js";
 import {
@@ -15,15 +14,9 @@ import {
   requestApproval,
   resolveApproval,
 } from "./stream-approvals.js";
+import { type ChatFilesEvent, decodeFilesChanged, setStepChanges } from "./stream-artifacts.js";
+import { type ChatStepView, endStep, startStep } from "./stream-steps.js";
 import { appendThinking, type ChatThinkingEvent, decodeThinkingDelta } from "./stream-thinking.js";
-
-type ChatStepView = {
-  id: ChatStep["id"];
-  name: ChatStep["name"];
-  detail: ChatStep["detail"];
-  output: ChatStep["output"];
-  status: ChatStep["status"];
-};
 
 type ChatMessageView = {
   id: ChatMessage["id"];
@@ -54,7 +47,8 @@ export type ChatEvent =
   | { type: "turn.end"; data: ChatMessageTarget & { status: ChatTurnEndStatus } }
   | { type: "error"; data: ChatMessageTarget & { message: string } }
   | ChatApprovalEvent
-  | ChatThinkingEvent;
+  | ChatThinkingEvent
+  | ChatFilesEvent;
 
 type ChatEventType = ChatEvent["type"];
 
@@ -89,6 +83,7 @@ const DATA_EVENTS = [
   "approval.request",
   "approval.resolved",
   "thinking.delta",
+  "files.changed",
 ] as const satisfies readonly ChatEventType[];
 const QUEUE_CAP = 1000;
 const CANONICAL_CURSOR = /^(0|[1-9][0-9]*):(0|[1-9][0-9]*)$/;
@@ -111,6 +106,7 @@ export function chatStateFromSnapshot(snapshot: ChatMessageSnapshot): ChatState 
         name: step.name,
         detail: step.detail,
         output: step.output,
+        changes: step.changes,
         status: step.status,
       })),
       approvals: approvalViews(message.approvals),
@@ -143,9 +139,9 @@ export function applyChatEvent(state: ChatState, event: ChatEvent): ChatState {
         content: message.content + event.data.delta,
       }));
     case "step.start":
-      return startStep(state, event.data);
+      return replaceAssistant(state, event.data.messageId, (m) => startStep(m, event.data));
     case "step.end":
-      return endStep(state, event.data);
+      return replaceAssistant(state, event.data.messageId, (m) => endStep(m, event.data));
     case "error":
       return replaceAssistant(
         state,
@@ -169,55 +165,12 @@ export function applyChatEvent(state: ChatState, event: ChatEvent): ChatState {
       return replaceAssistant(state, event.data.messageId, (m) =>
         appendThinking(m, event.data.delta),
       );
+    // files.changed only replaces one step's changes; the session status is left untouched.
+    case "files.changed":
+      return replaceAssistant(state, event.data.messageId, (m) => setStepChanges(m, event.data));
     default:
       return state;
   }
-}
-
-function startStep(
-  state: ChatState,
-  data: { messageId: number; stepId: number; name: string; detail: string },
-): ChatState {
-  return replaceAssistant(state, data.messageId, (message) => {
-    if (message.steps.some((step) => step.id === data.stepId)) {
-      return message;
-    }
-    return {
-      ...message,
-      steps: [
-        ...message.steps,
-        { id: data.stepId, name: data.name, detail: data.detail, output: "", status: "running" },
-      ],
-    };
-  });
-}
-
-function endStep(
-  state: ChatState,
-  data: {
-    messageId: number;
-    stepId: number;
-    status: "done" | "failed";
-    output: string;
-  },
-): ChatState {
-  return replaceAssistant(state, data.messageId, (message) => {
-    const index = message.steps.findIndex((step) => step.id === data.stepId);
-    const current = index < 0 ? undefined : message.steps[index];
-    if (current === undefined) {
-      return message;
-    }
-    const steps = message.steps.slice();
-    // detail 固定为 step.start/快照中的 args，step.end 只带回状态与输出（#367）。
-    steps[index] = {
-      id: current.id,
-      name: current.name,
-      detail: current.detail,
-      output: data.output,
-      status: data.status,
-    };
-    return { ...message, steps };
-  });
 }
 
 function endTurn(state: ChatState, messageId: number, status: ChatTurnEndStatus): ChatState {
@@ -683,6 +636,8 @@ function decodeEvent(type: ChatEventType, value: unknown): ChatEvent | undefined
       return decodeApprovalResolved(value);
     case "thinking.delta":
       return decodeThinkingDelta(value);
+    case "files.changed":
+      return decodeFilesChanged(value);
   }
 }
 
