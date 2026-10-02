@@ -14,7 +14,7 @@
 
 ## 与 issue / 父 delta 的偏差（父 change 归档前 rebase 适用）
 1. **清理段是改写而不是插入**：主规格现文是「After step 6 the journey leaves the session page by a real navigation …」。第 11 步经 UI 删除后页面自己回到欢迎态，那一步不再需要，去掉；`finally` 的范围改成第 2–11 步；成功路径上 DELETE 得 404。失败路径上页面可能仍在会话页，`finally` 的删除之后可能多出一条重连 404 的 oracle 错误——旅程本来就已失败，与 #540 的口径相同。父文的清理段写的是「If the journey fails before step 11」加 409 回退，沿用 #540 的偏差（无条件 `finally`、不实现回退）。
-2. **第 9 步的「scrolls the user message into view」写成「is fully in the viewport」**：走查断言的是结果（当前匹配的用户消息完整可见，`toBeInViewport({ ratio: 1 })`），不是「滚动发生过」。`mobile-dark` 上它有判别力——搜索前用户消息顶部被转录框裁掉约 39 px（可见比 0.64），命中后完整可见；把同一断言挪到搜索之前，mobile 失败、desktop 通过。`desktop-light` 上消息前后都完整可见，分辨不出滚动。滚动行为本身另有 jsdom 的对话内搜索测试。
+2. **第 9 步的「scrolls the user message into view」写成「is fully in the viewport」**：走查断言的是结果（当前匹配的用户消息完整可见，`toBeInViewport({ ratio: 1 })`），不是「滚动发生过」。`mobile-dark` 上它有判别力——搜索前用户消息顶部被转录框裁掉约 39–62 px（可见比 0.53–0.64，随 UUID 折行而定），命中后完整可见；把同一断言挪到搜索之前，mobile 失败、desktop 通过。`desktop-light` 上消息前后都完整可见，分辨不出滚动。滚动行为本身另有 jsdom 的对话内搜索测试。
 3. **第 9 步的次序写明**：搜索框一打开计数就是 `0/0`，所以「无匹配 → `0/0`」必须排在观察到 `1/1` 之后才有判别力；`Esc` 之前重新输入 UUID，使「清除高亮」有前后对比。父文没写次序。「`Esc` in the box」是收窄：只有输入框处理 `Esc`。
 4. **第 8 步加 REST 回读**（`GET /api/sessions` 的 `title` 与 `pinnedAt`）与「对话框里预填当前标题」「保存后对话框关闭」；新标题每个 project 唯一。父文没写。唯一标题让第 11 步的「条目从所有分区消失」可以按名字断言。
 5. **第 7 步写成「不再提供 `置顶任务`」**：父文只写「the menu then offers `取消置顶`」。
