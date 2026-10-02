@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, useId, useState } from "react";
+import { type FormEvent, type KeyboardEvent, type ReactNode, useId, useState } from "react";
 import { Button, Icon, useToast } from "../../ui/index.js";
 
 type StopTurn = () => Promise<"stopping" | null>;
@@ -9,11 +9,15 @@ type ComposerProps = {
   /** 卡片内工具栏之后的末尾节点（欢迎态的空间选择）；不传时卡片以工具栏结尾。 */
   footer?: ReactNode;
   generating: boolean;
+  /** 先于既有 Enter 规则调用；返回 true 表示按键已被处理，不再提交。 */
+  interceptKeyDown?(event: KeyboardEvent<HTMLTextAreaElement>): boolean;
   onChangeDraft(value: string): void;
   onStop: StopTurn;
   onSubmit(event: FormEvent<HTMLFormElement>): void;
   placeholder: string;
   sendDisabled: boolean;
+  /** 卡片内、输入框上方的候选面板（斜杠命令）；不传时不渲染。 */
+  slashMenu?: ReactNode;
   /** 当前选中会话；null（欢迎态建会话途中）时停止键禁用。 */
   stopSessionId: string | null;
 };
@@ -24,11 +28,13 @@ export function Composer({
   draft,
   footer,
   generating,
+  interceptKeyDown,
   onChangeDraft,
   onStop,
   onSubmit,
   placeholder,
   sendDisabled,
+  slashMenu,
   stopSessionId,
 }: ComposerProps) {
   const inputId = useId();
@@ -36,6 +42,7 @@ export function Composer({
   return (
     <form className="chat-composer" onSubmit={onSubmit}>
       <div className="chat-composer-card">
+        {slashMenu}
         <label className="ui-sr-only" htmlFor={inputId}>
           给助手发消息
         </label>
@@ -46,6 +53,7 @@ export function Composer({
           id={inputId}
           onChange={(event) => onChangeDraft(event.target.value)}
           onKeyDown={(event) => {
+            if (interceptKeyDown?.(event)) return;
             if (
               event.key !== "Enter" ||
               event.shiftKey ||

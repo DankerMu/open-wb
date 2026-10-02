@@ -9,6 +9,7 @@ import { ComposerFooter } from "./composer-footer.js";
 import { FileChangesCard } from "./file-changes-card.js";
 import { ForkAction, MessageActions } from "./message-actions.js";
 import { FollowTranscript, type TranscriptHandle } from "./scroll-follow.js";
+import type { useSlashMenu } from "./slash-menu.js";
 import { SESSION_STATUS_LABEL } from "./status-label.js";
 import { summarizeStepDetail } from "./step-summary.js";
 import type { ChatState } from "./stream.js";
@@ -40,6 +41,8 @@ type ConversationViewProps = {
   /** 对话内搜索：搜索框（未打开时为 null）、当前匹配的消息 id、交给转录区的句柄。 */
   search: { box: ReactNode; currentId: number | null; handleRef: Ref<TranscriptHandle> };
   sendDisabled: boolean;
+  /** 斜杠命令候选：输入框上方的面板（不可见时为 null）与先于 Enter 规则的按键拦截。 */
+  slash: ReturnType<typeof useSlashMenu>;
   streamError: string | null;
   /** 欢迎态的场景与空间选择（状态在会话页）；有当前会话时不渲染对应控件。 */
   welcome: WelcomeOptions;
@@ -233,6 +236,7 @@ export function ConversationView({
   requestedSessionId,
   search,
   sendDisabled,
+  slash,
   streamError,
   welcome,
   workspace,
@@ -300,11 +304,13 @@ export function ConversationView({
             )
           }
           generating={generating}
+          interceptKeyDown={slash.interceptKeyDown}
           onChangeDraft={onChangeDraft}
           onStop={onStop}
           onSubmit={onSubmit}
           placeholder={requestedSessionId ? "继续追问，或派一个新任务…" : "今天帮你做些什么"}
           sendDisabled={sendDisabled}
+          slashMenu={slash.menu}
           stopSessionId={requestedSessionId}
         />
         {requestedSessionId ? null : (

@@ -732,6 +732,51 @@
   border-radius: 8px;
 }
 
+/* Slash candidates (issue 556): the first child of the composer card, above the textarea and as
+   wide as the card, with a rule between the two; the gap of the card separates them. The panel
+   scrolls inside a bounded height (the key handler keeps the highlighted option in view). An
+   option is one row of label, description and hint that wraps on a narrow card instead of
+   widening it. */
+.chat-slash {
+  flex: none;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--wb-border-default);
+}
+
+.chat-slash-option {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.chat-slash-option--active {
+  background: var(--wb-bg-hover);
+}
+
+.chat-slash-label {
+  font-weight: 500;
+  color: var(--wb-text-primary);
+}
+
+.chat-slash-desc {
+  color: var(--wb-text-secondary);
+}
+
+.chat-slash-hint {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--wb-text-tertiary);
+}
+
 @media (max-width: 760px) {
   .chat-msg-user {
     max-width: 100%;
