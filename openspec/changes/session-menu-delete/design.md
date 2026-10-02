@@ -111,9 +111,9 @@ const sessionActions = useSessionActions(client, setListState, setHistoryState, 
 4. 被删会话的在途重命名/置顶响应到达时不改列表，但 `已重命名`/`已更新置顶状态` 或失败 Toast 照常出现。
 5. DELETE 得到 404（会话已在别处删除）按一般失败处理：Toast 信封 message 并重读列表；若它是当前会话，页面停在该 URL，直到用户离开（其它标签页删除后的既有状态，父 design D3 不为此新增 UI）。
 6. `≤760px` 覆盖层内删除当前会话后覆盖层不自动关闭（程序化导航不关闭它）；用户看到的是少了一条的列表。
+7. 当前会话的删除在途时点 `新建会话`：204 的 replace 先于创建响应到达时，既有 effect（`page.tsx:388-396`）中止这次创建；服务端可能已建出空会话，下一次列表读取才出现（「创建在途时离开」的既有行为）。
 8. `requestedSessionRef` 与 location 是「最近一次渲染」的值：204 恰好落在用户点选另一会话与那次导航渲染之间时，仍按旧会话判定并 replace 回欢迎态，用户的选择被覆盖（毫秒级窗口，再点一次即可；页面既有的渲染时 ref 约定，不在本刀改）。
 9. `turn-actions.ts` 里不带 signal 的快照读取（`reconcileSettled`、重新生成后的读取）若在 204 与下一次渲染之间到达，会为已删会话装入快照并打开事件流，随后由既有 effect 关闭；无可见错误。
-7. 当前会话的删除在途时点 `新建会话`：204 的 replace 先于创建响应到达时，既有 effect（`page.tsx:388-396`）中止这次创建；服务端可能已建出空会话，下一次列表读取才出现（「创建在途时离开」的既有行为）。
 
 ## Seams under test
 - jsdom 页面 fixture（`renderChatPage` / `renderChatPageWithAuthProbe` + `createFetchMock` + `FakeEventSource`）：菜单、确认框、Toast、列表、URL 与事件流连接的联动，请求方法与次数，时序（挂起、关闭重开、切换会话、续期、卸载），覆盖层。
