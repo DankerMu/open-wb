@@ -104,8 +104,9 @@ useTopbar(chatTopbar(selected, sessionActions.openRename, search.slot, artifacts
 `ChatPage` 不新增分支。
 
 ### D7 样式（`messages.css`）
-- `.chat-search`：`flex: none; align-self: flex-end; display: flex; align-items: center; gap: 6px; max-width: 100%`。
-- `.chat-search .chat-search-field`：`flex: 1 1 240px; width: auto; min-width: 0`（基元根的 240px 固定宽在 390px 视口放不下输入框 + 计数 + 三个按钮）。
+- `.chat-search`：`flex: none; align-self: flex-end; display: flex; align-items: center; gap: 6px; max-width: 100%; padding: 4px 4px 0`。内边距给焦点环留位：搜索框贴着 `.chat-main`（`overflow: hidden`）的上沿与右沿（窄屏占满整列时还有左沿），2px outline + 2px offset 落在盒外 4px 会被裁掉（评审第 1 轮）。
+- `.chat-search .chat-search-field`：`flex: 0 1 auto; min-width: 0`，不覆盖基元根的 `width: 240px`——有空间时 240px，窄屏只有它收缩。
+- `.chat-search .ui-btn`：`flex: none`，三个图标按钮保持基元的 32×32。（最初的写法是输入框 `flex: 1 1 240px; width: auto`、按钮不设 `flex`：收缩包裹的容器里整行过约束，按钮被压到约 27px；修复轮 1 改成现在的形状。）
 - `.chat-search-count`：`flex: none; font-family: var(--wb-mono); font-size: 11px; color: var(--wb-text-secondary)`（demo:325）。
 - `.chat-msg--search-current`：`background: var(--wb-brand-primary-subtle); box-shadow: 0 0 0 6px var(--wb-brand-primary-subtle)`（背景与同色外扩，等效于带 6px 内边距的底色而不改变布局；demo `.cs-mark` 用的同一 token）。`border-radius: 8px` 只写在 `.chat-msg-assistant.chat-msg--search-current` 上，用户气泡保留自己的圆角（实现时定下的写法）。
 - 只用 token，无颜色字面量。实现者按真实渲染微调数值，上面的结构（`flex: none`、可收缩的输入框、token 底色）是约束。
@@ -160,6 +161,7 @@ useTopbar(chatTopbar(selected, sessionActions.openRename, search.slot, artifacts
 - **S15 历史未读到**：历史请求挂起（标题来自列表）时打开 → `0/0`；输入查询后历史到达 → `0/n`（无当前、无高亮、`scrollIntoView` 未被调用）；Enter → `1/n`。另一组历史读取失败（页面上有 `role="alert"`）时打开 → 搜索框在该 alert 之前（仍是 `.chat-main` 的第一个子节点）、计数器 `0/0`、输入查询不抛错。
 - **S16 `chatTopbar` 单元**：`chatTopbar(undefined, …)` 为 `{}`；有会话时产出三项，键序 `rename`、`search`、`artifacts`，只有 `search` 带 `expanded`（值原样透传），`search` 的 `onSelect` 收到 trigger。
 - **S17 找不到消息节点**：直接渲染 `FollowTranscript`（带 `handleRef`，子节点里有一个 `data-message-id="1"` 的元素），`scrollToMessage(1)` 调用 stub 一次、`scrollToMessage(999)` 不抛错、不调用 `scrollIntoView`、`回到最新` 的显隐不变。
+- **评审第 1 轮后追加**：**S18** `messages.css` 的静态契约（高亮规则用 `--wb-brand-primary-subtle`；`.chat-search` 为 `flex: none` 且内边距 `4px 4px 0`；输入框规则有 `min-width: 0` 且不声明 `width`；`.chat-search .ui-btn` 为 `flex: none`）。**S19** 搜索框打开时续期账号使顶栏失去标题而 URL 不变 → 搜索框关闭，按钮回来后 `aria-expanded="false"`、不自动重开（把键换成 `requestedSessionId` 的实现在此失败）。**S20** 搜索框打开且有当前匹配时开关 `重命名` Dialog → 查询、计数、高亮不变，焦点回到 `重命名`；随后 Escape 关闭搜索、焦点在 `对话内搜索`。U3 的排除夹具补上审批标题与步骤 `changes` 的路径；S3 断言 Enter / Shift+Enter 前后 fetch 调用数不变、composer 草稿不变；S9 多一组「当前之前新出现一条匹配 → `1/2` 变 `2/3`、高亮不变、不滚动」；S11 多两组（落在中间带：不出现 `回到最新`、之后的增量不跟随；跳走后再跳回距底 4px 内：`回到最新` 消失并重新跟随）；S4 删去「点击 `下一个` 后焦点仍在输入框」的断言（只因 jsdom 的 click 不移动焦点才成立）。S8–S11 与 S17 搬到 `web/test/chat-page-search-follow.test.tsx`。
 - 既有：`chat-scroll-follow.test.tsx` 零 diff 全绿；D8 列出的期望更新后两个既有文件全绿。
 
 实现前就成立的护栏（不计入 RED）：无（U、S 全部依赖新文件或新按钮；基线上 21 个用例失败、`search-match.test.ts` 收集失败）；D8 的既有断言在实现前为绿、实现后按 D8 更新。
@@ -167,7 +169,10 @@ useTopbar(chatTopbar(selected, sessionActions.openRename, search.slot, artifacts
 实现时在规格之外补的断言：S1 断言计数器 `childNodes.length === 1` 与三个按钮的 `title`；S5 断言 Enter / Escape 调了 `preventDefault()`；S7 多一组「当前匹配仍是同一条消息时，查询变化与 Enter 仍各滚动一次」（否则「按 `currentId` 触发的 effect 取代处理器滚动」的实现杀不掉）；S10 末尾点 `回到最新` 后回到底部且高亮不变；S15 失败组断言搜索框是 `firstElementChild` 且其后紧跟 alert；S17 在转录区之外另放一个带 `data-message-id` 的元素，证明查询只在自己的转录区内。S16 合成一个用例（`chatTopbar(undefined, …)` 为 `{}` 在基线就成立，单列会是基线绿）。
 
 ## 变异自检
-实现者在沙箱里对产品代码做了 39 个变异（脚本与日志不入库），全部至少使一个用例变红，无存活：`scrollToMessage` 去掉同步重算（S8、S10、S17）、改成无条件解除贴底（S10、S11、S17）、去掉找不到节点的返回（S17）；只派生不清 `currentId`（S9 第二次重载）；加滚动 effect（S5、S7–S11、S15）；id 的真值判断（S6）；状态不按会话为键（S12、S13）；关闭不聚焦顶栏按钮（S3、S4）；组合输入期间处理按键（S5）；demo 的后退公式（S9）；`matchMessages` 搜步骤输出 / thinking / trim（U3）、去掉一侧 `toLowerCase()`（U1、U3、S2）；搜索框放到 alert 之后（S15 失败组）；`aria-current="false"`（S6）；`chatTopbar` 槽位去掉 `expanded` / 填错槽（S14、S16）；计数器三个文本节点（S1、S2）；chevron 互换（S1）。
+实现者在沙箱里对产品代码做了 39 个变异（脚本与日志不入库），全部至少使一个用例变红，无存活：`scrollToMessage` 去掉同步重算（S8、S10、S17）、改成无条件解除贴底（S10、S11、S17）、去掉找不到节点的返回（S17）；只派生不清 `currentId`（S9 第二次重载）；加滚动 effect（S5、S7–S11、S15）；id 的真值判断（S6）；状态不按会话为键（S12、S13）；关闭不聚焦顶栏按钮（S3、S4）；组合输入期间处理按键（S5）；demo 的后退公式（S9）；`matchMessages` 搜步骤输出 / thinking / trim（U3）、去掉一侧 `toLowerCase()`（U1、U3、S2）；搜索框放到 alert 之后（S15 失败组）；`aria-current="false"`（S6）；`chatTopbar` 槽位去掉 `expanded` / 填错槽（S14、S16）；计数器三个文本节点（S1、S2）；chevron 互换（S1）。修复轮 1 另做 16 个，同样全部被杀：删高亮规则 / 输入框规则 / 按钮的 `flex: none` / 内边距、输入框加回 `width: auto`（S18）；hook 改以 `requestedSessionId` 为键（S19）；`matchMessages` 搜审批标题 / `changes[].path`（U3）；存当前匹配的下标而不是 id（S9）；同步重算从不隐藏按钮或从不贴底（S11 跳回底部组）；一屏之内都算贴底（S11 中间带组）。
+
+## 评审记录
+第 1 轮（正确性 / 证据与规格符合 / 集成与不变量三席）：无 P0/P1。采纳并在修复轮 1 处理：搜索框焦点环被页面列裁切（P3，顺带发现并修正图标按钮被压缩、320px 下左侧焦点环被裁）；新 CSS 无测试约束、U3 排除夹具不全（P2）；以及上面「评审第 1 轮后追加」列出的覆盖缺口。未处理而记入「已知残留」11–14 的：禁用按钮丢焦点、`0/0` 不播报、历史再次读取中清空当前、三处只有结构或浏览器证据的句子。
 
 ## 真实浏览器观察（Chromium，一次性，结果进 PR）
 jsdom 没有布局，下面这些只能在浏览器里看（mock API，1440 / 390 / dark）：
@@ -177,7 +182,7 @@ jsdom 没有布局，下面这些只能在浏览器里看（mock API，1440 / 39
 4. 浅色与深色下高亮消息的底色都与未高亮的不同（计算样式），用户气泡与助手消息各看一次；高亮的外扩没有被转录区裁成不可辨。
 5. 打开/关闭搜索框时贴底的转录仍贴底（转录区变矮一行，由既有的尺寸变化重算处理）。
 
-**观察结果**（Chromium，mock API，生产构建，1440 / 390 / 1440-dark，脚本不入库）：1–5 全部成立。输入查询后首条匹配完整落在转录可视矩形内、`回到最新` 出现，Enter 后末条可见且按钮消失，Shift+Enter 回到首条；`window`、`document` 与四个祖先的 `scrollTop` 全程为 0；390px 无横向溢出，搜索框占 x=42–370；Tab 次序为输入框 → `上一个` → `下一个` → `关闭`；Escape 与 `关闭` 都关掉搜索框并把焦点还给顶栏按钮，再打开时输入框为空、`0/0`；两种主题下用户气泡与助手消息的高亮底色都与未高亮不同；全程无 Toast；贴底的转录在搜索框开合时保持贴底。另见「已知残留」7–9。
+**观察结果**（Chromium，mock API，生产构建，1440 / 390 / 1440-dark，脚本不入库）：1–5 全部成立。输入查询后首条匹配完整落在转录可视矩形内、`回到最新` 出现，Enter 后末条可见且按钮消失，Shift+Enter 回到首条；`window`、`document` 与四个祖先的 `scrollTop` 全程为 0；390px 无横向溢出，搜索框占 x=42–370；Tab 次序为输入框 → `上一个` → `下一个` → `关闭`；Escape 与 `关闭` 都关掉搜索框并把焦点还给顶栏按钮，再打开时输入框为空、`0/0`；两种主题下用户气泡与助手消息的高亮底色都与未高亮不同；全程无 Toast；贴底的转录在搜索框开合时保持贴底。另见「已知残留」7–9。修复轮 1 之后重跑同一脚本，上述各项不变；另量得（1440 / 390 / 320）输入框宽 240 / 202 / 132px，三个按钮均为 32×32，输入框与 `关闭` 的焦点环四边都在 `.chat-main` 之内，三个视口都无横向溢出。
 
 ## 已知残留
 1. 超过一屏高的消息居中后看不到开头（规格值 `block: "center"`）；消息级高亮不指出消息内的具体位置（Non-goal）。
@@ -188,8 +193,12 @@ jsdom 没有布局，下面这些只能在浏览器里看（mock API，1440 / 39
 6. `（已停止生成）`、错误文案等不在 `content` 里的可见文本搜不到（规格如此）。
 7. `type="search"` 的输入框在 Chromium 里有原生的清空按钮（输入框内的 ×），与搜索框右端的 `关闭` 相邻：前者清空查询（计数回到 `0/0`），后者关闭搜索框。这是 `Input variant="search"` 基元的既有外观，未改基元。
 8. ≤760px 时 `.chat-thread` 左右内边距为 0，高亮的 6px 外扩在左右两侧被转录区裁掉；高亮仍清楚可辨。
-9. **既有问题，非本刀引入**：1440px 下打开一个长会话，转录区停在距底 56px（顶栏高度）且不处于贴底状态；此时打开搜索框，转录保持位置（未贴底的既有规则）而不是跟到底部。基线构建同样如此，390px 不出现。已另建 issue 跟踪，本刀不处理。
+9. **既有问题，非本刀引入**：1440px 下打开一个长会话，转录区停在距底 56px（顶栏高度）且不处于贴底状态；此时打开搜索框，转录保持位置（未贴底的既有规则）而不是跟到底部。基线构建同样如此，390px 不出现。由 #726 跟踪（顶栏挂载与 scroll 事件的时序），本刀不处理；#726 若改 `onScroll` 的判定，须保证 `scrollToMessage` 里同步调用它时仍能解除贴底（S10、S11 是回归网）。
 10. 点 `回到最新` 后搜索高亮不变、焦点落在 `body`（该按钮点击后卸载的既有行为）。
+11. 焦点在 `上一个`/`下一个` 上时，若消息集合变化使匹配数变为 0，按钮被禁用，Chromium 会把焦点移到 `body`（规格规定 `n=0` 时禁用）。概率低，未处理。
+12. 查询无匹配时计数器保持 `0/0`、DOM 不变，live region 不播报，读屏用户得不到「无匹配」的反馈。
+13. 同一会话的历史若再次进入读取中（应用内没有触发路径，只能靠手改 URL），视图为空，仍匹配的当前会被清成 `0/n`。
+14. 「页面卸载即关闭」没有专门用例：状态是组件内的 `useState`，卸载即消失。「新回合」作为消息集合变化的触发源没有单独用例，它与流式增长、快照重载经同一个 `view` 入参到达 hook。「跳转后进入可视范围」只有上面的浏览器观察，没有入库的测试（ui-walk 的搜索步骤归 8.2b）。
 
 ## Seams under test
 - `fetch` mock 与 `FakeEventSource`（既有 support）：证明「不发请求」与流式路径。

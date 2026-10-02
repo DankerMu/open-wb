@@ -2,7 +2,7 @@
 
 ## 7. web — 对话内搜索（父 tasks 7.7）
 
-- [x] 7.7 新建 `search-match.ts`（`matchMessages(messages, query)`：空查询无匹配；否则转录顺序中每条消息 `content` 与查询各 `toLowerCase()` 子串判断；步骤/thinking/审批/卡片/错误不参与）+ `conversation-search.tsx`（`useConversationSearch` 与搜索框：`role="search"` 名 `对话内搜索`，打开即聚焦；输入 `搜索对话内容`、计数 `i/n`（`aria-live="polite"`）、`上一个`/`下一个`（`n=0` 禁用）/`关闭`；Enter/`下一个` 前进、Shift+Enter/`上一个` 后退、首尾循环、组合输入期间不生效；Escape/`关闭`/再点顶栏按钮关闭并清空、焦点还给顶栏按钮；查询变化 → 当前为首条匹配并滚动高亮；消息集合变化 → 重算 `n`，原当前仍匹配则保持并更新 `i` 否则清空当前、不滚动；切换会话/欢迎态/卸载即关闭）+ `scroll-follow.tsx` `FollowTranscript` 增 `handleRef` 暴露 `scrollToMessage(id)`（`[data-message-id]` + `scrollIntoView({block:"center"})` + 同步重算贴底）+ `conversation-view.tsx`（`data-message-id`、当前匹配 `aria-current="true"` 与类 `chat-msg--search-current`、搜索框位置）+ `topbar-actions.ts` 的 `对话内搜索` 槽（`expanded`）+ `page.tsx` 接线 + `messages.css`。验证：新建 `web/test/search-match.test.ts`（U1–U4）与 `web/test/chat-page-search.test.tsx`（S1–S17）；既有测试只改 proposal「偏差」1 列出的期望
+- [x] 7.7 新建 `search-match.ts`（`matchMessages(messages, query)`：空查询无匹配；否则转录顺序中每条消息 `content` 与查询各 `toLowerCase()` 子串判断；步骤/thinking/审批/卡片/错误不参与）+ `conversation-search.tsx`（`useConversationSearch` 与搜索框：`role="search"` 名 `对话内搜索`，打开即聚焦；输入 `搜索对话内容`、计数 `i/n`（`aria-live="polite"`）、`上一个`/`下一个`（`n=0` 禁用）/`关闭`；Enter/`下一个` 前进、Shift+Enter/`上一个` 后退、首尾循环、组合输入期间不生效；Escape/`关闭`/再点顶栏按钮关闭并清空、焦点还给顶栏按钮；查询变化 → 当前为首条匹配并滚动高亮；消息集合变化 → 重算 `n`，原当前仍匹配则保持并更新 `i` 否则清空当前、不滚动；切换会话/欢迎态/卸载即关闭）+ `scroll-follow.tsx` `FollowTranscript` 增 `handleRef` 暴露 `scrollToMessage(id)`（`[data-message-id]` + `scrollIntoView({block:"center"})` + 同步重算贴底）+ `conversation-view.tsx`（`data-message-id`、当前匹配 `aria-current="true"` 与类 `chat-msg--search-current`、搜索框位置）+ `topbar-actions.ts` 的 `对话内搜索` 槽（`expanded`）+ `page.tsx` 接线 + `messages.css`。验证：新建 `web/test/search-match.test.ts`（U1–U4）与 `web/test/chat-page-search.test.tsx` 与 `web/test/chat-page-search-follow.test.tsx`（S1–S20）；既有测试只改 proposal「偏差」1 列出的期望
 
 ## Risk packs
 
@@ -24,6 +24,6 @@
 ## 通用纪律（继承父 tasks.md）
 - [x] 新测试进新文件 `web/test/search-match.test.ts` 与 `web/test/chat-page-search*.test.tsx`（夹具从既有 support 导入，不改它们；缺的放新文件 `chat-page-search-support.tsx`）；既有测试只改 proposal「偏差」1 列出的期望；`chat-scroll-follow.test.tsx` 零 diff。
 - [x] RED 集合 = U1–U4、S1–S17 中依赖新行为的用例；实现前就成立的护栏逐条标出。实现前后各跑一次并记录命令与结果。
-- [x] `page.tsx` 694 → 697（+3：import、hook 调用、`search` prop；`useTopbar` 那一行原地改）；`conversation-view.tsx` 286 → 316、`scroll-follow.tsx` 119 → 148、`topbar-actions.ts` 44 → 47、`messages.css` 696 → 736；新文件 `conversation-search.tsx` 194、`search-match.ts` 16。
+- [x] `page.tsx` 694 → 697（+3：import、hook 调用、`search` prop；`useTopbar` 那一行原地改）；`conversation-view.tsx` 286 → 316、`scroll-follow.tsx` 119 → 148、`topbar-actions.ts` 44 → 47、`messages.css` 696 → 744；新文件 `conversation-search.tsx` 194、`search-match.ts` 16。
 - [x] `npm test --workspace web`、`make lint`、`make typecheck`、`make anti-drift`（knip 零新增、jscpd 克隆数 178 不增（门禁本身是 3% 占比，克隆数是本仓库子刀沿用的自我约束））、`bash scripts/size-guard.sh` 退出 0；`make ui-walk` 由 CI 的 ui-walk job 覆盖（顶栏三按钮后 390px 的既有走查仍须通过）；`openspec validate conversation-search --strict --no-interactive` 通过。
 - [x] 真实浏览器一次性观察（Chromium，1440 / 390 / dark）：design「真实浏览器观察」列出的各项，结果写进 PR。
