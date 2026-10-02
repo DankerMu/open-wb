@@ -2,7 +2,7 @@
 
 ## 7. web — thinking.delta 解码归约与深度思考折叠块（父 tasks 7.4）
 
-- [ ] 7.4 新建 `stream-thinking.ts`（`thinking.delta` 严格解码与归约：按 `messageId` 追加到消息 `thinking`，`null` 视为空串；不存在的 assistant 按 `text.delta` 的既有方式补建，user 消息不改）+ `thinking-block.tsx`（`<details class="thinking-block">`，summary `深度思考过程` 前置 `chevron-right`，主体 `pre-wrap` 纯文本不经 Markdown；消息 running 展开、进入 `done|failed|stopped` 收起、快照终态为收起、两次迁移间手动开合保留；null/空串不渲染；不参与 `复制`）+ `conversation-view.tsx` 助手块插入折叠块位（位于审批条之前）+ `stream.ts`：视图 `thinking` 字段、`turn.start` 复位、`DATA_EVENTS`/`ChatEvent`/`decodeEvent`/`applyChatEvent` 接线 + `messages.css` 样式。验证：新建 `web/test/chat-thinking.test.tsx`（T1–T12）；既有测试只改 proposal「偏差」1 列出的视图字面量
+- [x] 7.4 新建 `stream-thinking.ts`（`thinking.delta` 严格解码与归约：按 `messageId` 追加到消息 `thinking`，`null` 视为空串；不存在的 assistant 按 `text.delta` 的既有方式补建，user 消息不改）+ `thinking-block.tsx`（`<details class="thinking-block">`，summary `深度思考过程` 前置 `chevron-right`，主体 `pre-wrap` 纯文本不经 Markdown；消息 running 展开、进入 `done|failed|stopped` 收起、快照终态为收起、两次迁移间手动开合保留；null/空串不渲染；不参与 `复制`）+ `conversation-view.tsx` 助手块插入折叠块位（位于审批条之前）+ `stream.ts`：视图 `thinking` 字段、`turn.start` 复位、`DATA_EVENTS`/`ChatEvent`/`decodeEvent`/`applyChatEvent` 接线 + `messages.css` 样式。验证：新建 `web/test/chat-thinking.test.tsx`（T1–T12）；既有测试只改 proposal「偏差」1 列出的视图字面量
 
 ## Risk packs
 
@@ -23,8 +23,8 @@
 模型输出按纯文本渲染（不经 Markdown、不注入 HTML）不归上面任何一个 pack，单列证据 T11。
 
 ## 通用纪律（继承父 tasks.md）
-- [ ] 新测试进新文件 `web/test/chat-thinking.test.tsx`；既有测试只按 proposal「偏差」1 在视图字面量里加 `thinking: null`，不改断言语义。
-- [ ] RED 集合 = T1–T12 中依赖新行为的用例；实现前后各跑一次并记录命令与结果。
-- [ ] `stream.ts` 773 → ≤800；`page.tsx` 688 不变；`chat.css` 不动。PR 记录这些数。
-- [ ] `npm test --workspace web`、`make lint`、`make typecheck`、`make anti-drift`（knip 零新增、jscpd 零新增）、`bash scripts/size-guard.sh` 退出 0；`openspec validate thinking-fold-block --strict --no-interactive` 通过。
-- [ ] 页面级用例点 summary 用真实点击（jsdom 29 同步翻转 `open`）；不 fake `setTimeout`（`chat-approval-bar.test.tsx:170` 只 fake Date/setInterval 的写法可照搬）。
+- [x] 新测试进新文件 `web/test/chat-thinking.test.tsx`；既有测试只按 proposal「偏差」1 在视图字面量里加 `thinking: null`，不改断言语义。
+- [x] RED 集合 = T1–T12 中依赖新行为的用例；实现前后各跑一次并记录命令与结果。
+- [x] `stream.ts` 773 → ≤800；`page.tsx` 688 不变；`chat.css` 不动。PR 记录这些数。
+- [x] `npm test --workspace web`、`make lint`、`make typecheck`、`make anti-drift`（knip 零新增、jscpd 零新增）、`bash scripts/size-guard.sh` 退出 0；`openspec validate thinking-fold-block --strict --no-interactive` 通过。
+- [x] 页面级用例点 summary 用真实点击（jsdom 29 同步翻转 `open`）；不 fake `setTimeout`（`chat-approval-bar.test.tsx:170` 只 fake Date/setInterval 的写法可照搬）。

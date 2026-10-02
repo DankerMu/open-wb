@@ -86,6 +86,12 @@ export function ThinkingBlock({ running, text }: { running: boolean; text: strin
 
 点 summary 是真实交互：jsdom 29 给 `summary` 实现了激活行为，点击同步翻转 `open`。测试不 fake `setTimeout`。
 
+## 实现记录
+- 行数：`stream.ts` 773 → 787；`conversation-view.tsx` 258 → 262；`messages.css` 486 → 530；新文件 `stream-thinking.ts` 28、`thinking-block.tsx` 15；`page.tsx` 688、`chat.css` 797 零 diff。
+- 测试：`web/test/chat-thinking.test.tsx` 509 行 27 例。基线上 24 红 3 绿，绿的三例是 T1 的未知类型护栏、T5「指向 user 消息返回同一引用」（基线走 `default` 分支天然成立，没有变异能打红它）、T12 的「`chat.css` 不含 `thinking-`」。
+- 既有测试共加 16 行 `thinking: null,`（`chat-stream.test.ts` 10、`chat-stream-connection.test.ts` 2、`chat-stream-stopped.test.ts` 2、`chat-stream-approvals.test.ts` 1、`chat-stream-support.ts` 1）。`chat-stream.test.ts` 本地 `userView` 与 support 导出的 `userView` 里该行的位置不同：放同一位置时这两个本就重复的字面量会跨过 jscpd 门槛（178 → 179）。
+- 比 T1–T12 多的断言：T2 加 `messageId` 为 2^53 一行；T3 的 `null → x` 与 T5 的补建从 `done` 会话出发（这样才能看出 thinking.delta 没改会话状态）；T6/T8/T9 断言折叠块是同一个 DOM 节点（没有重新挂载）；T9 在 `error` 之后即断言已收起。
+
 ## 已知残留
 1. `error` 把消息置为 `failed` 之后到 `turn.end` 之间，用户若手动展开，随后的 `turn.end` 是终态 → 终态（prop `false → false`），不会再次收起。规格的 Scenario 没钉这一段。
 2. 终态消息收到 thinking.delta 仍会追加（归约器不按状态设门，与 `text.delta` 一致）；服务端在 `turn.end` 之前冲刷，正常不会发生。
