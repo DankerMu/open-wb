@@ -1,8 +1,8 @@
 /**
  * Issue #514 publication gate: `persistEvent` neither stores nor publishes `thinking.delta` /
- * `files.changed`. Since #519 the supervisor takes `thinking.delta` into its merge buffer before
- * `persistEvent` (covered by session-thinking.test.ts); `files.changed` stays unpublished until the
- * file-change slice (3.4) lands.
+ * `files.changed` here. Since #519 the supervisor takes `thinking.delta` into its merge buffer
+ * first (session-thinking.test.ts); since #522 an unbound session (root `null`) or an unregistered
+ * tool call, both the case below, still drops `files.changed` (persist-files-changed.test.ts).
  */
 import { describe, expect, it, vi } from "vitest";
 import type { ChatEvent } from "../src/sessions/events.js";
@@ -52,7 +52,7 @@ function persistAlone(event: ChatEvent<string>) {
   const toolIds = new Map<string, number>([["call_prior", 7]]);
   const nextOrdinal = vi.fn(() => 1);
   const settled: SettledApproval[] = [];
-  const published = persistEvent(store, ASSISTANT_ID, event, toolIds, nextOrdinal, settled);
+  const published = persistEvent(store, ASSISTANT_ID, event, toolIds, nextOrdinal, settled, null);
   return { published, touched, toolIds: [...toolIds], nextOrdinal, settled };
 }
 
