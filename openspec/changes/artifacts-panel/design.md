@@ -36,7 +36,7 @@ export function useArtifactsPanel(
   workspace: Workspace | undefined,
 ): { open(trigger: HTMLElement): void; panel: ReactNode }
 ```
-- 状态只有 `open: boolean`。渲染期校正：`if (open && view === null) setOpen(false);`（同组件 state 的渲染期调整，React 支持，不会循环）。切换会话时 `historyView` 在第一次渲染就是 `null`（`ownership.ts:27-31` 的归属判断按会话 id 与 client 比较，`page.tsx:627-630`），换账号（`page.tsx:195-198`）与历史重新读取同样；重同步、重新生成、分叉、重连都是 ready → ready，不经过 `null`。所以只看 `view === null` 就够，不需要记会话 id，hook 也不收 `sessionId`。关闭后回到原会话不重开。
+- 状态只有 `open: boolean`。渲染期校正：`if (open && view === null) setOpen(false);`（同组件 state 的渲染期调整，React 支持，不会循环）。切换会话时 `historyView` 在第一次渲染就是 `null`（`ownership.ts:27-31` 的归属判断按会话 id 与 client 比较，`page.tsx:627-630`），换账号（`page.tsx:195-198`）与历史重新读取同样；重同步、重新生成、重连都是 ready → ready，不经过 `null`（分叉会导航到新会话 id，属于切换会话）。所以只看 `view === null` 就够，不需要记会话 id，hook 也不收 `sessionId`。关闭后回到原会话不重开。
 - `open(trigger)`：`view` 为空或 D1 的聚合为空 → `toast.show({ type: "info", message: "当前任务暂无产物" })`，不动状态（历史还在读取或读取失败时 `view` 为空，同样走这里）；否则 **先 `trigger.focus()`** 再 `setOpen(true)`。`Drawer` 记下的打开者是打开瞬间的活动元素；鼠标点击在 Safari 里不聚焦按钮（jsdom 的 `fireEvent.click` 也不），不先聚焦的话关闭后焦点落在 body。这正是 `onSelect(trigger)` 给 `trigger` 的用途。
 - `panel`：
   ```tsx
@@ -92,9 +92,9 @@ useTopbar(chatTopbar(selected, sessionActions.openRename, artifacts.open));
 ## Sibling surfaces
 - `FileChangesCard`（D2 的抽取）：`web/test/chat-page-file-changes.test.tsx` 59 例是回归网，零 diff。
 - `ArtifactCards`（D3 的抽取）：`web/test/chat-page-artifact-card.test.tsx` 与 `chat-page-artifact-card-state.test.tsx` 是回归网，零 diff。
-- 顶栏 `重命名`：同一 `actions` 通道，次序由 `CHAT_TOPBAR_ACTIONS` 固定；M15、`chat-page-session-rename-pin.test.tsx`（D8 的三处）。
+- 顶栏 `重命名`：同一 `actions` 通道，次序由 `CHAT_TOPBAR_ACTIONS` 固定；M15、`chat-page-session-rename-pin.test.tsx`（D8 的四处）。
 - `Drawer` 的另一个消费者（shell 的窄屏侧栏覆盖层，`web/test/app-shell-responsive.test.tsx`）：`web/src/ui/**` 不改。
-- 7.7 `对话内搜索`：会把 banner 按钮变成三个，并再改一次 D8 的三处与 chat-web「顶栏入口」Scenario。
+- 7.7 `对话内搜索`：会把 banner 按钮变成三个，并再改一次 D8 的四处与 chat-web「顶栏入口」Scenario。
 
 ## Must-preserve
 - 两张卡的 DOM、文案、请求、拉取纪律、降级规则与在助手块里的位置。
@@ -126,7 +126,7 @@ useTopbar(chatTopbar(selected, sessionActions.openRename, artifacts.open));
 - P11 `查看详情`：点抽屉里某行的 `查看详情` → 路由到 `/files?ws=<空间 id>`，抽屉消失。
 - P12 静态与护栏：`.artifacts-panel-list` 的规则在 `messages.css`、`chat.css` 不含 `artifacts-panel`（护栏）；`web/src/features/chat/artifacts-panel.tsx` 的源码不含 `fetchPreview`、`sandbox`、`clipboard`、`createObjectURL`（复用而非复制的静态证据）。
 
-基线运行：测试不导入实现前不存在的模块（全是页面级），直接在基线树上跑；P1 的欢迎态一句与 P12 的 `chat.css` 一句是实现前就成立的护栏，其余应为红；报告里逐条列出基线即绿的用例。
+基线运行：测试不导入实现前不存在的模块（全是页面级），直接在基线树上跑；P1 的欢迎态一句、P1 单元断言里 `chatTopbar(undefined, …)` 恰为 `{}` 一句（运行时忽略多余实参）与 P12 的 `chat.css` 一句是实现前就成立的护栏，其余应为红；报告里逐条列出基线即绿的用例。
 
 变异自检（实现者在沙箱里做，做完还原，写进报告；每个至少打红一例）：聚合取首次值（`if (!byPath.has(path))`）；位置取最后（先 `delete` 再 `set`）；只聚合最后一条助手消息；计入 running 步骤；打开时拍快照（聚合存进 state）；空也开抽屉；非空也只 Toast；`open()` 不调 `trigger.focus()`；传 `expanded: true/false`；`artifacts` 槽排到 `rename` 之前（改 `chatTopbarActions` 入参次序不应有影响——这一条预期**存活**，由 M15 钉常量次序；改常量次序则 P1 与 M15 红）；欢迎态也上报 actions（P1 的单元断言）；空间不可解析时弹 Toast 而不开抽屉；空间不可解析时照样渲染操作按钮；操作按钮放在 `查看详情` 之前；行里另写一份 `fetchPreview` 调用（P12 的静态断言）；去掉渲染期的 `view === null` 校正；脚部 `关闭` 不关；`width={288}`；`side="left"`；标题不是 `产物面板`；Toast 文案或类型改动（`error`）；`FileChangeRow` 不渲染 `children`；`useChangeSpace` 的前缀用 `workspace.root`（既有 C9/C11 与 P2 都应红）。
 
