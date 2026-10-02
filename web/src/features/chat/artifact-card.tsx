@@ -42,6 +42,11 @@ function useArtifactAction({ artifact, client, path, workspaceId }: ArtifactActi
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<{ text: string; truncated: boolean } | null>(null);
   useEffect(() => () => controller.current?.abort(), []);
+  // A browser moves focus to `body` when the focused button is disabled by `busy`; once the request
+  // ended, hand it back to the clicked button unless focus has gone elsewhere (issue 537).
+  useEffect(() => {
+    if (!busy && document.activeElement === document.body) opener.current?.focus();
+  }, [busy]);
 
   /** Clicks a temporary link; the URL is revoked a task later so the browser can still read it. */
   function download(url: string) {
