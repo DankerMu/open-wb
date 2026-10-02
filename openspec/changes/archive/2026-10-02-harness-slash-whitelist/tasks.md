@@ -28,4 +28,4 @@ Fixture level: expanded
 - [x] 改动只有 `smoke/session-meta.hurl` 与 `web/e2e/ui-walk-sessions.spec.ts`；其它被跟踪文件零 diff。
 - [x] 没有 RED 阶段；负对照逐条记录失败所在的条目 / 步骤。
 - [x] design「Required evidence › 门禁」G1、G2 全部退出 0；`openspec validate harness-slash-whitelist --strict --no-interactive` 通过。
-- [ ] 实测时长（`make smoke` 一次运行、新旅程两个 project、CI）写进 PR。
+- [x] 实测时长（`make smoke` 一次运行、新旅程两个 project、CI）写进 PR。
