@@ -89,10 +89,10 @@ useWelcomeOptions(workspaces: readonly Workspace[] | null, workspacesError: stri
 - W7 读取中与失败：`/api/workspaces` 挂起 → 弹层显示 `正在读取工作空间` 与 `未选择`（可选，选择后弹层关闭、按钮仍为 `任务启动于 未选择`）；503 信封 `服务暂不可用` → 弹层内 `role="alert"` 文本恰为该 message，`未选择` 仍在；非信封失败 → `请求失败，请稍后重试`；失败后的重读在途时弹层显示 `正在读取工作空间`、无 alert；重读成功后弹层显示列表、无 alert。欢迎态下触发列表重读的方式：侧栏 `新建会话` 成功（`page.tsx:509` 的 `refreshList`）后用 `renderChatPage` 返回的 `router.navigate("/")` 回到欢迎态。
 - W8 改回未选择：选 `项目A` 后再打开并选 `未选择` → 按钮名 `任务启动于 未选择`；发送 → body 恰为 `{"scene":"office"}`（无 `workspaceId` 键）。
 - W9 两条路径一致：选 `代码开发` 与 `项目A` 后点侧栏 `新建会话` → body 恰为 `{"scene":"code","workspaceId":"<项目A id>"}`。
-- W10 锁定：欢迎态发送后创建请求挂起期间，三个胶囊与 footer 按钮均 `disabled`。另一例弹层打开时提交表单（`fireEvent.submit(form)`）→ 弹层消失。
+- W10 锁定：欢迎态发送后创建请求挂起期间，三个胶囊与 footer 按钮均 `disabled`。另一例弹层打开时提交表单（`fireEvent.submit(form)`），创建请求挂起 → 弹层消失；随后请求以 400 信封结束（同 W14）→ 解锁后 footer 按钮可用，`dialog` name `选择工作空间` 仍不存在（关闭而非隐藏，不自动重开）。
 - W11 会话页：`/?session=<id>` 下没有 `场景` 组与 `任务启动于` 按钮；（保持项）`.chat-composer-card` 的最后一个子元素是 `.chat-composer-toolbar`。
 - W12 状态保留与复位：选 `代码开发` 与 `项目A` → 从侧栏选中一个既有会话（胶囊与 footer 消失）→ `router.navigate("/")`（`renderChatPage` 的返回值，`web/test/chat-page-support.tsx:25-34`）回到欢迎态 → `代码开发` 仍为选中、按钮仍为 `任务启动于 项目A`、快捷任务行为代码开发五项。另一例离开会话页（`/center`）再回到 `/` → `日常办公` 选中、`任务启动于 未选择`。
-- W13 生效空间按当前列表解析：选 `项目A` → 触发一次列表重读（侧栏 `新建会话`，其后的 `/api/workspaces` 读取不再含 `项目A`）→ 回到 `/` → 按钮名 `任务启动于 未选择`；发送 → body 不含 `workspaceId`。另一例重读失败（503）→ 同样为 `未选择`、body 不含 `workspaceId`；再一次成功读取含 `项目A` → 按钮恢复 `任务启动于 项目A`。（重读均以「侧栏 `新建会话` 成功 → `router.navigate("/")`」触发。）账号切换（`renderChatPageWithAuthProbe` + `renewAccount`，先例 `web/test/chat-page-sidebar.test.tsx:568-599`）：选 `项目A` 后续期为另一账号且其 `/api/workspaces` 挂起 → 按钮立即为 `任务启动于 未选择`、页面不含 `项目A`、弹层显示 `正在读取工作空间`（不显示上一账号的失败文案或列表）；列表到达（不含该 id）后发送 → body 无 `workspaceId` 键。
+- W13 生效空间按当前列表解析：选 `项目A` → 触发一次列表重读（侧栏 `新建会话`，其后的 `/api/workspaces` 读取不再含 `项目A`）→ 回到 `/` → 按钮名 `任务启动于 未选择`；发送 → body 不含 `workspaceId`。另一例重读失败（503）→ 同样为 `未选择`、body 不含 `workspaceId`；再一次成功读取含 `项目A` → 按钮恢复 `任务启动于 项目A`。（重读均以「侧栏 `新建会话` 成功 → `router.navigate("/")`」触发。）账号切换（`renderChatPageWithAuthProbe` + `renewAccount`，先例 `web/test/chat-page-sidebar.test.tsx:568-599`）：选 `项目A` 后续期为另一账号且其 `/api/workspaces` 挂起 → 按钮立即为 `任务启动于 未选择`、页面不含 `项目A`、弹层显示 `正在读取工作空间`（不显示上一账号的列表）；列表到达（不含该 id）后发送 → body 无 `workspaceId` 键。
 - W14 创建失败后选择保留：选 `创意设计` 与 `项目A`，发送，`POST /api/sessions` 返回 400 信封 → 既有的错误提示与草稿恢复；`创意设计` 仍选中、按钮仍为 `任务启动于 项目A`；再次发送的 body 与第一次相同。
 
 静态样式断言（同 7.2a M1 读 `chat.css` 的写法）：`(max-width: 760px)` 媒体块内 `.chat-quick-row` 含 `flex-wrap: nowrap` 与 `overflow-x: auto`；该规则不出现在媒体块之外。
@@ -101,7 +101,7 @@ useWelcomeOptions(workspaces: readonly Workspace[] | null, workspacesError: stri
 
 实现前后各跑一次并记录：RED 集合 = W1–W14（W11 的保持项除外）；既有套件实现前后皆绿。
 
-一次性真实浏览器观察（不入库，写进 PR）：1440×900、1024×768、390×844 各一次——免责声明底边到首屏底的余量（真实组件，三个视口）、页面无横向滚动、五张卡同行（前两个视口）；390 下快捷任务行单行且可横向滚动到最后一项；胶囊切换后的样式；footer 弹层在视口内、可点中（`elementFromPoint`）、长空间名不溢出；选空间后发送的请求 body。
+一次性真实浏览器观察（不入库，写进 PR）：1440×900、1024×768、390×844 各一次——免责声明底边到首屏底的余量（真实组件，三个视口）、页面无横向滚动、五张卡同行（前两个视口）；390 下快捷任务行单行且可横向滚动到最后一项、键盘聚焦 chip 时焦点环完整（未被行容器裁掉）；胶囊切换后的样式；footer 弹层在视口内、可点中（`elementFromPoint`）、长空间名不溢出；选空间后发送的请求 body。
 
 ## 已知残留
 1. 场景与空间选择不随账号切换显式复位：场景是纯界面偏好，保留；空间按 D2 自然失效。
