@@ -72,7 +72,7 @@ const sessionActions = useSessionActions(client, setListState, setHistoryState, 
 5. `「更多」按钮与菜单项不关闭导航覆盖层`（主规格既有句）对 `删除` 同样成立。
 
 ## Required evidence
-新建 `web/test/chat-page-session-delete.test.tsx`（首行引入 `./radix-platform.js`；复用 `chat-page-session-meta-support.tsx` 的 `mountSessions`、`mountTwoAccounts`、`openEntryMenu`、`chooseEntryAction`、`toasts` 等；DELETE 专用的查询与请求断言写在新文件里，既有 support 模块不增行；新文件超过 800 行时拆出 `chat-page-session-delete-support.tsx`）。`DELETE` 与 `PATCH` 同路径，`createFetchMock` 只按路径路由，方法从 `options.method` 断言。确认框以 `role="alertdialog"`、name `删除任务` 定位，框内的 `删除` 用 `within()`（与菜单项同名）。全部 RED，除注明者。
+新建 `web/test/chat-page-session-delete.test.tsx`（首行引入 `./radix-platform.js`；复用 `chat-page-session-meta-support.tsx` 的 `mountSessions`、`mountTwoAccounts`、`openEntryMenu`、`chooseEntryAction`、`toasts` 等；DELETE 专用的查询与请求断言写在新文件里，既有 support 模块不增行；夹具与查询落 `chat-page-session-delete-support.tsx`——两者合计超过 800 行）。`DELETE` 与 `PATCH` 同路径，`createFetchMock` 只按路径路由，方法从 `options.method` 断言。确认框以 `role="alertdialog"`、name `删除任务` 定位，框内的 `删除` 用 `within()`（与菜单项同名）。全部 RED，除注明者。
 - R1 菜单三项：未置顶、已置顶、`running`、`title: null` 四种会话的菜单 `menuitem` 文本恰为 `重命名`、`置顶任务`|`取消置顶`、`删除`；`删除` 项带 `ui-menu-item--danger`、图标类含 `lucide-trash`、无 `aria-disabled`/`data-disabled`；无 `导出记录`。
 - R2 确认框与取消：选择 `删除` → `alertdialog` name `删除任务`，说明文本恰为 `确定要删除「<标题>」吗？删除后不可恢复。`（`title: null` 的会话为 `「新会话」`），按钮恰为 `取消`、`删除`，`删除` 是 danger 变体且可用，无 `删除请求已发送` 提示；点 `取消` → 确认框消失、没有 `DELETE`、焦点回到该条目的「更多」按钮、列表不变；另一例按 Escape 结果相同。
 - R3 删除当前且 `running` 的会话（Scenario 第一组）：挂载 `/?from=keep&session=<A>#hash`，A 为 `running` 且事件流已连接；确认 → 恰一次发往 `/api/sessions/<A>` 的请求，`method` 为 `DELETE`、无 `body`、无 `Content-Type`。DELETE 挂起期间：确认按钮 `disabled` 且 `aria-busy="true"`、取消按钮文案为 `关闭`、提示 `删除请求已发送，关闭窗口不会撤销请求。` 可见；条目仍在列表、URL 不变、事件流未关闭、没有 Toast。204 → 确认框消失；A 的条目消失、其余条目次序不变；Toast 恰为 `任务已删除`；location 恰为 `/?from=keep#hash` 且 `history.length` 与删除前相同（replace，不是 push）；关闭先于导航：A 的 `FakeEventSource` 的 `close()` 被调用的那一刻 location 仍含 `session=<A>`（spy `close`，在调用时读取 location）；hero heading `WorkBuddy，我帮你` 可见；页面内没有 `role="alert"`；A 的 `FakeEventSource` `readyState` 为 CLOSED 且之后没有新建 EventSource；204 之后 `/api/sessions/<A>/messages` 与 `/api/sessions` 的请求数不再增加。
@@ -88,6 +88,8 @@ const sessionActions = useSessionActions(client, setListState, setHistoryState, 
 - R13 `≤760px` 覆盖层：`导航` 内条目 `更多操作` → `删除` → 确认框出现且 `导航` 元素仍在 DOM；Escape → 只关确认框、没有 `DELETE`、`导航` 仍是同一元素、焦点回到该条目的「更多」按钮；再次 `删除` 并确认（当前会话）→ 204 后 `导航` 仍是同一元素、条目消失、location 不含 `?session=`。（确认框打开期间 Drawer 被标为 `aria-hidden`，按元素「仍在 DOM 中」断言，同 7.2a M14。）
 
 既有断言更新（非 RED 新增，随实现改为三项）：`chat-page-session-rename-pin.test.tsx:138-148` 与 `:99` 的用例标题、`chat-page-session-pin.test.tsx:97`、`:119-122`（多行数组加一项会多一行，改写成不增行的形式）。
+
+实现记录：R6 的 409 信封、500 非信封与「失败后可再次确认」合在一个用例里；「location 取响应到达时的值」没有可区分的用例（会话切换不改变其它 search/hash，确认时与响应时算出的目标 URL 相同）。一次性真实浏览器观察两种视口全部符合，详见 PR。
 
 实现前后各跑一次并记录：RED 集合 = R1–R13；既有套件实现前后皆绿（实现后以更新过的三处断言计）。
 

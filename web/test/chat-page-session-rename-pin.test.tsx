@@ -96,7 +96,7 @@ async function expectFailureToast(nav: HTMLElement) {
 }
 
 describe("条目「更多」菜单 (M1, M16)", () => {
-  it("M1 每个条目恰一个同级「更多」按钮；菜单恰为 重命名 + 置顶任务|取消置顶，任何状态可用", async () => {
+  it("M1 每个条目恰一个同级「更多」按钮；菜单恰为 重命名 + 置顶任务|取消置顶 + 删除，任何状态可用", async () => {
     mountSessions("/", [
       view(A, OLD),
       view(B, OTHER, { pinnedAt: PINNED_AT }),
@@ -135,16 +135,16 @@ describe("条目「更多」菜单 (M1, M16)", () => {
       ["新会话", PIN],
     ] as const) {
       const { items, menu } = await openEntryMenu(nav, title);
-      expect(items.map((item) => item.textContent)).toEqual(["重命名", second]);
+      expect(items.map((item) => item.textContent)).toEqual(["重命名", second, "删除"]);
       expect(items.map((item) => item.querySelector("svg")?.getAttribute("class"))).toEqual([
         expect.stringContaining("lucide-pencil"),
         expect.stringContaining("lucide-star"),
+        expect.stringContaining("lucide-trash"),
       ]);
       for (const item of items) {
         expect(item.hasAttribute("aria-disabled")).toBe(false);
         expect(item.hasAttribute("data-disabled")).toBe(false);
       }
-      expect(within(menu).queryByRole("menuitem", { name: "删除" })).toBeNull();
       expect(within(menu).queryByRole("menuitem", { name: "导出记录" })).toBeNull();
       fireEvent.keyDown(menu, { key: "Escape" });
       await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
