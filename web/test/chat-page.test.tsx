@@ -335,9 +335,6 @@ describe("welcome state", () => {
     const input = welcomeInput();
     expect(input.placeholder).toBe("今天帮你做些什么");
     expect(screen.queryByRole("button", { name: /查看更多|附件|模型|麦克风/ })).toBeNull();
-    for (const scene of ["日常办公", "代码开发", "创意设计"]) {
-      expect(screen.queryByText(scene)).toBeNull();
-    }
 
     const hero = screen.getByRole("heading", { level: 1, name: HERO });
     expect(precedes(hero, quickRow())).toBe(true);

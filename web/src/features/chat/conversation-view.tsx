@@ -3,12 +3,14 @@ import { MarkdownView } from "../../lib/markdown-view.js";
 import { BrandMark, Icon } from "../../ui/index.js";
 import { ApprovalBars } from "./approval-bar.js";
 import { Composer } from "./composer.js";
+import { ComposerFooter } from "./composer-footer.js";
 import { ForkAction, MessageActions } from "./message-actions.js";
 import { FollowTranscript } from "./scroll-follow.js";
 import { SESSION_STATUS_LABEL } from "./status-label.js";
 import { summarizeStepDetail } from "./step-summary.js";
 import type { ChatState } from "./stream.js";
 import { WelcomeIntro, WelcomePlaybooks } from "./welcome.js";
+import type { WelcomeOptions } from "./welcome-options.js";
 
 type AnswerApproval = ComponentProps<typeof ApprovalBars>["onAnswer"];
 type StopTurn = ComponentProps<typeof Composer>["onStop"];
@@ -30,6 +32,8 @@ type ConversationViewProps = {
   requestedSessionId: string | null;
   sendDisabled: boolean;
   streamError: string | null;
+  /** 欢迎态的场景与空间选择（状态在会话页）；有当前会话时不渲染对应控件。 */
+  welcome: WelcomeOptions;
 };
 
 type ChatMessageView = ChatState["messages"][number];
@@ -181,6 +185,7 @@ export function ConversationView({
   requestedSessionId,
   sendDisabled,
   streamError,
+  welcome,
 }: ConversationViewProps) {
   return (
     <div className="chat-layout">
@@ -214,12 +219,28 @@ export function ConversationView({
           </FollowTranscript>
         ) : (
           <div className="chat-transcript">
-            <WelcomeIntro disabled={composerDisabled} onPick={onChangeDraft} />
+            <WelcomeIntro
+              disabled={composerDisabled}
+              onPick={onChangeDraft}
+              onSelectScene={welcome.selectScene}
+              scene={welcome.scene}
+            />
           </div>
         )}
         <Composer
           disabled={composerDisabled}
           draft={draft}
+          footer={
+            requestedSessionId ? null : (
+              <ComposerFooter
+                disabled={composerDisabled}
+                onSelect={welcome.selectWorkspace}
+                workspace={welcome.workspace}
+                workspaces={welcome.workspaces}
+                workspacesError={welcome.workspacesError}
+              />
+            )
+          }
           generating={generating}
           onChangeDraft={onChangeDraft}
           onStop={onStop}

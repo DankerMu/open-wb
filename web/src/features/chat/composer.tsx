@@ -1,4 +1,4 @@
-import { type FormEvent, useId, useState } from "react";
+import { type FormEvent, type ReactNode, useId, useState } from "react";
 import { Button, Icon, useToast } from "../../ui/index.js";
 
 type StopTurn = () => Promise<"stopping" | null>;
@@ -6,6 +6,8 @@ type StopTurn = () => Promise<"stopping" | null>;
 type ComposerProps = {
   disabled: boolean;
   draft: string;
+  /** 卡片内工具栏之后的末尾节点（欢迎态的空间选择）；不传时卡片以工具栏结尾。 */
+  footer?: ReactNode;
   generating: boolean;
   onChangeDraft(value: string): void;
   onStop: StopTurn;
@@ -20,6 +22,7 @@ type ComposerProps = {
 export function Composer({
   disabled,
   draft,
+  footer,
   generating,
   onChangeDraft,
   onStop,
@@ -84,6 +87,7 @@ export function Composer({
             </Button>
           )}
         </div>
+        {footer}
       </div>
       <p className="chat-composer-hint" id={hintId}>
         Enter 发送 · Shift+Enter 换行

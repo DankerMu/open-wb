@@ -30,6 +30,7 @@ import type {
   ChatOwnedAlert,
   PendingCreateSend,
 } from "./types.js";
+import { useWelcomeOptions } from "./welcome-options.js";
 import { useWorkspaceList } from "./workspace-list.js";
 
 type SessionEventHandle = { close(): void; resync(): void };
@@ -68,7 +69,12 @@ export function ChatPage() {
   const [regenerateOwner, setRegenerateOwner] = useState<ChatMutationOwner | null>(null);
   const [forkOwner, setForkOwner] = useState<ChatMutationOwner | null>(null);
   const [sessionFilter, setSessionFilter] = useState(DEFAULT_SESSION_FILTER);
-  const { refresh: refreshWorkspaces, workspaces } = useWorkspaceList(client);
+  const {
+    error: workspacesError,
+    refresh: refreshWorkspaces,
+    workspaces,
+  } = useWorkspaceList(client);
+  const welcome = useWelcomeOptions(workspaces, workspacesError);
   const mountedRef = useRef(false);
   const clientRef = useRef(client);
   const requestedSessionRef = useRef(requestedSessionId);
@@ -478,7 +484,7 @@ export function ChatPage() {
       });
       setPromptError(null);
       void client
-        .createSession(undefined, { signal: controller.signal })
+        .createSession(welcome.createBody(), { signal: controller.signal })
         .then((session) => {
           if (
             !mountedRef.current ||
@@ -549,6 +555,7 @@ export function ChatPage() {
       refreshList,
       requestedSessionId,
       restoreOwnedDraft,
+      welcome.createBody,
     ],
   );
   const submitComposer = useCallback(
@@ -672,6 +679,7 @@ export function ChatPage() {
         requestedSessionId={requestedSessionId}
         sendDisabled={sendDisabled}
         streamError={ownedStreamError}
+        welcome={welcome}
       />
       <RenameDialog rename={sessionActions.rename} />
       <DeleteDialog remove={sessionActions.remove} />

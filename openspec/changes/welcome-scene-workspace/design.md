@@ -99,6 +99,13 @@ useWelcomeOptions(workspaces: readonly Workspace[] | null, workspacesError: stri
 
 既有断言更新（非 RED 新增）：`web/test/chat-page.test.tsx:338-340` 三行删除。实现时若发现其它既有用例变红，先报告再改（不在闭合清单内的不改）。
 
+实现记录：
+- 测试落 `web/test/chat-page-welcome-scene.test.tsx`（24 例）与 `web/test/chat-page-welcome-scene-support.tsx`。W6 另加纯路径查询（`misc`、`kefu`、`zhangsan` 不命中）——W5 的 `项目` 同时命中名称与路径，区分不了「也按路径过滤」；W11 拆成「欢迎态 → 选中会话」（RED）与深链保持项（实现前后皆绿）。
+- `WELCOME_SCENES` 的类型为 `readonly WelcomeScene[]`（不是 D4 草图的 `as const`），值与 `office.prompts === WELCOME_QUICK_PROMPTS` 不变；场景值类型取 `WelcomeScene["value"]`。
+- 胶囊 hover 底色用 `--wb-bg-primary` 而非 demo 的 `--wb-bg-pill-hover`（后者是浅色字面量，深色主题下浅底浅字）。
+- 未覆盖：`createBody` 把 `workspaceId` 写成 `undefined` 的变体在页面 seam 上不可观察（`JSON.stringify` 丢弃该键，请求体逐字节相同）。
+- `page.tsx` 680 → 688；`chat.css` 625 → 797（上限 800，下一刀的欢迎态样式须落新文件）。
+
 实现前后各跑一次并记录：RED 集合 = W1–W14（W11 的保持项除外）；既有套件实现前后皆绿。
 
 一次性真实浏览器观察（不入库，写进 PR）：1440×900、1024×768、390×844 各一次——免责声明底边到首屏底的余量（真实组件，三个视口）、页面无横向滚动、五张卡同行（前两个视口）；390 下快捷任务行单行且可横向滚动到最后一项、键盘聚焦 chip 时焦点环完整（未被行容器裁掉）；胶囊切换后的样式；footer 弹层在视口内、可点中（`elementFromPoint`）、长空间名不溢出；选空间后发送的请求 body。
@@ -110,6 +117,8 @@ useWelcomeOptions(workspaces: readonly Workspace[] | null, workspacesError: stri
 4. 360×740 等更小视口欢迎态仍会纵向滚动（规格只约束三个视口）。
 5. 选中的空间在别处被删除、而本页尚未重读列表时发送：服务端按 4.1 拒绝，走既有的创建失败提示。创建失败路径不重读列表（`page.tsx:514-541`），按钮仍显示该空间，用户须手动改选；之后任一次列表读取会让它回到 `未选择`。
 6. Scenario「场景随创建请求发送」的「新会话视图的 `scene` 与之相同」是服务端行为（4.1 的服务端测试为证），web 侧只钉请求 body；端到端由 8.2a 走查。
+7. 账号没有任何工作空间且查询为空时弹层显示 `没有匹配的工作空间`（与 demo 一致；规格只写了「无匹配时」）。
+8. 深色主题下选中胶囊为近黑底白字（`--wb-bg-pill-active` 只在浅色 `:root` 定义），可读，但与 Chip/SegmentedControl 的深色写法不一致。
 
 ## Seams under test
 - jsdom 页面 fixture：胶囊、快捷任务行、Toast、footer 弹层、创建请求 body、列表重读与失败、锁定、状态保留。

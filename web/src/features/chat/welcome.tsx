@@ -1,7 +1,8 @@
-/* Welcome state adapted from resource/workbuddy-live-demo.html:2537-2567; scene pills, chip expand toggle and 查看更多 are not rendered (S1c / undelivered /center). */
+/* Welcome state adapted from resource/workbuddy-live-demo.html:2537-2567; the chip expand toggle and 查看更多 are not rendered (undelivered /center). */
 import { useState } from "react";
 import { Icon } from "../../ui/index.js";
-import { playbookWindow, WELCOME_QUICK_PROMPTS } from "./welcome-content.js";
+import { ScenePills } from "./scene-pills.js";
+import { playbookWindow, WELCOME_SCENES, type WelcomeScene } from "./welcome-content.js";
 
 type WelcomeProps = {
   /** Composer lock: while a send is pending, picking a prompt must not overwrite the draft. */
@@ -9,13 +10,20 @@ type WelcomeProps = {
   onPick(prompt: string): void;
 };
 
-/** Hero and quick-prompt chips; sits in the transcript slot above the composer. */
-export function WelcomeIntro({ disabled, onPick }: WelcomeProps) {
+type WelcomeIntroProps = WelcomeProps & {
+  onSelectScene(scene: WelcomeScene["value"]): void;
+  scene: WelcomeScene["value"];
+};
+
+/** Hero, scene pills and the selected scene's quick-prompt chips; sits above the composer. */
+export function WelcomeIntro({ disabled, onPick, onSelectScene, scene }: WelcomeIntroProps) {
+  const prompts = WELCOME_SCENES.find((item) => item.value === scene)?.prompts ?? [];
   return (
     <div className="chat-welcome-intro">
       <h1 className="chat-hero">WorkBuddy，我帮你</h1>
+      <ScenePills disabled={disabled} onSelect={onSelectScene} scene={scene} />
       <fieldset aria-label="快捷任务" className="chat-quick-row">
-        {WELCOME_QUICK_PROMPTS.map((item) => (
+        {prompts.map((item) => (
           <button
             className="chat-quick-chip"
             disabled={disabled}
