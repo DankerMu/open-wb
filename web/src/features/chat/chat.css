@@ -1,6 +1,7 @@
 /* Chat presentation.
    Visual language adapted from resource/workbuddy-live-demo.html:282-298
-   (session rows), 337-362 (welcome), 363-378 (composer card), 408-409 (playbook row).
+   (session rows), 337-362 (welcome), 363-378 (composer card), 408-409 (playbook row),
+   656-659 and 782-792 (workspace popover items).
    Design tokens from WorkBuddy 5.3.11 (wb-design-tokens-master.css /
    design-tokens.json), light/dark brand colors via --wb-brand-primary in
    web/src/styles/tokens.css. Shell owns :root.
@@ -309,6 +310,59 @@
   padding: 0 8px;
 }
 
+/* Scene pills, adapted from resource/workbuddy-live-demo.html:345-351 (.scene-pills). The demo's
+   64px bottom margin is 12px here: the disclaimer has to stay inside the first viewport. */
+.chat-scene-pills {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  height: 36px;
+  min-width: 0;
+  margin: 0 0 12px;
+  padding: 2px;
+  border: 0;
+  border-radius: 100px;
+  background: var(--wb-bg-tertiary);
+}
+
+.chat-scene-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 12px;
+  border: none;
+  background: transparent;
+  color: var(--wb-text-secondary);
+  font-family: var(--wb-font);
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Pill radius restated over the global :focus-visible radius (same specificity, later). */
+.chat-scene-pill,
+.chat-scene-pill:focus-visible {
+  border-radius: 100px;
+}
+
+.chat-scene-pill:hover:not(:disabled) {
+  background: var(--wb-bg-primary);
+  color: var(--wb-text-primary);
+}
+
+.chat-scene-pill[aria-pressed="true"] {
+  background: var(--wb-bg-pill-active);
+  color: var(--wb-pill-active-fg);
+  font-weight: 600;
+}
+
+.chat-scene-pill[aria-pressed="true"]:hover:not(:disabled) {
+  background: var(--wb-bg-pill-active-hover);
+  color: var(--wb-pill-active-fg);
+}
+
 .chat-quick-row {
   display: flex;
   flex-wrap: wrap;
@@ -443,6 +497,7 @@
 }
 
 .chat-quick-chip:disabled,
+.chat-scene-pill:disabled,
 .chat-playbooks-refresh:disabled,
 .chat-playbook-card:disabled {
   cursor: not-allowed;
@@ -584,6 +639,106 @@
   border-radius: 50%;
 }
 
+/* Composer footer (welcome state only), adapted from resource/workbuddy-live-demo.html:2579-2582
+   (任务启动于 axis button) and 3586-3608 (space popover: search box, items with name + path). */
+.chat-workspace-picker {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.chat-workspace-trigger {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.chat-workspace-trigger > .ui-icon {
+  flex: none;
+}
+
+.chat-workspace-trigger-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-workspace-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chat-workspace-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 240px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.chat-workspace-option {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--wb-text-primary);
+  font-family: var(--wb-font);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* The list scrolls, so it clips an outset ring: draw the focus ring inside the item. */
+.chat-workspace-option:focus-visible {
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+
+.chat-workspace-option:hover,
+.chat-workspace-option[aria-pressed="true"] {
+  background: var(--wb-bg-hover);
+}
+
+.chat-workspace-option > strong,
+.chat-workspace-option > span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-workspace-option > strong {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 17px;
+}
+
+.chat-workspace-option > span {
+  color: var(--wb-text-tertiary);
+  font-family: var(--wb-mono);
+  font-size: 10.5px;
+  line-height: 14px;
+}
+
+.chat-workspace-note {
+  margin: 0;
+  padding: 4px 10px;
+  color: var(--wb-text-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.chat-workspace-note[role="alert"] {
+  color: var(--wb-status-error-text);
+}
+
 .chat-composer-hint {
   margin: 0;
   font-size: 12px;
@@ -603,6 +758,23 @@
   .chat-main {
     flex: 1 1 0;
     min-height: 0;
+  }
+
+  /* One scrolling row instead of three wrapped ones keeps the disclaimer inside the first viewport
+     at 390x844. `overflow-x: auto` also clips the block axis, so the 4px padding (cancelled by the
+     negative margin) leaves room for the chips' focus ring. */
+  .chat-quick-row {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    max-width: 100%;
+    margin: -4px;
+    padding: 4px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .chat-quick-chip {
+    flex: none;
   }
 
   /* The demo squeezes a single row to ~60px cards at 390; keep wrapping here instead. */

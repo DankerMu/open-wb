@@ -1,7 +1,14 @@
-/* Static welcome content ported from resource/workbuddy-live-demo.html:1221-1239 (QUICK_PROMPTS, default 日常办公 scene), 2553-2561 (PLAYBOOKS), 2674 (card prompts). */
+/* Static welcome content ported from resource/workbuddy-live-demo.html:1221-1239 (SCENES, QUICK_PROMPTS; icons limited to registered keys), 2553-2561 (PLAYBOOKS), 2674 (card prompts). */
+import type { ChatSession } from "../../lib/session-contract.js";
 import type { IconName } from "../../ui/index.js";
 
 export type WelcomePrompt = { label: string; icon: IconName; prompt: string };
+export type WelcomeScene = {
+  value: NonNullable<ChatSession["scene"]>;
+  label: string;
+  icon: IconName;
+  prompts: readonly WelcomePrompt[];
+};
 export type Playbook = { title: string; desc: string; icon: IconName; prompt: string };
 
 export const WELCOME_QUICK_PROMPTS: readonly WelcomePrompt[] = [
@@ -15,6 +22,35 @@ export const WELCOME_QUICK_PROMPTS: readonly WelcomePrompt[] = [
   { label: "资料归档", icon: "folder", prompt: "整理本地项目文档并建立分类索引" },
   { label: "幻灯片", icon: "file-chart-line", prompt: "帮我做一份项目评审 PPT 大纲" },
   { label: "产品需求", icon: "file-text", prompt: "帮我整理一份产品需求文档" },
+];
+
+/** Scene pills in display order; each scene carries its quick-prompt list (office is the list above). */
+export const WELCOME_SCENES: readonly WelcomeScene[] = [
+  { value: "office", label: "日常办公", icon: "file-text", prompts: WELCOME_QUICK_PROMPTS },
+  {
+    value: "code",
+    label: "代码开发",
+    icon: "code",
+    prompts: [
+      { label: "日常开发", icon: "code", prompt: "帮我实现一个带校验的登录组件" },
+      { label: "网站开发", icon: "layout-grid", prompt: "帮我搭建一个内部系统首页" },
+      { label: "Agent 应用", icon: "file-code", prompt: "帮我设计一个 Agent 应用的交互流程" },
+      { label: "Skill 开发", icon: "file-code", prompt: "帮我写一个数据处理 Skill" },
+      { label: "CI/CD", icon: "code", prompt: "帮我生成一条 CI 流水线配置" },
+    ],
+  },
+  {
+    value: "design",
+    label: "创意设计",
+    icon: "palette",
+    prompts: [
+      { label: "网站设计", icon: "palette", prompt: "帮我设计一个内部系统首页" },
+      { label: "PPT 设计", icon: "file-text", prompt: "帮我美化这份 PPT 的配色与排版" },
+      { label: "视觉海报", icon: "image", prompt: "帮我设计一张科技感的产品发布海报" },
+      { label: "移动端 App", icon: "image", prompt: "帮我设计一个移动端打卡界面" },
+      { label: "设计系统", icon: "palette", prompt: "帮我整理一套设计系统规范" },
+    ],
+  },
 ];
 
 export const PLAYBOOKS: readonly Playbook[] = [
