@@ -14,7 +14,7 @@ Fixture level: expanded
 | Config / project setup | yes | `web/playwright.config.ts` 两行；其它值不动 → E1 |
 | Legacy compatibility / examples | yes | `ui-walk.spec.ts` 在新 spec 先跑的前提下照常通过；读旧 spec 源码的两个 jsdom 测试 → E3、E4、E8 |
 | Concurrency / shared state / ordering | yes | 两个 spec、两个 project 共用一个库：空间采用（201/409）、不留会话、运行次序 → E3、E4、E5、N11 |
-| Error handling / rollback / partial outputs | yes | `finally` 清理在失败路径也执行、不吞原始失败；oracle 的 401 计数 → E5、N10、N11 |
+| Error handling / rollback / partial outputs | yes | `finally` 清理在失败路径也执行、不吞原始失败（id 取自 201 响应）；删除前离开会话页；oracle 的 401 计数 → N1–N9 之后的清点、N10、N11、N12 |
 | Schema / columns / units / field names | yes | 请求体 `{workspaceId, scene}`、`changes` 的四键、`thinking` → N2、N3、N9 |
 | Resource limits / large input / discovery | yes | 每测试 30 s 与 `globalTimeout` 300 s；CI 时长 → E3、E6、E10 |
 | Auth / permissions / secrets | yes | UI 登录 / 登出与 oracle 的两次 401；iframe `sandbox` 恰 `allow-scripts` → N7、N10 |
@@ -25,6 +25,6 @@ Fixture level: expanded
 
 ## 通用纪律（继承父 tasks.md）
 - [ ] 改动只有 `web/e2e/ui-walk-sessions.spec.ts`（新）与 `web/playwright.config.ts` 的两行；其它被跟踪文件零 diff。
-- [ ] 没有 RED 阶段（产品行为已在 master）；负对照 N1–N11 逐条记录失败所在的步骤。
-- [ ] `make lint`、`make typecheck`、`make anti-drift`（jscpd 178 不增）、`bash scripts/size-guard.sh`、`npm test --workspace web`、`make test-guardrails` 退出 0；`openspec validate ui-walk-sessions-walk-one --strict --no-interactive` 通过。
+- [ ] 没有 RED 阶段（产品行为已在 master）；负对照 N1–N12 逐条记录失败所在的步骤。
+- [ ] `make lint`、`make typecheck`、`make anti-drift`（jscpd 至多 178 → 179，且新增的那个只落在登录 / 登出块）、`bash scripts/size-guard.sh`、`npm test --workspace web`、`make test-guardrails` 退出 0；`openspec validate ui-walk-sessions-walk-one --strict --no-interactive` 通过。
 - [ ] 实测时长（本地全新状态、复用状态；CI）写进 PR。
