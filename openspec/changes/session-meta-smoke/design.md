@@ -69,24 +69,30 @@
 只此一行。`:50` 的 Directory Map `smoke/` 描述不动（「对话链路」已涵盖，且该句被 oracle 逐字钉住）。
 
 ### D4 `scripts/test-ci-harness.sh`
-同步方法：先只改 Makefile 与 AGENTS.md，跑 `make test-guardrails`，其 FAIL 清单就是同步清单（基线不匹配，以及每条查找串计数 ≠ 1 的 `cm`）；逐条把基线串、查找串、替换串更新到五文件，直到全绿。不靠目测数出现次数。
+同步方法（两步，缺一不可）：
+1. 先只改 Makefile 与 AGENTS.md，跑 `make test-guardrails`。FAIL 清单给出一部分同步项：基线不匹配，以及查找串在新文件里已不存在的 `cm`（AGENTS 族——证据行整行变了；`contract Make smoke export after target mutation`）。
+2. **FAIL 清单不完备**：旧四文件串是新五文件串的前缀，Makefile 追加参数后，查找串以 `… smoke/chat.hurl smoke/files.hurl` 结尾的 Makefile 族变异仍恰好命中一次（已按字符串模拟确认：`Hurl connection`、`smoke whitespace duplicate`、`smoke protected-first multi-target`、`recipe comment`、`conditional`、`smoke min-bash-steps`、`smoke chat file`、`smoke four-file order`、`smoke drop files.hurl`），它们照旧 PASS，但候选是残缺的——例如 `whitespace duplicate` 会把 `\nsmoke :\n\t@true` 插在 `smoke/files.hurl` 与 ` smoke/session-meta.hurl` 之间，被拒的原因变成「配方行被截断」而不是「重复 header」。所以 Makefile 族按 issue 的标签清单加兜底 grep 逐条同步：脚本里每一处 `smoke/chat.hurl smoke/files.hurl`（以及单独出现的旧证据行）都要过一遍，查找串与替换串都换成以五文件配方为基础的写法。
+3. 同步完成后做一次残留清点（证据 G5）：列出脚本里每一处**后面不跟** ` smoke/session-meta.hurl` 的 `smoke/chat.hurl smoke/files.hurl` 与每一处 `四文件`，逐处写明为什么留着（预期只剩：新增 1 与新增 4 的替换串、`stale HTTP evidence` 的替换串）。
 - 基线：`recipes("smoke", [...])` 第二行与 `one(matrix_rows, "| HTTP smoke | …")` 改成 D2、D3 的新串。
-- 既有变异：查找/替换串含旧文件列表或旧证据行的全部同步（issue 列出的标签 + 兜底规则）。标签不改名。每条同步后的变异仍须表达它原来的意图——例如 `four-file order` 仍是「文件次序被打乱」，`drop files.hurl` 仍是「去掉 `files.hurl`」（替换串保留 `session-meta.hurl`），`stale HTTP evidence` 的替换串是**旧的四文件证据行**（即「配方已五文件而证据行没跟上」）。
+- 既有变异：查找/替换串含旧文件列表或旧证据行的全部同步（issue 列出的标签 + 兜底规则）。标签不改名。每条同步后的变异仍须表达它原来的意图——例如 `four-file order` 仍是「文件次序被打乱」，`drop files.hurl` 仍是「去掉 `files.hurl`」（替换串保留 `session-meta.hurl`），`chat file` 与 `drop files.hurl` 今天的查找/替换串完全相同（`:122` 与 `:126`），同步后两条都写成「五文件 → 去掉 `files.hurl` 的四文件」，仍然相同、不借机改意图，`stale HTTP evidence` 的替换串是**旧的四文件证据行**（即「配方已五文件而证据行没跟上」）。
 - 新增四条（标签固定）：
   1. `contract Make smoke drop session-meta.hurl mutation`：配方回到四文件（遗漏）。
   2. `contract Make smoke session-meta before files mutation`：`… smoke/chat.hurl smoke/session-meta.hurl smoke/files.hurl`。
   3. `contract Make smoke-live session-meta file mutation`：`smoke-live` 配方末尾变成 `smoke/chat.hurl smoke/session-meta.hurl`。
   4. `contract Make smoke session-meta second recipe line mutation`：`smoke` 配方保持四文件的第二行，另加第三行单独对 `smoke/session-meta.hurl` 调用 hurl。
 - 「只改一侧被拒」：Makefile 已五文件而 AGENTS.md 仍四文件 = 既有 `stale HTTP evidence`（同步后）；AGENTS.md 已五文件而 Makefile 仍四文件 = 新增 1。
-- RED 记录（按阶段如实）：
-  - 阶段 A（只加四条新 `cm`，Makefile/AGENTS/基线未动）：四条都因查找串在旧 Makefile 里不存在而 `exit 2` 记 FAIL——这只说明前提未就绪，不是断言缺失。
-  - 阶段 B（Makefile + AGENTS 改好，基线与既有变异未同步）：`contract()` 在真实仓库上不通过，套件大面积 FAIL。
-  - 对照 C（针对新增 1）：在未改动的基线树上，`contract()` 对四文件配方通过——「遗漏」后的候选正是它，旧基线不拒；基线更新之后同一候选被拒。另外三条在新旧基线下都被拒（精确匹配），没有「先不被拒」的阶段。
-  - 阶段 D（全部同步）：`make test-guardrails` 全 PASS，四条新变异各自 PASS（被拒）。
-  每个阶段保留命令与输出片段。
+- RED 记录（按阶段如实；`cm` 的判据是「替换后 `contract()` 的退出码等于期望值 1」，缺锚另记 `missing anchor`）：
+  - 阶段 A（只加四条新 `cm`，Makefile/AGENTS/基线未动）：新增 1、2、4 的查找串是五文件串，旧 Makefile 里没有 → 缺锚 FAIL；新增 3 的锚点是 `smoke-live` 配方的尾部，旧 Makefile 里恰一次 → 直接 PASS。这一阶段只说明前提未就绪。
+  - 阶段 B（Makefile 已五文件；AGENTS.md 与 oracle 基线未动；四条新 `cm` 已加）：真实仓库上的 `contract()` 不通过（基线自检 FAIL）；锚点仍在的 `cm` 因「反正被拒」而 PASS——所以这一阶段的绿没有意义。**新增 1 的真 RED 在这里**：它把配方换回四文件，候选恰是旧基线，`contract()` 接受 → 输出 `FAIL … drop session-meta.hurl … (rc=0 want=1)`。
+  - 阶段 C（全部同步）：`make test-guardrails` 全 PASS，四条新变异各自 PASS（被拒）。
+  每个阶段保留命令与输出片段。新增 2、3、4 没有「先不被拒」的阶段（整表相等），记录里照实写。
 
 ### D5 本地真实冒烟（实现者与编排者各做一遍）
-`npm run build --workspace web && npm run build --workspace server`，然后以 CI 同款 env（`HOST`、`PORT`、`SMOKE_BASE_URL`、`DB_PATH`、`STATIC_ROOT=<仓库>/smoke/fixtures/static`、`OMP_BIN=<官方 v18.0.10 二进制的绝对路径>`、`OMP_STATE_DIR`、`SANDBOX_ROOT`、`MODEL_UPSTREAM_BASE_URL`、`MODEL_UPSTREAM_API_KEY=fake`、`FAKE_UPSTREAM_PORT`、`RUNNER_TEMP`）连跑两次 `bash .github/scripts/ci-compiled-server.sh smoke`，两次用**同一个** `RUNNER_TEMP`/`DB_PATH`/`SANDBOX_ROOT`：第一次走 201，第二次走 409 采用。两次之间服务重启（脚本自带启停），证据里写明。`OMP_BIN` 指向仓库外已校验的 v18.0.10 二进制或沙箱内 `make omp-fetch` 的产物；不在真实仓库里建符号链接。
+先 `npm run build --workspace web && npm run build --workspace server`。`OMP_BIN` 指向仓库外已校验的 v18.0.10 二进制或沙箱内 `make omp-fetch` 的产物；不在真实仓库里建符号链接。两种形态都做（先例：`openspec/changes/archive/2026-09-28-smoke-fork/design.md`）：
+- **形态 (a) CI 同款包装**：以 CI 的 env（`HOST`、`PORT`、`SMOKE_BASE_URL`、`DB_PATH`、`STATIC_ROOT=<仓库>/smoke/fixtures/static`、`OMP_BIN`、`OMP_STATE_DIR`、`SANDBOX_ROOT`、`MODEL_UPSTREAM_BASE_URL`、`MODEL_UPSTREAM_API_KEY=fake`、`FAKE_UPSTREAM_PORT`、`RUNNER_TEMP`）连跑两次 `bash .github/scripts/ci-compiled-server.sh smoke`，两次用**同一个** `RUNNER_TEMP`/`DB_PATH`/`SANDBOX_ROOT`（脚本只 `mkdir -p` 与 `cp -R`，不清库）。第一次走 201，第二次走 409 采用；两次之间服务重启（脚本自带启停）。
+- **形态 (b) 调用方自起的长驻服务**（主规格 verification-harness Scenario「文件烟测独立且可重复」的形态）：自己启动假上游与编译后的 server（同样的 env，全新 DB 与沙箱，先 `cp -R smoke/fixtures/sandbox/u1 <SANDBOX_ROOT>/`），对同一个运行中的服务连跑两遍 `make smoke`，再从空 cookie 单独跑一遍 `smoke/session-meta.hurl`（独立性），最后停掉自己起的进程。负对照 N1–N4 与下面的取证都在这个形态上做。
+- 201/409 的取证：服务不打请求日志（`server/src/app.ts` `logger: false`），所以用审计——形态 (b) 三遍之后以 `zhangsan` 查 `GET /api/audit`，`workspace.create` 且名称为 `smoke-sessions` 的事件恰一条（首遍 201 创建，后两遍 409 采用）。
+- 库与 `SANDBOX_ROOT` 必须同生命周期：库在而空间目录被清掉时，0b 仍是 409、1a 仍是 201，但 4a 的回合会因空间根不存在而失败（`server/src/sessions/session-cwd.ts`）。Hurl 文件头注释写明这一点。
 
 负对照（证明断言咬得住，做完还原；不入库）：
 - N1：把 `thinking` 期望文本改一个字 → `make smoke` 非零，失败点在 4d+5。
@@ -114,13 +120,14 @@
 ## Required evidence
 Guardrails（`make test-guardrails`）：
 - **G1** 全套 PASS（退出码 0），含四条新标签各一行 PASS。
-- **G2** D4 的阶段 A–D 记录。
-- **G3** 单侧变化被拒：只改 Makefile（AGENTS.md 与 oracle 的证据行留四文件）与只改 AGENTS.md 两种真实工作副本状态下 `make test-guardrails` 非零（在沙箱副本里做）。
-- **G4** `git diff --stat`：只有 `smoke/session-meta.hurl`、`Makefile`（1 行）、`AGENTS.md`（1 行）、`scripts/test-ci-harness.sh`；`Makefile` 的 `smoke-live` 配方行逐字节相同。
+- **G2** D4 的阶段 A–C 记录，其中阶段 B 含新增 1 的 `FAIL …(rc=0 want=1)` 输出。
+- **G3** 单侧变化被拒：oracle 为最终态，在沙箱副本里只把 Makefile 那一行回退成四文件、或只把 AGENTS.md 那一行回退成四文件，`make test-guardrails` 各自非零（oracle 对配方与证据行是各自独立钉的，不做交叉校验；「只改一侧」就是其中一侧与 oracle 不符）。
+- **G4** `git diff --stat origin/master`：只有 `smoke/session-meta.hurl`、`Makefile`（1 行）、`AGENTS.md`（1 行）、`scripts/test-ci-harness.sh` 与 `openspec/changes/session-meta-smoke/**`；`Makefile` 的 `smoke-live` 配方行逐字节相同。
+- **G5** D4 第 3 步的残留清点。
 
 真实 HTTP（`make smoke`，真 omp v18.0.10 + 受控假上游 + 编译后的 server）：
-- **H1** 同一 DB/沙箱连跑两遍均退出 0；Hurl 输出里五个文件都执行、`session-meta.hurl` 成功（第一遍 0b 为 201，第二遍为 409——从服务日志或 `--very-verbose` 单跑取证其一即可）。
-- **H2** 两遍之后：库里没有 `冒烟会话` 标题的会话行、没有 live 认证会话（`session-meta.hurl` 单独再跑一次从空 cookie 起步仍通过，即独立性）。
+- **H1** 形态 (a) 两次、形态 (b) 两遍均退出 0；Hurl 输出里五个文件都执行、`session-meta.hurl` 成功。形态 (b) 三遍之后 `smoke-sessions` 的 `workspace.create` 审计恰一条（首遍 201、其后 409）。
+- **H2** 形态 (b)：两遍之后从空 cookie 单独再跑一遍 `smoke/session-meta.hurl` 通过（独立性）；之后以 `zhangsan` 查 `GET /api/sessions`，没有标题为 `冒烟会话` 的会话、没有 `running` 会话。
 - **H3** 负对照 N1–N4 各自非零且失败点正确。
 - **H4** CI：`smoke` 与 `uid-isolation` 两个 job 通过（PR 上取证）。
 
@@ -130,7 +137,9 @@ Guardrails（`make test-guardrails`）：
 3. **审计「最新一条」依赖串行**：`make smoke` 以 `--jobs 1` 运行、调用方拥有的服务没有别的客户端时成立；并发的其它写审计的请求会让 `limit=1` 读到别的事件。与 `files.hurl` 的既有做法相同。
 4. **running 会话的删除不在此文件**：只删 `done` 会话。
 5. **`lisi` 是管理员**：越权断言证明的是「管理员也拿不到别人的会话与空间绑定」；普通成员的越权由服务端测试覆盖。
-6. **变异标签 `four-file order` 名不副实**（偏差 6）。
+6. **两个名字不再贴切**：变异标签 `four-file order`（偏差 6）与 verification-harness 的 Scenario 标题「文件控制面反映已执行四文件」（偏差 3）；两者都是稳定标识，不改名。
+
+7. **真 omp 下两件事只有实现期的 `make smoke` 能证明**：`thinking` 三分片是否逐字合并到达；回合 done 之后立刻 DELETE 时真实进程的收尾路径。fixture 评审只核对了代码。
 
 ## Seams under test
 - 真实 HTTP、真实 omp v18.0.10、编译后的 server、受控假上游：没有 mock。

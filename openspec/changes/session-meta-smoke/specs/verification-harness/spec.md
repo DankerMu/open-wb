@@ -1,6 +1,6 @@
 # Spec delta: verification-harness（#539，父 tasks 8.1）
 
-> 两条 Requirement 按主规格现文整段重述，只把 `make smoke` 的文件数与文件清单从四文件改为五文件（追加 `session-meta.hurl`），Scenario「文件控制面反映已执行四文件」随之更名；其余字句逐字不变。父 delta 没有这两条——父 change 归档前 rebase 时须带上。
+> 两条 Requirement 按主规格现文整段重述，只把 `make smoke` 的文件数与文件清单从四文件改为五文件（追加 `session-meta.hurl`），Scenario「文件控制面反映已执行四文件」的标题是稳定标识，不改名（MODIFIED 不能改 Scenario 标题），只改其正文；其余字句逐字不变。父 delta 没有这两条——父 change 归档前 rebase 时须带上。
 
 ## MODIFIED Requirements
 
@@ -92,6 +92,6 @@ smoke 与 ui-walk SHALL 作为两个独立 Ubuntu job 进入 CI，并纳入 `all
 
 AGENTS.md 的 files-harness 文档镜像 SHALL 保持 server/ 的沙箱/审计/工作空间/对话职责，在 smoke/ 中列出沙箱夹具，并在现有 HTTP smoke evidence 单元中列出 public.hurl、auth.hurl、chat.hurl、files.hurl、session-meta.hurl 五文件。现有 command/调用方 ownership、UI 行与errororacle、十一surface（含 `ui-shots`）、UIDblock/三条剩余downgrades与所有既有场景 SHALL 不变；此文案与精确sourceoracle/mutation anchors同PR更新。
 
-#### Scenario: 文件控制面反映已执行五文件
+#### Scenario: 文件控制面反映已执行四文件
 - **WHEN** AGENTS.md and its existing source-derived oracle are compared at the same revision
 - **THEN** sandbox fixture and all five Hurl files are named in their proper documentation owners; stale wording is rejected without changing runtime, workflow, parser behavior or thresholds

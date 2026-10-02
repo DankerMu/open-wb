@@ -2,7 +2,7 @@
 
 ## 8. chat-harness — 会话元数据 HTTP 冒烟（父 tasks 8.1）
 
-- [ ] 8.1 新建 `smoke/session-meta.hurl`（design D1 的条目表：独立登录 `zhangsan`；创建或采用 `smoke-sessions`（201|409）；绑定创建 201 八键 + `session.bind` 审计（`detail.sessionId`）；未知空间 404、多余键 400 且审计不变；无 body 创建 201；PATCH title/scene/pinned 200、多余键 400、列表反映、取消置顶；`WORKBUDDY_THINK` prompt → 作答唯一 bash 审批 `allow` → done；`thinking` 恰为 `先读需求，再列要点，最后作答。`、bash 步骤 done、标题仍为 `冒烟会话`；DELETE 204 + `session.delete` 审计 → messages 404 → 列表不含 → 再 DELETE 404；`lisi` 绑定他人空间 / PATCH / DELETE 均 404；`zhangsan` 复核并删除 `other_id`；登出）+ `Makefile` smoke 配方末尾追加 `smoke/session-meta.hurl`（D2）+ `AGENTS.md` HTTP smoke 证据行五文件（D3）+ `scripts/test-ci-harness.sh` 基线、既有变异同步与四条新变异（D4）。验证：`make test-guardrails` 绿（G1–G4）、同一 DB 上 `make smoke` 连跑两遍绿（H1–H3）、CI `smoke` 与 `uid-isolation` 绿（H4）
+- [ ] 8.1 新建 `smoke/session-meta.hurl`（design D1 的条目表：独立登录 `zhangsan`；创建或采用 `smoke-sessions`（201|409）；绑定创建 201 八键 + `session.bind` 审计（`detail.sessionId`）；未知空间 404、多余键 400 且审计不变；无 body 创建 201；PATCH title/scene/pinned 200、多余键 400、列表反映、取消置顶；`WORKBUDDY_THINK` prompt → 作答唯一 bash 审批 `allow` → done；`thinking` 恰为 `先读需求，再列要点，最后作答。`、bash 步骤 done、标题仍为 `冒烟会话`；DELETE 204 + `session.delete` 审计 → messages 404 → 列表不含 → 再 DELETE 404；`lisi` 绑定他人空间 / PATCH / DELETE 均 404；`zhangsan` 复核并删除 `other_id`；登出）+ `Makefile` smoke 配方末尾追加 `smoke/session-meta.hurl`（D2）+ `AGENTS.md` HTTP smoke 证据行五文件（D3）+ `scripts/test-ci-harness.sh` 基线、既有变异同步与四条新变异（D4）。验证：`make test-guardrails` 绿（G1–G5）、同一 DB 上 `make smoke` 连跑两遍绿（H1–H3）、CI `smoke` 与 `uid-isolation` 绿（H4）
 
 ## Risk packs
 
@@ -16,12 +16,12 @@
 | Concurrency / shared state / ordering | yes | 审批轮询与作答的次序；「最新一条审计」在连跑两遍的同一库上必须属于本次会话 → D1 条目 1b/2c/6b、N3、H1 |
 | Error handling / rollback / partial outputs | yes | 被拒的创建不写审计、不留会话；POST/PATCH/DELETE 不重试 → 2a–2c、Governing invariant 4 |
 | Schema / columns / units / field names | yes | 八键 DTO、审计 `detail.sessionId`、`thinking` 逐字 → 1a、3a、N1、N2 |
-| File IO / path safety / overwrite | no | 不触碰文件系统接口（空间只创建或采用） |
+| File IO / path safety / overwrite | yes | 0b 首跑会在所有者根下 `mkdir` 空间目录并 `chmod 2770`（`server/src/workspaces/store.ts`、`core/sandbox/dirs.ts`）；`uid-isolation` 下 omp uid 以该目录为 cwd，依赖其组与权限位 → H4、H1（首跑 201 / 重跑 409） |
 | Resource limits / large input / discovery | no | 无 |
 | Release / packaging / dependency compatibility | no | 无新依赖；hurl 版本不变 |
 
 ## 通用纪律（继承父 tasks.md）
 - [ ] PR 边界：`smoke/session-meta.hurl`、`Makefile`（仅 smoke 配方追加一个参数）、`scripts/test-ci-harness.sh`、`AGENTS.md`（仅 HTTP smoke 行）与本 change 目录；`smoke-live` 配方、CI workflow、`.github/scripts/**`、server、web、其它 smoke 文件零 diff。
-- [ ] oracle 同步按「先改两处消费端 → 跑 guardrails → 按 FAIL 清单逐条同步」进行，D4 的阶段记录入 PR。
+- [ ] oracle 同步按 D4 的两步进行（FAIL 清单 + 标签清单与兜底 grep），阶段记录（G2）与残留清点（G5）入 PR。
 - [ ] `make test-guardrails`、`make lint`、`make anti-drift`、`bash scripts/size-guard.sh` 退出 0；`openspec validate session-meta-smoke --strict --no-interactive` 通过。
-- [ ] 本地真实冒烟按 D5（同一 DB/沙箱连跑两遍 + 负对照 N1–N4）；`uid-isolation` 由 CI 取证。
+- [ ] 本地真实冒烟按 D5 两种形态（CI 同款包装连跑两次；长驻服务连跑两遍 + 单独一遍 + 负对照 N1–N4）；`uid-isolation` 由 CI 取证。
