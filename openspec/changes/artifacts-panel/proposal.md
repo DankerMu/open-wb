@@ -11,12 +11,12 @@
 - `web/src/features/chat/artifact-card.tsx`：把操作逻辑（拉取纪律、预览 Dialog、下载、复制）抽成可复用导出，卡片自己改用它；DOM 与行为不变。
 - `web/src/features/chat/messages.css`：抽屉内列表的样式。
 - 新建 `web/test/chat-page-artifacts-panel.test.tsx`（可带一个 support 文件）。
-- ADDED `turn-artifacts`「产物面板」；MODIFIED `chat-web`「会话页」（顶栏 actions 句与新增 Scenario「顶栏入口」）；MODIFIED `session-sidebar`「会话条目菜单与重命名」（槽位现状句）。
+- ADDED `turn-artifacts`「产物面板」；MODIFIED `turn-artifacts`「产物卡」（拉取结束后的焦点归还）；MODIFIED `chat-web`「会话页」（顶栏 actions 句与新增 Scenario「顶栏入口」）；MODIFIED `session-sidebar`「会话条目菜单与重命名」（槽位现状句）。
 
 ## Non-goals
 - `对话内搜索` 槽与三按钮全序（7.7）；ui-walk 的产物面板步骤（8.2a）。
 - `web/src/ui/**`（`Drawer`、`Dialog` 只消费）、shell、`stream.ts`、`stream-artifacts.ts`、`stream-steps.ts`、server 不动。
-- 产物卡与文件变更卡的可观察行为（7.5a/7.5b 的两套测试是回归网，零 diff）。
+- 产物卡与文件变更卡的其余可观察行为（7.5a/7.5b 的两套测试是回归网，零 diff）；唯一的行为变化是偏差 11 的焦点归还。
 - #731（代码卡的剪贴板写入在网络往返之后，Safari 预期失败）：面板的 `复制代码` 复用同一实现，原样继承，不在本刀处理。
 
 ## 与 issue / 父 delta 的偏差（父 change 归档前 rebase 适用）
@@ -30,7 +30,8 @@
 8. **chat-web「顶栏入口」Scenario 是两按钮版**（`重命名`、`产物面板`）；父文是三按钮，`对话内搜索` 归 7.7。
 9. **多一个 `session-sidebar` delta**：主规格「会话条目菜单与重命名」里有一句「当前只有 `重命名` 槽位产出按钮」，本刀合入后不再成立，MODIFIED 改这一句（7.2a 归档时写下的现状句；父 delta 里没有对应文字）。
 10. **chat-web「顶栏入口」的措辞**：父文「banner 内在面包屑之外恰有…按钮」在 ≤760px 不成立（banner 里还有 `打开导航`），子 delta 改成「顶栏的 actions 区恰有…」。
-11. 只并入父 delta 的产物面板部分。
+11. **改了产物卡（7.5b）的一条行为：拉取结束时焦点回到操作按钮**。实现后在 Chromium 里观察到：行内 `复制代码` 完成后焦点落在 `body`（按钮在拉取中被禁用，浏览器把焦点移走——7.5b 残留 8），成功 Toast 在屏的 2.4 秒内按 Escape 关不掉抽屉（Toast 是 Radix 的最高层，抽屉的 Escape 兜底只认目标在抽屉内的按键），违反本 issue 的验收点「Escape 关闭抽屉」。修在共用的操作 hook 里：拉取结束时若焦点在 `body`，把焦点还给被点的按钮。产物卡因此同样受益（7.5b 残留 8 消失），所以 MODIFIED `turn-artifacts`「产物卡」补一句。
+12. 只并入父 delta 的产物面板部分。
 
 ## Impact
 - web：一个新产品文件、五个既有产品文件改动（其中两个是不改行为的抽取）、一个新测试文件（可带 support）、一个既有测试文件的四处期望。server 无改动。
