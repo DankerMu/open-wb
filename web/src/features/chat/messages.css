@@ -684,6 +684,46 @@
   color: var(--wb-text-secondary);
 }
 
+/* In-conversation search (issue 538) — the box adapted from
+   resource/workbuddy-live-demo.html:323-327 (.conv-search, .cs-n): the input is the search Input
+   primitive, with the counter and the three icon buttons to its right. The box is a fixed row of
+   the page column above the alerts and the transcript; its field gives way so that the row fits a
+   390px viewport. */
+.chat-search {
+  flex: none;
+  align-self: flex-end;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+
+/* Over the fixed 240px of .ui-input--search. */
+.chat-search .chat-search-field {
+  flex: 1 1 240px;
+  width: auto;
+  min-width: 0;
+}
+
+.chat-search-count {
+  flex: none;
+  font-family: var(--wb-mono);
+  font-size: 11px;
+  color: var(--wb-text-secondary);
+}
+
+/* The current match: the tint of the demo's .cs-mark (demo:328) on the whole message. The shadow
+   is the same tint spread 6px outwards, a padded backdrop that does not move the layout. The user
+   bubble keeps its own corners. */
+.chat-msg--search-current {
+  background: var(--wb-brand-primary-subtle);
+  box-shadow: 0 0 0 6px var(--wb-brand-primary-subtle);
+}
+
+.chat-msg-assistant.chat-msg--search-current {
+  border-radius: 8px;
+}
+
 @media (max-width: 760px) {
   .chat-msg-user {
     max-width: 100%;

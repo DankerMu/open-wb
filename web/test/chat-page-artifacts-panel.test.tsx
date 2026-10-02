@@ -98,14 +98,14 @@ describe("顶栏入口 (P1)", () => {
   it("P1 a selected session shows 重命名 then 产物面板; the new button has the package icon and no aria-expanded", async () => {
     await openSession(editedAndWritten());
 
-    expect(bannerButtons()).toEqual(["重命名", "产物面板"]);
+    expect(bannerButtons()).toEqual(["重命名", "对话内搜索", "产物面板"]);
     const button = panelButton();
     expect(button.hasAttribute("aria-expanded")).toBe(false);
     expect(hasLucideGlyph(button, "package")).toBe(true);
 
     await openPanel();
 
-    expect(bannerButtons()).toEqual(["重命名", "产物面板"]);
+    expect(bannerButtons()).toEqual(["重命名", "对话内搜索", "产物面板"]);
     expect(panelButton()).toBe(button);
     expect(button.hasAttribute("aria-expanded")).toBe(false);
   });
@@ -121,17 +121,24 @@ describe("顶栏入口 (P1)", () => {
   });
 
   it("P1 chatTopbar reports nothing while no session is selected (guard)", () => {
-    expect(chatTopbar(undefined, vi.fn(), vi.fn())).toStrictEqual({});
+    expect(
+      chatTopbar(undefined, vi.fn(), { expanded: false, onSelect: vi.fn() }, vi.fn()),
+    ).toStrictEqual({});
   });
 
   it("P1 chatTopbar fills rename then artifacts, the latter without expanded, and passes it the trigger", () => {
     const openRename = vi.fn();
     const openArtifacts = vi.fn();
 
-    const report = chatTopbar(turn("done").session, openRename, openArtifacts);
+    const report = chatTopbar(
+      turn("done").session,
+      openRename,
+      { expanded: false, onSelect: vi.fn() },
+      openArtifacts,
+    );
 
-    expect(report.actions?.map((action) => action.key)).toEqual(["rename", "artifacts"]);
-    const artifacts = report.actions?.[1];
+    expect(report.actions?.map((action) => action.key)).toEqual(["rename", "search", "artifacts"]);
+    const artifacts = report.actions?.[2];
     expect(Object.keys(artifacts ?? {})).not.toContain("expanded");
     const trigger = document.createElement("button");
     artifacts?.onSelect(trigger);
@@ -262,7 +269,7 @@ describe("空态 (P4)", () => {
       [WORKSPACES]: listed,
       [SESSION_MESSAGES]: () => history.promise,
     });
-    await waitFor(() => expect(bannerButtons()).toEqual(["重命名", "产物面板"]));
+    await waitFor(() => expect(bannerButtons()).toEqual(["重命名", "对话内搜索", "产物面板"]));
     expect(screen.queryByRole("article", { name: "助手" })).toBeNull();
 
     fireEvent.click(panelButton());

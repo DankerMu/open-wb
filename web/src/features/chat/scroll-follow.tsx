@@ -3,9 +3,11 @@
 import {
   type Dispatch,
   type ReactNode,
+  type Ref,
   type RefObject,
   type SetStateAction,
   useCallback,
+  useImperativeHandle,
   useLayoutEffect,
   useRef,
   useState,
@@ -100,9 +102,36 @@ function useScrollFollow(ref: RefObject<HTMLDivElement | null>, content: unknown
   return { jumpToLatest, onScroll, showJump };
 }
 
-export function FollowTranscript({ children, content }: { children: ReactNode; content: unknown }) {
+/** What the transcript offers to the in-conversation search (issue 538). */
+export type TranscriptHandle = { scrollToMessage(id: number): void };
+
+export function FollowTranscript({
+  children,
+  content,
+  handleRef,
+}: {
+  children: ReactNode;
+  content: unknown;
+  handleRef: Ref<TranscriptHandle>;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const { jumpToLatest, onScroll, showJump } = useScrollFollow(ref, content);
+  /* Scrolls the message `id` of this transcript into the centre and recomputes the follow state
+     at once, as a user scroll would. The browser dispatches the scroll event a frame later; a
+     delta streamed before that would find the transcript still pinned and pull it back to the
+     bottom. Does nothing for a message the transcript does not hold. */
+  useImperativeHandle(
+    handleRef,
+    () => ({
+      scrollToMessage(id) {
+        const target = ref.current?.querySelector(`[data-message-id="${id}"]`);
+        if (!target) return;
+        target.scrollIntoView({ block: "center" });
+        onScroll();
+      },
+    }),
+    [onScroll],
+  );
   return (
     <div className="chat-transcript-frame">
       <div className="chat-transcript" onScroll={onScroll} ref={ref}>
