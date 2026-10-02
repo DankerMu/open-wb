@@ -2,7 +2,7 @@
 
 ## 7. web — files.changed 解码归约与文件变更卡（父 tasks 7.5a）
 
-- [ ] 7.5a 新建 `stream-artifacts.ts`（`files.changed` 严格解码与归约：按 `stepId` 设置步骤 `changes`，后到覆盖；按消息汇总的纯函数）+ `stream-steps.ts`（`startStep`/`endStep` 与步骤视图类型自 `stream.ts` 挪出，另有两处共用的 `updateStep`；步骤视图加 `changes`）+ `file-changes-card.tsx`（一条助手消息只汇总**已结束**步骤的 `changes`，按路径去重取靠后步骤的值、位置取首次；卡头 `文件变更（N 个）`；行 `+a`/`-d`（>0 才显）或 `写入` + 逻辑路径 `<account>/<dir>/<path>` + `查看详情 <逻辑路径>` 按钮 → `/files?ws=<workspaceId>`；空间不可解析时只显相对路径、无 `查看详情`）+ `conversation-view.tsx` 助手块插入文件变更卡位（错误之后、`已停止` 徽章之前）+ `stream.ts` 接线 + `session-contract.ts` 导出 `parseFileChanges` + `page.tsx` 传 `workspace` + `messages.css` 样式。验证：新建 `web/test/chat-page-file-changes.test.tsx`（C1–C15）；既有测试只改 proposal「偏差」1 列出的步骤视图字面量
+- [x] 7.5a 新建 `stream-artifacts.ts`（`files.changed` 严格解码与归约：按 `stepId` 设置步骤 `changes`，后到覆盖；按消息汇总的纯函数）+ `stream-steps.ts`（`startStep`/`endStep` 与步骤视图类型自 `stream.ts` 挪出，另有两处共用的 `updateStep`；步骤视图加 `changes`）+ `file-changes-card.tsx`（一条助手消息只汇总**已结束**步骤的 `changes`，按路径去重取靠后步骤的值、位置取首次；卡头 `文件变更（N 个）`；行 `+a`/`-d`（>0 才显）或 `写入` + 逻辑路径 `<account>/<dir>/<path>` + `查看详情 <逻辑路径>` 按钮 → `/files?ws=<workspaceId>`；空间不可解析时只显相对路径、无 `查看详情`）+ `conversation-view.tsx` 助手块插入文件变更卡位（错误之后、`已停止` 徽章之前）+ `stream.ts` 接线 + `session-contract.ts` 导出 `parseFileChanges` + `page.tsx` 传 `workspace` + `messages.css` 样式。验证：新建 `web/test/chat-page-file-changes.test.tsx`（C1–C15）；既有测试只改 proposal「偏差」1 列出的步骤视图字面量
 
 ## Risk packs
 
@@ -21,7 +21,7 @@
 | Documentation / migration notes | no | spec delta 即文档；ui-walk 步骤归 8.2a |
 
 ## 通用纪律（继承父 tasks.md）
-- [ ] 新测试进新文件 `web/test/chat-page-file-changes.test.tsx`（超过 800 行则拆 `web/test/chat-page-file-changes-support.tsx`）；既有测试只按 proposal「偏差」1 给步骤视图字面量加 `changes`，不改断言语义。
-- [ ] RED 集合 = C1–C15 中依赖新行为的用例；实现前就成立的护栏逐条标出。实现前后各跑一次并记录命令与结果。
-- [ ] `stream.ts` 787 → ≤800（预计约 750）；`page.tsx` 688 → 689；`chat.css` 不动。PR 记录这些数。
-- [ ] `npm test --workspace web`、`make lint`、`make typecheck`、`make anti-drift`（knip 零新增、jscpd 178 不增）、`bash scripts/size-guard.sh` 退出 0；`openspec validate file-changes-card --strict --no-interactive` 通过。
+- [x] 新测试进新文件 `web/test/chat-page-file-changes.test.tsx`（超过 800 行则拆 `web/test/chat-page-file-changes-support.tsx`）；既有测试只按 proposal「偏差」1 给步骤视图字面量加 `changes`，不改断言语义。
+- [x] RED 集合 = C1–C15 中依赖新行为的用例；实现前就成立的护栏逐条标出。实现前后各跑一次并记录命令与结果。
+- [x] `stream.ts` 787 → ≤800（预计约 750）；`page.tsx` 688 → 689；`chat.css` 不动。PR 记录这些数。
+- [x] `npm test --workspace web`、`make lint`、`make typecheck`、`make anti-drift`（knip 零新增、jscpd 178 不增）、`bash scripts/size-guard.sh` 退出 0；`openspec validate file-changes-card --strict --no-interactive` 通过。

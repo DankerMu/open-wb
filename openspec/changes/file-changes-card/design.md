@@ -71,7 +71,7 @@ export function summarizeChanges(steps: readonly ChatStepView[]): FileChanges[nu
 - 注释里不写 `#535`、`#522` 这类写法：`ui-guardrails.test.ts:46` 等颜色守卫按 `#` 加 3–8 位十六进制扫 features 下的 `.tsx`/`.css`，注释也算；写成「issue 535」。
 
 ### D5 接线
-- `page.tsx`：`<ConversationView … workspace={workspaces?.find((item) => item.id === selected?.workspaceId) ?? null} />`，+1 行。找到的是列表里的同一个对象，列表不重读时引用稳定，`MessageArticle` 的 `memo` 不失效。
+- `page.tsx`：`<ConversationView … workspace={workspaces?.find((item) => item.id === selected?.workspaceId)} />`，+1 行；`ConversationView` 的属性类型是 `Workspace | undefined`，往下传时归一成 `?? null`。不在 `page.tsx` 里写 `?? null`：`ChatPage` 的认知复杂度已在 Biome 上限 15，`??` 再记 1 分就过不了 `make lint`。找到的是列表里的同一个对象，列表不重读时引用稳定，`MessageArticle` 的 `memo` 不失效。
 - `conversation-view.tsx`：`workspace` 经 `ConversationView` → `MessageThread` → `MessageArticle`；助手分支在 `{error}` 之后、`已停止` 徽章之前渲染 `<FileChangesCard steps={message.steps} workspace={workspace} />`。user 分支不渲染。
 
 ### D6 样式（`messages.css`，530 行）
@@ -108,13 +108,23 @@ export function summarizeChanges(steps: readonly ChatStepView[]): FileChanges[nu
 
 变异自检（实现者在沙箱里做，做完还原，写进报告；每个至少打红一例）：去掉 `DATA_EVENTS` 的新条目；解码接受 `[]`；解码不查顶层键集；解码不用 `parseFileChanges`（放过未知 `kind`）；`endStep` 把 `changes` 置回 `null`；`startStep` 不设 `changes`；`setStepChanges` 追加而非替换；`setStepChanges` 对不存在的步骤造一个步骤；files.changed 一支传 `"running"` 作会话状态（由 C3 的 `done` 会话一例与 C4 打红）；快照映射不带 `changes`；`summarizeChanges` 计入 running 步骤；取首次的值而非最后的值；位置取最后而非首次；空汇总也渲染卡片；前缀用 `workspace.root`；不可解析时仍渲染 `查看详情`；导航到不带 `ws` 的 `/files`；卡片放到错误之前；卡片放到 `已停止` 徽章之后；`added: 0` 也显示 `+0`；user 消息也渲染卡片。
 
+## 实现记录
+- 行数：`stream.ts` 787 → 742；`page.tsx` 688 → 689；`conversation-view.tsx` 262 → 274；`messages.css` 530 → 590；`session-contract.ts` 只加一个 `export`；新文件 `stream-steps.ts` 69、`stream-artifacts.ts` 50、`file-changes-card.tsx` 71。
+- 卡片外层是 `<fieldset aria-labelledby>`（隐含 role `group`），不是 `<div role="group">`：Biome `useSemanticElements` 拒绝后者，先例 `approval-bar.tsx:47`。`messages.css` 因此多了 fieldset 的复位（`margin`/`padding`/`min-width`/`min-inline-size`），卡片多一个 `useId()`（排在另两个 hook 之后、汇总之前）。
+- `查看详情` 按钮复用既有类 `chat-msg-action`，没有新增按钮样式。
+- 测试：`web/test/chat-page-file-changes.test.tsx`（707 行，54 例）与 `web/test/chat-page-file-changes-support.tsx`（174 行）。基线（加空壳模块）43 红 11 绿，绿的都是标注过的护栏。
+- 既有测试共 12 处步骤视图字面量加 `changes: null`（`chat-stream.test.ts`、`chat-stream-recovery.test.ts`、`chat-stream-stopped.test.ts`、`session-contract-metadata.test.ts`）。
+- 比 C1–C15 多的用例：同一消息再次 `turn.start` 后卡片消失；恰好 50 项的 files.changed 被交付（钉住 51 项被拒的边界）。C9 另桩了 `/api/workspaces/<id>/tree`（files 页导航后会读），并把另一个空间排在列表前面，否则 files 页改写 `?ws=` 会掩盖「导航不带 `ws`」的变异。
+- 变异 21 项全部打红。清单外的一项存活：把空汇总的提前返回放到 hook 之前——React 19 在一次渲染调用零个 hook 时不抛错，测试看不出来；拦住它的是 Biome 的 `useHookAtTopLevel`（`make lint`）。
+
 ## 已知残留
 1. #522 合入前服务端不发布 `files.changed`，流式路径只有本刀的 jsdom 证据；真实链路由 #522、8.1（`make smoke`）与 8.2a（ui-walk）承担。
 2. `查看详情` 只到空间，不定位到文件（`/files` 没有路径参数，父规格明文）。
 3. 页面级的挂载/推事件辅助函数在 `chat-thinking.test.tsx` 里是文件私有的，本刀的测试要另写；写法须与之不同到不触发 jscpd（178 不增），或抽进新的 support 文件只供本刀用。
 4. 工作空间列表重读成功后列表项是新对象，所有助手消息会重渲染一次（`memo` 的 `workspace` 属性变了）。
 5. 路径过长时截断显示省略号，全文在 `title` 与按钮名里；窄屏下看不到全路径。
-6. 卡片的真实浏览器呈现由 8.2a 的 ui-walk 承担。
+6. 「上一条助手已终态时，未知回合的 files.changed 经 `isUnknownTurn` 走重同步」没有页面级用例（`isUnknownTurn` 泛读 `event.data.messageId`、`page.tsx` 该处零 diff；thinking.delta 的同一路径由 `chat-thinking.test.tsx` F6 钉住）。
+7. 卡片的真实浏览器呈现由 8.2a 的 ui-walk 承担。
 
 ## Seams under test
 - 纯函数：`chatStateFromSnapshot`、`applyChatEvent`、`summarizeChanges`。

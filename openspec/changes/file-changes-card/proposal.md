@@ -34,11 +34,12 @@
 1. **既有测试有改动**：issue 写「既有测试零 diff」「既有测试文件不增长」。步骤视图加了必有键 `changes` 之后，既有的整对象步骤视图断言都少一个键（`web/test/chat-stream.test.ts`、`chat-stream-stopped.test.ts`、`chat-stream-recovery.test.ts`、`session-contract-metadata.test.ts` 里不带 `ordinal` 的步骤字面量）。这些字面量各加 `changes: null`（或该用例应有的值），别的不动。同 #534 偏差 1。
 2. **多一个新产品文件 `stream-steps.ts`，`stream.ts` 的改动不止 `DATA_EVENTS`**：issue 的 PR Boundary 写「新建两个产品文件 + `DATA_EVENTS` 条目与接线」。`stream.ts` 现为 787 行，按最小接线试排后是 804 行（步骤字面量加一个键被 Biome 展开），超过 800 的上限。不靠压缩既有代码过线：把 `startStep`/`endStep` 与步骤视图类型挪进 `stream-steps.ts`，行为不变（`endStep` 的查找替换一段抽成 `updateStep`），只把外层的 `replaceAssistant` 留在 `stream.ts`。父 design D11「`stream.ts` 只增 `DATA_EVENTS` 条目与接线」写于 717 行时。
 3. **`session-contract.ts` 加一个 `export`**：issue 写「不触碰 `session-contract.ts`」。规格要求事件里 `files` 的规则与快照步骤 `changes` 相同；`parseFileChanges`（`session-contract.ts:185-188`）就是那条规则。在 `stream-artifacts.ts` 里重写一份会多一处真相来源并触发 jscpd。事件因此同样受 1..50 项的上限约束（父 turn-artifacts Scenario「上限」规定服务端每步骤至多 50 项，由 #522 兑现）。
-4. **`page.tsx` 的接线**：+1 行（`workspace` 属性：`workspaces?.find(...)`，当前会话取既有的 `selected`）。Principal 由卡片自己经 `useAuth()` 取（`composer-footer.tsx:51` 的先例）。
+4. **`page.tsx` 的接线**：+1 行（`workspace` 属性：`workspaces?.find(...)`，当前会话取既有的 `selected`；`?? null` 的归一放在 `ConversationView`，见 design D5）。Principal 由卡片自己经 `useAuth()` 取（`composer-footer.tsx:51` 的先例）。
 5. **只并入父 delta 的文件变更卡部分**：Assistant block order 与 Scenario「助手块次序」不含产物卡；turn-artifacts Scenario「空间不可解析」去掉「也不渲染产物卡」；「产物卡」「产物面板」两条 Requirement 归 7.5b、7.6。
 6. 子 delta 另加父文未写的可观察行为：files.changed 指向不存在的消息时也返回同一引用（不补建消息）、不改会话状态；`step.start` 新建步骤的 `changes` 为 `null`，`step.end` 保留已有 `changes`；空间列表读取中与读取失败同样按「不可解析」处理；user 消息不渲染文件变更卡；解码拒绝面列全。
 7. **卡头不带图标**：demo 的卡头有一个 `git` 图标（demo:2470），规格只点名了行尾按钮的 `chevron-right`，本刀卡头只有文本。
-8. **跨 feature 深导入 `logicalPath`**（`../files/file-meta.js`）：同 #533 偏差 8。
+8. **卡片外层是 `<fieldset>`**（隐含 role `group`）而非 `<div role="group">`，lint 要求语义元素（design 实现记录）。
+9. **跨 feature 深导入 `logicalPath`**（`../files/file-meta.js`）：同 #533 偏差 8。
 
 ## Impact
 - web：三个新产品文件、`stream.ts`/`conversation-view.tsx`/`page.tsx`/`messages.css`/`session-contract.ts` 改动、一个新测试文件（可拆出一个 support 文件）、四个既有测试文件的步骤视图字面量加键。server 无改动。
