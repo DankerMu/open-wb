@@ -1,11 +1,18 @@
-// 文件变更卡（issue #535）测试的夹具与页面查询：快照搭法、带工作空间列表的会话页挂载、事件推送、
-// 卡片行的读取。只供 chat-page-file-changes.test.tsx 使用。
+// 文件变更卡（issue #535）测试的夹具与页面查询：快照搭法、冻结的 reducer 输入、已装快照的连接器、
+// 带工作空间列表的会话页挂载、事件推送、卡片行的读取。只供 chat-page-file-changes.test.tsx 使用。
 import { act, screen, waitFor, within } from "@testing-library/react";
 import { expect } from "vitest";
+import {
+  applyChatEvent,
+  type ChatEvent,
+  type ChatState,
+  chatStateFromSnapshot,
+} from "../src/features/chat/stream.js";
 import type { ChatMessageSnapshot } from "../src/lib/session-contract.js";
 import { type FetchRoutes, renderChatPage } from "./chat-page-support.js";
 import {
   chatSnapshot,
+  connectChat,
   historyUser,
   latestSource,
   SESSION_ID,
@@ -64,16 +71,12 @@ export function toolStep(
   return { id, ordinal, name, detail: `${name} args`, output, changes, status };
 }
 
-/**
- * `historyUser` (id -3) then one assistant (id 0) whose status the session shares; the session is
- * bound to `workspaceId` and the stream cursor is `1:3`.
- */
-export function turn(
+/** An empty assistant message (id 0) in `status`, overridden by `fields`. */
+export function assistantMessage(
   status: Message["status"],
   fields: Partial<Message> = {},
-  workspaceId: string | null = PROJ.id,
-): Snapshot {
-  const reply: Message = {
+): Message {
+  return {
     id: 0,
     role: "assistant",
     content: "",
@@ -84,11 +87,54 @@ export function turn(
     approvals: [],
     ...fields,
   };
+}
+
+/**
+ * `historyUser` (id -3) then one assistant (id 0) whose status the session shares; the session is
+ * bound to `workspaceId` and the stream cursor is `1:3`.
+ */
+export function turn(
+  status: Message["status"],
+  fields: Partial<Message> = {},
+  workspaceId: string | null = PROJ.id,
+): Snapshot {
   return {
     session: { ...chatSnapshot().session, status, workspaceId },
-    messages: [historyUser, reply],
+    messages: [historyUser, assistantMessage(status, fields)],
     streamCursor: { epoch: 1, seq: 3 },
   };
+}
+
+/** Deep-freezes `value`: a reducer or a summary that writes to its input throws. */
+export function deepFrozen<T>(value: T): T {
+  if (typeof value === "object" && value !== null) {
+    Object.values(value).forEach(deepFrozen);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+export const viewOf = (snapshot: Snapshot): ChatState =>
+  deepFrozen(chatStateFromSnapshot(snapshot));
+
+export function filesChanged(messageId: number, stepId: number, ...files: Change[]): ChatEvent {
+  return { type: "files.changed", data: { messageId, stepId, files } };
+}
+
+/** Applies `events` in order, freezing every intermediate state. */
+export function reduce(state: ChatState, ...events: ChatEvent[]): ChatState {
+  return events.reduce((current, event) => deepFrozen(applyChatEvent(current, event)), state);
+}
+
+/** Connector over a running turn holding running step 5, with the `1:3` snapshot installed. */
+export async function installed() {
+  const snapshot = turn("running", { steps: [toolStep(5, 0, "write", null, "running")] });
+  const wire = connectChat(snapshot);
+  wire.source.emitOpen();
+  wire.loads[0]?.resolve(snapshot);
+  await settle();
+  expect(wire.snapshots).toHaveLength(1);
+  return wire;
 }
 
 /** Lets pending fetches, their JSON bodies and the renders they cause finish. */
@@ -99,6 +145,25 @@ export async function quiesce() {
 }
 
 export const listed = () => jsonResponse({ workspaces: [OTHER, PROJ] });
+
+/**
+ * Session-list route holding `snapshot`'s session and a neighbour bound to PROJ. The sidebar files
+ * the neighbour under 未知空间 until the workspace list is installed, then under PROJ's name.
+ */
+export const withNeighbour = (snapshot: Snapshot): FetchRoutes => {
+  const neighbour = {
+    ...snapshot.session,
+    id: "a".repeat(32),
+    title: "邻居会话",
+    workspaceId: PROJ.id,
+  };
+  return { "/api/sessions": () => jsonResponse({ sessions: [snapshot.session, neighbour] }) };
+};
+
+/** The sidebar group named after PROJ: present only once the page holds the workspace list. */
+export function listedGroup() {
+  return screen.queryByRole("group", { name: PROJ.name });
+}
 
 /** Opens the session page on `snapshot`; `workspaces` answers every workspace-list read. */
 export async function openSession(
@@ -112,7 +177,7 @@ export async function openSession(
     [MESSAGES]: () => jsonResponse(snapshot),
     ...more,
   });
-  await screen.findByRole("article", { name: "助手" });
+  await screen.findAllByRole("article", { name: "助手" });
   await waitFor(() => expect(calls(page.fetchMock, WORKSPACES).length).toBeGreaterThan(0));
   await quiesce();
   return page;

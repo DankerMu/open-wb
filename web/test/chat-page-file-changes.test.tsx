@@ -1,9 +1,10 @@
 /**
  * Issue #535 `files.changed` decoding/reduction and the 文件变更 card (parent tasks 7.5a),
- * C1–C15 of openspec/changes/file-changes-card/design.md. Seams: `chatStateFromSnapshot` /
- * `applyChatEvent` / `summarizeChanges` on frozen inputs, `connectSessionEvents` over the fake
- * EventSource, the jsdom chat page, and the static CSS text. Expected values are literals from the
- * spec deltas; cases marked (guard) already hold before the change.
+ * C1–C15 of openspec/changes/file-changes-card/design.md plus the review-round gaps G1–G6.
+ * Seams: `chatStateFromSnapshot` / `applyChatEvent` / `summarizeChanges` on frozen inputs,
+ * `connectSessionEvents` over the fake EventSource, the jsdom chat page, and the static CSS text.
+ * Expected values are literals from the spec deltas; cases marked (guard) already hold before the
+ * change.
  */
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -15,74 +16,43 @@ import {
 } from "../src/features/chat/stream.js";
 import { summarizeChanges } from "../src/features/chat/stream-artifacts.js";
 import {
-  type Change,
+  assistantMessage,
   cardNamed,
   cards,
+  deepFrozen,
   detailButtons,
   edit,
+  filesChanged,
   goLive,
+  installed,
   listed,
+  listedGroup,
   type Message,
   openSession,
   PROJ,
   quiesce,
   ROOT_PREFIX,
+  reduce,
   reply,
   replyParts,
   rowCells,
   rowTexts,
-  type Snapshot,
   stepBadge,
   tagAndClass,
   toolStep,
   turn,
   UNLISTED_ID,
+  viewOf,
   WORKSPACES,
+  withNeighbour,
   write,
 } from "./chat-page-file-changes-support.js";
 import { cleanupChatPage } from "./chat-page-support.js";
-import {
-  assistantSteps,
-  connectChat,
-  deferred,
-  historyUser,
-  settle,
-} from "./chat-stream-support.js";
+import { assistantSteps, deferred, historyUser } from "./chat-stream-support.js";
 import { calls, currentLocation, jsonResponse } from "./support.js";
 import { readRepoFile, ruleBody, stripComments } from "./ui-support.js";
 
 type StepView = ChatState["messages"][number]["steps"][number];
-
-/** Deep-freezes `value`: a reducer or a summary that writes to its input throws. */
-function deepFrozen<T>(value: T): T {
-  if (typeof value === "object" && value !== null) {
-    Object.values(value).forEach(deepFrozen);
-    Object.freeze(value);
-  }
-  return value;
-}
-
-const viewOf = (snapshot: Snapshot): ChatState => deepFrozen(chatStateFromSnapshot(snapshot));
-
-function filesChanged(messageId: number, stepId: number, ...files: Change[]): ChatEvent {
-  return { type: "files.changed", data: { messageId, stepId, files } };
-}
-
-/** Applies `events` in order, freezing every intermediate state. */
-function reduce(state: ChatState, ...events: ChatEvent[]): ChatState {
-  return events.reduce((current, event) => deepFrozen(applyChatEvent(current, event)), state);
-}
-
-/** Connector over a running turn holding running step 5, with the `1:3` snapshot installed. */
-async function installed() {
-  const snapshot = turn("running", { steps: [toolStep(5, 0, "write", null, "running")] });
-  const wire = connectChat(snapshot);
-  wire.source.emitOpen();
-  wire.loads[0]?.resolve(snapshot);
-  await settle();
-  expect(wire.snapshots).toHaveLength(1);
-  return wire;
-}
 
 afterEach(() => {
   cleanupChatPage();
@@ -188,6 +158,26 @@ describe("files.changed through the connector", () => {
     expect(wire.loads).toHaveLength(1);
     expect(wire.errors).toEqual([]);
   });
+
+  it("G6 drops files.changed at or below the snapshot cursor without a resync and delivers the one just above", async () => {
+    const wire = await installed();
+
+    wire.source.emitData("files.changed", "1:2", payload([write("below.html")]));
+    wire.source.emitData("files.changed", "1:3", payload([write("at.html")]));
+
+    expect(wire.events).toEqual([]);
+    expect(assistantSteps(wire.state)?.map((step) => step.changes)).toStrictEqual([null]);
+
+    wire.source.emitData("files.changed", "1:4", payload([write("above.html")]));
+
+    const above = { path: "above.html", added: null, removed: null, kind: "write" };
+    expect(wire.events).toStrictEqual([
+      { type: "files.changed", data: { messageId: 0, stepId: 5, files: [above] } },
+    ]);
+    expect(assistantSteps(wire.state)?.map((step) => step.changes)).toStrictEqual([[above]]);
+    expect(wire.loads).toHaveLength(1);
+    expect(wire.errors).toEqual([]);
+  });
 });
 
 describe("files.changed reduction and the step view shape", () => {
@@ -260,6 +250,22 @@ describe("files.changed reduction and the step view shape", () => {
     expect(next.status).toBe("done");
     expect(next.messages[1]?.status).toBe("done");
     expect(next.messages[0]).toBe(state.messages[0]);
+  });
+
+  it("G1 step.end keeps the detail and the changes a running snapshot step already carries", () => {
+    const steps = [toolStep(7, 0, "edit", [edit("src/app.ts", 2, 1)], "running")];
+    const state = viewOf(turn("running", { steps }));
+
+    const ended = reduce(state, {
+      type: "step.end",
+      data: { messageId: 0, stepId: 7, status: "failed", output: "boom" },
+    });
+
+    const changes = [{ path: "src/app.ts", added: 2, removed: 1, kind: "edit" }];
+    expect(assistantSteps(ended)).toStrictEqual([
+      { id: 7, name: "edit", detail: "edit args", output: "boom", changes, status: "failed" },
+    ]);
+    expect(assistantSteps(ended)?.[0]?.changes).toBe(assistantSteps(state)?.[0]?.changes);
   });
 
   const settled = () =>
@@ -412,6 +418,20 @@ describe("文件变更 card on the chat page", () => {
     expect(cards()).toHaveLength(1);
   });
 
+  it("G1 a reloaded running step that already carries changes shows them only after its step.end", async () => {
+    const steps = [toolStep(7, 0, "write", [write("docs/plan.md")], "running")];
+    await openSession(turn("running", { content: "写到一半", steps }));
+    expect(cards()).toEqual([]);
+    const send = await goLive();
+    expect(stepBadge("write 运行中").textContent).toBe("运行中");
+    expect(screen.queryByRole("group", { name: /文件变更/ })).toBeNull();
+
+    send("step.end", { stepId: 7, status: "failed", output: "disk full" });
+
+    expect(stepBadge("write 失败").textContent).toBe("失败");
+    expect(rowTexts(cardNamed("文件变更（1 个）"))).toEqual(["写入zhangsan/proj/docs/plan.md"]);
+  });
+
   it("C7 removes the card when the same message starts a new turn", async () => {
     const steps = [toolStep(11, 0, "write", [write("out/index.html")])];
     await openSession(turn("done", { content: "写好了", steps }));
@@ -425,7 +445,12 @@ describe("文件变更 card on the chat page", () => {
     expect(screen.queryAllByRole("alert")).toEqual([]);
   });
 
-  it("C8 a step still running at turn.end stopped becomes stopped and its changes show", async () => {
+  const turnEnds = [
+    ["C8 a step still running at turn.end stopped becomes stopped", "stopped", "已停止"],
+    ["G3 a step still running at turn.end failed becomes failed", "failed", "失败"],
+  ] as const;
+
+  it.each(turnEnds)("%s and its changes show", async (_name, status, label) => {
     const steps = [toolStep(5, 0, "write", null, "running")];
     await openSession(turn("running", { content: "写到一半", steps }));
     const send = await goLive();
@@ -434,13 +459,13 @@ describe("文件变更 card on the chat page", () => {
     expect(stepBadge("write 运行中").textContent).toBe("运行中");
     expect(cards()).toEqual([]);
 
-    send("turn.end", { status: "stopped" });
+    send("turn.end", { status });
 
-    await waitFor(() => expect(stepBadge("write 已停止").textContent).toBe("已停止"));
+    await waitFor(() => expect(stepBadge(`write ${label}`).textContent).toBe(label));
     expect(rowTexts(cardNamed("文件变更（1 个）"))).toEqual(["写入zhangsan/proj/out/index.html"]);
   });
 
-  it("C9 lists logical paths, never the absolute root, and 查看详情 opens the workspace in /files", async () => {
+  it("C9/G5 lists logical paths in the card only, never the absolute root, and 查看详情 opens the workspace in /files", async () => {
     const steps = [
       toolStep(11, 0, "edit", [edit("src/app.ts", 2, 1)]),
       toolStep(12, 1, "write", [write("out/index.html")]),
@@ -470,6 +495,10 @@ describe("文件变更 card on the chat page", () => {
     expect(document.documentElement.innerHTML).not.toContain(ROOT_PREFIX);
     expect(document.querySelectorAll(".chat-step")).toHaveLength(2);
     expect(document.querySelectorAll(".chat-step .file-change-row")).toHaveLength(0);
+    expect(document.querySelectorAll('.chat-step [class*="file-change"]')).toHaveLength(0);
+    const editStep = within(reply()).getByRole("region", { name: "edit" });
+    expect(editStep.textContent).not.toContain("+2");
+    expect(editStep.textContent).not.toContain("zhangsan/proj/src/app.ts");
     expect(detailButtons().map((button) => button.getAttribute("aria-label"))).toEqual([
       "查看详情 zhangsan/proj/src/app.ts",
       "查看详情 zhangsan/proj/out/index.html",
@@ -512,6 +541,26 @@ describe("文件变更 card on the chat page", () => {
     expect(cards()).toHaveLength(1);
   });
 
+  it("G2 gives each assistant message its own card with its own counts for a shared path", async () => {
+    const earlier = [toolStep(11, 0, "edit", [edit("a.md", 1, 0)])];
+    const later = [toolStep(12, 0, "edit", [edit("a.md", 4, 2)])];
+    const base = turn("done", { content: "第一轮", steps: earlier });
+    const followUp: Message[] = [
+      { ...historyUser, id: 1, createdAt: 1 },
+      assistantMessage("done", { id: 2, content: "第二轮", createdAt: 2, steps: later }),
+    ];
+    await openSession({ ...base, messages: [...base.messages, ...followUp] });
+
+    const perMessage = screen
+      .getAllByRole("article", { name: "助手" })
+      .map((article) => within(article).getAllByRole("group", { name: "文件变更（1 个）" }));
+    expect(perMessage.map((own) => own.map((card) => rowTexts(card)))).toEqual([
+      [["+1zhangsan/proj/a.md"]],
+      [["+4-2zhangsan/proj/a.md"]],
+    ]);
+    expect(cards()).toEqual(perMessage.flat());
+  });
+
   const changed = (workspaceId: string | null) =>
     turn(
       "done",
@@ -526,17 +575,21 @@ describe("文件变更 card on the chat page", () => {
     expect(document.documentElement.innerHTML).not.toContain(ROOT_PREFIX);
   }
 
-  it("C11 shows the relative path without 查看详情 when the bound workspace is not listed", async () => {
-    await openSession(changed(UNLISTED_ID));
+  const unresolved: Array<[string, string | null]> = [
+    ["the bound workspace is not listed", UNLISTED_ID],
+    ["the session has no workspace", null],
+  ];
 
-    expectRelativeRows();
-  });
+  it.each(unresolved)(
+    "C11/G4 shows the relative path without 查看详情 when %s, with the list installed",
+    async (_name, workspaceId) => {
+      const snapshot = changed(workspaceId);
+      await openSession(snapshot, listed, withNeighbour(snapshot));
 
-  it("C11 shows the relative path without 查看详情 when the session has no workspace", async () => {
-    await openSession(changed(null));
-
-    expectRelativeRows();
-  });
+      expect(listedGroup()?.textContent).toContain("邻居会话");
+      expectRelativeRows();
+    },
+  );
 
   it("C11 shows the relative path without 查看详情 when the workspace list fails", async () => {
     await openSession(changed(PROJ.id), () =>
@@ -546,15 +599,19 @@ describe("文件变更 card on the chat page", () => {
     expectRelativeRows();
   });
 
-  it("C11 shows the relative path while the workspace list loads, then the logical path", async () => {
+  it("C11/G4 shows the relative path while the workspace list loads, then the logical path and still no root", async () => {
     const gate = deferred<void>();
-    await openSession(changed(PROJ.id), () => gate.promise.then(listed));
+    const snapshot = changed(PROJ.id);
+    await openSession(snapshot, () => gate.promise.then(listed), withNeighbour(snapshot));
 
+    expect(listedGroup()).toBeNull();
     expectRelativeRows();
 
     gate.resolve();
     await quiesce();
 
+    expect(listedGroup()?.textContent).toContain("邻居会话");
+    expect(document.documentElement.innerHTML).not.toContain(ROOT_PREFIX);
     const card = cardNamed("文件变更（1 个）");
     expect(rowTexts(card)).toEqual(["+2-1zhangsan/proj/src/app.ts"]);
     expect(detailButtons().map((button) => button.getAttribute("aria-label"))).toEqual([

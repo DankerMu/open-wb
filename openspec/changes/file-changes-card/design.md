@@ -108,12 +108,23 @@ export function summarizeChanges(steps: readonly ChatStepView[]): FileChanges[nu
 
 变异自检（实现者在沙箱里做，做完还原，写进报告；每个至少打红一例）：去掉 `DATA_EVENTS` 的新条目；解码接受 `[]`；解码不查顶层键集；解码不用 `parseFileChanges`（放过未知 `kind`）；`endStep` 把 `changes` 置回 `null`；`startStep` 不设 `changes`；`setStepChanges` 追加而非替换；`setStepChanges` 对不存在的步骤造一个步骤；files.changed 一支传 `"running"` 作会话状态（由 C3 的 `done` 会话一例与 C4 打红）；快照映射不带 `changes`；`summarizeChanges` 计入 running 步骤；取首次的值而非最后的值；位置取最后而非首次；空汇总也渲染卡片；前缀用 `workspace.root`；不可解析时仍渲染 `查看详情`；导航到不带 `ws` 的 `/files`；卡片放到错误之前；卡片放到 `已停止` 徽章之后；`added: 0` 也显示 `+0`；user 消息也渲染卡片。
 
+## 评审轮 1 追加的证据（fix pass 1，只改测试）
+三席均无 P0/P1/P2，产品代码零改动。
+- G1：快照里 running 的步骤已带 `changes`（服务端发布事件之后，刷新落在变更提交与 `step.end` 之间的路径）→ `step.end` 之前无卡片，之后出现；归约层断言 `step.end` 后 `changes` 仍是快照带来的那个数组。
+- G2：两条助手消息各有一个已结束步骤改同一路径、计数不同 → 两张卡各归其消息，各为 `文件变更（1 个）`，各显示自己的计数（不跨消息汇总）。
+- G3：`turn.end failed` 时仍在 running 且已带 `changes` 的步骤变为 `failed` 并出卡（与 C8 的 `stopped` 同一个表）。
+- G4：C11 的「不在列表里」「未绑定」两例先断言侧栏已出现列表里的空间分组（会话列表里另放一个绑定到该空间的会话），证明列表已装入；「读取中」一例在列表到达后再断言页面不含绝对根。
+- G5：C9 追加——步骤卡内没有任何 `file-change-` 类的元素，`edit` 步骤卡文本不含 `+2` 与逻辑路径。
+- G6（连接器）：自身 id 不超过快照游标的 files.changed 不交付、不重同步，刚好超过的那一帧交付。
+
+变异：`endStep` 把 `changes` 置空 → G1；`page.tsx` 找不到时回退到列表首个空间 → C11/G4 两例；把整个会话的步骤一起汇总 → G2；`endTurn` 翻转步骤时丢 `changes` → G3、C8；files.changed 跳过游标过滤 → G6；前缀用 `workspace.root` → G4 新增断言等；步骤卡把变更印成文本或带 `file-change-path` 类 → G5。测试文件 707 → 764 行（54 → 59 例），support 174 → 239 行。
+
 ## 实现记录
 - 行数：`stream.ts` 787 → 742；`page.tsx` 688 → 689；`conversation-view.tsx` 262 → 274；`messages.css` 530 → 590；`session-contract.ts` 只加一个 `export`；新文件 `stream-steps.ts` 69、`stream-artifacts.ts` 50、`file-changes-card.tsx` 71。
 - 卡片外层是 `<fieldset aria-labelledby>`（隐含 role `group`），不是 `<div role="group">`：Biome `useSemanticElements` 拒绝后者，先例 `approval-bar.tsx:47`。`messages.css` 因此多了 fieldset 的复位（`margin`/`padding`/`min-width`/`min-inline-size`），卡片多一个 `useId()`（排在另两个 hook 之后、汇总之前）。
 - `查看详情` 按钮复用既有类 `chat-msg-action`，没有新增按钮样式。
-- 测试：`web/test/chat-page-file-changes.test.tsx`（707 行，54 例）与 `web/test/chat-page-file-changes-support.tsx`（174 行）。基线（加空壳模块）43 红 11 绿，绿的都是标注过的护栏。
-- 既有测试共 12 处步骤视图字面量加 `changes: null`（`chat-stream.test.ts`、`chat-stream-recovery.test.ts`、`chat-stream-stopped.test.ts`、`session-contract-metadata.test.ts`）。
+- 测试（首版）：`web/test/chat-page-file-changes.test.tsx`（707 行，54 例）与 `web/test/chat-page-file-changes-support.tsx`（174 行）。基线（加空壳模块）43 红 11 绿，绿的都是标注过的护栏。
+- 既有测试共 14 处步骤视图字面量加 `changes: null`（`chat-stream.test.ts` 8、其余三个文件各 2）。
 - 比 C1–C15 多的用例：同一消息再次 `turn.start` 后卡片消失；恰好 50 项的 files.changed 被交付（钉住 51 项被拒的边界）。C9 另桩了 `/api/workspaces/<id>/tree`（files 页导航后会读），并把另一个空间排在列表前面，否则 files 页改写 `?ws=` 会掩盖「导航不带 `ws`」的变异。
 - 变异 21 项全部打红。清单外的一项存活：把空汇总的提前返回放到 hook 之前——React 19 在一次渲染调用零个 hook 时不抛错，测试看不出来；拦住它的是 Biome 的 `useHookAtTopLevel`（`make lint`）。
 
