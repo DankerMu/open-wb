@@ -2,7 +2,7 @@
 
 ## 10. chat-web — `/` 命令候选（父 tasks 10.5）
 
-- [ ] 10.5 `web/src/lib/api-commands.ts`（新：`listCommands()` GET `/api/commands`，响应体恰 `{commands}`、元素严格五键；`api.ts` 接线）+ `web/src/features/chat/slash-menu-state.ts`（新，纯函数：`isOpen`、`filter`、`pickText`、`reduce`）+ `slash-menu.tsx`（新：`useSlashMenu` 的边沿触发拉取与缓存、按键拦截、选中；私有 `SlashMenu` 面板 `role="listbox"`）+ `composer.tsx` 可选 `slashMenu` 插槽与可选 `interceptKeyDown`（都不传时逐字同现状）+ `conversation-view.tsx` 透传 + `page.tsx` 接线（≤ +10 行）+ `chat.css` 面板样式。验证：新建 `web/test/api-commands.test.ts`（A1–A4）、`web/test/slash-menu-state.test.ts`（M1–M11）、`web/test/chat-page-slash.test.tsx`（J1–J14）；既有测试零 diff
+- [ ] 10.5 `web/src/lib/api-commands.ts`（新：`listCommands()` GET `/api/commands`，响应体恰 `{commands}`、元素严格五键；`api.ts` 接线）+ `web/src/features/chat/slash-menu-state.ts`（新，纯函数：`isOpen`、`filter`、`pickText`、`reduce`）+ `slash-menu.tsx`（新：`useSlashMenu` 的边沿触发拉取与缓存、按键拦截、选中；私有 `SlashMenu` 面板 `role="listbox"`）+ `composer.tsx` 可选 `slashMenu` 插槽与可选 `interceptKeyDown`（都不传时逐字同现状）+ `conversation-view.tsx` 透传 + `page.tsx` 接线（≤ +10 行）+ `messages.css` 面板样式（`chat.css` 已到行数上限，零 diff）。验证：新建 `web/test/api-commands.test.ts`（A1–A4）、`web/test/slash-menu-state.test.ts`（M1–M11）、`web/test/chat-page-slash.test.tsx`（J1–J14）；既有测试零 diff
 
 ## Risk packs
 
