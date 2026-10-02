@@ -1,11 +1,13 @@
 // 斜杠命令候选（issue 556）测试的夹具与页面查询：命令目录、`/api/commands` 路由、欢迎态与已选会话的
-// 挂载、候选面板的读取、按键与 `scrollIntoView` 记录桩。页面搭法来自 chat-page-support.tsx、
-// chat-page-ownership-support.ts 与 chat-page-search-support.tsx（不改它们）。供
+// 挂载、候选面板的读取、按键与 `scrollIntoView` 记录桩、裸 `Composer` 夹具（J11、J13）。页面搭法来自
+// chat-page-support.tsx、chat-page-ownership-support.ts 与 chat-page-search-support.tsx（不改它们）。供
 // api-commands.test.ts、slash-menu-state.test.ts 与 chat-page-slash.test.tsx 使用。
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import type { ComponentProps } from "react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { type ComponentProps, type KeyboardEvent, useState } from "react";
 import { afterEach, beforeEach, expect, vi } from "vitest";
-import type { Composer } from "../src/features/chat/composer.js";
+import { Composer } from "../src/features/chat/composer.js";
+import { useSlashMenu } from "../src/features/chat/slash-menu.js";
+import { createApiClient } from "../src/lib/api.js";
 import type { Command } from "../src/lib/api-commands.js";
 import { quiesce } from "./chat-page-file-changes-support.js";
 import { renderChatPageWithAuthProbe, typeDraft } from "./chat-page-lifecycle-support.js";
@@ -274,7 +276,7 @@ export async function sentPrompts(fetchMock: FetchMock) {
 }
 
 /** The props of a bare enabled composer holding `draft`; `onSubmit` only prevents the navigation. */
-export function composerProps(draft: string): ComponentProps<typeof Composer> {
+function composerProps(draft: string): ComponentProps<typeof Composer> {
   return {
     disabled: false,
     draft,
@@ -286,6 +288,36 @@ export function composerProps(draft: string): ComponentProps<typeof Composer> {
     sendDisabled: false,
     stopSessionId: null,
   };
+}
+
+/** `useSlashMenu` beside a bare composer whose draft starts as a slash. */
+export function Harness({ enabled }: { enabled: boolean }) {
+  const [client] = useState(() => createApiClient());
+  const [draft, setDraft] = useState("/");
+  const slash = useSlashMenu(client, draft, enabled, setDraft);
+  return (
+    <Composer
+      {...composerProps(draft)}
+      disabled={!enabled}
+      interceptKeyDown={slash.interceptKeyDown}
+      onChangeDraft={setDraft}
+      slashMenu={slash.menu}
+    />
+  );
+}
+
+type Slot = Pick<ComponentProps<typeof Composer>, "interceptKeyDown" | "slashMenu">;
+
+/** A bare composer on the draft `你好` with `slot`; returns its submit spy. */
+export function mountComposer(slot: Slot) {
+  const onSubmit = vi.fn(composerProps("").onSubmit);
+  render(<Composer {...composerProps("你好")} {...slot} onSubmit={onSubmit} />);
+  return onSubmit;
+}
+
+/** An interceptor that reports every key as `handled` and prevents nothing. */
+export function interceptor(handled: boolean) {
+  return vi.fn((_event: KeyboardEvent<HTMLTextAreaElement>) => handled);
 }
 
 /** The welcome state beside an auth probe, for `renewAccount`; `commands` answers `/api/commands`. */

@@ -7,11 +7,7 @@
  * literals from the spec delta.
  */
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { type ComponentProps, type KeyboardEvent, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { Composer } from "../src/features/chat/composer.js";
-import { useSlashMenu } from "../src/features/chat/slash-menu.js";
-import { createApiClient } from "../src/lib/api.js";
 import { quiesce } from "./chat-page-file-changes-support.js";
 import { renewAccount, settleDeferredResponse, typeDraft } from "./chat-page-lifecycle-support.js";
 import { composer, findMessageArea, SESSION_MESSAGES } from "./chat-page-ownership-support.js";
@@ -23,13 +19,15 @@ import {
   cardChildren,
   catalogue,
   commandCalls,
-  composerProps,
   composerReady,
   expectNothingSent,
   expectThreeCandidates,
+  Harness,
   highlighted,
+  interceptor,
   LABELS,
   labels,
+  mountComposer,
   openAnswering,
   openProbed,
   openSession,
@@ -278,6 +276,17 @@ describe("关闭与重现 (J6)", () => {
     expect(labels()).toEqual(LABELS);
     expect(highlighted()).toBe("整理上下文");
   });
+
+  it("J6 Shift+Esc closes the panel as Esc does: the key is prevented and nothing is sent", async () => {
+    const { fetchMock } = await welcomePanel();
+    const requests = paths(fetchMock);
+
+    expect(press("Escape", { shiftKey: true })).toBe(false);
+
+    expect(panel()).toBeNull();
+    expect(composer().value).toBe("/");
+    await expectNothingSent(fetchMock, requests);
+  });
 });
 
 describe("输入法组合态 (J7)", () => {
@@ -484,22 +493,6 @@ describe("点击与 Tab 选中 (J10)", () => {
 });
 
 describe("禁用 (J11)", () => {
-  /** `useSlashMenu` beside a bare composer whose draft starts as a slash. */
-  function Harness({ enabled }: { enabled: boolean }) {
-    const [client] = useState(() => createApiClient());
-    const [draft, setDraft] = useState("/");
-    const slash = useSlashMenu(client, draft, enabled, setDraft);
-    return (
-      <Composer
-        {...composerProps(draft)}
-        disabled={!enabled}
-        interceptKeyDown={slash.interceptKeyDown}
-        onChangeDraft={setDraft}
-        slashMenu={slash.menu}
-      />
-    );
-  }
-
   it("J11 a disabled composer holding a slash shows no panel and requests no catalogue", async () => {
     const fetchMock = createFetchMock({ [COMMANDS]: catalogue() });
     vi.stubGlobal("fetch", fetchMock);
@@ -579,6 +572,28 @@ describe("client 身份变化与卸载 (J12)", () => {
     expect(composer().value).toBe("/todo ");
   });
 
+  it("J12 an arrow key moves from the first option of the shorter catalogue, not from the old highlight", async () => {
+    const second = deferredResponse();
+    const { getProbe } = await openProbed([
+      jsonResponse({ commands: [...CATALOGUE, skill("minutes", "写会议纪要")] }),
+      second.promise,
+    ]);
+    await type("/");
+    press("ArrowUp");
+    expect(highlighted()).toBe("minutes");
+
+    await renewAccount(getProbe);
+    await quiesce();
+    await settleDeferredResponse(second, jsonResponse({ commands: [TODO, COMPACT] }));
+    expect(highlighted()).toBe("任务清单");
+    scrolls.length = 0;
+    expect(press("ArrowDown")).toBe(false);
+
+    // From the fourth of four options: one step from the first of two, not (3 + 1) mod 2 = 0.
+    expect(highlighted()).toBe("整理上下文");
+    expect(scrolls).toEqual([[optionOf("整理上下文"), NEAREST]]);
+  });
+
   it("J12 a renewal aborts the catalogue request in flight and its late answer is not shown", async () => {
     const first = deferredResponse();
     const second = deferredResponse();
@@ -600,6 +615,26 @@ describe("client 身份变化与卸载 (J12)", () => {
     await settleDeferredResponse(second, jsonResponse({ commands: [WEEKLY] }));
     expect(labels()).toEqual(["weekly-report"]);
     expect(commandCalls(fetchMock)).toHaveLength(2);
+  });
+
+  it("J12 the late answer of the aborted request does not replace the catalogue of the new client already shown", async () => {
+    const old = deferredResponse();
+    const renewed = deferredResponse();
+    const { fetchMock, getProbe } = await openProbed([old.promise, renewed.promise]);
+    await type("/");
+    await renewAccount(getProbe);
+    await quiesce();
+    await settleDeferredResponse(renewed, jsonResponse({ commands: [WEEKLY, TODO] }));
+    expect(labels()).toEqual(["weekly-report", "任务清单"]);
+
+    await settleDeferredResponse(old, jsonResponse({ commands: CATALOGUE }));
+
+    expect(labels()).toEqual(["weekly-report", "任务清单"]);
+    expect(highlighted()).toBe("weekly-report");
+    // The catalogue is kept, so the draft matching anew starts no third request.
+    await type("");
+    await type("/");
+    expect([labels(), commandCalls(fetchMock).length]).toEqual([["weekly-report", "任务清单"], 2]);
   });
 
   it("J12 an aborted request that fails, as fetch does, leaves the request of the new client in flight", async () => {
@@ -641,20 +676,6 @@ describe("client 身份变化与卸载 (J12)", () => {
 });
 
 describe("Composer 插槽契约 (J13)", () => {
-  type Slot = Pick<ComponentProps<typeof Composer>, "interceptKeyDown" | "slashMenu">;
-
-  /** A bare composer on the draft `你好` with `slot`; returns its submit spy. */
-  function mountComposer(slot: Slot) {
-    const onSubmit = vi.fn(composerProps("").onSubmit);
-    render(<Composer {...composerProps("你好")} {...slot} onSubmit={onSubmit} />);
-    return onSubmit;
-  }
-
-  /** An interceptor that reports every key as `handled` and prevents nothing. */
-  function interceptor(handled: boolean) {
-    return vi.fn((_event: KeyboardEvent<HTMLTextAreaElement>) => handled);
-  }
-
   it("J13 an interceptor that returns false leaves Enter to the composer, which submits once", () => {
     const interceptKeyDown = interceptor(false);
     const onSubmit = mountComposer({ interceptKeyDown });
