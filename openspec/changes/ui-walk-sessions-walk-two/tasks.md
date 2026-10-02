@@ -4,7 +4,7 @@ Fixture level: expanded
 
 ## 8. chat-harness — UI 走查会话元数据，走查二（父 tasks 8.2b）
 
-- [ ] 8.2b `web/e2e/ui-walk-sessions.spec.ts`：接第 6 步之后、同一会话、同一 `try` 块内追加第 7、8、9、11 步——行菜单 `置顶任务` → 条目移到 `置顶任务`、`空间` 不再含它、菜单改为 `取消置顶` → `重命名`（对话框 `重命名任务`、`任务名称`、`保存`）→ 侧栏条目与顶栏标题更新、reload 后标题与置顶分区保持、REST 回读 → 顶栏 `对话内搜索`：UUID → `1/1` 与当前匹配、`WorkBuddy` → `1/2`、无匹配 → `0/0`、`Esc` 关闭并清除高亮 → 行菜单 `删除`（确认框 `删除任务` 与文案）→ Toast `任务已删除`、条目消失、URL 无 `session`、欢迎态、REST 404。去掉「离开会话页」一步；`查看详情` 的 `waitForEvent` 与 click 并成 `Promise.all`。验证：`make ui-walk` 两个 project 全绿；design「Required evidence」E1–E8
+- [x] 8.2b `web/e2e/ui-walk-sessions.spec.ts`：接第 6 步之后、同一会话、同一 `try` 块内追加第 7、8、9、11 步——行菜单 `置顶任务` → 条目移到 `置顶任务`、`空间` 不再含它、菜单改为 `取消置顶` → `重命名`（对话框 `重命名任务`、`任务名称`、`保存`）→ 侧栏条目与顶栏标题更新、reload 后标题与置顶分区保持、REST 回读 → 顶栏 `对话内搜索`：UUID → `1/1` 与当前匹配、`WorkBuddy` → `1/2`、无匹配 → `0/0`、`Esc` 关闭并清除高亮 → 行菜单 `删除`（确认框 `删除任务` 与文案）→ Toast `任务已删除`、条目消失、URL 无 `session`、欢迎态、REST 404。去掉「离开会话页」一步；`查看详情` 的 `waitForEvent` 与 click 并成 `Promise.all`。验证：`make ui-walk` 两个 project 全绿；design「Required evidence」E1–E8
 
 ## Risk packs
 
@@ -24,7 +24,7 @@ Fixture level: expanded
 | Documentation / migration notes | no | spec delta 即文档 |
 
 ## 通用纪律（继承父 tasks.md）
-- [ ] 改动只有 `web/e2e/ui-walk-sessions.spec.ts`；其它被跟踪文件零 diff。
-- [ ] 没有 RED 阶段；负对照 N1–N16 在两个 project 上逐条记录失败所在的步骤，#540 仍适用的负对照在 `desktop-light` 重跑。
-- [ ] `make lint`、`make typecheck`、`make anti-drift`（jscpd 179 不增）、`bash scripts/size-guard.sh`、`npm test --workspace web`、`make test-guardrails` 退出 0；`openspec validate ui-walk-sessions-walk-two --strict --no-interactive` 通过。
+- [x] 改动只有 `web/e2e/ui-walk-sessions.spec.ts`；其它被跟踪文件零 diff。
+- [x] 没有 RED 阶段；负对照 N1–N16 在两个 project 上逐条记录失败所在的步骤，#540 仍适用的负对照在 `desktop-light` 重跑。
+- [x] `make lint`、`make typecheck`、`make anti-drift`（jscpd 179 不增）、`bash scripts/size-guard.sh`、`npm test --workspace web`、`make test-guardrails` 退出 0；`openspec validate ui-walk-sessions-walk-two --strict --no-interactive` 通过。
 - [ ] 实测时长（本地全新状态、复用状态；CI）写进 PR。

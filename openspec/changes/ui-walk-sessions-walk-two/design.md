@@ -31,7 +31,8 @@
 
 ### D1a 两个文件内辅助（避免四处重复，jscpd 不增）
 - `rowMenu(sidebar)`：返回选中条目所在 `li` 里名字以 `更多操作：` 开头的按钮（行菜单触发按钮）；四处用到（第 7 步两次、第 8、11 步）。
-- 一个分区归属断言：给定侧栏与期望的分区，断言选中条目在全列表计数 1、在期望分区计数 1、在其余两个分区计数 0。`step6Sidebar` 现有的三条计数断言改用它（行为不变），第 7、8 步复用。
+- 一个分区归属断言：给定侧栏与期望的分区，断言选中条目在全列表计数 1、在期望分区计数 1、在其余两个分区计数 0。`step6Sidebar` 现有的计数断言改用它（行为不变），第 7、8 步复用。
+- 实现：`sections(sidebar)`（四个定位器）+ `expectSelectedIn(list, home, others)`；`step6Sidebar` 仍是四条计数（全表 1、`空间 › ui-walk-sessions` 子组 1、`任务` 0、`置顶任务` 0）。另有三个只为不产生克隆的小辅助：`welcomeHeading`、`expectTranscriptReady`、`menuItem`（第 2 步与第 5 步末尾改用前两个，行为不变）。
 
 ### D2 第 7 步（置顶）
 在侧栏里（mobile 在覆盖层里；实现者决定用 `inspectSidebar` 还是 `openSidebar` 加自己收尾，见 D7）：
@@ -69,6 +70,7 @@
 `await Promise.all([navigated, <查看详情按钮>.click()])`，其余不变。目的只是让 `waitForEvent` 的 reject 有 handler：click 自己超时时，先 reject 的仍可能是 `waitForEvent`（同为 10 s 且先注册），报出的错误可以是两者之一；关键是它不再是 unhandled rejection，`finally` 照常执行。
 
 ### D7 mobile 的三处已知陷阱（实现者在真实栈上定写法，报告实际采用的写法与原因）
+> 实测（两个 project，长驻栈 8 次 + 全新状态 2 次 mobile 运行）：第 2、3 条的担心都没有发生。置顶 / 删除之后焦点落在覆盖层容器自身（仍在覆盖层内），`inspectSidebar` 结尾的 `Escape` 关得掉覆盖层，Toast 在场也一样；行菜单上的 `Escape` 只收起菜单、焦点回到触发按钮、覆盖层不关；删除不关 mobile 覆盖层（URL 在覆盖层开着时已去掉 `session`）；Toast 没有拖慢指针动作。采用的写法：三步都用 `inspectSidebar`，Toast 用 `.ui-toast` 过滤文本。置顶不是乐观更新——点击到 PATCH 落地之间条目仍在 `空间`。
 1. **覆盖层开着时按 role 找不到 Toast 与 `main` 里的东西**：Toast 按文本定位，必须 exact（`page.getByText("任务已删除", { exact: true })` 或 `.ui-toast` 过滤文本）——Radix 在 Toast 出现后的约 1 s 内另挂一个文本为 `通知 任务已删除` 的隐藏播报节点，非 exact 的文本匹配会 strict 冲突；欢迎态 h1 在覆盖层关闭之后断言。只断言规格点名的 `任务已删除`，不断言 `已更新置顶状态` 与 `已重命名`。
 2. **条目重挂或删除之后关覆盖层**：`inspectSidebar` 结尾的 `Escape` 依赖按键目标在覆盖层内。若置顶 / 删除之后 `Escape` 关不掉覆盖层，改为点覆盖层自己的 `关闭`；检查 `取消置顶` 时关菜单用 `Escape` 可能把覆盖层一起关掉——可以改为再点一次触发按钮收起菜单。不为此加任何睡眠。
 3. **Toast 遮挡**：Toast 在 `top: 52px` 居中，390 下可能盖住搜索框一带；Playwright 的指针动作会等到可点为止（最多约 2.4 s），是变慢而不是失败。键盘与 `fill` 不受影响。若因此接近预算，报告实测。
@@ -116,12 +118,14 @@
   - N15 删除之后期望名为新标题的条目计数 1 → 第 11 步的「条目消失」断言（Toast 断言已通过）。
   - N16 重命名对话框的预填值期望改成别的串 → 第 8 步。
   - 另：#540 的负对照里仍适用的（原 N1–N11、N13）在 `desktop-light` 上重跑一遍，确认第 1–6 步的断言没有被削弱。
+  - 实测更正：原 N11（去掉 `finally` 的清理）在成功路径上已无判别力——第 11 步已经经 UI 删除，旅程照样通过、零残留。替代是「去掉清理并让第 9 步失败」：留下 1 条绑定走查空间的会话，证明失败路径上 `finally` 仍然必要。N2 在两个 project 上失败的断言行不同（desktop 上 `空间` 计数 1 在 PATCH 落地前短暂成立），另补一条无歧义的版本（保留真断言，再期望 `空间` 计数 1）。N14 的基线对照：测试被孤立的 `waitForEvent` reject 结束，`finally` 里的 DELETE 报 `Test ended.` 没到服务端，留 1 条会话；Playwright 的输出里没有 `unhandled` 字样，证据是错误的次序与残留。
 - **E6 门禁**：`make lint`、`make typecheck`、`make anti-drift`、`bash scripts/size-guard.sh`、`npm test --workspace web`、`make test-guardrails`、`bash scripts/size-guard.sh web/e2e/ui-walk-sessions.spec.ts`（pre-commit 会把暂存文件传给它，≤ 800 行）、`openspec validate ui-walk-sessions-walk-two --strict --no-interactive` 退出 0；jscpd 计数与克隆位置。
 - **E7 源码清点**：`rg -n "waitForTimeout|page\\.route|\\.fulfill|EventSource|setTimeout|test\\.slow|MODEL_UPSTREAM"` 零命中；显式 `timeout` 仍只有一处。
 - **E8 CI**：PR 的 `ui-walk` job 通过；从日志记录四条旅程各自的时长、总时长与新旅程的分步累计。
 
 ## 已知残留
-1. **「滚入视图」没有真实浏览器证据**：两条消息的转录里用户消息可能本来就在视口内；`toBeInViewport` 只在转录溢出的 project 上有判别力（实现者按 project 记录）。滚动行为由 jsdom 的对话内搜索测试证明。
+1. **「滚入视图」没有断言级的真实浏览器证据**：`desktop-light` 上用户消息搜索前已完整在视口内（位置不变）；`mobile-dark` 上搜索前被转录框顶部裁掉约 39 px、`1/1` 之后完整可见（`mark` 日志里消息的 y 从 54–77 变到 128）——位移只在日志里，不是断言；`toBeInViewport`（任意相交）在两个 project 上搜索前都会通过。滚动行为由 jsdom 的对话内搜索测试证明。
+1a. **「助手消息没有 `aria-current`」按排除法断言**：全页带 `aria-current="true"` 的 `article` 恰一个且用户消息带它；没有对助手 article 的直接否定断言（N8 证明它会咬）。
 2. **只走行菜单**：顶栏的 `重命名` 入口不在走查里。
 3. **只删除 done 会话**：running 会话的 UI 删除没有真实浏览器证据（服务端集成测试覆盖 REST 路径）。
 4. **Toast 只断言 `任务已删除`**；`已更新置顶状态`、`已重命名` 不断言。
@@ -129,7 +133,7 @@
 6. **取消置顶**不走（菜单项的文案变化有断言，点击没有）。
 6a. **有断言而没有负对照的句子**：「保存后对话框关闭」（`取消` 同样关框）、reload 前的顶栏标题、reload 后 DOM 上的置顶分区（N6 只打 REST）、`0/0` 时无当前匹配、`Esc` 之后高亮清除（N10 先失败在搜索框）、URL 与欢迎态、`1/2`。都是对真实 DOM 的肯定或计数断言。
 7. **测试超时不清理**（同 #540）。
-8. **每测试 30 s**：#557 还要加第 10 步的两个真实回合；本刀给出加完第 7–11 步之后的实测时长供它判断。
+8. **每测试 30 s**：#557 还要加第 10 步的两个真实回合。实测（本地）：复用状态下新旅程 4.2–4.3 s（desktop）/ 5.6–5.7 s（mobile）；全新状态 6.3 s / 5.6 s，完整 `make ui-walk` 36 s。第 7–11 步合计约 1.7 s（desktop）/ 2.6 s（mobile）。
 
 ## Seams under test
 - 真实浏览器对编译后的应用、真 omp 与受控上游；没有任何桩。
