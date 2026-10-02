@@ -30,7 +30,7 @@
 2. **`stream-artifacts.ts` 与 `page.tsx` 有改动**：issue 的 PR Boundary 只列了 `artifact-card.tsx` 与 `conversation-view.tsx`。扩展名派生是纯函数，放在汇总函数旁边（7.6 也要用）；卡片要调 `fetchPreview`，而 API client 只在 `page.tsx` 里，所以多传一个 `client` 属性（+1 行，不含运算符，不增加 `ChatPage` 的认知复杂度）。不在卡片里另建 client：页面的归属判断按 client 身份比较。
 3. **父文「`globe`、`download`、`package` 三个 lucide 名由本 change 加入注册表」一句不并入**：三者已在注册表（`web/src/ui/icon.tsx:93-95`，7.0 落的）。
 4. **下载后的撤销延后一个宏任务**：父文「触发下载后撤销该 URL」。点击临时链接后同步撤销在部分浏览器里会让下载拿不到内容，延后一拍再撤销。
-5. 子 delta 另加父文未写的可观察行为：无扩展名不派生；拉取中禁用的是「该卡片的全部操作按钮」（父文「该按钮禁用」；html 卡有两个同名按钮）；失败时明确「不写剪贴板、不触发下载」；图片过大（413）与类型不符同样走失败 Toast；401 不另出 Toast；被 abort 的拉取不出 Toast；换账号同样 abort；user 消息不渲染产物卡；新增 Scenario「拉取中与卸载」。
+5. 子 delta 另加父文未写的可观察行为：无扩展名不派生（含 `.env`、`.html` 这类唯一的 `.` 在开头的文件名）；关闭 html 预览后焦点回到被点的那个按钮；拉取中禁用的是「该卡片的全部操作按钮」（父文「该按钮禁用」；html 卡有两个同名按钮）；失败时明确「不写剪贴板、不触发下载」；图片过大（413）与类型不符同样走失败 Toast；401 不另出 Toast；被 abort 的拉取不出 Toast；换账号同样 abort；user 消息不渲染产物卡；新增 Scenario「拉取中与卸载」。
 6. **图标底色偏离 demo**：demo 的三种图标底色是字面 `rgba()`（demo:505-507），features 下的样式不允许字面颜色与 `--wb-palette-*`。html 用 `--wb-status-warning-soft-bg` + `--wb-status-warning-text`，代码用 `--wb-brand-primary-subtle` + `--wb-brand-primary`，图片没有对应的蓝色语义 token，用 `--wb-bg-tertiary` + `--wb-text-secondary`。
 7. **卡片外层是 `<fieldset aria-labelledby>`**（隐含 role `group`），同 7.5a 偏差 8。
 8. 只并入父 delta 的产物卡部分；「产物面板」Requirement 与顶栏入口归 7.6。

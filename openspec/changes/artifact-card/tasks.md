@@ -2,7 +2,7 @@
 
 ## 7. web — 产物卡 html/图片/代码按需预览（父 tasks 7.5b）
 
-- [ ] 7.5b 新建 `artifact-card.tsx`（同一「已结束步骤按路径去重」汇总与顺序，按扩展名派生：`html` → `globe`/`HTML`/`打开网页预览`/卡脚 `可交互预览` → 点击时 `fetchPreview` → Dialog（标题文件名）内 `<iframe sandbox="allow-scripts" srcdoc title>`，截断时 iframe 上方 `文件超过 1 MiB，仅预览前 1 MiB`；`png`/`jpg|jpeg` → `image`/`PNG`|`JPG`/`下载` → Blob URL 临时链接下载后撤销；`md/txt/log/csv/json/js/ts/tsx` → `file-code`/大写扩展名/`复制代码` → 剪贴板 → toast `已复制到剪贴板`|`复制失败`，截断 → 不写剪贴板 toast `文件过大，无法复制`；其它扩展名不派生；空间不可解析时不渲染；拉取中按钮禁用不并发、卸载/切会话 abort 并撤销 Blob URL；预览失败 toast 信封 message 不开 Dialog）+ `stream-artifacts.ts` 的 `artifactKind` + `conversation-view.tsx` 在文件变更卡之后、`已停止` 徽章之前插入产物卡位 + `page.tsx` 传 `client` + `messages.css` 样式。验证：新建 `web/test/chat-page-artifact-card.test.tsx`（A1–A15）；既有测试只改 proposal「偏差」1 列出的三处期望
+- [x] 7.5b 新建 `artifact-card.tsx`（同一「已结束步骤按路径去重」汇总与顺序，按扩展名派生：`html` → `globe`/`HTML`/`打开网页预览`/卡脚 `可交互预览` → 点击时 `fetchPreview` → Dialog（标题文件名）内 `<iframe sandbox="allow-scripts" srcdoc title>`，截断时 iframe 上方 `文件超过 1 MiB，仅预览前 1 MiB`；`png`/`jpg|jpeg` → `image`/`PNG`|`JPG`/`下载` → Blob URL 临时链接下载后撤销；`md/txt/log/csv/json/js/ts/tsx` → `file-code`/大写扩展名/`复制代码` → 剪贴板 → toast `已复制到剪贴板`|`复制失败`，截断 → 不写剪贴板 toast `文件过大，无法复制`；其它扩展名不派生；空间不可解析时不渲染；拉取中按钮禁用不并发、卸载/切会话 abort 并撤销 Blob URL；预览失败 toast 信封 message 不开 Dialog）+ `stream-artifacts.ts` 的 `artifactKind` + `conversation-view.tsx` 在文件变更卡之后、`已停止` 徽章之前插入产物卡位 + `page.tsx` 传 `client` + `messages.css` 样式。验证：新建 `web/test/chat-page-artifact-card.test.tsx`（A1–A15）；既有测试只改 proposal「偏差」1 列出的三处期望
 
 ## Risk packs
 
@@ -21,7 +21,7 @@
 | Documentation / migration notes | no | spec delta 即文档 |
 
 ## 通用纪律（继承父 tasks.md）
-- [ ] 新测试进新文件 `web/test/chat-page-artifact-card.test.tsx`（需要的夹具从 `chat-page-file-changes-support.tsx` 导入，不改它；缺的放新文件 `chat-page-artifact-card-support.tsx`）；既有测试只改 proposal「偏差」1 的三处。
-- [ ] RED 集合 = A1–A15 中依赖新行为的用例；实现前就成立的护栏逐条标出。实现前后各跑一次并记录命令与结果。
-- [ ] `page.tsx` 689 → 690；`conversation-view.tsx`、`messages.css`、`stream-artifacts.ts` 的前后行数写进 PR。
-- [ ] `npm test --workspace web`、`make lint`、`make typecheck`、`make anti-drift`（knip 零新增、jscpd 178 不增）、`bash scripts/size-guard.sh` 退出 0；`openspec validate artifact-card --strict --no-interactive` 通过。
+- [x] 新测试进新文件 `web/test/chat-page-artifact-card.test.tsx`（需要的夹具从 `chat-page-file-changes-support.tsx` 导入，不改它；缺的放新文件 `chat-page-artifact-card-support.tsx`；评审后追加的 H2–H6 在新文件 `chat-page-artifact-card-state.test.tsx`）；既有测试只改 proposal「偏差」1 的三处。
+- [x] RED 集合 = A1–A15 中依赖新行为的用例；实现前就成立的护栏逐条标出。实现前后各跑一次并记录命令与结果。
+- [x] `page.tsx` 689 → 690；`conversation-view.tsx`、`messages.css`、`stream-artifacts.ts` 的前后行数写进 PR。
+- [x] `npm test --workspace web`、`make lint`、`make typecheck`、`make anti-drift`（knip 零新增、jscpd 178 不增）、`bash scripts/size-guard.sh` 退出 0；`openspec validate artifact-card --strict --no-interactive` 通过。

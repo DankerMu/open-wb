@@ -21,7 +21,7 @@
 type Artifact = { kind: "html" | "image" | "code"; label: string; name: string };
 export function artifactKind(path: string): Artifact | null
 ```
-`name` 是最后一个 `/` 之后的末段；扩展名是 `name` 里最后一个 `.` 之后的部分，转小写后查表：`html` → `html`/`HTML`；`png` → `image`/`PNG`；`jpg`、`jpeg` → `image`/`JPG`；`md`、`txt`、`log`、`csv`、`json`、`js`、`ts`、`tsx` → `code`/扩展名大写。没有 `.`、`.` 在末尾、或扩展名不在表里 → `null`。
+`name` 是最后一个 `/` 之后的末段；扩展名是 `name` 里最后一个 `.` 之后的部分，转小写后查表：`html` → `html`/`HTML`；`png` → `image`/`PNG`；`jpg`、`jpeg` → `image`/`JPG`；`md`、`txt`、`log`、`csv`、`json`、`js`、`ts`、`tsx` → `code`/扩展名大写。没有 `.`、唯一的 `.` 在开头（`.html`、`.env`：服务端用 Node `extname` 取扩展名，对这类名字是空串，预览必然 `preview_unsupported`）、`.` 在末尾、或扩展名不在表里 → `null`。`.config.json` 的最后一个 `.` 不在开头，照常派生 JSON。
 
 ### D2 组件拆分（`artifact-card.tsx`）
 - `ArtifactCards({ client, steps, workspace })`：**不调任何 hook**。`workspace === null` 返回 `null`；否则 `summarizeChanges(steps)` 逐项取 `artifactKind(change.path)`，为非 `null` 的每一项渲染 `<ArtifactCard key={change.path} … />`（次序即汇总次序）。没有可派生项时什么都不渲染（不留容器）。
@@ -127,6 +127,7 @@ async function run() {
 - A12 换账号与 401：预览挂起时换账号（`renderChatPageWithAuthProbe` + `renewAccount`；该搭法默认的 `/api/workspaces` 返回 `[]`，要覆盖成含会话空间的列表，否则没有卡可点）→ 请求被 abort、无 Toast；预览得 401 → 不出错误 Toast。
 - A13 次序（Scenario「助手块次序」）：`stopped` 助手消息带 `thinking`、一条已结算审批、正文 `部分回答`、带 `out/index.html` 变更的已结束 `write` 步骤、空间可解析 → `.chat-msg-main` 的**全部**子元素按序为 `details.thinking-block`、`div.chat-approvals`、`.chat-md`、步骤卡、`fieldset.file-changes-card`、`fieldset.artifact-card`、`已停止` 徽章、操作行；`复制` 的参数恰为 `部分回答`。
 - A14 不渲染的情形：会话空间不在列表里、会话未绑定、列表读取中、列表读取失败 → 文件变更卡仍在、没有 `.artifact-card`（列表读取成功后出现）；user 消息没有产物卡（夹具照 `chat-page-file-changes.test.tsx:714-726` 给 user 消息挂一个已结束、可派生的变更步骤，否则杀不掉「user 消息也渲染」）；running 步骤的变更在 `step.end` 之前没有产物卡、之后出现；只有 `main.py` 的消息没有产物卡。其中「空间不在列表里」「未绑定」「读取失败」「user 消息」「只有 `main.py`」五例只有否定断言，是实现前就成立的护栏（报告里逐条标出）；「读取中 → 读取成功后出现」「`step.end` 之后出现」是带正向对照的 RED 用例。
+- 评审后追加（H1–H6，`chat-page-artifact-card.test.tsx` 的 A1 表与新文件 `chat-page-artifact-card-state.test.tsx`）：H1 多点文件名（`vite.config.ts`、`dist/app.min.js`）、深层路径（`web/src/ui/card.tsx` → `card.tsx`）、`.config.json` 派生，`.html`/`dir/.json`/`.env`/尾斜杠/空串为 `null`；H2 同一路径出现在两个已结束步骤 → 每路径一张卡、次序同汇总；H3 关闭后再点会重新拉取，`srcdoc` 是第二次的内容；H4 图片卡、代码卡拉取中按钮禁用；H5 预览打开或挂起期间前面的步骤 `step.end` 插入新卡 → 原卡的 Dialog/请求不受影响（状态随路径走）；H6 拉取已完成、剪贴板写入未落定时切会话 → 写入完成后照常出 `已复制到剪贴板`。
 - A15 静态样式：`.artifact-preview-frame` 含 `border: 0`；三种图标块用 D6 列的 token；`chat.css` 不含 `artifact-`（护栏）。
 
 基线运行：测试导入实现前不存在的 `artifactKind`，跑基线时在沙箱里临时给 `stream-artifacts.ts` 加一个抛错的同名导出（不进补丁），让各用例逐例给出红绿；报告里逐条列出基线即绿的护栏。
@@ -144,6 +145,11 @@ async function run() {
 8. 拉取期间按钮禁用，Chromium 会把焦点移到 body：html 卡由 Dialog 接走焦点、关闭后经 `returnFocus` 还给按钮；图片卡与代码卡完成后焦点留在 body（键盘用户要重新 Tab 回来）。jsdom 不做这个 fixup；实现后的一次性 Chromium 观察确认了这三点（拉取中焦点在 body、html 卡关闭后回到被点的按钮、图片/代码卡完成后留在 body），进 CI 的证据归 8.2a。
 9. 焦点进入预览 iframe 之后，Escape 键事件留在 iframe 的文档里，传不到 Dialog；只能用 `关闭` 按钮或点遮罩关闭（Chromium 一次性观察确认）。
 10. 同一 client 的空间列表重读失败时 `workspace` 变 `null`（`workspace-list.ts:46-65`），产物卡连同已打开的预览 Dialog 一起卸载，在途的拉取被静默 abort；列表恢复后卡片重新出现。
+11. **代码卡的剪贴板写入发生在网络往返之后**，已不在点击手势的同步调用栈里（父规格规定的流程：点击 → 拉取 → `writeText`）。Chromium 一次性观察正常；Safari/WebKit 预期以 `NotAllowedError` 拒绝、每次都落到 `复制失败`，Firefox 在慢网下同样可能失败——两者都未实测。跟进 issue #731。
+12. 在途门是单卡粒度：慢网下先后点两张 html 卡，两个预览都会打开并叠成两个模态。
+13. 标题、group 名、按钮名都只用末段文件名：一条消息改了 `src/index.ts` 与 `test/index.ts` 时两张卡同名，只能靠与文件变更卡的次序对应来分辨。
+14. 「沙箱 iframe 里的脚本对应用源发请求不带会话 cookie」只有规范推理（不透明源的请求是跨站请求，cookie 为 `HttpOnly; SameSite=Lax`，`server/src/auth/session.ts:214-219`），没有对真实 server 实测；一次性浏览器观察用的是 mock API。
+15. 预览里的死循环或内存耗尽可能卡住用户自己的标签页（取决于浏览器是否把沙箱 frame 放进独立进程）。
 
 ## Seams under test
 - 纯函数：`artifactKind`。
