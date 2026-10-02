@@ -57,7 +57,7 @@ test("…", async ({ baseURL, page }, testInfo) => {
 
 约束：
 - 不 `import` `ui-walk.spec.ts`（它是测试文件）；需要的私有常量与小函数在新文件里自写。**jscpd**：登录与登出块按本旅程自己的需要自然地写（比旧旅程短），不为躲检测而打乱写法，也不改旧文件。若 jscpd 因此多报克隆且都只落在登录块或登出块上（两块不相邻，各至多一个：178 → 至多 180），接受并在报告里给出每个克隆的两端行号；出现任何其它新增克隆则停下来报告。
-- 不用 `waitForTimeout`、不用 `page.route` / `route.fulfill` / `route.continue`、不替换 `EventSource`、不 arm gate、不读 `MODEL_UPSTREAM_*`。等待一律是对可观察状态的 `expect`（自动重试）或 `waitForRequest` / `waitForResponse`。
+- 不用 `waitForTimeout`、不用 `page.route` / `route.fulfill` / `route.continue`、不替换 `EventSource`、不 arm gate、不读 `MODEL_UPSTREAM_*`。等待一律是对可观察状态的 `expect`（自动重试）或 `waitForRequest` / `waitForResponse` / `waitForEvent`（`查看详情` 的首次导航用的是 `waitForEvent("framenavigated")`）。
 - 每个 project 用 `crypto.randomUUID()` 生成自己的 UUID。
 - Toast（场景切换）不作断言，也不等它消失：`web/src/ui/escape-fallback.ts` 使 mobile 的导航覆盖层在 Toast 在场时也能用 `Escape` 关闭（fix pass 1 实测，见「评审第一轮与 fix pass 1」）。
 - 整条旅程必须在每测试 30 s 内完成，不调用 `test.setTimeout` / `test.slow`。若做不到，停下来报告实测分解。
@@ -122,6 +122,7 @@ test("…", async ({ baseURL, page }, testInfo) => {
 10. **jscpd 可能 178 → 至多 180**（登录、登出块各至多一个，见 proposal 偏差 10a）。
 
 ## 交付记录（实现后补记）
+> 本节是第一轮 head（`15e7767`）的快照：行数、时长、「201 / 409 是推断」与负对照条数都是 fix pass 1 之前的值；之后的值见下面「评审第一轮与 fix pass 1」。只有 jscpd 克隆的行号按最终文件改过。
 - **文件**：`web/e2e/ui-walk-sessions.spec.ts` 364 行；`web/playwright.config.ts` 恰两行。其它被跟踪文件零 diff。
 - **E1 / E2**：配置 diff 恰两行；`npx playwright test --list` 为「6 tests in 2 files」，每个 project 新 spec 1 条、旧 spec 2 条。
 - **E3 全新状态**（CI 同款包装，官方 omp v18.0.10；实现者两次、编排者在真实仓库一次，三个不同的 `RUNNER_TEMP`）：均退出 0，`5 passed, 1 skipped`。时长：新旅程 `desktop-light` 4.1–4.8 s、`mobile-dark` 4.8–4.9 s；旧旅程 10.4–10.5 s / 12.9–13.1 s；Playwright 总计 33.3–34.0 s（改动前的基线是 24.9 s）。201 / 409 两条路径是推断而非日志：spec 接受两者但不打印走了哪条；依据是运行后沙箱里出现了夹具里没有的 `ui-walk-sessions` 目录，且 Playwright 先跑 `desktop-light`。
@@ -150,7 +151,7 @@ fix 后的实测（真实仓库 / 实现者沙箱）：
 - 全新状态完整 `make ui-walk`：退出 0，`5 passed, 1 skipped`；新旅程 4.7 s / 3.0–3.1 s（`desktop-light` 含 omp 冷启动），旧旅程 9.9–10.4 s / 13.1 s，总计 31.5–32.1 s。
 - `make lint`、`make typecheck`、`make anti-drift`（jscpd 179，仍只有登录块一处）、`npm test --workspace web`、`make test-guardrails` 退出 0；禁用模式清点零命中。
 
-**E10（CI）**：第一轮 head `15e7767` 的 `ui-walk` job 通过（run 37043461057）：`5 passed, 1 skipped`，新旅程 5.5 s / 5.1 s，旧旅程 14.1 s / 17.7 s，Playwright 总计 44.7 s，job 1 分 29 秒。CI 比本机慢约 15–35%。fix pass 1 之后的 head 的 CI 数字记在归档 PR。按 CI 口径，第 1–6 步连同登录登出用掉约 5.5 s（fix 前），每测试 30 s 留给 #541 / #557 约 24 s。
+**E10（CI）**：第一轮 head `15e7767` 的 `ui-walk` job 通过（run 37043461057）：`5 passed, 1 skipped`，新旅程 5.5 s / 5.1 s，旧旅程 14.1 s / 17.7 s，Playwright 总计 44.7 s，job 1 分 29 秒。CI 比本机慢约 15–35%。fix pass 1 之后的 head `b569b1c`（run 37047209785）：`5 passed, 1 skipped`，新旅程 4.8 s / 5.3 s，旧旅程 14.0 s / 17.7 s，总计 43.8 s，job 1 分 32 秒；日志里 `desktop-light` 是 201、`mobile-dark` 是 409。「旅程缩短约 1.8 s」只在本机长驻栈成立——CI 上 `mobile-dark` 是 5.1 s → 5.3 s、`desktop-light` 是 5.5 s → 4.8 s；「CI 比本机慢约 15–35%」对 fix 后的 `mobile-dark` 也不成立（5.3 s 对 3.0–3.1 s）。给 #541 / #557 的预算按 CI 的约 5.3 s 算，每测试 30 s 余约 24 s。
 
 评审另外指出、按原样记录的事项：
 - **没有负对照、靠构造有判别力的断言**：快捷任务五项全文、`任务启动于 未选择` 与 `搜索工作空间`（按精确可访问名操作）、折叠块默认收起、`HTML` 徽标、抽屉行、iframe 内标题、侧栏「恰一次」、`dir` 等于名字。「无 +/−」与「无审批条」是按类名 / group 名断言不存在，名字一改就会空过——目前与产品源码一致，后者与 `ui-walk-stop.ts` 同写法。
@@ -158,6 +159,12 @@ fix 后的实测（真实仓库 / 实现者沙箱）：
 - **负对照只在 `desktop-light`、长驻栈上做**；没有一条失败发生在页面位于 `/files` 之后，也没有 `mobile-dark` 的失败路径清点。
 - **旧旅程的覆盖面有一处静默变化**：全新状态下 `desktop-light` 四路由遍历时的 `/files` 以前是空态，现在默认落在含一个文件的 `ui-walk-sessions`；空态在 1440 / 1024 / 880 三档的列宽与溢出断言不再有真实浏览器覆盖。规格没有要求空态。
 - **uid 隔离下真 omp 的 `write`** 没有任何证据（`uid-isolation` job 不跑 ui-walk，`session-meta.hurl` 只用 `WORKBUDDY_THINK`）。
+
+第二轮复审（correctness + test-evidence 一席，head `b569b1c`）：clean，无 P0/P1/P2；PR #746 合并提交 `8870cc6`。两条 P3：
+- **未修，交给 #541（已在该 issue 留言）**：`step5ViewDetails` 的 `waitForEvent("framenavigated")` 先于 click 注册、click 之后才 `await`。click 自己超时时，先 reject 的是还没挂 handler 的 `waitForEvent`，成为 unhandled rejection：首个报错不是 click 的定位错误，worker 被停，`finally` 的清理与 context 关闭赛跑，会话可能留下。只影响已经失败的运行。最小修复是 `await Promise.all([navigated, click])`。这条路径没有负对照。
+- 本文件「交付记录」与 fix 后的事实不一致的几行——已在本节与该节开头的说明里更正。
+
+另：Toast 在场时的点击证据主要来自本机长驻栈；CI 上 `mobile-dark` 的第 3 步约 2.6 s，Toast 大约在读侧栏的时刻到期，这个时序只有 CI 的通过作证。
 
 给后续 issue 的提示：
 - **#557**：现在的无条件 `finally`（接受 404）已经容得下第 11 步的 UI 删除，不必改回条件式（proposal 偏差 4 的说法可以不执行）；规格里「After step 6 the journey leaves the session page …」一句届时随 MODIFIED 改写。
