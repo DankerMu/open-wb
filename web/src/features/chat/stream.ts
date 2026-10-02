@@ -15,6 +15,7 @@ import {
   requestApproval,
   resolveApproval,
 } from "./stream-approvals.js";
+import { appendThinking, type ChatThinkingEvent, decodeThinkingDelta } from "./stream-thinking.js";
 
 type ChatStepView = {
   id: ChatStep["id"];
@@ -28,6 +29,7 @@ type ChatMessageView = {
   id: ChatMessage["id"];
   role: ChatMessage["role"];
   content: ChatMessage["content"];
+  thinking: ChatMessage["thinking"];
   status: ChatMessage["status"];
   steps: ChatStepView[];
   approvals: ChatApprovalView[];
@@ -51,7 +53,8 @@ export type ChatEvent =
   | { type: "step.end"; data: ChatStepTarget & { status: ChatStepEndStatus; output: string } }
   | { type: "turn.end"; data: ChatMessageTarget & { status: ChatTurnEndStatus } }
   | { type: "error"; data: ChatMessageTarget & { message: string } }
-  | ChatApprovalEvent;
+  | ChatApprovalEvent
+  | ChatThinkingEvent;
 
 type ChatEventType = ChatEvent["type"];
 
@@ -85,6 +88,7 @@ const DATA_EVENTS = [
   "error",
   "approval.request",
   "approval.resolved",
+  "thinking.delta",
 ] as const satisfies readonly ChatEventType[];
 const QUEUE_CAP = 1000;
 const CANONICAL_CURSOR = /^(0|[1-9][0-9]*):(0|[1-9][0-9]*)$/;
@@ -100,6 +104,7 @@ export function chatStateFromSnapshot(snapshot: ChatMessageSnapshot): ChatState 
       id: message.id,
       role: message.role,
       content: message.content,
+      thinking: message.thinking,
       status: message.status,
       steps: message.steps.map((step) => ({
         id: step.id,
@@ -124,6 +129,7 @@ export function applyChatEvent(state: ChatState, event: ChatEvent): ChatState {
           id: message.id,
           role: "assistant",
           content: "",
+          thinking: null,
           status: "running",
           steps: [],
           approvals: [],
@@ -158,6 +164,11 @@ export function applyChatEvent(state: ChatState, event: ChatEvent): ChatState {
       return replaceAssistant(state, event.data.messageId, (m) => requestApproval(m, event.data));
     case "approval.resolved":
       return replaceAssistant(state, event.data.messageId, (m) => resolveApproval(m, event.data));
+    // thinking.delta only appends to the message; the session status is left untouched.
+    case "thinking.delta":
+      return replaceAssistant(state, event.data.messageId, (m) =>
+        appendThinking(m, event.data.delta),
+      );
     default:
       return state;
   }
@@ -231,6 +242,7 @@ function emptyAssistant(messageId: number): ChatMessageView {
     role: "assistant",
     status: "running",
     content: "",
+    thinking: null,
     steps: [],
     approvals: [],
     error: null,
@@ -669,6 +681,8 @@ function decodeEvent(type: ChatEventType, value: unknown): ChatEvent | undefined
       return decodeApprovalRequest(value);
     case "approval.resolved":
       return decodeApprovalResolved(value);
+    case "thinking.delta":
+      return decodeThinkingDelta(value);
   }
 }
 

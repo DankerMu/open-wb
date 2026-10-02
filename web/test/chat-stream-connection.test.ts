@@ -117,6 +117,7 @@ describe("Chat stream connector", () => {
           content: COMPLETED_BODY,
           status: "done",
           steps: [],
+          thinking: null,
           error: null,
         },
         {
@@ -126,6 +127,7 @@ describe("Chat stream connector", () => {
           content: "Z",
           status: "running",
           steps: [],
+          thinking: null,
           error: null,
         },
       ],

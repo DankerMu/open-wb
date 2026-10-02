@@ -36,6 +36,7 @@ export const userView = {
   content: USER_CONTENT,
   status: "done" as const,
   steps: [] as [],
+  thinking: null,
   error: null,
 };
 

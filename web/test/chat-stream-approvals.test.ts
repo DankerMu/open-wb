@@ -296,6 +296,7 @@ describe("approval snapshot and event reduction", () => {
       status: "running",
       steps: [],
       approvals: [view(7, null)],
+      thinking: null,
       error: null,
     });
     expect(next.status).toBe("done");
