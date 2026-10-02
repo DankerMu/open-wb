@@ -687,8 +687,10 @@
 /* In-conversation search (issue 538) — the box adapted from
    resource/workbuddy-live-demo.html:323-327 (.conv-search, .cs-n): the input is the search Input
    primitive, with the counter and the three icon buttons to its right. The box is a fixed row of
-   the page column above the alerts and the transcript; its field gives way so that the row fits a
-   390px viewport. */
+   the page column above the alerts and the transcript. The page column clips its overflow and the
+   box sits at its top right corner (and fills the column on a narrow viewport), so the padding
+   keeps the 4px a focus ring takes (2px outline at a 2px offset) inside the box at the top and on
+   both sides; the width limit includes it. */
 .chat-search {
   flex: none;
   align-self: flex-end;
@@ -696,13 +698,19 @@
   align-items: center;
   gap: 6px;
   max-width: 100%;
+  padding: 4px 4px 0;
 }
 
-/* Over the fixed 240px of .ui-input--search. */
+/* The field keeps the 240px of .ui-input--search while there is room and alone gives way on a
+   narrow viewport. */
 .chat-search .chat-search-field {
-  flex: 1 1 240px;
-  width: auto;
+  flex: 0 1 auto;
   min-width: 0;
+}
+
+/* The icon buttons keep the size of the primitive. */
+.chat-search .ui-btn {
+  flex: none;
 }
 
 .chat-search-count {

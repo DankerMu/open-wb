@@ -1,42 +1,34 @@
 /**
- * Issue 538 对话内搜索 (parent tasks 7.7): S1–S17 of openspec/changes/conversation-search/design.md.
- * Seams: the jsdom chat page inside the real shell over a stubbed `fetch` and the fake event
- * source, the router, the scroll metrics and `scrollIntoView` (jsdom has neither layout nor that
- * method), the pure `chatTopbar`, and a bare `FollowTranscript`. Expected values are literals from
- * the spec deltas.
+ * Issue 538 对话内搜索 (parent tasks 7.7): S1–S7, S12–S16 and S18–S20 of
+ * openspec/changes/conversation-search/design.md and its review (S8–S11 and S17 are in
+ * chat-page-search-follow.test.tsx). Seams: the jsdom chat page inside the real shell over a
+ * stubbed `fetch` and the fake event source, the router, a recorded `scrollIntoView` (jsdom lacks
+ * it), the pure `chatTopbar`, and the static CSS text. Expected values are literals from the spec
+ * deltas.
  */
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { chatTopbar } from "../src/features/chat/topbar-actions.js";
-import { goLive, quiesce } from "./chat-page-file-changes-support.js";
-import { settleDeferredResponse } from "./chat-page-lifecycle-support.js";
-import { envelope } from "./chat-page-ownership-support.js";
+import { artifactsPanelFixture, openProbedSession } from "./chat-page-artifacts-panel-support.js";
+import { quiesce } from "./chat-page-file-changes-support.js";
+import { renewAccount, settleDeferredResponse } from "./chat-page-lifecycle-support.js";
+import { composer, envelope, SESSION_PROMPT } from "./chat-page-ownership-support.js";
 import {
-  answered,
-  asked,
   banner,
   bannerButtons,
-  bottom,
   boxButton,
   CENTER,
-  conversation,
   conversationSearchFixture,
   count,
   counter,
   expectSearchClosed,
-  geometry,
   highlighted,
-  installGeometry,
-  jumpButton,
   jumps,
-  landing,
   messageIds,
   mountConversation,
   openConversation,
   press,
-  renderTranscript,
   reportConversation,
-  runningConversation,
   SEARCH,
   SEARCH_INPUT,
   SESSION_PATH,
@@ -49,10 +41,17 @@ import {
   typeQuery,
   weeklyConversation,
 } from "./chat-page-search-support.js";
-import { crumb, installNarrowViewport } from "./chat-page-session-meta-support.js";
+import {
+  crumb,
+  focusOn,
+  installNarrowViewport,
+  openTopbarRename,
+  renameDialog,
+} from "./chat-page-session-meta-support.js";
 import { FakeEventSource } from "./chat-stream-support.js";
 import { hasLucideGlyph } from "./files-fixture.js";
-import { deferredResponse, jsonResponse } from "./support.js";
+import { calls, currentLocation, deferredResponse, jsonResponse } from "./support.js";
+import { readRepoFile, ruleBody, stripComments } from "./ui-support.js";
 
 const WEEKLY = "周报";
 const WEEKLY_IDS = ["-3", "0", "1", "2"];
@@ -60,6 +59,7 @@ const PREVIOUS = "上一个";
 const NEXT = "下一个";
 const CLOSE = "关闭";
 const WELCOME = "WorkBuddy，我帮你";
+const DRAFT = "还没发出去的草稿";
 
 conversationSearchFixture();
 
@@ -149,10 +149,12 @@ describe("搜索框 (S1, S2)", () => {
 });
 
 describe("键盘与按钮 (S3, S4, S5)", () => {
-  it("S3 Enter and Shift+Enter cycle through three matches; Escape closes, clears and returns focus", async () => {
-    await searchWeekly();
+  it("S3 Enter and Shift+Enter cycle through three matches and send nothing; Escape closes, clears and returns focus", async () => {
+    const page = await searchWeekly();
+    fireEvent.change(composer(), { target: { value: DRAFT } });
     typeQuery(WEEKLY);
     expect(count()).toBe("1/3");
+    const requests = page.fetchMock.mock.calls.length;
 
     const counts = [{}, {}, {}, { shiftKey: true }].map((init) => {
       press("Enter", init);
@@ -160,6 +162,11 @@ describe("键盘与按钮 (S3, S4, S5)", () => {
     });
     expect(counts).toEqual(["2/3", "3/3", "1/3", "3/3"]);
     expect(highlighted()).toEqual(["2"]);
+    // Enter in the search input is not the composer's Enter: nothing is sent, the draft stays.
+    await quiesce();
+    expect(page.fetchMock.mock.calls).toHaveLength(requests);
+    expect(calls(page.fetchMock, SESSION_PROMPT)).toEqual([]);
+    expect(composer().value).toBe(DRAFT);
 
     press("Escape");
 
@@ -181,7 +188,6 @@ describe("键盘与按钮 (S3, S4, S5)", () => {
     });
     expect(counts).toEqual(["2/3", "3/3", "1/3", "3/3", "2/3"]);
     expect(highlighted()).toEqual(["0"]);
-    expect(document.activeElement).toBe(searchInput());
 
     fireEvent.click(boxButton(CLOSE));
 
@@ -299,177 +305,6 @@ describe("消息标记与跳转调用 (S6, S7)", () => {
     expect(jumps).toHaveLength(5);
     await quiesce();
     expect(toasts()).toEqual([]);
-  });
-});
-
-describe("消息集合变化 (S8, S9)", () => {
-  beforeEach(installGeometry);
-
-  it("S8 a streamed match raises the count without moving the current match or the transcript", async () => {
-    await openConversation(runningConversation("周报怎么写", "正在写"));
-    const send = await goLive();
-    expect(geometry.scrollTop).toBe(2500);
-    landing.scrollTop = 1200;
-
-    toggleSearch();
-    typeQuery(WEEKLY);
-    expect([count(), highlighted()]).toEqual(["1/1", ["-3"]]);
-    expect(jumps).toEqual([["-3", CENTER]]);
-    expect(geometry.scrollTop).toBe(1200);
-
-    geometry.scrollHeight = 3200;
-    send("text.delta", { delta: "，周报初稿如下" });
-    await screen.findByText("正在写，周报初稿如下");
-
-    expect([count(), highlighted()]).toEqual(["1/2", ["-3"]]);
-    expect(jumps).toHaveLength(1);
-    expect(geometry.scrollTop).toBe(1200);
-  });
-
-  /** `问题`, an answer (id 0) holding `content`, then two more messages that hold 周报. */
-  const drafted = (content: string) =>
-    conversation([
-      asked(-3, "问题"),
-      answered(0, content),
-      asked(1, "再给一份周报"),
-      answered(2, "第二份周报"),
-    ]);
-
-  /** The current match (the message 0) stops matching in a reloaded snapshot. */
-  async function loseCurrentMatch() {
-    const page = await openConversation(drafted("周报初稿"));
-    toggleSearch();
-    typeQuery(WEEKLY);
-    expect([count(), highlighted()]).toEqual(["1/3", ["0"]]);
-    expect(jumps).toEqual([["0", CENTER]]);
-
-    await page.reload(drafted("已撤回"));
-
-    expect(screen.getByText("已撤回")).toBeTruthy();
-    expect([count(), highlighted()]).toEqual(["0/2", []]);
-    expect(jumps).toHaveLength(1);
-    return page;
-  }
-
-  it("S9 a current match that stopped matching is cleared without scrolling and is not restored when it matches again", async () => {
-    const page = await loseCurrentMatch();
-
-    await page.reload(drafted("周报二稿"));
-
-    expect(screen.getByText("周报二稿")).toBeTruthy();
-    expect([count(), highlighted()]).toEqual(["0/3", []]);
-    expect(jumps).toHaveLength(1);
-
-    press("Enter");
-
-    expect([count(), highlighted()]).toEqual(["1/3", ["0"]]);
-    expect(jumps.slice(1)).toEqual([["0", CENTER]]);
-  });
-
-  it("S9 Enter without a current match takes the first match", async () => {
-    await loseCurrentMatch();
-
-    press("Enter");
-
-    expect([count(), highlighted()]).toEqual(["1/2", ["1"]]);
-    expect(jumps.slice(1)).toEqual([["1", CENTER]]);
-  });
-
-  it("S9 Shift+Enter without a current match takes the last match", async () => {
-    await loseCurrentMatch();
-
-    press("Enter", { shiftKey: true });
-
-    expect([count(), highlighted()]).toEqual(["2/2", ["2"]]);
-    expect(jumps.slice(1)).toEqual([["2", CENTER]]);
-  });
-});
-
-describe("跳转与贴底跟随 (S10, S11, S17)", () => {
-  beforeEach(installGeometry);
-
-  /** A pinned running transcript with the stream live; the last message (id 0) is the only match. */
-  async function openPinned() {
-    await openConversation(runningConversation("写一份", "周报正在写"));
-    const send = await goLive();
-    expect(geometry.scrollTop).toBe(2500);
-    expect(jumpButton()).toBeNull();
-    return send;
-  }
-
-  /** Grows the content by 200px, then streams `delta` and waits until it renders. */
-  async function growAndStream(send: Awaited<ReturnType<typeof goLive>>, delta: string) {
-    geometry.scrollHeight = 3200;
-    send("text.delta", { delta });
-    await screen.findByText(`周报正在写${delta}`);
-  }
-
-  it("S10 a jump away from the bottom unpins at once: 回到最新 shows and a streamed delta does not pull the view back", async () => {
-    const send = await openPinned();
-    landing.scrollTop = 0;
-
-    toggleSearch();
-    typeQuery(WEEKLY);
-
-    expect(jumps).toEqual([["0", CENTER]]);
-    expect(geometry.scrollTop).toBe(0);
-    expect(jumpButton()).not.toBeNull();
-
-    await growAndStream(send, "，第一段");
-
-    expect(geometry.scrollTop).toBe(0);
-    expect(jumpButton()).not.toBeNull();
-    expect(highlighted()).toEqual(["0"]);
-
-    // 回到最新 goes back to the bottom and leaves the highlight alone.
-    fireEvent.click(screen.getByRole("button", { name: "回到最新" }));
-    expect(geometry.scrollTop).toBe(2700);
-    expect(jumpButton()).toBeNull();
-    expect(highlighted()).toEqual(["0"]);
-  });
-
-  it("S11 a jump that lands within 4px of the bottom keeps following", async () => {
-    const send = await openPinned();
-    landing.scrollTop = 2496;
-
-    toggleSearch();
-    typeQuery(WEEKLY);
-
-    expect(jumps).toEqual([["0", CENTER]]);
-    expect(geometry.scrollTop).toBe(2496);
-    expect(jumpButton()).toBeNull();
-
-    await growAndStream(send, "，第一段");
-
-    expect(bottom()).toBe(2700);
-    expect(geometry.scrollTop).toBe(2700);
-    expect(jumpButton()).toBeNull();
-  });
-
-  it("S17 scrollToMessage does nothing for a message the transcript does not hold", () => {
-    const jump = renderTranscript();
-    expect(geometry.scrollTop).toBe(2500);
-
-    jump(1);
-    expect(jumps).toEqual([["1", CENTER]]);
-    expect(jumpButton()).toBeNull();
-
-    // Moved without a scroll event: only a recompute would notice and show 回到最新.
-    geometry.scrollTop = 0;
-    expect(() => jump(999)).not.toThrow();
-    // The id 7 exists in the document, outside this transcript.
-    jump(7);
-    expect(jumps).toHaveLength(1);
-    expect(jumpButton()).toBeNull();
-
-    jump(2);
-    expect(jumps.slice(1)).toEqual([["2", CENTER]]);
-    expect(jumpButton()).not.toBeNull();
-
-    geometry.scrollTop = bottom();
-    jump(999);
-    expect(jumps).toHaveLength(2);
-    expect(jumpButton()).not.toBeNull();
   });
 });
 
@@ -639,5 +474,84 @@ describe("历史未读到 (S15)", () => {
     expect([PREVIOUS, NEXT].map((name) => boxButton(name).disabled)).toEqual([true, true]);
     expect(jumps).toEqual([]);
     expect(screen.getAllByRole("alert")).toEqual([alert]);
+  });
+});
+
+describe("标题未知与模态层 (S19, S20)", () => {
+  // The probed shell of the 产物面板 cases: its hooks dispose that shell's router.
+  artifactsPanelFixture();
+
+  it("S19 the search closes when the top bar loses the session title under the same URL, and stays closed once the title is back", async () => {
+    const getProbe = await openProbedSession(weeklyConversation());
+    toggleSearch();
+    typeQuery(WEEKLY);
+    expect([count(), highlighted()]).toEqual(["1/3", ["-3"]]);
+
+    // The renewed account owns neither the list nor the history yet: no title, no buttons.
+    await renewAccount(getProbe);
+
+    expect(currentLocation()).toBe(SESSION_PATH);
+    expect(searchBox()).toBeNull();
+    expect(await screen.findByText("lisi", { exact: true })).toBeTruthy();
+    await waitFor(() => expect(messageIds()).toEqual(WEEKLY_IDS));
+    await quiesce();
+    expect(bannerButtons()).toEqual(TOPBAR_BUTTONS);
+    expectSearchClosed();
+
+    toggleSearch();
+    expectFreshSearch();
+  });
+
+  it("S20 a rename dialog over the open search leaves it as it was and hands focus back to 重命名", async () => {
+    await searchWeekly();
+    typeQuery(WEEKLY);
+    press("Enter");
+    expect([count(), highlighted()]).toEqual(["2/3", ["0"]]);
+
+    const rename = await openTopbarRename();
+    expect(renameDialog()).toBe(rename.dialog);
+    fireEvent.click(rename.cancel);
+    await waitFor(() => expect(renameDialog()).toBeNull());
+    await focusOn(rename.trigger);
+
+    expect(rename.trigger.getAttribute("aria-label")).toBe("重命名");
+    expect(searchInput().value).toBe(WEEKLY);
+    expect([count(), highlighted()]).toEqual(["2/3", ["0"]]);
+    expect(searchButton().getAttribute("aria-expanded")).toBe("true");
+    expect(jumps).toHaveLength(2);
+
+    press("Escape");
+
+    expectSearchClosed();
+    expect(document.activeElement).toBe(searchButton());
+  });
+});
+
+describe("样式契约 (S18)", () => {
+  const css = () => stripComments(readRepoFile("web/src/features/chat/messages.css"));
+
+  it("S18 the highlight is the brand tint token", () => {
+    expect(ruleBody(css(), ".chat-msg--search-current")).toContain(
+      "background: var(--wb-brand-primary-subtle)",
+    );
+  });
+
+  it("S18 the search box is a fixed row", () => {
+    expect(ruleBody(css(), ".chat-search")).toContain("flex: none;");
+  });
+
+  it("S18 the field may shrink and keeps the width of the primitive: no width of its own, not width: auto", () => {
+    const field = ruleBody(css(), ".chat-search .chat-search-field");
+    expect(field).toContain("min-width: 0;");
+    expect(field).not.toContain("width: auto");
+    expect(field).not.toMatch(/(?<![-\w])width\s*:/);
+  });
+
+  it("S18 the icon buttons never shrink", () => {
+    expect(ruleBody(css(), ".chat-search .ui-btn")).toContain("flex: none;");
+  });
+
+  it("S18 the search box leaves 4px at its top and on both sides for the focus ring the page column would clip", () => {
+    expect(ruleBody(css(), ".chat-search")).toContain("padding: 4px 4px 0;");
   });
 });

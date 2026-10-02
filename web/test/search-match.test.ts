@@ -16,7 +16,7 @@ const report = () => chatStateFromSnapshot(reportConversation()).messages;
 const said = (id: number, content: string) => ({ id, content });
 
 describe("matchMessages", () => {
-  it("U1 counts a message once however often it holds the query, and never a step output", () => {
+  it("U1 counts each matching message once, however often it holds the query", () => {
     const messages = report();
     expect(messages[1]?.steps.map((step) => step.output)).toEqual(["report.pdf"]);
 
@@ -44,15 +44,21 @@ describe("matchMessages", () => {
     expect(matchMessages(report(), "report 已生成")).toEqual([]);
   });
 
-  it("U3 leaves thinking, error, step detail and step output out", () => {
+  it("U3 leaves thinking, approvals, error, step detail, step output and file changes out", () => {
     const [question, answer] = report();
     if (!question || !answer) throw new Error("expected the scenario's first two messages");
     const hidden: MessageView = {
       ...answer,
       content: "已生成",
       thinking: "先写 needle",
+      approvals: [{ id: 9, tool: "bash", title: "needle", expiresAt: 0, decision: "allow" }],
       error: "needle 失败",
-      steps: answer.steps.map((step) => ({ ...step, detail: "needle", output: "needle" })),
+      steps: answer.steps.map((step) => ({
+        ...step,
+        detail: "needle",
+        output: "needle",
+        changes: [{ path: "needle.html", added: null, removed: null, kind: "write" }],
+      })),
     };
 
     expect(matchMessages([question, hidden], "needle")).toEqual([]);
