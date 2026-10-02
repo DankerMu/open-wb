@@ -84,12 +84,13 @@ useTopbar(chatTopbar(selected, sessionActions.openRename, artifacts.open));
 **D9**（实现后的真实浏览器观察追加）：`useArtifactAction` 里加
 ```ts
 useEffect(() => {
-  if (!busy && document.activeElement === document.body) opener.current?.focus();
+  if (!busy && document.activeElement === document.body) opener.current?.focus({ preventScroll: true });
 }, [busy]);
 ```
 - 起因：按钮在拉取中 `disabled`，Chromium 当即把焦点移到 `body`（`web/src/ui/dialog.tsx:53-55` 的记录）。图片/代码操作结束后焦点留在 `body`；在抽屉里，成功或失败 Toast 在屏期间（`TOAST_DURATION_MS` 2400）Radix 的 Escape 监听在 Toast 层，抽屉的 `useEscapeFallback` 又只认目标在抽屉内的按键——这段时间 Escape 关不掉抽屉（Chromium 实测：两次 Escape 抽屉都还在，Toast 消失后才恢复）。加 D9 之后复测：复制与下载完成后焦点在行按钮上，Toast 在屏时一次 Escape 即关闭抽屉、焦点回到 `产物面板`。
 - 行为：`busy` 回到 `false` 的那次提交之后，若活动元素是 `body`，聚焦被点的按钮（此时它已恢复可用）。活动元素不是 `body`（用户已把焦点移到别处，或 html 预览 Dialog 已接走焦点）时不动。挂载时 `opener.current` 为空，不动。
 - html：`busy` 回到 `false` 的那次提交里预览 Dialog 的内容还没挂载（Radix 晚一轮渲染），所以本 effect 也会先把焦点放回行按钮，随后 Dialog 接走焦点（`focusin` 次序：行按钮 → Dialog 的 `关闭`）；关闭时经 `returnFocus` 归还。终态不变，只多一次瞬时聚焦。
+- `preventScroll`：转录里的卡片在慢拉取期间可能已离开视口（流式把它顶走，或用户滚走）；不带它的 `focus()` 会把 `.chat-transcript` 滚回卡片，这次滚动又经 `scroll-follow.tsx` 的 `onScroll` 解除贴底跟随。Chromium 实测：拉取挂起时滚到底部（`scrollTop` 2190），不带 `preventScroll` 时响应返回后被拽回卡片（`scrollTop` 67、出现 `回到最新`）；带上之后 `scrollTop` 仍为 2190、焦点在按钮上、没有 `回到最新`。
 - 抽屉关闭或卡片卸载后不会再跑（组件已卸载）。
 - 产物卡同样生效（7.5b 残留 8 消失），proposal 偏差 11。
 
@@ -121,7 +122,7 @@ useEffect(() => {
 - P2 聚合（Scenario「聚合与空态」前半）：助手消息甲的已结束步骤改 `a.md`（edit `+1 -0`），助手消息乙改 `a.md`（edit `+3 -1`）与 `out/index.html`（write），空间可解析 → 点击后出现名为 `产物面板` 的 dialog（带类 `ui-drawer--right` 与 `ui-drawer--w420`），`.artifacts-panel-list` 下恰两行，依次是：`+3`、`-1`、`zhangsan/proj/a.md`、`查看详情 zhangsan/proj/a.md`、`复制代码 a.md`；`写入`、`zhangsan/proj/out/index.html`、`查看详情 …`、`打开网页预览 index.html`（每行内按钮次序：`查看详情` 在前、操作在后）。此时对 `/file` 的请求数为 0；整个文档的 `innerHTML` 不含空间绝对根。
 - P3 次序规则：
   - 同一消息内步骤 ordinal 0 改 `b.ts`（`+1`）、ordinal 1 改 `b.ts`（`+5 -2`）→ 行显示 `+5`、`-2`。
-  - 消息甲改 `x.md`、`y.md`，消息乙改 `y.md`、`w.md` → 行次序 `x.md`、`y.md`、`w.md`，`y.md` 的值来自消息乙。
+  - 消息甲改 `y.md`（`+1`）、`x.md`，消息乙改 `y.md`（`+4 -2`）、`w.md` → 行次序 `y.md`、`x.md`、`w.md`，`y.md` 的值来自消息乙（`y.md` 在甲里排最前、在乙里也排最前：「位置取最后」会给出 `x.md`、`y.md`、`w.md`）。
   - running 步骤的变更不出现在列表里。
   - `main.py`（不可派生）有行、有 `查看详情`、没有操作按钮。
 - P4 空态（Scenario 后半）：会话没有任何变更 → 点击后 Toast 恰为一条 `当前任务暂无产物`、类型 `info`（`ui-toast--info`），没有 dialog；历史还在读取（快照挂起、会话已在列表里所以按钮已出现）时点击同样；未绑定空间的会话同样；只有 running 步骤带变更的会话同样。随后同一会话的 `step.end` 到达后再点 → 抽屉打开（正向对照）。
@@ -143,6 +144,7 @@ useEffect(() => {
   - 失败路径：404 → Toast 信封 message 之后活动元素是该按钮。
   - 产物卡（转录里）：`下载 chart.PNG` 挂起时 `blur()` → 完成后活动元素是该按钮。
   - html：挂起时 `blur()` → 预览打开后活动元素在预览 Dialog 内（不是行里的按钮）；关闭预览后是行里的按钮。
+- 评审第 1 轮后追加（Q1–Q5）：Q1 焦点归还的 `focus` 调用带 `{ preventScroll: true }`（spy `HTMLElement.prototype.focus`）；Q2 即上面 P3 的跨消息夹具；Q3 html 卡点卡脚按钮、预览 404 → 焦点回卡脚按钮而非卡头；Q4 路由导航关掉抽屉后焦点在 `产物面板` 按钮上；Q5 预览开着时导航到别的会话 → 两个 dialog 都消失，`body` 的 `pointer-events` 与应用根的 `aria-hidden` 已释放，新会话的 `产物面板` 按钮可用。追加变异：去掉 `preventScroll`（Q1）；逐消息汇总后跨消息「位置取最后」合并（Q2）；D9 恒聚焦卡头按钮（Q3）；`open()` 不调 `trigger.focus()`（Q4、P6）。
 - P12 静态与护栏：`.artifacts-panel-list` 的规则在 `messages.css`、`chat.css` 不含 `artifacts-panel`（护栏）；`web/src/features/chat/artifacts-panel.tsx` 的源码不含 `fetchPreview`、`sandbox`、`clipboard`、`createObjectURL`（复用而非复制的静态证据）。
 
 基线运行：测试不导入实现前不存在的模块（全是页面级），直接在基线树上跑；P1 的欢迎态一句、P1 单元断言里 `chatTopbar(undefined, …)` 恰为 `{}` 一句（运行时忽略多余实参）与 P12 的 `chat.css` 一句是实现前就成立的护栏，其余应为红；报告里逐条列出基线即绿的用例。P13 的对照例与 html 例在加 D9 之前就绿（护栏）。
@@ -162,6 +164,11 @@ useEffect(() => {
 10. Radix 的 Escape 监听从抽屉层交到预览层要等一轮渲染（`escape-fallback.ts` 记录的 issue 643 类窗口）：jsdom 里预览刚挂载就按 Escape 会把抽屉和预览一起关掉，所以 P7 在按键前让出一个宏任务；Chromium 里脚本在 iframe 一挂上就按 Escape 也只关预览，这个窗口没有复现。
 
 9. 历史还在读取或读取失败时点 `产物面板` 弹的也是「当前任务暂无产物」（此时视图为空）；读取中这句话不够准确，但规格只定义了这一种空态反馈。
+
+12. D9 只凭「活动元素是 `body`」判断，不区分是不是自己那个按钮造成的：两个慢拉取同时在途（转录卡一个、抽屉行一个）时，先结束的那个会拿走焦点，可能落到模态之下的按钮上，影响限于下一次 Tab。
+13. 「关闭后焦点归还 `产物面板` 按钮」以按钮仍在为前提：当前会话不在已加载的列表里而视图又没了（列表读取失败时切走）时按钮已卸载，焦点落在 `body`。
+14. Safari 点击按钮不聚焦，`open()` 里的 `trigger.focus()` 会触发 Tooltip 的 `onFocus`；抽屉关闭、焦点还给按钮后 `产物面板` 的 Tooltip 会弹出并停留到失焦（与 `重命名` 的归还路径同一模式）。Safari 未验证。
+15. 8.2a 提示：抽屉里有两个名为 `关闭` 的按钮，Playwright strict 模式下要按容器（`.ui-drawer-foot`）限定。
 
 ## Seams under test
 - jsdom 页面 fixture（顶栏按钮、Drawer、嵌套 Dialog、Toast、路由）。
