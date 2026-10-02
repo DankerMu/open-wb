@@ -15,12 +15,12 @@
 ## 与 issue / 父 delta 的偏差（父 change 归档前 rebase 适用）
 1. **清理段是改写而不是插入**：主规格现文是「After step 6 the journey leaves the session page by a real navigation …」。第 11 步经 UI 删除后页面自己回到欢迎态，那一步不再需要，去掉；`finally` 的范围改成第 2–11 步；成功路径上 DELETE 得 404。失败路径上页面可能仍在会话页，`finally` 的删除之后可能多出一条重连 404 的 oracle 错误——旅程本来就已失败，与 #540 的口径相同。父文的清理段写的是「If the journey fails before step 11」加 409 回退，沿用 #540 的偏差（无条件 `finally`、不实现回退）。
 2. **第 9 步的「scrolls the user message into view」写成「is in the viewport」**：两条消息的转录里用户消息本来就可能在视口内，`toBeInViewport` 对「滚动发生过」没有判别力。子 delta 只写可判别的部分（当前匹配的 `aria-current`、助手消息不是当前匹配、在视口内）；滚动行为由 jsdom 的对话内搜索测试证明。实现者按 project 记录搜索前该消息是否已在视口内。
-3. **第 9 步的次序写明**：搜索框一打开计数就是 `0/0`，所以「无匹配 → `0/0`」必须排在观察到 `1/1` 之后才有判别力；`Esc` 之前重新输入 UUID，使「清除高亮」有前后对比。父文没写次序。
+3. **第 9 步的次序写明**：搜索框一打开计数就是 `0/0`，所以「无匹配 → `0/0`」必须排在观察到 `1/1` 之后才有判别力；`Esc` 之前重新输入 UUID，使「清除高亮」有前后对比。父文没写次序。「`Esc` in the box」是收窄：只有输入框处理 `Esc`。
 4. **第 8 步加 REST 回读**（`GET /api/sessions` 的 `title` 与 `pinnedAt`）与「对话框里预填当前标题」「保存后对话框关闭」；新标题每个 project 唯一。父文没写。唯一标题让第 11 步的「条目从所有分区消失」可以按名字断言。
 5. **第 7 步写成「不再提供 `置顶任务`」**：父文只写「the menu then offers `取消置顶`」。
-6. **行菜单按钮的名字**：父文写 `更多`，产品里是 `更多操作：<标题>`（issue 的 Key interfaces 已更正）。子 delta 写「the `更多操作` button of that entry」。
-7. **第 10 步的占位句**：编号从 9 跳到 11，子 delta 里留一句「Step 10 … is not part of this journey yet」，#557 插入第 10 步时删掉它。
-8. **`查看详情` 的 `Promise.all`**（#540 复审 P3，已在本 issue 留言交接）：不改变任何规格句子；加一条负对照覆盖「click 自己失败时清理仍执行」。
+6. **行菜单按钮的名字**：父文写 `更多`，产品里是 `更多操作：<标题>`（issue 的 Key interfaces 已更正）。子 delta 写「the button named `更多操作：<title>` of that entry」。
+7. **第 10 项占位**：子 delta 里留一个列表项「10. (Slash candidates are not part of this journey yet.)」，保持编号连续（Markdown 会把跳号的 `11.` 渲染成 10），#557 原位替换它。
+8. **`查看详情` 的 `Promise.all`**（#540 复审 P3，已在本 issue 留言交接）：不改变任何规格句子；加一条负对照覆盖「click 自己失败时清理仍执行」。并成 `Promise.all` 之后先 reject 的仍可能是 `waitForEvent`（两者同为 10 s，`waitForEvent` 先注册），所以报出的首错不保证是 click 的定位错误——修的是「unhandled rejection 打断清理」，不是报错文案。
 9. **Toast 的定位**：既有旅程用 `getByRole("region", { name: /通知/ })` 找 Toast；本刀的置顶与删除 Toast 出现时 mobile 的导航覆盖层开着，覆盖层把页面其余部分标成 `aria-hidden`，按 role 找不到。按文本定位。只断言规格点名的 `任务已删除`。
 10. **没有 RED 阶段**：产品行为都已在 master；证据是负对照，这次两个 project 都做。
 

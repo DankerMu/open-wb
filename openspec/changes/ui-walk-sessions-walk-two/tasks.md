@@ -13,7 +13,7 @@ Fixture level: expanded
 | Public API / CLI / script entry | yes | `make ui-walk` 的旅程变长；选中的文件集合不变 → E1、E2 |
 | Legacy compatibility / examples | yes | 第 1–6 步不被削弱；`ui-walk.spec.ts` 照常通过 → E2、E5 末项 |
 | Concurrency / shared state / ordering | yes | 置顶 / 重命名 / 删除改的是共享库里的会话；UI 删除与事件流收尾的先后；不留残留 → E3、E4、N11、不变量 5 |
-| Error handling / rollback / partial outputs | yes | 失败路径的清理（含 `Promise.all` 修复）；`finally` 在 UI 已删时得 404 → N11、N14、E4 |
+| Error handling / rollback / partial outputs | yes | 失败路径的清理（含 `Promise.all` 修复）；`finally` 在 UI 已删时得 404 → N11、N14、N15、E4 |
 | Schema / columns / units / field names | yes | `title`、`pinnedAt` 的 REST 回读；确认文案模板；计数格式 `i/n` → N6、N7、N9、N12 |
 | Resource limits / large input / discovery | yes | 每测试 30 s；多一次 reload → E2、E3、E8 |
 | Accessibility / keyboard / focus | yes | 按可访问名定位行菜单、对话框、搜索框；`Esc` 关闭搜索；mobile 覆盖层的 `aria-hidden` 与 `Escape` → D7、E3 的 mobile 五遍、N10 |
@@ -25,6 +25,6 @@ Fixture level: expanded
 
 ## 通用纪律（继承父 tasks.md）
 - [ ] 改动只有 `web/e2e/ui-walk-sessions.spec.ts`；其它被跟踪文件零 diff。
-- [ ] 没有 RED 阶段；负对照 N1–N14 在两个 project 上逐条记录失败所在的步骤，#540 仍适用的负对照在 `desktop-light` 重跑。
+- [ ] 没有 RED 阶段；负对照 N1–N16 在两个 project 上逐条记录失败所在的步骤，#540 仍适用的负对照在 `desktop-light` 重跑。
 - [ ] `make lint`、`make typecheck`、`make anti-drift`（jscpd 179 不增）、`bash scripts/size-guard.sh`、`npm test --workspace web`、`make test-guardrails` 退出 0；`openspec validate ui-walk-sessions-walk-two --strict --no-interactive` 通过。
 - [ ] 实测时长（本地全新状态、复用状态；CI）写进 PR。

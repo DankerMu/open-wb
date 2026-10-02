@@ -29,6 +29,10 @@
 ### D1 结构
 `walkSessionMeta` 的 `try` 块在 `step6Sidebar` 之后依次调用 `step7Pin`、`step8Rename`、`step9Search`、`step11Delete`（各带 `mark`）；删掉末尾导航到 `/settings` 的那两行与它的注释。`finally`、`deleteCreatedSession`、`logout` 不动（登出在欢迎态上做）。UUID 提到外层变量，提示词由它拼出。
 
+### D1a 两个文件内辅助（避免四处重复，jscpd 不增）
+- `rowMenu(sidebar)`：返回选中条目所在 `li` 里名字以 `更多操作：` 开头的按钮（行菜单触发按钮）；四处用到（第 7 步两次、第 8、11 步）。
+- 一个分区归属断言：给定侧栏与期望的分区，断言选中条目在全列表计数 1、在期望分区计数 1、在其余两个分区计数 0。`step6Sidebar` 现有的三条计数断言改用它（行为不变），第 7、8 步复用。
+
 ### D2 第 7 步（置顶）
 在侧栏里（mobile 在覆盖层里；实现者决定用 `inspectSidebar` 还是 `openSidebar` 加自己收尾，见 D7）：
 - 行菜单经**选中条目所在的 `li`** 定位（`li` 里有 `button[aria-current="true"]`，取同一 `li` 里名字以 `更多操作：` 开头的按钮），不按标题。
@@ -39,8 +43,8 @@
 ### D3 第 8 步（重命名与 reload）
 - 行菜单 → `重命名` → 页面级 `dialog` `重命名任务`；`任务名称` 的值是 `WORKBUDDY_THINK WO`。
 - 新标题 `走查重命名 <uuid 的前 8 位>`（每个 project 唯一，远小于 80 个码点）；`fill` 后点 `保存`；对话框消失。
-- 断言：选中条目按钮的可访问名是新标题；顶栏 h1 的可访问名是 `我的工作 / <新标题>`。
-- `page.reload()` → 顶栏 h1 仍是新标题；侧栏里选中条目在 `置顶任务` 分区、可访问名是新标题、全列表选中条目计数 1。
+- 断言：选中条目按钮的可访问名是新标题（侧栏内；mobile 此时覆盖层仍开着）；顶栏 h1 的可访问名是 `我的工作 / <新标题>`（mobile 先关覆盖层——覆盖层开着时顶栏是 `aria-hidden`）。
+- `page.reload()` → 先等转录就绪（助手消息的固定回复可见，写法同 `step5ViewDetails` 末尾；第 9 步的搜索只在输入那一刻取匹配，历史没装载完就输入会得到 `0/1`）→ 顶栏 h1 仍是新标题；侧栏里（mobile 重新打开覆盖层）选中条目在 `置顶任务` 分区、可访问名是新标题、全列表选中条目计数 1。
 - REST 回读：`page.request.get("/api/sessions")` 里该 id 的 `title` 等于新标题、`pinnedAt` 是整数。
 
 ### D4 第 9 步（对话内搜索）
@@ -62,10 +66,10 @@
 - 之后 `finally` 的 DELETE 得 404（已在接受集合里），列表不含该 id。
 
 ### D6 `step5ViewDetails` 的 `Promise.all`
-`await Promise.all([navigated, <查看详情按钮>.click()])`，其余不变。
+`await Promise.all([navigated, <查看详情按钮>.click()])`，其余不变。目的只是让 `waitForEvent` 的 reject 有 handler：click 自己超时时，先 reject 的仍可能是 `waitForEvent`（同为 10 s 且先注册），报出的错误可以是两者之一；关键是它不再是 unhandled rejection，`finally` 照常执行。
 
 ### D7 mobile 的三处已知陷阱（实现者在真实栈上定写法，报告实际采用的写法与原因）
-1. **覆盖层开着时按 role 找不到 Toast 与 `main` 里的东西**：Toast 按文本定位（`page.getByText("任务已删除", { exact: true })` 或 `.ui-toast` 过滤文本）；欢迎态 h1 在覆盖层关闭之后断言。只断言规格点名的 `任务已删除`，不断言 `已更新置顶状态` 与 `已重命名`。
+1. **覆盖层开着时按 role 找不到 Toast 与 `main` 里的东西**：Toast 按文本定位，必须 exact（`page.getByText("任务已删除", { exact: true })` 或 `.ui-toast` 过滤文本）——Radix 在 Toast 出现后的约 1 s 内另挂一个文本为 `通知 任务已删除` 的隐藏播报节点，非 exact 的文本匹配会 strict 冲突；欢迎态 h1 在覆盖层关闭之后断言。只断言规格点名的 `任务已删除`，不断言 `已更新置顶状态` 与 `已重命名`。
 2. **条目重挂或删除之后关覆盖层**：`inspectSidebar` 结尾的 `Escape` 依赖按键目标在覆盖层内。若置顶 / 删除之后 `Escape` 关不掉覆盖层，改为点覆盖层自己的 `关闭`；检查 `取消置顶` 时关菜单用 `Escape` 可能把覆盖层一起关掉——可以改为再点一次触发按钮收起菜单。不为此加任何睡眠。
 3. **Toast 遮挡**：Toast 在 `top: 52px` 居中，390 下可能盖住搜索框一带；Playwright 的指针动作会等到可点为止（最多约 2.4 s），是变慢而不是失败。键盘与 `fill` 不受影响。若因此接近预算，报告实测。
 
@@ -108,9 +112,11 @@
   - N11 删除确认框里点 `取消` → 第 11 步（没有 Toast / 条目仍在）；其后 `finally` 删除，残留为零。
   - N12 确认文案期望旧标题 → 第 11 步。
   - N13 删除后的 REST 期望 200 → 第 11 步。
-  - N14 `查看详情` 的按钮名改成不存在的 → 第 5 步，旅程错误是 click 的定位超时（不是 `waitForEvent` 的 unhandled rejection），`finally` 照常删除、残留为零。
+  - N14 `查看详情` 的按钮名改成不存在的 → 第 5 步以一个被处理的超时失败（消息是 click 的定位超时或 `waitForEvent` 的超时，两者皆可）；运行输出里没有 unhandled rejection、worker 没有被中途停掉，`finally` 照常删除（清理日志行在）、残留为零。对照：同一变异打在修复前的写法上（base commit 的文件）会留下残留或报 unhandled rejection——跑一次并记录现象。
+  - N15 删除之后期望名为新标题的条目计数 1 → 第 11 步的「条目消失」断言（Toast 断言已通过）。
+  - N16 重命名对话框的预填值期望改成别的串 → 第 8 步。
   - 另：#540 的负对照里仍适用的（原 N1–N11、N13）在 `desktop-light` 上重跑一遍，确认第 1–6 步的断言没有被削弱。
-- **E6 门禁**：`make lint`、`make typecheck`、`make anti-drift`、`bash scripts/size-guard.sh`、`npm test --workspace web`、`make test-guardrails`、`openspec validate ui-walk-sessions-walk-two --strict --no-interactive` 退出 0；jscpd 计数与克隆位置。
+- **E6 门禁**：`make lint`、`make typecheck`、`make anti-drift`、`bash scripts/size-guard.sh`、`npm test --workspace web`、`make test-guardrails`、`bash scripts/size-guard.sh web/e2e/ui-walk-sessions.spec.ts`（pre-commit 会把暂存文件传给它，≤ 800 行）、`openspec validate ui-walk-sessions-walk-two --strict --no-interactive` 退出 0；jscpd 计数与克隆位置。
 - **E7 源码清点**：`rg -n "waitForTimeout|page\\.route|\\.fulfill|EventSource|setTimeout|test\\.slow|MODEL_UPSTREAM"` 零命中；显式 `timeout` 仍只有一处。
 - **E8 CI**：PR 的 `ui-walk` job 通过；从日志记录四条旅程各自的时长、总时长与新旅程的分步累计。
 
@@ -121,6 +127,7 @@
 4. **Toast 只断言 `任务已删除`**；`已更新置顶状态`、`已重命名` 不断言。
 5. **失败路径上的重连 404**：页面仍在会话页时 `finally` 删除，约 3 s 后事件流重连进 404，会给已失败的运行多加一条 oracle 错误。
 6. **取消置顶**不走（菜单项的文案变化有断言，点击没有）。
+6a. **有断言而没有负对照的句子**：「保存后对话框关闭」（`取消` 同样关框）、reload 前的顶栏标题、reload 后 DOM 上的置顶分区（N6 只打 REST）、`0/0` 时无当前匹配、`Esc` 之后高亮清除（N10 先失败在搜索框）、URL 与欢迎态、`1/2`。都是对真实 DOM 的肯定或计数断言。
 7. **测试超时不清理**（同 #540）。
 8. **每测试 30 s**：#557 还要加第 10 步的两个真实回合；本刀给出加完第 7–11 步之后的实测时长供它判断。
 
