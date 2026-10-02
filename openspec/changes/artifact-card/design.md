@@ -138,11 +138,11 @@ async function run() {
 2. `sandbox="allow-scripts"` 的 iframe 是不透明源：读不到应用的 cookie 与 API 响应，但其中的脚本可以向任意地址发网络请求。没有 `allow-modals`、`allow-popups`、`allow-forms`、`allow-top-navigation`，所以弹窗、开新窗口、提交表单、顶层导航都被禁。站点未设 CSP（父 design Risks）。
 3. 预览 Dialog 是 `md`（520px 宽），网页按窄视口排版；`web/src/ui/**` 不在本刀范围。
 4. 预览打开期间文件再被改写不会刷新（不存副本、不轮询）；关掉再点才重新拉取。
-5. 临时下载链接的撤销延后一个宏任务；极慢的环境下理论上仍可能早于浏览器读取 Blob，未做真实浏览器验证。
+5. 临时下载链接的撤销延后一个宏任务；极慢的环境下理论上仍可能早于浏览器读取 Blob。实现后在 Chromium（Playwright 自带）里做过一次性观察：下载到的文件与源字节一致；Firefox/Safari 未验证。
 6. 一条消息的可派生变更很多时每项一张卡，没有折叠（每步骤至多 50 项）。
 7. html 卡头按钮用 `chevron-right`（demo 的 `externalLink` 未注册）。
-8. 拉取期间按钮禁用，Chromium 会把焦点移到 body：html 卡由 Dialog 接走焦点、关闭后经 `returnFocus` 还给按钮；图片卡与代码卡完成后焦点留在 body（键盘用户要重新 Tab 回来）。jsdom 不做这个 fixup，真实浏览器证据归 8.2a。
-9. 焦点进入预览 iframe 之后，Escape 键事件留在 iframe 的文档里，传不到 Dialog；只能用 `关闭` 按钮或点遮罩关闭。
+8. 拉取期间按钮禁用，Chromium 会把焦点移到 body：html 卡由 Dialog 接走焦点、关闭后经 `returnFocus` 还给按钮；图片卡与代码卡完成后焦点留在 body（键盘用户要重新 Tab 回来）。jsdom 不做这个 fixup；实现后的一次性 Chromium 观察确认了这三点（拉取中焦点在 body、html 卡关闭后回到被点的按钮、图片/代码卡完成后留在 body），进 CI 的证据归 8.2a。
+9. 焦点进入预览 iframe 之后，Escape 键事件留在 iframe 的文档里，传不到 Dialog；只能用 `关闭` 按钮或点遮罩关闭（Chromium 一次性观察确认）。
 10. 同一 client 的空间列表重读失败时 `workspace` 变 `null`（`workspace-list.ts:46-65`），产物卡连同已打开的预览 Dialog 一起卸载，在途的拉取被静默 abort；列表恢复后卡片重新出现。
 
 ## Seams under test
