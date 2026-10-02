@@ -1,8 +1,8 @@
 // 产物卡（issue 536）测试的夹具与页面查询：预览路由、迟到与 abort 的响应、jsdom 缺的下载/剪贴板接缝、
 // 卡片与 Toast 的读取、切换会话。页面搭法来自 chat-page-file-changes-support.tsx（不改它）。
-// 只供 chat-page-artifact-card.test.tsx 使用。
+// 供 chat-page-artifact-card.test.tsx 与 chat-page-artifact-card-state.test.tsx 使用。
 import { fireEvent, screen, within } from "@testing-library/react";
-import { expect, vi } from "vitest";
+import { afterEach, beforeEach, expect, vi } from "vitest";
 import {
   type Change,
   listed,
@@ -14,6 +14,7 @@ import {
   turn,
   WORKSPACES,
 } from "./chat-page-file-changes-support.js";
+import { cleanupChatLifecycle } from "./chat-page-lifecycle-support.js";
 import {
   OTHER_MESSAGES,
   OTHER_SESSION_ID,
@@ -22,8 +23,13 @@ import {
 } from "./chat-page-ownership-support.js";
 import { expectChatLocation, type FetchRoutes } from "./chat-page-support.js";
 import { observeUnhandledRejections, settle } from "./chat-stream-support.js";
+import { cleanupFilesFixture, stubBlobUrls } from "./files-fixture.js";
 import { type FetchMock, jsonResponse, textPreviewResponse } from "./support.js";
 
+/** Workspace-relative paths of the three kinds: html, image (upper-case extension) and code. */
+export const INDEX = "out/index.html";
+export const CHART = "assets/chart.PNG";
+export const APP = "src/app.ts";
 export const HTML_TEXT = "<h1>hi</h1><script>document.title='x'</script>";
 export const CODE_TEXT = "export const answer = 42;\n";
 export const BLOB_URL = "blob:artifact-first";
@@ -32,6 +38,25 @@ export const OPEN_INDEX = "打开网页预览 index.html";
 export const COPY_APP = "复制代码 app.ts";
 export const DOWNLOAD_CHART = "下载 chart.PNG";
 export const TRUNCATION_NOTE = "文件超过 1 MiB，仅预览前 1 MiB";
+
+/**
+ * Registers the hooks every artifact-card case runs under and returns the Blob URL stubs of the
+ * current case: before each case `URL.createObjectURL` is stubbed to hand out BLOB_URL; after it
+ * the page, the stubs, `navigator.clipboard` and every spy are removed.
+ */
+export function artifactCardFixture() {
+  const blobs = {} as ReturnType<typeof stubBlobUrls>;
+  beforeEach(() => {
+    Object.assign(blobs, stubBlobUrls([BLOB_URL]));
+  });
+  afterEach(() => {
+    cleanupFilesFixture();
+    cleanupChatLifecycle();
+    Reflect.deleteProperty(window.navigator, "clipboard");
+    vi.restoreAllMocks();
+  });
+  return blobs;
+}
 
 /** Route key of the preview request for `path` (workspace-relative) in PROJ. */
 export const previewRoute = (path: string) =>
@@ -90,6 +115,11 @@ export const rejectOnAbort: FetchRoutes[string] = (_path, options) =>
 /** Every artifact card on the page, in document order. */
 export function artifactCards() {
   return [...document.querySelectorAll<HTMLElement>(".artifact-card")];
+}
+
+/** The file name each artifact card shows, in document order. */
+export function cardTitles() {
+  return artifactCards().map((card) => card.querySelector(".artifact-title")?.textContent);
 }
 
 /**

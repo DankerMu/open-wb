@@ -65,12 +65,13 @@ const ARTIFACT_KINDS = new Map<string, Pick<Artifact, "kind" | "label">>([
 
 /**
  * 变更路径派生的产物：`name` 是末段文件名，扩展名取 `name` 最后一个 `.` 之后、不分大小写查表。
- * 没有 `.`、`.` 在末尾或扩展名不在表里时为 null（不派生产物卡）。
+ * 没有 `.`、唯一的 `.` 在开头（`.html`：服务端用 Node `extname` 取扩展名，对它得空串，预览必被拒）、
+ * `.` 在末尾或扩展名不在表里时为 null（不派生产物卡）。
  */
 export function artifactKind(path: string): Artifact | null {
   const name = path.slice(path.lastIndexOf("/") + 1);
   const dot = name.lastIndexOf(".");
-  const entry = dot === -1 ? undefined : ARTIFACT_KINDS.get(name.slice(dot + 1).toLowerCase());
+  const entry = dot <= 0 ? undefined : ARTIFACT_KINDS.get(name.slice(dot + 1).toLowerCase());
   return entry === undefined ? null : { ...entry, name };
 }
 

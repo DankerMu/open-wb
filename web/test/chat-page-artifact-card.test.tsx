@@ -2,22 +2,27 @@
  * Issue #536 产物卡 (parent tasks 7.5b): A1–A15 of openspec/changes/artifact-card/design.md.
  * Seams: the pure `artifactKind`, the jsdom chat page over a stubbed `fetch`, the two Blob URL
  * statics, `<a>.click()`, `navigator.clipboard`, and the static CSS text. Expected values are
- * literals from the spec deltas; cases marked (guard) already hold before the change.
+ * literals from the spec deltas; cases marked (guard) already hold before the change. H1 is from
+ * review round 1; H2–H6 live in chat-page-artifact-card-state.test.tsx.
  */
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { artifactKind } from "../src/features/chat/stream-artifacts.js";
 import {
+  APP,
   action,
   actions,
+  artifactCardFixture,
   artifactCards,
   BLOB_URL,
+  CHART,
   CODE_TEXT,
   COPY_APP,
   changedTurn,
   DOWNLOAD_CHART,
   frameOf,
   HTML_TEXT,
+  INDEX,
   OPEN_INDEX,
   openPreviewing,
   previewCalls,
@@ -62,38 +67,17 @@ import {
   write,
 } from "./chat-page-file-changes-support.js";
 import {
-  cleanupChatLifecycle,
   renderChatPageWithAuthProbe,
   renewAccount,
   settleDeferredResponse,
 } from "./chat-page-lifecycle-support.js";
 import { envelope, SESSION_MESSAGES } from "./chat-page-ownership-support.js";
 import { deferred, historyUser, SESSION_ID } from "./chat-stream-support.js";
-import {
-  cleanupFilesFixture,
-  hasLucideGlyph,
-  imagePreviewResponse,
-  stubBlobUrls,
-} from "./files-fixture.js";
+import { hasLucideGlyph, imagePreviewResponse } from "./files-fixture.js";
 import { deferredResponse, jsonResponse, textPreviewResponse } from "./support.js";
 import { readRepoFile, ruleBody, stripComments } from "./ui-support.js";
 
-const INDEX = "out/index.html";
-const CHART = "assets/chart.PNG";
-const APP = "src/app.ts";
-
-let blobs: ReturnType<typeof stubBlobUrls>;
-
-beforeEach(() => {
-  blobs = stubBlobUrls([BLOB_URL]);
-});
-
-afterEach(() => {
-  cleanupFilesFixture();
-  cleanupChatLifecycle();
-  Reflect.deleteProperty(window.navigator, "clipboard");
-  vi.restoreAllMocks();
-});
+const blobs = artifactCardFixture();
 
 describe("artifactKind", () => {
   const code = (label: string, name: string) => ({ kind: "code" as const, label, name });
@@ -129,6 +113,23 @@ describe("artifactKind", () => {
       expect(artifactKind(path)).toBeNull();
     },
   );
+
+  // Review round 1: the extension follows the LAST dot of the LAST segment, and a dot that only
+  // leads the name is no extension (Node `extname` gives "" there, so the preview API refuses it).
+  const lastDot: Array<[string, ReturnType<typeof artifactKind>]> = [
+    ["vite.config.ts", code("TS", "vite.config.ts")],
+    ["dist/app.min.js", code("JS", "app.min.js")],
+    ["web/src/ui/card.tsx", code("TSX", "card.tsx")],
+    ["cfg/.config.json", code("JSON", ".config.json")],
+  ];
+
+  it.each(lastDot)("H1 %s derives its kind, label and file name", (path, expected) => {
+    expect(artifactKind(path)).toStrictEqual(expected);
+  });
+
+  it.each([".html", "dir/.json", ".env", "dir/", ""])("H1 %j derives no artifact", (path) => {
+    expect(artifactKind(path)).toBeNull();
+  });
 });
 
 describe("产物卡 derivation on the chat page", () => {
