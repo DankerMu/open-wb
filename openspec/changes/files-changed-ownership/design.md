@@ -31,7 +31,7 @@ export function ownedPath(realRoot: string, real: string): string | undefined
    - `path = ownedPath(root, real)`；`undefined` → 跳过。
    - 合并：`Map<string, FileChange>`（插入序即首次出现的位置）。首次出现 → 新建 `{ path, added, removed, kind }`（**键按此次序**）；再次出现 → 位置与 `kind` 不变，`kind === "edit"` 时 `added`/`removed` 各自相加（把 `null` 当 0），`kind === "write"` 时保持 `null`。同一事件来自同一次工具调用，`kind` 实际不会不同；规则写死是为了任何输入下产出的元素都满足 Context 里 web 的校验。
 3. 返回 `[...map.values()].slice(0, 50)`——**先合并后截断**。
-4. 不修改入参，返回的对象全是新建的；任何输入下都不抛错——单个候选的 `resolve → resolveReal → ownedPath` 包在模块私有的 `ownedCandidate` 的 `try/catch` 里（`path.resolve` 对非字符串抛 `TypeError`），根的规范性检查在模块私有的 `isCanonical` 里。
+4. 不修改入参，返回的对象全是新建的；对任何 `FileChange` 对象数组都不抛错（`path` 取什么值都一样；非对象元素见「已知残留」14）——单个候选的 `resolve → resolveReal → ownedPath` 包在模块私有的 `ownedCandidate` 的 `try/catch` 里（`path.resolve` 对非字符串抛 `TypeError`），根的规范性检查在模块私有的 `isCanonical` 里。
 
 `ownedPath(realRoot, real)`（不碰文件系统，便于在任何平台上取边界值的证据）：
 - `prefix = realRoot + sep`；`real.startsWith(prefix)` 不成立 → `undefined`（根自身、根外、兄弟前缀 `…/ws2`、经符号链接逃出的都落在这里）。
@@ -40,12 +40,12 @@ export function ownedPath(realRoot: string, real: string): string | undefined
 
 `resolveReal(target): string | undefined`（模块私有）：
 - `try { return realpathSync(target) } catch {}`——**用 JS 版 `realpathSync`，不用 `.native`**。
-- 失败后 `lstatSync(target, { throwIfNoEntry: false })`：抛错或返回了条目（悬空符号链接、链接环、无权限、ENOTDIR）→ `undefined`；确实没有条目 → `try { return join(realpathSync(dirname(target)), basename(target)) } catch { return undefined }`。（Node 24 实测：ENOENT 返回 `undefined`；ENOTDIR、EACCES、ELOOP 抛错；悬空链接返回条目。）
+- 失败后 `lstatSync(target, { throwIfNoEntry: false })`：抛错或返回了条目（悬空符号链接、链接环、无权限、ENOTDIR）→ `undefined`；确实没有条目 → `real = join(realpathSync(dirname(target)), basename(target))`，再对 `real` 做一次 `lstatSync(real, { throwIfNoEntry: false })`：抛错或有条目 → `undefined`，确实没有条目才返回 `real`（整段在 `try/catch` 里，抛错即 `undefined`）。第二次 `lstat` 不能省：`lstat(target)` 走内核语义，JS `realpathSync` 对符号链接**目标**里的 `..` 做词法折叠，两者可以指向不同位置——空间内 `a -> d/../sub`（`d -> deep/dir`）时，内核把 `a/name` 解析到 `deep/sub/name`（无条目），JS 把父目录解析到 `sub`，而 `sub/name` 可以是悬空符号链接或链接环；不复查就会把它当成空间内文件留下（fix pass 1，评审发现）。（Node 24 实测：ENOENT 返回 `undefined`；ENOTDIR、EACCES、ELOOP 抛错；悬空链接返回条目。）
 - NUL 字节与过长路径使这些调用抛错（`ERR_INVALID_ARG_VALUE`、`ENAMETOOLONG`），落在「抛错 → 丢弃」里，不需要单独判断。
 
 `..` 的语义是**词法折叠**（`link/../x.md` 即 `x.md`，不管 `link` 是不是符号链接），与 Node 工具链惯用的 `path.resolve(cwd, arg)` 一致；内核语义下它可能指向别处，见「已知残留」7。
 
-不创建、不读取、不写入任何文件；每个候选 1–3 次同步元数据调用。
+不创建、不读取、不写入任何文件；每个候选 1–4 次同步 `node:fs` 调用。这不是系统调用次数：JS `realpathSync` 对路径的每个分量各做一次 `lstat`，每遇到一个符号链接再 `stat` + `readlink` 并重走，候选之间不缓存——代价是 O(分量数 × 链接跳数)，见「已知残留」1。
 
 ### D2 `store-changes.ts`（新）与 `store.ts` 接线
 ```ts
@@ -145,21 +145,24 @@ case "files.changed": {
 
 实现前就成立的护栏（不计入 RED）：P6；F3、F4 里「无 `files.changed`、列为 NULL」的断言（实现前一切都被丢弃）。其余在实现前为红。
 
-交付记录（42 个用例：O 31、P 6、F 5）：
+交付记录（第一轮 42 个用例：O 31、P 6、F 5；fix pass 1 之后 52 个：O 41，其中 1 个仅在非 darwin 上运行）：
 - RED（基线 `738f144` + 仅三个新测试文件，`npx vitest run --coverage.enabled=false` 三个文件）：O 文件收集失败（模块不存在，31 个用例全部未收集）；P1–P5 红（P2、P3 各带一个「同样的候选在绑定且已登记时会落库并返回事件」的正对照，所以实现前为红）；F1、F2、F5 红；P6、F3、F4 绿——8 failed / 3 passed，与上面的预期一致。
 - GREEN：`npm test --workspace server` 155 个文件、2396 个用例通过（3 个既有 skip）；两个新产品文件的行/分支/函数覆盖率均为 100%；三个新文件连跑 3 次每次 42/42，结束后无残留临时目录或 fake-omp 进程。
 - 证据之外的补充断言：O2 `notes.md/`；O3 首项计数为 `null` 的合并；O7 裸 `link`、`dangling/x.md`、判定前后目录树不变（不创建不删除任何条目）；O8 经空间内符号链接目录的不存在文件；O9 根带结尾斜杠或 `/sub/..`；O10 普通文件当根、空串根、相对根（JS `realpathSync` 先做 `path.resolve`，这些都不等于自身）；O11 非字符串 `path`；F1 在发布 sink 内读列，证明 `files.changed` 发布时 `changes` 已提交且步骤仍为 `running`。
 - P 文件对 `node:fs` 做了透传记录（`vi.mock` + Proxy，只记被调用的函数名，行为不变，每次 `persistEvent` 前清零）：P2、P3（未登记）、P6 的「无文件系统访问」是直接观察到的。不这样做，变异 11「`null` 仍判定」杀不掉——`realpathSync(null)` 抛错被吞，结果同样是 `undefined`。
 - F 系列把 `runtime.sandboxRoot` 取成规范写法（macOS 的 tmpdir 是 `/var` → `/private/var`）：否则未绑定会话的所有者根不规范，变异 15「恒为 `cwd`」会被根规范性检查挡成 `[]`，F4 杀不掉它。
 - F5 的流在 prompt 之前打开并立即消费，等到 `step.start` 的 id 后再取全量（`edit-write` 场景没有挂起旋钮）。
+- fix pass 1（评审采纳的 P2：符号链接目标含 `..` 时，回落位置上的悬空符号链接、链接环、「把文件当目录」被保留）：RED（`379c9a7` + 仅新测试）4 红——O7 `a/name`、`a/loop`、`b/x.md`、同批只留合法路径；36 绿、1 跳过。修复后 `npm test --workspace server` 155 个文件、2405 个用例通过。新增护栏（修复前后都绿）：`a/x.md` → `sub/x.md` 与 `a/gone.md` → `sub/gone.md`（第二次 `lstat` 不误伤合法回落）、`a/kname`、`c/x.md`、O2 `link/../y.md`、指向根自身的 `self`（`self/x.md` → `x.md`，裸 `self` 丢弃）、`up -> ..`（`up/<空间目录名>/x.md` → `x.md`、`…/gone.md` → `gone.md`、`up/<空间目录名>` 丢弃）。
+- O6 增加一条真实目录树上的 1024/1025 字节用例（四级目录 255/255/255/200 字节 + 55/56 字节的叶子），`it.skipIf(process.platform === "darwin")`：macOS 上建不出来，只在 Linux（CI）上运行；本机没有执行过它。
 
 ## 变异自检（实现者在沙箱里做，脚本与日志不入库）
 每个变异至少使一个用例变红：
 1. 前缀判定去掉 `+ sep`（`startsWith(realRoot)`）→ O7（兄弟前缀）。
-2. 去掉「根的 realpath 必须等于自身」的检查（改用 realpath 结果继续判定）→ O9。（「去掉检查但前缀仍用 `root` 原串」是等价变异：候选的 realpath 天然不以符号链接根为前缀，结果同样是 `[]`，不必去追。）
-2b. 候选用 `join`/原串而不做 `resolve` 规范化 → O7（`dangling/`）。
+2. 去掉「根的 realpath 必须等于自身」的检查（改用 realpath 结果继续判定）→ O9。（「去掉检查但前缀仍用 `root` 原串」对符号链接根是等价的——候选的 realpath 天然不以符号链接根为前缀；但它不是等价变异：根为空串时前缀成了 `/`，所有绝对路径都会被当作空间内，由 O10 的空串根用例杀死。）
+2b. 候选用 `join`/原串而不做 `resolve` 规范化 → O2（`link/../y.md`：内核位置 `<空间外>/y.md` 有条目而根内没有，两种写法都应保留为 `y.md`）。fix pass 1 之前由 O7（`dangling/`）杀死；回落位置的第二次 `lstat` 现在也会接住 `dangling/`，所以归属移到了 O2。
 3. 去掉父目录回落 → O8。
-4. realpath 失败后不做 `lstat`、直接回落 → O7（悬空符号链接）；`lstat` 抛错时当作「无条目」继续回落 → O7（`notes.md/x.md`，ENOTDIR）与 O11（NUL）；符号链接环在这个变异下仍被丢弃（`loop` 走的是「`lstat` 返回条目」，`loop/x.md` 回落后父目录 realpath 同样失败），环的用例钉的是规格第 3 步的行为。
+4. realpath 失败后不做第一次 `lstat`、直接回落 → O7（`a/kname`：悬空符号链接只在内核位置 `deep/sub`；`c/x.md`）；第一次 `lstat` 抛错时当作「无条目」继续回落 → O7（`c/x.md`：内核位置是普通文件，ENOTDIR；JS 位置是目录）。fix pass 1 之前这两个变体由 `dangling`、`notes.md/x.md` 与 NUL 的用例杀死；内核位置与 JS 位置重合时第二次 `lstat` 会接住它们，所以两次 `lstat` 各自的必要性只在两个位置不同的构造（`a -> d/../sub` 一类）下才区分得出来。符号链接环（`loop`、`loop/x.md`）的用例钉的是规格第 3 步的行为。
+4b.（fix pass 1）去掉回落位置的第二次 `lstat` → O7（`a/name`、`a/loop`、同批用例、`b/x.md`）；第二次 `lstat` 抛错时当作「无条目」→ O7（`b/x.md`：JS 位置是普通文件，ENOTDIR；内核位置是目录）。
 5. 对候选只做词法规范化、不取 realpath → O7（符号链接目录）、O12。
 6. 先截断后合并 → O5。
 7. `ownedPath`：用 `path.length` 代替 `Buffer.byteLength` → O6（中文路径）。
@@ -172,20 +175,23 @@ case "files.changed": {
 14. `setStepChanges`：去掉 `AND status = 'running'` → P5；去掉一行回执 → P5。
 15. `supervisor.ts`：slot 的 `workspaceRoot` 恒为 `cwd`（未绑定也判定）→ F4；恒为 `null` → F1。
 
-结果：上列 1、2、2b、3–15（含双变体共 22 个）加两个自拟变异（根外的路径以其文件名保留 → O6、O7、F3；去掉 `ownedCandidate` 的 `try/catch` → O11）共 24 个，全部被杀，每个变异的红用例都包含上面点名的 id。
+结果：上列 1、2、2b、3–15（含双变体共 22 个）加两个自拟变异（根外的路径以其文件名保留 → O6、O7、F3；去掉 `ownedCandidate` 的 `try/catch` → O11）共 24 个，全部被杀，每个变异的红用例都包含上面点名的 id。fix pass 1 之后在修复后的树上重跑全部脚本并加上 4b 的两个，共 26 个，全部被杀（归属按上面更新后的写法）。
 
 ## 已知残留
-1. **候选数不设上限**：上限 50 在合并之后才截断，每个候选都要做 1–3 次同步文件系统调用，候选数只受 omp 单帧大小约束；父 D6 的「IO 有界」不成立（proposal 偏差 8）。候选来自 omp 实际执行过的 `edit`（`perFileResults` 每项对应一次真实的文件修改），不是模型可以随意填写的文本，所以实际规模是「一次 edit 调用改了多少文件」。本刀不另设候选数上限（那会改变规格里「派生次序前 50」的含义）。量级：omp 单帧重组上限是 64 MiB（`server/src/sessions/omp/frame.ts:4`），按每个候选几十字节估，一帧理论上可带百万级候选，全部在唯一的事件循环上同步解析，会阻塞所有会话数秒。对诚实的 omp 不会出现；是否加原始候选数上限由父 change 决定。
+1. **候选数不设上限，单条事件的同步代价无界**：上限 50 在合并之后才截断，每个候选都要解析，候选之间不缓存（20 万个相同的候选各解析一次）；父 D6 的「IO 有界」不成立（proposal 偏差 8）。候选数只受 omp 单帧重组上限约束（64 MiB，`server/src/sessions/omp/frame.ts:4`；归约器 `file-changes.ts` 没有更早的上限），最小的候选元素约 23 字节，一帧可带约 290 万个候选。每个候选的代价由 agent 可控的目录深度与链接链决定，与候选串长度无关。评审在 macOS / Node 24 上的实测（每候选）：根下已存在文件 12 µs、根下不存在文件 28 µs、50 层目录下不存在文件 0.2 ms、200 层 1.5 ms、400 层 6.5 ms；6 字节的候选经一个指向 400 层目录的符号链接同样是 6.6 ms。量级：行为失常的 omp 发一帧，最浅也是几十秒、对抗构造下是小时级的事件循环同步阻塞（期间所有会话、停止与健康检查都不响应）；诚实的 omp 在用户刻意建出的深目录里一次改 200 个文件约 1 秒。诚实使用下的规模是「一次 edit 调用改了多少文件」（`perFileResults` 每项对应一次真实的文件修改）。本刀不另设候选数上限（那会改变规格里「派生次序前 50」的含义，需要一个数字和一句规格）；「攒够 50 个就停」不可取（破坏先合并后截断）。是否加原始候选数上限或按原始串记忆由 owner 决定，由 #740 跟踪。
 2. **`files.changed` 与 `step.end` 之间可能插入别的发布**：两者之间有一个 `await this.#publish(...)`，审批结算等另一路发布理论上可以落在中间。「紧先于」对 pump 自己的事件流成立；这是既有的发布结构，不是本刀引入的。
 3. **判定的是路径，不是文件类型或身份**：目录路径会被当作变更保留（工具不会报告目录）；macOS 上大小写或 NFC/NFD 写法不同的同一文件不合并（realpath 不规范化大小写）；硬链接到空间外文件的空间内条目会被保留（固有限制）。
-4. **判定与实际写入之间有时间窗**：归属按事件到达时的文件系统状态判定；之后空间内的文件被换成指向空间外的符号链接，已保存的相对路径不会被重新判定。预览接口（`core/sandbox/resolve`）在读取时拒绝符号链接，所以不会借此读到空间外内容。
+4. **判定与实际写入之间有时间窗**：归属按事件到达时的文件系统状态判定；之后空间内的文件被换成指向空间外的符号链接，已保存的相对路径不会被重新判定。预览接口在解析路径的那一刻逐分量拒绝符号链接（`core/sandbox/resolve`），已保存的相对路径本身不带来新的可达性——预览本来就接受用户给的任意相对路径。预览在「检查」与「按路径打开」之间有自己的时间窗（既有代码，`server/src/workspaces/rest.ts` 与 `preview.ts`，不在本刀范围，由 #739 跟踪）。
 5. **只覆盖 POSIX**：路径分隔符按 `/` 处理（服务端不在 Windows 上运行）。
 6. **集成测试只走绝对路径分支**：fake 的 `edit-write` 发的是绝对路径；相对路径、`perFileResults`、合并与上限只有单元层证据（O2、O3、O5）。真 omp 的 `edit` `details.path` 是相对、绝对还是原始参数没有核对；真 omp 链路（ui-walk 的 `WORKBUDDY_WRITE`）归 8.2a。
-7. **`..` 按词法折叠**：`link/../x.md` 记为 `x.md`。若工具把原串直接交给系统调用（内核先跟随 `link`），实际触及的是别处的文件，卡片却指向空间内的同名路径。不泄露路径或内容（卡片只带空间内相对路径，预览按该相对路径在空间内读取）；与 Node 工具链的 `path.resolve` 惯例一致。
+7. **`..` 按词法折叠**：`link/../x.md` 记为 `x.md`。若工具把原串直接交给系统调用（内核先跟随 `link`），实际触及的是别处的文件，卡片却指向空间内的同名路径。不泄露路径或内容（卡片只带空间内相对路径，预览按该相对路径在空间内读取）；与 Node 工具链的 `path.resolve` 惯例一致。符号链接**目标**里的 `..` 同理：JS `realpathSync` 按词法折叠链接目标，空间内 `a -> d/../sub` 下的 `a/x.md` 记为 `sub/x.md`，而内核实际到达的是 `deep/sub/x.md`——标签可能指向空间内的另一个位置，但仍在空间内（返回串的每个分量都经 `lstat` 确认不是链接）。
 8. **权限类失败（EACCES）没有用例**：需要可控的目录权限；它走「`lstat` 抛错 → 丢弃」分支，该分支由 ENOTDIR（`notes.md/x.md`）与 NUL 的用例覆盖。
-9. **1024 字节边界在真实目录上没有证据**：macOS 的 `PATH_MAX` 限制了可构造的路径长度，边界值由不碰文件系统的 `ownedPath` 取证（O6）。
+9. **1024 字节边界在 macOS 的真实目录上没有证据**：macOS 的 `PATH_MAX` 限制了可构造的路径长度，边界值由不碰文件系统的 `ownedPath` 取证（O6）；经 `ownedChanges` 的真实目录用例只在 Linux（CI）上运行。
 10. **首次出现的元素原样带计数**：首项若是 `kind:"edit"` 且计数为 `null`、之后没有同路径候选，产出就是 `edit` + `null`，过不了 web 的严格解析。归约器（`file-changes.ts`）给 `edit` 的计数恒为非负整数，生产里不会出现；本模块不重复校验上游的元素形状。
 11. **根不要求是目录**：普通文件当根时它是自己的 realpath，通过规范性检查；其下的候选由 `lstat` 的 ENOTDIR 丢弃，结果仍是 `[]`（O10）。
+12. **存在性预言机（1 bit）**：空间内的符号链接 `p -> <空间外>/<probe>/../../<ws>/x.md`，`<probe>` 存在且 server uid 可穿越时产出 `x.md`，否则 `[]`。这是「跟随符号链接穿越空间外分量再折回空间内」的固有性质（换 `.native` 也一样）；利用它需要行为失常的 omp 加上能看到卡片的用户，得到的只是「某个空间外路径是否存在」。
+13. **保存的相对路径可以含反斜杠、控制字符、孤立代理项**：它们是合法的 POSIX 文件名，经 JSON 转义原样保存；不可能含 `..` 分量、前导 `/`、NUL，也不可能为空。预览端自己拒绝 NUL、前导 `/`、`..` 与符号链接分量。
+14. **入参按 `FileChange` 对象数组对待**：数组里若有非对象元素（`null`、`undefined`）会在取 `file.path` 时抛错；归约器只产出新建的普通对象，生产里到不了。
 
 ## Seams under test
 - 真实临时目录 + 真实 `realpathSync`/`lstatSync`：O 系列不 mock 文件系统。
