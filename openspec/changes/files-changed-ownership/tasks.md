@@ -2,7 +2,7 @@
 
 ## 3. server — files.changed 归属判定、落库后发布（父 tasks 3.4）
 
-- [ ] 3.4 新建 `file-changes-ownership.ts`（`ownedChanges`：空间根须为规范路径 → 候选以 `path.resolve` 拼根并词法规范化 → realpath（确实不存在则父目录 realpath + 文件名，其余失败丢弃）→ `ownedPath`：严格位于空间根 + 分隔符之内、相对空间根 `/` 分隔路径、UTF-8 >1024 字节丢弃 → 同路径合并（计数求和、位置取首次）→ 超 50 项只留前 50）+ 新建 `store-changes.ts` 的 `setStepChanges` 并挂到 `SessionStore` + `turn-control.ts` `persistEvent` 的 `files.changed` 分支（未绑定或未登记的调用 → 丢弃；无幸存项 → `undefined`；有则 `setStepChanges` 成功后返回以数字步骤 id 发布的事件）+ `Slot.workspaceRoot` 与 `supervisor.ts` 两行接线。验证：新建 `server/test/file-changes-ownership.test.ts`（O1–O13）、`server/test/session-file-changes.test.ts`（F1–F5）、`server/test/persist-files-changed.test.ts`（P1–P6）；既有测试只改 proposal「偏差」3 的一处
+- [x] 3.4 新建 `file-changes-ownership.ts`（`ownedChanges`：空间根须为规范路径 → 候选以 `path.resolve` 拼根并词法规范化 → realpath（确实不存在则父目录 realpath + 文件名，其余失败丢弃）→ `ownedPath`：严格位于空间根 + 分隔符之内、相对空间根 `/` 分隔路径、UTF-8 >1024 字节丢弃 → 同路径合并（计数求和、位置取首次）→ 超 50 项只留前 50）+ 新建 `store-changes.ts` 的 `setStepChanges` 并挂到 `SessionStore` + `turn-control.ts` `persistEvent` 的 `files.changed` 分支（未绑定或未登记的调用 → 丢弃；无幸存项 → `undefined`；有则 `setStepChanges` 成功后返回以数字步骤 id 发布的事件）+ `Slot.workspaceRoot` 与 `supervisor.ts` 两行接线。验证：新建 `server/test/file-changes-ownership.test.ts`（O1–O13）、`server/test/session-file-changes.test.ts`（F1–F5）、`server/test/persist-files-changed.test.ts`（P1–P6）；既有测试只改 proposal「偏差」3 的一处
 
 ## Risk packs
 
@@ -21,8 +21,8 @@
 | Documentation / migration notes | no | spec delta 即文档；`system.md`/`IMPLEMENTATION_PLAN.md` 的同步在收尾刀 9.1 |
 
 ## 通用纪律（继承父 tasks.md）
-- [ ] 新测试进三个新文件；既有测试只改 proposal「偏差」3 的一处（`session-persist-new-events.test.ts:55` 与文件头注释）。
-- [ ] RED 集合 = O、F、P 中依赖新行为的用例；实现前就成立的护栏逐条标出。实现前后各跑一次并记录命令与结果。
-- [ ] `supervisor.ts` 799 → 800、`store.ts` 789 → ≤800、`pool.ts`、`turn-control.ts` 的前后行数写进 PR。
-- [ ] `npm test --workspace server`、`make lint`、`make typecheck`、`make anti-drift`（knip 零新增、jscpd 克隆数 178 不增）、`bash scripts/size-guard.sh` 退出 0；`make smoke`、`make ui-walk` 与 `uid-isolation` 由 CI 覆盖；`openspec validate files-changed-ownership --strict --no-interactive` 通过。
-- [ ] PR 标注触碰 Critical Path「沙箱与文件边界」，请求白盒审查。
+- [x] 新测试进三个新文件；既有测试只改 proposal「偏差」3 的一处（`session-persist-new-events.test.ts:55` 与文件头注释）。
+- [x] RED 集合 = O、F、P 中依赖新行为的用例；实现前就成立的护栏逐条标出。实现前后各跑一次并记录命令与结果（design「Required evidence」交付记录：8 failed / 3 passed → 42 passed）。
+- [x] `supervisor.ts` 799 → 800、`store.ts` 789 → 797、`pool.ts` 322 → 324、`turn-control.ts` 286 → 299；新文件 `file-changes-ownership.ts` 94、`store-changes.ts` 14。
+- [x] `npm test --workspace server`、`make lint`、`make typecheck`、`make anti-drift`（knip 零新增、jscpd 克隆数 178 不增）、`bash scripts/size-guard.sh` 退出 0；`make smoke`、`make ui-walk` 与 `uid-isolation` 由 CI 覆盖；`openspec validate files-changed-ownership --strict --no-interactive` 通过。
+- [x] PR 标注触碰 Critical Path「沙箱与文件边界」，请求白盒审查。

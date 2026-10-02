@@ -31,11 +31,11 @@ export function ownedPath(realRoot: string, real: string): string | undefined
    - `path = ownedPath(root, real)`；`undefined` → 跳过。
    - 合并：`Map<string, FileChange>`（插入序即首次出现的位置）。首次出现 → 新建 `{ path, added, removed, kind }`（**键按此次序**）；再次出现 → 位置与 `kind` 不变，`kind === "edit"` 时 `added`/`removed` 各自相加（把 `null` 当 0），`kind === "write"` 时保持 `null`。同一事件来自同一次工具调用，`kind` 实际不会不同；规则写死是为了任何输入下产出的元素都满足 Context 里 web 的校验。
 3. 返回 `[...map.values()].slice(0, 50)`——**先合并后截断**。
-4. 不修改入参，返回的对象全是新建的；任何输入下都不抛错。
+4. 不修改入参，返回的对象全是新建的；任何输入下都不抛错——单个候选的 `resolve → resolveReal → ownedPath` 包在模块私有的 `ownedCandidate` 的 `try/catch` 里（`path.resolve` 对非字符串抛 `TypeError`），根的规范性检查在模块私有的 `isCanonical` 里。
 
 `ownedPath(realRoot, real)`（不碰文件系统，便于在任何平台上取边界值的证据）：
 - `prefix = realRoot + sep`；`real.startsWith(prefix)` 不成立 → `undefined`（根自身、根外、兄弟前缀 `…/ws2`、经符号链接逃出的都落在这里）。
-- `path = real.slice(prefix.length)`（服务端只跑在 POSIX 上，分隔符即 `/`；非空由前缀判定保证）。
+- `path = real.slice(prefix.length)`（服务端只跑在 POSIX 上，分隔符即 `/`）。纯函数自身不校验非空（`ownedPath("/ws", "/ws/")` 是 `""`）；经 `ownedChanges` 到不了这里——`realpathSync` 与 `join(realpath(父目录), basename(target))` 的结果除 `/` 外不以分隔符结尾，而 `/` 不以任何 `根 + sep` 为前缀。
 - `Buffer.byteLength(path, "utf8") > 1024` → `undefined`；否则返回 `path`。
 
 `resolveReal(target): string | undefined`（模块私有）：
@@ -54,7 +54,7 @@ export function setStepChanges(db: DatabaseSync, stepId: number, json: string): 
   requireChanges(db.prepare(SET_CHANGES).run(json, stepId).changes, 1, "step changes");
 }
 ```
-- `SessionStore` 增 `setStepChanges(stepId: number, json: string): void`，实现 `assertOpen(closed)` 后转调（同 `appendThinking` 的写法）。`finishStep` 不动。`store.ts` 789 → 约 796。
+- `SessionStore` 增 `setStepChanges(stepId: number, json: string): void`，实现 `assertOpen(closed)` 后转调（同 `appendThinking` 的写法）。`finishStep` 不动。`store.ts` 789 → 797。
 - 单条语句自成事务。写不到恰一行（步骤已结算、已被删除）→ `requireChanges` 抛错 → D4 的失败路径。
 
 ### D3 `turn-control.ts`：`persistEvent` 的分支
@@ -145,6 +145,14 @@ case "files.changed": {
 
 实现前就成立的护栏（不计入 RED）：P6；F3、F4 里「无 `files.changed`、列为 NULL」的断言（实现前一切都被丢弃）。其余在实现前为红。
 
+交付记录（42 个用例：O 31、P 6、F 5）：
+- RED（基线 `738f144` + 仅三个新测试文件，`npx vitest run --coverage.enabled=false` 三个文件）：O 文件收集失败（模块不存在，31 个用例全部未收集）；P1–P5 红（P2、P3 各带一个「同样的候选在绑定且已登记时会落库并返回事件」的正对照，所以实现前为红）；F1、F2、F5 红；P6、F3、F4 绿——8 failed / 3 passed，与上面的预期一致。
+- GREEN：`npm test --workspace server` 155 个文件、2396 个用例通过（3 个既有 skip）；两个新产品文件的行/分支/函数覆盖率均为 100%；三个新文件连跑 3 次每次 42/42，结束后无残留临时目录或 fake-omp 进程。
+- 证据之外的补充断言：O2 `notes.md/`；O3 首项计数为 `null` 的合并；O7 裸 `link`、`dangling/x.md`、判定前后目录树不变（不创建不删除任何条目）；O8 经空间内符号链接目录的不存在文件；O9 根带结尾斜杠或 `/sub/..`；O10 普通文件当根、空串根、相对根（JS `realpathSync` 先做 `path.resolve`，这些都不等于自身）；O11 非字符串 `path`；F1 在发布 sink 内读列，证明 `files.changed` 发布时 `changes` 已提交且步骤仍为 `running`。
+- P 文件对 `node:fs` 做了透传记录（`vi.mock` + Proxy，只记被调用的函数名，行为不变，每次 `persistEvent` 前清零）：P2、P3（未登记）、P6 的「无文件系统访问」是直接观察到的。不这样做，变异 11「`null` 仍判定」杀不掉——`realpathSync(null)` 抛错被吞，结果同样是 `undefined`。
+- F 系列把 `runtime.sandboxRoot` 取成规范写法（macOS 的 tmpdir 是 `/var` → `/private/var`）：否则未绑定会话的所有者根不规范，变异 15「恒为 `cwd`」会被根规范性检查挡成 `[]`，F4 杀不掉它。
+- F5 的流在 prompt 之前打开并立即消费，等到 `step.start` 的 id 后再取全量（`edit-write` 场景没有挂起旋钮）。
+
 ## 变异自检（实现者在沙箱里做，脚本与日志不入库）
 每个变异至少使一个用例变红：
 1. 前缀判定去掉 `+ sep`（`startsWith(realRoot)`）→ O7（兄弟前缀）。
@@ -164,6 +172,8 @@ case "files.changed": {
 14. `setStepChanges`：去掉 `AND status = 'running'` → P5；去掉一行回执 → P5。
 15. `supervisor.ts`：slot 的 `workspaceRoot` 恒为 `cwd`（未绑定也判定）→ F4；恒为 `null` → F1。
 
+结果：上列 1、2、2b、3–15（含双变体共 22 个）加两个自拟变异（根外的路径以其文件名保留 → O6、O7、F3；去掉 `ownedCandidate` 的 `try/catch` → O11）共 24 个，全部被杀，每个变异的红用例都包含上面点名的 id。
+
 ## 已知残留
 1. **候选数不设上限**：上限 50 在合并之后才截断，每个候选都要做 1–3 次同步文件系统调用，候选数只受 omp 单帧大小约束；父 D6 的「IO 有界」不成立（proposal 偏差 8）。候选来自 omp 实际执行过的 `edit`（`perFileResults` 每项对应一次真实的文件修改），不是模型可以随意填写的文本，所以实际规模是「一次 edit 调用改了多少文件」。本刀不另设候选数上限（那会改变规格里「派生次序前 50」的含义）。量级：omp 单帧重组上限是 64 MiB（`server/src/sessions/omp/frame.ts:4`），按每个候选几十字节估，一帧理论上可带百万级候选，全部在唯一的事件循环上同步解析，会阻塞所有会话数秒。对诚实的 omp 不会出现；是否加原始候选数上限由父 change 决定。
 2. **`files.changed` 与 `step.end` 之间可能插入别的发布**：两者之间有一个 `await this.#publish(...)`，审批结算等另一路发布理论上可以落在中间。「紧先于」对 pump 自己的事件流成立；这是既有的发布结构，不是本刀引入的。
@@ -174,9 +184,11 @@ case "files.changed": {
 7. **`..` 按词法折叠**：`link/../x.md` 记为 `x.md`。若工具把原串直接交给系统调用（内核先跟随 `link`），实际触及的是别处的文件，卡片却指向空间内的同名路径。不泄露路径或内容（卡片只带空间内相对路径，预览按该相对路径在空间内读取）；与 Node 工具链的 `path.resolve` 惯例一致。
 8. **权限类失败（EACCES）没有用例**：需要可控的目录权限；它走「`lstat` 抛错 → 丢弃」分支，该分支由 ENOTDIR（`notes.md/x.md`）与 NUL 的用例覆盖。
 9. **1024 字节边界在真实目录上没有证据**：macOS 的 `PATH_MAX` 限制了可构造的路径长度，边界值由不碰文件系统的 `ownedPath` 取证（O6）。
+10. **首次出现的元素原样带计数**：首项若是 `kind:"edit"` 且计数为 `null`、之后没有同路径候选，产出就是 `edit` + `null`，过不了 web 的严格解析。归约器（`file-changes.ts`）给 `edit` 的计数恒为非负整数，生产里不会出现；本模块不重复校验上游的元素形状。
+11. **根不要求是目录**：普通文件当根时它是自己的 realpath，通过规范性检查；其下的候选由 `lstat` 的 ENOTDIR 丢弃，结果仍是 `[]`（O10）。
 
 ## Seams under test
 - 真实临时目录 + 真实 `realpathSync`/`lstatSync`：O 系列不 mock 文件系统。
-- store 的记录替身（P1–P4，同 `session-persist-new-events.test.ts` 的 Proxy 写法）与真实 SQLite（P5、F 系列）。
+- store 的记录替身（P1–P4，同 `session-persist-new-events.test.ts` 的 Proxy 写法）与真实 SQLite（P5、F 系列）；P 文件另对 `node:fs` 做只记录、不改行为的透传。
 - 真实 fake-omp 子进程经 `spawnImpl` 注入点启动；`options.cwd` 替换用来把子进程放到空间根外。fake 不是真 omp：帧形状以 omp-test-harness 规格为准。
 - TEMP TRIGGER 注入的是「UPDATE 被数据库拒绝」这一种失败。
