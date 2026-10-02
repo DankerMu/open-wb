@@ -59,7 +59,7 @@ web 的会话解析 SHALL 要求会话对象恰含八键 `{id,title,status,creat
 
 以响应视图更新 SHALL 只采用响应中该请求所修改的那个键（重命名取 `title`，置顶取 `pinnedAt`），不覆盖该条目的其它键（迟到的响应不得把已刷新的 `status`、或另一类请求刚写入的标题/置顶改回旧值）；同一会话有多个进行中的同类请求时只采用最后发出的那个请求的响应，被取代的响应不更新也不提示；账号切换或离开会话页之后到达的响应 SHALL 被丢弃（不更新列表、不提示）；删除的响应同样如此（不移除条目、不提示、不导航、不重新读取列表）。
 
-顶栏第二态（有当前会话且标题已知）SHALL 经 spa-shell 的 `useTopbar` `actions` 插槽渲染 accessible name 与 Tooltip 均为 `重命名` 的图标按钮（`Icon pencil`，demo:1942），打开同一重命名 Dialog 作用于当前会话；会话页注入的顶栏按钮次序由有序常量 `CHAT_TOPBAR_ACTIONS` 固定为 `重命名`、`对话内搜索`、`产物面板`，页面只从该常量按序构造 `actions`，当前只有 `重命名` 槽位产出按钮；顶栏 `更多`（demo:1954）SHALL NOT 渲染；欢迎态不上报 `actions`。
+顶栏第二态（有当前会话且标题已知）SHALL 经 spa-shell 的 `useTopbar` `actions` 插槽渲染 accessible name 与 Tooltip 均为 `重命名` 的图标按钮（`Icon pencil`，demo:1942），打开同一重命名 Dialog 作用于当前会话；会话页注入的顶栏按钮次序由有序常量 `CHAT_TOPBAR_ACTIONS` 固定为 `重命名`、`对话内搜索`、`产物面板`，页面只从该常量按序构造 `actions`，当前 `重命名` 与 `产物面板`（turn-artifacts）两个槽位产出按钮、`对话内搜索` 槽位尚不产出；顶栏 `更多`（demo:1954）SHALL NOT 渲染；欢迎态不上报 `actions`。
 
 #### Scenario: 从条目菜单重命名
 - **WHEN** 对当前选中会话打开 `更多操作：<标题>` → `重命名`，把输入改为 `  周报整理  ` 并点击 `保存`
