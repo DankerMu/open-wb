@@ -137,6 +137,8 @@ export function summarizeChanges(steps: readonly ChatStepView[]): FileChanges[nu
 6. 「上一条助手已终态时，未知回合的 files.changed 经 `isUnknownTurn` 走重同步」没有页面级用例（`isUnknownTurn` 泛读 `event.data.messageId`、`page.tsx` 该处零 diff；thinking.delta 的同一路径由 `chat-thinking.test.tsx` F6 钉住）。
 7. 卡片的真实浏览器呈现由 8.2a 的 ui-walk 承担。
 
+8. 复审留下的未覆盖项：G5 只否定了 `+2` 与逻辑路径，步骤卡若只印裸相对路径（无计数、无 `file-change` 类）不会被发现（`StepCard` 本刀零 diff）。
+
 ## Seams under test
 - 纯函数：`chatStateFromSnapshot`、`applyChatEvent`、`summarizeChanges`。
 - 连接器：`connectSessionEvents` + `FakeEventSource`。
