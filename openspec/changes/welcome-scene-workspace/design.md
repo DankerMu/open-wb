@@ -11,7 +11,7 @@
 - 首屏约束（chat-web「Welcome state」）：1440×900、1024×768、390×844 下免责声明在首屏内；回归门是 CI `ui-walk` 的 `expectWelcomeFirstScreen`（`web/e2e/ui-walk-layout.ts:112-160`）。实测 master：三个视口的空余分别为 413 / 241 / 56px；390 下快捷任务行换成三行共 112px。
 
 ## Governing invariant
-创建请求的 body 与欢迎态当下显示的选择一致：`scene` 恒为选中胶囊的值；`workspaceId` 存在当且仅当 footer 按钮显示着某个空间名，且就是那个空间的 id。两条创建路径（欢迎态首次发送、侧栏 `新建会话`）发出相同的 body。选择只是会话页的内存状态：不写 storage、不进 URL、不触发任何请求。
+创建请求的 body 与欢迎态当下显示的选择一致：`scene` 恒为选中胶囊的值；`workspaceId` 存在当且仅当 footer 按钮显示着某个空间名，且就是那个空间的 id。两条创建路径（欢迎态首次发送、侧栏 `新建会话`）发出相同的 body；在会话页（footer 与胶囊不渲染）点侧栏 `新建会话` 时发出的是「此刻回到欢迎态会显示的那个选择」——同一份保留状态、同一条按当前列表的解析。选择只是会话页的内存状态：不写 storage、不进 URL、不触发任何请求。
 
 ## Sibling surfaces
 - `createAndSelect`（`page.tsx:445-552`）：两条创建路径唯一的 `createSession` 调用点；本刀只改它的第一个实参。创建失败的既有处理（恢复草稿、`promptError`）不动；失败后选择保留。
@@ -99,6 +99,17 @@ useWelcomeOptions(workspaces: readonly Workspace[] | null, workspacesError: stri
 
 既有断言更新（非 RED 新增）：`web/test/chat-page.test.tsx:338-340` 三行删除。实现时若发现其它既有用例变红，先报告再改（不在闭合清单内的不改）。
 
+评审后补充（fix pass 1，只加测试；各以一次产品代码变异确认会红，记录在 PR）：
+- X1 会话页创建：选 `代码开发` 与 `项目A` → 从侧栏选中既有会话 → 点侧栏 `新建会话` → body 恰为 `{"scene":"code","workspaceId":"<项目A id>"}`；变体：其后的 `/api/workspaces` 重读失败 → 在会话页再点 `新建会话` → body 恰为 `{"scene":"code"}`。
+- X2 W13 账号例去掉发送前的「改选 `未选择`」：新账号列表到达（不含该 id）后直接发送 → body 无 `workspaceId`。
+- X3 搜索框回车：有草稿时打开弹层，在 `搜索工作空间` 上按 Enter → 没有 `POST`、弹层仍在、草稿不变；弹层节点不在 composer 的 `<form>` 内。
+- X4 三态互斥：读取在途与读取失败时都不出现 `没有匹配的工作空间`；读取在途时没有 `role="alert"`。
+- X5 上一账号的读取失败不带到新账号：上一账号 `/api/workspaces` 失败（弹层为 alert）→ 续期且新账号读取挂起 → 弹层为 `正在读取工作空间`、无 alert。
+- X6 场景不改变 prompt：选 `创意设计` 后发送 `你好` → `POST /api/sessions/<id>/prompt` 的 body 恰为 `{"message":"你好"}`。
+- X7 选择不发请求：切换场景前后 `fetch` 的调用总数不变。
+- X8 静态样式补全：`(max-width: 760px)` 块内 `.chat-quick-row` 含 `max-width: 100%`，`.chat-quick-chip` 含 `flex: none`。
+- X9 footer 按钮：`type="button"`、图标类含 `lucide-folder`；W5 的「不含 `root`」改读 `innerHTML`；W11 两例先断言 `.chat-composer-card` 存在。
+
 实现记录：
 - 测试落 `web/test/chat-page-welcome-scene.test.tsx`（24 例）与 `web/test/chat-page-welcome-scene-support.tsx`。W6 另加纯路径查询（`misc`、`kefu`、`zhangsan` 不命中）——W5 的 `项目` 同时命中名称与路径，区分不了「也按路径过滤」；W11 拆成「欢迎态 → 选中会话」（RED）与深链保持项（实现前后皆绿）。
 - `WELCOME_SCENES` 的类型为 `readonly WelcomeScene[]`（不是 D4 草图的 `as const`），值与 `office.prompts === WELCOME_QUICK_PROMPTS` 不变；场景值类型取 `WelcomeScene["value"]`。
@@ -119,6 +130,8 @@ useWelcomeOptions(workspaces: readonly Workspace[] | null, workspacesError: stri
 6. Scenario「场景随创建请求发送」的「新会话视图的 `scene` 与之相同」是服务端行为（4.1 的服务端测试为证），web 侧只钉请求 body；端到端由 8.2a 走查。
 7. 账号没有任何工作空间且查询为空时弹层显示 `没有匹配的工作空间`（与 demo 一致；规格只写了「无匹配时」）。
 8. 深色主题下选中胶囊为近黑底白字（`--wb-bg-pill-active` 只在浅色 `:root` 定义），可读，但与 Chip/SegmentedControl 的深色写法不一致。
+9. `scrollbar-width: none` 没有 WebKit 对应写法：Safari 18.2 之前的桌面版在窄窗口下 chip 行会多出全局样式的 8px 滚动条（仍在首屏内）。
+10. 在会话页点侧栏 `新建会话` 时带上此刻不可见的场景与空间选择（父规格明文：选择「作用于其后由…侧栏 `新建会话` 发起的创建请求」）；该页没有改选的控件，须回欢迎态改。是否让会话页的创建不带选择属父规格的取舍，本刀不改。
 
 ## Seams under test
 - jsdom 页面 fixture：胶囊、快捷任务行、Toast、footer 弹层、创建请求 body、列表重读与失败、锁定、状态保留。
