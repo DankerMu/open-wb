@@ -11,7 +11,7 @@
 - `web/src/features/chat/topbar-actions.ts`：`chatTopbar()` 多收 `对话内搜索` 槽（带 `expanded`）。
 - `web/src/features/chat/page.tsx`：接线（+3 行）。
 - `web/src/features/chat/messages.css`：搜索框与高亮样式。
-- 新建 `web/test/search-match.test.ts`、`web/test/chat-page-search.test.tsx`（必要时加 `chat-page-search-support.tsx` 与第二个测试文件，单文件 ≤800 行）。
+- 新建 `web/test/search-match.test.ts`（U1–U4）、`web/test/chat-page-search.test.tsx`（S1–S17）与共用的 `web/test/chat-page-search-support.tsx`。
 - ADDED `conversation-search`「对话内搜索框」「跳转与消息级高亮」；MODIFIED `chat-web`「会话页」（顶栏 actions 句、搜索框位置句、Scenario「顶栏入口」三按钮版）；MODIFIED `session-sidebar`「会话条目菜单与重命名」与 `spa-shell`「路由 IA 与侧栏」（槽位现状句）。
 
 ## Non-goals
@@ -34,6 +34,6 @@
 11. 只并入父 delta 的对话内搜索部分；新能力规格的 `Purpose` 在归档时取父 delta 的 Purpose 原文。
 
 ## Impact
-- web：两个新产品文件、五个既有产品文件改动、两个以上新测试文件、两个既有测试文件的期望更新。server 无改动。
+- web：两个新产品文件、五个既有产品文件改动、两个新测试文件加一个 support、两个既有测试文件的期望更新。server 无改动。
 - 运行时：选中会话时顶栏多一个按钮；搜索不发任何请求。搜索框打开时转录区变矮约一行（贴底时仍贴底，由既有的尺寸变化重算保证）。
 - 依赖：#529、#531、#537、#489 已合并。
