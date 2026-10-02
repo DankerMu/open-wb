@@ -664,6 +664,7 @@ export function ChatPage() {
   return (
     <section className="chat-page">
       <ConversationView
+        client={client}
         composerDisabled={composerDisabled}
         draft={draft}
         generating={generating}

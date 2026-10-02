@@ -1,7 +1,9 @@
 import { type ComponentProps, type FormEvent, memo } from "react";
+import type { ApiClient } from "../../lib/api.js";
 import { MarkdownView } from "../../lib/markdown-view.js";
 import { BrandMark, Icon } from "../../ui/index.js";
 import { ApprovalBars } from "./approval-bar.js";
+import { ArtifactCards } from "./artifact-card.js";
 import { Composer } from "./composer.js";
 import { ComposerFooter } from "./composer-footer.js";
 import { FileChangesCard } from "./file-changes-card.js";
@@ -20,6 +22,8 @@ type StopTurn = ComponentProps<typeof Composer>["onStop"];
 type Regenerate = ComponentProps<typeof MessageActions>["regenerate"];
 
 type ConversationViewProps = {
+  /** 当前账号的 API client；产物卡经它按需拉取预览。 */
+  client: ApiClient;
   composerDisabled: boolean;
   draft: string;
   generating: boolean;
@@ -79,6 +83,7 @@ function StepCard({ step }: { step: ChatStepView }) {
 }
 
 const MessageArticle = memo(function MessageArticle({
+  client,
   forkDisabled,
   message,
   onAnswerApproval,
@@ -86,6 +91,7 @@ const MessageArticle = memo(function MessageArticle({
   regenerate,
   workspace,
 }: {
+  client: ApiClient;
   forkDisabled: boolean;
   message: ChatMessageView;
   onAnswerApproval: AnswerApproval;
@@ -134,6 +140,7 @@ const MessageArticle = memo(function MessageArticle({
         {steps}
         {error}
         <FileChangesCard steps={message.steps} workspace={workspace} />
+        <ArtifactCards client={client} steps={message.steps} workspace={workspace} />
         {stopped ? (
           <p aria-label="助手消息 已停止" className="chat-msg-stopped" role="status">
             已停止
@@ -148,6 +155,7 @@ const MessageArticle = memo(function MessageArticle({
 });
 
 function MessageThread({
+  client,
   composerDisabled,
   historyView,
   onAnswerApproval,
@@ -155,6 +163,7 @@ function MessageThread({
   onRegenerate,
   workspace,
 }: {
+  client: ApiClient;
   composerDisabled: boolean;
   historyView: ChatState;
   onAnswerApproval: AnswerApproval;
@@ -168,6 +177,7 @@ function MessageThread({
     <section aria-label="消息" className="chat-thread">
       {historyView.messages.map((message) => (
         <MessageArticle
+          client={client}
           forkDisabled={message.role === "user" && composerDisabled}
           key={message.id}
           message={message}
@@ -184,6 +194,7 @@ function MessageThread({
 }
 
 export function ConversationView({
+  client,
   composerDisabled,
   draft,
   generating,
@@ -224,6 +235,7 @@ export function ConversationView({
           <FollowTranscript content={historyView} key={requestedSessionId}>
             {historyView ? (
               <MessageThread
+                client={client}
                 composerDisabled={composerDisabled}
                 historyView={historyView}
                 onAnswerApproval={onAnswerApproval}

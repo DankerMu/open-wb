@@ -676,12 +676,13 @@ describe("文件变更 card on the chat page", () => {
       "div.chat-md",
       "section.chat-step",
       "fieldset.file-changes-card",
+      "fieldset.artifact-card",
       "p.chat-msg-stopped",
       "div.chat-msg-actions",
     ]);
     expect(cardNamed("文件变更（1 个）")).toBe(parts[4]);
     expect(within(reply()).getByRole("region", { name: "write" })).toBe(parts[3]);
-    expect(within(reply()).getByRole("status", { name: "助手消息 已停止" })).toBe(parts[5]);
+    expect(within(reply()).getByRole("status", { name: "助手消息 已停止" })).toBe(parts[6]);
     expect(parts[2]?.textContent).toBe("部分回答");
 
     fireEvent.click(within(reply()).getByRole("button", { name: "复制" }));
@@ -705,6 +706,7 @@ describe("文件变更 card on the chat page", () => {
       "section.chat-step",
       "p.ui-alert chat-msg-error",
       "fieldset.file-changes-card",
+      "fieldset.artifact-card",
       "div.chat-msg-actions",
     ]);
     expect(parts[2]?.textContent).toBe("上游失败");
