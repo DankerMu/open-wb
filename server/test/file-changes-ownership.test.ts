@@ -116,6 +116,12 @@ describe("O2 relative candidates and lexical normalization", () => {
     expect(ownedChanges(space.root, [edit("link/../x.md")])).toEqual([
       { path: "x.md", added: 1, removed: 0, kind: "edit" },
     ]);
+    // Only the folded target is asked: y.md exists at the kernel's location (<base>/y.md) and
+    // not in the root, so it is a missing file of the root, in either spelling.
+    writeFileSync(join(space.base, "y.md"), "kernel-side y");
+    expect(
+      ownedChanges(space.root, [edit("link/../y.md"), edit(`${space.root}/link/../y.md`)]),
+    ).toEqual([{ path: "y.md", added: 2, removed: 0, kind: "edit" }]);
   });
 
   it.each(["sub/", "sub//", "sub/./", "notes.md/"])(
@@ -252,6 +258,30 @@ describe("O6 containment and the 1024-byte limit on the pure ownedPath", () => {
       { path: relative, added: null, removed: null, kind: "write" },
     ]);
   });
+
+  // macOS PATH_MAX is 1024, so a 1024-byte relative path below a temp root cannot be given to its
+  // filesystem; Linux (CI) takes 4096 bytes with names of at most 255.
+  it.skipIf(process.platform === "darwin")(
+    "O6 on a real tree a relative path of 1024 bytes is kept and one of 1025 bytes is dropped",
+    () => {
+      const space = openSpace();
+      const dirs = ["p".repeat(255), "q".repeat(255), "r".repeat(255), "s".repeat(200)];
+      mkdirSync(join(space.root, ...dirs), { recursive: true });
+      // 255 * 3 + 200 bytes of directory names and four separators leave 55 for the leaf.
+      const exact = [...dirs, "f".repeat(55)].join("/");
+      const over = [...dirs, "g".repeat(56)].join("/");
+      expect([Buffer.byteLength(exact, "utf8"), Buffer.byteLength(over, "utf8")]).toEqual([
+        1024, 1025,
+      ]);
+      expect(
+        ownedChanges(space.root, [edit(over), edit(exact, 2, 1), write(join(space.root, over))]),
+      ).toEqual([{ path: exact, added: 2, removed: 1, kind: "edit" }]);
+      writeFileSync(join(space.root, exact), "now it exists");
+      expect(ownedChanges(space.root, [write(join(space.root, exact))])).toEqual([
+        { path: exact, added: null, removed: null, kind: "write" },
+      ]);
+    },
+  );
 });
 
 describe("O7 paths outside the workspace and symlink escapes", () => {
@@ -339,6 +369,124 @@ describe("O7 paths outside the workspace and symlink escapes", () => {
     ]);
     expect(listing()).toEqual(before);
     expect(before.outside).toEqual(["secret.txt", "x.md"]);
+  });
+});
+
+describe("O7 a symlink whose target folds `..` differently in JS realpath and in the kernel", () => {
+  /**
+   * `d -> deep/dir` and `a -> d/../sub`: JS realpath folds the `..` of the link target lexically
+   * (`a` is <root>/sub), the kernel follows `d` first (`a` is <root>/deep/sub). `sub/name` is a
+   * dangling outward symlink and `sub/loop` a loop; `deep/sub` holds neither.
+   */
+  function divergent(space: Space): void {
+    const { root } = space;
+    mkdirSync(join(root, "deep", "dir"), { recursive: true });
+    mkdirSync(join(root, "deep", "sub"));
+    symlinkSync("deep/dir", join(root, "d"));
+    symlinkSync("d/../sub", join(root, "a"));
+    symlinkSync("/nonexistent/target", join(root, "sub", "name"));
+    symlinkSync("loop", join(root, "sub", "loop"));
+    writeFileSync(join(root, "sub", "x.md"), "x");
+    expect(realpathSync(join(root, "a"))).toBe(join(root, "sub"));
+    expect(realpathSync.native(join(root, "a"))).toBe(join(root, "deep", "sub"));
+  }
+
+  it.each(["a/name", "a/loop"])(
+    "O7 %s, an entry without a realpath at the JS-resolved location, is dropped",
+    (candidate) => {
+      const space = openSpace();
+      divergent(space);
+      expect(ownedChanges(space.root, [edit(candidate)])).toEqual([]);
+      expect(ownedChanges(space.root, [write(join(space.root, candidate))])).toEqual([]);
+      // Reported directly they were dropped all along.
+      expect(ownedChanges(space.root, [edit(candidate.replace("a/", "sub/"))])).toEqual([]);
+    },
+  );
+
+  it.each([
+    ["a/kname", "a dangling symlink at the kernel's location only"],
+    ["c/x.md", "a regular file used as a directory at the kernel's location only"],
+    ["b/x.md", "a regular file used as a directory at the JS-resolved location only"],
+  ])("O7 %s, %s, is dropped", (candidate) => {
+    const space = openSpace();
+    divergent(space);
+    const { root } = space;
+    symlinkSync("/nonexistent/target", join(root, "deep", "sub", "kname"));
+    mkdirSync(join(root, "g"));
+    writeFileSync(join(root, "deep", "g"), "a file where JS realpath sees the directory g");
+    symlinkSync("d/../g", join(root, "c"));
+    writeFileSync(join(root, "f"), "a file where the kernel sees the directory deep/f");
+    mkdirSync(join(root, "deep", "f"));
+    symlinkSync("d/../f", join(root, "b"));
+    expect(ownedChanges(root, [edit(candidate)])).toEqual([]);
+    expect(ownedChanges(root, [write(join(root, candidate))])).toEqual([]);
+  });
+
+  it("O7 in one batch with them only the legitimate path survives", () => {
+    const space = openSpace();
+    divergent(space);
+    const files = ownedChanges(space.root, [
+      edit("a/name", 9, 9),
+      edit(join(space.root, "a", "loop"), 9, 9),
+      edit("notes.md", 2, 1),
+      write(join(space.root, "a", "name")),
+      write("a/loop"),
+    ]);
+    expect(files).toEqual([{ path: "notes.md", added: 2, removed: 1, kind: "edit" }]);
+  });
+
+  it("O7 an existing and a truly missing file under the same link keep the JS-realpath label", () => {
+    const space = openSpace();
+    divergent(space);
+    // The label is JS realpath's <root>/sub; the kernel location is <root>/deep/sub (design
+    // residual 7: `..` folds lexically). Neither location holds gone.md.
+    expect(readdirSync(join(space.root, "deep", "sub"))).toEqual([]);
+    expect(readdirSync(join(space.root, "sub")).sort()).toEqual(["loop", "name", "x.md"]);
+    expect(
+      ownedChanges(space.root, [
+        edit("a/x.md", 2, 1),
+        edit(join(space.root, "a", "gone.md"), 0, 3),
+      ]),
+    ).toEqual([
+      { path: "sub/x.md", added: 2, removed: 1, kind: "edit" },
+      { path: "sub/gone.md", added: 0, removed: 3, kind: "edit" },
+    ]);
+  });
+});
+
+describe("O7 guards: symlinks back to the root and to its parent", () => {
+  it("O7 guard: through `self -> <root>` a file keeps its real label and the bare link is dropped", () => {
+    const space = openSpace();
+    writeFileSync(join(space.root, "x.md"), "x");
+    symlinkSync(space.root, join(space.root, "self"));
+    expect(
+      ownedChanges(space.root, [
+        edit("self/x.md", 1, 1),
+        edit("x.md", 2, 0),
+        edit("self/self/x.md", 0, 1),
+      ]),
+    ).toEqual([{ path: "x.md", added: 3, removed: 2, kind: "edit" }]);
+    expect(ownedChanges(space.root, [edit("self"), write(join(space.root, "self"))])).toEqual([]);
+  });
+
+  it("O7 guard: through `up -> ..` only paths coming back into the root are owned", () => {
+    const space = openSpace();
+    writeFileSync(join(space.root, "x.md"), "x");
+    symlinkSync("..", join(space.root, "up"));
+    expect(
+      ownedChanges(space.root, [edit("up/ws/x.md", 2, 1), edit("up/ws/gone.md", 0, 4)]),
+    ).toEqual([
+      { path: "x.md", added: 2, removed: 1, kind: "edit" },
+      { path: "gone.md", added: 0, removed: 4, kind: "edit" },
+    ]);
+    expect(
+      ownedChanges(space.root, [
+        edit("up/ws"),
+        edit("up"),
+        edit("up/outside/x.md"),
+        edit("up/gone.md"),
+      ]),
+    ).toEqual([]);
   });
 });
 
