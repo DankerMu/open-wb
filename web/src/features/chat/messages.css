@@ -395,6 +395,66 @@
   color: var(--wb-text-secondary);
 }
 
+/* File-change card adapted from resource/workbuddy-live-demo.html:519-526 (.file-changes-card,
+   .file-changes-head, .file-change-*); the head carries no icon. The fieldset reset mirrors
+   .chat-approval and the 查看详情 button reuses .chat-msg-action. */
+.file-changes-card {
+  min-width: 0;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--wb-border-default);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--wb-bg-secondary);
+}
+
+.file-changes-head {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--wb-border-default);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.file-change-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--wb-border-default);
+  font-size: 12.5px;
+}
+
+.file-change-row:last-child {
+  border-bottom: none;
+}
+
+.file-change-add {
+  color: var(--wb-status-success-text);
+  font-family: var(--wb-mono);
+  font-size: 11px;
+}
+
+.file-change-del {
+  color: var(--wb-status-error-text);
+  font-family: var(--wb-mono);
+  font-size: 11px;
+}
+
+.file-change-kind {
+  color: var(--wb-text-secondary);
+  font-size: 11px;
+}
+
+.file-change-path {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--wb-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Positioning frame for the session transcript and its "回到最新" button; the inner
    .chat-transcript keeps its chat.css scroll rules. Button adapted from
    resource/workbuddy-live-demo.html:399-401 (.back-to-latest). */

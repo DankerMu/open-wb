@@ -65,8 +65,8 @@ describe("turn.end stopped reduction", () => {
       content: "partial",
       status: "stopped",
       steps: [
-        { id: 1, name: "bash", detail: "ls", output: "o", status: "stopped" },
-        { id: 2, name: "read", detail: "a.txt", output: "text", status: "done" },
+        { id: 1, name: "bash", detail: "ls", output: "o", changes: null, status: "stopped" },
+        { id: 2, name: "read", detail: "a.txt", output: "text", changes: null, status: "done" },
       ],
       thinking: null,
       error: null,

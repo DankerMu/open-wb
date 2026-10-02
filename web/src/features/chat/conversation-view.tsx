@@ -4,6 +4,7 @@ import { BrandMark, Icon } from "../../ui/index.js";
 import { ApprovalBars } from "./approval-bar.js";
 import { Composer } from "./composer.js";
 import { ComposerFooter } from "./composer-footer.js";
+import { FileChangesCard } from "./file-changes-card.js";
 import { ForkAction, MessageActions } from "./message-actions.js";
 import { FollowTranscript } from "./scroll-follow.js";
 import { SESSION_STATUS_LABEL } from "./status-label.js";
@@ -12,6 +13,7 @@ import type { ChatState } from "./stream.js";
 import { ThinkingBlock } from "./thinking-block.js";
 import { WelcomeIntro, WelcomePlaybooks } from "./welcome.js";
 import type { WelcomeOptions } from "./welcome-options.js";
+import type { Workspace } from "./workspace-list.js";
 
 type AnswerApproval = ComponentProps<typeof ApprovalBars>["onAnswer"];
 type StopTurn = ComponentProps<typeof Composer>["onStop"];
@@ -35,6 +37,8 @@ type ConversationViewProps = {
   streamError: string | null;
   /** 欢迎态的场景与空间选择（状态在会话页）；有当前会话时不渲染对应控件。 */
   welcome: WelcomeOptions;
+  /** 当前会话的空间（取自空间列表）；未绑定、不在列表里、列表读取中或读取失败时为 undefined。 */
+  workspace: Workspace | undefined;
 };
 
 type ChatMessageView = ChatState["messages"][number];
@@ -80,12 +84,14 @@ const MessageArticle = memo(function MessageArticle({
   onAnswerApproval,
   onFork,
   regenerate,
+  workspace,
 }: {
   forkDisabled: boolean;
   message: ChatMessageView;
   onAnswerApproval: AnswerApproval;
   onFork(messageId: number): Promise<void>;
   regenerate: Regenerate;
+  workspace: Workspace | null;
 }) {
   const assistant = message.role !== "user";
   const stopped = message.status === "stopped";
@@ -127,6 +133,7 @@ const MessageArticle = memo(function MessageArticle({
         </div>
         {steps}
         {error}
+        <FileChangesCard steps={message.steps} workspace={workspace} />
         {stopped ? (
           <p aria-label="助手消息 已停止" className="chat-msg-stopped" role="status">
             已停止
@@ -146,12 +153,14 @@ function MessageThread({
   onAnswerApproval,
   onFork,
   onRegenerate,
+  workspace,
 }: {
   composerDisabled: boolean;
   historyView: ChatState;
   onAnswerApproval: AnswerApproval;
   onFork(messageId: number): Promise<void>;
   onRegenerate(): Promise<boolean>;
+  workspace: Workspace | null;
 }) {
   const last = historyView.messages.at(-1);
   const eligible = last?.role === "assistant" && REGENERABLE.has(historyView.status);
@@ -167,6 +176,7 @@ function MessageThread({
           regenerate={
             eligible && message === last ? { disabled: composerDisabled, onRegenerate } : undefined
           }
+          workspace={workspace}
         />
       ))}
     </section>
@@ -190,6 +200,7 @@ export function ConversationView({
   sendDisabled,
   streamError,
   welcome,
+  workspace,
 }: ConversationViewProps) {
   return (
     <div className="chat-layout">
@@ -218,6 +229,7 @@ export function ConversationView({
                 onAnswerApproval={onAnswerApproval}
                 onFork={onFork}
                 onRegenerate={onRegenerate}
+                workspace={workspace ?? null}
               />
             ) : null}
           </FollowTranscript>

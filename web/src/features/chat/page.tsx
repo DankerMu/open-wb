@@ -680,6 +680,7 @@ export function ChatPage() {
         sendDisabled={sendDisabled}
         streamError={ownedStreamError}
         welcome={welcome}
+        workspace={workspaces?.find((item) => item.id === selected?.workspaceId)}
       />
       <RenameDialog rename={sessionActions.rename} />
       <DeleteDialog remove={sessionActions.remove} />

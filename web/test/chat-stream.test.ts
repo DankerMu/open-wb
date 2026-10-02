@@ -132,6 +132,7 @@ describe("Chat stream reducer", () => {
               name: "bash",
               detail: BASH_START_DETAIL,
               output: BASH_OUTPUT,
+              changes: null,
               status: "done",
             },
           ],
@@ -189,6 +190,7 @@ describe("Chat stream reducer", () => {
         name: "bash",
         detail: BASH_START_DETAIL,
         output: "workbuddy-smoke",
+        changes: null,
         status: "done",
       },
     ]);
@@ -223,6 +225,7 @@ describe("Chat stream reducer", () => {
               name: "bash",
               detail: BASH_START_DETAIL,
               output: "",
+              changes: null,
               status: "running",
             },
           ],
@@ -251,6 +254,7 @@ describe("Chat stream reducer", () => {
               name: "bash",
               detail: BASH_START_DETAIL,
               output: "",
+              changes: null,
               status: "failed",
             },
           ],
@@ -289,6 +293,7 @@ describe("Chat stream reducer", () => {
           name: "bash",
           detail: BASH_START_DETAIL,
           output: "",
+          changes: null,
           status: "failed",
         },
       ],
@@ -454,9 +459,16 @@ describe("Chat stream reducer", () => {
       data: { messageId: 0, stepId: 4, status: "done", output: "result 世界" },
     });
     expect(continued.messages[1]?.steps).toEqual([
-      { id: 3, name: "first", detail: "done", output: "ok", status: "done" },
-      { id: 4, name: "second", detail: "running", output: "result 世界", status: "done" },
-      { id: 5, name: "third", detail: "failed", output: "err", status: "failed" },
+      { id: 3, name: "first", detail: "done", output: "ok", changes: null, status: "done" },
+      {
+        id: 4,
+        name: "second",
+        detail: "running",
+        output: "result 世界",
+        changes: null,
+        status: "done",
+      },
+      { id: 5, name: "third", detail: "failed", output: "err", changes: null, status: "failed" },
     ]);
 
     const started = applyChatEvent(continued, {

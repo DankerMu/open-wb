@@ -272,7 +272,7 @@ describe("Session contract: SSE step.end stays four keys", () => {
       expect(context.loads).toHaveLength(2);
       expect(context.events).toEqual([]);
       expect(assistantSteps(context.state)).toEqual([
-        { id: 11, name: "edit", detail: "{}", output: "", status: "running" },
+        { id: 11, name: "edit", detail: "{}", output: "", changes: null, status: "running" },
       ]);
 
       context.loads[1]?.resolve(withEdit(5));
@@ -282,7 +282,7 @@ describe("Session contract: SSE step.end stays four keys", () => {
       expect(context.loads).toHaveLength(2);
       expect(context.events).toEqual([{ type: "step.end", data: stepEnd }]);
       expect(assistantSteps(context.state)).toEqual([
-        { id: 11, name: "edit", detail: "{}", output: "edited", status: "done" },
+        { id: 11, name: "edit", detail: "{}", output: "edited", changes: null, status: "done" },
       ]);
       context.handle.close();
       expect(observer.unhandled).toEqual([]);

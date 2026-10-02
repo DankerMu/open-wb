@@ -493,6 +493,7 @@ describe("Chat stream recovery", () => {
             name: "bash",
             detail: '{"command":"echo workbuddy-smoke"}',
             output: "workbuddy-smoke",
+            changes: null,
             status: "done",
           },
         ]);
@@ -506,6 +507,7 @@ describe("Chat stream recovery", () => {
             name: "bash",
             detail: '{"command":"echo workbuddy-smoke"}',
             output: "workbuddy-smoke",
+            changes: null,
             status: "done",
           },
         ]);
