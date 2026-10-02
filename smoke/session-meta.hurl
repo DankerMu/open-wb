@@ -5,7 +5,7 @@
 # → (4) WORKBUDDY_THINK prompt → 作答唯一 bash 审批 → 仅 messages GET 有界重试至 done
 # → (5) thinking 逐字、bash 步骤 done、标题仍为 PATCH 所设
 # → (6) DELETE 204 + session.delete 审计 → messages 404 → 列表不含 → 再 DELETE 404
-# → (7) lisi 绑定他人空间 / PATCH / DELETE 均 404 → zhangsan 复核并删除无绑定会话 → 登出。
+# → (7) lisi 绑定他人空间 / PATCH / DELETE 均 404 且 lisi 的会话数不变 → zhangsan 复核并删除无绑定会话 → 登出。
 # 只由 make smoke 运行（smoke-live 不跑本文件），不使用 skip_turn_control；slash 白名单步骤由后续 issue 追加。
 # 可重跑：工作空间保留供下次采用，自建会话在文件内删除，不留下 live authentication session 与 running 回合。
 # 库与 SANDBOX_ROOT 必须同生命周期：库在而空间目录被清掉时，创建仍成功，但 (4) 的回合会因空间根不存在而失败。
@@ -36,7 +36,7 @@ workspace_id: jsonpath "$.workspaces[?(@.name=='smoke-sessions')].id"
 jsonpath "$.workspaces[?(@.name=='smoke-sessions' && count($.workspaces[?(@.name=='smoke-sessions')])==1)]" exists
 jsonpath "$.workspaces[?(@.name=='smoke-sessions')].id" exists
 
-# (1) 绑定创建：exact 201，恰八键，title null、idle、scene code、workspaceId 为捕获值、pinnedAt null；捕获会话 id。不重试。
+# (1) 绑定创建：exact 201，恰八键且逐键点名，title null、idle、scene code、workspaceId 为捕获值、pinnedAt null；捕获会话 id。不重试。
 POST {{base_url}}/api/sessions
 Content-Type: application/json
 {"workspaceId":"{{workspace_id}}","scene":"code"}
@@ -45,8 +45,11 @@ HTTP 201
 session_id: jsonpath "$.id"
 [Asserts]
 jsonpath "$.*" count == 8
+jsonpath "$.id" matches "^[0-9a-f]{32}$"
 jsonpath "$.title" == null
 jsonpath "$.status" == "idle"
+jsonpath "$.createdAt" isInteger
+jsonpath "$.updatedAt" isInteger
 jsonpath "$.scene" == "code"
 jsonpath "$.workspaceId" == "{{workspace_id}}"
 jsonpath "$.pinnedAt" == null
@@ -83,7 +86,7 @@ jsonpath "$.events" count == 1
 jsonpath "$.events[0].kind" == "session.bind"
 jsonpath "$.events[0].detail.sessionId" == "{{session_id}}"
 
-# (2) 无 body 创建照旧可用：exact 201，恰八键，workspaceId null、scene null；捕获无绑定会话 id。
+# (2) 无 body 创建照旧可用：exact 201，恰八键且逐键点名，workspaceId null、scene null；捕获无绑定会话 id。
 # bodyless：无 Content-Type、无 body；不重试。
 POST {{base_url}}/api/sessions
 HTTP 201
@@ -91,19 +94,29 @@ HTTP 201
 other_id: jsonpath "$.id"
 [Asserts]
 jsonpath "$.*" count == 8
+jsonpath "$.id" matches "^[0-9a-f]{32}$"
+jsonpath "$.title" == null
+jsonpath "$.status" == "idle"
+jsonpath "$.createdAt" isInteger
+jsonpath "$.updatedAt" isInteger
 jsonpath "$.workspaceId" == null
 jsonpath "$.scene" == null
+jsonpath "$.pinnedAt" == null
 
-# (3) PATCH title/scene/pinned：exact 200，恰八键，pinnedAt 非 null，workspaceId 不变。不重试。
+# (3) PATCH title/scene/pinned：exact 200，恰八键且逐键点名，pinnedAt 为整数时间戳，id/status/workspaceId 不变。不重试。
 PATCH {{base_url}}/api/sessions/{{session_id}}
 Content-Type: application/json
 {"title":"冒烟会话","scene":"design","pinned":true}
 HTTP 200
 [Asserts]
 jsonpath "$.*" count == 8
+jsonpath "$.id" == "{{session_id}}"
 jsonpath "$.title" == "冒烟会话"
+jsonpath "$.status" == "idle"
+jsonpath "$.createdAt" isInteger
+jsonpath "$.updatedAt" isInteger
 jsonpath "$.scene" == "design"
-jsonpath "$.pinnedAt" != null
+jsonpath "$.pinnedAt" isInteger
 jsonpath "$.workspaceId" == "{{workspace_id}}"
 
 # (3) PATCH 多余键：exact 400 bad_request。不重试。
@@ -230,6 +243,12 @@ HTTP 200
 cookie "workbuddy_session" matches "^[0-9a-f]{64}$"
 {"id":"u3","account":"lisi","role":"管理员"}
 
+# (7) 越权尝试之前：记下 lisi 自己的会话数（服务归调用方所有，不假定为 0）。
+GET {{base_url}}/api/sessions
+HTTP 200
+[Captures]
+lisi_session_count: jsonpath "$.sessions" count
+
 # (7) 他账号绑定 zhangsan 的工作空间建会话：exact 404 not_found（他人空间与未知空间不可区分）。不重试。
 POST {{base_url}}/api/sessions
 Content-Type: application/json
@@ -248,6 +267,12 @@ HTTP 404
 DELETE {{base_url}}/api/sessions/{{other_id}}
 HTTP 404
 {"error":{"code":"not_found","message":"请求的资源不存在"}}
+
+# (7) 越权尝试之后：lisi 的会话数不变（被拒的绑定创建没有留下会话行）。
+GET {{base_url}}/api/sessions
+HTTP 200
+[Asserts]
+jsonpath "$.sessions" count == {{lisi_session_count}}
 
 # (7) 他账号登出。
 POST {{base_url}}/api/auth/logout
