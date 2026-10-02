@@ -196,7 +196,7 @@ RED：三个新测试文件在实现前全部失败（模块不存在 / 面板�
 ## 交付记录（实现后补记）
 - **abort effect 读 `client`**：只依赖 `[client]`、清理函数只碰 ref 的 effect 过不了 Biome 的 `useExhaustiveDependencies`，所以清理函数里比对 `call.current?.client === client` 再 abort。拉取 effect 依赖 `[client, wanted]`、无清理；调用记录在成功后保留（后续上升沿不再拉取），失败时只在记录仍是自己时清掉——被 abort 的旧请求迟到的 reject 不会清掉新 client 的在途记录（J12 第三例）。
 - **超出 Required evidence 的用例**：整页 J11（切到 running 会话后面板消失、draft 保留——夹具版测不出 `page.tsx` 把 `enabled` 接错）、一个 StrictMode 用例、`Ctrl/Alt/Meta` 不拦截的用例。
-- **测试 support**：`web/test/chat-page-slash-support.tsx`（页面测试不拆是 857 行）；目录夹具由它导出，`api-commands.test.ts` 与 `slash-menu-state.test.ts` 也从它取，避免三份目录字面量变成 jscpd 克隆。
+- **测试 support**：`web/test/chat-page-slash-support.tsx`（页面测试不拆是 857 行；fix pass 1 之后测试 796 行、support 328 行，J11 与 J13 的夹具搬进了 support）；目录夹具由它导出，`api-commands.test.ts` 与 `slash-menu-state.test.ts` 也从它取，避免三份目录字面量变成 jscpd 克隆。
 - **行数**（`wc -l`）：`page.tsx` 697 → 700、`api.ts` 722 → 725、`conversation-view.tsx` 316 → 322、`composer.tsx` 128 → 136、`messages.css` 744 → 789、`chat.css` 797 零 diff；新文件 `api-commands.ts` 68、`slash-menu-state.ts` 55、`slash-menu.tsx` 169；测试 154 / 147 / 775 + support 296。（Context 里的 798 与 745 是 `split("\n").length` 口径，比 `wc -l` 多 1。）
 - **RED**（基线 + 仅测试）：三个文件全部失败——A1–A4 22 例 `listCommands is not a function`，M 与 J 两个文件因模块不存在而收集失败。「实现前就成立的护栏」在纯基线上观察不到（文件收集失败）；用一个不接线的 hook 桩做的诊断运行里 43 例 40 红 3 绿，绿的三例都是 J13（不传拦截器照旧提交、两种卡片无包裹元素）；J5、J9、J11 的否定断言在基线成立，但各自所在用例因同例的肯定断言为红。
 - **GREEN**：`npm test --workspace web` 86 文件 / 1792 例；`make lint`、`make typecheck`、`make anti-drift`（knip 零新增、jscpd 178）、`bash scripts/size-guard.sh`、`openspec validate slash-command-menu --strict --no-interactive` 均退出 0。三个新产品文件的语句与分支覆盖率 100%。三个新测试文件连跑三次稳定。
@@ -207,9 +207,33 @@ RED：三个新测试文件在实现前全部失败（模块不存在 / 面板�
   - 面板是卡片的第一个子元素、在输入框上方、宽度随卡片（726/752、324/350）；高度 220px 封顶、内部滚动；页面与面板都没有横向溢出；390px 下 hint 换到第二行。
   - `↓` 15 次到末项时该项在面板可视范围内；再 `↓` 回到首项；光标位置不动。
   - `Esc` 关闭、焦点仍在输入框；再输入重现。
-  - **真实鼠标点击**选项：draft 变为 `/todo `、面板关闭、焦点仍在输入框（随后键入的字符接在 draft 后）、无 prompt 请求。按在面板边缘同样不抢焦点。
+  - **真实鼠标点击**选项：draft 变为 `/todo `、面板关闭、焦点仍在输入框（随后键入的字符接在 draft 后）、无 prompt 请求。按在面板自身的 padding 上（命中元素是 `.chat-slash` 而不是选项；两项目录，1440 与 390 两个视口）：面板保持打开、draft 不变、焦点仍在输入框。
   - `Tab` 选中高亮项且焦点不离开输入框；面板关闭时 `Tab` 照常移到发送键。
   - 每次页面装配 `/api/commands` 恰一次；无控制台错误；暗色下高亮与 hint 取自暗色 token。
+  - **触摸**（Chromium 的触摸仿真：Pixel 7 预设与 390×844 `hasTouch`）：tap 选项后 draft 为 `/todo `、面板关闭、焦点仍在输入框。WebKit 未安装，没有观察。
+
+## 评审第一轮与 fix pass 1（1/2）
+三席（correctness；test-evidence + spec-compliance；integration + invariant，带 a11y / 键盘 / IME 视角）无 P0/P1，产品代码无缺陷，fix pass 1 只动测试。采纳三处证据缺口，三条变异在 fix 前的树上都存活、之后各被恰一个新用例杀死：
+- **abort 守卫没有判别用例**（`slash-menu.tsx` 的 `if (!own.controller.signal.aborted) setCatalogue(…)`）：原 J12 第二例只让旧答案先到，它带着旧 `client` 存进去也会被身份比对挡掉。反过来——新目录先到、无视 abort 的旧请求后到——删掉守卫时目录被旧结果覆盖、面板消失且本次挂载内不再拉取。`web/src/lib` 在 fetch 返回后不复查 signal，守卫是唯一防线。新增 J12「the late answer of the aborted request does not replace the catalogue of the new client already shown」。
+- **下标兜底之后的方向键**：`move` 以兜底后的下标为起点；改成以存储的下标为起点时原用例测不出（原 J12 第一例是下标 2、新长度 2，两种算法结果相同，且按的是 Enter）。新增 J12「an arrow key moves from the first option of the shorter catalogue, not from the old highlight」（存储下标 3、新长度 2）。
+- **`Shift+Esc`**（已知残留 9）两个方向都没钉住。新增 J6「Shift+Esc closes the panel as Esc does」。
+
+fix 后：`npm test --workspace web` 86 文件 / 1795 例；`make lint`、`make typecheck`、`make anti-drift`（jscpd 178）、`bash scripts/size-guard.sh` 退出 0。评审另指出的事项：
+- 变异清单里 12b 与 19a 语义相同，独立变异是 46 个加本轮 3 个。
+- J3 的 `document.activeElement` 断言与 J10 的一样在 jsdom 下不判别。
+- 「三个新产品文件覆盖率 100%」是从覆盖率表省略满覆盖文件推出的，没有直接数字。
+- **整页的重新启用路径**（锁解除后面板重现且不追加调用）只有夹具版 J11 取证；**fork 锁 → 无面板**没有专门用例（与 running 共用 `composerDisabled` 同一个表达式）；**按住 Enter**（第一下选中，后续 repeat 落到既有的 `!event.repeat`）没有用例；**输入 `/` 时目录请求 401** 的页面级交接没有用例（与 `listSessions` 共用同一机制）。均按弱缺口记录，不在本轮补。
+
+本轮新增的已知残留（接上面的编号）：
+12. **触摸**：只有 Chromium 触摸仿真的观察；iOS Safari 上 tap 选项后输入框是否失焦、软键盘是否收起没有证据。#557 的 ui-walk 只有鼠标，也收不了这一条——需要真机。
+13. **真实输入法的事件时序**：J7 在单个合成事件上翻 `isComposing` / `keyCode 229`，测不到 compositionend 与随后 keydown 的先后；Playwright 驱动不了真实输入法，#557 同样收不了口。若某个输入法在上屏后给出 `keyCode 13` 且 `isComposing=false` 的 Enter：master 上是直接发送，本刀在面板可见时变成选中——同一暴露面，后果更轻。另外中文标点模式下 `/` 键通常产出 `、`，面板不会打开。
+14. **390px 加软键盘**：欢迎态下面板把输入框下推约 228px，软键盘打开时输入框是否仍在可视区没有观察。
+15. **「面板出现」没有读屏播报**：残留 1 说的是高亮项的播报；面板出现本身也不播报，读屏用户输入 `/t` 回车时 draft 被改成 `/todo ` 而不是发送。在面板节点里放一个 polite live region 不需要新 prop——留给后续 issue。
+16. **`client` 变化后高亮可能留在原下标**：只在越界时兜底到 0；规格只要求 draft 变化时重置。
+
+给 #557 的提示：option 的可访问名是 label、description、hint 的拼接，走查按子串或 `.chat-slash-label` 匹配，不能用 `exact: true`。
+
+父 change rebase（归档前）：`openspec/changes/s1c-session-metadata-presentation/specs/chat-web/spec.md` 仍写「`api.ts` 只加一行接线」「once per page mount」「pure page state」，与本刀合入后的主规格不一致（proposal 偏差 2、3、6、8）；父 delta 归档时是整段替换，须先按主规格重同步。主规格未改动的 Scenario「输入框键盘发送」对 `/todo` 这类 draft 不再无条件成立（残留 5），重同步时可加限定语。
 
 ## Seams under test
 - 纯函数直接调用（M 系列）。
