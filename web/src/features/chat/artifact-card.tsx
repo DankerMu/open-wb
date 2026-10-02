@@ -45,7 +45,9 @@ function useArtifactAction({ artifact, client, path, workspaceId }: ArtifactActi
   // A browser moves focus to `body` when the focused button is disabled by `busy`; once the request
   // ended, hand it back to the clicked button unless focus has gone elsewhere (issue 537).
   useEffect(() => {
-    if (!busy && document.activeElement === document.body) opener.current?.focus();
+    if (!busy && document.activeElement === document.body) {
+      opener.current?.focus({ preventScroll: true });
+    }
   }, [busy]);
 
   /** Clicks a temporary link; the URL is revoked a task later so the browser can still read it. */

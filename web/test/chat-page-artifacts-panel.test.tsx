@@ -192,13 +192,13 @@ describe("聚合 (P2, P3)", () => {
       ["+5-2zhangsan/proj/b.ts"],
     ],
     [
-      "the later message wins and a path keeps the place of its first appearance",
+      "(Q2) the later message wins and a path keeps the place of its first appearance",
       () =>
         twoTurns(
-          [toolStep(11, 0, "edit", [edit("x.md", 1, 0), edit("y.md", 1, 0)])],
+          [toolStep(11, 0, "edit", [edit("y.md", 1, 0), edit("x.md", 1, 0)])],
           [toolStep(21, 0, "edit", [edit("y.md", 4, 2), write("w.md")])],
         ),
-      ["+1zhangsan/proj/x.md", "+4-2zhangsan/proj/y.md", "写入zhangsan/proj/w.md"],
+      ["+4-2zhangsan/proj/y.md", "+1zhangsan/proj/x.md", "写入zhangsan/proj/w.md"],
     ],
     [
       "the changes of a running step are left out",
@@ -593,13 +593,14 @@ describe("空间不可解析 (P9)", () => {
 });
 
 describe("会话归属 (P10)", () => {
-  it("P10 routing to another session closes the drawer and routing back does not reopen it", async () => {
+  it("P10/Q4 routing to another session closes the drawer with focus back on 产物面板, and routing back does not reopen it", async () => {
     const snapshot = editedAndWritten();
     const page = await openSession(snapshot, listed, withOtherSession(snapshot));
     const { panel } = await openPanel();
 
     await routeToOtherSession(page.router);
 
+    await waitFor(() => expect(document.activeElement).toBe(panelButton()));
     expect(drawer()).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(panel.isConnected).toBe(false);

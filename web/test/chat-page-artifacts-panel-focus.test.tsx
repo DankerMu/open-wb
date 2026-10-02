@@ -10,32 +10,47 @@ import { describe, expect, it, vi } from "vitest";
 import {
   APP,
   action,
+  actions,
   CHART,
   CODE_TEXT,
   COPY_APP,
+  changedTurn,
   DOWNLOAD_CHART,
   HTML_TEXT,
   INDEX,
   OPEN_INDEX,
   openPreviewing,
   previewDialog,
+  previewRoute,
   spyDownloads,
   stubClipboard,
   toasts,
+  withOtherSession,
 } from "./chat-page-artifact-card-support.js";
 import {
   artifactsPanelFixture,
   drawer,
   expectPanelClosed,
   footClose,
+  NO_ARTIFACTS,
   openPanel,
   panelAction,
+  panelButton,
+  routeToOtherSession,
 } from "./chat-page-artifacts-panel-support.js";
-import { type Change, edit, quiesce, write } from "./chat-page-file-changes-support.js";
+import {
+  type Change,
+  edit,
+  listed,
+  openSession,
+  quiesce,
+  write,
+} from "./chat-page-file-changes-support.js";
 import { settleDeferredResponse } from "./chat-page-lifecycle-support.js";
 import { envelope } from "./chat-page-ownership-support.js";
 import { imagePreviewResponse } from "./files-fixture.js";
 import { deferredResponse, textPreviewResponse } from "./support.js";
+import { yieldMacrotask } from "./ui-support.js";
 
 const COPIED: [string, string] = ["success", "已复制到剪贴板"];
 
@@ -136,6 +151,38 @@ describe("焦点归还 (P13)", () => {
     expect(toasts()).toEqual([]);
   });
 
+  it("Q1 the hand-back focuses the clicked button without scrolling the transcript to it", async () => {
+    const pending = await openPending(write(CHART));
+    const clicks = spyDownloads(blobs.revokeObjectURL);
+    const download = action(DOWNLOAD_CHART);
+    await pressAndLoseFocus(download);
+    const focus = vi.spyOn(HTMLElement.prototype, "focus");
+
+    await settleDeferredResponse(pending, imagePreviewResponse());
+
+    await waitFor(() => expect(clicks).toHaveLength(1));
+    await focusOn(download);
+    const onDownload = focus.mock.calls.filter((_call, at) => focus.mock.contexts[at] === download);
+    expect(onDownload).toEqual([[{ preventScroll: true }]]);
+  });
+
+  it("Q3 a failed preview started from the html card's foot button hands focus back to that button, not the head one", async () => {
+    const pending = await openPending(write(INDEX));
+    const [head, foot] = actions(OPEN_INDEX);
+    if (!head || !foot) throw new Error("html 产物卡应有卡头与卡脚两个按钮");
+    expect(foot.closest(".artifact-foot")).not.toBeNull();
+    await pressAndLoseFocus(foot);
+    expect(head.disabled).toBe(true);
+
+    await settleDeferredResponse(pending, envelope(404, "not_found", "文件不存在或已被删除"));
+
+    await waitFor(() => expect(toasts()).toEqual([["error", "文件不存在或已被删除"]]));
+    await focusOn(foot);
+    expect(document.activeElement).not.toBe(head);
+    expect(head.disabled).toBe(false);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("P13 an html row leaves focus inside its preview dialog and gets it back when the preview closes", async () => {
     const pending = await openPending(write(INDEX));
     const { panel } = await openPanel();
@@ -155,5 +202,36 @@ describe("焦点归还 (P13)", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "index.html" })).toBeNull());
     await focusOn(open);
     expect(drawer()).toBe(panel);
+  });
+});
+
+describe("外层先离场 (Q5)", () => {
+  it("Q5 routing away while a row's preview covers the drawer leaves no dialog, no inert page and a working 产物面板 button", async () => {
+    const snapshot = changedTurn([write(INDEX)]);
+    const page = await openSession(snapshot, listed, {
+      ...withOtherSession(snapshot),
+      [previewRoute(INDEX)]: () => textPreviewResponse(HTML_TEXT),
+    });
+    const { panel } = await openPanel();
+    fireEvent.click(panelAction(panel, OPEN_INDEX));
+    const preview = await previewDialog();
+    await yieldMacrotask();
+    expect(screen.getAllByRole("dialog", { hidden: true })).toEqual([panel, preview]);
+    expect(document.body.style.pointerEvents).toBe("none");
+    expect(panelButton().closest('[aria-hidden="true"]')).not.toBeNull();
+
+    await routeToOtherSession(page.router);
+
+    expect(screen.queryAllByRole("dialog", { hidden: true })).toEqual([]);
+    expect(document.querySelector("iframe")).toBeNull();
+    expect(document.body.style.pointerEvents).not.toBe("none");
+    expect(panelButton().closest('[aria-hidden="true"]')).toBeNull();
+    const button = within(screen.getByRole("banner")).getByRole("button", { name: "产物面板" });
+
+    fireEvent.click(button);
+    await quiesce();
+
+    expect(toasts()).toEqual([NO_ARTIFACTS]);
+    expect(screen.queryAllByRole("dialog", { hidden: true })).toEqual([]);
   });
 });
