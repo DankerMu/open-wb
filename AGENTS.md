@@ -86,7 +86,7 @@ make setup    # npm install + uv sync + 挂 git hooks
 | 反漂移 | knip + jscpd + 守卫 | `make anti-drift` | 退出码 0 |
 | 全链 | 以上全部 | `make check` | 退出码 0 |
 | 守卫自身 | 注入违例自证 | `make test-guardrails` | 全 PASS |
-| HTTP smoke | Hurl（调用方拥有已运行服务） | `make smoke` | 退出码 0；public.hurl、auth.hurl、chat.hurl、files.hurl 四文件真实 HTTP 断言全绿 |
+| HTTP smoke | Hurl（调用方拥有已运行服务） | `make smoke` | 退出码 0；public.hurl、auth.hurl、chat.hurl、files.hurl、session-meta.hurl 五文件真实 HTTP 断言全绿 |
 | UI 走查 | Playwright Chromium（调用方拥有已运行服务） | `make ui-walk` | 退出码 0；真实浏览器走查与 error oracle 全绿 |
 | omp-fetch | 官方 omp v18.0.10 二进制供给（SHA 校验） | `make omp-fetch` | 退出码 0；官方 v18.0.10 版本输出与 SHA256 校验 |
 | 手动真实上游冒烟 | Hurl（调用方拥有已运行服务与真实上游） | `make smoke-live` | 退出码 0；非空 done 回复 |
