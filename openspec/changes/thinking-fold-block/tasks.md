@@ -10,7 +10,7 @@
 |---|---|---|
 | Public API / CLI / script entry | yes | 新消费一类 SSE 事件，须走既有游标/队列/恢复路径 → T1、T2 |
 | Schema / columns / units / field names | yes | payload 严格键集 `{messageId, delta}`；视图新增必有键 `thinking` → T2、T4、既有套件的整对象断言 |
-| Concurrency / shared state / ordering | yes | 游标过滤与去重；开合状态与事件到达、重同步的先后 → T1、T6、T8、T9 |
+| Concurrency / shared state / ordering | yes | 游标过滤与去重；用户的手动开合与事件到达、重同步的先后 → T1、T6、T8、T9 |
 | Error handling / rollback / partial outputs | yes | 非法 payload → 完整快照重同步、不交付 → T2 |
 | Legacy compatibility / examples | yes | `复制`、审批条、步骤卡、已停止徽章的既有行为与次序 → T6、T10、既有套件 |
 | Auth / permissions / secrets | no | 不涉及 |
@@ -27,4 +27,4 @@
 - [ ] RED 集合 = T1–T12 中依赖新行为的用例；实现前后各跑一次并记录命令与结果。
 - [ ] `stream.ts` 773 → ≤800；`page.tsx` 688 不变；`chat.css` 不动。PR 记录这些数。
 - [ ] `npm test --workspace web`、`make lint`、`make typecheck`、`make anti-drift`（knip 零新增、jscpd 零新增）、`bash scripts/size-guard.sh` 退出 0；`openspec validate thinking-fold-block --strict --no-interactive` 通过。
-- [ ] 一次性真实浏览器观察（Chromium）：受控 `<details>` 的点击开合与状态迁移，结果写进 PR。
+- [ ] 页面级用例点 summary 用真实点击（jsdom 29 同步翻转 `open`）；不 fake `setTimeout`（`chat-approval-bar.test.tsx:170` 只 fake Date/setInterval 的写法可照搬）。

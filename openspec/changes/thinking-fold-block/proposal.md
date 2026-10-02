@@ -6,7 +6,7 @@
 ## What Changes
 - 新建 `web/src/features/chat/stream-thinking.ts`：`thinking.delta` 严格解码与消息级纯归约（追加到 `thinking`，`null` 视为空串）。
 - `stream.ts`：消息视图加 `thinking: string | null`（快照原值；`turn.start` 与补建的 assistant 为 `null`）；`ChatEvent` 联合、`DATA_EVENTS`、`decodeEvent`、`applyChatEvent` 各加 `thinking.delta` 一支，接到新模块。游标过滤、队列、恢复不动。
-- 新建 `web/src/features/chat/thinking-block.tsx`：`<details class="thinking-block">`，summary `深度思考过程` + 装饰性 `chevron-right`，主体纯文本。开合：running 展开、终态收起、两次状态迁移之间保留用户的手动选择。
+- 新建 `web/src/features/chat/thinking-block.tsx`：`<details class="thinking-block">`，summary `深度思考过程` + 装饰性 `chevron-right`，主体纯文本。开合：running 展开、终态收起、两次状态迁移之间保留用户的手动选择（无状态 `<details open={running}>`）。
 - `conversation-view.tsx`：助手块最前（审批条之前）渲染折叠块；`thinking` 为 `null` 或空串不渲染。
 - `messages.css`：折叠块样式（demo:539-545）。`chat.css` 不动（797/800）。
 - 新建 `web/test/chat-thinking.test.tsx`。
@@ -29,7 +29,7 @@
 
 ## 与 issue / 父 delta 的偏差（父 change 归档前 rebase 适用）
 1. **既有测试有改动**：issue 写「既有测试零 diff」「既有测试文件不增长」。消息视图加了必有键 `thinking` 之后，既有的整对象断言（`toEqual`/`toStrictEqual` 的视图字面量）都少一个键：`web/test/chat-stream.test.ts`、`chat-stream-connection.test.ts`、`chat-stream-stopped.test.ts`、`chat-stream-approvals.test.ts` 与 `chat-stream-support.ts` 的 `userView`。这些字面量各加一行 `thinking: null`，别的不动（`approvals` 落地时 `userView` 也是这样加的）。不采用「值为 null 时省略该键」来保住零 diff：父文写的是 `thinking: string|null`。
-2. **视图中不存在的 `messageId`：补建而非忽略**。issue 的 In Scope 与验收写「未知消息忽略并返回同一引用」；父 chat-web delta 写「不存在的 assistant 按消息事件补建」，父 Scenario 里「返回同一引用」说的是指向不存在步骤的 `files.changed`。按父规格走，与 `text.delta` 一致：忽略会让随后的正文事件补建出一条没有思考的消息，实时视图就和重载快照不一样了。指向 user 消息的 `thinking.delta` 返回同一引用（既有「不得重写 user 消息」）。上一条助手已终态时到达的未知回合事件仍由页面的 `isUnknownTurn` 重同步（`stream.ts:262-275`，读 `event.data.messageId`，无需改）。
+2. **视图中不存在的 `messageId`：补建而非忽略**。issue 的 In Scope 与验收写「未知消息忽略并返回同一引用」；父 chat-web delta 写「不存在的 assistant 按消息事件补建」，父 Scenario 里「返回同一引用」说的是指向不存在步骤的 `files.changed`。按父规格走，与 `text.delta` 一致：忽略会让随后的正文事件补建出一条没有思考的消息，实时视图就和重载快照不一样了。指向 user 消息的 `thinking.delta` 返回同一引用（既有「不得重写 user 消息」）。上一条助手已终态时到达的未知回合事件仍由页面的 `isUnknownTurn` 重同步（定义 `stream.ts:280-292`、调用点 `page.tsx:262-275`，读 `event.data.messageId`，无需改）。
 3. **`stream.ts` 的改动不止 `DATA_EVENTS`**：issue 写「`stream.ts` 只在 `DATA_EVENTS` 增 `thinking.delta` 并接线」。视图类型、`chatStateFromSnapshot`、两处复位字面量、`ChatEvent` 联合、`decodeEvent` 与 `applyChatEvent` 各一处也必须动（接线的全部落点）；解码与追加的逻辑本身在新模块。
 4. **只并入父 delta 的 thinking 部分**：归约器是九类不是十类（`files.changed` 归 7.5a）；步骤视图不加 `changes`；Assistant block order 与 Scenario「助手块次序」不含文件变更卡与产物卡；父 Scenario「思考与文件变更归约」「思考与文件变更事件严格解码」在子 delta 里叫「思考归约」「思考事件严格解码」，7.5a 再并入文件变更部分并改回父名。
 5. **thinking-fold「深度思考折叠块呈现」去掉「不参与对话内搜索（见 conversation-search）」一句**：主规格还没有 conversation-search，这句由 7.7 加回。
