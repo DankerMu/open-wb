@@ -2,7 +2,8 @@
 // per project against the real stack — compiled app, real omp, controlled upstream driven by the
 // prompt markers WORKBUDDY_THINK / WORKBUDDY_WRITE. Nothing is fulfilled, faked or slept on.
 // Step 10 sends two more turns in the same session: `/todo` (answered by omp itself) and an escaped
-// `/session …` (answered by the model; no tool round, the session already holds a tool result).
+// `/session WORKBUDDY_THINK …` (answered by the model: its `thinking` is the marker's reasoning, so
+// the escaped text reached the upstream; no tool round, the session already holds a tool result).
 // Step 11 deletes the session through the UI; `finally` deletes it again over REST (404 by then,
 // 204 when a step failed first). The journey ends with a UI logout, which the error oracle needs
 // for its second expected /api/auth/me 401.
@@ -401,6 +402,15 @@ function menuItem(page: Page, name: string): Locator {
   return page.getByRole("menuitem", { name, exact: true });
 }
 
+// mobile 上 `inspectSidebar` 回调结束后紧接着按 `Escape` 关覆盖层。菜单、对话框关闭后 Radix 在下一个
+// 宏任务才把焦点还回来：按键早于它时目标是 `body`，而 Toast 在场时覆盖层只靠目标在自身子树内的兜底
+// 关闭，于是关不掉。回调的最后一句等焦点回到覆盖层内（它自己或其后代）；desktop 没有覆盖层。
+async function expectFocusInNavOverlay(page: Page, project: WalkProject): Promise<void> {
+  if (project === "desktop-light") return;
+  const overlay = page.getByRole("dialog", { name: "导航", exact: true });
+  await expect(overlay.and(page.locator(":focus-within"))).toHaveCount(1);
+}
+
 async function step6Sidebar(page: Page, project: WalkProject): Promise<void> {
   await inspectSidebar(page, project, async (sidebar) => {
     const { list, pinned, tasks, spaces } = sections(sidebar);
@@ -422,6 +432,7 @@ async function step7Pin(page: Page, project: WalkProject): Promise<void> {
     await expect(menuItem(page, "置顶任务")).toHaveCount(0);
     await page.keyboard.press("Escape");
     await expect(page.getByRole("menu")).toHaveCount(0);
+    await expectFocusInNavOverlay(page, project);
   });
 }
 
@@ -451,6 +462,7 @@ async function step8Rename(
     await dialog.getByRole("button", { name: "保存", exact: true }).click();
     await expect(dialog).toHaveCount(0);
     await expectPinnedAs(sidebar);
+    await expectFocusInNavOverlay(page, project);
   });
   await expect(topbarTitle).toBeVisible();
 
@@ -554,8 +566,9 @@ async function step10Slash(page: Page, sessionId: string): Promise<void> {
   const labels = listbox.locator(".chat-slash-label");
   const user = page.getByRole("article", { name: "用户" });
   const assistant = page.getByRole("article", { name: "助手" });
-  // `session` 是白名单外的真 omp 内建：不转义会被 omp 当命令执行。
-  const escaped = `/session ${randomUUID()}`;
+  // `session` 是白名单外的真 omp 内建：不转义会被 omp 当命令执行。固定回复与输入无关，转义后的文本
+  // 到了模型由标记证明：受控上游只对最新用户消息里的 WORKBUDDY_THINK 给出那段思考。
+  const escaped = `/session WORKBUDDY_THINK ${randomUUID()}`;
 
   await composer.fill("/");
   await expect(listbox).toBeVisible();
@@ -594,10 +607,12 @@ async function step10Slash(page: Page, sessionId: string): Promise<void> {
   expect(todoReply?.content).toBe(TODO_REPLY);
   expect(todoReply?.steps).toEqual([]);
   expect(todoReply?.status).toBe("done");
+  expect(todoReply?.thinking).toBeNull();
   expect(escapedUser?.content).toBe(escaped);
   expect(escapedReply?.content).toBe(EXPECTED_REPLY);
   expect(escapedReply?.steps).toEqual([]);
   expect(escapedReply?.status).toBe("done");
+  expect(escapedReply?.thinking).toBe(EXPECTED_THINKING);
 }
 
 // 确认框渲染在页面层。204 之后：条目移除、Toast、URL 去掉 `session`、回到欢迎态。Toast 按类名与
@@ -623,6 +638,7 @@ async function step11Delete(
     await expect(list).toBeVisible();
     await expect(list.locator(CURRENT_SESSION)).toHaveCount(0);
     await expect(list.getByRole("button", { name: title, exact: true })).toHaveCount(0);
+    await expectFocusInNavOverlay(page, project);
   });
   await expect.poll(() => new URL(page.url()).searchParams.get("session")).toBeNull();
   await expect(welcomeHeading(page)).toBeVisible();

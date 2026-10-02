@@ -4,7 +4,8 @@
 # → (3) PATCH title/scene/pinned、多余键 400、列表反映、取消置顶
 # → (4) WORKBUDDY_THINK prompt → 作答唯一 bash 审批 → 仅 messages GET 有界重试至 done
 # → (5) thinking 逐字、bash 步骤 done、标题仍为 PATCH 所设
-# → (6) GET /api/commands 恰两条内建 → /todo 回合：omp 原文、无步骤 → /session 冒烟 回合：正文按原样落库、固定回复、无步骤
+# → (6) GET /api/commands 恰两条内建 → /todo 回合：omp 原文、无步骤、无 thinking
+#     → /session WORKBUDDY_THINK 冒烟 回合：正文按原样落库、固定回复、thinking 逐字（转义文本到了模型）、无步骤
 # → (7) DELETE 204 + session.delete 审计 → messages 404 → 列表不含 → 再 DELETE 404
 # → (8) lisi 绑定他人空间 / PATCH / DELETE 均 404 且 lisi 的会话数不变 → zhangsan 复核并删除无绑定会话 → 登出。
 # 只由 make smoke 运行（smoke-live 不跑本文件），不使用 skip_turn_control。
@@ -221,7 +222,7 @@ jsonpath "$.assistantMessageId" exists
 
 # (6) 轮询 messages：仅 GET 有界 retry（约 20s；内建命令不经模型、没有审批），直到 /todo 的助手与 session 均为 done。
 # 正文逐字为真 omp 的 command_output；steps、approvals 为空数组（按 id 过滤出唯一一条消息后，count 数的是该数组的元素，
-# 消息或字段缺失时不通过）；用户正文 /todo；标题不被本回合改动。
+# 消息或字段缺失时不通过）；thinking 为 null（没有经过模型）；用户正文 /todo；标题不被本回合改动。
 GET {{base_url}}/api/sessions/{{session_id}}/messages
 [Options]
 retry: 40
@@ -232,14 +233,16 @@ jsonpath "$.messages[?(@.id=={{todo_assistant_id}})].status" == "done"
 jsonpath "$.messages[?(@.id=={{todo_assistant_id}})].content" == "No todos. Use /todo append <task> to start one."
 jsonpath "$.messages[?(@.id=={{todo_assistant_id}})].steps" count == 0
 jsonpath "$.messages[?(@.id=={{todo_assistant_id}})].approvals" count == 0
+jsonpath "$.messages[?(@.id=={{todo_assistant_id}})].thinking" == null
 jsonpath "$.messages[?(@.id=={{todo_user_id}})].content" == "/todo"
 jsonpath "$.session.status" == "done"
 jsonpath "$.session.title" == "冒烟会话"
 
-# (6) 白名单外的 /session（omp 的真内建，不转义会被 omp 当命令执行）：exact 202；捕获用户与助手消息 id。不重试本 POST。
+# (6) 白名单外的 /session（omp 的真内建，不转义会被 omp 当命令执行），文本里带 WORKBUDDY_THINK 标记：exact 202；
+# 捕获用户与助手消息 id。不重试本 POST。
 POST {{base_url}}/api/sessions/{{session_id}}/prompt
 Content-Type: application/json
-{"message":"/session 冒烟"}
+{"message":"/session WORKBUDDY_THINK 冒烟"}
 HTTP 202
 [Captures]
 session_cmd_assistant_id: jsonpath "$.assistantMessageId"
@@ -250,16 +253,18 @@ jsonpath "$.assistantMessageId" exists
 
 # (6) 轮询 messages：仅 GET 有界 retry（约 20s，须 < 60s 自动允许：出现待审批即失败），直到该助手与 session 均为 done。
 # 用户正文按所发文本落库（无前导空格）；助手正文匹配 content_pattern（由模型作答，而非 omp 的 /session usage 文本）；
-# 会话里已有 (4) 的工具结果，受控上游不再发工具轮：steps、approvals 为空数组。
+# 固定回复与输入无关，thinking 才是内容见证：受控上游只对最新用户消息里的 WORKBUDDY_THINK 给出这段思考，
+# 逐字相等即转义后的文本连同标记到了模型。会话里已有 (4) 的工具结果，受控上游不再发工具轮：steps、approvals 为空数组。
 GET {{base_url}}/api/sessions/{{session_id}}/messages
 [Options]
 retry: 40
 retry-interval: 500ms
 HTTP 200
 [Asserts]
-jsonpath "$.messages[?(@.id=={{session_cmd_user_id}})].content" == "/session 冒烟"
+jsonpath "$.messages[?(@.id=={{session_cmd_user_id}})].content" == "/session WORKBUDDY_THINK 冒烟"
 jsonpath "$.messages[?(@.id=={{session_cmd_assistant_id}})].status" == "done"
 jsonpath "$.messages[?(@.id=={{session_cmd_assistant_id}})].content" matches "{{content_pattern}}"
+jsonpath "$.messages[?(@.id=={{session_cmd_assistant_id}})].thinking" == "先读需求，再列要点，最后作答。"
 jsonpath "$.messages[?(@.id=={{session_cmd_assistant_id}})].steps" count == 0
 jsonpath "$.messages[?(@.id=={{session_cmd_assistant_id}})].approvals" count == 0
 jsonpath "$.session.status" == "done"
