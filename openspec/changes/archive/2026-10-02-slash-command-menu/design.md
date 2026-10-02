@@ -194,7 +194,7 @@ RED：三个新测试文件在实现前全部失败（模块不存在 / 面板�
 11. **目录里重名的条目**：解析不做去重（服务端保证内建名与 `skill:<名>` 不重复）；重名时 React 只给 key 告警，第二条仍可点击选中。
 
 ## 交付记录（实现后补记）
-- **abort effect 读 `client`**：只依赖 `[client]`、清理函数只碰 ref 的 effect 过不了 Biome 的 `useExhaustiveDependencies`，所以清理函数里比对 `call.current?.client === client` 再 abort。拉取 effect 依赖 `[client, wanted]`、无清理；调用记录在成功后保留（后续上升沿不再拉取），失败时只在记录仍是自己时清掉——被 abort 的旧请求迟到的 reject 不会清掉新 client 的在途记录（J12 第三例）。
+- **abort effect 读 `client`**：只依赖 `[client]`、清理函数只碰 ref 的 effect 过不了 Biome 的 `useExhaustiveDependencies`，所以清理函数里比对 `call.current?.client === client` 再 abort。拉取 effect 依赖 `[client, wanted]`、无清理；调用记录在成功后保留（后续上升沿不再拉取），失败时只在记录仍是自己时清掉——被 abort 的旧请求迟到的 reject 不会清掉新 client 的在途记录（用例「J12 an aborted request that fails, as fetch does, leaves the request of the new client in flight」）。
 - **超出 Required evidence 的用例**：整页 J11（切到 running 会话后面板消失、draft 保留——夹具版测不出 `page.tsx` 把 `enabled` 接错）、一个 StrictMode 用例、`Ctrl/Alt/Meta` 不拦截的用例。
 - **测试 support**：`web/test/chat-page-slash-support.tsx`（页面测试不拆是 857 行；fix pass 1 之后测试 796 行、support 328 行，J11 与 J13 的夹具搬进了 support）；目录夹具由它导出，`api-commands.test.ts` 与 `slash-menu-state.test.ts` 也从它取，避免三份目录字面量变成 jscpd 克隆。
 - **行数**（`wc -l`）：`page.tsx` 697 → 700、`api.ts` 722 → 725、`conversation-view.tsx` 316 → 322、`composer.tsx` 128 → 136、`messages.css` 744 → 789、`chat.css` 797 零 diff；新文件 `api-commands.ts` 68、`slash-menu-state.ts` 55、`slash-menu.tsx` 169；测试 154 / 147 / 775 + support 296。（Context 里的 798 与 745 是 `split("\n").length` 口径，比 `wc -l` 多 1。）
@@ -230,6 +230,8 @@ fix 后：`npm test --workspace web` 86 文件 / 1795 例；`make lint`、`make 
 14. **390px 加软键盘**：欢迎态下面板把输入框下推约 228px，软键盘打开时输入框是否仍在可视区没有观察。
 15. **「面板出现」没有读屏播报**：残留 1 说的是高亮项的播报；面板出现本身也不播报，读屏用户输入 `/t` 回车时 draft 被改成 `/todo ` 而不是发送。在面板节点里放一个 polite live region 不需要新 prop——留给后续 issue。
 16. **`client` 变化后高亮可能留在原下标**：只在越界时兜底到 0；规格只要求 draft 变化时重置。
+
+第二轮复审（correctness + test-evidence 一席，head `3006716`）：clean，无 P0/P1；PR #744 该 head 的 CI 九项检查全部通过（run 37034049467），合并提交 `26f2f9f`。
 
 给 #557 的提示：option 的可访问名是 label、description、hint 的拼接，走查按子串或 `.chat-slash-label` 匹配，不能用 `exact: true`。
 
