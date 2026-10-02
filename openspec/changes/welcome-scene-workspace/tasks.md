@@ -14,7 +14,7 @@
 | Error handling / rollback / partial outputs | yes | 空间列表读取中/失败仍可选 `未选择`、创建失败后选择保留 → W7、W14 |
 | Legacy compatibility / examples | yes | 日常办公清单与既有静态内容、会话页 composer 结构、侧栏分区、首屏约束 → W1、W11、既有套件、CI ui-walk、一次性真实浏览器观察 |
 | Auth / permissions / secrets | no | 只读本账号既有列表；权限开关不渲染（W6 钉住） |
-| File IO / path safety / overwrite | no | 只显示逻辑路径 `<account>/<dir>`，不渲染根路径（W5） |
+| File IO / path safety / overwrite | no | 只显示逻辑路径 `<account>/<dir>`，不渲染根路径（W5 以可辨识的 `root` 钉住） |
 | Config / project setup | no | 无 |
 | Resource limits / large input / discovery | no | 空间数量由服务端配额约束；弹层内列表可滚动 |
 | Release / packaging / dependency compatibility | no | 不加依赖；图标均已注册 |

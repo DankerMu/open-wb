@@ -25,11 +25,13 @@ Evidence floor: 新建 `web/test/chat-page-welcome-scene.test.tsx` 覆盖 design
 
 ## Capabilities
 - ADDED `session-sidebar`「欢迎页场景胶囊与场景化快捷任务」「composer footer 工作空间选择」。
+- MODIFIED `session-sidebar`「分区侧栏」：工作空间读取失败一句（偏差 9）。
 - MODIFIED `chat-web`「会话页」：Welcome state 段（胶囊、按场景的清单、`≤760px` 单行滚动、锁定规则含胶囊）、Composer card 段（欢迎态 footer）、Scenario「欢迎态与静态引导」的 THEN。
 
 ## Non-goals
 - `POST /api/sessions` body 的服务端校验与绑定（4.1）；`createSession` 签名（5.1）；工作空间列表的拉取时机（7.1，仍只随会话列表读取）。
 - 会话内切换场景入口、侧栏/会话页场景标签（S1d，不渲染）；权限开关（S3b）；`新建工作空间`、`挂载目录到当前空间`。
+- `docs/acceptance/demo-parity-checklist.md` 的 CH-03、CH-13 两行合入后过期，本刀不改 docs，只在 PR 报告。
 - ui-walk 场景与空间步骤（8.2a）；`api-sessions.ts`、`session-contract.ts`、`stream.ts`、`web/src/ui/**`、server 不动。
 
 ## 与 issue / 父 delta 的偏差（父 change 归档前 rebase 适用）
@@ -40,6 +42,8 @@ Evidence floor: 新建 `web/test/chat-page-welcome-scene.test.tsx` 覆盖 design
 5. **状态的生命周期写明**：父文「离开欢迎态再回来保留，刷新复位」；子 delta 写成「选中会话后再回到欢迎态保留；刷新或离开会话页复位」（状态在 `ChatPage`，路由离开即卸载；同 7.1 筛选状态的先例）。
 6. 子 delta 另加父文未写的可观察行为：切换提示为 info Toast；快捷任务图标的可用键集合；查询去首尾空白、每次打开弹层查询为空；打开弹层不另发请求；读取失败以 `role="alert"` 显示；composer 锁定时已打开的弹层关闭；未选空间时 body 不含 `workspaceId` 键。
 7. chat-web 的 Composer card 段只并入 footer 一句与「permission part」的改写；父文同段的 Slash candidates、Scenario「顶栏入口」「斜杠命令候选」等归后续刀，不并入。
+8. **跨 feature 深导入 `logicalPath`**：`composer-footer.tsx` 从 `../files/file-meta.js` 导入既有 helper。这是 chat 第一处不经 `index.js` 的跨 feature 导入（现有的都走 `../auth/index.js`）；没有 lint 规则禁止，取它是为了逻辑路径的格式只有一处定义。
+9. **session-sidebar「分区侧栏」改一句**：主规格「工作空间读取失败只影响归组」在 footer 出现后不再精确，改为「在列表区只影响归组…；欢迎态 composer footer 对读取中与读取失败的呈现见「composer footer 工作空间选择」」。
 
 ## Impact
 - web：三个新产品文件、`welcome-content.ts`/`welcome.tsx`/`composer.tsx`/`conversation-view.tsx`/`workspace-list.ts`/`page.tsx`/`chat.css` 改动、一个新测试文件、一处既有断言删除。server、shell、`web/src/ui/**`、`web/src/lib/**`、`web/e2e/**` 无改动。
