@@ -2,7 +2,7 @@
 
 ## 3. server — files.changed 归属判定、落库后发布（父 tasks 3.4）
 
-- [ ] 3.4 新建 `file-changes-ownership.ts`（`ownedChanges`：绝对原样/相对拼空间根 → realpath（确实不存在则父目录 realpath + 文件名，其余失败丢弃）→ 严格位于空间根 realpath + 分隔符之内 → 相对空间根 `/` 分隔路径，UTF-8 >1024 字节丢弃 → 同路径合并（计数求和、位置取首次）→ 超 50 项只留前 50）+ 新建 `store-changes.ts` 的 `setStepChanges` 并挂到 `SessionStore` + `turn-control.ts` `persistEvent` 的 `files.changed` 分支（未绑定或未登记的调用 → 丢弃；无幸存项 → `undefined`；有则 `setStepChanges` 成功后返回以数字步骤 id 发布的事件）+ `Slot.workspaceRoot` 与 `supervisor.ts` 两行接线。验证：新建 `server/test/file-changes-ownership.test.ts`（O1–O13）、`server/test/session-file-changes.test.ts`（F1–F5）、`server/test/persist-files-changed.test.ts`（P1–P6）；既有测试只改 proposal「偏差」3 的一处
+- [ ] 3.4 新建 `file-changes-ownership.ts`（`ownedChanges`：空间根须为规范路径 → 候选以 `path.resolve` 拼根并词法规范化 → realpath（确实不存在则父目录 realpath + 文件名，其余失败丢弃）→ `ownedPath`：严格位于空间根 + 分隔符之内、相对空间根 `/` 分隔路径、UTF-8 >1024 字节丢弃 → 同路径合并（计数求和、位置取首次）→ 超 50 项只留前 50）+ 新建 `store-changes.ts` 的 `setStepChanges` 并挂到 `SessionStore` + `turn-control.ts` `persistEvent` 的 `files.changed` 分支（未绑定或未登记的调用 → 丢弃；无幸存项 → `undefined`；有则 `setStepChanges` 成功后返回以数字步骤 id 发布的事件）+ `Slot.workspaceRoot` 与 `supervisor.ts` 两行接线。验证：新建 `server/test/file-changes-ownership.test.ts`（O1–O13）、`server/test/session-file-changes.test.ts`（F1–F5）、`server/test/persist-files-changed.test.ts`（P1–P6）；既有测试只改 proposal「偏差」3 的一处
 
 ## Risk packs
 
