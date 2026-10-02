@@ -4,7 +4,7 @@
 Defines HTTP smoke and browser walk-through surfaces plus their CI/control-plane wiring, shared test-harness invariants, and guard/oracle contracts.
 ## Requirements
 ### Requirement: HTTP smoke（hurl）
-`smoke/` 下 SHALL 有彼此独立、无需跨文件 cookie 或文件顺序的 Hurl 用例：`public.hurl` 覆盖 healthz、info、默认守卫 401、显式伪造 session id 401 与深链 fallback；`auth.hurl` 覆盖登录成功/凭证错误/停用（逐字断言 `$.error.message`）、已认证 API 404、登出与登出后 401；`chat.hurl` 独立覆盖登录、创建201、prompt202、完成正文与步骤、他账号404及代理无 bearer401。`make smoke` SHALL 只对已运行服务执行public/auth/chat/files 四个 top-level 文件：唯一输入 `SMOKE_BASE_URL` 缺省为 `http://127.0.0.1:3000`，并作为 `base_url` 传给单 job、全局 retry0 的 test-mode Hurl（仅 messages GET 允许有界 per-entry retry）；目标不得 build/start/stop 服务或安装工具。Hurl SHALL 仅从 caller PATH 发现并在只含 PATH 的 clean child environment 中运行，不能继承 ambient Hurl option/variable、credential、proxy 或 config/home state。深链 exact-byte 合同只在 caller 以 `STATIC_ROOT=<repo>/smoke/fixtures/static` 启动服务时成立，不以 default `make dev`/`web/dist` 为绿路径。本机缺 Hurl 时目标 SHALL 在任何请求前非零退出并打印命名 `hurl` 的官方安装指引。`make smoke` SHALL 传入 `content_pattern=^你好，这是 WorkBuddy 的第一条流式回复。$` 与 `min_bash_steps=1`；手动 smoke-live 保持其既有形状档契约不变。
+`smoke/` 下 SHALL 有彼此独立、无需跨文件 cookie 或文件顺序的 Hurl 用例：`public.hurl` 覆盖 healthz、info、默认守卫 401、显式伪造 session id 401 与深链 fallback；`auth.hurl` 覆盖登录成功/凭证错误/停用（逐字断言 `$.error.message`）、已认证 API 404、登出与登出后 401；`chat.hurl` 独立覆盖登录、创建201、prompt202、完成正文与步骤、他账号404及代理无 bearer401。`make smoke` SHALL 只对已运行服务执行public/auth/chat/files/session-meta 五个 top-level 文件：唯一输入 `SMOKE_BASE_URL` 缺省为 `http://127.0.0.1:3000`，并作为 `base_url` 传给单 job、全局 retry0 的 test-mode Hurl（仅 messages GET 允许有界 per-entry retry）；目标不得 build/start/stop 服务或安装工具。Hurl SHALL 仅从 caller PATH 发现并在只含 PATH 的 clean child environment 中运行，不能继承 ambient Hurl option/variable、credential、proxy 或 config/home state。深链 exact-byte 合同只在 caller 以 `STATIC_ROOT=<repo>/smoke/fixtures/static` 启动服务时成立，不以 default `make dev`/`web/dist` 为绿路径。本机缺 Hurl 时目标 SHALL 在任何请求前非零退出并打印命名 `hurl` 的官方安装指引。`make smoke` SHALL 传入 `content_pattern=^你好，这是 WorkBuddy 的第一条流式回复。$` 与 `min_bash_steps=1`；手动 smoke-live 保持其既有形状档契约不变。
 
 #### Scenario: 独立公开面与深链用例全绿
 - **GIVEN** #7 production entry 以临时 DB、free loopback port 和包含 tracked `index.html` 的 smoke fixture static root 运行
@@ -25,12 +25,12 @@ Defines HTTP smoke and browser walk-through surfaces plus their CI/control-plane
 - **THEN** `make smoke` 非零；缺工具路径在任何请求前打印 `错误：未找到 hurl；安装说明：https://hurl.dev/docs/installation.html`，不得 silent skip、下载工具或接管服务/DB/temp cleanup；base URL与PATH完整值只能作为 inert data，不能执行副作用或吞掉 Hurl nonzero；Hurl child只含PATH，assertions保持启用、全局retry固定0、请求不带ambient Authorization/proxy/config
 
 #### Scenario: Real runtime chat and isolation
-- **WHEN** real pinned omp v18.0.10 and the controlled upstream serve the four-file smoke twice
+- **WHEN** real pinned omp v18.0.10 and the controlled upstream serve the five-file smoke twice
 - **THEN** both runs pass; captured assistant is done with exact configured text, at least one bash step and no non-done step, session is done; another account gets404 for the session and bearer-free model POST gets401; chat.hurl needs no earlier file cookie and leaves no live authentication session
 
 #### Scenario: 文件烟测独立且可重复
 - WHEN tracked sandbox fixtures are copied by the caller and the same running service/DB/sandbox receives two complete make smoke runs followed by standalone files.hurl with empty cookie state
-- THEN files-harness assertions execute on every run, all four top-level files pass, no service is restarted/reseeded by make, and no live authentication sessions remain
+- THEN files-harness assertions execute on every run, all five top-level files pass, no service is restarted/reseeded by make, and no live authentication sessions remain
 
 ### Requirement: UI 走查（Playwright）
 `make ui-walk` SHALL 只消费由 caller 启动、可从 `UI_WALK_BASE_URL`（缺省 `http://127.0.0.1:3000`）访问的真实服务；目标不得 build、start、stop、安装浏览器或拥有 DB/temp cleanup。目标 SHALL 以两个 Playwright project（`desktop-light`：viewport 1440×900、`colorScheme: light`；`mobile-dark`：viewport 390×844、`colorScheme: dark`；各自全新 Chromium context，`workers: 1` 串行，共用 caller 的同一服务与沙箱，各自生成独立 gate UUID）执行同一条生产路径；每个 project 在每一路由断言 `document.documentElement.scrollWidth <= window.innerWidth` 且主区可见；布局断言按 project 分支：`desktop-light` 断侧栏宽 ≥160 且主区起点不小于侧栏右缘，在四路由遍历中对每个路由（含 `/center`）临时将 viewport 设为 1024×768 断言无横向溢出后恢复，并在 `/files` 临时将 viewport 设为 880×800 断言树栏 210px 后恢复；`mobile-dark` 断覆盖层默认关闭、`打开导航` 在含 `/` 欢迎态的每个路由可见，并经该按钮打开覆盖层完成每次路由点击。project 私有资源以 project 名区分：创建的目录名为 `walk-out-<project>` 补齐至 ≥48 字符（同时断言该行截断且 `title` 为全名）。主题步骤按 project 分支：`desktop-light` 在 `/settings` 选 `深色` 断 `data-theme=dark`、`workbuddy-theme=dark`；`mobile-dark` 选 `浅色` 断 `data-theme=light`、`workbuddy-theme=light`；二者 reload 后持久。`desktop-light` 另在受控回合运行中对 `.ui-pulse` 断言 reduced-motion 切换（见 ui-primitives），并在 journey 末断言静态资源（resourceType `image|font|stylesheet|script`）零 `requestfailed`（导航/SSE 取消的 `net::ERR_ABORTED` 不计）与零非 `baseURL` 源请求。路径：从 `/files` 登录 dev-stub 账号 → 经真实侧栏逐项访问四个受支持路由 → 在 `/` 完成受控真实回合中的新建/发送/步骤/刷新续流/精确完成/完成后刷新 → 在 `/settings` 切换主题并 reload 验证持久化 → 经侧栏用户区触发按钮 `用户菜单` 打开 `Menu`、选择 `退出登录` 并确认，reload 验证会话仍为未登录。`mobile-dark` 在每次断言用户区文本前先打开覆盖层。走查 SHALL 从首个 navigation 前开始收集并最终断言零非预期浏览器 `console.error` 和零 uncaught page error；本 journey 必须同时观测恰两次 `GET /api/auth/me` → 401（初始未登录、退出后 reload），仅与这两次响应同源、location pathname 恰为 `/api/auth/me` 且文本恰为 Chromium 固定 401 transport diagnostic 的 console 事件不计入错误预算，任何额外/不匹配 401 或其他 console error 仍失败。服务端 stderr（包括 `node:sqlite` ExperimentalWarning）不属于该浏览器 oracle。
@@ -71,7 +71,7 @@ smoke 与 ui-walk SHALL 作为两个独立 Ubuntu job 进入 CI，并纳入 `all
 #### Scenario: 两个真实 harness job 独立全绿并进入聚合
 - **GIVEN** fresh Ubuntu runners、受 lockfile 约束的 Node dependencies、固定 Hurl archive digest 与 Playwright Chromium revision
 - **WHEN** CI 分别运行 `smoke` 与 `ui-walk`
-- **THEN** 两者都先 build Web/server，分别用 isolated DB/process/static root 启动 production server；`make smoke` 的 public/auth/chat/files 四个独立文件与 `make ui-walk` 的完整 Chromium journey 全绿，cleanup 后 job 退出 0
+- **THEN** 两者都先 build Web/server，分别用 isolated DB/process/static root 启动 production server；`make smoke` 的 public/auth/chat/files/session-meta 五个独立文件与 `make ui-walk` 的完整 Chromium journey 全绿，cleanup 后 job 退出 0
 - **AND** `all-checks-passed.needs` 同时包含两个 job；任一 job failure/cancelled/skipped 时 aggregate 非零
 
 #### Scenario: 工具、服务或测试失败不得假绿或污染 sibling job
@@ -80,7 +80,7 @@ smoke 与 ui-walk SHALL 作为两个独立 Ubuntu job 进入 CI，并纳入 `all
 
 #### Scenario: 控制面一致
 - **WHEN** 比对 AGENTS.md matrix/enforcement/directory、constraints.yaml 十一个 verification.surfaces 与 Makefile 页头/target/PHONY，并分别注入五个 target 的 spaced duplicate
-- **THEN** 五条命令与 evidence/required_at/执行级别一致；AGENTS.md 无 `READINESS GAP` 且无过期 Known blind spot；五种 duplicate 均被拒绝，原 smoke/ui-walk block、四文件 smoke、CI jobs 与聚合不变
+- **THEN** 五条命令与 evidence/required_at/执行级别一致；AGENTS.md 无 `READINESS GAP` 且无过期 Known blind spot；五种 duplicate 均被拒绝，原 smoke/ui-walk block、五文件 smoke、CI jobs 与聚合不变
 - **AND** 删除或篡改任一新增镜像、职责或有效 downgrade 会使 oracle 非零；comment、fence 或其他 YAML owner 中的同名文本不能代替 active 条目
 
 #### Scenario: 安装高尾不再抢占全部质量检查预算
@@ -97,7 +97,7 @@ smoke 与 ui-walk SHALL 作为两个独立 Ubuntu job 进入 CI，并纳入 `all
 - **THEN** the wrapper preserves failure/cancellation status, boundedly reaps its upstream/server/omp/harness children and does not touch unrelated processes; escalation or residue is a cleanup failure
 
 #### Scenario: Exact integration oracle
-- **WHEN** a candidate omits/reorders omp fetch or upstream readiness, mutates job-local env, changes the four-file Make argv, drops cleanup or injects a secret/real model upstream into either harness job
+- **WHEN** a candidate omits/reorders omp fetch or upstream readiness, mutates job-local env, changes the five-file Make argv, drops cleanup or injects a secret/real model upstream into either harness job
 - **THEN** the source-derived or runtime oracle rejects it; baseline and restored implementation pass with unchanged action identities/counts and legacy guardrails
 
 #### Scenario: 夹具预置不可旁路
@@ -108,7 +108,7 @@ smoke 与 ui-walk SHALL 作为两个独立 Ubuntu job 进入 CI，并纳入 `all
 
 #### Scenario: uid job 与精确 oracle 原子接线
 - WHEN the workflow and source/runtime guardrails run on the same revision
-- THEN eight direct jobs include uid-isolation, checkout/setup-node counts are8/6, the selected Linux test is executed not skipped, real-omp four-file smoke passes under OMP_USER=omp, and failure/cancelled/skipped in that job fails the aggregate
+- THEN eight direct jobs include uid-isolation, checkout/setup-node counts are8/6, the selected Linux test is executed not skipped, real-omp five-file smoke passes under OMP_USER=omp, and failure/cancelled/skipped in that job fails the aggregate
 
 #### Scenario: 换 uid 透传保持可选
 - WHEN the existing compiled-server helper receives OMP_USER absent or present
@@ -118,11 +118,11 @@ smoke 与 ui-walk SHALL 作为两个独立 Ubuntu job 进入 CI，并纳入 `all
 - **WHEN** source-derived controls inspect the active downgrade owner and Enforcement Index after the official merged-master UID job succeeds
 - **THEN** only the three unrelated downgrades remain, the exact UID block row is active, and reintroduced risk registration or missing/weakened/decoy row is rejected without altering the runtime job
 
-AGENTS.md 的 files-harness 文档镜像 SHALL 保持 server/ 的沙箱/审计/工作空间/对话职责，在 smoke/ 中列出沙箱夹具，并在现有 HTTP smoke evidence 单元中列出 public.hurl、auth.hurl、chat.hurl、files.hurl 四文件。现有 command/调用方 ownership、UI 行与errororacle、十一surface（含 `ui-shots`）、UIDblock/三条剩余downgrades与所有既有场景 SHALL 不变；此文案与精确sourceoracle/mutation anchors同PR更新。
+AGENTS.md 的 files-harness 文档镜像 SHALL 保持 server/ 的沙箱/审计/工作空间/对话职责，在 smoke/ 中列出沙箱夹具，并在现有 HTTP smoke evidence 单元中列出 public.hurl、auth.hurl、chat.hurl、files.hurl、session-meta.hurl 五文件。现有 command/调用方 ownership、UI 行与errororacle、十一surface（含 `ui-shots`）、UIDblock/三条剩余downgrades与所有既有场景 SHALL 不变；此文案与精确sourceoracle/mutation anchors同PR更新。
 
 #### Scenario: 文件控制面反映已执行四文件
 - **WHEN** AGENTS.md and its existing source-derived oracle are compared at the same revision
-- **THEN** sandbox fixture and all four Hurl files are named in their proper documentation owners; stale wording is rejected without changing runtime, workflow, parser behavior or thresholds
+- **THEN** sandbox fixture and all five Hurl files are named in their proper documentation owners; stale wording is rejected without changing runtime, workflow, parser behavior or thresholds
 
 ### Requirement: 共享 Vitest 配置的 native ESM 边界
 server 与 web SHALL 通过逐字相同的完整相对 specifier `../vitest.shared.mjs` 消费唯一 tracked 根共享配置；该文件 SHALL 以 `.mjs` 自描述为 ESM，不依赖根 `package.json` 的 module type，不得保留 `.ts`/`.js` sibling、无扩展名 import、wrapper、fallback 或 warning suppression。共享配置 SHALL 继续使用 V8 coverage provider、include `src/**/*.{ts,tsx}`，且 lines/functions/branches/statements thresholds 各为 80；web SHALL 只在共享配置之上继续叠加 `environment: jsdom` 与 `e2e/**` exclusion。Makefile lint/fmt source list 与 `biome.json` 根级 include SHALL 指向同一 exact `.mjs` 文件并实际让 Biome 处理它；CI 的既有 Biome 命令、workspace test scripts、产品代码、依赖/lockfile及 Vite/Vitest versions SHALL 保持不变。

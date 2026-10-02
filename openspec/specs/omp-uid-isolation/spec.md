@@ -86,7 +86,7 @@ For non-:memory: DB paths, the entry SHALL ensure the SQLite main file mode is06
 
 #### Scenario: job 全绿并入聚合
 - WHEN PR CI 运行 `uid-isolation`
-- THEN Linux 测试非 skipped 且通过、`make smoke` 四文件全绿、cleanup 后无残留 omp/假上游进程；`all-checks-passed.needs` 含八个 direct job，任一失败/取消/跳过时聚合非零
+- THEN Linux 测试非 skipped 且通过、`make smoke` 五文件全绿、cleanup 后无残留 omp/假上游进程；`all-checks-passed.needs` 含八个 direct job，任一失败/取消/跳过时聚合非零
 
 #### Scenario: 预检与换组不能假绿
 - WHEN HOME preservation, effective shared group, required interpreter, selected test or real-omp smoke fails, or child residue remains
