@@ -26,7 +26,7 @@
 
 - 工程控制面：`make check`（lint/typecheck/test/anti-drift）、`make test-guardrails`、`make omp-fetch`；CI `ci.yml` 九个 job
   （fast-checks / unit-tests / anti-drift / secret-scan / sast / smoke / ui-walk / uid-isolation / all-checks-passed）+ 分支保护。
-- 运行时验证 harness（调用方拥有已运行服务）：`make smoke`（`smoke/{public,auth,chat,files}.hurl`）、`make smoke-live`（真实上游）、
+- 运行时验证 harness（调用方拥有已运行服务）：`make smoke`（`smoke/{public,auth,chat,files,session-meta}.hurl`）、`make smoke-live`（真实上游）、
   `make ui-walk`（Playwright 双 project：1440 亮 / 390 暗）、`make ui-shots`（六格 × 五态 demo-vs-app 截图对，人工签收输入）；
   控制面同步由 `scripts/test-ci-harness.sh` oracle 守住。
 - app-server（S0a/S0b/S1a）：Fastify 装配与错误信封、dev-stub 认证 + session cookie、SQLite WAL + 迁移（`002`–`033`）、
@@ -212,12 +212,23 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 - 覆盖：F-CHAT-1、F-CHAT-2、F-CHAT-7、F-CHAT-9、F-CHAT-10、F-OPS-1。
 - Change 归属（2026-09-28 留痕）：本阶段按 2026-09-26 grill 切为两个 change。
   - **change A `s1c-turn-control-governance`**（epic #448，已交付）：F-OPS-1（进程池上限 / 最久空闲驱逐 / 空闲回收；`OMP_MAX_PROCESSES` 默认 16 经测试 VPS 实测保留，#494）、F-CHAT-7 中断（停止 → `stopped`）、F-CHAT-6 的 fork 子项、重新生成、审批条。
-  - **change B `s1c-session-metadata-presentation`**：F-CHAT-1（三场景）、F-CHAT-2（会话分组侧栏）、F-CHAT-9（回合产物呈现）、F-CHAT-10（深度思考折叠），以及对话内搜索。
+  - **change B `s1c-session-metadata-presentation`**（epic #509）：F-CHAT-1（三场景）、F-CHAT-2（会话分组侧栏）、F-CHAT-9（回合产物呈现）、F-CHAT-10（深度思考折叠）；承接 S1e 移交的对话内搜索、重命名、置顶、删除、composer footer 与场景胶囊；另含 slash 命令白名单与 `GET /api/commands`（原 #497，2026-09-26 拍板并入）。
   - change A proposal「功能覆盖声明」记录了与上文 Outcome 的偏离；「与 demo 的有意偏差」记录了四条留痕：
     1. 审批超时 60s 自动允许（demo 15s）；
     2. `stopped` 为独立终态；
     3. fork 入口在用户消息；
     4. 审批条只在真实 exec 调用时出现。
+  - change B proposal「功能覆盖声明」记录了覆盖范围与「与 IMPLEMENTATION_PLAN S1c 的偏离」（对上文 F-CHAT-9 一条）：
+    1. 文件变更只从 `edit` / `write` 工具帧推导，不结合沙箱审计（审计不记 omp 的写入）；
+    2. html 产物卡在会话内以 sandbox iframe 预览；`查看详情` 跳 `/files?ws=<workspaceId>`，不定位到具体文件。
+  - change B design Context「Oracle 差异」另记对上文 F-CHAT-10 一条的偏离：thinking 取与 step detail 相同的「有界 + 截断标记」原则，但上限为 32768 码点（step detail 为 4096），发布按 2048 B / 2 s 合并。
+  - change B proposal「与 demo 的有意偏差」记录了六条留痕：
+    1. 对话内搜索跳转时滚动并做消息级高亮，计数为匹配的消息数；
+    2. composer footer 只显示空间，不显示权限；
+    3. `助理任务` 分区、`导出记录`、产物卡 `在编辑器中打开`、顶栏 `更多` 不渲染；
+    4. write 工具的文件变更行只标「写入」、无行数；
+    5. 场景切换只改会话标记与欢迎页快捷任务，不切换模型与工具面；
+    6. slash 命令的回复正文是 omp 英文原文，白名单外的 `/…` 文本当普通文本送模型。
   - 已修复：派发后约 1ms 内写入的 abort 曾使真实 omp 静默丢弃整轮；D2 修订后 `abort` 只在回合开始后写出（#650，change `stop-after-agent-start`，真 omp 复测 10/10）。回合在 grace 内一直没有开始时，用户消息仍不入 omp 历史，见 D2 修订段。
   - 已知限制：突发并发冷启动会触发握手超时 502（#652）。
 - 必读增量：demo `/` 侧栏与场景交互；PLAN §5 并发资源治理。
