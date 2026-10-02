@@ -112,7 +112,7 @@ useWelcomeOptions(workspaces: readonly Workspace[] | null, workspacesError: stri
 fix pass 1 记录：X5 按原文的终态断言杀不死「`error` 去掉 client 归属门」的变异（换 client 的 effect 在同一个 `act` 内就重读并清掉 error），另加逐次提交断言——侧栏已显示新账号的每一次提交都不含上一账号的失败文案；为此 `web/test/chat-page-lifecycle-support.tsx` 的 `renderChatPageWithAuthProbe` 加可选第三参 `onCommit`（既有 support 文件 +5 行，纯增量）。测试文件 559 → 683 行（29 例），support 243 → 279。
 
 实现记录：
-- 测试落 `web/test/chat-page-welcome-scene.test.tsx`（24 例）与 `web/test/chat-page-welcome-scene-support.tsx`。W6 另加纯路径查询（`misc`、`kefu`、`zhangsan` 不命中）——W5 的 `项目` 同时命中名称与路径，区分不了「也按路径过滤」；W11 拆成「欢迎态 → 选中会话」（RED）与深链保持项（实现前后皆绿）。
+- 测试落 `web/test/chat-page-welcome-scene.test.tsx`（24 例，fix pass 1 后 29 例）与 `web/test/chat-page-welcome-scene-support.tsx`。W6 另加纯路径查询（`misc`、`kefu`、`zhangsan` 不命中）——W5 的 `项目` 同时命中名称与路径，区分不了「也按路径过滤」；W11 拆成「欢迎态 → 选中会话」（RED）与深链保持项（实现前后皆绿）。
 - `WELCOME_SCENES` 的类型为 `readonly WelcomeScene[]`（不是 D4 草图的 `as const`），值与 `office.prompts === WELCOME_QUICK_PROMPTS` 不变；场景值类型取 `WelcomeScene["value"]`。
 - 胶囊 hover 底色用 `--wb-bg-primary` 而非 demo 的 `--wb-bg-pill-hover`（后者是浅色字面量，深色主题下浅底浅字）。
 - 未覆盖：`createBody` 把 `workspaceId` 写成 `undefined` 的变体在页面 seam 上不可观察（`JSON.stringify` 丢弃该键，请求体逐字节相同）。
@@ -133,6 +133,8 @@ fix pass 1 记录：X5 按原文的终态断言杀不死「`error` 去掉 client
 8. 深色主题下选中胶囊为近黑底白字（`--wb-bg-pill-active` 只在浅色 `:root` 定义），可读，但与 Chip/SegmentedControl 的深色写法不一致。
 9. `scrollbar-width: none` 没有 WebKit 对应写法：Safari 18.2 之前的桌面版在窄窗口下 chip 行会多出全局样式的 8px 滚动条（仍在首屏内）。
 10. 在会话页点侧栏 `新建会话` 时带上此刻不可见的场景与空间选择（父规格明文：选择「作用于其后由…侧栏 `新建会话` 发起的创建请求」）；该页没有改选的控件，须回欢迎态改。是否让会话页的创建不带选择属父规格的取舍，本刀不改。
+
+11. 复审留下的未覆盖项：X7「选择不发请求」的观察窗口是一个宏任务，带延时或防抖才发出的请求不在覆盖内（现有选择路径没有计时器）。
 
 ## Seams under test
 - jsdom 页面 fixture：胶囊、快捷任务行、Toast、footer 弹层、创建请求 body、列表重读与失败、锁定、状态保留。
