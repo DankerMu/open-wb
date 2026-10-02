@@ -27,18 +27,19 @@
 ### D1 状态归 `useSessionActions`，确认框挂页面主树
 确认框由槽位节点里的菜单项打开，槽位节点随折叠与覆盖层关闭而卸载；确认框与请求状态必须活在 `ChatPage`。`useSessionActions` 持有状态，`ChatPage` 渲染 `<DeleteDialog remove={sessionActions.remove} />`；`remove` 为 null 时组件返回 null（判断在组件内，不在 `ChatPage` 里加分支）。
 
-`page.tsx` 行计划（672 → 679，上限 682）：`:71` 的调用移到 `refreshList` 定义之后，改为
+`page.tsx` 行计划（672 → 680，上限 682）：`:71` 的调用移到 `refreshList` 定义之后，改为
 ```ts
 const sessionActions = useSessionActions(client, setListState, setHistoryState, {
+  abortHistory,
   closeSource,
   refreshList,
   requestedSessionRef,
 });
 ```
-（+4）；`DeleteDialog` 的 import（+1）；侧栏 `onDeleteSession={sessionActions.openDelete}`（+1）；`<DeleteDialog …/>`（+1）。hook 调用下移只改变 hook 的调用次序，不改变行为（`sessionActions` 的第一个使用点在 `:619`）。
+（+5）；`DeleteDialog` 的 import（+1）；侧栏 `onDeleteSession={sessionActions.openDelete}`（+1）；`<DeleteDialog …/>`（+1）。hook 调用下移只改变 hook 的调用次序，不改变行为（`sessionActions` 的第一个使用点在 `:619`）。
 
 ### D2 `session-actions.ts`
-第四个参数 `page: { closeSource(): void; refreshList(client: ApiClient): void; requestedSessionRef: RefObject<string | null> }`。导航在 hook 内完成：`useNavigate()` + `useLocation()`，location 经 ref 取最近一次渲染的值（响应到达时的 URL，而不是确认那一刻的闭包）。
+第四个参数 `page: { abortHistory(): void; closeSource(): void; refreshList(client: ApiClient): void; requestedSessionRef: RefObject<string | null> }`。导航在 hook 内完成：`useNavigate()` + `useLocation()`，location 经 ref 取最近一次渲染的值（响应到达时的 URL，而不是确认那一刻的闭包）。
 
 新增状态：
 - 打开的确认框 `{ client, sessionId, title }`（`title` 是打开那一刻的显示标题，`sessionTitle(session)`）；`returnFocus` 用独立的 ref，不与重命名共用。
@@ -51,12 +52,12 @@ const sessionActions = useSessionActions(client, setListState, setHistoryState, 
 
 响应处理（fence 与 PATCH 相同：已挂载、未 abort、`client === clientRef.current`；fence 逻辑与 `send` 共用一处，不复制——jscpd）：
 - 通过 fence 的任何结果先清掉该会话的在途标记。
-- 204：`setListState` 在 `status === "success"` 且属于该 client 时按 id 滤掉条目；确认框与重命名 Dialog 若是为这个会话打开的则关闭（为别的会话打开的不动）；Toast `{type:"success", message:"任务已删除"}`；若 `page.requestedSessionRef.current === sessionId`：`page.closeSource()`，随后 `navigate(sessionNavigation(pathname, search, hash, null), { replace: true })`。成功不调用 `refreshList`。
+- 204：`setListState` 在 `status === "success"` 且属于该 client 时按 id 滤掉条目；确认框与重命名 Dialog 若是为这个会话打开的则关闭（为别的会话打开的不动）；Toast `{type:"success", message:"任务已删除"}`；若 `page.requestedSessionRef.current === sessionId`：`page.abortHistory()`、`page.closeSource()`，随后 `navigate(sessionNavigation(pathname, search, hash, null), { replace: true })`。成功不调用 `refreshList`。
 - 401：只清在途标记（既有的未授权通知接管）。
 - 其它失败：确认框若是为这个会话打开的则关闭；Toast `{type:"error", message: errorMessage(error)}`；`page.refreshList(client)`。
 - 未通过 fence：什么都不做。
 
-先 `closeSource()` 再 `navigate`：服务端在返回 204 之前已经结束了这条连接，浏览器会按重连间隔自动重连并得到 404；显式关闭让重连在 204 处理的同一同步段里停掉，而不是等 effect。history 置 `idle`、清 `streamError` 留给既有 effect。
+先 `closeSource()` 再 `navigate`：服务端在返回 204 之前已经结束了这条连接，浏览器会按重连间隔自动重连并得到 404；显式关闭让重连在 204 处理的同一同步段里停掉，而不是等 effect。`abortHistory()`（评审后补充）：`requestedSessionRef` 与 location 都是渲染时才更新，而路由的 location 更新在 transition 里；该会话的历史读取若仍在途，它的 200 可能落在 `navigate` 与下一次渲染之间、通过 `loadHistory` 的全部检查并为已删会话重新打开事件流——abort 让那次读取在 204 处理的同一同步段里失效。history 置 `idle`、清 `streamError` 留给既有 effect。
 
 ### D3 `delete-dialog.tsx`
 `DeleteDialog({ remove })`：`remove` 为 null 返回 null；否则渲染恒 `open` 的 `ConfirmDialog`（卸载即关闭，与 `RenameDialog` 相同的挂载方式）：`title="删除任务"`、`description={`确定要删除「${title}」吗？删除后不可恢复。`}`、`confirmText="删除"`、`danger`、`pending`、`cancelText={pending ? "关闭" : "取消"}`、`returnFocus`、`onConfirm`、`onOpenChange(open)` 在 `!open` 时调 `onCancel`；`pending` 时 children 为 `<p className="ui-muted">删除请求已发送，关闭窗口不会撤销请求。</p>`。不新增 CSS。
@@ -89,6 +90,14 @@ const sessionActions = useSessionActions(client, setListState, setHistoryState, 
 
 既有断言更新（非 RED 新增，随实现改为三项）：`chat-page-session-rename-pin.test.tsx:138-148` 与 `:99` 的用例标题、`chat-page-session-pin.test.tsx:97`、`:119-122`（多行数组加一项会多一行，改写成不增行的形式）。
 
+评审后补充（fix pass 1，各以一次产品代码变异确认会红，记录在 PR）：
+- F1 成功也清在途标记：A 得 204 → 另一会话删除失败触发的列表重读把 A 带回 → 打开 A 的 `删除`，确认按钮可用。
+- F2 Toast 类型：204 的提示带 `ui-toast--success`，失败的提示带 `ui-toast--error`。
+- F3 两个会话同时在途：A、B 的 DELETE 都挂起（各自关闭确认框）；A 先 204 → 重开 B 的确认框仍忙碌、B 仍恰一个 DELETE；镜像 B 先到。
+- F4 槽位节点卸载：DELETE 挂起 → 关闭确认框 → 折叠侧栏（列表区卸载）→ 204 → Toast `任务已删除`、当前会话则回欢迎态；展开后条目已消失。`≤760px` 变体：关闭导航覆盖层后 204 到达，重开覆盖层条目已消失。另一例槽位节点卸载时确认框仍开着：确认框不随之消失，`取消` 可关闭。
+- F5 顶栏 `重命名`：当前会话的 DELETE 挂起 → 关闭确认框 → 顶栏 `重命名` 打开 Dialog → 204 → Dialog 消失、回欢迎态。
+- F6 历史读取在途时删除当前会话：挂载 `/?session=<A>` 且 `GET …/messages` 挂起 → 删除 A → 同一 `act` 内先后放行 204 与快照 → 没有新建 EventSource、回欢迎态、无错误。
+
 实现记录：R6 的 409 信封、500 非信封与「失败后可再次确认」合在一个用例里；「location 取响应到达时的值」没有可区分的用例（会话切换不改变其它 search/hash，确认时与响应时算出的目标 URL 相同）。一次性真实浏览器观察两种视口全部符合，详见 PR。
 
 实现前后各跑一次并记录：RED 集合 = R1–R13；既有套件实现前后皆绿（实现后以更新过的三处断言计）。
@@ -102,6 +111,8 @@ const sessionActions = useSessionActions(client, setListState, setHistoryState, 
 4. 被删会话的在途重命名/置顶响应到达时不改列表，但 `已重命名`/`已更新置顶状态` 或失败 Toast 照常出现。
 5. DELETE 得到 404（会话已在别处删除）按一般失败处理：Toast 信封 message 并重读列表；若它是当前会话，页面停在该 URL，直到用户离开（其它标签页删除后的既有状态，父 design D3 不为此新增 UI）。
 6. `≤760px` 覆盖层内删除当前会话后覆盖层不自动关闭（程序化导航不关闭它）；用户看到的是少了一条的列表。
+8. `requestedSessionRef` 与 location 是「最近一次渲染」的值：204 恰好落在用户点选另一会话与那次导航渲染之间时，仍按旧会话判定并 replace 回欢迎态，用户的选择被覆盖（毫秒级窗口，再点一次即可；页面既有的渲染时 ref 约定，不在本刀改）。
+9. `turn-actions.ts` 里不带 signal 的快照读取（`reconcileSettled`、重新生成后的读取）若在 204 与下一次渲染之间到达，会为已删会话装入快照并打开事件流，随后由既有 effect 关闭；无可见错误。
 7. 当前会话的删除在途时点 `新建会话`：204 的 replace 先于创建响应到达时，既有 effect（`page.tsx:388-396`）中止这次创建；服务端可能已建出空会话，下一次列表读取才出现（「创建在途时离开」的既有行为）。
 
 ## Seams under test

@@ -16,7 +16,7 @@ Evidence floor: 新建 `web/test/chat-page-session-delete.test.tsx` 覆盖 desig
 - `web/src/features/chat/session-actions.ts`：`useSessionActions` 加删除状态、在途标记与 handler；签名多一个 `page` 参数（`closeSource`、`refreshList`、`requestedSessionRef`）。
 - 新建 `web/src/features/chat/delete-dialog.tsx`：`删除任务` 确认框（`ConfirmDialog` 的薄封装）。
 - `web/src/features/chat/session-sidebar.tsx`：新 prop `onDeleteSession`，传给 `SessionMenu`。
-- `web/src/features/chat/page.tsx`：hook 调用移到 `refreshList` 之后并传入 `page` 参数、侧栏回调、`<DeleteDialog>`（672 → ≤682）。
+- `web/src/features/chat/page.tsx`：hook 调用移到 `refreshList` 之后并传入 `page` 参数、侧栏回调、`<DeleteDialog>`（672 → ≤682）。评审后补充：`page` 参数另含 `abortHistory`（design D2）。
 - 新建 `web/test/chat-page-session-delete.test.tsx`（超过 800 行时另拆 support 模块）；`web/test/chat-page-session-rename-pin.test.tsx:138-148`、`web/test/chat-page-session-pin.test.tsx:97`、`:119-122` 的菜单项断言改为三项。
 
 ## Capabilities
