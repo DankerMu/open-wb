@@ -22,6 +22,8 @@
 4. `POST …/prompt {"message":"/session 冒烟"}` → `HTTP 202`；捕获 `session_cmd_assistant_id`、`session_cmd_user_id`。不带 `[Options]`。
 5. `GET …/messages`，同样 `retry: 40` / `500ms`（约 20 s，低于 60 s 的自动允许：万一出现待审批，是失败而不是被自动放行）→ `HTTP 200`；断言：用户 `content` == `/session 冒烟`；助手 `status` == `done`、`content` matches `{{content_pattern}}`、`steps` 没有任何元素、`approvals` 没有任何元素；`session.status` == `done`。
 
+> 实测定下的写法：`jsonpath "$.messages[?(@.id=={{id}})].steps" count == 0`（`approvals` 同款）。按 id 过滤出唯一一条消息后，`count` 数的是该数组的元素（有一个 bash 步骤的消息得 1，`/todo` 的消息得 0）；消息或字段缺失时路径求值为空，`count` 报错、断言失败——`not exists` 系列在消息 id 不匹配时会空通过，所以不用。两个 POST 另有 `userMessageId` / `assistantMessageId` `exists` 两条断言（沿用 `chat.hurl`）。
+
 「没有任何元素」的 jsonpath 写法由实现者在真实栈上定（文件里已有 `… steps[?(@.status!='done')]" not exists` 与 `… approvals" count == 1` 两种先例；过滤表达式之后的 `count` 数的是什么要实测），并用一条负对照证明它在有步骤时会咬（HN5）。
 注释：新条目标 `# (6)`；原 `# (6)`、`# (7)` 改为 `# (7)`、`# (8)`；页头流程行加上第 6 步、顺延编号，「slash 白名单步骤由后续 issue 追加」那半句删掉。其余条目逐字不变。
 
@@ -38,6 +40,7 @@
 ### D3 辅助与不变的部分
 - 「等回合完成 + 无审批条」已在 `step3SendPrompt` 里：抽成一个文件内辅助（参数：助手消息定位器、期望正文），第 3 步改用它（行为不变），第 10 步两处复用。显式超时仍只有 `TURN_DONE_TIMEOUT_MS` 一处字面量。不新增涉及本文件的 jscpd 克隆（门禁是重复率 ≤ 3%；现有克隆 179 处，涉及本文件的只有登录块）。
 - 文件页头注释（现写「steps 1–9 and 11」）同步为含第 10 步。
+- 实现：`expectTurnDone(assistant, reply)`（唯一带显式超时的断言 + 三种审批条计数 0；第 3 步改用它，审批条的检查因此挪到 `write` 步骤状态之前，断言集合不变）、`readSnapshot(page, sessionId)`（第 4 步的回读与第 10 步共用）、`sendSlashTurn(page, index, sent, reply)`（第 10 步的两个回合共用：`Enter`、用户正文、助手正文、无步骤卡、输入框解锁并清空）。REST 回读用六个 `role` 的序列同时断言条数与交替。
 - `finally`、`deleteCreatedSession`、`logout`、第 1–9、11 步的断言不动。第 11 步按选中项与唯一新标题定位，不受多出的四条消息影响；标题没有被 `/todo` 改掉这件事由第 11 步的确认文案兜住。
 - 约束沿用：不用 `waitForTimeout`、`page.route` / `fulfill` / `continue`、假 `EventSource`、`test.setTimeout` / `test.slow`、`force: true`、`evaluate`；不新增显式超时字面量；只改这两个文件；`web/e2e/ui-walk-sessions.spec.ts` ≤ 800 行；整条旅程在每测试 30 s 内。
 
@@ -100,13 +103,23 @@
 ## 已知残留
 1. **未转义的 `/session` 的行为没有真实栈证据**（平台 API 够不到）；以 HN7 / UN8 的白名单内对照代替。
 1a. **`/session …` 回合没有工具轮**（proposal 偏差 6）：「转义文本进模型后跑工具」没有 harness 证据；有的是「得到模型的固定回复」。
-1b. **有断言而没有负对照的句子**：`source` 为 `builtin`、完整文本 `/session <uuid2>` 无面板、「composer 解锁」。
+1b. **有断言而没有负对照的句子**：`source` 为 `builtin`、完整文本 `/session <uuid2>` 无面板、「composer 解锁」、两处 `toBeFocused()`（`fill` / `press` 自己会先聚焦，判别力有限）、走查里的用户气泡 `/todo`。
+1c. **「无面板」是即时的计数 0 断言**：目录已加载时面板随输入同步渲染，所以即时检查成立；它不等待，证明不了「稍后也不会出现」。
+1d. **面板位置不断言**：390×844 下面板在输入框上方、完全在视口内（实测 y 551.5、高 117，输入框 y 680.5），只是观察记录。
 2. **`/compact` 不走**：只证明它在目录与候选里，不证明它的执行。
 3. **skills 不在两个状态目录里**：目录里的 `skill` 来源与候选没有真实栈证据。
 4. **鼠标选中候选不走**；只走键盘 `Enter`（`Tab`、方向键、`Esc` 由 jsdom 测试覆盖）。
 5. **「composer 解锁」断言的是输入框可用且清空**，不单独断言发送键的状态。
 6. **`/todo` 回合不改标题**：冒烟有断言；走查靠第 11 步的确认文案间接证明。
 7. **测试超时不清理**（同 #540 / #541）。
+
+## 交付记录（实现后补记）
+- `smoke/session-meta.hurl` 310 → 378 行（43 个请求，原 36 个）；`web/e2e/ui-walk-sessions.spec.ts` 566 → 662 行。
+- 冒烟：CI 同款包装连续两次（同一组状态目录）均退出 0；`session-meta.hurl` 约 2.6 s（改动前约 1.6 s），整个 `make smoke` 8.8–10.8 s。两个新回合各恰多一次 500 ms 的轮询重试。残留：无 `冒烟会话`、无 null 标题、无 running。
+- 冒烟负对照 HN1–HN7（另加 HN5b：`approvals` 断言指向有审批的消息；HN7b：把 HN7 里用户正文的期望同步掉，只剩正文断言失败）全部在预期条目失败、hurl 退出 4；失败条目之后没有请求（DELETE 0 次），`/prompt` POST 次数恰为到失败处为止的条目数。
+- 走查：长驻栈五遍 10/10（desktop 4.3–4.5 s、mobile 5.7–5.9 s）；第 10 步约 0.1 s（`/todo` 几毫秒、转义文本约 0.1 s）。全新状态完整 `make ui-walk` `5 passed, 1 skipped`，36.8–36.9 s；新旅程 6.5 s / 5.9 s。
+- 走查负对照 UN1–UN11 在两个 project 上都失败在预期断言，之后零残留；#541 的 N13、N15 在 desktop-light 仍失败在第 11 步。
+- jscpd 179 未变，涉及本文件的克隆仍只有登录块；knip 无新增。
 
 ## Seams under test
 - 真实 HTTP 与真实浏览器对编译后的应用、真 omp 与受控上游；没有任何桩。
