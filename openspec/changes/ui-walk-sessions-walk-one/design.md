@@ -48,7 +48,7 @@ test("…", async ({ baseURL, page }, testInfo) => {
    - **第 3 步**：`const created = page.waitForRequest(POST /api/sessions)`（只观测；全文件不得出现 `route.fulfill`、`page.route`）→ 填入提示词、`Enter` → `const request = await created; const response = await request.response()`（先断言非空），断言状态 201 并**立刻**从响应体取顶层的 `id`（建会话的响应体就是八键会话视图，不嵌在 `session` 下） 记进外层变量供 `finally` 使用（先于对请求体的任何断言——请求体断言失败时会话已经建好）→ `request.postDataJSON()` 深等于 `{ workspaceId, scene: "code" }`（键集合也相等）→ URL 的 `session` 参数等于该 id → 助手消息的 `.chat-md` 文本恰为固定回复（这一条是等回合完成的断言，可带显式 `{ timeout }`，取值照 `ui-walk-stop.ts` 的先例；其余断言用默认超时）；选中会话的状态为 `已完成`（`expectSelectedSessionStatus`）；`write` 步骤徽章 `已完成`；助手消息内 `需要你的确认`、`已允许执行`、`已拒绝执行` 三种 group 计数都是 0；转录恰一条用户消息、一条助手消息。
    - **第 4 步**：`details.thinking-block` 恰一个、无 `open` 属性、位于 `.chat-md` 之前（同一父元素内的先后）；summary 文本 `深度思考过程`；点 summary 后 `open`，`.thinking-body` 文本恰为该常量。
    - **REST 回读**：`page.request.get("/api/sessions/<id>/messages")` → `session.scene === "code"`、`session.workspaceId === <id>`、`session.status === "done"`；助手消息 `thinking` 恰为常量、`steps` 恰一条且 `name === "write"`、`changes` 深等于 `[{path:"workbuddy-report.html",added:null,removed:null,kind:"write"}]`。
-   - **第 5 步**：变更卡 group `文件变更（1 个）` 恰一行；`.file-change-path` 文本恰为 `zhangsan/ui-walk-sessions/workbuddy-report.html`；`.file-change-kind` 文本 `写入`；`.file-change-add`、`.file-change-del` 计数 0。产物卡：`.artifact-lang` 文本 `HTML`；点卡内底部的 `打开网页预览`（限定在产物卡内、取文字链接那一个）→ Dialog `workbuddy-report.html` → iframe 的 `sandbox` 属性**字符串**恰为 `allow-scripts` → `frameLocator` 内 heading `WorkBuddy` 可见 → 关闭 Dialog。顶栏 `产物面板` → 抽屉内恰一行、路径同上 → 关闭抽屉（消失后再继续）。**最后**点变更卡的 `查看详情` → URL 为 `/files` 且 `ws` 参数等于空间 id、`选择工作空间` 按钮含 `ui-walk-sessions` → 真实导航回 `/?session=<id>`，等到助手消息的固定回复重新可见。
+   - **第 5 步**：变更卡 group `文件变更（1 个）` 恰一行；`.file-change-path` 文本恰为 `zhangsan/ui-walk-sessions/workbuddy-report.html`；`.file-change-kind` 文本 `写入`；`.file-change-add`、`.file-change-del` 计数 0。产物卡：`.artifact-lang` 文本 `HTML`；点卡内底部的 `打开网页预览`（限定在产物卡内、取文字链接那一个）→ Dialog `workbuddy-report.html` → iframe 的 `sandbox` 属性**字符串**恰为 `allow-scripts` → `frameLocator` 内 heading `WorkBuddy` 可见 → 关闭 Dialog。顶栏 `产物面板` → 抽屉内恰一行、路径同上 → 关闭抽屉（消失后再继续）。**最后**点变更卡的 `查看详情` → 点击后**第一次**主帧导航的 URL 恰为 `/files?ws=<空间 id>`（fix pass 1 加；文件页会把缺失或未知的 `ws` 改写成第一个空间，全新状态下那正是本空间，落定后的 URL 没有判别力）→ 落定后 URL 为 `/files` 且 `ws` 参数等于空间 id、`选择工作空间` 按钮含 `ui-walk-sessions` → 真实导航回 `/?session=<id>`，等到助手消息的固定回复重新可见。
      - `查看详情` 放在第 5 步最后做，是为了只离开会话页一次；规格里第 5 步各项没有先后要求。
    - **第 6 步**：`inspectSidebar(page, project, …)` 里：`会话列表` 内 `button[aria-current="true"]` 恰一个；它位于名字匹配 `/^空间 \(\d+\)$/` 的 group 之内、且在其下名为 `ui-walk-sessions` 的子 group 之内；`置顶任务` group 与名字匹配 `/^任务 \(\d+\)$/` 的 group 内 `aria-current="true"` 的计数都是 0（分区不存在时计数自然为 0）。会话按 `aria-current` 定位，不按标题（标题每次相同）。
    - **离开会话页**（`try` 的最后一步）：真实导航到 `/settings`，等它的 h1 `设置`。此后页面不再订阅该会话，删除不会引出重连 404。
@@ -59,7 +59,7 @@ test("…", async ({ baseURL, page }, testInfo) => {
 - 不 `import` `ui-walk.spec.ts`（它是测试文件）；需要的私有常量与小函数在新文件里自写。**jscpd**：登录与登出块按本旅程自己的需要自然地写（比旧旅程短），不为躲检测而打乱写法，也不改旧文件。若 jscpd 因此多报克隆且都只落在登录块或登出块上（两块不相邻，各至多一个：178 → 至多 180），接受并在报告里给出每个克隆的两端行号；出现任何其它新增克隆则停下来报告。
 - 不用 `waitForTimeout`、不用 `page.route` / `route.fulfill` / `route.continue`、不替换 `EventSource`、不 arm gate、不读 `MODEL_UPSTREAM_*`。等待一律是对可观察状态的 `expect`（自动重试）或 `waitForRequest` / `waitForResponse`。
 - 每个 project 用 `crypto.randomUUID()` 生成自己的 UUID。
-- Toast（场景切换）不作断言；若它挡住后续操作（mobile 的侧栏浮层由 `inspectSidebar` 用 `Escape` 关闭），等它消失再继续，写法照既有辅助。
+- Toast（场景切换）不作断言，也不等它消失：`web/src/ui/escape-fallback.ts` 使 mobile 的导航覆盖层在 Toast 在场时也能用 `Escape` 关闭（fix pass 1 实测，见「评审第一轮与 fix pass 1」）。
 - 整条旅程必须在每测试 30 s 内完成，不调用 `test.setTimeout` / `test.slow`。若做不到，停下来报告实测分解。
 
 ### D3 不做的事
@@ -114,7 +114,7 @@ test("…", async ({ baseURL, page }, testInfo) => {
 2. **edit 的 `+N/−N`** 在真实栈上不可达，由服务端 fake-omp 测试证明。
 3. **标题不唯一**：每次运行的会话标题都是 `WORKBUDDY_THINK WO`；旅程按选中项定位。若 `finally` 的删除失败留下会话，下一次运行仍能通过（它只看自己选中的那条），残留要靠 E5 式清点发现。
 4. **预览 iframe 的文档断言**依赖 `srcdoc` 同步渲染；不验证脚本隔离的强度（那是 turn-artifacts 的 jsdom 与浏览器观察的范围）。
-5. **`查看详情` 只验证落到空间**（`?ws=`），不验证选中文件——文件页没有 path 参数。
+5. **`查看详情` 只验证落到空间**（`?ws=`，按点击后的第一次导航断言），不验证选中文件——文件页没有 path 参数。
 6. **每测试 30 s**：#541 / #557 往同一 `try` 块里追加第 7–11 步（含两个真实回合）后是否仍在 30 s 内，要由它们各自实测；本刀只给出第 1–6 步的实测时长。
 7. **登出收尾是简化版**：不重复旧旅程的键盘确认与焦点陷阱断言。
 8. **测试超时不清理**：30 s 超时触发时浏览器 context 已关闭，`finally` 里的 `page.request` 不可用，会话会留下；下一次运行不受影响（见 3），残留靠清点发现。
@@ -132,10 +132,37 @@ test("…", async ({ baseURL, page }, testInfo) => {
   - N1 → 第 4 步 `toHaveText`；N2、N3 → 第 3 步请求体 `toStrictEqual`（N3 的实际请求体没有 `workspaceId` 键）；N4 → 第 4 步折叠块计数 0；N5 → 第 3 步等回合完成的断言 10 s 超时；N6 → 第 5 步逻辑路径；N7 → 第 5 步 `sandbox`；N8 → 第 6 步分区计数；N9 → REST 回读；N10 → oracle「expected exactly one post-logout-reload … 401, got 0」；N11 → 旅程通过而清点 4 → 5（手工删除后回到 4）；N12 → oracle `console.error: Failed to load resource: the server responded with a status of 404 (Not Found)`。
   - **N5 另有探针**：被删时会话与助手消息都是 `running`、有一条未决的 bash 审批，DELETE 返回 204，之后不在列表里——proposal 偏差 3（不实现 409 回退）的实证。
   - **N12 与规格的括注一致**：不离开会话页、DELETE 后停留 5 s，重连 404 出现。N1–N9 的失败路径上页面都还在会话页，但没有出现这条 404——测试在约 3 s 的重连窗口之前就结束了。
-- **E8 门禁**（真实仓库）：`make lint`、`make typecheck`、`make anti-drift`、`bash scripts/size-guard.sh`、`npm test --workspace web`（86 文件 / 1795 例）、`make test-guardrails`（oracle 816 PASS）、`openspec validate` 退出 0。**jscpd 179**（基线 178）：唯一新增的克隆是登录块，`web/e2e/ui-walk-sessions.spec.ts` 111–117 行与 `web/e2e/ui-walk.spec.ts` 89–95 行；登出块没有克隆。
+- **E8 门禁**（真实仓库）：`make lint`、`make typecheck`、`make anti-drift`、`bash scripts/size-guard.sh`、`npm test --workspace web`（86 文件 / 1795 例）、`make test-guardrails`（oracle 816 PASS）、`openspec validate` 退出 0。**jscpd 179**（基线 178）：唯一新增的克隆是登录块，`web/e2e/ui-walk-sessions.spec.ts` 110–116 行（fix pass 1 之后的行号）与 `web/e2e/ui-walk.spec.ts` 89–95 行；登出块没有克隆。
 - **E9**：禁用模式的清点零命中。
 - **相对 D2 的小出入**：点场景胶囊之前多断言一次初态（`true/false/false`）；多断言用户气泡文本等于提示词；预览 iframe 用 `locator.contentFrame()`；离开会话页只等 `/settings` 的 h1；等回合完成的显式超时取 10 s，是全文件唯一的显式超时；空间选项按其中的精确文本过滤而不是按拼接的可访问名（与旧旅程选 `smoke-fixture` 的写法一致）；第一版的 `test()` 包装段与旧 spec 构成一个不在登录 / 登出块上的克隆，改成本文 D2 给出的写法后消失。
-- **观察**：390px 下顶栏 `产物面板`、footer 触发按钮、Popover、Dialog、抽屉都可直接操作；场景 Toast（2400 ms）在真实回合期间自然消失，mobile 读侧栏之前先等它消失。抽屉与 Dialog 的焦点归还没有验证（本刀不要求）。
+- **观察**：390px 下顶栏 `产物面板`、footer 触发按钮、Popover、Dialog、抽屉都可直接操作。抽屉与 Dialog 的焦点归还没有验证（本刀不要求）。
+
+## 评审第一轮与 fix pass 1（1/2）
+三席（correctness；test-evidence + spec-compliance；integration + invariant）无 P0；integration 席 clean。correctness 与 test-evidence 两席独立给出同一条发现，采纳；fix pass 1 只动 `web/e2e/ui-walk-sessions.spec.ts`（364 → 374 行）：
+- **`查看详情` 的落点断言在全新状态（即 CI）下是假通过**。原断言只读落定后的 URL 与切换器文本；文件页在 `ws` 缺失或未知时回退到第一个空间并用 `replace` 改写 URL，而全新库里 `ui-walk-sessions` 就是第一个空间。产品若退化成 `navigate("/files")`，原断言照样通过。改为在点击前注册主帧 `framenavigated`，断言点击后的第一次导航就是 `/files?ws=<id>`（整串比较）；落定态断言保留。
+  - 实证（变异构建：只把 `file-changes-card.tsx` 的 `navigate` 改成 `/files`，另出一份静态目录，产品源码与真实构建不动）：全新状态上，旧 spec 对变异构建**通过**（假通过成立）；新 spec 对变异构建失败在第 5 步（`Expected "/files?ws=<id>"`，`Received "/files"`），其后残留为零；新 spec 对正常构建在全新状态与长驻栈上都通过。
+  - 新增负对照 **N13**（首次导航断言里的期望 `ws` 改成另一个 id）→ 第 5 步该断言。N1–N12 在新文件上重跑，全部仍失败在预期位置，残留口径同前。
+- **201 / 409 进日志**：第 1 步的计时行带上 `POST /api/workspaces` 的状态码。全新状态的完整运行日志里 `desktop-light` 是 201、`mobile-dark` 是 409——E3 的这条不再是推断。
+- **去掉了场景 Toast 的等待**：原实现在读侧栏前先等 Toast 消失，注释引的 #643 已由 `escape-fallback.ts` 解决。去掉后 `mobile-dark` 连跑五遍通过；临时探针确认 Toast 在场时覆盖层被 `Escape` 关闭。旅程因此缩短约 1.8 s。
+
+fix 后的实测（真实仓库 / 实现者沙箱）：
+- 长驻栈只跑新 spec：连续五遍 10/10，`desktop-light` 2.6–2.7 s、`mobile-dark` 3.0–3.1 s，一遍合计约 6.3 s；前后会话总数相同、无 running、无绑定残留。
+- 全新状态完整 `make ui-walk`：退出 0，`5 passed, 1 skipped`；新旅程 4.7 s / 3.0–3.1 s（`desktop-light` 含 omp 冷启动），旧旅程 9.9–10.4 s / 13.1 s，总计 31.5–32.1 s。
+- `make lint`、`make typecheck`、`make anti-drift`（jscpd 179，仍只有登录块一处）、`npm test --workspace web`、`make test-guardrails` 退出 0；禁用模式清点零命中。
+
+**E10（CI）**：第一轮 head `15e7767` 的 `ui-walk` job 通过（run 37043461057）：`5 passed, 1 skipped`，新旅程 5.5 s / 5.1 s，旧旅程 14.1 s / 17.7 s，Playwright 总计 44.7 s，job 1 分 29 秒。CI 比本机慢约 15–35%。fix pass 1 之后的 head 的 CI 数字记在归档 PR。按 CI 口径，第 1–6 步连同登录登出用掉约 5.5 s（fix 前），每测试 30 s 留给 #541 / #557 约 24 s。
+
+评审另外指出、按原样记录的事项：
+- **没有负对照、靠构造有判别力的断言**：快捷任务五项全文、`任务启动于 未选择` 与 `搜索工作空间`（按精确可访问名操作）、折叠块默认收起、`HTML` 徽标、抽屉行、iframe 内标题、侧栏「恰一次」、`dir` 等于名字。「无 +/−」与「无审批条」是按类名 / group 名断言不存在，名字一改就会空过——目前与产品源码一致，后者与 `ui-walk-stop.ts` 同写法。
+- **N2 的竞争次序没有区分**（DELETE 先到还是 prompt 先被受理），两种先后的残留都为零只有代码走读支持其一。
+- **负对照只在 `desktop-light`、长驻栈上做**；没有一条失败发生在页面位于 `/files` 之后，也没有 `mobile-dark` 的失败路径清点。
+- **旧旅程的覆盖面有一处静默变化**：全新状态下 `desktop-light` 四路由遍历时的 `/files` 以前是空态，现在默认落在含一个文件的 `ui-walk-sessions`；空态在 1440 / 1024 / 880 三档的列宽与溢出断言不再有真实浏览器覆盖。规格没有要求空态。
+- **uid 隔离下真 omp 的 `write`** 没有任何证据（`uid-isolation` job 不跑 ui-walk，`session-meta.hurl` 只用 `WORKBUDDY_THINK`）。
+
+给后续 issue 的提示：
+- **#557**：现在的无条件 `finally`（接受 404）已经容得下第 11 步的 UI 删除，不必改回条件式（proposal 偏差 4 的说法可以不执行）；规格里「After step 6 the journey leaves the session page …」一句届时随 MODIFIED 改写。
+- **#541 / #557 的预算**：等回合完成的显式超时是 10 s，三个真实回合的最坏情况正好等于每测试 30 s；按实测有余量，但要各自实测。
+- **#541 的定位**：行菜单的可访问名是 `更多操作：<标题>`，而标题每次都是 `WORKBUDDY_THINK WO`；复用状态上有残留会话时会重名，应经 `aria-current="true"` 的条目定位。
 
 ## Seams under test
 - 真实浏览器（Playwright Chromium）对编译后的应用、真 omp 与受控上游；没有任何桩。

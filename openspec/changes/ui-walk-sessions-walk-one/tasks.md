@@ -25,6 +25,6 @@ Fixture level: expanded
 
 ## 通用纪律（继承父 tasks.md）
 - [x] 改动只有 `web/e2e/ui-walk-sessions.spec.ts`（新）与 `web/playwright.config.ts` 的两行；其它被跟踪文件零 diff。
-- [x] 没有 RED 阶段（产品行为已在 master）；负对照 N1–N12 逐条记录失败所在的步骤。
+- [x] 没有 RED 阶段（产品行为已在 master）；负对照 N1–N13 逐条记录失败所在的步骤。
 - [x] `make lint`、`make typecheck`、`make anti-drift`（jscpd 至多 178 → 180，且新增的只落在登录块或登出块）、`bash scripts/size-guard.sh`、`npm test --workspace web`、`make test-guardrails` 退出 0；`openspec validate ui-walk-sessions-walk-one --strict --no-interactive` 通过。
-- [ ] 实测时长（本地全新状态、复用状态；CI）写进 PR。
+- [x] 实测时长（本地全新状态、复用状态；CI）写进 PR。
