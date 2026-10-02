@@ -134,6 +134,8 @@ async function run() {
 
 变异自检（实现者在沙箱里做，做完还原，写进报告；每个至少打红一例）：`sandbox` 改成 `allow-scripts allow-same-origin`；去掉 `sandbox`；挂载时预取；`srcDoc` 换成经 `URL.createObjectURL` 的 `src`；卡片里内嵌 iframe；去掉拉取中的不并发门（`controller.current` 判断）且按钮不禁用；单独去门；`busy` 只禁用被点的那个按钮；卸载时不 abort；卸载后才回来的图片不撤销；迟到检查只管图片（卸载后才回来的文本照样写剪贴板）；不传 `returnFocus`；`returnFocus` 恒指卡头按钮；下载后不撤销；点击前就撤销；`click()` 返回后同步撤销（不延后）；截断的文本照样复制；截断时不显示提示；失败时照样开 Dialog；abort 也出 Toast；401 出 Toast；类型不符的图片不撤销；标签用原始扩展名（`chart.PNG` 的 `PNG` 看不出来，用 `app.ts` → `ts`）；`jpeg` 的标签为 `JPEG`；文件名取整条路径；请求用 `workspace.dir` 或逻辑路径而非空间 id 与相对路径；空间不可解析时照样渲染；产物卡放到文件变更卡之前；放到 `已停止` 徽章之后；user 消息也渲染；计入 running 步骤的变更。
 
+评审第 1 轮后追加的变异 F1–F8（`indexOf(".")`、文件名取第一个 `/` 之后、条件退回 `dot === -1`、不经 `summarizeChanges` 的 `flatMap`、缓存预览不重取、只禁用 html 卡、`key={index}`、卸载后剪贴板完成不出 Toast）分别打红 H1–H6。
+
 ## 已知残留
 1. #522 合入前服务端不产生 `changes`，产物卡只在快照已带 `changes` 时出现；真实链路与真实浏览器证据归 #522、8.2a。
 2. `sandbox="allow-scripts"` 的 iframe 是不透明源：读不到应用的 cookie 与 API 响应，但其中的脚本可以向任意地址发网络请求。没有 `allow-modals`、`allow-popups`、`allow-forms`、`allow-top-navigation`，所以弹窗、开新窗口、提交表单、顶层导航都被禁。站点未设 CSP（父 design Risks）。
