@@ -7,12 +7,12 @@ const DEFAULT_BASE_URL = "http://127.0.0.1:3000";
 
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: "ui-walk.spec.ts",
+  testMatch: "ui-walk*.spec.ts",
   fullyParallel: false,
   workers: 1,
   retries: 0,
   timeout: 30_000,
-  globalTimeout: 150_000,
+  globalTimeout: 300_000,
   forbidOnly: true,
   reporter: "list",
   outputDir: join(tmpdir(), "workbuddy-ui-walk-results"),
