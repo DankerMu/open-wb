@@ -23,7 +23,7 @@
 5. **「四条新变异先 FAIL、后 PASS」的含义**：oracle 对配方是整表相等，基线更新之后任何偏离都会被拒。四条里只有「遗漏」有真正的 RED：Makefile 已五文件而 oracle 基线仍是四文件时，「遗漏」后的候选正是旧基线，oracle 接受它，该条输出 `FAIL …(rc=0 want=1)`。另外三条在新旧基线下都被拒，没有「先不被拒」的阶段。RED 记录按阶段如实写（design D4），不把「查找串不存在导致缺锚」说成「缺失断言」。
 6. **既有变异标签不改名**：`contract Make smoke four-file order mutation` 的名字在五文件之后不再贴切；issue 要求按标签锚定同步，本刀只改它的查找/替换串，不改标签。
 7. **CI 的 smoke job 每次只跑一遍 `make smoke`**（`.github/scripts/ci-compiled-server.sh:113`，全新 DB）：父文「`make smoke` runs twice」「第二遍在已采用的空间上通过」由本地取证（同一 DB 与沙箱连跑两遍），CI 证明的是首跑（201）路径。
-8. **change A 的 delta 也要 rebase**：`openspec/changes/s1c-turn-control-governance/specs/chat-harness/spec.md` 里的「手动真实上游冒烟入口」与本刀之前的主规格逐字相同、尚未随父 change 归档。它若晚于本刀整体归档，会把本刀加进主规格的两处增量与两个 Scenario 覆盖掉；A 的父 change 归档前须把这条 Requirement 重同步到主规格现文。
+8. **change A 的 delta 也要 rebase**：`openspec/changes/s1c-turn-control-governance/specs/chat-harness/spec.md` 里的「手动真实上游冒烟入口」与本刀之前的主规格逐字相同、尚未随父 change 归档。它若晚于本刀整体归档，会把本刀加进主规格的两处增量与两个 Scenario 覆盖掉；change A 归档前须把这条 Requirement 重同步到主规格现文。
 9. **oracle 同步不能只靠 FAIL 清单**（issue 的说法是「查找串计数 ≠1 → `exit 2` 记 FAIL」）：旧四文件串是新五文件串的前缀，Makefile 追加参数之后，多数 Makefile 族变异的查找串仍恰好命中一次，照旧 PASS，但候选是残缺的（替换发生在 `smoke/files.hurl` 与 ` smoke/session-meta.hurl` 之间）。这些变异按标签清单与兜底 grep 逐条同步，并留一份「同步后残留的旧文件列表串」清单作证据（design D4）。
 
 ## Impact

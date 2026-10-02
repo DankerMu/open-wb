@@ -83,7 +83,7 @@
 - 「只改一侧被拒」：Makefile 已五文件而 AGENTS.md 仍四文件 = 既有 `stale HTTP evidence`（同步后）；AGENTS.md 已五文件而 Makefile 仍四文件 = 新增 1。
 - RED 记录（按阶段如实；`cm` 的判据是「替换后 `contract()` 的退出码等于期望值 1」，缺锚另记 `missing anchor`）：
   - 阶段 A（只加四条新 `cm`，Makefile/AGENTS/基线未动）：新增 1、2、4 的查找串是五文件串，旧 Makefile 里没有 → 缺锚 FAIL；新增 3 的锚点是 `smoke-live` 配方的尾部，旧 Makefile 里恰一次 → 直接 PASS。这一阶段只说明前提未就绪。
-  - 阶段 B（Makefile 已五文件；AGENTS.md 与 oracle 基线未动；四条新 `cm` 已加）：真实仓库上的 `contract()` 不通过（基线自检 FAIL）；锚点仍在的 `cm` 因「反正被拒」而 PASS——所以这一阶段的绿没有意义。**新增 1 的真 RED 在这里**：它把配方换回四文件，候选恰是旧基线，`contract()` 接受 → 输出 `FAIL … drop session-meta.hurl … (rc=0 want=1)`。
+  - 阶段 B（先于同步步骤 1：只改 Makefile 为五文件；AGENTS.md 与 oracle 基线未动；四条新 `cm` 已加）：真实仓库上的 `contract()` 不通过（基线自检 FAIL）；锚点仍在的 `cm` 因「反正被拒」而 PASS——所以这一阶段的绿没有意义。**新增 1 的真 RED 在这里**：它把配方换回四文件，候选恰是旧基线，`contract()` 接受 → 输出 `FAIL … drop session-meta.hurl … (rc=0 want=1)`。
   - 阶段 C（全部同步）：`make test-guardrails` 全 PASS，四条新变异各自 PASS（被拒）。
   每个阶段保留命令与输出片段。新增 2、3、4 没有「先不被拒」的阶段（整表相等），记录里照实写。
 
@@ -91,7 +91,8 @@
 先 `npm run build --workspace web && npm run build --workspace server`。`OMP_BIN` 指向仓库外已校验的 v18.0.10 二进制或沙箱内 `make omp-fetch` 的产物；不在真实仓库里建符号链接。两种形态都做（先例：`openspec/changes/archive/2026-09-28-smoke-fork/design.md`）：
 - **形态 (a) CI 同款包装**：以 CI 的 env（`HOST`、`PORT`、`SMOKE_BASE_URL`、`DB_PATH`、`STATIC_ROOT=<仓库>/smoke/fixtures/static`、`OMP_BIN`、`OMP_STATE_DIR`、`SANDBOX_ROOT`、`MODEL_UPSTREAM_BASE_URL`、`MODEL_UPSTREAM_API_KEY=fake`、`FAKE_UPSTREAM_PORT`、`RUNNER_TEMP`）连跑两次 `bash .github/scripts/ci-compiled-server.sh smoke`，两次用**同一个** `RUNNER_TEMP`/`DB_PATH`/`SANDBOX_ROOT`（脚本只 `mkdir -p` 与 `cp -R`，不清库）。第一次走 201，第二次走 409 采用；两次之间服务重启（脚本自带启停）。
 - **形态 (b) 调用方自起的长驻服务**（主规格 verification-harness Scenario「文件烟测独立且可重复」的形态）：自己启动假上游与编译后的 server（同样的 env，全新 DB 与沙箱，先 `cp -R smoke/fixtures/sandbox/u1 <SANDBOX_ROOT>/`），对同一个运行中的服务连跑两遍 `make smoke`，再从空 cookie 单独跑一遍 `smoke/session-meta.hurl`（独立性），最后停掉自己起的进程。负对照 N1–N4 与下面的取证都在这个形态上做。
-- 201/409 的取证：服务不打请求日志（`server/src/app.ts` `logger: false`），所以用审计——形态 (b) 三遍之后以 `zhangsan` 查 `GET /api/audit`，`workspace.create` 且名称为 `smoke-sessions` 的事件恰一条（首遍 201 创建，后两遍 409 采用）。
+- 201/409 的取证：服务不打请求日志（`server/src/app.ts` `logger: false`），所以用审计——形态 (b) 三遍之后以 `zhangsan` 查 `GET /api/audit?limit=200`（默认窗口 50 条，不够），`kind` 为 `workspace.create` 且 `title` 为 `创建工作空间 smoke-sessions` 的事件恰一条（首遍 201 创建，后两遍 409 采用；空间名在 `title` 里，`detail` 只有 `root`，见 `server/src/workspaces/store.ts:109-115`）。
+- 取证次序：H1 的审计清点与 H2 的列表检查先做，负对照 N1–N4 后做——负对照故意让文件中途失败，会留下 `冒烟会话` 行、`other_id` 行与登录态。
 - 库与 `SANDBOX_ROOT` 必须同生命周期：库在而空间目录被清掉时，0b 仍是 409、1a 仍是 201，但 4a 的回合会因空间根不存在而失败（`server/src/sessions/session-cwd.ts`）。Hurl 文件头注释写明这一点。
 
 负对照（证明断言咬得住，做完还原；不入库）：
@@ -127,7 +128,7 @@ Guardrails（`make test-guardrails`）：
 
 真实 HTTP（`make smoke`，真 omp v18.0.10 + 受控假上游 + 编译后的 server）：
 - **H1** 形态 (a) 两次、形态 (b) 两遍均退出 0；Hurl 输出里五个文件都执行、`session-meta.hurl` 成功。形态 (b) 三遍之后 `smoke-sessions` 的 `workspace.create` 审计恰一条（首遍 201、其后 409）。
-- **H2** 形态 (b)：两遍之后从空 cookie 单独再跑一遍 `smoke/session-meta.hurl` 通过（独立性）；之后以 `zhangsan` 查 `GET /api/sessions`，没有标题为 `冒烟会话` 的会话、没有 `running` 会话。
+- **H2** 形态 (b)：两遍之后从空 cookie 单独再跑一遍 `smoke/session-meta.hurl` 通过（独立性）；之后以 `zhangsan` 查 `GET /api/sessions`，没有标题为 `冒烟会话` 的会话、没有 `title` 为 null 的会话（泄漏的 `other_id` 会是这个样子；`chat.hurl` 留下的会话都有标题）、没有 `running` 会话。
 - **H3** 负对照 N1–N4 各自非零且失败点正确。
 - **H4** CI：`smoke` 与 `uid-isolation` 两个 job 通过（PR 上取证）。
 
