@@ -23,13 +23,13 @@
 | 0a | `POST /api/auth/login` zhangsan | 200，cookie 形状，body 恰为 Principal `u1` |
 | 0b | `POST /api/workspaces {"name":"smoke-sessions"}` | status ∈ {201, 409} |
 | 0c | `GET /api/workspaces` | 该名称恰一条；捕获 `workspace_id` |
-| 1a | `POST /api/sessions {"workspaceId":"{{workspace_id}}","scene":"code"}` | 201；`$.*` count == 8；`title` null、`status` `idle`、`scene` `code`、`workspaceId` == 捕获值、`pinnedAt` null；捕获 `session_id` |
+| 1a | `POST /api/sessions {"workspaceId":"{{workspace_id}}","scene":"code"}` | 201；`$.*` count == 8 且八个键逐个点名：`id` 为 32 位小写 hex、`title` null、`status` `idle`、`createdAt`/`updatedAt` 为整数、`scene` `code`、`workspaceId` == 捕获值、`pinnedAt` null；捕获 `session_id` |
 | 1b | `GET /api/audit?limit=1` | `events` count == 1；`kind` `session.bind`、`actorId` `u1`、`workspaceId` == 捕获值、`detail.sessionId` == `session_id` |
 | 2a | `POST /api/sessions {"workspaceId":"00000000000000000000000000000000","scene":"code"}` | 404，body 恰为 `not_found` 信封 |
 | 2b | `POST /api/sessions {"scene":"code","color":"red"}` | 400，body 恰为 `bad_request` 信封 |
 | 2c | `GET /api/audit?limit=1` | 仍是 `session.bind` 且 `detail.sessionId` == `session_id` |
-| 2d | `POST /api/sessions`（无 body、无 Content-Type） | 201；`$.*` count == 8；`workspaceId` null、`scene` null；捕获 `other_id` |
-| 3a | `PATCH /api/sessions/{{session_id}} {"title":"冒烟会话","scene":"design","pinned":true}` | 200；`$.*` count == 8；`title` `冒烟会话`、`scene` `design`、`pinnedAt` 非 null、`workspaceId` == 捕获值 |
+| 2d | `POST /api/sessions`（无 body、无 Content-Type） | 201；`$.*` count == 8 且八个键逐个点名（`id` hex、`title` null、`status` `idle`、时间戳为整数、`pinnedAt` null）；`workspaceId` null、`scene` null；捕获 `other_id` |
+| 3a | `PATCH /api/sessions/{{session_id}} {"title":"冒烟会话","scene":"design","pinned":true}` | 200；`$.*` count == 8 且八个键逐个点名：`id` == `session_id`、`status` `idle`、`createdAt`/`updatedAt` 为整数、`title` `冒烟会话`、`scene` `design`、`pinnedAt` 为整数、`workspaceId` == 捕获值 |
 | 3b | `PATCH … {"color":"red"}` | 400 `bad_request` 信封 |
 | 3c | `GET /api/sessions` | 200；`session_id` 那一条的 title/scene/`pinnedAt` 非 null/`workspaceId` |
 | 3d | `PATCH … {"pinned":false}` | 200；`pinnedAt` null；`title` `冒烟会话`、`scene` `design` |
@@ -44,9 +44,11 @@
 | 6e | `DELETE /api/sessions/{{session_id}}` | 404 信封 |
 | 7a | `POST /api/auth/logout` | 204 |
 | 7b | login lisi | 200 Principal `u3` |
+| 7b′ | `GET /api/sessions`（`lisi`） | 200；捕获 `lisi_session_count`（`$.sessions` 的条数；服务归调用方所有，不假定为 0） |
 | 7c | `POST /api/sessions {"workspaceId":"{{workspace_id}}"}` | 404 信封 |
 | 7d | `PATCH /api/sessions/{{other_id}} {"title":"x"}` | 404 信封 |
 | 7e | `DELETE /api/sessions/{{other_id}}` | 404 信封 |
+| 7e′ | `GET /api/sessions`（`lisi`） | 200；`$.sessions` 条数 == `lisi_session_count`（被拒的绑定创建没有留下会话行） |
 | 7f | logout | 204 |
 | 7g | login zhangsan | 200 |
 | 7h | `GET /api/sessions/{{other_id}}/messages` | 200；`session.title` null（`lisi` 的 PATCH 没有生效） |
@@ -111,7 +113,7 @@
 - `smoke/chat.hurl`、`files.hurl`、`public.hurl`、`auth.hurl`：零 diff；同一次 `make smoke` 里先于本文件运行，共享同一个服务与库（本文件的审计断言用 `detail.sessionId` 与它们留下的事件区分）。
 - `uid-isolation` job：同一条 `make smoke`，`OMP_USER=omp`。绑定空间的回合以空间根为 cwd；空间目录由 `core/sandbox/dirs.ts` 建成组可写（2770），omp uid 属该组。本机（macOS，同 uid）无法验证，CI 是判别性检查——那里失败是真实发现，不是 hurl 写法问题。
 - `scripts/test-guardrails.sh` 的其它守卫与 `.github/scripts/**`：零 diff。
-- constraints registry（`constraints.yaml`）的 smoke surface：命令与 evidence 不含文件数（已 grep：仓库内把 `make smoke` 写成四文件的非规格文件只有 Makefile、AGENTS.md、oracle 与一处历史验收记录）。
+- constraints registry（`constraints.yaml`）的 smoke surface：命令与 evidence 不含文件数。仓库内把 `make smoke` 写成四文件的非规格文件：Makefile、AGENTS.md、oracle（本刀同步）；`docs/acceptance/demo-parity-checklist.md:300`（历史验收记录，不改）；`IMPLEMENTATION_PLAN.md:29`（「What Already Exists」现状清单，写作 `smoke/{public,auth,chat,files}.hurl`——花括号写法，最初的 grep 没命中，评审发现；不在本 issue 的 PR 边界内，见「已知残留」10）。
 
 ## Must-preserve
 - 既有四个 Hurl 文件的全部断言与次序；`make smoke` 配方除追加的一个参数外逐字节不变；`smoke-live` 不变。
@@ -133,7 +135,7 @@ Guardrails（`make test-guardrails`）：
 - **H4** CI：`smoke` 与 `uid-isolation` 两个 job 通过（PR 上取证）。
 
 ## 交付记录
-- 文件：`smoke/session-meta.hurl` 285 行（34 个请求）；`Makefile` 1 行；`AGENTS.md` 1 行；`scripts/test-ci-harness.sh` 改 9 行、加 1 行（`cm` 229 → 233，无标签改名或删除）。
+- 文件：`smoke/session-meta.hurl` 第一轮 285 行、32 个请求条目（一次运行实测执行 34 次请求：两条轮询各重试一次）；`Makefile` 1 行；`AGENTS.md` 1 行；`scripts/test-ci-harness.sh` 改 9 行、加 1 行（`cm` 229 → 233，无标签改名或删除）。
 - **G1**：`make test-guardrails` 退出 0，ci-harness oracle 816 PASS / 0 FAIL（基线 812 + 4），四条新标签各 `PASS … (rc=1)`。
 - **G2**（四条新标签在各阶段的表现，与 D4 的预测一致）：
 
@@ -151,6 +153,11 @@ Guardrails（`make test-guardrails`）：
 - **H2**：空 cookie 单独跑 `smoke/session-meta.hurl` 退出 0（34 请求）；之后 `GET /api/sessions` 无 `冒烟会话`、无 null 标题、无 `running`。
 - **H3**：N1–N4 各自退出 4，失败点依次为 4d+5 的 `thinking`、1a 的键数、6b 的 `detail.sessionId`、7h 的 `session.title`。负对照是改一行的临时副本单独跑（不是整条 `make smoke`）；交付文件在负对照前后逐字节相同。
 - 真 omp v18.0.10 下的观察：`thinking` 三分片逐字合并到达；审批轮询与 done 轮询各只重试 1 次；done 之后立刻 DELETE 返回 204，下一个请求即读到 `session.delete` 审计，该会话的 omp 进程随之退出，服务日志无报错；绑定会话的 omp 以空间根为 `--cwd`。
+- **H4**：PR #742 的 CI run 37017996819（head `56bae2b`）九项检查全部通过；`smoke` 与 `uid-isolation` 两个 job 的日志都是 `Success smoke/session-meta.hurl (34 request(s) …)`、`Executed files: 5`、`Executed requests: 100`——绑定工作空间的回合在 `OMP_USER=omp` 下通过（确认命令：`gh run view 37017996819 --repo DankerMu/open-wb --log | grep -E 'Success smoke/|Executed files:'`）。
+- **fix pass 1**（评审采纳的两处覆盖缺口，只改 `smoke/session-meta.hurl`：285 → 310 行，32 → 34 个条目，一次运行 36 次请求）：
+  - 八键逐键点名：第一轮只断言键数与其中五个键的值，`createdAt`/`updatedAt` 的键名没有被点到，键数对而键名改了的 DTO 会通过。现在 1a、2d、3a 三处都把八个键逐个断言（先对真实服务核过形状：`id` 32 位小写 hex，时间戳与置顶后的 `pinnedAt` 是整数）。
+  - 越权创建不留会话：第一轮只断言 404。现在以 `lisi` 自己的会话列表条数在三次越权尝试前后相等来证明（7b′、7e′）。
+  - 复验：形态 (a) 两次、形态 (b) 两遍加单独一遍均退出 0（5 文件 102 请求）；编排者在真实仓库上形态 (a) 两次同样通过；`make test-guardrails` 816 PASS / 0 FAIL。负对照 N5（把 1a 的 `$.createdAt` 改成不存在的 `$.created_at`）失败在 1a，N6（把后置条数期望改成观测值加一）失败在 7e′——它们只说明新断言确实被求值，不能代替一个行为异常的服务端。
 - 耗时：`make smoke` 由四文件 66 请求约 8.3 s 变为五文件 100 请求约 8–10 s；`session-meta.hurl` 自身约 1.6 s。
 
 ## 已知残留
@@ -161,10 +168,13 @@ Guardrails（`make test-guardrails`）：
 5. **`lisi` 是管理员**：越权断言证明的是「管理员也拿不到别人的会话与空间绑定」；普通成员的越权由服务端测试覆盖。
 6. **两个名字不再贴切**：变异标签 `four-file order`（偏差 6）与 verification-harness 的 Scenario 标题「文件控制面反映已执行四文件」（偏差 3）；两者都是稳定标识，不改名。
 
-7. **真 omp 下两件事只有实现期的 `make smoke` 能证明**：`thinking` 三分片是否逐字合并到达；回合 done 之后立刻 DELETE 时真实进程的收尾路径。fixture 评审只核对了代码。
+7. **真 omp 下两件事在实现前只有代码依据**：`thinking` 三分片逐字合并到达、回合 done 之后立刻 DELETE 的收尾路径。实现期的真实运行已观察到两者成立（见「交付记录」）；DELETE 必为 204 另有读码依据——终态提交与回合释放在同一同步段，GET 看到 `done` 时已无活动回合。
 
 8. **`thinking` 文本不符时要等满约 90 秒才失败**：D1 把 `thinking` 断言与 done 轮询放在同一条带 `retry: 180` 的 GET 里，文本写错时表现为重试耗尽而不是即时不匹配（N1 实测 198 个请求、92 秒）。与 `chat.hurl` 的 `content` 断言同一性质。
 9. **空间目录的权限位在 macOS 上是 `0770`**（没有 setgid；`server/src/core/sandbox/dirs.ts` 写的是 `0o2770`）：本机观察，原因未查。`uid-isolation` 依赖的是 Linux 上该目录的组与权限位，由 CI 的 `uid-isolation` job 判别（H4）。
+10. **`IMPLEMENTATION_PLAN.md:29` 的现状清单仍写四个文件**：该文件不在本 issue 的 PR 边界内；收尾 issue #542（父 tasks 9.1，改 `IMPLEMENTATION_PLAN.md` 的 S1c 节）合入时一并改成五文件，已在 #542 留言。
+11. **`MODEL_REASONING=off` 下的 `thinking` 断言没有运行证据**：规格写「不论 `MODEL_REASONING` 取值」，本刀的所有运行都是缺省 on；off 时仍产出 thinking 只有读码依据（omp 在响应侧解析 `reasoning_content` 不依赖模型条目的声明）。定案命令：以 `MODEL_REASONING=off` 启动服务后单跑 `smoke/session-meta.hurl`。
+12. **`session-meta second recipe line` 变异同时改了第二行**：它的被拒也可以用「第二行不等于基线」解释；整套变异里没有「基线两行不动、只追加第三行配方」的候选（master 上即如此），oracle 的整表相等会拒绝它。
 
 ## Seams under test
 - 真实 HTTP、真实 omp v18.0.10、编译后的 server、受控假上游：没有 mock。
