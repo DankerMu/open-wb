@@ -76,6 +76,7 @@
   - HN5 把 `/todo` 轮询里「`steps` 没有任何元素」那条断言的消息 id 换成 `{{assistant_id}}`（第 4 步的回合，有一个 bash 步骤）→ 失败：证明该写法在有步骤时会咬。
   - HN6 `/todo` 轮询里用户正文的期望改成 `/todo `（带尾随空格）→ 失败。
   - HN8（fix pass 1）第二条提示词去掉 `WORKBUDDY_THINK` → 第二个轮询条目的 `thinking` 断言失败（实得 null）。
+  - HN9（fix pass 1）`/todo` 轮询里 `thinking == null` 的消息 id 换成 `{{assistant_id}}`（第 4 步的回合，有 thinking）→ 失败。
   - HN7 第二条提示词改成白名单内的 `/todo WORKBUDDY_THINK 冒烟`（omp 当命令执行，答 `Unknown /todo subcommand. …`）→ 第二个轮询条目的正文断言失败：证明断言分得清「被当命令执行」与「被模型回答」。
   - 每条失败的运行里，失败条目之后没有再发任何请求（hurl 在首个失败条目停止），POST 没有被重试（服务端访问日志或 hurl `--very-verbose` 的请求计数）。
 - **H4 结构**：`rg -n "retry" smoke/session-meta.hurl` 列出的每个 `[Options]` 都属于 messages GET 条目；`git diff` 里原有条目除注释标号外逐字不变。
@@ -97,7 +98,8 @@
   - UN9 REST 回读期望第 5 条 `content` 带前导空格 → 第 10 步的回读。
   - UN10 REST 回读期望第 4 条 `steps` 长度 1 → 第 10 步的回读。
   - UN12（fix pass 1）第二条提示词去掉 `WORKBUDDY_THINK`（`/session <uuid2>` 的原样）→ 第 10 步回读的 `thinking` 断言失败（实得 null）：证明内容见证有判别力。
-  - UN13（fix pass 1，机制对照，`mobile-dark`）：第 7 步里去掉「菜单已消失」与焦点断言、两个 `Escape` 连按 → 覆盖层关不掉，失败信息与 CI 上那次相同；恢复后连续 20 遍 `mobile-dark` 全绿。
+  - UN13（fix pass 1）REST 回读期望 `/todo` 的助手消息带 `thinking` → 第 10 步的回读（实得 null）。
+  - A1（fix pass 1，机制对照，`mobile-dark`；与 CI 的真实路径不完全相同——此时菜单还挂着——真实路径的复现见「评审与 fix pass 1」的节流对照）：第 7 步里去掉「菜单已消失」与焦点断言、两个 `Escape` 连按 → 覆盖层关不掉，失败信息与 CI 上那次相同；恢复后连续 20 遍 `mobile-dark` 全绿。
   - UN11 期望第三条助手消息里有一个步骤卡 → 第 10 步。
   - 另：#541 的 N13、N15（第 11 步）在 `desktop-light` 重跑，确认第 11 步在多出四条消息后仍有判别力。
 - **U6 CI**：PR 的 `smoke` 与 `ui-walk` job 通过；从日志记录时长。
@@ -108,7 +110,7 @@
 
 ## 已知残留
 1. **未转义的 `/session` 的行为没有真实栈证据**（平台 API 够不到）；以 HN7 / UN8 的白名单内对照代替。
-1a. **`/session …` 回合没有工具轮**（proposal 偏差 6）：「转义文本进模型后跑工具」没有 harness 证据。内容见证是 `thinking`：受控上游只在最新一条用户消息含 `WORKBUDDY_THINK` 时给出那段推理，所以它证明标记随转义后的文本到了模型；它不证明文本逐字完整（上游不回显输入）。
+1a. **`/session …` 回合没有工具轮**（proposal 偏差 6）：「转义文本进模型后跑工具」没有 harness 证据。内容见证是 `thinking`：受控上游只在最新一条用户消息含 `WORKBUDDY_THINK` 时给出那段推理，所以它证明标记随转义后的文本到了模型；它不证明文本逐字完整（上游不回显输入）。前提：本回合的用户消息确实在发给上游的请求里。若产品发起了模型回合却漏掉这条消息，「最新一条用户消息」会退回冒烟第 4 步 / 走查第 3 步的提示词——它们同样带 `WORKBUDDY_THINK`——断言会照样通过；这个状态经平台 API 造不出来，没有探针。
 1b. **有断言而没有负对照的句子**：`source` 为 `builtin`、完整文本 `/session WORKBUDDY_THINK <uuid2>` 无面板、「composer 解锁」、两处 `toBeFocused()`（`fill` / `press` 自己会先聚焦，判别力有限）、走查里的用户气泡 `/todo`、第 10 步两个回合的「无审批条」、REST 回读里的 `status` 与六个 `role` 的序列、冒烟 `/session …` 轮询的 `steps` / `approvals` 计数 0（同款写法在 `/todo` 轮询上有对照）、冒烟的 `session.title` 不变。偏差 3 说的「只有 REST 回读有判别力」对正文而言没有单独的对照（改正文的对照先在 DOM 断言上失败）；UN9、UN10、UN12 打的是回读独有的三条。
 1e. **首次 `Enter` 之后「消息仍各 1 条」是即时检查**：用户气泡不是乐观渲染，这条本身证明不了「没有发送」；兜住它的是随后的 `toHaveValue("/todo ")`（发送会清空草稿）、第二条用户消息的正文与回读的六条 `role`。
 1c. **「无面板」是即时的计数 0 断言**：目录已加载时面板随输入同步渲染，所以即时检查成立；它不等待，证明不了「稍后也不会出现」。
@@ -134,6 +136,8 @@
 - **内容见证**（偏差 6）：提示词改为 `/session WORKBUDDY_THINK …`，断言 `thinking`。对照 HN8 / UN12（去掉标记）只在 `thinking` 断言上失败（实得 null）；HN7（`/todo WORKBUDDY_THINK 冒烟`）在用户正文、正文、`thinking` 三条上失败；另有 HN9 / UN13（`/todo` 回合的 `thinking` 为 null 的对照）。
 
 fix 后：`make smoke` 连续两次退出 0（`session-meta.hurl` 43 个请求、约 2.6 s，文件 383 行）；长驻栈两个 project 连续五遍全绿（desktop 4.3–4.5 s、mobile 5.7–5.8 s）；全新状态完整 `make ui-walk` `5 passed, 1 skipped`，36.1 s；spec 文件 678 行；jscpd 179。
+
+fix 后 head 的 CI（run 37071520353）：`smoke` job 里 `session-meta.hurl` 43 个请求 / 3.2 s，整个 `make smoke` 12.2 s；`ui-walk` job `5 passed, 1 skipped`，58.3 s，新旅程 6.8 s / 7.6 s，旧旅程 13.8 s / 17.1 s，第 10 步约 0.2 s。复审（单席）无 P0–P2。节流复现与节流下的修复验证只做了第 7 步；第 8、11 步的守卫靠不节流的 20/20 与 CI。走查的两个 Scenario 没有提 `thinking`（冒烟的提了），断言在第 10 步的条文里。
 
 ## Seams under test
 - 真实 HTTP 与真实浏览器对编译后的应用、真 omp 与受控上游；没有任何桩。
