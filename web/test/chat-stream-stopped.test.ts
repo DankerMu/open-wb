@@ -68,6 +68,7 @@ describe("turn.end stopped reduction", () => {
         { id: 1, name: "bash", detail: "ls", output: "o", status: "stopped" },
         { id: 2, name: "read", detail: "a.txt", output: "text", status: "done" },
       ],
+      thinking: null,
       error: null,
     });
     expect(next.messages[0]).toBe(state.messages[0]);
@@ -93,6 +94,7 @@ describe("turn.end stopped reduction", () => {
       content: "",
       status: "stopped",
       steps: [],
+      thinking: null,
       error: null,
     });
   });

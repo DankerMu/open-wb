@@ -9,6 +9,7 @@ import { FollowTranscript } from "./scroll-follow.js";
 import { SESSION_STATUS_LABEL } from "./status-label.js";
 import { summarizeStepDetail } from "./step-summary.js";
 import type { ChatState } from "./stream.js";
+import { ThinkingBlock } from "./thinking-block.js";
 import { WelcomeIntro, WelcomePlaybooks } from "./welcome.js";
 import type { WelcomeOptions } from "./welcome-options.js";
 
@@ -110,6 +111,9 @@ const MessageArticle = memo(function MessageArticle({
         <BrandMark size={28} />
       </span>
       <div className="chat-msg-main">
+        {message.thinking ? (
+          <ThinkingBlock running={message.status === "running"} text={message.thinking} />
+        ) : null}
         <ApprovalBars approvals={message.approvals} onAnswer={onAnswerApproval} />
         <div className="chat-md">
           {stopped && message.content === "" ? (

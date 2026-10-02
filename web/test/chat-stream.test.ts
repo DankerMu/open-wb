@@ -40,6 +40,7 @@ const userView = {
   role: "user" as const,
   approvals: [] as [],
   content: USER_CONTENT,
+  thinking: null,
   status: "done" as const,
   steps: [] as [],
   error: null,
@@ -134,6 +135,7 @@ describe("Chat stream reducer", () => {
               status: "done",
             },
           ],
+          thinking: null,
           error: null,
         },
       ],
@@ -153,6 +155,7 @@ describe("Chat stream reducer", () => {
             content: "",
             status: "running",
             steps: [],
+            thinking: null,
             error: null,
           },
         ],
@@ -223,6 +226,7 @@ describe("Chat stream reducer", () => {
               status: "running",
             },
           ],
+          thinking: null,
           error: AGENT_FAILURE,
         },
       ],
@@ -250,6 +254,7 @@ describe("Chat stream reducer", () => {
               status: "failed",
             },
           ],
+          thinking: null,
           error: AGENT_FAILURE,
         },
       ],
@@ -287,6 +292,7 @@ describe("Chat stream reducer", () => {
           status: "failed",
         },
       ],
+      thinking: null,
       error: AGENT_FAILURE,
     });
 
@@ -300,6 +306,7 @@ describe("Chat stream reducer", () => {
       content: "",
       status: "running",
       steps: [],
+      thinking: null,
       error: null,
     });
     expect(frozenSnapshot).toEqual(snapshot);
@@ -329,6 +336,7 @@ describe("Chat stream reducer", () => {
           content: "",
           status,
           steps: [],
+          thinking: null,
           error: null,
         },
       ]);
@@ -358,6 +366,7 @@ describe("Chat stream reducer", () => {
         content: "",
         status: "failed",
         steps: [],
+        thinking: null,
         error: " exact error \u0000\uFEFF中文 😀 ",
       },
     ]);
@@ -490,6 +499,7 @@ describe("Chat stream reducer", () => {
       content: "",
       status: "done",
       steps: [],
+      thinking: null,
       error: null,
     });
   });
