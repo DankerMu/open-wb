@@ -10,6 +10,7 @@
 ## What Changes
 - 托管布局预建并持有 `<state>/home/.env`（`0640`，内容不管）；新 `ensureOwnedFile`。
 - spawn 环境显式设置 `PI_CODING_AGENT_DIR`（= 默认 agent 目录）与 `PI_CONFIG_FILES`（= overlay 路径）；sudo `--preserve-env` 同步。argv 不变（`--config` 保留）。
+- 评审后追加：同时钉 `PI_CONFIG_DIR=.omp`、`OMP_PROFILE=default`、`PI_PROFILE=default`（否则 profile / 配置根变量能绕过前两个；官方二进制实测 `PI_CONFIG_DIR=x` 单独注入即关闭 XDG 重定向，与 profile 合用可把配置根移到 cwd 下；五个全钉后同一份恶意 `.env` 无任何效果）；`OMP_STATE_DIR` 含 `:` 时启动失败。
 - 规格：omp-runtime MODIFIED「子进程 spawn 契约」「OMP_STATE_DIR 托管布局」+ ADDED「工作目录 dotenv 钉住」；sandbox-core ADDED「托管文件权限位」；omp-uid-isolation MODIFIED 两条；omp-test-harness MODIFIED 一句。ADR-0010/0012 同步。
 
 ## 残余
