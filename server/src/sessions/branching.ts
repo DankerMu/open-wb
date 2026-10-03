@@ -28,8 +28,11 @@ import type { ControlClaims, TurnStops } from "./turn-control.js";
 export type Resume = { ownerId: string; ompSessionFile: string | null; workspaceId: string | null };
 
 interface SkillsPort {
-  /** The platform skills right now (never cached); called only to judge content starting with `/`. */
-  skills(): readonly { name: string }[];
+  /**
+   * The platform and project skills of that session's cwd right now (never cached); called only
+   * to judge content starting with `/`.
+   */
+  skills(ownerId: string, workspaceId: string | null): readonly { name: string }[];
 }
 
 interface RegeneratePorts extends SkillsPort {
@@ -87,7 +90,7 @@ export class Regenerations {
       !TERMINAL.has(tree.session.status) ||
       user?.role !== "user" ||
       assistant?.role !== "assistant" ||
-      isCommand(user.content, this.#ports)
+      isCommand(user.content, this.#ports, resume)
     ) {
       throw new HttpError("bad_request");
     }
@@ -250,7 +253,7 @@ export class Forks {
     if (busy || tree.session.status === "running") {
       throw new HttpError("session_busy");
     }
-    if (isCommand(user.content, this.#ports)) {
+    if (isCommand(user.content, this.#ports, resume)) {
       throw new HttpError("bad_request");
     }
     if (resume.ompSessionFile === null) {
@@ -385,8 +388,12 @@ async function branchTo(runtime: SessionRuntime, entryId: string): Promise<Branc
 type StoredUser = { id: number; content: string };
 
 /** A whitelisted command turn left no omp `user` entry; the skill list is read only for `/` text. */
-function isCommand(content: string, ports: SkillsPort): boolean {
-  return content.startsWith("/") && classifyPrompt(content, ports.skills()).kind !== "text";
+function isCommand(content: string, ports: SkillsPort, session: Resume): boolean {
+  if (!content.startsWith("/")) {
+    return false;
+  }
+  const skills = ports.skills(session.ownerId, session.workspaceId);
+  return classifyPrompt(content, skills).kind !== "text";
 }
 
 /**

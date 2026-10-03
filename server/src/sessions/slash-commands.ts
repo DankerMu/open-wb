@@ -1,7 +1,7 @@
 /**
  * Slash command whitelist (#551, parent D15). omp runs any text starting with `/` through an exact
  * builtin lookup, so the host decides here, and only here, what a `/`-prefixed prompt is: one of
- * the two whitelisted builtins, a `/skill:<name>` invocation of a platform skill, or plain text.
+ * the two whitelisted builtins, a `/skill:<name>` invocation of a listed skill, or plain text.
  * `/todo import|export` is plain text (#704): omp reads or writes the path argument directly, with
  * no tool frame, step row or `files.changed`, and honours absolute paths, `~` and `..`.
  * `toWireText` prefixes one U+0020 to plain text so omp's `startsWith("/")` gate is false. That
@@ -12,11 +12,18 @@
  * of a YAML library: a skill it cannot read is left out and its `/skill:` stays plain text.
  * Host restrictions omp does not have (#706): a link is followed only inside `skills/`, and only
  * the first `MAX_SKILL_ENTRIES` entries are read.
+ * `listProjectSkills` (#773) reads `.omp/skills` of the session cwd and its ancestors inside the
+ * sandbox root under the same rules plus three, because those directories are writable by the omp
+ * uid; `sessionSkills` is the one set the command directory and the whitelist both use. omp also
+ * loads skills the host does not list (other provider directories, the managed `HOME`, above the
+ * sandbox root, entries these rules skip): they run and are recorded as text (ADR-0012 residual).
  */
 import {
   closeSync,
   constants,
   fstatSync,
+  lstatSync,
+  opendirSync,
   openSync,
   readdirSync,
   readSync,
@@ -24,6 +31,7 @@ import {
 } from "node:fs";
 import { join, sep } from "node:path";
 import { compareMigrationFilenames as compareCodePoints } from "../core/db/migration-assets.js";
+import { sessionCwdResolver, type WorkspaceRootOf } from "./session-cwd.js";
 
 interface BuiltinCommand {
   name: string;
@@ -35,6 +43,13 @@ interface BuiltinCommand {
 interface Skill {
   name: string;
   description: string;
+}
+
+/** One entry of a session's skill set: a platform skill or a project skill of its cwd. */
+interface SessionSkill extends Skill {
+  source: "skill" | "project";
+  /** True only for a project skill that replaces a platform skill of the same name. */
+  overrides: boolean;
 }
 
 type PromptClass =
@@ -65,6 +80,12 @@ const SKILL_PREFIX = "/skill:";
 const SKILL_MD_MAX_BYTES = 262144;
 /** Entries read per call, in SKILL.md path order; the rest get no filesystem access at all. */
 const MAX_SKILL_ENTRIES = 256;
+/** Entries enumerated in one project `skills` directory; one holding more is not listed at all. */
+const MAX_PROJECT_DIR_ENTRIES = 4096;
+/** Code points kept of a project skill's description. */
+const MAX_PROJECT_DESCRIPTION = 200;
+const PROJECT_SKILLS = "/.omp/skills";
+const SLASH = 0x2f;
 /** Host rule (omp validates nothing): `/skill:<name>` ends at the first U+0020, `/` is a path. */
 const SKILL_NAME = /^[^\s/]+$/;
 const TOP_LEVEL_KEY = /^(name|description|enabled):(.*)$/;
@@ -99,19 +120,97 @@ export function listSkills(agentDir: string): Skill[] {
   } catch {
     return [];
   }
-  const candidates = entries
-    .filter((entry) => !entry.startsWith("."))
-    .map((entry) => ({ entry, path: join(skillsDir, entry, "SKILL.md") }))
-    .sort((left, right) => compareCodePoints(left.path, right.path))
-    .slice(0, MAX_SKILL_ENTRIES);
-  const byName = new Map<string, Skill>();
-  for (const { entry, path } of candidates) {
-    const skill = readSkill(path, entry, inside);
-    if (skill !== null && !byName.has(skill.name)) {
-      byName.set(skill.name, skill);
-    }
+  return readSkillEntries(skillsDir, entries, inside, false).sort(byName);
+}
+
+/**
+ * The project skills of a session cwd: `<D>/.omp/skills` for `D` = `cwd`, its parent, and so on,
+ * stopping after the first `D` holding a `.git` entry (that `D` is still read; omp's `repoRoot`)
+ * or after `sandboxRoot`. The walk runs on kernel real paths kept as raw bytes: a resolved `cwd`
+ * that is neither the resolved `sandboxRoot` nor below it yields `[]` (the omp uid can put a link
+ * where a cwd is expected), and every `D` is a parent of the resolved `cwd`, hence a real
+ * directory inside the sandbox. Each directory is read by the rules of `listSkills` plus the three
+ * of `readProjectDir`; a description is cut to `MAX_PROJECT_DESCRIPTION` code points. A name found
+ * in a nearer `D` hides the same name farther up (omp v18.0.10: nearest project skill wins).
+ * Sorted by name, recomputed on every call, never throws: a failure for one `D` yields nothing
+ * for that `D`.
+ */
+export function listProjectSkills(cwd: string, sandboxRoot: string): Skill[] {
+  let root: Buffer;
+  let dir: Buffer;
+  try {
+    root = realpathSync.native(sandboxRoot, { encoding: "buffer" });
+    dir = realpathSync.native(cwd, { encoding: "buffer" });
+  } catch {
+    return [];
   }
-  return [...byName.values()].sort((left, right) => compareCodePoints(left.name, right.name));
+  const below = Buffer.concat([root, Buffer.from("/")]);
+  if (!dir.equals(root) && !dir.subarray(0, below.length).equals(below)) {
+    return [];
+  }
+  const byNearest = new Map<string, Skill>();
+  for (;;) {
+    for (const skill of readProjectDir(dir)) {
+      if (!byNearest.has(skill.name)) {
+        byNearest.set(skill.name, skill);
+      }
+    }
+    const parentEnd = dir.lastIndexOf(SLASH);
+    if (dir.equals(root) || hasGitEntry(dir) || parentEnd <= 0) {
+      break;
+    }
+    dir = dir.subarray(0, parentEnd);
+  }
+  return [...byNearest.values()].sort(byName);
+}
+
+/**
+ * The skills a session with this cwd can invoke: the platform skills, then the project skills,
+ * each group in name order. A project skill replaces the platform skill of the same name (omp runs
+ * the project one) and alone carries `overrides: true`. `cwd` is null when the session cwd cannot
+ * be resolved: no project skill.
+ */
+export function sessionSkills(
+  agentDir: string,
+  cwd: string | null,
+  sandboxRoot: string,
+): SessionSkill[] {
+  const platform = listSkills(agentDir);
+  const project = cwd === null ? [] : listProjectSkills(cwd, sandboxRoot);
+  const projectNames = new Set(project.map((skill) => skill.name));
+  const platformNames = new Set(platform.map((skill) => skill.name));
+  return [
+    ...platform
+      .filter((skill) => !projectNames.has(skill.name))
+      .map((skill) => ({ ...skill, source: "skill" as const, overrides: false })),
+    ...project.map((skill) => ({
+      ...skill,
+      source: "project" as const,
+      overrides: platformNames.has(skill.name),
+    })),
+  ];
+}
+
+/**
+ * `sessionSkills` by session identity, for the prompt route and the branch-family command check:
+ * the cwd is the one the session's omp process runs in (session-cwd.ts). A cwd that cannot be
+ * resolved contributes no project skill; nothing here throws.
+ */
+export function sessionSkillsResolver(
+  agentDir: string,
+  sandboxRoot: string,
+  workspaceRootOf: WorkspaceRootOf,
+): (ownerId: string, workspaceId: string | null) => SessionSkill[] {
+  const cwdOf = sessionCwdResolver(sandboxRoot, workspaceRootOf);
+  return (ownerId, workspaceId) => {
+    let cwd: string | null;
+    try {
+      cwd = cwdOf(ownerId, workspaceId);
+    } catch {
+      cwd = null;
+    }
+    return sessionSkills(agentDir, cwd, sandboxRoot);
+  };
 }
 
 /**
@@ -152,19 +251,111 @@ export function toWireText(text: string, skills: readonly { name: string }[]): s
   return text.startsWith("/") && classifyPrompt(text, skills).kind === "text" ? ` ${text}` : text;
 }
 
+function byName(left: Skill, right: Skill): number {
+  return compareCodePoints(left.name, right.name);
+}
+
+/** Whether `<dir>/.git` exists, by `lstat` only: the directory itself is never enumerated. */
+function hasGitEntry(dir: Buffer): boolean {
+  try {
+    lstatSync(Buffer.concat([dir, Buffer.from("/.git")]));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The skills of `<dir>/.omp/skills`, `dir` being a kernel real path. Rules added to those of the
+ * platform directory, because this one is writable by the omp uid: the kernel real path of
+ * `<dir>/.omp/skills` must be exactly those bytes (neither `.omp` nor `skills` is a link, so the
+ * containment boundary stays inside `dir`), checked before anything is enumerated; the directory
+ * is read through a handle and yields nothing once it holds more than `MAX_PROJECT_DIR_ENTRIES`;
+ * and a hard-linked SKILL.md is skipped (`readBounded`). Any failure yields `[]`.
+ */
+function readProjectDir(dir: Buffer): Skill[] {
+  const skillsDir = Buffer.concat([dir, Buffer.from(PROJECT_SKILLS)]);
+  const entries: string[] = [];
+  try {
+    if (!realpathSync.native(skillsDir, { encoding: "buffer" }).equals(skillsDir)) {
+      return [];
+    }
+    const handle = opendirSync(skillsDir);
+    try {
+      for (let entry = handle.readSync(); entry !== null; entry = handle.readSync()) {
+        if (entries.length === MAX_PROJECT_DIR_ENTRIES) {
+          return [];
+        }
+        entries.push(entry.name);
+      }
+    } finally {
+      handle.closeSync();
+    }
+  } catch {
+    return [];
+  }
+  const inside = Buffer.concat([skillsDir, Buffer.from("/")]);
+  return readSkillEntries(skillsDir, entries, inside, true).map((skill) => ({
+    name: skill.name,
+    description: firstCodePoints(skill.description, MAX_PROJECT_DESCRIPTION),
+  }));
+}
+
+function firstCodePoints(text: string, limit: number): string {
+  const points = Array.from(text);
+  return points.length > limit ? points.slice(0, limit).join("") : text;
+}
+
+/**
+ * The skills of one `skills` directory given its entry names: hidden entries dropped, the first
+ * `MAX_SKILL_ENTRIES` in SKILL.md path order read, entries sharing a name collapsed to the first.
+ * `inside` is the real path of the directory with a trailing separator. A directory given as bytes
+ * (a project one) has every SKILL.md path built from those bytes; its text is the sort key only.
+ */
+function readSkillEntries(
+  skillsDir: string | Buffer,
+  entries: readonly string[],
+  inside: Buffer,
+  project: boolean,
+): Skill[] {
+  const text = skillsDir.toString();
+  const candidates = entries
+    .filter((entry) => !entry.startsWith("."))
+    .map((entry) => ({ entry, path: join(text, entry, "SKILL.md") }))
+    .sort((left, right) => compareCodePoints(left.path, right.path))
+    .slice(0, MAX_SKILL_ENTRIES);
+  const byName = new Map<string, Skill>();
+  for (const { entry, path } of candidates) {
+    const target =
+      typeof skillsDir === "string"
+        ? path
+        : Buffer.concat([skillsDir, Buffer.from(`/${entry}/SKILL.md`)]);
+    const skill = readSkill(target, entry, inside, project);
+    if (skill !== null && !byName.has(skill.name)) {
+      byName.set(skill.name, skill);
+    }
+  }
+  return [...byName.values()];
+}
+
 /**
  * omp's drop rules for a user-level skill, plus the host rules (the name, and a SKILL.md whose
  * real path does not start with the bytes of `inside`, the real path of `skills` with a trailing
  * separator); null when it is not listed.
  */
-function readSkill(path: string, entry: string, inside: Buffer): Skill | null {
+function readSkill(
+  path: string | Buffer,
+  entry: string,
+  inside: Buffer,
+  project: boolean,
+): Skill | null {
   let content: string | null;
   try {
     const resolved = realpathSync.native(path, { encoding: "buffer" });
     if (!resolved.subarray(0, inside.length).equals(inside)) {
       return null;
     }
-    content = readBounded(resolved);
+    content = readBounded(resolved, project);
   } catch {
     return null;
   }
@@ -188,16 +379,18 @@ function readSkill(path: string, entry: string, inside: Buffer): Skill | null {
  * resolved path as raw bytes, so `O_NOFOLLOW` refuses a link swapped in as its last component.
  * `O_NONBLOCK` makes opening a FIFO return at once, `O_NOCTTY` keeps a terminal device from
  * becoming the server's controlling terminal, and the read stops at the size `fstat` reported, so
- * neither a writer-less pipe, a device nor a growing file can hold the event loop.
+ * neither a writer-less pipe, a device nor a growing file can hold the event loop. `singleLink`
+ * (project directories) also refuses a link count other than 1: a hard link to a file the server
+ * can read would otherwise echo that file's frontmatter.
  */
-function readBounded(path: Buffer): string | null {
+function readBounded(path: Buffer, singleLink: boolean): string | null {
   const fd = openSync(
     path,
     constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOCTTY | constants.O_NOFOLLOW,
   );
   try {
     const stat = fstatSync(fd);
-    if (!stat.isFile() || stat.size > SKILL_MD_MAX_BYTES) {
+    if (!stat.isFile() || stat.size > SKILL_MD_MAX_BYTES || (singleLink && stat.nlink !== 1)) {
       return null;
     }
     const buffer = Buffer.alloc(stat.size);

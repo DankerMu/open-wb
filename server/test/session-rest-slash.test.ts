@@ -6,8 +6,12 @@
  * is the argument the route hands the supervisor, and no omp process is ever spawned. Skills are
  * real `SKILL.md` files under `ompAgentDir(stateDir)/skills`. Oracles: response status, the spy's
  * arguments, SQLite rows, the spawn log and the `readdirSync` calls naming `<agentDir>/skills`.
+ * Issue #813 (#773 task group 1; Scenario「A project skill is a command for the prompt route,
+ * regenerate and fork」): the skills are those of the session's own cwd. Workspaces are created
+ * over `POST /api/workspaces`, bound sessions over `POST /api/sessions {workspaceId}`, project
+ * skills are real `SKILL.md` files under `<root>/.omp/skills`.
  */
-import fs, { mkdirSync, writeFileSync } from "node:fs";
+import fs, { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -59,17 +63,48 @@ async function openWorld() {
     wire,
     spawns: rt.calls,
     skillsDir: join(ompAgentDir(rt.runtime.stateDir), "skills"),
+    sandboxRoot: rt.runtime.sandboxRoot,
   };
 }
 
 type World = Awaited<ReturnType<typeof openWorld>>;
 
-function installSkill(world: World, name: string): void {
-  mkdirSync(join(world.skillsDir, name), { recursive: true });
+function installSkill(world: World, name: string, skillsDir = world.skillsDir): void {
+  mkdirSync(join(skillsDir, name), { recursive: true });
   writeFileSync(
-    join(world.skillsDir, name, "SKILL.md"),
+    join(skillsDir, name, "SKILL.md"),
     `---\nname: ${name}\ndescription: 测试用的 ${name}\n---\n正文\n`,
   );
+}
+
+function projectSkills(dir: string): string {
+  return join(dir, ".omp", "skills");
+}
+
+/** A workspace of the owner; `session()` creates a fresh idle session bound to it. */
+async function openBound(world: World, dir: string) {
+  const headers = { cookie: world.cookie, "content-type": "application/json" };
+  // The workspace store realpaths the sandbox root, so it has to exist first.
+  mkdirSync(world.sandboxRoot, { recursive: true });
+  const made = await world.fixture.app.inject({
+    method: "POST",
+    url: "/api/workspaces",
+    headers,
+    payload: JSON.stringify({ name: dir, dir }),
+  });
+  expect(made.statusCode).toBe(201);
+  const workspace = made.json<{ id: string; root: string }>();
+  const session = async (): Promise<string> => {
+    const created = await world.fixture.app.inject({
+      method: "POST",
+      url: "/api/sessions",
+      headers,
+      payload: JSON.stringify({ workspaceId: workspace.id }),
+    });
+    expect(created.statusCode).toBe(201);
+    return created.json<{ id: string }>().id;
+  };
+  return { root: workspace.root, session };
 }
 
 /** Prompts an idle session (a fresh one unless given) and returns the text the supervisor got. */
@@ -160,5 +195,75 @@ describe("prompt route slash escaping (#555)", () => {
     expect(await promptOn(world, text)).toBe(` ${text}`);
     installSkill(world, "late");
     expect(await promptOn(world, text)).toBe(text);
+  });
+});
+
+describe("prompt route classifies with the session's own skills (#813)", () => {
+  const DEPLOY = "/skill:deploy 上线";
+
+  it("sends a project skill of the session's workspace unchanged on the bound session and escaped elsewhere", async () => {
+    const world = await openWorld();
+    const bound = await openBound(world, "proj");
+    const other = await openBound(world, "other");
+    installSkill(world, "deploy", projectSkills(bound.root));
+
+    const sessions = [await bound.session(), world.session, await other.session()];
+
+    expect(await promptOn(world, DEPLOY, sessions[0])).toBe(DEPLOY);
+    expect(await promptOn(world, DEPLOY, sessions[1])).toBe(` ${DEPLOY}`);
+    expect(await promptOn(world, DEPLOY, sessions[2])).toBe(` ${DEPLOY}`);
+
+    for (const session of sessions) {
+      expect(userContents(world, session)).toEqual([DEPLOY]);
+    }
+    expect(world.spawns).toHaveLength(0);
+  });
+
+  it("sends an owner-root project skill and a platform skill unchanged on bound and unbound sessions", async () => {
+    const world = await openWorld();
+    const bound = await openBound(world, "proj");
+    installSkill(world, "mine", projectSkills(join(world.sandboxRoot, "u1")));
+    installSkill(world, SKILL);
+
+    for (const session of [await bound.session(), world.session]) {
+      expect(await promptOn(world, "/skill:mine x", session)).toBe("/skill:mine x");
+    }
+    expect(await promptOn(world, "/skill:weekly-report 写周报", await bound.session())).toBe(
+      "/skill:weekly-report 写周报",
+    );
+  });
+
+  it("counts no project skill once the workspace root is a symlink, and still the platform ones", async () => {
+    const world = await openWorld();
+    const bound = await openBound(world, "proj");
+    installSkill(world, SKILL);
+    installSkill(world, "deploy", projectSkills(join(world.sandboxRoot, "outside")));
+    installSkill(world, "mine", projectSkills(join(world.sandboxRoot, "u1")));
+    const sessions = [await bound.session(), await bound.session(), await bound.session()];
+    rmSync(bound.root, { recursive: true });
+    symlinkSync(join(world.sandboxRoot, "outside"), bound.root, "dir");
+
+    expect(await promptOn(world, DEPLOY, sessions[0])).toBe(` ${DEPLOY}`);
+    expect(await promptOn(world, "/skill:mine x", sessions[1])).toBe(" /skill:mine x");
+    expect(await promptOn(world, "/skill:weekly-report 写周报", sessions[2])).toBe(
+      "/skill:weekly-report 写周报",
+    );
+  });
+
+  it("enumerates no project directory for text not starting with `/`", async () => {
+    const world = await openWorld();
+    const bound = await openBound(world, "proj");
+    installSkill(world, "deploy", projectSkills(bound.root));
+    const spy = vi.spyOn(fs, "opendirSync");
+    syncBuiltinESMExports();
+
+    expect(await promptOn(world, "今天 /skill:deploy 帮我", await bound.session())).toBe(
+      "今天 /skill:deploy 帮我",
+    );
+    expect(spy.mock.calls).toHaveLength(0);
+
+    // Positive control: the same spy sees the scan a `/`-prefixed prompt needs.
+    expect(await promptOn(world, DEPLOY, await bound.session())).toBe(DEPLOY);
+    expect(spy.mock.calls.length).toBeGreaterThan(0);
   });
 });

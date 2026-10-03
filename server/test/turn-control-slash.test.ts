@@ -7,7 +7,9 @@
  * (no spawn); skills are real `SKILL.md` files under `ompAgentDir(stateDir)/skills`. Issue #711
  * adds the regenerate dispatch text (a bare `/` branch text is sent escaped). Oracles:
  * status and envelope, SQL rows and counts, per-child stdin frames, the spawn log, liveness, the
- * control claim and the `readdirSync` calls naming `<agentDir>/skills`.
+ * control claim and the `readdirSync` calls naming `<agentDir>/skills`. Issue #813 (#773 task
+ * group 1): the command check uses the skills of the session's own cwd — a project skill under the
+ * bound workspace's `.omp/skills` refuses regenerate and fork on that session only.
  */
 import fs, { mkdirSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
@@ -503,4 +505,67 @@ describe("fork at slash text (#555)", () => {
     seeded.unchanged();
     expect(held(world)).toBe(false);
   });
+});
+
+describe("regenerate and fork at a project skill (#813)", () => {
+  const DEPLOY_CALL = "/skill:deploy 上线";
+
+  /** A workspace of the owner holding `.omp/skills/deploy`, and an idle session bound to it. */
+  async function openBound(world: ForkWorld): Promise<ForkWorld> {
+    const { app } = world.fixture;
+    const headers = { cookie: world.cookie, "content-type": "application/json" };
+    // The workspace store realpaths the sandbox root, so it has to exist first.
+    mkdirSync(world.rt.runtime.sandboxRoot, { recursive: true });
+    const made = await app.inject({
+      method: "POST",
+      url: "/api/workspaces",
+      headers,
+      payload: JSON.stringify({ name: "proj", dir: "proj" }),
+    });
+    expect(made.statusCode).toBe(201);
+    const workspace = made.json<{ id: string; root: string }>();
+    const dir = join(workspace.root, ".omp", "skills", "deploy");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "SKILL.md"), "---\nname: deploy\ndescription: 上线\n---\n正文\n");
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/sessions",
+      headers,
+      payload: JSON.stringify({ workspaceId: workspace.id }),
+    });
+    expect(created.statusCode).toBe(201);
+    return { ...world, session: created.json<{ id: string }>().id };
+  }
+
+  it(
+    "is 400 before any spawn, frame, row or claim on the bound session, for regenerate and for fork",
+    REAL,
+    async () => {
+      const bound = await openBound(await openWorld());
+      const seeded = seedTurns(bound, [FIRST, DEPLOY_CALL]);
+
+      await expectRefused(bound, () => postRegenerate(bound), 400, BAD_REQUEST_ENVELOPE);
+      await expectRefused(bound, () => postFork(bound, seeded.last), 400, BAD_REQUEST_ENVELOPE);
+      seeded.unchanged();
+    },
+  );
+
+  it(
+    "is plain text on an unbound session of the same owner: the request reaches omp and answers 502",
+    REAL,
+    async () => {
+      const world = await openWorld();
+      await openBound(world);
+      const seeded = seedTurns(world, [DEPLOY_CALL]);
+
+      expectEnvelope(await postRegenerate(world), 502, AGENT_UNAVAILABLE_ENVELOPE);
+      expectEnvelope(await postFork(world, seeded.last), 502, AGENT_UNAVAILABLE_ENVELOPE);
+
+      // Both got as far as the branch list: neither was refused as a command.
+      expect(world.spawned).toHaveLength(2);
+      for (const index of [0, 1]) {
+        expect(types(spawnedAt(world, index).stdin)).toContain("get_branch_messages");
+      }
+    },
+  );
 });

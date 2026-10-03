@@ -12,7 +12,7 @@ import { HttpError } from "../core/errors/index.js";
 import { registerSessionMetadataRoutes } from "./rest-metadata.js";
 import type { WorkspaceRootOf } from "./session-cwd.js";
 import type { SessionDeleter } from "./session-delete.js";
-import { listSkills, toWireText } from "./slash-commands.js";
+import { sessionSkillsResolver, toWireText } from "./slash-commands.js";
 import type {
   ApprovalEntry,
   ApprovalView,
@@ -47,6 +47,8 @@ interface SessionRestDependencies {
   deleter: Pick<SessionDeleter, "deleteSession">;
   /** The omp agent directory of the slash whitelist; the prompt route lists its skills. */
   agentDir: string;
+  /** With `workspaceRootOf`, the session cwd whose project skills the prompt route lists (#773). */
+  sandboxRoot: string;
 }
 
 interface PublicSession {
@@ -129,6 +131,11 @@ export function registerSessionRoutes(
   dependencies: SessionRestDependencies,
 ): void {
   const authorizedHistory = new WeakMap<FastifyRequest, OwnedSnapshot>();
+  const skillsOf = sessionSkillsResolver(
+    dependencies.agentDir,
+    dependencies.sandboxRoot,
+    dependencies.workspaceRootOf,
+  );
 
   const authorizeOwnedBeforeParse: preParsingHookHandler<
     RawServerDefault,
@@ -199,7 +206,9 @@ export function registerSessionRoutes(
       const accepted = dependencies.store.acceptPrompt(request.params.id, principal.id, text);
       try {
         // The stored text stays as typed; only `/` text is classified, so no other prompt scans.
-        const skills = text.startsWith("/") ? listSkills(dependencies.agentDir) : [];
+        // The skills are those of this session's cwd: its workspace root, else the owner root.
+        const bound = authorizedHistory.get(request)?.tree.session.workspaceId ?? null;
+        const skills = text.startsWith("/") ? skillsOf(principal.id, bound) : [];
         await dependencies.supervisor.prompt(request.params.id, toWireText(text, skills));
       } catch (error) {
         dependencies.store.rollbackPrompt(accepted.assistantMessageId);
