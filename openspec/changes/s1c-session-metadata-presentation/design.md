@@ -129,7 +129,7 @@
 - **持久化与发布次序**：`persistEvent`（`supervisor.ts:641-692`，switch 无 default）保持一进一出；联合扩展的那一刀先为 `thinking.delta`/`files.changed` 加显式返回 `undefined` 的分支（不落库、不发布），避免中间切片把 `details` 原始绝对路径发上 SSE，随后各自替换——内部 `files.changed` 事件在该处完成归属判定，无幸存项返回 `undefined`（不发布）；有幸存项时经独立的 store 写入 `setStepChanges(stepId, json)`（新模块 `store-changes.ts`，单条 `UPDATE chat_steps SET changes = ?`）提交该步骤行的 `chat_steps.changes`（JSON 数组文本，元素键恰为 `path/added/removed/kind`），提交成功后以数字步骤 id 发布 `files.changed`；随后下一个内部事件 `step.end` 照既有路径经 `finishStep` 落库并发布——`finishStep` 从不读写 `changes`。`setStepChanges` 失败不发布该事件，沿 owned error-sink 路径处理，ring 序号不推进。`files.changed` 是普通 ring 事件（保留、`min−1` 回放、`replay.gap`、活跃 turn.start 刷新规则同其它事件）。未收到工具结束帧即被停止/失败结算的步骤 `changes` 为 NULL。
 - **快照**：步骤 DTO 增 `changes: {path, added, removed, kind}[] | null`，无变更的步骤（含全部非 edit/write 步骤与未绑定会话的步骤）为 `null`。
 - **取证分工**：`±` 行数只由 fake-omp `edit-write` 场景驱动的服务端集成测试证明；真 omp 链路（`WORKBUDDY_WRITE`）只能证明 write 变更（`写入`、无行数）。
-- **为什么**：`details` 是工具帧里唯一结构化的写入信息，审计不记 omp 写入（`IMPLEMENTATION_PLAN.md:336`）；realpath 前缀校验与 `core/sandbox` 的解析纪律一致，保证卡片只指向空间内真实路径。提交路径上的同步 IO 有界：单条事件只判定前 100 个原始候选、同一规范化路径只判定一次（每个至多 3 次 `realpath`/`lstat`），合并后保留前 50 项（#740；原文「每步最多 50 个路径 × 2 次」不成立——50 的上限在合并之后才截断）。
+- **为什么**：`details` 是工具帧里唯一结构化的写入信息，审计不记 omp 写入（`IMPLEMENTATION_PLAN.md:336`）；realpath 前缀校验与 `core/sandbox` 的解析纪律一致，保证卡片只指向空间内真实路径。提交路径上的同步 IO 有界：单条事件只判定前 100 个原始候选、同一规范化路径只判定一次（每个至多 4 次 `realpath`/`lstat`，另每条事件 1 次根目录校验），合并后保留前 50 项（#740；原文「每步最多 50 个路径 × 2 次」不成立——50 的上限在合并之后才截断）。
 - **备选**：监听空间根的文件系统事件——能覆盖 bash，但无法可靠归属到步骤且平台相关；回合前后目录快照比对——代价随空间大小增长。
 
 ### D7 web 分区侧栏、欢迎页场景与 composer footer
