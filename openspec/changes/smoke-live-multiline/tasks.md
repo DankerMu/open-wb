@@ -3,9 +3,9 @@
 Fixture level: compact
 
 ## 1. 实现
-- [ ] 1.1 `Makefile`：`smoke-live` 配方的 `content_pattern` 改为 `(?s)^.+$$`，其余字节不变。
-- [ ] 1.2 `scripts/test-ci-harness.sh`：Make oracle 里 `smoke-live` 配方的期望行同步；凡以该配方原文为锚点的 mutation（`cm`）用例一并更新；新增一条 mutation：把配方改回 `^.+$$` 时 oracle 拒绝。
-- [ ] 1.3 不改其它被跟踪文件。`scripts/test-ci-harness.sh` 里以 `make smoke` 配方为对象的 content-pattern mutation（替换值为单 `$` 的 `^.+$"`）不属于 smoke-live，不动。
+- [x] 1.1 `Makefile`：`smoke-live` 配方的 `content_pattern` 改为 `(?s)^.+$$`，其余字节不变。
+- [x] 1.2 `scripts/test-ci-harness.sh`：Make oracle 里 `smoke-live` 配方的期望行同步；凡以该配方原文为锚点的 mutation（`cm`）用例一并更新；新增一条 mutation：把配方改回 `^.+$$` 时 oracle 拒绝。
+- [x] 1.3 不改其它被跟踪文件。`scripts/test-ci-harness.sh` 里以 `make smoke` 配方为对象的 content-pattern mutation（替换值为单 `$` 的 `^.+$"`）不属于 smoke-live，不动。
 
 ## 归档次序（前提）
 - 未归档的父 change `s1c-session-metadata-presentation` 的 chat-harness delta 仍以旧文重述本 Requirement。本 change 先归档进主规格；父 change 归档前按 #754 把全部 delta 从主规格现文重新生成，届时带上本改动。本 PR 不改父 change 的 delta。
