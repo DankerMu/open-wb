@@ -21,17 +21,31 @@ import {
 } from "./fake-omp-helpers.js";
 
 const HOME = "/tmp/fake-omp-cwd home";
-const AGENT = "/tmp/fake-omp-cwd agent";
+const XDG = "/tmp/fake-omp-cwd xdg";
 /** 显式钉住 __CF_USER_TEXT_ENCODING，macOS 与 Linux 的 env 键表一致。 */
 const ENV: NodeJS.ProcessEnv = {
   PATH: process.env.PATH ?? "/usr/bin",
   HOME,
-  PI_CODING_AGENT_DIR: AGENT,
+  XDG_DATA_HOME: `${XDG}/data`,
+  XDG_STATE_HOME: `${XDG}/state`,
+  XDG_CACHE_HOME: `${XDG}/cache`,
   __CF_USER_TEXT_ENCODING: "0:0:0",
 };
-const ENV_KEYS = "HOME,PATH,PI_CODING_AGENT_DIR,__CF_USER_TEXT_ENCODING";
+const ENV_KEYS = "HOME,PATH,XDG_CACHE_HOME,XDG_DATA_HOME,XDG_STATE_HOME,__CF_USER_TEXT_ENCODING";
 const FRAMES = "negotiate_protocol,get_state,prompt";
-const LABELS = ["uid", "gid", "env", "home", "agent", "environ", "wrote", "frames", "cwd"] as const;
+const LABELS = [
+  "uid",
+  "gid",
+  "env",
+  "home",
+  "xdgdata",
+  "xdgstate",
+  "xdgcache",
+  "environ",
+  "wrote",
+  "frames",
+  "cwd",
+] as const;
 const ENVIRON = process.platform === "linux" ? "readable" : "ENOENT";
 const UID = process.getuid?.();
 const GID = process.getgid?.();
@@ -52,7 +66,7 @@ describe("fake omp probe cwd field", () => {
   it("ends the whole probe delta with frames=... cwd=<realpath of the spawn cwd>", async () => {
     const { session, real, delta } = await probeInTempDir();
     expect(delta).toBe(
-      `uid=${String(UID)} gid=${String(GID)} env=${ENV_KEYS} home=${HOME} agent=${AGENT} environ=${ENVIRON} wrote=ok frames=${FRAMES} cwd=${real}`,
+      `uid=${String(UID)} gid=${String(GID)} env=${ENV_KEYS} home=${HOME} xdgdata=${XDG}/data xdgstate=${XDG}/state xdgcache=${XDG}/cache environ=${ENVIRON} wrote=ok frames=${FRAMES} cwd=${real}`,
     );
     expect(delta.endsWith(` frames=${FRAMES} cwd=${real}`)).toBe(true);
     await closeSession(session);
@@ -156,19 +170,10 @@ function parseReport(report: string): Record<(typeof LABELS)[number], string> {
     parsed[label] = rest.slice(0, splitAt);
     rest = rest.slice(splitAt + 1);
   }
-  const { uid, gid, env, home, agent, environ, wrote, frames, cwd } = parsed;
-  if (
-    uid === undefined ||
-    gid === undefined ||
-    env === undefined ||
-    home === undefined ||
-    agent === undefined ||
-    environ === undefined ||
-    wrote === undefined ||
-    frames === undefined ||
-    cwd === undefined
-  ) {
-    throw new Error("probe report is truncated");
+  for (const label of LABELS) {
+    if (parsed[label] === undefined) {
+      throw new Error("probe report is truncated");
+    }
   }
-  return { uid, gid, env, home, agent, environ, wrote, frames, cwd };
+  return parsed as Record<(typeof LABELS)[number], string>;
 }

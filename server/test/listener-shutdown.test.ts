@@ -566,7 +566,9 @@ describe("production entry HOST=localhost", () => {
     try {
       const started = await server.waitForStarted();
       expect(started).toMatchObject({ event: "server_started", host: "127.0.0.1", port });
-      const models = parse(readFileSync(join(root, "state", "agent", "models.yml"), "utf8"));
+      const models = parse(
+        readFileSync(join(root, "state", "home", ".omp", "agent", "models.yml"), "utf8"),
+      );
       expect(models).toMatchObject({
         providers: { workbuddy: { baseUrl: `http://127.0.0.1:${port}/v1` } },
       });

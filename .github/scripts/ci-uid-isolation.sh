@@ -220,10 +220,14 @@ run_phase() {
 }
 # What real omp wrote under sudo: every session .jsonl is 0660 and every directory omp made is
 # group-writable with no other bits. No .jsonl at all fails, so an empty tree cannot pass.
+# Managed layout (#706): omp's runtime state is under xdg/ (agent.db exists there) and nothing omp
+# owns sits in the managed configuration under home/.omp.
 check_omp_modes() (
   cd "$OMP_STATE_DIR"
   files="$(sudo find sessions -type f -name '*.jsonl')" || { echo "omp mode check failed: cannot list session files" >&2; exit 1; }
   [ -n "$files" ] || { echo "omp mode check failed: no session .jsonl" >&2; exit 1; }
+  sudo test -f xdg/data/omp/agent.db || { echo "omp mode check failed: no xdg/data/omp/agent.db" >&2; exit 1; }
+  foreign="$(sudo find home/.omp ! -uid "$(id -u)")" && [ -z "$foreign" ] || { echo "omp mode check failed: home/.omp is missing or holds entries not owned by the app uid" >&2; exit 1; }
   bad_files="$(sudo find sessions -type f -name '*.jsonl' ! -perm 0660)" || { echo "omp mode check failed: cannot inspect session files" >&2; exit 1; }
   bad_dirs="$(sudo find sessions -type d ! -uid "$(id -u)" \( ! -perm -0020 -o -perm -0004 -o -perm -0002 -o -perm -0001 \))" || { echo "omp mode check failed: cannot inspect omp directories" >&2; exit 1; }
   if [ -z "$bad_files$bad_dirs" ]; then echo "omp mode check passed: $(printf '%s\n' "$files" | wc -l | tr -d ' ') session .jsonl"; exit 0; fi

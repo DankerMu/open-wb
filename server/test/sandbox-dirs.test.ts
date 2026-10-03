@@ -1,5 +1,6 @@
 import fs, {
   chmodSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -14,11 +15,13 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ensureSharedDir } from "../src/core/sandbox/dirs.js";
+import { ensureOwnedDir, ensureSharedDir } from "../src/core/sandbox/dirs.js";
 
 const tmpDirs: string[] = [];
 const SHARED_MODE = 0o2770;
 const EXISTING_MODE = 0o755;
+/** #706 托管目录权限位: the managed (app-owned, group read-only) mode of the omp state layout. */
+const MANAGED = 0o2750;
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -204,5 +207,132 @@ describe("core/sandbox ensureSharedDir", () => {
     expect(lstatSync(parent).isDirectory()).toBe(true);
     expectUnchangedMetadata(parent, beforeParent);
     expect(() => lstatSync(leaf)).toThrow();
+  });
+});
+
+function thrownBy(run: () => void): Error {
+  try {
+    run();
+  } catch (error) {
+    if (error instanceof Error) {
+      return error;
+    }
+  }
+  throw new Error("expected ensureOwnedDir to throw");
+}
+
+describe("core/sandbox ensureOwnedDir", () => {
+  it("creates at the exact mode, corrects a widened mode, and issues no chmod when already exact", () => {
+    const dir = join(createParent(), "d");
+
+    ensureOwnedDir(dir, MANAGED);
+    expect(modeOf(dir)).toBe(MANAGED);
+    expect(lstatSync(dir).uid).toBe(process.geteuid?.());
+
+    chmodSync(dir, 0o2777);
+    ensureOwnedDir(dir, MANAGED);
+    expect(modeOf(dir)).toBe(MANAGED);
+
+    const chmodSpy = vi.spyOn(fs, "chmodSync");
+    const chownSpy = vi.spyOn(fs, "chownSync");
+    syncBuiltinESMExports();
+    const umaskBefore = process.umask();
+    ensureOwnedDir(dir, MANAGED);
+    expect(chmodSpy).not.toHaveBeenCalled();
+    expect(chownSpy).not.toHaveBeenCalled();
+    expect(process.umask()).toBe(umaskBefore);
+    expect(modeOf(dir)).toBe(MANAGED);
+  });
+
+  it.each([0o2750, 0o2770, 0o3770])("applies mode %o whatever the umask", (mode) => {
+    const dir = join(createParent(), "d");
+    const previous = process.umask(0o077);
+    try {
+      ensureOwnedDir(dir, mode);
+    } finally {
+      process.umask(previous);
+    }
+    expect(modeOf(dir)).toBe(mode);
+  });
+
+  it("narrows a directory that was wider and widens one that was narrower", () => {
+    const parent = createParent();
+    const wide = join(parent, "wide");
+    const narrow = join(parent, "narrow");
+    mkdirSync(wide);
+    mkdirSync(narrow);
+    chmodSync(wide, 0o2770);
+    chmodSync(narrow, 0o700);
+
+    ensureOwnedDir(wide, MANAGED);
+    ensureOwnedDir(narrow, 0o3770);
+
+    expect(modeOf(wide)).toBe(MANAGED);
+    expect(modeOf(narrow)).toBe(0o3770);
+  });
+
+  it("rejects a regular file and leaves it untouched", () => {
+    const file = join(createParent(), "occupied");
+    writeFileSync(file, "not-a-directory");
+    chmodSync(file, 0o644);
+
+    const error = thrownBy(() => ensureOwnedDir(file, MANAGED));
+
+    expect(error.message).toContain(file);
+    expect(error.message).toContain("0o2750");
+    expect(modeOf(file)).toBe(0o644);
+    expect(readFileSync(file, "utf8")).toBe("not-a-directory");
+  });
+
+  it("rejects a symlink to a directory without following it", () => {
+    const parent = createParent();
+    const target = join(parent, "target");
+    const link = join(parent, "link");
+    mkdirSync(target);
+    chmodSync(target, 0o755);
+    symlinkSync(target, link);
+
+    const error = thrownBy(() => ensureOwnedDir(link, MANAGED));
+
+    expect(error.message).toContain(link);
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(modeOf(target)).toBe(0o755);
+  });
+
+  it("rejects a missing parent and creates nothing", () => {
+    const parent = createParent();
+    const nested = join(parent, "absent", "d");
+
+    const error = thrownBy(() => ensureOwnedDir(nested, MANAGED));
+
+    expect(error.message).toContain(nested);
+    expect(existsSync(join(parent, "absent"))).toBe(false);
+  });
+
+  // The directory's current mode is passed, so no chmod is needed: only the owner check rejects it.
+  it.skipIf(process.geteuid?.() === 0)("rejects a directory owned by another uid", () => {
+    const foreign = "/usr";
+    const before = lstatSync(foreign);
+    expect(before.uid).toBe(0);
+
+    const error = thrownBy(() => ensureOwnedDir(foreign, before.mode & 0o7777));
+
+    expect(error.message).toContain(foreign);
+    expect(lstatSync(foreign).mode).toBe(before.mode);
+  });
+
+  it("names the path and the octal mode but no environment value", () => {
+    const parent = createParent();
+    const file = join(parent, "occupied");
+    writeFileSync(file, "x");
+    vi.stubEnv("WORKBUDDY_CANARY_SECRET", "owned-dir-canary-value");
+    try {
+      const error = thrownBy(() => ensureOwnedDir(file, 0o3770));
+      expect(error.message).toContain(file);
+      expect(error.message).toContain("0o3770");
+      expect(error.message).not.toContain("owned-dir-canary-value");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

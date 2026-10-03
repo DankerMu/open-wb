@@ -74,9 +74,10 @@ describe("deriveProxyBaseUrl", () => {
 });
 
 describe("writeManagedModelsYml", () => {
-  it("creates missing agentDir parents and writes the credential-safe workbuddy schema", async () => {
+  it("writes the credential-safe workbuddy schema into an existing agentDir", async () => {
     const root = tempRoot();
-    const agentDir = join(root, "absent", "nested", "agent");
+    const agentDir = join(root, "agent");
+    mkdirSync(agentDir);
     const keepPath = join(root, "keep.txt");
     writeFileSync(keepPath, "unrelated-keep");
 
@@ -89,12 +90,6 @@ describe("writeManagedModelsYml", () => {
       vi.unstubAllEnvs();
     }
 
-    expect(statSync(join(root, "absent")).isDirectory()).toBe(true);
-    expect(lstatSync(join(root, "absent")).mode & 0o7777).toBe(0o2770);
-    expect(statSync(join(root, "absent", "nested")).isDirectory()).toBe(true);
-    expect(lstatSync(join(root, "absent", "nested")).mode & 0o7777).toBe(0o2770);
-    expect(statSync(agentDir).isDirectory()).toBe(true);
-    expect(lstatSync(agentDir).mode & 0o7777).toBe(0o2770);
     expect(readdirSync(agentDir)).toEqual(["models.yml"]);
     expect(readFileSync(keepPath, "utf8")).toBe("unrelated-keep");
 
@@ -110,8 +105,28 @@ describe("writeManagedModelsYml", () => {
     }
   });
 
+  it("rejects a missing or file-occupied agentDir without creating any directory", async () => {
+    const root = tempRoot();
+    const agentDir = join(root, "absent", "nested", "agent");
+    await expect(writeManagedModelsYml(agentDir, OPTIONS)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(writeManagedModelsYml(join(root, "absent"), OPTIONS)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    expect(readdirSync(root)).toEqual([]);
+
+    const occupied = join(root, "occupied");
+    writeFileSync(occupied, "not-a-directory");
+    await expect(writeManagedModelsYml(occupied, OPTIONS)).rejects.toMatchObject({
+      code: "ENOTDIR",
+    });
+    expect(readFileSync(occupied, "utf8")).toBe("not-a-directory");
+    expect(readdirSync(root)).toEqual(["occupied"]);
+  });
+
   it("identical options produce identical models.yml bytes", async () => {
-    const agentDir = join(tempRoot(), "agent");
+    const agentDir = makeAgentDir();
     await writeManagedModelsYml(agentDir, OPTIONS);
     const first = readFileSync(join(agentDir, "models.yml"));
     await writeManagedModelsYml(agentDir, OPTIONS);
@@ -120,7 +135,7 @@ describe("writeManagedModelsYml", () => {
   });
 
   it("changed options replace stale content and preserve YAML-sensitive model identity", async () => {
-    const agentDir = join(tempRoot(), "agent");
+    const agentDir = makeAgentDir();
     await writeManagedModelsYml(agentDir, OPTIONS);
     writeFileSync(join(agentDir, "models.yml"), "providers:\n  obsolete: true\n");
     writeFileSync(join(agentDir, "keep.txt"), "unrelated-keep");
@@ -220,7 +235,7 @@ describe("writeManagedModelsYml", () => {
   it.each([0o000, 0o077])(
     "writes models.yml with mode 0640 under umask %o, fresh and over a 0666 file",
     async (umask) => {
-      const agentDir = join(tempRoot(), "agent");
+      const agentDir = makeAgentDir();
       const target = join(agentDir, "models.yml");
 
       const previousUmask = process.umask(umask);
@@ -267,6 +282,13 @@ function tempRoot(): string {
   const dir = mkdtempSync(join(tmpdir(), "models-yml-"));
   tmpDirs.push(dir);
   return dir;
+}
+
+/** The writer never creates agentDir (the managed omp state layout does). */
+function makeAgentDir(): string {
+  const agentDir = join(tempRoot(), "agent");
+  mkdirSync(agentDir);
+  return agentDir;
 }
 
 function expectedDocument(proxyBaseUrl: string, modelId: string): unknown {

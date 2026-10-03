@@ -1,5 +1,5 @@
 /**
- * Issue #85 omp spawn contract: argv, allowlisted env, directory preparation.
+ * Issue #85 omp spawn contract: argv, allowlisted env, directory preparation (managed layout: #706).
  */
 import {
   type ChildProcessWithoutNullStreams,
@@ -155,7 +155,7 @@ describe("spawnOmp spawn contract", () => {
     expect(CALLER_TOKEN).toMatch(/^[0-9a-f]{64}$/);
     expect(call.env.WORKBUDDY_MODEL_TOKEN).toBe(CALLER_TOKEN);
     expect(call.env.HOME).not.toBe(SENTINELS.HOME);
-    expect(call.env.PI_CODING_AGENT_DIR).not.toBe(SENTINELS.PI_CODING_AGENT_DIR);
+    expect(call.env).not.toHaveProperty("PI_CODING_AGENT_DIR");
     for (const key of FORBIDDEN_KEYS) {
       expect(call.env).not.toHaveProperty(key);
     }
@@ -180,7 +180,7 @@ describe("spawnOmp spawn contract", () => {
     expect(omitted.env).not.toHaveProperty("TMPDIR");
   });
 
-  it("reuses existing directories on a later launch", async () => {
+  it("keeps an existing owner root's mode and corrects the managed directories", async () => {
     const roots = makeRoots();
     mkdirSync(roots.cwd, { recursive: true });
     mkdirSync(roots.sessionDir, { recursive: true });
@@ -207,12 +207,12 @@ describe("spawnOmp spawn contract", () => {
     expect(statSync(roots.home).isFile()).toBe(true);
   });
 
-  it("creates missing shared path levels at 2770 before spawn and leaves umask unchanged", async () => {
+  it("creates missing sandbox levels at 2770 and the state root at 2750, umask unchanged", async () => {
     const roots = makeRoots();
     await captureColdLaunch(roots, 0o2770);
     expect(lstatSync(roots.sandboxRoot).mode & 0o7777).toBe(0o2770);
-    expect(lstatSync(roots.stateDir).mode & 0o7777).toBe(0o2770);
-    expect(lstatSync(join(roots.stateDir, "sessions")).mode & 0o7777).toBe(0o2770);
+    expect(lstatSync(roots.stateDir).mode & 0o7777).toBe(0o2750);
+    expect(lstatSync(join(roots.stateDir, "sessions")).mode & 0o7777).toBe(0o2750);
   });
 
   it("real child observes captured env, cwd, and argv under contaminated parent env", {
@@ -405,7 +405,7 @@ describe("spawnOmp spawn contract", () => {
       "-n",
       "-u",
       "omp_user",
-      "--preserve-env=PATH,LANG,TMPDIR,HOME,PI_CODING_AGENT_DIR,WORKBUDDY_MODEL_TOKEN",
+      "--preserve-env=PATH,LANG,TMPDIR,HOME,XDG_DATA_HOME,XDG_STATE_HOME,XDG_CACHE_HOME,WORKBUDDY_MODEL_TOKEN",
       "--",
       "/usr/bin/setpriv",
       "--pdeathsig",
@@ -499,7 +499,7 @@ function makeRoots(): SpawnRoots {
     cwd: join(sandboxRoot, OWNER),
     sessionDir: join(stateDir, "sessions", OWNER),
     home: join(stateDir, "home"),
-    agent: join(stateDir, "agent"),
+    agent: join(stateDir, "home", ".omp", "agent"),
   };
 }
 
@@ -543,7 +543,9 @@ function allowlist(
   const env: Record<string, string> = {
     PATH: extra.PATH ?? SENTINEL_PATH,
     HOME: roots.home,
-    PI_CODING_AGENT_DIR: roots.agent,
+    XDG_DATA_HOME: join(roots.stateDir, "xdg", "data"),
+    XDG_STATE_HOME: join(roots.stateDir, "xdg", "state"),
+    XDG_CACHE_HOME: join(roots.stateDir, "xdg", "cache"),
     WORKBUDDY_MODEL_TOKEN: CALLER_TOKEN,
   };
   if (extra.LANG !== undefined) {
@@ -555,18 +557,15 @@ function allowlist(
   return env;
 }
 
-function expectFourDirectories(roots: SpawnRoots, mode?: number): void {
+/** `cwdMode` is the owner root's (ensureSharedDir); the three state dirs always hold the layout's. */
+function expectFourDirectories(roots: SpawnRoots, cwdMode?: number): void {
   expect(lstatSync(roots.cwd).isDirectory()).toBe(true);
-  expect(lstatSync(roots.sessionDir).isDirectory()).toBe(true);
-  expect(lstatSync(roots.home).isDirectory()).toBe(true);
-  expect(lstatSync(roots.agent).isDirectory()).toBe(true);
-  if (mode === undefined) {
-    return;
+  expect(lstatSync(roots.sessionDir).mode & 0o7777).toBe(0o2770);
+  expect(lstatSync(roots.home).mode & 0o7777).toBe(0o3770);
+  expect(lstatSync(roots.agent).mode & 0o7777).toBe(0o2750);
+  if (cwdMode !== undefined) {
+    expect(lstatSync(roots.cwd).mode & 0o7777).toBe(cwdMode);
   }
-  expect(lstatSync(roots.cwd).mode & 0o7777).toBe(mode);
-  expect(lstatSync(roots.sessionDir).mode & 0o7777).toBe(mode);
-  expect(lstatSync(roots.home).mode & 0o7777).toBe(mode);
-  expect(lstatSync(roots.agent).mode & 0o7777).toBe(mode);
 }
 
 async function capture(
@@ -586,12 +585,12 @@ async function capture(
   return call;
 }
 
-async function captureColdLaunch(roots: SpawnRoots, mode: number): Promise<void> {
+async function captureColdLaunch(roots: SpawnRoots, cwdMode: number): Promise<void> {
   const umaskBefore = process.umask();
   const call = await capture(roots, null);
   expect(call.command).toBe(roots.bin);
   expect(call.args).toEqual(coldArgs(roots));
-  expectFourDirectories(roots, mode);
+  expectFourDirectories(roots, cwdMode);
   expect(process.umask()).toBe(umaskBefore);
 }
 

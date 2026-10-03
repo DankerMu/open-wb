@@ -6,7 +6,7 @@
  * bytes, SQLite row counts, `liveProcessCount` and the env a recording `spawnImpl` receives from
  * `spawnOmp`.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -248,7 +248,27 @@ describe("GET /api/commands", () => {
     );
   });
 
-  it("reads the directory the spawn exports as PI_CODING_AGENT_DIR", async () => {
+  it("lists a skill installed under <state>/home/.omp/agent/skills and none from a legacy <state>/agent/skills", async () => {
+    const { app, stateDir } = openWorld();
+    writeSkill(join(stateDir, "home", ".omp", "agent", "skills"), "managed", [
+      "description: installed in the managed layout",
+    ]);
+    const legacySkills = join(stateDir, "agent", "skills");
+    writeSkill(legacySkills, "x", ["description: left over from the old layout"]);
+    const legacyBytes = readFileSync(join(legacySkills, "x", "SKILL.md"));
+    const cookie = await loginSessionPair(app);
+
+    const response = await app.inject({ method: "GET", url: ROUTE, headers: { cookie } });
+
+    expect(response.statusCode).toBe(200);
+    const names = response.json<{ commands: { name: string }[] }>().commands.map((c) => c.name);
+    expect(names).toEqual(["compact", "todo", "skill:managed"]);
+    expect(response.body).not.toContain("left over from the old layout");
+    expect(readFileSync(join(legacySkills, "x", "SKILL.md")).equals(legacyBytes)).toBe(true);
+    expect(readdirSync(join(stateDir, "agent")).toSorted()).toEqual(["skills"]);
+  });
+
+  it("reads `.omp/agent` under the HOME the spawn exports, omp's default agent dir", async () => {
     const { app, root, stateDir } = openWorld();
     const calls: SpawnCall[] = [];
     const child = new FakeChild();
@@ -273,7 +293,8 @@ describe("GET /api/commands", () => {
     );
 
     expect(calls).toHaveLength(1);
-    const exported = calls[0]?.env.PI_CODING_AGENT_DIR;
+    expect(calls[0]?.env).not.toHaveProperty("PI_CODING_AGENT_DIR");
+    const exported = join(String(calls[0]?.env.HOME), ".omp", "agent");
     expect(exported).toBe(ompAgentDir(stateDir));
     writeSkill(join(String(exported), "skills"), "from-spawn-dir", ["description: same source"]);
     const cookie = await loginSessionPair(app);

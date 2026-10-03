@@ -18,14 +18,15 @@ export function parseToolCall(call) {
   return { ...call, args };
 }
 
+/** 受管 models.yml 在真实 omp 的默认 agent 目录 `$HOME/.omp/agent`（宿主不设 PI_CODING_AGENT_DIR）。 */
 export function loadBaseUrl() {
-  const dir = process.env.PI_CODING_AGENT_DIR;
-  if (typeof dir !== "string" || dir.length === 0) {
+  const home = process.env.HOME;
+  if (typeof home !== "string" || home.length === 0) {
     throw new Error("config");
   }
   let text;
   try {
-    text = readFileSync(join(dir, "models.yml"), "utf8");
+    text = readFileSync(join(home, ".omp", "agent", "models.yml"), "utf8");
   } catch {
     throw new Error("config");
   }

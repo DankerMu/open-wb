@@ -1,7 +1,7 @@
 /**
  * Issue #102：真实 compiled production 入口。
  * HOST=0.0.0.0 绑定可用端口后，server_started 出现时
- * <OMP_STATE_DIR>/agent/models.yml 必须已经存在，且 baseUrl 指向该端口。
+ * <OMP_STATE_DIR>/home/.omp/agent/models.yml 必须已经存在，且 baseUrl 指向该端口。
  * #166：经 models.yml、token registry 与代理的完整 fake-omp call-proxy 回合；
  * #210：models.yml 写入被扣住时交付 SIGTERM，不得迟发任何启动记录。
  */
@@ -60,7 +60,8 @@ const STARTUP_MODULES = [
   "accounts",
 ];
 const PRIVATE_FILE_MODE = 0o600;
-const SHARED_DIR_MODE = 0o2770;
+/** 托管布局（#706）：托管配置目录与状态根都是 app 持有、组只读。 */
+const MANAGED_DIR_MODE = 0o2750;
 const EXISTING_DIR_MODE = 0o755;
 const MARKER_TITLE = "owned-state-marker";
 const SQLITE_EXPERIMENTAL_WARNING =
@@ -79,7 +80,7 @@ afterAll(async () => {
 });
 
 describe("production entry lifecycle", () => {
-  it("writes the actual-port model file before server_started and creates no eager runtime dirs", async () => {
+  it("writes the actual-port model file before server_started and creates only the managed state layout", async () => {
     const compiled = await compileServerEntry();
     const port = await reserveWildcardPort();
     const scratchRoot = mkdtempSync(join(tmpdir(), "open-wb-startup-case-"));
@@ -117,7 +118,8 @@ describe("production entry lifecycle", () => {
       });
       await expectConnectable("127.0.0.1", port);
 
-      const modelsPath = join(state, "agent", "models.yml");
+      const agentDir = join(state, "home", ".omp", "agent");
+      const modelsPath = join(agentDir, "models.yml");
       expect(
         existsSync(modelsPath),
         `models.yml missing after server_started\nstdout=${server.stdout()}\nstderr=${server.stderr()}`,
@@ -143,8 +145,9 @@ describe("production entry lifecycle", () => {
         },
       });
       expect(modelsText).toContain("apiKey: WORKBUDDY_MODEL_TOKEN");
-      expect(readdirSync(state).toSorted()).toEqual(["agent"]);
-      expect(readdirSync(join(state, "agent")).toSorted()).toEqual(["models.yml"]);
+      expect(readdirSync(state).toSorted()).toEqual(["home", "sessions", "xdg"]);
+      expect(readdirSync(join(state, "sessions"))).toEqual([]);
+      expect(readdirSync(agentDir).toSorted()).toEqual(["models.yml"]);
       expect(existsSync(sandbox)).toBe(false);
       expect(existsSync(join(scratchRoot, "bin"))).toBe(false);
     } finally {
@@ -205,7 +208,10 @@ describe("production entry lifecycle", () => {
       expect(assistant.steps).toMatchObject([{ name: "bash", status: "done" }]);
       const bearer = readFileSync(bearerPath, "utf8");
       expect(bearer).toMatch(/^[0-9a-f]{64}$/iu);
-      const modelsText = readFileSync(join(scratchRoot, "state", "agent", "models.yml"), "utf8");
+      const modelsText = readFileSync(
+        join(scratchRoot, "state", "home", ".omp", "agent", "models.yml"),
+        "utf8",
+      );
       expect(modelsText).toContain("apiKey: WORKBUDDY_MODEL_TOKEN");
       expect(await server.stop()).toBe(0);
       for (const secret of [upstreamKey, bearer]) {
@@ -245,9 +251,10 @@ describe("production entry lifecycle", () => {
       expect(existsSync(observed)).toBe(true);
       expect(server.stdout()).toBe("");
       expect(applicationStderr(server.stderr())).toBe("");
-      expect(
-        parse(readFileSync(join(scratchRoot, "state", "agent", "models.yml"), "utf8")),
-      ).toMatchObject({ providers: { workbuddy: { baseUrl: `http://127.0.0.1:${port}/v1` } } });
+      const written = join(scratchRoot, "state", "home", ".omp", "agent", "models.yml");
+      expect(parse(readFileSync(written, "utf8"))).toMatchObject({
+        providers: { workbuddy: { baseUrl: `http://127.0.0.1:${port}/v1` } },
+      });
       expect(readFileSync(tracePath, "utf8")).toBe("listener-close\ndb-close\n");
       await expectBindable("127.0.0.1", port);
     } finally {
@@ -318,7 +325,7 @@ describe("production entry private state permissions", () => {
       expect(firstOpen.wal === null || firstOpen.wal === PRIVATE_FILE_MODE).toBe(true);
       expect(firstOpen.shm === null || firstOpen.shm === PRIVATE_FILE_MODE).toBe(true);
       expectLivePrivateFiles(dbPath);
-      expect(lstatSync(join(state, "agent")).mode & 0o7777).toBe(SHARED_DIR_MODE);
+      expect(lstatSync(join(state, "home", ".omp", "agent")).mode & 0o7777).toBe(MANAGED_DIR_MODE);
       expect(existsSync(sandbox)).toBe(false);
       expect(lstatSync(dbParent).mode & 0o7777).toBe(EXISTING_DIR_MODE);
     } finally {
@@ -360,9 +367,12 @@ describe("production entry private state permissions", () => {
       expect(firstRestart.shm).toBe(PRIVATE_FILE_MODE);
       expectLivePrivateFiles(dbPath);
       expect(readOwnedMarker(dbPath)).toBe(MARKER_TITLE);
-      expect(lstatSync(existingState).mode & 0o7777).toBe(EXISTING_DIR_MODE);
+      // The sandbox root keeps its mode; the state root is corrected to the managed layout's.
+      expect(lstatSync(existingState).mode & 0o7777).toBe(MANAGED_DIR_MODE);
       expect(lstatSync(existingSandbox).mode & 0o7777).toBe(EXISTING_DIR_MODE);
-      expect(lstatSync(join(existingState, "agent")).mode & 0o7777).toBe(SHARED_DIR_MODE);
+      expect(lstatSync(join(existingState, "home", ".omp", "agent")).mode & 0o7777).toBe(
+        MANAGED_DIR_MODE,
+      );
       expect(existsSync(join(existingSandbox, "u1"))).toBe(false);
     } finally {
       await restart.dispose();
@@ -395,7 +405,7 @@ describe("production entry private state permissions", () => {
       expect(observations).toEqual([{ path: ":memory:", main: null, wal: null, shm: null }]);
       expect(existsSync(dbParent)).toBe(false);
       expect(existsSync(join(scratchRoot, "dev.db"))).toBe(false);
-      expect(existsSync(join(state, "agent", "models.yml"))).toBe(true);
+      expect(existsSync(join(state, "home", ".omp", "agent", "models.yml"))).toBe(true);
       expect(existsSync(sandbox)).toBe(false);
     } finally {
       await server.dispose();

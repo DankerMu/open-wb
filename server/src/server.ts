@@ -32,6 +32,7 @@ import { type AssemblyDependencies, createApp } from "./app.js";
 import { openDb } from "./core/db/index.js";
 import { deriveProxyBaseUrl, writeManagedModelsYml } from "./model-proxy/models-yml.js";
 import type { HandshakeTimeoutRecord } from "./sessions/omp/spawn-gate.js";
+import { ensureOmpStateLayout, ompAgentDir } from "./sessions/omp/state-layout.js";
 import type { SessionSupervisorRuntime } from "./sessions/supervisor.js";
 import { writeManagedLine } from "./startup-writer.js";
 
@@ -285,7 +286,7 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
   }
 }
 
-/** 成功记录：listen 之后写托管 models，再发实际 bound address/port。 */
+/** 成功记录：listen 之后建托管布局、写托管 models，再发实际 bound address/port。 */
 async function publishStarted(owned: OwnedResources, config: ServerConfig): Promise<void> {
   const app = owned.app;
   if (app === undefined) {
@@ -298,7 +299,8 @@ async function publishStarted(owned: OwnedResources, config: ServerConfig): Prom
   if (owned.signalReceived) {
     return;
   }
-  await writeManagedModelsYml(join(config.ompStateDir, "agent"), {
+  ensureOmpStateLayout(config.ompStateDir);
+  await writeManagedModelsYml(ompAgentDir(config.ompStateDir), {
     proxyBaseUrl: deriveProxyBaseUrl(address),
     modelId: config.modelId,
     reasoning: config.modelReasoning,
