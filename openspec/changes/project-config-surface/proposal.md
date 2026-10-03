@@ -16,7 +16,7 @@
 
 ## Impact
 
-- 规格：chat-sessions「Slash 命令白名单与命令目录」（修改）、「项目配置文件列表」（新增）；chat-web「API 客户端扩展」「会话页」（修改）。
+- 规格：chat-sessions「Slash 命令白名单与命令目录」「REST prompt 受理与补偿」「会话 REST」（修改）、「项目配置文件列表」（新增）；chat-web「API 客户端扩展」「会话页」（修改）。
 - 代码：`server/src/sessions/slash-commands.ts`、`rest-commands.ts`、`rest.ts`、`branching.ts`、`index.ts`，新增 `rest-project-config.ts`；
   `web/src/lib/api-commands.ts`、`web/src/features/chat/slash-menu.tsx`、`page.tsx`。
 - 不改：vendored omp（ADR-0001）、宿主 overlay（ADR-0012）、`OMP_STATE_DIR` 布局（ADR-0010）、sudoers。

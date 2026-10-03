@@ -21,14 +21,15 @@ Fixture level: expanded。Risk packs: 跨 uid 可写目录的读取（工作空�
 
 | 事实 | 出处 |
 | --- | --- |
-| 观察到进入系统提示：cwd 的 `AGENTS.md`、`.omp/AGENTS.md`、`.omp/RULES.md`、`.omp/SYSTEM.md`、`.claude/CLAUDE.md`；上一级的 `AGENTS.md`、`.agents/AGENTS.md` | 实跑 |
+| 单独放置即进入系统提示：各级的 `AGENTS.md`（到 `.git` 边界为止）与 `.agents/AGENTS.md`；cwd 的 `.claude/CLAUDE.md`、`.omp/SYSTEM.md` | 实跑 |
+| 单独放置但不进入系统提示：上一级的 `.claude/CLAUDE.md`、上一级的 `.omp/SYSTEM.md`（cwd 没有 `.omp` 时也不生效）、`.omp/rules/*.md` | 实跑 |
 | 同一层只有一个说明文件生效：cwd 同时有 `AGENTS.md` 与 `.claude/CLAUDE.md` 时只有后者；有 `.omp/AGENTS.md` 时它胜出 | 实跑 |
 | `.omp/AGENTS.md`、`.omp/RULES.md` 只取最近的非空 `.omp` 目录；cwd 有 `.omp` 时上一级的不生效 | 实跑；`discovery/builtin.ts:90-99` |
-| `.omp/agents/*.md` 取最近的非空 `.omp` 目录，不受 `.git` 边界限制 | 实跑；`task/discovery.ts` |
-| 上一级的 `.omp/SYSTEM.md` 未观察到生效 | 实跑 |
+| `.omp/agents/*.md` 取最近的、`.omp/agents` 本身是目录的祖先（与 `.omp` 是否有其它内容无关），不受 `.git` 边界限制 | 实跑；`task/discovery.ts:86-95` |
+| skill 在进程启动时加载：之后新建的 `SKILL.md` 不在 `get_available_commands` 里，`/skill:<name>` 被当作普通消息发给模型 | 实跑 |
 | 未观察到进入系统提示：`CLAUDE.md`（根目录）、`GEMINI.md`、`.cursorrules`、`.windsurfrules`、`.clinerules`、`.codex/AGENTS.md`、`.github/copilot-instructions.md`、`.opencode/AGENTS.md`、`.cursor/rules`、`.windsurf/rules`、`.claude/rules` | 实跑（多文件同置，存在同层去重的干扰，未逐个单测） |
 
-未逐项单测的部分（上一级的 `.claude/CLAUDE.md`、`.omp/rules/*.md`、除两组之外的跨目录同名优先级）由实现任务的真二进制用例定案（见 D4、任务 3）。
+未测全的部分（上表最后一行的各个位置、除两组之外的跨目录同名优先级）由实现任务的真二进制用例定案（见 D4、任务 1.5 与 3.1）。
 
 ## 决议
 
@@ -40,13 +41,15 @@ Fixture level: expanded。Risk packs: 跨 uid 可写目录的读取（工作空�
   复刻 7 个目录、三种上溯规则与跨目录优先级会把宿主与 omp 版本强耦合。
 - 接口：`GET /api/commands` 增加可选的 `workspaceId`，不带查询串的旧调用继续有效。不换路由、不拆两级。
 - `workspaceId` 经 owner 作用域的 `rootOf` 鉴权，未知、他人、格式错误同为 404（与创建会话一致），否则该路由会泄露他人工作空间的 skill 名称与描述。
+- `workspaceId` 属于调用者但根不可用（`rootOf` 抛错或不是目录）时不报错：返回内建与平台 skill。
 - 部署前提（宿主不检查）：沙箱根以上的目录不放 `.omp` 等配置目录。开发机把沙箱放在本仓库内时，omp 会加载仓库自己的 `.omp/skills`，宿主不列。
 
 ### D2 信任与可见性
 
 - 条目带 `source:"project"`，候选面板标注「项目」；与平台 skill 同名时只出项目那一条并带 `overrides:true`，面板标注「项目 · 覆盖平台技能」。
 - 读取复用 `listSkills` 的全部限制（每个 `skills` 目录内的内核 realpath 包含检查、原始字节路径、`O_NOFOLLOW|O_NONBLOCK|O_NOCTTY`、普通文件且不超过 262144 字节、256 条上限、名称规则）。
-  包含边界是该 `skills` 目录本身（比「工作空间根」更严，且与平台目录同一份代码）。
+  包含边界是该 `skills` 目录本身（与平台目录同一份代码）。项目目录对 omp uid 可写，另加两条：`<D>/.omp/skills` 的内核 realpath 必须等于 `D` 的 realpath 加 `/.omp/skills`
+  （`.omp` 或 `skills` 是链接则该层不产出，否则链接能把边界移到沙箱外）；目录经句柄最多读 4096 条，超过则该层不产出（防止海量条目卡住事件循环）。`.git` 探测用 `lstat`，不枚举目录。
 - `description` 截到 200 个码点；前端按纯文本渲染（React 文本节点，现状即如此）。
 - 可见性不另设规则：能通过 `rootOf` 的账号即可见。不追踪放置者（宿主没有文件级作者信息）。
 
@@ -63,8 +66,9 @@ Fixture level: expanded。Risk packs: 跨 uid 可写目录的读取（工作空�
 
 - 含义是「omp 会读取的位置上**存在**的项目配置文件」，不是「生效中的规则」：同层去重与优先级宿主不复刻，界面文案如实说明。
 - 新路由 `GET /api/project-config[?workspaceId=]`，请求规则与鉴权同 D1；宿主只 `lstat`，不读内容、不跟符号链接。
-- 位置表写在规格里（chat-sessions「项目配置文件列表」）。表中每一行都要有真二进制用例支撑（只放该文件，分别在 depth 0 与 depth 1，各看标记是否进入 `systemPrompt`）；
-  omp 不读的位置从表中删除，只在 cwd 读的限制为 depth 0——在路由发布前改规格，而不是照列。
+- 位置表写在规格里（chat-sessions「项目配置文件列表」），按实测：各级 `AGENTS.md` 与 `.agents/AGENTS.md`；cwd 的 `.claude/CLAUDE.md`；最近的非空 `.omp` 下的 `AGENTS.md`、`RULES.md`（该目录是 cwd 时另有 `SYSTEM.md`）；
+  最近的 `.omp/agents` 目录下的 `*.md`。表中每一行都要有真二进制用例支撑（只放该文件，depth 0 与 depth 1 各一次）；实测与某一行不符时先改规格（可删、可收窄、可放宽），再发布路由。
+- 从上溯目录到被列文件之间的每一级目录（`.omp`、`.omp/agents`、`.claude`、`.agents`）必须 `lstat` 为真实目录，链接视为不存在——否则宿主会对沙箱外的目录做枚举与存在性判断。
 - web：会话顶栏 actions 区、`重命名` 之前的 `项目配置` 按钮，列表非空才出现；只读弹层按层级分组，无编辑入口。欢迎态不显示（没有顶栏按钮）。
 - 用户级（`<state>/home/.omp/agent` 下）的文件不显示：平台托管、对 omp uid 只读（ADR-0010）。
 
@@ -85,7 +89,9 @@ Fixture level: expanded。Risk packs: 跨 uid 可写目录的读取（工作空�
 1. 其它 provider 目录、托管 `HOME`、沙箱根以上的 skill：能执行、不列出、宿主记为文本。
 2. 宿主读取规则跳过的项目 skill（超 256 条、越界链接、超大文件、名称含空白或 `/`）：同上。
 3. 项目配置列表只表示存在；实际生效的文件可能更少。
-4. 宿主扫描规则与位置表绑定 omp v18.0.10：升级 omp 时真二进制用例必须重跑，失败即改规格。
+4. 会话进程启动后才新建的项目 skill：宿主记为 `skill` 并原样下发，omp 当作普通消息交给模型；以它为锚点的 regenerate / fork 得到 400。进程下次启动后恢复一致。
+5. 检查与读取之间的竞态（omp uid 在 realpath / `lstat` 之后换掉目录）：与平台目录读取、会话文件删除同类，不单独处理。
+6. 宿主扫描规则与位置表绑定 omp v18.0.10：升级 omp 时真二进制用例必须重跑，失败即改规格。
 
 ## 备选（弃）
 
