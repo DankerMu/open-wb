@@ -247,6 +247,69 @@ describe("writeManagedLine — 同 tick 多条记录共用一个监听（#787）
     await nextImmediate();
     expect(sink.listenerCount("error")).toBe(0);
   });
+
+  it("三条在途、其中一条 callback 报错：只有它 reject，其余仍在途并随各自 callback resolve，监听留到最后一条 settle 后的下一轮", async () => {
+    const sink = new ManualSink();
+    const [a, b, c] = ["a\n", "b\n", "c\n"].map((line) => track(sink, line));
+    const failure = new Error("one-callback-failure");
+    sink.callbacks[1]?.(failure);
+    await Promise.resolve();
+    expect(b).toEqual([{ status: "rejected", error: failure }]);
+    expect([a, c]).toEqual([[], []]);
+    // 过一轮 setImmediate：A、C 仍在途，监听不得被摘
+    await nextImmediate();
+    expect([a, c]).toEqual([[], []]);
+    expect(sink.listenerCount("error")).toBe(1);
+
+    sink.callbacks[0]?.();
+    sink.callbacks[2]?.(null);
+    await Promise.resolve();
+    expect([a, b, c]).toEqual([
+      [{ status: "resolved" }],
+      [{ status: "rejected", error: failure }],
+      [{ status: "resolved" }],
+    ]);
+    expect(sink.listenerCount("error")).toBe(1);
+    await nextImmediate();
+    expect(sink.listenerCount("error")).toBe(0);
+  });
+
+  it("三条在途时第四条 write 同步 throw：只有它 reject，监听仍挂着，随后的 error 仍 reject 剩余在途记录", async () => {
+    const sink = new ManualSink();
+    const [a, b, c] = ["a\n", "b\n", "c\n"].map((line) => track(sink, line));
+    const thrown = new Error("sync-write-failure");
+    // 实例属性遮住原型上的 write，只让第四条同步 throw
+    sink.write = () => {
+      throw thrown;
+    };
+    const d = track(sink, "d\n");
+    await Promise.resolve();
+    expect(d).toEqual([{ status: "rejected", error: thrown }]);
+    expect([a, b, c]).toEqual([[], [], []]);
+    expect(sink.writes).toEqual(["a\n", "b\n", "c\n"]);
+    await nextImmediate();
+    expect([a, b, c]).toEqual([[], [], []]);
+    expect(sink.listenerCount("error")).toBe(1);
+
+    sink.callbacks[0]?.();
+    await Promise.resolve();
+    expect(a).toEqual([{ status: "resolved" }]);
+    expect([b, c]).toEqual([[], []]);
+
+    // 裸 EventEmitter：监听若已被摘，emit("error") 会同步 throw
+    const failure = new Error("stream-failure-after-sync-throw");
+    expect(() => sink.emit("error", failure)).not.toThrow();
+    await Promise.resolve();
+    const rejected: Outcome = { status: "rejected", error: failure };
+    expect([a, b, c, d]).toEqual([
+      [{ status: "resolved" }],
+      [rejected],
+      [rejected],
+      [{ status: "rejected", error: thrown }],
+    ]);
+    await nextImmediate();
+    expect(sink.listenerCount("error")).toBe(0);
+  });
 });
 
 describe("writeManagedLine — 同一 stream 上监听的复用与重挂（#787）", () => {
