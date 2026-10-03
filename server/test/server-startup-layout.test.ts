@@ -20,7 +20,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parse } from "yaml";
-import { expectHostOverlay, expectLayout, seedLegacyAgentDir } from "./omp-layout-helpers.js";
+import {
+  expectHomeDotenv,
+  expectHostOverlay,
+  expectLayout,
+  seedLegacyAgentDir,
+} from "./omp-layout-helpers.js";
 import {
   type CompiledServerEntry,
   compiledFixtureEnv,
@@ -102,6 +107,8 @@ describe("production entry managed omp state layout", () => {
       expectLayout(state);
       expectManagedModels(join(state, "home", ".omp", "agent"), port);
       expectHostOverlay(state);
+      expectHomeDotenv(state);
+      expect(readdirSync(join(state, "home")).toSorted()).toEqual([".env", ".omp"]);
       expect(readdirSync(state).toSorted()).toEqual(["agent", "home", "sessions", "trash", "xdg"]);
       expect(readFileSync(join(legacy, "models.yml"), "utf8")).toBe("legacy-models");
       expect(lstatSync(join(legacy, "models.yml")).mtimeMs).toBe(legacyBefore.mtimeMs);

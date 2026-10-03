@@ -3,13 +3,14 @@
  * state dir and of their permission bits. Managed configuration (`home/.omp/agent`: `models.yml`,
  * `host-overlay.yml`, operator-installed `skills/`) is owned by the app uid and read-only for the
  * omp uid; omp's own runtime state goes to `xdg/{data,state,cache}/omp`, which omp v18.0.10 uses
- * only when it runs with its default agent dir (`$HOME/.omp/agent`, no `PI_CODING_AGENT_DIR`) and
- * the directory already exists (`resource/oh-my-pi/packages/utils/src/dirs.ts`), so the host
- * creates all three.
+ * only when its agent dir is the default one (`$HOME/.omp/agent`; `PI_CODING_AGENT_DIR` is set to
+ * that very string) and the directory already exists
+ * (`resource/oh-my-pi/packages/utils/src/dirs.ts`), so the host creates all three. `home/.env`,
+ * which omp loads at startup, is pre-created and owned by the app uid (issue #802).
  */
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
-import { ensureOwnedDir } from "../../core/sandbox/dirs.js";
+import { ensureOwnedDir, ensureOwnedFile } from "../../core/sandbox/dirs.js";
 
 export type OmpXdgCategory = "data" | "state" | "cache";
 
@@ -52,6 +53,8 @@ const OMP_HOME = 0o3770;
 /** A `home` being cold-built: no group or other bits yet; setgid stays so `.omp` inherits the group. */
 const OMP_HOME_UNOPENED = 0o2700;
 const APP_PRIVATE = 0o700;
+/** `home/.env`: omp reads it; the sticky `home` keeps the omp uid from replacing it. */
+const HOME_DOTENV = 0o640;
 
 /**
  * Parents before children; paths relative to the resolved state root. The root and `home` come
@@ -79,8 +82,13 @@ const LAYOUT: readonly (readonly [path: string, mode: number])[] = [
  * A missing `home` is opened to the omp group only after `.omp` and `agent` stand in it: a
  * leftover omp-uid process could otherwise create `home/.omp` first and fail the layout on its
  * owner check. An existing `home` is never narrowed first: running omp processes are using it.
+ * `home/.env` is created (empty; its content is the operator's) before a cold `home` opens, for
+ * the same reason. A state dir containing `:` is refused: `PI_CONFIG_FILES` is `:`-separated.
  */
 export function ensureOmpStateLayout(stateDir: string): string {
+  if (stateDir.includes(":")) {
+    throw new Error("OMP_STATE_DIR must not contain ':'");
+  }
   mkdirSync(stateDir, { recursive: true });
   const root = realpathSync.native(stateDir);
   ensureOwnedDir(root, MANAGED);
@@ -88,6 +96,7 @@ export function ensureOmpStateLayout(stateDir: string): string {
   // A dangling symlink counts as missing here and is then refused by `ensureOwnedDir`.
   const cold = !existsSync(home);
   ensureOwnedDir(home, cold ? OMP_HOME_UNOPENED : OMP_HOME);
+  ensureOwnedFile(join(home, ".env"), HOME_DOTENV);
   for (const [path, mode] of LAYOUT) {
     ensureOwnedDir(join(root, path), mode);
   }

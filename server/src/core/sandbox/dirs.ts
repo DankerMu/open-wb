@@ -3,10 +3,11 @@
  *
  * `ensureSharedDir`：同步受信绝对路径，逐级 mkdir，仅对本次新建的分量 chmod 0o2770，不改既有分量
  * （SANDBOX_ROOT 一侧）。`ensureOwnedDir`：单个目录，每次校正到精确 mode 并校验归属
- * （OMP_STATE_DIR 托管布局）。两者都不 chown、不改进程 umask；组归属由部署 setgid 继承。
+ * （OMP_STATE_DIR 托管布局）。`ensureOwnedFile`：同一语义的单个普通文件，内容不管。
+ * 三者都不 chown、不改进程 umask；组归属由部署 setgid 继承。
  */
 
-import { chmodSync, lstatSync, mkdirSync, statSync } from "node:fs";
+import { chmodSync, closeSync, constants, lstatSync, mkdirSync, openSync, statSync } from "node:fs";
 
 const SHARED_DIR_MODE = 0o2770;
 
@@ -38,13 +39,35 @@ export function ensureSharedDir(absPath: string): void {
  * （本进程不在该目录的组里）同样是失败。
  */
 export function ensureOwnedDir(absPath: string, mode: number): void {
+  ensureOwned("directory", absPath, mode, () => mkdirSync(absPath, mode & 0o777));
+}
+
+/**
+ * 托管文件：`absPath` 缺失时建为空文件（父目录必须已在），要求它是本进程 uid 持有的普通文件
+ * （符号链接与其它类型一律拒绝、不跟随），并把 `mode & 0o7777` 校正到精确的 `mode`。既有内容
+ * 不读取、不截断、不改写。新建时 `open` 直接带目标权限位，不经过一个更宽的中间状态。
+ */
+export function ensureOwnedFile(absPath: string, mode: number): void {
+  const { O_WRONLY, O_CREAT, O_EXCL, O_NOFOLLOW } = constants;
+  ensureOwned("file", absPath, mode, () =>
+    closeSync(openSync(absPath, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, mode)),
+  );
+}
+
+/** `create` 的 `EEXIST` 不是错误；其后以 `lstat` 校验类型与归属，mode 不符时 chmod 并复查。 */
+function ensureOwned(
+  kind: "directory" | "file",
+  absPath: string,
+  mode: number,
+  create: () => void,
+): void {
   const fail = (reason: string, cause?: unknown): never => {
-    throw new Error(`managed directory ${absPath} (mode 0o${mode.toString(8)}): ${reason}`, {
+    throw new Error(`managed ${kind} ${absPath} (mode 0o${mode.toString(8)}): ${reason}`, {
       cause,
     });
   };
   try {
-    mkdirSync(absPath, mode & 0o777);
+    create();
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
       fail("cannot be created", error);
@@ -52,8 +75,8 @@ export function ensureOwnedDir(absPath: string, mode: number): void {
   }
   const modeOf = (): number => {
     const stats = lstatSync(absPath);
-    if (!stats.isDirectory()) {
-      fail("is not a directory");
+    if (!(kind === "directory" ? stats.isDirectory() : stats.isFile())) {
+      fail(kind === "directory" ? "is not a directory" : "is not a regular file");
     }
     if (stats.uid !== process.geteuid?.()) {
       fail("is not owned by this process");

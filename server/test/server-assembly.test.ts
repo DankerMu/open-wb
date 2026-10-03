@@ -237,7 +237,7 @@ describe("真实配置经认证 prompt 抵达 spawn", () => {
     expect(unset.stdio).toEqual(["pipe", "pipe", "pipe"]);
     expect(configured.shell).toBe(false);
     expect(configured.env.HOME).toBe(join(roots.stateDir, "home"));
-    expect(configured.env).not.toHaveProperty("PI_CODING_AGENT_DIR");
+    expect(configured.env.PI_CODING_AGENT_DIR).toBe(join(roots.stateDir, "home", ".omp", "agent"));
     expect(configured.env.XDG_DATA_HOME).toBe(join(roots.stateDir, "xdg", "data"));
     expect(configured.env.WORKBUDDY_MODEL_TOKEN).toBe(configured.token);
     expect(unset.env.WORKBUDDY_MODEL_TOKEN).toBe(unset.token);

@@ -361,7 +361,7 @@ export function sudoPrefix(user: string, bin: string, tmpdir?: string): string[]
     "-n",
     "-u",
     user,
-    "--preserve-env=PATH,LANG,TMPDIR,HOME,XDG_DATA_HOME,XDG_STATE_HOME,XDG_CACHE_HOME,WORKBUDDY_MODEL_TOKEN",
+    "--preserve-env=PATH,LANG,TMPDIR,HOME,XDG_DATA_HOME,XDG_STATE_HOME,XDG_CACHE_HOME,PI_CODING_AGENT_DIR,PI_CONFIG_FILES,PI_CONFIG_DIR,OMP_PROFILE,PI_PROFILE,WORKBUDDY_MODEL_TOKEN",
     ...(tmpdir === undefined ? [] : [`TMPDIR=${tmpdir}`]),
     "--",
     "/usr/bin/setpriv",

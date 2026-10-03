@@ -59,6 +59,19 @@ export function expectHostOverlay(state: string): void {
   expect(readFileSync(overlay, "utf8")).toBe(HOST_OVERLAY_YAML);
 }
 
+/**
+ * Issue #802: `<state>/home/.env` is a 0640 regular file owned by this process; the host creates
+ * it empty and never touches its content afterwards.
+ */
+export function expectHomeDotenv(state: string, content = ""): void {
+  const dotenv = join(state, "home", ".env");
+  const stats = lstatSync(dotenv);
+  expect(stats.isFile()).toBe(true);
+  expect(stats.mode & 0o7777).toBe(0o640);
+  expect(stats.uid).toBe(process.geteuid?.());
+  expect(readFileSync(dotenv, "utf8")).toBe(content);
+}
+
 /** `sessions/<ownerId>`, created by the spawn. */
 export function sessionRow(ownerId: string): readonly [string, number] {
   return [`sessions/${ownerId}`, 0o2770];

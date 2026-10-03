@@ -98,7 +98,7 @@ CONTEXT.md 不变量 4（网关/kb 凭证不进 omp 可读环境）在同 uid �
   | `<state>/xdg/{data,state,cache}/omp` | `2770` | 运行期状态（`agent.db`、日志、原生模块缓存） |
   | `<state>/sessions/<ownerId>` | `2770` | 会话文件 |
 
-  spawn 环境不再设 `PI_CODING_AGENT_DIR`（omp 取默认 `$HOME/.omp/agent`），新增 `XDG_DATA_HOME|XDG_STATE_HOME|XDG_CACHE_HOME=<state>/xdg/*`；
+  spawn 环境里 agent 目录取 omp 的默认值 `$HOME/.omp/agent`（#802 起显式设置 `PI_CODING_AGENT_DIR` 为这同一路径，见文末 dotenv 一条），新增 `XDG_DATA_HOME|XDG_STATE_HOME|XDG_CACHE_HOME=<state>/xdg/*`；
   `--preserve-env` 列表同步。omp 只在 agent 目录为默认值且 `$XDG_*_HOME/omp` 已存在时才重定向运行期状态，所以三个 `omp` 目录由宿主预建。
   宿主在启动与每次 spawn 时把上表校正到精确值，并拒绝不属于 app uid 的目录、符号链接与非目录条目（启动失败 / 该次 spawn 502）。
   `SANDBOX_ROOT` 一侧仍是 `2770`，不变。sudoers 规则不变。
@@ -122,3 +122,7 @@ CONTEXT.md 不变量 4（网关/kb 凭证不进 omp 可读环境）在同 uid �
 - **会话删除（#706 2b）**：同名产物目录先被移入 app 私有的 `<state>/trash`（`0700`）再递归删除，omp uid 不能再按路径替换其下的目录。
   删除前就把工作目录或目录 fd 留在该目录树内的 omp uid 进程仍可经相对路径替换子目录（Node 无 `*at` 系调用）——受信局域网下接受。
   递归删除部分失败的残余留在 `<state>/trash`，宿主不自动清理，运维可在停服务后清空。
+- **dotenv（#802）**：omp 启动时加载 `$HOME/.env`。`<state>/home/.env` 由宿主预建并持有（`0640`，内容不管，运维可在其中为 omp 放环境变量），
+  粘滞位使 omp uid 不能替换它。升级时若该文件已被 omp uid 建出，启动因归属不符失败，移走后重启。
+  spawn 环境显式设置 `PI_CODING_AGENT_DIR`、`PI_CONFIG_FILES`、`PI_CONFIG_DIR=.omp`、`OMP_PROFILE=default`、`PI_PROFILE=default`，
+  使工作目录的 `.env` 不能改动 omp 读托管配置的位置；`OMP_STATE_DIR` 的路径不得含 `:`（`PI_CONFIG_FILES` 的分隔符），否则启动失败。

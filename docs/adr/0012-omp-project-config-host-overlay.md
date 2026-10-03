@@ -25,8 +25,10 @@ omp 把会话 cwd（及其祖先）下的项目层内容当作配置加载：设
   - 项目层写 `eval: {js: false}` 时，omp 在 spawn 时做 Python 预检并执行 `<cwd>/.venv/bin/python`（overlay 把 `python.interpreter` 清空后走默认发现）；
     需要 cwd 下有带可执行位的该文件，能力不超过上面的项目工具残余，未钉 `eval.js`（钉住会剥夺项目关闭 JS eval 的选择）。
   - 官方 omp 二进制会自动加载 `<cwd>/.env`（实测：其中的 `PI_CONFIG_FILES` 生效）。宿主已设置的环境变量不会被覆盖，
-    被钉的设置键仍由 `--config` overlay 胜出，但未设置的 `PI_*` 变量可被工作目录注入——例如指向不存在的 overlay 使该目录的 spawn 持续失败，
-    或改写 agent 目录。与项目工具残余同类，后续处置见 #708 的后续 issue。
+    #802 起宿主显式设置 `PI_CODING_AGENT_DIR`、`PI_CONFIG_FILES`、`PI_CONFIG_DIR`、`OMP_PROFILE`、`PI_PROFILE`（dotenv 不覆盖已有的非空变量），并预建、持有 `<OMP_STATE_DIR>/home/.env`；
+    其它未被宿主设置的 `PI_*`/`OMP_*` 变量仍可被工作目录的 `.env` 注入（无法穷举），与项目工具残余同类。
+    omp 自己派生的 worker 子进程继承的是 profile 变量已被 omp 清掉的环境，`<cwd>/.env` 的 `OMP_PROFILE` 可能在 worker 里生效（读源码推断，未实测）；
+    `PI_CONFIG_DIR` 仍被钉住，配置根只能落在 app 持有的 `<OMP_STATE_DIR>/home/.omp` 之内，omp uid 建不出，不击穿托管配置的保证。
   - omp uid 可写的 `HOME` 下的第三方配置目录（`~/.claude` 等）不用 `disabledProviders` 关：该键不支持按路径生效，
     整个 provider 关掉会连项目层同名目录的功能一起关掉；omp 自己的运行期状态本就含可写的可加载代码（ADR-0010 同日补充）。
 - 部署前提：`SANDBOX_ROOT` 的任何祖先目录不得带 `.omp/`（或带 `.omp/plugins` 的 `.git` 根）——omp 的项目插件与 skills 发现会上溯祖先目录。

@@ -20,6 +20,7 @@ import {
 import {
   ensureOmpSessionDir,
   ensureOmpStateLayout,
+  ompAgentDir,
   ompHome,
   ompHostOverlayPath,
   ompSessionDir,
@@ -108,10 +109,17 @@ export async function spawnOmp(
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? "",
     HOME: home,
-    // No PI_CODING_AGENT_DIR: omp redirects runtime state to XDG only with its default agent dir.
     XDG_DATA_HOME: ompXdgHome(opts.stateDir, "data"),
     XDG_STATE_HOME: ompXdgHome(opts.stateDir, "state"),
     XDG_CACHE_HOME: ompXdgHome(opts.stateDir, "cache"),
+    // omp loads `<cwd>/.env` but never over a non-empty variable: these five are what omp does
+    // by default, set so a dotenv cannot move the managed config (issue #802). The agent dir must
+    // stay the default string itself, or omp stops redirecting runtime state to XDG.
+    PI_CODING_AGENT_DIR: ompAgentDir(opts.stateDir),
+    PI_CONFIG_FILES: ompHostOverlayPath(opts.stateDir),
+    PI_CONFIG_DIR: ".omp",
+    OMP_PROFILE: "default",
+    PI_PROFILE: "default",
     WORKBUDDY_MODEL_TOKEN: opts.token,
   };
   if (process.env.LANG !== undefined) {
@@ -129,7 +137,7 @@ export async function spawnOmp(
           "-n",
           "-u",
           opts.ompUser,
-          "--preserve-env=PATH,LANG,TMPDIR,HOME,XDG_DATA_HOME,XDG_STATE_HOME,XDG_CACHE_HOME,WORKBUDDY_MODEL_TOKEN",
+          "--preserve-env=PATH,LANG,TMPDIR,HOME,XDG_DATA_HOME,XDG_STATE_HOME,XDG_CACHE_HOME,PI_CODING_AGENT_DIR,PI_CONFIG_FILES,PI_CONFIG_DIR,OMP_PROFILE,PI_PROFILE,WORKBUDDY_MODEL_TOKEN",
           ...(env.TMPDIR === undefined ? [] : [`TMPDIR=${env.TMPDIR}`]),
           "--",
           // setpriv execs omp in place; the kernel SIGKILLs omp when sudo dies.

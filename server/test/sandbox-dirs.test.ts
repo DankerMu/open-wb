@@ -15,7 +15,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ensureOwnedDir, ensureSharedDir } from "../src/core/sandbox/dirs.js";
+import { ensureOwnedDir, ensureOwnedFile, ensureSharedDir } from "../src/core/sandbox/dirs.js";
 
 const tmpDirs: string[] = [];
 const SHARED_MODE = 0o2770;
@@ -218,7 +218,7 @@ function thrownBy(run: () => void): Error {
       return error;
     }
   }
-  throw new Error("expected ensureOwnedDir to throw");
+  throw new Error("expected the call to throw");
 }
 
 describe("core/sandbox ensureOwnedDir", () => {
@@ -357,5 +357,128 @@ describe("core/sandbox ensureOwnedDir", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+});
+
+/** #802 sandbox-core「托管文件权限位」. */
+describe("core/sandbox ensureOwnedFile", () => {
+  const FILE_MODE = 0o640;
+
+  it("creates an empty file at the exact mode, then corrects the mode without touching content", () => {
+    const file = join(createParent(), "f");
+
+    ensureOwnedFile(file, FILE_MODE);
+    expect(lstatSync(file).isFile()).toBe(true);
+    expect(modeOf(file)).toBe(FILE_MODE);
+    expect(lstatSync(file).uid).toBe(process.geteuid?.());
+    expect(readFileSync(file)).toHaveLength(0);
+
+    writeFileSync(file, "KEEP=these bytes\n");
+    chmodSync(file, 0o666);
+    ensureOwnedFile(file, FILE_MODE);
+    expect(modeOf(file)).toBe(FILE_MODE);
+    expect(readFileSync(file, "utf8")).toBe("KEEP=these bytes\n");
+
+    const chmodSpy = vi.spyOn(fs, "chmodSync");
+    const chownSpy = vi.spyOn(fs, "chownSync");
+    syncBuiltinESMExports();
+    const umaskBefore = process.umask();
+    ensureOwnedFile(file, FILE_MODE);
+    expect(chmodSpy).not.toHaveBeenCalled();
+    expect(chownSpy).not.toHaveBeenCalled();
+    expect(process.umask()).toBe(umaskBefore);
+    expect(readFileSync(file, "utf8")).toBe("KEEP=these bytes\n");
+  });
+
+  it("creates a new file no wider than the target under umask 000, before any chmod", () => {
+    const file = join(createParent(), "f");
+    const open = fs.openSync;
+    const opened: number[] = [];
+    vi.spyOn(fs, "openSync").mockImplementation((...args: Parameters<typeof fs.openSync>) => {
+      const fd = open(...args);
+      opened.push(modeOf(String(args[0])));
+      return fd;
+    });
+    const chmodSpy = vi.spyOn(fs, "chmodSync");
+    syncBuiltinESMExports();
+    const previous = process.umask(0o000);
+    try {
+      ensureOwnedFile(file, FILE_MODE);
+    } finally {
+      process.umask(previous);
+    }
+
+    expect(opened.map((mode) => (mode & ~FILE_MODE).toString(8))).toEqual(["0"]);
+    expect(chmodSpy).not.toHaveBeenCalled();
+    expect(modeOf(file)).toBe(FILE_MODE);
+  });
+
+  it("applies the mode under a restrictive umask", () => {
+    const file = join(createParent(), "f");
+    const previous = process.umask(0o077);
+    try {
+      ensureOwnedFile(file, FILE_MODE);
+    } finally {
+      process.umask(previous);
+    }
+    expect(modeOf(file)).toBe(FILE_MODE);
+  });
+
+  it("rejects a symlink to a regular file and leaves the target untouched", () => {
+    const parent = createParent();
+    const target = join(parent, "target");
+    const link = join(parent, "link");
+    writeFileSync(target, "target bytes");
+    chmodSync(target, 0o644);
+    symlinkSync(target, link);
+
+    const error = thrownBy(() => ensureOwnedFile(link, FILE_MODE));
+
+    expect(error.message).toContain(link);
+    expect(error.message).toContain("0o640");
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(modeOf(target)).toBe(0o644);
+    expect(readFileSync(target, "utf8")).toBe("target bytes");
+  });
+
+  it("rejects a dangling symlink without creating its target", () => {
+    const parent = createParent();
+    const link = join(parent, "link");
+    symlinkSync(join(parent, "absent"), link);
+
+    expect(thrownBy(() => ensureOwnedFile(link, FILE_MODE)).message).toContain(link);
+    expect(existsSync(join(parent, "absent"))).toBe(false);
+  });
+
+  it("rejects a directory and leaves it untouched", () => {
+    const dir = join(createParent(), "d");
+    mkdirSync(dir);
+    chmodSync(dir, 0o755);
+
+    expect(thrownBy(() => ensureOwnedFile(dir, FILE_MODE)).message).toContain(dir);
+    expect(lstatSync(dir).isDirectory()).toBe(true);
+    expect(modeOf(dir)).toBe(0o755);
+  });
+
+  it("rejects a missing parent and creates nothing", () => {
+    const parent = createParent();
+    const nested = join(parent, "absent", "f");
+
+    expect(thrownBy(() => ensureOwnedFile(nested, FILE_MODE)).message).toContain(nested);
+    expect(existsSync(join(parent, "absent"))).toBe(false);
+  });
+
+  // The file's current mode is passed, so no chmod is needed: only the owner check rejects it.
+  it.skipIf(process.geteuid?.() === 0)("rejects a file owned by another uid", () => {
+    const foreign = "/etc/hosts";
+    const before = lstatSync(foreign);
+    const bytes = readFileSync(foreign);
+    expect(before.uid).toBe(0);
+
+    const error = thrownBy(() => ensureOwnedFile(foreign, before.mode & 0o7777));
+
+    expect(error.message).toContain(foreign);
+    expect(lstatSync(foreign).mode).toBe(before.mode);
+    expect(readFileSync(foreign).equals(bytes)).toBe(true);
   });
 });
