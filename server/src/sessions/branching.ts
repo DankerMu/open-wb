@@ -4,7 +4,8 @@
  * dispatches on the session's own process; fork (#466) runs the commands on a temporary process
  * admitted after the source's process retired, shuts it down and only then commits. Both pick the
  * branch entry by wire candidates (#555): a whitelisted command turn has no entry and is refused,
- * escaped text has one with a leading space.
+ * escaped text has one with a leading space. Regenerate dispatches the branch text escaped when it
+ * starts with `/` (#711), so an entry left before the prompt route escaped is never re-sent bare.
  */
 import { randomBytes } from "node:crypto";
 import { HttpError } from "../core/errors/index.js";
@@ -96,7 +97,7 @@ export class Regenerations {
   async #regenerate(slot: Slot, plan: RegeneratePlan): Promise<{ assistantMessageId: number }> {
     const entryId = await this.#lastEntry(slot, plan.question);
     const branched = await branchTo(slot.runtime, entryId);
-    return this.#commit(slot, plan, branched.text, branched.sessionFile);
+    return this.#commit(slot, plan, dispatchText(branched.text), branched.sessionFile);
   }
 
   /** (a)+(b): the only command whose acquisition fault (re-admission) may surface. */
@@ -162,6 +163,15 @@ export class Regenerations {
     }
     return { assistantMessageId };
   }
+}
+
+/**
+ * The text regenerate dispatches for a branch text (#711): one U+0020 is prefixed when it starts
+ * with `/`. The precheck refused whitelisted command anchors, so a bare `/…` branch text is never
+ * a command to run; an escaped entry starts with a space and is not escaped twice.
+ */
+function dispatchText(text: string): string {
+  return text.startsWith("/") ? ` ${text}` : text;
 }
 
 type Branched = { text: string; sessionFile: string };
