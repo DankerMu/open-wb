@@ -21,7 +21,7 @@ Risk packs: process-spawn-contract, approval-bypass, filesystem-permissions
 - 无项目配置时的审批行为（bash/eval/task 提示，读写不提示）。
 
 ## 3. 必需证据
-- E1 单元：overlay 内容逐字节、`0640`、重复写字节不变、无临时文件残留；目标目录缺失时拒绝；`ompHostOverlayPath` 位于 `ompAgentDir` 下。
+- E1 单元：overlay 内容逐字节（含 `images.urls` 一组）、`0640`、重复写字节不变、无临时文件残留；目标目录缺失时拒绝；`ompHostOverlayPath` 位于 `ompAgentDir` 下。
 - E2 argv：冷启动与 resume 的精确 argv（`--config <path>` 紧随 `--no-title`，`--resume` 在最后）；sudo 模式下 `--` 之后同样。
 - E3 启动：编译入口冷启动后 overlay 存在；overlay 路径被目录占位时 exit 1、只有 generic 记录、无 `server_started`。
 - E4 真实 omp v18.0.10 + 编译后的服务 + 假上游（同 uid；可改编 `708/probe2/stack.py` 与其场景文件，复制到 $D 下使用）：

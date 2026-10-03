@@ -19,7 +19,7 @@
 2. 内容是常量，启动时与 `models.yml` 一起写（同一个 `replaceFile`；把它从 `models-yml.ts` 提到两处都能用的位置，不复制）。不在 spawn 时写：与 `models.yml` 同一生命周期，少一条并发写路径。
 3. argv 位置：`--no-title` 之后、`--resume` 之前。假 omp 的 argv 解析忽略未知参数及其后的 token，不需要改假 omp。
 4. 不回退：overlay 不可用时宁可 502，也不以无 overlay 的方式 spawn。
-5. 可选的 `shellMinimizer.settingsPath`、`images.urls.*` 不加：前者不是可执行路径，后者默认已关且未实测。
+5. `images.urls: {enabled: false, command: null}` 加入：默认虽关，但项目层可以自己打开，打开后 prewarm 在任何 prompt 之前拉起外部进程（fixture 评审读源码指出；未做执行级实测，取值被 omp 接受已实测）。`shellMinimizer.settingsPath` 不加：它是被解析的 TOML 过滤文件，不是可执行路径。
 
 ## 残余（记入 ADR-0012）
 - 项目层 `.omp/tools` / `.claude/tools` / `.codex/tools` 与项目插件在 spawn 时执行（已接受）。
