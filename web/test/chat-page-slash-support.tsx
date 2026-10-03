@@ -1,7 +1,8 @@
 // 斜杠命令候选（issue 556）测试的夹具与页面查询：命令目录、`/api/commands` 路由、欢迎态与已选会话的
 // 挂载、候选面板的读取、按键与 `scrollIntoView` 记录桩、裸 `Composer` 夹具（J11、J13）。页面搭法来自
 // chat-page-support.tsx、chat-page-ownership-support.ts 与 chat-page-search-support.tsx（不改它们）。供
-// api-commands.test.ts、slash-menu-state.test.ts 与 chat-page-slash.test.tsx 使用。
+// api-commands.test.ts、slash-menu-state.test.ts、chat-page-slash.test.tsx 与
+// chat-page-slash-workspace.test.tsx（issue 814：按工作空间取目录、项目 skill 标注）使用。
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { type ComponentProps, type KeyboardEvent, useState } from "react";
 import { afterEach, beforeEach, expect, vi } from "vitest";
@@ -27,6 +28,7 @@ export const COMPACT: Command = {
   description: "压缩较长对话的上下文，保留要点",
   hint: "可选：想保留的重点",
   source: "builtin",
+  overrides: false,
 };
 export const TODO: Command = {
   name: "todo",
@@ -34,6 +36,7 @@ export const TODO: Command = {
   description: "查看或修改助手的任务清单",
   hint: "可选：append <任务>",
   source: "builtin",
+  overrides: false,
 };
 
 /** A platform skill as the server lists it: the name is the label behind `skill:`. */
@@ -42,7 +45,17 @@ export function skill(
   description: string,
   hint: string | null = "可选参数",
 ): Command {
-  return { name: `skill:${label}`, label, description, hint, source: "skill" };
+  return { name: `skill:${label}`, label, description, hint, source: "skill", overrides: false };
+}
+
+/** A project skill as the server lists it; `overrides` marks one that replaces a platform skill. */
+export function project(label: string, description: string, overrides = false): Command {
+  return { ...skill(label, description), source: "project", overrides };
+}
+
+/** The path of the catalogue of the workspace `id`. */
+export function commandsOf(id: string) {
+  return `${COMMANDS}?workspaceId=${id}`;
 }
 
 export const WEEKLY = skill("weekly-report", "写周报");
@@ -150,6 +163,11 @@ function labelOf(option: Element) {
   return option.querySelector(".chat-slash-label")?.textContent;
 }
 
+/** The project tag of every option, in document order; null for an option without one. */
+export function tags() {
+  return options().map((option) => option.querySelector(".chat-slash-tag")?.textContent ?? null);
+}
+
 /** The label of every option, in document order. */
 export function labels() {
   return options().map(labelOf);
@@ -193,6 +211,11 @@ export function press(key: string, init: KeyboardEventInit & { keyCode?: number 
 /** The `/api/commands` requests so far, in call order. */
 export function commandCalls(fetchMock: FetchMock) {
   return calls(fetchMock, COMMANDS);
+}
+
+/** The paths of the catalogue requests of every workspace so far, in call order. */
+export function cataloguePaths(fetchMock: FetchMock) {
+  return paths(fetchMock).filter((path) => path.split("?")[0] === COMMANDS);
 }
 
 /** Asserts that no request of any kind (createSession, prompt, catalogue) followed `requests`. */
@@ -290,11 +313,21 @@ function composerProps(draft: string): ComponentProps<typeof Composer> {
   };
 }
 
-/** `useSlashMenu` beside a bare composer whose draft starts as a slash. */
-export function Harness({ enabled }: { enabled: boolean }) {
+/**
+ * `useSlashMenu` beside a bare composer whose draft starts as a slash; `workspaceId` names the
+ * catalogue (null by default: no workspace) and `"unknown"` is a workspace not resolved yet.
+ */
+export function Harness({
+  enabled,
+  workspaceId = null,
+}: {
+  enabled: boolean;
+  workspaceId?: string | null;
+}) {
   const [client] = useState(() => createApiClient());
   const [draft, setDraft] = useState("/");
-  const slash = useSlashMenu(client, draft, enabled, setDraft);
+  const key = workspaceId === "unknown" ? undefined : workspaceId;
+  const slash = useSlashMenu(client, key, draft, enabled, setDraft);
   return (
     <Composer
       {...composerProps(draft)}

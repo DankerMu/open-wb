@@ -12,9 +12,9 @@ Fixture level: expanded。每个任务组对应一个实现 issue；本变更在
 
 ## 2. web：候选面板
 
-- [ ] 2.1 `api-commands.ts`：`listCommands(workspaceId)`、六键严格解析、`source` 增加 `project`。
-- [ ] 2.2 `slash-menu.tsx`：目录按 client 与工作空间 id 持有；`项目` / `项目 · 覆盖平台技能` 标注；不显示其它工作空间的目录。
-- [ ] 2.3 用例：「命令目录方法」「候选面板按工作空间取目录」与既有候选场景；ui-walk 覆盖一个带项目 skill 的工作空间。
+- [x] 2.1 `api-commands.ts`：`listCommands(workspaceId)`、六键严格解析、`source` 增加 `project`。
+- [x] 2.2 `slash-menu.tsx`：目录按 client 与工作空间 id 持有；`项目` / `项目 · 覆盖平台技能` 标注；不显示其它工作空间的目录。
+- [x] 2.3 用例：「命令目录方法」「候选面板按工作空间取目录」与既有候选场景；ui-walk 覆盖一个带项目 skill 的工作空间。
 
 ## 3. server：项目配置文件列表
 

@@ -174,7 +174,7 @@ export type ApiClient = {
     decision: "allow" | "deny",
     options?: ApiRequestOptions,
   ): Promise<ChatSettledApproval>;
-  listCommands(options?: ApiRequestOptions): Promise<Command[]>;
+  listCommands(workspaceId: string | null, options?: ApiRequestOptions): Promise<Command[]>;
 };
 
 export type ApiClientOptions = {

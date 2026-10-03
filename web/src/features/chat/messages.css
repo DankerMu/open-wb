@@ -775,6 +775,15 @@
   color: var(--wb-text-primary);
 }
 
+/* A project skill's tag (issue 814), beside the label: the colours of the brand `Tag`. */
+.chat-slash-tag {
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  background: var(--wb-brand-primary-subtle);
+  color: var(--wb-brand-primary-deep);
+}
+
 .chat-slash-desc {
   color: var(--wb-text-secondary);
 }
