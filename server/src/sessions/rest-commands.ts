@@ -15,11 +15,15 @@ import { noStoreSessionHeaders } from "./rest.js";
 import type { WorkspaceRootOf } from "./session-cwd.js";
 import { BUILTIN_COMMANDS, sessionSkills } from "./slash-commands.js";
 
-interface CommandRouteDependencies {
-  agentDir: string;
+/** What resolving the cwd of a request needs; `GET /api/project-config` takes exactly this. */
+export interface RequestCwdDependencies {
   sandboxRoot: string;
   /** The workspace store's owner-scoped `rootOf`: null for an id that is not the caller's. */
   workspaceRootOf: WorkspaceRootOf;
+}
+
+interface CommandRouteDependencies extends RequestCwdDependencies {
+  agentDir: string;
 }
 
 const SKILL_HINT = "可选参数";
@@ -30,11 +34,7 @@ export function registerCommandRoutes(
   dependencies: CommandRouteDependencies,
 ): void {
   app.get("/api/commands", { onRequest: noStoreSessionHeaders }, async (request, reply) => {
-    const principal = request.principal;
-    if (principal === null) {
-      throw new HttpError("unauthorized");
-    }
-    const cwd = commandCwd(dependencies, principal.id, workspaceIdOf(request));
+    const cwd = requestCwd(request, dependencies);
     const builtins = BUILTIN_COMMANDS.map(({ name, label, description, hint }) => ({
       name,
       label,
@@ -58,22 +58,27 @@ export function registerCommandRoutes(
 }
 
 /**
- * The cwd whose project skills are listed: the owner root, or the workspace root. An id that is
- * malformed, unknown or another account's is 404 (`rootOf` answers null for all three); a
- * workspace of the caller whose root is unusable (`rootOf` throws) is not an error and has no
- * project skill — null.
+ * The request rules both cwd-scoped directory routes share, and the cwd they answer for: the
+ * caller's owner root, or the root of the workspace named by `workspaceId`. 401 without a
+ * principal, decided before the 400 of `workspaceIdOf`. An id that is malformed, unknown or
+ * another account's is 404 (`rootOf` answers null for all three); a workspace of the caller whose
+ * root is unusable (`rootOf` throws) is not an error and has nothing project-level — null.
  */
-function commandCwd(
-  dependencies: CommandRouteDependencies,
-  ownerId: string,
-  workspaceId: string | undefined,
+export function requestCwd(
+  request: FastifyRequest,
+  dependencies: RequestCwdDependencies,
 ): string | null {
+  const principal = request.principal;
+  if (principal === null) {
+    throw new HttpError("unauthorized");
+  }
+  const workspaceId = workspaceIdOf(request);
   if (workspaceId === undefined) {
-    return join(dependencies.sandboxRoot, ownerId);
+    return join(dependencies.sandboxRoot, principal.id);
   }
   let root: string | null;
   try {
-    root = dependencies.workspaceRootOf(ownerId, workspaceId);
+    root = dependencies.workspaceRootOf(principal.id, workspaceId);
   } catch {
     return null;
   }

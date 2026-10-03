@@ -8,6 +8,7 @@ import type { ChatEvent } from "./events.js";
 import type { SpawnLog } from "./omp/spawn-gate.js";
 import { registerSessionRoutes } from "./rest.js";
 import { registerCommandRoutes } from "./rest-commands.js";
+import { registerProjectConfigRoutes } from "./rest-project-config.js";
 import type { WorkspaceRootOf } from "./session-cwd.js";
 import { createSessionDeleter } from "./session-delete.js";
 import { sessionSkillsResolver } from "./slash-commands.js";
@@ -94,6 +95,10 @@ export function registerSessions(
   });
   registerCommandRoutes(app, {
     agentDir: options.agentDir,
+    sandboxRoot: options.runtime.sandboxRoot,
+    workspaceRootOf: options.workspaceRootOf,
+  });
+  registerProjectConfigRoutes(app, {
     sandboxRoot: options.runtime.sandboxRoot,
     workspaceRootOf: options.workspaceRootOf,
   });

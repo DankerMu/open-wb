@@ -10,7 +10,6 @@
  */
 import {
   mkdirSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   renameSync,
@@ -18,17 +17,21 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
-import { createApp } from "../src/app.js";
-import { openDb } from "../src/core/db/index.js";
 import { ompAgentDir, type SpawnImpl, spawnOmp } from "../src/sessions/omp/process.js";
+import {
+  createWorkspace,
+  expectRejected,
+  getDirectory,
+  MODEL,
+  openWorld as openDirectoryWorld,
+  REJECTED,
+} from "./commands-rest-helpers.js";
 import { expectEnvelope } from "./session-bodyless-rest-helpers.js";
 import {
-  BAD_REQUEST_ENVELOPE,
   loginSessionPair,
   NOT_FOUND_ENVELOPE,
   UNAUTHORIZED_ENVELOPE,
@@ -37,7 +40,6 @@ import { recordedSpawn, type SpawnCall } from "./session-supervisor-helpers.js";
 import { FakeChild } from "./support/omp-rpc.js";
 
 const ROUTE = "/api/commands";
-const MODEL = "deepseek-v4.1-flash";
 const SIX_KEYS = ["name", "label", "description", "hint", "source", "overrides"];
 const BUILTIN_ENTRIES = [
   {
@@ -58,101 +60,21 @@ const BUILTIN_ENTRIES = [
   },
 ];
 
-/**
- * Authenticated requests the route must refuse: a body, or a query string that is not exactly one
- * `workspaceId` key with one non-empty value (`WS` stands for a workspace id of the caller).
- */
-const REJECTED: ReadonlyArray<{
-  name: string;
-  url?: string;
-  headers?: Record<string, string>;
-  payload?: string;
-}> = [
-  { name: "a query key other than workspaceId", url: `${ROUTE}?x=1` },
-  { name: "workspaceId given twice", url: `${ROUTE}?workspaceId=WS&workspaceId=WS` },
-  { name: "an empty workspaceId", url: `${ROUTE}?workspaceId=` },
-  { name: "workspaceId without a value", url: `${ROUTE}?workspaceId` },
-  { name: "workspaceId and another key", url: `${ROUTE}?workspaceId=WS&x=1` },
-  {
-    name: "a workspaceId and a JSON body",
-    url: `${ROUTE}?workspaceId=WS`,
-    headers: { "content-type": "application/json" },
-    payload: "{}",
-  },
-  { name: "a JSON body", headers: { "content-type": "application/json" }, payload: "{}" },
-  { name: "a body without a content type", payload: "x" },
-  { name: "a transfer-encoding header", headers: { "transfer-encoding": "chunked" } },
-];
-
-interface World {
-  app: FastifyInstance;
-  db: DatabaseSync;
-  root: string;
-  stateDir: string;
-}
-
-const apps: FastifyInstance[] = [];
-const databases: DatabaseSync[] = [];
-const temps: string[] = [];
 const fakeChildren: FakeChild[] = [];
 
-afterEach(async () => {
+afterEach(() => {
   for (const child of fakeChildren.splice(0)) {
     child.destroy();
   }
-  for (const app of apps.splice(0)) {
-    await app.close();
-  }
-  for (const db of databases.splice(0)) {
-    db.close();
-  }
-  for (const root of temps.splice(0)) {
-    rmSync(root, { recursive: true, force: true });
-  }
 });
 
-function openWorld(): World {
-  const root = mkdtempSync(join(tmpdir(), "commands-rest-"));
-  temps.push(root);
-  const stateDir = join(root, "state dir");
-  const db = openDb(":memory:");
-  databases.push(db);
-  const app = createApp({
-    db,
-    assembly: {
-      runtime: {
-        bin: join(root, "omp-bin"),
-        sandboxRoot: join(root, "sandbox"),
-        stateDir,
-        modelId: MODEL,
-      },
-    },
-  });
-  apps.push(app);
-  return { app, db, root, stateDir };
+function openWorld() {
+  return openDirectoryWorld("commands-rest-");
 }
 
 function writeSkill(skillsDir: string, entry: string, frontmatter: readonly string[]): void {
   mkdirSync(join(skillsDir, entry), { recursive: true });
   writeFileSync(join(skillsDir, entry, "SKILL.md"), `---\n${frontmatter.join("\n")}\n---\n正文\n`);
-}
-
-/** A workspace of the cookie's account under `sandboxRoot` (created first: the store realpaths it). */
-async function createWorkspace(
-  app: FastifyInstance,
-  cookie: string,
-  sandboxRoot: string,
-  dir = "proj",
-): Promise<{ id: string; root: string }> {
-  mkdirSync(sandboxRoot, { recursive: true });
-  const created = await app.inject({
-    method: "POST",
-    url: "/api/workspaces",
-    headers: { cookie, "content-type": "application/json" },
-    payload: JSON.stringify({ name: dir, dir }),
-  });
-  expect(created.statusCode).toBe(201);
-  return created.json<{ id: string; root: string }>();
 }
 
 function projectSkills(dir: string): string {
@@ -163,14 +85,8 @@ function skillEntry(name: string, description: string, source: string, overrides
   return { name: `skill:${name}`, label: name, description, hint: "可选参数", source, overrides };
 }
 
-async function getCommands(app: FastifyInstance, cookie: string, workspaceId?: string) {
-  const response = await app.inject({
-    method: "GET",
-    url: workspaceId === undefined ? ROUTE : `${ROUTE}?workspaceId=${workspaceId}`,
-    headers: { cookie },
-  });
-  expect(response.headers["cache-control"]).toBe("no-store");
-  return response;
+function getCommands(app: FastifyInstance, cookie: string, workspaceId?: string) {
+  return getDirectory(app, ROUTE, cookie, workspaceId);
 }
 
 function rowCount(db: DatabaseSync, table: "audit_events" | "chat_sessions"): number {
@@ -254,19 +170,7 @@ describe("GET /api/commands", () => {
   });
 
   it.each(REJECTED)("is 400 bad_request for the owner sending $name", async (input) => {
-    const { app, root } = openWorld();
-    const cookie = await loginSessionPair(app);
-    const workspace = await createWorkspace(app, cookie, join(root, "sandbox"));
-    const { url = ROUTE, headers = {}, payload } = input;
-
-    const response = await app.inject({
-      method: "GET",
-      url: url.replaceAll("WS", workspace.id),
-      headers: { ...headers, cookie },
-      ...(payload === undefined ? {} : { payload }),
-    });
-
-    expectEnvelope(response, 400, BAD_REQUEST_ENVELOPE);
+    await expectRejected(ROUTE, input);
   });
 
   it("holds exactly the two builtins when no skills directory exists, also with content-length 0", async () => {

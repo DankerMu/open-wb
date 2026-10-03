@@ -10,6 +10,9 @@
  * directory writable by the omp uid needs (no link at `.omp` or `skills`, no hard-linked SKILL.md,
  * at most 4096 entries) and the sandbox-root anchor of the walk; expected values are the literals
  * of Scenario「Project skills are listed from the session cwd upwards」.
+ * Issue #815 (#773 task 3.3): `listProjectConfig` enumerates and `lstat`s nothing behind a link or
+ * outside the sandbox root, and opens nothing at all (Scenario「Files present at the read
+ * locations」).
  */
 import { execFileSync } from "node:child_process";
 import {
@@ -29,12 +32,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app.js";
 import { openDb } from "../src/core/db/index.js";
 import { ompAgentDir } from "../src/sessions/omp/process.js";
+import { listProjectConfig } from "../src/sessions/rest-project-config.js";
 import { listProjectSkills, listSkills } from "../src/sessions/slash-commands.js";
 import { loginSessionPair } from "./session-db-helpers.js";
 
 /**
- * Every `openSync`, `opendirSync`, `realpathSync` (Node's JS resolver) and `realpathSync.native`
- * (the kernel's) call made through a named `node:fs` import, in call order.
+ * Every `lstatSync`, `openSync`, `opendirSync`, `realpathSync` (Node's JS resolver) and
+ * `realpathSync.native` (the kernel's) call made through a named `node:fs` import, in call order.
  */
 const fsCalls = vi.hoisted(() => [] as Array<{ name: string; args: unknown[] }>);
 
@@ -55,6 +59,7 @@ vi.mock("node:fs", async (importOriginal) => {
   });
   return {
     ...actual,
+    lstatSync: record("lstatSync", actual.lstatSync),
     openSync: record("openSync", actual.openSync),
     opendirSync: record("opendirSync", actual.opendirSync),
     realpathSync,
@@ -371,15 +376,21 @@ function plantOutside(root: string): string {
   return outside;
 }
 
-/** `listProjectSkills` with the recorder reset first, and every path it opened, listed or resolved. */
-function recordedProject(cwd: string, sandboxRoot: string) {
+/** `run` with the recorder reset first: its result, the calls it made and their paths by name. */
+function recorded<T>(run: () => T) {
   fsCalls.length = 0;
-  const skills = listProjectSkills(cwd, sandboxRoot);
+  const result = run();
   const calls = fsCalls.splice(0);
   const pathsOf = (name: string) =>
     calls.filter((call) => call.name === name).map((call) => String(call.args[0]));
+  return { result, calls, pathsOf };
+}
+
+/** `listProjectSkills` recorded: every path it opened, listed or resolved. */
+function recordedProject(cwd: string, sandboxRoot: string) {
+  const { result, calls, pathsOf } = recorded(() => listProjectSkills(cwd, sandboxRoot));
   return {
-    skills,
+    skills: result,
     opened: pathsOf("openSync"),
     enumerated: pathsOf("opendirSync"),
     resolved: pathsOf("realpathSync.native"),
@@ -575,6 +586,99 @@ describe("listProjectSkills: a directory writable by the omp uid", () => {
     expect(opened).toEqual([]);
     expect(enumerated).toEqual([]);
     expect(touched.filter((path) => path.startsWith(outside))).toEqual([]);
+  });
+});
+
+/** `listProjectConfig` recorded: every path it enumerated, `lstat`ed or opened. */
+function recordedConfig(cwd: string, sandboxRoot: string) {
+  const { result, pathsOf } = recorded(() => listProjectConfig(cwd, sandboxRoot));
+  return {
+    files: result,
+    enumerated: pathsOf("opendirSync"),
+    inspected: pathsOf("lstatSync"),
+    opened: pathsOf("openSync"),
+  };
+}
+
+/** `RULES.md` and `agents/a.md` in a directory outside the sandbox root. */
+function plantOutsideConfig(root: string): string {
+  const outside = join(root, "outside");
+  mkdirSync(join(outside, "agents"), { recursive: true });
+  writeFileSync(join(outside, "RULES.md"), "外部规则\n");
+  writeFileSync(join(outside, "agents", "a.md"), "外部 agent\n");
+  return outside;
+}
+
+/** The owner root's own `.omp/RULES.md` and `.omp/agents/far.md`: listed unless a search ended. */
+function plantOwnerConfig(ownerRoot: string): void {
+  mkdirSync(join(ownerRoot, ".omp", "agents"), { recursive: true });
+  writeFileSync(join(ownerRoot, ".omp", "RULES.md"), "上层规则\n");
+  writeFileSync(join(ownerRoot, ".omp", "agents", "far.md"), "上层 agent\n");
+}
+
+describe("listProjectConfig: a directory writable by the omp uid", () => {
+  it("enumerates and inspects nothing behind a linked .omp, and ends both searches there", () => {
+    const { root, sandboxRoot, ownerRoot, workspaceRoot } = makeSandbox();
+    plantOwnerConfig(ownerRoot);
+    symlinkSync(plantOutsideConfig(root), join(workspaceRoot, ".omp"), "dir");
+
+    const { files, enumerated, inspected, opened } = recordedConfig(workspaceRoot, sandboxRoot);
+
+    expect(files).toEqual([]);
+    expect(enumerated).toEqual([]);
+    expect(opened).toEqual([]);
+    expect(inspected).toContain(join(workspaceRoot, ".omp"));
+    expect(inspected.filter((path) => path.startsWith(join(workspaceRoot, ".omp/")))).toEqual([]);
+    expect(inspected.filter((path) => !path.startsWith(`${sandboxRoot}/`))).toEqual([]);
+  });
+
+  it("enumerates only the real .omp when .omp/agents is a link, and ends the agents search there", () => {
+    const { root, sandboxRoot, ownerRoot, workspaceRoot } = makeSandbox();
+    plantOwnerConfig(ownerRoot);
+    mkdirSync(join(workspaceRoot, ".omp"));
+    symlinkSync(join(plantOutsideConfig(root), "agents"), join(workspaceRoot, ".omp", "agents"));
+
+    const { files, enumerated, inspected, opened } = recordedConfig(workspaceRoot, sandboxRoot);
+
+    expect(files).toEqual([]);
+    expect(enumerated).toEqual([join(workspaceRoot, ".omp")]);
+    expect(opened).toEqual([]);
+    expect(
+      inspected.filter((path) => path.startsWith(join(workspaceRoot, ".omp/agents/"))),
+    ).toEqual([]);
+    expect(inspected.filter((path) => !path.startsWith(`${sandboxRoot}/`))).toEqual([]);
+  });
+
+  it("lists by lstat alone: a listed file is never opened and no directory but .omp and .omp/agents is enumerated", () => {
+    const { sandboxRoot, ownerRoot, workspaceRoot } = makeSandbox();
+    plantOwnerConfig(ownerRoot);
+    mkdirSync(join(workspaceRoot, ".agents"));
+    writeFileSync(join(workspaceRoot, ".agents", "AGENTS.md"), "说明\n");
+
+    const { files, enumerated, opened } = recordedConfig(workspaceRoot, sandboxRoot);
+
+    expect(files).toEqual([
+      { path: ".agents/AGENTS.md", kind: "instructions", depth: 0 },
+      { path: ".omp/RULES.md", kind: "instructions", depth: 1 },
+      { path: ".omp/agents/far.md", kind: "agent", depth: 1 },
+    ]);
+    expect(enumerated).toEqual([join(ownerRoot, ".omp"), join(ownerRoot, ".omp", "agents")]);
+    expect(opened).toEqual([]);
+  });
+
+  it("is [] for an owner root that is a link out of the sandbox, inspecting nothing at all", () => {
+    const { root, sandboxRoot, ownerRoot } = makeSandbox();
+    const outside = plantOutsideConfig(root);
+    writeFileSync(join(outside, "AGENTS.md"), "外部说明\n");
+    renameSync(ownerRoot, join(root, "moved-owner-root"));
+    symlinkSync(outside, ownerRoot, "dir");
+    writeFileSync(join(sandboxRoot, "AGENTS.md"), "沙箱根说明\n");
+
+    const { files, enumerated, inspected } = recordedConfig(ownerRoot, sandboxRoot);
+
+    expect(files).toEqual([]);
+    expect(enumerated).toEqual([]);
+    expect(inspected).toEqual([]);
   });
 });
 
