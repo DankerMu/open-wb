@@ -2,9 +2,7 @@
 
 ## Purpose
 Define the application server's startup, health, persistence and static-serving contracts together with canonical typed error envelopes, trusted parser ownership, and explicit core-versus-HTTP responsibility boundaries.
-
 ## Requirements
-
 ### Requirement: 服务启动与装配
 系统 SHALL 以 `server/src/app.ts` 装配 Fastify 实例，并以 `server/src/server.ts` 作为唯一 production listen/DB ownership 入口；import该module只暴露pure config seam，不得mkdir/open/listen或注册signal，只有ESM main guard命中的执行路径可启动。唯一配置源为 own environment keys `HOST`、`PORT`、`DB_PATH`、`STATIC_ROOT`、`OMP_BIN`、`OMP_STATE_DIR`、`OMP_IDLE_MS`、`OMP_MAX_PROCESSES`、`OMP_SPAWN_CONCURRENCY`、`SANDBOX_ROOT`、`MODEL_UPSTREAM_BASE_URL`、`MODEL_UPSTREAM_API_KEY`、`MODEL_ID`、`OMP_USER`、`MODEL_REASONING`（共十五项）：缺省值分别为 `127.0.0.1`、`3000`、repo-root `var/dev.db`、repo-root `web/dist`、repo-root `var/omp/omp`、repo-root `var/omp-state`、`600000`、`16`、`os.availableParallelism()`、repo-root `var/sandbox`、未配置、未配置、`deepseek-v4.1-flash`、未配置（同uid直接spawn）、`on`；relative DB/static/omp/state/sandbox path SHALL 相对由 entry module identity 推导的repo root，不得随shell/npm workspace cwd分裂。`PORT` SHALL只接受canonical ASCII decimal `1..65535`；HOST missing取默认、empty或whitespace-only非法且不得trim/coerce；exact `localhost` SHALL 规范为 `127.0.0.1` 以保证单一 listener binding，其它nonempty string原样交listen；DB/static/omp/state/sandbox path explicit empty非法。`OMP_IDLE_MS` SHALL只接受canonical ASCII decimal整数1..2147483647（原生计时器上限，用户明确批准超限启动失败）；`OMP_MAX_PROCESSES` SHALL 遵守与 `OMP_IDLE_MS` 相同的解析纪律（canonical ASCII decimal 正整数 1..2147483647，缺省 16，empty/`0`/非 canonical/超限均为启动失败），经 `agent-config.ts` 同一 resolver 解析为 supervisor 的全局活进程上限；`OMP_SPAWN_CONCURRENCY` SHALL 遵守同一解析纪律（缺省 `os.availableParallelism()`），经同一 resolver 解析为 supervisor 的并发 spawn 上限（见 omp-pool「并发 spawn 上限」）；`MODEL_REASONING` SHALL 只接受 exact `on` 或 `off`（缺省 `on`；empty、大小写不同如 `ON`、`true`/`yes` 及其它任何值均为启动失败），经同一 resolver 解析为布尔并作为托管 models.yml 的 `reasoning` 输入（`on` → true、`off` → false，写出规则归 model-proxy）；非法值的配置错误SHALL命名该键而不含输入值。`MODEL_UPSTREAM_BASE_URL`/`MODEL_UPSTREAM_API_KEY`缺省合法，显式empty非法；未同时配置时代理仍先鉴权（无效bearer401，通过鉴权后502），不得阻止服务启动。OMP_USER及仅sudo模式的安全PATH前置条件 SHALL遵守主omp-uid-isolation规范，不在本切片重定义。全部config SHALL在任何filesystem/database/listen effect前验证。
 
@@ -213,3 +211,4 @@ From the start of shutdown, each response that completes SHALL trigger reclamati
 #### Scenario: Request outliving the budget
 - **WHEN** an accepted request is still unfinished when the listener budget expires
 - **THEN** remaining connections are force-closed, the production entry writes exactly one `{"event":"listener_force_close"}` stderr line and shutdown completes with its existing exit code
+

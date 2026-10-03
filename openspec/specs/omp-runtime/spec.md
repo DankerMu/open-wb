@@ -2,9 +2,7 @@
 
 ## Purpose
 Defines pinned omp binary supply, least-privilege child spawning, bounded RPC transport, per-session lifecycle, and prompt-dispatch receipt semantics.
-
 ## Requirements
-
 ### Requirement: 二进制供给
 `make omp-fetch` SHALL 只从 `can1357/oh-my-pi` GitHub release **v18.0.10** 拉取与当前 `uname -sm` 匹配的资产（`omp-darwin-arm64` 或 `omp-linux-x64`），对照仓内固定的 SHA256 表校验后落到 `var/omp/omp` 并置可执行位；校验失败 SHALL 不留下 `var/omp/omp`；目标已存在且校验通过 SHALL 跳过下载。不支持的平台 SHALL 显式失败并打印支持矩阵。app-server SHALL 不依赖 PATH 上的任何 `omp`。
 
@@ -297,3 +295,4 @@ SessionRuntime SHALL 接受可选同步 `log` 端口（supervisor 经 `sessionRu
 #### Scenario: 非超时的启动失败不记录
 - **WHEN** `OMP_BIN` 指向不存在的路径使 spawn 报 `ENOENT`，或 `log` 端口自身抛出
 - **THEN** 前者 `log` 未被调用；后者 REST 仍返回 502 `agent_unavailable` 且无未处理异常
+

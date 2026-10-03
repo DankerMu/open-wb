@@ -2,9 +2,7 @@
 
 ## Purpose
 定义 omp 子进程的全局数量治理：`OMP_MAX_PROCESSES` 硬上限、串行化准入、最久空闲驱逐、`agent_capacity` 拒绝，以及任何原因的进程退出即释放名额（修复空闲回收后的 slot 泄漏）。
-
 ## Requirements
-
 ### Requirement: agent_capacity 错误码
 `core/errors` 定义映射 SHALL 新增 `agent_capacity`(503, `Agent 容量已满，请稍后重试`)，随 `approval_settled` 一并把 typed 错误码由十一码扩为十三码；HTTP 映射器、既有"意外错误不伪装"与 no-store 路由归属规则对新码同样成立。
 
@@ -114,3 +112,4 @@ runtime 关停（`shutdown()`，含驱逐、supervisor 关停与 fork 临时进�
 #### Scenario: fork 临时进程共用许可
 - **WHEN** `OMP_SPAWN_CONCURRENCY=1`，一个会话正在慢握手时对另一个会话发起 fork
 - **THEN** fork 临时进程的 spawn 晚于前者 ready；两者都成功
+
