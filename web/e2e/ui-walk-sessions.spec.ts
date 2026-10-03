@@ -253,6 +253,10 @@ async function step4ThinkingFold(page: Page): Promise<void> {
   await expect(fold).toHaveAttribute("open", "");
   await expect(fold.locator(".thinking-body")).toBeVisible();
   await expect(fold.locator(".thinking-body")).toHaveText(EXPECTED_THINKING);
+  // 终态消息：不带 data-running，主体限高 12rem 并在盒内滚动（#725）。
+  await expect(fold).not.toHaveAttribute("data-running");
+  await expect(fold.locator(".thinking-body")).toHaveCSS("max-height", "192px");
+  await expect(fold.locator(".thinking-body")).toHaveCSS("overflow-y", "auto");
 }
 
 async function readSnapshot(page: Page, sessionId: string): Promise<SessionSnapshot> {
