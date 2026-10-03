@@ -2,6 +2,8 @@
 
 Fixture level: compact
 
+归档次序（前提）：本 change 先归档进主规格；父 change `s1c-session-metadata-presentation` 的 turn-artifacts delta 仍是旧文，归档前按 #754 从主规格现文重新生成全部 delta。本 PR 不改父 delta（只改父 design.md 的两句）。
+
 ## 1. 实现
 - [ ] 1.1 `file-changes-ownership.ts`：`MAX_CANDIDATES = 100`，`ownedChanges` 只遍历前 100 个；按 `resolve(root, raw)` 的结果记忆 `ownedCandidate` 的返回值（含 `undefined`）；注释同步。`ownedChanges` 的签名与「不抛、不改入参」的契约不变。
 - [ ] 1.2 `server/test/file-changes-ownership.test.ts`：(a) 150 个候选的 Scenario 原样（结果与次序、求和）；(b) 用可观测的方式断言文件系统调用次数——第 101 个起为零、前 100 个等于互不相同的规范化路径数（对 `node:fs` 的 `realpathSync`/`lstatSync` 计数，沿用该测试文件现有的手法；若现有手法做不到，停下报告）；(c) 判定为丢弃的路径（空间外、悬空链接）重复出现时同样只判定一次；(d) 恰 100 个与 101 个候选的边界。文件头注释里过期的描述一并更正。
