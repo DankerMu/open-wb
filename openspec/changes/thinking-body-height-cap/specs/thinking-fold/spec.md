@@ -18,7 +18,7 @@
 - **THEN** 正文更新为新快照的内容，折叠块保持展开
 
 #### Scenario: 终态消息主体限高
-- **WHEN** 转录贴底（距底 ≤4px），用户展开一条 done 助手消息的折叠块，其 thinking 为 120 行（视口 390×844 与 1440×900）
+- **WHEN** 转录贴底（距底 ≤4px），用户展开一条 done 助手消息的折叠块，其 thinking 为 120 行，点击前 `summary` 距转录滚动容器顶不少于 198px（视口 390×844 与 1440×900）
 - **THEN** 主体高度为 `12rem`（192px）且可在盒内滚动到末行；`summary` 仍在转录滚动容器的可视区内；转录保持贴底
 - **WHEN** 一条 running 助手消息的 thinking 增长到 120 行
 - **THEN** `<details>` 带 `data-running` 属性，主体不出现盒内滚动（`scrollHeight` 等于 `clientHeight`），转录贴底跟随到最新一行；`turn.end` 后该属性消失
