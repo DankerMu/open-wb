@@ -1,7 +1,7 @@
 # Proposal: omp-sudo-umask（#760）
 
 ## Why
-ADR-0010 的权限模型写「双方 umask `007`」，但 sudo 模式下 omp 的 umask 实际由部署机 PAM（`pam_umask` + `login.defs` + 是否私有主组）决定：Ubuntu 24.04 默认得到 `0002`（omp 写的 `.jsonl` 为 `0664`、目录 `2775`），主组非私有组时为 `0022`（组写位丢失，app uid 无法在 omp 建的目录里 unlink，破坏会话删除）。sudoers(5)：显式 `umask` 覆盖 PAM。
+ADR-0010 的权限模型写「双方 umask `007`」，但 sudo 模式下 omp 的 umask 实际由部署机 PAM（`pam_umask` + `login.defs` + 是否私有主组）决定：Ubuntu 24.04 默认得到 `0002`（omp 写的 `.jsonl` 为 `0664`、目录 `2775`），主组非私有组时为 `0022`（组写位丢失，app uid 无法在 omp 建的目录里删除文件——会话 `.jsonl` 本身在 app 建的目录里、不受影响，受影响的是 #758 要删除的 omp 同名目录）。sudoers(5)：显式 `umask` 覆盖 PAM。
 
 ## What Changes
 - `.github/scripts/ci-uid-isolation.sh`：生成的 sudoers 加 `Defaults>omp umask=0007`；真实 omp 冒烟后 stat 会话 `.jsonl` 与目录。
