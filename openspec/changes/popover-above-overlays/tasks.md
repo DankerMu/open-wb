@@ -3,10 +3,10 @@
 Fixture level: compact
 
 ## 1. 实现
-- [ ] 1.1 `web/src/ui/popover.css`：`.ui-popover` `z-index: 1500`；文件头注释不改语义（定位交给 Radix Popper）。
-- [ ] 1.2 `web/test/ui-popover-tooltip.test.tsx`：`.ui-popover` 期望 `z-index: 1500`；新增一条：从 `popover.css`、`dialog.css`、`menu.css` 读出数值，断言 popover 大于 `.ui-dialog-overlay`、`.ui-drawer-overlay`、`.ui-drawer`，小于 `.ui-menu`。
-- [ ] 1.3 `web/e2e/ui-walk-sessions.spec.ts`：`step6Sidebar` 的同一侧栏检查里追加筛选步骤（spec delta 第 6 步原文）：`筛选任务` → 点 `状态` 组的 `已完成`（真实点击，无 `force`）→ `aria-checked="true"` 且会话在原分组仍恰一个条目 → 点 `全部` → `aria-checked="true"` → Escape 关闭弹层，`mobile-dark` 上 `dialog 导航` 仍在，焦点回 `筛选任务`。之后的步骤按原样关闭覆盖层（现有 `inspectSidebar` 的收尾），第 7–11 步不变。定位要点：弹层 portal 在 `导航` Drawer 的 DOM 之外，须从 `page` 定位（如 `page.getByRole("dialog", { name: "筛选任务" })`），不能用 `inspectSidebar` 传入的 `sidebar` locator；`全部` 须在 `状态` radiogroup 内以 exact 匹配定位（否则同时命中 `全部时间`）。
-- [ ] 1.4 不改其它被跟踪文件。
+- [x] 1.1 `web/src/ui/popover.css`：`.ui-popover` `z-index: 1500`；文件头注释不改语义（定位交给 Radix Popper）。
+- [x] 1.2 `web/test/ui-popover-tooltip.test.tsx`：`.ui-popover` 期望 `z-index: 1500`；新增一条：从 `popover.css`、`dialog.css`、`menu.css` 读出数值，断言 popover 大于 `.ui-dialog-overlay`、`.ui-drawer-overlay`、`.ui-drawer`，小于 `.ui-menu`。
+- [x] 1.3 `web/e2e/ui-walk-sessions.spec.ts`：`step6Sidebar` 的同一侧栏检查里追加筛选步骤（spec delta 第 6 步原文）：`筛选任务` → 点 `状态` 组的 `已完成`（真实点击，无 `force`）→ `aria-checked="true"` 且会话在原分组仍恰一个条目 → 点 `全部` → `aria-checked="true"` → Escape 关闭弹层，`mobile-dark` 上 `dialog 导航` 仍在，焦点回 `筛选任务`。之后的步骤按原样关闭覆盖层（现有 `inspectSidebar` 的收尾），第 7–11 步不变。定位要点：弹层 portal 在 `导航` Drawer 的 DOM 之外，须从 `page` 定位（如 `page.getByRole("dialog", { name: "筛选任务" })`），不能用 `inspectSidebar` 传入的 `sidebar` locator；`全部` 须在 `状态` radiogroup 内以 exact 匹配定位（否则同时命中 `全部时间`）。
+- [x] 1.4 不改其它被跟踪文件。
 
 ## Must preserve
 - ui-walk 两个 spec、两个 project 全绿；第 1–11 步断言不被削弱；30 s 单测、`globalTimeout` 不变。
