@@ -14,10 +14,10 @@ Fixture level: compact
 - [x] 1.3 除上述两个文件与本 change 目录外不改其它被跟踪文件（`file-changes-ownership.test.ts` 文件头注释若描述了与新行为矛盾的内容可更正，其断言不动；父 design 的更正由编排方做）。
 
 ## Fix pass 1（评审 P1：单个候选的 `realpathSync` 代价无界）
-- [ ] F1 `ownedCandidate`：`resolve` 之后、任何文件系统访问之前，对规范化路径做纯词法检查——UTF-8 字节数 > 4096 或分量数 > 128 即丢弃（零 fs 调用；是否写入记忆均可，但不得触达 fs）。常量具名，注释说明平方代价与「第 4 步 1024 规则拦不住」的原因。
-- [ ] F2 `file-changes-candidate-cap.test.ts`：(e) 空间内 `l -> .`，候选 `l/`×200 + `a.txt`、一个规范化后 > 4096 字节的候选、一个普通的 `a.txt`——结果只有 `a.txt`；记录器里没有以前两者为首参的调用（也没有以其 `dirname` 为首参的调用）；(f) 边界：恰 128 个分量且 ≤4096 字节的空间内路径照常判定并进入结果，129 个分量的被丢弃。
-- [ ] F3 负控：去掉分量上限 → (e) 第一条失败；去掉字节上限 → (e) 第二条失败；把检查挪到 `resolveReal` 之后 → (e) 的「无 fs 调用」失败。
-- [ ] F4 证据：一次性计时（不入库）——修复前后对 `l/`×8000 的单候选调用 `ownedChanges` 的耗时；`npm test --workspace server` 全绿；lint/typecheck/anti-drift/size-guard/openspec validate exit 0。
+- [x] F1 `ownedCandidate`：`resolve` 之后、任何文件系统访问之前，对规范化路径做纯词法检查——UTF-8 字节数 > 4096 或分量数 > 128 即丢弃（零 fs 调用；是否写入记忆均可，但不得触达 fs）。常量具名，注释说明平方代价与「第 4 步 1024 规则拦不住」的原因。
+- [x] F2 `file-changes-candidate-cap.test.ts`：(e) 空间内 `l -> .`，候选 `l/`×200 + `a.txt`、一个规范化后 > 4096 字节的候选、一个普通的 `a.txt`——结果只有 `a.txt`；记录器里没有以前两者为首参的调用（也没有以其 `dirname` 为首参的调用）；(f) 边界：恰 128 个分量且 ≤4096 字节的空间内路径照常判定并进入结果，129 个分量的被丢弃。
+- [x] F3 负控：去掉分量上限 → (e) 第一条失败；去掉字节上限 → (e) 第二条失败；把检查挪到 `resolveReal` 之后 → (e) 的「无 fs 调用」失败。
+- [x] F4 证据：一次性计时（不入库）——修复前后对 `l/`×8000 的单候选调用 `ownedChanges` 的耗时；`npm test --workspace server` 全绿；lint/typecheck/anti-drift/size-guard/openspec validate exit 0。
 
 ## Must preserve
 - `server/test/file-changes-ownership.test.ts` 全部用例断言不动且全绿，尤其 O11（非字符串 / NUL / 超长 path 不抛）与 O13（不改入参）、「上限」Scenario（60 个不同路径 → 前 50）。

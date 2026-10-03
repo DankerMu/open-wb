@@ -4,11 +4,13 @@
  * raw candidates are judged, and candidates normalizing to the same path are judged once. Real
  * temp directories; `node:fs` is passed through a call recorder (behaviour untouched) so the
  * bound is an observed call count, never a duration. A recorded first argument is the normalized
- * path `resolve(root, raw)`, not the raw spelling of the candidate.
+ * path `resolve(root, raw)`, not the raw spelling of the candidate. Fix pass 1: a normalized path
+ * over 4096 bytes or 128 components is dropped before any filesystem call (`realpath` walks a path
+ * component by component, so one deep candidate through a self-referring symlink is unbounded).
  */
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FileChange } from "../src/sessions/file-changes.js";
 import { ownedChanges } from "../src/sessions/file-changes-ownership.js";
@@ -85,6 +87,11 @@ function callsOf(name: string): number {
 /** The first arguments of every recorded call, whatever the function. */
 function touched(): unknown[] {
   return fsCalls.map((call) => call.first);
+}
+
+/** The components of a normalized absolute path; the empty one before the leading separator is none. */
+function components(path: string): number {
+  return path.split(sep).filter((part) => part !== "").length;
 }
 
 /** The 40 distinct paths of the spec scenario: `a.txt`, then `f01.txt` … `f39.txt`. */
@@ -208,5 +215,78 @@ describe("C3 the cap counts positions, dropped candidates included", () => {
     expect(callsOn("realpathSync", resolve(space.root, EARLY[39] ?? ""))).toBe(1);
 
     expect(judge(space.root, hundred)).toEqual(expected);
+  });
+});
+
+describe("C4 a candidate too long or too deep reaches no filesystem call", () => {
+  it("C4 (e) 200 hops through `l -> .` and a path over 4096 bytes are dropped untouched", () => {
+    const space = openSpace(["a.txt"]);
+    symlinkSync(".", join(space.root, "l"));
+    // 201 components below the root; its realpath is the workspace's own `a.txt`.
+    const deep = resolve(space.root, `${"l/".repeat(200)}a.txt`);
+    // 1400 three-byte characters: over 4096 bytes although under 4096 UTF-16 units, two components.
+    const long = resolve(space.root, `long/${"深".repeat(1400)}`);
+    expect(Buffer.byteLength(long, "utf8")).toBeGreaterThan(4096);
+    expect(long.length).toBeLessThan(4096);
+    expect(components(long)).toBeLessThanOrEqual(128);
+    expect(Buffer.byteLength(deep, "utf8")).toBeLessThanOrEqual(4096);
+
+    const files = judge(space.root, [
+      edit(`${"l/".repeat(200)}a.txt`, 5, 5),
+      edit(`long/${"深".repeat(1400)}`, 7, 7),
+      edit("a.txt", 1, 0),
+    ]);
+
+    // Judged, the deep candidate would resolve to `a.txt` and add its counts to it.
+    expect(files).toEqual([{ path: "a.txt", added: 1, removed: 0, kind: "edit" }]);
+    const seen = touched();
+    expect(seen).not.toContain(deep);
+    expect(seen).not.toContain(dirname(deep));
+    expect(seen).not.toContain(long);
+    expect(seen).not.toContain(dirname(long));
+    // The root once and the plain `a.txt` once, nothing else.
+    expect(fsCalls).toEqual([
+      { name: "realpathSync", first: space.root },
+      { name: "realpathSync", first: resolve(space.root, "a.txt") },
+    ]);
+  });
+
+  it("C4 (f) exactly 128 components is judged and kept, 129 is dropped untouched", () => {
+    const space = openSpace(["a.txt"]);
+    symlinkSync(".", join(space.root, "l"));
+    // The temp root has a depth of its own: the hops fill up to the wanted total, `a.txt` is last.
+    const depth = components(space.root);
+    expect(depth).toBeLessThan(127);
+    const through = (total: number): string => `${"l/".repeat(total - depth - 1)}a.txt`;
+    const exact = resolve(space.root, through(128));
+    const over = resolve(space.root, through(129));
+    expect(components(exact)).toBe(128);
+    expect(components(over)).toBe(129);
+    expect(Buffer.byteLength(over, "utf8")).toBeLessThanOrEqual(4096);
+
+    expect(judge(space.root, [edit(through(128), 2, 3)])).toEqual([
+      { path: "a.txt", added: 2, removed: 3, kind: "edit" },
+    ]);
+    expect(callsOn("realpathSync", exact)).toBe(1);
+
+    expect(judge(space.root, [edit(through(129), 2, 3)])).toEqual([]);
+    expect(fsCalls).toEqual([{ name: "realpathSync", first: space.root }]);
+  });
+
+  it("C4 (f) exactly 4096 bytes reaches the filesystem, 4097 bytes does not", () => {
+    const space = openSpace([]);
+    // One component below the root, so only the byte rule can stop it; no such file can exist.
+    const fill = 4096 - Buffer.byteLength(space.root, "utf8") - 1;
+    expect(fill).toBeGreaterThan(0);
+    const exact = resolve(space.root, "x".repeat(fill));
+    const over = resolve(space.root, "x".repeat(fill + 1));
+    expect(Buffer.byteLength(exact, "utf8")).toBe(4096);
+    expect(Buffer.byteLength(over, "utf8")).toBe(4097);
+
+    expect(judge(space.root, [edit("x".repeat(fill), 1, 1)])).toEqual([]);
+    expect(callsOn("realpathSync", exact)).toBe(1);
+
+    expect(judge(space.root, [edit("x".repeat(fill + 1), 1, 1)])).toEqual([]);
+    expect(fsCalls).toEqual([{ name: "realpathSync", first: space.root }]);
   });
 });
