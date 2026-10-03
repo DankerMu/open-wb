@@ -75,12 +75,13 @@ function ConfigList({ files }: { files: readonly ProjectConfigFile[] }) {
  * The project config entry of the session page. `selected` is the session the top bar shows,
  * undefined in the welcome state and while a requested session is not resolved: nothing is asked
  * then. One `listProjectConfig(workspaceId)` call is issued per client, session id and workspace
- * id; the call of a previous selection is aborted. `slot` is the top-bar slot, present only while
- * the list held was answered for exactly the current selection and is non-empty: a pending call, a
- * failed one (silent, no retry until the selection changes) and an empty list yield no button, and
- * the list of another session is never shown. `dialog` is the read-only list, closed with its
- * session and still closed when that session is selected again; closing hands the focus back to
- * the header button.
+ * id, and each such call is one selection: selecting a session again is a new selection. When the
+ * selection changes its call is aborted and the list held and the open dialog are dropped, so
+ * nothing answered before the current selection can render, whatever the new call does. `slot` is
+ * the top-bar slot, present only once the current selection's own call answered a non-empty list:
+ * a pending call, a failed one (silent, no retry until the selection changes) and an empty list
+ * yield no button. `dialog` is the read-only list, closed with its selection and closed when its
+ * session is selected again; closing hands the focus back to the header button.
  */
 export function useProjectConfig(
   client: ApiClient,
@@ -92,10 +93,7 @@ export function useProjectConfig(
   const sessionId = selected?.id;
   const workspaceId = selected?.workspaceId ?? null;
   const [held, setHeld] = useState<Held | null>(null);
-  /**
-   * The answer whose dialog is open. An answer, not a session id: the dialog of a session that was
-   * left unmounts without a close event, and the next answer for that session is another object.
-   */
+  /** The answer whose dialog is open: dropped with it when the selection changes. */
   const [opened, setOpened] = useState<Held | null>(null);
   const trigger = useRef<HTMLElement | null>(null);
 
@@ -108,9 +106,14 @@ export function useProjectConfig(
       },
       () => undefined,
     );
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      setHeld(null);
+      setOpened(null);
+    };
   }, [client, sessionId, workspaceId]);
 
+  // The comparisons cover the one render between a change of the selection and the cleanup above.
   if (
     held === null ||
     held.client !== client ||

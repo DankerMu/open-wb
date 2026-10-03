@@ -130,6 +130,40 @@ async function selectSession(session: ChatSession) {
   await waitFor(() => expect(currentLocation()).toBe(`/?session=${session.id}`));
 }
 
+/** A 500 of the server, the body of the error contract. */
+const failure = () => jsonResponse({ error: { code: "internal", message: "服务异常" } }, 500);
+
+/**
+ * BOUND with its list open, then left for `away` and selected again while its second call is
+ * pending: the first call of workspace A answers THREE, every later one waits for `again`.
+ */
+async function reopenedAfter(away: string, config: FetchRoutes = {}) {
+  const again = deferredResponse();
+  let asked = 0;
+  const { fetchMock, router } = await mount(`/?session=${BOUND.id}`, {
+    ...config,
+    [configOf(A)]: () => {
+      asked += 1;
+      return asked === 1 ? jsonResponse({ files: THREE }) : again.promise;
+    },
+  });
+  await crumb("绑定会话");
+  fireEvent.click(configButton(3));
+  expect(await screen.findByRole("dialog", { name: TITLE })).toBeTruthy();
+
+  // The sidebar is behind the modal dialog: the session changes by navigation.
+  await act(() => router.navigate(away));
+  await waitFor(() => expect(configDialog()).toBeNull());
+  await quiesce();
+  expect(screen.queryByRole("button", { name: /项目配置/, hidden: true })).toBeNull();
+
+  await act(() => router.navigate(`/?session=${BOUND.id}`));
+  await crumb("绑定会话");
+  await quiesce();
+  expect(configPaths(fetchMock).filter((path) => path === configOf(A))).toHaveLength(2);
+  return again;
+}
+
 afterEach(cleanupSessionMeta);
 
 describe("项目配置入口 (G1–G7)", () => {
@@ -212,7 +246,7 @@ describe("项目配置入口 (G1–G7)", () => {
 
   it.each([
     ["an empty list", answer([])],
-    ["a 500", () => jsonResponse({ error: { code: "internal", message: "服务异常" } }, 500)],
+    ["a 500", failure],
     ["a 404", () => jsonResponse({ error: { code: "not_found", message: "资源不存在" } }, 404)],
     ["a network failure", () => Promise.reject(new Error("offline"))],
     ["an element of an unknown kind", answer([...THREE, file("X.md", 0, "rules" as never)])],
@@ -313,6 +347,43 @@ describe("项目配置入口 (G1–G7)", () => {
     await quiesce();
     expect(configDialog()).toBeNull();
     expect(configButton(3).getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it.each<[string, string, FetchRoutes]>([
+    ["the welcome state", "/", {}],
+    [
+      "a session whose call stays pending",
+      `/?session=${OTHER.id}`,
+      { [configOf(B)]: () => deferredResponse().promise },
+    ],
+  ])(
+    "G5 the list of a session left for %s is not shown on return until the new call answers, and then it is closed",
+    async (_label, away, config) => {
+      const again = await reopenedAfter(away, config);
+
+      expect(bannerButtons()).toEqual(THREE_BUTTONS);
+      expect(configDialog()).toBeNull();
+
+      await settleDeferredResponse(again, jsonResponse({ files: THREE }));
+
+      expect(bannerButtons()).toEqual(["项目配置 3", ...THREE_BUTTONS]);
+      expect(configButton(3).getAttribute("aria-expanded")).toBe("false");
+      expect(configDialog()).toBeNull();
+    },
+  );
+
+  it("G5 the list of a session left for one whose call fails is not shown on return, nor when the new call fails too", async () => {
+    const again = await reopenedAfter(`/?session=${OTHER.id}`, { [configOf(B)]: failure });
+
+    expect(bannerButtons()).toEqual(THREE_BUTTONS);
+    expect(configDialog()).toBeNull();
+
+    await settleDeferredResponse(again, failure());
+    await quiesce();
+
+    expect(bannerButtons()).toEqual(THREE_BUTTONS);
+    expect(configDialog()).toBeNull();
+    expect(toasts()).toEqual([]);
   });
 
   it("G6 the welcome state asks nothing, with or without a workspace chosen in the footer", async () => {
