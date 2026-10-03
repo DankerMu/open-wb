@@ -59,6 +59,7 @@ export interface AssemblyDependencies {
   /**
    * Must return synchronously. createApp forwards this callback and its return
    * unchanged; a returned thenable is an owned programming error beside the source fault.
+   * Omitted means no observer: the faults stay retained and surface at shutdown.
    */
   onError?: (error: Error) => void;
   /**
@@ -163,7 +164,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     runtime,
     workspaceRootOf: (ownerId, workspaceId) => store.rootOf({ id: ownerId }, workspaceId),
     agentDir: ompAgentDir(runtime.stateDir),
-    onError: assembly?.onError ?? ((error) => observeSessionFault(app, error)),
+    onError: assembly?.onError ?? (() => {}),
     ...(assembly?.onEvent === undefined ? {} : { onEvent: assembly.onEvent }),
     ...(assembly?.log === undefined ? {} : { log: assembly.log }),
   });
@@ -387,9 +388,4 @@ function sendNotFound(reply: FastifyReply, request: FastifyRequest): FastifyRepl
   }
 
   return sendHttpError(reply, "not_found");
-}
-
-function observeSessionFault(app: FastifyInstance, error: Error): void {
-  void error;
-  app.log.error({ event: "session_fault" });
 }
