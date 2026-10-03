@@ -17,7 +17,7 @@ Fixture level: compact
 - [ ] 1.4 除 `server/src/sessions/slash-commands.ts`、`server/src/model-proxy/models-yml.ts`、`server/test/slash-commands.test.ts`、新 `server/test/slash-commands-skills-hardening.test.ts`、`server/test/model-proxy-models-yml.test.ts` 与本 change 目录外不改其它被跟踪文件。
 
 ## Must preserve
-- `slash-commands.test.ts`、`session-rest-slash.test.ts`、`rest-commands` 相关测试与 `model-proxy-models-yml.test.ts` 的既有断言不动且全绿（含 FIFO/设备/超大文件跳过、同名折叠、目录不存在得 `[]`）。
+- `slash-commands.test.ts`、`session-rest-slash.test.ts`、`rest-commands` 相关测试与 `model-proxy-models-yml.test.ts` 的既有断言不动且全绿（含 FIFO/设备/超大文件跳过、同名折叠、目录不存在得 `[]`）。**两处例外**（它们钉的正是被本 change 取代的旧行为，按 spec delta 改写并在报告里列出）：`slash-commands.test.ts` 主场景里 `linked`（指向 `skills/` 之外目录的符号链接）改为不被列出；「follows a SKILL.md symlinked to a regular file」（目标在 `skills/` 之外）改为断言跳过，并补一条目标在 `skills/` 内部时仍被跟随的用例。指向 `/dev/zero` 的用例断言不变（仍被跳过）。
 - 指向 `skills/` **内部**的符号链接条目仍可用。
 - `make smoke`（真 omp + 托管 `models.yml`）全绿：omp uid 仍能读 `0640` 的 `models.yml`（同组）。
 - `slash-commands.ts` 行数 ≤ 800（现 224）。
