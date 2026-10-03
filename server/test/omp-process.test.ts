@@ -533,6 +533,8 @@ function coldArgs(roots: SpawnRoots): string[] {
     "--no-lsp",
     "--no-pty",
     "--no-title",
+    "--config",
+    join(roots.stateDir, "home", ".omp", "agent", "host-overlay.yml"),
   ];
 }
 

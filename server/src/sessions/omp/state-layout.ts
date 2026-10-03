@@ -1,10 +1,11 @@
 /**
  * OMP_STATE_DIR managed layout (issue #706, ADR-0010): the single source of every path under the
  * state dir and of their permission bits. Managed configuration (`home/.omp/agent`: `models.yml`,
- * operator-installed `skills/`) is owned by the app uid and read-only for the omp uid; omp's own
- * runtime state goes to `xdg/{data,state,cache}/omp`, which omp v18.0.10 uses only when it runs
- * with its default agent dir (`$HOME/.omp/agent`, no `PI_CODING_AGENT_DIR`) and the directory
- * already exists (`resource/oh-my-pi/packages/utils/src/dirs.ts`), so the host creates all three.
+ * `host-overlay.yml`, operator-installed `skills/`) is owned by the app uid and read-only for the
+ * omp uid; omp's own runtime state goes to `xdg/{data,state,cache}/omp`, which omp v18.0.10 uses
+ * only when it runs with its default agent dir (`$HOME/.omp/agent`, no `PI_CODING_AGENT_DIR`) and
+ * the directory already exists (`resource/oh-my-pi/packages/utils/src/dirs.ts`), so the host
+ * creates all three.
  */
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
@@ -20,6 +21,11 @@ export function ompHome(stateDir: string): string {
 /** omp's default agent dir `$HOME/.omp/agent`: managed `models.yml` and `skills/`. */
 export function ompAgentDir(stateDir: string): string {
   return join(ompHome(stateDir), ".omp", "agent");
+}
+
+/** The `--config` overlay of every spawn (`host-overlay.ts`), in the agent dir omp cannot write. */
+export function ompHostOverlayPath(stateDir: string): string {
+  return join(ompAgentDir(stateDir), "host-overlay.yml");
 }
 
 /** The value of `XDG_<CATEGORY>_HOME`; omp's runtime state lives in its `omp` subdirectory. */

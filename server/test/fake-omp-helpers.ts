@@ -24,6 +24,8 @@ const OMP_FLAGS = [
   "--no-lsp",
   "--no-pty",
   "--no-title",
+  "--config",
+  "/tmp/host-overlay.yml",
 ];
 export const HANDSHAKE = [
   { id: "protocol-1", type: "negotiate_protocol", protocolVersion: 2 },

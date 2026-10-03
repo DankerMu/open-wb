@@ -2,7 +2,7 @@
  * Issue #706 managed omp state layout: the directory table of the omp-runtime spec, written out
  * here (not derived from `src/sessions/omp/state-layout.ts`) so the tests have their own oracle.
  */
-import { chmodSync, lstatSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect } from "vitest";
 
@@ -22,6 +22,42 @@ export const LAYOUT_TABLE: ReadonlyArray<readonly [string, number]> = [
   ["sessions", 0o2750],
   ["trash", 0o700],
 ];
+
+/**
+ * Issue #708 host overlay: the bytes of the omp-runtime spec's `host-overlay.yml`, written out here
+ * (not imported from `src/sessions/omp/host-overlay.ts`).
+ */
+export const HOST_OVERLAY_YAML = `tools:
+  approval: []
+  approvalMode: write
+bash:
+  patterns: []
+  direnv: "off"
+shellPath: null
+python:
+  interpreter: ""
+ruby:
+  interpreter: ""
+julia:
+  interpreter: ""
+mcp:
+  enableProjectConfig: false
+todo:
+  reminders: false
+images:
+  urls:
+    enabled: false
+    command: null
+`;
+
+/** `<state>/home/.omp/agent/host-overlay.yml` is a 0640 regular file holding exactly the spec bytes. */
+export function expectHostOverlay(state: string): void {
+  const overlay = join(state, "home", ".omp", "agent", "host-overlay.yml");
+  const stats = lstatSync(overlay);
+  expect(stats.isFile()).toBe(true);
+  expect(stats.mode & 0o7777).toBe(0o640);
+  expect(readFileSync(overlay, "utf8")).toBe(HOST_OVERLAY_YAML);
+}
 
 /** `sessions/<ownerId>`, created by the spawn. */
 export function sessionRow(ownerId: string): readonly [string, number] {

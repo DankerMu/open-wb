@@ -147,7 +147,7 @@ describe("production entry lifecycle", () => {
       expect(modelsText).toContain("apiKey: WORKBUDDY_MODEL_TOKEN");
       expect(readdirSync(state).toSorted()).toEqual(["home", "sessions", "trash", "xdg"]);
       expect(readdirSync(join(state, "sessions"))).toEqual([]);
-      expect(readdirSync(agentDir).toSorted()).toEqual(["models.yml"]);
+      expect(readdirSync(agentDir).toSorted()).toEqual(["host-overlay.yml", "models.yml"]);
       expect(existsSync(sandbox)).toBe(false);
       expect(existsSync(join(scratchRoot, "bin"))).toBe(false);
     } finally {

@@ -21,6 +21,7 @@ import {
   ensureOmpSessionDir,
   ensureOmpStateLayout,
   ompHome,
+  ompHostOverlayPath,
   ompSessionDir,
   ompXdgHome,
 } from "./state-layout.js";
@@ -96,6 +97,9 @@ export async function spawnOmp(
     "--no-lsp",
     "--no-pty",
     "--no-title",
+    // Written at startup; omp exits before `ready` when it is missing, and there is no fallback.
+    "--config",
+    ompHostOverlayPath(opts.stateDir),
   ];
   if (opts.resumePath !== null) {
     args.push("--resume", opts.resumePath);
