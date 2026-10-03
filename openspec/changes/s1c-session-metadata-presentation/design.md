@@ -129,7 +129,7 @@
 - **持久化与发布次序**：`persistEvent`（`supervisor.ts:641-692`，switch 无 default）保持一进一出；联合扩展的那一刀先为 `thinking.delta`/`files.changed` 加显式返回 `undefined` 的分支（不落库、不发布），避免中间切片把 `details` 原始绝对路径发上 SSE，随后各自替换——内部 `files.changed` 事件在该处完成归属判定，无幸存项返回 `undefined`（不发布）；有幸存项时经独立的 store 写入 `setStepChanges(stepId, json)`（新模块 `store-changes.ts`，单条 `UPDATE chat_steps SET changes = ?`）提交该步骤行的 `chat_steps.changes`（JSON 数组文本，元素键恰为 `path/added/removed/kind`），提交成功后以数字步骤 id 发布 `files.changed`；随后下一个内部事件 `step.end` 照既有路径经 `finishStep` 落库并发布——`finishStep` 从不读写 `changes`。`setStepChanges` 失败不发布该事件，沿 owned error-sink 路径处理，ring 序号不推进。`files.changed` 是普通 ring 事件（保留、`min−1` 回放、`replay.gap`、活跃 turn.start 刷新规则同其它事件）。未收到工具结束帧即被停止/失败结算的步骤 `changes` 为 NULL。
 - **快照**：步骤 DTO 增 `changes: {path, added, removed, kind}[] | null`，无变更的步骤（含全部非 edit/write 步骤与未绑定会话的步骤）为 `null`。
 - **取证分工**：`±` 行数只由 fake-omp `edit-write` 场景驱动的服务端集成测试证明；真 omp 链路（`WORKBUDDY_WRITE`）只能证明 write 变更（`写入`、无行数）。
-- **为什么**：`details` 是工具帧里唯一结构化的写入信息，审计不记 omp 写入（`IMPLEMENTATION_PLAN.md:336`）；realpath 前缀校验与 `core/sandbox` 的解析纪律一致，保证卡片只指向空间内真实路径。每步最多 50 个路径 × 2 次同步 realpath，提交路径上的 IO 有界。
+- **为什么**：`details` 是工具帧里唯一结构化的写入信息，审计不记 omp 写入（`IMPLEMENTATION_PLAN.md:336`）；realpath 前缀校验与 `core/sandbox` 的解析纪律一致，保证卡片只指向空间内真实路径。提交路径上的同步 IO 有界：单条事件只判定前 100 个原始候选、同一规范化路径只判定一次（每个至多 4 次 `realpath`/`lstat`，另每条事件 1 次根目录校验；规范化后超过 4096 字节或 128 个分量的候选不触达文件系统，词法重复造成的平方代价因此被挡住；经空间内符号链接**展开**后的解析长度不在这两个词法上限之内，只受内核的符号链接跟随次数与 PATH_MAX 约束，属已知残留，见 Risks），合并后保留前 50 项（#740；原文「每步最多 50 个路径 × 2 次」不成立——50 的上限在合并之后才截断）。
 - **备选**：监听空间根的文件系统事件——能覆盖 bash，但无法可靠归属到步骤且平台相关；回合前后目录快照比对——代价随空间大小增长。
 
 ### D7 web 分区侧栏、欢迎页场景与 composer footer
@@ -227,7 +227,7 @@
 - [unlink 失败或 app uid 无权删除 omp uid 文件] → 行已删、响应 204，经错误通道上报；Open Questions 3 以 uid-isolation 用例与 VPS 关闭。
 - [HTML 预览执行任意脚本] → sandbox 恰为 `allow-scripts`，不透明源读不到 cookie 与 API 响应；`SameSite=Lax` 挡住带凭证的跨站写；站点目前未设 CSP（`server/src` 无 `Content-Security-Policy`），srcdoc 不受影响。
 - [thinking 挤占 ring] → 合并发布 + 32K 上限；溢出走既有 `replay.gap` → 快照。
-- [提交路径上的同步 realpath] → 每步至多 50 路径；未绑定会话零 IO。
+- [提交路径上的同步 realpath] → 每条事件至多 100 个互不相同的路径，每个 ≤4096 字节、≤128 个分量（原始候选上限 100 + 同路径记忆 + 词法上限，#740）；未绑定会话零 IO。残留：空间内的符号链接可让一个词法上很短的候选在 `realpath` 时展开成很长的解析（macOS 实测单条事件 100 个此类候选约 4–6 s；Linux 的 PATH_MAX 更大，未实测），词法上限不覆盖；需要能在空间内建符号链接并配合构造事件的子进程，受信局域网部署下不在威胁模型内（同 ADR-0011 #739 补充的前提），另行登记。
 - [web 严格解析遇新键] → D11：DTO 键同 PR，新事件类型先发安全。
 - [A 的 delta 在审核或实施中变动] → B 的 specs 以 A 为基线，A 变动即重新同步（Context 首句）；B 实施 issue 逐条 `Depends on` A。
 - [ui-walk 总时长] → `globalTimeout` 300 s 覆盖两份 spec × 两个视口；合入前在 CI 记录实测值。
