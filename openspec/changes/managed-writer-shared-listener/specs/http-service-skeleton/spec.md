@@ -50,7 +50,17 @@ Runtime config/DB/app/listen/models.yml/success-record任一步失败 SHALL不�
 #### Scenario: 同 tick 多条记录不触发监听上限警告
 - **WHEN** 在同一 tick 内对真实 `process.stderr`（子进程里运行，stderr 为管道）调用受管 writer 16 次
 - **THEN** 子进程 stderr 恰为 16 行对应的记录，不含 `MaxListenersExceededWarning`；全部 settle 并过一轮 `setImmediate` 后，该 stream 上由 writer 挂的 `error` 监听数为 0
-- **WHEN** 一个 EventEmitter sink 上有三条在途记录时发出一次 `error` 事件
+- **WHEN** 一个 EventEmitter sink 上有三条在途记录
+- **THEN** 该 sink 的 `error` 监听数恰为 1，`getMaxListeners()` 与写入前相同
+- **WHEN** 此时发出一次 `error` 事件
 - **THEN** 三条各自以该 error reject 恰一次；其后迟到的 write callback 不再改变结果；过一轮 `setImmediate` 后监听数为 0
 - **WHEN** 一条记录的 write callback 成功之后、`setImmediate` 之前 sink 发出 `error`
 - **THEN** 该记录保持 resolved，进程没有未处理的 `error` 事件
+
+#### Scenario: 同一 stream 上监听的复用与重挂
+- **WHEN** 记录 A settle 之后、其 `setImmediate` 触发之前写入记录 B，且该 `setImmediate` 触发时 B 仍在途
+- **THEN** 监听没有被摘除（监听数仍为 1）；随后 sink 发出 `error` 时 B 以该 error reject，没有未处理的 `error` 事件
+- **WHEN** 全部记录 settle、监听已摘除（监听数 0）之后再对同一 sink 写入记录 C，并在 C 在途时发出 `error`
+- **THEN** 写入 C 时监听数回到 1，C 以该 error reject，没有未处理的 `error` 事件
+- **WHEN** 两个不同的 sink 各有一条在途记录，其中一个发出 `error`
+- **THEN** 只有该 sink 的记录 reject，另一个 sink 的记录按自己的 write callback settle
