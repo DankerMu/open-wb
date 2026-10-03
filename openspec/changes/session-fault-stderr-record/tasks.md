@@ -6,11 +6,11 @@ Fixture level: compact
 
 ## 1. 实现
 - [ ] 1.1 `server.ts` `appAssemblyOf`：`onError`（spec delta 原句）；复用现有 `emitStderrRecord`，不新增第二个 stderr 出口；JSDoc 同步。
-- [ ] 1.2 `app.ts`：删除 `observeSessionFault` 及其对 `app.log` 的调用；未注入时的默认为不观测。`assembly.onError` 显式注入的路径不变。
+- [ ] 1.2 `app.ts`：删除 `observeSessionFault` 及其对 `app.log` 的调用；未注入时的默认为不观测——`registerSessions` 的 `onError` 是必填，在 `app.ts` 里传一个 no-op 即可，不改 `sessions/index.ts` 的签名。`assembly.onError` 显式注入的路径不变。
 - [ ] 1.3 测试（放进现有覆盖 `appAssemblyOf` / 握手超时 `log` 的测试文件，沿用其 stderr 捕获手法；找不到合适落点时新建 `server/test/session-fault-record.test.ts`）：
   - (a) `appAssemblyOf(config).onError(new Error("<含路径与密钥样式的哨兵文本>"))` → 捕获的 stderr 恰一行 `{"event":"session_fault"}\n`，不含哨兵；返回值严格为 `undefined`；
   - (b) stderr 写入被拒绝 / 同步抛出时：调用不抛、无 unhandledRejection（在测试内挂监听并让出事件循环后断言）、`onError` 调用次数不变；
-  - (c) 经 `createApp({ …, assembly: appAssemblyOf(config) 的等价物 })` 装配，触发一次真实的 supervisor 保留故障（沿用现有 infra-fault 测试的触发方式，例如持久化事务失败）→ stderr 恰一行 `session_fault`；关停时故障照常暴露（既有断言手法）；
+  - (c) 直接 `createApp({ …, assembly: { ...appAssemblyOf(config), runtime: <fake>, tokens } })` 装配（现有 helper `openSupervisorApp` 恒注入自己的 `onError`，不能用），触发一次真实的 supervisor 保留故障（触发方式取自 `session-supervisor-faults.test.ts`，如 TEMP TRIGGER 让写入失败；选一个只通知一次的触发并注明，或把断言写成「行数等于 `onError` 通知次数」）→ stderr 的 `session_fault` 行数与通知次数一致且至少一行；同一世界再以失败的 stderr 跑一次：supervisor 不多保留 sink 契约故障；关停时故障照常暴露（既有断言手法）；
   - (d) 不传 `onError` 的 `createApp`：同样的故障不写任何 stderr/stdout，故障仍在关停时暴露。
 - [ ] 1.4 除 `server/src/server.ts`、`server/src/app.ts`、上述测试文件与本 change 目录外不改其它被跟踪文件。若现有测试依赖 `observeSessionFault` 或 `app.log`，停下报告。
 
@@ -29,7 +29,7 @@ Fixture level: compact
 - N1 sink 改为返回 `emitStderrRecord(...)` 的 Promise → (a) 的返回值断言失败（并记录 supervisor sink 契约测试是否也红）。
 - N2 记录里带上 `error.message` → (a) 的哨兵断言失败。
 - N3 去掉 `emitStderrRecord` 的 catch（或在 sink 内直接 await 写入）→ (b) 失败。
-- N4 `createApp` 默认 sink 恢复为写 stderr → (d) 失败。
+- N4 `createApp` 默认 sink 改为写 stderr → (d) 失败。
 
 ## Risk packs
 | Pack | Selected | 理由 → 证据 |
