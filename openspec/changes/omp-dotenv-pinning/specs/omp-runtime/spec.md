@@ -8,7 +8,7 @@
 
 本要求不覆盖的（登记于 ADR-0012）：`<cwd>/.env` 里其它未被宿主设置的 `PI_*`/`OMP_*` 变量仍会生效；宿主不读取、不改写、不拒绝工作目录里的 `.env`（它可能是用户项目的一部分）。
 
-#### Scenario: 两个变量不可被 dotenv 改写（真实 omp）
+#### Scenario: 托管配置位置不可被 dotenv 改写（真实 omp）
 - **WHEN** cwd 下的 `.env` 含 `PI_CODING_AGENT_DIR=<cwd>/evil2`、`PI_CONFIG_FILES=/nonexistent.yml`、`OMP_CONFIG_FILES=/nonexistent2.yml`、`PI_CONFIG_DIR=../<cwd 相对 HOME 的路径>/evil`、`OMP_PROFILE=p`、`PI_PROFILE=q`，随后 spawn 并完成一个回合
 - **THEN** 回合 done；cwd 下除 `.env` 外没有 omp 新建的条目，`<state>/home` 下没有新的配置根，`agent.db` 仍在 `<state>/xdg/data/omp`
 - **WHEN** 去掉 spawn 环境里的 `PI_CONFIG_FILES`（负向对照）
