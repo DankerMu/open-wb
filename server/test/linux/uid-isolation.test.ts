@@ -6,6 +6,7 @@
  * Issue #760: what omp writes through sudo → setpriv has no other bits and keeps group write.
  * Issue #706: the managed state layout is read-only for the omp uid except HOME and the
  * three XDG `omp` directories; the trash a DELETE moves artifacts through is closed to it.
+ * Issue #708: the host overlay in the managed agent dir cannot be overwritten by the omp uid.
  * Non-Linux / unset WORKBUDDY_UID_TEST skip; opted-in missing OMP_USER fails.
  */
 
@@ -30,6 +31,7 @@ import { createApp } from "../../src/app.js";
 import { openDb } from "../../src/core/db/index.js";
 import { writeManagedModelsYml } from "../../src/model-proxy/models-yml.js";
 import type { OmpFrame } from "../../src/sessions/omp/frame.js";
+import { writeHostOverlay } from "../../src/sessions/omp/host-overlay.js";
 import type { OmpExit } from "../../src/sessions/omp/process.js";
 import { SessionRuntime, type SessionRuntimeOpts } from "../../src/sessions/omp/runtime.js";
 import { ensureOmpStateLayout } from "../../src/sessions/omp/state-layout.js";
@@ -230,12 +232,15 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
         const state = layout.stateDir;
         const agent = join(state, "home", ".omp", "agent");
         const models = join(agent, "models.yml");
+        const overlay = join(agent, "host-overlay.yml");
         ensureOmpStateLayout(state);
         await writeManagedModelsYml(agent, {
           proxyBaseUrl: "http://127.0.0.1:18016/v1",
           modelId: MODEL_ID,
         });
+        await writeHostOverlay(state);
         const modelsBefore = readFileSync(models);
+        const overlayBefore = readFileSync(overlay);
         const managed = [
           state,
           join(state, "sessions"),
@@ -265,6 +270,7 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
           expect(await write(join(dir, "planted by omp")), dir).toBe("EACCES");
         }
         expect(await write(models), models).toBe("EACCES");
+        expect(await write(overlay), overlay).toBe("EACCES");
         expect(await write(join(state, "trash", "x"))).toBe("EACCES");
         expect(readdirSync(join(state, "trash"))).toEqual([]);
         for (const dir of [join(state, "home"), join(state, "sessions"), agent]) {
@@ -278,6 +284,9 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
 
         expect(readFileSync(models).equals(modelsBefore)).toBe(true);
         expect(lstatSync(models).uid).toBe(process.getuid?.());
+        expect(readFileSync(overlay).equals(overlayBefore)).toBe(true);
+        expect(lstatSync(overlay).uid).toBe(process.getuid?.());
+        expect(lstatSync(overlay).mode & 0o7777).toBe(0o640);
         expect(managed.map((dir) => readdirSync(dir).toSorted())).toEqual(before);
         for (const dir of [...managed, ...writable]) {
           expect(lstatSync(dir).isDirectory(), dir).toBe(true);

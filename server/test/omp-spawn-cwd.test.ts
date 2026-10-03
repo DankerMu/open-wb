@@ -122,6 +122,8 @@ function contractArgs(roots: Roots, cwd: string): string[] {
     "--no-lsp",
     "--no-pty",
     "--no-title",
+    "--config",
+    join(roots.agent, "host-overlay.yml"),
   ];
 }
 

@@ -31,6 +31,7 @@ import { type AgentSettings, resolveAgentSettings } from "./agent-config.js";
 import { type AssemblyDependencies, createApp } from "./app.js";
 import { openDb } from "./core/db/index.js";
 import { deriveProxyBaseUrl, writeManagedModelsYml } from "./model-proxy/models-yml.js";
+import { writeHostOverlay } from "./sessions/omp/host-overlay.js";
 import type { HandshakeTimeoutRecord } from "./sessions/omp/spawn-gate.js";
 import { ensureOmpStateLayout, ompAgentDir } from "./sessions/omp/state-layout.js";
 import type { SessionSupervisorRuntime } from "./sessions/supervisor.js";
@@ -286,7 +287,7 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
   }
 }
 
-/** 成功记录：listen 之后建托管布局、写托管 models，再发实际 bound address/port。 */
+/** 成功记录：listen 之后建托管布局、写托管 models 与宿主 overlay，再发实际 bound address/port。 */
 async function publishStarted(owned: OwnedResources, config: ServerConfig): Promise<void> {
   const app = owned.app;
   if (app === undefined) {
@@ -305,6 +306,7 @@ async function publishStarted(owned: OwnedResources, config: ServerConfig): Prom
     modelId: config.modelId,
     reasoning: config.modelReasoning,
   });
+  await writeHostOverlay(config.ompStateDir);
   if (owned.signalReceived || owned.app === undefined) {
     return;
   }

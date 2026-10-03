@@ -2,6 +2,7 @@
  * Issue #706: the real compiled production entry establishes the managed omp state layout after
  * listen and before the managed models.yml is written, and an obstructed layout fails startup
  * through the generic partial-start path. Paths and modes come from the omp-runtime spec table.
+ * Issue #708: the same step writes the host overlay next to models.yml, with the same failure path.
  */
 import {
   chmodSync,
@@ -19,7 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parse } from "yaml";
-import { expectLayout, seedLegacyAgentDir } from "./omp-layout-helpers.js";
+import { expectHostOverlay, expectLayout, seedLegacyAgentDir } from "./omp-layout-helpers.js";
 import {
   type CompiledServerEntry,
   compiledFixtureEnv,
@@ -62,7 +63,25 @@ function expectManagedModels(agentDir: string, port: number): void {
       workbuddy: { baseUrl: `http://127.0.0.1:${port}/v1`, models: [{ id: MODEL_ID }] },
     },
   });
-  expect(readdirSync(agentDir)).toEqual(["models.yml"]);
+  expect(readdirSync(agentDir).toSorted()).toEqual(["host-overlay.yml", "models.yml"]);
+}
+
+/** The entry exits 1 with nothing on stdout, only the generic record on stderr, and frees its port. */
+async function expectGenericStartFailure(root: string, state: string): Promise<void> {
+  const port = await reserveWildcardPort();
+  const server = startCompiledServer(
+    compiled.entry,
+    compiledFixtureEnv(root, port, join(root, "bin", "omp"), { MODEL_ID }),
+  );
+  try {
+    expect(await server.waitForClose()).toEqual({ code: 1, signal: null });
+    expect(server.stdout()).toBe("");
+    expect(server.stderr().replace(NODE_SQLITE_WARNING, "")).toBe(FAILED_RECORD);
+    expect(server.stderr()).not.toContain(state);
+    await expectBindable("127.0.0.1", port);
+  } finally {
+    await server.dispose();
+  }
 }
 
 describe("production entry managed omp state layout", () => {
@@ -82,6 +101,7 @@ describe("production entry managed omp state layout", () => {
       await server.waitForStarted();
       expectLayout(state);
       expectManagedModels(join(state, "home", ".omp", "agent"), port);
+      expectHostOverlay(state);
       expect(readdirSync(state).toSorted()).toEqual(["agent", "home", "sessions", "trash", "xdg"]);
       expect(readFileSync(join(legacy, "models.yml"), "utf8")).toBe("legacy-models");
       expect(lstatSync(join(legacy, "models.yml")).mtimeMs).toBe(legacyBefore.mtimeMs);
@@ -120,23 +140,45 @@ describe("production entry managed omp state layout", () => {
     const state = join(root, "state");
     mkdirSync(join(state, "home"), { recursive: true });
     writeFileSync(join(state, "home", ".omp"), "not-a-directory");
-    const port = await reserveWildcardPort();
-    const server = startCompiledServer(
-      compiled.entry,
-      compiledFixtureEnv(root, port, join(root, "bin", "omp"), { MODEL_ID }),
-    );
-    try {
-      expect(await server.waitForClose()).toEqual({ code: 1, signal: null });
-      expect(server.stdout()).toBe("");
-      expect(server.stderr().replace(NODE_SQLITE_WARNING, "")).toBe(FAILED_RECORD);
-      expect(server.stderr()).not.toContain(state);
-      expect(readFileSync(join(state, "home", ".omp"), "utf8")).toBe("not-a-directory");
-      expect(existsSync(join(state, "xdg"))).toBe(false);
-      expect(existsSync(join(state, "agent"))).toBe(false);
-      expect(existsSync(join(root, "sandbox"))).toBe(false);
-      await expectBindable("127.0.0.1", port);
-    } finally {
-      await server.dispose();
+    await expectGenericStartFailure(root, state);
+    expect(readFileSync(join(state, "home", ".omp"), "utf8")).toBe("not-a-directory");
+    expect(existsSync(join(state, "xdg"))).toBe(false);
+    expect(existsSync(join(state, "agent"))).toBe(false);
+    expect(existsSync(join(root, "sandbox"))).toBe(false);
+  }, 60_000);
+
+  it("a restart on the same state dir rewrites the host overlay to the same bytes and leaves no temporary file", async () => {
+    const root = scratchRoot("open-wb-overlay-restart-");
+    const state = join(root, "state");
+    const agentDir = join(state, "home", ".omp", "agent");
+    for (const _start of [1, 2]) {
+      const port = await reserveWildcardPort();
+      const server = startCompiledServer(
+        compiled.entry,
+        compiledFixtureEnv(root, port, join(root, "bin", "omp"), { MODEL_ID }),
+      );
+      try {
+        await server.waitForStarted();
+        expectHostOverlay(state);
+        expectManagedModels(agentDir, port);
+      } finally {
+        await server.dispose();
+      }
     }
+  }, 60_000);
+
+  it("exits 1 with only the generic failure record when host-overlay.yml is occupied by a directory", async () => {
+    const root = scratchRoot("open-wb-overlay-blocked-");
+    const state = join(root, "state");
+    const overlay = join(state, "home", ".omp", "agent", "host-overlay.yml");
+    mkdirSync(overlay, { recursive: true });
+    await expectGenericStartFailure(root, state);
+    expect(lstatSync(overlay).isDirectory()).toBe(true);
+    expect(readdirSync(overlay)).toEqual([]);
+    // models.yml was written first; the overlay's temporary file is removed on the failed rename.
+    expect(readdirSync(join(state, "home", ".omp", "agent")).toSorted()).toEqual([
+      "host-overlay.yml",
+      "models.yml",
+    ]);
   }, 60_000);
 });

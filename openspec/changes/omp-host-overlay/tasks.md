@@ -6,11 +6,11 @@ Risk packs: process-spawn-contract, approval-bypass, filesystem-permissions
 归档次序（前提）：本 change 在 `session-delete-trash` 归档之后从主规格生成并先于父 change 归档；父 change `s1c-session-metadata-presentation` 对 omp-runtime 与 http-service-skeleton 的 delta 按 #754 重新生成；omp-uid-isolation 父 change 无 delta。
 
 ## 1. 实现
-- [ ] 1.1 `server/src/sessions/omp/state-layout.ts`：`ompHostOverlayPath(stateDir)`。
-- [ ] 1.2 overlay 写入：常量内容 + 写入函数（新文件 `server/src/sessions/omp/host-overlay.ts` 或并入现有模块，遵守仓库的模块依赖规则）；`replaceFile` 从 `server/src/model-proxy/models-yml.ts` 提为可复用（位置由依赖规则决定，如 `server/src/core/`），不得出现第二份临时文件 + rename 实现。
-- [ ] 1.3 `server/src/server.ts`：布局之后写 `models.yml` 与 overlay；任一失败走既有 partial-start failure 路径；`server_started` 在两者都写完之后。
-- [ ] 1.4 `server/src/sessions/omp/process.ts`：argv 在 `--no-title` 之后加 `--config`、`ompHostOverlayPath(opts.stateDir)`；`--resume` 仍在最后。
-- [ ] 1.5 测试：精确 argv 的全部既有断言同步（`server/test/fake-omp-helpers.ts`、`omp-process.test.ts`、`omp-spawn-cwd.test.ts`、`server-assembly.test.ts` 及其它 grep 到 `--no-title` 的测试）；overlay 写入的单元/启动测试；`server/test/linux/uid-isolation.test.ts` 加 overlay 覆写探针（测试需自行写出 overlay 文件，与它写 `models.yml` 的方式一致）。
+- [x] 1.1 `server/src/sessions/omp/state-layout.ts`：`ompHostOverlayPath(stateDir)`。
+- [x] 1.2 overlay 写入：常量内容 + 写入函数（新文件 `server/src/sessions/omp/host-overlay.ts` 或并入现有模块，遵守仓库的模块依赖规则）；`replaceFile` 从 `server/src/model-proxy/models-yml.ts` 提为可复用（位置由依赖规则决定，如 `server/src/core/`），不得出现第二份临时文件 + rename 实现。
+- [x] 1.3 `server/src/server.ts`：布局之后写 `models.yml` 与 overlay；任一失败走既有 partial-start failure 路径；`server_started` 在两者都写完之后。
+- [x] 1.4 `server/src/sessions/omp/process.ts`：argv 在 `--no-title` 之后加 `--config`、`ompHostOverlayPath(opts.stateDir)`；`--resume` 仍在最后。
+- [x] 1.5 测试：精确 argv 的全部既有断言同步（`server/test/fake-omp-helpers.ts`、`omp-process.test.ts`、`omp-spawn-cwd.test.ts`、`server-assembly.test.ts` 及其它 grep 到 `--no-title` 的测试）；overlay 写入的单元/启动测试；`server/test/linux/uid-isolation.test.ts` 加 overlay 覆写探针（测试需自行写出 overlay 文件，与它写 `models.yml` 的方式一致）。
 
 允许改动的文件：上列源码、`server/src/core/**` 中承接 `replaceFile` 的一个文件、`server/test/**`。不得改 `openspec/**`、`docs/**`、`.github/**`、`scripts/**`、`smoke/**`、假 omp 三个 `.mjs`。
 
