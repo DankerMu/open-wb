@@ -2,9 +2,7 @@
 
 ## Purpose
 定义会话、消息与执行步骤的 schema 和追加迁移，以及账号隔离的存储视图、原子受理与补偿、正文刷盘、步骤和终态、故障恢复、关闭及显式启动对账契约。REST/runtime/SSE装配由后续变更增补。
-
 ## Requirements
-
 ### Requirement: 会话数据 schema
 Migration032_chat_sessions.sql SHALL atomically create chat_sessions, chat_messages and chat_steps using the existing runner-owned transaction. Existing0010/002/010/030/031 receipts and business data SHALL remain unchanged;032 SHALL append as the sixth receipt without changing ledger validation.
 chat_sessions SHALL have id TEXT NOTNULL PRIMARYKEY constrained to32 lowercasehex characters withoutNUL; owner_id TEXT NOTNULL referencing accounts(id) ONDELETECASCADE; nullable title/omp_session_file TEXT; status TEXT NOTNULL in(idle,running,done,failed,stopped); stream_epoch INTEGER NOTNULL DEFAULT0 and nonnegativeinteger; created_at/updated_at INTEGER NOTNULL nonnegativeepochms; and an owner_id,updated_atDESC index.
@@ -490,3 +488,4 @@ Migration `034_chat_turn_control.sql` SHALL run inside the existing runner-owned
 - **THEN** all three return201: the `/todo` message consumed no entry so `继续` aligns to the `继续` entry and `draft` equals `继续`; the legacy message aligns by verbatim equality and `draft` equals `/legacy`; the escaped message aligns by its wire form and `draft` equals `/help 这是什么` (no leading space)
 - **WHEN** the owner forks at a stored message that left no entry and is not a whitelisted command (a mid-prompt skill invocation `今天 /skill:weekly-report 帮我` after the two fixed-list messages), or — on a `running` session whose last user message is `/todo` — regenerates, or forks at that message
 - **THEN** the fork returns502 agent_unavailable with no `branch` frame and no new session row, and both requests on the running session return409 session_busy (the busy check precedes the command check)
+

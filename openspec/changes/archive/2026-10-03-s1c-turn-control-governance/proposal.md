@@ -78,3 +78,9 @@ IMPLEMENTATION_PLAN.md S1c 的第一刀（2026-09-26 grill 拍板把 S1c 切为�
 - 依赖：零新增 npm 依赖。omp 二进制版本不变（v18.0.10）。
 - 依赖方向保持 `http → feature → core`；审批审计经 `core/audit` 既有 `emit`。
 - 文档：`docs/architecture/system.md` §3.1 `sessions` 行的 supervisor 描述随归档补"上限/驱逐/审批"一句；ADR 不新增（审批超时方向为产品决策，记在本 proposal 偏差留痕与 IMPLEMENTATION_PLAN）。
+
+## 归档说明（2026-10-02，#448）
+- 本 change 的各子 change（`fork-route`、`slash-escape-branch-align` 等）已逐个归档进主规格，之后主规格又经 change B 的子 change 继续演进；父 delta 停在立项时的文本。原样归档会把 10 个主规格文件改回旧文（含抹掉 #511 的 `MODEL_REASONING`，即 #667），且 CLI 1.13.2 对 16 个 MODIFIED 报缺 Scenario。
+- 归档前把 10 份 delta 里的 50 条 Requirement 全部按主规格现文逐字重述为 MODIFIED（脚本生成，每条在主规格恰出现一次）；去掉 delta 中无作用的 `## Purpose` 段。两个 CLI（1.3.1 / 1.13.2）`validate --strict` 均通过；归档后主规格与归档前逐字相同，只有归档工具对 6 个文件的空行归一（`## Purpose` 与 `## Requirements` 后各删一个空行、文件末尾补一个换行）。
+- 父 delta 中比主规格多出、而子 change 归档时未采纳的措辞，按主规格现文为准、不并入：tool-approval「审批事件」并行审批 Scenario 的「快照该消息 `approvals` 按 `id` 升序」一句；tool-approval「审批请求识别」三个 Scenario 的 THEN 以 supervisor / `chat_approvals` 视角写（主规格为 `OmpProcess` owner 视角）。
+- 勾 9.1：#486 已由 PR #655 交付（`docs/architecture/system.md` §3.1 `sessions` 行与 `IMPLEMENTATION_PLAN.md` S1c 节），任务未勾属遗漏。

@@ -1,7 +1,3 @@
-# Spec delta: omp-test-harness（S1c A 修改）
-
-> 本 delta 按仓内先例**整段重述**被修改的 Requirement（含其全部 Scenario）；归档时以本文整段替换 promoted 的同名 Requirement，未在此重述的 Requirement 不变。
-
 ## MODIFIED Requirements
 
 ### Requirement: 假 omp 入站帧记录

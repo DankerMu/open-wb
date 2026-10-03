@@ -1,8 +1,3 @@
-# Spec: omp-pool
-
-## Purpose
-定义 omp 子进程的全局数量治理：`OMP_MAX_PROCESSES` 硬上限、串行化准入、最久空闲驱逐、`agent_capacity` 拒绝，以及任何原因的进程退出即释放名额（修复空闲回收后的 slot 泄漏）。
-
 ## MODIFIED Requirements
 
 ### Requirement: 进程退出即释放名额
@@ -79,4 +74,3 @@ supervisor SHALL 维护"活进程集合"：每个已 spawn 且尚未退出的 om
 #### Scenario: 信封形状
 - **WHEN** 路由抛出 `HttpError("agent_capacity")`
 - **THEN** 响应 503，body 恰为 `{error:{code:"agent_capacity",message:"Agent 容量已满，请稍后重试"}}`，无 Fastify 默认字段；伪造 `statusCode:503` 的普通 Error 仍为 generic 5xx
-
