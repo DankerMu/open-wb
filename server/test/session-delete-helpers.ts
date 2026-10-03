@@ -8,7 +8,7 @@
  * The fake's shared `/tmp/open-wb-fake-session.jsonl` is never created, deleted or asserted.
  */
 import { Buffer } from "node:buffer";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -20,6 +20,7 @@ import {
   completeHeldTurn,
   createControlledRuntime,
   createRealFakeRuntime,
+  createSession,
   emitAssistantDelta,
   type OpenSessionOptions,
   OWNER_ID,
@@ -108,12 +109,20 @@ export function ownedArtifactDir(file: string): string {
 
 /**
  * The owner's omp session dir under `stateDir` (the independent oracle for the path the deleter
- * accepts), created if no spawn has made it yet.
+ * accepts), created if no spawn has made it yet, together with the app-private `<stateDir>/trash`
+ * (0700) the deleter moves artifact directories into, so cases that never spawn have it too.
  */
 export function ownerSessionDir(stateDir: string): string {
   const dir = join(stateDir, "sessions", OWNER_ID);
   mkdirSync(dir, { recursive: true });
+  mkdirSync(trashDir(stateDir), { recursive: true });
+  chmodSync(trashDir(stateDir), 0o700);
   return dir;
+}
+
+/** `<stateDir>/trash`, written out here as the oracle for where a removal's leftovers may be. */
+export function trashDir(stateDir: string): string {
+  return join(stateDir, "trash");
 }
 
 export interface DeleteBody {
@@ -239,6 +248,18 @@ export function sessionFileOf(db: DatabaseSync, session: string): string | null 
 
 export function presetFile(db: DatabaseSync, session: string, file: string): void {
   db.prepare("UPDATE chat_sessions SET omp_session_file = ? WHERE id = ?").run(file, session);
+}
+
+/** A fresh never-prompted session whose row names `file`, deleted: 204 and the row is gone. */
+export async function deleteNaming(
+  world: Pick<RecordingWorld, "fixture" | "cookie">,
+  file: string,
+): Promise<void> {
+  const { app, db } = world.fixture;
+  const session = await createSession(app, world.cookie);
+  presetFile(db, session, file);
+  expectDeleted(await sendDelete(app, session, world.cookie));
+  expect(sessionState(db, session).row).toBeUndefined();
 }
 
 /** Real fake-omp world (production createApp), tracked for teardown. */

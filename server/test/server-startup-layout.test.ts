@@ -82,7 +82,7 @@ describe("production entry managed omp state layout", () => {
       await server.waitForStarted();
       expectLayout(state);
       expectManagedModels(join(state, "home", ".omp", "agent"), port);
-      expect(readdirSync(state).toSorted()).toEqual(["agent", "home", "sessions", "xdg"]);
+      expect(readdirSync(state).toSorted()).toEqual(["agent", "home", "sessions", "trash", "xdg"]);
       expect(readFileSync(join(legacy, "models.yml"), "utf8")).toBe("legacy-models");
       expect(lstatSync(join(legacy, "models.yml")).mtimeMs).toBe(legacyBefore.mtimeMs);
       expect(lstatSync(legacy).mode & 0o7777).toBe(0o2770);

@@ -4,7 +4,7 @@
  * Paths and modes below are written out from the spec table, not derived from the source module.
  */
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
-import {
+import fs, {
   chmodSync,
   existsSync,
   lstatSync,
@@ -17,10 +17,11 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ompAgentDir as processAgentDir,
   ompSessionDir as processSessionDir,
@@ -33,6 +34,7 @@ import {
   ompAgentDir,
   ompHome,
   ompSessionDir,
+  ompTrashDir,
   ompXdgHome,
 } from "../src/sessions/omp/state-layout.js";
 import { TokenRegistry } from "../src/sessions/tokens.js";
@@ -57,6 +59,8 @@ const fakeChildren: FakeChild[] = [];
 const runtimes: SessionRuntime[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
+  syncBuiltinESMExports();
   for (const runtime of runtimes.splice(0)) {
     await runtime.shutdown();
   }
@@ -114,6 +118,7 @@ describe("managed omp state layout paths", () => {
     expect(ompXdgHome("/s", "state")).toBe("/s/xdg/state");
     expect(ompXdgHome("/s", "cache")).toBe("/s/xdg/cache");
     expect(ompSessionDir("/s", OWNER)).toBe("/s/sessions/u1");
+    expect(ompTrashDir("/s")).toBe("/s/trash");
     // chat-sessions names process.ts as the exporter of these two.
     expect(processAgentDir).toBe(ompAgentDir);
     expect(processSessionDir).toBe(ompSessionDir);
@@ -130,8 +135,9 @@ describe("ensureOmpStateLayout", () => {
     expectLayout(state, TABLE);
     expect(modeOf(join(root, "missing"))).toBe(parentMode);
     expect(modeOf(join(root, "missing", "parents"))).toBe(parentMode);
-    expect(readdirSync(state).toSorted()).toEqual(["home", "sessions", "xdg"]);
+    expect(readdirSync(state).toSorted()).toEqual(["home", "sessions", "trash", "xdg"]);
     expect(readdirSync(join(state, "sessions"))).toEqual([]);
+    expect(readdirSync(join(state, "trash"))).toEqual([]);
 
     const calls = await spawnRecorded(root, state);
     expect(calls).toHaveLength(1);
@@ -140,6 +146,57 @@ describe("ensureOmpStateLayout", () => {
     ensureOmpStateLayout(state);
     await spawnRecorded(root, state);
     expectLayout(state, [...TABLE, SESSION_ROW]);
+  });
+
+  it("keeps a cold home closed to group and other until .omp and agent stand in it", () => {
+    const state = join(tempRoot(), "state");
+    const mkdir = fs.mkdirSync;
+    const homeModeAt: Record<string, number> = {};
+    vi.spyOn(fs, "mkdirSync").mockImplementation((...args: Parameters<typeof fs.mkdirSync>) => {
+      const path = String(args[0]);
+      if (path.endsWith(join("home", ".omp")) || path.endsWith(join("home", ".omp", "agent"))) {
+        homeModeAt[path.slice(path.indexOf(".omp"))] = modeOf(join(realpathSync(state), "home"));
+      }
+      return mkdir(...args);
+    });
+    syncBuiltinESMExports();
+
+    ensureOmpStateLayout(state);
+
+    expect(Object.keys(homeModeAt)).toEqual([".omp", join(".omp", "agent")]);
+    for (const [created, mode] of Object.entries(homeModeAt)) {
+      expect((mode & 0o077).toString(8), created).toBe("0");
+    }
+    expect(modeOf(join(state, "home"))).toBe(0o3770);
+    expect(modeOf(join(state, "trash"))).toBe(0o700);
+    expect(lstatSync(join(state, "trash")).uid).toBe(process.geteuid?.());
+  });
+
+  it("does not narrow an existing 3770 home on a repeated call: no chmod at all", () => {
+    const state = join(tempRoot(), "state");
+    ensureOmpStateLayout(state);
+    const chmodSpy = vi.spyOn(fs, "chmodSync");
+    syncBuiltinESMExports();
+
+    ensureOmpStateLayout(state);
+
+    expect(chmodSpy).not.toHaveBeenCalled();
+    expectLayout(state, TABLE);
+  });
+
+  it("opens an existing home whose .omp is still missing without narrowing it first", () => {
+    const state = join(tempRoot(), "state");
+    ensureOmpStateLayout(state);
+    rmSync(join(state, "home", ".omp"), { recursive: true });
+    const chmodSpy = vi.spyOn(fs, "chmodSync");
+    syncBuiltinESMExports();
+
+    ensureOmpStateLayout(state);
+
+    expect(chmodSpy.mock.calls.map(([path]) => path)).not.toContain(
+      join(realpathSync(state), "home"),
+    );
+    expectLayout(state, TABLE);
   });
 
   it("corrects directories that were widened from outside", () => {
@@ -176,10 +233,12 @@ describe("ensureOmpStateLayout", () => {
     chmodSync(elsewhere, 0o755);
     writeFileSync(join(elsewhere, "keep.txt"), "outside");
     symlinkSync(elsewhere, join(state, "home", ".omp"));
+    const calls: SpawnCall[] = [];
 
     expect(() => ensureOmpStateLayout(state)).toThrow(join(realpathSync(state), "home", ".omp"));
-    await expect(spawnRecorded(root, state)).rejects.toThrow();
+    await expect(spawnRecorded(root, state, calls)).rejects.toThrow();
 
+    expect(calls).toEqual([]);
     expect(modeOf(elsewhere)).toBe(0o755);
     expect(readdirSync(elsewhere)).toEqual(["keep.txt"]);
     expect(lstatSync(join(state, "home", ".omp")).isSymbolicLink()).toBe(true);

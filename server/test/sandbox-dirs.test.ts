@@ -255,6 +255,29 @@ describe("core/sandbox ensureOwnedDir", () => {
     expect(modeOf(dir)).toBe(mode);
   });
 
+  // #706 2b: the directory never exists wider than its target, even under a permissive umask.
+  it("creates a new directory with the target permission bits already in the mkdir", () => {
+    const dir = join(createParent(), "d");
+    const mkdir = fs.mkdirSync;
+    const created: number[] = [];
+    vi.spyOn(fs, "mkdirSync").mockImplementation((...args: Parameters<typeof fs.mkdirSync>) => {
+      const result = mkdir(...args);
+      created.push(modeOf(String(args[0])));
+      return result;
+    });
+    syncBuiltinESMExports();
+    const previous = process.umask(0o000);
+    try {
+      ensureOwnedDir(dir, MANAGED);
+    } finally {
+      process.umask(previous);
+    }
+
+    // As mkdir left it, before any chmod: no bit outside 0750 (setgid may be inherited).
+    expect(created.map((mode) => (mode & 0o777 & ~0o750).toString(8))).toEqual(["0"]);
+    expect(modeOf(dir)).toBe(MANAGED);
+  });
+
   it("narrows a directory that was wider and widens one that was narrower", () => {
     const parent = createParent();
     const wide = join(parent, "wide");

@@ -21,6 +21,7 @@ import { basename, dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { settle } from "./session-approval-helpers.js";
 import {
+  deleteNaming,
   deleteWorlds,
   expectDeleted,
   openRealWorld,
@@ -28,17 +29,16 @@ import {
   ownedDir,
   ownedFile,
   ownerSessionDir,
-  presetFile,
   sendDelete,
   sessionFileOf,
   sessionState,
   track,
+  trashDir,
 } from "./session-delete-helpers.js";
 import { turn } from "./session-fork-helpers.js";
 import { QUESTION, regenerate } from "./session-regenerate-helpers.js";
 import {
   createRealFakeRuntime,
-  createSession,
   OWNER_ID,
   openRecordingSession,
   waitForTurn,
@@ -56,15 +56,6 @@ type RealWorld = Awaited<ReturnType<typeof openRealWorld>>;
 
 function tree(dir: string): string[] {
   return readdirSync(dir, { recursive: true, encoding: "utf8" }).sort();
-}
-
-/** A fresh never-prompted session whose row names `file`, deleted: 204 and the row is gone. */
-async function deleteNaming(world: RealWorld, file: string): Promise<void> {
-  const { app, db } = world.fixture;
-  const session = await createSession(app, world.cookie);
-  presetFile(db, session, file);
-  expectDeleted(await sendDelete(app, session, world.cookie));
-  expect(sessionState(db, session).row).toBeUndefined();
 }
 
 function messages(world: RealWorld): string[] {
@@ -150,21 +141,31 @@ describe("DELETE removes the session file's artifact directory (#758)", () => {
     expect(messages(world)).toEqual([OUTSIDE_SESSION_DIR, NOT_REGULAR_FILE, NOT_REGULAR_FILE]);
   });
 
-  it("(e) a failing recursive removal is reported once; the DELETE is still 204 and the row gone", async () => {
+  it("(e) a failing recursive removal is reported once and leaves its residue in the trash; still 204 and the row gone", async () => {
     const world = await openRealWorld();
-    const file = ownedFile(ownerSessionDir(world.rt.runtime.stateDir));
+    const { stateDir } = world.rt.runtime;
+    const file = ownedFile(ownerSessionDir(stateDir));
     const artifacts = ownedArtifactDir(file);
+    const trash = trashDir(stateDir);
     // A read-only (0500) nested directory: its entry cannot be unlinked, so the removal is partial.
-    const locked = join(artifacts, "local");
-    chmodSync(locked, 0o500);
+    chmodSync(join(artifacts, "local"), 0o500);
+    let residue: string[] = [];
     try {
       await deleteNaming(world, file);
+      residue = readdirSync(trash);
+      expect(residue).toHaveLength(1);
+      expect(residue[0]).toMatch(/^[0-9a-f]{32}$/u);
+      expect(tree(join(trash, residue[0] ?? ""))).toEqual(["local", join("local", "note.txt")]);
     } finally {
-      chmodSync(locked, 0o700);
+      // Wherever the locked directory ended up, teardown must be able to empty it.
+      for (const holder of [artifacts, ...readdirSync(trash).map((name) => join(trash, name))]) {
+        if (existsSync(join(holder, "local"))) {
+          chmodSync(join(holder, "local"), 0o700);
+        }
+      }
     }
 
-    expect(existsSync(file)).toBe(false);
-    expect(existsSync(join(locked, "note.txt"))).toBe(true);
+    expect([existsSync(file), existsSync(artifacts)]).toEqual([false, false]);
     expect(world.errors).toHaveLength(1);
     expect((world.errors[0] as NodeJS.ErrnoException).code).toBe("EACCES");
   });
