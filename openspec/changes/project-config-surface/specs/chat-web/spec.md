@@ -167,7 +167,7 @@ Business errors SHALL display inline on the message;400/409/502/503 SHALL displa
 - **THEN** 选中时顶栏的 actions 区（面包屑之后；`≤760px` 时 banner 里另有 `打开导航`）恰有按序排列的 `重命名`、`对话内搜索`、`产物面板` 三个按钮（该会话的项目配置列表为空时；非空时其前另有 `项目配置` 按钮，见「项目配置入口」场景）；欢迎态顶栏不渲染这些按钮（`≥761px` 仍无顶栏）
 
 #### Scenario: 斜杠命令候选
-- **WHEN** 在欢迎态与已选会话的 composer 中分别输入 `/`（`listCommands()` 返回两条内建与 `skill:weekly-report`），再输入 `/t`，按 `↓` `↑` `Enter`；再输入 `/help` 后 `Enter`；再输入 `/` 后 `Esc`；输入法组合态下（`isComposing`）输入 `/任` 并按 Enter；以及 `listCommands()` 失败时输入 `/`
+- **WHEN** 在欢迎态与已选会话（均未绑定工作空间）的 composer 中分别输入 `/`（`listCommands(null)` 返回两条内建与 `skill:weekly-report`），再输入 `/t`，按 `↓` `↑` `Enter`；再输入 `/help` 后 `Enter`；再输入 `/` 后 `Esc`；输入法组合态下（`isComposing`）输入 `/任` 并按 Enter；以及 `listCommands(null)` 失败时输入 `/`
 - **THEN** 输入 `/` 时出现 `命令候选` listbox 恰三项、第一项 `整理上下文` 高亮，`/t` 过滤为 `任务清单` 一项（`todo` 前缀命中），`↓`/`↑` 循环回到该项，`Enter` 使 draft 变为 `/todo ` 且面板关闭、不发送；`/help` 无候选、面板隐藏，`Enter` 照常发送且用户气泡显示 `/help`；`Esc` 关闭面板、再输入字符后重新出现；组合态的 Enter 既不选中也不发送，draft 保持输入法上屏结果；拉取失败时无面板、无错误提示，下次满足条件时重新拉取
 
 #### Scenario: 候选目录的拉取时机

@@ -49,7 +49,7 @@ Fixture level: expanded。Risk packs: 跨 uid 可写目录的读取（工作空�
 - 条目带 `source:"project"`，候选面板标注「项目」；与平台 skill 同名时只出项目那一条并带 `overrides:true`，面板标注「项目 · 覆盖平台技能」。
 - 读取复用 `listSkills` 的全部限制（每个 `skills` 目录内的内核 realpath 包含检查、原始字节路径、`O_NOFOLLOW|O_NONBLOCK|O_NOCTTY`、普通文件且不超过 262144 字节、256 条上限、名称规则）。
   包含边界是该 `skills` 目录本身（与平台目录同一份代码）。项目目录对 omp uid 可写，另加两条：`<D>/.omp/skills` 的内核 realpath 必须等于 `D` 的 realpath 加 `/.omp/skills`
-  （`.omp` 或 `skills` 是链接则该层不产出，否则链接能把边界移到沙箱外）；目录经句柄最多读 4096 条，超过则该层不产出（防止海量条目卡住事件循环）。`.git` 探测用 `lstat`，不枚举目录。
+  （`.omp` 或 `skills` 是链接则该层不产出，否则链接能把边界移到沙箱外）；`SKILL.md` 的硬链接数不为 1 时跳过；目录经句柄最多读 4096 条，超过则该层不产出（防止海量条目卡住事件循环）。`.git` 探测用 `lstat`，不枚举目录。
 - `description` 截到 200 个码点；前端按纯文本渲染（React 文本节点，现状即如此）。
 - 可见性不另设规则：能通过 `rootOf` 的账号即可见。不追踪放置者（宿主没有文件级作者信息）。
 
@@ -68,7 +68,7 @@ Fixture level: expanded。Risk packs: 跨 uid 可写目录的读取（工作空�
 - 新路由 `GET /api/project-config[?workspaceId=]`，请求规则与鉴权同 D1；宿主只 `lstat`，不读内容、不跟符号链接。
 - 位置表写在规格里（chat-sessions「项目配置文件列表」），按实测：各级 `AGENTS.md` 与 `.agents/AGENTS.md`；cwd 的 `.claude/CLAUDE.md`；最近的非空 `.omp` 下的 `AGENTS.md`、`RULES.md`（该目录是 cwd 时另有 `SYSTEM.md`）；
   最近的 `.omp/agents` 目录下的 `*.md`。表中每一行都要有真二进制用例支撑（只放该文件，depth 0 与 depth 1 各一次）；实测与某一行不符时先改规格（可删、可收窄、可放宽），再发布路由。
-- 从上溯目录到被列文件之间的每一级目录（`.omp`、`.omp/agents`、`.claude`、`.agents`）必须 `lstat` 为真实目录，链接视为不存在——否则宿主会对沙箱外的目录做枚举与存在性判断。
+- 从上溯目录到被列文件之间的每一级目录（`.omp`、`.omp/agents`、`.claude`、`.agents`）必须 `lstat` 为真实目录，否则宿主会对沙箱外的目录做枚举与存在性判断。`.omp` 或 `.omp/agents` 是链接或超过 4096 条时，「最近目录」的查找在该层结束且不列出（omp 会跟随链接并停在这一层，继续上溯会列出 omp 不读的祖先文件）。
 - web：会话顶栏 actions 区、`重命名` 之前的 `项目配置` 按钮，列表非空才出现；只读弹层按层级分组，无编辑入口。欢迎态不显示（没有顶栏按钮）。
 - 用户级（`<state>/home/.omp/agent` 下）的文件不显示：平台托管、对 omp uid 只读（ADR-0010）。
 
@@ -87,11 +87,12 @@ Fixture level: expanded。Risk packs: 跨 uid 可写目录的读取（工作空�
 ## 残余
 
 1. 其它 provider 目录、托管 `HOME`、沙箱根以上的 skill：能执行、不列出、宿主记为文本。
-2. 宿主读取规则跳过的项目 skill（超 256 条、越界链接、超大文件、名称含空白或 `/`）：同上。
+2. 宿主读取规则跳过的项目 skill（超 256 条、越界链接、硬链接、超大文件、名称含空白或 `/`）：同上。被跳过的近层 skill 在 omp 里仍会遮蔽远层或平台的同名 skill，此时目录列出的来源与 `overrides` 不准。
 3. 项目配置列表只表示存在；实际生效的文件可能更少。
 4. 会话进程启动后才新建的项目 skill：宿主记为 `skill` 并原样下发，omp 当作普通消息交给模型；以它为锚点的 regenerate / fork 得到 400。进程下次启动后恢复一致。
 5. 检查与读取之间的竞态（omp uid 在 realpath / `lstat` 之后换掉目录）：与平台目录读取、会话文件删除同类，不单独处理。
-6. 宿主扫描规则与位置表绑定 omp v18.0.10：升级 omp 时真二进制用例必须重跑，失败即改规格。
+6. 同步读取量：每层最多 256 个不超过 262144 字节的 `SKILL.md`，触发点是每次带 `workspaceId` 的目录请求与每条 `/` 开头的 prompt；不设总字节预算。
+7. 宿主扫描规则与位置表绑定 omp v18.0.10：升级 omp 时真二进制用例必须重跑，失败即改规格。
 
 ## 备选（弃）
 
