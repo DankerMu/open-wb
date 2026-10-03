@@ -18,9 +18,9 @@ Fixture level: expanded。每个任务组对应一个实现 issue；本变更在
 
 ## 3. server：项目配置文件列表
 
-- [ ] 3.1 真二进制用例为位置表逐行定案（每个位置只放该文件，depth 0 与 depth 1 各一次，查 `get_state.systemPrompt` 中的标记；agents 查 task 工具的 agent 列表）；与规格不符的行先改规格。
-- [ ] 3.2 `rest-project-config.ts`：路由、鉴权、`lstat`、排序、agents 的 64 条上限；目录链与接线复用任务组 1（依赖 1）。
-- [ ] 3.3 用例：「Files present at the read locations」场景；符号链接（文件与中间目录）、目录、不可读位置不列出；最近 `.omp` 与最近 `.omp/agents` 分别定位；`.omp` / `.omp/agents` 为链接或超过 4096 条时查找在该层结束。
+- [x] 3.1 真二进制用例为位置表逐行定案（每个位置只放该文件，depth 0 与 depth 1 各一次，查 `get_state.systemPrompt` 中的标记；agents 查 task 工具的 agent 列表）；与规格不符的行先改规格。
+- [x] 3.2 `rest-project-config.ts`：路由、鉴权、`lstat`、排序、agents 的 64 条上限；目录链与接线复用任务组 1（依赖 1）。
+- [x] 3.3 用例：「Files present at the read locations」场景；符号链接（文件与中间目录）、目录、不可读位置不列出；最近 `.omp` 与最近 `.omp/agents` 分别定位；`.omp` / `.omp/agents` 为链接或超过 4096 条时查找在该层结束。
 
 ## 4. web：项目配置入口
 

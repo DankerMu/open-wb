@@ -23,7 +23,7 @@ Fixture level: expanded。Risk packs: 跨 uid 可写目录的读取（工作空�
 | --- | --- |
 | 单独放置即进入系统提示：各级的 `AGENTS.md`（到 `.git` 边界为止）与 `.agents/AGENTS.md`；cwd 的 `.claude/CLAUDE.md`、`.omp/SYSTEM.md` | 实跑 |
 | 单独放置但不进入系统提示：上一级的 `.claude/CLAUDE.md`、上一级的 `.omp/SYSTEM.md`（cwd 没有 `.omp` 时也不生效）、`.omp/rules/*.md` | 实跑 |
-| 同一层只有一个说明文件生效：cwd 同时有 `AGENTS.md` 与 `.claude/CLAUDE.md` 时只有后者；有 `.omp/AGENTS.md` 时它胜出 | 实跑 |
+| 同一层只有一个说明文件生效：cwd 同时有 `AGENTS.md` 与 `.claude/CLAUDE.md` 时只有后者；与 `.agents/AGENTS.md` 并存时只有后者；有 `.omp/AGENTS.md` 时它胜出 | 实跑 |
 | `.omp/AGENTS.md`、`.omp/RULES.md` 只取最近的非空 `.omp` 目录；cwd 有 `.omp` 时上一级的不生效 | 实跑；`discovery/builtin.ts:90-99` |
 | `.omp/agents/*.md` 取最近的、`.omp/agents` 本身是目录的祖先（与 `.omp` 是否有其它内容无关），不受 `.git` 边界限制 | 实跑；`task/discovery.ts:86-95` |
 | skill 在进程启动时加载：之后新建的 `SKILL.md` 不在 `get_available_commands` 里，`/skill:<name>` 被当作普通消息发给模型 | 实跑 |
@@ -98,6 +98,7 @@ Fixture level: expanded。Risk packs: 跨 uid 可写目录的读取（工作空�
 8. 沙箱根与 owner 根上的 `.omp` 对其下所有会话生效，而沙箱内目录对单一的 omp uid 都可写（ADR-0010）：一个会话可以在那里放下影响其它工作空间、其它账号的 skill 与说明文件。这是 omp 现有行为，本变更不改变它，只是让这些 skill 在目录里可见并标为「项目」。
 9. owner 根在该账号首次 spawn 时才创建：此前不带 `workspaceId` 的目录不含沙箱根层的项目 skill，未绑定会话的首条 `/skill:<那一层的 skill>` 被记为文本而 omp 会执行。只影响首条消息。
 10. web：URL 指向的会话解析不出来时（不在列表里且历史读取失败）工作空间未知，候选面板不显示也不发请求；列表返回后自愈。按无工作空间取目录会给已绑定会话显示 owner 根的目录。
+11. 项目配置列表与 omp 的两处已知出入（#815 实测 / 读码）：omp 接受指向 `.md` 的符号链接作为 agent 定义，宿主不列（生效但不显示）；`.omp/agents` 不可读时 omp 停在该层，宿主继续上溯，可能列出 omp 不读的祖先 agent 文件。
 
 ## 备选（弃）
 

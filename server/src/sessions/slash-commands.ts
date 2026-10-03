@@ -80,7 +80,7 @@ const SKILL_PREFIX = "/skill:";
 const SKILL_MD_MAX_BYTES = 262144;
 /** Entries read per call, in SKILL.md path order; the rest get no filesystem access at all. */
 const MAX_SKILL_ENTRIES = 256;
-/** Entries enumerated in one project `skills` directory; one holding more is not listed at all. */
+/** Entries enumerated in one project directory; one holding more is not listed at all. */
 const MAX_PROJECT_DIR_ENTRIES = 4096;
 /** Code points kept of a project skill's description. */
 const MAX_PROJECT_DESCRIPTION = 200;
@@ -124,44 +124,76 @@ export function listSkills(agentDir: string): Skill[] {
 }
 
 /**
- * The project skills of a session cwd: `<D>/.omp/skills` for `D` = `cwd`, its parent, and so on,
- * stopping after the first `D` holding a `.git` entry (that `D` is still read; omp's `repoRoot`)
- * or after `sandboxRoot`. The walk runs on kernel real paths kept as raw bytes: a resolved `cwd`
- * that is neither the resolved `sandboxRoot` nor below it yields `[]` (the omp uid can put a link
- * where a cwd is expected), and every `D` is a parent of the resolved `cwd`, hence a real
- * directory inside the sandbox. Each directory is read by the rules of `listSkills` plus the three
- * of `readProjectDir`; a description is cut to `MAX_PROJECT_DESCRIPTION` code points. A name found
+ * The project skills of a session cwd: `<D>/.omp/skills` for every `D` of the walk of
+ * `projectDirs`. Each directory is read by the rules of `listSkills` plus the three of
+ * `readProjectDir`; a description is cut to `MAX_PROJECT_DESCRIPTION` code points. A name found
  * in a nearer `D` hides the same name farther up (omp v18.0.10: nearest project skill wins).
  * Sorted by name, recomputed on every call, never throws: a failure for one `D` yields nothing
  * for that `D`.
  */
 export function listProjectSkills(cwd: string, sandboxRoot: string): Skill[] {
+  const { chain, walk } = projectDirs(cwd, sandboxRoot);
+  const byNearest = new Map<string, Skill>();
+  for (const dir of chain.slice(0, walk)) {
+    for (const skill of readProjectDir(dir)) {
+      if (!byNearest.has(skill.name)) {
+        byNearest.set(skill.name, skill);
+      }
+    }
+  }
+  return [...byNearest.values()].sort(byName);
+}
+
+/**
+ * The directories of a session cwd the host inspects for project configuration, nearest first:
+ * `chain` is `cwd`, its parent, and so on up to `sandboxRoot`; the *walk* is its first `walk`
+ * directories, ending with the first one holding a `.git` entry (that one included; omp's
+ * `repoRoot`) or with `sandboxRoot`. Everything runs on kernel real paths kept as raw bytes: a
+ * resolved `cwd` that is neither the resolved `sandboxRoot` nor below it yields an empty chain
+ * (the omp uid can put a link where a cwd is expected), and every directory is a parent of the
+ * resolved `cwd`, hence a real directory inside the sandbox. Never throws.
+ */
+export function projectDirs(cwd: string, sandboxRoot: string): { chain: Buffer[]; walk: number } {
   let root: Buffer;
   let dir: Buffer;
   try {
     root = realpathSync.native(sandboxRoot, { encoding: "buffer" });
     dir = realpathSync.native(cwd, { encoding: "buffer" });
   } catch {
-    return [];
+    return { chain: [], walk: 0 };
   }
   const below = Buffer.concat([root, Buffer.from("/")]);
   if (!dir.equals(root) && !dir.subarray(0, below.length).equals(below)) {
-    return [];
+    return { chain: [], walk: 0 };
   }
-  const byNearest = new Map<string, Skill>();
-  for (;;) {
-    for (const skill of readProjectDir(dir)) {
-      if (!byNearest.has(skill.name)) {
-        byNearest.set(skill.name, skill);
+  const chain = [dir];
+  while (!dir.equals(root) && dir.lastIndexOf(SLASH) > 0) {
+    dir = dir.subarray(0, dir.lastIndexOf(SLASH));
+    chain.push(dir);
+  }
+  const repoRoot = chain.findIndex(hasGitEntry);
+  return { chain, walk: repoRoot === -1 ? chain.length : repoRoot + 1 };
+}
+
+/**
+ * The entry names of a directory given as raw bytes, read through a handle: null once it holds
+ * more than `MAX_PROJECT_DIR_ENTRIES` (a directory of the omp uid cannot hold the event loop).
+ * Throws what the filesystem throws.
+ */
+export function readDirBounded(dir: Buffer): string[] | null {
+  const entries: string[] = [];
+  const handle = opendirSync(dir);
+  try {
+    for (let entry = handle.readSync(); entry !== null; entry = handle.readSync()) {
+      if (entries.length === MAX_PROJECT_DIR_ENTRIES) {
+        return null;
       }
+      entries.push(entry.name);
     }
-    const parentEnd = dir.lastIndexOf(SLASH);
-    if (dir.equals(root) || hasGitEntry(dir) || parentEnd <= 0) {
-      break;
-    }
-    dir = dir.subarray(0, parentEnd);
+  } finally {
+    handle.closeSync();
   }
-  return [...byNearest.values()].sort(byName);
+  return entries;
 }
 
 /**
@@ -275,23 +307,16 @@ function hasGitEntry(dir: Buffer): boolean {
  */
 function readProjectDir(dir: Buffer): Skill[] {
   const skillsDir = Buffer.concat([dir, Buffer.from(PROJECT_SKILLS)]);
-  const entries: string[] = [];
+  let entries: string[] | null;
   try {
     if (!realpathSync.native(skillsDir, { encoding: "buffer" }).equals(skillsDir)) {
       return [];
     }
-    const handle = opendirSync(skillsDir);
-    try {
-      for (let entry = handle.readSync(); entry !== null; entry = handle.readSync()) {
-        if (entries.length === MAX_PROJECT_DIR_ENTRIES) {
-          return [];
-        }
-        entries.push(entry.name);
-      }
-    } finally {
-      handle.closeSync();
-    }
+    entries = readDirBounded(skillsDir);
   } catch {
+    return [];
+  }
+  if (entries === null) {
     return [];
   }
   const inside = Buffer.concat([skillsDir, Buffer.from("/")]);
