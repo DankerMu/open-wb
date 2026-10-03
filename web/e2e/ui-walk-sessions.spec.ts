@@ -8,7 +8,10 @@
 // (smoke/fixtures/sandbox) holds one project skill: the panel lists it with the `项目` tag, and
 // step 10, in the session bound to `ui-walk-sessions`, still lists the two builtins only.
 // Step 11 deletes the session through the UI; `finally` deletes it again over REST (404 by then,
-// 204 when a step failed first). The journey ends with a UI logout, which the error oracle needs
+// 204 when a step failed first). Step 12 (ui-walk-project-config.ts) opens a session bound to
+// `ui-walk-skills`, whose fixture also holds an `AGENTS.md`: its header has `项目配置 1` and the
+// read-only list; step 9 first asserts the three header buttons of the session whose workspace
+// holds no such file. The journey ends with a UI logout, which the error oracle needs
 // for its second expected /api/auth/me 401.
 
 import { randomUUID } from "node:crypto";
@@ -23,6 +26,7 @@ import {
   walkProject,
 } from "./ui-walk-layout.js";
 import { type AuthOracle, runWithBrowserErrorOracle } from "./ui-walk-oracle.js";
+import { expectNoProjectConfig, walkProjectConfig } from "./ui-walk-project-config.js";
 
 const DEV_PASSWORD = "demo";
 const WORKSPACE_NAME = "ui-walk-sessions";
@@ -90,6 +94,7 @@ async function walkSessionMeta(
   const mark = (point: string) =>
     console.log(`ui-walk sessions ${project}: ${point} +${Date.now() - started}ms`);
   const created: CreatedSession = { id: null };
+  const configSession: CreatedSession = { id: null };
   const uuid = randomUUID();
   const prompt = `WORKBUDDY_THINK WORKBUDDY_WRITE 会话走查 ${uuid}`;
   // 每个 project 唯一：第 11 步凭它断言条目从所有分区消失。
@@ -123,14 +128,18 @@ async function walkSessionMeta(
     mark("step 7");
     await step8Rename(page, project, sessionId, renamed);
     mark("step 8");
+    await expectNoProjectConfig(page, workspaceId);
     await step9Search(page, uuid, mark);
     mark("step 9");
     await step10Slash(page, sessionId);
     mark("step 10");
     await step11Delete(page, project, sessionId, renamed);
     mark("step 11");
+    await walkProjectConfig(page, skills.id, configSession);
+    mark("step 12");
   } finally {
     await deleteCreatedSession(page, created.id);
+    await deleteCreatedSession(page, configSession.id);
   }
   mark("cleanup");
   await logout(page, oracle, project);

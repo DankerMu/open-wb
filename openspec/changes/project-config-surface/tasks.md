@@ -24,11 +24,11 @@ Fixture level: expanded。每个任务组对应一个实现 issue；本变更在
 
 ## 4. web：项目配置入口
 
-- [ ] 4.1 `api-commands.ts`：`listProjectConfig(workspaceId)` 与严格解析。
-- [ ] 4.2 会话顶栏 `项目配置` 按钮与只读弹层；空、等待、失败时不渲染。
-- [ ] 4.3 用例：「项目配置入口」场景与修改后的「顶栏入口」「顶栏重命名入口」（session-sidebar）场景；ui-walk 覆盖。
+- [x] 4.1 `api-commands.ts`：`listProjectConfig(workspaceId)` 与严格解析。
+- [x] 4.2 会话顶栏 `项目配置` 按钮与只读弹层；空、等待、失败时不渲染。
+- [x] 4.3 用例：「项目配置入口」场景与修改后的「顶栏入口」「顶栏重命名入口」（session-sidebar）场景；ui-walk 覆盖。
 
 ## 5. 收尾
 
-- [ ] 5.1 ADR-0012 补充：项目 skill 的列出范围与「不列出但会执行」的残余；D5 的方向。
+- [x] 5.1 ADR-0012 补充：项目 skill 的列出范围与「不列出但会执行」的残余；D5 的方向。
 - [ ] 5.2 四组完成后归档本变更。

@@ -11,6 +11,7 @@ import { ConversationView } from "./conversation-view.js";
 import { DeleteDialog } from "./delete-dialog.js";
 import { errorMessage, isNotFound, isUnauthorized } from "./errors.js";
 import { ownsCreateSend, ownsHistory, ownsMutation, visibleOwnedAlert } from "./ownership.js";
+import { useProjectConfig } from "./project-config.js";
 import { RenameDialog } from "./rename-dialog.js";
 import { useSessionActions } from "./session-actions.js";
 import { DEFAULT_SESSION_FILTER } from "./session-groups.js";
@@ -635,7 +636,10 @@ export function ChatPage() {
   const workspace = workspaces?.find((item) => item.id === selected?.workspaceId);
   const artifacts = useArtifactsPanel(client, historyView, workspace);
   const search = useConversationSearch(selected?.id, historyView);
-  useTopbar(chatTopbar(selected, sessionActions.openRename, search.slot, artifacts.open));
+  const config = useProjectConfig(client, selected);
+  useTopbar(
+    chatTopbar(selected, sessionActions.openRename, search.slot, artifacts.open, config.slot),
+  );
   const ownedBusy = ownsMutation(mutationOwner, client, requestedSessionId);
   const ownedStreamError = visibleOwnedAlert(streamError, client, requestedSessionId);
   const generating =
@@ -696,6 +700,7 @@ export function ChatPage() {
       <RenameDialog rename={sessionActions.rename} />
       <DeleteDialog remove={sessionActions.remove} />
       {artifacts.panel}
+      {config.dialog}
     </section>
   );
 }

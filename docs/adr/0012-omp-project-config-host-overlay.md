@@ -43,3 +43,16 @@ omp 把会话 cwd（及其祖先）下的项目层内容当作配置加载：设
 - **spawn 前扫描工作目录并拒绝带 `.omp/tools` 的目录**——每次 spawn 一次目录遍历，且与 omp 的发现规则（多 provider、上溯祖先、符号链接）
   保持同步的成本高；拒绝 spawn 会把一个被植入的文件变成该空间的拒绝服务。弃。
 - **把 cwd 下的 `.omp` 做成 omp uid 不可写**——整个 `.omp` 不可读时 omp 启动失败；只锁 `tools` 子目录拦不住其它 provider 的目录。弃。
+
+## 补充（2026-10-03，#773）：项目 skill 与项目配置文件的产品面
+
+- **列出范围**：命令目录只列 `.omp/skills`，从会话 cwd 上溯到带 `.git` 的那一级或沙箱根；`GET /api/project-config` 列出 omp 会读取的位置上**存在**的说明文件与 agent 定义（只 `lstat`）。
+  两者都在内核 realpath 上进行，解析后的 cwd 不在沙箱根之内时为空；位置表与扫描规则由官方 v18.0.10 的对照用例钉住（uid-isolation job），升级 omp 时必须重跑。
+- **不列出但会执行（已接受残余）**：omp 还从 cwd 下的 `.claude`、`.codex`、`.agents`、`.agent`、`.opencode`、`.github`、托管 `HOME` 下的同类目录、以及沙箱根以上的祖先加载 skill；
+  这些 skill 的 `/skill:<name>` 被宿主记为文本而 omp 照常执行（omp 的分派先 `trimStart()`，空格前缀挡不住）。被宿主读取规则跳过的项目 skill 同理。
+  会话进程启动后才新建的项目 skill 方向相反：宿主记为 skill，omp 当作普通消息，直到进程下次启动。
+- **同名**：`.omp` 项目 skill 胜过平台 skill，目录只出项目那一条并标注覆盖；协作者可以用同名项目 skill 替换平台 skill，标注可见但不拦。
+- **跨工作空间影响**：沙箱根与 owner 根上的 `.omp` 对其下所有会话生效，而沙箱内目录对单一 omp uid 都可写（ADR-0010）；本决议不改变这一点，只让这些 skill 在目录里可见。
+- **项目级 MCP 与项目工具的方向**：长期不支持按工作空间开启。项目级 MCP 继续由 overlay 的 `mcp.enableProjectConfig: false` 关闭；需要 MCP 时由管理员装到平台级配置。
+  出现真实的按工作空间需求时另开 issue，以管理员开启加审计为起点。`.omp/tools` 等项目工具仍是上文登记的已接受残余。
+- 完整结论、实测事实表与残余清单见已归档的 openspec 变更 `project-config-surface` 的 design。

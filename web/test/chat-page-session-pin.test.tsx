@@ -385,6 +385,7 @@ describe("CHAT_TOPBAR_ACTIONS (M15)", () => {
       "../src/features/chat/topbar-actions.js"
     );
     expect(CHAT_TOPBAR_ACTIONS).toEqual([
+      { icon: "file-text", key: "config", label: "项目配置" },
       { icon: "pencil", key: "rename", label: "重命名" },
       { icon: "search", key: "search", label: "对话内搜索" },
       { icon: "package", key: "artifacts", label: "产物面板" },

@@ -1,4 +1,4 @@
-import { type Command, createCommandMethods } from "./api-commands.js";
+import { type Command, createCommandMethods, type ProjectConfigFile } from "./api-commands.js";
 import {
   hasExactlyKeys,
   isNonNegativeSafeInteger,
@@ -175,6 +175,10 @@ export type ApiClient = {
     options?: ApiRequestOptions,
   ): Promise<ChatSettledApproval>;
   listCommands(workspaceId: string | null, options?: ApiRequestOptions): Promise<Command[]>;
+  listProjectConfig(
+    workspaceId: string | null,
+    options?: ApiRequestOptions,
+  ): Promise<ProjectConfigFile[]>;
 };
 
 export type ApiClientOptions = {
