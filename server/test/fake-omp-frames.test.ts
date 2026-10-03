@@ -123,7 +123,7 @@ describe("fake-omp probe frames record", () => {
     }
     expect(framesOf(delta)).toBe("negotiate_protocol,get_state,prompt,prompt");
     expect(delta).toMatch(
-      /^uid=\d+ gid=\d+ env=\S* home=.* agent=.* environ=\S+ wrote=ok frames=/u,
+      /^uid=\d+ gid=\d+ env=\S* home=.* xdgdata=.* xdgstate=.* xdgcache=.* environ=\S+ wrote=ok frames=/u,
     );
   });
 

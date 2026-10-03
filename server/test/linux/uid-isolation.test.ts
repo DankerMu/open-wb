@@ -4,14 +4,18 @@
  * Issue #525: DELETE unlinks the omp-uid-written branch file from the app-uid session dir.
  * Issue #758: and removes the omp-uid-written artifact directory next to that file.
  * Issue #760: what omp writes through sudo → setpriv has no other bits and keeps group write.
+ * Issue #706: the managed state layout is read-only for the omp uid except HOME and the
+ * three XDG `omp` directories.
  * Non-Linux / unset WORKBUDDY_UID_TEST skip; opted-in missing OMP_USER fails.
  */
+
 import { type ChildProcessWithoutNullStreams, spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
   lstatSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -24,9 +28,11 @@ import type { FastifyInstance } from "fastify";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../../src/app.js";
 import { openDb } from "../../src/core/db/index.js";
+import { writeManagedModelsYml } from "../../src/model-proxy/models-yml.js";
 import type { OmpFrame } from "../../src/sessions/omp/frame.js";
 import type { OmpExit } from "../../src/sessions/omp/process.js";
-import { SessionRuntime } from "../../src/sessions/omp/runtime.js";
+import { SessionRuntime, type SessionRuntimeOpts } from "../../src/sessions/omp/runtime.js";
+import { ensureOmpStateLayout } from "../../src/sessions/omp/state-layout.js";
 import { TokenRegistry } from "../../src/sessions/tokens.js";
 import { listOneLevel } from "../../src/workspaces/tree.js";
 import { FIXED_NOW, fixedRuntime } from "../session-db-helpers.js";
@@ -51,7 +57,9 @@ const REQUIRED_CHILD_ENV_KEYS = [
   "LANG",
   "TMPDIR",
   "HOME",
-  "PI_CODING_AGENT_DIR",
+  "XDG_DATA_HOME",
+  "XDG_STATE_HOME",
+  "XDG_CACHE_HOME",
   "WORKBUDDY_MODEL_TOKEN",
 ] as const;
 const REPORT_LABELS = [
@@ -59,7 +67,9 @@ const REPORT_LABELS = [
   "gid",
   "env",
   "home",
-  "agent",
+  "xdgdata",
+  "xdgstate",
+  "xdgcache",
   "environ",
   "wrote",
   "frames",
@@ -80,7 +90,7 @@ interface OwnedLayout {
   stateDir: string;
   writePath: string;
   expectedHome: string;
-  expectedAgent: string;
+  expectedXdg: { data: string; state: string; cache: string };
 }
 
 describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !== "1")(
@@ -89,60 +99,30 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
     it("isolates child uid, env, proc, and shared writes", { timeout: 30_000 }, async () => {
       const ompUser = requireOmpUser();
       const parentUid = requireParentUid();
-      const previous = snapshotParentEnv();
-      let ownedRoot: string | undefined;
-      let runtime: SessionRuntime | undefined;
-      try {
-        applyParentEnv(previous);
-        ownedRoot = mkdtempSync(join(tmpdir(), "uid-isolation-"));
-        const layout = createOwnedLayout(ownedRoot);
-        runtime = new SessionRuntime({
-          sessionId: SESSION_ID,
-          bin: FAKE,
-          sandboxRoot: layout.sandboxRoot,
-          stateDir: layout.stateDir,
-          ownerId: OWNER_ID,
-          cwd: join(layout.sandboxRoot, OWNER_ID),
-          modelId: MODEL_ID,
-          tokens: new TokenRegistry(),
-          ompUser,
-        });
+      await withOwnedLayout("uid-isolation-", async (layout, own) => {
+        const runtime = own(new SessionRuntime(runtimeOpts(layout, ompUser, SESSION_ID)));
         const frames = await collectPrompt(
           runtime.prompt(`probe:${String(process.pid)}:${layout.writePath}`),
         );
         assertIsolation(frames, parentUid, layout);
-      } finally {
-        await releaseIsolation(runtime, ownedRoot, previous);
-      }
+      });
     });
 
     it("reaps omp when retire escalates to SIGKILL of sudo", { timeout: 30_000 }, async () => {
       const ompUser = requireOmpUser();
-      const previous = snapshotParentEnv();
-      let ownedRoot: string | undefined;
-      let runtime: SessionRuntime | undefined;
-      try {
-        applyParentEnv(previous);
-        ownedRoot = mkdtempSync(join(tmpdir(), "uid-reap-"));
-        const layout = createOwnedLayout(ownedRoot);
+      await withOwnedLayout("uid-reap-", async (layout, own) => {
         const sudoExits: OmpExit[] = [];
-        runtime = new SessionRuntime({
-          sessionId: `${SESSION_ID}-reap`,
-          bin: FAKE,
-          sandboxRoot: layout.sandboxRoot,
-          stateDir: layout.stateDir,
-          ownerId: OWNER_ID,
-          cwd: join(layout.sandboxRoot, OWNER_ID),
-          modelId: MODEL_ID,
-          tokens: new TokenRegistry(),
-          ompUser,
-          spawnImpl: (command, args, options) => {
-            expect(command).toBe("sudo");
-            const child = spawn(command, [...args, "--scenario", "hang-term"], options);
-            child.once("exit", (code, signal) => sudoExits.push({ code, signal }));
-            return child as ChildProcessWithoutNullStreams;
-          },
-        });
+        const runtime = own(
+          new SessionRuntime({
+            ...runtimeOpts(layout, ompUser, `${SESSION_ID}-reap`),
+            spawnImpl: (command, args, options) => {
+              expect(command).toBe("sudo");
+              const child = spawn(command, [...args, "--scenario", "hang-term"], options);
+              child.once("exit", (code, signal) => sudoExits.push({ code, signal }));
+              return child as ChildProcessWithoutNullStreams;
+            },
+          }),
+        );
         await collectPrompt(runtime.prompt("hang-term"));
         expect(ompUserHangPids(ompUser)).toHaveLength(1);
         const started = Date.now();
@@ -150,9 +130,7 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
         expect(Date.now() - started).toBeLessThan(RETIRE_LIMIT_MS);
         expect(sudoExits).toEqual([{ code: null, signal: "SIGKILL" }]);
         await expectReaped(ompUser);
-      } finally {
-        await releaseIsolation(runtime, ownedRoot, previous);
-      }
+      });
     });
 
     it("deletes a sudo-mode session and the branch file omp wrote", {
@@ -242,8 +220,111 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
         }
       }
     });
+
+    it("keeps the managed state layout read-only for the omp uid", {
+      timeout: 60_000,
+    }, async () => {
+      const ompUser = requireOmpUser();
+      await withOwnedLayout("uid-layout-", async (layout, own) => {
+        const state = layout.stateDir;
+        const agent = join(state, "home", ".omp", "agent");
+        const models = join(agent, "models.yml");
+        ensureOmpStateLayout(state);
+        await writeManagedModelsYml(agent, {
+          proxyBaseUrl: "http://127.0.0.1:18016/v1",
+          modelId: MODEL_ID,
+        });
+        const modelsBefore = readFileSync(models);
+        const managed = [
+          state,
+          join(state, "sessions"),
+          join(state, "xdg"),
+          join(state, "xdg", "data"),
+          join(state, "home", ".omp"),
+          agent,
+        ];
+        const writable = [
+          join(state, "home"),
+          join(state, "xdg", "data", "omp"),
+          join(state, "xdg", "state", "omp"),
+          join(state, "xdg", "cache", "omp"),
+        ];
+        const session = own(
+          new SessionRuntime(runtimeOpts(layout, ompUser, `${SESSION_ID}-layout`)),
+        );
+        const ask = async (text: string): Promise<string> =>
+          probeReport(await collectPrompt(session.prompt(text)));
+        const write = async (path: string): Promise<string> =>
+          parseLabeledReport(await ask(`probe:${String(process.pid)}:${path}`)).wrote;
+        // The spawn re-asserted the layout; listings are taken after it and before any attempt.
+        await collectPrompt(session.prompt("spawn"));
+        const before = managed.map((dir) => readdirSync(dir).toSorted());
+
+        for (const dir of managed) {
+          expect(await write(join(dir, "planted by omp")), dir).toBe("EACCES");
+        }
+        expect(await write(models), models).toBe("EACCES");
+        for (const dir of [join(state, "home"), join(state, "sessions"), agent]) {
+          expect(await ask(`rename:${dir}`), dir).toBe("renamed=EACCES");
+        }
+        // Sticky HOME: the omp uid may write there but not rename the app-owned `.omp`.
+        expect(await ask(`rename:${join(state, "home", ".omp")}`)).toBe("renamed=EPERM");
+        for (const dir of writable) {
+          expect(await write(join(dir, "written by omp")), dir).toBe("ok");
+        }
+
+        expect(readFileSync(models).equals(modelsBefore)).toBe(true);
+        expect(lstatSync(models).uid).toBe(process.getuid?.());
+        expect(managed.map((dir) => readdirSync(dir).toSorted())).toEqual(before);
+        for (const dir of [...managed, ...writable]) {
+          expect(lstatSync(dir).isDirectory(), dir).toBe(true);
+          expect(existsSync(`${dir}.moved`), dir).toBe(false);
+        }
+        for (const dir of writable) {
+          expect(statSync(join(dir, "written by omp")).uid).not.toBe(process.getuid?.());
+        }
+      });
+    });
   },
 );
+
+/**
+ * Runs `body` in a fresh owned layout with the parent sentinels applied; `own` registers the
+ * runtime to shut down. The runtime, the directory and the parent env are always released.
+ */
+async function withOwnedLayout(
+  prefix: string,
+  body: (layout: OwnedLayout, own: (runtime: SessionRuntime) => SessionRuntime) => Promise<void>,
+): Promise<void> {
+  const previous = snapshotParentEnv();
+  let ownedRoot: string | undefined;
+  let runtime: SessionRuntime | undefined;
+  try {
+    applyParentEnv(previous);
+    ownedRoot = mkdtempSync(join(tmpdir(), prefix));
+    await body(createOwnedLayout(ownedRoot), (created) => {
+      runtime = created;
+      return created;
+    });
+  } finally {
+    await releaseIsolation(runtime, ownedRoot, previous);
+  }
+}
+
+/** The SessionRuntime options every case shares: fake omp under sudo in the owned layout. */
+function runtimeOpts(layout: OwnedLayout, ompUser: string, sessionId: string): SessionRuntimeOpts {
+  return {
+    sessionId,
+    bin: FAKE,
+    sandboxRoot: layout.sandboxRoot,
+    stateDir: layout.stateDir,
+    ownerId: OWNER_ID,
+    cwd: join(layout.sandboxRoot, OWNER_ID),
+    modelId: MODEL_ID,
+    tokens: new TokenRegistry(),
+    ompUser,
+  };
+}
 
 async function createOwnedSession(app: FastifyInstance, cookie: string): Promise<string> {
   const created = await app.inject({ method: "POST", url: "/api/sessions", headers: { cookie } });
@@ -356,7 +437,11 @@ function createOwnedLayout(ownedRoot: string): OwnedLayout {
     stateDir,
     writePath: join(sandboxRoot, OWNER_ID, PROBE_FILE),
     expectedHome: join(stateDir, "home"),
-    expectedAgent: join(stateDir, "agent"),
+    expectedXdg: {
+      data: join(stateDir, "xdg", "data"),
+      state: join(stateDir, "xdg", "state"),
+      cache: join(stateDir, "xdg", "cache"),
+    },
   };
 }
 
@@ -396,7 +481,9 @@ function assertIsolation(
     expect(childKeys).not.toContain(key);
   }
   expect(parsed.home).toBe(layout.expectedHome);
-  expect(parsed.agent).toBe(layout.expectedAgent);
+  expect(parsed.xdgdata).toBe(layout.expectedXdg.data);
+  expect(parsed.xdgstate).toBe(layout.expectedXdg.state);
+  expect(parsed.xdgcache).toBe(layout.expectedXdg.cache);
   expect(parsed.environ).toBe("EACCES");
   expect(parsed.wrote).toBe("ok");
 
@@ -471,11 +558,13 @@ function parseLabeledReport(report: string): Record<(typeof REPORT_LABELS)[numbe
     gid: requiredValue(values, 1),
     env: requiredValue(values, 2),
     home: requiredValue(values, 3),
-    agent: requiredValue(values, 4),
-    environ: requiredValue(values, 5),
-    wrote: requiredValue(values, 6),
-    frames: requiredValue(values, 7),
-    cwd: requiredValue(values, 8),
+    xdgdata: requiredValue(values, 4),
+    xdgstate: requiredValue(values, 5),
+    xdgcache: requiredValue(values, 6),
+    environ: requiredValue(values, 7),
+    wrote: requiredValue(values, 8),
+    frames: requiredValue(values, 9),
+    cwd: requiredValue(values, 10),
   };
 }
 

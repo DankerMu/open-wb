@@ -116,17 +116,18 @@ export function createSessionDeleter(deps: SessionDeleterDependencies): SessionD
 /**
  * The row is already gone, so nothing here throws. `path` is omp-reported and was never validated
  * on write: it must be absolute and its parent's realpath must be the owner's session dir, whose own
- * realpath must be exactly `<stateDir realpath>/sessions/<ownerId>`. `sessions` and
- * `sessions/<ownerId>` are group-writable (2770) for the omp uid: a symlink standing at either level
- * resolves on both sides of the parent comparison, and only the second comparison rejects it
- * (stateDir itself may be a symlink, hence its realpath). From then on only `expected` (that
- * realpath) joined with the basename is touched, so no component of the omp string is re-resolved.
+ * realpath must be exactly `<stateDir realpath>/sessions/<ownerId>`. A symlink standing at
+ * `sessions` or `sessions/<ownerId>` (the latter is 2770, writable for the omp uid; `sessions` is
+ * 2750 in the managed layout, #706) resolves on both sides of the parent comparison, and only the
+ * second comparison rejects it (stateDir itself may be a symlink, hence its realpath). From then
+ * on only `expected` (that realpath) joined with the basename is touched, so no component of the
+ * omp string is re-resolved.
  * The file is unlinked only when `lstat` (no symlink follow) says regular file; anything else is
  * reported and left alone. ENOENT at any step is success. The artifact directory is handled only
  * when the file was a regular file (whatever its unlink did) or already gone. Residual: only the
- * race. Node has no `unlinkat`, so between this validation and `unlink` / `rm` the omp group can
- * still rename-swap `sessions/<ownerId>` or `sessions` for a symlink; closing it needs a dir fd /
- * `unlinkat` or tighter `sessions/` ownership.
+ * race. `sessions` is no longer writable for the omp uid, so `sessions/<ownerId>` cannot be
+ * rename-swapped, but entries inside it still can be between this validation and `unlink` / `rm`
+ * (Node has no `unlinkat`).
  */
 async function removeSessionFile(
   path: string,

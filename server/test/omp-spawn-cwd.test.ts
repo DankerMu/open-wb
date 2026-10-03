@@ -57,7 +57,7 @@ function makeRoots(): Roots {
     ownerRoot: join(sandboxRoot, OWNER),
     sessionDir: join(stateDir, "sessions", OWNER),
     home: join(stateDir, "home"),
-    agent: join(stateDir, "agent"),
+    agent: join(stateDir, "home", ".omp", "agent"),
   };
 }
 

@@ -5,7 +5,7 @@
  * Local oracle: resource/oh-my-pi/docs/rpc.md (docs/architecture/rpc.md tracked by #141).
  */
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { parseArgs, parseDelay } from "./fake-omp-argv.mjs";
@@ -399,6 +399,15 @@ async function handlePrompt(frame) {
 
 function probeReport(message) {
   const text = String(message ?? "");
+  if (text.startsWith("rename:")) {
+    const path = text.slice(7);
+    try {
+      renameSync(path, `${path}.moved`);
+      return "renamed=ok";
+    } catch (error) {
+      return `renamed=${error.code}`;
+    }
+  }
   if (!text.startsWith("probe:")) {
     return undefined;
   }
@@ -425,7 +434,8 @@ function probeReport(message) {
     environ = error.code;
   }
   const env = Object.keys(process.env).sort().join(",");
-  return `uid=${process.getuid()} gid=${process.getgid()} env=${env} home=${process.env.HOME ?? ""} agent=${process.env.PI_CODING_AGENT_DIR ?? ""} environ=${environ} wrote=${wrote} frames=${inbound.join(",")} cwd=${process.cwd()}`;
+  const xdg = (kind) => process.env[`XDG_${kind}_HOME`] ?? "";
+  return `uid=${process.getuid()} gid=${process.getgid()} env=${env} home=${process.env.HOME ?? ""} xdgdata=${xdg("DATA")} xdgstate=${xdg("STATE")} xdgcache=${xdg("CACHE")} environ=${environ} wrote=${wrote} frames=${inbound.join(",")} cwd=${process.cwd()}`;
 }
 
 async function requestConfirm() {

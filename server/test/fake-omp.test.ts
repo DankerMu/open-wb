@@ -9,6 +9,7 @@
  */
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -52,17 +53,19 @@ const STREAMED_TEXT = "你好🌍";
 const SSE_EVENT = `data: {"choices":[{"delta":{"content":"${STREAMED_TEXT}"}}]}\n\n`;
 const SSE_DONE = Buffer.from(`${SSE_EVENT}data: [DONE]\n\n`, "utf8");
 const PROBE_HOME = "/tmp/fake-omp home:dir";
-const PROBE_AGENT = "/tmp/fake-omp agent:dir";
+const PROBE_XDG = ["/tmp/fake-omp xdg:data", "/tmp/fake-omp xdg:state", "/tmp/fake-omp xdg:cache"];
 const PROBE_CANARY = "workbuddy-canary-secret";
 const PROBE_ENV: NodeJS.ProcessEnv = {
   PATH: process.env.PATH ?? "/usr/bin",
   HOME: PROBE_HOME,
-  PI_CODING_AGENT_DIR: PROBE_AGENT,
+  XDG_DATA_HOME: PROBE_XDG[0],
+  XDG_STATE_HOME: PROBE_XDG[1],
+  XDG_CACHE_HOME: PROBE_XDG[2],
   WORKBUDDY_CANARY_SECRET: PROBE_CANARY,
   __CF_USER_TEXT_ENCODING: "0:0:0",
 };
 const PROBE_ENV_KEYS =
-  "HOME,PATH,PI_CODING_AGENT_DIR,WORKBUDDY_CANARY_SECRET,__CF_USER_TEXT_ENCODING";
+  "HOME,PATH,WORKBUDDY_CANARY_SECRET,XDG_CACHE_HOME,XDG_DATA_HOME,XDG_STATE_HOME,__CF_USER_TEXT_ENCODING";
 const PARENT_UID = process.getuid?.();
 const PARENT_GID = process.getgid?.();
 if (typeof PARENT_UID !== "number" || typeof PARENT_GID !== "number") {
@@ -283,9 +286,7 @@ describe("fake-omp process contract", () => {
     const session = await startPromptedSession({
       scenario: "call-proxy",
       env: {
-        PI_CODING_AGENT_DIR: tempAgentDir(
-          managedYaml(`"${proxy.origin}/v1"`, "deepseek-v4.1-flash"),
-        ),
+        HOME: tempHome(managedYaml(`"${proxy.origin}/v1"`, "deepseek-v4.1-flash")),
         WORKBUDDY_MODEL_TOKEN: TOKEN,
       },
     });
@@ -309,15 +310,23 @@ describe("fake-omp process contract", () => {
   it("reports config, HTTP, and truncated-SSE failures before terminal completion", async () => {
     const missing = await startPromptedSession({
       scenario: "call-proxy",
-      env: { PI_CODING_AGENT_DIR: tempAgentDir(""), WORKBUDDY_MODEL_TOKEN: TOKEN },
+      env: { HOME: tempHome(""), WORKBUDDY_MODEL_TOKEN: TOKEN },
     });
     await expectVisibleFailure(missing);
     await closeSession(missing);
 
+    // No HOME at all: the fixture has no default agent dir to read models.yml from.
+    const homeless = await startPromptedSession({
+      scenario: "call-proxy",
+      env: { WORKBUDDY_MODEL_TOKEN: TOKEN },
+    });
+    await expectVisibleFailure(homeless);
+    await closeSession(homeless);
+
     const malformed = await startPromptedSession({
       scenario: "call-proxy",
       env: {
-        PI_CODING_AGENT_DIR: tempAgentDir("providers: []\n"),
+        HOME: tempHome("providers: []\n"),
         WORKBUDDY_MODEL_TOKEN: TOKEN,
       },
     });
@@ -419,7 +428,7 @@ describe("fake-omp process contract", () => {
     const session = await startPromptedSession({
       scenario: "call-proxy",
       env: {
-        PI_CODING_AGENT_DIR: tempAgentDir(managedYaml(`"${forwarder.origin}/v1"`, "flash")),
+        HOME: tempHome(managedYaml(`"${forwarder.origin}/v1"`, "flash")),
         WORKBUDDY_MODEL_TOKEN: TOKEN,
       },
     });
@@ -473,8 +482,8 @@ describe("fake-omp process contract", () => {
     await expectRelayedTail(session, end);
   });
 
-  it("reports identity, sorted env keys, HOME/agent, and probe file content", async () => {
-    const writePath = join(tempAgentDir(""), "out:with spaces");
+  it("reports identity, sorted env keys, HOME/XDG values, and probe file content", async () => {
+    const writePath = join(tempHome(""), "out:with spaces");
     const session = await runProbe(`${process.pid}:${writePath}`);
     await expectProbeTurn(session, expectedProbeReport(PROC_ENVIRON, "ok"));
     expect(readFileSync(writePath, "utf8")).toBe("probe");
@@ -483,7 +492,7 @@ describe("fake-omp process contract", () => {
   });
 
   it("reports write ENOENT independently of the actual proc-read result", async () => {
-    const writePath = join(tempAgentDir(""), "missing", "probe.txt");
+    const writePath = join(tempHome(""), "missing", "probe.txt");
     const session = await runProbe(`${process.pid}:${writePath}`);
     await expectProbeTurn(session, expectedProbeReport(PROC_ENVIRON, "ENOENT"));
     expect(existsSync(writePath)).toBe(false);
@@ -491,7 +500,7 @@ describe("fake-omp process contract", () => {
   });
 
   it("reports missing-pid ENOENT independently of a successful write", async () => {
-    const writePath = join(tempAgentDir(""), "missing-pid.txt");
+    const writePath = join(tempHome(""), "missing-pid.txt");
     const session = await runProbe(`${MISSING_PID}:${writePath}`);
     await expectProbeTurn(session, expectedProbeReport("ENOENT", "ok"));
     expect(readFileSync(writePath, "utf8")).toBe("probe");
@@ -681,7 +690,7 @@ function promptThroughStub(origin: string): Promise<Session> {
   return startPromptedSession({
     scenario: "call-proxy",
     env: {
-      PI_CODING_AGENT_DIR: tempAgentDir(managedYaml(origin, "flash")),
+      HOME: tempHome(managedYaml(origin, "flash")),
       WORKBUDDY_MODEL_TOKEN: TOKEN,
     },
   });
@@ -712,11 +721,13 @@ async function writeFragmentedSse(
   response.end(payload.subarray(splitAt));
 }
 
-function tempAgentDir(yaml: string): string {
+/** A HOME whose `.omp/agent/models.yml` (omp's default agent dir) holds `yaml`; none when empty. */
+function tempHome(yaml: string): string {
   const dir = mkdtempSync(join(tmpdir(), "fake-omp-"));
   temps.push(dir);
   if (yaml.length > 0) {
-    writeFileSync(join(dir, "models.yml"), yaml);
+    mkdirSync(join(dir, ".omp", "agent"), { recursive: true });
+    writeFileSync(join(dir, ".omp", "agent", "models.yml"), yaml);
   }
   return dir;
 }
@@ -758,7 +769,7 @@ async function expectProbeTurn(session: Session, expectedDelta: string): Promise
 }
 
 function expectedProbeReport(environ: string, wrote: string): string {
-  return `uid=${String(PARENT_UID)} gid=${String(PARENT_GID)} env=${PROBE_ENV_KEYS} home=${PROBE_HOME} agent=${PROBE_AGENT} environ=${environ} wrote=${wrote} frames=negotiate_protocol,get_state,prompt cwd=${realpathSync(process.cwd())}`;
+  return `uid=${String(PARENT_UID)} gid=${String(PARENT_GID)} env=${PROBE_ENV_KEYS} home=${PROBE_HOME} xdgdata=${PROBE_XDG[0]} xdgstate=${PROBE_XDG[1]} xdgcache=${PROBE_XDG[2]} environ=${environ} wrote=${wrote} frames=negotiate_protocol,get_state,prompt cwd=${realpathSync(process.cwd())}`;
 }
 
 function managedYaml(baseUrl: string, modelId: string): string {

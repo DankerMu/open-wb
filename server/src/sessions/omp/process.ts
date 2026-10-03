@@ -18,12 +18,22 @@ import {
   RpcChunkDecoder,
 } from "./frame.js";
 import {
+  ensureOmpSessionDir,
+  ensureOmpStateLayout,
+  ompHome,
+  ompSessionDir,
+  ompXdgHome,
+} from "./state-layout.js";
+import {
   type ApprovalDecision,
   type ApprovalRequest,
   answerFrame,
   approvalRequest,
   cancelFrame,
 } from "./ui-requests.js";
+
+// The paths have one source, state-layout.ts; these two stay importable from here.
+export { ompAgentDir, ompSessionDir } from "./state-layout.js";
 
 export interface SpawnOmpOpts {
   /** Trusted absolute executable path from config; not a PATH lookup. */
@@ -45,16 +55,6 @@ export type SpawnImpl = (
   options: SpawnOptions,
 ) => ChildProcessWithoutNullStreams;
 
-/** The owner's omp session directory (`--session-dir`); the single source of this path. */
-export function ompSessionDir(stateDir: string, ownerId: string): string {
-  return join(stateDir, "sessions", ownerId);
-}
-
-/** The omp agent directory (`PI_CODING_AGENT_DIR`); the single source of this path. */
-export function ompAgentDir(stateDir: string): string {
-  return join(stateDir, "agent");
-}
-
 /**
  * Prepare owned directories then spawn the omp child.
  * Await this call: it settles after directory preparation and spawnImpl return.
@@ -71,15 +71,13 @@ export async function spawnOmp(
   const ownerRoot = join(opts.sandboxRoot, opts.ownerId);
   const cwd = opts.cwd;
   const sessionDir = ompSessionDir(opts.stateDir, opts.ownerId);
-  const home = join(opts.stateDir, "home");
-  const agent = ompAgentDir(opts.stateDir);
+  const home = ompHome(opts.stateDir);
   // Only the owner root is ours to create; a missing bound cwd must not be silently rebuilt.
   if (resolve(cwd) === resolve(ownerRoot)) {
     ensureSharedDir(ownerRoot);
   }
-  ensureSharedDir(sessionDir);
-  ensureSharedDir(home);
-  ensureSharedDir(agent);
+  // The whole managed layout is re-asserted on every spawn; argv and env keep the configured path.
+  ensureOmpSessionDir(ensureOmpStateLayout(opts.stateDir), opts.ownerId);
   // Preserve the prior async spawn boundary; native lifecycle regression covers it.
   await Promise.resolve();
 
@@ -106,7 +104,10 @@ export async function spawnOmp(
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? "",
     HOME: home,
-    PI_CODING_AGENT_DIR: agent,
+    // No PI_CODING_AGENT_DIR: omp redirects runtime state to XDG only with its default agent dir.
+    XDG_DATA_HOME: ompXdgHome(opts.stateDir, "data"),
+    XDG_STATE_HOME: ompXdgHome(opts.stateDir, "state"),
+    XDG_CACHE_HOME: ompXdgHome(opts.stateDir, "cache"),
     WORKBUDDY_MODEL_TOKEN: opts.token,
   };
   if (process.env.LANG !== undefined) {
@@ -124,7 +125,7 @@ export async function spawnOmp(
           "-n",
           "-u",
           opts.ompUser,
-          "--preserve-env=PATH,LANG,TMPDIR,HOME,PI_CODING_AGENT_DIR,WORKBUDDY_MODEL_TOKEN",
+          "--preserve-env=PATH,LANG,TMPDIR,HOME,XDG_DATA_HOME,XDG_STATE_HOME,XDG_CACHE_HOME,WORKBUDDY_MODEL_TOKEN",
           ...(env.TMPDIR === undefined ? [] : [`TMPDIR=${env.TMPDIR}`]),
           "--",
           // setpriv execs omp in place; the kernel SIGKILLs omp when sudo dies.

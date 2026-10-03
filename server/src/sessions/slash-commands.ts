@@ -61,7 +61,7 @@ export const BUILTIN_COMMANDS: readonly BuiltinCommand[] = [
 /** `/todo` subcommands that are not whitelisted: omp's file channel (`helpers/todo.ts`). */
 const TODO_FILE_SUBCOMMANDS: readonly string[] = ["import", "export"];
 const SKILL_PREFIX = "/skill:";
-/** SKILL.md read cap: the omp uid can write the agent dir (ADR-0010); real ones stay under 51 KB. */
+/** SKILL.md read cap: `skills/` is operator-installed and unchecked; real ones stay under 51 KB. */
 const SKILL_MD_MAX_BYTES = 262144;
 /** Entries read per call, in SKILL.md path order; the rest get no filesystem access at all. */
 const MAX_SKILL_ENTRIES = 256;

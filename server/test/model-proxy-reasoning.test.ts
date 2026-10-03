@@ -164,7 +164,7 @@ describe("writeManagedModelsYml — reasoning 声明", () => {
     modelId: string;
     reasoning?: boolean;
   }): Promise<Buffer> {
-    const agentDir = join(scratch("open-wb-reasoning-yml-"), "agent");
+    const agentDir = scratch("open-wb-reasoning-yml-");
     await writeManagedModelsYml(agentDir, options);
     const first = readFileSync(join(agentDir, "models.yml"));
     await writeManagedModelsYml(agentDir, options);
@@ -200,7 +200,7 @@ describe("writeManagedModelsYml — reasoning 声明", () => {
   });
 
   it("同一 agentDir 先写 true 再写 false：无 reasoning/compat 残留", async () => {
-    const agentDir = join(scratch("open-wb-reasoning-overwrite-"), "agent");
+    const agentDir = scratch("open-wb-reasoning-overwrite-");
     const path = join(agentDir, "models.yml");
     await writeManagedModelsYml(agentDir, {
       proxyBaseUrl: PROXY_BASE_URL,
@@ -249,7 +249,7 @@ describe("production entry — MODEL_REASONING", () => {
       for (const owned of ["db", "state", "sandbox", "bin"]) {
         expect(existsSync(join(root, owned))).toBe(false);
       }
-      expect(existsSync(join(root, "state", "agent", "models.yml"))).toBe(false);
+      expect(existsSync(join(root, "state", "home", ".omp", "agent", "models.yml"))).toBe(false);
       expect(existsSync(join(compiled.root, "var"))).toBe(false);
       await expect(refused(port)).resolves.toBe(true);
     },
@@ -265,7 +265,7 @@ describe("production entry — MODEL_REASONING", () => {
     );
     try {
       await server.waitForStarted();
-      const text = readFileSync(join(root, "state", "agent", "models.yml"), "utf8");
+      const text = readFileSync(join(root, "state", "home", ".omp", "agent", "models.yml"), "utf8");
       const baseUrl = `http://127.0.0.1:${port}/v1`;
       expect(parse(text)).toEqual(documentWith(baseUrl, REASONING_MODEL));
       expect(text).toBe(reasoningYaml(baseUrl));
@@ -283,7 +283,7 @@ describe("production entry — MODEL_REASONING", () => {
     );
     try {
       await server.waitForStarted();
-      const text = readFileSync(join(root, "state", "agent", "models.yml"), "utf8");
+      const text = readFileSync(join(root, "state", "home", ".omp", "agent", "models.yml"), "utf8");
       const baseUrl = `http://127.0.0.1:${port}/v1`;
       expect(parse(text)).toEqual(documentWith(baseUrl, plainModel()));
       expect(text).toBe(plainYaml(baseUrl));

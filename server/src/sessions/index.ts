@@ -28,8 +28,8 @@ export interface RegisterSessionsOptions {
   workspaceRootOf: WorkspaceRootOf;
   /**
    * The omp agent directory whose `skills/` the slash whitelist lists. The caller passes
-   * `ompAgentDir(stateDir)` for the same stateDir as `runtime`, i.e. the spawn's
-   * `PI_CODING_AGENT_DIR`; sessions never computes it a second way.
+   * `ompAgentDir(stateDir)` for the same stateDir as `runtime`, i.e. `$HOME/.omp/agent` of the
+   * spawn's `HOME`, omp's default agent dir; sessions never computes it a second way.
    */
   agentDir: string;
   /**
