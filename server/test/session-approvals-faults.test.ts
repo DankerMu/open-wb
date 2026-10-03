@@ -199,8 +199,10 @@ describe("approval persistence failures", () => {
       await expectRetired(world, 0);
       await settle();
 
-      expect(world.errors).toHaveLength(1);
-      expect(containsMessage(world.errors[0], AUDIT_BLOCKED)).toBe(true);
+      expect(world.errors).toHaveLength(2);
+      for (const error of world.errors) {
+        expect(containsMessage(error, AUDIT_BLOCKED)).toBe(true);
+      }
       expect(approvalRow(world.fixture.db, row.id)).toMatchObject({
         decision: null,
         decided_at: null,

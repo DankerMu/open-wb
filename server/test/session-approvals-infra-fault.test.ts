@@ -3,7 +3,8 @@
  * a failed persistence write, a violated onEvent sink or a failed approval transaction retires the
  * slot with infraFaulted, and every approval still registered on it is denied through the store CAS
  * with its audit, its timer revoked, no frame written. Real fake-omp children, real SQLite triggers
- * for injected failures, the production REST assembly and the injected clock.
+ * for injected failures, the production REST assembly and the injected clock. Issue #662: the
+ * approval whose own timeout transaction failed keeps its registration, so that retire denies it too.
  */
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
@@ -27,8 +28,10 @@ import {
   waitForEvent,
   waitForRows,
 } from "./session-approval-helpers.js";
+import { collectRejections } from "./session-stop-helpers.js";
 import {
   assertRetainedFaultOnShutdown,
+  capturedFailure,
   closeAfterRetainedFault,
   containsMessage,
   waitFor,
@@ -38,6 +41,7 @@ import { waitExited } from "./session-supervisor-pool-helpers.js";
 const STEP_BLOCKED = "tool step insert blocked";
 const SINK_BROKEN = "observation sink broken";
 const TIMEOUT_BLOCKED = "r1 timeout blocked";
+const DENY_BLOCKED = "r1 deny blocked";
 const AUDIT_BLOCKED = "approval audit blocked";
 /** In `approval`, the first persistent write after r1 registers is tool_execution_start's step. */
 const BLOCK_STEP = `CREATE TRIGGER block_tool_step BEFORE INSERT ON chat_steps
@@ -45,11 +49,15 @@ const BLOCK_STEP = `CREATE TRIGGER block_tool_step BEFORE INSERT ON chat_steps
 const BLOCK_AUDIT = `CREATE TRIGGER block_approval_audit BEFORE INSERT ON audit_events
   WHEN NEW.kind = 'session.approval' BEGIN SELECT RAISE(ABORT, '${AUDIT_BLOCKED}'); END`;
 
-/** Only r1's timeout transaction fails; any other settlement of any row still commits. */
-function blockTimeoutOf(approvalId: number): string {
-  return `CREATE TRIGGER block_r1_timeout BEFORE UPDATE ON chat_approvals
-    WHEN OLD.id = ${String(approvalId)} AND NEW.decision = 'timeout'
-    BEGIN SELECT RAISE(ABORT, '${TIMEOUT_BLOCKED}'); END`;
+/** Only r1's settlement as `decision` fails; any other settlement of any row still commits. */
+function blockDecisionOf(
+  approvalId: number,
+  decision: "timeout" | "deny",
+  message: string,
+): string {
+  return `CREATE TRIGGER block_r1_${decision} BEFORE UPDATE ON chat_approvals
+    WHEN OLD.id = ${String(approvalId)} AND NEW.decision = '${decision}'
+    BEGIN SELECT RAISE(ABORT, '${message}'); END`;
 }
 
 const worlds: ApprovalWorld[] = [];
@@ -110,6 +118,32 @@ function expectDenied(world: ApprovalWorld, row: ApprovalRow): void {
   expect(settled.decided_at).not.toBeNull();
   expect(auditedDecisions(world.fixture.db)).toEqual(["deny"]);
   expectNoTimeoutNoFrames(world);
+}
+
+/** The owner's `allow` through the production REST route is 409 `approval_settled`. */
+async function expectAllowRefused(world: ApprovalWorld, row: ApprovalRow): Promise<void> {
+  const response = await world.fixture.app.inject({
+    method: "POST",
+    url: `/api/sessions/${world.session}/approvals/${String(row.id)}`,
+    headers: { "content-type": "application/json", cookie: world.cookie },
+    payload: JSON.stringify({ decision: "allow" }),
+  });
+  expect(response.statusCode).toBe(409);
+  expect(response.json()).toStrictEqual({
+    error: { code: "approval_settled", message: "该审批已处理" },
+  });
+  await settle();
+}
+
+/** F2/F6 set-up: both `approval-parallel` requests registered and published, r1 first. */
+async function parallelPending(world: ApprovalWorld): Promise<[ApprovalRow, ApprovalRow]> {
+  await prompted(world);
+  const [r1, r2] = await waitForRows(world, 2);
+  await waitForEvent(world, "approval.request", 2);
+  if (r1 === undefined || r2 === undefined) {
+    throw new Error("missing parallel approval rows");
+  }
+  return [r1, r2];
 }
 
 /** F1(a)/F3/F4 set-up: r1 pending, then its tool_execution_start step insert fails. */
@@ -177,38 +211,43 @@ describe("infra-fault retire denies pending approvals (#619)", () => {
   );
 
   it(
-    "F2 r1's failed timeout transaction retires the slot; r2 is denied, never timed out",
+    "F2 r1's failed timeout transaction retires the slot; r1 and r2 are denied, never timed out",
     REAL,
     async () => {
       const world = await open("approval-parallel");
-      await prompted(world);
-      const [r1, r2] = await waitForRows(world, 2);
-      await waitForEvent(world, "approval.request", 2);
-      if (r1 === undefined || r2 === undefined) {
-        throw new Error("missing parallel approval rows");
-      }
-      world.fixture.db.exec(blockTimeoutOf(r1.id));
+      const [r1, r2] = await parallelPending(world);
+      world.fixture.db.exec(blockDecisionOf(r1.id, "timeout", TIMEOUT_BLOCKED));
 
       world.clock.advance(TTL_MS);
       await infraRetired(world);
 
       expect(world.errors).toHaveLength(1);
       expect(containsMessage(world.errors[0], TIMEOUT_BLOCKED)).toBe(true);
-      const denied = approvalRow(world.fixture.db, r2.id);
-      expect(denied.decision).toBe("deny");
-      expect(denied.decided_at).not.toBeNull();
-      // r1's registration dropped with its failed transaction: it stays NULL for reconciliation.
-      expect(approvalRow(world.fixture.db, r1.id).decision).toBeNull();
-      expect(auditedDecisions(world.fixture.db)).toEqual(["deny"]);
+      // r1 kept its registration through its failed transaction: the retire denies it with r2.
+      const denied = [approvalRow(world.fixture.db, r1.id), approvalRow(world.fixture.db, r2.id)];
+      for (const row of denied) {
+        expect(row.decision).toBe("deny");
+        expect(row.decided_at).not.toBeNull();
+      }
+      expect(auditedDecisions(world.fixture.db)).toEqual(["deny", "deny"]);
       expectNoTimeoutNoFrames(world);
+      expect(ofType(world.events, "approval.resolved")).toEqual([]);
+      expect(world.timersDueAt(T + TTL_MS)).toBe(0);
+      const auditsBefore = auditCount(world.fixture.db);
+
+      await expectAllowRefused(world, r1);
+      expect(auditCount(world.fixture.db)).toBe(auditsBefore);
 
       world.clock.advance(TTL_MS);
       await settle();
 
-      expect(approvalRow(world.fixture.db, r2.id).decision).toBe("deny");
-      expect(approvalRow(world.fixture.db, r1.id).decision).not.toBe("timeout");
-      expect(auditedDecisions(world.fixture.db)).toEqual(["deny"]);
+      expect([
+        approvalRow(world.fixture.db, r1.id),
+        approvalRow(world.fixture.db, r2.id),
+      ]).toStrictEqual(denied);
+      expect(auditedDecisions(world.fixture.db)).toEqual(["deny", "deny"]);
       expectNoTimeoutNoFrames(world);
+      expect(ofType(world.events, "approval.resolved")).toEqual([]);
       expect(world.errors).toHaveLength(1);
       await assertRetainedFaultOnShutdown(world.fixture, TIMEOUT_BLOCKED);
     },
@@ -222,18 +261,7 @@ describe("infra-fault retire denies pending approvals (#619)", () => {
       const rowBefore = approvalRow(world.fixture.db, row.id);
       const auditsBefore = auditCount(world.fixture.db);
 
-      const response = await world.fixture.app.inject({
-        method: "POST",
-        url: `/api/sessions/${world.session}/approvals/${String(row.id)}`,
-        headers: { "content-type": "application/json", cookie: world.cookie },
-        payload: JSON.stringify({ decision: "allow" }),
-      });
-
-      expect(response.statusCode).toBe(409);
-      expect(response.json()).toStrictEqual({
-        error: { code: "approval_settled", message: "该审批已处理" },
-      });
-      await settle();
+      await expectAllowRefused(world, row);
       expect(approvalRow(world.fixture.db, row.id)).toStrictEqual(rowBefore);
       expect(rowBefore.decision).toBe("deny");
       expect(auditCount(world.fixture.db)).toBe(auditsBefore);
@@ -301,6 +329,49 @@ describe("infra-fault retire denies pending approvals (#619)", () => {
       expect(auditedDecisions(world.fixture.db)).toEqual([]);
       expectNoTimeoutNoFrames(world);
       await assertRetainedFaultOnShutdown(world.fixture, STEP_BLOCKED);
+    },
+  );
+
+  it(
+    "F6 with r1's timeout and deny transactions both failing, r1 stays undecided and both faults are retained",
+    REAL,
+    async () => {
+      const rejections = collectRejections();
+      try {
+        const world = await open("approval-parallel");
+        const [r1, r2] = await parallelPending(world);
+        world.fixture.db.exec(blockDecisionOf(r1.id, "timeout", TIMEOUT_BLOCKED));
+        world.fixture.db.exec(blockDecisionOf(r1.id, "deny", DENY_BLOCKED));
+
+        world.clock.advance(TTL_MS);
+        await infraRetired(world);
+
+        expect(world.errors).toHaveLength(2);
+        expect(containsMessage(world.errors[0], TIMEOUT_BLOCKED)).toBe(true);
+        expect(containsMessage(world.errors[1], DENY_BLOCKED)).toBe(true);
+        // The known residue: r1 waits for shutdown or startup reconciliation; r2 is still denied.
+        const undecided = { decision: null, decided_at: null };
+        expect(approvalRow(world.fixture.db, r1.id)).toMatchObject(undecided);
+        expect(approvalRow(world.fixture.db, r2.id).decision).toBe("deny");
+        expect(auditedDecisions(world.fixture.db)).toEqual(["deny"]);
+        expect(world.timersDueAt(T + TTL_MS)).toBe(0);
+
+        world.clock.advance(TTL_MS);
+        await settle();
+
+        expect(world.errors).toHaveLength(2);
+        expect(approvalRow(world.fixture.db, r1.id)).toMatchObject(undecided);
+        expect(auditedDecisions(world.fixture.db)).toEqual(["deny"]);
+        expectNoTimeoutNoFrames(world);
+        expect(ofType(world.events, "approval.resolved")).toEqual([]);
+        const shutdownFailure = await capturedFailure(() => world.fixture.app.close());
+        expect(containsMessage(shutdownFailure, TIMEOUT_BLOCKED)).toBe(true);
+        expect(containsMessage(shutdownFailure, DENY_BLOCKED)).toBe(true);
+        await settle();
+        expect(rejections.reasons).toEqual([]);
+      } finally {
+        rejections.dispose();
+      }
     },
   );
 });
