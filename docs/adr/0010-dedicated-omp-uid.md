@@ -34,7 +34,7 @@ CONTEXT.md 不变量 4（网关/kb 凭证不进 omp 可读环境）在同 uid �
   直接 spawn（macOS 开发机、单测）。否决项：`systemd-run --uid`（引入 systemd 与 polkit 依赖，容器内不稳）、
   自研 setuid 包装器（多一个需审计的特权二进制）。
 - **权限模型**：两用户同属组 `workbuddy`；`SANDBOX_ROOT`、`OMP_STATE_DIR` 及其下目录 `2770`（setgid 继承组），
-  双方 umask `007`；app-server 自有状态（SQLite、配置、环境）放在沙箱与 omp 状态目录之外且 `0700`/`0600`。
+  双方 umask `007`（omp 一侧由 sudoers 强制，见文末 2026-10-02 补充）；app-server 自有状态（SQLite、配置、环境）放在沙箱与 omp 状态目录之外且 `0700`/`0600`。
   `core/sandbox` 的目录创建路径负责施加位。否决项：POSIX ACL（依赖 acl 工具与 FUSE 支持，S1b 挂载不保证）、
   app-server 经 sudo 代操作文件（每次列举/预览起进程）。
 - **验证**：CI 新增 ubuntu job `uid-isolation`（useradd、写 sudoers、`OMP_USER` 起编译服务）跑 Linux-only 集成测试：
@@ -70,3 +70,16 @@ CONTEXT.md 不变量 4（网关/kb 凭证不进 omp 可读环境）在同 uid �
   - 启用任何 sudo I/O 日志（`log_input`/`log_output` 或第三方 I/O log 插件，无 tty 时同样生效）、或有 tty 时的 `use_pty`，都会让 sudo 插入一个 monitor 进程，pdeathsig 绑定到 monitor 而非被杀的 sudo，
     保证失效；部署不得为该规则开启这些选项（服务无 tty 时默认 `use_pty` 不分配 pty，实测无影响）。
   - 只覆盖 omp 进程本身：omp 派生的工具子进程（如 bash）仍可能存活，与直连模式相同（残留，不是回归）。
+
+## 补充（2026-10-02，#760）：omp 侧 umask 由 sudoers 强制
+
+- **问题（部署演练实测，Ubuntu 24.04 / sudo 1.9.15p5）**：app server 以 umask `007` 启动，但它经 sudo 拉起的 omp 实际 umask 为 `0002`
+  ——`/etc/pam.d/sudo` 引入的 `pam_umask` 按 `login.defs`（`UMASK 022`、`USERGROUPS_ENAB yes`）与 omp 的私有主组算出该值，
+  调用方的 umask 被丢弃。omp 写的会话 `.jsonl` 为 `0664`、目录 `2775`；omp 主组不是同名私有组时为 `0022`，组写位丢失，
+  app uid 无法在 omp 建的目录里删除文件。上文「双方 umask `007`」对 omp 一侧不成立，结果随发行版 PAM 默认值漂移。
+- **sudoers（在上一节的规则行之外新增一行 runas Defaults）**：`Defaults><OMP_USER> umask=0007`。sudoers(5)：显式设置的 `umask`
+  覆盖 PAM；不加 `umask_override`，保留「与调用方 umask 取并集」的语义（调用方 `007` → `007`；调用方误配 `022` → `027`，仍无 other 位，但组写位丢失——app server 一侧必须以 umask `007` 启动，这是部署前提，不由 sudoers 兜底）。
+- **否决项**：把 `sh -c 'umask 007; exec setpriv …'` 放进 allowlist（破坏精确的 launcher 规则形态）；只改文档、靠 `2770` 父目录遮蔽
+  （`TMPDIR` 等非 `2770` 位置无保护，且主组变体会破坏删除）。
+- **验证**：CI `uid-isolation` job 的 sudoers 含该行；Linux 集成测试断言 omp 写出物 other 位为 0 且组写位保留；job 在真实 omp 冒烟后
+  检查会话 `.jsonl` 为 `0660`。
