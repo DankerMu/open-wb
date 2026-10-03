@@ -17,6 +17,11 @@ Fixture level: compact
   - 启动测试钩子：`server/test/server-startup-helpers.ts` 的 `gatedModelsWriteHook` 现在猴补 `fsp.writeFile` 且按路径以 `models.yml` 结尾触发——写入方改为临时文件 + rename 后它不再触发。改为扣住 `node:fs/promises` 的 `rename`（与现有写法同形：preload 里改 `fsp.rename` 后 `syncBuiltinESMExports()`，所以写入方必须经 `node:fs/promises` 模块的 `rename` 导出调用，不要用 `FileHandle` 或 `node:fs` 的回调/同步版）、目标（第二个实参）以 `models.yml` 结尾时触发（call-through 模式放行后调原函数；throw 模式抛 EACCES，写入方清理临时文件后 reject）。消费它的两条用例（`server-startup-order.test.ts` #210、`listener-shutdown.test.ts` #227）断言不动。
 - [x] 1.4 除 `server/src/sessions/slash-commands.ts`、`server/src/model-proxy/models-yml.ts`、`server/test/slash-commands.test.ts`、新 `server/test/slash-commands-skills-hardening.test.ts`、`server/test/model-proxy-models-yml.test.ts`、`server/test/server-startup-helpers.ts`（仅 `gatedModelsWriteHook`）与本 change 目录外不改其它被跟踪文件。
 
+## 评审第 1 轮修复
+- [ ] F1 `slash-commands.ts`：`skills` 基准与每个候选的真实路径都改用 `realpathSync.native`（内核解析）。Node 的 JS `realpathSync` 在跟随链接后的 `stat` 结果是 FIFO/socket 时直接 `break`、返回词法拼接的路径，且按字符串折叠 `..`：`SKILL.md -> L/../x/secret.yml`（`L -> deep/dir`，`deep/x/secret.yml` 是 FIFO，`x ->` skills 之外的目录）会被 JS 版解析成 `<entry>/x/secret.yml`、通过包含判断，随后 open 沿 `x` 走到外部文件。注释写明为什么必须用 `.native`。
+- [ ] F2 测试：spec 新 Scenario 的 FIFO 布局用例（`slash-commands-skills-hardening.test.ts`；断言外部文件的 name/description 不出现；未改源码时 RED）。记录器同时代理并记录 `realpathSync.native`（`vi.mock` 的替身函数要带 `.native` 属性，否则生产代码调用会抛）；「其余 44 个不被 resolve」与 257 次计数的断言改为数 `.native` 的调用，JS 版 `realpathSync` 的调用数断言为 0。
+- [ ] F3 负对照 N9：改回 JS `realpathSync` → FIFO 布局用例失败（外部描述被列出）。全量 server 测试、lint、typecheck、anti-drift（179）、size-guard 重跑；E3 smoke 重跑一次（`.native` 在真实 omp 布局上不改变结果）。
+
 ## Must preserve
 - `slash-commands.test.ts`、`session-rest-slash.test.ts`、`rest-commands` 相关测试与 `model-proxy-models-yml.test.ts` 的既有断言不动且全绿（含 FIFO/设备/超大文件跳过、同名折叠、目录不存在得 `[]`）。**两处例外**（它们钉的正是被本 change 取代的旧行为，按 spec delta 改写并在报告里列出）：`slash-commands.test.ts` 主场景里 `linked`（指向 `skills/` 之外目录的符号链接）改为不被列出；「follows a SKILL.md symlinked to a regular file」（目标在 `skills/` 之外）改为断言跳过，并补一条目标在 `skills/` 内部时仍被跟随的用例。指向 `/dev/zero` 的用例断言不变（仍被跳过）。
 - 指向 `skills/` **内部**的符号链接条目仍可用。
