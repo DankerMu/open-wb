@@ -6,7 +6,7 @@
 ## What Changes
 - `branching.ts`：regenerate 派发前，对以 `/` 开头的 branch 文本前置一个 U+0020。
 - `server/test/turn-control-slash.test.ts`：派发转义用例；同次评审遗留的三条测试加固（见 tasks 1.3）。
-- 规格：turn-control MODIFIED「重新生成 REST」——派发文本规则一句与一个 Scenario。
+- 规格：turn-control MODIFIED「重新生成 REST」——派发文本规则一句与一个 Scenario；chat-sessions MODIFIED「会话 REST」——两处「dispatch / runs with the branch-returned text」同步为转义后的说法。
 - 归档 design `openspec/changes/archive/2026-10-01-slash-escape-branch-align/design.md`「残余」条目标注已由 #711 收口（编排方改）。
 
 ## Non-goals
