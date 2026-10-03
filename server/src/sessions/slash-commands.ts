@@ -10,9 +10,19 @@
  * `listSkills` reads `<agentDir>/skills/<entry>/SKILL.md` the way omp v18.0.10 discovers user-level
  * skills (`discovery/helpers.ts` scanSkillsFromDir), with a line-based frontmatter reader instead
  * of a YAML library: a skill it cannot read is left out and its `/skill:` stays plain text.
+ * Host restrictions omp does not have (#706): a link is followed only inside `skills/`, and only
+ * the first `MAX_SKILL_ENTRIES` entries are read.
  */
-import { closeSync, constants, fstatSync, openSync, readdirSync, readSync } from "node:fs";
-import { join } from "node:path";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  openSync,
+  readdirSync,
+  readSync,
+  realpathSync,
+} from "node:fs";
+import { join, sep } from "node:path";
 import { compareMigrationFilenames as compareCodePoints } from "../core/db/migration-assets.js";
 
 interface BuiltinCommand {
@@ -53,6 +63,8 @@ const TODO_FILE_SUBCOMMANDS: readonly string[] = ["import", "export"];
 const SKILL_PREFIX = "/skill:";
 /** SKILL.md read cap: the omp uid can write the agent dir (ADR-0010); real ones stay under 51 KB. */
 const SKILL_MD_MAX_BYTES = 262144;
+/** Entries read per call, in SKILL.md path order; the rest get no filesystem access at all. */
+const MAX_SKILL_ENTRIES = 256;
 /** Host rule (omp validates nothing): `/skill:<name>` ends at the first U+0020, `/` is a path. */
 const SKILL_NAME = /^[^\s/]+$/;
 const TOP_LEVEL_KEY = /^(name|description|enabled):(.*)$/;
@@ -61,27 +73,32 @@ const QUOTED = /^(["'])(.*)\1$/;
 
 /**
  * The platform skills omp would load from `<agentDir>/skills`, sorted by name in code-point order.
- * Recomputed on every call. Any failure to enumerate the directory yields `[]`; an entry whose
- * SKILL.md cannot be read is skipped (entry types are not inspected: a symlinked directory is
- * followed and a regular file fails the read), and so is a SKILL.md that is not a regular file of
- * at most `SKILL_MD_MAX_BYTES`. Entries sharing a name collapse to the one with the smallest
+ * Recomputed on every call. Any failure to enumerate the directory yields `[]`; only the first
+ * `MAX_SKILL_ENTRIES` candidates in SKILL.md path order are looked at. An entry whose SKILL.md
+ * cannot be read is skipped (entry types are not inspected: a regular file fails the read), and so
+ * is a SKILL.md that is not a regular file of at most `SKILL_MD_MAX_BYTES`. A symlink is followed
+ * only inside `skills`: an entry whose SKILL.md resolves outside the real path of `skills` is
+ * skipped (omp itself would load it). Entries sharing a name collapse to the one with the smallest
  * SKILL.md path, omp's first-wins order.
  */
 export function listSkills(agentDir: string): Skill[] {
   const skillsDir = join(agentDir, "skills");
   let entries: string[];
+  let inside: string;
   try {
     entries = readdirSync(skillsDir);
+    inside = realpathSync(skillsDir) + sep;
   } catch {
     return [];
   }
   const candidates = entries
     .filter((entry) => !entry.startsWith("."))
     .map((entry) => ({ entry, path: join(skillsDir, entry, "SKILL.md") }))
-    .sort((left, right) => compareCodePoints(left.path, right.path));
+    .sort((left, right) => compareCodePoints(left.path, right.path))
+    .slice(0, MAX_SKILL_ENTRIES);
   const byName = new Map<string, Skill>();
   for (const { entry, path } of candidates) {
-    const skill = readSkill(path, entry);
+    const skill = readSkill(path, entry, inside);
     if (skill !== null && !byName.has(skill.name)) {
       byName.set(skill.name, skill);
     }
@@ -127,11 +144,19 @@ export function toWireText(text: string, skills: readonly { name: string }[]): s
   return text.startsWith("/") && classifyPrompt(text, skills).kind === "text" ? ` ${text}` : text;
 }
 
-/** omp's drop rules for a user-level skill, plus the host name rule; null when it is not listed. */
-function readSkill(path: string, entry: string): Skill | null {
+/**
+ * omp's drop rules for a user-level skill, plus the host rules (the name, and a SKILL.md whose
+ * real path is not under `inside`, the real path of `skills` with a trailing separator); null
+ * when it is not listed.
+ */
+function readSkill(path: string, entry: string, inside: string): Skill | null {
   let content: string | null;
   try {
-    content = readBounded(path);
+    const resolved = realpathSync(path);
+    if (!resolved.startsWith(inside)) {
+      return null;
+    }
+    content = readBounded(resolved);
   } catch {
     return null;
   }
@@ -151,12 +176,17 @@ function readSkill(path: string, entry: string): Skill | null {
 }
 
 /**
- * The UTF-8 content of a regular file (symlinks followed) of at most `SKILL_MD_MAX_BYTES`, else
- * null. `O_NONBLOCK` makes opening a FIFO return at once, and the read stops at the size `fstat`
- * reported, so neither a writer-less pipe, a device nor a growing file can hold the event loop.
+ * The UTF-8 content of a regular file of at most `SKILL_MD_MAX_BYTES`, else null. `path` is
+ * already resolved, so `O_NOFOLLOW` refuses a link swapped in as its last component.
+ * `O_NONBLOCK` makes opening a FIFO return at once, `O_NOCTTY` keeps a terminal device from
+ * becoming the server's controlling terminal, and the read stops at the size `fstat` reported, so
+ * neither a writer-less pipe, a device nor a growing file can hold the event loop.
  */
 function readBounded(path: string): string | null {
-  const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  const fd = openSync(
+    path,
+    constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOCTTY | constants.O_NOFOLLOW,
+  );
   try {
     const stat = fstatSync(fd);
     if (!stat.isFile() || stat.size > SKILL_MD_MAX_BYTES) {

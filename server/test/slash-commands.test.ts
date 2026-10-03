@@ -183,7 +183,6 @@ describe("listSkills", () => {
 
     expect(listSkills(agentDir)).toEqual([
       { name: "folded", description: "第一行 第二行" },
-      { name: "linked", description: "l" },
       { name: "noname", description: "x" },
       { name: "weekly-report", description: "写周报" },
     ]);
@@ -448,13 +447,25 @@ describe("listSkills", () => {
     expect(listSkills(agentDir)).toEqual([{ name: "kept", description: "kept" }]);
   });
 
-  it("follows a SKILL.md symlinked to a regular file", () => {
+  it("skips a SKILL.md symlinked to a regular file outside skills", () => {
     const { root, agentDir, skillsDir } = makeRoot();
     writeFileSync(join(root, "elsewhere.md"), skillFile(["description: through a link"]));
     mkdirSync(join(skillsDir, "file-link"), { recursive: true });
     symlinkSync(join(root, "elsewhere.md"), join(skillsDir, "file-link", "SKILL.md"));
 
-    expect(listSkills(agentDir)).toEqual([{ name: "file-link", description: "through a link" }]);
+    expect(listSkills(agentDir)).toEqual([]);
+  });
+
+  it("follows a SKILL.md symlinked to a regular file inside skills", () => {
+    const { agentDir, skillsDir } = makeRoot();
+    writeSkill(skillsDir, "target", skillFile(["description: through a link"]));
+    mkdirSync(join(skillsDir, "file-link"), { recursive: true });
+    symlinkSync(join(skillsDir, "target", "SKILL.md"), join(skillsDir, "file-link", "SKILL.md"));
+
+    expect(listSkills(agentDir)).toEqual([
+      { name: "file-link", description: "through a link" },
+      { name: "target", description: "through a link" },
+    ]);
   });
 
   it("keeps the last of several thousand repeated block-scalar names", () => {

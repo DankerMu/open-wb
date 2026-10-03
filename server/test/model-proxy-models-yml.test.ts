@@ -7,11 +7,14 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
+import fsp from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
 import { deriveProxyBaseUrl, writeManagedModelsYml } from "../src/model-proxy/models-yml.js";
@@ -183,6 +186,80 @@ describe("writeManagedModelsYml", () => {
     expect(statSync(join(agentDir, "models.yml")).isDirectory()).toBe(true);
     expect(readFileSync(keepPath, "utf8")).toBe("unrelated-keep");
     expect(readdirSync(agentDir).toSorted()).toEqual(["keep.txt", "models.yml"]);
+  });
+
+  it.each([0o000, 0o077])(
+    "replaces a planted symlink with a 0640 regular file under umask %o",
+    async (umask) => {
+      const root = tempRoot();
+      const agentDir = join(root, "agent");
+      const outside = join(root, "outside.yml");
+      mkdirSync(agentDir);
+      writeFileSync(outside, "outside-untouched");
+      symlinkSync(outside, join(agentDir, "models.yml"));
+
+      const previousUmask = process.umask(umask);
+      try {
+        await writeManagedModelsYml(agentDir, OPTIONS);
+      } finally {
+        process.umask(previousUmask);
+      }
+
+      const stat = lstatSync(join(agentDir, "models.yml"));
+      expect(stat.isSymbolicLink()).toBe(false);
+      expect(stat.isFile()).toBe(true);
+      expect(stat.mode & 0o7777).toBe(0o640);
+      expect(parse(readFileSync(join(agentDir, "models.yml"), "utf8"))).toEqual(
+        expectedDocument(PROXY_BASE_URL, MODEL_ID),
+      );
+      expect(readFileSync(outside, "utf8")).toBe("outside-untouched");
+      expect(readdirSync(agentDir)).toEqual(["models.yml"]);
+    },
+  );
+
+  it.each([0o000, 0o077])(
+    "writes models.yml with mode 0640 under umask %o, fresh and over a 0666 file",
+    async (umask) => {
+      const agentDir = join(tempRoot(), "agent");
+      const target = join(agentDir, "models.yml");
+
+      const previousUmask = process.umask(umask);
+      try {
+        await writeManagedModelsYml(agentDir, OPTIONS);
+        expect(lstatSync(target).mode & 0o7777).toBe(0o640);
+        chmodSync(target, 0o666);
+        await writeManagedModelsYml(agentDir, OPTIONS);
+      } finally {
+        process.umask(previousUmask);
+      }
+
+      expect(lstatSync(target).mode & 0o7777).toBe(0o640);
+      expect(readdirSync(agentDir)).toEqual(["models.yml"]);
+    },
+  );
+
+  it("rejects and leaves no temporary file when the rename over models.yml fails", async () => {
+    const agentDir = join(tempRoot(), "agent");
+    mkdirSync(agentDir);
+    writeFileSync(join(agentDir, "models.yml"), "previous-content");
+    const failure = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+    const rename = vi.spyOn(fsp, "rename").mockRejectedValue(failure);
+    syncBuiltinESMExports();
+    try {
+      await expect(writeManagedModelsYml(agentDir, OPTIONS)).rejects.toBe(failure);
+
+      expect(rename).toHaveBeenCalledTimes(1);
+      const [source, target] = rename.mock.calls[0] ?? [];
+      expect(target).toBe(join(agentDir, "models.yml"));
+      expect(dirname(String(source))).toBe(agentDir);
+      expect(basename(String(source)).startsWith(".")).toBe(true);
+      expect(basename(String(source))).toContain(String(process.pid));
+    } finally {
+      rename.mockRestore();
+      syncBuiltinESMExports();
+    }
+    expect(readdirSync(agentDir)).toEqual(["models.yml"]);
+    expect(readFileSync(join(agentDir, "models.yml"), "utf8")).toBe("previous-content");
   });
 });
 
