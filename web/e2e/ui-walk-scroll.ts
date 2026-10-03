@@ -1,8 +1,11 @@
 // UI walk scroll-follow step (W-scroll): the transcript is forced to overflow by lowering the
 // viewport height only; a pinned transcript follows container and content size changes, a
 // scrolled-up one keeps its position and shows `回到最新` by the distance rule.
+// W-scroll 1b reloads the overflowing session with the session list held, so the snapshot renders
+// first and the wide-viewport top bar mounts after the transcript was scrolled to the bottom.
 
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import { holdRoute } from "./route-hold.js";
 import { type WalkProject, withViewport } from "./ui-walk-layout.js";
 
 // W-scroll 的量纲：强制溢出的余量、Step 3 再压低的高度、断言可信所需的最小可视高度。
@@ -67,7 +70,12 @@ function expectPinnedDistance(transcript: Locator, step: string) {
 }
 
 // #373：转录区尺寸变化（视口变矮、展开 `原始输出`）也要重算贴底；只改高度，不跨 760px 断点。
-export async function walkScrollFollow(page: Page, project: WalkProject): Promise<void> {
+// `expectCompleted` 是调用方对该会话已完成那对消息的判据（会读侧栏列表，只能在放行列表后调用）。
+export async function walkScrollFollow(
+  page: Page,
+  project: WalkProject,
+  expectCompleted: () => Promise<void>,
+): Promise<void> {
   const original = page.viewportSize();
   if (!original) throw new Error("ui-walk requires a fixed viewport");
   const transcript = page.locator(".chat-transcript");
@@ -95,6 +103,38 @@ export async function walkScrollFollow(page: Page, project: WalkProject): Promis
       await expectClientHeight(transcript, target, "W-scroll 1");
       expectForcedOverflow(await transcriptMetrics(transcript), "W-scroll 1");
       await expectPinnedDistance(transcript, "W-scroll 1");
+    });
+
+    // #726：快照先于列表到达时，宽屏顶栏在贴底赋值之后才挂载，容器变矮 56px；随后的 scroll
+    // 事件里 scrollTop 没变，不得解除贴底。列表请求挂住到转录渲染出该对消息为止。
+    await test.step("W-scroll 1b: a reload with the session list held stays pinned", async () => {
+      const hold = await holdRoute(page, "**/api/sessions");
+      try {
+        await page.reload();
+        await expect(page.getByRole("article", { name: "用户" })).toHaveCount(1);
+        await expect(page.getByRole("article", { name: "助手" })).toHaveCount(1);
+        expect(hold.held(), "W-scroll 1b: session list held behind the snapshot").toBe(true);
+      } finally {
+        await hold.release();
+      }
+      await expectCompleted();
+      if (project === "desktop-light") await expect(page.locator("header.topbar h1")).toBeVisible();
+      await transcript.evaluate(
+        () =>
+          new Promise<void>((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+          }),
+      );
+      const reloaded = await transcriptMetrics(transcript);
+      const jumps = await page.getByRole("button", { name: "回到最新" }).count();
+      console.log(
+        `ui-walk W-scroll ${project}: step1b distance ${reloaded.distance}, ` +
+          `clientHeight ${reloaded.clientHeight}, scrollHeight ${reloaded.scrollHeight}, 回到最新 ${jumps}`,
+      );
+      expectForcedOverflow(reloaded, "W-scroll 1b");
+      expect(reloaded.clientHeight, "W-scroll 1b: clientHeight").toBe(target);
+      expect(reloaded.distance, "W-scroll 1b: distance").toBeLessThanOrEqual(PIN_TOLERANCE_PX);
+      expect(jumps, "W-scroll 1b: no 回到最新").toBe(0);
     });
 
     await test.step("W-scroll 2: expanding 原始输出 while pinned keeps following", async () => {

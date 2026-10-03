@@ -5,11 +5,11 @@ Fixture level: compact
 归档次序（前提）：本 change 先归档进主规格；父 change `s1c-session-metadata-presentation` 的 chat-web 与 conversation-search delta 仍是旧文，归档前按 #754 从主规格现文重新生成全部 delta。本 PR 不改父 delta。
 
 ## 1. 实现
-- [ ] 1.1 `scroll-follow.tsx`：上一次 `scrollTop` 的记录与 `onScroll` 新判据（proposal「What Changes」第一条）；注释同步。记录值是写入后**读回**的 `el.scrollTop`（不是赋的 `scrollHeight`）；比较用严格 `<`、不加容差；初始记录值由挂载时的 `settle()` 确立。
-- [ ] 1.2 `chat-scroll-follow.test.tsx`：(a) 贴底赋值后 `clientHeight` 变小、派发 `scrollTop` 未变的 scroll 事件 → 仍贴底、`scrollTop` 被写到底、无 `回到最新`，随后内容更新继续跟随；(b) 贴底时 `scrollTop` 变小且距底 >4px → 解除贴底（现有 F2/F4 语义）；(c) 未贴底时 `scrollTop` 未变小的 scroll 事件不会把它置为贴底（除非距底 ≤4px）。
-- [ ] 1.3a 纯搬移：`ui-walk.spec.ts` 已 799 行（上限 800）。把 `walkScrollFollow` 及只被它使用的常量与 helper 搬到新文件 `web/e2e/ui-walk-scroll.ts`（做法同 `ui-walk-stop.ts`；函数体逐字不变，只调整 import/export 与参数传递）。搬移单独成一个 commit 级别的 diff 段落，在报告里给出「搬移前后函数体 diff 为空」的证明。
-- [ ] 1.3b 在 W-scroll 1 之后、强制溢出的视口内新增一步「刷新后仍贴底」：用 `web/e2e/route-hold.ts` 的 `holdRoute` 挂住会话列表请求（模式写死 `**/api/sessions`，不带尾部通配，以免连 `…/messages` 一起挂住），`page.reload()`，等转录渲染出该对消息、并断言 `hold.held() === true` 后放行（快照先于列表——顶栏在转录贴底之后才挂载）；再等既有的完成判据（`expectCompletedPair` 是 spec 私有且另有调用方，不搬移——以回调或参数传入 `walkScrollFollow`）与 desktop 的 `header.topbar h1` 可见，等两帧，做一次性读取：距底 ≤4px 且无 `回到最新`。`desktop-light` 上该步在未改 `scroll-follow.tsx` 的构建上必须失败（E1b）；`mobile-dark` 同样执行，作为不回归。不引入 `waitForTimeout` 与新的超时字面量。若 `holdRoute` 的次序在真实栈上做不出 RED，停下报告。
-- [ ] 1.4 除 `scroll-follow.tsx`、`chat-scroll-follow.test.tsx`、`ui-walk.spec.ts`、`ui-walk-scroll.ts`（新）与本 change 目录外不改其它被跟踪文件。
+- [x] 1.1 `scroll-follow.tsx`：上一次 `scrollTop` 的记录与 `onScroll` 新判据（proposal「What Changes」第一条）；注释同步。记录值是写入后**读回**的 `el.scrollTop`（不是赋的 `scrollHeight`）；比较用严格 `<`、不加容差；初始记录值由挂载时的 `settle()` 确立。
+- [x] 1.2 `chat-scroll-follow.test.tsx`：(a) 贴底赋值后 `clientHeight` 变小、派发 `scrollTop` 未变的 scroll 事件 → 仍贴底、`scrollTop` 被写到底、无 `回到最新`，随后内容更新继续跟随；(b) 贴底时 `scrollTop` 变小且距底 >4px → 解除贴底（现有 F2/F4 语义）；(c) 未贴底时 `scrollTop` 未变小的 scroll 事件不会把它置为贴底（除非距底 ≤4px）。
+- [x] 1.3a 纯搬移：`ui-walk.spec.ts` 已 799 行（上限 800）。把 `walkScrollFollow` 及只被它使用的常量与 helper 搬到新文件 `web/e2e/ui-walk-scroll.ts`（做法同 `ui-walk-stop.ts`；函数体逐字不变，只调整 import/export 与参数传递）。搬移单独成一个 commit 级别的 diff 段落，在报告里给出「搬移前后函数体 diff 为空」的证明。
+- [x] 1.3b 在 W-scroll 1 之后、强制溢出的视口内新增一步「刷新后仍贴底」：用 `web/e2e/route-hold.ts` 的 `holdRoute` 挂住会话列表请求（模式写死 `**/api/sessions`，不带尾部通配，以免连 `…/messages` 一起挂住），`page.reload()`，等转录渲染出该对消息、并断言 `hold.held() === true` 后放行（快照先于列表——顶栏在转录贴底之后才挂载）；再等既有的完成判据（`expectCompletedPair` 是 spec 私有且另有调用方，不搬移——以回调或参数传入 `walkScrollFollow`）与 desktop 的 `header.topbar h1` 可见，等两帧，做一次性读取：距底 ≤4px 且无 `回到最新`。`desktop-light` 上该步在未改 `scroll-follow.tsx` 的构建上必须失败（E1b）；`mobile-dark` 同样执行，作为不回归。不引入 `waitForTimeout` 与新的超时字面量。若 `holdRoute` 的次序在真实栈上做不出 RED，停下报告。
+- [x] 1.4 除 `scroll-follow.tsx`、`chat-scroll-follow.test.tsx`、`ui-walk.spec.ts`、`ui-walk-scroll.ts`（新）与本 change 目录外不改其它被跟踪文件。
 
 ## Must preserve
 - `chat-scroll-follow.test.tsx` 现有 F1–F8、R1–R8 全绿且断言不动；`chat-search` 的 `scrollToMessage` 相关测试全绿。

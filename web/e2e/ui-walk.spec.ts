@@ -336,7 +336,9 @@ async function walkHeldDialogue(page: Page, project: WalkProject): Promise<void>
     await expect.poll(() => page.url()).toBe(sessionUrl);
     await expectCompletedPair(page, project, sessionId, prompt);
     await expectAllowedBar(page);
-    await walkScrollFollow(page, project);
+    await walkScrollFollow(page, project, () =>
+      expectCompletedPair(page, project, sessionId, prompt),
+    );
     const stopGate = await walkStop(page, project, sessionId);
     await walkRegenerate(page, project, sessionId, stopGate);
     await walkFork(page, project, sessionId, prompt);

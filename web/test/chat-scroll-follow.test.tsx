@@ -249,6 +249,64 @@ describe("(F8) button presentation", () => {
   });
 });
 
+/* Issue 726: a scroll event is a user scroll-up only when `scrollTop` went down. No
+   ResizeObserver is installed here, so no resize callback precedes the scroll event. */
+describe("(S) scroll events that are not a user scroll-up", () => {
+  it("(S1) re-sticks when the container shrinks after the pin write and scrollTop is unchanged", async () => {
+    await openLongSession();
+    metrics.clientHeight = 444;
+    fireEvent.scroll(transcript());
+    expect(metrics.scrollTop).toBe(2556);
+    expect(jumpButton()).toBeNull();
+    await growAndStream(3200, "增量一");
+    expect(metrics.scrollTop).toBe(2756);
+    expect(jumpButton()).toBeNull();
+  });
+
+  it("(S2) a smaller scrollTop unpins, also right after a content update moved the bottom", async () => {
+    await openLongSession();
+    await growAndStream(3200, "增量一");
+    expect(metrics.scrollTop).toBe(2700);
+    userScroll(2600);
+    expect(jumpButton()).toBeNull();
+    await growAndStream(3400, "增量二");
+    expect(metrics.scrollTop).toBe(2600);
+    await growAndStream(3700, "增量三");
+    expect(metrics.scrollTop).toBe(2600);
+    expect(jumpButton()).not.toBeNull();
+  });
+
+  it("(S2) a smaller scrollTop unpins after 回到最新 moved the bottom", async () => {
+    await openLongSession();
+    userScroll(0);
+    fireEvent.click(screen.getByRole("button", { name: "回到最新" }));
+    expect(metrics.scrollTop).toBe(2500);
+    userScroll(2400);
+    await growAndStream(3200, "增量一");
+    expect(metrics.scrollTop).toBe(2400);
+  });
+
+  it("(S3) an unpinned transcript stays unpinned until it is within 4px of the bottom", async () => {
+    await openLongSession();
+    userScroll(2200);
+    metrics.clientHeight = 444;
+    fireEvent.scroll(transcript());
+    expect(metrics.scrollTop).toBe(2200);
+    expect(jumpButton()).toBeNull();
+    userScroll(2300);
+    await growAndStream(3200, "增量一");
+    expect(metrics.scrollTop).toBe(2300);
+    expect(jumpButton()).not.toBeNull();
+    fireEvent.scroll(transcript());
+    expect(metrics.scrollTop).toBe(2300);
+    expect(jumpButton()).not.toBeNull();
+    userScroll(2752);
+    expect(jumpButton()).toBeNull();
+    await growAndStream(3400, "增量二");
+    expect(metrics.scrollTop).toBe(2956);
+  });
+});
+
 /* Spy ResizeObserver for R1–R8: installed on globalThis before mount and restored afterwards.
    `resizeElement` is a no-op when no instance observes the element, so on a source without an
    observer the R cases fail on their assertions rather than crash. */
