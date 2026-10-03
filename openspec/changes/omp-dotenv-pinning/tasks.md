@@ -4,10 +4,10 @@ Fixture level: compact
 Risk packs: process-spawn-contract, filesystem-permissions, uid-isolation
 
 ## 1. 实现
-- [ ] 1.1 `server/src/core/sandbox/dirs.ts`：`ensureOwnedFile(absPath, mode)`。
-- [ ] 1.2 `server/src/sessions/omp/state-layout.ts`：`stateDir` 含 `:` 时抛错（先于任何 mkdir）；布局含 `home/.env`（`0o640`）；冷建时在 `home` 放宽到 `3770` 之前建出；已存在的 `home` 照常校正。
-- [ ] 1.3 `server/src/sessions/omp/process.ts`：env 加 `PI_CODING_AGENT_DIR: ompAgentDir(opts.stateDir)`、`PI_CONFIG_FILES: ompHostOverlayPath(opts.stateDir)`、`PI_CONFIG_DIR: ".omp"`、`OMP_PROFILE: "default"`、`PI_PROFILE: "default"`；`--preserve-env` 列表按规格顺序。注释同步。
-- [ ] 1.4 测试：`server/test/sandbox-dirs.test.ts`、`omp-state-layout.test.ts`、`omp-layout-helpers.ts`、`omp-process.test.ts`（793 行，上限 800：新增用例放到别的文件）、`session-supervisor-helpers.ts`（`sudoPrefix`）、`server-assembly.test.ts`、`omp-spawn-cwd.test.ts`、`fake-omp*.test.ts` 与 `commands-rest.test.ts` 中对 env 键集的断言、`server-startup-*.test.ts`（`home` 目录内容断言）、`linux/uid-isolation.test.ts`（`REQUIRED_CHILD_ENV_KEYS`、两条新探针）。
+- [x] 1.1 `server/src/core/sandbox/dirs.ts`：`ensureOwnedFile(absPath, mode)`。
+- [x] 1.2 `server/src/sessions/omp/state-layout.ts`：`stateDir` 含 `:` 时抛错（先于任何 mkdir）；布局含 `home/.env`（`0o640`）；冷建时在 `home` 放宽到 `3770` 之前建出；已存在的 `home` 照常校正。
+- [x] 1.3 `server/src/sessions/omp/process.ts`：env 加 `PI_CODING_AGENT_DIR: ompAgentDir(opts.stateDir)`、`PI_CONFIG_FILES: ompHostOverlayPath(opts.stateDir)`、`PI_CONFIG_DIR: ".omp"`、`OMP_PROFILE: "default"`、`PI_PROFILE: "default"`；`--preserve-env` 列表按规格顺序。注释同步。
+- [x] 1.4 测试：`server/test/sandbox-dirs.test.ts`、`omp-state-layout.test.ts`、`omp-layout-helpers.ts`、`omp-process.test.ts`（793 行，上限 800：新增用例放到别的文件）、`session-supervisor-helpers.ts`（`sudoPrefix`）、`server-assembly.test.ts`、`omp-spawn-cwd.test.ts`、`fake-omp*.test.ts` 与 `commands-rest.test.ts` 中对 env 键集的断言、`server-startup-*.test.ts`（`home` 目录内容断言）、`linux/uid-isolation.test.ts`（`REQUIRED_CHILD_ENV_KEYS`、两条新探针）。
 
 允许改动的文件：上列源码与 `server/test/**`。不得改 `openspec/**`、`docs/**`、`.github/**`、`scripts/**`、`smoke/**`、假 omp 的 `.mjs`。
 
@@ -32,5 +32,5 @@ Risk packs: process-spawn-contract, filesystem-permissions, uid-isolation
 - N2c 去掉冒号检查 → E2「状态目录路径含冒号」失败。
 - N3 `PI_CODING_AGENT_DIR` 取 `<state>/agent`（不等于默认）→ E3 相等断言失败；E5 冷启动失败或 `agent.db` 不在 xdg。
 - N4 布局去掉 `home/.env` → E2 失败；Linux 探针 `wrote=ok`。
-- N5 `ensureOwnedFile` 用 `stat` 代替 `lstat` / 去掉 `O_NOFOLLOW` → 符号链接用例失败。
+- N5 `ensureOwnedFile` 用 `stat` 代替 `lstat` → 符号链接用例失败。（去掉 `O_NOFOLLOW` 不可观测：`O_CREAT|O_EXCL` 对任何符号链接已返回 `EEXIST`；标志按规格保留。）
 - N6 `--preserve-env` 漏掉 `PI_CONFIG_FILES` → 前缀断言失败。

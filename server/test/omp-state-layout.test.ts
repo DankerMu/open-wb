@@ -1,6 +1,7 @@
 /**
  * Issue #706 omp-runtime「OMP_STATE_DIR 托管布局」: the directory table, its correction on every
  * call, refusal of obstructed paths, a symlinked state root, and the env the real child receives.
+ * Issue #802 adds the host-owned `home/.env` and the refusal of a state dir containing `:`.
  * Paths and modes below are written out from the spec table, not derived from the source module.
  */
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
@@ -39,6 +40,7 @@ import {
 } from "../src/sessions/omp/state-layout.js";
 import { TokenRegistry } from "../src/sessions/tokens.js";
 import {
+  expectHomeDotenv,
   expectLayout,
   LAYOUT_TABLE,
   seedLegacyAgentDir,
@@ -136,6 +138,8 @@ describe("ensureOmpStateLayout", () => {
     expect(modeOf(join(root, "missing"))).toBe(parentMode);
     expect(modeOf(join(root, "missing", "parents"))).toBe(parentMode);
     expect(readdirSync(state).toSorted()).toEqual(["home", "sessions", "trash", "xdg"]);
+    expect(readdirSync(join(state, "home")).toSorted()).toEqual([".env", ".omp"]);
+    expectHomeDotenv(state);
     expect(readdirSync(join(state, "sessions"))).toEqual([]);
     expect(readdirSync(join(state, "trash"))).toEqual([]);
 
@@ -298,6 +302,93 @@ describe("ensureOmpStateLayout", () => {
     expect(call?.args[call.args.indexOf("--session-dir") + 1]).toBe(join(link, "sessions", OWNER));
   });
 
+  // #802 omp-runtime「状态目录路径含冒号」: PI_CONFIG_FILES is `:`-separated.
+  it("refuses a state dir whose path contains a colon and creates nothing", async () => {
+    const root = tempRoot();
+    const state = join(root, "absent", "state:dir");
+    const calls: SpawnCall[] = [];
+
+    expect(() => ensureOmpStateLayout(state)).toThrow("OMP_STATE_DIR");
+    await expect(spawnRecorded(root, state, calls)).rejects.toThrow("OMP_STATE_DIR");
+
+    expect(calls).toEqual([]);
+    expect(existsSync(join(root, "absent"))).toBe(false);
+  });
+
+  // #802 omp-runtime「home/.env 由宿主持有」.
+  it("creates home/.env while a cold home is still closed to group and other", () => {
+    const state = join(tempRoot(), "state");
+    const open = fs.openSync;
+    const homeModeAt: number[] = [];
+    vi.spyOn(fs, "openSync").mockImplementation((...args: Parameters<typeof fs.openSync>) => {
+      const fd = open(...args);
+      if (String(args[0]).endsWith(join("home", ".env"))) {
+        expect(existsSync(String(args[0]))).toBe(true);
+        homeModeAt.push(modeOf(join(realpathSync(state), "home")));
+      }
+      return fd;
+    });
+    syncBuiltinESMExports();
+
+    ensureOmpStateLayout(state);
+
+    expect(homeModeAt.map((mode) => (mode & 0o077).toString(8))).toEqual(["0"]);
+    expect(modeOf(join(state, "home"))).toBe(0o3770);
+    expectHomeDotenv(state);
+  });
+
+  it("keeps the bytes of an existing home/.env and corrects its mode", async () => {
+    const root = tempRoot();
+    const state = join(root, "state");
+    ensureOmpStateLayout(state);
+    const dotenv = join(state, "home", ".env");
+    writeFileSync(dotenv, "OPERATOR_VAR=1\n");
+    chmodSync(dotenv, 0o666);
+
+    ensureOmpStateLayout(state);
+    expectHomeDotenv(state, "OPERATOR_VAR=1\n");
+
+    chmodSync(dotenv, 0o600);
+    await spawnRecorded(root, state);
+    expectHomeDotenv(state, "OPERATOR_VAR=1\n");
+  });
+
+  it("refuses a symlink at home/.env, leaves its target alone and spawns nothing", async () => {
+    const root = tempRoot();
+    const state = join(root, "state");
+    const target = join(root, "elsewhere.env");
+    mkdirSync(join(state, "home"), { recursive: true });
+    writeFileSync(target, "OUTSIDE=1\n");
+    chmodSync(target, 0o644);
+    symlinkSync(target, join(state, "home", ".env"));
+    const calls: SpawnCall[] = [];
+
+    expect(() => ensureOmpStateLayout(state)).toThrow(join(realpathSync(state), "home", ".env"));
+    await expect(spawnRecorded(root, state, calls)).rejects.toThrow();
+
+    expect(calls).toEqual([]);
+    expect(modeOf(target)).toBe(0o644);
+    expect(readFileSync(target, "utf8")).toBe("OUTSIDE=1\n");
+    expect(lstatSync(join(state, "home", ".env")).isSymbolicLink()).toBe(true);
+  });
+
+  it("refuses a directory at home/.env and spawns nothing", async () => {
+    const root = tempRoot();
+    const state = join(root, "state");
+    mkdirSync(join(state, "home", ".env"), { recursive: true });
+    chmodSync(join(state, "home", ".env"), 0o755);
+    const calls: SpawnCall[] = [];
+
+    expect(() => ensureOmpStateLayout(state)).toThrow(join(realpathSync(state), "home", ".env"));
+    await expect(spawnRecorded(root, state, calls)).rejects.toThrow(
+      join(realpathSync(state), "home", ".env"),
+    );
+
+    expect(calls).toEqual([]);
+    expect(lstatSync(join(state, "home", ".env")).isDirectory()).toBe(true);
+    expect(modeOf(join(state, "home", ".env"))).toBe(0o755);
+  });
+
   it("neither reads nor writes a legacy <state>/agent directory", async () => {
     const root = tempRoot();
     const state = join(root, "state");
@@ -375,7 +466,12 @@ describe("spawned child environment under the managed layout", () => {
     expect(keys.filter((key) => key !== "__CF_USER_TEXT_ENCODING")).toEqual([
       "HOME",
       "LANG",
+      "OMP_PROFILE",
       "PATH",
+      "PI_CODING_AGENT_DIR",
+      "PI_CONFIG_DIR",
+      "PI_CONFIG_FILES",
+      "PI_PROFILE",
       "TMPDIR",
       "WORKBUDDY_MODEL_TOKEN",
       "XDG_CACHE_HOME",

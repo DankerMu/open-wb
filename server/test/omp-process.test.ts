@@ -155,7 +155,7 @@ describe("spawnOmp spawn contract", () => {
     expect(CALLER_TOKEN).toMatch(/^[0-9a-f]{64}$/);
     expect(call.env.WORKBUDDY_MODEL_TOKEN).toBe(CALLER_TOKEN);
     expect(call.env.HOME).not.toBe(SENTINELS.HOME);
-    expect(call.env).not.toHaveProperty("PI_CODING_AGENT_DIR");
+    expect(call.env.PI_CODING_AGENT_DIR).toBe(join(String(call.env.HOME), ".omp", "agent"));
     for (const key of FORBIDDEN_KEYS) {
       expect(call.env).not.toHaveProperty(key);
     }
@@ -401,19 +401,7 @@ describe("spawnOmp spawn contract", () => {
     const roots = makeRoots();
     const call = await capture(roots, null, { LANG: undefined, TMPDIR: undefined }, "omp_user");
     expect(call.command).toBe("sudo");
-    expect(call.args).toEqual([
-      "-n",
-      "-u",
-      "omp_user",
-      "--preserve-env=PATH,LANG,TMPDIR,HOME,XDG_DATA_HOME,XDG_STATE_HOME,XDG_CACHE_HOME,WORKBUDDY_MODEL_TOKEN",
-      "--",
-      "/usr/bin/setpriv",
-      "--pdeathsig",
-      "KILL",
-      "--",
-      roots.bin,
-      ...coldArgs(roots),
-    ]);
+    expect(call.args).toEqual([...sudoPrefix("omp_user", roots.bin), ...coldArgs(roots)]);
     expect(call.env).toEqual(allowlist(roots));
     expect(call.env).not.toHaveProperty("LANG");
     expect(call.env).not.toHaveProperty("TMPDIR");
@@ -548,6 +536,11 @@ function allowlist(
     XDG_DATA_HOME: join(roots.stateDir, "xdg", "data"),
     XDG_STATE_HOME: join(roots.stateDir, "xdg", "state"),
     XDG_CACHE_HOME: join(roots.stateDir, "xdg", "cache"),
+    PI_CODING_AGENT_DIR: join(roots.home, ".omp", "agent"),
+    PI_CONFIG_FILES: join(roots.home, ".omp", "agent", "host-overlay.yml"),
+    PI_CONFIG_DIR: ".omp",
+    OMP_PROFILE: "default",
+    PI_PROFILE: "default",
     WORKBUDDY_MODEL_TOKEN: CALLER_TOKEN,
   };
   if (extra.LANG !== undefined) {

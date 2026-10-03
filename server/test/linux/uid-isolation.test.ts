@@ -20,6 +20,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -62,6 +63,11 @@ const REQUIRED_CHILD_ENV_KEYS = [
   "XDG_DATA_HOME",
   "XDG_STATE_HOME",
   "XDG_CACHE_HOME",
+  "PI_CODING_AGENT_DIR",
+  "PI_CONFIG_FILES",
+  "PI_CONFIG_DIR",
+  "OMP_PROFILE",
+  "PI_PROFILE",
   "WORKBUDDY_MODEL_TOKEN",
 ] as const;
 const REPORT_LABELS = [
@@ -233,6 +239,7 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
         const agent = join(state, "home", ".omp", "agent");
         const models = join(agent, "models.yml");
         const overlay = join(agent, "host-overlay.yml");
+        const dotenv = join(state, "home", ".env");
         ensureOmpStateLayout(state);
         await writeManagedModelsYml(agent, {
           proxyBaseUrl: "http://127.0.0.1:18016/v1",
@@ -241,6 +248,9 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
         await writeHostOverlay(state);
         const modelsBefore = readFileSync(models);
         const overlayBefore = readFileSync(overlay);
+        // An operator's line: the omp uid can read the file but not change or replace it (#802).
+        writeFileSync(dotenv, "OPERATOR_VAR=1\n");
+        const dotenvBefore = readFileSync(dotenv);
         const managed = [
           state,
           join(state, "sessions"),
@@ -271,13 +281,15 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
         }
         expect(await write(models), models).toBe("EACCES");
         expect(await write(overlay), overlay).toBe("EACCES");
+        expect(await write(dotenv), dotenv).toBe("EACCES");
         expect(await write(join(state, "trash", "x"))).toBe("EACCES");
         expect(readdirSync(join(state, "trash"))).toEqual([]);
         for (const dir of [join(state, "home"), join(state, "sessions"), agent]) {
           expect(await ask(`rename:${dir}`), dir).toBe("renamed=EACCES");
         }
-        // Sticky HOME: the omp uid may write there but not rename the app-owned `.omp`.
+        // Sticky HOME: the omp uid may write there but not rename the app-owned `.omp` or `.env`.
         expect(await ask(`rename:${join(state, "home", ".omp")}`)).toBe("renamed=EPERM");
+        expect(await ask(`rename:${dotenv}`)).toBe("renamed=EPERM");
         for (const dir of writable) {
           expect(await write(join(dir, "written by omp")), dir).toBe("ok");
         }
@@ -287,6 +299,11 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
         expect(readFileSync(overlay).equals(overlayBefore)).toBe(true);
         expect(lstatSync(overlay).uid).toBe(process.getuid?.());
         expect(lstatSync(overlay).mode & 0o7777).toBe(0o640);
+        expect(readFileSync(dotenv).equals(dotenvBefore)).toBe(true);
+        expect(lstatSync(dotenv).isFile()).toBe(true);
+        expect(lstatSync(dotenv).uid).toBe(process.getuid?.());
+        expect(lstatSync(dotenv).mode & 0o7777).toBe(0o640);
+        expect(existsSync(`${dotenv}.moved`)).toBe(false);
         expect(managed.map((dir) => readdirSync(dir).toSorted())).toEqual(before);
         for (const dir of [...managed, ...writable]) {
           expect(lstatSync(dir).isDirectory(), dir).toBe(true);
@@ -442,7 +459,8 @@ function applyParentEnv(previous: Record<string, string | undefined>): void {
 function createOwnedLayout(ownedRoot: string): OwnedLayout {
   chmodSync(ownedRoot, SHARED_MODE);
   const sandboxRoot = join(ownedRoot, "sandbox root:uid");
-  const stateDir = join(ownedRoot, "state dir:uid");
+  // No colon here: the layout refuses one (#802). The sandbox root and the probe file keep theirs.
+  const stateDir = join(ownedRoot, "state dir uid");
   return {
     ownedRoot,
     sandboxRoot,

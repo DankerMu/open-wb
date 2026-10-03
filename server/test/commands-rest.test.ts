@@ -293,9 +293,9 @@ describe("GET /api/commands", () => {
     );
 
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.env).not.toHaveProperty("PI_CODING_AGENT_DIR");
     const exported = join(String(calls[0]?.env.HOME), ".omp", "agent");
     expect(exported).toBe(ompAgentDir(stateDir));
+    expect(calls[0]?.env.PI_CODING_AGENT_DIR).toBe(exported);
     writeSkill(join(String(exported), "skills"), "from-spawn-dir", ["description: same source"]);
     const cookie = await loginSessionPair(app);
     const response = await app.inject({ method: "GET", url: ROUTE, headers: { cookie } });
