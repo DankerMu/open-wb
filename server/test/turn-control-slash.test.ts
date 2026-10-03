@@ -4,7 +4,8 @@
  * fork are requested over REST on the production createApp → registerSessions assembly; the omp
  * side is a real fake-omp `branch` child whose list is the fixed two entries plus `--branch-entry`
  * values, and one scripted FakeChild for a malformed list. Histories are written through the store
- * (no spawn); skills are real `SKILL.md` files under `ompAgentDir(stateDir)/skills`. Oracles:
+ * (no spawn); skills are real `SKILL.md` files under `ompAgentDir(stateDir)/skills`. Issue #711
+ * adds the regenerate dispatch text (a bare `/` branch text is sent escaped). Oracles:
  * status and envelope, SQL rows and counts, per-child stdin frames, the spawn log, liveness, the
  * control claim and the `readdirSync` calls naming `<agentDir>/skills`.
  */
@@ -28,7 +29,14 @@ import {
   rowCounts,
   seedTwoTurns,
 } from "./session-fork-helpers.js";
-import { held, QUESTION, scriptedAt, snapshot, types } from "./session-regenerate-helpers.js";
+import {
+  held,
+  QUESTION,
+  scriptedAt,
+  sessionFile,
+  snapshot,
+  types,
+} from "./session-regenerate-helpers.js";
 import { AGENT_UNAVAILABLE_ENVELOPE, SESSION_BUSY_ENVELOPE } from "./session-rest-helpers.js";
 import { OWNER_ID, type RecordingWorld, waitForTurn } from "./session-supervisor-helpers.js";
 import { isLive, presetSessionFile } from "./session-supervisor-pool-helpers.js";
@@ -175,12 +183,16 @@ async function forkAtLast(world: ForkWorld, texts: readonly string[]) {
 }
 
 /**
- * Regenerate after `/todo` then `text`, whose only appended entry is the escaped `text`: 202, the
- * branch is cut at that entry and the new turn is dispatched with the escaped text.
+ * Regenerate of the seeded `texts` on the session's own child: 202, the branch is cut at
+ * `entryId`, the new turn's `prompt` frame carries exactly `wire` and no stored text changed.
  */
-async function expectRegeneratedEscaped(text: string): Promise<void> {
-  const world = await openWorld({ entries: [` ${text}`] });
-  seedTurns(world, ["/todo", text]);
+async function expectRegenerated(
+  world: ForkWorld,
+  texts: readonly string[],
+  entryId: string,
+  wire: string,
+): Promise<void> {
+  seedTurns(world, texts);
 
   const response = await postRegenerate(world);
 
@@ -190,9 +202,34 @@ async function expectRegeneratedEscaped(text: string): Promise<void> {
   expect(ended.messages.at(-1)?.id).toBe(assistantMessageId);
   const frames = spawnedAt(world, 0).stdin.slice(2);
   expect(types(frames)).toEqual(["get_branch_messages", "branch", "get_state", "prompt"]);
-  expect(frames[1]).toMatchObject({ type: "branch", entryId: APPENDED });
-  expect(frames[3]).toMatchObject({ type: "prompt", message: ` ${text}` });
-  expect(userTexts(world)).toEqual(["/todo", text]);
+  expect(frames[1]).toMatchObject({ type: "branch", entryId });
+  // Never escaped twice: an entry that already carries the wire-side space gets no second one.
+  expect(String(frames[3]?.message)).not.toMatch(/^ {2}/);
+  expect(frames[3]?.message).toBe(wire);
+  expect(userTexts(world)).toEqual(texts);
+}
+
+/**
+ * Regenerate after `/todo` then `text`, whose only appended entry is `entry` (the escaped `text`
+ * unless given): 202, the branch is cut at that entry and the new turn is dispatched with the
+ * escaped text.
+ */
+async function expectRegeneratedEscaped(text: string, entry = ` ${text}`): Promise<void> {
+  const world = await openWorld({ entries: [entry] });
+
+  await expectRegenerated(world, ["/todo", text], APPENDED, ` ${text}`);
+}
+
+/** The state a refused regenerate must leave: child 0's frames, the rows and the spawn log. */
+function regenerateTraces(world: ForkWorld) {
+  const { db } = world.fixture;
+  return {
+    frames: types(spawnedAt(world, 0).stdin),
+    source: snapshot(db, world.session, true),
+    rows: rowCounts(db),
+    spawns: world.spawned.length,
+    calls: world.rt.calls.length,
+  };
 }
 
 /** `readdirSync` call-through spy; returns how often `<agentDir>/skills` was enumerated so far. */
@@ -252,6 +289,45 @@ describe("regenerate at slash text (#555)", () => {
   );
 });
 
+describe("regenerate dispatch text (#711)", () => {
+  it(
+    "a bare `/help` entry left before escaping is dispatched with one leading space",
+    REAL,
+    async () => {
+      await expectRegeneratedEscaped(HELP, HELP);
+    },
+  );
+
+  it("a branch text not starting with `/` is dispatched verbatim", REAL, async () => {
+    const world = await openWorld();
+
+    await expectRegenerated(world, [QUESTION], "fake-entry-2", QUESTION);
+  });
+
+  it(
+    "the skills are read on every request: 502 before the skill is installed, 400 after",
+    REAL,
+    async () => {
+      const world = await openWorld();
+      seedTurns(world, [SKILL_CALL]);
+
+      expectEnvelope(await postRegenerate(world), 502, AGENT_UNAVAILABLE_ENVELOPE);
+      await settle();
+      const before = regenerateTraces(world);
+      expect(before.frames).toContain("get_branch_messages");
+      expect(before.frames).not.toContain("branch");
+      expect(before.spawns).toBe(1);
+
+      installSkill(world.rt.runtime.stateDir);
+      expectEnvelope(await postRegenerate(world), 400, BAD_REQUEST_ENVELOPE);
+      await settle();
+
+      expect(regenerateTraces(world)).toEqual(before);
+      expect(held(world)).toBe(false);
+    },
+  );
+});
+
 describe("regenerate and fork at `/todo export` (#704)", () => {
   it(
     "a `/todo export` last message is ordinary text: 202, dispatched as branched",
@@ -306,6 +382,21 @@ describe("fork at slash text (#555)", () => {
       seeded.unchanged();
     },
   );
+
+  it("a `/todo` anchor is 400 even when the session has no session file (#711)", REAL, async () => {
+    const world = await openWorld();
+    const { store, db } = world.fixture;
+    const anchor = store.acceptPrompt(world.session, OWNER_ID, "/todo");
+    store.finishTurn(anchor.assistantMessageId, "done");
+    expect(sessionFile(db, world.session)).toBeNull();
+
+    await expectRefused(
+      world,
+      () => postFork(world, anchor.userMessageId),
+      400,
+      BAD_REQUEST_ENVELOPE,
+    );
+  });
 
   it(
     "E8 the same anchor with the skill not installed is aligned instead: no entry, 502",
@@ -401,9 +492,11 @@ describe("fork at slash text (#555)", () => {
 
     expectEnvelope(await postFork(world, seeded.u2), 502, AGENT_UNAVAILABLE_ENVELOPE);
 
-    const frames = types(scriptedAt(world.scripted, 0).frames);
+    const temp = scriptedAt(world.scripted, 0);
+    const frames = types(temp.frames);
     expect(frames).toContain("get_branch_messages");
     expect(frames).not.toContain("branch");
+    expect(isLive(temp.child)).toBe(false);
     expect(world.errors).toEqual([]);
     expect(snapshot(db, world.session, true)).toEqual(before);
     expect(rowCounts(db)).toEqual(rows);

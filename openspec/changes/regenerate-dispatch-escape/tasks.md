@@ -9,10 +9,10 @@ Fixture level: compact
 实施顺序：本 issue 在 #704 合入之后实施（同一测试文件）；实现前复核 #704 新增的 regenerate 用例里没有「裸 `/` 条目 + 断言 `prompt` 帧为裸文本」的断言，有则按本规格更新并在报告里列出。
 
 ## 1. 实现
-- [ ] 1.1 `branching.ts` `Regenerations`：派发文本规则（spec delta 原句）；只此一处派发；注释同步。不改 `matches`/`entryFor`、不改 fork。
-- [ ] 1.2 `turn-control-slash.test.ts`：(a) 末条存储 user 为白名单外 `/xxx`、末条条目为逐字相同的裸 `/xxx`（必须用真 fake-omp 的 `branch` 世界，如 `openWorld({entries:[…]})`；scripted FakeChild 的 `branch` 返回固定文本，造不出裸 `/`）→ 202，`prompt` 帧 `message` 恰为 ` /xxx`，存储正文不变；(b) 现有 E7（条目已是转义形）仍恰为该条目文本——补一条「不以两个空格开头」的断言；(c) 不以 `/` 开头的文本派发逐字不变（可在既有用例上补断言）。
-- [ ] 1.3 同文件的三条加固：(i) `skills` 端口逐次求值——同一世界内，锚点 `/skill:x …` 在安装前 regenerate 得 502、安装后得 400（第二次请求不能复用断言零 spawn 的 `expectRefused`，自写断言）；(ii) fork 的「命令锚点 400 先于无会话文件 502」——不预置会话文件（不用 `seedTurns`，直接经 store 写入消息），在 `/todo` 处 fork → 400；(iii) E14 补断言临时进程已退出（与其余 fork 用例的 `isLive(...) === false` 同法）。
-- [ ] 1.4 除 `server/src/sessions/branching.ts`、`server/test/turn-control-slash.test.ts`（行数逼近上限时可把新用例放进新文件 `server/test/turn-control-slash-dispatch.test.ts`）与本 change 目录外不改其它被跟踪文件。
+- [x] 1.1 `branching.ts` `Regenerations`：派发文本规则（spec delta 原句）；只此一处派发；注释同步。不改 `matches`/`entryFor`、不改 fork。
+- [x] 1.2 `turn-control-slash.test.ts`：(a) 末条存储 user 为白名单外 `/xxx`、末条条目为逐字相同的裸 `/xxx`（必须用真 fake-omp 的 `branch` 世界，如 `openWorld({entries:[…]})`；scripted FakeChild 的 `branch` 返回固定文本，造不出裸 `/`）→ 202，`prompt` 帧 `message` 恰为 ` /xxx`，存储正文不变；(b) 现有 E7（条目已是转义形）仍恰为该条目文本——补一条「不以两个空格开头」的断言；(c) 不以 `/` 开头的文本派发逐字不变（可在既有用例上补断言）。
+- [x] 1.3 同文件的三条加固：(i) `skills` 端口逐次求值——同一世界内，锚点 `/skill:x …` 在安装前 regenerate 得 502、安装后得 400（第二次请求不能复用断言零 spawn 的 `expectRefused`，自写断言）；(ii) fork 的「命令锚点 400 先于无会话文件 502」——不预置会话文件（不用 `seedTurns`，直接经 store 写入消息），在 `/todo` 处 fork → 400；(iii) E14 补断言临时进程已退出（与其余 fork 用例的 `isLive(...) === false` 同法）。
+- [x] 1.4 除 `server/src/sessions/branching.ts`、`server/test/turn-control-slash.test.ts`（行数逼近上限时可把新用例放进新文件 `server/test/turn-control-slash-dispatch.test.ts`）与本 change 目录外不改其它被跟踪文件。
 
 ## Must preserve
 - change A 与 #704 既有 regenerate/fork 用例零 diff 通过（`turn-control*.test.ts`、`session-rest-slash.test.ts`）；E10（旧裸条目对位）仍 2xx。
