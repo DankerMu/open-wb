@@ -12,6 +12,11 @@ type FocusTarget = RefObject<HTMLElement | null>;
  * Radix 模态 Content 关闭时只把焦点还给 `Dialog.Trigger`，无 trigger 时落到 body；故「传了
  * `returnFocus`」或「无 trigger」时由本组件拦截并归还 `returnFocus ?? 打开者`，否则交给 Radix。
  *
+ * 本组件的归还一律 `focus({ preventScroll: true })`：不带参数的 `focus()` 会把归还目标滚入视口，
+ * 转录贴底跟随时从较早消息的产物卡打开预览再关闭，就会被拽回那张卡片并解除贴底。代价：归还目标可以在
+ * 可视区之外（此时没有可见的焦点指示）；随后的 Tab/Shift+Tab 由浏览器把新焦点元素滚入视口，滚动到那时
+ * 才发生。有 `trigger` 且未传 `returnFocus` 时归还由 Radix 做（不带参数的 `focus()`，仍会滚动），不经此处。
+ *
  * 调用方指定初始焦点只能走 `initialFocus`，禁止在内容里用 React `autoFocus`：挂载时焦点若已在容器内，
  * FocusScope 不派发 `onMountAutoFocus`（即不触发 `onOpenAutoFocus`），打开者记录不会更新而停留在
  * 上一次打开时的旧值，关闭后焦点会被归还到错误元素。
@@ -37,7 +42,7 @@ export function useFocusHandoff({
     onCloseAutoFocus(event: Event) {
       if (returnFocus || !hasTrigger) {
         event.preventDefault();
-        (returnFocus?.current ?? opener.current)?.focus();
+        (returnFocus?.current ?? opener.current)?.focus({ preventScroll: true });
       }
     },
   };

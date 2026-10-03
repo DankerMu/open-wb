@@ -26,6 +26,15 @@ function closeButton() {
   return screen.getByRole("button", { name: "关闭" });
 }
 
+/**
+ * 归还调用的入参（#735）：spy 装在归还目标实例上，且在用例自己的 `focus()` 之后安装，调用列表里就只剩
+ * 组件的归还。不对原型 spy 用 `toHaveBeenCalledWith`——Radix 打开时的自动聚焦本身带 `preventScroll`，恒绿。
+ */
+function spyFocus(target: HTMLElement) {
+  return vi.spyOn(target, "focus");
+}
+const NO_SCROLL = [[{ preventScroll: true }]];
+
 /** 页面上的打开者按钮 + 另一个按钮（returnFocus 目标）+ 受控 Dialog。 */
 function DialogHarness({ open, withReturnFocus }: { open: boolean; withReturnFocus?: boolean }) {
   const other = useRef<HTMLButtonElement>(null);
@@ -314,10 +323,12 @@ describe("Dialog：焦点归还 (6)", () => {
     const { rerender } = render(<DialogHarness open={false} />);
     const opener = screen.getByRole("button", { name: "打开者" });
     opener.focus();
+    const focus = spyFocus(opener);
     rerender(<DialogHarness open />);
     expect(activeElement()).toBe(closeButton());
     rerender(<DialogHarness open={false} />);
     await waitFor(() => expect(activeElement()).toBe(opener));
+    expect(focus.mock.calls).toEqual(NO_SCROLL);
   });
 
   it("打开前活动元素为 body、传 returnFocus：关闭后焦点在其指向元素", async () => {
@@ -335,9 +346,11 @@ describe("Dialog：焦点归还 (6)", () => {
     const opener = screen.getByRole("button", { name: "打开者" });
     const other = screen.getByRole("button", { name: "其他" });
     opener.focus();
+    const focus = spyFocus(other);
     rerender(<DialogHarness open withReturnFocus />);
     rerender(<DialogHarness open={false} withReturnFocus />);
     await waitFor(() => expect(activeElement()).toBe(other));
+    expect(focus.mock.calls).toEqual(NO_SCROLL);
   });
 
   /** 点击 trigger 打开（焦点从 body 出发、未聚焦 trigger）→ 断言已打开 → Escape 关闭；返回 trigger。 */
@@ -361,9 +374,11 @@ describe("Dialog：焦点归还 (6)", () => {
   it("有 trigger 且传 returnFocus：关闭后焦点归还 returnFocus 而非 trigger", async () => {
     render(<TriggerReturnFocusHarness />);
     const other = screen.getByRole("button", { name: "其他" });
+    const focus = spyFocus(other);
     const trigger = openViaTriggerThenEscape();
     await waitFor(() => expect(activeElement()).toBe(other));
     expect(activeElement()).not.toBe(trigger);
+    expect(focus.mock.calls).toEqual(NO_SCROLL);
   });
 });
 
@@ -472,10 +487,12 @@ describe("ConfirmDialog (7)", () => {
     const { rerender } = render(<ConfirmHarness open={false} />);
     const target = screen.getByRole("button", { name: "设置" });
     expect(activeElement()).toBe(document.body);
+    const focus = spyFocus(target);
     rerender(<ConfirmHarness open />);
     expect(screen.getByRole("alertdialog")).toBeTruthy();
     rerender(<ConfirmHarness open={false} />);
     await waitFor(() => expect(activeElement()).toBe(target));
+    expect(focus.mock.calls).toEqual(NO_SCROLL);
   });
 });
 
@@ -537,10 +554,12 @@ describe("Drawer (8)", () => {
     const { rerender } = render(<DrawerHarness open={false} />);
     const opener = screen.getByRole("button", { name: "导航按钮" });
     opener.focus();
+    const focus = spyFocus(opener);
     rerender(<DrawerHarness open />);
     expect(activeElement()).toBe(closeButton());
     rerender(<DrawerHarness open={false} />);
     await waitFor(() => expect(activeElement()).toBe(opener));
+    expect(focus.mock.calls).toEqual(NO_SCROLL);
   });
 });
 
