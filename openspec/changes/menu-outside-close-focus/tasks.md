@@ -5,10 +5,10 @@ Fixture level: compact
 归档次序（前提）：本 change 先归档进主规格；父 change `s1c-session-metadata-presentation` 归档前按 #754 从主规格现文重新生成全部 delta。本 PR 不改父 delta。
 
 ## 1. 实现
-- [ ] 1.1 `web/src/ui/menu.tsx` JSDoc：写明 Escape 与选中项关闭后回焦 trigger、外点关闭不回焦。
-- [ ] 1.2 `web/src/ui/popover.tsx` JSDoc：写明 Escape 关闭回焦 trigger、外点关闭不回焦。
-- [ ] 1.3 `web/test/ui-menu.test.tsx`「非模态 (M8)」用例：外点序列关闭后让出一个宏任务，再断言 `document.activeElement` 不是 trigger（与 `ui-popover-tooltip.test.tsx` 的同类断言同法）。
-- [ ] 1.4 两个组件文件除注释外零 diff；除 `web/test/ui-menu.test.tsx` 与本 change 目录外不改其它被跟踪文件。
+- [x] 1.1 `web/src/ui/menu.tsx` JSDoc：写明 Escape 与选中项关闭后回焦 trigger、外点关闭不回焦。
+- [x] 1.2 `web/src/ui/popover.tsx` JSDoc：写明 Escape 关闭回焦 trigger、外点关闭不回焦。
+- [x] 1.3 `web/test/ui-menu.test.tsx`「非模态 (M8)」用例：外点序列关闭后让出一个宏任务，再断言 `document.activeElement` 不是 trigger（与 `ui-popover-tooltip.test.tsx` 的同类断言同法）。
+- [x] 1.4 两个组件文件除注释外零 diff；除 `web/test/ui-menu.test.tsx` 与本 change 目录外不改其它被跟踪文件。
 
 ## Must preserve
 - `ui-menu`、`ui-popover-tooltip`、`chat-page-sidebar` 既有测试全部通过；Escape 与选中项回焦的既有断言不动。

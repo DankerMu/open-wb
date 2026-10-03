@@ -17,7 +17,8 @@ type MenuProps = {
 
 /**
  * 下拉菜单：行为层全部由 Radix DropdownMenu 提供（role=menu/menuitem、roving focus 与上下/Home/End/
- * typeahead、Enter/Space/点击选择、Escape/外点关闭、关闭后焦点归还 trigger），本组件不写键盘/焦点代码。
+ * typeahead、Enter/Space/点击选择、Escape/外点关闭），本组件不写键盘/焦点代码。
+ * 焦点归还：选中项或 Escape 关闭后焦点回 trigger；外点关闭不归还焦点（非模态，Radix 在外部交互后不回焦）。
  * `modal={false}`：外点关闭且点击到达目标，不锁 body 指针事件、不给页面其它元素加 aria-hidden（demo:1056）；
  * `loop` 首尾环绕。样式映射 demo `.menu-pop`/`.menu-item`（menu.css）。
  */

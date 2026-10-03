@@ -135,12 +135,16 @@ describe("项外观 (M7)", () => {
 });
 
 describe("非模态 (M8)", () => {
-  it("打开期间 body 可点、其它元素未被 aria-hidden；外点序列后关闭", async () => {
-    await openByKeyboard(renderMenu().trigger);
+  it("打开期间 body 可点、其它元素未被 aria-hidden；外点序列后关闭、焦点不回 trigger", async () => {
+    const { trigger } = renderMenu();
+    await openByKeyboard(trigger);
     expect(document.body.style.pointerEvents).toBe("");
     expect(screen.getByRole("button", { name: "其他" })).toBeTruthy();
     await yieldMacrotask();
     pressPointer(document.body);
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    // 非模态：Radix 在外部交互后不把焦点还给 trigger（让出宏任务，等关闭后的回焦时机过去再断言）。
+    await yieldMacrotask();
+    expect(document.activeElement).not.toBe(trigger);
   });
 });
