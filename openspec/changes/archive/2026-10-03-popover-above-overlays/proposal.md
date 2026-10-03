@@ -20,3 +20,7 @@
 ## Impact
 - 视觉：桌面上 Popover 与非覆盖层内容的相对层级不变（都高于 1100 以下的页面层）。Dialog 打开时 Radix 的外点关闭会先关掉 Popover，因此不会出现 Popover 压在新开 Dialog 之上的状态。
 - 走查：`ui-walk-sessions.spec.ts` 多两次点击和一次 Escape，30 s 单测预算内。
+
+## 交付记录（PR #762）
+- 评审后修复一轮：走查第 6 步补了对 `时间 › 全部时间` 的真实点击（默认选中项，只做命中测试），使「两个单选组可点」两组都有证据；单测补了外点关闭后焦点不回 trigger 的断言。chat-harness 第 6 步的规格文本未列出 `时间` 组的点击，由 session-sidebar 的 Scenario 覆盖。
+- 范围外、已登记：`Menu` 的同类规格句与 `popover.tsx` / `menu.tsx` 的 JSDoc（#763）。
