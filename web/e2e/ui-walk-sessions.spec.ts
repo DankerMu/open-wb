@@ -411,11 +411,36 @@ async function expectFocusInNavOverlay(page: Page, project: WalkProject): Promis
   await expect(overlay.and(page.locator(":focus-within"))).toHaveCount(1);
 }
 
+// 筛选弹层 portal 到 `body`，在 `导航` 覆盖层的 DOM 子树之外：弹层与单选项从 `page` 定位。真实点击（无
+// `force`）经 Playwright 的命中测试，弹层画在覆盖层遮罩之下时点击被拦截（#715）。`全部` 在 `状态` 组内
+// exact 匹配（否则同时命中 `全部时间`）。`全部时间` 是默认选中项，Radix 只在未选中时回调，点它只做命中
+// 测试、无需复位。Escape 只关弹层、焦点回 `筛选任务`，覆盖层由 `inspectSidebar` 关闭。
 async function step6Sidebar(page: Page, project: WalkProject): Promise<void> {
   await inspectSidebar(page, project, async (sidebar) => {
     const { list, pinned, tasks, spaces } = sections(sidebar);
     const workspace = spaces.getByRole("group", { name: WORKSPACE_NAME, exact: true });
     await expectSelectedIn(list, workspace, [tasks, pinned]);
+    const trigger = list.getByRole("button", { name: "筛选任务", exact: true });
+    await trigger.click();
+    const filter = page.getByRole("dialog", { name: "筛选任务", exact: true });
+    const status = filter.getByRole("radiogroup", { name: "状态", exact: true });
+    const finished = status.getByRole("radio", { name: "已完成", exact: true });
+    await finished.click();
+    await expect(finished).toHaveAttribute("aria-checked", "true");
+    await expectSelectedIn(list, workspace, [tasks, pinned]);
+    const all = status.getByRole("radio", { name: "全部", exact: true });
+    await all.click();
+    await expect(all).toHaveAttribute("aria-checked", "true");
+    const time = filter.getByRole("radiogroup", { name: "时间", exact: true });
+    const anyTime = time.getByRole("radio", { name: "全部时间", exact: true });
+    await anyTime.click();
+    await expect(anyTime).toHaveAttribute("aria-checked", "true");
+    await page.keyboard.press("Escape");
+    await expect(filter).toHaveCount(0);
+    if (project === "mobile-dark") {
+      await expect(page.getByRole("dialog", { name: "导航", exact: true })).toHaveCount(1);
+    }
+    await expect(trigger).toBeFocused();
   });
 }
 
