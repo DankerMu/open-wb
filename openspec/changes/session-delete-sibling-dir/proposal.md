@@ -18,4 +18,6 @@ omp 建的同名目录及其内容的 mode 取决于 omp 的 umask：`0002`/`000
 ## Non-goals
 - regenerate/fork 遗留的旧分支 `.jsonl` 及其同名目录（规格已明确不在清理范围）。
 - fork/regenerate 之后旧产物引用在 omp 里失效（omp 行为，本应用不补）。
-- `sessions/<ownerId>` 组可写带来的 rename-swap 残余（既有注释已记录；realpath → rm 之间的 TOCTOU 同级，注释注明）。
+- `sessions/<ownerId>` 组可写带来的 rename-swap **竞态**残余（校验与 unlink / rm 之间替换目录分量）。
+
+评审第 1 轮更正：原文把「`sessions` 或 `sessions/<ownerId>` 被换成符号链接」整体归为竞态残余，不成立——静态的符号链接不需要竞态：`realpath(dirname(path))` 与 `realpath(sessionDir)` 都经过该链接、恒等。master 上它让 app uid unlink 链接目标目录里的一个普通文件；本 change 的递归删除会把它放大成删一棵目录树。因此本 change 加一条校验（会话目录的 realpath 必须恰为 `<state realpath>/sessions/<ownerId>`），静态形态对 unlink 与 rm 一并关闭；剩下的才是真正的竞态窗口，由 #706 第二刀收紧 `sessions/` 的归属后进一步缩小。
