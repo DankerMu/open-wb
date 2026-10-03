@@ -344,11 +344,12 @@ export function expectBindable(host: string, port: number): Promise<void> {
 }
 
 /**
- * 扣住真实 models.yml 写入：先落 MODELS_ENTERED 标记，再轮询等待 MODELS_RELEASE 出现。
+ * 扣住真实 models.yml 写入的最后一步（临时文件 rename 到 models.yml，#706）：先落 MODELS_ENTERED
+ * 标记，再轮询等待 MODELS_RELEASE 出现。
  * - throw（#227）：测试写 release；放行后以 EACCES 拒绝（等价于 state 目录不可写），
- *   让测试能在失败判定前放入在飞请求。不安装 SIGTERM 监听。
+ *   写入方清理临时文件后 reject，让测试能在失败判定前放入在飞请求。不安装 SIGTERM 监听。
  * - call-through（#210）：写 entered 之前安装 SIGTERM 监听，由它写 release；放行后调用真实
- *   writeFile。入口与本监听在同一次 process.emit 内同步执行，而被扣住的写入只在之后的定时器
+ *   rename。入口与本监听在同一次 process.emit 内同步执行，而被扣住的写入只在之后的定时器
  *   宏任务恢复，所以 signalReceived 必然先于写入完成与其后的发布守卫。
  */
 export function gatedModelsWriteHook(mode: "throw" | "call-through"): string {
@@ -369,9 +370,9 @@ export function gatedModelsWriteHook(mode: "throw" | "call-through"): string {
     "const fs = require('node:fs');",
     "const fsp = require('node:fs/promises');",
     "const { syncBuiltinESMExports } = require('node:module');",
-    "const nativeWriteFile = fsp.writeFile;",
-    "fsp.writeFile = async function gatedWriteFile(path, ...rest) {",
-    "  if (typeof path === 'string' && path.endsWith('models.yml')) {",
+    "const nativeRename = fsp.rename;",
+    "fsp.rename = async function gatedRename(source, target, ...rest) {",
+    "  if (typeof target === 'string' && target.endsWith('models.yml')) {",
     ...onEnter,
     "    fs.writeFileSync(process.env.MODELS_ENTERED, '');",
     "    while (!fs.existsSync(process.env.MODELS_RELEASE)) {",
@@ -379,7 +380,7 @@ export function gatedModelsWriteHook(mode: "throw" | "call-through"): string {
     "    }",
     ...onRelease,
     "  }",
-    "  return nativeWriteFile.call(this, path, ...rest);",
+    "  return nativeRename.call(this, source, target, ...rest);",
     "};",
     "syncBuiltinESMExports();",
     "",
