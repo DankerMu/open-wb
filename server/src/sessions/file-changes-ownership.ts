@@ -4,6 +4,8 @@
  * stored relative to it. The only filesystem access of the file-change path, metadata only
  * (`realpath`/`lstat`); nothing is created, read or written. Not `core/sandbox/resolve`: that one
  * rejects absolute paths and every symlink component, this one judges where a path really is.
+ * Issue #740: that access is synchronous and the event is sized by a low-trust child, so one
+ * event judges at most 100 distinct paths (the first 100 raw candidates, each normalized path once).
  */
 import { lstatSync, realpathSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
@@ -11,20 +13,27 @@ import type { FileChange } from "./file-changes.js";
 
 const MAX_PATH_BYTES = 1024;
 const MAX_FILES = 50;
+const MAX_CANDIDATES = 100;
+
+/** The verdicts of one event, keyed by normalized path; `undefined` is a remembered drop. */
+type Verdicts = Map<string, string | undefined>;
 
 /**
  * The candidates owned by `root`, as new elements `{path, added, removed, kind}` with `path`
  * relative to it: merged by path (first position and kind win, edit counts summed), then cut to
- * the first 50. `root` must be canonical (its own realpath), else nothing is owned. Never throws
- * for an array of `FileChange` objects (whatever their `path` is) and never mutates its input.
+ * the first 50. Only the first 100 raw candidates are judged, by position (a dropped candidate
+ * uses its place too); the rest reach no filesystem call. `root` must be canonical (its own
+ * realpath), else nothing is owned. Never throws for an array of `FileChange` objects (whatever
+ * their `path` is) and never mutates its input.
  */
 export function ownedChanges(root: string, files: readonly FileChange[]): FileChange[] {
   if (!isCanonical(root)) {
     return [];
   }
   const merged = new Map<string, FileChange>();
-  for (const file of files) {
-    const path = ownedCandidate(root, file.path);
+  const verdicts: Verdicts = new Map();
+  for (const file of files.slice(0, MAX_CANDIDATES)) {
+    const path = ownedCandidate(root, file.path, verdicts);
     if (path === undefined) {
       continue;
     }
@@ -61,12 +70,20 @@ function isCanonical(root: string): boolean {
 /**
  * One raw path → its owned relative path. `resolve` joins a relative path to the root and folds
  * `.`, `..` and repeated or trailing separators; only that normalized target reaches the
- * filesystem (an unnormalized `dangling/` would make lstat follow the dangling link).
+ * filesystem (an unnormalized `dangling/` would make lstat follow the dangling link). A target
+ * already in `verdicts` is not judged again. `resolve` throws for a raw path that is not a string,
+ * so the key is computed inside the try and such a candidate is dropped unremembered.
  */
-function ownedCandidate(root: string, raw: string): string | undefined {
+function ownedCandidate(root: string, raw: string, verdicts: Verdicts): string | undefined {
   try {
-    const real = resolveReal(resolve(root, raw));
-    return real === undefined ? undefined : ownedPath(root, real);
+    const target = resolve(root, raw);
+    if (verdicts.has(target)) {
+      return verdicts.get(target);
+    }
+    const real = resolveReal(target);
+    const owned = real === undefined ? undefined : ownedPath(root, real);
+    verdicts.set(target, owned);
+    return owned;
   } catch {
     return undefined;
   }

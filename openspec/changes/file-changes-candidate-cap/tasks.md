@@ -5,13 +5,13 @@ Fixture level: compact
 归档次序（前提）：本 change 先归档进主规格；父 change `s1c-session-metadata-presentation` 的 turn-artifacts delta 仍是旧文，归档前按 #754 从主规格现文重新生成全部 delta。本 PR 不改父 delta（只改父 design.md 的两句）。
 
 ## 1. 实现
-- [ ] 1.1 `file-changes-ownership.ts`：`MAX_CANDIDATES = 100`，`ownedChanges` 只遍历前 100 个原始候选（按位置计：空间外、超长、非字符串等被丢弃的候选同样占名额）；按 `resolve(root, raw)` 的结果记忆 `ownedCandidate` 的返回值，用 `Map.has` 区分已记忆的 `undefined`。记忆键的计算必须在既有的 try 之内（或非字符串候选不进记忆、直接丢弃）——`resolve` 对非字符串抛 TypeError，「不抛」契约不得回归。注释同步。签名与「不抛、不改入参」不变。
-- [ ] 1.2 新文件 `server/test/file-changes-candidate-cap.test.ts`，用 `server/test/persist-files-changed.test.ts:19-37` 的 `vi.hoisted` + `vi.mock("node:fs", importOriginal)` 透传记录器，记录器同时记下函数名与首参（断言里的「首参」一律比对 `resolve(root, raw)` 后的绝对路径，记录器看到的不是原始相对写法）；每个用例在调用 `ownedChanges` 之前清空记录：
+- [x] 1.1 `file-changes-ownership.ts`：`MAX_CANDIDATES = 100`，`ownedChanges` 只遍历前 100 个原始候选（按位置计：空间外、超长、非字符串等被丢弃的候选同样占名额）；按 `resolve(root, raw)` 的结果记忆 `ownedCandidate` 的返回值，用 `Map.has` 区分已记忆的 `undefined`。记忆键的计算必须在既有的 try 之内（或非字符串候选不进记忆、直接丢弃）——`resolve` 对非字符串抛 TypeError，「不抛」契约不得回归。注释同步。签名与「不抛、不改入参」不变。
+- [x] 1.2 新文件 `server/test/file-changes-candidate-cap.test.ts`，用 `server/test/persist-files-changed.test.ts:19-37` 的 `vi.hoisted` + `vi.mock("node:fs", importOriginal)` 透传记录器，记录器同时记下函数名与首参（断言里的「首参」一律比对 `resolve(root, raw)` 后的绝对路径，记录器看到的不是原始相对写法）；每个用例在调用 `ownedChanges` 之前清空记录：
   - (a) spec Scenario 原样：150 个候选（前 100 中 40 个不同的已落盘空间内路径及其重复，含 `./a.txt` 与 `a.txt`；第 101–150 是另外 50 个已落盘空间内路径）→ 结果恰为那 40 项、按首次出现次序、`added`/`removed` 求和；
   - (b) 同一输入的调用记录：`realpathSync` 恰 41 次（根 1 次 + 每个不同路径 1 次）、`lstatSync` 0 次；第 101–150 个路径从未作为任何 fs 调用的首参出现；
   - (c) 被丢弃的路径重复出现时只判定一轮：空间外路径重复 3 次 → 以它为首参的 `realpathSync` 恰 1 次；悬空符号链接重复 3 次 → 以它为首参的 `realpathSync` 与 `lstatSync` 各恰 1 次；
   - (d) 边界与名额：前 100 个候选里 60 个是空间外路径、40 个是不同的空间内路径，第 101 个是一个新的空间内路径 → 结果恰 40 项（第 101 个不在其中，且从未作为 fs 调用首参出现）；把同一输入截到恰 100 个 → 结果相同。
-- [ ] 1.3 除上述两个文件与本 change 目录外不改其它被跟踪文件（`file-changes-ownership.test.ts` 文件头注释若描述了与新行为矛盾的内容可更正，其断言不动；父 design 的更正由编排方做）。
+- [x] 1.3 除上述两个文件与本 change 目录外不改其它被跟踪文件（`file-changes-ownership.test.ts` 文件头注释若描述了与新行为矛盾的内容可更正，其断言不动；父 design 的更正由编排方做）。
 
 ## Must preserve
 - `server/test/file-changes-ownership.test.ts` 全部用例断言不动且全绿，尤其 O11（非字符串 / NUL / 超长 path 不抛）与 O13（不改入参）、「上限」Scenario（60 个不同路径 → 前 50）。
