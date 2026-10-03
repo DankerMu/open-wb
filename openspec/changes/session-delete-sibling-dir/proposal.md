@@ -1,0 +1,18 @@
+# Proposal: session-delete-sibling-dir（#758）
+
+## Why
+omp 为每个会话在 `<ts>_<uuid>.jsonl` 旁边另建同名目录 `<ts>_<uuid>/`，存放工具完整输出等由会话内容派生的产物（实测：一次 60001 行的 bash 输出写成 `1.bash.log`，会话正文以 `artifact://1` 引用）。`DELETE /api/sessions/:id` 只 unlink `.jsonl`，该目录永久残留：删除语义不完整，且随会话数无界累积。fake-omp 不建该目录，现有测试看不到。
+
+## What Changes
+- `server/src/sessions/session-delete.ts`：`.jsonl` 处理之后，在同一校验过的 owner 会话目录下递归移除同名目录（`lstat` 必须是目录，不跟随符号链接；失败走错误通道，响应仍 204）。
+- fake-omp：创建会话 `.jsonl` 时同时建同名目录（一个文件 + 一层嵌套子目录）。
+- 测试：`session-delete.test.ts`、`session-delete-running.test.ts`、fake-omp harness 测试、`server/test/linux/uid-isolation.test.ts`。
+- 规格：session-metadata MODIFIED「会话删除」；omp-test-harness MODIFIED「假 omp 进程契约」。
+
+## 开放问题的结论（真 omp v18.0.10 + 真实模型端点，2026-10-03）
+fork 会话不依赖源会话的同名目录：fork 出的新 `.jsonl` 不带同名目录（omp 不复制产物），文件头只以 `parentSession` 记录源 `.jsonl` 路径；在 fork 会话里读取 `artifact://1` 得到 `No artifacts directory found`——此时源目录仍在。omp 只在会话自己的同名目录里解析产物，所以删除源目录不改变 fork 会话的可见行为。方案按 issue 推荐实施，无需「仅在无存活 fork 时删除」或复制。
+
+## Non-goals
+- regenerate/fork 遗留的旧分支 `.jsonl` 及其同名目录（规格已明确不在清理范围）。
+- fork/regenerate 之后旧产物引用在 omp 里失效（omp 行为，本应用不补）。
+- `sessions/<ownerId>` 组可写带来的 rename-swap 残余（既有注释已记录；realpath → rm 之间的 TOCTOU 同级，注释注明）。
