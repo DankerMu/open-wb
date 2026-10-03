@@ -4,6 +4,8 @@
  * the six-key element of openspec/changes/project-config-surface (chat-web 命令目录方法). Seam: the
  * real `createApiClient` over a stubbed `fetch`. Oracles: the path, the request options and the
  * element of the spec delta, and the body the server sends (server/src/sessions/rest-commands.ts).
+ * Issue 816 `listProjectConfig(workspaceId)`: F1–F3 of the same scenario, against the body of
+ * server/src/sessions/rest-project-config.ts.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApiClient } from "../src/lib/api.js";
@@ -218,5 +220,114 @@ describe("listCommands (A1–A5)", () => {
     expect(onUnauthorized).not.toHaveBeenCalled();
     expect(await list()).toMatchObject({ status: 401, code: "unauthorized" });
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+});
+
+const CONFIG = "/api/project-config";
+/** The files of the spec scenario 项目配置入口, as the server orders them. */
+const FILES = [
+  { path: ".omp/RULES.md", kind: "instructions", depth: 0 },
+  { path: ".omp/SYSTEM.md", kind: "system", depth: 0 },
+  { path: "AGENTS.md", kind: "instructions", depth: 1 },
+  { path: ".omp/agents/reviewer.md", kind: "agent", depth: 2 },
+];
+const [RULES] = FILES;
+
+/** The failure of `listProjectConfig(null)` against a 200 response carrying `body`. */
+function configRejection(body: unknown) {
+  vi.stubGlobal("fetch", createFetchMock({ [CONFIG]: () => jsonResponse(body) }));
+  return captureApiError(createApiClient().listProjectConfig(null));
+}
+
+describe("listProjectConfig (F1–F3)", () => {
+  it("F1 null GETs /api/project-config without a query, a body or a cache; a workspace id adds only workspaceId=<id>, encoded", async () => {
+    const id = "0123456789abcdef0123456789abcdef";
+    const encoded = `${CONFIG}?workspaceId=a%20b%26c%3Dd%2F%E4%B8%AD`;
+    const { signal } = new AbortController();
+    const fetchMock = createFetchMock({
+      [CONFIG]: () => jsonResponse({ files: [] }),
+      [`${CONFIG}?workspaceId=${id}`]: () => jsonResponse({ files: FILES }),
+      [encoded]: () => jsonResponse({ files: [RULES] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = createApiClient();
+
+    await expect(client.listProjectConfig(null)).resolves.toEqual([]);
+    const files = await client.listProjectConfig(id, { signal });
+    await expect(client.listProjectConfig("a b&c=d/中")).resolves.toEqual([RULES]);
+
+    expect(files).toEqual(FILES);
+    expect(files.map((file) => `${file.depth}:${file.path}:${file.kind}`)).toEqual([
+      "0:.omp/RULES.md:instructions",
+      "0:.omp/SYSTEM.md:system",
+      "1:AGENTS.md:instructions",
+      "2:.omp/agents/reviewer.md:agent",
+    ]);
+    expect(fetchMock.mock.calls).toEqual([
+      ["/api/project-config", { method: "GET", credentials: "same-origin", cache: "no-store" }],
+      [
+        `/api/project-config?workspaceId=${id}`,
+        { method: "GET", credentials: "same-origin", cache: "no-store", signal },
+      ],
+      [encoded, { method: "GET", credentials: "same-origin", cache: "no-store" }],
+    ]);
+    for (const [, options] of fetchMock.mock.calls) expect(options).not.toHaveProperty("body");
+  });
+
+  it.each([
+    ["an unknown kind", [{ ...RULES, kind: "rules" }]],
+    ["a negative depth", [{ ...RULES, depth: -1 }]],
+    ["a fractional depth", [{ ...RULES, depth: 0.5 }]],
+    ["an unsafe depth", [{ ...RULES, depth: 2 ** 53 }]],
+    ["a depth that is a string", [{ ...RULES, depth: "0" }]],
+    ["an element with a fourth key", [{ ...RULES, size: 12 }]],
+    ["an element without depth", [{ path: "AGENTS.md", kind: "instructions" }]],
+    ["an empty path", [{ ...RULES, path: "" }]],
+    ["a path that is not a string", [{ ...RULES, path: 7 }]],
+    ["a null element", [null]],
+  ])("F2 rejects the whole list for %s after valid elements", async (_label, invalid) => {
+    expectRequestFailure(await configRejection({ files: [...FILES, ...invalid] }), 200);
+  });
+
+  it.each([
+    ["a second body key", { files: FILES, total: 4 }],
+    ["files that are not an array", { files: { 0: RULES } }],
+    ["a body without files", {}],
+    ["the body of the command catalogue", { commands: [] }],
+    ["an array body", FILES],
+    ["a null body", null],
+  ])("F2 rejects %s", async (_label, body) => {
+    expectRequestFailure(await configRejection(body), 200);
+  });
+
+  it("F3 a 401 notifies unauthorized once, a 404 keeps its envelope and an aborted call fails as cancelled", async () => {
+    const missing = `${CONFIG}?workspaceId=${"e".repeat(32)}`;
+    const onUnauthorized = vi.fn();
+    const fetchMock = createFetchMock({
+      [missing]: () => jsonResponse({ error: { code: "not_found", message: "资源不存在" } }, 404),
+      [`${CONFIG}?workspaceId=expired`]: () =>
+        jsonResponse({ error: { code: "unauthorized", message: "未登录" } }, 401),
+      [CONFIG]: untilAborted,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = createApiClient({ onUnauthorized });
+    const controller = new AbortController();
+
+    const notFound = await captureApiError(client.listProjectConfig("e".repeat(32)));
+    expect([notFound.status, notFound.code, notFound.message]).toEqual([
+      404,
+      "not_found",
+      "资源不存在",
+    ]);
+    expect(onUnauthorized).not.toHaveBeenCalled();
+
+    const unauthorized = await captureApiError(client.listProjectConfig("expired"));
+    expect([unauthorized.status, unauthorized.code]).toEqual([401, "unauthorized"]);
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+
+    const pending = captureApiError(client.listProjectConfig(null, { signal: controller.signal }));
+    controller.abort();
+    expectRequestFailure(await pending, 0);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });
