@@ -12,6 +12,9 @@ omp 为每个会话在 `<ts>_<uuid>.jsonl` 旁边另建同名目录 `<ts>_<uuid>
 ## 开放问题的结论（真 omp v18.0.10 + 真实模型端点，2026-10-03）
 fork 会话不依赖源会话的同名目录：fork 出的新 `.jsonl` 不带同名目录（omp 不复制产物），文件头只以 `parentSession` 记录源 `.jsonl` 路径；在 fork 会话里读取 `artifact://1` 得到 `No artifacts directory found`——此时源目录仍在。omp 只在会话自己的同名目录里解析产物，所以删除源目录不改变 fork 会话的可见行为。方案按 issue 推荐实施，无需「仅在无存活 fork 时删除」或复制。
 
+## 与 #760 的关系
+omp 建的同名目录及其内容的 mode 取决于 omp 的 umask：`0002`/`0007` 下组可写，app uid 可递归删除；`0022` 变体（#760 记录的主组配置）下删除以 EACCES 失败、走错误通道、仍 204。#760 把 umask 固定为 `0007`。
+
 ## Non-goals
 - regenerate/fork 遗留的旧分支 `.jsonl` 及其同名目录（规格已明确不在清理范围）。
 - fork/regenerate 之后旧产物引用在 omp 里失效（omp 行为，本应用不补）。
