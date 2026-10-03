@@ -215,7 +215,7 @@ describe("静态契约 (S)", () => {
 
   it.each([
     ["menu", ".ui-menu", /z-index:\s*1600\b/],
-    ["popover", ".ui-popover", /z-index:\s*1300\b/],
+    ["popover", ".ui-popover", /z-index:\s*1500\b/],
     ["tooltip", ".ui-tooltip", /z-index:\s*1700\b/],
     ["menu", ".ui-menu-item[data-highlighted]", /background:\s*var\(--wb-bg-hover\)/],
     ["segmented-control", '[data-theme="dark"] .ui-seg-item[data-state="checked"]', /background/],
@@ -223,6 +223,20 @@ describe("静态契约 (S)", () => {
     ["tooltip", '[data-theme="dark"] .ui-tooltip', /background/],
   ])("%s.css %s 含 %s", (name, selector, pattern) => {
     expect(ruleBody(css(name), selector)).toMatch(pattern);
+  });
+
+  // #715：Popover 总是 portal 到 body，须画在 Drawer/Dialog 遮罩与面板之上、Menu 之下；任何一方单独改值都会再被遮挡。
+  it("popover.css 的 z-index 高于 Dialog/Drawer 的遮罩与面板、低于 Menu", () => {
+    const zIndex = (name: string, selector: string) => {
+      const value = /z-index:\s*(\d+)/.exec(ruleBody(css(name), selector))?.[1];
+      if (value === undefined) throw new Error(`${name}.css ${selector} 无 z-index`);
+      return Number(value);
+    };
+    const popover = zIndex("popover", ".ui-popover");
+    for (const selector of [".ui-dialog-overlay", ".ui-drawer-overlay", ".ui-drawer"]) {
+      expect(popover, selector).toBeGreaterThan(zIndex("dialog", selector));
+    }
+    expect(popover, ".ui-menu").toBeLessThan(zIndex("menu", ".ui-menu"));
   });
 
   it("ui.css 汇总四个新 css", () => {

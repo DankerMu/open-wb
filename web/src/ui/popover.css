@@ -2,7 +2,7 @@
    定位交给 Radix Popper（去掉 demo 的 position/bottom/display）；列表项/搜索框样式归消费者。 */
 
 .ui-popover {
-  z-index: 1300;
+  z-index: 1500;
   width: 300px;
   max-height: min(70vh, 520px);
   padding: 8px;
