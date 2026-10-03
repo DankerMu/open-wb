@@ -93,7 +93,7 @@
    获取要么成功派发后经 (a) 结束，要么失败经 (b) 结束，二者都在既有上界内出现，删除不另设计时器。
 3. 调用 supervisor 公开的 `retire(sessionId)`：存活进程经既有有界 retire 序列退出（token 撤销、名额释放），该会话的 slot 与事件环丢弃，所有 SSE 订阅者的响应结束且不再收到事件。自本步开始至本次调用结束（删除墓碑期，含 retire 完成与第 4 步删行之间的窗口），已通过 owner 预检的新事件流订阅 SHALL 立即结束且不写任何事件；第 4 步失败时墓碑随控制占用一同解除，此后订阅恢复既有行为。
 4. 单个 SQLite 事务：读取 `omp_session_file` 与该会话消息数，删除会话行——消息、步骤、审批随外键级联删除，以其为源的 fork 会话 `parent_session_id` 由外键置 NULL 且这些会话保留——并在同一事务写一条 `session.delete` 审计；审计失败则整个事务回滚。store SHALL 在删除时确认该会话无活跃回合/缓冲/步骤内存状态（此时应已结算；若仍存在视为不变量破坏，通用失败且不删除）。
-5. 若第 4 步读到的 `omp_session_file` 非 NULL：该值由 omp 上报、写入时未经宿主校验，故宿主 SHALL 仅在它是绝对路径、其所在目录的 realpath 等于该会话所有者的 omp 会话目录（`<OMP_STATE_DIR>/sessions/<ownerId>`）的 realpath、该会话目录的 realpath 恰为 `<OMP_STATE_DIR 的 realpath>/sessions/<ownerId>`（`sessions` 与 `<ownerId>` 两级都不是符号链接——换成指向别处的符号链接后前一条比较两侧会一起解析到链接目标而恒等；omp-runtime「OMP_STATE_DIR 托管布局」之后这两级不能再被 omp uid 替换（它们的父目录对 omp uid 不可写），本校验保留为纵深防御）、且它本身（`lstat`，不跟随符号链接）是普通文件时才 unlink；不满足任一条件 SHALL NOT unlink 任何路径，并经服务错误通道报告。`ENOENT`（校验或 unlink 时已不存在）视为成功；其它错误经服务错误通道报告。以上任何情况响应仍为 204（行已删除，残留文件不影响任何会话），错误通道自身的失败也不改变该响应。同名目录的处理条件 SHALL 为：该值是绝对路径、其所在目录的 realpath 等于 owner 会话目录的 realpath、其 basename 以 `.jsonl` 结尾且去掉后缀后的名字非空且不是 `.` 或 `..`，并且对它本身的 `lstat` 结果是普通文件（不论随后 unlink 成功、`ENOENT` 或失败）或 `ENOENT`（文件已不存在而同名目录可能仍在）。条件满足时，宿主 SHALL 在同一校验后的 owner 会话目录 realpath 下，对去掉 `.jsonl` 后缀的同名项（omp 为该会话建的产物目录，存放工具完整输出等）做 `lstat`：为目录（不跟随符号链接）则递归移除，递归过程不跟随目录内的符号链接；不存在视为成功；不是目录（含符号链接）则不移除任何东西并经服务错误通道报告；移除失败（含部分失败）经服务错误通道报告。已知残留：递归移除按路径逐项进行；托管布局之后 `sessions/` 与 `<ownerId>` 这两级不能再被 omp uid 替换，但 `sessions/<ownerId>` 之内仍对 omp uid 可写，omp uid 在移除**进行期间**把同名产物目录或其下任一级换成符号链接后，其后的删除会落到链接目标之下（窗口覆盖整个递归过程、可能不产生任何错误报告）；该残留由 #706 的后续切片（删除前先把同名项移入 app 私有目录）关闭。其余情形（非绝对路径、所在目录不符或不存在、本身不是普通文件、去后缀后的名字为空或为 `.`/`..`）SHALL NOT 触碰任何同名项；名字不合法的情形经服务错误通道报告。以上情况响应仍为 204。regenerate/fork 产生的旧分支 `.jsonl` 及其同名目录不在清理范围内。以被删会话为源的 fork 会话不依赖该目录（omp 只在会话自己的同名目录里解析产物引用，fork 不复制也不回退到源目录）。
+5. 若第 4 步读到的 `omp_session_file` 非 NULL：该值由 omp 上报、写入时未经宿主校验，故宿主 SHALL 仅在它是绝对路径、其所在目录的 realpath 等于该会话所有者的 omp 会话目录（`<OMP_STATE_DIR>/sessions/<ownerId>`）的 realpath、该会话目录的 realpath 恰为 `<OMP_STATE_DIR 的 realpath>/sessions/<ownerId>`（`sessions` 与 `<ownerId>` 两级都不是符号链接——换成指向别处的符号链接后前一条比较两侧会一起解析到链接目标而恒等；omp-runtime「OMP_STATE_DIR 托管布局」之后这两级不能再被 omp uid 替换（它们的父目录对 omp uid 不可写），本校验保留为纵深防御）、且它本身（`lstat`，不跟随符号链接）是普通文件时才 unlink；不满足任一条件 SHALL NOT unlink 任何路径，并经服务错误通道报告。`ENOENT`（校验或 unlink 时已不存在）视为成功；其它错误经服务错误通道报告。以上任何情况响应仍为 204（行已删除，残留文件不影响任何会话），错误通道自身的失败也不改变该响应。同名目录的处理条件 SHALL 为：该值是绝对路径、其所在目录的 realpath 等于 owner 会话目录的 realpath、其 basename 以 `.jsonl` 结尾且去掉后缀后的名字非空且不是 `.` 或 `..`，并且对它本身的 `lstat` 结果是普通文件（不论随后 unlink 成功、`ENOENT` 或失败）或 `ENOENT`（文件已不存在而同名目录可能仍在）。条件满足时，宿主 SHALL 在同一校验后的 owner 会话目录 realpath 下，对去掉 `.jsonl` 后缀的同名项（omp 为该会话建的产物目录，存放工具完整输出等）做 `lstat`：为目录（不跟随符号链接）则先把它 `rename` 为 `<OMP_STATE_DIR 的 realpath>/trash/<32 位随机 hex>`（omp-runtime「OMP_STATE_DIR 托管布局」的 app 私有目录，omp uid 不能进入），再对 trash 里的该项 `lstat`：是目录则在 trash 内递归移除（不跟随目录内的符号链接），不是目录（`lstat` 与 `rename` 之间被换成了符号链接或文件）则只 `unlink` 这一项并经服务错误通道报告；`rename` 以 `ENOENT` 失败时（源已不在与 trash 缺失同为 `ENOENT`）SHALL 再对原位置 `lstat` 一次：已不存在视为成功，仍存在则按 trash 不可用经服务错误通道报告且不触碰原位置；其它失败（含 `EXDEV`、以及 omp uid 把自己的产物目录改成 app uid 不可写时的 `EACCES`）经服务错误通道报告且不触碰原位置；不存在视为成功；不是目录（含符号链接）则不移除任何东西并经服务错误通道报告；移除失败（含部分失败）经服务错误通道报告。递归移除因此发生在 omp uid 无法**按路径**到达的目录里：`rename` 不跟随符号链接、移动的是目录项本身，移入 trash 之后 omp uid 不能再经路径替换其下任何一级，#758 登记的「移除进行期间按路径替换目录」由此关闭。已知残留：(1) 在删除之前就已把工作目录或目录 fd 留在该产物目录树内的 omp uid 进程，仍可经相对路径在递归期间替换子目录（Node 的递归移除按路径逐项进行，没有 `*at` 系调用）——需要预先进入这一个会话的产物目录，受信局域网下接受并登记于 ADR-0010；(2) omp uid 以 `0700` 之类的权限位建出的子目录，app uid 无法列举或清空，递归移除部分失败——照常经服务错误通道报告一次，残余留在 trash（app 私有，不被任何会话引用，宿主不自动清理）而不在会话目录里。其余情形（非绝对路径、所在目录不符或不存在、本身不是普通文件、去后缀后的名字为空或为 `.`/`..`）SHALL NOT 触碰任何同名项；名字不合法的情形经服务错误通道报告。以上情况响应仍为 204。regenerate/fork 产生的旧分支 `.jsonl` 及其同名目录不在清理范围内。以被删会话为源的 fork 会话不依赖该目录（omp 只在会话自己的同名目录里解析产物引用，fork 不复制也不回退到源目录）。
 6. 返回 204。
 
 第 2–4 步失败（例如终态落库或删除事务的存储错误）SHALL 返回通用 5xx，会话行保持存在（进程可能已被退役，下次 prompt 按既有 `--resume` 懒获取）。删除完成后该 id 的 `GET /api/sessions/:id/messages`、事件流订阅、PATCH、DELETE SHALL 与未知 id 相同地 404，`GET /api/sessions` 不再列出它；其它会话的进程、行与订阅不受影响。
@@ -159,6 +159,22 @@
 - **THEN** 204；该文件按既有规则 unlink；owner 会话目录、其上级目录及其中的其它文件原样保留；错误通道收到一条报告
 - **WHEN** 同名目录的递归移除失败（注入）
 - **THEN** 204；会话行已删除；错误通道收到报告
+
+#### Scenario: 产物目录经 trash 移除
+- **WHEN** 删除一个会话，其 `.jsonl` 与同名非空产物目录（含嵌套子目录与一个指向会话目录之外文件的符号链接）都在 owner 会话目录里
+- **THEN** 响应 204，`.jsonl` 与产物目录在会话目录里都不存在，`<state>/trash` 为空，链接指向的外部文件字节不变，无错误报告
+
+#### Scenario: rename 之前被换成符号链接
+- **WHEN** 产物目录在宿主 `lstat` 之后、`rename` 之前被换成指向会话目录之外一棵目录树的符号链接（经测试钩子在 `rename` 调用点注入）
+- **THEN** 被移入 trash 的是该符号链接本身，宿主只 `unlink` 它并报告一次；链接目标的目录树逐字节不变；`<state>/trash` 为空
+
+#### Scenario: trash 不可用
+- **WHEN** `<state>/trash` 被换成普通文件，或根本不存在（`rename` 分别以 `ENOTDIR` 与 `ENOENT` 失败）
+- **THEN** 两种情况响应都是 204，产物目录原样留在会话目录里，错误经服务错误通道各报告一次
+
+#### Scenario: 部分失败的残余在 trash
+- **WHEN** 产物目录里有一个 app uid 无法清空的子目录（mode `0500`、内含文件）
+- **THEN** 响应 204，会话目录里已没有该产物目录，残余在 `<state>/trash/<随机名>` 之下，错误报告一次
 
 ### Requirement: fork 继承会话元数据
 `POST /api/sessions/:id/fork`（chat-sessions「会话 REST」fork 段）在其最终事务中插入的新会话行 SHALL 复制源会话的 `workspace_id` 与 `scene`，`pinned_at` SHALL 为 NULL；其余列与该段规则一致。该事务拷贝的消息与步骤 SHALL 同时拷贝 `chat_messages.thinking` 与 `chat_steps.changes`（原值，含 NULL），使新会话的快照与源会话被拷贝部分的思考与文件变更一致。fork 响应中的 `session` 与其它会话视图相同，为八键视图。fork 会话后续 generation 的 `--cwd` 由其继承的 `workspace_id` 按「绑定不可改与工作目录」计算，与源会话一致（均为源空间根或所有者根）。fork 不写 `session.bind` 审计。
