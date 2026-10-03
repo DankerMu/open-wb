@@ -2,13 +2,14 @@
  * Issue #468 approval answer REST (parent s1c tasks 5.2a), E1–E16 incl. E10b. The production
  * createApp → registerSessions assembly over real fake-omp `approval` children, real SQLite and
  * the injected clock; inject for status/body cases, `withListeningApp` + fetch for the real-socket
- * parser-owner boundary. Expected envelopes and rows are fixture literals from the tool-approval
- * and http-service-skeleton specs; `decide` is observed with a call-through spy, never replaced.
+ * parser-owner boundary (the oversized input goes headers-only over a raw socket, #657). Expected
+ * envelopes and rows are fixture literals from the tool-approval and http-service-skeleton specs;
+ * `decide` is observed with a call-through spy, never replaced.
  */
 import type { LightMyRequestResponse } from "fastify";
 import { afterEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { PARSER_INPUTS } from "./http-guard-helpers.js";
-import { withListeningApp } from "./raw-http-helpers.js";
+import { rawHttpRequest, withListeningApp } from "./raw-http-helpers.js";
 import {
   type ApprovalRow,
   type ApprovalWorld,
@@ -157,6 +158,35 @@ function postWire(
     method: "POST",
     headers: { "content-type": input.contentType, ...(cookie === null ? {} : { cookie }) },
     body: input.payload,
+  });
+}
+
+/**
+ * The oversized input as headers only (#657): the server rejects on `Content-Length` alone and
+ * closes without reading a body, so a client still writing 1.1 MB races that close and `fetch`
+ * rejects with ECONNRESET/EPIPE. Sending no body removes the race and reaches the same parser
+ * branch. Consequence: a server that stops rejecting on the headers waits for the body, so the
+ * case then fails by timeout rather than by assertion.
+ */
+async function postOversizedWire(url: string, cookie: string): Promise<Response> {
+  const { origin, pathname } = new URL(url);
+  const raw = await rawHttpRequest(origin, {
+    method: "POST",
+    target: pathname,
+    cookie,
+    headers: {
+      "Content-Type": OVERSIZED_PARSER_INPUT.contentType,
+      "Content-Length": String(Buffer.byteLength(OVERSIZED_PARSER_INPUT.payload)),
+    },
+  });
+  const [head = "", body = ""] = raw.split("\r\n\r\n");
+  const [statusLine = "", ...fields] = head.split("\r\n");
+  return new Response(body, {
+    status: Number(statusLine.split(" ")[1]),
+    headers: fields.map((field): [string, string] => {
+      const colon = field.indexOf(":");
+      return [field.slice(0, colon), field.slice(colon + 1).trim()];
+    }),
   });
 }
 
@@ -590,11 +620,13 @@ describe("approval answer over a real socket", () => {
     await withListeningApp(world.fixture.app, async (origin) => {
       const url = approvalPath(origin, world.session, row.id);
       for (const input of PARSER_INPUTS) {
-        await expectWireEnvelope(
-          await postWire(url, world.cookie, input),
-          400,
-          BAD_REQUEST_ENVELOPE,
-        );
+        // Oversized goes headers-only (see postOversizedWire): if the server ever stops
+        // rejecting on the headers, this case fails by timeout, not by assertion.
+        const response =
+          input === OVERSIZED_PARSER_INPUT
+            ? await postOversizedWire(url, world.cookie)
+            : await postWire(url, world.cookie, input);
+        await expectWireEnvelope(response, 400, BAD_REQUEST_ENVELOPE);
       }
       await settle();
       expectUntouched(world, spy, [row]);
