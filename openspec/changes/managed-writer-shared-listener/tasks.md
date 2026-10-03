@@ -4,8 +4,8 @@ Fixture level: compact
 Risk packs: stream-lifecycle
 
 ## 1. 实现
-- [ ] 1.1 `server/src/startup-writer.ts`：共享监听 + 在途集合；文件头注释同步。导出签名 `writeManagedLine(stream, line): Promise<void>` 不变。
-- [ ] 1.2 `server/test/startup-writer.test.ts`（或同目录新文件）：规格三个场景；规格两个 Scenario 的全部分支；真实 `process.stderr` 场景用子进程：`node -e 'import("<abs>/server/src/startup-writer.ts")…'`（Node 24.13.1 可直接导入该 TS 源，stderr 无多余行），stderr 接管道。
+- [x] 1.1 `server/src/startup-writer.ts`：共享监听 + 在途集合；文件头注释同步。导出签名 `writeManagedLine(stream, line): Promise<void>` 不变。
+- [x] 1.2 `server/test/startup-writer.test.ts`（或同目录新文件）：规格两个 Scenario 的全部分支；真实 `process.stderr` 场景用子进程：`node -e 'import("<abs>/server/src/startup-writer.ts")…'`（Node 24.13.1 可直接导入该 TS 源，stderr 无多余行），stderr 接管道。
 
 允许改动的文件：上列两个（及一个新测试文件）。不得改 `server/src/server.ts`、`openspec/**`、`docs/**`。
 
