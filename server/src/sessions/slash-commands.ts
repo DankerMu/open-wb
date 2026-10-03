@@ -80,16 +80,22 @@ const QUOTED = /^(["'])(.*)\1$/;
  * only inside `skills`: an entry whose SKILL.md resolves outside the real path of `skills` is
  * skipped (omp itself would load it). Both real paths come from the kernel (`realpathSync.native`):
  * Node's JS `realpathSync` stops resolving at a FIFO or socket and folds `..` as text, so it can
- * name a path inside `skills` that open() then walks, through a link, to a file outside. Entries
- * sharing a name collapse to the one with the smallest SKILL.md path, omp's first-wins order.
+ * name a path inside `skills` that open() then walks, through a link, to a file outside. They
+ * stay the kernel's raw bytes (`encoding: "buffer"`) from the containment check to the open: a
+ * path decoded to a string has every ill-formed UTF-8 sequence replaced by U+FFFD, and re-encoded
+ * for open() it names a different file. Entries sharing a name collapse to the one with the
+ * smallest SKILL.md path, omp's first-wins order.
  */
 export function listSkills(agentDir: string): Skill[] {
   const skillsDir = join(agentDir, "skills");
   let entries: string[];
-  let inside: string;
+  let inside: Buffer;
   try {
     entries = readdirSync(skillsDir);
-    inside = realpathSync.native(skillsDir) + sep;
+    inside = Buffer.concat([
+      realpathSync.native(skillsDir, { encoding: "buffer" }),
+      Buffer.from(sep),
+    ]);
   } catch {
     return [];
   }
@@ -148,14 +154,14 @@ export function toWireText(text: string, skills: readonly { name: string }[]): s
 
 /**
  * omp's drop rules for a user-level skill, plus the host rules (the name, and a SKILL.md whose
- * real path is not under `inside`, the real path of `skills` with a trailing separator); null
- * when it is not listed.
+ * real path does not start with the bytes of `inside`, the real path of `skills` with a trailing
+ * separator); null when it is not listed.
  */
-function readSkill(path: string, entry: string, inside: string): Skill | null {
+function readSkill(path: string, entry: string, inside: Buffer): Skill | null {
   let content: string | null;
   try {
-    const resolved = realpathSync.native(path);
-    if (!resolved.startsWith(inside)) {
+    const resolved = realpathSync.native(path, { encoding: "buffer" });
+    if (!resolved.subarray(0, inside.length).equals(inside)) {
       return null;
     }
     content = readBounded(resolved);
@@ -178,13 +184,13 @@ function readSkill(path: string, entry: string, inside: string): Skill | null {
 }
 
 /**
- * The UTF-8 content of a regular file of at most `SKILL_MD_MAX_BYTES`, else null. `path` is
- * already resolved, so `O_NOFOLLOW` refuses a link swapped in as its last component.
+ * The UTF-8 content of a regular file of at most `SKILL_MD_MAX_BYTES`, else null. `path` is the
+ * resolved path as raw bytes, so `O_NOFOLLOW` refuses a link swapped in as its last component.
  * `O_NONBLOCK` makes opening a FIFO return at once, `O_NOCTTY` keeps a terminal device from
  * becoming the server's controlling terminal, and the read stops at the size `fstat` reported, so
  * neither a writer-less pipe, a device nor a growing file can hold the event loop.
  */
-function readBounded(path: string): string | null {
+function readBounded(path: Buffer): string | null {
   const fd = openSync(
     path,
     constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOCTTY | constants.O_NOFOLLOW,

@@ -2,7 +2,7 @@
  * Issue #706 cut 1 (agent-dir-host-hardening): `listSkills` follows a link only inside
  * `<agentDir>/skills`, reads at most the first 256 entries and opens SKILL.md with
  * `O_NOCTTY | O_NOFOLLOW`; real paths come from the kernel (`realpathSync.native`), not from
- * Node's JS resolver. `node:fs` is passed through a call recorder (behaviour untouched) so
+ * Node's JS resolver, and stay the kernel's raw bytes from the check to the open. `node:fs` is passed through a call recorder (behaviour untouched) so
  * "not opened, not resolved" and the open flags are observations, not inferences. Expected values
  * are the literals of chat-sessions Scenario「Skill links leaving the skills directory and the
  * entry cap」; nothing here is derived from the module under test.
@@ -104,9 +104,12 @@ function plantLinks(root: string, skillsDir: string): void {
 /** `listSkills` with the recorder reset first, and the calls it made. */
 function recordedList(agentDir: string): {
   skills: Array<{ name: string; description: string }>;
-  opened: Array<{ path: unknown; flags: unknown }>;
+  /** `raw` is the path argument as passed; `path` is its text (the test paths are ASCII). */
+  opened: Array<{ path: string; raw: unknown; flags: unknown }>;
   /** First arguments of the `realpathSync.native` calls. */
   resolved: unknown[];
+  /** Second arguments of the `realpathSync.native` calls. */
+  resolveOptions: unknown[];
   /** First arguments of the JS `realpathSync` calls. */
   resolvedByJs: unknown[];
 } {
@@ -117,10 +120,13 @@ function recordedList(agentDir: string): {
     skills,
     opened: calls
       .filter((call) => call.name === "openSync")
-      .map((call) => ({ path: call.args[0], flags: call.args[1] })),
+      .map((call) => ({ path: String(call.args[0]), raw: call.args[0], flags: call.args[1] })),
     resolved: calls
       .filter((call) => call.name === "realpathSync.native")
       .map((call) => call.args[0]),
+    resolveOptions: calls
+      .filter((call) => call.name === "realpathSync.native")
+      .map((call) => call.args[1]),
     resolvedByJs: calls.filter((call) => call.name === "realpathSync").map((call) => call.args[0]),
   };
 }
@@ -207,6 +213,67 @@ describe("listSkills: links leaving the skills directory", () => {
     },
   );
 
+  // Decoded to a string, the kernel's `f/<FF>/secret.yml` becomes `f/<U+FFFD>/secret.yml`: inside
+  // `skills` as text, and re-encoded for open() it is the link that leaves. macOS (APFS) refuses
+  // an ill-formed name, so only Linux can build the layout.
+  it.skipIf(process.platform !== "linux")(
+    "lists nothing from an outside file reached by decoding an ill-formed path byte",
+    () => {
+      const { root, agentDir, skillsDir } = makeRoot();
+      const entry = join(skillsDir, "f");
+      const decoyDir = Buffer.concat([Buffer.from(`${entry}/`), Buffer.from([0xff])]);
+      const decoy = Buffer.concat([decoyDir, Buffer.from("/secret.yml")]);
+      mkdirSync(entry, { recursive: true });
+      mkdirSync(decoyDir);
+      writeFileSync(decoy, skillFile(["description: decoy inside skills"]));
+      mkdirSync(join(root, "outside"));
+      writeFileSync(
+        join(root, "outside", "secret.yml"),
+        skillFile(["name: leaked", `description: ${OUTSIDE_FILE_DESCRIPTION}`]),
+      );
+      symlinkSync(join(root, "outside"), join(entry, "\uFFFD"), "dir");
+      symlinkSync(
+        Buffer.concat([Buffer.from([0xff]), Buffer.from("/secret.yml")]),
+        join(entry, "SKILL.md"),
+      );
+
+      const { skills, opened } = recordedList(agentDir);
+
+      // The file the kernel named is the one read: the decoy, inside `skills`.
+      expect(skills).toEqual([{ name: "f", description: "decoy inside skills" }]);
+      expect(opened.map((call) => call.raw)).toEqual([decoy]);
+    },
+  );
+
+  // readdir decodes the entry name `<FF>` to U+FFFD, so its candidate path names the sibling link
+  // instead; whatever a candidate resolves to, the check runs on the kernel's bytes of that file.
+  it.skipIf(process.platform !== "linux")(
+    "lists nothing when an ill-formed entry name decodes to a link that leaves skills",
+    () => {
+      const { root, agentDir, skillsDir } = makeRoot();
+      mkdirSync(skillsDir, { recursive: true });
+      const illFormed = Buffer.concat([Buffer.from(`${skillsDir}/`), Buffer.from([0xff])]);
+      mkdirSync(illFormed);
+      writeFileSync(
+        Buffer.concat([illFormed, Buffer.from("/SKILL.md")]),
+        skillFile(["description: unreachable by its decoded name"]),
+      );
+      writeSkill(join(root, "outside"), "target", [`description: ${OUTSIDE_DIR_DESCRIPTION}`]);
+      symlinkSync(join(root, "outside", "target"), join(skillsDir, "\uFFFD"), "dir");
+
+      const { skills, opened, resolved } = recordedList(agentDir);
+
+      expect(skills).toEqual([]);
+      expect(opened).toEqual([]);
+      // `skills`, then both entries under the one decoded name.
+      expect(resolved).toEqual([
+        skillsDir,
+        join(skillsDir, "\uFFFD", "SKILL.md"),
+        join(skillsDir, "\uFFFD", "SKILL.md"),
+      ]);
+    },
+  );
+
   it("opens SKILL.md with O_RDONLY | O_NONBLOCK | O_NOCTTY | O_NOFOLLOW", () => {
     const { agentDir, skillsDir } = makeRoot();
     writeSkill(skillsDir, "kept", ["description: kept"]);
@@ -222,6 +289,19 @@ describe("listSkills: links leaving the skills directory", () => {
       expect((flags as number) & flag).toBe(flag);
     }
     expect((flags as number) & (constants.O_WRONLY | constants.O_RDWR)).toBe(0);
+  });
+
+  it("resolves to bytes and opens exactly the bytes the kernel returned", () => {
+    const { agentDir, skillsDir } = makeRoot();
+    writeSkill(skillsDir, "kept", ["description: kept"]);
+
+    const { opened, resolveOptions } = recordedList(agentDir);
+
+    // `skills` itself, then the one entry.
+    expect(resolveOptions).toEqual([{ encoding: "buffer" }, { encoding: "buffer" }]);
+    expect(opened.map((call) => call.raw)).toEqual([
+      Buffer.from(join(skillsDir, "kept", "SKILL.md")),
+    ]);
   });
 });
 
@@ -250,6 +330,7 @@ describe("listSkills: entry cap", () => {
     ]);
     expect(resolvedByJs).toEqual([]);
     const touched = [...opened.map((call) => call.path), ...resolved, ...resolvedByJs].map(String);
+    expect(touched).toHaveLength(CAP + 1 + CAP);
     for (const entry of dropped) {
       expect(touched.filter((path) => path.includes(entry))).toEqual([]);
     }

@@ -23,9 +23,9 @@ Fixture level: compact
 - [x] F3 负对照 N9：改回 JS `realpathSync` → FIFO 布局用例失败（外部描述被列出）。全量 server 测试、lint、typecheck、anti-drift（179）、size-guard 重跑；E3 smoke 重跑一次（`.native` 在真实 omp 布局上不改变结果）。
 
 ## 评审第 2 轮修复
-- [ ] F4 `slash-commands.ts`：两处 `realpathSync.native` 都传 `{ encoding: "buffer" }`；包含判断在字节上做（基准字节 + 分隔符字节为前缀）；`openSync` 直接收该 Buffer。任何地方都不得把解析结果解码成字符串后再用于判断或打开（`realpathSync.native` 默认按 utf8 解码，非良构字节变 U+FFFD，重新编码后是另一条路径：`f/\xFF/secret.yml` 在 `skills/` 内，解码再编码成 `f/<EF BF BD>/secret.yml`，而 `f/<U+FFFD>` 是指向外部目录的符号链接）。注释写明原因。
-- [ ] F5 测试：spec 新 Scenario 的非法字节布局用例，`it.skipIf(process.platform !== "linux")`（macOS APFS 拒绝非法 UTF-8 文件名）；文件名用 Buffer 路径创建。记录器对 `.native` 与 `openSync` 记录的路径实参可能是 Buffer——既有的路径断言改为对其字节（或 `toString()`，仅用于全 ASCII 的测试路径）比较，断言强度不降。
-- [ ] F6 证据：F5 的 RED→GREEN 必须在 Linux 上取得（本机 docker 的 `ubuntu:24.04` 容器 + Linux 版 Node 24.13.1 跑该测试文件；RED = 只带 F5 不带 F4）；负对照 N10：去掉 `{ encoding: "buffer" }`（回到字符串）→ F5 用例在 Linux 上失败。macOS 上全量 server 测试、lint、typecheck、anti-drift（179）、size-guard 重跑；E3 smoke 重跑一次。
+- [x] F4 `slash-commands.ts`：两处 `realpathSync.native` 都传 `{ encoding: "buffer" }`；包含判断在字节上做（基准字节 + 分隔符字节为前缀）；`openSync` 直接收该 Buffer。任何地方都不得把解析结果解码成字符串后再用于判断或打开（`realpathSync.native` 默认按 utf8 解码，非良构字节变 U+FFFD，重新编码后是另一条路径：`f/\xFF/secret.yml` 在 `skills/` 内，解码再编码成 `f/<EF BF BD>/secret.yml`，而 `f/<U+FFFD>` 是指向外部目录的符号链接）。注释写明原因。
+- [x] F5 测试：spec 新 Scenario 的非法字节布局用例，`it.skipIf(process.platform !== "linux")`（macOS APFS 拒绝非法 UTF-8 文件名）；文件名用 Buffer 路径创建。记录器对 `.native` 与 `openSync` 记录的路径实参可能是 Buffer——既有的路径断言改为对其字节（或 `toString()`，仅用于全 ASCII 的测试路径）比较，断言强度不降。
+- [x] F6 证据：F5 的 RED→GREEN 必须在 Linux 上取得（本机 docker 的 `ubuntu:24.04` 容器 + Linux 版 Node 24.13.1 跑该测试文件；RED = 只带 F5 不带 F4）；负对照 N10：去掉 `{ encoding: "buffer" }`（回到字符串）→ F5 用例在 Linux 上失败。macOS 上全量 server 测试、lint、typecheck、anti-drift（179）、size-guard 重跑；E3 smoke 重跑一次。
 
 ## Must preserve
 - `slash-commands.test.ts`、`session-rest-slash.test.ts`、`rest-commands` 相关测试与 `model-proxy-models-yml.test.ts` 的既有断言不动且全绿（含 FIFO/设备/超大文件跳过、同名折叠、目录不存在得 `[]`）。**两处例外**（它们钉的正是被本 change 取代的旧行为，按 spec delta 改写并在报告里列出）：`slash-commands.test.ts` 主场景里 `linked`（指向 `skills/` 之外目录的符号链接）改为不被列出；「follows a SKILL.md symlinked to a regular file」（目标在 `skills/` 之外）改为断言跳过，并补一条目标在 `skills/` 内部时仍被跟随的用例。指向 `/dev/zero` 的用例断言不变（仍被跳过）。
