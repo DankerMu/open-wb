@@ -1,7 +1,7 @@
 /**
  * Issue #457 fake-omp `branch` scenario (parent s1c-turn-control-governance 6.2).
  * `get_branch_messages` 回固定列表（包在 data.messages，同 omp v18.0.10 rpc-mode）；`branch{entryId}`
- * 在 `--session-dir` 下真实写出新 .jsonl 并切换，`get_state.sessionFile` 随之变为新路径；
+ * 在 `--session-dir` 下真实写出新 .jsonl 及其同名产物目录并切换，`get_state.sessionFile` 随之变为新路径；
  * 未知 entryId 回显 id 的错误帧，不建文件、不切换。真实子进程；帧读取复用 fake-omp-helpers.ts。
  */
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -90,6 +90,23 @@ function listing(dir: string): string[] {
   return readdirSync(dir).sort();
 }
 
+/** 新会话文件的同名产物目录：一个普通文件 + 一层嵌套子目录内一个普通文件，返回目录名。 */
+function expectArtifactDir(file: string): string {
+  const artifacts = file.slice(0, -".jsonl".length);
+  expect(readdirSync(artifacts, { recursive: true, encoding: "utf8" }).sort()).toEqual([
+    "1.bash.log",
+    "local",
+    join("local", "note.txt"),
+  ]);
+  expect(statSync(artifacts).isDirectory()).toBe(true);
+  expect(statSync(join(artifacts, "local")).isDirectory()).toBe(true);
+  for (const name of ["1.bash.log", join("local", "note.txt")]) {
+    expect(statSync(join(artifacts, name)).isFile()).toBe(true);
+    expect(statSync(join(artifacts, name)).size).toBeGreaterThan(0);
+  }
+  return basename(artifacts);
+}
+
 describe("fake-omp branch scenario", () => {
   it("lists the fixed entries and switches to a new session file on branch", async () => {
     const { session, dir, old } = await startBranch();
@@ -117,7 +134,7 @@ describe("fake-omp branch scenario", () => {
       data: { text: "second question", cancelled: false },
     });
     const next = expectNewSessionFile(await sessionFileOf(session, "state-2"), dir, [old]);
-    expect(listing(dir)).toEqual(["old.jsonl", basename(next)].sort());
+    expect(listing(dir)).toEqual(["old.jsonl", basename(next), expectArtifactDir(next)].sort());
     expect(readFileSync(old, "utf8")).toBe(OLD_CONTENT);
     await closeSession(session);
   });
@@ -150,8 +167,16 @@ describe("fake-omp branch scenario", () => {
     ]);
     const branch = await session.wait(response("br-2", "branch"));
     expect(branch.data).toEqual({ text: "first question", cancelled: false });
-    expectNewSessionFile(await sessionFileOf(session, "state-4"), dir, [next, old]);
-    expect(readdirSync(dir)).toHaveLength(3);
+    const last = expectNewSessionFile(await sessionFileOf(session, "state-4"), dir, [next, old]);
+    expect(listing(dir)).toEqual(
+      [
+        "old.jsonl",
+        basename(next),
+        expectArtifactDir(next),
+        basename(last),
+        expectArtifactDir(last),
+      ].sort(),
+    );
     await closeSession(session);
   });
 

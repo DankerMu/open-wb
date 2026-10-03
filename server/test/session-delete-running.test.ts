@@ -31,6 +31,7 @@ import {
   expectDeleted,
   JSON_TYPE,
   NOT_FOUND_WIRE,
+  ownedArtifactDir,
   parkedDelete,
   sendDelete,
   sessionState,
@@ -106,6 +107,7 @@ describe("DELETE of a running session stops it first (evidence 1–3)", () => {
       expect(supervisor.sessionStreamSubscriberCount(world.session)).toBe(2);
       const deletes = observeDeletes(db);
       const file = presetOwnedFile(world);
+      const artifacts = ownedArtifactDir(file);
       const admin = await cookieFor(app, "lisi");
       const before = await auditEvents(app, admin);
 
@@ -120,6 +122,7 @@ describe("DELETE of a running session stops it first (evidence 1–3)", () => {
       expect(isLive(child.child)).toBe(false);
       expect(sessionState(db, world.session).row).toBeUndefined();
       expect(existsSync(file)).toBe(false);
+      expect(existsSync(artifacts)).toBe(false);
       const after = await auditEvents(app, admin);
       expect(after.slice(2)).toEqual(before);
       expect(after[0]).toEqual(deleteEvent(world.session, file, 2));

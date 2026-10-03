@@ -291,7 +291,8 @@ async function handleBranchMessages(frame) {
 }
 
 /**
- * 已知 entry：wx 写出 session-dir 直属的新 .jsonl（不覆盖、不 mkdir），写成功后才切换当前文件，
+ * 已知 entry：wx 写出 session-dir 直属的新 .jsonl（不覆盖、不建 session-dir 本身）及其同名产物目录
+ * （真 omp 在会话文件旁放工具完整输出的目录：一个文件 + 一层嵌套子目录），都写成功后才切换当前文件，
  * 再回 data:{text, cancelled:false}（rpc-mode.ts:488-491,1101-1105）。未知/缺失/非字符串 entryId
  * 回显 id 的错误帧（rpc-mode.ts:401,754-755）。写异常转错误帧，避免 reject 卡死串行 queue。
  */
@@ -306,6 +307,10 @@ async function handleBranch(frame) {
     next = join(sessionDir, `branch-${randomUUID()}.jsonl`);
     const header = JSON.stringify({ type: "session", parentSession: currentSession });
     writeFileSync(next, `${header}\n`, { flag: "wx" });
+    const artifacts = next.slice(0, -".jsonl".length);
+    mkdirSync(join(artifacts, "local"), { recursive: true });
+    writeFileSync(join(artifacts, "1.bash.log"), `${TOOL_OUTPUT}\n`);
+    writeFileSync(join(artifacts, "local", "note.txt"), `${TOOL_OUTPUT}\n`);
   } catch (error) {
     await emitBranchError(frame.id, String(error?.message ?? error));
     return;

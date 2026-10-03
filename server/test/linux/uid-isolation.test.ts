@@ -2,6 +2,7 @@
  * Issue #131 Linux uid isolation: real SessionRuntime → native sudo → fake-omp probe.
  * Issue #351: retire's SIGKILL of sudo reaps omp through setpriv --pdeathsig KILL.
  * Issue #525: DELETE unlinks the omp-uid-written branch file from the app-uid session dir.
+ * Issue #758: and removes the omp-uid-written artifact directory next to that file.
  * Non-Linux / unset WORKBUDDY_UID_TEST skip; opted-in missing OMP_USER fails.
  */
 import { type ChildProcessWithoutNullStreams, spawn, spawnSync } from "node:child_process";
@@ -203,6 +204,13 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
         const file = sessionFileOf(db, session);
         expect(file.startsWith(join(layout.stateDir, "sessions", OWNER_ID, "branch-"))).toBe(true);
         expect(statSync(file).uid).not.toBe(parentUid);
+        // The artifact directory fake-omp made next to it, with its file and nested directory.
+        const artifacts = file.slice(0, -".jsonl".length);
+        for (const entry of [artifacts, join(artifacts, "1.bash.log"), join(artifacts, "local")]) {
+          expect(statSync(entry).uid).not.toBe(parentUid);
+        }
+        expect(statSync(artifacts).isDirectory()).toBe(true);
+        expect(statSync(join(artifacts, "local", "note.txt")).isFile()).toBe(true);
 
         const deleted = await app.inject({
           method: "DELETE",
@@ -212,6 +220,7 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
 
         expect(deleted.statusCode).toBe(204);
         expect(existsSync(file)).toBe(false);
+        expect(existsSync(artifacts)).toBe(false);
         expect(errors).toEqual([]);
       } finally {
         try {
