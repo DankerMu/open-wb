@@ -11,6 +11,8 @@ export interface RawHttpRequest {
   method?: string;
   target: string;
   cookie?: string;
+  /** 额外请求头，按给定名值原样写入。只发请求头、从不发 body：`Content-Length` 仅是声明。 */
+  headers?: Readonly<Record<string, string>>;
 }
 
 /** 监听一个临时端口执行 `action`，结束后关闭 app（caller 仍拥有自己的 DB）。 */
@@ -34,7 +36,7 @@ export async function withListeningApp<T>(
 /** 对已监听 origin 发一条原始请求，返回完整响应字节。 */
 export async function rawHttpRequest(
   origin: string,
-  { method = "GET", target, cookie }: RawHttpRequest,
+  { method = "GET", target, cookie, headers = {} }: RawHttpRequest,
 ): Promise<string> {
   const url = new URL(origin);
   const socket = createConnection({ host: url.hostname, port: Number(url.port) });
@@ -49,7 +51,10 @@ export async function rawHttpRequest(
       `${method} ${target} HTTP/1.1\r\n` +
         `Host: ${url.host}\r\n` +
         `Connection: close\r\n` +
-        `${cookie === undefined ? "" : `Cookie: ${cookie}\r\n`}\r\n`,
+        `${cookie === undefined ? "" : `Cookie: ${cookie}\r\n`}` +
+        `${Object.entries(headers)
+          .map(([name, value]) => `${name}: ${value}\r\n`)
+          .join("")}\r\n`,
     );
     for await (const chunk of socket) {
       chunks.push(Buffer.from(chunk));

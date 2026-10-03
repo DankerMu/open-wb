@@ -5,9 +5,9 @@ Fixture level: compact
 归档次序（前提）：本 change 先归档进主规格；父 change `s1c-session-metadata-presentation` 的 http-service-skeleton delta 仍是旧文，归档前按 #754 从主规格现文重新生成全部 delta。本 PR 不改父 delta。
 
 ## 1. 实现
-- [ ] 1.1 `raw-http-helpers.ts` `rawHttpRequest`：可选 `headers`（名值对，原样写入请求头；现有调用点行为逐字节不变）。不发 body。
-- [ ] 1.2 E15：四条 parser 输入仍全部在真实 socket 上覆盖（malformed / empty / unsupported media 走 `fetch`，oversized 走 1.1 的原始请求）；超限分支断言 400、`bad_request` 信封、`cache-control: no-store`、无 `set-cookie`；循环后 `expectUntouched`（`decide` 未调用、审批行仍 pending）不变。用例注释写明：headers-only 意味着服务端一旦不再凭请求头拒绝，本用例以超时而非断言失败。超限输入的 `Content-Length` 取自 `http-guard-helpers.ts` 现有超限载荷的字节长度（不另造魔法数）。
-- [ ] 1.3 除上述两个测试文件（及确有必要时的 `server/test/http-guard-helpers.ts`）与本 change 目录外不改其它被跟踪文件；不改任何 `server/src/**`。
+- [x] 1.1 `raw-http-helpers.ts` `rawHttpRequest`：可选 `headers`（名值对，原样写入请求头；现有调用点行为逐字节不变）。不发 body。
+- [x] 1.2 E15：四条 parser 输入仍全部在真实 socket 上覆盖（malformed / empty / unsupported media 走 `fetch`，oversized 走 1.1 的原始请求）；超限分支断言 400、`bad_request` 信封、`cache-control: no-store`、无 `set-cookie`；循环后 `expectUntouched`（`decide` 未调用、审批行仍 pending）不变。用例注释写明：headers-only 意味着服务端一旦不再凭请求头拒绝，本用例以超时而非断言失败。超限输入的 `Content-Length` 取自 `http-guard-helpers.ts` 现有超限载荷的字节长度（不另造魔法数）。
+- [x] 1.3 除上述两个测试文件（及确有必要时的 `server/test/http-guard-helpers.ts`）与本 change 目录外不改其它被跟踪文件；不改任何 `server/src/**`。
 
 ## Must preserve
 - E15 之外的用例与断言不动；`rawHttpRequest` 的既有调用方全绿。
