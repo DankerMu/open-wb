@@ -1,9 +1,4 @@
-# Spec: session-metadata
-
-## Purpose
-定义会话元数据的服务端契约：创建时可选绑定工作空间与场景（`POST /api/sessions` body）、绑定不可改且决定 omp 工作目录、单一 `PATCH /api/sessions/:id` 修改标题/场景/置顶、同步 `DELETE /api/sessions/:id`（先停止、再退役进程、级联删行、删当前会话文件）、`session.bind`/`session.delete` 审计，以及 fork 对元数据的继承规则。本 change 在 change A（`s1c-turn-control-governance`）之后实施，停止、控制占用与 fork 流程沿用 A 的定义。
-
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: 会话创建与空间绑定
 `POST /api/sessions` SHALL 接受可选 body `{workspaceId?, scene?}`，并因此成为 content-parser 归属路由（http-service-skeleton「统一错误信封」，body limit 16 KiB，与工作空间路由先例一致）。无 body（无 Content-Type 且无内容）SHALL 为合法请求，与 body `{}` 等价：创建未绑定、`scene` 为 NULL 的会话。携带 body 时 SHALL 为 `application/json` 且解析为对象，键集 SHALL 为 `{workspaceId, scene}` 的子集：数组/`null`/非对象、多余键、`workspaceId` 非字符串（含 `null`）、`scene` 不是 `office`/`code`/`design` 之一（含 `null`、大小写不同或空串）SHALL 400 `bad_request`；content-parser 错误亦为 400 `bad_request`。形状校验通过后，`workspaceId` SHALL 经工作空间 store 的所有者作用域 `rootOf(principal, workspaceId)` 判定：不存在或属他人的 id（含非 32 位小写 hex 的字符串）SHALL 返回相同的 404 `not_found` 信封，二者不可区分；以上 400/404 均不写会话行、不写审计。
@@ -27,7 +22,7 @@
 - **THEN** 均为 400 `bad_request` 与 no-store，无会话行、无审计行新增
 
 ### Requirement: 绑定不可改与工作目录
-会话的 `workspace_id` 只在创建时（或 fork 继承时）写入，此后 SHALL NOT 被任何 REST 修改：`PATCH /api/sessions/:id` 携带 `workspaceId` 键 SHALL 作为多余键 400 `bad_request`。会话的 omp 工作目录 SHALL 为：绑定时该空间根（经工作空间 store 以会话 `owner_id` 为 principal 的 `rootOf` 取得，落在 `<SANDBOX_ROOT>/<ownerId>/` 之下），未绑定时沿用所有者根 `<SANDBOX_ROOT>/<ownerId>`；该会话每一次 generation spawn（首次、闲置回收后、崩溃恢复、regenerate 重新获取）与以其为源的 fork 临时进程 SHALL 以此为 `--cwd`（chat-sessions「Supervisor dispatch and generation binding」）。绑定会话的 `rootOf` 返回 null 时 SHALL 以通用失败结束该次获取，不回退所有者根。`rootOf` 返回的空间根在获取时不是已存在的目录（被外部删除或改名）时，宿主 SHALL NOT 创建该目录（不对空间根做 mkdir）、SHALL NOT spawn、SHALL NOT 回退所有者根，该次获取按 `agent_unavailable` 失败（prompt → 502 并走既有受理对补偿；regenerate 按其既有 502 规则）。omp `--resume` 以会话文件头记录的 cwd 为准，故同一会话各 generation 的 cwd SHALL 一致。空间目录丢失后的修复不在本契约内。
+会话的 `workspace_id` 只在创建时（或 fork 继承时）写入，此后 SHALL NOT 被任何 REST 修改：`PATCH /api/sessions/:id` 携带 `workspaceId` 键 SHALL 作为多余键 400 `bad_request`。会话的 omp 工作目录 SHALL 为：绑定时该空间根（经工作空间 store 以会话 `owner_id` 为 principal 的 `rootOf` 取得，落在 `<SANDBOX_ROOT>/<ownerId>/` 之下），未绑定时沿用所有者根 `<SANDBOX_ROOT>/<ownerId>`；该会话每一次 generation spawn（首次、闲置回收后、崩溃恢复、regenerate 重新获取）与以其为源的 fork 临时进程 SHALL 以此为 `--cwd`（chat-sessions「Supervisor dispatch and generation binding」）。绑定会话的 `rootOf` 返回 null 时 SHALL 以通用失败结束该次获取，不回退所有者根。`rootOf` 返回的空间根在获取时不是已存在的目录（被外部删除或改名），或 `rootOf` 因该根存在但不是普通目录（被同名文件占据、含 symlink）而拒绝解析时，宿主 SHALL NOT 创建该目录（不对空间根做 mkdir）、SHALL NOT spawn、SHALL NOT 回退所有者根，该次获取按 `agent_unavailable` 失败（prompt → 502 并走既有受理对补偿；regenerate 按其既有 502 规则）。omp `--resume` 以会话文件头记录的 cwd 为准，故同一会话各 generation 的 cwd SHALL 一致。空间目录丢失后的修复不在本契约内。
 
 #### Scenario: 绑定会话的进程工作目录
 - **WHEN** owner 在绑定 W 的会话与一个未绑定会话上各发 prompt，fake-omp probe 报告 `cwd=`
@@ -80,14 +75,14 @@
    获取要么成功派发后经 (a) 结束，要么失败经 (b) 结束，二者都在既有上界内出现，删除不另设计时器。
 3. 调用 supervisor 公开的 `retire(sessionId)`：存活进程经既有有界 retire 序列退出（token 撤销、名额释放），该会话的 slot 与事件环丢弃，所有 SSE 订阅者的响应结束且不再收到事件。自本步开始至本次调用结束（删除墓碑期，含 retire 完成与第 4 步删行之间的窗口），已通过 owner 预检的新事件流订阅 SHALL 立即结束且不写任何事件；第 4 步失败时墓碑随控制占用一同解除，此后订阅恢复既有行为。
 4. 单个 SQLite 事务：读取 `omp_session_file` 与该会话消息数，删除会话行——消息、步骤、审批随外键级联删除，以其为源的 fork 会话 `parent_session_id` 由外键置 NULL 且这些会话保留——并在同一事务写一条 `session.delete` 审计；审计失败则整个事务回滚。store SHALL 在删除时确认该会话无活跃回合/缓冲/步骤内存状态（此时应已结算；若仍存在视为不变量破坏，通用失败且不删除）。
-5. 若第 4 步读到的 `omp_session_file` 非 NULL，SHALL unlink 该文件：`ENOENT` 视为成功；其它错误经服务错误通道报告，响应仍为 204（行已删除，残留文件不影响任何会话）。regenerate/fork 产生的旧分支 `.jsonl` 不在清理范围内。
+5. 若第 4 步读到的 `omp_session_file` 非 NULL：该值由 omp 上报、写入时未经宿主校验，故宿主 SHALL 仅在它是绝对路径、其所在目录的 realpath 等于该会话所有者的 omp 会话目录（`<OMP_STATE_DIR>/sessions/<ownerId>`）的 realpath、该会话目录的 realpath 恰为 `<OMP_STATE_DIR 的 realpath>/sessions/<ownerId>`（`sessions` 与 `<ownerId>` 两级都不是符号链接——换成指向别处的符号链接后前一条比较两侧会一起解析到链接目标而恒等；omp-runtime「OMP_STATE_DIR 托管布局」之后这两级不能再被 omp uid 替换（它们的父目录对 omp uid 不可写），本校验保留为纵深防御）、且它本身（`lstat`，不跟随符号链接）是普通文件时才 unlink；不满足任一条件 SHALL NOT unlink 任何路径，并经服务错误通道报告。`ENOENT`（校验或 unlink 时已不存在）视为成功；其它错误经服务错误通道报告。以上任何情况响应仍为 204（行已删除，残留文件不影响任何会话），错误通道自身的失败也不改变该响应。同名目录的处理条件 SHALL 为：该值是绝对路径、其所在目录的 realpath 等于 owner 会话目录的 realpath、其 basename 以 `.jsonl` 结尾且去掉后缀后的名字非空且不是 `.` 或 `..`，并且对它本身的 `lstat` 结果是普通文件（不论随后 unlink 成功、`ENOENT` 或失败）或 `ENOENT`（文件已不存在而同名目录可能仍在）。条件满足时，宿主 SHALL 在同一校验后的 owner 会话目录 realpath 下，对去掉 `.jsonl` 后缀的同名项（omp 为该会话建的产物目录，存放工具完整输出等）做 `lstat`：为目录（不跟随符号链接）则先把它 `rename` 为 `<OMP_STATE_DIR 的 realpath>/trash/<32 位随机 hex>`（omp-runtime「OMP_STATE_DIR 托管布局」的 app 私有目录，omp uid 不能进入），再对 trash 里的该项 `lstat`：是目录则在 trash 内递归移除（不跟随目录内的符号链接），不是目录（`lstat` 与 `rename` 之间被换成了符号链接或文件）则只 `unlink` 这一项并经服务错误通道报告；`rename` 以 `ENOENT` 失败时（源已不在与 trash 缺失同为 `ENOENT`）SHALL 再对原位置 `lstat` 一次：已不存在视为成功，仍存在则按 trash 不可用经服务错误通道报告且不触碰原位置；其它失败（含 `EXDEV`、以及 omp uid 把自己的产物目录改成 app uid 不可写时的 `EACCES`）经服务错误通道报告且不触碰原位置；不存在视为成功；不是目录（含符号链接）则不移除任何东西并经服务错误通道报告；移除失败（含部分失败）经服务错误通道报告。递归移除因此发生在 omp uid 无法**按路径**到达的目录里：`rename` 不跟随符号链接、移动的是目录项本身，移入 trash 之后 omp uid 不能再经路径替换其下任何一级，#758 登记的「移除进行期间按路径替换目录」由此关闭。已知残留：(1) 在删除之前就已把工作目录或目录 fd 留在该产物目录树内的 omp uid 进程，仍可经相对路径在递归期间替换子目录（Node 的递归移除按路径逐项进行，没有 `*at` 系调用）——需要预先进入这一个会话的产物目录，受信局域网下接受并登记于 ADR-0010；(2) omp uid 以 `0700` 之类的权限位建出的子目录，app uid 无法列举或清空，递归移除部分失败——照常经服务错误通道报告一次，残余留在 trash（app 私有，不被任何会话引用，宿主不自动清理）而不在会话目录里。其余情形（非绝对路径、所在目录不符或不存在、本身不是普通文件、去后缀后的名字为空或为 `.`/`..`）SHALL NOT 触碰任何同名项；名字不合法的情形经服务错误通道报告。以上情况响应仍为 204。regenerate/fork 产生的旧分支 `.jsonl` 及其同名目录不在清理范围内。以被删会话为源的 fork 会话不依赖该目录（omp 只在会话自己的同名目录里解析产物引用，fork 不复制也不回退到源目录）。
 6. 返回 204。
 
 第 2–4 步失败（例如终态落库或删除事务的存储错误）SHALL 返回通用 5xx，会话行保持存在（进程可能已被退役，下次 prompt 按既有 `--resume` 懒获取）。删除完成后该 id 的 `GET /api/sessions/:id/messages`、事件流订阅、PATCH、DELETE SHALL 与未知 id 相同地 404，`GET /api/sessions` 不再列出它；其它会话的进程、行与订阅不受影响。
 
 #### Scenario: 删除空闲会话
 - **WHEN** owner 删除一个 `done` 会话（两轮消息、含步骤与一条 `allow` 审批、存活 idle 进程、一个打开的 SSE 订阅、`omp_session_file` 指向已存在文件），另有一个以它为源的 fork 会话
-- **THEN** 204 无 body；fake-omp 子进程已退出且订阅响应已结束；该会话的消息/步骤/审批行不复存在；`omp_session_file` 文件已被删除；fork 会话仍在 `GET /api/sessions` 中且其 `parent_session_id` 为 NULL；`GET /api/audit` 恰新增一条 `session.delete`，`detail.messageCount=4`、`detail.ompSessionFile` 为被删文件路径
+- **THEN** 204 无 body；fake-omp 子进程已退出且订阅响应已结束；该会话的消息/步骤/审批行不复存在；`omp_session_file` 文件已被删除，其同名目录（含一个文件与一层嵌套子目录）也已不存在；fork 会话仍在 `GET /api/sessions` 中且其 `parent_session_id` 为 NULL；`GET /api/audit` 恰新增一条 `session.delete`，`detail.messageCount=4`、`detail.ompSessionFile` 为被删文件路径
 
 #### Scenario: 删除运行中的会话先停止
 - **WHEN** 回合进行中且有一条挂起审批时 owner 删除该会话，fake-omp 以 `abort-ok` 应答
@@ -100,6 +95,10 @@
 #### Scenario: 删除时停止意图遇获取失败
 - **WHEN** 会话在 fake-omp `slow-ready` 下受理 prompt（仍在获取/握手、`abort()` 返回 false），owner 此时 DELETE 使停止意图被登记，随后测试注入的获取失败使该次派发不发生
 - **THEN** prompt 返回其失败对应的 502/503，受理对被补偿、会话状态复原，fake-omp 未收到 `prompt` 或 `abort` 帧；DELETE 随后 204 且 `GET /api/audit` 恰新增一条 `session.delete`；此后该 id 的 DELETE、PATCH 与 `GET …/messages` 均为 404（而非 409 `session_busy`），无残留控制占用，其它会话的 prompt 照常 202
+
+#### Scenario: 运行中删除的过渡拒绝
+- **WHEN** 回合进行中（会话 `running`、进程存活、一个打开的 SSE 订阅）时 owner 删除该会话
+- **THEN** 不再返回过渡期的 409 `session_busy`：该回合按「删除运行中的会话先停止」被停止，随后删除完成、响应 204（过渡拒绝已由第 2 步的停止路径取代）
 
 #### Scenario: 删除墓碑期新订阅立即结束
 - **WHEN** DELETE 已完成第 3 步 retire、第 4 步删除事务尚未执行时，测试在该窗口内以同一 owner 对该会话发起新的 `GET /api/sessions/:id/events`
@@ -117,6 +116,10 @@
 - **WHEN** owner 删除 `omp_session_file` 指向的文件已不存在的会话，以及一个从未 prompt 过（`omp_session_file` 为 NULL、无进程）的会话
 - **THEN** 两者均 204、行被删除、审计各一条（后者 `ompSessionFile=null`、`messageCount=0`），无错误报告
 
+#### Scenario: 会话文件路径不在所有者会话目录内
+- **WHEN** 被删会话的 `omp_session_file` 分别为所有者会话目录之外的一个已存在文件、一个相对路径、会话目录内指向目录外文件的符号链接
+- **THEN** 三者均 204、行被删除、审计各一条；目录外文件、符号链接及其目标都仍存在；每次经服务错误通道恰报告一次
+
 #### Scenario: 删除事务失败保留会话
 - **WHEN** 测试令删除事务中的审计写入失败
 - **THEN** 响应为通用 5xx；会话、消息、步骤、审批行与 `omp_session_file` 文件都保留；控制占用已释放，随后对该会话的 prompt 可 202
@@ -125,6 +128,36 @@
 - **WHEN** 匿名请求、他人会话、不存在会话调用 DELETE
 - **THEN** 分别 401、404、404（后两者一致），无 supervisor 调用、无进程变化、无写入
 
+#### Scenario: 同名目录的边界情形
+- **WHEN** 被删会话的 `omp_session_file` 合法存在，而其同名项是一个指向 owner 会话目录之外某目录的符号链接
+- **THEN** 204；`.jsonl` 已删除；该符号链接及其目标目录的内容原样保留；服务错误通道恰收到一条报告
+- **WHEN** 同名项不存在
+- **THEN** 204，错误通道无报告
+- **WHEN** `omp_session_file` 未通过校验（不在 owner 会话目录内，或不是普通文件）
+- **THEN** 204；owner 会话目录内的同名项不被触碰（仍存在）
+- **WHEN** `omp_session_file` 指向的 `.jsonl` 已不存在，而 owner 会话目录内的同名目录仍在
+- **THEN** 204；同名目录已被移除；错误通道无报告
+- **WHEN** `omp_session_file` 是 owner 会话目录内名为 `..jsonl` 或 `...jsonl` 的普通文件（去后缀后为 `.` 或 `..`）
+- **THEN** 204；该文件按既有规则 unlink；owner 会话目录、其上级目录及其中的其它文件原样保留；错误通道收到一条报告
+- **WHEN** 同名目录的递归移除失败（注入）
+- **THEN** 204；会话行已删除；错误通道收到报告
+
+#### Scenario: 产物目录经 trash 移除
+- **WHEN** 删除一个会话，其 `.jsonl` 与同名非空产物目录（含嵌套子目录与一个指向会话目录之外文件的符号链接）都在 owner 会话目录里
+- **THEN** 响应 204，`.jsonl` 与产物目录在会话目录里都不存在，`<state>/trash` 为空，链接指向的外部文件字节不变，无错误报告
+
+#### Scenario: rename 之前被换成符号链接
+- **WHEN** 产物目录在宿主 `lstat` 之后、`rename` 之前被换成指向会话目录之外一棵目录树的符号链接（经测试钩子在 `rename` 调用点注入）
+- **THEN** 被移入 trash 的是该符号链接本身，宿主只 `unlink` 它并报告一次；链接目标的目录树逐字节不变；`<state>/trash` 为空
+
+#### Scenario: trash 不可用
+- **WHEN** `<state>/trash` 被换成普通文件，或根本不存在（`rename` 分别以 `ENOTDIR` 与 `ENOENT` 失败）
+- **THEN** 两种情况响应都是 204，产物目录原样留在会话目录里，错误经服务错误通道各报告一次
+
+#### Scenario: 部分失败的残余在 trash
+- **WHEN** 产物目录里有一个 app uid 无法清空的子目录（mode `0500`、内含文件）
+- **THEN** 响应 204，会话目录里已没有该产物目录，残余在 `<state>/trash/<随机名>` 之下，错误报告一次
+
 ### Requirement: 会话元数据审计
 会话元数据 SHALL 经 `core/audit` 既有 `emit` 写入两类新审计事件，均与其对应的业务写入处于同一 SQLite 事务（业务回滚则审计不存在，审计失败则业务不生效），`actorId` 为会话 `owner_id`：
 - `session.bind`：仅在 `POST /api/sessions` 以 `workspaceId` 创建会话时写一条；`title="绑定工作空间"`、`workspaceId`=所绑空间 id、`detail={sessionId, scene}`（`scene` 为请求值或 null）。未绑定的创建与 fork 继承绑定不写该事件。
@@ -132,17 +165,21 @@
 
 `PATCH /api/sessions/:id` 不写审计。`GET /api/audit` SHALL 以既有形状返回这两类事件，并沿用既有的按 actor 过滤与管理员可见规则。
 
+#### Scenario: 绑定审计形状
+- **WHEN** owner 以 `{workspaceId:W.id, scene:"office"}` 创建会话
+- **THEN** `GET /api/audit?limit=1` 返回 `session.bind`（`title="绑定工作空间"`、`workspaceId=W.id`、`detail={sessionId,scene:"office"}`），`actorId` 为该 owner；第二个非管理员账号的 `GET /api/audit` 不含该条
+
 #### Scenario: 审计形状
 - **WHEN** owner 以 `{workspaceId:W.id, scene:"office"}` 创建会话、发一轮 prompt 至 `done`，再删除它
 - **THEN** `GET /api/audit?limit=2` 依次返回 `session.delete`（`title="删除会话"`、`workspaceId=W.id`、`detail={sessionId,ompSessionFile:<路径>,messageCount:2}`）与 `session.bind`（`title="绑定工作空间"`、`workspaceId=W.id`、`detail={sessionId,scene:"office"}`），`actorId` 均为该 owner；第二个非管理员账号的 `GET /api/audit` 不含这两条
 
 ### Requirement: fork 继承会话元数据
-`POST /api/sessions/:id/fork`（turn-control「从此处分叉 REST」）预先插入的新会话行 SHALL 复制源会话的 `workspace_id` 与 `scene`，`pinned_at` SHALL 为 NULL；其余列与 A 的规则一致。fork 事务拷贝的消息与步骤 SHALL 同时拷贝 `chat_messages.thinking` 与 `chat_steps.changes`（原值，含 NULL），使新会话的快照与源会话被拷贝部分的思考与文件变更一致。fork 响应中的 `session` 与其它会话视图相同，为八键视图。因 omp `--resume` 采用源会话文件头的 cwd，fork 会话后续 generation 的 `--cwd` 与源会话一致（均为源空间根或所有者根）。fork 不写 `session.bind` 审计。
+`POST /api/sessions/:id/fork`（chat-sessions「会话 REST」fork 段）在其最终事务中插入的新会话行 SHALL 复制源会话的 `workspace_id` 与 `scene`，`pinned_at` SHALL 为 NULL；其余列与该段规则一致。该事务拷贝的消息与步骤 SHALL 同时拷贝 `chat_messages.thinking` 与 `chat_steps.changes`（原值，含 NULL），使新会话的快照与源会话被拷贝部分的思考与文件变更一致。fork 响应中的 `session` 与其它会话视图相同，为八键视图。fork 会话后续 generation 的 `--cwd` 由其继承的 `workspace_id` 按「绑定不可改与工作目录」计算，与源会话一致（均为源空间根或所有者根）。fork 不写 `session.bind` 审计。
 
 #### Scenario: 继承空间与场景、不继承置顶
 - **WHEN** owner 对绑定 W、`scene="code"`、已置顶的源会话调用 fork（fake-omp `branch`），随后在新会话发 prompt
-- **THEN** 201 的 `session` 为八键，`workspaceId=W.id`、`scene="code"`、`pinnedAt=null`；源会话 `pinnedAt` 不变；被拷贝助手消息的 `thinking` 与其步骤的 `changes` 在新会话快照中与源会话逐值相同；新会话进程 probe 报告的 `cwd` 为 W 的根；审计无 `session.bind` 新增
+- **THEN** 201 的 `session` 为八键，`workspaceId=W.id`、`scene="code"`、`pinnedAt=null`；源会话 `pinnedAt` 不变；被拷贝助手消息的 `thinking` 与其步骤的 `changes` 在新会话快照中与源会话逐值相同（NULL 仍为 null）；新会话进程 probe 报告的 `cwd` 为 W 的根；审计无 `session.bind` 新增
 
 #### Scenario: fork 响应的会话视图与列表一致
 - **WHEN** owner 对绑定 W、`scene="design"`、已置顶的源会话调用 fork 成功，随后 `GET /api/sessions`
-- **THEN** 201 响应的 `session` 恰为八键 `{id,title,status,createdAt,updatedAt,scene,workspaceId,pinnedAt}`，`workspaceId=W.id`、`scene="design"`、`pinnedAt=null`，且与 `GET /api/sessions` 中同 id 条目逐键相等；web 八键严格解析接受该响应（不因缺键视为无效响应）
+- **THEN** 201 响应的 `session` 恰为八键 `{id,title,status,createdAt,updatedAt,scene,workspaceId,pinnedAt}`，`workspaceId=W.id`、`scene="design"`、`pinnedAt=null`，且与 `GET /api/sessions` 中同 id 条目逐键相等

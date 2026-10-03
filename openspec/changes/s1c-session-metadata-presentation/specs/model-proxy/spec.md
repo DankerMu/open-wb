@@ -1,12 +1,8 @@
-# Spec delta: model-proxy（S1c B 修改）
-
-> 本 delta 按仓内先例**整段重述**被修改的 Requirement（含其全部 Scenario，另加 B 的 Scenario）；归档时以本文整段替换 promoted 的同名 Requirement，未在此重述的 Requirement 不变。
-
 ## MODIFIED Requirements
 
 ### Requirement: 托管 models.yml
 The model-proxy module SHALL export deriveProxyBaseUrl(address:AddressInfo):string and writeManagedModelsYml(agentDir,{proxyBaseUrl,modelId,reasoning?}):Promise<void> where `reasoning` is an optional boolean defaulting to false when omitted (an omitted `reasoning` writes exactly the false-variant file; the server always passes the parsed `MODEL_REASONING` value). Actual TCP listen addresses SHALL map wildcard0.0.0.0 to127.0.0.1 and wildcard:: to::1; explicit IPv4/IPv6 SHALL be retained, IPv6 enclosed in brackets, actual port used and /v1 appended with http scheme.
-The writer SHALL create missing agentDir parents and deterministically overwrite agentDir/models.yml with block YAML containing providers.workbuddy: api openai-completions, supplied proxyBaseUrl, literal apiKey WORKBUDDY_MODEL_TOKEN, and exactly one model with supplied id/name, contextWindow128000 and maxTokens8192. When `reasoning` is true the model entry SHALL additionally contain, after maxTokens and in this order, `reasoning: true` and a `compat` mapping holding exactly `reasoningContentField: reasoning_content` (omp v18.0.10 `ModelDefinitionSchema` places `reasoningContentField` under `compat`); when false both keys SHALL be absent and the output SHALL be byte-identical to the pre-reasoning managed output. The declaration only tells omp the model is a reasoning model on the request side (thinking/effort parameters, and replaying stored thinking into multi-turn history under the `compat.reasoningContentField` name, which DeepSeek-style upstreams validate); it SHALL NOT be relied on to gate the host thinking pipeline, because omp parses `reasoning_content`/`reasoning`/`reasoning_text` response deltas into thinking frames regardless of it (thinking-fold). The mapping from environment variable `MODEL_REASONING` (`on` default → true, `off` → false, any other value including empty rejected at startup with an error naming the variable) belongs to startup assembly (`server/src/agent-config.ts`), not to this module. It SHALL NOT write authHeader or read/expand parent environment credentials. Supplied string values SHALL remain strings and SHALL NOT inject YAML properties. Identical inputs SHALL produce identical bytes; changed inputs SHALL replace obsolete managed content. Filesystem failures SHALL reject rather than report success. Startup invocation after listen remains a later assembly responsibility, not this module's side effect.
+The writer SHALL NOT create agentDir or any parent — the directory is established by omp-runtime「OMP_STATE_DIR 托管布局」 before the writer runs, and a missing agentDir rejects — and SHALL deterministically replace agentDir/models.yml — by writing a fresh temporary file in agentDir (created exclusively, never through an existing path) with mode exactly `0640` regardless of the process umask and renaming it over `models.yml`, so that a symlink or foreign file planted at `models.yml` is replaced rather than followed or written through, and no partially written file is ever visible; a failed write SHALL leave no temporary file behind — with block YAML containing providers.workbuddy: api openai-completions, supplied proxyBaseUrl, literal apiKey WORKBUDDY_MODEL_TOKEN, and exactly one model with supplied id/name, contextWindow128000 and maxTokens8192. When `reasoning` is true the model entry SHALL additionally contain, after maxTokens and in this order, `reasoning: true` and a `compat` mapping holding exactly `reasoningContentField: reasoning_content` (omp v18.0.10 `ModelDefinitionSchema` places `reasoningContentField` under `compat`); when false both keys SHALL be absent and the output SHALL be byte-identical to the pre-reasoning managed output. The declaration only tells omp the model is a reasoning model on the request side (thinking/effort parameters, and replaying stored thinking into multi-turn history under the `compat.reasoningContentField` name, which DeepSeek-style upstreams validate); it SHALL NOT be relied on to gate the host thinking pipeline, because omp parses `reasoning_content`/`reasoning`/`reasoning_text` response deltas into thinking frames regardless of it (thinking-fold). The mapping from environment variable `MODEL_REASONING` (`on` default → true, `off` → false, any other value including empty rejected at startup with an error naming the variable) belongs to startup assembly (`server/src/agent-config.ts`), not to this module. It SHALL NOT write authHeader or read/expand parent environment credentials. Supplied string values SHALL remain strings and SHALL NOT inject YAML properties. Identical inputs SHALL produce identical bytes; changed inputs SHALL replace obsolete managed content. Filesystem failures SHALL reject rather than report success. Startup invocation after listen remains a later assembly responsibility, not this module's side effect.
 
 #### Scenario: Connectable address derivation
 - WHEN the actual listener address is0.0.0.0:18016 or IPv6:::18016
@@ -25,9 +21,9 @@ The writer SHALL create missing agentDir parents and deterministically overwrite
 - THEN the second file contains no `reasoning` or `compat` key and no stale reasoning line remains
 
 #### Scenario: Real filesystem ownership
-- WHEN agentDir does not yet exist
-- THEN its parents and models.yml are created and readable after the promise resolves
-- WHEN agentDir cannot be created or models.yml cannot be written because a regular file occupies a needed directory path
+- WHEN agentDir exists and holds no models.yml
+- THEN models.yml is created and readable after the promise resolves
+- WHEN agentDir does not exist, or is a regular file
 - THEN the promise rejects and unrelated files remain unchanged
 
 #### Scenario: Reasoning declaration toggles
@@ -35,3 +31,7 @@ The writer SHALL create missing agentDir parents and deterministically overwrite
 - THEN the first parsed model entry has `reasoning: true` and `compat: {reasoningContentField: "reasoning_content"}` and no other added key, and is accepted by omp's models.yml schema; the second has neither key; each variant written twice is byte-identical
 - WHEN startup reads `MODEL_REASONING` unset, `on`, `off`, empty and `yes`
 - THEN the writer receives true, true and false respectively, and empty or `yes` fails startup before models.yml is written, naming `MODEL_REASONING` without echoing unrelated environment values
+
+#### Scenario: Planted link is replaced and the mode is fixed
+- **WHEN** `agentDir/models.yml` is a symlink to a file outside agentDir and the writer runs under umask `000` and again under umask `077`
+- **THEN** both times `models.yml` is a regular file of mode `0640` holding the managed content, the outside file is byte-identical to before, and agentDir holds no leftover temporary file
