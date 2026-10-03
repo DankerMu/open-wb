@@ -5,7 +5,7 @@ Fixture level: compact
 ## 1. 实现
 - [ ] 1.1 `approvals.ts` `#expire`：非 `not_found` 的事务失败不再 `registrations.delete`，直接进 `#fault`；JSDoc 同步（「drops the registration」不再成立）。先核对 `#fault` 在该路径上必然同步到达 `abandon(slot)`（`supervisor.ts` 的 fault sink → `#retireSlot`）；若存在到不了 `abandon` 的分支（例如 slot 已退役），停下报告，不要自行加兜底删除。
 - [ ] 1.2 F2（`session-approvals-infra-fault.test.ts`）：触发器只阻断 r1 的 timeout 更新；退役后 r1 与 r2 均为 `deny`、`decided_at` 非空，审计恰为两条 `deny`；owner 对 r1 `POST …/approvals/:id {decision:"allow"}`（或该测试文件现有的作答入口）得 409 `approval_settled`，r1 仍为 `deny`，无 `allow` 审计；再推进一个 TTL 无 `timeout`、无帧；保留故障仍只有一条（TIMEOUT_BLOCKED）。
-- [ ] 1.3 新用例：r1 的 timeout 与 deny 更新都被阻断（存储持续失败）→ r1 保持 NULL、保留故障含两条错误来源、无未处理 rejection、关停仍暴露保留故障——钉住「已知残留」的如实行为，不断言 owner 作答结果。
+- [ ] 1.3 新用例：r1 的 timeout 与 deny 更新都被阻断（存储持续失败；两个触发器用不同的错误消息，以便断言两条来源）→ r1 保持 NULL、保留故障含两条错误来源、无未处理 rejection、关停仍暴露保留故障——钉住「已知残留」的如实行为，不断言 owner 作答结果。
 - [ ] 1.4 不改其它被跟踪文件。
 
 ## Must preserve
