@@ -69,6 +69,8 @@ sudo setfacl -m u:omp:--x "$runner_home"
 sudoers_src="${job_root}/workbuddy-omp.sudoers"
 {
   printf 'Defaults:%s secure_path="%s:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"\n' "$runner" "$node_dir"
+  # omp's umask comes from sudoers, not from the host's PAM (pam_umask gives 0002 or 0022).
+  printf 'Defaults>omp umask=0007\n'
   omp_rules "$runner"
   omp_rules "$check_user"
 } > "$sudoers_src"
@@ -216,6 +218,20 @@ run_phase() {
   phase_pid=""
   phase_kind=""
 }
+# What real omp wrote under sudo: every session .jsonl is 0660 and every directory omp made is
+# group-writable with no other bits. No .jsonl at all fails, so an empty tree cannot pass.
+check_omp_modes() (
+  cd "$OMP_STATE_DIR"
+  files="$(sudo find sessions -type f -name '*.jsonl')" || { echo "omp mode check failed: cannot list session files" >&2; exit 1; }
+  [ -n "$files" ] || { echo "omp mode check failed: no session .jsonl" >&2; exit 1; }
+  bad_files="$(sudo find sessions -type f -name '*.jsonl' ! -perm 0660)" || { echo "omp mode check failed: cannot inspect session files" >&2; exit 1; }
+  bad_dirs="$(sudo find sessions -type d ! -uid "$(id -u)" \( ! -perm -0020 -o -perm -0004 -o -perm -0002 -o -perm -0001 \))" || { echo "omp mode check failed: cannot inspect omp directories" >&2; exit 1; }
+  if [ -z "$bad_files$bad_dirs" ]; then echo "omp mode check passed: $(printf '%s\n' "$files" | wc -l | tr -d ' ') session .jsonl"; exit 0; fi
+  printf '%s\n' "$bad_files" "$bad_dirs" | while IFS= read -r path; do
+    [ -z "$path" ] || echo "omp mode check failed: $(sudo stat -c '%a' "$path" 2>/dev/null || sudo stat -f '%Lp' "$path") ${path}" >&2
+  done
+  exit 1
+)
 trap on_exit EXIT; trap 'pending=1' TERM INT; honor_cancel
 preflight="$(env -i PATH="$PATH" HOME="$proof_home" sudo -n -u omp --preserve-env=HOME,PATH -- /usr/bin/env)"
 printf '%s\n' "$preflight"
@@ -230,3 +246,6 @@ reap_owned
 run_phase smoke sg workbuddy -c 'umask 007; OMP_USER=omp bash .github/scripts/ci-compiled-server.sh smoke'
 honor_cancel
 reap_owned
+if [ "$primary_rc" -eq 0 ] && [ "$cleanup_rc" -eq 0 ]; then
+  check_omp_modes || { primary_rc=1; exit 1; }
+fi

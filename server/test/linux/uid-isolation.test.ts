@@ -3,6 +3,7 @@
  * Issue #351: retire's SIGKILL of sudo reaps omp through setpriv --pdeathsig KILL.
  * Issue #525: DELETE unlinks the omp-uid-written branch file from the app-uid session dir.
  * Issue #758: and removes the omp-uid-written artifact directory next to that file.
+ * Issue #760: what omp writes through sudo → setpriv has no other bits and keeps group write.
  * Non-Linux / unset WORKBUDDY_UID_TEST skip; opted-in missing OMP_USER fails.
  */
 import { type ChildProcessWithoutNullStreams, spawn, spawnSync } from "node:child_process";
@@ -211,6 +212,16 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
         }
         expect(statSync(artifacts).isDirectory()).toBe(true);
         expect(statSync(join(artifacts, "local", "note.txt")).isFile()).toBe(true);
+        // Modes are read here, before the DELETE below removes every one of these entries.
+        for (const entry of [
+          file,
+          artifacts,
+          join(artifacts, "1.bash.log"),
+          join(artifacts, "local"),
+          join(artifacts, "local", "note.txt"),
+        ]) {
+          expectSharedMode(entry);
+        }
 
         const deleted = await app.inject({
           method: "DELETE",
@@ -398,6 +409,18 @@ function assertIsolation(
     },
   ]);
   expect(readFileSync(layout.writePath, "utf8")).toBe(PROBE_CONTENT);
+  expectSharedMode(layout.writePath);
+}
+
+/**
+ * The omp side's umask is the sudoers `umask=0007`, not whatever the host's PAM hands out: 0002
+ * leaves other bits set, 0022 additionally drops group write. The mode is in the failure message.
+ */
+function expectSharedMode(path: string): void {
+  const mode = statSync(path).mode;
+  const seen = `${path} has mode ${(mode & 0o7777).toString(8)}`;
+  expect(mode & 0o007, seen).toBe(0);
+  expect(mode & 0o060, seen).toBe(0o060);
 }
 
 async function releaseIsolation(

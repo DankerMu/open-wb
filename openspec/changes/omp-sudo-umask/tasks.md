@@ -5,11 +5,11 @@ Fixture level: compact
 实施顺序：本 issue 在 #758 合入之后实施——1.3 的目录断言取 #758 让 fake-omp 建的同名目录及其嵌套子目录（此前 omp uid 在这些用例里只写文件，没有它新建的目录）。
 
 ## 1. 实现
-- [ ] 1.1 `ci-uid-isolation.sh`：sudoers 生成处加 `Defaults>omp umask=0007`；`visudo -c` 仍通过。
-- [ ] 1.2 `scripts/test-ci-harness.sh`：sudoers 合同以 `grep -Fx` 校验该行，新增「去掉该行」的 `cm` 式合同变异被拒（现有 `uid_rule_mutant` 靠运行时 `sudo -l` 拒绝，对 Defaults 行无效，不能照搬）。harness 的 `sg` 桩在 smoke 阶段生成一个 `0660` 的会话 `.jsonl` 与一个 `2770` 的同名目录，使 1.4 的检查在桩环境里有对象；另加两个变异：桩产物 mode 不对 → 脚本失败；桩不产出文件 → 脚本失败。
-- [ ] 1.3 `uid-isolation.test.ts`：spec delta 的 mode 断言——探针写出的文件；删除用例中 omp 写的分支 `.jsonl`、它的同名目录及其嵌套子目录与其中的文件（均由 omp uid 经 `sudo → setpriv` 创建，断言须在删除之前取 mode）。
-- [ ] 1.4 `ci-uid-isolation.sh` 真实 omp 冒烟阶段之后（仅当该阶段的主结果与清理结果都为 0 时执行）：检查 `OMP_STATE_DIR/sessions` 下 omp 写出的会话 `.jsonl` 全为 `0660`、omp 新建的目录不带 other 位且组可写；**零个 `.jsonl` 即失败**（防空转）；mode 检查用可移植写法（`find -perm`，或 harness 已用的 `stat -c … || stat -f …` 双形态——harness 在 macOS 上以桩运行同一脚本）。检查用 `sudo find`（主 shell 的 runner 没有生效的 `workbuddy` 组，进不了 omp 拥有的 `2770` 目录；不要再加一次 `sg` 调用——harness 断言 `sg` 恰被调用两次）。真 omp 在冒烟里未必新建目录：目录检查可能没有对象，这是允许的，防空转只由 `.jsonl` 承担（它的 `0660` 已能区分 umask `0002`/`0022`/`0007`）。不符则 job 失败；失败输出只打印 mode 与相对路径。
-- [ ] 1.5 除 `.github/scripts/ci-uid-isolation.sh`、`scripts/test-ci-harness.sh`、`server/test/linux/uid-isolation.test.ts` 与本 change 目录外不改其它被跟踪文件（ADR 由编排方改）。
+- [x] 1.1 `ci-uid-isolation.sh`：sudoers 生成处加 `Defaults>omp umask=0007`；`visudo -c` 仍通过。
+- [x] 1.2 `scripts/test-ci-harness.sh`：sudoers 合同以 `grep -Fx` 校验该行，新增「去掉该行」的 `cm` 式合同变异被拒（现有 `uid_rule_mutant` 靠运行时 `sudo -l` 拒绝，对 Defaults 行无效，不能照搬）。harness 的 `sg` 桩在 smoke 阶段生成一个 `0660` 的会话 `.jsonl` 与一个 `2770` 的同名目录，使 1.4 的检查在桩环境里有对象；另加两个变异：桩产物 mode 不对 → 脚本失败；桩不产出文件 → 脚本失败。
+- [x] 1.3 `uid-isolation.test.ts`：spec delta 的 mode 断言——探针写出的文件；删除用例中 omp 写的分支 `.jsonl`、它的同名目录及其嵌套子目录与其中的文件（均由 omp uid 经 `sudo → setpriv` 创建，断言须在删除之前取 mode）。
+- [x] 1.4 `ci-uid-isolation.sh` 真实 omp 冒烟阶段之后（仅当该阶段的主结果与清理结果都为 0 时执行）：检查 `OMP_STATE_DIR/sessions` 下 omp 写出的会话 `.jsonl` 全为 `0660`、omp 新建的目录不带 other 位且组可写；**零个 `.jsonl` 即失败**（防空转）；mode 检查用可移植写法（`find -perm`，或 harness 已用的 `stat -c … || stat -f …` 双形态——harness 在 macOS 上以桩运行同一脚本）。检查用 `sudo find`（主 shell 的 runner 没有生效的 `workbuddy` 组，进不了 omp 拥有的 `2770` 目录；不要再加一次 `sg` 调用——harness 断言 `sg` 恰被调用两次）。真 omp 在冒烟里未必新建目录：目录检查可能没有对象，这是允许的，防空转只由 `.jsonl` 承担（它的 `0660` 已能区分 umask `0002`/`0022`/`0007`）。不符则 job 失败；失败输出只打印 mode 与相对路径。
+- [x] 1.5 除 `.github/scripts/ci-uid-isolation.sh`、`scripts/test-ci-harness.sh`、`server/test/linux/uid-isolation.test.ts` 与本 change 目录外不改其它被跟踪文件（ADR 由编排方改）。
 
 ## Must preserve
 - `make test-guardrails` 基线全绿且只增不减；现有 sudoers rule mutants 不失效。
