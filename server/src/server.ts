@@ -90,8 +90,9 @@ export function sessionRuntimeOf(config: ServerConfig): SessionSupervisorRuntime
 }
 
 /**
- * 纯 seam：main 路径交给 createApp 的完整 assembly（runtime、可选 upstream、log）。构造本身零输出；
- * log 把每条握手超时记录写成 application stderr 一行 JSON，写失败吞掉。
+ * 纯 seam：main 路径交给 createApp 的完整 assembly（runtime、可选 upstream、log、onError）。构造本身零输出；
+ * log 把每条握手超时记录写成 application stderr 一行 JSON，写失败吞掉；
+ * onError 把 supervisor 每次通知的保留故障写成一行 generic `session_fault`（#664）。
  */
 export function appAssemblyOf(config: ServerConfig): AssemblyDependencies {
   return {
@@ -100,6 +101,7 @@ export function appAssemblyOf(config: ServerConfig): AssemblyDependencies {
       ? { upstream: { baseUrl: config.modelUpstreamBaseUrl, apiKey: config.modelUpstreamApiKey } }
       : {}),
     log: writeHandshakeTimeout,
+    onError: emitSessionFault,
   };
 }
 
@@ -182,6 +184,14 @@ function emitStartupFailed(): Promise<void> {
  */
 function emitListenerForceClose(): void {
   void emitStderrRecord("listener_force_close");
+}
+
+/**
+ * supervisor 保留故障的 generic 记录（#664）：不带原始 error 的任何内容。同步返回 undefined
+ * （sink 契约不允许 thenable）；以 void 调用，写入被拒绝也不会成为未处理 rejection 或再次通知。
+ */
+function emitSessionFault(): void {
+  void emitStderrRecord("session_fault");
 }
 
 /** generic application stderr 一行；sink 不可用时吞掉（不递归/不抛原始 stack）。 */
