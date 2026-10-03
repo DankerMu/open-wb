@@ -1,6 +1,8 @@
 /**
  * Issue #515 pure file-change candidates from omp edit/write tool_execution_end `result.details`.
  * Paths stay raw; resolution, workspace containment, caps and persistence belong to the supervisor.
+ * Real omp v18.0.10 (SHA256 bf026b63…fe278a, checked 2026-10-02): a hashline edit's `details.path` echoes the
+ * patch header verbatim — relative to the session cwd or absolute, whichever the model wrote; both occur.
  */
 
 /** One file of a `files.changed` event: `added`/`removed` are counts for edit, null for write. */
