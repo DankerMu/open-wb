@@ -86,13 +86,16 @@ describe("Popover 焦点与关闭 (P3/P4)", () => {
   });
 
   it("内点不关闭，外点序列关闭", async () => {
-    await openPopover();
+    const trigger = await openPopover();
     await yieldMacrotask();
     pressPointer(screen.getByRole("button", { name: "条目" }));
     await yieldMacrotask();
     expect(popoverContent()).not.toBeNull();
     pressPointer(document.body);
     await waitFor(() => expect(popoverContent()).toBeNull());
+    // Radix 关闭回焦在卸载后的 setTimeout(0) 里：先让出宏任务，断言才看得到它的结果。
+    await yieldMacrotask();
+    expect(document.activeElement).not.toBe(trigger);
   });
 });
 
