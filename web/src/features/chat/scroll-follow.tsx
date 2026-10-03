@@ -20,6 +20,14 @@ function distanceFromBottom(el: HTMLElement): number {
   return el.scrollHeight - el.scrollTop - el.clientHeight;
 }
 
+/* Writes the bottom position and records the `scrollTop` the element reports afterwards (the
+   clamped value, not the assigned `scrollHeight`), so the scroll event of this write is not
+   mistaken for a user scroll. */
+function scrollToBottom(el: HTMLElement, lastTop: RefObject<number>) {
+  el.scrollTop = el.scrollHeight;
+  lastTop.current = el.scrollTop;
+}
+
 /* Recompute after a layout change (content update, container or content resize). A pinned
    transcript is scrolled to the bottom. An unpinned one keeps its `scrollTop`: if the change
    brought it within the tolerance of the bottom it is pinned and the jump button hidden, as a
@@ -27,10 +35,11 @@ function distanceFromBottom(el: HTMLElement): number {
 function settle(
   el: HTMLElement,
   pinned: RefObject<boolean>,
+  lastTop: RefObject<number>,
   setShowJump: Dispatch<SetStateAction<boolean>>,
 ) {
   if (pinned.current) {
-    el.scrollTop = el.scrollHeight;
+    scrollToBottom(el, lastTop);
     return;
   }
   const distance = distanceFromBottom(el);
@@ -44,17 +53,29 @@ function settle(
 
 function useScrollFollow(ref: RefObject<HTMLDivElement | null>, content: unknown) {
   const pinned = useRef(true);
+  // `scrollTop` as of the last scroll event or bottom write; the mount `settle()` establishes it.
+  const lastTop = useRef(0);
   const [showJump, setShowJump] = useState(false);
   const observer = useRef<ResizeObserver | null>(null);
   const contentRoot = useRef<Element | null>(null);
 
+  /* Only a `scrollTop` that went down is a user scroll-up and unpins. A scroll event away from
+     the bottom whose `scrollTop` did not go down is the echo of a bottom write after which the
+     container shrank or the content grew (the wide top bar mounts in the same frame, after the
+     write, when a session is opened directly): it recomputes like a layout change instead. */
   const onScroll = useCallback(() => {
     const el = ref.current;
     if (!el) return;
+    const movedUp = el.scrollTop < lastTop.current;
+    lastTop.current = el.scrollTop;
     const distance = distanceFromBottom(el);
     if (distance <= PIN_TOLERANCE_PX) {
       pinned.current = true;
       setShowJump(false);
+      return;
+    }
+    if (!movedUp) {
+      settle(el, pinned, lastTop, setShowJump);
       return;
     }
     pinned.current = false;
@@ -67,7 +88,7 @@ function useScrollFollow(ref: RefObject<HTMLDivElement | null>, content: unknown
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const resize = new ResizeObserver(() => settle(el, pinned, setShowJump));
+    const resize = new ResizeObserver(() => settle(el, pinned, lastTop, setShowJump));
     resize.observe(el);
     observer.current = resize;
     return () => {
@@ -88,7 +109,7 @@ function useScrollFollow(ref: RefObject<HTMLDivElement | null>, content: unknown
       if (root) resize.observe(root);
       contentRoot.current = root;
     }
-    settle(el, pinned, setShowJump);
+    settle(el, pinned, lastTop, setShowJump);
   }, [content, ref]);
 
   const jumpToLatest = useCallback(() => {
@@ -96,7 +117,7 @@ function useScrollFollow(ref: RefObject<HTMLDivElement | null>, content: unknown
     if (!el) return;
     pinned.current = true;
     setShowJump(false);
-    el.scrollTop = el.scrollHeight;
+    scrollToBottom(el, lastTop);
   }, [ref]);
 
   return { jumpToLatest, onScroll, showJump };
