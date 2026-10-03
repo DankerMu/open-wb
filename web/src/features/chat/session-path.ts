@@ -40,6 +40,18 @@ export function selectedSession(
   );
 }
 
+/**
+ * composer 所在的工作空间 id（斜杠候选目录按它取）：已选会话的工作空间，欢迎态为 footer 里选中的
+ * 空间；没有空间为 null，请求了会话但还没解析出来时未知（undefined）。
+ */
+export function composerWorkspaceId(
+  requestedSessionId: string | null,
+  selected: ChatSession | undefined,
+  chosen: { id: string } | null,
+): string | null | undefined {
+  return requestedSessionId ? selected?.workspaceId : (chosen?.id ?? null);
+}
+
 /** 顶栏面包屑标题：当前会话的显示标题；没有当前会话时为 undefined（不上报）。 */
 export function selectedSessionTitle(
   requestedSessionId: string | null,

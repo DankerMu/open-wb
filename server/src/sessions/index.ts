@@ -10,7 +10,7 @@ import { registerSessionRoutes } from "./rest.js";
 import { registerCommandRoutes } from "./rest-commands.js";
 import type { WorkspaceRootOf } from "./session-cwd.js";
 import { createSessionDeleter } from "./session-delete.js";
-import { listSkills } from "./slash-commands.js";
+import { sessionSkillsResolver } from "./slash-commands.js";
 import { createSessionStore, type SessionStore } from "./store.js";
 import { createSessionMetadataStore } from "./store-metadata.js";
 import { defaultSessionClock, registerSessionEventStream } from "./stream/sse.js";
@@ -27,7 +27,8 @@ export interface RegisterSessionsOptions {
    */
   workspaceRootOf: WorkspaceRootOf;
   /**
-   * The omp agent directory whose `skills/` the slash whitelist lists. The caller passes
+   * The omp agent directory whose `skills/` the slash whitelist lists (platform skills; the
+   * project skills come from the session cwd under `runtime.sandboxRoot`). The caller passes
    * `ompAgentDir(stateDir)` for the same stateDir as `runtime`, i.e. `$HOME/.omp/agent` of the
    * spawn's `HOME`, omp's default agent dir; sessions never computes it a second way.
    */
@@ -65,7 +66,11 @@ export function registerSessions(
     runtime: options.runtime,
     workspaceRootOf: options.workspaceRootOf,
     onError: options.onError,
-    skills: () => listSkills(options.agentDir),
+    skills: sessionSkillsResolver(
+      options.agentDir,
+      options.runtime.sandboxRoot,
+      options.workspaceRootOf,
+    ),
     ...(options.onEvent === undefined ? {} : { onEvent: options.onEvent }),
     ...(options.log === undefined ? {} : { log: options.log }),
   });
@@ -85,8 +90,13 @@ export function registerSessions(
     workspaceRootOf: options.workspaceRootOf,
     deleter,
     agentDir: options.agentDir,
+    sandboxRoot: options.runtime.sandboxRoot,
   });
-  registerCommandRoutes(app, { agentDir: options.agentDir });
+  registerCommandRoutes(app, {
+    agentDir: options.agentDir,
+    sandboxRoot: options.runtime.sandboxRoot,
+    workspaceRootOf: options.workspaceRootOf,
+  });
   registerSessionEventStream(app, {
     store,
     supervisor,

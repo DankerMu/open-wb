@@ -1,12 +1,21 @@
 /**
  * Issue 556 (parent tasks 10.5) `listCommands()` over an injected fetch: A1–A4 of
- * openspec/changes/slash-command-menu/design.md. Seam: the real `createApiClient` over a stubbed
- * `fetch`. Oracles: the path, the request options and the five-key element of the spec delta, and
- * the body the server sends (server/src/sessions/rest-commands.ts).
+ * openspec/changes/slash-command-menu/design.md, and issue 814 `listCommands(workspaceId)`: A5 and
+ * the six-key element of openspec/changes/project-config-surface (chat-web 命令目录方法). Seam: the
+ * real `createApiClient` over a stubbed `fetch`. Oracles: the path, the request options and the
+ * element of the spec delta, and the body the server sends (server/src/sessions/rest-commands.ts).
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApiClient } from "../src/lib/api.js";
-import { CATALOGUE, COMMANDS, skill, untilAborted, WEEKLY } from "./chat-page-slash-support.js";
+import {
+  CATALOGUE,
+  COMMANDS,
+  commandsOf,
+  project,
+  skill,
+  untilAborted,
+  WEEKLY,
+} from "./chat-page-slash-support.js";
 import {
   captureApiError,
   createFetchMock,
@@ -25,21 +34,21 @@ function stubCommands(response: Response) {
   return fetchMock;
 }
 
-/** The failure of `listCommands()` against a 200 response carrying `body`. */
+/** The failure of `listCommands(null)` against a 200 response carrying `body`. */
 function rejection(body: unknown) {
   stubCommands(jsonResponse(body));
-  return captureApiError(createApiClient().listCommands());
+  return captureApiError(createApiClient().listCommands(null));
 }
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("listCommands (A1–A4)", () => {
-  it("A1 GETs /api/commands without a query, a body or a cache and returns the commands in order", async () => {
+describe("listCommands (A1–A5)", () => {
+  it("A1 null GETs /api/commands without a query, a body or a cache and returns the commands in order", async () => {
     const fetchMock = stubCommands(jsonResponse({ commands: FOUR }));
 
-    const commands = await createApiClient().listCommands();
+    const commands = await createApiClient().listCommands(null);
 
     expect(commands).toEqual(FOUR);
     expect(commands.map((command) => command.name)).toEqual([
@@ -54,6 +63,7 @@ describe("listCommands (A1–A4)", () => {
       description: "写周报",
       hint: "可选参数",
       source: "skill",
+      overrides: false,
     });
     expect(commands[3]?.hint).toBeNull();
     expect(fetchMock.mock.calls).toEqual([
@@ -65,14 +75,17 @@ describe("listCommands (A1–A4)", () => {
   it("A1 returns an empty catalogue as an empty array", async () => {
     stubCommands(jsonResponse({ commands: [] }));
 
-    await expect(createApiClient().listCommands()).resolves.toEqual([]);
+    await expect(createApiClient().listCommands(null)).resolves.toEqual([]);
   });
 
   it.each([
     ["an element without hint", [{ ...WEEKLY, hint: undefined }]],
     ["a numeric hint", [{ ...WEEKLY, hint: 1 }]],
+    ["an element without overrides", [{ ...WEEKLY, overrides: undefined }]],
+    ["overrides as a string", [{ ...WEEKLY, overrides: "false" }]],
+    ["a null overrides", [{ ...WEEKLY, overrides: null }]],
     ["the source extension", [{ ...WEEKLY, source: "extension" }]],
-    ["an element with a sixth key", [{ ...WEEKLY, enabled: true }]],
+    ["an element with a seventh key", [{ ...WEEKLY, enabled: true }]],
     ["a name that is not a string", [{ ...WEEKLY, name: 7 }]],
     ["a label that is not a string", [{ ...WEEKLY, label: null }]],
     ["a description that is not a string", [{ ...WEEKLY, description: ["写周报"] }]],
@@ -101,7 +114,7 @@ describe("listCommands (A1–A4)", () => {
       stubCommands(response);
 
       const error = await captureApiError(
-        createApiClient({ onUnauthorized }).listCommands({ signal }),
+        createApiClient({ onUnauthorized }).listCommands(null, { signal }),
       );
 
       expect(error.status).toBe(401);
@@ -113,7 +126,7 @@ describe("listCommands (A1–A4)", () => {
 
   it("A3 keeps the envelope of a 400 and fails a non-JSON 500 and a 201 as request_failed", async () => {
     const onUnauthorized = vi.fn();
-    const list = () => captureApiError(createApiClient({ onUnauthorized }).listCommands());
+    const list = () => captureApiError(createApiClient({ onUnauthorized }).listCommands(null));
 
     stubCommands(jsonResponse({ error: { code: "bad_request", message: "请求格式不正确" } }, 400));
     expect(await list()).toMatchObject({
@@ -135,7 +148,9 @@ describe("listCommands (A1–A4)", () => {
     const fetchMock = createFetchMock({ [COMMANDS]: untilAborted });
     vi.stubGlobal("fetch", fetchMock);
 
-    const pending = captureApiError(createApiClient().listCommands({ signal: controller.signal }));
+    const pending = captureApiError(
+      createApiClient().listCommands(null, { signal: controller.signal }),
+    );
     controller.abort();
 
     expectRequestFailure(await pending, 0);
@@ -150,5 +165,58 @@ describe("listCommands (A1–A4)", () => {
         },
       ],
     ]);
+  });
+
+  it("A5 a workspace id GETs /api/commands?workspaceId=<id> and keeps the project entries as sent", async () => {
+    const id = "0123456789abcdef0123456789abcdef";
+    const body = [...CATALOGUE, project("deploy", "部署到测试环境", true)];
+    const { signal } = new AbortController();
+    const fetchMock = createFetchMock({ [commandsOf(id)]: () => jsonResponse({ commands: body }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const commands = await createApiClient().listCommands(id, { signal });
+
+    expect(commands).toEqual(body);
+    expect(commands[3]).toEqual({
+      name: "skill:deploy",
+      label: "deploy",
+      description: "部署到测试环境",
+      hint: "可选参数",
+      source: "project",
+      overrides: true,
+    });
+    expect(fetchMock.mock.calls).toEqual([
+      [
+        `/api/commands?workspaceId=${id}`,
+        { method: "GET", credentials: "same-origin", cache: "no-store", signal },
+      ],
+    ]);
+    expect(fetchMock.mock.calls[0]?.[1]).not.toHaveProperty("body");
+  });
+
+  it("A5 the workspace id is encoded into the query string", async () => {
+    const path = "/api/commands?workspaceId=a%20b%26c%3Dd%2F%E4%B8%AD";
+    const fetchMock = createFetchMock({ [path]: () => jsonResponse({ commands: [] }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createApiClient().listCommands("a b&c=d/中")).resolves.toEqual([]);
+
+    expect(fetchMock.mock.calls.map(([called]) => called)).toEqual([path]);
+  });
+
+  it("A5 a 404 for a workspace id keeps its envelope and a 401 notifies unauthorized", async () => {
+    const id = "f".repeat(32);
+    const onUnauthorized = vi.fn();
+    const answers = [
+      jsonResponse({ error: { code: "not_found", message: "资源不存在" } }, 404),
+      jsonResponse({ error: { code: "unauthorized", message: "未登录" } }, 401),
+    ];
+    vi.stubGlobal("fetch", createFetchMock({ [commandsOf(id)]: answers }));
+    const list = () => captureApiError(createApiClient({ onUnauthorized }).listCommands(id));
+
+    expect(await list()).toMatchObject({ status: 404, code: "not_found", message: "资源不存在" });
+    expect(onUnauthorized).not.toHaveBeenCalled();
+    expect(await list()).toMatchObject({ status: 401, code: "unauthorized" });
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
   });
 });

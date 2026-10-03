@@ -4,6 +4,9 @@
 // Step 10 sends two more turns in the same session: `/todo` (answered by omp itself) and an escaped
 // `/session WORKBUDDY_THINK …` (answered by the model: its `thinking` is the marker's reasoning, so
 // the escaped text reached the upstream; no tool round, the session already holds a tool result).
+// Step 2 also reads the catalogue of a second workspace, `ui-walk-skills`, whose tracked fixture
+// (smoke/fixtures/sandbox) holds one project skill: the panel lists it with the `项目` tag, and
+// step 10, in the session bound to `ui-walk-sessions`, still lists the two builtins only.
 // Step 11 deletes the session through the UI; `finally` deletes it again over REST (404 by then,
 // 204 when a step failed first). The journey ends with a UI logout, which the error oracle needs
 // for its second expected /api/auth/me 401.
@@ -23,6 +26,10 @@ import { type AuthOracle, runWithBrowserErrorOracle } from "./ui-walk-oracle.js"
 
 const DEV_PASSWORD = "demo";
 const WORKSPACE_NAME = "ui-walk-sessions";
+// 夹具 smoke/fixtures/sandbox/u1/ui-walk-skills/.omp/skills/walk-brief/SKILL.md 的空间、名字与描述。
+const SKILLS_WORKSPACE = "ui-walk-skills";
+const SKILL_LABEL = "walk-brief";
+const SKILL_DESCRIPTION = "走查用的项目技能：按本项目的格式写简报";
 const REPORT_FILE = "workbuddy-report.html";
 // ADR-0011 逻辑路径 `<account>/<dir>/<path>`，不含沙箱根。
 const LOGICAL_PATH = "zhangsan/ui-walk-sessions/workbuddy-report.html";
@@ -90,13 +97,15 @@ async function walkSessionMeta(
 
   await step1Login(page, oracle, project);
   // 会话页只在挂载与建会话后读空间列表：先确保空间存在，再进入 `/`。
-  const { id: workspaceId, ensured } = await step1EnsureWorkspace(page);
-  mark(`step 1 (POST /api/workspaces ${ensured})`);
+  const { id: workspaceId, ensured } = await step1EnsureWorkspace(page, WORKSPACE_NAME);
+  const skills = await step1EnsureWorkspace(page, SKILLS_WORKSPACE);
+  mark(`step 1 (POST /api/workspaces ${ensured}, ${skills.ensured})`);
   try {
     await page.goto("/");
     await expect(welcomeHeading(page)).toBeVisible();
     await step2PickScene(page);
-    await step2PickWorkspace(page);
+    await step2ProjectSkill(page, skills.id);
+    await step2PickWorkspace(page, SKILLS_WORKSPACE, WORKSPACE_NAME);
     mark("step 2");
     const sessionId = await step3SendPrompt(page, project, workspaceId, prompt, created);
     mark("step 3");
@@ -151,14 +160,17 @@ async function step1Login(page: Page, oracle: AuthOracle, project: WalkProject):
 
 // 201（全新状态）或 409（已存在），状态码随 step 1 的日志行输出；id 与 dir 从列表读，dir 等于名字是
 // 逻辑路径的前提。
-async function step1EnsureWorkspace(page: Page): Promise<{ id: string; ensured: number }> {
-  const ensured = await page.request.post("/api/workspaces", { data: { name: WORKSPACE_NAME } });
+async function step1EnsureWorkspace(
+  page: Page,
+  name: string,
+): Promise<{ id: string; ensured: number }> {
+  const ensured = await page.request.post("/api/workspaces", { data: { name } });
   expect([201, 409], "POST /api/workspaces status").toContain(ensured.status());
   const listed = await page.request.get("/api/workspaces");
   expect(listed.status(), "GET /api/workspaces status").toBe(200);
   const body = (await listed.json()) as { workspaces: { id: string; name: string; dir: string }[] };
-  const named = body.workspaces.filter((workspace) => workspace.name === WORKSPACE_NAME);
-  expect(named.map((workspace) => workspace.dir)).toEqual([WORKSPACE_NAME]);
+  const named = body.workspaces.filter((workspace) => workspace.name === name);
+  expect(named.map((workspace) => workspace.dir)).toEqual([name]);
   const id = named[0]?.id ?? "";
   expect(id).toMatch(HEX_ID);
   return { id, ensured: ensured.status() };
@@ -181,18 +193,47 @@ async function step2PickScene(page: Page): Promise<void> {
   ).toHaveText(CODE_CHIPS);
 }
 
-async function step2PickWorkspace(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "任务启动于 未选择", exact: true }).click();
+// 页脚按钮当前显示 `current`（`未选择` 或一个空间名），选成空间 `name`。
+async function step2PickWorkspace(page: Page, current: string, name: string): Promise<void> {
+  await page.getByRole("button", { name: `任务启动于 ${current}`, exact: true }).click();
   const popover = page.getByRole("dialog", { name: "选择工作空间", exact: true });
-  await popover.getByLabel("搜索工作空间").fill(WORKSPACE_NAME);
+  await popover.getByLabel("搜索工作空间").fill(name);
   await popover
     .getByRole("button")
-    .filter({ has: page.getByText(WORKSPACE_NAME, { exact: true }) })
+    .filter({ has: page.getByText(name, { exact: true }) })
     .click();
   await expect(popover).toHaveCount(0);
-  await expect(
-    page.getByRole("button", { name: `任务启动于 ${WORKSPACE_NAME}`, exact: true }),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: `任务启动于 ${name}`, exact: true })).toBeVisible();
+}
+
+// 带项目 skill 的工作空间：欢迎态在页脚选中它后输入 `/`，目录按该空间的 id 取（请求的查询串），
+// 面板恰三项，只有项目 skill 那一项带 `项目` 标记。清空草稿后面板消失，页脚留在该空间。
+async function step2ProjectSkill(page: Page, workspaceId: string): Promise<void> {
+  const composer = page.getByLabel("给助手发消息");
+  const listbox = page.getByRole("listbox", { name: "命令候选", exact: true });
+  const options = listbox.getByRole("option");
+
+  await step2PickWorkspace(page, "未选择", SKILLS_WORKSPACE);
+  const catalogue = page.waitForRequest(
+    (request) => new URL(request.url()).pathname === "/api/commands",
+  );
+  await composer.fill("/");
+  const request = await catalogue;
+  expect(request.method()).toBe("GET");
+  expect(new URL(request.url()).search).toBe(`?workspaceId=${workspaceId}`);
+  await expect(listbox).toBeVisible();
+  await expect(options).toHaveCount(3);
+  await expect(listbox.locator(".chat-slash-label")).toHaveText([...SLASH_LABELS, SKILL_LABEL]);
+  await expect(listbox.locator(".chat-slash-tag")).toHaveText(["项目"]);
+  const skill = options.nth(2);
+  await expect(skill.locator(".chat-slash-tag")).toHaveText("项目");
+  await expect(skill.locator(".chat-slash-desc")).toHaveText(SKILL_DESCRIPTION);
+  await composer.fill(`/${SKILL_LABEL}`);
+  await expect(options).toHaveCount(1);
+  await composer.press("Enter");
+  await expect(composer).toHaveValue(`/skill:${SKILL_LABEL} `);
+  await expect(listbox).toHaveCount(0);
+  await composer.fill("");
 }
 
 // 回合完成：该助手消息的正文恰为 `reply`（文件里唯一带显式超时的断言），且没有任何一种审批条。

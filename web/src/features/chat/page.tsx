@@ -14,7 +14,7 @@ import { ownsCreateSend, ownsHistory, ownsMutation, visibleOwnedAlert } from "./
 import { RenameDialog } from "./rename-dialog.js";
 import { useSessionActions } from "./session-actions.js";
 import { DEFAULT_SESSION_FILTER } from "./session-groups.js";
-import { selectedSession, sessionNavigation } from "./session-path.js";
+import { composerWorkspaceId, selectedSession, sessionNavigation } from "./session-path.js";
 import { SessionSidebar } from "./session-sidebar.js";
 import { useSlashMenu } from "./slash-menu.js";
 import {
@@ -647,7 +647,8 @@ export function ChatPage() {
     Boolean(ownedStreamError);
   const forkLocked = ownsMutation(forkOwner, client, requestedSessionId);
   const { composerDisabled, sendDisabled } = composerLocks(generating, forkLocked, draft);
-  const slash = useSlashMenu(client, draft, !composerDisabled, setDraft);
+  const slashWorkspaceId = composerWorkspaceId(requestedSessionId, selected, welcome.workspace);
+  const slash = useSlashMenu(client, slashWorkspaceId, draft, !composerDisabled, setDraft);
   // 列表渲染进 shell 侧栏列表区（issue 424）；数据、回调与 fence 仍留在本页闭包里。
   useSidebarSlot(
     <SessionSidebar

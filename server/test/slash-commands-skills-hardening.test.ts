@@ -6,13 +6,19 @@
  * "not opened, not resolved" and the open flags are observations, not inferences. Expected values
  * are the literals of chat-sessions Scenario「Skill links leaving the skills directory and the
  * entry cap」; nothing here is derived from the module under test.
+ * Issue #813 (#773 task 1.4): the same limits hold in a project `.omp/skills`, plus the three a
+ * directory writable by the omp uid needs (no link at `.omp` or `skills`, no hard-linked SKILL.md,
+ * at most 4096 entries) and the sandbox-root anchor of the walk; expected values are the literals
+ * of Scenario「Project skills are listed from the session cwd upwards」.
  */
 import { execFileSync } from "node:child_process";
 import {
   constants,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -23,12 +29,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app.js";
 import { openDb } from "../src/core/db/index.js";
 import { ompAgentDir } from "../src/sessions/omp/process.js";
-import { listSkills } from "../src/sessions/slash-commands.js";
+import { listProjectSkills, listSkills } from "../src/sessions/slash-commands.js";
 import { loginSessionPair } from "./session-db-helpers.js";
 
 /**
- * Every `openSync`, `realpathSync` (Node's JS resolver) and `realpathSync.native` (the kernel's)
- * call made through a named `node:fs` import, in call order.
+ * Every `openSync`, `opendirSync`, `realpathSync` (Node's JS resolver) and `realpathSync.native`
+ * (the kernel's) call made through a named `node:fs` import, in call order.
  */
 const fsCalls = vi.hoisted(() => [] as Array<{ name: string; args: unknown[] }>);
 
@@ -47,7 +53,12 @@ vi.mock("node:fs", async (importOriginal) => {
     get: (target, key, receiver) =>
       key === "native" ? native : Reflect.get(target, key, receiver),
   });
-  return { ...actual, openSync: record("openSync", actual.openSync), realpathSync };
+  return {
+    ...actual,
+    openSync: record("openSync", actual.openSync),
+    opendirSync: record("opendirSync", actual.opendirSync),
+    realpathSync,
+  };
 });
 
 const OUTSIDE_DIR_DESCRIPTION = "outside directory description";
@@ -334,6 +345,236 @@ describe("listSkills: entry cap", () => {
     for (const entry of dropped) {
       expect(touched.filter((path) => path.includes(entry))).toEqual([]);
     }
+  });
+});
+
+/** A sandbox root with the owner root `u1`, the workspace root `u1/proj` and room outside. */
+function makeSandbox() {
+  const root = canonicalTemp("project-hardening-");
+  const sandboxRoot = join(root, "sandbox");
+  const ownerRoot = join(sandboxRoot, "u1");
+  const workspaceRoot = join(ownerRoot, "proj");
+  mkdirSync(workspaceRoot, { recursive: true });
+  writeSkill(join(ownerRoot, ".omp", "skills"), "owner-wide", ["description: 上层技能"]);
+  return { root, sandboxRoot, ownerRoot, workspaceRoot, skillsDir: projectSkills(workspaceRoot) };
+}
+
+function projectSkills(dir: string): string {
+  return join(dir, ".omp", "skills");
+}
+
+/** A directory outside the sandbox root holding `skills/x/SKILL.md` and `skills/y/SKILL.md`. */
+function plantOutside(root: string): string {
+  const outside = join(root, "outside");
+  writeSkill(join(outside, "skills"), "x", [`description: ${OUTSIDE_DIR_DESCRIPTION}`]);
+  writeSkill(join(outside, "skills"), "y", [`description: ${OUTSIDE_FILE_DESCRIPTION}`]);
+  return outside;
+}
+
+/** `listProjectSkills` with the recorder reset first, and every path it opened, listed or resolved. */
+function recordedProject(cwd: string, sandboxRoot: string) {
+  fsCalls.length = 0;
+  const skills = listProjectSkills(cwd, sandboxRoot);
+  const calls = fsCalls.splice(0);
+  const pathsOf = (name: string) =>
+    calls.filter((call) => call.name === name).map((call) => String(call.args[0]));
+  return {
+    skills,
+    opened: pathsOf("openSync"),
+    enumerated: pathsOf("opendirSync"),
+    resolved: pathsOf("realpathSync.native"),
+    touched: calls.map((call) => String(call.args[0])),
+    openFlags: calls.filter((call) => call.name === "openSync").map((call) => call.args[1]),
+    resolveOptions: calls
+      .filter((call) => call.name === "realpathSync.native")
+      .map((call) => call.args[1]),
+    rawOpened: calls.filter((call) => call.name === "openSync").map((call) => call.args[0]),
+  };
+}
+
+const OWNER_WIDE = [{ name: "owner-wide", description: "上层技能" }];
+
+describe("listProjectSkills: a directory writable by the omp uid", () => {
+  it("lists nothing from a link leaving .omp/skills and follows one that stays inside", () => {
+    const { root, sandboxRoot, workspaceRoot, skillsDir } = makeSandbox();
+    plantLinks(root, skillsDir);
+
+    const { skills, opened } = recordedProject(workspaceRoot, sandboxRoot);
+
+    expect(skills).toEqual([{ name: "inside", description: "内部技能" }, ...OWNER_WIDE]);
+    expect(opened).toEqual([
+      join(skillsDir, "inside", "SKILL.md"),
+      join(skillsDir, "inside", "SKILL.md"),
+      join(sandboxRoot, "u1", ".omp", "skills", "owner-wide", "SKILL.md"),
+    ]);
+  });
+
+  it.each([
+    {
+      link: ".omp/skills",
+      plant(outside: string, workspaceRoot: string) {
+        mkdirSync(join(workspaceRoot, ".omp"));
+        symlinkSync(join(outside, "skills"), projectSkills(workspaceRoot), "dir");
+      },
+    },
+    {
+      link: ".omp",
+      plant(outside: string, workspaceRoot: string) {
+        symlinkSync(outside, join(workspaceRoot, ".omp"), "dir");
+      },
+    },
+  ])(
+    "yields nothing for a directory whose $link is a link out of the sandbox, without enumerating it",
+    ({ plant }) => {
+      const { root, sandboxRoot, workspaceRoot, skillsDir } = makeSandbox();
+      const outside = plantOutside(root);
+      plant(outside, workspaceRoot);
+
+      const { skills, opened, enumerated, touched } = recordedProject(workspaceRoot, sandboxRoot);
+
+      expect(skills).toEqual(OWNER_WIDE);
+      // Only the owner root's: the sandbox root has no `.omp/skills`, the linked one is refused.
+      expect(enumerated).toEqual([projectSkills(join(sandboxRoot, "u1"))]);
+      expect(opened).toEqual([join(sandboxRoot, "u1", ".omp", "skills", "owner-wide", "SKILL.md")]);
+      expect(touched.filter((path) => path.startsWith(outside))).toEqual([]);
+      expect(touched.filter((path) => path.startsWith(`${skillsDir}/`))).toEqual([]);
+    },
+  );
+
+  it("yields nothing for a .omp/skills holding 5000 entries and opens none of them", () => {
+    const { sandboxRoot, workspaceRoot, skillsDir } = makeSandbox();
+    // Sorted first: without the 4096 bound it would be among the first 256 and listed.
+    writeSkill(skillsDir, "a-first", ["description: 条目过多的目录里的技能"]);
+    for (let index = 1; index < 5000; index += 1) {
+      writeFileSync(join(skillsDir, `f${String(index).padStart(4, "0")}`), "");
+    }
+
+    const { skills, opened, resolved } = recordedProject(workspaceRoot, sandboxRoot);
+
+    expect(skills).toEqual(OWNER_WIDE);
+    expect(opened.filter((path) => path.startsWith(skillsDir))).toEqual([]);
+    // The directory itself is resolved once (the equality rule); no entry is.
+    expect(resolved.filter((path) => path.startsWith(skillsDir))).toEqual([skillsDir]);
+  });
+
+  it("lists a .omp/skills holding exactly 4096 entries", () => {
+    const { sandboxRoot, workspaceRoot, skillsDir } = makeSandbox();
+    writeSkill(skillsDir, "a-first", ["description: 恰好不超限"]);
+    for (let index = 1; index < 4096; index += 1) {
+      writeFileSync(join(skillsDir, `f${String(index).padStart(4, "0")}`), "");
+    }
+
+    expect(listProjectSkills(workspaceRoot, sandboxRoot)).toEqual([
+      { name: "a-first", description: "恰好不超限" },
+      ...OWNER_WIDE,
+    ]);
+  });
+
+  it("skips a SKILL.md with a second hard link and lists the same file once it has one", () => {
+    const { root, sandboxRoot, workspaceRoot, skillsDir } = makeSandbox();
+    const secret = join(root, "secret.yml");
+    writeFileSync(secret, skillFile(["name: leaked", `description: ${OUTSIDE_FILE_DESCRIPTION}`]));
+    mkdirSync(join(skillsDir, "hard"), { recursive: true });
+    linkSync(secret, join(skillsDir, "hard", "SKILL.md"));
+
+    const { skills, opened } = recordedProject(workspaceRoot, sandboxRoot);
+
+    expect(skills).toEqual(OWNER_WIDE);
+    // Opened (the link count is only known from the descriptor), then refused.
+    expect(opened).toContain(join(skillsDir, "hard", "SKILL.md"));
+    // Positive control: with the other name gone the very same file is a listed skill.
+    rmSync(secret);
+    expect(listProjectSkills(workspaceRoot, sandboxRoot)).toEqual([
+      { name: "leaked", description: OUTSIDE_FILE_DESCRIPTION },
+      ...OWNER_WIDE,
+    ]);
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "skips a FIFO and an oversized SKILL.md without blocking",
+    () => {
+      const { sandboxRoot, workspaceRoot, skillsDir } = makeSandbox();
+      writeSkill(skillsDir, "kept", ["description: kept"]);
+      mkdirSync(join(skillsDir, "pipe"));
+      execFileSync("mkfifo", [join(skillsDir, "pipe", "SKILL.md")]);
+      mkdirSync(join(skillsDir, "huge"));
+      writeFileSync(
+        join(skillsDir, "huge", "SKILL.md"),
+        `${skillFile(["description: too large"])}${"x".repeat(262144)}`,
+      );
+      mkdirSync(join(skillsDir, "limit"));
+      const atLimit = skillFile(["description: at the limit"]);
+      writeFileSync(
+        join(skillsDir, "limit", "SKILL.md"),
+        `${atLimit}${"x".repeat(262144 - Buffer.byteLength(atLimit))}`,
+      );
+
+      const { skills, openFlags } = recordedProject(workspaceRoot, sandboxRoot);
+
+      expect(skills).toEqual([
+        { name: "kept", description: "kept" },
+        { name: "limit", description: "at the limit" },
+        ...OWNER_WIDE,
+      ]);
+      for (const flags of openFlags) {
+        for (const flag of [constants.O_NOCTTY, constants.O_NOFOLLOW, constants.O_NONBLOCK]) {
+          expect((flags as number) & flag).toBe(flag);
+        }
+      }
+    },
+  );
+
+  it("lists exactly the first 256 of 300 entries and neither opens nor resolves the other 44", () => {
+    const { sandboxRoot, workspaceRoot, skillsDir } = makeSandbox();
+    for (let index = 0; index < TOTAL; index += 1) {
+      writeSkill(skillsDir, entryName(index), [`description: d-${index}`]);
+    }
+
+    const { skills, opened, resolved } = recordedProject(workspaceRoot, sandboxRoot);
+
+    expect(skills).toEqual([
+      ...OWNER_WIDE,
+      ...Array.from({ length: CAP }, (_, index) => ({
+        name: entryName(index),
+        description: `d-${index}`,
+      })),
+    ]);
+    for (let index = CAP; index < TOTAL; index += 1) {
+      const entry = join(skillsDir, entryName(index));
+      expect([...opened, ...resolved].filter((path) => path.startsWith(entry))).toEqual([]);
+    }
+  });
+
+  it("resolves to bytes and opens exactly the bytes the kernel returned", () => {
+    const { sandboxRoot, workspaceRoot, skillsDir } = makeSandbox();
+    writeSkill(skillsDir, "kept", ["description: kept"]);
+
+    const { rawOpened, resolveOptions } = recordedProject(workspaceRoot, sandboxRoot);
+
+    expect(resolveOptions.length).toBeGreaterThan(0);
+    for (const options of resolveOptions) {
+      expect(options).toEqual({ encoding: "buffer" });
+    }
+    expect(rawOpened).toEqual([
+      Buffer.from(join(skillsDir, "kept", "SKILL.md")),
+      Buffer.from(join(sandboxRoot, "u1", ".omp", "skills", "owner-wide", "SKILL.md")),
+    ]);
+  });
+
+  it("is [] for an owner root that is a link out of the sandbox, touching nothing below the target", () => {
+    const { root, sandboxRoot, ownerRoot } = makeSandbox();
+    const outside = join(root, "elsewhere");
+    writeSkill(projectSkills(outside), "x", [`description: ${OUTSIDE_DIR_DESCRIPTION}`]);
+    renameSync(ownerRoot, join(root, "moved-owner-root"));
+    symlinkSync(outside, ownerRoot, "dir");
+    writeSkill(projectSkills(sandboxRoot), "root", ["description: 沙箱根技能"]);
+
+    const { skills, opened, enumerated, touched } = recordedProject(ownerRoot, sandboxRoot);
+
+    expect(skills).toEqual([]);
+    expect(opened).toEqual([]);
+    expect(enumerated).toEqual([]);
+    expect(touched.filter((path) => path.startsWith(outside))).toEqual([]);
   });
 });
 

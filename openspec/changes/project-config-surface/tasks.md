@@ -4,17 +4,17 @@ Fixture level: expanded。每个任务组对应一个实现 issue；本变更在
 
 ## 1. server：项目 skill 的目录与分类
 
-- [ ] 1.1 `slash-commands.ts`：抽出按目录读取 skill 的公共部分，新增 `listProjectSkills(cwd, sandboxRoot)` 与 `sessionSkills(agentDir, cwd, sandboxRoot)`（上溯、`.git` 边界、沙箱根边界、近者优先、描述截断、同名覆盖）。
-- [ ] 1.2 `rest-commands.ts`：`workspaceId` 查询串（400 / 404 规则）、`source:"project"`、`overrides`。
-- [ ] 1.3 prompt 路由、regenerate、fork 改用会话自己的 `sessionSkills`；cwd 解析失败时项目集合为空。
-- [ ] 1.4 用例：规格新增的三个场景与修改后的「Command directory」场景；越界链接、FIFO、超大文件、256 上限在项目目录下同样成立；`.omp` 或 `.omp/skills` 为链接、`SKILL.md` 为硬链接、目录超过 4096 条、工作空间根不可用、owner 根为指向沙箱外的链接。
-- [ ] 1.5 真二进制用例（v18.0.10）：目录列出的每个 `skill:<name>` 都在该 cwd 的 `get_available_commands` 里，描述一致或为其前 200 码点；进程启动后新建的 skill 的行为（规格登记的不一致）；`.omp` 项目 skill 胜过平台与其它目录的同名 skill；被分类为 `skill` 的回合在分支列表里没有 `user` 条目。
+- [x] 1.1 `slash-commands.ts`：抽出按目录读取 skill 的公共部分，新增 `listProjectSkills(cwd, sandboxRoot)` 与 `sessionSkills(agentDir, cwd, sandboxRoot)`（上溯、`.git` 边界、沙箱根边界、近者优先、描述截断、同名覆盖）。
+- [x] 1.2 `rest-commands.ts`：`workspaceId` 查询串（400 / 404 规则）、`source:"project"`、`overrides`。
+- [x] 1.3 prompt 路由、regenerate、fork 改用会话自己的 `sessionSkills`；cwd 解析失败时项目集合为空。
+- [x] 1.4 用例：规格新增的三个场景与修改后的「Command directory」场景；越界链接、FIFO、超大文件、256 上限在项目目录下同样成立；`.omp` 或 `.omp/skills` 为链接、`SKILL.md` 为硬链接、目录超过 4096 条、工作空间根不可用、owner 根为指向沙箱外的链接。
+- [x] 1.5 真二进制用例（v18.0.10）：目录列出的每个 `skill:<name>` 都在该 cwd 的 `get_available_commands` 里，描述一致或为其前 200 码点；进程启动后新建的 skill 的行为（规格登记的不一致）；`.omp` 项目 skill 胜过平台与其它目录的同名 skill；被分类为 `skill` 的回合在分支列表里没有 `user` 条目。
 
 ## 2. web：候选面板
 
-- [ ] 2.1 `api-commands.ts`：`listCommands(workspaceId)`、六键严格解析、`source` 增加 `project`。
-- [ ] 2.2 `slash-menu.tsx`：目录按 client 与工作空间 id 持有；`项目` / `项目 · 覆盖平台技能` 标注；不显示其它工作空间的目录。
-- [ ] 2.3 用例：「命令目录方法」「候选面板按工作空间取目录」与既有候选场景；ui-walk 覆盖一个带项目 skill 的工作空间。
+- [x] 2.1 `api-commands.ts`：`listCommands(workspaceId)`、六键严格解析、`source` 增加 `project`。
+- [x] 2.2 `slash-menu.tsx`：目录按 client 与工作空间 id 持有；`项目` / `项目 · 覆盖平台技能` 标注；不显示其它工作空间的目录。
+- [x] 2.3 用例：「命令目录方法」「候选面板按工作空间取目录」与既有候选场景；ui-walk 覆盖一个带项目 skill 的工作空间。
 
 ## 3. server：项目配置文件列表
 

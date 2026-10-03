@@ -94,8 +94,8 @@ export interface SessionSupervisorOptions {
   onEvent?: (sessionId: string, epoch: number, event: ChatEvent<number>) => void;
   /** Synchronous handshake-timeout record sink, never an onError fault; omitted → discarded. */
   log?: SpawnLog;
-  /** The platform skills right now, for the branch-family command check (branching.ts). */
-  skills: () => readonly { name: string }[];
+  /** The skills of a session's cwd right now, for the branch-family command check (branching.ts). */
+  skills: (ownerId: string, workspaceId: string | null) => readonly { name: string }[];
 }
 
 interface FlushFailure {

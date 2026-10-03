@@ -1,13 +1,18 @@
 import type { ApiClient, ApiClientOptions, ApiError } from "./api.js";
 import { hasExactlyKeys, parseJsonArray } from "./api-json.js";
 
-/** One entry of the slash-command catalogue (`GET /api/commands`). */
+/**
+ * One entry of the slash-command catalogue (`GET /api/commands`). A `project` entry is a skill of
+ * the workspace's own `.omp/skills`; `overrides` is true when it replaces a platform skill of the
+ * same name.
+ */
 export type Command = {
   name: string;
   label: string;
   description: string;
   hint: string | null;
-  source: "builtin" | "skill";
+  source: "builtin" | "skill" | "project";
+  overrides: boolean;
 };
 
 type CommandTransport = {
@@ -22,22 +27,25 @@ type CommandTransport = {
 };
 
 function parseCommand(value: unknown): Command | null {
-  if (!hasExactlyKeys(value, ["name", "label", "description", "hint", "source"])) {
+  if (!hasExactlyKeys(value, ["name", "label", "description", "hint", "source", "overrides"])) {
     return null;
   }
 
-  const { name, label, description, hint, source } = value;
+  const { name, label, description, hint, source, overrides } = value;
   if (typeof name !== "string" || typeof label !== "string" || typeof description !== "string") {
     return null;
   }
   if (hint !== null && typeof hint !== "string") {
     return null;
   }
-  if (source !== "builtin" && source !== "skill") {
+  if (source !== "builtin" && source !== "skill" && source !== "project") {
+    return null;
+  }
+  if (typeof overrides !== "boolean") {
     return null;
   }
 
-  return { name, label, description, hint, source };
+  return { name, label, description, hint, source, overrides };
 }
 
 /** The body is exactly `{commands}`; one invalid element rejects the whole catalogue. */
@@ -50,9 +58,12 @@ export function createCommandMethods(
   { getRequestOptions, request, requestFailed }: CommandTransport,
 ): Pick<ApiClient, "listCommands"> {
   return {
-    async listCommands(options) {
+    /** `workspaceId` null is the catalogue of the account's own root: no query string at all. */
+    async listCommands(workspaceId, options) {
       const response = await request(
-        "/api/commands",
+        workspaceId === null
+          ? "/api/commands"
+          : `/api/commands?workspaceId=${encodeURIComponent(workspaceId)}`,
         getRequestOptions(options?.signal),
         onUnauthorized,
         200,

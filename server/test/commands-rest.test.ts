@@ -4,9 +4,20 @@
  * assembly over a real in-memory SQLite with `assembly.runtime.stateDir` in a temporary directory,
  * driven through `app.inject()`; no omp process is started. Oracles: response status, headers and
  * bytes, SQLite row counts, `liveProcessCount` and the env a recording `spawnImpl` receives from
- * `spawnOmp`.
+ * `spawnOmp`. Issue #813 (#773 task group 1; Scenario「Command directory per workspace」): the
+ * optional `workspaceId`, `source:"project"` and `overrides`; workspaces are created over
+ * `POST /api/workspaces`, project skills are real `SKILL.md` files under `<root>/.omp/skills`.
  */
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -19,6 +30,7 @@ import { expectEnvelope } from "./session-bodyless-rest-helpers.js";
 import {
   BAD_REQUEST_ENVELOPE,
   loginSessionPair,
+  NOT_FOUND_ENVELOPE,
   UNAUTHORIZED_ENVELOPE,
 } from "./session-db-helpers.js";
 import { recordedSpawn, type SpawnCall } from "./session-supervisor-helpers.js";
@@ -26,7 +38,7 @@ import { FakeChild } from "./support/omp-rpc.js";
 
 const ROUTE = "/api/commands";
 const MODEL = "deepseek-v4.1-flash";
-const FIVE_KEYS = ["name", "label", "description", "hint", "source"];
+const SIX_KEYS = ["name", "label", "description", "hint", "source", "overrides"];
 const BUILTIN_ENTRIES = [
   {
     name: "compact",
@@ -34,6 +46,7 @@ const BUILTIN_ENTRIES = [
     description: "压缩较长对话的上下文，保留要点",
     hint: "可选：想保留的重点",
     source: "builtin",
+    overrides: false,
   },
   {
     name: "todo",
@@ -41,17 +54,31 @@ const BUILTIN_ENTRIES = [
     description: "查看或修改助手的任务清单",
     hint: "可选：append <任务>",
     source: "builtin",
+    overrides: false,
   },
 ];
 
-/** Authenticated requests the route must refuse: anything carrying a query string or a body. */
+/**
+ * Authenticated requests the route must refuse: a body, or a query string that is not exactly one
+ * `workspaceId` key with one non-empty value (`WS` stands for a workspace id of the caller).
+ */
 const REJECTED: ReadonlyArray<{
   name: string;
   url?: string;
   headers?: Record<string, string>;
   payload?: string;
 }> = [
-  { name: "a query string", url: `${ROUTE}?x=1` },
+  { name: "a query key other than workspaceId", url: `${ROUTE}?x=1` },
+  { name: "workspaceId given twice", url: `${ROUTE}?workspaceId=WS&workspaceId=WS` },
+  { name: "an empty workspaceId", url: `${ROUTE}?workspaceId=` },
+  { name: "workspaceId without a value", url: `${ROUTE}?workspaceId` },
+  { name: "workspaceId and another key", url: `${ROUTE}?workspaceId=WS&x=1` },
+  {
+    name: "a workspaceId and a JSON body",
+    url: `${ROUTE}?workspaceId=WS`,
+    headers: { "content-type": "application/json" },
+    payload: "{}",
+  },
   { name: "a JSON body", headers: { "content-type": "application/json" }, payload: "{}" },
   { name: "a body without a content type", payload: "x" },
   { name: "a transfer-encoding header", headers: { "transfer-encoding": "chunked" } },
@@ -110,6 +137,42 @@ function writeSkill(skillsDir: string, entry: string, frontmatter: readonly stri
   writeFileSync(join(skillsDir, entry, "SKILL.md"), `---\n${frontmatter.join("\n")}\n---\n正文\n`);
 }
 
+/** A workspace of the cookie's account under `sandboxRoot` (created first: the store realpaths it). */
+async function createWorkspace(
+  app: FastifyInstance,
+  cookie: string,
+  sandboxRoot: string,
+  dir = "proj",
+): Promise<{ id: string; root: string }> {
+  mkdirSync(sandboxRoot, { recursive: true });
+  const created = await app.inject({
+    method: "POST",
+    url: "/api/workspaces",
+    headers: { cookie, "content-type": "application/json" },
+    payload: JSON.stringify({ name: dir, dir }),
+  });
+  expect(created.statusCode).toBe(201);
+  return created.json<{ id: string; root: string }>();
+}
+
+function projectSkills(dir: string): string {
+  return join(dir, ".omp", "skills");
+}
+
+function skillEntry(name: string, description: string, source: string, overrides = false) {
+  return { name: `skill:${name}`, label: name, description, hint: "可选参数", source, overrides };
+}
+
+async function getCommands(app: FastifyInstance, cookie: string, workspaceId?: string) {
+  const response = await app.inject({
+    method: "GET",
+    url: workspaceId === undefined ? ROUTE : `${ROUTE}?workspaceId=${workspaceId}`,
+    headers: { cookie },
+  });
+  expect(response.headers["cache-control"]).toBe("no-store");
+  return response;
+}
+
 function rowCount(db: DatabaseSync, table: "audit_events" | "chat_sessions"): number {
   const row = db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get();
   if (row === undefined || typeof row.count !== "number") {
@@ -140,7 +203,7 @@ describe("GET /api/commands", () => {
     );
   });
 
-  it("lists the two builtins then the installed skills by name, five keys each, touching no row or process", async () => {
+  it("lists the two builtins then the installed skills by name, six keys each with overrides false, touching no row or process", async () => {
     const { app, db, stateDir } = openWorld();
     const skillsDir = join(ompAgentDir(stateDir), "skills");
     writeSkill(skillsDir, "weekly-report", ["name: weekly-report", 'description: "写周报"']);
@@ -163,6 +226,7 @@ describe("GET /api/commands", () => {
         description: "Review a diff before it is merged",
         hint: "可选参数",
         source: "skill",
+        overrides: false,
       },
       {
         name: "skill:weekly-report",
@@ -170,15 +234,16 @@ describe("GET /api/commands", () => {
         description: "写周报",
         hint: "可选参数",
         source: "skill",
+        overrides: false,
       },
     ];
     const body = response.json<{ commands: Array<Record<string, unknown>> }>();
     expect(body.commands).toHaveLength(4);
     expect(body.commands.map((command) => Object.keys(command))).toEqual([
-      FIVE_KEYS,
-      FIVE_KEYS,
-      FIVE_KEYS,
-      FIVE_KEYS,
+      SIX_KEYS,
+      SIX_KEYS,
+      SIX_KEYS,
+      SIX_KEYS,
     ]);
     expect(response.payload).toBe(JSON.stringify({ commands: expected }));
     expect({
@@ -189,13 +254,14 @@ describe("GET /api/commands", () => {
   });
 
   it.each(REJECTED)("is 400 bad_request for the owner sending $name", async (input) => {
-    const { app } = openWorld();
+    const { app, root } = openWorld();
     const cookie = await loginSessionPair(app);
+    const workspace = await createWorkspace(app, cookie, join(root, "sandbox"));
     const { url = ROUTE, headers = {}, payload } = input;
 
     const response = await app.inject({
       method: "GET",
-      url,
+      url: url.replaceAll("WS", workspace.id),
       headers: { ...headers, cookie },
       ...(payload === undefined ? {} : { payload }),
     });
@@ -242,6 +308,7 @@ describe("GET /api/commands", () => {
             description: "installed later",
             hint: "可选参数",
             source: "skill",
+            overrides: false,
           },
         ],
       }),
@@ -306,6 +373,141 @@ describe("GET /api/commands", () => {
       description: "same source",
       hint: "可选参数",
       source: "skill",
+      overrides: false,
     });
+  });
+});
+
+describe("GET /api/commands per workspace (#813)", () => {
+  it("lists the workspace's and its ancestors' project skills with workspaceId, the owner root's without", async () => {
+    const { app, db, root, stateDir } = openWorld();
+    const cookie = await loginSessionPair(app);
+    const workspace = await createWorkspace(app, cookie, join(root, "sandbox"));
+    writeSkill(join(ompAgentDir(stateDir), "skills"), "code-review", [
+      "description: Review a diff",
+    ]);
+    writeSkill(join(ompAgentDir(stateDir), "skills"), "weekly-report", ["description: 平台的周报"]);
+    writeSkill(projectSkills(workspace.root), "deploy", ["description: 上线到生产"]);
+    writeSkill(projectSkills(workspace.root), "weekly-report", ["description: 项目自己的周报"]);
+    writeSkill(projectSkills(join(root, "sandbox", "u1")), "mine", ["description: 我的技能"]);
+    const sessions = rowCount(db, "chat_sessions");
+
+    const bound = await getCommands(app, cookie, workspace.id);
+    const unbound = await getCommands(app, cookie);
+
+    expect(bound.statusCode).toBe(200);
+    expect(bound.payload).toBe(
+      JSON.stringify({
+        commands: [
+          ...BUILTIN_ENTRIES,
+          skillEntry("code-review", "Review a diff", "skill"),
+          skillEntry("deploy", "上线到生产", "project"),
+          skillEntry("mine", "我的技能", "project"),
+          skillEntry("weekly-report", "项目自己的周报", "project", true),
+        ],
+      }),
+    );
+    expect(unbound.statusCode).toBe(200);
+    expect(unbound.payload).toBe(
+      JSON.stringify({
+        commands: [
+          ...BUILTIN_ENTRIES,
+          skillEntry("code-review", "Review a diff", "skill"),
+          skillEntry("weekly-report", "平台的周报", "skill"),
+          skillEntry("mine", "我的技能", "project"),
+        ],
+      }),
+    );
+    for (const command of bound.json<{ commands: object[] }>().commands) {
+      expect(Object.keys(command)).toEqual(SIX_KEYS);
+    }
+    expect(rowCount(db, "chat_sessions")).toBe(sessions);
+    expect(app.sessions.supervisor.liveProcessCount()).toBe(0);
+  });
+
+  it("is 404 not_found for another account's workspace id, an unknown id and a malformed id", async () => {
+    const { app, root } = openWorld();
+    const cookie = await loginSessionPair(app);
+    const otherCookie = await loginSessionPair(app, "zhaoliu");
+    const foreign = await createWorkspace(app, otherCookie, join(root, "sandbox"));
+    writeSkill(projectSkills(foreign.root), "theirs", ["description: 别人的技能"]);
+
+    // Positive control: the id is a real workspace with a listed skill for its own account.
+    const own = await getCommands(app, otherCookie, foreign.id);
+    expect(own.json<{ commands: { name: string }[] }>().commands.at(-1)?.name).toBe("skill:theirs");
+
+    for (const id of [foreign.id, "f".repeat(32), "..%2F..", "not-an-id"]) {
+      const response = await getCommands(app, cookie, id);
+      expectEnvelope(response, 404, NOT_FOUND_ENVELOPE);
+      expect(response.payload).not.toContain("别人的技能");
+    }
+  });
+
+  it("is 401 without a session whatever the workspaceId", async () => {
+    const { app, root } = openWorld();
+    const workspace = await createWorkspace(
+      app,
+      await loginSessionPair(app),
+      join(root, "sandbox"),
+    );
+
+    for (const id of [workspace.id, "f".repeat(32)]) {
+      expectEnvelope(
+        await app.inject({ method: "GET", url: `${ROUTE}?workspaceId=${id}` }),
+        401,
+        UNAUTHORIZED_ENVELOPE,
+      );
+    }
+  });
+
+  it("is 200 with the builtins and the platform skills only once the workspace root is a symlink or gone", async () => {
+    const { app, root, stateDir } = openWorld();
+    const cookie = await loginSessionPair(app);
+    const sandboxRoot = join(root, "sandbox");
+    const linked = await createWorkspace(app, cookie, sandboxRoot, "linked");
+    const removed = await createWorkspace(app, cookie, sandboxRoot, "removed");
+    writeSkill(join(ompAgentDir(stateDir), "skills"), "code-review", [
+      "description: Review a diff",
+    ]);
+    writeSkill(projectSkills(join(sandboxRoot, "u1")), "mine", ["description: 我的技能"]);
+    writeSkill(projectSkills(join(root, "outside")), "x", ["description: 沙箱外的技能"]);
+    rmSync(linked.root, { recursive: true });
+    symlinkSync(join(root, "outside"), linked.root, "dir");
+    rmSync(removed.root, { recursive: true });
+    const platformOnly = JSON.stringify({
+      commands: [...BUILTIN_ENTRIES, skillEntry("code-review", "Review a diff", "skill")],
+    });
+
+    for (const workspace of [linked, removed]) {
+      const response = await getCommands(app, cookie, workspace.id);
+      expect(response.statusCode).toBe(200);
+      expect(response.payload).toBe(platformOnly);
+    }
+  });
+
+  it("is 200 with the builtins and the platform skills only when the owner root is a link out of the sandbox", async () => {
+    const { app, root, stateDir } = openWorld();
+    const cookie = await loginSessionPair(app);
+    const sandboxRoot = join(root, "sandbox");
+    const workspace = await createWorkspace(app, cookie, sandboxRoot);
+    writeSkill(join(ompAgentDir(stateDir), "skills"), "code-review", [
+      "description: Review a diff",
+    ]);
+    writeSkill(projectSkills(sandboxRoot), "root", ["description: 沙箱根技能"]);
+    writeSkill(projectSkills(join(root, "outside")), "x", ["description: 沙箱外的技能"]);
+    mkdirSync(join(root, "outside", "proj"));
+    renameSync(join(sandboxRoot, "u1"), join(root, "moved-owner-root"));
+    symlinkSync(join(root, "outside"), join(sandboxRoot, "u1"), "dir");
+    const platformOnly = JSON.stringify({
+      commands: [...BUILTIN_ENTRIES, skillEntry("code-review", "Review a diff", "skill")],
+    });
+
+    const unbound = await getCommands(app, cookie);
+    const bound = await getCommands(app, cookie, workspace.id);
+
+    for (const response of [unbound, bound]) {
+      expect(response.statusCode).toBe(200);
+      expect(response.payload).toBe(platformOnly);
+    }
   });
 });
