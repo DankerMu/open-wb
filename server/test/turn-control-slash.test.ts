@@ -36,6 +36,8 @@ import { isLive, presetSessionFile } from "./session-supervisor-pool-helpers.js"
 const SKILL = "weekly-report";
 const SKILL_CALL = "/skill:weekly-report 写周报";
 const HELP = "/help 这是什么";
+/** Issue #704: a `/todo` subcommand the host does not whitelist, so it is sent escaped. */
+const TODO_EXPORT = "/todo export /abs/x.md";
 /** The entry the fake appends for the first `--branch-entry` (after its fixed two). */
 const APPENDED = "fake-entry-3";
 
@@ -172,6 +174,27 @@ async function forkAtLast(world: ForkWorld, texts: readonly string[]) {
   return { seeded, draft: body.draft, entryId: branches[0]?.entryId };
 }
 
+/**
+ * Regenerate after `/todo` then `text`, whose only appended entry is the escaped `text`: 202, the
+ * branch is cut at that entry and the new turn is dispatched with the escaped text.
+ */
+async function expectRegeneratedEscaped(text: string): Promise<void> {
+  const world = await openWorld({ entries: [` ${text}`] });
+  seedTurns(world, ["/todo", text]);
+
+  const response = await postRegenerate(world);
+
+  expect(response.statusCode).toBe(202);
+  const { assistantMessageId } = response.json<{ assistantMessageId: number }>();
+  const ended = await waitForTurn(world.fixture, world.session, "done");
+  expect(ended.messages.at(-1)?.id).toBe(assistantMessageId);
+  const frames = spawnedAt(world, 0).stdin.slice(2);
+  expect(types(frames)).toEqual(["get_branch_messages", "branch", "get_state", "prompt"]);
+  expect(frames[1]).toMatchObject({ type: "branch", entryId: APPENDED });
+  expect(frames[3]).toMatchObject({ type: "prompt", message: ` ${text}` });
+  expect(userTexts(world)).toEqual(["/todo", text]);
+}
+
 /** `readdirSync` call-through spy; returns how often `<agentDir>/skills` was enumerated so far. */
 function spySkillScans(world: ForkWorld): () => number {
   const skillsDir = skillsDirOf(world.rt.runtime.stateDir);
@@ -224,20 +247,30 @@ describe("regenerate at slash text (#555)", () => {
     "E7 an escaped last message matches its wire-form entry: 202, dispatched as branched",
     REAL,
     async () => {
-      const world = await openWorld({ entries: [` ${HELP}`] });
-      seedTurns(world, ["/todo", HELP]);
+      await expectRegeneratedEscaped(HELP);
+    },
+  );
+});
 
-      const response = await postRegenerate(world);
+describe("regenerate and fork at `/todo export` (#704)", () => {
+  it(
+    "a `/todo export` last message is ordinary text: 202, dispatched as branched",
+    REAL,
+    async () => {
+      await expectRegeneratedEscaped(TODO_EXPORT);
+    },
+  );
 
-      expect(response.statusCode).toBe(202);
-      const { assistantMessageId } = response.json<{ assistantMessageId: number }>();
-      const ended = await waitForTurn(world.fixture, world.session, "done");
-      expect(ended.messages.at(-1)?.id).toBe(assistantMessageId);
-      const frames = spawnedAt(world, 0).stdin.slice(2);
-      expect(types(frames)).toEqual(["get_branch_messages", "branch", "get_state", "prompt"]);
-      expect(frames[1]).toMatchObject({ type: "branch", entryId: APPENDED });
-      expect(frames[3]).toMatchObject({ type: "prompt", message: ` ${HELP}` });
-      expect(userTexts(world)).toEqual(["/todo", HELP]);
+  it(
+    "a `/todo export` anchor aligns to its wire-form entry; the draft is the text",
+    REAL,
+    async () => {
+      const world = await openWorld({ entries: [` ${TODO_EXPORT}`] });
+
+      const forked = await forkAtLast(world, [FIRST, QUESTION, TODO_EXPORT]);
+
+      expect(forked.draft).toBe(TODO_EXPORT);
+      expect(forked.entryId).toBe(APPENDED);
     },
   );
 });

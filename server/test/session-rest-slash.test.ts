@@ -115,6 +115,17 @@ describe("prompt route slash escaping (#555)", () => {
     });
   }
 
+  it("#704 `/todo export <path>` is stored as typed and reaches the supervisor escaped", async () => {
+    const world = await openWorld();
+    const text = "/todo export /abs/x.md";
+
+    const sent = await promptOn(world, text, world.session);
+
+    expect(userContents(world, world.session)).toEqual([text]);
+    expect(sent).toBe(` ${text}`);
+    expect(world.spawns).toHaveLength(0);
+  });
+
   it("E2 a fresh session's title is the 18-code-point prefix of the original slash text", async () => {
     const world = await openWorld();
     const text = `/session ${"😀".repeat(10)} delete now`;

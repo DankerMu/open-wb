@@ -90,6 +90,15 @@ describe("BUILTIN_COMMANDS", () => {
   });
 });
 
+/** `text` classifies as plain text and its wire form is one U+0020 followed by `text`. */
+function expectEscaped(text: string): void {
+  expect(classifyPrompt(text, SKILLS)).toEqual({ kind: "text" });
+  const wire = toWireText(text, SKILLS);
+  expect(wire).toBe(` ${text}`);
+  expect(wire.length).toBe(text.length + 1);
+  expect(wire.codePointAt(0)).toBe(0x20);
+}
+
 describe("classifyPrompt and toWireText", () => {
   it.each([
     ["/todo", { kind: "builtin", name: "todo" }],
@@ -115,13 +124,29 @@ describe("classifyPrompt and toWireText", () => {
     "/",
     "/todox",
     "/compactor",
-  ])("non-whitelisted %j is text and gains exactly one leading U+0020", (text) => {
-    expect(classifyPrompt(text, SKILLS)).toEqual({ kind: "text" });
-    const wire = toWireText(text, SKILLS);
-    expect(wire).toBe(` ${text}`);
-    expect(wire.length).toBe(text.length + 1);
-    expect(wire.codePointAt(0)).toBe(0x20);
-  });
+  ])("non-whitelisted %j is text and gains exactly one leading U+0020", expectEscaped);
+
+  // Issue #704, Scenario「todo import and export are not whitelisted」: the eight inputs whose
+  // subcommand (omp's cut: trimmed, up to the first whitespace, lower-cased) is import or export.
+  it.each([
+    "/todo export /abs/x.md",
+    "/todo import ../x",
+    "/todo export",
+    "/todo EXPORT ~/x",
+    "/todo  import x",
+    "/todo:export /abs/x.md",
+    "/todo\nimport x",
+    "/todo export\n/abs/x.md",
+  ])("todo file subcommand %j is text and gains exactly one leading U+0020", expectEscaped);
+
+  // The other four of that Scenario: no subcommand, another one, a longer word, a later word.
+  it.each(["/todo", "/todo append 买菜", "/todo exported", "/todo done import"])(
+    "todo input %j stays the builtin and passes through unchanged",
+    (text) => {
+      expect(classifyPrompt(text, SKILLS)).toEqual({ kind: "builtin", name: "todo" });
+      expect(toWireText(text, SKILLS)).toBe(text);
+    },
+  );
 
   it("a skill token in the middle of a prompt is text and is returned unchanged", () => {
     const text = "今天 /skill:weekly-report 帮我";

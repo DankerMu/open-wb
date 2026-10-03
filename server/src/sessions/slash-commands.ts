@@ -2,6 +2,8 @@
  * Slash command whitelist (#551, parent D15). omp runs any text starting with `/` through an exact
  * builtin lookup, so the host decides here, and only here, what a `/`-prefixed prompt is: one of
  * the two whitelisted builtins, a `/skill:<name>` invocation of a platform skill, or plain text.
+ * `/todo import|export` is plain text (#704): omp reads or writes the path argument directly, with
+ * no tool frame, step row or `files.changed`, and honours absolute paths, `~` and `..`.
  * `toWireText` prefixes one U+0020 to plain text so omp's `startsWith("/")` gate is false. That
  * stops builtins and templates only: omp's skill dispatch `trimStart()`s first
  * (`extensibility/skills.ts:455`), so a `/skill:<name>` omp knows but the host does not list runs.
@@ -46,6 +48,8 @@ export const BUILTIN_COMMANDS: readonly BuiltinCommand[] = [
   },
 ];
 
+/** `/todo` subcommands that are not whitelisted: omp's file channel (`helpers/todo.ts`). */
+const TODO_FILE_SUBCOMMANDS: readonly string[] = ["import", "export"];
 const SKILL_PREFIX = "/skill:";
 /** SKILL.md read cap: the omp uid can write the agent dir (ADR-0010); real ones stay under 51 KB. */
 const SKILL_MD_MAX_BYTES = 262144;
@@ -88,7 +92,10 @@ export function listSkills(agentDir: string): Skill[] {
 /**
  * Classifies already-trimmed prompt text. The builtin name ends at the first whitespace or `:`
  * (omp `slash-commands/helpers/parse.ts`); the skill name ends at the first U+0020 only (omp
- * `extensibility/skills.ts` parseSkillInvocation), so a newline belongs to the name.
+ * `extensibility/skills.ts` parseSkillInvocation), so a newline belongs to the name. `todo` with
+ * the subcommand `import` or `export` is text; the subcommand is cut as omp's parseSubcommand cuts
+ * it: the text after the name's separator, trimmed, up to its first whitespace, lower-cased. The
+ * path is neither parsed nor validated here.
  */
 export function classifyPrompt(text: string, skills: readonly { name: string }[]): PromptClass {
   if (!text.startsWith("/")) {
@@ -98,6 +105,11 @@ export function classifyPrompt(text: string, skills: readonly { name: string }[]
   const separator = body.search(/[\s:]/);
   const command = separator === -1 ? body : body.slice(0, separator);
   if (BUILTIN_COMMANDS.some((builtin) => builtin.name === command)) {
+    const args = separator === -1 ? "" : body.slice(separator + 1).trim();
+    const subcommand = (args.split(/\s/, 1)[0] ?? "").toLowerCase();
+    if (command === "todo" && TODO_FILE_SUBCOMMANDS.includes(subcommand)) {
+      return { kind: "text" };
+    }
     return { kind: "builtin", name: command };
   }
   if (text.startsWith(SKILL_PREFIX)) {
