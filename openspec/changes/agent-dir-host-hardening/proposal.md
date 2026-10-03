@@ -19,6 +19,10 @@ omp 自己仍跟随任意符号链接的 skill 目录：指向 `skills/` 之外�
 ## 残余
 realpath 与 open 之间的 TOCTOU：`skills/` 仍对 omp uid 可写时，中间目录分量可在两步之间被换成符号链接。由第二刀（托管目录对 omp 只读）关闭，本刀不追。
 
+`skills` 自身被换成符号链接：包含判断以 `realpath(<agentDir>/skills)` 为基准，omp uid 今天能把 `skills` 整个换成指向别处的链接，基准随之移动。同样由第二刀关闭。
+
+条目数上界只管每个条目的 I/O：`readdir` 与排序仍随目录大小线性增长。
+
 ## Non-goals
 - 目录归属与权限位、spawn 契约（第二刀）。
 - 不改 omp；不改 skill frontmatter 的解析规则。

@@ -30,7 +30,7 @@
 - **THEN** the fork returns502 agent_unavailable with no `branch` frame and no new session row, and both requests on the running session return409 session_busy (the busy check precedes the command check)
 
 #### Scenario: Skill links leaving the skills directory and the entry cap
-- **WHEN** `<agentDir>/skills` holds `inside/SKILL.md` (a regular file), `alias` → a symlink to the sibling directory `inside`, `escape` → a symlink to a directory outside `skills/` that contains a valid SKILL.md, and `leak/SKILL.md` → a symlink to a valid skill file outside `skills/`
+- **WHEN** `<agentDir>/skills` holds `inside/SKILL.md` (a regular file whose frontmatter says `name: inside`), `alias` → a symlink to the sibling directory `inside`, `escape` → a symlink to a directory outside `skills/` that contains a valid SKILL.md, and `leak/SKILL.md` → a symlink to a valid skill file outside `skills/`
 - **THEN** `listSkills` returns the skill of `inside` (once: `alias` resolves to the same file and collapses by name) and nothing from `escape` or `leak`; `GET /api/commands` contains neither outside description
 - **WHEN** `skills` holds 300 valid entries
-- **THEN** exactly the first 256 in code-point order of their SKILL.md path are listed, and no file of the other 44 is opened
+- **THEN** exactly the first 256 in code-point order of their SKILL.md path are listed, and no file of the other 44 is opened or resolved
