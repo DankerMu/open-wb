@@ -78,8 +78,10 @@ const QUOTED = /^(["'])(.*)\1$/;
  * cannot be read is skipped (entry types are not inspected: a regular file fails the read), and so
  * is a SKILL.md that is not a regular file of at most `SKILL_MD_MAX_BYTES`. A symlink is followed
  * only inside `skills`: an entry whose SKILL.md resolves outside the real path of `skills` is
- * skipped (omp itself would load it). Entries sharing a name collapse to the one with the smallest
- * SKILL.md path, omp's first-wins order.
+ * skipped (omp itself would load it). Both real paths come from the kernel (`realpathSync.native`):
+ * Node's JS `realpathSync` stops resolving at a FIFO or socket and folds `..` as text, so it can
+ * name a path inside `skills` that open() then walks, through a link, to a file outside. Entries
+ * sharing a name collapse to the one with the smallest SKILL.md path, omp's first-wins order.
  */
 export function listSkills(agentDir: string): Skill[] {
   const skillsDir = join(agentDir, "skills");
@@ -87,7 +89,7 @@ export function listSkills(agentDir: string): Skill[] {
   let inside: string;
   try {
     entries = readdirSync(skillsDir);
-    inside = realpathSync(skillsDir) + sep;
+    inside = realpathSync.native(skillsDir) + sep;
   } catch {
     return [];
   }
@@ -152,7 +154,7 @@ export function toWireText(text: string, skills: readonly { name: string }[]): s
 function readSkill(path: string, entry: string, inside: string): Skill | null {
   let content: string | null;
   try {
-    const resolved = realpathSync(path);
+    const resolved = realpathSync.native(path);
     if (!resolved.startsWith(inside)) {
       return null;
     }

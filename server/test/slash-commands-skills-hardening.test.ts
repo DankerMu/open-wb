@@ -1,11 +1,13 @@
 /**
  * Issue #706 cut 1 (agent-dir-host-hardening): `listSkills` follows a link only inside
  * `<agentDir>/skills`, reads at most the first 256 entries and opens SKILL.md with
- * `O_NOCTTY | O_NOFOLLOW`. `node:fs` is passed through a call recorder (behaviour untouched) so
+ * `O_NOCTTY | O_NOFOLLOW`; real paths come from the kernel (`realpathSync.native`), not from
+ * Node's JS resolver. `node:fs` is passed through a call recorder (behaviour untouched) so
  * "not opened, not resolved" and the open flags are observations, not inferences. Expected values
  * are the literals of chat-sessions Scenario「Skill links leaving the skills directory and the
  * entry cap」; nothing here is derived from the module under test.
  */
+import { execFileSync } from "node:child_process";
 import {
   constants,
   mkdirSync,
@@ -24,7 +26,10 @@ import { ompAgentDir } from "../src/sessions/omp/process.js";
 import { listSkills } from "../src/sessions/slash-commands.js";
 import { loginSessionPair } from "./session-db-helpers.js";
 
-/** Every `openSync`/`realpathSync` call made through a named `node:fs` import, in call order. */
+/**
+ * Every `openSync`, `realpathSync` (Node's JS resolver) and `realpathSync.native` (the kernel's)
+ * call made through a named `node:fs` import, in call order.
+ */
 const fsCalls = vi.hoisted(() => [] as Array<{ name: string; args: unknown[] }>);
 
 vi.mock("node:fs", async (importOriginal) => {
@@ -36,11 +41,13 @@ vi.mock("node:fs", async (importOriginal) => {
         return Reflect.apply(target as (...values: unknown[]) => unknown, self, args);
       },
     });
-  return {
-    ...actual,
-    openSync: record("openSync", actual.openSync),
-    realpathSync: record("realpathSync", actual.realpathSync),
-  };
+  const native = record("realpathSync.native", actual.realpathSync.native);
+  // The stand-in must carry `.native` itself: the recorded one, not the original's.
+  const realpathSync = new Proxy(record("realpathSync", actual.realpathSync), {
+    get: (target, key, receiver) =>
+      key === "native" ? native : Reflect.get(target, key, receiver),
+  });
+  return { ...actual, openSync: record("openSync", actual.openSync), realpathSync };
 });
 
 const OUTSIDE_DIR_DESCRIPTION = "outside directory description";
@@ -98,7 +105,10 @@ function plantLinks(root: string, skillsDir: string): void {
 function recordedList(agentDir: string): {
   skills: Array<{ name: string; description: string }>;
   opened: Array<{ path: unknown; flags: unknown }>;
+  /** First arguments of the `realpathSync.native` calls. */
   resolved: unknown[];
+  /** First arguments of the JS `realpathSync` calls. */
+  resolvedByJs: unknown[];
 } {
   fsCalls.length = 0;
   const skills = listSkills(agentDir);
@@ -108,7 +118,10 @@ function recordedList(agentDir: string): {
     opened: calls
       .filter((call) => call.name === "openSync")
       .map((call) => ({ path: call.args[0], flags: call.args[1] })),
-    resolved: calls.filter((call) => call.name === "realpathSync").map((call) => call.args[0]),
+    resolved: calls
+      .filter((call) => call.name === "realpathSync.native")
+      .map((call) => call.args[0]),
+    resolvedByJs: calls.filter((call) => call.name === "realpathSync").map((call) => call.args[0]),
   };
 }
 
@@ -161,6 +174,39 @@ describe("listSkills: links leaving the skills directory", () => {
     expect(opened.map((call) => call.path)).toEqual([join(skillsDir, "kept", "SKILL.md")]);
   });
 
+  // Node's JS realpathSync stops at a FIFO and folds `..` as text: it answers `e/x/secret.yml`,
+  // which is inside `skills` as a string and which open() then walks, through `x`, to the outside.
+  it.skipIf(process.platform === "win32")(
+    "lists nothing from an outside file reached through a FIFO-terminated `..` link chain",
+    () => {
+      const { root, agentDir, skillsDir } = makeRoot();
+      writeSkill(skillsDir, "kept", ["description: kept"]);
+      const entry = join(skillsDir, "e");
+      mkdirSync(join(entry, "deep", "dir"), { recursive: true });
+      mkdirSync(join(entry, "deep", "x"));
+      execFileSync("mkfifo", [join(entry, "deep", "x", "secret.yml")]);
+      symlinkSync(join("deep", "dir"), join(entry, "L"), "dir");
+      mkdirSync(join(root, "outside"));
+      writeFileSync(
+        join(root, "outside", "secret.yml"),
+        skillFile(["name: leaked", `description: ${OUTSIDE_FILE_DESCRIPTION}`]),
+      );
+      symlinkSync(join(root, "outside"), join(entry, "x"), "dir");
+      // A literal target: `join` would fold the `..` away.
+      symlinkSync("L/../x/secret.yml", join(entry, "SKILL.md"));
+
+      const { skills, opened, resolvedByJs } = recordedList(agentDir);
+
+      expect(skills).toEqual([{ name: "kept", description: "kept" }]);
+      // The kernel's answer is the FIFO inside the entry: opened without blocking, then skipped.
+      expect(opened.map((call) => call.path)).toEqual([
+        join(entry, "deep", "x", "secret.yml"),
+        join(skillsDir, "kept", "SKILL.md"),
+      ]);
+      expect(resolvedByJs).toEqual([]);
+    },
+  );
+
   it("opens SKILL.md with O_RDONLY | O_NONBLOCK | O_NOCTTY | O_NOFOLLOW", () => {
     const { agentDir, skillsDir } = makeRoot();
     writeSkill(skillsDir, "kept", ["description: kept"]);
@@ -189,7 +235,7 @@ describe("listSkills: entry cap", () => {
     const dropped = Array.from({ length: TOTAL - CAP }, (_, index) => entryName(CAP + index));
     expect(dropped).toHaveLength(44);
 
-    const { skills, opened, resolved } = recordedList(agentDir);
+    const { skills, opened, resolved, resolvedByJs } = recordedList(agentDir);
 
     expect(skills).toEqual(
       kept.map((index) => ({ name: entryName(index), description: `d-${index}` })),
@@ -197,12 +243,13 @@ describe("listSkills: entry cap", () => {
     expect(opened.map((call) => call.path)).toEqual(
       kept.map((index) => join(skillsDir, entryName(index), "SKILL.md")),
     );
-    // One resolution of `skills` itself per call, then one per kept entry.
+    // One kernel resolution of `skills` itself per call, then one per kept entry; none by JS.
     expect(resolved).toEqual([
       skillsDir,
       ...kept.map((index) => join(skillsDir, entryName(index), "SKILL.md")),
     ]);
-    const touched = [...opened.map((call) => call.path), ...resolved].map(String);
+    expect(resolvedByJs).toEqual([]);
+    const touched = [...opened.map((call) => call.path), ...resolved, ...resolvedByJs].map(String);
     for (const entry of dropped) {
       expect(touched.filter((path) => path.includes(entry))).toEqual([]);
     }
