@@ -6,7 +6,7 @@
 ## What Changes
 - `server/test/raw-http-helpers.ts`：`rawHttpRequest` 接受额外请求头（只发请求头、不发 body）。
 - `session-approval-rest.test.ts` E15：超限输入改走原始 socket——带 `Content-Type: application/json` 与大于 1 MiB 的 `Content-Length`，不发 body，读到连接关闭后解析状态行、`cache-control`、`set-cookie` 与 JSON 信封；其余三条输入不变（仍走 `fetch`）。
-- 规格：tool-approval MODIFIED「审批作答 REST」——把「超限仅凭请求头拒绝并关闭连接」写成一句（测试方式的依据）。
+- 规格：http-service-skeleton MODIFIED「统一错误信封」——把「超限仅凭请求头拒绝并关闭连接」写成一句（parser 归属路由共有的行为，测试方式的依据）。
 
 ## Non-goals
 - 服务端 bodyLimit / parser 错误处理不改。
