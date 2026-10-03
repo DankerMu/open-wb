@@ -6,12 +6,13 @@
  * persisted, or the admission compensated; a faulted turn rejects → generic 5xx) → tombstone →
  * supervisor `retire` → the in-memory active-turn invariant → one delete + audit transaction →
  * post-commit removal of the session file (validated first: the path is omp-reported and must
- * name a regular file directly inside the owner's session dir). From the tombstone up to `retire`
+ * name a regular file directly inside the owner's session dir) and of the artifact directory omp
+ * keeps next to it (issue #758). From the tombstone up to `retire`
  * is one synchronous segment. The tombstone set belongs to this deleter instance; the SSE route
  * asks `isDeleting` before it subscribes. The tombstone is lifted before the claim on every exit
  * path. No timer of its own: the bounds are the stop grace, retire escalation and acquisition's.
  */
-import { lstat, realpath, unlink } from "node:fs/promises";
+import { lstat, realpath, rm, unlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { HttpError } from "../core/errors/index.js";
 import { ompSessionDir } from "./omp/process.js";
@@ -31,7 +32,7 @@ interface SessionDeleterDependencies {
   metadata: Pick<SessionMetadataStore, "deleteSession">;
   /** `OMP_STATE_DIR`; the owner's session dir under it bounds what a delete may unlink. */
   stateDir: string;
-  /** The session module's synchronous service error channel (session file removal only). */
+  /** The session module's synchronous service error channel (session file and directory removal only). */
   onError: (error: Error) => void;
 }
 
@@ -39,6 +40,9 @@ type Report = (error: unknown) => void;
 
 const OUTSIDE_SESSION_DIR = "session delete: session file outside the owner session dir";
 const NOT_REGULAR_FILE = "session delete: session file is not a regular file";
+const NO_ARTIFACT_NAME = "session delete: session file name leaves no artifact directory name";
+const NOT_A_DIRECTORY = "session delete: artifact directory is not a directory";
+const SESSION_FILE_SUFFIX = ".jsonl";
 
 export function createSessionDeleter(deps: SessionDeleterDependencies): SessionDeleter {
   const tombstones = new Set<string>();
@@ -116,34 +120,97 @@ export function createSessionDeleter(deps: SessionDeleterDependencies): SessionD
 /**
  * The row is already gone, so nothing here throws. `path` is omp-reported and was never validated
  * on write: it must be absolute and its parent's realpath must be the owner's session dir; from then
- * on only `target` (that realpath joined with the basename) is touched, so no component of the omp
- * string is re-resolved. `target` is unlinked only when `lstat` (no symlink follow) says regular
- * file; anything else is reported and left alone. ENOENT at any step is success. Residual: `sessions`
- * and `sessions/<ownerId>` are group-writable (2770) and Node has no `unlinkat`, so between realpath
- * and `unlink` the omp group can still rename-swap `sessions/<ownerId>` (or an ancestor up to
- * stateDir) for a symlink; that means replacing the owner's whole session dir, and closing it needs
- * a dir fd / `unlinkat` or tighter `sessions/` ownership.
+ * on only `expected` (that realpath) joined with the basename is touched, so no component of the omp
+ * string is re-resolved. The file is unlinked only when `lstat` (no symlink follow) says regular
+ * file; anything else is reported and left alone. ENOENT at any step is success. The artifact
+ * directory is handled only when the file was a regular file (whatever its unlink did) or already
+ * gone. Residual: `sessions` and `sessions/<ownerId>` are group-writable (2770) and Node has no
+ * `unlinkat`, so between realpath and `unlink` the omp group can still rename-swap
+ * `sessions/<ownerId>` (or an ancestor up to stateDir) for a symlink; that means replacing the
+ * owner's whole session dir, and closing it needs a dir fd / `unlinkat` or tighter `sessions/`
+ * ownership. The realpath → `rm` window of the artifact directory is the same residual.
  */
 async function removeSessionFile(path: string, sessionDir: string, report: Report): Promise<void> {
   if (!isAbsolute(path)) {
     report(new Error(OUTSIDE_SESSION_DIR));
     return;
   }
+  let expected: string;
   try {
-    const [parent, expected] = await Promise.all([realpath(dirname(path)), realpath(sessionDir)]);
-    if (parent !== expected) {
+    const [parent, resolved] = await Promise.all([realpath(dirname(path)), realpath(sessionDir)]);
+    if (parent !== resolved) {
       report(new Error(OUTSIDE_SESSION_DIR));
       return;
     }
-    const target = join(expected, basename(path));
+    expected = resolved;
+  } catch (error) {
+    reportUnlessMissing(error, report);
+    return;
+  }
+  const name = basename(path);
+  if (await unlinkRegularFile(join(expected, name), report)) {
+    await removeArtifactDir(expected, name, report);
+  }
+}
+
+/** False when `target` exists as anything but a regular file, or could not be inspected. */
+async function unlinkRegularFile(target: string, report: Report): Promise<boolean> {
+  try {
     if (!(await lstat(target)).isFile()) {
       report(new Error(NOT_REGULAR_FILE));
-      return;
+      return false;
     }
+  } catch (error) {
+    reportUnlessMissing(error, report);
+    return isMissing(error);
+  }
+  try {
     await unlink(target);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      report(error);
+    reportUnlessMissing(error, report);
+  }
+  return true;
+}
+
+/**
+ * omp keeps a session's artifacts (full tool output and the like) in a directory named like the
+ * session file without `.jsonl`, next to it. The name is cut from the already-validated basename
+ * and joined onto `expected`; an empty name, `.` or `..` would name the owner's session dir or its
+ * parent, so those are reported and nothing is touched. Only a real directory (`lstat`: a symlink
+ * planted in the omp-writable dir is not one) is removed; `rm` does not follow symlinks inside it.
+ * No `force`: a failed or partial removal is reported, ENOENT is success.
+ */
+async function removeArtifactDir(
+  expected: string,
+  fileName: string,
+  report: Report,
+): Promise<void> {
+  if (!fileName.endsWith(SESSION_FILE_SUFFIX)) {
+    return;
+  }
+  const name = fileName.slice(0, -SESSION_FILE_SUFFIX.length);
+  if (name === "" || name === "." || name === "..") {
+    report(new Error(NO_ARTIFACT_NAME));
+    return;
+  }
+  const dir = join(expected, name);
+  try {
+    if (!(await lstat(dir)).isDirectory()) {
+      report(new Error(NOT_A_DIRECTORY));
+      return;
     }
+    await rm(dir, { recursive: true });
+  } catch (error) {
+    reportUnlessMissing(error, report);
+  }
+}
+
+function isMissing(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException).code === "ENOENT";
+}
+
+function reportUnlessMissing(error: unknown, report: Report): void {
+  if (!isMissing(error)) {
+    report(error);
   }
 }

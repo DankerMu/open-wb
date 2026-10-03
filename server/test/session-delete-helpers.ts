@@ -94,6 +94,19 @@ export function ownedFile(dir: string = ownedDir(), name = "owned.jsonl"): strin
 }
 
 /**
+ * The artifact directory omp keeps next to a session file (issue #758): the same name without
+ * `.jsonl`, holding one file and one nested directory with one file, as fake-omp writes it. Only
+ * the cases that need it create it, so `ownedFile` alone still means "no such directory".
+ */
+export function ownedArtifactDir(file: string): string {
+  const dir = file.slice(0, -".jsonl".length);
+  mkdirSync(join(dir, "local"), { recursive: true });
+  writeFileSync(join(dir, "1.bash.log"), "full tool output\n");
+  writeFileSync(join(dir, "local", "note.txt"), "nested artifact\n");
+  return dir;
+}
+
+/**
  * The owner's omp session dir under `stateDir` (the independent oracle for the path the deleter
  * accepts), created if no spawn has made it yet.
  */

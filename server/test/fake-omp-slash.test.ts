@@ -308,11 +308,14 @@ describe("fake omp branch --branch-entry", () => {
       success: true,
       data: { text: "继续", cancelled: false },
     });
-    const written = readdirSync(dir);
-    expect(written).toHaveLength(1);
-    const file = join(dir, String(written[0]));
+    // 每个新 .jsonl 旁有一个同名产物目录。
+    const written = readdirSync(dir).sort();
+    expect(written).toHaveLength(2);
+    const file = join(dir, String(written[1]));
     expect(file.endsWith(".jsonl")).toBe(true);
     expect(statSync(file).size).toBeGreaterThan(0);
+    expect(written[0]).toBe(String(written[1]).slice(0, -".jsonl".length));
+    expect(statSync(join(dir, String(written[0]))).isDirectory()).toBe(true);
     const state = await session.wait(response("state-2", "get_state"));
     expect(asRecord(state.data).sessionFile).toBe(file);
 
@@ -320,7 +323,7 @@ describe("fake omp branch --branch-entry", () => {
     const escaped = await session.wait(response("br-3", "branch"));
     expect(escaped.success).toBe(true);
     expect(asRecord(escaped.data).text).toBe(ESCAPED);
-    expect(readdirSync(dir)).toHaveLength(2);
+    expect(readdirSync(dir)).toHaveLength(4);
     await closeSession(session);
   });
 
