@@ -6,7 +6,8 @@
 ## What Changes
 - `web/src/features/chat/scroll-follow.tsx`：记录上一次的 `scrollTop`（scroll 事件、`settle()` 与 `回到最新` 写入之后都更新）。`onScroll` 只在 `scrollTop` 变小且距底 >4px 时解除贴底；`scrollTop` 未变小而距底 >4px 时保持原贴底状态并执行一次 `settle()`。
 - `web/test/chat-scroll-follow.test.tsx`：新增回声用例与「上滚仍解除」用例。
-- `web/e2e/ui-walk.spec.ts`：W-scroll 在强制溢出的视口下增加一步刷新页面后断言贴底（`desktop-light`）。
+- `web/e2e/ui-walk.spec.ts` → 新文件 `web/e2e/ui-walk-scroll.ts`：`walkScrollFollow` 及其专用常量与 helper 的纯搬移（原文件已 799 行，上限 800）；在其中增加一步「挂住列表请求后刷新，放行后仍贴底」。
+- 规格：conversation-search MODIFIED「跳转与消息级高亮」——括注里的「否则解除贴底」改为引用 chat-web 的判据（行为等价：贴底时 `scrollIntoView` 要么使 `scrollTop` 变小、要么停在底部）。
 - 规格：chat-web MODIFIED「转录区尺寸变化触发贴底重算」——scroll 事件的判据一句与三个 Scenario。
 
 ## Non-goals
@@ -16,3 +17,4 @@
 
 ## 风险
 - 用户上滚的唯一判据变为「`scrollTop` 变小」。键盘、滚轮、拖动滚动条、`scrollIntoView` 向上都满足；`scrollToMessage`（对话内搜索）在调用 `onScroll()` 前已滚动，目标在当前位置上方时 `scrollTop` 变小，照常解除贴底。目标恰在底部时保持贴底，与现有语义一致。
+- 残余（比现状窄得多，不处理）：贴底时同一帧内「钳制或滚动锚定引起的 `scrollTop` 变小」叠加「另一处让距底 >4px 的布局变化」且中间没有内容更新，仍会误解除；滚动锚定把 `scrollTop` 抬高的那一帧里用户的小幅上滚会被吞一次，下一次滚动事件即恢复；缩放改变 `scrollTop` 的情况与现状相同。
