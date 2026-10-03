@@ -18,6 +18,6 @@ omp 建的同名目录及其内容的 mode 取决于 omp 的 umask：`0002`/`000
 ## Non-goals
 - regenerate/fork 遗留的旧分支 `.jsonl` 及其同名目录（规格已明确不在清理范围）。
 - fork/regenerate 之后旧产物引用在 omp 里失效（omp 行为，本应用不补）。
-- `sessions/<ownerId>` 组可写带来的 rename-swap **竞态**残余（校验与 unlink / rm 之间替换目录分量）。
+- `sessions/<ownerId>` 组可写带来的 rename-swap **竞态**残余。unlink 一侧是校验到 `unlink` 之间的单次窗口，收益是一个普通文件。**rm 一侧更大（评审第 2 轮，探针实测）**：Node 的递归 `rm` 按路径逐项操作，窗口覆盖整个递归过程——产物目录归 omp 所有，塞多少文件窗口就多长；期间把 `sessions/<ownerId>` rename 走并换成符号链接，其后的删除全部落到 `<链接目标>/<name>/`（2 万文件的布置下换链后目标树被删光且无任何报错）。收益是 app uid 可写的任意同名目录树。本函数内没有廉价缓解（任何基于路径的遍历性质相同）；由 #706 第二刀关闭：`sessions/` 归 app 所有且对 omp 不可写（`<ownerId>` 一级换不掉），同名目录先原子 rename 进 omp 不可达的 app 私有目录再删除。在那之前这是已登记的残留，前提同 ADR-0011 的 #739 补充（受信局域网、账号均为内部成员）。`session-delete.ts` 函数头注释对该残留的描述（「校验与 rm 之间」）偏窄，随第二刀重写该函数时改正。
 
 评审第 1 轮更正：原文把「`sessions` 或 `sessions/<ownerId>` 被换成符号链接」整体归为竞态残余，不成立——静态的符号链接不需要竞态：`realpath(dirname(path))` 与 `realpath(sessionDir)` 都经过该链接、恒等。master 上它让 app uid unlink 链接目标目录里的一个普通文件；本 change 的递归删除会把它放大成删一棵目录树。因此本 change 加一条校验（会话目录的 realpath 必须恰为 `<state realpath>/sessions/<ownerId>`），静态形态对 unlink 与 rm 一并关闭；剩下的才是真正的竞态窗口，由 #706 第二刀收紧 `sessions/` 的归属后进一步缩小。
