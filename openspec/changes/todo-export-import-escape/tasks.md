@@ -5,12 +5,12 @@ Fixture level: compact
 归档次序（前提）：本 change 先归档进主规格；父 change `s1c-session-metadata-presentation` 的 chat-sessions delta 仍是旧文，归档前按 #754 从主规格现文重新生成全部 delta。本 PR 不改父 delta。
 
 ## 1. 实现
-- [ ] 1.1 `slash-commands.ts`：`classifyPrompt` 的 `todo` 子命令规则（spec delta 原句）；JSDoc 同步。
-- [ ] 1.2 `server/test/slash-commands.test.ts`：spec delta 新 Scenario 的十二个输入逐个断言 `classifyPrompt` 与 `toWireText`。
-- [ ] 1.3 `server/test/session-rest-slash.test.ts`（inject + stub supervisor）：`/todo export /abs/x.md` 的持久化正文为原文、stub 收到的 wire 文本带前导空格。
-- [ ] 1.4 `server/test/turn-control-slash.test.ts`：regenerate 与 fork 以 `/todo export …` 为锚点时按普通文本对位（不 400）。
-- [ ] 1.4a 已知并接受：改动前落库的 `/todo export|import …` 用户消息当时按内建执行、omp 里没有 user 条目；改后以它为锚点的 regenerate/fork 由 400 变为 502 `agent_unavailable`（主规格既有的「没留条目且非白名单」规则）。不加代码；1.4 的用例只覆盖改动后产生的消息。
-- [ ] 1.5 不改其它被跟踪文件（父 design 的更正由编排方做）。
+- [x] 1.1 `slash-commands.ts`：`classifyPrompt` 的 `todo` 子命令规则（spec delta 原句）；JSDoc 同步。
+- [x] 1.2 `server/test/slash-commands.test.ts`：spec delta 新 Scenario 的十二个输入逐个断言 `classifyPrompt` 与 `toWireText`。
+- [x] 1.3 `server/test/session-rest-slash.test.ts`（inject + stub supervisor）：`/todo export /abs/x.md` 的持久化正文为原文、stub 收到的 wire 文本带前导空格。
+- [x] 1.4 `server/test/turn-control-slash.test.ts`：regenerate 与 fork 以 `/todo export …` 为锚点时按普通文本对位（不 400）。
+- [x] 1.4a 已知并接受：改动前落库的 `/todo export|import …` 用户消息当时按内建执行、omp 里没有 user 条目；改后以它为锚点的 regenerate/fork 由 400 变为 502 `agent_unavailable`（主规格既有的「没留条目且非白名单」规则）。不加代码；1.4 的用例只覆盖改动后产生的消息。
+- [x] 1.5 不改其它被跟踪文件（父 design 的更正由编排方做）。
 
 ## Must preserve
 - `/todo`、`/todo append …`、`/compact…`、`/skill:<已装>` 的分类与 wire 形态不变；既有 slash 相关测试全绿。
