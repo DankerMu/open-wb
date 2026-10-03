@@ -1,0 +1,8 @@
+## MODIFIED Requirements
+
+### Requirement: 假 omp 夹具模块划分
+`server/test/support/fake-omp.mjs` SHALL 是假 omp 唯一的可执行入口，负责按 argv 解析结果选定场景、JSONL 帧收发、scenario 状态与出站帧。call-proxy 的上游客户端 SHALL 位于同目录的 `server/test/support/fake-omp-proxy.mjs`，职责包括：读取受管 `models.yml`（`$HOME/.omp/agent/models.yml`，即真实 omp 的默认 agent 目录，宿主显式设置的 `PI_CODING_AGENT_DIR` 与它相同；`HOME` 缺席按配置缺失处理）的 `providers.workbuddy` 配置、向 `baseUrl/chat/completions` 发 POST、重组 SSE 的 delta 与 tool call 分片、解析上游 tool call 参数。argv 解析 SHALL 位于同目录的 `server/test/support/fake-omp-argv.mjs`，职责包括：取值型与布尔型 argv 的表、`--scenario` 等取值的位置无关解析与缺值判定、`--ready-delay-ms` 与 `--start-delay-ms` 的取值校验；它只返回解析结果，不决定场景行为。S1c 会话元数据场景的纯构建部分 SHALL 位于同目录的 `server/test/support/fake-omp-thinking.mjs`，职责包括：确定性思考文本常量、`thinking_start`/`thinking_delta`/`thinking_end` 事件与 `message_end` thinking 块的构建、`edit-write` 的固定 hashline input、post-edit 文件内容、html 内容与 `details` 构建，以及 `--thinking-repeat` 取值校验；它不写文件。`fake-omp-proxy.mjs`、`fake-omp-thinking.mjs` 与 `fake-omp-argv.mjs` SHALL 只导入 `node:` 内建模块，不导入 `fake-omp.mjs`、彼此不相互导入，不持有模块级可变状态，也不发出任何 JSONL 帧；值导入只沿 `fake-omp.mjs → fake-omp-proxy.mjs`、`fake-omp.mjs → fake-omp-thinking.mjs` 与 `fake-omp.mjs → fake-omp-argv.mjs` 三个方向（有向无环）。四个文件 SHALL 各自 ≤800 行（AGENTS.md 的文件行数约定；`scripts/size-guard.sh` 不扫描 `.mjs`，以 `wc -l` 核对）。夹具整体仍不依赖任何第三方包。
+
+#### Scenario: 模块划分可持续验证
+- **WHEN** 检查 `server/test/support/` 下四个模块的 import 语句，并运行 `wc -l` 与 server 测试
+- **THEN** `fake-omp-proxy.mjs`、`fake-omp-thinking.mjs` 与 `fake-omp-argv.mjs` 的 import 只含 `node:` 说明符、不含 `fake-omp.mjs` 且互不导入；`fake-omp.mjs` 以相对路径 `./fake-omp-proxy.mjs`、`./fake-omp-thinking.mjs` 与 `./fake-omp-argv.mjs` 静态导入它们；四个文件均 ≤800 行；fake-omp、call-proxy 与元数据场景相关测试全绿
