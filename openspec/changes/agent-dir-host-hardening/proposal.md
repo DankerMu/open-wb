@@ -21,6 +21,8 @@ realpath 与 open 之间的 TOCTOU：`skills/` 仍对 omp uid 可写时，中间
 
 `skills` 自身被换成符号链接：包含判断以 `realpath(<agentDir>/skills)` 为基准，omp uid 今天能把 `skills` 整个换成指向别处的链接，基准随之移动。同样由第二刀关闭。
 
+硬链接：realpath 区分不了硬链接。Linux 默认 `fs.protected_hardlinks=1` 下 omp uid 只能链接它自己拥有或可读可写的文件——这些内容它本来就能读出再写进 SKILL.md，没有新增泄露；该 sysctl 为 0 的主机上，omp uid 可以把同一文件系统里它读不了的文件链接进 `skills/`，frontmatter 会被列出。部署前提（第二刀文档写明）；第二刀之后 `skills/` 对 omp uid 不可写，此路关闭。
+
 排序饿死：omp uid 建 256 个排序靠前的条目，合法 skill 就全部不被列出。它今天本来也能改名或删除条目，没有新增能力；第二刀关闭。
 
 条目数上界只管每个条目的 I/O：`readdir` 与排序仍随目录大小线性增长。
