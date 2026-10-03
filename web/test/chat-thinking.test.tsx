@@ -387,12 +387,14 @@ describe("深度思考过程 fold on the chat page", () => {
     expect(icon.getAttribute("aria-hidden")).toBe("true");
     expect(block.open).toBe(true);
     expect(bodyText()).toBe("先想一想");
+    expect(block.getAttribute("data-running")).toBe("");
 
     emit(source, 5, "text.delta", { delta: "答案" });
     emit(source, 6, "turn.end", { status: "done" });
 
     expect(fold()).toBe(block);
     expect(block.open).toBe(false);
+    expect(block.hasAttribute("data-running")).toBe(false);
     expect(bodyText()).toBe("先想一想");
     expect(text.textContent).toBe("答案");
     expect(await copiedTexts(writeText)).toEqual([["答案"]]);
@@ -412,10 +414,12 @@ describe("深度思考过程 fold on the chat page", () => {
     expect(articles().map((article) => foldOf(article) !== null)).toEqual([true, false, false]);
     const block = fold();
     expect(block.open).toBe(false);
+    expect(block.hasAttribute("data-running")).toBe(false);
 
     toggle();
 
     expect(block.open).toBe(true);
+    expect(block.hasAttribute("data-running")).toBe(false);
     expect(bodyText()).toBe("想了很久很久…（已截断）");
     expect(bodyText()?.endsWith("…（已截断）")).toBe(true);
   });
@@ -647,6 +651,13 @@ describe("thinking fold static styles", () => {
     );
     const reduce = blockBody(css(), /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{/);
     expect(ruleBody(reduce, ".thinking-summary .ui-icon")).toContain("transition: none");
+  });
+
+  it("caps the body of a settled fold at 12rem and leaves a running one uncapped (#725)", () => {
+    const capped = ruleBody(css(), ".thinking-block:not([data-running]) .thinking-body");
+    expect(capped).toContain("max-height: 12rem");
+    expect(capped).toContain("overflow: auto");
+    expect(ruleBody(css(), ".thinking-body")).not.toContain("max-height");
   });
 
   it("T12 keeps thinking styles out of chat.css (regression guard)", () => {

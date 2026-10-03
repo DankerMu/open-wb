@@ -5,11 +5,11 @@ Fixture level: compact
 归档次序（前提）：本 change 先归档进主规格；父 change `s1c-session-metadata-presentation` 的 thinking-fold delta 仍是旧文，归档前按 #754 从主规格现文重新生成全部 delta。本 PR 不改父 delta。
 
 ## 1. 实现
-- [ ] 1.1 `thinking-block.tsx`：`<details>` 在 `running` 为真时带 `data-running` 属性（假时不带该属性）；`open` 的写法与「React 只在 running 变化时写 open」的性质不变。
-- [ ] 1.2 `messages.css`：`.thinking-block:not([data-running]) .thinking-body { max-height: 12rem; overflow: auto; }`，注释说明与 demo:539-545 的偏离及原因（#725）。其余 `.thinking-*` 规则不动。
-- [ ] 1.3 `web/test/chat-thinking.test.tsx`：T6（流式 → turn.end）补断言 running 时有 `data-running`、终态后没有；T7（快照 done）补断言没有；仿 T11/T12 的 `ruleBody` 静态断言：`.thinking-block:not([data-running]) .thinking-body` 规则含 `max-height: 12rem` 与 `overflow: auto`，且 `.thinking-body` 规则不含 `max-height`。
-- [ ] 1.4 `web/e2e/ui-walk-sessions.spec.ts` `step4ThinkingFold`：展开后断言 `.thinking-body` 的计算样式 `max-height` 为 `192px`、`overflow-y` 为 `auto`，且 `<details>` 不带 `data-running`。
-- [ ] 1.5 不改其它被跟踪文件（除本 change 目录）。
+- [x] 1.1 `thinking-block.tsx`：`<details>` 在 `running` 为真时带 `data-running` 属性（假时不带该属性）；`open` 的写法与「React 只在 running 变化时写 open」的性质不变。
+- [x] 1.2 `messages.css`：`.thinking-block:not([data-running]) .thinking-body { max-height: 12rem; overflow: auto; }`，注释说明与 demo:539-545 的偏离及原因（注释里写 `issue 725`：`(#725)` 会被颜色守卫当成 hex 字面量）。其余 `.thinking-*` 规则不动。
+- [x] 1.3 `web/test/chat-thinking.test.tsx`：T6（流式 → turn.end）补断言 running 时有 `data-running`、终态后没有；T7（快照 done）补断言没有；仿 T11/T12 的 `ruleBody` 静态断言：`.thinking-block:not([data-running]) .thinking-body` 规则含 `max-height: 12rem` 与 `overflow: auto`，且 `.thinking-body` 规则不含 `max-height`。
+- [x] 1.4 `web/e2e/ui-walk-sessions.spec.ts` `step4ThinkingFold`：展开后断言 `.thinking-body` 的计算样式 `max-height` 为 `192px`、`overflow-y` 为 `auto`，且 `<details>` 不带 `data-running`。
+- [x] 1.5 不改其它被跟踪文件（除本 change 目录）。
 
 ## Must preserve
 - `web/test/chat-thinking.test.tsx` 既有 T6–T8、F1–F4 断言不动且全绿（手动切换保留）。

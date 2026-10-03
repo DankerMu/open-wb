@@ -648,6 +648,14 @@
   overflow-wrap: anywhere;
 }
 
+/* Departs from demo:539-545, whose body has no height limit (issue 725): expanding a long fold in
+   a pinned transcript dragged the summary out of view. Same 12rem as the step card's 原始输出. A
+   running message stays uncapped, so the transcript's bottom-follow keeps its newest line visible. */
+.thinking-block:not([data-running]) .thinking-body {
+  max-height: 12rem;
+  overflow: auto;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .chat-jump-latest {
     transition: none;
