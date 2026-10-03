@@ -83,3 +83,34 @@ CONTEXT.md 不变量 4（网关/kb 凭证不进 omp 可读环境）在同 uid �
   （`TMPDIR` 等非 `2770` 位置无保护，且主组变体会破坏删除）。
 - **验证**：CI `uid-isolation` job 的 sudoers 含该行；Linux 集成测试断言 omp 写出物 other 位为 0 且组写位保留；job 在真实 omp 冒烟后
   检查会话 `.jsonl` 为 `0660`。
+
+## 补充（2026-10-03，#706）：`OMP_STATE_DIR` 分成托管配置与 omp 运行期状态
+
+- **问题**：上文权限模型把 `OMP_STATE_DIR` 整棵设为 `2770`，omp uid 因此能改写宿主托管的 `models.yml`、安装或替换 `skills/`、
+  整体改名 `agent`/`home`。托管配置跨账号生效，一次被注入的会话可以持久影响之后所有会话。agent 目录直接只读不可行（omp 要在其中建 `agent.db`）。
+- **布局**（`<state>` = `OMP_STATE_DIR`，全部由 app uid 持有，组经 setgid 继承）：
+
+  | 路径 | mode | omp uid |
+  | --- | --- | --- |
+  | `<state>`、`<state>/sessions`、`<state>/xdg`、`<state>/xdg/{data,state,cache}` | `2750` | 只能进入 |
+  | `<state>/home` | `3770` | 可写自己的条目；粘滞位使它不能改名/删除 `.omp` |
+  | `<state>/home/.omp`、`<state>/home/.omp/agent`（`models.yml` `0640`、`skills/`） | `2750` | 只读 |
+  | `<state>/xdg/{data,state,cache}/omp` | `2770` | 运行期状态（`agent.db`、日志、原生模块缓存） |
+  | `<state>/sessions/<ownerId>` | `2770` | 会话文件 |
+
+  spawn 环境不再设 `PI_CODING_AGENT_DIR`（omp 取默认 `$HOME/.omp/agent`），新增 `XDG_DATA_HOME|XDG_STATE_HOME|XDG_CACHE_HOME=<state>/xdg/*`；
+  `--preserve-env` 列表同步。omp 只在 agent 目录为默认值且 `$XDG_*_HOME/omp` 已存在时才重定向运行期状态，所以三个 `omp` 目录由宿主预建。
+  宿主在启动与每次 spawn 时把上表校正到精确值，并拒绝不属于 app uid 的目录、符号链接与非目录条目（启动失败 / 该次 spawn 502）。
+  `SANDBOX_ROOT` 一侧仍是 `2770`，不变。sudoers 规则不变。
+- **HOME 为什么可写**（owner 决定）：HOME 只读时 `npm install`（`~/.npm`）、`git config --global` 等工具链直接失败。
+- **部署前提（宿主不检查）**：`<state>` 的父目录不得对 omp uid 可写（否则 `<state>` 可被整体改名替换）；
+  `skills/` 由运维以 app uid（或 root）安装，目录与文件不对 omp uid 可写；app uid 必须属于共享组（否则 setgid 位设不上，启动失败）。
+- **从旧布局升级**：
+  1. 停服务。
+  2. sudo 模式：移走 omp uid 建的 `<state>/home/.omp`（其中只有 `natives/`、`logs/` 等可再生内容）；留在原处则启动因归属不符失败。
+  3. 把 `<state>/agent/skills` 的内容以 app uid 重新安装到 `<state>/home/.omp/agent/skills`（先核对内容——旧目录曾对 omp uid 可写）；
+     宿主不自动搬。旧 `<state>/agent` 的其余文件（`agent.db` 等）不再被读写。
+  4. 启动。会话文件位置不变，旧会话可继续续接。
+- **残余**：omp uid 仍可在 `<state>/home` 下建第三方配置目录（`~/.claude` 等）并在 `<state>/xdg/data/omp` 里持久化自己的状态
+  （含用户级插件目录）；前者由 #708 的宿主 overlay 处理，后者与 #708 已接受的「项目插件/工具不拦」同类。
+  `sessions/<ownerId>` 之内的递归删除竞态由 #706 的后续切片（删除前先移入 app 私有目录）关闭。
