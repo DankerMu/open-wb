@@ -10,7 +10,7 @@ Define the application server's startup, health, persistence and static-serving 
 
 `npm run start --workspace server` SHALL在clean checkout先以现有TypeScript compiler构建production-only JS并把tracked `migrations/`完整递归tree逐文件逐字节带入与compiled module相同的runtime位置，再执行compiled唯一入口；`make dev` SHALL只转发到该command，不得形成第二套启动逻辑。成功顺序 SHALL为validated config → DB-parent prepare → private-file preparation → DB open/migrate → createApp（auth → http guard → model-proxy → sessions → workspaces → accounts，sessions先对账后开放路由；workspace store/facade/audit绑定同一DB与runtime.sandboxRoot）→ listen → 以实际绑定地址推导可连接proxyBaseUrl并在建立托管布局后写`<OMP_STATE_DIR>/home/.omp/agent/models.yml` → application-owned stdout一行LF-terminated exact JSON `{"event":"server_started","host":"<actual>","port":<integer>,"modules":["core/db","auth","http","model-proxy","sessions","workspaces","accounts"]}`，不得有extra key或在listen前/应用stderr出现。Package-manager command banner不属于application record。
 
-Runtime config/DB/app/listen/models.yml/success-record任一步失败 SHALL不输出success record，以nonzero退出，并在stderr sink可写时由application-owned stderr输出一行LF-terminated exact generic JSON `{"event":"server_start_failed"}`（无extra key/原始error/config）；若stderr sink自身不可写，该行物理不可达，系统仍SHALL nonzero、释放资源且不得产生unhandled stream stack。Node `node:sqlite` ExperimentalWarning MAY作为平台warning另出stderr。任意success/failure stream均不得dump environment或包含cookie/password/session值、MODEL_UPSTREAM_API_KEY值或会话bearer。Application stdout/stderr record SHALL经受管writer处理sync throw、write callback与stream error，settle exact一次且不得泄漏raw EPIPE。监听成功后，生产入口 SHALL 把 sessions 模块的 `log` 端口接到同一受管 writer：每条握手超时记录（见 omp-runtime「握手超时可观测」）在 application stderr 恰写一行 LF-terminated exact JSON `{"event":"omp_handshake_timeout","sessionId":"<id>","reason":"handshake timeout","elapsedMs":<integer>}`，无 extra key、无原始 error/路径/凭据；会话 id 是已出现在 API URL 中的公开标识，不属于上文禁止的 session 凭据值；写失败 SHALL 吞掉，不影响请求结果与进程退出码。生产入口 SHALL 同样提供 sessions 模块的 `onError`：supervisor 每通知一次保留的基础设施故障，在 application stderr 经同一受管 writer 恰写一行 LF-terminated exact JSON `{"event":"session_fault"}`，无 extra key、无原始 error message/stack/路径/凭据；该 sink SHALL 同步返回 `undefined`（不返回 thenable），写失败 SHALL 吞掉——不产生未处理 rejection、不再次触发 `onError`、不影响请求结果与进程退出码。同一个 `onError` 也接收会话删除清理会话文件失败时的报告（session-metadata「会话删除」的错误通道），这类报告同样写一行 `session_fault`，但不进入 supervisor 的保留故障、不在关停时暴露——该记录的行数因此不等于关停时暴露的故障数。关停时暴露保留故障的既有行为不变。
+Runtime config/DB/app/listen/models.yml/success-record任一步失败 SHALL不输出success record，以nonzero退出，并在stderr sink可写时由application-owned stderr输出一行LF-terminated exact generic JSON `{"event":"server_start_failed"}`（无extra key/原始error/config）；若stderr sink自身不可写，该行物理不可达，系统仍SHALL nonzero、释放资源且不得产生unhandled stream stack。Node `node:sqlite` ExperimentalWarning MAY作为平台warning另出stderr。任意success/failure stream均不得dump environment或包含cookie/password/session值、MODEL_UPSTREAM_API_KEY值或会话bearer。Application stdout/stderr record SHALL经受管writer处理sync throw、write callback与stream error，settle exact一次且不得泄漏raw EPIPE。受管writer SHALL 在每个 stream 上至多挂一个 `error` 监听、由该 stream 的全部在途记录共用（一次 stream `error` 事件使当时全部在途记录各自以该 error settle 一次）：在途记录数不设上限，同一 tick 内写任意多条都 SHALL NOT 使 Node 向 stderr 打印 `MaxListenersExceededWarning`（那是一行非 JSON 输出）；SHALL NOT 以 `setMaxListeners`/`defaultMaxListeners` 调高上限来达成。最后一条在途记录 settle 之后经过一轮 `setImmediate` 该监听才摘除（write callback 之后、`setImmediate` 之前到达的 EPIPE `error` 事件仍被消费，不成为未处理异常）；其间有新记录进入则继续沿用同一个监听。监听成功后，生产入口 SHALL 把 sessions 模块的 `log` 端口接到同一受管 writer：每条握手超时记录（见 omp-runtime「握手超时可观测」）在 application stderr 恰写一行 LF-terminated exact JSON `{"event":"omp_handshake_timeout","sessionId":"<id>","reason":"handshake timeout","elapsedMs":<integer>}`，无 extra key、无原始 error/路径/凭据；会话 id 是已出现在 API URL 中的公开标识，不属于上文禁止的 session 凭据值；写失败 SHALL 吞掉，不影响请求结果与进程退出码。生产入口 SHALL 同样提供 sessions 模块的 `onError`：supervisor 每通知一次保留的基础设施故障，在 application stderr 经同一受管 writer 恰写一行 LF-terminated exact JSON `{"event":"session_fault"}`，无 extra key、无原始 error message/stack/路径/凭据；该 sink SHALL 同步返回 `undefined`（不返回 thenable），写失败 SHALL 吞掉——不产生未处理 rejection、不再次触发 `onError`、不影响请求结果与进程退出码。同一个 `onError` 也接收会话删除清理会话文件失败时的报告（session-metadata「会话删除」的错误通道），这类报告同样写一行 `session_fault`，但不进入 supervisor 的保留故障、不在关停时暴露——该记录的行数因此不等于关停时暴露的故障数。关停时暴露保留故障的既有行为不变。
 
 失败清理 SHALL关闭当前入口已拥有的app/DB；每个entry SHALL把同一AbortSignal传给Fastify listen，SIGINT/SIGTERM只对pending bind执行abort；已绑定时SHALL经共享幂等shutdown先完成所有runtime原生退出及store回收，再停止listener，最后关闭唯一DB handle。不得让同一AbortSignal的Node原生close绕过runtime先行归属；重复/混合signal不得在清理期间重新abort已绑定listener。干净取消正常退出；已确定真实失败保持nonzero，不得被signal抹去failure record或降为0。Signal落在listen invoke与实际bind之间时不得后到绑定、不得输出success/failure record，port/DB须可由successor立即复用。`.gitignore` SHALL排除default `var/` runtime output，knip SHALL把`src/server.ts`识别为entry。
 
@@ -49,6 +49,24 @@ Runtime config/DB/app/listen/models.yml/success-record任一步失败 SHALL不�
 - **THEN** application stderr 恰多一行 `{"event":"session_fault"}`，其中没有原始错误消息、stack、路径或凭据；sink 的返回值不是 thenable；关停时该故障照常暴露
 - **WHEN** 写该行时 stderr sink 不可用（写入被拒绝或同步抛出）
 - **THEN** 没有未处理 rejection、`onError` 不被再次调用、supervisor 不因此多保留一条 sink 契约故障
+
+#### Scenario: 同 tick 多条记录不触发监听上限警告
+- **WHEN** 在同一 tick 内对真实 `process.stderr`（子进程里运行，stderr 为管道）调用受管 writer 16 次
+- **THEN** 子进程 stderr 恰为 16 行对应的记录，不含 `MaxListenersExceededWarning`；全部 settle 并过一轮 `setImmediate` 后，该 stream 上由 writer 挂的 `error` 监听数为 0
+- **WHEN** 一个 EventEmitter sink 上有三条在途记录
+- **THEN** 该 sink 的 `error` 监听数恰为 1，`getMaxListeners()` 与写入前相同
+- **WHEN** 此时发出一次 `error` 事件
+- **THEN** 三条各自以该 error reject 恰一次；其后迟到的 write callback 不再改变结果；过一轮 `setImmediate` 后监听数为 0
+- **WHEN** 一条记录的 write callback 成功之后、`setImmediate` 之前 sink 发出 `error`
+- **THEN** 该记录保持 resolved，进程没有未处理的 `error` 事件
+
+#### Scenario: 同一 stream 上监听的复用与重挂
+- **WHEN** 记录 A settle 之后、其 `setImmediate` 触发之前写入记录 B，且该 `setImmediate` 触发时 B 仍在途
+- **THEN** 监听没有被摘除（监听数仍为 1）；随后 sink 发出 `error` 时 B 以该 error reject，没有未处理的 `error` 事件
+- **WHEN** 全部记录 settle、监听已摘除（监听数 0）之后再对同一 sink 写入记录 C，并在 C 在途时发出 `error`
+- **THEN** 写入 C 时监听数回到 1，C 以该 error reject，没有未处理的 `error` 事件
+- **WHEN** 两个不同的 sink 各有一条在途记录，其中一个发出 `error`
+- **THEN** 只有该 sink 的记录 reject，另一个 sink 的记录按自己的 write callback settle
 
 ### Requirement: 健康与服务信息端点
 系统 SHALL 提供 `GET /api/healthz`（无需认证）与 `GET /api/info`（无需认证，返回 exact SERVICE_INFO 与认证 provider 名）；info 成功 body SHALL 恰为 `{name:string,version:string,auth:{provider:string}}`，`name` 非空且 `version` 符合 `server/src/service-info.ts` 的 semver 规则，`auth.provider` 为 `registerAuth` 实际装配的认证 provider 对象的 `name`（provider 类型——现为 `DevStubProvider`——新增只读 `name`；dev-stub provider 为 `dev-stub`；S3a 的 OIDC 适配器为 `oidc`），由 `registerAuth` 在根实例上 `decorate("authProviderName", provider.name)`（provider 在 `registerAuth` 创建后传入封装的 auth 子插件，而非在子插件内创建，否则根实例读不到）暴露给 info route，不由 route、`createApp` 参数或 UI 硬编码，只读、不含任何配置值或密钥。可注入 app 装配 SHALL 接收 caller-owned SQLite handle、以名为 `db` 的 Fastify decorator 保持同一对象 identity，并不得在 `app.close()` 时关闭该 handle。
