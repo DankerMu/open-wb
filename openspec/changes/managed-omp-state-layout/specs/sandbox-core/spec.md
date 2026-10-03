@@ -12,8 +12,8 @@
 - **THEN** 抛错，message 含该路径；符号链接目标的 mode 不变
 
 #### Scenario: 拒绝他人持有的目录
-- **WHEN** 非 root 进程对一个 root 持有的既有目录（如 `/usr`）调 `ensureOwnedDir`（进程为 root 时该用例跳过）
-- **THEN** 抛错，该目录 mode 不变
+- **WHEN** 非 root 进程对一个 root 持有的既有目录（如 `/usr`）以**该目录当前的 mode** 调 `ensureOwnedDir`（无需 chmod，因此只有归属检查能拒绝它；进程为 root 时该用例跳过）
+- **THEN** 抛错，message 含该路径，该目录 mode 不变
 
 ## MODIFIED Requirements
 

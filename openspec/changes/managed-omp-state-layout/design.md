@@ -5,15 +5,18 @@
 - 重定向到 XDG 的是运行期状态（同文件 `:583-983`）：`agent.db`、`models.db`、`history.db`、`sessions`、`blobs`、`plugins`、`natives`、`logs`、`run/daemons`、各类 cache。`models.yml`、`config.yml`、`skills/` 仍从 agent 目录读。
 - 探针（一次性 Linux 容器，app/omp 两个 uid，sudoers 为 ADR-0010 规则 + `umask=0007`，编译后的服务 + 假上游）：
   - agent 目录直接只读（保留 `PI_CODING_AGENT_DIR`）：prompt → 502，omp 建不了 `agent.db`。
-  - 本布局：`/api/commands` 列出托管 skill；冷启动回合（含 bash + 审批）、空闲回收后的 `--resume` 回合、`/skill:` 回合、fork 及其回合、DELETE 全部成功；omp 的全部写入落在 `xdg/data/omp/{agent.db*,models.db,natives/}`、`xdg/state/omp/{logs,run}`、`xdg/cache/omp/`；omp uid 对 `models.yml`、`skills/`、`.omp`、`<state>/home` 的写/删/改名全部 `Permission denied`，读 `models.yml` 成功。
+  - 本布局：`/api/commands` 列出托管 skill；冷启动回合（含 bash + 审批）、空闲回收后的 `--resume` 回合、`/skill:` 回合、fork 及其回合、DELETE 全部成功；omp 成功的写入全部落在 `xdg/data/omp/{agent.db*,models.db,natives/}`、`xdg/state/omp/{logs,run}`、`xdg/cache/omp/`；omp uid 对 `models.yml`、`skills/`、`.omp`、`<state>/home` 的写/删/改名全部 `Permission denied`，读 `models.yml` 成功。
   - HOME 只读（`2750`）：`npm install`（`~/.npm`）与 `git config --global` 失败 → owner 选「HOME 可写 + 粘滞位」。HOME `2770` 无粘滞位：omp uid 可 `mv .omp .omp2`。HOME `3770` + app 持有的 `.omp`：工具链可用，`mv .omp` → `Operation not permitted`。
 - `<state>` 自身必须对 omp uid 不可写，否则 `home` 可被整体改名替换（探针实测）。
+  - 最终布局复测（本 change 的表原样：`<state>`/`sessions`/`xdg` 根 `2750`、`home` `3770`）：同一组回合全部 done，服务日志无权限错误；omp uid 的 `touch <state>/x`、`touch sessions/x`、`mv sessions/u1`、`touch xdg/data/x` → `Permission denied`，`mv home/.omp` → `Operation not permitted`，`home` 与 `xdg/data/omp` 下新建/删除成功。
+- XDG 生效后 omp 仍会尝试写 `~/.omp` 的几处都不阻断默认流程：`install-id`（`utils/src/dirs.ts:1061-1108`，失败被吞，每进程换新 id）、`config.yml` 保存（`coding-agent/src/config/settings.ts:2516`，仅告警）、`edit/blackbox.ts:53`（默认关）；`launch/client.ts:485-489` 的 `~/.omp/run/daemons/global` 只在 `browser.relay` 打开时走到（默认 false）。
+- `OMP_STATE_DIR` 可以是符号链接（`session-delete` 与其测试用例 (l) 按 realpath 校验）：布局对根取 realpath 后再应用，根以下不允许符号链接。
 
 ## 决定
 1. **布局与权限位**：见 omp-runtime delta 的表。`skills/` 不由宿主建立也不校正——它是运维安装的内容（可以是指向别处的符号链接，第一刀的 realpath 约束仍然生效）；agent 目录 `2750` 已保证 omp uid 不能替换 `skills` 这个条目。
 2. **`ensureOwnedDir` 而不是 `ensureSharedDir`**：后者只给新建分量设位、不看归属。托管布局需要「每次都是这个值、且是我的目录」，否则旧部署遗留的 `2770` 或 omp uid 预先放置的目录会被沿用。失败是硬失败：启动走 generic `server_start_failed`（既有合同不带细节），spawn 走既有目录准备失败（502 `agent_unavailable`）；`Error.message` 带路径与期望 mode，供测试与日志使用。
 3. **两处调用**：启动（listen 之后、写 `models.yml` 之前，原 `ensureSharedDir(agentDir)` 的位置）与每次 `spawnOmp`。每次 spawn 重跑整套（十来个同步 `mkdir`+`lstat`）换来：单元测试直接调 `spawnOmp` 仍能自建布局；运行中被改宽的位在下一次 spawn 前回正。
-4. **路径单一来源**：`server/src/sessions/omp/state-layout.ts`（新）放路径函数与 `ensureOmpStateLayout`；`process.ts` 改为从它导入（可 re-export `ompSessionDir`/`ompAgentDir` 以减少调用方改动）。`server.ts:301` 的 `join(config.ompStateDir, "agent")` 改用它。
+4. **路径单一来源**：`server/src/sessions/omp/state-layout.ts`（新）放路径函数与 `ensureOmpStateLayout`；`process.ts` 改为从它导入，并须继续 re-export `ompSessionDir`/`ompAgentDir`（chat-sessions 规格写的是「exported by `sessions/omp/process.ts`」）。`server.ts:301` 的 `join(config.ompStateDir, "agent")` 改用它。
 5. **spawn 环境**：键集 `{PATH, LANG?, TMPDIR?, HOME, XDG_DATA_HOME, XDG_STATE_HOME, XDG_CACHE_HOME, WORKBUDDY_MODEL_TOKEN}`；sudo `--preserve-env` 同序。argv 与 sudoers 规则不变（规则只约束命令行）。
 6. **`writeManagedModelsYml` 不建目录**：目录由布局建立；写入器只做临时文件 + rename（第一刀）。
 7. **CI**：`ci-uid-isolation.sh` 仍 `chmod 2770 "$OMP_STATE_DIR"`（服务启动时回正为 `2750`，正好覆盖「被改宽的目录被校正」）；只在 `check_omp_modes` 加两条断言。CI 的 `job_root` 对 omp uid 可写，不满足「`<state>` 父目录不可写」的部署前提——CI 证明的是布局之内的权限，不是该前提。
@@ -25,7 +28,8 @@
 
 ## 残余（如实登记）
 - `<state>/home` 对 omp uid 可写：它可以在 HOME 下建 `~/.claude`、`~/.codex` 等第三方配置目录，omp 的第三方 provider 会读。由 #708 的 overlay（`disabledProviders`）处理；本 change 不关。
-- `<state>/xdg/data/omp` 对 omp uid 可写且含 `plugins/`、`agent.db`：用户级插件与 omp 自己存的设置可被 omp uid 持久化，影响后续会话。与 owner 在 #708 接受的「项目插件/工具不拦」同类（受信局域网 + uid 隔离），但这里是跨账号的；#708 fixture 评估 overlay 能否压住，压不住则作为残余登记。
+- omp 运行期状态里有可加载的代码：`<state>/xdg/data/omp` 下的 `natives/`（原生模块解包，探针实测落在 data 目录）、`plugins/`（用户级插件），以及 `agent.db`。它们必须对 omp uid 可写，所以 omp uid 能跨会话、跨账号持久化代码与设置——所有账号共用一个 omp uid（ADR-0010）决定了这一点，本布局关不掉；单把 `plugins/` 做成只读没有意义（`natives/` 同样可写）。与 owner 在 #708 接受的「项目插件/工具不拦」同属受信局域网下的残余，在 ADR-0010 补充登记。
+- `install-id` 写不进 `~/.omp`：omp 每个进程用一个新的随机 id（只影响 omp 自己的遥测标识）。
 - `sessions/<ownerId>` 之内的删除竞态：2b。
 - 部署前提不由宿主检查：`<state>` 的父目录对 omp uid 不可写；`skills/` 内容不对 omp uid 可写。
 
