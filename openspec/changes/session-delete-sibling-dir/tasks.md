@@ -13,9 +13,9 @@ Fixture level: compact
 - [x] 1.6 除 `server/src/sessions/session-delete.ts`、fake-omp 源文件及其 harness 测试、上述三个测试文件（及它们共用的测试 helper）与本 change 目录外不改其它被跟踪文件。`session-delete.test.ts` 已 657 行（上限 800）：新用例放进新文件 `server/test/session-delete-sibling.test.ts`。fake-omp 改动若使其它既有测试的断言需要更新（例如对 session-dir 内容的精确列表断言），逐个列出；涉及文件超出本条范围时停下报告。
 
 ## 评审第 1 轮修复
-- [ ] F1 `removeSessionFile`：在既有的父目录比较之外，要求 `realpath(sessionDir) === join(realpath(stateDir), "sessions", ownerId)`（`stateDir` 自身允许是符号链接，所以取它的 realpath；用既有的 `ompSessionDir` 之类 helper 拼接亦可，但比较的一侧必须是「state 的 realpath + 两级字面分量」）。不成立 → 报告 `OUTSIDE_SESSION_DIR`（或新增一条具名消息）、不触碰任何路径。函数头注释改正：静态符号链接由本检查拒绝，残余只剩校验与操作之间的竞态。
-- [ ] F2 测试（`session-delete-sibling.test.ts`）：(i) `sessions/<ownerId>` 是指向 state 之外目录的符号链接，该目录里有同名 `.jsonl` 与同名目录 → 两者原样、错误通道恰一条、204；(j) `.jsonl` 不存在、只有同名目录的同一布置 → 目录原样；(k) `sessions` 自身是符号链接 → 同样拒绝；(l) `stateDir` 自身是指向真实 state 的符号链接（合法部署）→ 正常删除。
-- [ ] F3 负对照 N7：去掉 F1 的检查 → (i)(j)(k) 失败（外部目录被删）。全量 server 测试、lint、typecheck、anti-drift、size-guard 重跑。
+- [x] F1 `removeSessionFile`：在既有的父目录比较之外，要求 `realpath(sessionDir) === join(realpath(stateDir), "sessions", ownerId)`（`stateDir` 自身允许是符号链接，所以取它的 realpath；用既有的 `ompSessionDir` 之类 helper 拼接亦可，但比较的一侧必须是「state 的 realpath + 两级字面分量」）。不成立 → 报告 `OUTSIDE_SESSION_DIR`（或新增一条具名消息）、不触碰任何路径。函数头注释改正：静态符号链接由本检查拒绝，残余只剩校验与操作之间的竞态。
+- [x] F2 测试（`session-delete-sibling.test.ts`）：(i) `sessions/<ownerId>` 是指向 state 之外目录的符号链接，该目录里有同名 `.jsonl` 与同名目录 → 两者原样、错误通道恰一条、204；(j) `.jsonl` 不存在、只有同名目录的同一布置 → 目录原样；(k) `sessions` 自身是符号链接 → 同样拒绝；(l) `stateDir` 自身是指向真实 state 的符号链接（合法部署）→ 正常删除。
+- [x] F3 负对照 N7：去掉 F1 的检查 → (i)(j)(k) 失败（外部目录被删）。全量 server 测试、lint、typecheck、anti-drift、size-guard 重跑。
 
 ## Must preserve
 - `.jsonl` 的全部既有校验与错误通道语义不变；`session-delete*.test.ts` 既有断言不动且全绿。

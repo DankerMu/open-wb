@@ -13,6 +13,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -31,10 +32,17 @@ import {
   sendDelete,
   sessionFileOf,
   sessionState,
+  track,
 } from "./session-delete-helpers.js";
 import { turn } from "./session-fork-helpers.js";
 import { QUESTION, regenerate } from "./session-regenerate-helpers.js";
-import { createSession, waitForTurn } from "./session-supervisor-helpers.js";
+import {
+  createRealFakeRuntime,
+  createSession,
+  OWNER_ID,
+  openRecordingSession,
+  waitForTurn,
+} from "./session-supervisor-helpers.js";
 
 deleteWorlds();
 
@@ -212,6 +220,76 @@ describe("DELETE removes the session file's artifact directory (#758)", () => {
 
     expect(existsSync(artifacts)).toBe(false);
     expect(existsSync(dir)).toBe(true);
+    expect(world.errors).toEqual([]);
+  });
+});
+
+/**
+ * `sessions` and `sessions/<ownerId>` are writable by the omp group. A symlink standing at either
+ * level resolves on both sides of the parent comparison, so only the comparison with
+ * `<state realpath>/sessions/<ownerId>` tells it apart (fixture review round 1, F1/F2).
+ */
+describe("DELETE rejects a symlinked session dir level (#758 F2)", () => {
+  /**
+   * `level` under the state dir replaced by a symlink to a directory outside it; returns the
+   * outside directory that now stands for the owner session dir.
+   */
+  function symlinkedLevel(stateDir: string, level: "sessions" | "owner"): string {
+    const sessions = join(stateDir, "sessions");
+    rmSync(sessions, { recursive: true, force: true });
+    const outside = ownedDir();
+    if (level === "sessions") {
+      mkdirSync(stateDir, { recursive: true });
+      symlinkSync(outside, sessions);
+      mkdirSync(join(outside, OWNER_ID));
+      return join(outside, OWNER_ID);
+    }
+    mkdirSync(sessions, { recursive: true });
+    symlinkSync(outside, join(sessions, OWNER_ID));
+    return outside;
+  }
+
+  const cases = [
+    { letter: "(i)", level: "owner", withFile: true, what: "file and directory" },
+    { letter: "(j)", level: "owner", withFile: false, what: "directory, the file being absent," },
+    { letter: "(k)", level: "sessions", withFile: true, what: "file and directory" },
+  ] as const;
+
+  for (const { letter, level, withFile, what } of cases) {
+    it(`${letter} a symlinked \`${level}\` level: the outside ${what} are left alone, one report`, async () => {
+      const world = await openRealWorld();
+      const { stateDir } = world.rt.runtime;
+      const outside = symlinkedLevel(stateDir, level);
+      const real = join(outside, "owned.jsonl");
+      if (withFile) {
+        ownedFile(outside);
+      }
+      const artifacts = ownedArtifactDir(real);
+
+      await deleteNaming(world, join(stateDir, "sessions", OWNER_ID, "owned.jsonl"));
+
+      expect(tree(artifacts)).toEqual(ARTIFACT_TREE);
+      expect(existsSync(real)).toBe(withFile);
+      expect(messages(world)).toEqual([OUTSIDE_SESSION_DIR]);
+    });
+  }
+
+  it("(l) a state dir that is itself a symlink to the real state dir deletes normally", async () => {
+    const rt = createRealFakeRuntime();
+    const link = join(ownedDir(), "state-link");
+    mkdirSync(rt.runtime.stateDir, { recursive: true });
+    symlinkSync(rt.runtime.stateDir, link);
+    const opened = await openRecordingSession({ ...rt.runtime, stateDir: link });
+    track(opened.fixture);
+    const world = { ...opened, rt };
+    const file = ownedFile(ownerSessionDir(link));
+    const artifacts = ownedArtifactDir(file);
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(existsSync(join(rt.runtime.stateDir, "sessions", OWNER_ID, "owned"))).toBe(true);
+
+    await deleteNaming(world, file);
+
+    expect([existsSync(file), existsSync(artifacts)]).toEqual([false, false]);
     expect(world.errors).toEqual([]);
   });
 });

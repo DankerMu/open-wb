@@ -84,11 +84,7 @@ export function createSessionDeleter(deps: SessionDeleterDependencies): SessionD
       throw new HttpError("not_found");
     }
     if (removed.ompSessionFile !== null) {
-      await removeSessionFile(
-        removed.ompSessionFile,
-        ompSessionDir(deps.stateDir, ownerId),
-        report,
-      );
+      await removeSessionFile(removed.ompSessionFile, deps.stateDir, ownerId, report);
     }
   };
 
@@ -119,26 +115,37 @@ export function createSessionDeleter(deps: SessionDeleterDependencies): SessionD
 
 /**
  * The row is already gone, so nothing here throws. `path` is omp-reported and was never validated
- * on write: it must be absolute and its parent's realpath must be the owner's session dir; from then
- * on only `expected` (that realpath) joined with the basename is touched, so no component of the omp
- * string is re-resolved. The file is unlinked only when `lstat` (no symlink follow) says regular
- * file; anything else is reported and left alone. ENOENT at any step is success. The artifact
- * directory is handled only when the file was a regular file (whatever its unlink did) or already
- * gone. Residual: `sessions` and `sessions/<ownerId>` are group-writable (2770) and Node has no
- * `unlinkat`, so between realpath and `unlink` the omp group can still rename-swap
- * `sessions/<ownerId>` (or an ancestor up to stateDir) for a symlink; that means replacing the
- * owner's whole session dir, and closing it needs a dir fd / `unlinkat` or tighter `sessions/`
- * ownership. The realpath → `rm` window of the artifact directory is the same residual.
+ * on write: it must be absolute and its parent's realpath must be the owner's session dir, whose own
+ * realpath must be exactly `<stateDir realpath>/sessions/<ownerId>`. `sessions` and
+ * `sessions/<ownerId>` are group-writable (2770) for the omp uid: a symlink standing at either level
+ * resolves on both sides of the parent comparison, and only the second comparison rejects it
+ * (stateDir itself may be a symlink, hence its realpath). From then on only `expected` (that
+ * realpath) joined with the basename is touched, so no component of the omp string is re-resolved.
+ * The file is unlinked only when `lstat` (no symlink follow) says regular file; anything else is
+ * reported and left alone. ENOENT at any step is success. The artifact directory is handled only
+ * when the file was a regular file (whatever its unlink did) or already gone. Residual: only the
+ * race. Node has no `unlinkat`, so between this validation and `unlink` / `rm` the omp group can
+ * still rename-swap `sessions/<ownerId>` or `sessions` for a symlink; closing it needs a dir fd /
+ * `unlinkat` or tighter `sessions/` ownership.
  */
-async function removeSessionFile(path: string, sessionDir: string, report: Report): Promise<void> {
+async function removeSessionFile(
+  path: string,
+  stateDir: string,
+  ownerId: string,
+  report: Report,
+): Promise<void> {
   if (!isAbsolute(path)) {
     report(new Error(OUTSIDE_SESSION_DIR));
     return;
   }
   let expected: string;
   try {
-    const [parent, resolved] = await Promise.all([realpath(dirname(path)), realpath(sessionDir)]);
-    if (parent !== resolved) {
+    const [parent, resolved, state] = await Promise.all([
+      realpath(dirname(path)),
+      realpath(ompSessionDir(stateDir, ownerId)),
+      realpath(stateDir),
+    ]);
+    if (parent !== resolved || resolved !== ompSessionDir(state, ownerId)) {
       report(new Error(OUTSIDE_SESSION_DIR));
       return;
     }
