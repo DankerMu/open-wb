@@ -5,7 +5,7 @@
  * Issue #758: and removes the omp-uid-written artifact directory next to that file.
  * Issue #760: what omp writes through sudo → setpriv has no other bits and keeps group write.
  * Issue #706: the managed state layout is read-only for the omp uid except HOME and the
- * three XDG `omp` directories.
+ * three XDG `omp` directories; the trash a DELETE moves artifacts through is closed to it.
  * Non-Linux / unset WORKBUDDY_UID_TEST skip; opted-in missing OMP_USER fails.
  */
 
@@ -210,6 +210,7 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
         expect(deleted.statusCode).toBe(204);
         expect(existsSync(file)).toBe(false);
         expect(existsSync(artifacts)).toBe(false);
+        expect(readdirSync(join(layout.stateDir, "trash"))).toEqual([]);
         expect(errors).toEqual([]);
       } finally {
         try {
@@ -264,6 +265,8 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
           expect(await write(join(dir, "planted by omp")), dir).toBe("EACCES");
         }
         expect(await write(models), models).toBe("EACCES");
+        expect(await write(join(state, "trash", "x"))).toBe("EACCES");
+        expect(readdirSync(join(state, "trash"))).toEqual([]);
         for (const dir of [join(state, "home"), join(state, "sessions"), agent]) {
           expect(await ask(`rename:${dir}`), dir).toBe("renamed=EACCES");
         }

@@ -6,7 +6,7 @@
  * with its default agent dir (`$HOME/.omp/agent`, no `PI_CODING_AGENT_DIR`) and the directory
  * already exists (`resource/oh-my-pi/packages/utils/src/dirs.ts`), so the host creates all three.
  */
-import { mkdirSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { ensureOwnedDir } from "../../core/sandbox/dirs.js";
 
@@ -32,14 +32,26 @@ export function ompSessionDir(stateDir: string, ownerId: string): string {
   return join(stateDir, "sessions", ownerId);
 }
 
+/**
+ * App-private: session deletion moves an artifact directory here before removing it recursively
+ * (`session-delete.ts`), so the omp uid cannot reach the tree being removed by path.
+ */
+export function ompTrashDir(stateDir: string): string {
+  return join(stateDir, "trash");
+}
+
 const MANAGED = 0o2750;
 const OMP_WRITABLE = 0o2770;
 const OMP_HOME = 0o3770;
+/** A `home` being cold-built: no group or other bits yet; setgid stays so `.omp` inherits the group. */
+const OMP_HOME_UNOPENED = 0o2700;
+const APP_PRIVATE = 0o700;
 
-/** Parents before children; paths relative to the resolved state root. */
+/**
+ * Parents before children; paths relative to the resolved state root. The root and `home` come
+ * first and are handled by `ensureOmpStateLayout` itself.
+ */
 const LAYOUT: readonly (readonly [path: string, mode: number])[] = [
-  ["", MANAGED],
-  ["home", OMP_HOME],
   ["home/.omp", MANAGED],
   ["home/.omp/agent", MANAGED],
   ["xdg", MANAGED],
@@ -50,6 +62,7 @@ const LAYOUT: readonly (readonly [path: string, mode: number])[] = [
   ["xdg/cache", MANAGED],
   ["xdg/cache/omp", OMP_WRITABLE],
   ["sessions", MANAGED],
+  ["trash", APP_PRIVATE],
 ];
 
 /**
@@ -57,12 +70,23 @@ const LAYOUT: readonly (readonly [path: string, mode: number])[] = [
  * and one that is a symlink, not a directory or not ours fails instead of being followed. Only the
  * state dir itself may be a symlink (an operator-placed one): the layout is applied under its
  * kernel realpath, which is returned. Missing parents of the state dir are created untouched.
+ * A missing `home` is opened to the omp group only after `.omp` and `agent` stand in it: a
+ * leftover omp-uid process could otherwise create `home/.omp` first and fail the layout on its
+ * owner check. An existing `home` is never narrowed first: running omp processes are using it.
  */
 export function ensureOmpStateLayout(stateDir: string): string {
   mkdirSync(stateDir, { recursive: true });
   const root = realpathSync.native(stateDir);
+  ensureOwnedDir(root, MANAGED);
+  const home = ompHome(root);
+  // A dangling symlink counts as missing here and is then refused by `ensureOwnedDir`.
+  const cold = !existsSync(home);
+  ensureOwnedDir(home, cold ? OMP_HOME_UNOPENED : OMP_HOME);
   for (const [path, mode] of LAYOUT) {
     ensureOwnedDir(join(root, path), mode);
+  }
+  if (cold) {
+    ensureOwnedDir(home, OMP_HOME);
   }
   return root;
 }

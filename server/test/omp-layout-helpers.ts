@@ -20,6 +20,7 @@ export const LAYOUT_TABLE: ReadonlyArray<readonly [string, number]> = [
   ["xdg/state/omp", 0o2770],
   ["xdg/cache/omp", 0o2770],
   ["sessions", 0o2750],
+  ["trash", 0o700],
 ];
 
 /** `sessions/<ownerId>`, created by the spawn. */

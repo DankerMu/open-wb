@@ -33,8 +33,9 @@ export function ensureSharedDir(absPath: string): void {
 
 /**
  * 托管目录：非递归建出 `absPath`（父目录必须已在），要求它是本进程 uid 持有的目录（符号链接与
- * 其它类型一律拒绝、不跟随），并把 `mode & 0o7777` 校正到精确的 `mode`。校正后复查：内核静默
- * 丢掉 setgid（本进程不在该目录的组里）同样是失败。
+ * 其它类型一律拒绝、不跟随），并把 `mode & 0o7777` 校正到精确的 `mode`。新建时 `mkdir` 直接带
+ * 目标权限位（umask 只会再收窄），不经过一个更宽的中间状态。校正后复查：内核静默丢掉 setgid
+ * （本进程不在该目录的组里）同样是失败。
  */
 export function ensureOwnedDir(absPath: string, mode: number): void {
   const fail = (reason: string, cause?: unknown): never => {
@@ -43,7 +44,7 @@ export function ensureOwnedDir(absPath: string, mode: number): void {
     });
   };
   try {
-    mkdirSync(absPath);
+    mkdirSync(absPath, mode & 0o777);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
       fail("cannot be created", error);

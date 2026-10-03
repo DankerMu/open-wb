@@ -6,10 +6,10 @@ Risk packs: filesystem-race, filesystem-permissions
 归档次序（前提）：本 change 在 `managed-omp-state-layout` 归档之后从主规格生成并先于父 change 归档；父 change `s1c-session-metadata-presentation` 对 omp-runtime 与 session-metadata 的 delta 按 #754 重新生成。
 
 ## 1. 实现
-- [ ] 1.1 `server/src/sessions/omp/state-layout.ts`：`ompTrashDir(stateDir)`；布局加 `trash` `0o700`；`home` 冷建顺序（缺失时先以 `0o700` 建出，`.omp`、`agent` 之后再 `ensureOwnedDir(home, 0o3770)`；已存在的 `home` 不先收窄——运行中的 omp 进程在用它）。
-- [ ] 1.2 `server/src/core/sandbox/dirs.ts`：`ensureOwnedDir` 的 `mkdir` 带 `mode & 0o777`（随后的校正照旧）。
-- [ ] 1.3 `server/src/sessions/session-delete.ts`：`removeArtifactDir` 改为 lstat → rename 进 trash（名字 `randomBytes(16).toString("hex")`，trash 根取自已算出的 state realpath）→ trash 内 lstat → `rm` 或 `unlink`+报告；函数头注释同步。为「rename 之前被替换」场景提供最小的可注入点（沿用该模块现有的注入方式；没有则以参数默认值注入 `rename`），不得为测试改变生产路径的语义。
-- [ ] 1.4 测试：`server/test/session-delete-sibling.test.ts`（或同目录新文件）、`server/test/omp-state-layout.test.ts`、`server/test/omp-layout-helpers.ts`（布局表）、`server/test/sandbox-dirs.test.ts`、`server/test/linux/uid-isolation.test.ts`（见 E4），`server/test/session-delete-helpers.ts`（`ownerSessionDir` 一并建出 `<state>/trash` `0700`，使不经 spawn 的用例也有真实布局）、`server/test/server-startup-layout.test.ts` 与 `server/test/server-startup-order.test.ts`（启动后状态根内容变为 `["home","sessions","trash","xdg"]`）。
+- [x] 1.1 `server/src/sessions/omp/state-layout.ts`：`ompTrashDir(stateDir)`；布局加 `trash` `0o700`；`home` 冷建顺序（缺失时先以 `0o2700` 建出（保留 setgid，使 `.omp`/`agent` 继承共享组；组与 other 位为 0），`.omp`、`agent` 之后再 `ensureOwnedDir(home, 0o3770)`；已存在的 `home` 不先收窄——运行中的 omp 进程在用它）。
+- [x] 1.2 `server/src/core/sandbox/dirs.ts`：`ensureOwnedDir` 的 `mkdir` 带 `mode & 0o777`（随后的校正照旧）。
+- [x] 1.3 `server/src/sessions/session-delete.ts`：`removeArtifactDir` 改为 lstat → rename 进 trash（名字 `randomBytes(16).toString("hex")`，trash 根取自已算出的 state realpath）→ trash 内 lstat → `rm` 或 `unlink`+报告；函数头注释同步。为「rename 之前被替换」场景提供最小的可注入点（沿用该模块现有的注入方式；没有则以参数默认值注入 `rename`），不得为测试改变生产路径的语义。
+- [x] 1.4 测试：`server/test/session-delete-sibling.test.ts`（或同目录新文件）、`server/test/omp-state-layout.test.ts`、`server/test/omp-layout-helpers.ts`（布局表）、`server/test/sandbox-dirs.test.ts`、`server/test/linux/uid-isolation.test.ts`（见 E4），`server/test/session-delete-helpers.ts`（`ownerSessionDir` 一并建出 `<state>/trash` `0700`，使不经 spawn 的用例也有真实布局）、`server/test/server-startup-layout.test.ts` 与 `server/test/server-startup-order.test.ts`（启动后状态根内容变为 `["home","sessions","trash","xdg"]`）。
 
 允许改动的文件：上列。不得改 `openspec/**`、`docs/**`、`.github/**`、`scripts/**`、假 omp（`fake-omp.mjs` 已 799 行）。
 
