@@ -5,7 +5,8 @@
 
 ## What Changes
 - 托管布局新增 `<state>/trash`（`0700`，app 私有）。
-- `removeArtifactDir`：`lstat` 为目录 → `rename` 进 `trash/<随机名>` → 在 trash 里再 `lstat` → 目录则递归删、否则 `unlink` 并报告。递归只发生在 omp uid 不可达的目录里。
+- `removeArtifactDir`：`lstat` 为目录 → `rename` 进 `trash/<随机名>` → 在 trash 里再 `lstat` → 目录则递归删、否则 `unlink` 并报告。递归只发生在 omp uid 按路径到不了的目录里。
+- **关闭的是按路径的替换，不是全部**：删除前就把 cwd 或目录 fd 留在该产物目录树内的 omp uid 进程，仍能经相对路径在递归期间替换子目录（Node 没有 `*at` 系调用；改用 `/bin/rm` 才是 fd 级安全，但引入对宿主 `rm` 实现的依赖——busybox 的 `rm` 同样按路径——不取）。作为残余登记。
 - 顺带收掉 2a 评审的两条 P3：冷建时 `home` 在 `.omp`/`agent` 就位之前不对组开放；`ensureOwnedDir` 新建目录直接带目标权限位。`omp-state-layout.test.ts` 的 `home/.omp` 符号链接分支补「不 spawn」断言。
 - 规格：omp-runtime MODIFIED「OMP_STATE_DIR 托管布局」；session-metadata MODIFIED「会话删除」。`session-delete.ts` 函数头注释同步（残余一段改为现状）。
 
