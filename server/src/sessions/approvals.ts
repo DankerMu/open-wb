@@ -194,8 +194,8 @@ export class ApprovalRegistry {
 
   /**
    * Timer callback: synchronous and never throws. A settled or vanished row (not_found: its
-   * message was deleted, cascading the approval) is a silent miss; a failed transaction drops the
-   * registration and takes the fault sink.
+   * message was deleted, cascading the approval) is a silent miss; a failed transaction keeps the
+   * registration and takes the fault sink, whose infra retire denies it through `abandon` (#662).
    */
   #expire(approvalId: number, registration: Registration): void {
     let settled: ApprovalView | null;
@@ -208,7 +208,6 @@ export class ApprovalRegistry {
       );
     } catch (error) {
       if (!(error instanceof HttpError && error.code === "not_found")) {
-        this.#registrations.delete(approvalId);
         this.#fault(registration.slot, asError(error));
         return;
       }
