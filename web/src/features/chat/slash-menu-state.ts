@@ -1,15 +1,20 @@
 /* The pure state of the composer's slash candidates (issue 556): when the panel is wanted, which
    commands it lists, the text a pick leaves in the draft, and the highlight and dismissal of one
-   draft. No React: `slash-menu.tsx` owns the catalogue and the keys. */
+   draft, the highlight also of one catalogue. No React: `slash-menu.tsx` owns the catalogues and
+   the keys. */
 import type { Command } from "../../lib/api-commands.js";
 
-/** The highlight (`index` among the listed commands) and the dismissal, both of `draft` only. */
+/**
+ * The highlight (`index` among the listed commands) and the dismissal, both of `draft` only; the
+ * highlight is also of one catalogue only (the `catalogue` action).
+ */
 export type SlashMenuState = { draft: string; index: number; dismissed: boolean };
 
 type SlashMenuAction =
   | { type: "draft"; draft: string }
   | { type: "move"; delta: 1 | -1; count: number }
-  | { type: "dismiss" };
+  | { type: "dismiss" }
+  | { type: "catalogue" };
 
 /** A slash followed by no whitespace at all: the draft is still the command being typed. */
 const COMMAND_PREFIX = /^\/[^\s]*$/;
@@ -40,7 +45,9 @@ export function pickText(name: string): string {
 /**
  * `draft` follows the composer: the same text keeps the state (the same object), any other text
  * starts over on the first option and undoes a dismissal. `move` steps the highlight cyclically
- * over `count` options and `dismiss` closes the panel until the draft changes.
+ * over `count` options and `dismiss` closes the panel until the draft changes. `catalogue` tells
+ * that the workspace id of the listed catalogue changed: the highlight returns to the first option,
+ * the dismissal stays.
  */
 export function reduce(state: SlashMenuState, action: SlashMenuAction): SlashMenuState {
   switch (action.type) {
@@ -51,5 +58,7 @@ export function reduce(state: SlashMenuState, action: SlashMenuAction): SlashMen
       return { ...state, index: (state.index + action.delta + action.count) % action.count };
     case "dismiss":
       return { ...state, dismissed: true };
+    case "catalogue":
+      return state.index === 0 ? state : { ...state, index: 0 };
   }
 }
