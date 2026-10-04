@@ -97,8 +97,8 @@
 | F-CHAT-8 | 断线/刷新续流（Last-Event-ID 回放） |
 | F-CHAT-9 | 回合产物呈现：逐回复产物卡 / 文件变更卡 + 顶栏产物面板（同一特性、同批交付；2026-09-26 #403 拍板） |
 | F-CHAT-10 | 深度思考折叠：上游 reasoning 以独立事件流式呈现，模型无 reasoning 时不渲染（2026-09-26 #404 拍板） |
-| F-CHAT-11 | 输入框能力栏（2026-10-04，ADR-0013）：任何会话状态下可达的工作空间选择、权限设置、「+」菜单（技能/命令、上传文件、专家）；各项随其后端上线 |
-| F-CHAT-12 | 会话权限档（2026-10-04，ADR-0013）：用户在输入框选择本会话的工具审批档位，服务端按档位决定哪些工具调用需要审批 |
+| F-CHAT-11 | 输入框能力栏（2026-10-04，ADR-0013）：任何会话状态下可达的工作空间选择、权限设置、「+」菜单（技能/命令、上传文件、专家）。分三项：11a 能力栏本体 + 空间选择 + 技能/命令；11b 权限设置 + 上传文件；11c 专家 |
+| F-CHAT-12 | 会话权限设置（2026-10-04，ADR-0013）：输入框里的权限设置所对应的后端。语义待 S1g grill 确定——暂按「本会话的工具审批档位」理解，owner 尚未确认 |
 
 ### 文件页 `/files`
 | ID | 行为 |
@@ -246,10 +246,10 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 
 **S1d 中心能力面（专家/技能/连接器/模型）**
 - Outcome：`/center` 的专家、技能、连接器、模型四个 tab：专家卡入会话、技能启停映射 omp 工具面、MCP 显式配置、模型注册表 UI+探活。
-- 覆盖：F-CTR-EXP、F-CTR-SKL、F-CTR-CON、F-CTR-MOD。
+- 覆盖：F-CTR-EXP、F-CTR-SKL、F-CTR-CON、F-CTR-MOD、F-CHAT-11c。
 - 必读增量：demo `/center` 对应 tab；`resource/oh-my-pi/docs/`（工具面与 MCP 配置面）。
 - Verify：专家加入后系统提示词/工具面变化可观察；探活状态真实反映端点可用性。
-- Depends on：S1c、S1f（中心页直接建在新组件体系上；专家入会话接输入框「+」菜单，F-CHAT-11 的专家项随本阶段上线）。
+- Depends on：S1c、S1f（中心页直接建在新组件体系上；专家入会话接输入框「+」菜单，即 F-CHAT-11c）。
 - Review attention：mechanical 为主（UI+配置透传；MCP 配置注入 omp 需一眼白盒）。
 - 注：PLAN §4 阶段表未给这四个 tab 安家，本阶段是对 PLAN 的补全（不矛盾）。
 
@@ -257,7 +257,7 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 - Outcome：按 ADR-0013 重建已交付的全部页面（登录、外壳、`/`、`/files`、`/settings`）。会话面经 `useExternalStoreRuntime` 接现有
   REST + SSE（消息/思考/步骤/审批/停止/重新生成/fork/会话列表操作），输入框带能力栏中后端已有的两项（工作空间选择、技能/命令选择）；
   文件变更卡、产物卡与产物面板、对话内搜索、场景、置顶与分组、项目配置入口在新组件体系内重做。**不新增后端能力**（审批与步骤的关联键除外，见 grill 种子）。
-- 覆盖：F-UI-7、F-UI-8、F-CHAT-11（空间选择与技能/命令两项）。
+- 覆盖：F-UI-7、F-UI-8、F-CHAT-11a。
 - 必读增量：ADR-0013（含试验结论与未覆盖项）；assistant-ui 文档 ExternalStoreRuntime / Thread / ThreadList / Attachment。
 - Verify：`make check` + `make ui-walk`（视口矩阵无横向溢出、无 console error）+ 功能验收清单签收；真实端点走一轮含审批的回合；
   断线/刷新续流（F-CHAT-8）在新会话面上复测。
@@ -268,9 +268,9 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
   #824/#825 的取舍；按 demo 写死 DOM 的规格条款的改写范围；包体积与代码分割。
 
 **S1g 输入框能力后端（权限档 + 工作空间附件）**
-- Outcome：会话权限档（档位集合、默认档、与宿主 overlay 钉住的审批键的关系、审计）与工作空间附件上传（整文件写入会话空间，过沙箱 resolve、
+- Outcome：会话权限设置（语义待 grill：暂按审批档位理解——档位集合、默认档、与宿主 overlay 钉住的审批键的关系、审计）与工作空间附件上传（整文件写入会话空间，过沙箱 resolve、
   大小/类型上限、审计）；输入框能力栏的权限设置与「+」上传文件两项随之上线。
-- 覆盖：F-CHAT-12、F-CHAT-5a、F-CHAT-11（权限设置与上传文件两项）。
+- 覆盖：F-CHAT-12、F-CHAT-5a、F-CHAT-11b。
 - 必读增量：ADR-0012（overlay 钉住的审批键）；tool-approval 规格；CONTEXT.md 不变量 3（一切路径过 resolve）。
 - Verify：各档位下审批是否出现与规格一致（真 omp）；上传的越界/超限用例全拒且入审计；双账号互不可见。
 - Depends on：S1f。
@@ -347,10 +347,10 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 | S1a | F-FILE-1/2/4/5 |
 | S1b | F-FILE-3 |
 | S1c | F-CHAT-1/2/7/9/10、F-OPS-1 |
-| S1d | F-CTR-EXP/SKL/CON/MOD |
+| S1d | F-CTR-EXP/SKL/CON/MOD、F-CHAT-11c |
 | S1e | F-UI-1/2/3/4/5/6（呈现约定由 S1f 的 F-UI-7/8 取代）|
-| S1f | F-UI-7/8、F-CHAT-11（空间选择、技能/命令；专家项随 S1d，权限与上传项随 S1g）|
-| S1g | F-CHAT-12、F-CHAT-5a |
+| S1f | F-UI-7/8、F-CHAT-11a |
+| S1g | F-CHAT-12、F-CHAT-5a、F-CHAT-11b |
 | S2a | F-CTR-KB1/KB2 |
 | S2b | F-CTR-KB3 |
 | S2c | F-CHAT-4/5b、F-CTR-KB4 |
@@ -360,7 +360,6 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 | S4b | F-OPS-4 |
 
 无孤儿 ID；F-CTR-PERM/AUD 的底层事件自 S1a 起持续产生，S3b 只补呈现完整面。
-F-CHAT-11 是「每 ID 恰好属于一个阶段」的唯一例外：能力栏本体归 S1f，栏内各项随其后端所在阶段（S1g、S1d）上线。
 
 ## Risks
 
