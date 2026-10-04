@@ -9,9 +9,11 @@
 按阶段交付 `PLAN.md` §1 定义的内网多用户 AI Agent Web 服务；demo
 （`resource/workbuddy-live-demo.html`）能点出来的行为全部等价可用。
 
+> 2026-10-04 修订（ADR-0013）：demo 只作功能清单来源，不再约束界面呈现；前端改用 assistant-ui + shadcn/Tailwind 重建（S1f）。
+
 ## Scope
 
-- 功能实现清单（稳定 ID，源自 demo/PLAN §3）与 14 个实现子阶段的任务包、依赖、验收。
+- 功能实现清单（稳定 ID，源自 demo/PLAN §3）与 16 个实现子阶段的任务包、依赖、验收。
 - AGENTS.md 两个 READINESS GAP（HTTP smoke / UI 走查）的接入排期（S0a）。
 
 ## Not In Scope
@@ -89,12 +91,14 @@
 | F-CHAT-2 | 会话分组侧栏（项目/工作空间/专家团），会话按账号隔离 |
 | F-CHAT-3 | 流式对话 + 执行步骤卡片 |
 | F-CHAT-4 | agentic 检索卡（改写→召回→判定→二轮→仅切片入上下文） |
-| F-CHAT-5 | 附件双语义：知识库（切片）vs 工作空间（整文件） |
+| F-CHAT-5 | 附件双语义：知识库（切片）vs 工作空间（整文件）。2026-10-04 拆为 5a 工作空间附件（整文件上传进会话空间）与 5b 知识库附件（切片） |
 | F-CHAT-6 | 会话落盘、resume/fork |
 | F-CHAT-7 | 生成中断/继续 |
 | F-CHAT-8 | 断线/刷新续流（Last-Event-ID 回放） |
 | F-CHAT-9 | 回合产物呈现：逐回复产物卡 / 文件变更卡 + 顶栏产物面板（同一特性、同批交付；2026-09-26 #403 拍板） |
 | F-CHAT-10 | 深度思考折叠：上游 reasoning 以独立事件流式呈现，模型无 reasoning 时不渲染（2026-09-26 #404 拍板） |
+| F-CHAT-11 | 输入框能力栏（2026-10-04，ADR-0013）：任何会话状态下可达的工作空间选择、权限设置、「+」菜单（技能/命令、上传文件、专家）；各项随其后端上线 |
+| F-CHAT-12 | 会话权限档（2026-10-04，ADR-0013）：用户在输入框选择本会话的工具审批档位，服务端按档位决定哪些工具调用需要审批 |
 
 ### 文件页 `/files`
 | ID | 行为 |
@@ -142,18 +146,22 @@
 | F-UI-3 | 会话页对齐（已交付范围）：欢迎页 hero + 最佳实践卡 + 免责声明、composer 卡片形态（未交付控件不渲染）、用户/助手消息形态、Markdown 正文 + 流式光标、步骤卡结构化摘要（不倒 JSON）、回到最新、消息操作条（复制） |
 | F-UI-4 | 文件页对齐：树图标/大小/修改时间、根行形态、切换器弹层形态、预览头与不支持态/空目录文案、逻辑路径展示（不暴露服务器绝对路径） |
 | F-UI-5 | 登录页与设置页对齐：登录卡结构（自有品牌位 + 副标题 + 自动聚焦）、外观分段控件 + 当前生效卡、关于卡图标 |
+| F-UI-7 | 前端重建（2026-10-04，ADR-0013）：全部页面改用 assistant-ui（会话面）+ shadcn/ui + Tailwind；现有 token 映射进 Tailwind 主题；`web/src/ui` 自有基元退役。取代 F-UI-1–F-UI-5 的呈现约定 |
+| F-UI-8 | 功能验收 harness（2026-10-04，ADR-0013）：按功能的验收清单取代 demo 逐组件清单与 demo-vs-app 截图对；`make ui-walk` 视口矩阵与 error oracle 保留。取代 F-UI-6 |
 | F-UI-6 | demo 一致性验收 harness：Playwright 视口矩阵（1440/1024/390 × 亮/暗）、逐页 demo-vs-app 截图对产物（`make ui-shots`，人工验收输入）、肉眼可辨夹具（≥128px 图片 + 多段 md + 多行 csv）、逐页逐组件验收清单文档 |
 
-## Phases（14 子阶段）
+## Phases（16 子阶段）
 
 通用契约：每阶段 Verify 至少含 `make check` 绿 + 阶段专属验收；改动触碰 AGENTS.md
 Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有阶段共有：`AGENTS.md`、
 `CONTEXT.md`、`docs/architecture/system.md` §3–§6——下表只列增量。
 
-前端通用契约（2026-09-24 增补）：
-- 凡触碰 `web/` 的阶段：Verify 必含该阶段页面的 demo-vs-app 截图对（`make ui-shots`）与逐组件验收清单签收；
+前端通用契约（2026-09-24 增补；2026-10-04 按 ADR-0013 修订）：
+- 凡触碰 `web/` 的阶段：Verify 必含该阶段页面的功能验收清单签收与 `make ui-walk`；
   Stage 5 对 web 任务的 `Suggested fixture level` 不得只以 jsdom/mock 收口，涉及呈现的任务至少 `expanded`（真实浏览器 + 视口矩阵）。
-- demo 中无后端契约支撑的控件（麦克风、上传、审批、召唤/安装、连通测试等）在其后端阶段落地前**不渲染**；不得以禁用态/占位按钮"先摆上"。
+  S1f 关闭前已交付的阶段沿用原约定（demo-vs-app 截图对 + 逐组件清单），S1f 起不再产出截图对。
+- 新页面与新组件一律用 shadcn/ui + Tailwind（会话面用 assistant-ui），不再新增 `web/src/ui` 基元，也不再对照 demo 的布局与文案。
+- 无后端契约支撑的控件在其后端落地前**不渲染**；不得以禁用态/占位按钮"先摆上"。需要某个控件时，把它的后端排到同一批。
 - 明确不做（2026-09-24 S1e grill 拍板，不列入任何阶段、不进验收清单）：麦克风语音输入、⌘K 命令面板、消息赞/踩、导出对话记录、通知铃铛；demo 快捷登录卡仅在 `dev-stub` 认证适配器下渲染（生产 OIDC 无此面）。
   2026-09-26 追加：追问建议 chip（无数据生成契约；omp `followUp` 是排队语义，不作来源，#404）；顶栏「更多」菜单（其 `切换主题`/`设置` 已由设置页与侧栏覆盖，`历史提问` 如需另立项，#403）；产物卡「在编辑器中打开」（本仓无内嵌编辑器，#403）。
 
@@ -241,9 +249,32 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 - 覆盖：F-CTR-EXP、F-CTR-SKL、F-CTR-CON、F-CTR-MOD。
 - 必读增量：demo `/center` 对应 tab；`resource/oh-my-pi/docs/`（工具面与 MCP 配置面）。
 - Verify：专家加入后系统提示词/工具面变化可观察；探活状态真实反映端点可用性。
-- Depends on：S1c。
+- Depends on：S1c、S1f（中心页直接建在新组件体系上；专家入会话接输入框「+」菜单，F-CHAT-11 的专家项随本阶段上线）。
 - Review attention：mechanical 为主（UI+配置透传；MCP 配置注入 omp 需一眼白盒）。
 - 注：PLAN §4 阶段表未给这四个 tab 安家，本阶段是对 PLAN 的补全（不矛盾）。
+
+**S1f 前端重建（assistant-ui + shadcn/Tailwind）**
+- Outcome：按 ADR-0013 重建已交付的全部页面（登录、外壳、`/`、`/files`、`/settings`）。会话面经 `useExternalStoreRuntime` 接现有
+  REST + SSE（消息/思考/步骤/审批/停止/重新生成/fork/会话列表操作），输入框带能力栏中后端已有的两项（工作空间选择、技能/命令选择）；
+  文件变更卡、产物卡与产物面板、对话内搜索、场景、置顶与分组、项目配置入口在新组件体系内重做。**不新增后端能力**（审批与步骤的关联键除外，见 grill 种子）。
+- 覆盖：F-UI-7、F-UI-8、F-CHAT-11（空间选择与技能/命令两项）。
+- 必读增量：ADR-0013（含试验结论与未覆盖项）；assistant-ui 文档 ExternalStoreRuntime / Thread / ThreadList / Attachment。
+- Verify：`make check` + `make ui-walk`（视口矩阵无横向溢出、无 console error）+ 功能验收清单签收；真实端点走一轮含审批的回合；
+  断线/刷新续流（F-CHAT-8）在新会话面上复测。
+- Depends on：S1c。
+- Review attention：decision-dense（组件分层、token 映射、SSE 接入方式一次定调）。
+- grill 种子：宽度已触及 Risks「切片过宽」，预期切为多个 change——地基（Tailwind/shadcn/主题/外壳/登录/设置）、会话面、文件页、
+  验收 harness 与规格改写；审批与步骤的关联放服务端契约还是界面侧；空会话的创建时机（首次发送时创建，解决 #826 与空间选择）；
+  #824/#825 的取舍；按 demo 写死 DOM 的规格条款的改写范围；包体积与代码分割。
+
+**S1g 输入框能力后端（权限档 + 工作空间附件）**
+- Outcome：会话权限档（档位集合、默认档、与宿主 overlay 钉住的审批键的关系、审计）与工作空间附件上传（整文件写入会话空间，过沙箱 resolve、
+  大小/类型上限、审计）；输入框能力栏的权限设置与「+」上传文件两项随之上线。
+- 覆盖：F-CHAT-12、F-CHAT-5a、F-CHAT-11（权限设置与上传文件两项）。
+- 必读增量：ADR-0012（overlay 钉住的审批键）；tool-approval 规格；CONTEXT.md 不变量 3（一切路径过 resolve）。
+- Verify：各档位下审批是否出现与规格一致（真 omp）；上传的越界/超限用例全拒且入审计；双账号互不可见。
+- Depends on：S1f。
+- Review attention：decision-dense（Critical Path：审批策略放宽与写入沙箱）。
 
 ### 里程碑 P2 — 知识库
 
@@ -265,7 +296,7 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 
 **S2c 会话接入与可见范围**
 - Outcome：`host_tool_call`→app-server `kb` 模块转发（先过滤 kb_ids 再调 kbservice）；附件双语义；可见范围四档模型落库（部门/项目组字段就位，真实组数据 S3a 接入）；共享只读+跨账号检索审计。**P2 里程碑验收：会话内 KB 引用给出带出处切片，共享检索入审计。**
-- 覆盖：F-CHAT-4、F-CHAT-5、F-CTR-KB4。
+- 覆盖：F-CHAT-4、F-CHAT-5b、F-CTR-KB4。
 - 必读增量：system.md §6.1 时序图；CONTEXT.md 不变量 1、2、4。
 - Verify：整篇文档绝不入上下文（不变量 2 用例）；无权 kb_id 检索被过滤且不可探测。
 - Depends on：S2b、S1c。
@@ -317,16 +348,19 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 | S1b | F-FILE-3 |
 | S1c | F-CHAT-1/2/7/9/10、F-OPS-1 |
 | S1d | F-CTR-EXP/SKL/CON/MOD |
-| S1e | F-UI-1/2/3/4/5/6 |
+| S1e | F-UI-1/2/3/4/5/6（呈现约定由 S1f 的 F-UI-7/8 取代）|
+| S1f | F-UI-7/8、F-CHAT-11（空间选择、技能/命令；专家项随 S1d，权限与上传项随 S1g）|
+| S1g | F-CHAT-12、F-CHAT-5a |
 | S2a | F-CTR-KB1/KB2 |
 | S2b | F-CTR-KB3 |
-| S2c | F-CHAT-4/5、F-CTR-KB4 |
+| S2c | F-CHAT-4/5b、F-CTR-KB4 |
 | S3a | F-SET-2、F-CTR-ACC |
 | S3b | F-CTR-PERM、F-CTR-AUD |
 | S4a | F-OPS-3 |
 | S4b | F-OPS-4 |
 
 无孤儿 ID；F-CTR-PERM/AUD 的底层事件自 S1a 起持续产生，S3b 只补呈现完整面。
+F-CHAT-11 是「每 ID 恰好属于一个阶段」的唯一例外：能力栏本体归 S1f，栏内各项随其后端所在阶段（S1g、S1d）上线。
 
 ## Risks
 
@@ -344,6 +378,10 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 - S4a：减肥二进制回归不过即回官方全量二进制，部署包两者可切。
 
 ## Next Step
+
+> 2026-10-04 更新（ADR-0013）。S1c 的实现已全部合入；其 demo 逐组件签收（25 项待签）不再进行。
+> **主线改为 S1f**：对其跑 `/stage-change-pipeline`，随后 S1g，再回到 S1d。S1b、S2a 不依赖前端，仍可并行。
+> #824、#825、#826 并入 S1f 的设计，不按旧界面单独修。以下为 2026-09-26 的原记录。
 
 > 2026-09-26 更新。已关闭：S0a、S0b（#81）、S1a（#111）、S1e（#274），账本见 `docs/stage-pipeline-log.jsonl`。
 
