@@ -144,4 +144,20 @@ describe("高亮与关闭的归约 (M6, M7, M9, M10)", () => {
       dismissed: false,
     });
   });
+
+  it("a change of the catalogue returns to the first option and keeps the draft and the dismissal", () => {
+    expect(reduce({ draft: "/", index: 2, dismissed: false }, { type: "catalogue" })).toEqual({
+      draft: "/",
+      index: 0,
+      dismissed: false,
+    });
+    expect(reduce({ draft: "/t", index: 2, dismissed: true }, { type: "catalogue" })).toEqual({
+      draft: "/t",
+      index: 0,
+      dismissed: true,
+    });
+
+    const first: SlashMenuState = { draft: "/", index: 0, dismissed: true };
+    expect(reduce(first, { type: "catalogue" })).toBe(first);
+  });
 });

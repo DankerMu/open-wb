@@ -1,6 +1,7 @@
 /**
  * Issue 814 候选面板按工作空间取目录 (openspec/changes/project-config-surface, chat-web「会话页」
- * Slash candidates): K1–K4. Seams: the jsdom chat page inside the real shell over a stubbed `fetch`
+ * Slash candidates): K1–K4, and K5 切换工作空间后高亮回到首项
+ * (openspec/changes/slash-highlight-workspace-reset). Seams: the jsdom chat page inside the real shell over a stubbed `fetch`
  * (the real `createApiClient`) for the sessions, the footer picker and the routes, and
  * `useSlashMenu` beside a bare `Composer` for the timing of one catalogue per workspace id.
  * Expected values are literals from the spec delta.
@@ -20,12 +21,14 @@ import {
   commandsOf,
   composerReady,
   Harness,
+  highlighted,
   LABELS,
   labels,
   optionOf,
   panel,
   press,
   project,
+  selection,
   skill,
   slashMenuFixture,
   TODO,
@@ -202,6 +205,52 @@ describe("候选面板按工作空间取目录 (K1, K2)", () => {
     expect(composer().value).toBe("/");
     expect(panel()).toBeNull();
     expect(paths(fetchMock)).toEqual(requests);
+  });
+});
+
+describe("切换工作空间后高亮回到首项 (K5)", () => {
+  /** The welcome state on `/` without a workspace, the third of its three options highlighted. */
+  async function thirdHighlighted() {
+    renderChatPage("/", routes({ [COMMANDS]: catalogue(), [commandsOf(A)]: catalogue(FIVE) }));
+    await composerReady();
+    await type("/");
+    press("ArrowDown");
+    press("ArrowDown");
+    expect([labels(), highlighted()]).toEqual([LABELS, "weekly-report"]);
+  }
+
+  /** Picks workspace A in the composer footer and lets its catalogue arrive. */
+  async function switchToA() {
+    await pickOption(PROJECT_A_OPTION);
+    await quiesce();
+    expect(composer().value).toBe("/");
+  }
+
+  it("K5 picking workspace A under the same draft highlights A's first option, and Enter picks it", async () => {
+    await thirdHighlighted();
+
+    await switchToA();
+
+    expect(labels()).toEqual(FIVE_LABELS);
+    expect(highlighted()).toBe("整理上下文");
+    expect(selection()).toEqual(["true", "false", "false", "false", "false"]);
+    expect(press("Enter")).toBe(false);
+    expect(composer().value).toBe("/compact ");
+  });
+
+  it("K5 a panel dismissed by Esc stays closed over the switch and returns on the first option once the draft changes", async () => {
+    await thirdHighlighted();
+    expect(press("Escape")).toBe(false);
+    expect(panel()).toBeNull();
+
+    await switchToA();
+
+    expect(panel()).toBeNull();
+    await type("/s");
+    await type("/");
+    expect(labels()).toEqual(FIVE_LABELS);
+    expect(highlighted()).toBe("整理上下文");
+    expect(selection()).toEqual(["true", "false", "false", "false", "false"]);
   });
 });
 

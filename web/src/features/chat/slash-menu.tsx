@@ -115,9 +115,10 @@ function SlashMenu({
  * flight or has succeeded. Only the catalogue of the current workspace id is ever shown; the others
  * stay held. A failed call is silent and retried only at the next such moment, not on further
  * typing. The calls are aborted only on unmount or on a change of the client, not when the panel
- * stops being wanted or the workspace id changes. The highlight and the dismissal follow the draft
- * (reset during render, as in conversation-search.tsx); the highlighted option is scrolled into
- * view from the key handler.
+ * stops being wanted or the workspace id changes. The highlight and the dismissal follow the draft,
+ * and the highlight alone also follows the workspace id: a change of it returns to the first option
+ * and leaves a dismissal in place (both reset during render, as in conversation-search.tsx); the
+ * highlighted option is scrolled into view from the key handler.
  */
 export function useSlashMenu(
   client: ApiClient,
@@ -132,6 +133,8 @@ export function useSlashMenu(
     byWorkspace: ReadonlyMap<WorkspaceKey, Command[]>;
   } | null>(null);
   const [stored, setState] = useState(() => initialState(draft));
+  /** The workspace id the stored highlight belongs to. */
+  const [shown, setShown] = useState(workspaceId);
   /**
    * The catalogue calls of the current client by workspace id, each kept once it succeeded and
    * dropped when it failed.
@@ -176,7 +179,11 @@ export function useSlashMenu(
     [client],
   );
 
-  const state = reduce(stored, { type: "draft", draft });
+  let state = reduce(stored, { type: "draft", draft });
+  if (shown !== workspaceId) {
+    setShown(workspaceId);
+    state = reduce(state, { type: "catalogue" });
+  }
   if (state !== stored) setState(state);
 
   const commands =
@@ -184,8 +191,8 @@ export function useSlashMenu(
       ? catalogues.byWorkspace.get(wanted)
       : undefined;
   const matches = commands !== undefined && !state.dismissed ? filter(commands, draft) : [];
-  // The index outlives a catalogue that got shorter under the same draft (another client or
-  // workspace): 0 then.
+  // The index outlives a catalogue that got shorter under the same draft and workspace id (another
+  // client): 0 then.
   const active = state.index < matches.length ? state.index : 0;
   const current = matches[active];
   if (current === undefined) return HIDDEN;
