@@ -139,7 +139,7 @@ async function walkProductionOrigin(
     await walkSidebarCollapse(page);
     await walkCollapsedLogoutFailure(page);
   }
-  await switchTheme(page, project, initialBackground);
+  await switchTheme(page, project, initialBackground, PRODUCTION_SERVICE_NAME);
 
   // reduce 下打开侧栏与用户菜单，读完拷入组件的动画/过渡后恢复（ui-primitives「全局 reduced-motion 规则」）。
   await page.emulateMedia({ reducedMotion: "reduce" });

@@ -23,7 +23,7 @@ import {
   serviceInfo,
   unauthorizedResponseCases,
 } from "./support.js";
-import { blockBody, readRepoFile, stripComments } from "./ui-support.js";
+import { readRepoFile } from "./ui-support.js";
 
 afterEach(() => {
   resetSettingsTestState();
@@ -232,6 +232,10 @@ function ariaChecked(name: string) {
   return screen.getByRole("radio", { name }).getAttribute("aria-checked");
 }
 
+/** 设置卡里的一行与一张卡：页面用 `data-slot` 标出，不按类名定位。 */
+const ROW = '[data-slot="settings-row"]';
+const CARD = '[data-slot="card"]';
+
 async function renderSettings() {
   vi.stubGlobal("fetch", createAuthenticatedFetch());
   renderApp("/settings");
@@ -245,7 +249,6 @@ describe("settings appearance card", () => {
     const appearance = screen.getByRole("region", { name: "外观" });
     expect(within(appearance).getAllByRole("radiogroup")).toHaveLength(1);
     const group = within(appearance).getByRole("radiogroup", { name: "主题" });
-    expect(group.className).toBe("ui-seg");
     const radios = within(group).getAllByRole("radio");
     expect(radios.map((item) => item.textContent)).toEqual(["浅色", "深色", "跟随系统"]);
     expect(radios.map((item) => item.tagName)).toEqual(["BUTTON", "BUTTON", "BUTTON"]);
@@ -257,28 +260,32 @@ describe("settings appearance card", () => {
     for (const legacy of ['input[type="radio"]', "fieldset", ".theme-swatch"]) {
       expect(appearance.querySelector(legacy), legacy).toBeNull();
     }
-    const titles = [...appearance.querySelectorAll(".settings-row-title")];
-    expect(titles.map((title) => title.textContent)).toEqual(["主题", "当前生效"]);
+    const titles = ["主题", "当前生效"].map((title) =>
+      within(appearance).getByText(title, { exact: true }),
+    );
+    expect(appearance.querySelectorAll(ROW)).toHaveLength(2);
     expect(
       within(appearance).getByText("浅色 / 深色 / 跟随系统 · 即时生效并持久保存", { exact: true }),
     ).toBeTruthy();
 
     const headings = screen.getAllByRole("heading", { level: 2 });
     expect(headings.map((heading) => heading.textContent)).toEqual(["外观", "关于"]);
-    expect(headings.map((heading) => heading.closest(".settings-card"))).toEqual([null, null]);
+    expect(headings.map((heading) => heading.closest(CARD))).toEqual([null, null]);
 
-    const themeRow = titles[0]?.closest(".settings-row");
+    const themeRow = titles[0]?.closest(ROW);
     expect(themeRow).toBeTruthy();
-    expect(group.closest(".settings-row")).toBe(themeRow);
-    const control = group.closest(".settings-row-control");
-    const text = themeRow?.querySelector(".settings-row-text");
-    expect(control).toBeTruthy();
-    expect(text?.compareDocumentPosition(control as Element)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-    const card = themeRow?.closest(".settings-card");
+    expect(group.closest(ROW)).toBe(themeRow);
+    // 左侧标题 + 说明在前，右侧控件在后，且控件不包在文字块里。
+    expect(titles[0]?.compareDocumentPosition(group)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(
+      within(themeRow as HTMLElement)
+        .getByText("浅色 / 深色 / 跟随系统 · 即时生效并持久保存", { exact: true })
+        .compareDocumentPosition(group),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    const card = themeRow?.closest(CARD);
     expect(card).toBeTruthy();
-    expect(titles[1]?.closest(".settings-row")?.closest(".settings-card")).toBe(card);
+    expect(titles[1]?.closest(ROW)).not.toBe(themeRow);
+    expect(titles[1]?.closest(ROW)?.closest(CARD)).toBe(card);
   });
 
   it("S2 keeps the visible and accessible current-theme text in step with the selection", async () => {
@@ -286,14 +293,15 @@ describe("settings appearance card", () => {
     await renderSettings();
 
     const visible = screen.getByText("浅色 · 持久保存于 localStorage", { exact: true });
-    const row = visible.closest(".settings-row") as HTMLElement;
+    const row = visible.closest(ROW) as HTMLElement;
     expect(visible.getAttribute("aria-hidden")).toBe("true");
     expect(within(row).getByText("当前生效", { exact: true }).getAttribute("aria-hidden")).toBe(
       "true",
     );
     const accessible = screen.getByText("当前生效：浅色", { exact: true });
-    expect(accessible.className).toBe("ui-sr-only");
-    expect(accessible.closest(".settings-row")).toBe(row);
+    expect(accessible.getAttribute("aria-hidden")).toBeNull();
+    expect(accessible.closest('[aria-hidden="true"]')).toBeNull();
+    expect(accessible.closest(ROW)).toBe(row);
 
     fireEvent.click(screen.getByRole("radio", { name: "深色" }));
 
@@ -357,19 +365,17 @@ describe("settings about card", () => {
     const mark = within(about).getByRole("img", { name: "WorkBuddy" });
     expect(mark.tagName).toBe("svg");
     expect(about.querySelector("img")).toBeNull();
-    const titles = [...about.querySelectorAll(".settings-row-title")];
-    expect(titles.map((title) => title.textContent)).toEqual([serviceInfo.name]);
-    expect(titles[0]).toBe(name);
+    expect(about.querySelectorAll(ROW)).toHaveLength(1);
     const version = within(about).getByText(`版本 ${serviceInfo.version}`, { exact: true });
     for (const hidden of [serviceInfo.auth.provider, "5.3.11", "Live Demo"]) {
       expect(about.textContent).not.toContain(hidden);
     }
-    const row = mark.closest(".settings-row");
+    const row = mark.closest(ROW);
     expect(row).toBeTruthy();
-    expect(name.closest(".settings-row")).toBe(row);
-    expect(version.closest(".settings-row")).toBe(row);
-    const text = row?.querySelector(".settings-row-text");
-    expect(mark.compareDocumentPosition(text as Element)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(name.closest(ROW)).toBe(row);
+    expect(version.closest(ROW)).toBe(row);
+    expect(mark.compareDocumentPosition(name)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(name.compareDocumentPosition(version)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it("S5 keeps BrandMark while loading", async () => {
@@ -394,51 +400,8 @@ describe("settings about card", () => {
     const about = screen.getByRole("region", { name: "关于" });
     expect((await within(about).findByRole("alert")).textContent).toBe("请求失败，请稍后重试");
     expect(within(about).getByRole("img", { name: "WorkBuddy" })).toBeTruthy();
-    expect(about.querySelector(".settings-row-title")).toBeNull();
+    expect(within(about).queryByText(serviceInfo.name, { exact: true })).toBeNull();
     expect(about.textContent).not.toContain("版本");
-  });
-});
-
-describe("settings static contract", () => {
-  it("S6 page uses the primitives and drops the legacy radio markup", () => {
-    const page = readRepoFile("web/src/features/settings/page.tsx");
-    for (const token of ["SegmentedControl", "BrandMark", "ui-sr-only"]) {
-      expect(page).toContain(token);
-    }
-    for (const legacy of ['type="radio"', "fieldset", "theme-swatch", "@radix-ui"]) {
-      expect(page).not.toContain(legacy);
-    }
-  });
-
-  it("S6 moves the settings rules out of the global stylesheet into settings.css", () => {
-    const styles = readRepoFile("web/src/styles/legacy.css");
-    for (const legacy of [
-      ".theme-option",
-      ".theme-swatch",
-      ".service-identity",
-      ".settings-card",
-      ".settings-page",
-    ]) {
-      expect(styles).not.toContain(legacy);
-    }
-    expect(styles).toContain('@import "../features/settings/settings.css";');
-
-    const settings = readRepoFile("web/src/features/settings/settings.css");
-    expect(settings).toContain("demo.html:818-824");
-    expect(settings).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
-    const rules = stripComments(settings);
-    expect(blockBody(rules, /@media \(max-width: 760px\)/)).toContain("flex-wrap: wrap");
-    expect(blockBody(rules, /^\.settings-row \{/m)).toContain("display: flex");
-  });
-
-  it("S6 keeps .ui-sr-only visually hidden without removing its geometry", () => {
-    const rule = blockBody(stripComments(readRepoFile("web/src/ui/ui.css")), /\.ui-sr-only \{/);
-    for (const declaration of ["position: absolute", "width: 1px", "clip: rect(0 0 0 0)"]) {
-      expect(rule).toContain(declaration);
-    }
-    for (const hidden of ["display: none", "visibility: hidden"]) {
-      expect(rule).not.toContain(hidden);
-    }
   });
 });
 

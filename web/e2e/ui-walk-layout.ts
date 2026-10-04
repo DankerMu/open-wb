@@ -524,10 +524,11 @@ export async function switchTheme(
   page: Page,
   project: WalkProject,
   initialBackground: string,
+  serviceName: string,
 ): Promise<void> {
   const choice = THEME_CHOICE[project];
   await expectBodyColors(page, choice.value === "dark" ? "light" : "dark");
-  await expectReducedMotionThemeSwitch(page, project, choice);
+  await expectReducedMotionThemeSwitch(page, project, choice, serviceName);
   await page.getByRole("radio", { name: choice.label, exact: true }).check();
   await expectTheme(page, choice, initialBackground);
   await page.reload();
@@ -547,19 +548,34 @@ type SwitchProbe = {
 
 // #423：reduce 下点选主题后同一任务内同步读取——继承色文字须已是目标主题色、且无过渡在跑。
 // 点击与读取在同一次 evaluate 里，中间不让出帧（locator.click 后再 evaluate 会漏掉过渡）。
+// 两张卡的标题按角色、三个行标题按文本先解析成元素句柄，再随点击一起传进 evaluate。
 async function expectReducedMotionThemeSwitch(
   page: Page,
   project: WalkProject,
   choice: ThemeChoice,
+  serviceName: string,
 ): Promise<void> {
   await page.emulateMedia({ reducedMotion: "reduce" });
+  const main = page.getByRole("main");
+  // 三个行标题：主题、当前生效、关于卡的服务名（整串匹配，不含说明行）。
+  const titles = await Promise.all(
+    ["主题", "当前生效", serviceName].map((text) =>
+      main.getByText(text, { exact: true }).elementHandles(),
+    ),
+  );
+  const targets = {
+    headings: await main.getByRole("heading", { level: 2 }).elementHandles(),
+    titles: titles.flat(),
+  };
   const radio = page.getByRole("radio", { name: choice.label, exact: true });
-  const probe: SwitchProbe = await radio.evaluate((element) => {
-    const read = (selector: string) =>
-      [...document.querySelectorAll(selector)].map((el) => ({
-        color: getComputedStyle(el).color,
-        animations: el.getAnimations().length,
-      }));
+  const probe: SwitchProbe = await radio.evaluate((element, { headings, titles }) => {
+    const read = (nodes: Node[]) =>
+      nodes
+        .filter((node) => node instanceof Element)
+        .map((el) => ({
+          color: getComputedStyle(el).color,
+          animations: el.getAnimations().length,
+        }));
     const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
     const before = document.documentElement.dataset.theme;
     (element as HTMLElement).click();
@@ -567,11 +583,11 @@ async function expectReducedMotionThemeSwitch(
       reduce,
       before,
       after: document.documentElement.dataset.theme,
-      headings: read(".settings-sec-h"),
-      titles: read(".settings-row-title"),
-      links: read('nav[aria-label="主导航"] a'),
+      headings: read(headings),
+      titles: read(titles),
+      links: read([...document.querySelectorAll('nav[aria-label="主导航"] a')]),
     };
-  });
+  }, targets);
   await page.emulateMedia({ reducedMotion: "no-preference" });
   const detail = JSON.stringify(probe);
   expect(probe.reduce, "prefers-reduced-motion: reduce is emulated").toBe(true);
@@ -579,8 +595,8 @@ async function expectReducedMotionThemeSwitch(
     choice.value,
   );
   expect(probe.after, `theme switches within the click task: ${detail}`).toBe(choice.value);
-  expect(probe.headings, ".settings-sec-h count").toHaveLength(2);
-  expect(probe.titles, ".settings-row-title count").toHaveLength(3);
+  expect(probe.headings, "设置卡标题（level-2 heading）count").toHaveLength(2);
+  expect(probe.titles, "行标题（主题 / 当前生效 / 服务名）count").toHaveLength(3);
   if (project === "desktop-light")
     expect(probe.links.length, "主导航 link count").toBeGreaterThan(0);
   const text = [...probe.headings, ...probe.titles];

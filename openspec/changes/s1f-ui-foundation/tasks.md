@@ -7,8 +7,9 @@
 > - 「行为不变」的证据是既有行为断言（按角色/可访问名）原样通过；只允许删除或改写读源码、读 `.css`、按旧类名选择的断言，不得为通过而放宽行为断言。
 > - 不改 `web/src/features/chat/**`、`web/src/features/files/**` 的实现；`web/src/ui/**` 冻结（唯一例外：组 3 在 `index.ts` 加 `useEscapeFallback` 导出）；不改任何 `server/**`。
 >   会话页/文件页的**测试**只在点名处改选择器或读取的文件。
-> - 拷入层只做五类修改：颜色字面量换主题变量、可见与 aria 文案中文化、Biome 格式化、`cn` 的导入归一到 `@/lib/utils`（registry 下发的是 `import { cn } from "cn"`；不装 `cn` 包）、
->   为本仓严格 TS 选项（如 `exactOptionalPropertyTypes`）做的纯类型适配（不改运行时行为）。
+> - 拷入层只做六类修改：颜色字面量换主题变量、可见与 aria 文案中文化、Biome 格式化、`cn` 的导入归一到 `@/lib/utils`（registry 下发的是 `import { cn } from "cn"`；不装 `cn` 包）、
+>   为本仓严格 TS 选项（如 `exactOptionalPropertyTypes`）做的纯类型适配（不改运行时行为）、
+>   让组件渲染被 registry 原文丢弃的调用方 `children`（只增不改，如 `radio-group` 的项）。
 > - size-guard：新写的应用层文件 ≤800 行；新测试写进新文件。
 
 ## 1a. ui-foundation — Tailwind 接入、层叠顺序与主题映射
@@ -86,10 +87,10 @@ Minimal mergeable slice: atomic - 表单与快捷登录卡共用同一提交锁�
 
 ## 5. spa-shell — 设置页重写
 
-- [ ] 5.1 拷入 `radio-group`；`features/settings/page.tsx` 按 design D9 重写；删除 `settings.css` 并从 `legacy.css` 去掉其 `@import`。
-- [ ] 5.2 测试：`settings-page`、`theme-provider`、`theme`、`prepaint-theme` 的行为断言原样通过（含 `getByRole("radiogroup", { name: "主题" })`）；新增「再点已选项不改变主题」用例；
+- [x] 5.1 拷入 `radio-group`；`features/settings/page.tsx` 按 design D9 重写；删除 `settings.css` 并从 `legacy.css` 去掉其 `@import`。
+- [x] 5.2 测试：`settings-page`、`theme-provider`、`theme`、`prepaint-theme` 的行为断言原样通过（含 `getByRole("radiogroup", { name: "主题" })`）；新增「再点已选项不改变主题」用例；
   读 `settings.css`/`ui.css`/源码的断言删除或改为行为断言；`web/e2e/ui-walk-layout.ts` 主题探针里 `.settings-sec-h`、`.settings-row-title` 改为角色/文本定位。
-- [ ] 5.3 守卫：把 `web/src/features/settings/**`、`web/src/features/theme/**` 加入已迁移区域清单。`functional-checklist.md` 设置节加行（主题三档即时生效与持久化、跟随系统、关于卡显示服务名与版本、读取失败提示），结论 `待签`。
+- [x] 5.3 守卫：把 `web/src/features/settings/**`、`web/src/features/theme/**` 加入已迁移区域清单。`functional-checklist.md` 设置节加行（主题三档即时生效与持久化、跟随系统、关于卡显示服务名与版本、读取失败提示），结论 `待签`。
 
 Suggested fixture level: compact - 单页、无新契约；主题切换的既有 jsdom 与 ui-walk 用例已覆盖行为
 Minimal mergeable slice: atomic - 两张卡在同一个文件、同一个 `.css`，单一验证路径。依赖：4（与组 3 共用 `ui-walk-layout.ts` 的同一探针函数，与 3/4 共用守卫清单与功能清单文件；串行避免冲突）。

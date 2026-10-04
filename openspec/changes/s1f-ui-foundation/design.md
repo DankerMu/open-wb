@@ -71,7 +71,7 @@
 - **全局 reduced-motion 块留在 `styles.css`、不入层**：它没有 `!important`，进了 `legacy` 层就压不住 utilities 层里 `tw-animate-css` 与 `duration-*` 设的动画时长。
   留在原文件也使 `ui-reduced-motion.test.ts`「`styles.css` 恰有一个全局块」的断言不用改。
 - Tailwind 的 `transition*` 工具类在 reduce 下由 `theme.css` 里一条未分层规则统一关掉：
-  `@media (prefers-reduced-motion: reduce) { [class*="transition"] { transition: none; } }`。不逐个给拷入组件加 `motion-reduce:`（那会超出「五类修改」）。
+  `@media (prefers-reduced-motion: reduce) { [class*="transition"] { transition: none; } }`。不逐个给拷入组件加 `motion-reduce:`（那会超出「六类修改」）。
   这条是「只有覆盖、没有声明」的 reduce 规则，现行 reduced-motion 静态守卫允许。
 - `tokens.css` 与 `theme.css` 只定义自定义属性与上述未分层规则，不入层（唯一例外：D3 的边框色基线在 `base` 层）。
 - preflight 会重置旧页面依赖浏览器默认值的地方（标题字号、列表符号、段落外边距等）。owner 接受过渡期的观感变化；功能由 `make ui-walk` 守住。
@@ -104,9 +104,10 @@
 - `web/components.json`：`style: "radix-nova"`、`rsc: false`、`tsx: true`、`tailwind.css: "src/styles.css"`、`cssVariables: true`、
   aliases `components: "@/components"`、`ui: "@/components/ui"`、`utils: "@/lib/utils"`、`iconLibrary: "lucide"`。
 - 拷入（`npx shadcn@latest add …`，只拷用到的）：本 change 预期 `button`、`input`、`label`、`card`、`dropdown-menu`、`alert-dialog`、`sheet`、`tooltip`、
-  `radio-group`、`separator`。拷入后只做五类修改：颜色字面量换主题变量（若有）、中文化可见文案与 aria 文案、Biome 格式化（含其 import 排序）、`cn` 的导入归一到 `@/lib/utils`
+  `radio-group`、`separator`。拷入后只做六类修改：颜色字面量换主题变量（若有）、中文化可见文案与 aria 文案、Biome 格式化（含其 import 排序）、`cn` 的导入归一到 `@/lib/utils`
   （`radix-nova` registry 现下发 `import { cn } from "cn"` 并让 CLI 安装 npm 包 `cn`；本仓不引入该依赖，每次 `shadcn add` 后卸掉它并改写导入——owner 2026-10-04 决定）、为本仓严格 TS 选项做的纯类型适配
-  （registry 原文在 `exactOptionalPropertyTypes` 下报错处，如 `dropdown-menu` 的 `checked={checked}` 改为条件展开；不改运行时行为——owner 2026-10-04 决定，#834）。
+  （registry 原文在 `exactOptionalPropertyTypes` 下报错处，如 `dropdown-menu` 的 `checked={checked}` 改为条件展开；不改运行时行为——owner 2026-10-04 决定，#834）、让组件渲染被 registry 原文丢弃的调用方 `children`
+  （`radio-group` 的 `RadioGroupItem` 原文只渲染自带的圆点指示器，选项文字放不进 `role="radio"` 的按钮；改为同时渲染 `children`，既有行为不变——owner 2026-10-04 决定，#836）。
   `web/src/lib/utils.ts` 提供 `cn`。`shadcn` 命令会改写 `styles.css`——以 D2/D3 的结构为准，命令写入的默认主题块不保留。
 - 侧栏不拷 shadcn 的 `sidebar` 整块：它自带 cookie 持久化、键盘快捷键与 768 断点，与现有契约（`workbuddy-sidebar` localStorage、760 断点、
   `data-collapsed`、槽位）不一致，改造成本高于用 `sheet` + `tooltip` + Tailwind 自己排。
