@@ -2,7 +2,10 @@
 # 守卫自证：每条自研 guard 必须能拒绝注入的违例，拒绝失败 = 幽灵执行。
 set -uo pipefail
 cd "$(dirname "$0")/.."
-tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+# 拷入层豁免探针：前缀规则只认仓库内相对路径（$tmp 路径命中不了），故写在仓库内；用后即删，trap 兜底。
+app_probe="web/src/features/_probe.tsx"
+ui_probe="web/src/components/ui/_probe.tsx"
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"; rm -f "$app_probe" "$ui_probe"' EXIT
 pass=0; fail=0
 expect_reject() { # $1 描述, 其余为命令
   local desc="$1"; shift
@@ -53,6 +56,16 @@ elif printf '%s\n' "$out" | grep -F "BLOCK" | grep -F "801" | grep -F "$tmp/over
 else
   echo "FAIL(缺少 BLOCK 计数/路径) $desc"; fail=$((fail+1))
 fi
+seq 801 | sed 's/^/\/\/ line /' > "$app_probe"
+seq 801 | sed 's/^/\/\/ line /' > "$ui_probe"
+expect_reject "行数守卫拒绝应用层 801 行"      bash scripts/size-guard.sh "$app_probe"
+expect_reject "行数守卫拒绝应用层 801 行(./ 前缀)" bash scripts/size-guard.sh "./$app_probe"
+expect_accept "行数守卫放行拷入层 801 行"      bash scripts/size-guard.sh "$ui_probe"
+expect_accept "行数守卫放行拷入层 801 行(./ 前缀)" bash scripts/size-guard.sh "./$ui_probe"
+expect_reject "行数守卫全量扫描拒绝应用层 801 行" bash scripts/size-guard.sh
+rm -f "$app_probe"
+expect_accept "行数守卫全量扫描放行拷入层 801 行" bash scripts/size-guard.sh
+rm -f "$ui_probe"
 expect_accept "行数守卫放行现有源码"          bash scripts/size-guard.sh
 expect_reject "commit-msg 拒绝非规范信息"     bash .githooks/commit-msg <(echo "随手改一下")
 expect_accept "commit-msg 放行规范信息"       bash .githooks/commit-msg <(echo "feat(server): 新增健康探针")

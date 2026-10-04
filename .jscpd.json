@@ -1,6 +1,13 @@
 {
   "threshold": 3,
   "pattern": "{server,web,kbservice}/**/*.{ts,tsx,py}",
-  "ignore": ["**/node_modules/**", "**/coverage/**", "**/dist/**", "**/.venv/**"],
+  "ignore": [
+    "**/node_modules/**",
+    "**/coverage/**",
+    "**/dist/**",
+    "**/.venv/**",
+    "web/src/components/ui/**",
+    "web/src/components/assistant-ui/**"
+  ],
   "reporters": ["consoleFull"]
 }

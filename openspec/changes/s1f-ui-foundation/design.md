@@ -41,6 +41,9 @@
 `web/vite.config.ts` 加 `resolve.alias`（`@` → `web/src`）；`web/vitest.config.ts` 复用同一 alias；knip 读 tsconfig `paths`，如仍报未解析则在 `knip.json` 的 web workspace 加 `paths`。
 既有带 `.js` 后缀的相对导入在 Bundler 下仍合法，不批量改写。拷入层与新写的应用层代码用 `@/` 导入，不带扩展名。
 `server` 的 tsconfig 不动（根 base 不改）。
+实现时补两项覆盖（#832）：`moduleDetection: "force"`——`module` 改 ESNext 后，无 import/export 的 `web/test/radix-platform.ts` 被判为脚本，对它的动态导入报 TS2306；
+`skipLibCheck: true`（只在 `web/tsconfig.json`，owner 2026-10-04 接受）——`radix-ui` 合包入口带入的 `@radix-ui/react-select` 声明文件在 `exactOptionalPropertyTypes` 下报 TS2320，
+错误在上游 `.d.ts`；代价是 web 的 typecheck 不再检查第三方声明文件，自有源码的严格选项不变。
 
 备选「保留 NodeNext，把拷入代码的导入全改成带 `.js` 的相对路径」：每次从 registry 更新组件都要重改一遍，否决。
 
@@ -68,7 +71,7 @@
 - **全局 reduced-motion 块留在 `styles.css`、不入层**：它没有 `!important`，进了 `legacy` 层就压不住 utilities 层里 `tw-animate-css` 与 `duration-*` 设的动画时长。
   留在原文件也使 `ui-reduced-motion.test.ts`「`styles.css` 恰有一个全局块」的断言不用改。
 - Tailwind 的 `transition*` 工具类在 reduce 下由 `theme.css` 里一条未分层规则统一关掉：
-  `@media (prefers-reduced-motion: reduce) { [class*="transition"] { transition: none; } }`。不逐个给拷入组件加 `motion-reduce:`（那会超出「三类修改」）。
+  `@media (prefers-reduced-motion: reduce) { [class*="transition"] { transition: none; } }`。不逐个给拷入组件加 `motion-reduce:`（那会超出「四类修改」）。
   这条是「只有覆盖、没有声明」的 reduce 规则，现行 reduced-motion 静态守卫允许。
 - `tokens.css` 与 `theme.css` 只定义自定义属性与上述未分层规则，不入层。
 - preflight 会重置旧页面依赖浏览器默认值的地方（标题字号、列表符号、段落外边距等）。owner 接受过渡期的观感变化；功能由 `make ui-walk` 守住。
@@ -97,7 +100,8 @@
 - `web/components.json`：`style: "radix-nova"`、`rsc: false`、`tsx: true`、`tailwind.css: "src/styles.css"`、`cssVariables: true`、
   aliases `components: "@/components"`、`ui: "@/components/ui"`、`utils: "@/lib/utils"`、`iconLibrary: "lucide"`。
 - 拷入（`npx shadcn@latest add …`，只拷用到的）：本 change 预期 `button`、`input`、`label`、`card`、`dropdown-menu`、`alert-dialog`、`sheet`、`tooltip`、
-  `radio-group`、`separator`。拷入后只做三类修改：颜色字面量换主题变量（若有）、中文化可见文案与 aria 文案、Biome 格式化。
+  `radio-group`、`separator`。拷入后只做四类修改：颜色字面量换主题变量（若有）、中文化可见文案与 aria 文案、Biome 格式化（含其 import 排序）、`cn` 的导入归一到 `@/lib/utils`
+  （`radix-nova` registry 现下发 `import { cn } from "cn"` 并让 CLI 安装 npm 包 `cn`；本仓不引入该依赖，每次 `shadcn add` 后卸掉它并改写导入——owner 2026-10-04 决定）。
   `web/src/lib/utils.ts` 提供 `cn`。`shadcn` 命令会改写 `styles.css`——以 D2/D3 的结构为准，命令写入的默认主题块不保留。
 - 侧栏不拷 shadcn 的 `sidebar` 整块：它自带 cookie 持久化、键盘快捷键与 768 断点，与现有契约（`workbuddy-sidebar` localStorage、760 断点、
   `data-collapsed`、槽位）不一致，改造成本高于用 `sheet` + `tooltip` + Tailwind 自己排。

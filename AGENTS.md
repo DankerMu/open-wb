@@ -163,6 +163,8 @@ make setup    # npm install + uv sync + 挂 git hooks
 
 阈值与正则的机器可读权威是 `constraints.yaml`；变更先改那里，再同步守卫脚本内的镜像正则。没有执行点的规则是愿望不是规则——要么接上，要么删掉。
 
+拷入层豁免：`web/src/components/ui/` 与 `web/src/components/assistant-ui/`（registry 原样拷入的组件，ADR-0013）不计覆盖率、重复代码、文件行数、Biome linter 与 knip 未使用导出，格式化照常；条目登记在 `constraints.yaml` `exemptions.entries`，应用层与冻结区 `web/src/ui/` 门槛不变。
+
 ### Known blind spots（交给评审）
 
 - 密钥扫描本地依赖 gitleaks 安装与否（CI 恒定兜底）。
