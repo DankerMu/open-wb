@@ -105,6 +105,21 @@ a {
   background: transparent;
 }
 
+/* Restores the UA defaults that preflight resets, for the not-yet-migrated markdown surfaces
+   (chat answers, file preview). Removed together with those pages' migration. */
+.chat-md :is(ul, ol),
+.files-md :is(ul, ol) {
+  list-style: revert;
+}
+
+.files-md :is(ul, ol) {
+  padding-left: revert;
+}
+
+.files-md :is(h1, h2, h3, h4) {
+  font-weight: revert;
+}
+
 .ui-alert {
   margin: 0;
   padding: 8px 10px;

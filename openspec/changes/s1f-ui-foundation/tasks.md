@@ -16,6 +16,7 @@
   `knip.json` web `entry` 加 `src/styles.css`（仍报 `tailwindcss` / `tw-animate-css` 未使用时以 `ignoreDependencies` 精确列名）；`ATTRIBUTION.md` 登记 Tailwind CSS。
 - [x] 1a.2 样式入口（design D2）：新建 `web/src/styles/legacy.css` 承接原 `styles.css` 的全局规则（全局 reduced-motion 块除外）与全部 `@import`；
   `web/src/styles.css` 改为层声明 + Tailwind 三段导入 + `tw-animate-css` + `tokens.css` + `theme.css` + `legacy.css layer(legacy)` + 原样保留、未分层的全局 reduced-motion 块。
+  utilities 导入带 `source("./")`，类名扫描限定在 `web/src`（不扫 `web/test`、`web/e2e`）；`legacy.css` 末尾补三条 `revert` 规则，恢复 preflight 清掉的 `.chat-md` / `.files-md` 列表符号与编号、`.files-md` 列表缩进与标题字重（随两页迁移删除）。
 - [x] 1a.3 主题映射（design D3）：新建 `web/src/styles/theme.css`（规格所列语义变量，七项钉死的对应、`[data-theme="dark"]` 的 `--primary` 块、`@theme inline`、`--radius`、`@custom-variant dark`、
   `body` 底色与文字色、reduce 下 `[class*="transition"] { transition: none }`）；`legacy.css` 里 `body` 的底色/文字色声明删除。其余变量的对应表写进 PR 描述。
 - [x] 1a.4 随搬家改指的测试（design D6 表）：`chat-steps.test.tsx:145-149`、`app-shell-responsive.test.tsx:551-554`、`topbar.test.tsx:277-278`、`sidebar.test.tsx:410-413`、

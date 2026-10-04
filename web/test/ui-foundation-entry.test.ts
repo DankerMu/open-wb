@@ -21,7 +21,7 @@ const LAYER_ORDER = "@layer theme, base, legacy, components, utilities;";
 const ENTRY_IMPORTS = [
   '@import "tailwindcss/theme.css" layer(theme);',
   '@import "tailwindcss/preflight.css" layer(base);',
-  '@import "tailwindcss/utilities.css" layer(utilities);',
+  '@import "tailwindcss/utilities.css" layer(utilities) source("./");',
   '@import "tw-animate-css";',
   '@import "./styles/tokens.css";',
   '@import "./styles/theme.css";',
@@ -75,6 +75,7 @@ describe("入口结构（ui-foundation「入口结构不可缺失或重排」）
       ["层序重排", LAYER_ORDER, "@layer theme, base, components, legacy, utilities;"],
       ["legacy 未入层", '"./styles/legacy.css" layer(legacy);', '"./styles/legacy.css";'],
       ["tokens 入层", '"./styles/tokens.css";', '"./styles/tokens.css" layer(legacy);'],
+      ["类名扫描范围放开", ' source("./");', ";"],
       ["多一条 @import", LAYER_ORDER, `${LAYER_ORDER}\n@import "./ui/ui.css";`],
       ["reduce 块入层", REDUCE_PRELUDE, `@layer legacy { ${REDUCE_PRELUDE}`],
     ];
@@ -178,6 +179,9 @@ function themeViolations(source: string): string[] {
       violations.push(`${name} 未定义为单个 --wb-* token 引用`);
     }
   }
+  if ([...dark.keys()].join(" ") !== PINNED_DARK.map(([name]) => name).join(" ")) {
+    violations.push("[data-theme=dark] 块不是恰好 --primary 与 --primary-foreground 两项");
+  }
   if (light.get("--radius") !== "0.5rem") violations.push("--radius 不是 0.5rem");
   for (const pattern of COLOR_LITERALS) {
     if (pattern.test(css)) violations.push(`出现颜色字面量 ${pattern}`);
@@ -191,21 +195,40 @@ function themeViolations(source: string): string[] {
 }
 
 describe("theme.css 结构（ui-foundation「映射文件结构」）", () => {
-  it("判定自证：缺变量、改钉死项、颜色字面量、.dark 变体都判失败", () => {
+  it("判定自证：每种变异恰好只触发它对应的那一条判定", () => {
     const theme = readRepoFile(THEME);
-    const mutations: [string, string | RegExp, string][] = [
-      ["缺 --ring", /^\s*--ring:[^;]*;/m, ""],
-      ["改 --background", "var(--wb-home-bg-secondary)", "var(--wb-bg-primary)"],
-      ["深色 --primary", "var(--wb-palette-white-90)", "var(--wb-palette-white-70)"],
-      ["hex 字面量", "var(--wb-status-error)", "#f64041"],
-      ["oklch 字面量", "var(--wb-sidebar-bg)", "oklch(0.985 0 0)"],
-      ["--radius", "--radius: 0.5rem", "--radius: 0.625rem"],
-      [".dark 变体", '&:where([data-theme="dark"], [data-theme="dark"] *)', "&:is(.dark *)"],
+    const darkOpen = '[data-theme="dark"] {';
+    const mutations: [string, string | RegExp, string, string][] = [
+      ["缺 --ring", /^\s*--ring:[^;]*;/m, "", "--ring 未定义"],
+      [
+        "改 --background",
+        "var(--wb-home-bg-secondary)",
+        "var(--wb-bg-primary)",
+        ":root --background",
+      ],
+      [
+        "深色 --primary",
+        "var(--wb-palette-white-90)",
+        "var(--wb-palette-white-70)",
+        "[data-theme=dark]",
+      ],
+      ["深色块多一项", darkOpen, `${darkOpen}\n  --border: var(--wb-border-default);`, "恰好"],
+      // 字面量注入在不受其它判定约束的 body 规则里，单独证明字面量扫描。
+      ["hex 字面量", "background: var(--background);", "background: #ffffff;", "颜色字面量"],
+      ["oklch 字面量", "color: var(--foreground);", "color: oklch(0.2 0 0);", "颜色字面量"],
+      ["--radius", "--radius: 0.5rem", "--radius: 0.625rem", "--radius"],
+      [
+        "dark 变体改绑",
+        '(&:where([data-theme="dark"], [data-theme="dark"] *))',
+        "(&:where(.night *))",
+        "@custom-variant",
+      ],
+      [".dark 类", "body {", ".dark body {", ".dark 类"],
     ];
-    for (const [label, from, to] of mutations) {
+    for (const [label, from, to, expected] of mutations) {
       const mutated = theme.replace(from, to);
       expect(mutated, label).not.toBe(theme);
-      expect(themeViolations(mutated), label).not.toEqual([]);
+      expect(themeViolations(mutated), label).toEqual([expect.stringContaining(expected)]);
     }
   });
 
