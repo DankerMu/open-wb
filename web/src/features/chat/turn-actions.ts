@@ -1,4 +1,4 @@
-// 会话页回合操作：prompt 派发及其所有权 fence、审批作答、停止、重新生成、从此处分叉（由 ChatPage 调用）。
+// 会话页回合操作：prompt 派发及其所有权 fence、审批作答、停止、重新生成、从此处分叉（由 useChatSession 调用并注入 fence 状态）。
 import { type Dispatch, type RefObject, type SetStateAction, useCallback } from "react";
 import { type ApiClient, ApiError } from "../../lib/api.js";
 import type { ChatMessageSnapshot } from "../../lib/session-contract.js";
