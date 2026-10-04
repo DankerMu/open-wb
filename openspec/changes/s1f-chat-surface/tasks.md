@@ -1,6 +1,7 @@
 # Tasks: s1f-chat-surface
 
 > 执行顺序：1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9a → 9b → 10 → 11（design D11；串行原因是共享 `page.tsx`、`conversation-view.tsx`、`ui-layering.test.ts` 的清单断言与 ui-walk 文件）。
+> 例外：4.2 + 4.3（创建时机反转，不替换组件、不依赖能力栏）只依赖组 1，可紧随组 1 执行；D11「4 在 3 之后」的理由只约束 4.1（欢迎页换肤）。
 > 组 9a（迁移、归一化、测试支撑；无公共契约变化）与 1-8 没有依赖，可提前。组 9b 要改与组 2-8 共享的 web 测试 fixture，按序执行。
 >
 > 通用纪律：
@@ -98,6 +99,7 @@ Minimal mergeable slice: 4.2 + 4.3，以及 4.5 / 4.6 中依赖「新建即 POST
 - [ ] 5.3 操作行（应用层，`ActionBarPrimitive`）：`复制`（原文；成功换图标 + 视觉隐藏的 `已复制` 状态；失败就地 `role="alert"`）、`重新生成`（仅末条助手且会话状态 ∈ done/failed/stopped；不弹提示）、
   `从此处分叉`（仅用户消息；锁定期间禁用）。不渲染编辑、分支切换、附件。
 - [ ] 5.4 改写被打破的断言（按分片）：所有断言步骤徽章的 e2e（`ui-walk-approval.ts`、`ui-walk.spec.ts`、`ui-walk-scroll.ts`、`ui-walk-sessions.spec.ts`）先展开工具调用组再断言步骤状态；
+  单元测试里直接断言步骤徽章的用例（如 `chat-stop-button`）同样先展开；
   `.chat-step-*`、`details.thinking-block`、`.thinking-body` 选择器改为角色/属性；`ui-walk-stop.ts` 对 `正在重新生成…` 的正向断言改为断言它不出现；
   单元测试 `chat-steps`、`chat-thinking`、`chat-copy`，以及断言提示的 `chat-regenerate-button`。
 - [ ] 5.5 按分片退役：删除 `thinking-block.tsx`、`message-actions.tsx`、`conversation-view.tsx` 里的 `StepCard` 等旧实现与对应 CSS、静态断言；登记已迁移文件；
