@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: 任务清单来源与归一化
-会话的任务清单 SHALL 只有一个来源：omp `todo` 工具结果里的全量清单。纯归约器（chat-stream `纯协议事件归约`）SHALL 只对已知 running 调用的 `tool_execution_end` 取候选，且仅当该调用在 `tool_execution_start` 登记的工具名恰为 `todo`（结束帧自带的 `toolName` 不参与判定）、帧与结果都未标记失败（`isError` 与 `result.isError` 均不为 `true`；omp v18.0.10 在失败结果里带的是操作前的旧清单，不得采用）、`result` 与 `result.details` 都是普通对象且 `details` 有自有属性 `phases` 时；此时归约器 SHALL 在该调用的 `step.end` 之前、同一返回结果中紧邻输出一条候选 `todo.updated{messageId, todo:<details.phases 原值>}`。归约器无 IO、不校验、不归一化、不保存清单状态；读取 SHALL 只读自有属性、不访问对象原型。`details` 的其它键（`op`、`storage`、`completedTasks` 等）SHALL 不被读取。其它工具名、失败的 `todo` 调用、没有 `phases` 的 `todo` 结果 SHALL 不产生候选。`/todo …` 斜杠命令只产生 `command_output` 帧、不产生工具帧，SHALL 不产生候选（面板要到下一次 `todo` 工具结果才更新；本 change 不调用 `get_state`，不补读）。`todo_reminder`、`todo_auto_clear` 帧 SHALL 继续被过滤，不改变清单。
+会话的任务清单 SHALL 只有一个来源：omp `todo` 工具结果里的全量清单。纯归约器（chat-stream `纯协议事件归约`）SHALL 只对已知 running 调用的 `tool_execution_end` 取候选，且仅当该调用在 `tool_execution_start` 登记的工具名恰为 `todo`（结束帧自带的 `toolName` 不参与判定）、帧与结果都未标记失败（`isError` 与 `result.isError` 均不为 `true`；omp v18.0.10 在失败结果里带的是操作前的旧清单，不得采用）、`result` 与 `result.details` 都是普通对象且 `details` 有自有属性 `phases` 时；此时归约器 SHALL 在该调用的 `step.end` 之前、同一返回结果中紧邻输出一条候选 `todo.updated{messageId, todo:<details.phases 原值>}`。归约器无 IO、不校验、不归一化、不保存清单状态；读取 SHALL 只读自有属性、不访问对象原型。`details` 的其它键（`op`、`storage`、`completedTasks` 等）SHALL 不被读取。其它工具名、失败的 `todo` 调用、没有 `phases` 的 `todo` 结果 SHALL 不产生候选。`/todo …` 斜杠命令只产生 `command_output` 帧、不产生工具帧，SHALL 不产生候选（面板要到下一次 `todo` 工具结果才更新；本 change 不调用 `get_state`，不补读）。本 change 不处理 omp 的其它 todo 帧。
 
 SessionSupervisor 的有序持久化路径 SHALL 在落库前用一个无 IO 的纯函数对候选做结构校验与归一化（归约器输出的原值 SHALL NOT 出现在 SSE、快照或 `chat_sessions.todo` 中）：
 
@@ -15,7 +15,7 @@ SessionSupervisor 的有序持久化路径 SHALL 在落库前用一个无 IO 的
 - **THEN** 归约器的返回结果为 `todo.updated{messageId, todo:<该 phases 原值>}` 紧接该调用的 `step.end`（`step.end` 的 output 不含 details）；归一化结果恰为 `{phases:[{name:"准备", tasks:[{content:"读取需求", status:"completed"},{content:"列出要点", status:"in_progress"}]},{name:"交付", tasks:[{content:"输出结论", status:"blocked"}]}]}`，其中没有 `blocker`、`note`、`op`、`storage`、`completedTasks`
 
 #### Scenario: 失败调用、其它工具与命令输出不产生候选
-- **WHEN** `todo` 调用以帧 `isError:true` 结束且 `details.phases` 为合法清单；`todo` 调用以 `result.isError:true` 结束；`todo` 调用成功但 `details` 为数组、缺失或没有自有 `phases`（只存在于原型上）；以 `bash` 登记的调用成功结束且 `details.phases` 为合法清单；回合收到 `command_output{text:"…"}`（`/todo append 买菜` 的输出）；回合收到 `todo_reminder` 帧
+- **WHEN** `todo` 调用以帧 `isError:true` 结束且 `details.phases` 为合法清单；`todo` 调用以 `result.isError:true` 结束；`todo` 调用成功但 `details` 为数组、缺失或没有自有 `phases`（只存在于原型上）；以 `bash` 登记的调用成功结束且 `details.phases` 为合法清单；回合收到 `command_output{text:"…"}`（`/todo append 买菜` 的输出）
 - **THEN** 以上均不产生 `todo.updated`；已知调用只输出其 `step.end`，`command_output` 只按既有规则成为正文，已落库的清单不变
 
 #### Scenario: 结构不合规整帧丢弃
@@ -119,7 +119,7 @@ SessionSupervisor 的有序持久化路径 SHALL 在落库前用一个无 IO 的
 
 面板 SHALL 只读：除头部按钮外没有任何可交互控件，不提供新增、勾选、编辑、删除或排序，也不发起任何请求。展开/收起状态 SHALL 按会话保存在内存里：切换到另一会话再切回时保持该会话上次的状态，一个会话的收起不影响另一会话；它不写入 `localStorage`、URL 或服务端，页面重新加载后恢复为默认展开。
 
-面板高度 SHALL 有上限，任务超出时在面板内部滚动；在 1440×900 与 390×844 两种视口下，面板展开且清单为 200 个任务时，输入框与其发送按钮 SHALL 仍完整位于视口内，页面不出现横向滚动。清单经 `todo.updated` 更新时面板 SHALL 就地更新，不改变展开/收起状态，不移动输入框焦点、不改草稿。
+面板高度 SHALL 有上限，任务超出时在面板内部滚动；这个上限 SHALL 使展开的面板与第一张待决提问卡（含其 `允许` / `拒绝` 按钮）同时落在停靠区的最大高度之内（停靠区整体不超过会话页列高度的一半并在内部滚动，见 chat-web `输入框上方停靠区`）；在 1440×900 与 390×844 两种视口下，面板展开且清单为 200 个任务时，输入框与其发送按钮 SHALL 仍完整位于视口内，页面不出现横向滚动。清单经 `todo.updated` 更新时面板 SHALL 就地更新，不改变展开/收起状态，不移动输入框焦点、不改草稿。
 
 #### Scenario: 面板显示在停靠区最上方
 - **WHEN** 选中会话的 `todo` 为 `{phases:[{name:"准备", tasks:[{content:"读取需求", status:"completed"},{content:"列出要点", status:"in_progress"}]},{name:"交付", tasks:[{content:"输出结论", status:"pending"},{content:"写周报", status:"abandoned"},{content:"等评审", status:"blocked"}]}]}`，且该会话同时有一条待决审批

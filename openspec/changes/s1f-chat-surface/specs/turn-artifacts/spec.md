@@ -31,6 +31,8 @@
 - **THEN** 打开名为 `index.html` 的对话框，内含 `sandbox` 属性恰为 `allow-scripts`、`srcdoc` 为该文本的 iframe；卡片标签 `HTML`、卡脚有 `可交互预览`；无 `在编辑器中打开`；预览 API 恰被调用一次且在点击之前未被调用
 - **WHEN** 预览响应带 `X-Workbuddy-Truncated: 1`
 - **THEN** 对话框内显示 `文件超过 1 MiB，仅预览前 1 MiB`
+- **WHEN** 转录贴底、回合仍在输出时从较早一条消息的 html 产物卡打开预览，期间内容把该卡片顶出转录视口，随后以 Escape 或 `关闭` 关闭对话框
+- **THEN** 焦点回到打开它的 `打开网页预览 index.html` 按钮，消息线程不因焦点归还而滚动（仍贴底跟随，不出现 `回到最新`）
 
 #### Scenario: 图片下载与代码复制
 - **WHEN** 变更含 `assets/chart.PNG` 与 `src/app.ts`，分别点击 `下载 chart.PNG` 与 `复制代码 app.ts`

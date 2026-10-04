@@ -3,7 +3,7 @@
 ### Requirement: web 审批条
 web SHALL 把审批分两处呈现：待决审批是 composer 上方停靠区里的提问卡，已结算审批是其所属 assistant 消息内的记录。web 只使用快照与事件归约出的 `approvals`（`tool` 字段即工具名，web 不再解析 `title`）；assistant-ui 工具调用 part 的 `approval` 字段与 `onRespondToToolApproval` SHALL NOT 使用（审批与步骤之间没有关联键，且工具调用组默认收起）。
 
-**提问卡**：选中会话全部消息中 `decision:null` 的审批 SHALL 各渲染一张提问卡，跨消息按审批 `id` 升序纵向叠放在 composer 正上方的停靠区内（停靠区不随消息线程滚动；同一停靠区内任务清单面板在其上方，见 session-todo）；助手消息内 SHALL NOT 渲染待决审批。每张卡是独立的 `role="group"`，accessible name 为 `需要你的确认`，内容为：工具名徽章（`tool` 字段）；`title` **全文**，以 `white-space: pre-wrap` 保留换行；由 `expiresAt` 与注入时钟计算的单句倒计时 `（<n>s 内未操作将自动允许）`，`<n>` 为剩余整秒并随时间递减（初值 60），卡内无其它倒计时元素；按钮 `允许` / `拒绝`。点击按钮 SHALL 以该卡自己的审批 `id` 调用一次 `decideApproval(sessionId, approvalId, "allow"|"deny")`，该卡的两个按钮立即禁用，其它卡不受影响。409 `approval_settled` SHALL NOT 显示任何错误（无 Toast、composer 无内联错误），以随后到达的 `approval.resolved` 或权威快照为准。`approval.resolved` 到达或快照显示该审批已结算后，对应提问卡 SHALL 消失。
+**提问卡**：选中会话全部消息中 `decision:null` 的审批 SHALL 各渲染一张提问卡，跨消息按审批 `id` 升序纵向叠放在 composer 正上方的停靠区内（停靠区不随消息线程滚动；同一停靠区内任务清单面板在其上方，见 session-todo）；助手消息内 SHALL NOT 渲染待决审批。每张卡是独立的 `role="group"`，accessible name 为 `需要你的确认`，内容为：工具名徽章（`tool` 字段）；`title` **全文**，以 `white-space: pre-wrap` 保留换行，这段正文有自己的最大高度、超出时在卡内滚动（使按钮不被长 `title` 挤出，停靠区整体的限高见 chat-web `输入框上方停靠区`）；由 `expiresAt` 与注入时钟计算的单句倒计时 `（<n>s 内未操作将自动允许）`，`<n>` SHALL 为 `max(0, ceil((expiresAt - now) / 1000))`（`now` 为注入时钟的毫秒时间），至少每秒重算一次（初值 60，`expiresAt` 已过时为 0），卡内无其它倒计时元素；按钮 `允许` / `拒绝`。点击按钮 SHALL 以该卡自己的审批 `id` 调用一次 `decideApproval(sessionId, approvalId, "allow"|"deny")`，该卡的两个按钮立即禁用，其它卡不受影响。409 `approval_settled` SHALL NOT 显示任何错误（无 Toast、composer 无内联错误、卡内无 alert）：页面主动对账权威历史（与现状一致），以对账得到的快照或随后到达的 `approval.resolved` 为准。其它失败（400/404/502/503、网络异常或非法响应）SHALL 在该提问卡内以 `role="alert"` 渲染 `ApiError` 的 message（400/404/502/503 为信封文案；网络异常与非法响应为既有 request_failed 的安全文案），该卡的两个按钮恢复可用，该 alert 在这张卡下一次点击按钮时清除；不显示 Toast，其它卡不受影响。提问卡的标题与内容 SHALL NOT 乐观改变：在 `approval.resolved` 或权威快照显示已结算之前，它始终是 `需要你的确认`。`approval.resolved` 到达或快照显示该审批已结算后，对应提问卡 SHALL 消失。
 
 **已结算记录**：`decision` 非 null 的审批 SHALL 在其所属 assistant 消息内各渲染一条记录（位置见 chat-web `消息线程` 的助手块次序），同一消息的多条按 `id` 升序排列。每条是 `role="group"`，accessible name 按 `decision`：`allow` → `已允许执行`，`deny` → `已拒绝执行`，`timeout` → `超时自动允许`；显示工具名徽章与 `title` 全文（`white-space: pre-wrap`），无按钮、无倒计时。`approvals` 为 `[]` 的消息不渲染记录。
 
@@ -17,7 +17,11 @@ web SHALL 把审批分两处呈现：待决审批是 composer 上方停靠区里
 - **WHEN** 另一条挂起审批点击 `拒绝` 并收到 `approval.resolved{decision:"deny"}`
 - **THEN** 提问卡消失，所属助手消息内出现名为 `已拒绝执行` 的记录
 - **WHEN** 点击 `允许` 时服务端返回 409 `approval_settled`，随后权威快照中该审批 `decision:"timeout"`
-- **THEN** 无 Toast、composer 无内联错误、页面无新增 `role="alert"`；提问卡消失，所属助手消息内出现名为 `超时自动允许` 的记录
+- **THEN** 页面发起一次历史对账；无 Toast、composer 无内联错误、页面无新增 `role="alert"`；提问卡消失，所属助手消息内出现名为 `超时自动允许` 的记录
+
+#### Scenario: 作答失败在卡内提示并可重试
+- **WHEN** 待决提问卡点击 `允许`，服务端返回 502 `{error:{code:"agent_unavailable",message:"Agent 运行时不可用"}}`；随后再次点击 `允许`，服务端 200 并送达 `approval.resolved{decision:"allow"}`；另一例点击 `拒绝` 时请求因网络异常失败
+- **THEN** 502 之后该卡内出现 `role="alert"`，文本为 `Agent 运行时不可用`，卡的可访问名仍为 `需要你的确认`，`允许` / `拒绝` 两个按钮恢复可用，页面无 Toast、composer 无内联错误；第二次点击时该 alert 即被清除，`decideApproval` 累计恰调用两次，resolved 到达后提问卡消失、所属助手消息内出现 `已允许执行` 记录；网络异常的一例卡内 alert 为 request_failed 的安全文案，按钮同样恢复可用
 
 #### Scenario: 超时与拒绝的记录文案
 - **WHEN** 待决审批收到 `approval.resolved{decision:"timeout"}`；另一条收到 `{decision:"deny"}`
@@ -32,5 +36,5 @@ web SHALL 把审批分两处呈现：待决审批是 composer 上方停靠区里
 - **THEN** 停靠区恰有两张提问卡，按文档顺序先为 id 9、后为 id 12；两条助手消息内都没有待决审批的元素
 
 #### Scenario: 刷新后审批状态保留
-- **WHEN** 以 `/?session=<id>` 重新加载：快照中一条助手消息 `approvals` 含一条 pending 且 `expiresAt` 距今 40s，另一次加载中一条助手消息的审批 `decision` 为 `timeout`、另一条助手消息的为 `deny`、还有一条为 `allow`
-- **THEN** pending 加载后停靠区有名为 `需要你的确认` 的提问卡，倒计时句为 `（40s 内未操作将自动允许）`，按钮可点并能作答，composer 锁定且 `停止` 可用；`timeout`、`deny`、`allow` 分别在各自助手消息内渲染为名为 `超时自动允许`、`已拒绝执行`、`已允许执行` 的记录，均无按钮与倒计时句，停靠区没有它们的提问卡；`approvals` 为 `[]` 的助手消息不渲染记录
+- **WHEN** 以 `/?session=<id>` 重新加载：快照中一条助手消息 `approvals` 含一条 pending 且 `expiresAt` 距今 40s，另一次加载中快照的 pending 审批 `expiresAt` 已过去 3s，再一次加载中一条助手消息的审批 `decision` 为 `timeout`、另一条助手消息的为 `deny`、还有一条为 `allow`
+- **THEN** pending 加载后停靠区有名为 `需要你的确认` 的提问卡，倒计时句为 `（40s 内未操作将自动允许）`，按钮可点并能作答，composer 锁定且 `停止` 可用；`expiresAt` 已过的那次提问卡的倒计时句为 `（0s 内未操作将自动允许）`（不出现负数），按钮仍可点；`timeout`、`deny`、`allow` 分别在各自助手消息内渲染为名为 `超时自动允许`、`已拒绝执行`、`已允许执行` 的记录，均无按钮与倒计时句，停靠区没有它们的提问卡；`approvals` 为 `[]` 的助手消息不渲染记录
