@@ -90,7 +90,6 @@ make setup    # npm install + uv sync + 挂 git hooks
 | UI 走查 | Playwright Chromium（调用方拥有已运行服务） | `make ui-walk` | 退出码 0；真实浏览器走查与 error oracle 全绿 |
 | omp-fetch | 官方 omp v18.0.10 二进制供给（SHA 校验） | `make omp-fetch` | 退出码 0；官方 v18.0.10 版本输出与 SHA256 校验 |
 | 手动真实上游冒烟 | Hurl（调用方拥有已运行服务与真实上游） | `make smoke-live` | 退出码 0；非空 done 回复 |
-| demo 一致性截图对 | Playwright Chromium（调用方拥有已运行服务） | `make ui-shots` | 退出码 0；60 张截图 + index.html，人工按清单签收 |
 
 每行命令必须解析到真实 Makefile 目标；无验证命令的 surface 的改动是 review-only，PR 必须写明。
 
@@ -153,7 +152,6 @@ make setup    # npm install + uv sync + 挂 git hooks
 | UI 走查 | `.github/workflows/ci.yml`（job `ui-walk`） | `make ui-walk` + CI `ui-walk`/`all-checks-passed` | block |
 | omp-fetch | `scripts/omp-fetch.sh` | `make omp-fetch` | prerequisite |
 | 手动真实上游冒烟 | 本文件 Verification Matrix | `make smoke-live` | review-only |
-| demo 一致性截图对 | 本文件 Verification Matrix | `make ui-shots` | review-only |
 | uid 隔离 | `.github/workflows/ci.yml`（job `uid-isolation`） | CI `uid-isolation`/`all-checks-passed` | block |
 | Conventional commits | `.githooks/commit-msg` | pre-commit（commit-msg） | block |
 | CI 聚合门禁 | `.github/workflows/ci.yml`（all-checks-passed） | CI | block |
@@ -164,6 +162,8 @@ make setup    # npm install + uv sync + 挂 git hooks
 阈值与正则的机器可读权威是 `constraints.yaml`；变更先改那里，再同步守卫脚本内的镜像正则。没有执行点的规则是愿望不是规则——要么接上，要么删掉。
 
 拷入层豁免：`web/src/components/ui/` 与 `web/src/components/assistant-ui/`（registry 原样拷入的组件，ADR-0013）不计覆盖率、重复代码、文件行数、Biome linter 与 knip 未使用导出，格式化照常；条目登记在 `constraints.yaml` `exemptions.entries`，应用层与冻结区 `web/src/ui/` 门槛不变。
+
+界面功能验收：签收对象是 `docs/acceptance/functional-checklist.md`（格式由 `web/test/functional-checklist.test.ts` 守卫）；交付或改变用户可见功能的 PR 在同一 PR 里增改对应行并写 `待签`，只有仓库所有者本人可改为 `通过` 或 `不通过`，agent 不得代签（review-only，规则全文见该文件头）。
 
 ### Known blind spots（交给评审）
 

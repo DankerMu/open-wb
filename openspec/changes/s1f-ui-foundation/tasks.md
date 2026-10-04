@@ -47,11 +47,11 @@ Minimal mergeable slice: atomic - 拷入的 `button` 没有豁免即被覆盖率
 
 ## 2. functional-acceptance / verification-harness — demo 一致性 harness 退役与功能验收清单
 
-- [ ] 2.1 删除 `web/e2e/ui-shots.mjs`、`web/package.json` 的 `ui-shots` 脚本；Makefile 去掉 `ui-shots` 目标、`UI_SHOTS_*` 块、`.PHONY` 项与页头注释句（design D10）。
-- [ ] 2.2 `constraints.yaml` `verification.surfaces` 去掉 `ui-shots`；`AGENTS.md` Verification Matrix 与 Enforcement Index 各去掉「demo 一致性截图对」一行，并在 1b.3 的注记旁加一行指向功能验收清单与其签收规则的注记。
-- [ ] 2.3 `scripts/test-ci-harness.sh`：内嵌 oracle 的八类断言、`:144-145` 的整段锚与 `:155-174` 一带全部含 `ui-shots` 的突变用例同步去掉 `ui-shots`；新增「`web/package.json` 无 `ui-shots` 脚本」断言与
+- [x] 2.1 删除 `web/e2e/ui-shots.mjs`、`web/package.json` 的 `ui-shots` 脚本；Makefile 去掉 `ui-shots` 目标、`UI_SHOTS_*` 块、`.PHONY` 项与页头注释句（design D10）。
+- [x] 2.2 `constraints.yaml` `verification.surfaces` 去掉 `ui-shots`；`AGENTS.md` Verification Matrix 与 Enforcement Index 各去掉「demo 一致性截图对」一行，并在 1b.3 的注记旁加一行指向功能验收清单与其签收规则的注记。
+- [x] 2.3 `scripts/test-ci-harness.sh`：内嵌 oracle 的八类断言、`:144-145` 的整段锚与 `:155-174` 一带全部含 `ui-shots` 的突变用例同步去掉 `ui-shots`；新增「`web/package.json` 无 `ui-shots` 脚本」断言与
   「重新加入 `ui-shots` surface / target / AGENTS 行被拒」的突变用例。
-- [ ] 2.4 新增 `docs/acceptance/functional-checklist.md`：文件头（运行方式、四列格式、三种结论、签收规则）+ 分节骨架（登录、外壳、会话、文件、设置），本任务不写数据行；
+- [x] 2.4 新增 `docs/acceptance/functional-checklist.md`：文件头（运行方式、四列格式、三种结论、签收规则）+ 分节骨架（登录、外壳、会话、文件、设置），本任务不写数据行；
   新增其格式守卫测试（四列、ID 唯一、三值、无 `demo:`、无 `<数字>px` 与 `.`/`#` 选择器，含注入样本自证）。
 
 Suggested fixture level: compact - 控制面镜像由既有 source-derived oracle 守护，改动是删除一个 surface 并同步 oracle；无运行时行为
