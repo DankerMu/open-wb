@@ -1,15 +1,29 @@
 import "./radix-platform.js";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { clickSend, typeDraft } from "./chat-page-lifecycle-support.js";
-import { composer, mountRunningSnapshot } from "./chat-page-ownership-support.js";
+import {
+  clickSend,
+  renderObservedChatPage,
+  sessionPromptPath,
+  settleDeferredResponse,
+  typeDraft,
+} from "./chat-page-lifecycle-support.js";
+import {
+  composer,
+  findMessageArea,
+  mountRunningSnapshot,
+  promptAccepted,
+  runningCreatedSnapshot,
+} from "./chat-page-ownership-support.js";
 import {
   A,
+  C,
   cleanupSessionMeta,
   entryTitles,
   findList,
   focusOn,
   installNarrowViewport,
+  messagesPath,
   openNavOverlay,
   view,
 } from "./chat-page-session-meta-support.js";
@@ -23,8 +37,15 @@ import {
   sceneGroup,
   welcomeRoutes,
 } from "./chat-page-welcome-scene-support.js";
-import { chatSnapshot } from "./chat-stream-support.js";
-import { currentLocation, type FetchMock } from "./support.js";
+import { chatSnapshot, FakeEventSource } from "./chat-stream-support.js";
+import {
+  authenticatedPrincipal,
+  calls,
+  currentLocation,
+  deferredResponse,
+  type FetchMock,
+  jsonResponse,
+} from "./support.js";
 import { yieldMacrotask } from "./ui-support.js";
 
 // 「新建会话」只回欢迎态，会话在欢迎态首次发送时才创建（s1f-chat-surface 组 4，#826）。
@@ -46,6 +67,19 @@ function hero() {
 
 function newSessionButton(scope: HTMLElement) {
   return within(scope).getByRole("button", { name: "新建会话" });
+}
+
+function unauthorized() {
+  return jsonResponse({ error: { code: "unauthorized", message: "登录已失效" } }, 401);
+}
+
+/** `path` 上那一次请求的 AbortSignal。 */
+function onlySignal(fetchMock: FetchMock, path: string) {
+  const requests = calls(fetchMock, path);
+  expect(requests).toHaveLength(1);
+  const signal = requests[0]?.[1]?.signal;
+  if (!signal) throw new Error(`${path} 的请求没有带 signal`);
+  return signal;
 }
 
 /** 挂载在 `path`，列表里有一个已完成的既有会话 A（历史为空快照）。 */
@@ -149,5 +183,142 @@ describe("新建会话只回欢迎态", () => {
     expect(composer().value).toBe(DRAFT);
     expect(requestCount(fetchMock)).toBe(requests);
     expect(createRequests(fetchMock)).toEqual([]);
+  });
+
+  it("N4 创建—发送交接未完成（创建已返回、prompt 在途）：点击不导航、不中止 prompt、零请求；prompt 受理后恰一次 prompt，转录含 你好", async () => {
+    const created = `${CREATED_IDS[0]}`;
+    const held = deferredResponse();
+    const routes = welcomeRoutes();
+    routes[sessionPromptPath(created)] = () => held.promise;
+    routes[messagesPath(created)] = () =>
+      jsonResponse({
+        ...runningCreatedSnapshot(),
+        session: view(created, "你好", { status: "running" }),
+      });
+    const { fetchMock } = renderChatPage("/", routes);
+    await screen.findByRole("heading", { level: 1, name: HERO });
+
+    typeDraft("你好");
+    clickSend();
+    await waitFor(() => expect(currentLocation()).toBe(`/?session=${created}`));
+    await waitFor(() => expect(promptRequests(fetchMock, created)).toHaveLength(1));
+    await act(yieldMacrotask);
+    const signal = onlySignal(fetchMock, sessionPromptPath(created));
+    const requests = requestCount(fetchMock);
+
+    fireEvent.click(screen.getByRole("button", { name: "新建会话" }));
+    await act(yieldMacrotask);
+    expect(currentLocation()).toBe(`/?session=${created}`);
+    expect(signal.aborted).toBe(false);
+    expect(requestCount(fetchMock)).toBe(requests);
+
+    await settleDeferredResponse(held, jsonResponse(promptAccepted, 202));
+    expect(await within(await findMessageArea()).findByText("你好", { exact: true })).toBeTruthy();
+    expect(promptRequests(fetchMock, created)).toEqual([["POST", '{"message":"你好"}']]);
+    expect(createRequests(fetchMock)).toHaveLength(1);
+    expect(currentLocation()).toBe(`/?session=${created}`);
+    expect(signal.aborted).toBe(false);
+  });
+
+  it("N5 既有会话的 prompt 在途：点击回欢迎态并中止该请求；迟到的 202 不读历史、不重开事件连接，输入框可用、无错误", async () => {
+    const held = deferredResponse();
+    const routes = welcomeRoutes({ existing: [view(A, EXISTING)] });
+    routes[sessionPromptPath(A)] = () => held.promise;
+    const { fetchMock } = renderChatPage(`/?session=${A}`, routes);
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    await waitFor(() => expect(composer().disabled).toBe(false));
+
+    typeDraft("你好");
+    clickSend();
+    await waitFor(() => expect(promptRequests(fetchMock, A)).toHaveLength(1));
+    const signal = onlySignal(fetchMock, sessionPromptPath(A));
+    expect(signal.aborted).toBe(false);
+    expect(composer().disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "新建会话" }));
+    await waitFor(() => expect(currentLocation()).toBe("/"));
+    expect(signal.aborted).toBe(true);
+    expect(hero()).not.toBeNull();
+    await act(yieldMacrotask);
+    const historyReads = calls(fetchMock, messagesPath(A)).length;
+    const sources = FakeEventSource.instances.length;
+    const requests = requestCount(fetchMock);
+
+    await settleDeferredResponse(held, jsonResponse(promptAccepted, 202));
+    await act(yieldMacrotask);
+    expect(calls(fetchMock, messagesPath(A))).toHaveLength(historyReads);
+    expect(FakeEventSource.instances).toHaveLength(sources);
+    expect(sources).toBe(1);
+    expect(requestCount(fetchMock)).toBe(requests);
+    expect(currentLocation()).toBe("/");
+    expect(composer().disabled).toBe(false);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(promptRequests(fetchMock, A)).toHaveLength(1);
+  });
+
+  it("N6 分叉在途：点击回欢迎态；迟到的 201 不导航到分叉会话，草稿不被 fork.draft 覆盖", async () => {
+    const forkPath = `/api/sessions/${A}/fork`;
+    const held = deferredResponse();
+    const routes = welcomeRoutes({ existing: [view(A, EXISTING)] });
+    routes[messagesPath(A)] = () =>
+      jsonResponse({
+        ...chatSnapshot({ assistantStatus: "done", content: "回答", status: "done" }),
+        session: view(A, EXISTING),
+      });
+    routes[forkPath] = () => held.promise;
+    const { fetchMock } = renderChatPage(`/?session=${A}`, routes);
+    const fork = await screen.findByRole("button", { name: "从此处分叉" });
+    await waitFor(() => expect(composer().disabled).toBe(false));
+    typeDraft(DRAFT);
+
+    fireEvent.click(fork);
+    await waitFor(() => expect(calls(fetchMock, forkPath)).toHaveLength(1));
+    await waitFor(() => expect(composer().disabled).toBe(true));
+
+    fireEvent.click(screen.getByRole("button", { name: "新建会话" }));
+    await waitFor(() => expect(currentLocation()).toBe("/"));
+    expect(hero()).not.toBeNull();
+    await act(yieldMacrotask);
+    const requests = requestCount(fetchMock);
+
+    await settleDeferredResponse(
+      held,
+      jsonResponse({ session: view(C, "分叉会话"), draft: "分叉草稿" }, 201),
+    );
+    await act(yieldMacrotask);
+    expect(currentLocation()).toBe("/");
+    expect(hero()).not.toBeNull();
+    expect(composer().value).toBe(DRAFT);
+    expect(composer().disabled).toBe(false);
+    expect(requestCount(fetchMock)).toBe(requests);
+    expect(calls(fetchMock, messagesPath(C))).toEqual([]);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("N7 首次发送的创建请求 401：进入登录页，任何一次提交都没有行内错误，URL 无 session，零 prompt 请求", async () => {
+    let expired = false;
+    const commits: string[] = [];
+    const routes = welcomeRoutes({
+      create: () => {
+        expired = true;
+        return unauthorized();
+      },
+    });
+    // 登录失效后 `/api/auth/me` 同样回 401。
+    routes["/api/auth/me"] = () =>
+      expired ? unauthorized() : jsonResponse(authenticatedPrincipal);
+    const { fetchMock } = renderObservedChatPage("/", routes, (html) => commits.push(html));
+    await screen.findByRole("heading", { level: 1, name: HERO });
+
+    typeDraft("你好");
+    clickSend();
+    expect(await screen.findByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeTruthy();
+    await act(yieldMacrotask);
+    // 会话页被登录页取代之前的每一次提交都算：行内错误一闪而过也不行。
+    expect(commits.filter((html) => html.includes('role="alert"'))).toEqual([]);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(currentLocation()).toBe("/");
+    expect(createRequests(fetchMock)).toEqual([createOf('{"scene":"office"}')]);
+    expect(fetchMock.mock.calls.filter(([path]) => path.endsWith("/prompt"))).toEqual([]);
   });
 });

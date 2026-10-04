@@ -5,7 +5,7 @@
 
 会话 SHALL 只由欢迎态的首次发送创建：发送时恰发出一次 `POST /api/sessions`，body 为 `{scene:<选中场景>}`，当 composer 能力栏的工作空间选择显示着某个工作空间时同时带它的 `workspaceId`，显示 `未选择` 时 body 不含 `workspaceId` 键（见「composer footer 工作空间选择」）；随后选中返回的会话 id，再恰发出一次 prompt 请求。场景只决定新会话的 `scene` 与欢迎页快捷任务清单，SHALL NOT 改变模型、工具面或 prompt 内容（与 F-CHAT-1「决定默认专家与工具面」的有意偏差）；会话内切换场景的入口不渲染（归 S1d）。
 
-侧栏 `新建会话` SHALL 只把页面带回欢迎态，不创建会话：点击后以 replace 清除 URL 的 `?session=`（其它 search 与 hash 保留），SHALL NOT 发出任何请求（尤其没有 `POST /api/sessions`），输入框草稿保持不变。侧栏不是覆盖层时（`≥761px`）点击后把焦点放到会话页输入框（composer 的多行文本框）；已在欢迎态时点击只聚焦输入框，URL 与草稿不变、不发请求。`≤760px` 下承载它的导航覆盖层照常关闭，关闭后焦点按 spa-shell 既有规则归还 `打开导航`（与覆盖层内其它导航相同，本 change 不改外壳），此时不聚焦输入框。
+侧栏 `新建会话` SHALL 只把页面带回欢迎态，不创建会话：点击后以 replace 清除 URL 的 `?session=`（其它 search 与 hash 保留），SHALL NOT 发出任何请求（尤其没有 `POST /api/sessions`），输入框草稿保持不变。首次发送的「创建—发送」交接尚未完成时（创建请求或其后的那一次 prompt 请求在途）点击 SHALL NOT 导航，也不中止该交接——否则会留下一个没有消息的会话。侧栏不是覆盖层时（`≥761px`）点击后把焦点放到会话页输入框（composer 的多行文本框）；已在欢迎态时点击只聚焦输入框，URL 与草稿不变、不发请求。`≤760px` 下承载它的导航覆盖层照常关闭，关闭后焦点按 spa-shell 既有规则归还 `打开导航`（与覆盖层内其它导航相同，本 change 不改外壳），此时不聚焦输入框。
 
 #### Scenario: 场景切换替换快捷任务且无提示
 - **WHEN** 欢迎态点击 `代码开发`
@@ -22,6 +22,8 @@
 - **THEN** 没有任何请求，URL 与草稿不变，焦点在会话页输入框
 - **WHEN** 在 `≤760px` 的 `导航` 覆盖层内点击 `新建会话`
 - **THEN** 覆盖层关闭，没有任何请求，页面为欢迎态，草稿不变，焦点回到 `打开导航`（不在会话页输入框）
+- **WHEN** 欢迎态发送 `你好` 后创建已返回、URL 已是 `?session=<新 id>`，而该会话的 prompt 请求尚未返回时点击 `新建会话`
+- **THEN** URL 不变、prompt 请求未被中止；prompt 受理后恰有一次 prompt 请求，转录含 `你好`
 
 ### Requirement: composer footer 工作空间选择
 工作空间选择 SHALL 位于 composer 能力栏的最左侧（权限、上传与专家控件 SHALL NOT 渲染，也不摆禁用占位）。

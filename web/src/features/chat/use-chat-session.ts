@@ -629,6 +629,11 @@ export function useChatSession() {
         if (focusComposer) composerRef.current?.focus();
         return;
       }
+      // 首次发送的「创建—发送」交接在途（origin 为欢迎态、prompt 尚未落定）：不导航、不中止，
+      // 否则会留下一个没有消息的会话。
+      if (pendingCreateSendRef.current?.originSessionId === null && mutationControllerRef.current) {
+        return;
+      }
       focusOnWelcomeRef.current = focusComposer;
       navigate(sessionNavigation(location.pathname, location.search, location.hash, null), {
         replace: true,

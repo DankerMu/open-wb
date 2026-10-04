@@ -263,16 +263,22 @@ export async function pickOption(option: string) {
   await choose(dialog, option);
 }
 
+/** 经 URL（replace）回到欢迎态：`新建会话` 在「创建—发送」交接未完成时不导航。 */
+export async function leaveForWelcome({ router }: ReturnType<typeof renderChatPage>) {
+  await act(() => router.navigate("/", { replace: true }));
+  await waitFor(() => expect(currentLocation()).toBe("/"));
+}
+
 /**
- * 欢迎态首次发送建会话成功后页面重读会话列表与工作空间列表（第 `read` 次工作空间读取），再点侧栏
- * `新建会话` 回到欢迎态（它不发请求）。返回时该次读取的响应可能仍挂起。
+ * 欢迎态首次发送建会话成功后页面重读会话列表与工作空间列表（第 `read` 次工作空间读取），再回到欢迎态。
+ * 夹具里新会话的 prompt 挂起，「创建—发送」交接未完成时 `新建会话` 不导航，所以经 URL 回去
+ * （它不发请求）。返回时该次读取的响应可能仍挂起。
  */
-export async function rereadBySend({ fetchMock }: ReturnType<typeof renderChatPage>, read: number) {
+export async function rereadBySend(mounted: ReturnType<typeof renderChatPage>, read: number) {
   typeDraft("你好");
   clickSend();
   await waitFor(() => expect(currentLocation()).toMatch(/^\/\?session=[def]{32}$/));
-  await workspacesRead(fetchMock, read);
-  fireEvent.click(screen.getByRole("button", { name: "新建会话" }));
-  await waitFor(() => expect(currentLocation()).toBe("/"));
+  await workspacesRead(mounted.fetchMock, read);
+  await leaveForWelcome(mounted);
   await screen.findByRole("heading", { level: 1, name: HERO });
 }

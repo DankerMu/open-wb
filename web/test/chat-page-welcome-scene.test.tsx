@@ -41,6 +41,7 @@ import {
   footerButton,
   HERO,
   LOADING,
+  leaveForWelcome,
   mountWelcome,
   NO_MATCH,
   OFFICE_LABELS,
@@ -609,17 +610,18 @@ describe("评审后补充 (X1、X3、X5、X6)", () => {
     expect(createRequests(fetchMock)).toEqual([CODE_WITH_PROJECT_A]);
   });
 
-  it("X1 变体：创建后的工作空间重读失败，在会话页再点 新建会话 后发送，body 只剩 scene", async () => {
-    const { fetchMock } = await createFromSessionPage([
+  it("X1 变体：创建后的工作空间重读失败，从会话页回欢迎态后发送，body 只剩 scene", async () => {
+    const mounted = await createFromSessionPage([
       workspaceList(PROJECT_A, SUPPORT),
       unavailable(),
       workspaceList(PROJECT_A, SUPPORT),
     ]);
+    const { fetchMock } = mounted;
     await workspacesRead(fetchMock, 2);
     expect(sceneGroup()).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "新建会话" }));
-    await waitFor(() => expect(currentLocation()).toBe("/"));
+    // 夹具里新会话的 prompt 挂起：交接未完成时 `新建会话` 不导航，经 URL 回欢迎态。
+    await leaveForWelcome(mounted);
     send("你好");
     await waitFor(() => expect(currentLocation()).toBe(`/?session=${CREATED_IDS[1]}`));
     expect(createRequests(fetchMock)).toEqual([CODE_WITH_PROJECT_A, createOf('{"scene":"code"}')]);
