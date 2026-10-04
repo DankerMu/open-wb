@@ -36,6 +36,7 @@ import {
   walkProject,
   walkSidebarCollapse,
 } from "./ui-walk-layout.js";
+import { expectLoginCascade } from "./ui-walk-login.js";
 import { type AuthOracle, runWithBrowserErrorOracle } from "./ui-walk-oracle.js";
 import { walkScrollFollow } from "./ui-walk-scroll.js";
 import { walkFork, walkRegenerate, walkStop } from "./ui-walk-stop.js";
@@ -92,6 +93,7 @@ async function walkProductionOrigin(
 ): Promise<void> {
   await page.goto("/files");
   await expect(page.getByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeVisible();
+  await expectLoginCascade(page, project);
   await page.getByLabel("账号").fill(DEV_ACCOUNT);
   await page.getByLabel("密码").fill(DEV_PASSWORD);
   await page.getByRole("button", { name: "登录" }).click();

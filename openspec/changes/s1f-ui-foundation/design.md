@@ -73,7 +73,7 @@
 - Tailwind 的 `transition*` 工具类在 reduce 下由 `theme.css` 里一条未分层规则统一关掉：
   `@media (prefers-reduced-motion: reduce) { [class*="transition"] { transition: none; } }`。不逐个给拷入组件加 `motion-reduce:`（那会超出「五类修改」）。
   这条是「只有覆盖、没有声明」的 reduce 规则，现行 reduced-motion 静态守卫允许。
-- `tokens.css` 与 `theme.css` 只定义自定义属性与上述未分层规则，不入层。
+- `tokens.css` 与 `theme.css` 只定义自定义属性与上述未分层规则，不入层（唯一例外：D3 的边框色基线在 `base` 层）。
 - preflight 会重置旧页面依赖浏览器默认值的地方（标题字号、列表符号、段落外边距等）。owner 接受过渡期的观感变化；功能由 `make ui-walk` 守住。
 - Biome 2.5 默认把 `@theme`、`@custom-variant` 判为解析错误（「Tailwind-specific syntax is disabled」，formatter 也中止）；`biome.json` 顶层设
   `css.parser.tailwindDirectives: true` 后通过（评审时实测）。`@layer a, b;` 与 `@import … layer(x)` 本身不报错。

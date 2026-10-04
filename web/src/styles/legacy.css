@@ -10,7 +10,6 @@
 @import "../features/chat/messages.css";
 @import "../features/chat/project-config.css";
 @import "../features/files/files.css";
-@import "../features/auth/auth.css";
 @import "../features/settings/settings.css";
 
 *,
@@ -139,16 +138,6 @@ a {
   gap: 8px;
   padding: 28px;
   min-width: 0;
-}
-
-.auth-loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 100dvh;
-  padding: 24px;
-  background: var(--wb-home-bg-primary);
-  color: var(--wb-text-secondary);
 }
 
 @media (max-width: 760px) {

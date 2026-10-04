@@ -203,7 +203,7 @@ export function AuthFooter() {
           {pending ? (
             <p className="text-sm text-muted-foreground">退出请求已发送，关闭窗口不会撤销请求。</p>
           ) : null}
-          <AlertDialogFooter className="border-border">
+          <AlertDialogFooter>
             <AlertDialogCancel ref={cancelRef}>{pending ? "关闭" : "取消"}</AlertDialogCancel>
             <Button
               aria-busy={pending ? true : undefined}

@@ -10,7 +10,7 @@ const COPIED_DIRS = ["web/src/components/ui", "web/src/components/assistant-ui"]
  * `MIGRATED_ALLOWED_IMPORTS`，清单内不得有 `.css`。外壳、登录页、设置页迁移时各自加入。
  * 条目按前缀匹配（见 `isUnder`），所以不写通配、不以 `/` 结尾——否则一个文件也匹配不到。
  */
-const MIGRATED_AREAS: string[] = ["web/src/routes", "web/src/features/auth/footer.tsx"];
+const MIGRATED_AREAS: string[] = ["web/src/routes", "web/src/features/auth"];
 const MIGRATED_ALLOWED_IMPORTS = ["Icon", "IconName", "BrandMark", "useEscapeFallback"];
 
 const FROZEN_DIR = "web/src/ui";
@@ -132,7 +132,7 @@ function areaEntryViolations(areas: string[], paths: string[]): string[] {
 
 describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻结区不增长」）", () => {
   const rules: LayeringRules = {
-    migrated: ["web/src/routes", "web/src/features/auth/footer.tsx"],
+    migrated: ["web/src/routes", "web/src/features/auth"],
     frozen: FROZEN_FILES,
   };
   const check = (path: string, text = "") => layeringViolations([{ path, text }], rules);
@@ -176,7 +176,7 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
     ].join("\n");
     expect(check("web/src/routes/shell/sidebar.tsx", allowed)).toEqual([]);
     const legacy = 'import { Button } from "../../ui/index.js";';
-    expect(check("web/src/features/auth/login-form.tsx", legacy)).toEqual([]);
+    expect(check("web/src/features/settings/page.tsx", legacy)).toEqual([]);
     expect(check("web/src/features/chat/page.tsx", legacy)).toEqual([]);
     expect(check("web/src/features/chat/chat.css")).toEqual([]);
     expect(check("web/src/routes-extra/a.css")).toEqual([]);
@@ -222,7 +222,7 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
       text: /\.tsx?$/.test(path) ? readRepoFile(path) : "",
     }));
     expect(files.some((file) => isUnder(file.path, FROZEN_DIR))).toBe(true);
-    expect(MIGRATED_AREAS).toEqual(["web/src/routes", "web/src/features/auth/footer.tsx"]);
+    expect(MIGRATED_AREAS).toEqual(["web/src/routes", "web/src/features/auth"]);
     expect(
       areaEntryViolations(
         MIGRATED_AREAS,

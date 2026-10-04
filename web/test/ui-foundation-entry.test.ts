@@ -191,7 +191,27 @@ function themeViolations(source: string): string[] {
     violations.push('缺少把 dark 变体绑定到 [data-theme="dark"] 的 @custom-variant');
   }
   if (/\.dark\b/.test(css)) violations.push("出现 .dark 类");
+  violations.push(...borderBaselineViolations(css));
   return violations;
+}
+
+/**
+ * 边框色基线（design D3）：`theme.css` 里唯一入层的规则，恰为 base 层的
+ * `*, ::before, ::after { border-color: var(--border); }`。在 base 层才低于 legacy，
+ * 旧页面自己声明的边框色不受影响；其余规则保持未分层。
+ */
+function borderBaselineViolations(css: string): string[] {
+  const layers = [...css.matchAll(/@layer\b[^{;]*/g)].map(([prelude]) => prelude.trim());
+  if (layers.join("|") !== "@layer base") {
+    return [`边框色基线：@layer 应恰为一个 base 块，实为 ${JSON.stringify(layers)}`];
+  }
+  const block = blockBody(css, /^@layer base\s*\{/m);
+  const rule = block.replace(/\s+/g, " ").trim();
+  return rule === "*, ::before, ::after { border-color: var(--border); }"
+    ? []
+    : [
+        `边框色基线：base 块应只含对 *, ::before, ::after 的 border-color: var(--border)，实为 ${rule}`,
+      ];
 }
 
 describe("theme.css 结构（ui-foundation「映射文件结构」）", () => {
@@ -224,6 +244,15 @@ describe("theme.css 结构（ui-foundation「映射文件结构」）", () => {
         "@custom-variant",
       ],
       [".dark 类", "body {", ".dark body {", ".dark 类"],
+      ["缺边框色基线", /@layer base \{[^}]*\}\s*\}\n/, "", "边框色基线"],
+      ["基线换层", "@layer base {", "@layer legacy {", "边框色基线"],
+      ["基线改色", "border-color: var(--border);", "border-color: var(--input);", "边框色基线"],
+      [
+        "多一个入层块",
+        "body {",
+        "@layer utilities {\n  a {\n    top: 0;\n  }\n}\n\nbody {",
+        "边框色基线",
+      ],
     ];
     for (const [label, from, to, expected] of mutations) {
       const mutated = theme.replace(from, to);
@@ -259,6 +288,8 @@ describe("theme.css 结构（ui-foundation「映射文件结构」）", () => {
     const theme = stripComments(readRepoFile(THEME));
     const reduce = blockBody(theme, /^@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{/m);
     expect(ruleBody(reduce, '[class*="transition"]').trim()).toBe("transition: none;");
-    expect(theme).not.toMatch(/@layer\b/);
+    // 这条覆盖规则不在任何层里：文件唯一的 @layer 是 base 层的边框色基线，位于它之前。
+    expect(theme.slice(theme.indexOf("@media")).includes("@layer")).toBe(false);
+    expect(borderBaselineViolations(theme)).toEqual([]);
   });
 });
