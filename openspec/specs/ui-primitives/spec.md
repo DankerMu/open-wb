@@ -63,7 +63,7 @@ Menu/Popover/Tooltip 的入场动画与 Menu 项过渡 SHALL 在 `prefers-reduce
 
 #### Scenario: 退出确认迁移不回归
 - WHEN 在 jsdom（引入 `radix-platform.ts`）渲染已登录应用并点击侧栏 `退出登录`，分别执行：点击 `取消`；按 Escape；点击 `退出` 后按 Escape（logout 挂起）；同 tick 双击 `退出`；确认后卸载；logout 返回 403 后再次打开并成功；并静态读取 `footer.tsx`、`styles.css`
-- THEN `alertdialog` 标题 `heading` `退出登录？`、说明文案存在、`aria-modal="true"`、初始焦点在 `取消`；`取消`/Escape 关闭且 0 次 logout，Escape 后焦点回 trigger；pending 中 `关闭` 按钮存在、Escape 关闭后请求仍在（恰 1 次）且页面 heading 仍在、焦点回到 `aside` 内 `aria-current="page"` 的链接（trigger 已禁用），204 后回登录页；双击恰 1 次 logout、确认按钮 disabled、trigger disabled；卸载后请求 signal aborted 且无 `console.error`；403 后对话框关闭、footer `alert` 显示错误、重试可成功；`footer.tsx` 不含 `lib/dialog`/`<dialog`/`trapDialogFocus`，`web/src` 的样式文件不含 `.logout-dialog`；CI `make ui-walk` 退出段（定位已为页面范围，不改）通过，经 `render-app-router` 打开退出对话框的既有 `chat-page-lifecycle` 用例不改仍绿
+- THEN `alertdialog` 标题 `heading` `退出登录？`、说明文案存在、`aria-modal="true"`、初始焦点在 `取消`；`取消`/Escape 关闭且 0 次 logout，Escape 后焦点回 trigger；pending 中 `关闭` 按钮存在、Escape 关闭后请求仍在（恰 1 次）且页面 heading 仍在、焦点回到 trigger（`用户菜单` 在退出请求进行中保持可用，见 spa-shell「路由 IA 与侧栏」），204 后回登录页；双击恰 1 次 logout、确认按钮 disabled、trigger 保持可用；卸载后请求 signal aborted 且无 `console.error`；403 后对话框关闭、footer `alert` 显示错误、重试可成功；`footer.tsx` 不含 `lib/dialog`/`<dialog`/`trapDialogFocus`，`web/src` 的样式文件不含 `.logout-dialog`；CI `make ui-walk` 退出段（定位已为页面范围，不改）通过，经 `render-app-router` 打开退出对话框的既有 `chat-page-lifecycle` 用例不改仍绿
 
 #### Scenario: 退出确认框忙碌期焦点
 - **WHEN** 在 jsdom 渲染已登录应用，打开退出确认框并点击 `退出` 使 logout 挂起（确认按钮随即忙碌禁用）
