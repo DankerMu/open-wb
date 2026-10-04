@@ -26,6 +26,22 @@ export function stripComments(css: string): string {
   return css.replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
+/** 字符串/模板字面量（第 1 组，原样保留）或块注释、`//` 行注释。 */
+const TS_STRING_OR_COMMENT =
+  /("(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\.|[^`\\])*`)|\/\*[\s\S]*?\*\/|\/\/[^\n]*/g;
+
+/**
+ * 剥掉 `.ts` 源码里的块注释与 `//` 行注释：注释逐字符换成空格（换行保留），行号与列不变。
+ * 字符串与模板字面量整体跳过，所以 `"https://…"` 里的 `//` 不算注释，字面量里的颜色照样被扫到。
+ * 局限：不认正则字面量，也不解析模板里 `${}` 的嵌套——正则里出现引号或模板嵌套模板时，
+ * 字符串边界会在该处错位，其后同一行（模板则到下一个反引号）的内容可能被误判。
+ */
+export function stripTsComments(source: string): string {
+  return source.replace(TS_STRING_OR_COMMENT, (match, literal: string | undefined) =>
+    literal === undefined ? match.replace(/[^\n]/g, " ") : match,
+  );
+}
+
 /** 从 `opener` 首次出现处的 `{` 起按括号配对取块体（不含外层花括号）。 */
 export function blockBody(css: string, opener: RegExp): string {
   const match = opener.exec(css);

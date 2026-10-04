@@ -5,6 +5,7 @@ import {
   listRepoFiles,
   readRepoFile,
   stripComments,
+  stripTsComments,
 } from "./ui-support.js";
 
 const PALETTE_PATTERN = /--wb-palette-/;
@@ -56,6 +57,34 @@ describe("颜色 grep 守卫", () => {
     expect(hitsIn(paths, paletteHits)).toEqual([]);
   });
 
+  it("去注释自证：行注释与块注释被剥掉且行号不变，字符串里的 // 与颜色保留", () => {
+    const hits = (text: string) => literalHits(stripTsComments(text));
+    const line44 = readRepoFile("web/src/features/chat/stream-steps.ts").split("\n")[43] ?? "";
+    expect(line44).toContain("（#367）");
+    expect(literalHits(line44)).toHaveLength(1);
+    expect(hits(line44)).toEqual([]);
+    expect(hits("const a = 1; // 见 #1234\n/* #abc\n rgba(0,0,0,.5) */")).toEqual([]);
+    expect(hits('/* 注释 */\n// 注释\nconst c = "#abcdef";')).toEqual(['3: const c = "#abcdef";']);
+    expect(hits('const u = "https://example.test/#fff";')).toHaveLength(1);
+    expect(hits("const u = 'a//b'; const c = 'rgb(1 2 3)';")).toHaveLength(1);
+    expect(hits("const t = `bg-[#123456] // 不是注释`;")).toHaveLength(1);
+    expect(paletteHits(stripTsComments("// var(--wb-palette-gray-3)"))).toEqual([]);
+    expect(paletteHits(stripTsComments('const v = "var(--wb-palette-gray-3)";'))).toHaveLength(1);
+  });
+
+  it("features/routes 去注释后的 .ts 无 hex/rgba 字面颜色与 --wb-palette-", () => {
+    const paths = [
+      ...listRepoFiles("web/src/features", (path) => path.endsWith(".ts")),
+      ...listRepoFiles("web/src/routes", (path) => path.endsWith(".ts")),
+    ];
+    expect(paths).toContain("web/src/features/chat/stream-steps.ts");
+    const find = (text: string) => {
+      const code = stripTsComments(text);
+      return [...literalHits(code), ...paletteHits(code)];
+    };
+    expect(hitsIn(paths, find)).toEqual([]);
+  });
+
   it("web/src/ui/**/*.tsx 无内联 style={", () => {
     const ui = listRepoFiles("web/src/ui", (path) => path.endsWith(".tsx"));
     expect(ui.length).toBeGreaterThan(0);
@@ -66,9 +95,17 @@ describe("颜色 grep 守卫", () => {
 });
 
 describe("依赖方向 grep 守卫", () => {
-  /** 静态 `from "@radix-ui/…"` 与动态 `import("@radix-ui/…")`。 */
-  const RADIX_IMPORT_PATTERNS = [/from\s+["']@radix-ui\//, /import\(\s*["']@radix-ui\//];
+  /** 静态 `from "…"`、副作用 `import "…"` 与动态 `import("…")`，目标为 `@radix-ui/…` 单包或 `radix-ui` 合包。 */
+  const RADIX_IMPORT_PATTERNS = [/(?:from|import)\s*\(?\s*["'](?:@radix-ui\/|radix-ui["'/])/];
   const radixHits = (text: string) => lineHits(text, RADIX_IMPORT_PATTERNS);
+  /** 只有拷入层与冻结区可以导入 Radix；其余 `web/src` 都是应用层。 */
+  const RADIX_ALLOWED_DIRS = [
+    "web/src/components/ui/",
+    "web/src/components/assistant-ui/",
+    "web/src/ui/",
+  ];
+  const isApplicationLayer = (path: string) =>
+    /\.tsx?$/.test(path) && !RADIX_ALLOWED_DIRS.some((dir) => path.startsWith(dir));
 
   it("正则命中静态与动态 @radix-ui import，不命中基元出口", () => {
     expect(radixHits('import * as X from "@radix-ui/react-toast";')).toHaveLength(1);
@@ -77,15 +114,42 @@ describe("依赖方向 grep 守卫", () => {
     expect(radixHits('import { X } from "../../ui/index.js";')).toEqual([]);
   });
 
-  it("features/routes 的 .ts/.tsx 不直接 import @radix-ui（仅 web/src/ui 可以）", () => {
-    const source = (path: string) => /\.tsx?$/.test(path);
-    const paths = [
-      ...listRepoFiles("web/src/features", source),
-      ...listRepoFiles("web/src/routes", source),
-    ];
-    expect(paths.length).toBeGreaterThan(0);
-    expect(paths.some((path) => path.startsWith("web/src/ui/"))).toBe(false);
+  it("正则命中 radix-ui 合包的静态、子路径、副作用与动态导入，不命中同名后缀的包", () => {
+    expect(radixHits('import { Slot } from "radix-ui";')).toHaveLength(1);
+    expect(radixHits("import { Dialog } from 'radix-ui';")).toHaveLength(1);
+    expect(radixHits('import { X } from "radix-ui/internal";')).toHaveLength(1);
+    expect(radixHits('import "radix-ui";')).toHaveLength(1);
+    expect(radixHits('const X = await import("radix-ui");')).toHaveLength(1);
+    expect(radixHits('import { X } from "not-radix-ui";')).toEqual([]);
+    expect(radixHits('import { X } from "radix-ui-themes";')).toEqual([]);
+    expect(radixHits('import { Button } from "@/components/ui/button";')).toEqual([]);
+  });
+
+  it("应用层判定：只有两个拷入目录与 web/src/ui 之下的文件不算应用层", () => {
+    expect(isApplicationLayer("web/src/main.tsx")).toBe(true);
+    expect(isApplicationLayer("web/src/lib/utils.ts")).toBe(true);
+    expect(isApplicationLayer("web/src/features/auth/footer.tsx")).toBe(true);
+    expect(isApplicationLayer("web/src/components/shell.tsx")).toBe(true);
+    expect(isApplicationLayer("web/src/components/ui-extra/a.tsx")).toBe(true);
+    expect(isApplicationLayer("web/src/uix/a.ts")).toBe(true);
+    expect(isApplicationLayer("web/src/components/ui/button.tsx")).toBe(false);
+    expect(isApplicationLayer("web/src/components/assistant-ui/thread.tsx")).toBe(false);
+    expect(isApplicationLayer("web/src/ui/dialog.tsx")).toBe(false);
+    expect(isApplicationLayer("web/src/styles.css")).toBe(false);
+  });
+
+  it("应用层（web/src 除拷入层与 web/src/ui 外的全部 .ts/.tsx）不直接 import Radix", () => {
+    const paths = listRepoFiles("web/src", isApplicationLayer);
+    for (const dir of ["web/src/features/", "web/src/routes/", "web/src/lib/"]) {
+      expect(paths.some((path) => path.startsWith(dir))).toBe(true);
+    }
+    expect(paths).toContain("web/src/main.tsx");
+    expect(paths.some((path) => RADIX_ALLOWED_DIRS.some((dir) => path.startsWith(dir)))).toBe(
+      false,
+    );
     expect(hitsIn(paths, radixHits)).toEqual([]);
+    // 对照：同一正则在拷入层的真实文件上命中，上面的空结果不是正则失效。
+    expect(radixHits(readRepoFile("web/src/components/ui/button.tsx"))).toHaveLength(1);
   });
 });
 
@@ -160,5 +224,31 @@ describe("ATTRIBUTION.md", () => {
     expect(radix.length).toBeGreaterThan(0);
     const attribution = readRepoFile("ATTRIBUTION.md");
     for (const name of radix) expect(attribution).toContain(`\`${name}\``);
+  });
+
+  /** 条目标题行 `- **<名称>** —— <许可>`：名称全等，且同一行写明许可。 */
+  const hasEntry = (text: string, name: string, licence: RegExp) =>
+    text
+      .split("\n")
+      .some((line) => line.startsWith(`- **${name}** `) && licence.test(line.slice(name.length)));
+
+  it("登记 Tailwind CSS（tailwindcss）、shadcn/ui 与 radix-ui 合包，各带许可", () => {
+    const attribution = readRepoFile("ATTRIBUTION.md");
+    expect(hasEntry(attribution, "Tailwind CSS", /\bMIT\b/)).toBe(true);
+    expect(attribution).toContain("`tailwindcss`");
+    expect(hasEntry(attribution, "shadcn/ui", /\bMIT\b/)).toBe(true);
+    expect(hasEntry(attribution, "radix-ui", /\bMIT\b/)).toBe(true);
+  });
+
+  it("登记判定自证：缺许可、名称只出现在正文、名称不全等都不算登记", () => {
+    expect(hasEntry("- **radix-ui** —— `MIT License`,版权归 WorkOS", "radix-ui", /\bMIT\b/)).toBe(
+      true,
+    );
+    expect(hasEntry("- **radix-ui** —— 版权归 WorkOS", "radix-ui", /\bMIT\b/)).toBe(false);
+    expect(hasEntry("  - 用途：`radix-ui` 合包（MIT）", "radix-ui", /\bMIT\b/)).toBe(false);
+    expect(hasEntry("- **Radix UI Primitives** —— `MIT License`", "radix-ui", /\bMIT\b/)).toBe(
+      false,
+    );
+    expect(hasEntry("- **shadcn/ui-extras** —— `MIT License`", "shadcn/ui", /\bMIT\b/)).toBe(false);
   });
 });

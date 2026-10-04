@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 文件行数守卫：产品代码单文件 ≤ MAX 行（constraints.yaml size_limits.max_file_lines）。
 # 用法：size-guard.sh [file...]；无参数时扫描产品目录全部源码。
+# 豁免：registry 拷入层的两个目录不计行数（constraints.yaml exemptions.entries，依据 ADR-0013）。
 set -euo pipefail
 MAX=800
 files=()
@@ -16,6 +17,7 @@ fi
 fail=0
 for f in "${files[@]}"; do
   [ -f "$f" ] || continue
+  case "${f#./}" in web/src/components/ui/*|web/src/components/assistant-ui/*) continue ;; esac
   case "$f" in *.ts|*.tsx|*.py) ;; *) continue ;; esac
   lines=$(wc -l < "$f")
   if [ "$lines" -gt "$MAX" ]; then

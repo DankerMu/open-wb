@@ -17,7 +17,8 @@
         "test/**/*.test.ts",
         "test/**/*.test.tsx"
       ],
-      "project": ["src/**", "test/**"]
+      "project": ["src/**", "test/**"],
+      "ignore": ["src/components/ui/**", "src/components/assistant-ui/**"]
     }
   }
 }

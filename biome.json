@@ -38,5 +38,13 @@
         "noConsole": "off"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["web/src/components/ui/**", "web/src/components/assistant-ui/**"],
+      "linter": {
+        "enabled": false
+      }
+    }
+  ]
 }

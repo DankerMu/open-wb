@@ -37,6 +37,14 @@
   - 用途：`web/src/ui/` 无样式交互基元。已安装 `@radix-ui/react-switch`（#276,`Switch` 基元）、`@radix-ui/react-dialog`（#277,`Dialog`/`ConfirmDialog`/`Drawer` 基元）、`@radix-ui/react-dropdown-menu`、`@radix-ui/react-popover`、`@radix-ui/react-tooltip`、`@radix-ui/react-radio-group`（#278,`Menu`/`Popover`/`Tooltip`/`SegmentedControl` 基元）、`@radix-ui/react-toast`（#279,`ToastProvider`/`useToast` 基元）。
   - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;安装后随打包产物分发时须附带该 MIT 声明。
 
+- **radix-ui** —— `MIT License`,版权归 WorkOS（https://github.com/radix-ui/primitives）
+  - 用途：Radix UI Primitives 的合包（单一入口再导出各基元）,只供拷入层 `web/src/components/ui/` 导入;与上条保留的各 `@radix-ui/*` 单包并存到旧基元层退役。
+  - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;随打包产物分发时须附带该 MIT 声明。
+
+- **shadcn/ui** —— `MIT License`,版权归 shadcn（https://github.com/shadcn-ui/ui）
+  - 用途：`web/src/components/ui/` 的组件源码由其 registry（`radix-nova` 版式,配置见 `web/components.json`）拷入,拷入后只做颜色变量、中文文案、格式化与 `cn` 导入归一（`@/lib/utils`）四类修改;组件依赖 `class-variance-authority`（Apache-2.0）、`clsx`（MIT）、`tailwind-merge`（MIT）。
+  - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;拷入的源码随打包产物分发时须附带该 MIT 声明。
+
 - **Tailwind CSS** —— `MIT License`,版权归 Tailwind Labs, Inc.（https://github.com/tailwindlabs/tailwindcss）
   - 用途：`web/` 样式引擎。`tailwindcss`（theme / preflight / utilities 三段,经 `web/src/styles.css` 分层导入）与构建插件 `@tailwindcss/vite`;生成的 CSS 构建时打包进 `web/dist`,运行时零网络请求。
   - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;preflight 等样式随打包产物分发时须附带该 MIT 声明。

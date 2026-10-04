@@ -7,7 +7,7 @@
 > - 「行为不变」的证据是既有行为断言（按角色/可访问名）原样通过；只允许删除或改写读源码、读 `.css`、按旧类名选择的断言，不得为通过而放宽行为断言。
 > - 不改 `web/src/features/chat/**`、`web/src/features/files/**` 的实现；`web/src/ui/**` 冻结（唯一例外：组 3 在 `index.ts` 加 `useEscapeFallback` 导出）；不改任何 `server/**`。
 >   会话页/文件页的**测试**只在点名处改选择器或读取的文件。
-> - 拷入层只做三类修改：颜色字面量换主题变量、可见与 aria 文案中文化、Biome 格式化。
+> - 拷入层只做四类修改：颜色字面量换主题变量、可见与 aria 文案中文化、Biome 格式化、`cn` 的导入归一到 `@/lib/utils`（registry 下发的是 `import { cn } from "cn"`；不装 `cn` 包）。
 > - size-guard：新写的应用层文件 ≤800 行；新测试写进新文件。
 
 ## 1a. ui-foundation — Tailwind 接入、层叠顺序与主题映射
@@ -32,14 +32,14 @@ Minimal mergeable slice: atomic - 层声明、`legacy.css`、Tailwind 三段导�
 
 ## 1b. ui-foundation — 别名、组件分层、门槛豁免与分层守卫
 
-- [ ] 1b.1 模块解析与别名（design D1）：`web/tsconfig.json` 覆盖 `module: ESNext`、`moduleResolution: Bundler`、`paths {"@/*": ["./src/*"]}`；`web/vite.config.ts` 加 `resolve.alias`；
+- [x] 1b.1 模块解析与别名（design D1）：`web/tsconfig.json` 覆盖 `module: ESNext`、`moduleResolution: Bundler`、`paths {"@/*": ["./src/*"]}`；`web/vite.config.ts` 加 `resolve.alias`；
   `web/vitest.config.ts` 复用 alias；knip 能解析 `@/`（必要时在 `knip.json` 的 web workspace 加 `paths`）。
-- [ ] 1b.2 组件分层（design D4）：依赖加 `radix-ui`、`class-variance-authority`、`clsx`、`tailwind-merge`；`web/components.json` 入库；`web/src/lib/utils.ts`（`cn`）；拷入 `button`；
+- [x] 1b.2 组件分层（design D4）：依赖加 `radix-ui`、`class-variance-authority`、`clsx`、`tailwind-merge`；`web/components.json` 入库；`web/src/lib/utils.ts`（`cn`）；拷入 `button`；
   新增测试文件从 `@/components/ui/button` 导入并渲染（别名在 tsc / vitest / knip 下的证据；Vite 侧证据在组 3）。
-- [ ] 1b.3 门槛豁免（design D5）：`web/vitest.config.ts` coverage 排除、`.jscpd.json`、`scripts/size-guard.sh` 前缀排除、`biome.json` overrides、`knip.json` ignore，条目只指向两个拷入目录；
+- [x] 1b.3 门槛豁免（design D5）：`web/vitest.config.ts` coverage 排除、`.jscpd.json`、`scripts/size-guard.sh` 前缀排除、`biome.json` overrides、`knip.json` ignore，条目只指向两个拷入目录；
   `constraints.yaml` `exemptions.entries` 登记；`scripts/test-guardrails.sh` 加「应用层 801 行被拒 / 拷入层 801 行通过」两例（仓库内相对路径、用后清理）；
   `AGENTS.md` 在「阈值与正则…」说明段之后、`### Known blind spots` 之前加一行豁免注记；`ATTRIBUTION.md` 登记 shadcn/ui 与 `radix-ui`。
-- [ ] 1b.4 分层守卫（design D6）：Radix 导入扫描范围改为除拷入层与 `web/src/ui` 外的全部 `web/src`，并匹配 `radix-ui`；颜色字面量扫描扩到去掉块注释与 `//` 行注释后的 `.ts`（不改 `features/chat/stream-steps.ts`）；
+- [x] 1b.4 分层守卫（design D6）：Radix 导入扫描范围改为除拷入层与 `web/src/ui` 外的全部 `web/src`，并匹配 `radix-ui`；颜色字面量扫描扩到去掉块注释与 `//` 行注释后的 `.ts`（不改 `features/chat/stream-steps.ts`）；
   已迁移区域清单（此时为空）与冻结区清单（32 个文件名）及注入样本自证；豁免路径精确（读五处配置、`constraints.yaml` 与 `AGENTS.md` 注记）；ATTRIBUTION 登记检查加 `radix-ui`、`tailwindcss`、shadcn/ui。
 
 Suggested fixture level: expanded - 改模块解析（tsc/Vite/vitest/knip 四处）与五个质量门的配置；豁免是否外溢需注入违例自证
