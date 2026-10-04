@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Tailwind 入口与层叠顺序
-`web/src/styles.css` SHALL 是唯一样式入口（`web/index.html` 的 `<link>` 不变），其第一条规则 SHALL 是层声明 `@layer theme, base, legacy, components, utilities;`。Tailwind 的 theme、preflight、utilities SHALL 分别导入到 `theme`、`base`、`utilities` 层。迁移前既有的样式（原 `styles.css` 的全局规则——全局 reduced-motion 块除外——以及 `web/src/ui/*.css`、尚未迁移的 feature 与 routes 的 `.css`）SHALL 集中在 `web/src/styles/legacy.css`，并由 `styles.css` 以 `@import "./styles/legacy.css" layer(legacy);` 导入；`styles.css` 中除 Tailwind 三段、`tw-animate-css`、`./styles/tokens.css`、`./styles/theme.css` 与这一条之外 SHALL 没有其它 `@import`，`legacy.css` 之外 SHALL 没有对既有 `.css` 的导入。`tokens.css`、`theme.css` 与全局 reduced-motion 块不入层。由此：未分层规则压过 utilities，utilities 压过 `legacy`，`legacy` 压过 preflight。已迁移区域的样式 SHALL 只用 Tailwind 类与主题变量（`Icon`、`BrandMark` 自带的 `ui-*` 类除外，它们的规则留在 `legacy` 层），不再新增 `.css` 文件。尚未迁移的页面在 preflight 生效后 SHALL 保持功能可用（`make ui-walk` 全绿）；它们因 preflight 产生的观感变化不修复。
+`web/src/styles.css` SHALL 是唯一样式入口（`web/index.html` 的 `<link>` 不变），其第一条规则 SHALL 是层声明 `@layer theme, base, legacy, components, utilities;`。Tailwind 的 theme、preflight、utilities SHALL 分别导入到 `theme`、`base`、`utilities` 层。迁移前既有的样式（原 `styles.css` 的全局规则——全局 reduced-motion 块除外——以及 `web/src/ui/*.css`、尚未迁移的 feature 与 routes 的 `.css`）SHALL 集中在 `web/src/styles/legacy.css`，并由 `styles.css` 以 `@import "./styles/legacy.css" layer(legacy);` 导入；`styles.css` 中除 Tailwind 三段、`tw-animate-css`、`./styles/tokens.css`、`./styles/theme.css` 与这一条之外 SHALL 没有其它 `@import`，既有 `.css` SHALL 只被 `legacy.css` 直接导入，或经冻结区的 `web/src/ui/ui.css` 传递导入。`tokens.css`、`theme.css` 与全局 reduced-motion 块不入层。由此：未分层规则压过 utilities，utilities 压过 `legacy`，`legacy` 压过 preflight。已迁移区域的样式 SHALL 只用 Tailwind 类与主题变量（`Icon`、`BrandMark` 自带的 `ui-*` 类除外，它们的规则留在 `legacy` 层），不再新增 `.css` 文件。尚未迁移的页面在 preflight 生效后 SHALL 保持功能可用（`make ui-walk` 全绿）；它们因 preflight 产生的观感变化不修复。
 
 #### Scenario: utilities 压过旧全局规则
 - **WHEN** `make ui-walk` 打开登录页，读取主按钮 `登录` 的计算 `background-color`
@@ -13,7 +13,7 @@
 
 #### Scenario: 入口结构不可缺失或重排
 - **WHEN** 静态读取 `web/src/styles.css` 与 `web/src/styles/legacy.css`
-- **THEN** `styles.css` 的第一条规则是 `@layer theme, base, legacy, components, utilities;`；它对 `./styles/legacy.css` 的导入带 `layer(legacy)`，对 `tokens.css` 与 `theme.css` 的导入不带 `layer(...)`，此外只有 Tailwind 三段与 `tw-animate-css` 的导入；`web/src` 下其它既有 `.css` 只被 `legacy.css` 导入
+- **THEN** `styles.css` 的第一条规则是 `@layer theme, base, legacy, components, utilities;`；它对 `./styles/legacy.css` 的导入带 `layer(legacy)`，对 `tokens.css` 与 `theme.css` 的导入不带 `layer(...)`，此外只有 Tailwind 三段与 `tw-animate-css` 的导入；`web/src` 下其它既有 `.css` 只被 `legacy.css` 直接导入或经 `web/src/ui/ui.css` 传递导入
 
 ### Requirement: 主题映射
 `web/src/styles/theme.css` SHALL 定义 shadcn/ui 约定的语义变量：`--background`、`--foreground`、`--card`、`--card-foreground`、`--popover`、`--popover-foreground`、`--primary`、`--primary-foreground`、`--secondary`、`--secondary-foreground`、`--muted`、`--muted-foreground`、`--accent`、`--accent-foreground`、`--destructive`、`--border`、`--input`、`--ring`、`--radius`、`--sidebar`、`--sidebar-foreground`、`--sidebar-border`、`--sidebar-accent`、`--sidebar-accent-foreground`。每个颜色变量的值 SHALL 是对 `tokens.css` 中 `--wb-*` token 的引用（本文件与 `web/src/ui/**/*.css` 同为调色板到组件的映射边界，可引用 `--wb-palette-*`），不写颜色字面量。沿用现有配色体系意味着以下对应 SHALL 成立：
@@ -58,7 +58,7 @@ web SHALL 采用两层加一个冻结区：`web/src/components/ui/`（由 shadcn
 
 #### Scenario: 豁免路径精确
 - **WHEN** 守卫测试读取 `web/vitest.config.ts` 的 coverage 排除项、`.jscpd.json` 的 `ignore`、`scripts/size-guard.sh` 的排除前缀、`biome.json` 的 `overrides` 与 `knip.json` 的 web `ignore`
-- **THEN** 每处为本 change 新增的条目都只匹配 `web/src/components/ui` 与 `web/src/components/assistant-ui` 之下的路径；`biome.json` 对这两个目录的 override 不关闭 formatter；`constraints.yaml` `exemptions.entries` 含这两个目录
+- **THEN** 每处为本 change 新增的条目都只匹配 `web/src/components/ui` 与 `web/src/components/assistant-ui` 之下的路径；`biome.json` 对这两个目录的 override 不关闭 formatter；`constraints.yaml` `exemptions.entries` 含这两个目录；`AGENTS.md` 在 `## Enforcement Index` 与 `### Known blind spots` 之间含一行同时提到这两个目录与 ADR-0013 的注记
 
 #### Scenario: 归属登记完整
 - **WHEN** 读取 `ATTRIBUTION.md` 与 `web/package.json`

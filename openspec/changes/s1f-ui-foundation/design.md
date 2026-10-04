@@ -126,8 +126,8 @@
 
 `web/test/ui-guardrails.test.ts`：
 
-- 保留并扩展：颜色字面量与 `--wb-palette-` 扫描——范围为 features/routes 的 `.css`、`.tsx` 与**去注释后的** `.ts`（`web/test/ui-support.ts` 已有 `stripComments`；
-  `features/chat/stream-steps.ts` 注释里的 `（#367）` 不得命中）；Radix 导入扫描——范围改为 `web/src` 下除两个拷入目录与 `web/src/ui` 之外的全部 `.ts`/`.tsx`，
+- 保留并扩展：颜色字面量与 `--wb-palette-` 扫描——范围为 features/routes 的 `.css`、`.tsx` 与**去注释后的** `.ts`（`web/test/ui-support.ts` 的 `stripComments` 只剥 `/* */`，为 `.ts` 另加剥 `//` 行注释的步骤；
+  `features/chat/stream-steps.ts:44` 行注释里的 `（#367）` 不得命中，不改该文件）；Radix 导入扫描——范围改为 `web/src` 下除两个拷入目录与 `web/src/ui` 之外的全部 `.ts`/`.tsx`，
   匹配 `@radix-ui/` 与 `radix-ui`；`ATTRIBUTION.md` 登记检查加 `radix-ui`、`tailwindcss`、shadcn/ui。
 - 新增：入口结构（规格「入口结构不可缺失或重排」）；`theme.css` 结构（规格「映射文件结构」）；已迁移区域清单与冻结区清单及其注入样本自证；豁免路径精确。
   已迁移区域清单在引入时为空，组 3/4/5 各自把目录加入。
@@ -159,6 +159,8 @@
 - `lib/topbar.tsx`、`lib/sidebar-slot.tsx`、`lib/viewport.ts` 的导出与语义不变（会话页是它们的调用方，本 change 不改会话页实现）。
 - `features/auth/footer.tsx`（用户菜单 + 退出确认）重写：菜单用 `dropdown-menu`，确认框用 `alert-dialog`。忙碌态、`关闭` 文案、失败提示与 `关闭提示`、
   覆盖层重开不丢锁定态、初始焦点在取消按钮、关闭时按触发器是否禁用把焦点归还到触发器或 `aside` 内 `a[aria-current=page]`（`onCloseAutoFocus` 在应用层实现）不变。
+  **忙碌期焦点救回**：旧实现靠 `web/src/ui/dialog.tsx:68-81` 的 `useBusyFocusRescue`（冻结区内、未导出）。`footer.tsx` 在应用层用一个 effect 重现同一行为——
+  `pending` 上升沿时若活动元素被禁用或不在确认框内，把焦点移到取消按钮；`web/e2e/ui-walk.spec.ts:154-160` 的既有断言原样通过即为证据。
 - **Escape 兜底**（#643）：Toast 仍是旧实现（`@radix-ui/react-toast`），它的层会让导航覆盖层与确认框收不到 Escape。`web/src/ui/index.ts` 增加导出 `useEscapeFallback`
   （冻结区唯一允许的内容变更），外壳把它返回的 `ref` / `onEscapeKeyDown` / `onKeyDown` 经 props 传给 `SheetContent` 与 `AlertDialogContent`（Radix Content 透传这些 props，不改拷入代码）。
   `radix-ui` 合包与旧 `@radix-ui/*` 单包是否共用同一份 DismissableLayer 要等 lockfile 生成才知道；两种情况下兜底都成立（它不依赖层栈），
@@ -198,7 +200,7 @@
 - `AGENTS.md`：Verification Matrix 去掉「demo 一致性截图对」行，Enforcement Index 去掉对应行；在豁免注记旁加一行指向功能验收清单的注记（同样在锚外）；
   「demo 文件头的来源注释在编辑时必须保留」保留（demo 文件仍在）。
 - `scripts/test-ci-harness.sh`：内嵌 oracle 的矩阵行、enforcement 行、surface 元组、wanted 表、页头、safe_overrides、targets 集合与 `.PHONY`、freeze_block 与 recipes 八类断言，
-  以及 `:144-145` 的整段锚与 `:156-171` 的突变用例同步去掉 `ui-shots`；新增断言「`web/package.json` 无 `ui-shots` 脚本」与突变用例「重新加入 `ui-shots` surface / target / AGENTS 行被拒」。
+  以及 `:144-145` 的整段锚与 `:155-174` 一带全部含 `ui-shots` 的突变用例同步去掉 `ui-shots`；新增断言「`web/package.json` 无 `ui-shots` 脚本」与突变用例「重新加入 `ui-shots` surface / target / AGENTS 行被拒」。
 - 新增 `docs/acceptance/functional-checklist.md`：文件头（运行方式、签收规则）+ 分节骨架；新增其格式守卫测试（`web/test`，读仓库文件，含注入样本自证）。
   外壳/登录/设置的行由各自的迁移任务加入。
 - `docs/acceptance/demo-parity-checklist.md`、`docs/reviews/2026-09-24-demo-parity-audit.md`、ADR-0011 与 `IMPLEMENTATION_PLAN.md` 里对 `ui-shots` 的既有提及是历史记录，不改。

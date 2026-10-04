@@ -37,8 +37,8 @@ Minimal mergeable slice: atomic - 层声明、`legacy.css`、Tailwind 三段导�
 - [ ] 1b.3 门槛豁免（design D5）：`web/vitest.config.ts` coverage 排除、`.jscpd.json`、`scripts/size-guard.sh` 前缀排除、`biome.json` overrides、`knip.json` ignore，条目只指向两个拷入目录；
   `constraints.yaml` `exemptions.entries` 登记；`scripts/test-guardrails.sh` 加「应用层 801 行被拒 / 拷入层 801 行通过」两例（仓库内相对路径、用后清理）；
   `AGENTS.md` 在「阈值与正则…」说明段之后、`### Known blind spots` 之前加一行豁免注记；`ATTRIBUTION.md` 登记 shadcn/ui 与 `radix-ui`。
-- [ ] 1b.4 分层守卫（design D6）：Radix 导入扫描范围改为除拷入层与 `web/src/ui` 外的全部 `web/src`，并匹配 `radix-ui`；颜色字面量扫描扩到去注释后的 `.ts`；
-  已迁移区域清单（此时为空）与冻结区清单（32 个文件名）及注入样本自证；豁免路径精确（读五处配置）；ATTRIBUTION 登记检查加 `radix-ui`、`tailwindcss`、shadcn/ui。
+- [ ] 1b.4 分层守卫（design D6）：Radix 导入扫描范围改为除拷入层与 `web/src/ui` 外的全部 `web/src`，并匹配 `radix-ui`；颜色字面量扫描扩到去掉块注释与 `//` 行注释后的 `.ts`（不改 `features/chat/stream-steps.ts`）；
+  已迁移区域清单（此时为空）与冻结区清单（32 个文件名）及注入样本自证；豁免路径精确（读五处配置、`constraints.yaml` 与 `AGENTS.md` 注记）；ATTRIBUTION 登记检查加 `radix-ui`、`tailwindcss`、shadcn/ui。
 
 Suggested fixture level: expanded - 改模块解析（tsc/Vite/vitest/knip 四处）与五个质量门的配置；豁免是否外溢需注入违例自证
 Minimal mergeable slice: atomic - 拷入的 `button` 没有豁免即被覆盖率与 Biome linter 拒绝，没有别名即 TS2307，没有消费测试则 `radix-ui` 等依赖与 `lib/utils.ts` 被 knip 报未使用；豁免与守卫若先于首个拷入组件合入则无对象可证。验证路径单一：`make check` + `make test-guardrails`。依赖：1a（`button` 的类依赖主题变量；`AGENTS.md` 无交集）。
@@ -47,7 +47,7 @@ Minimal mergeable slice: atomic - 拷入的 `button` 没有豁免即被覆盖率
 
 - [ ] 2.1 删除 `web/e2e/ui-shots.mjs`、`web/package.json` 的 `ui-shots` 脚本；Makefile 去掉 `ui-shots` 目标、`UI_SHOTS_*` 块、`.PHONY` 项与页头注释句（design D10）。
 - [ ] 2.2 `constraints.yaml` `verification.surfaces` 去掉 `ui-shots`；`AGENTS.md` Verification Matrix 与 Enforcement Index 各去掉「demo 一致性截图对」一行，并在 1b.3 的注记旁加一行指向功能验收清单与其签收规则的注记。
-- [ ] 2.3 `scripts/test-ci-harness.sh`：内嵌 oracle 的八类断言、`:144-145` 的整段锚与 `:156-171` 的突变用例同步去掉 `ui-shots`；新增「`web/package.json` 无 `ui-shots` 脚本」断言与
+- [ ] 2.3 `scripts/test-ci-harness.sh`：内嵌 oracle 的八类断言、`:144-145` 的整段锚与 `:155-174` 一带全部含 `ui-shots` 的突变用例同步去掉 `ui-shots`；新增「`web/package.json` 无 `ui-shots` 脚本」断言与
   「重新加入 `ui-shots` surface / target / AGENTS 行被拒」的突变用例。
 - [ ] 2.4 新增 `docs/acceptance/functional-checklist.md`：文件头（运行方式、四列格式、三种结论、签收规则）+ 分节骨架（登录、外壳、会话、文件、设置），本任务不写数据行；
   新增其格式守卫测试（四列、ID 唯一、三值、无 `demo:`、无 `<数字>px` 与 `.`/`#` 选择器，含注入样本自证）。
@@ -59,7 +59,7 @@ Minimal mergeable slice: atomic - AGENTS.md 行、constraints surface、Makefile
 
 - [ ] 3.1 拷入 `sheet`、`tooltip`、`dropdown-menu`、`alert-dialog`、`separator`（按需）；`routes/shell/{app-shell,sidebar,topbar}.tsx` 按 design D7 重写，删除 `sidebar.css`、`topbar.css` 并从 `legacy.css` 去掉其 `@import`。
   保留 `aside` 的类 `sidebar` 与 `data-variant`；主区布局契约以 Tailwind 等价重现后删除 `legacy.css` 里只服务旧外壳的规则（`.app-shell`、`.app-content*`）；`ui-alert` 等仍被会话页/文件页使用的全局类不删。
-- [ ] 3.2 `features/auth/footer.tsx`（用户菜单、退出确认、失败提示）按 D7 重写；`web/src/ui/index.ts` 加 `useEscapeFallback` 导出，外壳把它接到导航覆盖层与退出确认的内容元素上。
+- [ ] 3.2 `features/auth/footer.tsx`（用户菜单、退出确认、失败提示）按 D7 重写；`web/src/ui/index.ts` 加 `useEscapeFallback` 导出，外壳把它接到导航覆盖层与退出确认的内容元素上；`footer.tsx` 在应用层重现忙碌期焦点救回（design D7），新增 jsdom 用例「`pending` 上升沿后活动元素为 `关闭`、Tab 不出确认框」，ui-walk 退出段原样通过。
 - [ ] 3.3 `lib/topbar.tsx`、`lib/sidebar-slot.tsx`、`lib/viewport.ts` 的导出与语义不变；actions 容器改 `data-slot="topbar-actions"`。
 - [ ] 3.4 测试：`sidebar`、`sidebar-slot`、`app-shell-responsive`、`topbar`、`topbar-actions`、`routes`、`settings-footer`、`ui-toast-drawer-escape` 的行为断言原样通过；
   读 `sidebar.css`/`topbar.css`/`legacy.css` 外壳规则/源码的断言删除或改为行为断言（含「`footer.tsx` 含 `ConfirmDialog`」一条，规格已改）；
