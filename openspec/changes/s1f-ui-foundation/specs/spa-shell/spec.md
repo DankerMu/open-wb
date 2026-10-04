@@ -8,8 +8,8 @@ web workspace SHALL 具备 Vite + React 构建面：`web/index.html`、`src/main
 - THEN 产出 `web/dist/index.html` 与静态资源，退出码 0
 
 #### Scenario: 别名在四处解析一致
-- **WHEN** 一个 `web/src` 模块以 `@/components/ui/button` 导入，依次执行 `make typecheck`、`npm run build --workspace web`、`npm test --workspace web` 与 `make anti-drift`
-- **THEN** 四者都解析到 `web/src/components/ui/button.tsx` 并通过，knip 不把该文件报为未使用
+- **WHEN** 一个 `web/test` 测试文件与一个被入口可达的 `web/src` 应用层模块各自以 `@/…` 导入（前者导入 `@/components/ui/button` 并渲染它），依次执行 `make typecheck`、`npm run build --workspace web`、`npm test --workspace web` 与 `make anti-drift`
+- **THEN** tsc 无 TS2307；Vite 构建成功且产物包含该应用层模块经别名导入的代码；vitest 中该按钮渲染成功；knip 不报 unresolved import，也不把经别名被导入的应用层文件或其依赖包报为未使用
 
 #### Scenario: 门禁兼容
 - WHEN 工具链落地后执行 `make check`
@@ -90,13 +90,17 @@ SPA SHALL 以 history 路由提供 `/`、`/files`、`/center`、`/settings` 四�
 - THEN 新会话与受保护页面保持不变，旧响应不得清除 Principal 或提交文件 UI
 
 ### Requirement: 设置页
-设置页 SHALL 含且仅含两张设置卡：`外观`与`关于`（页面标题 `设置` 由顶栏承担，无 `通用` 卡），以 ui-foundation 规定的组件层与 Tailwind 实现：卡内每行为左侧标题 + 说明、右侧控件。外观卡 SHALL 有 `主题` 行（说明 `浅色 / 深色 / 跟随系统 · 即时生效并持久保存`，右侧为 accessible name `主题` 的单选分段控件，三项 `浅色`/`深色`/`跟随系统`，每项 `role="radio"`，默认 `跟随系统`）与 `当前生效` 行（说明恰为 `浅色|深色 · 持久保存于 localStorage`，并保留可访问文本 `当前生效：浅色|深色`）；所选值 SHALL 以 production key `workbuddy-theme` 持久化为 `light|dark|system`，并把解析结果 `light|dark` 写到 `document.documentElement[data-theme]`。初始 storage 缺失、未知或读取抛错时 SHALL 选择 system；写入抛错不得破坏当前内存选择或向 UI 抛错，刷新后按可读取值（不可读即 system）重新初始化。system 使用唯一 query `(prefers-color-scheme: dark)`，系统偏好 change 时实时更新；固定 light/dark 不改变。`storage` 事件只在 key 为 `workbuddy-theme` 时同步其他 tab，null/unknown 归一化为 system；所有 listener 在 owner 卸载时移除。
+设置页 SHALL 含且仅含两张设置卡：`外观`与`关于`（页面标题 `设置` 由顶栏承担，无 `通用` 卡），以 ui-foundation 规定的组件层与 Tailwind 实现：卡内每行为左侧标题 + 说明、右侧控件。外观卡 SHALL 有 `主题` 行（说明 `浅色 / 深色 / 跟随系统 · 即时生效并持久保存`，右侧为 `role="radiogroup"`、accessible name `主题` 的单选分段控件，三项 `浅色`/`深色`/`跟随系统`，每项 `role="radio"`；再次点击已选项 SHALL 保持其选中、不产生空选择，默认 `跟随系统`）与 `当前生效` 行（说明恰为 `浅色|深色 · 持久保存于 localStorage`，并保留可访问文本 `当前生效：浅色|深色`）；所选值 SHALL 以 production key `workbuddy-theme` 持久化为 `light|dark|system`，并把解析结果 `light|dark` 写到 `document.documentElement[data-theme]`。初始 storage 缺失、未知或读取抛错时 SHALL 选择 system；写入抛错不得破坏当前内存选择或向 UI 抛错，刷新后按可读取值（不可读即 system）重新初始化。system 使用唯一 query `(prefers-color-scheme: dark)`，系统偏好 change 时实时更新；固定 light/dark 不改变。`storage` 事件只在 key 为 `workbuddy-theme` 时同步其他 tab，null/unknown 归一化为 system；所有 listener 在 owner 卸载时移除。
 
 关于卡 SHALL 以品牌 mark 图标 + 名称 + 版本说明一行呈现，在 mount 时经 Provider-owned API operation 请求 `GET /api/info`（relative path、`credentials:"same-origin"`、`cache:"no-store"`），但已有退出请求进行中时 Provider SHALL 返回 null，不启动 info operation、不发起该 GET、不打断退出；About 结束 loading 并显示稳定失败提示，退出结束后的新 mount 恢复普通读取。普通读取 loading 显示 `正在读取服务信息`；只接受恰为 `{name:string,version:string,auth:{provider:string}}`、非空 name、version 符合共享 semver contract、`auth` 恰含非空 `provider` 的 body，成功逐字展示 name 与 `版本 <version>`（provider 不在关于卡展示，仅供登录页快捷登录门控）。非 401 合法错误信封显示其 message；malformed/non-JSON/network 显示 `请求失败，请稍后重试`；current 401 依全局规则清 Principal。About component SHALL 在 effect cleanup 时 abort caller lifecycle signal，Provider SHALL 将其单向链接到自己的 operation controller，故离开设置 route element、更新 Provider operation 或 app unmount 任一情况都 abort 传给 fetch 的 signal 并移除 linkage；迟到响应不得写 UI/auth state。Provider 不感知 router/location。若 info 被 sibling operation supersede 且该 operation 非 401 失败后 authenticated settings 仍 mounted，About SHALL 结束 loading 并显示 `请求失败，请稍后重试`，不得永久停在 loading。不得硬编码 demo 的 `WorkBuddy`/`5.3.11` 作为成功 fallback。
 
 #### Scenario: 主题切换即时生效
 - WHEN 在分段控件选择 `深色`
 - THEN 该 radio 立即选中，根元素 `data-theme` 变为 `dark`，`当前生效：深色` 可见，storage 写入 `workbuddy-theme=dark`；重新 mount 仍为深色
+
+#### Scenario: 再点已选项不改变主题
+- **WHEN** 当前档位为 `深色`，再次点击 `深色`
+- **THEN** `深色` 仍为选中的 radio，`data-theme` 仍为 `dark`，storage 值仍为 `dark`
 
 #### Scenario: 跟随系统
 - WHEN 选择 `跟随系统` 且系统为深色，随后系统改为浅色

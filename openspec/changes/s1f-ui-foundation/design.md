@@ -57,41 +57,52 @@
 @import "./styles/tokens.css";
 @import "./styles/theme.css";
 @import "./styles/legacy.css" layer(legacy);
+
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { /* 原样保留的全局块 */ } }
 ```
 
-- 原 `styles.css` 的全局规则与全部既有 `@import`（`ui/*`、shell、chat、files、auth、settings）移入新文件 `web/src/styles/legacy.css`，整体进 `legacy` 层。
-  本 change 迁走外壳/登录/设置后，从 `legacy.css` 删去它们的 `@import` 并删除对应 `.css` 文件。
-- 层序含义：未分层规则 > utilities > components > legacy > base > theme。旧页面只声明在 `legacy` 的属性压过 preflight；
-  新组件的 utilities 压过 `legacy` 里的全局元素规则（如 `button { background: none }`、`input { border-radius: 8px }`）。
-- `tokens.css` 与 `theme.css` 只定义自定义属性，不入层。
+- 原 `styles.css` 的全局规则（全局 reduced-motion 块除外）与全部既有 `@import`（`ui/*`、shell、chat、files、auth、settings）移入新文件
+  `web/src/styles/legacy.css`，整体进 `legacy` 层；`legacy.css` 内的 `@import` 不带 `layer()`。迁走外壳/登录/设置时从 `legacy.css` 删去它们的 `@import` 并删除对应 `.css`。
+- 层序含义：未分层 > utilities > components > legacy > base > theme。旧页面在 `legacy` 的声明压过 preflight；新组件的 utilities 压过
+  `legacy` 里的全局元素规则（`button { background: none }`、`input { border-radius: 8px }` 等）。
+- **全局 reduced-motion 块留在 `styles.css`、不入层**：它没有 `!important`，进了 `legacy` 层就压不住 utilities 层里 `tw-animate-css` 与 `duration-*` 设的动画时长。
+  留在原文件也使 `ui-reduced-motion.test.ts`「`styles.css` 恰有一个全局块」的断言不用改。
+- Tailwind 的 `transition*` 工具类在 reduce 下由 `theme.css` 里一条未分层规则统一关掉：
+  `@media (prefers-reduced-motion: reduce) { [class*="transition"] { transition: none; } }`。不逐个给拷入组件加 `motion-reduce:`（那会超出「三类修改」）。
+  这条是「只有覆盖、没有声明」的 reduce 规则，现行 reduced-motion 静态守卫允许。
+- `tokens.css` 与 `theme.css` 只定义自定义属性与上述未分层规则，不入层。
 - preflight 会重置旧页面依赖浏览器默认值的地方（标题字号、列表符号、段落外边距等）。owner 接受过渡期的观感变化；功能由 `make ui-walk` 守住。
-- `legacy.css` 里的全局 `:focus-visible`、滚动条、`::selection`、reduced-motion 规则对新页面仍生效（未被 utilities 覆盖的属性），这是有意保留的一致性。
+- Biome 2.5 默认把 `@theme`、`@custom-variant` 判为解析错误（「Tailwind-specific syntax is disabled」，formatter 也中止）；`biome.json` 顶层设
+  `css.parser.tailwindDirectives: true` 后通过（评审时实测）。`@layer a, b;` 与 `@import … layer(x)` 本身不报错。
+- knip 在依赖含 `tailwindcss` 时把 `.css` 纳入项目文件，而 `web/index.html` 的 `<link rel="stylesheet">` 不算入口：`knip.json` web `entry` 加 `src/styles.css`，
+  使 `.css` 图与 `tailwindcss` / `tw-animate-css` 两个只在 CSS 里出现的依赖可达。若仍被报未使用，以 `ignoreDependencies` 精确列这两个包名（不用通配）。
 
 ### D3 主题映射
 
 `web/src/styles/theme.css`：
 
-- `:root { --background: var(--wb-home-bg-secondary); --foreground: var(--wb-text-primary); --primary: var(--wb-brand-primary); … }`，
-  每个 shadcn 语义变量指向一个 `--wb-*` 语义 token；因为 `--wb-*` 自己在 `[data-theme="dark"]` 下换值，这里不需要第二块。
-  具体对应表由实现在本文件内给出并在 PR 描述里列出，原则：表面取 `--wb-bg-*` / `--wb-home-bg-*`，文字取 `--wb-text-*`，边框取 `--wb-border-*`，
-  强调取 `--wb-brand-*`，危险取 `--wb-status-error*`，侧栏组取 `--wb-sidebar-bg` 等。`--primary-foreground` 须在亮/暗下都与 `--primary` 有足够对比
-  （现行按钮：亮色白字、暗色深字——沿用 `web/src/ui/button.css` 的取值来源）。
+- `:root { … }` 定义规格所列的语义变量。规格钉住七项（`--background`、`--foreground`、`--primary`、`--primary-foreground`、`--destructive`、`--border`、`--sidebar`）；
+  其余由实现按同一原则选：表面取 `--wb-bg-*` / `--wb-home-bg-*`，文字取 `--wb-text-*`，边框取 `--wb-border-*` / `--wb-color-border-*`，
+  hover/选中取 `--wb-bg-hover` / `--wb-bg-active`，侧栏组取 `--wb-sidebar-bg` 与文字/边框 token。
+- `--primary` 沿用迁移前主按钮的取值（`web/src/ui/button.css`：浅色 `--wb-palette-black-90` 底 + `--wb-text-white` 字，深色 `--wb-palette-white-90` 底 +
+  `--wb-palette-black-90` 字），所以本文件引用调色板 token，并有一个 `[data-theme="dark"] { --primary: …; --primary-foreground: …; }` 块。
+  品牌绿（`--wb-brand-primary`）不是主按钮色，留给焦点环与强调（`--ring` 可取它，与现行 `:focus-visible` 一致）。
 - `@theme inline { --color-background: var(--background); … --radius-lg: var(--radius); … }` 把语义变量暴露成 Tailwind 颜色与圆角刻度。
-- `--radius: 0.5rem`（现有 CSS 最常用的 `8px`）；字号沿用 Tailwind 默认刻度，`body` 14px / 22px 行高与现状一致。
+- `--radius: 0.5rem`（现有 CSS 最常用的 `8px`）；字号沿用 Tailwind 默认刻度；`body` 14px / 22px 行高不变。
 - `@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));`
-- `body { background: var(--background); color: var(--foreground); }` 写在 `theme.css`（未分层），取代 `legacy` 里 `body` 的同名声明。
+- `body { background: var(--background); color: var(--foreground); }` 写在 `theme.css`（未分层），`legacy.css` 里 `body` 的同名声明删除。
 
 ### D4 组件分层与拷入
 
 - `web/components.json`：`style: "radix-nova"`、`rsc: false`、`tsx: true`、`tailwind.css: "src/styles.css"`、`cssVariables: true`、
   aliases `components: "@/components"`、`ui: "@/components/ui"`、`utils: "@/lib/utils"`、`iconLibrary: "lucide"`。
 - 拷入（`npx shadcn@latest add …`，只拷用到的）：本 change 预期 `button`、`input`、`label`、`card`、`dropdown-menu`、`alert-dialog`、`sheet`、`tooltip`、
-  `toggle-group`（主题分段）、`separator`。拷入后只做三类修改：把颜色字面量换成主题变量（若有）、中文化可见文案与 aria 文案、按 Biome 格式化。
+  `radio-group`、`separator`。拷入后只做三类修改：颜色字面量换主题变量（若有）、中文化可见文案与 aria 文案、Biome 格式化。
   `web/src/lib/utils.ts` 提供 `cn`。`shadcn` 命令会改写 `styles.css`——以 D2/D3 的结构为准，命令写入的默认主题块不保留。
 - 侧栏不拷 shadcn 的 `sidebar` 整块：它自带 cookie 持久化、键盘快捷键与 768 断点，与现有契约（`workbuddy-sidebar` localStorage、760 断点、
   `data-collapsed`、槽位）不一致，改造成本高于用 `sheet` + `tooltip` + Tailwind 自己排。
-- `Icon`、`IconName`、`BrandMark` 留在 `web/src/ui`（应用自有、与 demo 无关），已迁移区域只允许从 `web/src/ui/index.js` 导入这三个名字；
-  搬家留给收尾 change。顶栏 actions 描述符的 `icon` 仍是 `IconName`，会话页的调用方不改。
+- `Icon`、`IconName`、`BrandMark` 留在冻结区 `web/src/ui`（应用自有、与 demo 无关），搬家留给收尾 change。已迁移区域从 `web/src/ui/index.js` 只可导入这三个名字与
+  `useEscapeFallback`（D7）。顶栏 actions 描述符的 `icon` 仍是 `IconName`，会话页的调用方不改。
 
 ### D5 拷入层门槛豁免
 
@@ -99,32 +110,68 @@
 |---|---|---|
 | 覆盖率 | `web/vitest.config.ts` 的 `coverage.exclude`（不改根 `vitest.shared.mjs`，server 不受影响） | `src/components/ui/**`、`src/components/assistant-ui/**` |
 | jscpd | `.jscpd.json` `ignore` | `web/src/components/ui/**`、`web/src/components/assistant-ui/**` |
-| size-guard | `.large-file-guard.json` `exclude` | `web/src/components/ui/*`、`web/src/components/assistant-ui/*`（按该文件既有的 glob 语义，含子目录） |
+| size-guard | `scripts/size-guard.sh`：在逐文件循环里按路径前缀跳过这两个目录（含带 `./` 前缀的写法），带参数（pre-commit 传暂存文件）与无参数（全量扫描）共用同一循环；Bash 3.2 兼容 | 两个目录前缀 |
 | Biome linter | `biome.json` `overrides`：这两个目录 `linter.enabled: false`，formatter 不关 | 同上两个目录 |
-| knip | `knip.json` web workspace `ignore`（只忽略未使用导出的来源文件，不影响应用层的未使用检测） | 同上两个目录 |
+| knip | `knip.json` web workspace `ignore` | 同上两个目录 |
 
-`scripts/test-guardrails.sh` 增两例自证：应用层 801 行文件仍被拒、拷入层 801 行文件通过。`AGENTS.md` Enforcement Index 下加一行注记（不新增表格行——表格行被 oracle 逐字钉住）。
+- `.large-file-guard.json` 没有任何消费者（`size-guard.sh` 不读配置），不用它。
+- `constraints.yaml` `exemptions.entries` 登记两个目录（rules 取 `size_limits`、`anti_drift`、`testing` 中对应的项；reason 指向 ADR-0013；`expires: never`）。
+- `scripts/test-guardrails.sh` 增两例：在仓库内临时写 801 行的 `web/src/features/_probe.tsx` 与 `web/src/components/ui/_probe.tsx`，分别以相对路径传给 `size-guard.sh`，
+  前者拒绝、后者通过，`trap` 清理（现有用例用 `$tmp` 路径，命中不了前缀规则）。
+- `AGENTS.md`：Enforcement Index 的表格与「阈值与正则…」说明段被 `scripts/test-ci-harness.sh` 以整段逐字文本为锚，注记必须写在该说明段之后、
+  `### Known blind spots` 之前，不进锚内。
+- 新增守卫测试读上述五处配置，断言新增条目只匹配两个拷入目录、Biome override 未关 formatter（规格「豁免路径精确」）。
 
-### D6 守卫改写（`web/test/ui-guardrails.test.ts`、`ui-tokens.test.ts`）
+### D6 守卫改写
 
-- 保留：features/routes 无颜色字面量与 `--wb-palette-`（扫描范围加 `.ts`/`.tsx` 的类名字符串，正则不变即可命中 `bg-[#fff]`）；
-  应用层不导入 `@radix-ui/*`，并加 `radix-ui`；`ATTRIBUTION.md` 登记每个 `@radix-ui/*`，并加 `radix-ui`、`tailwindcss`、shadcn/ui。
-- 新增：`styles.css` 首条规则是层声明、既有样式的 import 都在 `legacy.css` 且 `legacy.css` 以 `layer(legacy)` 导入；`theme.css` 无颜色字面量；
-  已迁移区域（routes、features/auth、features/settings、features/theme）从 `web/src/ui` 只导入 `Icon`/`IconName`/`BrandMark` 且无 `.css` 文件；
-  `web/src/ui` 文件集合 ⊆ 迁移前快照（快照写在测试里）。
-- 删除：`ui-tokens.test.ts` 的 demo 逐值相等与名集合断言、`body`/`.app-shell` 底色的源码断言（改由 ui-walk 的计算样式断言）；
-  保留「引用的 `var(--wb-*)` 都有定义」「无公网字体」。
-- 旧基元的测试（`web/test/ui-*.test.tsx`）与 `ui-reduced-motion.test.ts` 不动——旧基元仍被会话页与文件页使用。
+`web/test/ui-guardrails.test.ts`：
+
+- 保留并扩展：颜色字面量与 `--wb-palette-` 扫描——范围为 features/routes 的 `.css`、`.tsx` 与**去注释后的** `.ts`（`web/test/ui-support.ts` 已有 `stripComments`；
+  `features/chat/stream-steps.ts` 注释里的 `（#367）` 不得命中）；Radix 导入扫描——范围改为 `web/src` 下除两个拷入目录与 `web/src/ui` 之外的全部 `.ts`/`.tsx`，
+  匹配 `@radix-ui/` 与 `radix-ui`；`ATTRIBUTION.md` 登记检查加 `radix-ui`、`tailwindcss`、shadcn/ui。
+- 新增：入口结构（规格「入口结构不可缺失或重排」）；`theme.css` 结构（规格「映射文件结构」）；已迁移区域清单与冻结区清单及其注入样本自证；豁免路径精确。
+  已迁移区域清单在引入时为空，组 3/4/5 各自把目录加入。
+- 「`web/src` 不再出现 `ui-button`」等其余既有断言不动。
+
+`web/test/ui-tokens.test.ts`：删除 demo 逐值相等与名集合断言；`it.each` 里针对 `styles.css` 的 `body` / `.app-shell` / `.app-content > main` 底色断言删除
+（`body` 底色改由 ui-walk 计算样式断言），针对 `files.css` 的两行保留到文件页 change；保留「引用的 `var(--wb-*)` 都有定义」「无公网字体」。
+
+读 `styles.css` 的既有断言随内容搬家改指 `legacy.css`（组 1a 一并处理，它们在搬家那一刻就会红）：
+
+| 测试 | 现断言 | 处理 |
+|---|---|---|
+| `web/test/chat-steps.test.tsx:145-149` | `styles.css` 含 `chat.css`、`messages.css` 的 `@import` 且有序 | 改读 `legacy.css` |
+| `web/test/app-shell-responsive.test.tsx:551-554` | `styles.css` 的 `@media (max-width: 760px)` 块 | 改读 `legacy.css` |
+| `web/test/topbar.test.tsx:277-278` | `styles.css` 含 `.app-content > main` | 改读 `legacy.css` |
+| `web/test/sidebar.test.tsx:410-413` | `styles.css` 含 `routes/shell/sidebar.css` | 改读 `legacy.css` |
+| `web/test/login-form.test.tsx:279-280` | `styles.css` 含 `auth.css` 的 `@import` | 改读 `legacy.css` |
+| `web/test/settings-page.test.tsx:414,424` | `styles.css` 含 `settings.css` 的 `@import` | 改读 `legacy.css` |
+| `web/test/ui-reduced-motion.test.ts:136-137` | `styles.css` 恰有一个全局 reduce 块 | 不改（块留在 `styles.css`） |
+
+后四行中属于外壳/登录/设置的断言在各自页面迁移时（组 3/4/5）随 `.css` 删除而删除。旧基元的测试（`web/test/ui-*.test.tsx`）不动——旧基元仍被会话页与文件页使用；
+唯一例外是 `ui-toast-drawer-escape.test.tsx`，它挂载整个应用，见 D7。
 
 ### D7 外壳重写
 
-行为契约不变（spa-shell「路由 IA 与侧栏」「退出失败提示可关闭」全部场景），实现换成 Tailwind + 拷入层：
+行为契约不变（spa-shell「路由 IA 与侧栏」「退出失败提示可关闭」、ui-primitives「Escape 分派不受 Toast 层栈影响」与「基元组件库」的退出确认场景），实现换成 Tailwind + 拷入层：
 
 - `routes/shell/app-shell.tsx`、`sidebar.tsx`、`topbar.tsx` 重写；`sidebar.css`、`topbar.css` 删除。窄屏覆盖层用 `sheet`（`side="left"`，对话框 accessible name `导航`）。
-- `lib/topbar.tsx`、`lib/sidebar-slot.tsx`、`lib/viewport.ts` 的导出与语义不变（会话页是它们的调用方，本 change 不改会话页）。
-- actions 容器从类 `.topbar-actions` 改为 `data-slot="topbar-actions"`；`ui-walk` 与测试里用到该类、`.sidebar-link`、`header.topbar h1` 的选择器改为角色/名称或 `data-slot`。
-- `features/auth/footer.tsx`（用户菜单 + 退出确认）重写：菜单用 `dropdown-menu`，确认框用 `alert-dialog`；忙碌态、`关闭` 文案、失败提示与 `关闭提示`、
-  覆盖层重开不丢锁定态的行为不变。
+- `lib/topbar.tsx`、`lib/sidebar-slot.tsx`、`lib/viewport.ts` 的导出与语义不变（会话页是它们的调用方，本 change 不改会话页实现）。
+- `features/auth/footer.tsx`（用户菜单 + 退出确认）重写：菜单用 `dropdown-menu`，确认框用 `alert-dialog`。忙碌态、`关闭` 文案、失败提示与 `关闭提示`、
+  覆盖层重开不丢锁定态、初始焦点在取消按钮、关闭时按触发器是否禁用把焦点归还到触发器或 `aside` 内 `a[aria-current=page]`（`onCloseAutoFocus` 在应用层实现）不变。
+- **Escape 兜底**（#643）：Toast 仍是旧实现（`@radix-ui/react-toast`），它的层会让导航覆盖层与确认框收不到 Escape。`web/src/ui/index.ts` 增加导出 `useEscapeFallback`
+  （冻结区唯一允许的内容变更），外壳把它返回的 `ref` / `onEscapeKeyDown` / `onKeyDown` 经 props 传给 `SheetContent` 与 `AlertDialogContent`（Radix Content 透传这些 props，不改拷入代码）。
+  `radix-ui` 合包与旧 `@radix-ui/*` 单包是否共用同一份 DismissableLayer 要等 lockfile 生成才知道；两种情况下兜底都成立（它不依赖层栈），
+  `web/test/ui-toast-drawer-escape.test.tsx` 的行为断言原样通过即为证据。
+- **会话页与文件页对外壳的依赖必须保留**：
+  - `aside` 保留类 `sidebar` 与 `data-variant="inline|overlay"`——`features/chat/chat.css:102` 的 `.sidebar[data-variant="overlay"] .chat-session-groups` 靠它决定覆盖层内列表的滚动方式
+    （`web/test/chat-page-sidebar.test.tsx:761` 钉着这条规则）。
+  - 主区布局契约：`main` 是纵向 flex 容器、`min-height: 0`、`overflow: hidden`，直接子元素撑满（现 `styles.css` 的 `.app-content`、`.app-content > main`、`.app-content > main > *`
+    与 760 断点下的对应规则）。`.chat-page` / `.files-page` 靠它撑满并各自滚动。实现以 Tailwind 类等价重现后删除这些旧规则；ui-walk 的滚动与布局用例原样通过即为证据。
+  - `legacy.css` 中 `ui-alert`、`ui-muted`、`ui-empty`、`ui-sr-only` 等仍被会话页/文件页使用的全局类不删。
+- 选择器迁移：actions 容器从类 `.topbar-actions` 改为 `data-slot="topbar-actions"`；侧栏宽度断言（`web/e2e/ui-walk-layout.ts:30-41` 的 48/288）改为 `data-collapsed`；
+  `.sidebar-link`、`header.topbar h1` 改为角色/名称。受影响且不在外壳测试清单里的会话页测试只改选择器、不改断言含义：
+  `web/test/chat-page-project-config.test.tsx:177`（`closest(".topbar-actions")`）、`web/test/chat-page-welcome-scene.test.tsx:91,649`（字面 `<span class="sidebar-user-account">`）。
 - 会话页注入侧栏槽位的内容仍是旧样式（在 `legacy` 层），与新侧栏并排——过渡期可接受。
 - 必须保留的可访问名与属性：`aside[aria-label="侧栏"]`、`nav[aria-label="主导航"]`、`打开导航`、`折叠侧栏`/`展开侧栏`、`用户菜单`、`退出登录？`、`关闭提示`、
   `dialog` 名 `导航`、`data-collapsed`、`aria-current="page"`、`localStorage` key `workbuddy-sidebar`。
@@ -137,8 +184,10 @@
 
 ### D9 设置页重写
 
-`features/settings/page.tsx` 重写为 `card` + `toggle-group`（`type="single"`，项 `role="radio"`、组 accessible name `主题`）；`settings.css` 删除。
-`features/theme/provider.tsx` 与 `lib/theme.ts` 不改。`当前生效：浅色|深色` 的可访问文本保留（用 Tailwind 的 `sr-only`）。
+`features/settings/page.tsx` 重写为 `card` + `radio-group`（Radix RadioGroup：根 `role="radiogroup"`、项 `role="radio"`、再点已选项不取消选中、方向键移动即选中——
+与旧 `SegmentedControl` 同一基元，既有 `getByRole("radiogroup", { name: "主题" })` 断言原样通过），在应用层用 Tailwind 排成分段样式；`settings.css` 删除。
+不用 `toggle-group`：它的根是 `role="group"`，`type="single"` 时再点已选项会清空选择。
+`features/theme/provider.tsx` 与 `lib/theme.ts` 不改。`当前生效：浅色|深色` 的可访问文本保留（Tailwind 的 `sr-only`）。
 
 ### D10 demo 一致性 harness 退役与功能验收清单
 
@@ -146,44 +195,55 @@
 
 - 删除 `web/e2e/ui-shots.mjs`、`web/package.json` 的 `ui-shots` 脚本、Makefile 的 `ui-shots` 目标 / `UI_SHOTS_*` 块 / `.PHONY` 项 / 页头注释句。
 - `constraints.yaml` `verification.surfaces` 去掉 `ui-shots`（十一 → 十）。
-- `AGENTS.md`：Verification Matrix 去掉「demo 一致性截图对」行，Enforcement Index 去掉对应行；「demo 文件头的来源注释在编辑时必须保留」保留（demo 文件仍在）。
-- `scripts/test-ci-harness.sh`：期望元组、逐字行、冻结块检查、`.PHONY`/配方断言与突变用例同步去掉 `ui-shots`，并加一条「重新加入 `ui-shots` 被拒」。
-- 新增 `docs/acceptance/functional-checklist.md`：文件头（运行方式、签收规则）+ 空的分节骨架；外壳/登录/设置的行由各自的迁移任务加入。
-- `docs/acceptance/demo-parity-checklist.md`、`docs/reviews/2026-09-24-demo-parity-audit.md`、ADR-0011 里对 `ui-shots.mjs` 的行号引用是历史记录，不改。
+- `AGENTS.md`：Verification Matrix 去掉「demo 一致性截图对」行，Enforcement Index 去掉对应行；在豁免注记旁加一行指向功能验收清单的注记（同样在锚外）；
+  「demo 文件头的来源注释在编辑时必须保留」保留（demo 文件仍在）。
+- `scripts/test-ci-harness.sh`：内嵌 oracle 的矩阵行、enforcement 行、surface 元组、wanted 表、页头、safe_overrides、targets 集合与 `.PHONY`、freeze_block 与 recipes 八类断言，
+  以及 `:144-145` 的整段锚与 `:156-171` 的突变用例同步去掉 `ui-shots`；新增断言「`web/package.json` 无 `ui-shots` 脚本」与突变用例「重新加入 `ui-shots` surface / target / AGENTS 行被拒」。
+- 新增 `docs/acceptance/functional-checklist.md`：文件头（运行方式、签收规则）+ 分节骨架；新增其格式守卫测试（`web/test`，读仓库文件，含注入样本自证）。
+  外壳/登录/设置的行由各自的迁移任务加入。
+- `docs/acceptance/demo-parity-checklist.md`、`docs/reviews/2026-09-24-demo-parity-audit.md`、ADR-0011 与 `IMPLEMENTATION_PLAN.md` 里对 `ui-shots` 的既有提及是历史记录，不改。
 
 ### D11 落刀次序
 
-1. 工具链 + 层叠 + 主题 + 分层 + 豁免 + 守卫（不改任何页面的 JSX；`legacy.css` 承接全部旧样式）。
-2. harness 退役 + 功能清单骨架（与 1 无文件交集，除 `ui-tokens.test.ts`：demo 绑定断言在 1 里删，2 不碰该文件）。
-3. 外壳、4. 登录页、5. 设置页：各自独立，均依赖 1 与 2（要往清单加行）。
+线性链 1a → 1b → 2 → 3 → 4 → 5。串行的原因是共享文件，不全是逻辑依赖：`AGENTS.md` 与 `web/package.json`（1b、2）；守卫的已迁移区域清单、
+`docs/acceptance/functional-checklist.md` 与 `web/e2e/ui-walk-layout.ts` 的同一个主题探针函数（3、4、5）；`features/auth/footer.tsx` 属组 3 而 `features/auth/**` 整目录在组 4 登记（4 依赖 3）。
+
+- 1a：Tailwind + 层叠 + `legacy.css` + `theme.css`（只动样式入口与读它的测试；不改任何 JSX）。
+- 1b：Bundler + 别名 + `components.json` + 首个拷入组件 + 豁免 + 分层守卫。
+- 2：harness 退役 + 功能清单骨架与格式守卫。
+- 3：外壳。4：登录页。5：设置页。
 
 ## Sketch seams under test
 
-- **层叠顺序**：登录页主按钮的计算 `background-color` 等于 `--primary`（utilities > legacy）；一个旧页面容器的 `padding` 等于其 `.css` 声明（legacy > preflight）。真实浏览器（ui-walk），jsdom 证明不了。
-- **别名四处一致**：同一个 `@/components/ui/button` 导入在 `make typecheck`、`vite build`、`vitest`、`knip` 下都解析；任一处漏配即红。
-- **`dark:` 绑定 `data-theme`**：暗色下 `body` 计算底色等于 `--wb-home-bg-secondary` 的深色值；首帧前主题的 ui-walk 用例（`MutationObserver` 顺序）保持通过。
-- **豁免不外溢**：`make test-guardrails` 的两例（应用层 801 行被拒 / 拷入层 801 行通过）；覆盖率排除只列两个目录。
-- **外壳槽位契约**：未改动的会话页经 `useTopbar` / `useSidebarSlot` 注入的内容在新外壳里仍出现（既有 `topbar-actions`、`sidebar-slot`、`app-shell-responsive` 测试的行为断言保留）。
+- **层叠顺序**：登录页主按钮的计算底色等于 `--primary`（utilities > legacy）；`/files` 上旧 `ui-btn` 的 `padding-left` 非 0（legacy > preflight）。真实浏览器（ui-walk），jsdom 证明不了。
+- **配色不换**：浅色下主按钮计算底色为 `rgba(0, 0, 0, 0.9)`；亮/暗 `body` 底色为 `rgb(255, 255, 255)` / `rgb(20, 20, 20)`。
+- **别名四处一致**：`@/…` 导入在 `make typecheck`、`vitest`、`knip`（1b：测试渲染 `@/components/ui/button`）与 `vite build`（组 3 起应用层模块经别名导入拷入组件）下都解析。
+- **`dark:` 绑定 `data-theme`** 与首帧前主题：`theme.css` 的 `@custom-variant` 静态断言；首帧前主题的 ui-walk 用例（`MutationObserver` 顺序）保持通过。
+- **reduced-motion**：reduce 下打开的菜单/覆盖层内容 `animation-duration` ≤ `0.01ms`、带 `transition*` 类的按钮 `transition-property` 为 `none`；切主题时继承色即时生效（既有用例，定位改为角色）。
+- **豁免不外溢**：`make test-guardrails` 的两例与读配置的守卫测试。
+- **外壳槽位与布局契约**：未改动的会话页经 `useTopbar` / `useSidebarSlot` 注入的内容仍出现；会话页/文件页在新 `main` 内撑满并滚动（ui-walk 滚动与布局用例）。
+- **Escape 兜底**：Toast 在场时 Escape 仍关闭导航覆盖层与退出确认（`ui-toast-drawer-escape.test.tsx` 原样通过）。
 - **退出流程的锁定态**：挂起退出请求时关闭并重开窄屏覆盖层，确认按钮仍忙碌禁用（既有场景）。
 - **控制面 oracle**：`make test-guardrails` 在 `ui-shots` 镜像全部移除后通过，重新加入任一镜像被拒。
 
 ## Risks / Trade-offs
 
-- **preflight 改变旧页面观感**：接受（owner）；若 `make ui-walk` 的功能断言因此失败（例如断言某元素可见但被重置隐藏），在 `legacy.css` 补最小规则修复功能，不追观感。
-- **拷入层代码质量不受门槛约束**：只拷用到的组件；改动处由 ui-walk 与应用层测试间接覆盖。
-- **shadcn / Tailwind 4 与 Biome 格式化冲突**：拷入后统一 `biome format --write`；Biome 对 Tailwind 4 的 `@theme`、`@custom-variant` 等 at-rule 若报解析错误，对 `web/src/styles/*.css` 关闭 CSS linter（只关这三个文件）。
-- **测试改写量**：外壳/登录/设置的测试里读源码与 `.css` 的断言要删或改；行为断言（角色/名称）应原样通过——原样通过是「行为不变」的证据，不得为通过而放宽。
-- **两套组件并存期**：直到文件页 change 收尾；`web/src/ui` 冻结守卫防止回流。
+- **preflight 改变旧页面观感**：接受（owner）；若 `make ui-walk` 的功能断言因此失败，在 `legacy.css` 补最小规则修复功能，不追观感。
+- **`[class*="transition"]` 选择器较宽**：reduce 下任何类名含 `transition` 的元素都失去过渡。这正是意图；旧 `.css` 没有以 `transition` 命名的类。
+- **拷入层代码质量不受门槛约束**：只拷用到的组件；其行为由 ui-walk 与应用层测试间接覆盖。
+- **测试改写量**：外壳/登录/设置的测试里读源码与 `.css` 的断言要删或改；行为断言（角色/名称）原样通过是「行为不变」的证据，不得为通过而放宽。
+- **两套组件并存期**：直到文件页 change 收尾；冻结区与已迁移区域守卫防止回流。
+- **组 1a / 3 的 diff 会超过 400 行评审线**（review-only）：样式整体搬家与外壳整体替换无法更小；PR 描述标明哪些是纯搬移。
 
 ## Migration Plan
 
-每个任务组一个 PR，合入后主干可运行；任一 PR 可独立 revert（组 1 被后续依赖，revert 需按逆序）。无数据迁移、无服务端变更、无部署步骤变化。
+每个任务组一个 PR，按 D11 的线性次序合入，合入后主干可运行；revert 按逆序。无数据迁移、无服务端变更、无部署步骤变化。
 
 ## Not yet specified
 
-- shadcn 语义变量与 `--wb-*` 的逐项对应表（原则见 D3，具体取值在实现时对着亮/暗两套实际渲染定，PR 描述里列表，owner 在功能验收时看整体观感）。
-- 旧页面在 preflight 下具体会出现哪些观感变化（不修，但若引起功能断言失败需要的最小补丁现在说不清）。
-- Biome 对 Tailwind 4 at-rule 的实际兼容性（见 Risks 的兜底）。
+- 规格钉住的七项之外，其余 shadcn 语义变量具体对应哪个 `--wb-*`（原则见 D3；实现时对着亮/暗两套实际渲染定，PR 描述里列表，owner 在功能验收时看整体观感）。
+- 旧页面在 preflight 下具体会出现哪些观感变化（不修），以及其中是否有会让 ui-walk 功能断言失败、需要在 `legacy.css` 补最小规则的。
+- `radix-ui` 合包与旧 `@radix-ui/*` 单包是否解析出同一份 DismissableLayer（lockfile 生成后才知道；不影响 Escape 兜底的成立）。
 
 ## Open Questions
 
