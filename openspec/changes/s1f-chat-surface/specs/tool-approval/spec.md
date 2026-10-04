@@ -9,6 +9,8 @@ web SHALL 把审批分两处呈现：待决审批是 composer 上方停靠区里
 
 只要选中会话存在待决审批，回合即仍在进行：composer SHALL 保持锁定且 `停止` 可用。重新加载后，快照中的待决审批 SHALL 恢复为提问卡（倒计时从 `expiresAt` 起算，可继续作答），已结算审批恢复为消息内记录。
 
+`title` 正文限高的证据按 seam 分工：多张提问卡与超长 `title` 由整页挂载测试断言结构（下方 `长 title 与多张提问卡的结构`，不作视口或像素断言）；真实浏览器里的布局只对 ui-walk 栈能产生的那一张待决提问卡（首回合 bash 审批）断言：其 `允许` / `拒绝` 与输入框、`停止` 都在视口内（chat-harness `UI 走查对话步骤`）。
+
 #### Scenario: 提问卡挂起、允许与拒绝
 - **WHEN** running 助手消息收到 `approval.request{approvalId, tool:"bash", title:"Allow tool: bash\nReason: run ls", expiresAt: now+60s}`
 - **THEN** composer 上方停靠区出现一张名为 `需要你的确认` 的提问卡：工具名徽章为 `bash`，正文为 title 全文（两行均在，换行按 `white-space: pre-wrap` 保留），倒计时句为 `（60s 内未操作将自动允许）` 且随注入时钟推进 1s 后变为 `（59s 内未操作将自动允许）`，卡内无其它倒计时元素，按钮 `允许`/`拒绝` 可用；该助手消息内没有名为 `需要你的确认` 的元素；composer 仍锁定且 `停止` 可用
@@ -30,6 +32,10 @@ web SHALL 把审批分两处呈现：待决审批是 composer 上方停靠区里
 #### Scenario: 两条并行审批分别作答
 - **WHEN** running 助手消息先后收到 `approval.request{approvalId:7, tool:"bash"}` 与 `approval.request{approvalId:8, tool:"bash"}`（均 pending），用户先点 id 8 提问卡的 `拒绝`、再点 id 7 提问卡的 `允许`，服务端各返回 200，随后依次收到 `approval.resolved{approvalId:8, decision:"deny"}` 与 `approval.resolved{approvalId:7, decision:"allow"}`
 - **THEN** 停靠区按文档顺序纵向叠放两张名为 `需要你的确认` 的提问卡（第一张为 id 7、第二张为 id 8），第二个 request 未替换第一张；点 id 8 的 `拒绝` 只以 `decideApproval(sessionId, 8, "deny")` 调用一次并只禁用 id 8 的两按钮，id 7 的按钮仍可用、倒计时句仍在；id 8 resolved 后停靠区只剩 id 7 的提问卡，助手消息内出现一条 `已拒绝执行` 记录，composer 仍锁定；id 7 作答并 resolved 后停靠区没有提问卡，助手消息内按 id 升序为 `已允许执行`、`已拒绝执行` 两条记录，均无按钮
+
+#### Scenario: 长 title 与多张提问卡的结构
+- **WHEN** 整页挂载（假 API 与假 EventSource）的 running 助手消息有三条待决审批，`id` 为 7、8、9，其中 id 7 的 `title` 为 50 行
+- **THEN** 三张提问卡按 id 升序渲染在同一个停靠区容器内，该容器在所有消息 `article` 与消息线程的滚动容器之外、按文档顺序位于输入框之前；每张卡的 `title` 正文是独立的元素（经实现暴露的稳定钩子如 `data-slot` 属性定位），带有限高与内部滚动的样式声明，id 7 的正文含全部 50 行；每张卡的 `允许` / `拒绝` 按钮与倒计时句都不在该卡 `title` 正文的滚动容器之内。本场景不对视口或像素尺寸作断言
 
 #### Scenario: 待决审批跨消息按 id 叠放
 - **WHEN** 选中会话的快照里两条不同的助手消息各有一条 `decision:null` 的审批，`id` 分别为 12 与 9
