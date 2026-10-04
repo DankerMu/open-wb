@@ -24,7 +24,7 @@
 - [ ] 1.2 `page.tsx` 只保留 `ChatPage` 的组合与外壳接线（`useTopbar`、`useSidebarSlot`）；`SessionSidebar` 的 props 契约不变；`index.ts` 仍只导出 `ChatPage`。
 - [ ] 1.3 既有测试零改动通过（整页测试约 12,600 行是这一刀的证据）；新增一个测试文件断言模块划分：`turn-actions.ts`、`use-chat-session.ts` 不导入 `./page.js`；
   `turn-actions.ts` 不导入 `./use-chat-session.js`，其导出只被 `use-chat-session.ts` 消费；`use-chat-session.ts` 不含 JSX。
-- [ ] 1.4 文档（design D12）：`IMPLEMENTATION_PLAN.md` S1f 段订正 B 的范围（含任务清单后端）并登记本次 grill 的决定；`docs/adr/0013-assistant-ui-frontend-rebuild.md` 增补一段，列五项：
+- [x] 1.4 文档（design D12）：`IMPLEMENTATION_PLAN.md` S1f 段订正 B 的范围（含任务清单后端）并登记本次 grill 的决定；`docs/adr/0013-assistant-ui-frontend-rebuild.md` 增补一段，列五项：
   链接惰性与图片不加载、轻提示退场、审批提问卡与任务清单面板停靠在输入框上方、B 不用运行时的 threadList、任务清单后端。
 
 Suggested fixture level: expanded - 无行为变化，但搬移的是全部所有权 fence、代次计数与 abort controller（共享状态 + 并发）；既有整页测试是证据，fence 的搬移需要逐条对照

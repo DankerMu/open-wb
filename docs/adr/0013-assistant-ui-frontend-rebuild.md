@@ -61,6 +61,16 @@ S1c 交付后的实测（2026-10-04，真实模型端点）暴露出：会话页
   `class-variance-authority`、`tw-animate-css`。assistant-ui 仍在 0.x，升级可能有破坏性变更；拷入的组件源码由本仓维护。
 - 内网部署不受影响：全部为构建期依赖，产物不访问公网（assistant-ui 的云服务适配不启用）。
 
+## 增补（2026-10-04，change B `s1f-chat-surface` 设计阶段）
+
+- **Markdown**：助手正文改用 `@assistant-ui/react-markdown`。链接保持惰性（只显示文字，不生成可点击的链接），图片不加载（显示替代文本），
+  源 HTML 不生成元素。`web/src/lib/md-render.ts` 留给文件页。
+- **轻提示退场**：重建后的会话页不再弹提示。成功/信息类删除；失败在触发处就地显示；复制成功只换图标。会话列表动作的提示留到 change C 处理。
+- **输入框上方停靠区**：待决审批做成提问卡（参照 Claude Code 桌面版），答完收起，消息内按消息留一条已结算记录（已允许 / 已拒绝 / 超时自动允许）；
+  助手的任务清单面板同样停靠在这里，位于提问卡之上。不用 assistant-ui 挂在 `tool-call` 上的 `approval` 字段。
+- **threadList**：change B 不用运行时的 `adapters.threadList`——会话列表经外壳侧栏插槽渲染，属 change C；上文「接入方式」里的对应一行留给 C 决定。
+- **任务清单后端**：change B 不再是纯前端。服务端从 omp `todo` 工具结果取全量清单，落库到会话行，经 `todo.updated` 事件与快照字段下发。
+
 ## Considered Options
 
 - **只换会话页，其余页面保留自有基元**：改动小，但留下两套样式体系与两种观感。owner 否决。
