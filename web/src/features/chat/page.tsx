@@ -1,4 +1,5 @@
-import { useSidebarSlot } from "../../lib/sidebar-slot.js";
+import type { ComponentProps } from "react";
+import { useSidebarNavigate, useSidebarSlot } from "../../lib/sidebar-slot.js";
 import { useTopbar } from "../../lib/topbar.js";
 import { useArtifactsPanel } from "./artifacts-panel.js";
 import { useConversationSearch } from "./conversation-search.js";
@@ -10,6 +11,19 @@ import { SessionSidebar } from "./session-sidebar.js";
 import { useSlashMenu } from "./slash-menu.js";
 import { chatTopbar } from "./topbar-actions.js";
 import { useChatSession } from "./use-chat-session.js";
+
+type SessionListProps = Omit<ComponentProps<typeof SessionSidebar>, "onCreateSession"> & {
+  onShowWelcome(focusComposer: boolean): void;
+};
+
+/**
+ * 侧栏槽位里的列表：`新建会话` 只回欢迎态。它渲染在侧栏树内，读得到覆盖层的关闭回调——侧栏是
+ * 覆盖层时不抢焦点（外壳关闭覆盖层并把焦点还给 `打开导航`），否则聚焦输入框。
+ */
+function SessionList({ onShowWelcome, ...props }: SessionListProps) {
+  const overlay = useSidebarNavigate() !== undefined;
+  return <SessionSidebar {...props} onCreateSession={() => onShowWelcome(!overlay)} />;
+}
 
 export function ChatPage() {
   // 页面状态、回调与 fence 都在 useChatSession；本组件只做组合与外壳接线。
@@ -31,15 +45,15 @@ export function ChatPage() {
   );
   // 列表渲染进 shell 侧栏列表区（issue 424）；数据与回调经 SessionSidebar 的既有 props 传入。
   useSidebarSlot(
-    <SessionSidebar
+    <SessionList
       filter={session.sessionFilter}
       listError={session.listError}
       listLoading={session.listLoading}
-      onCreateSession={() => session.createAndSelect()}
       onDeleteSession={sessionActions.openDelete}
       onFilterChange={session.setSessionFilter}
       onRenameSession={sessionActions.openRename}
       onSelectSession={session.selectSession}
+      onShowWelcome={session.showWelcome}
       onTogglePin={sessionActions.togglePin}
       requestedSessionId={requestedSessionId}
       sessions={session.sessions}
@@ -52,6 +66,7 @@ export function ChatPage() {
       <ConversationView
         client={client}
         composerDisabled={session.composerDisabled}
+        composerRef={session.composerRef}
         draft={draft}
         generating={session.generating}
         historyError={session.historyError}

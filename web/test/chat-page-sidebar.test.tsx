@@ -8,6 +8,7 @@ import {
   renewAccount,
   settleDeferredResponse,
 } from "./chat-page-lifecycle-support.js";
+import { typeAndSend } from "./chat-page-ownership-support.js";
 import { type FetchRoutes, renderChatPage } from "./chat-page-support.js";
 import { chatSnapshot, settle } from "./chat-stream-support.js";
 import { createMediaQuery, installMatchMedia, uninstallMatchMedia } from "./media-query-support.js";
@@ -115,7 +116,7 @@ function sidebarRoutes(
   };
 }
 
-/** `新建会话` 可用的路由：POST 返回 CREATED 并把它排到列表首位，其历史挂起。 */
+/** 首次发送可用的路由：POST 返回 CREATED 并把它排到列表首位，其历史与 prompt 挂起。 */
 function creatableRoutes(sessions: readonly Listed[], workspaces: FetchRoutes[string]) {
   let current = sessions;
   const created = listed(CREATED, "新建的", { status: "idle" });
@@ -128,6 +129,7 @@ function creatableRoutes(sessions: readonly Listed[], workspaces: FetchRoutes[st
       return jsonResponse({ sessions: current });
     },
     [messagesPath(CREATED)]: () => deferredResponse().promise,
+    [`/api/sessions/${CREATED}/prompt`]: () => deferredResponse().promise,
   });
 }
 
@@ -505,10 +507,8 @@ describe("工作空间读取与归组 (S5–S7)", () => {
     expect(calls(fetchMock, "/api/sessions")).toHaveLength(1);
   });
 
-  /**
-   * 两次工作空间响应都由用例控制：返回时首次响应仍挂起而会话条目已渲染。`refreshByCreate` 经
-   * `新建会话` 触发一次 refreshList，等列表刷新（新会话出现）且第二次工作空间请求已发出。
-   */
+  // 两次工作空间响应都由用例控制：返回时首次响应仍挂起而会话条目已渲染。`refreshByCreate` 经
+  // 欢迎态首次发送触发一次 refreshList，等列表刷新（新会话出现）且第二次工作空间请求已发出。
   async function mountWithDeferredWorkspaces() {
     const first = deferredResponse();
     const second = deferredResponse();
@@ -519,7 +519,7 @@ describe("工作空间读取与归组 (S5–S7)", () => {
     const nav = await findList("绑定会话");
     expect(workspaceRequests(fetchMock)).toBe(1);
     const refreshByCreate = async () => {
-      fireEvent.click(within(nav).getByRole("button", { name: "新建会话" }));
+      await typeAndSend("你好");
       await within(nav).findByRole("button", { name: "新建的" });
       expect(workspaceRequests(fetchMock)).toBe(2);
     };

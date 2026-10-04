@@ -382,7 +382,14 @@ describe("chat page ignored-abort GET, renewal, and concurrent submit", () => {
         (screen.getByRole("textbox", { name: "给助手发消息" }) as HTMLTextAreaElement).disabled,
       ).toBe(false);
     });
+    // `新建会话` 只回欢迎态、不创建；下一次创建来自欢迎态的再次发送。
     fireEvent.click(screen.getByRole("button", { name: "新建会话" }));
+    await waitFor(() => {
+      expect(currentLocation()).toBe("/");
+    });
+    expect(creates).toBe(1);
+    typeDraft("second");
+    clickSend();
     await waitFor(() => {
       expect(creates).toBe(2);
     });
@@ -418,7 +425,7 @@ describe("chat page ignored-abort GET, renewal, and concurrent submit", () => {
     expect(fetchMock.mock.calls.filter(([path]) => path === "/api/auth/logout")).toHaveLength(1);
   });
 
-  it("keeps the new-session action after a list GET 503 and creates once", async () => {
+  it("keeps the new-session action after a list GET 503: the click only returns to welcome, the first send creates once", async () => {
     let creates = 0;
     const { fetchMock } = renderChatPage(`/?session=${SESSION_A}`, {
       "/api/sessions": (_path, options) => {
@@ -440,11 +447,20 @@ describe("chat page ignored-abort GET, renewal, and concurrent submit", () => {
       },
       [SESSION_A_MESSAGES]: () => jsonResponse(snapshotFor(sessionA(), SESSION_A_TEXT)),
       [sessionMessagesPath(FIRST_CREATED_ID)]: emptyCreatedMessages(),
+      [sessionPromptPath(FIRST_CREATED_ID)]: () =>
+        jsonResponse({ userMessageId: -3, assistantMessageId: 0 }, 202),
     });
 
     expect(await screen.findByText(SESSION_A_TEXT, { exact: true })).toBeTruthy();
     expect((await screen.findByRole("alert")).textContent).toBe("会话列表不可用");
     fireEvent.click(screen.getByRole("button", { name: "新建会话" }));
+    await waitFor(() => {
+      expect(currentLocation()).toBe("/");
+    });
+    expect(creates).toBe(0);
+    expect(screen.getByRole("alert").textContent).toBe("会话列表不可用");
+    typeDraft("你好");
+    clickSend();
     await waitFor(() => {
       expect(creates).toBe(1);
       expect(currentLocation()).toBe(`/?session=${FIRST_CREATED_ID}`);

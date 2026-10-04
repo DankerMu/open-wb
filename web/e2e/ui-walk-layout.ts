@@ -372,7 +372,7 @@ export async function inspectSidebar(
   await expect(page.getByRole("dialog", NAV_OVERLAY)).toHaveCount(0);
 }
 
-function sessionList(sidebar: Locator): Locator {
+export function sessionList(sidebar: Locator): Locator {
   return sidebar.getByRole("navigation", { name: "会话列表" });
 }
 
@@ -396,15 +396,6 @@ export async function expectSessionListInSidebar(page: Page, project: WalkProjec
   });
   if (project === "mobile-dark") {
     await expect(page.locator('nav[aria-label="会话列表"]')).toHaveCount(0);
-  }
-}
-
-// 经侧栏 新建会话：mobile 先开覆盖层，点击后覆盖层随即关闭（列表经 onNavigate 关闭它）。
-export async function createSessionFromSidebar(page: Page, project: WalkProject): Promise<void> {
-  const sidebar = await openSidebar(page, project);
-  await sessionList(sidebar).getByRole("button", { name: "新建会话" }).click();
-  if (project === "mobile-dark") {
-    await expect(page.getByRole("dialog", NAV_OVERLAY)).toHaveCount(0);
   }
 }
 

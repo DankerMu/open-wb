@@ -75,9 +75,9 @@ Minimal mergeable slice: 3.1 + 3.2 + 3.4，以及 3.5 / 3.6 的全部（旧表�
 ## 4. session-sidebar / chat-web / spa-shell — 欢迎页、场景、会话创建时机与空态（#824 #825 #826）
 
 - [ ] 4.1 欢迎页重建（design D9）：hero、三个场景分组、快捷任务、最佳实践卡与 `换一批`、免责声明；切换场景不弹提示（删除 `scene-pills.tsx` 的 `useToast`）；所选场景仍写进创建 body。
-- [ ] 4.2 「新建会话」只回欢迎态：`onCreateSession` 的处理改为以 replace 导航清除 `?session=`（保留无关 search/hash）、零请求、草稿不动。侧栏不是覆盖层时（宽视口）聚焦输入框，已在欢迎态时只聚焦；
+- [x] 4.2 「新建会话」只回欢迎态：`onCreateSession` 的处理改为以 replace 导航清除 `?session=`（保留无关 search/hash）、零请求、草稿不动。侧栏不是覆盖层时（宽视口）聚焦输入框，已在欢迎态时只聚焦；
   侧栏是覆盖层时（窄视口）覆盖层关闭、焦点按外壳现有规则回到 `打开导航`——外壳不改。
-- [ ] 4.3 首次发送建会话：欢迎态发送恰一次 `POST /api/sessions`、恰一次 prompt（沿用 `createAndSelect(prompt)` 与其 fence）；删除「空 prompt 建会话」的代码路径。
+- [x] 4.3 首次发送建会话：欢迎态发送恰一次 `POST /api/sessions`、恰一次 prompt（沿用 `createAndSelect(prompt)` 与其 fence）；删除「空 prompt 建会话」的代码路径。
 - [ ] 4.4 零消息会话空态（design D4）：图标、`还没有消息，发一条开始吧`、只读的绑定工作空间名（未绑定，或空间名解析不出——列表读取中、失败、空间已删——时不显示这一行）；
   不显示场景与快捷任务；不改草稿；一级标题仍是面包屑。
 - [ ] 4.5 改写单元断言（按分片）：所有「点新建会话 → POST」的测试（`chat-page-welcome-scene*`、`chat-page-sidebar`（768 行，只减不增）、`chat-page-session-pin`、`chat-page-lifecycle`、`chat-page-ownership`、`app-shell-responsive`）

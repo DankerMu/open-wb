@@ -1,7 +1,12 @@
 import "./radix-platform.js";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { settleDeferredResponse } from "./chat-page-lifecycle-support.js";
+import {
+  clickSend,
+  sessionPromptPath,
+  settleDeferredResponse,
+  typeDraft,
+} from "./chat-page-lifecycle-support.js";
 import {
   A,
   B,
@@ -173,20 +178,22 @@ describe("迟到与乱序的元数据响应 (M11, M12)", () => {
     const created = view(CREATED, "新建的", { status: "idle" });
     let sessions: SessionView[] = [view(A, FIRST), running, view(C, LAST)];
     mountTasks({
-      // `新建会话` 触发一次列表重读（page.tsx 的 createAndSelect）；重读时 B 已完成。
+      // 欢迎态首次发送建会话后触发一次列表重读（createAndSelect）；重读时 B 已完成。
       "/api/sessions": (_path, options) => {
         if (options?.method !== "POST") return jsonResponse({ sessions });
         sessions = [created, view(A, FIRST), view(B, MIDDLE), view(C, LAST)];
         return jsonResponse(created, 201);
       },
       [messagesPath(CREATED)]: () => deferredResponse().promise,
+      [sessionPromptPath(CREATED)]: () => deferredResponse().promise,
       [patchPath(B)]: () => patch.promise,
     });
     const nav = await findList(MIDDLE);
     expect(within(nav).getByRole("status", { name: `${MIDDLE} 运行中` })).toBeTruthy();
 
     await chooseEntryAction(nav, MIDDLE, PIN);
-    fireEvent.click(within(nav).getByRole("button", { name: "新建会话" }));
+    typeDraft("你好");
+    clickSend();
     await within(nav).findByRole("button", { name: "新建的" });
     expect(within(nav).getByRole("status", { name: `${MIDDLE} 已完成` })).toBeTruthy();
     expect(partition(nav, PINNED_GROUP)).toBeNull();

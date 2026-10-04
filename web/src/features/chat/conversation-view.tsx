@@ -26,6 +26,8 @@ type ConversationViewProps = {
   /** 当前账号的 API client；产物卡经它按需拉取预览。 */
   client: ApiClient;
   composerDisabled: boolean;
+  /** 输入框元素：回到欢迎态后由会话页聚焦它。 */
+  composerRef: Ref<HTMLTextAreaElement>;
   draft: string;
   generating: boolean;
   historyError: string | null;
@@ -222,6 +224,7 @@ function MessageThread({
 export function ConversationView({
   client,
   composerDisabled,
+  composerRef,
   draft,
   generating,
   historyError,
@@ -304,6 +307,7 @@ export function ConversationView({
             )
           }
           generating={generating}
+          inputRef={composerRef}
           interceptKeyDown={slash.interceptKeyDown}
           onChangeDraft={onChangeDraft}
           onStop={onStop}
