@@ -168,12 +168,12 @@ exemptions:
       exit_condition: "none（OpenSpec 规范归档路径；仍受后缀、.bak、大小与边界规则约束）"
     - path: "web/src/components/ui/**"
       rules: [size_limits.max_file_lines, size_limits.max_complexity, testing.min_line_coverage, anti_drift]
-      reason: "shadcn/ui registry 原样拷入的组件（ADR-0013）；只做颜色变量、中文文案、格式化与 cn 导入归一四类修改，不按自写代码的门槛度量"
+      reason: "shadcn/ui registry 原样拷入的组件（ADR-0013）；只做颜色变量、中文文案、格式化、cn 导入归一与严格 TS 选项下的纯类型适配五类修改，不按自写代码的门槛度量"
       expires: never
       exit_condition: "none（结构性豁免；只限该目录，应用层与冻结区门槛不变）"
     - path: "web/src/components/assistant-ui/**"
       rules: [size_limits.max_file_lines, size_limits.max_complexity, testing.min_line_coverage, anti_drift]
-      reason: "assistant-ui registry 原样拷入的组件（ADR-0013）；只做颜色变量、中文文案、格式化与 cn 导入归一四类修改，不按自写代码的门槛度量"
+      reason: "assistant-ui registry 原样拷入的组件（ADR-0013）；只做颜色变量、中文文案、格式化、cn 导入归一与严格 TS 选项下的纯类型适配五类修改，不按自写代码的门槛度量"
       expires: never
       exit_condition: "none（结构性豁免；只限该目录，应用层与冻结区门槛不变）"
   enforced_by: "各路径仅按 entries.rules 豁免；OpenSpec 归档例外由 scripts/naming-guard.sh 执行；拷入层豁免由 web/vitest.config.ts、.jscpd.json、scripts/size-guard.sh、biome.json、knip.json 执行"

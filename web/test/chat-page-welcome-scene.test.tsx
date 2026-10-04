@@ -88,7 +88,7 @@ const PROJECT_A_BUTTON = "任务启动于 项目A";
 const OFFICE_BODY = '{"scene":"office"}';
 const UNAVAILABLE = "服务暂不可用";
 /** 续期后侧栏账号区的标记（`renewAccount` 登录为 `lisi`）。 */
-const NEW_ACCOUNT = '<span class="sidebar-user-account">lisi</span>';
+const NEW_ACCOUNT = 'data-slot="sidebar-user-account">lisi</span>';
 
 // 弹层的 FocusScope 在卸载后的宏任务里归还焦点，清理里先让出一轮。
 afterEach(cleanupSessionMeta);

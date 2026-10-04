@@ -174,7 +174,9 @@ describe("项目配置入口 (G1–G7)", () => {
     expect(bannerButtons()).toEqual(["项目配置 3", ...THREE_BUTTONS]);
     expect(configPaths(fetchMock)).toEqual([`/api/project-config?workspaceId=${A}`]);
     const button = configButton(3);
-    expect(button.closest(".topbar-actions")?.firstElementChild?.contains(button)).toBe(true);
+    expect(
+      button.closest('[data-slot="topbar-actions"]')?.firstElementChild?.contains(button),
+    ).toBe(true);
     expect(button.getAttribute("aria-expanded")).toBe("false");
     expect(button.querySelector("svg")?.getAttribute("class")).toContain("lucide-file-text");
     expect(configDialog()).toBeNull();

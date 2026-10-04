@@ -39,12 +39,12 @@ export function walkProject(name: string): WalkProject {
 export async function walkSidebarCollapse(page: Page): Promise<void> {
   const sidebar = page.getByRole("complementary", SIDEBAR);
   await sidebar.getByRole("button", { name: "折叠侧栏" }).click();
-  await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(48);
+  await expect(sidebar).toHaveAttribute("data-collapsed", "true");
   await page.reload();
   await expectAuthenticatedRoute(page, "desktop-light", "/settings", "设置", "设置");
-  await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(48);
+  await expect(sidebar).toHaveAttribute("data-collapsed", "true");
   await sidebar.getByRole("button", { name: "展开侧栏" }).click();
-  await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(288);
+  await expect(sidebar).toHaveAttribute("data-collapsed", "false");
   await expectPrincipalFooter(page, "desktop-light");
 }
 
@@ -72,7 +72,7 @@ async function expectNoHorizontalOverflow(page: Page): Promise<void> {
     innerWidth,
   ]);
   expect(scrollWidth, "document scrollWidth <= innerWidth").toBeLessThanOrEqual(viewportWidth);
-  // >760px 时 body/.app-shell/main 均 overflow:hidden，文档宽度恒不溢出；路由内容须在 main 上复核。
+  // >760px 时 body/外壳根/main 均 overflow:hidden，文档宽度恒不溢出；路由内容须在 main 上复核。
   const [mainScroll, mainClient] = await page
     .getByRole("main")
     .evaluate((el) => [el.scrollWidth, el.clientWidth]);
@@ -172,8 +172,8 @@ async function expectDisclaimerInView(page: Page, label: string): Promise<void> 
 }
 
 // ui-foundation「旧页面规则压过 preflight」：button.css 在 legacy 层，压过 base 层 preflight 的
-// `padding: 0`。限定在 main 内：文档序第一个 .ui-btn 是外壳的图标按钮（.ui-btn--icon 自己就是
-// `padding: 0`），证明不了层序。随 legacy 层整体移除（change s1f-files-page 收尾）删除。
+// `padding: 0`。限定在 main 内：外壳已不用旧按钮，.ui-btn 只由尚未迁移的页面渲染在 main 里。
+// 随 legacy 层整体移除（change s1f-files-page 收尾）删除。
 async function expectLegacyOverPreflight(page: Page): Promise<void> {
   const padding = await page
     .getByRole("main")
@@ -391,6 +391,45 @@ function sidebarLink(navigation: Locator, label: string) {
   return navigation.getByRole("link", { name: label });
 }
 
+// ui-primitives「reduce 下拷入组件无动画与过渡」：拷入组件的入场动画由 tw-animate-css 声明、时长被
+// styles.css 的全局 reduce 块压到 0.01ms（未分层，压过 utilities）。先断言确有动画声明，免得空过。
+async function expectNoEnterMotion(content: Locator, label: string): Promise<void> {
+  const probe = await content.evaluate((el) => {
+    const style = getComputedStyle(el);
+    return { name: style.animationName, duration: style.animationDuration };
+  });
+  expect(probe.name, `${label} declares an enter animation`).not.toBe("none");
+  const seconds = probe.duration.split(",").map((value) => Number.parseFloat(value));
+  for (const value of seconds) {
+    expect(value, `${label} animation-duration ${probe.duration} <= 0.01ms`).toBeLessThanOrEqual(
+      0.00001,
+    );
+  }
+}
+
+// 调用方已 emulateMedia reduce 并打开侧栏：窄屏断 导航 覆盖层无入场动画；两个 project 都断一个带
+// Tailwind transition* 类的按钮（theme.css 的 reduce 规则）过渡被关掉。
+export async function expectReducedMotionShell(page: Page, project: WalkProject): Promise<void> {
+  const reduce = await page.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches);
+  expect(reduce, "prefers-reduced-motion: reduce is emulated").toBe(true);
+  if (project === "mobile-dark") {
+    await expectNoEnterMotion(page.getByRole("dialog", NAV_OVERLAY), "导航 overlay");
+  }
+  const button = page.locator('button[class*="transition"]:visible').first();
+  await expect(button).toBeVisible();
+  expect(
+    await button.evaluate((el) => getComputedStyle(el).transitionProperty),
+    "a button carrying a transition* class has transition-property none under reduce",
+  ).toBe("none");
+}
+
+// 调用方已 emulateMedia reduce 并打开 用户菜单。
+export async function expectReducedMotionMenu(page: Page): Promise<void> {
+  const menu = page.getByRole("menu");
+  await expect(menu).toBeVisible();
+  await expectNoEnterMotion(menu, "用户菜单");
+}
+
 export async function expectPrincipalFooter(page: Page, project: WalkProject) {
   await inspectSidebar(page, project, async (sidebar) => {
     const footer = sidebar.locator("footer");
@@ -448,7 +487,7 @@ async function expectReducedMotionThemeSwitch(
       after: document.documentElement.dataset.theme,
       headings: read(".settings-sec-h"),
       titles: read(".settings-row-title"),
-      links: read(".sidebar-link"),
+      links: read('nav[aria-label="主导航"] a'),
     };
   });
   await page.emulateMedia({ reducedMotion: "no-preference" });
@@ -461,7 +500,7 @@ async function expectReducedMotionThemeSwitch(
   expect(probe.headings, ".settings-sec-h count").toHaveLength(2);
   expect(probe.titles, ".settings-row-title count").toHaveLength(3);
   if (project === "desktop-light")
-    expect(probe.links.length, ".sidebar-link count").toBeGreaterThan(0);
+    expect(probe.links.length, "主导航 link count").toBeGreaterThan(0);
   const text = [...probe.headings, ...probe.titles];
   expect(
     text.map((entry) => entry.color),

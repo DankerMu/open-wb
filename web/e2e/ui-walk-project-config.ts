@@ -14,7 +14,7 @@ const HEADER_ACTIONS = ["重命名", "对话内搜索", "产物面板"];
 const FIXTURE_FILES = [{ path: "AGENTS.md", kind: "instructions", depth: 0 }];
 
 function headerActions(page: Page) {
-  return page.getByRole("banner").locator(".topbar-actions").getByRole("button");
+  return page.getByRole("banner").locator('[data-slot="topbar-actions"]').getByRole("button");
 }
 
 async function expectHeaderActions(page: Page, names: readonly string[]): Promise<void> {

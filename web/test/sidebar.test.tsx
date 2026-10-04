@@ -11,16 +11,12 @@ import {
   type FetchMock,
   jsonResponse,
 } from "./support.js";
-import {
-  readRepoFile,
-  ruleBody,
-  stripComments,
-  topLevelBlocks,
-  yieldMacrotask,
-} from "./ui-support.js";
+import { readRepoFile, yieldMacrotask } from "./ui-support.js";
 
 const STORAGE_KEY = "workbuddy-sidebar";
 const LABELS = ["会话", "工作空间", "中心", "设置"];
+/** 侧栏列表区（页面经槽位上报的内容所在的容器）。 */
+const LIST_AREA = '[data-slot="sidebar-list"]';
 
 let disposeRouter: (() => void) | undefined;
 
@@ -159,7 +155,7 @@ describe("侧栏会话列表区 (S11)", () => {
     if (!footer) throw new Error("侧栏缺用户区");
     expect(follows(mainNav, list)).toBe(true);
     expect(follows(list, footer)).toBe(true);
-    expect(list.closest(".sidebar-main")?.parentElement).toBe(aside);
+    expect(list.closest(LIST_AREA)?.parentElement).toBe(aside);
     expect(create.className).toContain("chat-new-session");
     const main = screen.getByRole("main");
     expect(within(main).queryByRole("navigation", { name: "会话列表" })).toBeNull();
@@ -173,7 +169,7 @@ describe("侧栏会话列表区 (S11)", () => {
 
     toggleSidebar(aside, "折叠侧栏");
     expectNoSessionList();
-    expect(aside.querySelector(".sidebar-main")).toBeNull();
+    expect(aside.querySelector(LIST_AREA)).toBeNull();
 
     toggleSidebar(aside, "展开侧栏");
     expect(within(aside).getByRole("navigation", { name: "会话列表" })).toBeTruthy();
@@ -187,7 +183,7 @@ describe("侧栏会话列表区 (S11)", () => {
     fireEvent.click(within(aside).getByRole("link", { name: /^工作空间/ }));
     expect(await screen.findByRole("heading", { level: 1, name: "工作空间" })).toBeTruthy();
     expectNoSessionList();
-    expect(aside.querySelector(".sidebar-main")?.childElementCount).toBe(0);
+    expect(aside.querySelector(LIST_AREA)?.childElementCount).toBe(0);
     cleanup();
     disposeRouter?.();
 
@@ -247,17 +243,6 @@ describe("侧栏会话列表区 (S11)", () => {
     pending.resolve(jsonResponse({ sessions: [LIST_SESSION] }));
     await within(list).findByRole("button", { name: LIST_SESSION.title });
     expect(within(list).queryByText("正在读取会话", { exact: true })).toBeNull();
-  });
-
-  it("sidebar.css 的主导航规则不再匹配列表区的 nav；列表区不另设滚动层", () => {
-    const css = stripComments(readRepoFile("web/src/routes/shell/sidebar.css"));
-    const preludes = topLevelBlocks(css).map((block) => block.prelude);
-    expect(preludes.filter((prelude) => /(^|[\s>+~])nav\b/.test(prelude))).toEqual([]);
-    expect(preludes).toContain(".sidebar-nav");
-    const area = ruleBody(css, ".sidebar-main");
-    expect(area).toContain("flex: 1;");
-    expect(area).toContain("min-height: 0;");
-    expect(area).not.toContain("overflow");
   });
 });
 
@@ -410,14 +395,11 @@ describe("manifest 与静态契约 (S10)", () => {
     const styles = readRepoFile("web/src/styles/legacy.css");
     expect(styles).not.toContain(".account-footer");
     expect(styles).not.toContain(".sidebar-link");
-    expect(styles).toContain("routes/shell/sidebar.css");
+    expect(styles).not.toContain("routes/shell/");
   });
 });
 
-describe("折叠态退出反馈与样式契约", () => {
-  const sidebarCss = () => stripComments(readRepoFile("web/src/routes/shell/sidebar.css"));
-  const COLLAPSED_NOTE = '.sidebar[data-collapsed="true"] .sidebar-footer-note';
-
+describe("折叠态退出反馈", () => {
   /** 折叠侧栏后经用户菜单确认 退出；返回侧栏。 */
   async function collapseAndConfirmLogout() {
     const aside = await findSidebar();
@@ -428,26 +410,24 @@ describe("折叠态退出反馈与样式契约", () => {
     return aside;
   }
 
-  it("折叠态退出失败：错误提示以浮出 note 呈现，确认框关闭、侧栏仍折叠", async () => {
+  it("折叠态退出失败：错误提示在侧栏内，确认框关闭、侧栏仍折叠", async () => {
     const message = "无法退出当前会话";
     mountFiles(() => jsonResponse({ error: { code: "forbidden", message } }, 403));
     const aside = await collapseAndConfirmLogout();
 
     const alert = await within(aside).findByRole("alert");
     expect(alert.textContent).toBe(message);
-    expect(alert.classList.contains("sidebar-footer-note")).toBe(true);
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(aside.getAttribute("data-collapsed")).toBe("true");
   });
 
-  it("折叠态退出进行中：状态提示以浮出 note 呈现", async () => {
+  it("折叠态退出进行中：状态提示在侧栏内", async () => {
     const pendingLogout = deferredResponse();
     mountFiles(() => pendingLogout.promise);
     const aside = await collapseAndConfirmLogout();
 
     const status = await within(aside).findByRole("status", { hidden: true });
     expect(status.textContent).toBe("正在退出登录，可继续浏览或刷新确认登录状态。");
-    expect(status.classList.contains("sidebar-footer-note")).toBe(true);
     expect(aside.getAttribute("data-collapsed")).toBe("true");
   });
 
@@ -509,17 +489,5 @@ describe("折叠态退出反馈与样式契约", () => {
     // 确认框仍开着，hideOthers 把侧栏设为 aria-hidden，故带 hidden 查询以免空过。
     expect(await within(aside).findByRole("status", { hidden: true })).toBeTruthy();
     expect(within(aside).queryByRole("button", { name: "关闭提示", hidden: true })).toBeNull();
-  });
-
-  it("折叠态 note 以 fixed 浮出 overflow 裁剪", () => {
-    const floating = ruleBody(sidebarCss(), COLLAPSED_NOTE);
-    expect(floating).toContain("position: fixed;");
-    expect(floating).toContain("width: 240px;");
-    // 半透明的 alert 底浮在主内容上需垫不透明底色。
-    expect(ruleBody(sidebarCss(), `${COLLAPSED_NOTE}.ui-alert`)).toContain("var(--wb-bg-primary)");
-  });
-
-  it("导航链接聚焦时重申 8px 圆角（压过全局 :focus-visible）", () => {
-    expect(ruleBody(sidebarCss(), ".sidebar-link:focus-visible")).toContain("border-radius: 8px;");
   });
 });
