@@ -37,6 +37,14 @@
   - 用途：`web/src/ui/` 无样式交互基元。已安装 `@radix-ui/react-switch`（#276,`Switch` 基元）、`@radix-ui/react-dialog`（#277,`Dialog`/`ConfirmDialog`/`Drawer` 基元）、`@radix-ui/react-dropdown-menu`、`@radix-ui/react-popover`、`@radix-ui/react-tooltip`、`@radix-ui/react-radio-group`（#278,`Menu`/`Popover`/`Tooltip`/`SegmentedControl` 基元）、`@radix-ui/react-toast`（#279,`ToastProvider`/`useToast` 基元）。
   - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;安装后随打包产物分发时须附带该 MIT 声明。
 
+- **Tailwind CSS** —— `MIT License`,版权归 Tailwind Labs, Inc.（https://github.com/tailwindlabs/tailwindcss）
+  - 用途：`web/` 样式引擎。`tailwindcss`（theme / preflight / utilities 三段,经 `web/src/styles.css` 分层导入）与构建插件 `@tailwindcss/vite`;生成的 CSS 构建时打包进 `web/dist`,运行时零网络请求。
+  - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;preflight 等样式随打包产物分发时须附带该 MIT 声明。
+
+- **tw-animate-css** —— `MIT License`,版权归 Wombosvideo（https://github.com/Wombosvideo/tw-animate-css）
+  - 用途：Tailwind 4 的进出场动画工具类（shadcn/ui 组件依赖）,经 `web/src/styles.css` 导入,构建时打包进 `web/dist`。
+  - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;随打包产物分发时须附带该 MIT 声明。
+
 ## 4. 本仓库自有内容
 
 - `app-reference/analysis/*.md` —— 结构分析文档（仓库作者）

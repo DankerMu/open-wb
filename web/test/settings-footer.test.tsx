@@ -539,7 +539,7 @@ describe("迁移静态契约", () => {
     expect(footer).toContain("ConfirmDialog");
     expect(footer).toContain("returnFocus");
     expect(footer).not.toContain("aria-current");
-    expect(readRepoFile("web/src/styles.css")).not.toContain(".logout-dialog");
+    expect(readRepoFile("web/src/styles/legacy.css")).not.toContain(".logout-dialog");
     for (const file of [
       "web/test/settings-footer.test.tsx",
       "web/test/settings-page.test.tsx",

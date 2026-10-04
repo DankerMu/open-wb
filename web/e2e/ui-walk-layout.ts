@@ -24,6 +24,12 @@ const THEME_CHOICE: Record<WalkProject, ThemeChoice> = {
   "mobile-dark": { label: "浅色", value: "light", textPrimary: "rgb(0, 0, 0)" },
 };
 
+// body 的计算底色（--background → --wb-home-bg-secondary）与文字色（--foreground → --wb-text-primary）。
+const BODY_COLORS = {
+  light: { background: "rgb(255, 255, 255)", color: "rgb(0, 0, 0)" },
+  dark: { background: "rgb(20, 20, 20)", color: "rgb(255, 255, 255)" },
+} as const;
+
 export function walkProject(name: string): WalkProject {
   if (name === "desktop-light" || name === "mobile-dark") return name;
   throw new Error(`unknown ui-walk project: ${name}`);
@@ -104,7 +110,10 @@ export async function expectRouteViewports(
   project: WalkProject,
   path: string,
 ): Promise<void> {
-  if (path === "/files") await expectFilesColumns(page, project);
+  if (path === "/files") {
+    await expectFilesColumns(page, project);
+    await expectLegacyOverPreflight(page);
+  }
   if (project !== "desktop-light") return;
   await withViewport(page, NARROW_DESKTOP, () => expectRouteLayout(page, project));
 }
@@ -160,6 +169,18 @@ async function expectDisclaimerInView(page: Page, label: string): Promise<void> 
       `${label}: disclaimer bottom - min(innerHeight, .chat-main bottom) <= 0`,
     )
     .toBeLessThanOrEqual(0);
+}
+
+// ui-foundation「旧页面规则压过 preflight」：button.css 在 legacy 层，压过 base 层 preflight 的
+// `padding: 0`。限定在 main 内：文档序第一个 .ui-btn 是外壳的图标按钮（.ui-btn--icon 自己就是
+// `padding: 0`），证明不了层序。随 legacy 层整体移除（change s1f-files-page 收尾）删除。
+async function expectLegacyOverPreflight(page: Page): Promise<void> {
+  const padding = await page
+    .getByRole("main")
+    .locator(".ui-btn")
+    .first()
+    .evaluate((el) => getComputedStyle(el).paddingLeft);
+  expect(padding, "first .ui-btn padding-left in main on /files").not.toBe("0px");
 }
 
 async function expectFilesColumns(page: Page, project: WalkProject): Promise<void> {
@@ -384,6 +405,7 @@ export async function switchTheme(
   initialBackground: string,
 ): Promise<void> {
   const choice = THEME_CHOICE[project];
+  await expectBodyColors(page, choice.value === "dark" ? "light" : "dark");
   await expectReducedMotionThemeSwitch(page, project, choice);
   await page.getByRole("radio", { name: choice.label, exact: true }).check();
   await expectTheme(page, choice, initialBackground);
@@ -461,6 +483,18 @@ async function expectTheme(page: Page, choice: ThemeChoice, initialBackground: s
   await expect
     .poll(() => pageBackground(page), "page background differs from the initial theme")
     .not.toBe(initialBackground);
+  await expectBodyColors(page, choice.value);
+}
+
+// ui-foundation「主题映射」：theme.css 的 body 规则未分层，亮/暗取值与迁移前一致。
+async function expectBodyColors(page: Page, theme: "light" | "dark"): Promise<void> {
+  await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+  const body = () =>
+    page.locator("body").evaluate((el) => {
+      const { backgroundColor, color } = getComputedStyle(el);
+      return { background: backgroundColor, color };
+    });
+  await expect.poll(body, `body colours under data-theme=${theme}`).toEqual(BODY_COLORS[theme]);
 }
 
 // #429 首帧前主题：存储值 × 系统配色 → 首帧应写入的 data-theme。

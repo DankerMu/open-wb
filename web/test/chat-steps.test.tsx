@@ -142,9 +142,9 @@ describe("(S2) step cards render icon, Chinese badge, summary and collapsed raw 
       expect(chat).not.toContain(moved);
     }
 
-    const styles = readRepoFile("web/src/styles.css");
-    const chatImport = styles.indexOf('@import "./features/chat/chat.css";');
-    const messagesImport = styles.indexOf('@import "./features/chat/messages.css";');
+    const styles = readRepoFile("web/src/styles/legacy.css");
+    const chatImport = styles.indexOf('@import "../features/chat/chat.css";');
+    const messagesImport = styles.indexOf('@import "../features/chat/messages.css";');
     expect(chatImport).toBeGreaterThanOrEqual(0);
     expect(messagesImport).toBeGreaterThan(chatImport);
   });

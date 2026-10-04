@@ -269,13 +269,14 @@ describe("静态契约 (T8)", () => {
     expect(readRepoFile("web/src/features/chat/welcome.tsx")).toContain(HERO);
     for (const path of [
       "web/src/styles.css",
+      "web/src/styles/legacy.css",
       "web/src/features/chat/chat.css",
       "web/src/features/chat/messages.css",
       "web/src/features/files/files.css",
     ]) {
       expect(readRepoFile(path), path).not.toContain("ui-page-heading");
     }
-    const styles = readRepoFile("web/src/styles.css");
+    const styles = readRepoFile("web/src/styles/legacy.css");
     expect(styles).toContain(".app-content > main");
     expect(styles).not.toContain(".app-shell > main");
     const topbar = readRepoFile("web/src/routes/shell/topbar.tsx");

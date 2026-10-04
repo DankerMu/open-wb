@@ -275,9 +275,9 @@ describe("login card static contract", () => {
     expect(ruleBody(css, ".login-err")).toContain("var(--wb-status-error-soft-bg)");
   });
 
-  it("styles.css imports auth.css and drops the migrated login and brand-mark rules", () => {
-    const styles = readRepoFile("web/src/styles.css");
-    expect(styles).toContain('@import "./features/auth/auth.css";');
+  it("legacy.css imports auth.css and drops the migrated login and brand-mark rules", () => {
+    const styles = readRepoFile("web/src/styles/legacy.css");
+    expect(styles).toContain('@import "../features/auth/auth.css";');
     expect(styles).not.toContain(".brand-mark");
     expect(styles).not.toContain(".login-");
     expect(styles).not.toContain(".login-dialog");

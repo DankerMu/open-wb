@@ -407,7 +407,7 @@ describe("manifest 与静态契约 (S10)", () => {
     ]);
     expect(readRepoFile("web/src/routes/router.tsx")).not.toContain("export const routeManifest");
     expect(readRepoFile("web/src/routes/shell/sidebar.tsx")).not.toContain("@radix-ui");
-    const styles = readRepoFile("web/src/styles.css");
+    const styles = readRepoFile("web/src/styles/legacy.css");
     expect(styles).not.toContain(".account-footer");
     expect(styles).not.toContain(".sidebar-link");
     expect(styles).toContain("routes/shell/sidebar.css");
