@@ -1,675 +1,49 @@
-import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router";
-import type { ApiClient } from "../../lib/api.js";
-import type { ChatMessageSnapshot } from "../../lib/session-contract.js";
 import { useSidebarSlot } from "../../lib/sidebar-slot.js";
 import { useTopbar } from "../../lib/topbar.js";
-import { useAuth } from "../auth/index.js";
 import { useArtifactsPanel } from "./artifacts-panel.js";
 import { useConversationSearch } from "./conversation-search.js";
 import { ConversationView } from "./conversation-view.js";
 import { DeleteDialog } from "./delete-dialog.js";
-import { errorMessage, isNotFound, isUnauthorized } from "./errors.js";
-import { ownsCreateSend, ownsHistory, ownsMutation, visibleOwnedAlert } from "./ownership.js";
 import { useProjectConfig } from "./project-config.js";
 import { RenameDialog } from "./rename-dialog.js";
-import { useSessionActions } from "./session-actions.js";
-import { DEFAULT_SESSION_FILTER } from "./session-groups.js";
-import { composerWorkspaceId, selectedSession, sessionNavigation } from "./session-path.js";
 import { SessionSidebar } from "./session-sidebar.js";
 import { useSlashMenu } from "./slash-menu.js";
-import {
-  applyChatEvent,
-  type ChatEvent,
-  chatStateFromSnapshot,
-  connectSessionEvents,
-  isUnknownTurn,
-} from "./stream.js";
 import { chatTopbar } from "./topbar-actions.js";
-import { TERMINAL_REFRESH_GUIDANCE, useTurnActions } from "./turn-actions.js";
-import type {
-  ChatHistoryState,
-  ChatListState,
-  ChatMutationOwner,
-  ChatOwnedAlert,
-  PendingCreateSend,
-} from "./types.js";
-import { useWelcomeOptions } from "./welcome-options.js";
-import { useWorkspaceList } from "./workspace-list.js";
-
-type SessionEventHandle = { close(): void; resync(): void };
-type ReadyHistory = Extract<ChatHistoryState, { status: "ready" }>;
-/**
- * `resync` marks the connection whose unknown-turn event asked for a fresh snapshot (issue 633).
- * Set by a pure updater, consumed by an effect; every installed snapshot replaces the state and
- * clears it.
- */
-type PageHistoryState =
-  | Exclude<ChatHistoryState, ReadyHistory>
-  | (ReadyHistory & { resync?: { source: SessionEventHandle } });
-
-const MISSING_EVENT_SOURCE = "无法连接会话事件";
-
-/** A fork in flight locks the composer without being a running turn (no 停止/生成中). */
-function composerLocks(generating: boolean, forkLocked: boolean, draft: string) {
-  const composerDisabled = generating || forkLocked;
-  return { composerDisabled, sendDisabled: composerDisabled || draft.trim().length === 0 };
-}
+import { useChatSession } from "./use-chat-session.js";
 
 export function ChatPage() {
-  const { createSessionClient } = useAuth();
-  const client = useMemo(() => createSessionClient(), [createSessionClient]);
-  const location = useLocation();
-  const navigate = useNavigate();
-  const requestedSessionId = new URLSearchParams(location.search).get("session");
-  const [draft, setDraft] = useState("");
-  const [listState, setListState] = useState<ChatListState>({ status: "loading", client });
-  const [historyState, setHistoryState] = useState<PageHistoryState>({ status: "idle" });
-  const [promptError, setPromptError] = useState<ChatOwnedAlert | null>(null);
-  const [streamError, setStreamError] = useState<ChatOwnedAlert | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [mutationOwner, setMutationOwner] = useState<ChatMutationOwner | null>(null);
-  const [regenerateOwner, setRegenerateOwner] = useState<ChatMutationOwner | null>(null);
-  const [forkOwner, setForkOwner] = useState<ChatMutationOwner | null>(null);
-  const [sessionFilter, setSessionFilter] = useState(DEFAULT_SESSION_FILTER);
-  const {
-    error: workspacesError,
-    refresh: refreshWorkspaces,
-    workspaces,
-  } = useWorkspaceList(client);
-  const welcome = useWelcomeOptions(workspaces, workspacesError);
-  const mountedRef = useRef(false);
-  const clientRef = useRef(client);
-  const requestedSessionRef = useRef(requestedSessionId);
-  const listGenerationRef = useRef(0);
-  const historyGenerationRef = useRef(0);
-  const mutationGenerationRef = useRef(0);
-  const createSendGenerationRef = useRef(0);
-  const sourceRef = useRef<SessionEventHandle | null>(null);
-  const sourceSessionRef = useRef<string | null>(null);
-  const pendingCreateSendRef = useRef<PendingCreateSend | null>(null);
-  const listControllerRef = useRef<AbortController | null>(null);
-  const historyControllerRef = useRef<AbortController | null>(null);
-  const mutationControllerRef = useRef<AbortController | null>(null);
-  const createControllerRef = useRef<AbortController | null>(null);
-
-  clientRef.current = client;
-  requestedSessionRef.current = requestedSessionId;
-
-  const closeSource = useCallback(() => {
-    sourceRef.current?.close();
-    sourceRef.current = null;
-    sourceSessionRef.current = null;
-  }, []);
-
-  const abortList = useCallback(() => {
-    listControllerRef.current?.abort();
-    listControllerRef.current = null;
-  }, []);
-
-  const abortHistory = useCallback(() => {
-    historyControllerRef.current?.abort();
-    historyControllerRef.current = null;
-  }, []);
-
-  const abortMutation = useCallback(() => {
-    mutationControllerRef.current?.abort();
-    mutationControllerRef.current = null;
-  }, []);
-
-  const abortCreate = useCallback(() => {
-    createControllerRef.current?.abort();
-    createControllerRef.current = null;
-  }, []);
-
-  const releaseMutationIfOwned = useCallback((controller: AbortController) => {
-    if (mutationControllerRef.current === controller) {
-      mutationControllerRef.current = null;
-    }
-  }, []);
-
-  const fencePageWork = useCallback(() => {
-    listGenerationRef.current += 1;
-    historyGenerationRef.current += 1;
-    mutationGenerationRef.current += 1;
-    createSendGenerationRef.current += 1;
-    pendingCreateSendRef.current = null;
-    abortList();
-    abortHistory();
-    abortMutation();
-    abortCreate();
-    closeSource();
-  }, [abortCreate, abortHistory, abortList, abortMutation, closeSource]);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      fencePageWork();
-    };
-  }, [fencePageWork]);
-
-  const refreshList = useCallback(
-    (ownedClient: ApiClient) => {
-      if (ownedClient !== clientRef.current) {
-        return;
-      }
-      abortList();
-      const controller = new AbortController();
-      listControllerRef.current = controller;
-      listGenerationRef.current += 1;
-      const generation = listGenerationRef.current;
-      void ownedClient
-        .listSessions({ signal: controller.signal })
-        .then(({ sessions }) => {
-          if (
-            !mountedRef.current ||
-            controller.signal.aborted ||
-            generation !== listGenerationRef.current ||
-            ownedClient !== clientRef.current
-          ) {
-            return;
-          }
-          setListState({ status: "success", client: ownedClient, sessions });
-        })
-        .catch((error: unknown) => {
-          if (
-            !mountedRef.current ||
-            controller.signal.aborted ||
-            generation !== listGenerationRef.current ||
-            ownedClient !== clientRef.current ||
-            isUnauthorized(error)
-          ) {
-            return;
-          }
-          setListState({ status: "error", client: ownedClient, message: errorMessage(error) });
-        });
-      refreshWorkspaces(ownedClient);
-    },
-    [abortList, refreshWorkspaces],
-  );
-  const sessionActions = useSessionActions(client, setListState, setHistoryState, {
-    abortHistory,
-    closeSource,
-    refreshList,
-    requestedSessionRef,
-  });
-
-  useEffect(() => {
-    fencePageWork();
-    setListState({ status: "loading", client });
-    setHistoryState({ status: "idle" });
-    setPromptError(null);
-    setStreamError(null);
-    setCreating(false);
-    setSubmitting(false);
-    setMutationOwner(null);
-    refreshList(client);
-    return () => {
-      abortList();
-    };
-  }, [abortList, client, fencePageWork, refreshList]);
-
-  const installSnapshot = useCallback((snapshot: ChatMessageSnapshot, ownedClient: ApiClient) => {
-    if (ownedClient !== clientRef.current || snapshot.session.id !== requestedSessionRef.current) {
-      return;
-    }
-    setHistoryState({
-      status: "ready",
-      client: ownedClient,
-      snapshot,
-      view: chatStateFromSnapshot(snapshot),
-    });
-    setStreamError(null);
-  }, []);
-
-  const openSource = useCallback(
-    (snapshot: ChatMessageSnapshot, ownedClient: ApiClient) => {
-      closeSource();
-      const EventSourceCtor = globalThis.EventSource;
-      const sessionId = snapshot.session.id;
-      if (typeof EventSourceCtor !== "function") {
-        setStreamError({
-          client: ownedClient,
-          sessionId,
-          message: `${MISSING_EVENT_SOURCE}。${TERMINAL_REFRESH_GUIDANCE}`,
-        });
-        return;
-      }
-      const handle: SessionEventHandle = connectSessionEvents(sessionId, {
-        EventSourceCtor,
-        initialCursor: snapshot.streamCursor,
-        loadSnapshot(signal) {
-          return ownedClient.getMessages(sessionId, { signal });
-        },
-        onSnapshot(next) {
-          if (
-            sourceSessionRef.current !== sessionId ||
-            ownedClient !== clientRef.current ||
-            next.session.id !== requestedSessionRef.current
-          ) {
-            return;
-          }
-          installSnapshot(next, ownedClient);
-        },
-        onEvent(event: ChatEvent) {
-          if (sourceSessionRef.current !== sessionId || ownedClient !== clientRef.current) {
-            return;
-          }
-          setHistoryState((current) => {
-            if (
-              current.status !== "ready" ||
-              current.client !== ownedClient ||
-              current.snapshot.session.id !== sessionId ||
-              sessionId !== requestedSessionRef.current
-            ) {
-              return current;
-            }
-            if (isUnknownTurn(current.view, event)) {
-              // Not reduced: the recovery snapshot brings the turn. One request per connection
-              // until a snapshot install replaces this state.
-              return current.resync?.source === handle
-                ? current
-                : { ...current, resync: { source: handle } };
-            }
-            return { ...current, view: applyChatEvent(current.view, event) };
-          });
-        },
-        onError(error) {
-          if (sourceSessionRef.current !== sessionId || ownedClient !== clientRef.current) {
-            return;
-          }
-          setStreamError({
-            client: ownedClient,
-            sessionId,
-            message: `${errorMessage(error)}。${TERMINAL_REFRESH_GUIDANCE}`,
-          });
-        },
-      });
-      sourceRef.current = handle;
-      sourceSessionRef.current = sessionId;
-    },
-    [closeSource, installSnapshot],
-  );
-
-  const loadHistory = useCallback(
-    (sessionId: string, ownedClient: ApiClient) => {
-      abortHistory();
-      closeSource();
-      const controller = new AbortController();
-      historyControllerRef.current = controller;
-      historyGenerationRef.current += 1;
-      const generation = historyGenerationRef.current;
-      setHistoryState({ status: "loading", client: ownedClient, sessionId });
-      setStreamError(null);
-      void ownedClient
-        .getMessages(sessionId, { signal: controller.signal })
-        .then((snapshot) => {
-          if (
-            !mountedRef.current ||
-            controller.signal.aborted ||
-            generation !== historyGenerationRef.current ||
-            ownedClient !== clientRef.current ||
-            requestedSessionRef.current !== sessionId
-          ) {
-            return;
-          }
-          installSnapshot(snapshot, ownedClient);
-          openSource(snapshot, ownedClient);
-        })
-        .catch((error: unknown) => {
-          if (
-            !mountedRef.current ||
-            controller.signal.aborted ||
-            generation !== historyGenerationRef.current ||
-            ownedClient !== clientRef.current ||
-            requestedSessionRef.current !== sessionId ||
-            isUnauthorized(error)
-          ) {
-            return;
-          }
-          if (isNotFound(error)) {
-            setHistoryState({ status: "idle" });
-            navigate(sessionNavigation(location.pathname, location.search, location.hash, null), {
-              replace: true,
-            });
-            return;
-          }
-          setHistoryState({
-            status: "error",
-            client: ownedClient,
-            sessionId,
-            message: errorMessage(error),
-          });
-        });
-    },
-    [
-      abortHistory,
-      closeSource,
-      installSnapshot,
-      location.hash,
-      location.pathname,
-      location.search,
-      navigate,
-      openSource,
-    ],
-  );
-
-  const selectSession = useCallback(
-    (sessionId: string | null) => {
-      navigate(sessionNavigation(location.pathname, location.search, location.hash, sessionId));
-    },
-    [location.hash, location.pathname, location.search, navigate],
-  );
-
-  const { answerApproval, dispatchPrompt, forkTurn, regenerateTurn, restoreOwnedDraft, stopTurn } =
-    useTurnActions({
-      abortMutation,
-      clientRef,
-      closeSource,
-      historyGenerationRef,
-      installSnapshot,
-      mountedRef,
-      mutationControllerRef,
-      mutationGenerationRef,
-      openSource,
-      pendingCreateSendRef,
-      refreshList,
-      releaseMutationIfOwned,
-      requestedSessionRef,
-      selectSession,
-      setCreating,
-      setDraft,
-      setForkOwner,
-      setMutationOwner,
-      setPromptError,
-      setRegenerateOwner,
-      setStreamError,
-      setSubmitting,
-    });
-
-  useEffect(() => {
-    const pending = pendingCreateSendRef.current;
-    const keepOwnedPrompt =
-      ownsCreateSend(pending, client, requestedSessionId) && pending.prompt.length > 0;
-    const keepOwnedCreate =
-      pending !== null &&
-      pending.client === client &&
-      pending.sessionId === null &&
-      pending.originSessionId === requestedSessionId;
-    if (keepOwnedPrompt || keepOwnedCreate) {
-      return;
-    }
-    if (pending && pending.client === client) {
-      pendingCreateSendRef.current = null;
-      createSendGenerationRef.current += 1;
-      abortCreate();
-      abortMutation();
-      setCreating(false);
-      setSubmitting(false);
-      setMutationOwner(null);
-    }
-    if (!requestedSessionId) {
-      abortHistory();
-      closeSource();
-      historyGenerationRef.current += 1;
-      setHistoryState({ status: "idle" });
-      setStreamError(null);
-      return;
-    }
-    loadHistory(requestedSessionId, client);
-    return () => {
-      const currentPending = pendingCreateSendRef.current;
-      if (
-        ownsCreateSend(currentPending, client, requestedSessionId) &&
-        currentPending.prompt.length > 0
-      ) {
-        return;
-      }
-      abortHistory();
-      closeSource();
-    };
-  }, [
-    abortCreate,
-    abortHistory,
-    abortMutation,
-    client,
-    closeSource,
-    loadHistory,
-    requestedSessionId,
-  ]);
-
-  useEffect(() => {
-    const pending = pendingCreateSendRef.current;
-    if (
-      !ownsCreateSend(pending, client, requestedSessionId) ||
-      pending.prompt.length === 0 ||
-      mutationControllerRef.current !== null
-    ) {
-      return;
-    }
-    dispatchPrompt(pending.sessionId, pending.prompt, pending.generation, pending.client);
-  }, [client, dispatchPrompt, requestedSessionId]);
-
-  const createAndSelect = useCallback(
-    (prompt?: string) => {
-      if (createControllerRef.current || mutationControllerRef.current) {
-        return;
-      }
-      const controller = new AbortController();
-      createControllerRef.current = controller;
-      createSendGenerationRef.current += 1;
-      const generation = createSendGenerationRef.current;
-      const originSessionId = requestedSessionId;
-      if (prompt !== undefined) {
-        pendingCreateSendRef.current = {
-          client,
-          generation,
-          originSessionId,
-          prompt,
-          sessionId: null,
-        };
-        setSubmitting(true);
-      } else {
-        pendingCreateSendRef.current = {
-          client,
-          generation,
-          originSessionId,
-          prompt: "",
-          sessionId: null,
-        };
-      }
-      setCreating(true);
-      setMutationOwner({
-        client,
-        originSessionId,
-        sessionId: null,
-      });
-      setPromptError(null);
-      void client
-        .createSession(welcome.createBody(), { signal: controller.signal })
-        .then((session) => {
-          if (
-            !mountedRef.current ||
-            controller.signal.aborted ||
-            generation !== createSendGenerationRef.current ||
-            client !== clientRef.current
-          ) {
-            return;
-          }
-          createControllerRef.current = null;
-          if (pendingCreateSendRef.current?.generation === generation) {
-            pendingCreateSendRef.current = {
-              client,
-              generation,
-              originSessionId: pendingCreateSendRef.current.originSessionId,
-              prompt: pendingCreateSendRef.current.prompt,
-              sessionId: session.id,
-            };
-            setMutationOwner({
-              client,
-              originSessionId: pendingCreateSendRef.current.originSessionId,
-              sessionId: session.id,
-            });
-          } else {
-            setCreating(false);
-            setMutationOwner(null);
-          }
-          refreshList(client);
-          navigate(
-            sessionNavigation(location.pathname, location.search, location.hash, session.id),
-          );
-        })
-        .catch((error: unknown) => {
-          if (
-            !mountedRef.current ||
-            controller.signal.aborted ||
-            generation !== createSendGenerationRef.current ||
-            isUnauthorized(error)
-          ) {
-            if (createControllerRef.current === controller) {
-              createControllerRef.current = null;
-            }
-            return;
-          }
-          const rejectedPrompt =
-            pendingCreateSendRef.current?.generation === generation
-              ? pendingCreateSendRef.current.prompt
-              : "";
-          createControllerRef.current = null;
-          pendingCreateSendRef.current = null;
-          restoreOwnedDraft(rejectedPrompt, client, originSessionId);
-          setCreating(false);
-          setSubmitting(false);
-          setMutationOwner(null);
-          setPromptError({
-            client,
-            sessionId: originSessionId,
-            message: errorMessage(error),
-          });
-        });
-    },
-    [
-      client,
-      location.hash,
-      location.pathname,
-      location.search,
-      navigate,
-      refreshList,
-      requestedSessionId,
-      restoreOwnedDraft,
-      welcome.createBody,
-    ],
-  );
-  const submitComposer = useCallback(
-    (event: FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-      if (creating || submitting || createControllerRef.current || mutationControllerRef.current) {
-        return;
-      }
-      if (draft.trim().length === 0) {
-        return;
-      }
-      const prompt = draft;
-      setDraft("");
-      if (!requestedSessionId) {
-        createAndSelect(prompt);
-        return;
-      }
-      createSendGenerationRef.current += 1;
-      const generation = createSendGenerationRef.current;
-      pendingCreateSendRef.current = {
-        client,
-        generation,
-        originSessionId: requestedSessionId,
-        prompt,
-        sessionId: requestedSessionId,
-      };
-      setMutationOwner({
-        client,
-        originSessionId: requestedSessionId,
-        sessionId: requestedSessionId,
-      });
-      dispatchPrompt(requestedSessionId, prompt, generation, client);
-    },
-    [client, createAndSelect, creating, dispatchPrompt, draft, requestedSessionId, submitting],
-  );
-
-  useEffect(() => {
-    if (historyState.status !== "ready" || historyState.client !== client) {
-      return;
-    }
-    const sessionId = historyState.snapshot.session.id;
-    const nextStatus = historyState.view.status;
-    setListState((list) => {
-      if (list.status !== "success" || list.client !== historyState.client) {
-        return list;
-      }
-      const current = list.sessions.find((session) => session.id === sessionId);
-      if (!current || current.status === nextStatus) {
-        return list;
-      }
-      return {
-        status: "success",
-        client: list.client,
-        sessions: list.sessions.map((session) =>
-          session.id === sessionId ? { ...session, status: nextStatus } : session,
-        ),
-      };
-    });
-  }, [client, historyState]);
-
-  const resyncRequest = historyState.status === "ready" ? historyState.resync : undefined;
-  useEffect(() => {
-    // Only the connection that delivered the unknown turn, and only while it is still current.
-    if (resyncRequest !== undefined && resyncRequest.source === sourceRef.current) {
-      resyncRequest.source.resync();
-    }
-  }, [resyncRequest]);
-
-  const ownedHistory = ownsHistory(historyState, client, requestedSessionId);
-  const listForClient =
-    listState.client === client && listState.status === "success" ? listState : null;
-  const historyView = ownedHistory && historyState.status === "ready" ? historyState.view : null;
-  const selected = selectedSession(requestedSessionId, listForClient, ownedHistory, historyState);
-  const workspace = workspaces?.find((item) => item.id === selected?.workspaceId);
+  // 页面状态、回调与 fence 都在 useChatSession；本组件只做组合与外壳接线。
+  const session = useChatSession();
+  const { client, draft, historyView, requestedSessionId, selected, sessionActions, workspace } =
+    session;
   const artifacts = useArtifactsPanel(client, historyView, workspace);
   const search = useConversationSearch(selected?.id, historyView);
   const config = useProjectConfig(client, selected);
   useTopbar(
     chatTopbar(selected, sessionActions.openRename, search.slot, artifacts.open, config.slot),
   );
-  const ownedBusy = ownsMutation(mutationOwner, client, requestedSessionId);
-  const ownedStreamError = visibleOwnedAlert(streamError, client, requestedSessionId);
-  const generating =
-    (ownedBusy && creating) ||
-    (ownedBusy && submitting) ||
-    ownsMutation(regenerateOwner, client, requestedSessionId) ||
-    (ownedHistory && historyState.status === "loading") ||
-    historyView?.status === "running" ||
-    Boolean(ownedStreamError);
-  const forkLocked = ownsMutation(forkOwner, client, requestedSessionId);
-  const { composerDisabled, sendDisabled } = composerLocks(generating, forkLocked, draft);
-  const slashWorkspaceId = composerWorkspaceId(requestedSessionId, selected, welcome.workspace);
-  const slash = useSlashMenu(client, slashWorkspaceId, draft, !composerDisabled, setDraft);
-  // 列表渲染进 shell 侧栏列表区（issue 424）；数据、回调与 fence 仍留在本页闭包里。
+  const slash = useSlashMenu(
+    client,
+    session.slashWorkspaceId,
+    draft,
+    !session.composerDisabled,
+    session.setDraft,
+  );
+  // 列表渲染进 shell 侧栏列表区（issue 424）；数据与回调经 SessionSidebar 的既有 props 传入。
   useSidebarSlot(
     <SessionSidebar
-      filter={sessionFilter}
-      listError={
-        listState.client === client && listState.status === "error" ? listState.message : null
-      }
-      listLoading={listState.client === client && listState.status === "loading"}
-      onCreateSession={() => createAndSelect()}
+      filter={session.sessionFilter}
+      listError={session.listError}
+      listLoading={session.listLoading}
+      onCreateSession={() => session.createAndSelect()}
       onDeleteSession={sessionActions.openDelete}
-      onFilterChange={setSessionFilter}
+      onFilterChange={session.setSessionFilter}
       onRenameSession={sessionActions.openRename}
-      onSelectSession={selectSession}
+      onSelectSession={session.selectSession}
       onTogglePin={sessionActions.togglePin}
       requestedSessionId={requestedSessionId}
-      sessions={listForClient?.sessions ?? null}
-      workspaces={workspaces}
+      sessions={session.sessions}
+      workspaces={session.workspaces}
     />,
   );
 
@@ -677,24 +51,24 @@ export function ChatPage() {
     <section className="chat-page">
       <ConversationView
         client={client}
-        composerDisabled={composerDisabled}
+        composerDisabled={session.composerDisabled}
         draft={draft}
-        generating={generating}
-        historyError={ownedHistory && historyState.status === "error" ? historyState.message : null}
+        generating={session.generating}
+        historyError={session.historyError}
         historyView={historyView}
-        onAnswerApproval={answerApproval}
-        onChangeDraft={setDraft}
-        onFork={forkTurn}
-        onRegenerate={regenerateTurn}
-        onStop={stopTurn}
-        onSubmit={submitComposer}
-        promptError={visibleOwnedAlert(promptError, client, requestedSessionId)}
+        onAnswerApproval={session.answerApproval}
+        onChangeDraft={session.setDraft}
+        onFork={session.forkTurn}
+        onRegenerate={session.regenerateTurn}
+        onStop={session.stopTurn}
+        onSubmit={session.submitComposer}
+        promptError={session.promptError}
         requestedSessionId={requestedSessionId}
         search={search}
-        sendDisabled={sendDisabled}
+        sendDisabled={session.sendDisabled}
         slash={slash}
-        streamError={ownedStreamError}
-        welcome={welcome}
+        streamError={session.streamError}
+        welcome={session.welcome}
         workspace={workspace}
       />
       <RenameDialog rename={sessionActions.rename} />
