@@ -548,7 +548,7 @@ describe("静态契约 (R10)", () => {
     expect(sidebarCss).not.toContain("max-width: 760px");
     expect(sidebarCss).toContain('.sidebar[data-variant="overlay"]');
 
-    const styles = stripComments(readRepoFile("web/src/styles.css"));
+    const styles = stripComments(readRepoFile("web/src/styles/legacy.css"));
     const narrowBlock = blockBody(styles, /@media\s*\(max-width:\s*760px\)\s*\{/);
     expect(narrowBlock).not.toContain("flex-direction: column");
     expect(narrowBlock).toContain("min-height: 100dvh;");

@@ -12,17 +12,19 @@
 
 ## 1a. ui-foundation — Tailwind 接入、层叠顺序与主题映射
 
-- [ ] 1a.1 依赖与构建：`web/package.json` 加 `tailwindcss`、`@tailwindcss/vite`、`tw-animate-css`；`web/vite.config.ts` 加 Tailwind 插件；`biome.json` 顶层 `css.parser.tailwindDirectives: true`；
+- [x] 1a.1 依赖与构建：`web/package.json` 加 `tailwindcss`、`@tailwindcss/vite`、`tw-animate-css`；`web/vite.config.ts` 加 Tailwind 插件；`biome.json` 顶层 `css.parser.tailwindDirectives: true`；
   `knip.json` web `entry` 加 `src/styles.css`（仍报 `tailwindcss` / `tw-animate-css` 未使用时以 `ignoreDependencies` 精确列名）；`ATTRIBUTION.md` 登记 Tailwind CSS。
-- [ ] 1a.2 样式入口（design D2）：新建 `web/src/styles/legacy.css` 承接原 `styles.css` 的全局规则（全局 reduced-motion 块除外）与全部 `@import`；
+- [x] 1a.2 样式入口（design D2）：新建 `web/src/styles/legacy.css` 承接原 `styles.css` 的全局规则（全局 reduced-motion 块除外）与全部 `@import`；
   `web/src/styles.css` 改为层声明 + Tailwind 三段导入 + `tw-animate-css` + `tokens.css` + `theme.css` + `legacy.css layer(legacy)` + 原样保留、未分层的全局 reduced-motion 块。
-- [ ] 1a.3 主题映射（design D3）：新建 `web/src/styles/theme.css`（规格所列语义变量，七项钉死的对应、`[data-theme="dark"]` 的 `--primary` 块、`@theme inline`、`--radius`、`@custom-variant dark`、
+  utilities 导入带 `source("./")`，类名扫描限定在 `web/src`（不扫 `web/test`、`web/e2e`）；`legacy.css` 末尾补三条 `revert` 规则，恢复 preflight 清掉的 `.chat-md` / `.files-md` 列表符号与编号、`.files-md` 列表缩进与标题字重（随两页迁移删除）。
+- [x] 1a.3 主题映射（design D3）：新建 `web/src/styles/theme.css`（规格所列语义变量，七项钉死的对应、`[data-theme="dark"]` 的 `--primary` 块、`@theme inline`、`--radius`、`@custom-variant dark`、
   `body` 底色与文字色、reduce 下 `[class*="transition"] { transition: none }`）；`legacy.css` 里 `body` 的底色/文字色声明删除。其余变量的对应表写进 PR 描述。
-- [ ] 1a.4 随搬家改指的测试（design D6 表）：`chat-steps.test.tsx:145-149`、`app-shell-responsive.test.tsx:551-554`、`topbar.test.tsx:277-278`、`sidebar.test.tsx:410-413`、
+- [x] 1a.4 随搬家改指的测试（design D6 表）：`chat-steps.test.tsx:145-149`、`app-shell-responsive.test.tsx:551-554`、`topbar.test.tsx:277-278`、`sidebar.test.tsx:410-413`、
   `login-form.test.tsx:279-280`、`settings-page.test.tsx:414,424` 改读 `legacy.css`；`ui-reduced-motion.test.ts` 不改且保持通过；
   `ui-tokens.test.ts` 删除 demo 逐值相等与名集合断言及 `styles.css` 的三条底色断言，`files.css` 的两行保留。
-- [ ] 1a.5 守卫（新测试文件）：入口结构（规格「入口结构不可缺失或重排」）与 `theme.css` 结构（规格「映射文件结构」）。
-- [ ] 1a.6 ui-walk：`/settings` 亮/暗下 `body` 计算底色为 `rgb(255, 255, 255)` / `rgb(20, 20, 20)`、文字色等于 `--wb-text-primary`；`/files` 第一个 `.ui-btn` 的 `padding-left` 非 `0px`。
+  另有两处读 `styles.css` 的否定断言随搬家补读 `legacy.css`（否则成空断言）：`topbar.test.tsx` 的「不含 `ui-page-heading`」列表、`settings-footer.test.tsx` 的「不含 `.logout-dialog`」。
+- [x] 1a.5 守卫（新测试文件）：入口结构（规格「入口结构不可缺失或重排」）与 `theme.css` 结构（规格「映射文件结构」）。
+- [x] 1a.6 ui-walk：`/settings` 亮/暗下 `body` 计算底色为 `rgb(255, 255, 255)` / `rgb(20, 20, 20)`、文字色等于 `--wb-text-primary`；`/files` 的 `main` 内第一个 `.ui-btn` 的 `padding-left` 非 `0px`。
   既有 ui-walk 全部用例保持通过；若 preflight 使某功能断言失败，在 `legacy.css` 补最小规则。
 
 Suggested fixture level: expanded - 全局层叠顺序是全部页面的公共契约，其结果（legacy 压过 preflight、未分层压过 utilities）只有真实浏览器能证明

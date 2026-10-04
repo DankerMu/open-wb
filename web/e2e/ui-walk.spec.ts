@@ -215,6 +215,14 @@ async function walkFiles(page: Page, project: WalkProject): Promise<void> {
   await expect(
     preview.getByRole("heading", { level: 1, name: SMOKE_FIXTURE, exact: true }),
   ).toBeVisible();
+  // 旧 markdown 面的列表符号由 legacy.css 从 preflight 手里还原（随文件页迁移删除）。
+  expect(
+    await preview
+      .getByRole("list")
+      .first()
+      .evaluate((el) => getComputedStyle(el).listStyleType),
+    "readme.md list marker survives preflight",
+  ).not.toBe("none");
   await preview.getByRole("button", { name: "查看源码" }).click();
   const sourceRow = preview.getByRole("row").first();
   await expect(sourceRow.getByRole("cell").nth(0)).toHaveText("1");

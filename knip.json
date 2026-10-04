@@ -10,7 +10,13 @@
       "ignoreBinaries": ["mkfifo", "pgrep"]
     },
     "web": {
-      "entry": ["index.html", "src/lib/theme.ts", "test/**/*.test.ts", "test/**/*.test.tsx"],
+      "entry": [
+        "index.html",
+        "src/styles.css",
+        "src/lib/theme.ts",
+        "test/**/*.test.ts",
+        "test/**/*.test.tsx"
+      ],
       "project": ["src/**", "test/**"]
     }
   }

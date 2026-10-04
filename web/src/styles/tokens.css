@@ -1,10 +1,11 @@
 /* Design tokens — 移植自 resource/workbuddy-live-demo.html:19-188（:root 与
    [data-theme="dark"] 两块），demo 的 token 取自 WorkBuddy 5.3.11 的设计 token 文件
    （wb-design-tokens-master.css / design-tokens.json），归属见 ATTRIBUTION.md §4。
-   与 demo 的差异（仅此两类）：
+   移植时与 demo 的差异（仅此两类）：
    - --wb-font-heading 去掉 Poppins，只用本地/系统字体栈（不请求公网字体）；
    - demo 引用但未定义的六个变量在此补定，逐条注明"demo 缺失、本仓补定"。
-   其余值与 demo 逐字相同（仅经 biome 格式化），由 web/test/ui-tokens.test.ts 守护。
+   自 s1f-ui-foundation 起 token 的值与名集合由本仓拥有，不再与 demo 逐值绑定；
+   web/test/ui-tokens.test.ts 只守护「被引用的 token 都有定义」与「不加载公网字体」。
    上游品牌图形与布局代码不在此复用。 */
 
 :root {

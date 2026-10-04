@@ -410,8 +410,8 @@ describe("settings static contract", () => {
     }
   });
 
-  it("S6 moves the settings rules out of styles.css into settings.css", () => {
-    const styles = readRepoFile("web/src/styles.css");
+  it("S6 moves the settings rules out of the global stylesheet into settings.css", () => {
+    const styles = readRepoFile("web/src/styles/legacy.css");
     for (const legacy of [
       ".theme-option",
       ".theme-swatch",
@@ -421,7 +421,7 @@ describe("settings static contract", () => {
     ]) {
       expect(styles).not.toContain(legacy);
     }
-    expect(styles).toContain('@import "./features/settings/settings.css";');
+    expect(styles).toContain('@import "../features/settings/settings.css";');
 
     const settings = readRepoFile("web/src/features/settings/settings.css");
     expect(settings).toContain("demo.html:818-824");

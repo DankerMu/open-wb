@@ -8,7 +8,7 @@
 - **THEN** 它等于 `--primary` 的计算值，不是透明（旧全局规则 `button { background: none }` 在 `legacy` 层，被 utilities 压过）
 
 #### Scenario: 旧页面规则压过 preflight
-- **WHEN** `make ui-walk` 打开 `/files`（尚未迁移），读取页面上第一个旧基元按钮（类 `ui-btn`）的计算 `padding-left`
+- **WHEN** `make ui-walk` 打开 `/files`（尚未迁移），读取主区（`main`）内第一个旧基元按钮（类 `ui-btn`）的计算 `padding-left`（外壳的图标按钮自身即 `padding: 0`，证明不了层序）
 - **THEN** 它不是 `0px`（`button.css` 的声明在 `legacy` 层，压过 preflight 的 `padding: 0`）；该场景在 `legacy` 层整体移除时（change `s1f-files-page` 收尾）随之删除
 
 #### Scenario: 入口结构不可缺失或重排
