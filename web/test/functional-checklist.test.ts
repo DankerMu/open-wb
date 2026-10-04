@@ -20,12 +20,12 @@ const DEMO_REF = /demo:/i;
 /** `<数字>px`：`12px`、`0.5px`、`12 px`；`px` 后接字母（如单词的一部分）不算。 */
 const PIXEL_VALUE = /\d\s?px(?![A-Za-z])/i;
 /**
- * `.`/`#` 前缀的 CSS 选择器：记号出现在单元格开头，或紧跟空白、反引号、引号、括号、顿号/逗号之后，
- * 且 `.`/`#` 后是字母、下划线或连字符。于是 `/settings`、`/files#top`、`#643`、`0.5`、`styles.css`、`*.md`
- * 都不算（前一个字符是字母/数字/`*`，或后一个字符是数字）；裸写的 `.md` 与 `.btn` 无法从字面区分，一律按选择器拒绝，
- * 清单文件头要求扩展名写成 `*.md` 或完整文件名。
+ * `.`/`#` 前缀的 CSS 选择器：`.`/`#` 后是字母、下划线或连字符即算，除非它前一个字符是 ASCII 字母、数字、`*` 或 `/`。
+ * 于是 `/settings`、`/files#top`、`/#/chat`、`styles.css`、`*.md` 不算（前一个字符被豁免），`#643`、`0.5` 也不算
+ *（后一个字符是数字）；紧跟中文、标点或括号的 `点击.btn`、`「.item」`、`为#app` 照样被拒。
+ * 裸写的 `.md`、`.env`、`#fff` 与 `.btn` 无法从字面区分，一律按选择器拒绝，清单文件头要求改用文字描述或写成 `*.md`。
  */
-const CSS_SELECTOR = /(?:^|[\s`'"“”‘’(（[【、，,：:])[.#][A-Za-z_-][\w-]*/;
+const CSS_SELECTOR = /(?<![A-Za-z0-9*/])[.#][A-Za-z_-][\w-]*/;
 
 type Section = { name: string; prefix: string | null; tableLines: number };
 
@@ -273,6 +273,10 @@ describe("功能验收清单格式（functional-acceptance「行格式可判定�
       "容器为 #app",
       "焦点落在“.menu-trigger”",
       "裸写扩展名 .md",
+      "点击.ui-btn 按钮",
+      "点击「.sidebar-item」",
+      "容器为#app",
+      "焦点落在<.menu>",
     ]) {
       expect(shellErrors(row("SH-01", cell, "看到乙")), cell).toEqual([
         "第 12 行：「操作」含 ./# 前缀的选择器",
@@ -295,6 +299,12 @@ describe("功能验收清单格式（functional-acceptance「行格式可判定�
       "文件名为 .5 开头的不显示",
       "提示以句号结尾。再点一次",
       "显示省略号...后截断",
+      "侧栏 `workbuddy-sidebar` 展开",
+      '当前项带 aria-current="page"',
+      "容器带 data-collapsed 标记",
+      "标题为「设置」",
+      "把窗口调到宽度 390",
+      "输入 e.g. 示例",
     ]) {
       expect(shellErrors(row("SH-01", cell, cell)), cell).toEqual([]);
     }
