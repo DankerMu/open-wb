@@ -1,0 +1,386 @@
+## MODIFIED Requirements
+
+### Requirement: API 客户端扩展
+`ApiClient` SHALL 提供 `listSessions()`、`createSession()`、`getMessages(id)`、`prompt(id, message)`，分别返回类型化的会话列表、会话、完整消息快照和接受回合的消息 ID；并 SHALL 提供 S1c 回合控制四方法 `stopSession(id)`、`regenerateSession(id)`、`forkSession(id, messageId)`、`decideApproval(id, approvalId, decision)` 与 S1c 会话元数据二方法 `patchSession(id, patch)`、`deleteSession(id)`；`createSession` 扩为 `createSession(input?, options?)`（`options` 仍为既有请求选项、携带可选 `signal`，调用方只传 signal 时 input 为 `undefined`）。十方法 SHALL 使用既有 same-origin 请求、可选 AbortSignal、错误信封与 401 通知机制；GET SHALL 禁止缓存，路径 ID（会话 id、`approvalId`）SHALL 编码。原四方法成功状态 SHALL 分别为 200、201、200、202；`createSession()` 无 input（或 input 为 `undefined`）时不发送 body，给出 input 时 SHALL 原样发送恰含所给键的 JSON `{workspaceId?, scene?}`（`workspaceId` 为 32 位小写十六进制、`scene ∈ {"office","code","design"}`；空对象 input 视同无 input、不发送 body），prompt SHALL 原样发送 JSON `{message}`。
+回合控制四方法的合同：`stopSession(id)` POST `/api/sessions/:id/stop` 不发送 body，202 的 body SHALL 按 JSON 严格解析为空对象 `{}`（多字段、非对象或非 JSON 按非法响应处理）并解析为 `"stopping"`（已受理停止），204 无 body、不读取响应体并解析为 `"idle"`（会话非 running，幂等），返回 `Promise<"stopping"|"idle">`，调用方据此决定是否提示；`regenerateSession(id)` POST `/api/sessions/:id/regenerate` 不发送 body，202 返回严格解析的 `{assistantMessageId}`（安全整数）；`forkSession(id, messageId)` POST `/api/sessions/:id/fork` 原样发送 JSON `{messageId}`，201 返回严格解析的 `{session, draft}`，`session` 复用会话 DTO 解析、`draft` 为字符串（允许空串）；`decideApproval(id, approvalId, decision)` POST `/api/sessions/:id/approvals/:approvalId` 原样发送 JSON `{decision}`（`decision ∈ {"allow","deny"}`），200 返回严格解析的已结算审批对象（形状同消息快照 `approvals` 数组元素且 `decision` 非 null）。
+会话元数据二方法的合同：`patchSession(id, patch)` PATCH `/api/sessions/:id`，原样发送 JSON `patch`，`patch` 为 `{title?: string, scene?: "office"|"code"|"design", pinned?: boolean}` 的非空子集（调用方传空对象时客户端不发请求，返回以 `TypeError` 拒绝的 Promise），200 返回按会话 DTO 严格解析的更新后会话；`deleteSession(id)` DELETE `/api/sessions/:id` 不发送 body，204 无 body、不读取响应体并解析为 `undefined`（客户端不另行等待或轮询）。命令目录方法 `listCommands(workspaceId)`（`web/src/lib/api-commands.ts`，由 `api.ts` 接线；`workspaceId` 为字符串或 null）GET `/api/commands`，`workspaceId` 非 null 时带且只带查询串 `workspaceId=<id>`，null 时不带查询串，均无 body，200 响应体 SHALL 恰为 `{commands}`，`commands` 是按 `{name,label,description,hint,source,overrides}` 严格解析的数组并作为返回值：`name`/`label`/`description` 为字符串，`hint` 为字符串或 null，`source ∈ {"builtin","skill","project"}`，`overrides` 为布尔值，项目配置方法 `listProjectConfig(workspaceId)`（同文件）以同样的查询串规则 GET `/api/project-config`，200 响应体 SHALL 恰为 `{files}`，`files` 是按 `{path,kind,depth}` 严格解析的数组：`path` 为非空字符串，`kind ∈ {"instructions","system","agent"}`，`depth` 为非负安全整数；两个方法的响应体或任一元素缺键、多键、类型不符、错误枚举时整体拒绝；同一 same-origin、no-store、401 通知机制。
+返回对象 SHALL 按公开 DTO 严格校验，不接受缺字段、多字段、错误枚举或非安全整数；消息时间戳和消息/步骤 ID SHALL 允许有符号安全整数，session 时间戳、epoch、非 null seq 和 ordinal SHALL 非负。会话、消息与步骤的 `status` 枚举 SHALL 同刀扩为含 `stopped`（会话 `idle|running|done|failed|stopped`，消息/步骤 `running|done|failed|stopped`）。消息 DTO 严格键集 SHALL 为 `{id,role,content,status,createdAt,steps,approvals}`：`approvals` 在每条消息上都存在且为数组，user 消息与无审批记录的 assistant 消息恒为 `[]`，assistant 消息的每个元素为 `{id,tool,title,requestedAt,expiresAt,decision}`（`id` 安全整数、`tool`/`title` 字符串、`requestedAt`/`expiresAt` 安全整数、`decision ∈ {"allow","deny","timeout",null}`），数组按 `id` 严格升序且 `id` 不重复；缺字段、多字段、错误枚举、非数组、乱序或重复 id 整体拒绝。服务端快照的 `approvals` 键与 `approval.*` 事件 SHALL 与本 web 解析同刀落地，不设兼容窗口（同仓同部署，无第三方消费者；严格键集使任一侧先合入都会让会话页整体失效）。`stopped` 枚举不在同刀之列，而是先解析后发出（web-parse-before-server-emit）：web 解析与 `status-label.ts` 的 `stopped: "已停止"` SHALL 先于服务端真正发出 `stopped`（`turn.end stopped` 与快照中的 `stopped` 状态）合入——服务端尚未发出时多接受一个枚举值无副作用，反之严格枚举会把含 `stopped` 的整个响应判为非法。会话 DTO 严格键集 SHALL 由五键扩为八键 `{id,title,status,createdAt,updatedAt,scene,workspaceId,pinnedAt}`：`scene ∈ {"office","code","design",null}`，`workspaceId` 为 32 位小写十六进制字符串或 `null`，`pinnedAt` 为非负安全整数或 `null`（fork 产生的 `parent_session_id` 仍不进 DTO）；列表、`createSession`、`patchSession` 与 `forkSession` 的 `session` 共用该解析。消息 DTO 严格键集 SHALL 在上述基础上增 `thinking`，即 `{id,role,content,status,createdAt,steps,approvals,thinking}`：`thinking` 为字符串或 `null`，user 消息恒为 `null`（非 null 整体拒绝）。步骤 DTO 严格键集 SHALL 增 `changes`（见 `步骤 args 与输出分栏`）：`changes` 为 `null` 或 1..50 个元素的数组，元素严格键集 `{path,added,removed,kind}`，`path` 为非空字符串，`kind:"edit"` 时 `added`/`removed` 为非负安全整数，`kind:"write"` 时二者为 `null`；空数组、未知 `kind`、`kind` 与计数类型不符、元素多余或缺失字段整体拒绝。八键会话 DTO、消息 `thinking` 与步骤 `changes` SHALL 与服务端同刀落地，不设兼容窗口（理由同上：严格键集使任一侧先合入都会让会话页整体失效）。`getMessages` SHALL 保留完整正文、步骤（含字符串 `output`）、顺序和 `streamCursor:{epoch:number,seq:number|null}`，不得截断、过滤、规范化文本或将 null/缺失游标默认成 0。`getMessages` 的消息快照顶层键集 SHALL 恰为 `{session, messages, streamCursor, todo}`：`todo` 为 `null` 或归一化任务清单对象，按 session-todo `web 契约解析与归约` 校验并逐值保留；缺 `todo`、多键或 `todo` 结构不合规时整个快照按非法响应拒绝，不部分安装。四键快照解析 SHALL 与服务端四键快照同刀落地，不设兼容窗口（理由同上）。400/409/502/503 SHALL 保留 `ApiError` 的 status/code/message（含 prompt/regenerate/fork 的 503 `agent_capacity`、approvals 的 409 `approval_settled`、regenerate/fork 的 409 `session_busy` 与 400 `bad_request`、createSession/patchSession 的 400 `bad_request`、patchSession/deleteSession 与绑定不可访问空间的 createSession 的 404 `not_found`、deleteSession 的 409 `session_busy`），供页面按信封文案呈现；非法响应和网络异常 SHALL 使用既有不泄露响应内容的 request_failed 错误。
+
+#### Scenario: 四方法请求与响应
+- WHEN 调用四方法并收到服务端对应成功响应
+- THEN 路径、HTTP 方法、body、凭证、signal、状态与类型化返回值符合上述合同，原始 prompt 文本和历史正文不变
+
+#### Scenario: 完整快照边界
+- WHEN 快照包含 NUL/BOM/Unicode 正文、零 ordinal、有符号消息时间戳和 `{epoch:1,seq:null}` 或 `{epoch:1,seq:0}`
+- THEN 完整历史与游标逐值保留；缺失游标、非法嵌套项或额外私有字段则整体拒绝
+
+#### Scenario: 四键快照与任务清单
+- **WHEN** `getMessages` 收到恰含 `session`、`messages`、`streamCursor`、`todo` 四键的快照，`todo` 分别为 `null` 与 `{phases:[{name:"准备", tasks:[{content:"读取需求", status:"in_progress"}]}]}`；另收到只有 `session`、`messages`、`streamCursor` 三键的快照、四键之外多一个顶层键的快照，以及 `todo` 为 `{phases:[]}` 的快照
+- **THEN** 前两者整体通过且 `todo` 逐值保留；后三者以不泄露响应内容的 request_failed 错误拒绝，不部分安装
+
+#### Scenario: 信封和未登录
+- WHEN prompt 返回 409 session_busy 或 502 agent_unavailable，或任一方法返回 401
+- THEN 409/502 保留 code/message；401 无论合法、畸形或非 JSON 都沿用既有未登录通知，通知回调抛错不替代请求错误
+
+#### Scenario: 原有客户端不回归
+- WHEN 原有认证、工作空间、预览、审计 API 在共享校验抽取后运行
+- THEN 既有成功形状、严格拒绝规则、signed workspace 时间戳、错误保密与预览资源生命周期不变
+
+#### Scenario: 回合控制四方法请求与响应
+- **WHEN** 分别调用 `stopSession`（服务端返回 202 与 204 两种）、`regenerateSession`（202 `{assistantMessageId}`）、`forkSession`（201 `{session, draft}`）与 `decideApproval(id, approvalId, "allow")`（200 已结算审批对象）
+- **THEN** 路径分别为编码后的 `/api/sessions/:id/stop`、`/regenerate`、`/fork`、`/approvals/:approvalId`，HTTP 方法均为 POST，stop/regenerate 无 body，fork body 恰为 `{messageId}`、approvals body 恰为 `{decision}`；`stopSession` 202（body `{}`）解析为 `"stopping"`、204（无 body）解析为 `"idle"`，202 body 为 `{"x":1}` 或非 JSON 时按非法响应拒绝；其余返回值按合同严格类型化，`draft` 原文不变
+
+#### Scenario: stopped 与 approval 字段严格解析
+- **WHEN** 消息快照的会话/消息/步骤 status 为 `stopped`，assistant 消息 `approvals` 分别为 `[]`、单条 pending（`decision:null`）、以及按 id 升序的两条（`[{id:7,decision:"timeout"},{id:8,decision:null}]` 形状），user 消息 `approvals` 为 `[]`
+- **THEN** 快照整体通过并逐值保留（数组顺序不变）；缺 `approvals` 键、`approvals` 为 null 或非数组、元素多余字段、`decision` 为未知字符串、元素 id 乱序或重复、user 消息 `approvals` 非空，或任一 status 为未知枚举时整体拒绝
+
+#### Scenario: 新错误码信封
+- **WHEN** prompt 或 regenerate 返回 503 `agent_capacity`，`decideApproval` 返回 409 `approval_settled`，regenerate/fork 返回 409 `session_busy` 或 400 `bad_request`
+- **THEN** `ApiError` 保留对应 status/code/message，不改写为 request_failed，401 仍沿用既有未登录通知
+
+#### Scenario: 会话元数据方法请求与响应
+- **WHEN** 分别调用 `createSession()`、`createSession({workspaceId:"<32hex>", scene:"code"})`、`patchSession(id, {title:"周报", pinned:true})`（200 八键会话）与 `deleteSession(id)`（204）
+- **THEN** 第一次 POST `/api/sessions` 无 body；第二次 body 恰为 `{"workspaceId":"<32hex>","scene":"code"}`；PATCH 路径为编码后的 `/api/sessions/:id`、body 恰为 `{"title":"周报","pinned":true}`、返回值为严格解析的八键会话；DELETE 路径相同、无 body、解析为 `undefined` 且不读取响应体；`patchSession(id, {})` 不发出请求
+- **WHEN** PATCH 返回 400 `bad_request` 或 404 `not_found`，DELETE 返回 404 `not_found` 或 409 `session_busy`
+- **THEN** `ApiError` 保留对应 status/code/message
+
+#### Scenario: 八键会话与思考、变更字段严格解析
+- **WHEN** 会话列表项为 `{…, scene:"design", workspaceId:"<32hex>", pinnedAt:1700000000000}` 与三者皆 `null` 的项；快照中 assistant 消息 `thinking` 为 `"先想一想"` 与 `null`，user 消息 `thinking` 为 `null`；步骤 `changes` 为 `null` 与 `[{path:"src/app.ts",added:2,removed:1,kind:"edit"},{path:"out/index.html",added:null,removed:null,kind:"write"}]`
+- **THEN** 整体通过并逐值保留；缺任一新键、`scene` 为未知字符串、`workspaceId` 非 32 位小写十六进制、`pinnedAt` 为负数或非安全整数、user 消息 `thinking` 非 null、`changes` 为 `[]`、`kind:"write"` 带数字计数或 `kind:"edit"` 计数为 null、变更元素多余字段时整体拒绝；仍为五键的会话对象同样整体拒绝
+
+#### Scenario: 命令目录方法
+- **WHEN** 调用 `listCommands(null)`，服务端返回两条内建与一条 skill（`{name:"skill:weekly-report",label:"weekly-report",description:"写周报",hint:"可选参数",source:"skill",overrides:false}`）；另调用 `listCommands("<32 位十六进制 id>")`，服务端多返回一条 `source:"project"`、`overrides:true` 的条目；再调用 `listProjectConfig` 的两种形式
+- **THEN** 前者路径为 `/api/commands`、后者为 `/api/commands?workspaceId=<id>`，方法 GET、无 body、no-store，返回值逐值保留且顺序不变；元素缺 `hint` 或 `overrides`、`hint` 为数字、`overrides` 为字符串、`source` 为 `"extension"` 或多余键时整体拒绝；`listProjectConfig` 的路径规则相同，元素 `kind` 为未知字符串、`depth` 为负数或多余键时整体拒绝；401 沿用既有未登录通知
+
+### Requirement: 纯会话视图归约
+`chatStateFromSnapshot` SHALL 从完整消息快照生成有序聊天视图，不编造 SSE 缺失的时间戳或 ordinal；每条消息视图 SHALL 携带 `approvals: {id,tool,title,expiresAt,decision}[]`（由快照 `approvals` 逐项映射并保持按 `id` 升序，user 消息与无审批记录的 assistant 消息恒为 `[]`；`requestedAt` 不进视图），并携带 `thinking: string|null`（取快照原值）；每个步骤视图携带 `changes`（取快照原值，`null` 或变更数组）；视图状态 `ChatState` SHALL 携带会话级的 `todo`（取快照 `todo` 原值：归一化任务清单或 `null`）。`applyChatEvent(state,event)` SHALL 为确定性的纯函数，只复制改变的分支、不修改输入；未知事件类型 SHALL 保持原状态。
+归约器 SHALL 处理服务端十一类事件：turn.start 重置对应 assistant 正文/步骤/错误并把 `approvals` 置为 `[]`、`thinking` 置为 `null`、置 running（不重置 `todo`）；thinking.delta `{messageId, delta}` 把 `delta` 原样追加到对应 assistant 的 `thinking`（`null` 视为空串），会话状态不变，不存在的 assistant 按消息事件补建；files.changed `{messageId, stepId, files}` 把该消息内 `stepId` 步骤的 `changes` 整体替换为 `files`（同一步骤后到者胜），该步骤或该消息不存在时保持原状态（同一引用），不编造步骤也不补建消息，会话状态不变；todo.updated `{messageId, todo}` 把 `ChatState.todo` 整体替换为事件的 `todo`（归一化任务清单或 `null`），不补建消息，不改任何消息、步骤与会话状态（`messages` 保持同一引用），新值与当前值深相等时返回原状态（同一引用），且 `turn.start`、`turn.end`、`error` 及其它事件 SHALL NOT 重置或改动 `todo`（清单属于会话，不属于某条消息；见 session-todo `web 契约解析与归约`）；text.delta 原样追加；step.start 按 messageId 内的 stepId 新建 running 步骤（`changes` 为 `null`）且不重复；step.end 更新已有步骤的状态和 output，detail 与 `changes` 保持 step.start、files.changed 或快照中的值不变；error 将对应 assistant 标记 failed 并保存原始文案，但会话保持 running 等待 turn.end；turn.end 将消息、会话和仍 running 的步骤置为其 done/failed/stopped 状态（`stopped` 不设置 error 文案）；审批按 `approvalId` 为键增改：approval.request `{messageId, approvalId, tool, title, expiresAt}` 向对应 assistant 的 `approvals` **追加** pending 项 `{id: approvalId, tool, title, expiresAt, decision: null}` 并保持按 `id` 升序，绝不覆盖或移除同消息的其它审批项（同一消息可同时有多条 pending）；若该 `approvalId` 已存在于该消息则保持原状态（同一引用）；会话保持 running；approval.resolved `{messageId, approvalId, decision}` 仅更新该消息 `approvals` 中 `id === approvalId` 的那一项的 `decision`，其余项与其顺序不变；未知 `approvalId`（该消息无此 id、消息无审批或消息不存在）保持原状态（同一引用），不补建。不存在的 assistant 可按消息事件补建；不得重写 user 消息。未知 step.end 不得编造缺失的步骤名称。没有先前 turn.start 或 error 的终态 SHALL 有效。
+
+#### Scenario: 流式归约与重置
+- WHEN 对初始状态应用 turn.start、step.start(bash)、text.delta×3、step.end(done,output)、turn.end(done)
+- THEN 得到完整正文、一条 detail 仍为 start 值且带该 output 的 done bash 步骤和 done 状态，输入及未改分支不被修改
+- WHEN 再次对该 assistant 应用 turn.start
+- THEN 仅该消息正文、步骤、错误清空并回到 running
+
+#### Scenario: 无 start 的合法终态与失败
+- WHEN 接收本地完成回合的单独 turn.end(done)，或 agent_start 之前的 error 然后 turn.end(failed)
+- THEN 对应 assistant 视图存在并进入正确终态；错误文案原样保留，error 本身不提前结束会话生成状态
+- WHEN 快照已有步骤随后收到 step.end
+- THEN 更新同一 messageId/stepId 的步骤而不是重复创建
+
+#### Scenario: 停止终态归约
+- **WHEN** 对 running assistant（含一条 running `bash` 步骤）应用 turn.end(stopped)
+- **THEN** 该消息与会话状态为 `stopped`、该步骤为 `stopped` 且 output 不变、error 保持 null，未改分支引用不变；没有先前 turn.start 的单独 turn.end(stopped) 同样有效
+
+#### Scenario: 审批请求与结算归约
+- **WHEN** 对 running assistant 依次应用 approval.request(approvalId 7, tool bash)、approval.resolved(approvalId 7, allow)
+- **THEN** 第一步后该消息 `approvals` 为 `[{id:7, tool:"bash", title, expiresAt, decision:null}]` 且会话仍 running；第二步后该项 `decision` 为 `allow`，其余字段不变
+- **WHEN** 对同一状态应用 approval.resolved(approvalId 8) 或对 `approvals` 为 `[]` 的消息应用 approval.resolved，或再次应用已存在的 approval.request(approvalId 7)
+- **THEN** 返回的状态与输入相等（同一引用），不编造、不覆盖审批记录
+- **WHEN** 再次对该 assistant 应用 turn.start
+- **THEN** 该消息 `approvals` 回到 `[]`
+
+#### Scenario: 同一消息多条并行审批归约
+- **WHEN** 对 running assistant 依次应用 approval.request(approvalId 8)、approval.request(approvalId 7)、approval.resolved(approvalId 8, deny)
+- **THEN** 两次 request 后该消息 `approvals` 为 id 顺序 `[7, 8]` 的两条 pending，第二次 request 未覆盖第一条；resolved 后仅 id 8 的 `decision` 为 `deny`，id 7 仍为 `decision:null`，会话仍 running
+
+#### Scenario: 思考与文件变更归约
+- **WHEN** 对 running assistant 依次应用 thinking.delta(`先`)、thinking.delta(`想`)、step.start(stepId 5, write)、files.changed(stepId 5, `[{path:"a.html",added:null,removed:null,kind:"write"}]`)、再一次 files.changed(stepId 5, `[{path:"b.html",…}]`)、step.end(stepId 5)
+- **THEN** 该消息 `thinking` 为 `先想`，步骤 5 的 `changes` 最终为仅含 `b.html` 的数组且在 step.end 之后保留，正文与会话状态不变，输入与未改分支不被修改；对快照中 `thinking` 为 `null` 的消息应用 thinking.delta(`x`) 后为 `x`
+- **WHEN** 应用指向不存在步骤（stepId 99）或视图中不存在的 messageId 的 files.changed，或对 user 消息的 id 应用 thinking.delta 或 files.changed
+- **THEN** 都返回与输入相等的同一引用
+- **WHEN** 再次对该 assistant 应用 turn.start，或对视图中不存在的 messageId 应用 thinking.delta(`y`)
+- **THEN** 前者该消息 `thinking` 回到 `null`、步骤清空；后者在末尾补建一条 running assistant，其 `thinking` 为 `y`、正文为空
+
+#### Scenario: 任务清单归约
+- **WHEN** 视图由 `todo` 为 `null` 的快照生成且末条助手 M 为 running，依次应用 `todo.updated{messageId:M, todo:T1}`、与之逐值相同的第二条、`todo.updated{messageId:M, todo:T2}`、`turn.end{messageId:M, status:"done"}`、下一回合的 `turn.start{messageId:N}`、`todo.updated{messageId:N, todo:null}`；另由一份 `todo` 为 T1 的快照调用 `chatStateFromSnapshot`
+- **THEN** `ChatState.todo` 依次为 T1、T1（第二条返回同一状态引用）、T2、T2、T2（`turn.start` 不重置）、`null`；每次 `todo.updated` 归约后 `messages` 与归约前是同一引用、没有补建消息，输入状态未被修改；由快照生成的视图 `todo` 为 T1
+
+### Requirement: 事件流消费与续流
+`connectSessionEvents` SHALL 使用注入的 EventSourceCtor 建立编码 sessionId 的同源 events URL，并设置 withCredentials:true。调用方先取得初始完整快照并传入 initialCursor；连接器 SHALL 提供 close，并通过 loadSnapshot(signal)、同步 onSnapshot/onEvent、可选 onGap 和 onError 管理恢复与错误。API 方法和页面由其他模块拥有。
+连接器 SHALL 从命名 MessageEvent 的 data 解码负载、从 lastEventId 读取 canonical 安全整数 epoch:seq；十一类数据事件（含 `approval.request`、`approval.resolved`、`thinking.delta`、`files.changed`、`todo.updated`）均经过同一游标过滤。`thinking.delta` 按严格键集 `{messageId,delta}`（`messageId` 安全整数、`delta` 非空字符串）解码，`files.changed` 按严格键集 `{messageId,stepId,files}`（`messageId`/`stepId` 安全整数，`files` 的规则同快照步骤的非 null `changes`：1 至 50 项，每项严格键集 `{path,added,removed,kind}`）解码，`todo.updated` 按严格键集 `{messageId,todo}`（`messageId` 安全整数，`todo` 的规则同快照的 `todo`，含 `null`，见 session-todo `web 契约解析与归约`）解码。原生传输 error 不得被当作业务 error：CONNECTING 时保留状态并交给原生自动重连，CLOSED 时关闭并报告，不推断 HTTP 状态。已知事件的非法 payload/id SHALL 触发重新同步，未知事件类型忽略。
+每次 open（含首次连接和自动重连）、replay.gap 或1000条待处理数据队列溢出 SHALL 开启新的完整快照恢复；gap 额外调用 onGap。恢复期间排队，并以 generation/AbortController 使旧加载失效；只有仍有效且属于当前会话、未倒退的快照可安装。安装后丢弃旧 epoch，同 epoch 的 seq:null 覆盖整代，否则丢弃 seq≤边界，仅按到达顺序消费后继；已经成功交付的 watermark 继续去重。过滤包含 turn.start，不能清空已覆盖快照。
+再次 gap/溢出 SHALL 废弃旧队列并重新同步，不以截断后继续消费替代恢复。同步回调重入时仍须保持先后次序，并在关闭/替代后停止旧 drain。loadSnapshot 失败或消费者回调违反同步合同 SHALL 关闭并报告，不能留下未处理拒绝、失效安装或继续追加；不新增自动重试策略。close SHALL 幂等关闭底层源、移除监听、abort加载并使所有迟到结果失效。切换/卸载/未登录由页面生命周期调用 close。
+
+#### Scenario: 首次订阅窗口补齐
+- WHEN 初始 REST 快照是 running/1:1，而回合在首次订阅前完成为 done/X/1:3，服务端 fresh 订阅不回放
+- THEN open 后的完整快照同步仍安装 done/X/1:3，不停留在旧 running 状态
+
+#### Scenario: 精确缺口重载
+- WHEN gap 重载快照为2048字符和游标1:1002，期间排队1048字符 delta(1:1002)、旧 turn.start 以及 Z(1:1003)
+- THEN 安装快照后仅追加 Z，正文恰2049字符，旧 turn.start 不清空历史
+- WHEN 快照游标为 epoch1/seq:null，队列有 epoch1 尾帧及 epoch2 数据
+- THEN 丢弃全部 epoch1，仅按到达顺序消费 epoch2
+
+#### Scenario: 恢复所有权与队列边界
+- WHEN 加载期间再次 gap 或队列超过1000条，然后旧加载最后才完成
+- THEN 旧加载已 abort/失效，其结果不能安装；新快照及其后继负责恢复，不静默丢数据
+- WHEN close、切换或未登录后加载完成，或回调重入关闭当前连接
+- THEN 无迟到安装/交付，底层 EventSource 只关闭一次，队列和加载资源释放
+
+#### Scenario: 命名错误与原生自动续连
+- WHEN 先收到业务 event:error MessageEvent，再收到普通网络 error Event 和自动 reconnect/open
+- THEN 仅业务帧改变 assistant 错误文案；网络错误不伪造生成失败，重连由原生 EventSource 携带 Last-Event-ID，open/必要 gap 同步恢复完整视图
+
+#### Scenario: 审批事件经同一游标过滤
+- **WHEN** 快照游标为 1:5，随后依次到达 approval.request(1:5)、approval.resolved(1:6) 与 turn.end stopped(1:7) 三个命名事件
+- **THEN** 1:5 被丢弃，1:6 与 1:7 按到达顺序交付 onEvent；`approval.*` 的非法 payload/id 同样触发重新同步
+
+#### Scenario: 思考与文件变更事件严格解码
+- **WHEN** 快照游标为 1:3，随后到达 thinking.delta(1:3)、thinking.delta(1:4)、files.changed(1:5) 与一个未知类型 `event:foo.bar`(1:6)
+- **THEN** 1:3 被丢弃，1:4 与 1:5 按到达顺序交付 onEvent，未知类型被忽略且不触发重新同步
+- **WHEN** thinking.delta 的 `delta` 为空串、不是字符串或缺失，或 payload 多一个键，或 `messageId` 不是安全整数；或 files.changed 的 `files` 为 `[]`、超过 50 项或不是数组，元素 `kind` 未知、缺键或多键、计数与 `kind` 不符，或 `stepId` 不是安全整数
+- **THEN** 触发完整快照重新同步，不交付该事件
+
+#### Scenario: 任务清单事件经同一游标过滤并严格解码
+- **WHEN** 快照游标为 1:5，随后依次到达 todo.updated(1:5)、todo.updated(1:6) 与 turn.end done(1:7) 三个命名事件
+- **THEN** 1:5 被丢弃，1:6 与 1:7 按到达顺序交付 onEvent
+- **WHEN** todo.updated 的 data 缺 `todo`、多一个键、`messageId` 不是安全整数，或 `todo` 为 `{phases:[]}`、含 `blocker` 键或未知 `status`
+- **THEN** 触发完整快照重新同步，不交付该事件
+
+### Requirement: 会话页
+`/` SHALL render, as a single full-width column in `main`, the message thread (`消息线程`), the composer dock (`输入框上方停靠区`) and the labeled composer (`输入框与能力栏`), and SHALL own the account-owned session list and new-session action, which it renders into the shell sidebar's list area (spa-shell `路由 IA 与侧栏`) through the shell-provided slot and never inside `main`; the page keeps all list data, selection, creation and ownership fences, and the list behavior specified here is unchanged by its location. The page-level level-1 heading follows spa-shell: in welcome state it is the hero `WorkBuddy，我帮你` rendered by the chat page; with a selected session it is the topbar breadcrumb container (accessible name `我的工作 / <title>`), the title being reported by the chat page via `useTopbar({ breadcrumb: sessionTitle(selected), actions })` as soon as the selected session is known and cleared when none is selected or the page unmounts; with a selected session `actions` (spa-shell topbar `actions` slot) is built from the ordered slot constant `CHAT_TOPBAR_ACTIONS` and holds exactly three icon buttons in this order — `重命名` (`Icon pencil`, session-sidebar), `对话内搜索` (`Icon search`, conversation-search) and `产物面板` (`Icon package`, turn-artifacts), each with that accessible name and tooltip — and the welcome state reports no actions; the page SHALL NOT render its own page-level `<h1>` (headings inside rendered Markdown are content, not page headings). List SHALL be rendered in the partitions (`置顶任务` / `任务` / `空间`), filters and entry menus specified by session-sidebar, each partition and workspace subgroup retaining server updatedAt-descending order, and each entry SHALL show server title or `新会话` plus a status element (`role="status"`, accessible name `<title> 运行中|已完成|失败|已停止`, visible dot with `running` pulsing via `ui-pulse`, visually-hidden text `运行中|已完成|失败|已停止` (`stopped` maps to `已停止` in `SESSION_STATUS_LABEL`); a session whose server status is `idle` uses `未开始` in the same positions). Selecting a session SHALL update `?session=<id>` while preserving unrelated search/hash; refresh and Back SHALL restore the selected session. Missing selection (no `?session=`) or an inaccessible target that has been replace-removed SHALL show the welcome state (hero `WorkBuddy，我帮你`) and composer, never auto-select first session; a selected session whose history is pending or failed renders neither hero nor a page-level heading of its own (the breadcrumb owns it). An inaccessible initial GET404 SHALL replace-remove the session parameter and SHALL NOT open EventSource; other errors SHALL remain visible without displaying another session's history.
+**New session**: the `新建会话` action SHALL only return the page to the welcome state: it removes `?session=` by a replace navigation (preserving unrelated search/hash), issues no request at all (in particular no `POST /api/sessions`), moves the focus to the composer textarea and leaves the composer draft untouched; when the page is already in the welcome state it only focuses the composer textarea. Inside the narrow-viewport navigation overlay the action also closes the overlay, and the focus lands on the composer textarea instead of being returned to `打开导航` (spa-shell `路由 IA 与侧栏`). A session is created only by the first send from the welcome state (below); the details of the action's entry in the list area are specified by session-sidebar.
+**Welcome state** SHALL show hero `WorkBuddy，我帮你`, three scene groups `日常办公`/`代码开发`/`创意设计` (default `日常办公`) above one row of quick chips whose static list is the selected scene's list, the composer with its capability bar (`输入框与能力栏`), a `不知道做什么，试试最佳实践案例` section with five static playbook cards and a `换一批` action that rotates within the static set (`查看更多` is not rendered because its target `/center` is undelivered), and the disclaimer `内容由 AI 生成，请核实重要信息`; the static content comes from `web/src/features/chat/welcome-content.ts`. A scene is only a suggestion group of the welcome state: switching it SHALL only swap the quick-chip list and SHALL NOT show any toast or other notice, the selected scene is carried into the create body of the first send, and once a session is selected the page shows no scene (selection control, create body and persistence are specified by session-sidebar). At `≥761px` the five cards SHALL sit in one row without wrapping (cards share the row equally and may shrink below their content width, at most `220px` each); at `≤760px` the row MAY wrap; at 1440×900, 1024×768 and 390×844 the disclaimer SHALL lie inside the first viewport of the welcome state; to keep that true, at `≤760px` the quick chips SHALL stay on a single row that scrolls horizontally inside the row (no page-level horizontal overflow) instead of wrapping. Clicking a chip or card SHALL only fill the composer draft, never send. While the composer is locked (from submit through the running turn), scene groups, chips, cards and `换一批` SHALL be disabled so a pick cannot overwrite the draft that a failed create restores.
+**Runtime**: the thread and composer SHALL be driven by the assistant-ui external-store runtime (`useExternalStoreRuntime`) while the application keeps owning the state: the runtime's messages are the selected session's view messages mapped by the pure `convertMessage` (`会话页源码模块划分`), a new message goes through the page's existing send path, cancel through the stop path and reload through the regenerate path. The runtime's running flag SHALL mean only "the selected session has a turn in flight" (create/submit in progress, regenerate in progress, or authoritative status `running`); history loading, a fork in progress and a terminal connector failure SHALL NOT count as running — they only disable the composer through the page's own lock, so no `生成中` status and no `停止` button appear for them. The page SHALL NOT use the runtime's thread-list adapter, message editing, branch switching, attachments, or the tool-call approval field and its response callback (pending approvals are specified by tool-approval).
+With a selected session the conversation search box opened by `对话内搜索` renders inside `main` as the first child of the page column, directly below the topbar and above any alert and the thread (conversation-search).
+Page SHALL derive its API client from the current auth session, load complete history before opening EventSource, seed the exact snapshot cursor, and use existing pure reducer/connector. All callbacks SHALL be synchronous. Account renewal, session selection, unmount and successful/current401 logout SHALL abort/fence page requests and close the old connection; late responses and ignored-abort loads SHALL NOT mutate UI, navigate or open sources. Pending/failed logout SHALL preserve canonical authenticated behavior.
+A user send with no session SHALL create once, select its returned ID and prompt that session once. Empty-whitespace sends SHALL be disabled, and duplicate submits SHALL NOT create concurrent turns. User-initiated navigation SHALL invalidate stale mutation continuations; the create-send operation's own URL handoff SHALL NOT lose its prompt. After successful acceptance the page SHALL reconcile authoritative history and reconnect from that snapshot, without appending duplicate rows or demoting an already finished turn. Failed502 SHALL NOT introduce speculative messages. Session title/order SHALL refresh from server, not duplicate server truncation logic.
+Business errors SHALL display inline on the message;400/409/502/503 SHALL display envelope message (a 503 `agent_capacity` on prompt or regenerate displays its envelope message `Agent 容量已满，请稍后重试` inline on the composer, introduces no speculative rows and unlocks the composer so the user can retry). Composer SHALL be disabled from submit through running turn until terminal authoritative state (`done|failed|stopped`), with `生成中` status and the `停止` button in place of send. Current401 SHALL hand off to login. Terminal connector failure SHALL expose a safe error and refresh guidance, preserve last history, and not invent completion or automatically retry; a still-running authoritative status remains locked until reloaded.
+The chat page SHALL NOT show toasts: none of the page's rebuilt source files imports `useToast`; success and informational notices are removed and failures are displayed inline next to the control that triggered them, as specified per control in `消息线程`, `输入框与能力栏`, turn-control and turn-artifacts. Toasts of the session-list actions (rename, pin, delete) are owned by session-sidebar and are not changed here.
+
+**Project config entry** (#773): for a selected session the page SHALL call `listProjectConfig(workspaceId)` once per client and session selection (again when the selected session or its workspace id changes; not in the welcome state) and, when it returns a non-empty list, render in the header actions area, before `重命名`, a button `项目配置` whose accessible name is `项目配置 <count>`; pressing it opens a read-only modal dialog built on the copied-layer dialog component (`web/src/components/ui/dialog`; the shell renders header buttons from descriptors, so the page has no trigger element to anchor a popover to) titled `助手会读取的项目配置文件` with the note `以下位置存在配置文件；同一层有多个说明文件时只有一个生效` and the entries grouped by `depth` (`当前目录` for 0, `上 <n> 级目录` otherwise), each showing `path` as plain text and its kind (`说明` for `instructions`, `系统提示` for `system`, `智能体` for `agent`). The dialog's only control is its `关闭`; `Esc` or `关闭` returns the focus to the header button; switching sessions closes it and it stays closed on return. The button's tooltip equals its accessible name. The list has no edit affordance and reads no file content. A failed call is not retried until the selection changes. An empty list, a pending call or a failed call renders no button and no error UI; a result for a previous selection is never shown.
+
+#### Scenario: Once-only create and streaming conversation
+- WHEN an empty page user sends `你好` and the accepted turn emits start, step start/end, three deltas and done
+- THEN exactly one session and prompt are created, URL selects that ID, user and assistant appear in server order without duplicates, text grows, step status/output changes, server title appears and composer unlocks at done
+
+#### Scenario: Completed before acceptance response
+- WHEN SSE turn.end arrives before prompt202 resolves and subsequent history reports the completed turn
+- THEN acceptance reconciliation preserves one user/assistant pair and final content/status, never re-locks completed state or appends the user after the assistant
+
+#### Scenario: Deep-link snapshot and covered replay
+- WHEN `/?session=<id>` loads a running snapshot and EventSource opens with covered start/step/text and newer frames
+- THEN snapshot GET completes before source construction, covered frames never erase/duplicate history, only successors append, and list selection matches the URL
+
+#### Scenario: Selection and stale operation isolation
+- WHEN a history/create/prompt/recovery request ignoring abort completes after user selects another session, navigates away or renews authentication
+- THEN the old source is closed, owned signals are aborted and stale completion cannot install history, alter current errors, navigate, dispatch another prompt or create a source
+
+#### Scenario: Inaccessible and empty targets
+- WHEN no session is selected or initial history returns404 for an unknown/foreign ID
+- THEN the page shows the welcome state (hero `WorkBuddy，我帮你`) and composer, no first-session fallback and no source for the inaccessible target; invalid query removal preserves other search/hash
+
+#### Scenario: Error and stream ownership
+- WHEN prompt rejects409/502, named business error arrives, or connector terminates while last snapshot is running
+- THEN exact API/business messages are visible,502 introduces no speculative rows, connector failure gives safe refresh guidance without false terminal state, and temporary native reconnect errors do not become business failures
+
+#### Scenario: Logout and page compatibility
+- WHEN confirmed logout succeeds/current401 clears auth, or page unmounts under StrictMode
+- THEN owned source/request lifecycles close without late UI writes or unhandled rejection; failed logout preserves authenticated page, and routes/main/settings-footer fixtures still exercise honest successful root loading
+
+#### Scenario: 欢迎态与静态引导
+- **WHEN** 已登录无 `?session=` 打开 `/`，把场景从 `日常办公` 切到 `代码开发`，点击一张最佳实践卡，再点击 `换一批`
+- **THEN** `≥761px` 无顶栏（`≤760px` 顶栏只含 `打开导航`），页面 level-1 heading 为 hero `WorkBuddy，我帮你`；三个场景分组（初始 `日常办公` 为选中态）、所选场景的快捷 chip 行、输入框（能力栏的工作空间选择器按钮为 `任务启动于 未选择`，无权限设置、上传、专家控件）、五张卡片（取自静态七项清单）与免责声明可见，无附件/模型/麦克风控件、无顶栏 `actions` 按钮；切换场景后快捷 chip 行换成 `代码开发` 的列表，页面上不出现任何轻提示，也未发出任何请求；点击卡片后输入框草稿等于卡片 prompt 且未发送；`换一批` 后五张卡片集合改变且仍来自静态清单；1440×900、1024×768 与 390×844 下免责声明位于首屏内，`≥761px` 五张卡片同行（`offsetTop` 相同），`main` 内无会话列表与 `新建会话`
+
+#### Scenario: 新建会话只回欢迎态
+- **WHEN** 选中一个会话且输入框草稿为 `半句话`，URL 为 `/?session=<id>&x=1#h`，点击侧栏 `新建会话`；随后在欢迎态再点一次 `新建会话`；最后在输入框发送 `你好`
+- **THEN** 第一次点击后 URL 为 `/?x=1#h`、页面为欢迎态（hero 可见）、焦点在输入框、草稿仍为 `半句话`，其间没有发出任何请求（`POST /api/sessions` 调用数为 0），会话列表条目数不变；第二次点击只把焦点放到输入框，仍无请求；发送后恰一次 `POST /api/sessions`、URL 选中返回的 id、再恰一次 prompt
+
+#### Scenario: 锁定不等于生成中
+- **WHEN** 以 `/?session=<id>` 打开一个 `done` 会话而历史请求尚未返回；另一例在已完成会话中点击 `从此处分叉` 而 fork 请求尚未返回
+- **THEN** 两例中输入框都处于禁用，但没有 `生成中` 状态元素、没有 `停止` 按钮；历史返回或 fork 结束后输入框恢复可用
+
+#### Scenario: 容量已满内联提示
+- **WHEN** 发送 prompt 收到 503 `agent_capacity`（信封文案 `Agent 容量已满，请稍后重试`）
+- **THEN** 该文案内联显示于 composer，转录不新增用户或助手行，composer 解锁且草稿保留，用户可直接重试；同一文案在 regenerate 返回 503 时同样内联显示
+
+#### Scenario: 顶栏入口
+- **WHEN** 选中一个会话，随后回到欢迎态
+- **THEN** 选中时顶栏的 actions 区（面包屑之后；`≤760px` 时 banner 里另有 `打开导航`）恰有按序排列的 `重命名`、`对话内搜索`、`产物面板` 三个按钮（该会话的项目配置列表为空时；非空时其前另有 `项目配置` 按钮，见「项目配置入口」场景）；欢迎态顶栏不渲染这些按钮（`≥761px` 仍无顶栏）
+
+#### Scenario: 项目配置入口
+- **WHEN** 选中绑定工作空间 A 的会话，`listProjectConfig("A")` 返回 depth 0 的 `.omp/RULES.md`、`AGENTS.md` 与 depth 1 的 `AGENTS.md`；另一例返回 `{files:[]}`；再一例调用失败；随后切到另一个会话
+- **THEN** 第一例顶栏 actions 区在 `重命名` 之前出现按钮 `项目配置`（可访问名 `项目配置 3`），点击后打开只读列表：标题 `助手会读取的项目配置文件`，说明 `以下位置存在配置文件；同一层有多个说明文件时只有一个生效`，条目按 depth 分组（`当前目录`、`上 1 级目录`）逐条显示 `path` 与类型（`说明`/`系统提示`/`智能体`），没有编辑入口；后两例不渲染该按钮也不显示错误；切换会话时按新会话的工作空间 id 重新拉取，返回前不显示上一个会话的按钮
+
+### Requirement: 会话页源码模块划分
+`web/src/features/chat/` 下的会话页实现 SHALL 保持每个源文件 ≤800 行（`scripts/size-guard.sh`）。
+
+`ChatPage` SHALL 保持定义在 `page.tsx`，并经 `index.ts` 导出。`index.ts` 是会话页 feature 的唯一公共入口。
+
+`use-chat-session.ts` SHALL 以不渲染 UI 的 hook `useChatSession` 承载会话页的页面状态：会话列表、历史、连接、发送与创建、所有权 fence 状态及派生量（是否生成中、输入框锁定等），向 `ChatPage` 返回只读状态与动作。`useChatSession` SHALL 只由 `ChatPage` 调用；会话列表（`SessionSidebar`）继续经其既有 props 契约从 `ChatPage` 取得数据与动作。
+
+`turn-actions.ts` SHALL 承载会话页回合操作的 handler 及其所有权 fence，包括：
+- prompt 派发、受理前后的失败回退与草稿恢复；
+- 停止、重新生成、分叉与审批作答。
+
+这些 handler SHALL 以只由 `useChatSession` 调用的 hook 或辅助函数形式提供，`turn-actions.ts` SHALL 不渲染 UI。fence 状态（ref、generation 计数器，以及 `releaseMutationIfOwned`、`abortMutation` 这类页面级 fence 函数）SHALL 由 `useChatSession` 持有，并注入给这些 handler。「会话页」要求中所说的页面持有所有权 fence，指的就是这些状态由 `ChatPage` 所调用的 `useChatSession` 持有。
+
+三者之间的值导入 SHALL 只沿 `page.tsx → use-chat-session.ts → turn-actions.ts` 方向：`use-chat-session.ts` 与 `turn-actions.ts` SHALL 不导入 `./page.js`，`turn-actions.ts` SHALL 不导入 `./use-chat-session.js`。`use-chat-session.ts` 的导出 SHALL 只供 `page.tsx` 使用，`turn-actions.ts` 的导出 SHALL 只供 `use-chat-session.ts` 使用；二者都不经 `index.ts` 对外暴露，也不新增未被引用的导出。
+
+`runtime-convert.ts` SHALL 是纯模块（不渲染 UI、无副作用、不持有状态），导出把会话视图消息映射为运行时消息的 `convertMessage`：消息 `id` 映射为其十进制字符串；内容 part 的顺序固定为 reasoning（仅 `thinking` 非空时）、text（`content` 原文）、每个步骤一个 tool-call（`toolCallId` 为步骤 id、`toolName` 为步骤名、参数文本为 `detail`、结果为 `output`，`failed` 步骤标为错误）；消息状态 `running` 映射为运行中，`done` 映射为完成，`failed` 与 `stopped` 映射为未完成；`approvals`、步骤 `changes`、`error` 与原始 `status` 作为应用自有字段原值透传给应用层组件。同一输入 SHALL 得到相等的输出，且 SHALL 不修改输入。
+
+`stream-steps.ts` SHALL 不移动、不改名。
+
+#### Scenario: 模块划分可持续验证
+- **WHEN** 运行 `bash scripts/size-guard.sh`、`knip` 与 web 测试
+- **THEN** 同时满足以下各项：
+  - size-guard 退出 0；
+  - knip 报告无未引用导出；
+  - `use-chat-session.ts` 与 `turn-actions.ts` 都不导入 `./page.js`，`turn-actions.ts` 不导入 `./use-chat-session.js`；
+  - `turn-actions.ts` 的导出只被 `use-chat-session.ts` 导入，`use-chat-session.ts` 的导出只被 `page.tsx` 导入；
+  - `web/src/features/chat/stream-steps.ts` 仍在原路径；
+  - 既有调用方仍从 `features/chat/index.js` 取得 `ChatPage`；
+  - web 测试全绿。
+
+#### Scenario: convertMessage 映射
+- **WHEN** 以一条 `stopped` 助手视图消息调用 `convertMessage`：`id` 为 12，`thinking` 为 `先想一想`，`content` 为 `部分回答`，含一条 `done` 的 `bash` 步骤与一条 `failed` 的 `write` 步骤，`approvals` 含一条已结算审批；再以一条 `thinking` 为 `null`、无步骤的 `running` 助手消息调用
+- **THEN** 第一条的 `id` 为 `"12"`，part 依次为一个 reasoning、一个 text（`部分回答`）、两个 tool-call（按步骤原序，第二个标为错误），状态为未完成，审批、步骤 `changes`、`error` 与原始状态 `stopped` 可由应用层组件从透传字段读到；第二条只有一个 text part、状态为运行中；两次调用都未修改输入对象
+
+### Requirement: 步骤卡原始输出不做路径改写
+按 ADR-0011，步骤卡 `原始输出` 内的完整 detail 与 output SHALL 原样展示其中出现的绝对沙箱路径，不做前缀替换、隐藏或其它改写；摘要行派生、120 码点截断与折叠默认状态不受影响。files 页、外壳、标题与 aria 属性不渲染 workspace `root` 的呈现规则不因此放宽。
+
+#### Scenario: 含沙箱路径的 detail 原样出现在原始输出
+- **WHEN** 会话页渲染一张 detail 为 `{"path":"<SANDBOX_ROOT>/<ownerId>/<dir>/a.md"}` 形态的 done 步骤，展开其所在的工具调用组与该卡的 `原始输出`
+- **THEN** 该卡 `原始输出` 折叠内的文本包含该绝对路径原文，摘要行为 `path: <该路径>`
+
+#### Scenario: 含沙箱路径的 output 原样出现在原始输出
+- **WHEN** 会话页渲染一张 output 含 `<SANDBOX_ROOT>/<ownerId>/<dir>/a.md` 形态绝对路径的 done 步骤，展开其所在的工具调用组与该卡的 `原始输出`
+- **THEN** 该卡 `原始输出` 的 output 块包含该路径原文
+
+## ADDED Requirements
+
+### Requirement: 消息线程
+会话页 SHALL 以拷入层的 assistant-ui 组件（`web/src/components/assistant-ui/`）与 `features/chat/` 内的应用层组件渲染选中会话的消息线程。每条消息的根元素（用户与助手）SHALL 带 `data-message-id="<message id>"`。
+
+**用户消息** SHALL 渲染为右侧气泡，完整保留文本与空白（换行与前导空白不折叠），内容按纯文本呈现。用户消息 SHALL 带一个操作行，只含 `从此处分叉` 按钮（可访问名与 tooltip 均为 `从此处分叉`），输入框锁定期间禁用；点击 SHALL 恰调用一次 `forkSession(sessionId, messageId)`，201 时导航到 `?session=<new id>`（保留无关的 search/hash）、从服务端刷新会话列表，并把输入框草稿设为返回的 `draft` 而不发送；400/409/502/503 信封文案就地显示在输入框上。
+
+**助手消息** SHALL 渲染为左侧的无气泡块，带装饰性的助手头像标记（不进入可访问名）。块内各部分 SHALL 按以下次序渲染，每项仅在存在时渲染：深度思考折叠块 `深度思考过程`（thinking-fold）→ 正文（Markdown，或 `（已停止生成）` 占位）→ 工具调用组 → 已结算审批记录（tool-approval）→ 错误文本 → `文件变更（N 个）` 卡 → 产物卡（turn-artifacts）→ `已停止` 徽章 → 操作行。待决审批 SHALL NOT 渲染在消息内（见 `输入框上方停靠区` 与 tool-approval）。思考折叠块、已结算审批记录、文件变更卡与产物卡 SHALL NOT 改变本条规定的复制、重新生成、分叉与已停止行为。
+
+**正文** SHALL 经 `@assistant-ui/react-markdown`（加 `remark-gfm`，不启用任何把源 HTML 转成元素的插件）渲染，不经 `web/src/lib/md-render.ts`（该模块留给文件页）：
+- 源文本中的 HTML SHALL 作为文本出现，不生成对应元素；
+- 只有目标协议为 `http:` 或 `https:` 的链接 SHALL 渲染为链接，且带 `target="_blank"` 与 `rel="noopener noreferrer"`；其它目标（含 `javascript:`、`data:`、相对路径）SHALL 只渲染链接文字，不生成链接元素；
+- 图片 SHALL 不加载：不生成 `img` 元素、不向图片地址发请求，在原位渲染其 alt 文本，无 alt 时渲染其 URL 文本；
+- 代码块 SHALL 带复制按钮，复制该代码块的原文，成功只把按钮图标换成对勾、不弹提示；复制失败（剪贴板 API 不存在、抛错或 reject）时不显示任何提示、图标不变，异常与 rejection 不外泄；不做语法高亮。
+
+运行中的助手消息 SHALL 在正文最后一个字符之后显示闪烁光标，进入终态后光标消失；`prefers-reduced-motion: reduce` 下光标 SHALL 不闪烁。
+
+状态为 `stopped` 的助手消息 SHALL 在正文之后、操作行之前渲染一个 `role="status"` 徽章，可见文本 `已停止`、可访问名 `助手消息 已停止`（不带错误文本）；其正文为空时 SHALL 以占位文本 `（已停止生成）` 代替空块。这一消息级呈现不改变会话列表状态点、步骤徽章与输入框的呈现。
+
+**操作行**：不再运行的助手消息在正文非空或符合重新生成条件时 SHALL 以操作行结尾；运行中的助手消息不渲染操作行。
+- 正文非空时操作行含 `复制` 图标按钮（可访问名与 tooltip 均为 `复制`）：点击 SHALL 经 `navigator.clipboard.writeText` 复制消息的原始文本（Markdown 源文本，不是渲染后的文本）。成功时按钮图标换成对勾约 2 秒，并出现一个视觉隐藏的 `role="status"` 文本 `已复制`；不弹轻提示。剪贴板 API 不存在、抛错或 reject 时，SHALL 在该按钮旁渲染 `role="alert"` 的一行文字 `复制失败`，下一次复制成功或再次点击时清除；异常与 rejection 不外泄。
+- `重新生成` 图标按钮（可访问名与 tooltip 均为 `重新生成`）SHALL 只出现在转录**末条**消息上，且该消息是助手消息、会话状态为 `done|failed|stopped`（正文为空也显示）；更早的助手消息、运行中的会话与 `idle` 会话不渲染它（会话只有在没有历史时才是 `idle`——分叉得到的会话继承末条被拷贝助手消息的状态，所以带历史的分叉会话是 `done|failed|stopped`，其末条助手消息符合条件）。这一可见条件由应用层组件判定，不依赖运行时的默认可见性。点击 SHALL 恰调用一次 `regenerateSession`（结算前按钮禁用），像运行中回合一样锁定输入框，202 时不弹任何提示，随后对账权威历史并从该快照重连：旧助手行消失，新的运行中助手行（新 id、正文为空）取代其位置，用户消息不重复；409/400/502/503 信封文案就地显示在输入框上并解锁输入框。
+- 不提供点赞/点踩、消息编辑与分支切换。
+
+**工具调用组**：一条助手消息的全部步骤 SHALL 收进一个工具调用组，位于正文之后；没有步骤的消息不渲染该组。组 SHALL 默认收起，展开/收起控件带 `aria-expanded`；收起时只显示一行摘要，内容为步骤数与最近一步（末位步骤）的名称及其状态文字。组内任一步骤状态为 `failed` 时组 SHALL 自动展开（从快照打开时即为展开；流式中某步骤变为 `failed` 时展开）。因失败自动展开后用户仍可手动收起；手动收起后组 SHALL NOT 再自动展开，直到该消息出现新的失败步骤。文件变更卡与产物卡在组之外，不受组的展开状态影响。
+展开后每个步骤一张卡，卡的内容不变：SHALL show a header (terminal icon for `bash`, wrench icon otherwise, step name, and a status badge with `role="status"`, visible text `运行中|已完成|失败|已停止` mapped from running/done/failed/stopped and accessible name `<step name> 运行中|已完成|失败|已停止`) and a one-line summary derived from detail: for JSON object detail the non-blank `text` string, else the non-blank `content` string, or else the first key/value rendered as `<key>: <value>` (non-string values JSON-encoded); for any other detail (non-JSON, or JSON that is not an object) the first non-empty line; the summary is that value's first non-empty line, trimmed; empty detail yields an empty summary; all truncated to 120 code points; the summary SHALL come from `detail` (the tool args) only and SHALL NOT change when the step ends; the complete `detail` and, when non-empty, the step `output` (the tool result text, or the error text of a failed step) SHALL stay available behind a `原始输出` fold (collapsed by default) as two separate blocks, args first; a step whose detail and output are both empty renders no `原始输出`. No fabricated time or todo state.
+
+**滚动**：线程 SHALL 用 assistant-ui 线程视口的贴底跟随与回到底部控件实现以下行为；原生行为满足不了其中某条或「转录区尺寸变化触发贴底重算」的某个场景时，SHALL 以应用层逻辑补齐，行为以这些场景为准。A `回到最新` floating button (a chevron-down icon plus the text, rendered only while a session is selected and absent otherwise, never a disabled placeholder) SHALL appear when the transcript is scrolled more than one viewport (`clientHeight`) above the bottom, including when new content grows that distance while the user is away from the bottom; once shown it SHALL stay until the transcript reaches the bottom (within 4px) or the button is clicked; clicking SHALL scroll the transcript to the bottom and hide the button. New content SHALL auto-scroll the transcript to the bottom only when the transcript was at the bottom (within 4px) before the update or the user has just clicked `回到最新`; while the user is scrolled up, new content SHALL NOT change the scroll position. Opening or switching to a session SHALL start at the bottom.
+
+**零消息空态**：选中会话、历史已加载、消息为空且没有回合在跑时，线程区 SHALL 显示一个装饰性图标、一行 `还没有消息，发一条开始吧`，以及该会话绑定的工作空间名（只读，前缀 `工作空间`；会话未绑定时不显示这一行）。空态 SHALL NOT 显示场景分组、快捷任务或最佳实践卡，SHALL NOT 改动输入框草稿；页面一级标题仍是顶栏面包屑。历史尚在加载或加载失败时 SHALL NOT 显示空态。
+
+#### Scenario: 消息呈现与流式光标
+- **WHEN** 一次回合的快照包含多行用户消息与含 Markdown（标题 + 代码块 + 源 HTML）的助手正文，先处于 running、随后收到 `turn.end` done；另一例在 `prefers-reduced-motion: reduce` 下渲染同一条 running 助手消息
+- **THEN** 用户消息为右侧气泡且多行文本换行与前导空白保留；助手块带装饰性头像标记，正文渲染出 heading 与 code 元素，源 HTML 作为文本出现、不生成对应元素；代码块带复制按钮；running 时正文末尾有光标，done 后消失；减少动态效果的一例中光标存在但不闪烁；两条消息的根元素各带自己的 `data-message-id`
+
+#### Scenario: Markdown 链接与图片规则
+- **WHEN** 助手正文为 `[官网](https://example.com/a) [脚本](javascript:alert(1)) [数据](data:text/html,x) [相对](docs/a.md) ![示意图](https://img.example.com/a.png) ![](https://img.example.com/b.png) <a href="https://evil.example">x</a>`
+- **THEN** 只有 `官网` 是链接，`href` 为 `https://example.com/a`、带 `target="_blank"` 与 `rel="noopener noreferrer"`；`脚本`、`数据`、`相对` 只作为文字出现，没有对应的链接元素；正文内没有任何 `img` 元素，也没有向 `img.example.com` 发出请求，两张图片的位置分别显示文本 `示意图` 与 `https://img.example.com/b.png`；源 HTML 的 `<a …>` 作为文本出现，不生成链接元素
+
+#### Scenario: 步骤卡呈现
+- **WHEN** 回合快照含 detail 为 `{"command":"echo workbuddy-smoke"}` 的 running `bash` 步骤与一条非 bash 步骤，展开该消息的工具调用组，随后 bash 步骤以 output `workbuddy-smoke` 结束为 done
+- **THEN** bash 卡头为终端图标、`bash` 与徽章 `运行中`（`role=status` 名 `bash 运行中`），摘要行为 `command: echo workbuddy-smoke`；结束后徽章为 `已完成`（名 `bash 已完成`）、摘要行仍为 `command: echo workbuddy-smoke`；非 bash 卡头为扳手图标；`原始输出` 折叠未展开，展开后内含完整 detail 块与内容为 `workbuddy-smoke` 的 output 块
+
+#### Scenario: 工具调用组默认收起与失败自动展开
+- **WHEN** 快照含一条 done 助手消息，其三个步骤（`read`、`bash`、`write`）均为 `done`；另一条 done 助手消息的两个步骤中 `bash` 为 `failed`；还有一条助手消息没有步骤；另一例中一条 running 助手消息的组处于收起，随后 `step.end` 把其中一个步骤置为 `failed`，用户手动收起该组，之后到达 `text.delta` 与另一个步骤的 `step.end{status:"done"}`，最后又一个步骤以 `failed` 结束
+- **THEN** 第一条的工具调用组为收起态（`aria-expanded="false"`），只见一行摘要，含步骤数 3 与末位步骤的名称 `write` 及状态 `已完成`，各步骤卡不可见；展开后按步骤原序出现三张卡。第二条的组打开即为展开态，失败卡徽章为 `失败`。第三条不渲染工具调用组。流式的一例在第一个失败的 `step.end` 之后组变为展开态；手动收起后 `text.delta` 与 `done` 的 `step.end` 不使它重新展开；新的失败步骤到达后组再次展开
+
+#### Scenario: 回到最新
+- WHEN 长历史会话打开后，用户上滚超过一屏，随后新 delta 到达；再点击 `回到最新`，之后又有新 delta 到达
+- THEN 打开时位于底部且无按钮；上滚期间新 delta 不改变滚动位置且按钮可见；点击后滚到底部、按钮消失；之后的新 delta 保持自动跟随到底部；欢迎态不渲染该按钮
+
+#### Scenario: 复制助手原文
+- **WHEN** 一次已完成回合的助手正文为含 Markdown 标记的原文，点击该助手消息的 `复制`；再分别在剪贴板 API 缺失、`writeText` reject 时点击；随后在剪贴板恢复可用后再点击一次
+- **THEN** 第一次点击后剪贴板写入恰为该条助手的原始 Markdown 文本，按钮图标换成对勾并在约 2 秒后恢复，出现视觉隐藏的 `role="status"` 文本 `已复制`，页面上没有任何轻提示；API 缺失或 reject 时按钮旁出现 `role="alert"` 的 `复制失败` 且无未捕获异常，同样没有轻提示；恢复后再点击，`复制失败` 消失；running 助手、空正文助手与用户消息均无 `复制` 按钮
+
+#### Scenario: 助手消息级已停止呈现
+- **WHEN** 快照含两条 `stopped` 助手消息：一条正文为 `部分回答`，另一条正文为空；同时含一条 `done` 与一条 `failed` 助手消息
+- **THEN** 两条 `stopped` 助手消息正文之后各有一个 `role=status`、可见文本 `已停止`、accessible name `助手消息 已停止` 的徽章且无错误文案；空正文那条正文区显示占位文本 `（已停止生成）`，非空那条正文为 `部分回答` 且无占位文本；`done`/`failed` 助手消息无该徽章与占位文本；侧栏状态元素、步骤徽章与 composer 的呈现不因此改变
+
+#### Scenario: 重新生成末条回答
+- **WHEN** 会话状态为 `done`、末条为助手消息时点击其 `重新生成`，服务端 202 返回新的 `assistantMessageId`，随后权威快照中旧助手行不存在、新助手行 running，SSE 送达 delta 与 `turn.end done`
+- **THEN** `regenerateSession` 恰调用一次，页面上不出现任何轻提示（含 `正在重新生成…`），composer 立即锁定；对账后转录为同一条用户消息加一条新 id 的助手消息（旧正文消失、无重复用户行），新正文按 delta 增长直至 done 解锁；`重新生成` 只在末条为助手消息且会话状态 ∈ `done`/`failed`/`stopped` 时可见——running 期间、非末条助手消息与用户消息均无该按钮；`failed`/`stopped` 会话的末条助手消息（含空正文）同样可见并可点击；分叉得到且含历史的会话状态继承末条被拷贝助手消息的状态，其末条助手消息同样可见
+- **WHEN** 服务端对 regenerate 返回 409 `session_busy` 或 503 `agent_capacity`
+- **THEN** 信封文案内联显示于 composer，composer 解锁，转录不变，页面上没有轻提示
+
+#### Scenario: 从用户消息分叉
+- **WHEN** 已完成会话中点击第二条用户消息的 `从此处分叉`，服务端 201 返回 `{session:<new>, draft:"<该用户消息原文>"}`
+- **THEN** `forkSession` 恰以该消息 id 调用一次；URL 变为 `?session=<new id>`（无关 search/hash 保留），页面加载新会话历史（分叉点之前的消息）并打开其 EventSource，会话列表从服务端刷新后含新会话，其状态元素反映继承自末条被拷贝助手消息的状态（此例第一条助手消息 `done` → `<title> 已完成`），末条助手消息显示 `重新生成`；composer 草稿等于 `draft` 且未发送任何 prompt；composer 锁定期间 `从此处分叉` 禁用，助手消息无该按钮
+- **WHEN** 对第一条用户消息点击 `从此处分叉`，服务端 201 返回的新会话 `status` 为 `idle`
+- **THEN** 新会话线程区显示零消息空态（无消息、无 `重新生成`），侧栏状态元素名为 `<title> 未开始`，composer 草稿等于该用户消息原文且未发送
+
+#### Scenario: 零消息会话空态
+- **WHEN** 以 `/?session=<id>` 打开一个绑定工作空间 `项目A`、快照 `messages` 为 `[]` 的 `idle` 会话，打开前输入框草稿为 `草稿`；另一例会话未绑定工作空间；再一例历史请求尚未返回；随后在第一例中发送一条消息
+- **THEN** 第一例线程区显示一个图标、`还没有消息，发一条开始吧` 与 `工作空间 项目A`，没有场景分组、快捷任务与最佳实践卡，没有 hero，页面 level-1 heading 仍是顶栏面包屑 `我的工作 / <title>`，输入框草稿仍为 `草稿`、可发送；第二例没有工作空间那一行；第三例历史返回之前不显示空态；发送被受理后空态消失、出现用户消息
+
+#### Scenario: 助手块次序
+- **WHEN** 快照含一条 `stopped` 助手消息：`thinking` 为 `先想一想`，`approvals` 含一条已结算审批，正文为 `部分回答`，一个已结束 `write` 步骤的 `changes` 为 `[{path:"out/index.html",added:null,removed:null,kind:"write"}]`，会话绑定到本账号的空间
+- **THEN** 该消息内按文档顺序依次为 `深度思考过程` 折叠块（收起）、正文、工具调用组（收起）、已结算审批记录、名为 `文件变更（1 个）` 的卡片、`index.html` 的 HTML 产物卡、名为 `助手消息 已停止` 的徽章与操作行；消息内没有名为 `需要你的确认` 的区域；`复制` 仍只复制 `部分回答`
+
+### Requirement: 输入框与能力栏
+会话页的输入框 SHALL 以 assistant-ui 的输入框基元构建，含带标签的多行文本框（欢迎态占位 `今天帮你做些什么`，已选会话占位 `继续追问，或派一个新任务…`）、底部能力栏与发送按钮（可访问名 `发送`）。提示 `Enter 发送 · Shift+Enter 换行` SHALL 保留。键盘规则不变：无修饰的 Enter 经同一表单受理路径发送一次原始草稿，Shift+Enter 换行，输入法组合态（`isComposing`）与键码 229 不发送，长按重复的 Enter 不新增提交，空白草稿与锁定期间不可发送。
+
+**回合进行中**（从提交、经运行中回合、直到权威终态）发送按钮 SHALL 原位换成 `停止` 按钮（可访问名与 tooltip 均为 `停止`），并显示 `role="status"` 的 `生成中`。`停止` 每个点击序列 SHALL 恰调用一次 `stopSession`（点击后到响应或终态之间禁用）；`"stopping"`（202）与 `"idle"`（204）都 SHALL NOT 弹任何提示；错误信封就地显示在输入框上。输入框保持锁定直到权威 `stopped` 状态到达（`turn.end stopped` 或终态快照），届时会话列表状态元素与仍在运行的步骤徽章读作 `已停止`，助手消息显示 `已停止` 徽章，输入框解锁并恢复 `发送`。
+
+**能力栏**自左向右 SHALL 为：
+1. 工作空间：欢迎态是选择器，触发按钮文本为 `任务启动于 <空间名>`，未选择时为 `任务启动于 未选择`（默认），选项为本账号的工作空间（选择器的呈现、搜索、数据来源与所选值进入创建请求的规则见 session-sidebar「composer footer 工作空间选择」）；已选会话时同一位置是只读标签，同样以 `任务启动于` 开头：会话未绑定时为 `任务启动于 未绑定`，绑定的工作空间在已读取的列表里时为 `任务启动于 <空间名>`，`workspaceId` 非空但在已读取的列表里找不到（读取中、读取失败或空间已删除）时为 `任务启动于 已绑定空间`；标签不可操作、不发出任何修改请求（会话开始后工作空间锁定）。
+2. 「+」菜单：触发按钮的可访问名为 `技能与命令`，输入框锁定时按钮禁用；打开后列出当前工作空间命令目录（`listCommands(workspaceId)`）的全部条目（内建命令与技能），按目录顺序，每项显示 `label` 与 `description`，`source` 为 `project` 的条目带与斜杠候选相同的标记（`项目`，`overrides` 为真时 `项目 · 覆盖平台技能`），目录字符串一律按纯文本呈现。点选一项 SHALL 把草稿替换为 `/<name> `（末尾一个空格）、关闭菜单并聚焦文本框，SHALL NOT 发送。「+」菜单与斜杠候选共用同一份按工作空间 id 缓存的目录与同一套拉取时机规则：打开菜单时若当前 client 与工作空间 id 尚无目录且无在途调用，则发出一次 `listCommands(workspaceId)`；目录未持有（拉取中或失败）时菜单不列出条目，只显示 `暂无可用项`，不显示错误。
+
+权限设置、上传文件、专家、附件、模型切换与麦克风 SHALL NOT 渲染，既不出现在能力栏，也不出现在「+」菜单里，不摆禁用占位。
+
+**Slash candidates**: while the draft matches `^\/[^\s]*$` and the composer is enabled, the composer SHALL show above the textarea a `role="listbox"` panel (`aria-label` `命令候选`) listing, from `listCommands(workspaceId)`, every command whose `name` or `label` starts with the typed text after `/` (case-sensitive), in catalogue order, each as a `role="option"` showing `label`, `description` and, when non-null, `hint` in muted text; an option whose `source` is `project` additionally shows the tag `项目`, or `项目 · 覆盖平台技能` when `overrides` is true, and every catalogue string is rendered as plain text. `workspaceId` is the selected session's workspace id (null when unbound) and, in the welcome state, the workspace currently chosen in the capability bar's workspace selector (null for none). The catalogue is fetched lazily and kept in a map keyed by workspace id (null included) for the lifetime of the client — a catalogue is never dropped when the workspace id changes, and a new client starts with an empty map: one `listCommands(workspaceId)` call is issued when the condition becomes true — or the client or the workspace id changes while it is true — while no catalogue is held for the current client and workspace id and no call is in flight for them; a catalogue held for another workspace id is never shown; while that call is pending the panel stays hidden and appears on its success if the condition still holds; a failed call keeps the panel hidden without any error UI, and a new call is issued only at the next such trigger (not on further keystrokes while the condition stays true). The first option is highlighted: the listbox's `aria-activedescendant` names it and it alone carries `aria-selected="true"`; `↑`/`↓` move the highlight cyclically and keep the highlighted option scrolled into view inside the panel, which has a bounded height; `Enter` or `Tab` replaces the draft with `/<name> ` (one trailing space) and closes the panel, `Esc` closes it until the draft changes (returning later to the same text shows it again), clicking an option does what `Enter` does for that option and does not move the focus (the panel and its options are not tab stops and a press on the panel does not take the focus from the textarea), and `Enter` with the panel open SHALL NOT submit; `Shift+Enter`, `Shift+Tab` and keys with `Ctrl`/`Alt`/`Meta` are not intercepted. Any change of the draft, and any change of the workspace id whose catalogue the panel shows, resets the highlight to the first option; a dismissal by `Esc` still lasts until the draft changes, whatever the workspace id does. Key events during an IME composition (`isComposing` or `keyCode` 229, the composer's existing rule) SHALL neither move the highlight nor pick an option, so confirming a Chinese candidate such as `/任务` with Enter is not a pick; with no matching command the panel is hidden and `Enter` submits as usual — an unmatched `/xxx` is sent unchanged (the server decides how omp receives it, chat-sessions「Slash 命令白名单与命令目录」), and the user bubble shows it as typed. The panel's state SHALL stay outside `page.tsx`, in `features/chat/slash-menu-state.ts`.
+
+#### Scenario: 输入框键盘发送
+- WHEN 可发送的草稿在输入框收到无修饰的 Enter
+- THEN 通过同一表单受理路径发送一次原始草稿；Shift+Enter 保留换行，输入法 composing 或确认键码229不发送，长按重复Enter不新增提交；空草稿及生成中仍不可发送
+
+#### Scenario: 停止生成
+- **WHEN** 一次回合 running 期间（含一条 running `bash` 步骤、无挂起审批）用户点击 composer 的 `停止`，服务端返回 202，随后 SSE 送达 `turn.end stopped`
+- **THEN** 点击前输入框无 `发送` 按钮而有可访问名 `停止` 的按钮与 `role=status` `生成中`；点击后 `stopSession` 恰调用一次、按钮禁用，页面上不出现任何轻提示（含 `已停止生成`）；`turn.end stopped` 到达后 composer 解锁并恢复 `发送`，助手消息末尾出现名为 `助手消息 已停止` 的 `role=status` 徽章，展开工具调用组后仍 running 的步骤徽章为 `已停止`（步骤名 `bash 已停止`），侧栏该会话状态元素名为 `<title> 已停止`，助手消息无错误文案；再次发送 prompt 走既有受理路径
+- **WHEN** 点击 `停止` 时服务端返回 204
+- **THEN** 不出现任何轻提示，composer 以下一份权威快照的状态为准
+
+#### Scenario: 「+」菜单写入草稿
+- **WHEN** 已选会话绑定工作空间 A、草稿为 `半句`，点击可访问名为 `技能与命令` 的「+」按钮打开菜单（`listCommands("A")` 返回两条内建、`skill:weekly-report`（`source:"skill"`）与 `skill:deploy`（`source:"project"`、`overrides:false`）），点选 `deploy`；随后输入 `/`；另一例 `listCommands` 尚未返回时打开菜单，再一例它失败后打开菜单；还有一例回合进行中（输入框锁定）
+- **THEN** 菜单按目录顺序恰列四项，`deploy` 带 `项目` 标记；菜单里没有权限设置、上传文件、专家；点选后草稿为 `/skill:deploy `、菜单关闭、焦点在文本框，没有发出 prompt；随后输入 `/` 时斜杠候选直接显示同一份目录、不再发新的 `listCommands` 调用；拉取中与失败的两例菜单都不列条目、只显示 `暂无可用项`，不显示错误；输入框锁定的一例 `技能与命令` 按钮处于禁用
+
+#### Scenario: 已选会话工作空间只读
+- **WHEN** 选中一个绑定工作空间 `项目A` 的会话；再选中一个未绑定工作空间的会话；再选中一个 `workspaceId` 非空、但该空间不在已读取列表里（已删除，或工作空间列表读取失败）的会话；随后回到欢迎态
+- **THEN** 三者的能力栏分别显示只读的 `任务启动于 项目A`、`任务启动于 未绑定`、`任务启动于 已绑定空间`，都没有可打开的工作空间选择器，切换前后没有发出修改会话的请求；回到欢迎态后能力栏是可操作的选择器，按钮为 `任务启动于 未选择`
+
+#### Scenario: 斜杠命令候选
+- **WHEN** 在欢迎态与已选会话（均未绑定工作空间）的 composer 中分别输入 `/`（`listCommands(null)` 返回两条内建与 `skill:weekly-report`），再输入 `/t`，按 `↓` `↑` `Enter`；再输入 `/help` 后 `Enter`；再输入 `/` 后 `Esc`；输入法组合态下（`isComposing`）输入 `/任` 并按 Enter；以及 `listCommands(null)` 失败时输入 `/`
+- **THEN** 输入 `/` 时出现 `命令候选` listbox 恰三项、第一项 `整理上下文` 高亮，`/t` 过滤为 `任务清单` 一项（`todo` 前缀命中），`↓`/`↑` 循环回到该项，`Enter` 使 draft 变为 `/todo ` 且面板关闭、不发送；`/help` 无候选、面板隐藏，`Enter` 照常发送且用户气泡显示 `/help`；`Esc` 关闭面板、再输入字符后重新出现；组合态的 Enter 既不选中也不发送，draft 保持输入法上屏结果；拉取失败时无面板、无错误提示，下次满足条件时重新拉取
+
+#### Scenario: 候选目录的拉取时机
+- **WHEN** 首次输入 `/` 而 `listCommands(null)` 尚未返回，其间清空并再次输入 `/`，随后它成功；另一例它失败后继续输入 `/t`，再清空并重新输入 `/`
+- **THEN** 返回之前没有面板，成功后（draft 仍满足条件）面板出现，整个过程恰一次调用；失败的一例里 `/t` 不触发新的调用，重新输入 `/` 时发出第二次调用（共恰两次）
+
+#### Scenario: 点击与 Tab 选中
+- **WHEN** 面板打开时点击 `任务清单`，另一例按 `Tab`，再一例按 `Shift+Tab`
+- **THEN** 点击与 `Tab` 都使 draft 变为对应的 `/<name> ` 并关闭面板，输入框的焦点不被移走，不发送；`Shift+Tab` 不选中
+
+#### Scenario: 候选面板按工作空间取目录
+- **WHEN** 已选会话绑定工作空间 A，输入 `/`（`listCommands("A")` 返回两条内建、一条平台 skill、`skill:deploy`（`source:"project"`、`overrides:false`）与 `skill:weekly-report`（`source:"project"`、`overrides:true`））；随后切到未绑定工作空间的会话并输入 `/`；再回到欢迎态、在能力栏的工作空间选择器选中工作空间 A 后输入 `/`
+- **THEN** 第一次面板恰五项，`deploy` 一项带 `项目` 标记，`weekly-report` 一项带 `项目 · 覆盖平台技能` 标记，其余无标记；切到未绑定会话时发出 `listCommands(null)`，其返回前不显示 A 的目录；欢迎态选中 A 后显示的是 A 的目录且不再发新调用（同一 client 与工作空间 id 已持有）
+
+#### Scenario: 切换工作空间后高亮回到首项
+- **WHEN** 欢迎态草稿为 `/`、未选工作空间的目录有三项，按两次 `↓`（第三项高亮），随后在能力栏的工作空间选择器选中工作空间 A（其目录有五项），再按 `Enter`；另一例在第三项高亮时按 `Esc` 后切到工作空间 A
+- **THEN** 切换后面板显示 A 的目录且第一项高亮（`aria-activedescendant` 指向它，仅它 `aria-selected="true"`），`Enter` 选中的是 A 的第一项；另一例切换后面板保持关闭，草稿变化后重新出现且第一项高亮
+
+### Requirement: 输入框上方停靠区
+会话页 SHALL 在输入框正上方渲染一个停靠区，自上而下依次为：任务清单面板（内容、显隐与展开规则见 session-todo）、选中会话的待决审批提问卡（每条待决审批一张，卡的内容、次序、作答与收起规则见 tool-approval），其下紧接输入框。停靠区 SHALL NOT 位于消息线程的滚动容器内：线程滚动时停靠区与输入框的位置不变。既没有任务清单面板也没有待决审批时，停靠区 SHALL 不渲染任何可见内容、不占位；欢迎态没有选中会话，停靠区为空。待决审批存在时回合仍在运行：输入框保持锁定，`停止` 可用。
+
+#### Scenario: 停靠区次序与位置
+- **WHEN** 选中一个历史超过一屏的 running 会话，其快照带一份含未完成任务的任务清单，且某条助手消息有一条待决审批（`decision` 为 `null`）；随后把线程从底部上滚一屏；另一例选中一个既无任务清单也无待决审批的 `done` 会话
+- **THEN** 第一例按文档顺序依次为消息线程、任务清单面板、名为 `需要你的确认` 的提问卡、输入框，三者都不在线程的滚动容器内；该助手消息内没有名为 `需要你的确认` 的区域；上滚前后任务清单面板、提问卡与输入框在视口中的位置不变；输入框处于锁定且 `停止` 可用。另一例线程与输入框之间没有任务清单面板与提问卡
