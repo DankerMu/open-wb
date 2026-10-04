@@ -2,9 +2,7 @@
 
 ## Purpose
 定义 app 与 `resource/workbuddy-live-demo.html` 一致性验收的依据：`make ui-shots` 截图对产物（六格 × 五态，真实服务、不注入假数据）、其 Makefile/AGENTS.md 控制面同步，以及逐页验收清单 `docs/acceptance/demo-parity-checklist.md` 的条目格式与签收规则。
-
 ## Requirements
-
 ### Requirement: ui-shots 截图对产物
 `make ui-shots`（配方 `npm run --silent ui-shots --workspace web`：`--silent` 压掉 npm 失败横幅中的本机绝对路径，退出码不变）→ `web/e2e/ui-shots.mjs`（Playwright chromium，取自 `@playwright/test`，与 ui-walk 同一依赖）SHALL 只消费由 caller 启动、可从 `UI_SHOTS_BASE_URL`（缺省 `http://127.0.0.1:3000`）访问的真实服务与仓库内 `resource/workbuddy-live-demo.html`（`file://`），不得 build/start/stop 服务、不得安装或下载浏览器、不得清理 caller 的 DB/沙箱/temp；启动时 `GET /api/healthz` 非 200 即非零退出且不截图。目标 SHALL 对六个格（视口 `1440×900`、`1024×768`、`390×844` × `light`/`dark`）截取五个态，态名固定为 `login-default`（登录前）、`chat-welcome`（登录后 `/` 无会话）、`chat-done`（一次已完成回合的会话）、`files-readme`（已选 `smoke-fixture` 且预览 `readme.md`）、`settings-default`：app 侧主题经 `addInitScript` 预置 `localStorage.workbuddy-theme`，以 `zhangsan`/`demo` 登录；`smoke-fixture` 工作空间经 `GET /api/workspaces` 查找、缺失时经 `POST /api/workspaces` 创建；`chat-done` 由脚本在首格新建会话、发送固定提示 `请用一句话介绍你自己`；该回合出现待作答的工具审批时（omp 以 `--approval-mode write` 运行，假上游首轮必调 bash），脚本 SHALL 在助手消息内等 group `需要你的确认` 可见、点击其中 `允许`（exact）、再等 group `已允许执行` 可见——不得依赖 60s 自动允许；回合未产生审批（例如调用方自有真实上游未调工具）时直接进入等待；随后等待会话 status 为 `已完成`（上限 60s，自发送起算）后复用该会话 id 于其余各格；demo 侧（`resource/workbuddy-live-demo.html`，`file://`）以 `addInitScript` 预置其主题存储键、以 `[data-quick="zhangsan"]` 快捷登录，`files-readme` 取 demo 首个工作空间的首个 `.md`，`chat-done` 取 demo 预置会话中当前账号首个已完成会话（所选 id、文件路径与主题键为脚本常量并注明 demo 行号）；`390` 格的 demo 在登录后折叠其浮层侧栏。输出到 `UI_SHOTS_OUT`（相对路径以仓库根解析；未设置或为空串时由脚本取 `var/ui-shots/<UTC 时间戳>/`）：每张 PNG 命名 `<app|demo>-<state>-<width>-<theme>.png`，并生成 `index.html` 对照表（每行 demo 左、app 右，标注格与态，缺失图标注 `缺失`）。app 侧 SHALL 走 `?ws=` 与真实 REST，不注入假数据；每张 app 截图前 SHALL 断言 `document.documentElement.scrollWidth <= window.innerWidth` 且（若存在 `main`）`main.scrollWidth <= main.clientWidth`。非 chat 态（`login-default`、`files-readme`、`settings-default`）的 app 截图前 SHALL 另断言 `document.title`、DOM 文本、`title` 与 `aria-*` 属性值不含任何 workspace `root` 绝对路径值（失败消息不回显该值）；chat 态按 ADR-0011 不做该断言。`settings-default` 的 app 截图前 SHALL 先等关于卡名称可见，再断言 `.settings-sec-h`（2 个）、`.settings-row-title`（3 个，含关于卡名称）的计算 `color` 等于该格主题的 `--wb-text-primary`（暗色 `rgb(255, 255, 255)`、亮色 `rgb(0, 0, 0)`）且各自 `getAnimations().length` 为 0（见 ui-primitives `全局 reduced-motion 规则`）。任一页面导航失败、断言失败或 console/page error（app 未登录时 `GET /api/auth/me` 401 的资源错误除外，条数不超过该响应数）SHALL 使目标非零并保留已产出文件。
 
@@ -24,8 +22,13 @@
 - THEN AGENTS.md 两新行、`constraints.yaml` 十一条 surfaces、Makefile `ui-shots` 目标逐字一致；`ui-shots :` duplicate mutation 用例为 PASS（rc=1）；workflow 无新增 job 与 action
 
 ### Requirement: 逐页验收清单与签收
-`docs/acceptance/demo-parity-checklist.md` SHALL 按页面（登录、外壳、`/`、`/files`、`/settings`）逐组件列出：`demo:行号`、来源 `§4.x` 行、期望元素/状态/交互、对应实现 `file:line`、验证方式（`ui-shots` 态名 + 格 / `ui-walk` / jsdom）、签收列（通过/不通过/不适用 + 日期）；每一项 SHALL 可由一名评审者对着 `ui-shots` 的 `index.html` 或运行中的应用在 1 分钟内判定。**S1e 范围**定义为 `demo-parity-audit.md` §4 中"计划归属"落在 F-UI-1..6（或无 F-ID 且被 `s1e-frontend-parity` change spec、其晋升 spec 或其 proposal 偏差留痕/grill 结论认领）的行；其余行（归 S1b/S1c/S1d/S2c、明确不做、grill 删除的铃铛/设置快捷入口等）SHALL 在清单中标 `不适用` 并注明来源阶段或决策，不得留空。S1e Epic 关闭前 SHALL 把清单签收结果（全部通过或列出不通过项及其 issue）贴入 Epic。
+`docs/acceptance/demo-parity-checklist.md` SHALL 按页面（登录、外壳、`/`、`/files`、`/settings`）逐组件列出：`demo:行号`、来源 `§4.x` 行、期望元素/状态/交互、对应实现 `file:line`、验证方式（`ui-shots` 态名 + 格 / `ui-walk` / jsdom）、签收列（通过/不通过/不适用 + 日期）；每一项 SHALL 可由一名评审者对着 `ui-shots` 的 `index.html` 或运行中的应用在 1 分钟内判定。**S1e 范围**定义为 `demo-parity-audit.md` §4 中"计划归属"落在 F-UI-1..6（或无 F-ID 且被 `s1e-frontend-parity` change spec、其晋升 spec 或其 proposal 偏差留痕/grill 结论认领）的行；其余行（归 S1b/S1c/S1d/S2c、明确不做、grill 删除的铃铛/设置快捷入口等）SHALL 在清单中标 `不适用` 并注明来源阶段或决策，不得留空。归后续阶段的行在该阶段交付后 SHALL 改写为范围内项（期望取自该阶段已晋升的 spec，签收格回到 `待签`）；该阶段交付而 demo 无对应物的功能 SHALL 列在独立小节，来源列填 spec 的 Requirement 名。S1c 已按此增补（2026-10-04）。S1e Epic 关闭前 SHALL 把清单签收结果（全部通过或列出不通过项及其 issue）贴入 Epic。
 
 #### Scenario: 清单可判定且与实现同步
 - **WHEN** 评审者依清单逐项对照 `ui-shots` 产物
 - **THEN** 每项有 demo 行号、§4 来源行、可观察的期望与签收格；§4 中分类为"实现偏差"或"计划遗漏"且属 S1e 范围的每一行在清单中至少有一项对应（一行含多个组件时逐组件拆项，各注明同一来源行）
+
+#### Scenario: 后续阶段交付后清单随之增补
+- **WHEN** S1c 交付了清单中原标 `不适用（… → S1c）` 的组件，以及 demo 无对应的 slash 候选、项目技能与项目配置入口
+- **THEN** 这些行改写为可判定的范围内项、签收格为 `待签`，demo 无对应的功能列在「S1c 新增」小节；清单中不再有把已交付组件写成「不渲染」的行
+
