@@ -7,7 +7,10 @@ export function AuthGuard({ children }: PropsWithChildren) {
 
   if (status === "loading") {
     return (
-      <p className="auth-loading" role="status">
+      <p
+        className="flex min-h-dvh items-center justify-center bg-(--wb-home-bg-primary) p-6 text-muted-foreground"
+        role="status"
+      >
         正在检查登录状态
       </p>
     );

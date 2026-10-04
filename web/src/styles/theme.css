@@ -1,8 +1,9 @@
-/* Theme mapping: shadcn/ui semantic variables → --wb-* tokens (./tokens.css). Unlayered.
+/* Theme mapping: shadcn/ui semantic variables → --wb-* tokens (./tokens.css).
    Like the .css files under web/src/ui, this file is a palette → component boundary, so it may reference
    --wb-palette-*; it never writes colour literals. Semantic tokens switch value under
    [data-theme="dark"] by themselves, so only --primary / --primary-foreground (the former
-   .ui-btn--primary pair) need a dark block. */
+   .ui-btn--primary pair) need a dark block. The only layered rule is the border-colour baseline
+   (@layer base). */
 
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
@@ -72,6 +73,17 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* Border-colour baseline (shadcn convention): a bare `border` class on a copied component would
+   otherwise resolve to currentColor. It sits in the base layer, below `legacy`, so the
+   not-yet-migrated pages' own border colours still win. */
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--border);
+  }
 }
 
 body {

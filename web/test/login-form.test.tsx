@@ -27,7 +27,7 @@ import {
   serviceInfo,
   setBrowserPath,
 } from "./support.js";
-import { readRepoFile, ruleBody, stripComments, yieldMacrotask } from "./ui-support.js";
+import { readRepoFile, yieldMacrotask } from "./ui-support.js";
 
 type LoginRoutes = Parameters<typeof createFetchMock>[0];
 
@@ -91,6 +91,17 @@ async function expectAccountFocused() {
   });
 }
 
+/** 登录卡：标题所在的卡片容器（拷入层 Card 的 `data-slot`）。 */
+function loginCard() {
+  const heading = screen.getByRole("heading", { level: 1, name: "登录 WorkBuddy" });
+  return heading.closest('[data-slot="card"]') as HTMLElement;
+}
+
+/** `演示账号` 提示行（快捷登录区的第一行）。 */
+function queryDemoHint() {
+  return screen.queryByText(/^演示账号：/);
+}
+
 /** 断言 nodes 在文档中严格按给定顺序出现。 */
 function expectDocumentOrder(nodes: Element[]) {
   for (let index = 1; index < nodes.length; index += 1) {
@@ -106,12 +117,11 @@ describe("login card structure", () => {
 
     const subtitle = screen.getByText("内网统一身份 · 本实例不出网");
     expect(subtitle.tagName).toBe("P");
-    expect(subtitle.classList.contains("login-sub")).toBe(true);
 
-    const card = document.querySelector(".login-card") as HTMLElement;
-    const brand = card.querySelector(".login-brand") as HTMLElement;
-    expect(brand).not.toBeNull();
-    const mark = brand.querySelector("svg.ui-brand-mark") as SVGElement;
+    const card = loginCard();
+    expect(card).not.toBeNull();
+    const mark = card.querySelector("svg.ui-brand-mark") as SVGElement;
+    const brand = mark.parentElement as HTMLElement;
     expect(mark.getAttribute("width")).toBe("26");
     expect(mark.getAttribute("height")).toBe("26");
     expect(mark.getAttribute("aria-hidden")).toBe("true");
@@ -124,7 +134,7 @@ describe("login card structure", () => {
     // 默认 helper 不注册 /api/info：请求落为 requestFailed(0)，info 不可用时快捷区不渲染。
     await settleInfoRequest(fetchMock);
     expect(screen.queryByText(/演示账号/)).toBeNull();
-    expect(document.querySelector(".login-quick")).toBeNull();
+    expect(screen.queryByRole("list", { name: "快捷登录" })).toBeNull();
     expect(document.querySelector(".brand-mark")).toBeNull();
   });
 
@@ -155,11 +165,9 @@ describe("login card structure", () => {
       ["账号", account],
       ["密码", password],
     ] as const) {
-      expect(input.classList.contains("ui-input")).toBe(true);
       expect(input.id).not.toBe("");
       const label = screen.getByText(text, { selector: "label" }) as HTMLLabelElement;
       expect(label.htmlFor).toBe(input.id);
-      expect(label.classList.contains("login-label")).toBe(true);
     }
   });
 });
@@ -195,7 +203,6 @@ describe("login card submission", () => {
     });
     expect(button.disabled).toBe(false);
     expect(alert.textContent).toBe("该账号已停用，请联系管理员");
-    expect(alert.classList.contains("login-err")).toBe(true);
     expect(alert.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
     expectDocumentOrder([password, alert, button]);
   });
@@ -259,36 +266,20 @@ describe("login card routing and scope", () => {
 });
 
 describe("login card static contract", () => {
-  const authCssPath = "web/src/features/auth/auth.css";
-
-  it("auth.css carries demo provenance and demo-aligned geometry on semantic tokens", () => {
-    const raw = readRepoFile(authCssPath);
-    expect(raw).toContain("resource/workbuddy-live-demo.html:637");
-    const css = stripComments(raw);
-
-    const card = ruleBody(css, ".login-card");
-    expect(card).toContain("width: 360px;");
-    expect(card).toContain("border: 1px solid var(--wb-border-card);");
-    expect(card).toContain("max-width: calc(100vw - 32px);");
-    expect(ruleBody(css, ".login-sub")).toContain("color: var(--wb-text-tertiary);");
-    expect(ruleBody(css, ".login-btn")).toContain("height: 36px;");
-    expect(ruleBody(css, ".login-err")).toContain("var(--wb-status-error-soft-bg)");
-  });
-
-  it("legacy.css imports auth.css and drops the migrated login and brand-mark rules", () => {
+  it("legacy.css no longer carries any login rule or the auth stylesheet import", () => {
     const styles = readRepoFile("web/src/styles/legacy.css");
-    expect(styles).toContain('@import "../features/auth/auth.css";');
+    expect(styles).not.toContain("auth.css");
+    expect(styles).not.toContain(".auth-loading");
     expect(styles).not.toContain(".brand-mark");
     expect(styles).not.toContain(".login-");
     expect(styles).not.toContain(".login-dialog");
   });
 
-  it("login-form.tsx avoids autoFocus, radix and ui-muted and imports primitives via ui/index", () => {
+  it("login-form.tsx avoids autoFocus, radix and ui-muted", () => {
     const source = readRepoFile("web/src/features/auth/login-form.tsx");
     expect(source).not.toContain("autoFocus");
     expect(source).not.toContain("@radix-ui");
     expect(source).not.toContain("ui-muted");
-    expect(source).toContain('from "../../ui/index.js"');
   });
 });
 
@@ -475,11 +466,11 @@ describe("quick login", () => {
     QUICK_CARD_NAMES.forEach((name, index) => {
       expect(within(list).getByRole("button", { name })).toBe(cards[index]);
     });
-    const hint = document.querySelector(".login-hint") as HTMLElement;
+    const hint = queryDemoHint() as HTMLElement;
     expect(hint.textContent).toBe("演示账号：zhangsan / zhaoliu / lisi（管理员），密码均为 demo");
 
-    const card = document.querySelector(".login-card") as HTMLElement;
-    const form = document.querySelector(".login-form") as HTMLElement;
+    const card = loginCard();
+    const form = screen.getByRole("button", { name: "登录" }).closest("form") as HTMLElement;
     for (const node of [hint, list]) expect(card.contains(node)).toBe(true);
     expectDocumentOrder([form, hint, list]);
     expect(card.textContent).not.toMatch(/张三|赵六|李四|部/);
@@ -507,7 +498,7 @@ describe("quick login", () => {
     await settleInfoRequest(fields.fetchMock);
 
     expect(screen.queryByRole("list", { name: "快捷登录" })).toBeNull();
-    expect(document.querySelector(".login-hint")).toBeNull();
+    expect(queryDemoHint()).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
 
     fillAndSubmit(fields);
@@ -521,7 +512,7 @@ describe("quick login", () => {
     await settleInfoRequest(fetchMock);
 
     expect(screen.queryByRole("list", { name: "快捷登录" })).not.toBeNull();
-    expect(document.querySelector(".login-hint")).not.toBeNull();
+    expect(queryDemoHint()).not.toBeNull();
   });
 
   it("submits the picked account with demo exactly once and locks every card", async () => {
@@ -585,7 +576,7 @@ describe("quick login", () => {
     await yieldMacrotask();
 
     expect(screen.queryByRole("list", { name: "快捷登录" })).toBeNull();
-    expect(document.querySelector(".login-hint")).toBeNull();
+    expect(queryDemoHint()).toBeNull();
   });
 
   it("keeps the info read out of the provider operation slot while login is pending", async () => {
@@ -702,7 +693,7 @@ describe("quick login", () => {
 
     expect(cards).toHaveLength(3);
     expect(screen.getAllByRole("list", { name: "快捷登录" })).toHaveLength(1);
-    expect(document.querySelectorAll(".login-hint")).toHaveLength(1);
+    expect(screen.getAllByText(/^演示账号：/)).toHaveLength(1);
     const infoCalls = calls(fetchMock, "/api/info");
     expect(infoCalls).toHaveLength(2);
     expect(infoCalls[0]?.[1]?.signal?.aborted).toBe(true);
@@ -712,9 +703,12 @@ describe("quick login", () => {
     const { button } = await openLoginPage({ routes: devStubRoutes });
     // 以 hint 出现为渲染完成信号，不依赖待测的列表名与卡片名。
     await waitFor(() => {
-      expect(document.querySelector(".login-hint")).not.toBeNull();
+      expect(queryDemoHint()).not.toBeNull();
     });
-    const cards = document.querySelectorAll(".login-quick-item");
+    // 不经待测的列表名：取登录卡内除主按钮外的全部按钮。
+    const cards = within(loginCard())
+      .getAllByRole("button")
+      .filter((candidate) => candidate !== button);
     expect(cards).toHaveLength(3);
 
     const accountLabelled = screen.getAllByLabelText(/账号/);
@@ -743,15 +737,5 @@ describe("quick login static contract", () => {
   it("dev-accounts.ts mirrors only seed account and role", () => {
     const source = readRepoFile("web/src/features/auth/dev-accounts.ts");
     for (const forbidden of ["wangwu", "name:", "dept"]) expect(source).not.toContain(forbidden);
-  });
-
-  it("auth.css scrolls the login root and centers the card with auto margins", () => {
-    const css = stripComments(readRepoFile("web/src/features/auth/auth.css"));
-    const root = ruleBody(css, ".login-root");
-    expect(root).toContain("overflow-y: auto;");
-    expect(root).toMatch(/(^|[^-])height: 100dvh;/);
-    expect(root).not.toContain("align-items: center;");
-    expect(ruleBody(css, ".login-card")).toContain("margin: auto;");
-    expect(ruleBody(css, ".login-quick-item")).toContain("cursor: pointer;");
   });
 });

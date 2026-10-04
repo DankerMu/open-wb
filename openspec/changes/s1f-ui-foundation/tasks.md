@@ -76,10 +76,10 @@ Minimal mergeable slice: atomic - 侧栏、顶栏、覆盖层与用户菜单共�
 
 ## 4. spa-shell — 登录页重写
 
-- [ ] 4.1 拷入 `card`、`input`、`label`（按需）；`theme.css` 加边框色基线（design D3）；`features/auth/login-form.tsx`、`quick-login.tsx` 按 design D8 重写；删除 `auth.css` 并从 `legacy.css` 去掉其 `@import`；`.auth-loading` 的加载态改用 Tailwind 并删去其旧规则。
-- [ ] 4.2 测试：`login-form`、`auth-router`、`auth-session-client` 的行为断言原样通过；读 `auth.css`/`legacy.css`/源码的断言删除或改为行为断言。
+- [x] 4.1 拷入 `card`、`input`、`label`（按需）；`theme.css` 加边框色基线（design D3）；`features/auth/login-form.tsx`、`quick-login.tsx` 按 design D8 重写；删除 `auth.css` 并从 `legacy.css` 去掉其 `@import`；`.auth-loading` 的加载态改用 Tailwind 并删去其旧规则。
+- [x] 4.2 测试：`login-form`、`auth-router`、`auth-session-client` 的行为断言原样通过；读 `auth.css`/`legacy.css`/源码的断言删除或改为行为断言。
   ui-walk 增「登录主按钮计算底色等于 `--primary`，浅色下为 `rgba(0, 0, 0, 0.9)`」。
-- [ ] 4.3 守卫：已迁移区域清单把 `features/auth/footer.tsx` 一项换成 `web/src/features/auth/**` 整目录。`functional-checklist.md` 登录节加行（未登录落登录页且 URL 不变、登录成功回原路由、错误提示、快捷登录仅演示环境可见），结论 `待签`。
+- [x] 4.3 守卫：已迁移区域清单把 `features/auth/footer.tsx` 一项换成 `web/src/features/auth/**` 整目录。`functional-checklist.md` 登录节加行（未登录落登录页且 URL 不变、登录成功回原路由、错误提示、快捷登录仅演示环境可见），结论 `待签`。
 
 Suggested fixture level: expanded - 登录页是层叠顺序（utilities 压过旧全局 `button` 规则）与「配色不换」的取证点，计算样式需真实浏览器
 Minimal mergeable slice: atomic - 表单与快捷登录卡共用同一提交锁与同一个 `.css`，单页、单一验证路径。依赖：3（`features/auth/**` 整目录登记要求 footer 已迁；共享守卫清单与功能清单文件）。
