@@ -4,22 +4,26 @@
 Defines the React SPA build, four-route shell, authentication guard, settings/theme behavior, and workspace-page integration.
 ## Requirements
 ### Requirement: web 构建工具链
-web workspace SHALL 具备 Vite + React 构建面：`web/index.html`、`src/main.tsx` 入口、`vite.config.ts`（@vitejs/plugin-react，outDir=dist）、tsconfig JSX（react-jsx）、vitest jsdom 环境、knip entry 同步；`npm run build --workspace web` SHALL 可复现产出 `web/dist`，且 `make check` 全链（lint/typecheck/test/anti-drift）保持绿。
+web workspace SHALL 具备 Vite + React 构建面：`web/index.html`、`src/main.tsx` 入口、`vite.config.ts`（@vitejs/plugin-react，outDir=dist）、tsconfig JSX（react-jsx）、vitest jsdom 环境、knip entry 同步、Tailwind CSS（`@tailwindcss/vite` 插件，样式入口与层叠顺序见 ui-foundation）与 `@/` 路径别名（指向 `web/src`，在 tsc、Vite、vitest 与 knip 中解析一致）；`npm run build --workspace web` SHALL 可复现产出 `web/dist`，且 `make check` 全链（lint/typecheck/test/anti-drift）保持绿。
 
 #### Scenario: 构建可复现
 - WHEN 执行 `npm run build --workspace web`
 - THEN 产出 `web/dist/index.html` 与静态资源，退出码 0
+
+#### Scenario: 别名在四处解析一致
+- **WHEN** 一个 `web/test` 测试文件与一个被入口可达的 `web/src` 应用层模块各自以 `@/…` 导入（前者导入 `@/components/ui/button` 并渲染它），依次执行 `make typecheck`、`npm run build --workspace web`、`npm test --workspace web` 与 `make anti-drift`
+- **THEN** tsc 无 TS2307；Vite 构建成功且产物包含该应用层模块经别名导入的代码；vitest 中该按钮渲染成功；knip 不报 unresolved import，也不把经别名被导入的应用层文件或其依赖包报为未使用
 
 #### Scenario: 门禁兼容
 - WHEN 工具链落地后执行 `make check`
 - THEN typecheck（JSX）、knip（vite 入口解析）、覆盖率全部通过
 
 ### Requirement: 路由 IA 与侧栏
-SPA SHALL 以 history 路由提供 `/`、`/files`、`/center`、`/settings` 四页与四个导航入口；视觉参考 demo，标签与说明仅表达已实现的功能，不宣传挂载等未交付能力。`/` 渲染 chat-web 规定的会话页（当前会话由 `?session=<id>` 表示；页面级 heading 归属见下文顶栏段）；`/center` 明确展示暂不可用状态，不提供虚假功能按钮；`/files` 渲染 files-web 规定的工作空间页（heading `工作空间`，当前空间以 `?ws=<id>` 表示），routeManifest 描述及 routes/ui-walk 既有断言 SHALL 随真实页面同步更新；`/center` 为扁平路由（demo 的 8 tab 是页内状态而非 URL，demo:3144-3161；页内 tab 属 S1d）；demo 开发者页 `/tokens` 不移植。**侧栏**（demo:232-300, 1773-1822）SHALL 宽 `288px`，每个导航项为 `Icon`（`routeManifest[].icon`：`message-square`/`folder`/`layout-grid`/`settings`）+ 标签 + 可选副标签（仅 `/files` 为 `文件·预览`，其余路由无副标签直到有真实内容），当前项高亮；顶部为品牌区（自有 mark + 字标 `WorkBuddy`，不使用上游 logo 资产）与折叠按钮（accessible name `折叠侧栏`/`展开侧栏`），折叠态宽 `48px` 只显示图标（每项保留 `aria-label` 为标签文本）并以 `Tooltip` 显示标签，折叠状态持久化在 `localStorage` key `workbuddy-sidebar`（`expanded|collapsed`，读取失败或值不合法按 expanded，写入失败静默并保留内存状态）；底部为用户区（aside 内 `<footer>`）：头像圆标（`account` 首字符大写）+ 逐字展示当前 Principal 的 `account` 与 `role`（前端不伪造 display name/部门或角色映射），整块为触发按钮（accessible name `用户菜单`），点击打开 `Menu`，菜单项**只有** `退出登录`（沙箱信息、账号与隔离、切换账号、铃铛无后端，不渲染）；退出请求进行中触发按钮保持可用，再次选择 `退出登录` 打开的确认框其确认按钮处于忙碌禁用态、取消按钮文案为 `关闭`（重复退出被锁定）。**会话列表区**（demo:274、1797、1852）：`/` 路由下侧栏 SHALL 在主导航与用户区之间渲染会话页经 shell 槽位提供的列表区（`新建会话` 与会话列表；列表区 `nav` 的 accessible name 仍为 `会话列表`，其内按 session-sidebar 规定的「置顶任务 / 任务 / 空间」分区渲染；列表内容、数据与行为归 chat-web `会话页` 与 session-sidebar，shell 只提供槽位、不读取 chat 数据层），文档流侧栏中列表区独立滚动、用户区固定在底部（覆盖层沿用 Drawer 主体整体滚动）；其它路由不渲染列表内容；折叠态（`48px`）不渲染列表区（demo:241）；`≤760px` 覆盖层内列表区位于主导航之后，选择会话或 `新建会话` 后覆盖层关闭并按导航项关闭规则归还焦点，覆盖层关闭时列表不在 DOM 中。**顶栏**（demo:313-322, 1928-1963）SHALL 由 shell 渲染为 `main` 之外的 `<header>`（隐式 `role=banner`）、高 `56px`，三态：`≤760px` 时三态都在顶栏最左渲染 `打开导航` 按钮（accessible name 固定，`Icon` `menu`）；`/` 无当前会话时 `≥761px` 不渲染顶栏、`≤760px` 只渲染含 `打开导航` 的窄条（无 heading）；`/` 有当前会话时显示面包屑 `我的工作 / <会话标题>`（标题来自服务端 title 或 `新会话`，由会话页经 `useTopbar({ breadcrumb, actions })` 上报，shell 不读取 chat 数据层）；其它路由显示 `routeManifest[].title`（`工作空间`/`中心`/`设置`）。**顶栏 actions 插槽**：`useTopbar` SHALL 接受可选 `actions`：页面提供的**描述符**数组（每项 `{key, label, icon, expanded?, onSelect(trigger)}`，`icon` 为 `Icon` 注册名，`key` 在数组内唯一；页面不传 React 节点，描述符可比较，避免上报循环：shell 只在各项 `key`/`label`/`icon`/`expanded` 有变化时更新，`onSelect` 取上报方最近一次渲染提供的回调），shell 按数组顺序为每项渲染一个 ghost 图标 `Button`（accessible name 与 `Tooltip` 均为 `label`，图标装饰性；提供 `expanded` 时带同值 `aria-expanded`，未提供时不带该属性；点击以该按钮元素为 `trigger` 调用 `onSelect`，供页面把焦点归还给触发按钮）；在第二态（`/` 有当前会话且标题已知）与第三态（其它路由）中，shell SHALL 把它渲染在顶栏 level-1 heading 之后、同一 `<header>` 之内的 `.topbar-actions` 容器（靠右，不进入 heading 的 accessible name）；未提供 `actions`（或数组为空）时两态的顶栏结构与既有行为逐一相同，不渲染该容器；第一态（`/` 无当前会话，或会话已选但标题未知）不渲染 `actions`；上报方清空上报或卸载时 `actions` 与面包屑一同清空。shell 不规定按钮内容：会话页注入的 `重命名`、`对话内搜索`、`产物面板` 分别归 session-sidebar、conversation-search、turn-artifacts；顶栏 `更多` 不渲染。**页面级 level-1 heading 归属**：`/` 欢迎态为 chat-web 渲染的 hero `WorkBuddy，我帮你`；`/` 有会话时为顶栏面包屑容器（heading level 1，accessible name `我的工作 / <标题>`）；其它路由为顶栏页面标题；除欢迎态 hero 外页面自身不再渲染页面级 `<h1>`，内容区（Markdown 预览、助手正文）内的 heading 不受此限，heading 断言以 banner 或 hero 定位。**响应式**（demo:305-310；外壳唯一断点 `760`，`≤900px` 文件页树栏宽度由 files-web 规定，demo 的 1100 断点只作用于 `/center` 面板、不在 S1e 范围）：`≤760px`（媒体查询 `(max-width: 760px)`，无 `matchMedia` 的环境按宽屏处理）侧栏不在文档流中渲染，改由顶栏 `打开导航` 按钮打开的 `Drawer side="left" width=288`（对话框 accessible name `导航`）承载：默认关闭；覆盖层内侧栏始终为展开态（标签与副标签可见，不渲染品牌区与折叠按钮）；选择任一导航项后关闭，Escape、遮罩与 `关闭` 亦关闭，关闭后焦点归还 `打开导航`；开合是瞬时状态，不读取也不写入 `workbuddy-sidebar`（桌面折叠偏好原样保留）；关闭时导航项不在 DOM 中（不可聚焦），用户区随之卸载，但退出请求进行中的锁定态（忙碌禁用的确认按钮、`关闭` 文案、状态提示）SHALL 不因关闭并重开覆盖层或视口跨越 `760` 而丢失；`≥761px` 不挂载 Drawer 也不渲染 `打开导航`；视口跨越 `760` 时即时切换，切回宽屏时覆盖层关闭且再次进入窄屏不得处于打开态；主区在 `≤760px` 占满宽度，任何视口无横向溢出。退出 SHALL 先显示可访问模态确认框：标题 `退出登录？`、说明退出后的登录状态与任务保留语义、按钮 `取消`/`退出`；取消不发请求，确认只调用一次 Provider-owned logout。其余 demo 用户菜单项延后见 proposal Non-goals。
+SPA SHALL 以 history 路由提供 `/`、`/files`、`/center`、`/settings` 四页与四个导航入口；标签与说明仅表达已实现的功能，不宣传挂载等未交付能力。`/` 渲染 chat-web 规定的会话页（当前会话由 `?session=<id>` 表示；页面级 heading 归属见下文顶栏段）；`/center` 明确展示暂不可用状态，不提供虚假功能按钮；`/files` 渲染 files-web 规定的工作空间页（heading `工作空间`，当前空间以 `?ws=<id>` 表示），routeManifest 描述及 routes/ui-walk 既有断言 SHALL 随真实页面同步更新；`/center` 为扁平路由（页内 tab 属 S1d）。外壳 SHALL 以 ui-foundation 规定的组件层与 Tailwind 实现，布局尺寸（侧栏宽度、顶栏高度等）不在本规格固定。**侧栏** 的每个导航项 SHALL 为图标（`routeManifest[].icon`：`message-square`/`folder`/`layout-grid`/`settings`）+ 标签 + 可选副标签（仅 `/files` 为 `文件·预览`，其余路由无副标签直到有真实内容），当前项高亮；顶部为品牌区（自有 mark + 字标 `WorkBuddy`，不使用上游 logo 资产）与折叠按钮（accessible name `折叠侧栏`/`展开侧栏`），折叠态（`aside` 带 `data-collapsed="true"`，展开态为 `"false"`）只显示图标（每项保留 `aria-label` 为标签文本）并以 Tooltip 显示标签，折叠状态持久化在 `localStorage` key `workbuddy-sidebar`（`expanded|collapsed`，读取失败或值不合法按 expanded，写入失败静默并保留内存状态）；底部为用户区（aside 内 `<footer>`）：头像圆标（`account` 首字符大写）+ 逐字展示当前 Principal 的 `account` 与 `role`（前端不伪造 display name/部门或角色映射），整块为触发按钮（accessible name `用户菜单`），点击打开菜单，菜单项**只有** `退出登录`（沙箱信息、账号与隔离、切换账号、铃铛无后端，不渲染）；退出请求进行中触发按钮保持可用，再次选择 `退出登录` 打开的确认框其确认按钮处于忙碌禁用态、取消按钮文案为 `关闭`（重复退出被锁定）。**会话列表区**：`/` 路由下侧栏 SHALL 在主导航与用户区之间渲染会话页经 shell 槽位提供的列表区（`新建会话` 与会话列表；列表区 `nav` 的 accessible name 仍为 `会话列表`，其内按 session-sidebar 规定的「置顶任务 / 任务 / 空间」分区渲染；列表内容、数据与行为归 chat-web `会话页` 与 session-sidebar，shell 只提供槽位、不读取 chat 数据层），文档流侧栏中列表区独立滚动、用户区固定在底部（覆盖层主体整体滚动）；其它路由不渲染列表内容；折叠态不渲染列表区；`≤760px` 覆盖层内列表区位于主导航之后，选择会话或 `新建会话` 后覆盖层关闭并按导航项关闭规则归还焦点，覆盖层关闭时列表不在 DOM 中。**顶栏** SHALL 由 shell 渲染为 `main` 之外的 `<header>`（隐式 `role=banner`），三态：`≤760px` 时三态都在顶栏最左渲染 `打开导航` 按钮（accessible name 固定）；`/` 无当前会话时 `≥761px` 不渲染顶栏、`≤760px` 只渲染含 `打开导航` 的窄条（无 heading）；`/` 有当前会话时显示面包屑 `我的工作 / <会话标题>`（标题来自服务端 title 或 `新会话`，由会话页经 `useTopbar({ breadcrumb, actions })` 上报，shell 不读取 chat 数据层）；其它路由显示 `routeManifest[].title`（`工作空间`/`中心`/`设置`）。**顶栏 actions 插槽**：`useTopbar` SHALL 接受可选 `actions`：页面提供的**描述符**数组（每项 `{key, label, icon, expanded?, onSelect(trigger)}`，`icon` 为图标注册名，`key` 在数组内唯一；页面不传 React 节点，描述符可比较，避免上报循环：shell 只在各项 `key`/`label`/`icon`/`expanded` 有变化时更新，`onSelect` 取上报方最近一次渲染提供的回调），shell 按数组顺序为每项渲染一个图标按钮（accessible name 与 Tooltip 均为 `label`，图标装饰性；提供 `expanded` 时带同值 `aria-expanded`，未提供时不带该属性；点击以该按钮元素为 `trigger` 调用 `onSelect`，供页面把焦点归还给触发按钮）；在第二态（`/` 有当前会话且标题已知）与第三态（其它路由）中，shell SHALL 把它渲染在顶栏 level-1 heading 之后、同一 `<header>` 之内的 actions 容器（`data-slot="topbar-actions"`，靠右，不进入 heading 的 accessible name）；未提供 `actions`（或数组为空）时两态的顶栏结构与既有行为逐一相同，不渲染该容器；第一态（`/` 无当前会话，或会话已选但标题未知）不渲染 `actions`；上报方清空上报或卸载时 `actions` 与面包屑一同清空。shell 不规定按钮内容：会话页注入的 `重命名`、`对话内搜索`、`产物面板` 分别归 session-sidebar、conversation-search、turn-artifacts；顶栏 `更多` 不渲染。**页面级 level-1 heading 归属**：`/` 欢迎态为 chat-web 渲染的 hero `WorkBuddy，我帮你`；`/` 有会话时为顶栏面包屑容器（heading level 1，accessible name `我的工作 / <标题>`）；其它路由为顶栏页面标题；除欢迎态 hero 外页面自身不再渲染页面级 `<h1>`，内容区（Markdown 预览、助手正文）内的 heading 不受此限，heading 断言以 banner 或 hero 定位。**响应式**（外壳唯一断点 `760`，`≤900px` 文件页树栏宽度由 files-web 规定）：`≤760px`（媒体查询 `(max-width: 760px)`，无 `matchMedia` 的环境按宽屏处理）侧栏不在文档流中渲染，改由顶栏 `打开导航` 按钮打开的左侧覆盖层（对话框 accessible name `导航`）承载：默认关闭；覆盖层内侧栏始终为展开态（标签与副标签可见，不渲染品牌区与折叠按钮）；选择任一导航项后关闭，Escape、遮罩与 `关闭` 亦关闭，关闭后焦点归还 `打开导航`；开合是瞬时状态，不读取也不写入 `workbuddy-sidebar`（桌面折叠偏好原样保留）；关闭时导航项不在 DOM 中（不可聚焦），用户区随之卸载，但退出请求进行中的锁定态（忙碌禁用的确认按钮、`关闭` 文案、状态提示）SHALL 不因关闭并重开覆盖层或视口跨越 `760` 而丢失；`≥761px` 不挂载覆盖层也不渲染 `打开导航`；视口跨越 `760` 时即时切换，切回宽屏时覆盖层关闭且再次进入窄屏不得处于打开态；主区在 `≤760px` 占满宽度，任何视口无横向溢出。退出 SHALL 先显示可访问模态确认框：标题 `退出登录？`、说明退出后的登录状态与任务保留语义、按钮 `取消`/`退出`；取消不发请求，确认只调用一次 Provider-owned logout。
 
 #### Scenario: 视觉与键盘可用性
 - WHEN 浏览器在桌面和390px窄屏打开登录及四个路由，并切换浅色/深色主题
-- THEN 使用本地构建的统一样式与带来源的设计token，桌面侧栏与主区并排，390px 时侧栏为 `导航` 覆盖层、`打开导航` 在含欢迎态的每个路由可达且页面无横向溢出；焦点/禁用/忙碌/错误状态可辨，不请求公网字体或资源
+- THEN 使用本地构建的统一样式与 ui-foundation 的主题变量，桌面侧栏与主区并排，390px 时侧栏为 `导航` 覆盖层、`打开导航` 在含欢迎态的每个路由可达且页面无横向溢出；焦点/禁用/忙碌/错误状态可辨，不请求公网字体或资源
 - AND 退出模态打开时聚焦取消，Tab循环留在框内，Escape关闭并恢复到可用控件；提交中允许关闭窗口以避免网络停滞锁死应用，明确关闭不会撤销已发送的退出请求，重复退出仍被锁定
 - AND 已发送的退出请求优先于普通服务信息读取；退出进行中进入设置页不得中断该请求，服务信息可暂不可用，当前会话的退出成功仍进入登录页
 
@@ -33,7 +37,7 @@ SPA SHALL 以 history 路由提供 `/`、`/files`、`/center`、`/settings` 四�
 
 #### Scenario: 侧栏折叠与用户菜单
 - WHEN 点击折叠按钮、reload、再展开；随后打开用户菜单
-- THEN 折叠后侧栏宽 48px、导航只显示图标、列表区不渲染且 hover/聚焦出现 Tooltip 标签，`localStorage.workbuddy-sidebar=collapsed`，reload 保持折叠；展开后宽 288px 且 storage 为 `expanded`；菜单只含 `退出登录` 一项，Escape 关闭并恢复触发器焦点
+- THEN 折叠后 `aside[aria-label="侧栏"]` 的 `data-collapsed` 为 `true`、导航只显示图标、列表区不渲染且 hover/聚焦出现 Tooltip 标签，`localStorage.workbuddy-sidebar=collapsed`，reload 保持折叠；展开后 `data-collapsed` 为 `false` 且 storage 为 `expanded`；菜单只含 `退出登录` 一项，Escape 关闭并恢复触发器焦点
 
 #### Scenario: 窄屏导航覆盖层
 - WHEN jsdom 以 `(max-width: 760px)` 匹配的 `matchMedia` mock 挂载已认证应用于 `/`、点击顶栏 `打开导航`，在覆盖层中选择 `工作空间`，随后再打开并按 Escape；再在覆盖层内经 `用户菜单` → `退出登录` → `退出` 发起一个挂起的退出请求，Escape 关闭确认框与覆盖层后重开
@@ -44,7 +48,7 @@ SPA SHALL 以 history 路由提供 `/`、`/files`、`/center`、`/settings` 四�
 - THEN 覆盖层始终为展开态、storage 值仍为 `collapsed` 且无任何写入；切回宽屏后文档流侧栏以折叠态渲染、覆盖层与 `打开导航` 消失；再次进入窄屏时覆盖层处于关闭态
 
 #### Scenario: 退出登录
-- WHEN 点击侧栏用户区触发按钮 `用户菜单`、在 `Menu` 中选择 `退出登录` 并在确认框选择 `退出`
+- WHEN 点击侧栏用户区触发按钮 `用户菜单`、在菜单中选择 `退出登录` 并在确认框选择 `退出`
 - THEN 恰调用一次 `POST /api/auth/logout`；204 或 current 401 均清空 Principal，会话页的连接随卸载关闭，并在保持当前 pathname/search/hash 不变时渲染登录页
 
 #### Scenario: 取消退出
@@ -66,7 +70,7 @@ SPA SHALL 以 history 路由提供 `/`、`/files`、`/center`、`/settings` 四�
 - **THEN** 重渲染不引起 shell 再次更新 actions（无上报循环），点击调用的是最近一次渲染的闭包；按钮按新数组顺序渲染；卸载后按钮与面包屑一同消失
 
 ### Requirement: 登录页与路由守卫
-未登录时任一受支持 SPA 路由（本阶段为 `/`、`/files`、`/center`、`/settings`）SHALL 在保持当前 browser URL 不变的情况下渲染登录页（域账号+密码），该 URL 即原目标路由；登录失败 SHALL 展示错误信封的 message 字段文案；登录成功 SHALL 在同一 URL 恢复原目标壳。登录页 SHALL 镜像 demo:1721-1752 的结构：居中卡片宽 `360px`，自上而下为品牌区（`BrandMark` 自有 mark + 字标，高度与 demo:640 的 logo 一致 `26px`，不使用上游 logo 资产）、标题 `登录 WorkBuddy`（heading level 1）、副标题 `内网统一身份 · 本实例不出网`、`账号`（placeholder `域账号，如 zhangsan`，`autocomplete=username`，mount 时自动聚焦）、`密码`（placeholder `密码`，`autocomplete=current-password`）、错误行（`role="alert"`，位于主按钮之上，展示错误信封的 message 字段文案，文本内容恰为该 message）、主按钮 `登录`（提交中显示 `正在登录` 并禁用）；登录页不渲染无后端契约支撑的控件。当 `GET /api/info` 的 `auth.provider === "dev-stub"` 时 SHALL 在按钮下方渲染 `演示账号` 提示与快捷登录列表（静态常量镜像 dev-stub seed：`zhangsan`/`zhaoliu`/`lisi` 与各自 seed 角色，前端不伪造 display name/部门/角色映射；点击即以该账号与密码 `demo` 提交）。该 info 读取由 LoginForm 在每次 mount 时以匿名 API client 发起一次（relative path、`credentials:"same-origin"`、`cache:"no-store"`；StrictMode 双 mount 下首个请求随卸载 abort），**不占用** Provider 的单槽 operation、不与 login/logout 竞争，LoginForm 卸载时 abort，失败（含 `requestFailed(0)`、malformed）不重试；provider 非 dev-stub、body 不合法或请求失败时 SHALL 不渲染该区域，且不阻塞登录表单。`lib/api` SHALL 统一解析错误信封并在当前有效 operation 或当前认证会话所属、未取消页面请求的 401 响应时进入未登录态；旧会话（包括同账号重新登录之前）或已取消请求的迟到 401 SHALL 不改变当前认证状态。
+未登录时任一受支持 SPA 路由（本阶段为 `/`、`/files`、`/center`、`/settings`）SHALL 在保持当前 browser URL 不变的情况下渲染登录页（域账号+密码），该 URL 即原目标路由；登录失败 SHALL 展示错误信封的 message 字段文案；登录成功 SHALL 在同一 URL 恢复原目标壳。登录页 SHALL 为居中卡片（以 ui-foundation 规定的组件层与 Tailwind 实现），自上而下为品牌区（自有 mark + 字标，不使用上游 logo 资产）、标题 `登录 WorkBuddy`（heading level 1）、副标题 `内网统一身份 · 本实例不出网`、`账号`（placeholder `域账号，如 zhangsan`，`autocomplete=username`，mount 时自动聚焦）、`密码`（placeholder `密码`，`autocomplete=current-password`）、错误行（`role="alert"`，位于主按钮之上，展示错误信封的 message 字段文案，文本内容恰为该 message）、主按钮 `登录`（提交中显示 `正在登录` 并禁用）；登录页不渲染无后端契约支撑的控件。当 `GET /api/info` 的 `auth.provider === "dev-stub"` 时 SHALL 在按钮下方渲染 `演示账号` 提示与快捷登录列表（静态常量镜像 dev-stub seed：`zhangsan`/`zhaoliu`/`lisi` 与各自 seed 角色，前端不伪造 display name/部门/角色映射；点击即以该账号与密码 `demo` 提交）。该 info 读取由 LoginForm 在每次 mount 时以匿名 API client 发起一次（relative path、`credentials:"same-origin"`、`cache:"no-store"`；StrictMode 双 mount 下首个请求随卸载 abort），**不占用** Provider 的单槽 operation、不与 login/logout 竞争，LoginForm 卸载时 abort，失败（含 `requestFailed(0)`、malformed）不重试；provider 非 dev-stub、body 不合法或请求失败时 SHALL 不渲染该区域，且不阻塞登录表单。`lib/api` SHALL 统一解析错误信封并在当前有效 operation 或当前认证会话所属、未取消页面请求的 401 响应时进入未登录态；旧会话（包括同账号重新登录之前）或已取消请求的迟到 401 SHALL 不改变当前认证状态。
 
 #### Scenario: 未登录重定向
 - WHEN 未登录直接访问 `/files`
@@ -89,13 +93,17 @@ SPA SHALL 以 history 路由提供 `/`、`/files`、`/center`、`/settings` 四�
 - THEN 新会话与受保护页面保持不变，旧响应不得清除 Principal 或提交文件 UI
 
 ### Requirement: 设置页
-设置页 SHALL 含且仅含两张设置卡：`外观`与`关于`（页面标题 `设置` 由顶栏承担，无 `通用` 卡），布局镜像 demo:3533-3567：卡内每行为左侧标题 + 说明、右侧控件。外观卡 SHALL 有 `主题` 行（说明 `浅色 / 深色 / 跟随系统 · 即时生效并持久保存`，右侧 `SegmentedControl` 三项 `浅色`/`深色`/`跟随系统`，每项 `role="radio"`，默认 `跟随系统`）与 `当前生效` 行（说明恰为 `浅色|深色 · 持久保存于 localStorage`，并保留可访问文本 `当前生效：浅色|深色`）；所选值 SHALL 以 production key `workbuddy-theme` 持久化为 `light|dark|system`，并把解析结果 `light|dark` 写到 `document.documentElement[data-theme]`。初始 storage 缺失、未知或读取抛错时 SHALL 选择 system；写入抛错不得破坏当前内存选择或向 UI 抛错，刷新后按可读取值（不可读即 system）重新初始化。system 使用唯一 query `(prefers-color-scheme: dark)`，系统偏好 change 时实时更新；固定 light/dark 不改变。`storage` 事件只在 key 为 `workbuddy-theme` 时同步其他 tab，null/unknown 归一化为 system；所有 listener 在 owner 卸载时移除。
+设置页 SHALL 含且仅含两张设置卡：`外观`与`关于`（页面标题 `设置` 由顶栏承担，无 `通用` 卡），以 ui-foundation 规定的组件层与 Tailwind 实现：卡内每行为左侧标题 + 说明、右侧控件。外观卡 SHALL 有 `主题` 行（说明 `浅色 / 深色 / 跟随系统 · 即时生效并持久保存`，右侧为 `role="radiogroup"`、accessible name `主题` 的单选分段控件，三项 `浅色`/`深色`/`跟随系统`，每项 `role="radio"`；再次点击已选项 SHALL 保持其选中、不产生空选择，默认 `跟随系统`）与 `当前生效` 行（说明恰为 `浅色|深色 · 持久保存于 localStorage`，并保留可访问文本 `当前生效：浅色|深色`）；所选值 SHALL 以 production key `workbuddy-theme` 持久化为 `light|dark|system`，并把解析结果 `light|dark` 写到 `document.documentElement[data-theme]`。初始 storage 缺失、未知或读取抛错时 SHALL 选择 system；写入抛错不得破坏当前内存选择或向 UI 抛错，刷新后按可读取值（不可读即 system）重新初始化。system 使用唯一 query `(prefers-color-scheme: dark)`，系统偏好 change 时实时更新；固定 light/dark 不改变。`storage` 事件只在 key 为 `workbuddy-theme` 时同步其他 tab，null/unknown 归一化为 system；所有 listener 在 owner 卸载时移除。
 
 关于卡 SHALL 以品牌 mark 图标 + 名称 + 版本说明一行呈现，在 mount 时经 Provider-owned API operation 请求 `GET /api/info`（relative path、`credentials:"same-origin"`、`cache:"no-store"`），但已有退出请求进行中时 Provider SHALL 返回 null，不启动 info operation、不发起该 GET、不打断退出；About 结束 loading 并显示稳定失败提示，退出结束后的新 mount 恢复普通读取。普通读取 loading 显示 `正在读取服务信息`；只接受恰为 `{name:string,version:string,auth:{provider:string}}`、非空 name、version 符合共享 semver contract、`auth` 恰含非空 `provider` 的 body，成功逐字展示 name 与 `版本 <version>`（provider 不在关于卡展示，仅供登录页快捷登录门控）。非 401 合法错误信封显示其 message；malformed/non-JSON/network 显示 `请求失败，请稍后重试`；current 401 依全局规则清 Principal。About component SHALL 在 effect cleanup 时 abort caller lifecycle signal，Provider SHALL 将其单向链接到自己的 operation controller，故离开设置 route element、更新 Provider operation 或 app unmount 任一情况都 abort 传给 fetch 的 signal 并移除 linkage；迟到响应不得写 UI/auth state。Provider 不感知 router/location。若 info 被 sibling operation supersede 且该 operation 非 401 失败后 authenticated settings 仍 mounted，About SHALL 结束 loading 并显示 `请求失败，请稍后重试`，不得永久停在 loading。不得硬编码 demo 的 `WorkBuddy`/`5.3.11` 作为成功 fallback。
 
 #### Scenario: 主题切换即时生效
 - WHEN 在分段控件选择 `深色`
 - THEN 该 radio 立即选中，根元素 `data-theme` 变为 `dark`，`当前生效：深色` 可见，storage 写入 `workbuddy-theme=dark`；重新 mount 仍为深色
+
+#### Scenario: 再点已选项不改变主题
+- **WHEN** 当前档位为 `深色`，再次点击 `深色`
+- **THEN** `深色` 仍为选中的 radio，`data-theme` 仍为 `dark`，storage 值仍为 `dark`
 
 #### Scenario: 跟随系统
 - WHEN 选择 `跟随系统` 且系统为深色，随后系统改为浅色
@@ -142,17 +150,6 @@ SPA SHALL 以 history 路由提供 `/`、`/files`、`/center`、`/settings` 四�
 #### Scenario: 退出进行中无关闭按钮
 - **WHEN** 折叠侧栏后发起一个挂起的退出请求，状态提示出现
 - **THEN** 不存在 accessible name 为 `关闭提示` 的按钮
-
-### Requirement: 外壳页面底色
-已认证外壳的页面底色 SHALL 与 demo 同构：唯一来源是 `body` 的 `--wb-home-bg-secondary`（demo:195；亮色 `#ffffff`、暗色 `#141414`）。`.app-shell`、`.app-content > main` 以及 files 页的 `.files-layout`、`.files-preview`（demo 对应的 `.app-shell`/`.main-column`/`.fs-layout`/`.fs-preview`，demo:210-213、666、702）SHALL NOT 自涂底色，由 body 透出。侧栏（`--wb-sidebar-bg`）、卡片、输入、弹层、用户气泡等表面的既有 token 不变，因此暗色下主区（`#141414`）与侧栏（`#1f1f1f`）、以及主区与用户气泡（`--wb-bg-hover-light`，暗色 `#1f1f1f`，messages.css:33）和 composer 卡片（`--wb-bg-primary`，暗色 `#1f1f1f`）的明度层次与 demo 一致；登录页与认证加载页保留各自的显式底色。
-
-#### Scenario: 暗色主区与侧栏可区分
-- **WHEN** 暗色主题下打开 `/`（有会话）、`/files`、`/settings`
-- **THEN** `body` 的计算底色为 `rgb(20, 20, 20)`（`#141414`），`.app-content > main` 的计算底色为透明（主区渲染为 body 色），侧栏为 `rgb(31, 31, 31)`，用户气泡与 composer 卡片（均为 `#1f1f1f`）在主区上可辨；亮色下 `body` 计算底色为 `rgb(255, 255, 255)`
-
-#### Scenario: 外壳容器不自涂底色
-- **WHEN** 读取 `web/src/styles.css` 与 `web/src/features/files/files.css`
-- **THEN** `body` 的 background 为 `var(--wb-home-bg-secondary)`，`.app-shell`、`.app-content > main`、`.files-layout`、`.files-preview` 的规则体不含 background 声明
 
 ### Requirement: 首帧前主题
 `web/index.html` SHALL 在 `<head>` 内（构建后位于样式表 `<link>` 之前）含一段经典（非 module）内联脚本：读取 `localStorage["workbuddy-theme"]`，按 `web/src/lib/theme.ts` 的规则解析（`light`/`dark`/`system`，非法值与读取抛错回落为 `system`；`system` 按 `matchMedia("(prefers-color-scheme: dark)")` 解析，`matchMedia` 不可用或抛错时按 `light`），并在首次样式解析前写入 `document.documentElement.dataset.theme`。脚本 SHALL 用 try/catch 包住全部存储与媒体查询访问，任何异常都不得阻断页面加载。挂载后的同步（设置页切换、跨标签页 `storage` 事件、`system` 下系统配色变化）仍由 `ThemeProvider` 负责，行为不变；对同一输入，内联脚本与 `theme.ts` 的解析结果 SHALL 一致，因此挂载时根元素主题不再变化。
