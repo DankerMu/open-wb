@@ -24,6 +24,8 @@ const PIXEL_VALUE = /\d\s?px(?![A-Za-z])/i;
  * 于是 `/settings`、`/files#top`、`/#/chat`、`styles.css`、`*.md` 不算（前一个字符被豁免），`#643`、`0.5` 也不算
  *（后一个字符是数字）；紧跟中文、标点或括号的 `点击.btn`、`「.item」`、`为#app` 照样被拒。
  * 裸写的 `.md`、`.env`、`#fff` 与 `.btn` 无法从字面区分，一律按选择器拒绝，清单文件头要求改用文字描述或写成 `*.md`。
+ * 非 ASCII 主干的文件名（`笔记.md`、`备份.tar.gz`）同样被拒，这是有意的：`笔记.md` 与 `点击.btn` 字面上无法区分，
+ * 把豁免放宽到任意字母会让后者漏过；清单文件头要求改用 ASCII 文件名、`*.md` 或文字描述。
  */
 const CSS_SELECTOR = /(?<![A-Za-z0-9*/])[.#][A-Za-z_-][\w-]*/;
 
@@ -40,7 +42,10 @@ function cellErrors(label: string, column: string, cell: string): string[] {
   const errors: string[] = [];
   if (cell === "") errors.push(`${label}：「${column}」为空`);
   if (PIXEL_VALUE.test(cell)) errors.push(`${label}：「${column}」含像素值`);
-  if (CSS_SELECTOR.test(cell)) errors.push(`${label}：「${column}」含 ./# 前缀的选择器`);
+  if (CSS_SELECTOR.test(cell))
+    errors.push(
+      `${label}：「${column}」含点号或井号紧跟字母的记号（选择器或非 ASCII 主干的文件名；见文件头行格式）`,
+    );
   return errors;
 }
 
@@ -264,7 +269,7 @@ describe("功能验收清单格式（functional-acceptance「行格式可判定�
     }
   });
 
-  it("自证：操作/期望里 ./# 前缀的选择器被拒", () => {
+  it("自证：操作/期望里 ./# 前缀的选择器与非 ASCII 主干的文件名被拒", () => {
     for (const cell of [
       ".ui-btn 可点击",
       "点击 .sidebar-item",
@@ -277,12 +282,14 @@ describe("功能验收清单格式（functional-acceptance「行格式可判定�
       "点击「.sidebar-item」",
       "容器为#app",
       "焦点落在<.menu>",
+      "上传 笔记.md",
+      "归档为 备份.tar.gz",
     ]) {
       expect(shellErrors(row("SH-01", cell, "看到乙")), cell).toEqual([
-        "第 12 行：「操作」含 ./# 前缀的选择器",
+        "第 12 行：「操作」含点号或井号紧跟字母的记号（选择器或非 ASCII 主干的文件名；见文件头行格式）",
       ]);
       expect(shellErrors(row("SH-01", "点击甲", cell)), cell).toEqual([
-        "第 12 行：「期望」含 ./# 前缀的选择器",
+        "第 12 行：「期望」含点号或井号紧跟字母的记号（选择器或非 ASCII 主干的文件名；见文件头行格式）",
       ]);
     }
   });
