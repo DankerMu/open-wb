@@ -83,6 +83,8 @@ export function useChatSession() {
   const historyControllerRef = useRef<AbortController | null>(null);
   const mutationControllerRef = useRef<AbortController | null>(null);
   const createControllerRef = useRef<AbortController | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const focusOnWelcomeRef = useRef(false);
 
   clientRef.current = client;
   requestedSessionRef.current = requestedSessionId;
@@ -381,8 +383,7 @@ export function useChatSession() {
 
   useEffect(() => {
     const pending = pendingCreateSendRef.current;
-    const keepOwnedPrompt =
-      ownsCreateSend(pending, client, requestedSessionId) && pending.prompt.length > 0;
+    const keepOwnedPrompt = ownsCreateSend(pending, client, requestedSessionId);
     const keepOwnedCreate =
       pending !== null &&
       pending.client === client &&
@@ -410,11 +411,7 @@ export function useChatSession() {
     }
     loadHistory(requestedSessionId, client);
     return () => {
-      const currentPending = pendingCreateSendRef.current;
-      if (
-        ownsCreateSend(currentPending, client, requestedSessionId) &&
-        currentPending.prompt.length > 0
-      ) {
+      if (ownsCreateSend(pendingCreateSendRef.current, client, requestedSessionId)) {
         return;
       }
       abortHistory();
@@ -432,18 +429,15 @@ export function useChatSession() {
 
   useEffect(() => {
     const pending = pendingCreateSendRef.current;
-    if (
-      !ownsCreateSend(pending, client, requestedSessionId) ||
-      pending.prompt.length === 0 ||
-      mutationControllerRef.current !== null
-    ) {
+    if (!ownsCreateSend(pending, client, requestedSessionId) || mutationControllerRef.current) {
       return;
     }
     dispatchPrompt(pending.sessionId, pending.prompt, pending.generation, pending.client);
   }, [client, dispatchPrompt, requestedSessionId]);
 
+  // 会话只在欢迎态首次发送时创建：恰一次创建，选中返回的 id 后恰一次 prompt。
   const createAndSelect = useCallback(
-    (prompt?: string) => {
+    (prompt: string) => {
       if (createControllerRef.current || mutationControllerRef.current) {
         return;
       }
@@ -452,24 +446,14 @@ export function useChatSession() {
       createSendGenerationRef.current += 1;
       const generation = createSendGenerationRef.current;
       const originSessionId = requestedSessionId;
-      if (prompt !== undefined) {
-        pendingCreateSendRef.current = {
-          client,
-          generation,
-          originSessionId,
-          prompt,
-          sessionId: null,
-        };
-        setSubmitting(true);
-      } else {
-        pendingCreateSendRef.current = {
-          client,
-          generation,
-          originSessionId,
-          prompt: "",
-          sessionId: null,
-        };
-      }
+      pendingCreateSendRef.current = {
+        client,
+        generation,
+        originSessionId,
+        prompt,
+        sessionId: null,
+      };
+      setSubmitting(true);
       setCreating(true);
       setMutationOwner({
         client,
@@ -637,11 +621,39 @@ export function useChatSession() {
   const { composerDisabled, sendDisabled } = composerLocks(generating, forkLocked, draft);
   const slashWorkspaceId = composerWorkspaceId(requestedSessionId, selected, welcome.workspace);
 
+  // `新建会话`：replace 导航回欢迎态，不发请求、不动草稿。`focusComposer` 为假（侧栏是覆盖层）时
+  // 焦点交给外壳；已在欢迎态时只聚焦。离开会话后输入框解锁的那次提交里才聚焦（锁定时 focus 无效）。
+  const showWelcome = useCallback(
+    (focusComposer: boolean) => {
+      if (!requestedSessionId) {
+        if (focusComposer) composerRef.current?.focus();
+        return;
+      }
+      // 首次发送的「创建—发送」交接在途（origin 为欢迎态、prompt 尚未落定）：不导航、不中止，
+      // 否则会留下一个没有消息的会话。
+      if (pendingCreateSendRef.current?.originSessionId === null && mutationControllerRef.current) {
+        return;
+      }
+      focusOnWelcomeRef.current = focusComposer;
+      navigate(sessionNavigation(location.pathname, location.search, location.hash, null), {
+        replace: true,
+      });
+    },
+    [location.hash, location.pathname, location.search, navigate, requestedSessionId],
+  );
+  useEffect(() => {
+    if (requestedSessionId || composerDisabled || !focusOnWelcomeRef.current) {
+      return;
+    }
+    focusOnWelcomeRef.current = false;
+    composerRef.current?.focus();
+  }, [composerDisabled, requestedSessionId]);
+
   return {
     answerApproval,
     client,
     composerDisabled,
-    createAndSelect,
+    composerRef,
     draft,
     forkTurn,
     generating,
@@ -661,6 +673,7 @@ export function useChatSession() {
     sessions: listForClient?.sessions ?? null,
     setDraft,
     setSessionFilter,
+    showWelcome,
     slashWorkspaceId,
     stopTurn,
     streamError: ownedStreamError,

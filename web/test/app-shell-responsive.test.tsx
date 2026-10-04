@@ -313,15 +313,13 @@ function listSession(id: string, title: string, updatedAt: number) {
   return { ...chatSnapshot().session, id, status: "done" as const, title, updatedAt };
 }
 
-/** 两个会话；选中会话的历史挂起（只验证导航与覆盖层），新建返回 SESSION_B 并被选中。 */
+/** 两个会话；选中会话的历史挂起（只验证导航与覆盖层）。 */
 function listRoutes(): Routes {
   return {
-    "/api/sessions": (_path, options) =>
-      options?.method === "POST"
-        ? jsonResponse(listSession(SESSION_B, "新建的", 3), 201)
-        : jsonResponse({
-            sessions: [listSession(SESSION, "周报", 2), listSession(SESSION_B, "复盘", 1)],
-          }),
+    "/api/sessions": () =>
+      jsonResponse({
+        sessions: [listSession(SESSION, "周报", 2), listSession(SESSION_B, "复盘", 1)],
+      }),
     [`/api/sessions/${SESSION}/messages`]: () => deferredResponse().promise,
     [`/api/sessions/${SESSION_B}/messages`]: () => deferredResponse().promise,
   };
@@ -332,13 +330,15 @@ function follows(first: Element, second: Element) {
 }
 
 describe("覆盖层会话列表区 (R11/R12)", () => {
-  it("R11 列表在主导航之后；选择会话关闭覆盖层、写 ?session=、归还焦点；新建会话同样关闭", async () => {
+  it("R11 列表在主导航之后；选择会话关闭覆盖层、写 ?session=、归还焦点；新建会话同样关闭并回欢迎态，零请求、草稿不动", async () => {
     installViewport(true);
     const setItem = vi.spyOn(Storage.prototype, "setItem");
     const { fetchMock, view } = mountShell("/", listRoutes());
     await screen.findByRole("heading", { level: 1, name: HERO });
     expect(screen.queryByRole("navigation", { name: "会话列表", hidden: true })).toBeNull();
     expect(screen.queryByRole("button", { name: "新建会话", hidden: true })).toBeNull();
+    const draft = () => screen.getByRole<HTMLTextAreaElement>("textbox", { name: "给助手发消息" });
+    fireEvent.change(draft(), { target: { value: "半句话" } });
 
     const first = await openNav();
     const mainNav = within(first.dialog).getByRole("navigation", { name: "主导航" });
@@ -355,11 +355,17 @@ describe("覆盖层会话列表区 (R11/R12)", () => {
     const second = await openNav();
     const current = await within(second.dialog).findByRole("button", { name: "复盘" });
     expect(current.getAttribute("aria-current")).toBe("true");
+    await yieldMacrotask();
+    const requests = fetchMock.mock.calls.length;
     fireEvent.click(within(second.dialog).getByRole("button", { name: "新建会话" }));
     await expectNavClosed(view.container, second.button);
-    await waitFor(() =>
-      expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true),
-    );
+    await act(yieldMacrotask);
+    expect(new URL(window.location.href).searchParams.get("session")).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: HERO })).toBeTruthy();
+    expect(draft().value).toBe("半句话");
+    expect(document.activeElement).toBe(second.button);
+    expect(fetchMock.mock.calls.length).toBe(requests);
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
     expect(setItem).not.toHaveBeenCalled();
     expect(window.localStorage.getItem(SIDEBAR_KEY)).toBeNull();
   });

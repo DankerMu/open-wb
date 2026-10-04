@@ -9,10 +9,10 @@ import {
 } from "@playwright/test";
 import { holdRoute } from "./route-hold.js";
 import { allowFirstApproval, expectAllowedBar, generatingStatus } from "./ui-walk-approval.js";
+import { createSessionFromSidebar } from "./ui-walk-create-session.js";
 import { armGate, controlOrigin, deleteGate, gatePhase, releaseGate } from "./ui-walk-gate.js";
 import {
   clickRoute,
-  createSessionFromSidebar,
   DEV_ACCOUNT,
   expectAuthenticatedRoute,
   expectDesktopLayout,
@@ -312,21 +312,13 @@ async function walkHeldDialogue(page: Page, project: WalkProject): Promise<void>
   const origin = controlOrigin();
   try {
     await armGate(origin, gateId);
-    await createSessionFromSidebar(page, project);
+    const accepted = await createSessionFromSidebar(page, project, prompt);
     await expect.poll(() => sessionIdFromUrl(page.url())).toMatch(SESSION_ID);
     const crumb = page.getByRole("banner").getByRole("heading", { level: 1 });
     await expect(crumb).toHaveAccessibleName(/^我的工作 \/ /);
     const sessionUrl = page.url();
     const sessionId = sessionIdFromUrl(sessionUrl);
-    await page.getByLabel("给助手发消息").fill(prompt);
-    const promptAccepted = page.waitForResponse(
-      (response) =>
-        isSessionPath(response.url(), sessionId, "prompt") &&
-        response.request().method() === "POST" &&
-        response.status() === 202,
-    );
-    await page.getByLabel("给助手发消息").press("Enter");
-    const accepted = await promptAccepted;
+    expect(new URL(accepted.url()).pathname).toBe(`/api/sessions/${sessionId}/prompt`);
     const promptIds = parsePromptIds(await accepted.json());
     await allowFirstApproval(page, origin, gateId);
     await expect.poll(() => gatePhase(origin, gateId)).toBe("held");

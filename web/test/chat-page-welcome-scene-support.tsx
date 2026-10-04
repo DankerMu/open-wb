@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect } from "vitest";
-import { sessionPromptPath } from "./chat-page-lifecycle-support.js";
+import { clickSend, sessionPromptPath, typeDraft } from "./chat-page-lifecycle-support.js";
 import { composer } from "./chat-page-ownership-support.js";
 import {
   envelope,
@@ -64,7 +64,7 @@ export function createRejected() {
 type WelcomeFixture = {
   /** 取代缺省的 `POST /api/sessions` 处理（挂起、拒绝）。 */
   create?: () => Promise<Response> | Response;
-  /** 挂载时已在列表里的会话（排在新建会话之后），各带一份空历史快照。 */
+  /** 挂载时已在列表里的会话（排在首次发送建出的会话之后），各带一份空历史快照。 */
   existing?: readonly SessionView[];
   /** `/api/workspaces` 路由；缺省恒返回 项目A 与 客服。 */
   workspaces?: FetchRoutes[string];
@@ -263,17 +263,22 @@ export async function pickOption(option: string) {
   await choose(dialog, option);
 }
 
+/** 经 URL（replace）回到欢迎态：`新建会话` 在「创建—发送」交接未完成时不导航。 */
+export async function leaveForWelcome({ router }: ReturnType<typeof renderChatPage>) {
+  await act(() => router.navigate("/", { replace: true }));
+  await waitFor(() => expect(currentLocation()).toBe("/"));
+}
+
 /**
- * 侧栏 `新建会话` 成功后页面重读会话列表与工作空间列表（第 `read` 次工作空间读取），再经路由回到
- * 欢迎态。返回时该次读取的响应可能仍挂起。
+ * 欢迎态首次发送建会话成功后页面重读会话列表与工作空间列表（第 `read` 次工作空间读取），再回到欢迎态。
+ * 夹具里新会话的 prompt 挂起，「创建—发送」交接未完成时 `新建会话` 不导航，所以经 URL 回去
+ * （它不发请求）。返回时该次读取的响应可能仍挂起。
  */
-export async function rereadByCreate(
-  { fetchMock, router }: ReturnType<typeof renderChatPage>,
-  read: number,
-) {
-  fireEvent.click(screen.getByRole("button", { name: "新建会话" }));
+export async function rereadBySend(mounted: ReturnType<typeof renderChatPage>, read: number) {
+  typeDraft("你好");
+  clickSend();
   await waitFor(() => expect(currentLocation()).toMatch(/^\/\?session=[def]{32}$/));
-  await workspacesRead(fetchMock, read);
-  await act(() => router.navigate("/"));
+  await workspacesRead(mounted.fetchMock, read);
+  await leaveForWelcome(mounted);
   await screen.findByRole("heading", { level: 1, name: HERO });
 }

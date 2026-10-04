@@ -41,6 +41,7 @@ import {
   footerButton,
   HERO,
   LOADING,
+  leaveForWelcome,
   mountWelcome,
   NO_MATCH,
   OFFICE_LABELS,
@@ -57,7 +58,7 @@ import {
   quickLabels,
   quickRow,
   ROOT_MARK,
-  rereadByCreate,
+  rereadBySend,
   SEARCH,
   SUPPORT,
   SUPPORT_OPTION,
@@ -206,9 +207,18 @@ describe("场景胶囊 (W1–W4)", () => {
     expect(createRequests(fetchMock)).toEqual([createOf('{"scene":"design"}')]);
   });
 
-  it("W4 默认场景下点侧栏 新建会话：body 为 office 的 JSON", async () => {
+  it("W4 默认场景下点侧栏 新建会话 不发创建请求、仍在欢迎态；随后发送的 body 为 office 的 JSON", async () => {
     const { fetchMock } = await mountWelcome();
+    await workspacesRead(fetchMock, 1);
+    const requests = requestCount(fetchMock);
     fireEvent.click(screen.getByRole("button", { name: "新建会话" }));
+    await act(settle);
+    expect(requestCount(fetchMock)).toBe(requests);
+    expect(createRequests(fetchMock)).toEqual([]);
+    expect(currentLocation()).toBe("/");
+    expect(screen.getByRole("heading", { level: 1, name: HERO })).toBeTruthy();
+
+    send("你好");
     await waitFor(() => expect(currentLocation()).toBe(`/?session=${CREATED_IDS[0]}`));
     expect(createRequests(fetchMock)).toEqual([createOf(OFFICE_BODY)]);
   });
@@ -330,7 +340,7 @@ describe("composer footer 空间选择 (W5–W9)", () => {
     expect(options(failed)).toEqual([[UNSELECTED, "true"]]);
     await choose(failed, UNSELECTED);
 
-    await rereadByCreate(mounted, 2);
+    await rereadBySend(mounted, 2);
     const rereading = await openPicker();
     expect(within(rereading).getByText(LOADING, { exact: true })).toBeTruthy();
     expect(within(rereading).queryByRole("alert")).toBeNull();
@@ -368,11 +378,17 @@ describe("composer footer 空间选择 (W5–W9)", () => {
     expect(createRequests(fetchMock)).toEqual([createOf(OFFICE_BODY)]);
   });
 
-  it("W9 两条路径一致：选 代码开发 与 项目A 后点侧栏 新建会话，body 带同样的 scene 与 workspaceId", async () => {
+  it("W9 新建会话 不改变选择：选 代码开发 与 项目A 后点侧栏 新建会话（零创建请求），再发送的 body 带同样的 scene 与 workspaceId", async () => {
     const { fetchMock } = await mountWelcome();
     selectScene("代码开发");
     await pickOption(PROJECT_A_OPTION);
     fireEvent.click(screen.getByRole("button", { name: "新建会话" }));
+    await act(settle);
+    expect(createRequests(fetchMock)).toEqual([]);
+    expect(pressedScenes()).toEqual(["false", "true", "false"]);
+    expect(footerButton().textContent).toBe(PROJECT_A_BUTTON);
+
+    send("你好");
     await waitFor(() => expect(currentLocation()).toBe(`/?session=${CREATED_IDS[0]}`));
     expect(createRequests(fetchMock)).toEqual([
       createOf(`{"scene":"code","workspaceId":"${PROJECT_A.id}"}`),
@@ -478,7 +494,7 @@ describe("锁定、会话页与状态生命周期 (W10–W14)", () => {
       ],
     });
     await pickOption(PROJECT_A_OPTION);
-    await rereadByCreate(mounted, 2);
+    await rereadBySend(mounted, 2);
     expect(footerButton().textContent).toBe(UNSELECTED_BUTTON);
 
     send("你好");
@@ -498,10 +514,10 @@ describe("锁定、会话页与状态生命周期 (W10–W14)", () => {
       ],
     });
     await pickOption(PROJECT_A_OPTION);
-    await rereadByCreate(mounted, 2);
+    await rereadBySend(mounted, 2);
     expect(footerButton().textContent).toBe(UNSELECTED_BUTTON);
 
-    await rereadByCreate(mounted, 3);
+    await rereadBySend(mounted, 3);
     expect(createRequests(mounted.fetchMock)).toEqual([
       createOf(`{"scene":"office","workspaceId":"${PROJECT_A.id}"}`),
       createOf(OFFICE_BODY),
@@ -569,7 +585,7 @@ describe("评审后补充 (X1、X3、X5、X6)", () => {
 
   /**
    * 一个既有会话 + 欢迎态夹具：选 代码开发 与 项目A，从侧栏选中既有会话（胶囊与 footer 卸载），
-   * 再在会话页点侧栏 新建会话 并等它被选中。
+   * 再在会话页点侧栏 新建会话 回到欢迎态（零创建请求），发送并等新会话被选中。
    */
   async function createFromSessionPage(workspaces?: Response[]) {
     const mounted = await mountWelcome({
@@ -582,25 +598,31 @@ describe("评审后补充 (X1、X3、X5、X6)", () => {
     await openExistingSession(nav, "既有会话", A);
 
     fireEvent.click(screen.getByRole("button", { name: "新建会话" }));
+    await waitFor(() => expect(currentLocation()).toBe("/"));
+    expect(createRequests(mounted.fetchMock)).toEqual([]);
+    send("你好");
     await waitFor(() => expect(currentLocation()).toBe(`/?session=${CREATED_IDS[0]}`));
     return mounted;
   }
 
-  it("X1 会话页创建：选 代码开发 与 项目A 后选中既有会话，再点侧栏 新建会话，body 带同样的 scene 与 workspaceId", async () => {
+  it("X1 从会话页回欢迎态再创建：选 代码开发 与 项目A 后选中既有会话，点侧栏 新建会话 后发送，body 带同样的 scene 与 workspaceId", async () => {
     const { fetchMock } = await createFromSessionPage();
     expect(createRequests(fetchMock)).toEqual([CODE_WITH_PROJECT_A]);
   });
 
-  it("X1 变体：创建后的工作空间重读失败，在会话页再点 新建会话，body 只剩 scene", async () => {
-    const { fetchMock } = await createFromSessionPage([
+  it("X1 变体：创建后的工作空间重读失败，从会话页回欢迎态后发送，body 只剩 scene", async () => {
+    const mounted = await createFromSessionPage([
       workspaceList(PROJECT_A, SUPPORT),
       unavailable(),
       workspaceList(PROJECT_A, SUPPORT),
     ]);
+    const { fetchMock } = mounted;
     await workspacesRead(fetchMock, 2);
     expect(sceneGroup()).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "新建会话" }));
+    // 夹具里新会话的 prompt 挂起：交接未完成时 `新建会话` 不导航，经 URL 回欢迎态。
+    await leaveForWelcome(mounted);
+    send("你好");
     await waitFor(() => expect(currentLocation()).toBe(`/?session=${CREATED_IDS[1]}`));
     expect(createRequests(fetchMock)).toEqual([CODE_WITH_PROJECT_A, createOf('{"scene":"code"}')]);
   });

@@ -1,4 +1,11 @@
-import { type FormEvent, type KeyboardEvent, type ReactNode, useId, useState } from "react";
+import {
+  type FormEvent,
+  type KeyboardEvent,
+  type ReactNode,
+  type Ref,
+  useId,
+  useState,
+} from "react";
 import { Button, Icon, useToast } from "../../ui/index.js";
 
 type StopTurn = () => Promise<"stopping" | null>;
@@ -9,6 +16,8 @@ type ComposerProps = {
   /** 卡片内工具栏之后的末尾节点（欢迎态的空间选择）；不传时卡片以工具栏结尾。 */
   footer?: ReactNode;
   generating: boolean;
+  /** 输入框元素的 ref（会话页经它聚焦输入框）。 */
+  inputRef?: Ref<HTMLTextAreaElement>;
   /** 先于既有 Enter 规则调用；返回 true 表示按键已被处理，不再提交。 */
   interceptKeyDown?(event: KeyboardEvent<HTMLTextAreaElement>): boolean;
   onChangeDraft(value: string): void;
@@ -28,6 +37,7 @@ export function Composer({
   draft,
   footer,
   generating,
+  inputRef,
   interceptKeyDown,
   onChangeDraft,
   onStop,
@@ -71,6 +81,7 @@ export function Composer({
             }
           }}
           placeholder={placeholder}
+          ref={inputRef}
           rows={2}
           value={draft}
         />

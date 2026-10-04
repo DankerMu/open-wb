@@ -334,8 +334,13 @@ describe("chat page isolation and errors", () => {
         { error: { code: "unauthorized", message: "登录已失效" } },
         401,
       ),
+      [`/api/sessions/${SESSION_ID}/stop`]: jsonResponse(
+        { error: { code: "unauthorized", message: "登录已失效" } },
+        401,
+      ),
     });
-    fireEvent.click(screen.getByRole("button", { name: "新建会话" }));
+    // `新建会话` 不再发请求：改由仍在页面上的 停止 触发一次带 401 的请求。
+    fireEvent.click(screen.getByRole("button", { name: "停止" }));
     expect(await screen.findByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeTruthy();
     await waitFor(() => {
       expect(source.closeCount).toBe(1);
