@@ -256,7 +256,7 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 **S1f 前端重建（assistant-ui + shadcn/Tailwind）**
 - Outcome：按 ADR-0013 重建已交付的全部页面（登录、外壳、`/`、`/files`、`/settings`）。会话面经 `useExternalStoreRuntime` 接现有
   REST + SSE（消息/思考/步骤/审批/停止/重新生成/fork/会话列表操作），输入框带能力栏中后端已有的两项（工作空间选择、技能/命令选择）；
-  文件变更卡、产物卡与产物面板、对话内搜索、场景、置顶与分组、项目配置入口在新组件体系内重做。**不新增后端能力**（审批与步骤的关联键除外，见 grill 种子）。
+  文件变更卡、产物卡与产物面板、对话内搜索、场景、置顶与分组、项目配置入口在新组件体系内重做。**不新增后端能力**（审批与步骤的关联键是否需要，见 grill 种子）。
 - 覆盖：F-UI-7、F-UI-8、F-CHAT-11a。
 - 必读增量：ADR-0013（含试验结论与未覆盖项）；assistant-ui 文档 ExternalStoreRuntime / Thread / ThreadList / Attachment。
 - Verify：`make check` + `make ui-walk`（视口矩阵无横向溢出、无 console error）+ 功能验收清单签收；真实端点走一轮含审批的回合；
@@ -264,7 +264,7 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 - Depends on：S1c。
 - Review attention：decision-dense（组件分层、token 映射、SSE 接入方式一次定调）。
 - grill 种子：宽度已触及 Risks「切片过宽」，预期切为多个 change——地基（Tailwind/shadcn/主题/外壳/登录/设置）、会话面、文件页、
-  验收 harness 与规格改写；审批与步骤的关联放服务端契约还是界面侧；空会话的创建时机（首次发送时创建，解决 #826 与空间选择）；
+  验收 harness 与规格改写；挂起审批固定在输入框上方（已定，ADR-0013 第 4 条），已结算审批是否在消息内标注（需要审批与步骤的关联键）；空会话的创建时机（首次发送时创建，解决 #826 与空间选择）；
   #824/#825 的取舍；按 demo 写死 DOM 的规格条款的改写范围；包体积与代码分割。
 
 **S1g 输入框能力后端（权限档 + 工作空间附件）**
