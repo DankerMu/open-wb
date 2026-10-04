@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { Outlet } from "react-router";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { SidebarSlotProvider } from "@/lib/sidebar-slot";
@@ -13,12 +13,21 @@ import { Topbar } from "./topbar";
  * 覆盖层的焦点归还：没有 Trigger 的 Radix Dialog 关闭后焦点落到 body，这里在打开时记下打开者
  * （FocusScope 先派发事件、再移动焦点，此刻活动元素必是打开者），关闭时还给它。
  * `preventScroll`：归还不滚动任何容器。
+ *
+ * 初始焦点：拷入的 Sheet 把 `关闭` 按钮渲染在内容末尾，FocusScope 默认聚焦第一个可聚焦元素
+ * （会话列表区的按钮或 `用户菜单`，随路由而变）；这里拦下默认行为，固定落在 `关闭` 上。
  */
-function useOpenerFocus() {
+function useOpenerFocus(content: RefObject<HTMLElement | null>) {
   const opener = useRef<HTMLElement | null>(null);
   return {
-    onOpenAutoFocus() {
+    onOpenAutoFocus(event: Event) {
       opener.current = document.activeElement as HTMLElement | null;
+      // 按 Sheet 自己的标记找关闭控件，不按文本：覆盖层里还有会话列表等用户可控的文本。
+      const close = content.current?.querySelector<HTMLElement>('[data-slot="sheet-close"]');
+      // 找不到就不拦，交还 FocusScope 的默认聚焦，焦点不至于留在覆盖层外。
+      if (!close) return;
+      event.preventDefault();
+      close.focus({ preventScroll: true });
     },
     onCloseAutoFocus(event: Event) {
       event.preventDefault();
@@ -38,8 +47,8 @@ function NavOverlay({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const focus = useOpenerFocus();
   const fallback = useEscapeFallback({ canClose: true, onOpenChange });
+  const focus = useOpenerFocus(fallback.ref);
   const close = useCallback(() => onOpenChange(false), [onOpenChange]);
   return (
     <Sheet onOpenChange={onOpenChange} open={open}>

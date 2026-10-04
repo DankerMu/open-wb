@@ -38,14 +38,96 @@ export function walkProject(name: string): WalkProject {
 // 仍在 authenticated 阶段：reload 只产生 200 的 /api/auth/me，oracle 放行。
 export async function walkSidebarCollapse(page: Page): Promise<void> {
   const sidebar = page.getByRole("complementary", SIDEBAR);
+  const width = async () => (await sidebar.boundingBox())?.width ?? Number.NaN;
+  const expanded = await width();
   await sidebar.getByRole("button", { name: "折叠侧栏" }).click();
   await expect(sidebar).toHaveAttribute("data-collapsed", "true");
   await page.reload();
   await expectAuthenticatedRoute(page, "desktop-light", "/settings", "设置", "设置");
   await expect(sidebar).toHaveAttribute("data-collapsed", "true");
+  // 相对几何：reload 后折叠态直接渲染（无宽度过渡），此时的宽度须小于展开宽度；展开后重新变宽。
+  const collapsed = await width();
+  expect(collapsed, "collapsed sidebar is narrower than expanded").toBeLessThan(expanded);
   await sidebar.getByRole("button", { name: "展开侧栏" }).click();
   await expect(sidebar).toHaveAttribute("data-collapsed", "false");
+  await expect.poll(width, "expanded sidebar is wider than collapsed").toBeGreaterThan(collapsed);
   await expectPrincipalFooter(page, "desktop-light");
+}
+
+const LOGOUT_ROUTE = "**/api/auth/logout";
+// web/src/lib/api.ts 的 REQUEST_FAILED_MESSAGE。
+const LOGOUT_FAILURE = "请求失败，请稍后重试";
+
+// 折叠浮出的退出失败提示（spa-shell「退出失败提示可关闭」）：折叠态侧栏 overflow:hidden 且只有图标列宽，
+// 提示须脱离裁剪浮到侧栏右侧、可点。POST /api/auth/logout 由 route 应答、不到服务器，会话不受影响；
+// 结束前 unroute 并展开侧栏，后续旅程（含最后的真实退出）照常。
+// 失败用「2xx 但不是 204」触发（客户端按请求失败处理）：4xx/5xx 或 abort 会让 Chromium 记一条
+// console error，而 oracle 只放行 /api/auth/me 的 401。403 + 错误信封的文案路径由 jsdom 用例覆盖。
+export async function walkCollapsedLogoutFailure(page: Page): Promise<void> {
+  const sidebar = page.getByRole("complementary", SIDEBAR);
+  const trigger = sidebar.getByRole("button", { name: "用户菜单" });
+  let answered = 0;
+  await page.route(LOGOUT_ROUTE, (route) => {
+    answered += 1;
+    return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+  });
+  try {
+    await sidebar.getByRole("button", { name: "折叠侧栏" }).click();
+    await expect(sidebar).toHaveAttribute("data-collapsed", "true");
+    await trigger.click();
+    await page.getByRole("menuitem", { name: "退出登录" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "退出" }).click();
+
+    const alert = sidebar.getByRole("alert");
+    await expect(alert).toBeVisible();
+    await expect(alert).toHaveText(LOGOUT_FAILURE);
+    await expect(page.getByRole("alertdialog")).toHaveCount(0);
+    expect(answered, "logout answered by the route exactly once").toBe(1);
+    const dismiss = alert.getByRole("button", { name: "关闭提示" });
+    await expectFloatsOutOfSidebar(sidebar, alert, dismiss);
+
+    await dismiss.click();
+    await expect(alert).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await expect(sidebar).toHaveAttribute("data-collapsed", "true");
+    expect(answered, "dismissing sends no logout request").toBe(1);
+  } finally {
+    await page.unroute(LOGOUT_ROUTE);
+  }
+  await sidebar.getByRole("button", { name: "展开侧栏" }).click();
+  await expect(sidebar).toHaveAttribute("data-collapsed", "false");
+  // 仍是已登录外壳：路由、标题、导航与用户区都在。
+  await expectAuthenticatedRoute(page, "desktop-light", "/settings", "设置", "设置");
+  await expectPrincipalFooter(page, "desktop-light");
+}
+
+// 布局盒不反映祖先裁剪（被 overflow:hidden 裁掉的提示，其盒同样越过侧栏右缘），所以除右缘比较外，
+// 再用命中测试证明越出侧栏的部分确实画了出来：`关闭提示` 中心点整个在侧栏之外，且命中的就是它。
+async function expectFloatsOutOfSidebar(
+  sidebar: Locator,
+  alert: Locator,
+  dismiss: Locator,
+): Promise<void> {
+  // 折叠的宽度过渡结束后侧栏右缘才稳定，轮询到条件成立。
+  await expect
+    .poll(async () => {
+      const aside = await sidebar.boundingBox();
+      const note = await alert.boundingBox();
+      const button = await dismiss.boundingBox();
+      if (!aside || !note || !button) return "not laid out";
+      const asideRight = aside.x + aside.width;
+      if (note.x + note.width <= asideRight) return "alert right edge within sidebar";
+      return button.x >= asideRight ? "floats" : "dismiss button overlaps sidebar";
+    }, "alert floats to the right of the collapsed sidebar")
+    .toBe("floats");
+  const hit = await dismiss.evaluate((button) => {
+    const box = button.getBoundingClientRect();
+    const top = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+    return top !== null && button.contains(top);
+  });
+  expect(hit, "关闭提示 is the hit target at its own centre (not clipped by the sidebar)").toBe(
+    true,
+  );
 }
 
 export async function expectDesktopLayout(page: Page): Promise<void> {
