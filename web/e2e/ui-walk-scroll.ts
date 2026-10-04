@@ -118,7 +118,8 @@ export async function walkScrollFollow(
         await hold.release();
       }
       await expectCompleted();
-      if (project === "desktop-light") await expect(page.locator("header.topbar h1")).toBeVisible();
+      if (project === "desktop-light")
+        await expect(page.getByRole("banner").getByRole("heading", { level: 1 })).toBeVisible();
       await transcript.evaluate(
         () =>
           new Promise<void>((resolve) => {

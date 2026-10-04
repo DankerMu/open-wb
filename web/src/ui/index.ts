@@ -6,6 +6,7 @@ export { ConfirmDialog } from "./confirm-dialog.js";
 export { Dialog } from "./dialog.js";
 export { Drawer } from "./drawer.js";
 export { EmptyState } from "./empty-state.js";
+export { useEscapeFallback } from "./escape-fallback.js";
 export { Icon, type IconName } from "./icon.js";
 export { Input } from "./input.js";
 export { Menu, type MenuItem } from "./menu.js";

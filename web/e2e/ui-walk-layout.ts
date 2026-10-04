@@ -38,14 +38,96 @@ export function walkProject(name: string): WalkProject {
 // 仍在 authenticated 阶段：reload 只产生 200 的 /api/auth/me，oracle 放行。
 export async function walkSidebarCollapse(page: Page): Promise<void> {
   const sidebar = page.getByRole("complementary", SIDEBAR);
+  const width = async () => (await sidebar.boundingBox())?.width ?? Number.NaN;
+  const expanded = await width();
   await sidebar.getByRole("button", { name: "折叠侧栏" }).click();
-  await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(48);
+  await expect(sidebar).toHaveAttribute("data-collapsed", "true");
   await page.reload();
   await expectAuthenticatedRoute(page, "desktop-light", "/settings", "设置", "设置");
-  await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(48);
+  await expect(sidebar).toHaveAttribute("data-collapsed", "true");
+  // 相对几何：reload 后折叠态直接渲染（无宽度过渡），此时的宽度须小于展开宽度；展开后重新变宽。
+  const collapsed = await width();
+  expect(collapsed, "collapsed sidebar is narrower than expanded").toBeLessThan(expanded);
   await sidebar.getByRole("button", { name: "展开侧栏" }).click();
-  await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(288);
+  await expect(sidebar).toHaveAttribute("data-collapsed", "false");
+  await expect.poll(width, "expanded sidebar is wider than collapsed").toBeGreaterThan(collapsed);
   await expectPrincipalFooter(page, "desktop-light");
+}
+
+const LOGOUT_ROUTE = "**/api/auth/logout";
+// web/src/lib/api.ts 的 REQUEST_FAILED_MESSAGE。
+const LOGOUT_FAILURE = "请求失败，请稍后重试";
+
+// 折叠浮出的退出失败提示（spa-shell「退出失败提示可关闭」）：折叠态侧栏 overflow:hidden 且只有图标列宽，
+// 提示须脱离裁剪浮到侧栏右侧、可点。POST /api/auth/logout 由 route 应答、不到服务器，会话不受影响；
+// 结束前 unroute 并展开侧栏，后续旅程（含最后的真实退出）照常。
+// 失败用「2xx 但不是 204」触发（客户端按请求失败处理）：4xx/5xx 或 abort 会让 Chromium 记一条
+// console error，而 oracle 只放行 /api/auth/me 的 401。403 + 错误信封的文案路径由 jsdom 用例覆盖。
+export async function walkCollapsedLogoutFailure(page: Page): Promise<void> {
+  const sidebar = page.getByRole("complementary", SIDEBAR);
+  const trigger = sidebar.getByRole("button", { name: "用户菜单" });
+  let answered = 0;
+  await page.route(LOGOUT_ROUTE, (route) => {
+    answered += 1;
+    return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+  });
+  try {
+    await sidebar.getByRole("button", { name: "折叠侧栏" }).click();
+    await expect(sidebar).toHaveAttribute("data-collapsed", "true");
+    await trigger.click();
+    await page.getByRole("menuitem", { name: "退出登录" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "退出" }).click();
+
+    const alert = sidebar.getByRole("alert");
+    await expect(alert).toBeVisible();
+    await expect(alert).toHaveText(LOGOUT_FAILURE);
+    await expect(page.getByRole("alertdialog")).toHaveCount(0);
+    expect(answered, "logout answered by the route exactly once").toBe(1);
+    const dismiss = alert.getByRole("button", { name: "关闭提示" });
+    await expectFloatsOutOfSidebar(sidebar, alert, dismiss);
+
+    await dismiss.click();
+    await expect(alert).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await expect(sidebar).toHaveAttribute("data-collapsed", "true");
+    expect(answered, "dismissing sends no logout request").toBe(1);
+  } finally {
+    await page.unroute(LOGOUT_ROUTE);
+  }
+  await sidebar.getByRole("button", { name: "展开侧栏" }).click();
+  await expect(sidebar).toHaveAttribute("data-collapsed", "false");
+  // 仍是已登录外壳：路由、标题、导航与用户区都在。
+  await expectAuthenticatedRoute(page, "desktop-light", "/settings", "设置", "设置");
+  await expectPrincipalFooter(page, "desktop-light");
+}
+
+// 布局盒不反映祖先裁剪（被 overflow:hidden 裁掉的提示，其盒同样越过侧栏右缘），所以除右缘比较外，
+// 再用命中测试证明越出侧栏的部分确实画了出来：`关闭提示` 中心点整个在侧栏之外，且命中的就是它。
+async function expectFloatsOutOfSidebar(
+  sidebar: Locator,
+  alert: Locator,
+  dismiss: Locator,
+): Promise<void> {
+  // 折叠的宽度过渡结束后侧栏右缘才稳定，轮询到条件成立。
+  await expect
+    .poll(async () => {
+      const aside = await sidebar.boundingBox();
+      const note = await alert.boundingBox();
+      const button = await dismiss.boundingBox();
+      if (!aside || !note || !button) return "not laid out";
+      const asideRight = aside.x + aside.width;
+      if (note.x + note.width <= asideRight) return "alert right edge within sidebar";
+      return button.x >= asideRight ? "floats" : "dismiss button overlaps sidebar";
+    }, "alert floats to the right of the collapsed sidebar")
+    .toBe("floats");
+  const hit = await dismiss.evaluate((button) => {
+    const box = button.getBoundingClientRect();
+    const top = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+    return top !== null && button.contains(top);
+  });
+  expect(hit, "关闭提示 is the hit target at its own centre (not clipped by the sidebar)").toBe(
+    true,
+  );
 }
 
 export async function expectDesktopLayout(page: Page): Promise<void> {
@@ -72,7 +154,7 @@ async function expectNoHorizontalOverflow(page: Page): Promise<void> {
     innerWidth,
   ]);
   expect(scrollWidth, "document scrollWidth <= innerWidth").toBeLessThanOrEqual(viewportWidth);
-  // >760px 时 body/.app-shell/main 均 overflow:hidden，文档宽度恒不溢出；路由内容须在 main 上复核。
+  // >760px 时 body/外壳根/main 均 overflow:hidden，文档宽度恒不溢出；路由内容须在 main 上复核。
   const [mainScroll, mainClient] = await page
     .getByRole("main")
     .evaluate((el) => [el.scrollWidth, el.clientWidth]);
@@ -172,8 +254,8 @@ async function expectDisclaimerInView(page: Page, label: string): Promise<void> 
 }
 
 // ui-foundation「旧页面规则压过 preflight」：button.css 在 legacy 层，压过 base 层 preflight 的
-// `padding: 0`。限定在 main 内：文档序第一个 .ui-btn 是外壳的图标按钮（.ui-btn--icon 自己就是
-// `padding: 0`），证明不了层序。随 legacy 层整体移除（change s1f-files-page 收尾）删除。
+// `padding: 0`。限定在 main 内：外壳已不用旧按钮，.ui-btn 只由尚未迁移的页面渲染在 main 里。
+// 随 legacy 层整体移除（change s1f-files-page 收尾）删除。
 async function expectLegacyOverPreflight(page: Page): Promise<void> {
   const padding = await page
     .getByRole("main")
@@ -391,6 +473,45 @@ function sidebarLink(navigation: Locator, label: string) {
   return navigation.getByRole("link", { name: label });
 }
 
+// ui-primitives「reduce 下拷入组件无动画与过渡」：拷入组件的入场动画由 tw-animate-css 声明、时长被
+// styles.css 的全局 reduce 块压到 0.01ms（未分层，压过 utilities）。先断言确有动画声明，免得空过。
+async function expectNoEnterMotion(content: Locator, label: string): Promise<void> {
+  const probe = await content.evaluate((el) => {
+    const style = getComputedStyle(el);
+    return { name: style.animationName, duration: style.animationDuration };
+  });
+  expect(probe.name, `${label} declares an enter animation`).not.toBe("none");
+  const seconds = probe.duration.split(",").map((value) => Number.parseFloat(value));
+  for (const value of seconds) {
+    expect(value, `${label} animation-duration ${probe.duration} <= 0.01ms`).toBeLessThanOrEqual(
+      0.00001,
+    );
+  }
+}
+
+// 调用方已 emulateMedia reduce 并打开侧栏：窄屏断 导航 覆盖层无入场动画；两个 project 都断一个带
+// Tailwind transition* 类的按钮（theme.css 的 reduce 规则）过渡被关掉。
+export async function expectReducedMotionShell(page: Page, project: WalkProject): Promise<void> {
+  const reduce = await page.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches);
+  expect(reduce, "prefers-reduced-motion: reduce is emulated").toBe(true);
+  if (project === "mobile-dark") {
+    await expectNoEnterMotion(page.getByRole("dialog", NAV_OVERLAY), "导航 overlay");
+  }
+  const button = page.locator('button[class*="transition"]:visible').first();
+  await expect(button).toBeVisible();
+  expect(
+    await button.evaluate((el) => getComputedStyle(el).transitionProperty),
+    "a button carrying a transition* class has transition-property none under reduce",
+  ).toBe("none");
+}
+
+// 调用方已 emulateMedia reduce 并打开 用户菜单。
+export async function expectReducedMotionMenu(page: Page): Promise<void> {
+  const menu = page.getByRole("menu");
+  await expect(menu).toBeVisible();
+  await expectNoEnterMotion(menu, "用户菜单");
+}
+
 export async function expectPrincipalFooter(page: Page, project: WalkProject) {
   await inspectSidebar(page, project, async (sidebar) => {
     const footer = sidebar.locator("footer");
@@ -448,7 +569,7 @@ async function expectReducedMotionThemeSwitch(
       after: document.documentElement.dataset.theme,
       headings: read(".settings-sec-h"),
       titles: read(".settings-row-title"),
-      links: read(".sidebar-link"),
+      links: read('nav[aria-label="主导航"] a'),
     };
   });
   await page.emulateMedia({ reducedMotion: "no-preference" });
@@ -461,7 +582,7 @@ async function expectReducedMotionThemeSwitch(
   expect(probe.headings, ".settings-sec-h count").toHaveLength(2);
   expect(probe.titles, ".settings-row-title count").toHaveLength(3);
   if (project === "desktop-light")
-    expect(probe.links.length, ".sidebar-link count").toBeGreaterThan(0);
+    expect(probe.links.length, "主导航 link count").toBeGreaterThan(0);
   const text = [...probe.headings, ...probe.titles];
   expect(
     text.map((entry) => entry.color),

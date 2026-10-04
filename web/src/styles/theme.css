@@ -6,6 +6,12 @@
 
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
+/* Copied components write their enter/exit animations as data-open: / data-closed: (the registry
+   expects these two variants from shadcn's own stylesheet, which this entry does not import).
+   Radix exposes the state as data-state, so the variants are bound to it here. */
+@custom-variant data-open (&:where([data-state="open"]));
+@custom-variant data-closed (&:where([data-state="closed"]));
+
 :root {
   --radius: 0.5rem;
   --background: var(--wb-home-bg-secondary);

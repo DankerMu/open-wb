@@ -18,6 +18,8 @@ import {
   expectDesktopLayout,
   expectPrePaintTheme,
   expectPrincipalFooter,
+  expectReducedMotionMenu,
+  expectReducedMotionShell,
   expectReducedMotionToggle,
   expectRouteViewports,
   expectScrollableX,
@@ -30,6 +32,7 @@ import {
   selectFirstSessionInOverlay,
   switchTheme,
   type WalkProject,
+  walkCollapsedLogoutFailure,
   walkProject,
   walkSidebarCollapse,
 } from "./ui-walk-layout.js";
@@ -130,11 +133,19 @@ async function walkProductionOrigin(
   await expect(page.getByText(`版本 ${PRODUCTION_SERVICE_VERSION}`, { exact: true })).toBeVisible();
 
   // 覆盖层变体无折叠按钮，折叠只在 desktop 走查。
-  if (project === "desktop-light") await walkSidebarCollapse(page);
+  if (project === "desktop-light") {
+    await walkSidebarCollapse(page);
+    await walkCollapsedLogoutFailure(page);
+  }
   await switchTheme(page, project, initialBackground);
 
+  // reduce 下打开侧栏与用户菜单，读完拷入组件的动画/过渡后恢复（ui-primitives「全局 reduced-motion 规则」）。
+  await page.emulateMedia({ reducedMotion: "reduce" });
   const sidebar = await openSidebar(page, project);
+  await expectReducedMotionShell(page, project);
   await sidebar.locator("footer").getByRole("button", { name: "用户菜单" }).click();
+  await expectReducedMotionMenu(page);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.getByRole("menuitem", { name: "退出登录" }).click();
   const dialog = page.getByRole("alertdialog");
   await expect(dialog.getByRole("heading", { name: "退出登录？" })).toBeVisible();

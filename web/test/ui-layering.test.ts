@@ -8,8 +8,9 @@ const COPIED_DIRS = ["web/src/components/ui", "web/src/components/assistant-ui"]
 /**
  * 已迁移区域：目录或单个文件的仓库相对路径。清单内的文件从 `web/src/ui` 只可导入
  * `MIGRATED_ALLOWED_IMPORTS`，清单内不得有 `.css`。外壳、登录页、设置页迁移时各自加入。
+ * 条目按前缀匹配（见 `isUnder`），所以不写通配、不以 `/` 结尾——否则一个文件也匹配不到。
  */
-const MIGRATED_AREAS: string[] = [];
+const MIGRATED_AREAS: string[] = ["web/src/routes", "web/src/features/auth/footer.tsx"];
 const MIGRATED_ALLOWED_IMPORTS = ["Icon", "IconName", "BrandMark", "useEscapeFallback"];
 
 const FROZEN_DIR = "web/src/ui";
@@ -114,6 +115,21 @@ function layeringViolations(files: SourceFile[], rules: LayeringRules): string[]
   });
 }
 
+/**
+ * 清单条目自检：`isUnder` 只做前缀匹配，写成 `dir/**` 或 `dir/` 的条目匹配不到任何文件，守卫会
+ * 在不报错的情况下放空。带通配或以 `/` 结尾的条目、以及匹配不到现存文件的条目都判违例。
+ */
+function areaEntryViolations(areas: string[], paths: string[]): string[] {
+  return areas.flatMap((area) => {
+    if (area.includes("*") || area.endsWith("/")) {
+      return [`${area}: 已迁移区域条目不得含通配或以 / 结尾`];
+    }
+    return paths.some((path) => isUnder(path, area))
+      ? []
+      : [`${area}: 已迁移区域条目未匹配任何文件`];
+  });
+}
+
 describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻结区不增长」）", () => {
   const rules: LayeringRules = {
     migrated: ["web/src/routes", "web/src/features/auth/footer.tsx"],
@@ -167,6 +183,34 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
     for (const name of FROZEN_FILES) expect(check(`web/src/ui/${name}`)).toEqual([]);
   });
 
+  it("判定自证：带通配、以 / 结尾或匹配不到文件的清单条目各判失败", () => {
+    const paths = ["web/src/routes/shell/sidebar.tsx", "web/src/features/auth/footer.tsx"];
+    expect(areaEntryViolations(["web/src/routes/**"], paths)).toEqual([
+      "web/src/routes/**: 已迁移区域条目不得含通配或以 / 结尾",
+    ]);
+    expect(areaEntryViolations(["web/src/routes/"], paths)).toEqual([
+      "web/src/routes/: 已迁移区域条目不得含通配或以 / 结尾",
+    ]);
+    expect(areaEntryViolations(["web/src/*.tsx"], paths)).toHaveLength(1);
+    expect(areaEntryViolations(["web/src/features/settings"], paths)).toEqual([
+      "web/src/features/settings: 已迁移区域条目未匹配任何文件",
+    ]);
+    // 前缀按路径段比较：`web/src/route` 不是 `web/src/routes` 的上级目录。
+    expect(areaEntryViolations(["web/src/route"], paths)).toHaveLength(1);
+    expect(
+      areaEntryViolations(["web/src/routes", "web/src/features/auth/footer.tsx"], paths),
+    ).toEqual([]);
+    // 被拒的写法确实匹配不到文件：不拦下来的话分层判定会对整个目录放空。
+    const button = 'import { Button } from "../../ui/index.js";';
+    const file = { path: "web/src/routes/shell/sidebar.tsx", text: button };
+    for (const entry of ["web/src/routes/**", "web/src/routes/"]) {
+      expect(layeringViolations([file], { migrated: [entry], frozen: FROZEN_FILES })).toEqual([]);
+    }
+    expect(
+      layeringViolations([file], { migrated: ["web/src/routes"], frozen: FROZEN_FILES }),
+    ).toHaveLength(1);
+  });
+
   it("冻结清单恰为 32 个互不相同的文件名", () => {
     expect(new Set(FROZEN_FILES).size).toBe(32);
     expect(FROZEN_FILES).toHaveLength(32);
@@ -178,6 +222,13 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
       text: /\.tsx?$/.test(path) ? readRepoFile(path) : "",
     }));
     expect(files.some((file) => isUnder(file.path, FROZEN_DIR))).toBe(true);
+    expect(MIGRATED_AREAS).toEqual(["web/src/routes", "web/src/features/auth/footer.tsx"]);
+    expect(
+      areaEntryViolations(
+        MIGRATED_AREAS,
+        files.map((file) => file.path),
+      ),
+    ).toEqual([]);
     expect(layeringViolations(files, { migrated: MIGRATED_AREAS, frozen: FROZEN_FILES })).toEqual(
       [],
     );

@@ -16,13 +16,7 @@ import {
   type FetchMock,
   jsonResponse,
 } from "./support.js";
-import {
-  blockBody,
-  pressPointer,
-  readRepoFile,
-  stripComments,
-  yieldMacrotask,
-} from "./ui-support.js";
+import { blockBody, pressPointer, readRepoFile, yieldMacrotask } from "./ui-support.js";
 import "./radix-platform.js";
 
 const HERO = "WorkBuddy，我帮你";
@@ -183,7 +177,6 @@ describe("窄屏顶栏与覆盖层入口 (R1/R4/R4b/R5)", () => {
 
     const hero = await screen.findByRole("heading", { level: 1, name: HERO });
     const banner = screen.getByRole("banner");
-    expect(banner.classList.contains("topbar")).toBe(true);
     const button = within(banner).getByRole("button", { name: "打开导航" });
     expect(banner.firstElementChild).toBe(button);
     expect(within(banner).queryAllByRole("heading")).toHaveLength(0);
@@ -276,7 +269,6 @@ describe("覆盖层开合 (R3/R6)", () => {
 
     const { button, dialog } = await openNav();
     expect(dialog.getAttribute("data-side")).toBe("left");
-    expect(dialog.classList.contains("ui-drawer--w288")).toBe(true);
     const links = overlayLinks(dialog);
     expect(links).toHaveLength(4);
     links.forEach((link, index) => {
@@ -293,7 +285,9 @@ describe("覆盖层开合 (R3/R6)", () => {
 
     fireEvent.click(within(dialog).getByRole("link", { name: /^工作空间/ }));
     await expectNavClosed(view.container, button);
-    expect(document.querySelector(".topbar h1")?.textContent).toBe("工作空间");
+    expect(within(screen.getByRole("banner")).getByRole("heading", { level: 1 }).textContent).toBe(
+      "工作空间",
+    );
     expect(setItem).not.toHaveBeenCalled();
     expect(window.localStorage.getItem(SIDEBAR_KEY)).toBeNull();
   });
@@ -386,7 +380,7 @@ describe("覆盖层会话列表区 (R11/R12)", () => {
     await yieldMacrotask();
     expect(screen.getByRole("dialog", { name: "导航" })).toBe(dialog);
 
-    const overlay = document.querySelector(".ui-drawer-overlay");
+    const overlay = document.querySelector('[data-slot="sheet-overlay"]');
     if (!overlay) throw new Error("缺遮罩");
     pressPointer(overlay);
     await expectNavClosed(view.container, button);
@@ -543,19 +537,9 @@ describe("覆盖层内用户区 (R9/R9b/R9c/R9d)", () => {
 });
 
 describe("静态契约 (R10)", () => {
-  it("横条 CSS 已删、覆盖层规则存在、外壳经 ui 出口取 Drawer、Drawer API 未扩", () => {
-    const sidebarCss = stripComments(readRepoFile("web/src/routes/shell/sidebar.css"));
-    expect(sidebarCss).not.toContain("max-width: 760px");
-    expect(sidebarCss).toContain('.sidebar[data-variant="overlay"]');
-
-    const styles = stripComments(readRepoFile("web/src/styles/legacy.css"));
-    const narrowBlock = blockBody(styles, /@media\s*\(max-width:\s*760px\)\s*\{/);
-    expect(narrowBlock).not.toContain("flex-direction: column");
-    expect(narrowBlock).toContain("min-height: 100dvh;");
-
+  it("窄屏判定走 useMediaQuery、旧基元 Drawer API 未扩", () => {
     const shell = readRepoFile("web/src/routes/shell/app-shell.tsx");
     expect(shell).toContain("useMediaQuery(SHELL_NARROW_QUERY)");
-    expect(shell).toMatch(/import \{[^}]*\bDrawer\b[^}]*\} from "\.\.\/\.\.\/ui\/index\.js"/);
 
     const topbar = readRepoFile("web/src/routes/shell/topbar.tsx");
     expect(topbar).toContain("打开导航");

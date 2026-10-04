@@ -71,7 +71,7 @@
 - **全局 reduced-motion 块留在 `styles.css`、不入层**：它没有 `!important`，进了 `legacy` 层就压不住 utilities 层里 `tw-animate-css` 与 `duration-*` 设的动画时长。
   留在原文件也使 `ui-reduced-motion.test.ts`「`styles.css` 恰有一个全局块」的断言不用改。
 - Tailwind 的 `transition*` 工具类在 reduce 下由 `theme.css` 里一条未分层规则统一关掉：
-  `@media (prefers-reduced-motion: reduce) { [class*="transition"] { transition: none; } }`。不逐个给拷入组件加 `motion-reduce:`（那会超出「四类修改」）。
+  `@media (prefers-reduced-motion: reduce) { [class*="transition"] { transition: none; } }`。不逐个给拷入组件加 `motion-reduce:`（那会超出「五类修改」）。
   这条是「只有覆盖、没有声明」的 reduce 规则，现行 reduced-motion 静态守卫允许。
 - `tokens.css` 与 `theme.css` 只定义自定义属性与上述未分层规则，不入层。
 - preflight 会重置旧页面依赖浏览器默认值的地方（标题字号、列表符号、段落外边距等）。owner 接受过渡期的观感变化；功能由 `make ui-walk` 守住。
@@ -93,6 +93,10 @@
 - `@theme inline { --color-background: var(--background); … --radius-lg: var(--radius); … }` 把语义变量暴露成 Tailwind 颜色与圆角刻度。
 - `--radius: 0.5rem`（现有 CSS 最常用的 `8px`）；字号沿用 Tailwind 默认刻度；`body` 14px / 22px 行高不变。
 - `@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));`
+- `@custom-variant data-open (&:where([data-state="open"]));` 与 `data-closed`（#834，owner 2026-10-04 决定）：registry 组件的进出场动画写成 `data-open:` / `data-closed:`，
+  这两个变体原本来自 shadcn 自带样式表，本仓入口不导入它，故在此绑定到 Radix 的 `data-state`。
+- 边框色基线（#835 落地，owner 2026-10-04 决定）：`@layer base { *, ::before, ::after { border-color: var(--border); } }`——拷入组件里裸的 `border` 类否则取 `currentColor`；
+  `legacy` 层优先级高于 `base`，旧页面自己声明的边框色不受影响。
 - `body { background: var(--background); color: var(--foreground); }` 写在 `theme.css`（未分层），`legacy.css` 里 `body` 的同名声明删除。
 
 ### D4 组件分层与拷入
@@ -100,8 +104,9 @@
 - `web/components.json`：`style: "radix-nova"`、`rsc: false`、`tsx: true`、`tailwind.css: "src/styles.css"`、`cssVariables: true`、
   aliases `components: "@/components"`、`ui: "@/components/ui"`、`utils: "@/lib/utils"`、`iconLibrary: "lucide"`。
 - 拷入（`npx shadcn@latest add …`，只拷用到的）：本 change 预期 `button`、`input`、`label`、`card`、`dropdown-menu`、`alert-dialog`、`sheet`、`tooltip`、
-  `radio-group`、`separator`。拷入后只做四类修改：颜色字面量换主题变量（若有）、中文化可见文案与 aria 文案、Biome 格式化（含其 import 排序）、`cn` 的导入归一到 `@/lib/utils`
-  （`radix-nova` registry 现下发 `import { cn } from "cn"` 并让 CLI 安装 npm 包 `cn`；本仓不引入该依赖，每次 `shadcn add` 后卸掉它并改写导入——owner 2026-10-04 决定）。
+  `radio-group`、`separator`。拷入后只做五类修改：颜色字面量换主题变量（若有）、中文化可见文案与 aria 文案、Biome 格式化（含其 import 排序）、`cn` 的导入归一到 `@/lib/utils`
+  （`radix-nova` registry 现下发 `import { cn } from "cn"` 并让 CLI 安装 npm 包 `cn`；本仓不引入该依赖，每次 `shadcn add` 后卸掉它并改写导入——owner 2026-10-04 决定）、为本仓严格 TS 选项做的纯类型适配
+  （registry 原文在 `exactOptionalPropertyTypes` 下报错处，如 `dropdown-menu` 的 `checked={checked}` 改为条件展开；不改运行时行为——owner 2026-10-04 决定，#834）。
   `web/src/lib/utils.ts` 提供 `cn`。`shadcn` 命令会改写 `styles.css`——以 D2/D3 的结构为准，命令写入的默认主题块不保留。
 - 侧栏不拷 shadcn 的 `sidebar` 整块：它自带 cookie 持久化、键盘快捷键与 768 断点，与现有契约（`workbuddy-sidebar` localStorage、760 断点、
   `data-collapsed`、槽位）不一致，改造成本高于用 `sheet` + `tooltip` + Tailwind 自己排。

@@ -531,14 +531,11 @@ describe("authenticated sidebar footer", () => {
 });
 
 describe("迁移静态契约", () => {
-  it("auth 退出确认只经 ConfirmDialog，旧 <dialog> 与样式已移除", () => {
+  it("auth 退出确认不再手写 <dialog>，旧样式已移除", () => {
     const footer = readRepoFile("web/src/features/auth/footer.tsx");
     for (const legacy of ["lib/dialog", "<dialog", "showModal", "trapDialogFocus"]) {
       expect(footer).not.toContain(legacy);
     }
-    expect(footer).toContain("ConfirmDialog");
-    expect(footer).toContain("returnFocus");
-    expect(footer).not.toContain("aria-current");
     expect(readRepoFile("web/src/styles/legacy.css")).not.toContain(".logout-dialog");
     for (const file of [
       "web/test/settings-footer.test.tsx",

@@ -7,7 +7,8 @@
 > - 「行为不变」的证据是既有行为断言（按角色/可访问名）原样通过；只允许删除或改写读源码、读 `.css`、按旧类名选择的断言，不得为通过而放宽行为断言。
 > - 不改 `web/src/features/chat/**`、`web/src/features/files/**` 的实现；`web/src/ui/**` 冻结（唯一例外：组 3 在 `index.ts` 加 `useEscapeFallback` 导出）；不改任何 `server/**`。
 >   会话页/文件页的**测试**只在点名处改选择器或读取的文件。
-> - 拷入层只做四类修改：颜色字面量换主题变量、可见与 aria 文案中文化、Biome 格式化、`cn` 的导入归一到 `@/lib/utils`（registry 下发的是 `import { cn } from "cn"`；不装 `cn` 包）。
+> - 拷入层只做五类修改：颜色字面量换主题变量、可见与 aria 文案中文化、Biome 格式化、`cn` 的导入归一到 `@/lib/utils`（registry 下发的是 `import { cn } from "cn"`；不装 `cn` 包）、
+>   为本仓严格 TS 选项（如 `exactOptionalPropertyTypes`）做的纯类型适配（不改运行时行为）。
 > - size-guard：新写的应用层文件 ≤800 行；新测试写进新文件。
 
 ## 1a. ui-foundation — Tailwind 接入、层叠顺序与主题映射
@@ -59,23 +60,23 @@ Minimal mergeable slice: atomic - AGENTS.md 行、constraints surface、Makefile
 
 ## 3. spa-shell — 外壳重写
 
-- [ ] 3.1 拷入 `sheet`、`tooltip`、`dropdown-menu`、`alert-dialog`、`separator`（按需）；`routes/shell/{app-shell,sidebar,topbar}.tsx` 按 design D7 重写，删除 `sidebar.css`、`topbar.css` 并从 `legacy.css` 去掉其 `@import`。
+- [x] 3.1 拷入 `sheet`、`tooltip`、`dropdown-menu`、`alert-dialog`、`separator`（按需）；`routes/shell/{app-shell,sidebar,topbar}.tsx` 按 design D7 重写，删除 `sidebar.css`、`topbar.css` 并从 `legacy.css` 去掉其 `@import`。
   保留 `aside` 的类 `sidebar` 与 `data-variant`；主区布局契约以 Tailwind 等价重现后删除 `legacy.css` 里只服务旧外壳的规则（`.app-shell`、`.app-content*`）；`ui-alert` 等仍被会话页/文件页使用的全局类不删。
-- [ ] 3.2 `features/auth/footer.tsx`（用户菜单、退出确认、失败提示）按 D7 重写；`web/src/ui/index.ts` 加 `useEscapeFallback` 导出，外壳把它接到导航覆盖层与退出确认的内容元素上；`footer.tsx` 在应用层重现忙碌期焦点救回（design D7），新增 jsdom 用例「`pending` 上升沿后活动元素为 `关闭`、Tab 不出确认框」，ui-walk 退出段原样通过。
-- [ ] 3.3 `lib/topbar.tsx`、`lib/sidebar-slot.tsx`、`lib/viewport.ts` 的导出与语义不变；actions 容器改 `data-slot="topbar-actions"`。
-- [ ] 3.4 测试：`sidebar`、`sidebar-slot`、`app-shell-responsive`、`topbar`、`topbar-actions`、`routes`、`settings-footer`、`ui-toast-drawer-escape` 的行为断言原样通过；
+- [x] 3.2 `features/auth/footer.tsx`（用户菜单、退出确认、失败提示）按 D7 重写；`web/src/ui/index.ts` 加 `useEscapeFallback` 导出，外壳把它接到导航覆盖层与退出确认的内容元素上；`footer.tsx` 在应用层重现忙碌期焦点救回（design D7），新增 jsdom 用例「`pending` 上升沿后活动元素为 `关闭`、Tab 不出确认框」，ui-walk 退出段原样通过。
+- [x] 3.3 `lib/topbar.tsx`、`lib/sidebar-slot.tsx`、`lib/viewport.ts` 的导出与语义不变；actions 容器改 `data-slot="topbar-actions"`。
+- [x] 3.4 测试：`sidebar`、`sidebar-slot`、`app-shell-responsive`、`topbar`、`topbar-actions`、`routes`、`settings-footer`、`ui-toast-drawer-escape` 的行为断言原样通过；
   读 `sidebar.css`/`topbar.css`/`legacy.css` 外壳规则/源码的断言删除或改为行为断言（含「`footer.tsx` 含 `ConfirmDialog`」一条，规格已改）；
   会话页测试只改选择器：`chat-page-project-config.test.tsx:177`、`chat-page-welcome-scene.test.tsx:91,649`；`chat-page-sidebar.test.tsx:761` 所钉的 `chat.css` 规则不动且仍生效。
   `web/e2e/ui-walk*`：`.sidebar-link`、`header.topbar h1`、`.topbar-actions` 改为角色/名称或 `data-slot`，侧栏宽度 48/288 断言改为 `data-collapsed`；
   新增 reduce 下菜单/覆盖层 `animation-duration` 与带 `transition*` 类按钮 `transition-property` 的断言（规格「reduce 下拷入组件无动画与过渡」）。
-- [ ] 3.5 守卫：把 `web/src/routes/**` 与 `web/src/features/auth/footer.tsx` 加入已迁移区域清单。`functional-checklist.md` 外壳节加行（导航四项、折叠与持久化、窄屏覆盖层、顶栏三态、用户菜单与退出、退出失败提示），结论 `待签`。
+- [x] 3.5 守卫：把 `web/src/routes/**` 与 `web/src/features/auth/footer.tsx` 加入已迁移区域清单。`functional-checklist.md` 外壳节加行（导航四项、折叠与持久化、窄屏覆盖层、顶栏三态、用户菜单与退出、退出失败提示），结论 `待签`。
 
 Suggested fixture level: expanded - 外壳是全部页面的容器，响应式覆盖层、焦点归还、Escape 兜底与退出锁定态只有真实浏览器 + 视口矩阵能证明
 Minimal mergeable slice: atomic - 侧栏、顶栏、覆盖层与用户菜单共用同一组上下文（折叠状态、窄屏判定、槽位），footer 渲染在侧栏内，且共用即将删除的两个 `.css`；先迁一半会让另一半失去样式或需要临时双写。验证路径单一（外壳的 jsdom 行为测试 + ui-walk 外壳段）。依赖：2（往清单加行、守卫清单）。
 
 ## 4. spa-shell — 登录页重写
 
-- [ ] 4.1 拷入 `card`、`input`、`label`（按需）；`features/auth/login-form.tsx`、`quick-login.tsx` 按 design D8 重写；删除 `auth.css` 并从 `legacy.css` 去掉其 `@import`；`.auth-loading` 的加载态改用 Tailwind 并删去其旧规则。
+- [ ] 4.1 拷入 `card`、`input`、`label`（按需）；`theme.css` 加边框色基线（design D3）；`features/auth/login-form.tsx`、`quick-login.tsx` 按 design D8 重写；删除 `auth.css` 并从 `legacy.css` 去掉其 `@import`；`.auth-loading` 的加载态改用 Tailwind 并删去其旧规则。
 - [ ] 4.2 测试：`login-form`、`auth-router`、`auth-session-client` 的行为断言原样通过；读 `auth.css`/`legacy.css`/源码的断言删除或改为行为断言。
   ui-walk 增「登录主按钮计算底色等于 `--primary`，浅色下为 `rgba(0, 0, 0, 0.9)`」。
 - [ ] 4.3 守卫：已迁移区域清单把 `features/auth/footer.tsx` 一项换成 `web/src/features/auth/**` 整目录。`functional-checklist.md` 登录节加行（未登录落登录页且 URL 不变、登录成功回原路由、错误提示、快捷登录仅演示环境可见），结论 `待签`。

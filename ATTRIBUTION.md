@@ -42,7 +42,7 @@
   - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;随打包产物分发时须附带该 MIT 声明。
 
 - **shadcn/ui** —— `MIT License`,版权归 shadcn（https://github.com/shadcn-ui/ui）
-  - 用途：`web/src/components/ui/` 的组件源码由其 registry（`radix-nova` 版式,配置见 `web/components.json`）拷入,拷入后只做颜色变量、中文文案、格式化与 `cn` 导入归一（`@/lib/utils`）四类修改;组件依赖 `class-variance-authority`（Apache-2.0）、`clsx`（MIT）、`tailwind-merge`（MIT）。
+  - 用途：`web/src/components/ui/` 的组件源码由其 registry（`radix-nova` 版式,配置见 `web/components.json`）拷入,拷入后只做颜色变量、中文文案、格式化、`cn` 导入归一（`@/lib/utils`）与严格 TS 选项下的纯类型适配五类修改;组件依赖 `class-variance-authority`（Apache-2.0）、`clsx`（MIT）、`tailwind-merge`（MIT）。
   - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;拷入的源码随打包产物分发时须附带该 MIT 声明。
 
 - **Tailwind CSS** —— `MIT License`,版权归 Tailwind Labs, Inc.（https://github.com/tailwindlabs/tailwindcss）

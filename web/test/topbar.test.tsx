@@ -19,7 +19,7 @@ import {
   deferredResponse,
   jsonResponse,
 } from "./support.js";
-import { readRepoFile, ruleBody, stripComments } from "./ui-support.js";
+import { readRepoFile } from "./ui-support.js";
 import "./radix-platform.js";
 
 const HERO = "WorkBuddy，我帮你";
@@ -276,9 +276,6 @@ describe("静态契约 (T8)", () => {
     ]) {
       expect(readRepoFile(path), path).not.toContain("ui-page-heading");
     }
-    const styles = readRepoFile("web/src/styles/legacy.css");
-    expect(styles).toContain(".app-content > main");
-    expect(styles).not.toContain(".app-shell > main");
     const topbar = readRepoFile("web/src/routes/shell/topbar.tsx");
     expect(topbar).not.toContain('role="banner"');
     expect(topbar).not.toContain("@radix-ui");
@@ -289,20 +286,14 @@ describe("静态契约 (T8)", () => {
     const lib = readRepoFile("web/src/lib/topbar.tsx");
     expect(lib).not.toContain("routes/");
     expect(lib).not.toContain("features/");
-    const topbarRule = ruleBody(
-      stripComments(readRepoFile("web/src/routes/shell/topbar.css")),
-      ".topbar",
-    );
-    expect(topbarRule).toMatch(/^\s*height: 56px;$/m);
-    expect(topbarRule).toContain("flex: none;");
-    expect(ruleBody(stripComments(styles), ".app-content")).toContain("flex-direction: column;");
   });
 
-  it("顶栏位于 main 之外（挂载后 main .topbar 不存在）", async () => {
+  it("顶栏位于 main 之外（挂载后 main 内没有 header）", async () => {
     mountApp("/files");
 
-    await screen.findByRole("banner");
-    expect(document.querySelector(".topbar")).not.toBeNull();
-    expect(document.querySelector("main .topbar")).toBeNull();
+    const banner = await screen.findByRole("banner");
+    expect(banner.tagName).toBe("HEADER");
+    expect(banner.closest("main")).toBeNull();
+    expect(document.querySelector("main header")).toBeNull();
   });
 });

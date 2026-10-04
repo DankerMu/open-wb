@@ -11,13 +11,15 @@ import {
 } from "../src/lib/topbar.js";
 import { Topbar } from "../src/routes/shell/topbar.js";
 import { Icon, type IconName } from "../src/ui/index.js";
-import { readRepoFile, ruleBody, stripComments, yieldMacrotask } from "./ui-support.js";
+import { yieldMacrotask } from "./ui-support.js";
 
 const LABEL = "示例操作";
 const NAV = "打开导航";
 const SESSION_PATH = "/?session=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const FILES_PATH = "/files";
 const CRUMB = "我的工作 / T";
+/** shell 渲染的 actions 容器。 */
+const ACTIONS = '[data-slot="topbar-actions"]';
 
 type Report = { breadcrumb?: string; actions?: readonly TopbarAction[] };
 
@@ -93,11 +95,11 @@ function queryActionButton(name = LABEL) {
   return screen.queryByRole("button", { name });
 }
 
-/** banner 内 `.topbar-actions` 中各按钮的 accessible name，按 DOM 次序。 */
+/** banner 内 actions 容器中各按钮的 accessible name，按 DOM 次序。 */
 function actionLabels() {
   return within(screen.getByRole("banner"))
     .queryAllByRole("button")
-    .filter((button) => button.closest(".topbar-actions") !== null)
+    .filter((button) => button.closest(ACTIONS) !== null)
     .map((button) => button.getAttribute("aria-label"));
 }
 
@@ -106,12 +108,12 @@ function bannerHeading(name: string) {
 }
 
 function expectNoActions() {
-  expect(document.querySelector(".topbar-actions")).toBeNull();
+  expect(document.querySelector(ACTIONS)).toBeNull();
   expect(queryActionButton()).toBeNull();
 }
 
 describe("顶栏 actions 插槽：渲染契约 (E1–E4)", () => {
-  it("E1 第二态：按钮在 heading 之后的 .topbar-actions 内，带 aria-expanded=false 与 Tooltip", async () => {
+  it("E1 第二态：按钮在 heading 之后的 actions 容器内，带 aria-expanded=false 与 Tooltip", async () => {
     mount(SESSION_PATH, { breadcrumb: "T", actions: [action({ expanded: false })] });
 
     const button = actionButton();
@@ -119,11 +121,9 @@ describe("顶栏 actions 插槽：渲染契约 (E1–E4)", () => {
     expect(screen.getAllByRole("heading", { level: 1 })).toEqual([heading]);
     expect(heading.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
     expect(heading.contains(button)).toBe(false);
-    const container = button.closest(".topbar-actions");
+    const container = button.closest(ACTIONS);
     expect(container?.parentElement).toBe(screen.getByRole("banner"));
     expect(button.getAttribute("aria-expanded")).toBe("false");
-    expect(button.classList.contains("ui-btn--ghost")).toBe(true);
-    expect(button.classList.contains("ui-btn--icon")).toBe(true);
     const svg = button.querySelector("svg");
     expect(svg?.getAttribute("aria-hidden")).toBe("true");
     expect(svg?.classList.contains("lucide-search")).toBe(true);
@@ -144,7 +144,7 @@ describe("顶栏 actions 插槽：渲染契约 (E1–E4)", () => {
     const heading = bannerHeading("工作空间");
     expect(screen.getAllByRole("heading", { level: 1 })).toEqual([heading]);
     expect(heading.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
-    expect(button.closest(".topbar-actions")).not.toBeNull();
+    expect(button.closest(ACTIONS)).not.toBeNull();
   });
 
   it("E2 显式 expanded: undefined 与省略键等价：按钮没有 aria-expanded，有值后带上", () => {
@@ -359,7 +359,7 @@ describe("顶栏 actions 插槽：无 actions 与清空 (E7–E9)", () => {
         ? [within(banner).getByRole("button", { name: NAV }), heading]
         : [heading];
       expect(Array.from(banner.children)).toEqual(expected);
-      expect(document.querySelector(".topbar-actions")).toBeNull();
+      expect(document.querySelector(ACTIONS)).toBeNull();
     },
   );
 
@@ -455,7 +455,7 @@ const NEW_ICONS: [IconName, string][] = [
   ["filter", "lucide-funnel"],
 ];
 
-describe("图标注册表与样式 (E10)", () => {
+describe("图标注册表 (E10)", () => {
   it.each(NEW_ICONS)("E10 Icon name=%s 渲染出 svg（%s）", (name, glyphClass) => {
     const { container } = render(<Icon name={name} />);
 
@@ -463,15 +463,6 @@ describe("图标注册表与样式 (E10)", () => {
     expect(svg?.getAttribute("aria-hidden")).toBe("true");
     expect(svg?.classList.contains(glyphClass)).toBe(true);
     expect(svg?.classList.contains("ui-icon-16")).toBe(true);
-  });
-
-  it("E10 .topbar-actions 规则靠右且不收缩", () => {
-    const rule = ruleBody(
-      stripComments(readRepoFile("web/src/routes/shell/topbar.css")),
-      ".topbar-actions",
-    );
-    expect(rule).toContain("margin-left: auto;");
-    expect(rule).toContain("flex: none;");
   });
 });
 
@@ -514,7 +505,7 @@ function mountRoutes(session: TopbarAction, files: TopbarAction, strict = false)
 }
 
 describe("顶栏 actions 插槽：边界 (E11–E13, E15)", () => {
-  it("E11 Provider 外：useTopbar({actions}) 不抛，单挂 Topbar 渲染 heading 且无 .topbar-actions", () => {
+  it("E11 Provider 外：useTopbar({actions}) 不抛，单挂 Topbar 渲染 heading 且无 actions 容器", () => {
     const consoleError = vi.spyOn(console, "error");
     render(
       <MemoryRouter initialEntries={[FILES_PATH]}>
@@ -542,7 +533,7 @@ describe("顶栏 actions 插槽：边界 (E11–E13, E15)", () => {
 
     expect(screen.getAllByRole("button", { name: LABEL })).toHaveLength(1);
     expect(actionLabels()).toEqual([LABEL]);
-    expect(document.querySelectorAll(".topbar-actions")).toHaveLength(1);
+    expect(document.querySelectorAll(ACTIONS)).toHaveLength(1);
     fireEvent.click(actionButton());
     expect(onSelect).toHaveBeenCalledTimes(1);
   });
