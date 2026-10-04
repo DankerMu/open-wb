@@ -57,7 +57,7 @@ web SHALL 采用两层加一个冻结区：`web/src/components/ui/`（由 shadcn
 - **THEN** 前者被拒绝，后者通过
 
 #### Scenario: 豁免路径精确
-- **WHEN** 守卫测试读取 `web/vitest.config.ts` 的 coverage 排除项、`.jscpd.json` 的 `ignore`、`scripts/size-guard.sh` 的排除前缀、`biome.json` 的 `overrides` 与 `knip.json` 的 web `ignore`
+- **WHEN** 守卫测试读取 `web/vitest.config.ts` 的 coverage 排除项、`.jscpd.json` 的 `ignore`、`scripts/size-guard.sh` 的排除前缀、`biome.json` 的 `overrides`、`knip.json` 的 web `ignore`、`constraints.yaml` 与 `AGENTS.md`
 - **THEN** 每处为本 change 新增的条目都只匹配 `web/src/components/ui` 与 `web/src/components/assistant-ui` 之下的路径；`biome.json` 对这两个目录的 override 不关闭 formatter；`constraints.yaml` `exemptions.entries` 含这两个目录；`AGENTS.md` 在 `## Enforcement Index` 与 `### Known blind spots` 之间含一行同时提到这两个目录与 ADR-0013 的注记
 
 #### Scenario: 归属登记完整

@@ -160,7 +160,7 @@
 - `features/auth/footer.tsx`（用户菜单 + 退出确认）重写：菜单用 `dropdown-menu`，确认框用 `alert-dialog`。忙碌态、`关闭` 文案、失败提示与 `关闭提示`、
   覆盖层重开不丢锁定态、初始焦点在取消按钮、关闭时按触发器是否禁用把焦点归还到触发器或 `aside` 内 `a[aria-current=page]`（`onCloseAutoFocus` 在应用层实现）不变。
   **忙碌期焦点救回**：旧实现靠 `web/src/ui/dialog.tsx:68-81` 的 `useBusyFocusRescue`（冻结区内、未导出）。`footer.tsx` 在应用层用一个 effect 重现同一行为——
-  `pending` 上升沿时若活动元素被禁用或不在确认框内，把焦点移到取消按钮；`web/e2e/ui-walk.spec.ts:154-160` 的既有断言原样通过即为证据。
+  `pending` 上升沿时若活动元素在确认框内且被禁用，或活动元素为 `document.body`/空，把焦点移到取消按钮（与旧 hook 的判定相同）；`web/e2e/ui-walk.spec.ts:154-160` 的既有断言原样通过即为证据。
 - **Escape 兜底**（#643）：Toast 仍是旧实现（`@radix-ui/react-toast`），它的层会让导航覆盖层与确认框收不到 Escape。`web/src/ui/index.ts` 增加导出 `useEscapeFallback`
   （冻结区唯一允许的内容变更），外壳把它返回的 `ref` / `onEscapeKeyDown` / `onKeyDown` 经 props 传给 `SheetContent` 与 `AlertDialogContent`（Radix Content 透传这些 props，不改拷入代码）。
   `radix-ui` 合包与旧 `@radix-ui/*` 单包是否共用同一份 DismissableLayer 要等 lockfile 生成才知道；两种情况下兜底都成立（它不依赖层栈），
