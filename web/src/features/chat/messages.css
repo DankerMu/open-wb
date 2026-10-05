@@ -7,11 +7,9 @@
    Design tokens from WorkBuddy 5.3.11 via web/src/styles/tokens.css.
 */
 
-/* File-change card adapted from resource/workbuddy-live-demo.html:519-526 (.file-changes-card,
-   .file-changes-head, .file-change-*); the head carries no icon. The fieldset is reset to a plain
-   block and the 查看详情 button reuses .chat-msg-action. The artifact card and the list of
-   the 产物面板 drawer (issue 537, a div: the fieldset reset is a no-op there) share the frame. */
-.file-changes-card,
+/* Frame of the artifact card and of the 产物面板 list (issue 537, a div: the fieldset reset is a
+   no-op there), adapted from resource/workbuddy-live-demo.html:519 (.file-changes-card). The
+   file-change card and its rows carry their own Tailwind classes (file-changes-card.tsx). */
 .artifact-card,
 .artifacts-panel-list {
   min-width: 0;
@@ -22,52 +20,6 @@
   border-radius: 12px;
   overflow: hidden;
   background: var(--wb-bg-secondary);
-}
-
-.file-changes-head {
-  padding: 9px 12px;
-  border-bottom: 1px solid var(--wb-border-default);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.file-change-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 12px;
-  border-bottom: 1px solid var(--wb-border-default);
-  font-size: 12.5px;
-}
-
-.file-change-row:last-child {
-  border-bottom: none;
-}
-
-.file-change-add {
-  color: var(--wb-status-success-text);
-  font-family: var(--wb-mono);
-  font-size: 11px;
-}
-
-.file-change-del {
-  color: var(--wb-status-error-text);
-  font-family: var(--wb-mono);
-  font-size: 11px;
-}
-
-.file-change-kind {
-  color: var(--wb-text-secondary);
-  font-size: 11px;
-}
-
-.file-change-path {
-  flex: 1;
-  min-width: 0;
-  font-family: var(--wb-mono);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* Artifact card adapted from resource/workbuddy-live-demo.html:502-515 (.artifact-head,
@@ -173,8 +125,8 @@
   background: white;
 }
 
-/* Icon button of the file-change card and the artifact card (the message action row no longer
-   uses it). Overrides the ui-btn--icon size (same specificity, loaded later). */
+/* Icon button of the artifact card (the message action row and the file-change row no longer
+   use it). Overrides the ui-btn--icon size (same specificity, loaded later). */
 .chat-msg-action {
   width: 26px;
   height: 26px;

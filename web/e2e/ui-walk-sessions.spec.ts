@@ -350,12 +350,12 @@ function fileChangesCard(page: Page): Locator {
 }
 
 async function step5FileChanges(page: Page): Promise<void> {
-  const row = fileChangesCard(page).locator(".file-change-row");
+  const row = fileChangesCard(page).locator('[data-slot="file-change-row"]');
   await expect(row).toHaveCount(1);
-  await expect(row.locator(".file-change-path")).toHaveText(LOGICAL_PATH);
-  await expect(row.locator(".file-change-kind")).toHaveText("写入");
-  await expect(row.locator(".file-change-add")).toHaveCount(0);
-  await expect(row.locator(".file-change-del")).toHaveCount(0);
+  await expect(row.locator('[data-slot="file-change-path"]')).toHaveText(LOGICAL_PATH);
+  await expect(row.locator('[data-slot="file-change-kind"]')).toHaveText("写入");
+  await expect(row.locator('[data-slot="file-change-add"]')).toHaveCount(0);
+  await expect(row.locator('[data-slot="file-change-del"]')).toHaveCount(0);
 }
 
 // 卡内有两个同名动作按钮（头部图标、底部文字），点带文字的那个。
@@ -382,9 +382,9 @@ async function step5ArtifactPreview(page: Page): Promise<void> {
 async function step5ArtifactsDrawer(page: Page): Promise<void> {
   await page.getByRole("banner").getByRole("button", { name: "产物面板", exact: true }).click();
   const drawer = page.getByRole("dialog", { name: "产物面板", exact: true });
-  const row = drawer.locator(".file-change-row");
+  const row = drawer.locator('[data-slot="file-change-row"]');
   await expect(row).toHaveCount(1);
-  await expect(row.locator(".file-change-path")).toHaveText(LOGICAL_PATH);
+  await expect(row.locator('[data-slot="file-change-path"]')).toHaveText(LOGICAL_PATH);
   await drawer
     .getByRole("button", { name: "关闭", exact: true })
     .filter({ hasText: "关闭" })

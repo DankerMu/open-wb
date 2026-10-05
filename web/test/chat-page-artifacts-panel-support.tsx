@@ -120,7 +120,9 @@ export async function expectPanelClosed() {
 
 /** The rows of the drawer's list, in document order. */
 export function panelRows(panel: HTMLElement) {
-  return [...panel.querySelectorAll<HTMLElement>(".artifacts-panel-list > .file-change-row")];
+  return [
+    ...panel.querySelectorAll<HTMLElement>('.artifacts-panel-list > [data-slot="file-change-row"]'),
+  ];
 }
 
 /** Per row, the `aria-label` of each button in document order. */

@@ -150,7 +150,7 @@ describe("产物卡 derivation on the chat page", () => {
     expect(replyParts().map(tagAndClass)).toEqual([
       "message-body",
       "tool-group-root",
-      "fieldset.file-changes-card",
+      "file-changes-card",
       "fieldset.artifact-card",
       "fieldset.artifact-card",
       "fieldset.artifact-card",
@@ -657,7 +657,7 @@ describe("产物卡 placement", () => {
       "message-body",
       "tool-group-root",
       "approval-records",
-      "fieldset.file-changes-card",
+      "file-changes-card",
       "fieldset.artifact-card",
       "message-stopped",
       "message-actions",
