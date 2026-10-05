@@ -224,7 +224,7 @@ describe("未命中与发送 (J5)", () => {
 
     expect(await sentPrompts(fetchMock)).toEqual([{ message: "/help" }]);
     const bubble = await within(await findMessageArea()).findByText("/help", { exact: true });
-    expect(bubble.className).toBe("chat-msg-body");
+    expect(bubble.getAttribute("data-slot")).toBe("message-body");
     expect(bubble.closest("article")?.getAttribute("aria-label")).toBe("用户");
     expect(composer().value).toBe("");
   });

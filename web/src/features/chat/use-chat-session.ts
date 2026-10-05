@@ -536,16 +536,15 @@ export function useChatSession() {
       welcome.createBody,
     ],
   );
-  const submitComposer = useCallback(
-    (event: FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
+  // 发送路径的文本入口：表单提交与运行时适配器的 `onNew` 都走这里。
+  const sendPrompt = useCallback(
+    (prompt: string) => {
       if (creating || submitting || createControllerRef.current || mutationControllerRef.current) {
         return;
       }
-      if (draft.trim().length === 0) {
+      if (prompt.trim().length === 0) {
         return;
       }
-      const prompt = draft;
       setDraft("");
       if (!requestedSessionId) {
         createAndSelect(prompt);
@@ -567,7 +566,14 @@ export function useChatSession() {
       });
       dispatchPrompt(requestedSessionId, prompt, generation, client);
     },
-    [client, createAndSelect, creating, dispatchPrompt, draft, requestedSessionId, submitting],
+    [client, createAndSelect, creating, dispatchPrompt, requestedSessionId, submitting],
+  );
+  const submitComposer = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      sendPrompt(draft);
+    },
+    [draft, sendPrompt],
   );
 
   useEffect(() => {
@@ -668,6 +674,7 @@ export function useChatSession() {
     selectSession,
     selected,
     sendDisabled,
+    sendPrompt,
     sessionActions,
     sessionFilter,
     sessions: listForClient?.sessions ?? null,

@@ -94,7 +94,7 @@
 - 拷入层与应用层的分工：不拷 registry 的 `thread` 与 `tool-fallback`。线程、消息、步骤卡、停靠区、输入框是 `features/chat/` 内的应用层组件，
   直接用 `@assistant-ui/react` 的基元（`ThreadPrimitive`、`MessagePrimitive`、`ActionBarPrimitive`）组合。拷入 `web/src/components/assistant-ui/`（`components.json` 产生的落点）的只有
   `markdown-text`、`reasoning`、`tool-group`，各自在首个消费它的任务组拷入，连同它们依赖的 `ui` 组件（`collapsible`、`skeleton` 等，不含 `avatar`）；
-  拷入组件需要的 npm 包（如 `tw-shimmer`）随它加入并登记 `ATTRIBUTION.md`。拷入文件只做 A 定下的六类修改；行为定制（链接惰性、图片显示为 alt 文本、块次序、
+  拷入组件需要的 npm 包（如 `tw-shimmer`）随它加入并登记 `ATTRIBUTION.md`。拷入文件只做 A 定下的六类修改（owner 2026-10-04 把第六类从「渲染被丢弃的 `children`」放宽为「把被丢弃的调用方 `children` 或属性原样透传给底层基元，只转发、不写默认值」，`markdown-text` 的 `smooth` 即按此透传）；行为定制（链接惰性、图片显示为 alt 文本、块次序、
   失败自动展开、不出现编辑/分支/附件 UI）全部在应用层——经 `markdown-text` 的 `components` 覆盖，以及组合 `tool-group` / `reasoning` 的 Root/Trigger/Content。
 - 每个分片（不只是每组）在同一 PR 里删除它替换的旧 `.tsx` 与旧 CSS、改写被打破的断言（单元测试与 ui-walk）、登记已迁移文件。
 - 测试纪律沿用 A：按角色/可访问名的行为断言原样通过；只删除或改写读 `.css`、按旧类名选择的断言；规格条文在本 change 被改的行为，其断言随条文改写。

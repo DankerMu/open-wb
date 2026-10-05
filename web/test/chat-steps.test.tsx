@@ -133,7 +133,7 @@ describe("(S2) step cards render icon, Chinese badge, summary and collapsed raw 
       expect(messagesRaw).not.toMatch(pattern);
     }
     expect(messagesRaw).not.toContain("--wb-palette");
-    expect(blockBody(messages, /@media \(max-width: 760px\) \{/)).toContain(".chat-msg-user");
+    expect(blockBody(messages, /@media \(max-width: 760px\) \{/)).toContain(".chat-thread");
 
     const chatRaw = readRepoFile("web/src/features/chat/chat.css");
     expect(chatRaw.split("\n").length).toBeLessThanOrEqual(800);

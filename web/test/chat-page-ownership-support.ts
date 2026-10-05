@@ -16,7 +16,9 @@ export const SESSION_BUSY = "会话正在生成，请稍候";
 export const BUSINESS_ERROR = "Agent execution failed";
 export const BASH_START_DETAIL = '{"command":"echo workbuddy-smoke"}';
 export const BASH_OUTPUT = "workbuddy-smoke";
-export const STREAMED_BODY = "Hello \u0000\uFEFF中文 😀";
+const STREAMED_BODY = "Hello \u0000\uFEFF中文 😀";
+/** 正文经 Markdown 渲染后的样子：段尾空白不保留，NUL 显示为 U+FFFD（CommonMark 规则）。 */
+export const STREAMED_SHOWN = "Hello \uFFFD\uFEFF中文 😀";
 export const exactText = { exact: true, collapseWhitespace: false, trim: false } as const;
 export const promptAccepted = { userMessageId: -3, assistantMessageId: 0 };
 export const CREATED_MESSAGES = `/api/sessions/${CREATED_SESSION_ID}/messages`;
@@ -44,7 +46,7 @@ export async function mountRunningSnapshot(snapshot: ChatMessageSnapshot) {
     [SESSION_MESSAGES]: () => jsonResponse(snapshot),
   });
   const messages = await findMessageArea();
-  expect(await within(messages).findByText("Hello ", exactText)).toBeTruthy();
+  expect(await within(messages).findByText("Hello", exactText)).toBeTruthy();
   return { ...mounted, messages, source: latestSource() };
 }
 

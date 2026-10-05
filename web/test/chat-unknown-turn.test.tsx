@@ -93,7 +93,9 @@ function userArticles() {
 }
 
 function bodies(articles: HTMLElement[]) {
-  return articles.map((article) => article.querySelector(".chat-md")?.textContent ?? "");
+  return articles.map(
+    (article) => article.querySelector('[data-slot="message-body"]')?.textContent ?? "",
+  );
 }
 
 function textarea() {

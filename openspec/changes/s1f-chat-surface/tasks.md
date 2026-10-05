@@ -33,16 +33,16 @@ Minimal mergeable slice: atomic - `page.tsx` 的状态与 `turn-actions.ts` 的 
 
 ## 2. chat-web — 运行时与线程骨架
 
-- [ ] 2.1 依赖与拷入：`web/package.json` 加 `@assistant-ui/react`、`@assistant-ui/react-markdown`、`remark-gfm`；`ATTRIBUTION.md` 登记；
+- [x] 2.1 依赖与拷入：`web/package.json` 加 `@assistant-ui/react`、`@assistant-ui/react-markdown`、`remark-gfm`；`ATTRIBUTION.md` 登记；
   只拷入本组消费的 `markdown-text` 到 `web/src/components/assistant-ui/`（`components.json` 产生的落点），连同它依赖的 `ui` 组件与 npm 包；文案中文化。
-- [ ] 2.2 `runtime-convert.ts`（纯函数，design D1）与其单元测试：id、text / reasoning / tool-call part 的映射与顺序、状态映射、`metadata.custom` 透传。
-- [ ] 2.3 运行时接入：`useExternalStoreRuntime`（`messages`、`isRunning`、`convertMessage`、`onNew`、`onCancel`、`onReload`）。`isRunning` 仅当选中会话末条消息是状态为 `running` 的助手消息时为真
+- [x] 2.2 `runtime-convert.ts`（纯函数，design D1）与其单元测试：id、text / reasoning / tool-call part 的映射与顺序、状态映射、`metadata.custom` 透传。
+- [x] 2.3 运行时接入：`useExternalStoreRuntime`（`messages`、`isRunning`、`convertMessage`、`onNew`、`onCancel`、`onReload`）。`isRunning` 仅当选中会话末条消息是状态为 `running` 的助手消息时为真
   （运行时不注入乐观的助手占位）；`onNew` 委托给现有发送路径，没有 UI 调用运行时的 composer；`生成中` / `停止` / 锁定仍由应用自己的 `generating` 驱动（design D1）。
   测试：历史加载中、分叉进行中时输入框禁用但线程不显示运行态；欢迎态首次发送后，在 `turn.start` 或快照给出助手消息之前线程里没有助手块。
-- [ ] 2.4 线程骨架：应用层组件，直接用 `ThreadPrimitive` / `MessagePrimitive` 组合。消息根元素是 `article`（可访问名 `用户` / `助手`），带 `data-message-id` 与搜索命中标记 `aria-current`；
+- [x] 2.4 线程骨架：应用层组件，直接用 `ThreadPrimitive` / `MessagePrimitive` 组合。消息根元素是 `article`（可访问名 `用户` / `助手`），带 `data-message-id` 与搜索命中标记 `aria-current`；
   用户气泡（保留空白）、助手块（头像、Markdown 正文、运行中光标、错误文本、`已停止` 徽章与空正文占位 `（已停止生成）`）；
   思考、步骤卡、审批条、文件变更卡、产物卡、操作行此刻仍用旧组件，按 D4 的块次序挂在助手消息的插槽里（审批条暂留在消息内，组 6 移走）。旧输入框表单仍在线程下方。
-- [ ] 2.5 Markdown（design D5）：不生成源 HTML 元素；链接与现状一样惰性（只显示可见文本、丢弃目标、不生成 `a` 元素）；图片渲染为 alt 文本、不加载；
+- [x] 2.5 Markdown（design D5）：不生成源 HTML 元素；链接与现状一样惰性（只显示可见文本、丢弃目标、不生成 `a` 元素）；图片渲染为 alt 文本、不加载；
   这些规则经 `markdown-text` 的 `components` 覆盖写在应用层。代码块复制成功只换图标，失败在按钮旁就地显示 `role="alert"` 的 `复制失败`。
   测试含注入样本：`<script>`、`javascript:` 链接、`https:` 链接、`data:` 链接、图片。
 - [ ] 2.6 滚动（design D4）：`ThreadPrimitive.Viewport` + 可访问名为 `回到最新` 的回底按钮；新滚动层继续提供对话内搜索使用的 `scrollToMessage` 句柄，

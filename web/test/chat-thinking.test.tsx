@@ -322,8 +322,8 @@ function articles() {
 }
 
 function mainOf(article: HTMLElement) {
-  const main = article.querySelector(".chat-msg-main");
-  if (!main) throw new Error("助手消息缺少 .chat-msg-main");
+  const main = article.querySelector('[data-slot="message-content"]');
+  if (!main) throw new Error("助手消息缺少 message-content");
   return main;
 }
 
@@ -342,9 +342,9 @@ function bodyText(block = fold()) {
   return block.querySelector("div.thinking-body")?.textContent;
 }
 
-/** Rendered answer text (`.chat-md`) of the first assistant. */
+/** Rendered answer text (`message-body`) of the first assistant. */
 function answerText() {
-  return articles()[0]?.querySelector(".chat-md")?.textContent;
+  return articles()[0]?.querySelector('[data-slot="message-body"]')?.textContent;
 }
 
 function toggle(block = fold()) {
@@ -377,7 +377,7 @@ describe("深度思考过程 fold on the chat page", () => {
 
     const block = fold();
     const main = mainOf(articles()[0] as HTMLElement);
-    const text = main.querySelector(".chat-md") as Element;
+    const text = main.querySelector('[data-slot="message-body"]') as Element;
     expect(main.firstElementChild).toBe(block);
     expect(block.compareDocumentPosition(text) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const summary = block.querySelector("summary") as HTMLElement;
@@ -579,12 +579,11 @@ describe("深度思考过程 fold on the chat page", () => {
     expect(block.open).toBe(false);
     expect(bodyText()).toBe("想到一半");
     const main = mainOf(articles()[0] as HTMLElement);
-    expect([...main.children].map((part) => `${part.localName}.${part.className}`)).toEqual([
-      "details.thinking-block",
-      "div.chat-md",
-      "p.ui-alert chat-msg-error",
-      "div.chat-msg-actions",
-    ]);
+    expect(
+      [...main.children].map(
+        (part) => part.getAttribute("data-slot") ?? `${part.localName}.${part.className}`,
+      ),
+    ).toEqual(["details.thinking-block", "message-body", "message-error", "div.chat-msg-actions"]);
     expect(screen.getByRole("alert")).toBe(main.children[2]);
   });
 
@@ -598,7 +597,7 @@ describe("深度思考过程 fold on the chat page", () => {
     expect(foldOf()).toBeNull();
   });
 
-  it("T10 orders fold, approvals, body, step, stopped badge and actions", async () => {
+  it("T10 orders fold, body, step, approvals, stopped badge and actions", async () => {
     const writeText = stubClipboard();
     await mountThread(
       turnSnapshot("stopped", {
@@ -611,18 +610,20 @@ describe("深度思考过程 fold on the chat page", () => {
     const article = articles()[0] as HTMLElement;
     const parts = [...mainOf(article).children];
 
-    expect(parts.map((part) => `${part.localName}.${part.className}`)).toEqual([
+    expect(
+      parts.map((part) => part.getAttribute("data-slot") ?? `${part.localName}.${part.className}`),
+    ).toEqual([
       "details.thinking-block",
-      "div.chat-approvals",
-      "div.chat-md",
+      "message-body",
       "section.chat-step",
-      "p.chat-msg-stopped",
+      "div.chat-approvals",
+      "message-stopped",
       "div.chat-msg-actions",
     ]);
     expect(fold().open).toBe(false);
-    expect(within(parts[1] as HTMLElement).getAllByRole("group")).toHaveLength(1);
-    expect(parts[2]?.textContent).toBe("部分回答");
-    expect(within(article).getByRole("region", { name: "bash" })).toBe(parts[3]);
+    expect(within(parts[3] as HTMLElement).getAllByRole("group")).toHaveLength(1);
+    expect(parts[1]?.textContent).toBe("部分回答");
+    expect(within(article).getByRole("region", { name: "bash" })).toBe(parts[2]);
     expect(within(article).getByRole("status", { name: "助手消息 已停止" })).toBe(parts[4]);
     expect(await copiedTexts(writeText)).toEqual([["部分回答"]]);
   });

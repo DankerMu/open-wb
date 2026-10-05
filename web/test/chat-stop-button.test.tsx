@@ -216,9 +216,9 @@ describe("stop button: layout and outcomes", () => {
     const badge = within(article).getByRole("status", { name: BADGE });
     expect(badge.textContent).toBe("已停止");
     expect(within(article).queryByRole("alert")).toBeNull();
-    const body = article.querySelector(".chat-md");
+    const body = article.querySelector('[data-slot="message-body"]');
     expect(body?.textContent).toBe(PLACEHOLDER);
-    expect(article.querySelector(".ui-caret")).toBeNull();
+    expect(article.querySelector('[data-slot="message-caret"]')).toBeNull();
     expect(within(article).getByRole("status", { name: "bash 已停止" })).toBeTruthy();
     const listed = within(nav()).getByRole("status", { name: "saved title 已停止" });
     expect(
@@ -247,7 +247,9 @@ describe("stop button: layout and outcomes", () => {
     expect(stopButton().disabled).toBe(false);
     expectRunningComposer();
     expect(within(nav()).getByRole("status", { name: "saved title 运行中" })).toBeTruthy();
-    expect((assistants()[0] as HTMLElement).querySelector(".ui-caret")).not.toBeNull();
+    expect(
+      (assistants()[0] as HTMLElement).querySelector('[data-slot="message-caret"]'),
+    ).not.toBeNull();
     expect(calls(fetchMock, MESSAGES)).toHaveLength(reads);
 
     page.snapshot = doneSnapshot("完");
@@ -511,14 +513,14 @@ describe("stop button: stopped presentation from snapshots", () => {
     const placeholders = articles.map((article) => within(article).queryAllByText(PLACEHOLDER));
     expect(placeholders.map((list) => list.length)).toEqual([0, 1, 0, 0]);
     const [first, second] = articles as [HTMLElement, HTMLElement];
-    expect(first.querySelector(".chat-md")?.textContent).toBe("部分回答");
+    expect(first.querySelector('[data-slot="message-body"]')?.textContent).toBe("部分回答");
     expect(within(first).queryByRole("alert")).toBeNull();
     expect(within(second).queryByRole("alert")).toBeNull();
     expect(within(first).queryByRole("button", { name: "复制" })).not.toBeNull();
     expect(within(second).queryByRole("button", { name: "复制" })).toBeNull();
     const badge = badges[0]?.[0] as HTMLElement;
     expect(badge.textContent).toBe("已停止");
-    expect(follows(first.querySelector(".chat-md") as Element, badge)).toBe(true);
+    expect(follows(first.querySelector('[data-slot="message-body"]') as Element, badge)).toBe(true);
     expect(follows(badge, first.querySelector(".chat-msg-actions") as Element)).toBe(true);
     expect(within(nav()).getByRole("status", { name: "saved title 失败" })).toBeTruthy();
     expect(within(first).getByRole("status", { name: "bash 已停止" })).toBeTruthy();

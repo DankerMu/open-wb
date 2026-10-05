@@ -171,7 +171,7 @@ describe("键盘与按钮 (S3, S4, S5)", () => {
     press("Escape");
 
     expectSearchClosed();
-    expect(document.querySelectorAll(".chat-msg--search-current")).toHaveLength(0);
+    expect(document.querySelectorAll("article[aria-current]")).toHaveLength(0);
     expect(document.activeElement).toBe(searchButton());
 
     toggleSearch();
@@ -261,12 +261,6 @@ describe("消息标记与跳转调用 (S6, S7)", () => {
       "助手",
       "用户",
       "助手",
-    ]);
-    expect(articles.map((article) => article.className)).toEqual([
-      "chat-msg chat-msg-user",
-      "chat-msg chat-msg-assistant chat-msg--search-current",
-      "chat-msg chat-msg-user",
-      "chat-msg chat-msg-assistant",
     ]);
     expect(articles.map((article) => article.hasAttribute("aria-current"))).toEqual([
       false,
@@ -529,12 +523,6 @@ describe("标题未知与模态层 (S19, S20)", () => {
 
 describe("样式契约 (S18)", () => {
   const css = () => stripComments(readRepoFile("web/src/features/chat/messages.css"));
-
-  it("S18 the highlight is the brand tint token", () => {
-    expect(ruleBody(css(), ".chat-msg--search-current")).toContain(
-      "background: var(--wb-brand-primary-subtle)",
-    );
-  });
 
   it("S18 the search box is a fixed row", () => {
     expect(ruleBody(css(), ".chat-search")).toContain("flex: none;");

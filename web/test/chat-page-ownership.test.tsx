@@ -28,7 +28,7 @@ import {
   SESSION_BUSY,
   SESSION_MESSAGES,
   SESSION_PROMPT,
-  STREAMED_BODY,
+  STREAMED_SHOWN,
   typeAndSend,
   UNKNOWN_MESSAGES,
   UNKNOWN_SESSION_ID,
@@ -125,7 +125,7 @@ describe("chat page create and acceptance ownership", () => {
     });
     currentSnapshot = completedCreatedSnapshot();
 
-    expect(await within(messages).findByText(STREAMED_BODY, exactText)).toBeTruthy();
+    expect(await within(messages).findByText(STREAMED_SHOWN, exactText)).toBeTruthy();
     expect(within(messages).getByText(PROMPT, { exact: true })).toBeTruthy();
     expect(within(messages).getByText("bash", { exact: true })).toBeTruthy();
     expect(within(messages).getByText(BASH_START_DETAIL, { exact: true })).toBeTruthy();
@@ -308,7 +308,7 @@ describe("chat page isolation and errors", () => {
       source.emitData("error", "1:4", { messageId: 0, message: BUSINESS_ERROR });
     });
     expect(await within(messages).findByText(BUSINESS_ERROR, { exact: true })).toBeTruthy();
-    expect(within(messages).getByText("Hello ", exactText)).toBeTruthy();
+    expect(within(messages).getByText("Hello", exactText)).toBeTruthy();
 
     act(() => {
       source.emitTransport(2);
@@ -359,7 +359,7 @@ describe("chat page isolation and errors", () => {
       true,
     );
     const messages = await findMessageArea();
-    expect(await within(messages).findByText("Hello ", exactText)).toBeTruthy();
+    expect(await within(messages).findByText("Hello", exactText)).toBeTruthy();
     const source = latestSource();
     view.unmount();
     expect(source.closeCount).toBeGreaterThan(0);

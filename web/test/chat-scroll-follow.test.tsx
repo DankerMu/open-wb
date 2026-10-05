@@ -81,7 +81,10 @@ function jumpButton() {
 }
 
 function assistantText(): string {
-  return document.querySelector(".chat-msg-assistant .chat-md")?.textContent ?? "";
+  return (
+    document.querySelector('article[aria-label="助手"] [data-slot="message-body"]')?.textContent ??
+    ""
+  );
 }
 
 function userScroll(scrollTop: number) {
