@@ -1,4 +1,4 @@
-/* Chat message area (the not-yet-rebuilt blocks: approvals, step cards, cards,
+/* Chat message area (the not-yet-rebuilt blocks: cards,
    action row, search box, slash panel), split from chat.css; sources as noted per block.
    The thread column, message bubbles, Markdown body, caret and search highlight are Tailwind
    classes in message-thread.tsx / markdown-body.tsx; the thinking fold is thinking-fold.tsx; the
@@ -7,87 +7,9 @@
    Design tokens from WorkBuddy 5.3.11 via web/src/styles/tokens.css.
 */
 
-/* Approval bars adapted from resource/workbuddy-live-demo.html:475-490 (.approval, .appr-*);
-   the demo .bar/.cd countdown and the literal-colored .appr-btn are replaced by one countdown
-   sentence and ui Button variants. The fieldset is reset to a plain flex row. */
-.chat-approvals {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-}
-
-.chat-approval {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  min-width: 0;
-  min-inline-size: 0;
-  margin: 0;
-  padding: 13px 16px;
-  border: 1px solid var(--wb-border-default);
-  border-left: 3px solid var(--wb-status-warning);
-  border-radius: 12px;
-  background: var(--wb-status-warning-soft-bg);
-}
-
-.chat-approval--allow {
-  border-left-color: var(--wb-status-success);
-  background: var(--wb-status-success-soft-bg);
-}
-
-.chat-approval--deny {
-  border-left-color: var(--wb-status-error);
-  background: var(--wb-status-error-soft-bg);
-}
-
-.chat-approval-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  font-size: 13px;
-  font-weight: 650;
-  color: var(--wb-status-warning-text);
-}
-
-.chat-approval--allow .chat-approval-head {
-  color: var(--wb-status-success-text);
-}
-
-.chat-approval--deny .chat-approval-head {
-  color: var(--wb-status-error-text);
-}
-
-.chat-approval-tool {
-  font-weight: 400;
-}
-
-.chat-approval-body {
-  margin: 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font-size: 12.5px;
-  line-height: 1.6;
-  color: var(--wb-text-secondary);
-}
-
-.chat-approval-countdown {
-  margin: 0;
-  font-size: 12.5px;
-  color: var(--wb-text-secondary);
-}
-
-.chat-approval-ops {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-}
-
 /* File-change card adapted from resource/workbuddy-live-demo.html:519-526 (.file-changes-card,
-   .file-changes-head, .file-change-*); the head carries no icon. The fieldset reset mirrors
-   .chat-approval and the 查看详情 button reuses .chat-msg-action. The artifact card and the list of
+   .file-changes-head, .file-change-*); the head carries no icon. The fieldset is reset to a plain
+   block and the 查看详情 button reuses .chat-msg-action. The artifact card and the list of
    the 产物面板 drawer (issue 537, a div: the fieldset reset is a no-op there) share the frame. */
 .file-changes-card,
 .artifact-card,

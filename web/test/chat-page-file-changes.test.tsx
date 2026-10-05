@@ -675,7 +675,7 @@ describe("文件变更 card on the chat page", () => {
       "reasoning-root",
       "message-body",
       "tool-group-root",
-      "div.chat-approvals",
+      "approval-records",
       "fieldset.file-changes-card",
       "fieldset.artifact-card",
       "message-stopped",

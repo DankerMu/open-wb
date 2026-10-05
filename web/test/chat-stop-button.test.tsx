@@ -340,7 +340,9 @@ describe("stop button: layout and outcomes", () => {
       expiresAt: Date.now() + 60_000,
     });
     const article = assistants()[0] as HTMLElement;
-    const group = within(article).getByRole("group", { name: "需要你的确认" });
+    expect(within(article).queryAllByRole("group", { name: "需要你的确认" })).toHaveLength(0);
+    const dock = document.querySelector('[data-slot="composer-dock"]') as HTMLElement;
+    const group = within(dock).getByRole("group", { name: "需要你的确认" });
     expect(
       (within(group).getByRole("button", { name: "允许" }) as HTMLButtonElement).disabled,
     ).toBe(false);

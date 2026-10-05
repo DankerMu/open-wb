@@ -254,27 +254,30 @@ export function useTurnActions({
     [installSnapshot, openSource, ownsSessionWrite],
   );
 
-  /** Resolves `true` when the bar may answer again (inline error shown); never rejects. */
+  /**
+   * Resolves the message to show inside the prompt card (which may then answer again), or `null`
+   * when nothing is to be shown: accepted, 409 `approval_settled` (silent reconcile), 401, or a
+   * result the page no longer owns. Never rejects and never writes the composer's inline error.
+   */
   const answerApproval = useCallback(
-    (approvalId: number, decision: "allow" | "deny"): Promise<boolean> => {
+    (approvalId: number, decision: "allow" | "deny"): Promise<string | null> => {
       const ownedClient = clientRef.current;
       const sessionId = requestedSessionRef.current;
       if (sessionId === null) {
-        return Promise.resolve(false);
+        return Promise.resolve(null);
       }
       setPromptError(null);
       return ownedClient.decideApproval(sessionId, approvalId, decision).then(
-        () => false,
+        () => null,
         (error: unknown) => {
           if (!ownsSessionWrite(ownedClient, sessionId) || isUnauthorized(error)) {
-            return false;
+            return null;
           }
           if (isApprovalSettled(error)) {
             reconcileSettled(ownedClient, sessionId);
-            return false;
+            return null;
           }
-          setPromptError({ client: ownedClient, sessionId, message: errorMessage(error) });
-          return true;
+          return errorMessage(error);
         },
       );
     },

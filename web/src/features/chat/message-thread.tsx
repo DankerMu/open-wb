@@ -1,16 +1,17 @@
 // 消息线程骨架（design D4）：应用层组件，直接由 ThreadPrimitive / MessagePrimitive 组合；滚动层在
 // thread-viewport.tsx，思考折叠在 thinking-fold.tsx，工具调用组在 tool-call-group.tsx，操作行在
-// message-action-row.tsx。审批条、文件变更卡与产物卡此刻仍是旧组件，按 D4 的块次序挂在助手消息里。
+// message-action-row.tsx，已结算审批记录在 approval-card.tsx（待决审批不在消息里，见 composer-dock.tsx）。
+// 文件变更卡与产物卡此刻仍是旧组件，按 D4 的块次序挂在助手消息里。
 import {
   AssistantRuntimeProvider,
   MessagePrimitive,
   type MessageState,
   ThreadPrimitive,
 } from "@assistant-ui/react";
-import { type ComponentProps, memo, type Ref } from "react";
+import { memo, type Ref } from "react";
 import type { ApiClient } from "../../lib/api.js";
 import { BrandMark, Icon } from "../../ui/index.js";
-import { ApprovalBars } from "./approval-bar.js";
+import { ApprovalRecords } from "./approval-card.js";
 import { ArtifactCards } from "./artifact-card.js";
 import { FileChangesCard } from "./file-changes-card.js";
 import { MarkdownBody } from "./markdown-body.js";
@@ -23,8 +24,6 @@ import { ToolCallGroup } from "./tool-call-group.js";
 import { useThreadRuntime } from "./use-thread-runtime.js";
 import type { Workspace } from "./workspace-list.js";
 
-type AnswerApproval = ComponentProps<typeof ApprovalBars>["onAnswer"];
-
 type ThreadProps = {
   /** 当前账号的 API client；产物卡经它按需拉取预览。 */
   client: ApiClient;
@@ -32,7 +31,6 @@ type ThreadProps = {
   currentId: number | null;
   /** 输入框锁定期间分叉与重新生成禁用，零消息时也不显示空态。 */
   locked: boolean;
-  onAnswerApproval: AnswerApproval;
   onFork(messageId: number): Promise<void>;
   onRegenerate(): Promise<boolean>;
   onSend(prompt: string): void;
@@ -133,7 +131,6 @@ const AssistantMessage = memo(function AssistantMessage({
   current,
   custom,
   locked,
-  onAnswerApproval,
   onRegenerate,
   regenerable,
   text,
@@ -144,7 +141,6 @@ const AssistantMessage = memo(function AssistantMessage({
   current: boolean;
   custom: ChatMessageCustom;
   locked: boolean;
-  onAnswerApproval: AnswerApproval;
   onRegenerate: ThreadProps["onRegenerate"];
   /** 仅转录末条助手消息、且会话状态允许时为真。 */
   regenerable: boolean;
@@ -172,7 +168,7 @@ const AssistantMessage = memo(function AssistantMessage({
           {thinking ? <ThinkingFold running={running} text={thinking} /> : null}
           <MessageBody status={status} text={text} />
           <ToolCallGroup steps={steps} />
-          <ApprovalBars approvals={approvals} onAnswer={onAnswerApproval} />
+          <ApprovalRecords approvals={approvals} />
           <MessageError error={error} />
           <FileChangesCard steps={steps} workspace={workspace} />
           <ArtifactCards client={client} steps={steps} workspace={workspace} />
@@ -223,7 +219,6 @@ export function Thread({
   client,
   currentId,
   locked,
-  onAnswerApproval,
   onFork,
   onRegenerate,
   onSend,
@@ -260,7 +255,6 @@ export function Thread({
                     current={current}
                     custom={custom}
                     locked={locked}
-                    onAnswerApproval={onAnswerApproval}
                     onRegenerate={onRegenerate}
                     regenerable={message.id === regenerableId}
                     text={text}

@@ -287,7 +287,9 @@ describe("unknown turn resync: own prompt", () => {
 
   async function answerPending(fetchMock: ReturnType<typeof renderChatPage>["fetchMock"]) {
     const turn = assistantArticles()[1] as HTMLElement;
-    const group = within(turn).getByRole("group", { name: PENDING });
+    expect(within(turn).queryAllByRole("group", { name: PENDING })).toHaveLength(0);
+    const dock = document.querySelector('[data-slot="composer-dock"]') as HTMLElement;
+    const group = within(dock).getByRole("group", { name: PENDING });
     fireEvent.click(within(group).getByRole("button", { name: "允许" }));
     await flush();
     const posted = calls(fetchMock, `/api/sessions/${SESSION_ID}/approvals/9`);
@@ -303,7 +305,7 @@ describe("unknown turn resync: own prompt", () => {
     expect(bodies(assistantArticles())[0]).toBe("earlier");
   }
 
-  it("P5 shows the approval bar from the recovery snapshot when events precede the 202", async () => {
+  it("P5 shows the approval prompt card from the recovery snapshot when events precede the 202", async () => {
     const { fetchMock, prompt, reads, source } = await sendPrompt();
     emitApprovalTurn(source);
     await flush();
@@ -322,7 +324,7 @@ describe("unknown turn resync: own prompt", () => {
     expect(reads()).toBe(5);
   });
 
-  it("P5′ shows the approval bar after the 202 reconcile when the 202 comes first", async () => {
+  it("P5′ shows the approval prompt card after the 202 reconcile when the 202 comes first", async () => {
     const { fetchMock, prompt, reads, source } = await sendPrompt();
     prompt.resolve(jsonResponse({ userMessageId: 1, assistantMessageId: 2 }, 202));
     await flush();
