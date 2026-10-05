@@ -1,12 +1,14 @@
 // 对话内搜索（issue 538）测试的夹具与页面查询：会话快照、顶栏按钮与搜索框的读取、快照重载、
-// 转录区的滚动度量与 `scrollIntoView` 记录桩、直接挂载的 FollowTranscript。页面搭法来自
+// 转录区的滚动度量与 `scrollIntoView` 记录桩、直接挂载的 ThreadViewport。页面搭法来自
 // chat-page-support.tsx 与 chat-page-ownership-support.ts（不改它们）。供 search-match.test.ts 与
 // chat-page-search*.test.tsx 使用。
 import "./radix-platform.js";
+import { AssistantRuntimeProvider } from "@assistant-ui/react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { createRef } from "react";
+import { createRef, type Ref } from "react";
 import { afterEach, beforeEach, expect, vi } from "vitest";
-import { FollowTranscript, type TranscriptHandle } from "../src/features/chat/scroll-follow.js";
+import { ThreadViewport, type TranscriptHandle } from "../src/features/chat/thread-viewport.js";
+import { useThreadRuntime } from "../src/features/chat/use-thread-runtime.js";
 import {
   assistantMessage,
   type Message,
@@ -91,7 +93,7 @@ export function runningConversation(question: string, content: string): Snapshot
 /** `[data-message-id, argument]` of every `scrollIntoView` call of the current case, in order. */
 export const jumps: Array<[string | null, unknown]> = [];
 
-/* jsdom has no layout. The three scroll metrics of every `.chat-transcript` read from `geometry`
+/* jsdom has no layout. The three scroll metrics of every thread viewport read from `geometry`
    once `installGeometry()` ran; a write (the page only writes `scrollTop`) is clamped to the
    scrollable range as a browser does. */
 export const geometry = { scrollHeight: 0, clientHeight: 0, scrollTop: 0 };
@@ -104,7 +106,7 @@ const METRICS = ["scrollHeight", "clientHeight", "scrollTop"] as const;
  */
 export const landing: { scrollTop: number | null } = { scrollTop: null };
 
-const inTranscript = (element: Element) => element.matches(".chat-transcript");
+const inTranscript = (element: Element) => element.matches('[data-slot="thread-viewport"]');
 
 export function installGeometry() {
   Object.assign(geometry, { scrollHeight: 3000, clientHeight: 500, scrollTop: 0 });
@@ -280,26 +282,43 @@ export function toasts() {
   return Array.from(document.querySelectorAll(".ui-toast-message"), (node) => node.textContent);
 }
 
+const settled = async () => true;
+
+/** A bare thread viewport over an empty runtime, holding the messages 1 and 2. */
+function BareViewport({ handleRef }: { handleRef: Ref<TranscriptHandle> }) {
+  const runtime = useThreadRuntime({
+    messages: [],
+    onRegenerate: settled,
+    onSend: () => undefined,
+    onStop: settled,
+  });
+  return (
+    <AssistantRuntimeProvider runtime={runtime}>
+      <ThreadViewport handleRef={handleRef}>
+        <section>
+          <article data-message-id="1">一</article>
+          <article data-message-id="2">二</article>
+        </section>
+      </ThreadViewport>
+    </AssistantRuntimeProvider>
+  );
+}
+
 /**
- * A bare FollowTranscript holding the messages 1 and 2, beside an element outside it that carries
- * the id 7. `jump(id)` calls `scrollToMessage(id)` on the handle the transcript filled.
+ * A bare thread viewport holding the messages 1 and 2, beside an element outside it that carries
+ * the id 7. `jump(id)` calls `scrollToMessage(id)` on the handle the viewport filled.
  */
 export function renderTranscript() {
   const handle = createRef<TranscriptHandle>();
   render(
     <div>
-      <FollowTranscript content={null} handleRef={handle}>
-        <section>
-          <article data-message-id="1">一</article>
-          <article data-message-id="2">二</article>
-        </section>
-      </FollowTranscript>
+      <BareViewport handleRef={handle} />
       <article data-message-id="7">转录区之外</article>
     </div>,
   );
   return (id: number) => {
     const transcript = handle.current;
-    if (!transcript) throw new Error("FollowTranscript 没有填充 handleRef");
+    if (!transcript) throw new Error("ThreadViewport 没有填充 handleRef");
     act(() => transcript.scrollToMessage(id));
   };
 }

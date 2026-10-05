@@ -10,16 +10,23 @@ import {
 import { cleanupChatPage, renderChatPage } from "./chat-page-support.js";
 import { chatSnapshot, latestSource, SESSION_ID } from "./chat-stream-support.js";
 import { calls, deferredResponse, jsonResponse } from "./support.js";
-import { readRepoFile, ruleBody, stripComments } from "./ui-support.js";
 
-/* jsdom has no layout: scroll metrics of the `.chat-transcript` element are mocked at the
-   prototype level so that even the first mount's layout effect is observable. */
+/* jsdom has no layout: scroll metrics of the thread viewport (the scroll container, selected by
+   its `data-slot`) are mocked at the prototype level so that even the first mount's layout effect
+   is observable. */
+const VIEWPORT = '[data-slot="thread-viewport"]';
 const METRIC_NAMES = ["scrollHeight", "clientHeight", "scrollTop"] as const;
 const metrics = { scrollHeight: 3000, clientHeight: 500, scrollTop: 0 };
 let seq = 3;
+/** When set, the viewport's `scrollHeight` is read from the DOM it holds at that moment. */
+let renderedHeight: ((viewport: HTMLElement) => number) | null = null;
+
+function scrollHeightOf(viewport: HTMLElement): number {
+  return renderedHeight ? renderedHeight(viewport) : metrics.scrollHeight;
+}
 
 function isTranscript(element: HTMLElement): boolean {
-  return element.classList.contains("chat-transcript");
+  return element.matches(VIEWPORT);
 }
 
 function installMetrics() {
@@ -29,7 +36,7 @@ function installMetrics() {
   Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
     configurable: true,
     get(this: HTMLElement) {
-      return isTranscript(this) ? metrics.scrollHeight : height?.get?.call(this);
+      return isTranscript(this) ? scrollHeightOf(this) : height?.get?.call(this);
     },
   });
   Object.defineProperty(HTMLElement.prototype, "clientHeight", {
@@ -48,7 +55,7 @@ function installMetrics() {
         top?.set?.call(this, value);
         return;
       }
-      const max = Math.max(metrics.scrollHeight - metrics.clientHeight, 0);
+      const max = Math.max(scrollHeightOf(this) - metrics.clientHeight, 0);
       metrics.scrollTop = Math.min(Math.max(value, 0), max);
     },
   });
@@ -57,6 +64,7 @@ function installMetrics() {
 beforeEach(() => {
   Object.assign(metrics, { scrollHeight: 3000, clientHeight: 500, scrollTop: 0 });
   seq = 3;
+  renderedHeight = null;
   installMetrics();
 });
 
@@ -71,8 +79,8 @@ const runningSnapshot = () =>
   chatSnapshot({ assistantStatus: "running", content: "起始", cursor: { epoch: 1, seq: 3 } });
 
 function transcript(): HTMLElement {
-  const element = document.querySelector<HTMLElement>(".chat-transcript");
-  if (!element) throw new Error("expected a .chat-transcript element");
+  const element = document.querySelector<HTMLElement>(VIEWPORT);
+  if (!element) throw new Error("expected the thread viewport");
   return element;
 }
 
@@ -140,6 +148,29 @@ describe("(F1) opening a long history starts at the bottom", () => {
       history.resolve(jsonResponse(runningSnapshot()));
     });
     await waitFor(() => expect(assistantText()).toContain("起始"));
+    expect(metrics.scrollTop).toBe(2500);
+    expect(jumpButton()).toBeNull();
+  });
+});
+
+/* The runtime hands new messages to the thread one effect after the page state changed, so a
+   recompute tied to the page state would measure the DOM without them. Here the height is a
+   function of the rendered messages and no resize callback is ever delivered (the platform stub
+   is a no-op): only a recompute in the commit that rendered the messages lands on their bottom. */
+describe("(F1b) the recompute measures the DOM that holds the new messages", () => {
+  it("lands on the bottom of the rendered history without a resize callback", async () => {
+    renderedHeight = (viewport) => 500 + 1250 * viewport.querySelectorAll("article").length;
+    const history = deferredResponse();
+    const { fetchMock } = renderChatPage(`/?session=${SESSION_ID}`, {
+      "/api/sessions": () => jsonResponse({ sessions: [chatSnapshot().session] }),
+      [SESSION_MESSAGES]: () => history.promise,
+    });
+    await waitFor(() => expect(calls(fetchMock, SESSION_MESSAGES)).toHaveLength(1));
+    expect(metrics.scrollTop).toBe(0);
+    await act(async () => {
+      history.resolve(jsonResponse(chatSnapshot()));
+    });
+    expect(screen.getAllByRole("article")).toHaveLength(2);
     expect(metrics.scrollTop).toBe(2500);
     expect(jumpButton()).toBeNull();
   });
@@ -216,39 +247,31 @@ describe("(F6) switching sessions resets follow state", () => {
 });
 
 describe("(F7) welcome state", () => {
-  it("keeps the plain transcript slot directly under .chat-main with no frame or button", async () => {
+  it("renders neither a thread viewport nor the button", async () => {
     renderChatPage("/", { "/api/sessions": () => jsonResponse({ sessions: [] }) });
     expect(
       await screen.findByRole("heading", { level: 1, name: "WorkBuddy，我帮你" }),
     ).toBeTruthy();
-    expect(transcript().parentElement?.classList.contains("chat-main")).toBe(true);
-    userScroll(0);
-    expect(document.querySelector(".chat-transcript-frame")).toBeNull();
+    expect(document.querySelector(VIEWPORT)).toBeNull();
+    expect(screen.queryByRole("region", { name: "消息" })).toBeNull();
     expect(jumpButton()).toBeNull();
   });
 });
 
 describe("(F8) button presentation", () => {
-  it("styles the floating button and its frame with semantic tokens", () => {
-    const css = stripComments(readRepoFile("web/src/features/chat/messages.css"));
-    const button = ruleBody(css, ".chat-jump-latest");
-    expect(button).toContain("position: absolute");
-    expect(button).toContain("background: var(--wb-bg-primary)");
-    expect(button).toContain("box-shadow: var(--wb-shadow-popover)");
-    expect(ruleBody(css, ".chat-transcript-frame")).toContain("position: relative");
-  });
-
   it("renders a decorative chevron-down icon and the name 回到最新 only", async () => {
     await openLongSession();
     userScroll(1000);
     const button = jumpButton();
     if (!button) throw new Error("expected the 回到最新 button");
-    const icon = button.querySelector("svg.ui-icon");
+    const icon = button.querySelector("svg");
     expect(icon?.classList.contains("lucide-chevron-down")).toBe(true);
     expect(icon?.getAttribute("aria-hidden")).toBe("true");
     expect(button.textContent).toBe("回到最新");
     expect(button.getAttribute("type")).toBe("button");
-    expect(button.parentElement?.classList.contains("chat-transcript-frame")).toBe(true);
+    // 浮在滚动容器之外：不随转录滚走。
+    expect(transcript().contains(button)).toBe(false);
+    expect(button.parentElement).toBe(transcript().parentElement);
   });
 });
 
@@ -342,11 +365,17 @@ class SpyResizeObserver {
   }
 }
 
-/** Observers created for a follow transcript (other components may observe other elements). */
+/** Observers that ever observed the thread viewport: the scroll layer's own and the ones the
+    viewport primitive creates for itself (other components may observe other elements). */
 function followObservers(): SpyResizeObserver[] {
   return SpyResizeObserver.instances.filter((spy) =>
     spy.history.some((target) => target instanceof HTMLElement && isTranscript(target)),
   );
+}
+
+/** Observers currently observing `element`. */
+function observing(element: Element): SpyResizeObserver[] {
+  return SpyResizeObserver.instances.filter((spy) => spy.observed.has(element));
 }
 
 function resizeElement(element: Element) {
@@ -359,8 +388,11 @@ function resizeElement(element: Element) {
 
 function thread(): HTMLElement {
   const element = transcript().firstElementChild;
-  if (!(element instanceof HTMLElement) || !element.matches("section.chat-thread")) {
-    throw new Error("expected section.chat-thread as the transcript's content root");
+  if (
+    !(element instanceof HTMLElement) ||
+    element !== screen.getByRole("region", { name: "消息" })
+  ) {
+    throw new Error("expected the 消息 region as the viewport's content root");
   }
   return element;
 }
@@ -416,6 +448,9 @@ describe("(R) size changes without a content change", () => {
     expect(jumpButton()).toBeNull();
   });
 
+  /* The viewport primitive observes the scroll container for itself (and may replace its
+     observers between renders), so more than one observer holds it; the content root is bound by
+     the scroll layer's observer alone, and that one is never replaced within a session. */
   it("(R4) binds the content root once it renders and disconnects on unmount", async () => {
     metrics.scrollHeight = 500;
     const history = deferredResponse();
@@ -424,25 +459,29 @@ describe("(R) size changes without a content change", () => {
       [SESSION_MESSAGES]: () => history.promise,
     });
     await waitFor(() => expect(calls(fetchMock, SESSION_MESSAGES)).toHaveLength(1));
-    const [spy] = followObservers();
-    expect(followObservers()).toHaveLength(1);
+    const mounted = observing(transcript());
+    expect(mounted.length).toBeGreaterThanOrEqual(1);
     expect(transcript().firstElementChild).toBeNull();
-    expect([...(spy?.observed ?? [])]).toEqual([transcript()]);
+    for (const each of mounted) expect([...each.observed]).toEqual([transcript()]);
     await act(async () => {
       metrics.scrollHeight = 3000;
       history.resolve(jsonResponse(runningSnapshot()));
     });
     await waitFor(() => expect(assistantText()).toContain("起始"));
+    const [spy, ...others] = observing(thread());
+    expect(others).toEqual([]);
+    expect(mounted).toContain(spy);
     expect([...(spy?.observed ?? [])]).toEqual([transcript(), thread()]);
     const observedThread = thread();
     await growAndStream(3200, "增量一");
     expect(thread()).toBe(observedThread);
     expect(spy?.history).toHaveLength(2);
     expect(spy?.disconnects).toBe(0);
+    const created = followObservers();
     cleanupChatPage();
-    expect(followObservers()).toHaveLength(1);
+    expect(followObservers()).toEqual(created);
     expect(spy?.disconnects).toBe(1);
-    expect(spy?.observed.size).toBe(0);
+    for (const each of created) expect(each.observed.size).toBe(0);
   });
 
   it("(R4) disconnects on a session switch and observes the new session's content root", async () => {
@@ -454,24 +493,32 @@ describe("(R) size changes without a content change", () => {
       [OTHER_MESSAGES]: () => other.promise,
     });
     await waitFor(() => expect(assistantText()).toContain("起始"));
-    const [first] = followObservers();
-    expect(followObservers()).toHaveLength(1);
+    const first = followObservers();
+    const [firstLayer, ...rest] = observing(thread());
+    expect(rest).toEqual([]);
+    expect(firstLayer?.disconnects).toBe(0);
     await act(async () => {
       await mounted.router.navigate(`/?session=${OTHER_SESSION_ID}`);
     });
     await waitFor(() => expect(calls(mounted.fetchMock, OTHER_MESSAGES)).toHaveLength(1));
-    expect(first?.disconnects).toBe(1);
-    expect(first?.observed.size).toBe(0);
-    const [, second] = followObservers();
-    expect(followObservers()).toHaveLength(2);
-    expect([...(second?.observed ?? [])]).toEqual([transcript()]);
+    expect(firstLayer?.disconnects).toBe(1);
+    for (const each of first) expect(each.observed.size).toBe(0);
+    const second = observing(transcript());
+    expect(second.length).toBeGreaterThanOrEqual(1);
+    for (const each of second) {
+      expect(first).not.toContain(each);
+      expect([...each.observed]).toEqual([transcript()]);
+    }
     await act(async () => {
       metrics.scrollHeight = 4000;
       other.resolve(jsonResponse(otherSnapshot()));
     });
     expect(await screen.findByText("other user", { exact: true })).toBeTruthy();
-    expect([...(second?.observed ?? [])]).toEqual([transcript(), thread()]);
-    expect(second?.disconnects).toBe(0);
+    const [spy, ...others] = observing(thread());
+    expect(others).toEqual([]);
+    expect(second).toContain(spy);
+    expect([...(spy?.observed ?? [])]).toEqual([transcript(), thread()]);
+    expect(spy?.disconnects).toBe(0);
     expect(metrics.scrollTop).toBe(3500);
   });
 
@@ -482,7 +529,7 @@ describe("(R) size changes without a content change", () => {
     await growAndStream(3200, "增量一");
     expect(metrics.scrollTop).toBe(2700);
     expect(jumpButton()).toBeNull();
-    expect(SpyResizeObserver.instances).toHaveLength(0);
+    expect(followObservers()).toHaveLength(0);
   });
 
   it("(R6) a resize that brings a scrolled-up transcript to the bottom pins it and hides 回到最新", async () => {

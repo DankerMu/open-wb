@@ -3,7 +3,7 @@
  * openspec/changes/conversation-search/design.md — a changing message set under an open search,
  * and jumps against the bottom-follow rules. Seams: the jsdom chat page inside the real shell over a
  * stubbed `fetch` and the fake event source, the scroll metrics and `scrollIntoView` (jsdom has
- * neither layout nor that method), and a bare `FollowTranscript`. Expected values are literals
+ * neither layout nor that method), and a bare `ThreadViewport`. Expected values are literals
  * from the spec deltas.
  */
 import { fireEvent, screen } from "@testing-library/react";

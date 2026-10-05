@@ -2,15 +2,15 @@ import type { ComponentProps, FormEvent, ReactNode, Ref } from "react";
 import type { ApiClient } from "../../lib/api.js";
 import { Composer } from "./composer.js";
 import { ComposerFooter } from "./composer-footer.js";
-import { ThreadMessages } from "./message-thread.js";
-import { FollowTranscript, type TranscriptHandle } from "./scroll-follow.js";
+import { Thread } from "./message-thread.js";
 import type { useSlashMenu } from "./slash-menu.js";
 import type { ChatState } from "./stream.js";
+import type { TranscriptHandle } from "./thread-viewport.js";
 import { WelcomeIntro, WelcomePlaybooks } from "./welcome.js";
 import type { WelcomeOptions } from "./welcome-options.js";
 import type { Workspace } from "./workspace-list.js";
 
-type AnswerApproval = ComponentProps<typeof ThreadMessages>["onAnswerApproval"];
+type AnswerApproval = ComponentProps<typeof Thread>["onAnswerApproval"];
 type StopTurn = ComponentProps<typeof Composer>["onStop"];
 
 type ConversationViewProps = {
@@ -89,30 +89,22 @@ export function ConversationView({
           </p>
         ) : null}
         {requestedSessionId ? (
-          <FollowTranscript
-            content={historyView}
-            handleRef={search.handleRef}
+          <Thread
+            client={client}
+            currentId={search.currentId}
             key={requestedSessionId}
-          >
-            {historyView ? (
-              <section aria-label="消息" className="chat-thread">
-                <ThreadMessages
-                  client={client}
-                  currentId={search.currentId}
-                  locked={composerDisabled}
-                  onAnswerApproval={onAnswerApproval}
-                  onFork={onFork}
-                  onRegenerate={onRegenerate}
-                  onSend={onSend}
-                  onStop={onStop}
-                  view={historyView}
-                  workspace={workspace ?? null}
-                />
-              </section>
-            ) : null}
-          </FollowTranscript>
+            locked={composerDisabled}
+            onAnswerApproval={onAnswerApproval}
+            onFork={onFork}
+            onRegenerate={onRegenerate}
+            onSend={onSend}
+            onStop={onStop}
+            scrollHandleRef={search.handleRef}
+            view={historyView}
+            workspace={workspace ?? null}
+          />
         ) : (
-          <div className="chat-transcript">
+          <div className="mt-auto min-w-0 flex-none">
             <WelcomeIntro
               disabled={composerDisabled}
               onPick={onChangeDraft}

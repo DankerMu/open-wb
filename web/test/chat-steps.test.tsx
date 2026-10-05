@@ -4,13 +4,7 @@ import type { ChatMessageSnapshot } from "../src/lib/session-contract.js";
 import { cleanupChatPage, renderChatPage } from "./chat-page-support.js";
 import { chatSnapshot, latestSource, SESSION_ID } from "./chat-stream-support.js";
 import { jsonResponse } from "./support.js";
-import {
-  blockBody,
-  COLOR_LITERAL_PATTERNS,
-  readRepoFile,
-  ruleBody,
-  stripComments,
-} from "./ui-support.js";
+import { COLOR_LITERAL_PATTERNS, readRepoFile, ruleBody, stripComments } from "./ui-support.js";
 
 const messagesPath = `/api/sessions/${SESSION_ID}/messages`;
 const BASH_START = '{"command":"echo workbuddy-smoke"}';
@@ -133,7 +127,6 @@ describe("(S2) step cards render icon, Chinese badge, summary and collapsed raw 
       expect(messagesRaw).not.toMatch(pattern);
     }
     expect(messagesRaw).not.toContain("--wb-palette");
-    expect(blockBody(messages, /@media \(max-width: 760px\) \{/)).toContain(".chat-thread");
 
     const chatRaw = readRepoFile("web/src/features/chat/chat.css");
     expect(chatRaw.split("\n").length).toBeLessThanOrEqual(800);

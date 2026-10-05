@@ -607,7 +607,7 @@ async function step9Search(page: Page, uuid: string, mark: (point: string) => vo
 // 消息落在转录滚动容器内的高度，与两者的纵向范围（视口坐标）。
 async function describePosition(page: Page, message: Locator): Promise<string> {
   const box = await message.boundingBox();
-  const frame = await page.locator(".chat-transcript").boundingBox();
+  const frame = await page.locator('[data-slot="thread-viewport"]').boundingBox();
   if (!box || !frame) return "not rendered";
   const [top, bottom] = [box.y, box.y + box.height];
   const [frameTop, frameBottom] = [frame.y, frame.y + frame.height];

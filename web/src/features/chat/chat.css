@@ -271,14 +271,6 @@
   margin: 0;
 }
 
-.chat-transcript {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-}
-
 .chat-hero {
   margin: 0 0 16px;
   font-size: 30px;
@@ -295,12 +287,6 @@
    its top reachable when a short viewport makes it scroll. */
 .chat-main--welcome {
   overflow-y: auto;
-}
-
-.chat-main--welcome > .chat-transcript {
-  flex: 0 0 auto;
-  overflow: visible;
-  margin-top: auto;
 }
 
 .chat-welcome-intro {

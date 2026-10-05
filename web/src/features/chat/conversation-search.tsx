@@ -11,9 +11,9 @@ import {
   useState,
 } from "react";
 import { Button, Icon, Input } from "../../ui/index.js";
-import type { TranscriptHandle } from "./scroll-follow.js";
 import { matchMessages } from "./search-match.js";
 import type { ChatState } from "./stream.js";
+import type { TranscriptHandle } from "./thread-viewport.js";
 
 /** The open search of one session; `currentId` is the message of the current match. */
 type SearchState = { sessionId: string; query: string; currentId: number | null };
