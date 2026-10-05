@@ -18,6 +18,7 @@ import {
   CODE_TEXT,
   COPY_APP,
   cardTitles,
+  copiedStatus,
   DOWNLOAD_CHART,
   frameOf,
   HTML_TEXT,
@@ -54,7 +55,6 @@ import { imagePreviewResponse } from "./files-fixture.js";
 import { deferredResponse, textPreviewResponse } from "./support.js";
 
 const NOTES = "notes/a.md";
-const COPIED: [string, string] = ["success", "已复制到剪贴板"];
 
 const blobs = artifactCardFixture();
 
@@ -112,14 +112,14 @@ describe("产物卡 state", () => {
     expect(toasts()).toEqual([]);
   });
 
-  const pendingKinds: Array<[string, Change, string, () => Response, string[][], number]> = [
-    ["image", write(CHART), DOWNLOAD_CHART, () => imagePreviewResponse(), [], 1],
-    ["code", edit(APP, 2, 1), COPY_APP, () => textPreviewResponse(CODE_TEXT), [COPIED], 0],
+  const pendingKinds: Array<[string, Change, string, () => Response, boolean, number]> = [
+    ["image", write(CHART), DOWNLOAD_CHART, () => imagePreviewResponse(), false, 1],
+    ["code", edit(APP, 2, 1), COPY_APP, () => textPreviewResponse(CODE_TEXT), true, 0],
   ];
 
   it.each(pendingKinds)(
     "H4 disables the action of the %s card while its preview is pending",
-    async (_kind, change, name, response, expectedToasts, expectedDownloads) => {
+    async (_kind, change, name, response, copied, expectedDownloads) => {
       stubClipboard(vi.fn((_text: string) => Promise.resolve()));
       const pending = deferredResponse();
       const page = await openPreviewing([change], () => pending.promise);
@@ -134,6 +134,7 @@ describe("产物卡 state", () => {
       expect(button.disabled).toBe(true);
       expect(previewCalls(page.fetchMock)).toHaveLength(1);
       expect(toasts()).toEqual([]);
+      expect(copiedStatus()).toBeNull();
       expect(clicks).toEqual([]);
 
       await settleDeferredResponse(pending, response());
@@ -141,7 +142,8 @@ describe("产物卡 state", () => {
       await quiesce();
 
       expect(action(name)).toBe(button);
-      expect(toasts()).toEqual(expectedToasts);
+      expect(toasts()).toEqual([]);
+      expect(copiedStatus() !== null).toBe(copied);
       expect(clicks).toHaveLength(expectedDownloads);
       expect(previewCalls(page.fetchMock)).toHaveLength(1);
     },
@@ -214,7 +216,7 @@ describe("产物卡 state", () => {
     expect(toasts()).toEqual([]);
   });
 
-  it("H6 a clipboard write still pending at the session switch completes and is confirmed", async () => {
+  it("H6 a clipboard write still pending at the session switch completes without a toast or a rejection", async () => {
     const written = deferred<void>();
     const writeText = stubClipboard(vi.fn((_text: string) => written.promise));
     const page = await openPreviewing(
@@ -239,7 +241,9 @@ describe("产物卡 state", () => {
         await settle();
       });
 
-      await waitFor(() => expect(toasts()).toEqual([COPIED]));
+      await quiesce();
+      expect(toasts()).toEqual([]);
+      expect(screen.queryByText("已复制")).toBeNull();
     });
     expect(writeText).toHaveBeenCalledTimes(1);
     expect(previewCalls(page.fetchMock)).toHaveLength(1);

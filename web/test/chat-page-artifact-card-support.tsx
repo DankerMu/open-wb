@@ -1,5 +1,5 @@
 // 产物卡（issue 536）测试的夹具与页面查询：预览路由、迟到与 abort 的响应、jsdom 缺的下载/剪贴板接缝、
-// 卡片与 Toast 的读取、切换会话。页面搭法来自 chat-page-file-changes-support.tsx（不改它）。
+// 卡片、就地提示与 Toast 的读取、切换会话。页面搭法来自 chat-page-file-changes-support.tsx（不改它）。
 // 供 chat-page-artifact-card.test.tsx 与 chat-page-artifact-card-state.test.tsx 使用。
 import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, vi } from "vitest";
@@ -114,12 +114,17 @@ export const rejectOnAbort: FetchRoutes[string] = (_path, options) =>
 
 /** Every artifact card on the page, in document order. */
 export function artifactCards() {
-  return [...document.querySelectorAll<HTMLElement>(".artifact-card")];
+  return [...document.querySelectorAll<HTMLElement>('[data-slot="artifact-card"]')];
+}
+
+/** The part of `card` marked `data-slot="artifact-<name>"`. */
+export function slot(card: Element, name: string) {
+  return card.querySelector<HTMLElement>(`[data-slot="artifact-${name}"]`);
 }
 
 /** The file name each artifact card shows, in document order. */
 export function cardTitles() {
-  return artifactCards().map((card) => card.querySelector(".artifact-title")?.textContent);
+  return artifactCards().map((card) => slot(card, "title")?.textContent);
 }
 
 /**
@@ -146,6 +151,27 @@ export function frameOf(dialog: HTMLElement) {
   const frame = dialog.querySelector("iframe");
   if (!frame) throw new Error("预览对话框里没有 iframe");
   return frame;
+}
+
+/** The text of every `role="alert"` line inside the assistant message, in document order. */
+export function alerts() {
+  const message = screen.getByRole("article", { name: "助手", hidden: true });
+  return within(message)
+    .queryAllByRole("alert", { hidden: true })
+    .map((alert) => alert.textContent);
+}
+
+/** `lucide-<name>` of the glyph `button` shows. */
+export function glyphOf(button: Element) {
+  return button
+    .querySelector("svg")
+    ?.getAttribute("class")
+    ?.match(/lucide-([a-z-]+)/)?.[1];
+}
+
+/** The hidden `已复制` status of the assistant message, `null` while there is none. */
+export function copiedStatus() {
+  return within(screen.getByRole("article", { name: "助手" })).queryByText("已复制");
 }
 
 /** `[type, message]` of every toast on screen, oldest first. */

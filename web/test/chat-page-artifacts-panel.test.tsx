@@ -670,11 +670,10 @@ describe("查看详情 (P11)", () => {
 });
 
 describe("产物面板 static contract (P12)", () => {
-  it("P12 styles the drawer list in messages.css with the artifact card frame", () => {
+  it("P12 styles the drawer list in messages.css with a bordered frame", () => {
     const css = stripComments(readRepoFile("web/src/features/chat/messages.css"));
     const frame = ruleBody(css, ".artifacts-panel-list");
 
-    expect(frame).toBe(ruleBody(css, ".artifact-card"));
     expect(frame).toContain("border: 1px solid var(--wb-border-default)");
   });
 

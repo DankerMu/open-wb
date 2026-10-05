@@ -11,6 +11,7 @@ import {
   APP,
   action,
   actions,
+  alerts,
   CHART,
   CODE_TEXT,
   COPY_APP,
@@ -170,13 +171,14 @@ describe("焦点归还 (P13)", () => {
     const pending = await openPending(write(INDEX));
     const [head, foot] = actions(OPEN_INDEX);
     if (!head || !foot) throw new Error("html 产物卡应有卡头与卡脚两个按钮");
-    expect(foot.closest(".artifact-foot")).not.toBeNull();
+    expect(foot.closest('[data-slot="artifact-foot"]')).not.toBeNull();
     await pressAndLoseFocus(foot);
     expect(head.disabled).toBe(true);
 
     await settleDeferredResponse(pending, envelope(404, "not_found", "文件不存在或已被删除"));
 
-    await waitFor(() => expect(toasts()).toEqual([["error", "文件不存在或已被删除"]]));
+    await waitFor(() => expect(alerts()).toEqual(["文件不存在或已被删除"]));
+    expect(toasts()).toEqual([]);
     await focusOn(foot);
     expect(document.activeElement).not.toBe(head);
     expect(head.disabled).toBe(false);

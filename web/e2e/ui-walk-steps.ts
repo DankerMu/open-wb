@@ -2,7 +2,7 @@
 // collapsed by default, and a collapsed group has no step cards in the DOM. Every step assertion
 // expands the group first.
 
-import { expect, type Locator } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 export function toolGroup(message: Locator): Locator {
   return message.getByRole("group", { name: "工具调用" });
@@ -70,4 +70,31 @@ async function expectFocusRingInside(trigger: Locator): Promise<void> {
     width: 2,
     overflow: [0, 0, 0, 0],
   });
+}
+
+/**
+ * html 产物卡的预览：卡内有两个同名动作按钮（头部图标、底部文字），点带文字的那个。预览打开后焦点在
+ * 对话框的 `关闭` 按钮上而不在 iframe 里——焦点进了 sandbox iframe，父文档就收不到按键，Escape 关不掉
+ * 对话框（jsdom 看不到这一点）。随后用 Escape 关闭，焦点回到打开它的按钮。
+ */
+export async function walkArtifactPreview(page: Page, file: string): Promise<void> {
+  const card = page
+    .getByRole("article", { name: "助手" })
+    .getByRole("group", { name: file, exact: true });
+  await expect(card.getByText("HTML", { exact: true })).toBeVisible();
+  const opener = card
+    .getByRole("button", { name: `打开网页预览 ${file}`, exact: true })
+    .filter({ hasText: "打开网页预览" });
+  await opener.click();
+  const dialog = page.getByRole("dialog", { name: file, exact: true });
+  const frame = dialog.locator(`iframe[title="${file}"]`);
+  await expect(frame).toHaveAttribute("sandbox", "allow-scripts");
+  await expect(
+    frame.contentFrame().getByRole("heading", { name: "WorkBuddy", exact: true }),
+  ).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "关闭", exact: true })).toBeFocused();
+  expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("IFRAME");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(opener).toBeFocused();
 }
