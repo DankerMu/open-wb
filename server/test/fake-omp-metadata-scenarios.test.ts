@@ -3,6 +3,8 @@
  * 真实子进程：只看 stdout 帧与磁盘文件。`thinking` 发 omp v18.0.10 形状的 thinking_start/delta/end，
  * 旋钮 `--thinking-repeat <n>` 与 `--hold-after-thinking` 只作用于 `thinking`；`edit-write` 在
  * `<cwd>` 下真实写 `notes.md` 与 `out/report.html` 后才发各自的 tool_execution_end。
+ * Issue #863 `todo` 场景（s1f-chat-surface 9a.3）：每回合一次 `todo` 工具调用，`details.phases` 为全量清单，
+ * 只取决于进程内的回合序号；期望值抄自 omp-test-harness 规格，不从夹具导入。
  */
 import { spawnSync } from "node:child_process";
 import {
@@ -77,6 +79,54 @@ const EDIT_WRITE = [
   "text_delta",
   "message_end:stop",
   "agent_end",
+];
+
+const TODO_TURN = [
+  "response:prompt",
+  "agent_start",
+  "message_end:toolUse",
+  "tool_execution_start:todo",
+  "tool_execution_end:todo",
+];
+const TODO_INIT_ARGS = {
+  op: "init",
+  list: [
+    { phase: "准备", items: ["读取需求", "列出要点"] },
+    { phase: "交付", items: ["输出结论"] },
+  ],
+};
+const TODO_INIT_PHASES = [
+  {
+    name: "准备",
+    tasks: [
+      { content: "读取需求", status: "in_progress" },
+      { content: "列出要点", status: "pending" },
+    ],
+  },
+  { name: "交付", tasks: [{ content: "输出结论", status: "pending" }] },
+];
+const TODO_DONE_ARGS = { op: "done", task: "读取需求" };
+const TODO_DONE_DETAILS = {
+  op: "done",
+  phases: [
+    {
+      name: "准备",
+      tasks: [
+        { content: "读取需求", status: "completed" },
+        { content: "列出要点", status: "in_progress" },
+      ],
+    },
+    { name: "交付", tasks: [{ content: "输出结论", status: "pending" }] },
+  ],
+  storage: "session",
+  completedTasks: [{ phase: "准备", content: "读取需求" }],
+};
+/** 每回合的 [args, details]；第四回合重复第三回合。 */
+const TODO_TURNS = [
+  [TODO_INIT_ARGS, { op: "init", phases: TODO_INIT_PHASES, storage: "session" }],
+  [{ op: "view" }, { op: "view", phases: TODO_INIT_PHASES, storage: "session" }],
+  [TODO_DONE_ARGS, TODO_DONE_DETAILS],
+  [TODO_DONE_ARGS, TODO_DONE_DETAILS],
 ];
 
 const temps: string[] = [];
@@ -480,6 +530,59 @@ describe("fake omp edit-write scenario", () => {
     expect(readFileSync(join(dir, "out"), "utf8")).toBe("not a directory");
     await closeSession(session);
   });
+});
+
+/** 一个 todo 回合的逐字段形状；返回该回合的 toolCallId。 */
+function expectTodoTurn(frames: Frame[], args: unknown, details: unknown): string {
+  const kinds = frames.map(describeFrame);
+  const deltas = kinds.length - TODO_TURN.length - 2;
+  expect(deltas).toBeGreaterThanOrEqual(2);
+  expect(kinds).toEqual([
+    ...TODO_TURN,
+    ...Array.from({ length: deltas }, () => "text_delta"),
+    "message_end:stop",
+    "agent_end",
+  ]);
+  const [, , toolUse, start, end] = frames;
+  const id = String(start?.toolCallId);
+  expect(asRecord(toolUse?.message).content).toEqual([
+    { type: "toolCall", id, name: "todo", arguments: args },
+  ]);
+  expect(start).toEqual({ type: "tool_execution_start", toolCallId: id, toolName: "todo", args });
+  expect(Object.keys(end ?? {})).toEqual(["type", "toolCallId", "toolName", "result"]);
+  expect(end?.toolCallId).toBe(id);
+  const result = asRecord(end?.result);
+  expect(Object.keys(result)).toEqual(["content", "details"]);
+  expect(result.content).toEqual([{ type: "text", text: expect.any(String) }]);
+  expect(result.details).toEqual(details);
+  expect(JSON.stringify(result.details)).toBe(JSON.stringify(details));
+  expect(frames.at(-1)).toEqual({ type: "agent_end", messages: [], isTerminal: true });
+  return id;
+}
+
+describe("fake omp todo scenario", () => {
+  it.each([
+    ["--approval-mode write", WRITE_MODE],
+    ["--approval-mode yolo", YOLO_MODE],
+    ["both thinking knobs", ["--thinking-repeat", "0", "--hold-after-thinking"]],
+  ])(
+    "emits one todo tool call per turn with the turn's full task list under %s",
+    async (_label, extra) => {
+      const session = await startPromptedSession({ scenario: "todo", extraArgs: extra });
+      await session.wait(isTerminal);
+      const turns = [turnFrames(session, "req_1")];
+      for (const id of ["req_2", "req_3", "req_4"]) {
+        turns.push(await runTurn(session, { id, type: "prompt", message: "next" }));
+      }
+      const ids = turns.map((frames, index) => {
+        const [args, details] = TODO_TURNS[index] ?? [];
+        return expectTodoTurn(frames, args, details);
+      });
+      expect(new Set(ids).size).toBe(4);
+      expect(session.frames.some((frame) => frame.type === "extension_ui_request")).toBe(false);
+      await closeSession(session);
+    },
+  );
 });
 
 describe("fake omp knobs on other scenarios", () => {

@@ -17,6 +17,7 @@ import {
   stepEnd,
   thinkingContent,
   thinkingFrames,
+  todoStep,
   toolUseEnd,
 } from "./fake-omp-thinking.mjs";
 
@@ -113,6 +114,7 @@ let currentSession = resume ?? DEFAULT_SESSION;
 const inbound = [];
 let queue = Promise.resolve();
 let readyTimer; // 仅在 slow-ready 扣住 ready 期间有值
+let todoTurns = 0; // todo 场景已开始的回合数
 const readyGate = scenario === "slow-ready" ? delayReady(readyDelayMs) : Promise.resolve();
 
 if (scenario !== "no-ready" && scenario !== "no-ready-hang") {
@@ -228,18 +230,16 @@ async function handleNegotiate(frame) {
 
 async function handleState(frame) {
   const data = sessionState();
-  if (scenario === "chunked" || scenario === "interleaved") {
-    if (protocol === 2) {
-      data.pad = unicodePad();
-      await emitChunked({
-        id: frame.id,
-        type: "response",
-        command: "get_state",
-        success: true,
-        data,
-      });
-      return;
-    }
+  if ((scenario === "chunked" || scenario === "interleaved") && protocol === 2) {
+    data.pad = unicodePad();
+    await emitChunked({
+      id: frame.id,
+      type: "response",
+      command: "get_state",
+      success: true,
+      data,
+    });
+    return;
   }
   await emit({
     id: frame.id,
@@ -375,6 +375,7 @@ async function handlePrompt(frame) {
     "hang-prompt": () => {},
     thinking: () => thinkingTurn(),
     "edit-write": () => editWriteTurn(),
+    todo: () => todoTurn(),
   };
   if (gated && abortTurn === "idle") {
     await openSelects(scenario === "approval-parallel" ? [CALL_1, CALL_2] : [CALL_1]);
@@ -480,16 +481,7 @@ function delayHoldTurn() {
 async function openSelects(calls) {
   await emit({ type: "agent_start" });
   await emitDeltas(DELTAS);
-  const content = calls.map((call) => ({
-    type: "toolCall",
-    id: call.id,
-    name: call.name,
-    arguments: call.args,
-  }));
-  await emit({
-    type: "message_end",
-    message: { role: "assistant", content, stopReason: "toolUse" },
-  });
+  await emit(toolUseEnd(calls.map((call) => ({ call }))));
   for (const [index, call] of calls.entries()) {
     await emitSelect(`r${index + 1}`, call);
   }
@@ -689,6 +681,17 @@ async function editWriteTurn() {
   await finishTurn();
 }
 
+/** 每个回合一次 todo 工具调用（其前无正文、无审批、不写文件）；args/details 只取决于回合序号。 */
+async function todoTurn() {
+  const step = todoStep(todoTurns++);
+  await emit({ type: "agent_start" });
+  await emit(toolUseEnd([step]));
+  await emit(toolStart(step.call));
+  await emit(stepEnd(step));
+  await emitDeltas(DELTAS);
+  await finishTurn();
+}
+
 function writeStepFile(step) {
   try {
     mkdirSync(dirname(step.file), { recursive: true });
@@ -699,10 +702,7 @@ function writeStepFile(step) {
 }
 
 async function emitToolRound(calls) {
-  await emit({
-    type: "message_end",
-    message: { role: "assistant", content: [], stopReason: "toolUse" },
-  });
+  await emit(toolUseEnd([]));
   for (const call of calls) {
     await emit(toolStart(call));
     await emit(toolEnd(call));

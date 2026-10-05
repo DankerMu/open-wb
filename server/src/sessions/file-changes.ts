@@ -86,11 +86,13 @@ function editCandidate(value: unknown): FileChange | undefined {
   return { path, ...countDiffLines(diff), kind: "edit" };
 }
 
-function own(record: Plain, key: string): unknown {
+/** 只读自有属性，不走原型链。 */
+export function own(record: Plain, key: string): unknown {
   return Object.hasOwn(record, key) ? record[key] : undefined;
 }
 
-function asPlain(value: unknown): Plain | undefined {
+/** 非 null、非数组的对象；其余为 `undefined`。 */
+export function asPlain(value: unknown): Plain | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Plain)
     : undefined;

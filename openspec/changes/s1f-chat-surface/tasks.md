@@ -154,9 +154,9 @@ Minimal mergeable slice: 8.2，自带 `project-config.css` 规则删除与 `ui-w
 
 ## 9a. session-todo / chat-sessions / omp-test-harness — 任务清单后端：迁移、归一化与测试支撑
 
-- [ ] 9a.1 迁移 `server/src/core/db/migrations/036_*.sql`：`chat_sessions` 加可空 `todo` 列；迁移测试（仿 `migration-034.test.ts`）。
-- [ ] 9a.2 归一化（纯函数，新文件，仿 `file-changes.ts`）：结构校验、五种 `status`、`name` / `content` 截断 200 码点、总任务数上限 200、没有任务的阶段不输出、全空归一为 `null`、不下发 `blocker`；单元测试含不合规样本。
-- [ ] 9a.3 测试支撑：`fake-omp.mjs` 增 `todo` 场景（工具结果带 `details.phases`；常量放进 `fake-omp-thinking.mjs`，入口文件已 799 行）；`fake-upstream.mjs` 增 `WORKBUDDY_TODO` 标记
+- [x] 9a.1 迁移 `server/src/core/db/migrations/036_*.sql`：`chat_sessions` 加可空 `todo` 列；迁移测试（仿 `migration-034.test.ts`）。
+- [x] 9a.2 归一化（纯函数，新文件，仿 `file-changes.ts`）：结构校验、五种 `status`、`name` / `content` 截断 200 码点、总任务数上限 200、没有任务的阶段不输出、全空归一为 `null`、不下发 `blocker`；单元测试含不合规样本。
+- [x] 9a.3 测试支撑：`fake-omp.mjs` 增 `todo` 场景（工具结果带 `details.phases`；常量放进 `fake-omp-thinking.mjs`，入口文件已 799 行）；`fake-upstream.mjs` 增 `WORKBUDDY_TODO` 标记
   （与 `WORKBUDDY_WRITE` 同时出现时 `WORKBUDDY_WRITE` 优先）与 `fake-upstream-markers.test.ts` 用例。
 
 Suggested fixture level: compact - 一个只加可空列的迁移、一个纯函数模块、两处测试支撑；没有公共契约变化（事件联合、快照、web 解析都不动）

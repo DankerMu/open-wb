@@ -20,6 +20,7 @@ import {
   MIGRATION_033,
   MIGRATION_034,
   MIGRATION_035,
+  MIGRATION_036,
   MIGRATION_0010,
   migrationReceiptExists,
   removeTempDirs,
@@ -218,7 +219,8 @@ function seedPre032Database(path: string): void {
       asset.filename !== MIGRATION_032 &&
       asset.filename !== MIGRATION_033 &&
       asset.filename !== MIGRATION_034 &&
-      asset.filename !== MIGRATION_035,
+      asset.filename !== MIGRATION_035 &&
+      asset.filename !== MIGRATION_036,
   );
   const filenames = assets.map((asset) => asset.filename);
   expect(filenames).toEqual([...HISTORICAL_FILENAMES]);
@@ -298,6 +300,7 @@ describe("core/db chat schema", () => {
         ["workspace_id", "TEXT", 0, null, 0, 0],
         ["scene", "TEXT", 0, null, 0, 0],
         ["pinned_at", "INTEGER", 0, null, 0, 0],
+        ["todo", "TEXT", 0, null, 0, 0],
       ]);
       expect(columnInfo(db, "chat_messages")).toEqual([
         ["id", "INTEGER", 0, null, 1, 0],
@@ -699,6 +702,9 @@ describe("core/db chat schema", () => {
     );
     expect(upgraded.receipts[8]).toEqual(
       expect.objectContaining({ sequence: 9, filename: MIGRATION_035 }),
+    );
+    expect(upgraded.receipts[9]).toEqual(
+      expect.objectContaining({ sequence: 10, filename: MIGRATION_036 }),
     );
     expect(upgraded.business).toEqual(before.business);
     expectRepeatedOpenStable(file, (db) => {

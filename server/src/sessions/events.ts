@@ -410,7 +410,8 @@ function truncateStep(text: string): string {
   return kept.length === text.length ? text : kept + TRUNCATED_MARK;
 }
 
-function truncateCodepoints(text: string, max: number): string {
+/** `text` 的前 `max` 个 Unicode 码点（不拆代理对、不加标记）；不超过时原样返回。 */
+export function truncateCodepoints(text: string, max: number): string {
   const { length } = text;
   let offset = 0;
   let points = 0;
