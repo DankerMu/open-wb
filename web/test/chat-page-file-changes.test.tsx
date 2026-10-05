@@ -645,7 +645,7 @@ describe("文件变更 card on the chat page", () => {
     ]);
   });
 
-  it("C13 orders fold, approvals, body, step, file changes, stopped badge and actions", async () => {
+  it("C13 orders fold, body, step, approvals, file changes, stopped badge and actions", async () => {
     const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
     Object.defineProperty(window.navigator, "clipboard", {
       configurable: true,
@@ -672,18 +672,18 @@ describe("文件变更 card on the chat page", () => {
 
     expect(parts.map(tagAndClass)).toEqual([
       "details.thinking-block",
-      "div.chat-approvals",
-      "div.chat-md",
+      "message-body",
       "section.chat-step",
+      "div.chat-approvals",
       "fieldset.file-changes-card",
       "fieldset.artifact-card",
-      "p.chat-msg-stopped",
+      "message-stopped",
       "div.chat-msg-actions",
     ]);
     expect(cardNamed("文件变更（1 个）")).toBe(parts[4]);
-    expect(within(reply()).getByRole("region", { name: "write" })).toBe(parts[3]);
+    expect(within(reply()).getByRole("region", { name: "write" })).toBe(parts[2]);
     expect(within(reply()).getByRole("status", { name: "助手消息 已停止" })).toBe(parts[6]);
-    expect(parts[2]?.textContent).toBe("部分回答");
+    expect(parts[1]?.textContent).toBe("部分回答");
 
     fireEvent.click(within(reply()).getByRole("button", { name: "复制" }));
     await screen.findByText("已复制到剪贴板");
@@ -702,9 +702,9 @@ describe("文件变更 card on the chat page", () => {
     await waitFor(() => expect(cards()).toHaveLength(1));
     const parts = replyParts();
     expect(parts.map(tagAndClass)).toEqual([
-      "div.chat-md",
+      "message-body",
       "section.chat-step",
-      "p.ui-alert chat-msg-error",
+      "message-error",
       "fieldset.file-changes-card",
       "fieldset.artifact-card",
       "div.chat-msg-actions",

@@ -199,14 +199,16 @@ export function reply() {
   return screen.getByRole("article", { name: "助手" });
 }
 
-/** `tag.class` of every child of the assistant's `.chat-msg-main`, in document order. */
+/** Every child of the assistant's `message-content` column, in document order. */
 export function replyParts() {
-  const main = reply().querySelector(".chat-msg-main");
-  if (!main) throw new Error("助手消息缺少 .chat-msg-main");
+  const main = reply().querySelector('[data-slot="message-content"]');
+  if (!main) throw new Error("助手消息缺少 message-content");
   return [...main.children];
 }
 
-export const tagAndClass = (part: Element) => `${part.localName}.${part.className}`;
+/** A part's name: `data-slot` on the thread's own markup, `tag.class` on the slotted old components. */
+export const tagAndClass = (part: Element) =>
+  part.getAttribute("data-slot") ?? `${part.localName}.${part.className}`;
 
 export function cards() {
   return [...document.querySelectorAll(".file-changes-card")];

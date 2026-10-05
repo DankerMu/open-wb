@@ -518,7 +518,9 @@ async function expectRunningPrefix(
   await expect(generatingStatus(page)).toBeVisible();
   await expect
     .poll(async () =>
-      (await pair.assistant.locator(".chat-md").innerText()).startsWith(FIRST_REPLY_PART),
+      (await pair.assistant.locator('[data-slot="message-body"]').innerText()).startsWith(
+        FIRST_REPLY_PART,
+      ),
     )
     .toBe(true);
   await expect(pair.assistant.getByRole("region", { name: "bash" })).toBeVisible();
@@ -569,7 +571,7 @@ async function expectCompletedPair(
   prompt: string,
 ): Promise<void> {
   const pair = await dialoguePair(page, sessionId, prompt);
-  await expect(pair.assistant.locator(".chat-md")).toHaveText(EXPECTED_REPLY);
+  await expect(pair.assistant.locator('[data-slot="message-body"]')).toHaveText(EXPECTED_REPLY);
   await expect(page.getByRole("status", { name: "bash 已完成" })).toBeVisible();
   // #367：摘要仍由 args 派生；真实 omp 的 AgentToolResult 经 output 块呈现（未展开时断言文本即可，
   // 不点击以免改变 W-scroll 所需的贴底与折叠初态）。锚定行首证明已规范化为纯文本——

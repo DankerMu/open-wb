@@ -168,7 +168,7 @@ function alerts() {
   return screen.queryAllByRole("alert").map((alert) => alert.textContent);
 }
 
-/** 消息区内按序的正文：用户取 `p.chat-msg-body`，助手取 `.chat-md`。 */
+/** 消息区内按序的正文（两种消息的正文都带 `data-slot="message-body"`）。 */
 function transcript() {
   const region = screen.queryByRole("region", { name: "消息" });
   if (!region) {
@@ -176,7 +176,7 @@ function transcript() {
   }
   return within(region)
     .queryAllByRole("article")
-    .map((article) => article.querySelector(".chat-msg-body, .chat-md")?.textContent ?? "");
+    .map((article) => article.querySelector('[data-slot="message-body"]')?.textContent ?? "");
 }
 
 function nav() {
@@ -214,7 +214,7 @@ describe("fork button: availability", () => {
       const row = button.closest(".chat-msg-actions");
       expect(row).not.toBeNull();
       expect(user.lastElementChild).toBe(row);
-      const body = user.querySelector("p.chat-msg-body");
+      const body = user.querySelector('p[data-slot="message-body"]');
       expect(user.querySelector("p")).toBe(body);
       expect(
         (body as Node).compareDocumentPosition(row as Node) & Node.DOCUMENT_POSITION_FOLLOWING,

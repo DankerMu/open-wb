@@ -187,15 +187,15 @@ describe("approval bar: pending, countdown and settled headers", () => {
     const group = groups[0] as HTMLElement;
     expect(group.querySelector(".chat-approval-tool")?.textContent).toBe("bash");
     expect(group.querySelector(".chat-approval-body")?.textContent).toBe(TITLE);
-    // 条渲染在同一 `.chat-msg-main` 内、正文 `.chat-md` 之上
-    const main = article.querySelector(".chat-msg-main");
+    // 条渲染在同一 `message-content` 列内、正文之后（design D4 的块次序）
+    const main = article.querySelector('[data-slot="message-content"]');
     const list = main?.querySelector(".chat-approvals");
-    const text = main?.querySelector(".chat-md");
+    const text = main?.querySelector('[data-slot="message-body"]');
     expect(list?.contains(group)).toBe(true);
     expect(list?.parentElement).toBe(main);
     expect(text?.parentElement).toBe(main);
     expect(
-      (list as Element).compareDocumentPosition(text as Element) & Node.DOCUMENT_POSITION_FOLLOWING,
+      (text as Element).compareDocumentPosition(list as Element) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     const sentences = countdowns(group);
     expect(sentences).toHaveLength(1);

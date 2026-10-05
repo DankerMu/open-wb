@@ -75,6 +75,7 @@ export function ChatPage() {
         onChangeDraft={session.setDraft}
         onFork={session.forkTurn}
         onRegenerate={session.regenerateTurn}
+        onSend={session.sendPrompt}
         onStop={session.stopTurn}
         onSubmit={session.submitComposer}
         promptError={session.promptError}

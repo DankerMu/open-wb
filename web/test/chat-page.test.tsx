@@ -29,7 +29,9 @@ import { currentLocation, deferredResponse, jsonResponse } from "./support.js";
 const BASH_START_DETAIL = '{"command":"echo workbuddy-smoke"}';
 const BASH_OUTPUT = "workbuddy-smoke";
 const SNAPSHOT_ASSISTANT = "Hello ";
-const STREAMED_BODY = "Hello \u0000\uFEFF中文 😀";
+/** 正文经 Markdown 渲染后的样子：段尾空白不保留，NUL 显示为 U+FFFD（CommonMark 规则）。 */
+const SNAPSHOT_SHOWN = "Hello";
+const STREAMED_SHOWN = "Hello \uFFFD\uFEFF中文 😀";
 const exactText = { exact: true, collapseWhitespace: false, trim: false } as const;
 const messagesPath = `/api/sessions/${SESSION_ID}/messages`;
 
@@ -118,12 +120,12 @@ describe("chat page route integration", () => {
     );
     expect(FakeEventSource.instances).toHaveLength(0);
     expect(screen.queryByText(historyUser.content, exactText)).toBeNull();
-    expect(screen.queryByText(SNAPSHOT_ASSISTANT, exactText)).toBeNull();
+    expect(screen.queryByText(SNAPSHOT_SHOWN, exactText)).toBeNull();
 
     initialMessages.resolve(jsonResponse(runningSnapshot));
 
     expect(await screen.findByText(historyUser.content, exactText)).toBeTruthy();
-    expect(screen.getByText(SNAPSHOT_ASSISTANT, exactText)).toBeTruthy();
+    expect(screen.getByText(SNAPSHOT_SHOWN, exactText)).toBeTruthy();
     expect(
       within(screen.getByRole("navigation", { name: "会话列表" })).getByText("saved title", {
         exact: true,
@@ -146,9 +148,7 @@ describe("chat page route integration", () => {
       source.emitOpen();
       source.emitData("text.delta", "1:4", { messageId: 0, delta: "\u0000\uFEFF中文" });
     });
-    expect(
-      await screen.findByText(`${SNAPSHOT_ASSISTANT}\u0000\uFEFF中文`, exactText),
-    ).toBeTruthy();
+    expect(await screen.findByText("Hello \uFFFD\uFEFF中文", exactText)).toBeTruthy();
 
     act(() => {
       source.emitData("text.delta", "1:5", { messageId: 0, delta: " 😀" });
@@ -161,7 +161,7 @@ describe("chat page route integration", () => {
       source.emitData("turn.end", "1:7", { messageId: 0, status: "done" });
     });
 
-    expect(await screen.findByText(STREAMED_BODY, exactText)).toBeTruthy();
+    expect(await screen.findByText(STREAMED_SHOWN, exactText)).toBeTruthy();
     expect(screen.getByText(historyUser.content, exactText)).toBeTruthy();
     expect(screen.getByText(BASH_OUTPUT, { exact: true })).toBeTruthy();
     expect(screen.getByText(BASH_START_DETAIL, { exact: true })).toBeTruthy();

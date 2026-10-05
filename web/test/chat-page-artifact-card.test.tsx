@@ -148,7 +148,7 @@ describe("产物卡 derivation on the chat page", () => {
     ]);
     const derived = artifactCards();
     expect(replyParts().map(tagAndClass)).toEqual([
-      "div.chat-md",
+      "message-body",
       "section.chat-step",
       "section.chat-step",
       "fieldset.file-changes-card",
@@ -633,7 +633,7 @@ describe("拉取中、卸载与换账号", () => {
 });
 
 describe("产物卡 placement", () => {
-  it("A13 orders fold, approvals, body, step, file changes, artifact card, stopped badge and actions", async () => {
+  it("A13 orders fold, body, step, approvals, file changes, artifact card, stopped badge and actions", async () => {
     const writeText = stubClipboard(vi.fn((_text: string) => Promise.resolve()));
     const settled: Message["approvals"][number] = {
       id: 9,
@@ -655,12 +655,12 @@ describe("产物卡 placement", () => {
     const parts = replyParts();
     expect(parts.map(tagAndClass)).toEqual([
       "details.thinking-block",
-      "div.chat-approvals",
-      "div.chat-md",
+      "message-body",
       "section.chat-step",
+      "div.chat-approvals",
       "fieldset.file-changes-card",
       "fieldset.artifact-card",
-      "p.chat-msg-stopped",
+      "message-stopped",
       "div.chat-msg-actions",
     ]);
     expect(parts[4]).toBe(cardNamed("文件变更（1 个）"));

@@ -1,18 +1,12 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ChatMessageSnapshot } from "../src/lib/session-contract.js";
 import { cleanupChatPage, renderChatPage } from "./chat-page-support.js";
 import { chatSnapshot, historyUser, latestSource, SESSION_ID } from "./chat-stream-support.js";
 import { jsonResponse } from "./support.js";
-import {
-  COLOR_LITERAL_PATTERNS,
-  listRepoFiles,
-  readRepoFile,
-  ruleBody,
-  stripComments,
-} from "./ui-support.js";
+import { COLOR_LITERAL_PATTERNS, listRepoFiles, readRepoFile } from "./ui-support.js";
 
 const messagesPath = `/api/sessions/${SESSION_ID}/messages`;
 const exactText = { exact: true, collapseWhitespace: false, trim: false } as const;
@@ -57,25 +51,24 @@ async function assistantArticle(): Promise<HTMLElement> {
   return screen.findByRole("article", { name: "助手" });
 }
 
-function chatCss(): string {
-  return stripComments(readRepoFile("web/src/features/chat/messages.css"));
-}
+const CARET = '[data-slot="message-caret"]';
 
-describe("(M1) assistant Markdown renders through the shared safe renderer", () => {
+describe("(M1) assistant Markdown renders through the assistant-ui Markdown renderer", () => {
   it("renders heading/strong/code, keeps source HTML as text and links inert", async () => {
     mountSnapshot(doneSnapshot(MARKDOWN_REPLY));
     const article = await assistantArticle();
     const view = within(article);
     expect(view.getByRole("heading", { level: 1, name: "标题" })).toBeTruthy();
     expect(article.querySelector("strong")?.textContent).toBe("粗体");
-    expect(article.querySelector("pre > code")?.textContent).toBe("<script>alert(1)</script>");
+    expect(article.querySelector("pre > code")?.textContent).toBe("<script>alert(1)</script>\n");
     expect(article.querySelector("p code")?.textContent).toBe("行内");
     expect(document.querySelector("script")).toBeNull();
     expect(document.querySelector("img")).toBeNull();
     expect(article.textContent).toContain("<img src=x onerror=alert(1)>");
-    const link = view.getByRole("link", { name: "链接" });
-    expect(link.getAttribute("href")).toBe("#");
-    expect(fireEvent.click(link)).toBe(false);
+    expect(view.getByText(/链接$/)).toBeTruthy();
+    expect(view.queryByRole("link")).toBeNull();
+    expect(article.querySelector("a")).toBeNull();
+    expect(article.innerHTML).not.toContain("example.com");
   });
 });
 
@@ -87,13 +80,10 @@ describe("(M2) user bubble keeps the raw text", () => {
     const user = await screen.findByRole("article", { name: "用户" });
     const first = user.querySelector("p");
     expect(first?.textContent).toBe(MULTILINE_USER);
-    expect(first?.classList.contains("chat-msg-body")).toBe(true);
-  });
-
-  it("styles the user bubble right-aligned with pre-wrap text", () => {
-    const css = chatCss();
-    expect(ruleBody(css, ".chat-msg-user .chat-msg-body")).toContain("white-space: pre-wrap");
-    expect(ruleBody(css, ".chat-msg-user")).toContain("align-self: flex-end");
+    expect(first?.getAttribute("data-slot")).toBe("message-body");
+    // jsdom 不算布局：这里只看气泡带上了保留空白与靠右的工具类，计算样式由 ui-walk 断言。
+    expect(first?.classList.contains("whitespace-pre-wrap")).toBe(true);
+    expect(user.classList.contains("self-end")).toBe(true);
   });
 });
 
@@ -108,13 +98,14 @@ describe("(M3) streaming caret lifecycle", () => {
     );
     const article = await assistantArticle();
     expect(within(article).getByRole("heading", { level: 1, name: "进行中" })).toBeTruthy();
-    const body = article.querySelector(".chat-md");
+    const body = article.querySelector('[data-slot="message-body"]');
     expect(body).not.toBeNull();
     const caret = body?.lastElementChild;
     expect(caret?.tagName).toBe("SPAN");
-    expect(caret?.classList.contains("ui-caret")).toBe(true);
-    expect(caret?.classList.contains("chat-caret")).toBe(true);
+    expect(caret?.matches(CARET)).toBe(true);
     expect(caret?.getAttribute("aria-hidden")).toBe("true");
+    // 减少动态效果时不闪：工具类在这里，计算样式 `animation-name: none` 由 ui-walk 断言。
+    expect(caret?.classList.contains("motion-reduce:animate-none")).toBe(true);
 
     await waitFor(() => expect(latestSource().url).toBe(`/api/sessions/${SESSION_ID}/events`));
     const source = latestSource();
@@ -124,9 +115,10 @@ describe("(M3) streaming caret lifecycle", () => {
       source.emitData("turn.end", "1:5", { messageId: 0, status: "done" });
     });
     await waitFor(() => {
-      expect(document.querySelector(".ui-caret")).toBeNull();
+      expect(document.querySelector(CARET)).toBeNull();
     });
-    expect(within(article).getByText("正文！", exactText)).toBeTruthy();
+    // 正文经基元的延迟渲染（`defer`）落地，可能比光标消失晚一个调度周期：等它出现，不同步断言。
+    expect(await within(article).findByText("正文！", exactText)).toBeTruthy();
   });
 
   it("shows no caret on a failed assistant turn", async () => {
@@ -140,11 +132,7 @@ describe("(M3) streaming caret lifecycle", () => {
     );
     const article = await assistantArticle();
     expect(within(article).getByText("x", exactText)).toBeTruthy();
-    expect(document.querySelector(".ui-caret")).toBeNull();
-  });
-
-  it("paints the caret with the brand token", () => {
-    expect(ruleBody(chatCss(), ".chat-caret")).toContain("background: var(--wb-brand-primary)");
+    expect(document.querySelector(CARET)).toBeNull();
   });
 });
 
@@ -167,16 +155,15 @@ describe("(M4) avatar and assistant block structure", () => {
     expect(within(article).queryByRole("img")).toBeNull();
     const avatar = article.firstElementChild;
     expect(avatar?.tagName).toBe("SPAN");
-    expect(avatar?.classList.contains("chat-msg-avatar")).toBe(true);
+    expect(avatar?.getAttribute("data-slot")).toBe("message-avatar");
     expect(avatar?.getAttribute("aria-hidden")).toBe("true");
     expect(avatar?.querySelector("svg.ui-brand-mark")).not.toBeNull();
 
     const user = screen.getByRole("article", { name: "用户" });
-    expect(user.querySelector(".chat-msg-avatar")).toBeNull();
-    expect(document.querySelector(".chat-msg-role")).toBeNull();
+    expect(user.querySelector('[data-slot="message-avatar"]')).toBeNull();
 
-    const main = article.querySelector(".chat-msg-main");
-    const text = main?.querySelector(".chat-md");
+    const main = article.querySelector('[data-slot="message-content"]');
+    const text = main?.querySelector('[data-slot="message-body"]');
     const step = within(article).getByRole("region", { name: "bash" });
     expect(text).not.toBeNull();
     expect(main?.contains(step)).toBe(true);
@@ -187,7 +174,7 @@ describe("(M4) avatar and assistant block structure", () => {
 });
 
 describe("(M5) static contract", () => {
-  it("relocates md-render and shares one React renderer between files and chat", () => {
+  it("keeps md-render for the files page; the chat body no longer goes through it", () => {
     expect(readRepoFile("web/src/lib/md-render.ts")).toContain(
       "Markdown subset renderer ported from resource/workbuddy-live-demo.html:1145-1185",
     );
@@ -197,9 +184,14 @@ describe("(M5) static contract", () => {
     const preview = readRepoFile("web/src/features/files/preview.tsx");
     expect(preview).toContain("MarkdownView");
     expect(preview).not.toContain("function renderBlock");
-    const conversation = readRepoFile("web/src/features/chat/conversation-view.tsx");
-    expect(conversation).toContain("MarkdownView");
-    expect(conversation).toContain("BrandMark");
+    const chat = listRepoFiles("web/src/features/chat", (path) => /\.tsx?$/.test(path));
+    expect(chat).toContain("web/src/features/chat/markdown-body.tsx");
+    for (const path of chat) {
+      expect(readRepoFile(path), path).not.toMatch(/markdown-view|md-render/);
+    }
+    expect(readRepoFile("web/src/features/chat/markdown-body.tsx")).toContain(
+      'from "@/components/assistant-ui/elements/markdown-text"',
+    );
     const view = readRepoFile("web/src/lib/markdown-view.tsx");
     expect(view).not.toContain('from "../features');
     expect(view).not.toContain('from "../ui');

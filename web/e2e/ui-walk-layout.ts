@@ -333,15 +333,23 @@ export async function expectScrollableX(container: Locator): Promise<void> {
   expect(await container.evaluate((el) => getComputedStyle(el).overflowX)).toBe("auto");
 }
 
-// 必须在受控回合 held 期间调用：运行中的会话项/步骤卡带 .ui-pulse。
+// 必须在受控回合 held 期间调用：运行中的会话项/步骤卡带 .ui-pulse，运行中的助手正文末尾有流式光标
+// （chat-harness「流式光标在减少动态效果下不闪烁」）。
 export async function expectReducedMotionToggle(page: Page): Promise<void> {
   const pulse = page.locator(".ui-pulse:visible").first();
   await expect(pulse).toBeVisible();
-  const animation = () => pulse.evaluate((el) => getComputedStyle(el).animationName);
+  const caret = page.getByRole("article", { name: "助手" }).locator('[data-slot="message-caret"]');
+  await expect(caret).toHaveCount(1);
+  const animationOf = (target: Locator) => () =>
+    target.evaluate((el) => getComputedStyle(el).animationName);
+  await expect.poll(animationOf(caret), "the running caret blinks").not.toBe("none");
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await expect.poll(animation, "reduced motion disables .ui-pulse").toBe("none");
+  await expect.poll(animationOf(pulse), "reduced motion disables .ui-pulse").toBe("none");
+  await expect(caret).toHaveCount(1);
+  await expect.poll(animationOf(caret), "reduced motion stills the running caret").toBe("none");
   await page.emulateMedia({ reducedMotion: "no-preference" });
-  await expect.poll(animation, "no-preference restores .ui-pulse").not.toBe("none");
+  await expect.poll(animationOf(pulse), "no-preference restores .ui-pulse").not.toBe("none");
+  await expect.poll(animationOf(caret), "no-preference restores the caret").not.toBe("none");
 }
 
 async function openNav(page: Page): Promise<Locator> {

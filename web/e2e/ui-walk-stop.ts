@@ -66,7 +66,7 @@ export async function walkStop(
     mark("held");
     await expect(users).toHaveCount(2);
     await expect(assistants).toHaveCount(2);
-    await expect(second.locator(".chat-md")).toHaveText(FIRST_REPLY_PART);
+    await expect(second.locator('[data-slot="message-body"]')).toHaveText(FIRST_REPLY_PART);
     await expect(generatingStatus(page)).toBeVisible();
     await expect(stop).toBeEnabled();
     await expect(send).toHaveCount(0);
@@ -79,7 +79,7 @@ export async function walkStop(
     await expect(toast).toBeVisible();
     await expect(stoppedBadge).toBeVisible();
     await expect(second.getByRole("alert")).toHaveCount(0);
-    await expect(second.locator(".chat-md")).toHaveText(FIRST_REPLY_PART);
+    await expect(second.locator('[data-slot="message-body"]')).toHaveText(FIRST_REPLY_PART);
     await expect(users).toHaveCount(2);
     await expect(assistants).toHaveCount(2);
     await expect(send).toBeVisible();
@@ -138,7 +138,7 @@ export async function walkRegenerate(
   mark("toast visible");
   await expect(stoppedBadge).toHaveCount(0);
   mark("badge gone");
-  await expect(second.locator(".chat-md")).toHaveText(EXPECTED_REPLY);
+  await expect(second.locator('[data-slot="message-body"]')).toHaveText(EXPECTED_REPLY);
   mark("original reply");
   await expect(second.getByRole("group", { name: "需要你的确认" })).toHaveCount(0);
   await expect(second.getByRole("region", { name: "bash" })).toHaveCount(0);
@@ -186,7 +186,11 @@ export async function walkFork(
   const mark = (point: string) =>
     console.log(`ui-walk fork ${project}: ${point} +${Date.now() - started}ms`);
 
-  await expect(first.locator(".chat-msg-body")).toHaveText(prompt);
+  const bubble = first.locator('[data-slot="message-body"]');
+  await expect(bubble).toHaveText(prompt);
+  // 用户气泡保留空白、靠右：计算样式只有真实浏览器给得出。
+  await expect(bubble).toHaveCSS("white-space", "pre-wrap");
+  await expect(first).toHaveCSS("align-self", "flex-end");
   await expect(fork).toBeEnabled();
   page.on("request", onRequest);
   try {

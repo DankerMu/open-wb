@@ -42,7 +42,7 @@
   - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;随打包产物分发时须附带该 MIT 声明。
 
 - **shadcn/ui** —— `MIT License`,版权归 shadcn（https://github.com/shadcn-ui/ui）
-  - 用途：`web/src/components/ui/` 的组件源码由其 registry（`radix-nova` 版式,配置见 `web/components.json`）拷入,拷入后只做颜色变量、中文文案、格式化、`cn` 导入归一（`@/lib/utils`）、严格 TS 选项下的纯类型适配与渲染被原文丢弃的 `children` 六类修改;组件依赖 `class-variance-authority`（Apache-2.0）、`clsx`（MIT）、`tailwind-merge`（MIT）。
+  - 用途：`web/src/components/ui/` 的组件源码由其 registry（`radix-nova` 版式,配置见 `web/components.json`）拷入,拷入后只做颜色变量、中文文案、格式化、`cn` 导入归一（`@/lib/utils`）、严格 TS 选项下的纯类型适配与把被原文丢弃的调用方 `children` 或属性原样透传给底层基元（只转发、不写默认值）六类修改;组件依赖 `class-variance-authority`（Apache-2.0）、`clsx`（MIT）、`tailwind-merge`（MIT）。
   - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;拷入的源码随打包产物分发时须附带该 MIT 声明。
 
 - **Tailwind CSS** —— `MIT License`,版权归 Tailwind Labs, Inc.（https://github.com/tailwindlabs/tailwindcss）
@@ -51,6 +51,14 @@
 
 - **tw-animate-css** —— `MIT License`,版权归 Wombosvideo（https://github.com/Wombosvideo/tw-animate-css）
   - 用途：Tailwind 4 的进出场动画工具类（shadcn/ui 组件依赖）,经 `web/src/styles.css` 导入,构建时打包进 `web/dist`。
+  - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;随打包产物分发时须附带该 MIT 声明。
+
+- **assistant-ui** —— `MIT License`,版权归 AgentbaseAI Inc.（https://github.com/assistant-ui/assistant-ui）
+  - 用途：会话页消息线程的运行时与无样式基元。`@assistant-ui/react`（`useExternalStoreRuntime`、`ThreadPrimitive`、`MessagePrimitive`）与 `@assistant-ui/react-markdown`（助手正文的 Markdown 渲染,内含 `react-markdown`,MIT,版权归 Espen Hovlandsdal）;`web/src/components/assistant-ui/` 的组件源码由其 registry 拷入（`markdown-text` 及其依赖 `tooltip-icon-button`、`use-copy-to-clipboard`）,拷入后的修改限制同 shadcn/ui 条目。构建时打包进 `web/dist`,不启用其云服务适配,运行时零网络请求。
+  - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;拷入的源码与打包产物分发时须附带该 MIT 声明。
+
+- **remark-gfm** —— `MIT License`,版权归 Titus Wormer（https://github.com/remarkjs/remark-gfm）
+  - 用途：助手正文 Markdown 的 GFM 扩展（表格、删除线、任务列表、自动链接）,由拷入的 `markdown-text` 使用,构建时打包进 `web/dist`。
   - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;随打包产物分发时须附带该 MIT 声明。
 
 ## 4. 本仓库自有内容

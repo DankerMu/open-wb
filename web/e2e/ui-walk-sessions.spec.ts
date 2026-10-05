@@ -152,9 +152,9 @@ function welcomeHeading(page: Page): Locator {
 
 // 转录就绪：助手消息的固定回复可见（真实导航或 reload 之后历史从 REST 恢复）。
 async function expectTranscriptReady(page: Page): Promise<void> {
-  await expect(page.getByRole("article", { name: "助手" }).locator(".chat-md")).toHaveText(
-    EXPECTED_REPLY,
-  );
+  await expect(
+    page.getByRole("article", { name: "助手" }).locator('[data-slot="message-body"]'),
+  ).toHaveText(EXPECTED_REPLY);
 }
 
 async function step1Login(page: Page, oracle: AuthOracle, project: WalkProject): Promise<void> {
@@ -247,7 +247,9 @@ async function step2ProjectSkill(page: Page, workspaceId: string): Promise<void>
 
 // 回合完成：该助手消息的正文恰为 `reply`（文件里唯一带显式超时的断言），且没有任何一种审批条。
 async function expectTurnDone(assistant: Locator, reply: string): Promise<void> {
-  await expect(assistant.locator(".chat-md")).toHaveText(reply, { timeout: TURN_DONE_TIMEOUT_MS });
+  await expect(assistant.locator('[data-slot="message-body"]')).toHaveText(reply, {
+    timeout: TURN_DONE_TIMEOUT_MS,
+  });
   for (const name of APPROVAL_BARS) {
     await expect(assistant.getByRole("group", { name })).toHaveCount(0);
   }
@@ -286,7 +288,7 @@ async function step3SendPrompt(
   ).toBeVisible();
   await expect(user).toHaveCount(1);
   await expect(assistant).toHaveCount(1);
-  await expect(user.locator(".chat-msg-body")).toHaveText(prompt);
+  await expect(user.locator('[data-slot="message-body"]')).toHaveText(prompt);
   return sessionId;
 }
 
@@ -295,7 +297,9 @@ async function step4ThinkingFold(page: Page): Promise<void> {
   const fold = assistant.locator("details.thinking-block");
   await expect(fold).toHaveCount(1);
   // 同一父元素内先于回答正文。
-  await expect(assistant.locator("details.thinking-block ~ .chat-md")).toHaveCount(1);
+  await expect(
+    assistant.locator('details.thinking-block ~ [data-slot="message-body"]'),
+  ).toHaveCount(1);
   await expect(fold).not.toHaveAttribute("open", "");
   const summary = fold.locator("summary");
   await expect(summary).toHaveText("深度思考过程");
@@ -625,7 +629,7 @@ async function sendSlashTurn(
   const assistant = page.getByRole("article", { name: "助手" });
   await composer.press("Enter");
   await expect(user).toHaveCount(index + 1);
-  await expect(user.nth(index).locator(".chat-msg-body")).toHaveText(sent);
+  await expect(user.nth(index).locator('[data-slot="message-body"]')).toHaveText(sent);
   await expect(assistant).toHaveCount(index + 1);
   await expectTurnDone(assistant.nth(index), reply);
   // 步骤卡是助手消息里唯一的 `region`。

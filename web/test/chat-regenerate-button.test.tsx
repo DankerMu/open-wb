@@ -150,7 +150,9 @@ function expectUnlocked() {
 
 function expectTranscript(bodies: string[]) {
   const articles = assistantArticles();
-  expect(articles.map((article) => article.querySelector(".chat-md")?.textContent)).toEqual(bodies);
+  expect(
+    articles.map((article) => article.querySelector('[data-slot="message-body"]')?.textContent),
+  ).toEqual(bodies);
 }
 
 async function selectInNav(title: string, sessionId: string) {
@@ -231,7 +233,7 @@ describe("regenerate button: availability", () => {
     expect(row).not.toBeNull();
     const buttons = within(row as HTMLElement).getAllByRole("button");
     expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([REGEN_LABEL]);
-    expect(a2.querySelector(".chat-md")?.textContent).toBe("（已停止生成）");
+    expect(a2.querySelector('[data-slot="message-body"]')?.textContent).toBe("（已停止生成）");
   });
 
   it("R2 keeps 复制 off empty bodies while the last non-empty answer has both", async () => {

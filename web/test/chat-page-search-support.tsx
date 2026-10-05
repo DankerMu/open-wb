@@ -254,14 +254,13 @@ export function messageIds() {
 
 /**
  * `data-message-id` of the highlighted messages. Scoped to `article`: the sidebar button of the
- * selected session carries `aria-current` too. Fails when the attribute and the class disagree.
+ * selected session carries `aria-current` too. `aria-current` is the highlight's only observable.
  */
 export function highlighted() {
   const current = [...document.querySelectorAll("article[aria-current]")];
   expect(current.map((article) => article.getAttribute("aria-current"))).toEqual(
     current.map(() => "true"),
   );
-  expect([...document.querySelectorAll(".chat-msg--search-current")]).toEqual(current);
   return current.map((article) => article.getAttribute("data-message-id"));
 }
 
