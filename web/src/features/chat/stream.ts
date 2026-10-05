@@ -17,6 +17,7 @@ import {
 import { type ChatFilesEvent, decodeFilesChanged, setStepChanges } from "./stream-artifacts.js";
 import { type ChatStepView, endStep, startStep } from "./stream-steps.js";
 import { appendThinking, type ChatThinkingEvent, decodeThinkingDelta } from "./stream-thinking.js";
+import { type ChatTodoEvent, decodeTodoUpdated, setTodo } from "./stream-todo.js";
 
 type ChatMessageView = {
   id: ChatMessage["id"];
@@ -32,6 +33,7 @@ type ChatMessageView = {
 export type ChatState = {
   status: ChatSession["status"];
   messages: ChatMessageView[];
+  todo: ChatMessageSnapshot["todo"];
 };
 
 type ChatMessageTarget = { messageId: number };
@@ -48,7 +50,8 @@ export type ChatEvent =
   | { type: "error"; data: ChatMessageTarget & { message: string } }
   | ChatApprovalEvent
   | ChatThinkingEvent
-  | ChatFilesEvent;
+  | ChatFilesEvent
+  | ChatTodoEvent;
 
 type ChatEventType = ChatEvent["type"];
 
@@ -84,6 +87,7 @@ const DATA_EVENTS = [
   "approval.resolved",
   "thinking.delta",
   "files.changed",
+  "todo.updated",
 ] as const satisfies readonly ChatEventType[];
 const QUEUE_CAP = 1000;
 const CANONICAL_CURSOR = /^(0|[1-9][0-9]*):(0|[1-9][0-9]*)$/;
@@ -112,6 +116,7 @@ export function chatStateFromSnapshot(snapshot: ChatMessageSnapshot): ChatState 
       approvals: approvalViews(message.approvals),
       error: null,
     })),
+    todo: snapshot.todo,
   };
 }
 
@@ -168,6 +173,9 @@ export function applyChatEvent(state: ChatState, event: ChatEvent): ChatState {
     // files.changed only replaces one step's changes; the session status is left untouched.
     case "files.changed":
       return replaceAssistant(state, event.data.messageId, (m) => setStepChanges(m, event.data));
+    // todo.updated replaces the session's list; no message, step or status is touched or created.
+    case "todo.updated":
+      return setTodo(state, event.data.todo);
     default:
       return state;
   }
@@ -229,10 +237,7 @@ function replaceAssistant(
   } else {
     messages[index] = next;
   }
-  return {
-    status: sessionStatus ?? state.status,
-    messages,
-  };
+  return { ...state, status: sessionStatus ?? state.status, messages };
 }
 
 const SETTLED_TURN: ReadonlySet<ChatMessage["status"]> = new Set(["done", "failed", "stopped"]);
@@ -638,6 +643,8 @@ function decodeEvent(type: ChatEventType, value: unknown): ChatEvent | undefined
       return decodeThinkingDelta(value);
     case "files.changed":
       return decodeFilesChanged(value);
+    case "todo.updated":
+      return decodeTodoUpdated(value);
   }
 }
 

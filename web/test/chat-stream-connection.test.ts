@@ -109,6 +109,7 @@ describe("Chat stream connector", () => {
     ]);
     expect(state).toEqual({
       status: "running",
+      todo: null,
       messages: [
         userView,
         {

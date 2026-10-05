@@ -2,13 +2,12 @@
  * Issue #864 web snapshot contract (session-todo「web 契约解析与归约」: 四键严格解析、非法 todo 结构
  * 整体拒绝; chat-web「四键快照与任务清单」): `parseMessageSnapshot` and `getMessages()` accept
  * exactly the four keys with a null or well-formed task list and reject everything else whole.
- * Until the web reduces it, `todo.updated` is an unknown event type. Fixtures are the spec's
- * literals.
+ * Fixtures are the spec's literals. The `todo.updated` event is in `chat-stream-todo.test.ts`.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApiClient } from "../src/lib/api.js";
 import { parseMessageSnapshot } from "../src/lib/session-contract.js";
-import { chatSnapshot, connectChat, resetFakeEventSources, settle } from "./chat-stream-support.js";
+import { chatSnapshot } from "./chat-stream-support.js";
 import { captureApiError, expectRequestFailure, jsonResponse } from "./support.js";
 
 const SESSION_ID = "0123456789abcdef0123456789abcdef";
@@ -45,7 +44,6 @@ async function expectRejected(body: unknown): Promise<void> {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  resetFakeEventSources();
 });
 
 describe("four-key strict snapshot", () => {
@@ -123,25 +121,5 @@ describe("an illegal todo structure rejects the whole snapshot", () => {
     ["an array", []],
   ])("%s", async (_label, todo) => {
     await expectRejected(withTodo(todo));
-  });
-});
-
-describe("todo.updated before the web reduces it", () => {
-  it("is ignored as an unknown event type: no event, no resync, state unchanged", async () => {
-    const context = connectChat(chatSnapshot());
-    context.source.emitOpen();
-    context.loads[0]?.resolve(chatSnapshot());
-    await settle();
-    const before = context.state;
-
-    context.source.emitData("todo.updated", "1:1", { messageId: 0, todo: LIST });
-    context.source.emitData("todo.updated", "1:2", { messageId: 0 });
-    await settle();
-
-    expect(context.loads).toHaveLength(1);
-    expect(context.events).toHaveLength(0);
-    expect(context.errors).toHaveLength(0);
-    expect(context.state).toBe(before);
-    context.handle.close();
   });
 });

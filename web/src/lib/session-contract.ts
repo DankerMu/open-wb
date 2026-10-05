@@ -344,7 +344,7 @@ function parseTodoPhase(value: unknown): ChatTodoPhase | null {
 }
 
 /** `null` 是合法的空清单，所以非法结构用 `undefined` 表示。 */
-function parseTodo(value: unknown): ChatTodo | null | undefined {
+export function parseTodo(value: unknown): ChatTodo | null | undefined {
   if (value === null) {
     return null;
   }

@@ -119,6 +119,7 @@ describe("Chat stream reducer", () => {
 
     const expected: ChatState = {
       status: "done",
+      todo: null,
       messages: [
         userView,
         {
@@ -148,6 +149,7 @@ describe("Chat stream reducer", () => {
       let state = deepFreeze(chatStateFromSnapshot(input));
       expect(state).toEqual({
         status: "running",
+        todo: null,
         messages: [
           userView,
           {
@@ -212,6 +214,7 @@ describe("Chat stream reducer", () => {
 
     expect(afterError).toEqual({
       status: "running",
+      todo: null,
       messages: [
         userView,
         {
@@ -241,6 +244,7 @@ describe("Chat stream reducer", () => {
     );
     expect(afterEnd).toEqual({
       status: "failed",
+      todo: null,
       messages: [
         userView,
         {
