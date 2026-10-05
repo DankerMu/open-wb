@@ -12,6 +12,7 @@ import { HttpError } from "../core/errors/index.js";
 import { registerSessionMetadataRoutes } from "./rest-metadata.js";
 import type { WorkspaceRootOf } from "./session-cwd.js";
 import type { SessionDeleter } from "./session-delete.js";
+import type { SessionTodo } from "./session-todo.js";
 import { sessionSkillsResolver, toWireText } from "./slash-commands.js";
 import type {
   ApprovalEntry,
@@ -86,6 +87,7 @@ interface PublicMessage {
 interface OwnedSnapshot {
   tree: SessionMessageTree;
   streamCursor: StreamCursor;
+  todo: SessionTodo | null;
 }
 
 interface SessionIdParams {
@@ -145,7 +147,24 @@ export function registerSessionRoutes(
   > = (request, _reply, payload, done) => {
     const tree = requireOwnedSession(dependencies.store, request);
     const streamCursor = dependencies.supervisor.streamCursor(request.params.id);
-    authorizedHistory.set(request, { tree, streamCursor });
+    authorizedHistory.set(request, { tree, streamCursor, todo: null });
+    done(null, payload);
+  };
+
+  /**
+   * History route only, right after the owner check above and in the same synchronous segment, so
+   * the task list matches the tree and the cursor; no other route reads `chat_sessions.todo`.
+   */
+  const readTodoBeforeParse: typeof authorizeOwnedBeforeParse = (
+    request,
+    _reply,
+    payload,
+    done,
+  ) => {
+    const snapshot = authorizedHistory.get(request);
+    if (snapshot !== undefined) {
+      snapshot.todo = dependencies.store.readTodo(request.params.id, currentPrincipal(request).id);
+    }
     done(null, payload);
   };
 
@@ -184,7 +203,10 @@ export function registerSessionRoutes(
   });
   app.get<{ Params: SessionIdParams }>(
     "/api/sessions/:id/messages",
-    { onRequest: noStoreSessionResponse, preParsing: authorizeOwnedBeforeParse },
+    {
+      onRequest: noStoreSessionResponse,
+      preParsing: [authorizeOwnedBeforeParse, readTodoBeforeParse],
+    },
     async (request) => {
       const snapshot = authorizedHistory.get(request);
       if (snapshot === undefined) {
@@ -314,6 +336,7 @@ function toPublicHistory(snapshot: OwnedSnapshot): {
   session: PublicSession;
   messages: PublicMessage[];
   streamCursor: StreamCursor;
+  todo: SessionTodo | null;
 } {
   return {
     session: toPublicSession(snapshot.tree.session),
@@ -336,6 +359,7 @@ function toPublicHistory(snapshot: OwnedSnapshot): {
       })),
     })),
     streamCursor: snapshot.streamCursor,
+    todo: snapshot.todo,
   };
 }
 

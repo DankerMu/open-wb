@@ -102,6 +102,7 @@ export function turn(
     session: { ...chatSnapshot().session, status, workspaceId },
     messages: [historyUser, assistantMessage(status, fields)],
     streamCursor: { epoch: 1, seq: 3 },
+    todo: null,
   };
 }
 

@@ -59,6 +59,7 @@ function snapshotOf(
     session: { ...base.session, status, title },
     messages,
     streamCursor: { epoch: 1, seq },
+    todo: null,
   };
 }
 

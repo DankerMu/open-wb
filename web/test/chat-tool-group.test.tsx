@@ -90,6 +90,7 @@ describe("tool-call group: collapsed by default, expanded on failure", () => {
         assistant(4, []),
       ],
       streamCursor: { epoch: 1, seq: 0 },
+      todo: null,
     });
     const [allDone, withFailure, noSteps] = (await assistants(3)) as [
       HTMLElement,
@@ -235,6 +236,7 @@ describe("tool-call group: collapsed by default, expanded on failure", () => {
       session: runningSession("done"),
       messages: [historyUser, assistant(0, [step(1, name, "done")])],
       streamCursor: { epoch: 1, seq: 0 },
+      todo: null,
     });
     const [article] = (await assistants(1)) as [HTMLElement];
     const toggle = within(article).getByRole("button", { name: `1 个步骤 · ${name} 已完成` });
@@ -251,6 +253,7 @@ describe("tool-call group: collapsed by default, expanded on failure", () => {
       session: runningSession("failed"),
       messages: [historyUser, assistant(0, [step(1, "bash", "failed")], "failed")],
       streamCursor: { epoch: 1, seq: 3 },
+      todo: null,
     });
     const [article] = (await assistants(1)) as [HTMLElement];
     expect(trigger(article).getAttribute("aria-expanded")).toBe("true");

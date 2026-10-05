@@ -10,6 +10,7 @@ import type { ChatEvent } from "../src/sessions/events.js";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import type { SpawnImpl } from "../src/sessions/omp/process.js";
 import type { SessionStore } from "../src/sessions/store.js";
+import type { TodoWarn } from "../src/sessions/store-todo.js";
 import type { SessionSupervisor } from "../src/sessions/supervisor.js";
 import { TokenRegistry } from "../src/sessions/tokens.js";
 import { FIXED_NOW, fixedRuntime } from "./session-db-helpers.js";
@@ -82,6 +83,10 @@ export interface OpenSessionOptions {
   prepare?: (db: DatabaseSync) => void;
   onError?: ErrorSink;
   onEvent?: EventSink;
+  /** Collects dropped task-list candidates (#864); omitted → discarded. */
+  warn?: TodoWarn;
+  /** An already open database (a restart over the same rows); omitted → a fresh `:memory:` one. */
+  db?: DatabaseSync;
   configureApp?: (app: FastifyInstance) => void;
 }
 
@@ -159,7 +164,7 @@ interface OpenSupervisorAppInput extends OpenSessionOptions {
 }
 
 function openSupervisorApp(input: OpenSupervisorAppInput): SupervisorApp {
-  const db = openDb(":memory:");
+  const db = input.db ?? openDb(":memory:");
   input.prepare?.(db);
   const tokens = input.tokens ?? new TokenRegistry();
   const app = createApp({
@@ -170,6 +175,7 @@ function openSupervisorApp(input: OpenSupervisorAppInput): SupervisorApp {
       runtime: input.runtime,
       onError: input.onError ?? (() => {}),
       ...(input.onEvent === undefined ? {} : { onEvent: input.onEvent }),
+      ...(input.warn === undefined ? {} : { warn: input.warn }),
     },
   });
   input.configureApp?.(app);

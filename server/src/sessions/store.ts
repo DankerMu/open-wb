@@ -4,6 +4,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { emit } from "../core/audit/index.js";
 import { createSqliteTextDecoder } from "../core/db/index.js";
 import { HttpError } from "../core/errors/index.js";
+import type { FileChange } from "./file-changes.js";
 import {
   approvalsBySession,
   cancelTimer,
@@ -36,6 +37,11 @@ import {
 } from "./store-branch.js";
 import { setStepChanges as setStepChangesText } from "./store-changes.js";
 import { appendThinking as appendThinkingText } from "./store-thinking.js";
+import {
+  createSessionTodoStore,
+  type SessionTodoOptions,
+  type SessionTodoStore,
+} from "./store-todo.js";
 
 type SessionStatus = "idle" | "running" | "done" | "failed" | "stopped";
 export type MessageRole = "user" | "assistant";
@@ -56,21 +62,14 @@ export interface SessionView {
   pinnedAt: number | null;
 }
 
-/** One `chat_steps.changes` element; element validity is the writer's (3.4) job. */
-interface FileChangeView {
-  path: string;
-  added: number | null;
-  removed: number | null;
-  kind: "edit" | "write";
-}
-
 export interface StepView {
   id: number;
   ordinal: number;
   name: string;
   detail: string;
   output: string;
-  changes: FileChangeView[] | null;
+  /** `chat_steps.changes` elements; element validity is the writer's (3.4) job. */
+  changes: FileChange[] | null;
   status: StepStatus;
   startedAt: number;
   endedAt: number | null;
@@ -112,7 +111,7 @@ interface FlushError {
   error: unknown;
 }
 
-export interface SessionStoreOptions {
+export interface SessionStoreOptions extends SessionTodoOptions {
   onFlushError: (failure: FlushError) => void;
   /** core/audit emit bound per call to this DB; settling an approval without it fails closed. */
   emit?: typeof emit;
@@ -160,7 +159,7 @@ interface StartStepInput {
   detail: string;
 }
 
-export interface SessionStore {
+export interface SessionStore extends SessionTodoStore {
   create(ownerId: string): SessionView;
   list(ownerId: string): SessionView[];
   getMessages(sessionId: string, ownerId: string): SessionMessageTree | null;
@@ -268,6 +267,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
     finishOwnedTurn(db, options.emit, turn, status, activeTurns, activeSessions, activeSteps);
 
   return {
+    ...createSessionTodoStore(db, options),
     create(ownerId) {
       assertOpen(closed);
       const now = Date.now();

@@ -99,6 +99,7 @@ function parsedSnapshot(): Snapshot {
       assistantMessage(2, [approval(7, "timeout"), approval(8, null)], "done"),
     ],
     streamCursor: { epoch: 1, seq: 7 },
+    todo: null,
   };
 }
 
@@ -115,6 +116,7 @@ function runningSnapshot(
       assistantMessage(0, approvals, status === "running" ? "running" : "done"),
     ],
     streamCursor: options.cursor ?? { epoch: 1, seq: 0 },
+    todo: null,
   };
 }
 

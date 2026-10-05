@@ -35,6 +35,7 @@ function completedSnapshot(): ChatMessageSnapshot {
       },
     ],
     streamCursor: { epoch: 1, seq: 3 },
+    todo: null,
   };
 }
 

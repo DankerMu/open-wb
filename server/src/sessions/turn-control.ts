@@ -282,6 +282,14 @@ export function persistEvent(
       store.setStepChanges(stepId, JSON.stringify(files));
       return { type: "files.changed", data: { messageId: event.data.messageId, stepId, files } };
     }
+    // The raw candidate is validated, normalised, compared with the stored list and written by
+    // the store (#864); an invalid or unchanged one is dropped there and takes no ring sequence.
+    case "todo.updated": {
+      const stored = store.storeTodo(assistantMessageId, event.data.todo);
+      return stored === undefined
+        ? undefined
+        : { type: "todo.updated", data: { messageId: event.data.messageId, todo: stored.todo } };
+    }
     // thinking.delta never reaches here: the supervisor's merge buffer (#519) takes it first.
     case "thinking.delta":
       return undefined;

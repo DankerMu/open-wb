@@ -62,7 +62,7 @@ function snapshotOf(
   messages: Message[],
   streamCursor: Cursor = { epoch: 1, seq: 0 },
 ) {
-  return { session: s, messages, streamCursor };
+  return { session: s, messages, streamCursor, todo: null };
 }
 
 /** S：A 的 done 会话，u1/a2/u3/a4，cursor `1:0`。 */

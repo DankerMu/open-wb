@@ -2,16 +2,23 @@
  * Issue #83 pure protocol event mapping; #455 adds the interrupted outcome and applyStop;
  * #514 maps assistant thinking_delta to thinking.delta and declares files.changed;
  * #515 emits raw edit/write candidates as files.changed immediately before their step.end;
- * #554 maps command_output to turn.start (first time) + text.delta, so a command reply is the body.
+ * #554 maps command_output to turn.start (first time) + text.delta, so a command reply is the body;
+ * #864 emits a `todo` result's raw `details.phases` as todo.updated immediately before its step.end.
  */
-import { type FileChange, fileChangeCandidates } from "./file-changes.js";
+import { asPlain, type FileChange, fileChangeCandidates, own } from "./file-changes.js";
 import type { OmpFrame } from "./omp/frame.js";
+import type { SessionTodo } from "./session-todo.js";
 
 export type ChatEvent<StepId extends string | number = number> =
   | { type: "turn.start"; data: { messageId: number } }
   | { type: "text.delta"; data: { messageId: number; delta: string } }
   | { type: "thinking.delta"; data: { messageId: number; delta: string } }
   | { type: "files.changed"; data: { messageId: number; stepId: StepId; files: FileChange[] } }
+  // Mapper output (string step ids) carries the raw candidate; the published event the stored list.
+  | {
+      type: "todo.updated";
+      data: { messageId: number; todo: StepId extends number ? SessionTodo | null : unknown };
+    }
   | {
       type: "step.start";
       data: { messageId: number; stepId: StepId; name: string; detail: string };
@@ -219,17 +226,41 @@ function applyToolEnd(state: EventState, frame: OmpFrame): ApplyResult {
     data: { messageId, stepId: id, status: failed ? "failed" : "done", output },
   };
   // 工具名以 tool_execution_start 登记的为准；失败帧不推导候选。
-  const files = failed ? [] : fileChangeCandidates(entry.name, frame.result);
+  const events: ChatEvent<string>[] = [];
+  if (!failed) {
+    const files = fileChangeCandidates(entry.name, frame.result);
+    if (files.length > 0) {
+      events.push({ type: "files.changed", data: { messageId, stepId: id, files } });
+    }
+    const todo = entry.name === "todo" ? todoCandidate(frame.result) : undefined;
+    if (todo !== undefined) {
+      events.push({ type: "todo.updated", data: { messageId, todo: todo.phases } });
+    }
+  }
+  events.push(stepEnd);
   return {
     state: evolve(state, {
       running: Object.freeze(state.running.filter((tool) => tool.id !== id)),
       finished: Object.freeze([...state.finished, id]),
     }),
-    events:
-      files.length === 0
-        ? [stepEnd]
-        : [{ type: "files.changed", data: { messageId, stepId: id, files } }, stepEnd],
+    events,
   };
+}
+
+/**
+ * `todo` 工具结果的 `details.phases` 原值（包一层，使自有的 `undefined` 也算候选）：`result` 与 `details`
+ * 皆为普通对象、`result.isError` 不为 true 且 `details` 有自有 `phases` 时产出；只读自有属性，不读其它键，
+ * 不校验、不归一化。
+ */
+function todoCandidate(result: unknown): { phases: unknown } | undefined {
+  const record = asPlain(result);
+  if (record === undefined || own(record, "isError") === true) {
+    return undefined;
+  }
+  const details = asPlain(own(record, "details"));
+  return details !== undefined && Object.hasOwn(details, "phases")
+    ? { phases: details.phases }
+    : undefined;
 }
 
 function applyMessageEnd(state: EventState, frame: OmpFrame): ApplyResult {

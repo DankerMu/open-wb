@@ -69,6 +69,7 @@ describe("session REST", () => {
         session: body,
         messages: [],
         streamCursor: { epoch: 0, seq: null },
+        todo: null,
       });
     });
   });
@@ -223,6 +224,7 @@ describe("session REST", () => {
           },
         ],
         streamCursor: { epoch: 1, seq: null },
+        todo: null,
       });
       expect(history.payload).not.toMatch(
         /startedAt|endedAt|owner_id|ownerId|omp_session_file|stream_epoch|streamEpoch|resume\/hidden/u,
@@ -779,6 +781,7 @@ describe("session REST", () => {
             },
           ],
           streamCursor: { epoch: 0, seq: null },
+          todo: null,
         });
       }
     });

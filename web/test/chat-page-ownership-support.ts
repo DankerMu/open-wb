@@ -79,6 +79,7 @@ export function emptyCreatedSnapshot(): ChatMessageSnapshot {
     session: idleCreatedSession(),
     messages: [],
     streamCursor: { epoch: 1, seq: 0 },
+    todo: null,
   };
 }
 
@@ -113,6 +114,7 @@ export function runningCreatedSnapshot(): ChatMessageSnapshot {
       },
     ],
     streamCursor: { epoch: 1, seq: 0 },
+    todo: null,
   };
 }
 
@@ -152,6 +154,7 @@ export function completedCreatedSnapshot(): ChatMessageSnapshot {
       },
     ],
     streamCursor: { epoch: 1, seq: 7 },
+    todo: null,
   };
 }
 
@@ -182,6 +185,7 @@ export function otherSnapshot(): ChatMessageSnapshot {
       },
     ],
     streamCursor: { epoch: 1, seq: null },
+    todo: null,
   };
 }
 

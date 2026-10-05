@@ -297,6 +297,7 @@ describe("Stopped status in sessions and snapshots", () => {
       },
     ],
     streamCursor: { epoch: 1, seq: 7 },
+    todo: null,
   };
 
   it("lists a stopped session unchanged", async () => {

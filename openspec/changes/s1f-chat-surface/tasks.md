@@ -164,15 +164,15 @@ Minimal mergeable slice: 9a.1——迁移与其测试自成一刀；9a.2 归一�
 
 ## 9b. session-todo / chat-stream / chat-sessions / chat-web — 任务清单后端：事件、持久化、快照与 web 契约
 
-- [ ] 9b.1 归约器候选：`events.ts#applyFrame` 在 `tool_execution_end` 且 `toolName === "todo"`、未失败时只产出 `details.phases` 原值候选（归约器不做 IO、不校验）。
-- [ ] 9b.2 持久化路径：校验、归一化（9a.2）、去重（与上次落库值相同不发不写）、warn 与写入落在 `turn-control.ts` 的 `persistEvent` 与一个新的 store 模块（与 `store-metadata.ts` / `store-changes.ts` 并列）。
+- [x] 9b.1 归约器候选：`events.ts#applyFrame` 在 `tool_execution_end` 且 `toolName === "todo"`、未失败时只产出 `details.phases` 原值候选（归约器不做 IO、不校验）。
+- [x] 9b.2 持久化路径：校验、归一化（9a.2）、去重（与上次落库值相同不发不写）、warn 与写入落在 `turn-control.ts` 的 `persistEvent` 与一个新的 store 模块（与 `store-metadata.ts` / `store-changes.ts` 并列）。
   `server/src/sessions/supervisor.ts`（800 行）与 `store.ts`（797 行）不得增长；warn sink 以注入方式提供，不给 `supervisor.ts` 加行。不合规候选丢弃并记一条 warn，不影响步骤事件与回合。
   写 `todo` 不改会话的 `updated_at`。
-- [ ] 9b.3 事件：发布 `todo.updated{messageId, todo}`，位置紧邻该次工具调用的 `step.end` 之前；事件联合新增该类型。
-- [ ] 9b.4 快照：`GET /api/sessions/:id/messages` 返回顶层 `todo`（四键）；分叉新会话为 `null`；重新生成不清空。
-- [ ] 9b.5 web 契约（design Migration Plan）：`session-contract.ts` 的快照解析（`:303-304`）改为四键严格并校验 `todo` 结构；契约测试更新。此刻 web 只解析、不显示，`todo.updated` 按未知事件类型忽略。
-- [ ] 9b.6 web 测试 fixture：三键快照字面量散在约 22 个 web 测试文件（45 处），在 fixture 构造点补 `todo: null`，尽量收敛到 support 文件（`chat-stream-support.ts`、`chat-page-*-support.*`）。
-- [ ] 9b.7 服务端管线测试（用 9a.3 的 fake-omp 场景）：事件、落库、快照、SSE 续流、去重、不合规候选的 warn、`updated_at` 不变、分叉为 `null`。
+- [x] 9b.3 事件：发布 `todo.updated{messageId, todo}`，位置紧邻该次工具调用的 `step.end` 之前；事件联合新增该类型。
+- [x] 9b.4 快照：`GET /api/sessions/:id/messages` 返回顶层 `todo`（四键）；分叉新会话为 `null`；重新生成不清空。
+- [x] 9b.5 web 契约（design Migration Plan）：`session-contract.ts` 的快照解析（`:303-304`）改为四键严格并校验 `todo` 结构；契约测试更新。此刻 web 只解析、不显示，`todo.updated` 按未知事件类型忽略。
+- [x] 9b.6 web 测试 fixture：三键快照字面量散在约 22 个 web 测试文件（45 处），在 fixture 构造点补 `todo: null`，尽量收敛到 support 文件（`chat-stream-support.ts`、`chat-page-*-support.*`）。
+- [x] 9b.7 服务端管线测试（用 9a.3 的 fake-omp 场景）：事件、落库、快照、SSE 续流、去重、不合规候选的 warn、`updated_at` 不变、分叉为 `null`。
 
 Suggested fixture level: expanded - 事件联合与快照契约（web 严格解析）两处公共契约变化，持久化路径有顺序与去重；数据形状来自对 omp 二进制的反查
 Minimal mergeable slice: atomic - 快照多出一个键会被 web 的三键严格解析拒绝，所以服务端快照字段、web 解析与 web fixture（9b.4 + 9b.5 + 9b.6）必须同刀；事件产出没有落库则刷新即丢，9b.1-9b.4 互为前提。这一刀自带它打破的全部 fixture 改写。验证路径单一：服务端管线测试 + 契约测试

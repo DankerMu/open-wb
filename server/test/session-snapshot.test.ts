@@ -149,6 +149,7 @@ describe("session REST snapshot capture", () => {
           },
         ],
         streamCursor: { epoch: 1, seq: 1002 },
+        todo: null,
       });
       expect(supervisor.cursor).toEqual({ epoch: 1, seq: 1003 });
       expect(supervisor.cursorCalls).toEqual([session.id]);

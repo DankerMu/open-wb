@@ -51,7 +51,12 @@ async function mount(rename: () => Promise<Response> | Response = () => jsonResp
     ...welcomeRoutes(),
     "/api/sessions": () => jsonResponse({ sessions: [SESSION] }),
     [messagesPath(SESSION.id)]: () =>
-      jsonResponse({ session: SESSION, messages: [], streamCursor: { epoch: 1, seq: 0 } }),
+      jsonResponse({
+        session: SESSION,
+        messages: [],
+        streamCursor: { epoch: 1, seq: 0 },
+        todo: null,
+      }),
     [`/api/project-config?workspaceId=${PROJECT_A.id}`]: () => jsonResponse({ files: FILES }),
     [patchPath(SESSION.id)]: rename,
   });

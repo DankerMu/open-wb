@@ -100,6 +100,7 @@ function snapshotWith(
       },
     ],
     streamCursor: { epoch: 1, seq: null },
+    todo: null,
   };
 }
 
@@ -218,6 +219,7 @@ describe("Session contract: message thinking and step changes", () => {
         steps: message.steps.map((entry) => withoutKey(entry, "changes")),
       })),
       streamCursor: snapshot.streamCursor,
+      todo: null,
     };
 
     expect(parseMessageSnapshot(legacy)).toBeNull();

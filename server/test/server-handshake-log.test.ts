@@ -166,6 +166,23 @@ describe("appAssemblyOf (L2)", () => {
     expect(parsed).toEqual(RECORD);
   });
 
+  it("warn writes one LF-terminated JSON line for a dropped task-list candidate (#864)", async () => {
+    const stdout = spyWrites(process.stdout);
+    const stderr = spyWrites(process.stderr);
+    const { warn } = appAssemblyOf(resolveServerConfig({}, ENTRY));
+    const record = {
+      level: "warn",
+      event: "session_todo_rejected",
+      assistantMessageId: 7,
+    } as const;
+
+    warn?.(record);
+    await settle(2);
+
+    expect(stdout).not.toHaveBeenCalled();
+    expect(linesOf(stderr)).toEqual([`${JSON.stringify(record)}\n`]);
+  });
+
   it("a failing stderr write is swallowed: no throw, no unhandled rejection", async () => {
     const rejections = collectRejections();
     try {

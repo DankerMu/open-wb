@@ -106,7 +106,7 @@ export function welcomeRoutes({
     "/api/workspaces": workspaces,
   };
   const snapshotOf = (session: unknown) =>
-    jsonResponse({ session, messages: [], streamCursor: { epoch: 1, seq: 0 } });
+    jsonResponse({ session, messages: [], streamCursor: { epoch: 1, seq: 0 }, todo: null });
   for (const session of existing) {
     routes[messagesPath(session.id)] = () => snapshotOf(session);
   }
