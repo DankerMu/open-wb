@@ -32,8 +32,9 @@ import {
   sceneGroup,
   welcomeRoutes,
   workspaceList,
+  workspaceRequests,
 } from "./chat-page-welcome-scene-support.js";
-import { FakeEventSource } from "./chat-stream-support.js";
+import { CLOSED, FakeEventSource, latestSource } from "./chat-stream-support.js";
 import { currentLocation, deferredResponse, jsonResponse } from "./support.js";
 import { yieldMacrotask } from "./ui-support.js";
 
@@ -43,6 +44,7 @@ const EMPTY = "还没有消息，发一条开始吧";
 const TITLE = "空会话";
 const DRAFT = "草稿";
 const HISTORY_FAILED = "历史读取失败";
+const GUIDANCE = "请刷新页面后重试";
 
 const UNBOUND = view(A, TITLE, { status: "idle" });
 const BOUND = { ...UNBOUND, workspaceId: PROJECT_A.id };
@@ -74,6 +76,40 @@ async function findEmptyState() {
 
 function queryEmptyText() {
   return screen.queryByText(EMPTY, { exact: true });
+}
+
+/** 刷新指引已显示、输入框锁定、不是「生成中」——此时线程里不该再有空态。 */
+async function expectGuidanceInsteadOfEmptyState() {
+  await waitFor(() => expect(screen.getByRole("alert").textContent).toContain(GUIDANCE));
+  expect(queryEmptyText()).toBeNull();
+  expect(composer().disabled).toBe(true);
+  expect(screen.queryByText("生成中", { exact: true })).toBeNull();
+}
+
+/**
+ * 在零消息空闲会话的空态里发送，prompt 请求挂起。返回的 `accept` 让服务端受理（202）；受理之后的历史
+ * 读取由 `afterAccept` 应答。
+ */
+async function sendFromEmptyState(afterAccept: () => Response) {
+  const held = deferredResponse();
+  let accepted = false;
+  const { fetchMock } = renderChatPage(
+    `/?session=${A}`,
+    routes(BOUND, {
+      [messagesPath(A)]: () => (accepted ? afterAccept() : snapshot(BOUND)),
+      [sessionPromptPath(A)]: () => held.promise,
+    }),
+  );
+  await findEmptyState();
+  await waitFor(() => expect(composer().disabled).toBe(false));
+
+  typeDraft("你好");
+  clickSend();
+  await waitFor(() => expect(promptRequests(fetchMock, A)).toHaveLength(1));
+  return async () => {
+    accepted = true;
+    await settleDeferredResponse(held, jsonResponse(promptAccepted, 202));
+  };
 }
 
 /** 线程区里以 `工作空间` 开头的文本节点（只读的绑定空间行）。 */
@@ -113,6 +149,9 @@ describe("零消息会话空态", () => {
 
     expectDecorativeIcon(empty);
     expect(workspaceLines(empty)).toEqual(["工作空间 项目A"]);
+    // 工作空间行只读：空态里没有任何按钮或链接。
+    expect(within(empty).queryAllByRole("button")).toEqual([]);
+    expect(within(empty).queryAllByRole("link")).toEqual([]);
     expect(screen.queryAllByRole("article")).toEqual([]);
     expectNoWelcomeContent();
     expect(screen.getAllByRole("heading", { level: 1 })).toEqual([await crumb(TITLE)]);
@@ -133,16 +172,24 @@ describe("零消息会话空态", () => {
     expectNoWelcomeContent();
   });
 
+  // 列表响应先挂起：`respond` 为 null 即一直读取中，否则等页面消化完这个响应再断言。
   it.each([
-    ["列表读取中", () => new Promise<Response>(() => {})],
+    ["列表读取中", null],
     ["列表读取失败", () => envelope(500, "读取失败")],
     ["该空间已不在列表里", () => workspaceList()],
   ])(
     "E3 已绑定但空间名解析不出（%s）：有图标与提示，没有以 工作空间 开头的那一行",
-    async (_, workspaces) => {
-      renderChatPage(`/?session=${A}`, routes(BOUND, { "/api/workspaces": workspaces }));
+    async (_, respond) => {
+      const list = deferredResponse();
+      const { fetchMock } = renderChatPage(
+        `/?session=${A}`,
+        routes(BOUND, { "/api/workspaces": () => list.promise }),
+      );
       const empty = await findEmptyState();
+      await waitFor(() => expect(workspaceRequests(fetchMock)).toBe(1));
+      if (respond) await settleDeferredResponse(list, respond());
       await act(yieldMacrotask);
+      expect(workspaceRequests(fetchMock)).toBe(1);
 
       expectDecorativeIcon(empty);
       expect(workspaceLines(await findMessageArea())).toEqual([]);
@@ -190,34 +237,35 @@ describe("零消息会话空态", () => {
   });
 
   it("E7 在空态里发送：请求在途时空态已消失；受理后出现用户消息，空态不再出现", async () => {
-    const held = deferredResponse();
-    let accepted = false;
-    const { fetchMock } = renderChatPage(
-      `/?session=${A}`,
-      routes(BOUND, {
-        [messagesPath(A)]: () =>
-          accepted
-            ? jsonResponse({
-                ...runningCreatedSnapshot(),
-                session: { ...BOUND, status: "running" },
-              })
-            : snapshot(BOUND),
-        [sessionPromptPath(A)]: () => held.promise,
-      }),
+    const accept = await sendFromEmptyState(() =>
+      jsonResponse({ ...runningCreatedSnapshot(), session: { ...BOUND, status: "running" } }),
     );
-    await findEmptyState();
-    await waitFor(() => expect(composer().disabled).toBe(false));
-
-    typeDraft("你好");
-    clickSend();
-    await waitFor(() => expect(promptRequests(fetchMock, A)).toHaveLength(1));
     expect(queryEmptyText()).toBeNull();
     expect(screen.queryAllByRole("article")).toEqual([]);
 
-    accepted = true;
-    await settleDeferredResponse(held, jsonResponse(promptAccepted, 202));
+    await accept();
     expect(await screen.findByRole("article", { name: "用户" })).toBeTruthy();
     expect(queryEmptyText()).toBeNull();
+  });
+
+  it("E7b 在空态里发送，已受理（202）但随后的快照读取失败：显示刷新指引、输入框锁定，不显示空态", async () => {
+    const accept = await sendFromEmptyState(() => envelope(500, HISTORY_FAILED));
+
+    await accept();
+    await expectGuidanceInsteadOfEmptyState();
+    expect(screen.getByRole("alert").textContent).toContain(HISTORY_FAILED);
+    expect(screen.queryAllByRole("article")).toEqual([]);
+  });
+
+  it("E7c 零消息空闲会话的事件流终止失败：显示刷新指引、输入框锁定，不显示空态", async () => {
+    renderChatPage(`/?session=${A}`, routes(BOUND));
+    await findEmptyState();
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+
+    act(() => {
+      latestSource().emitTransport(CLOSED);
+    });
+    await expectGuidanceInsteadOfEmptyState();
   });
 
   it("E8 欢迎态首次发送：会话已建、prompt 在途——不显示空态", async () => {

@@ -30,9 +30,7 @@ type ThreadProps = {
   client: ApiClient;
   /** 对话内搜索的当前匹配；其余消息不带 `aria-current`。 */
   currentId: number | null;
-  /** 回合进行中（发送在途或权威状态 running）：此时即使还没有消息也不显示空态。 */
-  generating: boolean;
-  /** 输入框锁定期间分叉与重新生成禁用。 */
+  /** 输入框锁定期间分叉与重新生成禁用，零消息时也不显示空态。 */
   locked: boolean;
   onAnswerApproval: AnswerApproval;
   onFork(messageId: number): Promise<void>;
@@ -207,6 +205,7 @@ const AssistantMessage = memo(function AssistantMessage({
 /**
  * 零消息空态（design D4）：装饰性图标、一行提示与只读的绑定工作空间名。`workspace` 为 null（未绑定，
  * 或空间名解析不出——列表读取中、读取失败、空间已删）时没有工作空间那一行。不是标题，也不是消息。
+ * 只在输入框未锁定时渲染（见 `Thread` 的 `empty`）。
  */
 function EmptyThread({ workspace }: { workspace: Workspace | null }) {
   return (
@@ -227,7 +226,6 @@ function EmptyThread({ workspace }: { workspace: Workspace | null }) {
 export function Thread({
   client,
   currentId,
-  generating,
   locked,
   onAnswerApproval,
   onFork,
@@ -240,8 +238,9 @@ export function Thread({
 }: ThreadProps) {
   const messages = view?.messages ?? NO_MESSAGES;
   const runtime = useThreadRuntime({ messages, onRegenerate, onSend, onStop });
-  // 空态只在历史已到（下面的 `view` 分支）、没有消息且没有回合在跑时出现；内容根此时撑满滚动容器，让它垂直居中。
-  const empty = messages.length === 0 && !generating;
+  // 空态跟随输入框锁定：只在历史已到（下面的 `view` 分支）、没有消息且输入框未锁定时出现——回合进行中、
+  // 或流错误带着刷新指引时都不显示。内容根此时撑满滚动容器，让它垂直居中。
+  const empty = messages.length === 0 && !locked;
   const last = messages.at(-1);
   const regenerableId =
     view && last?.role === "assistant" && REGENERABLE.has(view.status) ? String(last.id) : null;
