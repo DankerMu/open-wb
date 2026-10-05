@@ -71,9 +71,15 @@ async function openRowPreview() {
   open.focus();
   fireEvent.click(open);
   const preview = await previewDialog();
-  // The dialog is in the document before its effects ran. Focus moving into it shows they did; one
-  // task later its layer has the document's Escape and pointerdown listeners.
+  // The dialog is in the document before its effects ran; focus moving into it shows they did.
+  // Its layer is not ready for a press yet. Radix arms a layer's document pointerdown listener in a
+  // setTimeout(0), and arms it again whenever the layer's place in the stack changes: registering
+  // the preview above the sheet re-renders both layers, which drops the listeners armed at mount
+  // and sets new timers. That re-render is the one that marks the preview as the layer taking
+  // pointer events (`pointer-events: auto` on its content); a press before it, or before the task
+  // after it, reaches no listener and closes nothing.
   await waitFor(() => expect(preview.contains(document.activeElement)).toBe(true));
+  await waitFor(() => expect(preview.style.pointerEvents).toBe("auto"));
   await yieldMacrotask();
   return { open, panel, preview, trigger };
 }
