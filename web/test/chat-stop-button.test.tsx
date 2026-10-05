@@ -179,8 +179,13 @@ describe("stop button: layout and outcomes", () => {
     const bar = toolbar();
     expect(within(bar).queryByRole("button", { name: "发送" })).toBeNull();
     const buttons = within(bar).getAllByRole("button");
-    expect(buttons).toHaveLength(1);
-    const stop = buttons[0] as HTMLButtonElement;
+    // 能力栏的「+」按钮（回合进行中禁用）之后只有停止键。
+    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([
+      "技能与命令",
+      "停止",
+    ]);
+    expect((buttons[0] as HTMLButtonElement).disabled).toBe(true);
+    const stop = buttons[1] as HTMLButtonElement;
     expect(stop.getAttribute("aria-label")).toBe("停止");
     expect(stop.disabled).toBe(false);
     expect(stop.type).toBe("button");
