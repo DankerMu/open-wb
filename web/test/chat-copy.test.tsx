@@ -173,7 +173,9 @@ describe("(C4) render conditions", () => {
     expect(icon?.getAttribute("aria-hidden")).toBe("true");
     const actions = button.closest(".chat-msg-actions");
     expect(actions).not.toBeNull();
-    expect(article.querySelector('[data-slot="message-content"] > .chat-step')).not.toBeNull();
+    expect(
+      article.querySelector('[data-slot="message-content"] > [data-slot="tool-group-root"]'),
+    ).not.toBeNull();
     expect(article.querySelector('[data-slot="message-content"]')?.lastElementChild).toBe(actions);
     const user = screen.getByRole("article", { name: "用户" });
     expect(within(user).queryByRole("button", { name: "复制" })).toBeNull();

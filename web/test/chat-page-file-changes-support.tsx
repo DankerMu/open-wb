@@ -9,7 +9,7 @@ import {
   chatStateFromSnapshot,
 } from "../src/features/chat/stream.js";
 import type { ChatMessageSnapshot } from "../src/lib/session-contract.js";
-import { type FetchRoutes, renderChatPage } from "./chat-page-support.js";
+import { expandToolGroups, type FetchRoutes, renderChatPage } from "./chat-page-support.js";
 import {
   chatSnapshot,
   connectChat,
@@ -236,6 +236,8 @@ export function detailButtons() {
   return screen.queryAllByRole("button", { name: DETAILS });
 }
 
+/** 助手消息里名为 `name` 的步骤徽章；步骤收在工具调用组里，先展开。 */
 export function stepBadge(name: string) {
+  expandToolGroups(reply());
   return within(reply()).getByRole("status", { name });
 }

@@ -4,6 +4,7 @@
 import { expect, type Page } from "@playwright/test";
 import { holdRoute } from "./route-hold.js";
 import { gatePhase } from "./ui-walk-gate.js";
+import { expandToolGroup, toolGroup } from "./ui-walk-steps.js";
 
 const PENDING = "需要你的确认";
 const ALLOWED = "已允许执行";
@@ -19,7 +20,7 @@ function assistantArticle(page: Page) {
   return page.getByRole("article", { name: "助手" });
 }
 
-// 待决审批条、运行中的 bash 步骤与 composer `生成中` 同时可见（不断言先后）；gate 仍为 armed 证明末轮被审批挡住。
+// 待决审批条、运行中的 bash 步骤（展开工具调用组后）与 composer `生成中` 同时可见（不断言先后）；gate 仍为 armed 证明末轮被审批挡住。
 // 作答 POST 被 holdRoute 挂起期间断言两按钮禁用：放行后 approval.resolved 约 20ms 内就会卸载按钮。
 export async function allowFirstApproval(
   page: Page,
@@ -29,6 +30,11 @@ export async function allowFirstApproval(
   const assistant = assistantArticle(page);
   const pending = assistant.getByRole("group", { name: PENDING });
   await expect(pending).toBeVisible();
+  // 组默认收起：只有一行摘要，步骤卡不在页面上。
+  await expect(toolGroup(assistant).getByRole("button")).toHaveAttribute("aria-expanded", "false");
+  await expect(toolGroup(assistant).getByRole("button")).toHaveText("1 个步骤 · bash 运行中");
+  await expect(assistant.getByRole("region", { name: "bash" })).toHaveCount(0);
+  await expandToolGroup(assistant);
   await expect(assistant.getByRole("status", { name: "bash 运行中" })).toBeVisible();
   await expect(generatingStatus(page)).toBeVisible();
   const allow = pending.getByRole("button", { name: "允许", exact: true });

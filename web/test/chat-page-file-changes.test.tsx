@@ -47,7 +47,7 @@ import {
   withNeighbour,
   write,
 } from "./chat-page-file-changes-support.js";
-import { cleanupChatPage } from "./chat-page-support.js";
+import { cleanupChatPage, expandToolGroups } from "./chat-page-support.js";
 import { assistantSteps, deferred, historyUser } from "./chat-stream-support.js";
 import { calls, currentLocation, jsonResponse } from "./support.js";
 import { readRepoFile, ruleBody, stripComments } from "./ui-support.js";
@@ -440,7 +440,7 @@ describe("文件变更 card on the chat page", () => {
 
     send("turn.start", {});
 
-    expect(within(reply()).queryAllByRole("region")).toEqual([]);
+    expect(reply().querySelector('[data-slot="tool-group-root"]')).toBeNull();
     expect(cards()).toEqual([]);
     expect(screen.queryAllByRole("alert")).toEqual([]);
   });
@@ -493,9 +493,10 @@ describe("文件变更 card on the chat page", () => {
     ]);
     expect(rowTexts(card)[1]).not.toMatch(/[+-]\d/);
     expect(document.documentElement.innerHTML).not.toContain(ROOT_PREFIX);
-    expect(document.querySelectorAll(".chat-step")).toHaveLength(2);
-    expect(document.querySelectorAll(".chat-step .file-change-row")).toHaveLength(0);
-    expect(document.querySelectorAll('.chat-step [class*="file-change"]')).toHaveLength(0);
+    expect(within(cardNamed("工具调用")).queryAllByRole("region")).toEqual([]);
+    expandToolGroups(reply());
+    expect(within(cardNamed("工具调用")).getAllByRole("region")).toHaveLength(2);
+    expect(cardNamed("工具调用").querySelectorAll('[class*="file-change"]')).toHaveLength(0);
     const editStep = within(reply()).getByRole("region", { name: "edit" });
     expect(editStep.textContent).not.toContain("+2");
     expect(editStep.textContent).not.toContain("zhangsan/proj/src/app.ts");
@@ -673,7 +674,7 @@ describe("文件变更 card on the chat page", () => {
     expect(parts.map(tagAndClass)).toEqual([
       "reasoning-root",
       "message-body",
-      "section.chat-step",
+      "tool-group-root",
       "div.chat-approvals",
       "fieldset.file-changes-card",
       "fieldset.artifact-card",
@@ -681,7 +682,7 @@ describe("文件变更 card on the chat page", () => {
       "div.chat-msg-actions",
     ]);
     expect(cardNamed("文件变更（1 个）")).toBe(parts[4]);
-    expect(within(reply()).getByRole("region", { name: "write" })).toBe(parts[2]);
+    expect(cardNamed("工具调用")).toBe(parts[2]);
     expect(within(reply()).getByRole("status", { name: "助手消息 已停止" })).toBe(parts[6]);
     expect(parts[1]?.textContent).toBe("部分回答");
 
@@ -703,7 +704,7 @@ describe("文件变更 card on the chat page", () => {
     const parts = replyParts();
     expect(parts.map(tagAndClass)).toEqual([
       "message-body",
-      "section.chat-step",
+      "tool-group-root",
       "message-error",
       "fieldset.file-changes-card",
       "fieldset.artifact-card",
@@ -721,8 +722,7 @@ describe("文件变更 card on the chat page", () => {
     };
     await openSession({ ...base, messages: [asker, ...base.messages.slice(1)] });
 
-    const user = screen.getByRole("article", { name: "用户" });
-    expect(within(user).getByRole("region", { name: "edit" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "1 个步骤 · edit 已完成" })).toBeTruthy();
     expect(cards()).toEqual([]);
     expect(screen.queryByRole("group", { name: /文件变更/ })).toBeNull();
   });

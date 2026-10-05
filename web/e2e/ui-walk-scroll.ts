@@ -7,6 +7,7 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { holdRoute } from "./route-hold.js";
 import { type WalkProject, withViewport } from "./ui-walk-layout.js";
+import { expandToolGroup } from "./ui-walk-steps.js";
 
 // W-scroll 的量纲：强制溢出的余量、Step 3 再压低的高度、断言可信所需的最小可视高度。
 const SCROLL_OVERFLOW_PX = 80;
@@ -139,10 +140,9 @@ export async function walkScrollFollow(
     });
 
     await test.step("W-scroll 2: expanding 原始输出 while pinned keeps following", async () => {
-      const summary = page
-        .getByRole("article", { name: "助手" })
-        .getByRole("region", { name: "bash" })
-        .locator("summary");
+      const steps = await expandToolGroup(page.getByRole("article", { name: "助手" }));
+      await expectPinnedDistance(transcript, "W-scroll 2: tool-call group expanded");
+      const summary = steps.getByRole("region", { name: "bash" }).locator("summary");
       await expect(summary).toHaveText("原始输出");
       const before = await transcriptMetrics(transcript);
       expectForcedOverflow(before, "W-scroll 2");

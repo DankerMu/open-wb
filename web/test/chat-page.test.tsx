@@ -15,7 +15,12 @@ import {
   emptyCreatedSnapshot,
   idleCreatedSession,
 } from "./chat-page-ownership-support.js";
-import { cleanupChatPage, expectChatLocation, renderChatPage } from "./chat-page-support.js";
+import {
+  cleanupChatPage,
+  expandToolGroups,
+  expectChatLocation,
+  renderChatPage,
+} from "./chat-page-support.js";
 import {
   chatSnapshot,
   FakeEventSource,
@@ -131,6 +136,7 @@ describe("chat page route integration", () => {
         exact: true,
       }),
     ).toBeTruthy();
+    expandToolGroups();
     expect(screen.getByText("bash", { exact: true })).toBeTruthy();
     expect(screen.getByText(BASH_START_DETAIL, { exact: true })).toBeTruthy();
     expect(screen.getByRole("status", { name: "bash 运行中" })).toBeTruthy();

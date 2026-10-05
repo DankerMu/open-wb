@@ -33,7 +33,12 @@ import {
   UNKNOWN_MESSAGES,
   UNKNOWN_SESSION_ID,
 } from "./chat-page-ownership-support.js";
-import { cleanupChatPage, expectChatLocation, renderChatPage } from "./chat-page-support.js";
+import {
+  cleanupChatPage,
+  expandToolGroups,
+  expectChatLocation,
+  renderChatPage,
+} from "./chat-page-support.js";
 import {
   chatSnapshot,
   FakeEventSource,
@@ -127,6 +132,7 @@ describe("chat page create and acceptance ownership", () => {
 
     expect(await within(messages).findByText(STREAMED_SHOWN, exactText)).toBeTruthy();
     expect(within(messages).getByText(PROMPT, { exact: true })).toBeTruthy();
+    expandToolGroups(messages);
     expect(within(messages).getByText("bash", { exact: true })).toBeTruthy();
     expect(within(messages).getByText(BASH_START_DETAIL, { exact: true })).toBeTruthy();
     expect(within(messages).getByText(BASH_OUTPUT, { exact: true })).toBeTruthy();

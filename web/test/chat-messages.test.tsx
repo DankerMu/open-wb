@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ChatMessageSnapshot } from "../src/lib/session-contract.js";
-import { cleanupChatPage, renderChatPage } from "./chat-page-support.js";
+import { cleanupChatPage, expandToolGroups, renderChatPage } from "./chat-page-support.js";
 import { chatSnapshot, historyUser, latestSource, SESSION_ID } from "./chat-stream-support.js";
 import { jsonResponse } from "./support.js";
 import { COLOR_LITERAL_PATTERNS, listRepoFiles, readRepoFile } from "./ui-support.js";
@@ -164,6 +164,7 @@ describe("(M4) avatar and assistant block structure", () => {
 
     const main = article.querySelector('[data-slot="message-content"]');
     const text = main?.querySelector('[data-slot="message-body"]');
+    expandToolGroups(article);
     const step = within(article).getByRole("region", { name: "bash" });
     expect(text).not.toBeNull();
     expect(main?.contains(step)).toBe(true);

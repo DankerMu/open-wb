@@ -149,15 +149,14 @@ describe("产物卡 derivation on the chat page", () => {
     const derived = artifactCards();
     expect(replyParts().map(tagAndClass)).toEqual([
       "message-body",
-      "section.chat-step",
-      "section.chat-step",
+      "tool-group-root",
       "fieldset.file-changes-card",
       "fieldset.artifact-card",
       "fieldset.artifact-card",
       "fieldset.artifact-card",
       "div.chat-msg-actions",
     ]);
-    expect(replyParts().slice(4, 7)).toEqual(derived);
+    expect(replyParts().slice(3, 6)).toEqual(derived);
     expect(
       ["app.ts", "index.html", "chart.PNG"].map((name) =>
         within(reply()).getByRole("group", { name }),
@@ -656,7 +655,7 @@ describe("产物卡 placement", () => {
     expect(parts.map(tagAndClass)).toEqual([
       "reasoning-root",
       "message-body",
-      "section.chat-step",
+      "tool-group-root",
       "div.chat-approvals",
       "fieldset.file-changes-card",
       "fieldset.artifact-card",
@@ -725,7 +724,7 @@ describe("产物卡 placement", () => {
     await openSession({ ...turn("done"), messages: [asker, answer] });
 
     const question = screen.getByRole("article", { name: "用户" });
-    expect(within(question).getAllByRole("region", { name: "write" })).toHaveLength(1);
+    expect(within(question).getAllByRole("button", { name: /个步骤 · write/ })).toHaveLength(1);
     expect(listedGroup()).not.toBeNull();
     expect(artifactCards()).toEqual([]);
     expect(screen.queryByRole("button", { name: /^复制代码/ })).toBeNull();
