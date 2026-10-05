@@ -18,6 +18,7 @@ const MIGRATED_AREAS: string[] = [
   // 会话页按文件逐个登记（s1f-chat-surface D3）；目录本身不登记。
   "web/src/features/chat/approval-card.tsx",
   "web/src/features/chat/artifact-card.tsx",
+  "web/src/features/chat/artifacts-panel.tsx",
   "web/src/features/chat/capability-bar.tsx",
   "web/src/features/chat/composer-dock.tsx",
   "web/src/features/chat/composer-locks.ts",
@@ -258,6 +259,7 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
       "web/src/features/theme",
       "web/src/features/chat/approval-card.tsx",
       "web/src/features/chat/artifact-card.tsx",
+      "web/src/features/chat/artifacts-panel.tsx",
       "web/src/features/chat/capability-bar.tsx",
       "web/src/features/chat/composer-dock.tsx",
       "web/src/features/chat/composer-locks.ts",

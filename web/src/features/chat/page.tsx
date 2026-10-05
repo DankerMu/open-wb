@@ -30,7 +30,7 @@ export function ChatPage() {
   const session = useChatSession();
   const { client, draft, historyView, requestedSessionId, selected, sessionActions, workspace } =
     session;
-  const artifacts = useArtifactsPanel(client, historyView, workspace);
+  const artifacts = useArtifactsPanel(client, historyView, workspace, selected?.id);
   const search = useConversationSearch(selected?.id, historyView);
   const config = useProjectConfig(client, selected);
   useTopbar(

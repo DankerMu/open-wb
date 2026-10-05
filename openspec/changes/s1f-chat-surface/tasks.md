@@ -134,10 +134,10 @@ Minimal mergeable slice: atomic - 待决卡离开消息与测试/ui-walk 的选�
 - [x] 7.1 文件变更卡：换到拷入层组件，位于工具调用组之外；行为场景不变。
 - [x] 7.2 产物卡：预览、复制、下载行为不变；在此拷入 `dialog`（首个消费者：html 产物预览），关闭预览后焦点回到预览按钮且线程不滚动；复制成功换图标 + `已复制` 状态；
   `文件过大，无法复制`、`复制失败`、下载/预览失败的信封文案就地 `role="alert"`。覆盖 ui-primitives「焦点归还不滚动」的既有断言若以 html 预览为对象，改以会话重命名对话框（仍是旧 `Dialog`）为对象。
-- [ ] 7.3 产物面板：旧 `Drawer` 换为拷入层 `sheet`（可访问名、焦点与 Escape 行为按现规格）；无产物时照常打开并显示空态 `当前任务暂无产物`。
-- [ ] 7.4 改写被打破的断言（按分片）：`ui-walk-sessions.spec.ts` 的 `.artifact-lang`、`iframe.artifact-preview-frame` 选择器改为角色/属性；
+- [x] 7.3 产物面板：旧 `Drawer` 换为拷入层 `sheet`（可访问名、焦点与 Escape 行为按现规格）；无产物时照常打开并显示空态 `当前任务暂无产物`。
+- [x] 7.4 改写被打破的断言（按分片）：`ui-walk-sessions.spec.ts` 的 `.artifact-lang`、`iframe.artifact-preview-frame` 选择器改为角色/属性；
   单元测试 `chat-page-artifacts-panel`、`chat-page-file-changes`（766 行）、`chat-page-artifact-card`（778 行）——后两个只减不增，新用例进新文件；断言提示的测试改为就地呈现。
-- [ ] 7.5 按分片退役：删除 `file-changes-card.tsx`、`artifact-card.tsx`、`artifacts-panel.tsx` 的旧实现与对应 CSS、静态断言；登记已迁移文件；CH 行：文件变更卡、产物卡预览/复制/下载、产物面板与空态。
+- [x] 7.5 按分片退役：删除 `file-changes-card.tsx`、`artifact-card.tsx`、`artifacts-panel.tsx` 的旧实现与对应 CSS、静态断言；登记已迁移文件；CH 行：文件变更卡、产物卡预览/复制/下载、产物面板与空态。
 
 Suggested fixture level: compact - 三个组件的换肤，行为规格不变；变化只有提示改就地与面板空态
 Minimal mergeable slice: 7.1，自带 `file-changes-card.tsx` 旧实现与其 CSS 的删除、`chat-page-file-changes` 的读 CSS 断言改写——文件变更卡不带交互，可单独替换保绿；7.2 产物卡一刀（自带 `dialog` 拷入、`artifact-card.tsx` 退役、`chat-page-artifact-card` 与 `.artifact-lang` / `iframe.artifact-preview-frame` 改写）、7.3 产物面板一刀（自带 `artifacts-panel.tsx` 退役与 `chat-page-artifacts-panel` 改写；面板的空态改动与卡片无关）

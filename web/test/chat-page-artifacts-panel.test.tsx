@@ -2,8 +2,13 @@
  * Issue 537 产物面板 (parent tasks 7.6): P1–P12 of openspec/changes/artifacts-panel/design.md.
  * Seams: the jsdom chat page inside the shell over a stubbed `fetch`, the live event source, the
  * router, the two Blob URL statics, `<a>.click()`, `navigator.clipboard`, the pure `chatTopbar`,
- * and the static source and CSS text. Expected values are literals from the spec deltas; cases
- * marked (guard) already hold before the change.
+ * and the static source text. Expected values are literals from the spec deltas; cases marked
+ * (guard) already hold before the change.
+ *
+ * Issue 860 (s1f-chat-surface task 7.3) moved the panel to the copied-layer sheet: the cases that
+ * asserted a toast (the empty result P4, a row's copy and failure P7) assert what the panel shows
+ * in place instead, P2 no longer reads the old drawer's class names and P12 no longer reads CSS.
+ * The cases new with that issue are in chat-page-artifacts-panel-sheet.test.tsx.
  */
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -17,6 +22,7 @@ import {
   changedTurn,
   DOWNLOAD_CHART,
   frameOf,
+  glyphOf,
   HTML_TEXT,
   INDEX,
   OPEN_INDEX,
@@ -42,10 +48,12 @@ import {
   openProbedSession,
   panelAction,
   panelActions,
+  panelBody,
   panelButton,
   panelRows,
   routeBack,
   routeToOtherSession,
+  rowAlerts,
   rowButtons,
   SESSION_PATH,
   twoTurns,
@@ -74,19 +82,12 @@ import { renderChatPage } from "./chat-page-support.js";
 import { deferred } from "./chat-stream-support.js";
 import { hasLucideGlyph, imagePreviewResponse } from "./files-fixture.js";
 import { currentLocation, deferredResponse, jsonResponse, textPreviewResponse } from "./support.js";
-import {
-  pressPointer,
-  readRepoFile,
-  ruleBody,
-  stripComments,
-  yieldMacrotask,
-} from "./ui-support.js";
+import { pressPointer, readRepoFile, yieldMacrotask } from "./ui-support.js";
 
 const A_MD = "a.md";
 const DETAILS = /^查看详情/;
 const DETAILS_A = "查看详情 zhangsan/proj/a.md";
 const DETAILS_INDEX = "查看详情 zhangsan/proj/out/index.html";
-const COPIED: [string, string] = ["success", "已复制到剪贴板"];
 
 const blobs = artifactsPanelFixture();
 
@@ -148,7 +149,7 @@ describe("顶栏入口 (P1)", () => {
 });
 
 describe("聚合 (P2, P3)", () => {
-  it("P2 opens a right drawer of width 420 with one row per path across both assistant messages and fetches nothing", async () => {
+  it("P2 opens a right sheet with one row per path across both assistant messages and fetches nothing", async () => {
     const page = await openSession(
       twoTurns(
         [toolStep(11, 0, "edit", [edit(A_MD, 1, 0)])],
@@ -160,8 +161,9 @@ describe("聚合 (P2, P3)", () => {
 
     expect(screen.getByRole("dialog", { name: "产物面板" })).toBe(panel);
     expect(screen.getAllByRole("dialog")).toEqual([panel]);
-    expect(panel.classList.contains("ui-drawer--right")).toBe(true);
-    expect(panel.classList.contains("ui-drawer--w420")).toBe(true);
+    expect(panel.getAttribute("data-slot")).toBe("sheet-content");
+    expect(panel.getAttribute("data-side")).toBe("right");
+    expect(panel.getAttribute("aria-modal")).toBe("true");
     expect(panelRows(panel)).toHaveLength(2);
     expect(rowCells(panel)).toEqual([
       [
@@ -250,18 +252,29 @@ describe("空态 (P4)", () => {
     ["the session is bound to no workspace", () => turn("done", unchanged, null)],
   ];
 
-  it.each(empties)("P4 only toasts 当前任务暂无产物 when %s", async (_name, snapshot) => {
-    await openSession(snapshot());
+  it.each(empties)(
+    "P4 opens the panel on its empty state 当前任务暂无产物 when %s",
+    async (_name, snapshot) => {
+      await openSession(snapshot());
 
-    fireEvent.click(panelButton());
-    await quiesce();
+      const { panel, trigger } = await openPanel();
 
-    expect(toasts()).toEqual([["info", "当前任务暂无产物"]]);
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(drawer()).toBeNull();
-  });
+      expect(screen.getAllByRole("dialog")).toEqual([panel]);
+      expect(panelBody(panel)).toBe(NO_ARTIFACTS);
+      expect(panelRows(panel)).toEqual([]);
+      expect(panelActions(panel)).toEqual([]);
+      expect(toasts()).toEqual([]);
+      await yieldMacrotask();
 
-  it("P4 only toasts while the history is still being read, and opens once it arrived", async () => {
+      fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
+
+      await expectPanelClosed();
+      expect(document.activeElement).toBe(trigger);
+      expect(toasts()).toEqual([]);
+    },
+  );
+
+  it("P4 opened while the history is still being read, the panel shows the empty state and then the list once it arrived", async () => {
     const history = deferredResponse();
     const snapshot = editedAndWritten();
     renderChatPage(SESSION_PATH, {
@@ -270,41 +283,41 @@ describe("空态 (P4)", () => {
       [SESSION_MESSAGES]: () => history.promise,
     });
     await waitFor(() => expect(bannerButtons()).toEqual(["重命名", "对话内搜索", "产物面板"]));
-    expect(screen.queryByRole("article", { name: "助手" })).toBeNull();
-
-    fireEvent.click(panelButton());
-    await quiesce();
-
-    expect(toasts()).toEqual([NO_ARTIFACTS]);
-    expect(drawer()).toBeNull();
-
-    await settleDeferredResponse(history, jsonResponse(snapshot));
-    await screen.findByRole("article", { name: "助手" });
-    await quiesce();
-    expect(drawer()).toBeNull();
+    expect(screen.queryByRole("article", { name: "助手", hidden: true })).toBeNull();
 
     const { panel } = await openPanel();
 
+    expect(panelBody(panel)).toBe(NO_ARTIFACTS);
+    expect(panelRows(panel)).toEqual([]);
+
+    await settleDeferredResponse(history, jsonResponse(snapshot));
+    await screen.findByRole("article", { name: "助手", hidden: true });
+    await quiesce();
+
+    expect(drawer()).toBe(panel);
     expect(rowTexts(panel)).toEqual(["+1zhangsan/proj/a.md", "写入zhangsan/proj/out/index.html"]);
-    expect(toasts()).toEqual([NO_ARTIFACTS]);
+    expect(toasts()).toEqual([]);
   });
 
-  it("P4 only toasts while the one step carrying changes still runs, and opens after its step.end", async () => {
+  it("P4 the empty state of the open panel turns into the list at the step.end of the one step carrying changes", async () => {
     const steps = [toolStep(21, 0, "edit", [edit("notes/todo.md", 3, 0)], "running")];
     await openSession(turn("running", { content: "正在改", steps }));
 
-    fireEvent.click(panelButton());
-    await quiesce();
-
-    expect(toasts()).toEqual([NO_ARTIFACTS]);
-    expect(drawer()).toBeNull();
-
-    const send = await goLive();
-    send("step.end", { stepId: 21, status: "done", output: "ok" });
     const { panel } = await openPanel();
 
+    expect(panelBody(panel)).toBe(NO_ARTIFACTS);
+    expect(panelRows(panel)).toEqual([]);
+
+    const send = await goLive();
+    expect(drawer()).toBe(panel);
+    expect(panelBody(panel)).toBe(NO_ARTIFACTS);
+
+    send("step.end", { stepId: 21, status: "done", output: "ok" });
+
+    expect(drawer()).toBe(panel);
     expect(rowTexts(panel)).toEqual(["+3zhangsan/proj/notes/todo.md"]);
-    expect(toasts()).toEqual([NO_ARTIFACTS]);
+    expect(within(panel).queryByText(NO_ARTIFACTS)).toBeNull();
+    expect(toasts()).toEqual([]);
   });
 });
 
@@ -352,7 +365,7 @@ describe("关闭与焦点 (P6)", () => {
     [
       "a press on the overlay",
       () => {
-        const overlay = document.querySelector(".ui-drawer-overlay");
+        const overlay = document.querySelector('[data-slot="sheet-overlay"]');
         if (!overlay) throw new Error("缺遮罩");
         pressPointer(overlay);
       },
@@ -448,20 +461,27 @@ describe("行操作复用 (P7)", () => {
     expect(toasts()).toEqual([]);
   });
 
-  it("P7 the code row copies exactly the fetched text and confirms with a toast", async () => {
+  it("P7 the code row copies exactly the fetched text and confirms in place with a check and a hidden 已复制", async () => {
     const writeText = stubClipboard(vi.fn((_text: string) => Promise.resolve()));
     const page = await openPreviewing([edit(APP, 2, 1)], () => textPreviewResponse(CODE_TEXT));
     const { panel } = await openPanel();
+    const copy = panelAction(panel, COPY_APP);
+    expect(glyphOf(copy)).toBe("copy");
 
-    fireEvent.click(panelAction(panel, COPY_APP));
+    fireEvent.click(copy);
 
-    await waitFor(() => expect(toasts()).toEqual([COPIED]));
+    await waitFor(() => expect(glyphOf(copy)).toBe("check"));
+    const status = within(panelRows(panel)[0] as HTMLElement).getByRole("status");
+    expect(status.textContent).toBe("已复制");
+    expect(status.classList.contains("sr-only")).toBe(true);
     expect(writeText.mock.calls).toEqual([[CODE_TEXT]]);
     expect(previewCalls(page.fetchMock).map(([path]) => path)).toEqual([previewRoute(APP)]);
     expect(screen.getAllByRole("dialog")).toEqual([panel]);
+    expect(rowAlerts(panel)).toEqual([[]]);
+    expect(toasts()).toEqual([]);
   });
 
-  it("P7 a failed row action toasts the envelope message, keeps the drawer open and can be retried", async () => {
+  it("P7 a failed row action shows the envelope message in its row, keeps the drawer open and can be retried", async () => {
     const gone = "复制代码 gone.md";
     const page = await openPreviewing([edit("gone.md", 1, 0)], () =>
       envelope(404, "not_found", "文件不存在或已被删除"),
@@ -470,7 +490,7 @@ describe("行操作复用 (P7)", () => {
 
     fireEvent.click(panelAction(panel, gone));
 
-    await waitFor(() => expect(toasts()).toEqual([["error", "文件不存在或已被删除"]]));
+    await waitFor(() => expect(rowAlerts(panel)).toEqual([["文件不存在或已被删除"]]));
     await quiesce();
     expect(drawer()).toBe(panel);
     expect(panelAction(panel, gone).disabled).toBe(false);
@@ -478,8 +498,10 @@ describe("行操作复用 (P7)", () => {
     fireEvent.click(panelAction(panel, gone));
 
     await waitFor(() => expect(previewCalls(page.fetchMock)).toHaveLength(2));
-    await waitFor(() => expect(toasts()).toHaveLength(2));
+    await waitFor(() => expect(panelAction(panel, gone).disabled).toBe(false));
+    expect(rowAlerts(panel)).toEqual([["文件不存在或已被删除"]]);
     expect(drawer()).toBe(panel);
+    expect(toasts()).toEqual([]);
   });
 
   it("P7 a pending row action disables only its own button", async () => {
@@ -509,7 +531,8 @@ describe("行操作复用 (P7)", () => {
     await waitFor(() => expect(previewCalls(page.fetchMock)).toHaveLength(2));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(CODE_TEXT));
     expect(open.disabled).toBe(true);
-    await waitFor(() => expect(toasts()).toEqual([COPIED]));
+    await waitFor(() => expect(glyphOf(panelAction(panel, COPY_APP))).toBe("check"));
+    expect(toasts()).toEqual([]);
     expect(screen.queryByRole("dialog", { name: "index.html", hidden: true })).toBeNull();
   });
 });
@@ -670,17 +693,6 @@ describe("查看详情 (P11)", () => {
 });
 
 describe("产物面板 static contract (P12)", () => {
-  it("P12 styles the drawer list in messages.css with a bordered frame", () => {
-    const css = stripComments(readRepoFile("web/src/features/chat/messages.css"));
-    const frame = ruleBody(css, ".artifacts-panel-list");
-
-    expect(frame).toContain("border: 1px solid var(--wb-border-default)");
-  });
-
-  it("P12 keeps the panel's styles out of chat.css (guard)", () => {
-    expect(readRepoFile("web/src/features/chat/chat.css")).not.toContain("artifacts-panel");
-  });
-
   it("P12 the panel module holds no fetch, iframe, clipboard or Blob URL code of its own", () => {
     const source = readRepoFile("web/src/features/chat/artifacts-panel.tsx");
 
