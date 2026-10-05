@@ -1,5 +1,6 @@
 /**
- * Issue #528 fake-upstream WORKBUDDY_THINK / WORKBUDDY_WRITE marker contracts.
+ * Issue #528 fake-upstream WORKBUDDY_THINK / WORKBUDDY_WRITE marker contracts, and the issue #863
+ * WORKBUDDY_TODO marker (a `todo` tool call in the tool round; WORKBUDDY_WRITE wins over it).
  * Expected SSE records are literal strings written from the omp-test-harness
  * spec delta and the pre-change fixture output; fixture constants are not imported.
  * Raw data records are compared after pinning only the random ids and `created`.
@@ -12,12 +13,15 @@ import type { FakeUpstreamServer } from "./support/fake-upstream.mjs";
 const KEY = "fake";
 const THINK = "WORKBUDDY_THINK";
 const WRITE = "WORKBUDDY_WRITE";
+const TODO = "WORKBUDDY_TODO";
 const FAKE_ERROR = "WORKBUDDY_FAKE_ERROR";
 const WALK = "WORKBUDDY_UI_WALK:";
 const TOOL_RESULT = { role: "tool", content: "workbuddy-smoke" };
 const EXPECTED_THINKING = "先读需求，再列要点，最后作答。";
 const EXPECTED_WRITE_ARGS =
   '{"path":"workbuddy-report.html","content":"<!doctype html><title>WorkBuddy</title><h1>WorkBuddy</h1>\\n"}';
+const EXPECTED_TODO_ARGS =
+  '{"op":"init","list":[{"phase":"走查","items":["整理需求","输出结论"]}]}';
 const WAIT_MS = 8_000;
 // Localhost idle bound: frames already written are readable immediately.
 const IDLE_MS = 250;
@@ -51,10 +55,15 @@ const WRITE_CALL = frame(
   String.raw`{"role":"assistant","tool_calls":[{"index":0,"id":"call_ID","type":"function","function":{"name":"write","arguments":"{\"path\":\"workbuddy-report.html\",\"content\":\"<!doctype html><title>WorkBuddy</title><h1>WorkBuddy</h1>\\n\"}"}}]}`,
   "null",
 );
+const TODO_CALL = frame(
+  String.raw`{"role":"assistant","tool_calls":[{"index":0,"id":"call_ID","type":"function","function":{"name":"todo","arguments":"{\"op\":\"init\",\"list\":[{\"phase\":\"走查\",\"items\":[\"整理需求\",\"输出结论\"]}]}"}}]}`,
+  "null",
+);
 const TOOL_STOP = frame("{}", '"tool_calls"');
 
 const BASH_ROUND = [BASH_CALL, TOOL_STOP, DONE];
 const WRITE_ROUND = [WRITE_CALL, TOOL_STOP, DONE];
+const TODO_ROUND = [TODO_CALL, TOOL_STOP, DONE];
 const ANSWER = [ROLE, ...CONTENT, STOP, DONE];
 const THINK_ANSWER = [ROLE, ...REASONING, ...CONTENT, STOP, DONE];
 const HELD_PREFIX = [ROLE, CONTENT[0]];
@@ -170,6 +179,65 @@ describe("WORKBUDDY_THINK and WORKBUDDY_WRITE combined", () => {
   });
 });
 
+describe("WORKBUDDY_TODO tool round", () => {
+  it("replaces the bash call with one exact todo call", async () => {
+    const port = await upstream();
+    const reply = await chat(port, toolRound(`plan it ${TODO}`));
+    expect(recordsOf(reply)).toEqual(TODO_ROUND);
+    expect(toolFunctions(reply.text)).toEqual([{ name: "todo", arguments: EXPECTED_TODO_ARGS }]);
+    expect(reply.text).not.toContain("bash");
+  });
+
+  it.each([
+    ["WRITE before TODO", `${WRITE} ${TODO}`],
+    ["TODO before WRITE", `${TODO} ${WRITE}`],
+  ])(
+    "WORKBUDDY_WRITE wins: %s streams the unchanged write call and no todo call",
+    async (_label, markers) => {
+      const port = await upstream();
+      const reply = await chat(port, toolRound(markers));
+      expect(recordsOf(reply)).toEqual(WRITE_ROUND);
+      expect(toolFunctions(reply.text)).toEqual([
+        { name: "write", arguments: EXPECTED_WRITE_ARGS },
+      ]);
+      expect(reply.text).not.toContain('"todo"');
+    },
+  );
+
+  it("leaves the answering round as the fixed reply with no tool call", async () => {
+    const port = await upstream();
+    const reply = await chat(port, answerRound(TODO));
+    expect(recordsOf(reply)).toEqual(ANSWER);
+    expect(toolFunctions(reply.text)).toEqual([]);
+  });
+
+  it("combines with WORKBUDDY_THINK: todo in the tool round, reasoning in the answering round", async () => {
+    const port = await upstream();
+    const markers = `${THINK} ${TODO}`;
+    const tool = await chat(port, toolRound(markers));
+    expect(recordsOf(tool)).toEqual(TODO_ROUND);
+    expect(tool.text).not.toContain("reasoning_content");
+    const answer = await chat(port, answerRound(markers));
+    expect(recordsOf(answer)).toEqual(THINK_ANSWER);
+  });
+
+  it.each([
+    ["alone", TODO, HELD_PREFIX],
+    ["with WORKBUDDY_THINK", `${THINK} ${TODO}`, THINK_HELD_PREFIX],
+  ])(
+    "under an armed gate %s holds and releases exactly as without the marker",
+    async (_label, markers, held) => {
+      const run = await armedGateRun(markers);
+      expect(run.prefix).toEqual(held);
+      expect(run.prefixEnded).toBe(false);
+      expect(run.heldPhase).toBe("held");
+      expect(run.completed).toEqual([...held, ...RELEASED_REST]);
+      expect(run.completedEnded).toBe(true);
+      expect(run.secondRelease).toBe(404);
+    },
+  );
+});
+
 describe("unmarked requests stay byte-identical", () => {
   it("tool round is the original bash call", async () => {
     const port = await upstream();
@@ -201,9 +269,9 @@ describe("unmarked requests stay byte-identical", () => {
 });
 
 describe("error marker precedence", () => {
-  it("returns the 500 error even when THINK and WRITE are present", async () => {
+  it("returns the 500 error even when THINK, WRITE and TODO are present", async () => {
     const port = await upstream();
-    const markers = `${FAKE_ERROR} ${THINK} ${WRITE}`;
+    const markers = `${FAKE_ERROR} ${THINK} ${WRITE} ${TODO}`;
     for (const messages of [toolRound(markers), answerRound(markers)]) {
       const reply = await chat(port, messages);
       expect(reply.status).toBe(500);

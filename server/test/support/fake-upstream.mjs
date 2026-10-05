@@ -8,12 +8,17 @@ const ERROR_MARKER = "WORKBUDDY_FAKE_ERROR";
 const WALK_MARKER = "WORKBUDDY_UI_WALK:";
 const THINK_MARKER = "WORKBUDDY_THINK";
 const WRITE_MARKER = "WORKBUDDY_WRITE";
+const TODO_MARKER = "WORKBUDDY_TODO";
 const TOOL_ARGS = '{"command":"echo workbuddy-smoke"}';
 const REPLY_PARTS = ["你好，", "这是 WorkBuddy 的", "第一条流式回复。"];
 const THINK_PARTS = ["先读需求，", "再列要点，", "最后作答。"];
 const WRITE_ARGS = JSON.stringify({
   path: "workbuddy-report.html",
   content: "<!doctype html><title>WorkBuddy</title><h1>WorkBuddy</h1>\n",
+});
+const TODO_ARGS = JSON.stringify({
+  op: "init",
+  list: [{ phase: "走查", items: ["整理需求", "输出结论"] }],
 });
 const GATE_PREFIX = "/__control/gates/";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
@@ -110,8 +115,8 @@ function serveChat(response, gates, parsed) {
   const created = Math.floor(Date.now() / 1000);
   const model = typeof parsed.model === "string" ? parsed.model : "fake";
   if (!hasToolRole(parsed.messages)) {
-    const write = lastUserTextFrom(parsed.messages).includes(WRITE_MARKER);
-    writeSse(response, toolFrames(id, created, model, write));
+    const call = toolRoundCall(lastUserTextFrom(parsed.messages));
+    writeSse(response, toolFrames(id, created, model, call));
     return;
   }
   serveFinal(response, gates, parsed.messages, id, created, model);
@@ -374,7 +379,18 @@ function hasToolRole(messages) {
   );
 }
 
-function toolFrames(id, created, model, write) {
+/** 工具轮只发一个调用：WRITE 优先于 TODO，都没有即缺省 bash。 */
+function toolRoundCall(text) {
+  if (text.includes(WRITE_MARKER)) {
+    return { name: "write", arguments: WRITE_ARGS };
+  }
+  if (text.includes(TODO_MARKER)) {
+    return { name: "todo", arguments: TODO_ARGS };
+  }
+  return { name: "bash", arguments: TOOL_ARGS };
+}
+
+function toolFrames(id, created, model, call) {
   const callId = `call_${randomUUID()}`;
   return [
     chunk(
@@ -388,9 +404,7 @@ function toolFrames(id, created, model, write) {
             index: 0,
             id: callId,
             type: "function",
-            function: write
-              ? { name: "write", arguments: WRITE_ARGS }
-              : { name: "bash", arguments: TOOL_ARGS },
+            function: call,
           },
         ],
       },

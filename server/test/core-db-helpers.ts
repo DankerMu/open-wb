@@ -14,6 +14,7 @@ export const MIGRATION_032 = "032_chat_sessions.sql";
 export const MIGRATION_033 = "033_chat_step_output.sql";
 export const MIGRATION_034 = "034_chat_turn_control.sql";
 export const MIGRATION_035 = "035_chat_session_metadata.sql";
+export const MIGRATION_036 = "036_chat_session_todo.sql";
 export const TRACKED_MIGRATION_FILENAMES = [
   MIGRATION_0010,
   MIGRATION_002,
@@ -24,6 +25,7 @@ export const TRACKED_MIGRATION_FILENAMES = [
   MIGRATION_033,
   MIGRATION_034,
   MIGRATION_035,
+  MIGRATION_036,
 ] as const;
 export const HISTORY_VIEW = "schema_migration_history";
 export type SqlLineEnding = "\n" | "\r\n" | "\r";
@@ -79,8 +81,9 @@ export const COMPLETE_CATALOG: CatalogSnapshot = {
     [7, MIGRATION_033],
     [8, MIGRATION_034],
     [9, MIGRATION_035],
+    [10, MIGRATION_036],
   ],
-  sequenceRows: [["schema_migrations", 9, "integer"]],
+  sequenceRows: [["schema_migrations", 10, "integer"]],
   triggerNames: [
     "audit_events_no_delete",
     "audit_events_no_update",

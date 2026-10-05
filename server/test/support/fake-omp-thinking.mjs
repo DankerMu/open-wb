@@ -1,10 +1,12 @@
 /**
  * fake-omp S1c 会话元数据场景的纯构建部分（#518 拆出）：`thinking` / `edit-write` 的常量与帧构建、
- * `--thinking-repeat` 取值校验。无模块级可变状态、不发帧、不写文件；只依赖 node: 内建，
+ * `--thinking-repeat` 取值校验；S1f 任务清单场景 `todo`（#863）的三组 args/details 常量及按回合序号的选取。
+ * 无模块级可变状态、不发帧、不写文件；只依赖 node: 内建，
  * 绝不导入 fake-omp.mjs（它有 argv/ready/stdin 模块级副作用）或 fake-omp-proxy.mjs。
  * 形状对照 omp v18.0.10：ai/src/types.ts:1294-1296（thinking 事件）、coding-agent/src/edit/renderer.ts
  * （EditToolDetails.path/diff）、edit/diff.ts:54-56（`+N|`/`-N|`/` N|` 行格式）、tools/write.ts:314-324
- * （WriteToolDetails.resolvedPath，无 diff）。
+ * （WriteToolDetails.resolvedPath，无 diff）；`todo` 工具结果的
+ * `details` 为 `{op, phases:[{name, tasks:[{content, status, blocker?}]}], storage, completedTasks?}`，`phases` 是全量。
  */
 import { join } from "node:path";
 
@@ -20,6 +22,53 @@ const NOTES_CONTENT = "a\nb\nd\n";
 const EDIT_DIFF = "+1|a\n+2|b\n-3|c\n 4|d";
 /** write 的固定 html，真实写到 `<cwd>/out/report.html`。 */
 const REPORT_HTML = "<!doctype html>\n<html><body><h1>Report</h1></body></html>\n";
+
+/** `todo` 第一回合：init 后 omp 把第一个 pending 任务提升为 in_progress。 */
+const TODO_PHASES = [
+  {
+    name: "准备",
+    tasks: [
+      { content: "读取需求", status: "in_progress" },
+      { content: "列出要点", status: "pending" },
+    ],
+  },
+  { name: "交付", tasks: [{ content: "输出结论", status: "pending" }] },
+];
+const TODO_INIT = {
+  args: {
+    op: "init",
+    list: [
+      { phase: "准备", items: ["读取需求", "列出要点"] },
+      { phase: "交付", items: ["输出结论"] },
+    ],
+  },
+  details: { op: "init", phases: TODO_PHASES, storage: "session" },
+};
+/** 第二回合：只读，`phases` 与第一回合逐值相同。 */
+const TODO_VIEW = {
+  args: { op: "view" },
+  details: { op: "view", phases: TODO_PHASES, storage: "session" },
+};
+/** 第三回合及以后：完成 `读取需求`，下一个 pending 任务被提升。 */
+const TODO_DONE = {
+  args: { op: "done", task: "读取需求" },
+  details: {
+    op: "done",
+    phases: [
+      {
+        name: "准备",
+        tasks: [
+          { content: "读取需求", status: "completed" },
+          { content: "列出要点", status: "in_progress" },
+        ],
+      },
+      { name: "交付", tasks: [{ content: "输出结论", status: "pending" }] },
+    ],
+    storage: "session",
+    completedTasks: [{ phase: "准备", content: "读取需求" }],
+  },
+};
+const TODO_TURNS = Object.freeze([TODO_INIT, TODO_VIEW, TODO_DONE]);
 
 /** `--thinking-repeat`：缺省（undefined）为 1；只接受 `/^[1-9][0-9]*$/` 的安全整数，其余（含缺值 ""）抛错。 */
 export function parseThinkingRepeat(raw) {
@@ -121,5 +170,15 @@ export function stepEnd(step, error) {
       ...(error === undefined ? { details: step.details } : {}),
     },
     ...(error === undefined ? {} : { isError: true }),
+  };
+}
+
+/** `todo` 场景第 `ordinal`（从 0 起）个回合的一步：args/details 只取决于序号，每回合一个新的 toolCallId。 */
+export function todoStep(ordinal) {
+  const { args, details } = TODO_TURNS[Math.min(ordinal, TODO_TURNS.length - 1)];
+  return {
+    call: { id: `tool-todo-${ordinal + 1}`, name: "todo", args },
+    details,
+    text: "Task list updated",
   };
 }
