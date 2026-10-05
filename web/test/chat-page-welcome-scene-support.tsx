@@ -169,9 +169,9 @@ export function composerForm() {
 
 /** 会话页的卡片结构：卡片与工具栏都存在（不对 `undefined` 做恒真比较），工具栏是卡片的最后一个子元素。 */
 export function expectToolbarEndsCard() {
-  const card = composer().closest(".chat-composer-card");
-  if (!card) throw new Error("输入框不在 .chat-composer-card 内");
-  const toolbar = card.querySelector(".chat-composer-toolbar");
+  const card = composer().closest('[data-slot="composer-card"]');
+  if (!card) throw new Error("输入框不在输入卡内");
+  const toolbar = card.querySelector('[data-slot="composer-toolbar"]');
   expect(toolbar).not.toBeNull();
   expect(card.lastElementChild).toBe(toolbar);
 }

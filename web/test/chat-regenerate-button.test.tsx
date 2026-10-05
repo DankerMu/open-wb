@@ -113,7 +113,7 @@ function regenButton() {
 }
 
 function bar() {
-  const element = document.querySelector<HTMLElement>("form .chat-composer-toolbar");
+  const element = document.querySelector<HTMLElement>('form [data-slot="composer-toolbar"]');
   expect(element).not.toBeNull();
   return within(element as HTMLElement);
 }
@@ -527,7 +527,9 @@ describe("regenerate button: ownership fences", () => {
     await flush();
     expect(alerts()).toEqual(own);
     expect(textarea().disabled).toBe(true);
-    expect(bar().getByText("生成中", { exact: true })).toBeTruthy();
+    // B 的连接器终止失败只锁定输入框（chat-web「锁定不等于生成中」）。
+    expect(bar().queryByText("生成中")).toBeNull();
+    expect(bar().queryByRole("button", { name: "停止" })).toBeNull();
     expectTranscript(["B 回答"]);
     expect(screen.queryByText("旧回答")).toBeNull();
   });

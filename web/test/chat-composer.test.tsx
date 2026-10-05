@@ -45,13 +45,13 @@ async function mountSelectedDone() {
 
 function composerParts(input: HTMLElement) {
   const form = input.closest("form");
-  const card = input.closest(".chat-composer-card");
-  const toolbar = card?.querySelector(".chat-composer-toolbar");
+  const card = input.closest('[data-slot="composer-card"]');
+  const toolbar = card?.querySelector('[data-slot="composer-toolbar"]');
   if (!(form instanceof HTMLFormElement) || !(card instanceof HTMLElement)) {
-    throw new Error("expected textarea inside form.chat-composer > .chat-composer-card");
+    throw new Error("expected textarea inside form > composer card");
   }
   if (!(toolbar instanceof HTMLElement)) {
-    throw new Error("expected .chat-composer-toolbar inside the card");
+    throw new Error("expected the composer toolbar inside the card");
   }
   return { form, card, toolbar };
 }
@@ -79,7 +79,6 @@ describe("(C2) composer card structure", () => {
   it("renders textarea, sr-only label, toolbar with one icon send button and the hint", async () => {
     const { input } = await mountSelectedDone();
     const { form, card, toolbar } = composerParts(input);
-    expect(form.className).toBe("chat-composer");
 
     const buttons = within(form).queryAllByRole("button");
     expect(buttons).toHaveLength(1);
@@ -94,7 +93,6 @@ describe("(C2) composer card structure", () => {
 
     const label = form.querySelector(`label[for="${input.id}"]`);
     expect(input.id).not.toBe("");
-    expect(label?.className).toBe("ui-sr-only");
     expect(label?.textContent).toBe(COMPOSER_NAME);
 
     const hint = screen.getByText(HINT, { exact: true });
@@ -102,7 +100,7 @@ describe("(C2) composer card structure", () => {
     expect(card.contains(hint)).toBe(false);
     expect(hint.id).not.toBe("");
     expect(input.getAttribute("aria-describedby")).toBe(hint.id);
-    // 卡 + 提示行之外不渲染任何东西（无工作区/权限页脚）。
+    // 卡 + 提示行之外不渲染任何东西（能力栏在卡内的工具栏里）。
     const children = Array.from(form.children);
     expect(children).toHaveLength(2);
     expect(children[0]).toBe(card);
@@ -186,18 +184,6 @@ describe("(C4) session list status element", () => {
 });
 
 describe("(C5) static contract", () => {
-  it("composer uses the Icon/Button primitives and no role other than status", () => {
-    const source = readRepoFile("web/src/features/chat/composer.tsx");
-    for (const needle of ['<Icon name="send" />', "Button", "ui-sr-only", "生成中", '"发送"']) {
-      expect(source).toContain(needle);
-    }
-    const roles = source.match(/role=/g) ?? [];
-    expect(roles.length).toBe((source.match(/role="status"/g) ?? []).length);
-    const buttonTag = /<Button\b[^>]*>/.exec(source)?.[0] ?? "";
-    expect(buttonTag).not.toBe("");
-    expect(buttonTag).not.toContain("role");
-  });
-
   it("session nav maps session status through SESSION_STATUS_LABEL", () => {
     const source = readRepoFile("web/src/features/chat/session-sidebar.tsx");
     expect(source).not.toMatch(/>\s*\{session\.status\}\s*</);
@@ -228,21 +214,20 @@ describe("(C5) static contract", () => {
     expect(ruleBody(css, ".chat-session-nav")).not.toContain("overflow");
   });
 
-  it("chat.css drops the badge and visible-label styles and keeps the round focus ring", () => {
+  it("chat.css drops the badge styles and holds no composer rules", () => {
     const raw = readRepoFile("web/src/features/chat/chat.css");
     const css = stripComments(raw);
     for (const removed of [
       ".chat-session-status-running",
-      ".chat-composer-label",
-      ".chat-composer-foot",
+      ".chat-composer",
+      ".chat-send",
+      ".chat-workspace-",
       "outline: none",
     ]) {
       expect(css).not.toContain(removed);
     }
     expect(raw).not.toMatch(COLOR_LITERAL_PATTERNS[0] as RegExp);
     expect(raw).toContain("demo.html:282-298");
-    expect(raw).toContain("demo.html:363-378");
-    expect(ruleBody(css, ".chat-send:focus-visible")).toContain("border-radius: 50%");
     const statusRule = ruleBody(css, ".chat-session-status");
     expect(statusRule).not.toContain("padding");
     expect(statusRule).not.toContain("background");

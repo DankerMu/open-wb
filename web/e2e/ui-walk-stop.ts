@@ -33,7 +33,7 @@ function sessionPost(
 }
 
 // 点击只在 gate `held` + 第二条助手已呈现前缀 + form 内 `生成中` 同时成立时发生（`停止` 可用不足以证明 running）。
-// 末尾先等 Toast 消失再查侧栏：Toast 显示期间 mobile 导航覆盖层按 Escape 关不掉（#643）。
+// 停止不弹提示：`已停止生成` 的断言放在 `已停止` 徽章出现之后（此时 stop 的 202 早已处理完），并在本步末尾再查一次。
 export async function walkStop(
   page: Page,
   project: WalkProject,
@@ -49,9 +49,8 @@ export async function walkStop(
   const stoppedBadge = second.getByRole("status", { name: "助手消息 已停止", exact: true });
   const stop = form.getByRole("button", { name: "停止", exact: true });
   const send = form.getByRole("button", { name: "发送", exact: true });
-  const toast = page
-    .getByRole("region", { name: /通知/u })
-    .getByText(STOPPED_TOAST, { exact: true });
+  // 整页范围：既不在通知区，也不在别处出现这句文本（空正文的占位是带括号的另一句）。
+  const toast = page.getByText(STOPPED_TOAST, { exact: true });
   const started = Date.now();
   const mark = (point: string) =>
     console.log(`ui-walk stop ${project}: ${point} +${Date.now() - started}ms`);
@@ -76,8 +75,8 @@ export async function walkStop(
     await stop.click();
     expect((await stopped).status()).toBe(202);
     mark("stop 202");
-    await expect(toast).toBeVisible();
     await expect(stoppedBadge).toBeVisible();
+    await expect(toast).toHaveCount(0);
     await expect(second.getByRole("alert")).toHaveCount(0);
     await expect(second.locator('[data-slot="message-body"]')).toHaveText(FIRST_REPLY_PART);
     await expect(users).toHaveCount(2);
@@ -88,8 +87,6 @@ export async function walkStop(
 
     await expect.poll(() => gatePhase(origin, gateId)).toBe("status:404");
     mark("gate 404");
-    await expect(toast).toHaveCount(0, { timeout: TOAST_GONE_TIMEOUT_MS });
-    mark("toast gone");
     await inspectSidebar(page, project, async (sidebar) => {
       const current = sidebar
         .getByRole("navigation", { name: "会话列表" })
@@ -98,6 +95,7 @@ export async function walkStop(
       const title = await current.getAttribute("aria-label");
       await expect(current.getByRole("status")).toHaveAccessibleName(`${title} 已停止`);
     });
+    await expect(toast).toHaveCount(0);
     return gateId;
   } finally {
     await deleteGate(origin, gateId);

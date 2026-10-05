@@ -283,7 +283,9 @@ describe("chat page isolation and errors", () => {
     expect(within(messages).getByText(historyUser.content, exactText)).toBeTruthy();
     expect(within(messages).queryByText(PROMPT, { exact: true })).toBeNull();
     expect(composer().disabled).toBe(true);
-    expect(screen.getByText("生成中", { exact: true })).toBeTruthy();
+    // 失败引导优先（chat-web「锁定不等于生成中」）：锁定，但不是生成中，也给不出停止。
+    expect(screen.queryByText("生成中", { exact: true })).toBeNull();
+    expect(screen.queryByRole("button", { name: "停止" })).toBeNull();
   });
 
   it("keeps business error on the message and locks a still-running snapshot after terminal stream failure", async () => {
@@ -316,7 +318,8 @@ describe("chat page isolation and errors", () => {
     expect(within(messages).getByRole("alert").textContent).toBe(BUSINESS_ERROR);
     expect(await screen.findByText(/请刷新页面后重试/)).toBeTruthy();
     expect(composer().disabled).toBe(true);
-    expect(screen.getByText("生成中", { exact: true })).toBeTruthy();
+    expect(screen.queryByText("生成中", { exact: true })).toBeNull();
+    expect(screen.queryByRole("button", { name: "停止" })).toBeNull();
   });
 
   it("hands a current 401 to login and closes the live source", async () => {

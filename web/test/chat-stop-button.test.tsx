@@ -8,6 +8,7 @@ import {
   renewAccount,
 } from "./chat-page-lifecycle-support.js";
 import { OTHER_SESSION_ID } from "./chat-page-ownership-support.js";
+import { toasts } from "./chat-page-search-support.js";
 import { expectChatLocation, type FetchRoutes, renderChatPage } from "./chat-page-support.js";
 import {
   chatSnapshot,
@@ -100,7 +101,7 @@ function emit(type: string, seq: number, data: unknown) {
 }
 
 function toolbar() {
-  const element = document.querySelector<HTMLElement>("form .chat-composer-toolbar");
+  const element = document.querySelector<HTMLElement>('form [data-slot="composer-toolbar"]');
   expect(element).not.toBeNull();
   return element as HTMLElement;
 }
@@ -123,6 +124,12 @@ function nav() {
 
 function toastText(message: string) {
   return screen.queryByText(message);
+}
+
+/** 停止不弹任何提示（turn-control「停止按钮与文案」）：页面上没有 Toast，也没有 `已停止生成` 文本。 */
+function expectNoToast() {
+  expect(toasts()).toEqual([]);
+  expect(toastText(STOPPED_TOAST)).toBeNull();
 }
 
 function expectRunningComposer() {
@@ -178,7 +185,6 @@ describe("stop button: layout and outcomes", () => {
     expect(stop.disabled).toBe(false);
     expect(stop.type).toBe("button");
     expect(stop.title).toBe("停止");
-    expect(stop.classList.contains("ui-btn--primary")).toBe(true);
     expect(stop.querySelector("svg.lucide-square")).not.toBeNull();
     const status = within(bar).getByRole("status");
     expect(status.textContent).toBe("生成中");
@@ -186,7 +192,7 @@ describe("stop button: layout and outcomes", () => {
     expect(composerInput().disabled).toBe(true);
   });
 
-  it("S2 stops once per in-flight click, toasts on 202 and renders 已停止 from turn.end", async () => {
+  it("S2 stops once per in-flight click, shows no toast on 202 and renders 已停止 from turn.end", async () => {
     const stop = deferredResponse();
     const { fetchMock, page } = await mountPage(runningR(), {
       [STOP]: () => stop.promise,
@@ -205,8 +211,9 @@ describe("stop button: layout and outcomes", () => {
 
     stop.resolve(accepted());
     await flush();
-    const region = within(screen.getByRole("region", { name: "通知" }));
-    expect(region.getByText(STOPPED_TOAST)).toBeTruthy();
+    expect(screen.getByRole("region", { name: "通知" })).toBeTruthy();
+    expectNoToast();
+    expect(stopButton().disabled).toBe(false);
     expect(composerInput().disabled).toBe(true);
 
     emit("turn.end", 1, { messageId: 0, status: "stopped" });
@@ -242,7 +249,7 @@ describe("stop button: layout and outcomes", () => {
     fireEvent.click(stopButton());
     await flush();
     expect(calls(fetchMock, STOP)).toHaveLength(1);
-    expect(toastText(STOPPED_TOAST)).toBeNull();
+    expectNoToast();
     expect(screen.queryByRole("alert")).toBeNull();
     expect(stopButton().disabled).toBe(false);
     expectRunningComposer();
@@ -266,7 +273,7 @@ describe("stop button: layout and outcomes", () => {
 
     fireEvent.click(stopButton());
     await flush();
-    expect(toastText(STOPPED_TOAST)).not.toBeNull();
+    expectNoToast();
     expectRunningComposer();
     expect(stopButton().disabled).toBe(false);
 
@@ -416,7 +423,7 @@ describe("stop button: ownership and fences", () => {
       await router.navigate("/center");
     });
     expect(await screen.findByText("中心暂不可用")).toBeTruthy();
-    expect(document.querySelector("form.chat-composer")).toBeNull();
+    expect(document.querySelector('form[data-slot="composer"]')).toBeNull();
     const consoleError = vi.spyOn(console, "error");
 
     stale.resolve(accepted());
