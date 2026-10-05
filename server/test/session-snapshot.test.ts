@@ -155,4 +155,36 @@ describe("session REST snapshot capture", () => {
       expect(supervisor.cursorCalls).toEqual([session.id]);
     });
   });
+
+  it("keeps the preParsing task list even if the column and the stream move later in the request", async () => {
+    const stored =
+      '{"phases":[{"name":"准备","tasks":[{"content":"读取需求","status":"in_progress"}]}]}';
+    const later =
+      '{"phases":[{"name":"交付","tasks":[{"content":"输出结论","status":"pending"}]}]}';
+    await withSessionRest(async ({ app, db, store, supervisor }) => {
+      const session = store.create("u1");
+      const setTodo = db.prepare("UPDATE chat_sessions SET todo = ? WHERE id = ?");
+      setTodo.run(stored, session.id);
+      supervisor.cursor = { epoch: 1, seq: 7 };
+      // After every preParsing hook, before the handler: the list and the stream both move on.
+      let moved = 0;
+      app.addHook("preValidation", (request, _reply, done) => {
+        if (request.url.endsWith("/messages")) {
+          setTodo.run(later, session.id);
+          supervisor.cursor = { epoch: 1, seq: 8 };
+          moved += 1;
+        }
+        done();
+      });
+
+      const history = await getSessionMessages(app, session.id, await cookieFor(app, "zhangsan"));
+
+      expect(history.statusCode).toBe(200);
+      const body = history.json() as { streamCursor: unknown; todo: unknown };
+      expect(body.todo).toEqual(JSON.parse(stored));
+      expect(body.streamCursor).toEqual({ epoch: 1, seq: 7 });
+      expect(moved).toBe(1);
+      expect(store.readTodo(session.id, "u1")).toEqual(JSON.parse(later));
+    });
+  });
 });

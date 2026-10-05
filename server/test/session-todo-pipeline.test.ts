@@ -413,11 +413,14 @@ describe("candidates that must not change the list", () => {
     "failed todo calls, a todo result without phases and other tools yield no update",
     REAL,
     async () => {
+      // A stored list first, so "unchanged" is observable; the rejected calls carry another one.
+      const other = [{ name: "别的", tasks: [{ content: "别的任务", status: "pending" }] }];
       const frames = [
-        ...call("c1", "todo", { isError: true, result: result(T1.phases) }),
-        ...call("c2", "todo", { result: { ...result(T1.phases), isError: true } }),
+        ...call("c0", "todo", { result: result(T1.phases) }),
+        ...call("c1", "todo", { isError: true, result: result(other) }),
+        ...call("c2", "todo", { result: { ...result(other), isError: true } }),
         ...call("c3", "todo", { result: { content: [], details: { op: "view" } } }),
-        ...call("c4", "bash", { result: result(T1.phases) }),
+        ...call("c4", "bash", { result: result(other) }),
         { type: "command_output", text: "Added 1 task." },
         AGENT_END,
       ];
@@ -425,16 +428,18 @@ describe("candidates that must not change the list", () => {
       await waitForTurn(world.fixture, world.session, "done");
 
       const published = events(world);
-      expect(ofType(sessionEvents(world), "todo.updated")).toEqual([]);
+      const updates = ofType(sessionEvents(world), "todo.updated");
+      expect(updates.map((event) => event.data.todo)).toEqual([T1]);
       expect(ofType(sessionEvents(world), "files.changed")).toEqual([]);
       expect(ofType(sessionEvents(world), "step.end").map((event) => event.data.status)).toEqual([
+        "done",
         "failed",
         "done",
         "done",
         "done",
       ]);
       expect(published.at(-1)).toMatchObject({ type: "turn.end", data: { status: "done" } });
-      expect(todoColumn(world.fixture.db, world.session)).toBeNull();
+      expect(todoColumn(world.fixture.db, world.session)).toBe(T1_TEXT);
       expect(world.warns).toEqual([]);
       expect(world.errors).toEqual([]);
     },
