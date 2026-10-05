@@ -59,6 +59,7 @@ export function chatSnapshot(
     steps?: ChatMessageSnapshot["messages"][number]["steps"];
     cursor?: { epoch: number; seq: number | null };
     sessionId?: string;
+    todo?: ChatMessageSnapshot["todo"];
   } = {},
 ): ChatMessageSnapshot {
   return {
@@ -80,7 +81,7 @@ export function chatSnapshot(
       },
     ],
     streamCursor: options.cursor ?? { epoch: 1, seq: 0 },
-    todo: null,
+    todo: options.todo ?? null,
   };
 }
 
