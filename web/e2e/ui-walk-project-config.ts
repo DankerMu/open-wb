@@ -39,7 +39,7 @@ export async function expectNoProjectConfig(page: Page, workspaceId: string): Pr
 }
 
 // 调用前页面在欢迎态。`created.id` 在 201 一到就记下，调用方的 `finally` 凭它删除。按钮在
-// `重命名` 之前；弹层只读（唯一的控件是自带的 `关闭`），不超出视口；Escape 关闭后焦点回到按钮。
+// `重命名` 之前；弹层只读（唯一的控件是自带的 `关闭`，打开时焦点在它上面），不超出视口；Escape 关闭后焦点回到按钮。
 // 结束时会话已删除，页面回到欢迎态。
 export async function walkProjectConfig(
   page: Page,
@@ -70,10 +70,11 @@ export async function walkProjectConfig(
   const group = dialog.getByRole("region", { name: "当前目录", exact: true });
   await expect(dialog.getByRole("region")).toHaveCount(1);
   await expect(group.getByRole("listitem")).toHaveCount(1);
-  await expect(group.locator(".chat-project-config-path")).toHaveText("AGENTS.md");
-  await expect(group.locator(".ui-tag")).toHaveText("说明");
+  await expect(group.locator('[data-slot="project-config-path"]')).toHaveText("AGENTS.md");
+  await expect(group.locator('[data-slot="project-config-kind"]')).toHaveText("说明");
   await expect(dialog.getByRole("button")).toHaveCount(1);
   await expect(dialog.getByRole("button")).toHaveAccessibleName("关闭");
+  await expect(dialog.getByRole("button")).toBeFocused();
   await expect(dialog.locator("a, input, textarea, select")).toHaveCount(0);
   const box = await dialog.boundingBox();
   const viewport = page.viewportSize();

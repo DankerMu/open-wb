@@ -1,12 +1,20 @@
 /* Read-only project config entry of the session header (issue 816, design D4 of issue 773): the files of
    `GET /api/project-config` for the selected session's workspace, a header button that exists only
    while that list is non-empty and the dialog it opens. A list of files present at the locations
-   the assistant reads, not of files in effect; no content is read and nothing can be edited. */
+   the assistant reads, not of files in effect; no content is read and nothing can be edited.
+   Built from the copied-layer Dialog and Tailwind classes (issue 861). */
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import type { ApiClient } from "../../lib/api.js";
 import type { ProjectConfigFile } from "../../lib/api-commands.js";
 import type { ChatSession } from "../../lib/session-contract.js";
-import { Dialog, Tag } from "../../ui/index.js";
+import { useEscapeFallback } from "../../ui/index.js";
 
 const TITLE = "助手会读取的项目配置文件";
 const NOTE = "以下位置存在配置文件；同一层有多个说明文件时只有一个生效";
@@ -50,24 +58,95 @@ export function groupByDepth(files: readonly ProjectConfigFile[]): ConfigGroup[]
   return [...groups.values()].sort((left, right) => left.depth - right.depth);
 }
 
-/** The groups as headed lists; `path` comes from the workspace and is rendered as text only. */
+/**
+ * The groups as headed lists; `path` comes from the workspace and is rendered as text only. A long
+ * path wraps inside its row and a long list scrolls inside the dialog.
+ */
 function ConfigList({ files }: { files: readonly ProjectConfigFile[] }) {
   return (
-    <div className="chat-project-config">
+    <div className="flex max-h-[60vh] min-w-0 flex-col gap-3 overflow-y-auto">
       {groupByDepth(files).map((group) => (
-        <section aria-label={group.label} className="chat-project-config-group" key={group.depth}>
-          <h3 className="chat-project-config-title">{group.label}</h3>
-          <ul className="chat-project-config-list">
+        <section aria-label={group.label} key={group.depth}>
+          <h3 className="m-0 mb-1 text-[11px] font-medium text-(--wb-text-secondary)">
+            {group.label}
+          </h3>
+          <ul className="m-0 flex list-none flex-col gap-1 p-0">
             {group.files.map((file) => (
-              <li className="chat-project-config-item" key={file.path}>
-                <span className="chat-project-config-path">{file.path}</span>
-                <Tag>{KIND_LABELS[file.kind]}</Tag>
+              <li
+                className="flex items-center gap-2 rounded-lg border border-(--wb-border-default) px-2 py-1.5"
+                key={file.path}
+              >
+                <span
+                  className="min-w-0 flex-1 font-mono text-xs leading-[18px] wrap-anywhere text-(--wb-text-primary)"
+                  data-slot="project-config-path"
+                >
+                  {file.path}
+                </span>
+                <span
+                  className="flex-none rounded border border-(--wb-border-default) px-1.5 py-px text-[10.5px] leading-[14px] text-(--wb-text-secondary)"
+                  data-slot="project-config-kind"
+                >
+                  {KIND_LABELS[file.kind]}
+                </span>
               </li>
             ))}
           </ul>
         </section>
       ))}
     </div>
+  );
+}
+
+/**
+ * The read-only list in the copied-layer dialog; its only control is the dialog's own 关闭, which
+ * holds the focus from the moment it opens.
+ *
+ * That dialog has no trigger element, so closing it would leave focus on `body`: focus goes back
+ * to `opener` (the header button) while it is still in the document, without scrolling. Escape is
+ * also handled on the content itself, because a toast on screen (the session list's) takes the
+ * Escape of every Radix layer below it.
+ */
+function ConfigDialog({
+  files,
+  onClose,
+  open,
+  opener,
+}: {
+  files: readonly ProjectConfigFile[];
+  onClose(): void;
+  open: boolean;
+  opener: { readonly current: HTMLElement | null };
+}) {
+  const onOpenChange = (next: boolean) => {
+    if (!next) onClose();
+  };
+  const fallback = useEscapeFallback({ canClose: true, onOpenChange });
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent
+        aria-modal="true"
+        className="sm:max-w-[400px]"
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          if (opener.current?.isConnected) opener.current.focus({ preventScroll: true });
+        }}
+        onEscapeKeyDown={fallback.onEscapeKeyDown}
+        onKeyDown={fallback.onKeyDown}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          fallback.ref.current
+            ?.querySelector<HTMLElement>('[data-slot="dialog-close"]')
+            ?.focus({ preventScroll: true });
+        }}
+        ref={fallback.ref}
+      >
+        <DialogHeader className="pr-8">
+          <DialogTitle className="leading-5">{TITLE}</DialogTitle>
+          <DialogDescription>{NOTE}</DialogDescription>
+        </DialogHeader>
+        <ConfigList files={files} />
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -136,18 +215,7 @@ export function useProjectConfig(
       },
     },
     dialog: (
-      <Dialog
-        description={NOTE}
-        onOpenChange={(next) => {
-          if (!next) setOpened(null);
-        }}
-        open={open}
-        returnFocus={trigger}
-        size="sm"
-        title={TITLE}
-      >
-        <ConfigList files={files} />
-      </Dialog>
+      <ConfigDialog files={files} onClose={() => setOpened(null)} open={open} opener={trigger} />
     ),
   };
 }
