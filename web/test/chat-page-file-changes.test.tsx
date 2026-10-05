@@ -679,7 +679,7 @@ describe("文件变更 card on the chat page", () => {
       "fieldset.file-changes-card",
       "fieldset.artifact-card",
       "message-stopped",
-      "div.chat-msg-actions",
+      "message-actions",
     ]);
     expect(cardNamed("文件变更（1 个）")).toBe(parts[4]);
     expect(cardNamed("工具调用")).toBe(parts[2]);
@@ -687,7 +687,7 @@ describe("文件变更 card on the chat page", () => {
     expect(parts[1]?.textContent).toBe("部分回答");
 
     fireEvent.click(within(reply()).getByRole("button", { name: "复制" }));
-    await screen.findByText("已复制到剪贴板");
+    expect((await screen.findByText("已复制")).getAttribute("role")).toBe("status");
 
     expect(writeText.mock.calls).toEqual([["部分回答"]]);
   });
@@ -708,7 +708,7 @@ describe("文件变更 card on the chat page", () => {
       "message-error",
       "fieldset.file-changes-card",
       "fieldset.artifact-card",
-      "div.chat-msg-actions",
+      "message-actions",
     ]);
     expect(parts[2]?.textContent).toBe("上游失败");
     expect(cardNamed("文件变更（1 个）")).toBe(parts[3]);

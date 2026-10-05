@@ -154,7 +154,7 @@ describe("产物卡 derivation on the chat page", () => {
       "fieldset.artifact-card",
       "fieldset.artifact-card",
       "fieldset.artifact-card",
-      "div.chat-msg-actions",
+      "message-actions",
     ]);
     expect(replyParts().slice(3, 6)).toEqual(derived);
     expect(
@@ -660,7 +660,7 @@ describe("产物卡 placement", () => {
       "fieldset.file-changes-card",
       "fieldset.artifact-card",
       "message-stopped",
-      "div.chat-msg-actions",
+      "message-actions",
     ]);
     expect(parts[4]).toBe(cardNamed("文件变更（1 个）"));
     expect(parts[5]).toBe(within(reply()).getByRole("group", { name: "index.html" }));
@@ -668,8 +668,8 @@ describe("产物卡 placement", () => {
     expect(artifactCards()).toEqual([parts[5]]);
 
     fireEvent.click(within(reply()).getByRole("button", { name: "复制" }));
-
-    await waitFor(() => expect(toasts()).toEqual([["success", "已复制到剪贴板"]]));
+    expect((await within(reply()).findByText("已复制")).getAttribute("role")).toBe("status");
+    expect(toasts()).toEqual([]);
     expect(writeText.mock.calls).toEqual([["部分回答"]]);
   });
 

@@ -211,7 +211,8 @@ describe("fork button: availability", () => {
       expect(button.type).toBe("button");
       expect(button.title).toBe(FORK_LABEL);
       expect(button.querySelector("svg.lucide-git-branch")).not.toBeNull();
-      const row = button.closest(".chat-msg-actions");
+      expect(button.getAttribute("aria-label")).toBe(FORK_LABEL);
+      const row = button.closest('[data-slot="message-actions"]');
       expect(row).not.toBeNull();
       expect(user.lastElementChild).toBe(row);
       const body = user.querySelector('p[data-slot="message-body"]');

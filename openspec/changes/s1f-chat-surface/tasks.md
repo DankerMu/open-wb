@@ -96,13 +96,13 @@ Minimal mergeable slice: 4.2 + 4.3，以及 4.5 / 4.6 中依赖「新建即 POST
   回合进行中展开、终态收起，可访问名 `深度思考过程`，thinking-fold 的行为场景通过。
 - [x] 5.2 工具调用组（design D4）：应用层组合 `tool-group` 的 Root/Trigger/Content，步骤卡是应用层组件。默认收起的一行摘要；展开后的步骤卡（图标、名称、状态徽章与可访问名、一行摘要、`原始输出` 的 detail/output 分栏、不做路径改写）；
   有失败步骤时自动展开；用户手动收起后不再自动展开，直到出现新的失败步骤。
-- [ ] 5.3 操作行（应用层，`ActionBarPrimitive`）：`复制`（原文；成功换图标 + 视觉隐藏的 `已复制` 状态；失败就地 `role="alert"`）、`重新生成`（仅末条助手且会话状态 ∈ done/failed/stopped；不弹提示）、
+- [x] 5.3 操作行（应用层，`ActionBarPrimitive`）：`复制`（原文；成功换图标 + 视觉隐藏的 `已复制` 状态；失败就地 `role="alert"`）、`重新生成`（仅末条助手且会话状态 ∈ done/failed/stopped；不弹提示）、
   `从此处分叉`（仅用户消息；锁定期间禁用）。不渲染编辑、分支切换、附件。
-- [ ] 5.4 改写被打破的断言（按分片）：所有断言步骤徽章的 e2e（`ui-walk-approval.ts`、`ui-walk.spec.ts`、`ui-walk-scroll.ts`、`ui-walk-sessions.spec.ts`）先展开工具调用组再断言步骤状态；
+- [x] 5.4 改写被打破的断言（按分片）：所有断言步骤徽章的 e2e（`ui-walk-approval.ts`、`ui-walk.spec.ts`、`ui-walk-scroll.ts`、`ui-walk-sessions.spec.ts`）先展开工具调用组再断言步骤状态；
   单元测试里直接断言步骤徽章的用例（如 `chat-stop-button`）同样先展开；
   `.chat-step-*`、`details.thinking-block`、`.thinking-body` 选择器改为角色/属性；`ui-walk-stop.ts` 对 `正在重新生成…` 的正向断言改为断言它不出现；
   单元测试 `chat-steps`、`chat-thinking`、`chat-copy`，以及断言提示的 `chat-regenerate-button`。
-- [ ] 5.5 按分片退役：删除 `thinking-block.tsx`、`message-actions.tsx`、`conversation-view.tsx` 里的 `StepCard` 等旧实现与对应 CSS、静态断言；登记已迁移文件；
+- [x] 5.5 按分片退役：删除 `thinking-block.tsx`、`message-actions.tsx`、`conversation-view.tsx` 里的 `StepCard` 等旧实现与对应 CSS、静态断言；登记已迁移文件；
   CH 行：思考折叠、工具调用组收起/展开/失败自动展开、复制、重新生成、分叉。
 
 Suggested fixture level: expanded - 步骤呈现从逐卡变为折叠组（owner 决定 8），状态徽章的可访问名被多处测试与 ui-walk 依赖；三处提示退场

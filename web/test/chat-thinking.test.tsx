@@ -390,7 +390,7 @@ function stubClipboard() {
 /** Clicks 复制 on the first assistant and returns every `writeText` argument list. */
 async function copiedTexts(writeText: ReturnType<typeof stubClipboard>) {
   fireEvent.click(within(articles()[0] as HTMLElement).getByRole("button", { name: "复制" }));
-  await screen.findByText("已复制到剪贴板");
+  expect((await screen.findByText("已复制")).getAttribute("role")).toBe("status");
   return writeText.mock.calls;
 }
 
@@ -603,7 +603,7 @@ describe("深度思考过程 fold on the chat page", () => {
       [...main.children].map(
         (part) => part.getAttribute("data-slot") ?? `${part.localName}.${part.className}`,
       ),
-    ).toEqual(["reasoning-root", "message-body", "message-error", "div.chat-msg-actions"]);
+    ).toEqual(["reasoning-root", "message-body", "message-error", "message-actions"]);
     expect(screen.getByRole("alert")).toBe(main.children[2]);
   });
 
@@ -638,7 +638,7 @@ describe("深度思考过程 fold on the chat page", () => {
       "tool-group-root",
       "div.chat-approvals",
       "message-stopped",
-      "div.chat-msg-actions",
+      "message-actions",
     ]);
     expect(isOpen()).toBe(false);
     expect(within(parts[3] as HTMLElement).getAllByRole("group")).toHaveLength(1);
