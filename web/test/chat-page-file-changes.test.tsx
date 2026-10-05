@@ -671,7 +671,7 @@ describe("文件变更 card on the chat page", () => {
     const parts = replyParts();
 
     expect(parts.map(tagAndClass)).toEqual([
-      "details.thinking-block",
+      "reasoning-root",
       "message-body",
       "section.chat-step",
       "div.chat-approvals",

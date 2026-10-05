@@ -298,23 +298,22 @@ async function step3SendPrompt(
 
 async function step4ThinkingFold(page: Page): Promise<void> {
   const assistant = page.getByRole("article", { name: "助手" });
-  const fold = assistant.locator("details.thinking-block");
+  const fold = assistant.locator('[data-slot="reasoning-root"]');
   await expect(fold).toHaveCount(1);
   // 同一父元素内先于回答正文。
-  await expect(
-    assistant.locator('details.thinking-block ~ [data-slot="message-body"]'),
-  ).toHaveCount(1);
-  await expect(fold).not.toHaveAttribute("open", "");
-  const summary = fold.locator("summary");
+  await expect(fold.locator(':scope ~ [data-slot="message-body"]')).toHaveCount(1);
+  const summary = fold.getByRole("button", { name: "深度思考过程", exact: true });
+  await expect(summary).toHaveAttribute("aria-expanded", "false");
   await expect(summary).toHaveText("深度思考过程");
   await summary.click();
-  await expect(fold).toHaveAttribute("open", "");
-  await expect(fold.locator(".thinking-body")).toBeVisible();
-  await expect(fold.locator(".thinking-body")).toHaveText(EXPECTED_THINKING);
+  await expect(summary).toHaveAttribute("aria-expanded", "true");
+  const body = fold.locator('[data-slot="reasoning-text"]');
+  await expect(body).toBeVisible();
+  await expect(body).toHaveText(EXPECTED_THINKING);
   // 终态消息：不带 data-running，主体限高 12rem 并在盒内滚动（#725）。
   await expect(fold).not.toHaveAttribute("data-running");
-  await expect(fold.locator(".thinking-body")).toHaveCSS("max-height", "192px");
-  await expect(fold.locator(".thinking-body")).toHaveCSS("overflow-y", "auto");
+  await expect(body).toHaveCSS("max-height", "192px");
+  await expect(body).toHaveCSS("overflow-y", "auto");
 }
 
 async function readSnapshot(page: Page, sessionId: string): Promise<SessionSnapshot> {
