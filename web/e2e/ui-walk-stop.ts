@@ -10,6 +10,7 @@ import { expect, type Page, type Request } from "@playwright/test";
 import { generatingStatus } from "./ui-walk-approval.js";
 import { armGate, controlOrigin, deleteGate, gatePhase } from "./ui-walk-gate.js";
 import { inspectSidebar, type WalkProject } from "./ui-walk-layout.js";
+import { toolGroup } from "./ui-walk-steps.js";
 
 const WALK_MARKER = "WORKBUDDY_UI_WALK:";
 const FIRST_REPLY_PART = "你好，";
@@ -139,7 +140,7 @@ export async function walkRegenerate(
   await expect(second.locator('[data-slot="message-body"]')).toHaveText(EXPECTED_REPLY);
   mark("original reply");
   await expect(second.getByRole("group", { name: "需要你的确认" })).toHaveCount(0);
-  await expect(second.getByRole("region", { name: "bash" })).toHaveCount(0);
+  await expect(toolGroup(second)).toHaveCount(0);
   await expect(second.getByRole("alert")).toHaveCount(0);
   await expect(users).toHaveCount(2);
   await expect(assistants).toHaveCount(2);

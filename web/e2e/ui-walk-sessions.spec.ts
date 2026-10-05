@@ -27,6 +27,7 @@ import {
 } from "./ui-walk-layout.js";
 import { type AuthOracle, runWithBrowserErrorOracle } from "./ui-walk-oracle.js";
 import { expectNoProjectConfig, walkProjectConfig } from "./ui-walk-project-config.js";
+import { expandToolGroup, toolGroup } from "./ui-walk-steps.js";
 
 const DEV_PASSWORD = "demo";
 const WORKSPACE_NAME = "ui-walk-sessions";
@@ -287,9 +288,8 @@ async function step3SendPrompt(
   const assistant = page.getByRole("article", { name: "助手" });
   await expectTurnDone(assistant, EXPECTED_REPLY);
   await expectSelectedSessionStatus(page, project, "已完成");
-  await expect(
-    assistant.getByRole("region", { name: "write" }).getByRole("status", { name: "write 已完成" }),
-  ).toBeVisible();
+  const steps = await expandToolGroup(assistant);
+  await expect(steps.getByRole("status", { name: "write 已完成" })).toBeVisible();
   await expect(user).toHaveCount(1);
   await expect(assistant).toHaveCount(1);
   await expect(user.locator('[data-slot="message-body"]')).toHaveText(prompt);
@@ -636,8 +636,8 @@ async function sendSlashTurn(
   await expect(user.nth(index).locator('[data-slot="message-body"]')).toHaveText(sent);
   await expect(assistant).toHaveCount(index + 1);
   await expectTurnDone(assistant.nth(index), reply);
-  // 步骤卡是助手消息里唯一的 `region`。
-  await expect(assistant.nth(index).getByRole("region")).toHaveCount(0);
+  // 斜杠回合没有步骤：不渲染工具调用组。
+  await expect(toolGroup(assistant.nth(index))).toHaveCount(0);
   await expect(composer).toBeEnabled();
   await expect(composer).toHaveValue("");
 }

@@ -17,7 +17,7 @@ import {
   chatStateFromSnapshot,
 } from "../src/features/chat/stream.js";
 import type { ChatMessageSnapshot } from "../src/lib/session-contract.js";
-import { cleanupChatPage, renderChatPage } from "./chat-page-support.js";
+import { cleanupChatPage, expandToolGroups, renderChatPage } from "./chat-page-support.js";
 import {
   chatSnapshot,
   connectChat,
@@ -459,6 +459,7 @@ describe("深度思考过程 fold on the chat page", () => {
     emit(source, 7, "text.delta", { delta: "正文" });
     emit(source, 8, "step.start", { stepId: 21, name: "bash", detail: "ls" });
 
+    expandToolGroups();
     expect(screen.getByRole("region", { name: "bash" })).toBeTruthy();
     expect(fold()).toBe(block);
     expect(isOpen(block)).toBe(false);
@@ -520,6 +521,7 @@ describe("深度思考过程 fold on the chat page", () => {
     toggle();
     const expectStillCollapsed = () => expect([fold(), isOpen(block)]).toEqual([block, false]);
     expectStillCollapsed();
+    expandToolGroups(articles()[0]);
     expect(article.getByRole("status", { name: "bash 运行中" })).toBeTruthy();
 
     const { id: approvalId, tool, title, expiresAt } = SETTLED_APPROVAL;
@@ -633,7 +635,7 @@ describe("深度思考过程 fold on the chat page", () => {
     ).toEqual([
       "reasoning-root",
       "message-body",
-      "section.chat-step",
+      "tool-group-root",
       "div.chat-approvals",
       "message-stopped",
       "div.chat-msg-actions",
@@ -641,7 +643,11 @@ describe("深度思考过程 fold on the chat page", () => {
     expect(isOpen()).toBe(false);
     expect(within(parts[3] as HTMLElement).getAllByRole("group")).toHaveLength(1);
     expect(parts[1]?.textContent).toBe("部分回答");
-    expect(within(article).getByRole("region", { name: "bash" })).toBe(parts[2]);
+    const group = within(article).getByRole("group", { name: "工具调用" });
+    expect(group).toBe(parts[2]);
+    expect(within(group).getByRole("button").getAttribute("aria-expanded")).toBe("false");
+    expandToolGroups(article);
+    expect(within(group).getByRole("region", { name: "bash" })).toBeTruthy();
     expect(within(article).getByRole("status", { name: "助手消息 已停止" })).toBe(parts[4]);
     expect(await copiedTexts(writeText)).toEqual([["部分回答"]]);
   });

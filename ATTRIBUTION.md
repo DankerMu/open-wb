@@ -54,11 +54,11 @@
   - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;随打包产物分发时须附带该 MIT 声明。
 
 - **tw-shimmer** —— `MIT License`,版权归 AgentbaseAI Inc.（https://github.com/assistant-ui/assistant-ui,`packages/tw-shimmer`）
-  - 用途：Tailwind 4 的闪光（shimmer）工具类（assistant-ui registry 的 `reasoning` 组件依赖,会话页深度思考折叠块在回合进行中的标题用它）,经 `web/src/styles.css` 导入,构建时打包进 `web/dist`。
+  - 用途：Tailwind 4 的闪光（shimmer）工具类（assistant-ui registry 的 `reasoning`、`tool-group` 组件依赖,会话页深度思考折叠块在回合进行中的标题、工具调用组在有步骤运行时的摘要行用它）,经 `web/src/styles.css` 导入,构建时打包进 `web/dist`。
   - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;随打包产物分发时须附带该 MIT 声明。
 
 - **assistant-ui** —— `MIT License`,版权归 AgentbaseAI Inc.（https://github.com/assistant-ui/assistant-ui）
-  - 用途：会话页消息线程的运行时与无样式基元。`@assistant-ui/react`（`useExternalStoreRuntime`、`ThreadPrimitive`、`MessagePrimitive`）与 `@assistant-ui/react-markdown`（助手正文的 Markdown 渲染,内含 `react-markdown`,MIT,版权归 Espen Hovlandsdal）;`web/src/components/assistant-ui/` 的组件源码由其 registry 拷入（`markdown-text` 及其依赖 `tooltip-icon-button`、`use-copy-to-clipboard`;`reasoning` 及其依赖 `elements/reasoning`,后者用到的 shadcn/ui `collapsible` 拷入 `web/src/components/ui/`）,拷入后的修改限制同 shadcn/ui 条目。构建时打包进 `web/dist`,不启用其云服务适配,运行时零网络请求。
+  - 用途：会话页消息线程的运行时与无样式基元。`@assistant-ui/react`（`useExternalStoreRuntime`、`ThreadPrimitive`、`MessagePrimitive`）与 `@assistant-ui/react-markdown`（助手正文的 Markdown 渲染,内含 `react-markdown`,MIT,版权归 Espen Hovlandsdal）;`web/src/components/assistant-ui/` 的组件源码由其 registry 拷入（`markdown-text` 及其依赖 `tooltip-icon-button`、`use-copy-to-clipboard`;`reasoning` 及其依赖 `elements/reasoning`;`tool-group`;两者用到的 shadcn/ui `collapsible` 拷入 `web/src/components/ui/`）,拷入后的修改限制同 shadcn/ui 条目。构建时打包进 `web/dist`,不启用其云服务适配,运行时零网络请求。
   - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;拷入的源码与打包产物分发时须附带该 MIT 声明。
 
 - **remark-gfm** —— `MIT License`,版权归 Titus Wormer（https://github.com/remarkjs/remark-gfm）

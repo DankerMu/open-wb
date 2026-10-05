@@ -9,7 +9,12 @@ import {
 } from "./chat-page-lifecycle-support.js";
 import { OTHER_SESSION_ID } from "./chat-page-ownership-support.js";
 import { toasts } from "./chat-page-search-support.js";
-import { expectChatLocation, type FetchRoutes, renderChatPage } from "./chat-page-support.js";
+import {
+  expandToolGroups,
+  expectChatLocation,
+  type FetchRoutes,
+  renderChatPage,
+} from "./chat-page-support.js";
 import {
   chatSnapshot,
   FakeEventSource,
@@ -231,7 +236,14 @@ describe("stop button: layout and outcomes", () => {
     const body = article.querySelector('[data-slot="message-body"]');
     expect(body?.textContent).toBe(PLACEHOLDER);
     expect(article.querySelector('[data-slot="message-caret"]')).toBeNull();
-    expect(within(article).getByRole("status", { name: "bash 已停止" })).toBeTruthy();
+    // 步骤收在默认收起的工具调用组里：摘要行已读作 已停止，展开后徽章同名。
+    expect(within(article).getByRole("button", { name: "1 个步骤 · bash 已停止" })).toBeTruthy();
+    expect(within(article).queryByRole("status", { name: /^bash / })).toBeNull();
+    expandToolGroups(article);
+    const stepBadge = within(article).getByRole("status", { name: "bash 已停止" });
+    expect(stepBadge.textContent).toBe("已停止");
+    expect(stepBadge.className).toContain("text-(--wb-text-secondary)");
+    expect(within(article).queryByRole("status", { name: "bash 运行中" })).toBeNull();
     const listed = within(nav()).getByRole("status", { name: "saved title 已停止" });
     expect(
       listed.querySelector(".chat-session-dot")?.classList.contains("chat-session-dot-stopped"),
@@ -535,6 +547,7 @@ describe("stop button: stopped presentation from snapshots", () => {
     expect(follows(first.querySelector('[data-slot="message-body"]') as Element, badge)).toBe(true);
     expect(follows(badge, first.querySelector(".chat-msg-actions") as Element)).toBe(true);
     expect(within(nav()).getByRole("status", { name: "saved title 失败" })).toBeTruthy();
+    expandToolGroups(first);
     expect(within(first).getByRole("status", { name: "bash 已停止" })).toBeTruthy();
     expect(within(toolbar()).getByRole("button", { name: "发送" })).toBeTruthy();
     expect(within(toolbar()).queryByText("生成中")).toBeNull();
@@ -571,22 +584,19 @@ describe("stop button: capacity and source guards", () => {
     expect(calls(fetchMock, MESSAGES)).toHaveLength(reads);
   });
 
-  it("S13 styles the stopped dot and step badge with semantic tokens only", () => {
-    const rules = [
-      ["web/src/features/chat/chat.css", ".chat-session-dot-stopped"],
-      ["web/src/features/chat/messages.css", ".chat-step-status-stopped"],
-    ] as const;
-    for (const [file, selector] of rules) {
-      const body = ruleBody(stripComments(readRepoFile(file)), selector);
-      const values = body
-        .split(";")
-        .map((declaration) => declaration.trim())
-        .filter(Boolean)
-        .map((declaration) => declaration.slice(declaration.indexOf(":") + 1).trim());
-      expect(values.length).toBeGreaterThan(0);
-      for (const value of values) {
-        expect(value.startsWith("var(--wb-")).toBe(true);
-      }
+  it("S13 styles the stopped dot with semantic tokens only", () => {
+    const body = ruleBody(
+      stripComments(readRepoFile("web/src/features/chat/chat.css")),
+      ".chat-session-dot-stopped",
+    );
+    const values = body
+      .split(";")
+      .map((declaration) => declaration.trim())
+      .filter(Boolean)
+      .map((declaration) => declaration.slice(declaration.indexOf(":") + 1).trim());
+    expect(values.length).toBeGreaterThan(0);
+    for (const value of values) {
+      expect(value.startsWith("var(--wb-")).toBe(true);
     }
   });
 

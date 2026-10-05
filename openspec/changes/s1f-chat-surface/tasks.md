@@ -92,9 +92,9 @@ Minimal mergeable slice: 4.2 + 4.3，以及 4.5 / 4.6 中依赖「新建即 POST
 
 ## 5. chat-web / thinking-fold / turn-control — 思考、工具调用组与操作行
 
-- [ ] 5.1 拷入 `reasoning`、`tool-group`（及它们依赖的 `ui` 组件 `collapsible`、`skeleton` 等，不含 `avatar`；需要的 npm 包随之加入并登记）。思考折叠由应用层组合 `reasoning` 的 Root/Trigger/Content：
+- [x] 5.1 拷入 `reasoning`、`tool-group`（及它们依赖的 `ui` 组件 `collapsible` 等，不含 `avatar`；需要的 npm 包随之加入并登记）。思考折叠由应用层组合 `reasoning` 的 Root/Trigger/Content：
   回合进行中展开、终态收起，可访问名 `深度思考过程`，thinking-fold 的行为场景通过。
-- [ ] 5.2 工具调用组（design D4）：应用层组合 `tool-group` 的 Root/Trigger/Content，步骤卡是应用层组件。默认收起的一行摘要；展开后的步骤卡（图标、名称、状态徽章与可访问名、一行摘要、`原始输出` 的 detail/output 分栏、不做路径改写）；
+- [x] 5.2 工具调用组（design D4）：应用层组合 `tool-group` 的 Root/Trigger/Content，步骤卡是应用层组件。默认收起的一行摘要；展开后的步骤卡（图标、名称、状态徽章与可访问名、一行摘要、`原始输出` 的 detail/output 分栏、不做路径改写）；
   有失败步骤时自动展开；用户手动收起后不再自动展开，直到出现新的失败步骤。
 - [ ] 5.3 操作行（应用层，`ActionBarPrimitive`）：`复制`（原文；成功换图标 + 视觉隐藏的 `已复制` 状态；失败就地 `role="alert"`）、`重新生成`（仅末条助手且会话状态 ∈ done/failed/stopped；不弹提示）、
   `从此处分叉`（仅用户消息；锁定期间禁用）。不渲染编辑、分支切换、附件。

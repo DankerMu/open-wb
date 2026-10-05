@@ -1,4 +1,4 @@
-import { cleanup, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { expect, vi } from "vitest";
 import { FakeEventSource, resetFakeEventSources } from "./chat-stream-support.js";
 import { mountAuthenticatedApp } from "./render-app-router.js";
@@ -46,4 +46,15 @@ export function cleanupChatPage() {
   resetFakeEventSources();
   document.body.replaceChildren();
   setBrowserPath("/");
+}
+
+/**
+ * 展开 `root` 内全部收起的工具调用组：步骤默认收在组里，收起时步骤卡不在 DOM 中，断言步骤卡或步骤徽章前先调用。
+ */
+export function expandToolGroups(root: ParentNode = document) {
+  for (const trigger of root.querySelectorAll<HTMLElement>(
+    '[data-slot="tool-group-trigger"][aria-expanded="false"]',
+  )) {
+    fireEvent.click(trigger);
+  }
 }

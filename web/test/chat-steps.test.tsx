@@ -1,10 +1,10 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ChatMessageSnapshot } from "../src/lib/session-contract.js";
-import { cleanupChatPage, renderChatPage } from "./chat-page-support.js";
+import { cleanupChatPage, expandToolGroups, renderChatPage } from "./chat-page-support.js";
 import { chatSnapshot, latestSource, SESSION_ID } from "./chat-stream-support.js";
 import { jsonResponse } from "./support.js";
-import { COLOR_LITERAL_PATTERNS, readRepoFile, ruleBody, stripComments } from "./ui-support.js";
+import { COLOR_LITERAL_PATTERNS, readRepoFile, stripComments } from "./ui-support.js";
 
 const messagesPath = `/api/sessions/${SESSION_ID}/messages`;
 const BASH_START = '{"command":"echo workbuddy-smoke"}';
@@ -53,31 +53,41 @@ function hasIcon(root: HTMLElement, name: string): boolean {
   return [...root.querySelectorAll("svg")].some((svg) => svg.classList.contains(`lucide-${name}`));
 }
 
+/** 步骤卡在默认收起的工具调用组里：等组出现、展开它，再按名取卡。 */
+async function findCard(name: string): Promise<HTMLElement> {
+  await screen.findByRole("group", { name: "工具调用" });
+  expandToolGroups();
+  return screen.getByRole("region", { name });
+}
+
+function slotText(card: HTMLElement, slot: string): string | undefined {
+  return card.querySelector(`[data-slot="${slot}"]`)?.textContent ?? undefined;
+}
+
 describe("(S2) step cards render icon, Chinese badge, summary and collapsed raw detail", () => {
   it("shows the running cards and swaps badge/summary when steps end", async () => {
     mountRunningSteps();
-    const bash = await screen.findByRole("region", { name: "bash" });
+    const bash = await findCard("bash");
     expect(hasIcon(bash, "terminal")).toBe(true);
     expect(bash.querySelector("strong")?.textContent).toBe("bash");
     const bashBadge = within(bash).getByRole("status", { name: "bash 运行中" });
     expect(bashBadge.textContent).toBe("运行中");
-    expect(bashBadge.className).toContain("ui-pulse");
-    expect(bash.querySelector("p.chat-step-line")?.textContent).toBe(
-      "command: echo workbuddy-smoke",
-    );
-    const disclosure = bash.querySelector("details.chat-step-disclosure") as HTMLDetailsElement;
+    expect(bashBadge.dataset.status).toBe("running");
+    expect(bashBadge.className).toContain("animate-pulse motion-reduce:animate-none");
+    expect(slotText(bash, "step-summary")).toBe("command: echo workbuddy-smoke");
+    const disclosure = bash.querySelector("details") as HTMLDetailsElement;
     expect(disclosure).not.toBeNull();
     expect(disclosure.open).toBe(false);
     expect(disclosure.querySelector("summary")?.textContent).toBe("原始输出");
-    expect(disclosure.querySelector("pre.chat-step-detail")?.textContent).toBe(BASH_START);
-    expect(disclosure.querySelector("pre.chat-step-output")).toBeNull();
+    expect(slotText(disclosure, "step-detail")).toBe(BASH_START);
+    expect(disclosure.querySelector('[data-slot="step-output"]')).toBeNull();
 
     const read = screen.getByRole("region", { name: "read" });
     expect(hasIcon(read, "wrench")).toBe(true);
     expect(hasIcon(read, "terminal")).toBe(false);
     expect(within(read).getByRole("status", { name: "read 运行中" }).textContent).toBe("运行中");
-    expect(read.querySelector("p.chat-step-line")?.textContent).toBe("plain line");
-    expect(read.querySelector("pre.chat-step-detail")?.textContent).toBe(READ_START);
+    expect(slotText(read, "step-summary")).toBe("plain line");
+    expect(slotText(read, "step-detail")).toBe(READ_START);
 
     await waitFor(() => expect(latestSource().url).toBe(`/api/sessions/${SESSION_ID}/events`));
     const source = latestSource();
@@ -99,34 +109,33 @@ describe("(S2) step cards render icon, Chinese badge, summary and collapsed raw 
 
     const doneBadge = await within(bash).findByRole("status", { name: "bash 已完成" });
     expect(doneBadge.textContent).toBe("已完成");
-    expect(doneBadge.className).not.toContain("ui-pulse");
-    expect(bash.querySelector("p.chat-step-line")?.textContent).toBe(
-      "command: echo workbuddy-smoke",
-    );
-    const ended = bash.querySelector("details.chat-step-disclosure") as HTMLDetailsElement;
+    expect(doneBadge.dataset.status).toBe("done");
+    expect(doneBadge.className).not.toContain("animate-pulse");
+    expect(doneBadge.className).toContain("text-(--wb-status-success-text)");
+    expect(slotText(bash, "step-summary")).toBe("command: echo workbuddy-smoke");
+    const ended = bash.querySelector("details") as HTMLDetailsElement;
     expect(ended.open).toBe(false);
     expect(
-      [...ended.querySelectorAll("pre")].map((pre) => [pre.className, pre.textContent]),
+      [...ended.querySelectorAll("pre")].map((pre) => [pre.dataset.slot, pre.textContent]),
     ).toEqual([
-      ["chat-step-detail", BASH_START],
-      ["chat-step-output", BASH_OUTPUT],
+      ["step-detail", BASH_START],
+      ["step-output", BASH_OUTPUT],
     ]);
 
     expect(within(read).getByRole("status", { name: "read 失败" }).textContent).toBe("失败");
-    expect(read.querySelector("p.chat-step-line")?.textContent).toBe("plain line");
-    expect(read.querySelector("pre.chat-step-detail")?.textContent).toBe(READ_START);
-    expect(read.querySelector("pre.chat-step-output")).toBeNull();
+    expect(slotText(read, "step-summary")).toBe("plain line");
+    expect(slotText(read, "step-detail")).toBe(READ_START);
+    expect(read.querySelector('[data-slot="step-output"]')).toBeNull();
     expect(screen.queryByRole("status", { name: /running|done|failed/ })).toBeNull();
   });
 
-  it("styles the step cards from semantic tokens in the split messages.css", () => {
+  it("keeps the step-card rules out of both chat stylesheets", () => {
     const messagesRaw = readRepoFile("web/src/features/chat/messages.css");
-    const messages = stripComments(messagesRaw);
-    expect(ruleBody(messages, ".chat-step-status-done")).toContain("var(--wb-status-success-text)");
     for (const pattern of COLOR_LITERAL_PATTERNS) {
       expect(messagesRaw).not.toMatch(pattern);
     }
     expect(messagesRaw).not.toContain("--wb-palette");
+    expect(messagesRaw).not.toContain("chat-step");
 
     const chatRaw = readRepoFile("web/src/features/chat/chat.css");
     expect(chatRaw.split("\n").length).toBeLessThanOrEqual(800);
@@ -145,8 +154,8 @@ describe("(S2) step cards render icon, Chinese badge, summary and collapsed raw 
 
 describe("step cards split args and output under 原始输出 (#367)", () => {
   function preBlocks(card: HTMLElement): string[][] {
-    return [...card.querySelectorAll("details.chat-step-disclosure pre")].map((pre) => [
-      pre.className,
+    return [...card.querySelectorAll<HTMLElement>("details pre")].map((pre) => [
+      pre.dataset.slot ?? "",
       pre.textContent ?? "",
     ]);
   }
@@ -200,30 +209,30 @@ describe("step cards split args and output under 原始输出 (#367)", () => {
       [messagesPath]: () => jsonResponse(snapshot),
     });
 
-    const legacy = await screen.findByRole("region", { name: "legacy" });
-    expect(legacy.querySelector("p.chat-step-line")?.textContent).toBe("old");
-    expect(preBlocks(legacy)).toEqual([["chat-step-detail", '{"text":"old"}']]);
+    const legacy = await findCard("legacy");
+    expect(slotText(legacy, "step-summary")).toBe("old");
+    expect(preBlocks(legacy)).toEqual([["step-detail", '{"text":"old"}']]);
 
     const failed = screen.getByRole("region", { name: "bash" });
     expect(within(failed).getByRole("status", { name: "bash 失败" }).textContent).toBe("失败");
-    expect(failed.querySelector("p.chat-step-line")?.textContent).toBe("command: false");
+    expect(slotText(failed, "step-summary")).toBe("command: false");
     expect(preBlocks(failed)).toEqual([
-      ["chat-step-detail", '{"command":"false"}'],
-      ["chat-step-output", "boom"],
+      ["step-detail", '{"command":"false"}'],
+      ["step-output", "boom"],
     ]);
 
     const empty = screen.getByRole("region", { name: "empty" });
     expect(empty.querySelector("details")).toBeNull();
-    expect(empty.querySelector(".chat-step-line")).toBeNull();
+    expect(empty.querySelector('[data-slot="step-summary"]')).toBeNull();
 
     const noArgs = screen.getByRole("region", { name: "noargs" });
-    expect(noArgs.querySelector(".chat-step-line")).toBeNull();
-    expect(preBlocks(noArgs)).toEqual([["chat-step-output", "only output"]]);
+    expect(noArgs.querySelector('[data-slot="step-summary"]')).toBeNull();
+    expect(preBlocks(noArgs)).toEqual([["step-output", "only output"]]);
   });
 
   it("keeps the args summary after a long multi-line output arrives on step.end", async () => {
     mountRunningSteps();
-    const bash = await screen.findByRole("region", { name: "bash" });
+    const bash = await findCard("bash");
     await waitFor(() => expect(latestSource().url).toBe(`/api/sessions/${SESSION_ID}/events`));
     const longOutput = `${"x".repeat(150)}\nsecond line\n\n  indented 😀`;
     act(() => {
@@ -236,12 +245,10 @@ describe("step cards split args and output under 原始输出 (#367)", () => {
       });
     });
     await within(bash).findByRole("status", { name: "bash 已完成" });
-    expect(bash.querySelector("p.chat-step-line")?.textContent).toBe(
-      "command: echo workbuddy-smoke",
-    );
+    expect(slotText(bash, "step-summary")).toBe("command: echo workbuddy-smoke");
     expect(preBlocks(bash)).toEqual([
-      ["chat-step-detail", BASH_START],
-      ["chat-step-output", longOutput],
+      ["step-detail", BASH_START],
+      ["step-output", longOutput],
     ]);
   });
 });
@@ -269,16 +276,14 @@ describe("step cards keep absolute sandbox paths verbatim (ADR-0011)", () => {
       [messagesPath]: () => jsonResponse(snapshot),
     });
 
-    const read = await screen.findByRole("region", { name: "read" });
+    const read = await findCard("read");
     expect(within(read).getByRole("status", { name: "read 已完成" }).textContent).toBe("已完成");
-    expect(read.querySelector("p.chat-step-line")?.textContent).toBe(`path: ${SANDBOX_PATH}`);
-    const disclosure = read.querySelector("details.chat-step-disclosure") as HTMLDetailsElement;
+    expect(slotText(read, "step-summary")).toBe(`path: ${SANDBOX_PATH}`);
+    const disclosure = read.querySelector("details") as HTMLDetailsElement;
     expect(disclosure.querySelector("summary")?.textContent).toBe("原始输出");
     expect(disclosure.textContent).toContain(SANDBOX_PATH);
-    expect(disclosure.querySelector("pre.chat-step-detail")?.textContent).toBe(SANDBOX_DETAIL);
-    expect(disclosure.querySelector("pre.chat-step-output")?.textContent).toBe(
-      `# a.md at ${SANDBOX_PATH}`,
-    );
+    expect(slotText(disclosure, "step-detail")).toBe(SANDBOX_DETAIL);
+    expect(slotText(disclosure, "step-output")).toBe(`# a.md at ${SANDBOX_PATH}`);
   });
 });
 

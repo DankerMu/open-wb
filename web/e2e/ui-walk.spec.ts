@@ -39,6 +39,7 @@ import {
 import { expectLoginCascade } from "./ui-walk-login.js";
 import { type AuthOracle, runWithBrowserErrorOracle } from "./ui-walk-oracle.js";
 import { walkScrollFollow } from "./ui-walk-scroll.js";
+import { expandToolGroup } from "./ui-walk-steps.js";
 import { walkFork, walkRegenerate, walkStop } from "./ui-walk-stop.js";
 
 const DEV_PASSWORD = "demo";
@@ -523,7 +524,8 @@ async function expectRunningPrefix(
       ),
     )
     .toBe(true);
-  await expect(pair.assistant.getByRole("region", { name: "bash" })).toBeVisible();
+  const steps = await expandToolGroup(pair.assistant);
+  await expect(steps.getByRole("region", { name: "bash" })).toBeVisible();
   await expect(
     page
       .getByRole("status", { name: "bash 运行中" })
@@ -572,16 +574,21 @@ async function expectCompletedPair(
 ): Promise<void> {
   const pair = await dialoguePair(page, sessionId, prompt);
   await expect(pair.assistant.locator('[data-slot="message-body"]')).toHaveText(EXPECTED_REPLY);
+  // 工具调用组默认收起：摘要行是步骤数与末位步骤的名称、状态；展开后才有步骤卡。
+  await expect(
+    pair.assistant.getByRole("button", { name: "1 个步骤 · bash 已完成", exact: true }),
+  ).toBeVisible();
+  const steps = await expandToolGroup(pair.assistant);
   await expect(page.getByRole("status", { name: "bash 已完成" })).toBeVisible();
-  // #367：摘要仍由 args 派生；真实 omp 的 AgentToolResult 经 output 块呈现（未展开时断言文本即可，
-  // 不点击以免改变 W-scroll 所需的贴底与折叠初态）。锚定行首证明已规范化为纯文本——
+  // #367：摘要仍由 args 派生；真实 omp 的 AgentToolResult 经 output 块呈现（`原始输出` 未展开时断言文本
+  // 即可，不点击以免改变 W-scroll 所需的贴底与折叠初态）。锚定行首证明已规范化为纯文本——
   // 若落入紧凑 JSON 兜底，文本会以 `{"content":` 开头。
-  const bash = pair.assistant.getByRole("region", { name: "bash" });
-  await expect(bash.locator("p.chat-step-line")).toHaveText("command: echo workbuddy-smoke");
-  await expect(bash.locator("details.chat-step-disclosure")).not.toHaveAttribute("open", "");
-  await expect(bash.locator("details.chat-step-disclosure pre.chat-step-output")).toHaveText(
-    /^workbuddy-smoke/u,
+  const bash = steps.getByRole("region", { name: "bash" });
+  await expect(bash.locator('[data-slot="step-summary"]')).toHaveText(
+    "command: echo workbuddy-smoke",
   );
+  await expect(bash.locator("details")).not.toHaveAttribute("open", "");
+  await expect(bash.locator('details [data-slot="step-output"]')).toHaveText(/^workbuddy-smoke/u);
   await expectSelectedSessionStatus(page, project, "已完成");
   await expect(generatingStatus(page)).toHaveCount(0);
 }
