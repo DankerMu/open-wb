@@ -29,6 +29,7 @@ const B_REGEN = `/api/sessions/${OTHER_SESSION_ID}/regenerate`;
 const REGEN_LABEL = "重新生成";
 const REGEN_TOAST = "正在重新生成…";
 const GUIDANCE = "请刷新页面后重试";
+const ROW = '[data-slot="message-actions"]';
 
 type Snapshot = ChatMessageSnapshot;
 type Message = Snapshot["messages"][number];
@@ -188,6 +189,7 @@ describe("regenerate button: availability", () => {
     expect(button.disabled).toBe(false);
     expect(button.type).toBe("button");
     expect(button.title).toBe(REGEN_LABEL);
+    expect(button.getAttribute("aria-label")).toBe(REGEN_LABEL);
     expect(button.querySelector("svg.lucide-refresh-cw")).not.toBeNull();
     if (name === "(a) done") {
       const copy = within(article as HTMLElement).getByRole("button", { name: "复制" });
@@ -228,8 +230,8 @@ describe("regenerate button: availability", () => {
   it("R2 gives an empty regenerable last message an action row with only 重新生成", async () => {
     await mount(snapshotOf("stopped", [historyUser, a(1, "stopped"), u(2), a(3, "stopped")]));
     const [a1, a2] = assistantArticles() as [HTMLElement, HTMLElement];
-    expect(a1.querySelector(".chat-msg-actions")).toBeNull();
-    const row = a2.querySelector<HTMLElement>(".chat-msg-actions");
+    expect(a1.querySelector(ROW)).toBeNull();
+    const row = a2.querySelector<HTMLElement>(ROW);
     expect(row).not.toBeNull();
     const buttons = within(row as HTMLElement).getAllByRole("button");
     expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([REGEN_LABEL]);
@@ -239,7 +241,7 @@ describe("regenerate button: availability", () => {
   it("R2 keeps 复制 off empty bodies while the last non-empty answer has both", async () => {
     await mount(snapshotOf("done", [historyUser, a(1, "done"), u(2), a(3, "done", "答")]));
     const [a1, a2] = assistantArticles() as [HTMLElement, HTMLElement];
-    expect(a1.querySelector(".chat-msg-actions")).toBeNull();
+    expect(a1.querySelector(ROW)).toBeNull();
     const labels = within(a2)
       .getAllByRole("button")
       .map((button) => button.getAttribute("aria-label"));
@@ -273,7 +275,8 @@ describe("regenerate button: request, lock and reconcile", () => {
 
     regen.resolve(accepted());
     await flush();
-    expect(screen.queryByText(REGEN_TOAST)).not.toBeNull();
+    expect(screen.queryByText(REGEN_TOAST)).toBeNull();
+    expect(document.querySelector(".ui-toast")).toBeNull();
     expect(source.closeCount).toBe(1);
     expect(calls(fetchMock, MESSAGES)).toHaveLength(reads + 1);
     expectTranscript(["旧回答"]);

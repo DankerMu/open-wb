@@ -1,6 +1,6 @@
 // 消息线程骨架（design D4）：应用层组件，直接由 ThreadPrimitive / MessagePrimitive 组合；滚动层在
-// thread-viewport.tsx，思考折叠在 thinking-fold.tsx，工具调用组在 tool-call-group.tsx。审批条、文件变更卡、
-// 产物卡与操作行此刻仍是旧组件，按 D4 的块次序挂在助手消息里。
+// thread-viewport.tsx，思考折叠在 thinking-fold.tsx，工具调用组在 tool-call-group.tsx，操作行在
+// message-action-row.tsx。审批条、文件变更卡与产物卡此刻仍是旧组件，按 D4 的块次序挂在助手消息里。
 import {
   AssistantRuntimeProvider,
   MessagePrimitive,
@@ -14,7 +14,7 @@ import { ApprovalBars } from "./approval-bar.js";
 import { ArtifactCards } from "./artifact-card.js";
 import { FileChangesCard } from "./file-changes-card.js";
 import { MarkdownBody } from "./markdown-body.js";
-import { ForkAction, MessageActions } from "./message-actions.js";
+import { AssistantActions, UserActions } from "./message-action-row.js";
 import { type ChatMessageCustom, messageCustom } from "./runtime-convert.js";
 import type { ChatState } from "./stream.js";
 import { ThinkingFold } from "./thinking-fold.js";
@@ -90,7 +90,7 @@ const UserMessage = memo(function UserMessage({
         </p>
         <ToolCallGroup steps={custom.steps} />
         <MessageError error={custom.error} />
-        <ForkAction disabled={locked} onFork={() => void onFork(id)} />
+        <UserActions disabled={locked} onFork={() => void onFork(id)} />
       </article>
     </MessagePrimitive.Root>
   );
@@ -187,7 +187,7 @@ const AssistantMessage = memo(function AssistantMessage({
             </p>
           ) : null}
           {!running && (text !== "" || regenerable) ? (
-            <MessageActions
+            <AssistantActions
               regenerate={regenerable ? { disabled: locked, onRegenerate } : undefined}
               text={text}
             />

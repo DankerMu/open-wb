@@ -545,7 +545,8 @@ describe("stop button: stopped presentation from snapshots", () => {
     const badge = badges[0]?.[0] as HTMLElement;
     expect(badge.textContent).toBe("已停止");
     expect(follows(first.querySelector('[data-slot="message-body"]') as Element, badge)).toBe(true);
-    expect(follows(badge, first.querySelector(".chat-msg-actions") as Element)).toBe(true);
+    const row = first.querySelector('[data-slot="message-actions"]') as Element;
+    expect(follows(badge, row)).toBe(true);
     expect(within(nav()).getByRole("status", { name: "saved title 失败" })).toBeTruthy();
     expandToolGroups(first);
     expect(within(first).getByRole("status", { name: "bash 已停止" })).toBeTruthy();

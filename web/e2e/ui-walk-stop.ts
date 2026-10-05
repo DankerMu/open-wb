@@ -17,7 +17,6 @@ const FIRST_REPLY_PART = "你好，";
 const EXPECTED_REPLY = "你好，这是 WorkBuddy 的第一条流式回复。";
 const STOPPED_TOAST = "已停止生成";
 const REGENERATING_TOAST = "正在重新生成…";
-const TOAST_GONE_TIMEOUT_MS = 10_000;
 const SESSION_ID = /^[0-9a-f]{32}$/;
 const PROMPT_PATH = /^\/api\/sessions\/[^/]+\/prompt$/;
 
@@ -118,9 +117,9 @@ export async function walkRegenerate(
   const second = assistants.nth(1);
   const stoppedBadge = second.getByRole("status", { name: "助手消息 已停止", exact: true });
   const regenerate = second.getByRole("button", { name: "重新生成", exact: true });
-  const toast = page
-    .getByRole("region", { name: /通知/u })
-    .getByText(REGENERATING_TOAST, { exact: true });
+  // 整页范围：重新生成不弹任何提示，这句文本哪里都不出现；通知区里也没有任何一条提示。
+  const toast = page.getByText(REGENERATING_TOAST, { exact: true });
+  const anyToast = page.getByRole("region", { name: /通知/u }).getByRole("status");
   const started = Date.now();
   const mark = (point: string) =>
     console.log(`ui-walk regenerate ${project}: ${point} +${Date.now() - started}ms`);
@@ -133,8 +132,8 @@ export async function walkRegenerate(
   await regenerate.click();
   expect((await accepted).status()).toBe(202);
   mark("regenerate 202");
-  await expect(toast).toBeVisible();
-  mark("toast visible");
+  await expect(toast).toHaveCount(0);
+  await expect(anyToast).toHaveCount(0);
   await expect(stoppedBadge).toHaveCount(0);
   mark("badge gone");
   await expect(second.locator('[data-slot="message-body"]')).toHaveText(EXPECTED_REPLY);
@@ -151,8 +150,8 @@ export async function walkRegenerate(
   await expect(generatingStatus(page)).toHaveCount(0);
   await expect(regenerate).toBeEnabled();
 
-  await expect(toast).toHaveCount(0, { timeout: TOAST_GONE_TIMEOUT_MS });
-  mark("toast gone");
+  await expect(toast).toHaveCount(0);
+  await expect(anyToast).toHaveCount(0);
   await inspectSidebar(page, project, async (sidebar) => {
     const current = sidebar
       .getByRole("navigation", { name: "会话列表" })
@@ -165,7 +164,7 @@ export async function walkRegenerate(
 
 // 首条用户消息 `从此处分叉` → 201 → URL 选中新会话（与 201 体一致）→ 历史已装载且为空、显示零消息空态 → 侧栏 `未开始` → 草稿恰为首条 prompt。
 // 无 prompt POST：监听在点击前挂上、覆盖任何会话；窗口止于侧栏断言——setDraft/refreshList/selectSession 同在一个回调里，
-// 空转录与侧栏新项都在其下游，回调里任何同步自动发送此时已发出。分叉不弹 Toast（message-actions.tsx ForkAction）。
+// 空转录与侧栏新项都在其下游，回调里任何同步自动发送此时已发出。分叉不弹 Toast（message-action-row.tsx UserActions）。
 export async function walkFork(
   page: Page,
   project: WalkProject,
