@@ -31,11 +31,11 @@ export function WelcomeIntro({ disabled, onPick, onSelectScene, scene }: Welcome
       <ScenePills disabled={disabled} onSelect={onSelectScene} scene={scene} />
       <fieldset
         aria-label="快捷任务"
-        className="m-0 flex max-w-3xl min-w-0 flex-wrap justify-center gap-2 border-0 p-0 max-[760px]:-m-1 max-[760px]:max-w-full max-[760px]:flex-nowrap max-[760px]:justify-start max-[760px]:overflow-x-auto max-[760px]:p-1 max-[760px]:[scrollbar-width:none]"
+        className="m-0 flex max-w-3xl min-w-0 flex-wrap justify-center gap-2 border-0 p-0 narrow:-m-1 narrow:max-w-full narrow:flex-nowrap narrow:justify-start narrow:overflow-x-auto narrow:p-1 narrow:[scrollbar-width:none]"
       >
         {prompts.map((item) => (
           <button
-            className="inline-flex h-8 cursor-pointer items-center gap-1 rounded-full border border-(--wb-color-border-secondary) bg-card px-3 text-sm leading-[22px] whitespace-nowrap text-muted-foreground transition-[background-color,color] duration-150 enabled:hover:bg-(--wb-home-composer-chip-bg-hover) enabled:hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60 motion-reduce:transition-none max-[760px]:flex-none"
+            className="inline-flex h-8 cursor-pointer items-center gap-1 rounded-full border border-(--wb-color-border-secondary) bg-card px-3 text-sm leading-[22px] whitespace-nowrap text-muted-foreground transition-[background-color,color] duration-150 enabled:hover:bg-(--wb-home-composer-chip-bg-hover) enabled:hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60 motion-reduce:transition-none narrow:flex-none"
             disabled={disabled}
             key={item.label}
             onClick={() => onPick(item.prompt)}
@@ -75,9 +75,9 @@ export function WelcomePlaybooks({ disabled, onPick }: WelcomeProps) {
             换一批
           </button>
         </div>
-        <ul className="m-0 flex list-none flex-nowrap gap-2.5 p-0 max-[760px]:flex-wrap">
+        <ul className="m-0 flex list-none flex-nowrap gap-2.5 p-0 narrow:flex-wrap">
           {playbookWindow(start).map((item) => (
-            <li className="max-w-55 min-w-0 flex-[1_1_0] max-[760px]:basis-35" key={item.title}>
+            <li className="max-w-55 min-w-0 flex-[1_1_0] narrow:basis-35" key={item.title}>
               <button
                 className="box-border flex size-full cursor-pointer flex-col rounded-xl border border-border bg-secondary px-3.5 py-3 text-left text-foreground transition-[border-color,box-shadow] duration-150 enabled:hover:border-(--wb-text-tertiary) enabled:hover:shadow-(--wb-activity-card-shadow) disabled:cursor-not-allowed disabled:opacity-60 motion-reduce:transition-none"
                 disabled={disabled}

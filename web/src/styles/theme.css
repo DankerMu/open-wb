@@ -13,6 +13,9 @@
 @custom-variant data-open (&:where([data-state="open"]));
 @custom-variant data-closed (&:where([data-state="closed"]));
 
+/* The shell's single breakpoint (≤760px, SHELL_NARROW_QUERY); max-[760px]: compiles to <760px. */
+@custom-variant narrow (@media (max-width: 760px));
+
 :root {
   --radius: 0.5rem;
   --background: var(--wb-home-bg-secondary);
