@@ -654,7 +654,7 @@ describe("产物卡 placement", () => {
 
     const parts = replyParts();
     expect(parts.map(tagAndClass)).toEqual([
-      "details.thinking-block",
+      "reasoning-root",
       "message-body",
       "section.chat-step",
       "div.chat-approvals",

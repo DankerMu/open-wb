@@ -1,6 +1,6 @@
 // 消息线程骨架（design D4）：应用层组件，直接由 ThreadPrimitive / MessagePrimitive 组合；滚动层在
-// thread-viewport.tsx。思考、步骤卡、审批条、文件变更卡、产物卡与操作行此刻仍是旧组件，按 D4 的块次序
-// 挂在助手消息里。
+// thread-viewport.tsx，思考折叠在 thinking-fold.tsx。步骤卡、审批条、文件变更卡、产物卡与操作行此刻仍是
+// 旧组件，按 D4 的块次序挂在助手消息里。
 import {
   AssistantRuntimeProvider,
   MessagePrimitive,
@@ -18,7 +18,7 @@ import { ForkAction, MessageActions } from "./message-actions.js";
 import { type ChatMessageCustom, messageCustom } from "./runtime-convert.js";
 import { StepCard } from "./step-card.js";
 import type { ChatState } from "./stream.js";
-import { ThinkingBlock } from "./thinking-block.js";
+import { ThinkingFold } from "./thinking-fold.js";
 import { ThreadViewport, type TranscriptHandle } from "./thread-viewport.js";
 import { useThreadRuntime } from "./use-thread-runtime.js";
 import type { Workspace } from "./workspace-list.js";
@@ -173,7 +173,7 @@ const AssistantMessage = memo(function AssistantMessage({
           <BrandMark size={28} />
         </span>
         <div className="flex min-w-0 flex-1 flex-col gap-2.5" data-slot="message-content">
-          {thinking ? <ThinkingBlock running={running} text={thinking} /> : null}
+          {thinking ? <ThinkingFold running={running} text={thinking} /> : null}
           <MessageBody status={status} text={text} />
           <StepCards steps={steps} />
           <ApprovalBars approvals={approvals} onAnswer={onAnswerApproval} />

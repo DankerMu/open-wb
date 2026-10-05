@@ -2,8 +2,11 @@
  * Issue #534 `thinking.delta` decoding/reduction and the 深度思考过程 fold (parent tasks 7.4),
  * T1–T12 of openspec/changes/thinking-fold-block/design.md. Seams: `chatStateFromSnapshot` /
  * `applyChatEvent` on frozen inputs, `connectSessionEvents` over the fake EventSource, the jsdom
- * chat page, and the static CSS text. Expected values are literals from the spec deltas.
+ * chat page. Expected values are literals from the spec deltas.
  * F1–F7 close the evidence gaps of review round 1 (resync snapshots, covered replay, unknown turn).
+ * Since s1f-chat-surface the fold is composed from the copied `reasoning` parts: it is found by
+ * `data-slot`, its control by role and accessible name, its state by `aria-expanded`. A collapsed
+ * fold has no body in the DOM, so body text is read after expanding.
  */
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -25,7 +28,6 @@ import {
   settle,
 } from "./chat-stream-support.js";
 import { calls, deferredResponse, jsonResponse } from "./support.js";
-import { blockBody, readRepoFile, ruleBody, stripComments } from "./ui-support.js";
 
 type Snapshot = ChatMessageSnapshot;
 type Message = Snapshot["messages"][number];
@@ -327,19 +329,44 @@ function mainOf(article: HTMLElement) {
   return main;
 }
 
+const FOLD = '[data-slot="reasoning-root"]';
+
 function foldOf(article = articles()[0]) {
-  return article?.querySelector<HTMLDetailsElement>("details.thinking-block") ?? null;
+  return article?.querySelector<HTMLElement>(FOLD) ?? null;
 }
 
 /** The fold of the first assistant; throws when it is not rendered. */
 function fold() {
   const block = foldOf();
-  if (!block) throw new Error("未渲染 details.thinking-block");
+  if (!block) throw new Error("未渲染思考折叠块");
   return block;
 }
 
+/** The expand/collapse control, found by role and accessible name. */
+function control(block = fold()) {
+  return within(block).getByRole("button", { name: SUMMARY });
+}
+
+function isOpen(block = fold()) {
+  return control(block).getAttribute("aria-expanded") === "true";
+}
+
+function bodyOf(block = fold()) {
+  return block.querySelector<HTMLElement>('[data-slot="reasoning-text"]');
+}
+
+/** Body text of an expanded fold; `undefined` while collapsed (the body is not in the DOM). */
 function bodyText(block = fold()) {
-  return block.querySelector("div.thinking-body")?.textContent;
+  return bodyOf(block)?.textContent;
+}
+
+/** Expands a collapsed fold and returns its body text. */
+function expandedText(block = fold()) {
+  expect(isOpen(block)).toBe(false);
+  expect(bodyOf(block)).toBeNull();
+  toggle(block);
+  expect(isOpen(block)).toBe(true);
+  return bodyText(block);
 }
 
 /** Rendered answer text (`message-body`) of the first assistant. */
@@ -348,7 +375,7 @@ function answerText() {
 }
 
 function toggle(block = fold()) {
-  fireEvent.click(block.querySelector("summary") as HTMLElement);
+  fireEvent.click(control(block));
 }
 
 function stubClipboard() {
@@ -380,12 +407,12 @@ describe("深度思考过程 fold on the chat page", () => {
     const text = main.querySelector('[data-slot="message-body"]') as Element;
     expect(main.firstElementChild).toBe(block);
     expect(block.compareDocumentPosition(text) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    const summary = block.querySelector("summary") as HTMLElement;
+    const summary = control(block);
     expect(summary.textContent).toBe(SUMMARY);
     const icon = summary.firstElementChild as Element;
-    expect(icon.matches("svg.ui-icon.lucide-chevron-right")).toBe(true);
+    expect(icon.localName).toBe("svg");
     expect(icon.getAttribute("aria-hidden")).toBe("true");
-    expect(block.open).toBe(true);
+    expect(isOpen(block)).toBe(true);
     expect(bodyText()).toBe("先想一想");
     expect(block.getAttribute("data-running")).toBe("");
 
@@ -393,9 +420,8 @@ describe("深度思考过程 fold on the chat page", () => {
     emit(source, 6, "turn.end", { status: "done" });
 
     expect(fold()).toBe(block);
-    expect(block.open).toBe(false);
     expect(block.hasAttribute("data-running")).toBe(false);
-    expect(bodyText()).toBe("先想一想");
+    expect(expandedText()).toBe("先想一想");
     expect(text.textContent).toBe("答案");
     expect(await copiedTexts(writeText)).toEqual([["答案"]]);
   });
@@ -413,14 +439,10 @@ describe("深度思考过程 fold on the chat page", () => {
     expect(articles()).toHaveLength(3);
     expect(articles().map((article) => foldOf(article) !== null)).toEqual([true, false, false]);
     const block = fold();
-    expect(block.open).toBe(false);
     expect(block.hasAttribute("data-running")).toBe(false);
 
-    toggle();
-
-    expect(block.open).toBe(true);
+    expect(expandedText()).toBe("想了很久很久…（已截断）");
     expect(block.hasAttribute("data-running")).toBe(false);
-    expect(bodyText()).toBe("想了很久很久…（已截断）");
     expect(bodyText()?.endsWith("…（已截断）")).toBe(true);
   });
 
@@ -428,10 +450,10 @@ describe("深度思考过程 fold on the chat page", () => {
     const { source } = await mountThread(turnSnapshot("running"));
     emit(source, 4, "thinking.delta", { delta: "一" });
     const block = fold();
-    expect(block.open).toBe(true);
+    expect(isOpen(block)).toBe(true);
 
     toggle();
-    expect(block.open).toBe(false);
+    expect(isOpen(block)).toBe(false);
     emit(source, 5, "thinking.delta", { delta: "二" });
     emit(source, 6, "thinking.delta", { delta: "三" });
     emit(source, 7, "text.delta", { delta: "正文" });
@@ -439,55 +461,53 @@ describe("深度思考过程 fold on the chat page", () => {
 
     expect(screen.getByRole("region", { name: "bash" })).toBeTruthy();
     expect(fold()).toBe(block);
-    expect(block.open).toBe(false);
+    expect(isOpen(block)).toBe(false);
 
     toggle();
 
-    expect(block.open).toBe(true);
+    expect(isOpen(block)).toBe(true);
     expect(bodyText()).toBe("一二三");
   });
 
   it("F1 keeps a done fold expanded by the user when a resync installs a changed answer", async () => {
     const thread = await mountThread(turnSnapshot("done", { content: "答", thinking: "想过" }));
     const block = fold();
-    expect(block.open).toBe(false);
+    expect(isOpen(block)).toBe(false);
     toggle();
-    expect(block.open).toBe(true);
+    expect(isOpen(block)).toBe(true);
     expect(answerText()).toBe("答");
 
     await resyncWith(thread, turnSnapshot("done", { content: "答复", thinking: "想过" }));
 
     expect(answerText()).toBe("答复");
     expect(fold()).toBe(block);
-    expect(block.open).toBe(true);
+    expect(isOpen(block)).toBe(true);
     expect(bodyText()).toBe("想过");
   });
 
   it("F2 keeps a running fold collapsed by the user when a resync brings longer thinking", async () => {
     const thread = await mountThread(turnSnapshot("running", { thinking: "想到一半" }));
     const block = fold();
-    expect(block.open).toBe(true);
+    expect(isOpen(block)).toBe(true);
     toggle();
-    expect(block.open).toBe(false);
+    expect(isOpen(block)).toBe(false);
 
     await resyncWith(thread, turnSnapshot("running", { thinking: "想到一半，又想了一步" }));
 
     expect(fold()).toBe(block);
-    expect(block.open).toBe(false);
-    expect(bodyText()).toBe("想到一半，又想了一步");
+    expect(expandedText()).toBe("想到一半，又想了一步");
   });
 
   it("F3 collapses an untouched running fold when a resync finds the turn done", async () => {
     const thread = await mountThread(turnSnapshot("running", { thinking: "断线前的思考" }));
     const block = fold();
-    expect(block.open).toBe(true);
+    expect(isOpen(block)).toBe(true);
 
     await resyncWith(thread, turnSnapshot("done", { content: "答", thinking: "断线前的思考" }));
 
     expect(answerText()).toBe("答");
     expect(fold()).toBe(block);
-    expect(block.open).toBe(false);
-    expect(bodyText()).toBe("断线前的思考");
+    expect(expandedText()).toBe("断线前的思考");
   });
 
   it("F4 keeps the fold collapsed by the user through approval and step.end events", async () => {
@@ -498,7 +518,7 @@ describe("深度思考过程 fold on the chat page", () => {
     const article = within(articles()[0] as HTMLElement);
     const block = fold();
     toggle();
-    const expectStillCollapsed = () => expect([fold(), block.open]).toEqual([block, false]);
+    const expectStillCollapsed = () => expect([fold(), isOpen(block)]).toEqual([block, false]);
     expectStillCollapsed();
     expect(article.getByRole("status", { name: "bash 运行中" })).toBeTruthy();
 
@@ -514,7 +534,7 @@ describe("深度思考过程 fold on the chat page", () => {
     emit(source, 6, "step.end", { stepId: step.id, status: "done", output: "a.md" });
     expect(article.getByRole("status", { name: "bash 已完成" })).toBeTruthy();
     expectStillCollapsed();
-    expect(bodyText()).toBe("先想一想");
+    expect(expandedText()).toBe("先想一想");
   });
 
   it("F6 resyncs on a thinking.delta for an unknown turn instead of fabricating a message", async () => {
@@ -529,7 +549,7 @@ describe("深度思考过程 fold on the chat page", () => {
     expect(thread.reads()).toBe(before + 1);
     expect(articles()).toHaveLength(1);
     expect(answerText()).toBe("答");
-    expect(document.querySelector("details.thinking-block")).toBeNull();
+    expect(document.querySelector(FOLD)).toBeNull();
 
     const followUp: Message = { ...historyUser, id: 1, content: "再问", createdAt: 1 };
     const next = sessionSnapshot(
@@ -544,16 +564,16 @@ describe("深度思考过程 fold on the chat page", () => {
     expect(thread.reads()).toBe(before + 1);
     expect(articles()).toHaveLength(2);
     expect(foldOf(articles()[0])).toBeNull();
-    const block = foldOf(articles()[1]);
-    expect(block?.open).toBe(true);
-    expect(block?.querySelector("div.thinking-body")?.textContent).toBe("新一轮的思考");
+    const block = foldOf(articles()[1]) as HTMLElement;
+    expect(isOpen(block)).toBe(true);
+    expect(bodyText(block)).toBe("新一轮的思考");
     expect(screen.queryAllByRole("alert")).toEqual([]);
   });
 
   it("T9 opens a running snapshot message and collapses on turn.end stopped", async () => {
     const { source } = await mountThread(turnSnapshot("running", { thinking: "快照里的思考" }));
     const block = fold();
-    expect(block.open).toBe(true);
+    expect(isOpen(block)).toBe(true);
     expect(bodyText()).toBe("快照里的思考");
 
     emit(source, 4, "turn.end", { status: "stopped" });
@@ -561,35 +581,33 @@ describe("深度思考过程 fold on the chat page", () => {
     await waitFor(() =>
       expect(screen.getByRole("status", { name: "助手消息 已停止" })).toBeTruthy(),
     );
-    expect(block.open).toBe(false);
-    expect(bodyText()).toBe("快照里的思考");
+    expect(expandedText()).toBe("快照里的思考");
   });
 
   it("T9 F7 collapses on error then turn.end failed, fold above answer above error", async () => {
     const { source } = await mountThread(turnSnapshot("running", { thinking: "想到一半" }));
     const block = fold();
-    expect(block.open).toBe(true);
+    expect(isOpen(block)).toBe(true);
 
     emit(source, 4, "error", { message: "上游失败" });
     expect(screen.getByRole("alert").textContent).toBe("上游失败");
-    expect(block.open).toBe(false);
+    expect(isOpen(block)).toBe(false);
     emit(source, 5, "turn.end", { status: "failed" });
 
     expect(fold()).toBe(block);
-    expect(block.open).toBe(false);
-    expect(bodyText()).toBe("想到一半");
+    expect(expandedText()).toBe("想到一半");
     const main = mainOf(articles()[0] as HTMLElement);
     expect(
       [...main.children].map(
         (part) => part.getAttribute("data-slot") ?? `${part.localName}.${part.className}`,
       ),
-    ).toEqual(["details.thinking-block", "message-body", "message-error", "div.chat-msg-actions"]);
+    ).toEqual(["reasoning-root", "message-body", "message-error", "div.chat-msg-actions"]);
     expect(screen.getByRole("alert")).toBe(main.children[2]);
   });
 
   it("T9 removes the fold when the same message starts a new turn", async () => {
     const { source } = await mountThread(turnSnapshot("running", { thinking: "上一轮的思考" }));
-    expect(fold().open).toBe(true);
+    expect(isOpen()).toBe(true);
 
     emit(source, 4, "turn.start", {});
 
@@ -613,14 +631,14 @@ describe("深度思考过程 fold on the chat page", () => {
     expect(
       parts.map((part) => part.getAttribute("data-slot") ?? `${part.localName}.${part.className}`),
     ).toEqual([
-      "details.thinking-block",
+      "reasoning-root",
       "message-body",
       "section.chat-step",
       "div.chat-approvals",
       "message-stopped",
       "div.chat-msg-actions",
     ]);
-    expect(fold().open).toBe(false);
+    expect(isOpen()).toBe(false);
     expect(within(parts[3] as HTMLElement).getAllByRole("group")).toHaveLength(1);
     expect(parts[1]?.textContent).toBe("部分回答");
     expect(within(article).getByRole("region", { name: "bash" })).toBe(parts[2]);
@@ -632,36 +650,64 @@ describe("深度思考过程 fold on the chat page", () => {
     await mountThread(turnSnapshot("done", { content: "答", thinking: PLAIN }));
     const block = fold();
 
-    expect(bodyText()).toBe("**粗** <b>x</b>\n  缩进");
+    expect(expandedText()).toBe("**粗** <b>x</b>\n  缩进");
     expect(block.querySelectorAll("strong, b")).toHaveLength(0);
-    expect(block.querySelector("div.thinking-body")?.childElementCount).toBe(0);
-    const css = stripComments(readRepoFile("web/src/features/chat/messages.css"));
-    expect(ruleBody(css, ".thinking-body")).toContain("white-space: pre-wrap");
+    expect(bodyOf()?.classList.contains("whitespace-pre-wrap")).toBe(true);
   });
-});
 
-describe("thinking fold static styles", () => {
-  const css = () => stripComments(readRepoFile("web/src/features/chat/messages.css"));
+  it("caps the body of a settled fold at 12rem and leaves a running one uncapped (#725)", async () => {
+    const { source } = await mountThread(turnSnapshot("running", { thinking: "想" }));
+    const block = fold();
+    const capOf = () =>
+      [...(bodyOf()?.classList ?? [])].filter((name) => /^(max-h-|overflow-)/.test(name)).sort();
 
-  it("T12 hides the default marker, rotates the open chevron and honours reduced motion", () => {
-    expect(ruleBody(css(), ".thinking-summary")).toContain("list-style: none");
-    expect(ruleBody(css(), ".thinking-summary::-webkit-details-marker")).toContain("display: none");
-    expect(ruleBody(css(), ".thinking-summary .ui-icon")).toContain("transition: transform 0.2s");
-    expect(ruleBody(css(), ".thinking-block[open] .thinking-summary .ui-icon")).toContain(
-      "transform: rotate(90deg)",
+    expect(block.getAttribute("data-running")).toBe("");
+    expect(capOf()).toEqual(["max-h-none", "overflow-y-auto"]);
+
+    emit(source, 4, "turn.end", { status: "done" });
+    expect(block.hasAttribute("data-running")).toBe(false);
+    toggle();
+
+    expect(capOf()).toEqual(["max-h-48", "overflow-auto"]);
+  });
+
+  it("shimmers the title only while the turn runs (tw-shimmer `shimmer` class)", async () => {
+    const { source } = await mountThread(turnSnapshot("running", { thinking: "想" }));
+    const label = () => control().querySelector('[data-slot="reasoning-trigger-label"]');
+
+    expect([...(label()?.classList ?? [])]).toEqual(
+      expect.arrayContaining(["shimmer", "motion-reduce:animate-none"]),
     );
-    const reduce = blockBody(css(), /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{/);
-    expect(ruleBody(reduce, ".thinking-summary .ui-icon")).toContain("transition: none");
+
+    emit(source, 4, "turn.end", { status: "done" });
+
+    expect(label()?.textContent).toBe(SUMMARY);
+    expect(label()?.classList.contains("shimmer")).toBe(false);
   });
 
-  it("caps the body of a settled fold at 12rem and leaves a running one uncapped (#725)", () => {
-    const capped = ruleBody(css(), ".thinking-block:not([data-running]) .thinking-body");
-    expect(capped).toContain("max-height: 12rem");
-    expect(capped).toContain("overflow: auto");
-    expect(ruleBody(css(), ".thinking-body")).not.toContain("max-height");
+  it("hides the copied component's top fade mask on an expanded fold", async () => {
+    await mountThread(turnSnapshot("running", { thinking: "想" }));
+    const content = fold().querySelector('[data-slot="reasoning-content"]');
+    const fades = [...fold().querySelectorAll('[data-slot="reasoning-fade"]')];
+
+    expect(isOpen()).toBe(true);
+    expect(fades).toHaveLength(1);
+    // The hiding class is an arbitrary variant on the fade's parent; resolve it as a selector.
+    const hiding = [...(content?.classList ?? [])].filter((name) => name.endsWith(":hidden"));
+    expect(hiding).toEqual(["[&>[data-slot=reasoning-fade]]:hidden"]);
+    const selector = hiding[0]?.slice(1, -"]:hidden".length).replace("&", ":scope") ?? "";
+    expect([...(content?.querySelectorAll(selector) ?? [])]).toEqual(fades);
   });
 
-  it("T12 keeps thinking styles out of chat.css (regression guard)", () => {
-    expect(readRepoFile("web/src/features/chat/chat.css")).not.toContain("thinking-");
+  it("T12 keeps the control's icons decorative and honours reduced motion", async () => {
+    await mountThread(turnSnapshot("running", { thinking: "想" }));
+    const chevron = control().querySelector('[data-slot="reasoning-trigger-chevron"]');
+
+    expect(chevron?.classList.contains("motion-reduce:transition-none")).toBe(true);
+    expect(chevron?.getAttribute("aria-hidden")).toBe("true");
+    expect(bodyOf()?.classList.contains("motion-reduce:animate-none")).toBe(true);
+    expect(fold().querySelector('[data-slot="reasoning-content"]')?.classList).toContain(
+      "motion-reduce:animate-none",
+    );
   });
 });

@@ -8,6 +8,7 @@
 @import "tailwindcss/preflight.css" layer(base);
 @import "tailwindcss/utilities.css" layer(utilities) source("./");
 @import "tw-animate-css";
+@import "tw-shimmer";
 @import "./styles/tokens.css";
 @import "./styles/theme.css";
 @import "./styles/legacy.css" layer(legacy);

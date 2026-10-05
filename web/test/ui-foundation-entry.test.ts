@@ -23,6 +23,7 @@ const ENTRY_IMPORTS = [
   '@import "tailwindcss/preflight.css" layer(base);',
   '@import "tailwindcss/utilities.css" layer(utilities) source("./");',
   '@import "tw-animate-css";',
+  '@import "tw-shimmer";',
   '@import "./styles/tokens.css";',
   '@import "./styles/theme.css";',
   '@import "./styles/legacy.css" layer(legacy);',
@@ -86,7 +87,7 @@ describe("入口结构（ui-foundation「入口结构不可缺失或重排」）
     expect(entryViolations(`body { margin: 0; }\n${entry}`)).not.toEqual([]);
   });
 
-  it("styles.css：层声明在首，七条导入各归其层，只剩一个未分层的全局 reduce 块", () => {
+  it("styles.css：层声明在首，八条导入各归其层，只剩一个未分层的全局 reduce 块", () => {
     expect(entryViolations(readRepoFile(ENTRY))).toEqual([]);
   });
 

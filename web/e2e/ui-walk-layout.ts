@@ -388,7 +388,18 @@ export async function expectReducedMotionToggle(page: Page): Promise<void> {
   const animationOf = (target: Locator) => () =>
     target.evaluate((el) => getComputedStyle(el).animationName);
   await expect.poll(animationOf(caret), "the running caret blinks").not.toBe("none");
+  // tw-shimmer：闪光由 ::before 承载。受控回合没有思考内容，用带同一类名的探针读编译后的规则。
+  const shimmer = () =>
+    page.evaluate(() => {
+      const probe = document.body.appendChild(document.createElement("span"));
+      probe.className = "shimmer motion-reduce:animate-none";
+      const { animationName, animationPlayState } = getComputedStyle(probe, "::before");
+      probe.remove();
+      return `${animationName} ${animationPlayState}`;
+    });
+  expect(await shimmer(), "the shimmer sweeps").toBe("tw-shimmer-translate running");
   await page.emulateMedia({ reducedMotion: "reduce" });
+  expect(await shimmer(), "reduced motion pauses the shimmer").toBe("tw-shimmer-translate paused");
   await expect.poll(animationOf(pulse), "reduced motion disables .ui-pulse").toBe("none");
   await expect(caret).toHaveCount(1);
   await expect.poll(animationOf(caret), "reduced motion stills the running caret").toBe("none");

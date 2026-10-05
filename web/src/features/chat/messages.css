@@ -1,7 +1,8 @@
 /* Chat message area (the not-yet-rebuilt blocks: approvals, step cards, cards,
-   fold, action row, search box, slash panel), split from chat.css; sources as noted per block.
+   action row, search box, slash panel), split from chat.css; sources as noted per block.
    The thread column, message bubbles, Markdown body, caret and search highlight are Tailwind
-   classes in message-thread.tsx / markdown-body.tsx; the scroll layer is thread-viewport.tsx.
+   classes in message-thread.tsx / markdown-body.tsx; the thinking fold is thinking-fold.tsx; the
+   scroll layer is thread-viewport.tsx.
    Visual language adapted from resource/workbuddy-live-demo.html:416-549 (transcript/steps).
    Design tokens from WorkBuddy 5.3.11 via web/src/styles/tokens.css.
 */
@@ -349,60 +350,6 @@
   height: 60vh;
   border: 0;
   background: white;
-}
-
-/* Deep-thinking fold adapted from resource/workbuddy-live-demo.html:539-545 (.thinking-block,
-   .thinking-body); the body is the raw thinking text, never Markdown. */
-.thinking-block {
-  border-left: 3px solid var(--wb-border-default);
-  padding: 4px 12px;
-  margin-bottom: 8px;
-}
-
-.thinking-summary {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  font-size: 12.5px;
-  color: var(--wb-text-secondary);
-  user-select: none;
-  list-style: none;
-}
-
-.thinking-summary::-webkit-details-marker {
-  display: none;
-}
-
-.thinking-summary .ui-icon {
-  transition: transform 0.2s;
-}
-
-.thinking-block[open] .thinking-summary .ui-icon {
-  transform: rotate(90deg);
-}
-
-.thinking-body {
-  margin-top: 6px;
-  font-size: 12.5px;
-  line-height: 20px;
-  color: var(--wb-text-secondary);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-/* Departs from demo:539-545, whose body has no height limit (issue 725): expanding a long fold in
-   a pinned transcript dragged the summary out of view. Same 12rem as the step card's 原始输出. A
-   running message stays uncapped, so the transcript's bottom-follow keeps its newest line visible. */
-.thinking-block:not([data-running]) .thinking-body {
-  max-height: 12rem;
-  overflow: auto;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .thinking-summary .ui-icon {
-    transition: none;
-  }
 }
 
 /* Assistant action row — adapted from resource/workbuddy-live-demo.html:528-530 (.msg-actions). */
