@@ -7,38 +7,6 @@
    Design tokens from WorkBuddy 5.3.11 via web/src/styles/tokens.css.
 */
 
-/* Frame of the 产物面板 list (issue 537), adapted from
-   resource/workbuddy-live-demo.html:519 (.file-changes-card). The file-change card, the artifact
-   card and their rows carry their own Tailwind classes (file-changes-card.tsx, artifact-card.tsx). */
-.artifacts-panel-list {
-  min-width: 0;
-  border: 1px solid var(--wb-border-default);
-  border-radius: 12px;
-  overflow: hidden;
-  background: var(--wb-bg-secondary);
-}
-
-/* Icon button of a 产物面板 row action (the message action row, the file-change row and the
-   artifact card no longer use it). Overrides the ui-btn--icon size (same specificity, loaded
-   later). */
-.chat-msg-action {
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border-radius: 6px;
-  color: var(--wb-icon-muted);
-}
-
-/* Radius restated over the ui-btn focus-visible radius (same specificity, later). */
-.chat-msg-action,
-.chat-msg-action:focus-visible {
-  border-radius: 6px;
-}
-
-.chat-msg-action:hover:not(:disabled) {
-  color: var(--wb-text-secondary);
-}
-
 /* In-conversation search (issue 538) — the box adapted from
    resource/workbuddy-live-demo.html:323-327 (.conv-search, .cs-n): the input is the search Input
    primitive, with the counter and the three icon buttons to its right. The box is a fixed row of

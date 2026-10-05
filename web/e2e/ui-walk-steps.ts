@@ -98,3 +98,75 @@ export async function walkArtifactPreview(page: Page, file: string): Promise<voi
   await expect(dialog).toHaveCount(0);
   await expect(opener).toBeFocused();
 }
+
+/**
+ * Whether the element painted on top at the centre of `target` is inside `layer`. Radix makes a
+ * modal layer below the top one `pointer-events: none` (inline, as it does `body`), and a hit test
+ * skips such elements whatever the paint order: the inline values on `target`'s ancestors are
+ * lifted for the one synchronous hit test and put back, so the answer is the paint order.
+ */
+function paintedWithin(target: Locator, layer: string): Promise<boolean> {
+  return target.evaluate((el, selector) => {
+    const lifted: HTMLElement[] = [];
+    for (let at: Element | null = el; at; at = at.parentElement) {
+      if (at instanceof HTMLElement && at.style.pointerEvents === "none") {
+        at.style.pointerEvents = "auto";
+        lifted.push(at);
+      }
+    }
+    const box = el.getBoundingClientRect();
+    const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+    for (const at of lifted) at.style.pointerEvents = "none";
+    return top?.closest(selector) !== null;
+  }, layer);
+}
+
+/**
+ * 产物面板（拷入层 sheet）：顶栏按钮打开，恰一行 `logicalPath`。从该行打开 html 预览——预览是面板之上的
+ * 第二层：面板行按钮所在的点画在最上面的是预览的遮罩，预览中心画在最上面的是预览自己（jsdom 不做布局，
+ * 只有这里能证明叠放次序）；焦点在预览的 `关闭` 上而不在 iframe 里，所以 Escape 先只关预览，面板仍开、焦点回到
+ * 该行按钮。面板有两个 `关闭`（右上图标、底部按钮），点底部那个；面板消失后焦点回到顶栏按钮。
+ */
+export async function walkArtifactsPanel(
+  page: Page,
+  file: string,
+  logicalPath: string,
+): Promise<void> {
+  const trigger = page.getByRole("banner").getByRole("button", { name: "产物面板", exact: true });
+  await trigger.click();
+  const panel = page.getByRole("dialog", { name: "产物面板", exact: true });
+  const row = panel.locator('[data-slot="file-change-row"]');
+  await expect(row).toHaveCount(1);
+  await expect(row.locator('[data-slot="file-change-path"]')).toHaveText(logicalPath);
+  await expect(panel.getByText("当前任务暂无产物")).toHaveCount(0);
+  const opener = row.getByRole("button", { name: `打开网页预览 ${file}`, exact: true });
+  await expect.poll(() => paintedWithin(opener, '[data-slot="sheet-content"]')).toBe(true);
+  await opener.click();
+
+  const preview = page.getByRole("dialog", { name: file, exact: true });
+  const close = preview.getByRole("button", { name: "关闭", exact: true });
+  await expect(preview.locator(`iframe[title="${file}"]`)).toHaveAttribute(
+    "sandbox",
+    "allow-scripts",
+  );
+  await expect(close).toBeFocused();
+  expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("IFRAME");
+  await expect.poll(() => paintedWithin(preview, '[data-slot="dialog-content"]')).toBe(true);
+  const sheet = page.locator('[data-slot="sheet-content"]');
+  await expect(sheet).toBeVisible();
+  const rowButton = sheet.locator(`button[aria-label="打开网页预览 ${file}"]`);
+  await expect.poll(() => paintedWithin(rowButton, '[data-slot="dialog-overlay"]')).toBe(true);
+
+  await page.keyboard.press("Escape");
+  await expect(preview).toHaveCount(0);
+  await expect(panel).toBeVisible();
+  await expect(row).toHaveCount(1);
+  await expect(opener).toBeFocused();
+
+  await panel
+    .locator('[data-slot="sheet-footer"]')
+    .getByRole("button", { name: "关闭", exact: true })
+    .click();
+  await expect(panel).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+}

@@ -17,6 +17,7 @@ import {
   CHART,
   CODE_TEXT,
   COPY_APP,
+  changedTurn,
   copiedStatus,
   DOWNLOAD_CHART,
   frameOf,
@@ -34,17 +35,14 @@ import {
 } from "./chat-page-artifact-card-support.js";
 import {
   artifactsPanelFixture,
-  expectPanelClosed,
-  footClose,
-  openPanel,
-  panelAction,
+  renameBehindDialog,
+  renameRoute,
 } from "./chat-page-artifacts-panel-support.js";
 import { cardNamed, edit, quiesce, reply, write } from "./chat-page-file-changes-support.js";
 import { settleDeferredResponse } from "./chat-page-lifecycle-support.js";
 import { envelope } from "./chat-page-ownership-support.js";
-import { deferred, settle } from "./chat-stream-support.js";
 import { imagePreviewResponse } from "./files-fixture.js";
-import { deferredResponse, textPreviewResponse } from "./support.js";
+import { deferredResponse, jsonResponse, textPreviewResponse } from "./support.js";
 
 const blobs = artifactsPanelFixture();
 afterEach(() => {
@@ -234,28 +232,24 @@ describe("html 预览对话框（拷入层 dialog）", () => {
   );
 
   // A toast that arrives after the preview opened sits above it in the Radix layer stack and takes
-  // its Escape. The only toast left on this page comes from a 产物面板 row, so the row's clipboard
-  // write is held back until the card's preview is open.
+  // its Escape. The only toasts left on this page are the session list's, so a rename is submitted
+  // first and answered once the card's preview is open.
   it("F5 Escape closes the preview while a later toast holds the top of the layer stack", async () => {
-    const written = deferred<void>();
-    stubClipboard(vi.fn((_text: string) => written.promise));
-    await openPreviewing([write(INDEX), edit(APP, 2, 1)], (path) =>
-      textPreviewResponse(path.includes("index.html") ? HTML_TEXT : CODE_TEXT),
+    const renamed = deferredResponse();
+    const changes = [write(INDEX)];
+    await openPreviewing(
+      changes,
+      () => textPreviewResponse(HTML_TEXT),
+      () => renameRoute(renamed.promise),
     );
-    const { panel } = await openPanel();
-    fireEvent.click(panelAction(panel, COPY_APP));
-    await quiesce();
-    fireEvent.click(footClose(panel));
-    await expectPanelClosed();
+    await renameBehindDialog();
     const [head] = actions(OPEN_INDEX) as [HTMLButtonElement];
 
     fireEvent.click(head);
     const dialog = await previewDialog();
-    await act(async () => {
-      written.resolve();
-      await settle();
-    });
-    await waitFor(() => expect(toasts()).toEqual([["success", "已复制到剪贴板"]]));
+    const session = { ...changedTurn(changes).session, title: "新标题" };
+    await settleDeferredResponse(renamed, jsonResponse(session));
+    await waitFor(() => expect(toasts()).toEqual([["success", "已重命名"]]));
     expect(dialog.contains(document.activeElement)).toBe(true);
 
     fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });

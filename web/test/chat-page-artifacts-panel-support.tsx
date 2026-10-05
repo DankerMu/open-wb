@@ -1,5 +1,6 @@
-// 产物面板（issue 537）测试的夹具与页面查询：两轮助手消息的快照、顶栏按钮与抽屉的读取、抽屉内的行与
-// 按钮、经路由切换会话、带续期探针的外壳挂载。页面搭法来自 chat-page-file-changes-support.tsx 与
+// 产物面板（issue 537；issue 860 起由拷入层 sheet 渲染，下文仍称它「抽屉」）测试的夹具与页面查询：
+// 两轮助手消息的快照、顶栏按钮与抽屉的读取、抽屉内的行、按钮、空态与就地提示、经路由切换会话、
+// 带续期探针的外壳挂载、会话列表动作的 Toast（本页仅剩的 Toast 来源）。页面搭法来自 chat-page-file-changes-support.tsx 与
 // chat-page-artifact-card-support.tsx（不改它们）。供 chat-page-artifacts-panel*.test.tsx 使用。
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createBrowserRouter, RouterProvider } from "react-router";
@@ -20,7 +21,7 @@ import {
 } from "./chat-page-file-changes-support.js";
 import type { ChatAuthProbe } from "./chat-page-lifecycle-support.js";
 import { OTHER_SESSION_ID, SESSION_MESSAGES } from "./chat-page-ownership-support.js";
-import { expectChatLocation } from "./chat-page-support.js";
+import { expectChatLocation, type FetchRoutes } from "./chat-page-support.js";
 import {
   FakeEventSource,
   historyUser,
@@ -36,7 +37,7 @@ import {
 import { yieldMacrotask } from "./ui-support.js";
 
 const PANEL = "产物面板";
-export const NO_ARTIFACTS: [string, string] = ["info", "当前任务暂无产物"];
+export const NO_ARTIFACTS = "当前任务暂无产物";
 export const SESSION_PATH = `/?session=${SESSION_ID}`;
 const ACTION = /^(打开网页预览|下载|复制代码) /;
 
@@ -120,9 +121,21 @@ export async function expectPanelClosed() {
 
 /** The rows of the drawer's list, in document order. */
 export function panelRows(panel: HTMLElement) {
-  return [
-    ...panel.querySelectorAll<HTMLElement>('.artifacts-panel-list > [data-slot="file-change-row"]'),
-  ];
+  return [...panel.querySelectorAll<HTMLElement>('[data-slot="file-change-row"]')];
+}
+
+/** The text of the drawer's body: what it shows between its title and its foot. */
+export function panelBody(panel: HTMLElement) {
+  return panel.querySelector('[data-slot="artifacts-panel-body"]')?.textContent;
+}
+
+/** Per row, the text of each `role="alert"` line inside it. */
+export function rowAlerts(panel: HTMLElement) {
+  return panelRows(panel).map((row) =>
+    within(row)
+      .queryAllByRole("alert", { hidden: true })
+      .map((alert) => alert.textContent),
+  );
 }
 
 /** Per row, the `aria-label` of each button in document order. */
@@ -142,16 +155,47 @@ export function panelActions(panel: HTMLElement) {
   return within(panel).queryAllByRole("button", { name: ACTION, hidden: true });
 }
 
+/** The two 关闭 buttons of the drawer: the icon button at its top right, then the foot button. */
+function closeButtons(panel: HTMLElement) {
+  const buttons = within(panel).getAllByRole("button", { name: "关闭" });
+  const foot = buttons.filter((button) => button.closest('[data-slot="sheet-footer"]') !== null);
+  const head = buttons.filter((button) => !foot.includes(button));
+  if (foot.length !== 1 || head.length !== 1) throw new Error("抽屉应恰有头部与脚部两个 关闭");
+  return { foot: foot[0] as HTMLElement, head: head[0] as HTMLElement };
+}
+
 export function footClose(panel: HTMLElement) {
-  const foot = panel.querySelector<HTMLElement>(".ui-drawer-foot");
-  if (!foot) throw new Error("抽屉没有脚部");
-  return within(foot).getByRole("button", { name: "关闭" });
+  return closeButtons(panel).foot;
 }
 
 export function headClose(panel: HTMLElement) {
-  const head = panel.querySelector<HTMLElement>(".ui-drawer-head");
-  if (!head) throw new Error("抽屉没有头部");
-  return within(head).getByRole("button", { name: "关闭" });
+  return closeButtons(panel).head;
+}
+
+const RENAME = `/api/sessions/${SESSION_ID}`;
+
+/**
+ * Route answering the session's rename with `response`, for `renameBehindDialog`: the session-list
+ * actions are the only toast source left on the session page.
+ */
+export const renameRoute = (response: Promise<Response>): FetchRoutes => ({
+  [RENAME]: () => response,
+});
+
+/**
+ * Submits a rename from the top bar and cancels its dialog while the request is pending. Answering
+ * the request later shows the `已重命名` toast above whatever layer was opened meanwhile.
+ */
+export async function renameBehindDialog() {
+  fireEvent.click(within(banner()).getByRole("button", { name: "重命名" }));
+  const dialog = await screen.findByRole("dialog", { name: "重命名任务" });
+  fireEvent.change(within(dialog).getByRole("textbox", { name: "任务名称" }), {
+    target: { value: "新标题" },
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "保存" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  await yieldMacrotask();
 }
 
 type Router = { navigate(to: string): Promise<void> };

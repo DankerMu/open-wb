@@ -54,15 +54,16 @@ type ArtifactActionProps = {
 };
 
 /**
- * The action of one artifact, without markup: shared by its card and by a 产物面板 row. It owns at
- * most one preview request at a time (`controller`): the request starts on a click, sets `busy`
+ * The action of one artifact, without markup: shared by its card and by a 产物面板 row
+ * (`ArtifactRowAction`). It owns at most one preview request at a time (`controller`): the request
+ * starts on a click, sets `busy`
  * while in flight and is aborted on unmount, after which its late result has no effect except that
  * a Blob URL it brought is revoked. `report` is called with `null` when an action starts and with
  * the outcome when it copied or failed; a download and an opened preview report nothing, an aborted
  * request and a 401 neither. `preview` is the fetched page while the html preview is open,
  * `opener` the button that was clicked last.
  */
-export function useArtifactAction(
+function useArtifactAction(
   { artifact, client, path, workspaceId }: ArtifactActionProps,
   report: (outcome: ArtifactOutcome | null) => void,
 ) {
@@ -162,7 +163,7 @@ export function useArtifactAction(
  * nothing else, under a note when the server cut it. Fetched pages are written for a white canvas:
  * a transparent iframe would put their default dark text on the dark-theme dialog, hence `bg-white`.
  */
-export function ArtifactPreview({ name, preview }: { name: string; preview: HtmlPreview | null }) {
+function ArtifactPreview({ name, preview }: { name: string; preview: HtmlPreview | null }) {
   if (preview === null) return null;
   return (
     <div className="min-w-0">
@@ -182,7 +183,10 @@ export function ArtifactPreview({ name, preview }: { name: string; preview: Html
 }
 
 /**
- * The html preview of a card, in the copied-layer dialog. That dialog has no trigger element, so
+ * The html preview of a card or a 产物面板 row, in the copied-layer dialog. Opened from a row it
+ * is a second Radix layer above the panel's sheet: Escape reaches it first and the sheet stays.
+ *
+ * That dialog has no trigger element, so
  * closing it would leave focus on `body`: focus goes back to `opener` here, without scrolling the
  * thread to a card that has left the viewport meanwhile. Escape is also handled on the content
  * itself, because a toast on screen takes the Escape of every Radix layer below it.
@@ -235,7 +239,7 @@ function PreviewDialog({
   );
 }
 
-/** The outcome a card shows: 已复制 lasts about two seconds, a failure until the next action. */
+/** The outcome shown in place: 已复制 lasts about two seconds, a failure until the next action. */
 function useOutcome() {
   const [outcome, setOutcome] = useState<ArtifactOutcome | null>(null);
   useEffect(() => {
@@ -244,6 +248,66 @@ function useOutcome() {
     return () => clearTimeout(timer);
   }, [outcome]);
   return [outcome, setOutcome] as const;
+}
+
+type Action = ReturnType<typeof useArtifactAction>;
+
+/**
+ * The icon button of an action and, after a copy, the hidden 已复制 status beside it; the icon is a
+ * check while that status lasts.
+ */
+function ActionButton({ action, copied }: { action: Action; copied: boolean }) {
+  return (
+    <>
+      <Button
+        aria-label={action.label}
+        className="size-[26px] rounded-md text-(--wb-icon-muted) hover:bg-accent hover:text-(--wb-text-secondary) dark:hover:bg-accent"
+        disabled={action.busy}
+        onClick={action.onAction}
+        size="icon-xs"
+        title={action.label}
+        type="button"
+        variant="ghost"
+      >
+        <Icon name={copied ? "check" : action.icon} size={12} />
+      </Button>
+      {copied ? (
+        <span className="sr-only" role="status">
+          已复制
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * The action of one artifact as the children of a 产物面板 row: the card's icon button, outcome
+ * and html preview. A failure is a line of its own under the row's controls (the row wraps), so a
+ * long message does not squeeze the path.
+ */
+export function ArtifactRowAction(props: ArtifactActionProps) {
+  const [outcome, setOutcome] = useOutcome();
+  const action = useArtifactAction(props, setOutcome);
+  return (
+    <>
+      <ActionButton action={action} copied={outcome?.kind === "copied"} />
+      {outcome?.kind === "failed" ? (
+        <p
+          className="m-0 min-w-0 basis-full text-right text-xs text-(--wb-status-error-text)"
+          data-slot="artifact-error"
+          role="alert"
+        >
+          {outcome.message}
+        </p>
+      ) : null}
+      <PreviewDialog
+        name={props.artifact.name}
+        onClose={action.closePreview}
+        opener={action.opener}
+        preview={action.preview}
+      />
+    </>
+  );
 }
 
 /**
@@ -255,10 +319,8 @@ function ArtifactCard(props: ArtifactActionProps) {
   const { artifact } = props;
   const headId = useId();
   const [outcome, setOutcome] = useOutcome();
-  const { busy, icon, label, onAction, opener, preview, closePreview } = useArtifactAction(
-    props,
-    setOutcome,
-  );
+  const action = useArtifactAction(props, setOutcome);
+  const { busy, label, onAction } = action;
   const traits = TRAITS[artifact.kind];
   return (
     <>
@@ -290,23 +352,7 @@ function ArtifactCard(props: ArtifactActionProps) {
           >
             {artifact.label}
           </span>
-          <Button
-            aria-label={label}
-            className="size-[26px] rounded-md text-(--wb-icon-muted) hover:bg-accent hover:text-(--wb-text-secondary) dark:hover:bg-accent"
-            disabled={busy}
-            onClick={onAction}
-            size="icon-xs"
-            title={label}
-            type="button"
-            variant="ghost"
-          >
-            <Icon name={outcome?.kind === "copied" ? "check" : icon} size={12} />
-          </Button>
-          {outcome?.kind === "copied" ? (
-            <span className="sr-only" role="status">
-              已复制
-            </span>
-          ) : null}
+          <ActionButton action={action} copied={outcome?.kind === "copied"} />
         </div>
         {outcome?.kind === "failed" ? (
           <p
@@ -337,9 +383,9 @@ function ArtifactCard(props: ArtifactActionProps) {
       </div>
       <PreviewDialog
         name={artifact.name}
-        onClose={closePreview}
-        opener={opener}
-        preview={preview}
+        onClose={action.closePreview}
+        opener={action.opener}
+        preview={action.preview}
       />
     </>
   );

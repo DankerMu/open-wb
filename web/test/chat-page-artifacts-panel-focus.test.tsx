@@ -17,6 +17,7 @@ import {
   COPY_APP,
   changedTurn,
   DOWNLOAD_CHART,
+  glyphOf,
   HTML_TEXT,
   INDEX,
   OPEN_INDEX,
@@ -36,8 +37,12 @@ import {
   NO_ARTIFACTS,
   openPanel,
   panelAction,
+  panelBody,
   panelButton,
+  renameBehindDialog,
+  renameRoute,
   routeToOtherSession,
+  rowAlerts,
 } from "./chat-page-artifacts-panel-support.js";
 import {
   type Change,
@@ -50,10 +55,8 @@ import {
 import { settleDeferredResponse } from "./chat-page-lifecycle-support.js";
 import { envelope } from "./chat-page-ownership-support.js";
 import { imagePreviewResponse } from "./files-fixture.js";
-import { deferredResponse, textPreviewResponse } from "./support.js";
+import { deferredResponse, jsonResponse, textPreviewResponse } from "./support.js";
 import { yieldMacrotask } from "./ui-support.js";
-
-const COPIED: [string, string] = ["success", "已复制到剪贴板"];
 
 const blobs = artifactsPanelFixture();
 
@@ -89,16 +92,29 @@ function focusOn(element: Element) {
 }
 
 describe("焦点归还 (P13)", () => {
-  it("P13 a finished row copy takes focus back from body, so Escape closes the drawer while its toast is still shown", async () => {
+  // The toast is the session list's 已重命名: a row's copy no longer shows one. It arrives while the
+  // drawer is open, so it sits above the drawer in the Radix layer stack and takes its Escape.
+  it("P13 a finished row copy takes focus back from body, so Escape closes the drawer while a toast is shown", async () => {
     stubClipboard(vi.fn((_text: string) => Promise.resolve()));
-    const pending = await openPending(edit(APP, 2, 1));
+    const pending = deferredResponse();
+    const renamed = deferredResponse();
+    const changes = [edit(APP, 2, 1)];
+    await openPreviewing(
+      changes,
+      () => pending.promise,
+      () => renameRoute(renamed.promise),
+    );
+    await renameBehindDialog();
     const { panel, trigger } = await openPanel();
     const copy = panelAction(panel, COPY_APP);
     await pressAndLoseFocus(copy);
 
     await settleDeferredResponse(pending, textPreviewResponse(CODE_TEXT));
+    const session = { ...changedTurn(changes).session, title: "新标题" };
+    await settleDeferredResponse(renamed, jsonResponse(session));
 
-    await waitFor(() => expect(toasts()).toEqual([COPIED]));
+    await waitFor(() => expect(glyphOf(copy)).toBe("check"));
+    await waitFor(() => expect(toasts()).toEqual([["success", "已重命名"]]));
     await focusOn(copy);
     expect(copy.disabled).toBe(false);
 
@@ -106,7 +122,6 @@ describe("焦点归还 (P13)", () => {
 
     await expectPanelClosed();
     expect(document.activeElement).toBe(trigger);
-    expect(toasts()).toEqual([COPIED]);
   });
 
   it("P13 focus the user moved elsewhere while the row action was pending stays there", async () => {
@@ -119,13 +134,14 @@ describe("焦点归还 (P13)", () => {
 
     await settleDeferredResponse(pending, textPreviewResponse(CODE_TEXT));
 
-    await waitFor(() => expect(toasts()).toEqual([COPIED]));
+    await waitFor(() => expect(glyphOf(panelAction(panel, COPY_APP))).toBe("check"));
     await quiesce();
+    expect(toasts()).toEqual([]);
     expect(panelAction(panel, COPY_APP).disabled).toBe(false);
     expect(document.activeElement).toBe(close);
   });
 
-  it("P13 a failed row action takes focus back from body after its toast", async () => {
+  it("P13 a failed row action takes focus back from body after its failure is shown in the row", async () => {
     const pending = await openPending(edit("gone.md", 1, 0));
     const { panel } = await openPanel();
     const copy = panelAction(panel, "复制代码 gone.md");
@@ -133,7 +149,8 @@ describe("焦点归还 (P13)", () => {
 
     await settleDeferredResponse(pending, envelope(404, "not_found", "文件不存在或已被删除"));
 
-    await waitFor(() => expect(toasts()).toEqual([["error", "文件不存在或已被删除"]]));
+    await waitFor(() => expect(rowAlerts(panel)).toEqual([["文件不存在或已被删除"]]));
+    expect(toasts()).toEqual([]);
     await focusOn(copy);
     expect(drawer()).toBe(panel);
   });
@@ -208,7 +225,7 @@ describe("焦点归还 (P13)", () => {
 });
 
 describe("外层先离场 (Q5)", () => {
-  it("Q5 routing away while a row's preview covers the drawer leaves no dialog, no inert page and a working 产物面板 button", async () => {
+  it("Q5 routing away while a row's preview covers the drawer leaves no dialog, no inert page and a 产物面板 button that opens the other session's empty panel", async () => {
     const snapshot = changedTurn([write(INDEX)]);
     const page = await openSession(snapshot, listed, {
       ...withOtherSession(snapshot),
@@ -231,9 +248,10 @@ describe("外层先离场 (Q5)", () => {
     const button = within(screen.getByRole("banner")).getByRole("button", { name: "产物面板" });
 
     fireEvent.click(button);
-    await quiesce();
+    const empty = await screen.findByRole("dialog", { name: "产物面板" });
 
-    expect(toasts()).toEqual([NO_ARTIFACTS]);
-    expect(screen.queryAllByRole("dialog", { hidden: true })).toEqual([]);
+    expect(panelBody(empty)).toBe(NO_ARTIFACTS);
+    expect(screen.getAllByRole("dialog", { hidden: true })).toEqual([empty]);
+    expect(toasts()).toEqual([]);
   });
 });

@@ -1,4 +1,4 @@
-/* File-change card adapted from resource/workbuddy-live-demo.html:2468-2476 (fileChangesHTML) and :519-526 (its frame): the head has no icon, each row shows the logical path `<account>/<dir>/<path>` (never the workspace root) and 查看详情 opens that workspace in /files. Built from the copied-layer Button and Tailwind classes; the row carries its own classes, so the 产物面板 list reuses it as is. */
+/* File-change card adapted from resource/workbuddy-live-demo.html:2468-2476 (fileChangesHTML) and :519-526 (its frame): the head has no icon, each row shows the logical path `<account>/<dir>/<path>` (never the workspace root) and 查看详情 opens that workspace in /files. Built from the copied-layer Button and Tailwind classes; the row carries its own classes, so the 产物面板 list reuses it as is; it wraps, so a row of that list can put the failure of its action on a line under its controls. */
 import { type ReactNode, useId } from "react";
 import { useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
@@ -42,7 +42,7 @@ export function FileChangeRow({
   const path = `${space?.prefix ?? ""}${change.path}`;
   return (
     <div
-      className="flex items-center gap-2 border-b border-(--wb-border-default) px-3 py-[7px] text-[12.5px] last:border-b-0"
+      className="flex flex-wrap items-center gap-2 border-b border-(--wb-border-default) px-3 py-[7px] text-[12.5px] last:border-b-0"
       data-slot="file-change-row"
     >
       {change.kind === "edit" && change.added > 0 ? (
