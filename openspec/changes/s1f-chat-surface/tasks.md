@@ -78,13 +78,13 @@ Minimal mergeable slice: 3.1 + 3.2 + 3.4，以及 3.5 / 3.6 的全部（旧表�
 - [x] 4.2 「新建会话」只回欢迎态：`onCreateSession` 的处理改为以 replace 导航清除 `?session=`（保留无关 search/hash）、零请求、草稿不动。侧栏不是覆盖层时（宽视口）聚焦输入框，已在欢迎态时只聚焦；
   侧栏是覆盖层时（窄视口）覆盖层关闭、焦点按外壳现有规则回到 `打开导航`——外壳不改。
 - [x] 4.3 首次发送建会话：欢迎态发送恰一次 `POST /api/sessions`、恰一次 prompt（沿用 `createAndSelect(prompt)` 与其 fence）；删除「空 prompt 建会话」的代码路径。
-- [ ] 4.4 零消息会话空态（design D4）：图标、`还没有消息，发一条开始吧`、只读的绑定工作空间名（未绑定，或空间名解析不出——列表读取中、失败、空间已删——时不显示这一行）；
+- [x] 4.4 零消息会话空态（design D4）：图标、`还没有消息，发一条开始吧`、只读的绑定工作空间名（未绑定，或空间名解析不出——列表读取中、失败、空间已删——时不显示这一行）；
   不显示场景与快捷任务；不改草稿；一级标题仍是面包屑。
 - [x] 4.5 改写单元断言（按分片）：所有「点新建会话 → POST」的测试（`chat-page-welcome-scene*`、`chat-page-sidebar`（768 行，只减不增）、`chat-page-session-pin`、`chat-page-lifecycle`、`chat-page-ownership`、`app-shell-responsive`）
   改为断言零 POST 与欢迎态；需要一个已存在会话的用例改用预置会话或首次发送。场景提示的断言改为「无提示」。
-- [ ] 4.6 ui-walk（按分片）：`createSessionFromSidebar` 改为在欢迎态输入并发送来建会话（或由各调用点改用预置/首次发送）；`ui-walk-layout.ts` 的 `.chat-playbooks-row`、`.chat-main` 选择器改为角色/属性；
+- [x] 4.6 ui-walk（按分片）：`createSessionFromSidebar` 改为在欢迎态输入并发送来建会话（或由各调用点改用预置/首次发送）；`ui-walk-layout.ts` 的 `.chat-playbooks-row`、`.chat-main` 选择器改为角色/属性；
   新增步骤：点「新建会话」后 URL 无会话 id、会话数不变；零消息会话（从第一条用户消息分叉得到）显示空态。
-- [ ] 4.7 按分片退役：删除 `welcome.tsx`、`scene-pills.tsx` 的旧实现与对应 CSS、静态断言；登记已迁移文件；CH 行：场景切换无提示、新建会话回欢迎态、首次发送才出现在列表、零消息会话空态。
+- [x] 4.7 按分片退役：删除 `welcome.tsx`、`scene-pills.tsx` 的旧实现与对应 CSS、静态断言；登记已迁移文件；CH 行：场景切换无提示、新建会话回欢迎态、首次发送才出现在列表、零消息会话空态。
   PR 描述写明关闭 #824、#825、#826。
 
 Suggested fixture level: expanded - 反转一条既有规格行为（新建即 POST），牵动六个测试文件与 ui-walk 的建会话辅助函数；会话创建路径带所有权 fence

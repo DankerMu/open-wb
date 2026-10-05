@@ -98,6 +98,7 @@ export function ConversationView({
           <Thread
             client={client}
             currentId={search.currentId}
+            generating={generating}
             key={requestedSessionId}
             locked={composerDisabled}
             onAnswerApproval={onAnswerApproval}

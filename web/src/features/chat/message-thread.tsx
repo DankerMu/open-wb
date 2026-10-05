@@ -9,7 +9,7 @@ import {
 } from "@assistant-ui/react";
 import { type ComponentProps, memo, type Ref } from "react";
 import type { ApiClient } from "../../lib/api.js";
-import { BrandMark } from "../../ui/index.js";
+import { BrandMark, Icon } from "../../ui/index.js";
 import { ApprovalBars } from "./approval-bar.js";
 import { ArtifactCards } from "./artifact-card.js";
 import { FileChangesCard } from "./file-changes-card.js";
@@ -30,6 +30,8 @@ type ThreadProps = {
   client: ApiClient;
   /** 对话内搜索的当前匹配；其余消息不带 `aria-current`。 */
   currentId: number | null;
+  /** 回合进行中（发送在途或权威状态 running）：此时即使还没有消息也不显示空态。 */
+  generating: boolean;
   /** 输入框锁定期间分叉与重新生成禁用。 */
   locked: boolean;
   onAnswerApproval: AnswerApproval;
@@ -202,10 +204,30 @@ const AssistantMessage = memo(function AssistantMessage({
   );
 });
 
+/**
+ * 零消息空态（design D4）：装饰性图标、一行提示与只读的绑定工作空间名。`workspace` 为 null（未绑定，
+ * 或空间名解析不出——列表读取中、读取失败、空间已删）时没有工作空间那一行。不是标题，也不是消息。
+ */
+function EmptyThread({ workspace }: { workspace: Workspace | null }) {
+  return (
+    <div
+      className="my-auto flex min-w-0 flex-col items-center gap-2 py-10 text-center text-(--wb-text-tertiary)"
+      data-slot="thread-empty"
+    >
+      <Icon name="message-square" size={20} />
+      <p className="m-0 text-sm leading-6 text-(--wb-text-secondary)">还没有消息，发一条开始吧</p>
+      {workspace ? (
+        <p className="m-0 max-w-full truncate text-xs leading-5">{`工作空间 ${workspace.name}`}</p>
+      ) : null}
+    </div>
+  );
+}
+
 /** 选中会话的线程：运行时、滚动层与全部消息。按会话 `key` 挂载，切换会话即重置跟随状态。 */
 export function Thread({
   client,
   currentId,
+  generating,
   locked,
   onAnswerApproval,
   onFork,
@@ -218,6 +240,8 @@ export function Thread({
 }: ThreadProps) {
   const messages = view?.messages ?? NO_MESSAGES;
   const runtime = useThreadRuntime({ messages, onRegenerate, onSend, onStop });
+  // 空态只在历史已到（下面的 `view` 分支）、没有消息且没有回合在跑时出现；内容根此时撑满滚动容器，让它垂直居中。
+  const empty = messages.length === 0 && !generating;
   const last = messages.at(-1);
   const regenerableId =
     view && last?.role === "assistant" && REGENERABLE.has(view.status) ? String(last.id) : null;
@@ -227,8 +251,9 @@ export function Thread({
         {view ? (
           <section
             aria-label="消息"
-            className="mx-auto box-border flex w-full max-w-3xl flex-col gap-4 px-2 pt-3 pb-6 max-[760px]:px-0"
+            className={`mx-auto box-border flex w-full max-w-3xl flex-col gap-4 px-2 pt-3 pb-6 max-[760px]:px-0 ${empty ? "min-h-full" : ""}`}
           >
+            {empty ? <EmptyThread workspace={workspace} /> : null}
             <ThreadPrimitive.Messages>
               {({ message }) => {
                 const custom = messageCustom(message.metadata.custom);
