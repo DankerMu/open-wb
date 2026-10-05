@@ -2,6 +2,7 @@ import type { ComponentProps, FormEvent, ReactNode, Ref, RefObject } from "react
 import type { ApiClient } from "../../lib/api.js";
 import { CapabilityBar } from "./capability-bar.js";
 import { Composer } from "./composer.js";
+import { ComposerDock } from "./composer-dock.js";
 import { Thread } from "./message-thread.js";
 import type { useSlashMenu } from "./slash-menu.js";
 import type { ChatState } from "./stream.js";
@@ -10,7 +11,7 @@ import { WelcomeIntro, WelcomePlaybooks } from "./welcome.js";
 import type { WelcomeOptions } from "./welcome-options.js";
 import type { Workspace } from "./workspace-list.js";
 
-type AnswerApproval = ComponentProps<typeof Thread>["onAnswerApproval"];
+type AnswerApproval = ComponentProps<typeof ComposerDock>["onAnswerApproval"];
 type StopTurn = ComponentProps<typeof Composer>["onStop"];
 
 type ConversationViewProps = {
@@ -100,7 +101,6 @@ export function ConversationView({
             currentId={search.currentId}
             key={requestedSessionId}
             locked={composerDisabled}
-            onAnswerApproval={onAnswerApproval}
             onFork={onFork}
             onRegenerate={onRegenerate}
             onSend={onSend}
@@ -119,6 +119,9 @@ export function ConversationView({
             />
           </div>
         )}
+        {requestedSessionId ? (
+          <ComposerDock onAnswerApproval={onAnswerApproval} view={historyView} />
+        ) : null}
         <Composer
           capabilityBar={
             <CapabilityBar

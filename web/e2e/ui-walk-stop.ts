@@ -132,13 +132,15 @@ export async function walkRegenerate(
   await regenerate.click();
   expect((await accepted).status()).toBe(202);
   mark("regenerate 202");
-  await expect(toast).toHaveCount(0);
-  await expect(anyToast).toHaveCount(0);
   await expect(stoppedBadge).toHaveCount(0);
+  // 徽章消失在 202 回调的下游：回调里弹出的提示此刻已挂载且还没到自动消失的时间。即时计数、不重试——
+  // 会重试的「数量为 0」会等到提示自己消失后通过。
+  expect(await toast.count(), "no regenerating toast").toBe(0);
+  expect(await anyToast.count(), "no toast at all").toBe(0);
   mark("badge gone");
   await expect(second.locator('[data-slot="message-body"]')).toHaveText(EXPECTED_REPLY);
   mark("original reply");
-  await expect(second.getByRole("group", { name: "需要你的确认" })).toHaveCount(0);
+  await expect(page.getByRole("group", { name: "需要你的确认" })).toHaveCount(0);
   await expect(toolGroup(second)).toHaveCount(0);
   await expect(second.getByRole("alert")).toHaveCount(0);
   await expect(users).toHaveCount(2);
@@ -150,8 +152,6 @@ export async function walkRegenerate(
   await expect(generatingStatus(page)).toHaveCount(0);
   await expect(regenerate).toBeEnabled();
 
-  await expect(toast).toHaveCount(0);
-  await expect(anyToast).toHaveCount(0);
   await inspectSidebar(page, project, async (sidebar) => {
     const current = sidebar
       .getByRole("navigation", { name: "会话列表" })

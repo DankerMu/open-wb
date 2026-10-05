@@ -526,7 +526,14 @@ describe("深度思考过程 fold on the chat page", () => {
 
     const { id: approvalId, tool, title, expiresAt } = SETTLED_APPROVAL;
     emit(source, 4, "approval.request", { approvalId, tool, title, expiresAt });
-    expect(article.getByRole("group", { name: "需要你的确认" })).toBeTruthy();
+    // 待决审批在输入框上方的停靠区里，不在消息内
+    expect(article.queryAllByRole("group", { name: "需要你的确认" })).toHaveLength(0);
+    expect(
+      within(document.querySelector('[data-slot="composer-dock"]') as HTMLElement).getByRole(
+        "group",
+        { name: "需要你的确认" },
+      ),
+    ).toBeTruthy();
     expectStillCollapsed();
 
     emit(source, 5, "approval.resolved", { approvalId, decision: "allow" });
@@ -636,7 +643,7 @@ describe("深度思考过程 fold on the chat page", () => {
       "reasoning-root",
       "message-body",
       "tool-group-root",
-      "div.chat-approvals",
+      "approval-records",
       "message-stopped",
       "message-actions",
     ]);

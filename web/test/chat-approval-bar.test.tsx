@@ -1,169 +1,76 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ChatMessageSnapshot } from "../src/lib/session-contract.js";
+import {
+  ALLOWED,
+  approval,
+  approvalPath,
+  assistants,
+  bodies,
+  button,
+  cards,
+  composerInput,
+  countdowns,
+  DENIED,
+  dock,
+  emitRequest,
+  emitResolved,
+  expectRecord,
+  flush,
+  MESSAGES,
+  mountPage,
+  OTHER_TITLE,
+  type PageRoutes,
+  PENDING,
+  records,
+  settledBody,
+  slotText,
+  snapshotWith,
+  stopButton,
+  T0,
+  TIMED_OUT,
+  TITLE,
+  UNAVAILABLE_502,
+} from "./chat-approval-support.js";
 import {
   cleanupChatLifecycle,
   renderChatPageWithAuthProbe,
   renewAccount,
 } from "./chat-page-lifecycle-support.js";
-import {
-  OTHER_MESSAGES,
-  OTHER_SESSION_ID,
-  otherIdleSession,
-  otherSnapshot,
-} from "./chat-page-ownership-support.js";
-import { expectChatLocation, type FetchRoutes, renderChatPage } from "./chat-page-support.js";
+import { OTHER_MESSAGES, OTHER_SESSION_ID, otherSnapshot } from "./chat-page-ownership-support.js";
+import { expectChatLocation } from "./chat-page-support.js";
 import {
   chatSnapshot,
   FakeEventSource,
   historyUser,
   latestSource,
   SESSION_ID,
-  settle,
 } from "./chat-stream-support.js";
 import { calls, deferredResponse, jsonResponse } from "./support.js";
-import { readRepoFile, ruleBody, stripComments } from "./ui-support.js";
+import { readRepoFile } from "./ui-support.js";
 
-const T0 = 1_750_000_000_000;
-const TITLE = "Allow tool: bash\nReason: run ls";
-const OTHER_TITLE = "Allow tool: bash\nReason: run pwd";
-const MESSAGES = `/api/sessions/${SESSION_ID}/messages`;
 const PROMPT_PATH = `/api/sessions/${SESSION_ID}/prompt`;
 const EVENTS_URL = `/api/sessions/${SESSION_ID}/events`;
 const OTHER_EVENTS_URL = `/api/sessions/${OTHER_SESSION_ID}/events`;
-const PENDING = "需要你的确认";
-const ALLOWED = "已允许执行";
-const DENIED = "已拒绝执行";
-const COUNTDOWN = /内未操作将自动允许/;
 const SETTLED_409 = { error: { code: "approval_settled", message: "该审批已处理" } };
 const BUSY_409 = { error: { code: "session_busy", message: "会话正在生成，请稍候" } };
-const UNAVAILABLE_502 = { error: { code: "agent_unavailable", message: "Agent 运行时不可用" } };
-
-type Approval = ChatMessageSnapshot["messages"][number]["approvals"][number];
-type Decision = "allow" | "deny" | "timeout";
-
-const approvalPath = (id: number) => `/api/sessions/${SESSION_ID}/approvals/${id}`;
-
-function approval(id: number, overrides: Partial<Approval> = {}): Approval {
-  return {
-    id,
-    tool: "bash",
-    title: TITLE,
-    requestedAt: T0,
-    expiresAt: T0 + 60_000,
-    decision: null,
-    ...overrides,
-  };
-}
-
-function settledBody(id: number, decision: Decision) {
-  return jsonResponse(approval(id, { decision }));
-}
-
-/** running 快照（assistant id 0），把 approvals 放进该条助手消息。 */
-function snapshotWith(approvals: Approval[], seq = 0): ChatMessageSnapshot {
-  const base = chatSnapshot({ status: "running", cursor: { epoch: 1, seq } });
-  return {
-    ...base,
-    messages: base.messages.map((message) =>
-      message.role === "assistant" ? { ...message, approvals } : message,
-    ),
-  };
-}
-
-type PageRoutes = { messages: () => Response | Promise<Response>; snapshot: ChatMessageSnapshot };
-
-/** 选中会话、读完历史并 open 实时源（open 会再拉一次快照），此后事件从 `1:<seq+1>` 起。 */
-async function mountPage(initial: ChatMessageSnapshot, routes: FetchRoutes = {}) {
-  const page: PageRoutes = {
-    snapshot: initial,
-    messages: () => jsonResponse(page.snapshot),
-  };
-  const { fetchMock } = renderChatPage(`/?session=${SESSION_ID}`, {
-    "/api/sessions": () => jsonResponse({ sessions: [initial.session, otherIdleSession()] }),
-    [MESSAGES]: () => page.messages(),
-    ...routes,
-  });
-  await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
-  const source = latestSource();
-  act(() => {
-    source.emitOpen();
-  });
-  await flush();
-  return { fetchMock, page, source };
-}
-
-async function flush(rounds = 3) {
-  for (let round = 0; round < rounds; round += 1) {
-    await act(settle);
-  }
-}
-
-function emitRequest(
-  source: FakeEventSource,
-  seq: number,
-  approvalId: number,
-  overrides: { messageId?: number; tool?: string; title?: string; expiresAt?: number } = {},
-) {
-  act(() => {
-    source.emitData("approval.request", `1:${seq}`, {
-      messageId: 0,
-      approvalId,
-      tool: "bash",
-      title: TITLE,
-      expiresAt: T0 + 60_000,
-      ...overrides,
-    });
-  });
-}
-
-function emitResolved(
-  source: FakeEventSource,
-  seq: number,
-  approvalId: number,
-  decision: Decision,
-  messageId = 0,
-) {
-  act(() => {
-    source.emitData("approval.resolved", `1:${seq}`, { messageId, approvalId, decision });
-  });
-}
-
-function assistants() {
-  return screen.getAllByRole("article", { name: "助手" });
-}
-
-function bars(article = assistants()[0] as HTMLElement) {
-  return within(article).getAllByRole("group");
-}
-
-function button(group: HTMLElement, name: "允许" | "拒绝") {
-  return within(group).getByRole("button", { name }) as HTMLButtonElement;
-}
-
-function countdowns(group: HTMLElement) {
-  return within(group).queryAllByText(COUNTDOWN);
-}
-
-function composerInput() {
-  return screen.getByRole("textbox", { name: "给助手发消息" }) as HTMLTextAreaElement;
-}
-
-function bodies(fetchMock: ReturnType<typeof renderChatPage>["fetchMock"], path: string) {
-  return calls(fetchMock, path).map(([, init]) => JSON.parse(String(init?.body)));
-}
-
-function expectSettled(group: HTMLElement, header: string) {
-  expect(group.getAttribute("aria-labelledby")).not.toBeNull();
-  expect(within(group).queryAllByRole("button")).toHaveLength(0);
-  expect(countdowns(group)).toHaveLength(0);
-  expect(within(assistants()[0] as HTMLElement).getAllByRole("group", { name: header })).toContain(
-    group,
-  );
-}
+const REQUEST_FAILED = "请求失败，请稍后重试";
 
 function sourcesFor(url: string) {
   return FakeEventSource.instances.filter((source) => source.url === url);
+}
+
+/** 整页没有任何错误呈现：无 alert（提问卡内、输入框上方都没有）、无 Toast。 */
+function expectNoErrorShown() {
+  expect(screen.queryAllByRole("alert")).toHaveLength(0);
+  expect(document.querySelector(".ui-toast")).toBeNull();
+}
+
+/** 恰一条 alert，且在 `card` 内：输入框上方没有内联错误，也没有 Toast。 */
+function expectCardAlert(card: HTMLElement, message: string) {
+  const alerts = screen.getAllByRole("alert");
+  expect(alerts.map((alert) => alert.textContent)).toEqual([message]);
+  expect(card.contains(alerts[0] as HTMLElement)).toBe(true);
+  expect(document.querySelector(".ui-toast")).toBeNull();
 }
 
 beforeEach(() => {
@@ -176,78 +83,76 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("approval bar: pending, countdown and settled headers", () => {
-  it("A1 renders one pending bar with badge, full title, one countdown sentence and live buttons", async () => {
+describe("approval prompt card: pending, countdown and settled records", () => {
+  it("A1 docks one pending card above the composer with badge, full title, one countdown sentence and live buttons", async () => {
     const { source } = await mountPage(snapshotWith([]));
+    expect(dock()).toBeNull();
     emitRequest(source, 1, 7);
 
-    const article = assistants()[0] as HTMLElement;
-    const groups = within(article).getAllByRole("group", { name: PENDING });
-    expect(groups).toHaveLength(1);
-    const group = groups[0] as HTMLElement;
-    expect(group.querySelector(".chat-approval-tool")?.textContent).toBe("bash");
-    expect(group.querySelector(".chat-approval-body")?.textContent).toBe(TITLE);
-    // 条渲染在同一 `message-content` 列内、正文之后（design D4 的块次序）
-    const main = article.querySelector('[data-slot="message-content"]');
-    const list = main?.querySelector(".chat-approvals");
-    const text = main?.querySelector('[data-slot="message-body"]');
-    expect(list?.contains(group)).toBe(true);
-    expect(list?.parentElement).toBe(main);
-    expect(text?.parentElement).toBe(main);
-    expect(
-      (text as Element).compareDocumentPosition(list as Element) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    const sentences = countdowns(group);
+    const [card] = cards() as [HTMLElement];
+    expect(cards()).toHaveLength(1);
+    expect(slotText(card, "approval-tool")).toBe("bash");
+    expect(slotText(card, "approval-title")).toBe(TITLE);
+    expect(card.querySelector('[data-slot="approval-title"]')?.classList).toContain(
+      "whitespace-pre-wrap",
+    );
+    const sentences = countdowns(card);
     expect(sentences).toHaveLength(1);
     expect(sentences[0]?.textContent).toBe("（60s 内未操作将自动允许）");
-    expect(within(group).queryByRole("progressbar")).toBeNull();
-    expect(within(group).queryAllByText(/^\d+s$/)).toHaveLength(0);
-    expect(button(group, "允许").disabled).toBe(false);
-    expect(button(group, "拒绝").disabled).toBe(false);
-    // 守卫：有 pending 审批时回合仍 running，composer 锁定
+    expect(within(card).queryByRole("progressbar")).toBeNull();
+    expect(within(card).queryAllByText(/^\d+s$/)).toHaveLength(0);
+    expect(button(card, "允许").disabled).toBe(false);
+    expect(button(card, "拒绝").disabled).toBe(false);
+    // 助手消息内没有待决审批的任何元素，也还没有已结算记录
+    const article = assistants()[0] as HTMLElement;
+    expect(within(article).queryAllByRole("group")).toHaveLength(0);
+    expect(article.textContent).not.toContain("Reason: run ls");
+    // 有 pending 审批时回合仍 running：composer 锁定，`停止` 可用
     expect(composerInput().disabled).toBe(true);
     expect(screen.getByText("生成中", { exact: true })).toBeTruthy();
+    expect(stopButton().disabled).toBe(false);
+
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(countdowns(card).map((sentence) => sentence.textContent)).toEqual([
+      "（59s 内未操作将自动允许）",
+    ]);
   });
 
   it("A2 recomputes the countdown every second and floors it at 0 with buttons still live", async () => {
     const { source } = await mountPage(snapshotWith([]));
     emitRequest(source, 1, 7);
-    const group = bars()[0] as HTMLElement;
+    const [card] = cards() as [HTMLElement];
 
     act(() => {
-      vi.advanceTimersByTime(1000);
+      vi.advanceTimersByTime(60_000);
     });
-    expect(countdowns(group)[0]?.textContent).toBe("（59s 内未操作将自动允许）");
-    act(() => {
-      vi.advanceTimersByTime(59_000);
-    });
-    expect(countdowns(group)[0]?.textContent).toBe("（0s 内未操作将自动允许）");
+    expect(countdowns(card)[0]?.textContent).toBe("（0s 内未操作将自动允许）");
     act(() => {
       vi.advanceTimersByTime(5000);
     });
-    expect(countdowns(group)).toHaveLength(1);
-    expect(countdowns(group)[0]?.textContent).toBe("（0s 内未操作将自动允许）");
-    expect(button(group, "允许").disabled).toBe(false);
-    expect(button(group, "拒绝").disabled).toBe(false);
+    expect(countdowns(card)).toHaveLength(1);
+    expect(countdowns(card)[0]?.textContent).toBe("（0s 内未操作将自动允许）");
+    expect(button(card, "允许").disabled).toBe(false);
+    expect(button(card, "拒绝").disabled).toBe(false);
   });
 
-  it("A3 sends allow exactly once, stays disabled across a snapshot swap and waits for approval.resolved", async () => {
+  it("A3 sends allow exactly once, stays disabled across a snapshot swap and leaves only on approval.resolved", async () => {
     const answer = deferredResponse();
     const { fetchMock, page, source } = await mountPage(snapshotWith([]), {
       [approvalPath(7)]: () => answer.promise,
     });
     emitRequest(source, 1, 7);
-    const group = bars()[0] as HTMLElement;
+    const [card] = cards() as [HTMLElement];
 
-    fireEvent.click(button(group, "允许"));
-    fireEvent.click(button(group, "允许"));
+    fireEvent.click(button(card, "允许"));
+    fireEvent.click(button(card, "允许"));
     await flush();
     expect(bodies(fetchMock, approvalPath(7))).toEqual([{ decision: "allow" }]);
-    expect(button(group, "允许").disabled).toBe(true);
-    expect(button(group, "拒绝").disabled).toBe(true);
-    expect(within(assistants()[0] as HTMLElement).getByRole("group", { name: PENDING })).toBe(
-      group,
-    );
+    expect(button(card, "允许").disabled).toBe(true);
+    expect(button(card, "拒绝").disabled).toBe(true);
+    expect(cards()).toEqual([card]);
 
     const reads = calls(fetchMock, MESSAGES).length;
     page.snapshot = snapshotWith([approval(7)], 1);
@@ -256,51 +161,72 @@ describe("approval bar: pending, countdown and settled headers", () => {
     });
     await flush();
     expect(calls(fetchMock, MESSAGES)).toHaveLength(reads + 1);
-    const swapped = within(assistants()[0] as HTMLElement).getByRole("group", { name: PENDING });
+    const [swapped] = cards() as [HTMLElement];
     expect(button(swapped, "允许").disabled).toBe(true);
     expect(button(swapped, "拒绝").disabled).toBe(true);
     fireEvent.click(button(swapped, "允许"));
     await flush();
     expect(calls(fetchMock, approvalPath(7))).toHaveLength(1);
 
+    // 200 本身不改卡头：resolved 到达前它仍是待决提问卡
     answer.resolve(settledBody(7, "allow"));
     await flush();
-    const answered = within(assistants()[0] as HTMLElement).getByRole("group", { name: PENDING });
-    expect(answered.querySelector(".chat-approval-head")?.textContent).toContain(PENDING);
+    const [answered] = cards() as [HTMLElement];
     expect(countdowns(answered)).toHaveLength(1);
+    expect(records()).toHaveLength(0);
 
     emitResolved(source, 2, 7, "allow");
-    const settled = bars()[0] as HTMLElement;
-    expectSettled(settled, ALLOWED);
-    expect(settled.querySelector(".chat-approval-tool")?.textContent).toBe("bash");
-    expect(settled.querySelector(".chat-approval-body")?.textContent).toBe(TITLE);
+    expect(cards()).toHaveLength(0);
+    expect(dock()).toBeNull();
+    const [record] = records();
+    expectRecord(record, ALLOWED);
+    expect(slotText(record as HTMLElement, "approval-tool")).toBe("bash");
+    expect(slotText(record as HTMLElement, "approval-title")).toBe(TITLE);
+    expect(
+      (record as HTMLElement).querySelector('[data-slot="approval-title"]')?.classList,
+    ).toContain("whitespace-pre-wrap");
   });
 
-  it("A4 maps deny to 已拒绝执行 and timeout to 已允许执行 without buttons or countdown", async () => {
+  it("A3b answers deny with the card's id and settles into a 已拒绝执行 record", async () => {
+    const { fetchMock, source } = await mountPage(snapshotWith([]), {
+      [approvalPath(7)]: () => settledBody(7, "deny"),
+    });
+    emitRequest(source, 1, 7);
+
+    fireEvent.click(button(cards()[0] as HTMLElement, "拒绝"));
+    await flush();
+    expect(bodies(fetchMock, approvalPath(7))).toEqual([{ decision: "deny" }]);
+    emitResolved(source, 2, 7, "deny");
+
+    expect(cards()).toHaveLength(0);
+    expectRecord(records()[0], DENIED);
+  });
+
+  it("A4 turns timeout into a 超时自动允许 record and deny into 已拒绝执行, without buttons or countdown", async () => {
     const { source } = await mountPage(snapshotWith([]));
     emitRequest(source, 1, 7);
     emitRequest(source, 2, 8, { title: OTHER_TITLE });
+    expect(cards()).toHaveLength(2);
     emitResolved(source, 3, 8, "deny");
     emitResolved(source, 4, 7, "timeout");
 
-    const [seven, eight] = bars() as [HTMLElement, HTMLElement];
-    expectSettled(seven, ALLOWED);
-    expectSettled(eight, DENIED);
-    expect(seven.querySelector(".chat-approval-body")?.textContent).toBe(TITLE);
-    expect(eight.querySelector(".chat-approval-body")?.textContent).toBe(OTHER_TITLE);
+    expect(cards()).toHaveLength(0);
+    const [seven, eight] = records() as [HTMLElement, HTMLElement];
+    expect(records()).toHaveLength(2);
+    expectRecord(seven, TIMED_OUT);
+    expectRecord(eight, DENIED);
+    expect(slotText(seven, "approval-title")).toBe(TITLE);
+    expect(slotText(eight, "approval-title")).toBe(OTHER_TITLE);
+    expect(screen.queryAllByRole("group", { name: ALLOWED })).toHaveLength(0);
   });
 
   it("A10 shows the tool field as the badge and never re-parses the title", async () => {
     const { source } = await mountPage(snapshotWith([]));
     emitRequest(source, 1, 7, { tool: "python", title: "Allow tool: bash\nReason: x" });
-    const group = bars()[0] as HTMLElement;
-    expect(group.querySelector(".chat-approval-tool")?.textContent).toBe("python");
-    expect(within(assistants()[0] as HTMLElement).getByRole("group", { name: PENDING })).toBe(
-      group,
-    );
+    expect(slotText(cards()[0] as HTMLElement, "approval-tool")).toBe("python");
   });
 
-  it("A11 keeps exactly one interval per list with pending bars and clears it once none is pending", async () => {
+  it("A11 keeps exactly one interval while any card is pending and clears it once none is", async () => {
     const { source } = await mountPage(snapshotWith([]));
     expect(vi.getTimerCount()).toBe(0);
     emitRequest(source, 1, 7);
@@ -314,7 +240,7 @@ describe("approval bar: pending, countdown and settled headers", () => {
   });
 });
 
-describe("approval bar: answer outcomes", () => {
+describe("approval prompt card: answer outcomes", () => {
   it("A5 reconciles a 409 approval_settled silently and reconnects from the new snapshot", async () => {
     const { fetchMock, page, source } = await mountPage(snapshotWith([]), {
       [approvalPath(7)]: () => jsonResponse(SETTLED_409, 409),
@@ -324,35 +250,35 @@ describe("approval bar: answer outcomes", () => {
     const sources = FakeEventSource.instances.length;
     page.snapshot = snapshotWith([approval(7, { decision: "timeout" })], 1);
 
-    fireEvent.click(button(bars()[0] as HTMLElement, "允许"));
+    fireEvent.click(button(cards()[0] as HTMLElement, "允许"));
     await flush();
 
-    expect(screen.queryByRole("alert")).toBeNull();
-    expect(document.querySelector(".ui-toast")).toBeNull();
+    expectNoErrorShown();
     expect(calls(fetchMock, MESSAGES)).toHaveLength(reads + 1);
     expect(source.closeCount).toBe(1);
     expect(FakeEventSource.instances).toHaveLength(sources + 1);
     expect(latestSource().url).toBe(EVENTS_URL);
-    expectSettled(bars()[0] as HTMLElement, ALLOWED);
+    expect(cards()).toHaveLength(0);
+    expectRecord(records()[0], TIMED_OUT);
   });
 
-  it("A5 counter-case: a 409 with another code is an inline error, re-enables and never reconciles", async () => {
+  it("A5 counter-case: a 409 with another code is an alert inside the card, re-enables and never reconciles", async () => {
     const { fetchMock, source } = await mountPage(snapshotWith([]), {
       [approvalPath(7)]: () => jsonResponse(BUSY_409, 409),
     });
     emitRequest(source, 1, 7);
     const reads = calls(fetchMock, MESSAGES).length;
 
-    fireEvent.click(button(bars()[0] as HTMLElement, "允许"));
+    fireEvent.click(button(cards()[0] as HTMLElement, "允许"));
     await flush();
 
-    expect(screen.getByRole("alert").textContent).toBe(BUSY_409.error.message);
+    const [card] = cards() as [HTMLElement];
+    expectCardAlert(card, BUSY_409.error.message);
     expect(calls(fetchMock, MESSAGES)).toHaveLength(reads);
     expect(source.closeCount).toBe(0);
     expect(FakeEventSource.instances).toHaveLength(1);
-    const group = bars()[0] as HTMLElement;
-    expect(button(group, "允许").disabled).toBe(false);
-    expect(button(group, "拒绝").disabled).toBe(false);
+    expect(button(card, "允许").disabled).toBe(false);
+    expect(button(card, "拒绝").disabled).toBe(false);
   });
 
   it("A5b keeps the live source and stays silent when the reconcile GET fails", async () => {
@@ -363,22 +289,23 @@ describe("approval bar: answer outcomes", () => {
     const reads = calls(fetchMock, MESSAGES).length;
     page.messages = () => jsonResponse(UNAVAILABLE_502, 502);
 
-    fireEvent.click(button(bars()[0] as HTMLElement, "允许"));
+    fireEvent.click(button(cards()[0] as HTMLElement, "允许"));
     await flush();
 
     expect(calls(fetchMock, MESSAGES)).toHaveLength(reads + 1);
-    expect(screen.queryByRole("alert")).toBeNull();
+    expectNoErrorShown();
     expect(source.closeCount).toBe(0);
     expect(FakeEventSource.instances).toHaveLength(1);
-    const group = within(assistants()[0] as HTMLElement).getByRole("group", { name: PENDING });
-    expect(button(group, "允许").disabled).toBe(true);
-    expect(button(group, "拒绝").disabled).toBe(true);
+    const [card] = cards() as [HTMLElement];
+    expect(button(card, "允许").disabled).toBe(true);
+    expect(button(card, "拒绝").disabled).toBe(true);
 
     emitResolved(source, 2, 7, "timeout");
-    expectSettled(bars()[0] as HTMLElement, ALLOWED);
+    expect(cards()).toHaveLength(0);
+    expectRecord(records()[0], TIMED_OUT);
   });
 
-  it("A6 shows other envelopes inline, re-enables the bar and clears the alert on retry", async () => {
+  it("A6 shows a 502 as an alert inside the card, re-enables it, and the retry clears the alert and succeeds", async () => {
     const retry = deferredResponse();
     let answers = 0;
     const { fetchMock, source } = await mountPage(snapshotWith([]), {
@@ -390,25 +317,59 @@ describe("approval bar: answer outcomes", () => {
     emitRequest(source, 1, 7);
     const reads = calls(fetchMock, MESSAGES).length;
 
-    fireEvent.click(button(bars()[0] as HTMLElement, "拒绝"));
+    fireEvent.click(button(cards()[0] as HTMLElement, "允许"));
     await flush();
-    expect(screen.getByRole("alert").textContent).toBe("Agent 运行时不可用");
+    const [card] = cards() as [HTMLElement];
+    expectCardAlert(card, "Agent 运行时不可用");
+    expect(screen.getAllByRole("group", { name: PENDING })).toEqual([card]);
     expect(calls(fetchMock, MESSAGES)).toHaveLength(reads);
-    const group = bars()[0] as HTMLElement;
-    expect(button(group, "允许").disabled).toBe(false);
-    expect(button(group, "拒绝").disabled).toBe(false);
+    expect(button(card, "允许").disabled).toBe(false);
+    expect(button(card, "拒绝").disabled).toBe(false);
+    expect(countdowns(card)).toHaveLength(1);
 
-    fireEvent.click(button(group, "拒绝"));
+    // 第二次点击当即清除 alert（请求仍在途），两按钮禁用
+    fireEvent.click(button(card, "允许"));
+    expectNoErrorShown();
     await flush();
-    expect(screen.queryByRole("alert")).toBeNull();
+    expectNoErrorShown();
     expect(bodies(fetchMock, approvalPath(7))).toEqual([
-      { decision: "deny" },
-      { decision: "deny" },
+      { decision: "allow" },
+      { decision: "allow" },
     ]);
-    expect(button(group, "拒绝").disabled).toBe(true);
+    expect(button(card, "允许").disabled).toBe(true);
+    expect(button(card, "拒绝").disabled).toBe(true);
+
+    retry.resolve(settledBody(7, "allow"));
+    await flush();
+    emitResolved(source, 2, 7, "allow");
+    expect(cards()).toHaveLength(0);
+    expectRecord(records()[0], ALLOWED);
+    expectNoErrorShown();
+    expect(calls(fetchMock, approvalPath(7))).toHaveLength(2);
   });
 
-  it("A7 answers two bars of one message independently by their own ids", async () => {
+  it("A6b shows the request_failed wording inside the card when the answer fails on the network", async () => {
+    const { fetchMock, source } = await mountPage(snapshotWith([]), {
+      [approvalPath(7)]: () => Promise.reject(new TypeError("network down")),
+    });
+    emitRequest(source, 1, 7);
+    emitRequest(source, 2, 8, { title: OTHER_TITLE });
+
+    fireEvent.click(button(cards()[0] as HTMLElement, "拒绝"));
+    await flush();
+
+    const [seven, eight] = cards() as [HTMLElement, HTMLElement];
+    expectCardAlert(seven, REQUEST_FAILED);
+    expect(bodies(fetchMock, approvalPath(7))).toEqual([{ decision: "deny" }]);
+    expect(button(seven, "允许").disabled).toBe(false);
+    expect(button(seven, "拒绝").disabled).toBe(false);
+    // 其它卡不受影响
+    expect(within(eight).queryAllByRole("alert")).toHaveLength(0);
+    expect(button(eight, "允许").disabled).toBe(false);
+    expect(composerInput().disabled).toBe(true);
+  });
+
+  it("A7 answers two concurrent cards independently by their own ids", async () => {
     const { fetchMock, source } = await mountPage(snapshotWith([]), {
       [approvalPath(7)]: () => settledBody(7, "allow"),
       [approvalPath(8)]: () => settledBody(8, "deny"),
@@ -416,14 +377,10 @@ describe("approval bar: answer outcomes", () => {
     emitRequest(source, 1, 7);
     emitRequest(source, 2, 8, { title: OTHER_TITLE });
 
-    const article = assistants()[0] as HTMLElement;
-    const [seven, eight] = within(article).getAllByRole("group", { name: PENDING }) as [
-      HTMLElement,
-      HTMLElement,
-    ];
-    expect(bars()).toHaveLength(2);
-    expect(seven.querySelector(".chat-approval-body")?.textContent).toBe(TITLE);
-    expect(eight.querySelector(".chat-approval-body")?.textContent).toBe(OTHER_TITLE);
+    const [seven, eight] = cards() as [HTMLElement, HTMLElement];
+    expect(cards()).toHaveLength(2);
+    expect(slotText(seven, "approval-title")).toBe(TITLE);
+    expect(slotText(eight, "approval-title")).toBe(OTHER_TITLE);
     expect(seven.compareDocumentPosition(eight) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     fireEvent.click(button(eight, "拒绝"));
@@ -437,73 +394,25 @@ describe("approval bar: answer outcomes", () => {
     expect(countdowns(seven)).toHaveLength(1);
 
     emitResolved(source, 3, 8, "deny");
-    expect(within(article).getByRole("group", { name: PENDING })).toBe(seven);
-    expectSettled(bars()[1] as HTMLElement, DENIED);
+    expect(cards()).toEqual([seven]);
+    expect(records()).toHaveLength(1);
+    expectRecord(records()[0], DENIED);
     expect(composerInput().disabled).toBe(true);
 
     fireEvent.click(button(seven, "允许"));
     await flush();
     expect(bodies(fetchMock, approvalPath(7))).toEqual([{ decision: "allow" }]);
     emitResolved(source, 4, 7, "allow");
-    expectSettled(bars()[0] as HTMLElement, ALLOWED);
-    expect(within(article).queryAllByRole("button", { name: /允许|拒绝/ })).toHaveLength(0);
+    expect(cards()).toHaveLength(0);
+    const settled = records();
+    expect(settled).toHaveLength(2);
+    expectRecord(settled[0], ALLOWED);
+    expectRecord(settled[1], DENIED);
+    expect(screen.queryAllByRole("button", { name: /^(允许|拒绝)$/ })).toHaveLength(0);
   });
 });
 
-describe("approval bar: snapshot restore", () => {
-  it("A8 restores a pending bar from the snapshot with the remaining seconds and keeps it answerable", async () => {
-    const restored = approval(7, { requestedAt: T0 - 20_000, expiresAt: T0 + 40_000 });
-    const { fetchMock } = await mountPage(snapshotWith([restored]), {
-      [approvalPath(7)]: () => settledBody(7, "allow"),
-    });
-    const group = within(assistants()[0] as HTMLElement).getByRole("group", { name: PENDING });
-    expect(countdowns(group)[0]?.textContent).toBe("（40s 内未操作将自动允许）");
-    act(() => {
-      vi.advanceTimersByTime(1000);
-    });
-    expect(countdowns(group)[0]?.textContent).toBe("（39s 内未操作将自动允许）");
-
-    fireEvent.click(button(group, "允许"));
-    await flush();
-    expect(bodies(fetchMock, approvalPath(7))).toEqual([{ decision: "allow" }]);
-  });
-
-  it("A9 renders settled decisions from the snapshot and nothing for approvals: []", async () => {
-    const assistant = (id: number, approvals: Approval[]) => ({
-      id,
-      role: "assistant" as const,
-      approvals,
-      content: `answer ${id}`,
-      status: "done" as const,
-      createdAt: id,
-      steps: [] as [],
-      thinking: null,
-    });
-    const snapshot: ChatMessageSnapshot = {
-      ...chatSnapshot({ status: "done", cursor: { epoch: 1, seq: null } }),
-      messages: [
-        historyUser,
-        assistant(0, [approval(7, { decision: "timeout" })]),
-        assistant(1, [approval(8, { decision: "deny" })]),
-        assistant(2, []),
-      ],
-    };
-    await mountPage(snapshot);
-
-    const [first, second, third] = assistants() as [HTMLElement, HTMLElement, HTMLElement];
-    const allowed = within(first).getByRole("group", { name: ALLOWED });
-    const denied = within(second).getByRole("group", { name: DENIED });
-    for (const group of [allowed, denied]) {
-      expect(within(group).queryAllByRole("button", { name: /允许|拒绝/ })).toHaveLength(0);
-      expect(countdowns(group)).toHaveLength(0);
-    }
-    expect(within(third).queryAllByRole("group")).toHaveLength(0);
-    expect(third.querySelector(".chat-approvals")).toBeNull();
-    expect(vi.getTimerCount()).toBe(0);
-  });
-});
-
-describe("approval bar: ownership fences", () => {
+describe("approval prompt card: ownership fences", () => {
   async function switchToOther() {
     fireEvent.click(screen.getByRole("button", { name: "other session" }));
     await expectChatLocation(`/?session=${OTHER_SESSION_ID}`);
@@ -518,7 +427,7 @@ describe("approval bar: ownership fences", () => {
       [OTHER_MESSAGES]: () => jsonResponse(otherSnapshot()),
     });
     emitRequest(source, 1, 7);
-    fireEvent.click(button(bars()[0] as HTMLElement, "允许"));
+    fireEvent.click(button(cards()[0] as HTMLElement, "允许"));
     await flush();
     await switchToOther();
     const reads = calls(fetchMock, MESSAGES).length;
@@ -540,7 +449,7 @@ describe("approval bar: ownership fences", () => {
     emitRequest(source, 1, 7);
     const reads = calls(fetchMock, MESSAGES).length;
     page.messages = () => reconcile.promise;
-    fireEvent.click(button(bars()[0] as HTMLElement, "允许"));
+    fireEvent.click(button(cards()[0] as HTMLElement, "允许"));
     await flush();
     expect(calls(fetchMock, MESSAGES)).toHaveLength(reads + 1);
 
@@ -554,7 +463,7 @@ describe("approval bar: ownership fences", () => {
     expect(sourcesFor(EVENTS_URL)).toHaveLength(1);
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getByText("other user", { exact: true })).toBeTruthy();
-    expect(screen.queryAllByRole("group", { name: ALLOWED })).toHaveLength(0);
+    expect(document.querySelector('[data-slot="approval-record"]')).toBeNull();
   });
 
   it("A12c drops a late 409 after account renewal kept the same session selected", async () => {
@@ -576,7 +485,7 @@ describe("approval bar: ownership fences", () => {
     await flush();
     emitRequest(source, 1, 7);
     page.snapshot = snapshotWith([approval(7)], 1);
-    fireEvent.click(button(bars()[0] as HTMLElement, "允许"));
+    fireEvent.click(button(cards()[0] as HTMLElement, "允许"));
     await flush();
     expect(bodies(fetchMock, approvalPath(7))).toEqual([{ decision: "allow" }]);
 
@@ -620,7 +529,7 @@ describe("approval bar: ownership fences", () => {
     expect(calls(fetchMock, PROMPT_PATH)).toHaveLength(1);
 
     // #633：新回合事件先于 202 到达且末条助手已 done，页面不本地追加，而是恢复一次快照；
-    // 权威快照（游标 1:2）带助手 2 与待审批 9，审批条随快照装入后出现。
+    // 权威快照（游标 1:2）带助手 2 与待审批 9，提问卡随快照装入后出现。
     page.snapshot = {
       session: { ...done.session, status: "running" },
       messages: [
@@ -655,8 +564,8 @@ describe("approval bar: ownership fences", () => {
     await flush();
     expect(calls(fetchMock, MESSAGES)).toHaveLength(3);
     expect(assistants()).toHaveLength(2);
-    const turn = assistants()[1] as HTMLElement;
-    const group = within(turn).getByRole("group", { name: PENDING });
+    expect(within(assistants()[1] as HTMLElement).queryAllByRole("group")).toHaveLength(0);
+    const [group] = cards() as [HTMLElement];
     fireEvent.click(button(group, "允许"));
     await flush();
     expect(bodies(fetchMock, approvalPath(9))).toEqual([{ decision: "allow" }]);
@@ -672,12 +581,7 @@ describe("approval bar: ownership fences", () => {
   });
 });
 
-describe("approval bar: source guards", () => {
-  it("G1 messages.css keeps the full title as pre-wrap text", () => {
-    const css = stripComments(readRepoFile("web/src/features/chat/messages.css"));
-    expect(ruleBody(css, ".chat-approval-body")).toContain("white-space: pre-wrap;");
-  });
-
+describe("approval prompt card: source guards", () => {
   it("G2 turn-actions.ts owns no React state and does not import the page", () => {
     const source = readRepoFile("web/src/features/chat/turn-actions.ts");
     for (const banned of ["useState(", "useEffect(", "useRef(", "useMemo(", "./page.js"]) {

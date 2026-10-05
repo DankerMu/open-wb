@@ -43,7 +43,7 @@ const EXPECTED_THINKING = "先读需求，再列要点，最后作答。";
 // 真 omp 对无参数 `/todo` 的原文（新会话没有 todo）；`<task>` 在页面上是转义后的文本。
 const TODO_REPLY = "No todos. Use /todo append <task> to start one.";
 const SLASH_LABELS = ["整理上下文", "任务清单"];
-const APPROVAL_BARS = ["需要你的确认", "已允许执行", "已拒绝执行"];
+const APPROVAL_BARS = ["需要你的确认", "已允许执行", "已拒绝执行", "超时自动允许"];
 const EXPECTED_CHANGES = [{ path: REPORT_FILE, added: null, removed: null, kind: "write" }];
 const SCENE_PILLS = ["日常办公", "代码开发", "创意设计"];
 const CODE_CHIPS = ["日常开发", "网站开发", "Agent 应用", "Skill 开发", "CI/CD"];
@@ -250,13 +250,13 @@ async function step2ProjectSkill(page: Page, workspaceId: string): Promise<void>
   await composer.fill("");
 }
 
-// 回合完成：该助手消息的正文恰为 `reply`（文件里唯一带显式超时的断言），且没有任何一种审批条。
+// 回合完成：该助手消息的正文恰为 `reply`（文件里唯一带显式超时的断言），整页没有提问卡与审批记录。
 async function expectTurnDone(assistant: Locator, reply: string): Promise<void> {
   await expect(assistant.locator('[data-slot="message-body"]')).toHaveText(reply, {
     timeout: TURN_DONE_TIMEOUT_MS,
   });
   for (const name of APPROVAL_BARS) {
-    await expect(assistant.getByRole("group", { name })).toHaveCount(0);
+    await expect(assistant.page().getByRole("group", { name })).toHaveCount(0);
   }
 }
 
