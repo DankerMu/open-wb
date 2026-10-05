@@ -671,6 +671,34 @@ describe("深度思考过程 fold on the chat page", () => {
     expect(capOf()).toEqual(["max-h-48", "overflow-auto"]);
   });
 
+  it("shimmers the title only while the turn runs (tw-shimmer `shimmer` class)", async () => {
+    const { source } = await mountThread(turnSnapshot("running", { thinking: "想" }));
+    const label = () => control().querySelector('[data-slot="reasoning-trigger-label"]');
+
+    expect([...(label()?.classList ?? [])]).toEqual(
+      expect.arrayContaining(["shimmer", "motion-reduce:animate-none"]),
+    );
+
+    emit(source, 4, "turn.end", { status: "done" });
+
+    expect(label()?.textContent).toBe(SUMMARY);
+    expect(label()?.classList.contains("shimmer")).toBe(false);
+  });
+
+  it("hides the copied component's top fade mask on an expanded fold", async () => {
+    await mountThread(turnSnapshot("running", { thinking: "想" }));
+    const content = fold().querySelector('[data-slot="reasoning-content"]');
+    const fades = [...fold().querySelectorAll('[data-slot="reasoning-fade"]')];
+
+    expect(isOpen()).toBe(true);
+    expect(fades).toHaveLength(1);
+    // The hiding class is an arbitrary variant on the fade's parent; resolve it as a selector.
+    const hiding = [...(content?.classList ?? [])].filter((name) => name.endsWith(":hidden"));
+    expect(hiding).toEqual(["[&>[data-slot=reasoning-fade]]:hidden"]);
+    const selector = hiding[0]?.slice(1, -"]:hidden".length).replace("&", ":scope") ?? "";
+    expect([...(content?.querySelectorAll(selector) ?? [])]).toEqual(fades);
+  });
+
   it("T12 keeps the control's icons decorative and honours reduced motion", async () => {
     await mountThread(turnSnapshot("running", { thinking: "想" }));
     const chevron = control().querySelector('[data-slot="reasoning-trigger-chevron"]');

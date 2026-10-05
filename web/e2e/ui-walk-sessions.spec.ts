@@ -310,6 +310,7 @@ async function step4ThinkingFold(page: Page): Promise<void> {
   const body = fold.locator('[data-slot="reasoning-text"]');
   await expect(body).toBeVisible();
   await expect(body).toHaveText(EXPECTED_THINKING);
+  await expect(fold.locator('[data-slot="reasoning-fade"]')).toHaveCSS("display", "none");
   // 终态消息：不带 data-running，主体限高 12rem 并在盒内滚动（#725）。
   await expect(fold).not.toHaveAttribute("data-running");
   await expect(body).toHaveCSS("max-height", "192px");

@@ -70,6 +70,7 @@ S1c 交付后的实测（2026-10-04，真实模型端点）暴露出：会话页
   助手的任务清单面板同样停靠在这里，位于提问卡之上。不用 assistant-ui 挂在 `tool-call` 上的 `approval` 字段。
 - **threadList**：change B 不用运行时的 `adapters.threadList`——会话列表经外壳侧栏插槽渲染，属 change C；上文「接入方式」里的对应一行留给 C 决定。
 - **任务清单后端**：change B 不再是纯前端。服务端从 omp `todo` 工具结果取全量清单，落库到会话行，经 `todo.updated` 事件与快照字段下发。
+- **启用 `tw-shimmer`**（owner 2026-10-05，#854 实现期间）：拷入的 `reasoning`、`tool-group` 用它给「进行中」的标题加流光。样式入口因此多一条 `@import "tw-shimmer";`，ui-foundation「入口结构」条文与守卫同步放宽为允许这一条。
 - **拷入层第六类修改放宽**（owner 2026-10-04，#848 实现期间）：从「渲染被 registry 原文丢弃的调用方 `children`」放宽为「把被原文丢弃的调用方 `children` 或属性原样透传给底层基元」。
   拷入文件只转发、不写默认值；起因是 `markdown-text` 不透传基元的 `smooth`，正文的逐字显现由应用层传 `smooth={false}` 关闭。
 
