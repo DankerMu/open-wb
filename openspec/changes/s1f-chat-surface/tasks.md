@@ -144,10 +144,10 @@ Minimal mergeable slice: 7.1，自带 `file-changes-card.tsx` 旧实现与其 CS
 
 ## 8. conversation-search / chat-web — 对话内搜索与项目配置入口
 
-- [ ] 8.1 对话内搜索：只做搜索框换肤（换到拷入层组件），位置与行为按 conversation-search；`data-message-id`、`aria-current` 高亮与 `scrollToMessage` 已在组 2 随线程迁移，这里不动。
+- [x] 8.1 对话内搜索：只做搜索框换肤（换到拷入层组件），位置与行为按 conversation-search；`data-message-id`、`aria-current` 高亮与 `scrollToMessage` 已在组 2 随线程迁移，这里不动。
 - [x] 8.2 项目配置入口：复用 7.2 拷入的 `dialog`；只读列表的标题、说明、分组与条目不变；`project-config.css` 的规则删除。
-- [ ] 8.3 改写被打破的断言（按分片）：`ui-walk-sessions.spec.ts` 的 `.chat-search-count`；`ui-walk-project-config.ts` 的 `.chat-project-config-path`、`.ui-tag`；单元测试 `chat-page-search`（读 CSS / 旧类名的部分）、`chat-page-project-config`。
-- [ ] 8.4 按分片退役：`topbar-actions.ts` 的描述符不变（`重命名` 仍来自会话列表动作）；删除 `conversation-search.tsx`、`project-config.tsx` 旧实现的 CSS 与静态断言；登记已迁移文件；CH 行：对话内搜索、项目配置入口。
+- [x] 8.3 改写被打破的断言（按分片）：`ui-walk-sessions.spec.ts` 的 `.chat-search-count`；`ui-walk-project-config.ts` 的 `.chat-project-config-path`、`.ui-tag`；单元测试 `chat-page-search`（读 CSS / 旧类名的部分）、`chat-page-project-config`。
+- [x] 8.4 按分片退役：`topbar-actions.ts` 的描述符不变（`重命名` 仍来自会话列表动作）；删除 `conversation-search.tsx`、`project-config.tsx` 旧实现的 CSS 与静态断言；登记已迁移文件；CH 行：对话内搜索、项目配置入口。
 
 Suggested fixture level: compact - 两个彼此独立的小组件换肤，行为规格不变
 Minimal mergeable slice: 8.2，自带 `project-config.css` 规则删除与 `ui-walk-project-config.ts`、`chat-page-project-config` 的改写——项目配置入口不依赖线程，可先单独合入；8.1 搜索框换肤单独一刀，自带 `.chat-search-count` 与 `chat-page-search` 的改写及旧搜索框 CSS 的删除

@@ -548,7 +548,7 @@ async function step9Search(page: Page, uuid: string, mark: (point: string) => vo
   const toggle = page.getByRole("banner").getByRole("button", { name: "对话内搜索", exact: true });
   const search = page.getByRole("search", { name: "对话内搜索", exact: true });
   const field = search.getByRole("searchbox", { name: "搜索对话内容", exact: true });
-  const counter = search.locator(".chat-search-count");
+  const counter = search.locator('[data-slot="search-count"]');
   const user = page.getByRole("article", { name: "用户" });
   const expectUuidMatch = async () => {
     await field.fill(uuid);

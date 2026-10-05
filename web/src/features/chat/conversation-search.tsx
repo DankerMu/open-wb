@@ -1,7 +1,7 @@
 /* In-conversation search (issue 538), adapted from resource/workbuddy-live-demo.html:1945-1952
    (the box) and :2002-2031 (open/close, Enter / Shift+Enter / Escape, the counter). Unlike the demo
    a jump scrolls the message into view and highlights it instead of toasting, and the input is
-   not debounced. */
+   not debounced. The box is built on the copied `Input` and `Button` (s1f-chat-surface 8.1). */
 import {
   type KeyboardEvent,
   type ReactNode,
@@ -10,7 +10,9 @@ import {
   useRef,
   useState,
 } from "react";
-import { Button, Icon, Input } from "../../ui/index.js";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Icon, type IconName } from "../../ui/index.js";
 import { matchMessages } from "./search-match.js";
 import type { ChatState } from "./stream.js";
 import type { TranscriptHandle } from "./thread-viewport.js";
@@ -33,6 +35,33 @@ function stepTarget(
   const total = matches.length;
   if (total === 0) return undefined;
   return forward ? matches[(index + 1) % total] : matches[(index <= 0 ? total : index) - 1];
+}
+
+/** An icon button of the box: `label` is both its accessible name and its tooltip. */
+function BoxButton({
+  disabled,
+  icon,
+  label,
+  onClick,
+}: {
+  disabled?: boolean;
+  icon: IconName;
+  label: string;
+  onClick(): void;
+}) {
+  return (
+    <Button
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      size="icon"
+      title={label}
+      type="button"
+      variant="ghost"
+    >
+      <Icon name={icon} size={14} />
+    </Button>
+  );
 }
 
 /**
@@ -71,43 +100,50 @@ function SearchBox({
     }
   }
   return (
+    // A fixed row at the top right corner of the page column, above the alerts and the transcript;
+    // it never grows wider than the column and the field alone gives way. The column clips its
+    // overflow, so the padding keeps the focus ring inside the box at the top and on both sides.
     // biome-ignore lint/a11y/useSemanticElements: the implicit role of <search> is unreliable in jsdom queries and older browsers.
-    <div aria-label="对话内搜索" className="chat-search" role="search">
-      <Input
-        aria-label="搜索对话内容"
-        className="chat-search-field"
-        onChange={(event) => onQuery(event.target.value)}
-        onKeyDown={onKeyDown}
-        placeholder="搜索对话内容"
-        ref={input}
-        value={query}
-        variant="search"
-      />
+    <div
+      aria-label="对话内搜索"
+      className="flex max-w-full flex-none items-center gap-1.5 self-end px-1 pt-1"
+      data-slot="conversation-search"
+      role="search"
+    >
+      <div className="relative w-60 min-w-0 shrink">
+        <span className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center text-(--wb-icon-muted)">
+          <Icon name="search" size={14} />
+        </span>
+        <Input
+          aria-label="搜索对话内容"
+          className="pl-8"
+          onChange={(event) => onQuery(event.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder="搜索对话内容"
+          ref={input}
+          type="search"
+          value={query}
+        />
+      </div>
       {/* One text node: a non-atomic live region announces only the node that changed. */}
-      <span aria-live="polite" className="chat-search-count">{`${index + 1}/${total}`}</span>
-      <Button
-        aria-label="上一个"
+      <span
+        aria-live="polite"
+        className="flex-none font-mono text-[11px] text-(--wb-text-secondary)"
+        data-slot="search-count"
+      >{`${index + 1}/${total}`}</span>
+      <BoxButton
         disabled={total === 0}
+        icon="chevron-up"
+        label="上一个"
         onClick={() => onStep(false)}
-        size="icon"
-        title="上一个"
-        variant="ghost"
-      >
-        <Icon name="chevron-up" size={14} />
-      </Button>
-      <Button
-        aria-label="下一个"
+      />
+      <BoxButton
         disabled={total === 0}
+        icon="chevron-down"
+        label="下一个"
         onClick={() => onStep(true)}
-        size="icon"
-        title="下一个"
-        variant="ghost"
-      >
-        <Icon name="chevron-down" size={14} />
-      </Button>
-      <Button aria-label="关闭" onClick={onClose} size="icon" title="关闭" variant="ghost">
-        <Icon name="x" size={14} />
-      </Button>
+      />
+      <BoxButton icon="x" label="关闭" onClick={onClose} />
     </div>
   );
 }
