@@ -14,6 +14,7 @@ import {
   countdowns,
   DENIED,
   dock,
+  emitRequest,
   emitResolved,
   expectRecord,
   flush,
@@ -46,6 +47,29 @@ function caps(element: Element | null | undefined) {
   return [...(element?.classList ?? [])].filter((name) => /^(max-h-|overflow-)/.test(name)).sort();
 }
 
+const OVERFLOW_HINT = "内容较长，请滚动查看全部";
+
+/**
+ * jsdom 不做布局：给 `title` 正文一个内容高度与可见高度，50 行的那段超出、其余不超出（其它元素仍为 0）。
+ * 数值只用来比大小，不是像素断言。
+ */
+function stubTitleHeights() {
+  const isTitle = (el: Element) => el.getAttribute("data-slot") === "approval-title";
+  vi.spyOn(Element.prototype, "clientHeight", "get").mockImplementation(function (this: Element) {
+    return isTitle(this) ? 6 : 0;
+  });
+  vi.spyOn(Element.prototype, "scrollHeight", "get").mockImplementation(function (this: Element) {
+    if (!isTitle(this)) return 0;
+    return this.textContent === LONG_TITLE ? 50 : 2;
+  });
+}
+
+function passClickGuard(ms = 400) {
+  act(() => {
+    vi.advanceTimersByTime(ms);
+  });
+}
+
 function sessionSnapshot(
   status: "running" | "done",
   rows: ChatMessageSnapshot["messages"],
@@ -63,11 +87,13 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanupChatLifecycle();
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
 describe("composer dock: position and structure", () => {
   it("D1 keeps three pending cards, one with a 50-line title, in one dock outside the thread scroller and before the composer", async () => {
+    stubTitleHeights();
     await mountPage(
       snapshotWith([
         approval(7, { title: LONG_TITLE }),
@@ -120,6 +146,28 @@ describe("composer dock: position and structure", () => {
       expect(within(title).queryAllByRole("button")).toHaveLength(0);
     }
     expect(slotText(found[0] as HTMLElement, "approval-title")?.split("\n")).toHaveLength(50);
+
+    // 只有正文被限高裁掉的那张卡（id 7）有可见提示，且正文可由键盘聚焦；提示在正文之外、倒计时句之前
+    const hints = found.map((card) => [
+      ...card.querySelectorAll('[data-slot="approval-overflow"]'),
+    ]);
+    expect(hints.map((list) => list.map((hint) => hint.textContent))).toEqual([
+      [OVERFLOW_HINT],
+      [],
+      [],
+    ]);
+    expect(
+      found.map((card) =>
+        card.querySelector('[data-slot="approval-title"]')?.getAttribute("tabindex"),
+      ),
+    ).toEqual(["0", null, null]);
+    const [long] = found as [HTMLElement];
+    const longTitle = long.querySelector('[data-slot="approval-title"]') as HTMLElement;
+    const hint = hints[0]?.[0] as HTMLElement;
+    expect(longTitle.contains(hint)).toBe(false);
+    expect(follows(longTitle, hint)).toBe(true);
+    expect(follows(hint, countdowns(long)[0] as HTMLElement)).toBe(true);
+    expect(screen.getAllByText(OVERFLOW_HINT)).toEqual([hint]);
   });
 
   it("D2 stacks pending approvals of different messages by ascending id and renders none inside the messages", async () => {
@@ -239,5 +287,78 @@ describe("composer dock: reload recovery", () => {
     expectRecord(records()[0], DENIED);
     expect(composerInput().disabled).toBe(true);
     expect(stopButton().disabled).toBe(false);
+  });
+});
+
+describe("composer dock: click guard after the cards move", () => {
+  it("G1 ignores a click on the remaining card within 400 ms of another card leaving, then answers it once", async () => {
+    const { fetchMock, source } = await mountPage(snapshotWith([approval(7), approval(8)]), {
+      [approvalPath(7)]: () => settledBody(7, "allow"),
+      [approvalPath(8)]: () => settledBody(8, "allow"),
+    });
+    const [seven, eight] = cards() as [HTMLElement, HTMLElement];
+
+    // 两张卡随快照一起出现（停靠区从空到有）：立即点击照常作答
+    fireEvent.click(button(eight, "允许"));
+    await flush();
+    expect(bodies(fetchMock, approvalPath(8))).toEqual([{ decision: "allow" }]);
+    emitResolved(source, 1, 8, "allow");
+    expect(cards()).toEqual([seven]);
+
+    fireEvent.click(button(seven, "允许"));
+    passClickGuard(399);
+    fireEvent.click(button(seven, "拒绝"));
+    await flush();
+    expect(bodies(fetchMock, approvalPath(7))).toEqual([]);
+    expect(button(seven, "允许").disabled).toBe(false);
+    expect(button(seven, "拒绝").disabled).toBe(false);
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
+
+    passClickGuard(1);
+    fireEvent.click(button(seven, "允许"));
+    await flush();
+    expect(bodies(fetchMock, approvalPath(7))).toEqual([{ decision: "allow" }]);
+    expect(button(seven, "允许").disabled).toBe(true);
+  });
+
+  it("G2 arms the guard for every card when a new card joins one that is already shown", async () => {
+    const { fetchMock, source } = await mountPage(snapshotWith([approval(7)]), {
+      [approvalPath(7)]: () => settledBody(7, "deny"),
+      [approvalPath(8)]: () => settledBody(8, "allow"),
+    });
+    emitRequest(source, 1, 8, { title: OTHER_TITLE });
+    const [seven, eight] = cards() as [HTMLElement, HTMLElement];
+
+    fireEvent.click(button(seven, "拒绝"));
+    fireEvent.click(button(eight, "允许"));
+    await flush();
+    expect(bodies(fetchMock, approvalPath(7))).toEqual([]);
+    expect(bodies(fetchMock, approvalPath(8))).toEqual([]);
+    expect(button(seven, "拒绝").disabled).toBe(false);
+    expect(button(eight, "允许").disabled).toBe(false);
+
+    passClickGuard();
+    fireEvent.click(button(seven, "拒绝"));
+    await flush();
+    expect(bodies(fetchMock, approvalPath(7))).toEqual([{ decision: "deny" }]);
+    expect(bodies(fetchMock, approvalPath(8))).toEqual([]);
+  });
+
+  it("G3 answers a single card at once when it appears in an empty dock, also after the dock emptied before", async () => {
+    const { fetchMock, source } = await mountPage(snapshotWith([]), {
+      [approvalPath(7)]: () => settledBody(7, "allow"),
+      [approvalPath(8)]: () => settledBody(8, "deny"),
+    });
+    emitRequest(source, 1, 7);
+    fireEvent.click(button(cards()[0] as HTMLElement, "允许"));
+    await flush();
+    expect(bodies(fetchMock, approvalPath(7))).toEqual([{ decision: "allow" }]);
+    emitResolved(source, 2, 7, "allow");
+    expect(dock()).toBeNull();
+
+    emitRequest(source, 3, 8, { title: OTHER_TITLE });
+    fireEvent.click(button(cards()[0] as HTMLElement, "拒绝"));
+    await flush();
+    expect(bodies(fetchMock, approvalPath(8))).toEqual([{ decision: "deny" }]);
   });
 });

@@ -151,6 +151,9 @@ export async function walkRegenerate(
   await expect(form.getByRole("button", { name: "停止", exact: true })).toHaveCount(0);
   await expect(generatingStatus(page)).toHaveCount(0);
   await expect(regenerate).toBeEnabled();
+  // 回合结束、输入框解锁之后再数一次（即时计数）：完成时才弹出的提示此刻也还挂着。
+  expect(await toast.count(), "no regenerating toast after the round").toBe(0);
+  expect(await anyToast.count(), "no toast at all after the round").toBe(0);
 
   await inspectSidebar(page, project, async (sidebar) => {
     const current = sidebar

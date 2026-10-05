@@ -73,6 +73,13 @@ function expectCardAlert(card: HTMLElement, message: string) {
   expect(document.querySelector(".ui-toast")).toBeNull();
 }
 
+/** 卡的集合变化后 400ms 内的作答点击被忽略：推进注入时钟越过它。 */
+function passClickGuard() {
+  act(() => {
+    vi.advanceTimersByTime(400);
+  });
+}
+
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
   vi.setSystemTime(T0);
@@ -348,12 +355,38 @@ describe("approval prompt card: answer outcomes", () => {
     expect(calls(fetchMock, approvalPath(7))).toHaveLength(2);
   });
 
+  it.each([
+    [400, "invalid_request", "请求参数无效"],
+    [404, "not_found", "审批不存在"],
+    [503, "service_unavailable", "服务暂不可用"],
+  ])(
+    "A6c shows a %i envelope message inside the card and re-enables both buttons",
+    async (status, code, message) => {
+      const { fetchMock, source } = await mountPage(snapshotWith([]), {
+        [approvalPath(7)]: () => jsonResponse({ error: { code, message } }, status),
+      });
+      emitRequest(source, 1, 7);
+
+      fireEvent.click(button(cards()[0] as HTMLElement, "允许"));
+      await flush();
+
+      const [card] = cards() as [HTMLElement];
+      expectCardAlert(card, message);
+      expect(calls(fetchMock, approvalPath(7))).toHaveLength(1);
+      expect([button(card, "允许").disabled, button(card, "拒绝").disabled]).toEqual([
+        false,
+        false,
+      ]);
+    },
+  );
+
   it("A6b shows the request_failed wording inside the card when the answer fails on the network", async () => {
     const { fetchMock, source } = await mountPage(snapshotWith([]), {
       [approvalPath(7)]: () => Promise.reject(new TypeError("network down")),
     });
     emitRequest(source, 1, 7);
     emitRequest(source, 2, 8, { title: OTHER_TITLE });
+    passClickGuard();
 
     fireEvent.click(button(cards()[0] as HTMLElement, "拒绝"));
     await flush();
@@ -383,6 +416,8 @@ describe("approval prompt card: answer outcomes", () => {
     expect(slotText(eight, "approval-title")).toBe(OTHER_TITLE);
     expect(seven.compareDocumentPosition(eight) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
+    // 卡的集合刚变过（8 加入、随后 8 消失）：各等过防误点的 400ms 再点
+    passClickGuard();
     fireEvent.click(button(eight, "拒绝"));
     await flush();
     expect(bodies(fetchMock, approvalPath(8))).toEqual([{ decision: "deny" }]);
@@ -399,6 +434,7 @@ describe("approval prompt card: answer outcomes", () => {
     expectRecord(records()[0], DENIED);
     expect(composerInput().disabled).toBe(true);
 
+    passClickGuard();
     fireEvent.click(button(seven, "允许"));
     await flush();
     expect(bodies(fetchMock, approvalPath(7))).toEqual([{ decision: "allow" }]);

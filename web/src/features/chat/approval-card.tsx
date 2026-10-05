@@ -1,7 +1,7 @@
 // 审批的两种呈现（design D7）：待决审批是输入框上方停靠区里的提问卡（composer-dock.tsx 叠放），已结算
 // 审批是所属助手消息内的记录（message-thread.tsx 按 D4 的块次序挂载）。二者只读归约出的 `approvals`：
 // 工具名徽章是 `tool` 字段（不解析 `title`），正文是 `title` 全文、保留换行。
-import { useId, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Icon } from "../../ui/index.js";
 import type { ChatApprovalView } from "./stream-approvals.js";
@@ -25,6 +25,7 @@ function ToolBadge({ tool }: { tool: string }) {
     <span
       className="min-w-0 truncate rounded-full border border-(--wb-border-default) bg-(--wb-bg-primary) px-2 py-px font-mono text-[11.5px] leading-4 font-normal text-(--wb-text-secondary)"
       data-slot="approval-tool"
+      title={tool}
     >
       {tool}
     </span>
@@ -35,13 +36,20 @@ function ToolBadge({ tool }: { tool: string }) {
  * 一张待决提问卡。`title` 正文有自己的限高并在卡内滚动，倒计时句与按钮在它之外，长 `title` 不会把按钮
  * 挤出停靠区。点击后本卡两个按钮立即禁用；卡头不做乐观改动——`approval.resolved` 或权威快照显示已结算
  * 后停靠区不再渲染它。作答失败的文案以 `role="alert"` 留在卡内，下一次点击时清除。
+ *
+ * 同意安全：`title` 来自助手一侧。正文被限高裁掉时（`scrollHeight > clientHeight`，随正文变化与元素尺寸
+ * 变化重量）卡内多一行可见提示，正文可由键盘聚焦滚动；`Date.now()` 早于 `ignoreClicksUntil` 的点击不作答
+ * （卡刚移过位，见 composer-dock.tsx）。
  */
 export function ApprovalPromptCard({
   approval,
+  ignoreClicksUntil,
   now,
   onAnswer,
 }: {
   approval: ChatApprovalView;
+  /** 这个时刻（注入时钟的毫秒时间）之前的作答点击被忽略：不发请求、不改任何状态。 */
+  ignoreClicksUntil: number;
   /** 注入时钟的毫秒时间；停靠区每秒重读一次。 */
   now: number;
   onAnswer: AnswerApproval;
@@ -49,7 +57,21 @@ export function ApprovalPromptCard({
   const headerId = useId();
   const [sent, setSent] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const titleRef = useRef<HTMLParagraphElement>(null);
+  const [clipped, setClipped] = useState(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 正文变了就重量；元素本身不换。
+  useLayoutEffect(() => {
+    const el = titleRef.current;
+    if (!el) return;
+    const measure = () => setClipped(el.scrollHeight > el.clientHeight);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const resize = new ResizeObserver(measure);
+    resize.observe(el);
+    return () => resize.disconnect();
+  }, [approval.title]);
   const answer = (choice: ApprovalAnswer) => {
+    if (Date.now() < ignoreClicksUntil) return;
     setSent(true);
     setFailure(null);
     void onAnswer(approval.id, choice).then((message) => {
@@ -78,9 +100,19 @@ export function ApprovalPromptCard({
       <p
         className={`${TITLE_TEXT} max-h-30 overflow-y-auto narrow:max-h-24`}
         data-slot="approval-title"
+        ref={titleRef}
+        tabIndex={clipped ? 0 : undefined}
       >
         {approval.title}
       </p>
+      {clipped ? (
+        <p
+          className="m-0 text-xs font-medium text-(--wb-status-warning-text)"
+          data-slot="approval-overflow"
+        >
+          内容较长，请滚动查看全部
+        </p>
+      ) : null}
       <p className="m-0 text-[12.5px] text-(--wb-text-secondary)" data-slot="approval-countdown">
         {`（${seconds}s 内未操作将自动允许）`}
       </p>
