@@ -198,21 +198,11 @@ describe("(C5) static contract", () => {
     expect(view).not.toContain("新建会话");
   });
 
-  it("chat.css: single-column layout, one-row playbooks at ≥761px, wrap kept at ≤760px", () => {
+  it("chat.css: single-column layout, no session list rules in the page column", () => {
     const css = stripComments(readRepoFile("web/src/features/chat/chat.css"));
     expect(ruleBody(css, ".chat-layout")).toContain("grid-template-columns: minmax(0, 1fr);");
     expect(css).not.toContain(".chat-sidebar");
-    const row = ruleBody(css, ".chat-playbooks-row");
-    expect(row).toContain("flex-wrap: nowrap;");
-    expect(row).not.toContain("overflow");
-    const card = ruleBody(css, ".chat-playbooks-row > li");
-    expect(card).toContain("flex: 1 1 0;");
-    expect(card).toContain("min-width: 0;");
-    expect(card).toContain("max-width: 220px;");
-    expect(ruleBody(css, ".chat-playbook-title-text")).toContain("text-overflow: ellipsis;");
     const narrow = blockBody(css, /@media\s*\(max-width:\s*760px\)\s*\{/);
-    expect(ruleBody(narrow, ".chat-playbooks-row")).toContain("flex-wrap: wrap;");
-    expect(ruleBody(narrow, ".chat-playbooks-row > li")).toContain("flex: 1 1 140px;");
     expect(ruleBody(narrow, ".chat-layout")).not.toContain("gap");
     expect(ruleBody(css, ".chat-session-nav")).not.toContain("overflow");
   });

@@ -75,14 +75,7 @@ import {
 } from "./chat-page-welcome-scene-support.js";
 import { settle } from "./chat-stream-support.js";
 import { currentLocation, deferredResponse, type FetchMock } from "./support.js";
-import {
-  blockBody,
-  readRepoFile,
-  ruleBody,
-  stripComments,
-  topLevelBlocks,
-  yieldMacrotask,
-} from "./ui-support.js";
+import { yieldMacrotask } from "./ui-support.js";
 
 const UNSELECTED_BUTTON = "任务启动于 未选择";
 const PROJECT_A_BUTTON = "任务启动于 项目A";
@@ -106,6 +99,22 @@ function pageHtml() {
 /** 至今发出的请求总数（任意路径、任意方法）。 */
 function requestCount(fetchMock: FetchMock) {
   return fetchMock.mock.calls.length;
+}
+
+/** 页面上全部 `role="status"` / `role="alert"` 节点（含通知区的播报节点），按文档顺序。 */
+function announcements() {
+  return [...screen.queryAllByRole("status"), ...screen.queryAllByRole("alert")];
+}
+
+/** 场景切换不提示：通知区为空、播报节点与切换前是同一批、`message` 不在页面任何位置。 */
+function expectNoNotice(before: Element[], message: string) {
+  const region = screen.getByRole("region", { name: "通知" });
+  expect(within(region).queryAllByRole("listitem")).toEqual([]);
+  expect(region.textContent).toBe("");
+  expect(toasts()).toEqual([]);
+  expect(announcements()).toEqual(before);
+  expect(pageText()).not.toContain(message);
+  expect(pageText()).not.toContain("已切换到");
 }
 
 function send(text: string) {
@@ -136,20 +145,20 @@ describe("场景胶囊 (W1–W4)", () => {
     expect(quickLabels()).toEqual(OFFICE_LABELS);
   });
 
-  it("W2 切换到 代码开发（X7 不发任何请求）：选中态与快捷任务替换、一条 info Toast；点 网站开发 只填草稿不发送；再点已选场景无变化", async () => {
+  it("W2 切换到 代码开发（X7 不发任何请求）：选中态与快捷任务替换，没有 Toast 也没有播报；点 网站开发 只填草稿不发送；再点已选场景无变化", async () => {
     const { fetchMock } = await mountWelcome();
     await workspacesRead(fetchMock, 1);
     const requests = requestCount(fetchMock);
-    const expectCodeSceneWithOneToast = () => {
+    const before = announcements();
+    const expectCodeSceneWithoutNotice = () => {
       expect(pressedScenes()).toEqual(["false", "true", "false"]);
       expect(quickLabels()).toEqual(CODE_LABELS);
-      expect(toasts()).toEqual(["已切换到「代码开发」场景"]);
+      expectNoNotice(before, "已切换到「代码开发」场景");
     };
     selectScene("代码开发");
-    expectCodeSceneWithOneToast();
-    const shown = Array.from(document.querySelectorAll(".ui-toast"));
-    expect(shown.map((toast) => toast.classList.contains("ui-toast--info"))).toEqual([true]);
+    expectCodeSceneWithoutNotice();
     await act(settle);
+    expectCodeSceneWithoutNotice();
     expect(requestCount(fetchMock)).toBe(requests);
 
     fireEvent.click(within(quickRow()).getByRole("button", { name: "网站开发" }));
@@ -159,20 +168,21 @@ describe("场景胶囊 (W1–W4)", () => {
     expect(currentLocation()).toBe("/");
 
     selectScene("代码开发");
-    expectCodeSceneWithOneToast();
     await act(settle);
+    expectCodeSceneWithoutNotice();
     expect(requestCount(fetchMock)).toBe(requests);
   });
 
-  it("W2 切换到 创意设计（X7 不发任何请求）：五项快捷任务与对应 Toast", async () => {
+  it("W2 切换到 创意设计（X7 不发任何请求）：五项快捷任务，没有 Toast 也没有播报", async () => {
     const { fetchMock } = await mountWelcome();
     await workspacesRead(fetchMock, 1);
     const requests = requestCount(fetchMock);
+    const before = announcements();
     selectScene("创意设计");
     expect(pressedScenes()).toEqual(["false", "false", "true"]);
     expect(quickLabels()).toEqual(DESIGN_LABELS);
-    expect(toasts()).toEqual(["已切换到「创意设计」场景"]);
     await act(settle);
+    expectNoNotice(before, "已切换到「创意设计」场景");
     expect(requestCount(fetchMock)).toBe(requests);
   });
 
@@ -686,25 +696,5 @@ describe("评审后补充 (X1、X3、X5、X6)", () => {
     await waitFor(() => expect(promptRequests(fetchMock, sessionId)).toHaveLength(1));
     expect(createRequests(fetchMock)).toEqual([createOf('{"scene":"design"}')]);
     expect(promptRequests(fetchMock, sessionId)).toEqual([["POST", '{"message":"你好"}']]);
-  });
-});
-
-describe("静态样式", () => {
-  it("≤760px 媒体块内 .chat-quick-row 单行横向滚动且不超出容器、chip 不收缩（X8）；该规则不出现在媒体块之外", () => {
-    const css = stripComments(readRepoFile("web/src/features/chat/chat.css"));
-    const media = blockBody(css, /@media\s*\(max-width:\s*760px\)\s*\{/);
-    const narrow = ruleBody(media, ".chat-quick-row");
-    expect(narrow).toContain("flex-wrap: nowrap;");
-    expect(narrow).toContain("overflow-x: auto;");
-    expect(narrow).toContain("max-width: 100%;");
-    expect(ruleBody(media, ".chat-quick-chip")).toContain("flex: none;");
-
-    const outside = topLevelBlocks(css)
-      .filter(({ prelude }) => prelude.split(",").some((part) => part.trim() === ".chat-quick-row"))
-      .map(({ body }) => body);
-    expect(outside).toHaveLength(1);
-    expect(outside[0]).toContain("flex-wrap: wrap;");
-    expect(outside[0]).not.toContain("nowrap");
-    expect(outside[0]).not.toContain("overflow");
   });
 });

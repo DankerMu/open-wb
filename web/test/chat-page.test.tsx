@@ -274,7 +274,9 @@ function welcomeInput() {
 }
 
 function playbookCards(): HTMLButtonElement[] {
-  return Array.from(playbookRegion().querySelectorAll<HTMLButtonElement>(".chat-playbook-card"));
+  return within(playbookRegion())
+    .getAllByRole("listitem")
+    .map((item) => within(item).getByRole<HTMLButtonElement>("button"));
 }
 
 function cardTitle(card: HTMLElement): string | undefined {

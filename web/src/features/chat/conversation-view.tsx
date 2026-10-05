@@ -74,7 +74,10 @@ export function ConversationView({
 }: ConversationViewProps) {
   return (
     <div className="chat-layout">
-      <div className={requestedSessionId ? "chat-main" : "chat-main chat-main--welcome"}>
+      <div
+        className={requestedSessionId ? "chat-main" : "chat-main chat-main--welcome"}
+        data-slot="chat-column"
+      >
         {search.box}
         {historyError ? (
           <p className="ui-alert" role="alert">

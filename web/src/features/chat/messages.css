@@ -8,7 +8,7 @@
 
 /* Approval bars adapted from resource/workbuddy-live-demo.html:475-490 (.approval, .appr-*);
    the demo .bar/.cd countdown and the literal-colored .appr-btn are replaced by one countdown
-   sentence and ui Button variants. The fieldset reset mirrors .chat-quick-row (chat.css). */
+   sentence and ui Button variants. The fieldset is reset to a plain flex row. */
 .chat-approvals {
   display: flex;
   flex-direction: column;
