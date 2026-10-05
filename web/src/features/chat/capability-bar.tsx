@@ -1,12 +1,19 @@
-// 输入框底部的能力栏（design D6、D13）。此刻只有最左的工作空间位：欢迎态是选择器，会话开始后是只读标签。
-// 权限、上传、专家等控件不渲染，也不摆禁用占位。
-import { useState } from "react";
+// 输入框底部的能力栏（design D6、D13），自左向右：工作空间位（欢迎态是选择器，会话开始后是只读标签）、
+// 「+」菜单（技能与命令）。权限、上传、专家等控件不渲染，也不摆禁用占位。
+import { type RefObject, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Icon } from "../../ui/index.js";
 import { useAuth } from "../auth/index.js";
 import { logicalPath } from "../files/file-meta.js";
+import { sourceTag, type useSlashMenu } from "./slash-menu.js";
 import type { WelcomeOptions } from "./welcome-options.js";
 import type { Workspace } from "./workspace-list.js";
 
@@ -18,11 +25,17 @@ type WorkspaceChoice = Pick<WelcomeOptions, "workspace" | "workspaces" | "worksp
   onSelect(workspaceId: string | null): void;
 };
 
+type PlusMenu = ReturnType<typeof useSlashMenu>["plus"];
+
 type CapabilityBarProps = {
   /** 欢迎态的空间选择；`onSelect` 只改会话页的内存状态。 */
   choice: WorkspaceChoice;
   /** 输入框锁定：选择器按钮随之禁用。 */
   disabled: boolean;
+  /** 输入框元素：「+」菜单点选后把焦点交给它。 */
+  inputRef: RefObject<HTMLTextAreaElement | null>;
+  /** 「+」菜单的目录、开合与可用条件（与斜杠候选同出 `useSlashMenu`，共用一份目录）。 */
+  plus: PlusMenu;
   /**
    * 已选会话绑定的工作空间：`id` 为 null 即未绑定，undefined 表示会话还没解析出来；`workspace` 是它在
    * 已读取列表里的那一项（读取中、读取失败或空间已删时为 undefined）。欢迎态不传。
@@ -30,7 +43,7 @@ type CapabilityBarProps = {
   session?: { id: string | null | undefined; workspace: Workspace | undefined };
 };
 
-export function CapabilityBar({ choice, disabled, session }: CapabilityBarProps) {
+export function CapabilityBar({ choice, disabled, inputRef, plus, session }: CapabilityBarProps) {
   return (
     <div className="flex min-w-0 flex-1 items-center gap-1" data-slot="composer-capabilities">
       {session === undefined ? (
@@ -38,7 +51,70 @@ export function CapabilityBar({ choice, disabled, session }: CapabilityBarProps)
       ) : (
         <WorkspaceLabel {...session} />
       )}
+      <CommandMenu inputRef={inputRef} plus={plus} />
     </div>
+  );
+}
+
+/**
+ * `技能与命令` 按钮与菜单：按目录顺序列出命令与技能（名称、项目标记、描述）；目录未持有（拉取中或失败）时
+ * 只有 `暂无可用项`，目录到达后列表就地替换它。点选把草稿写成 `/<name> `，菜单关闭后焦点交给输入框而不是
+ * 回到按钮（此时草稿非空白，按钮已禁用）；Esc 等其它关闭方式仍按菜单默认把焦点还给按钮。
+ */
+function CommandMenu({ inputRef, plus }: Pick<CapabilityBarProps, "inputRef" | "plus">) {
+  const picked = useRef(false);
+  return (
+    <DropdownMenu onOpenChange={plus.onOpenChange} open={plus.open}>
+      <DropdownMenuTrigger asChild>
+        <Button
+          aria-label="技能与命令"
+          className="flex-none text-muted-foreground"
+          disabled={plus.disabled}
+          size="icon-sm"
+          type="button"
+          variant="ghost"
+        >
+          <Icon name="plus" size={14} />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        className="w-80 max-w-(--radix-dropdown-menu-content-available-width)"
+        collisionPadding={8}
+        onCloseAutoFocus={(event) => {
+          if (!picked.current) return;
+          picked.current = false;
+          event.preventDefault();
+          inputRef.current?.focus();
+        }}
+        side="top"
+      >
+        {plus.commands === undefined || plus.commands.length === 0 ? (
+          <p className="m-0 px-1.5 py-1 text-sm text-muted-foreground">暂无可用项</p>
+        ) : (
+          plus.commands.map((command) => {
+            const tag = sourceTag(command);
+            return (
+              <DropdownMenuItem
+                className="flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[13px] leading-5 wrap-anywhere"
+                key={command.name}
+                onSelect={() => {
+                  picked.current = true;
+                  plus.onPick(command);
+                }}
+              >
+                <span className="font-medium">{command.label}</span>
+                {tag === null ? null : (
+                  <span className="rounded bg-(--wb-brand-primary-subtle) px-1.5 text-xs text-(--wb-brand-primary-deep)">
+                    {tag}
+                  </span>
+                )}
+                <span className="text-muted-foreground">{command.description}</span>
+              </DropdownMenuItem>
+            );
+          })
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

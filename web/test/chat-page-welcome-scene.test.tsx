@@ -287,14 +287,17 @@ describe("composer footer 空间选择 (W5–W9)", () => {
     expect(pageHtml()).not.toContain(ROOT_MARK);
   });
 
-  it("W6 无权限元素与无匹配：footer 只有一个按钮；搜索无匹配只剩 未选择 与提示；按名称过滤（去首尾空白、不分大小写、不匹配逻辑路径）", async () => {
+  it("W6 无权限元素与无匹配：footer 只有空间按钮与「+」按钮；搜索无匹配只剩 未选择 与提示；按名称过滤（去首尾空白、不分大小写、不匹配逻辑路径）", async () => {
     const { fetchMock } = await mountWelcome({
       workspaces: () => workspaceList(PROJECT_A, SUPPORT, ALPHA),
     });
     await workspacesRead(fetchMock, 1);
     const picker = document.querySelector('[data-slot="composer-capabilities"]');
     if (!(picker instanceof HTMLElement)) throw new Error("未渲染 footer");
-    expect(within(picker).getAllByRole("button")).toEqual([footerButton(UNSELECTED_BUTTON)]);
+    expect(within(picker).getAllByRole("button")).toEqual([
+      footerButton(UNSELECTED_BUTTON),
+      screen.getByRole("button", { name: "技能与命令" }),
+    ]);
 
     const dialog = await openPicker();
     const none = [[UNSELECTED, "true"]];

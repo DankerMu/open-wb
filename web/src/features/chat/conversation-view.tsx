@@ -1,4 +1,4 @@
-import type { ComponentProps, FormEvent, ReactNode, Ref } from "react";
+import type { ComponentProps, FormEvent, ReactNode, Ref, RefObject } from "react";
 import type { ApiClient } from "../../lib/api.js";
 import { CapabilityBar } from "./capability-bar.js";
 import { Composer } from "./composer.js";
@@ -17,8 +17,8 @@ type ConversationViewProps = {
   /** 当前账号的 API client；产物卡经它按需拉取预览。 */
   client: ApiClient;
   composerDisabled: boolean;
-  /** 输入框元素：回到欢迎态后由会话页聚焦它。 */
-  composerRef: Ref<HTMLTextAreaElement>;
+  /** 输入框元素：回到欢迎态后由会话页聚焦它，「+」菜单点选后也聚焦它。 */
+  composerRef: RefObject<HTMLTextAreaElement | null>;
   draft: string;
   generating: boolean;
   historyError: string | null;
@@ -36,7 +36,7 @@ type ConversationViewProps = {
   /** 对话内搜索：搜索框（未打开时为 null）、当前匹配的消息 id、交给转录区的句柄。 */
   search: { box: ReactNode; currentId: number | null; handleRef: Ref<TranscriptHandle> };
   sendDisabled: boolean;
-  /** 斜杠命令候选：输入框上方的面板（不可见时为 null）与先于 Enter 规则的按键拦截。 */
+  /** 斜杠命令候选：输入框上方的面板（不可见时为 null）、先于 Enter 规则的按键拦截，以及「+」菜单的状态。 */
   slash: ReturnType<typeof useSlashMenu>;
   streamError: string | null;
   /** 欢迎态的场景与空间选择（状态在会话页）；有当前会话时场景不渲染，空间位换成只读标签。 */
@@ -126,6 +126,8 @@ export function ConversationView({
                 workspacesError: welcome.workspacesError,
               }}
               disabled={composerDisabled}
+              inputRef={composerRef}
+              plus={slash.plus}
               {...(requestedSessionId ? { session: { id: workspaceId, workspace } } : {})}
             />
           }

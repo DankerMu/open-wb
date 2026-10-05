@@ -1,7 +1,9 @@
 /* Slash candidates of the composer (issue 556): the catalogues of `GET /api/commands`, one per
    workspace id (issue 814), fetched lazily and kept for the client, the panel above the textarea
    and the keys it takes from the composer. The focus never leaves the textarea: the panel and its
-   options are no tab stops and a press on the panel is prevented from taking the focus. */
+   options are no tab stops and a press on the panel is prevented from taking the focus. The 「+」
+   menu of the capability bar lists the same catalogues: its open state is kept here so that it
+   asks for them by the very rule of the panel. */
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import type { ApiClient } from "../../lib/api.js";
 import type { Command } from "../../lib/api-commands.js";
@@ -11,8 +13,6 @@ type ComposerKeyEvent = KeyboardEvent<HTMLTextAreaElement>;
 type KeyAction = "down" | "up" | "pick" | "dismiss";
 /** The workspace a catalogue belongs to; null is the account's own root (no workspace). */
 type WorkspaceKey = string | null;
-
-const HIDDEN = { menu: null, interceptKeyDown: () => false };
 
 function optionId(id: string, index: number) {
   return `${id}-${index}`;
@@ -42,7 +42,7 @@ function keyAction(event: ComposerKeyEvent): KeyAction | null {
 }
 
 /** The tag of a project skill, null for every other command. */
-function sourceTag({ source, overrides }: Command): string | null {
+export function sourceTag({ source, overrides }: Command): string | null {
   if (source !== "project") return null;
   return overrides ? "项目 · 覆盖平台技能" : "项目";
 }
@@ -119,6 +119,17 @@ function SlashMenu({
 }
 
 /**
+ * Whether the 「+」 menu can be opened and is open: `disabled` while the composer is not `enabled`
+ * or the draft is not blank, and an open menu closes then (reset during render) and stays closed.
+ */
+function usePlusState(enabled: boolean, draft: string) {
+  const [open, setOpen] = useState(false);
+  const disabled = !enabled || draft.trim() !== "";
+  if (open && disabled) setOpen(false);
+  return { disabled, open: open && !disabled, onOpenChange: setOpen };
+}
+
+/**
  * The slash candidates of the composer holding `draft`. `menu` is the panel (null while hidden)
  * and `interceptKeyDown` takes the panel's keys before the composer's Enter rule; it returns true
  * for a key it handled and never while the panel is hidden.
@@ -138,6 +149,14 @@ function SlashMenu({
  * and the highlight alone also follows the workspace id: a change of it returns to the first option
  * and leaves a dismissal in place (both reset during render, as in conversation-search.tsx); the
  * highlighted option is scrolled into view from the key handler.
+ *
+ * `plus` is the 「+」 menu of the capability bar. It can be opened while the composer is `enabled`
+ * and the draft is blank (nothing but whitespace), which never coincides with a slash draft; it is
+ * `disabled` otherwise, and an open one closes (reset during render) and stays closed. While it is
+ * open the catalogue is wanted exactly as for the panel, so the same single call per client and
+ * workspace id serves both. `commands` is the catalogue of the current workspace id, undefined
+ * while it is not held (in flight, failed, or the workspace id unknown); `onPick` leaves the draft
+ * the panel's pick leaves.
  */
 export function useSlashMenu(
   client: ApiClient,
@@ -145,7 +164,17 @@ export function useSlashMenu(
   draft: string,
   enabled: boolean,
   setDraft: (text: string) => void,
-): { menu: ReactNode; interceptKeyDown(event: ComposerKeyEvent): boolean } {
+): {
+  menu: ReactNode;
+  interceptKeyDown(event: ComposerKeyEvent): boolean;
+  plus: {
+    commands: readonly Command[] | undefined;
+    disabled: boolean;
+    open: boolean;
+    onOpenChange(open: boolean): void;
+    onPick(command: Command): void;
+  };
+} {
   const id = useId();
   const [catalogues, setCatalogues] = useState<{
     client: ApiClient;
@@ -162,8 +191,12 @@ export function useSlashMenu(
     client: ApiClient;
     byWorkspace: Map<WorkspaceKey, AbortController>;
   } | null>(null);
-  /** The workspace id whose catalogue the panel wants; undefined while no panel is wanted. */
-  const wanted = enabled && isOpen(draft) ? workspaceId : undefined;
+  const plusState = usePlusState(enabled, draft);
+  /**
+   * The workspace id whose catalogue the panel or the open 「+」 menu wants; undefined while
+   * neither is wanted.
+   */
+  const wanted = enabled && (isOpen(draft) || plusState.open) ? workspaceId : undefined;
 
   useEffect(() => {
     if (wanted === undefined) return;
@@ -214,9 +247,10 @@ export function useSlashMenu(
   // client): 0 then.
   const active = state.index < matches.length ? state.index : 0;
   const current = matches[active];
-  if (current === undefined) return HIDDEN;
-
   const pick = (command: Command) => setDraft(pickText(command.name));
+  const plus = { ...plusState, commands, onPick: pick };
+  if (current === undefined) return { menu: null, interceptKeyDown: () => false, plus };
+
   const interceptKeyDown = (event: ComposerKeyEvent) => {
     const action = keyAction(event);
     if (action === null) return false;
@@ -239,5 +273,6 @@ export function useSlashMenu(
   return {
     menu: <SlashMenu active={active} id={id} matches={matches} onPick={pick} />,
     interceptKeyDown,
+    plus,
   };
 }

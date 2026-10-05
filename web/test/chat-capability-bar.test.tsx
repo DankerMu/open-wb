@@ -102,7 +102,7 @@ describe("能力栏：欢迎态", () => {
     const buttons = within(toolbar).getAllByRole("button");
     expect(
       buttons.map((button) => button.getAttribute("aria-label") ?? button.textContent),
-    ).toEqual(["任务启动于 未选择", "发送"]);
+    ).toEqual(["任务启动于 未选择", "技能与命令", "发送"]);
     expect(toolbar.firstElementChild?.firstElementChild).toBe(workspaceSlot());
     for (const text of ["权限", "完全访问", "默认权限", "上传", "专家"]) {
       expect(toolbar.textContent).not.toContain(text);

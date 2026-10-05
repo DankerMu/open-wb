@@ -132,6 +132,7 @@ async function walkSessionMeta(
     await step9Search(page, uuid, mark);
     mark("step 9");
     await step10Slash(page, sessionId);
+    await step10PlusMenu(page);
     mark("step 10");
     await step11Delete(page, project, sessionId, renamed);
     mark("step 11");
@@ -639,6 +640,35 @@ async function sendSlashTurn(
   await expect(assistant.nth(index).getByRole("region")).toHaveCount(0);
   await expect(composer).toBeEnabled();
   await expect(composer).toHaveValue("");
+}
+
+// 能力栏「+」菜单（接在 step10Slash 之后，目录已由斜杠候选取回）：空白草稿下打开 `技能与命令`，列出同一份
+// 目录；点选把草稿写成 `/<name> `、菜单关闭、焦点在输入框，没有发出 prompt；草稿非空白时按钮禁用。
+async function step10PlusMenu(page: Page): Promise<void> {
+  const composer = page.getByLabel("给助手发消息");
+  const trigger = page.getByRole("button", { name: "技能与命令", exact: true });
+  const menu = page.getByRole("menu");
+  const requests: string[] = [];
+  const record = (request: { method(): string; url(): string }) => {
+    const { pathname } = new URL(request.url());
+    if (pathname === "/api/commands" || request.method() === "POST") requests.push(pathname);
+  };
+
+  await expect(composer).toHaveValue("");
+  page.on("request", record);
+  await trigger.click();
+  // 数组形式逐项对应且项数相等：恰两项，按目录顺序。
+  await expect(menu.getByRole("menuitem")).toContainText(SLASH_LABELS);
+  await menu.getByRole("menuitem").nth(0).click();
+  await expect(menu).toHaveCount(0);
+  await expect(composer).toHaveValue("/compact ");
+  await expect(composer).toBeFocused();
+  await expect(trigger).toBeDisabled();
+  await composer.fill("");
+  await expect(trigger).toBeEnabled();
+  page.off("request", record);
+  // 没有 prompt（任何 POST），也没有第二次目录请求（与斜杠候选共用缓存）。
+  expect(requests).toEqual([]);
 }
 
 // 次序有判别力：候选目录在第一次输入 `/` 时才取，`Enter` 之前先断言面板里恰一项——面板没出来时
