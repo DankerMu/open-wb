@@ -19,6 +19,7 @@ const MIGRATED_AREAS: string[] = [
   "web/src/features/chat/markdown-body.tsx",
   "web/src/features/chat/message-thread.tsx",
   "web/src/features/chat/runtime-convert.ts",
+  "web/src/features/chat/thread-viewport.tsx",
   "web/src/features/chat/use-thread-runtime.ts",
 ];
 const MIGRATED_ALLOWED_IMPORTS = ["Icon", "IconName", "BrandMark", "useEscapeFallback"];
@@ -240,6 +241,7 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
       "web/src/features/chat/markdown-body.tsx",
       "web/src/features/chat/message-thread.tsx",
       "web/src/features/chat/runtime-convert.ts",
+      "web/src/features/chat/thread-viewport.tsx",
       "web/src/features/chat/use-thread-runtime.ts",
     ]);
     expect(MIGRATED_AREAS).not.toContain("web/src/features/chat");

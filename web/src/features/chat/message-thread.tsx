@@ -1,12 +1,13 @@
-// 消息线程骨架（design D4）：应用层组件，直接由 ThreadPrimitive / MessagePrimitive 组合。思考、步骤卡、
-// 审批条、文件变更卡、产物卡与操作行此刻仍是旧组件，按 D4 的块次序挂在助手消息里。
+// 消息线程骨架（design D4）：应用层组件，直接由 ThreadPrimitive / MessagePrimitive 组合；滚动层在
+// thread-viewport.tsx。思考、步骤卡、审批条、文件变更卡、产物卡与操作行此刻仍是旧组件，按 D4 的块次序
+// 挂在助手消息里。
 import {
   AssistantRuntimeProvider,
   MessagePrimitive,
   type MessageState,
   ThreadPrimitive,
 } from "@assistant-ui/react";
-import { type ComponentProps, memo } from "react";
+import { type ComponentProps, memo, type Ref } from "react";
 import type { ApiClient } from "../../lib/api.js";
 import { BrandMark } from "../../ui/index.js";
 import { ApprovalBars } from "./approval-bar.js";
@@ -18,12 +19,13 @@ import { type ChatMessageCustom, messageCustom } from "./runtime-convert.js";
 import { StepCard } from "./step-card.js";
 import type { ChatState } from "./stream.js";
 import { ThinkingBlock } from "./thinking-block.js";
+import { ThreadViewport, type TranscriptHandle } from "./thread-viewport.js";
 import { useThreadRuntime } from "./use-thread-runtime.js";
 import type { Workspace } from "./workspace-list.js";
 
 type AnswerApproval = ComponentProps<typeof ApprovalBars>["onAnswer"];
 
-type ThreadMessagesProps = {
+type ThreadProps = {
   /** 当前账号的 API client；产物卡经它按需拉取预览。 */
   client: ApiClient;
   /** 对话内搜索的当前匹配；其余消息不带 `aria-current`。 */
@@ -35,9 +37,14 @@ type ThreadMessagesProps = {
   onRegenerate(): Promise<boolean>;
   onSend(prompt: string): void;
   onStop(): Promise<unknown>;
-  view: ChatState;
+  /** 对话内搜索经它调用滚动层的 `scrollToMessage`。 */
+  scrollHandleRef: Ref<TranscriptHandle>;
+  /** 选中会话的视图；历史尚未到达时为 null（滚动容器已在，内容根还没有）。 */
+  view: ChatState | null;
   workspace: Workspace | null;
 };
+
+const NO_MESSAGES: ChatState["messages"] = [];
 
 /** 末条助手消息可重新生成的会话状态（运行中与 `idle` 不可）。 */
 const REGENERABLE: ReadonlySet<ChatState["status"]> = new Set(["done", "failed", "stopped"]);
@@ -65,7 +72,7 @@ const UserMessage = memo(function UserMessage({
   custom: ChatMessageCustom;
   id: number;
   locked: boolean;
-  onFork: ThreadMessagesProps["onFork"];
+  onFork: ThreadProps["onFork"];
   text: string;
 }) {
   return (
@@ -142,7 +149,7 @@ const AssistantMessage = memo(function AssistantMessage({
   custom: ChatMessageCustom;
   locked: boolean;
   onAnswerApproval: AnswerApproval;
-  onRegenerate: ThreadMessagesProps["onRegenerate"];
+  onRegenerate: ThreadProps["onRegenerate"];
   /** 仅转录末条助手消息、且会话状态允许时为真。 */
   regenerable: boolean;
   text: string;
@@ -195,8 +202,8 @@ const AssistantMessage = memo(function AssistantMessage({
   );
 });
 
-/** 选中会话的全部消息；外层的 `section` 与滚动层仍在 conversation-view.tsx / scroll-follow.tsx。 */
-export function ThreadMessages({
+/** 选中会话的线程：运行时、滚动层与全部消息。按会话 `key` 挂载，切换会话即重置跟随状态。 */
+export function Thread({
   client,
   currentId,
   locked,
@@ -205,45 +212,56 @@ export function ThreadMessages({
   onRegenerate,
   onSend,
   onStop,
+  scrollHandleRef,
   view,
   workspace,
-}: ThreadMessagesProps) {
-  const runtime = useThreadRuntime({ messages: view.messages, onRegenerate, onSend, onStop });
-  const last = view.messages.at(-1);
+}: ThreadProps) {
+  const messages = view?.messages ?? NO_MESSAGES;
+  const runtime = useThreadRuntime({ messages, onRegenerate, onSend, onStop });
+  const last = messages.at(-1);
   const regenerableId =
-    last?.role === "assistant" && REGENERABLE.has(view.status) ? String(last.id) : null;
+    view && last?.role === "assistant" && REGENERABLE.has(view.status) ? String(last.id) : null;
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <ThreadPrimitive.Messages>
-        {({ message }) => {
-          const custom = messageCustom(message.metadata.custom);
-          const current = message.id === String(currentId);
-          const text = partText(message, "text");
-          return message.role === "assistant" ? (
-            <AssistantMessage
-              client={client}
-              current={current}
-              custom={custom}
-              locked={locked}
-              onAnswerApproval={onAnswerApproval}
-              onRegenerate={onRegenerate}
-              regenerable={message.id === regenerableId}
-              text={text}
-              thinking={partText(message, "reasoning")}
-              workspace={workspace}
-            />
-          ) : (
-            <UserMessage
-              current={current}
-              custom={custom}
-              id={Number(message.id)}
-              locked={locked}
-              onFork={onFork}
-              text={text}
-            />
-          );
-        }}
-      </ThreadPrimitive.Messages>
+      <ThreadViewport handleRef={scrollHandleRef}>
+        {view ? (
+          <section
+            aria-label="消息"
+            className="mx-auto box-border flex w-full max-w-3xl flex-col gap-4 px-2 pt-3 pb-6 max-[760px]:px-0"
+          >
+            <ThreadPrimitive.Messages>
+              {({ message }) => {
+                const custom = messageCustom(message.metadata.custom);
+                const current = message.id === String(currentId);
+                const text = partText(message, "text");
+                return message.role === "assistant" ? (
+                  <AssistantMessage
+                    client={client}
+                    current={current}
+                    custom={custom}
+                    locked={locked}
+                    onAnswerApproval={onAnswerApproval}
+                    onRegenerate={onRegenerate}
+                    regenerable={message.id === regenerableId}
+                    text={text}
+                    thinking={partText(message, "reasoning")}
+                    workspace={workspace}
+                  />
+                ) : (
+                  <UserMessage
+                    current={current}
+                    custom={custom}
+                    id={Number(message.id)}
+                    locked={locked}
+                    onFork={onFork}
+                    text={text}
+                  />
+                );
+              }}
+            </ThreadPrimitive.Messages>
+          </section>
+        ) : null}
+      </ThreadViewport>
     </AssistantRuntimeProvider>
   );
 }

@@ -45,12 +45,12 @@ Minimal mergeable slice: atomic - `page.tsx` 的状态与 `turn-actions.ts` 的 
 - [x] 2.5 Markdown（design D5）：不生成源 HTML 元素；链接与现状一样惰性（只显示可见文本、丢弃目标、不生成 `a` 元素）；图片渲染为 alt 文本、不加载；
   这些规则经 `markdown-text` 的 `components` 覆盖写在应用层。代码块复制成功只换图标，失败在按钮旁就地显示 `role="alert"` 的 `复制失败`。
   测试含注入样本：`<script>`、`javascript:` 链接、`https:` 链接、`data:` 链接、图片。
-- [ ] 2.6 滚动（design D4）：`ThreadPrimitive.Viewport` + 可访问名为 `回到最新` 的回底按钮；新滚动层继续提供对话内搜索使用的 `scrollToMessage` 句柄，
+- [x] 2.6 滚动（design D4）：`ThreadPrimitive.Viewport` + 可访问名为 `回到最新` 的回底按钮；新滚动层继续提供对话内搜索使用的 `scrollToMessage` 句柄，
   `chat-page-search*.test.tsx` 与 ui-walk 的搜索步骤保持通过；既有滚动场景与 `ui-walk-scroll` 通过；原生行为不满足的场景保留 `scroll-follow.tsx` 对应逻辑。
-- [ ] 2.7 改写被打破的断言（按分片）：ui-walk 中 `.chat-md` / `.chat-msg-body` 选择器（`ui-walk-stop.ts`、`ui-walk.spec.ts`、`ui-walk-sessions.spec.ts`、`ui-walk-scroll.ts`）改为角色/属性；
+- [x] 2.7 改写被打破的断言（按分片）：ui-walk 中 `.chat-md` / `.chat-msg-body` 选择器（`ui-walk-stop.ts`、`ui-walk.spec.ts`、`ui-walk-sessions.spec.ts`、`ui-walk-scroll.ts`）改为角色/属性；
   单元测试 `chat-messages`、`chat-copy`（读 CSS 的部分）、`chat-scroll-follow`；ui-walk 新增断言：`prefers-reduced-motion: reduce` 下光标的计算样式 `animation-name` 为 `none`；
   搜索高亮只断言 `aria-current`。
-- [ ] 2.8 按分片退役：删除被替换区域的旧 CSS 规则与读它们的静态断言、`conversation-view.tsx` 中已替换的部分；登记已迁移文件；CH 行：消息呈现、Markdown 规则、回到最新。
+- [x] 2.8 按分片退役：删除被替换区域的旧 CSS 规则与读它们的静态断言、`conversation-view.tsx` 中已替换的部分；登记已迁移文件；CH 行：消息呈现、Markdown 规则、回到最新。
 
 Suggested fixture level: expanded - 引入运行时（状态边界一次定调）、换 Markdown 渲染器（安全面变化）、换滚动实现；ui-walk 才能证明滚动与布局
 Minimal mergeable slice: 2.1 + 2.2 + 2.3 + 2.4 + 2.5，以及 2.7 / 2.8 中属于它们的份额（`.chat-md` / `.chat-msg-body` 选择器、`chat-messages` 与 `chat-copy` 的读 CSS 断言、对应旧 CSS 与 `conversation-view.tsx` 已替换部分）——运行时、映射与最小线程必须同刀（依赖没有消费者即被 knip 拒绝，线程没有运行时无法渲染），渲染器的安全规则不可后置，`article` 根与 `aria-current` 同刀才能让搜索测试保绿。2.6 滚动是紧随其后的一刀，自带 `chat-scroll-follow` 与 `ui-walk-scroll.ts` 的改写（首刀期间旧 `scroll-follow.tsx` 包裹新线程并继续提供 `scrollToMessage`）

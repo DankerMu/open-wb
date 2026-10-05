@@ -28,8 +28,8 @@ interface TranscriptMetrics {
 function transcriptMetrics(transcript: Locator): Promise<TranscriptMetrics> {
   return transcript.evaluate((el) => {
     const thread = el.firstElementChild;
-    if (!(thread instanceof HTMLElement) || !thread.matches("section.chat-thread")) {
-      throw new Error("transcript content root is not section.chat-thread");
+    if (!(thread instanceof HTMLElement) || !thread.matches('section[aria-label="消息"]')) {
+      throw new Error("transcript content root is not the 消息 section");
     }
     return {
       clientHeight: el.clientHeight,
@@ -78,7 +78,7 @@ export async function walkScrollFollow(
 ): Promise<void> {
   const original = page.viewportSize();
   if (!original) throw new Error("ui-walk requires a fixed viewport");
-  const transcript = page.locator(".chat-transcript");
+  const transcript = page.locator('[data-slot="thread-viewport"]');
   const initial = await transcriptMetrics(transcript);
   expect(initial.distance, "W-scroll: pinned before resizing").toBeLessThanOrEqual(
     PIN_TOLERANCE_PX,
@@ -142,7 +142,7 @@ export async function walkScrollFollow(
       const summary = page
         .getByRole("article", { name: "助手" })
         .getByRole("region", { name: "bash" })
-        .locator("summary.chat-step-summary");
+        .locator("summary");
       await expect(summary).toHaveText("原始输出");
       const before = await transcriptMetrics(transcript);
       expectForcedOverflow(before, "W-scroll 2");
@@ -161,7 +161,7 @@ export async function walkScrollFollow(
         });
       }
       await expect(summary.locator("xpath=..")).toHaveAttribute("open", "");
-      await expect(summary.locator("xpath=..").locator("pre.chat-step-output")).toBeVisible();
+      await expect(summary.locator("xpath=..").locator("pre").last()).toBeVisible();
       await expect
         .poll(async () => (await transcriptMetrics(transcript)).threadHeight, "W-scroll 2: grew")
         .toBeGreaterThan(before.threadHeight);
