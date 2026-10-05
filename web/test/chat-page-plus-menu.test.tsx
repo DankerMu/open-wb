@@ -2,7 +2,7 @@
 // 列出的目录与项目标记、点选写入草稿并聚焦输入框而不发送、拉取中与失败的 `暂无可用项`、与斜杠候选共用
 // 一份目录。seam：整页挂载 + 假 API；「菜单开着时输入框被锁定」用 `useSlashMenu` + 裸 `CapabilityBar`。
 // 期望文案与条目取自规格条文。
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useRef, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CapabilityBar } from "../src/features/chat/capability-bar.js";
@@ -14,6 +14,7 @@ import { composer, SESSION_MESSAGES } from "./chat-page-ownership-support.js";
 import { cleanupSessionMeta, view } from "./chat-page-session-meta-support.js";
 import {
   welcomeRoutes as accountRoutes,
+  CATALOGUE,
   COMMANDS,
   COMPACT,
   catalogue,
@@ -87,6 +88,46 @@ function itemTexts(menu: HTMLElement) {
 
 function prompts(fetchMock: FetchMock) {
   return paths(fetchMock).filter((path) => path.endsWith("/prompt"));
+}
+
+/** `Bar` 最近一次渲染的钩子输出与草稿：菜单内容卸载后仍能看到 `plus.commands`，也能绕过菜单直接点选。 */
+let seam: {
+  draft: string;
+  plus: ReturnType<typeof useSlashMenu>["plus"];
+  setDraft(text: string): void;
+};
+
+/** `useSlashMenu` + 裸 `CapabilityBar`（未绑定空间的会话），不经整页。 */
+function Bar({ enabled }: { enabled: boolean }) {
+  const [client] = useState(() => createApiClient());
+  const [draft, setDraft] = useState("");
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const { plus } = useSlashMenu(client, null, draft, enabled, setDraft);
+  seam = { draft, plus, setDraft };
+  return (
+    <CapabilityBar
+      choice={{ onSelect: () => undefined, workspace: null, workspaces: [], workspacesError: null }}
+      disabled={!enabled}
+      inputRef={inputRef}
+      plus={plus}
+      session={{ id: null, workspace: undefined }}
+    />
+  );
+}
+
+/** 挂载 `Bar` 并打开菜单，账号目录（三项）已取回。 */
+async function openBar() {
+  vi.stubGlobal("fetch", createFetchMock({ [COMMANDS]: catalogue() }));
+  const bar = render(<Bar enabled />);
+  return { bar, menu: await openMenu() };
+}
+
+/** 方向键下移到第一项，再在该项上按 `key`（Radix 菜单项对 Enter 与空格都触发点选）。 */
+function pickFirstByKey(menu: HTMLElement, key: string) {
+  fireEvent.keyDown(menu, { key: "ArrowDown" });
+  const first = within(menu).getAllByRole("menuitem")[0];
+  expect(document.activeElement).toBe(first);
+  fireEvent.keyDown(first as HTMLElement, { key });
 }
 
 describe("「+」菜单写入草稿", () => {
@@ -210,6 +251,25 @@ describe("「+」菜单写入草稿", () => {
     expect(prompts(fetchMock)).toEqual([]);
   });
 
+  it.each([
+    ["Enter", "Enter"],
+    ["空格", " "],
+  ])(
+    "键盘点选：方向键下移到第一项后按 %s，写入 `/compact `、关闭菜单、聚焦输入框、不发送",
+    async (_name, key) => {
+      const { fetchMock } = await openBound(catalogue(FOUR));
+      const menu = await openMenu();
+
+      pickFirstByKey(menu, key);
+
+      await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+      expect(composer().value).toBe("/compact ");
+      await waitFor(() => expect(document.activeElement).toBe(composer()));
+      await quiesce();
+      expect(prompts(fetchMock)).toEqual([]);
+    },
+  );
+
   it("欢迎态未选择空间：菜单列出账号自己的目录（`GET /api/commands`），点选同样写入草稿", async () => {
     const { fetchMock } = renderChatPage("/", accountRoutes(catalogue()));
     await composerReady();
@@ -252,29 +312,7 @@ describe("「+」按钮随输入框锁定", () => {
   });
 
   it("菜单开着时输入框被锁定：菜单关闭、按钮禁用，解锁后不自动重开", async () => {
-    function Bar({ enabled }: { enabled: boolean }) {
-      const [client] = useState(() => createApiClient());
-      const [draft, setDraft] = useState("");
-      const inputRef = useRef<HTMLTextAreaElement>(null);
-      const slash = useSlashMenu(client, null, draft, enabled, setDraft);
-      return (
-        <CapabilityBar
-          choice={{
-            onSelect: () => undefined,
-            workspace: null,
-            workspaces: [],
-            workspacesError: null,
-          }}
-          disabled={!enabled}
-          inputRef={inputRef}
-          plus={slash.plus}
-          session={{ id: null, workspace: undefined }}
-        />
-      );
-    }
-    vi.stubGlobal("fetch", createFetchMock({ [COMMANDS]: catalogue() }));
-    const bar = render(<Bar enabled />);
-    const menu = await openMenu();
+    const { bar, menu } = await openBar();
     expect(itemTexts(menu)).toHaveLength(3);
 
     bar.rerender(<Bar enabled={false} />);
@@ -287,5 +325,39 @@ describe("「+」按钮随输入框锁定", () => {
 
     expect(plusButton().disabled).toBe(false);
     expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("菜单关闭后目录仍在手：`plus.commands` 还是那份目录，退场动画期间不会塌成 `暂无可用项`", async () => {
+    const { menu } = await openBar();
+    expect(seam.plus.commands).toEqual(CATALOGUE);
+
+    fireEvent.keyDown(menu, { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    expect(seam.plus.open).toBe(false);
+    expect(seam.plus.commands).toEqual(CATALOGUE);
+  });
+
+  it("菜单已禁用时的点选不落地：草稿非空白时不覆盖草稿，输入框锁定时不写入", async () => {
+    const { bar } = await openBar();
+    act(() => seam.setDraft("半句"));
+    expect(seam.plus.disabled).toBe(true);
+    expect(seam.plus.commands).toEqual(CATALOGUE);
+
+    act(() => seam.plus.onPick(TODO));
+
+    expect(seam.draft).toBe("半句");
+
+    act(() => seam.setDraft(""));
+    bar.rerender(<Bar enabled={false} />);
+    act(() => seam.plus.onPick(TODO));
+
+    expect(seam.draft).toBe("");
+
+    // 对照：可用时同一个 `onPick` 照常写入。
+    bar.rerender(<Bar enabled />);
+    act(() => seam.plus.onPick(TODO));
+
+    expect(seam.draft).toBe("/todo ");
   });
 });

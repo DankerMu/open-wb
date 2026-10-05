@@ -155,8 +155,9 @@ function usePlusState(enabled: boolean, draft: string) {
  * `disabled` otherwise, and an open one closes (reset during render) and stays closed. While it is
  * open the catalogue is wanted exactly as for the panel, so the same single call per client and
  * workspace id serves both. `commands` is the catalogue of the current workspace id, undefined
- * while it is not held (in flight, failed, or the workspace id unknown); `onPick` leaves the draft
- * the panel's pick leaves.
+ * while it is not held (in flight, failed, or the workspace id unknown) and the same whether the
+ * menu is open or not, so a closing menu keeps its items; `onPick` leaves the draft the panel's
+ * pick leaves and does nothing while the menu is `disabled`.
  */
 export function useSlashMenu(
   client: ApiClient,
@@ -238,17 +239,26 @@ export function useSlashMenu(
   }
   if (state !== stored) setState(state);
 
+  // Held for the current workspace id whether or not anything wants it: the closing 「+」 menu
+  // still lists it while it fades out. The panel alone needs it to be wanted.
   const commands =
-    wanted !== undefined && catalogues?.client === client
-      ? catalogues.byWorkspace.get(wanted)
+    workspaceId !== undefined && catalogues?.client === client
+      ? catalogues.byWorkspace.get(workspaceId)
       : undefined;
-  const matches = commands !== undefined && !state.dismissed ? filter(commands, draft) : [];
+  const matches =
+    wanted !== undefined && commands !== undefined && !state.dismissed
+      ? filter(commands, draft)
+      : [];
   // The index outlives a catalogue that got shorter under the same draft and workspace id (another
   // client): 0 then.
   const active = state.index < matches.length ? state.index : 0;
   const current = matches[active];
   const pick = (command: Command) => setDraft(pickText(command.name));
-  const plus = { ...plusState, commands, onPick: pick };
+  // The items of a closing menu are still there to be picked: nothing lands once it is disabled.
+  const onPick = (command: Command) => {
+    if (!plusState.disabled) pick(command);
+  };
+  const plus = { ...plusState, commands, onPick };
   if (current === undefined) return { menu: null, interceptKeyDown: () => false, plus };
 
   const interceptKeyDown = (event: ComposerKeyEvent) => {
