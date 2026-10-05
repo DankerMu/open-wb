@@ -363,13 +363,13 @@ async function step5ArtifactPreview(page: Page): Promise<void> {
   const card = page
     .getByRole("article", { name: "助手" })
     .getByRole("group", { name: REPORT_FILE, exact: true });
-  await expect(card.locator(".artifact-lang")).toHaveText("HTML");
+  await expect(card.getByText("HTML", { exact: true })).toBeVisible();
   await card
     .getByRole("button", { name: `打开网页预览 ${REPORT_FILE}`, exact: true })
     .filter({ hasText: "打开网页预览" })
     .click();
   const dialog = page.getByRole("dialog", { name: REPORT_FILE, exact: true });
-  const frame = dialog.locator("iframe.artifact-preview-frame");
+  const frame = dialog.locator(`iframe[title="${REPORT_FILE}"]`);
   await expect(frame).toHaveAttribute("sandbox", "allow-scripts");
   await expect(
     frame.contentFrame().getByRole("heading", { name: "WorkBuddy", exact: true }),

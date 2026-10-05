@@ -681,7 +681,7 @@ describe("文件变更 card on the chat page", () => {
       "tool-group-root",
       "approval-records",
       "file-changes-card",
-      "fieldset.artifact-card",
+      "artifact-card",
       "message-stopped",
       "message-actions",
     ]);
@@ -711,7 +711,7 @@ describe("文件变更 card on the chat page", () => {
       "tool-group-root",
       "message-error",
       "file-changes-card",
-      "fieldset.artifact-card",
+      "artifact-card",
       "message-actions",
     ]);
     expect(parts[2]?.textContent).toBe("上游失败");

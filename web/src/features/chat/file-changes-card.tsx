@@ -66,7 +66,7 @@ export function FileChangeRow({
       {space === null ? null : (
         <Button
           aria-label={`查看详情 ${path}`}
-          className="size-[26px] rounded-md text-(--wb-icon-muted) hover:text-(--wb-text-secondary)"
+          className="size-[26px] rounded-md text-(--wb-icon-muted) hover:bg-accent hover:text-(--wb-text-secondary) dark:hover:bg-accent"
           onClick={() => void navigate(`/files?ws=${space.id}`)}
           size="icon-xs"
           title={`查看详情 ${path}`}

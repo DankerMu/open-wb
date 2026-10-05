@@ -1,7 +1,7 @@
 /**
  * Issue #536 产物卡 (parent tasks 7.5b): A1–A15 of openspec/changes/artifact-card/design.md.
  * Seams: the pure `artifactKind`, the jsdom chat page over a stubbed `fetch`, the two Blob URL
- * statics, `<a>.click()`, `navigator.clipboard`, and the static CSS text. Expected values are
+ * statics, `<a>.click()` and `navigator.clipboard`. Expected values are
  * literals from the spec deltas; cases marked (guard) already hold before the change. H1 is from
  * review round 1; H2–H6 live in chat-page-artifact-card-state.test.tsx.
  */
@@ -12,13 +12,16 @@ import {
   APP,
   action,
   actions,
+  alerts,
   artifactCardFixture,
   artifactCards,
   BLOB_URL,
   CHART,
   CODE_TEXT,
   COPY_APP,
+  cardTitles,
   changedTurn,
+  copiedStatus,
   DOWNLOAD_CHART,
   frameOf,
   HTML_TEXT,
@@ -31,6 +34,7 @@ import {
   previewSignal,
   REQUEST_FAILED,
   rejectOnAbort,
+  slot,
   spyDownloads,
   stubClipboard,
   switchSession,
@@ -75,7 +79,7 @@ import { envelope, SESSION_MESSAGES } from "./chat-page-ownership-support.js";
 import { deferred, historyUser, SESSION_ID } from "./chat-stream-support.js";
 import { hasLucideGlyph, imagePreviewResponse } from "./files-fixture.js";
 import { deferredResponse, jsonResponse, textPreviewResponse } from "./support.js";
-import { readRepoFile, ruleBody, stripComments } from "./ui-support.js";
+import { readRepoFile } from "./ui-support.js";
 
 const blobs = artifactCardFixture();
 
@@ -151,9 +155,9 @@ describe("产物卡 derivation on the chat page", () => {
       "message-body",
       "tool-group-root",
       "file-changes-card",
-      "fieldset.artifact-card",
-      "fieldset.artifact-card",
-      "fieldset.artifact-card",
+      "artifact-card",
+      "artifact-card",
+      "artifact-card",
       "message-actions",
     ]);
     expect(replyParts().slice(3, 6)).toEqual(derived);
@@ -162,31 +166,24 @@ describe("产物卡 derivation on the chat page", () => {
         within(reply()).getByRole("group", { name }),
       ),
     ).toEqual(derived);
-    expect(derived.map((card) => card.querySelector(".artifact-title")?.textContent)).toEqual([
-      "app.ts",
-      "index.html",
-      "chart.PNG",
-    ]);
-    expect(derived.map((card) => card.querySelector(".artifact-lang")?.textContent)).toEqual([
-      "TS",
-      "HTML",
-      "PNG",
-    ]);
-    expect(derived.map((card) => card.querySelector(".artifact-file-icon")?.className)).toEqual([
-      "artifact-file-icon artifact-file-icon--code",
-      "artifact-file-icon artifact-file-icon--html",
-      "artifact-file-icon artifact-file-icon--image",
+    expect(cardTitles()).toEqual(["app.ts", "index.html", "chart.PNG"]);
+    expect(derived.map((card) => slot(card, "label")?.textContent)).toEqual(["TS", "HTML", "PNG"]);
+    expect(derived.map((card) => slot(card, "icon")?.dataset.kind)).toEqual([
+      "code",
+      "html",
+      "image",
     ]);
     const glyphs = ["file-code", "globe", "image"];
     expect(
-      derived.map((card, at) =>
-        hasLucideGlyph(card.querySelector(".artifact-file-icon") ?? card, glyphs[at] ?? ""),
-      ),
+      derived.map((card, at) => hasLucideGlyph(slot(card, "icon") ?? card, glyphs[at] ?? "")),
     ).toEqual([true, true, true]);
     expect(
       within(reply())
         .getAllByRole("button", { name: /^(复制代码|打开网页预览|下载) / })
-        .map((button) => [button.getAttribute("aria-label"), button.closest("fieldset")]),
+        .map((button) => [
+          button.getAttribute("aria-label"),
+          button.closest('[data-slot="artifact-card"]'),
+        ]),
     ).toEqual([
       [COPY_APP, derived[0]],
       [OPEN_INDEX, derived[1]],
@@ -197,9 +194,7 @@ describe("产物卡 derivation on the chat page", () => {
     expect(hasLucideGlyph(action(COPY_APP), "copy")).toBe(true);
     expect(action(DOWNLOAD_CHART).getAttribute("title")).toBe(DOWNLOAD_CHART);
     expect(hasLucideGlyph(action(DOWNLOAD_CHART), "download")).toBe(true);
-    expect(derived.map((card) => card.querySelectorAll(".artifact-foot").length)).toEqual([
-      0, 1, 0,
-    ]);
+    expect(derived.map((card) => slot(card, "foot") !== null)).toEqual([false, true, false]);
 
     expect(previewCalls(page.fetchMock)).toEqual([]);
     expect(blobs.createObjectURL).not.toHaveBeenCalled();
@@ -220,9 +215,9 @@ describe("html 产物卡", () => {
 
     const [head, foot] = actions(OPEN_INDEX);
     expect(actions(OPEN_INDEX)).toHaveLength(2);
-    expect(head?.closest(".artifact-head")).not.toBeNull();
+    expect(head?.closest('[data-slot="artifact-head"]')).not.toBeNull();
     expect(head?.getAttribute("title")).toBe(OPEN_INDEX);
-    expect(foot?.closest(".artifact-foot")?.textContent).toContain("可交互预览");
+    expect(foot?.closest('[data-slot="artifact-foot"]')?.textContent).toContain("可交互预览");
     expect(foot?.textContent).toBe("打开网页预览");
     expect(previewCalls(page.fetchMock)).toEqual([]);
 
@@ -309,13 +304,15 @@ describe("图片与代码产物卡", () => {
     expect(action(DOWNLOAD_CHART).disabled).toBe(false);
   });
 
-  it("A6 copies exactly the fetched text and confirms with a toast", async () => {
+  it("A6 copies exactly the fetched text and confirms with a hidden 已复制 status, not a toast", async () => {
     const writeText = stubClipboard(vi.fn((_text: string) => Promise.resolve()));
     const page = await openPreviewing([edit(APP, 2, 1)], () => textPreviewResponse(CODE_TEXT));
 
     fireEvent.click(action(COPY_APP));
 
-    await waitFor(() => expect(toasts()).toEqual([["success", "已复制到剪贴板"]]));
+    await waitFor(() => expect(copiedStatus()?.getAttribute("role")).toBe("status"));
+    expect(toasts()).toEqual([]);
+    expect(alerts()).toEqual([]);
     expect(writeText.mock.calls).toEqual([[CODE_TEXT]]);
     expect(previewCalls(page.fetchMock).map(([path]) => path)).toEqual([
       `/api/workspaces/${PROJ.id}/file?path=src%2Fapp.ts`,
@@ -335,15 +332,16 @@ describe("图片与代码产物卡", () => {
     ["writeText rejects", () => Promise.reject(new DOMException("denied", "NotAllowedError"))],
   ];
 
-  it.each(brokenClipboards)("A7 toasts 复制失败 when %s", async (_name, writeText) => {
+  it.each(brokenClipboards)("A7 shows 复制失败 in the card when %s", async (_name, writeText) => {
     const spy = writeText === null ? null : stubClipboard(vi.fn(writeText as () => Promise<void>));
     expect("clipboard" in navigator).toBe(spy !== null);
     await openPreviewing([edit(APP, 2, 1)], () => textPreviewResponse(CODE_TEXT));
 
     await withoutUnhandledRejections(async () => {
       fireEvent.click(action(COPY_APP));
-      await waitFor(() => expect(toasts()).toEqual([["error", "复制失败"]]));
+      await waitFor(() => expect(alerts()).toEqual(["复制失败"]));
     });
+    expect(toasts()).toEqual([]);
     if (spy !== null) expect(spy.mock.calls).toEqual([[CODE_TEXT]]);
     expect(action(COPY_APP).disabled).toBe(false);
   });
@@ -354,15 +352,16 @@ describe("图片与代码产物卡", () => {
 
     fireEvent.click(action(COPY_APP));
 
-    await waitFor(() => expect(toasts()).toEqual([["error", "文件过大，无法复制"]]));
+    await waitFor(() => expect(alerts()).toEqual(["文件过大，无法复制"]));
     await quiesce();
     expect(writeText).not.toHaveBeenCalled();
-    expect(toasts()).toEqual([["error", "文件过大，无法复制"]]);
+    expect(alerts()).toEqual(["文件过大，无法复制"]);
+    expect(toasts()).toEqual([]);
   });
 });
 
 describe("预览失败与类型不符", () => {
-  it("A8 a deleted file toasts the envelope message, copies nothing and can be retried", async () => {
+  it("A8 a deleted file shows the envelope message in its card, copies nothing and can be retried", async () => {
     const writeText = stubClipboard(vi.fn((_text: string) => Promise.resolve()));
     const page = await openPreviewing([write("main.py"), edit("gone.md", 1, 0)], () =>
       envelope(404, "not_found", "文件不存在或已被删除"),
@@ -375,8 +374,9 @@ describe("预览失败与类型不符", () => {
 
     await withoutUnhandledRejections(async () => {
       fireEvent.click(action("复制代码 gone.md"));
-      await waitFor(() => expect(toasts()).toEqual([["error", "文件不存在或已被删除"]]));
+      await waitFor(() => expect(alerts()).toEqual(["文件不存在或已被删除"]));
     });
+    expect(toasts()).toEqual([]);
     expect(writeText).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(previewCalls(page.fetchMock)).toHaveLength(1);
@@ -385,25 +385,26 @@ describe("预览失败与类型不符", () => {
     fireEvent.click(action("复制代码 gone.md"));
 
     await waitFor(() => expect(previewCalls(page.fetchMock)).toHaveLength(2));
-    await waitFor(() => expect(toasts()).toHaveLength(2));
+    await waitFor(() => expect(action("复制代码 gone.md").disabled).toBe(false));
+    expect(alerts()).toEqual(["文件不存在或已被删除"]);
     expect(writeText).not.toHaveBeenCalled();
   });
 
-  it("A8 an unsupported html preview toasts the envelope message and opens no dialog", async () => {
+  it("A8 an unsupported html preview shows the envelope message and opens no dialog", async () => {
     await openPreviewing([write(INDEX)], () =>
       envelope(415, "preview_unsupported", "该文件类型不支持预览"),
     );
 
     fireEvent.click(actions(OPEN_INDEX)[0] as HTMLButtonElement);
 
-    await waitFor(() => expect(toasts()).toEqual([["error", "该文件类型不支持预览"]]));
+    await waitFor(() => expect(alerts()).toEqual(["该文件类型不支持预览"]));
     await quiesce();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.querySelector("iframe")).toBeNull();
     expect(actions(OPEN_INDEX).map((button) => button.disabled)).toEqual([false, false]);
   });
 
-  it("A8 an oversized image toasts the envelope message and downloads nothing", async () => {
+  it("A8 an oversized image shows the envelope message and downloads nothing", async () => {
     await openPreviewing([write(CHART)], () =>
       envelope(413, "preview_too_large", "图片超过预览上限"),
     );
@@ -411,19 +412,19 @@ describe("预览失败与类型不符", () => {
 
     fireEvent.click(action(DOWNLOAD_CHART));
 
-    await waitFor(() => expect(toasts()).toEqual([["error", "图片超过预览上限"]]));
+    await waitFor(() => expect(alerts()).toEqual(["图片超过预览上限"]));
     await quiesce();
     expect(clicks).toEqual([]);
     expect(blobs.createObjectURL).not.toHaveBeenCalled();
   });
 
-  it("A8 a network failure toasts the request_failed text", async () => {
+  it("A8 a network failure shows the request_failed text", async () => {
     const writeText = stubClipboard(vi.fn((_text: string) => Promise.resolve()));
     await openPreviewing([edit(APP, 2, 1)], () => new TypeError("Failed to fetch"));
 
     await withoutUnhandledRejections(async () => {
       fireEvent.click(action(COPY_APP));
-      await waitFor(() => expect(toasts()).toEqual([["error", REQUEST_FAILED]]));
+      await waitFor(() => expect(alerts()).toEqual([REQUEST_FAILED]));
     });
     expect(writeText).not.toHaveBeenCalled();
     expect(action(COPY_APP).disabled).toBe(false);
@@ -442,7 +443,7 @@ describe("预览失败与类型不符", () => {
 
       fireEvent.click(actions(name)[0] as HTMLButtonElement);
 
-      await waitFor(() => expect(toasts()).toEqual([["error", REQUEST_FAILED]]));
+      await waitFor(() => expect(alerts()).toEqual([REQUEST_FAILED]));
       await quiesce();
       expect(blobs.revokeObjectURL.mock.calls).toEqual([[BLOB_URL]]);
       expect(writeText).not.toHaveBeenCalled();
@@ -457,7 +458,7 @@ describe("预览失败与类型不符", () => {
 
     fireEvent.click(action(DOWNLOAD_CHART));
 
-    await waitFor(() => expect(toasts()).toEqual([["error", REQUEST_FAILED]]));
+    await waitFor(() => expect(alerts()).toEqual([REQUEST_FAILED]));
     await quiesce();
     expect(clicks).toEqual([]);
     expect(blobs.revokeObjectURL).not.toHaveBeenCalled();
@@ -658,7 +659,7 @@ describe("产物卡 placement", () => {
       "tool-group-root",
       "approval-records",
       "file-changes-card",
-      "fieldset.artifact-card",
+      "artifact-card",
       "message-stopped",
       "message-actions",
     ]);
@@ -744,7 +745,7 @@ describe("产物卡 placement", () => {
     expect(stepBadge("edit 已完成").textContent).toBe("已完成");
     expect(rowTexts(cardNamed("文件变更（1 个）"))).toEqual(["+3zhangsan/proj/notes/todo.md"]);
     expect(artifactCards()).toEqual([within(reply()).getByRole("group", { name: "todo.md" })]);
-    expect(artifactCards()[0]?.querySelector(".artifact-lang")?.textContent).toBe("MD");
+    expect(slot(artifactCards()[0] as HTMLElement, "label")?.textContent).toBe("MD");
   });
 
   it("A14 renders no artifact card for a message that only changed main.py (guard)", async () => {
@@ -756,21 +757,6 @@ describe("产物卡 placement", () => {
 });
 
 describe("artifact card static styles", () => {
-  const css = () => stripComments(readRepoFile("web/src/features/chat/messages.css"));
-
-  it("A15 gives the preview iframe no border and colours the three icon blocks with tokens", () => {
-    expect(ruleBody(css(), ".artifact-preview-frame")).toContain("border: 0");
-    const html = ruleBody(css(), ".artifact-file-icon--html");
-    expect(html).toContain("background: var(--wb-status-warning-soft-bg)");
-    expect(html).toContain("color: var(--wb-status-warning-text)");
-    const code = ruleBody(css(), ".artifact-file-icon--code");
-    expect(code).toContain("background: var(--wb-brand-primary-subtle)");
-    expect(code).toContain("color: var(--wb-brand-primary)");
-    const image = ruleBody(css(), ".artifact-file-icon--image");
-    expect(image).toContain("background: var(--wb-bg-tertiary)");
-    expect(image).toContain("color: var(--wb-text-secondary)");
-  });
-
   it("A15 keeps artifact styles out of chat.css (guard)", () => {
     expect(readRepoFile("web/src/features/chat/chat.css")).not.toContain("artifact-");
   });

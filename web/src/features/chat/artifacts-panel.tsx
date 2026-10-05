@@ -1,8 +1,8 @@
 /* Artifacts panel adapted from resource/workbuddy-live-demo.html:2033-2046 (openArtifactsPanel), issue 537: the rows are the file-change rows of the whole session and a previewable path carries the action of its artifact card instead of the demo's static panels. */
 import { type ReactNode, useState } from "react";
 import type { ApiClient } from "../../lib/api.js";
-import { Button, Drawer, useToast } from "../../ui/index.js";
-import { ArtifactAction } from "./artifact-card.js";
+import { Button, Dialog, Drawer, Icon, useToast } from "../../ui/index.js";
+import { ArtifactPreview, useArtifactAction } from "./artifact-card.js";
 import { FileChangeRow, useChangeSpace } from "./file-changes-card.js";
 import type { ChatState } from "./stream.js";
 import { artifactKind, summarizeChanges } from "./stream-artifacts.js";
@@ -15,6 +15,48 @@ import type { Workspace } from "./workspace-list.js";
  */
 function sessionChanges(view: ChatState) {
   return summarizeChanges(view.messages.flatMap((message) => message.steps));
+}
+
+/**
+ * The icon button of an artifact's action and its html preview dialog, for one row. Still on the
+ * old primitives with the drawer: the old drawer is stacked above the copied-layer dialog, so a
+ * preview opened from a row has to be the old dialog, and the row reports through toasts.
+ */
+function ArtifactAction(props: Parameters<typeof useArtifactAction>[0]) {
+  const toast = useToast();
+  const { busy, icon, label, onAction, opener, preview, closePreview } = useArtifactAction(
+    props,
+    (outcome) => {
+      if (outcome?.kind === "copied") toast.show({ type: "success", message: "已复制到剪贴板" });
+      if (outcome?.kind === "failed") toast.show({ type: "error", message: outcome.message });
+    },
+  );
+  return (
+    <>
+      <Button
+        aria-label={label}
+        className="chat-msg-action"
+        disabled={busy}
+        onClick={onAction}
+        size="icon"
+        title={label}
+        variant="ghost"
+      >
+        <Icon name={icon} size={12} />
+      </Button>
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open) closePreview();
+        }}
+        open={preview !== null}
+        returnFocus={opener}
+        size="md"
+        title={props.artifact.name}
+      >
+        <ArtifactPreview name={props.artifact.name} preview={preview} />
+      </Dialog>
+    </>
+  );
 }
 
 /**

@@ -7,126 +7,20 @@
    Design tokens from WorkBuddy 5.3.11 via web/src/styles/tokens.css.
 */
 
-/* Frame of the artifact card and of the 产物面板 list (issue 537, a div: the fieldset reset is a
-   no-op there), adapted from resource/workbuddy-live-demo.html:519 (.file-changes-card). The
-   file-change card and its rows carry their own Tailwind classes (file-changes-card.tsx). */
-.artifact-card,
+/* Frame of the 产物面板 list (issue 537), adapted from
+   resource/workbuddy-live-demo.html:519 (.file-changes-card). The file-change card, the artifact
+   card and their rows carry their own Tailwind classes (file-changes-card.tsx, artifact-card.tsx). */
 .artifacts-panel-list {
   min-width: 0;
-  min-inline-size: 0;
-  margin: 0;
-  padding: 0;
   border: 1px solid var(--wb-border-default);
   border-radius: 12px;
   overflow: hidden;
   background: var(--wb-bg-secondary);
 }
 
-/* Artifact card adapted from resource/workbuddy-live-demo.html:502-515 (.artifact-head,
-   .artifact-file-icon*, .artifact-title, .artifact-lang, .artifact-foot, .link-btn), issue 536.
-   The card embeds no preview, so only the html card has a foot and its top border is the one
-   divider under the head. The html and image icon blocks take semantic tokens in place of the
-   demo's literal tints, and the head action button reuses .chat-msg-action. */
-.artifact-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 9px 12px;
-}
-
-.artifact-file-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-}
-
-.artifact-file-icon--html {
-  background: var(--wb-status-warning-soft-bg);
-  color: var(--wb-status-warning-text);
-}
-
-.artifact-file-icon--code {
-  background: var(--wb-brand-primary-subtle);
-  color: var(--wb-brand-primary);
-}
-
-.artifact-file-icon--image {
-  background: var(--wb-bg-tertiary);
-  color: var(--wb-text-secondary);
-}
-
-.artifact-title {
-  flex: 1;
-  min-width: 0;
-  font-family: var(--wb-mono);
-  font-size: 13px;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.artifact-lang {
-  padding: 1px 6px;
-  border: 1px solid var(--wb-border-default);
-  border-radius: 4px;
-  font-size: 10.5px;
-  line-height: 14px;
-  color: var(--wb-text-secondary);
-}
-
-.artifact-foot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-top: 1px solid var(--wb-border-default);
-  font-size: 12px;
-  color: var(--wb-text-secondary);
-}
-
-.artifact-link {
-  margin-left: auto;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--wb-brand-primary-deep);
-  font-family: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.artifact-link:hover:not(:disabled) {
-  text-decoration: underline;
-}
-
-.artifact-link:disabled {
-  color: var(--wb-text-tertiary);
-  cursor: default;
-}
-
-/* Preview dialog body. Fetched pages are written for a white canvas: a transparent iframe would
-   put their default dark text on the dark-theme dialog, hence the keyword background. */
-.artifact-preview-note {
-  margin: 0 0 8px;
-  font-size: 12.5px;
-  color: var(--wb-text-secondary);
-}
-
-.artifact-preview-frame {
-  display: block;
-  width: 100%;
-  height: 60vh;
-  border: 0;
-  background: white;
-}
-
-/* Icon button of the artifact card (the message action row and the file-change row no longer
-   use it). Overrides the ui-btn--icon size (same specificity, loaded later). */
+/* Icon button of a 产物面板 row action (the message action row, the file-change row and the
+   artifact card no longer use it). Overrides the ui-btn--icon size (same specificity, loaded
+   later). */
 .chat-msg-action {
   width: 26px;
   height: 26px;
