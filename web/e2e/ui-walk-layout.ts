@@ -201,10 +201,16 @@ export async function expectRouteViewports(
 }
 
 // #424 欢迎态首屏：≥761px 五张最佳实践卡同一行（offsetTop 相同）；免责声明底边不超出视口，
-// 也不被 .chat-main 裁掉。desktop 在 1440×900 与 1024×768 各测一次，mobile 即 390×844。
+// 也不被会话页主列裁掉。desktop 在 1440×900 与 1024×768 各测一次，mobile 即 390×844，
+// 此时快捷任务保持单行、在行内横向滚动；另在断点边界 760px 宽（外壳 ≤760px 即窄屏）复测一次。
 export async function expectWelcomeFirstScreen(page: Page, project: WalkProject): Promise<void> {
   if (project === "mobile-dark") {
+    await expectQuickChipsOneScrollingRow(page, viewportLabel(page));
     await expectDisclaimerInView(page, viewportLabel(page));
+    const height = page.viewportSize()?.height ?? 844;
+    await withViewport(page, { width: 760, height }, () =>
+      expectQuickChipsOneScrollingRow(page, viewportLabel(page), false),
+    );
     return;
   }
   for (const size of [WIDE_DESKTOP, NARROW_DESKTOP]) {
@@ -221,21 +227,30 @@ function viewportLabel(page: Page): string {
 }
 
 async function expectPlaybooksOneRow(page: Page, label: string): Promise<void> {
-  const cards = page
-    .getByRole("region", { name: "最佳实践案例" })
-    .locator(".chat-playbooks-row > li");
+  const cards = page.getByRole("region", { name: "最佳实践案例" }).getByRole("listitem");
   await expect(cards).toHaveCount(5);
   // 各卡 offsetTop 相对首卡的差值；全 0 即单行，失败时直接显示换行形态（如 [0,0,x,x,y]）。
+  // 另断五卡均分一行：宽度差 ≤1px、单卡 ≤220px、末卡右缘不超出区域右缘（三项均为超出量，0 即满足）。
   await expect
     .poll(
       () =>
         cards.evaluateAll((items) => {
           const tops = items.map((li) => (li as HTMLElement).offsetTop);
-          return tops.map((top) => top - (tops[0] ?? 0));
+          const boxes = items.map((li) => li.getBoundingClientRect());
+          const widths = boxes.map((box) => box.width);
+          const region = items[0]?.closest("section")?.getBoundingClientRect();
+          if (!region) throw new Error("playbook cards are outside their region");
+          const over = (px: number) => Math.max(0, Math.ceil(px));
+          return {
+            tops: tops.map((top) => top - (tops[0] ?? 0)),
+            widthSpread: over(Math.max(...widths) - Math.min(...widths) - 1),
+            overWidth: over(Math.max(...widths) - 220),
+            overhang: over((boxes.at(-1)?.right ?? 0) - region.right),
+          };
         }),
-      `${label}: five playbook cards share one offsetTop`,
+      `${label}: five playbook cards on one row, equal widths <= 220px, inside the region`,
     )
-    .toEqual([0, 0, 0, 0, 0]);
+    .toEqual({ tops: [0, 0, 0, 0, 0], widthSpread: 0, overWidth: 0, overhang: 0 });
 }
 
 async function expectDisclaimerInView(page: Page, label: string): Promise<void> {
@@ -245,12 +260,42 @@ async function expectDisclaimerInView(page: Page, label: string): Promise<void> 
     .poll(
       () =>
         disclaimer.evaluate((el) => {
-          const clip = el.closest(".chat-main")?.getBoundingClientRect().bottom ?? innerHeight;
+          const column = el.closest('[data-slot="chat-column"]');
+          if (!column) throw new Error("disclaimer is outside the chat column");
+          const clip = column.getBoundingClientRect().bottom;
           return Math.ceil(el.getBoundingClientRect().bottom - Math.min(innerHeight, clip));
         }),
-      `${label}: disclaimer bottom - min(innerHeight, .chat-main bottom) <= 0`,
+      `${label}: disclaimer bottom - min(innerHeight, chat column bottom) <= 0`,
     )
     .toBeLessThanOrEqual(0);
+}
+
+// chat-web「会话页」：≤760px 快捷任务不换行（各 chip 的 offsetTop 相同），溢出在行内横向滚动
+// （行自身是滚动容器且确有溢出），页面没有横向溢出。760px 宽时六个 chip 放得下、没有溢出，
+// `overflows = false` 只断行仍是滚动容器（桌面形态为 overflow-x: visible）。
+async function expectQuickChipsOneScrollingRow(
+  page: Page,
+  label: string,
+  overflows = true,
+): Promise<void> {
+  const row = page.getByRole("group", { name: "快捷任务" });
+  await expect
+    .poll(
+      () =>
+        row.evaluate((el, mustOverflow) => {
+          const tops = Array.from(el.querySelectorAll("button"), (chip) => chip.offsetTop);
+          return {
+            chips: tops.length,
+            rows: new Set(tops).size,
+            rowScrolls:
+              getComputedStyle(el).overflowX === "auto" &&
+              (!mustOverflow || el.scrollWidth > el.clientWidth),
+            pageOverflow: document.documentElement.scrollWidth - innerWidth,
+          };
+        }, overflows),
+      `${label}: six quick chips on one row that scrolls inside itself`,
+    )
+    .toEqual({ chips: 6, rows: 1, rowScrolls: true, pageOverflow: 0 });
 }
 
 // ui-foundation「旧页面规则压过 preflight」：button.css 在 legacy 层，压过 base 层 preflight 的

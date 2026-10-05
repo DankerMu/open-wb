@@ -289,7 +289,8 @@ describe("theme.css 结构（ui-foundation「映射文件结构」）", () => {
     const reduce = blockBody(theme, /^@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{/m);
     expect(ruleBody(reduce, '[class*="transition"]').trim()).toBe("transition: none;");
     // 这条覆盖规则不在任何层里：文件唯一的 @layer 是 base 层的边框色基线，位于它之前。
-    expect(theme.slice(theme.indexOf("@media")).includes("@layer")).toBe(false);
+    // 行首的 @media 才是规则块；`@custom-variant narrow (@media …)` 行内那个不算。
+    expect(theme.slice(theme.search(/^@media/m)).includes("@layer")).toBe(false);
     expect(borderBaselineViolations(theme)).toEqual([]);
   });
 });
