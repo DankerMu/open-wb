@@ -216,7 +216,10 @@ describe("html 预览对话框（拷入层 dialog）", () => {
       expect(dialog.getAttribute("aria-modal")).toBe("true");
       expect(dialog.classList.contains("ui-dialog")).toBe(false);
       expect(within(dialog).getAllByRole("button", { name: "关闭" })).toHaveLength(1);
-      expect(dialog.contains(document.activeElement)).toBe(true);
+      // Initial focus is the dialog's 关闭 button, never the iframe of the fetched page: with focus
+      // inside a sandboxed iframe the page gets no keydown and Escape cannot close the preview.
+      expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "关闭" }));
+      expect(document.activeElement).not.toBe(frameOf(dialog));
       expect(onHead.mock.calls).toEqual([]);
 
       close(dialog);

@@ -186,6 +186,12 @@ export function ArtifactPreview({ name, preview }: { name: string; preview: Html
  * closing it would leave focus on `body`: focus goes back to `opener` here, without scrolling the
  * thread to a card that has left the viewport meanwhile. Escape is also handled on the content
  * itself, because a toast on screen takes the Escape of every Radix layer below it.
+ *
+ * Opening focuses the dialog's 关闭 button. Left to Radix, focus would go to the first tabbable
+ * element, and the copied content puts its children before that button: the iframe. Focus inside
+ * the sandboxed page means the fetched content holds the keyboard before the user did anything and
+ * this document sees no keydown, so Escape would not close the preview. Tab order is then 关闭 →
+ * the iframe → 关闭 (the two tabbable elements, wrapping).
  */
 function PreviewDialog({
   name,
@@ -214,6 +220,12 @@ function PreviewDialog({
         }}
         onEscapeKeyDown={fallback.onEscapeKeyDown}
         onKeyDown={fallback.onKeyDown}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          fallback.ref.current
+            ?.querySelector<HTMLElement>('[data-slot="dialog-close"]')
+            ?.focus({ preventScroll: true });
+        }}
         ref={fallback.ref}
       >
         <DialogTitle className="truncate pr-8 font-mono leading-5">{name}</DialogTitle>

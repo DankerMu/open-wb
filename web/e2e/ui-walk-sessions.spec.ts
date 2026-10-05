@@ -27,7 +27,7 @@ import {
 } from "./ui-walk-layout.js";
 import { type AuthOracle, runWithBrowserErrorOracle } from "./ui-walk-oracle.js";
 import { expectNoProjectConfig, walkProjectConfig } from "./ui-walk-project-config.js";
-import { expandToolGroup, toolGroup } from "./ui-walk-steps.js";
+import { expandToolGroup, toolGroup, walkArtifactPreview } from "./ui-walk-steps.js";
 
 const DEV_PASSWORD = "demo";
 const WORKSPACE_NAME = "ui-walk-sessions";
@@ -119,7 +119,7 @@ async function walkSessionMeta(
     await expectServerSnapshot(page, sessionId, workspaceId);
     mark("step 4");
     await step5FileChanges(page);
-    await step5ArtifactPreview(page);
+    await walkArtifactPreview(page, REPORT_FILE);
     await step5ArtifactsDrawer(page);
     await step5ViewDetails(page, workspaceId, sessionId);
     mark("step 5");
@@ -356,26 +356,6 @@ async function step5FileChanges(page: Page): Promise<void> {
   await expect(row.locator('[data-slot="file-change-kind"]')).toHaveText("写入");
   await expect(row.locator('[data-slot="file-change-add"]')).toHaveCount(0);
   await expect(row.locator('[data-slot="file-change-del"]')).toHaveCount(0);
-}
-
-// 卡内有两个同名动作按钮（头部图标、底部文字），点带文字的那个。
-async function step5ArtifactPreview(page: Page): Promise<void> {
-  const card = page
-    .getByRole("article", { name: "助手" })
-    .getByRole("group", { name: REPORT_FILE, exact: true });
-  await expect(card.getByText("HTML", { exact: true })).toBeVisible();
-  await card
-    .getByRole("button", { name: `打开网页预览 ${REPORT_FILE}`, exact: true })
-    .filter({ hasText: "打开网页预览" })
-    .click();
-  const dialog = page.getByRole("dialog", { name: REPORT_FILE, exact: true });
-  const frame = dialog.locator(`iframe[title="${REPORT_FILE}"]`);
-  await expect(frame).toHaveAttribute("sandbox", "allow-scripts");
-  await expect(
-    frame.contentFrame().getByRole("heading", { name: "WorkBuddy", exact: true }),
-  ).toBeVisible();
-  await dialog.getByRole("button", { name: "关闭", exact: true }).click();
-  await expect(dialog).toHaveCount(0);
 }
 
 // 抽屉里有两个 `关闭`（头部图标、底部按钮），点带文字的那个；抽屉消失后再继续。
