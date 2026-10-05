@@ -80,6 +80,7 @@ export function chatSnapshot(
       },
     ],
     streamCursor: options.cursor ?? { epoch: 1, seq: 0 },
+    todo: null,
   };
 }
 

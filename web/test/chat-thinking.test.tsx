@@ -64,6 +64,7 @@ function assistant(id: number, status: Status, fields: Partial<Message> = {}): M
 function sessionSnapshot(status: Snapshot["session"]["status"], ...later: Message[]) {
   const snapshot: Snapshot = {
     streamCursor: { epoch: 1, seq: 3 },
+    todo: null,
     session: { ...chatSnapshot().session, status },
     messages: [historyUser, ...later],
   };

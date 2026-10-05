@@ -69,6 +69,7 @@ function snapshotFor(session: ChatSession, content: string): ChatMessageSnapshot
       },
     ],
     streamCursor: { epoch: 1, seq: 0 },
+    todo: null,
   };
 }
 
@@ -84,6 +85,7 @@ function emptyCreatedSnapshot(sessionId: string): ChatMessageSnapshot {
     },
     messages: [],
     streamCursor: { epoch: 1, seq: 0 },
+    todo: null,
   };
 }
 
@@ -200,6 +202,7 @@ describe("chat page draft retention on pre-acceptance rejection", () => {
         session: idle,
         messages: [historyUser],
         streamCursor: { epoch: 1, seq: 0 },
+        todo: null,
       }),
     );
     await rejectedDraft;

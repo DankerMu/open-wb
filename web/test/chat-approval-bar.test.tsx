@@ -582,6 +582,7 @@ describe("approval prompt card: ownership fences", () => {
         },
       ],
       streamCursor: { epoch: 1, seq: 2 },
+      todo: null,
     };
     // 首次加载 + open 恢复。
     expect(calls(fetchMock, MESSAGES)).toHaveLength(2);

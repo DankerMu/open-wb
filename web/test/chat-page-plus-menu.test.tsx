@@ -61,7 +61,12 @@ async function openBound(commands: FetchRoutes[string]) {
     ...welcomeRoutes(),
     "/api/sessions": () => jsonResponse({ sessions: [BOUND] }),
     [`/api/sessions/${BOUND.id}/messages`]: () =>
-      jsonResponse({ session: BOUND, messages: [], streamCursor: { epoch: 1, seq: 0 } }),
+      jsonResponse({
+        session: BOUND,
+        messages: [],
+        streamCursor: { epoch: 1, seq: 0 },
+        todo: null,
+      }),
     [commandsOf(A)]: commands,
   });
   await composerReady();

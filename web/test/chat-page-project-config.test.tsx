@@ -77,7 +77,12 @@ function routes(config: FetchRoutes): FetchRoutes {
   };
   for (const listed of SESSIONS) {
     all[messagesPath(listed.id)] = () =>
-      jsonResponse({ session: listed, messages: [], streamCursor: { epoch: 1, seq: 0 } });
+      jsonResponse({
+        session: listed,
+        messages: [],
+        streamCursor: { epoch: 1, seq: 0 },
+        todo: null,
+      });
   }
   return { ...all, ...config };
 }

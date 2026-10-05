@@ -237,6 +237,7 @@ describe("chat page isolation and errors", () => {
       session: idle,
       messages: [historyUser],
       streamCursor: { epoch: 1, seq: 0 },
+      todo: null,
     };
     renderChatPage(`/?session=${SESSION_ID}`, {
       "/api/sessions": () => jsonResponse({ sessions: [idle] }),
@@ -267,6 +268,7 @@ describe("chat page isolation and errors", () => {
       session: idle,
       messages: [historyUser],
       streamCursor: { epoch: 1, seq: 0 },
+      todo: null,
     };
     let messageReads = 0;
     renderChatPage(`/?session=${SESSION_ID}`, {

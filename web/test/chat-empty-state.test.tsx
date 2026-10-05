@@ -54,7 +54,7 @@ type Session = typeof BOUND | typeof UNBOUND;
 afterEach(cleanupSessionMeta);
 
 function snapshot(session: Session, messages: unknown[] = []) {
-  return jsonResponse({ session, messages, streamCursor: { epoch: 1, seq: 0 } });
+  return jsonResponse({ session, messages, streamCursor: { epoch: 1, seq: 0 }, todo: null });
 }
 
 /** 列表里只有 `session`，它的历史是空快照；`extra` 追加或覆盖。 */

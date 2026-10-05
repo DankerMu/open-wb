@@ -211,6 +211,7 @@ describe("session REST — stopped read-back", () => {
           },
         ],
         streamCursor: { epoch: 0, seq: null },
+        todo: null,
       });
     });
   });

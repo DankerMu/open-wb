@@ -14,6 +14,7 @@ import { createSessionDeleter } from "./session-delete.js";
 import { sessionSkillsResolver } from "./slash-commands.js";
 import { createSessionStore, type SessionStore } from "./store.js";
 import { createSessionMetadataStore } from "./store-metadata.js";
+import type { TodoWarn } from "./store-todo.js";
 import { defaultSessionClock, registerSessionEventStream } from "./stream/sse.js";
 import { SessionSupervisor, type SessionSupervisorRuntime } from "./supervisor.js";
 import type { TokenRegistry } from "./tokens.js";
@@ -48,6 +49,8 @@ export interface RegisterSessionsOptions {
   onEvent?: (sessionId: string, epoch: number, event: ChatEvent<number>) => void;
   /** Optional synchronous handshake-timeout record sink, forwarded unchanged; omitted → discarded. */
   log?: SpawnLog;
+  /** Optional synchronous warn sink for a dropped task-list candidate (#864); omitted → discarded. */
+  warn?: TodoWarn;
 }
 
 export function registerSessions(
@@ -60,6 +63,7 @@ export function registerSessions(
       supervisor.handleFlushError(failure);
     },
     emit,
+    warn: options.warn,
   });
   supervisor = new SessionSupervisor({
     store,

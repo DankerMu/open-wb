@@ -50,6 +50,7 @@ export function conversation(messages: Message[], status: "done" | "running" = "
     session: chatSnapshot({ status }).session,
     messages,
     streamCursor: { epoch: 1, seq: 3 },
+    todo: null,
   };
 }
 

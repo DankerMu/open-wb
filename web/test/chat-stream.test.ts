@@ -83,6 +83,7 @@ function reducerSnapshot(
     session: { ...runningSession, status: options.sessionStatus ?? "running" },
     messages,
     streamCursor: options.cursor ?? { epoch: 1, seq: null },
+    todo: null,
   };
 }
 

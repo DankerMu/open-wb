@@ -66,6 +66,7 @@ describe("chat page confirmed ownership gaps", () => {
       session: { ...runningSession("idle"), title: "saved title" },
       messages: [priorUser],
       streamCursor: { epoch: 1, seq: 0 },
+      todo: null,
     };
     const acceptedSnapshot: ChatMessageSnapshot = {
       session: { ...runningSession("done"), title: PROMPT, updatedAt: 1_740_000_000_080 },
@@ -93,6 +94,7 @@ describe("chat page confirmed ownership gaps", () => {
         },
       ],
       streamCursor: { epoch: 2, seq: 3 },
+      todo: null,
     };
     let currentSnapshot: ChatMessageSnapshot = idleSnapshot;
     renderChatPage(`/?session=${SESSION_ID}`, {
@@ -216,6 +218,7 @@ describe("chat page confirmed ownership gaps", () => {
         },
       ],
       streamCursor: { epoch: 1, seq: 6 },
+      todo: null,
     };
     renderChatPage(`/?session=${SESSION_ID}`, {
       "/api/sessions": () => jsonResponse({ sessions: [currentSnapshot.session] }),
@@ -264,6 +267,7 @@ describe("chat page confirmed ownership gaps", () => {
         },
       ],
       streamCursor: { epoch: 1, seq: 9 },
+      todo: null,
     };
     await typeAndSend(secondUser);
     await waitFor(() => {
@@ -318,6 +322,7 @@ describe("chat page confirmed ownership gaps", () => {
       session: olderListedSession(),
       messages: [historyUser],
       streamCursor: { epoch: 1, seq: 0 },
+      todo: null,
     };
     const pendingAccept = deferredResponse();
     renderChatPage(`/?session=${SESSION_ID}`, {
@@ -366,6 +371,7 @@ describe("chat page confirmed ownership gaps", () => {
         },
       ],
       streamCursor: { epoch: 1, seq: 3 },
+      todo: null,
     };
     pendingAccept.resolve(jsonResponse(promptAccepted, 202));
     const messages = await findMessageArea();
@@ -381,6 +387,7 @@ describe("chat page confirmed ownership gaps", () => {
       session: { ...runningSession("idle"), title: "saved title" },
       messages: [historyUser],
       streamCursor: { epoch: 1, seq: 0 },
+      todo: null,
     };
     const completed = chatSnapshot({
       status: "done",

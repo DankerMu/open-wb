@@ -67,6 +67,7 @@ const snapshot = {
     },
   ],
   streamCursor: { epoch: 1, seq: null as number | null },
+  todo: null,
 };
 
 const promptAccepted = {
@@ -178,6 +179,7 @@ describe("Sessions API client history contract", () => {
     const zeroCursorSnapshot = {
       ...snapshot,
       streamCursor: { epoch: 1, seq: 0 },
+      todo: null,
     };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(zeroCursorSnapshot)));
 
@@ -272,6 +274,7 @@ describe("Sessions API client snapshot domain contract", () => {
         },
       ],
       streamCursor: { epoch: SAFE_INTEGER_MAX, seq: SAFE_INTEGER_MAX },
+      todo: null,
     };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(boundedSnapshot)));
 
@@ -330,7 +333,10 @@ describe("Sessions API client snapshot rejection contract", () => {
   });
 
   it.each([
-    ["a missing streamCursor", { session: runningSession, messages: snapshot.messages }],
+    [
+      "a missing streamCursor",
+      { session: runningSession, messages: snapshot.messages, todo: null },
+    ],
     ["an extra snapshot field", { ...snapshot, ownerId: "u1" }],
     [
       "a missing nested session field",

@@ -38,6 +38,7 @@ import { registerSessions } from "./sessions/index.js";
 import { ompAgentDir } from "./sessions/omp/process.js";
 import type { SpawnLog } from "./sessions/omp/spawn-gate.js";
 import type { SessionStore } from "./sessions/store.js";
+import type { TodoWarn } from "./sessions/store-todo.js";
 import type { SessionSupervisor, SessionSupervisorRuntime } from "./sessions/supervisor.js";
 import { TokenRegistry } from "./sessions/tokens.js";
 import { registerWorkspaces } from "./workspaces/index.js";
@@ -69,6 +70,8 @@ export interface AssemblyDependencies {
   onEvent?: (sessionId: string, epoch: number, event: ChatEvent<number>) => void;
   /** Optional synchronous handshake-timeout record sink, forwarded unchanged; not an onError fault. */
   log?: SpawnLog;
+  /** Optional synchronous warn sink for a dropped task-list candidate; not an onError fault. */
+  warn?: TodoWarn;
 }
 
 export interface CreateAppOptions {
@@ -167,6 +170,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     onError: assembly?.onError ?? (() => {}),
     ...(assembly?.onEvent === undefined ? {} : { onEvent: assembly.onEvent }),
     ...(assembly?.log === undefined ? {} : { log: assembly.log }),
+    ...(assembly?.warn === undefined ? {} : { warn: assembly.warn }),
   });
   app.decorate("sessions", registered);
   const audit = { emit: (event: Parameters<typeof emit>[1]) => emit(db, event) };

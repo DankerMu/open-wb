@@ -80,7 +80,7 @@ function routes(commands: FetchRoutes): FetchRoutes {
   const sessions = [BOUND, UNBOUND];
   const histories = sessions.map((session) => [
     `/api/sessions/${session.id}/messages`,
-    () => jsonResponse({ session, messages: [], streamCursor: { epoch: 1, seq: 0 } }),
+    () => jsonResponse({ session, messages: [], streamCursor: { epoch: 1, seq: 0 }, todo: null }),
   ]);
   return {
     ...welcomeRoutes(),

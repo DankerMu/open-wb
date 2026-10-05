@@ -34,6 +34,7 @@ import { deriveProxyBaseUrl, writeManagedModelsYml } from "./model-proxy/models-
 import { writeHostOverlay } from "./sessions/omp/host-overlay.js";
 import type { HandshakeTimeoutRecord } from "./sessions/omp/spawn-gate.js";
 import { ensureOmpStateLayout, ompAgentDir } from "./sessions/omp/state-layout.js";
+import type { TodoRejection } from "./sessions/store-todo.js";
 import type { SessionSupervisorRuntime } from "./sessions/supervisor.js";
 import { writeManagedLine } from "./startup-writer.js";
 
@@ -93,7 +94,8 @@ export function sessionRuntimeOf(config: ServerConfig): SessionSupervisorRuntime
 
 /**
  * 纯 seam：main 路径交给 createApp 的完整 assembly（runtime、可选 upstream、log、onError）。构造本身零输出；
- * log 把每条握手超时记录写成 application stderr 一行 JSON，写失败吞掉；
+ * log 把每条握手超时记录、warn 把每条被丢弃的任务清单候选记录（不含任务文本）写成 application stderr 一行 JSON，
+ * 写失败吞掉；
  * onError 把 supervisor 每次通知的保留故障写成一行 generic `session_fault`（#664）。
  */
 export function appAssemblyOf(config: ServerConfig): AssemblyDependencies {
@@ -102,12 +104,13 @@ export function appAssemblyOf(config: ServerConfig): AssemblyDependencies {
     ...(config.modelUpstreamBaseUrl !== undefined && config.modelUpstreamApiKey !== undefined
       ? { upstream: { baseUrl: config.modelUpstreamBaseUrl, apiKey: config.modelUpstreamApiKey } }
       : {}),
-    log: writeHandshakeTimeout,
+    log: writeRecord,
+    warn: writeRecord,
     onError: emitSessionFault,
   };
 }
 
-function writeHandshakeTimeout(record: HandshakeTimeoutRecord): void {
+function writeRecord(record: HandshakeTimeoutRecord | TodoRejection): void {
   void writeManagedLine(process.stderr, `${JSON.stringify(record)}\n`).catch(() => {
     // Sink unavailable: the record is observation only and never changes the request or exit code.
   });

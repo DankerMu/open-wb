@@ -53,10 +53,18 @@ export type ChatSessionList = {
   sessions: ChatSession[];
 };
 
+type ChatTodoStatus = "pending" | "in_progress" | "completed" | "abandoned" | "blocked";
+type ChatTodoTask = { content: string; status: ChatTodoStatus };
+type ChatTodoPhase = { name: string; tasks: ChatTodoTask[] };
+
+/** 归一化任务清单：1..200 个阶段、每个阶段至少一个任务、任务总数 1..200。 */
+type ChatTodo = { phases: ChatTodoPhase[] };
+
 export type ChatMessageSnapshot = {
   session: ChatSession;
   messages: ChatMessage[];
   streamCursor: ChatStreamCursor;
+  todo: ChatTodo | null;
 };
 
 export type ChatPromptAccepted = {
@@ -89,6 +97,16 @@ export type ChatSettledApproval = ChatApproval & { decision: ChatApprovalDecisio
 const SESSION_ID = /^[0-9a-f]{32}$/;
 const WORKSPACE_ID = /^[0-9a-f]{32}$/;
 const MAX_FILE_CHANGES = 50;
+const TODO_STATUSES: ReadonlySet<unknown> = new Set<ChatTodoStatus>([
+  "pending",
+  "in_progress",
+  "completed",
+  "abandoned",
+  "blocked",
+]);
+/** `name` / `content` 各自的码点上限，以及跨阶段的任务总数上限。 */
+const MAX_TODO_TEXT_POINTS = 200;
+const MAX_TODO_TASKS = 200;
 
 function isSafeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value);
@@ -291,6 +309,58 @@ function parseStreamCursor(value: unknown): ChatStreamCursor | null {
   return { epoch, seq };
 }
 
+/** 字符串且不超过 200 个码点（代理对算一个）。 */
+function isTodoText(value: unknown): value is string {
+  if (typeof value !== "string" || value.length > MAX_TODO_TEXT_POINTS * 2) {
+    return false;
+  }
+  let points = 0;
+  for (const _point of value) {
+    points += 1;
+  }
+  return points <= MAX_TODO_TEXT_POINTS;
+}
+
+function parseTodoTask(value: unknown): ChatTodoTask | null {
+  if (!hasExactlyKeys(value, ["content", "status"])) {
+    return null;
+  }
+
+  const { content, status } = value;
+  if (!isTodoText(content) || !TODO_STATUSES.has(status)) {
+    return null;
+  }
+
+  return { content, status: status as ChatTodoStatus };
+}
+
+function parseTodoPhase(value: unknown): ChatTodoPhase | null {
+  if (!hasExactlyKeys(value, ["name", "tasks"]) || !isTodoText(value.name)) {
+    return null;
+  }
+
+  const tasks = parseJsonArray(value.tasks, parseTodoTask);
+  return tasks && tasks.length > 0 ? { name: value.name, tasks } : null;
+}
+
+/** `null` 是合法的空清单，所以非法结构用 `undefined` 表示。 */
+function parseTodo(value: unknown): ChatTodo | null | undefined {
+  if (value === null) {
+    return null;
+  }
+  if (!hasExactlyKeys(value, ["phases"])) {
+    return undefined;
+  }
+
+  const phases = parseJsonArray(value.phases, parseTodoPhase);
+  if (!phases || phases.length === 0) {
+    return undefined;
+  }
+
+  const total = phases.reduce((count, phase) => count + phase.tasks.length, 0);
+  return total > MAX_TODO_TASKS ? undefined : { phases };
+}
+
 export function parseSessionList(value: unknown): ChatSessionList | null {
   if (!hasExactlyKeys(value, ["sessions"])) {
     return null;
@@ -301,18 +371,19 @@ export function parseSessionList(value: unknown): ChatSessionList | null {
 }
 
 export function parseMessageSnapshot(value: unknown): ChatMessageSnapshot | null {
-  if (!hasExactlyKeys(value, ["session", "messages", "streamCursor"])) {
+  if (!hasExactlyKeys(value, ["session", "messages", "streamCursor", "todo"])) {
     return null;
   }
 
   const session = parseSession(value.session);
   const messages = parseJsonArray(value.messages, parseMessage);
   const streamCursor = parseStreamCursor(value.streamCursor);
-  if (!session || !messages || !streamCursor) {
+  const todo = parseTodo(value.todo);
+  if (!session || !messages || !streamCursor || todo === undefined) {
     return null;
   }
 
-  return { session, messages, streamCursor };
+  return { session, messages, streamCursor, todo };
 }
 
 export function parsePromptAccepted(value: unknown): ChatPromptAccepted | null {

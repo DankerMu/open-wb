@@ -46,6 +46,7 @@ function snapshotOf(status: Snapshot["session"]["status"], messages: Message[], 
     session: { ...base.session, status },
     messages,
     streamCursor: { epoch: 1, seq },
+    todo: null,
   } satisfies Snapshot;
 }
 
