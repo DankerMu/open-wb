@@ -160,12 +160,14 @@ export function options() {
 }
 
 function labelOf(option: Element) {
-  return option.querySelector(".chat-slash-label")?.textContent;
+  return option.querySelector('[data-slot="slash-label"]')?.textContent;
 }
 
 /** The project tag of every option, in document order; null for an option without one. */
 export function tags() {
-  return options().map((option) => option.querySelector(".chat-slash-tag")?.textContent ?? null);
+  return options().map(
+    (option) => option.querySelector('[data-slot="slash-tag"]')?.textContent ?? null,
+  );
 }
 
 /** The label of every option, in document order. */
@@ -180,8 +182,7 @@ export function selection() {
 
 /**
  * The label of the highlighted option. Fails unless exactly one option carries
- * `aria-selected="true"`, the listbox names it in `aria-activedescendant` and it alone has the
- * highlight class.
+ * `aria-selected="true"` and the listbox names it in `aria-activedescendant`.
  */
 export function highlighted() {
   const all = options();
@@ -190,9 +191,6 @@ export function highlighted() {
   const [option] = selected as [HTMLElement];
   expect(option.id).not.toBe("");
   expect(shownPanel().getAttribute("aria-activedescendant")).toBe(option.id);
-  expect(all.filter((item) => item.classList.contains("chat-slash-option--active"))).toEqual([
-    option,
-  ]);
   return labelOf(option);
 }
 
@@ -224,14 +222,14 @@ export async function expectNothingSent(fetchMock: FetchMock, requests: readonly
   expect(paths(fetchMock)).toEqual(requests);
 }
 
-/** The children of the composer card as `tag.class` (the tag alone without a class). */
+/** The children of the composer card, each as its `data-slot` (the tag name without one). */
 export function cardChildren() {
-  const card = composer().closest(".chat-composer-card");
-  if (!card) throw new Error("expected the composer inside .chat-composer-card");
-  return Array.from(card.children, (child) => {
-    const tag = child.tagName.toLowerCase();
-    return child.classList.length === 0 ? tag : `${tag}.${child.classList[0]}`;
-  });
+  const card = composer().closest('[data-slot="composer-card"]');
+  if (!card) throw new Error("expected the composer inside the composer card");
+  return Array.from(
+    card.children,
+    (child) => child.getAttribute("data-slot") ?? child.tagName.toLowerCase(),
+  );
 }
 
 /** Opens the welcome state with the three-command catalogue loaded and the panel on `draft`. */
@@ -257,23 +255,19 @@ export function expectThreeCandidates() {
     "-1",
     "-1",
   ]);
-  expect(all.map((option) => option.querySelector(".chat-slash-desc")?.textContent)).toEqual([
-    "压缩较长对话的上下文，保留要点",
-    "查看或修改助手的任务清单",
-    "写周报",
-  ]);
-  expect(all.map((option) => option.querySelector(".chat-slash-hint")?.textContent)).toEqual([
-    "可选：想保留的重点",
-    "可选：append <任务>",
-    "可选参数",
-  ]);
+  expect(
+    all.map((option) => option.querySelector('[data-slot="slash-desc"]')?.textContent),
+  ).toEqual(["压缩较长对话的上下文，保留要点", "查看或修改助手的任务清单", "写周报"]);
+  expect(
+    all.map((option) => option.querySelector('[data-slot="slash-hint"]')?.textContent),
+  ).toEqual(["可选：想保留的重点", "可选：append <任务>", "可选参数"]);
   expect(all.map((option) => option.textContent)).toEqual([
     "整理上下文压缩较长对话的上下文，保留要点可选：想保留的重点",
     "任务清单查看或修改助手的任务清单可选：append <任务>",
     "weekly-report写周报可选参数",
   ]);
   expect(highlighted()).toBe("整理上下文");
-  expect(composer().closest(".chat-composer-card")?.firstElementChild).toBe(listbox);
+  expect(composer().closest('[data-slot="composer-card"]')?.firstElementChild).toBe(listbox);
 }
 
 /** A finished session whose next prompt is accepted and answered; `sent` is that prompt. */

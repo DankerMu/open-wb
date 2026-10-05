@@ -232,11 +232,10 @@ describe("composer footer 空间选择 (W5–W9)", () => {
     const trigger = footerButton(UNSELECTED_BUTTON);
     expect(trigger.type).toBe("button");
     expect(trigger.querySelector("svg")?.classList.contains("lucide-folder")).toBe(true);
-    const card = trigger.closest(".chat-composer-card");
-    expect(card?.lastElementChild?.contains(trigger)).toBe(true);
-    expect(card?.lastElementChild?.previousElementSibling).toBe(
-      card?.querySelector(".chat-composer-toolbar"),
-    );
+    // 选择器在卡片末尾的工具栏里、能力栏最左。
+    const toolbar = trigger.closest('[data-slot="composer-toolbar"]');
+    expect(trigger.closest('[data-slot="composer-card"]')?.lastElementChild).toBe(toolbar);
+    expect(toolbar?.firstElementChild?.contains(trigger)).toBe(true);
 
     const dialog = await openPicker();
     expect(searchBox(dialog).placeholder).toBe(SEARCH);
@@ -281,6 +280,9 @@ describe("composer footer 空间选择 (W5–W9)", () => {
     expect(partitionTitles(nav, "项目A")).toEqual(["新会话"]);
     expect(entryTitles(nav)).toEqual(["新会话"]);
     await waitFor(() => expect(queryFooterButton()).toBeNull());
+    expect(document.querySelector('[data-slot="composer-workspace"]')?.textContent).toBe(
+      PROJECT_A_BUTTON,
+    );
     expect(sceneGroup()).toBeNull();
     expect(pageHtml()).not.toContain(ROOT_MARK);
   });
@@ -290,7 +292,7 @@ describe("composer footer 空间选择 (W5–W9)", () => {
       workspaces: () => workspaceList(PROJECT_A, SUPPORT, ALPHA),
     });
     await workspacesRead(fetchMock, 1);
-    const picker = document.querySelector(".chat-workspace-picker");
+    const picker = document.querySelector('[data-slot="composer-capabilities"]');
     if (!(picker instanceof HTMLElement)) throw new Error("未渲染 footer");
     expect(within(picker).getAllByRole("button")).toEqual([footerButton(UNSELECTED_BUTTON)]);
 
@@ -446,7 +448,7 @@ describe("锁定、会话页与状态生命周期 (W10–W14)", () => {
     await screen.findByText("回答", { exact: true });
     expect(sceneGroup()).toBeNull();
     expect(queryFooterButton()).toBeNull();
-    expect(document.querySelector(".chat-workspace-picker")).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "选择工作空间" })).toBeNull();
     expectToolbarEndsCard();
   });
 

@@ -51,14 +51,34 @@ function SlashOption({ command }: { command: Command }) {
   const tag = sourceTag(command);
   return (
     <>
-      <span className="chat-slash-label">{command.label}</span>
-      {tag === null ? null : <span className="chat-slash-tag">{tag}</span>}
-      <span className="chat-slash-desc">{command.description}</span>
-      {command.hint === null ? null : <span className="chat-slash-hint">{command.hint}</span>}
+      <span className="font-medium text-foreground" data-slot="slash-label">
+        {command.label}
+      </span>
+      {tag === null ? null : (
+        <span
+          className="rounded bg-(--wb-brand-primary-subtle) px-1.5 text-xs text-(--wb-brand-primary-deep)"
+          data-slot="slash-tag"
+        >
+          {tag}
+        </span>
+      )}
+      <span className="text-muted-foreground" data-slot="slash-desc">
+        {command.description}
+      </span>
+      {command.hint === null ? null : (
+        <span className="ml-auto text-xs text-(--wb-text-tertiary)" data-slot="slash-hint">
+          {command.hint}
+        </span>
+      )}
     </>
   );
 }
 
+/**
+ * The panel: the first child of the composer card, above the textarea, with a rule between the
+ * two. It scrolls inside a bounded height (the key handler keeps the highlighted option in view);
+ * an option is one row of label, description and hint that wraps on a narrow card.
+ */
 function SlashMenu({
   active,
   id,
@@ -74,7 +94,8 @@ function SlashMenu({
     <div
       aria-activedescendant={optionId(id, active)}
       aria-label="命令候选"
-      className="chat-slash"
+      className="max-h-55 flex-none overflow-y-auto border-b border-border pb-2"
+      data-slot="slash-menu"
       onMouseDown={(event) => event.preventDefault()}
       role="listbox"
       tabIndex={-1}
@@ -83,9 +104,7 @@ function SlashMenu({
         // biome-ignore lint/a11y/useKeyWithClickEvents: 按键由保持焦点的输入框处理（interceptKeyDown）。
         <div
           aria-selected={index === active}
-          className={
-            index === active ? "chat-slash-option chat-slash-option--active" : "chat-slash-option"
-          }
+          className="flex cursor-pointer flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-lg px-2 py-1.5 text-[13px] leading-5 wrap-anywhere aria-selected:bg-accent"
           id={optionId(id, index)}
           key={command.name}
           onClick={() => onPick(command)}

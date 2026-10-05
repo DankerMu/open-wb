@@ -86,6 +86,7 @@ export function ChatPage() {
         streamError={session.streamError}
         welcome={session.welcome}
         workspace={workspace}
+        workspaceId={session.slashWorkspaceId}
       />
       <RenameDialog rename={sessionActions.rename} />
       <DeleteDialog remove={sessionActions.remove} />

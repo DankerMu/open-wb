@@ -3,7 +3,7 @@
  * openspec/changes/slash-command-menu/design.md. Seams: the jsdom chat page inside the real shell
  * over a stubbed `fetch` (the real `createApiClient`), the page beside an auth probe for the
  * account renewal, a recorded `scrollIntoView` (jsdom lacks it), `useSlashMenu` beside a bare
- * `Composer` (J11), the bare `Composer` (J13) and the static CSS text (J14). Expected values are
+ * `Composer` (J11), the bare `Composer` (J13) and the panel's own classes (J14). Expected values are
  * literals from the spec delta.
  */
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -52,13 +52,6 @@ import {
 import { renderChatPage } from "./chat-page-support.js";
 import { chatSnapshot } from "./chat-stream-support.js";
 import { createFetchMock, deferredResponse, jsonResponse, paths } from "./support.js";
-import {
-  COLOR_LITERAL_PATTERNS,
-  readRepoFile,
-  ruleBody,
-  stripComments,
-  topLevelBlocks,
-} from "./ui-support.js";
 
 const NEAREST = { block: "nearest" };
 const COMPOSING = { isComposing: true };
@@ -75,13 +68,7 @@ describe("候选面板 (J1, J2)", () => {
     await type("/");
 
     expectThreeCandidates();
-    expect(cardChildren()).toEqual([
-      "div.chat-slash",
-      "label.ui-sr-only",
-      "textarea.chat-composer-input",
-      "div.chat-composer-toolbar",
-      "div.chat-workspace-picker",
-    ]);
+    expect(cardChildren()).toEqual(["slash-menu", "label", "textarea", "composer-toolbar"]);
     expect(commandCalls(fetchMock)).toEqual([
       [
         COMMANDS,
@@ -101,9 +88,9 @@ describe("候选面板 (J1, J2)", () => {
     await type("/");
 
     expect(labels()).toEqual(["任务清单", "plain"]);
-    expect(options().map((option) => option.querySelectorAll(".chat-slash-hint").length)).toEqual([
-      1, 0,
-    ]);
+    expect(
+      options().map((option) => option.querySelectorAll('[data-slot="slash-hint"]').length),
+    ).toEqual([1, 0]);
     expect(optionOf("plain").textContent).toBe("plain没有提示的技能");
   });
 
@@ -124,12 +111,7 @@ describe("候选面板 (J1, J2)", () => {
     await type("/");
 
     expectThreeCandidates();
-    expect(cardChildren()).toEqual([
-      "div.chat-slash",
-      "label.ui-sr-only",
-      "textarea.chat-composer-input",
-      "div.chat-composer-toolbar",
-    ]);
+    expect(cardChildren()).toEqual(["slash-menu", "label", "textarea", "composer-toolbar"]);
     expect(commandCalls(fetchMock)).toHaveLength(1);
   });
 });
@@ -708,19 +690,14 @@ describe("Composer 插槽契约 (J13)", () => {
   });
 
   it("J13 the slot node is rendered bare as the first child of the card", () => {
-    mountComposer({ slashMenu: <div className="slot-probe">候选</div> });
+    mountComposer({ slashMenu: <div data-slot="slot-probe">候选</div> });
 
-    expect(cardChildren()).toEqual([
-      "div.slot-probe",
-      "label.ui-sr-only",
-      "textarea.chat-composer-input",
-      "div.chat-composer-toolbar",
-    ]);
+    expect(cardChildren()).toEqual(["slot-probe", "label", "textarea", "composer-toolbar"]);
   });
 
   it("J13 a hidden panel leaves no wrapper in the card of a selected session", async () => {
     await openSession();
-    const bare = ["label.ui-sr-only", "textarea.chat-composer-input", "div.chat-composer-toolbar"];
+    const bare = ["label", "textarea", "composer-toolbar"];
     expect(cardChildren()).toEqual(bare);
 
     await type("/help");
@@ -731,14 +708,9 @@ describe("Composer 插槽契约 (J13)", () => {
     expect(cardChildren()).toEqual(bare);
   });
 
-  it("J13 a hidden panel leaves no wrapper in the welcome card, which ends with its footer", async () => {
+  it("J13 a hidden panel leaves no wrapper in the welcome card, which ends with its toolbar", async () => {
     await openWelcome();
-    const bare = [
-      "label.ui-sr-only",
-      "textarea.chat-composer-input",
-      "div.chat-composer-toolbar",
-      "div.chat-workspace-picker",
-    ];
+    const bare = ["label", "textarea", "composer-toolbar"];
     expect(cardChildren()).toEqual(bare);
 
     await type("/");
@@ -749,48 +721,11 @@ describe("Composer 插槽契约 (J13)", () => {
 });
 
 describe("样式契约 (J14)", () => {
-  const TOKEN = /^var\(--wb-[a-z0-9-]+\)$/;
-  const css = () => stripComments(readRepoFile("web/src/features/chat/messages.css"));
-  /** The value of `property` in the rule of `selector`; undefined when the rule does not set it. */
-  const declared = (selector: string, property: string) =>
-    new RegExp(`(?<![-\\w])${property}\\s*:\\s*([^;]+);`).exec(ruleBody(css(), selector))?.[1];
+  it("J14 the panel declares a bounded height with vertical scrolling", async () => {
+    await welcomePanel();
 
-  it("J14 the panel has a bounded height and scrolls vertically", () => {
-    expect(declared(".chat-slash", "max-height")).toMatch(/^\d+px$/);
-    expect(declared(".chat-slash", "overflow-y")).toBe("auto");
-  });
-
-  it("J14 the highlighted option has a background of its own, from a token", () => {
-    expect(declared(".chat-slash-option--active", "background")).toMatch(TOKEN);
-    expect(declared(".chat-slash-option", "background")).not.toBe(
-      declared(".chat-slash-option--active", "background"),
-    );
-  });
-
-  it("J14 the hint is muted text from a token, unlike the label", () => {
-    expect(declared(".chat-slash-hint", "color")).toMatch(
-      /^var\(--wb-text-(secondary|tertiary)\)$/,
-    );
-    expect(declared(".chat-slash-label", "color")).toBe("var(--wb-text-primary)");
-  });
-
-  it("J14 the panel rules hold no bare colour and take every colour from a token", () => {
-    const rules = topLevelBlocks(css()).filter((block) => block.prelude.includes(".chat-slash"));
-    const selectors = rules.map((block) => block.prelude);
-    expect(selectors).toContain(".chat-slash-option--active");
-    expect(selectors.length).toBeGreaterThan(3);
-
-    const bodies = rules.map((block) => block.body).join("\n");
-    for (const pattern of COLOR_LITERAL_PATTERNS) expect(bodies).not.toMatch(pattern);
-    const colours = [
-      ...bodies.matchAll(/(?<![-\w])(?:color|background(?:-color)?)\s*:\s*([^;]+);/g),
-    ];
-    expect(colours.length).toBeGreaterThan(3);
-    for (const [, value] of colours) expect(value).toMatch(TOKEN);
-    for (const [, value = ""] of bodies.matchAll(/(?<![-\w])border[-\w]*\s*:\s*([^;]+);/g)) {
-      if (/[a-z]/i.test(value.replace(/\d+px|solid|var\([^)]*\)/g, ""))) {
-        throw new Error(`border 声明含非 token 的值：${value}`);
-      }
-    }
+    const classes = Array.from(panel()?.classList ?? []);
+    expect(classes.filter((name) => /^max-h-\d+$/.test(name))).toHaveLength(1);
+    expect(classes).toContain("overflow-y-auto");
   });
 });

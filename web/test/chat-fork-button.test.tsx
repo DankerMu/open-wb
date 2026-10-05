@@ -139,7 +139,7 @@ function regenButton() {
 }
 
 function bar() {
-  const element = document.querySelector<HTMLElement>("form .chat-composer-toolbar");
+  const element = document.querySelector<HTMLElement>('form [data-slot="composer-toolbar"]');
   expect(element).not.toBeNull();
   return within(element as HTMLElement);
 }

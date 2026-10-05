@@ -232,11 +232,14 @@ async function step2ProjectSkill(page: Page, workspaceId: string): Promise<void>
   expect(new URL(request.url()).search).toBe(`?workspaceId=${workspaceId}`);
   await expect(listbox).toBeVisible();
   await expect(options).toHaveCount(3);
-  await expect(listbox.locator(".chat-slash-label")).toHaveText([...SLASH_LABELS, SKILL_LABEL]);
-  await expect(listbox.locator(".chat-slash-tag")).toHaveText(["项目"]);
+  await expect(listbox.locator('[data-slot="slash-label"]')).toHaveText([
+    ...SLASH_LABELS,
+    SKILL_LABEL,
+  ]);
+  await expect(listbox.locator('[data-slot="slash-tag"]')).toHaveText(["项目"]);
   const skill = options.nth(2);
-  await expect(skill.locator(".chat-slash-tag")).toHaveText("项目");
-  await expect(skill.locator(".chat-slash-desc")).toHaveText(SKILL_DESCRIPTION);
+  await expect(skill.locator('[data-slot="slash-tag"]')).toHaveText("项目");
+  await expect(skill.locator('[data-slot="slash-desc"]')).toHaveText(SKILL_DESCRIPTION);
   await composer.fill(`/${SKILL_LABEL}`);
   await expect(options).toHaveCount(1);
   await composer.press("Enter");
@@ -645,8 +648,8 @@ async function step10Slash(page: Page, sessionId: string): Promise<void> {
   const composer = page.getByLabel("给助手发消息");
   const listbox = page.getByRole("listbox", { name: "命令候选", exact: true });
   const options = listbox.getByRole("option");
-  // `option` 的可访问名是 label、描述与 hint 的拼接，按 label 的类名取文本。
-  const labels = listbox.locator(".chat-slash-label");
+  // `option` 的可访问名是 label、描述与 hint 的拼接，按 label 的 `data-slot` 取文本。
+  const labels = listbox.locator('[data-slot="slash-label"]');
   const user = page.getByRole("article", { name: "用户" });
   const assistant = page.getByRole("article", { name: "助手" });
   // `session` 是白名单外的真 omp 内建：不转义会被 omp 当命令执行。固定回复与输入无关，转义后的文本

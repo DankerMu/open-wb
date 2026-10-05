@@ -1,3 +1,6 @@
+// 会话页输入框（design D6）：应用层组件，不用 ComposerPrimitive——拷入层的受控 textarea 加按钮，值即应用的
+// `draft`，提交走页面既有的表单受理路径。`generating` 与 `disabled` 是两回事：前者驱动 `生成中` 与 `停止`，
+// 后者只锁定输入框（历史加载中、分叉在途、连接器终止失败时只有后者为真）。
 import {
   type FormEvent,
   type KeyboardEvent,
@@ -6,15 +9,17 @@ import {
   useId,
   useState,
 } from "react";
-import { Button, Icon, useToast } from "../../ui/index.js";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Icon } from "../../ui/index.js";
 
 type StopTurn = () => Promise<"stopping" | null>;
 
 type ComposerProps = {
+  /** 工具栏左侧的能力栏（工作空间位）；不传时工具栏只有发送键。 */
+  capabilityBar?: ReactNode;
   disabled: boolean;
   draft: string;
-  /** 卡片内工具栏之后的末尾节点（欢迎态的空间选择）；不传时卡片以工具栏结尾。 */
-  footer?: ReactNode;
   generating: boolean;
   /** 输入框元素的 ref（会话页经它聚焦输入框）。 */
   inputRef?: Ref<HTMLTextAreaElement>;
@@ -31,11 +36,11 @@ type ComposerProps = {
   stopSessionId: string | null;
 };
 
-/** 输入卡：textarea 在上，底部工具栏只有圆形发送按钮（生成中换成停止键）；提示行在卡外。 */
+/** 输入卡：候选面板、textarea、底部工具栏（能力栏在左，`生成中` 与发送/停止键在右）；提示行在卡外。 */
 export function Composer({
+  capabilityBar,
   disabled,
   draft,
-  footer,
   generating,
   inputRef,
   interceptKeyDown,
@@ -50,15 +55,22 @@ export function Composer({
   const inputId = useId();
   const hintId = useId();
   return (
-    <form className="chat-composer" onSubmit={onSubmit}>
-      <div className="chat-composer-card">
+    <form
+      className="mx-auto box-border flex w-full max-w-3xl flex-none flex-col gap-2 px-2 pt-2.5 pb-1 max-[760px]:px-0"
+      data-slot="composer"
+      onSubmit={onSubmit}
+    >
+      <div
+        className="relative flex flex-col gap-3 rounded-2xl border border-border bg-card p-3 shadow-(--wb-shadow-input) has-[textarea:focus-visible]:border-ring has-[textarea:focus-visible]:ring-3 has-[textarea:focus-visible]:ring-ring/50"
+        data-slot="composer-card"
+      >
         {slashMenu}
-        <label className="ui-sr-only" htmlFor={inputId}>
+        <label className="sr-only" htmlFor={inputId}>
           给助手发消息
         </label>
-        <textarea
+        <Textarea
           aria-describedby={hintId}
-          className="chat-composer-input"
+          className="max-h-40 min-h-13 resize-none overflow-x-hidden overflow-y-auto rounded-none border-0 bg-transparent p-0 text-[15px] leading-[1.75] wrap-anywhere text-foreground placeholder:text-(--wb-text-tertiary) focus-visible:ring-0 disabled:bg-transparent disabled:text-(--wb-text-tertiary) disabled:opacity-100 max-[760px]:max-h-24 md:text-[15px] dark:bg-transparent dark:disabled:bg-transparent"
           disabled={disabled}
           id={inputId}
           onChange={(event) => onChangeDraft(event.target.value)}
@@ -85,30 +97,31 @@ export function Composer({
           rows={2}
           value={draft}
         />
-        <div className="chat-composer-toolbar">
-          {generating ? (
-            <p className="chat-composer-pending" role="status">
-              生成中
-            </p>
-          ) : null}
-          {generating ? (
-            <StopButton key={stopSessionId ?? ""} onStop={onStop} sessionId={stopSessionId} />
-          ) : (
-            <Button
-              aria-label="发送"
-              className="chat-send"
-              disabled={sendDisabled}
-              size="icon"
-              type="submit"
-              variant="primary"
-            >
-              <Icon name="send" />
-            </Button>
-          )}
+        <div className="flex min-h-8 items-center gap-2" data-slot="composer-toolbar">
+          {capabilityBar}
+          <div className="ml-auto flex flex-none items-center gap-2">
+            {generating ? (
+              <p className="m-0 text-[13px] text-(--wb-brand-primary-deep)" role="status">
+                生成中
+              </p>
+            ) : null}
+            {generating ? (
+              <StopButton key={stopSessionId ?? ""} onStop={onStop} sessionId={stopSessionId} />
+            ) : (
+              <Button
+                aria-label="发送"
+                className="rounded-full"
+                disabled={sendDisabled}
+                size="icon"
+                type="submit"
+              >
+                <Icon name="send" />
+              </Button>
+            )}
+          </div>
         </div>
-        {footer}
       </div>
-      <p className="chat-composer-hint" id={hintId}>
+      <p className="m-0 text-center text-xs text-(--wb-text-tertiary)" id={hintId}>
         Enter 发送 · Shift+Enter 换行
       </p>
     </form>
@@ -117,29 +130,22 @@ export function Composer({
 
 /**
  * 生成中替换发送键的圆形停止键：只在自己的 stop 请求在途时禁用，任何响应后（仍 running 时）恢复可点；
- * 解锁与「已停止」呈现只来自权威状态（`turn.end stopped` 或快照），从不来自 stop 响应本身。
+ * 解锁与「已停止」呈现只来自权威状态（`turn.end stopped` 或快照），从不来自 stop 响应本身，也不弹提示。
  */
 function StopButton({ onStop, sessionId }: { onStop: StopTurn; sessionId: string | null }) {
-  const toast = useToast();
   const [pending, setPending] = useState(false);
   return (
     <Button
       aria-label="停止"
-      className="chat-send"
+      className="rounded-full"
       disabled={pending || sessionId === null}
       onClick={() => {
         setPending(true);
-        void onStop().then((result) => {
-          if (result === "stopping") {
-            toast.show({ type: "info", message: "已停止生成" });
-          }
-          setPending(false);
-        });
+        void onStop().then(() => setPending(false));
       }}
       size="icon"
       title="停止"
       type="button"
-      variant="primary"
     >
       <Icon name="square" size={12} />
     </Button>

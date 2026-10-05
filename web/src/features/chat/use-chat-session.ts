@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from "react-router";
 import type { ApiClient } from "../../lib/api.js";
 import type { ChatMessageSnapshot } from "../../lib/session-contract.js";
 import { useAuth } from "../auth/index.js";
+import { composerLocks } from "./composer-locks.js";
 import { errorMessage, isNotFound, isUnauthorized } from "./errors.js";
 import { ownsCreateSend, ownsHistory, ownsMutation, visibleOwnedAlert } from "./ownership.js";
 import { useSessionActions } from "./session-actions.js";
@@ -39,12 +40,6 @@ type PageHistoryState =
   | (ReadyHistory & { resync?: { source: SessionEventHandle } });
 
 const MISSING_EVENT_SOURCE = "无法连接会话事件";
-
-/** A fork in flight locks the composer without being a running turn (no 停止/生成中). */
-function composerLocks(generating: boolean, forkLocked: boolean, draft: string) {
-  const composerDisabled = generating || forkLocked;
-  return { composerDisabled, sendDisabled: composerDisabled || draft.trim().length === 0 };
-}
 
 export function useChatSession() {
   const { createSessionClient } = useAuth();
@@ -616,15 +611,15 @@ export function useChatSession() {
   const workspace = workspaces?.find((item) => item.id === selected?.workspaceId);
   const ownedBusy = ownsMutation(mutationOwner, client, requestedSessionId);
   const ownedStreamError = visibleOwnedAlert(streamError, client, requestedSessionId);
-  const generating =
-    (ownedBusy && creating) ||
-    (ownedBusy && submitting) ||
-    ownsMutation(regenerateOwner, client, requestedSessionId) ||
-    (ownedHistory && historyState.status === "loading") ||
-    historyView?.status === "running" ||
-    Boolean(ownedStreamError);
-  const forkLocked = ownsMutation(forkOwner, client, requestedSessionId);
-  const { composerDisabled, sendDisabled } = composerLocks(generating, forkLocked, draft);
+  const { composerDisabled, generating, sendDisabled } = composerLocks({
+    sending: ownedBusy && (creating || submitting),
+    regenerating: ownsMutation(regenerateOwner, client, requestedSessionId),
+    running: historyView?.status === "running",
+    historyLoading: ownedHistory && historyState.status === "loading",
+    forking: ownsMutation(forkOwner, client, requestedSessionId),
+    streamFailed: Boolean(ownedStreamError),
+    draft,
+  });
   const slashWorkspaceId = composerWorkspaceId(requestedSessionId, selected, welcome.workspace);
 
   // `新建会话`：replace 导航回欢迎态，不发请求、不动草稿。`focusComposer` 为假（侧栏是覆盖层）时

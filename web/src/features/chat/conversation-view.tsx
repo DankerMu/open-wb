@@ -1,7 +1,7 @@
 import type { ComponentProps, FormEvent, ReactNode, Ref } from "react";
 import type { ApiClient } from "../../lib/api.js";
+import { CapabilityBar } from "./capability-bar.js";
 import { Composer } from "./composer.js";
-import { ComposerFooter } from "./composer-footer.js";
 import { Thread } from "./message-thread.js";
 import type { useSlashMenu } from "./slash-menu.js";
 import type { ChatState } from "./stream.js";
@@ -39,10 +39,12 @@ type ConversationViewProps = {
   /** 斜杠命令候选：输入框上方的面板（不可见时为 null）与先于 Enter 规则的按键拦截。 */
   slash: ReturnType<typeof useSlashMenu>;
   streamError: string | null;
-  /** 欢迎态的场景与空间选择（状态在会话页）；有当前会话时不渲染对应控件。 */
+  /** 欢迎态的场景与空间选择（状态在会话页）；有当前会话时场景不渲染，空间位换成只读标签。 */
   welcome: WelcomeOptions;
   /** 当前会话的空间（取自空间列表）；未绑定、不在列表里、列表读取中或读取失败时为 undefined。 */
   workspace: Workspace | undefined;
+  /** 当前会话绑定的工作空间 id：未绑定为 null，会话还没解析出来时为 undefined。 */
+  workspaceId: string | null | undefined;
 };
 
 export function ConversationView({
@@ -68,6 +70,7 @@ export function ConversationView({
   streamError,
   welcome,
   workspace,
+  workspaceId,
 }: ConversationViewProps) {
   return (
     <div className="chat-layout">
@@ -114,19 +117,20 @@ export function ConversationView({
           </div>
         )}
         <Composer
+          capabilityBar={
+            <CapabilityBar
+              choice={{
+                onSelect: welcome.selectWorkspace,
+                workspace: welcome.workspace,
+                workspaces: welcome.workspaces,
+                workspacesError: welcome.workspacesError,
+              }}
+              disabled={composerDisabled}
+              {...(requestedSessionId ? { session: { id: workspaceId, workspace } } : {})}
+            />
+          }
           disabled={composerDisabled}
           draft={draft}
-          footer={
-            requestedSessionId ? null : (
-              <ComposerFooter
-                disabled={composerDisabled}
-                onSelect={welcome.selectWorkspace}
-                workspace={welcome.workspace}
-                workspaces={welcome.workspaces}
-                workspacesError={welcome.workspacesError}
-              />
-            )
-          }
           generating={generating}
           inputRef={composerRef}
           interceptKeyDown={slash.interceptKeyDown}
