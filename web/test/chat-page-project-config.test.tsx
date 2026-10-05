@@ -201,11 +201,9 @@ describe("项目配置入口 (G1–G7)", () => {
     ]);
     expect(configButton(3).getAttribute("aria-expanded")).toBe("true");
     // Read-only: the only control is the dialog's own 关闭.
-    expect(
-      within(dialog)
-        .getAllByRole("button")
-        .map((control) => control.getAttribute("aria-label")),
-    ).toEqual(["关闭"]);
+    expect(within(dialog).getAllByRole("button")).toEqual([
+      within(dialog).getByRole("button", { name: "关闭" }),
+    ]);
     expect(dialog.querySelectorAll("a, input, textarea, select, [contenteditable]")).toHaveLength(
       0,
     );
