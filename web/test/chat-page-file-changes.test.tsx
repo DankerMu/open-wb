@@ -722,7 +722,8 @@ describe("文件变更 card on the chat page", () => {
     };
     await openSession({ ...base, messages: [asker, ...base.messages.slice(1)] });
 
-    expect(screen.getByRole("button", { name: "1 个步骤 · edit 已完成" })).toBeTruthy();
+    const user = screen.getByRole("article", { name: "用户" });
+    expect(within(user).getByRole("button", { name: "1 个步骤 · edit 已完成" })).toBeTruthy();
     expect(cards()).toEqual([]);
     expect(screen.queryByRole("group", { name: /文件变更/ })).toBeNull();
   });

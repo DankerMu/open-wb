@@ -119,7 +119,9 @@ describe("tool-call group: collapsed by default, expanded on failure", () => {
     expect(trigger(withFailure).getAttribute("aria-expanded")).toBe("true");
     expect(trigger(withFailure).textContent).toBe("2 个步骤 · bash 失败");
     expect(cardNames(withFailure)).toEqual(["read", "bash"]);
-    expect(within(withFailure).getByRole("status", { name: "bash 失败" }).textContent).toBe("失败");
+    const failedBadge = within(withFailure).getByRole("status", { name: "bash 失败" });
+    expect(failedBadge.textContent).toBe("失败");
+    expect(failedBadge.className).toContain("text-(--wb-status-error-text)");
 
     expect(noSteps.querySelector(GROUP)).toBeNull();
     expect(within(noSteps).queryByRole("button", { name: /个步骤/ })).toBeNull();
@@ -182,6 +184,9 @@ describe("tool-call group: collapsed by default, expanded on failure", () => {
     expect(trigger(article).textContent).toBe("1 个步骤 · read 运行中");
     expandToolGroups(article);
     expect(cardNames(article)).toEqual(["read"]);
+    expect(within(article).getByRole("status", { name: "read 运行中" }).className).toContain(
+      "text-(--wb-brand-primary-deep)",
+    );
 
     const source = await openStream();
     act(() => {
@@ -222,6 +227,23 @@ describe("tool-call group: collapsed by default, expanded on failure", () => {
     await waitFor(() => expect(trigger(article).textContent).toBe("1 个步骤 · read 已完成"));
     expect(label().classList.contains("shimmer")).toBe(false);
     expect(loader()).toBeNull();
+  });
+
+  it("truncates a long summary inside the trigger and keeps the full text as its name", async () => {
+    const name = `mcp__${"very_long_tool_name_".repeat(12)}run`;
+    mount({
+      session: runningSession("done"),
+      messages: [historyUser, assistant(0, [step(1, name, "done")])],
+      streamCursor: { epoch: 1, seq: 0 },
+    });
+    const [article] = (await assistants(1)) as [HTMLElement];
+    const toggle = within(article).getByRole("button", { name: `1 个步骤 · ${name} 已完成` });
+    const summary = toggle.querySelector('[data-slot="tool-summary"]') as HTMLElement;
+    expect(summary.textContent).toBe(`1 个步骤 · ${name} 已完成`);
+    expect([...summary.classList]).toEqual(expect.arrayContaining(["block", "truncate"]));
+    // 拷入的 label 是弹性子项，要能收窄省略号才生效，尾部的折叠箭头才留在组内。
+    expect(summary.parentElement?.dataset.slot).toBe("tool-group-trigger-label");
+    expect(toggle.classList.contains("*:min-w-0")).toBe(true);
   });
 
   it("starts collapsed again when a new turn resets the steps of an expanded group", async () => {

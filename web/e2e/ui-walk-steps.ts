@@ -15,6 +15,7 @@ export async function expandToolGroup(message: Locator): Promise<Locator> {
   const group = toolGroup(message);
   const trigger = group.getByRole("button", { name: /个步骤/u });
   await expect(trigger).toBeVisible();
+  await expectFocusRingInside(trigger);
   const locked = await trigger.evaluate((el) => {
     if (!(el instanceof HTMLElement) || el.getAttribute("aria-expanded") === "true") return null;
     el.click();
@@ -30,4 +31,43 @@ export async function expandToolGroup(message: Locator): Promise<Locator> {
   const content = group.locator('[data-slot="tool-group-content"]');
   await expect.poll(() => content.evaluate((el) => el.getAnimations().length)).toBe(0);
   return group;
+}
+
+// 键盘焦点环不被组裁掉：组为滚动锁带着 `overflow`，摘要按钮又占满整宽，画在按钮外的 outline 会被左右
+// 裁掉。按一次 Shift 让焦点进入键盘可见态（不滚动、不触发按钮），用 `preventScroll` 聚焦后量 outline
+// 外框（按钮框外扩 outline 宽度 + offset）是否四边都在组的 client 框内，再把焦点还回去。
+async function expectFocusRingInside(trigger: Locator): Promise<void> {
+  await trigger.page().keyboard.press("Shift");
+  const ring = await trigger.evaluate((el) => {
+    const root = el.closest('[data-slot="tool-group-root"]');
+    if (!(el instanceof HTMLElement) || !(root instanceof HTMLElement)) return null;
+    const before = document.activeElement;
+    el.focus({ preventScroll: true });
+    const style = getComputedStyle(el);
+    const grow = parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset);
+    const box = el.getBoundingClientRect();
+    const outer = root.getBoundingClientRect();
+    const left = outer.left + root.clientLeft;
+    const top = outer.top + root.clientTop;
+    const result = {
+      visible: el.matches(":focus-visible"),
+      style: style.outlineStyle,
+      width: parseFloat(style.outlineWidth),
+      overflow: [
+        left - (box.left - grow),
+        top - (box.top - grow),
+        box.right + grow - (left + root.clientWidth),
+        box.bottom + grow - (top + root.clientHeight),
+      ].map((px) => Math.max(0, Math.round(px * 100) / 100)),
+    };
+    if (before instanceof HTMLElement) before.focus({ preventScroll: true });
+    else el.blur();
+    return result;
+  });
+  expect(ring, "focus ring [left, top, right, bottom] overflow of the group, px").toEqual({
+    visible: true,
+    style: "solid",
+    width: 2,
+    overflow: [0, 0, 0, 0],
+  });
 }

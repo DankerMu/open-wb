@@ -9,6 +9,11 @@
 //   auto / scroll 的元素，200ms 内把它的 `scrollTop` 钉回原值并改它的滚动条与内边距。落到转录滚动
 //   容器上会被滚动层读成用户上滚、解除贴底。Root 自己带 `overflow-y-auto`（不限高，永不滚动）后锁只
 //   落在组自身，转录容器不受影响；拷入文件不改。
+// - Root 的 `overflow` 会裁掉画在按钮外的东西，所以两处在应用层收进组内：键盘焦点环改为内缩
+//   （`-outline-offset-2`，utilities 层压过 legacy 层的全局 `:focus-visible`），按钮用 `-my-2 py-2` 占满
+//   Root 的上下内边距（布局不变），内缩的环才不压在只有一行字高的文字上；摘要文字单行省略——拷入
+//   的 label 是弹性子项，`*:min-w-0` 让它能收窄，省略号由里面的 `span` 给，折叠箭头留在组内。`span`
+//   的 `py-0.5 -my-0.5` 只是不让 `leading-none` 的行框裁掉字形上下沿。
 import { useState } from "react";
 import {
   ToolGroupContent,
@@ -47,10 +52,12 @@ function Group({ last, steps }: { last: ChatStepView; steps: readonly ChatStepVi
     >
       <ToolGroupTrigger
         active={steps.some((step) => step.status === "running")}
-        className="cursor-pointer text-(--wb-text-secondary) hover:text-(--wb-text-primary)"
+        className="-my-2 cursor-pointer py-2 text-(--wb-text-secondary) *:min-w-0 hover:text-(--wb-text-primary) focus-visible:-outline-offset-2"
         count={steps.length}
       >
-        {`${steps.length} 个步骤 · ${last.name} ${SESSION_STATUS_LABEL[last.status]}`}
+        <span className="-my-0.5 block truncate py-0.5" data-slot="tool-summary">
+          {`${steps.length} 个步骤 · ${last.name} ${SESSION_STATUS_LABEL[last.status]}`}
+        </span>
       </ToolGroupTrigger>
       <ToolGroupContent>
         {steps.map((step) => (

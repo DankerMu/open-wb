@@ -93,7 +93,7 @@
   `chat.css` 保留，届时只含会话列表规则（`.chat-session-*`、`.sidebar[data-variant="overlay"] .chat-session-groups` 等）。
 - 拷入层与应用层的分工：不拷 registry 的 `thread` 与 `tool-fallback`。线程、消息、步骤卡、停靠区、输入框是 `features/chat/` 内的应用层组件，
   直接用 `@assistant-ui/react` 的基元（`ThreadPrimitive`、`MessagePrimitive`、`ActionBarPrimitive`）组合。拷入 `web/src/components/assistant-ui/`（`components.json` 产生的落点）的只有
-  `markdown-text`、`reasoning`、`tool-group`，各自在首个消费它的任务组拷入，连同它们依赖的 `ui` 组件（`collapsible`、`skeleton` 等，不含 `avatar`）；
+  `markdown-text`、`reasoning`、`tool-group`，各自在首个消费它的任务组拷入，连同它们依赖的 `ui` 组件（`collapsible` 等，不含 `avatar`）；
   拷入组件需要的 npm 包（如 `tw-shimmer`）随它加入并登记 `ATTRIBUTION.md`。拷入文件只做 A 定下的六类修改（owner 2026-10-04 把第六类从「渲染被丢弃的 `children`」放宽为「把被丢弃的调用方 `children` 或属性原样透传给底层基元，只转发、不写默认值」，`markdown-text` 的 `smooth` 即按此透传）；行为定制（链接惰性、图片显示为 alt 文本、块次序、
   失败自动展开、不出现编辑/分支/附件 UI）全部在应用层——经 `markdown-text` 的 `components` 覆盖，以及组合 `tool-group` / `reasoning` 的 Root/Trigger/Content。
 - 每个分片（不只是每组）在同一 PR 里删除它替换的旧 `.tsx` 与旧 CSS、改写被打破的断言（单元测试与 ui-walk）、登记已迁移文件。
@@ -263,7 +263,7 @@ web：
 - 任务清单：`<完成数>` 只数 `completed`，`<总数>` 为全部任务数；截断是纯码点截断、不加标记。
 - `WORKBUDDY_WRITE` 与 `WORKBUDDY_TODO` 同时出现时前者优先；`fake-omp.mjs` 已 799 行，新增常量放进 `fake-omp-thinking.mjs`。
 - 9b 合入而 10 未合入期间，web 对 `todo.updated` 按「未知事件类型忽略」处理。
-- 拷入层组件的拷入点：`markdown-text` 在组 2，`textarea` 与工作空间选择器所需的 `popover` 在组 3，`reasoning`、`tool-group`、`collapsible`、`skeleton` 在组 5，
+- 拷入层组件的拷入点：`markdown-text` 在组 2，`textarea` 与工作空间选择器所需的 `popover` 在组 3，`reasoning`、`tool-group`、`collapsible` 在组 5（registry 依赖里没有 `skeleton`，未拷），
   `dialog` 在组 7（首个消费者是 html 产物预览），组 8 的项目配置入口复用它。
 - html 产物预览改用拷入层 `dialog`：关闭后焦点回到预览按钮且线程不滚动（turn-artifacts）；ui-primitives 的「焦点归还不滚动」场景改以会话重命名对话框（仍是旧 `Dialog`）为对象。
 - 对话内搜索的高亮只以 `aria-current` 为可观察量。
