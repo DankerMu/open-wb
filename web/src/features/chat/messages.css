@@ -1,44 +1,5 @@
-/* Chat message area (the not-yet-rebuilt blocks: cards,
-   action row, search box, slash panel), split from chat.css; sources as noted per block.
-   The thread column, message bubbles, Markdown body, caret and search highlight are Tailwind
-   classes in message-thread.tsx / markdown-body.tsx; the thinking fold is thinking-fold.tsx; the
-   scroll layer is thread-viewport.tsx.
-   Visual language adapted from resource/workbuddy-live-demo.html:416-549 (transcript/steps).
-   Design tokens from WorkBuddy 5.3.11 via web/src/styles/tokens.css.
+/* No rules left: the message area (thread, bubbles, Markdown body, thinking fold, tool-call group,
+   cards, action row, slash panel, in-conversation search) is Tailwind classes in the migrated
+   components of this directory. The file stays only because styles/legacy.css imports it and
+   static tests still read it by path; new rules do not belong here.
 */
-
-/* In-conversation search (issue 538) — the box adapted from
-   resource/workbuddy-live-demo.html:323-327 (.conv-search, .cs-n): the input is the search Input
-   primitive, with the counter and the three icon buttons to its right. The box is a fixed row of
-   the page column above the alerts and the transcript. The page column clips its overflow and the
-   box sits at its top right corner (and fills the column on a narrow viewport), so the padding
-   keeps the 4px a focus ring takes (2px outline at a 2px offset) inside the box at the top and on
-   both sides; the width limit includes it. */
-.chat-search {
-  flex: none;
-  align-self: flex-end;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 100%;
-  padding: 4px 4px 0;
-}
-
-/* The field keeps the 240px of .ui-input--search while there is room and alone gives way on a
-   narrow viewport. */
-.chat-search .chat-search-field {
-  flex: 0 1 auto;
-  min-width: 0;
-}
-
-/* The icon buttons keep the size of the primitive. */
-.chat-search .ui-btn {
-  flex: none;
-}
-
-.chat-search-count {
-  flex: none;
-  font-family: var(--wb-mono);
-  font-size: 11px;
-  color: var(--wb-text-secondary);
-}

@@ -3,8 +3,8 @@
  * openspec/changes/conversation-search/design.md and its review (S8–S11 and S17 are in
  * chat-page-search-follow.test.tsx). Seams: the jsdom chat page inside the real shell over a
  * stubbed `fetch` and the fake event source, the router, a recorded `scrollIntoView` (jsdom lacks
- * it), the pure `chatTopbar`, and the static CSS text. Expected values are literals from the spec
- * deltas.
+ * it), the pure `chatTopbar`, and the class tokens of the rendered box. Expected values are
+ * literals from the spec deltas.
  */
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -51,7 +51,6 @@ import {
 import { FakeEventSource } from "./chat-stream-support.js";
 import { hasLucideGlyph } from "./files-fixture.js";
 import { calls, currentLocation, deferredResponse, jsonResponse } from "./support.js";
-import { readRepoFile, ruleBody, stripComments } from "./ui-support.js";
 
 const WEEKLY = "周报";
 const WEEKLY_IDS = ["-3", "0", "1", "2"];
@@ -522,24 +521,51 @@ describe("标题未知与模态层 (S19, S20)", () => {
 });
 
 describe("样式契约 (S18)", () => {
-  const css = () => stripComments(readRepoFile("web/src/features/chat/messages.css"));
+  /** The class tokens of every child of the open search box, in DOM order. */
+  async function openedBox() {
+    await openConversation(weeklyConversation());
+    toggleSearch();
+    const box = screen.getByRole("search", { name: SEARCH });
+    return { box, children: [...box.children].map((child) => [...child.classList]) };
+  }
 
-  it("S18 the search box is a fixed row", () => {
-    expect(ruleBody(css(), ".chat-search")).toContain("flex: none;");
+  it("S18 the search box is a fixed row at the end of the page column, never wider than it", async () => {
+    const { box } = await openedBox();
+    expect([...box.classList]).toEqual(
+      expect.arrayContaining(["flex", "flex-none", "items-center", "self-end", "max-w-full"]),
+    );
   });
 
-  it("S18 the field may shrink and keeps the width of the primitive: no width of its own, not width: auto", () => {
-    const field = ruleBody(css(), ".chat-search .chat-search-field");
-    expect(field).toContain("min-width: 0;");
-    expect(field).not.toContain("width: auto");
-    expect(field).not.toMatch(/(?<![-\w])width\s*:/);
+  it("S18 the field alone may shrink: the counter and the icon buttons never do", async () => {
+    const { children } = await openedBox();
+    const [field, live, ...buttons] = children;
+    expect(field).toEqual(expect.arrayContaining(["min-w-0", "shrink"]));
+    expect(field).not.toContain("flex-none");
+    expect(live).toContain("flex-none");
+    expect(buttons).toHaveLength(3);
+    for (const button of buttons) expect(button).toContain("shrink-0");
   });
 
-  it("S18 the icon buttons never shrink", () => {
-    expect(ruleBody(css(), ".chat-search .ui-btn")).toContain("flex: none;");
+  it("S18 the search box leaves room at its top and on both sides for the focus ring the page column would clip", async () => {
+    const { box } = await openedBox();
+    expect([...box.classList]).toEqual(expect.arrayContaining(["px-1", "pt-1"]));
   });
 
-  it("S18 the search box leaves 4px at its top and on both sides for the focus ring the page column would clip", () => {
-    expect(ruleBody(css(), ".chat-search")).toContain("padding: 4px 4px 0;");
+  it("S18 the box is built on the copied layer: stable slots, no class of the frozen primitives", async () => {
+    const { box } = await openedBox();
+    expect(box.dataset.slot).toBe("conversation-search");
+    expect(counter().dataset.slot).toBe("search-count");
+    expect(searchInput().dataset.slot).toBe("input");
+    expect([PREVIOUS, NEXT, CLOSE].map((name) => boxButton(name).dataset.slot)).toEqual([
+      "button",
+      "button",
+      "button",
+    ]);
+    expect([PREVIOUS, NEXT, CLOSE].map((name) => boxButton(name).type)).toEqual([
+      "button",
+      "button",
+      "button",
+    ]);
+    expect(box.outerHTML).not.toMatch(/chat-search|ui-btn|ui-input/);
   });
 });
