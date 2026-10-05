@@ -2,7 +2,7 @@
  * Issue #535 `files.changed` decoding/reduction and the 文件变更 card (parent tasks 7.5a),
  * C1–C15 of openspec/changes/file-changes-card/design.md plus the review-round gaps G1–G6.
  * Seams: `chatStateFromSnapshot` / `applyChatEvent` / `summarizeChanges` on frozen inputs,
- * `connectSessionEvents` over the fake EventSource, the jsdom chat page, and the static CSS text.
+ * `connectSessionEvents` over the fake EventSource and the jsdom chat page.
  * Expected values are literals from the spec deltas; cases marked (guard) already hold before the
  * change.
  */
@@ -50,7 +50,6 @@ import {
 import { cleanupChatPage, expandToolGroups } from "./chat-page-support.js";
 import { assistantSteps, deferred, historyUser } from "./chat-stream-support.js";
 import { calls, currentLocation, jsonResponse } from "./support.js";
-import { readRepoFile, ruleBody, stripComments } from "./ui-support.js";
 
 type StepView = ChatState["messages"][number]["steps"][number];
 
@@ -496,7 +495,7 @@ describe("文件变更 card on the chat page", () => {
     expect(within(cardNamed("工具调用")).queryAllByRole("region")).toEqual([]);
     expandToolGroups(reply());
     expect(within(cardNamed("工具调用")).getAllByRole("region")).toHaveLength(2);
-    expect(cardNamed("工具调用").querySelectorAll('[class*="file-change"]')).toHaveLength(0);
+    expect(cardNamed("工具调用").querySelectorAll('[data-slot^="file-change"]')).toHaveLength(0);
     const editStep = within(reply()).getByRole("region", { name: "edit" });
     expect(editStep.textContent).not.toContain("+2");
     expect(editStep.textContent).not.toContain("zhangsan/proj/src/app.ts");
@@ -507,10 +506,13 @@ describe("文件变更 card on the chat page", () => {
     const open = within(card).getByRole("button", { name: "查看详情 zhangsan/proj/src/app.ts" });
     expect(open.getAttribute("title")).toBe("查看详情 zhangsan/proj/src/app.ts");
     expect(open.querySelector("svg.lucide-chevron-right")).not.toBeNull();
-    expect(open.closest(".file-change-row")?.lastElementChild).toBe(open);
-    expect(card.querySelector(".file-change-path")?.getAttribute("title")).toBe(
-      "zhangsan/proj/src/app.ts",
-    );
+    expect(open.closest('[data-slot="file-change-row"]')?.lastElementChild).toBe(open);
+    const slot = (name: string) => card.querySelector(`[data-slot="file-change-${name}"]`);
+    expect(slot("path")?.getAttribute("title")).toBe("zhangsan/proj/src/app.ts");
+    expect(slot("path")?.classList.contains("truncate")).toBe(true);
+    expect(slot("path")?.classList.contains("min-w-0")).toBe(true);
+    expect(slot("add")?.classList.contains("text-(--wb-status-success-text)")).toBe(true);
+    expect(slot("del")?.classList.contains("text-(--wb-status-error-text)")).toBe(true);
 
     fireEvent.click(open);
 
@@ -571,7 +573,9 @@ describe("文件变更 card on the chat page", () => {
 
   function expectRelativeRows() {
     expect(rowTexts(cardNamed("文件变更（1 个）"))).toEqual(["+2-1src/app.ts"]);
-    expect(document.querySelector(".file-change-path")?.textContent).toBe("src/app.ts");
+    expect(document.querySelector('[data-slot="file-change-path"]')?.textContent).toBe(
+      "src/app.ts",
+    );
     expect(detailButtons()).toEqual([]);
     expect(document.documentElement.innerHTML).not.toContain(ROOT_PREFIX);
   }
@@ -676,7 +680,7 @@ describe("文件变更 card on the chat page", () => {
       "message-body",
       "tool-group-root",
       "approval-records",
-      "fieldset.file-changes-card",
+      "file-changes-card",
       "fieldset.artifact-card",
       "message-stopped",
       "message-actions",
@@ -706,7 +710,7 @@ describe("文件变更 card on the chat page", () => {
       "message-body",
       "tool-group-root",
       "message-error",
-      "fieldset.file-changes-card",
+      "file-changes-card",
       "fieldset.artifact-card",
       "message-actions",
     ]);
@@ -745,23 +749,8 @@ describe("文件变更 card on the chat page", () => {
     await openSession(turn("done", { content: "改好了", steps }));
 
     const card = cardNamed("文件变更（2 个）");
-    expect(card.querySelector(".file-changes-head")?.textContent).toBe("文件变更（2 个）");
-    expect(card.firstElementChild?.className).toBe("file-changes-head");
+    expect(card.firstElementChild?.getAttribute("data-slot")).toBe("file-changes-head");
+    expect(card.firstElementChild?.textContent).toBe("文件变更（2 个）");
     expect(screen.getAllByRole("group", { name: /文件变更/ })).toEqual([card]);
-  });
-});
-
-describe("file changes card static styles", () => {
-  const css = () => stripComments(readRepoFile("web/src/features/chat/messages.css"));
-
-  it("C15 truncates long paths and colours the counts with the status tokens", () => {
-    expect(ruleBody(css(), ".file-change-path")).toContain("text-overflow: ellipsis");
-    expect(ruleBody(css(), ".file-change-path")).toContain("min-width: 0");
-    expect(ruleBody(css(), ".file-change-add")).toContain("var(--wb-status-success-text)");
-    expect(ruleBody(css(), ".file-change-del")).toContain("var(--wb-status-error-text)");
-  });
-
-  it("C15 keeps file change styles out of chat.css (guard)", () => {
-    expect(readRepoFile("web/src/features/chat/chat.css")).not.toContain("file-change");
   });
 });

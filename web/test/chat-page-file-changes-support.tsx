@@ -211,7 +211,7 @@ export const tagAndClass = (part: Element) =>
   part.getAttribute("data-slot") ?? `${part.localName}.${part.className}`;
 
 export function cards() {
-  return [...document.querySelectorAll(".file-changes-card")];
+  return [...document.querySelectorAll('[data-slot="file-changes-card"]')];
 }
 
 /** The card named `name` inside the assistant message. */
@@ -219,17 +219,19 @@ export function cardNamed(name: string) {
   return within(reply()).getByRole("group", { name });
 }
 
-/** Per row, the `[class, text]` of each span in document order. */
+/** Per row, the `[data-slot, text]` of each span in document order. */
 export function rowCells(card: HTMLElement) {
-  return [...card.querySelectorAll(".file-change-row")].map((line) =>
+  return [...card.querySelectorAll('[data-slot="file-change-row"]')].map((line) =>
     [...line.children]
       .filter((cell) => cell.localName === "span")
-      .map((cell) => [cell.className, cell.textContent]),
+      .map((cell) => [cell.getAttribute("data-slot"), cell.textContent]),
   );
 }
 
 export function rowTexts(card: HTMLElement) {
-  return [...card.querySelectorAll(".file-change-row")].map((line) => line.textContent);
+  return [...card.querySelectorAll('[data-slot="file-change-row"]')].map(
+    (line) => line.textContent,
+  );
 }
 
 export function detailButtons() {
