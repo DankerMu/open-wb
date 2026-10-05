@@ -310,6 +310,10 @@ describe("fork button: request, navigation and draft", () => {
     await waitFor(() => expect(calls(fetchMock, N_MESSAGES)).toHaveLength(1));
     await flush();
     expect(screen.queryAllByRole("article")).toHaveLength(0);
+    // 零消息空态（#825）：分叉出的 idle 会话线程区不再空白。
+    expect(
+      within(screen.getByRole("region", { name: "消息" })).getByText("还没有消息，发一条开始吧"),
+    ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "重新生成" })).toBeNull();
     const current = within(nav()).getByRole("button", { current: true });
     expect(within(current).getByRole("status").getAttribute("aria-label")).toBe(

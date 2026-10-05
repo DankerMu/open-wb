@@ -162,7 +162,7 @@ export async function walkRegenerate(
   });
 }
 
-// 首条用户消息 `从此处分叉` → 201 → URL 选中新会话（与 201 体一致）→ 历史已装载且为空 → 侧栏 `未开始` → 草稿恰为首条 prompt。
+// 首条用户消息 `从此处分叉` → 201 → URL 选中新会话（与 201 体一致）→ 历史已装载且为空、显示零消息空态 → 侧栏 `未开始` → 草稿恰为首条 prompt。
 // 无 prompt POST：监听在点击前挂上、覆盖任何会话；窗口止于侧栏断言——setDraft/refreshList/selectSession 同在一个回调里，
 // 空转录与侧栏新项都在其下游，回调里任何同步自动发送此时已发出。分叉不弹 Toast（message-actions.tsx ForkAction）。
 export async function walkFork(
@@ -208,6 +208,16 @@ export async function walkFork(
       .filter({ hasNot: page.getByRole("article") });
     await expect(transcript).toBeVisible();
     await expect(transcript.getByRole("button", { name: "重新生成", exact: true })).toHaveCount(0);
+    // 零消息空态（#825）：一行提示在线程区里；欢迎态的场景分组、快捷任务与最佳实践卡不出现，也没有 hero。
+    await expect(transcript.getByText("还没有消息，发一条开始吧", { exact: true })).toBeVisible();
+    for (const role of ["group", "region", "heading"] as const) {
+      const name = {
+        group: /^(场景|快捷任务)$/,
+        region: "最佳实践案例",
+        heading: "WorkBuddy，我帮你",
+      };
+      await expect(main.getByRole(role, { name: name[role] })).toHaveCount(0);
+    }
     mark("empty transcript");
     await expect(page.getByLabel("给助手发消息")).toHaveValue(prompt);
     await expect(
