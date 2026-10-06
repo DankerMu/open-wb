@@ -179,6 +179,9 @@ export function useTurnActions({
             return;
           }
           pendingCreateSendRef.current = { ...pendingCreateSendRef.current, accepted: true };
+          // Before the history read: once accepted the page may leave, and the sidebar entry
+          // (title, status) must not wait for a read that leaving aborts.
+          refreshList(ownedClient);
           closeSource();
           return ownedClient.getMessages(sessionId, { signal: controller.signal }).then(
             (snapshot) => {
@@ -194,7 +197,6 @@ export function useTurnActions({
               }
               installSnapshot(snapshot, ownedClient);
               openSource(snapshot, ownedClient);
-              refreshList(ownedClient);
               finishCreateSend(generation);
               releaseMutationIfOwned(controller);
             },
