@@ -325,11 +325,11 @@ export function useTurnActions({
   }, [clientRef, ownsSessionWrite, requestedSessionRef, setPromptError]);
 
   // Page-level lock (never the prompt fence) released by identity on every branch; never rejects.
-  const regenerateTurn = useCallback((): Promise<boolean> => {
+  const regenerateTurn = useCallback((): Promise<void> => {
     const ownedClient = clientRef.current;
     const sessionId = requestedSessionRef.current;
     if (sessionId === null) {
-      return Promise.resolve(false);
+      return Promise.resolve();
     }
     const owner: ChatMutationOwner = { client: ownedClient, originSessionId: sessionId, sessionId };
     const release = () => setRegenerateOwner((current) => (current === owner ? null : current));
@@ -346,7 +346,7 @@ export function useTurnActions({
       () => {
         if (!owned()) {
           release();
-          return false;
+          return;
         }
         closeSource();
         void ownedClient.getMessages(sessionId).then(
@@ -360,14 +360,12 @@ export function useTurnActions({
           },
           (error: unknown) => fail(error, setStreamError, `。${TERMINAL_REFRESH_GUIDANCE}`),
         );
-        return true;
       },
       (error: unknown) => {
         fail(error, setPromptError);
         if (owned() && !isUncommittedRegenerate(error)) {
           reconcileSettled(ownedClient, sessionId);
         }
-        return false;
       },
     );
   }, [

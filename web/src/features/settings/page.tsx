@@ -29,7 +29,7 @@ function SettingsSection({ title, children }: { title: string; children: ReactNo
 function SettingsRow({ children, control }: { children: ReactNode; control?: ReactNode }) {
   return (
     <div
-      className="flex items-center gap-4 border-t py-[13px] first:border-t-0 max-[760px]:flex-wrap"
+      className="flex items-center gap-4 border-t py-[13px] first:border-t-0 narrow:flex-wrap"
       data-slot="settings-row"
     >
       {children}
@@ -163,7 +163,7 @@ function AboutCard() {
 
 export function SettingsPage() {
   return (
-    <div className="overflow-auto px-7 pt-6 pb-10 max-[760px]:px-4">
+    <div className="overflow-auto px-7 pt-6 pb-10 narrow:px-4">
       <AppearanceCard />
       <AboutCard />
     </div>

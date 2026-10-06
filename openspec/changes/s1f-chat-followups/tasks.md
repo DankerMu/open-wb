@@ -55,7 +55,7 @@ Minimal mergeable slice: atomic - 调用、整页测试与清单行同刀；1.3 
   （`chat-page-project-config.test.tsx:208-209` 的「唯一按钮」断言不变）。
 - [x] 2.4 提问卡的描述关联：`approval-card.tsx` 的待决卡在 `role="group"` 上加 `aria-describedby`，依次指向本卡的工具徽章与 `title` 正文（各一个 `useId`）；已结算记录不加。
   测试（`web/test/chat-approval-dock.test.tsx`，现 364 行）：两张工具与正文不同的卡，各自的 `aria-describedby` 恰两个 id、依次解析到本卡的徽章与正文、两卡互不相同；卡名与四个按钮名不变。
-- [x] 2.5 卡消失后的焦点（design D2）：规则与两路判定在 `composer-dock.tsx`；`ApprovalPromptCard` 上报「作答时焦点在本卡内」；`conversation-view.tsx` 把输入框 ref 与锁定状态传给停靠区，
+- [x] 2.5 卡消失后的焦点（design D2）：规则与两路判定在 `composer-dock.tsx`；`ApprovalPromptCard` 上报每次被受理的作答及其是否由键盘激活且焦点在本卡内（#901 审核后收窄：只有键盘作答移动焦点；卡内按钮忽略重复按键；对应用例 F7–F10）；`conversation-view.tsx` 把输入框 ref 与锁定状态传给停靠区，
   最后一张卡消失而输入框仍锁定时延后到解锁那次提交、且焦点仍未落到别处才聚焦。
   测试（同文件，F1–F6）：三张卡依次作答的焦点落点（id 8 → 9 的 `允许`；9 → 7 的 `允许`；7 → 回合结束解锁后的输入框）；作答后显式 `blur()` 模拟禁用失焦，结果相同；
   焦点在 `停止` 上时卡因超时消失 → 不动；作答后用户把焦点移到 `停止` → 不动；延后聚焦期间焦点去了 `停止`、回合结束时 `停止` 卸载焦点回到 `body` → 解锁时不抢（延后聚焦按「期间有过别处的 focusin 即作废」实现，不是只在解锁那一刻看 `activeElement`）；卡出现时不夺焦；
@@ -73,25 +73,25 @@ Minimal mergeable slice: 2.1 + 2.2 + 2.3 一刀（列表语义与被裁剪可聚
 
 ## 3. chat-web — 代码块复制不带末尾换行（owner 决定 2）
 
-- [ ] 3.1 `web/src/features/chat/markdown-body.tsx` 的 `CodeHeader`：传给 `useCopyFeedback` 的文本去掉末尾恰一个 `\n`（design D4）。拷入文件 `markdown-text.tsx` 不动；`copy-feedback.ts` 不动（消息级 `复制` 共用它，不裁）。
-- [ ] 3.2 测试（`web/test/chat-markdown.test.tsx`）：第 153 行现断言写入值等于以换行结尾的 `CODE`，改为去掉末尾一个换行后的文本；新增一例代码块以空行结尾 → 写入值仍以恰一个换行结尾、内部换行原样；
+- [x] 3.1 `web/src/features/chat/markdown-body.tsx` 的 `CodeHeader`：传给 `useCopyFeedback` 的文本去掉末尾恰一个 `\n`（design D4）。拷入文件 `markdown-text.tsx` 不动；`copy-feedback.ts` 不动（消息级 `复制` 共用它，不裁）。
+- [x] 3.2 测试（`web/test/chat-markdown.test.tsx`）：第 153 行现断言写入值等于以换行结尾的 `CODE`，改为去掉末尾一个换行后的文本；新增一例代码块以空行结尾 → 写入值仍以恰一个换行结尾、内部换行原样；
   `web/test/chat-copy.test.tsx` 的消息级断言（写入 Markdown 原文）原样通过。
-- [ ] 3.3 CH-05：期望里写明粘贴出的内容末尾不带多余的换行；该行「禁用该站点的剪贴板权限」一步换成 CH-16 已用的控制台替换写法（权限开关多半不影响用户手势内的写入）；结论 `待签`。
-- [ ] 3.4 变异证据：不裁 → 3.2 第一例判红；裁掉全部末尾换行 → 空行结尾一例判红；裁到消息级复制上 → `chat-copy.test.tsx` 判红。
+- [x] 3.3 CH-05：期望里写明粘贴出的内容末尾不带多余的换行；该行「禁用该站点的剪贴板权限」一步换成 CH-16 已用的控制台替换写法（权限开关多半不影响用户手势内的写入）；结论 `待签`。
+- [x] 3.4 变异证据：不裁 → 3.2 第一例判红；裁掉全部末尾换行 → 空行结尾一例判红；裁到消息级复制上 → `chat-copy.test.tsx` 判红。
 
 Suggested fixture level: compact - 应用层一处字符串处理，规格一句一场景
 Minimal mergeable slice: atomic - 改动、断言改写与清单行同刀
 
 ## 4. 源码整理（逐条核对过仍存在；除 4.2、4.6 外无行为变化）
 
-- [ ] 4.1 `web/src/features/chat/message-thread.tsx:247-275`：`ThreadPrimitive.Messages` 的 children 改为 `useCallback` 的稳定函数（依赖是它闭包里用到的那几个 props 与 `regenerableId`）。既有线程测试原样通过。
-- [ ] 4.2 `max-[760px]:` 换成 `narrow:`（design D6，视口恰为 760 宽时与外壳一致）：`web/src/features/chat/composer.tsx:59`、`:73`，`message-thread.tsx:81`、`:244`，
+- [x] 4.1 `web/src/features/chat/message-thread.tsx:247-275`：`ThreadPrimitive.Messages` 的 children 改为 `useCallback` 的稳定函数（依赖是它闭包里用到的那几个 props 与 `regenerableId`）。既有线程测试原样通过。
+- [x] 4.2 `max-[760px]:` 换成 `narrow:`（design D6，视口恰为 760 宽时与外壳一致）：`web/src/features/chat/composer.tsx:59`、`:73`，`message-thread.tsx:81`、`:244`，
   `web/src/features/settings/page.tsx:32`、`:166`，`web/src/features/auth/login-form.tsx:76`；换完 `web/src` 里除 `styles/theme.css:16` 的注释外不再有 `max-[760px]`。
   加一条静态断言（并入 `web/test/ui-foundation-entry.test.ts` 或同类文件）：`web/src` 的 `.tsx` 不含 `max-[760px]:`。
-- [ ] 4.3 `web/src/features/chat/conversation-search.tsx:62`：`BoxButton` 里的 `size={14}` 被拷入按钮的图标尺寸规则盖掉，删去这个属性（渲染结果不变）；第 115 行那个不在按钮里，不动。
-- [ ] 4.4 `regenerateTurn` 的布尔返回值无人读取（消费方都按 `Promise<unknown>` 收）：`turn-actions.ts:311` 起改为 `Promise<void>`，
+- [x] 4.3 `web/src/features/chat/conversation-search.tsx:62`：`BoxButton` 里的 `size={14}` 被拷入按钮的图标尺寸规则盖掉，删去这个属性（渲染结果不变）；第 115 行那个不在按钮里，不动。
+- [x] 4.4 `regenerateTurn` 的布尔返回值无人读取（消费方都按 `Promise<unknown>` 收）：`turn-actions.ts:311` 起改为 `Promise<void>`，
   `conversation-view.tsx:30` 与 `message-thread.tsx:35` 的类型同步；测试替身（`web/test/chat-thread-runtime.test.tsx:45`、`chat-page-search-support.tsx:292`）按需跟着改。
-- [ ] 4.5 过期注释与标题：`message-thread.tsx:4`（「文件变更卡与产物卡此刻仍是旧组件」）；`session-sidebar.tsx:88`（「同 approval-bar」，该组件已删）；
+- [x] 4.5 过期注释与标题：`message-thread.tsx:4`（「文件变更卡与产物卡此刻仍是旧组件」）；`session-sidebar.tsx:88`（「同 approval-bar」，该组件已删）；
   `artifact-card.tsx` `PreviewDialog` 的文档注释（收窄为「只决定打开时的初始落点；页面脚本自行聚焦或用户 Tab 进 iframe 后，Escape 到不了本文档，`关闭` 与点遮罩仍可用」）；
   `web/test/chat-page-file-changes.test.tsx:3`（「C1–C15」，C15 已删）；`web/test/chat-page-file-changes-support.tsx:2`（「只供……使用」，实际被多个测试导入）；
   `web/test/chat-page-project-config-dialog.test.tsx:2`（归档前的 change 路径）；`web/test/chat-steps.test.tsx:288` 的用例标题（「the .chat-md body」）。

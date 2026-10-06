@@ -285,7 +285,7 @@ describe("step cards keep absolute sandbox paths verbatim (ADR-0011)", () => {
 });
 
 describe("(S3) ui-walk locates steps by the Chinese badge and the Markdown body", () => {
-  it("uses Chinese badge names, the .chat-md body and the split gate module", () => {
+  it("uses Chinese badge names, no bare paragraph locator and the split gate module", () => {
     const walk = readRepoFile("web/e2e/ui-walk.spec.ts");
     expect(walk).toContain('name: "bash 已完成"');
     expect(walk).toContain('name: "bash 运行中"');

@@ -150,7 +150,8 @@ describe("代码块复制", () => {
 
     fireEvent.click(button);
     await waitFor(() => expect(button.querySelector("svg.lucide-check")).not.toBeNull());
-    expect(writeText.mock.calls).toEqual([[CODE]]);
+    // 写入值是代码块原文去掉末尾恰一个换行（Markdown 转换追加的那个），不以换行结尾。
+    expect(writeText.mock.calls).toEqual([['const a = "<b>";\nconsole.log(a);']]);
     expect(failed(article)).toBeNull();
     expect(within(screen.getByRole("region", { name: "通知" })).queryByRole("status")).toBeNull();
     expect(screen.queryByText("已复制到剪贴板")).toBeNull();
@@ -170,6 +171,17 @@ describe("代码块复制", () => {
     await settle();
     rejections.stop();
     expect(rejections.unhandled).toEqual([]);
+  });
+
+  it("代码块以空行结尾时写入值仍以恰一个换行结尾，内部换行与空行原样", async () => {
+    const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
+    mockClipboard(writeText);
+    const { article, body } = await mountReply("```sh\na\n\nb\n\n```");
+    expect(body.querySelector("pre > code")?.textContent).toBe("a\n\nb\n\n");
+
+    fireEvent.click(copyButton(article));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(writeText.mock.calls).toEqual([["a\n\nb\n"]]);
   });
 
   it("剪贴板 API 不存在或同步抛错时同样就地显示 复制失败，异常不外泄", async () => {

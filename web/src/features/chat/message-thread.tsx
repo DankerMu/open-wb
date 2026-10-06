@@ -1,14 +1,14 @@
 // 消息线程骨架（design D4）：应用层组件，直接由 ThreadPrimitive / MessagePrimitive 组合；滚动层在
 // thread-viewport.tsx，思考折叠在 thinking-fold.tsx，工具调用组在 tool-call-group.tsx，操作行在
 // message-action-row.tsx，已结算审批记录在 approval-card.tsx（待决审批不在消息里，见 composer-dock.tsx）。
-// 文件变更卡与产物卡此刻仍是旧组件，按 D4 的块次序挂在助手消息里。
+// 文件变更卡在 file-changes-card.tsx，产物卡在 artifact-card.tsx，按 D4 的块次序挂在助手消息里。
 import {
   AssistantRuntimeProvider,
   MessagePrimitive,
   type MessageState,
   ThreadPrimitive,
 } from "@assistant-ui/react";
-import { memo, type Ref } from "react";
+import { memo, type Ref, useCallback } from "react";
 import type { ApiClient } from "../../lib/api.js";
 import { BrandMark, Icon } from "../../ui/index.js";
 import { ApprovalRecords } from "./approval-card.js";
@@ -32,7 +32,7 @@ type ThreadProps = {
   /** 输入框锁定期间分叉与重新生成禁用，零消息时也不显示空态。 */
   locked: boolean;
   onFork(messageId: number): Promise<void>;
-  onRegenerate(): Promise<boolean>;
+  onRegenerate(): Promise<void>;
   onSend(prompt: string): void;
   onStop(): Promise<unknown>;
   /** 对话内搜索经它调用滚动层的 `scrollToMessage`。 */
@@ -78,7 +78,7 @@ const UserMessage = memo(function UserMessage({
       <article
         aria-current={current ? "true" : undefined}
         aria-label="用户"
-        className={`flex max-w-[80%] min-w-0 flex-col gap-2 self-end rounded-2xl rounded-br-sm bg-(--wb-bg-hover-light) px-[15px] py-2.5 max-[760px]:max-w-full ${CURRENT_MATCH}`}
+        className={`flex max-w-[80%] min-w-0 flex-col gap-2 self-end rounded-2xl rounded-br-sm bg-(--wb-bg-hover-light) px-[15px] py-2.5 narrow:max-w-full ${CURRENT_MATCH}`}
       >
         <p
           className="m-0 text-sm leading-[1.65] wrap-anywhere whitespace-pre-wrap text-foreground"
@@ -235,44 +235,47 @@ export function Thread({
   const last = messages.at(-1);
   const regenerableId =
     view && last?.role === "assistant" && REGENERABLE.has(view.status) ? String(last.id) : null;
+  // 引用稳定的渲染函数：依赖就是闭包里用到的这几项，其余重渲染不换函数。
+  const renderMessage = useCallback(
+    ({ message }: { message: MessageState }) => {
+      const custom = messageCustom(message.metadata.custom);
+      const current = message.id === String(currentId);
+      const text = partText(message, "text");
+      return message.role === "assistant" ? (
+        <AssistantMessage
+          client={client}
+          current={current}
+          custom={custom}
+          locked={locked}
+          onRegenerate={onRegenerate}
+          regenerable={message.id === regenerableId}
+          text={text}
+          thinking={partText(message, "reasoning")}
+          workspace={workspace}
+        />
+      ) : (
+        <UserMessage
+          current={current}
+          custom={custom}
+          id={Number(message.id)}
+          locked={locked}
+          onFork={onFork}
+          text={text}
+        />
+      );
+    },
+    [client, currentId, locked, onFork, onRegenerate, regenerableId, workspace],
+  );
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <ThreadViewport handleRef={scrollHandleRef}>
         {view ? (
           <section
             aria-label="消息"
-            className={`mx-auto box-border flex w-full max-w-3xl flex-col gap-4 px-2 pt-3 pb-6 max-[760px]:px-0 ${empty ? "min-h-full" : ""}`}
+            className={`mx-auto box-border flex w-full max-w-3xl flex-col gap-4 px-2 pt-3 pb-6 narrow:px-0 ${empty ? "min-h-full" : ""}`}
           >
             {empty ? <EmptyThread workspace={workspace} /> : null}
-            <ThreadPrimitive.Messages>
-              {({ message }) => {
-                const custom = messageCustom(message.metadata.custom);
-                const current = message.id === String(currentId);
-                const text = partText(message, "text");
-                return message.role === "assistant" ? (
-                  <AssistantMessage
-                    client={client}
-                    current={current}
-                    custom={custom}
-                    locked={locked}
-                    onRegenerate={onRegenerate}
-                    regenerable={message.id === regenerableId}
-                    text={text}
-                    thinking={partText(message, "reasoning")}
-                    workspace={workspace}
-                  />
-                ) : (
-                  <UserMessage
-                    current={current}
-                    custom={custom}
-                    id={Number(message.id)}
-                    locked={locked}
-                    onFork={onFork}
-                    text={text}
-                  />
-                );
-              }}
-            </ThreadPrimitive.Messages>
+            <ThreadPrimitive.Messages>{renderMessage}</ThreadPrimitive.Messages>
           </section>
         ) : null}
       </ThreadViewport>

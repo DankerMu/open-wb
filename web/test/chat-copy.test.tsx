@@ -94,6 +94,17 @@ describe("(C1) copy writes the raw assistant text", () => {
     expectNoToast();
   });
 
+  it("writes a source that ends in a newline untouched: only the code-block copy trims one", async () => {
+    const source = "第一段\n\n```sh\nls\n```\n";
+    const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
+    mockClipboard(writeText);
+    const { button } = await mountCopy(source);
+
+    fireEvent.click(button);
+    await waitFor(() => expect(iconOf(button)).toBe("check"));
+    expect(writeText.mock.calls).toEqual([[source]]);
+  });
+
   it("reverts the check icon and drops the 已复制 status after about 2 seconds", async () => {
     mockClipboard(vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined));
     const { article, button } = await mountCopy();
