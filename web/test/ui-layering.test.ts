@@ -24,27 +24,59 @@ const MIGRATED_AREAS: string[] = [
   "web/src/features/chat/composer-locks.ts",
   "web/src/features/chat/composer.tsx",
   "web/src/features/chat/conversation-search.tsx",
+  "web/src/features/chat/conversation-view.tsx",
   "web/src/features/chat/copy-feedback.ts",
+  "web/src/features/chat/errors.ts",
   "web/src/features/chat/file-changes-card.tsx",
+  "web/src/features/chat/index.ts",
   "web/src/features/chat/markdown-body.tsx",
   "web/src/features/chat/message-action-row.tsx",
   "web/src/features/chat/message-thread.tsx",
+  "web/src/features/chat/ownership.ts",
+  "web/src/features/chat/page.tsx",
   "web/src/features/chat/project-config.tsx",
   "web/src/features/chat/runtime-convert.ts",
   "web/src/features/chat/scene-pills.tsx",
+  "web/src/features/chat/search-match.ts",
   "web/src/features/chat/slash-menu-state.ts",
   "web/src/features/chat/slash-menu.tsx",
+  "web/src/features/chat/status-label.ts",
   "web/src/features/chat/step-card.tsx",
+  "web/src/features/chat/step-summary.ts",
+  "web/src/features/chat/stream-approvals.ts",
+  "web/src/features/chat/stream-artifacts.ts",
+  "web/src/features/chat/stream-steps.ts",
+  "web/src/features/chat/stream-thinking.ts",
+  "web/src/features/chat/stream-todo.ts",
+  "web/src/features/chat/stream.ts",
   "web/src/features/chat/thinking-fold.tsx",
   "web/src/features/chat/thread-viewport.tsx",
   "web/src/features/chat/todo-panel.tsx",
   "web/src/features/chat/tool-call-group.tsx",
+  "web/src/features/chat/topbar-actions.ts",
+  "web/src/features/chat/turn-actions.ts",
+  "web/src/features/chat/types.ts",
+  "web/src/features/chat/use-chat-session.ts",
   "web/src/features/chat/use-thread-runtime.ts",
   "web/src/features/chat/welcome-content.ts",
   "web/src/features/chat/welcome-options.ts",
   "web/src/features/chat/welcome.tsx",
+  "web/src/features/chat/workspace-list.ts",
 ];
 const MIGRATED_ALLOWED_IMPORTS = ["Icon", "IconName", "BrandMark", "useEscapeFallback"];
+
+const CHAT_DIR = "web/src/features/chat";
+/** 会话列表的八个文件：仍是旧实现，不登记（随后续 change 迁移）。 */
+const SESSION_LIST_FILES = [
+  "delete-dialog.tsx",
+  "rename-dialog.tsx",
+  "session-actions.ts",
+  "session-filter.tsx",
+  "session-groups.ts",
+  "session-menu.tsx",
+  "session-path.ts",
+  "session-sidebar.tsx",
+];
 
 const FROZEN_DIR = "web/src/ui";
 /** 冻结区：`web/src/ui` 的文件名只能是这 32 个的子集（可以删，不能加）。 */
@@ -149,6 +181,21 @@ function layeringViolations(files: SourceFile[], rules: LayeringRules): string[]
 }
 
 /**
+ * 会话页迁移终态（纯函数）：`CHAT_DIR` 下除会话列表八个文件外的每个 `.ts`/`.tsx` 都逐个登记在
+ * 已迁移清单里（按路径全等，不走前缀），目录里唯一的 `.css` 是 `chat.css`。
+ */
+function chatEndStateViolations(paths: string[], migrated: string[]): string[] {
+  return paths.flatMap((path) => {
+    const name = path.slice(CHAT_DIR.length + 1);
+    if (path.endsWith(".css")) {
+      return name === "chat.css" ? [] : [`${path}: 会话页目录只允许 chat.css 一个 .css`];
+    }
+    if (!/\.tsx?$/.test(path) || SESSION_LIST_FILES.includes(name)) return [];
+    return migrated.includes(path) ? [] : [`${path}: 会话页文件未登记为已迁移`];
+  });
+}
+
+/**
  * 清单条目自检：`isUnder` 只做前缀匹配，写成 `dir/**` 或 `dir/` 的条目匹配不到任何文件，守卫会
  * 在不报错的情况下放空。带通配或以 `/` 结尾的条目、以及匹配不到现存文件的条目都判违例。
  */
@@ -244,6 +291,26 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
     ).toHaveLength(1);
   });
 
+  it("判定自证：真实清单内的文件注入 useToast 导入判失败（相对路径与别名两种写法）", () => {
+    const real: LayeringRules = { migrated: MIGRATED_AREAS, frozen: FROZEN_FILES };
+    const composer = `${CHAT_DIR}/composer.tsx`;
+    const source = readRepoFile(composer);
+    expect(layeringViolations([{ path: composer, text: source }], real)).toEqual([]);
+    const expected = [`${composer}: 已迁移区域从 ${FROZEN_DIR} 导入 useToast`];
+    for (const injected of [
+      'import { useToast } from "../../ui/index.js";',
+      'import { Icon, useToast } from "@/ui";',
+    ]) {
+      const text = `${injected}\n${source}`;
+      expect(layeringViolations([{ path: composer, text }], real)).toEqual(expected);
+    }
+    // 会话列表文件不在清单里：它的 useToast 不归这条守卫管。
+    const sessionActions = `${CHAT_DIR}/session-actions.ts`;
+    const actions = { path: sessionActions, text: readRepoFile(sessionActions) };
+    expect(actions.text).toContain("useToast");
+    expect(layeringViolations([actions], real)).toEqual([]);
+  });
+
   it("冻结清单恰为 32 个互不相同的文件名", () => {
     expect(new Set(FROZEN_FILES).size).toBe(32);
     expect(FROZEN_FILES).toHaveLength(32);
@@ -268,25 +335,44 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
       "web/src/features/chat/composer-locks.ts",
       "web/src/features/chat/composer.tsx",
       "web/src/features/chat/conversation-search.tsx",
+      "web/src/features/chat/conversation-view.tsx",
       "web/src/features/chat/copy-feedback.ts",
+      "web/src/features/chat/errors.ts",
       "web/src/features/chat/file-changes-card.tsx",
+      "web/src/features/chat/index.ts",
       "web/src/features/chat/markdown-body.tsx",
       "web/src/features/chat/message-action-row.tsx",
       "web/src/features/chat/message-thread.tsx",
+      "web/src/features/chat/ownership.ts",
+      "web/src/features/chat/page.tsx",
       "web/src/features/chat/project-config.tsx",
       "web/src/features/chat/runtime-convert.ts",
       "web/src/features/chat/scene-pills.tsx",
+      "web/src/features/chat/search-match.ts",
       "web/src/features/chat/slash-menu-state.ts",
       "web/src/features/chat/slash-menu.tsx",
+      "web/src/features/chat/status-label.ts",
       "web/src/features/chat/step-card.tsx",
+      "web/src/features/chat/step-summary.ts",
+      "web/src/features/chat/stream-approvals.ts",
+      "web/src/features/chat/stream-artifacts.ts",
+      "web/src/features/chat/stream-steps.ts",
+      "web/src/features/chat/stream-thinking.ts",
+      "web/src/features/chat/stream-todo.ts",
+      "web/src/features/chat/stream.ts",
       "web/src/features/chat/thinking-fold.tsx",
       "web/src/features/chat/thread-viewport.tsx",
       "web/src/features/chat/todo-panel.tsx",
       "web/src/features/chat/tool-call-group.tsx",
+      "web/src/features/chat/topbar-actions.ts",
+      "web/src/features/chat/turn-actions.ts",
+      "web/src/features/chat/types.ts",
+      "web/src/features/chat/use-chat-session.ts",
       "web/src/features/chat/use-thread-runtime.ts",
       "web/src/features/chat/welcome-content.ts",
       "web/src/features/chat/welcome-options.ts",
       "web/src/features/chat/welcome.tsx",
+      "web/src/features/chat/workspace-list.ts",
     ]);
     expect(MIGRATED_AREAS).not.toContain("web/src/features/chat");
     expect(
@@ -469,5 +555,68 @@ describe("拷入层门槛豁免（ui-foundation「豁免路径精确」）", () 
     expect(count(doc("", note.replace("ADR-0013", "ADR-0011"), ""))).toBe(0);
     expect(count(doc("", note.replace(COPIED_DIRS[1] ?? "", "web/src/ui"), ""))).toBe(0);
     expect(() => agentsNoteLines("## Enforcement Index\n\n### Known blind spots")).toThrow();
+  });
+});
+
+describe("会话页迁移终态（ui-foundation「会话页迁移终态」）", () => {
+  const chatPaths = () => listRepoFiles(CHAT_DIR, () => true);
+
+  it("判定自证：未登记的非会话列表文件、目录下多出一个 .css 各判失败", () => {
+    const paths = ["chat.css", "page.tsx", "session-menu.tsx", "stream.ts"].map(
+      (name) => `${CHAT_DIR}/${name}`,
+    );
+    expect(chatEndStateViolations(paths, MIGRATED_AREAS)).toEqual([]);
+    const extra = `${CHAT_DIR}/extra.ts`;
+    expect(chatEndStateViolations([...paths, extra], MIGRATED_AREAS)).toEqual([
+      `${extra}: 会话页文件未登记为已迁移`,
+    ]);
+    const nested = `${CHAT_DIR}/parts/session-menu.tsx`;
+    expect(chatEndStateViolations([nested], MIGRATED_AREAS)).toHaveLength(1);
+    const css = `${CHAT_DIR}/messages.css`;
+    expect(chatEndStateViolations([...paths, css], MIGRATED_AREAS)).toEqual([
+      `${css}: 会话页目录只允许 chat.css 一个 .css`,
+    ]);
+    const page = `${CHAT_DIR}/page.tsx`;
+    expect(
+      chatEndStateViolations(
+        paths,
+        MIGRATED_AREAS.filter((entry) => entry !== page),
+      ),
+    ).toEqual([`${page}: 会话页文件未登记为已迁移`]);
+    // 登记目录本身不算数：终态按路径全等，逐个文件登记。
+    expect(chatEndStateViolations([page], [CHAT_DIR])).toHaveLength(1);
+  });
+
+  it("web/src/features/chat 现状：八个会话列表文件之外全部登记，唯一的 .css 是 chat.css", () => {
+    const paths = chatPaths();
+    for (const name of SESSION_LIST_FILES) {
+      expect(paths).toContain(`${CHAT_DIR}/${name}`);
+      expect(MIGRATED_AREAS).not.toContain(`${CHAT_DIR}/${name}`);
+    }
+    expect(SESSION_LIST_FILES).toHaveLength(8);
+    expect(paths.filter((path) => path.endsWith(".css"))).toEqual([`${CHAT_DIR}/chat.css`]);
+    expect(chatEndStateViolations(paths, MIGRATED_AREAS)).toEqual([]);
+    // 反向：会话页的清单条目恰是目录里的非会话列表源文件，不多不少。
+    expect(MIGRATED_AREAS.filter((entry) => isUnder(entry, CHAT_DIR))).toEqual(
+      paths.filter(
+        (path) =>
+          /\.tsx?$/.test(path) && !SESSION_LIST_FILES.includes(path.slice(CHAT_DIR.length + 1)),
+      ),
+    );
+  });
+
+  it("web/src/components/assistant-ui 只有三个组件、它们的 registry 依赖与 styles.d.ts", () => {
+    const dir = "web/src/components/assistant-ui";
+    const files = listRepoFiles(dir, () => true);
+    expect(files).toEqual([
+      `${dir}/elements/markdown-text.tsx`,
+      `${dir}/elements/reasoning.aui.tsx`,
+      `${dir}/elements/reasoning.tsx`,
+      `${dir}/elements/tool-group.aui.tsx`,
+      `${dir}/elements/tooltip-icon-button.tsx`,
+      `${dir}/hooks/use-copy-to-clipboard.ts`,
+      `${dir}/styles.d.ts`,
+    ]);
+    expect(files.filter((path) => /\/(thread|tool-fallback)\b/.test(path))).toEqual([]);
   });
 });

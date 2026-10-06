@@ -1,32 +1,10 @@
-/* Chat presentation.
-   Visual language adapted from resource/workbuddy-live-demo.html:282-298
-   (session rows), 363-378 (composer card), 656-659 and 782-792 (workspace popover items).
+/* Session list (rendered in the shell sidebar) and its rename dialog. The conversation column is
+   Tailwind classes in the components of this directory; new rules do not belong here.
+   Visual language adapted from resource/workbuddy-live-demo.html:282-298 (session rows).
    Design tokens from WorkBuddy 5.3.11 (wb-design-tokens-master.css /
    design-tokens.json), light/dark brand colors via --wb-brand-primary in
    web/src/styles/tokens.css. Shell owns :root.
 */
-
-.chat-page {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  min-width: 0;
-  min-height: 0;
-  flex: 1;
-  height: 100%;
-  overflow: hidden;
-}
-
-/* Single full-width column: the session list lives in the shell sidebar (issue 424). */
-.chat-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  padding: 16px 20px 20px;
-  min-width: 0;
-  min-height: 0;
-  flex: 1;
-  overflow: hidden;
-}
 
 /* Session list, rendered in the shell sidebar list area (.sidebar-main, demo:274) and sitting
    directly on the sidebar background: the 新建会话 / 筛选任务 row stays pinned on top, the
@@ -254,39 +232,4 @@
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-}
-
-.chat-main {
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  overflow: hidden;
-}
-
-.chat-main > .ui-alert {
-  flex: none;
-  margin: 0;
-}
-
-/* Welcome state: the column scrolls when a short viewport cannot hold it (the welcome blocks
-   themselves are styled in welcome.tsx / scene-pills.tsx). */
-.chat-main--welcome {
-  overflow-y: auto;
-}
-
-@media (max-width: 760px) {
-  /* The shell height is auto here (styles.css ≤760 block), so a grid row would take the
-     transcript's content height; a flex column with a zero-basis .chat-main keeps the
-     transcript as the scroll container. */
-  .chat-layout {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .chat-main {
-    flex: 1 1 0;
-    min-height: 0;
-  }
 }

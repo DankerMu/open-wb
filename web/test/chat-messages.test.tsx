@@ -208,10 +208,12 @@ describe("(M5) static contract", () => {
     expect(injecting).toEqual([]);
   });
 
-  it("messages.css carries no literal colors", () => {
-    const raw = readRepoFile("web/src/features/chat/messages.css");
+  it("the message area has no stylesheet left: chat.css is the directory's only .css", () => {
+    expect(listRepoFiles("web/src/features/chat", (path) => path.endsWith(".css"))).toEqual([
+      "web/src/features/chat/chat.css",
+    ]);
     for (const pattern of COLOR_LITERAL_PATTERNS) {
-      expect(raw).not.toMatch(pattern);
+      expect(readRepoFile("web/src/features/chat/chat.css")).not.toMatch(pattern);
     }
   });
 });

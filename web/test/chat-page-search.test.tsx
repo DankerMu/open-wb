@@ -70,8 +70,8 @@ async function searchWeekly() {
 }
 
 function pageColumn() {
-  const column = document.querySelector(".chat-main");
-  if (!column) throw new Error("expected the .chat-main column");
+  const column = document.querySelector('[data-slot="chat-column"]');
+  if (!column) throw new Error("expected the chat column");
   return column;
 }
 

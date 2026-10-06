@@ -195,14 +195,14 @@ Minimal mergeable slice: 10.1——归约与纯归约测试先行一刀（新增
 
 ## 11. chat-web / ui-foundation — 收尾
 
-- [ ] 11.1 删除 `web/src/features/chat/messages.css`、`project-config.css` 与 `legacy.css` 中对应的 `@import`；`chat.css` 只留会话列表规则；
+- [x] 11.1 删除 `web/src/features/chat/messages.css`、`project-config.css` 与 `legacy.css` 中对应的 `@import`；`chat.css` 只留会话列表规则；
   `legacy.css` 的 `.chat-md` `revert` 规则删除（同一条选择器里的 `.files-md` 部分保留）；`conversation-view.tsx` 等已无引用的旧文件删除——`chat-composer.test.tsx` 读 `conversation-view.tsx` 源码的断言同刀改写。
 - [ ] 11.2 ui-walk 核对：`web/e2e` 里除会话列表的选择器外，不再有会话页的 `.chat-*` / `.ui-*` 选择器（各组已随分片改写，这里只查残余并补漏）；视口矩阵无横向溢出、无 console error。
   `chat-page.test.tsx` 对「新建会话」按钮类名的断言属于会话列表，不改。
-- [ ] 11.3 守卫：在 `ui-layering.test.ts` 加终态断言——`web/src/features/chat` 下除会话列表八个文件外的每个文件都在 `MIGRATED_AREAS`，该目录只剩 `chat.css` 一个 `.css`；
+- [x] 11.3 守卫：在 `ui-layering.test.ts` 加终态断言——`web/src/features/chat` 下除会话列表八个文件外的每个文件都在 `MIGRATED_AREAS`，该目录只剩 `chat.css` 一个 `.css`；
   加 `useToast` 的注入样本自检（已迁移文件里注入一条 `useToast` 导入时守卫报错）。在 `web/src` 与 `web/e2e` 搜索残留旧类名（`chat-md`、`chat-msg`、`chat-step`、`chat-transcript`、`chat-thread`、`thinking-`、`artifact-`）并清除。
-- [ ] 11.4 包体：记录 `web/dist` 的 JS 总大小与 gzip 大小（对比重建前 598,483 字节），写进 PR 描述与 design 的 Open Questions 结论处。
-- [ ] 11.5 CH 节通读：每条规格里用户可见的行为都有对应行，结论全部 `待签`；PR 描述列出待 owner 执行的真实端点验收步骤（一轮含审批与任务清单的回合、断线/刷新续流 F-CHAT-8 复测）——由 owner 执行，不是实现者的任务。
+- [x] 11.4 包体：记录 `web/dist` 的 JS 总大小与 gzip 大小（对比重建前 598,483 字节），写进 PR 描述与 design 的 Open Questions 结论处。
+- [x] 11.5 CH 节通读：每条规格里用户可见的行为都有对应行，结论全部 `待签`；PR 描述列出待 owner 执行的真实端点验收步骤（一轮含审批与任务清单的回合、断线/刷新续流 F-CHAT-8 复测）——由 owner 执行，不是实现者的任务。
 
 Suggested fixture level: compact - 删除已无引用的样式与文件、加终态守卫、记录数字；无新行为
 Minimal mergeable slice: 11.1 + 11.3，含 `chat-composer.test.tsx` 的改写——旧 CSS 与旧文件删除同终态守卫同刀（删完守卫才成立，读被删源码的断言不改则红）；11.2 ui-walk 残余核对可单独一刀；11.4、11.5 是记录与验收步骤清单，不改代码

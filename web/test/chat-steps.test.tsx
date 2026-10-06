@@ -129,26 +129,23 @@ describe("(S2) step cards render icon, Chinese badge, summary and collapsed raw 
     expect(screen.queryByRole("status", { name: /running|done|failed/ })).toBeNull();
   });
 
-  it("keeps the step-card rules out of both chat stylesheets", () => {
-    const messagesRaw = readRepoFile("web/src/features/chat/messages.css");
-    for (const pattern of COLOR_LITERAL_PATTERNS) {
-      expect(messagesRaw).not.toMatch(pattern);
-    }
-    expect(messagesRaw).not.toContain("--wb-palette");
-    expect(messagesRaw).not.toContain("chat-step");
-
+  it("keeps the step-card rules out of the chat stylesheet; messages.css is gone", () => {
     const chatRaw = readRepoFile("web/src/features/chat/chat.css");
     expect(chatRaw.split("\n").length).toBeLessThanOrEqual(800);
+    for (const pattern of COLOR_LITERAL_PATTERNS) {
+      expect(chatRaw).not.toMatch(pattern);
+    }
+    expect(chatRaw).not.toContain("--wb-palette");
     const chat = stripComments(chatRaw);
     for (const moved of [".chat-step", ".chat-md", ".chat-msg-"]) {
       expect(chat).not.toContain(moved);
     }
 
     const styles = readRepoFile("web/src/styles/legacy.css");
-    const chatImport = styles.indexOf('@import "../features/chat/chat.css";');
-    const messagesImport = styles.indexOf('@import "../features/chat/messages.css";');
-    expect(chatImport).toBeGreaterThanOrEqual(0);
-    expect(messagesImport).toBeGreaterThan(chatImport);
+    expect(styles).toContain('@import "../features/chat/chat.css";');
+    expect(styles).not.toContain("messages.css");
+    expect(styles).not.toContain(".chat-md");
+    expect(styles).toContain(".files-md :is(ul, ol)");
   });
 });
 

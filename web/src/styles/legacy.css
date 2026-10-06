@@ -7,7 +7,6 @@
 @import "../ui/motion.css";
 @import "../ui/ui.css";
 @import "../features/chat/chat.css";
-@import "../features/chat/messages.css";
 @import "../features/files/files.css";
 
 *,
@@ -100,9 +99,8 @@ a {
   background: transparent;
 }
 
-/* Restores the UA defaults that preflight resets, for the not-yet-migrated markdown surfaces
-   (chat answers, file preview). Removed together with those pages' migration. */
-.chat-md :is(ul, ol),
+/* Restores the UA defaults that preflight resets, for the not-yet-migrated markdown surface
+   (file preview). Removed together with that page's migration. */
 .files-md :is(ul, ol) {
   list-style: revert;
 }

@@ -62,7 +62,7 @@ export function ChatPage() {
   );
 
   return (
-    <section className="chat-page">
+    <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <ConversationView
         client={client}
         composerDisabled={session.composerDisabled}

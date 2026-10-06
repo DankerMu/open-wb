@@ -1,5 +1,0 @@
-/* No rules left: the message area (thread, bubbles, Markdown body, thinking fold, tool-call group,
-   cards, action row, slash panel, in-conversation search) is Tailwind classes in the migrated
-   components of this directory. The file stays only because styles/legacy.css imports it and
-   static tests still read it by path; new rules do not belong here.
-*/

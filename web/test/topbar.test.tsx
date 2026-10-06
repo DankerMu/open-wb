@@ -271,7 +271,6 @@ describe("静态契约 (T8)", () => {
       "web/src/styles.css",
       "web/src/styles/legacy.css",
       "web/src/features/chat/chat.css",
-      "web/src/features/chat/messages.css",
       "web/src/features/files/files.css",
     ]) {
       expect(readRepoFile(path), path).not.toContain("ui-page-heading");
