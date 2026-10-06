@@ -1,7 +1,7 @@
 // 审批的两种呈现（design D7）：待决审批是输入框上方停靠区里的提问卡（composer-dock.tsx 叠放），已结算
 // 审批是所属助手消息内的记录（message-thread.tsx 按 D4 的块次序挂载）。二者只读归约出的 `approvals`：
 // 工具名徽章是 `tool` 字段（不解析 `title`），正文是 `title` 全文、保留换行。
-import { useId, useRef, useState } from "react";
+import { type KeyboardEvent, type MouseEvent, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Icon } from "../../ui/index.js";
 import type { ChatApprovalView } from "./stream-approvals.js";
@@ -44,16 +44,18 @@ function ToolBadge({ id, tool }: { id?: string; tool: string }) {
  * （卡刚移过位，见 composer-dock.tsx）。
  *
  * 多张卡的名称与按钮名都相同：卡以 `aria-describedby` 依次关联自己的工具徽章与正文，读屏靠这段描述区分。
- * 卡消失后的焦点归停靠区管（design D2）：卡只在作答那一刻上报「焦点在本卡内」（`onAnswerFocused`）——
- * 作答后按钮禁用，浏览器随即把焦点收走，等卡卸载时再看就晚了；停靠区按 `data-approval-id` 认卡，
- * 卡内第一个按钮是 `允许`。
+ * 卡消失后的焦点归停靠区管（design D2）：卡只在作答那一刻上报（`onAnswered`）这次作答是不是焦点在
+ * 本卡内的键盘激活——作答后按钮禁用，浏览器随即把焦点收走，等卡卸载时再看就晚了。只认键盘：指针点击
+ * 同样让按钮获得焦点，照样移动的话焦点会不带焦点环地落到另一张卡的 `允许` 上。键盘激活的 click 的
+ * `detail` 为 0，指针点击不为 0。停靠区按 `data-approval-id` 认卡，卡内第一个按钮是 `允许`。
+ * 按住不放的按键不作答：防误点从卡集合变化算起，按键重复会在它过期后落到刚被聚焦的按钮上。
  */
 export function ApprovalPromptCard({
   approval,
   ignoreClicksUntil,
   now,
   onAnswer,
-  onAnswerFocused,
+  onAnswered,
 }: {
   approval: ChatApprovalView;
   /** 这个时刻（注入时钟的毫秒时间）之前的作答点击被忽略：不发请求、不改任何状态。 */
@@ -61,8 +63,8 @@ export function ApprovalPromptCard({
   /** 注入时钟的毫秒时间；停靠区每秒重读一次。 */
   now: number;
   onAnswer: AnswerApproval;
-  /** 一次被受理的作答点击发生时焦点在本卡内。 */
-  onAnswerFocused(approvalId: number): void;
+  /** 一次作答点击被受理；`byKeyboard`：它是焦点在本卡内时的键盘激活。 */
+  onAnswered(approvalId: number, byKeyboard: boolean): void;
 }) {
   const headerId = useId();
   const toolId = useId();
@@ -73,9 +75,12 @@ export function ApprovalPromptCard({
   const titleRef = useRef<HTMLParagraphElement>(null);
   // 正文变了就重量；元素本身不换。
   const clipped = useClipped(titleRef, [approval.title]);
-  const answer = (choice: ApprovalAnswer) => {
+  const answer = (choice: ApprovalAnswer, click: MouseEvent) => {
     if (Date.now() < ignoreClicksUntil) return;
-    if (cardRef.current?.contains(document.activeElement)) onAnswerFocused(approval.id);
+    onAnswered(
+      approval.id,
+      click.detail === 0 && Boolean(cardRef.current?.contains(document.activeElement)),
+    );
     setSent(true);
     setFailure(null);
     void onAnswer(approval.id, choice).then((message) => {
@@ -84,6 +89,11 @@ export function ApprovalPromptCard({
         setSent(false);
       }
     });
+  };
+  // Enter 在 keydown 上触发 click，按住会连发；空格在 keyup 上触发，但重复的 keydown 会让刚被聚焦的
+  // 按钮进入按下状态、松开时作答。两种重复都取消默认动作。
+  const ignoreRepeat = (event: KeyboardEvent) => {
+    if (event.repeat && (event.key === "Enter" || event.key === " ")) event.preventDefault();
   };
   const seconds = Math.max(0, Math.ceil((approval.expiresAt - now) / 1000));
   return (
@@ -130,12 +140,19 @@ export function ApprovalPromptCard({
         </p>
       )}
       <div className="flex flex-wrap items-center gap-2.5">
-        <Button disabled={sent} onClick={() => answer("allow")} size="sm" type="button">
+        <Button
+          disabled={sent}
+          onClick={(event) => answer("allow", event)}
+          onKeyDown={ignoreRepeat}
+          size="sm"
+          type="button"
+        >
           允许
         </Button>
         <Button
           disabled={sent}
-          onClick={() => answer("deny")}
+          onClick={(event) => answer("deny", event)}
+          onKeyDown={ignoreRepeat}
           size="sm"
           type="button"
           variant="outline"

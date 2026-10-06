@@ -8,9 +8,9 @@
 // `MOVED_CLICK_GUARD_MS` 内所有卡忽略作答点击；从空到出现第一张卡不计。
 // 卡消失后的焦点（design D2）：消失之前焦点在这张卡内，才把焦点移到 `id` 大于它的最小一张待决卡的
 // `允许`（没有更大的取剩余第一张）；没有待决卡时移到输入框，输入框锁定就等到它解锁的那次提交。
-// 「焦点在卡内」有两路：用户在卡内作答（按钮随即禁用、焦点被浏览器收走）且此后焦点没有落到别的元素上；
-// 或卡消失前的那次渲染里焦点就在卡内（超时、别处作答）。焦点在别处不动，卡出现时不夺取；移过去的焦点
-// 不豁免上面的防误点。
+// 「焦点在卡内」有两路：用户用键盘在卡内作答（按钮随即禁用、焦点被浏览器收走）且此后焦点没有落到别的
+// 元素上；或卡未经本页作答（超时、别处作答）、消失前的那次渲染里焦点就在卡内。用鼠标或触屏作答的卡不移动
+// 焦点（design D2）。焦点在别处不动，卡出现时不夺取；移过去的焦点不豁免上面的防误点。
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { type AnswerApproval, ApprovalPromptCard } from "./approval-card.js";
 import type { ChatState } from "./stream.js";
@@ -93,11 +93,11 @@ export function ComposerDock({
     });
   }
   const dockRef = useRef<HTMLDivElement>(null);
-  // 焦点簿记：上一次提交的会话与卡、作答时焦点在其内的那张卡、等输入框解锁后要给它的焦点。
+  // 焦点簿记：上一次提交的会话与卡、本页最近作答的那张卡（及是否键盘作答）、等输入框解锁后要给它的焦点。
   const focus = useRef({
     sessionId,
     shown: [] as number[],
-    answered: null as number | null,
+    answered: null as { id: number; byKeyboard: boolean } | null,
     toInput: false,
   });
   // 焦点一旦落到任何元素上，两项「待定」都作废，之后不再恢复：解锁时只看 `activeElement` 会在
@@ -115,9 +115,12 @@ export function ComposerDock({
     const shown = layout.ids === "" ? [] : layout.ids.split(",").map(Number);
     // 换了会话不算结算：卡是随会话一起换掉的。
     const sameSession = state.sessionId === sessionId;
+    const answered = state.answered;
     const gone = sameSession
       ? state.shown.find(
-          (id) => !shown.includes(id) && (id === state.answered || id === layout.focused),
+          (id) =>
+            !shown.includes(id) &&
+            (id === answered?.id ? answered.byKeyboard : id === layout.focused),
         )
       : undefined;
     if (!sameSession) {
@@ -161,8 +164,8 @@ export function ComposerDock({
           key={approval.id}
           now={now}
           onAnswer={onAnswerApproval}
-          onAnswerFocused={(id) => {
-            focus.current.answered = id;
+          onAnswered={(id, byKeyboard) => {
+            focus.current.answered = { id, byKeyboard };
           }}
         />
       ))}
