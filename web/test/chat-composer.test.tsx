@@ -5,11 +5,11 @@ import { chatSnapshot, FakeEventSource, latestSource, SESSION_ID } from "./chat-
 import { NULL_SESSION_META } from "./session-meta-fixtures.js";
 import { deferredResponse, jsonResponse } from "./support.js";
 import {
-  blockBody,
   COLOR_LITERAL_PATTERNS,
   readRepoFile,
   ruleBody,
   stripComments,
+  topLevelBlocks,
 } from "./ui-support.js";
 
 const COMPOSER_NAME = "给助手发消息";
@@ -198,12 +198,20 @@ describe("(C5) static contract", () => {
     expect(view).not.toContain("新建会话");
   });
 
-  it("chat.css: single-column layout, no session list rules in the page column", () => {
+  it("single-column layout lives in the view; chat.css holds session-list rules only", () => {
+    const view = readRepoFile("web/src/features/chat/conversation-view.tsx");
+    expect(view).toContain("grid-cols-[minmax(0,1fr)]");
+    expect(view).not.toMatch(/chat-(layout|main)/);
     const css = stripComments(readRepoFile("web/src/features/chat/chat.css"));
-    expect(ruleBody(css, ".chat-layout")).toContain("grid-template-columns: minmax(0, 1fr);");
     expect(css).not.toContain(".chat-sidebar");
-    const narrow = blockBody(css, /@media\s*\(max-width:\s*760px\)\s*\{/);
-    expect(ruleBody(narrow, ".chat-layout")).not.toContain("gap");
+    const selectors = topLevelBlocks(css).map((block) => block.prelude.trim());
+    expect(selectors.length).toBeGreaterThan(0);
+    const foreign = selectors.filter(
+      (selector) =>
+        !/\.chat-(session|new-session|rename)\b/.test(selector) &&
+        !selector.startsWith("@media (hover"),
+    );
+    expect(foreign).toEqual([]);
     expect(ruleBody(css, ".chat-session-nav")).not.toContain("overflow");
   });
 

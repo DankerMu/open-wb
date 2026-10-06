@@ -74,24 +74,24 @@ export function ConversationView({
   workspaceId,
 }: ConversationViewProps) {
   return (
-    <div className="chat-layout">
+    <div className="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)] overflow-hidden px-5 pt-4 pb-5 narrow:flex narrow:flex-col">
       <div
-        className={requestedSessionId ? "chat-main" : "chat-main chat-main--welcome"}
+        className={`flex min-h-0 min-w-0 flex-col gap-2 narrow:flex-[1_1_0px] ${requestedSessionId ? "overflow-hidden" : "overflow-x-hidden overflow-y-auto"}`}
         data-slot="chat-column"
       >
         {search.box}
         {historyError ? (
-          <p className="ui-alert" role="alert">
+          <p className="ui-alert flex-none" role="alert">
             {historyError}
           </p>
         ) : null}
         {promptError ? (
-          <p className="ui-alert" role="alert">
+          <p className="ui-alert flex-none" role="alert">
             {promptError}
           </p>
         ) : null}
         {streamError ? (
-          <p className="ui-alert" role="alert">
+          <p className="ui-alert flex-none" role="alert">
             {streamError}
           </p>
         ) : null}
