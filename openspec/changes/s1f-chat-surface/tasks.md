@@ -197,7 +197,7 @@ Minimal mergeable slice: 10.1——归约与纯归约测试先行一刀（新增
 
 - [x] 11.1 删除 `web/src/features/chat/messages.css`、`project-config.css` 与 `legacy.css` 中对应的 `@import`；`chat.css` 只留会话列表规则；
   `legacy.css` 的 `.chat-md` `revert` 规则删除（同一条选择器里的 `.files-md` 部分保留）；`conversation-view.tsx` 等已无引用的旧文件删除——`chat-composer.test.tsx` 读 `conversation-view.tsx` 源码的断言同刀改写。
-- [ ] 11.2 ui-walk 核对：`web/e2e` 里除会话列表的选择器外，不再有会话页的 `.chat-*` / `.ui-*` 选择器（各组已随分片改写，这里只查残余并补漏）；视口矩阵无横向溢出、无 console error。
+- [x] 11.2 ui-walk 核对：`web/e2e` 里除会话列表的选择器外，不再有会话页的 `.chat-*` / `.ui-*` 选择器（各组已随分片改写，这里只查残余并补漏）；视口矩阵无横向溢出、无 console error。
   `chat-page.test.tsx` 对「新建会话」按钮类名的断言属于会话列表，不改。
 - [x] 11.3 守卫：在 `ui-layering.test.ts` 加终态断言——`web/src/features/chat` 下除会话列表八个文件外的每个文件都在 `MIGRATED_AREAS`，该目录只剩 `chat.css` 一个 `.css`；
   加 `useToast` 的注入样本自检（已迁移文件里注入一条 `useToast` 导入时守卫报错）。在 `web/src` 与 `web/e2e` 搜索残留旧类名（`chat-md`、`chat-msg`、`chat-step`、`chat-transcript`、`chat-thread`、`thinking-`、`artifact-`）并清除。
