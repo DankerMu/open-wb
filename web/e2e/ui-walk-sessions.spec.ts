@@ -1,4 +1,4 @@
-// UI walk, session metadata (chat-harness「UI 走查会话元数据」steps 1–11): one serial journey
+// UI walk, session metadata (chat-harness「UI 走查会话元数据」steps 1–13): one serial journey
 // per project against the real stack — compiled app, real omp, controlled upstream driven by the
 // prompt markers WORKBUDDY_THINK / WORKBUDDY_WRITE. Nothing is fulfilled, faked or slept on.
 // Step 10 sends two more turns in the same session: `/todo` (answered by omp itself) and an escaped
@@ -12,7 +12,8 @@
 // `ui-walk-skills`, whose fixture also holds an `AGENTS.md`: its header has `项目配置 1` and the
 // read-only list; step 9 first asserts the three header buttons of the session whose workspace
 // holds no such file. The journey ends with a UI logout, which the error oracle needs
-// for its second expected /api/auth/me 401.
+// for its second expected /api/auth/me 401. Step 13 (ui-walk-todo.ts), before the logout, sends a
+// WORKBUDDY_TODO turn from the welcome state in a session of its own: the task-list panel.
 
 import { randomUUID } from "node:crypto";
 import { expect, type Locator, type Page, test } from "@playwright/test";
@@ -33,6 +34,7 @@ import {
   walkArtifactPreview,
   walkArtifactsPanel,
 } from "./ui-walk-steps.js";
+import { walkTodoPanel } from "./ui-walk-todo.js";
 
 const DEV_PASSWORD = "demo";
 const WORKSPACE_NAME = "ui-walk-sessions";
@@ -101,6 +103,7 @@ async function walkSessionMeta(
     console.log(`ui-walk sessions ${project}: ${point} +${Date.now() - started}ms`);
   const created: CreatedSession = { id: null };
   const configSession: CreatedSession = { id: null };
+  const todoSession: CreatedSession = { id: null };
   const uuid = randomUUID();
   const prompt = `WORKBUDDY_THINK WORKBUDDY_WRITE 会话走查 ${uuid}`;
   // 每个 project 唯一：第 11 步凭它断言条目从所有分区消失。
@@ -144,9 +147,12 @@ async function walkSessionMeta(
     mark("step 11");
     await walkProjectConfig(page, skills.id, configSession);
     mark("step 12");
+    await walkTodoPanel(page, EXPECTED_REPLY, todoSession);
+    mark("step 13");
   } finally {
     await deleteCreatedSession(page, created.id);
     await deleteCreatedSession(page, configSession.id);
+    await deleteCreatedSession(page, todoSession.id);
   }
   mark("cleanup");
   await logout(page, oracle, project);

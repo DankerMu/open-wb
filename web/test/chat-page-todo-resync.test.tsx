@@ -2,7 +2,7 @@
  * Issue #865 — session-todo「非法事件负载与未知回合」on the mounted page: an illegal `todo.updated`
  * payload and a valid one for a turn the settled view does not hold each cost exactly one more
  * history read, and the recovery snapshot replaces the view. A valid one for a known turn costs
- * none and changes nothing on screen (no panel renders the list yet). History reads are counted
+ * none and leaves the page as it was once the list is cleared again. History reads are counted
  * exactly: first load 1 + open recovery 1 is the baseline.
  */
 import { act, screen, waitFor } from "@testing-library/react";
@@ -124,7 +124,7 @@ describe("todo.updated on the mounted page", () => {
     },
   );
 
-  it("reduces a valid event of a known turn with no history read and no visible change", async () => {
+  it("reduces valid events of a known turn with no history read: a list set and cleared again leaves the page unchanged", async () => {
     const { reads, source } = await mount(OLD);
     const before = document.body.innerHTML;
 

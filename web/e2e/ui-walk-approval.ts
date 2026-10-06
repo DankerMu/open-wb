@@ -35,28 +35,20 @@ async function expectInsideViewport(target: Locator, what: string): Promise<void
   expect(box.y + box.height, `${what} bottom edge`).toBeLessThanOrEqual(viewport.height);
 }
 
-// 一张待决提问卡时的停靠区布局（两个 project 的视口：1440×900 与 390×844）：停靠区在线程滚动容器之外、
-// 输入框正上方；输入框、`停止` 与卡的两个按钮完整在视口内；线程可见高度不为零；页面没有横向滚动。
-async function expectDockLayout(page: Page, card: Locator): Promise<void> {
+// 停靠区有内容时的布局（两个 project 的视口：1440×900 与 390×844）：停靠区在线程滚动容器之外、线程
+// 之下、输入框正上方；输入框与它右下角的按钮 `action`（`停止` 或 `发送`）完整在视口内；线程可见高度不为
+// 零；页面没有横向滚动。
+export async function expectDockFrame(page: Page, action: "停止" | "发送"): Promise<void> {
   const dock = page.locator('[data-slot="composer-dock"]');
   const thread = page.locator('[data-slot="thread-viewport"]');
   const composer = page.locator('[data-slot="composer"]');
-  const input = page.getByLabel("给助手发消息");
-  await expect(dock.getByRole("group", { name: PENDING })).toHaveCount(1);
+  await expect(dock).toHaveCount(1);
   await expect(thread.locator('[data-slot="composer-dock"]')).toHaveCount(0);
 
-  await expectInsideViewport(input, "composer textarea");
+  await expectInsideViewport(page.getByLabel("给助手发消息"), "composer textarea");
   await expectInsideViewport(
-    composer.getByRole("button", { name: "停止", exact: true }),
-    "停止 button",
-  );
-  await expectInsideViewport(
-    card.getByRole("button", { name: "允许", exact: true }),
-    "允许 button",
-  );
-  await expectInsideViewport(
-    card.getByRole("button", { name: "拒绝", exact: true }),
-    "拒绝 button",
+    composer.getByRole("button", { name: action, exact: true }),
+    `${action} button`,
   );
 
   const dockBox = await dock.boundingBox();
@@ -79,6 +71,22 @@ async function expectDockLayout(page: Page, card: Locator): Promise<void> {
     window.innerWidth,
   ]);
   expect(scrollWidth, "document scrollWidth <= innerWidth").toBeLessThanOrEqual(innerWidth ?? 0);
+}
+
+// 一张待决提问卡时的停靠区布局：回合在跑（`停止`），卡的两个按钮也完整在视口内。
+async function expectDockLayout(page: Page, card: Locator): Promise<void> {
+  await expect(
+    page.locator('[data-slot="composer-dock"]').getByRole("group", { name: PENDING }),
+  ).toHaveCount(1);
+  await expectDockFrame(page, "停止");
+  await expectInsideViewport(
+    card.getByRole("button", { name: "允许", exact: true }),
+    "允许 button",
+  );
+  await expectInsideViewport(
+    card.getByRole("button", { name: "拒绝", exact: true }),
+    "拒绝 button",
+  );
 }
 
 // 待决提问卡（停靠区）、运行中的 bash 步骤（展开工具调用组后）与 composer `生成中` 同时可见（不断言先后）；gate 仍为 armed 证明末轮被审批挡住。

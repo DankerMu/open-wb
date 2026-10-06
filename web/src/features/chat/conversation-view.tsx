@@ -119,9 +119,11 @@ export function ConversationView({
             />
           </div>
         )}
-        {requestedSessionId ? (
-          <ComposerDock onAnswerApproval={onAnswerApproval} view={historyView} />
-        ) : null}
+        <ComposerDock
+          onAnswerApproval={onAnswerApproval}
+          sessionId={requestedSessionId}
+          view={historyView}
+        />
         <Composer
           capabilityBar={
             <CapabilityBar
