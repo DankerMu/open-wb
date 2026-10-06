@@ -348,6 +348,8 @@ export function useChatSession() {
       openSource,
     ],
   );
+  const loadHistoryRef = useRef(loadHistory);
+  loadHistoryRef.current = loadHistory;
 
   const selectSession = useCallback(
     (sessionId: string | null) => {
@@ -363,6 +365,7 @@ export function useChatSession() {
       closeSource,
       historyGenerationRef,
       installSnapshot,
+      loadHistoryRef,
       mountedRef,
       mutationControllerRef,
       mutationGenerationRef,
@@ -430,7 +433,11 @@ export function useChatSession() {
 
   useEffect(() => {
     const pending = pendingCreateSendRef.current;
-    if (!ownsCreateSend(pending, client, requestedSessionId) || mutationControllerRef.current) {
+    if (
+      !ownsCreateSend(pending, client, requestedSessionId) ||
+      pending.accepted ||
+      mutationControllerRef.current
+    ) {
       return;
     }
     dispatchPrompt(pending.sessionId, pending.prompt, pending.generation, pending.client);
