@@ -451,6 +451,10 @@ describe("a failed write", () => {
     "publishes no todo.updated, takes no ring sequence and reaches the owned error sink",
     REAL,
     async () => {
+      // The sink runs synchronously inside the failed commit, while the pump still holds the
+      // generation: the only point where the live ring sequence is readable after the fault.
+      let cursorAtFault: (() => number | null) | undefined;
+      const seqAtFault: Array<number | null> = [];
       const world = await openWorld(
         createRealFakeRuntime("todo").runtime,
         {
@@ -458,18 +462,40 @@ describe("a failed write", () => {
             db.exec(`CREATE TEMP TRIGGER reject_todo BEFORE UPDATE OF todo ON chat_sessions
             BEGIN SELECT RAISE(ABORT, '${SENTINEL}'); END`);
           },
+          onError(error) {
+            if (cursorAtFault !== undefined && containsMessage(error, SENTINEL)) {
+              seqAtFault.push(cursorAtFault());
+            }
+          },
         },
         true,
       );
+      const { supervisor } = world.fixture;
+      cursorAtFault = () => supervisor.streamCursor(world.session).seq;
+      const ring: RetainedEvent[] = [];
+      supervisor.subscribe(world.session, null, (event) => {
+        ring.push(event);
+      });
       await prompted(world);
       await waitFor(
         () => (world.errors.some((error) => containsMessage(error, SENTINEL)) ? true : undefined),
         "owned todo write fault",
       );
-      await settle();
+      // The fault then retires the slot: the live cursor is gone for good and nothing is pushed
+      // later, so the subscriber's log is everything this generation's ring ever fanned out.
+      await waitFor(
+        () => (supervisor.streamCursor(world.session).seq === null ? true : undefined),
+        "retired slot",
+      );
 
       expect(types(events(world))).toEqual(["turn.start", "step.start"]);
-      expect(world.fixture.supervisor.streamCursor(world.session).seq).toBe(2);
+      expect(seqAtFault).toEqual([2]);
+      const epoch = sessionEvents(world)[0]?.epoch;
+      expect(ring.map((event) => [event.id, event.type])).toEqual([
+        [`${String(epoch)}:1`, "turn.start"],
+        [`${String(epoch)}:2`, "step.start"],
+      ]);
+      expect(supervisor.streamCursor(world.session)).toEqual({ epoch, seq: null });
       expect(todoColumn(world.fixture.db, world.session)).toBeNull();
       expect(world.warns).toEqual([]);
     },
