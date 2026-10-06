@@ -21,11 +21,12 @@ export type AnswerApproval = (
 const TITLE_TEXT =
   "m-0 text-[12.5px] leading-[1.6] wrap-anywhere whitespace-pre-wrap text-(--wb-text-secondary)";
 
-function ToolBadge({ tool }: { tool: string }) {
+function ToolBadge({ id, tool }: { id?: string; tool: string }) {
   return (
     <span
       className="min-w-0 truncate rounded-full border border-(--wb-border-default) bg-(--wb-bg-primary) px-2 py-px font-mono text-[11.5px] leading-4 font-normal text-(--wb-text-secondary)"
       data-slot="approval-tool"
+      id={id}
       title={tool}
     >
       {tool}
@@ -41,12 +42,18 @@ function ToolBadge({ tool }: { tool: string }) {
  * 同意安全：`title` 来自助手一侧。正文被限高裁掉时（`scrollHeight > clientHeight`，随正文变化与元素尺寸
  * 变化重量）卡内多一行可见提示，正文可由键盘聚焦滚动；`Date.now()` 早于 `ignoreClicksUntil` 的点击不作答
  * （卡刚移过位，见 composer-dock.tsx）。
+ *
+ * 多张卡的名称与按钮名都相同：卡以 `aria-describedby` 依次关联自己的工具徽章与正文，读屏靠这段描述区分。
+ * 卡消失后的焦点归停靠区管（design D2）：卡只在作答那一刻上报「焦点在本卡内」（`onAnswerFocused`）——
+ * 作答后按钮禁用，浏览器随即把焦点收走，等卡卸载时再看就晚了；停靠区按 `data-approval-id` 认卡，
+ * 卡内第一个按钮是 `允许`。
  */
 export function ApprovalPromptCard({
   approval,
   ignoreClicksUntil,
   now,
   onAnswer,
+  onAnswerFocused,
 }: {
   approval: ChatApprovalView;
   /** 这个时刻（注入时钟的毫秒时间）之前的作答点击被忽略：不发请求、不改任何状态。 */
@@ -54,8 +61,13 @@ export function ApprovalPromptCard({
   /** 注入时钟的毫秒时间；停靠区每秒重读一次。 */
   now: number;
   onAnswer: AnswerApproval;
+  /** 一次被受理的作答点击发生时焦点在本卡内。 */
+  onAnswerFocused(approvalId: number): void;
 }) {
   const headerId = useId();
+  const toolId = useId();
+  const titleId = useId();
+  const cardRef = useRef<HTMLDivElement>(null);
   const [sent, setSent] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const titleRef = useRef<HTMLParagraphElement>(null);
@@ -63,6 +75,7 @@ export function ApprovalPromptCard({
   const clipped = useClipped(titleRef, [approval.title]);
   const answer = (choice: ApprovalAnswer) => {
     if (Date.now() < ignoreClicksUntil) return;
+    if (cardRef.current?.contains(document.activeElement)) onAnswerFocused(approval.id);
     setSent(true);
     setFailure(null);
     void onAnswer(approval.id, choice).then((message) => {
@@ -76,9 +89,12 @@ export function ApprovalPromptCard({
   return (
     // biome-ignore lint/a11y/useSemanticElements: fieldset 的禁用语义与默认边框都用不上，这里只要分组。
     <div
+      aria-describedby={`${toolId} ${titleId}`}
       aria-labelledby={headerId}
       className="flex min-w-0 flex-none flex-col gap-2 rounded-xl border border-l-[3px] border-(--wb-border-default) border-l-(--wb-status-warning) bg-(--wb-status-warning-soft-bg) px-4 py-3"
+      data-approval-id={approval.id}
       data-slot="approval-prompt"
+      ref={cardRef}
       role="group"
     >
       <div className="flex min-w-0 items-center gap-2 text-[13px] font-semibold text-(--wb-status-warning-text)">
@@ -86,11 +102,12 @@ export function ApprovalPromptCard({
         <span className="flex-none" id={headerId}>
           需要你的确认
         </span>
-        <ToolBadge tool={approval.tool} />
+        <ToolBadge id={toolId} tool={approval.tool} />
       </div>
       <p
         className={`${TITLE_TEXT} max-h-30 overflow-y-auto narrow:max-h-24`}
         data-slot="approval-title"
+        id={titleId}
         ref={titleRef}
         tabIndex={clipped ? 0 : undefined}
       >
