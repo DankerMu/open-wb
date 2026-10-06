@@ -3,6 +3,7 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest";
 import {
   clickSend,
+  renderObservedChatPage,
   sessionPromptPath,
   settleDeferredResponse,
   typeDraft,
@@ -39,7 +40,13 @@ import {
   welcomeRoutes,
 } from "./chat-page-welcome-scene-support.js";
 import { FakeEventSource, latestSource } from "./chat-stream-support.js";
-import { calls, currentLocation, deferredResponse, jsonResponse } from "./support.js";
+import {
+  authenticatedPrincipal,
+  calls,
+  currentLocation,
+  deferredResponse,
+  jsonResponse,
+} from "./support.js";
 import { yieldMacrotask } from "./ui-support.js";
 
 // 欢迎态首次发送的 prompt 未被受理：页面补读一次新会话的历史并显示它的正常状态
@@ -287,5 +294,33 @@ describe("欢迎态首次发送被拒后显示新会话的状态", () => {
     expect(FakeEventSource.instances).toEqual([]);
     expect(createRequests(fetchMock)).toHaveLength(1);
     expect(promptRequests(fetchMock, CREATED)).toHaveLength(1);
+  });
+
+  it("R8 首次发送的 prompt 401：进入登录页，任何一次提交都没有行内错误，不为新会话读历史、不开事件连接，恰一次创建与一次 prompt", async () => {
+    let expired = false;
+    const unauthorized = () => envelope(401, "unauthorized", "登录已失效");
+    const commits: string[] = [];
+    const routes = welcomeRoutes();
+    routes[sessionPromptPath(CREATED)] = () => {
+      expired = true;
+      return unauthorized();
+    };
+    // 登录失效后 `/api/auth/me` 同样回 401。
+    routes["/api/auth/me"] = () =>
+      expired ? unauthorized() : jsonResponse(authenticatedPrincipal);
+    const { fetchMock } = renderObservedChatPage("/", routes, (html) => commits.push(html));
+    await screen.findByRole("heading", { level: 1, name: HERO });
+
+    typeDraft(PROMPT);
+    clickSend();
+    expect(await screen.findByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeTruthy();
+    await act(yieldMacrotask);
+    // 会话页被登录页取代之前的每一次提交都算：行内错误一闪而过也不行。
+    expect(commits.filter((html) => html.includes('role="alert"'))).toEqual([]);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(historyReads(fetchMock)).toEqual([]);
+    expect(FakeEventSource.instances).toEqual([]);
+    expect(createRequests(fetchMock)).toEqual([createOf('{"scene":"office"}')]);
+    expect(promptRequests(fetchMock, CREATED)).toEqual([["POST", PROMPT_BODY]]);
   });
 });
