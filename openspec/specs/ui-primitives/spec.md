@@ -78,8 +78,8 @@ Menu/Popover/Tooltip 的入场动画与 Menu 项过渡 SHALL 在 `prefers-reduce
 - THEN 既有断言语义（`alertdialog` 标题 `退出登录？`、`取消`/`退出`、创建校验文案、切换器 `dialog` 名称 `工作空间切换器`、`＋ 新建工作空间`、`menuitem` `新建文件夹`）全部保持通过——定位器由 `main` 范围改为页面范围、原生 `HTMLDialogElement.open`/`cancel` 事件断言改为 Escape keydown；`web/src/lib/dialog.ts` 与 `dialog.test.tsx` 不再存在
 
 #### Scenario: 焦点归还不滚动
-- WHEN 转录贴底、回合仍在输出，用户从较早一条消息的 html 产物卡打开预览 Dialog，期间内容把该卡片顶出转录视口，随后以 Escape 或 `关闭` 关闭
-- THEN 焦点回到该卡片按钮，转录不被拽回该卡片、仍贴底跟随，不出现 `回到最新`；归还调用的入参为 `{ preventScroll: true }`（无 `trigger` 的 Dialog、传了 `returnFocus` 的 Dialog/ConfirmDialog 与 Drawer 相同）
+- WHEN 转录贴底、回合仍在输出，用户从顶栏 `重命名` 按钮打开会话重命名对话框（标题 `重命名任务`，仍由旧 `Dialog` 渲染），期间正文继续增长，随后以 Escape 或 `取消` 关闭
+- THEN 焦点回到该 `重命名` 按钮，转录不因焦点归还而滚动、仍贴底跟随，不出现 `回到最新`；归还调用的入参为 `{ preventScroll: true }`（无 `trigger` 的 Dialog、传了 `returnFocus` 的 Dialog/ConfirmDialog 与 Drawer 相同）
 
 ### Requirement: 动效与图标
 `Icon` SHALL 是单一组件：`name` 为本仓用到的 lucide 图标名联合类型，内部维护 name→组件映射、不逐个再导出 lucide 图标；size `12|14|16|18|20`（类名 `ui-icon-<size>`）；默认 `aria-hidden="true"`，传 `label` 时为 `role="img"` 且以 `label` 为可访问名。`web/src/ui/motion.css` SHALL 提供 demo 的 `wb-fadein`、`wb-pop`、`wb-pulse`、`wb-caret`、`wb-spin`、`wb-drawer-in` 关键帧与对应工具类（`ui-fadein`、`ui-pop`、`ui-pulse`、`ui-caret`、`ui-spin`），并在 `prefers-reduced-motion: reduce` 下把每个工具类置为 `animation: none` 与 `transition: none`；demo 未使用的 `wb-float`/`wb-shimmer` 不移植。图标 SHALL 全部经 `Icon` 取自 `lucide-react`（ISC，打包进产物，运行时零网络请求），`ATTRIBUTION.md` SHALL 新增 lucide（ISC）与 Radix UI Primitives（MIT）条目。
