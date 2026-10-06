@@ -95,10 +95,10 @@ Minimal mergeable slice: atomic - 改动、断言改写与清单行同刀
   `artifact-card.tsx` `PreviewDialog` 的文档注释（收窄为「只决定打开时的初始落点；页面脚本自行聚焦或用户 Tab 进 iframe 后，Escape 到不了本文档，`关闭` 与点遮罩仍可用」）；
   `web/test/chat-page-file-changes.test.tsx:3`（「C1–C15」，C15 已删）；`web/test/chat-page-file-changes-support.tsx:2`（「只供……使用」，实际被多个测试导入）；
   `web/test/chat-page-project-config-dialog.test.tsx:2`（归档前的 change 路径）；`web/test/chat-steps.test.tsx:288` 的用例标题（「the .chat-md body」）。
-- [ ] 4.6 `server/src/sessions/store-todo.ts` 的 `readTodo`：存量文本 `JSON.parse` 失败、解析结果不是带自有属性 `phases` 的普通对象、或其 `phases` 经 `normalizeTodo` 判为不合规时返回 `null`（`normalizeTodo` 的入参是 `phases` 数组，不是整个对象），不抛错、不改写该列、不记日志（design D6；session-todo delta「任务清单快照」）。
+- [x] 4.6 `server/src/sessions/store-todo.ts` 的 `readTodo`：存量文本 `JSON.parse` 失败、解析结果不是带自有属性 `phases` 的普通对象、或其 `phases` 经 `normalizeTodo` 判为不合规时返回 `null`（`normalizeTodo` 的入参是 `phases` 数组，不是整个对象），不抛错、不改写该列、不记日志（design D6；session-todo delta「任务清单快照」）。
   测试：`server/test/persist-todo.test.ts`（现 252 行）加两例（非 JSON、结构不合规 → `null`，列值未变）；`server/test/session-snapshot.test.ts` 加一例带外写坏值后快照 200 且 `todo` 为 `null`
   （`session-rest.test.ts` 已 789 行，不往里加）。变异：去掉降级 → 两处判红。
-- [ ] 4.7 走查探针：`web/e2e/ui-walk-steps.ts:63-64` 的 `expectFocusRingInside`——之前的焦点是 `body` 时改为 `blur()`，不再对 `body` 调 `focus()`；
+- [x] 4.7 走查探针：`web/e2e/ui-walk-steps.ts:63-64` 的 `expectFocusRingInside`——之前的焦点是 `body` 时改为 `blur()`，不再对 `body` 调 `focus()`；
   同文件 `paintedWithin`（第 108-121 行）——`elementFromPoint` 返回 `null` 时判为不成立（现在空过），恢复 `pointer-events` 放进 `try/finally`；
   `web/e2e/ui-walk-scroll.ts:164` 的 `pre.last()` 换成步骤卡输出块的稳定钩子（`data-slot="step-output"`）；
   `web/e2e/ui-walk-stop.ts:79`、`:98` 对 `已停止生成` 的缺席断言改为不重试的瞬时计数（自动重试的写法等得到旧提示自行消失，对旧实现不判红）。
@@ -113,7 +113,7 @@ Minimal mergeable slice: 4.1 + 4.2 + 4.3 + 4.4 + 4.5 一刀（web 源码与注�
 - [ ] 5.3 「+」菜单点菜单外关闭：草稿不变、焦点回到 `技能与命令` 按钮（同文件，现只有 Esc 一条路径）。
 - [ ] 5.4 原生跟随开关守卫（`web/test/chat-scroll-follow.test.tsx`，现 577 行，或新文件）：用户上滚后开始新回合，线程不被拉回底部——钉 `scrollToBottomOnRunStart`；
   变异：从 `thread-viewport.tsx` 的 `NATIVE_FOLLOW_OFF` 去掉该项应判红。jsdom 下若基元的这次滚动观察不到（变异不红），改为把四个开关的值作为可断言的结构钉住，并把「未能在 jsdom 层证明」写进 PR 偏离记录。
-- [ ] 5.5 走查里真实点击 `回到最新`（`web/e2e/ui-walk-scroll.ts`，现 276 行，在按钮可见的那一步之后）：点击后转录到达底部（距底在容差内）、按钮消失。
+- [x] 5.5 走查里真实点击 `回到最新`（`web/e2e/ui-walk-scroll.ts`，现 276 行，在按钮可见的那一步之后）：点击后转录到达底部（距底在容差内）、按钮消失。
 - [ ] 5.6 `web/test/chat-composer.test.tsx`（现 247 行）：补回 #893 丢掉的「窄屏外壳不带 gap」——`conversation-view.tsx` 里带 `grid-cols-[minmax(0,1fr)]` 的那个外层容器的类名里没有任何 `gap-` 记号（含 `narrow:` 前缀的；其内的 `chat-column` 带 `gap-2` 是对的，不改产品代码）；
   `chat.css` 选择器归属断言不再整体放行 `@media (hover` 块，改为进到块内对其选择器用同一归属规则，注入样本自证。
 - [ ] 5.7 产物面板跨重同步保持打开：面板打开时到达未知回合事件、页面重装快照 → 面板仍开、内容来自新快照（`web/test/chat-page-artifacts-panel-focus.test.tsx`，现 257 行）。

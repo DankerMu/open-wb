@@ -1,6 +1,7 @@
 // UI walk scroll-follow step (W-scroll): the transcript is forced to overflow by lowering the
 // viewport height only; a pinned transcript follows container and content size changes, a
-// scrolled-up one keeps its position and shows `回到最新` by the distance rule.
+// scrolled-up one keeps its position and shows `回到最新` by the distance rule; a real click on
+// `回到最新` brings it back to the bottom.
 // W-scroll 1b reloads the overflowing session with the session list held, so the snapshot renders
 // first and the wide-viewport top bar mounts after the transcript was scrolled to the bottom.
 
@@ -161,7 +162,7 @@ export async function walkScrollFollow(
         });
       }
       await expect(summary.locator("xpath=..")).toHaveAttribute("open", "");
-      await expect(summary.locator("xpath=..").locator("pre").last()).toBeVisible();
+      await expect(summary.locator("xpath=..").locator('[data-slot="step-output"]')).toBeVisible();
       await expect
         .poll(async () => (await transcriptMetrics(transcript)).threadHeight, "W-scroll 2: grew")
         .toBeGreaterThan(before.threadHeight);
@@ -206,6 +207,8 @@ export async function walkScrollFollow(
       );
     });
 
+    // Step 4 里 `回到最新` 可见时的视口高度，Step 5 回到它。
+    let jumpHeight = step3Height;
     await test.step("W-scroll 4: a taller viewport that reaches the bottom hides 回到最新", async () => {
       const jump = page.getByRole("button", { name: "回到最新" });
       let height = step3Height;
@@ -263,6 +266,37 @@ export async function walkScrollFollow(
           `(clientHeight ${before.clientHeight}, scrollHeight ${before.scrollHeight}, ` +
           `distance ${before.distance}) -> ${grown} (clientHeight ${after.clientHeight}, ` +
           `scrollHeight ${after.scrollHeight}), 回到最新 absent`,
+      );
+      jumpHeight = height;
+    });
+
+    // Step 4 末尾转录不再溢出，按规则恢复了贴底。回到 Step 4 里按钮可见时的视口高度（转录跟到底部），
+    // 再上滚到顶：距底超过一屏，按钮出现，真实点击它。
+    await test.step("W-scroll 5: clicking 回到最新 reaches the bottom and hides the button", async () => {
+      const jump = page.getByRole("button", { name: "回到最新" });
+      await page.setViewportSize({ width: original.width, height: jumpHeight });
+      await expectPinnedDistance(transcript, "W-scroll 5: pinned again after shrinking");
+      expectForcedOverflow(await transcriptMetrics(transcript), "W-scroll 5");
+      await expect(jump).toHaveCount(0);
+      await transcript.evaluate(
+        (el) =>
+          new Promise<void>((resolve) => {
+            el.addEventListener("scroll", () => resolve(), { once: true });
+            el.scrollTop = 0;
+          }),
+      );
+      await expect(jump).toBeVisible();
+      const before = await transcriptMetrics(transcript);
+      expect(before.scrollTop, "W-scroll 5: scrolled to top").toBe(0);
+      expect(before.distance, "W-scroll 5: more than a viewport away").toBeGreaterThan(
+        before.clientHeight,
+      );
+      await jump.click();
+      await expectPinnedDistance(transcript, "W-scroll 5");
+      await expect(jump).toHaveCount(0);
+      console.log(
+        `ui-walk W-scroll ${project}: step5 回到最新 clicked, distance ${before.distance} -> ` +
+          `${(await transcriptMetrics(transcript)).distance}`,
       );
     });
   });

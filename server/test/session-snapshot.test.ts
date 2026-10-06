@@ -187,4 +187,31 @@ describe("session REST snapshot capture", () => {
       expect(store.readTodo(session.id, "u1")).toEqual(JSON.parse(later));
     });
   });
+
+  // session-todo「存量坏值降级为 null」: the snapshot is the one the NULL column gives.
+  it.each(["{not json", '{"phases":"x"}'])(
+    "answers 200 with todo null when the column holds %s and leaves the column alone",
+    async (tampered) => {
+      await withSessionRest(async ({ app, db, store, supervisor }) => {
+        const session = store.create("u1");
+        store.acceptPrompt(session.id, "u1", "bad stored list");
+        supervisor.cursor = { epoch: 1, seq: 3 };
+        const cookie = await cookieFor(app, "zhangsan");
+        const clean = await getSessionMessages(app, session.id, cookie);
+        expect(clean.statusCode).toBe(200);
+        db.prepare("UPDATE chat_sessions SET todo = ? WHERE id = ?").run(tampered, session.id);
+
+        const history = await getSessionMessages(app, session.id, cookie);
+
+        expect(history.statusCode).toBe(200);
+        const body = history.json() as Record<string, unknown>;
+        expect(Object.keys(body).sort()).toEqual(["messages", "session", "streamCursor", "todo"]);
+        expect(body.todo).toBeNull();
+        expect(body).toEqual(clean.json());
+        expect(db.prepare("SELECT todo FROM chat_sessions WHERE id = ?").get(session.id)).toEqual({
+          todo: tampered,
+        });
+      });
+    },
+  );
 });

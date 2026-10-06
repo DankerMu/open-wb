@@ -1,6 +1,7 @@
 /**
  * Issue #535 `files.changed` decoding/reduction and the 文件变更 card (parent tasks 7.5a),
- * C1–C14 of openspec/changes/file-changes-card/design.md plus the review-round gaps G1–G6.
+ * C1–C14 of openspec/changes/archive/2026-10-02-file-changes-card/design.md plus the review-round
+ * gaps G1–G6.
  * Seams: `chatStateFromSnapshot` / `applyChatEvent` / `summarizeChanges` on frozen inputs,
  * `connectSessionEvents` over the fake EventSource and the jsdom chat page.
  * Expected values are literals from the spec deltas; cases marked (guard) already hold before the

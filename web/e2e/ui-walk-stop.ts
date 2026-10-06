@@ -34,6 +34,7 @@ function sessionPost(
 
 // 点击只在 gate `held` + 第二条助手已呈现前缀 + form 内 `生成中` 同时成立时发生（`停止` 可用不足以证明 running）。
 // 停止不弹提示：`已停止生成` 的断言放在 `已停止` 徽章出现之后（此时 stop 的 202 早已处理完），并在本步末尾再查一次。
+// 两处都是即时计数、不重试：会重试的「数量为 0」等得到提示自己消失，对弹提示的实现不判红。
 export async function walkStop(
   page: Page,
   project: WalkProject,
@@ -76,7 +77,7 @@ export async function walkStop(
     expect((await stopped).status()).toBe(202);
     mark("stop 202");
     await expect(stoppedBadge).toBeVisible();
-    await expect(toast).toHaveCount(0);
+    expect(await toast.count(), "no stopped toast").toBe(0);
     await expect(second.getByRole("alert")).toHaveCount(0);
     await expect(second.locator('[data-slot="message-body"]')).toHaveText(FIRST_REPLY_PART);
     await expect(users).toHaveCount(2);
@@ -95,7 +96,7 @@ export async function walkStop(
       const title = await current.getAttribute("aria-label");
       await expect(current.getByRole("status")).toHaveAccessibleName(`${title} 已停止`);
     });
-    await expect(toast).toHaveCount(0);
+    expect(await toast.count(), "no stopped toast after the round").toBe(0);
     return gateId;
   } finally {
     await deleteGate(origin, gateId);

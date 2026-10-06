@@ -1,5 +1,5 @@
 // 文件变更卡（issue #535）测试的夹具与页面查询：快照搭法、冻结的 reducer 输入、已装快照的连接器、
-// 带工作空间列表的会话页挂载、事件推送、卡片行的读取。chat-page-file-changes.test.tsx 与其它整页测试（产物卡、产物面板、搜索、斜杠菜单、项目配置）共用。
+// 带工作空间列表的会话页挂载、事件推送、卡片行的读取。由多个整页测试共用。
 import { act, screen, waitFor, within } from "@testing-library/react";
 import { expect } from "vitest";
 import {
