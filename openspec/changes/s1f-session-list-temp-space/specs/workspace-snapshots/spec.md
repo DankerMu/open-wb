@@ -1,0 +1,202 @@
+## ADDED Requirements
+
+### Requirement: 迁移 039 回合快照登记表
+迁移 `039_chat_turn_snapshots.sql` SHALL 在既有 runner 事务内、作为 `038` 之后的第十三个 receipt，创建表 `chat_turn_snapshots`：`message_id INTEGER PRIMARY KEY REFERENCES chat_messages(id) ON DELETE CASCADE`；`workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE`；`outcome TEXT NOT NULL CHECK (outcome IN ('ok','too_large','failed','command'))`；`skipped TEXT NULL`；`todo TEXT NULL`；`created_at INTEGER NOT NULL CHECK (typeof(created_at)='integer' AND created_at >= 0)`；并在 `workspace_id` 上建索引（索引名不属于外部契约）。不使用 `IF NOT EXISTS`，不改动任何既有表。`031`–`038` 的迁移文件 SHALL NOT 被编辑。受信任迁移目录计数断言 SHALL 随之 +1。
+
+#### Scenario: 建表与约束
+- **WHEN** openDb 打开新库与一个 receipts 止于 `038` 的存量库，然后写入 `outcome` 为四个合法值之一与 `'done'`、对不存在的 `message_id` 或 `workspace_id` 写入、对同一 `message_id` 写两行
+- **THEN** receipts 含 `039`；合法行写入成功；非法 `outcome`、缺失的外键目标与重复主键被 SQLite 拒绝；存量表的行与 `sqlite_sequence` 不变
+
+#### Scenario: 级联
+- **WHEN** 删除一条有快照行的消息、删除其会话、或删除其工作空间行
+- **THEN** 对应的快照行随之消失，其它会话与其它工作空间的快照行不变
+
+### Requirement: 快照的存放位置
+快照 SHALL 存放在 `<OMP_STATE_DIR>/snapshots/<workspaceId>/<userMessageId>/` 之下：`manifest.json` 与目录 `tree/`（工作空间内容的副本）。`<OMP_STATE_DIR>/snapshots` 属于托管布局，mode `0700`、由 app 用户持有（omp-runtime「OMP_STATE_DIR 托管布局」），其下的每级目录以 `0700`、每个文件以 `0600` 创建；omp 用户不能进入、列举、读取或改写其中任何内容。快照模块 SHALL 从 `createApp` 注入的快照根取路径，不自行拼接 `OMP_STATE_DIR`；路径分量只取自受信任的行（32 位小写十六进制的工作空间 id、十进制的消息 id），SHALL NOT 取自任何请求字符串。快照 SHALL NOT 写入工作空间内或 `SANDBOX_ROOT` 之下的任何位置。
+
+#### Scenario: 位置与权限位
+- **WHEN** 对工作空间 W 的用户消息 `42` 成功做一次快照
+- **THEN** `<OMP_STATE_DIR>/snapshots/<W>/42/manifest.json` 与 `tree/` 存在；`snapshots`、`<W>`、`42`、`tree` 及其下目录的 `mode & 0o777` 为 `0o700`，文件为 `0o600`；工作空间根下没有新增任何条目
+
+#### Scenario: omp 用户不可达
+- **WHEN** 在 `uid-isolation` CI job（omp 以独立系统用户运行）里完成一轮带快照的回合后，以 omp 用户尝试列举 `<OMP_STATE_DIR>/snapshots`
+- **THEN** 得到 `EACCES`
+
+### Requirement: 快照内容规则
+`take(workspaceRoot, …)` SHALL 自工作空间根向下遍历，用不跟随符号链接的元数据判定每个条目，并写出清单 `manifest.json`：`{entries:[…], skipped:[{path,reason}]}`，`path` 为相对工作空间根的 POSIX 路径。规则：
+- 目录：记 `{path,type:"dir",mode}`，在 `tree/` 下建同名目录，继续向下；
+- 普通文件：记 `{path,type:"file",size,mtimeMs,ctimeMs,mode}`，内容放在 `tree/<path>`；
+- 符号链接：记 `{path,type:"symlink",target}`（`target` 为 `readlink` 的原字符串），SHALL NOT 跟随、SHALL NOT 复制目标内容；
+- FIFO、socket、设备等其它类型：不进 `entries`，记入 `skipped`，`reason` 为 `special`；
+- 名字在排除名单里的**目录**（任何层级，见「快照上限与配置」）：整棵不遍历，记入 `skipped`，`reason` 为 `excluded`；同名的普通文件不受影响；
+- 大小超过单文件上限的普通文件：不进 `entries`，记入 `skipped`，`reason` 为 `too_large`；
+- 读取元数据、列举或复制时得到 `EACCES` / `EPERM` 的条目：记入 `skipped`，`reason` 为 `unreadable`（目录则整棵）。
+
+遍历 SHALL NOT 离开工作空间根（符号链接不跟随即保证）。`take` 结束时返回三种结果之一：`ok`（附 `skipped`）、`too_large`（见上限）、`failed`（其它任何错误，含工作空间根不是目录）。结果不是 `ok` 时 SHALL 删除本次已写出的 `<userMessageId>` 目录，不留半份快照。`take` SHALL NOT 修改工作空间内的任何文件、时间戳或权限位。
+
+#### Scenario: 各类条目
+- **WHEN** 工作空间含 `a.txt`、`src/b.ts`、空目录 `empty/`、指向 `a.txt` 的符号链接 `link`、指向工作空间外文件的符号链接 `out`、一个 FIFO、目录 `node_modules/`（内有文件）与一个名为 `node_modules` 的普通文件位于 `docs/` 下，对它做快照
+- **THEN** 结果为 `ok`；`tree/` 含 `a.txt`、`src/b.ts`、`empty/` 与 `docs/node_modules`，字节与原文件相同；`link` 与 `out` 只在清单里以 `symlink` 与原 `target` 出现，`tree/` 下没有它们的目标内容；`skipped` 恰含 FIFO（`special`）与 `node_modules`（`excluded`）；工作空间各文件的 `mtime` 与内容未变
+
+#### Scenario: 读不了的子目录
+- **WHEN** 工作空间含一个 app 用户无权列举的子目录 `locked/`
+- **THEN** 结果为 `ok`；`skipped` 含 `{path:"locked",reason:"unreadable"}`；其余条目照常进快照
+
+#### Scenario: 失败不留半份
+- **WHEN** 复制中途注入一个非权限类 IO 错误，或工作空间根被换成普通文件
+- **THEN** 结果为 `failed`；`<OMP_STATE_DIR>/snapshots/<W>/<messageId>` 不存在
+
+### Requirement: 快照上限与配置
+服务配置 SHALL 接受四个可选环境变量，经既有配置解析入口校验（非法值使启动失败，与其它数值配置同一规则）：
+- `SNAPSHOT_MAX_FILE_BYTES`：正整数，默认 `20971520`；大于它的单个文件不进快照（`skipped` `too_large`）；
+- `SNAPSHOT_MAX_TOTAL_BYTES`：正整数，默认 `524288000`；进入 `entries` 的普通文件 `size` 之和超过它时，本次快照结果为 `too_large`；
+- `SNAPSHOT_MAX_ENTRIES`：正整数，默认 `50000`；`entries` 的条目数超过它时，本次快照结果为 `too_large`；
+- `SNAPSHOT_EXCLUDE_NAMES`：逗号分隔的目录名列表，默认 `node_modules,.venv,__pycache__`（只排除依赖目录，管理员可配）；每个名字非空、不含 `/` 与 NUL、不是 `.` 或 `..`；空字符串表示不排除任何目录。
+
+`.git` 不在默认排除名单里：版本库目录与其它目录一样进快照（其下每个文件同样受单文件上限约束，条目与字节计入条目上限与总量上限），撤回时连同回合里产生的提交、引用与暂存区一起还原。
+
+`take` SHALL 在累计值越过总量或条目上限的那一刻停止遍历并返回 `too_large`，不继续复制。恰等于上限的值不算超限。
+
+#### Scenario: 单文件上限
+- **WHEN** 单文件上限配为 `10`，工作空间有 10 字节的 `ok.bin` 与 11 字节的 `big.bin`
+- **THEN** 结果为 `ok`；`tree/` 含 `ok.bin`、不含 `big.bin`；`skipped` 含 `{path:"big.bin",reason:"too_large"}`
+
+#### Scenario: 总量与条目上限
+- **WHEN** 总量上限配为 `20` 而三个 10 字节的文件待快照；另一次条目上限配为 `2` 而工作空间有三个文件
+- **THEN** 两次结果都是 `too_large`；快照目录不存在；总量恰为 20 字节的两文件空间结果为 `ok`
+
+#### Scenario: 版本库目录进快照
+- **WHEN** 以默认配置对一个含 `.git/HEAD`、`.git/refs/heads/main`、`.git/objects/ab/cdef` 与 `node_modules/x.js` 的工作空间做快照
+- **THEN** 结果为 `ok`；`tree/.git/` 下三者字节与原文件相同并出现在 `entries` 里；`skipped` 恰含 `node_modules`（`excluded`），不含 `.git`
+
+#### Scenario: 配置非法
+- **WHEN** `SNAPSHOT_MAX_FILE_BYTES` 为 `0`、`abc`、`1.5`，或 `SNAPSHOT_EXCLUDE_NAMES` 含 `a/b` 或 `..`
+- **THEN** 配置解析失败，服务不启动
+
+### Requirement: 未变文件的去重
+`take` SHALL 接受「上一份快照」——同一工作空间最近一条 `outcome='ok'` 的快照行所对应的目录（不限会话）；没有则为空。对每个进入 `entries` 的普通文件，若上一份清单里有相同 `path` 的 `file` 条目且 `size`、`mtimeMs`、`ctimeMs` 三者都与当前元数据相等，SHALL 从上一份快照的 `tree/<path>` 建硬链接到本次的 `tree/<path>`，不读文件内容；否则 SHALL 复制当前文件内容（`copyFile`，带 `COPYFILE_FICLONE` 以在支持的文件系统上使用写时复制）。建硬链接失败（上一份正被删除、链接数上限等）SHALL 退为复制，不使本次快照失败。硬链接只在快照根内部的两份快照之间建立，SHALL NOT 在快照与工作空间之间建立任何硬链接。删除一份快照 SHALL NOT 影响其它快照的可读性（链接计数保证）。
+
+#### Scenario: 未变文件不重复占用
+- **WHEN** 对含 `a.txt`、`b.txt` 的工作空间先后做两次快照，其间只改写 `b.txt`
+- **THEN** 两份快照里的 `a.txt` 是同一个 inode（`nlink` ≥ 2），`b.txt` 是不同的 inode 且各自内容对应当时的文件；两份 `tree/a.txt` 与工作空间里的 `a.txt` 不是同一个 inode
+
+#### Scenario: 内容变了而 mtime 被改回
+- **WHEN** 第一次快照后改写 `a.txt` 的内容（长度不变），再把它的 `mtime` 设回原值，做第二次快照
+- **THEN** 第二份快照的 `a.txt` 是新内容（`ctimeMs` 不同，不走硬链接）
+
+#### Scenario: 上一份消失时退为复制
+- **WHEN** 第二次快照进行时上一份快照目录已被删除
+- **THEN** 结果仍为 `ok`，`tree/` 内容完整
+
+#### Scenario: 删除较早的一份
+- **WHEN** 删除第一份快照目录后读取第二份的 `a.txt`
+- **THEN** 内容完整可读
+
+### Requirement: 受理时做快照
+prompt 路由 SHALL 把「快照步骤」作为 `supervisor.prompt` 的派发前步骤传入（chat-sessions「Supervisor dispatch and generation binding」的 `beforeDispatch`）：`acceptPrompt` 成功后不经任何 await 即调用 `supervisor.prompt`，supervisor 在该回合进入「派发前」阶段之后、等待旧进程退出 / 进程池准入 / spawn 之前执行该步骤。步骤 SHALL 为被受理的用户消息决定其快照结果并写一行 `chat_turn_snapshots`（`message_id` 为该用户消息 id，`created_at` 为当前毫秒，`todo` 为此刻 `chat_sessions.todo` 的原文或 NULL）：
+- 会话 `workspace_id` 为 NULL（存量的未绑定会话）：SHALL NOT 做快照、SHALL NOT 写行；
+- 该消息被 `classifyPrompt` 判为白名单命令（`builtin` / `skill`）：不做快照，写 `outcome='command'`；
+- 其余：对会话的工作空间根调用 `take`，写其结果 `ok` / `too_large` / `failed`；`ok` 时 `skipped` 列存 `{count:<总数>,paths:[…至多前 200 项 {path,reason}]}` 的 JSON，没有跳过项时存 NULL。
+
+快照的任何结果（含 `failed`）SHALL NOT 使 prompt 失败：派发照常进行，`failed` 时经服务错误通道报告一次。快照行的写入失败同样只报告，按该消息没有快照行处理。派发失败使受理被补偿（`rollbackPrompt`）时，快照行随用户消息行级联删除，宿主 SHALL 在补偿之后删除该消息的快照目录。步骤自身 SHALL NOT 以拒绝结束（内部捕获全部错误）。快照进行期间会话已是 `running` 且该回合处于「派发前」阶段：其间到达的 stop SHALL 按 turn-control「停止生成 REST」的停止意图规则处理（stop 立即 202，不等快照；快照结束后派发照常进行，派发回执兑现后恰写一次 `abort`，回合以 `stopped` 收尾，prompt 仍 202）；其间到达的 DELETE 按既有规则先 stop 再等待回合释放，因此在快照结束、回合被停止之后完成，不等一个完整回合。快照步骤 SHALL NOT 放在 `supervisor.prompt` 调用之前的路由代码里（那里回合尚未进入「派发前」阶段，stop 会被丢弃）。regenerate SHALL NOT 做新的快照，也不改动任何快照行。fork SHALL NOT 拷贝快照行。
+
+快照的受理延迟（`take` 的耗时）计入 prompt 的 202 之前；202 的 body 增加 `undo`（message-undo「可撤回状态」）。
+
+#### Scenario: 每个回合前一份
+- **WHEN** 绑定工作空间 W 的会话在 fake omp 下连续发两条 prompt，第一轮里 fake omp 的 `edit-write` 场景改写了一个文件
+- **THEN** 两条用户消息各有一行 `outcome='ok'`；第一份快照的 `tree/` 是第一轮开始前的内容，第二份是第一轮结束后的内容；fake omp 收到 `prompt` 帧的时刻晚于对应快照目录出现的时刻
+
+#### Scenario: 快照期间停止与删除
+- **WHEN** 测试让 `take` 挂起，其间对该会话调用 stop，随后放行 `take`
+- **THEN** stop 在 `take` 放行前已返回 202；prompt 返回 202；fake omp 在 `take` 放行前未被 spawn、未收到任何帧，放行后收到 `prompt` 帧与恰一个 `abort`；回合以恰一个 `turn.end{status:"stopped"}` 收尾；该用户消息的快照行为 `ok`
+- **WHEN** 同样让 `take` 挂起，其间对该会话调用 DELETE，随后放行 `take`
+- **THEN** DELETE 在回合被停止后返回 204；会话行、消息行与快照行都不存在（快照目录的删除见「快照清理」）；fake omp 没有跑完一个完整回合
+
+#### Scenario: 命令回合与未绑定会话
+- **WHEN** 绑定会话发送 `/todo`；一个 `workspace_id` 为 NULL 的存量会话（直接写库构造）发送普通 prompt
+- **THEN** 前者的用户消息有一行 `outcome='command'` 且没有快照目录；后者没有快照行，两者都返回 202 且回合照常进行
+
+#### Scenario: 快照失败不挡发送
+- **WHEN** 测试令 `take` 抛错，或工作空间超出总量上限
+- **THEN** prompt 仍返回 202 且回合完成；快照行的 `outcome` 分别为 `failed`（错误通道报告一次）与 `too_large`；没有残留的快照目录
+
+#### Scenario: 受理被补偿时清理
+- **WHEN** 快照成功后 supervisor 以 `agent_unavailable` 拒绝派发
+- **THEN** prompt 返回 502；用户消息行与其快照行都不存在；该消息的快照目录已被删除
+
+#### Scenario: 记录当时的任务清单
+- **WHEN** 会话的 `chat_sessions.todo` 存有清单 T 时受理一条 prompt
+- **THEN** 该消息快照行的 `todo` 与 T 的存储文本逐字相同；`todo` 为 NULL 的会话其快照行 `todo` 为 NULL
+
+### Requirement: 还原
+`restore(workspaceRoot, snapshotDir)` SHALL 把工作空间还原为清单描述的状态，并返回 `{restored,removed,skipped,failed}`（`restored` 为内容被写回的文件数与被重建的符号链接数之和，`removed` 为删除的条目数（被递归删除的目录连同其下内容计一项），`skipped` 为清单的 `skipped`，`failed` 为 `[{path}]`）。它 SHALL 先读清单并校验：清单可解析、`tree/` 存在、工作空间根是真实目录（`lstat`，非符号链接）；任一不成立 SHALL 在改动任何工作空间条目之前抛错。随后：
+- 现存而不在 `entries` 里、且不位于任何 `skipped` 路径之下（含其自身）的条目 SHALL 被删除（目录递归删除，不跟随符号链接）；
+- `entries` 里的目录 SHALL 存在（缺失则创建，mode `2770`；现存而不是目录的同名条目先删除）；
+- `entries` 里的文件按以下次序判定，命中即止：
+  1. 当前是普通文件且 `size`、`mtimeMs`、`ctimeMs` 都与清单相等 → 不动、不读内容、不计入 `restored`；
+  2. 当前是普通文件、`size` 与清单相等、且其内容与 `tree/<path>` 逐字节相同 → 不动（不改内容、时间戳与权限位）、不计入 `restored`；
+  3. 其余（不存在、不是普通文件、`size` 不同或内容不同）→ SHALL 从 `tree/<path>` 写回并计入 `restored`：在同一目录写临时文件后 `rename` 到位，随后把 `mtime` 设为清单值，并以显式 `chmod` 把权限位置为 `(清单 mode & 0o777) | 0o660`（不受进程 umask 影响；setuid、setgid、sticky 位一律不带）；写回 SHALL 复制内容，SHALL NOT 在工作空间与快照之间建硬链接；现存而不是普通文件的同名条目先删除；
+- `entries` 里的符号链接：当前不是目标相同的符号链接则重建并计入 `restored`；
+- `skipped` 路径及其之下的一切 SHALL NOT 被读取、改写或删除。
+
+写回的文件 SHALL 对属主与属组都可读写（上式的 `0o660`）：清单里是 `0644` 的文件写回后为 `0664`，`0755` 写回后为 `0775`，`0600` 写回后为 `0660`。理由是写回的文件由 app 用户持有、靠父目录的 setgid 继承共享组，omp 用户只能经组权限继续读写它（ADR-0010）；其它用户位与执行位保持清单值。第 1、2 两种「不动」的文件权限位不被修改。
+
+每次写或删之前 SHALL 对该条目自工作空间根起的各级父目录做 `lstat`：任何一级是符号链接或不是目录时，SHALL 跳过该条目并把它记入 `failed`，SHALL NOT 经由它写入或删除；单个条目的 `EACCES` / `EPERM` 同样记入 `failed` 并继续。`restore` SHALL NOT 改动工作空间根之外的任何路径，SHALL NOT 修改快照目录（清单里的 `ctimeMs` 不随写回更新，所以被写回过的文件在下一次还原时走第 2 步的内容比较）。对同一份快照重复调用 SHALL 是幂等的：工作空间状态相同，且在两次调用之间工作空间没有别的改动时，第二次的 `restored` 与 `removed` 都为 0。
+
+#### Scenario: 还原改动、新增与删除
+- **WHEN** 快照时工作空间为 `a.txt`（"1"）、`dir/b.txt`（"2"）、`keep.txt`（"3"）；之后 `a.txt` 被改为 "x"、`dir/b.txt` 被删除、新增了 `c.txt` 与 `new/d.txt`，然后还原
+- **THEN** 工作空间恰为 `a.txt`（"1"）、`dir/b.txt`（"2"）与 `keep.txt`（"3"）；`c.txt`、`new/` 不存在；返回 `restored=2`、`removed=2`、`failed=[]`；`keep.txt` 的 inode 不变
+
+#### Scenario: 只计内容确有变化的文件
+- **WHEN** 快照后 `a.txt` 被原样重写（内容与长度不变，`mtime` 与 `ctime` 变了）、`b.txt` 被改成等长的另一段内容、`c.txt` 只被 `chmod` 过，然后还原
+- **THEN** 返回 `restored=1`、`removed=0`；`b.txt` 为快照内容；`a.txt` 与 `c.txt` 的 inode、时间戳与权限位都与还原前相同
+
+#### Scenario: 跳过项不动并列出
+- **WHEN** 快照的 `skipped` 含 `big.bin`（`too_large`）与 `node_modules`（`excluded`），其后二者内容都被改动，另新增了 `node_modules/x/y.js`，然后还原
+- **THEN** `big.bin` 与 `node_modules` 之下的内容保持改动后的样子（包括新增的文件）；返回的 `skipped` 含这两项
+
+#### Scenario: 版本库随撤回还原
+- **WHEN** 快照时 `.git/refs/heads/main` 的内容为提交 A；之后的回合里新增了对象文件 `.git/objects/cd/ef01`、把 `.git/refs/heads/main` 改为提交 B，并改写了 `src/app.ts`，然后还原
+- **THEN** `.git/refs/heads/main` 的内容回到提交 A，`.git/objects/cd/ef01` 不存在，`src/app.ts` 为快照内容；`skipped` 不含 `.git`
+
+#### Scenario: 父目录被换成符号链接
+- **WHEN** 快照含目录 `dir` 与 `dir/b.txt`，之后 `dir` 被换成指向工作空间外某目录 O 的符号链接（O 内有一个 `b.txt`），然后还原
+- **THEN** 符号链接 `dir` 被删除（只删链接本身）并重建为真实目录，`dir/b.txt` 为快照内容；O 及其 `b.txt` 的内容与时间戳不变
+- **WHEN** 直接对还原模块的路径校验给出一条某一级父目录为符号链接（指向 O）的待写回路径
+- **THEN** 该条目出现在返回的 `failed` 里，O 内没有任何写入或删除
+
+#### Scenario: 写回文件的权限位
+- **WHEN** 快照时 `a.txt` 为 `0644`、`run.sh` 为 `0755`、`secret` 为 `0600`、`s.bin` 为 `04755`；之后四者内容都被改动，然后在 umask 为 `0o077` 的进程里还原
+- **THEN** 四者的 `mode & 0o7777` 依次为 `0o664`、`0o775`、`0o660`、`0o775`
+
+#### Scenario: 还原出的文件对 omp 用户可写
+- **WHEN** 在 `uid-isolation` CI job 里，一个快照时为 `0644` 的文件被 omp 用户删除，还原后以 omp 用户向它追加一个字节
+- **THEN** 追加成功（文件由 app 用户持有、属组为共享组、组可写）
+
+#### Scenario: 结构性失败不动工作空间
+- **WHEN** 快照目录的 `manifest.json` 缺失或不是合法 JSON，或工作空间根是符号链接
+- **THEN** `restore` 抛错；工作空间内的条目与调用前逐字节相同
+
+#### Scenario: 幂等
+- **WHEN** 快照后工作空间被改动（一个文件被改写、一个被删除、另新增一个），对同一份快照连续还原两次，两次之间工作空间没有别的改动
+- **THEN** 第一次返回 `restored=2`、`removed=1`；第二次返回 `restored=0`、`removed=0`、`failed=[]`，工作空间逐字节不变，第一次写回的文件没有被再次写回（inode 不变）
+
+### Requirement: 快照清理
+快照目录的生命周期 SHALL 跟随其登记行：
+- 用户消息行被删除（会话删除的级联、撤回的事务、prompt 受理被补偿）之后，宿主 SHALL 在对应事务提交后删除每条被删消息的 `<OMP_STATE_DIR>/snapshots/<workspaceId>/<messageId>` 目录；被删消息的 id 与工作空间 id SHALL 在删除行之前读出；
+- 临时空间行被删除之后，SHALL 删除整个 `<OMP_STATE_DIR>/snapshots/<workspaceId>` 目录；
+- `outcome` 不是 `ok` 的行没有目录，不需要清理。
+
+清理 SHALL 只在快照根之下按上述受信任分量拼出的路径上进行，目录不存在视为成功；任何清理失败 SHALL 只经服务错误通道报告，不改变触发它的请求的响应。清理 SHALL NOT 触及仍有登记行的快照目录。本 change 不提供按时间或按容量淘汰快照的机制，也不在启动时扫描快照根：`take` 进行中进程被杀留下的半份 `<messageId>` 目录没有登记行（对应的用户消息在启动对账后读作 `none`），它留在磁盘上直到所属临时空间被删除（整目录清理）或由运维在停服务后手工删除——消息 id 不复用，残留目录不会被之后的快照读到或当作「上一份快照」。
+
+#### Scenario: 随会话删除清理
+- **WHEN** 一个有三条用户消息（各有 `ok` 快照）的会话被删除，同一工作空间的另一个会话有一份快照
+- **THEN** 204 之后三份快照目录都不存在，另一个会话的快照目录与其文件仍可读
+
+#### Scenario: 清理失败不影响删除
+- **WHEN** 测试令快照目录的删除抛错
+- **THEN** `DELETE` 仍为 204；错误通道报告一次
+
+#### Scenario: 临时空间删除时整目录清理
+- **WHEN** 临时空间 T 的唯一会话被删除
+- **THEN** `<OMP_STATE_DIR>/snapshots/<T>` 不存在
