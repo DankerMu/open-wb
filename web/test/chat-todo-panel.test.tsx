@@ -63,6 +63,14 @@ const HUNDREDS: Todo = {
     },
   ],
 };
+const TWENTY: Todo = {
+  phases: [
+    {
+      name: "中等清单",
+      tasks: Array.from({ length: 20 }, (_, at) => task(`任务 ${at + 1}`, "pending")),
+    },
+  ],
+};
 const LONG_TITLE = Array.from({ length: 50 }, (_, line) => `line ${line + 1}`).join("\n");
 
 function slot(name: string, root: ParentNode = document) {
@@ -90,6 +98,21 @@ function stubListHeights() {
   const isList = (el: Element) => el.getAttribute("data-slot") === "todo-list";
   vi.spyOn(Element.prototype, "clientHeight", "get").mockImplementation(function (this: Element) {
     return isList(this) ? 6 : 0;
+  });
+  vi.spyOn(Element.prototype, "scrollHeight", "get").mockImplementation(function (this: Element) {
+    return isList(this) ? this.querySelectorAll("li").length : 0;
+  });
+}
+
+/**
+ * 可见高度随限高档位变：小档（`max-h-16`）比 20 项的内容矮，大档（`max-h-40`）比它高。同一份清单
+ * 只因档位切换而从被裁剪变成不被裁剪。
+ */
+function stubListHeightsByTier() {
+  const isList = (el: Element) => el.getAttribute("data-slot") === "todo-list";
+  vi.spyOn(Element.prototype, "clientHeight", "get").mockImplementation(function (this: Element) {
+    if (!isList(this)) return 0;
+    return this.classList.contains("max-h-16") ? 6 : 100;
   });
   vi.spyOn(Element.prototype, "scrollHeight", "get").mockImplementation(function (this: Element) {
     return isList(this) ? this.querySelectorAll("li").length : 0;
@@ -413,6 +436,9 @@ describe("task-list panel: structure of the extreme states", () => {
     // 显式的列表语义；200 项被限高裁掉：列表可由键盘聚焦
     expect(list.getAttribute("role")).toBe("list");
     expect(list.getAttribute("tabindex")).toBe("0");
+    // 可聚焦的列表不是控件：面板里的按钮仍只有头部按钮，带 tabindex 的只有列表自己
+    expect(within(panel()).getAllByRole("button")).toEqual([toggle()]);
+    expect([...panel().querySelectorAll("[tabindex]")]).toEqual([list]);
     expect(list.contains(toggle())).toBe(false);
     expect(panel().contains(list)).toBe(true);
     expect(caps(panel())).toEqual([]);
@@ -466,6 +492,25 @@ describe("task-list panel: structure of the extreme states", () => {
     const list = slot("todo-list") as HTMLElement;
     expect(within(list).getAllByRole("listitem")).toHaveLength(200);
     expect(list.getAttribute("tabindex")).toBe("0");
+  });
+
+  it("S4 re-measures the same list when only the cap tier changes: clipped under the small tier, not under the large one", async () => {
+    stubListHeightsByTier();
+    const { source } = await mountPage({ ...snapshotWith([approval(7)]), todo: TWENTY });
+
+    const list = slot("todo-list") as HTMLElement;
+    expect(cards()).toHaveLength(1);
+    expect(within(list).getAllByRole("listitem")).toHaveLength(20);
+    expect(caps(list)).toEqual(["max-h-16", "overflow-y-auto"]);
+    expect(list.getAttribute("tabindex")).toBe("0");
+
+    // 卡结算：清单与展开状态都没变，只有档位换了
+    emitResolved(source, 1, 7, "allow");
+    expect(cards()).toHaveLength(0);
+    expect(slot("todo-list")).toBe(list);
+    expect(within(list).getAllByRole("listitem")).toHaveLength(20);
+    expect(caps(list)).toEqual(["max-h-40", "overflow-y-auto"]);
+    expect(list.hasAttribute("tabindex")).toBe(false);
   });
 
   it("S2 keeps the panel and three pending cards, one with a 50-line title, in one dock: panel first, outside the thread scroller, before the composer", async () => {

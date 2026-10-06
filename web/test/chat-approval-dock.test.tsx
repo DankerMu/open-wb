@@ -30,7 +30,9 @@ import {
   TITLE,
 } from "./chat-approval-support.js";
 import { cleanupChatLifecycle } from "./chat-page-lifecycle-support.js";
-import { chatSnapshot, historyUser } from "./chat-stream-support.js";
+import { OTHER_MESSAGES, otherSnapshot } from "./chat-page-ownership-support.js";
+import { chatSnapshot, type FakeEventSource, historyUser } from "./chat-stream-support.js";
+import { jsonResponse } from "./support.js";
 
 const LONG_TITLE = Array.from({ length: 50 }, (_, line) => `line ${line + 1}`).join("\n");
 
@@ -68,6 +70,38 @@ function passClickGuard(ms = 400) {
   act(() => {
     vi.advanceTimersByTime(ms);
   });
+}
+
+const WRITE_TITLE = "Allow tool: write\nPath: notes.md";
+
+/** 回合结束：`停止` 卸载、输入框解锁。 */
+async function endTurn(source: FakeEventSource, seq: number) {
+  act(() => {
+    source.emitData("turn.end", `1:${seq}`, { messageId: 0, status: "done" });
+  });
+  await flush();
+}
+
+/** 焦点在按钮上作答（键盘 Enter / Space 在浏览器里就是一次 click）。 */
+async function answerFocused(target: HTMLButtonElement) {
+  target.focus();
+  expect(document.activeElement).toBe(target);
+  fireEvent.click(target);
+  await flush();
+}
+
+/**
+ * 作答后焦点掉到 body：浏览器在按钮被禁用时把焦点收走。jsdom 不做这一步，也不让已禁用的按钮 `blur()`，
+ * 所以在点击处理之后、按钮被禁用的那次提交之前显式 `blur()`（document 上的监听晚于 React 的处理，
+ * 早于 act 结束时的提交）。
+ */
+async function answerThenLoseFocus(target: HTMLButtonElement) {
+  target.focus();
+  document.addEventListener("click", () => target.blur(), { once: true });
+  fireEvent.click(target);
+  await flush();
+  expect(target.disabled).toBe(true);
+  expect(document.activeElement).toBe(document.body);
 }
 
 function sessionSnapshot(
@@ -360,5 +394,296 @@ describe("composer dock: click guard after the cards move", () => {
     fireEvent.click(button(cards()[0] as HTMLElement, "拒绝"));
     await flush();
     expect(bodies(fetchMock, approvalPath(8))).toEqual([{ decision: "deny" }]);
+  });
+});
+
+describe("composer dock: what distinguishes one card from another", () => {
+  it("A1 describes each pending card by its own tool badge and title, in that order, and leaves names and settled records alone", async () => {
+    await mountPage(
+      snapshotWith([
+        approval(6, { decision: "allow" }),
+        approval(7),
+        approval(8, { tool: "write", title: WRITE_TITLE }),
+      ]),
+    );
+    const found = cards();
+    expect(found).toHaveLength(2);
+    const described = found.map((card) => (card.getAttribute("aria-describedby") ?? "").split(" "));
+    for (const [at, card] of found.entries()) {
+      const ids = described[at] as string[];
+      expect(ids).toHaveLength(2);
+      expect(ids.map((id) => document.getElementById(id))).toEqual([
+        card.querySelector('[data-slot="approval-tool"]'),
+        card.querySelector('[data-slot="approval-title"]'),
+      ]);
+      for (const id of ids) {
+        expect(document.querySelectorAll(`[id="${id}"]`)).toHaveLength(1);
+      }
+    }
+    expect(new Set(described.flat()).size).toBe(4);
+    const text = (ids: string[] | undefined) =>
+      (ids ?? []).map((id) => document.getElementById(id)?.textContent);
+    expect(text(described[0])).toEqual(["bash", TITLE]);
+    expect(text(described[1])).toEqual(["write", WRITE_TITLE]);
+
+    // 卡名与四个按钮名不变；已结算记录没有描述关联
+    expect(screen.getAllByRole("group", { name: "需要你的确认" })).toEqual(found);
+    expect(screen.getAllByRole("button", { name: "允许" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "拒绝" })).toHaveLength(2);
+    expect(
+      found.flatMap((card) =>
+        within(card)
+          .getAllByRole("button")
+          .map((b) => b.textContent),
+      ),
+    ).toEqual(["允许", "拒绝", "允许", "拒绝"]);
+    expect(records()).toHaveLength(1);
+    expectRecord(records()[0], ALLOWED);
+    expect((records()[0] as HTMLElement).hasAttribute("aria-describedby")).toBe(false);
+  });
+});
+
+describe("composer dock: focus after a card leaves", () => {
+  it("F1 moves focus from an answered card to the next higher id, then to the first remaining, then to the composer once it unlocks; a moved focus is still click-guarded", async () => {
+    const { fetchMock, source } = await mountPage(
+      snapshotWith([approval(7), approval(8), approval(9, { title: OTHER_TITLE })]),
+      {
+        [approvalPath(7)]: () => settledBody(7, "allow"),
+        [approvalPath(8)]: () => settledBody(8, "deny"),
+        [approvalPath(9)]: () => settledBody(9, "allow"),
+      },
+    );
+    const [seven, eight, nine] = cards() as [HTMLElement, HTMLElement, HTMLElement];
+
+    await answerFocused(button(eight, "拒绝"));
+    expect(bodies(fetchMock, approvalPath(8))).toEqual([{ decision: "deny" }]);
+    emitResolved(source, 1, 8, "deny");
+    expect(cards()).toEqual([seven, nine]);
+    expect(document.activeElement).toBe(button(nine, "允许"));
+
+    // 移过去的焦点不豁免防误点：400 毫秒内对它的点击不作答
+    fireEvent.click(button(nine, "允许"));
+    passClickGuard(399);
+    fireEvent.click(button(nine, "允许"));
+    await flush();
+    expect(bodies(fetchMock, approvalPath(9))).toEqual([]);
+    expect(button(nine, "允许").disabled).toBe(false);
+    expect(document.activeElement).toBe(button(nine, "允许"));
+
+    passClickGuard(1);
+    fireEvent.click(button(nine, "允许"));
+    await flush();
+    expect(bodies(fetchMock, approvalPath(9))).toEqual([{ decision: "allow" }]);
+    emitResolved(source, 2, 9, "allow");
+    expect(cards()).toEqual([seven]);
+    expect(document.activeElement).toBe(button(seven, "允许"));
+
+    fireEvent.click(button(seven, "允许"));
+    await flush();
+    expect(bodies(fetchMock, approvalPath(7))).toEqual([]);
+    passClickGuard();
+    fireEvent.click(button(seven, "允许"));
+    await flush();
+    expect(bodies(fetchMock, approvalPath(7))).toEqual([{ decision: "allow" }]);
+    emitResolved(source, 3, 7, "allow");
+    expect(cards()).toHaveLength(0);
+    // 回合仍在进行：输入框锁定，焦点还没有给它
+    expect(composerInput().disabled).toBe(true);
+    expect(document.activeElement).toBe(document.body);
+
+    await endTurn(source, 4);
+    expect(composerInput().disabled).toBe(false);
+    expect(document.activeElement).toBe(composerInput());
+  });
+
+  it("F2 gives the same result when the disabled button loses focus to the body right after the answer", async () => {
+    const { source } = await mountPage(snapshotWith([approval(7), approval(8)]), {
+      [approvalPath(7)]: () => settledBody(7, "allow"),
+      [approvalPath(8)]: () => settledBody(8, "allow"),
+    });
+    const [seven, eight] = cards() as [HTMLElement, HTMLElement];
+
+    await answerThenLoseFocus(button(seven, "允许"));
+    emitResolved(source, 1, 7, "allow");
+    expect(document.activeElement).toBe(button(eight, "允许"));
+
+    passClickGuard();
+    await answerThenLoseFocus(button(eight, "允许"));
+    emitResolved(source, 2, 8, "allow");
+    expect(cards()).toHaveLength(0);
+    expect(document.activeElement).toBe(document.body);
+    await endTurn(source, 3);
+    expect(document.activeElement).toBe(composerInput());
+  });
+
+  it("F3 leaves focus where it is when it was outside the card: on 停止 while a card times out, or moved to 停止 after answering", async () => {
+    const { source } = await mountPage(snapshotWith([approval(7), approval(8), approval(9)]), {
+      [approvalPath(8)]: () => settledBody(8, "allow"),
+    });
+    const [, eight, nine] = cards() as [HTMLElement, HTMLElement, HTMLElement];
+
+    stopButton().focus();
+    emitResolved(source, 1, 7, "timeout");
+    expect(cards()).toEqual([eight, nine]);
+    expect(document.activeElement).toBe(stopButton());
+
+    // 在卡内作答，结算到达之前把焦点移到了 停止
+    passClickGuard();
+    await answerFocused(button(eight, "允许"));
+    stopButton().focus();
+    emitResolved(source, 2, 8, "allow");
+    expect(cards()).toEqual([nine]);
+    expect(document.activeElement).toBe(stopButton());
+
+    // 最后一张也因超时消失、回合结束：焦点不去输入框
+    emitResolved(source, 3, 9, "timeout");
+    expect(cards()).toHaveLength(0);
+    expect(document.activeElement).toBe(stopButton());
+    await endTurn(source, 4);
+    expect(composerInput().disabled).toBe(false);
+    expect(document.activeElement).not.toBe(composerInput());
+  });
+
+  it("F4 drops the deferred composer focus once focus lands elsewhere, even if that element is gone by the time the composer unlocks", async () => {
+    const { source } = await mountPage(snapshotWith([approval(7)]), {
+      [approvalPath(7)]: () => settledBody(7, "allow"),
+    });
+    await answerFocused(button(cards()[0] as HTMLElement, "允许"));
+    emitResolved(source, 1, 7, "allow");
+    expect(cards()).toHaveLength(0);
+    expect(composerInput().disabled).toBe(true);
+
+    // 等解锁期间用户把焦点移到 停止；回合结束时 停止 卸载，焦点掉回 body
+    stopButton().focus();
+    expect(document.activeElement).toBe(stopButton());
+    await endTurn(source, 2);
+    expect(screen.queryByRole("button", { name: "停止" })).toBeNull();
+    expect(composerInput().disabled).toBe(false);
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it("F5 never takes focus when a card appears", async () => {
+    const { source } = await mountPage(snapshotWith([]));
+    stopButton().focus();
+    emitRequest(source, 1, 7);
+    expect(cards()).toHaveLength(1);
+    expect(document.activeElement).toBe(stopButton());
+    emitRequest(source, 2, 8, { title: OTHER_TITLE });
+    expect(cards()).toHaveLength(2);
+    expect(document.activeElement).toBe(stopButton());
+
+    // 焦点在一张卡上时另一张卡出现：也不动
+    const [seven] = cards() as [HTMLElement];
+    button(seven, "拒绝").focus();
+    emitRequest(source, 3, 9);
+    expect(cards()).toHaveLength(3);
+    expect(document.activeElement).toBe(button(seven, "拒绝"));
+  });
+
+  it("F6 moves focus to the remaining card when the focused, unanswered card times out, still click-guarded", async () => {
+    const { fetchMock, source } = await mountPage(snapshotWith([approval(7), approval(8)]), {
+      [approvalPath(7)]: () => settledBody(7, "allow"),
+    });
+    const [seven, eight] = cards() as [HTMLElement, HTMLElement];
+
+    button(eight, "拒绝").focus();
+    emitResolved(source, 1, 8, "timeout");
+    expect(cards()).toEqual([seven]);
+    expect(document.activeElement).toBe(button(seven, "允许"));
+
+    fireEvent.click(button(seven, "允许"));
+    await flush();
+    expect(bodies(fetchMock, approvalPath(7))).toEqual([]);
+    passClickGuard();
+    fireEvent.click(button(seven, "允许"));
+    await flush();
+    expect(bodies(fetchMock, approvalPath(7))).toEqual([{ decision: "allow" }]);
+  });
+
+  it("F7 moves no focus for a card answered with the pointer, although the click focused its button: not to the other card, not to the composer", async () => {
+    const { fetchMock, source } = await mountPage(snapshotWith([approval(7), approval(8)]), {
+      [approvalPath(7)]: () => settledBody(7, "allow"),
+      [approvalPath(8)]: () => settledBody(8, "deny"),
+    });
+    const [seven, eight] = cards() as [HTMLElement, HTMLElement];
+
+    // 指针点击：按钮因点击获得焦点，click 的 detail 不为 0
+    button(eight, "拒绝").focus();
+    fireEvent.click(button(eight, "拒绝"), { detail: 1 });
+    await flush();
+    expect(bodies(fetchMock, approvalPath(8))).toEqual([{ decision: "deny" }]);
+    emitResolved(source, 1, 8, "deny");
+    expect(cards()).toEqual([seven]);
+    expect(seven.contains(document.activeElement)).toBe(false);
+    expect(document.activeElement).toBe(document.body);
+
+    passClickGuard();
+    button(seven, "允许").focus();
+    fireEvent.click(button(seven, "允许"), { detail: 1 });
+    await flush();
+    expect(bodies(fetchMock, approvalPath(7))).toEqual([{ decision: "allow" }]);
+    emitResolved(source, 2, 7, "allow");
+    expect(cards()).toHaveLength(0);
+    await endTurn(source, 3);
+    expect(composerInput().disabled).toBe(false);
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it("F8 does not answer on a repeated key once the guard has expired: a held Enter or Space is default-prevented, a fresh activation still answers", async () => {
+    const { fetchMock, source } = await mountPage(snapshotWith([approval(7), approval(8)]), {
+      [approvalPath(7)]: () => settledBody(7, "allow"),
+      [approvalPath(8)]: () => settledBody(8, "allow"),
+    });
+    const [seven, eight] = cards() as [HTMLElement, HTMLElement];
+    await answerFocused(button(eight, "允许"));
+    emitResolved(source, 1, 8, "allow");
+    expect(document.activeElement).toBe(button(seven, "允许"));
+    passClickGuard();
+
+    // `fireEvent` 返回 false 即默认动作被取消：浏览器不会由这次按键合成 click
+    for (const target of [button(seven, "允许"), button(seven, "拒绝")]) {
+      expect(fireEvent.keyDown(target, { key: "Enter", repeat: true })).toBe(false);
+      expect(fireEvent.keyDown(target, { key: " ", repeat: true })).toBe(false);
+      expect(fireEvent.keyDown(target, { key: "Tab", repeat: true })).toBe(true);
+    }
+    await flush();
+    expect(bodies(fetchMock, approvalPath(7))).toEqual([]);
+    expect(button(seven, "允许").disabled).toBe(false);
+
+    expect(fireEvent.keyDown(button(seven, "允许"), { key: "Enter" })).toBe(true);
+    fireEvent.click(button(seven, "允许"));
+    await flush();
+    expect(bodies(fetchMock, approvalPath(7))).toEqual([{ decision: "allow" }]);
+  });
+
+  it("F9 picks the smallest id above the removed card, not the largest", async () => {
+    const { source } = await mountPage(snapshotWith([approval(7), approval(8), approval(9)]));
+    const [seven, eight, nine] = cards() as [HTMLElement, HTMLElement, HTMLElement];
+
+    button(seven, "允许").focus();
+    emitResolved(source, 1, 7, "timeout");
+    expect(cards()).toEqual([eight, nine]);
+    expect(document.activeElement).toBe(button(eight, "允许"));
+  });
+
+  it("F10 drops the deferred composer focus when the session is switched before the composer unlocks", async () => {
+    const { source } = await mountPage(snapshotWith([approval(7)]), {
+      [approvalPath(7)]: () => settledBody(7, "allow"),
+      [OTHER_MESSAGES]: () => jsonResponse(otherSnapshot()),
+    });
+    await answerFocused(button(cards()[0] as HTMLElement, "允许"));
+    emitResolved(source, 1, 7, "allow");
+    expect(cards()).toHaveLength(0);
+    expect(composerInput().disabled).toBe(true);
+
+    // `fireEvent.click` 不移动焦点：没有 focusin 可以作废这次等待，只剩「换了会话」这一条
+    fireEvent.click(screen.getByRole("button", { name: "other session" }));
+    for (let round = 0; round < 200 && composerInput().disabled; round += 1) {
+      await flush(1);
+    }
+    await flush();
+    expect(screen.getByText("other user", { exact: true })).toBeTruthy();
+    expect(composerInput().disabled).toBe(false);
+    expect(document.activeElement).not.toBe(composerInput());
   });
 });

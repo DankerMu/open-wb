@@ -1,7 +1,7 @@
 // UI walk approval steps: the first-turn bash approval is a prompt card in the dock directly above
 // the composer (never inside a message). Assert the dock layout while that one card is pending,
-// answer it with `允许` while the final model turn is still behind the fake-upstream gate, then
-// prove the settled record inside the message survives a reload.
+// answer it from the keyboard (focus `允许`, press Enter) while the final model turn is still behind
+// the fake-upstream gate, then prove the settled record inside the message survives a reload.
 
 import { expect, type Locator, type Page } from "@playwright/test";
 import { holdRoute } from "./route-hold.js";
@@ -91,6 +91,8 @@ async function expectDockLayout(page: Page, card: Locator): Promise<void> {
 
 // 待决提问卡（停靠区）、运行中的 bash 步骤（展开工具调用组后）与 composer `生成中` 同时可见（不断言先后）；gate 仍为 armed 证明末轮被审批挡住。
 // 作答 POST 被 holdRoute 挂起期间断言两按钮禁用：放行后 approval.resolved 约 20ms 内就会卸载提问卡。
+// 作答走键盘：聚焦 `允许` 后按 Enter（卡是从空的停靠区出现的，不设防误点）。调用方随后在回合结束之前
+// 重新加载页面，解锁后焦点落到输入框这一步在这条走查里观察不到（见 web/test/chat-approval-dock.test.tsx F1）。
 export async function allowFirstApproval(
   page: Page,
   origin: string,
@@ -118,7 +120,9 @@ export async function allowFirstApproval(
 
   const answer = await holdRoute(page, "**/api/sessions/*/approvals/*");
   try {
-    await allow.click();
+    await allow.focus();
+    await expect(allow).toBeFocused();
+    await page.keyboard.press("Enter");
     await expect.poll(() => answer.held(), "approval answer held by route").toBe(true);
     await expect(allow).toBeDisabled();
     await expect(deny).toBeDisabled();

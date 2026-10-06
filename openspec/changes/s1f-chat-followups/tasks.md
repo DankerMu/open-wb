@@ -53,18 +53,19 @@ Minimal mergeable slice: atomic - 调用、整页测试与清单行同刀；1.3 
   T1 第 193 行的查询（面板内没有 `[tabindex]`）保留，它断言的是未被裁剪的五项清单，把上一行注释改成写明这一前提。
   `web/test/chat-page-project-config-dialog.test.tsx` 加 H4：被裁剪时滚动容器 `tabindex="0"`、打开时焦点仍在 `关闭`、对话框内按钮仍只有 `关闭`；未被裁剪时没有 `tabindex`
   （`chat-page-project-config.test.tsx:208-209` 的「唯一按钮」断言不变）。
-- [ ] 2.4 提问卡的描述关联：`approval-card.tsx` 的待决卡在 `role="group"` 上加 `aria-describedby`，依次指向本卡的工具徽章与 `title` 正文（各一个 `useId`）；已结算记录不加。
+- [x] 2.4 提问卡的描述关联：`approval-card.tsx` 的待决卡在 `role="group"` 上加 `aria-describedby`，依次指向本卡的工具徽章与 `title` 正文（各一个 `useId`）；已结算记录不加。
   测试（`web/test/chat-approval-dock.test.tsx`，现 364 行）：两张工具与正文不同的卡，各自的 `aria-describedby` 恰两个 id、依次解析到本卡的徽章与正文、两卡互不相同；卡名与四个按钮名不变。
-- [ ] 2.5 卡消失后的焦点（design D2）：规则与两路判定在 `composer-dock.tsx`；`ApprovalPromptCard` 上报「作答时焦点在本卡内」；`conversation-view.tsx` 把输入框 ref 与锁定状态传给停靠区，
+- [x] 2.5 卡消失后的焦点（design D2）：规则与两路判定在 `composer-dock.tsx`；`ApprovalPromptCard` 上报「作答时焦点在本卡内」；`conversation-view.tsx` 把输入框 ref 与锁定状态传给停靠区，
   最后一张卡消失而输入框仍锁定时延后到解锁那次提交、且焦点仍未落到别处才聚焦。
   测试（同文件，F1–F6）：三张卡依次作答的焦点落点（id 8 → 9 的 `允许`；9 → 7 的 `允许`；7 → 回合结束解锁后的输入框）；作答后显式 `blur()` 模拟禁用失焦，结果相同；
   焦点在 `停止` 上时卡因超时消失 → 不动；作答后用户把焦点移到 `停止` → 不动；延后聚焦期间焦点去了 `停止`、回合结束时 `停止` 卸载焦点回到 `body` → 解锁时不抢（延后聚焦按「期间有过别处的 focusin 即作废」实现，不是只在解锁那一刻看 `activeElement`）；卡出现时不夺焦；
   焦点在卡的按钮上、未作答、卡因超时消失且还有别的卡 → 移到那一张的 `允许`；移动后 400 毫秒内对新按钮的点击不作答。
   既有用例里用 `fireEvent.click` 作答的不聚焦按钮，不受影响；`chat-todo-panel.test.tsx` V4（第 297 行，焦点留在输入框）原样通过。
-- [ ] 2.6 ui-walk（`web/e2e/ui-walk-approval.ts`，现 140 行）：现有作答步骤改为先聚焦 `允许` 再按 Enter；回合结束后断言焦点在输入框。只此一处真实浏览器证据（走查栈只产生一张卡）。
-- [ ] 2.7 变异证据：去掉 `role="list"` → 2.1 判红；`tabindex` 恒为 0 → T1 第 193 行与 H4 的未裁剪一例判红，恒不加 → S1 与 H4 判红；触发量去掉展开状态 → 「收起态挂载后展开」一例判红；延后聚焦改成只在解锁那一刻看 `activeElement` → 「焦点去了 `停止`」一例判红；去掉 `aria-describedby` 或两卡共用 id → 2.4 判红；
+- [x] 2.6 ui-walk（`web/e2e/ui-walk-approval.ts`，现 140 行）：现有作答步骤改为先聚焦 `允许` 再按 Enter；回合结束后断言焦点在输入框。只此一处真实浏览器证据（走查栈只产生一张卡）。
+  （后半句未取证：走查在回合结束前刷新页面，焦点记录随之丢失，见 PR #901 偏离记录；该行为由 `chat-approval-dock.test.tsx` 的 F1、F2、F4 在 jsdom 覆盖，真实浏览器里没有焦点落点的证据。）
+- [x] 2.7 变异证据：去掉 `role="list"` → 2.1 判红；`tabindex` 恒为 0 → T1 第 193 行与 H4 的未裁剪一例判红，恒不加 → S1 与 H4 判红；触发量去掉展开状态 → 「收起态挂载后展开」一例判红；延后聚焦改成只在解锁那一刻看 `activeElement` → 「焦点去了 `停止`」一例判红；去掉 `aria-describedby` 或两卡共用 id → 2.4 判红；
   去掉焦点移动 → F1 判红；无条件移动 → 「焦点在别处」两例判红；不延后直接 `focus()` → 「解锁后在输入框」判红。
-- [ ] 2.8 CH 行：多张卡的那一行（CH-22）补「用 Tab 聚焦下面那张的按钮并按 Enter 作答后，焦点落到上面那张的『允许』；最后一张答完、回答结束后焦点在输入框」；
+- [x] 2.8 CH 行：多张卡的那一行（CH-22）补「用 Tab 聚焦下面那张的按钮并按 Enter 作答后，焦点落到上面那张的『允许』；最后一张答完、回答结束后焦点在输入框」；
   任务清单与项目配置各补一句「内容超出时可按 Tab 聚焦列表并用方向键滚动」；结论 `待签`。
 
 Suggested fixture level: expanded - 焦点移动有「不夺取」的多条反例与禁用失焦、输入框锁定两处时序；改两份规格的条文

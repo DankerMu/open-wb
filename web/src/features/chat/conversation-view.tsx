@@ -120,6 +120,8 @@ export function ConversationView({
           </div>
         )}
         <ComposerDock
+          inputLocked={composerDisabled}
+          inputRef={composerRef}
           onAnswerApproval={onAnswerApproval}
           sessionId={requestedSessionId}
           view={historyView}
