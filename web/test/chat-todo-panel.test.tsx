@@ -463,26 +463,29 @@ describe("task-list panel: structure of the extreme states", () => {
   });
 });
 
+/** 立即点 `允许`、第 399 毫秒点 `拒绝`：都不发请求、按钮保持可用；返回时恰好过了 400 毫秒。 */
+async function expectBlocked(card: HTMLElement, sent: () => unknown[]) {
+  fireEvent.click(button(card, "允许"));
+  act(() => {
+    vi.advanceTimersByTime(399);
+  });
+  fireEvent.click(button(card, "拒绝"));
+  await flush();
+  expect(sent()).toEqual([]);
+  expect(button(card, "允许").disabled).toBe(false);
+  act(() => {
+    vi.advanceTimersByTime(1);
+  });
+}
+
 describe("task-list panel: click guard of the cards below it", () => {
-  it("G4 ignores answers for 400 ms after the panel above a shown card appears, changes or is collapsed, then answers once", async () => {
+  it("G4 ignores answers for 400 ms after the panel above a shown card appears, changes, is collapsed or is expanded again, then answers once", async () => {
     const { fetchMock, source } = await mountPage(snapshotWith([approval(7)]), {
       [approvalPath(7)]: () => settledBody(7, "allow"),
     });
     const [card] = cards() as [HTMLElement];
     const sent = () => bodies(fetchMock, approvalPath(7));
-    const blockedClick = async () => {
-      fireEvent.click(button(card, "允许"));
-      act(() => {
-        vi.advanceTimersByTime(399);
-      });
-      fireEvent.click(button(card, "拒绝"));
-      await flush();
-      expect(sent()).toEqual([]);
-      expect(button(card, "允许").disabled).toBe(false);
-      act(() => {
-        vi.advanceTimersByTime(1);
-      });
-    };
+    const blockedClick = () => expectBlocked(card, sent);
 
     // 面板出现在已显示的卡上方
     emitTodo(source, 1, TWO);
@@ -492,6 +495,14 @@ describe("task-list panel: click guard of the cards below it", () => {
     await blockedClick();
     // 收起
     fireEvent.click(toggle());
+    await blockedClick();
+    // 重新展开
+    fireEvent.click(toggle());
+    expect(toggle().getAttribute("aria-expanded")).toBe("true");
+    await blockedClick();
+    // 再收起
+    fireEvent.click(toggle());
+    expect(toggle().getAttribute("aria-expanded")).toBe("false");
     await blockedClick();
     // 收起时清单变化不改变面板的形状：不设防
     emitTodo(source, 3, TWO);
@@ -511,5 +522,38 @@ describe("task-list panel: click guard of the cards below it", () => {
     fireEvent.click(button(cards()[0] as HTMLElement, "拒绝"));
     await flush();
     expect(bodies(fetchMock, approvalPath(7))).toEqual([{ decision: "deny" }]);
+  });
+
+  it("G6 ignores answers for 400 ms after the panel above a shown card disappears, whether it was expanded or collapsed, then answers once", async () => {
+    // 面板与卡一开始就都在：不设防的起点
+    const { fetchMock, source } = await mountPage(
+      { ...snapshotWith([approval(7)]), todo: TWO },
+      { [approvalPath(7)]: () => settledBody(7, "allow") },
+    );
+    const [card] = cards() as [HTMLElement];
+    const sent = () => bodies(fetchMock, approvalPath(7));
+    const blockedClick = () => expectBlocked(card, sent);
+    expect(toggle().getAttribute("aria-expanded")).toBe("true");
+
+    // 展开的面板消失：清单全部结束
+    emitTodo(source, 1, ALL_CLOSED);
+    expect(toggles()).toHaveLength(0);
+    await blockedClick();
+    // 重新出现
+    emitTodo(source, 2, ONE_DONE);
+    await blockedClick();
+    // 收起
+    fireEvent.click(toggle());
+    expect(toggle().getAttribute("aria-expanded")).toBe("false");
+    await blockedClick();
+    // 收起的面板消失：清单为 null
+    emitTodo(source, 3, null);
+    expect(toggles()).toHaveLength(0);
+    expect(cards()).toEqual([card]);
+    await blockedClick();
+
+    fireEvent.click(button(card, "允许"));
+    await flush();
+    expect(sent()).toEqual([{ decision: "allow" }]);
   });
 });
