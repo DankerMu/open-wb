@@ -19,6 +19,23 @@ export function ownsCreateSend(
   );
 }
 
+/**
+ * `新建会话` must not navigate while a welcome-state first send (create, then prompt) is still
+ * unsettled: leaving would abort the prompt and strand a session with no messages. Settled once
+ * the prompt is accepted; a rejection or an abandoned handoff clears the registration.
+ */
+export function blocksNewSession(
+  pending: PendingCreateSend | null,
+  client: ApiClient,
+  sessionId: string | null,
+): boolean {
+  return (
+    ownsCreateSend(pending, client, sessionId) &&
+    pending.originSessionId === null &&
+    !pending.accepted
+  );
+}
+
 export function ownsHistory(
   state: ChatHistoryState,
   client: ApiClient,
