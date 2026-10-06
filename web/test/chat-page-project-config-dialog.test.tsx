@@ -1,6 +1,6 @@
 /**
  * Issue 861 项目配置入口 on the copied-layer dialog (openspec/changes/s1f-chat-surface, chat-web
- * 「会话页」Project config entry): H1–H3. The behaviour cases G1–G9 stay in
+ * 「会话页」Project config entry): H1–H4. The behaviour cases G1–G9 stay in
  * chat-page-project-config.test.tsx; here is what the move itself has to hold: the dialog is the
  * copied one, focus opens on its 关闭 and goes back to the header button, and Escape still closes
  * it under a toast. Seam: the jsdom chat page inside the real shell over a stubbed `fetch`.
@@ -71,9 +71,23 @@ async function openDialog() {
   return { button, dialog: await screen.findByRole("dialog", { name: TITLE }) };
 }
 
+/**
+ * jsdom does no layout: the dialog's scroll container reads a visible height of 6 and the given
+ * content height, every other element 0. The numbers are only compared, not pixel assertions.
+ */
+function stubScrollerHeights(content: number) {
+  const isScroller = (el: Element) => el.getAttribute("data-slot") === "project-config-list";
+  vi.spyOn(Element.prototype, "clientHeight", "get").mockImplementation(function (this: Element) {
+    return isScroller(this) ? 6 : 0;
+  });
+  vi.spyOn(Element.prototype, "scrollHeight", "get").mockImplementation(function (this: Element) {
+    return isScroller(this) ? content : 0;
+  });
+}
+
 afterEach(cleanupSessionMeta);
 
-describe("项目配置入口：拷入层对话框 (H1–H3)", () => {
+describe("项目配置入口：拷入层对话框 (H1–H4)", () => {
   it("H1 the list is the copied dialog: modal, titled and described by its own slots, each row a text path and a kind badge, nothing of the old layer", async () => {
     await mount();
 
@@ -139,4 +153,34 @@ describe("项目配置入口：拷入层对话框 (H1–H3)", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await focusOn(button);
   });
+
+  it.each([
+    ["clipped", 50, "0"],
+    ["not clipped", 2, null],
+  ])(
+    "H4 the scroll container is keyboard-focusable only while its content is clipped (%s); focus still opens on 关闭, the only button",
+    async (_case, content, tabindex) => {
+      stubScrollerHeights(content);
+      await mount();
+
+      const { dialog } = await openDialog();
+
+      // The container that wraps the groups, not the list of a group.
+      const scroller = dialog.querySelector('[data-slot="project-config-list"]') as HTMLElement;
+      expect(scroller.tagName).toBe("DIV");
+      expect(scroller.classList.contains("overflow-y-auto")).toBe(true);
+      expect(scroller.querySelectorAll("section")).toHaveLength(2);
+      expect(scroller.getAttribute("tabindex")).toBe(tabindex);
+      expect(scroller.hasAttribute("role")).toBe(false);
+      const lists = within(scroller).getAllByRole("list");
+      expect(lists).toHaveLength(2);
+      for (const list of lists) {
+        expect(list.getAttribute("role")).toBe("list");
+        expect(list.hasAttribute("tabindex")).toBe(false);
+      }
+      const close = within(dialog).getByRole("button", { name: "关闭" });
+      await focusOn(close);
+      expect(within(dialog).getAllByRole("button")).toEqual([close]);
+    },
+  );
 });

@@ -57,6 +57,7 @@ const MIGRATED_AREAS: string[] = [
   "web/src/features/chat/turn-actions.ts",
   "web/src/features/chat/types.ts",
   "web/src/features/chat/use-chat-session.ts",
+  "web/src/features/chat/use-clipped.ts",
   "web/src/features/chat/use-thread-runtime.ts",
   "web/src/features/chat/welcome-content.ts",
   "web/src/features/chat/welcome-options.ts",
@@ -368,6 +369,7 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
       "web/src/features/chat/turn-actions.ts",
       "web/src/features/chat/types.ts",
       "web/src/features/chat/use-chat-session.ts",
+      "web/src/features/chat/use-clipped.ts",
       "web/src/features/chat/use-thread-runtime.ts",
       "web/src/features/chat/welcome-content.ts",
       "web/src/features/chat/welcome-options.ts",
@@ -555,6 +557,65 @@ describe("拷入层门槛豁免（ui-foundation「豁免路径精确」）", () 
     expect(count(doc("", note.replace("ADR-0013", "ADR-0011"), ""))).toBe(0);
     expect(count(doc("", note.replace(COPIED_DIRS[1] ?? "", "web/src/ui"), ""))).toBe(0);
     expect(() => agentsNoteLines("## Enforcement Index\n\n### Known blind spots")).toThrow();
+  });
+});
+
+/** 开标签：从 `<名字` 到第一个不属于 `=>` 的 `>`（跨行；属性表达式里的箭头函数不截断）。 */
+const OPENING_TAG = /<[A-Za-z][\w.]*(?:=>|[^>])*>/g;
+
+/**
+ * 显式列表语义（纯函数）：开标签带 `list-none` 的也必须带 `role="list"`——去掉列表符号的样式会让
+ * Safari 丢掉列表语义。返回缺角色的开标签；标签之外提到 `list-none` 的注释不算。
+ */
+function listRoleViolations(file: SourceFile): string[] {
+  return (file.text.match(OPENING_TAG) ?? [])
+    .filter((tag) => tag.includes("list-none") && !tag.includes('role="list"'))
+    .map((tag) => `${file.path}: 带 list-none 的列表缺 role="list"（${tag.split("\n")[0]}）`);
+}
+
+describe("显式列表语义（session-todo「任务清单面板」；s1f-chat-followups 2.1）", () => {
+  const path = `${CHAT_DIR}/todo-panel.tsx`;
+  const violations = (text: string) => listRoleViolations({ path, text });
+
+  it("判定自证：单行与跨行的缺角色各判失败，带角色、标签之外的注释与别的元素上的角色不误判", () => {
+    expect(violations('<ul className="m-0 list-none p-0">')).toHaveLength(1);
+    expect(
+      violations('<ul\n  onClick={() => pick()}\n  className={`list-none`}\n  data-slot="x"\n>'),
+    ).toHaveLength(1);
+    expect(violations('<ul className="m-0 list-none p-0" role="list">')).toEqual([]);
+    expect(
+      violations('<ul\n  onClick={() => pick()}\n  className="list-none"\n  role="list"\n>'),
+    ).toEqual([]);
+    expect(violations('{/* list-none 的说明 */}\n<ul className="p-0">')).toEqual([]);
+    // 角色写在子元素或相邻元素上不算数；`listbox` 不是 `list`。
+    expect(violations('<ul className="list-none">\n  <li role="list">')).toHaveLength(1);
+    expect(violations('<div role="list" />\n<ul className="list-none">')).toHaveLength(1);
+    expect(violations('<ul className="list-none" role="listbox">')).toHaveLength(1);
+    // 真实文件去掉角色判失败。
+    const source = readRepoFile(path);
+    expect(violations(source)).toEqual([]);
+    expect(source).toContain('role="list"');
+    expect(violations(source.replace(/\s*role="list"/, ""))).toHaveLength(1);
+  });
+
+  it('web/src 现状：已迁移区域的 .tsx 里带 list-none 的开标签都带 role="list"', () => {
+    const files = listRepoFiles("web/src", (file) => file.endsWith(".tsx"))
+      .filter((file) => MIGRATED_AREAS.some((area) => isUnder(file, area)))
+      .map((file) => ({ path: file, text: readRepoFile(file) }));
+    // 扫描没有放空：这四个文件确有带 list-none 的开标签。
+    const withLists = files
+      .filter((file) =>
+        (file.text.match(OPENING_TAG) ?? []).some((tag) => tag.includes("list-none")),
+      )
+      .map((file) => file.path);
+    expect(withLists).toEqual(
+      expect.arrayContaining(
+        ["capability-bar.tsx", "project-config.tsx", "todo-panel.tsx", "welcome.tsx"].map(
+          (name) => `${CHAT_DIR}/${name}`,
+        ),
+      ),
+    );
+    expect(files.flatMap(listRoleViolations)).toEqual([]);
   });
 });
 

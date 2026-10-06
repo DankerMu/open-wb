@@ -75,7 +75,8 @@ export function WelcomePlaybooks({ disabled, onPick }: WelcomeProps) {
             换一批
           </button>
         </div>
-        <ul className="m-0 flex list-none flex-nowrap gap-2.5 p-0 narrow:flex-wrap">
+        {/* biome-ignore lint/a11y/noRedundantRoles: list-none drops the list semantics in Safari; the explicit role restores them. */}
+        <ul className="m-0 flex list-none flex-nowrap gap-2.5 p-0 narrow:flex-wrap" role="list">
           {playbookWindow(start).map((item) => (
             <li className="max-w-55 min-w-0 flex-[1_1_0] narrow:basis-35" key={item.title}>
               <button

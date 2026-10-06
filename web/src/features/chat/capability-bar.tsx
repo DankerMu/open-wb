@@ -192,7 +192,8 @@ function WorkspaceOptions({ onSelect, workspace, workspaces, workspacesError }: 
         placeholder={SEARCH}
         value={query}
       />
-      <ul className="m-0 flex max-h-60 list-none flex-col gap-0.5 overflow-y-auto p-0">
+      {/* biome-ignore lint/a11y/noRedundantRoles: list-none 会让 Safari 丢掉列表语义，显式写回。 */}
+      <ul className="m-0 flex max-h-60 list-none flex-col gap-0.5 overflow-y-auto p-0" role="list">
         <li>
           <button
             aria-pressed={workspace === null}

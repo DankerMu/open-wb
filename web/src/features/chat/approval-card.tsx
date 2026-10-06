@@ -1,10 +1,11 @@
 // 审批的两种呈现（design D7）：待决审批是输入框上方停靠区里的提问卡（composer-dock.tsx 叠放），已结算
 // 审批是所属助手消息内的记录（message-thread.tsx 按 D4 的块次序挂载）。二者只读归约出的 `approvals`：
 // 工具名徽章是 `tool` 字段（不解析 `title`），正文是 `title` 全文、保留换行。
-import { useId, useLayoutEffect, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Icon } from "../../ui/index.js";
 import type { ChatApprovalView } from "./stream-approvals.js";
+import { useClipped } from "./use-clipped.js";
 
 type ApprovalAnswer = "allow" | "deny";
 
@@ -58,18 +59,8 @@ export function ApprovalPromptCard({
   const [sent, setSent] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const titleRef = useRef<HTMLParagraphElement>(null);
-  const [clipped, setClipped] = useState(false);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: 正文变了就重量；元素本身不换。
-  useLayoutEffect(() => {
-    const el = titleRef.current;
-    if (!el) return;
-    const measure = () => setClipped(el.scrollHeight > el.clientHeight);
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const resize = new ResizeObserver(measure);
-    resize.observe(el);
-    return () => resize.disconnect();
-  }, [approval.title]);
+  // 正文变了就重量；元素本身不换。
+  const clipped = useClipped(titleRef, [approval.title]);
   const answer = (choice: ApprovalAnswer) => {
     if (Date.now() < ignoreClicksUntil) return;
     setSent(true);

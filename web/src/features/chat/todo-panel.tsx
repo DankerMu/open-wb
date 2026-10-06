@@ -3,10 +3,13 @@
 // 在它之外。限高分两档：停靠区里有待决提问卡时（`compact`）取小——展开的面板要与第一张提问卡（正文
 // 顶满限高、带超长提示与失败文案时）一起落在停靠区的半列高之内，1440×900 与 390×844 下都是如此；没有
 // 提问卡时取大，多显示几项。显隐（`hasUnfinishedTask`）与按会话保存的展开状态由 composer-dock.tsx 决定。
-// 状态标记是可见的文字（不只靠颜色）；`name` 与 `content` 按文本渲染。
+// 状态标记是可见的文字（不只靠颜色）；`name` 与 `content` 按文本渲染。列表被限高裁掉时带 `tabindex="0"`
+// （可由键盘聚焦滚动，design D3）：它不是控件，没有角色之外的交互。
+import { useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Icon } from "../../ui/index.js";
 import type { ChatState } from "./stream.js";
+import { useClipped } from "./use-clipped.js";
 
 type Todo = NonNullable<ChatState["todo"]>;
 type TaskStatus = Todo["phases"][number]["tasks"][number]["status"];
@@ -62,6 +65,9 @@ export function TodoPanel({
   const tasks = tasksOf(todo);
   const done = tasks.filter((task) => task.status === "completed").length;
   const named = todo.phases.length > 1;
+  const listRef = useRef<HTMLUListElement>(null);
+  // 列表只在展开时渲染：收起态挂载后再展开要重量，并把观察器挂到新元素上。
+  const clipped = useClipped(listRef, [todo, compact, expanded]);
   return (
     <div
       className="flex min-w-0 flex-none flex-col rounded-xl border border-(--wb-border-default) bg-(--wb-bg-secondary)"
@@ -82,6 +88,10 @@ export function TodoPanel({
         <ul
           className={`m-0 flex list-none flex-col gap-1 overflow-y-auto px-4 pt-0 pb-2 ${compact ? "max-h-16" : "max-h-40"}`}
           data-slot="todo-list"
+          ref={listRef}
+          // biome-ignore lint/a11y/noRedundantRoles: list-none 会让 Safari 丢掉列表语义，显式写回。
+          role="list"
+          tabIndex={clipped ? 0 : undefined}
         >
           {todo.phases.map((phase, at) => (
             <Phase

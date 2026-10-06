@@ -15,6 +15,7 @@ import type { ApiClient } from "../../lib/api.js";
 import type { ProjectConfigFile } from "../../lib/api-commands.js";
 import type { ChatSession } from "../../lib/session-contract.js";
 import { useEscapeFallback } from "../../ui/index.js";
+import { useClipped } from "./use-clipped.js";
 
 const TITLE = "助手会读取的项目配置文件";
 const NOTE = "以下位置存在配置文件；同一层有多个说明文件时只有一个生效";
@@ -60,17 +61,27 @@ export function groupByDepth(files: readonly ProjectConfigFile[]): ConfigGroup[]
 
 /**
  * The groups as headed lists; `path` comes from the workspace and is rendered as text only. A long
- * path wraps inside its row and a long list scrolls inside the dialog.
+ * path wraps inside its row and a long list scrolls inside the dialog. While that scroll container
+ * clips its content it is keyboard-focusable so the clipped rows can be scrolled to; it is not a
+ * control.
  */
 function ConfigList({ files }: { files: readonly ProjectConfigFile[] }) {
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const clipped = useClipped(scrollerRef, [files]);
   return (
-    <div className="flex max-h-[60vh] min-w-0 flex-col gap-3 overflow-y-auto">
+    <div
+      className="flex max-h-[60vh] min-w-0 flex-col gap-3 overflow-y-auto"
+      data-slot="project-config-list"
+      ref={scrollerRef}
+      tabIndex={clipped ? 0 : undefined}
+    >
       {groupByDepth(files).map((group) => (
         <section aria-label={group.label} key={group.depth}>
           <h3 className="m-0 mb-1 text-[11px] font-medium text-(--wb-text-secondary)">
             {group.label}
           </h3>
-          <ul className="m-0 flex list-none flex-col gap-1 p-0">
+          {/* biome-ignore lint/a11y/noRedundantRoles: list-none drops the list semantics in Safari; the explicit role restores them. */}
+          <ul className="m-0 flex list-none flex-col gap-1 p-0" role="list">
             {group.files.map((file) => (
               <li
                 className="flex items-center gap-2 rounded-lg border border-(--wb-border-default) px-2 py-1.5"
