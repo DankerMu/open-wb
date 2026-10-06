@@ -26,6 +26,8 @@ type TurnActionDeps = {
   closeSource: () => void;
   historyGenerationRef: RefObject<number>;
   installSnapshot: (snapshot: ChatMessageSnapshot, ownedClient: ApiClient) => void;
+  /** A ref: `loadHistory` changes with the location, `dispatchPrompt` must not. */
+  loadHistoryRef: RefObject<(sessionId: string, ownedClient: ApiClient) => void>;
   mountedRef: RefObject<boolean>;
   mutationControllerRef: RefObject<AbortController | null>;
   mutationGenerationRef: RefObject<number>;
@@ -51,6 +53,7 @@ export function useTurnActions({
   closeSource,
   historyGenerationRef,
   installSnapshot,
+  loadHistoryRef,
   mountedRef,
   mutationControllerRef,
   mutationGenerationRef,
@@ -137,14 +140,25 @@ export function useTurnActions({
       });
       finishCreateSend(generation);
       releaseMutationIfOwned(controller);
+      // A welcome-state first send skipped the new session's history read to keep the handoff, and
+      // nothing reads it after a rejection: read it once so the page shows that session's state.
+      if (
+        pending?.originSessionId === null &&
+        pending.sessionId !== null &&
+        requestedSessionRef.current === pending.sessionId
+      ) {
+        loadHistoryRef.current(pending.sessionId, ownedClient);
+      }
     },
     [
       clientRef,
       finishCreateSend,
+      loadHistoryRef,
       mountedRef,
       mutationGenerationRef,
       pendingCreateSendRef,
       releaseMutationIfOwned,
+      requestedSessionRef,
       restoreOwnedDraft,
       setPromptError,
       setStreamError,

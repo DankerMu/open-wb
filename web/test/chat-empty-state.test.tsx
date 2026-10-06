@@ -1,6 +1,6 @@
 import "./radix-platform.js";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   clickSend,
   sessionPromptPath,
@@ -15,6 +15,7 @@ import {
 } from "./chat-page-ownership-support.js";
 import {
   A,
+  B,
   cleanupSessionMeta,
   crumb,
   envelope,
@@ -34,7 +35,7 @@ import {
   workspaceList,
   workspaceRequests,
 } from "./chat-page-welcome-scene-support.js";
-import { CLOSED, FakeEventSource, latestSource } from "./chat-stream-support.js";
+import { CLOSED, chatSnapshot, FakeEventSource, latestSource } from "./chat-stream-support.js";
 import { currentLocation, deferredResponse, jsonResponse } from "./support.js";
 import { yieldMacrotask } from "./ui-support.js";
 
@@ -42,9 +43,12 @@ import { yieldMacrotask } from "./ui-support.js";
 
 const EMPTY = "还没有消息，发一条开始吧";
 const TITLE = "空会话";
+const OTHER_TITLE = "另一个会话";
 const DRAFT = "草稿";
 const HISTORY_FAILED = "历史读取失败";
 const GUIDANCE = "请刷新页面后重试";
+const CAPACITY = "Agent 容量已满，请稍后重试";
+const NO_EVENT_SOURCE = "无法连接会话事件";
 
 const UNBOUND = view(A, TITLE, { status: "idle" });
 const BOUND = { ...UNBOUND, workspaceId: PROJECT_A.id };
@@ -266,6 +270,81 @@ describe("零消息会话空态", () => {
       latestSource().emitTransport(CLOSED);
     });
     await expectGuidanceInsteadOfEmptyState();
+  });
+
+  it("E7d 零消息空闲会话的事件流终止失败后切到别的会话再切回：空态恢复，没有流错误", async () => {
+    const other = view(B, OTHER_TITLE);
+    renderChatPage(
+      `/?session=${A}`,
+      routes(BOUND, {
+        "/api/sessions": () => jsonResponse({ sessions: [BOUND, other] }),
+        [messagesPath(B)]: () =>
+          jsonResponse({
+            ...chatSnapshot({ assistantStatus: "done", content: "回答" }),
+            session: other,
+          }),
+      }),
+    );
+    const nav = await findList(TITLE);
+    await findEmptyState();
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    act(() => {
+      latestSource().emitTransport(CLOSED);
+    });
+    await expectGuidanceInsteadOfEmptyState();
+
+    fireEvent.click(within(nav).getByRole("button", { name: OTHER_TITLE }));
+    await waitFor(() => expect(currentLocation()).toBe(`/?session=${B}`));
+    expect(await within(await findMessageArea()).findByText("回答", { exact: true })).toBeTruthy();
+    expect(queryEmptyText()).toBeNull();
+
+    fireEvent.click(within(nav).getByRole("button", { name: TITLE }));
+    await waitFor(() => expect(currentLocation()).toBe(`/?session=${A}`));
+    await findEmptyState();
+    await waitFor(() => expect(composer().disabled).toBe(false));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("E7e 在空态里发送、prompt 被拒（503）：空态重新出现，草稿恢复，文案内联", async () => {
+    const held = deferredResponse();
+    const { fetchMock } = renderChatPage(
+      `/?session=${A}`,
+      routes(BOUND, { [sessionPromptPath(A)]: () => held.promise }),
+    );
+    await findEmptyState();
+    await waitFor(() => expect(composer().disabled).toBe(false));
+
+    typeDraft("你好");
+    clickSend();
+    await waitFor(() => expect(promptRequests(fetchMock, A)).toHaveLength(1));
+    // 请求在途时空态已让位，之后的「重新出现」才有意义。
+    expect(queryEmptyText()).toBeNull();
+
+    await settleDeferredResponse(held, envelope(503, CAPACITY));
+    expect(workspaceLines(await findEmptyState())).toEqual(["工作空间 项目A"]);
+    expect(screen.getByRole("alert").textContent).toBe(CAPACITY);
+    expect(composer().value).toBe("你好");
+    expect(composer().disabled).toBe(false);
+    expect(screen.queryAllByRole("article")).toEqual([]);
+  });
+
+  it("E7f 运行环境没有 EventSource 时打开零消息会话：无法连接会话事件 加刷新指引、输入框锁定，不显示空态，没有 生成中 与 停止", async () => {
+    const history = deferredResponse();
+    const { fetchMock } = renderChatPage(
+      `/?session=${A}`,
+      routes(BOUND, { [messagesPath(A)]: () => history.promise }),
+    );
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.map(([path]) => path)).toContain(messagesPath(A)),
+    );
+    // 构造器在开连接那一刻才读取；清理里的 `vi.unstubAllGlobals()` 负责还原。
+    vi.stubGlobal("EventSource", undefined);
+
+    await settleDeferredResponse(history, snapshot(BOUND));
+    await expectGuidanceInsteadOfEmptyState();
+    expect(screen.getByRole("alert").textContent).toBe(`${NO_EVENT_SOURCE}。${GUIDANCE}`);
+    expect(screen.queryByRole("button", { name: "停止" })).toBeNull();
+    expect(FakeEventSource.instances).toEqual([]);
   });
 
   it("E8 欢迎态首次发送：会话已建、prompt 在途——不显示空态", async () => {
