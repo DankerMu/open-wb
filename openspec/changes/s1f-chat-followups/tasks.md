@@ -43,12 +43,12 @@ Minimal mergeable slice: atomic - 调用、整页测试与清单行同刀；1.3 
 
 ## 2. tool-approval / session-todo / chat-web — 可访问性（owner 决定 3 的 a–d）
 
-- [ ] 2.1 显式列表语义：四处带 `list-none` 的列表加 `role="list"`——`web/src/features/chat/todo-panel.tsx:83`、`project-config.tsx:73`、`capability-bar.tsx:195`、`welcome.tsx:78`
+- [x] 2.1 显式列表语义：四处带 `list-none` 的列表加 `role="list"`——`web/src/features/chat/todo-panel.tsx:83`、`project-config.tsx:73`、`capability-bar.tsx:195`、`welcome.tsx:78`
   （当前 `web/src` 里只有这四处；Biome 的冗余角色规则会报，按文件既有写法加带理由的 ignore 注释）。
   静态测试（新文件或并入 `web/test/chat-module-layout.test.ts`）：`MIGRATED_AREAS` 内的 `.tsx` 里，凡开标签带 `list-none` 的也带 `role="list"`；注入样本自证。
-- [ ] 2.2 测量 hook：把 `approval-card.tsx` 里「内容高度超过可见高度」的测量抽到新文件 `web/src/features/chat/use-clipped.ts`（登记 `MIGRATED_AREAS`），提问卡正文改用它，行为不变
+- [x] 2.2 测量 hook：把 `approval-card.tsx` 里「内容高度超过可见高度」的测量抽到新文件 `web/src/features/chat/use-clipped.ts`（登记 `MIGRATED_AREAS`），提问卡正文改用它，行为不变
   （`web/test/chat-approval-dock.test.tsx` D1 原样通过）。hook 的单元测试（新文件）：挂载时量一次；触发量变化时重量；用可控的 `ResizeObserver` 替身触发回调后重量；没有 `ResizeObserver` 时不抛错。
-- [ ] 2.3 被裁剪时可键盘聚焦（design D3）：`todo-panel.tsx` 的列表 `ul`（触发量：清单内容、限高档位与展开状态）与 `project-config.tsx` 里包着各分组的滚动 `div`（触发量：文件列表）在被裁剪时带 `tabindex="0"`，否则不带。任务清单的触发量含展开状态（或把 hook 放进随 `ul` 一起挂载的子组件）：补一例「收起态挂载后展开、内容被裁剪 → `tabindex="0"`」。
+- [x] 2.3 被裁剪时可键盘聚焦（design D3）：`todo-panel.tsx` 的列表 `ul`（触发量：清单内容、限高档位与展开状态）与 `project-config.tsx` 里包着各分组的滚动 `div`（触发量：文件列表）在被裁剪时带 `tabindex="0"`，否则不带。任务清单的触发量含展开状态（或把 hook 放进随 `ul` 一起挂载的子组件）：补一例「收起态挂载后展开、内容被裁剪 → `tabindex="0"`」。
   测试：`web/test/chat-todo-panel.test.tsx` 的 S1 按 `chat-approval-dock.test.tsx:58-61` 的打桩方式补「200 项被裁剪 → 列表 `tabindex="0"`、`role="list"`」；
   T1 第 193 行的查询（面板内没有 `[tabindex]`）保留，它断言的是未被裁剪的五项清单，把上一行注释改成写明这一前提。
   `web/test/chat-page-project-config-dialog.test.tsx` 加 H4：被裁剪时滚动容器 `tabindex="0"`、打开时焦点仍在 `关闭`、对话框内按钮仍只有 `关闭`；未被裁剪时没有 `tabindex`

@@ -82,6 +82,20 @@ function caps(element: Element | null) {
   return [...(element?.classList ?? [])].filter((name) => /^(max-h-|overflow-)/.test(name)).sort();
 }
 
+/**
+ * jsdom 不做布局：给任务列表一个可见高度（6）与内容高度（列表项个数），200 项的清单超出、五项以内的
+ * 不超出（其它元素仍为 0）。数值只用来比大小，不是像素断言。
+ */
+function stubListHeights() {
+  const isList = (el: Element) => el.getAttribute("data-slot") === "todo-list";
+  vi.spyOn(Element.prototype, "clientHeight", "get").mockImplementation(function (this: Element) {
+    return isList(this) ? 6 : 0;
+  });
+  vi.spyOn(Element.prototype, "scrollHeight", "get").mockImplementation(function (this: Element) {
+    return isList(this) ? this.querySelectorAll("li").length : 0;
+  });
+}
+
 /** 名称以 `任务清单` 开头的按钮：面板的头部按钮，整页至多一个。 */
 function toggles() {
   return screen.queryAllByRole("button", { name: /^任务清单/ });
@@ -187,7 +201,8 @@ describe("task-list panel: content", () => {
       ["受阻", "等评审"],
     ]);
     expect(within(list).getAllByRole("listitem")).toHaveLength(5);
-    // 只读：除头部按钮外没有任何可交互控件
+    // 只读：除头部按钮外没有任何可交互控件。五项的清单没有被限高裁掉（jsdom 里内容高度不超过可见高度），
+    // 所以列表也不带 tabindex；被裁掉时列表可聚焦，见 S1。
     expect(within(panel()).getAllByRole("button")).toEqual([header]);
     expect(
       panel().querySelectorAll("a, input, textarea, select, [tabindex], [contenteditable]"),
@@ -379,7 +394,8 @@ describe("task-list panel: expanded state", () => {
 });
 
 describe("task-list panel: structure of the extreme states", () => {
-  it("S1 renders 200 items inside the capped, scrolling list with the header button outside it; the cap is the large tier without cards and the small tier while a card is pending", async () => {
+  it("S1 renders 200 items inside the capped, scrolling list with the header button outside it; the cap is the large tier without cards and the small tier while a card is pending; the clipped list is a keyboard-focusable role=list", async () => {
+    stubListHeights();
     const { source } = await mountPage({ ...snapshotWith([]), todo: HUNDREDS });
 
     const container = dock() as HTMLElement;
@@ -394,6 +410,9 @@ describe("task-list panel: structure of the extreme states", () => {
     // 列表自己限高并在内部滚动；头部按钮在这个滚动容器之外
     // 没有待决提问卡：较大的一档
     expect(caps(list)).toEqual(["max-h-40", "overflow-y-auto"]);
+    // 显式的列表语义；200 项被限高裁掉：列表可由键盘聚焦
+    expect(list.getAttribute("role")).toBe("list");
+    expect(list.getAttribute("tabindex")).toBe("0");
     expect(list.contains(toggle())).toBe(false);
     expect(panel().contains(list)).toBe(true);
     expect(caps(panel())).toEqual([]);
@@ -414,12 +433,39 @@ describe("task-list panel: structure of the extreme states", () => {
     expect(within(list).getAllByRole("listitem")).toHaveLength(200);
     // 卡出现后换成较小的一档，最后一张卡结算后换回较大的一档；头部按钮始终在滚动容器之外
     expect(caps(list)).toEqual(["max-h-16", "overflow-y-auto"]);
+    expect(list.getAttribute("tabindex")).toBe("0");
     expect(list.contains(toggle())).toBe(false);
     emitResolved(source, 2, 7, "allow");
     expect(cards()).toHaveLength(0);
     expect(slot("todo-list")).toBe(list);
     expect(caps(list)).toEqual(["max-h-40", "overflow-y-auto"]);
     expect(within(list).getAllByRole("listitem")).toHaveLength(200);
+    expect(list.getAttribute("tabindex")).toBe("0");
+
+    // 清单换成不超出的两项：同一个列表不再带 tabindex
+    emitTodo(source, 3, TWO);
+    expect(slot("todo-list")).toBe(list);
+    expect(list.getAttribute("role")).toBe("list");
+    expect(list.hasAttribute("tabindex")).toBe(false);
+  });
+
+  it("S3 measures the list when a panel that mounted collapsed is expanded: a clipped list gets tabindex=0", async () => {
+    stubListHeights();
+    await mountPage(doneSnapshot(HUNDREDS), OTHER_ROUTE);
+    fireEvent.click(toggle());
+    expect(toggle().getAttribute("aria-expanded")).toBe("false");
+
+    // 切走再切回：面板以收起态出现，列表不在 DOM 里
+    await select("other session", "other user");
+    expect((slot("todo-list") as HTMLElement).hasAttribute("tabindex")).toBe(false);
+    await select("saved title", "answer");
+    expect(toggle().getAttribute("aria-expanded")).toBe("false");
+    expect(slot("todo-list")).toBeNull();
+
+    fireEvent.click(toggle());
+    const list = slot("todo-list") as HTMLElement;
+    expect(within(list).getAllByRole("listitem")).toHaveLength(200);
+    expect(list.getAttribute("tabindex")).toBe("0");
   });
 
   it("S2 keeps the panel and three pending cards, one with a 50-line title, in one dock: panel first, outside the thread scroller, before the composer", async () => {
