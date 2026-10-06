@@ -38,6 +38,7 @@ import {
   jsonResponse,
   paths,
 } from "./support.js";
+import { pressPointer, yieldMacrotask } from "./ui-support.js";
 
 const A = PROJECT_A.id;
 const BOUND = { ...view("a".repeat(32), "绑定会话"), workspaceId: A };
@@ -242,6 +243,35 @@ describe("「+」菜单写入草稿", () => {
     expect(itemTexts(await openMenu())).toEqual(FOUR_TEXTS);
     expect(cataloguePaths(fetchMock)).toHaveLength(3);
     expect(errors).not.toHaveBeenCalled();
+  });
+
+  // 真实后端的目录至少有内建命令，到不了这一分支：只能在这里钉。
+  it("目录请求成功但为空：菜单只显示 `暂无可用项`，不列条目、不显示错误", async () => {
+    const { fetchMock } = await openBound(catalogue([]));
+    const errors = vi.spyOn(console, "error");
+
+    const menu = await openMenu();
+
+    expect(menu.textContent).toBe(EMPTY);
+    expect(itemTexts(menu)).toEqual([]);
+    expect(screen.queryAllByRole("alert", { hidden: true })).toEqual([]);
+    expect(cataloguePaths(fetchMock)).toEqual([commandsOf(A)]);
+    expect(errors).not.toHaveBeenCalled();
+  });
+
+  it("点菜单外关闭：草稿不变，焦点回到 `技能与命令` 按钮", async () => {
+    const { fetchMock } = await openBound(catalogue(FOUR));
+    await openMenu();
+    // 外点监听在菜单挂载后的下一个宏任务里才登记。
+    await yieldMacrotask();
+
+    pressPointer(document.body);
+
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    expect(composer().value).toBe("");
+    await waitFor(() => expect(document.activeElement).toBe(plusButton()));
+    await quiesce();
+    expect(prompts(fetchMock)).toEqual([]);
   });
 
   it("Esc 关闭菜单：草稿不变，焦点回到 `技能与命令` 按钮", async () => {

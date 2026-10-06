@@ -189,7 +189,7 @@ describe("session REST snapshot capture", () => {
   });
 
   // session-todo「存量坏值降级为 null」: the snapshot is the one the NULL column gives.
-  it.each(["{not json", '{"phases":"x"}'])(
+  it.each(["{not json", '{"phases":"x"}', "null"])(
     "answers 200 with todo null when the column holds %s and leaves the column alone",
     async (tampered) => {
       await withSessionRest(async ({ app, db, store, supervisor }) => {

@@ -228,6 +228,7 @@ describe("a stored value that is not a normalised list reads as null and is left
   it.each([
     ["text that is not JSON", "{not json"],
     ["JSON whose phases is not a list", '{"phases":"x"}'],
+    ["JSON that is not an object", "null"],
   ])("%s", (_label, tampered) => {
     const world = open();
     world.db.prepare("UPDATE chat_sessions SET todo = ? WHERE id = ?").run(tampered, world.session);

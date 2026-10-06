@@ -1,15 +1,19 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { clickSend, typeDraft } from "./chat-page-lifecycle-support.js";
 import {
   OTHER_MESSAGES,
   OTHER_SESSION_ID,
   otherIdleSession,
   otherSnapshot,
+  promptAccepted,
   SESSION_MESSAGES,
+  SESSION_PROMPT,
 } from "./chat-page-ownership-support.js";
 import { cleanupChatPage, renderChatPage } from "./chat-page-support.js";
-import { chatSnapshot, latestSource, SESSION_ID } from "./chat-stream-support.js";
+import { chatSnapshot, historyUser, latestSource, SESSION_ID } from "./chat-stream-support.js";
 import { calls, deferredResponse, jsonResponse } from "./support.js";
+import { waitMs } from "./ui-support.js";
 
 /* jsdom has no layout: scroll metrics of the thread viewport (the scroll container, selected by
    its `data-slot`) are mocked at the prototype level so that even the first mount's layout effect
@@ -573,5 +577,68 @@ describe("(R) size changes without a content change", () => {
     expect(jumpButton()).toBeNull();
     await growAndStream(3500, "增量一");
     expect(distance()).toBeLessThanOrEqual(4);
+  });
+
+  /* Sits under (R) on purpose: the viewport primitive mounts only where `ResizeObserver` is
+     defined (a plain div otherwise), and this block's spy supplies it; outside it the case would
+     pass without the primitive. The primitive scrolls with `scrollTo` one animation frame after
+     the runtime reports a run start; jsdom has no `scrollTo` on elements, so that platform method
+     is stubbed here and moves the mocked `scrollTop` the way a browser would. The follow-up turn
+     makes the last message a running assistant message, which is what the runtime calls a run
+     start. */
+  it("(N1) a new turn started after the user scrolled up does not pull the transcript to the bottom", async () => {
+    const scrollTo = vi.fn(function (this: HTMLElement, options?: ScrollToOptions) {
+      if (isTranscript(this)) this.scrollTop = options?.top ?? 0;
+    });
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      value: scrollTo,
+      writable: true,
+    });
+    try {
+      const done = chatSnapshot({ status: "done", assistantStatus: "done", content: "起始" });
+      const next = {
+        ...done,
+        session: { ...done.session, status: "running" as const },
+        messages: [
+          ...done.messages,
+          { ...historyUser, id: 1, content: "继续", createdAt: 1 },
+          {
+            ...historyUser,
+            id: 2,
+            role: "assistant" as const,
+            content: "",
+            status: "running" as const,
+            createdAt: 2,
+          },
+        ],
+      };
+      let accepted = false;
+      renderChatPage(`/?session=${SESSION_ID}`, {
+        "/api/sessions": () => jsonResponse({ sessions: [done.session] }),
+        [SESSION_MESSAGES]: () => jsonResponse(accepted ? next : done),
+        [SESSION_PROMPT]: () => {
+          accepted = true;
+          return jsonResponse({ ...promptAccepted, userMessageId: 1, assistantMessageId: 2 }, 202);
+        },
+      });
+      await waitFor(() => expect(assistantText()).toContain("起始"));
+      expect(metrics.scrollTop).toBe(2500);
+      userScroll(1000);
+      expect(jumpButton()).not.toBeNull();
+
+      typeDraft("继续");
+      clickSend();
+      await waitFor(() => expect(screen.getAllByRole("article")).toHaveLength(4));
+      expect(screen.getByText("生成中", { exact: true })).toBeTruthy();
+      // 基元把滚动排在下一帧：等过几帧再看。
+      await waitMs(100);
+
+      expect(scrollTo).not.toHaveBeenCalled();
+      expect(metrics.scrollTop).toBe(1000);
+      expect(jumpButton()).not.toBeNull();
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollTo");
+    }
   });
 });
