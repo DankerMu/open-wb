@@ -6,7 +6,13 @@ import type { ChatMessageSnapshot } from "../../lib/session-contract.js";
 import { useAuth } from "../auth/index.js";
 import { composerLocks } from "./composer-locks.js";
 import { errorMessage, isNotFound, isUnauthorized } from "./errors.js";
-import { ownsCreateSend, ownsHistory, ownsMutation, visibleOwnedAlert } from "./ownership.js";
+import {
+  blocksNewSession,
+  ownsCreateSend,
+  ownsHistory,
+  ownsMutation,
+  visibleOwnedAlert,
+} from "./ownership.js";
 import { useSessionActions } from "./session-actions.js";
 import { DEFAULT_SESSION_FILTER } from "./session-groups.js";
 import { composerWorkspaceId, selectedSession, sessionNavigation } from "./session-path.js";
@@ -442,6 +448,7 @@ export function useChatSession() {
       const generation = createSendGenerationRef.current;
       const originSessionId = requestedSessionId;
       pendingCreateSendRef.current = {
+        accepted: false,
         client,
         generation,
         originSessionId,
@@ -470,6 +477,7 @@ export function useChatSession() {
           createControllerRef.current = null;
           if (pendingCreateSendRef.current?.generation === generation) {
             pendingCreateSendRef.current = {
+              accepted: false,
               client,
               generation,
               originSessionId: pendingCreateSendRef.current.originSessionId,
@@ -548,6 +556,7 @@ export function useChatSession() {
       createSendGenerationRef.current += 1;
       const generation = createSendGenerationRef.current;
       pendingCreateSendRef.current = {
+        accepted: false,
         client,
         generation,
         originSessionId: requestedSessionId,
@@ -630,9 +639,8 @@ export function useChatSession() {
         if (focusComposer) composerRef.current?.focus();
         return;
       }
-      // 首次发送的「创建—发送」交接在途（origin 为欢迎态、prompt 尚未落定）：不导航、不中止，
-      // 否则会留下一个没有消息的会话。
-      if (pendingCreateSendRef.current?.originSessionId === null && mutationControllerRef.current) {
+      // 首次发送的「创建—发送」交接尚未落定：不导航、不中止，否则会留下一个没有消息的会话。
+      if (blocksNewSession(pendingCreateSendRef.current, client, requestedSessionId)) {
         return;
       }
       focusOnWelcomeRef.current = focusComposer;
@@ -640,7 +648,7 @@ export function useChatSession() {
         replace: true,
       });
     },
-    [location.hash, location.pathname, location.search, navigate, requestedSessionId],
+    [client, location.hash, location.pathname, location.search, navigate, requestedSessionId],
   );
   useEffect(() => {
     if (requestedSessionId || composerDisabled || !focusOnWelcomeRef.current) {

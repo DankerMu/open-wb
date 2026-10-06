@@ -178,6 +178,7 @@ export function useTurnActions({
           ) {
             return;
           }
+          pendingCreateSendRef.current = { ...pendingCreateSendRef.current, accepted: true };
           closeSource();
           return ownedClient.getMessages(sessionId, { signal: controller.signal }).then(
             (snapshot) => {

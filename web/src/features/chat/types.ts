@@ -14,6 +14,8 @@ export type ChatHistoryState =
   | { status: "ready"; client: ApiClient; snapshot: ChatMessageSnapshot; view: ChatState };
 
 export type PendingCreateSend = {
+  /** The prompt was accepted: the handoff is settled, whatever the follow-up history read does. */
+  accepted: boolean;
   client: ApiClient;
   generation: number;
   originSessionId: string | null;

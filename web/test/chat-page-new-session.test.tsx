@@ -82,6 +82,25 @@ function onlySignal(fetchMock: FetchMock, path: string) {
   return signal;
 }
 
+/** 欢迎态首次发送的夹具：`created` 的 prompt 与历史读取各由调用方决定。 */
+function firstSendRoutes(
+  created: string,
+  prompt: () => Promise<Response> | Response,
+  history: () => Promise<Response> | Response,
+) {
+  const routes = welcomeRoutes();
+  routes[sessionPromptPath(created)] = prompt;
+  routes[messagesPath(created)] = history;
+  return routes;
+}
+
+function runningCreated(created: string) {
+  return jsonResponse({
+    ...runningCreatedSnapshot(),
+    session: view(created, "你好", { status: "running" }),
+  });
+}
+
 /** 挂载在 `path`，列表里有一个已完成的既有会话 A（历史为空快照）。 */
 async function mountWithExisting(path: string) {
   const mounted = renderChatPage(path, welcomeRoutes({ existing: [view(A, EXISTING)] }));
@@ -218,6 +237,69 @@ describe("新建会话只回欢迎态", () => {
     expect(createRequests(fetchMock)).toHaveLength(1);
     expect(currentLocation()).toBe(`/?session=${created}`);
     expect(signal.aborted).toBe(false);
+  });
+
+  it("N4b prompt 已受理、随后的历史读取仍挂起：点击回欢迎态，点击之后零请求；迟到的快照不把页面带回会话", async () => {
+    const created = `${CREATED_IDS[0]}`;
+    const held = deferredResponse();
+    const { fetchMock } = renderChatPage(
+      "/",
+      firstSendRoutes(
+        created,
+        () => jsonResponse(promptAccepted, 202),
+        () => held.promise,
+      ),
+    );
+    await screen.findByRole("heading", { level: 1, name: HERO });
+
+    typeDraft("你好");
+    clickSend();
+    await waitFor(() => expect(currentLocation()).toBe(`/?session=${created}`));
+    await waitFor(() => expect(calls(fetchMock, messagesPath(created))).toHaveLength(1));
+    await act(yieldMacrotask);
+    expect(promptRequests(fetchMock, created)).toEqual([["POST", '{"message":"你好"}']]);
+    const requests = requestCount(fetchMock);
+
+    fireEvent.click(screen.getByRole("button", { name: "新建会话" }));
+    await waitFor(() => expect(currentLocation()).toBe("/"));
+    expect(hero()).not.toBeNull();
+    await act(yieldMacrotask);
+    expect(requestCount(fetchMock)).toBe(requests);
+
+    await settleDeferredResponse(held, runningCreated(created));
+    await act(yieldMacrotask);
+    expect(currentLocation()).toBe("/");
+    expect(hero()).not.toBeNull();
+    expect(requestCount(fetchMock)).toBe(requests);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("N4c prompt 已受理、随后的历史读取失败之后：点击回欢迎态，点击之后零请求", async () => {
+    const created = `${CREATED_IDS[0]}`;
+    const { fetchMock } = renderChatPage(
+      "/",
+      firstSendRoutes(
+        created,
+        () => jsonResponse(promptAccepted, 202),
+        () => jsonResponse({ error: { code: "unavailable", message: "历史不可用" } }, 503),
+      ),
+    );
+    await screen.findByRole("heading", { level: 1, name: HERO });
+
+    typeDraft("你好");
+    clickSend();
+    await waitFor(() => expect(currentLocation()).toBe(`/?session=${created}`));
+    expect((await screen.findByRole("alert")).textContent).toContain("历史不可用");
+    await act(yieldMacrotask);
+    expect(promptRequests(fetchMock, created)).toEqual([["POST", '{"message":"你好"}']]);
+    expect(calls(fetchMock, messagesPath(created))).toHaveLength(1);
+    const requests = requestCount(fetchMock);
+
+    fireEvent.click(screen.getByRole("button", { name: "新建会话" }));
+    await waitFor(() => expect(currentLocation()).toBe("/"));
+    expect(hero()).not.toBeNull();
+    await act(yieldMacrotask);
+    expect(requestCount(fetchMock)).toBe(requests);
   });
 
   it("N5 既有会话的 prompt 在途：点击回欢迎态并中止该请求；迟到的 202 不读历史、不重开事件连接，输入框可用、无错误", async () => {
