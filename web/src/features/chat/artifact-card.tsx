@@ -191,11 +191,10 @@ function ArtifactPreview({ name, preview }: { name: string; preview: HtmlPreview
  * thread to a card that has left the viewport meanwhile. Escape is also handled on the content
  * itself, because a toast on screen takes the Escape of every Radix layer below it.
  *
- * Opening focuses the dialog's 关闭 button. Left to Radix, focus would go to the first tabbable
- * element, and the copied content puts its children before that button: the iframe. Focus inside
- * the sandboxed page means the fetched content holds the keyboard before the user did anything and
- * this document sees no keydown, so Escape would not close the preview. Tab order is then 关闭 →
- * the iframe → 关闭 (the two tabbable elements, wrapping).
+ * Opening focuses the dialog's 关闭 button rather than the first tabbable element (the iframe,
+ * which the copied content puts before that button). That decides only where focus lands on open:
+ * once the page's script focuses itself or the user Tabs into the iframe, Escape no longer reaches
+ * this document; 关闭 and a click on the overlay still close the preview.
  */
 function PreviewDialog({
   name,

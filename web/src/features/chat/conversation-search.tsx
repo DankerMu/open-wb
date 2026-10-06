@@ -59,7 +59,7 @@ function BoxButton({
       type="button"
       variant="ghost"
     >
-      <Icon name={icon} size={14} />
+      <Icon name={icon} />
     </Button>
   );
 }

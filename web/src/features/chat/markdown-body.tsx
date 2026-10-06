@@ -18,10 +18,11 @@ function ImageText({ alt, src }: ComponentProps<"img">) {
 
 /**
  * 代码块头：语言名与复制按钮。成功只把图标换成对勾（约 2 秒后恢复），失败在按钮旁就地显示
- * `复制失败`；规则与消息级 `复制` 共用（copy-feedback.ts）。
+ * `复制失败`；规则与消息级 `复制` 共用（copy-feedback.ts）。写入的是代码块原文去掉末尾恰一个换行
+ * （Markdown 转换追加的那个；代码自己以空行结尾时仍留一个），粘贴到终端时末行不会被直接执行。
  */
 function CodeHeader({ code, language }: CodeHeaderProps) {
-  const { copy, result } = useCopyFeedback(code);
+  const { copy, result } = useCopyFeedback(code.endsWith("\n") ? code.slice(0, -1) : code);
   return (
     <div className="mt-3 flex items-center gap-2 rounded-t-xl border border-b-0 border-border bg-muted px-3.5 py-1.5 text-xs">
       <span className="mr-auto font-medium text-muted-foreground lowercase">{language}</span>

@@ -294,4 +294,11 @@ describe("theme.css 结构（ui-foundation「映射文件结构」）", () => {
     expect(theme.slice(theme.search(/^@media/m)).includes("@layer")).toBe(false);
     expect(borderBaselineViolations(theme)).toEqual([]);
   });
+
+  it("应用层只用外壳的 narrow: 断点变体：web/src 的 .tsx 不含 max-[760px]:（它编译为小于 760）", () => {
+    const stale = listRepoFiles("web/src", (path) => path.endsWith(".tsx")).filter((path) =>
+      readRepoFile(path).includes("max-[760px]:"),
+    );
+    expect(stale).toEqual([]);
+  });
 });

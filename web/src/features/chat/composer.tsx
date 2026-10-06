@@ -56,7 +56,7 @@ export function Composer({
   const hintId = useId();
   return (
     <form
-      className="mx-auto box-border flex w-full max-w-3xl flex-none flex-col gap-2 px-2 pt-2.5 pb-1 max-[760px]:px-0"
+      className="mx-auto box-border flex w-full max-w-3xl flex-none flex-col gap-2 px-2 pt-2.5 pb-1 narrow:px-0"
       data-slot="composer"
       onSubmit={onSubmit}
     >
@@ -70,7 +70,7 @@ export function Composer({
         </label>
         <Textarea
           aria-describedby={hintId}
-          className="max-h-40 min-h-13 resize-none overflow-x-hidden overflow-y-auto rounded-none border-0 bg-transparent p-0 text-[15px] leading-[1.75] wrap-anywhere text-foreground placeholder:text-(--wb-text-tertiary) focus-visible:ring-0 disabled:bg-transparent disabled:text-(--wb-text-tertiary) disabled:opacity-100 max-[760px]:max-h-24 md:text-[15px] dark:bg-transparent dark:disabled:bg-transparent"
+          className="max-h-40 min-h-13 resize-none overflow-x-hidden overflow-y-auto rounded-none border-0 bg-transparent p-0 text-[15px] leading-[1.75] wrap-anywhere text-foreground placeholder:text-(--wb-text-tertiary) focus-visible:ring-0 disabled:bg-transparent disabled:text-(--wb-text-tertiary) disabled:opacity-100 narrow:max-h-24 md:text-[15px] dark:bg-transparent dark:disabled:bg-transparent"
           disabled={disabled}
           id={inputId}
           onChange={(event) => onChangeDraft(event.target.value)}

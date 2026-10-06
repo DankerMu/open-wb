@@ -1,6 +1,6 @@
 /**
- * Issue 861 项目配置入口 on the copied-layer dialog (openspec/changes/s1f-chat-surface, chat-web
- * 「会话页」Project config entry): H1–H4. The behaviour cases G1–G9 stay in
+ * Issue 861 项目配置入口 on the copied-layer dialog
+ * (openspec/changes/archive/2026-10-06-s1f-chat-surface, chat-web 「会话页」Project config entry): H1–H4. The behaviour cases G1–G9 stay in
  * chat-page-project-config.test.tsx; here is what the move itself has to hold: the dialog is the
  * copied one, focus opens on its 关闭 and goes back to the header button, and Escape still closes
  * it under a toast. Seam: the jsdom chat page inside the real shell over a stubbed `fetch`.

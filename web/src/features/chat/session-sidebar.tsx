@@ -85,7 +85,7 @@ function SessionEntries({
 }
 
 /**
- * 分区或空间子组：`fieldset` 即 `role="group"`（同 approval-bar），accessible name 取自可见标签
+ * 分区或空间子组：`fieldset` 即 `role="group"`，accessible name 取自可见标签
  * （demo:275、1873-1889）。
  */
 function SessionGroup({

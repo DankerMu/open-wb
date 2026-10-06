@@ -73,7 +73,7 @@ export function LoginForm() {
   return (
     // 可滚动容器 + 卡片 m-auto 居中：内容高于视口时顶部不被裁切。
     <main className="flex h-dvh overflow-y-auto bg-(--wb-home-bg-primary) px-4 py-6">
-      <Card className="m-auto w-90 max-w-[calc(100vw-2rem)] gap-0 pt-7 shadow-(--wb-shadow-dialog) [--card-spacing:--spacing(6)] max-[760px]:[--card-spacing:--spacing(4)]">
+      <Card className="m-auto w-90 max-w-[calc(100vw-2rem)] gap-0 pt-7 shadow-(--wb-shadow-dialog) [--card-spacing:--spacing(6)] narrow:[--card-spacing:--spacing(4)]">
         <CardHeader className="justify-items-center gap-0 text-center">
           <div className="mb-3.5 flex justify-center">
             <BrandMark size={26} wordmark />

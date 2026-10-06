@@ -27,7 +27,7 @@ type ConversationViewProps = {
   onAnswerApproval: AnswerApproval;
   onChangeDraft(value: string): void;
   onFork(messageId: number): Promise<void>;
-  onRegenerate(): Promise<boolean>;
+  onRegenerate(): Promise<void>;
   /** 现有发送路径的文本入口：运行时适配器的 `onNew` 委托给它。 */
   onSend(prompt: string): void;
   onStop: StopTurn;

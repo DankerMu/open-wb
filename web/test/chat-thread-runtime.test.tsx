@@ -42,7 +42,7 @@ function view(id: number, role: View["role"], status: View["status"], content = 
 function mountRuntime(initial: View[]) {
   const onSend = vi.fn<(prompt: string) => void>();
   const onStop = vi.fn<() => Promise<unknown>>().mockResolvedValue("stopping");
-  const onRegenerate = vi.fn<() => Promise<unknown>>().mockResolvedValue(true);
+  const onRegenerate = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
   const held: { runtime?: ReturnType<typeof useThreadRuntime> } = {};
   function Harness({ messages }: { messages: View[] }) {
     held.runtime = useThreadRuntime({ messages, onRegenerate, onSend, onStop });
