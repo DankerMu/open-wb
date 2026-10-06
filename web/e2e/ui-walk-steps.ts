@@ -60,7 +60,9 @@ async function expectFocusRingInside(trigger: Locator): Promise<void> {
         box.bottom + grow - (top + root.clientHeight),
       ].map((px) => Math.max(0, Math.round(px * 100) / 100)),
     };
-    if (before instanceof HTMLElement) before.focus({ preventScroll: true });
+    // 之前的焦点在 `body`（没有元素持有焦点）时还原为 blur：对 `body` 调 focus 不是同一个状态。
+    if (before instanceof HTMLElement && before !== document.body)
+      before.focus({ preventScroll: true });
     else el.blur();
     return result;
   });
@@ -114,10 +116,14 @@ function paintedWithin(target: Locator, layer: string): Promise<boolean> {
         lifted.push(at);
       }
     }
-    const box = el.getBoundingClientRect();
-    const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
-    for (const at of lifted) at.style.pointerEvents = "none";
-    return top?.closest(selector) !== null;
+    try {
+      const box = el.getBoundingClientRect();
+      const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      // Nothing hit (the centre is outside the viewport) is not "inside the layer".
+      return top !== null && top.closest(selector) !== null;
+    } finally {
+      for (const at of lifted) at.style.pointerEvents = "none";
+    }
   }, layer);
 }
 

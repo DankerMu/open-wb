@@ -223,6 +223,22 @@ describe("a failed write publishes nothing and throws to the owned error path", 
   });
 });
 
+// session-todo「任务清单快照」「存量坏值降级为 null」: only an out-of-band write can leave such a value.
+describe("a stored value that is not a normalised list reads as null and is left alone", () => {
+  it.each([
+    ["text that is not JSON", "{not json"],
+    ["JSON whose phases is not a list", '{"phases":"x"}'],
+  ])("%s", (_label, tampered) => {
+    const world = open();
+    world.db.prepare("UPDATE chat_sessions SET todo = ? WHERE id = ?").run(tampered, world.session);
+
+    expect(world.store.readTodo(world.session, OWNER)).toBeNull();
+
+    expect(column(world)).toBe(tampered);
+    expect(world.warns).toEqual([]);
+  });
+});
+
 describe("the stored list survives terminal settlement and startup reconciliation", () => {
   it.each(["stopped", "failed"] as const)("a turn ending %s keeps the list", (status) => {
     const world = open();

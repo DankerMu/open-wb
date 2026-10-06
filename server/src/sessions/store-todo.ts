@@ -6,6 +6,7 @@
  * `status` and `title` stay, so a task-list update never reorders the session list.
  */
 import type { DatabaseSync } from "node:sqlite";
+import { asPlain, own } from "./file-changes.js";
 import { normalizeTodo, type SessionTodo } from "./session-todo.js";
 import { requireChanges } from "./store-branch.js";
 
@@ -33,7 +34,11 @@ export interface SessionTodoStore {
     assistantMessageId: number,
     candidate: unknown,
   ): { todo: SessionTodo | null } | undefined;
-  /** The stored list of this owner's session; `null` for a stored NULL or no such row. */
+  /**
+   * The stored list of this owner's session; `null` for a stored NULL or no such row, and for a
+   * stored text that is not a normalised list (only an out-of-band write can leave one). Never
+   * throws on such a value, rewrites the column or logs: every snapshot read comes through here.
+   */
   readTodo(sessionId: string, ownerId: string): SessionTodo | null;
 }
 
@@ -76,9 +81,21 @@ export function createSessionTodoStore(
       const row = db.prepare(SELECT_OWNED).get(sessionId, ownerId) as unknown as
         | TodoRow
         | undefined;
-      return row === undefined || row.todo === null ? null : (JSON.parse(row.todo) as SessionTodo);
+      return row === undefined || row.todo === null ? null : parseStored(row.todo);
     },
   };
+}
+
+/** The stored text as a normalised list, or `null` when it is not one. */
+function parseStored(text: string): SessionTodo | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  const record = asPlain(parsed);
+  return record === undefined ? null : (normalizeTodo(own(record, "phases")) ?? null);
 }
 
 function reject(warn: TodoWarn | undefined, assistantMessageId: number): void {
