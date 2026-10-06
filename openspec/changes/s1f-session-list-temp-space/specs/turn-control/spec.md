@@ -1,0 +1,153 @@
+## MODIFIED Requirements
+
+### Requirement: 从此处分叉 REST
+`POST /api/sessions/:id/fork` SHALL 只接受 `application/json` 且 body 恰为 `{messageId:number}`，其 content-parser 错误由归属集映射为 400 `bad_request`；受 cookie guard 与 owner 校验（401/404 同 stop），响应 no-store。`messageId` SHALL 属于该会话且 `role="user"`，否则 400 `bad_request`；原会话已归档 SHALL 409 `session_archived`（先于其余前置校验，session-metadata「会话归档」）；原会话 `status="running"` 或持有控制占用 SHALL 409 `session_busy`；该消息 `content` 被 chat-sessions「Slash 命令白名单与命令目录」的 `classifyPrompt` 判为 `builtin|skill` SHALL 400 `bad_request`（判定在 409 之后）；原会话 `omp_session_file` 为 NULL SHALL 502 `agent_unavailable`。校验通过即对原会话登记控制占用（见会话级控制占用），并记下预检读到的原会话末条 assistant id。
+
+执行序：若原会话有存活 idle 进程，SHALL 先经既有 retire 序列关停它并等待其退出（数据在会话文件中，无损；名额随退出释放）→ 经 omp-pool 准入起**临时** `SessionRuntime`（同一 spawn 契约、`--resume <原 omp_session_file>`、不绑定任何会话 slot、计入活进程集合）→ `get_branch_messages` → 按 chat-sessions「Slash 命令白名单与命令目录」Branch alignment 把 SQLite 该会话 user 消息（按 `created_at,id` 升序）与返回列表自前向后首次匹配对位（条目 `text` 为该消息 `content` 的 wire 候选时配对并各自前进，否则跳过该消息、不消耗条目），取对位到该 user 消息的项，无对位 SHALL 502 → `branch{entryId}` → `get_state` 取新文件 → 关停临时进程（既有有界 retire，token 撤销）→ SQLite 单事务：先以 CAS 复核源会话 `status` 仍非 running 且其末条 assistant id 仍等于预检读到的 id，复核失败 SHALL 不写任何行并 409 `session_busy`；复核通过则插入新会话行（`owner_id` 同、`title` 复制、`parent_session_id`=原会话 id（列为 `TEXT NULL REFERENCES chat_sessions(id) ON DELETE SET NULL`，删除原会话时分叉会话保留且该列置 NULL）、`omp_session_file`=新文件、`stream_epoch=0`、`workspace_id` 与 `scene` 复制自源会话、`pinned_at` 与 `archived_at` 为 NULL；源会话用临时空间时新会话继承同一个 `workspace_id`，与源会话共用该临时空间而不复制目录，见 temporary-workspaces「共用与随最后一个会话删除」），把原会话中 `(created_at,id)` 严格早于分叉点 user 消息的全部 `chat_messages` 及其 `chat_steps` 与 `chat_approvals` 拷贝到新会话（新 id、保持顺序、`content`/`status`/`created_at`/步骤 `ordinal`/`name`/`detail`/`output`/`status`/时间原值；审批 `request_id`/`tool`/`title`/`requested_at`/`expires_at`/`decision`/`decided_at` 原值，指向拷贝后的新消息 id），分叉点 user 消息本身不拷贝；`chat_turn_snapshots` 行 SHALL NOT 拷贝（拷贝来的用户消息在新会话里 `undo` 读作 `none`，message-undo「可撤回状态」）；新会话 `status` SHALL 置为拷贝历史中末条 assistant 消息的状态（`done`/`failed`/`stopped` 之一；该消息仍为 `running` 时视为事务失败），未拷贝任何消息时为 `idle`。响应 201 `{session, draft:<该 user 消息所存 `content`>}`，`session` 为与其它会话视图键集相同的公共视图（session-metadata「会话视图扩展键」；反映上述最终 `status`；`workspaceId` 与 `scene` 为继承自源会话的值，`pinnedAt` 与 `archivedAt` 为 null，`pendingApproval` 为 false，`temporaryWorkspace` 与源会话相同），不暴露 `parent_session_id`。准入 503、`branch` 前后任何失败、无对位 SHALL 不留下新会话行（新会话不存在于 `GET /api/sessions`）并关停临时进程。原会话的行、`omp_session_file` 与会话文件 SHALL 全程不被改写（只读取以复制）；原会话进程 SHALL 不被发送任何帧，其存活 idle 进程在临时进程启动前被 retire（fork 失败时不恢复，下次 prompt 按既有 `--resume` 懒 spawn）。响应返回之前，临时进程 SHALL 已退出并释放名额。
+
+#### Scenario: 正常分叉
+- **WHEN** 原会话 `done`、历史 u1(`"first question"`)→a1→u2(`"second question"`)→a2（a1 为 `done`），对 u2 调用 fork，fake-omp `branch` 脚本对 `get_branch_messages` 返回 `{messages:[{entryId:"fake-entry-1",text:"first question"},{entryId:"fake-entry-2",text:"second question"}]}` 并在 `branch{entryId:"fake-entry-2"}` 后创建新会话文件
+- **THEN** 201 `{session:{id:<新>,title:<原 title>,status:"done",...},draft:"second question"}`；新会话 messages 为 u1、a1（含 a1 步骤与审批，新 id，顺序与内容相同）、`streamCursor:{epoch:0,seq:null}`；`chat_sessions.parent_session_id`=原 id；`omp_session_file` 为新文件路径；原会话行与文件不变；临时进程已退出且原会话进程未收到任何帧；`GET /api/sessions` 同时列出两会话
+
+#### Scenario: 新会话状态随拷贝历史
+- **WHEN** 对首条 user 消息 u1 调用 fork，或对 u2 调用 fork 而 a1 为 `stopped`（或 `failed`）
+- **THEN** 前者无拷贝消息，新会话 `status="idle"`；后者新会话 `status` 分别为 `stopped`（或 `failed`），且新会话可直接 regenerate 末条助手消息
+
+#### Scenario: 拷贝审批记录
+- **WHEN** 被拷贝的 a1 带两条审批（`deny`、`timeout`）时 fork
+- **THEN** 新会话中 a1 副本的 `approvals` 按 `id` 升序为两条、`decision` 分别为 `deny`、`timeout`，`tool`/`title`/`requestedAt`/`expiresAt` 原值；原会话审批行不变；无 `decision` NULL 的拷贝行
+
+#### Scenario: 源会话存活进程先退出
+- **WHEN** `OMP_MAX_PROCESSES=1`，原会话刚完成回合且其进程仍存活（未到 `OMP_IDLE_MS`），对其 u1 调用 fork
+- **THEN** 201；以真实子进程观察，原会话进程在临时进程 spawn 之前已退出，任一时刻活 omp 子进程数 ≤1，不出现两个进程同时打开原会话文件；原会话进程未收到任何帧（仅 stdin 关闭与既有升级序列）；随后原会话 prompt 以 `--resume <原 omp_session_file>` 重 spawn 并 202
+
+#### Scenario: 非法目标与运行中
+- **WHEN** `messageId` 为 assistant 消息、属他会话、不存在、其 `content` 为白名单命令（如 `/skill:<已安装>`），或 body 形态不为 `{messageId:number}`
+- **THEN** 400 `bad_request`，无新会话行、无进程 spawn
+- **WHEN** 原会话 running 时 fork
+- **THEN** 409 `session_busy`，无新会话行、无进程 spawn、原会话进程未被 retire
+
+#### Scenario: 对齐失败回滚
+- **WHEN** 该 user 消息在 `get_branch_messages` 列表中无对位（轮到它时当前条目的 `text` 不是其 `content` 的 wire 候选，或条目已耗尽）
+- **THEN** 502 `agent_unavailable`；无新会话行、`GET /api/sessions` 不含新会话；未发送 `branch`；临时进程已关停；原会话行与文件不变
+
+#### Scenario: fork 最终事务复核失败
+- **WHEN** fork 的 `get_state` 应答后、事务提交前，源会话行被直接改写为末条 assistant id 不同于预检值（或 `status="running"`）
+- **THEN** 409 `session_busy`；无新会话行、`GET /api/sessions` 不含新会话；事务未拷贝任何行；源会话行与 `omp_session_file` 不变；临时进程已退出；占用已释放
+
+#### Scenario: 池满与临时进程释放
+- **WHEN** `OMP_MAX_PROCESSES=1` 且另一会话在回合中时 fork
+- **THEN** 503 `agent_capacity`，无新会话行
+- **WHEN** `OMP_MAX_PROCESSES=1` 且无其它活进程时 fork 成功
+- **THEN** 201 返回时活进程数为 0，随后对新会话发 prompt 以 `--resume <新文件>` spawn 并 202
+
+#### Scenario: 继承空间与场景、不继承置顶
+- **WHEN** owner 对绑定 W、`scene="code"`、已置顶的源会话调用 fork（fake-omp `branch`），随后在新会话发 prompt
+- **THEN** 201 的 `session` 为会话视图，`workspaceId=W.id`、`scene="code"`、`pinnedAt=null`；源会话 `pinnedAt` 不变；被拷贝助手消息的 `thinking` 与其步骤的 `changes` 在新会话快照中与源会话逐值相同（NULL 仍为 null）；新会话进程 probe 报告的 `cwd` 为 W 的根；审计无 `session.bind` 新增
+
+#### Scenario: fork 响应的会话视图与列表一致
+- **WHEN** owner 对绑定 W、`scene="design"`、已置顶的源会话调用 fork 成功，随后 `GET /api/sessions`
+- **THEN** 201 响应的 `session` 的键集恰为会话视图的键集（基础八键加 `archivedAt`、`pendingApproval`、`temporaryWorkspace`），`workspaceId=W.id`、`scene="design"`、`pinnedAt=null`、`archivedAt=null`、`temporaryWorkspace=false`，且与 `GET /api/sessions` 中同 id 条目逐键相等
+
+#### Scenario: 已归档的源会话
+- **WHEN** 对一个已归档的会话调用 fork（合法 body）
+- **THEN** 409 `session_archived`；无新会话行、无进程 spawn、源会话进程未被 retire；恢复归档后同一请求 201
+
+#### Scenario: 分叉共用临时空间且不带快照
+- **WHEN** 源会话用临时空间 T、其各用户消息 `undo` 为 `available`，对第二条用户消息 fork
+- **THEN** 新会话 `workspaceId` 为 `<T>`、`temporaryWorkspace` 为 `true`；磁盘上没有新的 `tmp-…` 目录；新会话里拷贝来的用户消息 `undo` 为 `none`；`chat_turn_snapshots` 没有指向新会话消息的行；新会话的进程 probe 报告的 `cwd` 为 T 的根
+
+### Requirement: stopped 终态
+`chat_sessions.status`、`chat_messages.status`、`chat_steps.status` 三处 CHECK SHALL 扩为分别含 `stopped`：会话 `∈ {idle,running,done,failed,stopped}`、消息 `∈ {done,running,failed,stopped}`、步骤 `∈ {running,done,failed,stopped}`（由迁移 `034_chat_turn_control.sql` 以重建表方式完成，列/索引/FK/级联语义与 032/033 等价）。`stopped` SHALL 是与 `failed` 不同的独立终态：`finishTurn` SHALL 接受 `stopped`，把 assistant 消息与会话置为 `stopped`、`updated_at=now`、仍 `running` 的步骤置为 `stopped` 并写 `ended_at`（output 保持 NULL，读回为 `""`），已终态步骤不变；assistant 已刷盘与待刷的部分正文 SHALL 保留。会话/消息/步骤视图、`GET /api/sessions`、`GET /api/sessions/:id/messages` 与 web 联合类型 SHALL 接受 `stopped`。启动对账仍只把 `running` 置为 `failed`，`stopped` 行不受影响；对账 SHALL NOT 改写 `updated_at`（message-undo「共用空间冲突」据此识别没有结束时刻的回合）。`stopped` 之后会话 SHALL 与 `done`/`failed` 同等可再受理 prompt。
+
+#### Scenario: 停止落盘形状
+- **WHEN** 回合已发两段 text.delta 且一条步骤 running 时以 `stopped` 结算
+- **THEN** assistant `content` 等于两段拼接、`status="stopped"`；该步骤 `status="stopped"`、`output=""`、`ended_at` 非空；会话 `status="stopped"`；`GET /api/sessions/:id/messages` 原样返回上述状态
+
+#### Scenario: 停止后继续对话
+- **WHEN** 会话为 `stopped` 时发送合法 prompt
+- **THEN** 返回 202 `{userMessageId,assistantMessageId,undo}`，历史保留 `stopped` 的助手消息，新回合正常进行
+
+#### Scenario: 对账不触碰 stopped
+- **WHEN** 服务重启时库中有 `stopped` 会话与 `running` 会话
+- **THEN** 只有 `running` 会话及其 running 消息被置为 `failed`，`stopped` 行逐字不变；被置为 `failed` 的会话 `updated_at` 与重启前相同
+
+### Requirement: 会话级控制占用
+supervisor SHALL 按 `sessionId` 维护"控制占用"（control claim）。regenerate、fork（占用的是**源**会话）、stop 与撤回（message-undo「撤回 REST」，占用的是被撤回的会话）在前置校验通过的同一同步段内登记占用，持有至该操作的 prompt 派发完成（regenerate）或响应返回（fork、stop、撤回，以及任何失败路径），并 SHALL 在每一种结束路径（2xx、409、400、502、503、异常）上释放，使失败后会话仍可正常使用。占用 SHALL 按持有次数计数：同一会话可同时有多个持有者（如 regenerate 执行中到达的 stop），每个持有者只释放自己登记的那一次，全部释放后占用才解除；supervisor SHALL 提供同步可读的"该会话是否持有控制占用"判定，供受理前拒绝使用。持有占用期间，同一会话的 prompt、regenerate、fork、撤回请求与归档（session-metadata「会话归档」的 `archived:true`）SHALL 一律 409 `session_busy`，不写任何行、不向进程发帧、不 spawn。stop 不受占用阻塞、永不因占用返回 409：它按会话 `status` 判定（非 running → 204；running 而 prompt 尚未派发 → 停止意图，见停止生成 REST；regenerate 派发后即为普通 running 回合，可正常停止）。持有占用的会话，其进程与该操作的临时进程在 omp-pool 中视为"回合中"，不可被驱逐。
+
+#### Scenario: regenerate 各 RPC 间隙的并发请求
+- **WHEN** 会话 `done`，regenerate 执行中，分别在进程已准入而 `ready` 未到、`get_branch_messages` 应答未到、`branch` 应答未到、branch 之后的 `get_state` 应答未到（事务提交前）时向同一会话注入 prompt、regenerate 或 fork 请求
+- **THEN** 每个注入请求均 409 `session_busy`；注入请求未新增或修改任何 `chat_messages`/`chat_steps`/`chat_sessions` 行，未改动 `omp_session_file` 与会话文件，fake-omp 未收到注入请求引起的任何帧；原 regenerate 照常 202 并完成回合
+
+#### Scenario: fork 各 RPC 间隙的并发请求
+- **WHEN** fork 执行中，分别在临时进程已准入而 `ready` 未到、`get_branch_messages` 应答未到、`branch` 应答未到、`get_state` 应答未到、临时进程关停未完成（事务提交前）时向**源**会话注入 prompt、regenerate 或 fork
+- **THEN** 每个注入请求均 409 `session_busy`，源会话行、`omp_session_file` 与文件不变，无额外 spawn；原 fork 照常 201
+
+#### Scenario: 失败后释放占用
+- **WHEN** regenerate 因分支文本不一致 502、因池满 503，或 fork 因对齐失败 502 结束
+- **THEN** 响应返回时占用已释放：随后对该会话的合法 prompt 返回 202
+
+#### Scenario: stop 持有占用且不被占用阻塞
+- **WHEN** 会话 A 回合进行中调用 stop；另一次，A 的 regenerate 持有占用（`branch` 应答未到）时对 A 调用 stop
+- **THEN** 前者 stop 调用期间 A 持有控制占用、调用返回后占用解除，stop 不因占用被拒；后者 stop 正常返回且不写任何帧，返回后 A 仍持有占用（stop 的释放不抵消 regenerate 的登记），regenerate 照常完成后占用解除
+
+#### Scenario: 撤回各 RPC 间隙的并发请求
+- **WHEN** 撤回执行中，分别在临时进程已准入而 `ready` 未到、`get_branch_messages` 应答未到、`branch` 应答未到、`get_state` 应答未到、文件还原未完成（事务提交前）时向同一会话注入 prompt、regenerate、fork、另一次撤回或 `PATCH {archived:true}`
+- **THEN** 每个注入请求均 409 `session_busy`，会话行、消息行、`omp_session_file` 不因注入请求改变，无额外 spawn；原撤回照常 200；撤回因对位失败 502 或池满 503 结束后，随后的合法 prompt 返回 202
+
+### Requirement: 停止生成 REST
+`POST /api/sessions/:id/stop` SHALL 受既有 cookie guard 与 owner 校验：未认证 401（先于 body 解析）、不存在或属他人 404 `not_found`，均在任何 supervisor 调用前；响应 `Cache-Control: no-store`。该路由 SHALL 是无 body 路由且列入 content-parser 归属集（与 logout 先例一致）：content-parser 错误（malformed/empty JSON、unsupported media、超出最小 body limit）SHALL 映射为 400 `bad_request`，任何被解析出的 body SHALL 400 `bad_request`，均在认证之后、任何 supervisor 调用之前，无写入、无帧。
+
+会话 `status="running"` 时 SHALL 调用 supervisor stop；stop 在其调用期间持有该会话的控制占用（调用返回即释放；停止意图路径上的 `abort` 帧在调用返回之后才写出，不在占用内），并：先按 tool-approval 规范以 `deny` 结算该会话全部挂起审批（以进入 stop 时读取的快照为准，写 `abort` 前不重读）（每条结算落库与审计同一事务 → 发 `Deny` → 发布 `approval.resolved`），再处理中断，返回 202，body 恰为 JSON 空对象 `{}`；不等待 `agent_end`。中断 SHALL 分两种：
+- prompt 已派发（runtime 存在活跃回合）：对该会话进程调用 `abort()`，随即返回 202。`{type:"abort"}` 帧由 runtime 在该回合已开始（收到 `agent_start` 或本地完成应答）之后写出（见 omp-runtime「相关命令 API 与回合中断」）：真 omp 在回合开始前收到 `abort` 会静默丢弃整轮，用户消息不入会话历史，其后的 regenerate/fork 对齐随之失效。stop 不等待该帧写出；`OMP_ABORT_GRACE_MS` 从 `abort()` 被调用时起算。
+- prompt 尚未派发（supervisor 仍在执行 chat-sessions「Supervisor dispatch and generation binding」的派发前步骤（工作空间快照），或 runtime 仍在获取/握手，`abort()` 返回 `false`，即尚无已派发的回合）：supervisor SHALL 为该回合登记"停止意图"，此刻不写任何帧，stop 随即返回 202 `{}`；该次派发 SHALL 照常进行——握手完成后 `prompt` 帧照常写出，用户消息照常进入 omp 会话历史，仍在等待派发回执的 prompt（或 regenerate）请求 SHALL 以 202 返回其原本的受理 body。supervisor 本就等待的该 `prompt` 派发回执兑现后，SHALL 立即对同一 generation 再次调用 `abort()`，`{type:"abort"}` 帧同样在该回合已开始之后才写出；此后与上一条完全相同：回合经归约器的普通中断路径（`message_end{stopReason:"aborted"}` → `agent_end` → 恰一个 `turn.end{messageId,status:"stopped"}`）收尾，`agent_end` 未在 `OMP_ABORT_GRACE_MS` 内到达则走有界退回（见中断帧归约与有界退回）。停止意图路径本身 SHALL 不调用 `applyStop`、不直接 `finishTurn(stopped)`：一个回合的 `turn.end` 恰由一条路径发出。被停止的 assistant 正文为 abort 生效前已到达的 text.delta（可能为空）。停止意图登记期间 runtime 获取或派发失败（派发回执拒绝）时，SHALL 走该请求在无停止意图时完全相同的失败路径（prompt → 既有受理对补偿与既有错误响应；regenerate → 其自身规则），停止意图随之丢弃、不写 `abort`。若该回合已先被其它路径终态结算（如崩溃 `failed`），停止意图 SHALL 不改写其终态。
+
+会话非 running（`idle`/`done`/`failed`/`stopped`）SHALL 返回 204 无 body，不写任何行、不向进程发帧（幂等）。supervisor SHALL 记录该回合的停止已在途：同一回合再次 stop SHALL 不写第二帧 `abort`、不重复结算审批，返回 202 `{}`。
+
+#### Scenario: 运行中停止
+- **WHEN** 回合进行中调用 stop，fake-omp 以 `abort-ok` 脚本应答
+- **THEN** 202，body 恰为 `{}`；fake-omp stdin 收到恰一帧 `{type:"abort"}`；随后浏览器事件序列以 `turn.end{messageId,status:"stopped"}` 结束且不含 `error`；`GET /api/sessions` 中该会话 `status="stopped"`
+
+#### Scenario: 非运行中停止幂等
+- **WHEN** 对 `idle`、`done`、`failed`、`stopped` 会话分别调用 stop
+- **THEN** 204、响应无 body；消息表行数与 `updated_at` 不变、无入站帧
+
+#### Scenario: 同一回合二次停止
+- **WHEN** fake-omp 以 `abort-ignored` 脚本运行，回合中调用 stop，在 `abort` 已发出而 `agent_end` 未到、有界退回尚未触发时再次调用 stop
+- **THEN** 两次均 202 `{}`；fake-omp stdin 记录恰一帧 `abort`；无第二次审批结算；最终恰一个 `turn.end(stopped)`
+
+#### Scenario: 派发前停止
+- **WHEN** fake-omp 以 `slow-ready` 脚本运行（`--ready-delay-ms` 使获取/握手窗口可观察），会话发出 prompt（REST 仍在等待派发回执、会话已为 running）时调用 stop，随后握手完成；该回合结束后对同一会话发一个 probe prompt
+- **THEN** stop 在握手完成前返回 202 `{}`；该 prompt 请求返回 202 `{userMessageId,assistantMessageId,undo}`（chat-sessions「REST prompt 受理与补偿」的三键受理 body）；该回合的 assistant 与会话为 `stopped`，SSE 该回合恰一个 `turn.end(stopped)`、无 `error`、无 `turn.end(failed)`；probe prompt 在同一进程上 202 且正常完成，其报告的 `frames=` 恰为 `negotiate_protocol,get_state,prompt,abort,prompt`（`abort` 紧随被停止回合的 `prompt`，末个 `prompt` 为 probe）
+
+#### Scenario: abort 返回 false 走停止意图
+- **WHEN** supervisor 对 running 会话调用 runtime `abort()` 而它因 prompt 尚未派发返回 `false`
+- **THEN** 此刻不写 `abort` 帧，stop 仍返回 202 `{}`；该回合派发回执兑现后 supervisor 对同一 generation 再次调用 `abort()`，入站帧序为该回合的 `prompt` 后恰一帧 `abort`；回合经 `message_end aborted` → `agent_end` 以恰一个 `turn.end(stopped)` 收尾（不经 `applyStop` 合成）；不产生 `error` 或 `turn.end(failed)`
+
+#### Scenario: body 与鉴权
+- **WHEN** 已认证 owner 以 `{}`、`{"x":1}`、malformed JSON 或 `text/plain` body 调用 stop
+- **THEN** 400 `bad_request`，无 supervisor 调用、无写入、无入站帧
+- **WHEN** 匿名请求、他人会话、不存在会话调用 stop
+- **THEN** 分别 401、404、404（后两者响应一致），无 supervisor 调用与数据变更
+
+#### Scenario: 获取失败丢弃停止意图
+- **WHEN** fake-omp 以 `no-ready-hang` 脚本运行，会话发出 prompt 后、握手超时之前调用 stop，随后握手超时、该进程经既有获取失败路径关停；另一会话以同一脚本发出 prompt 但不调用 stop，作为对照
+- **THEN** 两个 prompt 以同一既有错误结束（响应状态码、错误信封、受理对补偿后的消息与会话状态均与对照相同）；两个子进程收到的入站帧相同，且都不含 `abort`；两个会话都没有 `turn.end` 或 `error` 事件
+
+#### Scenario: 准入与前代退役等待期间停止
+- **WHEN** 会话的 prompt 已受理但尚未取得可派发的进程时调用 stop：该 prompt 的派发前步骤（工作空间快照）尚未结束，或仍在进程池准入中，或在等待该会话上一进程退役完成；或 stop 在该 prompt 的获取/握手期间登记了停止意图，随后该 prompt 因上一进程已退出而改在新进程上重新准入
+- **THEN** stop 正常返回，此刻不写任何帧；该 prompt 在其最终取得的进程上照常派发，派发回执兑现后该进程恰收到一帧 `abort`，回合以恰一个 `turn.end(stopped)` 收尾，不产生 `error`；已退役的上一进程没有收到 `abort`
+
+#### Scenario: regenerate 派发前停止
+- **WHEN** regenerate 已提交事务（新 assistant 行与会话为 running）而其 prompt 派发回执尚未兑现时调用 stop，随后派发回执兑现
+- **THEN** stop 正常返回，此刻不写任何帧；派发回执兑现后该进程恰收到一帧 `abort`，回合经 `message_end aborted` → `agent_end` 以恰一个 `turn.end(stopped)` 收尾，不产生 `error`；regenerate 兑现其 `{assistantMessageId}`
+- **WHEN** 同样登记了停止意图，但提交后的派发失败
+- **THEN** 新 assistant 行与会话为 `failed`，regenerate 以 502 `agent_unavailable` 拒绝；进程未收到 `abort`；已删除的旧 assistant 行未被复活
+
+#### Scenario: 派发后极早停止
+- **WHEN** fake-omp 以 `abort-ok --start-delay-ms 300` 运行（回合在 prompt ack 后 300ms 才开始；此前读到的 `abort` 按真 omp 语义静默丢弃整轮），会话 prompt 的派发回执兑现后立即调用 stop；另以 `slow-ready --ready-delay-ms 300 --start-delay-ms 300` 在握手期间调用 stop；两者都在该回合结束后发一个 probe prompt
+- **THEN** stop 均返回；不推进注入时钟，该回合的 assistant 与会话为 `stopped`，SSE 恰一个 `turn.end(stopped)`、无 `error`，未经有界退回；probe prompt 在同一进程上正常完成，其 `frames=` 恰为 `negotiate_protocol,get_state,prompt,abort,prompt`
+
+#### Scenario: 回合迟迟不开始时仍有界收尾
+- **WHEN** fake-omp 以 `abort-ok --start-delay-ms 60000` 运行，派发回执兑现后调用 stop，注入时钟推进 `OMP_ABORT_GRACE_MS`
+- **THEN** 进程不收到 `abort` 帧；回合经有界退回以恰一个 `turn.end(stopped)` 收尾，不产生 `error`，没有未处理的 Promise 拒绝
