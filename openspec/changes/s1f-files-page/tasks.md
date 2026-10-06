@@ -57,7 +57,7 @@
 > - 既有断言的盘点：组 2、3 与其后各「删除 / 替换 / 搬家」类任务里点名的 `文件:行`，是写作时（C、S1g 尚未实现）在仓库里 `grep` 的结果；C、S1g 归档后行号与个别用例会变。每一刀开工时先重跑该任务给出的 grep，
 >   命中而未被点名的依赖按同一规则（等价改写 / 随条文删除 / 旧名暂留）在**让它变红的那一刀**里处置并记入偏离记录，不留到后一个 PR。
 > - 预览正文的断言一律异步取：组 17 起每类预览器都经动态 `import()` 首次加载，凡经 `PreviewPane` / `WorkspaceBrowser` / 页面渲染后取预览正文（表格、源码行、标题、`img`、`iframe`、成员列表等）的断言——新写的与改写的都算——用 `await screen.findBy…` 或 `await waitFor(…)`，
->   不在 `render`、`rerender` 或点击之后同步 `getBy…` / `querySelector`，也不靠预热加载函数。测试文件静态导入某个预览器模块并直接渲染它时不经加载函数，模块自身同步渲染的内容可以同步断言。假定时器生效期间 `findBy` / `waitFor` 的轮询会挂住，改用 `await act(() => vi.advanceTimersByTimeAsync(n))` 推进后同步断言。
+>   不在 `render`、`rerender` 或点击之后同步 `getBy…` / `querySelector`，也不靠预热加载函数（唯一例外是 18.1 点名的那条「没有 `act` 之外的更新」用例，理由见该任务）。测试文件静态导入某个预览器模块并直接渲染它时不经加载函数，模块自身同步渲染的内容可以同步断言。假定时器生效期间 `findBy` / `waitFor` 的轮询会挂住，改用 `await act(() => vi.advanceTimersByTimeAsync(n))` 推进后同步断言。
 > - 用户可见的变化在 `docs/acceptance/functional-checklist.md` 增改对应行，结论一律 `待签`，agent 不代签；行里不写带单位的像素值与点号、井号开头的选择器（守卫会拒；回收目录、环境文件这类点开头的名字用文字描述）。
 > - 每条行为任务给出变异证据（去掉或写反实现时哪条测试判红），写进 PR 描述。
 > - 公开仓库：被跟踪文件里不出现主机绝对路径、用户名、IP 或密钥；测试 VPS 的地址只在本机未跟踪的注记里。
@@ -354,7 +354,7 @@ Minimal mergeable slice: 16.1 按方法分两刀——地址函数 `fileUrl`、`
 
 ## 17. file-previewers — 框架：类别判定、按需加载、预览头与下载
 
-- [ ] 17.1 新目录 `web/src/features/files/previewers/`：`index.ts`（唯一含动态 `import()` 的文件，按类别返回带缓存的加载函数）与 `kind.ts`（`previewKind`、`textView`、图标映射）。把组 2 的 Markdown、表格、源码、图片四个既有预览各搬成一个模块，经 `index.ts` 加载；2.1 定的 `data-slot`（`preview-code`、`preview-table`、`preview-markdown` 等）随模块原样带走。
+- [ ] 17.1 新目录 `web/src/features/files/previewers/`：`index.ts`（唯一含动态 `import()` 的文件，按类别返回带缓存的加载函数）与 `kind.ts`（`previewKind`、`textView`、图标映射）。把组 2 的 Markdown、表格、源码、图片四个既有预览各搬成一个模块，经 `index.ts` 加载；2.1 定的 `data-slot`（`preview-code`、`preview-table`、`preview-markdown` 等）随模块原样带走。这一刀里 `preview.tsx` 即经 `kind.ts` 的 `previewKind` / `textView` 在这四类之间分流（两个导出在本刀就有生产调用方，knip 不报未引用）；其余类别的分流随 17.2。
   这一刀的边界（定死，下面的测试处置以它为前提）：
   - 留在 `preview.tsx`、同步渲染的：预览头（图标、路径、元数据）、截断提示行、不支持态、错误态——它们不经任何预览器模块。
   - 进模块、首次经动态 `import()` 才出现的：表格（`CsvTable`）、源码（`CodeView`，含 `json` 的格式化）、图片（`img`）、Markdown（`MarkdownPreview` 整个搬走，**`查看源码` / `渲染视图` 切换按钮留在 Markdown 模块里**，不上提到预览头；Markdown 模块在 `previewers/` 内部静态导入源码模块的 `CodeView`，所以同一次挂载里切换视图仍是同步的）。
@@ -409,7 +409,7 @@ Minimal mergeable slice: 16.1 按方法分两刀——地址函数 `fileUrl`、`
 - [ ] 17.4 契约测试（`web/test/preview-kind-contract.test.ts`）：读取服务端 `preview.ts` 导出的四个扩展名集合与 `kind.ts` 的对应集合，断言两两相等（file-previewers「与服务端的扩展名表一致」）。
 - [ ] 17.5 测试（`web/test/preview.test.tsx` 扩充、`web/test/previewers-loading.test.tsx` 扩充——该文件与它的三条 `PreviewPane` 级用例已随 17.1 建立，这里补页面级场景，其中「加载失败可重试」的 `下载 main.py` 断言依赖 17.2 的预览头；凡取预览正文的断言一律 `await screen.findBy…` / `waitFor`，不在 `render` 或点击之后同步取）：「判定表」「未知文件由服务端裁决」「第一次才加载」「加载失败可重试」「每个文件都能下载」「截断提示」「请求归属与资源释放」。
 - [ ] 17.6 FL 行：每个文件都有下载按钮、未知类型文件的两种结果（看得了 / 不支持加下载）；结论 `待签`。
-- [ ] 17.7 变异证据：在 `page.tsx` 里静态导入 `previewers/code` → 守卫判红；把 `previewers/index.ts` 的动态 `import()` 全改成静态导入 → 走查的「选中时新增 `.js` 响应」断言判红；不支持态去掉下载链接 → 「每个文件都能下载」判红；恢复扩展名白名单 → `schema.proto` 用例判红。
+- [ ] 17.7 变异证据：在 `page.tsx` 里静态导入 `previewers/code` → 守卫判红；把 `previewers/index.ts` 的动态 `import()` 全改成静态导入 → 走查的「选中时新增 `.js` 响应」断言判红；不支持态去掉下载链接 → 「每个文件都能下载」判红；恢复扩展名白名单 → `schema.proto` 用例判红；去掉加载期间的 `正在加载预览…` 占位，或让 `重试` 不重新发起加载 → `previewers-loading.test.tsx` 对应用例判红（这两条随 17.1 的 PR）。
 
 Suggested fixture level: compact - 前端展示层的结构调整；全站唯一的代码分割点由静态守卫钉住
 Minimal mergeable slice: 17.1 + 17.3（搬家、加载占位与失败重试、静态守卫与走查里的按需块断言，除首次加载的异步之外行为不变；17.1 点名的两处导入 / 读源码断言同刀改指新模块，`preview.test.tsx` 的 12 个用例与 `files-page.test.tsx` 的一处同刀改为 `findBy`，`previewers-loading.test.tsx` 的三条新用例同刀）先合，单独合入时 `make check` 全绿；17.2 的预览头、文案与白名单去除随后，它点名的三个既有测试文件的断言同刀改写
@@ -539,7 +539,7 @@ Minimal mergeable slice: 24.1–24.2（标记与过滤，纯派生）先合；24
   - 随 25.2（产物卡）：`chat-page-artifact-card-state.test.tsx` 的 H3（`:83` 起，「再次打开预览会重新拉取」）与两条 H5（`:163`、`:188` 起，「打开中 / 拉取中的预览跟着自己的卡片」）断言对话框里 iframe 的 `srcdoc`（`:94`、`:105`、`:181`、`:212`），测的是预览对话框——随对话框**删除**，「最后一次为准」的意思由 `chat-workspace-sidebar-reveal.test.tsx` 的竞态用例接住；
     同文件 `:115-120` 起的 H4（拉取中禁用动作，按 image / code 两行参数化）去掉 image 一行（图片下载不再经 `fetchPreview`，没有拉取中的状态），code 一行保留；H2、H6 不动；
     `chat-page-artifact-card-support.tsx` 的 `OPEN_INDEX`（`:37`，按钮名不变，保留）、`truncatedPreview` 与 `:63`、`:88-91` 统计 `…/file?path=` 请求的帮手（html 与图片不再发这个请求：只被删除用例使用的帮手一并删除，其余保留——knip 不留未引用导出）；
-    `chat-page-artifact-card.test.tsx:228`、`:295`（html 与图片各发一次 `GET …/file`）改为「`GET …/file` 次数不增加」，`:318`（代码 `复制代码` 仍发一次）不动，`:393-400`（A8：html 预览 415 的就地文案）随对话框删除。；
+    `chat-page-artifact-card.test.tsx:228`、`:295`（html 与图片各发一次 `GET …/file`）改为「`GET …/file` 次数不增加」，`:318`（代码 `复制代码` 仍发一次）不动，`:393-400`（A8：html 预览 415 的就地文案）随对话框删除；
     `chat-page-artifact-card-feedback.test.tsx`（逐个 `it`）：`describe("失败就地显示")` 里的 `F3 a failed download shows the envelope message in its card and a later successful one removes it`（`:141-164`，图片 `下载` 经 `fetchPreview` 得 413 后就地显示信封文案、成功后经 `spyDownloads` 看到 Blob 链接被点击）——**删除**：下载改成普通链接后卡片不再为图片发请求，没有就地失败分支（即 25.4 首段说的「图片 413 的就地文案用例」；新形态由 `chat-page-artifact-card.test.tsx:295` 改写后的断言与 turn-artifacts「图片下载与代码复制」的用例证明）；
     同一 `describe` 的 `F3 a failed html preview shows its message between the head and the foot and an opened preview removes it`（`:166-192`，`:188` 断言对话框里 iframe 的 `srcdoc`）——**删除**：卡片不再为 html 发 `file` 请求，失败不再显示在卡片里，改由侧边栏预览区显示（workspace-sidebar「从卡片定位到文件」的场景「文件已不存在」，在 `chat-workspace-sidebar-reveal.test.tsx`）；
     `describe("html 预览对话框（拷入层 dialog）")` 整个（`:194-260`）——**删除**：`it.each` 的两条 `F4 closing the preview with %s focuses the button that opened it without scrolling`（`:200-232`，`关闭` 与 Escape 各一）的「关闭后焦点回到打开它的按钮且不滚动」由 `chat-workspace-sidebar-reveal.test.tsx` 的「窄屏的焦点往返」接住（25.3）；
