@@ -56,6 +56,20 @@ function composerParts(input: HTMLElement) {
   return { form, card, toolbar };
 }
 
+/** 样式规则的选择器，`@media` 等 at-rule 块展开为其内的规则（递归）。 */
+function ruleSelectors(css: string): string[] {
+  return topLevelBlocks(css).flatMap((block) =>
+    block.prelude.startsWith("@") ? ruleSelectors(block.body) : [block.prelude],
+  );
+}
+
+/** chat.css 的归属规则：每条规则的选择器都属于会话列表（含新建会话与重命名）。 */
+function foreignSelectors(css: string): string[] {
+  return ruleSelectors(css).filter(
+    (selector) => !/\.chat-(session|new-session|rename)\b/.test(selector),
+  );
+}
+
 function precedes(first: Node, second: Node) {
   return Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
 }
@@ -204,15 +218,37 @@ describe("(C5) static contract", () => {
     expect(view).not.toMatch(/chat-(layout|main)/);
     const css = stripComments(readRepoFile("web/src/features/chat/chat.css"));
     expect(css).not.toContain(".chat-sidebar");
-    const selectors = topLevelBlocks(css).map((block) => block.prelude.trim());
-    expect(selectors.length).toBeGreaterThan(0);
-    const foreign = selectors.filter(
-      (selector) =>
-        !/\.chat-(session|new-session|rename)\b/.test(selector) &&
-        !selector.startsWith("@media (hover"),
-    );
-    expect(foreign).toEqual([]);
+    expect(ruleSelectors(css).length).toBeGreaterThan(0);
+    expect(foreignSelectors(css)).toEqual([]);
     expect(ruleBody(css, ".chat-session-nav")).not.toContain("overflow");
+  });
+
+  it("the ownership rule reaches into at-rule blocks: a foreign selector inside @media is reported", () => {
+    const sample = [
+      ".chat-session-more { flex: none; }",
+      "@media (hover: hover) and (min-width: 761px) {",
+      "  .chat-session-item:hover .chat-session-more { opacity: 1; }",
+      "  .chat-composer { opacity: 0; }",
+      "}",
+      ".welcome { margin: 0; }",
+    ].join("\n");
+    expect(foreignSelectors(sample)).toEqual([".chat-composer", ".welcome"]);
+    // 真实文件确有一个带规则的 @media 块：上一条用例的空结果不是因为没进到块里。
+    const css = stripComments(readRepoFile("web/src/features/chat/chat.css"));
+    const media = topLevelBlocks(css).filter((block) => block.prelude.startsWith("@media"));
+    expect(media.flatMap((block) => ruleSelectors(block.body)).length).toBeGreaterThan(0);
+  });
+
+  it("the single-column shell has no gap class, plain or narrow-prefixed; the chat column keeps gap-2", async () => {
+    const { input } = await mountSelectedDone();
+    const column = input.closest('[data-slot="chat-column"]');
+    const shell = column?.parentElement;
+    if (!(column instanceof HTMLElement) || !(shell instanceof HTMLElement)) {
+      throw new Error("expected the chat column inside the single-column shell");
+    }
+    expect(shell.classList.contains("grid-cols-[minmax(0,1fr)]")).toBe(true);
+    expect([...shell.classList].filter((token) => /(^|:)-?gap-/.test(token))).toEqual([]);
+    expect(column.classList.contains("gap-2")).toBe(true);
   });
 
   it("chat.css drops the badge styles and holds no composer rules", () => {

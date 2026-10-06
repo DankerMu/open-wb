@@ -43,19 +43,24 @@ import {
   renameRoute,
   routeToOtherSession,
   rowAlerts,
+  rowButtons,
+  twoTurns,
 } from "./chat-page-artifacts-panel-support.js";
 import {
   type Change,
   edit,
+  goLive,
   listed,
   openSession,
   quiesce,
+  rowTexts,
+  toolStep,
   write,
 } from "./chat-page-file-changes-support.js";
 import { settleDeferredResponse } from "./chat-page-lifecycle-support.js";
-import { envelope } from "./chat-page-ownership-support.js";
+import { envelope, SESSION_MESSAGES } from "./chat-page-ownership-support.js";
 import { imagePreviewResponse } from "./files-fixture.js";
-import { deferredResponse, jsonResponse, textPreviewResponse } from "./support.js";
+import { calls, deferredResponse, jsonResponse, textPreviewResponse } from "./support.js";
 import { yieldMacrotask } from "./ui-support.js";
 
 const blobs = artifactsPanelFixture();
@@ -252,6 +257,45 @@ describe("外层先离场 (Q5)", () => {
 
     expect(panelBody(empty)).toBe(NO_ARTIFACTS);
     expect(screen.getAllByRole("dialog", { hidden: true })).toEqual([empty]);
+    expect(toasts()).toEqual([]);
+  });
+});
+
+// s1f-chat-followups 5.7：视图末条助手已终态时到达未知回合的事件，连接重装一次完整快照（不经「历史加载中」）。
+describe("跨重同步保持打开", () => {
+  it("an unknown-turn event while the panel is open re-reads the snapshot once: the panel stays open and lists the new snapshot's changes", async () => {
+    const first = [toolStep(11, 0, "edit", [edit("a.md", 1, 0)])];
+    const before = changedTurn([edit("a.md", 1, 0)]);
+    // 别处开始并结束的下一回合（助手消息 id 2）：改了 a.md，新写了 out/index.html；游标盖过 `1:4`。
+    const after = {
+      ...twoTurns(first, [
+        toolStep(21, 0, "edit", [edit("a.md", 3, 1)]),
+        toolStep(22, 1, "write", [write(INDEX)]),
+      ]),
+      streamCursor: { epoch: 1, seq: 4 },
+    };
+    let current = before;
+    const { fetchMock } = await openSession(before, listed, {
+      [SESSION_MESSAGES]: () => jsonResponse(current),
+    });
+    const send = await goLive();
+    const reads = () => calls(fetchMock, SESSION_MESSAGES).length;
+    const baseline = reads();
+    const { panel } = await openPanel();
+    expect(rowTexts(panel)).toEqual(["+1zhangsan/proj/a.md"]);
+
+    current = after;
+    send("turn.start", { messageId: 2 });
+    await quiesce();
+
+    expect(reads()).toBe(baseline + 1);
+    expect(drawer()).toBe(panel);
+    expect(screen.getAllByRole("dialog")).toEqual([panel]);
+    expect(rowTexts(panel)).toEqual(["+3-1zhangsan/proj/a.md", "写入zhangsan/proj/out/index.html"]);
+    expect(rowButtons(panel)[1]).toEqual([
+      "查看详情 zhangsan/proj/out/index.html",
+      "打开网页预览 index.html",
+    ]);
     expect(toasts()).toEqual([]);
   });
 });

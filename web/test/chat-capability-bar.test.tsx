@@ -1,8 +1,9 @@
 // 能力栏的工作空间位（chat-web「输入框与能力栏」、session-sidebar「composer footer 工作空间选择」）：已选会话
 // 是只读标签的三种文案，回到欢迎态后是可操作的选择器；欢迎态能力栏不渲染权限、上传与专家控件。
 // seam：整页挂载 + 假 API。期望文案取自规格条文。
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
+import { quiesce } from "./chat-page-file-changes-support.js";
 import { composer } from "./chat-page-ownership-support.js";
 import {
   A,
@@ -24,7 +25,8 @@ import {
   queryFooterButton,
   workspaceList,
 } from "./chat-page-welcome-scene-support.js";
-import type { FetchMock } from "./support.js";
+import { type FetchMock, paths } from "./support.js";
+import { pressPointer } from "./ui-support.js";
 
 const GONE = "9".repeat(32);
 
@@ -79,6 +81,28 @@ describe("能力栏：已选会话工作空间只读", () => {
     expect(trigger.disabled).toBe(false);
     expect(workspaceSlot().contains(trigger)).toBe(true);
     expect(mutations(mounted.fetchMock)).toEqual([]);
+  });
+
+  it("点击只读标签：不出现弹层，没有新请求", async () => {
+    const { fetchMock } = mountSessions("/", sessions(), {
+      "/api/workspaces": () => workspaceList(PROJECT_A),
+    });
+    await openExistingSession(await findList("绑定会话"), "绑定会话", A);
+    await expectReadOnly("任务启动于 项目A");
+    await quiesce();
+    const before = paths(fetchMock);
+    const text = within(workspaceSlot()).getByText("任务启动于 项目A", { exact: true });
+
+    for (const target of [text, workspaceSlot()]) {
+      pressPointer(target);
+      fireEvent.keyDown(target, { key: "Enter" });
+    }
+    await quiesce();
+
+    expect(screen.queryAllByRole("dialog", { hidden: true })).toEqual([]);
+    expect(screen.queryByRole("textbox", { name: "搜索工作空间" })).toBeNull();
+    expect(workspaceSlot().textContent).toBe("任务启动于 项目A");
+    expect(paths(fetchMock)).toEqual(before);
   });
 
   it("工作空间列表读取失败：绑定会话显示 任务启动于 已绑定空间，未绑定会话仍是 任务启动于 未绑定", async () => {

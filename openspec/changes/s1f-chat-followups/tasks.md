@@ -108,17 +108,17 @@ Minimal mergeable slice: 4.1 + 4.2 + 4.3 + 4.4 + 4.5 一刀（web 源码与注�
 
 ## 5. 补测试（不改产品代码）
 
-- [ ] 5.1 流错误恢复：最近快照为 `running` 时事件连接终态失败（没有 `生成中` / `停止`）→ 切到别的会话再切回、历史重读为 `running` → `生成中` 与 `停止` 重新出现、流错误消失。新文件 `web/test/chat-stream-error-recovery.test.tsx`。
-- [ ] 5.2 「+」菜单空目录：目录请求成功但为空 → 菜单只显示 `暂无可用项`、不显示错误（`web/test/chat-page-plus-menu.test.tsx`，现 368 行；真实后端到不了这一分支，只能在这里钉）。
-- [ ] 5.3 「+」菜单点菜单外关闭：草稿不变、焦点回到 `技能与命令` 按钮（同文件，现只有 Esc 一条路径）。
-- [ ] 5.4 原生跟随开关守卫（`web/test/chat-scroll-follow.test.tsx`，现 577 行，或新文件）：用户上滚后开始新回合，线程不被拉回底部——钉 `scrollToBottomOnRunStart`；
+- [x] 5.1 流错误恢复：最近快照为 `running` 时事件连接终态失败（没有 `生成中` / `停止`）→ 切到别的会话再切回、历史重读为 `running` → `生成中` 与 `停止` 重新出现、流错误消失。新文件 `web/test/chat-stream-error-recovery.test.tsx`。
+- [x] 5.2 「+」菜单空目录：目录请求成功但为空 → 菜单只显示 `暂无可用项`、不显示错误（`web/test/chat-page-plus-menu.test.tsx`，现 368 行；真实后端到不了这一分支，只能在这里钉）。
+- [x] 5.3 「+」菜单点菜单外关闭：草稿不变、焦点回到 `技能与命令` 按钮（同文件，现只有 Esc 一条路径）。
+- [x] 5.4 原生跟随开关守卫（`web/test/chat-scroll-follow.test.tsx`，现 577 行，或新文件）：用户上滚后开始新回合，线程不被拉回底部——钉 `scrollToBottomOnRunStart`；
   变异：从 `thread-viewport.tsx` 的 `NATIVE_FOLLOW_OFF` 去掉该项应判红。jsdom 下若基元的这次滚动观察不到（变异不红），改为把四个开关的值作为可断言的结构钉住，并把「未能在 jsdom 层证明」写进 PR 偏离记录。
 - [x] 5.5 走查里真实点击 `回到最新`（`web/e2e/ui-walk-scroll.ts`，现 276 行，在按钮可见的那一步之后）：点击后转录到达底部（距底在容差内）、按钮消失。
-- [ ] 5.6 `web/test/chat-composer.test.tsx`（现 247 行）：补回 #893 丢掉的「窄屏外壳不带 gap」——`conversation-view.tsx` 里带 `grid-cols-[minmax(0,1fr)]` 的那个外层容器的类名里没有任何 `gap-` 记号（含 `narrow:` 前缀的；其内的 `chat-column` 带 `gap-2` 是对的，不改产品代码）；
+- [x] 5.6 `web/test/chat-composer.test.tsx`（现 247 行）：补回 #893 丢掉的「窄屏外壳不带 gap」——`conversation-view.tsx` 里带 `grid-cols-[minmax(0,1fr)]` 的那个外层容器的类名里没有任何 `gap-` 记号（含 `narrow:` 前缀的；其内的 `chat-column` 带 `gap-2` 是对的，不改产品代码）；
   `chat.css` 选择器归属断言不再整体放行 `@media (hover` 块，改为进到块内对其选择器用同一归属规则，注入样本自证。
-- [ ] 5.7 产物面板跨重同步保持打开：面板打开时到达未知回合事件、页面重装快照 → 面板仍开、内容来自新快照（`web/test/chat-page-artifacts-panel-focus.test.tsx`，现 257 行）。
-- [ ] 5.8 只读工作空间标签的真实点击：已选会话里点击标签 → 不出现弹层、没有新请求（`web/test/chat-capability-bar.test.tsx`，现 112 行；现为「无按钮、无可聚焦元素」的代理断言）。
-- [ ] 5.9 每条写明对应的变异或「去掉哪一行实现判红」；写不出变异的（纯结构钉子）在 PR 描述里说明。
+- [x] 5.7 产物面板跨重同步保持打开：面板打开时到达未知回合事件、页面重装快照 → 面板仍开、内容来自新快照（`web/test/chat-page-artifacts-panel-focus.test.tsx`，现 257 行）。
+- [x] 5.8 只读工作空间标签的真实点击：已选会话里点击标签 → 不出现弹层、没有新请求（`web/test/chat-capability-bar.test.tsx`，现 112 行；现为「无按钮、无可聚焦元素」的代理断言）。
+- [x] 5.9 每条写明对应的变异或「去掉哪一行实现判红」；写不出变异的（纯结构钉子）在 PR 描述里说明。
 
 Suggested fixture level: compact - 只加断言；产品代码零改动（发现缺陷则停下报告，不在本组修）
 Minimal mergeable slice: 5.1–5.4、5.6–5.8 一刀（jsdom 测试）；5.5 单独一刀（ui-walk）
