@@ -16,6 +16,7 @@ export const HTTP_ERROR_MESSAGES = Object.freeze({
   preview_unsupported: "该类型不支持预览",
   agent_capacity: "Agent 容量已满，请稍后重试",
   approval_settled: "该审批已处理",
+  session_archived: "会话已归档，恢复后才能继续对话",
 });
 
 export type HttpErrorCode = keyof typeof HTTP_ERROR_MESSAGES;

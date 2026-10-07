@@ -7,7 +7,7 @@ import { HTTP_ERROR_MESSAGES, HttpError, type HttpErrorCode } from "../src/core/
 import { handleHttpError } from "../src/http/index.js";
 
 /** spec「统一错误信封」码表逐字抄录：独立于 core/errors 的期望来源。 */
-const THIRTEEN_TYPED_ERRORS = [
+const FOURTEEN_TYPED_ERRORS = [
   ["bad_request", 400, "请求格式不正确"],
   ["invalid_credentials", 401, "账号或密码不正确"],
   ["account_disabled", 403, "该账号已停用，请联系管理员"],
@@ -21,10 +21,12 @@ const THIRTEEN_TYPED_ERRORS = [
   ["preview_unsupported", 415, "该类型不支持预览"],
   ["agent_capacity", 503, "Agent 容量已满，请稍后重试"],
   ["approval_settled", 409, "该审批已处理"],
+  ["session_archived", 409, "会话已归档，恢复后才能继续对话"],
 ] as const;
 
-const NEW_TYPED_ERRORS = THIRTEEN_TYPED_ERRORS.filter(
-  ([code]) => code === "agent_capacity" || code === "approval_settled",
+const NEW_TYPED_ERRORS = FOURTEEN_TYPED_ERRORS.filter(
+  ([code]) =>
+    code === "agent_capacity" || code === "approval_settled" || code === "session_archived",
 );
 
 const GENERIC_BODY = JSON.stringify({ error: { message: "服务器内部错误" } });
@@ -94,7 +96,7 @@ function expectGenericNoDetail(captured: ReplyCapture): void {
   expect(captured.statusCode).toBe(500);
   expect(captured.body).toBe(GENERIC_BODY);
   expect(captured.body).not.toContain("FST_ERR");
-  for (const [code] of THIRTEEN_TYPED_ERRORS) {
+  for (const [code] of FOURTEEN_TYPED_ERRORS) {
     expect(captured.body).not.toContain(code);
   }
 }
@@ -112,14 +114,14 @@ async function withTestErrorApp<T>(action: (app: FastifyInstance) => Promise<T>)
   }
 }
 
-describe("typed definition map 恰十三码", () => {
+describe("typed definition map 恰十四码", () => {
   it("core/errors 的码集合与 spec 码表逐一相等", () => {
     expect(Object.keys(HTTP_ERROR_MESSAGES).sort()).toEqual(
-      THIRTEEN_TYPED_ERRORS.map(([code]) => code).sort(),
+      FOURTEEN_TYPED_ERRORS.map(([code]) => code).sort(),
     );
   });
 
-  it.each(THIRTEEN_TYPED_ERRORS)(
+  it.each(FOURTEEN_TYPED_ERRORS)(
     "测试路由抛 HttpError(%s) -> exact %i 信封，无 Fastify 默认字段",
     async (code, statusCode, message) => {
       await withTestErrorApp(async (app) => {
@@ -133,13 +135,15 @@ describe("typed definition map 恰十三码", () => {
     },
   );
 
-  it("三种 409 以 code 区分，各自保留独立文案", () => {
-    const conflicts = THIRTEEN_TYPED_ERRORS.filter(([, statusCode]) => statusCode === 409);
+  it("四种 409 以 code 区分，各自保留独立文案", () => {
+    const conflicts = FOURTEEN_TYPED_ERRORS.filter(([, statusCode]) => statusCode === 409);
     expect(conflicts.map(([code]) => code)).toEqual([
       "session_busy",
       "conflict",
       "approval_settled",
+      "session_archived",
     ]);
+    expect(new Set(conflicts.map(([, , message]) => message)).size).toBe(4);
     for (const [code, , message] of conflicts) {
       const captured = mapError(new HttpError(code), "/api/no-such-route", "POST");
       expect(captured.statusCode).toBe(409);
@@ -220,7 +224,7 @@ async function withMappedLoginApp<T>(
   }
 }
 
-describe("两新码经 no-store 路由保持 route-owned no-store", () => {
+describe("新码经 no-store 路由保持 route-owned no-store", () => {
   it.each(NEW_TYPED_ERRORS)(
     "POST /api/auth/login 注入 %s -> exact %i 信封、no-store、无 set-cookie",
     async (code, statusCode, message) => {

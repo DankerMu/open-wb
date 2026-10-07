@@ -16,6 +16,7 @@ const HTTP_ERROR_STATUSES = Object.freeze({
   preview_unsupported: 415,
   agent_capacity: 503,
   approval_settled: 409,
+  session_archived: 409,
 } as const satisfies Record<HttpErrorCode, number>);
 
 export function sendHttpError(reply: FastifyReply, code: HttpErrorCode): FastifyReply {

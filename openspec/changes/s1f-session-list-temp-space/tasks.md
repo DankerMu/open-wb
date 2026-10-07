@@ -51,7 +51,7 @@ Minimal mergeable slice: 1.1、1.2 各自可先单独合入（只增列的迁移
 
 ## 2. server — 归档
 
-- [ ] 2.1 `server/src/core/errors` 增加 `session_archived`（message `会话已归档，恢复后才能继续对话`），`server/src/http` 的状态映射为 409。测试：http-service-skeleton「归档与撤回冲突的错误码」中 `session_archived` 的一半；既有「N 码」断言的计数同步（十三 → 十四，11.1 再加到十五）。
+- [x] 2.1 `server/src/core/errors` 增加 `session_archived`（message `会话已归档，恢复后才能继续对话`），`server/src/http` 的状态映射为 409。测试：http-service-skeleton「归档与撤回冲突的错误码」中 `session_archived` 的一半；既有「N 码」断言的计数同步（十三 → 十四，11.1 再加到十五）。
 - [ ] 2.2 `store-metadata.ts` 的 `patchSession` 支持 `archived`：`true` 用带条件的 UPDATE（`status != 'running'`）并由路由在同一同步段内检查控制占用，条件不满足时整个 PATCH 不写；`false` 置 NULL。`rest-metadata.ts` 的 body 校验加 `archived`（布尔）。测试（新文件 `server/test/session-archive.test.ts`）：session-metadata「会话归档」的「归档与恢复」「运行中与占用期间不能归档」「鉴权」，「会话元数据修改」的「归档键与其它键一起修改」与「非法 body 与鉴权」里新增的两例。
 - [ ] 2.3 只读拦截：prompt 路由（`rest.ts`，与受理同一同步段）、regenerate 与 fork 的预检（`branching.ts`）对 `archived_at` 非 NULL 返回 409 `session_archived`，位于 owner 预检与 body 校验之后、`session_busy` 之前。测试（同文件）：「归档后只读」（undo 一项留到 11.4）、「归档与受理不并发成功」、chat-sessions「Archived session refuses prompts」、turn-control「已归档的源会话」。
 - [ ] 2.4 变异证据：去掉 UPDATE 的 `status` 条件 → 「运行中不能归档」判红；去掉 prompt 的拦截 → 「归档后只读」判红；把拦截放到 `session_busy` 之后不影响这些用例，另加一条「已归档且占用被持有时返回 `session_archived`」钉住次序。
