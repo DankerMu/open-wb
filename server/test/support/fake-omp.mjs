@@ -9,6 +9,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { parseArgs, parseDelay } from "./fake-omp-argv.mjs";
+import { CALL_1, CALL_2, TOOL_OUTPUT, toolEnd, toolStart } from "./fake-omp-composer.mjs";
 import { loadBaseUrl, parseToolCall, postChat } from "./fake-omp-proxy.mjs";
 import {
   ANSWER_DELTAS,
@@ -26,9 +27,6 @@ const MAX_REASSEMBLED = 67_108_864;
 const CHUNK_PAYLOAD = 256 * 1024;
 const THREE_MIB = 3 * 1024 * 1024;
 const DEFAULT_SESSION = "/tmp/open-wb-fake-session.jsonl";
-const TOOL_ID = "tool-1";
-const TOOL_NAME = "bash";
-const TOOL_OUTPUT = "workbuddy-smoke";
 const UI_ID = "ui-confirm-1";
 const DELTAS = ["Hello ", "from ", "fake-omp"];
 /** slow-ready（#461）：扣住 ready 之后行为与 abort-ok 完全一致。 */
@@ -47,8 +45,6 @@ const APPROVAL_SCENARIOS = new Set([
 ]);
 /** 任何状态下 abort 都不产生帧、也不被延后记录的场景。 */
 const IGNORE_ABORT = new Set(["abort-ignored", "approval-chain-abort-ignored"]);
-const CALL_1 = { id: TOOL_ID, name: TOOL_NAME, args: { command: "echo workbuddy-smoke" } };
-const CALL_2 = { id: "tool-2", name: TOOL_NAME, args: { command: "echo workbuddy-smoke-2" } };
 /**
  * `branch` 场景的固定用户 entry 列表（#457）：进程生命周期内不变，不随 --resume、branch 或 prompt
  * 变化。后续消费者（#465 regenerate / #466 fork / #488 command）逐字依赖 entryId 与 text。
@@ -707,27 +703,6 @@ async function emitToolRound(calls) {
     await emit(toolStart(call));
     await emit(toolEnd(call));
   }
-}
-
-function toolStart(call) {
-  return {
-    type: "tool_execution_start",
-    toolCallId: call.id,
-    toolName: call.name,
-    args: call.args,
-  };
-}
-
-/** 成功帧同既有工具轮（无 isError）；拒绝帧同 wrapper.ts:337-340 与 agent-loop.ts:2625-2631。 */
-function toolEnd(call, approved = true) {
-  const text = approved ? TOOL_OUTPUT : `Tool call denied by user: ${call.name}`;
-  return {
-    type: "tool_execution_end",
-    toolCallId: call.id,
-    toolName: call.name,
-    result: { content: [{ type: "text", text }], details: approved ? { exitCode: 0 } : {} },
-    ...(approved ? {} : { isError: true }),
-  };
 }
 
 /** content 缺省为 []，既有回合逐字节不变；thinking 回合传入 [thinking 块, 文本块]。 */
