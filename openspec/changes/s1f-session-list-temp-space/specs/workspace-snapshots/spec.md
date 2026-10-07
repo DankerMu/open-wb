@@ -31,8 +31,20 @@
 - 名字在排除名单里的**目录**（任何层级，见「快照上限与配置」）：整棵不遍历，记入 `skipped`，`reason` 为 `excluded`；同名的普通文件不受影响；
 - 大小超过单文件上限的普通文件：不进 `entries`，记入 `skipped`，`reason` 为 `too_large`；
 - 读取元数据、列举或复制时得到 `EACCES` / `EPERM` 的条目：记入 `skipped`，`reason` 为 `unreadable`（目录则整棵）。
+- 列举出来之后就不在了的条目（#1148）：对一个已被列举出的条目读取元数据、读链接目标、打开或列举其子项时得到 `ENOENT`（或因其路径的中间分量消失而得到 `ENOTDIR`），视为快照时它已不存在——不进 `entries`，不进 `skipped`，遍历继续。工作空间根自身不存在或不是目录仍是 `failed`；
+- 名字不是合法 UTF-8 的条目（#1148）：列举 SHALL 按字节取名；名字的字节经 UTF-8 解码再编码得不回原字节的条目不进 `entries`、不读取（目录则整棵不遍历），记入 `skipped`，`reason` 为 `name_encoding`，`path` 为父路径加该名字的有损解码（非法字节以 U+FFFD 代替）。这个 `path` 只供展示，不保证能定位回该条目；还原对这类条目的保护不依赖它（见「还原」）。
 
-遍历 SHALL NOT 离开工作空间根（符号链接不跟随即保证）。`take` 结束时返回三种结果之一：`ok`（附 `skipped`）、`too_large`（见上限）、`failed`（其它任何错误，含工作空间根不是目录）。结果不是 `ok` 时 SHALL 删除本次已写出的 `<userMessageId>` 目录，不留半份快照。`take` SHALL NOT 修改工作空间内的任何文件、时间戳或权限位。
+遍历 SHALL NOT 离开工作空间根（符号链接不跟随即保证）。`take` 结束时返回三种结果之一：`ok`（附 `skipped`）、`too_large`（见上限）、`failed`（上述规则之外的任何错误，含工作空间根不是目录）。结果不是 `ok` 时 SHALL 删除本次已写出的 `<userMessageId>` 目录，不留半份快照。`take` SHALL NOT 修改工作空间内的任何文件、时间戳或权限位。
+
+#### Scenario: 列举后消失的条目不使快照失败
+- **WHEN** 工作空间含 `a.txt`、`gone.txt` 与目录 `d/`（内有 `d/x.txt`），测试让 `gone.txt` 在根目录被列举之后、被读取元数据之前被删除，另一次让 `d/` 在被判为目录之后、被列举之前被整棵删除
+- **THEN** 两次的结果都是 `ok`；清单的 `entries` 含 `a.txt`，不含消失的条目及其之下的路径；`skipped` 为空；`tree/` 下没有消失条目的残留
+- **WHEN** 工作空间根在 `take` 开始前就不存在
+- **THEN** 结果为 `failed`
+
+#### Scenario: 非 UTF-8 文件名被跳过而不使快照失败
+- **WHEN** 在 Linux 上工作空间含 `a.txt`、一个名字字节为 `0xD6 0xD0 0xCE 0xC4 0x2E 0x74 0x78 0x74` 的文件，以及一个名字含非法 UTF-8 字节的目录（内有文件），对它做快照
+- **THEN** 结果为 `ok`；`entries` 含 `a.txt`，不含这两个条目及该目录之下的任何路径；`skipped` 恰含这两项，`reason` 均为 `name_encoding`，`path` 为含 U+FFFD 的有损解码；`tree/` 下没有它们的内容；清单是合法的 UTF-8 JSON
 
 #### Scenario: 各类条目
 - **WHEN** 工作空间含 `a.txt`、`src/b.ts`、空目录 `empty/`、指向 `a.txt` 的符号链接 `link`、指向工作空间外文件的符号链接 `out`、一个 FIFO、目录 `node_modules/`（内有文件）与一个名为 `node_modules` 的普通文件位于 `docs/` 下，对它做快照
@@ -138,6 +150,7 @@ prompt 路由 SHALL 把「快照步骤」作为 `supervisor.prompt` 的派发前
   3. 其余（不存在、不是普通文件、`size` 不同或内容不同）→ SHALL 从 `tree/<path>` 写回并计入 `restored`：在同一目录以独占方式新建一个名字不可预测的临时文件，写入内容后**在 `rename` 之前经它的句柄**把 `mtime` 设为清单值、把权限位显式置为 `(清单 mode & 0o777) | 0o660`（不受进程 umask 影响；setuid、setgid、sticky 位一律不带），再 `rename` 到位——`rename` 之后 SHALL NOT 再按最终路径改时间或权限位（那条路径此时可被换成符号链接）；写回 SHALL 复制内容，SHALL NOT 在工作空间与快照之间建硬链接；现存而不是普通文件的同名条目先删除；
 - `entries` 里的符号链接：当前不是目标相同的符号链接则重建并计入 `restored`；
 - `skipped` 路径及其之下的一切 SHALL NOT 被读取、改写或删除。
+- 名字不是合法 UTF-8 的条目（#1148）：还原列举工作空间时 SHALL 按字节取名；在工作空间根或 `entries` 里的目录之下，名字的字节不能经 UTF-8 无损往返的条目及其之下的一切 SHALL NOT 被读取、改写或删除，也不计入 `removed` 与 `failed`——这一条与清单的 `skipped` 无关，不靠路径字符串匹配。不在 `entries` 里的多余目录照旧整棵删除，其下这类名字的条目一并删除（该目录在快照时不存在，其下的一切都是之后才出现的）。
 
 写回的文件 SHALL 对属主与属组都可读写（上式的 `0o660`）：清单里是 `0644` 的文件写回后为 `0664`，`0755` 写回后为 `0775`，`0600` 写回后为 `0660`。理由是写回的文件由 app 用户持有、靠父目录的 setgid 继承共享组，omp 用户只能经组权限继续读写它（ADR-0010）；其它用户位与执行位保持清单值。第 1、2 两种「不动」的文件权限位不被修改。
 
@@ -154,6 +167,10 @@ prompt 路由 SHALL 把「快照步骤」作为 `supervisor.prompt` 的派发前
 #### Scenario: 跳过项不动并列出
 - **WHEN** 快照的 `skipped` 含 `big.bin`（`too_large`）与 `node_modules`（`excluded`），其后二者内容都被改动，另新增了 `node_modules/x/y.js`，然后还原
 - **THEN** `big.bin` 与 `node_modules` 之下的内容保持改动后的样子（包括新增的文件）；返回的 `skipped` 含这两项
+
+#### Scenario: 非 UTF-8 文件名的条目不被当作多余条目删除
+- **WHEN** 在 Linux 上快照时工作空间含 `a.txt`、目录 `d/` 与 `d/` 下一个名字含非法 UTF-8 字节的文件 B（快照把它记入 `skipped`，`name_encoding`）；之后 `a.txt` 被改写、根下新增了一个名字含非法 UTF-8 字节的文件 C、新增了目录 `new/`（内有一个名字含非法 UTF-8 字节的文件），然后还原
+- **THEN** `a.txt` 为快照内容；B 与 C 都还在、字节未变；`new/` 整棵不存在；返回的 `removed` 为 1、`failed` 为空、`skipped` 含 B 那一项
 
 #### Scenario: 版本库随撤回还原
 - **WHEN** 快照时 `.git/refs/heads/main` 的内容为提交 A；之后的回合里新增了对象文件 `.git/objects/cd/ef01`、把 `.git/refs/heads/main` 改为提交 B，并改写了 `src/app.ts`，然后还原
