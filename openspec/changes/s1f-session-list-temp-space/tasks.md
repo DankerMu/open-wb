@@ -58,7 +58,7 @@ Minimal mergeable slice: 1.1、1.2 各自可先单独合入（只增列的迁移
 ## 2. server — 归档
 
 - [x] 2.1 `server/src/core/errors` 增加 `session_archived`（message `会话已归档，恢复后才能继续对话`），`server/src/http` 的状态映射为 409。测试：http-service-skeleton「归档与撤回冲突的错误码」中 `session_archived` 的一半；既有「N 码」断言的计数同步（十三 → 十四，11.1 再加到十五）。
-- [ ] 2.2 `store-metadata.ts` 的 `patchSession` 支持 `archived`：`true` 用带条件的 UPDATE（`status != 'running'`）并由路由在同一同步段内检查控制占用，条件不满足时整个 PATCH 不写；`false` 置 NULL。`rest-metadata.ts` 的 body 校验加 `archived`（布尔）。测试（新文件 `server/test/session-archive.test.ts`）：session-metadata「会话归档」的「归档与恢复」「运行中与占用期间不能归档」「鉴权」，「会话元数据修改」的「归档键与其它键一起修改」与「非法 body 与鉴权」里新增的两例。
+- [x] 2.2 `store-metadata.ts` 的 `patchSession` 支持 `archived`：`true` 用带条件的 UPDATE（`status != 'running'`）并由路由在同一同步段内检查控制占用，条件不满足时整个 PATCH 不写；`false` 置 NULL。`rest-metadata.ts` 的 body 校验加 `archived`（布尔）。测试（新文件 `server/test/session-archive.test.ts`）：session-metadata「会话归档」的「归档与恢复」「运行中与占用期间不能归档」「鉴权」，「会话元数据修改」的「归档键与其它键一起修改」与「非法 body 与鉴权」里新增的两例。
   **实施注记（fixture 评审补充）**：
   - 控制占用的检查口：`rest-metadata.ts` 的依赖增加 `supervisor: Pick<SessionSupervisorPort, "controlHeld">`（由 `rest.ts` 注册处传入；prompt 路由已有同样的用法）。`archived: true` 时先查 `controlHeld`，命中即 409 `session_busy`，与 UPDATE 之间没有 await。
   - 带条件的 UPDATE 命中 0 行有两种含义，`patchSession` 因此返回三态：视图 / 行不存在（→ 404，同今天）/ 条件不满足（→ 409 `session_busy`）。「条件不满足」由同一同步段内按 owner 复读该行是否存在判定。409 时整个 PATCH 不写，也不调 `noteTitleWrite`。
