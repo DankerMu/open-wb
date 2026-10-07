@@ -9,139 +9,41 @@ import { execFileSync } from "node:child_process";
 import fs, {
   appendFileSync,
   chmodSync,
-  closeSync,
-  constants,
   existsSync,
   lstatSync,
   mkdirSync,
-  mkdtempSync,
-  openSync,
-  type PathLike,
   readdirSync,
   readFileSync,
   readlinkSync,
   rmSync,
-  type StatOptions,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { type TakeResult, take } from "../src/workspaces/snapshots.js";
+import { describe, expect, it, vi } from "vitest";
+import {
+  describeTree,
+  dirEntry,
+  type Fixture,
+  fileEntry,
+  fixture,
+  ioError,
+  lock,
+  MESSAGE_ID,
+  manifestOf,
+  OUTSIDE_BYTES,
+  onCopyCreate,
+  put,
+  releaseAfterTest,
+  run,
+  swapAfterLstat,
+  W,
+} from "./workspace-snapshots-helpers.js";
 
-const W = "0123456789abcdef0123456789abcdef";
-const MESSAGE_ID = 42;
-const EXCLUDE = ["node_modules"];
-const OUTSIDE_BYTES = "outside the workspace\n";
 const IS_ROOT = process.geteuid?.() === 0;
-
-const temps: string[] = [];
-const locked: string[] = [];
-const fifos: string[] = [];
-
-afterEach(() => {
-  vi.restoreAllMocks();
-  for (const fifo of fifos.splice(0)) {
-    releaseReader(fifo);
-  }
-  for (const path of locked.splice(0)) {
-    chmodSync(path, 0o700);
-  }
-  for (const dir of temps.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-interface Fixture {
-  workspace: string;
-  snapshots: string;
-  snapshot: string;
-  outside: string;
-}
-
-/** Workspace, snapshot root (the state layout's 0700 directory) and an outside file, all apart. */
-function fixture(): Fixture {
-  const base = mkdtempSync(join(tmpdir(), "snapshot-take-"));
-  temps.push(base);
-  const workspace = join(base, "workspace");
-  const snapshots = join(base, "state", "snapshots");
-  const outside = join(base, "outside.txt");
-  mkdirSync(workspace, { mode: 0o755 });
-  mkdirSync(snapshots, { recursive: true, mode: 0o700 });
-  chmodSync(snapshots, 0o700);
-  writeFileSync(outside, OUTSIDE_BYTES);
-  return { workspace, snapshots, snapshot: join(snapshots, W, String(MESSAGE_ID)), outside };
-}
-
-function put(root: string, path: string, bytes: string, mode = 0o644): void {
-  const file = join(root, path);
-  mkdirSync(join(file, ".."), { recursive: true, mode: 0o755 });
-  writeFileSync(file, bytes);
-  chmodSync(file, mode);
-}
-
-function lock(path: string, mode: number): void {
-  chmodSync(path, mode);
-  locked.push(path);
-}
-
-function run(f: Fixture, excludeNames: readonly string[] = EXCLUDE): Promise<TakeResult> {
-  return take({
-    workspaceRoot: f.workspace,
-    snapshotsRoot: f.snapshots,
-    workspaceId: W,
-    userMessageId: MESSAGE_ID,
-    excludeNames,
-  });
-}
 
 function modeOf(path: string): number {
   return lstatSync(path).mode & 0o777;
-}
-
-/** Every path under `root` (relative, POSIX) with what would change if the entry were touched. */
-function describeTree(root: string, rel = ""): Record<string, string> {
-  const seen: Record<string, string> = {};
-  let names: string[];
-  try {
-    names = readdirSync(join(root, rel));
-  } catch {
-    return seen;
-  }
-  for (const name of names.sort()) {
-    const path = rel === "" ? name : `${rel}/${name}`;
-    try {
-      const s = lstatSync(join(root, path));
-      seen[path] = [s.mode, s.size, s.mtimeMs, s.ctimeMs, s.ino].join(":");
-      if (s.isDirectory()) {
-        Object.assign(seen, describeTree(root, path));
-      }
-    } catch {
-      seen[path] = "unreadable";
-    }
-  }
-  return seen;
-}
-
-function manifestOf(f: Fixture): { entries: unknown[]; skipped: unknown[] } {
-  return JSON.parse(readFileSync(join(f.snapshot, "manifest.json"), "utf8"));
-}
-
-function fileEntry(f: Fixture, path: string): Record<string, unknown> {
-  const s = lstatSync(join(f.workspace, path));
-  return {
-    path,
-    type: "file",
-    size: s.size,
-    mtimeMs: s.mtimeMs,
-    ctimeMs: s.ctimeMs,
-    mode: s.mode & 0o7777,
-  };
-}
-
-function dirEntry(f: Fixture, path: string): Record<string, unknown> {
-  return { path, type: "dir", mode: lstatSync(join(f.workspace, path)).mode & 0o7777 };
 }
 
 /** The workspace of scenario「各类条目」. */
@@ -156,52 +58,11 @@ function populate(f: Fixture): void {
   put(f.workspace, "docs/node_modules", "a regular file with the excluded name\n");
 }
 
-function ioError(code: string): NodeJS.ErrnoException {
-  return Object.assign(new Error(`injected ${code}`), { code });
-}
-
-/**
- * A writer between classification and reading: once the real `lstat` of `target` has returned,
- * `swap` runs (once) before the walk sees the result.
- */
-function swapAfterLstat(target: string, swap: () => void): void {
-  const lstat = fs.promises.lstat;
-  let swapped = false;
-  vi.spyOn(fs.promises, "lstat").mockImplementation((async (path: PathLike, o?: StatOptions) => {
-    const stat = await lstat(path, o);
-    if (path === target && !swapped) {
-      swapped = true;
-      swap();
-    }
-    return stat;
-  }) as typeof lstat);
-}
-
-/** A reader stuck opening `fifo` returns once a writer shows up; without a reader this is ENXIO. */
-function releaseReader(fifo: string): void {
-  try {
-    closeSync(openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK));
-  } catch {
-    // Nobody is blocked on it.
-  }
-}
-
 /** Every regular file under the snapshot root, by content. */
 function snapshotContents(f: Fixture): string[] {
   return Object.keys(describeTree(f.snapshots))
     .filter((path) => lstatSync(join(f.snapshots, path)).isFile())
     .map((path) => readFileSync(join(f.snapshots, path), "utf8"));
-}
-
-/** Calls of `fs.promises.open` that create a file under `tree/` (flag `wx`) get `intercept`. */
-function onCopyCreate(intercept: (path: string) => void): void {
-  const open = fs.promises.open;
-  vi.spyOn(fs.promises, "open").mockImplementation(async (...args: Parameters<typeof open>) => {
-    if (args[1] === "wx") {
-      intercept(String(args[0]));
-    }
-    return open(...args);
-  });
 }
 
 describe("快照的存放位置", () => {
@@ -267,39 +128,13 @@ describe("快照的存放位置", () => {
       `${W}\n`,
     ];
     for (const workspaceId of badWorkspaceIds) {
-      await expect(
-        take({
-          workspaceRoot: f.workspace,
-          snapshotsRoot: f.snapshots,
-          workspaceId,
-          userMessageId: MESSAGE_ID,
-          excludeNames: EXCLUDE,
-        }),
-        JSON.stringify(workspaceId),
-      ).rejects.toThrow(TypeError);
+      await expect(run(f, { workspaceId }), JSON.stringify(workspaceId)).rejects.toThrow(TypeError);
     }
     const badMessageIds = [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53];
     for (const userMessageId of badMessageIds) {
-      await expect(
-        take({
-          workspaceRoot: f.workspace,
-          snapshotsRoot: f.snapshots,
-          workspaceId: W,
-          userMessageId,
-          excludeNames: EXCLUDE,
-        }),
-        String(userMessageId),
-      ).rejects.toThrow(TypeError);
+      await expect(run(f, { userMessageId }), String(userMessageId)).rejects.toThrow(TypeError);
     }
-    await expect(
-      take({
-        workspaceRoot: f.workspace,
-        snapshotsRoot: f.snapshots,
-        workspaceId: W,
-        userMessageId: "42" as unknown as number,
-        excludeNames: EXCLUDE,
-      }),
-    ).rejects.toThrow(TypeError);
+    await expect(run(f, { userMessageId: "42" as unknown as number })).rejects.toThrow(TypeError);
     expect(readdirSync(f.snapshots)).toEqual([]);
   });
 
@@ -311,16 +146,7 @@ describe("快照的存放位置", () => {
     const before = describeTree(f.workspace);
 
     for (const snapshotsRoot of [inside, f.workspace, join(f.workspace, "sub", "..", "snaps")]) {
-      await expect(
-        take({
-          workspaceRoot: f.workspace,
-          snapshotsRoot,
-          workspaceId: W,
-          userMessageId: MESSAGE_ID,
-          excludeNames: EXCLUDE,
-        }),
-        snapshotsRoot,
-      ).rejects.toThrow(TypeError);
+      await expect(run(f, { snapshotsRoot }), snapshotsRoot).rejects.toThrow(TypeError);
     }
     expect(describeTree(f.workspace)).toEqual(before);
   });
@@ -331,13 +157,7 @@ describe("快照的存放位置", () => {
     const sibling = `${f.workspace}..snapshots`;
     mkdirSync(sibling, { mode: 0o700 });
 
-    const result = await take({
-      workspaceRoot: f.workspace,
-      snapshotsRoot: sibling,
-      workspaceId: W,
-      userMessageId: 7,
-      excludeNames: [],
-    });
+    const result = await run(f, { snapshotsRoot: sibling, userMessageId: 7, excludeNames: [] });
 
     expect(result.outcome).toBe("ok");
     expect(readFileSync(join(sibling, W, "7", "tree", "a.txt"), "utf8")).toBe("alpha\n");
@@ -433,7 +253,7 @@ describe("快照内容规则", () => {
     ]);
     rmSync(f.snapshot, { recursive: true });
 
-    expect(await run(f, [])).toEqual({ outcome: "ok", skipped: [] });
+    expect(await run(f, { excludeNames: [] })).toEqual({ outcome: "ok", skipped: [] });
     expect(readFileSync(join(f.snapshot, "tree", "pkg", "a", "node_modules", "x.js"), "utf8")).toBe(
       "x\n",
     );
@@ -581,13 +401,7 @@ describe("快照内容规则", () => {
     expect((await run(f)).outcome).toBe("ok");
     put(f.workspace, "a.txt", "two\n");
 
-    const second = await take({
-      workspaceRoot: f.workspace,
-      snapshotsRoot: f.snapshots,
-      workspaceId: W,
-      userMessageId: 43,
-      excludeNames: EXCLUDE,
-    });
+    const second = await run(f, { userMessageId: 43 });
 
     expect(second.outcome).toBe("ok");
     expect(readdirSync(join(f.snapshots, W)).sort()).toEqual(["42", "43"]);
@@ -622,7 +436,7 @@ describe("快照期间可能有写入者", () => {
     put(f.workspace, "b.txt", "bravo\n");
     put(f.workspace, "c.txt", "charlie\n");
     const victim = join(f.workspace, "b.txt");
-    fifos.push(victim);
+    releaseAfterTest(victim);
     swapAfterLstat(victim, () => {
       rmSync(victim);
       execFileSync("mkfifo", [victim]);
