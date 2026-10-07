@@ -22,11 +22,11 @@
 
 ## 0. 前置核对 — 真实 omp 上的 `branch` 与 `--resume`
 
-- [ ] 0.1 用 `var/omp/omp`（官方 release v18.0.10，`make omp-fetch`）与受控上游写一个一次性脚本（放在未跟踪的工作目录，不入库），按 design D11 的三行表逐点核对并保存命令与输出：
+- [x] 0.1 用 `var/omp/omp`（官方 release v18.0.10，`make omp-fetch`）与受控上游写一个一次性脚本（放在未跟踪的工作目录，不入库），按 design D11 的三行表逐点核对并保存命令与输出：
   - (a) 两轮会话；临时进程 `--resume <会话文件>` → `get_branch_messages` → 对**第二条**用户条目 `branch` → `get_state` 取新文件 → 关停；新进程 `--resume <新文件>`：握手成功、`get_branch_messages` 恰含第一条用户条目、再发一条 prompt 能完成。全部满足即成立。
   - (b) 同样的流程对**第一条**用户条目 `branch`：新文件存在、`--resume` 握手成功、`get_branch_messages` 为空、随后的 prompt 能完成。全部满足即成立。
   - (c) 第一轮发普通 prompt（不建清单），第二轮发 `WORKBUDDY_TODO …`（受控上游让模型建清单）；对第二条用户条目 `branch` 后 `--resume <新文件>`，发 `/todo`：输出恰为 `No todos. Use /todo append <task> to start one.` 即成立；仍列出第二轮建的任务即不成立。
-- [ ] 0.2 结论落定（一个只改本 change 目录的 PR；组 7 起的任务以它合入为前提）：把三点的结论（成立 / 不成立、所用命令与输出，不含主机信息）记在 design D11 表后的「核对结论」一段。三点都成立时 PR 只加这一段。任一点不成立时，同一个 PR 按 design D11 表的「不成立时的处置」一列改规格与任务，文本以该列为准：
+- [x] 0.2 结论落定（一个只改本 change 目录的 PR；组 7 起的任务以它合入为前提）：把三点的结论（成立 / 不成立、所用命令与输出，不含主机信息）记在 design D11 表后的「核对结论」一段。三点都成立时 PR 只加这一段。任一点不成立时，同一个 PR 按 design D11 表的「不成立时的处置」一列改规格与任务，文本以该列为准：
   - (a) 不成立：在本文件文首加一行「组 7–12、13.1 的 `undoMessage`、组 18、19.2 的撤回步骤暂停」，change 停在组 6 之后，报告给 owner（撤回路径不成立，回到设计阶段）；不自行换实现方式。
   - (b) 不成立：message-undo「对话原地回退」第 3 步加「被撤回的是该会话的首条用户消息时不发 `branch`」、第 5 步改为「此时 `omp_session_file` 置 NULL」，场景「撤回第一条」的 THEN 改为「其后的 prompt 不带 `--resume` 启动并 202」；任务 11.5 的实现与 11.7 里「不改 `omp_session_file`」的变异证据随之改。
   - (c) 不成立：`chat_turn_snapshots` 不建 `todo` 列——workspace-snapshots「迁移 039 回合快照登记表」与「受理时做快照」删去 `todo`、删场景「记录当时的任务清单」；message-undo「对话原地回退」第 5 步删去 `todo` 的写回，场景「任务清单回到当时」改为「撤回后 `todo` 与撤回前相同」；本 change 的 `specs/session-todo/spec.md` 删去「任务清单持久化」的 MODIFIED，只留「任务清单快照」；design D9、D11 的对应句与任务 10.1、10.2、10.5、11.2 里的 `todo` 一并删去。
