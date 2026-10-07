@@ -30,6 +30,7 @@ import type {
   ChatOwnedAlert,
   PendingCreateSend,
 } from "./types.js";
+import { useSessionListEvents } from "./use-session-list-events.js";
 import { useWelcomeOptions } from "./welcome-options.js";
 import { useWorkspaceList } from "./workspace-list.js";
 
@@ -45,6 +46,8 @@ type PageHistoryState =
   | (ReadyHistory & { resync?: { source: SessionEventHandle } });
 
 const MISSING_EVENT_SOURCE = "无法连接会话事件";
+/** 「本页有在途撤回」：撤回动作接进页面（任务 18.4）之前恒为否。 */
+const NO_UNDO_IN_FLIGHT = () => false;
 
 export function useChatSession() {
   const { createSessionClient } = useAuth();
@@ -84,6 +87,7 @@ export function useChatSession() {
   const createControllerRef = useRef<AbortController | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const focusOnWelcomeRef = useRef(false);
+  const viewRunningRef = useRef(false);
 
   clientRef.current = client;
   requestedSessionRef.current = requestedSessionId;
@@ -141,17 +145,18 @@ export function useChatSession() {
     };
   }, [fencePageWork]);
 
-  const refreshList = useCallback(
-    (ownedClient: ApiClient) => {
+  // 一次列表读取：中止在途的并重发。`silent`（列表事件触发）失败时保留现有列表、不置错误。
+  const readList = useCallback(
+    (ownedClient: ApiClient, silent: boolean) => {
       if (ownedClient !== clientRef.current) {
-        return;
+        return null;
       }
       abortList();
       const controller = new AbortController();
       listControllerRef.current = controller;
       listGenerationRef.current += 1;
       const generation = listGenerationRef.current;
-      void ownedClient
+      const flight = ownedClient
         .listSessions({ signal: controller.signal })
         .then(({ sessions }) => {
           if (
@@ -170,16 +175,30 @@ export function useChatSession() {
             controller.signal.aborted ||
             generation !== listGenerationRef.current ||
             ownedClient !== clientRef.current ||
-            isUnauthorized(error)
+            isUnauthorized(error) ||
+            silent
           ) {
             return;
           }
           setListState({ status: "error", client: ownedClient, message: errorMessage(error) });
         });
-      refreshWorkspaces(ownedClient);
+      refreshWorkspaces(ownedClient, silent);
+      return flight;
     },
     [abortList, refreshWorkspaces],
   );
+  const refreshList = useSessionListEvents({
+    client,
+    readList,
+    selected() {
+      const sessionId = sourceSessionRef.current;
+      const source = sourceRef.current;
+      return source !== null && sessionId !== null && sessionId === requestedSessionRef.current
+        ? { sessionId, running: viewRunningRef.current, resync: source.resync }
+        : null;
+    },
+    undoInFlight: NO_UNDO_IN_FLIGHT,
+  });
   const sessionActions = useSessionActions(client, setListState, setHistoryState, {
     abortHistory,
     closeSource,
@@ -621,6 +640,7 @@ export function useChatSession() {
   const listForClient =
     listState.client === client && listState.status === "success" ? listState : null;
   const historyView = ownedHistory && historyState.status === "ready" ? historyState.view : null;
+  viewRunningRef.current = historyView?.status === "running";
   const selected = selectedSession(requestedSessionId, listForClient, ownedHistory, historyState);
   const workspace = workspaces?.find((item) => item.id === selected?.workspaceId);
   const ownedBusy = ownsMutation(mutationOwner, client, requestedSessionId);
