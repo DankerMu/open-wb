@@ -75,6 +75,43 @@ export function defaultEffort(model: CatalogModel): Effort | null {
   return below.at(-1) ?? declared[0] ?? "off";
 }
 
+/** 审批档位，按权限升序；次序只此一份（夹取、最高档校验与界面都以它为准）。 */
+export const APPROVAL_MODES = ["always-ask", "write", "yolo"] as const;
+export type ApprovalMode = (typeof APPROVAL_MODES)[number];
+
+/**
+ * 会话输入框设置的有效值（session-composer-settings「有效值解析」）：只读入参，不回写原始值。
+ * 档位取原始值（null 即 write）与最高档中较低的一个；模型不在白名单取缺省模型；
+ * 强度在模型不支持推理时为 null，否则原始值非 null 原样保留（omp 自行夹取），为 null 取缺省强度。
+ */
+export function effectiveComposer(
+  raw: {
+    approvalMode: ApprovalMode | null;
+    modelId: string | null;
+    reasoningEffort: Effort | null;
+  },
+  config: { approvalMaxMode: ApprovalMode; modelCatalog: ModelCatalog },
+): { approvalMode: ApprovalMode; modelId: string; reasoningEffort: Effort | null } {
+  const { models, defaultModelId } = config.modelCatalog;
+  const wanted = raw.approvalMode ?? "write";
+  const capped =
+    APPROVAL_MODES.indexOf(wanted) > APPROVAL_MODES.indexOf(config.approvalMaxMode)
+      ? config.approvalMaxMode
+      : wanted;
+  const model =
+    models.find((entry) => entry.id === raw.modelId) ??
+    models.find((entry) => entry.id === defaultModelId);
+  if (model === undefined) {
+    // 只可能来自手工构造的白名单（resolveModelCatalog 保证缺省模型在其中）。
+    return { approvalMode: capped, modelId: defaultModelId, reasoningEffort: null };
+  }
+  return {
+    approvalMode: capped,
+    modelId: model.id,
+    reasoningEffort: model.reasoning ? (raw.reasoningEffort ?? defaultEffort(model)) : null,
+  };
+}
+
 function levelIndex(effort: unknown): number {
   return (EFFORT_LEVELS as readonly unknown[]).indexOf(effort);
 }
