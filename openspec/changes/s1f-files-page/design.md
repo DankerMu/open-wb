@@ -234,6 +234,26 @@ spawn 行沿用 omp 的形态：`sudo -n -u <OMP_USER> --preserve-env=PATH,LANG,
 - 上线前在测试 VPS 上实测一次（tasks 1.3）：sudo 模式下转换能跑通、两个并发转换互不干扰，以及超时杀掉 `sudo` 之后残留进程**是否出现**——只记录现象，写进 ADR-0010 增补，不再决定做法。
 `PREVIEW_CACHE_DIR` 单独一个目录（缺省 repo-root `var/preview-cache`），不放进 `OMP_STATE_DIR`：那棵树的目录表被 omp-runtime 规格逐项钉死，往里加目录要改那条规格，没有必要。
 
+**实测**（#1052，tasks 1.3；2026-10-06，与 D22「实测」同一套测试 VPS 容器内的 uid 分离部署。LibreOffice 24.2.7.2（只装 writer 组件）；`/usr/bin/soffice` 是包装脚本，它启动 `oosplash`，再由后者派生 `soffice.bin`。本项只记录现象，不决定做法。）
+
+sudoers 只新增本条写明的一行（`<应用用户> ALL=(<omp 用户>) NOPASSWD: SETENV: /usr/bin/setpriv --pdeathsig KILL -- /usr/bin/soffice *`）。应用用户（umask `007`，工作目录与 `HOME` 为 `<job>`，`<job>` 为 `2770`、属应用用户）执行：
+
+```
+sudo -n -u <omp 用户> --preserve-env=PATH,LANG,HOME -- /usr/bin/setpriv --pdeathsig KILL -- /usr/bin/soffice --headless --norestore --nolockcheck --nodefault --nofirststartwizard -env:UserInstallation=file://<job>/profile --convert-to pdf --outdir <job>/out <工作空间里的 docx>
+```
+
+- **转换能跑通**：退出码 0，约 1.2 秒，`<job>/out/<名>.pdf` 生成（`0660`、属 omp 用户与共享组），应用用户能把它复制进 `pdf/`。`out/` 不必预建。
+- **进程身份**：`oosplash` 与 `soffice.bin` 的 `Uid:` 四个值都是 omp 用户（`sudo` 自身是实际 uid 应用用户、有效 uid root）。
+- **并发**：两个转换各用自己的 `UserInstallation` 同时进行——两个小文档、以及两个各约 25 秒的文档全程重叠——都以退出码 0 结束并各自产出 PDF。
+- **杀 `sudo` 之后**（应用用户对自己启动的 `sudo` 发 `SIGKILL`，共 5 次：约 25 秒的文档在第 3 秒杀 3 次、在第 0.15 秒杀 1 次，约 133 秒的文档在第 5 秒杀 1 次）：`sudo` 立即消失，它的直接子进程 `oosplash` 随之被杀（`--pdeathsig` 生效）；**`soffice.bin` 每次都残留**——属 omp 用户、被 1 号进程收养、持续占用 CPU，并且**把整份转换跑完才自行退出**（杀后约 20–23 秒；大文档杀后 128 秒，长于 60 秒的缺省超时），在已被放弃的 `<job>/out` 里留下与未中断时字节数相同的完整 PDF，没有半截文件。5 次表现一致，不是偶发。
+
+与本条及 D17 的文字不一致、需要 owner 裁决的两点（规格未改）：
+
+1. **应用用户删不掉 `<job>`，转换成功的作业也一样。** LibreOffice 把 `<job>/profile` 建成 `0700`、属 omp 用户（不受 umask `007` 影响）；因为 `HOME=<job>`，它还在 `<job>` 下建 `.cache/` 与 `.config/`（`2700`、属 omp 用户）。对一个正常跑完的作业目录做递归删除：只删掉 `out/` 与空的 `.config/`，`profile/` 与 `.cache/` 留下，`EACCES`。于是 D17 的「转换成功后删 `<job>`」「超时清掉 `<job>`」「启动时清空 `work/`」与本条的「留给下次启动时对 `work/` 的清空」在 `OMP_USER` 模式下按现有的一行 sudoers 都做不到，`work/` 只增不减（小文档每个作业约 650 KB；被杀的作业另加完整的输出 PDF，实测 20–78 MB）。同 uid 模式不受影响。
+2. **残留进程的代价比本条描述的大。** 它不是很快自行消失，而是占一个核直到整份文档转完；并发名额在 `convert` 落定时已经释放，所以实际同时运行的 `soffice.bin` 可以多于 `OFFICE_CONVERT_CONCURRENCY`。
+
+- 范围说明：全程在容器内（1 号进程是容器的 init，负责收养并回收孤儿进程）；只测了对 `sudo` 发 `SIGKILL`；只测了 docx（xlsx / pptx 与经 `/o/` 的端到端属 tasks 28.6）；每次转换的标准错误里有一行与结果无关的 `javaldx` 警告。
+
 **D19 转换失败的呈现在 iframe 里，不新增错误码。**
 `/o/` 的失败是预览监听器上的固定纯文本页：413「文件超过预览上限，请下载后查看」、415「该类型不支持转换」、502「文档转换失败，请下载后查看」、
 503「文档转换繁忙，请稍后重试」/「服务器未启用文档转换」、504「文档转换超时，请下载后查看」。主站页面在 iframe 的 `load` 事件之前盖一层「正在转换文档…」，
