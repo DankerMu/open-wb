@@ -16,8 +16,10 @@ import {
   MIGRATION_036,
   MIGRATION_037,
   MIGRATION_038,
+  MIGRATION_039,
   migrationReceiptExists,
   removeTempDirs,
+  tableExists,
   tempDir,
   withDatabase,
   withOpenDb,
@@ -151,7 +153,7 @@ describe("migration 038 workspace temporary flag", () => {
     });
   });
 
-  it("a conflicting workspaces.temporary fails 038 after 037 is kept, and a retry applies 038 once", () => {
+  it("a conflicting workspaces.temporary fails 038 after 037 is kept, and a retry applies 038 then 039 once each", () => {
     const file = join(tempDir(), "conflict-temporary.db");
     seedThrough(file, RECEIPTS_036, (db) => {
       seedPopulated035(db);
@@ -168,11 +170,14 @@ describe("migration 038 workspace temporary flag", () => {
     expectOpenDbFailure(file, DUPLICATE_TEMPORARY);
 
     const afterFailure = withDatabase(file, (db) => {
-      // 037 committed in its own transaction: its receipt and column are there, 038 left nothing.
+      // 037 committed in its own transaction: its receipt and column are there, 038 left nothing
+      // and 039 never ran.
       expect(ledgerFilenames(db)).toEqual([...RECEIPTS_037]);
       expect(receipts(db).slice(0, 10)).toEqual(before.receipts);
       expect(countReceipts(db, MIGRATION_037)).toBe(1);
       expect(migrationReceiptExists(db, MIGRATION_038)).toBe(false);
+      expect(migrationReceiptExists(db, MIGRATION_039)).toBe(false);
+      expect(tableExists(db, "chat_turn_snapshots")).toBe(false);
       expect(columnNames(db, "chat_sessions")).toEqual(COLUMNS_037.chat_sessions);
       expect(db.prepare("SELECT sql FROM sqlite_master WHERE name = 'workspaces'").get()).toEqual(
         before.workspacesSql,
@@ -193,6 +198,12 @@ describe("migration 038 workspace temporary flag", () => {
 
     const retried = withOpenDb(file, (db) => {
       expect038Applied(db);
+      expect(ledgerRows(db).slice(11)).toEqual([
+        [12, MIGRATION_038],
+        [13, MIGRATION_039],
+      ]);
+      expect(countReceipts(db, MIGRATION_039)).toBe(1);
+      expect(tableExists(db, "chat_turn_snapshots")).toBe(true);
       expect(receipts(db).slice(0, 11)).toEqual(afterFailure);
       expect(preservedState(db, COLUMNS_036)).toEqual(before.state);
       expectFixture035(db);

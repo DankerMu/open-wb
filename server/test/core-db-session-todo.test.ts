@@ -63,7 +63,7 @@ function todoRows(db: DatabaseSync) {
 
 function expect036Applied(db: DatabaseSync): void {
   expect(ledgerRows(db).slice(7, 10)).toEqual(LEDGER_TAIL);
-  expect(ledgerRows(db)).toHaveLength(12);
+  expect(ledgerRows(db)).toHaveLength(13);
   expect(countReceipts(db, MIGRATION_035)).toBe(1);
   expect(countReceipts(db, MIGRATION_036)).toBe(1);
   expectChatSchema(db);
