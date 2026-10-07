@@ -121,8 +121,8 @@ Minimal mergeable slice: atomic - 解析放宽、类型与透传必须同刀（�
 ## 6. omp-test-harness — 假 omp 的 approval-write 与模型命令
 
 - [x] 6.1 先腾出行数：把 `server/test/support/fake-omp.mjs`（799 行）里一段既有的纯构建代码原样搬到新模块 `server/test/support/fake-omp-composer.mjs`（或搬到已有的纯构建模块，以不破坏「假 omp 夹具模块划分」为准），只搬不改，既有 fake-omp 测试原样通过。单独一次提交。
-- [ ] 6.2 `fake-omp-composer.mjs`：`approval-write` 的常量与帧数据构建、`set_model` / `set_thinking_level` 的应答数据构建与两个失败取值的判定（纯函数）。`fake-omp-argv.mjs`：场景表加 `approval-write`。`fake-omp.mjs`：接线——场景分派、两种命令的应答、`get_state` 带上最近一次成功应用的 `model` / `thinkingLevel`（状态在这里）。
-- [ ] 6.3 测试新文件 `server/test/fake-omp-composer.test.ts`：omp-test-harness delta 的两条新场景（`approval-write` 只在 `always-ask` 下请求确认；两种命令的应答与 `frames=`）；既有十二个场景的帧逐字节不变（跑既有测试即可）。
+- [x] 6.2 `fake-omp-composer.mjs`：`approval-write` 的常量与帧数据构建、`set_model` / `set_thinking_level` 的应答数据构建与两个失败取值的判定（纯函数）。`fake-omp-argv.mjs`：场景表加 `approval-write`。`fake-omp.mjs`：接线——场景分派、两种命令的应答、`get_state` 带上最近一次成功应用的 `model` / `thinkingLevel`（状态在这里）。
+- [x] 6.3 测试新文件 `server/test/fake-omp-composer.test.ts`：omp-test-harness delta 的两条新场景（`approval-write` 只在 `always-ask` 下请求确认；两种命令的应答与 `frames=`）；既有十二个场景的帧逐字节不变（跑既有测试即可）。
   `server/test/` 里核对模块划分的用例（导入方向、五个文件 ≤800 行）随规格更新。变异：`approval-write` 在 `write` 档也发 select、失败模型 id 也应答成功 → 判红。
 
   **实施注记（fixture 评审补充）**：

@@ -61,13 +61,17 @@ export interface StartOptions {
   prompt?: Frame;
   /** 子进程工作目录；缺省不传 spawn 的 `cwd`（继承 vitest 进程）。 */
   cwd?: string;
+  /** argv 里不带 `--approval-mode <值>`（#998 的「无该旗标」一例）；缺省照旧带生产的 write。 */
+  omitApprovalMode?: boolean;
 }
 
 const exitStatuses = new WeakMap<ChildProcessWithoutNullStreams, number>();
 const observers = new WeakMap<ChildProcessWithoutNullStreams, ChildObserver>();
 
 export function startFake(options: StartOptions = {}): Session {
-  const args = [...OMP_FLAGS, ...(options.extraArgs ?? [])];
+  const at = OMP_FLAGS.indexOf("--approval-mode");
+  const base = options.omitApprovalMode ? OMP_FLAGS.toSpliced(at, 2) : OMP_FLAGS;
+  const args = [...base, ...(options.extraArgs ?? [])];
   if (options.scenario !== undefined) {
     args.push("--scenario", options.scenario);
   }

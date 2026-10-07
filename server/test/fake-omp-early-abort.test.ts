@@ -192,7 +192,7 @@ async function promptAndAbort(options: Parameters<typeof startFake>[0]): Promise
 }
 
 describe("fake omp argv module split (#650)", () => {
-  it("keeps fake-omp-argv.mjs a node-only leaf statically imported by main, all four within 800 lines", () => {
+  it("keeps fake-omp-argv.mjs a node-only leaf statically imported by main, all five within 800 lines", () => {
     const argv = readFileSync(join(SUPPORT, "fake-omp-argv.mjs"), "utf8");
     const imports = argv.split("\n").filter((line) => line.startsWith("import"));
     for (const line of imports) {
@@ -202,7 +202,7 @@ describe("fake omp argv module split (#650)", () => {
     expect(argv).not.toMatch(/\bimport\(|\brequire\(/);
     expect(argv).not.toMatch(/^let /m);
     expect(argv.startsWith("#!")).toBe(false);
-    for (const leaf of ["fake-omp-proxy.mjs", "fake-omp-thinking.mjs"]) {
+    for (const leaf of ["fake-omp-proxy.mjs", "fake-omp-thinking.mjs", "fake-omp-composer.mjs"]) {
       expect(readFileSync(join(SUPPORT, leaf), "utf8")).not.toMatch(/fake-omp-argv/);
     }
     const main = readFileSync(join(SUPPORT, "fake-omp.mjs"), "utf8");
@@ -212,6 +212,7 @@ describe("fake omp argv module split (#650)", () => {
       "fake-omp-argv.mjs",
       "fake-omp-proxy.mjs",
       "fake-omp-thinking.mjs",
+      "fake-omp-composer.mjs",
     ]) {
       const file = join(SUPPORT, name);
       const check = spawnSync(process.execPath, ["--check", file], { encoding: "utf8" });
