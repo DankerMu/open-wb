@@ -144,6 +144,16 @@ Minimal mergeable slice: 4.1 可先单独合入（store 方法由自己的 store
   - `web/e2e/ui-walk.spec.ts`：会话 id 取自被观察的 `POST /api/sessions` 201 响应，`finally` 里经请求上下文 `DELETE`（204 或 404）。
   - 验证：干净的沙箱与数据库上 `make smoke` 两遍、`make ui-walk` 一遍，之后 `workspaces` 表没有 `temporary = 1` 的行、账号根下没有 `tmp-` 开头的目录（chat-harness 场景「连跑两遍不积累临时空间」；快照目录那一半在 12.3 之后成立）。
 - [ ] 5.9 变异证据（创建）：临时空间创建放到事务外 → 「目录创建失败不留行」或「临时空间创建失败不留会话」判红；`chat.hurl` 不删会话 → 5.8 的残留检查判红；创建时写了 `session.bind` → 「无 body 与空对象按默认创建」的「审计无新增行」判红。
+  **实施注记（5.6–5.9，fixture 评审补充）**：
+  - 注入：`RegisterSessionsOptions` 与 `SessionMetadataStoreOptions` 各加 `createTemporaryWorkspace(ownerId)`，由 `app.ts` 以工作空间 store 的 `createTemporary` 传入；会话模块不导入工作空间模块。
+  - 无 `workspaceId` 分支的次序：`createTemporary` → INSERT 会话，同一事务；事务回滚之后调用 `removeCreatedDirs()`，提交之后绝不调用。「临时空间不可显式绑定」的 404 只留在显式 id 分支。
+  - 三处手工装配要补这个端口并换成真实的临时沙箱目录：`session-rest-helpers.ts`（现为 `/nonexistent/sandbox`，11 个测试文件经它装配）、`session-archive.test.ts`、`session-metadata-rest.test.ts`。先改它们，再看其余的红。
+  - 「目录创建失败不留行」的 REST 一半（偏离，待 owner 追认）：`createApp` 没有 id 生成器的注入点，不为测试加一个。REST 层用「账号根被一个普通文件占住」制造真实的目录失败，断言通用 5xx、两表无新行、故障移除后同一请求 201；规格字面的场景留在 store seam（3.1 已测）。
+  - `chat.hurl` 的删除步骤不能放在 lisi 那次 logout 之前（否则「lisi 读该会话 404」成了空断言）：lisi 退出之后 zhangsan 重新登录 → 删除三个会话（fork 出的与第二个会话带 `skip_turn_control` 门控）→ 退出，仍在文件末尾无 cookie 的 401 之前。
+  - `ui-walk.spec.ts` 的 fork 旅程会产生第二个会话，与源会话共用临时空间；`finally` 两个都删，id 取自各自的 201 响应。
+  - 新场景进新文件；`session-rest.test.ts` 不净增行。CH-09 的 `未绑定` 文案暂时过时，17.4 改写，PR 里注明。
+  - `linux/uid-isolation.test.ts` 只在 CI 跑，按阅读修改，由 CI 的 uid-isolation 任务裁决。
+  - 5.8 的残留检查用不入库的一次性脚本（查库与列目录）在本机真实栈上跑，命令与输出写进 PR；不改 CI 脚本。
 
 Risk packs: File IO / path safety / delete（账号根下的 `lstat` 校验、不跟随链接、经 trash 删除）、Error handling / partial failure（提交后清理失败只报告，响应仍 204）、Concurrency / ordering（引用计数与 fork、删行与删目录的先后）、Auth（所有者作用域）、Legacy compatibility（产物目录与会话文件的既有删除行为不变）。
 Suggested fixture level: expanded - 删除用户文件、路径安全、审计、跨文件系统退路、公共 API 的 BREAKING 语义变化与存量兼容（Critical Path）
