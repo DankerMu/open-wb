@@ -88,6 +88,14 @@ describe("resolveServerConfig — 缺省身份", () => {
       expect(config.snapshotMaxTotalBytes).toBe(524_288_000);
       expect(config.snapshotMaxEntries).toBe(50_000);
       expect(config.snapshotExcludeNames).toEqual(["node_modules", ".venv", "__pycache__"]);
+      // 未设置 MODEL_CATALOG 的单模型一项不带 efforts 键（toStrictEqual 连键的有无一起比）。
+      expect(config.modelCatalog).toStrictEqual({
+        models: [{ id: DEFAULT_MODEL_ID, name: DEFAULT_MODEL_ID, reasoning: true, vision: false }],
+        defaultModelId: DEFAULT_MODEL_ID,
+      });
+      expect(config.approvalMaxMode).toBe("yolo");
+      expect(config.uploadMaxBytes).toBe(524_288_000);
+      expect(config.uploadMaxFiles).toBe(10);
     }
   });
 
@@ -287,6 +295,14 @@ describe("resolveServerConfig — 新增七项缺省与逐项覆盖", () => {
       SNAPSHOT_MAX_TOTAL_BYTES: "65536",
       SNAPSHOT_MAX_ENTRIES: "12",
       SNAPSHOT_EXCLUDE_NAMES: "target,.cache",
+      // 设了 MODEL_CATALOG 就不设 MODEL_REASONING；推理模型必带 efforts，MODEL_ID 选第二项为缺省。
+      MODEL_CATALOG: JSON.stringify([
+        { id: "plain-model", vision: true },
+        { id: "model-bytes", name: "Model Bytes", reasoning: true, efforts: ["low", "high"] },
+      ]),
+      APPROVAL_MAX_MODE: "write",
+      UPLOAD_MAX_BYTES: "1048576",
+      UPLOAD_MAX_FILES: "3",
     };
     const originalCwd = process.cwd();
     try {
@@ -310,6 +326,22 @@ describe("resolveServerConfig — 新增七项缺省与逐项覆盖", () => {
         expect(config.snapshotMaxTotalBytes).toBe(65_536);
         expect(config.snapshotMaxEntries).toBe(12);
         expect(config.snapshotExcludeNames).toEqual(["target", ".cache"]);
+        expect(config.modelCatalog).toStrictEqual({
+          models: [
+            { id: "plain-model", name: "plain-model", reasoning: false, vision: true },
+            {
+              id: "model-bytes",
+              name: "Model Bytes",
+              reasoning: true,
+              vision: false,
+              efforts: ["low", "high"],
+            },
+          ],
+          defaultModelId: "model-bytes",
+        });
+        expect(config.approvalMaxMode).toBe("write");
+        expect(config.uploadMaxBytes).toBe(1_048_576);
+        expect(config.uploadMaxFiles).toBe(3);
       }
     } finally {
       process.chdir(originalCwd);

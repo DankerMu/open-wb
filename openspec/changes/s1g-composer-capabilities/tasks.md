@@ -85,9 +85,15 @@ Minimal mergeable slice: 1.0 + 1.1 + 1.2 + 1.3 一刀（world 扩展与档位核
   - 档位次序常量在 `model-catalog.ts` 导出为 `APPROVAL_MODES = ["always-ask", "write", "yolo"] as const` 与类型 `ApprovalMode`；`agent-config.ts` 里的内联联合类型与字面量比较改为引用它（`model-catalog.ts` 不得反向导入 `agent-config.ts`）。
   - 测试除七组输入外再加两例：入参冻结后求值不抛且入参不变；同一份 raw 在「调低再调回」的两份 config 下原始选择重新生效（有效值不回写）。
   Risk packs（2.3）: Legacy compatibility（三列全 NULL 等于今天的行为）、Config（最高档夹取）。
-- [ ] 2.4 入口级：`server/src/server.ts` 的纯配置 seam（`resolveServerConfig` 上方注释「消费十五项自有 key，agent 十一项」）在 C 之后已是十九项，本任务把注释与实现改到二十三项（agent 侧加四键，经 `resolveAgentSettings`）。
+- [x] 2.4 入口级：`server/src/server.ts` 的纯配置 seam（`resolveServerConfig` 上方注释「消费十五项自有 key，agent 十一项」）在 C 之后已是十九项，本任务把注释与实现改到二十三项（agent 侧加四键，经 `resolveAgentSettings`）。
   测试 `server/test/server-config.test.ts`：http-service-skeleton「Pure source and compiled configuration identity」改写后的断言（twenty-three application keys，源码入口与编译入口一致）；`server/test/server-startup-order.test.ts`（或 `server-entry-silent.test.ts`，以既有覆盖「非法配置 nonzero 退出、stderr 恰一行」的那个文件为准）：「四个新配置键的取值与非法值」的非法值一半——四键各自的非法取值都在任何 filesystem / database / listen 副作用之前 nonzero 退出、application stderr 恰一行 generic failure record。
   合法四键启动后 `GET /api/composer/options` 的回报与「托管 models.yml 含三个模型条目」属于同一场景的另一半，分别在 8.5 与 3.2 落（两处各自点名本场景）。变异：某个新键的非法值被当作缺省放行 → 判红。
+  **实施注记（2.4，fixture 评审补充）**：
+  - 实现已是二十三项（`agent-config.ts` 已解析四个新键）；本任务的产品改动只有 `server.ts` 里 `resolveServerConfig` 上方那段注释（四项自有键 + agent 十九项）。
+  - 「非法值在副作用之前退出」落在 `server/test/omp-max-processes-config.test.ts`（`SNAPSHOT_*` 的同类用例在那里，沿用其 `it.each` 形状与既有辅助）；`server-startup-order.test.ts` 已近 800 行，不加；`server-entry-silent.test.ts` 不是目标。
+  - 非法值表按规格共 20 例：`APPROVAL_MAX_MODE` 4 个、`UPLOAD_MAX_BYTES` 与 `UPLOAD_MAX_FILES` 各 7 个、`MODEL_CATALOG` 为空串与 `not json`；每例另断言 stderr 不含键名。
+  - 身份断言补四键：`server-config.test.ts` 里源码入口与编译入口两例都断言 `modelCatalog`、`approvalMaxMode`、`uploadMaxBytes`、`uploadMaxFiles` 的缺省与覆盖；覆盖例设 `MODEL_CATALOG` 时不得同设 `MODEL_REASONING`。
+  Risk packs（2.4）: Startup ordering（副作用之前）、Config。
 
 Suggested fixture level: expanded - 生产配置解析与白名单是其后各组的共同输入；含向后兼容（单模型缺省）
 Minimal mergeable slice: 2.1 一刀（三个标量键，尚无读者，knip 以 `AgentSettings` 字段计不报）；2.2 + 2.3 一刀（白名单与两个纯函数，带测试；被 `agent-config.ts` 引用故无未引用导出）；2.4 单独一刀（入口级断言与 seam 注释；等 C 的 7.2 合入，不随第二刀提前）

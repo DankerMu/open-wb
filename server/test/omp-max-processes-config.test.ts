@@ -248,6 +248,51 @@ describe("production entry rejects invalid SNAPSHOT_* settings before effects", 
   }, 30_000);
 });
 
+/** #989：四个新键（审批最高档、两个上传上限、模型白名单）的非法值同样在任何副作用之前使启动失败。 */
+describe("production entry rejects invalid composer settings before effects", () => {
+  const UPLOAD_INVALID = ["", "0", "abc", "-1", "1.5", "010", "2147483648"] as const;
+  const COMPOSER_INVALID = [
+    ...["", "YOLO", " write", "ask"].map((raw) => ["APPROVAL_MAX_MODE", raw] as const),
+    ...["UPLOAD_MAX_BYTES", "UPLOAD_MAX_FILES"].flatMap((key) =>
+      UPLOAD_INVALID.map((raw) => [key, raw] as const),
+    ),
+    ["MODEL_CATALOG", ""],
+    ["MODEL_CATALOG", "not json"],
+  ] as const;
+  let compiled: CompiledServerEntry;
+
+  beforeAll(async () => {
+    compiled = await compileServerEntry();
+  }, 90_000);
+
+  it("规格列出的非法取值共二十例", () => {
+    expect(COMPOSER_INVALID).toHaveLength(20);
+  });
+
+  it.each(COMPOSER_INVALID)(
+    "%s=%j：nonzero、恰一行 generic record、无 DB/state/sandbox/listen",
+    async (key, raw) => {
+      const root = scratch("open-wb-composer-config-");
+      const port = await reserveWildcardPort();
+      const env = compiledFixtureEnv(root, port, join(root, "bin", "omp"), { [key]: raw });
+      const server = startCompiledServer(compiled.entry, env);
+      const closed = await server.waitForClose();
+
+      expect(closed).toEqual({ code: 1, signal: null });
+      expect(server.stdout()).toBe("");
+      const stderr = server.stderr().replace(NODE_SQLITE_WARNING, "");
+      expect(stderr).toBe(FAILED_RECORD);
+      expect(stderr).not.toContain(key);
+      for (const owned of ["db", "state", "sandbox", "bin"]) {
+        expect(existsSync(join(root, owned))).toBe(false);
+      }
+      expect(existsSync(join(compiled.root, "var"))).toBe(false);
+      await expect(refused(port)).resolves.toBe(true);
+    },
+    20_000,
+  );
+});
+
 describe("process cap reaches the sessions module", () => {
   function scratchEnv(root: string): Record<string, string> {
     return {
