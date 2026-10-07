@@ -57,7 +57,7 @@ Minimal mergeable slice: 1.0 + 1.1 + 1.2 + 1.3 一刀（world 扩展与档位核
 
 ## 2. agent-config — 四个环境变量与模型白名单
 
-- [ ] 2.1 `server/src/agent-config.ts`（现 142 行）：`AgentSettings` 增 `approvalMaxMode`、`uploadMaxBytes`、`uploadMaxFiles`；`APPROVAL_MAX_MODE` 只接受 exact 三个字面量（缺省 `yolo`），两个上传键复用 `resolvePositiveInteger`（缺省 524288000 与 10）；错误只点名键。
+- [x] 2.1 `server/src/agent-config.ts`（现 142 行）：`AgentSettings` 增 `approvalMaxMode`、`uploadMaxBytes`、`uploadMaxFiles`；`APPROVAL_MAX_MODE` 只接受 exact 三个字面量（缺省 `yolo`），两个上传键复用 `resolvePositiveInteger`（缺省 524288000 与 10）；错误只点名键。
   测试 `server/test/server-config.test.ts`（或同类新文件）：http-service-skeleton「四个新配置键的取值与非法值」的配置层部分（表驱动）。变异：把缺省 `yolo` 改成 `write`、放宽大小写 → 判红。
 - [ ] 2.2 新文件 `server/src/model-catalog.ts`（纯函数，不读环境以外的东西）：`resolveModelCatalog(env)` 按 model-selection「模型白名单配置」得出 `{models, defaultModelId}`；`selectableEfforts(model)` / `defaultEffort(model)` 按「推理强度集合」。`agent-config.ts` 调用它，`AgentSettings` 以 `modelCatalog` 取代对外的 `modelId` / `modelReasoning` 两个字段
   （既有读者 `pool.ts`、启动装配在组 3、7 改；本任务保留两个字段为白名单缺省模型的派生值，组 7 结束时删除——在任务 7.4 里核对已无读者）。
