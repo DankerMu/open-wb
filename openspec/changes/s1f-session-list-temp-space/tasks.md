@@ -115,7 +115,8 @@ Minimal mergeable slice: 6.1 + 6.2（端点可连、无触发点时只有心跳�
 
 ## 7. server — 托管布局与快照配置
 
-- [ ] 7.1 `server/src/sessions/omp/state-layout.ts`：`LAYOUT` 增加 `["snapshots", APP_PRIVATE]`，导出 `ompSnapshotsDir(stateDir)`。测试加在既有布局测试：omp-runtime「快照目录属于布局」。
+- [x] 7.1 `server/src/sessions/omp/state-layout.ts`：`LAYOUT` 增加 `["snapshots", APP_PRIVATE]`，导出 `ompSnapshotsDir(stateDir)`。测试加在既有布局测试：omp-runtime「快照目录属于布局」。
+  既有的状态根目录列举断言随之同步（只在期望的列举里加 `snapshots`，不删除、不削弱，写进 PR 的偏离记录）：测试侧独立的布局表 `server/test/omp-layout-helpers.ts` 的 `LAYOUT_TABLE`、`omp-state-layout.test.ts` 的根目录列举，以及两处启动测试 `server-startup-layout.test.ts`、`server-startup-order.test.ts` 里写死的状态根目录列举。omp 用户对该目录 `EACCES` 的实机验证在 10.8。
 - [ ] 7.2 `server/src/agent-config.ts`：解析 `SNAPSHOT_MAX_FILE_BYTES`、`SNAPSHOT_MAX_TOTAL_BYTES`、`SNAPSHOT_MAX_ENTRIES`（沿用 `resolvePositiveInteger`）与 `SNAPSHOT_EXCLUDE_NAMES`（逗号分隔、逐名校验；默认 `node_modules,.venv,__pycache__`，不含 `.git`）；默认值见 workspace-snapshots「快照上限与配置」。测试加在配置测试：默认值、合法覆盖、「配置非法」各例，以及 http-service-skeleton「服务启动与装配」（十九项、四个新键的默认与非法值）与「Shared agent module assembly」的「Pure source and compiled configuration identity」。
 
 Suggested fixture level: expanded - 生产配置面与受保护目录布局（Critical Path：omp 子进程治理的目录权限）

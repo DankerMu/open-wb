@@ -109,7 +109,14 @@ describe("production entry managed omp state layout", () => {
       expectHostOverlay(state);
       expectHomeDotenv(state);
       expect(readdirSync(join(state, "home")).toSorted()).toEqual([".env", ".omp"]);
-      expect(readdirSync(state).toSorted()).toEqual(["agent", "home", "sessions", "trash", "xdg"]);
+      expect(readdirSync(state).toSorted()).toEqual([
+        "agent",
+        "home",
+        "sessions",
+        "snapshots",
+        "trash",
+        "xdg",
+      ]);
       expect(readFileSync(join(legacy, "models.yml"), "utf8")).toBe("legacy-models");
       expect(lstatSync(join(legacy, "models.yml")).mtimeMs).toBe(legacyBefore.mtimeMs);
       expect(lstatSync(legacy).mode & 0o7777).toBe(0o2770);
