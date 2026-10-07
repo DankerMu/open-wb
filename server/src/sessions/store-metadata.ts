@@ -2,7 +2,8 @@
  * Session metadata writes (#523/#524, parent D2 "模块拆分"): creation with an optional workspace
  * binding and scene, and the title/scene/pin/archive PATCH. The row insert and its `session.bind`
  * audit share one SQLite transaction, so an audit failure leaves no session row. Ownership of the
- * workspace is the route's job. A PATCH is one owner-scoped UPDATE of only the given columns: it
+ * workspace is the route's job; a temporary workspace cannot be bound by id (#925): the transaction
+ * throws the same `not_found` and rolls the row back. A PATCH is one owner-scoped UPDATE of only the given columns: it
  * never touches `updated_at`, `status`, `workspace_id`, the generation columns or message rows.
  * `archived: true` (#922) puts `status != 'running'` on that whole UPDATE, so a running session
  * gets none of the PATCH's keys.
@@ -14,6 +15,7 @@ import { randomBytes } from "node:crypto";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import type { emit as canonicalEmit } from "../core/audit/index.js";
 import { createSqliteTextDecoder } from "../core/db/index.js";
+import { HttpError } from "../core/errors/index.js";
 import { SESSION_COLUMNS, type SessionDbRow, type SessionView, toSessionView } from "./store.js";
 import {
   decodeNullableText,
@@ -122,6 +124,10 @@ export function createSessionMetadataStore(
             | { temporary: number | bigint }
             | undefined;
           temporaryWorkspace = Number(bound?.temporary) === 1;
+          if (temporaryWorkspace) {
+            // Same error as the route's unknown / foreign id; the INSERT above is rolled back.
+            throw new HttpError("not_found");
+          }
           options.emit(db, {
             kind: "session.bind",
             actorId: ownerId,
