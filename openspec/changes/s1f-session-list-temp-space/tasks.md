@@ -137,11 +137,17 @@ Minimal mergeable slice: 5.1 + 5.2 一起（删了行不删目录会留下无主
 
 - [ ] 6.1 通知器与路由（新模块 `server/src/sessions/list-events.ts`）：按账号登记连接；`GET /api/sessions/events` 复用 `stream/sse.ts` 的 SSE 头常量、心跳常量与注入时钟（把共用的头与心跳写出函数从 `sse.ts` 导出，不复制）；`preClose` 销毁；关停后新连接 502；不写 `id:`。测试（新文件 `server/test/session-list-events.test.ts`，真实监听 + 原生读流）：session-list-push「列表事件端点」三个场景。
 - [ ] 6.2 背压与隔离：每条连接至多一条未写出的 `sessions.changed`；写失败只关该连接。测试：「一条连接写失败不影响请求」与一条合并用例（暂停读取时连发 5 次 notify，恢复后收到的条数 ≥1 且 <5）。
+  **实施注记（6.1 / 6.2，fixture 评审补充）**：
+  - 通知器由 `registerSessions` 创建并随其返回值暴露（`app.sessions` 的类型同步加键），测试与 6.5 的注入都从这里取。
+  - `stream/sse.ts` 导出 SSE 头常量、心跳间隔常量、一个只收 `ServerResponse` 的心跳写出函数，以及「关停中则 `Connection: close` + 502」的拒绝函数（该文件里已有两处重复）；不导出绑定流连接类型的 `armHeartbeat`。
+  - 「尚未写出」的定义是上一条 `sessions.changed` 的 `write` 回调尚未触发（或 `writableLength > 0`），不是 `write()` 返回 false。合并用例在同一同步段内连发 5 次 `notify`——跨 tick 发送时本机回环上 5 条都会写出。
+  - 本刀还没有触发点（6.3–6.5）：「一条连接写失败不影响请求」在本刀直接调 `notify(ownerId)`，断言不抛、坏连接被关、另一条连接照常收到；经 PATCH 触发的版本随 6.3。`notifyRewound` 在本刀也要有一条用例（不合并、`data` 的形状），否则它是未被引用的导出。
 - [ ] 6.3 触发点接线之一——会话 CRUD 与 fork：会话创建、PATCH（含归档与恢复）、删除、fork 提交，在各自事务提交之后调用 `notify(ownerId)`（`rest-metadata.ts` / `session-delete.ts` / `rest.ts` 的 fork 路由处）。测试：session-list-push「每个触发点各自通知」里这五项（表驱动：每项写入之后所有者的连接恰多至少一条 `sessions.changed`）、「被拒绝的写入不通知」。
 - [ ] 6.4 触发点接线之二——回合生命周期与审批：prompt 受理与受理被补偿、regenerate 提交在 `rest.ts` 的对应路由处通知；回合终态落库、审批行插入与结算经 supervisor 既有的同步观察口 `onEvent` 得到（`turn.end`、`approval.request`、`approval.resolved` 三种事件；在 `sessions/index.ts` 里把通知器的观察函数与装配传入的 `onEvent` 串接：先调通知器（try/catch、丢弃结果），再调装配传入的 `onEvent` 并把它的返回值原样返回；所有者由 store 的会话行解析）。**不改 `supervisor.ts`**。测试：「状态变化推送给所有者的每条连接」「待决确认的出现与结算」、「每个触发点各自通知」里受理、回合结束、受理被补偿、regenerate 四项；另加一条「通知器的观察函数抛错时回合照常结束、supervisor 没有保留故障」；既有的「`onEvent` 返回 thenable 即故障」测试在串接之后原样通过。
 - [ ] 6.5 触发点接线之三——工作空间：`POST /api/workspaces` 与转正成功之后通知（`workspaces/rest.ts`，通知器由 `createApp` 注入，`workspaces/` 不导入 `sessions/`）。测试：「每个触发点各自通知」里这两项。
 - [ ] 6.6 变异证据（逐触发点）：对 6.3–6.5 的十一个触发点各去掉一次通知调用，「每个触发点各自通知」里对应的那一项判红（表驱动测试逐项断言，不合并成总数）；通知发在提交之前且事务回滚 → 「被拒绝的写入不通知」的回滚例判红；按连接而非按账号过滤错误 → `lisi` 收到事件判红；串接函数吞掉装配方 `onEvent` 的返回值 → 既有的观察口同步返回值违规测试判红。
 
+Risk packs: Public API（新 SSE 端点的头、事件名与 data 形状）、Concurrency / backpressure（每连接至多一条未写出、写失败隔离）、Auth（按账号隔离，未认证走全局守卫）、Lifecycle / shutdown（`preClose` 销毁、关停后 502、心跳）。
 Suggested fixture level: expanded - 新的公共端点、长连接与关停、跨模块的触发点接线、账号隔离
 Minimal mergeable slice: 6.1 + 6.2（端点可连、无触发点时只有心跳，主干行为不变）；6.3、6.4、6.5 各自一个 PR（每个 PR 让表驱动测试里自己那几项由预期失败转绿）
 
