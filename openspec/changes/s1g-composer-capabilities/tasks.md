@@ -321,7 +321,7 @@ Minimal mergeable slice: 19.2 + 19.3 一刀（ADR-0013 增补与术语，可随�
 
 ## 20. model-proxy — 模型白名单强制（owner S-22；Critical Path）
 
-- [ ] 20.1 新文件 `server/src/model-proxy/model-guard.ts`（纯函数，不依赖 Fastify）：`topLevelModel(raw: string)` 对一段已通过 `JSON.parse` 的文本扫描顶层对象的成员键（跟踪嵌套深度与字符串状态，键名按 JSON 字符串解码），返回「不是对象 / 没有 `model` / 多于一个 `model` / 唯一的 `model` 及其原始值文本」；`isAllowedModel(parsed, raw, allowed)` 组合 `JSON.parse` 的结果给出放行与否。
+- [x] 20.1 新文件 `server/src/model-proxy/model-guard.ts`（纯函数，不依赖 Fastify）：`topLevelModel(raw: string)` 对一段已通过 `JSON.parse` 的文本扫描顶层对象的成员键（跟踪嵌套深度与字符串状态，键名按 JSON 字符串解码），返回「不是对象 / 没有 `model` / 多于一个 `model` / 唯一的 `model` 及其原始值文本」；`isAllowedModel(parsed, raw, allowed)` 组合 `JSON.parse` 的结果给出放行与否。
   测试新文件 `server/test/model-proxy-model-guard.test.ts`（表驱动）：model-proxy「Model outside the whitelist is refused」的十二个 body 各自的判定、「Whitelisted model is forwarded untouched」里转义键名与嵌套 `model` 的判定；另加键名含转义引号、值里含 `"model":` 字样的字符串、深层嵌套、顶层为数组 / 标量各一例。
 - [ ] 20.2 `server/src/model-proxy/index.ts`（436 行）：`ModelProxyOptions` 增必填的 `allowedModels: ReadonlySet<string>`（空集在注册时抛出）；`parseJsonBytes` 在 `JSON.parse` 成功之后调用 20.1 的判定，不放行即 `HttpError("bad_request")`（与语法错误同一条拒绝路径：在 `authenticate()` 的上游配置检查之后、任何上游接触之前；`authenticate()` 与 `onRequest` 的次序不改；不回显模型名）；转发的仍是原始 `raw` 字节。装配处（`createApp` 里调用 `registerModelProxy` 的那一处）传入 `settings.modelCatalog.models` 的 id 集合。
   测试 `server/test/model-proxy-wire.test.ts`（记录型真上游，真实 HTTP）：「Model outside the whitelist is refused」（每个 body 带与不带 `stream` 各一次；零上游请求；响应体不含所给模型名）、「Whitelisted model is forwarded untouched」（字节逐一相等，流式与非流式响应原样到达）；`server/test/server-assembly.test.ts`：「Default single-model whitelist」（缺省配置下 `deepseek-v4.1-flash` 放行、`gpt-x` 400）。
