@@ -28,7 +28,9 @@
 | 可见范围 scope | KB 权限四档：仅自己/本部门/项目组/全员；共享一律只读 | 检索共享库记审计 |
 | 项目组 group | 跨部门共享单元，只影响 KB 可见范围，不改沙箱边界 | 若 SSO 自带组概念则改同步（开放问题） |
 | 连接器 connector | MCP 连接器，仅显式配置不自动发现 | 上游的 SaaS 连接器已裁掉 |
-| 审计 audit | 权限事件/共享 KB 检索/账号操作的只追加记录，按账号隔离 | |
+| 审计 audit | 权限事件/共享 KB 检索/账号操作的只追加记录，按账号隔离 | 会话权限档位的实际变化（`session.permission`）与文件上传的成功和拒绝（`file.upload` / `upload.reject`）在内；模型与推理强度的变化不记 |
+| 权限档位 permission tier | 会话的工具审批档位，三档对应 omp 的 `always-ask` / `write` / `yolo` | 不是账号权限、不是 KB 可见范围 |
+| 附件 attachment | 随一条消息告知助手的工作空间文件路径 | 文件本身是工作空间里的普通文件：不随消息删除，也不随绑定正式工作空间的会话删除；临时空间随最后一个会话删除时、撤回连文件一起还原时，按工作空间的规则一并变化 |
 | host tool | omp RPC 的宿主工具机制；KB 检索经 app-server 转发实现 | 凭证只在 app-server，不进 omp 环境 |
 | 模型代理 model-proxy | app-server 内的 OpenAI 兼容端点，omp 访问模型的唯一通道 | omp 环境零网关凭证（ADR-0008）；kb-service 嵌入调用不经它 |
 
