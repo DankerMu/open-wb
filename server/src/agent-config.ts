@@ -1,7 +1,12 @@
 import { availableParallelism } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { assertSafeSudoPath, assertSetprivExecutable } from "./core/process-path.js";
-import { type ModelCatalog, resolveModelCatalog } from "./model-catalog.js";
+import {
+  APPROVAL_MODES,
+  type ApprovalMode,
+  type ModelCatalog,
+  resolveModelCatalog,
+} from "./model-catalog.js";
 
 export { DEFAULT_MODEL_ID } from "./model-catalog.js";
 
@@ -42,7 +47,7 @@ export interface AgentSettings {
   /** 白名单缺省模型是否支持推理（派生值；读者迁到 modelCatalog 后删除）。 */
   modelReasoning: boolean;
   /** 所有会话可用审批档位的上界（APPROVAL_MAX_MODE，缺省 yolo 即三档都开放）。 */
-  approvalMaxMode: "always-ask" | "write" | "yolo";
+  approvalMaxMode: ApprovalMode;
   /** 单个上传文件的字节上限（UPLOAD_MAX_BYTES，缺省 524288000）。 */
   uploadMaxBytes: number;
   /** 一条消息可带的附件个数上限（UPLOAD_MAX_FILES，缺省 10）。 */
@@ -161,12 +166,13 @@ function resolvePositiveInteger(raw: string | undefined, fallback: number, key: 
 }
 
 /** 只接受三个档位字面量的精确拼写（不 trim、不改大小写）；错误只命名键，不回显输入值。 */
-function resolveApprovalMaxMode(raw: string | undefined): AgentSettings["approvalMaxMode"] {
+function resolveApprovalMaxMode(raw: string | undefined): ApprovalMode {
   if (raw === undefined) {
     return "yolo";
   }
-  if (raw === "always-ask" || raw === "write" || raw === "yolo") {
-    return raw;
+  const mode = APPROVAL_MODES.find((candidate) => candidate === raw);
+  if (mode !== undefined) {
+    return mode;
   }
   throw new Error("APPROVAL_MAX_MODE must be exactly always-ask, write or yolo");
 }

@@ -7,9 +7,13 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { resolveAgentSettings } from "../src/agent-config.js";
 import {
+  APPROVAL_MODES,
+  type ApprovalMode,
   type CatalogModel,
   defaultEffort,
   type Effort,
+  effectiveComposer,
+  type ModelCatalog,
   resolveModelCatalog,
   selectableEfforts,
 } from "../src/model-catalog.js";
@@ -353,5 +357,159 @@ describe("resolveAgentSettings — 白名单进入配置", () => {
     expect(() =>
       resolveAgentSettings({ [KEY]: THREE_MODELS, MODEL_REASONING: "on" }, root),
     ).toThrow(/MODEL_REASONING/u);
+  });
+});
+
+/**
+ * Issue #988（S1g 任务 2.3）：session-composer-settings「有效值解析」。
+ * 期望值逐条取自该条文与「夹取与回落」场景，不经被测函数或源码常量算出。
+ */
+type Mode = ApprovalMode | null;
+type Raw = Parameters<typeof effectiveComposer>[0];
+type Config = Parameters<typeof effectiveComposer>[1];
+
+function catalogOf(defaultModelId: string, models = THREE_MODELS_PARSED): ModelCatalog {
+  return { models, defaultModelId };
+}
+
+function deepFreeze<T>(value: T): T {
+  if (typeof value === "object" && value !== null) {
+    for (const child of Object.values(value)) {
+      deepFreeze(child);
+    }
+    Object.freeze(value);
+  }
+  return value;
+}
+
+describe("有效值解析 — 夹取与回落", () => {
+  it("档位次序常量：always-ask < write < yolo", () => {
+    expect(APPROVAL_MODES).toStrictEqual(["always-ask", "write", "yolo"]);
+  });
+
+  // 场景原文的七组：(原始档位, 原始模型, 原始强度) / 最高档 → {档位, 模型, 强度}
+  it.each<[Mode, string | null, Effort | null, ApprovalMode, ApprovalMode, string, Effort | null]>([
+    [null, null, null, "yolo", "write", "m1", "high"],
+    ["yolo", "m3", "xhigh", "write", "write", "m3", "xhigh"],
+    ["write", "gone", "medium", "yolo", "write", "m1", "medium"],
+    ["always-ask", "m2", "high", "yolo", "always-ask", "m2", null],
+    ["write", "m3", "low", "always-ask", "always-ask", "m3", "low"],
+    ["yolo", "m1", "max", "yolo", "yolo", "m1", "max"],
+    [null, "m3", null, "yolo", "write", "m3", "high"],
+  ])(
+    "(%j,%j,%j) / %s → {%s,%s,%j}",
+    (approvalMode, modelId, reasoningEffort, approvalMaxMode, mode, model, effort) => {
+      expect(
+        effectiveComposer(
+          { approvalMode, modelId, reasoningEffort },
+          { approvalMaxMode, modelCatalog: catalogOf("m1") },
+        ),
+      ).toStrictEqual({ approvalMode: mode, modelId: model, reasoningEffort: effort });
+    },
+  );
+
+  it("入参深冻结：求值不抛，入参不变（函数不产生任何写入）", () => {
+    const raw: Raw = { approvalMode: "yolo", modelId: "gone", reasoningEffort: null };
+    // 白名单取副本再冻结，不把文件级的共享样例冻住。
+    const config: Config = {
+      approvalMaxMode: "write",
+      modelCatalog: catalogOf("m3", structuredClone(THREE_MODELS_PARSED)),
+    };
+    const rawBefore = structuredClone(raw);
+    const configBefore = structuredClone(config);
+    deepFreeze(raw);
+    deepFreeze(config);
+    expect(Object.isFrozen(config.modelCatalog.models[2]?.efforts)).toBe(true);
+    expect(effectiveComposer(raw, config)).toStrictEqual({
+      approvalMode: "write",
+      modelId: "m3",
+      reasoningEffort: "high",
+    });
+    expect(raw).toStrictEqual(rawBefore);
+    expect(config).toStrictEqual(configBefore);
+  });
+
+  it("调低最高档再调回：同一份 raw 的原始选择重新生效", () => {
+    const raw: Raw = { approvalMode: "yolo", modelId: "m3", reasoningEffort: "xhigh" };
+    const open: Config = { approvalMaxMode: "yolo", modelCatalog: catalogOf("m1") };
+    const lowered: Config = { ...open, approvalMaxMode: "always-ask" };
+    const chosen = { approvalMode: "yolo", modelId: "m3", reasoningEffort: "xhigh" };
+    expect(effectiveComposer(raw, open)).toStrictEqual(chosen);
+    expect(effectiveComposer(raw, lowered)).toStrictEqual({
+      ...chosen,
+      approvalMode: "always-ask",
+    });
+    expect(effectiveComposer(raw, open)).toStrictEqual(chosen);
+  });
+
+  it("从白名单移除模型再加回：原始模型与强度重新生效", () => {
+    const raw: Raw = { approvalMode: "write", modelId: "m3", reasoningEffort: "low" };
+    const full: Config = { approvalMaxMode: "yolo", modelCatalog: catalogOf("m2") };
+    const removed: Config = {
+      approvalMaxMode: "yolo",
+      modelCatalog: catalogOf("m2", THREE_MODELS_PARSED.slice(0, 2)),
+    };
+    const chosen = { approvalMode: "write", modelId: "m3", reasoningEffort: "low" };
+    expect(effectiveComposer(raw, full)).toStrictEqual(chosen);
+    // 回落到的缺省模型 m2 不支持推理：存着的 low 不出现在有效值里。
+    expect(effectiveComposer(raw, removed)).toStrictEqual({
+      approvalMode: "write",
+      modelId: "m2",
+      reasoningEffort: null,
+    });
+    expect(effectiveComposer(raw, full)).toStrictEqual(chosen);
+  });
+
+  it("原始档位为 null 取 write，再受最高档 always-ask 夹取", () => {
+    expect(
+      effectiveComposer(
+        { approvalMode: null, modelId: null, reasoningEffort: null },
+        { approvalMaxMode: "always-ask", modelCatalog: catalogOf("m1") },
+      ),
+    ).toStrictEqual({ approvalMode: "always-ask", modelId: "m1", reasoningEffort: "high" });
+  });
+
+  it("原始档位低于最高档时不被抬高", () => {
+    expect(
+      effectiveComposer(
+        { approvalMode: "always-ask", modelId: "m1", reasoningEffort: "off" },
+        { approvalMaxMode: "write", modelCatalog: catalogOf("m1") },
+      ),
+    ).toStrictEqual({ approvalMode: "always-ask", modelId: "m1", reasoningEffort: "off" });
+  });
+
+  it("缺省模型取 defaultModelId，不是白名单第一项", () => {
+    const config: Config = { approvalMaxMode: "yolo", modelCatalog: catalogOf("m3") };
+    expect(
+      effectiveComposer({ approvalMode: null, modelId: null, reasoningEffort: null }, config),
+    ).toStrictEqual({ approvalMode: "write", modelId: "m3", reasoningEffort: "high" });
+    expect(
+      effectiveComposer({ approvalMode: null, modelId: "gone", reasoningEffort: "max" }, config),
+    ).toStrictEqual({ approvalMode: "write", modelId: "m3", reasoningEffort: "max" });
+  });
+
+  it("手工构造的白名单里没有缺省模型（解析器不会产出）：报出 defaultModelId，强度为 null", () => {
+    expect(
+      effectiveComposer(
+        { approvalMode: "yolo", modelId: "gone", reasoningEffort: "high" },
+        { approvalMaxMode: "write", modelCatalog: catalogOf("absent") },
+      ),
+    ).toStrictEqual({ approvalMode: "write", modelId: "absent", reasoningEffort: null });
+  });
+
+  it("三项全 null 加旧式单模型配置：write、MODEL_ID、high（AgentSettings 直接当 config）", () => {
+    const root = join(REPO_ROOT, "server");
+    const raw: Raw = { approvalMode: null, modelId: null, reasoningEffort: null };
+    expect(effectiveComposer(raw, resolveAgentSettings({}, root))).toStrictEqual({
+      approvalMode: "write",
+      modelId: "deepseek-v4.1-flash",
+      reasoningEffort: "high",
+    });
+    expect(
+      effectiveComposer(
+        raw,
+        resolveAgentSettings({ MODEL_ID: "qwen-x", MODEL_REASONING: "off" }, root),
+      ),
+    ).toStrictEqual({ approvalMode: "write", modelId: "qwen-x", reasoningEffort: null });
   });
 });
