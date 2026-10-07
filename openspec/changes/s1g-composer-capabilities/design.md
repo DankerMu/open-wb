@@ -70,6 +70,7 @@
 | S-22 | 模型代理强制白名单：解析请求里的模型名，不在白名单即拒绝 | Goals、D18；model-proxy「透传端点与 bearer 鉴权」、model-selection「模型白名单配置」、omp-test-harness「受控上游请求记录」；tasks 组 20、1.4 |
 | S-23 | 每条消息附件总数最多 `UPLOAD_MAX_FILES` 个（与「一次最多 10 个」同一个可配的数）；提示文案 `每条消息最多 N 个附件` | D12、D15；message-attachments「prompt 携带附件」「输入框附件标签」、http-service-skeleton「服务启动与装配」；tasks 12.3、16.1 |
 | S-24 | 撤回带附件的消息时附件标签也恢复（undo 响应加 `attachments`；文件已不存在的不恢复） | D19；message-undo「撤回 REST」「web 撤回」、message-attachments「重新生成与分叉中的附件」「输入框附件标签」、chat-web「API 客户端扩展」「消息线程」；tasks 12.6、13.1、17.5 |
+| 改判（2026-10-06） | **允许只发附件、不发文字**：`message` 去掉首尾空白后为空时，只要 `attachments` 非空且通过全部附件校验就受理；为空且无附件仍拒绝；`message` 键仍须出现且为字符串。改掉的是原 D17 第 4 条（起草者自定的「不支持」） | D12、D15、D17 第 4 条（配套细节 4a–4g 由起草者定）；chat-sessions「REST prompt 受理与补偿」「会话持久化与回合刷盘」「Slash 命令白名单与命令目录」、message-attachments 各条、chat-web「会话页」「输入框与能力栏」「消息线程」「API 客户端扩展」、message-undo「撤回 REST」「web 撤回」；tasks 0.1、1.6–1.8、12.1–12.4、12.6、13.1、14.2a、16.2c、16.3–16.6、17.1–17.5 |
 
 ## Goals / Non-Goals
 
@@ -255,15 +256,22 @@ handler 的次序（每一步失败即止，括号里是结果）：
 ### D12 附件如何随消息走
 
 - **请求**。`POST /api/sessions/:id/prompt` 的 body 从「恰 `message`」变为 `{message, attachments?}`；`attachments` 是 0 到 `UPLOAD_MAX_FILES` 个互不相同的字符串（**每条消息的附件总数上限就是这个数**，owner S-23：与「一次最多 10 个」同一个可配的数，不设第二个配置项），每个是相对会话工作空间根的路径（上传返回的 `path`）。`[]` 与缺席等价。
-  `message` 的规则不变——仍须非空：只发附件不发字不支持（标题规则、斜杠分类、分支对齐都以文本为准，少一类特例）。
-- **校验（都在受理之前）**。带附件而会话没有工作空间 → 400；每个路径 1 到 1024 字节、不含控制字符，否则 400；每个路径经 `sandbox.resolve(op=read)`（越界 → 403 + 审计）；目标须是已存在的普通文件，否则 400；
+  **只发附件、不发文字是允许的**（owner 2026-10-06 改判；原先起草者定的是「不支持」）：`message` 去掉首尾空白后为空时，只要 `attachments` 非空且通过下面的全部校验，就受理（202）。`message` 为空且无附件仍是 400；`message` 键仍必须出现且为字符串。空文本带附件时请求的去留只看附件校验的结果，不因文本为空被拒。
+  这件事不引入新的规范化，也不引入新的分支（配套细节由起草者按最小改动定，列在 D17 第 4 条）：
+  - **落库**：现有规则是「去掉首尾空白一次，存去掉之后的文本」（chat-sessions「REST prompt 受理与补偿」的 trimmed original text，`rest.ts` 的 `trim()`）。只发附件时照这条规则存下来的就是空串——不是 NULL，也不保留用户留下的空白。主规格里没有「原样保存空白」这回事，所以不存在「纯空白原文」这种落库值。
+  - **分类**：`classifyPrompt("")` 不以 `/` 开头，是普通文本；空文本不是命令。「内建命令不得带附件」照旧（` /todo` 去掉空白后仍是内建命令，带附件 400）。
+  - **标题**：新会话的第一条消息只有附件时没有文字可取，标题取第一个附件路径的文件名（最后一个 `/` 之后的部分），按现有标题规则的同一截断（前 18 个码点、不加省略号）。有文字时规则不变。规则落在 chat-sessions「会话持久化与回合刷盘」（`acceptPrompt` 定标题的地方），所以本 change 对该条有一条 MODIFIED（底本是主规格，C 未改）。
+- **校验（都在受理之前）**。带附件而会话没有工作空间 → 400；每个路径 1 到 1024 字节、不含控制字符、不以 `/` 结尾，否则 400；每个路径经 `sandbox.resolve(op=read)`（越界 → 403 + 审计）；目标须是已存在的普通文件，否则 400；
   文本分类为内建命令（`classifyPrompt` → `builtin`）而带附件 → 400（后缀会变成本地命令的参数）。技能调用可以带附件（后缀成为技能的参数文本）。不限定路径必须在 `uploads/` 下：同一空间里的任何文件都能被这条消息指到，文件页日后要做「引用文件」时不必改合同。
 - **落库**。迁移 042 给 `chat_messages` 加 `attachments TEXT NULL`；`acceptPrompt` 把 `[{path, size}]`（`size` 取受理那一刻的文件大小）写进用户消息行，无附件为 NULL。快照的每条消息带 `attachments` 数组（NULL 读成 `[]`，与 `approvals` 同一做法）。
 - **给 omp 的文本**。落库的 `content` 仍是用户原文；交给 omp 的是 `toWireText(text, skills)` 再接一个确定的后缀：两个换行、一行固定说明 `用户随本条消息上传了以下文件（相对当前工作目录的路径），需要时请读取：`、然后每个路径一行 `- <path>`（请求里的次序）。
-  会话绑定工作空间时进程的 cwd 就是空间根，相对路径直接可用。标题仍取用户原文的前缀。
-- **分支对齐**。带附件消息的 wire candidates 是原有候选各自接上同一后缀（由落库的 `attachments` 重新算出）。重新生成沿用 branch 返回的文本（已含后缀），用户消息行不动，气泡照旧显示附件。
+  会话绑定工作空间时进程的 cwd 就是空间根，相对路径直接可用。标题仍取用户原文的前缀（只发附件时取文件名，见上）。
+  空文本不另写分支：`toWireText("", skills)` 是空串，交给 omp 的就是后缀本身——以两个换行开头的一段文字。
+- **分支对齐**。带附件消息的 wire candidates 是原有候选各自接上同一后缀（由落库的 `attachments` 重新算出）。只发附件的消息同理：`content` 为空串，候选恰一个，就是后缀本身。重新生成沿用 branch 返回的文本（已含后缀），用户消息行不动，气泡照旧显示附件。
   分叉把被拷贝消息的 `attachments` 原样拷走；分叉点那条消息不拷贝、其文本作为 `draft` 返回，它的附件随响应的新键 `attachments` 返回，web 用它恢复附件标签（文件在同一个空间里，分叉继承空间绑定）。
 - **撤回**（owner S-24）：见 D19。
+- **先核对（omp 是否原样保存以换行开头的文本）**。只发附件的消息交给 omp 的文本以两个换行开头。读到的证据只有一条相邻的：v18.0.10 的技能分派对文本做 `trimStart()`（ADR-0012），而用户条目的文本保留开头的一个空格（omp-test-harness 的 ` /help 这是什么` 一例、既有的转义空格候选都依赖它）。这说明不了开头的换行会不会被存下来的条目裁掉，也说明不了 RPC `prompt` 收不收这样的文本——所以不猜，列为实机核对项 (g)（tasks 1.8）：对官方二进制发一条文本恰为附件后缀的 prompt，回合结束后 `get_branch_messages` 最后一项的 `text`、以及对它 `branch` 的应答 `text`，都与发出的文本逐字节相等。
+  **退路**：(g) 不成立（omp 裁掉或改写了开头的空白）→ 只发附件的消息的 wire candidates 改为「omp 实际存下的那种形式」——候选集合里把后缀本身换成（或加上）实测得到的裁剪结果，只对 `content` 为空串的带附件消息如此；受理时发出的文本不变。先改 message-attachments「重新生成与分叉中的附件」与 chat-sessions「Slash 命令白名单与命令目录」的 Branch alignment 两处 delta，再做组 12。(g) 若是 omp 根本不收这样的文本（RPC 报错或回合不产生 `user` 条目）→ 停下回到 owner：只发附件需要另一种 wire 形式，那就不是「不另写分支」了。
 - **不走事件流**。事件里没有用户消息内容；页面在受理后用自己手里的草稿与附件呈现用户消息，刷新后来自快照。
 
 否决：把路径拼进落库的 `content`（气泡里出现一段机器话，分叉回填的草稿也带着它）；用 RPC `prompt` 的 `images`（只支持图片，且要把文件读进内存转码）；`@path` 写法（omp 的 `@` 文件展开是 CLI 参数层的行为，RPC 里没有，读不到证据）。
@@ -299,10 +307,11 @@ handler 的次序（每一步失败即止，括号里是结果）：
 ### D15 附件标签与用户气泡
 
 附件标签在输入框的文本框上方、输入框容器之内（不在停靠区里：停靠区是任务清单与确认卡的地方）。每个标签：文件名、大小、状态（`待上传` / `上传中 <百分比>` / 无字样表示已上传 / `失败：<原因>`）、一个 `移除 <文件名>` 按钮。
-移除上传中的标签会中止请求（服务端删掉半截文件）；移除已上传的不删文件。任何标签处于 `上传中` 或 `失败` 时不可发送。发送被受理后标签清空；发送被拒时与草稿一起恢复。切换会话或回到欢迎态时标签清空（已上传的文件留在空间里）；此时在途的那个上传被中止、排队的撤掉，与逐个移除同一语义——否则 500 MiB 的文件会在一个已经没有界面可取消的会话里继续传完。欢迎态首次发送的上传阶段中途切走同理，不再发 prompt。
+移除上传中的标签会中止请求（服务端删掉半截文件）；移除已上传的不删文件。任何标签处于 `上传中` 或 `失败` 时不可发送。`发送` 的启用条件从「草稿非空」改为「草稿非空，或至少有一个附件且全部附件处于可发送状态（已上传，或欢迎态的 `待上传`）」；锁定等其余禁用条件不变，Enter 与按钮同一判定（现有代码里有两道闸：`composer-locks.ts` 的 `sendDisabled` 与 `use-chat-session.ts` 提交入口对空白草稿的提前返回，两处都要改）。发送被受理后标签清空；发送被拒时与草稿一起恢复。切换会话或回到欢迎态时标签清空（已上传的文件留在空间里）；此时在途的那个上传被中止、排队的撤掉，与逐个移除同一语义——否则 500 MiB 的文件会在一个已经没有界面可取消的会话里继续传完。欢迎态首次发送的上传阶段中途切走同理，不再发 prompt。
 选择、拖入、粘贴走同一个入口函数：一条消息的附件总数超过 `UPLOAD_MAX_FILES`（本次选入连同已有标签）整批拒绝并提示 `每条消息最多 N 个附件`（owner S-23：提示说的就是实际规则）；单个超过 `UPLOAD_MAX_BYTES` 的那一个被拒绝并提示，其余照常。粘贴只在剪贴板带文件时拦截，粘贴文字不受影响。
 
-用户气泡在文本下方列出附件：一个带可访问名 `附件` 的列表，每项是文件名与大小，纯文本、不是链接（预览入口属于 `s1f-files-page` 的侧边栏）。拷入层零改动，都在应用层。
+用户气泡在文本下方列出附件：一个带可访问名 `附件` 的列表，每项是文件名与大小，纯文本、不是链接（预览入口属于 `s1f-files-page` 的侧边栏）。文本为空（只发附件的消息）时气泡只渲染这个列表，不渲染空的文本块；操作行照旧。「空」在快照里就是 `content` 为空串；页面在受理后自己呈现的那条按发送时的草稿去掉首尾空白后判定，两种来源呈现一致。
+对话内搜索、复制等以 `content` 为输入的功能不为空文本加特例：conversation-search 的子串判断对空串自然不匹配（附件文件名不参与搜索）；用户消息的 `复制` 是 #908 的事，不在本 change。核对现有条文后有一处要跟着改：chat-web「会话页」的「Empty-whitespace sends SHALL be disabled」与新的启用条件矛盾，本 change 对该条加一条 MODIFIED（以 C 的 delta 为底），只把这句限定为「没有处于可发送状态的附件标签时」；同一条的欢迎态场景里「无权限设置、上传…无附件/模型…控件」与本 change 在欢迎态渲染这些控件矛盾，一并改到与「输入框与能力栏」一致。D 的同名 MODIFIED 随之以本 change 的文本为底。拷入层零改动，都在应用层。
 
 ### D16 键集变化分三步落地；与 C 重叠的 MODIFIED
 
@@ -342,10 +351,11 @@ handler 的次序（每一步失败即止，括号里是结果）：
 | 条文（capability / Requirement） | 底本 | 本 change 的增量 |
 |---|---|---|
 | chat-sessions / 会话 REST | C 的 MODIFIED | 新增句：创建 body 加三键及其规则引用、创建视图带三键的有效值；消息对象加 `attachments` 及其取值句；会话视图 eleven → fourteen keys 与三键的取值域；fork 事务复制三列原始值与消息 `attachments`；fork 响应 `{session,draft,attachments}`；`GET /api/composer/options` 由 registerSessions 另注册、不计入 eleven routes、不读会话、不是 content-parser 归属方（与 C 对 `/api/sessions/events` 的写法并列）。改写场景：「Stable public history and recent order」（`attachments` 数组、fourteen keys）、「Fork copies history before the chosen user message」（201 三键）、「Snapshot carries the stored task list」（fourteen keys）、「Session views carry the three extension keys」（fourteen keys）、「User messages carry an undo state」（消息键集加 `attachments`）。新增场景：「Session views carry the three composer settings」。路由数不变（eleven） |
-| chat-sessions / REST prompt 受理与补偿 | C 的 MODIFIED | 新增句：body 键集 `{message}` 或 `{message,attachments}`；`acceptPrompt(…, attachments)`；派发文本为 `toWireText(…) + attachmentSuffix(paths)`（C 的 `snapshotStep` 第三参数与「无 await」原样保留）。新增场景：「Attachments are validated before admission」 |
-| chat-web / API 客户端扩展 | C 的 MODIFIED | 新增句：`createSession` input 加三键、prompt 带附件时的 body、`forkSession` 响应加 `attachments`、「十一键」后的括注（另加三键共十四键）、`undoMessage` 的 200 加 `attachments`（S-24）、整段「S1g 输入框能力」（十四键逐键规则、消息 `attachments`、两个新方法 `getComposerOptions` / `uploadFile`、最终形状与落地次序的指引）。改写场景：「回合控制四方法请求与响应」（`forkSession` 的 201 带 `attachments`）、「撤回与转正方法」（200 body 带 `attachments`；缺 `attachments` 或其元素多键 → 无效响应）、「八键会话与思考、变更字段严格解析」（标题原样保留；WHEN 的会话项在 C 的十一键之后补三键成十四键，`null` 项加 `reasoningEffort`；THEN 的拒绝清单由「五键或八键」改为「五键、八键或十一键」）。新增场景：「三键与附件的严格解析」「新输入与两个新方法」「上传传输」 |
-| chat-web / 消息线程 | C 的 MODIFIED | 新增句：气泡在文本下方列出附件；撤回成功后恢复仍存在的附件标签（S-24）；分叉回填 `attachments` 为附件标签；「不提供编辑/分支/附件」一句的「附件」改述为「不使用 runtime 的附件适配器」。改写场景：「从用户消息分叉」（201 带 `attachments`、附件区一个已上传标签、无上传请求）。C 的 `撤回`、`从此处分叉` 两个按钮与次序、归档只读原样保留 |
-| chat-web / 输入框与能力栏 | C 的 MODIFIED | 新增句：附件标签区；能力行分左右两组与次序（「+」、工作空间、权限 / 模型、强度）；三个新控件的数据来源与不随锁定禁用；「+」按钮改名 `添加文件或命令`、只在锁定时禁用、第一项 `上传文件`、草稿非空时命令条目不可选与提示行；「不渲染」一句收窄为专家与麦克风；窄屏规则。改写场景：「「+」菜单写入草稿」。新增场景：「能力行的次序」「锁定时三个控件仍可用」「真实浏览器下能力行不挤出发送键」「选项读取失败后重取」。C 的只读标签四种取值（`任务启动于 临时空间` 在最前）与「草稿可被撤回覆盖」原样保留 |
+| chat-sessions / REST prompt 受理与补偿 | C 的 MODIFIED | 新增句：body 键集 `{message}` 或 `{message,attachments}`；`acceptPrompt(…, attachments)`；派发文本为 `toWireText(…) + attachmentSuffix(paths)`（C 的 `snapshotStep` 第三参数与「无 await」原样保留）。改写句：C 的「trim the string once and require nonempty text of at most32768 UTF-8 bytes」改为「文本不超过 32768 字节；除非带非空 `attachments`，否则须非空」并加 `message` 键必须出现、空文本带附件只由附件校验决定去留两句；括注「persisted user content and the title rule are unchanged」改述为落库空串与标题取材；派发一句加「空文本不另写分支」。改写场景：「Input boundaries」（标题原样保留；WHEN 的「empty after trim」限定为无附件时）。新增场景：「Attachments are validated before admission」「Attachment-only prompt is admitted」 |
+| chat-web / API 客户端扩展 | C 的 MODIFIED | 新增句：`createSession` input 加三键、prompt 带附件时的 body（含 `message` 原样发送、空串不省略一句；「新输入与两个新方法」里多一个空文本带附件的调用）、`forkSession` 响应加 `attachments`、「十一键」后的括注（另加三键共十四键）、`undoMessage` 的 200 加 `attachments`（S-24）、整段「S1g 输入框能力」（十四键逐键规则、消息 `attachments`、两个新方法 `getComposerOptions` / `uploadFile`、最终形状与落地次序的指引）。改写场景：「回合控制四方法请求与响应」（`forkSession` 的 201 带 `attachments`）、「撤回与转正方法」（200 body 带 `attachments`；缺 `attachments` 或其元素多键 → 无效响应）、「八键会话与思考、变更字段严格解析」（标题原样保留；WHEN 的会话项在 C 的十一键之后补三键成十四键，`null` 项加 `reasoningEffort`；THEN 的拒绝清单由「五键或八键」改为「五键、八键或十一键」）。新增场景：「三键与附件的严格解析」「新输入与两个新方法」「上传传输」 |
+| chat-web / 消息线程 | C 的 MODIFIED | 新增句：气泡在文本下方列出附件；文本为空串的用户消息只渲染附件列表、不渲染空文本块；撤回成功后恢复仍存在的附件标签（S-24）；分叉回填 `attachments` 为附件标签；两处括注（分叉的 `draft`、撤回的原文在只发附件的消息上为空串）；「不提供编辑/分支/附件」一句的「附件」改述为「不使用 runtime 的附件适配器」。改写场景：「从用户消息分叉」（201 带 `attachments`、附件区一个已上传标签、无上传请求；另加在只有附件的消息处分叉一段）。新增场景：「只有附件的用户消息」。C 的 `撤回`、`从此处分叉` 两个按钮与次序、归档只读原样保留 |
+| chat-web / 输入框与能力栏 | C 的 MODIFIED | 新增句：附件标签区；能力行分左右两组与次序（「+」、工作空间、权限 / 模型、强度）；三个新控件的数据来源与不随锁定禁用；「+」按钮改名 `添加文件或命令`、只在锁定时禁用、第一项 `上传文件`、草稿非空时命令条目不可选与提示行；「不渲染」一句收窄为专家与麦克风；窄屏规则。改写句：`发送` 的启用条件（草稿非空，或至少一个附件且全部处于可发送状态）；键盘规则末尾「空白草稿与锁定期间不可发送」随之改述。改写场景：「「+」菜单写入草稿」「输入框键盘发送」（标题原样保留；THEN 的「空草稿仍不可发送」限定为没有附件标签时，另加带附件的空白草稿可提交）。新增场景：「能力行的次序」「锁定时三个控件仍可用」「真实浏览器下能力行不挤出发送键」「选项读取失败后重取」。C 的只读标签四种取值（`任务启动于 临时空间` 在最前）与「草稿可被撤回覆盖」原样保留 |
+| chat-web / 会话页 | C 的 MODIFIED | 改写句：「Empty-whitespace sends SHALL be disabled」限定为没有处于可发送状态的附件标签时（带可发送附件的空白草稿可以发送）。改写场景：「欢迎态与静态引导」（THEN 里「无权限设置、上传、专家控件」改为「无专家控件；权限档位、模型、推理强度控件与 `上传文件` 按「输入框与能力栏」渲染」，「无附件/模型/麦克风控件」改为「无麦克风控件、未选入文件时不渲染附件标签区」）。C 的其余句子与全部场景标题原样保留 |
 | http-service-skeleton / 统一错误信封 | C 的 MODIFIED | 十五码 → 十六码（`upload_too_large` 及其 message、与 `preview_too_large` 共享 413 的一句）；归属身份十四 → 十五（`POST /api/workspaces/:id/uploads`，「其余十四条以 POST 归属」）；新增一段「流式 body 的归属路由」。改写场景：「auth POST 请求 parse/validation 错误稳定映射」（十五条）、「意外错误不伪装」（十六个）、「产品路由身份在共享映射器中的归属」（WHEN 的路由清单增 uploads；fifteen-identity）、「Cache policy remains route-owned」（sixteen typed errors）、「工作空间 parser owner 的真实 HTTP 边界」（fifteen-owner、thirteen other owners）。新增场景：「上传超限码的信封形状」「上传路由的 parser 归属」。C 的「归档与撤回冲突的错误码」「撤回与转正路由属于归属集」与无 body 创建得到临时空间的 THEN 原样保留 |
 | http-service-skeleton / 服务启动与装配 | C 的 MODIFIED | 配置项十九 → 二十三（四个键名与缺省值 `yolo`、未配置、`524288000`、`10`）；四键的解析规则一句（含「白名单同时是模型代理放行的取值集合」）。改写场景：「干净启动与一致命令面」（二十三项；恰一个模型条目、档位上界与上传上限的缺省）。新增场景：「四个新配置键的取值与非法值」。C 的四个 `SNAPSHOT_*` 键、缺省值与解析规则原样保留 |
 | http-service-skeleton / Shared agent module assembly | C 的 MODIFIED | 改写场景：「Pure source and compiled configuration identity」（nineteen → twenty-three application keys）。无其它差异 |
@@ -357,9 +367,10 @@ handler 的次序（每一步失败即止，括号里是结果）：
 | session-sidebar / composer footer 工作空间选择 | C 的 MODIFIED | 首句：由「能力栏最左侧（权限、上传与专家控件 SHALL NOT 渲染）」改为「能力行左组第二项（专家与麦克风 SHALL NOT 渲染）」。场景「无权限元素与无匹配」标题原样保留，THEN 的前半句改写为「无专家与麦克风控件」（权限控件此后由 session-permission-tier 规定为渲染）。其余（含 C 的临时空间各句与场景）原样保留 |
 | turn-control / 从此处分叉 REST | C 的 MODIFIED | 新增句：临时进程的 `--approval-mode` / `--model` 取源会话有效值；新会话行复制三列原始值；拷贝消息带 `attachments`；201 加 `attachments`；`session` 带三键的有效值。改写场景：「正常分叉」（201 带 `attachments:[]`）、「fork 响应的会话视图与列表一致」（十四键）。新增场景：「分叉点消息的附件随响应返回」「分叉继承三项输入框设置」。C 的归档 409、不拷贝快照行、共用临时空间原样保留 |
 | chat-harness / 会话元数据 HTTP 冒烟 | C 的 MODIFIED | 第 1 步：eleven → fourteen keys（`count == 14`）与三键的缺省值断言；第 3 步的 `eleven-key` → `fourteen-key`。改写场景：「绑定、元数据、思考与删除全链路」（fourteen-key）。C 的临时空间与归档步骤原样保留 |
-| message-undo / 撤回 REST | C 的 ADDED | 200 加 `attachments` 及其取值、读出与存在性判定规则（S-24）。新增场景：「响应带回仍存在的附件」 |
-| message-undo / web 撤回 | C 的 ADDED | 200 时恢复附件标签一句；失败与丢弃响应两句各加「附件标签」。新增场景：「撤回带附件的消息恢复标签」 |
+| message-undo / 撤回 REST | C 的 ADDED | 200 加 `attachments` 及其取值、读出与存在性判定规则（S-24）；`draft` 的括注加「只发附件的消息为空串」。新增场景：「响应带回仍存在的附件」（含只有附件的消息一段） |
+| message-undo / web 撤回 | C 的 ADDED | 200 时恢复附件标签一句；失败与丢弃响应两句各加「附件标签」；草稿回填一句加括注（`draft` 为空串时草稿被清空）。新增场景：「撤回带附件的消息恢复标签」（含只有附件的消息一段） |
 | turn-control / 重新生成 REST | 主规格（C 未改） | 执行序两处：存活进程的启动档位不同时先退役；取得进程后、`get_branch_messages` 前对齐模型与强度及其失败映射。新增场景：「模型对齐失败发生在事务之前」「档位不同时先退役再重新生成」 |
+| chat-sessions / 会话持久化与回合刷盘 | 主规格（C 未改） | `acceptPrompt` 签名加 `attachments`（及其出处的括注）；「Text SHALL be preserved」后加空文本存为空串；标题一句加取材（文本，或文本为空串时第一个附件的文件名）。主规格该条的十个场景标题与正文全部原样保留。新增场景：「Attachment-only admission titles from the first file name」 |
 | model-proxy / 透传端点与 bearer 鉴权 | 主规格（C 未改） | `registerModelProxy` 入参加 `allowedModels`；整段 Model whitelist；改写场景：「Byte-preserving credential substitution」「Real two-round fake model」「Parser byte limit and sibling isolation」（请求带白名单内的 `model`）、「Missing configuration after valid authentication」（WHEN 写明不论 body 是否合法、`model` 是否在白名单内，结果不变：502）。新增场景：「Model outside the whitelist is refused」「Whitelisted model is forwarded untouched」「Default single-model whitelist」（D18） |
 | session-metadata / 会话元数据审计、chat-sessions / Slash 命令白名单与命令目录、model-proxy / 托管 models.yml、omp-runtime 两条、omp-test-harness 两条、tool-approval / 审批请求识别、sandbox-core / resolve 契约与逃逸向量 | 主规格（C 未改） | 各自的 delta 即全部增量；其中 sandbox-core 一条 D 也改，D 以本 change 归档后的文本为底 |
 
@@ -373,7 +384,14 @@ C 新增而本 change 没有修改的条文（temporary-workspaces、workspace-s
 1. **500 MB 取为 500 MiB**：`UPLOAD_MAX_BYTES` 缺省 524288000 字节，与既有的 1 MiB / 10 MiB 预览上限同一口径（D10；改判只改缺省值）。
 2. **白名单项的 `efforts` 可把强度列表收窄**：未声明时列全部八项，声明后只列 `off`、所声明的子集与 `auto`（D9；grill 第 15 行「按 omp 支持的全部档位列出」的细化）。
 3. **审计的三条边界**：创建时只有「原始档位非 NULL 且有效档位偏离缺省档」才写 `session.permission`；fork 继承不写；模型与强度的变化不写（D6）。
-4. **只发附件不发字不支持**：`message` 仍须非空（D12）。
+4. **只发附件、不发文字的配套细节**。原先这一条是「只发附件不发字不支持：`message` 仍须非空」；owner 2026-10-06 改判为**允许**（D12，owner 拍板的只有「允许」本身及其边界：空文本带通过校验的附件即受理，空文本无附件仍拒绝，`message` 键仍须出现且为字符串）。随之由起草者按最小改动定下的七点，owner 改判时各自只动所注明的一处：
+   - 4a. **落库 `content` 是空串**：沿用现有规则（去掉首尾空白一次，存去掉之后的文本），不发明新的规范化；不存 NULL，也不保留纯空白原文（D12；chat-sessions「REST prompt 受理与补偿」、message-attachments「附件落库与快照」）。
+   - 4b. **空文本不是命令**，按普通文本处理；「内建命令不得带附件」不受影响（D12；message-attachments「prompt 携带附件」第 3 条）。
+   - 4c. **交给 omp 的文本不为空文本另写分支**：仍是 `toWireText(text, skills)` 加同一份附件后缀，空文本时就是后缀本身（含开头两个换行）；分支对齐的 wire candidates 同理。omp 是否原样保存这种文本未读到证据，列为实机核对项 (g)（D12 的「先核对」与退路；tasks 1.8）。
+   - 4d. **新会话首条消息只有附件时的标题**：取第一个附件路径的文件名（最后一个 `/` 之后的部分），按现有标题规则的同一截断（前 18 个码点）；有文字时不变（D12；chat-sessions「会话持久化与回合刷盘」）。
+   - 4e. **`发送` 的启用条件**：从「草稿非空」改为「草稿非空，或至少有一个附件且全部附件处于可发送状态」；有失败 / 上传中的标签、锁定等其余禁用条件不变（D15；chat-web「输入框与能力栏」、message-attachments「输入框附件标签」）。
+   - 4f. **用户气泡**：文本为空时只渲染附件列表，不渲染空的文本块，操作行照旧；分叉返回的 `draft` 可以是空串、附件随 `attachments` 返回，撤回恢复同理（D15、D19；message-attachments「用户气泡中的附件」、chat-web「消息线程」、message-undo 两条）。
+   - 4g. **对话内搜索、复制等以 `content` 为输入的功能不为空文本加特例**：空文本自然不匹配，附件文件名不参与搜索（D15；不改 conversation-search）。
 5. **附件路径不限定在 `uploads/` 下**：会话工作空间内任何已存在的普通文件都可作为附件（D12；等于经 API 可以把空间内已有文件指给助手，文件页日后做「引用文件」不必改合同）。
 6. **进程崩溃留下的 `.part` 不清扫**（Non-Goals）。
 7. **撤回恢复的附件标签沿用所存的 `size`**，不在撤回时重新量文件大小（D19；与 fork 的做法一致）。
@@ -404,6 +422,7 @@ C 新增而本 change 没有修改的条文（temporary-workspaces、workspace-s
 
 仿 fork：C 的 `POST /api/sessions/:id/undo` 的 200 在 `{session, draft, files}` 之外加 `attachments`，web 用它恢复输入框的附件标签。
 
+- **`draft` 可以是空串**：被撤回的是只发附件的消息时，`draft` 为空串（它所存的 `content`），附件照下面的规则带回；web 把草稿清空并恢复标签，此时 `发送` 因有可发送的附件而可用（D15）。
 - **取值**：被撤回消息所存的 `[{path, size}]` 里，撤回完成后仍然存在的那些，按存储次序；元素原样（`size` 是受理时的记录）。没有附件或都不存在 → `[]`。
 - **何时读、何时判**：所存的数组在撤回事务删除该消息行之前读出；存在性在文件还原（`files` 不是 `keep` 时）之后判——还原可能把助手删掉的附件恢复回来。判据与受理时相同：沙箱 `resolve(op=read)` 通过且 `lstat` 是普通文件。
 - **不写审计、不失败**：这是服务端读回它自己受理时校验过的路径，不是用户请求；用不写审计的纯解析函数，被拒或出错都按「不存在」处理，撤回照常 200。
@@ -416,7 +435,9 @@ C 新增而本 change 没有修改的条文（temporary-workspaces、workspace-s
 - **`全部自动` 是 Critical Path 上的放宽**：助手不经确认执行命令。缓解：管理员可封顶（`APPROVAL_MAX_MODE`）；选择时确认；常驻警示色；每次变化与每个非缺省档的新会话都有审计；omp 以独立 uid 运行（ADR-0010），能触及的范围不变。组 7、9 标注白盒审查。
 - **`全部自动` 会被新会话继承**（owner S-21，已定）。缓解：警示色在欢迎页就可见；创建时写审计；管理员可用 `APPROVAL_MAX_MODE` 整体关掉这一档。
 - **`always-ask` 下确认很多且 60 秒自动允许**：每次写文件都弹卡，无人值守时等于 60 秒延迟后的全部允许。这是 owner 决定 3 的原意（各档相同），在档位说明文字里不夸大它的保护力。
-- **未实测的 omp 行为**（D2、D7、D8、D9 的「先核对」）：若核对不成立，退路都要先改规格。缓解：核对是组 1，其它组在它之后；每条退路已写明。
+- **未实测的 omp 行为**（D2、D7、D8、D9、D12 的「先核对」）：若核对不成立，退路都要先改规格。缓解：核对是组 1，其它组在它之后；每条退路已写明。
+- **只发附件的消息的 wire 文本以换行开头**（D12）：omp 若不原样保存它，这类消息的重新生成、分叉与撤回对位全部 502。缓解：核对项 (g)（任务 1.8）在组 12 之前跑，退路已写明。
+- **只发附件的会话标题是文件名**：`image.png`、`截图.png` 这类名字区分度低。可接受——用户可以改名，且有文字时规则不变。
 - **换档后的第一条消息变慢**：多一次进程启动。可接受（与空闲回收后的第一条相同）。
 - **每个新进程无条件 `set_model`**：会话文件里每个 generation 多一两条变更记录。无害；核对 (e) 之后可以放宽，但不在本 change。
 - **代理强制白名单会拦住 omp 自己发的请求**（D18）：若真实 omp 在某个内部角色上发出 `models.yml` 之外的模型名，该角色的请求会被 400。缓解：任务 1.4 的核对项 (f) 在官方二进制上记录每一个请求的 `model`，其中 `/compact` 一步须确有上游请求（零观察按不成立）；不成立即停下回到 owner，不带着一个会打断 omp 的代理上线。
@@ -430,7 +451,7 @@ C 新增而本 change 没有修改的条文（temporary-workspaces、workspace-s
 - **「+」按钮改名**波及既有测试、走查与清单行：一次性改完，任务里列了位置。
 - **审计量**：`always-ask` 下 `session.approval` 行数明显增加（每次写文件一条）。审计表只追加、无清理策略——既有事实，不在本 change 处理。
 - **键集三步走期间**（组 5 到组 13 之间）web 接受两种形状：过渡分支有测试，组 13 删除时有反向断言。
-- **条文底本依赖 C 的归档文本**：本 change 的十八条重叠 MODIFIED 以 C 当前的 delta 为底。C 在实现期若再改这些条文，本 change 的同名条文要跟着改。缓解：任务 0.1 在 C 归档之后、本 change 归档之前用当时的主规格逐条 diff，差异只允许是 D16 表里列的增量。
+- **条文底本依赖 C 的归档文本**：本 change 的十九条重叠 MODIFIED 以 C 当前的 delta 为底。C 在实现期若再改这些条文，本 change 的同名条文要跟着改。缓解：任务 0.1 在 C 归档之后、本 change 归档之前用当时的主规格逐条 diff，差异只允许是 D16 表里列的增量。
 - **撤回响应的附件存在性是「那一刻」的事实**：判定之后文件仍可能被别的会话或助手删掉，届时带着它发 prompt 会得到 400（附件须是已存在的普通文件），用户移除该标签即可。不为此加锁。
 
 ## Migration Plan
