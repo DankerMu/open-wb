@@ -20,6 +20,8 @@ export interface WorkspaceRestDependencies {
   store: WorkspaceStore;
   sandbox: ReturnType<typeof createSandbox>;
   audit: Parameters<typeof createSandbox>[0]["audit"];
+  /** Session list notifier, injected by the assembly: called after a committed create or promote. */
+  listEvents: { notify(ownerId: string): void };
 }
 
 const WORKSPACE_BODY_LIMIT = 16 * 1024;
@@ -122,9 +124,9 @@ export function registerWorkspaceRest(
     { bodyLimit: WORKSPACE_BODY_LIMIT, onRequest: noStoreWorkspaceResponse },
     async (request, reply) => {
       const principal = currentPrincipal(request);
-      return reply
-        .code(201)
-        .send(dependencies.store.create(principal, parseCreateBody(request.body)));
+      const created = dependencies.store.create(principal, parseCreateBody(request.body));
+      dependencies.listEvents.notify(principal.id);
+      return reply.code(201).send(created);
     },
   );
   app.post<{ Params: { id: string } }>(
@@ -142,6 +144,7 @@ export function registerWorkspaceRest(
       if (promoted === null) {
         throw new HttpError("bad_request");
       }
+      dependencies.listEvents.notify(principal.id);
       return promoted;
     },
   );
