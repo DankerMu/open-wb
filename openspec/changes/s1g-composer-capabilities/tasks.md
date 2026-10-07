@@ -80,6 +80,11 @@ Minimal mergeable slice: 1.0 + 1.1 + 1.2 + 1.3 一刀（world 扩展与档位核
   （既有读者 `pool.ts`、启动装配在组 3、7 改；本任务保留两个字段为白名单缺省模型的派生值，组 7 结束时删除——在任务 7.4 里核对已无读者）。
   测试新文件 `server/test/model-catalog.test.ts`：三条配置场景（未配置等于单模型、多模型与缺省、全部非法情形各点名正确的键且不回显取值）与「可选强度与缺省强度」场景。变异：允许 `efforts` 乱序、允许与 `MODEL_REASONING` 并存、缺省强度恒取 `high`、放行 `MODEL_CATALOG` 里不带 `efforts` 的推理模型（当作全部六档）、给 `MODEL_CATALOG` 未设置时的那一项补上 `efforts`、可选强度里多出 `auto` → 各判红。
 - [ ] 2.3 同文件再导出纯函数 `effectiveComposer(raw, config)`（session-composer-settings「有效值解析」；档位次序常量也在这里，供组 8、9 共用，不另写第二份）。测试并入 `model-catalog.test.ts`：「夹取与回落」的七组输入。变异：不夹取档位、白名单外的模型不回落 → 判红；强度不在模型的可选强度内时回落到缺省 → `("yolo","m3","xhigh")` 一组判红（期望 `xhigh` 原样保留）；原始强度为 null 时不取缺省 → `(null,"m3",null)` 一组判红。
+  **实施注记（2.3，fixture 评审补充）**：
+  - 签名：`effectiveComposer(raw: { approvalMode: ApprovalMode | null; modelId: string | null; reasoningEffort: Effort | null }, config: { approvalMaxMode: ApprovalMode; modelCatalog: ModelCatalog }): { approvalMode: ApprovalMode; modelId: string; reasoningEffort: Effort | null }`；`AgentSettings` 在结构上可直接当 `config` 传。
+  - 档位次序常量在 `model-catalog.ts` 导出为 `APPROVAL_MODES = ["always-ask", "write", "yolo"] as const` 与类型 `ApprovalMode`；`agent-config.ts` 里的内联联合类型与字面量比较改为引用它（`model-catalog.ts` 不得反向导入 `agent-config.ts`）。
+  - 测试除七组输入外再加两例：入参冻结后求值不抛且入参不变；同一份 raw 在「调低再调回」的两份 config 下原始选择重新生效（有效值不回写）。
+  Risk packs（2.3）: Legacy compatibility（三列全 NULL 等于今天的行为）、Config（最高档夹取）。
 - [ ] 2.4 入口级：`server/src/server.ts` 的纯配置 seam（`resolveServerConfig` 上方注释「消费十五项自有 key，agent 十一项」）在 C 之后已是十九项，本任务把注释与实现改到二十三项（agent 侧加四键，经 `resolveAgentSettings`）。
   测试 `server/test/server-config.test.ts`：http-service-skeleton「Pure source and compiled configuration identity」改写后的断言（twenty-three application keys，源码入口与编译入口一致）；`server/test/server-startup-order.test.ts`（或 `server-entry-silent.test.ts`，以既有覆盖「非法配置 nonzero 退出、stderr 恰一行」的那个文件为准）：「四个新配置键的取值与非法值」的非法值一半——四键各自的非法取值都在任何 filesystem / database / listen 副作用之前 nonzero 退出、application stderr 恰一行 generic failure record。
   合法四键启动后 `GET /api/composer/options` 的回报与「托管 models.yml 含三个模型条目」属于同一场景的另一半，分别在 8.5 与 3.2 落（两处各自点名本场景）。变异：某个新键的非法值被当作缺省放行 → 判红。
