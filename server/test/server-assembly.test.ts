@@ -9,11 +9,13 @@ import { type CreateAppOptions, createApp } from "../src/app.js";
 import * as auth from "../src/auth/index.js";
 import { openDb } from "../src/core/db/index.js";
 import * as http from "../src/http/index.js";
+import type { ModelCatalog } from "../src/model-catalog.js";
 import * as modelProxy from "../src/model-proxy/index.js";
 import * as sessions from "../src/sessions/index.js";
 import type { SessionSupervisorRuntime } from "../src/sessions/supervisor.js";
 import { TokenRegistry } from "../src/sessions/tokens.js";
 import * as workspaces from "../src/workspaces/index.js";
+import { startRecordingUpstream } from "./model-proxy-helpers.js";
 import {
   compileServerEntry,
   releaseStartupFixtures,
@@ -450,6 +452,72 @@ describe("真实 createApp 挂载 workspaces 与 accounts", () => {
     }
   }, 90_000);
 });
+describe("真实 createApp 把白名单交给模型代理", () => {
+  it("Default single-model whitelist：缺省配置只放行 deepseek-v4.1-flash", async () => {
+    expect(await proxyStatuses(undefined, ["deepseek-v4.1-flash", "gpt-x"])).toEqual({
+      statuses: [202, 400],
+      forwarded: ['{"model":"deepseek-v4.1-flash"}'],
+    });
+  });
+
+  it("给了 modelCatalog 就以它的 id 集合为准，缺省模型不再自动放行", async () => {
+    const models = ["m1", "m2", "m3"].map((id) => ({
+      id,
+      name: id,
+      reasoning: false,
+      vision: false,
+    }));
+    expect(
+      await proxyStatuses({ models, defaultModelId: "m1" }, [
+        "m1",
+        "m2",
+        "m3",
+        "deepseek-v4.1-flash",
+      ]),
+    ).toEqual({
+      statuses: [202, 202, 202, 400],
+      forwarded: ['{"model":"m1"}', '{"model":"m2"}', '{"model":"m3"}'],
+    });
+  });
+});
+
+/** 依次以存活 bearer 请求各模型名；返回各自的状态码与记录型上游实际收到的 body。 */
+async function proxyStatuses(
+  modelCatalog: ModelCatalog | undefined,
+  modelIds: readonly string[],
+): Promise<{ statuses: number[]; forwarded: string[] }> {
+  const upstream = await startRecordingUpstream(({ response }) => {
+    response.writeHead(202);
+    response.end("ok");
+  });
+  try {
+    const tokens = new TokenRegistry();
+    const bearer = tokens.issue("runtime-live");
+    const app = createApp({
+      db: track(openDb(":memory:")),
+      assembly: {
+        tokens,
+        upstream: { baseUrl: `${upstream.origin}/v1`, apiKey: "k-992" },
+        ...(modelCatalog === undefined ? {} : { modelCatalog }),
+      },
+    });
+    apps.push(app);
+    const statuses: number[] = [];
+    for (const id of modelIds) {
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
+        payload: JSON.stringify({ model: id }),
+      });
+      statuses.push(response.statusCode);
+    }
+    return { statuses, forwarded: upstream.requests.map((entry) => entry.body.toString("utf8")) };
+  } finally {
+    await upstream.close();
+  }
+}
+
 function spyRegistrationOrder(): string[] {
   const order: string[] = [];
   vi.spyOn(auth, "registerAuth").mockImplementationOnce((app, options) => {

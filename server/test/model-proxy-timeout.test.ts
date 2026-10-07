@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   AGENT_UNAVAILABLE_ENVELOPE,
+  ALLOWED_MODELS,
   API_KEY,
   CONNECTION_DEADLINE_MS,
   createGate,
@@ -35,6 +36,7 @@ const CASE_TIMEOUT_MS = CONNECTION_DEADLINE_MS + 8_000;
 function configured(baseUrl: string) {
   return {
     tokens: tokensFrom(liveTokenTable()),
+    allowedModels: ALLOWED_MODELS,
     upstream: { baseUrl, apiKey: API_KEY },
   };
 }
@@ -75,7 +77,9 @@ describe("connection-establishment deadline", () => {
       );
       await withListeningProxy(configured(`${upstream.origin}/v1`), async (origin) => {
         try {
-          const pending = postCompletions(origin, { body: '{"mode":"delayed-headers"}' });
+          const pending = postCompletions(origin, {
+            body: '{"model":"m1","mode":"delayed-headers"}',
+          });
           await waitForUpstream(arrived.promise, pending, "delayed headers");
           await expectPendingDuring(
             Date.now(),
@@ -107,7 +111,7 @@ describe("connection-establishment deadline", () => {
       await withListeningProxy(configured(`${held.origin}/v1`), async (origin) => {
         try {
           const response = await waitFor(
-            postCompletions(origin, { body: '{"mode":"long-sse"}' }),
+            postCompletions(origin, { body: '{"model":"m1","mode":"long-sse"}' }),
             3_000,
             "healthy stream never committed headers",
           );

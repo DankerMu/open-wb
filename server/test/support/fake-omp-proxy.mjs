@@ -1,5 +1,5 @@
 /**
- * fake-omp call-proxy 上游客户端（#461 拆出）：读 models.yml 的 workbuddy base URL、POST 一轮 SSE、重组 tool_calls。
+ * fake-omp call-proxy 上游客户端（#461 拆出）：读 models.yml 的 workbuddy base URL 与第一条模型 id、POST 一轮 SSE、重组 tool_calls。
  * 无模块级状态、不发帧；只依赖 node: 内建，绝不导入 fake-omp.mjs（它有 argv/ready/stdin 模块级副作用）。
  */
 import { readFileSync } from "node:fs";
@@ -20,6 +20,10 @@ export function parseToolCall(call) {
 
 /** 受管 models.yml 在真实 omp 的默认 agent 目录 `$HOME/.omp/agent`（宿主不设 PI_CODING_AGENT_DIR）。 */
 export function loadBaseUrl() {
+  return loadWorkbuddy().baseUrl;
+}
+
+function loadWorkbuddy() {
   const home = process.env.HOME;
   if (typeof home !== "string" || home.length === 0) {
     throw new Error("config");
@@ -30,29 +34,29 @@ export function loadBaseUrl() {
   } catch {
     throw new Error("config");
   }
-  return parseWorkbuddyBaseUrl(text);
+  return parseWorkbuddy(text);
 }
 
-function parseWorkbuddyBaseUrl(text) {
+function parseWorkbuddy(text) {
   if (/^providers:\s*\[/mu.test(text)) {
     throw new Error("config");
   }
   const fields = collectWorkbuddyFields(text);
-  const { api, apiKey, baseUrl, hasModel } = fields;
+  const { api, apiKey, baseUrl, model } = fields;
   if (
     api !== "openai-completions" ||
     apiKey !== "WORKBUDDY_MODEL_TOKEN" ||
     typeof baseUrl !== "string" ||
     !/^https?:\/\//u.test(baseUrl) ||
-    !hasModel
+    typeof model !== "string"
   ) {
     throw new Error("config");
   }
-  return baseUrl;
+  return { baseUrl, model };
 }
 
 function collectWorkbuddyFields(text) {
-  const fields = { hasModel: false };
+  const fields = {};
   let section = "";
   for (const raw of text.split(/\r?\n/u)) {
     const line = raw.trim();
@@ -87,9 +91,15 @@ function applyWorkbuddyLine(fields, section, indent, line) {
     }
     return;
   }
-  if (indent >= 6 && /(^-\s*id:|^id:)/u.test(line)) {
-    fields.hasModel = true;
+  const id = indent >= 6 ? /^(?:-\s*)?id:(.*)$/u.exec(line) : null;
+  if (id !== null) {
+    fields.model ??= modelIdOf(id[1].trim());
   }
+}
+
+/** 托管写出器用 JSON.stringify 写 id；手写夹具可以不带引号。 */
+function modelIdOf(value) {
+  return value.startsWith('"') ? JSON.parse(value) : unquote(value);
 }
 
 function unquote(value) {
@@ -105,7 +115,9 @@ export function postChat(baseUrl, token, messages) {
   const { promise, resolve, reject } = Promise.withResolvers();
   const root = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
   const endpoint = new URL("chat/completions", root);
-  const payload = Buffer.from(JSON.stringify({ stream: true, messages }));
+  // `model` 取托管 models.yml 的第一条 id（真实代理按白名单校验它）。
+  const { model } = loadWorkbuddy();
+  const payload = Buffer.from(JSON.stringify({ model, stream: true, messages }));
   const send = endpoint.protocol === "https:" ? httpsRequest : httpRequest;
   const req = send(
     endpoint,

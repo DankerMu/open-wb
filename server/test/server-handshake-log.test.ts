@@ -141,6 +141,7 @@ describe("appAssemblyOf (L2)", () => {
 
     expect(assembly.runtime).toEqual(sessionRuntimeOf(bare));
     expect(assembly.runtime?.spawnConcurrency).toBe(2);
+    expect(assembly.modelCatalog).toBe(bare.modelCatalog);
     expect(Object.hasOwn(assembly, "upstream")).toBe(false);
     expect(typeof assembly.log).toBe("function");
     expect(upstream.upstream).toEqual({ baseUrl: "http://127.0.0.1:9/v1", apiKey: "k-652" });

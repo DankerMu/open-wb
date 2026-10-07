@@ -101,6 +101,7 @@ export function sessionRuntimeOf(config: ServerConfig): SessionSupervisorRuntime
 export function appAssemblyOf(config: ServerConfig): AssemblyDependencies {
   return {
     runtime: sessionRuntimeOf(config),
+    modelCatalog: config.modelCatalog,
     ...(config.modelUpstreamBaseUrl !== undefined && config.modelUpstreamApiKey !== undefined
       ? { upstream: { baseUrl: config.modelUpstreamBaseUrl, apiKey: config.modelUpstreamApiKey } }
       : {}),

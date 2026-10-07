@@ -29,7 +29,7 @@ For S1g the fixture SHALL additionally: (1) support the scenario `approval-write
 
 #### Scenario: 真实代理承载
 - WHEN call-proxy reads the managed providers.workbuddy configuration and receives a prompt
-- THEN it POSTs the prompt messages with stream true to baseUrl/chat/completions using the environment WORKBUDDY_MODEL_TOKEN bearer; if the streamed response carries tool calls it reassembles them, reports each as matching tool_execution_start/end frames carrying the upstream tool call id and name, and POSTs one second request whose messages are the original user message, the assistant tool-call message and a role tool result for that call id; streamed content of the answering round maps to text_delta without byte-boundary corruption, and the turn ends successfully after DONE
+- THEN it POSTs the prompt messages with stream true and with `model` set to the first model id of the managed providers.workbuddy configuration to baseUrl/chat/completions using the environment WORKBUDDY_MODEL_TOKEN bearer; if the streamed response carries tool calls it reassembles them, reports each as matching tool_execution_start/end frames carrying the upstream tool call id and name, and POSTs one second request whose messages are the original user message, the assistant tool-call message and a role tool result for that call id; streamed content of the answering round maps to text_delta without byte-boundary corruption, and the turn ends successfully after DONE
 - WHEN a 200 response ends without content or tool calls, or the second round again yields only tool calls
 - THEN the assistant message ends with stopReason error rather than a successful empty turn
 - WHEN configuration is invalid or the local HTTP request fails

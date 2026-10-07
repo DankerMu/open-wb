@@ -6,6 +6,7 @@ import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { FastifyInstance, FastifyReply, FastifyRequest, onRequestHookHandler } from "fastify";
 import { HttpError } from "../core/errors/index.js";
+import { isAllowedModel } from "./model-guard.js";
 
 const BODY_LIMIT = 4 * 1024 * 1024;
 const CONNECT_DEADLINE_MS = 10_000;
@@ -24,6 +25,8 @@ interface ModelProxyUpstream {
 export interface ModelProxyOptions {
   tokens: TokenLookup;
   upstream?: ModelProxyUpstream | undefined;
+  /** 白名单模型 id 的非空集合，由装配方给出；本模块不读环境。 */
+  allowedModels: ReadonlySet<string>;
 }
 
 interface Exchange {
@@ -49,6 +52,10 @@ const noStore: onRequestHookHandler = (_request, reply, done) => {
 };
 
 export function registerModelProxy(app: FastifyInstance, options: ModelProxyOptions): void {
+  const { allowedModels } = options;
+  if (allowedModels.size === 0) {
+    throw new Error("model proxy needs at least one allowed model");
+  }
   const secureSockets = new WeakSet<Socket>();
   const exchanges = new Set<Exchange>();
   const uploads = new Set<IncomingUpload>();
@@ -65,7 +72,7 @@ export function registerModelProxy(app: FastifyInstance, options: ModelProxyOpti
   app.register((instance, _opts, done) => {
     instance.removeContentTypeParser(["application/json", "text/plain"]);
     instance.addContentTypeParser("application/json", (request, payload, complete) => {
-      parseJsonBytes(request, payload, complete, uploadsByRequest.get(request));
+      parseJsonBytes(request, payload, complete, uploadsByRequest.get(request), allowedModels);
     });
     instance.addHook("onRequest", noStore);
     instance.addHook("onRequest", (request, reply, next) => {
@@ -106,6 +113,7 @@ function parseJsonBytes(
   payload: Readable,
   complete: (error: Error | null, value?: Buffer) => void,
   upload: IncomingUpload | undefined,
+  allowedModels: ReadonlySet<string>,
 ): void {
   if (upload === undefined) {
     payload.destroy();
@@ -145,9 +153,15 @@ function parseJsonBytes(
       return;
     }
     const raw = Buffer.concat(chunks);
+    // 解析与白名单扫描读同一个字符串；语法错误与白名单外走同一条拒绝；放行后转发的仍是原始字节 raw。
+    let allowed = false;
     try {
-      JSON.parse(raw.toString("utf8"));
+      const text = raw.toString("utf8");
+      allowed = isAllowedModel(JSON.parse(text), text, allowedModels);
     } catch {
+      // JSON 语法错误（或扫描器抛出）：allowed 保持 false，一律拒绝。
+    }
+    if (!allowed) {
       finish(new HttpError("bad_request"));
       return;
     }
