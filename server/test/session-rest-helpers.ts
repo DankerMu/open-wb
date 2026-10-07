@@ -5,7 +5,10 @@ import { emit } from "../src/core/audit/index.js";
 import { registerAuthGuard } from "../src/http/index.js";
 import { registerSessionRoutes, type SessionSupervisorPort } from "../src/sessions/rest.js";
 import { createSessionStore, type SessionStore } from "../src/sessions/store.js";
-import { createSessionMetadataStore } from "../src/sessions/store-metadata.js";
+import {
+  createSessionMetadataStore,
+  type SessionMetadataStore,
+} from "../src/sessions/store-metadata.js";
 import { bearerCookie, loginSessionId } from "./auth-lifecycle-helpers.js";
 import { PARSER_INPUTS, withStandaloneAuthApp } from "./http-guard-helpers.js";
 
@@ -15,6 +18,9 @@ export const EXACT_MULTIBYTE = "😀".repeat(8_192);
 export const UNKNOWN_SESSION_ID = "f".repeat(32);
 export const SESSION_BUSY_ENVELOPE = {
   error: { code: "session_busy", message: "会话正在生成，请稍候" },
+} as const;
+export const SESSION_ARCHIVED_ENVELOPE = {
+  error: { code: "session_archived", message: "会话已归档，恢复后才能继续对话" },
 } as const;
 export const AGENT_UNAVAILABLE_ENVELOPE = {
   error: { code: "agent_unavailable", message: "Agent 运行时不可用" },
@@ -39,6 +45,8 @@ export interface SessionRestFixture {
   db: DatabaseSync;
   store: SessionStore;
   supervisor: RecordingSupervisor;
+  /** The very store object the routes hold, so a spy on it observes the route's own calls. */
+  metadata: SessionMetadataStore;
 }
 
 export async function withSessionRest<T>(
@@ -57,10 +65,14 @@ export async function withSessionRest<T>(
           },
           emit,
         });
+        const metadata = createSessionMetadataStore(db, {
+          emit,
+          sandboxRoot: "/nonexistent/sandbox",
+        });
         registerSessionRoutes(app, {
           store,
           supervisor,
-          metadata: createSessionMetadataStore(db, { emit, sandboxRoot: "/nonexistent/sandbox" }),
+          metadata,
           workspaceRootOf: () => null,
           agentDir: "/nonexistent/omp-agent",
           sandboxRoot: "/nonexistent/sandbox",
@@ -70,7 +82,7 @@ export async function withSessionRest<T>(
           },
         });
         try {
-          return await action({ app, db, store, supervisor });
+          return await action({ app, db, store, supervisor, metadata });
         } finally {
           db.setAuthorizer(null);
           if (db.isTransaction) {

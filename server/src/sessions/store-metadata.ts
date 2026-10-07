@@ -70,6 +70,11 @@ export interface SessionMetadataStore {
     sessionId: string,
     patch: SessionPatch,
   ): SessionView | null | "busy";
+  /**
+   * A fresh synchronous read of this owner's `archived_at` (#923): the archive time, or null when
+   * the session is not archived or this owner has no such row (admission then answers the 404).
+   */
+  archivedAt(sessionId: string, ownerId: string): number | null;
   /** The deleted row's file and message count; null when no row of this owner matched. */
   deleteSession(ownerId: string, sessionId: string): DeletedSession | null;
 }
@@ -124,6 +129,7 @@ const PATCH_OWNED = "WHERE id = ? AND owner_id = ?";
 /** Archiving and prompt admission (which writes `running`) cannot both succeed. */
 const PATCH_OWNED_NOT_RUNNING = `${PATCH_OWNED} AND status != 'running'`;
 const SELECT_OWNED = `SELECT 1 FROM chat_sessions ${PATCH_OWNED}`;
+const SELECT_ARCHIVED_AT = `SELECT archived_at FROM chat_sessions ${PATCH_OWNED}`;
 
 export function createSessionMetadataStore(
   db: DatabaseSync,
@@ -195,6 +201,14 @@ export function createSessionMetadataStore(
         throw new Error("patched session row missing");
       }
       return toSessionView(row, createSqliteTextDecoder(db));
+    },
+
+    archivedAt(sessionId, ownerId) {
+      const row = db.prepare(SELECT_ARCHIVED_AT).get(sessionId, ownerId) as
+        | { archived_at: number | bigint | null }
+        | undefined;
+      const at = row?.archived_at ?? null;
+      return at === null ? null : Number(at);
     },
 
     deleteSession(ownerId, sessionId) {

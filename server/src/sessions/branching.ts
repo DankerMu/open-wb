@@ -82,6 +82,9 @@ export class Regenerations {
     if (tree === null || resume === null) {
       throw new HttpError("not_found");
     }
+    if (tree.session.archivedAt !== null) {
+      throw new HttpError("session_archived");
+    }
     if (tree.session.status === "running" || controls.held(sessionId)) {
       throw new HttpError("session_busy");
     }
@@ -244,6 +247,10 @@ export class Forks {
     const resume = store.runtimeState(sourceId);
     if (tree === null || resume === null) {
       throw new HttpError("not_found");
+    }
+    // Read-only once archived: ahead of the fork point's own 400 and of session_busy.
+    if (tree.session.archivedAt !== null) {
+      throw new HttpError("session_archived");
     }
     const users = tree.messages.filter((message) => message.role === "user");
     const user = users.find((message) => message.id === messageId);

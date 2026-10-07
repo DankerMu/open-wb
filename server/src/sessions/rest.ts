@@ -225,7 +225,11 @@ export function registerSessionRoutes(
     async (request, reply) => {
       const principal = currentPrincipal(request);
       const text = parsePromptMessage(request.body);
-      // Claim check and admission share one synchronous segment: no await in between.
+      // Archive read, claim check and admission share one synchronous segment: no await in
+      // between. The read is fresh: the tree cached before the body arrived may predate a PATCH.
+      if (dependencies.metadata.archivedAt(request.params.id, principal.id) !== null) {
+        throw new HttpError("session_archived");
+      }
       if (dependencies.supervisor.controlHeld(request.params.id)) {
         throw new HttpError("session_busy");
       }
