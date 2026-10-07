@@ -160,6 +160,23 @@ describe("core/sandbox createSandbox", () => {
       },
     });
 
+    expectCanonicalError(
+      () => resolve(PRINCIPAL, WORKSPACE_ID, "uploads/a\\b", "write"),
+      "sandbox_denied",
+    );
+    expect(audit.events).toHaveLength(4);
+    expect(audit.events[3]).toEqual({
+      kind: "sandbox.reject",
+      actorId: PRINCIPAL.id,
+      workspaceId: WORKSPACE_ID,
+      title: "越界访问被沙箱拦截",
+      detail: {
+        relPath: "uploads/a\\b",
+        op: "write",
+        reason: expect.stringMatching(/\S/),
+      },
+    });
+
     expect(readdirSync(parent).toSorted()).toEqual(beforeParent);
     expect(readdirSync(sandbox).toSorted()).toEqual(beforeSandbox);
     expect(readFileSync(join(parent, "outside.txt"), "utf8")).toBe("outside");

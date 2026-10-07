@@ -11,7 +11,7 @@ import { join } from "node:path";
 export function resolve(
   root: string,
   relPath: string,
-  op: "read" | "list" | "mkdir",
+  op: "read" | "list" | "mkdir" | "write",
 ): { ok: true; absPath: string } | { ok: false; reason: string } {
   let canonicalRoot: string;
   try {
@@ -28,7 +28,7 @@ export function resolve(
   }
 
   const components = relPath.split("/");
-  if (op === "mkdir" && !isValidMkdirTerminal(components.at(-1))) {
+  if (createsEntry(op) && !isValidMkdirTerminal(components.at(-1))) {
     return { ok: false, reason: "mkdir name is invalid" };
   }
 
@@ -51,6 +51,11 @@ export function resolve(
     return { ok: false, reason: "path escapes the sandbox root" };
   }
   return { ok: true, absPath: current };
+}
+
+/** mkdir 与 write 都在目标位置新建条目，共用同一段末段词法判定。 */
+function createsEntry(op: string): boolean {
+  return op === "mkdir" || op === "write";
 }
 
 function isValidMkdirTerminal(name: string | undefined): boolean {

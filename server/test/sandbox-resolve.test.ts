@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   readlinkSync,
   realpathSync,
   rmSync,
@@ -86,7 +87,7 @@ function snapshotTree(root: string): string[] {
 function expectRejected(
   root: string,
   relPath: string,
-  op: "read" | "list" | "mkdir" = "read",
+  op: "read" | "list" | "mkdir" | "write" = "read",
 ): void {
   const result = resolve(root, relPath, op);
   expect(result.ok, `${op} ${JSON.stringify(relPath)}`).toBe(false);
@@ -161,6 +162,95 @@ describe("core/sandbox resolve", () => {
     expect(snapshotTree(layout.parent)).toEqual(before);
   });
 
+  it("write accepts a.pdf, uploads/a.pdf, and uploads/图 (1).png whether uploads exists or not, without creating them", () => {
+    const layout = createLayout();
+    const targets = ["a.pdf", "uploads/a.pdf", "uploads/图 (1).png"];
+
+    const beforeMissing = snapshotTree(layout.parent);
+    for (const relPath of targets) {
+      expect(resolve(layout.sandbox, relPath, "write"), `missing uploads: ${relPath}`).toEqual({
+        ok: true,
+        absPath: `${layout.canonicalSandbox}/${relPath}`,
+      });
+    }
+    expect(snapshotTree(layout.parent)).toEqual(beforeMissing);
+
+    mkdirSync(join(layout.sandbox, "uploads"));
+    const beforeExisting = snapshotTree(layout.parent);
+    for (const relPath of targets) {
+      expect(resolve(layout.sandbox, relPath, "write"), `existing uploads: ${relPath}`).toEqual({
+        ok: true,
+        absPath: `${layout.canonicalSandbox}/${relPath}`,
+      });
+    }
+    expect(snapshotTree(layout.parent)).toEqual(beforeExisting);
+  });
+
+  it("write rejects dot, dotdot, backslash, and trailing slash whether uploads exists or not", () => {
+    const layout = createLayout();
+
+    const rejectAll = (): void => {
+      const before = snapshotTree(layout.parent);
+      expectRejected(layout.sandbox, "uploads/.", "write");
+      expectRejected(layout.sandbox, "uploads/..", "write");
+      expectRejected(layout.sandbox, "uploads/a\\b", "write");
+      expectRejected(layout.sandbox, "uploads/", "write");
+      expect(snapshotTree(layout.parent)).toEqual(before);
+    };
+
+    rejectAll();
+    mkdirSync(join(layout.sandbox, "uploads"));
+    rejectAll();
+  });
+
+  it("write rejects traversal, absolute, and NUL escape vectors without adding filesystem entries", () => {
+    const layout = createLayout();
+    mkdirSync(join(layout.sandbox, "uploads"));
+    const before = snapshotTree(layout.parent);
+
+    expectRejected(layout.sandbox, "uploads/../../x", "write");
+    expectRejected(layout.sandbox, "../x", "write");
+    expectRejected(layout.sandbox, "/etc/passwd", "write");
+    expectRejected(layout.sandbox, "uploads/a\0b", "write");
+
+    expect(snapshotTree(layout.parent)).toEqual(before);
+  });
+
+  it("write does not follow an uploads symlink that points outside the root", () => {
+    const layout = createLayout();
+    symlinkSync(join(layout.parent, "outside-dir"), join(layout.sandbox, "uploads"));
+    const before = snapshotTree(layout.parent);
+
+    expectRejected(layout.sandbox, "uploads/a.pdf", "write");
+    expectRejected(layout.sandbox, "uploads/child", "write");
+
+    expect(snapshotTree(layout.parent)).toEqual(before);
+    expect(readFileSync(join(layout.parent, "outside-dir", "child"), "utf8")).toBe("child");
+  });
+
+  it("write rejects a target that is itself a symlink, pointing inside or outside the root", () => {
+    const layout = createLayout();
+    const uploads = join(layout.sandbox, "uploads");
+    mkdirSync(uploads);
+    writeFileSync(join(layout.sandbox, "a", "inside.txt"), "inside");
+
+    for (const [label, target, content] of [
+      ["inside", join(layout.sandbox, "a", "inside.txt"), "inside"],
+      ["outside", join(layout.parent, "outside.txt"), "outside"],
+    ] as const) {
+      symlinkSync(target, join(uploads, "a.pdf"));
+      const before = snapshotTree(layout.parent);
+
+      const result = resolve(layout.sandbox, "uploads/a.pdf", "write");
+      expect(result.ok, `symlink to ${label}`).toBe(false);
+      expect(result.ok ? "" : result.reason, `symlink to ${label} reason`).toMatch(/\S/);
+
+      expect(snapshotTree(layout.parent)).toEqual(before);
+      expect(readFileSync(target, "utf8")).toBe(content);
+      rmSync(join(uploads, "a.pdf"));
+    }
+  });
+
   it("rejects in-root symlinks even when a following dot or empty segment would normalize them away", () => {
     const layout = createLayout();
     const before = snapshotTree(layout.parent);
@@ -190,7 +280,12 @@ describe("core/sandbox resolve", () => {
       ok: true,
       absPath: join(layout.canonicalSandbox, "regular-file", "child"),
     });
+    expect(resolve(layout.sandbox, "regular-file/child", "write")).toEqual({
+      ok: true,
+      absPath: join(layout.canonicalSandbox, "regular-file", "child"),
+    });
     expectRejected(layout.sandbox, "regular-file/child/..", "read");
+    expectRejected(layout.sandbox, "regular-file/child/..", "write");
 
     expect(snapshotTree(layout.parent)).toEqual(before);
   });
