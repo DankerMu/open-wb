@@ -21,6 +21,7 @@ import {
   MIGRATION_034,
   MIGRATION_035,
   MIGRATION_036,
+  MIGRATION_037,
   MIGRATION_0010,
   migrationReceiptExists,
   removeTempDirs,
@@ -214,14 +215,8 @@ function expectRequiredIndex(
 }
 
 function seedPre032Database(path: string): void {
-  const assets = trackedMigrationAssets().filter(
-    (asset) =>
-      asset.filename !== MIGRATION_032 &&
-      asset.filename !== MIGRATION_033 &&
-      asset.filename !== MIGRATION_034 &&
-      asset.filename !== MIGRATION_035 &&
-      asset.filename !== MIGRATION_036,
-  );
+  const later: readonly string[] = TRACKED_MIGRATION_FILENAMES.slice(5); // 032 onwards
+  const assets = trackedMigrationAssets().filter((asset) => !later.includes(asset.filename));
   const filenames = assets.map((asset) => asset.filename);
   expect(filenames).toEqual([...HISTORICAL_FILENAMES]);
   withDatabase(path, (db) => {
@@ -301,6 +296,7 @@ describe("core/db chat schema", () => {
         ["scene", "TEXT", 0, null, 0, 0],
         ["pinned_at", "INTEGER", 0, null, 0, 0],
         ["todo", "TEXT", 0, null, 0, 0],
+        ["archived_at", "INTEGER", 0, null, 0, 0],
       ]);
       expect(columnInfo(db, "chat_messages")).toEqual([
         ["id", "INTEGER", 0, null, 1, 0],
@@ -705,6 +701,9 @@ describe("core/db chat schema", () => {
     );
     expect(upgraded.receipts[9]).toEqual(
       expect.objectContaining({ sequence: 10, filename: MIGRATION_036 }),
+    );
+    expect(upgraded.receipts[10]).toEqual(
+      expect.objectContaining({ sequence: 11, filename: MIGRATION_037 }),
     );
     expect(upgraded.business).toEqual(before.business);
     expectRepeatedOpenStable(file, (db) => {
