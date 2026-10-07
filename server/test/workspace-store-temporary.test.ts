@@ -503,3 +503,174 @@ describe("temporary workspace: id collisions", () => {
     });
   });
 });
+
+describe("temporary workspace: 转正 (store.promote)", () => {
+  const TEMPORARY_ROW = { id: ID_T, owner_id: "u1", name: TMP_T, dir: TMP_T, temporary: 1 };
+
+  function auditRows(db: DatabaseSync): unknown[] {
+    return db
+      .prepare("SELECT actor_id, kind, title, detail, workspace_id FROM audit_events ORDER BY id")
+      .all();
+  }
+
+  /** Nothing was written and no transaction is left open. */
+  function expectUntouched(db: DatabaseSync, rows: unknown[]): void {
+    expect(workspaceRows(db)).toEqual(rows);
+    expect(auditRows(db)).toEqual([]);
+    expect(db.isTransaction).toBe(false);
+  }
+
+  it("原地转正: renames the row and clears the flag, leaves id, dir, createdAt, the directory and the session alone, and writes one audit", () => {
+    withWorld({ ids: [ID_T] }, ({ db, store, sandboxRoot }) => {
+      const temporary = seedTemporaryWorkspaceSession(db, store, "u1", SESSION_ID);
+      const ownerRoot = join(sandboxRoot, "u1");
+      const notes = join(temporary.root, "notes.md");
+      writeFileSync(notes, "调研笔记");
+      const inodes = { root: lstatSync(temporary.root).ino, notes: lstatSync(notes).ino };
+      const storedAt = db.prepare("SELECT created_at FROM workspaces WHERE id = ?").get(ID_T);
+
+      const promoted = store.promote(U1, ID_T, "  调研资料  ");
+
+      const expected = {
+        id: ID_T,
+        name: "调研资料",
+        dir: TMP_T,
+        root: join(ownerRoot, TMP_T),
+        createdAt: temporary.createdAt,
+      };
+      expect(promoted).toEqual(expected);
+      expect(workspaceRows(db)).toEqual([
+        { id: ID_T, owner_id: "u1", name: "调研资料", dir: TMP_T, temporary: 0 },
+      ]);
+      expect(db.prepare("SELECT created_at FROM workspaces WHERE id = ?").get(ID_T)).toEqual(
+        storedAt,
+      );
+      expect(readdirSync(sandboxRoot)).toEqual(["u1"]);
+      expect(readdirSync(ownerRoot)).toEqual([TMP_T]);
+      expect(readdirSync(temporary.root)).toEqual(["notes.md"]);
+      expect(lstatSync(temporary.root).ino).toBe(inodes.root);
+      expect(lstatSync(notes).ino).toBe(inodes.notes);
+      expect(readFileSync(notes, "utf8")).toBe("调研笔记");
+      expect(db.prepare("SELECT id, owner_id, workspace_id FROM chat_sessions").all()).toEqual([
+        { id: SESSION_ID, owner_id: "u1", workspace_id: ID_T },
+      ]);
+      expect(store.list("u1")).toEqual([expected]);
+      expect(store.rootOf(U1, ID_T)).toBe(expected.root);
+      expect(auditRows(db)).toEqual([
+        {
+          actor_id: "u1",
+          kind: "workspace.promote",
+          title: "另存为工作空间 调研资料",
+          detail: JSON.stringify({ root: join(ownerRoot, TMP_T) }),
+          workspace_id: ID_T,
+        },
+      ]);
+      expect(db.isTransaction).toBe(false);
+    });
+  });
+
+  it("冲突: a name the owner already uses is a conflict that writes nothing; another owner's same name is no obstacle", () => {
+    withWorld({ ids: [ID_T] }, ({ db, store }) => {
+      insertWorkspace(db, ID_A, "u1", "项目A", "project-a");
+      insertWorkspace(db, ID_B, "u2", "别人的", "theirs");
+      seedTemporaryWorkspaceSession(db, store, "u1", SESSION_ID);
+      const before = workspaceRows(db);
+
+      const error = captureThrown(() => store.promote(U1, ID_T, " 项目A "));
+      expect(error).toBeInstanceOf(HttpError);
+      expect(error).toMatchObject({ code: "conflict" });
+      expectUntouched(db, before);
+      expect(before).toContainEqual(TEMPORARY_ROW);
+
+      expect(store.promote(U1, ID_T, "别人的")).toMatchObject({ id: ID_T, name: "别人的" });
+      expect(workspaceRows(db)).toContainEqual({ ...TEMPORARY_ROW, name: "别人的", temporary: 0 });
+      expect(count(db, "audit_events")).toBe(1);
+    });
+  });
+
+  it("非临时: promoting an ordinary workspace returns null and changes nothing", () => {
+    withWorld({}, ({ db, store }) => {
+      insertWorkspace(db, ID_A, "u1", "正式", "formal");
+      const before = workspaceRows(db);
+      expect(store.promote(U1, ID_A, "改名")).toBeNull();
+      expectUntouched(db, before);
+      expect(before).toEqual([
+        { id: ID_A, owner_id: "u1", name: "正式", dir: "formal", temporary: 0 },
+      ]);
+    });
+  });
+
+  it("他人与不存在: another owner's temporary workspace and an unknown id both return null and change nothing", () => {
+    withWorld({ ids: [ID_T] }, ({ db, store }) => {
+      seedTemporaryWorkspaceSession(db, store, "u1", SESSION_ID);
+      expect(store.promote(U2, ID_T, "抢占")).toBeNull();
+      expectUntouched(db, [TEMPORARY_ROW]);
+      expect(store.promote(U1, ID_X, "不存在")).toBeNull();
+      expectUntouched(db, [TEMPORARY_ROW]);
+      expect(store.list("u2")).toEqual([]);
+    });
+  });
+
+  it("审计失败: the update is rolled back with the audit, no transaction stays open, and a later promote succeeds", () => {
+    withWorld({ ids: [ID_T] }, ({ db, store }) => {
+      seedTemporaryWorkspaceSession(db, store, "u1", SESSION_ID);
+      db.exec(`CREATE TEMP TRIGGER reject_promote_audit BEFORE INSERT ON audit_events
+        WHEN NEW.kind = 'workspace.promote' BEGIN SELECT RAISE(ABORT, 'audit fault'); END`);
+
+      const error = captureThrown(() => store.promote(U1, ID_T, "调研资料"));
+      expectGeneric(error, "audit fault");
+      expectUntouched(db, [TEMPORARY_ROW]);
+      expect(store.list("u1")).toEqual([]);
+
+      db.exec("DROP TRIGGER reject_promote_audit");
+      expect(store.promote(U1, ID_T, "调研资料")).toMatchObject({ id: ID_T, name: "调研资料" });
+      expect(workspaceRows(db)).toEqual([{ ...TEMPORARY_ROW, name: "调研资料", temporary: 0 }]);
+      expect(count(db, "audit_events")).toBe(1);
+      expect(db.isTransaction).toBe(false);
+    });
+  });
+
+  // The name-only samples `create` rejects (workspace-store.test.ts), restated: not exported there.
+  it.each([
+    ["empty", ""],
+    ["blank", "   "],
+    ["65 code points", "n".repeat(65)],
+    ["65 astral code points", "😀".repeat(65)],
+    ["a control character", "ok\nname"],
+    ["DEL", "ok\u007fname"],
+    ["a lone high surrogate", "\uD800"],
+    ["a lone low surrogate", "\uDC00"],
+  ])("非法名字: %s is a bad_request before anything is written", (_name, name) => {
+    withWorld({ ids: [ID_T] }, ({ db, store }) => {
+      seedTemporaryWorkspaceSession(db, store, "u1", SESSION_ID);
+      const error = captureThrown(() => store.promote(U1, ID_T, name));
+      expect(error).toBeInstanceOf(HttpError);
+      expect(error).toMatchObject({ code: "bad_request" });
+      expectUntouched(db, [TEMPORARY_ROW]);
+    });
+  });
+
+  it("accepts the longest name create accepts: 64 astral code points", () => {
+    withWorld({ ids: [ID_T] }, ({ db, store }) => {
+      seedTemporaryWorkspaceSession(db, store, "u1", SESSION_ID);
+      const name = "😀".repeat(64);
+      expect(store.promote(U1, ID_T, name)).toMatchObject({ name, dir: TMP_T });
+    });
+  });
+
+  it("重复转正: the second call returns null and leaves the first result and its single audit", () => {
+    withWorld({ ids: [ID_T] }, ({ db, store }) => {
+      seedTemporaryWorkspaceSession(db, store, "u1", SESSION_ID);
+      expect(store.promote(U1, ID_T, "第一次")).not.toBeNull();
+      const rows = workspaceRows(db);
+      const audits = auditRows(db);
+
+      expect(store.promote(U1, ID_T, "第二次")).toBeNull();
+      expect(workspaceRows(db)).toEqual(rows);
+      expect(rows).toEqual([{ ...TEMPORARY_ROW, name: "第一次", temporary: 0 }]);
+      expect(auditRows(db)).toEqual(audits);
+      expect(audits).toHaveLength(1);
+      expect(db.isTransaction).toBe(false);
+    });
+  });
+});

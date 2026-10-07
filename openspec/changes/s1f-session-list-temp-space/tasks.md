@@ -90,7 +90,7 @@ Minimal mergeable slice: 3.1 + 3.2（store 能建、列表不列；没有 REST �
 
 ## 4. server — 转正
 
-- [ ] 4.1 store：`promote(principal, workspaceId, name)`——名字校验复用 `create` 的校验函数；一条所有者作用域且带 `temporary = 1` 条件的 UPDATE 与 `workspace.promote` 审计同事务；唯一冲突映射 `conflict`。测试：store 层的成功、冲突、非临时、他人四例。
+- [x] 4.1 store：`promote(principal, workspaceId, name)`——名字校验复用 `create` 的校验函数；一条所有者作用域且带 `temporary = 1` 条件的 UPDATE 与 `workspace.promote` 审计同事务；唯一冲突映射 `conflict`。测试：store 层的成功、冲突、非临时、他人四例。
   **实施注记（fixture 评审补充）**：
   - `promote` 返回五键的空间记录；UPDATE 命中 0 行（不是临时空间 / 他人的 / 不存在——store 不区分）返回 `null`，不写审计；4.2 的路由在 owner 预检之后把 `null` 映射为 400。方法自带 BEGIN / COMMIT，失败 ROLLBACK（仿 `create`，没有目录步骤——转正不移动目录）。
   - 审计 `workspace.promote` 的 `title` 为 `另存为工作空间 <name>`，`detail` 为 `{root}`。

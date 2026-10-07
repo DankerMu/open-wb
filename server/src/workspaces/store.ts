@@ -60,6 +60,15 @@ export interface WorkspaceStore {
    * the caller's. Outside a transaction it throws before any mutation.
    */
   createTemporary(principal: StorePrincipal): CreatedTemporaryWorkspace;
+  /**
+   * Turns the owner's temporary workspace into an ordinary one under `name` (validated as `create`
+   * validates it), with the `workspace.promote` audit in the same transaction — its own BEGIN /
+   * COMMIT, rolled back on any failure. Only `name` and the temporary flag change: no directory is
+   * moved or renamed. Returns null, writing nothing, when the id is not a temporary workspace of
+   * this owner (ordinary, someone else's or unknown — not told apart). A name the owner already
+   * uses is a `conflict`.
+   */
+  promote(principal: StorePrincipal, workspaceId: string, name: string): WorkspaceRecord | null;
   rootOf(principal: StorePrincipal, workspaceId: string): string | null;
 }
 
@@ -75,6 +84,8 @@ const LIST_SQL =
 const ROOT_OF_SQL = "SELECT dir FROM workspaces WHERE owner_id = ? AND id = ? LIMIT 1";
 const INSERT_SQL =
   "INSERT INTO workspaces(id, owner_id, name, dir, created_at, temporary) VALUES (?, ?, ?, ?, ?, ?)";
+const PROMOTE_SQL =
+  "UPDATE workspaces SET name = ?, temporary = 0 WHERE id = ? AND owner_id = ? AND temporary = 1 RETURNING id, name, dir, created_at AS createdAt";
 const SQLITE_CONSTRAINT_UNIQUE = 2067;
 const SQLITE_CONSTRAINT_PRIMARYKEY = 1555;
 const ID_CONFLICT_MESSAGE = "UNIQUE constraint failed: workspaces.id";
@@ -85,6 +96,7 @@ const DEMO_DIR_REPLACE = /[^\w\u4e00-\u9fa5-]/g;
 const MAX_NAME_CODEPOINTS = 64;
 const ROLLBACK_FAILURE_MESSAGE = "workspace create rollback failed";
 const CLEANUP_FAILURE_MESSAGE = "workspace create compensation failed";
+const PROMOTE_ROLLBACK_FAILURE_MESSAGE = "workspace promote rollback failed";
 
 export function createWorkspaceStore(
   db: DatabaseSync,
@@ -165,6 +177,39 @@ export function createWorkspaceStore(
           }
         },
       };
+    },
+    promote(
+      principal: StorePrincipal,
+      workspaceId: string,
+      rawName: string,
+    ): WorkspaceRecord | null {
+      const name = validateName(rawName);
+      db.exec("BEGIN");
+      try {
+        const row = promoteOwnedTemporary(db, principal.id, workspaceId, name);
+        if (row === undefined) {
+          db.exec("ROLLBACK");
+          return null;
+        }
+        const promoted = toWorkspace(sandboxRoot, principal.id, row);
+        emit(db, {
+          kind: "workspace.promote",
+          actorId: principal.id,
+          workspaceId: promoted.id,
+          title: `另存为工作空间 ${name}`,
+          detail: { root: promoted.root },
+        });
+        db.exec("COMMIT");
+        return promoted;
+      } catch (error) {
+        const rollbackErrors = rollbackIfOpen(db);
+        if (rollbackErrors.length === 0) {
+          throw error;
+        }
+        throw new AggregateError([error, ...rollbackErrors], PROMOTE_ROLLBACK_FAILURE_MESSAGE, {
+          cause: error,
+        });
+      }
     },
     rootOf(principal: StorePrincipal, workspaceId: string): string | null {
       const row = db.prepare(ROOT_OF_SQL).get(principal.id, workspaceId) as
@@ -335,6 +380,23 @@ function insertOwnedWorkspace(db: DatabaseSync, created: WorkspaceRecord, ownerI
   }
 }
 
+/** The one owner-scoped UPDATE of promote; undefined when it matched no temporary row. */
+function promoteOwnedTemporary(
+  db: DatabaseSync,
+  ownerId: string,
+  workspaceId: string,
+  name: string,
+): WorkspaceRow | undefined {
+  try {
+    return db.prepare(PROMOTE_SQL).get(name, workspaceId, ownerId) as WorkspaceRow | undefined;
+  } catch (error) {
+    if (isOwnerUniqueConflict(error)) {
+      throw new HttpError("conflict");
+    }
+    throw error;
+  }
+}
+
 function isOwnerUniqueConflict(error: unknown): boolean {
   if (typeof error !== "object" || error === null || !("errcode" in error)) {
     return false;
@@ -363,15 +425,20 @@ function compensateCreateFailure(
   originalError: unknown,
   createdPaths: string[],
 ): never {
-  const rollbackErrors: unknown[] = [];
-  if (db.isTransaction) {
-    try {
-      db.exec("ROLLBACK");
-    } catch (error) {
-      rollbackErrors.push(error);
-    }
+  failAfterCleanup(originalError, rollbackIfOpen(db), createdPaths);
+}
+
+/** Rolls back the transaction a failed write left open; returns the rollback's own failure, if any. */
+function rollbackIfOpen(db: DatabaseSync): unknown[] {
+  if (!db.isTransaction) {
+    return [];
   }
-  failAfterCleanup(originalError, rollbackErrors, createdPaths);
+  try {
+    db.exec("ROLLBACK");
+    return [];
+  } catch (error) {
+    return [error];
+  }
 }
 
 /**
