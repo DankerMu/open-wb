@@ -37,7 +37,9 @@ Minimal mergeable slice: 0.1 + 0.2 一个 PR（结论与它引起的规格修订
 
 ## 1. 契约 — 会话视图三键（server + web 同刀）
 
-- [ ] 1.1 迁移 `server/src/core/db/migrations/037_chat_session_archive.sql`：`chat_sessions.archived_at`（可空、非负整数 CHECK）。测试加在迁移测试文件：新库与止于 036 的存量库两条路径、列约束的合法与非法取值、受信任迁移计数 +1（chat-sessions「会话数据 schema」的「Migration 037 on fresh and populated databases」「Migration 037 column constraint」）。
+- [x] 1.1 迁移 `server/src/core/db/migrations/037_chat_session_archive.sql`：`chat_sessions.archived_at`（可空、非负整数 CHECK）。测试加在迁移测试文件：新库与止于 036 的存量库两条路径、列约束的合法与非法取值、受信任迁移计数 +1（chat-sessions「会话数据 schema」的「Migration 037 on fresh and populated databases」「Migration 037 column constraint」）。
+  新用例写进新的测试文件（先例 `core-db-session-todo.test.ts`；`core-db-chat-schema.test.ts` 已近 800 行，不净增）。「受信任迁移计数」落在 `server/test/core-db-helpers.ts` 的 `TRACKED_MIGRATION_FILENAMES` 与 `COMPLETE_CATALOG`（回执与序号 10 → 11）。
+  把 036 写死为末位、或写死 `chat_sessions` 列清单的既有断言随之同步（只改期望的末位、列清单与回执数，不删除、不削弱，逐条写进 PR 的偏离记录）：`core-db-session-todo.test.ts`、`migration-034.test.ts`、`core-db-chat-schema.test.ts`、`core-db-chat-step-output.test.ts`、`core-db-session-fixture.ts`。
 - [ ] 1.2 迁移 `038_workspace_temporary.sql`：`workspaces.temporary`（NOT NULL DEFAULT 0、0/1 CHECK）。同一迁移测试文件：存量行读作 0、非法取值被拒、计数 +1、036→037→038 按序且 038 失败时 037 保留（temporary-workspaces「迁移 038 临时标记」两个场景）。
 - [ ] 1.3 服务端视图：`SESSION_COLUMNS` / `SessionDbRow` / `toSessionView`（`store.ts` 内只改列集与映射，超行则把列集与映射移到 `store-branch.ts` 或新的 `store-view.ts`）增加 `archivedAt`、`pendingApproval`（`EXISTS` 子查询）、`temporaryWorkspace`（关联 `workspaces.temporary`）；`createSession`、`patchSession`、fork 提交返回的视图同步。测试（新文件 `server/test/session-view-keys.test.ts`，REST seam）：session-metadata「会话视图扩展键」三个场景、chat-sessions「Session views carry the three extension keys」——此时归档与临时空间尚未有写入口，用直接写库构造归档行与绑定临时空间的行。
 - [ ] 1.4 web 解析：`web/src/lib/session-contract.ts` 的会话解析改为十一键并逐键校验（含 `workspaceId:null` 且 `temporaryWorkspace:true` 拒绝），`ChatSession` 类型同步；`patchSession` 的 patch 类型加 `archived`。测试改写 `web/test` 里的会话契约用例：session-sidebar「会话 DTO 严格解析」两个场景、chat-web「API 客户端扩展」的「八键会话与思考、变更字段严格解析」。全仓测试夹具里的会话对象补三键（集中在测试工厂函数，没有就先抽一个）。
