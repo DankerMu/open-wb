@@ -7,15 +7,22 @@
  * supervisor `retire` → the in-memory active-turn invariant → one delete + audit transaction →
  * post-commit removal of the session file (validated first: the path is omp-reported and must
  * name a regular file directly inside the owner's session dir) and of the artifact directory omp
- * keeps next to it (issue #758; moved into the app-private trash first, #706). From the tombstone
+ * keeps next to it (issue #758; moved into the app-private trash first, #706), then of the
+ * directory of a temporary workspace whose row that transaction deleted (#928). From the tombstone
  * up to `retire` is one synchronous segment. The tombstone set belongs to this deleter instance; the SSE route
  * asks `isDeleting` before it subscribes. The tombstone is lifted before the claim on every exit
  * path. No timer of its own: the bounds are the stop grace, retire escalation and acquisition's.
  */
-import { randomBytes } from "node:crypto";
-import { lstat, realpath, rename, rm, unlink } from "node:fs/promises";
+import { lstat, realpath, rename, unlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { HttpError } from "../core/errors/index.js";
+// The one import from `workspaces/`: the trash-backed directory removal lives there.
+import {
+  isMissing,
+  removeDirThroughTrash,
+  removeTemporaryWorkspaceDir,
+  reportUnlessMissing,
+} from "../workspaces/temp-dir-remove.js";
 import { ompSessionDir, ompTrashDir } from "./omp/state-layout.js";
 import type { SessionStore, SessionView } from "./store.js";
 import type { SessionMetadataStore } from "./store-metadata.js";
@@ -33,6 +40,8 @@ interface SessionDeleterDependencies {
   metadata: Pick<SessionMetadataStore, "deleteSession">;
   /** `OMP_STATE_DIR`; the owner's session dir under it bounds what a delete may unlink. */
   stateDir: string;
+  /** `SANDBOX_ROOT`; the owner's account root under it bounds a temporary workspace's removal. */
+  sandboxRoot: string;
   /** The session module's synchronous service error channel (session file and directory removal only). */
   onError: (error: Error) => void;
 }
@@ -42,9 +51,12 @@ type Report = (error: unknown) => void;
 const OUTSIDE_SESSION_DIR = "session delete: session file outside the owner session dir";
 const NOT_REGULAR_FILE = "session delete: session file is not a regular file";
 const NO_ARTIFACT_NAME = "session delete: session file name leaves no artifact directory name";
-const NOT_A_DIRECTORY = "session delete: artifact directory is not a directory";
-const REPLACED_BEFORE_MOVE = "session delete: artifact directory was replaced before it was moved";
-const TRASH_UNAVAILABLE = "session delete: trash directory is unavailable";
+const ARTIFACT_MESSAGES = {
+  notADirectory: "session delete: artifact directory is not a directory",
+  replacedBeforeMove: "session delete: artifact directory was replaced before it was moved",
+  trashUnavailable: "session delete: trash directory is unavailable",
+};
+const OUTSIDE_SANDBOX_ROOT = "temporary workspace delete: account root outside the sandbox root";
 const SESSION_FILE_SUFFIX = ".jsonl";
 
 export function createSessionDeleter(deps: SessionDeleterDependencies): SessionDeleter {
@@ -88,6 +100,15 @@ export function createSessionDeleter(deps: SessionDeleterDependencies): SessionD
     }
     if (removed.ompSessionFile !== null) {
       await removeSessionFile(removed.ompSessionFile, deps.stateDir, ownerId, report);
+    }
+    // Only a committed delete reaches this line; the row is gone, so nothing below throws.
+    if (removed.temporaryWorkspace !== undefined) {
+      await removeTemporaryWorkspace(
+        removed.temporaryWorkspace,
+        deps.sandboxRoot,
+        deps.stateDir,
+        report,
+      );
     }
   };
 
@@ -169,6 +190,46 @@ export async function removeSessionFile(
   }
 }
 
+/**
+ * The directory of a temporary workspace whose row is already deleted. The account root is the
+ * realpath of `<sandboxRoot>/<ownerId>` and must be exactly `<sandboxRoot realpath>/<ownerId>`:
+ * `SANDBOX_ROOT` is writable for the omp uid (ADR-0010), so a symlink standing at the account root
+ * resolves elsewhere and is reported, and nothing behind it is touched. A missing sandbox or
+ * account root means the directory is gone too. The trash is the one under the state dir's
+ * realpath, as for artifact directories. Residual: the account root can still be swapped between
+ * this check and the `lstat` / `rename` in `removeTemporaryWorkspaceDir` (Node has no `*at` calls).
+ */
+async function removeTemporaryWorkspace(
+  workspace: { id: string; ownerId: string },
+  sandboxRoot: string,
+  stateDir: string,
+  report: Report,
+): Promise<void> {
+  let accountRoot: string;
+  try {
+    const [root, account] = await Promise.all([
+      realpath(sandboxRoot),
+      realpath(join(sandboxRoot, workspace.ownerId)),
+    ]);
+    if (account !== join(root, workspace.ownerId) || dirname(account) !== root) {
+      report(new Error(OUTSIDE_SANDBOX_ROOT));
+      return;
+    }
+    accountRoot = account;
+  } catch (error) {
+    reportUnlessMissing(error, report);
+    return;
+  }
+  let trash: string;
+  try {
+    trash = ompTrashDir(await realpath(stateDir));
+  } catch (error) {
+    report(error);
+    return;
+  }
+  await removeTemporaryWorkspaceDir({ accountRoot, name: `tmp-${workspace.id}`, trash }, report);
+}
+
 /** False when `target` exists as anything but a regular file, or could not be inspected. */
 async function unlinkRegularFile(target: string, report: Report): Promise<boolean> {
   try {
@@ -193,18 +254,9 @@ async function unlinkRegularFile(target: string, report: Report): Promise<boolea
  * session file without `.jsonl`, next to it. The name is cut from the already-validated basename
  * and joined onto `expected`; an empty name, `.` or `..` would name the owner's session dir or its
  * parent, so those are reported and nothing is touched. Only a real directory (`lstat`: a symlink
- * planted in the omp-writable dir is not one) is handled.
- * It is first renamed into `trash` (`<state realpath>/trash`, 0700, which the omp uid cannot
- * enter) under a random name: `rename` moves the entry itself and follows no symlink, so the
- * recursive `rm` (which follows none inside either) runs where the omp uid can no longer replace
- * any level by path. What arrives is checked again: an entry swapped for a symlink or a file
- * between `lstat` and `rename` is only unlinked, and reported. A rename failing with ENOENT means
- * the source is gone (success) or the trash is missing, told apart by one more `lstat` of the
- * source; any other rename failure is reported and the source left alone.
- * No `force`: a failed or partial removal is reported, and what could not be removed stays in the
- * trash, not in the session dir. Residual: an omp-uid process that put its cwd or a directory fd
- * inside this tree before the delete can still swap subdirectories through relative paths while
- * `rm` walks it (Node has no `*at` calls).
+ * planted in the omp-writable dir is not one) is handled, and it is moved into `trash`
+ * (`<state realpath>/trash`, 0700) before its recursive removal: `removeDirThroughTrash`, shared
+ * with the temporary workspace directory, documents the steps and the residual.
  */
 async function removeArtifactDir(
   expected: string,
@@ -221,56 +273,5 @@ async function removeArtifactDir(
     report(new Error(NO_ARTIFACT_NAME));
     return;
   }
-  const dir = join(expected, name);
-  const trashed = join(trash, randomBytes(16).toString("hex"));
-  try {
-    if (!(await lstat(dir)).isDirectory()) {
-      report(new Error(NOT_A_DIRECTORY));
-      return;
-    }
-  } catch (error) {
-    reportUnlessMissing(error, report);
-    return;
-  }
-  try {
-    await renameImpl(dir, trashed);
-  } catch (error) {
-    if (!isMissing(error)) {
-      report(error);
-    } else if (await stillPresent(dir, report)) {
-      report(new Error(TRASH_UNAVAILABLE, { cause: error }));
-    }
-    return;
-  }
-  try {
-    if ((await lstat(trashed)).isDirectory()) {
-      await rm(trashed, { recursive: true });
-    } else {
-      await unlink(trashed);
-      report(new Error(REPLACED_BEFORE_MOVE));
-    }
-  } catch (error) {
-    report(error);
-  }
-}
-
-/** After a rename's ENOENT: is the source still there? Another `lstat` failure is reported. */
-async function stillPresent(path: string, report: Report): Promise<boolean> {
-  try {
-    await lstat(path);
-    return true;
-  } catch (error) {
-    reportUnlessMissing(error, report);
-    return false;
-  }
-}
-
-function isMissing(error: unknown): boolean {
-  return (error as NodeJS.ErrnoException).code === "ENOENT";
-}
-
-function reportUnlessMissing(error: unknown, report: Report): void {
-  if (!isMissing(error)) {
-    report(error);
-  }
+  await removeDirThroughTrash(join(expected, name), trash, ARTIFACT_MESSAGES, report, renameImpl);
 }

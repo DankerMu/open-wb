@@ -9,9 +9,14 @@
  * gets none of the PATCH's keys.
  * A delete (#525) reads the file and message count, deletes the owner's row (messages, steps and
  * approvals cascade; fork children's `parent_session_id` is set NULL by the foreign keys) and
- * writes its `session.delete` audit in one transaction: an audit failure keeps the row.
+ * writes its `session.delete` audit in one transaction: an audit failure keeps the row. In that
+ * same transaction (#928, design D8) a temporary workspace the deleted session was the last user
+ * of loses its row, with a `workspace.delete` audit; its directory is the deleter's job after the
+ * commit.
  */
 import { randomBytes } from "node:crypto";
+import { realpathSync } from "node:fs";
+import { join } from "node:path";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import type { emit as canonicalEmit } from "../core/audit/index.js";
 import { createSqliteTextDecoder } from "../core/db/index.js";
@@ -69,9 +74,22 @@ export interface SessionMetadataStore {
   deleteSession(ownerId: string, sessionId: string): DeletedSession | null;
 }
 
+interface TemporaryWorkspaceRef {
+  id: string;
+  ownerId: string;
+}
+
 interface DeletedSession {
   ompSessionFile: string | null;
   messageCount: number;
+  /** Present only when this delete also removed that temporary workspace's row. */
+  temporaryWorkspace?: TemporaryWorkspaceRef;
+}
+
+interface SessionMetadataStoreOptions {
+  emit: typeof canonicalEmit;
+  /** `SANDBOX_ROOT`: the `root` a `workspace.delete` audit names is built from its realpath. */
+  sandboxRoot: string;
 }
 
 interface DeletedRow {
@@ -88,6 +106,11 @@ const SELECT_DELETED =
   "SELECT CAST(omp_session_file AS BLOB) AS omp_session_file, workspace_id FROM chat_sessions WHERE id = ? AND owner_id = ?";
 const COUNT_MESSAGES = "SELECT COUNT(*) AS n FROM chat_messages WHERE session_id = ?";
 const DELETE_SESSION = "DELETE FROM chat_sessions WHERE id = ? AND owner_id = ?";
+const SELECT_OWNED_TEMPORARY = "SELECT temporary FROM workspaces WHERE id = ? AND owner_id = ?";
+/** Every session row counts as a user, whoever owns it and archived or not. */
+const COUNT_WORKSPACE_SESSIONS = "SELECT COUNT(*) AS n FROM chat_sessions WHERE workspace_id = ?";
+const DELETE_TEMPORARY_WORKSPACE =
+  "DELETE FROM workspaces WHERE id = ? AND owner_id = ? AND temporary = 1";
 
 const SET_TITLE = "title = ?";
 const SET_SCENE = "scene = ?";
@@ -104,7 +127,7 @@ const SELECT_OWNED = `SELECT 1 FROM chat_sessions ${PATCH_OWNED}`;
 
 export function createSessionMetadataStore(
   db: DatabaseSync,
-  options: { emit: typeof canonicalEmit },
+  options: SessionMetadataStoreOptions,
 ): SessionMetadataStore {
   return {
     createSession(ownerId, input) {
@@ -198,10 +221,60 @@ export function createSessionMetadataStore(
           ...(row.workspace_id === null ? {} : { workspaceId: row.workspace_id }),
           detail: { sessionId, ompSessionFile, messageCount },
         });
-        return { ompSessionFile, messageCount };
+        const temporaryWorkspace =
+          row.workspace_id === null
+            ? undefined
+            : deleteUnusedTemporaryWorkspace(db, options, ownerId, sessionId, row.workspace_id);
+        return {
+          ompSessionFile,
+          messageCount,
+          ...(temporaryWorkspace === undefined ? {} : { temporaryWorkspace }),
+        };
       });
     },
   };
+}
+
+/**
+ * Inside the delete transaction, after the session row is gone: when `workspaceId` is a temporary
+ * workspace of this owner that no session row references any more, deletes its row and writes the
+ * `workspace.delete` audit. An ordinary (or promoted) workspace, someone else's, or one another
+ * session still uses is left alone — `chat_sessions.workspace_id` is `ON DELETE SET NULL`, so
+ * deleting a row still in use would silently unbind those sessions.
+ * `root` is a plain join computed before the row is deleted; the directory is not inspected here
+ * (whatever stands there is the post-commit removal's finding, not this transaction's failure).
+ */
+function deleteUnusedTemporaryWorkspace(
+  db: DatabaseSync,
+  options: SessionMetadataStoreOptions,
+  ownerId: string,
+  sessionId: string,
+  workspaceId: string,
+): TemporaryWorkspaceRef | undefined {
+  const owned = db.prepare(SELECT_OWNED_TEMPORARY).get(workspaceId, ownerId) as
+    | { temporary: number | bigint }
+    | undefined;
+  if (owned === undefined || Number(owned.temporary) !== 1) {
+    return undefined;
+  }
+  const users = db.prepare(COUNT_WORKSPACE_SESSIONS).get(workspaceId) as { n: number | bigint };
+  if (Number(users.n) !== 0) {
+    return undefined;
+  }
+  const root = join(realpathSync(options.sandboxRoot), ownerId, `tmp-${workspaceId}`);
+  requireChanges(
+    db.prepare(DELETE_TEMPORARY_WORKSPACE).run(workspaceId, ownerId).changes,
+    1,
+    "temporary workspace delete",
+  );
+  options.emit(db, {
+    kind: "workspace.delete",
+    actorId: ownerId,
+    title: "删除临时空间",
+    workspaceId,
+    detail: { root, sessionId },
+  });
+  return { id: workspaceId, ownerId };
 }
 
 /** The SET clause from source-constant fragments only; every value travels as a parameter. */

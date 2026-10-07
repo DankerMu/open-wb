@@ -378,7 +378,10 @@ describe("patchSession tri-state (store)", REAL, () => {
   it("F1 view, absent (null) and condition-not-met (busy) are three distinct results", async () => {
     const world = await openDoneWorld();
     const { fixture, session } = world;
-    const metadata = createSessionMetadataStore(fixture.db, { emit });
+    const metadata = createSessionMetadataStore(fixture.db, {
+      emit,
+      sandboxRoot: "/nonexistent/sandbox",
+    });
     const done = rowOf(fixture.db, session);
 
     // Absent for this owner: null, with or without the archive condition.
