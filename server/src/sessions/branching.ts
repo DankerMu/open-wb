@@ -9,16 +9,15 @@
  */
 import { randomBytes } from "node:crypto";
 import { HttpError } from "../core/errors/index.js";
-import { SessionRuntime } from "./omp/runtime.js";
 import {
-  type PoolEntry,
-  type ProcessPool,
-  releaseDispatch,
-  type Slot,
-  type SpawnShared,
-  sessionRuntimeOpts,
-  temporaryTokens,
-} from "./pool.js";
+  type Branched,
+  BranchTemps,
+  branchEntries,
+  branchTo,
+  entryFor,
+  type StoredUser,
+} from "./branch-temp.js";
+import { type ProcessPool, releaseDispatch, type Slot, type SpawnShared } from "./pool.js";
 import { classifyPrompt } from "./slash-commands.js";
 import type { SessionStore, SettledApproval } from "./store.js";
 import type { SessionSupervisorRuntime } from "./supervisor.js";
@@ -180,8 +179,6 @@ function dispatchText(text: string): string {
   return text.startsWith("/") ? ` ${text}` : text;
 }
 
-type Branched = { text: string; sessionFile: string };
-
 interface ForkPorts extends SkillsPort {
   store: SessionStore;
   controls: ControlClaims;
@@ -220,10 +217,11 @@ export type ForkResult = { session: ReturnType<SessionStore["commitFork"]>; draf
  */
 export class Forks {
   readonly #ports: ForkPorts;
-  readonly #temps = new Set<SessionRuntime>();
+  readonly #temps: BranchTemps;
 
   constructor(ports: ForkPorts) {
     this.#ports = ports;
+    this.#temps = new BranchTemps(ports);
   }
 
   /** Every failure is a rejection; claim, precheck and the source retire share one segment. */
@@ -238,7 +236,7 @@ export class Forks {
 
   /** Shuts down every in-flight temporary process (shutdown); never rejects. */
   async close(): Promise<void> {
-    await Promise.all([...this.#temps].map(stopQuietly));
+    await this.#temps.close();
   }
 
   #precheck(sourceId: string, ownerId: string, messageId: number, busy: boolean): ForkPlan {
@@ -281,63 +279,20 @@ export class Forks {
   }
 
   async #fork(plan: ForkPlan, retired: Promise<void>): Promise<ForkResult> {
-    const { pool, controls, tokens } = this.#ports;
     await retired;
     // Before admission: an unusable root fails the fork without taking (or evicting) capacity.
     const cwd = this.#ports.cwdOf(plan.ownerId, plan.workspaceId);
-    let temp: SessionRuntime | undefined;
-    const entry = await pool.admit({
-      busy: () => controls.held(plan.sourceId),
-      retire: () => (temp === undefined ? Promise.resolve() : stopQuietly(temp)),
+    // Claim key: the source session; token key: the new session's pre-generated id.
+    const branched = await this.#temps.branchAt({
+      claimKey: plan.sourceId,
+      tokenKey: plan.sessionId,
+      ownerId: plan.ownerId,
+      cwd,
+      resumePath: plan.file,
+      messageId: plan.messageId,
+      users: plan.users,
     });
-    if (this.#ports.closed()) {
-      pool.release(entry);
-      throw new HttpError("agent_unavailable");
-    }
-    const runtime = new SessionRuntime(
-      sessionRuntimeOpts(this.#ports.config, this.#ports.spawn, {
-        sessionId: plan.sessionId,
-        ownerId: plan.ownerId,
-        cwd,
-        resumePath: plan.file,
-        tokens: temporaryTokens(pool, entry, tokens),
-        onExit: () => {
-          pool.release(entry);
-        },
-      }),
-    );
-    temp = runtime;
-    this.#temps.add(runtime);
-    let branched: Branched;
-    try {
-      branched = await this.#branch(runtime, entry, plan);
-    } finally {
-      await stopQuietly(runtime);
-      pool.release(entry);
-      tokens.revoke(plan.sessionId);
-      this.#temps.delete(runtime);
-    }
     return this.#commit(plan, branched);
-  }
-
-  /** get_branch_messages → first-fit alignment → branch → get_state on the temporary process. */
-  async #branch(runtime: SessionRuntime, entry: PoolEntry, plan: ForkPlan): Promise<Branched> {
-    let data: unknown;
-    try {
-      data = await runtime.command({ type: "get_branch_messages" });
-    } catch {
-      throw new HttpError("agent_unavailable");
-    }
-    const entryId = alignBranchEntries(plan.users, branchEntries(data)).get(plan.messageId);
-    if (entryId === undefined) {
-      throw new HttpError("agent_unavailable");
-    }
-    const branched = await branchTo(runtime, entryId);
-    // Same segment as the get_state reply: the process that answered is still the admitted one.
-    if (!this.#ports.pool.holds(entry)) {
-      throw new HttpError("agent_unavailable");
-    }
-    return branched;
   }
 
   /** After the temporary process exited: closed and shared-file checks, then the one transaction. */
@@ -367,33 +322,6 @@ export class Forks {
   }
 }
 
-function stopQuietly(runtime: SessionRuntime): Promise<void> {
-  return runtime.shutdown().catch(() => undefined);
-}
-
-/** (c): any failure is agent_unavailable; get_state always follows branch. */
-async function branchTo(runtime: SessionRuntime, entryId: string): Promise<Branched> {
-  try {
-    const branched = record(await runtime.command({ type: "branch", entryId }));
-    const state = record(await runtime.command({ type: "get_state" }));
-    const text = branched?.text;
-    const sessionFile = state?.sessionFile;
-    if (
-      typeof text === "string" &&
-      branched?.cancelled === false &&
-      typeof sessionFile === "string" &&
-      sessionFile.length > 0
-    ) {
-      return { text, sessionFile };
-    }
-  } catch {
-    /* mapped below */
-  }
-  throw new HttpError("agent_unavailable");
-}
-
-type StoredUser = { id: number; content: string };
-
 /** A whitelisted command turn left no omp `user` entry; the skill list is read only for `/` text. */
 function isCommand(content: string, ports: SkillsPort, session: Resume): boolean {
   if (!content.startsWith("/")) {
@@ -401,54 +329,4 @@ function isCommand(content: string, ports: SkillsPort, session: Resume): boolean
   }
   const skills = ports.skills(session.ownerId, session.workspaceId);
   return classifyPrompt(content, skills).kind !== "text";
-}
-
-/**
- * Whether an entry's text is a wire candidate of stored user content: the content itself (sent
- * verbatim before the prompt route escaped) or, for `/` text, its escaped form. Text only — the
- * current skill set is never consulted, so installing or removing a skill moves no alignment.
- */
-function matches(entryText: string, content: string): boolean {
-  return entryText === content || (content.startsWith("/") && entryText === ` ${content}`);
-}
-
-/** The entries of a get_branch_messages answer; anything but a list is no entry. */
-function branchEntries(data: unknown): readonly unknown[] {
-  const messages = record(data)?.messages;
-  return Array.isArray(messages) ? messages : [];
-}
-
-/** The entryId of `entry` when it is well formed and its text is a wire candidate of `content`. */
-function entryFor(entry: unknown, content: string): string | undefined {
-  const { entryId, text } = record(entry) ?? {};
-  return typeof entryId === "string" && typeof text === "string" && matches(text, content)
-    ? entryId
-    : undefined;
-}
-
-/**
- * First-fit from the front: a user message matching the current entry takes it and both advance;
- * one that does not is skipped (a command or other local-only turn) and consumes no entry. An
- * entry is never skipped, so a malformed one aligns nothing from there on.
- */
-function alignBranchEntries(
-  users: readonly StoredUser[],
-  entries: readonly unknown[],
-): Map<number, string> {
-  const aligned = new Map<number, string>();
-  let next = 0;
-  for (const user of users) {
-    const entryId = entryFor(entries[next], user.content);
-    if (entryId !== undefined) {
-      aligned.set(user.id, entryId);
-      next += 1;
-    }
-  }
-  return aligned;
-}
-
-function record(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null
-    ? (value as Record<string, unknown>)
-    : undefined;
 }

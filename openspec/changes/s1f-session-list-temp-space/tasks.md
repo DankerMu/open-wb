@@ -263,7 +263,7 @@ Minimal mergeable slice: 10.1 + 10.2（表与登记行读写，由迁移测试�
   - 返回值含被删除的各用户消息的登记（`messageId`、`workspaceId`、`outcome`）供 12.3 清理——只有 `ok` 的才有目录，由清理方过滤。
   - `status` 取剩余消息中末条助手消息的 `chat_messages.status`（`done` / `failed` / `stopped`），没有则 `idle`。`store.ts` 不加行；测试新文件 `server/test/session-store-undo-transaction.test.ts`。
   Risk packs（11.2）: Schema / cascade、Error handling / rollback、Concurrency（CAS）、Audit。
-- [ ] 11.3 `branching.ts` 抽取（**行为不变的重构，单独一个 PR**）：把 `alignBranchEntries` / `branchTo` 与临时进程的准入、握手、关停抽成 fork 与撤回共用的函数（不复制）。验证：既有 fork / regenerate 测试全绿，不改任何断言。
+- [x] 11.3 `branching.ts` 抽取（**行为不变的重构，单独一个 PR**）：把 `alignBranchEntries` / `branchTo` 与临时进程的准入、握手、关停抽成 fork 与撤回共用的函数（不复制）。验证：既有 fork / regenerate 测试全绿，不改任何断言。
   **实施注记（11.3，fixture 评审补充）**：
   - 新文件 `server/src/sessions/branch-temp.ts`（只供 `sessions/` 内使用）。从 `branching.ts` 搬出：条目对位（`alignBranchEntries` 及其辅助）、`branchTo`、`stopQuietly`，以及 `Forks` 里临时进程的准入、握手、关停与在途登记（`#temps` 与 `close()` 进一个可实例化的类）。
   - 入参把**占用键**与**令牌键**分开：fork 的占用键是源会话 id，令牌键是新会话 id；撤回两者会不同于 fork（用本会话 id 作令牌键会让收尾的 `tokens.revoke` 吊销会话自己的令牌），所以不能合成一个参数。
