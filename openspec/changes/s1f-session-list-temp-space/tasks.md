@@ -268,7 +268,13 @@ Minimal mergeable slice: 10.1 + 10.2（表与登记行读写，由迁移测试�
   - 返回值含被删除的各用户消息的登记（`messageId`、`workspaceId`、`outcome`）供 12.3 清理——只有 `ok` 的才有目录，由清理方过滤。
   - `status` 取剩余消息中末条助手消息的 `chat_messages.status`（`done` / `failed` / `stopped`），没有则 `idle`。`store.ts` 不加行；测试新文件 `server/test/session-store-undo-transaction.test.ts`。
   Risk packs（11.2）: Schema / cascade、Error handling / rollback、Concurrency（CAS）、Audit。
-- [ ] 11.3 `branching.ts` 抽取（**行为不变的重构，单独一个 PR**）：把 `alignBranchEntries` / `branchTo` 与临时进程的准入、握手、关停抽成 fork 与撤回共用的函数（不复制）。验证：既有 fork / regenerate 测试全绿，不改任何断言。
+- [x] 11.3 `branching.ts` 抽取（**行为不变的重构，单独一个 PR**）：把 `alignBranchEntries` / `branchTo` 与临时进程的准入、握手、关停抽成 fork 与撤回共用的函数（不复制）。验证：既有 fork / regenerate 测试全绿，不改任何断言。
+  **实施注记（11.3，fixture 评审补充）**：
+  - 新文件 `server/src/sessions/branch-temp.ts`（只供 `sessions/` 内使用）。从 `branching.ts` 搬出：条目对位（`alignBranchEntries` 及其辅助）、`branchTo`、`stopQuietly`，以及 `Forks` 里临时进程的准入、握手、关停与在途登记（`#temps` 与 `close()` 进一个可实例化的类）。
+  - 入参把**占用键**与**令牌键**分开：fork 的占用键是源会话 id，令牌键是新会话 id；撤回两者会不同于 fork（用本会话 id 作令牌键会让收尾的 `tokens.revoke` 吊销会话自己的令牌），所以不能合成一个参数。
+  - 留在 `branching.ts`：两处前置校验、提交、`Regenerations`。导出 `Forks` / `Regenerations` / `Resume` / `ForkResult` 与 `ForkPorts` 的形状不变；`supervisor.ts` 零改动。
+  - 证据：`git diff --stat -- server/test` 为空；`session-fork*`、`session-regenerate*`、`session-spawn-gate`、`session-todo-branch`、`session-archive-readonly` 全绿；jscpd、knip 不新增；新模块的覆盖率写进 PR 描述。
+  Risk packs（11.3）: Process lifecycle（临时进程的准入与关停）、Concurrency（占用与令牌的释放次序）、Refactor parity。
 - [ ] 11.4 路由与前置校验（新模块 `server/src/sessions/undo.ts` 的入口部分，只供 `sessions/` 内使用；`rest.ts` 只加注册调用）：body 形状、owner 预检、前置校验第 1–5 步、控制占用的登记与在每条结束路径上的释放。本组只支持 `files:"keep"`；`restore` / `force` 暂返回 400，12.1 接上。测试（新文件 `server/test/session-undo.test.ts`，REST seam + fake omp `branch`）：message-undo「撤回 REST」的「形状与鉴权」「前置校验的各拒绝」「撤回期间的并发请求」、session-metadata「归档后只读」的 undo 一项与「撤回持有占用时删除被拒」、turn-control「撤回各 RPC 间隙的并发请求」。
 - [ ] 11.5 编排与提交（`undo.ts`）：退役本会话进程 → 临时进程 `get_branch_messages` → 对位 → `branch` → `get_state` → 关停 → 11.2 的事务。**`supervisor.ts` 的改动面**（design D15 第 3 点，至多 12 行，行数写进 PR 描述）：把传给 `new Forks(…)` 的端口对象提成局部常量同时传给 `new Undos(…)`、一个经 `#control` 包装的公开方法 `undo(…)`、`shutdown()` 里收掉在途的撤回临时进程。测试（同文件）：message-undo「对话原地回退」的「撤回中间的一条」「撤回第一条」「剩余历史的状态」「任务清单回到当时」「对位失败与进程失败」「最终事务复核失败」、omp-pool「撤回的临时进程计入上限」「撤回先退回本会话进程」「撤回遇池满」；另加一条「关停时在途撤回的临时进程被收掉」。
 - [ ] 11.6 通知：提交后 `notify` 与 `notifyRewound`（组 6 的通知器）。测试：session-list-push「撤回发两种事件」。
