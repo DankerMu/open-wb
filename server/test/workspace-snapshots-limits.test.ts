@@ -309,9 +309,12 @@ describe("越限即停", () => {
     const landed: string[][] = [];
     const listed: string[] = [];
     const readdir = fs.promises.readdir;
-    vi.spyOn(fs.promises, "readdir").mockImplementation((async (path: string) => {
+    vi.spyOn(fs.promises, "readdir").mockImplementation((async (
+      path: string,
+      options: { encoding: "buffer" },
+    ) => {
       listed.push(path);
-      return readdir(path);
+      return readdir(path, options);
     }) as typeof readdir);
     // c.bin is the file that would take the total from 20 to 30. It is opened to learn its size;
     // from there on any read, any copy and any other open breaks the snapshot with EIO.

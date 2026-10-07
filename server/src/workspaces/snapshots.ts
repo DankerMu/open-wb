@@ -19,6 +19,12 @@
  *      listed is traversed by both `lstat` and the open;
  *   2. a directory entry replaced by a symbolic link between its `lstat` and its `readdir` is
  *      listed and copied whole from wherever the link points.
+ * An entry that is gone by the time it is read was never there as far as the snapshot goes
+ * (`readable`); only the workspace root itself missing fails it (#1148).
+ *
+ * Names are listed as bytes (`splitNames`). A name that is not valid UTF-8 cannot be written in
+ * the manifest, whose paths are JSON strings: the entry is left out as `name_encoding` and never
+ * read (#1148).
  *
  * Deduplication (spec「未变文件的去重」): a file whose `fstat` says what the previous snapshot's
  * manifest says of the same path (inode number, size, both times) is hard-linked from that
@@ -38,7 +44,7 @@ export const SOURCE_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constant
 const COPY_CHUNK_BYTES = 64 * 1024;
 const WORKSPACE_ID = /^[0-9a-f]{32}$/;
 
-type SkipReason = "special" | "excluded" | "too_large" | "unreadable";
+type SkipReason = "special" | "excluded" | "too_large" | "unreadable" | "name_encoding";
 
 interface SkippedEntry {
   path: string;
@@ -270,7 +276,8 @@ async function write(options: TakeOptions, snapshotDir: string): Promise<TakeRes
     totalBytes: 0,
   };
   await makePrivateDir(walk.treeRoot);
-  await visitChildren(walk, "", await fsp.readdir(options.workspaceRoot));
+  // Not through `readable`: the root itself gone is a failure, not an entry that vanished.
+  await visitChildren(walk, "", await fsp.readdir(options.workspaceRoot, { encoding: "buffer" }));
 
   const manifest = join(snapshotDir, "manifest.json");
   const body = JSON.stringify({ entries: walk.entries, skipped: walk.skipped });
@@ -302,10 +309,35 @@ async function previousFiles(previousDir: string): Promise<Map<string, FileState
   }
 }
 
-/** Names come from `readdir`, so none is empty, `.`, `..` or contains a separator. */
-async function visitChildren(walk: Walk, parent: string, names: string[]): Promise<void> {
-  for (const name of names.sort()) {
-    await visit(walk, parent === "" ? name : `${parent}/${name}`, name);
+/**
+ * Splits the names of one directory, as `readdir` gives them with `{ encoding: "buffer" }`.
+ * `names`: those whose bytes are valid UTF-8 (decoding and encoding again gives the same bytes),
+ * decoded and sorted as strings. `lossy`: the decoding of every other name, each invalid byte
+ * sequence replaced by U+FFFD, sorted; such a string does not name the entry on disk, and two
+ * different names can give the same one. Shared with the restore, which lists the same way.
+ */
+export function splitNames(raw: readonly Buffer[]): { names: string[]; lossy: string[] } {
+  const names: string[] = [];
+  const lossy: string[] = [];
+  for (const bytes of raw) {
+    const name = bytes.toString("utf8");
+    (Buffer.from(name, "utf8").equals(bytes) ? names : lossy).push(name);
+  }
+  return { names: names.sort(), lossy: lossy.sort() };
+}
+
+/**
+ * Names come from `readdir`, so none is empty, `.`, `..` or contains a separator. An entry whose
+ * name is not valid UTF-8 is recorded by its lossy decoding and nothing of it is read.
+ */
+async function visitChildren(walk: Walk, parent: string, raw: Buffer[]): Promise<void> {
+  const { names, lossy } = splitNames(raw);
+  const pathOf = (name: string): string => (parent === "" ? name : `${parent}/${name}`);
+  for (const name of lossy) {
+    walk.skipped.push({ path: pathOf(name), reason: "name_encoding" });
+  }
+  for (const name of names) {
+    await visit(walk, pathOf(name), name);
   }
 }
 
@@ -335,8 +367,11 @@ async function visitDirectory(walk: Walk, path: string, name: string, stat: Stat
     walk.skipped.push({ path, reason: "excluded" });
     return;
   }
-  // Listed before anything is recorded: a directory that cannot be listed is skipped whole.
-  const names = await readable(walk, path, () => fsp.readdir(join(walk.workspaceRoot, path)));
+  // Listed before anything is recorded: a directory that cannot be listed is skipped whole,
+  // and one that is gone by now leaves neither an entry nor a directory under `tree/`.
+  const names = await readable(walk, path, () =>
+    fsp.readdir(join(walk.workspaceRoot, path), { encoding: "buffer" }),
+  );
   if (names === undefined) {
     return;
   }
@@ -485,8 +520,13 @@ async function copyContent(
 }
 
 /**
- * Runs one read of a workspace entry. `EACCES` / `EPERM` records the entry as `unreadable` and
- * yields `undefined`; every other error propagates and fails the snapshot.
+ * Runs one read of a workspace entry that its parent's listing named: `lstat`, `readlink`,
+ * `open` or `readdir` of its path in the workspace, or a read of its handle. Never a call on the
+ * snapshot's side. Yields `undefined` when the entry is to be left out:
+ *   - `EACCES` / `EPERM`: recorded as `unreadable`;
+ *   - `ENOENT`, or `ENOTDIR` (a level of its path is no directory any more): it vanished after
+ *     it was listed, so it did not exist when the snapshot was taken and is recorded nowhere.
+ * Every other error propagates and fails the snapshot.
  */
 async function readable<T>(
   walk: Walk,
@@ -497,6 +537,9 @@ async function readable<T>(
     return await read();
   } catch (error) {
     const code = codeOf(error);
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      return undefined;
+    }
     if (code !== "EACCES" && code !== "EPERM") {
       throw error;
     }

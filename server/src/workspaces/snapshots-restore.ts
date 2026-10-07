@@ -24,7 +24,7 @@
 import { randomBytes } from "node:crypto";
 import { constants, promises as fsp, type Stats } from "node:fs";
 import { dirname, join } from "node:path";
-import { codeOf, isWithin, type ManifestEntry, SOURCE_FLAGS } from "./snapshots.js";
+import { codeOf, isWithin, type ManifestEntry, SOURCE_FLAGS, splitNames } from "./snapshots.js";
 
 /** New directories: shared with the omp user's group, setgid so the group is inherited. */
 const SHARED_DIR_MODE = 0o2770;
@@ -74,6 +74,7 @@ interface Run {
   tree: string;
   /** The manifest's entries by path, without those under a skipped path. */
   entries: ReadonlyMap<string, Entry>;
+  /** The skipped paths that protect by path: every one but the `name_encoding` items. */
   skipped: ReadonlySet<string>;
   restored: number;
   removed: number;
@@ -100,7 +101,7 @@ export async function restore(options: RestoreOptions): Promise<RestoreResult> {
     root: options.workspaceRoot,
     tree,
     entries: manifest.entries,
-    skipped: new Set(manifest.skipped.map((item) => item.path)),
+    skipped: manifest.skippedPaths,
     restored: 0,
     removed: 0,
     failed: new Set(),
@@ -224,10 +225,16 @@ function underSkipped(skipped: ReadonlySet<string>, path: string): boolean {
  * Deletes every entry under `parent` that the manifest does not have, going down only into real
  * directories the manifest has as directories. A skipped path is neither looked at nor entered.
  * An entry the manifest has as something else than it is now is left to that entry's phase.
+ *
+ * Listed as bytes (#1148). `parent` is the root or a directory of the manifest, so it was there
+ * when the snapshot was taken, and an entry of it whose name is not valid UTF-8 may have been
+ * too: no manifest path can name it, so it is dropped from the listing here and nothing of it is
+ * read, deleted or counted, whatever `skipped` says. Such a name below a directory deleted as an
+ * extra goes with it: `rm` lists as bytes as well.
  */
 async function removeExtras(run: Run, parent: string): Promise<void> {
-  const names = await fsp.readdir(join(run.root, parent));
-  for (const name of names.sort()) {
+  const raw = await fsp.readdir(join(run.root, parent), { encoding: "buffer" });
+  for (const name of splitNames(raw).names) {
     const path = parent === "" ? name : `${parent}/${name}`;
     if (underSkipped(run.skipped, path)) {
       continue;
@@ -461,10 +468,15 @@ async function restoreSymlink(run: Run, path: string, target: string): Promise<v
  * parent of every entry and of every skipped path is a directory entry (or under a skipped
  * path), so no phase can be led to write below a file or delete above something skipped.
  * Entries under a skipped path are dropped here: they are skipped too.
+ *
+ * `skippedPaths` is what "under a skipped path" means here and in `removeExtras`. An item whose
+ * reason is `name_encoding` is not in it (#1148): its path is the lossy decoding of a name that
+ * is not valid UTF-8, names no entry, and may equal the path of an entry with a valid name,
+ * which is restored like any other. Those entries are protected by how the workspace is listed.
  */
 async function readManifest(
   snapshotDir: string,
-): Promise<{ entries: Map<string, Entry>; skipped: SkippedPath[] }> {
+): Promise<{ entries: Map<string, Entry>; skipped: SkippedPath[]; skippedPaths: Set<string> }> {
   const manifest: unknown = JSON.parse(
     await fsp.readFile(join(snapshotDir, "manifest.json"), "utf8"),
   );
@@ -472,7 +484,8 @@ async function readManifest(
     throw new Error("snapshot manifest has no entries or no skipped list");
   }
   const skipped = manifest.skipped.map(parseSkipped);
-  const skippedPaths = new Set(skipped.map((item) => item.path));
+  const byPath = skipped.filter((item) => item.reason !== "name_encoding");
+  const skippedPaths = new Set(byPath.map((item) => item.path));
   const entries = new Map<string, Entry>();
   for (const entry of manifest.entries.map(parseEntry)) {
     if (underSkipped(skippedPaths, entry.path)) {
@@ -483,14 +496,14 @@ async function readManifest(
     }
     entries.set(entry.path, entry);
   }
-  for (const path of [...entries.keys(), ...skippedPaths]) {
+  for (const path of [...entries.keys(), ...skipped.map((item) => item.path)]) {
     const cut = path.lastIndexOf("/");
     const parent = path.slice(0, Math.max(cut, 0));
     if (cut !== -1 && entries.get(parent)?.type !== "dir" && !underSkipped(skippedPaths, parent)) {
       throw new Error("snapshot manifest has a path whose parent is not a directory entry");
     }
   }
-  return { entries, skipped };
+  return { entries, skipped, skippedPaths };
 }
 
 function parseSkipped(raw: unknown): SkippedPath {
