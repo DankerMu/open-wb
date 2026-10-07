@@ -8,6 +8,9 @@ export const DEFAULT_SANDBOX_RELATIVE = join("var", "sandbox");
 export const DEFAULT_OMP_IDLE_MS = 600_000;
 export const DEFAULT_MODEL_ID = "deepseek-v4.1-flash";
 export const DEFAULT_OMP_MAX_PROCESSES = 16;
+/** 单个上传文件的字节上限缺省值：500 MiB。 */
+const DEFAULT_UPLOAD_MAX_BYTES = 524_288_000;
+const DEFAULT_UPLOAD_MAX_FILES = 10;
 /** 正整数键的共同上界（原生计时器上限）。 */
 const MAX_POSITIVE_SETTING = 2_147_483_647;
 
@@ -26,6 +29,12 @@ export interface AgentSettings {
   ompUser?: string;
   /** 托管 models.yml 是否声明 reasoning（MODEL_REASONING，缺省 on）。 */
   modelReasoning: boolean;
+  /** 所有会话可用审批档位的上界（APPROVAL_MAX_MODE，缺省 yolo 即三档都开放）。 */
+  approvalMaxMode: "always-ask" | "write" | "yolo";
+  /** 单个上传文件的字节上限（UPLOAD_MAX_BYTES，缺省 524288000）。 */
+  uploadMaxBytes: number;
+  /** 一条消息可带的附件个数上限（UPLOAD_MAX_FILES，缺省 10）。 */
+  uploadMaxFiles: number;
 }
 
 export function resolveAgentSettings(
@@ -67,6 +76,17 @@ export function resolveAgentSettings(
     modelId: env.MODEL_ID === undefined ? DEFAULT_MODEL_ID : env.MODEL_ID,
     ...(env.OMP_USER === undefined ? {} : { ompUser: resolveOmpUser(env.OMP_USER, env.PATH) }),
     modelReasoning: resolveOnOff(env.MODEL_REASONING, true, "MODEL_REASONING"),
+    approvalMaxMode: resolveApprovalMaxMode(env.APPROVAL_MAX_MODE),
+    uploadMaxBytes: resolvePositiveInteger(
+      env.UPLOAD_MAX_BYTES,
+      DEFAULT_UPLOAD_MAX_BYTES,
+      "UPLOAD_MAX_BYTES",
+    ),
+    uploadMaxFiles: resolvePositiveInteger(
+      env.UPLOAD_MAX_FILES,
+      DEFAULT_UPLOAD_MAX_FILES,
+      "UPLOAD_MAX_FILES",
+    ),
   };
 }
 
@@ -112,6 +132,17 @@ function resolveOnOff(raw: string | undefined, fallback: boolean, key: string): 
     return false;
   }
   throw new Error(`${key} must be exactly on or off`);
+}
+
+/** 只接受三个档位字面量的精确拼写（不 trim、不改大小写）；错误只命名键，不回显输入值。 */
+function resolveApprovalMaxMode(raw: string | undefined): AgentSettings["approvalMaxMode"] {
+  if (raw === undefined) {
+    return "yolo";
+  }
+  if (raw === "always-ask" || raw === "write" || raw === "yolo") {
+    return raw;
+  }
+  throw new Error("APPROVAL_MAX_MODE must be exactly always-ask, write or yolo");
 }
 
 function optionalSetting(raw: string | undefined, key: string): string | undefined {

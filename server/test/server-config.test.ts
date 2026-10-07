@@ -449,3 +449,122 @@ describe("resolveServerConfig — OMP_USER", () => {
     expect(resolveServerConfig({ PATH: "bin" }, SOURCE_ENTRY).ompUser).toBeUndefined();
   });
 });
+
+/** 配置层错误信息：恰为期望文本（故与输入无关），命名该键，且不含输入值。 */
+function expectKeyOnlyMessage(key: string, value: string, message: string): void {
+  let thrown: unknown;
+  try {
+    resolveServerConfig({ [key]: value }, SOURCE_ENTRY);
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown, `${key} 应当拒绝该取值`).toBeInstanceOf(Error);
+  expect((thrown as Error).message).toBe(message);
+  expect((thrown as Error).message).toContain(key);
+}
+
+function thrownMessageOf(patch: Record<string, string>): string {
+  try {
+    resolveServerConfig(patch, SOURCE_ENTRY);
+  } catch (error) {
+    return (error as Error).message;
+  }
+  throw new Error("resolver accepted an invalid setting");
+}
+
+describe("resolveServerConfig — APPROVAL_MAX_MODE（审批最高档）", () => {
+  const KEY = "APPROVAL_MAX_MODE";
+  const MESSAGE = "APPROVAL_MAX_MODE must be exactly always-ask, write or yolo";
+
+  it("未设置与显式 undefined 时为 yolo（三档都开放）", () => {
+    expect(resolveServerConfig({}, SOURCE_ENTRY).approvalMaxMode).toBe("yolo");
+    expect(resolveServerConfig({ [KEY]: undefined }, SOURCE_ENTRY).approvalMaxMode).toBe("yolo");
+  });
+
+  it.each(["always-ask", "write", "yolo"])("接受精确字面量 %s 并原样保留", (mode) => {
+    const config = resolveServerConfig({ [KEY]: mode }, SOURCE_ENTRY);
+    expect(config.approvalMaxMode).toBe(mode);
+    const { approvalMaxMode: _mode, ...rest } = config;
+    const { approvalMaxMode: _default, ...base } = resolveServerConfig({}, SOURCE_ENTRY);
+    expect(rest).toEqual(base);
+  });
+
+  it.each([
+    ["empty", ""],
+    ["大写", "YOLO"],
+    ["前导空格", " write"],
+    ["非档位字面量", "ask"],
+    ["尾随空格", "yolo "],
+    ["首字母大写", "Write"],
+    ["下划线写法", "always_ask"],
+  ])("拒绝 %s，错误只命名键", (_label, bad) => {
+    expectKeyOnlyMessage(KEY, bad, MESSAGE);
+  });
+
+  it.each(["YOLO", "Write", "Sentinel-Tier-7", "always_ask"])("错误信息不回显输入值 %s", (bad) => {
+    const message = thrownMessageOf({ [KEY]: bad });
+    expect(message).toContain(KEY);
+    expect(message).not.toContain(bad);
+  });
+});
+
+describe("resolveServerConfig — UPLOAD_MAX_BYTES 与 UPLOAD_MAX_FILES（上传上限）", () => {
+  const KEYS = [
+    ["UPLOAD_MAX_BYTES", "uploadMaxBytes", 524_288_000],
+    ["UPLOAD_MAX_FILES", "uploadMaxFiles", 10],
+  ] as const;
+  const INVALID = [
+    ["", "canonical"],
+    ["0", "range"],
+    ["abc", "canonical"],
+    ["-1", "canonical"],
+    ["1.5", "canonical"],
+    ["010", "canonical"],
+    ["2147483648", "range"],
+    [" 3", "canonical"],
+    ["+3", "canonical"],
+    ["1e3", "canonical"],
+  ] as const;
+
+  it("未设置时为 524288000 字节（500 MiB）与 10 个文件", () => {
+    const config = resolveServerConfig({}, SOURCE_ENTRY);
+    expect(config.uploadMaxBytes).toBe(524_288_000);
+    expect(config.uploadMaxFiles).toBe(10);
+  });
+
+  it("三个标量键同时给出合法值时各自生效，互不串位", () => {
+    expect(
+      resolveServerConfig(
+        { APPROVAL_MAX_MODE: "write", UPLOAD_MAX_BYTES: "1048576", UPLOAD_MAX_FILES: "3" },
+        SOURCE_ENTRY,
+      ),
+    ).toMatchObject({ approvalMaxMode: "write", uploadMaxBytes: 1_048_576, uploadMaxFiles: 3 });
+  });
+
+  describe.each(KEYS)("%s", (key, field, fallback) => {
+    it("显式 undefined 取缺省；接受 canonical 边界 1 与 2147483647", () => {
+      expect(resolveServerConfig({ [key]: undefined }, SOURCE_ENTRY)[field]).toBe(fallback);
+      expect(resolveServerConfig({ [key]: "1" }, SOURCE_ENTRY)[field]).toBe(1);
+      expect(resolveServerConfig({ [key]: "2147483647" }, SOURCE_ENTRY)[field]).toBe(2_147_483_647);
+    });
+
+    it.each(INVALID)("拒绝 %j，错误只命名键", (bad, kind) => {
+      expectKeyOnlyMessage(
+        key,
+        bad,
+        kind === "range"
+          ? `${key} must be within 1..2147483647`
+          : `${key} must be a canonical ASCII decimal`,
+      );
+    });
+
+    it.each(["abc", "-1", "1.5", "010", "2147483648", "98765x"])(
+      "错误信息不回显输入值 %s",
+      (bad) => {
+        const message = thrownMessageOf({ [key]: bad });
+        expect(message).toContain(key);
+        expect(message).not.toContain(bad);
+      },
+    );
+  });
+});
