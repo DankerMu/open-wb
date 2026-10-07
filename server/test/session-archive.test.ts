@@ -56,6 +56,7 @@ import {
   waitFor,
   waitForTurn,
 } from "./session-supervisor-helpers.js";
+import { temporaryWorkspacePort } from "./support/temporary-workspace.js";
 
 const fixtures: SupervisorApp[] = [];
 const regenWorldsOwned = regenWorlds();
@@ -319,7 +320,8 @@ describe("patchSession tri-state (store)", REAL, () => {
     const { fixture, session } = world;
     const metadata = createSessionMetadataStore(fixture.db, {
       emit,
-      sandboxRoot: "/nonexistent/sandbox",
+      sandboxRoot: world.rt.runtime.sandboxRoot,
+      createTemporaryWorkspace: temporaryWorkspacePort(fixture.db, world.rt.runtime.sandboxRoot),
     });
     const done = rowOf(fixture.db, session);
 

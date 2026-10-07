@@ -33,8 +33,10 @@ import {
   waitFor,
   waitForTurn,
 } from "./session-supervisor-helpers.js";
+import { seedUnboundSession } from "./support/temporary-workspace.js";
 
 /** fake-omp `edit-write` literals (support/fake-omp-thinking.mjs); copied, not imported. */
+const UNBOUND_SESSION = "7".repeat(32);
 const THOUGHT = "先读需求，再列要点，最后作答。";
 const ANSWER = ["Edited notes.md ", "and wrote out/report.html."];
 const EDIT_OUTPUT = "Updated notes.md";
@@ -102,8 +104,14 @@ async function openWorld(options: WorldOptions): Promise<World> {
     ...(onEvent === undefined ? {} : { onEvent: (_id, _epoch, event) => onEvent(event) }),
   });
   cleanups.push(() => closeAfterRetainedFault(world.fixture, options.faulted === true));
-  const workspaceRoot = options.bound ? await bindWorkspace(world, runtime.sandboxRoot) : null;
-  return { ...world, sandboxRoot: runtime.sandboxRoot, workspaceRoot };
+  if (options.bound) {
+    const workspaceRoot = await bindWorkspace(world, runtime.sandboxRoot);
+    return { ...world, sandboxRoot: runtime.sandboxRoot, workspaceRoot };
+  }
+  // REST no longer creates an unbound session (#930): the world's session is a legacy row
+  // written directly, in place of the one the harness created over REST.
+  const session = seedUnboundSession(world.fixture.db, OWNER_ID, UNBOUND_SESSION);
+  return { ...world, session, sandboxRoot: runtime.sandboxRoot, workspaceRoot: null };
 }
 
 /** Creates u1's workspace `proj` (the store realpaths the sandbox root) and binds the session. */

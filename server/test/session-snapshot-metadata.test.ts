@@ -95,7 +95,7 @@ function writeChanges(db: DatabaseSync, stepId: number, changes: string): void {
 }
 
 describe("session DTO metadata: eleven-key session view", () => {
-  it("returns eleven keys with null metadata from create, list and snapshot", async () => {
+  it("returns eleven keys with the default metadata from create, list and snapshot", async () => {
     await withSessionRest(async ({ app }) => {
       const cookie = await cookieFor(app, "zhangsan");
       const created = await app.inject({
@@ -104,8 +104,10 @@ describe("session DTO metadata: eleven-key session view", () => {
         headers: { cookie },
       });
       expect(created.statusCode).toBe(201);
-      const body = created.json() as { id: string };
+      const body = created.json() as { id: string; workspaceId: string };
       expect(body.id).toMatch(HEX32);
+      // A create without a workspace makes a temporary one (#930): a fresh 32-hex id.
+      expect(body.workspaceId).toMatch(HEX32);
       expect(Object.keys(body)).toEqual(SESSION_VIEW_KEYS);
       expect(body).toEqual({
         id: body.id,
@@ -114,11 +116,11 @@ describe("session DTO metadata: eleven-key session view", () => {
         createdAt: SESSION_NOW,
         updatedAt: SESSION_NOW,
         scene: null,
-        workspaceId: null,
+        workspaceId: body.workspaceId,
         pinnedAt: null,
         archivedAt: null,
         pendingApproval: false,
-        temporaryWorkspace: false,
+        temporaryWorkspace: true,
       });
 
       const listed = await listSessions(app, cookie);

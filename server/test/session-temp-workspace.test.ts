@@ -2,9 +2,10 @@
  * Issue #925 (s1f-session-list-temp-space task 3.3): a temporary workspace through the REST seam —
  * temporary-workspaces 「列表不含临时空间而按 id 可达」「不能显式绑定临时空间」, session-metadata
  * 「他人与不存在的空间一致 404」 and the first half of workspaces 「临时空间不在列表里，转正后出现」.
- * Real `createApp`, real SQLite, real directories. No REST path creates a temporary workspace
- * before task 5.6, so T comes from the 3.2 helper over a second store on the same database and
- * sandbox root. Oracles: the spec's literals and the bytes written here.
+ * Real `createApp`, real SQLite, real directories. T comes from the 3.2 helper over a second store
+ * on the same database and sandbox root (these cases predate task 5.6; the bodyless create that
+ * makes one over REST is session-create-temporary.test.ts). Oracles: the spec's literals and the
+ * bytes written here.
  */
 import { Buffer } from "node:buffer";
 import { existsSync, lstatSync, mkdirSync, writeFileSync } from "node:fs";

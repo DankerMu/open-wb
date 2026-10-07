@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance } from "fastify";
 import { vi } from "vitest";
@@ -11,6 +14,7 @@ import {
 } from "../src/sessions/store-metadata.js";
 import { bearerCookie, loginSessionId } from "./auth-lifecycle-helpers.js";
 import { PARSER_INPUTS, withStandaloneAuthApp } from "./http-guard-helpers.js";
+import { temporaryWorkspacePort } from "./support/temporary-workspace.js";
 
 export const SESSION_NOW = 1_740_000_000_000;
 export const MESSAGE_LIMIT = 32_768;
@@ -67,9 +71,12 @@ export async function withSessionRest<T>(
           },
           emit,
         });
+        // A real directory: a body-less create makes its temporary workspace under it.
+        const sandboxRoot = mkdtempSync(join(tmpdir(), "workbuddy-session-rest-"));
         const metadata = createSessionMetadataStore(db, {
           emit,
-          sandboxRoot: "/nonexistent/sandbox",
+          sandboxRoot,
+          createTemporaryWorkspace: temporaryWorkspacePort(db, sandboxRoot),
         });
         const listNotified: string[] = [];
         registerSessionRoutes(app, {
@@ -83,7 +90,7 @@ export async function withSessionRest<T>(
           metadata,
           workspaceRootOf: () => null,
           agentDir: "/nonexistent/omp-agent",
-          sandboxRoot: "/nonexistent/sandbox",
+          sandboxRoot,
           deleter: {
             deleteSession: () =>
               Promise.reject(new Error("session-rest harness does not serve DELETE")),
@@ -97,6 +104,7 @@ export async function withSessionRest<T>(
             db.exec("ROLLBACK");
           }
           store.close();
+          rmSync(sandboxRoot, { recursive: true, force: true });
         }
       },
       { now: () => SESSION_NOW },

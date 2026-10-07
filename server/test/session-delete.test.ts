@@ -41,6 +41,7 @@ import {
   sendDelete,
   sessionFileOf,
   sessionState,
+  temporaryWorkspaceDeleteEvent,
   track,
   wireShape,
 } from "./session-delete-helpers.js";
@@ -69,6 +70,7 @@ import {
   waitForTurn,
 } from "./session-supervisor-helpers.js";
 import { isLive } from "./session-supervisor-pool-helpers.js";
+import { workspaceOf } from "./support/temporary-workspace.js";
 
 deleteWorlds();
 const worlds = regenWorlds();
@@ -173,6 +175,10 @@ describe("DELETE of an idle session (evidence 2)", () => {
     const otherBefore = sessionState(db, other);
     const forkBefore = sessionState(db, fork);
     expect(forkBefore.row).toMatchObject({ parent_session_id: source });
+    // The source was created without a workspace (#930): it and its fork share one temporary
+    // workspace, which stays with the fork — the delete names it and writes no `workspace.delete`.
+    const shared = workspaceOf(db, source);
+    expect(workspaceOf(db, fork)).toBe(shared);
 
     const streams = [
       await openEventStream(world.fixture, source, world.cookie),
@@ -220,7 +226,7 @@ describe("DELETE of an idle session (evidence 2)", () => {
 
     const adminAfter = await auditEvents(app, admin);
     expect(adminAfter.slice(1)).toEqual(adminBefore);
-    expect(adminAfter[0]).toEqual(deleteEvent(source, file, 4));
+    expect(adminAfter[0]).toEqual(deleteEvent(source, file, 4, shared));
     const member = await auditEvents(app, await cookieFor(app, "zhaoliu"));
     expect(member.filter((event) => event.kind === "session.delete")).toEqual([]);
 
@@ -241,6 +247,10 @@ describe("DELETE file edge cases (evidence 3, 9)", () => {
     const missing = join(ownerSessionDir(world.rt.runtime.stateDir), "missing.jsonl");
     presetFile(db, world.session, missing);
     const fresh = await createSession(app, world.cookie);
+    const { sandboxRoot } = world.rt.runtime;
+    // Each session was created without a workspace (#930) and is the only user of its temporary
+    // one: every delete also writes that workspace's `workspace.delete`.
+    const [ownSpace, freshSpace] = [workspaceOf(db, world.session), workspaceOf(db, fresh)];
     const admin = await cookieFor(app, "lisi");
     const before = await auditEvents(app, admin);
 
@@ -248,10 +258,12 @@ describe("DELETE file edge cases (evidence 3, 9)", () => {
     expectDeleted(await sendDelete(app, fresh, world.cookie));
 
     const after = await auditEvents(app, admin);
-    expect(after.slice(2)).toEqual(before);
-    expect(after.slice(0, 2)).toEqual([
-      deleteEvent(fresh, null, 0),
-      deleteEvent(world.session, missing, 0),
+    expect(after.slice(4)).toEqual(before);
+    expect(after.slice(0, 4)).toEqual([
+      temporaryWorkspaceDeleteEvent(fresh, freshSpace, sandboxRoot),
+      deleteEvent(fresh, null, 0, freshSpace),
+      temporaryWorkspaceDeleteEvent(world.session, ownSpace, sandboxRoot),
+      deleteEvent(world.session, missing, 0, ownSpace),
     ]);
     expect([sessionState(db, world.session).row, sessionState(db, fresh).row]).toEqual([
       undefined,
@@ -294,7 +306,8 @@ async function expectUnlinkFailureReported(world: RealWorld): Promise<void> {
   }
 
   expect(sessionState(db, world.session).row).toBeUndefined();
-  expect(auditRows(db)).toBe(audits + 1);
+  // `session.delete` plus the `workspace.delete` of the session's own temporary workspace (#930).
+  expect(auditRows(db)).toBe(audits + 2);
   expect(world.errors).toHaveLength(1);
   const reported = world.errors[0] as NodeJS.ErrnoException;
   expect([reported.code, reported.path]).toEqual([
@@ -326,12 +339,17 @@ describe("DELETE session file path validation (evidence 13)", () => {
 
     for (const [index, { file }] of cases.entries()) {
       const session = await createSession(app, world.cookie);
+      const space = workspaceOf(db, session);
       presetFile(db, session, file);
 
       expectDeleted(await sendDelete(app, session, world.cookie));
 
       expect(sessionState(db, session).row).toBeUndefined();
-      expect((await auditEvents(app, admin, 1))[0]).toEqual(deleteEvent(session, file, 0));
+      // Newest first: the session's own temporary workspace (#930) went after the session row.
+      expect(await auditEvents(app, admin, 2)).toEqual([
+        temporaryWorkspaceDeleteEvent(session, space, world.rt.runtime.sandboxRoot),
+        deleteEvent(session, file, 0, space),
+      ]);
       expect(world.errors.map((error) => error.message)).toEqual(
         cases.slice(0, index + 1).map(({ message }) => message),
       );
@@ -351,12 +369,17 @@ describe("DELETE session file path validation (evidence 13)", () => {
     symlinkSync(dir, junction);
     const file = join(junction, "x.jsonl");
     presetFile(db, world.session, file);
+    const space = workspaceOf(db, world.session);
     const admin = await cookieFor(app, "lisi");
 
     expectDeleted(await sendDelete(app, world.session, world.cookie));
 
     expect(sessionState(db, world.session).row).toBeUndefined();
-    expect((await auditEvents(app, admin, 1))[0]).toEqual(deleteEvent(world.session, file, 0));
+    // Newest first: the session's own temporary workspace (#930) went after the session row.
+    expect(await auditEvents(app, admin, 2)).toEqual([
+      temporaryWorkspaceDeleteEvent(world.session, space, world.rt.runtime.sandboxRoot),
+      deleteEvent(world.session, file, 0, space),
+    ]);
     expect(existsSync(resolved)).toBe(false);
     expect(lstatSync(junction).isSymbolicLink()).toBe(true);
     expect(world.errors).toEqual([]);
@@ -571,7 +594,8 @@ describe("DELETE and concurrent control (evidence 7)", () => {
 
     release(world.rt.children[0]);
     expectDeleted(await pending);
-    expect(auditRows(db)).toBe(audits + 1);
+    // `session.delete` plus the `workspace.delete` of the session's own temporary workspace (#930).
+    expect(auditRows(db)).toBe(audits + 2);
   });
 });
 

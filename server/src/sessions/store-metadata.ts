@@ -3,7 +3,10 @@
  * binding and scene, and the title/scene/pin/archive PATCH. The row insert and its `session.bind`
  * audit share one SQLite transaction, so an audit failure leaves no session row. Ownership of the
  * workspace is the route's job; a temporary workspace cannot be bound by id (#925): the transaction
- * throws the same `not_found` and rolls the row back. A PATCH is one owner-scoped UPDATE of only the given columns: it
+ * throws the same `not_found` and rolls the row back. A create without a workspace (#930, design
+ * D6) makes a temporary one in that same transaction and binds it, with no audit row; when the
+ * transaction rolls back, the directories that creation made are removed afterwards.
+ * A PATCH is one owner-scoped UPDATE of only the given columns: it
  * never touches `updated_at`, `status`, `workspace_id`, the generation columns or message rows.
  * `archived: true` (#922) puts `status != 'running'` on that whole UPDATE, so a running session
  * gets none of the PATCH's keys.
@@ -91,8 +94,20 @@ interface DeletedSession {
   temporaryWorkspace?: TemporaryWorkspaceRef;
 }
 
-interface SessionMetadataStoreOptions {
+/** What the workspace store's `createTemporary` hands back, as far as session creation uses it. */
+interface CreatedTemporaryWorkspace {
+  workspace: { id: string };
+  /** Only for a rolled-back transaction: removes the still-empty directories that call created. */
+  removeCreatedDirs(): void;
+}
+
+export interface SessionMetadataStoreOptions {
   emit: typeof canonicalEmit;
+  /**
+   * The workspace store's `createTemporary` for this owner (injected by the assembly; sessions
+   * does not import the workspaces module). Called inside the session-create transaction.
+   */
+  createTemporaryWorkspace: (ownerId: string) => CreatedTemporaryWorkspace;
   /** `SANDBOX_ROOT`: the `root` a `workspace.delete` audit names is built from its realpath. */
   sandboxRoot: string;
 }
@@ -139,34 +154,15 @@ export function createSessionMetadataStore(
     createSession(ownerId, input) {
       const now = Date.now();
       const id = randomBytes(16).toString("hex");
-      const workspaceId = input.workspaceId ?? null;
       const scene = input.scene ?? null;
-      let temporaryWorkspace = false;
-      runOwnedTransaction(db, "session create rollback failed", () => {
+      const insert = (workspaceId: string): void => {
         requireChanges(
           db.prepare(INSERT_SESSION).run(id, ownerId, now, now, workspaceId, scene).changes,
           1,
           "session create",
         );
-        if (workspaceId !== null) {
-          const bound = db.prepare(SELECT_TEMPORARY).get(workspaceId) as
-            | { temporary: number | bigint }
-            | undefined;
-          temporaryWorkspace = Number(bound?.temporary) === 1;
-          if (temporaryWorkspace) {
-            // Same error as the route's unknown / foreign id; the INSERT above is rolled back.
-            throw new HttpError("not_found");
-          }
-          options.emit(db, {
-            kind: "session.bind",
-            actorId: ownerId,
-            title: "绑定工作空间",
-            workspaceId,
-            detail: { sessionId: id, scene },
-          });
-        }
-      });
-      return {
+      };
+      const view = (workspaceId: string, temporaryWorkspace: boolean): CreatedSessionView => ({
         id,
         title: null,
         status: "idle",
@@ -178,7 +174,29 @@ export function createSessionMetadataStore(
         archivedAt: null,
         pendingApproval: false,
         temporaryWorkspace,
-      };
+      });
+      const workspaceId = input.workspaceId;
+      if (workspaceId === undefined) {
+        return view(createInTemporaryWorkspace(db, options, ownerId, insert), true);
+      }
+      runOwnedTransaction(db, "session create rollback failed", () => {
+        insert(workspaceId);
+        const bound = db.prepare(SELECT_TEMPORARY).get(workspaceId) as
+          | { temporary: number | bigint }
+          | undefined;
+        if (Number(bound?.temporary) === 1) {
+          // Same error as the route's unknown / foreign id; the INSERT above is rolled back.
+          throw new HttpError("not_found");
+        }
+        options.emit(db, {
+          kind: "session.bind",
+          actorId: ownerId,
+          title: "绑定工作空间",
+          workspaceId,
+          detail: { sessionId: id, scene },
+        });
+      });
+      return view(workspaceId, false);
     },
 
     patchSession(ownerId, sessionId, patch) {
@@ -319,4 +337,37 @@ function patchAssignments(
     fragments.push(SET_UNARCHIVED);
   }
   return { assignments: fragments.join(", "), values };
+}
+
+/**
+ * One transaction: the owner's new temporary workspace, then the session row bound to it — no
+ * `session.bind` and no `workspace.create` audit. Returns the workspace id. When the transaction
+ * rolls back after the workspace's directories were made, they are removed here, after the
+ * rollback; never once it has committed. The original failure is what propagates.
+ */
+function createInTemporaryWorkspace(
+  db: DatabaseSync,
+  options: SessionMetadataStoreOptions,
+  ownerId: string,
+  insertSession: (workspaceId: string) => void,
+): string {
+  let created: CreatedTemporaryWorkspace | undefined;
+  try {
+    return runOwnedTransaction(db, "session create rollback failed", () => {
+      created = options.createTemporaryWorkspace(ownerId);
+      insertSession(created.workspace.id);
+      return created.workspace.id;
+    });
+  } catch (error) {
+    try {
+      created?.removeCreatedDirs();
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "session create left a temporary workspace directory",
+        { cause: error },
+      );
+    }
+    throw error;
+  }
 }

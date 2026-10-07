@@ -1,13 +1,15 @@
 # 会话元数据冒烟（session-meta.hurl）：从空 cookie store 独立可运行，不依赖 public/auth/chat/files。
 # 登录 zhangsan → 创建/采用 smoke-sessions（201 或 409）→ 列表按 name 取 id
 # → (1) 绑定创建 201 十一键 + session.bind 审计 → (2) 未知空间 404 / 多余键 400 且审计不变、无 body 创建 201
+#     带临时空间（列表不含、tree 200 且为空、显式绑定 404）
 # → (3) PATCH title/scene/pinned、多余键 400、列表反映、取消置顶
 # → (4) WORKBUDDY_THINK prompt → 作答唯一 bash 审批 → 仅 messages GET 有界重试至 done
 # → (5) thinking 逐字、bash 步骤 done、标题仍为 PATCH 所设
 # → (6) GET /api/commands 恰两条内建 → /todo 回合：omp 原文、无步骤、无 thinking
 #     → /session WORKBUDDY_THINK 冒烟 回合：正文按原样落库、固定回复、thinking 逐字（转义文本到了模型）、无步骤
 # → (7) DELETE 204 + session.delete 审计 → messages 404 → 列表不含 → 再 DELETE 404
-# → (8) lisi 绑定他人空间 / PATCH / DELETE 均 404 且 lisi 的会话数不变 → zhangsan 复核并删除无绑定会话 → 登出。
+# → (8) lisi 绑定他人空间 / PATCH / DELETE 均 404 且 lisi 的会话数不变 → zhangsan 复核并删除该会话
+#     → 其临时空间 tree 404 → 登出。
 # 只由 make smoke 运行（smoke-live 不跑本文件），不使用 skip_turn_control。
 # 可重跑：工作空间保留供下次采用，自建会话在文件内删除，不留下 live authentication session 与 running 回合。
 # 库与 SANDBOX_ROOT 必须同生命周期：库在而空间目录被清掉时，创建仍成功，但 (4) 的回合会因空间根不存在而失败。
@@ -91,12 +93,13 @@ jsonpath "$.events" count == 1
 jsonpath "$.events[0].kind" == "session.bind"
 jsonpath "$.events[0].detail.sessionId" == "{{session_id}}"
 
-# (2) 无 body 创建照旧可用：exact 201，恰十一键且逐键点名，workspaceId null、scene null；捕获无绑定会话 id。
-# bodyless：无 Content-Type、无 body；不重试。
+# (2) 无 body 创建现在带一个临时空间：exact 201，恰十一键且逐键点名，scene null、temporaryWorkspace true、
+# workspaceId 为 32 位十六进制；捕获该会话 id 与临时空间 id。bodyless：无 Content-Type、无 body；不重试。
 POST {{base_url}}/api/sessions
 HTTP 201
 [Captures]
 other_id: jsonpath "$.id"
+temp_ws: jsonpath "$.workspaceId"
 [Asserts]
 jsonpath "$.*" count == 11
 jsonpath "$.id" matches "^[0-9a-f]{32}$"
@@ -104,12 +107,32 @@ jsonpath "$.title" == null
 jsonpath "$.status" == "idle"
 jsonpath "$.createdAt" isInteger
 jsonpath "$.updatedAt" isInteger
-jsonpath "$.workspaceId" == null
+jsonpath "$.workspaceId" matches "^[0-9a-f]{32}$"
 jsonpath "$.scene" == null
 jsonpath "$.pinnedAt" == null
 jsonpath "$.archivedAt" == null
 jsonpath "$.pendingApproval" == false
-jsonpath "$.temporaryWorkspace" == false
+jsonpath "$.temporaryWorkspace" == true
+
+# (2) 工作空间列表不含该临时空间（采用的 smoke-sessions 仍在）。
+GET {{base_url}}/api/workspaces
+HTTP 200
+[Asserts]
+jsonpath "$.workspaces[?(@.id=='{{temp_ws}}')]" not exists
+jsonpath "$.workspaces[?(@.id=='{{workspace_id}}')]" exists
+
+# (2) 但按 id 可达：其目录树 exact 200，是一个空目录。
+GET {{base_url}}/api/workspaces/{{temp_ws}}/tree
+HTTP 200
+[Asserts]
+jsonpath "$.entries" count == 0
+
+# (2) 临时空间不能被显式绑定：exact 404 not_found，与不存在的空间逐字相同。不重试。
+POST {{base_url}}/api/sessions
+Content-Type: application/json
+{"workspaceId":"{{temp_ws}}"}
+HTTP 404
+{"error":{"code":"not_found","message":"请求的资源不存在"}}
 
 # (3) PATCH title/scene/pinned：exact 200，恰十一键且逐键点名，pinnedAt 为整数时间戳，id/status/workspaceId 不变。不重试。
 PATCH {{base_url}}/api/sessions/{{session_id}}
@@ -372,17 +395,22 @@ HTTP 200
 cookie "workbuddy_session" matches "^[0-9a-f]{64}$"
 {"id":"u1","account":"zhangsan","role":"成员"}
 
-# (8) 无绑定会话仍在且标题仍为 null：他账号的 PATCH/DELETE 没有生效。
+# (8) 该会话仍在且标题仍为 null：他账号的 PATCH/DELETE 没有生效。
 GET {{base_url}}/api/sessions/{{other_id}}/messages
 HTTP 200
 [Asserts]
 jsonpath "$.session.title" == null
 
-# (8) 属主删除无绑定会话：exact 204、空 body。不重试。
+# (8) 属主删除该会话：exact 204、空 body。不重试。
 DELETE {{base_url}}/api/sessions/{{other_id}}
 HTTP 204
 [Asserts]
 body == ""
+
+# (8) 临时空间随它的最后一个会话消失：目录树 exact 404 not_found。
+GET {{base_url}}/api/workspaces/{{temp_ws}}/tree
+HTTP 404
+{"error":{"code":"not_found","message":"请求的资源不存在"}}
 
 # (8) 属主登出：exact 204 + clear cookie。
 POST {{base_url}}/api/auth/logout

@@ -52,11 +52,16 @@ import {
   trashDir,
 } from "./session-delete-helpers.js";
 import { OWNER_ID } from "./session-supervisor-helpers.js";
-import { seedTemporaryWorkspaceSession } from "./support/temporary-workspace.js";
+import {
+  seedTemporaryWorkspaceSession,
+  seedUnboundSession,
+  workspaceOf,
+} from "./support/temporary-workspace.js";
 
 deleteWorlds();
 
 const SOURCE = "5".repeat(32);
+const UNBOUND = "6".repeat(32);
 const WORKSPACE_ID = "a".repeat(32);
 const NOT_A_DIRECTORY = "temporary workspace delete: the directory is not a directory";
 const REPLACED_BEFORE_MOVE =
@@ -136,6 +141,14 @@ function temporaryDirs(world: RealWorld): string[] {
   return readdirSync(join(world.rt.runtime.sandboxRoot, OWNER_ID)).filter((name) =>
     name.startsWith("tmp-"),
   );
+}
+
+/**
+ * The directory name of the temporary workspace the world's own session got when it was created
+ * without a workspace (#930). No case here deletes that session, so its directory stays.
+ */
+function ownTemporaryDir(world: RealWorld): string {
+  return `tmp-${workspaceOf(world.fixture.db, world.session)}`;
 }
 
 async function workspaceDeletes(world: RealWorld): Promise<AuditEventWire[]> {
@@ -227,7 +240,7 @@ describe("fork 继承会话元数据 — 继承临时空间 (#928)", () => {
       ]);
       expect(workspaceCount(world.fixture.db)).toBe(rows);
       expect(temporaryDirs(world)).toEqual(dirs);
-      expect(dirs).toEqual([`tmp-${temporary.id}`]);
+      expect(dirs.toSorted()).toEqual([`tmp-${temporary.id}`, ownTemporaryDir(world)].toSorted());
     },
   );
 });
@@ -244,14 +257,14 @@ describe("共用与随最后一个会话删除 (#928)", () => {
 
     expect(workspaceRow(db, temporary.id)).toBeUndefined();
     expect(existsSync(temporary.dir)).toBe(false);
-    expect(temporaryDirs(world)).toEqual([]);
+    expect(temporaryDirs(world)).toEqual([ownTemporaryDir(world)]);
     expect(trashOf(world)).toEqual([]);
     expect(auditRows(db)).toBe(audits + 2);
     expect(await auditEvents(app, world.cookie, 2)).toEqual([
       workspaceDeleteEvent(temporary, SOURCE),
       deleteEvent(SOURCE, null, 0, temporary.id),
     ]);
-    // The unbound session the world opened with is no user of anything.
+    // The session the world opened with uses its own temporary workspace, not this one.
     expect(sessionState(db, world.session).row).toBeDefined();
     expect(world.errors).toEqual([]);
   });
@@ -385,10 +398,12 @@ describe("共用与随最后一个会话删除 (#928)", () => {
       payload: JSON.stringify({ workspaceId: normal.id }),
     });
     expect(bound.statusCode).toBe(201);
+    // "On none": a legacy unbound row, which REST can no longer create (#930).
+    seedUnboundSession(db, OWNER_ID, UNBOUND);
     const rows = workspaceCount(db);
 
     await deleted(world, (bound.json() as { id: string }).id);
-    await deleted(world, world.session);
+    await deleted(world, UNBOUND);
 
     expect(workspaceCount(db)).toBe(rows);
     expect(workspaceRow(db, normal.id)?.temporary).toBe(0);
@@ -446,7 +461,7 @@ describe("临时空间目录的删除 — DELETE (#928)", () => {
     await deleted(world, SOURCE);
 
     expect(existsSync(temporary.dir)).toBe(false);
-    expect(temporaryDirs(world)).toEqual([]);
+    expect(temporaryDirs(world)).toEqual([ownTemporaryDir(world)]);
     expect(trashOf(world)).toEqual([]);
     expect(readFileSync(outsideFile, "utf8")).toBe(fileBytes);
     expect(snapshot(outsideDir)).toEqual(dirBefore);

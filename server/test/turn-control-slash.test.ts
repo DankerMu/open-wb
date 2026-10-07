@@ -42,6 +42,7 @@ import {
 import { AGENT_UNAVAILABLE_ENVELOPE, SESSION_BUSY_ENVELOPE } from "./session-rest-helpers.js";
 import { OWNER_ID, type RecordingWorld, waitForTurn } from "./session-supervisor-helpers.js";
 import { isLive, presetSessionFile } from "./session-supervisor-pool-helpers.js";
+import { seedUnboundSession } from "./support/temporary-workspace.js";
 
 const SKILL = "weekly-report";
 const SKILL_CALL = "/skill:weekly-report 写周报";
@@ -554,8 +555,11 @@ describe("regenerate and fork at a project skill (#813)", () => {
     "is plain text on an unbound session of the same owner: the request reaches omp and answers 502",
     REAL,
     async () => {
-      const world = await openWorld();
-      await openBound(world);
+      const opened = await openWorld();
+      await openBound(opened);
+      // REST no longer creates an unbound session (#930): the legacy row is written directly.
+      const session = seedUnboundSession(opened.fixture.db, OWNER_ID, "7".repeat(32));
+      const world = { ...opened, session };
       const seeded = seedTurns(world, [DEPLOY_CALL]);
 
       expectEnvelope(await postRegenerate(world), 502, AGENT_UNAVAILABLE_ENVELOPE);

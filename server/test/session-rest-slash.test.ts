@@ -24,6 +24,7 @@ import {
   openBareSession,
   type SupervisorApp,
 } from "./session-supervisor-helpers.js";
+import { seedUnboundSession } from "./support/temporary-workspace.js";
 
 const SKILL = "weekly-report";
 
@@ -224,8 +225,11 @@ describe("prompt route classifies with the session's own skills (#813)", () => {
     const bound = await openBound(world, "proj");
     installSkill(world, "mine", projectSkills(join(world.sandboxRoot, "u1")));
     installSkill(world, SKILL);
+    // REST no longer creates an unbound session (#930): the legacy row is written directly. The
+    // world's own session uses a temporary workspace, whose root is below the owner root too.
+    const unbound = seedUnboundSession(world.fixture.db, "u1", "7".repeat(32));
 
-    for (const session of [await bound.session(), world.session]) {
+    for (const session of [await bound.session(), unbound, world.session]) {
       expect(await promptOn(world, "/skill:mine x", session)).toBe("/skill:mine x");
     }
     expect(await promptOn(world, "/skill:weekly-report 写周报", await bound.session())).toBe(

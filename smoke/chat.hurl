@@ -1,7 +1,8 @@
 # 对话冒烟（chat.hurl）：从空 cookie store 独立可运行，不依赖 public/auth。
 # 登录 → 首轮 prompt → 审批作答 → 仅 messages GET 有界重试至 captured assistant/session done
-# → 回合控制 → 他账号404 → 无 bearer 代理401。审批作答与回合控制仅在 skip_turn_control=false 时执行。
-# 两账号均登出，不留下 live authentication session 与 running 回合。
+# → 回合控制 → 他账号404 → 本账号删除自己创建的会话 → 无 bearer 代理401。
+# 审批作答与回合控制仅在 skip_turn_control=false 时执行。
+# 两账号均登出，不留下 live authentication session、running 回合与本文件创建的会话。
 
 # 成功登录：exact 200 Principal + 合规 session cookie。
 POST {{base_url}}/api/auth/login
@@ -316,6 +317,45 @@ HTTP 404
 {"error":{"code":"not_found","message":"请求的资源不存在"}}
 
 # 他账号登出。
+POST {{base_url}}/api/auth/logout
+HTTP 204
+[Asserts]
+header "Set-Cookie" == "workbuddy_session=; Max-Age=0; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax"
+body == ""
+
+# 清理：本文件创建的每个会话都由它自己删除（无 workspaceId 的创建各带一个临时空间，连跑不积累）。
+# 放在他账号的 404 之后——先删会让那一步对谁都是 404。本账号重新登录。
+POST {{base_url}}/api/auth/login
+Content-Type: application/json
+{"account":"zhangsan","password":"demo"}
+HTTP 200
+[Asserts]
+cookie "workbuddy_session" matches "^[0-9a-f]{64}$"
+{"id":"u1","account":"zhangsan","role":"成员"}
+
+# 删除首会话：exact 204、空 body；不重试。
+DELETE {{base_url}}/api/sessions/{{session_id}}
+HTTP 204
+[Asserts]
+body == ""
+
+# 删除分叉会话（与首会话共用临时空间，二者都删后该空间才消失）：exact 204；门控同 fork 步骤。
+DELETE {{base_url}}/api/sessions/{{fork_session_id}}
+[Options]
+skip: {{skip_turn_control}}
+HTTP 204
+[Asserts]
+body == ""
+
+# 删除第二会话：exact 204；门控同其创建步骤。
+DELETE {{base_url}}/api/sessions/{{session2_id}}
+[Options]
+skip: {{skip_turn_control}}
+HTTP 204
+[Asserts]
+body == ""
+
+# 本账号再次登出：exact 204 + clear cookie。
 POST {{base_url}}/api/auth/logout
 HTTP 204
 [Asserts]
