@@ -5,6 +5,10 @@ import type {
   FastifyRequest,
   onErrorHookHandler,
   onRequestHookHandler,
+  preParsingHookHandler,
+  RawReplyDefaultExpression,
+  RawRequestDefaultExpression,
+  RawServerDefault,
 } from "fastify";
 import { HttpError } from "../core/errors/index.js";
 import type { createSandbox } from "../core/sandbox/index.js";
@@ -96,6 +100,19 @@ export function registerWorkspaceRest(
   app: FastifyInstance,
   dependencies: WorkspaceRestDependencies,
 ): void {
+  /** Runs before the body is parsed: another owner's id answers 404 whatever the body is. */
+  const requireOwnedBeforeParse: preParsingHookHandler<
+    RawServerDefault,
+    RawRequestDefaultExpression<RawServerDefault>,
+    RawReplyDefaultExpression<RawServerDefault>,
+    { Params: { id: string } }
+  > = (request, _reply, payload, done) => {
+    if (dependencies.store.rootOf(currentPrincipal(request), request.params.id) === null) {
+      throw new HttpError("not_found");
+    }
+    done(null, payload);
+  };
+
   app.get("/api/workspaces", { onRequest: noStoreWorkspaceResponse }, async (request) => {
     const principal = currentPrincipal(request);
     return { workspaces: dependencies.store.list(principal.id) };
@@ -108,6 +125,24 @@ export function registerWorkspaceRest(
       return reply
         .code(201)
         .send(dependencies.store.create(principal, parseCreateBody(request.body)));
+    },
+  );
+  app.post<{ Params: { id: string } }>(
+    "/api/workspaces/:id/promote",
+    {
+      bodyLimit: WORKSPACE_BODY_LIMIT,
+      onRequest: noStoreWorkspaceResponse,
+      preParsing: requireOwnedBeforeParse,
+    },
+    async (request) => {
+      const principal = currentPrincipal(request);
+      const { name } = parsePromoteBody(request.body);
+      // `promote` owns its transaction; null = the owner's workspace is not (or no longer) temporary.
+      const promoted = dependencies.store.promote(principal, request.params.id, name);
+      if (promoted === null) {
+        throw new HttpError("bad_request");
+      }
+      return promoted;
     },
   );
   app.get<{ Params: { id: string } }>(
@@ -217,4 +252,16 @@ function parseDirectoryBody(body: unknown): { path: string } {
     throw new HttpError("bad_request");
   }
   return { path: record.path };
+}
+
+function parsePromoteBody(body: unknown): { name: string } {
+  const record = parseBodyRecord(body);
+  if (
+    Object.keys(record).length !== 1 ||
+    !Object.hasOwn(record, "name") ||
+    typeof record.name !== "string"
+  ) {
+    throw new HttpError("bad_request");
+  }
+  return { name: record.name };
 }
