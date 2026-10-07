@@ -168,6 +168,11 @@ Minimal mergeable slice: 5.1 + 5.2 一起（删了行不删目录会留下无主
   - regenerate 在事务提交之后派发失败时（`branching.ts` 直接把新行结算为 `failed`，不经 `onEvent`，请求 502 `agent_unavailable`）既有「regenerate 的事务提交」也有「回合终态落库」两处写入，必须通知。路由无法区分这次 502 之前是否已提交，因此 regenerate 路由对 `agent_unavailable` 一律通知一次：未提交的 502 会多发一条 `sessions.changed`（客户端多读一次列表，无害），记入偏离记录。**不改 `branching.ts` 与 `supervisor.ts`**。
   - 通知器经 `SessionRestDependencies` 注入 `rest.ts`（6.3 尚未落地：注入由本任务建立，6.3 复用）。6.4 的用例写进新文件 `server/test/session-list-events-turns.test.ts`；读连接的辅助从 `session-list-events.test.ts` 抽到 support 文件共用，不复制。
 - [ ] 6.5 触发点接线之三——工作空间：`POST /api/workspaces` 与转正成功之后通知（`workspaces/rest.ts`，通知器由 `createApp` 注入，`workspaces/` 不导入 `sessions/`）。测试：「每个触发点各自通知」里这两项。
+  **实施注记（6.5，fixture 评审补充）**：
+  - `WorkspaceRestDependencies` 加 `listEvents: { notify(ownerId: string): void }`（结构类型，`workspaces/` 不导入 `sessions/`）；`createApp` 在注册工作空间路由处传入会话模块返回的通知器（会话路由先注册，通知器届时已存在）。装配签名因此多一个键，记入偏离记录。
+  - `store.create` / `store.promote` 成功返回之后、回复之前通知；`promote` 返回 `null`（400）、名字冲突（409）与其它拒绝不通知。
+  - 两项触发点写进新文件 `server/test/session-list-events-workspaces.test.ts`（复用 `session-list-events-helpers.ts` 的读连接辅助与临时空间的测试辅助）；另加「重名 409 不通知」「对正式空间 promote 400 不通知」「他人账号的连接收不到」。
+  - 6.6 的勾选等 6.3（会话 CRUD 与 fork 的触发点）合入之后。
 - [ ] 6.6 变异证据（逐触发点）：对 6.3–6.5 的十一个触发点各去掉一次通知调用，「每个触发点各自通知」里对应的那一项判红（表驱动测试逐项断言，不合并成总数）；通知发在提交之前且事务回滚 → 「被拒绝的写入不通知」的回滚例判红；按连接而非按账号过滤错误 → `lisi` 收到事件判红；串接函数吞掉装配方 `onEvent` 的返回值 → 既有的观察口同步返回值违规测试判红。
 
 Risk packs: Public API（新 SSE 端点的头、事件名与 data 形状）、Concurrency / backpressure（每连接至多一条未写出、写失败隔离）、Auth（按账号隔离，未认证走全局守卫）、Lifecycle / shutdown（`preClose` 销毁、关停后 502、心跳）。
