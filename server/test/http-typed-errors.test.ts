@@ -7,7 +7,7 @@ import { HTTP_ERROR_MESSAGES, HttpError, type HttpErrorCode } from "../src/core/
 import { handleHttpError } from "../src/http/index.js";
 
 /** spec「统一错误信封」码表逐字抄录：独立于 core/errors 的期望来源。 */
-const FOURTEEN_TYPED_ERRORS = [
+const FIFTEEN_TYPED_ERRORS = [
   ["bad_request", 400, "请求格式不正确"],
   ["invalid_credentials", 401, "账号或密码不正确"],
   ["account_disabled", 403, "该账号已停用，请联系管理员"],
@@ -22,11 +22,15 @@ const FOURTEEN_TYPED_ERRORS = [
   ["agent_capacity", 503, "Agent 容量已满，请稍后重试"],
   ["approval_settled", 409, "该审批已处理"],
   ["session_archived", 409, "会话已归档，恢复后才能继续对话"],
+  ["undo_conflict", 409, "其它会话在这之后改动过工作空间"],
 ] as const;
 
-const NEW_TYPED_ERRORS = FOURTEEN_TYPED_ERRORS.filter(
+const NEW_TYPED_ERRORS = FIFTEEN_TYPED_ERRORS.filter(
   ([code]) =>
-    code === "agent_capacity" || code === "approval_settled" || code === "session_archived",
+    code === "agent_capacity" ||
+    code === "approval_settled" ||
+    code === "session_archived" ||
+    code === "undo_conflict",
 );
 
 const GENERIC_BODY = JSON.stringify({ error: { message: "服务器内部错误" } });
@@ -96,7 +100,7 @@ function expectGenericNoDetail(captured: ReplyCapture): void {
   expect(captured.statusCode).toBe(500);
   expect(captured.body).toBe(GENERIC_BODY);
   expect(captured.body).not.toContain("FST_ERR");
-  for (const [code] of FOURTEEN_TYPED_ERRORS) {
+  for (const [code] of FIFTEEN_TYPED_ERRORS) {
     expect(captured.body).not.toContain(code);
   }
 }
@@ -114,14 +118,14 @@ async function withTestErrorApp<T>(action: (app: FastifyInstance) => Promise<T>)
   }
 }
 
-describe("typed definition map 恰十四码", () => {
+describe("typed definition map 恰十五码", () => {
   it("core/errors 的码集合与 spec 码表逐一相等", () => {
     expect(Object.keys(HTTP_ERROR_MESSAGES).sort()).toEqual(
-      FOURTEEN_TYPED_ERRORS.map(([code]) => code).sort(),
+      FIFTEEN_TYPED_ERRORS.map(([code]) => code).sort(),
     );
   });
 
-  it.each(FOURTEEN_TYPED_ERRORS)(
+  it.each(FIFTEEN_TYPED_ERRORS)(
     "测试路由抛 HttpError(%s) -> exact %i 信封，无 Fastify 默认字段",
     async (code, statusCode, message) => {
       await withTestErrorApp(async (app) => {
@@ -135,15 +139,16 @@ describe("typed definition map 恰十四码", () => {
     },
   );
 
-  it("四种 409 以 code 区分，各自保留独立文案", () => {
-    const conflicts = FOURTEEN_TYPED_ERRORS.filter(([, statusCode]) => statusCode === 409);
+  it("五种 409 以 code 区分，各自保留独立文案", () => {
+    const conflicts = FIFTEEN_TYPED_ERRORS.filter(([, statusCode]) => statusCode === 409);
     expect(conflicts.map(([code]) => code)).toEqual([
       "session_busy",
       "conflict",
       "approval_settled",
       "session_archived",
+      "undo_conflict",
     ]);
-    expect(new Set(conflicts.map(([, , message]) => message)).size).toBe(4);
+    expect(new Set(conflicts.map(([, , message]) => message)).size).toBe(5);
     for (const [code, , message] of conflicts) {
       const captured = mapError(new HttpError(code), "/api/no-such-route", "POST");
       expect(captured.statusCode).toBe(409);
@@ -167,7 +172,7 @@ describe("伪造新码形状的普通对象不被误标（守卫）", () => {
   );
 });
 
-describe("content-parser 归属集恰十二条身份（共享 handleHttpError 接缝）", () => {
+describe("content-parser 归属集恰十四条身份（共享 handleHttpError 接缝）", () => {
   const OWNER_CASES = [...LEGACY_OWNERS, ...TURN_CONTROL_OWNERS].flatMap((url) =>
     ALLOWLISTED_CTP_CODES.map((ctpCode) => [url, ctpCode] as const),
   );

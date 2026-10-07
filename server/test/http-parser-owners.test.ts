@@ -25,8 +25,8 @@ const CTP_CODES = [
 
 type CtpCode = (typeof CTP_CODES)[number];
 
-/** spec 的十三条 method + matched route 归属身份（十二条 POST + 一条 PATCH）。 */
-const THIRTEEN_OWNER_IDENTITIES = [
+/** spec 的十四条 method + matched route 归属身份（十三条 POST + 一条 PATCH）。 */
+const FOURTEEN_OWNER_IDENTITIES = [
   ["POST", "/api/auth/login"],
   ["POST", "/api/auth/logout"],
   ["POST", "/api/sessions/:id/prompt"],
@@ -40,10 +40,11 @@ const THIRTEEN_OWNER_IDENTITIES = [
   ["POST", "/api/sessions"],
   ["PATCH", "/api/sessions/:id"],
   ["POST", "/api/workspaces/:id/promote"],
+  ["POST", "/api/sessions/:id/undo"],
 ] as const;
 
-/** spec 码表的十四码键集（与 http-typed-errors.test.ts 同义的本文件守卫）。 */
-const FOURTEEN_CODES = [
+/** spec 码表的十五码键集（与 http-typed-errors.test.ts 同义的本文件守卫）。 */
+const FIFTEEN_CODES = [
   "bad_request",
   "invalid_credentials",
   "account_disabled",
@@ -58,6 +59,7 @@ const FOURTEEN_CODES = [
   "agent_capacity",
   "approval_settled",
   "session_archived",
+  "undo_conflict",
 ] as const;
 
 interface ReplyCapture {
@@ -127,7 +129,7 @@ function expectGeneric500(captured: ReplyCapture, error: Error): void {
   expect(captured.statusCode).toBe(500);
   expect(captured.body).toBe(GENERIC_BODY);
   expectNoRawDetail(captured, error);
-  for (const code of FOURTEEN_CODES) {
+  for (const code of FIFTEEN_CODES) {
     expect(captured.body).not.toContain(code);
   }
 }
@@ -142,13 +144,13 @@ function crossWithCodes<T extends readonly unknown[]>(rows: readonly T[]) {
   return rows.flatMap((row) => CTP_CODES.map((code) => [...row, code] as const));
 }
 
-describe("证据 1：十三条身份 × 四个真实 CTP 错误 -> 400", () => {
-  it("身份集恰十三条且互不重复", () => {
-    const keys = THIRTEEN_OWNER_IDENTITIES.map(([method, url]) => `${method} ${url}`);
-    expect(new Set(keys).size).toBe(13);
+describe("证据 1：十四条身份 × 四个真实 CTP 错误 -> 400", () => {
+  it("身份集恰十四条且互不重复", () => {
+    const keys = FOURTEEN_OWNER_IDENTITIES.map(([method, url]) => `${method} ${url}`);
+    expect(new Set(keys).size).toBe(14);
   });
 
-  it.each(crossWithCodes(THIRTEEN_OWNER_IDENTITIES))(
+  it.each(crossWithCodes(FOURTEEN_OWNER_IDENTITIES))(
     "%s %s 上真实 %s -> 400 bad_request 且无 raw 细节",
     (method, url, code) => {
       const error = genuineCtpError(code);
@@ -173,6 +175,7 @@ describe("证据 3（守卫）：非本身份与 lookalike 保持 500", () => {
     ["PUT", "/api/sessions/:id"],
     ["PUT", "/api/auth/logout"],
     ["PATCH", "/api/sessions/:id/prompt"],
+    ["PUT", "/api/sessions/:id/undo"],
   ] as const;
 
   const LOOKALIKES = [
@@ -256,8 +259,8 @@ describe("证据 5（回归）：catch-all 与 unmatched 分流不变", () => {
   });
 });
 
-describe("证据 6（守卫）：错误码表仍恰十四码", () => {
+describe("证据 6（守卫）：错误码表仍恰十五码", () => {
   it("HTTP_ERROR_MESSAGES 键集与 spec 码表相等", () => {
-    expect(Object.keys(HTTP_ERROR_MESSAGES).sort()).toEqual([...FOURTEEN_CODES].sort());
+    expect(Object.keys(HTTP_ERROR_MESSAGES).sort()).toEqual([...FIFTEEN_CODES].sort());
   });
 });
