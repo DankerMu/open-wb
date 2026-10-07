@@ -24,11 +24,11 @@
 | 各档位自动放行的最高工具档：`always-ask → read`、`write → write`、`yolo → exec` | 打包源码常量表 |
 | 逐工具策略 `tools.approval.<tool>` 在每种档位下都先于档位判定（`deny` 最先）；`yolo` 下结果为「工具自带策略 ?? 用户策略 ?? allow」 | 打包源码策略函数 |
 | 需要确认时调用 `ui.select(<标题>, ["Approve","Deny"])`，标题首行 `Allow tool: <name>`，与工具档无关 | 打包源码 |
-| RPC `set_model{provider, modelId}`：在可用模型里按 `provider` 与 `id` 精确查找，找不到应答失败 `Model not found: …`；找到则 `setModel`，它向会话文件追加一条模型变更记录、并把推理强度重置为该模型的缺省 | 打包源码 |
+| RPC `set_model{provider, modelId}`：在可用模型里按 `provider` 与 `id` 精确查找，找不到应答失败 `Model not found: …`；找到则 `setModel`，它向会话文件追加一条模型变更记录、并把推理强度重置为该模型的缺省（实机上看到的是强度被带过去，是否重置未判定——见「实机核对结果」） | 打包源码 |
 | RPC `set_thinking_level{level}`：RPC 层不校验 `level`；`auto` 走单独分支，其余取值按模型支持的强度就近取低；向会话文件追加一条强度变更记录；不写全局设置 | 打包源码 |
 | `get_state` 应答含 `model` 与 `thinkingLevel` | 打包源码 |
 | 强度序 `minimal < low < medium < high < xhigh < max`；`--thinking` 接受 `off`、这六档与 `auto`；设置项 `defaultThinkingLevel` 缺省 `high` | 打包源码、`--help` |
-| 模型支持的强度取自模型条目的 `thinking.efforts`，条目不带它时为空集 | 打包源码 |
+| 模型支持的强度取自模型条目的 `thinking.efforts`；条目不带它时 omp 按模型 id 自行得出一个集合（不是空集，也不一定是全部六档：`deepseek-v4.1-flash` 为 `[low, high, max]`） | 打包源码；后半句为实机核对结果 |
 | RPC `prompt` 只带 `message` 与 `images`，没有通用附件字段；RPC 命令表里没有任何审批档位相关的命令 | 打包源码 |
 
 以上是读出来的，不是跑出来的；凡设计依赖其中一条的，都在对应决定里写了「先核对」与退路，核对任务是 tasks 组 1。
@@ -137,9 +137,9 @@
 
 - `approvalMode` = `min(approval_mode ?? "write", APPROVAL_MAX_MODE)`（按 D1 的次序）。
 - `modelId` = `model_id` 在白名单里则取它，否则取缺省模型。
-- `reasoningEffort` = 该模型不支持推理时为 `null`；否则 `reasoning_effort` 在该模型的可选强度里则取它，否则取该模型的缺省强度（D9）。
+- `reasoningEffort` = 该模型不支持推理时为 `null`；否则 `reasoning_effort` 非 NULL 就取它（CHECK 保证它是七个强度名之一），为 NULL 取该模型的缺省强度（D9）。不因它不在该模型的可选强度里而回落到缺省：原样经 `set_thinking_level` 交给 omp，由 omp 就近取低（owner 2026-10-07 的决定 O3）。
 
-这样：既有会话（三列为 NULL）读成 `write`、缺省模型、缺省强度，行为与今天相同；管理员调低最高档或从白名单里拿掉一个模型，下一次派发就生效，界面显示的也是夹取后的值；不需要回填、不需要「配置变了去改库」的任务。
+这样：既有会话（三列为 NULL）读成 `write`、缺省模型、缺省强度，行为与今天相同；管理员调低最高档或从白名单里拿掉一个模型，下一次派发就生效，界面显示的档位与模型也是夹取 / 回落后的值（强度显示的是存储的值，omp 可能把它取低）；不需要回填、不需要「配置变了去改库」的任务。
 管理员把上限调回去时，原始选择重新生效——用户确实选过它，这是有意的。
 
 否决：入库时就夹取（配置一变库里的值就成了假话，还得回写）；列带缺省值（既有迁移的先例是可空无缺省，且缺省值会把「没选过」和「选了缺省」混为一谈）。
@@ -179,17 +179,17 @@
 ### D7 模型白名单：一个 JSON 环境变量，缺席时等于今天
 
 `MODEL_CATALOG` 是一个 JSON 数组（1 到 32 项），每项 `{id, name?, reasoning?, vision?, efforts?}`：`id` 即发给上游的模型名；`name` 是显示名，缺省等于 `id`；`reasoning`、`vision` 缺省 `false`；
-`efforts` 只在 `reasoning` 为真时可给，是 `minimal…max` 的一个非空、不重复、按强度升序的子集，表示该模型支持的强度。配置错误（非 JSON、不是数组、空、超过 32 项、多余键、类型不对、`id` 重复）启动失败，错误只点名 `MODEL_CATALOG`。
+`efforts` 在 `reasoning` 为真时**必须**给、不为真时不得给，是 `minimal…max` 的一个非空、不重复、按强度升序的子集，表示该模型支持的强度。配置错误（非 JSON、不是数组、空、超过 32 项、多余键、类型不对、`id` 重复、推理模型不带 `efforts`、非推理模型带 `efforts`）启动失败，错误只点名 `MODEL_CATALOG`。
 
-- **与旧配置的关系**。`MODEL_CATALOG` 未设置：白名单恰一项 `{id: MODEL_ID, name: MODEL_ID, reasoning: MODEL_REASONING, vision: false}`，托管 `models.yml` 与今天逐字节相同。
+- **与旧配置的关系**。`MODEL_CATALOG` 未设置：白名单恰一项 `{id: MODEL_ID, name: MODEL_ID, reasoning: MODEL_REASONING, vision: false}`，不带 `efforts`，托管 `models.yml` 与今天逐字节相同（没有 `thinking` 键）；「推理模型必带 `efforts`」只约束 `MODEL_CATALOG` 的元素，不约束这一项。
   `MODEL_CATALOG` 已设置：`MODEL_ID` 若设置须等于某一项的 `id`，表示缺省模型，未设置则第一项是缺省；`MODEL_REASONING` 不得同时设置（每个模型的推理声明已在白名单里，两处都写只会打架），同设即启动失败并点名 `MODEL_REASONING`。
 - **为什么是环境变量而不是配置文件**。http-service-skeleton 规定环境变量是唯一配置源；为一张小表引入配置文件要同时引入路径解析、权限与重载语义。JSON 写在环境变量里不好看，但部署用的 `.env` / systemd unit / compose 都放得下，校验一次即可。
 - **托管 `models.yml`**。写出器改收模型数组，按白名单次序各写一条；每条仍是 `id`、`name`、`contextWindow: 128000`、`maxTokens: 8192` 与既有的 `reasoning` / `compat` 两键；
-  白名单项带 `efforts` 时追加 `thinking: {mode: effort, efforts: […]}`，`vision` 为真时追加 `input: [text, image]`。未带 `efforts`、`vision` 为假的条目不出现这两个键，所以单模型缺省配置的输出不变。
+  白名单项带 `efforts` 时追加 `thinking: {mode: effort, efforts: […]}`，`vision` 为真时追加 `input: [text, image]`。未带 `efforts`、`vision` 为假的条目不出现这两个键。来自 `MODEL_CATALOG` 的推理模型必带 `efforts`，所以它们的条目一律有 `thinking`；不带 `thinking` 的推理条目只有 `MODEL_CATALOG` 未设置时的那一项，单模型缺省配置的输出因此不变。
 - **代理强制白名单**（owner S-22）：见 D18。白名单因此有三个消费者——界面与会话设置校验、托管 `models.yml`、模型代理——都来自 `resolveModelCatalog` 的同一份结果。
 
-**先核对**（tasks 1.5）：官方二进制读取带 `thinking` 与 `input` 两键的托管条目后，`get_available_models` 里该模型的 `thinking.efforts` 与 `input` 与所写一致；不带 `thinking` 的推理模型条目，`get_available_models` 报出的强度集合是什么。
-**退路**：omp 不接受其中某个键 → 该键不写进 `models.yml`（`efforts` 仍用于界面与服务端校验，`vision` 退化为仅展示），先改 model-proxy 的 delta 再实现；不带 `thinking` 的推理模型强度集合为空 → 写出器对每个推理模型都写 `thinking`（未声明 `efforts` 时写全部六档），单模型缺省配置的「字节不变」一句随之改为「多出 `thinking` 块」，同样先改规格。
+**核对结果**（tasks 1.5，见「实机核对结果」）：带 `thinking` 与 `input` 两键的托管条目被官方二进制接受，`get_available_models` 原样回显；不带 `thinking` 的推理模型条目报出的强度集合不是空集、也不是全部六档，而是 omp 按模型 id 得出的（`deepseek-v4.1-flash` 为 `[low, high, max]`）。原先写的两条退路（某个键不被接受；集合为空时写出器一律补全六档）都没有用上。
+**owner 决定（2026-10-07）**：`MODEL_CATALOG` 里的推理模型必须声明 `efforts`（O2），写出器照此为它们写 `thinking`；`MODEL_CATALOG` 未设置的旧式单模型配置原样不动（O2-legacy），它的强度集合由 omp 自己定，界面与 omp 可能不一致的后果见 D9。
 
 否决：先看 `get_available_models` 返回什么再决定要不要白名单（#906 评论里的想法）——它返回的就是 `models.yml` 里宿主自己写的条目，绕一圈回到原地；显示名、能力标签也不该靠起一个 omp 进程来查。
 
@@ -197,27 +197,30 @@
 
 按 grill 第 20 行，用运行期 RPC：`SessionRuntime.command` 在既有三种帧之外再接受 `set_model{provider, modelId}` 与 `set_thinking_level{level}`，规则同其它相关命令（独立 id、只被匹配的 `response` 结算、与 prompt 互斥、失败为 `AgentUnavailableError`）。
 
-- **次序固定**：先 `set_model` 后 `set_thinking_level`——`setModel` 会把强度重置为新模型的缺省，反过来发强度会被冲掉。
-- **每个 generation 的第一次派发总是应用**，不管 argv。spawn 的 `--model` 也改为按会话取值（冷启动总得有个模型，取对的那个），但 `--resume` 时 omp 是以 argv 为准还是以会话文件里的模型变更记录为准没有实测，所以不依赖它：新进程的第一条 prompt 之前无条件发 `set_model`（支持推理的再发 `set_thinking_level`）。同一个 generation 上之后的派发只在有效值变了才发。
+- **次序固定**：先 `set_model` 后 `set_thinking_level`。打包源码读起来 `setModel` 会把强度重置为新模型的缺省；实机核对看到的是强度被带了过去（`off` 仍是 `off`），omp 是否在某些情形下重置未判定。这一次序在两种情形下都无害，并使每个 generation 上的强度都是显式设置的。
+- **每个 generation 的第一次派发总是应用**，不管 argv。spawn 的 `--model` 也改为按会话取值（冷启动总得有个模型，取对的那个），实机核对的结论是 `--resume` 时模型以 argv 为准（会话文件里的模型变更不被恢复），强度则是会话文件里最后一次设置的旧值（`PATCH` 只写库，它可能已过时），所以两者都不依赖：新进程的第一条 prompt 之前无条件发 `set_model`（支持推理的再发 `set_thinking_level`）。同一个 generation 上之后的派发只在有效值变了才发。
 - **生成中改选择**：`PATCH` 只写库；`command` 与在途回合互斥，本来也发不出去。下一次派发时对齐——「下一条消息起生效」。历史上下文在 omp 的会话里，换模型不清空。
 - **失败**：`set_model` 应答失败（例如白名单与 `models.yml` 不一致）→ 这次派发按 `agent_unavailable` 失败并补偿。
 - **不持久到 omp 的全局设置**：RPC 的这两个命令不带持久化参数（读到的实现如此），各会话共用的托管 `HOME` 不被某个会话的选择污染。核对任务里一并确认。
 
-**先核对**（tasks 1.4）：(a) `set_model` 后 `get_state.model` 为所选；(b) `set_thinking_level` 的每个取值后 `get_state.thinkingLevel` 是什么（含模型不支持的取值、`off`、`auto`）；(c) 两个命令后托管 `HOME` 下的全局配置文件没有变化；
-(d) 换模型后的下一个回合，受控上游收到的请求体 `model` 为新模型且带着此前的对话历史；(e) 新进程以 `--resume` 启动、未发 RPC 时 `get_state` 报的模型与强度（决定「每个 generation 总是应用」能否放宽——放宽不在本 change）。
-**退路**：RPC 在 rpc 模式下不生效或不可用 → 模型与强度并入 D2 的机制：slot 记下启动时的模型与强度，不同就重启，argv 带 `--model` 与 `--thinking`；先改 chat-sessions / omp-runtime 的 delta 再实现。
+**核对项**（tasks 1.4；结果见「实机核对结果」：(a)(c)(d) 成立，(b) 的结论是 omp 不拒绝任何取值、对不在模型强度集合内的取值就近取低，`auto` 被报成 `high`——owner 据此作出 O1 与 O3）：(a) `set_model` 后 `get_state.model` 为所选；(b) `set_thinking_level` 的每个取值后 `get_state.thinkingLevel` 是什么（含模型不支持的取值、`off`、`auto`）；(c) 两个命令后托管 `HOME` 下的全局配置文件没有变化；
+(d) 换模型后的下一个回合，受控上游收到的请求体 `model` 为新模型且带着此前的对话历史；(e) 新进程以 `--resume` 启动、未发 RPC 时 `get_state` 报的模型与强度（结论：无条件应用是必要的，不能放宽——argv 的模型压过会话文件里记录的模型变更）。
+**退路**（未用上——RPC 在 rpc 模式下生效）：RPC 在 rpc 模式下不生效或不可用 → 模型与强度并入 D2 的机制：slot 记下启动时的模型与强度，不同就重启，argv 带 `--model` 与 `--thinking`；先改 chat-sessions / omp-runtime 的 delta 再实现。
 
 否决：模型也一律靠重启进程（档位、模型、强度三项统一走 argv）——更少的活动部件，但每次换模型多一次进程启动，且与 grill 第 20 行的事实核对结论相反；作为上面的退路保留。
 
 ### D9 强度档位集合与缺省
 
-可选强度（界面列出、服务端接受的集合）按模型算：不支持推理 → 空；支持推理 → `off`，加上白名单项声明的 `efforts`（未声明则全部六档 `minimal, low, medium, high, xhigh, max`），加上 `auto`。这就是「按 omp 支持的全部档位列出」——八个名字都来自二进制；声明了 `efforts` 的模型只列它真支持的，避免选了 `xhigh` 实际被 omp 悄悄降到 `high`。
+强度的取值域是七个名字：`off`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`。`auto` 不是合法取值（O1：实机上它不作为一个状态保留，被报成 `high`）——库的 CHECK、DTO 解析、`GET /api/composer/options` 的 `efforts`、界面名与菜单里都没有它。
+可选强度（界面列出的集合）按模型算：不支持推理 → 空；支持推理 → `off` 加上白名单项声明的 `efforts`。`MODEL_CATALOG` 里的推理模型必带 `efforts`（D7），界面因此只列它真支持的，避免选了 `xhigh` 实际被 omp 悄悄降到 `high`。
+`MODEL_CATALOG` 未设置时的那一项不带 `efforts`，它的可选强度是 `off` 加全部六档 `minimal, low, medium, high, xhigh, max`、缺省 `high`。这一项上宿主不向 omp 声明强度集合，omp 按模型 id 自己得出一个并静默夹取（实机核对结果：`deepseek-v4.1-flash` → `[low, high, max]`，`minimal` / `medium` 被取成 `low`，`xhigh` 被取成 `high`），所以界面显示的强度可能与 omp 实际使用的不同；要两者一致，管理员改用 `MODEL_CATALOG` 并给出 `efforts`（O2-legacy）。
+服务端**不**按可选强度校验（O3）：创建与修改只检查取值是七个名字之一、且所对的模型支持推理；有效值解析也不因取值不在可选强度里而回落到缺省（D3）。集合之外的取值原样存储、原样经 `set_thinking_level` 发给 omp，由 omp 就近取低；会话视图显示的是存储的值，界面的强度按钮照常显示它的界面名，只是菜单里没有一项被选中。
 缺省强度：`high` 在该模型的可选强度里就是 `high`（omp 设置项 `defaultThinkingLevel` 的缺省），否则取声明的 `efforts` 里不高于 `high` 的最高一档，再没有就取声明的第一档（与 omp 就近取低的规则同向）。
-界面名：`关闭`、`极低`、`低`、`中`、`高`、`很高`、`最高`、`自动`。
+界面名（七个）：`关闭`、`极低`、`低`、`中`、`高`、`很高`、`最高`。
 
 组 1 对强度的核对只看 omp 自己报告的状态（`set_thinking_level` 之后的 `get_state.thinkingLevel`），**不**核对请求体里的 reasoning 字段——那取决于 `compat` 与上游方言，属于 Open Questions 1 的验收期观察。
 
-未实测的部分与核对见 D8 的 (b)：若 omp 对某个取值的实际行为与名字不符（例如 `auto` 在自定义模型上无效），先把该取值从可选集合里拿掉并改规格。
+本节原先留给核对的部分（D8 的 (b)）已有结论并由 owner 于 2026-10-07 定下：`auto` 的实际行为与名字不符，已从取值域移除（O1）；未声明 `efforts` 的推理模型报出的不是全部六档，`MODEL_CATALOG` 因此要求推理模型声明 `efforts`、旧式单模型配置保持原样（O2、O2-legacy）；集合之外的取值服务端放行、由 omp 夹取（O3）。见「实机核对结果」的「owner 决定」。
 
 ### D10 上传的传输：原始字节流，一次请求一个文件
 
@@ -301,7 +304,7 @@ handler 的次序（每一步失败即止，括号里是结果）：
   只有一个可选档位时仍显示（只读地告诉用户现在是什么档），菜单里只有那一项。
 - **模型与强度**。模型按钮文字是显示名（过长截断，完整名在 `title`），可访问名 `模型：<名>`；菜单每项带能力标签 `推理` / `看图`。强度按钮只在当前模型支持推理时渲染，可访问名 `推理强度：<档位名>`。
 - **生成中可改**：三个控件不随输入框锁定而禁用（owner 决定 4、14）；只在自己的提交在途时禁用。提交失败在输入框上显示信封文案，显示值回到服务端的值。
-- **已选会话**：选择即 `patchSession`，以响应里的会话视图为准（换模型后强度可能被服务端解析成另一个值）。**欢迎页**：选择只改页面内存里的值，初值取 `options.defaults`；首次发送时只带用户在欢迎页实际改过的键，没碰的键不发、由服务端继承——`defaults` 是夹取后的有效值，原样发回会把账号存着的原始选择覆盖成夹取值，D3「上限调回后原始选择重新生效」就不成立了。
+- **已选会话**：选择即 `patchSession`，以响应里的会话视图为准（换模型后强度可能随之变化或消失：原始强度为空时取新模型的缺省，新模型不支持推理时为 `null`）。**欢迎页**：选择只改页面内存里的值，初值取 `options.defaults`；首次发送时只带用户在欢迎页实际改过的键，没碰的键不发、由服务端继承——`defaults` 是夹取后的有效值，原样发回会把账号存着的原始选择覆盖成夹取值，D3「上限调回后原始选择重新生效」就不成立了。
 - **options 取不到**：三个控件都不渲染（不摆占位），其余照常；下次进入欢迎态或选中会话时重取。服务端仍按库里的值执行，界面只是暂时看不到。
 - **窄屏（≤760px）**：工具行允许换行；左组在第一行，右组（模型、强度、`生成中`、`停止` / `发送`）放不下时整体落到第二行并靠右；工作空间标签与模型名各有最大宽度并截断。
   `发送` / `停止` 始终完整在视口内、文档没有横向滚动（既有走查断言保持）。不改成只有图标：三个中文档位名都只有四个字。
@@ -384,7 +387,7 @@ C 新增而本 change 没有修改的条文（temporary-workspaces、workspace-s
 以下各项 owner 没有逐条拍板，由起草者在 grill 结论的范围内定下，规格与任务已按此写死；建 Epic 时列给 owner 知悉，owner 改判时各自只动所注明的一处：
 
 1. **500 MB 取为 500 MiB**：`UPLOAD_MAX_BYTES` 缺省 524288000 字节，与既有的 1 MiB / 10 MiB 预览上限同一口径（D10；改判只改缺省值）。
-2. **白名单项的 `efforts` 可把强度列表收窄**：未声明时列全部八项，声明后只列 `off`、所声明的子集与 `auto`（D9；grill 第 15 行「按 omp 支持的全部档位列出」的细化）。
+2. **白名单项的 `efforts` 决定强度列表**：`MODEL_CATALOG` 里的推理模型必须声明 `efforts`，界面只列 `off` 与所声明的子集；`MODEL_CATALOG` 未设置的旧式单模型配置列 `off` 与全部六档，共七项（D9；grill 第 15 行「按 omp 支持的全部档位列出」的细化，经 owner 2026-10-07 的决定 O1、O2 修订）。
 3. **审计的三条边界**：创建时只有「原始档位非 NULL 且有效档位偏离缺省档」才写 `session.permission`；fork 继承不写；模型与强度的变化不写（D6）。
 4. **只发附件、不发文字的配套细节**。原先这一条是「只发附件不发字不支持：`message` 仍须非空」；owner 2026-10-06 改判为**允许**（D12，owner 拍板的只有「允许」本身及其边界：空文本带通过校验的附件即受理，空文本无附件仍拒绝，`message` 键仍须出现且为字符串）。随之由起草者按最小改动定下的七点，owner 改判时各自只动所注明的一处：
    - 4a. **落库 `content` 是空串**：沿用现有规则（去掉首尾空白一次，存去掉之后的文本），不发明新的规范化；不存 NULL，也不保留纯空白原文（D12；chat-sessions「REST prompt 受理与补偿」、message-attachments「附件落库与快照」）。
@@ -437,11 +440,13 @@ C 新增而本 change 没有修改的条文（temporary-workspaces、workspace-s
 - **`全部自动` 是 Critical Path 上的放宽**：助手不经确认执行命令。缓解：管理员可封顶（`APPROVAL_MAX_MODE`）；选择时确认；常驻警示色；每次变化与每个非缺省档的新会话都有审计；omp 以独立 uid 运行（ADR-0010），能触及的范围不变。组 7、9 标注白盒审查。
 - **`全部自动` 会被新会话继承**（owner S-21，已定）。缓解：警示色在欢迎页就可见；创建时写审计；管理员可用 `APPROVAL_MAX_MODE` 整体关掉这一档。
 - **`always-ask` 下确认很多且 60 秒自动允许**：每次写文件都弹卡，无人值守时等于 60 秒延迟后的全部允许。这是 owner 决定 3 的原意（各档相同），在档位说明文字里不夸大它的保护力。
-- **未实测的 omp 行为**（D2、D7、D8、D9、D12 的「先核对」）：若核对不成立，退路都要先改规格。缓解：核对是组 1，其它组在它之后；每条退路已写明。
+- **未实测的 omp 行为**（D2、D7、D8、D9、D12 的「先核对」）：若核对不成立，退路都要先改规格。缓解：核对是组 1，其它组在它之后；每条退路已写明。（核对已完成：D7、D8 (b)、D9 三项不成立，owner 于 2026-10-07 作出决定，规格已修订——见「实机核对结果」。）
+- **旧式单模型配置下显示的强度与 omp 实际使用的不一致**（D9、O2-legacy）：omp 按模型 id 自定强度集合并静默夹取。可接受——owner 的决定；要一致就配置 `MODEL_CATALOG` 并给出 `efforts`，部署文档写明。
+- **集合之外的强度被放行**（O3）：直接调 API 可以存入一个模型未声明的强度名，界面显示它而 omp 用的是取低后的一档。可接受——owner 的决定；取值仍限于七个名字，界面菜单只列声明的强度。
 - **只发附件的消息的 wire 文本以换行开头**（D12）：omp 若不原样保存它，这类消息的重新生成、分叉与撤回对位全部 502。缓解：核对项 (g)（任务 1.8）在组 12 之前跑，退路已写明。
 - **只发附件的会话标题是文件名**：`image.png`、`截图.png` 这类名字区分度低。可接受——用户可以改名，且有文字时规则不变。
 - **换档后的第一条消息变慢**：多一次进程启动。可接受（与空闲回收后的第一条相同）。
-- **每个新进程无条件 `set_model`**：会话文件里每个 generation 多一两条变更记录。无害；核对 (e) 之后可以放宽，但不在本 change。
+- **每个新进程无条件 `set_model`**：会话文件里每个 generation 多一两条变更记录。无害；核对 (e) 的结论是这一步必要、不能放宽（`--resume` 时模型以 argv 为准，强度是会话文件里的旧值）。
 - **代理强制白名单会拦住 omp 自己发的请求**（D18）：若真实 omp 在某个内部角色上发出 `models.yml` 之外的模型名，该角色的请求会被 400。缓解：任务 1.4 的核对项 (f) 在官方二进制上记录每一个请求的 `model`，其中 `/compact` 一步须确有上游请求（零观察按不成立）；不成立即停下回到 owner，不带着一个会打断 omp 的代理上线。
 - **代理的 JSON 解析与上游的不一致**：重复的 `model` 键在不同解析器下取值不同。缓解：重复键一律拒绝（规格与变异证据都钉住）；其余差异（非 UTF-8、超深嵌套）不改变「放行的字节里顶层 `model` 唯一且在白名单内」这一事实。
 - **白名单按全局而不按会话**：会话 A 的 bearer 可以请求白名单里会话 A 没选的另一个模型。这是 S-22 字面的范围（Non-Goals），费用边界仍是管理员给出的清单。
@@ -475,7 +480,7 @@ C 新增而本 change 没有修改的条文（temporary-workspaces、workspace-s
 
 没有卡住任何 task 或 requirement 的开放项。仅余一条验收期的观察项，不影响实现：
 
-1. **推理强度的 `auto` 与 `off` 在所配上游上的实际效果**。组 1 只核对 omp 报告的状态与发出的请求体，不核对真实模型的行为；由 owner 在验收时对真实上游确认（任务 15.4 的清单行）。结论若是某个取值在该上游无效，改法是管理员在 `MODEL_CATALOG` 里用 `efforts` 收窄，不需要改代码。
+1. **推理强度 `off` 在所配上游上的实际效果**（`auto` 已按 owner 2026-10-07 的决定从取值域移除，不再是观察项）。组 1 只核对 omp 报告的状态与发出的请求体，不核对真实模型的行为；由 owner 在验收时对真实上游确认（任务 15.4 的清单行）。各强度档在该上游是否有效同样在验收时看；某一档无效时，改法是管理员在 `MODEL_CATALOG` 里用 `efforts` 收窄，不需要改代码（`off` 恒在可选强度里，它若无效需另行改规格）。
 
 原开放项的去向：1（代理是否强制白名单）→ owner S-22，D18；2（临时空间寻址）→ D13，引用 C 的 temporary-workspaces；3（`.part` 清扫）→ Non-Goals；4（`全部自动` 继承）→ owner S-21，D4；5（每条消息的附件数上限）→ owner S-23，D12；6（撤回与附件）→ owner S-24，D19。
 
@@ -503,7 +508,7 @@ C 新增而本 change 没有修改的条文（temporary-workspaces、workspace-s
 
 官方 omp v18.0.10 二进制对照用例的结论。权威输出是 CI uid-isolation job（linux-x64）：D2 与 (g) 见 PR #1139、PR #1151 各自的 job 输出（(g) 为 run 37577719753）；D7、D8、D18 见 PR #1159 的 run 37604867418（四个对照文件 40 例通过、无 skip；`omp-official-model-commands.test.ts` 的每个观察值以 `[model-commands] ` 行打印）。本机 darwin-arm64 的结果与之逐项相同（`/compact` 输出里的 token 数除外）。
 
-**三项不成立，待 owner 决定；在那之前本节只记结论，规格、任务与受影响 issue 的正文都还没有按退路修订，组 7 之后的 issue 不开工。**（(f) 成立，组 20 的前提不受影响。）
+**三项不成立；owner 已于 2026-10-07 作出决定（见本节末的「owner 决定」），本 change 的规格、设计与任务已据此修订，受影响 issue 的正文另行同步。**（(f) 成立，组 20 的前提不受影响。）
 
 ### 逐项结论
 
@@ -559,8 +564,18 @@ C 新增而本 change 没有修改的条文（temporary-workspaces、workspace-s
 - `--no-title` 下第一个回合确无标题请求：工具轮的两条主请求之外的请求数为 0。
 - 观察、不作结论：`set_model` 之后 omp 自己的数据目录（`XDG_DATA_HOME` 下的 `omp/agent.db`，不在托管 `HOME` 的配置里）有写入；本机探针看到的是一张模型使用记录表多了一行，设置表没有变化。它是各会话共用的存储，但不是设置项。
 
-### 待 owner 决定
+### owner 决定（2026-10-07）
 
-1. `auto`：照 D9 末段把它从可选集合里拿掉，还是保留并在界面上说明它由 omp 解析成一个具体档位（两个模型上都是 `high`；用例区分不开「缺省档」与「不高于 `high` 的最高档」）？
-2. 未声明 `efforts` 的推理模型的可选强度：让写出器对每个推理模型都写 `thinking`（未声明时写全部六档——D7 为「集合为空」写的退路，是否对「非空但不是六档」同样有效，需要再跑一次对照用例确认 omp 接受并照此回显），还是界面与服务端校验改按 omp 为该 id 报的集合？
-3. 受影响的规格与 issue 在决定之后改：model-selection「模型与强度从下一条消息起生效」、model-proxy「托管 models.yml」（「单模型时字节不变」一句可能要改）、design D7 / D8 / D9，以及任务组 3、7 与依赖它们的 issue 正文。
+针对上面三项不成立，owner 作出四点决定；规格、设计正文与任务已据此修订。
+
+- **O1 — 移除 `auto`。** 推理强度的取值域是七个名字 `off`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`；`auto` 在任何地方都不再是合法取值（迁移 040 / 041 的 CHECK、DTO 解析、`GET /api/composer/options` 的 `efforts`、界面名与菜单）。对照用例仍对 `auto` 发 `set_thinking_level` 并记录结果，只作记录。
+  修订：model-selection「推理强度集合」「模型与推理强度控件」「模型与强度从下一条消息起生效」的真实 omp 场景措辞；session-composer-settings「迁移 040 会话输入框设置列」「有效值解析」「创建会话时的设置与继承」「修改会话设置」「输入框选项端点」；chat-web「API 客户端扩展」；session-sidebar「会话 DTO 严格解析」；chat-harness 走查第 3 步（菜单七项）；proposal；D9、D17 第 2 项、Open Questions 1。
+- **O2 — `MODEL_CATALOG` 里的推理模型必须声明 `efforts`。** `reasoning: true` 而不带 `efforts` 的元素是配置错误，启动失败并只点名 `MODEL_CATALOG`；`reasoning` 不为真时仍不得带 `efforts`。托管 `models.yml` 的写出器因此为每个来自 `MODEL_CATALOG` 的推理条目写 `thinking: {mode: effort, efforts: […]}`。
+  修订：model-selection「模型白名单配置」（条文、多模型场景的样例、非法清单）；model-proxy「托管 models.yml」（条文与「Several models in whitelist order」场景）；session-composer-settings 里共用同一份三模型样例的场景；D7。
+- **O2-legacy — 旧式单模型配置原样不动。** `MODEL_CATALOG` 未设置时白名单是 `{id: MODEL_ID, name: MODEL_ID, reasoning: MODEL_REASONING, vision: false}` 一项，不带 `efforts`；托管 `models.yml` 与今天逐字节相同（没有 `thinking` 键）。该项支持推理时可选强度为 `off` 加全部六档、缺省 `high`。omp 对这一项按模型 id 自定强度集合并静默夹取，界面显示的强度可能与 omp 实际使用的不同；要一致就配置 `MODEL_CATALOG` 并给出 `efforts`。
+  修订：model-selection「模型白名单配置」「推理强度集合」；model-proxy「托管 models.yml」（「Single-model output is unchanged」场景写明是 `MODEL_CATALOG` 未设置的情形）；session-composer-settings「输入框选项端点」的缺省配置场景；D7、D9。
+- **O3 — 集合之外的强度放行，由 omp 夹取。** 创建与 PATCH 对 `reasoningEffort` 只校验：是字符串、是七个名字之一、所对的模型支持推理（不支持推理的模型下任何 `reasoningEffort` 仍为 400，`null` 仍不合法）；不校验它是否在该模型的可选强度里。有效值解析对强度改为：模型不支持推理 → `null`；否则原始值非 null 取原始值，为 null 取该模型的缺省强度——不再因取值在可选强度之外而回落。该值原样经 `set_thinking_level` 发给 omp，会话视图显示存储的值；界面菜单仍只列可选强度，当前值不在其中时按钮照常显示界面名、菜单没有选中项。欢迎态换模型时「原强度在新模型的 `efforts` 里则保留，否则取其 `defaultEffort`」的客户端规则不变。缺省强度规则不变。
+  修订：session-composer-settings「有效值解析」（规则与「夹取与回落」的期望值）、「创建会话时的设置与继承」「修改会话设置」（`xhigh` 对 `m3` 由 400 改为受理）；model-selection「推理强度集合」「模型与推理强度控件」；D3、D9。
+- **D8 的次序与 (e)。** 「先 `set_model` 后 `set_thinking_level`」的次序不变，理由改述：实机上看到强度被带了过去（`off` 仍是 `off`），omp 是否重置未判定，这一次序在两种情形下都无害并使强度在每个 generation 上显式。(e) 的结论：每个 generation 第一次派发的无条件应用是必要的（argv 的模型压过会话文件里记录的模型变更）。
+  修订：D8、Risks；omp-runtime「模型与推理强度命令」的依据一句。
+- 任务：组 2（白名单与两个纯函数）、组 3（写出器）、组 4（迁移 CHECK）、组 8（创建 / 修改校验与选项端点）、组 15（控件）与 1.6 的状态已按上述修订；依赖它们的 issue 正文另行同步。

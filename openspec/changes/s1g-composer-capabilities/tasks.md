@@ -51,7 +51,7 @@ Minimal mergeable slice: 0.1 一刀（如有差异才产生 PR）；0.2 随归�
   - RPC 发送：`SessionRuntime.command` 的联合类型（`server/src/sessions/omp/runtime.ts`）还没有 `set_model` / `set_thinking_level` / `get_available_models`（组 7 才加），对照用例以 `as never` 发送（先例 `server/test/omp-official-skills.test.ts`），**不改 `server/src`**。`success:false` 的应答在这一层表现为 `AgentUnavailableError`，拿不到 omp 的错误文本。
   - world：`support/omp-official.ts` 的 world 写死 `--model deepseek-v4.1-flash`。手写的 `models.yml` 须含 provider `workbuddy`、该 id 为**第一个**模型，格式照 `server/src/model-proxy/models-yml.ts`。
   - 工具轮：受控上游只在请求不含 tool 结果时才以工具调用开场（#1140），请求记录不解决这一点。「一个工具轮」因此必须是新会话的第一个回合；本文件**不用** `freshToolRounds`（它让 forwarder 裁掉历史，D8 (d) 的消息条数证据随之失效）。
-  - 期望表：两个模型各一张八行表（`off`、六档、`auto`）。成立口径见 1.6。
+  - 期望表：两个模型各一张八行表（`off`、六档、`auto`）。成立口径见 1.6。（`auto` 一行只作记录；它已按 owner 2026-10-07 的决定从取值域移除。）
   - 停下并报告（不改断言换绿）：`/compact` 主手段与备选都零请求；记录到两个 id 之外的 `model`；任一核对项不成立；`omp --version` 不是 `omp/18.0.10`。
 - [x] 1.5 同文件：带 `thinking: {mode: effort, efforts: [low, high]}` 与 `input: [text, image]` 的条目被 omp 接受，`get_available_models` 里该模型的这两项与所写一致；只写 `reasoning: true`、不带 `thinking` 的条目在 `get_available_models` 里报出的强度集合记入期望表（D7 核对项）。
   **CI**：把 `test/omp-official-model-commands.test.ts` 加进 `.github/scripts/ci-uid-isolation.sh` 的同一份清单，`scripts/test-ci-harness.sh` 的逐字断言同步。
@@ -62,7 +62,7 @@ Minimal mergeable slice: 0.1 一刀（如有差异才产生 PR）；0.2 随归�
   - 成立口径：D8 (b) / D9——对该模型可选集合里的每个取值 v，`set_thinking_level{v}` 之后 `get_state.thinkingLevel === v` 即成立；集合之外的取值只记录不判定。D7 后半——不带 `thinking` 的推理模型报出的强度集合为空 → 走 D7 已写的退路；非空但不是全部六档 → **停下回 owner**（D9「未声明则全部六档」的前提不成立，退路未写）。D8 (e) 只是观察值。
   - 任一项不成立：本 PR 只提交用例与结论并**停下报告**；对规格、任务与受影响 issue 正文的修订是 owner 确认之后的第二轮，不在同一次提交里。
   - 逐项结论同时回填 Epic #982 的「前置核对结论」。
-  **状态（2026-10-07）**：结论节已写进 design.md（PR #1159）。三项不成立（D8 (b) / D9 的 `auto`、未声明 `efforts` 时的夹取、D7 后半），规格修订待 owner 决定——本条在修订完成前不勾选。
+  **状态（2026-10-07）**：结论节已写；owner 于 2026-10-07 作出四点决定（见 design 「实机核对结果」的「owner 决定」），规格与任务已据此修订。
 - [x] 1.7 本地运行方式写进组 1 新增的各个对照测试文件（1.1 与 1.4 的两个；1.8 若另起了 `omp-official-attachment-only.test.ts` 则是三个）的文件头注释与 PR 描述：先 `make omp-fetch`（取官方 v18.0.10 二进制），再在 `server/` 下 `WORKBUDDY_OMP_TEST=1 OMP_BIN="$PWD/../var/omp/omp" npx vitest run test/omp-official-approval-modes.test.ts test/omp-official-model-commands.test.ts --coverage=false`（`OMP_BIN` 须是**绝对路径**——omp 以临时工作空间为 cwd 启动，仓库相对路径解析不到；1.8 没有另起文件，命令行就是这两个文件）；不带开关时这些文件整体 skip（`make test` 下如此），所以「本地 `make check` 绿」不代表核对被执行过——以 CI uid-isolation job 的输出为准。
 - [x] 1.8 以换行开头的文本是否被原样保存（design D12 核对项 (g)；只发附件的消息交给 omp 的文本就是附件后缀本身，以两个 U+000A 开头）。依赖 1.0（world）；写进 1.1 的文件 `server/test/omp-official-approval-modes.test.ts`（已在 1.3 加进 CI 清单，不再改 CI 脚本）或同目录新文件 `server/test/omp-official-attachment-only.test.ts`（新文件则照 1.3 的做法加进 `.github/scripts/ci-uid-isolation.sh` 的清单并同步 `scripts/test-ci-harness.sh` 的逐字断言）。
   用例：`plant` 在 cwd 预置 `uploads/a.txt`；以缺省档位启动，经 RPC 发一条 `prompt`，其 `message` 恰为 message-attachments「后缀的确切字节」对 `["uploads/a.txt"]` 给出的字符串（测试里按规格逐字写出，不依赖组 12 的 `attachmentSuffix`）；回合正常结束后断言：(1) `get_branch_messages` 最后一项的 `text` 与发出的 `message` 逐字节相等（开头两个换行都在）；(2) 对该条目 `branch{entryId}` 的应答 `text` 同样逐字节相等；(3) 该回合确实产生了一个 `user` 条目（列表长度比发之前多一）。对照：再发一条以普通文字开头、后接同一后缀的 prompt，同样三条断言（证明用例能区分「只裁开头」与「整体不保存」）。三条里任何一条不成立即 (g) 不成立，实际存下的文本以 `JSON.stringify` 的形式输出到测试日志，供 1.6 记录。不带 `WORKBUDDY_OMP_TEST=1` 时整体 skip（同 1.7）。
@@ -76,10 +76,10 @@ Minimal mergeable slice: 1.0 + 1.1 + 1.2 + 1.3 一刀（world 扩展与档位核
 
 - [x] 2.1 `server/src/agent-config.ts`（现 142 行）：`AgentSettings` 增 `approvalMaxMode`、`uploadMaxBytes`、`uploadMaxFiles`；`APPROVAL_MAX_MODE` 只接受 exact 三个字面量（缺省 `yolo`），两个上传键复用 `resolvePositiveInteger`（缺省 524288000 与 10）；错误只点名键。
   测试 `server/test/server-config.test.ts`（或同类新文件）：http-service-skeleton「四个新配置键的取值与非法值」的配置层部分（表驱动）。变异：把缺省 `yolo` 改成 `write`、放宽大小写 → 判红。
-- [ ] 2.2 新文件 `server/src/model-catalog.ts`（纯函数，不读环境以外的东西）：`resolveModelCatalog(env)` 按 model-selection「模型白名单配置」得出 `{models, defaultModelId}`；`selectableEfforts(model)` / `defaultEffort(model)` 按「推理强度集合」。`agent-config.ts` 调用它，`AgentSettings` 以 `modelCatalog` 取代对外的 `modelId` / `modelReasoning` 两个字段
+- [ ] 2.2 新文件 `server/src/model-catalog.ts`（纯函数，不读环境以外的东西）：`resolveModelCatalog(env)` 按 model-selection「模型白名单配置」得出 `{models, defaultModelId}`；`selectableEfforts(model)` / `defaultEffort(model)` 按「推理强度集合」（七个强度名，没有 `auto`；`MODEL_CATALOG` 里 `reasoning: true` 而不带 `efforts` 的元素启动失败并点名 `MODEL_CATALOG`；`MODEL_CATALOG` 未设置时的那一项不带 `efforts`，可选强度为 `off` 加全部六档）。`agent-config.ts` 调用它，`AgentSettings` 以 `modelCatalog` 取代对外的 `modelId` / `modelReasoning` 两个字段
   （既有读者 `pool.ts`、启动装配在组 3、7 改；本任务保留两个字段为白名单缺省模型的派生值，组 7 结束时删除——在任务 7.4 里核对已无读者）。
-  测试新文件 `server/test/model-catalog.test.ts`：三条配置场景（未配置等于单模型、多模型与缺省、全部非法情形各点名正确的键且不回显取值）与「可选强度与缺省强度」场景。变异：允许 `efforts` 乱序、允许与 `MODEL_REASONING` 并存、缺省强度恒取 `high` → 各判红。
-- [ ] 2.3 同文件再导出纯函数 `effectiveComposer(raw, config)`（session-composer-settings「有效值解析」；档位次序常量也在这里，供组 8、9 共用，不另写第二份）。测试并入 `model-catalog.test.ts`：「夹取与回落」的六组输入。变异：不夹取档位、白名单外的模型不回落 → 判红。
+  测试新文件 `server/test/model-catalog.test.ts`：三条配置场景（未配置等于单模型、多模型与缺省、全部非法情形各点名正确的键且不回显取值）与「可选强度与缺省强度」场景。变异：允许 `efforts` 乱序、允许与 `MODEL_REASONING` 并存、缺省强度恒取 `high`、放行 `MODEL_CATALOG` 里不带 `efforts` 的推理模型（当作全部六档）、给 `MODEL_CATALOG` 未设置时的那一项补上 `efforts`、可选强度里多出 `auto` → 各判红。
+- [ ] 2.3 同文件再导出纯函数 `effectiveComposer(raw, config)`（session-composer-settings「有效值解析」；档位次序常量也在这里，供组 8、9 共用，不另写第二份）。测试并入 `model-catalog.test.ts`：「夹取与回落」的七组输入。变异：不夹取档位、白名单外的模型不回落 → 判红；强度不在模型的可选强度内时回落到缺省 → `("yolo","m3","xhigh")` 一组判红（期望 `xhigh` 原样保留）；原始强度为 null 时不取缺省 → `(null,"m3",null)` 一组判红。
 - [ ] 2.4 入口级：`server/src/server.ts` 的纯配置 seam（`resolveServerConfig` 上方注释「消费十五项自有 key，agent 十一项」）在 C 之后已是十九项，本任务把注释与实现改到二十三项（agent 侧加四键，经 `resolveAgentSettings`）。
   测试 `server/test/server-config.test.ts`：http-service-skeleton「Pure source and compiled configuration identity」改写后的断言（twenty-three application keys，源码入口与编译入口一致）；`server/test/server-startup-order.test.ts`（或 `server-entry-silent.test.ts`，以既有覆盖「非法配置 nonzero 退出、stderr 恰一行」的那个文件为准）：「四个新配置键的取值与非法值」的非法值一半——四键各自的非法取值都在任何 filesystem / database / listen 副作用之前 nonzero 退出、application stderr 恰一行 generic failure record。
   合法四键启动后 `GET /api/composer/options` 的回报与「托管 models.yml 含三个模型条目」属于同一场景的另一半，分别在 8.5 与 3.2 落（两处各自点名本场景）。变异：某个新键的非法值被当作缺省放行 → 判红。
@@ -90,16 +90,16 @@ Minimal mergeable slice: 2.1 一刀（三个标量键，尚无读者，knip 以 
 ## 3. model-proxy — 托管 models.yml 多模型
 
 - [ ] 3.1 `server/src/model-proxy/models-yml.ts`：`writeManagedModelsYml(agentDir, {proxyBaseUrl, models})` 按 model-proxy delta「托管 models.yml」写出（每模型一条；`thinking` 在 `input` 之前；空数组拒绝且不动既有文件）。先把改动前对 `deepseek-v4.1-flash`、`reasoning` 真 / 假两种输出存成测试夹具，再改实现。
-  测试 `server/test/model-proxy-models-yml.test.ts` 与 `model-proxy-reasoning.test.ts`：既有用例改为传单模型白名单（断言不变）；新增「Several models in whitelist order」「Single-model output is unchanged」。变异：模型次序反转、`input` 写在 `thinking` 之前、单模型多写一个键 → 判红。
+  测试 `server/test/model-proxy-models-yml.test.ts` 与 `model-proxy-reasoning.test.ts`：既有用例改为传单模型白名单（断言不变）；新增「Several models in whitelist order」「Single-model output is unchanged」。变异：模型次序反转、`input` 写在 `thinking` 之前、带 `efforts` 的推理条目（场景里的 `m1`）不写 `thinking`、单模型多写一个键（含给 `MODEL_CATALOG` 未设置时的那一项补 `thinking`）→ 判红。
 - [ ] 3.2 启动装配（`server/src/server.ts` / `app.ts` 里调用写出器的那一处）：传入 `settings.modelCatalog.models`。测试：`server/test/server-startup-layout.test.ts` 的缺省启动仍恰一个模型条目且字节与夹具相同；新增一例三模型 `MODEL_CATALOG` 启动后文件含三条（http-service-skeleton「四个新配置键的取值与非法值」里「托管 models.yml 含三个模型条目」的一半）。
-  （组 1.5 的结论若要求推理模型一律写 `thinking`，先改 model-proxy delta 与本任务的「字节不变」断言。）
+  （组 1.5 的结论与 owner 2026-10-07 的决定：来自 `MODEL_CATALOG` 的推理模型必带 `efforts`，其条目一律有 `thinking`；`MODEL_CATALOG` 未设置的缺省启动不写 `thinking`，「字节不变」断言保持。三模型一例的 `MODEL_CATALOG` 须给每个推理模型写 `efforts`。）
 
 Suggested fixture level: expanded - 改一个被 omp 直接消费的文件格式；单模型输出逐字节不变是兼容性约束
 Minimal mergeable slice: atomic - 写出器签名变化必须与其唯一调用点同刀，否则类型检查不过
 
 ## 4. core/db — 迁移 040、041、042
 
-- [ ] 4.1 `server/src/core/db/migrations/040_chat_session_composer.sql`（session-composer-settings「迁移 040」）。测试新文件 `server/test/core-db-session-composer.test.ts`：新库与存量库、列约束、中途失败原子回滚三条场景；受信任迁移目录计数断言加一（`core-db-catalog.test.ts` 等处）。
+- [ ] 4.1 `server/src/core/db/migrations/040_chat_session_composer.sql`（session-composer-settings「迁移 040」）。测试新文件 `server/test/core-db-session-composer.test.ts`：新库与存量库、列约束（`reasoning_effort` 的 CHECK 是七个强度名，`auto` 被拒绝）、中途失败原子回滚三条场景；受信任迁移目录计数断言加一（`core-db-catalog.test.ts` 等处）。
 - [ ] 4.2 `041_account_composer_prefs.sql`（「迁移 041」）。测试并入同文件：建表与约束、随账号级联。
 - [ ] 4.3 `042_chat_message_attachments.sql`（message-attachments「迁移 042」）。测试并入同文件：新库与存量库、中途失败原子回滚。
 - [ ] 4.4 变异证据：去掉任一 CHECK、给列加缺省值、把 041 写成 `IF NOT EXISTS` → 对应场景判红。三个文件按编号顺序各自独立应用。本组在 C 的 037–039 合入之后才合入（见文首；不得让 040 先于 037–039 进入任何持久库）；测试断言 040「紧随上一个回执」而不是写死序数。
@@ -150,14 +150,14 @@ Minimal mergeable slice: 7.0 一刀（仅当需要腾行）；7.1（搬迁提交
   C 若把它们留在了 `store.ts`，本任务把这四个符号原样搬到新文件 `server/src/sessions/store-view.ts`（`store.ts` 改为从它导入并照旧再导出，调用方不动）。15 行的用途：8.1 的 `runtimeState` 三列（约 +4）与视图构造多收一个配置参数（约 +3）、12.2 的 `acceptPrompt` 多一个参数与一次调用（约 +4）。验证：`make check`，既有 store 与 REST 测试原样通过。
 - [ ] 8.1 只读半边——会话视图发出三键：新文件 `server/src/sessions/store-composer.ts`（本任务只放读取：三列的列名常量、行到原始值的映射）；`SESSION_COLUMNS` 加三列、`toSessionView`（在 8.0 确定的文件里）统一经 `effectiveComposer`（组 2.3）加上三键——只有一处构造函数，列表、创建、PATCH、快照、fork、undo 共用；`runtimeState` 增报三个原始列（供组 9）。此时三列恒为 NULL，视图恒为缺省有效值。
   测试新文件 `server/test/session-composer-store.test.ts`：三列为 NULL 的行读成缺省有效值；直接写库的原始值经夹取 / 回落后进入视图（session-composer-settings「夹取与回落」在视图层的两例）；`runtimeState` 报出原始列。chat-sessions「Session views carry the three composer settings」里创建与列表两个出口的键集断言。
-- [ ] 8.2 REST 创建：`store-composer.ts` 增写入——创建时三列的取值（请求值 / 最近选择 / NULL）、`account_composer_prefs` 的读取与 upsert（只改所给列）；经 `store.ts` 的既有事务原语组合进创建事务（`store-metadata.ts` 189 行有余量，创建的入口在那里；C 的临时空间创建在同一个事务里，次序不变）。`server/src/sessions/rest-metadata.ts`（209 行）的 `POST /api/sessions` 接受三键并校验（session-metadata「会话创建与空间绑定」、session-composer-settings「创建会话时的设置与继承」）；创建时的 `session.permission` 审计只按 session-permission-tier「档位变更审计」的条件（session-metadata 不另述条件）。
+- [ ] 8.2 REST 创建：`store-composer.ts` 增写入——创建时三列的取值（请求值 / 最近选择 / NULL）、`account_composer_prefs` 的读取与 upsert（只改所给列）；经 `store.ts` 的既有事务原语组合进创建事务（`store-metadata.ts` 189 行有余量，创建的入口在那里；C 的临时空间创建在同一个事务里，次序不变）。`server/src/sessions/rest-metadata.ts`（209 行）的 `POST /api/sessions` 接受三键并校验（session-metadata「会话创建与空间绑定」、session-composer-settings「创建会话时的设置与继承」；`reasoningEffort` 只校验是七个强度名之一且所对模型支持推理，不校验是否在该模型的可选强度内）；创建时的 `session.permission` 审计只按 session-permission-tier「档位变更审计」的条件（session-metadata 不另述条件）。
   测试新文件 `server/test/session-composer-rest.test.ts`（`session-rest.test.ts` 789 行不加）：「缺省与显式」「新会话沿用最近选择」（含继承 `yolo`：owner S-21）「非法取值」「创建时的审计」两段（含 `APPROVAL_MAX_MODE=always-ask` 下三次创建都不写）；`session-composer-store.test.ts` 加：upsert 只改所给列、事务回滚（审计失败时会话行、空间行与最近选择都不落）。
-- [ ] 8.3 REST 修改：`PATCH /api/sessions/:id` 的键集由 C 之后的四键 `{title, scene, pinned, archived}` 扩为七键；三键的校验、写列、更新最近选择、有效档位变化时的审计（同一事务）；不调用 supervisor、不向 omp 发帧。测试同文件：session-composer-settings「修改并回显有效值」「运行中修改不触及在途回合」（假 omp 真子进程：回合在途时 PATCH，假 omp 没有收到新帧、进程未退出、回合照常结束）「非法取值与越过最高档」「隔离」、session-permission-tier「修改与重复选择」「审计失败则修改不生效」「调低上界后既有会话被夹取」的视图部分。
+- [ ] 8.3 REST 修改：`PATCH /api/sessions/:id` 的键集由 C 之后的四键 `{title, scene, pinned, archived}` 扩为七键；三键的校验（`reasoningEffort` 的规则同 8.2，不按可选强度拒绝）、写列、更新最近选择、有效档位变化时的审计（同一事务）；不调用 supervisor、不向 omp 发帧。测试同文件：session-composer-settings「修改并回显有效值」「运行中修改不触及在途回合」（假 omp 真子进程：回合在途时 PATCH，假 omp 没有收到新帧、进程未退出、回合照常结束）「非法取值与越过最高档」「隔离」、session-permission-tier「修改与重复选择」「审计失败则修改不生效」「调低上界后既有会话被夹取」的视图部分。
   既有 `session-metadata-rest.test.ts` 里断言「PATCH 不写审计」的用例按 delta 改写为「除 `session.permission` 外不写审计」（偏离记录）；C 的 `archived` 用例原样通过。
 - [ ] 8.4 fork 继承：`server/src/sessions/store-branch.ts`（266 行）的 `copyForkHistory` / fork 事务复制三列原始值；不动最近选择、不写 `session.permission`。测试 `server/test/session-fork-metadata.test.ts`：session-metadata「继承三项设置」与 turn-control「分叉继承三项输入框设置」的存储与视图部分（argv 与帧序在组 9）；C 的「继承临时空间」「分叉共用临时空间且不带快照」原样通过。
 - [ ] 8.5 `GET /api/composer/options`：新文件 `server/src/sessions/rest-composer.ts`，由 sessions 模块注册（与 `rest-commands.ts` 同样的接法；装配处把 `modelCatalog`、`approvalMaxMode`、两个上传上限传进来）。测试同 8.2 的文件：「缺省配置」「封顶、白名单与账号各自的缺省」；http-service-skeleton「四个新配置键的取值与非法值」里合法四键启动后 `GET /api/composer/options` 的回报（编译入口，`server-startup-layout.test.ts`）。
 - [ ] 8.6 与 8.1 同刀：既有断言会话视图「恰十一键」的服务端测试与 `smoke/*.hurl` 断言改为十四键——session-metadata「会话视图扩展键」的两个改写场景、chat-harness「会话元数据 HTTP 冒烟」第 1、3 步（`count == 14` 与三键的缺省值）、turn-control / session-metadata 的「fork 响应的会话视图与列表一致」、C 的 undo 响应里的 `session`；`make smoke` 通过（web 已由组 5 接受新键）。
-- [ ] 8.7 变异证据，按刀分配——8.1 + 8.6：视图直接回显原始列（不夹取）→「调低上界」的视图部分与「夹取与回落」判红；少发一键 → 十四键断言判红。8.2：创建不继承最近选择 →「新会话沿用最近选择」判红；继承 `yolo` 的创建不写审计、或上界 `always-ask` 下的缺省创建写了审计 →「创建时的审计」判红。8.3：PATCH 不更新最近选择 →「沿用最近选择」判红；重复选择也写审计 →「修改与重复选择」判红；PATCH 调用了 supervisor 或向 omp 发帧 →「运行中修改不触及在途回合」判红。8.4：fork 不复制三列 →「继承三项设置」判红。
+- [ ] 8.7 变异证据，按刀分配——8.1 + 8.6：视图直接回显原始列（不夹取）→「调低上界」的视图部分与「夹取与回落」判红；少发一键 → 十四键断言判红。8.2：创建不继承最近选择 →「新会话沿用最近选择」判红；创建时按模型的可选强度校验 `reasoningEffort` →「新会话沿用最近选择」里 `{modelId:"m3", reasoningEffort:"xhigh"}` 的 201 判红；放行 `auto` →「非法取值」判红；继承 `yolo` 的创建不写审计、或上界 `always-ask` 下的缺省创建写了审计 →「创建时的审计」判红。8.3：PATCH 不更新最近选择 →「沿用最近选择」判红；PATCH 时按模型的可选强度校验 `reasoningEffort` →「修改并回显有效值」的 `{reasoningEffort:"xhigh"}` 一步判红；放行 `auto` 或不支持推理的模型下的 `reasoningEffort` →「非法取值与越过最高档」判红；重复选择也写审计 →「修改与重复选择」判红；PATCH 调用了 supervisor 或向 omp 发帧 →「运行中修改不触及在途回合」判红。8.4：fork 不复制三列 →「继承三项设置」判红。
 
 Suggested fixture level: expanded - 公共 API（会话视图键集、POST / PATCH body、新端点）、持久化、审计与账号隔离
 Minimal mergeable slice: 8.0 一刀（纯搬迁）；8.1 + 8.6 一刀（视图发出三键必须与全部「恰十一键」断言的改写同刀：键集一变所有会话视图断言同时变；此刀三键恒为缺省值）；8.2 一刀（创建入参、继承与创建审计——新测试文件里的新行为，不触动既有断言）；8.3 一刀（修改入参与修改审计）；8.4 一刀；8.5 一刀。8.7 的变异证据随各自的刀。此时设置可存可读但尚不影响进程（组 9）
@@ -254,10 +254,10 @@ Minimal mergeable slice: 14.1 + 14.2a + 14.2b + 14.2c 一刀（options 状态、
 
 ## 15. web — 模型与推理强度控件
 
-- [ ] 15.1 新文件 `web/src/features/chat/model-picker.tsx`（登记 `MIGRATED_AREAS`）：模型按钮与菜单（能力标签、截断与 `title`、`modelId` 不在 options 里时退为原文）、强度按钮与菜单（八个界面名的映射常量放在同一文件或 `composer-options.ts`）、提交与失败回退、两个控件互相禁用在途、不随输入框锁定禁用；欢迎态换模型时强度的重算规则。提交的 handler 与组 14 的权限共用一个 `patchComposer(sessionId, patch)`（不写第二份 fence 逻辑）。
+- [ ] 15.1 新文件 `web/src/features/chat/model-picker.tsx`（登记 `MIGRATED_AREAS`）：模型按钮与菜单（能力标签、截断与 `title`、`modelId` 不在 options 里时退为原文）、强度按钮与菜单（七个界面名的映射常量放在同一文件或 `composer-options.ts`，没有 `自动`；当前强度不在当前模型的 `efforts` 里时按钮照常显示其界面名、菜单没有选中项）、提交与失败回退、两个控件互相禁用在途、不随输入框锁定禁用；欢迎态换模型时强度的重算规则。提交的 handler 与组 14 的权限共用一个 `patchComposer(sessionId, patch)`（不写第二份 fence 逻辑）。
 - [ ] 15.2 测试新文件 `web/test/chat-model-picker.test.tsx`（整页挂载）：model-selection「模型与推理强度控件」五条场景。
-- [ ] 15.3 变异证据：不支持推理时仍渲染强度控件 → 判红；换模型后不以响应为准 →「切换模型与强度」的 `{m3, high}` 一步判红；欢迎态保留新模型不支持的强度 →「欢迎态的选择」判红；`reasoningEffort` 在不支持推理的模型下仍进创建 input → 判红。
-- [ ] 15.4 功能验收清单新增行（`待签`）：输入框下方右侧显示模型名与推理强度；点模型名切换（需要管理员配置多个模型，写明配置前只有一项）；强度的档位列表；不支持推理的模型不显示强度；生成中切换不影响正在生成的回答、下一条消息起生效；重新生成用当前选择；分叉出的会话沿用原会话的选择；新会话沿用上次的选择。
+- [ ] 15.3 变异证据：不支持推理时仍渲染强度控件 → 判红；换模型后不以响应为准 →「切换模型与强度」的 `{m3, high}` 一步判红；欢迎态保留新模型不支持的强度 →「欢迎态的选择」判红；当前强度不在 `efforts` 里时按钮退为空或原文、或菜单里有选中项 →「切换模型与强度」的 `{m3, xhigh}` 一例判红；`reasoningEffort` 在不支持推理的模型下仍进创建 input → 判红。
+- [ ] 15.4 功能验收清单新增行（`待签`）：输入框下方右侧显示模型名与推理强度；点模型名切换（需要管理员配置多个模型，写明配置前只有一项）；强度的档位列表（缺省单模型配置下七项，没有 `自动`；写明该配置下所选强度可能被 omp 取成相邻的一档，要一致需管理员配置 `MODEL_CATALOG` 的 `efforts`）；不支持推理的模型不显示强度；生成中切换不影响正在生成的回答、下一条消息起生效；重新生成用当前选择；分叉出的会话沿用原会话的选择；新会话沿用上次的选择。
 
 Suggested fixture level: compact - 独立的两个下拉控件，复用组 14 的提交路径与 options；无新的公共入口
 Minimal mergeable slice: atomic - 两个控件共用一份提交与强度重算逻辑，拆开会留下半个不可验收的状态；测试与清单行同刀
@@ -312,7 +312,7 @@ Minimal mergeable slice: 18.1 + 18.2 一刀（Hurl）；18.3 + 18.4 一刀（ui-
 - [x] 19.2 `docs/adr/0013-assistant-ui-frontend-rebuild.md`：加一节「增补（S1g）」——能力行五项与次序；「+」按钮改名与草稿非空时的行为；附件是应用层状态，不使用 runtime 的 attachments 适配器；拷入层零改动、六类修改不变；模型与强度按 #906 的 owner 决定。
 - [x] 19.3 `CONTEXT.md` 术语表新增两行：**权限档位 permission tier**（会话的工具审批档位，三档对应 omp 的 `always-ask` / `write` / `yolo`；不是账号权限、不是 KB 可见范围）；**附件 attachment**（随一条消息告知助手的工作空间文件路径；文件本身是工作空间里的普通文件：不随消息删除，也不随绑定正式工作空间的会话删除；临时空间随最后一个会话删除时、撤回连文件一起还原时，按工作空间的规则一并变化）。
   「审计」一行的边界说明补上档位变更与上传。`openspec/glossary.md` 若存在同名词条，保持单一来源（指向 `CONTEXT.md`）。
-- [ ] 19.4 部署与配置文档（`README.md` 的配置表或 `docs/` 下现行的部署页，先 grep `OMP_MAX_PROCESSES` 找到列环境变量的那一处）：四个新变量的含义、缺省值与示例（`MODEL_CATALOG` 给一个两模型的 JSON 示例，不含真实供应商密钥或地址）；`MODEL_CATALOG` 与 `MODEL_ID` / `MODEL_REASONING` 的关系；
+- [ ] 19.4 部署与配置文档（`README.md` 的配置表或 `docs/` 下现行的部署页，先 grep `OMP_MAX_PROCESSES` 找到列环境变量的那一处）：四个新变量的含义、缺省值与示例（`MODEL_CATALOG` 给一个两模型的 JSON 示例，不含真实供应商密钥或地址）；`MODEL_CATALOG` 与 `MODEL_ID` / `MODEL_REASONING` 的关系；`MODEL_CATALOG` 里的推理模型必须写 `efforts`（示例照此）；不设 `MODEL_CATALOG` 的单模型配置下 omp 按模型 id 自定强度集合，界面显示的强度可能与实际使用的不同，要一致就配置 `MODEL_CATALOG` 并给出 `efforts`；
   反向代理须放开请求体大小并关闭请求缓冲；上传没有配额、`uploads/` 可能残留 `.part` 文件；`全部自动` 的安全含义（选过一次之后新会话默认沿用它）与如何用 `APPROVAL_MAX_MODE` 关掉它；模型代理只放行白名单内的模型名（白名单外的请求得到 400，不到达上游；想让某个模型可用就把它写进 `MODEL_CATALOG`）。
 - [ ] 19.5 核对功能验收清单：组 14–17 新增的各行都在、ID 不重复、结论均为 `待签`；`web/test/functional-checklist.test.ts` 通过；因「+」按钮改名而失实的既有行（提到 `技能与命令` 按钮名的）改写并回到 `待签`。
 

@@ -3,7 +3,7 @@
 ### Requirement: 模型与推理强度命令
 在「相关命令 API 与回合中断」所列的三种帧之外，`SessionRuntime.command(frame)` SHALL 另外接受 `{type:"set_model", provider:string, modelId:string}` 与 `{type:"set_thinking_level", level:string}` 两种帧；它们遵守该条对 `command` 的全部既有规则：以独立 id 发送，只被 id 与 command 同时匹配的 `response` 结算；存在活跃回合或另一条 `command` 在途时同步抛出 `SessionBusyError` 而不写帧；没有存活子进程时经与 `prompt` 相同的惰性获取路径先取得一个 generation（恰一次 `tokens.issue`），其后同一 generation 上的 `command` / `prompt` 复用它；匹配 response 的 `success` 不为 `true`（例如 omp 应答 `Model not found: …`）时以 `AgentUnavailableError` 拒绝且不因此回收 generation；`command` 期间视为活动并重置空闲计时器；子进程在结算前退出或产生协议错误时以 `AgentUnavailableError` 拒绝并按既有路径回收；runtime 已 `shutdown` 后调用同步抛出 `AgentUnavailableError`。
 runtime SHALL 把这两种帧原样写出（除补上 `id`），SHALL NOT 校验 `provider`、`modelId` 或 `level` 的取值，SHALL NOT 记住或自动重发它们：何时发、发什么由 owner 决定（chat-sessions「派发前按会话设置对齐进程」）。`set_model` 成功的 response 数据是 omp 报告的模型对象，`set_thinking_level` 成功的 response 没有数据；`command` 的返回值分别是该数据与 `undefined`。这两种帧 SHALL NOT 改变 runtime 记录的 last-known-good 会话文件路径。
-依据（官方 v18.0.10 二进制内的打包源码，未经宿主校验）：`set_model` 在 omp 的可用模型里按 `provider` 与 `id` 精确查找，找到后切换并把推理强度重置为该模型的缺省；`set_thinking_level` 在 RPC 层不校验 `level`。因此 owner 发送时 SHALL 先 `set_model` 后 `set_thinking_level`。
+依据（官方 v18.0.10 二进制内的打包源码，未经宿主校验）：`set_model` 在 omp 的可用模型里按 `provider` 与 `id` 精确查找，找到后切换；`set_thinking_level` 在 RPC 层不校验 `level`。打包源码读起来 `set_model` 会把推理强度重置为该模型的缺省，实机核对看到的却是强度被带了过去（`off` 仍是 `off`），omp 是否在某些情形下重置未判定（design「实机核对结果」）。owner 发送时 SHALL 先 `set_model` 后 `set_thinking_level`：这一次序在两种情形下都无害，并使每个 generation 上的强度都是显式设置的。
 
 #### Scenario: 回合之间设置模型与强度
 - **WHEN** 一个空闲 runtime（真实假 omp）依次收到 `command({type:"set_model",provider:"workbuddy",modelId:"m3"})`、`command({type:"set_thinking_level",level:"low"})`，随后一条 prompt 与一条 probe prompt
