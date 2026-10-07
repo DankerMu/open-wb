@@ -55,7 +55,7 @@ const PINNED_GROUP = "置顶任务";
 const CONFLICT = "会话状态冲突";
 const CREATED = "f".repeat(32);
 
-/** `任务` 分区里的三条会话，服务端顺序 A、B、C；被操作的是中间的 B。 */
+/** `临时空间` 分组里的三条会话，服务端顺序 A、B、C；被操作的是中间的 B。 */
 const TASKS = [view(A, FIRST), view(B, MIDDLE), view(C, LAST)];
 const PINNED_B = view(B, MIDDLE, { pinnedAt: PINNED_AT });
 
@@ -67,12 +67,12 @@ function mountTasks(extra: Parameters<typeof mountSessions>[2], path = "/", stri
 
 function expectUnpinned(nav: HTMLElement) {
   expect(partition(nav, PINNED_GROUP)).toBeNull();
-  expect(partitionTitles(nav, "任务 (3)")).toEqual([FIRST, MIDDLE, LAST]);
+  expect(partitionTitles(nav, "临时空间")).toEqual([FIRST, MIDDLE, LAST]);
 }
 
 function expectMiddlePinned(nav: HTMLElement, title = MIDDLE) {
   expect(partitionTitles(nav, PINNED_GROUP)).toEqual([title]);
-  expect(partitionTitles(nav, "任务 (2)")).toEqual([FIRST, LAST]);
+  expect(partitionTitles(nav, "临时空间")).toEqual([FIRST, LAST]);
   expect(entryTitles(nav)).toEqual([title, FIRST, LAST]);
 }
 
@@ -81,7 +81,7 @@ describe("置顶与取消置顶 (M8, M9)", () => {
     ["默认渲染", false],
     ["StrictMode", true],
   ] as const)(
-    "M8 置顶往返（%s）：PATCH {pinned:true} 后只在 置顶任务、任务 (2)；取消置顶 后回到 任务 (3) 的原位",
+    "M8 置顶往返（%s）：PATCH {pinned:true} 后只在 置顶任务、临时空间 剩两条；取消置顶 后回到 临时空间 的原位",
     async (_mode, strict) => {
       const { fetchMock } = mountTasks(
         { [patchPath(B)]: [jsonResponse(PINNED_B), jsonResponse(view(B, MIDDLE))] },
@@ -155,7 +155,7 @@ describe("只信响应 (M10)", () => {
     expect(toasts()).toEqual([RENAMED_TOAST]);
   });
 
-  it("M10 置顶：响应前条目不动；响应的 pinnedAt 为 null 时条目留在 任务", async () => {
+  it("M10 置顶：响应前条目不动；响应的 pinnedAt 为 null 时条目留在 临时空间", async () => {
     const patch = deferredResponse();
     const { fetchMock } = mountTasks({ [patchPath(B)]: () => patch.promise });
     const nav = await findList(MIDDLE);
@@ -201,7 +201,7 @@ describe("迟到与乱序的元数据响应 (M11, M12)", () => {
     await settleDeferredResponse(patch, jsonResponse({ ...running, pinnedAt: PINNED_AT }));
     expect(toasts()).toEqual([PINNED_TOAST]);
     expect(partitionTitles(nav, PINNED_GROUP)).toEqual([MIDDLE]);
-    expect(partitionTitles(nav, "任务 (3)")).toEqual(["新建的", FIRST, LAST]);
+    expect(partitionTitles(nav, "临时空间")).toEqual(["新建的", FIRST, LAST]);
     expect(within(nav).getByRole("status", { name: `${MIDDLE} 已完成` })).toBeTruthy();
     expect(within(nav).queryByRole("status", { name: `${MIDDLE} 运行中` })).toBeNull();
   });

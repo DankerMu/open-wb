@@ -24,7 +24,7 @@ import {
   settle,
 } from "./chat-stream-support.js";
 import { calls, deferredResponse, jsonResponse } from "./support.js";
-import { listRepoFiles, readRepoFile, ruleBody, stripComments } from "./ui-support.js";
+import { listRepoFiles, readRepoFile } from "./ui-support.js";
 
 const MESSAGES = `/api/sessions/${SESSION_ID}/messages`;
 const PROMPT_PATH = `/api/sessions/${SESSION_ID}/prompt`;
@@ -245,9 +245,9 @@ describe("stop button: layout and outcomes", () => {
     expect(stepBadge.className).toContain("text-(--wb-text-secondary)");
     expect(within(article).queryByRole("status", { name: "bash 运行中" })).toBeNull();
     const listed = within(nav()).getByRole("status", { name: "saved title 已停止" });
-    expect(
-      listed.querySelector(".chat-session-dot")?.classList.contains("chat-session-dot-stopped"),
-    ).toBe(true);
+    // 已停止 没有可见标记：状态只以视觉隐藏的文案存在。
+    expect(listed.textContent).toBe("已停止");
+    expect(listed.querySelector("[data-status-mark]")).toBeNull();
 
     const reads = calls(fetchMock, MESSAGES).length;
     const sources = FakeEventSource.instances.length;
@@ -585,22 +585,6 @@ describe("stop button: capacity and source guards", () => {
     expect(send.disabled).toBe(false);
     expect(within(toolbar()).queryByRole("button", { name: "停止" })).toBeNull();
     expect(calls(fetchMock, MESSAGES)).toHaveLength(reads);
-  });
-
-  it("S13 styles the stopped dot with semantic tokens only", () => {
-    const body = ruleBody(
-      stripComments(readRepoFile("web/src/features/chat/chat.css")),
-      ".chat-session-dot-stopped",
-    );
-    const values = body
-      .split(";")
-      .map((declaration) => declaration.trim())
-      .filter(Boolean)
-      .map((declaration) => declaration.slice(declaration.indexOf(":") + 1).trim());
-    expect(values.length).toBeGreaterThan(0);
-    for (const value of values) {
-      expect(value.startsWith("var(--wb-")).toBe(true);
-    }
   });
 
   it("G4 keeps the capacity copy out of web/src (it comes from the envelope)", () => {

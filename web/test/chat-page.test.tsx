@@ -351,11 +351,13 @@ describe("welcome state", () => {
     expect(precedes(region, disclaimer)).toBe(true);
   });
 
-  it("styles 新建会话 as a full-width primary ui-btn", async () => {
+  it("styles 新建会话 as a full-width primary button of the copied-in layer", async () => {
     await mountWelcome();
-    expect(screen.getByRole("button", { name: "新建会话" }).className).toBe(
-      "ui-btn ui-btn--primary ui-btn--md chat-new-session",
-    );
+    const create = screen.getByRole("button", { name: "新建会话" });
+    expect(create.getAttribute("data-slot")).toBe("button");
+    expect(create.getAttribute("data-variant")).toBe("default");
+    expect(create.classList.contains("w-full")).toBe(true);
+    expect(create.className).not.toMatch(/\bui-btn|chat-new-session/);
   });
 
   it("(W2) fills the draft from a card or chip without sending", async () => {

@@ -146,7 +146,7 @@ export async function openNavOverlay(title: string) {
 
 /** 选择按钮的标题，按文档顺序（Dialog 打开期间列表被 aria-hidden，故直接读 DOM）。 */
 export function entryTitles(scope: Element) {
-  return Array.from(scope.querySelectorAll("button.chat-session-button"), (button) =>
+  return Array.from(scope.querySelectorAll('[data-slot="session-select"]'), (button) =>
     button.getAttribute("aria-label"),
   );
 }

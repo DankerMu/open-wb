@@ -286,8 +286,7 @@ describe("composer footer 空间选择 (W5–W9)", () => {
       createOf(`{"scene":"office","workspaceId":"${PROJECT_A.id}"}`),
     ]);
     const nav = await findList("新会话");
-    await waitFor(() => expect(partitionTitles(nav, "空间 (1)")).toEqual(["新会话"]));
-    expect(partitionTitles(nav, "项目A")).toEqual(["新会话"]);
+    await waitFor(() => expect(partitionTitles(nav, "项目A")).toEqual(["新会话"]));
     expect(entryTitles(nav)).toEqual(["新会话"]);
     await waitFor(() => expect(queryFooterButton()).toBeNull());
     expect(document.querySelector('[data-slot="composer-workspace"]')?.textContent).toBe(

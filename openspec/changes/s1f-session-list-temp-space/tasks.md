@@ -304,9 +304,17 @@ Minimal mergeable slice: 13.1、13.2、13.3 各自可单独合入（每个导出
   - 新组件文件 `web/src/features/chat/session-status-mark.tsx`：可见标记 `aria-hidden` 并带 `data-status-mark="waiting" | "running" | "failed"`；其余三种状态只有视觉隐藏的文案、没有该属性。减少动态效果用 Tailwind 的 `motion-reduce:` 变体表达并按类名断言。只用 Tailwind 与拷入层，不用 `ui-pulse` / `ui-sr-only`，不改 `chat.css`。
   - 旧侧栏（`session-sidebar.tsx`）在本刀不改、不接入新组件（14.4 接入）。新文件登记进 `ui-layering.test.ts` 的 `MIGRATED_AREAS` 与逐字清单断言（字母序）。
   Risk packs（14.3）: Accessibility、Legacy compatibility。
-- [ ] 14.4 重写 `session-sidebar.tsx`（拷入层的 `button`、`input`、`collapsible`、`dropdown-menu` + Tailwind）：`新建会话`、搜索框、`分组方式` 菜单、可折叠分组、条目、空态；删除 `session-filter.tsx` 及其测试，删除 `session-groups.ts` 里的筛选函数、`SessionFilter` 类型与 `DEFAULT_SESSION_FILTER`，既有分组测试里针对筛选的用例随之删除（写进偏离记录）；`use-chat-session.ts` / `page.tsx` 去掉筛选状态、加搜索与分组状态。整页测试（新文件 `web/test/chat-session-list.test.tsx`）：「分组侧栏」八个场景、「标题搜索」的「过滤与恢复」「不影响主区」、spa-shell「列表区承载重建后的会话列表」。
-- [ ] 14.5 既有走查第 6 步的改写（**与 14.4 同 PR**，否则 `make ui-walk` 在 14.4 合入时必红——旧步骤取 `筛选任务` 按钮）：`web/e2e/ui-walk-sessions.spec.ts` 的第 6 步按 chat-harness「UI 走查会话元数据」改为分组头折叠、搜索、`分组方式` 切换、无 `筛选任务`。选择器集中在新 helper `web/e2e/ui-walk-session-list.ts`，被改写的步骤移进该 helper，`ui-walk-sessions.spec.ts` 不净增行。验证：`make ui-walk`。
-- [ ] 14.6 迁移登记（与 14.4 同 PR）：`session-sidebar.tsx`、`session-groups.ts`、`session-list-prefs.ts`、`session-path.ts` 及本组新增文件加入 `MIGRATED_AREAS` 并同步清单断言；`SESSION_LIST_FILES` 里移除已迁移与已删除的文件名。`chat.css` 中只属于被重写组件的规则随之删除。
+- [x] 14.4 重写 `session-sidebar.tsx`（拷入层的 `button`、`input`、`collapsible`、`dropdown-menu` + Tailwind）：`新建会话`、搜索框、`分组方式` 菜单、可折叠分组、条目、空态；删除 `session-filter.tsx` 及其测试，删除 `session-groups.ts` 里的筛选函数、`SessionFilter` 类型与 `DEFAULT_SESSION_FILTER`，既有分组测试里针对筛选的用例随之删除（写进偏离记录）；`use-chat-session.ts` / `page.tsx` 去掉筛选状态、加搜索与分组状态。整页测试（新文件 `web/test/chat-session-list.test.tsx`）：「分组侧栏」八个场景、「标题搜索」的「过滤与恢复」「不影响主区」、spa-shell「列表区承载重建后的会话列表」。
+- [x] 14.5 既有走查第 6 步的改写（**与 14.4 同 PR**，否则 `make ui-walk` 在 14.4 合入时必红——旧步骤取 `筛选任务` 按钮）：`web/e2e/ui-walk-sessions.spec.ts` 的第 6 步按 chat-harness「UI 走查会话元数据」改为分组头折叠、搜索、`分组方式` 切换、无 `筛选任务`。选择器集中在新 helper `web/e2e/ui-walk-session-list.ts`，被改写的步骤移进该 helper，`ui-walk-sessions.spec.ts` 不净增行。验证：`make ui-walk`。
+- [x] 14.6 迁移登记（与 14.4 同 PR）：`session-sidebar.tsx`、`session-groups.ts`、`session-list-prefs.ts`、`session-path.ts` 及本组新增文件加入 `MIGRATED_AREAS` 并同步清单断言；`SESSION_LIST_FILES` 里移除已迁移与已删除的文件名。`chat.css` 中只属于被重写组件的规则随之删除。
+  **实施注记（14.4 / 14.5 / 14.6，fixture 评审补充）**：
+  - 波及的既有测试（逐条写进偏离记录）：`web/test/chat-page-sidebar.test.tsx`（测 `筛选任务` 的用例删除，其余断言旧三分区 DOM 的用例按新 DOM 改写）、`chat-page-session-{delete,pin,rename-pin}.test.tsx` 与 `chat-page-session-meta-support.tsx`（引用旧标题与类名处改写）。新场景只写进 `chat-session-list.test.tsx`。
+  - 旧的两参 `groupSessions` 与 `filterSessions`、`SessionFilter`、`DEFAULT_SESSION_FILTER` 一并删除（否则只剩测试引用）；`web/test/session-groups.test.ts` 整文件删除，分组由 `session-list-groups.test.ts` 覆盖。显示标题的回退 `新会话` 收成一个来源（`session-path.ts` 的 `sessionTitle`）。
+  - `ui-layering.test.ts` 的同步点：`SESSION_LIST_FILES` 由八项剩四项（两个对话框、`session-actions.ts`、`session-menu.tsx`——组 15 迁移），对应的长度断言、拿 `session-filter.tsx` 当样本的断言换一个仍未迁移的文件、`MIGRATED_AREAS` 的逐字清单同步。
+  - `use-chat-session.ts` 已 700 行左右：搜索词、分组方式、折叠状态放进一个新的小 hook（同 PR 登记进已迁移清单），不往它里面加状态。
+  - 新侧栏继续渲染尚未迁移的 `session-menu.tsx`（组 15 重写）；条目的状态元素用 14.3 的 `SessionStatusMark`（传显示标题）。
+  - `docs/acceptance/functional-checklist.md` 里描述筛选的 SL 行归 14.8 改写；本 PR 在描述里标注它们暂时过期，不改清单。
+  Risk packs（14.4–14.6）: Persistence（折叠与分组方式的本地记忆、存储不可用）、Legacy compatibility（删除筛选及既有用例）、CI gate（走查第 6 步）、Layering（迁移登记与 legacy 样式删除）、Accessibility（分组按钮、菜单、搜索框的可访问名与焦点）。
 - [ ] 14.7 列表事件接入页面：`use-chat-session.ts` 持有 13.3 的连接器——`open` 与 `sessions.changed` 触发单飞的列表重取（通知触发的失败静默），再次 `open` 时按规则补读所选会话的快照，`session.rewound` 触发所选会话的快照重读；卸载 / 换账号关闭。整页测试（新文件 `web/test/chat-list-events.test.tsx`）：session-list-push「web 列表事件消费」七个场景。
 - [ ] 14.8 SL 行：在 `docs/acceptance/functional-checklist.md` 新增「会话列表（SL）」节，写分组与折叠、切换按时间、三种状态标记、搜索、无筛选入口、另一个标签页的变化不刷新就出现在列表里各一行，结论 `待签`；原会话节里描述三分区与筛选的行改写或删除并在 PR 说明。
 - [ ] 14.9 变异证据：置顶会话同时留在工作空间分组 → 「按工作空间分组」判红；折叠不写存储 → 「折叠与记忆」判红；搜索包含归档会话 → 「过滤与恢复」判红；通知到达时并发重取 → 「单飞与尾随重取」判红；重连后不补读所选会话 → 「重连补读所选会话」判红；已登记文件导入 `useToast` → 分层守卫判红。

@@ -42,7 +42,7 @@ const PENDING_HINT = "删除请求已发送，关闭窗口不会撤销请求。"
 /** 一次 DELETE 的期望形状：无 body、无 `Content-Type`。 */
 export const DELETE_REQUEST = { body: undefined, contentType: null, method: "DELETE" };
 
-/** 服务端顺序 A、B、C，都在 `任务` 分区。 */
+/** 服务端顺序 A、B、C，都在 `临时空间` 分组。 */
 export const SESSIONS = [view(A, CURRENT), view(B, OTHER), view(C, THIRD)];
 
 export function noContent() {
