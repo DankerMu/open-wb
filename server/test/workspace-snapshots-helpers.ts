@@ -1,7 +1,7 @@
 /**
- * Fixtures shared by the workspace-snapshots test files (issues #937 to #939): a workspace and a
- * snapshot root on real temporary directories, the `take` runner, and the readers the expected
- * manifests are built from. Expected values come from the tests' own lstat of the workspace, not
+ * Fixtures shared by the workspace-snapshots test files (issues #937 to #940): a workspace and a
+ * snapshot root on real temporary directories, the `take` and `restore` runners, and the readers
+ * the expected manifests are built from. Expected values come from the tests' own lstat of the workspace, not
  * from the module under test.
  */
 import fs, {
@@ -15,6 +15,7 @@ import fs, {
   type PathLike,
   readdirSync,
   readFileSync,
+  readlinkSync,
   rmSync,
   type StatOptions,
   writeFileSync,
@@ -22,8 +23,9 @@ import fs, {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
-import { afterEach, vi } from "vitest";
+import { afterEach, expect, vi } from "vitest";
 import { type TakeResult, take } from "../src/workspaces/snapshots.js";
+import { restore } from "../src/workspaces/snapshots-restore.js";
 
 export const W = "0123456789abcdef0123456789abcdef";
 export const MESSAGE_ID = 42;
@@ -104,6 +106,47 @@ export function run(f: Fixture, overrides: Partial<TakeOptions> = {}): Promise<T
     maxEntries: Number.MAX_SAFE_INTEGER,
     ...overrides,
   });
+}
+
+/** One successful `take` of the fixture's workspace: the snapshot the restore tests start from. */
+export async function snapshot(f: Fixture, overrides: Partial<TakeOptions> = {}): Promise<void> {
+  expect(await run(f, overrides)).toMatchObject({ outcome: "ok" });
+}
+
+/** One `restore` of the fixture's workspace from the fixture's snapshot. */
+export function restoreRun(f: Fixture): ReturnType<typeof restore> {
+  return restore({ workspaceRoot: f.workspace, snapshotDir: f.snapshot });
+}
+
+/** Every path under `root` with what it holds: a file's bytes, `dir`, or `-> <link target>`. */
+export function contentsOf(root: string, rel = ""): Record<string, string> {
+  const seen: Record<string, string> = {};
+  for (const name of readdirSync(join(root, rel)).sort()) {
+    const path = rel === "" ? name : `${rel}/${name}`;
+    const stat = lstatSync(join(root, path));
+    if (stat.isDirectory()) {
+      seen[path] = "dir";
+      Object.assign(seen, contentsOf(root, path));
+    } else if (stat.isSymbolicLink()) {
+      seen[path] = `-> ${readlinkSync(join(root, path))}`;
+    } else {
+      seen[path] = stat.isFile() ? readFileSync(join(root, path), "utf8") : "special";
+    }
+  }
+  return seen;
+}
+
+/** What a restore must leave alone under `root`, read before it runs and again after. */
+export function stateOf(root: string): unknown {
+  return { own: lstatSync(root).mtimeMs, tree: describeTree(root), contents: contentsOf(root) };
+}
+
+/** The directory O of scenario「父目录被换成符号链接」: beside the workspace, holding `b.txt`. */
+export function outsideDir(f: Fixture): string {
+  const dir = join(f.workspace, "..", "o");
+  mkdirSync(dir);
+  writeFileSync(join(dir, "b.txt"), "outside b\n");
+  return dir;
 }
 
 /** Every path under `root` (relative, POSIX) with what would change if the entry were touched. */

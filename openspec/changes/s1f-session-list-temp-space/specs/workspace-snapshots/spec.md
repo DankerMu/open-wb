@@ -129,19 +129,19 @@ prompt 路由 SHALL 把「快照步骤」作为 `supervisor.prompt` 的派发前
 - **THEN** 该消息快照行的 `todo` 与 T 的存储文本逐字相同；`todo` 为 NULL 的会话其快照行 `todo` 为 NULL
 
 ### Requirement: 还原
-`restore(workspaceRoot, snapshotDir)` SHALL 把工作空间还原为清单描述的状态，并返回 `{restored,removed,skipped,failed}`（`restored` 为内容被写回的文件数与被重建的符号链接数之和，`removed` 为删除的条目数（被递归删除的目录连同其下内容计一项），`skipped` 为清单的 `skipped`，`failed` 为 `[{path}]`）。它 SHALL 先读清单并校验：清单可解析、`tree/` 存在、工作空间根是真实目录（`lstat`，非符号链接）；任一不成立 SHALL 在改动任何工作空间条目之前抛错。随后：
+`restore`（入参为工作空间根与快照目录）SHALL 把工作空间还原为清单描述的状态，并返回 `{restored,removed,skipped,failed}`（`restored` 为内容被写回的文件数与被重建的符号链接数之和，`removed` 为被删除的多余条目数——只计清单里没有的条目，被递归删除的目录连同其下内容计一项；清单路径上类型不对而被替换的占位者不计，`skipped` 为清单的 `skipped`，`failed` 为 `[{path}]`）。它 SHALL 先读清单并校验：清单可解析且每个条目形状合法（`path` 是相对的 POSIX 路径，不含空分量、`.`、`..`，不以 `/` 开头，条目类型与字段齐全，路径不重复，每个条目与每个 `skipped` 路径的父级是清单里的目录条目或位于某个 `skipped` 路径之下）、`tree/` 存在、快照目录不在工作空间之内、工作空间根是真实目录（`lstat`，非符号链接）；任一不成立 SHALL 在改动任何工作空间条目之前抛错。随后：
 - 现存而不在 `entries` 里、且不位于任何 `skipped` 路径之下（含其自身）的条目 SHALL 被删除（目录递归删除，不跟随符号链接）；
 - `entries` 里的目录 SHALL 存在（缺失则创建，mode `2770`；现存而不是目录的同名条目先删除）；
 - `entries` 里的文件按以下次序判定，命中即止：
-  1. 当前是普通文件且 `size`、`mtimeMs`、`ctimeMs` 都与清单相等 → 不动、不读内容、不计入 `restored`；
-  2. 当前是普通文件、`size` 与清单相等、且其内容与 `tree/<path>` 逐字节相同 → 不动（不改内容、时间戳与权限位）、不计入 `restored`；
-  3. 其余（不存在、不是普通文件、`size` 不同或内容不同）→ SHALL 从 `tree/<path>` 写回并计入 `restored`：在同一目录写临时文件后 `rename` 到位，随后把 `mtime` 设为清单值，并以显式 `chmod` 把权限位置为 `(清单 mode & 0o777) | 0o660`（不受进程 umask 影响；setuid、setgid、sticky 位一律不带）；写回 SHALL 复制内容，SHALL NOT 在工作空间与快照之间建硬链接；现存而不是普通文件的同名条目先删除；
+  1. 当前是普通文件且 `ino`、`size`、`mtimeMs`、`ctimeMs` 都与清单相等 → 不动、不读内容、不计入 `restored`（清单条目没有 `ino` 时本步不成立）；
+  2. 当前是普通文件、`size` 与清单相等、且其前 `size` 个字节与 `tree/<path>` 逐字节相同 → 不动（不改内容、时间戳与权限位）、不计入 `restored`；
+  3. 其余（不存在、不是普通文件、`size` 不同或内容不同）→ SHALL 从 `tree/<path>` 写回并计入 `restored`：在同一目录以独占方式新建一个名字不可预测的临时文件，写入内容后**在 `rename` 之前经它的句柄**把 `mtime` 设为清单值、把权限位显式置为 `(清单 mode & 0o777) | 0o660`（不受进程 umask 影响；setuid、setgid、sticky 位一律不带），再 `rename` 到位——`rename` 之后 SHALL NOT 再按最终路径改时间或权限位（那条路径此时可被换成符号链接）；写回 SHALL 复制内容，SHALL NOT 在工作空间与快照之间建硬链接；现存而不是普通文件的同名条目先删除；
 - `entries` 里的符号链接：当前不是目标相同的符号链接则重建并计入 `restored`；
 - `skipped` 路径及其之下的一切 SHALL NOT 被读取、改写或删除。
 
 写回的文件 SHALL 对属主与属组都可读写（上式的 `0o660`）：清单里是 `0644` 的文件写回后为 `0664`，`0755` 写回后为 `0775`，`0600` 写回后为 `0660`。理由是写回的文件由 app 用户持有、靠父目录的 setgid 继承共享组，omp 用户只能经组权限继续读写它（ADR-0010）；其它用户位与执行位保持清单值。第 1、2 两种「不动」的文件权限位不被修改。
 
-每次写或删之前 SHALL 对该条目自工作空间根起的各级父目录做 `lstat`：任何一级是符号链接或不是目录时，SHALL 跳过该条目并把它记入 `failed`，SHALL NOT 经由它写入或删除；单个条目的 `EACCES` / `EPERM` 同样记入 `failed` 并继续。`restore` SHALL NOT 改动工作空间根之外的任何路径，SHALL NOT 修改快照目录（清单里的 `ctimeMs` 不随写回更新，所以被写回过的文件在下一次还原时走第 2 步的内容比较）。对同一份快照重复调用 SHALL 是幂等的：工作空间状态相同，且在两次调用之间工作空间没有别的改动时，第二次的 `restored` 与 `removed` 都为 0。
+每次写或删之前 SHALL 对该条目自工作空间根起的各级父目录做 `lstat`：任何一级是符号链接或不是目录时，SHALL 跳过该条目并把它记入 `failed`，SHALL NOT 经由它写入或删除；单个条目的 `EACCES` / `EPERM` 同样记入 `failed` 并继续；其它错误（`ENOENT`、`EIO` 等）SHALL 向外抛出——此时工作空间处于部分还原的状态，重新调用可以继续。读取工作空间里的文件（元数据与内容比较）SHALL 经不跟随符号链接、不阻塞的句柄，确认是普通文件后才读。`restore` SHALL NOT 改动工作空间根之外的任何路径，SHALL NOT 修改快照目录（清单里的 `ctimeMs` 不随写回更新，所以被写回过的文件在下一次还原时走第 2 步的内容比较）。对同一份快照重复调用 SHALL 是幂等的：工作空间状态相同，且在两次调用之间工作空间没有别的改动时，第二次的 `restored` 与 `removed` 都为 0。
 
 #### Scenario: 还原改动、新增与删除
 - **WHEN** 快照时工作空间为 `a.txt`（"1"）、`dir/b.txt`（"2"）、`keep.txt`（"3"）；之后 `a.txt` 被改为 "x"、`dir/b.txt` 被删除、新增了 `c.txt` 与 `new/d.txt`，然后还原
