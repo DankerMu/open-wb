@@ -267,7 +267,8 @@ export function chatSequences(db: DatabaseSync) {
 
 /**
  * Everything an ADD COLUMN upgrade must not touch, for the given pre-upgrade columns (default: those
- * before 035): SQL-literal row values, prior column shape, keys, indexes, sequences.
+ * before 035): SQL-literal row values, prior column shape, keys, indexes, sequences. The indexes are
+ * those of every table but `chat_turn_snapshots`, which 039 creates whole (its own test covers it).
  */
 export function preservedState(
   db: DatabaseSync,
@@ -291,7 +292,9 @@ export function preservedState(
     ),
     indexes: perTable((table) => tableIndexKeys(db, table)),
     indexSql: db
-      .prepare("SELECT name, tbl_name, sql FROM sqlite_master WHERE type = 'index' ORDER BY name")
+      .prepare(
+        "SELECT name, tbl_name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name <> 'chat_turn_snapshots' ORDER BY name",
+      )
       .all(),
     sequences: chatSequences(db),
   };
