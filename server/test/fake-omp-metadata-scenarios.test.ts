@@ -36,6 +36,8 @@ const SUPPORT = fileURLToPath(new URL("./support/", import.meta.url));
 const MAIN = join(SUPPORT, "fake-omp.mjs");
 const PROXY = join(SUPPORT, "fake-omp-proxy.mjs");
 const THINKING = join(SUPPORT, "fake-omp-thinking.mjs");
+const ARGV = join(SUPPORT, "fake-omp-argv.mjs");
+const COMPOSER = join(SUPPORT, "fake-omp-composer.mjs");
 const PARTS = ["先读需求，", "再列要点，", "最后作答。"];
 const TEXT = "先读需求，再列要点，最后作答。";
 const PARTIAL = { role: "assistant", content: [] };
@@ -600,29 +602,36 @@ describe("fake omp knobs on other scenarios", () => {
   });
 });
 
-/** 叶子模块只许 `node:` 静态导入：不回引主程序、不互引、无动态导入/shebang/顶层可变状态。 */
-function expectNodeOnlyLeaf(file: string): void {
+/**
+ * 叶子模块只许 `node:` 静态导入：不回引主程序、不互引、无动态导入/shebang/顶层可变状态。
+ * `imports` 是该模块应有的 import 条数下限：composer 没有任何 import（0），不为过断言加假导入。
+ */
+function expectNodeOnlyLeaf(file: string, minImports = 1): void {
   const module = readFileSync(file, "utf8");
   const imports = module.split("\n").filter((line) => line.startsWith("import"));
-  expect(imports.length, file).toBeGreaterThan(0);
+  expect(imports.length, file).toBeGreaterThanOrEqual(minImports);
   for (const line of imports) {
     expect(line, file).toMatch(/from "node:[a-z/]+";$/);
   }
-  expect(imports.join("\n"), file).not.toMatch(/fake-omp(-proxy|-thinking)?\.mjs/);
+  expect(imports.join("\n"), file).not.toMatch(/fake-omp(-proxy|-thinking|-argv|-composer)?\.mjs/);
   expect(module, file).not.toMatch(/\bimport\(|\brequire\(/);
   expect(module.startsWith("#!"), file).toBe(false);
   expect(module, file).not.toMatch(/^let /m);
 }
 
 describe("fake omp module split", () => {
-  it("keeps proxy and thinking modules node-only leaves, statically imported by main and within line budgets", () => {
+  it("keeps proxy, thinking, argv and composer modules node-only leaves, statically imported by main and within line budgets", () => {
     for (const leaf of [PROXY, THINKING]) {
       expectNodeOnlyLeaf(leaf);
     }
+    expectNodeOnlyLeaf(ARGV, 0);
+    expectNodeOnlyLeaf(COMPOSER, 0);
     const main = readFileSync(MAIN, "utf8");
     expect(main).toMatch(/^import \{[^}]+\} from "\.\/fake-omp-proxy\.mjs";$/m);
     expect(main).toMatch(/^import \{[^}]+\} from "\.\/fake-omp-thinking\.mjs";$/m);
-    for (const file of [MAIN, PROXY, THINKING]) {
+    expect(main).toMatch(/^import \{[^}]+\} from "\.\/fake-omp-argv\.mjs";$/m);
+    expect(main).toMatch(/^import \{[^}]+\} from "\.\/fake-omp-composer\.mjs";$/m);
+    for (const file of [MAIN, PROXY, THINKING, ARGV, COMPOSER]) {
       const check = spawnSync(process.execPath, ["--check", file], { encoding: "utf8" });
       expect(check.status, check.stderr).toBe(0);
       expect(readFileSync(file, "utf8").split("\n").length - 1).toBeLessThanOrEqual(800);

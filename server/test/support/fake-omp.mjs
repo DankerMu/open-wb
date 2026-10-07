@@ -9,7 +9,19 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { parseArgs, parseDelay } from "./fake-omp-argv.mjs";
-import { CALL_1, CALL_2, TOOL_OUTPUT, toolEnd, toolStart } from "./fake-omp-composer.mjs";
+import {
+  CALL_1,
+  CALL_2,
+  commandAnswer,
+  INITIAL_APPLIED,
+  selectRequest,
+  stateData,
+  TOOL_OUTPUT,
+  toolEnd,
+  toolStart,
+  WRITE_CALL,
+  WRITE_SELECT_ID,
+} from "./fake-omp-composer.mjs";
 import { loadBaseUrl, parseToolCall, postChat } from "./fake-omp-proxy.mjs";
 import {
   ANSWER_DELTAS,
@@ -36,6 +48,7 @@ const START_SCENARIOS = new Set(["abort-ok", "slow-ready"]);
  * 审批门控场景（#458）：仅最后一个 `--approval-mode` 恰为 write 时门控，否则同 normal。
  * approval-chain-abort-ignored（#470）：r1 应答后再开 r2/C2，r2 应答后永久挂起；abort 一律无帧。
  * 帧序同 omp v18.0.10 实测（#620）：select 先于 tool_execution_start；每个 end 后紧跟其 toolResult。
+ * approval-write（#998）不在此集合：只在 always-ask 下门控一次 write 调用，作答即完成、不可 abort。
  */
 const APPROVAL_SCENARIOS = new Set([
   "approval",
@@ -87,9 +100,10 @@ const startMs = START_SCENARIOS.has(scenario) ? parseDelay(startDelay, "--start-
 /** #518：`--thinking-repeat <n>`（非法值同上零帧退出）与 `--hold-after-thinking` 只作用于 thinking。 */
 const thinkingRepeat = scenario === "thinking" ? parseThinkingRepeat(repeat) : 1;
 const holdThinking = scenario === "thinking" && hold;
-const gated = APPROVAL_SCENARIOS.has(scenario) && approvalMode === "write";
-const abortable =
-  ABORT_SCENARIOS.has(scenario) || (gated && scenario !== "approval") || holdThinking;
+const writeGated = scenario === "approval-write" && approvalMode === "always-ask";
+const gated = writeGated || (APPROVAL_SCENARIOS.has(scenario) && approvalMode === "write");
+const soloGate = writeGated || scenario === "approval";
+const abortable = ABORT_SCENARIOS.has(scenario) || (gated && !soloGate) || holdThinking;
 let protocol = 1;
 let pendingUi = false;
 /**
@@ -111,6 +125,11 @@ const inbound = [];
 let queue = Promise.resolve();
 let readyTimer; // 仅在 slow-ready 扣住 ready 期间有值
 let todoTurns = 0; // todo 场景已开始的回合数
+/** 最近一次成功的 set_model / set_thinking_level（#998）；初值即夹具自第一版起的 get_state 取值。 */
+const applied = { ...INITIAL_APPLIED };
+/** 回合在途（prompt 回执起，到终态 agent_end 或回合被丢弃止）时到达的两种命令，按到达序记下。 */
+let turnOpen = false;
+const deferred = [];
 const readyGate = scenario === "slow-ready" ? delayReady(readyDelayMs) : Promise.resolve();
 
 if (scenario !== "no-ready" && scenario !== "no-ready-hang") {
@@ -193,6 +212,8 @@ async function dispatch(frame) {
     extension_ui_response: gated ? handleSelect : handleUi,
     negotiate_protocol: handleNegotiate,
     get_state: handleState,
+    set_model: handleCommand,
+    set_thinking_level: handleCommand,
     prompt: handlePrompt,
     ...(abortable ? { abort: handleAbort } : {}),
     ...(scenario === "slash" ? { abort: handleSlashAbort } : {}),
@@ -246,24 +267,27 @@ async function handleState(frame) {
   });
 }
 
+/** 回合之间即时应答并并入状态；回合在途时只记下，由 flushCommands 在回合结束处应答。 */
+async function handleCommand(frame) {
+  if (turnOpen) {
+    deferred.push(frame);
+    return;
+  }
+  const { response, patch } = commandAnswer(frame);
+  Object.assign(applied, patch);
+  await emit(response);
+}
+
+/** 回合结束（终态 agent_end 之后，或回合被 abort 丢弃）：按到达序应答在途期间记下的命令。 */
+async function flushCommands() {
+  turnOpen = false;
+  for (const frame of deferred.splice(0)) {
+    await handleCommand(frame);
+  }
+}
+
 function sessionState() {
-  const data = {
-    model: { provider: "workbuddy", id: "deepseek-v4.1-flash" },
-    thinkingLevel: "off",
-    isStreaming: false,
-    isCompacting: false,
-    steeringMode: "one-at-a-time",
-    followUpMode: "one-at-a-time",
-    interruptMode: "immediate",
-    sessionId: "sess-fake",
-    autoCompactionEnabled: true,
-    fastModeEnabled: false,
-    fastModeActive: false,
-    tokensPerSecond: null,
-    messageCount: 0,
-    queuedMessageCount: 0,
-    todoPhases: [],
-  };
+  const data = stateData(applied);
   if (scenario === "missing-session") {
     return data;
   }
@@ -362,6 +386,7 @@ async function handlePrompt(frame) {
     return;
   }
   await promptAck(frame.id, true);
+  turnOpen = true;
   const turns = {
     crash: () => process.exit(2),
     "crash-after-deltas": () => crashAfterDeltas(),
@@ -374,7 +399,8 @@ async function handlePrompt(frame) {
     todo: () => todoTurn(),
   };
   if (gated && abortTurn === "idle") {
-    await openSelects(scenario === "approval-parallel" ? [CALL_1, CALL_2] : [CALL_1]);
+    const solo = writeGated ? WRITE_CALL : CALL_1;
+    await openSelects(scenario === "approval-parallel" ? [CALL_1, CALL_2] : [solo]);
     return;
   }
   if (ABORT_SCENARIOS.has(scenario) && abortTurn === "idle") {
@@ -479,7 +505,7 @@ async function openSelects(calls) {
   await emitDeltas(DELTAS);
   await emit(toolUseEnd(calls.map((call) => ({ call }))));
   for (const [index, call] of calls.entries()) {
-    await emitSelect(`r${index + 1}`, call);
+    await emitSelect(writeGated ? WRITE_SELECT_ID : `r${index + 1}`, call);
   }
   for (const call of calls) {
     await emit(toolStart(call));
@@ -489,14 +515,7 @@ async function openSelects(calls) {
 
 async function emitSelect(id, call) {
   pendingSelects.set(id, call);
-  const title = `Allow tool: ${call.name}\nCommand: ${call.args.command}`;
-  await emit({
-    type: "extension_ui_request",
-    id,
-    method: "select",
-    title,
-    options: ["Approve", "Deny"],
-  });
+  await emit(selectRequest(id, call));
 }
 
 /**
@@ -530,7 +549,7 @@ async function handleSelect(frame) {
 async function settleSelects() {
   if (deferredAbort !== undefined) {
     await emitAbortedEnd(deferredAbort.id);
-  } else if (scenario === "approval" || (scenario === "approval-parallel" && approvedAny)) {
+  } else if (soloGate || (scenario === "approval-parallel" && approvedAny)) {
     await finishTurn();
     abortTurn = "done";
   } else {
@@ -566,6 +585,7 @@ async function dropStartingTurn(id) {
   startTimer = undefined;
   abortTurn = "done";
   await emit({ id, type: "response", command: "abort", success: true });
+  await flushCommands();
 }
 
 /**
@@ -586,6 +606,7 @@ async function emitAbortedEnd(id) {
   await emit({ type: "agent_end", messages: [], isTerminal: true });
   await emit({ id, type: "response", command: "abort", success: true });
   abortTurn = "done";
+  await flushCommands();
 }
 
 /**
@@ -712,6 +733,7 @@ async function finishTurn(content = []) {
     message: { role: "assistant", content, stopReason: "stop" },
   });
   await emit({ type: "agent_end", messages: [], isTerminal: true });
+  await flushCommands();
 }
 
 async function failTurn(errorMessage) {
@@ -720,6 +742,7 @@ async function failTurn(errorMessage) {
     message: { role: "assistant", content: [], stopReason: "error", errorMessage },
   });
   await emit({ type: "agent_end", messages: [], isTerminal: true });
+  await flushCommands();
 }
 
 /**
