@@ -79,9 +79,10 @@ Minimal mergeable slice: 2.1 + 2.2（错误码与 PATCH `archived`，只读拦�
   调用方事务在方法返回之后才失败时，目录也得能撤掉：方法的返回值带一个「移除本次新建的空目录」的补偿出口（5.6 的「临时空间创建失败不留会话」用它），本任务的测试覆盖它。
   id 生成器经 `WorkspaceStoreOptions` 的可选字段注入；碰撞重试有上限（常量生成器不得死循环，超限即抛），重试要同时认账号内 `name` / `dir` 唯一约束与全局主键 `id` 的冲突。
 - [x] 3.2 测试辅助函数（`server/test/support/`）：用 3.1 的方法建一个临时空间，并直接写库插入绑定它的会话行。组 3–5 的 REST 测试用它构造「用临时空间的会话」；5.6 之后的新测试可以直接走无 body 创建。
-- [ ] 3.3 可见性：`GET /api/workspaces` 不含临时空间；tree / dirs / file / commands / project-config 对所有者的临时空间 id 正常、对他人 404；`POST /api/sessions` 显式携带临时空间的 `workspaceId` → 404（`rest-metadata.ts`）。测试（新文件 `server/test/session-temp-workspace.test.ts`）：temporary-workspaces「列表不含临时空间而按 id 可达」「不能显式绑定临时空间」、session-metadata「他人与不存在的空间一致 404」、workspaces「临时空间不在列表里，转正后出现」的前半（后半在 4.2）。
+- [x] 3.3 可见性：`GET /api/workspaces` 不含临时空间；tree / dirs / file / commands / project-config 对所有者的临时空间 id 正常、对他人 404；`POST /api/sessions` 显式携带临时空间的 `workspaceId` → 404（`rest-metadata.ts`）。测试（新文件 `server/test/session-temp-workspace.test.ts`）：temporary-workspaces「列表不含临时空间而按 id 可达」「不能显式绑定临时空间」、session-metadata「他人与不存在的空间一致 404」、workspaces「临时空间不在列表里，转正后出现」的前半（后半在 4.2）。
   前向同步点（#921 留下）：`server/test/session-view-keys.test.ts` 里「绑定创建」一例经 `POST /api/sessions` 显式绑定 `temporary = 1` 的空间，本任务落地后该路径是 404——该例改用 3.2 的辅助函数构造，`store-metadata.ts` 的 `createSession` 里为它读 `workspaces.temporary` 的那一次读随 5.6 的创建语义一起定去留。这是按规格改写，不算削弱既有断言。
-- [ ] 3.4 变异证据：`list` 不过滤 → 3.3 判红；去掉显式绑定的 404 → 「不能显式绑定临时空间」判红；临时空间的目录确保不走补偿 → 「目录创建失败不留行」判红。
+  **实施注记（fixture 评审补充）**：显式绑定的 404 判定落在 `store-metadata.ts` 的 `createSession` 事务里——既有的那次 `SELECT temporary` 读到 1 时抛 `HttpError("not_found")`，由 `runOwnedTransaction` 回滚，不写会话行、不写 `session.bind` 审计；不给 workspace store 加方法、不改装配（`rootOf` 不区分临时与否，路由手里只有它）。响应与「他人 / 不存在的空间」的 404 逐字节相同。其余全是测试：`rootOf` 与 `list` 的现状已满足 tree / dirs / file / commands / project-config 的可达性。场景原文里「由无 body 创建产生的 T」在 5.6 之前不成立，用 3.2 的辅助函数构造。
+- [x] 3.4 变异证据：`list` 不过滤 → 3.3 判红；去掉显式绑定的 404 → 「不能显式绑定临时空间」判红；临时空间的目录确保不走补偿 → 「目录创建失败不留行」判红。
 
 Suggested fixture level: expanded - 沙箱内建目录与失败补偿、公共列表的可见性规则（Critical Path）
 Risk packs: File IO / path safety（3.1 的目录确保与补偿场景）、Error handling / rollback（「目录创建失败不留行」、补偿出口）、Public API（3.3 的列表与 404 场景）、Concurrency / shared state（调用方事务契约、id 碰撞重试）；不选 Schema（列在 1.2 已加）、Config。

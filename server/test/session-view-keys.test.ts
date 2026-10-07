@@ -2,14 +2,17 @@
  * Issue #921 (s1f-session-list-temp-space task 1.3): the session view's three extension keys
  * `archivedAt` / `pendingApproval` / `temporaryWorkspace` through the REST seam — session-metadata
  * 「会话视图扩展键」 (三键的取值 / 待决确认随结算消失 / 各出口一致) and chat-sessions 「Session views
- * carry the three extension keys」. No write entry exists yet for archiving or temporary
- * workspaces, so those rows are planted by SQL. Oracles: the spec's key order and the literals
- * written here, never a view returned by the store.
+ * carry the three extension keys」. Temporary workspaces have no REST write entry yet (and cannot
+ * be bound by id, #925), so those rows are planted by SQL or the 3.2 helper. Oracles: the spec's
+ * key order and the literals written here, never a view returned by the store.
  */
 import { mkdirSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { emit } from "../src/core/audit/index.js";
+import { ensureSharedDir } from "../src/core/sandbox/dirs.js";
+import { createWorkspaceStore } from "../src/workspaces/store.js";
 import {
   type ApprovalWorld,
   openApprovalWorld,
@@ -23,7 +26,8 @@ import {
   withSessionRest,
 } from "./session-rest-helpers.js";
 import { seedMessage, seedSession } from "./session-store-helpers.js";
-import { waitForTurn } from "./session-supervisor-helpers.js";
+import { OWNER_ID, waitForTurn } from "./session-supervisor-helpers.js";
+import { seedTemporaryWorkspaceSession } from "./support/temporary-workspace.js";
 import { insertWorkspace } from "./workspaces-http-helpers.js";
 
 const ELEVEN_KEYS = [
@@ -331,47 +335,59 @@ describe("会话视图扩展键 over the production assembly (real fake-omp appr
   );
 
   it(
-    "绑定创建的 201 视图与列表项相等：正式空间 temporaryWorkspace 为 false，带临时标记的空间为 true",
+    "绑定创建的 201 视图与列表项相等：正式空间 temporaryWorkspace 为 false；用临时空间的会话读回 true，显式绑定它是 404",
     REAL,
     async () => {
       const world = await open();
       const { app, db } = world.fixture;
-      mkdirSync(world.rt.runtime.sandboxRoot, { recursive: true });
-      const workspaceIds: string[] = [];
-      for (const name of ["view-keys-ordinary", "view-keys-temporary"]) {
-        const response = await app.inject({
-          method: "POST",
-          url: "/api/workspaces",
-          headers: { "content-type": JSON_TYPE, cookie: world.cookie },
-          payload: JSON.stringify({ name, dir: name }),
-        });
-        expect(response.statusCode).toBe(201);
-        workspaceIds.push((response.json() as { id: string }).id);
-      }
-      const [ordinary, temporary] = workspaceIds;
-      updateOne(db, "UPDATE workspaces SET temporary = 1 WHERE id = ?", temporary ?? "");
+      const { sandboxRoot } = world.rt.runtime;
+      mkdirSync(sandboxRoot, { recursive: true });
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/workspaces",
+        headers: { "content-type": JSON_TYPE, cookie: world.cookie },
+        payload: JSON.stringify({ name: "view-keys-ordinary", dir: "view-keys-ordinary" }),
+      });
+      expect(response.statusCode).toBe(201);
+      const ordinary = (response.json() as { id: string }).id;
 
-      for (const [workspaceId, temporaryWorkspace] of [
-        [ordinary, false],
-        [temporary, true],
-      ] as const) {
-        const created = await app.inject({
-          method: "POST",
-          url: "/api/sessions",
-          headers: { "content-type": JSON_TYPE, cookie: world.cookie },
-          payload: JSON.stringify({ workspaceId }),
-        });
-        expect(created.statusCode).toBe(201);
-        const body = created.json() as View;
-        expect(Object.keys(body)).toEqual(ELEVEN_KEYS);
-        expect(body).toMatchObject({
-          workspaceId,
-          archivedAt: null,
-          pendingApproval: false,
-          temporaryWorkspace,
-        });
-        expect(await listedView(app, world.cookie, body.id)).toEqual(body);
-      }
+      const created = await app.inject({
+        method: "POST",
+        url: "/api/sessions",
+        headers: { "content-type": JSON_TYPE, cookie: world.cookie },
+        payload: JSON.stringify({ workspaceId: ordinary }),
+      });
+      expect(created.statusCode).toBe(201);
+      const body = created.json() as View;
+      expect(Object.keys(body)).toEqual(ELEVEN_KEYS);
+      expect(body).toMatchObject({
+        workspaceId: ordinary,
+        archivedAt: null,
+        pendingApproval: false,
+        temporaryWorkspace: false,
+      });
+      expect(await listedView(app, world.cookie, body.id)).toEqual(body);
+
+      // A temporary workspace cannot be bound through POST /api/sessions (#925): its session comes
+      // from the store's own createTemporary plus a planted row.
+      const workspaces = createWorkspaceStore(db, { sandboxRoot, ensureSharedDir, emit });
+      const temporary = seedTemporaryWorkspaceSession(db, workspaces, OWNER_ID, ORPHAN_SESSION).id;
+      const refused = await app.inject({
+        method: "POST",
+        url: "/api/sessions",
+        headers: { "content-type": JSON_TYPE, cookie: world.cookie },
+        payload: JSON.stringify({ workspaceId: temporary }),
+      });
+      expect(refused.statusCode).toBe(404);
+      const listedTemporary = await listedView(app, world.cookie, ORPHAN_SESSION);
+      expect(Object.keys(listedTemporary)).toEqual(ELEVEN_KEYS);
+      expect(listedTemporary).toMatchObject({
+        workspaceId: temporary,
+        archivedAt: null,
+        pendingApproval: false,
+        temporaryWorkspace: true,
+      });
+      expect(await snapshotView(app, world.cookie, ORPHAN_SESSION)).toEqual(listedTemporary);
     },
   );
 });

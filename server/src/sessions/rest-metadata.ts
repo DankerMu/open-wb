@@ -1,7 +1,8 @@
 /**
  * Session metadata routes (parent D2). `POST /api/sessions` (#523): an optional exact
  * `{workspaceId?, scene?}` body; a named workspace must be the caller's through the injected
- * owner-scoped `workspaceRootOf`; unknown, foreign and malformed ids share one 404.
+ * owner-scoped `workspaceRootOf`; unknown, foreign and malformed ids share one 404, and so does the
+ * caller's own temporary workspace (#925, thrown by `createSession`).
  * `PATCH /api/sessions/:id` (#524, #922): a non-empty exact `{title?, scene?, pinned?, archived?}`
  * body, owner checked before parsing; a title write marks the session's in-flight admission so its
  * rollback keeps the new title; `archived: true` is refused whole with 409 `session_busy` while the
