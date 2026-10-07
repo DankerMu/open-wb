@@ -83,6 +83,12 @@ describe("resolveServerConfig — 缺省身份", () => {
       ompUser: undefined,
     });
     expect(sevenDefaults(fromDist)).toEqual(sevenDefaults(fromSource));
+    for (const config of [fromSource, fromDist]) {
+      expect(config.snapshotMaxFileBytes).toBe(20_971_520);
+      expect(config.snapshotMaxTotalBytes).toBe(524_288_000);
+      expect(config.snapshotMaxEntries).toBe(50_000);
+      expect(config.snapshotExcludeNames).toEqual(["node_modules", ".venv", "__pycache__"]);
+    }
   });
 
   it("路径身份不受 process.cwd() 影响，只由 entry module identity 推导", () => {
@@ -277,6 +283,10 @@ describe("resolveServerConfig — 新增七项缺省与逐项覆盖", () => {
       MODEL_UPSTREAM_BASE_URL: "https://models.example",
       MODEL_UPSTREAM_API_KEY: "sentinel-key",
       MODEL_ID: "model-bytes",
+      SNAPSHOT_MAX_FILE_BYTES: "4096",
+      SNAPSHOT_MAX_TOTAL_BYTES: "65536",
+      SNAPSHOT_MAX_ENTRIES: "12",
+      SNAPSHOT_EXCLUDE_NAMES: "target,.cache",
     };
     const originalCwd = process.cwd();
     try {
@@ -295,6 +305,12 @@ describe("resolveServerConfig — 新增七项缺省与逐项覆盖", () => {
         modelId: "model-bytes",
         repoRoot: REPO_ROOT,
       });
+      for (const config of [fromSource, fromDist]) {
+        expect(config.snapshotMaxFileBytes).toBe(4096);
+        expect(config.snapshotMaxTotalBytes).toBe(65_536);
+        expect(config.snapshotMaxEntries).toBe(12);
+        expect(config.snapshotExcludeNames).toEqual(["target", ".cache"]);
+      }
     } finally {
       process.chdir(originalCwd);
     }
@@ -567,4 +583,157 @@ describe("resolveServerConfig — UPLOAD_MAX_BYTES 与 UPLOAD_MAX_FILES（上传
       },
     );
   });
+});
+
+describe("resolveServerConfig — SNAPSHOT_*（快照上限与排除名单）", () => {
+  const NUMERIC = [
+    ["SNAPSHOT_MAX_FILE_BYTES", "snapshotMaxFileBytes", 20_971_520],
+    ["SNAPSHOT_MAX_TOTAL_BYTES", "snapshotMaxTotalBytes", 524_288_000],
+    ["SNAPSHOT_MAX_ENTRIES", "snapshotMaxEntries", 50_000],
+  ] as const;
+  const NUMERIC_INVALID = [
+    ["", "canonical"],
+    ["0", "range"],
+    ["abc", "canonical"],
+    ["-1", "canonical"],
+    ["1.5", "canonical"],
+    ["016", "canonical"],
+    ["+8", "canonical"],
+    [" 8", "canonical"],
+    ["2147483648", "range"],
+  ] as const;
+  const NAMES = "SNAPSHOT_EXCLUDE_NAMES";
+  const NAMES_MESSAGE =
+    "SNAPSHOT_EXCLUDE_NAMES must be comma-separated directory names without empty, '.', '..', '/' or NUL entries";
+  const DEFAULT_NAMES = ["node_modules", ".venv", "__pycache__"];
+
+  it("未设置与显式 undefined 时为规格缺省，默认名单不含 .git", () => {
+    for (const env of [
+      {},
+      {
+        SNAPSHOT_MAX_FILE_BYTES: undefined,
+        SNAPSHOT_MAX_TOTAL_BYTES: undefined,
+        SNAPSHOT_MAX_ENTRIES: undefined,
+        SNAPSHOT_EXCLUDE_NAMES: undefined,
+      },
+    ]) {
+      const config = resolveServerConfig(env, SOURCE_ENTRY);
+      expect(config.snapshotMaxFileBytes).toBe(20_971_520);
+      expect(config.snapshotMaxTotalBytes).toBe(524_288_000);
+      expect(config.snapshotMaxEntries).toBe(50_000);
+      expect(config.snapshotExcludeNames).toEqual(DEFAULT_NAMES);
+      expect(config.snapshotExcludeNames).not.toContain(".git");
+    }
+  });
+
+  it("四个键同时给出合法值时各自生效，互不串位，其余配置不变", () => {
+    const config = resolveServerConfig(
+      {
+        SNAPSHOT_MAX_FILE_BYTES: "11",
+        SNAPSHOT_MAX_TOTAL_BYTES: "22",
+        SNAPSHOT_MAX_ENTRIES: "33",
+        SNAPSHOT_EXCLUDE_NAMES: "target,.git",
+      },
+      SOURCE_ENTRY,
+    );
+    const {
+      snapshotMaxFileBytes,
+      snapshotMaxTotalBytes,
+      snapshotMaxEntries,
+      snapshotExcludeNames,
+      ...rest
+    } = config;
+    expect(snapshotMaxFileBytes).toBe(11);
+    expect(snapshotMaxTotalBytes).toBe(22);
+    expect(snapshotMaxEntries).toBe(33);
+    expect(snapshotExcludeNames).toEqual(["target", ".git"]);
+    const {
+      snapshotMaxFileBytes: _file,
+      snapshotMaxTotalBytes: _total,
+      snapshotMaxEntries: _entries,
+      snapshotExcludeNames: _names,
+      ...base
+    } = resolveServerConfig({}, SOURCE_ENTRY);
+    expect(rest).toEqual(base);
+  });
+
+  describe.each(NUMERIC)("%s", (key, field, fallback) => {
+    it("只读自己的键：单独覆盖时另外三项保持缺省；接受边界 1 与 2147483647", () => {
+      const config = resolveServerConfig({ [key]: "7" }, SOURCE_ENTRY);
+      for (const [, other, otherDefault] of NUMERIC) {
+        expect(config[other]).toBe(other === field ? 7 : otherDefault);
+      }
+      expect(config.snapshotExcludeNames).toEqual(DEFAULT_NAMES);
+      expect(resolveServerConfig({ [key]: undefined }, SOURCE_ENTRY)[field]).toBe(fallback);
+      expect(resolveServerConfig({ [key]: "1" }, SOURCE_ENTRY)[field]).toBe(1);
+      expect(resolveServerConfig({ [key]: "2147483647" }, SOURCE_ENTRY)[field]).toBe(2_147_483_647);
+    });
+
+    it.each(NUMERIC_INVALID)("拒绝 %j，错误只命名键", (bad, kind) => {
+      expectKeyOnlyMessage(
+        key,
+        bad,
+        kind === "range"
+          ? `${key} must be within 1..2147483647`
+          : `${key} must be a canonical ASCII decimal`,
+      );
+    });
+
+    it.each(["abc", "-1", "1.5", "016", "2147483648", "98765x"])(
+      "错误信息不回显输入值 %s",
+      (bad) => {
+        const message = thrownMessageOf({ [key]: bad });
+        expect(message).toContain(key);
+        expect(message).not.toContain(bad);
+      },
+    );
+  });
+
+  it.each([
+    ["空字符串表示不排除任何目录", "", []],
+    ["单个名字", "dist", ["dist"]],
+    ["多个名字按书写顺序", "node_modules,.git,build", ["node_modules", ".git", "build"]],
+    ["不 trim、不去重、保留点前缀与多点名", " a ,a,...,.b", [" a ", "a", "...", ".b"]],
+  ])("SNAPSHOT_EXCLUDE_NAMES：%s", (_label, raw, expected) => {
+    const config = resolveServerConfig({ [NAMES]: raw }, SOURCE_ENTRY);
+    expect(config.snapshotExcludeNames).toEqual(expected);
+    expect(config.snapshotMaxFileBytes).toBe(20_971_520);
+    expect(config.snapshotMaxTotalBytes).toBe(524_288_000);
+    expect(config.snapshotMaxEntries).toBe(50_000);
+  });
+
+  it("缺省名单每次解析是独立数组，改动一份不影响下一次解析", () => {
+    const first = resolveServerConfig({}, SOURCE_ENTRY).snapshotExcludeNames as string[];
+    first.push(".git");
+    expect(resolveServerConfig({}, SOURCE_ENTRY).snapshotExcludeNames).toEqual(DEFAULT_NAMES);
+  });
+
+  it.each([
+    ["含斜杠的名字", "a/b"],
+    ["父目录", ".."],
+    ["当前目录", "."],
+    ["中间空名段", "a,,b"],
+    ["前导逗号", ",a"],
+    ["尾随逗号", "a,"],
+    ["只有逗号", ","],
+    ["列表里的父目录", "node_modules,.."],
+    ["列表里的当前目录", ".,dist"],
+    ["列表里的斜杠名", "dist,src/gen"],
+    ["绝对路径", "/abs"],
+    ["含 NUL 的名字", "a\0b"],
+  ])("SNAPSHOT_EXCLUDE_NAMES 拒绝%s，错误只命名键", (_label, bad) => {
+    expectKeyOnlyMessage(NAMES, bad, NAMES_MESSAGE);
+  });
+
+  it.each(["sentinel/zeta9", "Sentinel-Name,,x", "zeta-7,..", "pre\0post"])(
+    "SNAPSHOT_EXCLUDE_NAMES 错误信息不回显输入值 %j",
+    (bad) => {
+      const message = thrownMessageOf({ [NAMES]: bad });
+      expect(message).toContain(NAMES);
+      expect(message).not.toContain(bad);
+      for (const part of bad.split(/[,/]/u).filter((piece) => piece.length > 2)) {
+        expect(message).not.toContain(part);
+      }
+    },
+  );
 });
