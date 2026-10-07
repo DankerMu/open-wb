@@ -21,6 +21,8 @@ const TODO_ARGS = JSON.stringify({
   list: [{ phase: "走查", items: ["整理需求", "输出结论"] }],
 });
 const GATE_PREFIX = "/__control/gates/";
+const REQUESTS_PATH = "/__control/requests";
+const REQUESTS_CAP = 1000;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const WALK_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/iu;
 const DEFAULT_TTL_MS = 30_000;
@@ -36,8 +38,10 @@ export async function start(options = {}) {
       ? options.gateTtlMs
       : DEFAULT_TTL_MS;
   const gates = new Map();
+  /** Accepted chat-completions requests in arrival order: `{model, messages}` only, latest 1000. */
+  const requests = [];
   const server = createServer((request, response) => {
-    void handleRequest(request, response, expectedKey, gates, ttlMs);
+    void handleRequest(request, response, expectedKey, gates, ttlMs, requests);
   });
   await listen(server, requested);
   const address = server.address();
@@ -47,6 +51,9 @@ export async function start(options = {}) {
   let closed = false;
   return {
     port: address.port,
+    requests() {
+      return requests.map((entry) => ({ ...entry }));
+    },
     async close() {
       if (closed) {
         return;
@@ -63,8 +70,12 @@ export async function start(options = {}) {
   };
 }
 
-async function handleRequest(request, response, expectedKey, gates, ttlMs) {
+async function handleRequest(request, response, expectedKey, gates, ttlMs, requests) {
   const path = request.url === undefined ? "" : request.url.split("?")[0];
+  if (path === REQUESTS_PATH) {
+    readRequests(request, response, expectedKey, requests);
+    return;
+  }
   if (path.startsWith(GATE_PREFIX)) {
     handleControl(request, response, path, expectedKey, gates, ttlMs);
     return;
@@ -77,14 +88,40 @@ async function handleRequest(request, response, expectedKey, gates, ttlMs) {
     writeJson(response, 401, { error: { message: "Unauthorized" } });
     return;
   }
-  const parsed = await readChatMessages(request, response);
+  const parsed = await readChatMessages(request, response, requests);
   if (parsed === undefined) {
     return;
   }
   serveChat(response, gates, parsed);
 }
 
-async function readChatMessages(request, response) {
+function readRequests(request, response, expectedKey, requests) {
+  if (!bearerMatches(request.headers.authorization, expectedKey)) {
+    writeJson(response, 401, { error: { message: "Unauthorized" } });
+    return;
+  }
+  if (request.method !== "GET") {
+    notFound(response);
+    return;
+  }
+  writeJson(response, 200, { requests }, { "cache-control": "no-store" });
+}
+
+/** Records a body that parsed as a JSON object, before `messages` is validated; no text is kept. */
+function recordRequest(requests, body) {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return;
+  }
+  requests.push({
+    model: typeof body.model === "string" ? body.model : null,
+    messages: Array.isArray(body.messages) ? body.messages.length : 0,
+  });
+  if (requests.length > REQUESTS_CAP) {
+    requests.shift();
+  }
+}
+
+async function readChatMessages(request, response, requests) {
   let raw;
   try {
     raw = await readBody(request);
@@ -99,6 +136,7 @@ async function readChatMessages(request, response) {
     writeJson(response, 400, { error: { message: "Invalid request" } });
     return undefined;
   }
+  recordRequest(requests, body);
   if (body === null || typeof body !== "object" || !Array.isArray(body.messages)) {
     writeJson(response, 400, { error: { message: "Invalid request" } });
     return undefined;
@@ -464,9 +502,9 @@ function writeSseDone(response) {
   response.write("data: [DONE]\n\n");
 }
 
-function writeJson(response, status, body) {
+function writeJson(response, status, body, headers = {}) {
   const payload = JSON.stringify(body);
-  response.writeHead(status, { "content-type": "application/json" });
+  response.writeHead(status, { "content-type": "application/json", ...headers });
   response.end(payload);
 }
 
