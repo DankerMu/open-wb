@@ -90,7 +90,7 @@ INSERT INTO workspaces(id, owner_id, name, dir, created_at)
 VALUES ('${KEPT_WORKSPACE_ID}', '${KEPT_OWNER_ID}', 'kept-name', 'kept-dir', 7);`;
 
 describe("core/db workspaces schema", () => {
-  it("openDb exposes five columns, id PK NOT NULL, CASCADE owner FK, and both unique indexes", () => {
+  it("openDb exposes six columns, id PK NOT NULL, CASCADE owner FK, and both unique indexes", () => {
     withOpenDb(":memory:", (db) => {
       expect(
         db
@@ -103,6 +103,7 @@ describe("core/db workspaces schema", () => {
         ["name", "TEXT", 1, null, 0, 0],
         ["dir", "TEXT", 1, null, 0, 0],
         ["created_at", "INTEGER", 1, null, 0, 0],
+        ["temporary", "INTEGER", 1, "0", 0, 0],
       ]);
       expect(db.prepare("PRAGMA foreign_key_list('workspaces')").all()).toEqual([
         expect.objectContaining({
