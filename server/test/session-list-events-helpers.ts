@@ -10,6 +10,7 @@ import { expect } from "vitest";
 import { requestMe } from "./auth-lifecycle-helpers.js";
 import { cookieFor } from "./session-rest-helpers.js";
 import { waitFor } from "./session-supervisor-helpers.js";
+import type { TestClock } from "./support/omp-runtime.js";
 
 export const EVENTS_URL = "/api/sessions/events";
 export const CHANGED_FRAME = "event: sessions.changed\ndata: {}\n\n";
@@ -93,6 +94,39 @@ export function textOf(client: ListClient, expected: string): Promise<string> {
 
 export function count(text: string, frame: string): number {
   return text.split(frame).length - 1;
+}
+
+export function changedSince(client: ListClient, mark: number): number {
+  return count(client.text().slice(mark), CHANGED_FRAME);
+}
+
+export async function changed(client: ListClient, mark: number, what: string, atLeast = 1) {
+  await waitFor(
+    () => (changedSince(client, mark) >= atLeast ? true : undefined),
+    `${String(atLeast)} sessions.changed after ${what}`,
+  );
+}
+
+/**
+ * Reads the connections empty: one heartbeat is written after everything handed to the transport
+ * so far, so once it arrived nothing older is still in flight. Returns the marks for "after this".
+ */
+export async function drainedBy(clock: TestClock, clients: ListClient[]): Promise<number[]> {
+  const beats = clients.map((client) => count(client.text(), HEARTBEAT_FRAME));
+  clock.advance(HEARTBEAT_MS);
+  await waitFor(
+    () =>
+      clients.every((client, index) => count(client.text(), HEARTBEAT_FRAME) > (beats[index] ?? 0))
+        ? true
+        : undefined,
+    "heartbeat sentinel",
+  );
+  return clients.map((client) => client.text().length);
+}
+
+/** Every frame on the connection is a `sessions.changed` with `data` exactly `{}` or a heartbeat. */
+export function expectOnlyChangedFrames(client: ListClient): void {
+  expect(client.text().replaceAll(CHANGED_FRAME, "").replaceAll(HEARTBEAT_FRAME, "")).toBe("");
 }
 
 export async function bounded<T>(work: Promise<T>, description: string, ms = 3_000): Promise<T> {

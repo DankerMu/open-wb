@@ -31,9 +31,12 @@ import { BAD_REQUEST_ENVELOPE, NOT_FOUND_ENVELOPE } from "./session-db-helpers.j
 import {
   accountOf,
   CHANGED_FRAME,
+  changed,
+  changedSince,
   count,
+  drainedBy,
+  expectOnlyChangedFrames,
   HEARTBEAT_FRAME,
-  HEARTBEAT_MS,
   type ListClient,
   type ListTarget,
   openList,
@@ -135,42 +138,13 @@ async function openReal(
   return listening(world, world.clock, () => world.spawned.map((spawned) => spawned.child));
 }
 
-function changedSince(client: ListClient, mark: number): number {
-  return count(client.text().slice(mark), CHANGED_FRAME);
-}
-
-async function changed(client: ListClient, mark: number, what: string, atLeast = 1) {
-  await waitFor(
-    () => (changedSince(client, mark) >= atLeast ? true : undefined),
-    `${String(atLeast)} sessions.changed after ${what}`,
-  );
-}
-
-/**
- * Reads the connection empty: one heartbeat is written after everything handed to the transport
- * so far, so once it arrived nothing older is still in flight. Returns the mark for "after this".
- */
-async function drained(world: AnyWorld, ...clients: ListClient[]): Promise<number[]> {
-  const beats = clients.map((client) => count(client.text(), HEARTBEAT_FRAME));
-  world.clock.advance(HEARTBEAT_MS);
-  await waitFor(
-    () =>
-      clients.every((client, index) => count(client.text(), HEARTBEAT_FRAME) > (beats[index] ?? 0))
-        ? true
-        : undefined,
-    "heartbeat sentinel",
-  );
-  return clients.map((client) => client.text().length);
+function drained(world: AnyWorld, ...clients: ListClient[]): Promise<number[]> {
+  return drainedBy(world.clock, clients);
 }
 
 async function mark(world: AnyWorld, client: ListClient): Promise<number> {
   const [length] = await drained(world, client);
   return length ?? 0;
-}
-
-/** Every frame on the connection is a `sessions.changed` with `data` exactly `{}` or a heartbeat. */
-function expectOnlyChangedFrames(client: ListClient): void {
-  expect(client.text().replaceAll(CHANGED_FRAME, "").replaceAll(HEARTBEAT_FRAME, "")).toBe("");
 }
 
 async function listed(world: AnyWorld, session = world.session): Promise<Listed | undefined> {

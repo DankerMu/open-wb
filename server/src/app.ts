@@ -185,7 +185,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
   app.decorate("sessions", registered);
   const audit = { emit: (event: Parameters<typeof emit>[1]) => emit(db, event) };
   const sandbox = createSandbox({ rootOf: store.rootOf, audit });
-  registerWorkspaces(app, { store, sandbox, audit });
+  registerWorkspaces(app, { store, sandbox, audit, listEvents: registered.listEvents });
   registerAccounts(app, { db });
 
   app.all("/api", (request, reply) => sendNotFound(reply, request));
