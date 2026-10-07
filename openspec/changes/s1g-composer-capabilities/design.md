@@ -544,8 +544,8 @@ C 新增而本 change 没有修改的条文（temporary-workspaces、workspace-s
 | `auto` | `high` | `high` |
 
 - `set_thinking_level` 对这十六次调用没有一次拒绝。omp 报的是「不高于所请求值的最近一档该模型的强度，没有就取最低一档」；`auto` 不作为一个状态保留，报成 `high`。
-- 声明了 `efforts` 的模型：可选集合 `{off, low, high, auto}` 里只有 `auto` 不满足 `thinkingLevel === v`。D9 末段已写了这种情形的处理（把该取值从可选集合里拿掉并改规格），是否照办待 owner。
-- 未声明 `efforts` 的推理模型：D9「未声明则全部六档」的前提不成立——omp 自己给条目配了强度集合，`minimal`、`medium`、`xhigh` 被夹到相邻档。D7 只写了「集合为空」的退路。
+- 声明了 `efforts` 的模型：当时的可选集合 `{off, low, high, auto}` 里只有 `auto` 不满足 `thinkingLevel === v`。owner 据此移除 `auto`（见本节末「owner 决定」）。
+- 未声明 `efforts` 的推理模型：omp 自己给条目配了强度集合，`minimal`、`medium`、`xhigh` 被夹到相邻档——修订前 D9「未声明则全部六档」的前提不成立，修订前 D7 只为「集合为空」写了退路。owner 据此要求 `MODEL_CATALOG` 的推理模型声明 `efforts`、旧式单模型配置不动。
 - 仅本机探针、不在 CI 输出里的补充（未入库，不作结论依据）：同样只写 `reasoning: true` 的条目，id 换成一个中性名字时报出的是 `[minimal, low, medium, high, xhigh]` 五档——集合随模型 id 变；未知取值（如 `bogus`）不被拒绝，之后 `thinkingLevel` 缺席。
 - 关于 D8 正文「`setModel` 会把强度重置为新模型的缺省」：实测在第一个模型上设 `off` 后 `set_model` 到第二个模型，`get_state.thinkingLevel` 是 `off`——`off` 被带了过去。用例没有记录第二个模型未经设置时的缺省强度，所以这只是与「重置为缺省」不符的迹象，**未判定**；「先 `set_model` 后 `set_thinking_level`」的次序在两种解释下都无害。
 
