@@ -9,7 +9,6 @@ import {
 import { useLocation, useNavigate } from "react-router";
 import type { ApiClient } from "../../lib/api.js";
 import type { ChatSession } from "../../lib/session-contract.js";
-import { useToast } from "../../ui/index.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
 import { sessionNavigation, sessionTitle } from "./session-path.js";
 import type { ChatHistoryState, ChatListState } from "./types.js";
@@ -27,16 +26,33 @@ type RenameState = {
   token: number;
 };
 
-/** 打开的删除确认框；`title` 是打开那一刻的显示标题。 */
-type DeleteState = { client: ApiClient; sessionId: string; title: string };
+/**
+ * 打开的删除确认框；`title` 是打开那一刻的显示标题。`shared` 在打开时用已加载的列表（含已归档）
+ * 判定：另有会话与它同 `workspaceId`。只对临时空间的会话有意义（确认文案的三种变体）。
+ */
+type DeleteState = {
+  client: ApiClient;
+  sessionId: string;
+  title: string;
+  workspaceId: string | null;
+  temporaryWorkspace: boolean;
+  shared: boolean;
+};
+
+/** 列表区顶部提示：没有对话框可显示的失败。属于 `client`，换账号后不再显示。 */
+type AlertState = { client: ApiClient; message: string };
 
 /** DELETE 在途的会话 id，属于 `client`；只经 `deletingIds` 读取。 */
 type DeletingState = { client: ApiClient; ids: readonly string[] };
 
-/** 页面交给删除收尾用的句柄：中止历史读取、关闭事件流、重读列表、当前选中的会话 id（响应到达时读取）。 */
+/**
+ * 页面交给删除用的句柄：中止历史读取、关闭事件流、重读列表、当前选中的会话 id（响应到达时读取），
+ * 以及会话列表状态（打开删除确认框时判定临时空间是否共用）。
+ */
 type PageHandles = {
   abortHistory(): void;
   closeSource(): void;
+  list: ChatListState;
   refreshList(client: ApiClient): void;
   requestedSessionRef: RefObject<string | null>;
 };
@@ -64,6 +80,22 @@ function withoutSession(list: ChatListState, client: ApiClient, sessionId: strin
     : list;
 }
 
+/**
+ * 列表区的 `新建会话`（nav 的直接子按钮；顶部提示里的 `关闭提示` 不是直接子元素）；列表区未挂载
+ * （侧栏折叠、覆盖层关闭）时为 null。列表区在外壳的侧栏槽位里渲染，这里按 DOM 取而不传 ref。
+ */
+function listEntryPoint() {
+  return document.querySelector<HTMLElement>('nav[aria-label="会话列表"] > button');
+}
+
+/**
+ * 对话框关闭后的焦点：打开它的按钮还在就还给它；按钮已卸载（条目被删除、列表区换了呈现面）时
+ * 落到列表区的首个控件，不落回 body。
+ */
+function restoreFocus(trigger: HTMLElement | null) {
+  (trigger?.isConnected ? trigger : listEntryPoint())?.focus({ preventScroll: true });
+}
+
 function withMeta(session: ChatSession, view: ChatSession, key: MetaKey): ChatSession {
   return key === "title"
     ? { ...session, title: view.title }
@@ -83,6 +115,9 @@ function withMeta(session: ChatSession, view: ChatSession, key: MetaKey): ChatSe
  * 在途 DELETE。「是否为当前会话」在响应到达时读 `page.requestedSessionRef`；是则先关闭事件流再
  * 以 replace 移除 `?session=`，其余收尾（历史置 idle 等）由页面既有的 `requestedSessionId` effect
  * 完成。
+ *
+ * 不弹轻提示：成功以列表自身的变化为反馈；对话框开着时的失败在对话框内显示；没有对话框的动作
+ * （置顶）与对话框关闭后才到达的失败进 `alert`（列表区顶部提示），下一次列表动作发起时清除。
  */
 export function useSessionActions(
   client: ApiClient,
@@ -90,12 +125,12 @@ export function useSessionActions(
   setHistoryState: Dispatch<SetStateAction<ChatHistoryState>>,
   page: PageHandles,
 ) {
-  const toast = useToast();
   const navigate = useNavigate();
   const location = useLocation();
   const [state, setState] = useState<RenameState | null>(null);
   const [removing, setRemoving] = useState<DeleteState | null>(null);
   const [deleting, setDeleting] = useState<DeletingState>({ client, ids: [] });
+  const [alert, setAlert] = useState<AlertState | null>(null);
   const stateRef = useRef(state);
   const clientRef = useRef(client);
   const mountedRef = useRef(false);
@@ -196,7 +231,13 @@ export function useSessionActions(
       );
   }
 
+  /** 通过 fence 的失败进列表区顶部提示；401 交给既有的未授权通知。 */
+  function report(error: unknown) {
+    if (!isUnauthorized(error)) setAlert({ client, message: errorMessage(error) });
+  }
+
   function openRename(session: ChatSession, trigger: HTMLElement | null) {
+    setAlert(null);
     returnFocus.current = trigger;
     tokenRef.current += 1;
     setState({
@@ -212,6 +253,7 @@ export function useSessionActions(
   function submitRename(text: string) {
     const title = text.trim();
     if (!state || state.busy || title.length === 0) return;
+    setAlert(null);
     const { sessionId, token } = state;
     /** 只改发起本请求的那次打开；它已被关闭或被新的打开取代时不动。 */
     const update = (next: (opening: RenameState) => RenameState | null) =>
@@ -221,37 +263,39 @@ export function useSessionActions(
       sessionId,
       "title",
       { title },
-      () => {
-        toast.show({ type: "success", message: "已重命名" });
-        update(() => null);
-      },
+      () => update(() => null),
       (error) => {
         if (isUnauthorized(error)) {
           update((opening) => ({ ...opening, busy: false }));
         } else if (stateRef.current?.token === token) {
           update((opening) => ({ ...opening, busy: false, error: errorMessage(error) }));
         } else {
-          toast.show({ type: "error", message: errorMessage(error) });
+          report(error);
         }
       },
     );
   }
 
   function togglePin(session: ChatSession) {
-    send(
-      session.id,
-      "pinnedAt",
-      { pinned: session.pinnedAt === null },
-      () => toast.show({ type: "success", message: "已更新置顶状态" }),
-      (error) => {
-        if (!isUnauthorized(error)) toast.show({ type: "error", message: errorMessage(error) });
-      },
-    );
+    setAlert(null);
+    send(session.id, "pinnedAt", { pinned: session.pinnedAt === null }, () => {}, report);
   }
 
   function openDelete(session: ChatSession, trigger: HTMLElement | null) {
+    setAlert(null);
     deleteReturnFocus.current = trigger;
-    setRemoving({ client, sessionId: session.id, title: sessionTitle(session) });
+    const { list } = page;
+    const loaded = list.status === "success" && list.client === client ? list.sessions : [];
+    setRemoving({
+      client,
+      sessionId: session.id,
+      title: sessionTitle(session),
+      workspaceId: session.workspaceId,
+      temporaryWorkspace: session.temporaryWorkspace,
+      shared: loaded.some(
+        (other) => other.id !== session.id && other.workspaceId === session.workspaceId,
+      ),
+    });
   }
 
   function isDeleting(sessionId: string) {
@@ -260,11 +304,12 @@ export function useSessionActions(
 
   /**
    * 发出 DELETE；该会话已有在途 DELETE 时不做任何事。通过 fence 的结果先清在途标记。204：移除
-   * 条目、关闭为该会话打开的确认框与重命名 Dialog、提示；响应到达时它是当前会话则关闭事件流并
-   * replace 回欢迎态（不重读列表）。401 交给既有的未授权通知。其它失败：关闭确认框、提示、重读列表。
+   * 条目、关闭为该会话打开的确认框与重命名 Dialog；响应到达时它是当前会话则关闭事件流并 replace
+   * 回欢迎态（不重读列表）。401 交给既有的未授权通知。其它失败：关闭确认框、列表区顶部提示、重读列表。
    */
   function confirmDelete(sessionId: string) {
     if (isDeleting(sessionId)) return;
+    setAlert(null);
     const request = track();
     setDeleting((marks) => ({ client, ids: [...deletingIds(marks, client), sessionId] }));
     const unmark = () =>
@@ -282,7 +327,6 @@ export function useSessionActions(
           setListState((list) => withoutSession(list, client, sessionId));
           setRemoving((opening) => closedFor(opening, client, sessionId));
           setState((opening) => closedFor(opening, client, sessionId));
-          toast.show({ type: "success", message: "任务已删除" });
           if (page.requestedSessionRef.current !== sessionId) return;
           // 仍在途的历史读取若在 navigate 与下一次渲染之间得到 200，会为已删会话重开事件流：先中止它。
           page.abortHistory();
@@ -295,7 +339,7 @@ export function useSessionActions(
           unmark();
           if (isUnauthorized(error)) return;
           setRemoving((opening) => closedFor(opening, client, sessionId));
-          toast.show({ type: "error", message: errorMessage(error) });
+          report(error);
           page.refreshList(client);
         },
       );
@@ -305,13 +349,21 @@ export function useSessionActions(
     openRename,
     togglePin,
     openDelete,
+    /** 列表区顶部提示的文案（null 为没有）与 `关闭提示`；属于上一个 client 的不显示。 */
+    alert: alert && alert.client === client ? alert.message : null,
+    dismissAlert: () => setAlert(null),
     /** `DeleteDialog` 的 props；没有打开的确认框、或它属于上一个 client 时为 null。 */
     remove:
       removing && removing.client === client
         ? {
             title: removing.title,
+            workspace: removing.temporaryWorkspace
+              ? removing.shared
+                ? ("shared" as const)
+                : ("sole" as const)
+              : null,
             pending: isDeleting(removing.sessionId),
-            returnFocus: deleteReturnFocus,
+            restoreFocus: () => restoreFocus(deleteReturnFocus.current),
             onConfirm: () => confirmDelete(removing.sessionId),
             onCancel: () => setRemoving(null),
           }
@@ -323,7 +375,7 @@ export function useSessionActions(
             title: state.title,
             busy: state.busy,
             error: state.error,
-            returnFocus,
+            restoreFocus: () => restoreFocus(returnFocus.current),
             onSubmit: submitRename,
             onCancel: () => setState(null),
           }

@@ -32,15 +32,12 @@ import {
 import {
   artifactsPanelFixture,
   drawer,
-  expectPanelClosed,
   footClose,
   NO_ARTIFACTS,
   openPanel,
   panelAction,
   panelBody,
   panelButton,
-  renameBehindDialog,
-  renameRoute,
   routeToOtherSession,
   rowAlerts,
   rowButtons,
@@ -97,38 +94,6 @@ function focusOn(element: Element) {
 }
 
 describe("焦点归还 (P13)", () => {
-  // The toast is the session list's 已重命名: a row's copy no longer shows one. It arrives while the
-  // drawer is open, so it sits above the drawer in the Radix layer stack and takes its Escape.
-  it("P13 a finished row copy takes focus back from body, so Escape closes the drawer while a toast is shown", async () => {
-    stubClipboard(vi.fn((_text: string) => Promise.resolve()));
-    const pending = deferredResponse();
-    const renamed = deferredResponse();
-    const changes = [edit(APP, 2, 1)];
-    await openPreviewing(
-      changes,
-      () => pending.promise,
-      () => renameRoute(renamed.promise),
-    );
-    await renameBehindDialog();
-    const { panel, trigger } = await openPanel();
-    const copy = panelAction(panel, COPY_APP);
-    await pressAndLoseFocus(copy);
-
-    await settleDeferredResponse(pending, textPreviewResponse(CODE_TEXT));
-    const session = { ...changedTurn(changes).session, title: "新标题" };
-    await settleDeferredResponse(renamed, jsonResponse(session));
-
-    await waitFor(() => expect(glyphOf(copy)).toBe("check"));
-    await waitFor(() => expect(toasts()).toEqual([["success", "已重命名"]]));
-    await focusOn(copy);
-    expect(copy.disabled).toBe(false);
-
-    fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
-
-    await expectPanelClosed();
-    expect(document.activeElement).toBe(trigger);
-  });
-
   it("P13 focus the user moved elsewhere while the row action was pending stays there", async () => {
     stubClipboard(vi.fn((_text: string) => Promise.resolve()));
     const pending = await openPending(edit(APP, 2, 1));

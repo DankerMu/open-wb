@@ -21,7 +21,7 @@ import {
 } from "./chat-page-file-changes-support.js";
 import type { ChatAuthProbe } from "./chat-page-lifecycle-support.js";
 import { OTHER_SESSION_ID, SESSION_MESSAGES } from "./chat-page-ownership-support.js";
-import { expectChatLocation, type FetchRoutes } from "./chat-page-support.js";
+import { expectChatLocation } from "./chat-page-support.js";
 import {
   FakeEventSource,
   historyUser,
@@ -170,32 +170,6 @@ export function footClose(panel: HTMLElement) {
 
 export function headClose(panel: HTMLElement) {
   return closeButtons(panel).head;
-}
-
-const RENAME = `/api/sessions/${SESSION_ID}`;
-
-/**
- * Route answering the session's rename with `response`, for `renameBehindDialog`: the session-list
- * actions are the only toast source left on the session page.
- */
-export const renameRoute = (response: Promise<Response>): FetchRoutes => ({
-  [RENAME]: () => response,
-});
-
-/**
- * Submits a rename from the top bar and cancels its dialog while the request is pending. Answering
- * the request later shows the `已重命名` toast above whatever layer was opened meanwhile.
- */
-export async function renameBehindDialog() {
-  fireEvent.click(within(banner()).getByRole("button", { name: "重命名" }));
-  const dialog = await screen.findByRole("dialog", { name: "重命名任务" });
-  fireEvent.change(within(dialog).getByRole("textbox", { name: "任务名称" }), {
-    target: { value: "新标题" },
-  });
-  fireEvent.click(within(dialog).getByRole("button", { name: "保存" }));
-  fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
-  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-  await yieldMacrotask();
 }
 
 type Router = { navigate(to: string): Promise<void> };

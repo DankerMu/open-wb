@@ -16,9 +16,12 @@ import {
   crumb,
   entryTitles,
   envelope,
+  expectNoListToast,
   FIRST_ACCOUNT_TASK,
   findList,
+  findListAlert,
   leaveChatPage,
+  listAlert,
   messagesPath,
   mountSessions,
   mountTwoAccounts,
@@ -27,13 +30,11 @@ import {
   openTopbarRename,
   PIN,
   PINNED_AT,
-  PINNED_TOAST,
   partition,
   partitionTitles,
   patchOf,
   patchPath,
   patchRequests,
-  RENAMED_TOAST,
   REQUEST_FAILED,
   renameDialog,
   SECOND_ACCOUNT_TASK,
@@ -93,45 +94,77 @@ describe("置顶与取消置顶 (M8, M9)", () => {
       const lists = calls(fetchMock, "/api/sessions").length;
 
       await chooseEntryAction(nav, MIDDLE, PIN);
-      await waitFor(() => expect(toasts()).toEqual([PINNED_TOAST]));
+      await waitFor(() => expectMiddlePinned(nav));
+      expectNoListToast();
       expect(patchRequests(fetchMock, B)).toEqual([patchOf('{"pinned":true}')]);
-      expectMiddlePinned(nav);
       expect(within(nav).getAllByRole("button", { name: MIDDLE })).toHaveLength(1);
 
       const { items, menu } = await openEntryMenu(nav, MIDDLE);
       expect(items.map((item) => item.textContent)).toEqual(["重命名", UNPIN, "删除"]);
       fireEvent.click(within(menu).getByRole("menuitem", { name: UNPIN }));
-      await waitFor(() => expect(toasts()).toEqual([PINNED_TOAST, PINNED_TOAST]));
+      await waitFor(() => expectUnpinned(nav));
+      expectNoListToast();
+      expect(listAlert(nav)).toBeNull();
       expect(patchRequests(fetchMock, B)).toEqual([
         patchOf('{"pinned":true}'),
         patchOf('{"pinned":false}'),
       ]);
-      expectUnpinned(nav);
       expect(entryTitles(nav)).toEqual([FIRST, MIDDLE, LAST]);
       expect(calls(fetchMock, "/api/sessions")).toHaveLength(lists);
     },
   );
 
-  it("M9 置顶失败：409 信封以 Toast 显示 message，非信封失败为 请求失败，请稍后重试；分区与顺序不变", async () => {
+  it("M9 置顶失败：409 信封在列表区顶部提示显示 message，非信封失败为 请求失败，请稍后重试；分区与顺序不变", async () => {
+    const retry = deferredResponse();
     const { fetchMock } = mountTasks({
-      [patchPath(B)]: [envelope(409, CONFLICT), new Response("bad gateway", { status: 502 })],
+      [patchPath(B)]: [envelope(409, CONFLICT), retry.promise],
     });
     const nav = await findList(MIDDLE);
 
     await chooseEntryAction(nav, MIDDLE, PIN);
-    await waitFor(() => expect(toasts()).toEqual([CONFLICT]));
+    await findListAlert(nav, CONFLICT);
+    expectNoListToast();
     expectUnpinned(nav);
     const reopened = (await openEntryMenu(nav, MIDDLE)).items.map((item) => item.textContent);
     expect(reopened).toEqual(["重命名", PIN, "删除"]);
 
+    // 打开菜单不是列表动作：提示还在；再次发起置顶即清除（响应到达之前）。
+    expect(listAlert(nav)).toBe(CONFLICT);
     fireEvent.click(screen.getByRole("menuitem", { name: PIN }));
-    await waitFor(() => expect(toasts()).toEqual([CONFLICT, REQUEST_FAILED]));
+    expect(listAlert(nav)).toBeNull();
+    await settleDeferredResponse(retry, new Response("bad gateway", { status: 502 }));
+    await findListAlert(nav, REQUEST_FAILED);
+    expectNoListToast();
     expectUnpinned(nav);
     expect(patchRequests(fetchMock, B)).toEqual([
       patchOf('{"pinned":true}'),
       patchOf('{"pinned":true}'),
     ]);
-    expect(screen.queryByRole("alert")).toBeNull();
+    // 页面上唯一的 alert 就是列表区顶部那一条（旧的一条已被替换，不叠加）。
+    expect(screen.getAllByRole("alert").map((alert) => alert.textContent)).toEqual([
+      REQUEST_FAILED,
+    ]);
+  });
+
+  it("M9 提示在重命名 Dialog 打开之后才出现：提交重命名是下一次列表动作，提示随即清除", async () => {
+    const pin = deferredResponse();
+    const rename = deferredResponse();
+    const { fetchMock } = mountTasks({
+      [patchPath(A)]: () => rename.promise,
+      [patchPath(B)]: () => pin.promise,
+    });
+    const nav = await findList(MIDDLE);
+
+    await chooseEntryAction(nav, MIDDLE, PIN);
+    const controls = await openRename(nav, FIRST);
+    await settleDeferredResponse(pin, envelope(409, CONFLICT));
+    await findListAlert(nav, CONFLICT);
+    expect(within(controls.dialog).queryByRole("alert")).toBeNull();
+
+    saveTitle(controls, NEW);
+    expect(listAlert(nav)).toBeNull();
+    expect(patchRequests(fetchMock, A)).toEqual([patchOf(`{"title":"${NEW}"}`)]);
+    expectNoListToast();
   });
 });
 
@@ -152,7 +185,7 @@ describe("只信响应 (M10)", () => {
     expect(entryTitles(nav)).toEqual([FIRST, "服务端改写的名字", LAST]);
     expect(await crumb("服务端改写的名字")).toBeTruthy();
     expect(nav.textContent).not.toContain("我键入的名字");
-    expect(toasts()).toEqual([RENAMED_TOAST]);
+    expectNoListToast();
   });
 
   it("M10 置顶：响应前条目不动；响应的 pinnedAt 为 null 时条目留在 临时空间", async () => {
@@ -166,7 +199,8 @@ describe("只信响应 (M10)", () => {
     expect(toasts()).toEqual([]);
 
     await settleDeferredResponse(patch, jsonResponse(view(B, MIDDLE)));
-    expect(toasts()).toEqual([PINNED_TOAST]);
+    expectNoListToast();
+    expect(listAlert(nav)).toBeNull();
     expectUnpinned(nav);
   });
 });
@@ -199,7 +233,7 @@ describe("迟到与乱序的元数据响应 (M11, M12)", () => {
     expect(partition(nav, PINNED_GROUP)).toBeNull();
 
     await settleDeferredResponse(patch, jsonResponse({ ...running, pinnedAt: PINNED_AT }));
-    expect(toasts()).toEqual([PINNED_TOAST]);
+    expectNoListToast();
     expect(partitionTitles(nav, PINNED_GROUP)).toEqual([MIDDLE]);
     expect(partitionTitles(nav, "临时空间")).toEqual(["新建的", FIRST, LAST]);
     expect(within(nav).getByRole("status", { name: `${MIDDLE} 已完成` })).toBeTruthy();
@@ -210,7 +244,7 @@ describe("迟到与乱序的元数据响应 (M11, M12)", () => {
     ["200 视图（pinnedAt:null）", () => jsonResponse(view(B, MIDDLE))],
     ["409 信封", () => envelope(409, CONFLICT)],
   ] as const)(
-    "M12 同类乱序：两次 置顶任务，后发的响应先到并生效；先发的响应（%s）后到被丢弃，只提示一次",
+    "M12 同类乱序：两次 置顶任务，后发的响应先到并生效；先发的响应（%s）后到被丢弃，不更新也不提示",
     async (_kind, late) => {
       const first = deferredResponse();
       const second = deferredResponse();
@@ -228,16 +262,18 @@ describe("迟到与乱序的元数据响应 (M11, M12)", () => {
 
       await settleDeferredResponse(second, jsonResponse(PINNED_B));
       expectMiddlePinned(nav);
-      expect(toasts()).toEqual([PINNED_TOAST]);
+      expectNoListToast();
 
       await settleDeferredResponse(first, late());
       await yieldMacrotask();
       expectMiddlePinned(nav);
-      expect(toasts()).toEqual([PINNED_TOAST]);
+      expectNoListToast();
+      // 被取代的失败响应同样不进列表区顶部提示。
+      expect(listAlert(nav)).toBeNull();
     },
   );
 
-  it("M12 同类乱序（重命名）：#1 请求中关闭并重开后提交 #2；#2 的 200 先到并生效，#1 的 200 后到被丢弃，只提示一次", async () => {
+  it("M12 同类乱序（重命名）：#1 请求中关闭并重开后提交 #2；#2 的 200 先到并生效，#1 的 200 后到被丢弃，不更新也不提示", async () => {
     const first = deferredResponse();
     const second = deferredResponse();
     const { fetchMock } = mountTasks(
@@ -258,13 +294,14 @@ describe("迟到与乱序的元数据响应 (M11, M12)", () => {
     await waitFor(() => expect(renameDialog()).toBeNull());
     expect(await crumb("第二次的名字")).toBeTruthy();
     expect(entryTitles(nav)).toEqual([FIRST, "第二次的名字", LAST]);
-    expect(toasts()).toEqual([RENAMED_TOAST]);
+    expectNoListToast();
 
     await settleDeferredResponse(first, jsonResponse(view(B, "第一次的名字")));
     await yieldMacrotask();
     expect(await crumb("第二次的名字")).toBeTruthy();
     expect(entryTitles(nav)).toEqual([FIRST, "第二次的名字", LAST]);
-    expect(toasts()).toEqual([RENAMED_TOAST]);
+    expectNoListToast();
+    expect(listAlert(nav)).toBeNull();
   });
 
   it("M12 跨类：重命名请求中关闭 Dialog 后置顶；置顶响应先到，重命名响应（pinnedAt:null）后到只改标题", async () => {
@@ -282,11 +319,11 @@ describe("迟到与乱序的元数据响应 (M11, M12)", () => {
 
     await settleDeferredResponse(pin, jsonResponse(PINNED_B));
     expectMiddlePinned(nav);
-    expect(toasts()).toEqual([PINNED_TOAST]);
+    expectNoListToast();
 
     await settleDeferredResponse(rename, jsonResponse(view(B, NEW)));
     expectMiddlePinned(nav, NEW);
-    expect(toasts()).toEqual([PINNED_TOAST, RENAMED_TOAST]);
+    expectNoListToast();
   });
 
   it("M12 镜像：置顶请求挂起时顶栏重命名成功；迟到的置顶响应（title 为旧标题）只带来置顶，标题仍为新值", async () => {
@@ -303,7 +340,7 @@ describe("迟到与乱序的元数据响应 (M11, M12)", () => {
     await waitFor(() => expect(renameDialog()).toBeNull());
     expect(entryTitles(nav)).toEqual([FIRST, NEW, LAST]);
     expect(await crumb(NEW)).toBeTruthy();
-    expect(toasts()).toEqual([RENAMED_TOAST]);
+    expectNoListToast();
     expect(patchRequests(fetchMock, B)).toEqual([
       patchOf('{"pinned":true}'),
       patchOf(`{"title":"${NEW}"}`),
@@ -312,7 +349,7 @@ describe("迟到与乱序的元数据响应 (M11, M12)", () => {
     await settleDeferredResponse(pin, jsonResponse(PINNED_B));
     expectMiddlePinned(nav, NEW);
     expect(await crumb(NEW)).toBeTruthy();
-    expect(toasts()).toEqual([RENAMED_TOAST, PINNED_TOAST]);
+    expectNoListToast();
   });
 });
 
@@ -340,6 +377,7 @@ describe("fence：置顶的失败响应 (M13)", () => {
     await settleDeferredResponse(patch, envelope(409, CONFLICT));
     await yieldMacrotask();
     expect(toasts()).toEqual([]);
+    expect(listAlert(list)).toBeNull();
     expect(entryTitles(list)).toEqual([SECOND_ACCOUNT_TASK]);
     expect(partition(list, PINNED_GROUP)).toBeNull();
   });
@@ -353,9 +391,10 @@ describe("401 交给既有的登录失效处理 (D2)", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeTruthy();
     await yieldMacrotask();
     expect(toasts()).toEqual([]);
+    expect(screen.queryByRole("button", { name: "关闭提示" })).toBeNull();
   }
 
-  it("D2 置顶收到 401：进入登录页，不以 Toast 显示该失败", async () => {
+  it("D2 置顶收到 401：进入登录页，不显示该失败", async () => {
     mountTasks({ [patchPath(B)]: unauthorized });
     const nav = await findList(MIDDLE);
 
@@ -363,7 +402,7 @@ describe("401 交给既有的登录失效处理 (D2)", () => {
     await expectLoginWithoutToast();
   });
 
-  it("D2 重命名请求中关闭 Dialog 后收到 401：进入登录页，不以 Toast 显示该失败", async () => {
+  it("D2 重命名请求中关闭 Dialog 后收到 401：进入登录页，不显示该失败", async () => {
     const patch = deferredResponse();
     mountTasks({ [patchPath(B)]: () => patch.promise });
     const nav = await findList(MIDDLE);

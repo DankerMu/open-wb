@@ -48,9 +48,11 @@ export function ChatPage() {
   // 列表渲染进 shell 侧栏列表区（issue 424）；数据与回调经 SessionSidebar 的既有 props 传入。
   useSidebarSlot(
     <SessionList
+      actionAlert={sessionActions.alert}
       listError={session.listError}
       listLoading={session.listLoading}
       onDeleteSession={sessionActions.openDelete}
+      onDismissActionAlert={sessionActions.dismissAlert}
       onRenameSession={sessionActions.openRename}
       onSelectSession={session.selectSession}
       onShowWelcome={session.showWelcome}

@@ -17,7 +17,6 @@ import {
   CHART,
   CODE_TEXT,
   COPY_APP,
-  changedTurn,
   copiedStatus,
   DOWNLOAD_CHART,
   frameOf,
@@ -33,16 +32,12 @@ import {
   toasts,
   truncatedPreview,
 } from "./chat-page-artifact-card-support.js";
-import {
-  artifactsPanelFixture,
-  renameBehindDialog,
-  renameRoute,
-} from "./chat-page-artifacts-panel-support.js";
+import { artifactsPanelFixture } from "./chat-page-artifacts-panel-support.js";
 import { cardNamed, edit, quiesce, reply, write } from "./chat-page-file-changes-support.js";
 import { settleDeferredResponse } from "./chat-page-lifecycle-support.js";
 import { envelope } from "./chat-page-ownership-support.js";
 import { imagePreviewResponse } from "./files-fixture.js";
-import { deferredResponse, jsonResponse, textPreviewResponse } from "./support.js";
+import { deferredResponse, textPreviewResponse } from "./support.js";
 
 const blobs = artifactsPanelFixture();
 afterEach(() => {
@@ -230,33 +225,6 @@ describe("html 预览对话框（拷入层 dialog）", () => {
       expect(document.querySelector("iframe")).toBeNull();
     },
   );
-
-  // A toast that arrives after the preview opened sits above it in the Radix layer stack and takes
-  // its Escape. The only toasts left on this page are the session list's, so a rename is submitted
-  // first and answered once the card's preview is open.
-  it("F5 Escape closes the preview while a later toast holds the top of the layer stack", async () => {
-    const renamed = deferredResponse();
-    const changes = [write(INDEX)];
-    await openPreviewing(
-      changes,
-      () => textPreviewResponse(HTML_TEXT),
-      () => renameRoute(renamed.promise),
-    );
-    await renameBehindDialog();
-    const [head] = actions(OPEN_INDEX) as [HTMLButtonElement];
-
-    fireEvent.click(head);
-    const dialog = await previewDialog();
-    const session = { ...changedTurn(changes).session, title: "新标题" };
-    await settleDeferredResponse(renamed, jsonResponse(session));
-    await waitFor(() => expect(toasts()).toEqual([["success", "已重命名"]]));
-    expect(dialog.contains(document.activeElement)).toBe(true);
-
-    fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
-
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    await waitFor(() => expect(document.activeElement).toBe(head));
-  });
 });
 
 describe("卡片底色上的悬停底色", () => {

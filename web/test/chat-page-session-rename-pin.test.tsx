@@ -11,11 +11,14 @@ import {
   crumb,
   entryTitles,
   envelope,
+  expectNoListToast,
   FIRST_ACCOUNT_TASK,
   findList,
+  findListAlert,
   focusOn,
   installNarrowViewport,
   leaveChatPage,
+  listAlert,
   moreButton,
   mountSessions,
   mountTwoAccounts,
@@ -25,12 +28,10 @@ import {
   openTopbarRename,
   PIN,
   PINNED_AT,
-  PINNED_TOAST,
   partitionTitles,
   patchOf,
   patchPath,
   patchRequests,
-  RENAMED_TOAST,
   REQUEST_FAILED,
   type RenameControls,
   renameDialog,
@@ -43,19 +44,13 @@ import {
 } from "./chat-page-session-meta-support.js";
 import { settle } from "./chat-stream-support.js";
 import { calls, currentLocation, deferredResponse, jsonResponse } from "./support.js";
-import {
-  blockBody,
-  pressPointer,
-  readRepoFile,
-  ruleBody,
-  stripComments,
-  yieldMacrotask,
-} from "./ui-support.js";
+import { pressPointer, readRepoFile, stripComments, yieldMacrotask } from "./ui-support.js";
 
 const OLD = "季度复盘";
 const OTHER = "需求评审";
 const NEW = "周报整理";
 const BAD_REQUEST = "请求格式不正确";
+const CONFLICT = "会话状态冲突";
 const SESSION_A = `/?session=${A}`;
 const D = "d".repeat(32);
 
@@ -82,17 +77,18 @@ async function dialogGone() {
   await waitFor(() => expect(renameDialog()).toBeNull());
 }
 
-/** A 的重命名已生效：顶栏与条目为新标题，恰一条 `已重命名`。 */
+/** A 的重命名已生效：顶栏与条目为新标题，没有轻提示。 */
 async function expectRenamed(nav: HTMLElement) {
   expect(await crumb(NEW)).toBeTruthy();
   expect(entryTitles(nav)).toEqual([NEW, OTHER]);
-  expect(toasts()).toEqual([RENAMED_TOAST]);
+  expectNoListToast();
 }
 
-/** 迟到的失败改用 Toast：恰一条 `请求格式不正确`，A 的标题不变。 */
-async function expectFailureToast(nav: HTMLElement) {
-  await waitFor(() => expect(toasts()).toEqual([BAD_REQUEST]));
+/** 迟到的失败走列表区顶部提示：恰为 `请求格式不正确`，A 的标题不变，没有轻提示。 */
+async function expectLateFailure(nav: HTMLElement) {
+  await findListAlert(nav, BAD_REQUEST);
   expect(entryTitles(nav)).toEqual([OLD, OTHER]);
+  expectNoListToast();
 }
 
 describe("条目「更多」菜单 (M1, M16)", () => {
@@ -105,7 +101,7 @@ describe("条目「更多」菜单 (M1, M16)", () => {
     ]);
     const nav = await findList(OLD);
 
-    const rows = Array.from(nav.querySelectorAll("li.chat-session-item"));
+    const rows = Array.from(nav.querySelectorAll('ul[role="list"] > li'));
     expect(rows).toHaveLength(4);
     for (const row of rows) {
       const [select, more] = Array.from(row.children);
@@ -174,7 +170,8 @@ describe("条目「更多」菜单 (M1, M16)", () => {
     fireEvent.click(trigger);
     expect(currentLocation()).toBe(SESSION_A);
     fireEvent.click(screen.getByRole("menuitem", { name: PIN }));
-    await waitFor(() => expect(toasts()).toEqual([PINNED_TOAST]));
+    await waitFor(() => expect(partitionTitles(nav, "置顶任务")).toEqual([OTHER]));
+    expectNoListToast();
 
     expect(currentLocation()).toBe(SESSION_A);
     expect(within(nav).getByRole("button", { name: OLD }).getAttribute("aria-current")).toBe(
@@ -183,24 +180,34 @@ describe("条目「更多」菜单 (M1, M16)", () => {
     expect(fetchMock.mock.calls.slice(requests).map(([path]) => path)).toEqual([patchPath(B)]);
   });
 
-  it("M1 静态样式：「更多」按钮只在可悬停的宽屏上以透明度弱化，悬停、聚焦与菜单打开时显现，从不 display:none / visibility:hidden", () => {
+  it("M1 静态样式：「更多」按钮只在可悬停的宽屏上以透明度弱化，悬停、聚焦与菜单打开时显现，从不 display:none / visibility:hidden", async () => {
+    mountSessions("/", [view(A, OLD)]);
+    const nav = await findList(OLD);
+    const more = moreButton(nav, OLD);
+    const tokens = more.className.split(/\s+/);
+    // 弱化只在「可悬停且 ≥761px」的媒体条件下；媒体条件之外（触屏、窄屏）没有 opacity 类。
+    expect(tokens.filter((token) => token.endsWith("opacity-0"))).toEqual([
+      "[@media(hover:hover)_and_(min-width:761px)]:opacity-0",
+    ]);
+    // 显现：条目（`group/session`）悬停、其内有焦点、菜单打开。
+    expect(tokens.filter((token) => token.endsWith("opacity-100")).sort()).toEqual([
+      "data-[state=open]:opacity-100",
+      "group-focus-within/session:opacity-100",
+      "group-hover/session:opacity-100",
+    ]);
+    expect(more.closest("li")?.classList.contains("group/session")).toBe(true);
+    for (const token of tokens) {
+      expect(token).not.toMatch(/(^|:)(hidden|invisible|collapse)$/);
+    }
+    // 菜单打开时触发按钮带 Radix 的 data-state="open"（显现类的挂点）。
+    const { menu, trigger } = await openEntryMenu(nav, OLD);
+    expect(trigger.getAttribute("data-state")).toBe("open");
+    fireEvent.keyDown(menu, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    // 旧的类规则已随 chat.css 清空而消失。
     const css = stripComments(readRepoFile("web/src/features/chat/chat.css"));
-    const hover = blockBody(css, /@media \(hover: hover\) and \(min-width: 761px\)/);
-    expect(ruleBody(hover, ".chat-session-more")).toContain("opacity: 0;");
-    for (const selector of [
-      ".chat-session-item:hover .chat-session-more",
-      ".chat-session-item:focus-within .chat-session-more",
-      '.chat-session-more[data-state="open"]',
-    ]) {
-      expect(ruleBody(hover, selector)).toContain("opacity: 1;");
-    }
-    // 媒体块之外（触屏、窄屏）按钮始终可见：没有 opacity 声明。
-    expect(ruleBody(css, ".chat-session-more")).not.toContain("opacity");
-    const rules = Array.from(css.matchAll(/[^{}]*\.chat-session-more[^{}]*\{([^{}]*)\}/g));
-    expect(rules).toHaveLength(3);
-    for (const [, body] of rules) {
-      expect(body).not.toMatch(/display\s*:\s*none|visibility\s*:\s*hidden/);
-    }
+    expect(css).not.toContain("chat-session-more");
+    expect(css).not.toMatch(/display\s*:\s*none|visibility\s*:\s*hidden/);
   });
 });
 
@@ -209,7 +216,7 @@ describe("从条目菜单重命名 (M2, M3, M5)", () => {
     ["默认渲染", false],
     ["StrictMode", true],
   ] as const)(
-    "M2 行菜单重命名成功（%s）：trim 后恰一次 PATCH {title}，条目与顶栏更新、Toast、焦点回「更多」按钮，不重读列表",
+    "M2 行菜单重命名成功（%s）：trim 后恰一次 PATCH {title}，条目与顶栏更新、无轻提示、焦点回「更多」按钮，不重读列表",
     async (_mode, strict) => {
       const { fetchMock } = mountSelected(
         { [patchPath(A)]: () => jsonResponse(view(A, NEW)) },
@@ -265,7 +272,7 @@ describe("从条目菜单重命名 (M2, M3, M5)", () => {
     await dialogGone();
     expect(patchRequests(fetchMock, A)).toEqual([patchOf(`{"title":"${NEW}"}`)]);
     expect(entryTitles(nav)).toEqual([NEW, "新会话"]);
-    expect(toasts()).toEqual([RENAMED_TOAST]);
+    expectNoListToast();
   });
 
   it("M5 400 信封：Dialog 保持打开并在其内 alert 显示 message，标题不变；再次 保存 时 alert 立即消失，随后成功", async () => {
@@ -369,7 +376,7 @@ describe("重命名请求中 (M4)", () => {
     expect(patchRequests(fetchMock, A)).toHaveLength(1);
   });
 
-  it("M4 请求中点 取消：Dialog 消失；迟到的 200 照常更新并提示，Dialog 不重新出现", async () => {
+  it("M4 请求中点 取消：Dialog 消失；迟到的 200 照常更新且无轻提示，Dialog 不重新出现", async () => {
     const { nav, patch } = await pendingRename(({ cancel }) => fireEvent.click(cancel));
     expect(entryTitles(nav)).toEqual([OLD, OTHER]);
     expect(toasts()).toEqual([]);
@@ -380,16 +387,17 @@ describe("重命名请求中 (M4)", () => {
     expect(renameDialog()).toBeNull();
   });
 
-  it("M4 请求中点 关闭：迟到的 400 信封改用 Toast 显示 message，标题不变", async () => {
+  it("M4 请求中点 关闭：迟到的 400 信封改在列表区顶部提示显示 message，标题不变", async () => {
     const { nav, patch } = await pendingRename(({ dialog }) =>
       fireEvent.click(within(dialog).getByRole("button", { name: "关闭" })),
     );
 
     await settleDeferredResponse(patch, envelope(400, BAD_REQUEST));
-    await expectFailureToast(nav);
+    await expectLateFailure(nav);
     expect(await crumb(OLD)).toBeTruthy();
     expect(renameDialog()).toBeNull();
-    expect(screen.queryByRole("alert")).toBeNull();
+    // 页面上唯一的 alert 就是列表区顶部那一条。
+    expect(screen.getAllByRole("alert").map((alert) => alert.textContent)).toEqual([BAD_REQUEST]);
   });
 
   /** 重开的 Dialog 不受旧请求结果影响：仍是同一元素、无 alert、已键入文本不变、`保存` 可用。 */
@@ -408,7 +416,7 @@ describe("重命名请求中 (M4)", () => {
   ] as const;
 
   it.each(REOPENED)(
-    "M4 请求中关闭后重开（%s）：旧请求的 200 更新条目与顶栏并提示，重开的 Dialog 仍在、已键入文本不变、无 alert",
+    "M4 请求中关闭后重开（%s）：旧请求的 200 更新条目与顶栏且无轻提示，重开的 Dialog 仍在、已键入文本不变、无 alert",
     async (_which, title) => {
       const { nav, patch, reopened } = await reopenedRename(title);
 
@@ -419,22 +427,22 @@ describe("重命名请求中 (M4)", () => {
   );
 
   it.each(REOPENED)(
-    "M4 请求中关闭后重开（%s）：旧请求的 400 走 Toast，重开的 Dialog 内无 alert、保存 仍可用",
+    "M4 请求中关闭后重开（%s）：旧请求的 400 走列表区顶部提示，重开的 Dialog 内无 alert、保存 仍可用",
     async (_which, title) => {
       const { fetchMock, nav, patch, reopened } = await reopenedRename(title);
 
       await settleDeferredResponse(patch, envelope(400, BAD_REQUEST));
-      await expectFailureToast(nav);
+      await expectLateFailure(nav);
       await expectReopenedIntact(reopened);
       expect(patchRequests(fetchMock, A)).toHaveLength(1);
     },
   );
 
-  it("M4 请求中点遮罩（完整指针序列）也能关闭 Dialog；迟到的 200 照常更新并提示", async () => {
+  it("M4 请求中点遮罩（完整指针序列）也能关闭 Dialog；迟到的 200 照常更新且无轻提示", async () => {
     const { nav, patch } = await pendingRename(async () => {
       // DismissableLayer 的 document pointerdown 监听在挂载后的 setTimeout(0) 里才注册。
       await yieldMacrotask();
-      const mask = document.querySelector(".ui-dialog-overlay");
+      const mask = document.querySelector('[data-slot="dialog-overlay"]');
       if (!mask) throw new Error("缺遮罩");
       pressPointer(mask);
     });
@@ -502,7 +510,7 @@ describe("顶栏重命名入口 (M6, M7)", () => {
     expect(calls(fetchMock, patchPath(A))).toEqual([]);
     expect(await crumb(NEW)).toBeTruthy();
     expect(entryTitles(nav)).toEqual([OLD, NEW]);
-    expect(toasts()).toEqual([RENAMED_TOAST]);
+    expectNoListToast();
   });
 
   it("M6 顶栏入口失败同 M5：400 信封在 Dialog 内 alert，heading 不变", async () => {
@@ -562,14 +570,14 @@ describe("顶栏重命名入口 (M6, M7)", () => {
 
     expect(await crumb(NEW)).toBeTruthy();
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
-    expect(toasts()).toEqual([RENAMED_TOAST]);
+    expectNoListToast();
     expect(patchRequests(fetchMock, A)).toEqual([patchOf(`{"title":"${NEW}"}`)]);
     expect(calls(fetchMock, "/api/sessions")).toHaveLength(1);
   });
 });
 
 describe("fence：账号切换与卸载 (M13)", () => {
-  it("M13 重命名 PATCH 挂起时续期为另一 client：旧响应到达后无 Toast、新账号的列表不变、没有 Dialog；新账号的重命名是全新 Dialog 并发往新 client", async () => {
+  it("M13 重命名 PATCH 挂起时续期为另一 client：旧响应到达后无提示、新账号的列表不变、没有 Dialog；新账号的重命名是全新 Dialog 并发往新 client", async () => {
     const patch = deferredResponse();
     const { fetchMock, nav, renew } = await mountTwoAccounts([
       patch.promise,
@@ -584,7 +592,8 @@ describe("fence：账号切换与卸载 (M13)", () => {
 
     await settleDeferredResponse(patch, jsonResponse(view(A, "甲改的名字")));
     await yieldMacrotask();
-    expect(toasts()).toEqual([]);
+    expectNoListToast();
+    expect(listAlert(list)).toBeNull();
     expect(entryTitles(list)).toEqual([SECOND_ACCOUNT_TASK]);
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(patchRequests(fetchMock, A)).toHaveLength(1);
@@ -602,7 +611,7 @@ describe("fence：账号切换与卸载 (M13)", () => {
       patchOf('{"title":"乙改的名字"}'),
     ]);
     expect(entryTitles(list)).toEqual(["乙改的名字"]);
-    expect(toasts()).toEqual([RENAMED_TOAST]);
+    expectNoListToast();
   });
 
   it.each([
@@ -668,7 +677,8 @@ describe("≤760px 导航覆盖层 (M14)", () => {
     const pin = await openEntryMenu(nav, OTHER);
     await yieldMacrotask();
     pressPointer(within(pin.menu).getByRole("menuitem", { name: PIN }));
-    await waitFor(() => expect(toasts()).toEqual([RENAMED_TOAST, PINNED_TOAST]));
+    await waitFor(() => expect(partitionTitles(nav, "置顶任务")).toEqual([OTHER]));
+    expectNoListToast();
     await yieldMacrotask();
     expect(screen.getByRole("dialog", { name: "导航" })).toBe(overlay);
     expect(partitionTitles(nav, "置顶任务")).toEqual([OTHER]);
@@ -677,11 +687,11 @@ describe("≤760px 导航覆盖层 (M14)", () => {
   });
 
   it.each([
-    ["无 Toast", false],
-    ["Dialog 打开后出现 Toast，走 Escape 兜底分支", true],
+    ["无提示", false],
+    ["Dialog 打开后出现列表区顶部提示", true],
   ] as const)(
     "M14 覆盖层内重命名 Dialog 按 Escape（%s）：只关 Dialog，导航 仍是同一元素、焦点回该行「更多」按钮，随后 置顶任务 仍可用",
-    async (_case, withToast) => {
+    async (_case, withAlert) => {
       installNarrowViewport();
       const pinOther = deferredResponse();
       const { fetchMock } = mountSelected({
@@ -690,20 +700,15 @@ describe("≤760px 导航覆盖层 (M14)", () => {
       });
       await crumb(OLD);
       const { nav, overlay } = await openNavOverlay(OLD);
-      const shown = withToast ? [PINNED_TOAST] : [];
-      if (withToast) await chooseEntryAction(nav, OTHER, PIN);
+      const shown = withAlert ? CONFLICT : null;
+      if (withAlert) await chooseEntryAction(nav, OTHER, PIN);
 
       const controls = await openRename(nav, OLD);
       await focusOn(controls.input);
-      // Toast 要在 Dialog 之后入栈才会占住 Radix 的最高层（Escape 监听只挂在最高层），Dialog 这时
-      // 只能靠 Content 上的 onKeyDown 兜底关闭；先出现的 Toast 排在 Dialog 之下，走不到兜底分支。
-      if (withToast) {
-        await settleDeferredResponse(
-          pinOther,
-          jsonResponse(view(B, OTHER, { pinnedAt: PINNED_AT })),
-        );
-      }
-      await waitFor(() => expect(toasts()).toEqual(shown));
+      // 另一条的置顶在 Dialog 打开之后才失败：提示出现在 Dialog 背后的列表区顶部，Dialog 不受影响。
+      if (withAlert) await settleDeferredResponse(pinOther, envelope(409, CONFLICT));
+      await waitFor(() => expect(listAlert(nav)).toBe(shown));
+      expect(within(controls.dialog).queryByRole("alert")).toBeNull();
 
       fireEvent.keyDown(controls.input, { key: "Escape" });
       await dialogGone();
@@ -712,13 +717,16 @@ describe("≤760px 导航覆盖层 (M14)", () => {
       expect(controls.trigger).toBe(moreButton(nav, OLD));
       // 按名称能查到：覆盖层仍是同一元素，且 hideOthers 加上的 aria-hidden 已撤掉。
       expect(screen.getByRole("dialog", { name: "导航" })).toBe(overlay);
-      expect(toasts()).toEqual(shown);
+      // 关闭 Dialog 不是列表动作：提示原样保留。
+      expect(listAlert(nav)).toBe(shown);
       expect(calls(fetchMock, patchPath(A))).toEqual([]);
 
       await chooseEntryAction(nav, OLD, PIN);
-      await waitFor(() => expect(toasts()).toEqual([...shown, PINNED_TOAST]));
+      // 下一次列表动作发起即清除提示。
+      expect(listAlert(nav)).toBeNull();
+      await waitFor(() => expect(partitionTitles(nav, "置顶任务")).toContain(OLD));
+      expectNoListToast();
       expect(patchRequests(fetchMock, A)).toEqual([patchOf('{"pinned":true}')]);
-      expect(partitionTitles(nav, "置顶任务")).toContain(OLD);
       expect(screen.getByRole("dialog", { name: "导航" })).toBe(overlay);
     },
   );

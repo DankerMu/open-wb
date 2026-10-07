@@ -308,10 +308,14 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
       const text = `${injected}\n${source}`;
       expect(layeringViolations([{ path: composer, text }], real)).toEqual(expected);
     }
-    // 会话列表文件不在清单里：它的 useToast 不归这条守卫管。
+    // 会话列表文件不在清单里：注入的 useToast 不归这条守卫管（它自己已不再导入）。
     const sessionActions = `${CHAT_DIR}/session-actions.ts`;
-    const actions = { path: sessionActions, text: readRepoFile(sessionActions) };
-    expect(actions.text).toContain("useToast");
+    const own = readRepoFile(sessionActions);
+    expect(own).not.toContain("useToast");
+    const actions = {
+      path: sessionActions,
+      text: `import { useToast } from "../../ui/index.js";\n${own}`,
+    };
     expect(layeringViolations([actions], real)).toEqual([]);
   });
 

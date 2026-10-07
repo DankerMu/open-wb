@@ -20,7 +20,6 @@ import {
   messagesPath,
   PIN,
   PINNED_AT,
-  PINNED_TOAST,
   partition,
   partitionTitles,
   patchPath,
@@ -263,8 +262,8 @@ describe("web 列表事件消费", () => {
     expect(partition(nav, PIN)).toBeNull();
 
     await chooseEntryAction(nav, SECOND, PIN);
-    await waitFor(() => expect(toasts()).toEqual([PINNED_TOAST]));
-    expect(partitionTitles(nav, PIN)).toEqual([SECOND]);
+    await waitFor(() => expect(partitionTitles(nav, PIN)).toEqual([SECOND]));
+    expect(toasts()).toEqual([]);
     expect(within(nav).getAllByRole("button", { name: FIRST })).toHaveLength(1);
     expect(alerts()).toEqual([]);
     expect(count(fetchMock, LIST)).toBe(1);
