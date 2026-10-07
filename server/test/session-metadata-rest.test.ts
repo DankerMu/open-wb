@@ -686,7 +686,10 @@ describe("PATCH /api/sessions/:id ownership and binding", () => {
 
   it("E6 the owner-scoped store update reports null for a foreign owner and a deleted row", async () => {
     const world = await openPatchWorld();
-    const metadata = createSessionMetadataStore(world.db, { emit });
+    const metadata = createSessionMetadataStore(world.db, {
+      emit,
+      sandboxRoot: "/nonexistent/sandbox",
+    });
     const before = rowState(world.db, world.session);
 
     expect(metadata.patchSession("u2", world.session, { title: "x" })).toBeNull();

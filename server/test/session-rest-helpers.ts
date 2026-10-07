@@ -60,7 +60,7 @@ export async function withSessionRest<T>(
         registerSessionRoutes(app, {
           store,
           supervisor,
-          metadata: createSessionMetadataStore(db, { emit }),
+          metadata: createSessionMetadataStore(db, { emit, sandboxRoot: "/nonexistent/sandbox" }),
           workspaceRootOf: () => null,
           agentDir: "/nonexistent/omp-agent",
           sandboxRoot: "/nonexistent/sandbox",

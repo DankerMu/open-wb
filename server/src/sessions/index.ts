@@ -80,12 +80,16 @@ export function registerSessions(
     ...(options.log === undefined ? {} : { log: options.log }),
   });
   store.reconcileOnStartup();
-  const metadata = createSessionMetadataStore(options.db, { emit });
+  const metadata = createSessionMetadataStore(options.db, {
+    emit,
+    sandboxRoot: options.runtime.sandboxRoot,
+  });
   const deleter = createSessionDeleter({
     store,
     supervisor,
     metadata,
     stateDir: options.runtime.stateDir,
+    sandboxRoot: options.runtime.sandboxRoot,
     onError: options.onError,
   });
   registerSessionRoutes(app, {
