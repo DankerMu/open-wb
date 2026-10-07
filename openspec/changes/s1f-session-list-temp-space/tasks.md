@@ -269,6 +269,11 @@ Minimal mergeable slice: 13.1、13.2、13.3 各自可单独合入（每个导出
   - `web/test/ui-layering.test.ts`：只把 `session-list-prefs.ts` 加进 `MIGRATED_AREAS` 与对应的逐字清单断言（字母序）；`SESSION_LIST_FILES` 不动（14.6）。
   Risk packs（14.1 / 14.2）: Persistence（localStorage 容错）、Legacy compatibility（旧导出与既有测试不动）。
 - [ ] 14.3 状态标记（`status-label.ts` 加 `等待确认`；新组件）：六种文案的可访问名、三种可见标记与 `data-status-mark`、减少动态效果下不转动。组件测试：session-sidebar「会话状态标记」两个场景、chat-web「列表条目的状态元素」。
+  **实施注记（14.3，fixture 评审补充）**：
+  - `SESSION_STATUS_LABEL` 的五个键与文案不动（`chat-stream-stopped.test.ts` 钉着它，步骤卡与工具调用组也在用）；`等待确认` 作为**单独的导出**（如 `sessionStatusText(session)`，`pendingApproval` 优先于 `status`）。
+  - 新组件文件 `web/src/features/chat/session-status-mark.tsx`：可见标记 `aria-hidden` 并带 `data-status-mark="waiting" | "running" | "failed"`；其余三种状态只有视觉隐藏的文案、没有该属性。减少动态效果用 Tailwind 的 `motion-reduce:` 变体表达并按类名断言。只用 Tailwind 与拷入层，不用 `ui-pulse` / `ui-sr-only`，不改 `chat.css`。
+  - 旧侧栏（`session-sidebar.tsx`）在本刀不改、不接入新组件（14.4 接入）。新文件登记进 `ui-layering.test.ts` 的 `MIGRATED_AREAS` 与逐字清单断言（字母序）。
+  Risk packs（14.3）: Accessibility、Legacy compatibility。
 - [ ] 14.4 重写 `session-sidebar.tsx`（拷入层的 `button`、`input`、`collapsible`、`dropdown-menu` + Tailwind）：`新建会话`、搜索框、`分组方式` 菜单、可折叠分组、条目、空态；删除 `session-filter.tsx` 及其测试，删除 `session-groups.ts` 里的筛选函数、`SessionFilter` 类型与 `DEFAULT_SESSION_FILTER`，既有分组测试里针对筛选的用例随之删除（写进偏离记录）；`use-chat-session.ts` / `page.tsx` 去掉筛选状态、加搜索与分组状态。整页测试（新文件 `web/test/chat-session-list.test.tsx`）：「分组侧栏」八个场景、「标题搜索」的「过滤与恢复」「不影响主区」、spa-shell「列表区承载重建后的会话列表」。
 - [ ] 14.5 既有走查第 6 步的改写（**与 14.4 同 PR**，否则 `make ui-walk` 在 14.4 合入时必红——旧步骤取 `筛选任务` 按钮）：`web/e2e/ui-walk-sessions.spec.ts` 的第 6 步按 chat-harness「UI 走查会话元数据」改为分组头折叠、搜索、`分组方式` 切换、无 `筛选任务`。选择器集中在新 helper `web/e2e/ui-walk-session-list.ts`，被改写的步骤移进该 helper，`ui-walk-sessions.spec.ts` 不净增行。验证：`make ui-walk`。
 - [ ] 14.6 迁移登记（与 14.4 同 PR）：`session-sidebar.tsx`、`session-groups.ts`、`session-list-prefs.ts`、`session-path.ts` 及本组新增文件加入 `MIGRATED_AREAS` 并同步清单断言；`SESSION_LIST_FILES` 里移除已迁移与已删除的文件名。`chat.css` 中只属于被重写组件的规则随之删除。
