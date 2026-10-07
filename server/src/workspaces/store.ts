@@ -41,6 +41,11 @@ interface CreatedTemporaryWorkspace {
    * For a caller whose transaction fails after `createTemporary` returned: removes, in reverse
    * order, the directories that call created, only while they are empty directories. Throws an
    * AggregateError naming what it had to leave; safe to call again.
+   *
+   * Must not be called once the caller's transaction has committed: it would remove the
+   * still-empty directory of a live temporary workspace. It throws when a directory this call
+   * created is no longer empty — e.g. another workspace directory appeared inside an owner root
+   * this call created — and leaves that directory in place.
    */
   removeCreatedDirs(): void;
 }

@@ -16,7 +16,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { emit } from "../src/core/audit/index.js";
 import { HttpError } from "../src/core/errors/index.js";
 import { ensureSharedDir } from "../src/core/sandbox/dirs.js";
@@ -35,6 +35,7 @@ const TMP_X = `tmp-${ID_X}`;
 const TMP_Y = `tmp-${ID_Y}`;
 const HEX32 = /^[0-9a-f]{32}$/u;
 const SHARED_MODE = 0o2770;
+const FIXED_NOW = 1_725_000_000_000;
 /** The retry cap, restated here on purpose: the store's constant is not imported. */
 const ID_ATTEMPTS = 8;
 const GENERATOR_LIMIT = 64;
@@ -61,6 +62,7 @@ interface WorldOptions {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   removeTempDirs();
 });
 
@@ -191,6 +193,23 @@ describe("temporary workspace: list and shape", () => {
       expect(mode(temporary.root)).toBe(SHARED_MODE);
       expect(count(db, "audit_events")).toBe(0);
       expect(db.isTransaction).toBe(false);
+    });
+  });
+
+  it("stamps the row with the creation time: the returned createdAt and the stored created_at are both now", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(FIXED_NOW);
+    withWorld({ ids: [ID_T] }, ({ db, store }) => {
+      db.exec("BEGIN");
+      const { workspace } = store.createTemporary(U1);
+      db.exec("COMMIT");
+      // Later reads of the clock must not leak into what was stored.
+      vi.setSystemTime(FIXED_NOW + 60_000);
+
+      expect(workspace.createdAt).toBe(FIXED_NOW);
+      expect(db.prepare("SELECT created_at FROM workspaces WHERE id = ?").get(ID_T)).toEqual({
+        created_at: FIXED_NOW,
+      });
     });
   });
 
