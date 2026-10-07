@@ -3,20 +3,30 @@
  * (design D9 of s1f-session-list-temp-space; spec workspace-snapshots「快照的存放位置」
  * 「快照内容规则」).
  *
- * `take` writes `<snapshotsRoot>/<workspaceId>/<userMessageId>/{manifest.json,tree/}`. Every
- * entry is classified by `lstat`, so nothing is ever read through a symbolic link and the walk
- * cannot leave the workspace root. The workspace is only read. The snapshot root is injected by
- * the caller; this module does not know `OMP_STATE_DIR` and does not import from `sessions/`.
+ * `take` writes `<snapshotsRoot>/<workspaceId>/<userMessageId>/{manifest.json,tree/}`. The
+ * workspace is only read. The snapshot root is injected by the caller; this module does not know
+ * `OMP_STATE_DIR` and does not import from `sessions/`.
+ *
+ * A writer may be in the workspace while the walk runs (design D9「快照期间可能有写入者」): the
+ * previous process of the session has not exited yet, and another session may share the
+ * workspace. Every entry is classified by `lstat`, and a regular file is then read through a
+ * handle opened without following its final component and without blocking, so an entry
+ * replaced after classification is never read through a symbolic link (the open fails and so
+ * does the snapshot) and never hangs the walk (a FIFO or device is skipped as `special`). What
+ * remains: an intermediate path component replaced by a symbolic link after its directory was
+ * listed is traversed by both `lstat` and the open — the residual registered in design D9 and
+ * ADR-0010 (task 20.3).
  *
  * Asynchronous on purpose: the snapshot runs as the supervisor's pre-dispatch step, during which
  * a stop must still be answered (spec「受理时做快照」), so the walk must not hold the event loop.
- * No writer is expected in the workspace while it runs (the turn has not been dispatched).
  */
-import { promises as fsp, type Stats } from "node:fs";
+import { constants, promises as fsp, type Stats } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
+const SOURCE_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+const COPY_CHUNK_BYTES = 64 * 1024;
 const WORKSPACE_ID = /^[0-9a-f]{32}$/;
 
 type SkipReason = "special" | "excluded" | "too_large" | "unreadable";
@@ -157,7 +167,7 @@ async function visit(walk: Walk, path: string, name: string): Promise<void> {
   if (stat.isDirectory()) {
     await visitDirectory(walk, path, name, stat);
   } else if (stat.isFile()) {
-    await visitFile(walk, path, stat);
+    await visitFile(walk, path);
   } else if (stat.isSymbolicLink()) {
     const target = await readable(walk, path, () => fsp.readlink(source));
     if (target !== undefined) {
@@ -183,26 +193,63 @@ async function visitDirectory(walk: Walk, path: string, name: string, stat: Stat
   await visitChildren(walk, path, names);
 }
 
-async function visitFile(walk: Walk, path: string, stat: Stats): Promise<void> {
-  const copy = join(walk.treeRoot, path);
-  const copied = await readable(walk, path, async () => {
-    await fsp.copyFile(join(walk.workspaceRoot, path), copy);
-    return true;
-  });
-  if (copied === undefined) {
-    await fsp.rm(copy, { force: true });
+/**
+ * The handle, not the earlier `lstat`, decides what the entry is and what the manifest says of
+ * it: the entry may have been replaced since it was classified.
+ */
+async function visitFile(walk: Walk, path: string): Promise<void> {
+  const source = await readable(walk, path, () =>
+    fsp.open(join(walk.workspaceRoot, path), SOURCE_FLAGS),
+  );
+  if (source === undefined) {
     return;
   }
-  // copyFile gives the copy the source's permission bits.
-  await fsp.chmod(copy, FILE_MODE);
-  walk.entries.push({
-    path,
-    type: "file",
-    size: stat.size,
-    mtimeMs: stat.mtimeMs,
-    ctimeMs: stat.ctimeMs,
-    mode: stat.mode & 0o7777,
-  });
+  try {
+    const stat = await source.stat();
+    if (!stat.isFile()) {
+      walk.skipped.push({ path, reason: "special" });
+    } else if (await copyContent(walk, path, source)) {
+      walk.entries.push({
+        path,
+        type: "file",
+        size: stat.size,
+        mtimeMs: stat.mtimeMs,
+        ctimeMs: stat.ctimeMs,
+        mode: stat.mode & 0o7777,
+      });
+    }
+  } finally {
+    await source.close();
+  }
+}
+
+/**
+ * Copies what `source` reads into a new private file under `tree/`. False when a read was
+ * refused: the entry is then recorded as `unreadable` and its partial copy removed. Errors of
+ * the copy's own side are not read errors and fail the snapshot.
+ */
+async function copyContent(walk: Walk, path: string, source: fsp.FileHandle): Promise<boolean> {
+  const copy = join(walk.treeRoot, path);
+  const target = await fsp.open(copy, "wx", FILE_MODE);
+  try {
+    // The creation mode honours the umask; the explicit chmod makes the bits exact.
+    await target.chmod(FILE_MODE);
+    const chunk = Buffer.allocUnsafe(COPY_CHUNK_BYTES);
+    for (;;) {
+      const read = await readable(walk, path, () => source.read(chunk, 0, chunk.length, null));
+      if (read === undefined) {
+        await fsp.rm(copy, { force: true });
+        return false;
+      }
+      if (read.bytesRead === 0) {
+        return true;
+      }
+      // writeFile on a handle writes the whole buffer at the current position.
+      await target.writeFile(chunk.subarray(0, read.bytesRead));
+    }
+  } finally {
+    await target.close();
+  }
 }
 
 /**

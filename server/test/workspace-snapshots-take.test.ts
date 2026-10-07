@@ -2,19 +2,26 @@
  * Issue #937 workspace-snapshots「快照的存放位置」(位置与权限位) and「快照内容规则」(各类条目、
  * 读不了的子目录、失败不留半份): `take` on real temporary directories. Expected manifests are
  * written out from the spec's entry rules and the test's own lstat / readlink of the workspace,
- * not derived from the module under test.
+ * not derived from the module under test. The last group is design D9「快照期间可能有写入者」:
+ * an entry replaced after it was classified.
  */
 import { execFileSync } from "node:child_process";
 import fs, {
+  appendFileSync,
   chmodSync,
+  closeSync,
+  constants,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
+  type PathLike,
   readdirSync,
   readFileSync,
   readlinkSync,
   rmSync,
+  type StatOptions,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -31,9 +38,13 @@ const IS_ROOT = process.geteuid?.() === 0;
 
 const temps: string[] = [];
 const locked: string[] = [];
+const fifos: string[] = [];
 
 afterEach(() => {
   vi.restoreAllMocks();
+  for (const fifo of fifos.splice(0)) {
+    releaseReader(fifo);
+  }
   for (const path of locked.splice(0)) {
     chmodSync(path, 0o700);
   }
@@ -147,6 +158,50 @@ function populate(f: Fixture): void {
 
 function ioError(code: string): NodeJS.ErrnoException {
   return Object.assign(new Error(`injected ${code}`), { code });
+}
+
+/**
+ * A writer between classification and reading: once the real `lstat` of `target` has returned,
+ * `swap` runs (once) before the walk sees the result.
+ */
+function swapAfterLstat(target: string, swap: () => void): void {
+  const lstat = fs.promises.lstat;
+  let swapped = false;
+  vi.spyOn(fs.promises, "lstat").mockImplementation((async (path: PathLike, o?: StatOptions) => {
+    const stat = await lstat(path, o);
+    if (path === target && !swapped) {
+      swapped = true;
+      swap();
+    }
+    return stat;
+  }) as typeof lstat);
+}
+
+/** A reader stuck opening `fifo` returns once a writer shows up; without a reader this is ENXIO. */
+function releaseReader(fifo: string): void {
+  try {
+    closeSync(openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK));
+  } catch {
+    // Nobody is blocked on it.
+  }
+}
+
+/** Every regular file under the snapshot root, by content. */
+function snapshotContents(f: Fixture): string[] {
+  return Object.keys(describeTree(f.snapshots))
+    .filter((path) => lstatSync(join(f.snapshots, path)).isFile())
+    .map((path) => readFileSync(join(f.snapshots, path), "utf8"));
+}
+
+/** Calls of `fs.promises.open` that create a file under `tree/` (flag `wx`) get `intercept`. */
+function onCopyCreate(intercept: (path: string) => void): void {
+  const open = fs.promises.open;
+  vi.spyOn(fs.promises, "open").mockImplementation(async (...args: Parameters<typeof open>) => {
+    if (args[1] === "wx") {
+      intercept(String(args[0]));
+    }
+    return open(...args);
+  });
 }
 
 describe("快照的存放位置", () => {
@@ -456,23 +511,21 @@ describe("快照内容规则", () => {
     put(f.workspace, "b.txt", "bravo\n");
     put(f.workspace, "c/d.txt", "delta\n");
     const before = describeTree(f.workspace);
-    const copyFile = fs.promises.copyFile;
     const landed: boolean[] = [];
-    const spy = vi
-      .spyOn(fs.promises, "copyFile")
-      .mockImplementation(async (...args: Parameters<typeof copyFile>) => {
-        if (spy.mock.calls.length === 2) {
-          // The first file is already in place: there is a half snapshot to remove.
-          landed.push(existsSync(join(f.snapshot, "tree", "a.txt")));
-          throw ioError("EIO");
-        }
-        return copyFile(...args);
-      });
+    const created: string[] = [];
+    onCopyCreate((path) => {
+      created.push(path);
+      if (created.length === 2) {
+        // The first file is already in place: there is a half snapshot to remove.
+        landed.push(existsSync(join(f.snapshot, "tree", "a.txt")));
+        throw ioError("EIO");
+      }
+    });
 
     const result = await run(f);
 
     expect(landed).toEqual([true]);
-    expect(spy).toHaveBeenCalledTimes(2);
+    expect(created).toEqual([join(f.snapshot, "tree", "a.txt"), join(f.snapshot, "tree", "b.txt")]);
     expect(result.outcome).toBe("failed");
     expect(result).toMatchObject({ error: { code: "EIO" } });
     expect(existsSync(f.snapshot)).toBe(false);
@@ -540,5 +593,140 @@ describe("快照内容规则", () => {
     expect(readdirSync(join(f.snapshots, W)).sort()).toEqual(["42", "43"]);
     expect(readFileSync(join(f.snapshot, "tree", "a.txt"), "utf8")).toBe("one\n");
     expect(readFileSync(join(f.snapshots, W, "43", "tree", "a.txt"), "utf8")).toBe("two\n");
+  });
+});
+
+describe("快照期间可能有写入者", () => {
+  it("a file swapped for a link to an outside file is not followed: failed, nothing kept", async () => {
+    const f = fixture();
+    put(f.workspace, "a.txt", "alpha\n");
+    put(f.workspace, "b.txt", "bravo\n");
+    const victim = join(f.workspace, "b.txt");
+    swapAfterLstat(victim, () => {
+      rmSync(victim);
+      symlinkSync(f.outside, victim);
+    });
+
+    const result = await run(f);
+
+    expect(snapshotContents(f)).not.toContain(OUTSIDE_BYTES);
+    expect(result).toMatchObject({ outcome: "failed", error: { code: "ELOOP" } });
+    expect(existsSync(f.snapshot)).toBe(false);
+    expect(snapshotContents(f)).toEqual([]);
+    expect(readFileSync(f.outside, "utf8")).toBe(OUTSIDE_BYTES);
+  });
+
+  it("a file swapped for a FIFO does not hang the snapshot: skipped as special", async () => {
+    const f = fixture();
+    put(f.workspace, "a.txt", "alpha\n");
+    put(f.workspace, "b.txt", "bravo\n");
+    put(f.workspace, "c.txt", "charlie\n");
+    const victim = join(f.workspace, "b.txt");
+    fifos.push(victim);
+    swapAfterLstat(victim, () => {
+      rmSync(victim);
+      execFileSync("mkfifo", [victim]);
+    });
+
+    const result = await run(f);
+
+    const skipped = [{ path: "b.txt", reason: "special" }];
+    expect(result).toEqual({ outcome: "ok", skipped });
+    expect(manifestOf(f)).toEqual({
+      entries: [fileEntry(f, "a.txt"), fileEntry(f, "c.txt")],
+      skipped,
+    });
+    expect(Object.keys(describeTree(join(f.snapshot, "tree")))).toEqual(["a.txt", "c.txt"]);
+    expect(lstatSync(victim).isFIFO()).toBe(true);
+  }, 5000);
+
+  it("登记的残余 — a swapped parent directory: the entry itself is still not followed", async () => {
+    // Not claimed: that the walk stays inside the workspace once `d` points elsewhere. Had
+    // `elsewhere/inner.txt` been a regular file it would have been copied (design D9, task 20.3).
+    const f = fixture();
+    put(f.workspace, "d/inner.txt", "inner\n");
+    const elsewhere = join(f.workspace, "..", "elsewhere");
+    mkdirSync(elsewhere);
+    symlinkSync(f.outside, join(elsewhere, "inner.txt"));
+    const parent = join(f.workspace, "d");
+    swapAfterLstat(join(parent, "inner.txt"), () => {
+      rmSync(parent, { recursive: true });
+      symlinkSync(elsewhere, parent);
+    });
+
+    const result = await run(f);
+
+    expect(snapshotContents(f)).not.toContain(OUTSIDE_BYTES);
+    expect(result).toMatchObject({ outcome: "failed", error: { code: "ELOOP" } });
+    expect(existsSync(f.snapshot)).toBe(false);
+  });
+
+  it("the manifest describes the file that was opened, not the one that was classified", async () => {
+    const f = fixture();
+    put(f.workspace, "a.txt", "alpha\n", 0o644);
+    const victim = join(f.workspace, "a.txt");
+    swapAfterLstat(victim, () => {
+      appendFileSync(victim, "appended after lstat\n");
+      chmodSync(victim, 0o640);
+    });
+
+    const result = await run(f);
+
+    expect(result).toEqual({ outcome: "ok", skipped: [] });
+    const copy = join(f.snapshot, "tree", "a.txt");
+    expect(readFileSync(copy, "utf8")).toBe("alpha\nappended after lstat\n");
+    expect(lstatSync(copy).size).toBe(27);
+    expect(manifestOf(f).entries).toEqual([{ ...fileEntry(f, "a.txt"), size: 27, mode: 0o640 }]);
+  });
+
+  it("a file larger than one read is copied whole", async () => {
+    const f = fixture();
+    const bytes = Buffer.alloc(200 * 1024 + 7);
+    for (let i = 0; i < bytes.length; i += 1) {
+      bytes[i] = (i * 31 + (i >> 9)) & 0xff;
+    }
+    writeFileSync(join(f.workspace, "big.bin"), bytes);
+
+    expect(await run(f)).toEqual({ outcome: "ok", skipped: [] });
+
+    expect(readFileSync(join(f.snapshot, "tree", "big.bin")).equals(bytes)).toBe(true);
+    expect(manifestOf(f).entries).toEqual([{ ...fileEntry(f, "big.bin"), size: 204807 }]);
+  });
+
+  it("a permission error creating the copy is not `unreadable`: failed, nothing kept", async () => {
+    const f = fixture();
+    put(f.workspace, "a.txt", "alpha\n");
+    put(f.workspace, "b.txt", "bravo\n");
+    onCopyCreate((path) => {
+      if (path === join(f.snapshot, "tree", "b.txt")) {
+        throw ioError("EACCES");
+      }
+    });
+
+    const result = await run(f);
+
+    expect(result).toMatchObject({ outcome: "failed", error: { code: "EACCES" } });
+    expect(existsSync(f.snapshot)).toBe(false);
+  });
+
+  it("a permission error in the middle of reading a file leaves no partial copy of it", async () => {
+    const f = fixture();
+    put(f.workspace, "a.txt", "alpha\n");
+    put(f.workspace, "b.txt", "bravo\n");
+    const open = fs.promises.open;
+    vi.spyOn(fs.promises, "open").mockImplementation(async (...args: Parameters<typeof open>) => {
+      const handle = await open(...args);
+      if (args[0] === join(f.workspace, "a.txt")) {
+        handle.read = () => Promise.reject(ioError("EACCES"));
+      }
+      return handle;
+    });
+
+    const result = await run(f);
+
+    const skipped = [{ path: "a.txt", reason: "unreadable" }];
+    expect(result).toEqual({ outcome: "ok", skipped });
+    expect(manifestOf(f)).toEqual({ entries: [fileEntry(f, "b.txt")], skipped });
+    expect(Object.keys(describeTree(join(f.snapshot, "tree")))).toEqual(["b.txt"]);
   });
 });
