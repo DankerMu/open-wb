@@ -13,7 +13,7 @@ owner 于 2026-10-06 定下了 S1g 的全部产品决定（权限档位、整文
   **BREAKING（规格层）**：omp-runtime「`--approval-mode write` 是唯一允许值、不得运行期切换」一句作废，ADR-0012 的相应说明同步修订。
 - **整文件上传与消息附件（F-CHAT-5a、F-CHAT-11b）**：`POST /api/workspaces/:id/uploads` 以原始字节流把一个文件写进该工作空间根下的 `uploads/`（任意类型；单个上限 `UPLOAD_MAX_BYTES`，缺省 524288000 字节，即把 owner 说的 500 MB 取为 500 MiB，与既有的 1 MiB / 10 MiB 预览上限同一口径；
   同名自动编号、不覆盖；路径过沙箱 `resolve(op=write)`；越界与超限全部拒绝并记审计；他人或不存在的空间一律 404）。输入框上方出现附件标签（可移除，移除不删已上传的文件），
-  发送时 `prompt` 请求带上这些文件的相对路径，服务端随消息落库并以确定的后缀拼进交给 omp 的文本；用户气泡显示这些附件（刷新后仍在）。
+  发送时 `prompt` 请求带上这些文件的相对路径，服务端随消息落库并以确定的后缀拼进交给 omp 的文本；用户气泡显示这些附件（刷新后仍在）。可以只发附件、不发文字（owner 2026-10-06 改判）：没有文字时只要带着已上传的附件就能发送，新会话这样发出的第一条消息以第一个附件的文件名作标题；没有附件的空消息仍被拒绝。
   欢迎页可先选文件（留在浏览器里），首次发送建好会话后再上传；支持拖进输入框与粘贴剪贴板里的文件或截图；每条消息最多 `UPLOAD_MAX_FILES` 个附件（缺省 10，即 owner 说的「一次最多 10 个」的同一个数；超出时整批不接受并提示 `每条消息最多 N 个附件`）。
   撤回一条带附件的消息时，仍存在的附件随撤回响应返回并恢复为输入框的附件标签（对 C 的 message-undo 的修改）。
 - **模型与推理强度（#906）**：服务端模型白名单 `MODEL_CATALOG`（显示名、是否支持推理与看图、可选的强度子集），未配置时由 `MODEL_ID` / `MODEL_REASONING` 构成单模型白名单（托管 `models.yml` 字节不变）；
@@ -42,11 +42,11 @@ owner 于 2026-10-06 定下了 S1g 的全部产品决定（权限档位、整文
 
 ### Modified Capabilities
 
-- `chat-web`：「输入框与能力栏」（能力行布局、「+」菜单、不渲染项收窄）、「消息线程」（用户气泡显示附件；分叉与撤回回填附件）、「API 客户端扩展」（会话视图与消息的新键、`prompt` 与 `createSession` / `patchSession` 的新输入、fork 与 undo 响应的 `attachments`、两个新方法 `getComposerOptions` 与 `uploadFile`）。三条都以 C 的 delta 为底。
+- `chat-web`：「会话页」（空白发送一句限定为没有可发送附件时；欢迎态场景的控件措辞；以 C 的 delta 为底）、「输入框与能力栏」（能力行布局、「+」菜单、不渲染项收窄）、「消息线程」（用户气泡显示附件；分叉与撤回回填附件）、「API 客户端扩展」（会话视图与消息的新键、`prompt` 与 `createSession` / `patchSession` 的新输入、fork 与 undo 响应的 `attachments`、两个新方法 `getComposerOptions` 与 `uploadFile`）。四条都以 C 的 delta 为底。
 - `omp-runtime`：「子进程 spawn 契约」（`--approval-mode` 与 `--model` 按会话取值）、「宿主 overlay」（措辞与三档下的实机场景；文件字节不变）；新增「模型与推理强度命令」。
 - `tool-approval`：「审批请求识别」（不再假定 `write` 档；`always-ask` 下写文件类工具同样走审批流）。
 - `session-metadata`：「会话创建与空间绑定」「会话元数据修改」「fork 继承会话元数据」（三键的输入、校验与继承；以 C 的 delta 为底）、「会话元数据审计」（`session.permission` 只引用 session-permission-tier，不复述条件）、「会话视图扩展键」（C 新增的条文：十一键之上再加三键的括注与场景计数）。
-- `chat-sessions`：「会话 REST」（会话视图十四键、消息键集、fork 响应；以 C 的 delta 为底）、「REST prompt 受理与补偿」（`attachments`；以 C 的 delta 为底）、「Slash 命令白名单与命令目录」（带附件消息的 wire candidates）；新增「派发前按会话设置对齐进程」。
+- `chat-sessions`：「会话 REST」（会话视图十四键、消息键集、fork 响应；以 C 的 delta 为底）、「REST prompt 受理与补偿」（`attachments`；`message` 可以为空，只要带通过校验的附件；以 C 的 delta 为底）、「会话持久化与回合刷盘」（只发附件时标题取第一个附件的文件名；底本是主规格）、「Slash 命令白名单与命令目录」（带附件消息的 wire candidates）；新增「派发前按会话设置对齐进程」。
 - `turn-control`：「从此处分叉 REST」（响应加 `attachments`、复制三列与消息附件、临时进程的档位与模型；以 C 的 delta 为底）、「重新生成 REST」（档位不同先退役；模型与强度的对齐在 `get_branch_messages` 之前，失败属事务前）。
 - `session-sidebar`：「会话 DTO 严格解析」（C 新增的条文：十一键 → 十四键）、「composer footer 工作空间选择」（位置由「能力栏最左侧」改为左组第二项；「权限、上传与专家控件 SHALL NOT 渲染」收窄为专家与麦克风；以 C 的 delta 为底）。
 - `message-undo`（C 新增的能力）：「撤回 REST」（200 加 `attachments`：被撤回消息里仍存在的附件）、「web 撤回」（恢复附件标签）。
@@ -63,7 +63,7 @@ owner 于 2026-10-06 定下了 S1g 的全部产品决定（权限档位、整文
 
 - **服务端代码**：`server/src/agent-config.ts`（四个新键、白名单解析）、`server/src/model-proxy/models-yml.ts`、`server/src/core/sandbox/{resolve,index}.ts`、`server/src/core/errors`（新码）、`server/src/http`（归属身份）、
   `server/src/model-proxy/index.ts`（顶层 `model` 校验，`allowedModels` 由装配处传入）、`server/src/workspaces/`（上传路由，新文件）、`server/src/sessions/`（store 的三列与附件列、账号最近选择、`rest.ts` / `rest-metadata.ts`、新的 options 路由文件、`pool.ts` / `supervisor.ts` / `branching.ts` 的按会话取值与派发前对齐、
-  `slash-commands.ts` 的附件后缀与 wire candidates、C 新增的 `undo.ts` / `store-undo.ts` 的撤回响应附件）、`server/src/sessions/omp/{process,runtime,commands}.ts`（argv 取值、两种新命令帧）、`server/src/core/db/migrations/040–042`。
+  `slash-commands.ts` 的附件后缀与 wire candidates、`rest.ts` 对空文本带附件的受理与 `acceptPrompt` 的标题取材、C 新增的 `undo.ts` / `store-undo.ts` 的撤回响应附件）、`server/src/sessions/omp/{process,runtime,commands}.ts`（argv 取值、两种新命令帧）、`server/src/core/db/migrations/040–042`。
   `process.ts`（788 行）、`store.ts`（797）、`runtime.ts`（798）、`supervisor.ts`（800）都贴着 800 行上限：新增逻辑落在新文件或有余量的既有文件。
 - **Web 代码**：`web/src/lib/`（`session-contract.ts` 的键集、`api.ts` / `api-sessions.ts` 的新方法、新的上传传输文件）、`web/src/features/chat/`（`composer.tsx`、`capability-bar.tsx`、`message-thread.tsx`、`turn-actions.ts`、`use-chat-session.ts`，
   以及新的档位、模型、附件组件与状态文件——逐个登记进 `MIGRATED_AREAS`）。拷入层两个目录不改。
