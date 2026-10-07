@@ -111,7 +111,7 @@ describe("条目「更多」菜单 (M1, M16)", () => {
       const [select, more] = Array.from(row.children);
       expect(row.children).toHaveLength(2);
       expect(row.querySelectorAll("button")).toHaveLength(2);
-      expect(select?.matches("button.chat-session-button")).toBe(true);
+      expect(select?.matches('button[data-slot="session-select"]')).toBe(true);
       expect(more?.tagName).toBe("BUTTON");
       expect(more?.getAttribute("aria-label")).toBe(
         `更多操作：${select?.getAttribute("aria-label")}`,
@@ -672,7 +672,7 @@ describe("≤760px 导航覆盖层 (M14)", () => {
     await yieldMacrotask();
     expect(screen.getByRole("dialog", { name: "导航" })).toBe(overlay);
     expect(partitionTitles(nav, "置顶任务")).toEqual([OTHER]);
-    expect(partitionTitles(nav, "任务 (1)")).toEqual([NEW]);
+    expect(partitionTitles(nav, "临时空间")).toEqual([NEW]);
     expect(currentLocation()).toBe(SESSION_A);
   });
 

@@ -7,7 +7,6 @@ import { deferredResponse, jsonResponse } from "./support.js";
 import {
   COLOR_LITERAL_PATTERNS,
   readRepoFile,
-  ruleBody,
   stripComments,
   topLevelBlocks,
 } from "./ui-support.js";
@@ -171,7 +170,7 @@ describe("(C4) session list status element", () => {
     { id: "d".repeat(32), title: "会话丁", status: "idle", label: "未开始" },
   ] as const;
 
-  it("shows a dot plus visually hidden Chinese status named `<title> <状态>`", async () => {
+  it("shows a visually hidden Chinese status named `<title> <状态>`, with a visible mark only while running or failed", async () => {
     const sessions = rows.map(({ id, title, status }, index) => ({
       id,
       title,
@@ -187,11 +186,12 @@ describe("(C4) session list status element", () => {
     for (const { title, status, label } of rows) {
       const element = within(nav).getByRole("status", { name: `${title} ${label}` });
       expect(element.textContent).toBe(label);
-      expect(element.querySelector(".ui-sr-only")?.textContent).toBe(label);
-      const dot = element.querySelector(".chat-session-dot");
-      expect(dot?.getAttribute("aria-hidden")).toBe("true");
-      expect(dot?.classList.contains(`chat-session-dot-${status}`)).toBe(true);
-      expect(dot?.classList.contains("ui-pulse")).toBe(status === "running");
+      expect(element.querySelector(".sr-only")?.textContent).toBe(label);
+      // 可见标记只有 运行中 / 失败（与 等待确认）；已完成、未开始 没有标记元素。
+      const mark = element.querySelector("[data-status-mark]");
+      const visible = status === "running" || status === "failed";
+      expect(mark?.getAttribute("data-status-mark") ?? null).toBe(visible ? status : null);
+      if (mark) expect(mark.getAttribute("aria-hidden")).toBe("true");
       expect(within(nav).getByRole("button", { name: title })).toBeTruthy();
     }
     for (const english of ["running", "done", "failed", "idle"]) {
@@ -201,18 +201,21 @@ describe("(C4) session list status element", () => {
 });
 
 describe("(C5) static contract", () => {
-  it("session nav maps session status through SESSION_STATUS_LABEL", () => {
+  it("session nav maps session status through SessionStatusMark (sessionStatusText)", () => {
     const source = readRepoFile("web/src/features/chat/session-sidebar.tsx");
     expect(source).not.toMatch(/>\s*\{session\.status\}\s*</);
-    expect(source).toContain("SESSION_STATUS_LABEL");
-    expect(source).toContain("ui-pulse");
+    expect(source).toContain("<SessionStatusMark ");
+    expect(readRepoFile("web/src/features/chat/session-status-mark.tsx")).toContain(
+      "sessionStatusText(session)",
+    );
+    expect(readRepoFile("web/src/features/chat/status-label.ts")).toContain("SESSION_STATUS_LABEL");
     // 列表只经侧栏槽位渲染：主区视图不再持有会话列表。
     const view = readRepoFile("web/src/features/chat/conversation-view.tsx");
     expect(view).not.toContain("会话列表");
     expect(view).not.toContain("新建会话");
   });
 
-  it("single-column layout lives in the view; chat.css holds session-list rules only", () => {
+  it("single-column layout lives in the view; chat.css holds only the row-menu and rename-dialog rules", () => {
     const view = readRepoFile("web/src/features/chat/conversation-view.tsx");
     expect(view).toContain("grid-cols-[minmax(0,1fr)]");
     expect(view).not.toMatch(/chat-(layout|main)/);
@@ -220,7 +223,10 @@ describe("(C5) static contract", () => {
     expect(css).not.toContain(".chat-sidebar");
     expect(ruleSelectors(css).length).toBeGreaterThan(0);
     expect(foreignSelectors(css)).toEqual([]);
-    expect(ruleBody(css, ".chat-session-nav")).not.toContain("overflow");
+    // 侧栏已改用 Tailwind：只属于它的规则不再留在 chat.css。
+    for (const selector of ruleSelectors(css)) {
+      expect(selector).toMatch(/\.chat-(session-more|rename-(form|actions))\b/);
+    }
   });
 
   it("the ownership rule reaches into at-rule blocks: a foreign selector inside @media is reported", () => {
@@ -255,7 +261,8 @@ describe("(C5) static contract", () => {
     const raw = readRepoFile("web/src/features/chat/chat.css");
     const css = stripComments(raw);
     for (const removed of [
-      ".chat-session-status-running",
+      ".chat-session-status",
+      ".chat-session-dot",
       ".chat-composer",
       ".chat-send",
       ".chat-workspace-",
@@ -265,9 +272,6 @@ describe("(C5) static contract", () => {
     }
     expect(raw).not.toMatch(COLOR_LITERAL_PATTERNS[0] as RegExp);
     expect(raw).toContain("demo.html:282-298");
-    const statusRule = ruleBody(css, ".chat-session-status");
-    expect(statusRule).not.toContain("padding");
-    expect(statusRule).not.toContain("background");
   });
 
   it("ui-walk expects the Chinese session status", () => {

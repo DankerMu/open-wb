@@ -38,7 +38,10 @@ const MIGRATED_AREAS: string[] = [
   "web/src/features/chat/runtime-convert.ts",
   "web/src/features/chat/scene-pills.tsx",
   "web/src/features/chat/search-match.ts",
+  "web/src/features/chat/session-groups.ts",
   "web/src/features/chat/session-list-prefs.ts",
+  "web/src/features/chat/session-path.ts",
+  "web/src/features/chat/session-sidebar.tsx",
   "web/src/features/chat/session-status-mark.tsx",
   "web/src/features/chat/slash-menu-state.ts",
   "web/src/features/chat/slash-menu.tsx",
@@ -60,6 +63,7 @@ const MIGRATED_AREAS: string[] = [
   "web/src/features/chat/types.ts",
   "web/src/features/chat/use-chat-session.ts",
   "web/src/features/chat/use-clipped.ts",
+  "web/src/features/chat/use-session-list-view.ts",
   "web/src/features/chat/use-thread-runtime.ts",
   "web/src/features/chat/welcome-content.ts",
   "web/src/features/chat/welcome-options.ts",
@@ -69,16 +73,12 @@ const MIGRATED_AREAS: string[] = [
 const MIGRATED_ALLOWED_IMPORTS = ["Icon", "IconName", "BrandMark", "useEscapeFallback"];
 
 const CHAT_DIR = "web/src/features/chat";
-/** 会话列表的八个文件：仍是旧实现，不登记（随后续 change 迁移）。 */
+/** 会话列表里仍是旧实现的四个文件：条目菜单、两个对话框与动作层，不登记（任务组 15 迁移）。 */
 const SESSION_LIST_FILES = [
   "delete-dialog.tsx",
   "rename-dialog.tsx",
   "session-actions.ts",
-  "session-filter.tsx",
-  "session-groups.ts",
   "session-menu.tsx",
-  "session-path.ts",
-  "session-sidebar.tsx",
 ];
 
 const FROZEN_DIR = "web/src/ui";
@@ -184,7 +184,7 @@ function layeringViolations(files: SourceFile[], rules: LayeringRules): string[]
 }
 
 /**
- * 会话页迁移终态（纯函数）：`CHAT_DIR` 下除会话列表八个文件外的每个 `.ts`/`.tsx` 都逐个登记在
+ * 会话页迁移终态（纯函数）：`CHAT_DIR` 下除会话列表四个未迁移文件外的每个 `.ts`/`.tsx` 都逐个登记在
  * 已迁移清单里（按路径全等，不走前缀），目录里唯一的 `.css` 是 `chat.css`。
  */
 function chatEndStateViolations(paths: string[], migrated: string[]): string[] {
@@ -259,7 +259,7 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
     ].join("\n");
     expect(check("web/src/routes/shell/sidebar.tsx", allowed)).toEqual([]);
     const legacy = 'import { Button } from "../../ui/index.js";';
-    expect(check("web/src/features/chat/session-filter.tsx", legacy)).toEqual([]);
+    expect(check("web/src/features/chat/session-menu.tsx", legacy)).toEqual([]);
     expect(check("web/src/features/chat/page.tsx", legacy)).toEqual([]);
     expect(check("web/src/features/chat/chat.css")).toEqual([]);
     expect(check("web/src/routes-extra/a.css")).toEqual([]);
@@ -352,7 +352,10 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
       "web/src/features/chat/runtime-convert.ts",
       "web/src/features/chat/scene-pills.tsx",
       "web/src/features/chat/search-match.ts",
+      "web/src/features/chat/session-groups.ts",
       "web/src/features/chat/session-list-prefs.ts",
+      "web/src/features/chat/session-path.ts",
+      "web/src/features/chat/session-sidebar.tsx",
       "web/src/features/chat/session-status-mark.tsx",
       "web/src/features/chat/slash-menu-state.ts",
       "web/src/features/chat/slash-menu.tsx",
@@ -374,6 +377,7 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
       "web/src/features/chat/types.ts",
       "web/src/features/chat/use-chat-session.ts",
       "web/src/features/chat/use-clipped.ts",
+      "web/src/features/chat/use-session-list-view.ts",
       "web/src/features/chat/use-thread-runtime.ts",
       "web/src/features/chat/welcome-content.ts",
       "web/src/features/chat/welcome-options.ts",
@@ -652,13 +656,13 @@ describe("会话页迁移终态（ui-foundation「会话页迁移终态」）", 
     expect(chatEndStateViolations([page], [CHAT_DIR])).toHaveLength(1);
   });
 
-  it("web/src/features/chat 现状：八个会话列表文件之外全部登记，唯一的 .css 是 chat.css", () => {
+  it("web/src/features/chat 现状：四个未迁移的会话列表文件之外全部登记，唯一的 .css 是 chat.css", () => {
     const paths = chatPaths();
     for (const name of SESSION_LIST_FILES) {
       expect(paths).toContain(`${CHAT_DIR}/${name}`);
       expect(MIGRATED_AREAS).not.toContain(`${CHAT_DIR}/${name}`);
     }
-    expect(SESSION_LIST_FILES).toHaveLength(8);
+    expect(SESSION_LIST_FILES).toHaveLength(4);
     expect(paths.filter((path) => path.endsWith(".css"))).toEqual([`${CHAT_DIR}/chat.css`]);
     expect(chatEndStateViolations(paths, MIGRATED_AREAS)).toEqual([]);
     // 反向：会话页的清单条目恰是目录里的非会话列表源文件，不多不少。

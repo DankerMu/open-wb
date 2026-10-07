@@ -156,7 +156,7 @@ describe("侧栏会话列表区 (S11)", () => {
     expect(follows(mainNav, list)).toBe(true);
     expect(follows(list, footer)).toBe(true);
     expect(list.closest(LIST_AREA)?.parentElement).toBe(aside);
-    expect(create.className).toContain("chat-new-session");
+    expect(create.classList.contains("w-full")).toBe(true);
     const main = screen.getByRole("main");
     expect(within(main).queryByRole("navigation", { name: "会话列表" })).toBeNull();
     expect(within(main).queryByRole("button", { name: "新建会话" })).toBeNull();

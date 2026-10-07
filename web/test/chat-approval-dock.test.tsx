@@ -310,6 +310,10 @@ describe("composer dock: reload recovery", () => {
     expect(fourth.querySelector('[data-slot="approval-records"]')).toBeNull();
     expect(dock()).toBeNull();
     expect(cards()).toHaveLength(0);
+    // 侧栏分组（Radix Collapsible）挂载时排一帧，jsdom 的 rAF 架在 setInterval 上：先让这一帧跑完。
+    act(() => {
+      vi.advanceTimersByTime(20);
+    });
     expect(vi.getTimerCount()).toBe(0);
   });
 

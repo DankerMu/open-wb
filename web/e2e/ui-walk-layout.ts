@@ -378,10 +378,10 @@ export async function expectScrollableX(container: Locator): Promise<void> {
   expect(await container.evaluate((el) => getComputedStyle(el).overflowX)).toBe("auto");
 }
 
-// 必须在受控回合 held 期间调用：运行中的会话项带 .ui-pulse，运行中的助手正文末尾有流式光标
+// 必须在受控回合 held 期间调用：运行中的会话项带转动的状态标记，运行中的助手正文末尾有流式光标
 // （chat-harness「流式光标在减少动态效果下不闪烁」）。
 export async function expectReducedMotionToggle(page: Page): Promise<void> {
-  const pulse = page.locator(".ui-pulse:visible").first();
+  const pulse = page.locator('[data-status-mark="running"]:visible').first();
   await expect(pulse).toBeVisible();
   const caret = page.getByRole("article", { name: "助手" }).locator('[data-slot="message-caret"]');
   await expect(caret).toHaveCount(1);
@@ -400,11 +400,11 @@ export async function expectReducedMotionToggle(page: Page): Promise<void> {
   expect(await shimmer(), "the shimmer sweeps").toBe("tw-shimmer-translate running");
   await page.emulateMedia({ reducedMotion: "reduce" });
   expect(await shimmer(), "reduced motion pauses the shimmer").toBe("tw-shimmer-translate paused");
-  await expect.poll(animationOf(pulse), "reduced motion disables .ui-pulse").toBe("none");
+  await expect.poll(animationOf(pulse), "reduced motion stills the running mark").toBe("none");
   await expect(caret).toHaveCount(1);
   await expect.poll(animationOf(caret), "reduced motion stills the running caret").toBe("none");
   await page.emulateMedia({ reducedMotion: "no-preference" });
-  await expect.poll(animationOf(pulse), "no-preference restores .ui-pulse").not.toBe("none");
+  await expect.poll(animationOf(pulse), "no-preference restores the running mark").not.toBe("none");
   await expect.poll(animationOf(caret), "no-preference restores the caret").not.toBe("none");
 }
 
@@ -469,7 +469,7 @@ export async function selectFirstSessionInOverlay(page: Page): Promise<void> {
   const sidebar = await openSidebar(page, "mobile-dark");
   const idle = page.getByRole("status", { name: / 未开始$/u });
   await sessionList(sidebar)
-    .locator("button.chat-session-button")
+    .locator('[data-slot="session-select"]')
     .filter({ hasNot: idle })
     .first()
     .click();

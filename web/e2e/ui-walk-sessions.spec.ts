@@ -29,6 +29,12 @@ import {
 import { type AuthOracle, runWithBrowserErrorOracle } from "./ui-walk-oracle.js";
 import { expectNoProjectConfig, walkProjectConfig } from "./ui-walk-project-config.js";
 import {
+  CURRENT_SESSION,
+  expectSelectedIn,
+  sections,
+  step6Sidebar,
+} from "./ui-walk-session-list.js";
+import {
   expandToolGroup,
   toolGroup,
   walkArtifactPreview,
@@ -55,9 +61,6 @@ const EXPECTED_CHANGES = [{ path: REPORT_FILE, added: null, removed: null, kind:
 const SCENE_PILLS = ["日常办公", "代码开发", "创意设计"];
 const CODE_CHIPS = ["日常开发", "网站开发", "Agent 应用", "Skill 开发", "CI/CD"];
 const HEX_ID = /^[0-9a-f]{32}$/;
-const SPACES_SECTION = /^空间 \(\d+\)$/u;
-const TASKS_SECTION = /^任务 \(\d+\)$/u;
-const CURRENT_SESSION = 'button[aria-current="true"]';
 const CURRENT_MATCH = 'article[aria-current="true"]';
 // 建会话后的标题：提示词的前 18 个码点，每次运行都相同。
 const INITIAL_TITLE = "WORKBUDDY_THINK WO";
@@ -106,7 +109,7 @@ async function walkSessionMeta(
   const todoSession: CreatedSession = { id: null };
   const uuid = randomUUID();
   const prompt = `WORKBUDDY_THINK WORKBUDDY_WRITE 会话走查 ${uuid}`;
-  // 每个 project 唯一：第 11 步凭它断言条目从所有分区消失。
+  // 每个 project 唯一：第 11 步凭它断言条目从所有分组消失。
   const renamed = `走查重命名 ${uuid.slice(0, 8)}`;
 
   await step1Login(page, oracle, project);
@@ -131,7 +134,7 @@ async function walkSessionMeta(
     await walkArtifactsPanel(page, REPORT_FILE, LOGICAL_PATH);
     await step5ViewDetails(page, workspaceId, sessionId);
     mark("step 5");
-    await step6Sidebar(page, project);
+    await step6Sidebar(page, project, WORKSPACE_NAME, INITIAL_TITLE);
     mark("step 6");
     await step7Pin(page, project);
     mark("step 7");
@@ -403,32 +406,6 @@ async function step5ViewDetails(page: Page, workspaceId: string, sessionId: stri
   await expectTranscriptReady(page);
 }
 
-type Sections = { list: Locator; pinned: Locator; tasks: Locator; spaces: Locator };
-
-function sections(sidebar: Locator): Sections {
-  const list = sidebar.getByRole("navigation", { name: "会话列表" });
-  return {
-    list,
-    pinned: list.getByRole("group", { name: "置顶任务", exact: true }),
-    tasks: list.getByRole("group", { name: TASKS_SECTION }),
-    spaces: list.getByRole("group", { name: SPACES_SECTION }),
-  };
-}
-
-// 会话按选中项定位（建会话后的标题每次运行都相同）：在 `home` 里，全列表恰一条，不在 `others` 的
-// 任何一个里；不存在的分区计数自然为 0。先断言 `home`：条目迁移之前的 DOM 也满足全列表恰一条。
-async function expectSelectedIn(
-  list: Locator,
-  home: Locator,
-  others: readonly Locator[],
-): Promise<void> {
-  await expect(home.locator(CURRENT_SESSION)).toHaveCount(1);
-  await expect(list.locator(CURRENT_SESSION)).toHaveCount(1);
-  for (const section of others) {
-    await expect(section.locator(CURRENT_SESSION)).toHaveCount(0);
-  }
-}
-
 // 选中条目所在 `li` 里的行菜单触发按钮（`更多操作：<标题>`）；菜单本身经 portal 渲染在页面层。
 function rowMenu(sidebar: Locator): Locator {
   return sidebar
@@ -450,47 +427,14 @@ async function expectFocusInNavOverlay(page: Page, project: WalkProject): Promis
   await expect(overlay.and(page.locator(":focus-within"))).toHaveCount(1);
 }
 
-// 筛选弹层 portal 到 `body`，在 `导航` 覆盖层的 DOM 子树之外：弹层与单选项从 `page` 定位。真实点击（无
-// `force`）经 Playwright 的命中测试，弹层画在覆盖层遮罩之下时点击被拦截（#715）。`全部` 在 `状态` 组内
-// exact 匹配（否则同时命中 `全部时间`）。`全部时间` 是默认选中项，Radix 只在未选中时回调，点它只做命中
-// 测试、无需复位。Escape 只关弹层、焦点回 `筛选任务`，覆盖层由 `inspectSidebar` 关闭。
-async function step6Sidebar(page: Page, project: WalkProject): Promise<void> {
-  await inspectSidebar(page, project, async (sidebar) => {
-    const { list, pinned, tasks, spaces } = sections(sidebar);
-    const workspace = spaces.getByRole("group", { name: WORKSPACE_NAME, exact: true });
-    await expectSelectedIn(list, workspace, [tasks, pinned]);
-    const trigger = list.getByRole("button", { name: "筛选任务", exact: true });
-    await trigger.click();
-    const filter = page.getByRole("dialog", { name: "筛选任务", exact: true });
-    const status = filter.getByRole("radiogroup", { name: "状态", exact: true });
-    const finished = status.getByRole("radio", { name: "已完成", exact: true });
-    await finished.click();
-    await expect(finished).toHaveAttribute("aria-checked", "true");
-    await expectSelectedIn(list, workspace, [tasks, pinned]);
-    const all = status.getByRole("radio", { name: "全部", exact: true });
-    await all.click();
-    await expect(all).toHaveAttribute("aria-checked", "true");
-    const time = filter.getByRole("radiogroup", { name: "时间", exact: true });
-    const anyTime = time.getByRole("radio", { name: "全部时间", exact: true });
-    await anyTime.click();
-    await expect(anyTime).toHaveAttribute("aria-checked", "true");
-    await page.keyboard.press("Escape");
-    await expect(filter).toHaveCount(0);
-    if (project === "mobile-dark") {
-      await expect(page.getByRole("dialog", { name: "导航", exact: true })).toHaveCount(1);
-    }
-    await expect(trigger).toBeFocused();
-  });
-}
-
-// 置顶不是乐观更新：PATCH 成功后条目换到 `置顶任务` 分区（DOM 节点重挂）。菜单在覆盖层的 DOM
+// 置顶不是乐观更新：PATCH 成功后条目换到 `置顶任务` 分组（DOM 节点重挂）。菜单在覆盖层的 DOM
 // 子树之外，`Escape` 只收起菜单并把焦点还给触发按钮；mobile 的覆盖层由 `inspectSidebar` 关闭。
 async function step7Pin(page: Page, project: WalkProject): Promise<void> {
   await inspectSidebar(page, project, async (sidebar) => {
-    const { list, pinned, tasks, spaces } = sections(sidebar);
+    const { list, pinned, temporary, workspace } = sections(sidebar, WORKSPACE_NAME);
     await rowMenu(sidebar).click();
     await menuItem(page, "置顶任务").click();
-    await expectSelectedIn(list, pinned, [spaces, tasks]);
+    await expectSelectedIn(list, pinned, [workspace, temporary]);
     await rowMenu(sidebar).click();
     await expect(menuItem(page, "取消置顶")).toBeVisible();
     await expect(menuItem(page, "置顶任务")).toHaveCount(0);
@@ -500,7 +444,7 @@ async function step7Pin(page: Page, project: WalkProject): Promise<void> {
   });
 }
 
-// 重命名对话框渲染在页面层；侧栏条目与顶栏标题更新，reload 后标题与置顶分区从 REST 恢复。
+// 重命名对话框渲染在页面层；侧栏条目与顶栏标题更新，reload 后标题与置顶分组从 REST 恢复。
 async function step8Rename(
   page: Page,
   project: WalkProject,
@@ -511,8 +455,8 @@ async function step8Rename(
     .getByRole("banner")
     .getByRole("heading", { level: 1, name: `我的工作 / ${title}`, exact: true });
   const expectPinnedAs = async (sidebar: Locator) => {
-    const { list, pinned, tasks, spaces } = sections(sidebar);
-    await expectSelectedIn(list, pinned, [spaces, tasks]);
+    const { list, pinned, temporary, workspace } = sections(sidebar, WORKSPACE_NAME);
+    await expectSelectedIn(list, pinned, [workspace, temporary]);
     await expect(list.locator(CURRENT_SESSION)).toHaveAccessibleName(title);
     await expect(rowMenu(sidebar)).toHaveAccessibleName(`更多操作：${title}`);
   };
@@ -723,7 +667,7 @@ async function step11Delete(
   title: string,
 ): Promise<void> {
   await inspectSidebar(page, project, async (sidebar) => {
-    const { list } = sections(sidebar);
+    const { list } = sections(sidebar, WORKSPACE_NAME);
     await rowMenu(sidebar).click();
     await menuItem(page, "删除").click();
     const confirm = page.getByRole("alertdialog", { name: "删除任务", exact: true });

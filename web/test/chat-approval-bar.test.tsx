@@ -235,6 +235,10 @@ describe("approval prompt card: pending, countdown and settled records", () => {
 
   it("A11 keeps exactly one interval while any card is pending and clears it once none is", async () => {
     const { source } = await mountPage(snapshotWith([]));
+    // 侧栏分组（Radix Collapsible）挂载时排一帧，jsdom 的 rAF 架在 setInterval 上：先让这一帧跑完。
+    act(() => {
+      vi.advanceTimersByTime(20);
+    });
     expect(vi.getTimerCount()).toBe(0);
     emitRequest(source, 1, 7);
     expect(vi.getTimerCount()).toBe(1);

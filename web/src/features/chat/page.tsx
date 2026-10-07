@@ -11,6 +11,7 @@ import { SessionSidebar } from "./session-sidebar.js";
 import { useSlashMenu } from "./slash-menu.js";
 import { chatTopbar } from "./topbar-actions.js";
 import { useChatSession } from "./use-chat-session.js";
+import { useSessionListView } from "./use-session-list-view.js";
 
 type SessionListProps = Omit<ComponentProps<typeof SessionSidebar>, "onCreateSession"> & {
   onShowWelcome(focusComposer: boolean): void;
@@ -36,6 +37,7 @@ export function ChatPage() {
   useTopbar(
     chatTopbar(selected, sessionActions.openRename, search.slot, artifacts.open, config.slot),
   );
+  const listView = useSessionListView();
   const slash = useSlashMenu(
     client,
     session.slashWorkspaceId,
@@ -46,17 +48,16 @@ export function ChatPage() {
   // 列表渲染进 shell 侧栏列表区（issue 424）；数据与回调经 SessionSidebar 的既有 props 传入。
   useSidebarSlot(
     <SessionList
-      filter={session.sessionFilter}
       listError={session.listError}
       listLoading={session.listLoading}
       onDeleteSession={sessionActions.openDelete}
-      onFilterChange={session.setSessionFilter}
       onRenameSession={sessionActions.openRename}
       onSelectSession={session.selectSession}
       onShowWelcome={session.showWelcome}
       onTogglePin={sessionActions.togglePin}
       requestedSessionId={requestedSessionId}
       sessions={session.sessions}
+      view={listView}
       workspaces={session.workspaces}
     />,
   );

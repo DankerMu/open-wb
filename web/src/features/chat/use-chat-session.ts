@@ -14,7 +14,6 @@ import {
   visibleOwnedAlert,
 } from "./ownership.js";
 import { useSessionActions } from "./session-actions.js";
-import { DEFAULT_SESSION_FILTER } from "./session-groups.js";
 import { composerWorkspaceId, selectedSession, sessionNavigation } from "./session-path.js";
 import {
   applyChatEvent,
@@ -63,7 +62,6 @@ export function useChatSession() {
   const [mutationOwner, setMutationOwner] = useState<ChatMutationOwner | null>(null);
   const [regenerateOwner, setRegenerateOwner] = useState<ChatMutationOwner | null>(null);
   const [forkOwner, setForkOwner] = useState<ChatMutationOwner | null>(null);
-  const [sessionFilter, setSessionFilter] = useState(DEFAULT_SESSION_FILTER);
   const {
     error: workspacesError,
     refresh: refreshWorkspaces,
@@ -686,10 +684,8 @@ export function useChatSession() {
     sendDisabled,
     sendPrompt,
     sessionActions,
-    sessionFilter,
     sessions: listForClient?.sessions ?? null,
     setDraft,
-    setSessionFilter,
     showWelcome,
     slashWorkspaceId,
     stopTurn,

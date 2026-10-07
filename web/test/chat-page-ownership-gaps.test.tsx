@@ -34,7 +34,7 @@ afterEach(() => {
 });
 
 function listTitles(list: HTMLElement) {
-  return Array.from(list.querySelectorAll("button.chat-session-button")).map((button) =>
+  return Array.from(list.querySelectorAll('[data-slot="session-select"]')).map((button) =>
     button.getAttribute("aria-label"),
   );
 }
