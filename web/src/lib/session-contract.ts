@@ -9,6 +9,9 @@ type ChatSessionMeta = {
   scene: ChatSessionScene | null;
   workspaceId: string | null;
   pinnedAt: number | null;
+  archivedAt: number | null;
+  pendingApproval: boolean;
+  temporaryWorkspace: boolean;
 };
 
 export type ChatSession = {
@@ -133,17 +136,22 @@ function isSessionScene(value: unknown): value is ChatSessionScene {
 }
 
 function parseSessionMeta(value: Record<string, unknown>): ChatSessionMeta | null {
-  const { pinnedAt, scene, workspaceId } = value;
+  const { archivedAt, pendingApproval, pinnedAt, scene, temporaryWorkspace, workspaceId } = value;
   if (
     (scene !== null && !isSessionScene(scene)) ||
     (workspaceId !== null &&
       (typeof workspaceId !== "string" || !WORKSPACE_ID.test(workspaceId))) ||
-    (pinnedAt !== null && !isNonNegativeSafeInteger(pinnedAt))
+    (pinnedAt !== null && !isNonNegativeSafeInteger(pinnedAt)) ||
+    (archivedAt !== null && !isNonNegativeSafeInteger(archivedAt)) ||
+    typeof pendingApproval !== "boolean" ||
+    typeof temporaryWorkspace !== "boolean" ||
+    // 临时空间标记只能随一个已绑定的空间出现。
+    (workspaceId === null && temporaryWorkspace)
   ) {
     return null;
   }
 
-  return { scene, workspaceId, pinnedAt };
+  return { scene, workspaceId, pinnedAt, archivedAt, pendingApproval, temporaryWorkspace };
 }
 
 export function parseSession(value: unknown): ChatSession | null {
@@ -157,6 +165,9 @@ export function parseSession(value: unknown): ChatSession | null {
       "scene",
       "workspaceId",
       "pinnedAt",
+      "archivedAt",
+      "pendingApproval",
+      "temporaryWorkspace",
     ])
   ) {
     return null;

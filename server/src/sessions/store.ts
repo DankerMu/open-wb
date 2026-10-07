@@ -42,25 +42,20 @@ import {
   type SessionTodoOptions,
   type SessionTodoStore,
 } from "./store-todo.js";
+import {
+  SESSION_COLUMNS,
+  type SessionDbRow,
+  type SessionStatus,
+  type SessionView,
+  toSessionView,
+} from "./store-view.js";
 
-type SessionStatus = "idle" | "running" | "done" | "failed" | "stopped";
+export { SESSION_COLUMNS, type SessionDbRow, type SessionView, toSessionView };
+
 export type MessageRole = "user" | "assistant";
 export type MessageStatus = "done" | "running" | "failed" | "stopped";
 export type StepStatus = "running" | "done" | "failed" | "stopped";
 export type FinishStatus = "done" | "failed" | "stopped";
-
-type SessionScene = "office" | "code" | "design";
-
-export interface SessionView {
-  id: string;
-  title: string | null;
-  status: SessionStatus;
-  createdAt: number;
-  updatedAt: number;
-  scene: SessionScene | null;
-  workspaceId: string | null;
-  pinnedAt: number | null;
-}
 
 export interface StepView {
   id: number;
@@ -205,20 +200,6 @@ export interface SessionStore extends SessionTodoStore {
   close(): void;
 }
 
-export type SessionDbRow = {
-  id: string;
-  owner_id: string;
-  title: Uint8Array | null;
-  status: SessionStatus;
-  omp_session_file: Uint8Array | null;
-  stream_epoch: number;
-  created_at: number;
-  updated_at: number;
-  workspace_id: string | null;
-  scene: SessionScene | null;
-  pinned_at: number | null;
-};
-
 type RuntimeDbRow = {
   owner_id: string;
   omp_session_file: Uint8Array | null;
@@ -253,8 +234,6 @@ export type Turn = {
 
 const FLUSH_BYTES = 2_048;
 const FLUSH_MS = 2_000;
-export const SESSION_COLUMNS =
-  "id, owner_id, CAST(title AS BLOB) AS title, status, CAST(omp_session_file AS BLOB) AS omp_session_file, stream_epoch, created_at, updated_at, workspace_id, scene, pinned_at";
 const INSERT_SESSION =
   "INSERT INTO chat_sessions(id, owner_id, title, status, created_at, updated_at) VALUES (?, ?, NULL, 'idle', ?, ?)";
 
@@ -288,6 +267,9 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
         scene: null,
         workspaceId: null,
         pinnedAt: null,
+        archivedAt: null,
+        pendingApproval: false,
+        temporaryWorkspace: false,
       };
     },
 
@@ -714,19 +696,6 @@ function assertOpen(closed: boolean): void {
   if (closed) {
     throw new Error("session store is closed");
   }
-}
-
-export function toSessionView(row: SessionDbRow, decoder: TextDecoder): SessionView {
-  return {
-    id: row.id,
-    title: decodeNullableText(decoder, row.title),
-    status: row.status,
-    createdAt: Number(row.created_at),
-    updatedAt: Number(row.updated_at),
-    scene: row.scene,
-    workspaceId: row.workspace_id,
-    pinnedAt: row.pinned_at === null ? null : Number(row.pinned_at),
-  };
 }
 
 function openTurn(

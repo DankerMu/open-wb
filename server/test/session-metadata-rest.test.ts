@@ -36,7 +36,7 @@ import {
 
 const JSON_TYPE = "application/json";
 const BODY_LIMIT = 16 * 1024;
-const EIGHT_KEYS = [
+const ELEVEN_KEYS = [
   "id",
   "title",
   "status",
@@ -45,6 +45,9 @@ const EIGHT_KEYS = [
   "scene",
   "workspaceId",
   "pinnedAt",
+  "archivedAt",
+  "pendingApproval",
+  "temporaryWorkspace",
 ] as const;
 const SESSION_ID = /^[0-9a-f]{32}$/u;
 
@@ -159,7 +162,7 @@ function sessionColumns(db: DatabaseSync, id: string): unknown {
     .get(id);
 }
 
-/** 201 + no-store + exactly the eight keys in wire order with the default columns. */
+/** 201 + no-store + exactly the eleven keys in wire order with the default columns. */
 function expectCreated(
   response: LightMyRequestResponse,
   expected: { scene: string | null; workspaceId: string | null },
@@ -167,7 +170,7 @@ function expectCreated(
   expect(response.statusCode).toBe(201);
   expect(response.headers["cache-control"]).toBe("no-store");
   const body = response.json() as CreatedSession;
-  expect(Object.keys(body)).toEqual([...EIGHT_KEYS]);
+  expect(Object.keys(body)).toEqual([...ELEVEN_KEYS]);
   expect(body).toEqual({
     id: expect.stringMatching(SESSION_ID),
     title: null,
@@ -177,6 +180,9 @@ function expectCreated(
     scene: expected.scene,
     workspaceId: expected.workspaceId,
     pinnedAt: null,
+    archivedAt: null,
+    pendingApproval: false,
+    temporaryWorkspace: false,
   });
   expect(Number.isSafeInteger(body.createdAt)).toBe(true);
   return body;
@@ -214,7 +220,7 @@ function paddedSceneBody(bytes: number): string {
 }
 
 describe("POST /api/sessions default creation", () => {
-  it("E1 no body and JSON {} both create the default eight-key session without audit", async () => {
+  it("E1 no body and JSON {} both create the default eleven-key session without audit", async () => {
     const world = await openWorld();
     const before = rowCounts(world.db);
 
@@ -270,7 +276,7 @@ describe("POST /api/sessions workspace binding and scene", () => {
     const sessions = (listed.json() as { sessions: CreatedSession[] }).sessions;
     const row = sessions.find((session) => session.id === created.id);
     expect(row).toEqual(created);
-    expect(Object.keys(row ?? {})).toEqual([...EIGHT_KEYS]);
+    expect(Object.keys(row ?? {})).toEqual([...ELEVEN_KEYS]);
     expect(world.rt.calls).toEqual([]);
   });
 
@@ -521,12 +527,12 @@ function rowState(db: DatabaseSync, id: string) {
   return { row: db.prepare(FULL_ROW).get(id), messages: Number(messages.n) };
 }
 
-/** 200 + no-store + exactly the eight keys in wire order. */
+/** 200 + no-store + exactly the eleven keys in wire order. */
 function expectPatched(response: LightMyRequestResponse): CreatedSession {
   expect(response.statusCode).toBe(200);
   expect(response.headers["cache-control"]).toBe("no-store");
   const body = response.json() as CreatedSession;
-  expect(Object.keys(body)).toEqual([...EIGHT_KEYS]);
+  expect(Object.keys(body)).toEqual([...ELEVEN_KEYS]);
   return body;
 }
 

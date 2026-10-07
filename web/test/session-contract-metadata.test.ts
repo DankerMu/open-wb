@@ -1,8 +1,10 @@
 /**
- * Issue #517 (parent s1c tasks 5.1) web session DTO contract: eight-key sessions, message
- * `thinking` and step `changes` strict parsing through the exported snapshot/list/fork parsers,
- * `listSessions()` whole-response rejection, and the SSE `step.end` guard that still refuses a
- * `changes` key. Oracles: the spec delta's literal fixtures and key sets.
+ * Issue #517 (parent s1c tasks 5.1) web session DTO contract: message `thinking` and step
+ * `changes` strict parsing through the exported snapshot/list/fork parsers, `listSessions()`
+ * whole-response rejection, and the SSE `step.end` guard that still refuses a `changes` key.
+ * Issue #921 (s1f task 1.4) widens the session object to eleven keys (`archivedAt`,
+ * `pendingApproval`, `temporaryWorkspace`): session-sidebar 「会话 DTO 严格解析」 and chat-web
+ * 「八键会话与思考、变更字段严格解析」. Oracles: the spec delta's literal fixtures and key sets.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApiClient } from "../src/lib/api.js";
@@ -34,6 +36,17 @@ const metaSession = {
   scene: "design",
   workspaceId: WORKSPACE_ID,
   pinnedAt: 1_700_000_000_000,
+  archivedAt: null,
+  pendingApproval: false,
+  temporaryWorkspace: false,
+};
+
+/** 三键都取非默认值：已归档、有待决审批、绑定的是临时空间。 */
+const extendedSession = {
+  ...metaSession,
+  archivedAt: 1_750_000_000_000,
+  pendingApproval: true,
+  temporaryWorkspace: true,
 };
 
 const nullMetaSession = {
@@ -109,8 +122,20 @@ function withoutKey(value: Record<string, unknown>, key: string) {
   return rest;
 }
 
+/** The pre-#921 eight-key session: no `archivedAt`, `pendingApproval`, `temporaryWorkspace`. */
+function withoutExtension(session: Record<string, unknown>) {
+  return withoutKey(
+    withoutKey(withoutKey(session, "archivedAt"), "pendingApproval"),
+    "temporaryWorkspace",
+  );
+}
+
+/** The pre-#517 five-key session. */
 function withoutMeta(session: Record<string, unknown>) {
-  return withoutKey(withoutKey(withoutKey(session, "scene"), "workspaceId"), "pinnedAt");
+  return withoutKey(
+    withoutKey(withoutKey(withoutExtension(session), "scene"), "workspaceId"),
+    "pinnedAt",
+  );
 }
 
 function manyChanges(count: number) {
@@ -122,10 +147,12 @@ afterEach(() => {
   resetFakeEventSources();
 });
 
-describe("Session contract: eight-key session", () => {
+describe("Session contract: eleven-key session", () => {
   it.each([
     ["stored metadata", metaSession],
     ["null metadata", nullMetaSession],
+    ["an archive time, a pending approval and a temporary workspace", extendedSession],
+    ["archivedAt 0", { ...metaSession, archivedAt: 0 }],
   ])("accepts and preserves a session with %s in list, snapshot and fork", (_label, session) => {
     expect(parseSessionList({ sessions: [session] })).toEqual({ sessions: [session] });
     expect(parseSessionFork({ session, draft: "" })).toEqual({ session, draft: "" });
@@ -143,14 +170,32 @@ describe("Session contract: eight-key session", () => {
     ["a non-hex workspaceId", { ...metaSession, workspaceId: `g${WORKSPACE_ID.slice(1)}` }],
     ["a negative pinnedAt", { ...metaSession, pinnedAt: -1 }],
     ["an unsafe pinnedAt", { ...metaSession, pinnedAt: 2 ** 53 }],
+    ["missing archivedAt", withoutKey(metaSession, "archivedAt")],
+    ["missing pendingApproval", withoutKey(metaSession, "pendingApproval")],
+    ["missing temporaryWorkspace", withoutKey(metaSession, "temporaryWorkspace")],
+    ["a negative archivedAt", { ...metaSession, archivedAt: -1 }],
+    ["an unsafe archivedAt", { ...metaSession, archivedAt: 2 ** 53 }],
+    ["a string archivedAt", { ...metaSession, archivedAt: "1700000000000" }],
+    ["a boolean archivedAt", { ...metaSession, archivedAt: true }],
+    ["pendingApproval yes", { ...metaSession, pendingApproval: "yes" }],
+    ["a null pendingApproval", { ...metaSession, pendingApproval: null }],
+    ["a numeric temporaryWorkspace", { ...metaSession, temporaryWorkspace: 1 }],
+    ["a null temporaryWorkspace", { ...metaSession, temporaryWorkspace: null }],
+    [
+      "a null workspaceId with temporaryWorkspace true",
+      { ...metaSession, workspaceId: null, temporaryWorkspace: true },
+    ],
   ])("rejects a session with %s in list, snapshot and fork", (_label, session) => {
     expect(parseSessionList({ sessions: [nullMetaSession, session] })).toBeNull();
     expect(parseSessionFork({ session, draft: "" })).toBeNull();
     expect(parseMessageSnapshot(snapshotWith({ session }))).toBeNull();
   });
 
-  it("rejects a legacy five-key session in list, snapshot and fork", () => {
-    const legacy = withoutMeta(nullMetaSession);
+  it.each([
+    [5, withoutMeta(metaSession)],
+    [8, withoutExtension(metaSession)],
+  ])("rejects a legacy %i-key session in list, snapshot and fork", (keyCount, legacy) => {
+    expect(Object.keys(legacy)).toHaveLength(keyCount);
     expect(parseSessionList({ sessions: [legacy] })).toBeNull();
     expect(parseSessionFork({ session: legacy, draft: "" })).toBeNull();
     expect(parseMessageSnapshot(snapshotWith({ session: legacy }))).toBeNull();
@@ -227,17 +272,27 @@ describe("Session contract: message thinking and step changes", () => {
 });
 
 describe("Session contract: list response through the API client", () => {
-  it("accepts a valid eight-key list", async () => {
-    const body = { sessions: [metaSession, nullMetaSession] };
+  it("十一键接受：accepts a valid eleven-key list and keeps every value", async () => {
+    const body = { sessions: [metaSession, nullMetaSession, extendedSession] };
+    for (const session of body.sessions) {
+      expect(Object.keys(session)).toHaveLength(11);
+    }
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(body)));
 
     await expect(createApiClient().listSessions()).resolves.toEqual(body);
   });
 
   it.each([
-    ["a seven-key item without pinnedAt", withoutKey(metaSession, "pinnedAt")],
-    ["a nine-key item with parentSessionId", { ...metaSession, parentSessionId: SESSION_ID }],
+    ["a ten-key item without pinnedAt", withoutKey(metaSession, "pinnedAt")],
+    ["a ten-key item without archivedAt", withoutKey(metaSession, "archivedAt")],
+    ["a legacy eight-key item", withoutExtension(metaSession)],
+    ["a twelve-key item with parentSessionId", { ...metaSession, parentSessionId: SESSION_ID }],
     ["an item with scene chat", { ...metaSession, scene: "chat" }],
+    ["an item with pendingApproval yes", { ...metaSession, pendingApproval: "yes" }],
+    [
+      "an item with a null workspaceId and temporaryWorkspace true",
+      { ...metaSession, workspaceId: null, temporaryWorkspace: true },
+    ],
   ])("rejects the whole list for %s without a partial list", async (_label, session) => {
     const body = { sessions: [nullMetaSession, session] };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(body)));

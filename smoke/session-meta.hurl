@@ -1,6 +1,6 @@
 # 会话元数据冒烟（session-meta.hurl）：从空 cookie store 独立可运行，不依赖 public/auth/chat/files。
 # 登录 zhangsan → 创建/采用 smoke-sessions（201 或 409）→ 列表按 name 取 id
-# → (1) 绑定创建 201 八键 + session.bind 审计 → (2) 未知空间 404 / 多余键 400 且审计不变、无 body 创建 201
+# → (1) 绑定创建 201 十一键 + session.bind 审计 → (2) 未知空间 404 / 多余键 400 且审计不变、无 body 创建 201
 # → (3) PATCH title/scene/pinned、多余键 400、列表反映、取消置顶
 # → (4) WORKBUDDY_THINK prompt → 作答唯一 bash 审批 → 仅 messages GET 有界重试至 done
 # → (5) thinking 逐字、bash 步骤 done、标题仍为 PATCH 所设
@@ -38,7 +38,7 @@ workspace_id: jsonpath "$.workspaces[?(@.name=='smoke-sessions')].id"
 jsonpath "$.workspaces[?(@.name=='smoke-sessions' && count($.workspaces[?(@.name=='smoke-sessions')])==1)]" exists
 jsonpath "$.workspaces[?(@.name=='smoke-sessions')].id" exists
 
-# (1) 绑定创建：exact 201，恰八键且逐键点名，title null、idle、scene code、workspaceId 为捕获值、pinnedAt null；捕获会话 id。不重试。
+# (1) 绑定创建：exact 201，恰十一键且逐键点名，title null、idle、scene code、workspaceId 为捕获值、pinnedAt 与 archivedAt null、pendingApproval 与 temporaryWorkspace false；捕获会话 id。不重试。
 POST {{base_url}}/api/sessions
 Content-Type: application/json
 {"workspaceId":"{{workspace_id}}","scene":"code"}
@@ -46,7 +46,7 @@ HTTP 201
 [Captures]
 session_id: jsonpath "$.id"
 [Asserts]
-jsonpath "$.*" count == 8
+jsonpath "$.*" count == 11
 jsonpath "$.id" matches "^[0-9a-f]{32}$"
 jsonpath "$.title" == null
 jsonpath "$.status" == "idle"
@@ -55,6 +55,9 @@ jsonpath "$.updatedAt" isInteger
 jsonpath "$.scene" == "code"
 jsonpath "$.workspaceId" == "{{workspace_id}}"
 jsonpath "$.pinnedAt" == null
+jsonpath "$.archivedAt" == null
+jsonpath "$.pendingApproval" == false
+jsonpath "$.temporaryWorkspace" == false
 
 # (1) 最新审计是本次会话的 session.bind（detail.sessionId 区分同库上一轮留下的同类事件）。
 GET {{base_url}}/api/audit?limit=1
@@ -88,14 +91,14 @@ jsonpath "$.events" count == 1
 jsonpath "$.events[0].kind" == "session.bind"
 jsonpath "$.events[0].detail.sessionId" == "{{session_id}}"
 
-# (2) 无 body 创建照旧可用：exact 201，恰八键且逐键点名，workspaceId null、scene null；捕获无绑定会话 id。
+# (2) 无 body 创建照旧可用：exact 201，恰十一键且逐键点名，workspaceId null、scene null；捕获无绑定会话 id。
 # bodyless：无 Content-Type、无 body；不重试。
 POST {{base_url}}/api/sessions
 HTTP 201
 [Captures]
 other_id: jsonpath "$.id"
 [Asserts]
-jsonpath "$.*" count == 8
+jsonpath "$.*" count == 11
 jsonpath "$.id" matches "^[0-9a-f]{32}$"
 jsonpath "$.title" == null
 jsonpath "$.status" == "idle"
@@ -104,14 +107,17 @@ jsonpath "$.updatedAt" isInteger
 jsonpath "$.workspaceId" == null
 jsonpath "$.scene" == null
 jsonpath "$.pinnedAt" == null
+jsonpath "$.archivedAt" == null
+jsonpath "$.pendingApproval" == false
+jsonpath "$.temporaryWorkspace" == false
 
-# (3) PATCH title/scene/pinned：exact 200，恰八键且逐键点名，pinnedAt 为整数时间戳，id/status/workspaceId 不变。不重试。
+# (3) PATCH title/scene/pinned：exact 200，恰十一键且逐键点名，pinnedAt 为整数时间戳，id/status/workspaceId 不变。不重试。
 PATCH {{base_url}}/api/sessions/{{session_id}}
 Content-Type: application/json
 {"title":"冒烟会话","scene":"design","pinned":true}
 HTTP 200
 [Asserts]
-jsonpath "$.*" count == 8
+jsonpath "$.*" count == 11
 jsonpath "$.id" == "{{session_id}}"
 jsonpath "$.title" == "冒烟会话"
 jsonpath "$.status" == "idle"
@@ -120,6 +126,9 @@ jsonpath "$.updatedAt" isInteger
 jsonpath "$.scene" == "design"
 jsonpath "$.pinnedAt" isInteger
 jsonpath "$.workspaceId" == "{{workspace_id}}"
+jsonpath "$.archivedAt" == null
+jsonpath "$.pendingApproval" == false
+jsonpath "$.temporaryWorkspace" == false
 
 # (3) PATCH 多余键：exact 400 bad_request。不重试。
 PATCH {{base_url}}/api/sessions/{{session_id}}

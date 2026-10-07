@@ -228,7 +228,7 @@ async function forkSource(
   };
 }
 
-/** The 201 `session`: exactly the eight view keys in wire order, draft = the u3 text. */
+/** The 201 `session`: exactly the eleven view keys in wire order, draft = the u3 text. */
 function forkedSession(fork: LightMyRequestResponse): SessionView {
   const body = fork.json() as { session: SessionView; draft: string };
   expect(Object.keys(body)).toEqual(["session", "draft"]);
@@ -384,7 +384,7 @@ describe("fork inherits workspace and scene but not pin", () => {
 
 describe("the fork response view equals the list entry", () => {
   it(
-    "a bound, pinned `design` source forks to an eight-key view equal to its list entry",
+    "a bound, pinned `design` source forks to an eleven-key view equal to its list entry",
     REAL,
     async () => {
       const { world, workspace, fork } = await forkSource(

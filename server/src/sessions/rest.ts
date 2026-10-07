@@ -61,6 +61,9 @@ interface PublicSession {
   scene: string | null;
   workspaceId: string | null;
   pinnedAt: number | null;
+  archivedAt: number | null;
+  pendingApproval: boolean;
+  temporaryWorkspace: boolean;
 }
 
 interface PublicStep {
@@ -329,6 +332,9 @@ function toPublicSession(session: PublicSession): PublicSession {
     scene: session.scene,
     workspaceId: session.workspaceId,
     pinnedAt: session.pinnedAt,
+    archivedAt: session.archivedAt,
+    pendingApproval: session.pendingApproval,
+    temporaryWorkspace: session.temporaryWorkspace,
   };
 }
 
