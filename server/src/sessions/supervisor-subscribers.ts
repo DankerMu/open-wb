@@ -3,14 +3,79 @@
  * per-session deliver → onEnd registrations, fan-out that drops a throwing deliver, and the
  * end-every-subscriber step of retire.
  */
-import type { RetainedEvent } from "./stream/ring-buffer.js";
+import type { Generation } from "./pool.js";
+import type { RetainedEvent, RingRead } from "./stream/ring-buffer.js";
+import type { SessionStreamSubscription, StreamCursor } from "./supervisor.js";
 
 export type SessionStreamLiveHandler = (event: RetainedEvent) => void;
 
 type Listeners = Map<SessionStreamLiveHandler, (() => void) | undefined>;
 
+/** A subscriber's replay: without a live unsealed generation a cursor or a running turn is a gap. */
+export function readReplay(
+  generation: Generation | undefined,
+  lastEventId: string | null,
+  turnRunning: boolean,
+): RingRead {
+  if (generation === undefined || generation.sealed) {
+    if (lastEventId !== null || turnRunning) {
+      return { mode: "gap", events: [] };
+    }
+    return { mode: "fresh", events: [] };
+  }
+  return generation.ring.since(lastEventId, { turnRunning });
+}
+
+/** The live unsealed generation's epoch and ring sequence; else the stored epoch, read only then. */
+export function streamCursorOf(
+  generation: Generation | undefined,
+  storedState: () => { streamEpoch: number } | null,
+): StreamCursor {
+  if (generation !== undefined && !generation.sealed) {
+    return { epoch: generation.epoch, seq: generation.ring.sequence };
+  }
+  const state = storedState();
+  return { epoch: state?.streamEpoch ?? 0, seq: null };
+}
+
+/** A closed supervisor's subscription: nothing registered, nothing replayed. */
+export function closedSubscription(): SessionStreamSubscription {
+  return {
+    mode: "fresh",
+    replay: [],
+    unsubscribe() {},
+  };
+}
+
 export class SubscriberTable {
   readonly #sessions = new Map<string, Listeners>();
+
+  /**
+   * Registers the subscriber before reading its replay, so no event published in between is
+   * lost; a failed read unregisters it and rethrows.
+   */
+  subscribe(
+    sessionId: string,
+    deliver: SessionStreamLiveHandler,
+    onEnd: (() => void) | undefined,
+    read: () => RingRead,
+  ): SessionStreamSubscription {
+    this.add(sessionId, deliver, onEnd);
+    let replay: RingRead;
+    try {
+      replay = read();
+    } catch (error) {
+      this.remove(sessionId, deliver);
+      throw error;
+    }
+    return {
+      mode: replay.mode,
+      replay: replay.events,
+      unsubscribe: () => {
+        this.remove(sessionId, deliver);
+      },
+    };
+  }
 
   add(sessionId: string, deliver: SessionStreamLiveHandler, onEnd: (() => void) | undefined) {
     let listeners = this.#sessions.get(sessionId);

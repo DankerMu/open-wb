@@ -31,14 +31,21 @@ import {
 } from "./pool.js";
 import { sessionCwdResolver, type WorkspaceRootOf } from "./session-cwd.js";
 import type { ApprovalView, SessionStore, SettledApproval } from "./store.js";
-import type { RetainedEvent, RingRead } from "./stream/ring-buffer.js";
+import type { RetainedEvent } from "./stream/ring-buffer.js";
 import {
   asError,
-  synchronousSinkViolation,
+  observerViolation,
+  retainFault,
   throwCollected,
   translateSupervisorError,
 } from "./supervisor-faults.js";
-import { type SessionStreamLiveHandler, SubscriberTable } from "./supervisor-subscribers.js";
+import {
+  closedSubscription,
+  readReplay,
+  type SessionStreamLiveHandler,
+  SubscriberTable,
+  streamCursorOf,
+} from "./supervisor-subscribers.js";
 import { ThinkingBuffers } from "./thinking-buffer.js";
 import type { TokenRegistry } from "./tokens.js";
 import { ControlClaims, drain, persistEvent, TurnStops } from "./turn-control.js";
@@ -232,11 +239,7 @@ export class SessionSupervisor {
 
   streamCursor(sessionId: string): StreamCursor {
     const generation = this.#slots.get(sessionId)?.generation;
-    if (generation !== undefined && !generation.sealed) {
-      return { epoch: generation.epoch, seq: generation.ring.sequence };
-    }
-    const state = this.#store.runtimeState(sessionId);
-    return { epoch: state?.streamEpoch ?? 0, seq: null };
+    return streamCursorOf(generation, () => this.#store.runtimeState(sessionId));
   }
 
   subscribe(
@@ -246,27 +249,13 @@ export class SessionSupervisor {
     onEnd?: () => void,
   ): SessionStreamSubscription {
     if (this.#closed) {
-      return {
-        mode: "fresh",
-        replay: [],
-        unsubscribe() {},
-      };
+      return closedSubscription();
     }
-    this.#subscribers.add(sessionId, deliver, onEnd);
-    let replay: RingRead;
-    try {
-      replay = this.#readReplay(sessionId, lastEventId);
-    } catch (error) {
-      this.#subscribers.remove(sessionId, deliver);
-      throw error;
-    }
-    return {
-      mode: replay.mode,
-      replay: replay.events,
-      unsubscribe: () => {
-        this.#subscribers.remove(sessionId, deliver);
-      },
-    };
+    return this.#subscribers.subscribe(sessionId, deliver, onEnd, () => {
+      const generation = this.#slots.get(sessionId)?.generation;
+      const turnRunning = this.#store.runtimeState(sessionId)?.activeTurn !== null;
+      return readReplay(generation, lastEventId, turnRunning);
+    });
   }
 
   sessionStreamSubscriberCount(sessionId: string): number {
@@ -725,20 +714,13 @@ export class SessionSupervisor {
         this.#subscribers.fanout(slot.sessionId, recorded);
       }
     }
-    if (this.#onEvent === undefined) {
-      return true;
-    }
-    try {
-      const returned = this.#onEvent(slot.sessionId, generation?.epoch ?? slot.epoch, event);
-      const violation = synchronousSinkViolation(returned);
-      if (violation !== undefined) {
-        throw violation;
-      }
-      return true;
-    } catch (error) {
-      this.#faultSlot(slot, asError(error));
+    const epoch = generation?.epoch ?? slot.epoch;
+    const violation = observerViolation(this.#onEvent, slot.sessionId, epoch, event);
+    if (violation !== undefined) {
+      this.#faultSlot(slot, violation);
       return false;
     }
+    return true;
   }
 
   /** Owned error sink: retain, mark the slot infra-faulted and retire it without awaiting. */
@@ -746,18 +728,6 @@ export class SessionSupervisor {
     slot.infraFaulted = true;
     this.#retain(error);
     void this.#retireSlot(slot);
-  }
-
-  #readReplay(sessionId: string, lastEventId: string | null): RingRead {
-    const generation = this.#slots.get(sessionId)?.generation;
-    const turnRunning = this.#store.runtimeState(sessionId)?.activeTurn !== null;
-    if (generation === undefined || generation.sealed) {
-      if (lastEventId !== null || turnRunning) {
-        return { mode: "gap", events: [] };
-      }
-      return { mode: "fresh", events: [] };
-    }
-    return generation.ring.since(lastEventId, { turnRunning });
   }
 
   async #retireSlot(slot: Slot): Promise<void> {
@@ -786,15 +756,6 @@ export class SessionSupervisor {
   }
 
   #retain(error: Error): void {
-    this.#faults.push(error);
-    try {
-      const returned = this.#onError(error);
-      const violation = synchronousSinkViolation(returned);
-      if (violation !== undefined) {
-        this.#faults.push(violation);
-      }
-    } catch (thrown) {
-      this.#faults.push(asError(thrown));
-    }
+    retainFault(this.#faults, this.#onError, error);
   }
 }
