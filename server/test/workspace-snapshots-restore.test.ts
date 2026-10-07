@@ -430,15 +430,19 @@ describe("还原", () => {
     [
       "only its last byte changed",
       (path: string, big: string) => writeFileSync(path, withByteChanged(big, BIG_BYTES - 1)),
+      true,
     ],
     [
       "only one byte of its second chunk changed",
       (path: string, big: string) => writeFileSync(path, withByteChanged(big, SECOND_CHUNK)),
+      true,
     ],
-    ["been deleted", (path: string) => rmSync(path)],
-  ])(
+    // The deletion frees the inode number before the restore creates its temporary file, and a
+    // file system may hand that number out again: only a file still there forces a new one.
+    ["been deleted", (path: string) => rmSync(path), false],
+  ] as [string, (path: string, big: string) => void, boolean][])(
     "a file of several chunks that has %s is written back byte for byte",
-    async (_name, change) => {
+    async (_name, change, oldFileStillThere) => {
       const f = fixture();
       const big = bigContent();
       put(f.workspace, "big.bin", big, 0o644);
@@ -454,7 +458,9 @@ describe("还原", () => {
       expect(written.size).toBe(BIG_BYTES);
       // Not a deep comparison of 150 000 bytes: a mismatch would print both in full.
       expect(readFileSync(at(f, "big.bin"), "latin1") === big).toBe(true);
-      expect(written.ino).not.toBe(recorded);
+      if (oldFileStillThere) {
+        expect(written.ino).not.toBe(recorded);
+      }
       expect(written.mode & 0o7777).toBe(0o664);
       expect(written.mtimeMs).toBe(PINNED_SECONDS * 1000);
     },
