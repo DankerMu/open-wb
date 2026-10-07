@@ -69,12 +69,17 @@ Minimal mergeable slice: 2.1 + 2.2（错误码与 PATCH `archived`，只读拦�
 
 本组不改 `POST /api/sessions`：做完之后还没有任何 REST 路径会创建临时空间（创建语义在 5.6 才切换，排在「随最后一个会话删除」之后）。
 
-- [ ] 3.1 工作空间 store（`server/src/workspaces/store.ts`）：`list` 排除 `temporary = 1`；新增在调用方事务内创建临时空间的方法（行 `id` 随机、`dir = name = tmp-<id>`、`temporary = 1`，复用 `create` 的目录确保与补偿，不复制实现；id 生成器可注入以便测试碰撞与占位）。测试（工作空间 store 测试文件或新文件）：workspaces「列表不含临时空间」、temporary-workspaces「目录创建失败不留行」的 store 层一半（空间行不留、空目录被移除）与随机 id 冲突重试、`POST /api/workspaces` 与临时空间重名 409。
-- [ ] 3.2 测试辅助函数（`server/test/support/`）：用 3.1 的方法建一个临时空间，并直接写库插入绑定它的会话行。组 3–5 的 REST 测试用它构造「用临时空间的会话」；5.6 之后的新测试可以直接走无 body 创建。
+- [x] 3.1 工作空间 store（`server/src/workspaces/store.ts`）：`list` 排除 `temporary = 1`；新增在调用方事务内创建临时空间的方法（行 `id` 随机、`dir = name = tmp-<id>`、`temporary = 1`，复用 `create` 的目录确保与补偿，不复制实现；id 生成器可注入以便测试碰撞与占位）。测试（新文件 `server/test/workspace-store-temporary.test.ts`；`workspace-store.test.ts` 已 798 行，不加行）：workspaces「列表不含临时空间」、temporary-workspaces「目录创建失败不留行」的 store 层一半（空间行不留、空目录被移除）与随机 id 冲突重试、`POST /api/workspaces` 与临时空间重名 409。
+  事务契约：新方法自己不发 `BEGIN` / `COMMIT` / `ROLLBACK`（既有的创建失败补偿在处于事务中时会 `ROLLBACK`，不能原样复用——那会回滚调用方的事务，违反 workspaces「调用方事务与路径边界」）；与 `create` 共用的只是目录确保与逆序移除本次新建的空目录。方法自身失败时移除本次新建的目录后重抛，回滚归调用方。
+  调用方事务在方法返回之后才失败时，目录也得能撤掉：方法的返回值带一个「移除本次新建的空目录」的补偿出口（5.6 的「临时空间创建失败不留会话」用它），本任务的测试覆盖它。
+  id 生成器经 `WorkspaceStoreOptions` 的可选字段注入；碰撞重试有上限（常量生成器不得死循环，超限即抛），重试要同时认账号内 `name` / `dir` 唯一约束与全局主键 `id` 的冲突。
+- [x] 3.2 测试辅助函数（`server/test/support/`）：用 3.1 的方法建一个临时空间，并直接写库插入绑定它的会话行。组 3–5 的 REST 测试用它构造「用临时空间的会话」；5.6 之后的新测试可以直接走无 body 创建。
 - [ ] 3.3 可见性：`GET /api/workspaces` 不含临时空间；tree / dirs / file / commands / project-config 对所有者的临时空间 id 正常、对他人 404；`POST /api/sessions` 显式携带临时空间的 `workspaceId` → 404（`rest-metadata.ts`）。测试（新文件 `server/test/session-temp-workspace.test.ts`）：temporary-workspaces「列表不含临时空间而按 id 可达」「不能显式绑定临时空间」、session-metadata「他人与不存在的空间一致 404」、workspaces「临时空间不在列表里，转正后出现」的前半（后半在 4.2）。
+  前向同步点（#921 留下）：`server/test/session-view-keys.test.ts` 里「绑定创建」一例经 `POST /api/sessions` 显式绑定 `temporary = 1` 的空间，本任务落地后该路径是 404——该例改用 3.2 的辅助函数构造，`store-metadata.ts` 的 `createSession` 里为它读 `workspaces.temporary` 的那一次读随 5.6 的创建语义一起定去留。这是按规格改写，不算削弱既有断言。
 - [ ] 3.4 变异证据：`list` 不过滤 → 3.3 判红；去掉显式绑定的 404 → 「不能显式绑定临时空间」判红；临时空间的目录确保不走补偿 → 「目录创建失败不留行」判红。
 
 Suggested fixture level: expanded - 沙箱内建目录与失败补偿、公共列表的可见性规则（Critical Path）
+Risk packs: File IO / path safety（3.1 的目录确保与补偿场景）、Error handling / rollback（「目录创建失败不留行」、补偿出口）、Public API（3.3 的列表与 404 场景）、Concurrency / shared state（调用方事务契约、id 碰撞重试）；不选 Schema（列在 1.2 已加）、Config。
 Minimal mergeable slice: 3.1 + 3.2（store 能建、列表不列；没有 REST 路径创建临时空间，线上行为不变）；3.3 随后
 
 ## 4. server — 转正

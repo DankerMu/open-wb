@@ -30,11 +30,36 @@ interface WorkspaceStoreOptions {
   sandboxRoot: string;
   ensureSharedDir: (absPath: string) => void;
   emit: typeof canonicalEmit;
+  /** Row ids of temporary workspaces; tests inject collisions. Default: 16 random bytes as hex. */
+  generateId?: () => string;
+}
+
+/** A temporary workspace whose row is still uncommitted in the caller's transaction. */
+interface CreatedTemporaryWorkspace {
+  workspace: WorkspaceRecord;
+  /**
+   * For a caller whose transaction fails after `createTemporary` returned: removes, in reverse
+   * order, the directories that call created, only while they are empty directories. Throws an
+   * AggregateError naming what it had to leave; safe to call again.
+   *
+   * Must not be called once the caller's transaction has committed: it would remove the
+   * still-empty directory of a live temporary workspace. It throws when a directory this call
+   * created is no longer empty — e.g. another workspace directory appeared inside an owner root
+   * this call created — and leaves that directory in place.
+   */
+  removeCreatedDirs(): void;
 }
 
 export interface WorkspaceStore {
   list(ownerId: string): WorkspaceRecord[];
   create(principal: StorePrincipal, input: CreateWorkspaceInput): WorkspaceRecord;
+  /**
+   * Inserts a `temporary = 1` row (`dir = name = tmp-<id>`) and ensures its directory inside the
+   * transaction the caller already opened. Issues no BEGIN / COMMIT / ROLLBACK and writes no
+   * audit event: on failure it removes the directories it created and rethrows, the rollback is
+   * the caller's. Outside a transaction it throws before any mutation.
+   */
+  createTemporary(principal: StorePrincipal): CreatedTemporaryWorkspace;
   rootOf(principal: StorePrincipal, workspaceId: string): string | null;
 }
 
@@ -46,11 +71,15 @@ type WorkspaceRow = {
 } & Record<string, SQLOutputValue>;
 
 const LIST_SQL =
-  "SELECT id, name, dir, created_at AS createdAt FROM workspaces WHERE owner_id = ? ORDER BY created_at ASC, id ASC";
+  "SELECT id, name, dir, created_at AS createdAt FROM workspaces WHERE owner_id = ? AND temporary = 0 ORDER BY created_at ASC, id ASC";
 const ROOT_OF_SQL = "SELECT dir FROM workspaces WHERE owner_id = ? AND id = ? LIMIT 1";
 const INSERT_SQL =
-  "INSERT INTO workspaces(id, owner_id, name, dir, created_at) VALUES (?, ?, ?, ?, ?)";
+  "INSERT INTO workspaces(id, owner_id, name, dir, created_at, temporary) VALUES (?, ?, ?, ?, ?, ?)";
 const SQLITE_CONSTRAINT_UNIQUE = 2067;
+const SQLITE_CONSTRAINT_PRIMARYKEY = 1555;
+const ID_CONFLICT_MESSAGE = "UNIQUE constraint failed: workspaces.id";
+/** How many generated ids a temporary workspace may try before giving up. */
+const TEMPORARY_ID_ATTEMPTS = 8;
 const DIR_ALPHABET = /^[A-Za-z0-9_\u4e00-\u9fa5-]{1,64}$/;
 const DEMO_DIR_REPLACE = /[^\w\u4e00-\u9fa5-]/g;
 const MAX_NAME_CODEPOINTS = 64;
@@ -65,6 +94,7 @@ export function createWorkspaceStore(
     ? options.sandboxRoot
     : resolveFsPath(options.sandboxRoot);
   const { ensureSharedDir, emit } = options;
+  const generateId = options.generateId ?? (() => randomBytes(16).toString("hex"));
 
   return {
     list(ownerId: string): WorkspaceRecord[] {
@@ -91,21 +121,13 @@ export function createWorkspaceStore(
         createdAt,
       };
 
-      const ownerMissingBefore = !pathExists(ownerRoot);
-      const workspaceMissingBefore = !pathExists(workspaceRoot);
-      const createdPaths: string[] = [];
-      if (ownerMissingBefore) {
-        createdPaths.push(ownerRoot);
-      }
-      if (workspaceMissingBefore) {
-        createdPaths.push(workspaceRoot);
-      }
+      const roots = [ownerRoot, workspaceRoot];
+      const createdPaths = missingPaths(roots);
 
       db.exec("BEGIN");
       try {
         insertOwnedWorkspace(db, created, principal.id);
-        ensureSharedDir(ownerRoot);
-        ensureSharedDir(workspaceRoot);
+        ensureRoots(roots, ensureSharedDir);
         emit(db, {
           kind: "workspace.create",
           actorId: principal.id,
@@ -118,6 +140,31 @@ export function createWorkspaceStore(
         throw compensateCreateFailure(db, error, createdPaths);
       }
       return created;
+    },
+    createTemporary(principal: StorePrincipal): CreatedTemporaryWorkspace {
+      if (!db.isTransaction) {
+        throw new Error("temporary workspace creation needs the caller's transaction");
+      }
+      const ownerRoot = computeSafeRoot(sandboxRoot, principal.id);
+      const row = insertTemporaryWorkspace(db, principal.id, generateId);
+      // The only path component is `tmp-<id>`, and the row's CHECKs already accepted that id.
+      const workspaceRoot = computeSafeRoot(sandboxRoot, principal.id, row.dir);
+      const roots = [ownerRoot, workspaceRoot];
+      const createdPaths = missingPaths(roots);
+      try {
+        ensureRoots(roots, ensureSharedDir);
+      } catch (error) {
+        throw failAfterCleanup(error, [], createdPaths);
+      }
+      return {
+        workspace: { ...row, root: workspaceRoot },
+        removeCreatedDirs(): void {
+          const errors = removeCreatedDirs(createdPaths);
+          if (errors.length > 0) {
+            throw new AggregateError(errors, CLEANUP_FAILURE_MESSAGE);
+          }
+        },
+      };
     },
     rootOf(principal: StorePrincipal, workspaceId: string): string | null {
       const row = db.prepare(ROOT_OF_SQL).get(principal.id, workspaceId) as
@@ -223,14 +270,63 @@ function computeSafeRoot(sandboxRoot: string, ownerId: string, dir?: string): st
   return resolved.absPath;
 }
 
+/** The paths among `roots` that do not exist yet — the ones the ensure step is about to create. */
+function missingPaths(roots: string[]): string[] {
+  return roots.filter((root) => !pathExists(root));
+}
+
+/** Owner root first, then the workspace root: each parent exists before its child is made. */
+function ensureRoots(roots: string[], ensureSharedDir: (absPath: string) => void): void {
+  for (const root of roots) {
+    ensureSharedDir(root);
+  }
+}
+
+type InsertableWorkspace = Omit<WorkspaceRecord, "root">;
+
+function insertWorkspaceRow(
+  db: DatabaseSync,
+  row: InsertableWorkspace,
+  ownerId: string,
+  temporary: 0 | 1,
+): void {
+  const result = db
+    .prepare(INSERT_SQL)
+    .run(row.id, ownerId, row.name, row.dir, row.createdAt, temporary);
+  if (result.changes !== 1 && result.changes !== 1n) {
+    throw new Error("workspace insert must change exactly one row");
+  }
+}
+
+/**
+ * Inserts the `temporary = 1` row under a generated id, trying again while that id (global primary
+ * key) or its `tmp-<id>` name / dir (unique per owner) is taken. A failed INSERT undoes only
+ * itself, so the caller's transaction stays usable. Any other failure propagates at once.
+ */
+function insertTemporaryWorkspace(
+  db: DatabaseSync,
+  ownerId: string,
+  generateId: () => string,
+): InsertableWorkspace {
+  for (let attempt = 0; attempt < TEMPORARY_ID_ATTEMPTS; attempt += 1) {
+    const id = generateId();
+    const dir = `tmp-${id}`;
+    const row = { id, name: dir, dir, createdAt: Date.now() };
+    try {
+      insertWorkspaceRow(db, row, ownerId, 1);
+      return row;
+    } catch (error) {
+      if (!isOwnerUniqueConflict(error) && !isIdConflict(error)) {
+        throw error;
+      }
+    }
+  }
+  throw new Error("temporary workspace id generation exhausted");
+}
+
 function insertOwnedWorkspace(db: DatabaseSync, created: WorkspaceRecord, ownerId: string): void {
   try {
-    const result = db
-      .prepare(INSERT_SQL)
-      .run(created.id, ownerId, created.name, created.dir, created.createdAt);
-    if (result.changes !== 1 && result.changes !== 1n) {
-      throw new Error("workspace insert must change exactly one row");
-    }
+    insertWorkspaceRow(db, created, ownerId, 0);
   } catch (error) {
     if (isOwnerUniqueConflict(error)) {
       throw new HttpError("conflict");
@@ -253,42 +349,63 @@ function isOwnerUniqueConflict(error: unknown): boolean {
   );
 }
 
+function isIdConflict(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    "errcode" in error &&
+    error.errcode === SQLITE_CONSTRAINT_PRIMARYKEY &&
+    error.message === ID_CONFLICT_MESSAGE
+  );
+}
+
 function compensateCreateFailure(
   db: DatabaseSync,
   originalError: unknown,
   createdPaths: string[],
 ): never {
-  const errors: unknown[] = [originalError];
-  let rollbackFailed = false;
+  const rollbackErrors: unknown[] = [];
   if (db.isTransaction) {
     try {
       db.exec("ROLLBACK");
     } catch (error) {
-      rollbackFailed = true;
-      errors.push(error);
+      rollbackErrors.push(error);
     }
   }
+  failAfterCleanup(originalError, rollbackErrors, createdPaths);
+}
 
-  for (let index = createdPaths.length - 1; index >= 0; index -= 1) {
-    const path = createdPaths[index];
-    if (path === undefined) {
-      continue;
-    }
+/**
+ * The transaction-free half of create's compensation: removes the empty directories this call
+ * created, then throws the original failure — alone when nothing else went wrong, otherwise as
+ * the first entry and cause of an AggregateError [original, ...rollbackErrors, ...cleanupErrors].
+ */
+function failAfterCleanup(
+  originalError: unknown,
+  rollbackErrors: unknown[],
+  createdPaths: string[],
+): never {
+  const errors = [originalError, ...rollbackErrors, ...removeCreatedDirs(createdPaths)];
+  if (errors.length === 1) {
+    throw originalError;
+  }
+  throw new AggregateError(
+    errors,
+    rollbackErrors.length > 0 ? ROLLBACK_FAILURE_MESSAGE : CLEANUP_FAILURE_MESSAGE,
+    { cause: originalError },
+  );
+}
+
+/** Reverse-order removal of the still-empty directories in `createdPaths`; returns what failed. */
+function removeCreatedDirs(createdPaths: string[]): unknown[] {
+  const errors: unknown[] = [];
+  for (const path of createdPaths.toReversed()) {
     try {
       removeEmptyCreatedDir(path);
     } catch (error) {
       errors.push(error);
     }
   }
-
-  if (errors.length === 1) {
-    throw originalError;
-  }
-  throw new AggregateError(
-    errors,
-    rollbackFailed ? ROLLBACK_FAILURE_MESSAGE : CLEANUP_FAILURE_MESSAGE,
-    { cause: originalError },
-  );
+  return errors;
 }
 
 function removeEmptyCreatedDir(path: string): void {

@@ -4,6 +4,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   symlinkSync,
   truncateSync,
@@ -40,6 +41,7 @@ const U1_DIRS = "5".repeat(32);
 const U1_DIR_PARSER = "d".repeat(32);
 const U1_STREAM_FAILURE = "0".repeat(32);
 const U1_PREVIEW = "6".repeat(32);
+const U1_TEMPORARY = "7".repeat(32);
 
 describe("workspace REST", () => {
   it("lists only the authenticated account's collection and applies no-store before guard", async () => {
@@ -133,6 +135,50 @@ describe("workspace REST", () => {
       expect(duplicate.json()).toEqual({ error: { code: "conflict", message: "同名资源已存在" } });
       expect(duplicate.headers["cache-control"]).toBe("no-store");
       expect(db.prepare("SELECT count(*) AS count FROM audit_events").get()).toEqual({ count: 1 });
+    });
+  });
+  it("answers 409 for a name a temporary workspace of the same owner holds, and never lists that temporary", async () => {
+    await withWorkspacesApp(async ({ app, db, sandboxRoot }) => {
+      const temporaryName = `tmp-${U1_TEMPORARY}`;
+      const ownerRoot = join(sandboxRoot, "u1");
+      mkdirSync(join(ownerRoot, temporaryName), { recursive: true });
+      db.prepare(
+        "INSERT INTO workspaces(id, owner_id, name, dir, created_at, temporary) VALUES (?, ?, ?, ?, ?, 1)",
+      ).run(U1_TEMPORARY, "u1", temporaryName, temporaryName, 1);
+      const cookie = bearerCookie(await loginSessionId(app, "zhangsan"));
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/workspaces",
+        headers: { "content-type": "application/json", cookie },
+        payload: JSON.stringify({ name: temporaryName }),
+      });
+
+      expectWorkspaceResponse(response, 409, {
+        error: { code: "conflict", message: "同名资源已存在" },
+      });
+      expect(db.prepare("SELECT id, owner_id, name, dir, temporary FROM workspaces").all()).toEqual(
+        [
+          {
+            id: U1_TEMPORARY,
+            owner_id: "u1",
+            name: temporaryName,
+            dir: temporaryName,
+            temporary: 1,
+          },
+        ],
+      );
+      expect(readdirSync(sandboxRoot)).toEqual(["u1"]);
+      expect(readdirSync(ownerRoot)).toEqual([temporaryName]);
+      expect(readdirSync(join(ownerRoot, temporaryName))).toEqual([]);
+      expect(db.prepare("SELECT count(*) AS count FROM audit_events").get()).toEqual({ count: 0 });
+
+      const listed = await app.inject({
+        method: "GET",
+        url: "/api/workspaces",
+        headers: { cookie },
+      });
+      expectWorkspaceResponse(listed, 200, { workspaces: [] });
     });
   });
   it("adopts an existing ordinary directory through HTTP without changing its content or mode", async () => {
