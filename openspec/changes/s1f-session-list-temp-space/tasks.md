@@ -228,7 +228,14 @@ Minimal mergeable slice: 10.1 + 10.2（表与登记行读写，由迁移测试�
 前提：任务 0.2 已合入（design D11 的核对结论）；(a) 不成立时本组不开工。
 
 - [ ] 11.1 `core/errors` 增加 `undo_conflict`（409，message `其它会话在这之后改动过工作空间`）；`POST /api/sessions/:id/undo` 加入 content-parser 归属集（十三 → 十四）。测试：http-service-skeleton「归档与撤回冲突的错误码」「撤回与转正路由属于归属集」中 undo 的部分，以及「统一错误信封」各场景里的计数（十五码、fourteen identities）。
-- [ ] 11.2 撤回事务（`store-undo.ts`）：CAS 复核 → 删除该消息及其后的消息行 → 置 `omp_session_file`、`status`、`updated_at`、`todo` → `session.undo` 审计；返回被删消息的快照登记供清理。单测：删除范围（步骤、审批、快照行级联）、`status` 的三种取值与 `idle`、`todo` 还原（session-todo「任务清单持久化」的「快照步骤只读、撤回写回」）、CAS 失败不写、审计失败回滚（message-undo「审计失败则不回退」）。
+- [x] 11.2 撤回事务（`store-undo.ts`）：CAS 复核 → 删除该消息及其后的消息行 → 置 `omp_session_file`、`status`、`updated_at`、`todo` → `session.undo` 审计；返回被删消息的快照登记供清理。单测：删除范围（步骤、审批、快照行级联）、`status` 的三种取值与 `idle`、`todo` 还原（session-todo「任务清单持久化」的「快照步骤只读、撤回写回」）、CAS 失败不写、审计失败回滚（message-undo「审计失败则不回退」）。
+  **实施注记（11.2，fixture 评审补充）**：
+  - CAS 以 message-undo「对话原地回退」第 5 步为准，四项：非 `running`、**未归档**（`archived_at IS NULL`）、末条助手消息 id 等于调用方给的值、该用户消息行仍在（属于该会话与该所有者）。任一不满足抛 `HttpError("session_busy")`、不写任何行（先例 `store-branch.ts` 的两处 CAS）。该消息没有快照登记行同样按 CAS 失败处理。
+  - 入参 `{ ownerId, sessionId, messageId, expectedLastAssistantId, ompSessionFile, files, now }` 加审计 `emit`；审计 `detail = { sessionId, messageId, removedMessages, files }`，`workspaceId` 取会话行的值。
+  - 登记行（及其 `todo`）在 DELETE **之前**读出（039 的外键级联会把它删掉）；`todo` 的写回逐字节相同（SQL 子查询，或 `CAST AS BLOB` + 解码），含 SQL NULL。删除范围按 `(created_at, id)` 不早于该用户消息。
+  - 返回值含被删除的各用户消息的登记（`messageId`、`workspaceId`、`outcome`）供 12.3 清理——只有 `ok` 的才有目录，由清理方过滤。
+  - `status` 取剩余消息中末条助手消息的 `chat_messages.status`（`done` / `failed` / `stopped`），没有则 `idle`。`store.ts` 不加行；测试新文件 `server/test/session-store-undo-transaction.test.ts`。
+  Risk packs（11.2）: Schema / cascade、Error handling / rollback、Concurrency（CAS）、Audit。
 - [ ] 11.3 `branching.ts` 抽取（**行为不变的重构，单独一个 PR**）：把 `alignBranchEntries` / `branchTo` 与临时进程的准入、握手、关停抽成 fork 与撤回共用的函数（不复制）。验证：既有 fork / regenerate 测试全绿，不改任何断言。
 - [ ] 11.4 路由与前置校验（新模块 `server/src/sessions/undo.ts` 的入口部分，只供 `sessions/` 内使用；`rest.ts` 只加注册调用）：body 形状、owner 预检、前置校验第 1–5 步、控制占用的登记与在每条结束路径上的释放。本组只支持 `files:"keep"`；`restore` / `force` 暂返回 400，12.1 接上。测试（新文件 `server/test/session-undo.test.ts`，REST seam + fake omp `branch`）：message-undo「撤回 REST」的「形状与鉴权」「前置校验的各拒绝」「撤回期间的并发请求」、session-metadata「归档后只读」的 undo 一项与「撤回持有占用时删除被拒」、turn-control「撤回各 RPC 间隙的并发请求」。
 - [ ] 11.5 编排与提交（`undo.ts`）：退役本会话进程 → 临时进程 `get_branch_messages` → 对位 → `branch` → `get_state` → 关停 → 11.2 的事务。**`supervisor.ts` 的改动面**（design D15 第 3 点，至多 12 行，行数写进 PR 描述）：把传给 `new Forks(…)` 的端口对象提成局部常量同时传给 `new Undos(…)`、一个经 `#control` 包装的公开方法 `undo(…)`、`shutdown()` 里收掉在途的撤回临时进程。测试（同文件）：message-undo「对话原地回退」的「撤回中间的一条」「撤回第一条」「剩余历史的状态」「任务清单回到当时」「对位失败与进程失败」「最终事务复核失败」、omp-pool「撤回的临时进程计入上限」「撤回先退回本会话进程」「撤回遇池满」；另加一条「关停时在途撤回的临时进程被收掉」。
