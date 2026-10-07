@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { connectSessionListEvents } from "../src/lib/session-list-events.js";
-import { FakeEventSource, latestSource, resetFakeEventSources } from "./chat-stream-support.js";
+import { FakeEventSource, latestListSource, resetFakeEventSources } from "./chat-stream-support.js";
 
 const SESSION_A = "0123456789abcdef0123456789abcdef";
 const SESSION_B = "fedcba9876543210fedcba9876543210";
@@ -16,7 +16,7 @@ function spies() {
 function connect() {
   const handlers = spies();
   const connection = connectSessionListEvents(handlers, { EventSourceCtor: FakeEventSource });
-  return { connection, source: latestSource(), ...handlers };
+  return { connection, source: latestListSource(), ...handlers };
 }
 
 beforeEach(() => {
@@ -31,7 +31,7 @@ describe("session list events connector", () => {
   it("opens one credentialed EventSource on the list events endpoint", () => {
     const { source, onOpen, onChanged, onRewound } = connect();
 
-    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(FakeEventSource.listInstances).toHaveLength(1);
     expect(source.url).toBe("/api/sessions/events");
     expect(source.withCredentials).toBe(true);
     expect(source.closeCount).toBe(0);
@@ -45,7 +45,7 @@ describe("session list events connector", () => {
     const onChanged = vi.fn<() => void>();
 
     connectSessionListEvents({ onOpen: vi.fn(), onChanged, onRewound: vi.fn() });
-    const source = latestSource();
+    const source = latestListSource();
     source.emitNamed("sessions.changed", "{}");
 
     expect(source.url).toBe("/api/sessions/events");
@@ -221,7 +221,7 @@ describe("session list events connector", () => {
 
     connection.close();
     expect(source.closeCount).toBe(1);
-    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(FakeEventSource.listInstances).toHaveLength(1);
   });
 
   it("stops within the same dispatch when a callback closes the connection", () => {
@@ -236,7 +236,7 @@ describe("session list events connector", () => {
       },
       { EventSourceCtor: FakeEventSource },
     );
-    const source = latestSource();
+    const source = latestListSource();
 
     source.emitNamed("sessions.changed", "{}");
     source.emitNamed("session.rewound", JSON.stringify({ sessionId: SESSION_A }));
@@ -254,6 +254,7 @@ describe("session list events connector", () => {
 
     const connection = connectSessionListEvents({ onOpen, onChanged, onRewound }, options);
 
+    expect(FakeEventSource.listInstances).toHaveLength(0);
     expect(FakeEventSource.instances).toHaveLength(0);
     expect(() => {
       connection.close();

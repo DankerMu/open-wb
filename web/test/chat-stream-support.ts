@@ -14,6 +14,8 @@ export const ENCODED_SESSION_EVENTS_URL = "/api/sessions/sess%2F%25%23%3F%2B%20%
 const USER_CONTENT = "\u0000\uFEFFKeep BOM 中文 😀";
 export const COMPLETED_BODY = "X";
 
+const LIST_EVENTS_URL = "/api/sessions/events";
+
 export const CONNECTING = 0;
 const OPEN = 1;
 export const CLOSED = 2;
@@ -161,6 +163,8 @@ export class FakeEventSource extends EventTarget {
   static CLOSED = CLOSED;
 
   static instances: FakeEventSource[] = [];
+  /** 列表事件连接（`/api/sessions/events`）单独登记：`instances` 只含单会话事件流，按下标与长度读它的断言不受影响。 */
+  static listInstances: FakeEventSource[] = [];
 
   readonly url: string;
   readonly withCredentials: boolean;
@@ -171,7 +175,9 @@ export class FakeEventSource extends EventTarget {
     super();
     this.url = url;
     this.withCredentials = init?.withCredentials === true;
-    FakeEventSource.instances.push(this);
+    (url === LIST_EVENTS_URL ? FakeEventSource.listInstances : FakeEventSource.instances).push(
+      this,
+    );
   }
 
   close() {
@@ -214,8 +220,18 @@ export function latestSource() {
   return source;
 }
 
+/** 最近一条列表事件连接。 */
+export function latestListSource() {
+  const source = FakeEventSource.listInstances.at(-1);
+  if (source === undefined) {
+    throw new Error("expected a session list EventSource instance");
+  }
+  return source;
+}
+
 export function resetFakeEventSources() {
   FakeEventSource.instances = [];
+  FakeEventSource.listInstances = [];
 }
 
 export type ChatConnectContext = {

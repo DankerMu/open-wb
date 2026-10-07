@@ -22,14 +22,28 @@ function authenticatedChatRoutes(routes: FetchRoutes = {}): FetchRoutes {
   };
 }
 
-export function renderChatPage(path: string, routes: FetchRoutes, strict = false) {
+function mountChatPage(
+  path: string,
+  routes: FetchRoutes,
+  strict: boolean,
+  EventSourceCtor: typeof FakeEventSource | undefined,
+) {
   disposeRouter?.();
   resetFakeEventSources();
   const fetchMock = createFetchMock(authenticatedChatRoutes(routes));
-  vi.stubGlobal("EventSource", FakeEventSource);
+  vi.stubGlobal("EventSource", EventSourceCtor);
   const mounted = mountAuthenticatedApp(path, fetchMock, strict);
   disposeRouter = () => mounted.router.dispose();
   return mounted;
+}
+
+export function renderChatPage(path: string, routes: FetchRoutes, strict = false) {
+  return mountChatPage(path, routes, strict, FakeEventSource);
+}
+
+/** 运行环境从挂载起就没有全局 `EventSource`（列表事件连接在挂载时建立，挂载后再去掉为时已晚）。 */
+export function renderChatPageWithoutEventSource(path: string, routes: FetchRoutes) {
+  return mountChatPage(path, routes, false, undefined);
 }
 
 export async function expectChatLocation(expected: string) {
