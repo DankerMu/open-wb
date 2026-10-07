@@ -1,39 +1,61 @@
 import type { AddressInfo } from "node:net";
 import { replaceFile } from "../core/replace-file.js";
+import type { CatalogModel } from "../model-catalog.js";
 
 export function deriveProxyBaseUrl(address: AddressInfo): string {
   const host = hostOf(address.address);
   return `http://${host}:${address.port}/v1`;
 }
 
-/** `agentDir` must exist: the managed omp state layout creates it, this writer never does. */
+/**
+ * `agentDir` must exist: the managed omp state layout creates it, this writer never does.
+ * One entry per whitelist model, in order. An empty whitelist is refused before the file is touched.
+ */
 export async function writeManagedModelsYml(
   agentDir: string,
-  options: { proxyBaseUrl: string; modelId: string; reasoning?: boolean },
+  options: { proxyBaseUrl: string; models: readonly CatalogModel[] },
 ): Promise<void> {
-  const quotedUrl = JSON.stringify(options.proxyBaseUrl);
-  const quotedModel = JSON.stringify(options.modelId);
+  if (options.models.length === 0) {
+    throw new Error("managed models.yml needs at least one model");
+  }
   const yaml = [
     "providers:",
     "  workbuddy:",
     "    api: openai-completions",
-    `    baseUrl: ${quotedUrl}`,
+    `    baseUrl: ${JSON.stringify(options.proxyBaseUrl)}`,
     "    apiKey: WORKBUDDY_MODEL_TOKEN",
     "    models:",
-    `      - id: ${quotedModel}`,
-    `        name: ${quotedModel}`,
+    ...options.models.flatMap(modelLines),
+    "",
+  ].join("\n");
+  await replaceFile(agentDir, "models.yml", yaml);
+}
+
+/** Key order is read by omp: limits, the reasoning pair, `thinking`, then `input`. */
+function modelLines(model: CatalogModel): string[] {
+  return [
+    `      - id: ${JSON.stringify(model.id)}`,
+    `        name: ${JSON.stringify(model.name)}`,
     "        contextWindow: 128000",
     "        maxTokens: 8192",
-    ...(options.reasoning === true
+    ...(model.reasoning
       ? [
           "        reasoning: true",
           "        compat:",
           "          reasoningContentField: reasoning_content",
         ]
       : []),
-    "",
-  ].join("\n");
-  await replaceFile(agentDir, "models.yml", yaml);
+    // Only a MODEL_CATALOG reasoning model carries efforts; without them omp derives its own set.
+    ...(model.efforts === undefined
+      ? []
+      : [
+          "        thinking:",
+          "          mode: effort",
+          "          efforts:",
+          ...model.efforts.map((effort) => `            - ${JSON.stringify(effort)}`),
+        ]),
+    ...(model.vision ? ["        input:", "          - text", "          - image"] : []),
+  ];
 }
 
 function hostOf(address: string): string {

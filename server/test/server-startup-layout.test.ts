@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parse } from "yaml";
+import { reasoningYaml } from "./models-yml-helpers.js";
 import {
   expectHomeDotenv,
   expectHostOverlay,
@@ -60,15 +61,24 @@ function scratchRoot(prefix: string): string {
   return root;
 }
 
+/** Default startup (no MODEL_CATALOG, MODEL_REASONING unset): exactly one entry, pre-change bytes. */
 function expectManagedModels(agentDir: string, port: number): void {
   const models = join(agentDir, "models.yml");
+  const text = readFileSync(models, "utf8");
   expect(lstatSync(models).mode & 0o7777).toBe(0o640);
-  expect(parse(readFileSync(models, "utf8"))).toMatchObject({
+  expect(parse(text)).toMatchObject({
     providers: {
       workbuddy: { baseUrl: `http://127.0.0.1:${port}/v1`, models: [{ id: MODEL_ID }] },
     },
   });
+  expect(modelEntries(text)).toHaveLength(1);
+  expect(text).toBe(reasoningYaml(`http://127.0.0.1:${port}/v1`, MODEL_ID));
   expect(readdirSync(agentDir).toSorted()).toEqual(["host-overlay.yml", "models.yml"]);
+}
+
+function modelEntries(text: string): unknown[] {
+  const document = parse(text) as { providers: { workbuddy: { models: unknown[] } } };
+  return document.providers.workbuddy.models;
 }
 
 /** The entry exits 1 with nothing on stdout, only the generic record on stderr, and frees its port. */
@@ -122,6 +132,49 @@ describe("production entry managed omp state layout", () => {
       expect(lstatSync(legacy).mode & 0o7777).toBe(0o2770);
       expect(readdirSync(legacy).toSorted()).toEqual(["models.yml", "skills"]);
       expect(existsSync(join(root, "sandbox"))).toBe(false);
+    } finally {
+      await server.dispose();
+    }
+  }, 60_000);
+
+  it("a three-model MODEL_CATALOG writes three model entries in whitelist order", async () => {
+    const root = scratchRoot("open-wb-layout-catalog-");
+    const catalog = [
+      { id: "m1", name: "通用", reasoning: true, efforts: ["minimal", "low", "medium", "high"] },
+      { id: "m2" },
+      { id: "m3", name: "深度", reasoning: true, vision: true, efforts: ["low", "high"] },
+    ];
+    const port = await reserveWildcardPort();
+    const server = startCompiledServer(
+      compiled.entry,
+      compiledFixtureEnv(root, port, join(root, "bin", "omp"), {
+        MODEL_CATALOG: JSON.stringify(catalog),
+      }),
+    );
+    try {
+      await server.waitForStarted();
+      const agentDir = join(root, "state", "home", ".omp", "agent");
+      const limits = { contextWindow: 128000, maxTokens: 8192 };
+      const reasoning = { reasoning: true, compat: { reasoningContentField: "reasoning_content" } };
+      expect(modelEntries(readFileSync(join(agentDir, "models.yml"), "utf8"))).toEqual([
+        {
+          id: "m1",
+          name: "通用",
+          ...limits,
+          ...reasoning,
+          thinking: { mode: "effort", efforts: ["minimal", "low", "medium", "high"] },
+        },
+        { id: "m2", name: "m2", ...limits },
+        {
+          id: "m3",
+          name: "深度",
+          ...limits,
+          ...reasoning,
+          thinking: { mode: "effort", efforts: ["low", "high"] },
+          input: ["text", "image"],
+        },
+      ]);
+      expect(readdirSync(agentDir).toSorted()).toEqual(["host-overlay.yml", "models.yml"]);
     } finally {
       await server.dispose();
     }

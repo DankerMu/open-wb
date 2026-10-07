@@ -232,7 +232,10 @@ export async function openOfficialWorld(
     options.freshToolRounds === true ? await startTurnForwarder(upstream.port) : upstream.port;
   const proxyBaseUrl = `http://127.0.0.1:${String(modelPort)}/v1`;
   if (options.modelsYml === undefined) {
-    await writeManagedModelsYml(agentDir, { proxyBaseUrl, modelId: MODEL_ID });
+    await writeManagedModelsYml(agentDir, {
+      proxyBaseUrl,
+      models: [{ id: MODEL_ID, name: MODEL_ID, reasoning: false, vision: false }],
+    });
   } else {
     writeFileSync(join(agentDir, "models.yml"), options.modelsYml(proxyBaseUrl), { mode: 0o640 });
   }

@@ -306,8 +306,7 @@ async function publishStarted(owned: OwnedResources, config: ServerConfig): Prom
   ensureOmpStateLayout(config.ompStateDir);
   await writeManagedModelsYml(ompAgentDir(config.ompStateDir), {
     proxyBaseUrl: deriveProxyBaseUrl(address),
-    modelId: config.modelId,
-    reasoning: config.modelReasoning,
+    models: config.modelCatalog.models,
   });
   await writeHostOverlay(config.ompStateDir);
   if (owned.signalReceived || owned.app === undefined) {

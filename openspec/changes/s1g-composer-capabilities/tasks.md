@@ -100,9 +100,9 @@ Minimal mergeable slice: 2.1 一刀（三个标量键，尚无读者，knip 以 
 
 ## 3. model-proxy — 托管 models.yml 多模型
 
-- [ ] 3.1 `server/src/model-proxy/models-yml.ts`：`writeManagedModelsYml(agentDir, {proxyBaseUrl, models})` 按 model-proxy delta「托管 models.yml」写出（每模型一条；`thinking` 在 `input` 之前；空数组拒绝且不动既有文件）。先把改动前对 `deepseek-v4.1-flash`、`reasoning` 真 / 假两种输出存成测试夹具，再改实现。
+- [x] 3.1 `server/src/model-proxy/models-yml.ts`：`writeManagedModelsYml(agentDir, {proxyBaseUrl, models})` 按 model-proxy delta「托管 models.yml」写出（每模型一条；`thinking` 在 `input` 之前；空数组拒绝且不动既有文件）。先把改动前对 `deepseek-v4.1-flash`、`reasoning` 真 / 假两种输出存成测试夹具，再改实现。
   测试 `server/test/model-proxy-models-yml.test.ts` 与 `model-proxy-reasoning.test.ts`：既有用例改为传单模型白名单（断言不变）；新增「Several models in whitelist order」「Single-model output is unchanged」。变异：模型次序反转、`input` 写在 `thinking` 之前、带 `efforts` 的推理条目（场景里的 `m1`）不写 `thinking`、单模型多写一个键（含给 `MODEL_CATALOG` 未设置时的那一项补 `thinking`）→ 判红。
-- [ ] 3.2 启动装配（`server/src/server.ts` / `app.ts` 里调用写出器的那一处）：传入 `settings.modelCatalog.models`。测试：`server/test/server-startup-layout.test.ts` 的缺省启动仍恰一个模型条目且字节与夹具相同；新增一例三模型 `MODEL_CATALOG` 启动后文件含三条（http-service-skeleton「四个新配置键的取值与非法值」里「托管 models.yml 含三个模型条目」的一半）。
+- [x] 3.2 启动装配（`server/src/server.ts` / `app.ts` 里调用写出器的那一处）：传入 `settings.modelCatalog.models`。测试：`server/test/server-startup-layout.test.ts` 的缺省启动仍恰一个模型条目且字节与夹具相同；新增一例三模型 `MODEL_CATALOG` 启动后文件含三条（http-service-skeleton「四个新配置键的取值与非法值」里「托管 models.yml 含三个模型条目」的一半）。
   （组 1.5 的结论与 owner 2026-10-07 的决定：来自 `MODEL_CATALOG` 的推理模型必带 `efforts`，其条目一律有 `thinking`；`MODEL_CATALOG` 未设置的缺省启动不写 `thinking`，「字节不变」断言保持。三模型一例的 `MODEL_CATALOG` 须给每个推理模型写 `efforts`。）
 
   **实施注记（3.1 / 3.2，fixture 评审补充）**：

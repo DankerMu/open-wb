@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { writeManagedModelsYml } from "../src/model-proxy/models-yml.js";
 import { resolveServerConfig } from "../src/server.js";
+import { plainYaml, reasoningYaml } from "./models-yml-helpers.js";
 import {
   type CompiledServerEntry,
   compiledFixtureEnv,
@@ -31,43 +32,6 @@ const MODEL_ID = "deepseek-v4.1-flash";
 const FAILED_RECORD = `${JSON.stringify({ event: "server_start_failed" })}\n`;
 const NODE_SQLITE_WARNING =
   /^\(node:\d+\) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n\(Use `node --trace-warnings \.\.\.` to show where the warning was created\)\n/u;
-
-/** 变更前托管输出（10 行 + 结尾换行）。 */
-function plainYaml(baseUrl: string): string {
-  return [
-    "providers:",
-    "  workbuddy:",
-    "    api: openai-completions",
-    `    baseUrl: "${baseUrl}"`,
-    "    apiKey: WORKBUDDY_MODEL_TOKEN",
-    "    models:",
-    `      - id: "${MODEL_ID}"`,
-    `        name: "${MODEL_ID}"`,
-    "        contextWindow: 128000",
-    "        maxTokens: 8192",
-    "",
-  ].join("\n");
-}
-
-/** reasoning: true 输出（13 行 + 结尾换行）。 */
-function reasoningYaml(baseUrl: string): string {
-  return [
-    "providers:",
-    "  workbuddy:",
-    "    api: openai-completions",
-    `    baseUrl: "${baseUrl}"`,
-    "    apiKey: WORKBUDDY_MODEL_TOKEN",
-    "    models:",
-    `      - id: "${MODEL_ID}"`,
-    `        name: "${MODEL_ID}"`,
-    "        contextWindow: 128000",
-    "        maxTokens: 8192",
-    "        reasoning: true",
-    "        compat:",
-    "          reasoningContentField: reasoning_content",
-    "",
-  ].join("\n");
-}
 
 function plainModel(): Record<string, unknown> {
   return { id: MODEL_ID, name: MODEL_ID, contextWindow: 128000, maxTokens: 8192 };
@@ -159,11 +123,16 @@ describe("resolveServerConfig — MODEL_REASONING", () => {
 });
 
 describe("writeManagedModelsYml — reasoning 声明", () => {
-  async function written(options: {
-    proxyBaseUrl: string;
-    modelId: string;
-    reasoning?: boolean;
-  }): Promise<Buffer> {
+  /** 未设置 MODEL_CATALOG 的单模型白名单：name 同 id、不带 efforts、vision 为假。 */
+  function single(reasoning: boolean): Parameters<typeof writeManagedModelsYml>[1] {
+    return {
+      proxyBaseUrl: PROXY_BASE_URL,
+      models: [{ id: MODEL_ID, name: MODEL_ID, reasoning, vision: false }],
+    };
+  }
+
+  async function written(reasoning: boolean): Promise<Buffer> {
+    const options = single(reasoning);
     const agentDir = scratch("open-wb-reasoning-yml-");
     await writeManagedModelsYml(agentDir, options);
     const first = readFileSync(join(agentDir, "models.yml"));
@@ -174,27 +143,16 @@ describe("writeManagedModelsYml — reasoning 声明", () => {
   }
 
   it("reasoning: true 写出精确 13 行，解析后模型条目恰多 reasoning 与 compat", async () => {
-    const bytes = await written({
-      proxyBaseUrl: PROXY_BASE_URL,
-      modelId: MODEL_ID,
-      reasoning: true,
-    });
+    const bytes = await written(true);
     const text = bytes.toString("utf8");
-    expect(text).toBe(reasoningYaml(PROXY_BASE_URL));
+    expect(text).toBe(reasoningYaml(PROXY_BASE_URL, MODEL_ID));
     expect(text.split("\n")).toHaveLength(14);
     expect(parse(text)).toEqual(documentWith(PROXY_BASE_URL, REASONING_MODEL));
   });
 
-  it("reasoning: false 与省略 reasoning 逐字节相同，且等于变更前输出", async () => {
-    const explicitFalse = await written({
-      proxyBaseUrl: PROXY_BASE_URL,
-      modelId: MODEL_ID,
-      reasoning: false,
-    });
-    const omitted = await written({ proxyBaseUrl: PROXY_BASE_URL, modelId: MODEL_ID });
-    expect(explicitFalse.equals(omitted)).toBe(true);
-    const text = omitted.toString("utf8");
-    expect(text).toBe(plainYaml(PROXY_BASE_URL));
+  it("reasoning: false 等于变更前输出", async () => {
+    const text = (await written(false)).toString("utf8");
+    expect(text).toBe(plainYaml(PROXY_BASE_URL, MODEL_ID));
     expect(text.split("\n")).toHaveLength(11);
     expect(parse(text)).toEqual(documentWith(PROXY_BASE_URL, plainModel()));
   });
@@ -202,22 +160,14 @@ describe("writeManagedModelsYml — reasoning 声明", () => {
   it("同一 agentDir 先写 true 再写 false：无 reasoning/compat 残留", async () => {
     const agentDir = scratch("open-wb-reasoning-overwrite-");
     const path = join(agentDir, "models.yml");
-    await writeManagedModelsYml(agentDir, {
-      proxyBaseUrl: PROXY_BASE_URL,
-      modelId: MODEL_ID,
-      reasoning: true,
-    });
-    expect(readFileSync(path, "utf8")).toBe(reasoningYaml(PROXY_BASE_URL));
-    await writeManagedModelsYml(agentDir, {
-      proxyBaseUrl: PROXY_BASE_URL,
-      modelId: MODEL_ID,
-      reasoning: false,
-    });
+    await writeManagedModelsYml(agentDir, single(true));
+    expect(readFileSync(path, "utf8")).toBe(reasoningYaml(PROXY_BASE_URL, MODEL_ID));
+    await writeManagedModelsYml(agentDir, single(false));
     const text = readFileSync(path, "utf8");
     for (const stale of ["reasoning", "compat", "reasoningContentField"]) {
       expect(text).not.toContain(stale);
     }
-    expect(text).toBe(plainYaml(PROXY_BASE_URL));
+    expect(text).toBe(plainYaml(PROXY_BASE_URL, MODEL_ID));
   });
 });
 
@@ -268,7 +218,7 @@ describe("production entry — MODEL_REASONING", () => {
       const text = readFileSync(join(root, "state", "home", ".omp", "agent", "models.yml"), "utf8");
       const baseUrl = `http://127.0.0.1:${port}/v1`;
       expect(parse(text)).toEqual(documentWith(baseUrl, REASONING_MODEL));
-      expect(text).toBe(reasoningYaml(baseUrl));
+      expect(text).toBe(reasoningYaml(baseUrl, MODEL_ID));
     } finally {
       await server.dispose();
     }
@@ -286,7 +236,7 @@ describe("production entry — MODEL_REASONING", () => {
       const text = readFileSync(join(root, "state", "home", ".omp", "agent", "models.yml"), "utf8");
       const baseUrl = `http://127.0.0.1:${port}/v1`;
       expect(parse(text)).toEqual(documentWith(baseUrl, plainModel()));
-      expect(text).toBe(plainYaml(baseUrl));
+      expect(text).toBe(plainYaml(baseUrl, MODEL_ID));
     } finally {
       await server.dispose();
     }
