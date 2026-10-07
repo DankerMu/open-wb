@@ -260,8 +260,8 @@ Minimal mergeable slice: 13.1、13.2、13.3 各自可单独合入（每个导出
 
 ## 14. web — 列表重建：分组、折叠、状态标记、搜索
 
-- [ ] 14.1 纯函数（在 `web/src/features/chat/session-groups.ts` 里**新增**，旧的筛选函数、`SessionFilter` 类型与 `DEFAULT_SESSION_FILTER` 此时保留不动——它们仍被 `session-filter.tsx`、`use-chat-session.ts`、`session-sidebar.tsx`、`page.tsx` 与既有测试引用，删除动作在 14.4）：`groupSessions(sessions, workspaces, mode, now)` 产出置顶区与按工作空间 / 按时间的有序分组（含分组键）、`searchSessions(sessions, query)`、归档与否的划分。单测（新文件，不改写既有分组测试）：session-sidebar「按工作空间分组」「切换为按时间」「未知空间与读取失败」的归组部分、时间分组的日历日边界（今天 0 点、6 天前、7 天前、晚于当前）、搜索的大小写与空白。
-- [ ] 14.2 本地记忆（新文件 `web/src/features/chat/session-list-prefs.ts`）：两个 `localStorage` 键的读写与容错。单测：缺失、非法值、解析失败、读写抛错。
+- [x] 14.1 纯函数（在 `web/src/features/chat/session-groups.ts` 里**新增**，旧的筛选函数、`SessionFilter` 类型与 `DEFAULT_SESSION_FILTER` 此时保留不动——它们仍被 `session-filter.tsx`、`use-chat-session.ts`、`session-sidebar.tsx`、`page.tsx` 与既有测试引用，删除动作在 14.4）：`groupSessions(sessions, workspaces, mode, now)` 产出置顶区与按工作空间 / 按时间的有序分组（含分组键）、`searchSessions(sessions, query)`、归档与否的划分。单测（新文件，不改写既有分组测试）：session-sidebar「按工作空间分组」「切换为按时间」「未知空间与读取失败」的归组部分、时间分组的日历日边界（今天 0 点、6 天前、7 天前、晚于当前）、搜索的大小写与空白。
+- [x] 14.2 本地记忆（新文件 `web/src/features/chat/session-list-prefs.ts`）：两个 `localStorage` 键的读写与容错。单测：缺失、非法值、解析失败、读写抛错。
   **实施注记（14.1 / 14.2，fixture 评审补充）**：
   - 既有的两参 `groupSessions(sessions, now)` 仍被旧侧栏与既有测试引用，14.4 才删；新分组函数因此取**新名字**（如 `groupSessionList(sessions, workspaces, mode, now)`），不重载、不改旧函数。`filterSessions`、`SessionFilter`、`DEFAULT_SESSION_FILTER` 原样保留。
   - 分组键按 design D2：`pinned`、`temporary`、`unknown`、`today`、`week`、`earlier` 与工作空间 id；`workspaces` 为 null 表示空间列表没有读到（「未知空间与读取失败」）。时间分组按**本地时间**的日历日边界（复用 `sameLocalDay`）。
