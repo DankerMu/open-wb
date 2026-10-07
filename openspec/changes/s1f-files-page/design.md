@@ -182,6 +182,26 @@ ADR-0013 增补记录这条例外与本 change 完成后的包体数字。
 - 查看器正常出现、可翻页 → 与本设计一致，组 19 照规格实现，实测记录写在本条下的「实测」小节。
 - 任一浏览器不显示 → **停下回 owner**，组 19 中 PDF 与办公文档的部分不开工（其余组不受影响）。本设计不预先批准任何替代方案：`<object>`、`<embed>`、pdf.js 都要改规格（file-previewers「PDF 与办公文档」、preview-origin 的 PDF 例外头），pdf.js 还是一个新的依赖与体积决定。
 
+**实测**（#1050，tasks 1.1；2026-10-06，macOS arm64，均为有界面模式。一次性本地页面不入库：宿主页与 PDF 各在一个回环端口，宿主页的 `iframe` 不带 `sandbox` 属性；PDF 响应带 `Content-Type: application/pdf`、`X-Content-Type-Options: nosniff`、`Content-Security-Policy: frame-ancestors <宿主来源>`；PDF 共 4 页，每页一行大字。「可翻页」的判定是点进 iframe 后滚轮与 End 键把页码从 1 带到 4，截图逐张看过。）
+
+| 情况 | 浏览器与版本 | 查看器出现 | 可翻页 | 现象 |
+|---|---|---|---|---|
+| 无 `sandbox`（本设计的形态） | Chromium 151.0.7922.34（Playwright 1.62.1 自带构建） | 是 | 是 | 内置查看器工具栏 1/4 → 4/4，缩略图栏在 |
+| 无 `sandbox` | Google Chrome 154.0.8037.98 | 是 | 是 | 与 Chromium 151 相同 |
+| 无 `sandbox` | Firefox 153.0（Playwright 1.62.1 自带构建，`pdfjs.disabled` 改回正式版默认值 `false`） | 是 | 是 | 内置 PDF.js 工具栏「1 of 4」→「4 of 4」 |
+| PDF 响应加 CSP `sandbox allow-scripts allow-forms allow-modals; frame-ancestors …` | 上述三个 | 是 | 是 | 与不加时无差别，控制台与网络无报错 |
+| PDF 响应加裸 CSP `sandbox; frame-ancestors …` | 上述三个 | 是 | 是 | 同上 |
+| `iframe` 加 `sandbox="allow-scripts allow-forms allow-modals"` 属性（响应不带 CSP `sandbox`） | Chromium 151、Chrome 154 | 否 | 否 | 请求被拦（`net::ERR_BLOCKED_BY_CLIENT`），iframe 内是错误页 |
+| 同上 | Firefox 153.0 | 是 | 是 | 照常显示 |
+| 内置查看器被禁用（`navigator.pdfViewerEnabled === false`） | Firefox 153.0（`pdfjs.disabled=true`） | 否 | 否 | iframe 空白并触发下载 |
+
+对照：同一条 CSP `sandbox` 头放在 HTML 文档上时，文档内 `self.origin` 为 `null`、不带时为 PDF 所在来源——测试用的头确实生效。
+
+- **结论：与设计相符**——无 `sandbox` 时桌面 Chromium 与 Firefox 的内置查看器都出现且可翻页，组 19 照规格实现。`iframe` 不带 `sandbox` 属性对 Chromium 是必需的（加了就被拦）；`pdfViewerEnabled === false` 时浏览器不内嵌而是下载，与本条「不建 iframe、显示下载按钮」的分支一致。
+- **与本条依据不一致的一点（不改变上面的结论，留给 owner）**：依据里的「带 CSP `sandbox` 的响应里不工作」在这三个版本上没有复现——PDF 响应带 CSP `sandbox`（两种形式）时查看器照常工作。使查看器失效的是 `iframe` 的 `sandbox` 属性，不是响应头。D14 给 PDF 响应的例外（不带 CSP `sandbox`）因此不是这些版本上的必要条件；是否保留该例外是规格决定，本项只记录现象，规格不改。
+- 范围说明：Firefox 测的是 Playwright 的构建，没有测 Mozilla 正式发行版；只测了 macOS 上的这三个版本。
+
+
 ### 办公文档
 
 **D17 办公文档经 LibreOffice 无界面转换成 PDF，由预览监听器的 `/o/<token>/<path>` 返回。**
