@@ -47,6 +47,8 @@ export interface SessionRestFixture {
   supervisor: RecordingSupervisor;
   /** The very store object the routes hold, so a spy on it observes the route's own calls. */
   metadata: SessionMetadataStore;
+  /** Owner ids the routes handed to the list notifier, in call order. */
+  listNotified: string[];
 }
 
 export async function withSessionRest<T>(
@@ -69,7 +71,13 @@ export async function withSessionRest<T>(
           emit,
           sandboxRoot: "/nonexistent/sandbox",
         });
+        const listNotified: string[] = [];
         registerSessionRoutes(app, {
+          listEvents: {
+            notify(ownerId) {
+              listNotified.push(ownerId);
+            },
+          },
           store,
           supervisor,
           metadata,
@@ -82,7 +90,7 @@ export async function withSessionRest<T>(
           },
         });
         try {
-          return await action({ app, db, store, supervisor, metadata });
+          return await action({ app, db, store, supervisor, metadata, listNotified });
         } finally {
           db.setAuthorizer(null);
           if (db.isTransaction) {

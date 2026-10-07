@@ -159,7 +159,14 @@ Minimal mergeable slice: 5.1 + 5.2 一起（删了行不删目录会留下无主
   - 「尚未写出」的定义是上一条 `sessions.changed` 的 `write` 回调尚未触发（或 `writableLength > 0`），不是 `write()` 返回 false。合并用例在同一同步段内连发 5 次 `notify`——跨 tick 发送时本机回环上 5 条都会写出。
   - 本刀还没有触发点（6.3–6.5）：「一条连接写失败不影响请求」在本刀直接调 `notify(ownerId)`，断言不抛、坏连接被关、另一条连接照常收到；经 PATCH 触发的版本随 6.3。`notifyRewound` 在本刀也要有一条用例（不合并、`data` 的形状），否则它是未被引用的导出。
 - [ ] 6.3 触发点接线之一——会话 CRUD 与 fork：会话创建、PATCH（含归档与恢复）、删除、fork 提交，在各自事务提交之后调用 `notify(ownerId)`（`rest-metadata.ts` / `session-delete.ts` / `rest.ts` 的 fork 路由处）。测试：session-list-push「每个触发点各自通知」里这五项（表驱动：每项写入之后所有者的连接恰多至少一条 `sessions.changed`）、「被拒绝的写入不通知」。
-- [ ] 6.4 触发点接线之二——回合生命周期与审批：prompt 受理与受理被补偿、regenerate 提交在 `rest.ts` 的对应路由处通知；回合终态落库、审批行插入与结算经 supervisor 既有的同步观察口 `onEvent` 得到（`turn.end`、`approval.request`、`approval.resolved` 三种事件；在 `sessions/index.ts` 里把通知器的观察函数与装配传入的 `onEvent` 串接：先调通知器（try/catch、丢弃结果），再调装配传入的 `onEvent` 并把它的返回值原样返回；所有者由 store 的会话行解析）。**不改 `supervisor.ts`**。测试：「状态变化推送给所有者的每条连接」「待决确认的出现与结算」、「每个触发点各自通知」里受理、回合结束、受理被补偿、regenerate 四项；另加一条「通知器的观察函数抛错时回合照常结束、supervisor 没有保留故障」；既有的「`onEvent` 返回 thenable 即故障」测试在串接之后原样通过。
+- [x] 6.4 触发点接线之二——回合生命周期与审批：prompt 受理与受理被补偿、regenerate 提交在 `rest.ts` 的对应路由处通知；回合终态落库、审批行插入与结算经 supervisor 既有的同步观察口 `onEvent` 得到（`turn.end`、`approval.request`、`approval.resolved` 三种事件；在 `sessions/index.ts` 里把通知器的观察函数与装配传入的 `onEvent` 串接：先调通知器（try/catch、丢弃结果），再调装配传入的 `onEvent` 并把它的返回值原样返回；所有者由 store 的会话行解析）。**不改 `supervisor.ts`**。测试：「状态变化推送给所有者的每条连接」「待决确认的出现与结算」、「每个触发点各自通知」里受理、回合结束、受理被补偿、regenerate 四项；另加一条「通知器的观察函数抛错时回合照常结束、supervisor 没有保留故障」；既有的「`onEvent` 返回 thenable 即故障」测试在串接之后原样通过。
+  **实施注记（6.4，fixture 评审补充）**：
+  - 6.1 的评审转交项并入本任务（`list-events.ts` 进 PR 边界）：心跳 `write` 返回 false 时只清心跳并停止投递，连接留在登记表里直到物理 `close`（与 `stream/sse.ts` 同构），这样 `preClose` 仍能销毁它；补一条用例——`write` 返回 false 的连接在心跳之后关停，断言它在模块自己的 `preClose` 内已 `destroyed`。心跳用例另加「14999 ms 时尚无字节」。
+  - 通知器须先于 `new SessionSupervisor` 存在（今天在其后才创建）：把创建上移，或像 `supervisor` 那样用 `let` 前置；端点路由的注册位置不变。
+  - 观察函数只看三种事件（`turn.end`、`approval.request`、`approval.resolved`）；所有者取 `store.runtimeState(sessionId)?.ownerId`，取不到则跳过。
+  - 路由处：prompt 受理成功后通知；受理被补偿只在 `rollbackPrompt` 返回 true 时通知；regenerate 在 `await` 成功后通知。
+  - regenerate 在事务提交之后派发失败时（`branching.ts` 直接把新行结算为 `failed`，不经 `onEvent`，请求 502 `agent_unavailable`）既有「regenerate 的事务提交」也有「回合终态落库」两处写入，必须通知。路由无法区分这次 502 之前是否已提交，因此 regenerate 路由对 `agent_unavailable` 一律通知一次：未提交的 502 会多发一条 `sessions.changed`（客户端多读一次列表，无害），记入偏离记录。**不改 `branching.ts` 与 `supervisor.ts`**。
+  - 通知器经 `SessionRestDependencies` 注入 `rest.ts`（6.3 尚未落地：注入由本任务建立，6.3 复用）。6.4 的用例写进新文件 `server/test/session-list-events-turns.test.ts`；读连接的辅助从 `session-list-events.test.ts` 抽到 support 文件共用，不复制。
 - [ ] 6.5 触发点接线之三——工作空间：`POST /api/workspaces` 与转正成功之后通知（`workspaces/rest.ts`，通知器由 `createApp` 注入，`workspaces/` 不导入 `sessions/`）。测试：「每个触发点各自通知」里这两项。
 - [ ] 6.6 变异证据（逐触发点）：对 6.3–6.5 的十一个触发点各去掉一次通知调用，「每个触发点各自通知」里对应的那一项判红（表驱动测试逐项断言，不合并成总数）；通知发在提交之前且事务回滚 → 「被拒绝的写入不通知」的回滚例判红；按连接而非按账号过滤错误 → `lisi` 收到事件判红；串接函数吞掉装配方 `onEvent` 的返回值 → 既有的观察口同步返回值违规测试判红。
 
