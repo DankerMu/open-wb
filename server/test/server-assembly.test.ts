@@ -87,7 +87,19 @@ afterEach(async () => {
 
 describe("真实 createApp 缺省挂载 sessions 与 model-proxy", () => {
   it("认证后 POST /api/sessions 创建会话并返回 201", async () => {
-    const { app } = openCurrentApp();
+    // The default assembly mounts the session routes. Its sandbox root is the repository's own
+    // var directory, and a create makes a temporary workspace directory there since #930 — so the
+    // create itself runs against the same assembly over a per-test sandbox root.
+    const mounted = openCurrentApp().app;
+    const listed = await mounted.inject({
+      method: "GET",
+      url: "/api/sessions",
+      headers: { cookie: bearerCookie(await loginSessionId(mounted)) },
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json()).toEqual({ sessions: [] });
+
+    const { app } = openConfiguredAssemblyApp("open-wb-assembly-create-");
     const cookie = bearerCookie(await loginSessionId(app));
     const response = await app.inject({
       method: "POST",
@@ -228,13 +240,22 @@ describe("真实配置经认证 prompt 抵达 spawn", () => {
     const tmpdir = process.env.TMPDIR;
     const configured = await captureAuthenticatedSpawn(roots, "omp");
     const unset = await captureAuthenticatedSpawn(roots);
-    const directArgs = ompArgs(roots, unset.cwd);
+    // The two apps differ in `--cwd` only (each session's own temporary workspace, asserted below).
     expect(configured.command).toBe("sudo");
-    expect(configured.args).toEqual([...sudoPrefix("omp", roots.bin, tmpdir), ...directArgs]);
+    expect(configured.args).toEqual([
+      ...sudoPrefix("omp", roots.bin, tmpdir),
+      ...ompArgs(roots, configured.cwd),
+    ]);
     expect(unset.command).toBe(roots.bin);
-    expect(unset.args).toEqual(directArgs);
-    expect(configured.cwd).toBe(join(roots.sandboxRoot, "u1"));
-    expect(unset.cwd).toBe(configured.cwd);
+    expect(unset.args).toEqual(ompArgs(roots, unset.cwd));
+    // Each app's session was created without a workspace: it runs in the root of its own
+    // temporary workspace (#930), no longer in the account root.
+    // The store answers roots under the sandbox root's real path; the create made that root.
+    const accountRoot = join(realpathSync(roots.sandboxRoot), "u1");
+    expect(configured.cwd).toBe(join(accountRoot, `tmp-${configured.workspaceId}`));
+    expect(unset.cwd).toBe(join(accountRoot, `tmp-${unset.workspaceId}`));
+    expect(configured.workspaceId).toMatch(/^[0-9a-f]{32}$/u);
+    expect(unset.workspaceId).not.toBe(configured.workspaceId);
     expect(configured.stdio).toEqual(["pipe", "pipe", "pipe"]);
     expect(unset.stdio).toEqual(["pipe", "pipe", "pipe"]);
     expect(configured.shell).toBe(false);
@@ -666,12 +687,13 @@ function makeAssemblyRoots(): { root: string; bin: string; sandboxRoot: string; 
 async function captureAuthenticatedSpawn(
   roots: { bin: string; sandboxRoot: string; stateDir: string },
   user?: string,
-): Promise<SpawnCall> {
+): Promise<SpawnCall & { workspaceId: string }> {
   const controlled = createControlledRuntime(() => {});
   fakeChildren.push(controlled.children);
   const calls = controlled.calls;
+  const db = track(openDb(":memory:"));
   const app = createApp({
-    db: track(openDb(":memory:")),
+    db,
     assembly: {
       tokens: new TokenRegistry(),
       runtime: {
@@ -692,7 +714,11 @@ async function captureAuthenticatedSpawn(
   if (call === undefined) {
     throw new Error("authenticated prompt did not spawn");
   }
-  return call;
+  const bound = db.prepare("SELECT workspace_id FROM chat_sessions").all() as Array<{
+    workspace_id: string;
+  }>;
+  expect(bound).toHaveLength(1);
+  return { ...call, workspaceId: bound[0]?.workspace_id ?? "" };
 }
 
 async function promptHello(app: FastifyInstance) {

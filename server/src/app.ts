@@ -176,6 +176,12 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     tokens,
     runtime,
     workspaceRootOf: (ownerId, workspaceId) => store.rootOf({ id: ownerId }, workspaceId),
+    createTemporaryWorkspace: (ownerId) => {
+      // Startup creates no sandbox directory: like the first spawn before it, the first session
+      // created without a workspace makes the root (the workspace store resolves its real path).
+      ensureSharedDir(runtime.sandboxRoot);
+      return store.createTemporary({ id: ownerId });
+    },
     agentDir: ompAgentDir(runtime.stateDir),
     onError: assembly?.onError ?? (() => {}),
     ...(assembly?.onEvent === undefined ? {} : { onEvent: assembly.onEvent }),

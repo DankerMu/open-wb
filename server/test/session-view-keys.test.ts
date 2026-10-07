@@ -273,7 +273,7 @@ describe("会话视图扩展键 (deterministic store)", () => {
     });
   });
 
-  it("无 body 创建的 201 视图恰十一键，三键为 null / false / false，并与列表项相等", async () => {
+  it("无 body 创建的 201 视图恰十一键，三键为 null / false / true（新建的临时空间），并与列表项相等", async () => {
     await withSessionRest(async ({ app }) => {
       const cookie = await cookieFor(app, "zhangsan");
 
@@ -286,7 +286,13 @@ describe("会话视图扩展键 (deterministic store)", () => {
       expect(created.statusCode).toBe(201);
       const body = created.json() as View;
       expect(Object.keys(body)).toEqual(ELEVEN_KEYS);
-      expect(body).toEqual(idleView(body.id));
+      // A create without a workspace makes a temporary one (#930): a fresh 32-hex id.
+      expect(body).toEqual(
+        idleView(body.id, {
+          workspaceId: expect.stringMatching(/^[0-9a-f]{32}$/u),
+          temporaryWorkspace: true,
+        }),
+      );
       expect(await listed(app, cookie)).toEqual([body]);
     });
   });
@@ -313,7 +319,8 @@ describe("会话视图扩展键 over the production assembly (real fake-omp appr
         status: "running",
         archivedAt: null,
         pendingApproval: true,
-        temporaryWorkspace: false,
+        // The world's session was created without a workspace: it uses a temporary one (#930).
+        temporaryWorkspace: true,
       });
       expect(await snapshotView(app, world.cookie, world.session)).toEqual(pending);
 

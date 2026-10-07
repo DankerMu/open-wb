@@ -8,7 +8,8 @@
  * The fake's shared `/tmp/open-wb-fake-session.jsonl` is never created, deleted or asserted.
  */
 import { Buffer } from "node:buffer";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -20,7 +21,6 @@ import {
   completeHeldTurn,
   createControlledRuntime,
   createRealFakeRuntime,
-  createSession,
   emitAssistantDelta,
   type OpenSessionOptions,
   OWNER_ID,
@@ -31,6 +31,7 @@ import {
 } from "./session-supervisor-helpers.js";
 import { isLive } from "./session-supervisor-pool-helpers.js";
 import type { FakeChild } from "./support/omp-rpc.js";
+import { seedUnboundSession } from "./support/temporary-workspace.js";
 
 export const JSON_TYPE = "application/json";
 
@@ -239,6 +240,27 @@ export function deleteEvent(
   };
 }
 
+/**
+ * The `GET /api/audit` wire form of the `workspace.delete` written when `sessionId`, the last
+ * user of the owner's temporary workspace `workspaceId`, is deleted (#928): a session created
+ * without a workspace owns one since #930. `detail.root` is spelled out from the sandbox root.
+ */
+export function temporaryWorkspaceDeleteEvent(
+  sessionId: string,
+  workspaceId: string,
+  sandboxRoot: string,
+) {
+  return {
+    id: expect.any(Number),
+    ts: expect.any(Number),
+    actorId: OWNER_ID,
+    kind: "workspace.delete",
+    title: "删除临时空间",
+    detail: { root: join(realpathSync(sandboxRoot), OWNER_ID, `tmp-${workspaceId}`), sessionId },
+    workspaceId,
+  };
+}
+
 export function sessionFileOf(db: DatabaseSync, session: string): string | null {
   const row = db.prepare("SELECT omp_session_file FROM chat_sessions WHERE id = ?").get(session) as
     | { omp_session_file: string | null }
@@ -250,13 +272,18 @@ export function presetFile(db: DatabaseSync, session: string, file: string): voi
   db.prepare("UPDATE chat_sessions SET omp_session_file = ? WHERE id = ?").run(file, session);
 }
 
-/** A fresh never-prompted session whose row names `file`, deleted: 204 and the row is gone. */
+/**
+ * A fresh never-prompted session whose row names `file`, deleted: 204 and the row is gone. The row
+ * is written straight into the database, unbound (a legacy row since #930): its DELETE touches
+ * the session file and artifact directory only, so their report counts stay exact. A temporary
+ * workspace going with its session is session-delete-temp-workspace.test.ts.
+ */
 export async function deleteNaming(
   world: Pick<RecordingWorld, "fixture" | "cookie">,
   file: string,
 ): Promise<void> {
   const { app, db } = world.fixture;
-  const session = await createSession(app, world.cookie);
+  const session = seedUnboundSession(db, OWNER_ID, randomBytes(16).toString("hex"));
   presetFile(db, session, file);
   expectDeleted(await sendDelete(app, session, world.cookie));
   expect(sessionState(db, session).row).toBeUndefined();

@@ -24,8 +24,10 @@ import { SESSION_VIEW_KEYS } from "./session-meta-fixtures.js";
 import { QUESTION, type RegenWorld, sendPrompt } from "./session-regenerate-helpers.js";
 import { cookieFor, getSessionMessages } from "./session-rest-helpers.js";
 import { OWNER_ID, requiredCall, waitForTurn } from "./session-supervisor-helpers.js";
+import { seedUnboundSession } from "./support/temporary-workspace.js";
 
 const JSON_TYPE = "application/json";
+const UNBOUND_SOURCE = "7".repeat(32);
 /** Copied assistant a1's thinking: multi-byte on purpose (CJK and an astral emoji). */
 const THINKING = "先读 README，再改 src/app.ts 🤔";
 const CHANGES_A1 = [
@@ -190,12 +192,25 @@ async function forkSource(
     expect(made.statusCode).toBe(201);
     workspace = made.json() as Workspace;
   }
-  const created = await inject(world, "POST", "/api/sessions", {
-    ...(workspace === null ? {} : { workspaceId: workspace.id }),
-    scene: body.scene,
-  });
-  expect(created.statusCode).toBe(201);
-  let source = created.json() as SessionView;
+  let source: SessionView;
+  if (workspace === null) {
+    // REST no longer creates an unbound session (#930): the legacy row is written directly.
+    const id = seedUnboundSession(world.fixture.db, OWNER_ID, UNBOUND_SOURCE, {
+      scene: body.scene,
+    });
+    const seededView = await listedOf(world, id);
+    if (seededView === undefined) {
+      throw new Error("seeded unbound source missing from the list");
+    }
+    source = seededView;
+  } else {
+    const created = await inject(world, "POST", "/api/sessions", {
+      workspaceId: workspace.id,
+      scene: body.scene,
+    });
+    expect(created.statusCode).toBe(201);
+    source = created.json() as SessionView;
+  }
   if (pin) {
     const pinned = await inject(world, "PATCH", `/api/sessions/${source.id}`, { pinned: true });
     expect(pinned.statusCode).toBe(200);

@@ -14,7 +14,7 @@ import type { WorkspaceRootOf } from "./session-cwd.js";
 import { createSessionDeleter } from "./session-delete.js";
 import { sessionSkillsResolver } from "./slash-commands.js";
 import { createSessionStore, type SessionStore } from "./store.js";
-import { createSessionMetadataStore } from "./store-metadata.js";
+import { createSessionMetadataStore, type SessionMetadataStoreOptions } from "./store-metadata.js";
 import type { TodoWarn } from "./store-todo.js";
 import { defaultSessionClock, registerSessionEventStream } from "./stream/sse.js";
 import { SessionSupervisor, type SessionSupervisorRuntime } from "./supervisor.js";
@@ -29,6 +29,12 @@ export interface RegisterSessionsOptions {
    * bound session's omp cwd; sessions never builds a workspace store or computes a root itself.
    */
   workspaceRootOf: WorkspaceRootOf;
+  /**
+   * The workspace store's `createTemporary` for an owner (createApp's one store), called inside
+   * the session-create transaction when the request names no workspace. Sessions does not import
+   * the workspaces module for it.
+   */
+  createTemporaryWorkspace: SessionMetadataStoreOptions["createTemporaryWorkspace"];
   /**
    * The omp agent directory whose `skills/` the slash whitelist lists (platform skills; the
    * project skills come from the session cwd under `runtime.sandboxRoot`). The caller passes
@@ -93,6 +99,7 @@ export function registerSessions(
   const metadata = createSessionMetadataStore(options.db, {
     emit,
     sandboxRoot: options.runtime.sandboxRoot,
+    createTemporaryWorkspace: options.createTemporaryWorkspace,
   });
   const deleter = createSessionDeleter({
     store,

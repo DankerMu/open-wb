@@ -35,7 +35,11 @@ import {
   snapshot,
   waitDead,
 } from "./session-regenerate-helpers.js";
-import { AGENT_UNAVAILABLE_ENVELOPE, cookieFor } from "./session-rest-helpers.js";
+import {
+  AGENT_UNAVAILABLE_ENVELOPE,
+  cookieFor,
+  getSessionMessages,
+} from "./session-rest-helpers.js";
 import {
   createSession,
   IDLE_MS,
@@ -45,7 +49,9 @@ import {
   type SpawnCall,
   waitForTurn,
 } from "./session-supervisor-helpers.js";
+import { seedUnboundSession, workspaceOf } from "./support/temporary-workspace.js";
 
+const UNBOUND = "7".repeat(32);
 const worlds = regenWorlds();
 const probeDirs: string[] = [];
 
@@ -94,6 +100,17 @@ function bind(db: DatabaseSync, session: string, workspaceId: string): void {
     .prepare("UPDATE chat_sessions SET workspace_id = ? WHERE id = ?")
     .run(workspaceId, session);
   expect(Number(result.changes)).toBe(1);
+}
+
+function boundWorkspace(db: DatabaseSync, session: string): string | null | undefined {
+  const row = db.prepare("SELECT workspace_id FROM chat_sessions WHERE id = ?").get(session) as
+    | { workspace_id: string | null }
+    | undefined;
+  return row?.workspace_id;
+}
+
+function workspaceRows(db: DatabaseSync): number {
+  return Number((db.prepare("SELECT COUNT(*) AS n FROM workspaces").get() as { n: number }).n);
 }
 
 /** One REST probe turn to done; returns the child's reported `cwd=` (the report's last field). */
@@ -164,8 +181,9 @@ describe("session spawn cwd follows the workspace binding", () => {
     REAL,
     async () => {
       const { world, ownerRoot, workspace } = await openBound();
-      const { store, app } = world.fixture;
-      const unbound = await createSession(app, world.cookie);
+      const { store, db } = world.fixture;
+      // REST no longer creates an unbound session (#930): the legacy row is written directly.
+      const unbound = seedUnboundSession(db, OWNER_ID, UNBOUND);
       expect(realpathSync(workspace.root)).toBe(realpathSync(join(ownerRoot, "proj")));
       expect(store.runtimeState(world.session)?.workspaceId).toBe(workspace.id);
       expect(store.runtimeState(unbound)?.workspaceId).toBeNull();
@@ -188,14 +206,27 @@ describe("session spawn cwd follows the workspace binding", () => {
     },
   );
 
-  it.each(["bound", "unbound"] as const)(
+  it.each(["bound", "unbound", "temporary"] as const)(
     "resumes a %s session after idle retirement with the identical --cwd and probe cwd",
     REAL,
     async (kind) => {
       const { world, ownerRoot, workspace } = await openBound();
-      const session =
-        kind === "bound" ? world.session : await createSession(world.fixture.app, world.cookie);
-      const expected = kind === "bound" ? workspace.root : ownerRoot;
+      const { app, db } = world.fixture;
+      // REST no longer creates an unbound session (#930): the legacy row is written directly.
+      // A session created without a workspace runs in its own temporary workspace's root.
+      const sessions = {
+        bound: () => world.session,
+        unbound: () => seedUnboundSession(db, OWNER_ID, UNBOUND),
+        temporary: () => createSession(app, world.cookie),
+      };
+      const session = await sessions[kind]();
+      const roots = {
+        bound: () => workspace.root,
+        unbound: () => ownerRoot,
+        // The store answers a temporary workspace's root under the sandbox root's real path.
+        temporary: () => join(realpathSync(ownerRoot), `tmp-${workspaceOf(db, session)}`),
+      };
+      const expected = roots[kind]();
 
       const first = await probeTurn(world, session);
       await idleRetire(world, 0);
@@ -212,6 +243,84 @@ describe("session spawn cwd follows the workspace binding", () => {
       expect(argvShape(resumed.args)).toEqual(argvShape(cold.args));
       expect(first).toBe(realpathSync(expected));
       expect(second).toBe(first);
+    },
+  );
+});
+
+describe("绑定不可改与工作目录 — 三种会话的工作目录 (#930)", () => {
+  it(
+    "绑定会话的进程工作目录: W's root, the account root for a legacy unbound row, the temporary workspace root for a bodyless create",
+    REAL,
+    async () => {
+      const { world, ownerRoot, workspace } = await openBound();
+      const { app, db } = world.fixture;
+      const legacy = seedUnboundSession(db, OWNER_ID, UNBOUND);
+      const fresh = await createSession(app, world.cookie);
+      // The store answers a temporary workspace's root under the sandbox root's real path.
+      const temporaryRoot = join(realpathSync(ownerRoot), `tmp-${workspaceOf(db, fresh)}`);
+      const rows = workspaceRows(db);
+      const entries = readdirSync(ownerRoot).sort();
+      expect(entries).toContain(`tmp-${workspaceOf(db, fresh)}`);
+
+      const reported = [
+        await probeTurn(world),
+        await probeTurn(world, legacy),
+        await probeTurn(world, fresh),
+      ];
+
+      expect(reported).toEqual([
+        realpathSync(workspace.root),
+        realpathSync(ownerRoot),
+        realpathSync(temporaryRoot),
+      ]);
+      expect(world.rt.calls).toHaveLength(3);
+      expectSpawnCwd(requiredCall(world.rt.calls, 0), workspace.root);
+      expectSpawnCwd(requiredCall(world.rt.calls, 1), ownerRoot);
+      expectSpawnCwd(requiredCall(world.rt.calls, 2), temporaryRoot);
+      // The legacy row is left as it was: still unbound, no workspace row or directory made for it.
+      expect(boundWorkspace(db, legacy)).toBeNull();
+      expect(workspaceRows(db)).toBe(rows);
+      expect(readdirSync(ownerRoot).sort()).toEqual(entries);
+    },
+  );
+
+  it(
+    "存量未绑定会话照常可用: listed unbound, its snapshot readable, the next prompt 202 in the account root, no tmp- directory made",
+    REAL,
+    async () => {
+      const { world, ownerRoot } = await openBound();
+      const { app, db, store } = world.fixture;
+      const legacy = seedUnboundSession(db, OWNER_ID, UNBOUND);
+      for (const text of ["第一轮", "第二轮"]) {
+        store.finishTurn(store.acceptPrompt(legacy, OWNER_ID, text).assistantMessageId, "done");
+      }
+      const rows = workspaceRows(db);
+      const entries = readdirSync(ownerRoot).sort();
+
+      const list = await app.inject({
+        method: "GET",
+        url: "/api/sessions",
+        headers: { cookie: world.cookie },
+      });
+      expect(list.statusCode).toBe(200);
+      const item = (list.json() as { sessions: Array<{ id: string }> }).sessions.find(
+        (session) => session.id === legacy,
+      );
+      expect(item).toMatchObject({ id: legacy, workspaceId: null, temporaryWorkspace: false });
+      const snapshot = await getSessionMessages(app, legacy, world.cookie);
+      expect(snapshot.statusCode).toBe(200);
+      expect(
+        (snapshot.json() as { messages: Array<{ role: string }> }).messages.map((m) => m.role),
+      ).toEqual(["user", "assistant", "user", "assistant"]);
+
+      // `probeTurn` asserts the prompt's 202 (its `undo` value is task 10.6).
+      const reported = await probeTurn(world, legacy);
+
+      expect(reported).toBe(realpathSync(ownerRoot));
+      expectSpawnCwd(requiredCall(world.rt.calls, 0), ownerRoot);
+      expect(boundWorkspace(db, legacy)).toBeNull();
+      expect(workspaceRows(db)).toBe(rows);
+      expect(readdirSync(ownerRoot).sort()).toEqual(entries);
     },
   );
 });
@@ -263,6 +372,11 @@ describe("a bound session whose workspace root is unusable", () => {
       mkdirSync(sandboxRoot, { recursive: true });
       const foreign = await createWorkspace(world, await cookieFor(app, "zhaoliu"), "proj");
       expect(realpathSync(foreign.root)).toBe(realpathSync(join(sandboxRoot, "u2", "proj")));
+      // The owner root holds what creating the world's session made (#930): the directory of its
+      // own temporary workspace, and nothing else.
+      const ownerRoot = join(sandboxRoot, OWNER_ID);
+      const own = workspaceOf(db, world.session);
+      expect(readdirSync(ownerRoot)).toEqual([`tmp-${own}`]);
       bind(db, world.session, foreign.id);
       const before = snapshot(db, world.session, true);
 
@@ -272,7 +386,10 @@ describe("a bound session whose workspace root is unusable", () => {
       expect(world.rt.calls).toHaveLength(0);
       expect(snapshot(db, world.session, true)).toEqual(before);
       expect(readdirSync(foreign.root)).toEqual([]);
-      expect(existsSync(join(sandboxRoot, OWNER_ID))).toBe(false);
+      // No fallback to the owner root: nothing was written into it, and its own temporary
+      // workspace directory is still empty.
+      expect(readdirSync(ownerRoot)).toEqual([`tmp-${own}`]);
+      expect(readdirSync(join(ownerRoot, `tmp-${own}`))).toEqual([]);
       expect(supervisor.liveProcessCount()).toBe(0);
     },
   );

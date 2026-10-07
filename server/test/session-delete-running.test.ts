@@ -35,6 +35,7 @@ import {
   parkedDelete,
   sendDelete,
   sessionState,
+  temporaryWorkspaceDeleteEvent,
   wireShape,
 } from "./session-delete-helpers.js";
 import {
@@ -73,6 +74,7 @@ import {
 } from "./session-supervisor-helpers.js";
 import { isLive, waitExited } from "./session-supervisor-pool-helpers.js";
 import { observePromise } from "./support/omp-rpc.js";
+import { workspaceOf } from "./support/temporary-workspace.js";
 
 const { open, faulted } = runningWorlds();
 
@@ -110,6 +112,7 @@ describe("DELETE of a running session stops it first (evidence 1–3)", () => {
       const artifacts = ownedArtifactDir(file);
       const admin = await cookieFor(app, "lisi");
       const before = await auditEvents(app, admin);
+      const space = workspaceOf(db, world.session);
 
       expectDeleted(await sendDelete(app, world.session, world.cookie));
 
@@ -124,9 +127,13 @@ describe("DELETE of a running session stops it first (evidence 1–3)", () => {
       expect(existsSync(file)).toBe(false);
       expect(existsSync(artifacts)).toBe(false);
       const after = await auditEvents(app, admin);
-      expect(after.slice(2)).toEqual(before);
-      expect(after[0]).toEqual(deleteEvent(world.session, file, 2));
-      expect(after[1]).toMatchObject({
+      // Newest first: the session's own temporary workspace (#930) went after the session row.
+      expect(after.slice(3)).toEqual(before);
+      expect(after[0]).toEqual(
+        temporaryWorkspaceDeleteEvent(world.session, space, world.rt.runtime.sandboxRoot),
+      );
+      expect(after[1]).toEqual(deleteEvent(world.session, file, 2, space));
+      expect(after[2]).toMatchObject({
         kind: "session.approval",
         actorId: OWNER_ID,
         detail: {
@@ -218,6 +225,7 @@ describe("DELETE while the stop intent meets a failed acquisition (evidence 4)",
       delayReady(world, 60_000);
       const admin = await cookieFor(app, "lisi");
       const before = await auditEvents(app, admin);
+      const space = workspaceOf(db, world.session);
       const prompt = postPrompt(
         app,
         world.session,
@@ -235,8 +243,12 @@ describe("DELETE while the stop intent meets a failed acquisition (evidence 4)",
       expectDeleted(await pending);
       expect(spawned.stdin).toEqual([]);
       const after = await auditEvents(app, admin);
-      expect(after.slice(1)).toEqual(before);
-      expect(after[0]).toEqual(deleteEvent(world.session, null, 0));
+      // Newest first: the session's own temporary workspace (#930) went after the session row.
+      expect(after.slice(2)).toEqual(before);
+      expect(after.slice(0, 2)).toEqual([
+        temporaryWorkspaceDeleteEvent(world.session, space, world.rt.runtime.sandboxRoot),
+        deleteEvent(world.session, null, 0, space),
+      ]);
       const gone = [
         await sendDelete(app, world.session, world.cookie),
         await patchTitle(app, world.session, world.cookie),

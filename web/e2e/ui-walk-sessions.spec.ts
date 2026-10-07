@@ -17,6 +17,7 @@
 
 import { randomUUID } from "node:crypto";
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import { deleteCreatedSession } from "./ui-walk-cleanup.js";
 import {
   DEV_ACCOUNT,
   expectAuthenticatedRoute,
@@ -686,25 +687,6 @@ async function step11Delete(
   await expect(welcomeHeading(page)).toBeVisible();
   const gone = await page.request.get(`/api/sessions/${sessionId}/messages`);
   expect(gone.status(), "GET messages status after delete").toBe(404);
-}
-
-// `finally` 里调用：只产生 soft 失败，不盖掉 try 里的原始失败。204 或 404；409 判失败。
-async function deleteCreatedSession(page: Page, sessionId: string | null): Promise<void> {
-  if (sessionId === null) return;
-  try {
-    const deleted = await page.request.delete(`/api/sessions/${sessionId}`);
-    expect.soft([204, 404], "cleanup: DELETE session status").toContain(deleted.status());
-    const listed = await page.request.get("/api/sessions");
-    const body = (await listed.json()) as { sessions: { id: string }[] };
-    expect
-      .soft(
-        body.sessions.map((session) => session.id),
-        "cleanup: session list",
-      )
-      .not.toContain(sessionId);
-  } catch (error) {
-    expect.soft(String(error), "cleanup: request failed").toBe("");
-  }
 }
 
 async function logout(page: Page, oracle: AuthOracle, project: WalkProject): Promise<void> {

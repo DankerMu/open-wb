@@ -9,6 +9,7 @@ import {
 } from "@playwright/test";
 import { holdRoute } from "./route-hold.js";
 import { allowFirstApproval, expectAllowedBar, generatingStatus } from "./ui-walk-approval.js";
+import { type CreatedSessions, watchCreatedSessions } from "./ui-walk-cleanup.js";
 import { createSessionFromSidebar } from "./ui-walk-create-session.js";
 import { armGate, controlOrigin, deleteGate, gatePhase, releaseGate } from "./ui-walk-gate.js";
 import {
@@ -117,20 +118,27 @@ async function walkProductionOrigin(
 
   await clickRoute(page, project, "会话");
   await expectAuthenticatedRoute(page, project, "/", ROUTES[0].heading, "会话");
-  await walkHeldDialogue(page, project);
-  // 放在建会话之后：列表非空时仍须满足首屏约束（#424）。
-  await clickRoute(page, project, "会话");
-  await expectAuthenticatedRoute(page, project, "/", ROUTES[0].heading, "会话");
-  await test.step("session list in sidebar and welcome first screen (#424)", async () => {
-    await expectSessionListInSidebar(page, project);
-    await expectWelcomeFirstScreen(page, project);
-    if (project === "mobile-dark") {
-      await selectFirstSessionInOverlay(page);
-      await expect(page.getByRole("article", { name: "助手" }).first()).toBeVisible();
-    }
-  });
-  await clickRoute(page, project, "设置");
-  await expectAuthenticatedRoute(page, project, "/settings", "设置", "设置");
+  // 对话旅程创建的会话（首次发送的那个与 fork 出的那个）在离开会话页之后删除：成功与步骤失败都执行，
+  // 且先于退出登录。第 #424 步还要用到它们，所以 `finally` 包到进入设置页为止。
+  const created = watchCreatedSessions(page);
+  try {
+    await walkHeldDialogue(page, project, created);
+    // 放在建会话之后：列表非空时仍须满足首屏约束（#424）。
+    await clickRoute(page, project, "会话");
+    await expectAuthenticatedRoute(page, project, "/", ROUTES[0].heading, "会话");
+    await test.step("session list in sidebar and welcome first screen (#424)", async () => {
+      await expectSessionListInSidebar(page, project);
+      await expectWelcomeFirstScreen(page, project);
+      if (project === "mobile-dark") {
+        await selectFirstSessionInOverlay(page);
+        await expect(page.getByRole("article", { name: "助手" }).first()).toBeVisible();
+      }
+    });
+    await clickRoute(page, project, "设置");
+    await expectAuthenticatedRoute(page, project, "/settings", "设置", "设置");
+  } finally {
+    await created.deleteAll();
+  }
 
   await expect(page.getByText(PRODUCTION_SERVICE_NAME, { exact: true })).toBeVisible();
   await expect(page.getByText(`版本 ${PRODUCTION_SERVICE_VERSION}`, { exact: true })).toBeVisible();
@@ -307,18 +315,24 @@ async function expectRootFileButtons(tree: Locator) {
   await expect(tree.getByRole("button", { name: "logo.png", exact: true })).toBeVisible();
 }
 
-async function walkHeldDialogue(page: Page, project: WalkProject): Promise<void> {
+async function walkHeldDialogue(
+  page: Page,
+  project: WalkProject,
+  created: CreatedSessions,
+): Promise<void> {
   const gateId = randomUUID();
   const prompt = `${WALK_MARKER}${gateId}`;
   const origin = controlOrigin();
   try {
     await armGate(origin, gateId);
     const accepted = await createSessionFromSidebar(page, project, prompt);
-    await expect.poll(() => sessionIdFromUrl(page.url())).toMatch(SESSION_ID);
+    // 会话 id 取自被观察的 `POST /api/sessions` 201 响应，URL 选中的必须是同一个。
+    const sessionId = await created.firstId();
+    expect(sessionId).toMatch(SESSION_ID);
+    await expect.poll(() => sessionIdFromUrl(page.url())).toBe(sessionId);
     const crumb = page.getByRole("banner").getByRole("heading", { level: 1 });
     await expect(crumb).toHaveAccessibleName(/^我的工作 \/ /);
     const sessionUrl = page.url();
-    const sessionId = sessionIdFromUrl(sessionUrl);
     expect(new URL(accepted.url()).pathname).toBe(`/api/sessions/${sessionId}/prompt`);
     const promptIds = parsePromptIds(await accepted.json());
     await allowFirstApproval(page, origin, gateId);

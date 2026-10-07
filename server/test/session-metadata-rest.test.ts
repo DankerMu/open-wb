@@ -2,8 +2,8 @@
  * Issue #523 POST /api/sessions optional body (parent s1c-session-metadata-presentation tasks 4.1,
  * design D2): workspace binding, scene choice and the same-transaction `session.bind` audit.
  * Every world is the production createApp → registerSessions assembly (`openBareSession`, which
- * pre-creates one unbound zhangsan session) over the real fake-omp runtime, driven through
- * `app.inject()` on a real in-memory SQLite. Workspaces are created over `POST /api/workspaces`
+ * pre-creates one zhangsan session on its own temporary workspace) over the real fake-omp runtime,
+ * driven through `app.inject()` on a real in-memory SQLite. Workspaces are created over `POST /api/workspaces`
  * (the sandbox root is created first: the workspace store realpaths it). Oracles: response status,
  * headers and bytes, SQLite rows, `GET /api/audit` per account role and the recorded spawn calls.
  */
@@ -33,6 +33,7 @@ import {
   waitFor,
   waitForTurn,
 } from "./session-supervisor-helpers.js";
+import { temporaryWorkspacePort } from "./support/temporary-workspace.js";
 
 const JSON_TYPE = "application/json";
 const BODY_LIMIT = 16 * 1024;
@@ -50,6 +51,8 @@ const ELEVEN_KEYS = [
   "temporaryWorkspace",
 ] as const;
 const SESSION_ID = /^[0-9a-f]{32}$/u;
+/** A create that names no workspace gets a new temporary one (#930): a fresh 32-hex id. */
+const TEMPORARY = Symbol("temporary workspace");
 
 const fixtures: SupervisorApp[] = [];
 
@@ -165,11 +168,12 @@ function sessionColumns(db: DatabaseSync, id: string): unknown {
 /** 201 + no-store + exactly the eleven keys in wire order with the default columns. */
 function expectCreated(
   response: LightMyRequestResponse,
-  expected: { scene: string | null; workspaceId: string | null },
-): CreatedSession {
+  expected: { scene: string | null; workspaceId: string | typeof TEMPORARY },
+): CreatedSession & { workspaceId: string } {
   expect(response.statusCode).toBe(201);
   expect(response.headers["cache-control"]).toBe("no-store");
-  const body = response.json() as CreatedSession;
+  const body = response.json() as CreatedSession & { workspaceId: string };
+  const temporary = expected.workspaceId === TEMPORARY;
   expect(Object.keys(body)).toEqual([...ELEVEN_KEYS]);
   expect(body).toEqual({
     id: expect.stringMatching(SESSION_ID),
@@ -178,11 +182,11 @@ function expectCreated(
     createdAt: body.createdAt,
     updatedAt: body.createdAt,
     scene: expected.scene,
-    workspaceId: expected.workspaceId,
+    workspaceId: temporary ? expect.stringMatching(SESSION_ID) : expected.workspaceId,
     pinnedAt: null,
     archivedAt: null,
     pendingApproval: false,
-    temporaryWorkspace: false,
+    temporaryWorkspace: temporary,
   });
   expect(Number.isSafeInteger(body.createdAt)).toBe(true);
   return body;
@@ -224,10 +228,14 @@ describe("POST /api/sessions default creation", () => {
     const world = await openWorld();
     const before = rowCounts(world.db);
 
-    const bodyless = expectCreated(await postCreate(world), { scene: null, workspaceId: null });
-    const empty = expectCreated(await postJson(world, {}), { scene: null, workspaceId: null });
+    const bodyless = expectCreated(await postCreate(world), {
+      scene: null,
+      workspaceId: TEMPORARY,
+    });
+    const empty = expectCreated(await postJson(world, {}), { scene: null, workspaceId: TEMPORARY });
 
     expect(bodyless.id).not.toBe(empty.id);
+    expect(bodyless.workspaceId).not.toBe(empty.workspaceId);
     expect(rowCounts(world.db)).toEqual({ sessions: before.sessions + 2, audits: before.audits });
     expect(sessionColumns(world.db, empty.id)).toEqual({
       owner_id: OWNER_ID,
@@ -235,7 +243,7 @@ describe("POST /api/sessions default creation", () => {
       status: "idle",
       created_at: empty.createdAt,
       updated_at: empty.createdAt,
-      workspace_id: null,
+      workspace_id: empty.workspaceId,
       scene: null,
       pinned_at: null,
     });
@@ -287,11 +295,11 @@ describe("POST /api/sessions workspace binding and scene", () => {
 
     const sceneOnly = expectCreated(await postJson(world, { scene: "design" }), {
       scene: "design",
-      workspaceId: null,
+      workspaceId: TEMPORARY,
     });
     expect(rowCounts(world.db)).toEqual({ sessions: before.sessions + 1, audits: before.audits });
     expect(sessionColumns(world.db, sceneOnly.id)).toMatchObject({
-      workspace_id: null,
+      workspace_id: sceneOnly.workspaceId,
       scene: "design",
     });
 
@@ -403,14 +411,14 @@ describe("POST /api/sessions body validation", () => {
     const boundary = paddedSceneBody(BODY_LIMIT);
     expectCreated(await postCreate(world, { payload: boundary, contentType: JSON_TYPE }), {
       scene: "code",
-      workspaceId: null,
+      workspaceId: TEMPORARY,
     });
     expect(rowCounts(world.db)).toEqual({ sessions: before.sessions + 1, audits: before.audits });
   });
 });
 
 describe("POST /api/sessions audit atomicity and visibility", () => {
-  it("E6 a failed session.bind write rolls the session row back; unbound creation is unaffected", async () => {
+  it("E6 a failed session.bind write rolls the session row back; creation without a workspace is unaffected", async () => {
     const world = await openWorld();
     const workspace = await createWorkspace(world, "proj");
     world.db.exec(`CREATE TEMP TRIGGER reject_audit
@@ -426,7 +434,7 @@ describe("POST /api/sessions audit atomicity and visibility", () => {
 
       expectCreated(await postJson(world, { scene: "office" }), {
         scene: "office",
-        workspaceId: null,
+        workspaceId: TEMPORARY,
       });
       expect(rowCounts(world.db)).toEqual({
         sessions: before.sessions + 1,
@@ -557,7 +565,7 @@ describe("PATCH /api/sessions/:id metadata writes", () => {
     expect(prompt.statusCode).toBe(202);
     const done = (await waitForTurn(world.fixture, id, "done")).session;
     await laterThan(done.updatedAt);
-    const newer = expectCreated(await postCreate(world), { scene: null, workspaceId: null });
+    const newer = expectCreated(await postCreate(world), { scene: null, workspaceId: TEMPORARY });
     expect(await listedIds(world)).toEqual([newer.id, id]);
     const before = rowState(world.db, id);
     const audits = rowCounts(world.db).audits;
@@ -688,7 +696,8 @@ describe("PATCH /api/sessions/:id ownership and binding", () => {
     const world = await openPatchWorld();
     const metadata = createSessionMetadataStore(world.db, {
       emit,
-      sandboxRoot: "/nonexistent/sandbox",
+      sandboxRoot: world.rt.runtime.sandboxRoot,
+      createTemporaryWorkspace: temporaryWorkspacePort(world.db, world.rt.runtime.sandboxRoot),
     });
     const before = rowState(world.db, world.session);
 
