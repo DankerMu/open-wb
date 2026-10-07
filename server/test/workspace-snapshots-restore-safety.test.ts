@@ -7,6 +7,7 @@
  */
 import { execFileSync } from "node:child_process";
 import fs, {
+  appendFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -120,8 +121,12 @@ describe("还原 — a manifest that is not one is refused before anything chang
     ["a skipped path that leaves the workspace", { path: "../x", reason: "excluded" }],
     ["a skipped item without a reason", { path: "x" }],
     ["a skipped item that is no object", "x"],
+    // Taken as it is, `nowhere/` would be deleted as an extra entry with the skipped path in it.
+    ["a skipped path whose parent is not listed", { path: "nowhere/x", reason: "excluded" }],
   ])("%s", async (_name, item) => {
     const f = await changedWorkspace();
+    put(f.workspace, "nowhere/x", "skipped by the snapshot\n");
+    put(f.workspace, "nowhere/kept.txt", "kept\n");
     editManifest(f, (manifest) => {
       manifest.skipped.push(item as Record<string, unknown>);
     });
@@ -130,6 +135,11 @@ describe("还原 — a manifest that is not one is refused before anything chang
     await expect(restoreRun(f)).rejects.toThrow("manifest");
 
     expect(stateOf(f.workspace)).toEqual(before);
+    expect(contentsOf(f.workspace)).toMatchObject({
+      nowhere: "dir",
+      "nowhere/kept.txt": "kept\n",
+      "nowhere/x": "skipped by the snapshot\n",
+    });
   });
 
   it.each([
@@ -564,6 +574,61 @@ describe("还原 — what it deletes and what it leaves behind", () => {
       expect(existsSync(at(f, "locked"))).toBe(true);
     },
   );
+
+  it.skipIf(IS_ROOT)(
+    "a directory that may not be made is failed, and so is the file whose parent is then missing",
+    async () => {
+      const f = fixture();
+      put(f.workspace, "a.txt", "alpha\n");
+      put(f.workspace, "p/dir/b.txt", "bravo\n");
+      await snapshot(f);
+      writeFileSync(at(f, "a.txt"), "changed in the turn\n");
+      rmSync(at(f, "p/dir"), { recursive: true });
+      lock(at(f, "p"), 0o500);
+
+      const result = await restoreRun(f);
+
+      expect(result).toEqual({
+        restored: 1,
+        removed: 0,
+        skipped: [],
+        failed: [{ path: "p/dir" }, { path: "p/dir/b.txt" }],
+      });
+      expect(contentsOf(f.workspace)).toEqual({ "a.txt": "alpha\n", p: "dir" });
+    },
+  );
+
+  it("bytes appended after the size was read are not compared: the file is left, nothing hangs", async () => {
+    const f = fixture();
+    put(f.workspace, "a.txt", "alpha\n");
+    await snapshot(f);
+    // No inode number: the file is not taken for the recorded one unread, its bytes are compared.
+    editManifest(f, (manifest) => {
+      for (const entry of manifest.entries) {
+        delete entry.ino;
+      }
+    });
+    const recorded = lstatSync(at(f, "a.txt")).ino;
+    const open = fs.promises.open;
+    vi.spyOn(fs.promises, "open").mockImplementation(async (...args: Parameters<typeof open>) => {
+      const handle = await open(...args);
+      if (args[0] === at(f, "a.txt")) {
+        const stat = handle.stat.bind(handle);
+        handle.stat = (async () => {
+          const size = await stat();
+          appendFileSync(at(f, "a.txt"), "appended by a writer\n");
+          return size;
+        }) as typeof handle.stat;
+      }
+      return handle;
+    });
+
+    expect(await restoreRun(f)).toEqual({ restored: 0, removed: 0, skipped: [], failed: [] });
+
+    expect(readFileSync(at(f, "a.txt"), "utf8")).toBe("alpha\nappended by a writer\n");
+    expect(lstatSync(at(f, "a.txt")).ino).toBe(recorded);
+    expect(leftovers(f.workspace)).toEqual([]);
+  }, 5000);
 
   it("an error that is not about permission stops the restore; running it again finishes it", async () => {
     const f = fixture();

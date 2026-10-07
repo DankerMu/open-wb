@@ -129,7 +129,7 @@ prompt 路由 SHALL 把「快照步骤」作为 `supervisor.prompt` 的派发前
 - **THEN** 该消息快照行的 `todo` 与 T 的存储文本逐字相同；`todo` 为 NULL 的会话其快照行 `todo` 为 NULL
 
 ### Requirement: 还原
-`restore(workspaceRoot, snapshotDir)` SHALL 把工作空间还原为清单描述的状态，并返回 `{restored,removed,skipped,failed}`（`restored` 为内容被写回的文件数与被重建的符号链接数之和，`removed` 为删除的条目数（被递归删除的目录连同其下内容计一项），`skipped` 为清单的 `skipped`，`failed` 为 `[{path}]`）。它 SHALL 先读清单并校验：清单可解析且每个条目形状合法（`path` 是相对的 POSIX 路径，不含空分量、`.`、`..`，不以 `/` 开头，条目类型与字段齐全，路径不重复，每个条目与每个 `skipped` 路径的父级是清单里的目录条目或位于某个 `skipped` 路径之下）、`tree/` 存在、快照目录不在工作空间之内、工作空间根是真实目录（`lstat`，非符号链接）；任一不成立 SHALL 在改动任何工作空间条目之前抛错。随后：
+`restore`（入参为工作空间根与快照目录）SHALL 把工作空间还原为清单描述的状态，并返回 `{restored,removed,skipped,failed}`（`restored` 为内容被写回的文件数与被重建的符号链接数之和，`removed` 为被删除的多余条目数——只计清单里没有的条目，被递归删除的目录连同其下内容计一项；清单路径上类型不对而被替换的占位者不计，`skipped` 为清单的 `skipped`，`failed` 为 `[{path}]`）。它 SHALL 先读清单并校验：清单可解析且每个条目形状合法（`path` 是相对的 POSIX 路径，不含空分量、`.`、`..`，不以 `/` 开头，条目类型与字段齐全，路径不重复，每个条目与每个 `skipped` 路径的父级是清单里的目录条目或位于某个 `skipped` 路径之下）、`tree/` 存在、快照目录不在工作空间之内、工作空间根是真实目录（`lstat`，非符号链接）；任一不成立 SHALL 在改动任何工作空间条目之前抛错。随后：
 - 现存而不在 `entries` 里、且不位于任何 `skipped` 路径之下（含其自身）的条目 SHALL 被删除（目录递归删除，不跟随符号链接）；
 - `entries` 里的目录 SHALL 存在（缺失则创建，mode `2770`；现存而不是目录的同名条目先删除）；
 - `entries` 里的文件按以下次序判定，命中即止：

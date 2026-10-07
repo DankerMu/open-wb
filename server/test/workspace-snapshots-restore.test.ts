@@ -55,6 +55,27 @@ function modeOf(path: string): number {
   return lstatSync(path).mode & 0o7777;
 }
 
+/** Two whole 64 KiB chunks of the restore's reads and writes, and part of a third. */
+const BIG_BYTES = 150_000;
+const SECOND_CHUNK = 64 * 1024 + 4321;
+
+/** Printable bytes from a seeded generator: no two chunks, and no two offsets apart, repeat. */
+function bigContent(): string {
+  const bytes = Buffer.alloc(BIG_BYTES);
+  let state = 0x2545f491;
+  for (let index = 0; index < BIG_BYTES; index++) {
+    state = (Math.imul(state, 1103515245) + 12345) >>> 0;
+    bytes[index] = 0x20 + ((state >>> 16) % 95);
+  }
+  return bytes.toString("latin1");
+}
+
+/** `content` with the one byte at `index` replaced by another printable one: the same length. */
+function withByteChanged(content: string, index: number): string {
+  const other = content[index] === "!" ? "?" : "!";
+  return content.slice(0, index) + other + content.slice(index + 1);
+}
+
 describe("还原", () => {
   it("还原改动、新增与删除: changed and deleted files come back, new entries go", async () => {
     const f = fixture();
@@ -403,6 +424,59 @@ describe("还原", () => {
       file: "a file\n",
       link: "-> file",
     });
+  });
+
+  it.each([
+    [
+      "only its last byte changed",
+      (path: string, big: string) => writeFileSync(path, withByteChanged(big, BIG_BYTES - 1)),
+    ],
+    [
+      "only one byte of its second chunk changed",
+      (path: string, big: string) => writeFileSync(path, withByteChanged(big, SECOND_CHUNK)),
+    ],
+    ["been deleted", (path: string) => rmSync(path)],
+  ])(
+    "a file of several chunks that has %s is written back byte for byte",
+    async (_name, change) => {
+      const f = fixture();
+      const big = bigContent();
+      put(f.workspace, "big.bin", big, 0o644);
+      utimesSync(at(f, "big.bin"), PINNED_SECONDS, PINNED_SECONDS);
+      await snapshot(f);
+      await sleep(CTIME_GAP_MS);
+      const recorded = inode(at(f, "big.bin"));
+      change(at(f, "big.bin"), big);
+
+      expect(await restoreRun(f)).toEqual({ restored: 1, removed: 0, skipped: [], failed: [] });
+
+      const written = lstatSync(at(f, "big.bin"));
+      expect(written.size).toBe(BIG_BYTES);
+      // Not a deep comparison of 150 000 bytes: a mismatch would print both in full.
+      expect(readFileSync(at(f, "big.bin"), "latin1") === big).toBe(true);
+      expect(written.ino).not.toBe(recorded);
+      expect(written.mode & 0o7777).toBe(0o664);
+      expect(written.mtimeMs).toBe(PINNED_SECONDS * 1000);
+    },
+  );
+
+  it("a file of several chunks rewritten with the same bytes is compared to its end and left", async () => {
+    const f = fixture();
+    const big = bigContent();
+    put(f.workspace, "big.bin", big);
+    await snapshot(f);
+    await sleep(CTIME_GAP_MS);
+    const recorded = lstatSync(at(f, "big.bin"));
+    writeFileSync(at(f, "big.bin"), big);
+    expect(lstatSync(at(f, "big.bin")).mtimeMs).not.toBe(recorded.mtimeMs);
+    expect(lstatSync(at(f, "big.bin")).ctimeMs).not.toBe(recorded.ctimeMs);
+    const before = describeTree(f.workspace);
+
+    expect(await restoreRun(f)).toEqual({ restored: 0, removed: 0, skipped: [], failed: [] });
+
+    expect(describeTree(f.workspace)).toEqual(before);
+    expect(inode(at(f, "big.bin"))).toBe(recorded.ino);
+    expect(readFileSync(at(f, "big.bin"), "latin1") === big).toBe(true);
   });
 
   it("sets the recorded mtime on a written-back file and leaves an existing directory's mode", async () => {
