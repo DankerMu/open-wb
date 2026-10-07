@@ -18,10 +18,11 @@ import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
 import { deriveProxyBaseUrl, writeManagedModelsYml } from "../src/model-proxy/models-yml.js";
+import { plainYaml, reasoningYaml } from "./models-yml-helpers.js";
 
 const PROXY_BASE_URL = "http://127.0.0.1:18016/v1";
 const MODEL_ID = "deepseek-v4.1-flash";
-const OPTIONS = { proxyBaseUrl: PROXY_BASE_URL, modelId: MODEL_ID };
+const OPTIONS = singleModel(PROXY_BASE_URL, MODEL_ID);
 const YAML_SENSITIVE_MODEL_ID = 'flash: "quoted"\nproviders:\n  injected: true # 中文';
 const NEXT_PROXY_BASE_URL = "http://[::1]:18016/v1";
 const SENTINELS = {
@@ -29,6 +30,107 @@ const SENTINELS = {
   MODEL_UPSTREAM_API_KEY: "parent-upstream-key-SENTINEL-89",
   WORKBUDDY_MODEL_TOKEN: "session-bearer-SENTINEL-89-token",
 } as const;
+
+/** A whitelist of an installation without MODEL_CATALOG: name equals id, no efforts, no vision. */
+function singleModel(proxyBaseUrl: string, modelId: string) {
+  return {
+    proxyBaseUrl,
+    models: [{ id: modelId, name: modelId, reasoning: false, vision: false }],
+  };
+}
+
+/** model-proxy「托管 models.yml」scenario "Several models in whitelist order", verbatim. */
+const M2 = { id: "m2", name: "m2", reasoning: false, vision: false } as const;
+const THREE_MODELS = [
+  {
+    id: "m1",
+    name: "通用",
+    reasoning: true,
+    vision: false,
+    efforts: ["minimal", "low", "medium", "high", "xhigh", "max"],
+  },
+  M2,
+  { id: "m3", name: "深度", reasoning: true, vision: true, efforts: ["low", "high"] },
+] as const;
+
+const THREE_MODELS_YAML = `providers:
+  workbuddy:
+    api: openai-completions
+    baseUrl: "http://127.0.0.1:18016/v1"
+    apiKey: WORKBUDDY_MODEL_TOKEN
+    models:
+      - id: "m1"
+        name: "通用"
+        contextWindow: 128000
+        maxTokens: 8192
+        reasoning: true
+        compat:
+          reasoningContentField: reasoning_content
+        thinking:
+          mode: effort
+          efforts:
+            - "minimal"
+            - "low"
+            - "medium"
+            - "high"
+            - "xhigh"
+            - "max"
+      - id: "m2"
+        name: "m2"
+        contextWindow: 128000
+        maxTokens: 8192
+      - id: "m3"
+        name: "深度"
+        contextWindow: 128000
+        maxTokens: 8192
+        reasoning: true
+        compat:
+          reasoningContentField: reasoning_content
+        thinking:
+          mode: effort
+          efforts:
+            - "low"
+            - "high"
+        input:
+          - text
+          - image
+`;
+
+const LIMITS = { contextWindow: 128000, maxTokens: 8192 };
+const REASONING_KEYS = {
+  reasoning: true,
+  compat: { reasoningContentField: "reasoning_content" },
+};
+const THREE_MODELS_DOCUMENT = {
+  providers: {
+    workbuddy: {
+      api: "openai-completions",
+      baseUrl: PROXY_BASE_URL,
+      apiKey: "WORKBUDDY_MODEL_TOKEN",
+      models: [
+        {
+          id: "m1",
+          name: "通用",
+          ...LIMITS,
+          ...REASONING_KEYS,
+          thinking: {
+            mode: "effort",
+            efforts: ["minimal", "low", "medium", "high", "xhigh", "max"],
+          },
+        },
+        { id: "m2", name: "m2", ...LIMITS },
+        {
+          id: "m3",
+          name: "深度",
+          ...LIMITS,
+          ...REASONING_KEYS,
+          thinking: { mode: "effort", efforts: ["low", "high"] },
+          input: ["text", "image"],
+        },
+      ],
+    },
+  },
+};
 
 const tmpDirs: string[] = [];
 
@@ -140,19 +242,16 @@ describe("writeManagedModelsYml", () => {
     writeFileSync(join(agentDir, "models.yml"), "providers:\n  obsolete: true\n");
     writeFileSync(join(agentDir, "keep.txt"), "unrelated-keep");
 
-    await writeManagedModelsYml(agentDir, {
-      proxyBaseUrl: PROXY_BASE_URL,
-      modelId: YAML_SENSITIVE_MODEL_ID,
-    });
+    await writeManagedModelsYml(agentDir, singleModel(PROXY_BASE_URL, YAML_SENSITIVE_MODEL_ID));
     expect(parse(readFileSync(join(agentDir, "models.yml"), "utf8"))).toEqual(
       expectedDocument(PROXY_BASE_URL, YAML_SENSITIVE_MODEL_ID),
     );
     expect(readdirSync(agentDir).toSorted()).toEqual(["keep.txt", "models.yml"]);
 
-    await writeManagedModelsYml(agentDir, {
-      proxyBaseUrl: NEXT_PROXY_BASE_URL,
-      modelId: YAML_SENSITIVE_MODEL_ID,
-    });
+    await writeManagedModelsYml(
+      agentDir,
+      singleModel(NEXT_PROXY_BASE_URL, YAML_SENSITIVE_MODEL_ID),
+    );
     expect(parse(readFileSync(join(agentDir, "models.yml"), "utf8"))).toEqual(
       expectedDocument(NEXT_PROXY_BASE_URL, YAML_SENSITIVE_MODEL_ID),
     );
@@ -275,6 +374,66 @@ describe("writeManagedModelsYml", () => {
     }
     expect(readdirSync(agentDir)).toEqual(["models.yml"]);
     expect(readFileSync(join(agentDir, "models.yml"), "utf8")).toBe("previous-content");
+  });
+
+  it("several models are written one entry each in whitelist order, thinking before input", async () => {
+    const agentDir = makeAgentDir();
+    const target = join(agentDir, "models.yml");
+    const several = { proxyBaseUrl: PROXY_BASE_URL, models: THREE_MODELS };
+
+    await writeManagedModelsYml(agentDir, several);
+    const first = readFileSync(target);
+    expect(first.toString("utf8")).toBe(THREE_MODELS_YAML);
+    expect(parse(first.toString("utf8"))).toEqual(THREE_MODELS_DOCUMENT);
+    await writeManagedModelsYml(agentDir, several);
+    expect(readFileSync(target).equals(first)).toBe(true);
+
+    await writeManagedModelsYml(agentDir, { proxyBaseUrl: PROXY_BASE_URL, models: [M2] });
+    const text = readFileSync(target, "utf8");
+    expect(text).toBe(plainYaml(PROXY_BASE_URL, "m2"));
+    for (const stale of ["m1", "m3", "通用", "深度", "thinking", "input", "reasoning"]) {
+      expect(text).not.toContain(stale);
+    }
+    expect(readdirSync(agentDir)).toEqual(["models.yml"]);
+  });
+
+  it.each([
+    [true, reasoningYaml(PROXY_BASE_URL, MODEL_ID)],
+    [false, plainYaml(PROXY_BASE_URL, MODEL_ID)],
+  ])(
+    "single-model output without MODEL_CATALOG is byte-identical to the pre-change file (reasoning %s)",
+    async (reasoning, before) => {
+      const agentDir = makeAgentDir();
+      await writeManagedModelsYml(agentDir, {
+        proxyBaseUrl: PROXY_BASE_URL,
+        models: [{ id: MODEL_ID, name: MODEL_ID, reasoning, vision: false }],
+      });
+      expect(readFileSync(join(agentDir, "models.yml")).equals(Buffer.from(before, "utf8"))).toBe(
+        true,
+      );
+    },
+  );
+
+  it("rejects an empty whitelist and leaves the existing models.yml and agentDir untouched", async () => {
+    const agentDir = makeAgentDir();
+    const target = join(agentDir, "models.yml");
+    await writeManagedModelsYml(agentDir, OPTIONS);
+    const before = readFileSync(target);
+    const statBefore = lstatSync(target);
+
+    await expect(
+      writeManagedModelsYml(agentDir, { proxyBaseUrl: NEXT_PROXY_BASE_URL, models: [] }),
+    ).rejects.toThrow();
+
+    expect(readFileSync(target).equals(before)).toBe(true);
+    expect(lstatSync(target).ino).toBe(statBefore.ino);
+    expect(readdirSync(agentDir)).toEqual(["models.yml"]);
+
+    const empty = makeAgentDir();
+    await expect(
+      writeManagedModelsYml(empty, { proxyBaseUrl: PROXY_BASE_URL, models: [] }),
+    ).rejects.toThrow();
+    expect(readdirSync(empty)).toEqual([]);
   });
 });
 

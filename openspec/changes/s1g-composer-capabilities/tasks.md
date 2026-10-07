@@ -100,10 +100,18 @@ Minimal mergeable slice: 2.1 一刀（三个标量键，尚无读者，knip 以 
 
 ## 3. model-proxy — 托管 models.yml 多模型
 
-- [ ] 3.1 `server/src/model-proxy/models-yml.ts`：`writeManagedModelsYml(agentDir, {proxyBaseUrl, models})` 按 model-proxy delta「托管 models.yml」写出（每模型一条；`thinking` 在 `input` 之前；空数组拒绝且不动既有文件）。先把改动前对 `deepseek-v4.1-flash`、`reasoning` 真 / 假两种输出存成测试夹具，再改实现。
+- [x] 3.1 `server/src/model-proxy/models-yml.ts`：`writeManagedModelsYml(agentDir, {proxyBaseUrl, models})` 按 model-proxy delta「托管 models.yml」写出（每模型一条；`thinking` 在 `input` 之前；空数组拒绝且不动既有文件）。先把改动前对 `deepseek-v4.1-flash`、`reasoning` 真 / 假两种输出存成测试夹具，再改实现。
   测试 `server/test/model-proxy-models-yml.test.ts` 与 `model-proxy-reasoning.test.ts`：既有用例改为传单模型白名单（断言不变）；新增「Several models in whitelist order」「Single-model output is unchanged」。变异：模型次序反转、`input` 写在 `thinking` 之前、带 `efforts` 的推理条目（场景里的 `m1`）不写 `thinking`、单模型多写一个键（含给 `MODEL_CATALOG` 未设置时的那一项补 `thinking`）→ 判红。
-- [ ] 3.2 启动装配（`server/src/server.ts` / `app.ts` 里调用写出器的那一处）：传入 `settings.modelCatalog.models`。测试：`server/test/server-startup-layout.test.ts` 的缺省启动仍恰一个模型条目且字节与夹具相同；新增一例三模型 `MODEL_CATALOG` 启动后文件含三条（http-service-skeleton「四个新配置键的取值与非法值」里「托管 models.yml 含三个模型条目」的一半）。
+- [x] 3.2 启动装配（`server/src/server.ts` / `app.ts` 里调用写出器的那一处）：传入 `settings.modelCatalog.models`。测试：`server/test/server-startup-layout.test.ts` 的缺省启动仍恰一个模型条目且字节与夹具相同；新增一例三模型 `MODEL_CATALOG` 启动后文件含三条（http-service-skeleton「四个新配置键的取值与非法值」里「托管 models.yml 含三个模型条目」的一半）。
   （组 1.5 的结论与 owner 2026-10-07 的决定：来自 `MODEL_CATALOG` 的推理模型必带 `efforts`，其条目一律有 `thinking`；`MODEL_CATALOG` 未设置的缺省启动不写 `thinking`，「字节不变」断言保持。三模型一例的 `MODEL_CATALOG` 须给每个推理模型写 `efforts`。）
+
+  **实施注记（3.1 / 3.2，fixture 评审补充）**：
+  - 写出器的另外两个调用方随签名一起改，否则类型检查不过：`server/test/linux/uid-isolation.test.ts` 与 `server/test/support/omp-official.ts`。二者今天省略 `reasoning`，改为单模型且 `reasoning: false`，输出字节不变。它们只在 CI 的 uid-isolation job 里运行，本机只有类型检查看得到——PR 里点名。
+  - 写出器入参的模型类型用 `import type { CatalogModel } from "../model-catalog.js"`（只导类型，不导解析器，不另写一份结构类型）。
+  - 「改动前夹具」已经存在：`model-proxy-reasoning.test.ts` 里的 `plainYaml` / `reasoningYaml`。不另存第二份；启动布局测试要用时搬到共享测试辅助，并把模型 id 参数化。
+  - `model-proxy-reasoning.test.ts` 的「`reasoning:false` 与省略 `reasoning` 逐字节相同」一例里「省略」的一半在新签名下不可表达：删去这一半并写进偏离记录（「断言不变」对这一例不成立）。
+  - 三模型启动例不得设 `MODEL_REASONING`。`AgentSettings` 的派生字段 `modelId` / `modelReasoning` 本刀不删（组 7）。
+  Risk packs（组 3）: Legacy compatibility（单模型字节不变）、File format consumed by omp（键序 `thinking` → `input`）、Atomic write（空数组拒绝且不动既有文件）。
 
 Suggested fixture level: expanded - 改一个被 omp 直接消费的文件格式；单模型输出逐字节不变是兼容性约束
 Minimal mergeable slice: atomic - 写出器签名变化必须与其唯一调用点同刀，否则类型检查不过
