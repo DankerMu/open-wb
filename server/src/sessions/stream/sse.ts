@@ -9,12 +9,28 @@ import { noStoreSessionHeaders, requireOwnedSession, type SessionOwnerStore } fr
 import type { SessionSupervisor } from "../supervisor.js";
 import type { RetainedEvent } from "./ring-buffer.js";
 
-const HEARTBEAT_MS = 15_000;
-const SSE_HEADERS = {
+/** Shared by every SSE endpoint of this module (the session stream and the list events). */
+export const HEARTBEAT_MS = 15_000;
+export const SSE_HEADERS = {
   "Content-Type": "text/event-stream; charset=utf-8",
   "Cache-Control": "no-store",
   Connection: "keep-alive",
 } as const;
+
+/** Writes one heartbeat comment; returns what `write` returned and throws what it threw. */
+export function writeHeartbeat(raw: ServerResponse): boolean {
+  return raw.write(": keepalive\n\n");
+}
+
+/** After shutdown began no stream is attached: `Connection: close` and 502 `agent_unavailable`. */
+export function rejectWhenClosing(reply: FastifyReply, closing: boolean): void {
+  if (!closing) {
+    return;
+  }
+  reply.header("Connection", "close");
+  reply.raw.setHeader("Connection", "close");
+  throw new HttpError("agent_unavailable");
+}
 
 export interface SessionEventStreamOptions {
   store: SessionOwnerStore;
@@ -78,11 +94,7 @@ export function registerSessionEventStream(
     { onRequest: noStoreSessionHeaders },
     (request, reply) => {
       requireOwnedSession(options.store, request);
-      if (closing) {
-        reply.header("Connection", "close");
-        reply.raw.setHeader("Connection", "close");
-        throw new HttpError("agent_unavailable");
-      }
+      rejectWhenClosing(reply, closing);
       attachEventStream(request, reply, options, connections, () => closing);
     },
   );
@@ -97,11 +109,7 @@ function attachEventStream(
 ): void {
   const sessionId = request.params.id;
   const lastEventId = lastEventIdFrom(request);
-  if (isClosing()) {
-    reply.header("Connection", "close");
-    reply.raw.setHeader("Connection", "close");
-    throw new HttpError("agent_unavailable");
-  }
+  rejectWhenClosing(reply, isClosing());
   reply.hijack();
   const raw = reply.raw;
   const connection: StreamConnection = {
@@ -272,7 +280,7 @@ function armHeartbeat(connection: StreamConnection, clock: SessionClock): void {
       return;
     }
     try {
-      const accepted = connection.raw.write(": keepalive\n\n");
+      const accepted = writeHeartbeat(connection.raw);
       if (!accepted) {
         endOwned(connection, clock);
         return;
