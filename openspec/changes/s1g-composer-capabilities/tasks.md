@@ -33,12 +33,14 @@ Minimal mergeable slice: 0.1 一刀（如有差异才产生 PR）；0.2 随归�
 
 ## 1. omp 实机核对（官方 v18.0.10 二进制对照用例）
 
-- [ ] 1.0 扩 `server/test/support/omp-official.ts`（101 行）的 world，三处，既有两个对照用例（`omp-official-skills`、`omp-official-project-config`）原样通过：(a) `openOfficialWorld(plant, options?)` 的 `options.spawnArgs` 让测试指定 `--approval-mode` 的取值与是否带 `--config`（现由 `process.ts:95-96` 写死；组 7 之前经一个只在测试里用的 spawn 包装改写 argv，组 7 之后改为直接传 `approvalMode`，在 7.1 里删掉这个包装）；
+- [x] 1.0 扩 `server/test/support/omp-official.ts`（101 行）的 world，三处，既有两个对照用例（`omp-official-skills`、`omp-official-project-config`）原样通过：(a) `openOfficialWorld(plant, options?)` 的 `options.spawnArgs` 让测试指定 `--approval-mode` 的取值与是否带 `--config`（现由 `process.ts:95-96` 写死；组 7 之前经一个只在测试里用的 spawn 包装改写 argv，组 7 之后改为直接传 `approvalMode`，在 7.1 里删掉这个包装）；
   (b) `options.onApproval` 让测试决定审批的应答（缺省仍是 deny，现写死在 `omp-official.ts:96-97`）；(c) `options.modelsYml` 让测试直接给出托管 `models.yml` 的文本（1.4 / 1.5 要两个模型与 `thinking` / `input` 键，而多模型写出器在组 3、组 3 又依赖 1.5 的结论——所以这里手写文件，不经写出器）。world 另暴露受控上游句柄，供 1.4 读请求记录。
-- [ ] 1.1 新文件 `server/test/omp-official-approval-modes.test.ts`（`WORKBUDDY_OMP_TEST=1` 开关与受控上游同既有对照用例）：以原样的宿主 overlay 分别用 `--approval-mode always-ask` / `write` / `yolo` 启动，
+  第四处（1.3 需要）：(d) 同一个托管状态目录上能先后开两个 runtime——world 暴露重开入口（或暴露 `stateDir` 并接受 `options.resumePath`），让第二个 runtime 以另一档位加 `--resume <第一个的会话文件>` 启动；`SessionRuntime` 关停后不可复用，`SessionRuntimeOpts` 已有 `spawnImpl` / `onApproval` / `resumePath`，world 的扩展不需要改 `server/src`。
+- [x] 1.1 新文件 `server/test/omp-official-approval-modes.test.ts`（`WORKBUDDY_OMP_TEST=1` 开关与受控上游同既有对照用例）：以原样的宿主 overlay 分别用 `--approval-mode always-ask` / `write` / `yolo` 启动，
   各跑一个 bash 回合与一个 `WORKBUDDY_WRITE` 回合，断言 session-permission-tier「档位与 omp 审批模式」三条真实 omp 场景（审批请求的有无、`tool`、`title` 首行、作答 `Approve` 后工具执行）。这是 design D2 核对项 (a)(b)。
-- [ ] 1.2 同文件：`always-ask` 下 cwd 预置 `.omp/config.yml`（`tools.approval: {write: allow}`）仍对 `write` 发起审批（D2 核对项 (c)）；负向对照：去掉 `--config` 时不发起，证明用例能判红。
-- [ ] 1.3 同文件：同一会话文件先以 `write` 跑一个回合，退出后以 `always-ask` 加 `--resume` 重启，`get_branch_messages` 仍含第一回合的 user 条目，且 `WORKBUDDY_WRITE` 回合发起审批（D2 核对项 (d)）。
+- [x] 1.2 同文件：`always-ask` 下 cwd 预置 `.omp/config.yml`（`tools.approval: {write: allow}`）仍对 `write` 发起审批（D2 核对项 (c)）；负向对照：去掉宿主 overlay 时不发起，证明用例能判红。
+  「去掉宿主 overlay」要同时去掉两个来源：argv 的 `--config <overlay>` 与 spawn env 里指向同一份 overlay 的 `PI_CONFIG_FILES`（`process.ts` 两处都钉了；主规格 omp-runtime「托管配置位置不可被 dotenv 改写」）。只去掉其中一个时 omp 的实际行为以实测为准，记进 PR 描述；负向对照以「两个来源都去掉时不发起」为判据。
+- [x] 1.3 同文件：同一会话文件先以 `write` 跑一个回合，退出后以 `always-ask` 加 `--resume` 重启，`get_branch_messages` 仍含第一回合的 user 条目，且 `WORKBUDDY_WRITE` 回合发起审批（D2 核对项 (d)）。
   **CI（确定要改）**：`.github/scripts/ci-uid-isolation.sh` 的 vitest 命令行是显式文件清单（现为 `test/omp-official-skills.test.ts test/omp-official-project-config.test.ts`），把 `test/omp-official-approval-modes.test.ts` 加进去；`scripts/test-ci-harness.sh` 对这条命令行有逐字断言，同步改；PR 描述标注改了 CI 脚本。验证：CI 的 uid-isolation job 里出现该文件的用例且通过，`make test-guardrails` 绿。
 - [ ] 1.4 受控上游的请求记录：`server/test/support/fake-upstream.mjs`（518 行）按 omp-test-harness「受控上游请求记录」加 `GET /__control/requests` 与句柄的 `requests()`；测试 `server/test/fake-upstream.test.ts`（或同类新文件）：「记录模型名与消息条数」；既有 fake-upstream 测试原样通过。变异：不鉴权、记录了消息文本 → 判红。
   新文件 `server/test/omp-official-model-commands.test.ts`：托管 `models.yml` 含两个模型（1.0 的 `modelsYml`）；断言 model-selection「真实 omp 上的模型与强度」——`set_model` 后的 `get_state.model`；对 `off`、六个强度档、`auto` 逐一 `set_thinking_level` 后的 `get_state.thinkingLevel`，
