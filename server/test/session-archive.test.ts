@@ -7,15 +7,22 @@
  * controlled child holding a turn open for `running`, a real regenerate parked on its first child
  * for a held control claim. Oracles: the spec's status codes and envelopes, the wall clock around
  * each request, and whole `chat_sessions` rows read by SQL. The read-only interception of archived
- * sessions is task 2.3 (#923) and is not exercised here.
+ * sessions is task 2.3 (#923): `session-archive-readonly.test.ts`.
  */
 import { Buffer } from "node:buffer";
-import type { DatabaseSync } from "node:sqlite";
 import type { LightMyRequestResponse } from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { emit } from "../src/core/audit/index.js";
 import { createSessionMetadataStore } from "../src/sessions/store-metadata.js";
 import { REAL, spawnedAt } from "./session-approval-helpers.js";
+import {
+  archiveNow,
+  patch,
+  patched,
+  rowOf,
+  type Target,
+  type View,
+} from "./session-archive-helpers.js";
 import { expectEnvelope } from "./session-bodyless-rest-helpers.js";
 import {
   BAD_REQUEST_ENVELOPE,
@@ -50,28 +57,6 @@ import {
   waitForTurn,
 } from "./session-supervisor-helpers.js";
 
-const ELEVEN_KEYS = [
-  "id",
-  "title",
-  "status",
-  "createdAt",
-  "updatedAt",
-  "scene",
-  "workspaceId",
-  "pinnedAt",
-  "archivedAt",
-  "pendingApproval",
-  "temporaryWorkspace",
-];
-
-type View = Record<string, unknown> & { archivedAt: number | null; pinnedAt: number | null };
-
-interface Target {
-  fixture: SupervisorApp;
-  cookie: string;
-  session: string;
-}
-
 const fixtures: SupervisorApp[] = [];
 const regenWorldsOwned = regenWorlds();
 
@@ -82,46 +67,12 @@ afterEach(async () => {
   }
 });
 
-/** `cookie: null` sends none (anonymous); `raw` sends the payload bytes as they are. */
-function patch(
-  target: Target,
-  body: unknown,
-  options: { cookie?: string | null; session?: string; raw?: boolean } = {},
-): Promise<LightMyRequestResponse> {
-  const cookie = options.cookie === undefined ? target.cookie : options.cookie;
-  return target.fixture.app.inject({
-    method: "PATCH",
-    url: `/api/sessions/${options.session ?? target.session}`,
-    headers: { "content-type": "application/json", ...(cookie === null ? {} : { cookie }) },
-    payload: options.raw === true ? String(body) : JSON.stringify(body),
-  });
-}
-
-/** 200 + no-store + exactly the eleven keys in wire order. */
-async function patched(response: Promise<LightMyRequestResponse>): Promise<View> {
-  const settled = await response;
-  expect(settled.statusCode).toBe(200);
-  expect(settled.headers["cache-control"]).toBe("no-store");
-  const view = settled.json() as View;
-  expect(Object.keys(view)).toEqual(ELEVEN_KEYS);
-  return view;
-}
-
-/** The whole row, every column: "unchanged" means none of them moved. */
-function rowOf(db: DatabaseSync, session: string): Record<string, unknown> {
-  const row = db.prepare("SELECT * FROM chat_sessions WHERE id = ?").get(session);
-  if (row === undefined) {
-    throw new Error("session row missing");
-  }
-  return { ...row };
-}
-
 async function laterThan(ms: number): Promise<void> {
   await waitFor(() => (Date.now() > ms ? true : undefined), `clock past ${String(ms)}`);
 }
 
 /** A session whose one real fake-omp turn ended `done`; its child stays alive (idle). */
-async function openDoneWorld(): Promise<Target & { rt: RealFakeRuntime }> {
+async function openDoneWorld(): Promise<Target & { fixture: SupervisorApp; rt: RealFakeRuntime }> {
   const rt = createRealFakeRuntime();
   const opened = await openBareSession(rt.runtime);
   fixtures.push(opened.fixture);
@@ -134,18 +85,6 @@ async function openDoneWorld(): Promise<Target & { rt: RealFakeRuntime }> {
   expect(prompt.statusCode).toBe(202);
   await waitForTurn(opened.fixture, opened.session, "done");
   return { ...opened, rt };
-}
-
-/** Archives now and returns the 200 view, with `archivedAt` checked against the request window. */
-async function archiveNow(target: Target, body: object): Promise<View> {
-  const start = Date.now();
-  const view = await patched(patch(target, body));
-  const end = Date.now();
-  expect(view.archivedAt).toEqual(expect.any(Number));
-  expect(view.archivedAt).toBeGreaterThanOrEqual(start);
-  expect(view.archivedAt).toBeLessThanOrEqual(end);
-  expect(rowOf(target.fixture.db, target.session).archived_at).toBe(view.archivedAt);
-  return view;
 }
 
 describe("PATCH archived: archive and restore (归档与恢复)", REAL, () => {

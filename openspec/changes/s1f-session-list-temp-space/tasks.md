@@ -63,14 +63,14 @@ Minimal mergeable slice: 1.1、1.2 各自可先单独合入（只增列的迁移
   - 控制占用的检查口：`rest-metadata.ts` 的依赖增加 `supervisor: Pick<SessionSupervisorPort, "controlHeld">`（由 `rest.ts` 注册处传入；prompt 路由已有同样的用法）。`archived: true` 时先查 `controlHeld`，命中即 409 `session_busy`，与 UPDATE 之间没有 await。
   - 带条件的 UPDATE 命中 0 行有两种含义，`patchSession` 因此返回三态：视图 / 行不存在（→ 404，同今天）/ 条件不满足（→ 409 `session_busy`）。「条件不满足」由同一同步段内按 owner 复读该行是否存在判定。409 时整个 PATCH 不写，也不调 `noteTitleWrite`。
   - `archived: true` 写 `archived_at = COALESCE(archived_at, ?)`（重复归档不改时间）；`status != 'running'` 的条件只在 body 带 `archived: true` 时加到整条 UPDATE 上，其余 PATCH 的行为不变。
-- [ ] 2.3 只读拦截：prompt 路由（`rest.ts`，与受理同一同步段）、regenerate 与 fork 的预检（`branching.ts`）对 `archived_at` 非 NULL 返回 409 `session_archived`，位于 owner 预检与 body 校验之后、`session_busy` 之前。测试（同文件）：「归档后只读」（undo 一项留到 11.4）、「归档与受理不并发成功」、chat-sessions「Archived session refuses prompts」、turn-control「已归档的源会话」。
+- [x] 2.3 只读拦截：prompt 路由（`rest.ts`，与受理同一同步段）、regenerate 与 fork 的预检（`branching.ts`）对 `archived_at` 非 NULL 返回 409 `session_archived`，位于 owner 预检与 body 校验之后、`session_busy` 之前。测试（同文件）：「归档后只读」（undo 一项留到 11.4）、「归档与受理不并发成功」、chat-sessions「Archived session refuses prompts」、turn-control「已归档的源会话」。
   **实施注记（2.3，fixture 评审补充）**：
   - prompt 路由不得用 `preParsing` 阶段缓存的会话树判定归档（它在 body 解析之前读出，其间 PATCH 可以插入，「归档与受理不并发成功」会两头都成功）。在 handler 内、body 校验（`parsePromptMessage`）之后、`controlHeld` 之前做一次**同步新读**，与 `acceptPrompt` 之间没有 `await`。
   - 读口是 `SessionMetadataStore` 新增的同步方法 `archivedAt(sessionId, ownerId)`（`store-metadata.ts`；路由依赖里已有 `metadata`）；`store.ts` 不加行。
   - `branching.ts` 的 regenerate / fork 两处预检：紧跟 `not_found` 之后判 `archivedAt !== null`，先于 fork 的 messageId 归属 400 与 `session_busy`（与撤回前置校验第 1 步同序）。
   - 「不调 supervisor」指不调 `supervisor.prompt` 与 `controlHeld`；`preParsing` 里的 `streamCursor` 不算。
   - 次序用例：先归档、再持有控制占用（`supervisor.holdControl`），三个路由都返回 `session_archived`。测试文件超 800 行时拆 `session-archive-readonly.test.ts`。
-- [ ] 2.4 变异证据：去掉 UPDATE 的 `status` 条件 → 「运行中不能归档」判红；去掉 prompt 的拦截 → 「归档后只读」判红；把拦截放到 `session_busy` 之后不影响这些用例，另加一条「已归档且占用被持有时返回 `session_archived`」钉住次序。
+- [x] 2.4 变异证据：去掉 UPDATE 的 `status` 条件 → 「运行中不能归档」判红；去掉 prompt 的拦截 → 「归档后只读」判红；把拦截放到 `session_busy` 之后不影响这些用例，另加一条「已归档且占用被持有时返回 `session_archived`」钉住次序。
 
 Risk packs: Public API（PATCH 新键、409 的两种来源）、Concurrency / ordering（归档与运行中 / 控制占用的互斥，检查与写入之间无 await）、Auth（owner 作用域与 404 口径）、Error handling（0 行的三态）。
 Suggested fixture level: expanded - 公共 API 新键与新错误码、与 prompt 受理的并发互斥、权限式的只读拦截
