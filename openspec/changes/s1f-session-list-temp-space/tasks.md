@@ -126,7 +126,9 @@ Minimal mergeable slice: 7.1、7.2 各自可单独合入（7.1 建出一个暂�
 
 ## 8. server — 快照落盘（take）
 
-- [ ] 8.1 新模块 `server/src/workspaces/snapshots.ts` 的 `take`：遍历、清单、各类条目规则、`0700` / `0600` 权限、结果三态（`ok` / `too_large` / `failed`）、非 `ok` 时删掉半份。快照根与上限由调用方传入（生产装配在 10.5 接上；本组以测试为入口）。测试（新文件 `server/test/workspace-snapshots-take.test.ts`，真实临时目录）：workspace-snapshots「快照的存放位置」第一个场景、「快照内容规则」三个场景。
+- [x] 8.1 新模块 `server/src/workspaces/snapshots.ts` 的 `take`：遍历、清单、各类条目规则、`0700` / `0600` 权限、结果三态（`ok` / `too_large` / `failed`）、非 `ok` 时删掉半份。快照根与上限由调用方传入（生产装配在 10.5 接上；本组以测试为入口）。测试（新文件 `server/test/workspace-snapshots-take.test.ts`，真实临时目录）：workspace-snapshots「快照的存放位置」第一个场景、「快照内容规则」三个场景。
+  入口形状在本任务定下，8.2、8.3 只往选项对象里加字段、不改签名：`take` 收一个选项对象，至少含工作空间根、快照根、`workspaceId`、`userMessageId` 与排除名单；数值上限（8.2）与上一份快照（8.3）是之后加进同一对象的字段。「各类条目」场景要求 `node_modules/` 以 `excluded` 进 `skipped`、`docs/node_modules` 普通文件照常进快照，所以**按名排除目录在本任务实现**（名单由调用方传入）；8.2 做三个数值上限与「版本库目录进快照」。结果类型现在就含 `too_large`，本任务没有产生它的路径。
+  「失败不留半份」的 IO 错误用 `vi.spyOn(fs.promises, …)` 注入：`take` 是异步的（快照期间仍要能应答停止），模块经 `node:fs` 的 `promises` 对象调用文件系统，该对象与测试拿到的是同一个，所以不需要 `syncBuiltinESMExports()`；「读不了的子目录」在 root 下不成立，用例按 `geteuid() === 0` 跳过（先例 `sandbox-dirs.test.ts`）。
 - [ ] 8.2 上限与排除：单文件、总量、条目数、排除名单；越限即停；`.git` 不被排除。测试：「快照上限与配置」的「单文件上限」「总量与条目上限」「版本库目录进快照」。
 - [ ] 8.3 去重：上一份清单比对三元组 → 硬链接，否则 `copyFile(COPYFILE_FICLONE)`；链接失败退为复制。测试：「未变文件的去重」四个场景（断言 inode 与 `nlink`）。
 - [ ] 8.4 变异证据：跟随符号链接 → 「各类条目」里指向工作空间外的链接被复制，判红；比对只看 `mtime` → 「内容变了而 mtime 被改回」判红；在工作空间与快照之间建硬链接 → 「不是同一个 inode」判红；越限后继续复制 → 用一个会抛错的读取桩证明越限后没有再读文件；把 `.git` 加回默认排除 → 「版本库目录进快照」判红。
