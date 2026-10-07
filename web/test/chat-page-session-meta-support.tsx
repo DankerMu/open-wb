@@ -30,7 +30,7 @@ export const SECOND_ACCOUNT_TASK = "乙的任务";
 
 type SessionStatus = "idle" | "running" | "done" | "failed" | "stopped";
 
-/** 服务端八键会话视图；列表项、快照会话与 PATCH 200 响应体共用这一形状。 */
+/** 服务端十一键会话视图；列表项、快照会话与 PATCH 200 响应体共用这一形状。 */
 export function view(
   id: string,
   title: string | null,

@@ -37,6 +37,9 @@ interface CreatedSessionView {
   scene: SessionScene | null;
   workspaceId: string | null;
   pinnedAt: null;
+  archivedAt: null;
+  pendingApproval: false;
+  temporaryWorkspace: boolean;
 }
 
 /** At least one key (the route guarantees it); `title` is already trimmed and 1..80 code points. */
@@ -48,7 +51,7 @@ export interface SessionPatch {
 
 export interface SessionMetadataStore {
   createSession(ownerId: string, input: SessionCreateInput): CreatedSessionView;
-  /** The updated eight-key view; null when no row of this owner matched (unknown or deleted). */
+  /** The updated session view; null when no row of this owner matched (unknown or deleted). */
   patchSession(ownerId: string, sessionId: string, patch: SessionPatch): SessionView | null;
   /** The deleted row's file and message count; null when no row of this owner matched. */
   deleteSession(ownerId: string, sessionId: string): DeletedSession | null;
@@ -66,6 +69,8 @@ interface DeletedRow {
 
 const INSERT_SESSION =
   "INSERT INTO chat_sessions(id, owner_id, title, status, created_at, updated_at, workspace_id, scene) VALUES (?, ?, NULL, 'idle', ?, ?, ?, ?)";
+
+const SELECT_TEMPORARY = "SELECT temporary FROM workspaces WHERE id = ?";
 
 const SELECT_DELETED =
   "SELECT CAST(omp_session_file AS BLOB) AS omp_session_file, workspace_id FROM chat_sessions WHERE id = ? AND owner_id = ?";
@@ -88,6 +93,7 @@ export function createSessionMetadataStore(
       const id = randomBytes(16).toString("hex");
       const workspaceId = input.workspaceId ?? null;
       const scene = input.scene ?? null;
+      let temporaryWorkspace = false;
       runOwnedTransaction(db, "session create rollback failed", () => {
         requireChanges(
           db.prepare(INSERT_SESSION).run(id, ownerId, now, now, workspaceId, scene).changes,
@@ -95,6 +101,10 @@ export function createSessionMetadataStore(
           "session create",
         );
         if (workspaceId !== null) {
+          const bound = db.prepare(SELECT_TEMPORARY).get(workspaceId) as
+            | { temporary: number | bigint }
+            | undefined;
+          temporaryWorkspace = Number(bound?.temporary) === 1;
           options.emit(db, {
             kind: "session.bind",
             actorId: ownerId,
@@ -113,6 +123,9 @@ export function createSessionMetadataStore(
         scene,
         workspaceId,
         pinnedAt: null,
+        archivedAt: null,
+        pendingApproval: false,
+        temporaryWorkspace,
       };
     },
 

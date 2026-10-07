@@ -5,6 +5,7 @@ import {
   groupSessions,
 } from "../src/features/chat/session-groups.js";
 import type { ChatSession } from "../src/lib/session-contract.js";
+import { NULL_SESSION_META } from "./session-meta-fixtures.js";
 
 const W1 = "1".repeat(32);
 const W2 = "2".repeat(32);
@@ -26,9 +27,7 @@ function session(id: string, overrides: Partial<ChatSession> = {}): ChatSession 
     status: "done",
     createdAt: NOON,
     updatedAt: NOON,
-    scene: null,
-    workspaceId: null,
-    pinnedAt: null,
+    ...NULL_SESSION_META,
     ...overrides,
   };
 }

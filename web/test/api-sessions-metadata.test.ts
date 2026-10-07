@@ -29,17 +29,16 @@ const legacySession = {
 
 const createdSession = {
   ...legacySession,
+  ...NULL_SESSION_META,
   scene: "code",
   workspaceId: WORKSPACE_ID,
-  pinnedAt: null,
 };
 
 const patchedSession = {
   ...legacySession,
   title: "周报",
   updatedAt: 1_740_000_000_050,
-  scene: null,
-  workspaceId: null,
+  ...NULL_SESSION_META,
   pinnedAt: 1_740_000_000_050,
 };
 
@@ -92,7 +91,7 @@ describe("Session metadata client: createSession", () => {
       `{"workspaceId":"${WORKSPACE_ID}","scene":"code"}`,
     ],
     ["scene only", { scene: "code" } as const, '{"scene":"code"}'],
-  ])("sends %s as exact JSON and returns the eight-key session", async (_label, input, body) => {
+  ])("sends %s as exact JSON and returns the eleven-key session", async (_label, input, body) => {
     const fetchMock = stubFetch(jsonResponse(createdSession, 201));
 
     await expect(createApiClient().createSession(input)).resolves.toEqual(createdSession);
@@ -136,7 +135,7 @@ describe("Session metadata client: createSession", () => {
 });
 
 describe("Session metadata client: patchSession", () => {
-  it("PATCHes the encoded path with the exact JSON and returns the eight-key session", async () => {
+  it("PATCHes the encoded path with the exact JSON and returns the eleven-key session", async () => {
     const fetchMock = stubFetch(jsonResponse(patchedSession));
     const controller = new AbortController();
 
@@ -165,6 +164,15 @@ describe("Session metadata client: patchSession", () => {
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe(`/api/sessions/${SESSION_ID}`);
     expect(fetchMock.mock.calls[0]?.[1]?.body).toBe('{"pinned":true}');
+  });
+
+  it("sends an archive-only patch as exactly that JSON", async () => {
+    const fetchMock = stubFetch(jsonResponse(patchedSession));
+
+    await createApiClient().patchSession(SESSION_ID, { archived: true });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(`/api/sessions/${SESSION_ID}`);
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe('{"archived":true}');
   });
 
   it("rejects an empty patch with TypeError without calling fetch", async () => {

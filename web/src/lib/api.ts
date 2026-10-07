@@ -123,6 +123,7 @@ type ChatSessionPatch = {
   title?: string;
   scene?: ChatSessionScene;
   pinned?: boolean;
+  archived?: boolean;
 };
 
 export type ApiClient = {
