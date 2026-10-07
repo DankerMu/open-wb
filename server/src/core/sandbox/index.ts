@@ -26,7 +26,7 @@ export function createSandbox({
       principal: SandboxPrincipal,
       workspaceId: string,
       relPath: string,
-      op: "read" | "list" | "mkdir",
+      op: "read" | "list" | "mkdir" | "write",
     ): string {
       const root = rootOf(principal, workspaceId);
       if (root === null) {

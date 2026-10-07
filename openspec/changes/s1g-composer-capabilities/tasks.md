@@ -163,7 +163,7 @@ Minimal mergeable slice: 9.1 一刀（档位重启，含 argv 取会话有效值
 
 ## 10. core — 沙箱 `op=write` 与上传错误码
 
-- [ ] 10.1 `server/src/core/sandbox/resolve.ts` 与 `index.ts`：`op` 联合类型加 `write`，词法规则与 `mkdir` 相同（共用同一段判定，不复制）。测试 `server/test/sandbox-resolve.test.ts`：sandbox-core delta「合法路径与边界」的 `write` 部分、「写操作的逃逸向量」、「非目录祖先不是越界」的 `write`；`sandbox-facade.test.ts` 加一例 `op=write` 被拒时审计 `detail.op="write"`。
+- [x] 10.1 `server/src/core/sandbox/resolve.ts` 与 `index.ts`：`op` 联合类型加 `write`，词法规则与 `mkdir` 相同（共用同一段判定，不复制）。测试 `server/test/sandbox-resolve.test.ts`：sandbox-core delta「合法路径与边界」的 `write` 部分、「写操作的逃逸向量」、「非目录祖先不是越界」的 `write`；`sandbox-facade.test.ts` 加一例 `op=write` 被拒时审计 `detail.op="write"`。
   变异：`write` 不查最后一段反斜杠、`write` 跟随 `uploads` 符号链接 → 判红。
 - [ ] 10.2 `server/src/core/errors`：新增 `upload_too_large`（413，`文件超过大小上限`）。测试 `server/test/http-typed-errors.test.ts`：http-service-skeleton delta「上传超限码的信封形状」；断言码数的既有用例由 C 之后的十五改为十六。
 - [ ] 10.3 `server/src/http`（content-parser 归属表）：加入 `POST /api/workspaces/:id/uploads`。测试 `server/test/http-parser-owners.test.ts`：归属身份数由 C 之后的十四改为十五（「产品路由身份在共享映射器中的归属」的路由清单加上传路由）；「上传路由的 parser 归属」的映射层部分用测试路由钉住（真实路由在组 11）。
