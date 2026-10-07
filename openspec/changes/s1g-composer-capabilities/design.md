@@ -518,7 +518,7 @@ C 新增而本 change 没有修改的条文（temporary-workspaces、workspace-s
 | D8 (b) / D9 每个可选强度 v 之后 `thinkingLevel === v` | 1.4 | **不成立** | 见「强度」 |
 | D8 (c) 两个命令前后托管 `HOME` 下全局配置逐字节不变 | 1.4 | 成立 | 比较的是 `HOME` 下全部常规文件：`.env`、`.omp/agent/host-overlay.yml`、`.omp/agent/models.yml`，路径集合与 sha256 全等 |
 | D8 (d) 换模型后的回合带新 `model` 与此前的历史 | 1.4 | 成立 | 请求体 `model` 为 `workbuddy-second`，消息 6 条（第一个回合两条请求为 3、5 条） |
-| D8 (e) `--resume` 后不发命令的 `get_state`（观察值） | 1.4 | — | 模型回到 argv `--model` 的 `deepseek-v4.1-flash`，强度是会话里最后设的 `low`。模型以 argv 为准、强度以会话为准，所以「每个 generation 的第一次派发总是应用」是必要的，不能放宽 |
+| D8 (e) `--resume` 后不发命令的 `get_state`（观察值） | 1.4 | — | 模型回到 argv `--model` 的 `deepseek-v4.1-flash`，强度是会话里最后设的 `low`。模型以 argv 为准（会话里的模型变更不被恢复），强度则是会话文件里的旧值（`PATCH` 只写库，它可能已过时），所以「每个 generation 的第一次派发总是应用」是必要的，不能放宽 |
 | D7 带 `thinking` 与 `input` 两键的条目被接受且回显一致 | 1.5 | 成立 | `thinking: {mode: effort, efforts: [low, high]}`、`input: [text, image]` 原样回显 |
 | D7 只写 `reasoning: true` 的条目报出的强度集合 | 1.5 | **不成立（退路未写的情形）** | `deepseek-v4.1-flash` 报 `thinking: {mode: effort, efforts: [low, high, max]}`、`input: [text]`：非空，但不是全部六档 |
 | D18 (f) 每一个上游请求的 `model` 都在托管 `models.yml` 的 id 之内，且 `/compact` 确实发出请求 | 1.4 | 成立 | 见「上游请求」 |
@@ -542,7 +542,7 @@ C 新增而本 change 没有修改的条文（temporary-workspaces、workspace-s
 - 声明了 `efforts` 的模型：可选集合 `{off, low, high, auto}` 里只有 `auto` 不满足 `thinkingLevel === v`。D9 末段已写了这种情形的处理（把该取值从可选集合里拿掉并改规格），是否照办待 owner。
 - 未声明 `efforts` 的推理模型：D9「未声明则全部六档」的前提不成立——omp 自己给条目配了强度集合，`minimal`、`medium`、`xhigh` 被夹到相邻档。D7 只写了「集合为空」的退路。
 - 仅本机探针、不在 CI 输出里的补充（未入库，不作结论依据）：同样只写 `reasoning: true` 的条目，id 换成一个中性名字时报出的是 `[minimal, low, medium, high, xhigh]` 五档——集合随模型 id 变；未知取值（如 `bogus`）不被拒绝，之后 `thinkingLevel` 缺席。
-- 与 D8 正文不符的一处：D8 写「`setModel` 会把强度重置为新模型的缺省」。实测在第一个模型上设 `off` 后 `set_model` 到第二个模型，`get_state.thinkingLevel` 仍是 `off`。「先 `set_model` 后 `set_thinking_level`」的次序仍然无害，但理由要改。
+- 关于 D8 正文「`setModel` 会把强度重置为新模型的缺省」：实测在第一个模型上设 `off` 后 `set_model` 到第二个模型，`get_state.thinkingLevel` 是 `off`——`off` 被带了过去。用例没有记录第二个模型未经设置时的缺省强度，所以这只是与「重置为缺省」不符的迹象，**未判定**；「先 `set_model` 后 `set_thinking_level`」的次序在两种解释下都无害。
 
 ### 上游请求（D18 (f)）
 
@@ -561,6 +561,6 @@ C 新增而本 change 没有修改的条文（temporary-workspaces、workspace-s
 
 ### 待 owner 决定
 
-1. `auto`：照 D9 末段把它从可选集合里拿掉，还是保留并在界面上说明它等同于缺省档？
+1. `auto`：照 D9 末段把它从可选集合里拿掉，还是保留并在界面上说明它由 omp 解析成一个具体档位（两个模型上都是 `high`；用例区分不开「缺省档」与「不高于 `high` 的最高档」）？
 2. 未声明 `efforts` 的推理模型的可选强度：让写出器对每个推理模型都写 `thinking`（未声明时写全部六档——D7 为「集合为空」写的退路，是否对「非空但不是六档」同样有效，需要再跑一次对照用例确认 omp 接受并照此回显），还是界面与服务端校验改按 omp 为该 id 报的集合？
 3. 受影响的规格与 issue 在决定之后改：model-selection「模型与强度从下一条消息起生效」、model-proxy「托管 models.yml」（「单模型时字节不变」一句可能要改）、design D7 / D8 / D9，以及任务组 3、7 与依赖它们的 issue 正文。
