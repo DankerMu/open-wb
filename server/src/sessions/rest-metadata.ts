@@ -2,11 +2,13 @@
  * Session metadata routes (parent D2). `POST /api/sessions` (#523): an optional exact
  * `{workspaceId?, scene?}` body; a named workspace must be the caller's through the injected
  * owner-scoped `workspaceRootOf`; unknown, foreign and malformed ids share one 404.
- * `PATCH /api/sessions/:id` (#524): a non-empty exact `{title?, scene?, pinned?}` body, owner
- * checked before parsing; a title write marks the session's in-flight admission so its rollback
- * keeps the new title. `DELETE /api/sessions/:id` (#525): owner checked before parsing, no body
- * read (not a parser owner), the deletion itself is `session-delete.ts`; 204 with no body.
- * Imports nothing from `rest.ts` (it imports this).
+ * `PATCH /api/sessions/:id` (#524, #922): a non-empty exact `{title?, scene?, pinned?, archived?}`
+ * body, owner checked before parsing; a title write marks the session's in-flight admission so its
+ * rollback keeps the new title; `archived: true` is refused whole with 409 `session_busy` while the
+ * session runs or its control claim is held. `DELETE /api/sessions/:id` (#525): owner checked
+ * before parsing, no body read (not a parser owner), the deletion itself is `session-delete.ts`;
+ * 204 with no body.
+ * Imports only the supervisor port type from `rest.ts` (it imports this).
  */
 import type {
   FastifyInstance,
@@ -18,6 +20,7 @@ import type {
   RawServerDefault,
 } from "fastify";
 import { HttpError } from "../core/errors/index.js";
+import type { SessionSupervisorPort } from "./rest.js";
 import type { WorkspaceRootOf } from "./session-cwd.js";
 import type { SessionDeleter } from "./session-delete.js";
 import type { SessionStore } from "./store.js";
@@ -33,6 +36,7 @@ interface SessionMetadataRouteDependencies {
   workspaceRootOf: WorkspaceRootOf;
   store: Pick<SessionStore, "getMessages" | "noteTitleWrite">;
   deleter: Pick<SessionDeleter, "deleteSession">;
+  supervisor: Pick<SessionSupervisorPort, "controlHeld">;
 }
 
 interface SessionIdParams {
@@ -41,7 +45,7 @@ interface SessionIdParams {
 
 const SESSION_METADATA_BODY_LIMIT = 16 * 1024;
 const CREATE_KEYS: ReadonlySet<string> = new Set(["workspaceId", "scene"]);
-const PATCH_KEYS: ReadonlySet<string> = new Set(["title", "scene", "pinned"]);
+const PATCH_KEYS: ReadonlySet<string> = new Set(["title", "scene", "pinned", "archived"]);
 const SCENES: ReadonlySet<string> = new Set<SessionScene>(["office", "code", "design"]);
 const TITLE_MAX_CODE_POINTS = 80;
 
@@ -96,10 +100,18 @@ export function registerSessionMetadataRoutes(
     async (request, reply) => {
       const principal = createPrincipal(request);
       const patch = parsePatchBody(request.body);
+      // Claim check and the conditional UPDATE share one synchronous segment: no await in between.
+      if (patch.archived === true && dependencies.supervisor.controlHeld(request.params.id)) {
+        throw new HttpError("session_busy");
+      }
       const view = dependencies.metadata.patchSession(principal.id, request.params.id, patch);
       if (view === null) {
         // The row vanished between the owner check and the UPDATE (a concurrent delete).
         throw new HttpError("not_found");
+      }
+      if (view === "busy") {
+        // Running: nothing was written, so the title is not noted either.
+        throw new HttpError("session_busy");
       }
       // Same synchronous segment as the UPDATE: no rollback can interleave before the mark.
       if (patch.title !== undefined) {
@@ -144,8 +156,8 @@ function parseCreateBody(body: unknown): SessionCreateInput {
 }
 
 /**
- * A non-empty plain JSON object whose keys ⊆ {title, scene, pinned}; strings (text/plain) are never
- * parsed. Every field is validated before anything is written.
+ * A non-empty plain JSON object whose keys ⊆ {title, scene, pinned, archived}; strings
+ * (text/plain) are never parsed. Every field is validated before anything is written.
  */
 function parsePatchBody(body: unknown): SessionPatch {
   if (!isPlainObject(body)) {
@@ -163,7 +175,10 @@ function parsePatchBody(body: unknown): SessionPatch {
     patch.scene = requireScene(body.scene);
   }
   if (Object.hasOwn(body, "pinned")) {
-    patch.pinned = requirePinned(body.pinned);
+    patch.pinned = requireBoolean(body.pinned);
+  }
+  if (Object.hasOwn(body, "archived")) {
+    patch.archived = requireBoolean(body.archived);
   }
   return patch;
 }
@@ -181,7 +196,7 @@ function requireTitle(value: unknown): string {
   return trimmed;
 }
 
-function requirePinned(value: unknown): boolean {
+function requireBoolean(value: unknown): boolean {
   if (typeof value !== "boolean") {
     throw new HttpError("bad_request");
   }

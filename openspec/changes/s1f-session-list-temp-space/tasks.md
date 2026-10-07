@@ -58,10 +58,15 @@ Minimal mergeable slice: 1.1、1.2 各自可先单独合入（只增列的迁移
 ## 2. server — 归档
 
 - [x] 2.1 `server/src/core/errors` 增加 `session_archived`（message `会话已归档，恢复后才能继续对话`），`server/src/http` 的状态映射为 409。测试：http-service-skeleton「归档与撤回冲突的错误码」中 `session_archived` 的一半；既有「N 码」断言的计数同步（十三 → 十四，11.1 再加到十五）。
-- [ ] 2.2 `store-metadata.ts` 的 `patchSession` 支持 `archived`：`true` 用带条件的 UPDATE（`status != 'running'`）并由路由在同一同步段内检查控制占用，条件不满足时整个 PATCH 不写；`false` 置 NULL。`rest-metadata.ts` 的 body 校验加 `archived`（布尔）。测试（新文件 `server/test/session-archive.test.ts`）：session-metadata「会话归档」的「归档与恢复」「运行中与占用期间不能归档」「鉴权」，「会话元数据修改」的「归档键与其它键一起修改」与「非法 body 与鉴权」里新增的两例。
+- [x] 2.2 `store-metadata.ts` 的 `patchSession` 支持 `archived`：`true` 用带条件的 UPDATE（`status != 'running'`）并由路由在同一同步段内检查控制占用，条件不满足时整个 PATCH 不写；`false` 置 NULL。`rest-metadata.ts` 的 body 校验加 `archived`（布尔）。测试（新文件 `server/test/session-archive.test.ts`）：session-metadata「会话归档」的「归档与恢复」「运行中与占用期间不能归档」「鉴权」，「会话元数据修改」的「归档键与其它键一起修改」与「非法 body 与鉴权」里新增的两例。
+  **实施注记（fixture 评审补充）**：
+  - 控制占用的检查口：`rest-metadata.ts` 的依赖增加 `supervisor: Pick<SessionSupervisorPort, "controlHeld">`（由 `rest.ts` 注册处传入；prompt 路由已有同样的用法）。`archived: true` 时先查 `controlHeld`，命中即 409 `session_busy`，与 UPDATE 之间没有 await。
+  - 带条件的 UPDATE 命中 0 行有两种含义，`patchSession` 因此返回三态：视图 / 行不存在（→ 404，同今天）/ 条件不满足（→ 409 `session_busy`）。「条件不满足」由同一同步段内按 owner 复读该行是否存在判定。409 时整个 PATCH 不写，也不调 `noteTitleWrite`。
+  - `archived: true` 写 `archived_at = COALESCE(archived_at, ?)`（重复归档不改时间）；`status != 'running'` 的条件只在 body 带 `archived: true` 时加到整条 UPDATE 上，其余 PATCH 的行为不变。
 - [ ] 2.3 只读拦截：prompt 路由（`rest.ts`，与受理同一同步段）、regenerate 与 fork 的预检（`branching.ts`）对 `archived_at` 非 NULL 返回 409 `session_archived`，位于 owner 预检与 body 校验之后、`session_busy` 之前。测试（同文件）：「归档后只读」（undo 一项留到 11.4）、「归档与受理不并发成功」、chat-sessions「Archived session refuses prompts」、turn-control「已归档的源会话」。
 - [ ] 2.4 变异证据：去掉 UPDATE 的 `status` 条件 → 「运行中不能归档」判红；去掉 prompt 的拦截 → 「归档后只读」判红；把拦截放到 `session_busy` 之后不影响这些用例，另加一条「已归档且占用被持有时返回 `session_archived`」钉住次序。
 
+Risk packs: Public API（PATCH 新键、409 的两种来源）、Concurrency / ordering（归档与运行中 / 控制占用的互斥，检查与写入之间无 await）、Auth（owner 作用域与 404 口径）、Error handling（0 行的三态）。
 Suggested fixture level: expanded - 公共 API 新键与新错误码、与 prompt 受理的并发互斥、权限式的只读拦截
 Minimal mergeable slice: 2.1 + 2.2（错误码与 PATCH `archived`，只读拦截未接时归档只是一个被存下的时间戳，主干保持绿）；2.3 随后
 

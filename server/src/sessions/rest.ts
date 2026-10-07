@@ -203,6 +203,7 @@ export function registerSessionRoutes(
     workspaceRootOf: dependencies.workspaceRootOf,
     store: dependencies.store,
     deleter: dependencies.deleter,
+    supervisor: dependencies.supervisor,
   });
   app.get<{ Params: SessionIdParams }>(
     "/api/sessions/:id/messages",

@@ -1,9 +1,11 @@
 /**
  * Session metadata writes (#523/#524, parent D2 "模块拆分"): creation with an optional workspace
- * binding and scene, and the title/scene/pin PATCH. The row insert and its `session.bind` audit
- * share one SQLite transaction, so an audit failure leaves no session row. Ownership of the
+ * binding and scene, and the title/scene/pin/archive PATCH. The row insert and its `session.bind`
+ * audit share one SQLite transaction, so an audit failure leaves no session row. Ownership of the
  * workspace is the route's job. A PATCH is one owner-scoped UPDATE of only the given columns: it
  * never touches `updated_at`, `status`, `workspace_id`, the generation columns or message rows.
+ * `archived: true` (#922) puts `status != 'running'` on that whole UPDATE, so a running session
+ * gets none of the PATCH's keys.
  * A delete (#525) reads the file and message count, deletes the owner's row (messages, steps and
  * approvals cascade; fork children's `parent_session_id` is set NULL by the foreign keys) and
  * writes its `session.delete` audit in one transaction: an audit failure keeps the row.
@@ -47,12 +49,20 @@ export interface SessionPatch {
   title?: string;
   scene?: SessionScene;
   pinned?: boolean;
+  archived?: boolean;
 }
 
 export interface SessionMetadataStore {
   createSession(ownerId: string, input: SessionCreateInput): CreatedSessionView;
-  /** The updated session view; null when no row of this owner matched (unknown or deleted). */
-  patchSession(ownerId: string, sessionId: string, patch: SessionPatch): SessionView | null;
+  /**
+   * The updated session view; null when this owner has no such row (unknown or deleted); `"busy"`
+   * when the row exists but `archived: true` met a running session — nothing was written.
+   */
+  patchSession(
+    ownerId: string,
+    sessionId: string,
+    patch: SessionPatch,
+  ): SessionView | null | "busy";
   /** The deleted row's file and message count; null when no row of this owner matched. */
   deleteSession(ownerId: string, sessionId: string): DeletedSession | null;
 }
@@ -82,6 +92,13 @@ const SET_SCENE = "scene = ?";
 /** Re-pinning keeps the original pin time. */
 const SET_PINNED = "pinned_at = COALESCE(pinned_at, ?)";
 const SET_UNPINNED = "pinned_at = NULL";
+/** Re-archiving keeps the original archive time. */
+const SET_ARCHIVED = "archived_at = COALESCE(archived_at, ?)";
+const SET_UNARCHIVED = "archived_at = NULL";
+const PATCH_OWNED = "WHERE id = ? AND owner_id = ?";
+/** Archiving and prompt admission (which writes `running`) cannot both succeed. */
+const PATCH_OWNED_NOT_RUNNING = `${PATCH_OWNED} AND status != 'running'`;
+const SELECT_OWNED = `SELECT 1 FROM chat_sessions ${PATCH_OWNED}`;
 
 export function createSessionMetadataStore(
   db: DatabaseSync,
@@ -131,12 +148,16 @@ export function createSessionMetadataStore(
 
     patchSession(ownerId, sessionId, patch) {
       const { assignments, values } = patchAssignments(patch, Date.now());
+      const guarded = patch.archived === true;
+      const where = guarded ? PATCH_OWNED_NOT_RUNNING : PATCH_OWNED;
       const changes = db
-        .prepare(`UPDATE chat_sessions SET ${assignments} WHERE id = ? AND owner_id = ?`)
+        .prepare(`UPDATE chat_sessions SET ${assignments} ${where}`)
         .run(...values, sessionId, ownerId).changes;
       requireAtMostOne(changes, "session patch");
       if (!hasChanges(changes)) {
-        return null;
+        // Zero rows under the guard means either no such row or a running one: re-read to tell.
+        const present = guarded && db.prepare(SELECT_OWNED).get(sessionId, ownerId) !== undefined;
+        return present ? "busy" : null;
       }
       const row = db
         .prepare(`SELECT ${SESSION_COLUMNS} FROM chat_sessions WHERE id = ?`)
@@ -197,6 +218,12 @@ function patchAssignments(
     values.push(now);
   } else if (patch.pinned === false) {
     fragments.push(SET_UNPINNED);
+  }
+  if (patch.archived === true) {
+    fragments.push(SET_ARCHIVED);
+    values.push(now);
+  } else if (patch.archived === false) {
+    fragments.push(SET_UNARCHIVED);
   }
   return { assignments: fragments.join(", "), values };
 }
