@@ -12,10 +12,15 @@
  * whose second tool round follows a resume, opens its world with `freshToolRounds` (the upstream is
  * then shown the running turn only — see `startTurnForwarder` in support/omp-official.ts).
  *
+ * Issue #1128 (s1g task 1.8): the last group checks design D12 item (g) on the same binary — does
+ * omp store a prompt text that starts with newlines (the wire text of an attachment-only message)
+ * byte for byte, in `get_branch_messages` and in the reply to `branch`?
+ *
  * Run locally: `make omp-fetch` (fetches the official v18.0.10 binary), then in `server/`
- *   WORKBUDDY_OMP_TEST=1 OMP_BIN=../var/omp/omp \
+ *   WORKBUDDY_OMP_TEST=1 OMP_BIN="$PWD/../var/omp/omp" \
  *     npx vitest run test/omp-official-approval-modes.test.ts --coverage=false
- * (`OMP_BIN` is the binary's path, `var/omp/omp` under the repository root by default.) Without
+ * (`OMP_BIN` is the binary's path, `var/omp/omp` under the repository root by default; it must be
+ * absolute, because omp is spawned with the temporary workspace as its cwd.) Without
  * `WORKBUDDY_OMP_TEST=1` the whole file is skipped — also under `make test` — so a green local
  * `make check` does not mean these checks ran: the output of the CI uid-isolation job is the
  * authority. When an omp upgrade turns a case red, the spec changes first.
@@ -180,3 +185,62 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: approval tiers`, ()
     },
   );
 });
+
+/**
+ * The attachment suffix for `["uploads/a.txt"]`, written out from message-attachments「后缀的确切
+ * 字节」: two U+000A, the fixed line, one U+000A, `- ` and the path, no trailing newline.
+ */
+const SUFFIX =
+  "\n\n用户随本条消息上传了以下文件（相对当前工作目录的路径），需要时请读取：\n- uploads/a.txt";
+
+type BranchEntry = { entryId: string; text: string };
+
+function plantUpload({ workspaceRoot }: { workspaceRoot: string }): void {
+  mkdirSync(join(workspaceRoot, "uploads"));
+  writeFileSync(join(workspaceRoot, "uploads", "a.txt"), "attachment\n");
+}
+
+async function branchMessages(world: OfficialWorld): Promise<BranchEntry[]> {
+  const data = (await world.runtime.command({ type: "get_branch_messages" })) as {
+    messages: BranchEntry[];
+  };
+  return data.messages;
+}
+
+/** What omp stored, escaped: the evidence a red run leaves in the log (s1g task 1.6 records it). */
+function stored(where: string, text: unknown): string {
+  return `${where} holds ${JSON.stringify(text)}`;
+}
+
+describe.skipIf(OMP_TEST_OFF)(
+  `official omp v${OMP_VERSION}: (g) text that starts with newlines`,
+  () => {
+    it.each([
+      { name: "the attachment suffix alone (an attachment-only message)", sent: SUFFIX },
+      { name: "control: ordinary text followed by the same suffix", sent: `看看这个${SUFFIX}` },
+    ])("$name is stored byte for byte as one new user entry", TURN, async ({ sent }) => {
+      const world = await openOfficialWorld(plantUpload);
+      const before = await branchMessages(world);
+
+      const frames = await collectPrompt(world.runtime.prompt(sent));
+
+      expect(frames.at(-1)?.type).toBe("agent_end");
+      const after = await branchMessages(world);
+      const entry = after.at(-1);
+      expect(
+        after.length,
+        stored(
+          `the turn left ${String(after.length - before.length)} new entries; the list`,
+          after,
+        ),
+      ).toBe(before.length + 1);
+      expect(entry?.text, stored("the last entry of get_branch_messages", entry?.text)).toBe(sent);
+      // Last: `branch` cuts the live session back to before this entry.
+      const branched = (await world.runtime.command({
+        type: "branch",
+        entryId: entry?.entryId ?? "",
+      })) as { text: string };
+      expect(branched.text, stored("the reply to branch", branched.text)).toBe(sent);
+    });
+  },
+);
