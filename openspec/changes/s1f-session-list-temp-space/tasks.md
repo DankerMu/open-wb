@@ -107,7 +107,16 @@ Minimal mergeable slice: 4.1 可先单独合入（store 方法由自己的 store
 先做删除清理（5.1–5.5），再让 `POST /api/sessions` 开始创建临时空间（5.6–5.9）。这个次序保证主干上不存在「能建临时空间、删会话却不清理」的中间态。
 
 - [ ] 5.1 `store-metadata.ts` 的 `deleteSession` 事务：读出被删会话的 `workspace_id`；若该空间 `temporary = 1` 且删除后无其它会话引用，删空间行并写 `workspace.delete` 审计；返回值带上「需删除的临时空间 `{id, ownerId}`」供提交后清理。测试（新文件 `server/test/session-delete-temp-workspace.test.ts`，用 3.2 的辅助函数与 fork 构造）：temporary-workspaces「共用与随最后一个会话删除」五个场景（磁盘断言在 5.2 之后补全）、session-metadata「fork 继承会话元数据」的「继承临时空间」。
+  **实施注记（fixture 评审补充）**：
+  - 事务内的次序：删会话行 → 数剩余引用（归档的会话也算）→ 无引用才删空间行 → 两条审计。迁移 035 的 `workspace_id` 是 `ON DELETE SET NULL`：漏判引用就删空间行，会把兄弟会话静默解绑。
+  - `workspace.delete` 审计的 `detail.root` 是 `join(realpath(SANDBOX_ROOT), ownerId, "tmp-" + id)` 的纯拼接，在删空间行之前算好；`createSessionMetadataStore` 的 options 为此增加 `sandboxRoot`。不经 `workspaceRootOf`——它在根被换成符号链接或普通文件时抛错，会让 DELETE 变成 5xx，与「不是目录则不删、报告一次、仍 204」冲突。
+  - `deleteSession` 的返回值增加可选的 `temporaryWorkspace: {id, ownerId}`，只在空间行确实被删时给出。
 - [ ] 5.2 目录删除（新模块 `server/src/workspaces/temp-dir-remove.ts`，由 `session-delete.ts` 在提交后调用）：账号根 realpath 下的 `lstat` 校验 → `rename` 进 `ompTrashDir` → trash 内递归删除；`ENOENT` 复查；其它失败报告。与 `session-delete.ts` 既有的产物目录 trash 流程共用同一个「移入 trash 再删」函数（抽出来，不复制——jscpd）。测试（同文件）：temporary-workspaces「临时空间目录的删除」的「经 trash 删除且不跟随链接」「目标被换成符号链接」「删除失败不影响响应」；session-metadata「删除连同快照与独占的临时空间」的目录部分（快照部分留到 12.3）。
+  **实施注记（fixture 评审补充）**：
+  - `temp-dir-remove.ts` 不导入 `sessions/`：trash 目录、账号根与报告函数由调用方传入，保留 `rename` 的测试 seam。`session-delete.ts` 导入它（这是 `sessions/` 对 `workspaces/` 的第一处导入，写进 PR）；`SessionDeleterDependencies` 为此增加 `sandboxRoot`。
+  - 共用的「移入 trash 再删」函数从 `session-delete.ts` 的产物目录流程抽出；本任务里它对 `EXDEV` 仍是「报告且不碰原位置」，原地删除的退路在 5.3 作为只对临时目录开启的参数加入——产物目录的行为不变，`removeSessionFile` 的签名不变（既有 trash 测试依赖它）。
+  - 「目标被换成符号链接」在模块 seam 上测：直接调导出的删除函数，经 `rename` seam 或前置钩子注入替换（先例 `session-delete-trash.test.ts`）。「删除失败不影响响应」用 0500 子目录构造，以 root 运行时跳过。
+  - 被删会话的快照目录在 12.3（#953）之前不清；此刻没有生产写入者，不留残余。
 - [ ] 5.3 `EXDEV` 退路：`rename` 以 `EXDEV` 失败时再 `lstat` 后原地递归删除。测试：「跨文件系统退为原地删除」（注入 `rename` 失败）。
 - [ ] 5.4 真实两文件系统验证（design D8 的首次验证）：在测试 VPS 上把 `SANDBOX_ROOT` 与 `OMP_STATE_DIR` 放在两个文件系统（如 tmpfs 与磁盘），删除一个用临时空间的会话，确认 `rename` 真的给出 `EXDEV`、目录被原地删除、无残留；结果（命令与输出，不含主机信息）写进 PR 描述。退路不成立时停下来报告。
 - [ ] 5.5 变异证据（删除）：不判引用计数直接删 → 「共用时保留到最后一个会话」判红；计数排除归档会话 → 「归档的会话仍算使用者」判红；递归删除改为跟随符号链接 → 「不跟随链接」判红；`lstat` 校验去掉 → 「目标被换成符号链接」判红。
@@ -120,6 +129,7 @@ Minimal mergeable slice: 4.1 可先单独合入（store 方法由自己的 store
   - 验证：干净的沙箱与数据库上 `make smoke` 两遍、`make ui-walk` 一遍，之后 `workspaces` 表没有 `temporary = 1` 的行、账号根下没有 `tmp-` 开头的目录（chat-harness 场景「连跑两遍不积累临时空间」；快照目录那一半在 12.3 之后成立）。
 - [ ] 5.9 变异证据（创建）：临时空间创建放到事务外 → 「目录创建失败不留行」或「临时空间创建失败不留会话」判红；`chat.hurl` 不删会话 → 5.8 的残留检查判红；创建时写了 `session.bind` → 「无 body 与空对象按默认创建」的「审计无新增行」判红。
 
+Risk packs: File IO / path safety / delete（账号根下的 `lstat` 校验、不跟随链接、经 trash 删除）、Error handling / partial failure（提交后清理失败只报告，响应仍 204）、Concurrency / ordering（引用计数与 fork、删行与删目录的先后）、Auth（所有者作用域）、Legacy compatibility（产物目录与会话文件的既有删除行为不变）。
 Suggested fixture level: expanded - 删除用户文件、路径安全、审计、跨文件系统退路、公共 API 的 BREAKING 语义变化与存量兼容（Critical Path）
 Minimal mergeable slice: 5.1 + 5.2 一起（删了行不删目录会留下无主目录）→ 5.3 + 5.4（此前跨文件系统部署只是报告并残留，不影响同文件系统的默认布局）→ 5.6 + 5.7 + 5.8 atomic: 创建语义一变，断言 `workspaceId:null` 的既有测试与冒烟立刻红、不删会话的冒烟立刻开始积累临时空间，三者必须同一个 PR
 
