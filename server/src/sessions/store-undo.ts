@@ -10,11 +10,17 @@
  * of the store.
  *
  * Input and output types are this module's own; nothing is imported from `workspaces/`.
+ *
+ * `commitUndo` (#949, message-undo「对话原地回退」step 5) is the one transaction that removes
+ * messages from the middle of a session; it is at the end of this file.
  */
 import type { DatabaseSync } from "node:sqlite";
+import type { emit as auditEmit } from "../core/audit/index.js";
 import { createSqliteTextDecoder } from "../core/db/index.js";
+import { HttpError } from "../core/errors/index.js";
 import { asPlain, own } from "./file-changes.js";
-import { decodeNullableText } from "./store-branch.js";
+import type { MessageStatus } from "./store.js";
+import { decodeNullableText, requireChanges, runOwnedTransaction } from "./store-branch.js";
 
 export type TurnSnapshotOutcome = "ok" | "too_large" | "failed" | "command";
 
@@ -147,4 +153,130 @@ function parseSkipped(text: string): TurnSnapshotRow["skipped"] {
     paths.push({ path, reason });
   }
   return { count, paths };
+}
+
+export interface UndoCommit {
+  ownerId: string;
+  sessionId: string;
+  /** The user message being undone; it and every later message of the session are deleted. */
+  messageId: number;
+  /** The session's last assistant message as the pre-check read it; null when it had none. */
+  expectedLastAssistantId: number | null;
+  /** The session file `branch` produced; becomes the session's `omp_session_file`. */
+  ompSessionFile: string;
+  /** What the request asked for; recorded in the audit row only. */
+  files: "restore" | "force" | "keep";
+  now: number;
+}
+
+/** The registration of one removed user message; only an `ok` one has a snapshot directory. */
+interface RemovedTurnSnapshot {
+  messageId: number;
+  workspaceId: string;
+  outcome: TurnSnapshotOutcome;
+}
+
+export interface UndoResult {
+  /** The number of `chat_messages` rows deleted. */
+  removedMessages: number;
+  /** In history order, the undone message's own first. */
+  snapshots: RemovedTurnSnapshot[];
+}
+
+// History order is (created_at, id). `FROM_POINT` is "the undone message and everything after it",
+// `BEFORE_POINT` its exact complement; both bind the message's created_at twice, then its id.
+const FROM_POINT = "(m.created_at > ? OR (m.created_at = ? AND m.id >= ?))";
+const BEFORE_POINT = "(m.created_at < ? OR (m.created_at = ? AND m.id < ?))";
+const UNDO_SESSION =
+  "SELECT status, archived_at, workspace_id FROM chat_sessions WHERE id = ? AND owner_id = ?";
+const UNDO_LAST_ASSISTANT =
+  "SELECT id FROM chat_messages WHERE session_id = ? AND role = 'assistant' ORDER BY created_at DESC, id DESC LIMIT 1";
+// The join is the fourth check's second half: no registration row, no point.
+const UNDO_POINT =
+  "SELECT m.created_at FROM chat_messages AS m JOIN chat_turn_snapshots AS t ON t.message_id = m.id WHERE m.id = ? AND m.session_id = ? AND m.role = 'user'";
+const UNDO_REMOVED_SNAPSHOTS = `SELECT t.message_id, t.workspace_id, t.outcome FROM chat_turn_snapshots AS t JOIN chat_messages AS m ON m.id = t.message_id WHERE m.session_id = ? AND ${FROM_POINT} ORDER BY m.created_at ASC, m.id ASC`;
+const UNDO_REMAINING_STATUS = `SELECT m.status FROM chat_messages AS m WHERE m.session_id = ? AND m.role = 'assistant' AND ${BEFORE_POINT} ORDER BY m.created_at DESC, m.id DESC LIMIT 1`;
+// `todo` is copied inside SQLite from the undone message's registration, so it is the same bytes
+// and the same storage class (text or NULL). This must run before the delete: the registration row
+// goes with its message (039 cascade).
+const UNDO_SESSION_UPDATE =
+  "UPDATE chat_sessions SET omp_session_file = ?, status = ?, updated_at = ?, todo = (SELECT todo FROM chat_turn_snapshots WHERE message_id = ?) WHERE id = ?";
+const UNDO_DELETE = `DELETE FROM chat_messages AS m WHERE m.session_id = ? AND ${FROM_POINT}`;
+
+/**
+ * Undo CAS (#949), one transaction. Unless the session is not the owner's, is running, is archived,
+ * has another last assistant than the prechecked one, or the user message (with its registration
+ * row) is no longer in it (session_busy, no write):
+ *   1. read the registrations of the user messages about to go and the status the session will take
+ *      (the last assistant before the undone message, else `idle`);
+ *   2. update the session row: `omp_session_file`, `status`, `updated_at`, `todo`; nothing else;
+ *   3. delete the undone message and every later message of the session; their steps, approvals and
+ *      registration rows go by foreign-key cascade (`openDb` turns foreign keys on);
+ *   4. write the `session.undo` audit row.
+ * A throw anywhere, the audit included, rolls all of it back.
+ */
+export function commitUndo(
+  db: DatabaseSync,
+  emit: typeof auditEmit,
+  input: UndoCommit,
+): UndoResult {
+  const { ownerId, sessionId, messageId, expectedLastAssistantId, ompSessionFile, files, now } =
+    input;
+  return runOwnedTransaction(db, "undo rollback failed", () => {
+    const session = db.prepare(UNDO_SESSION).get(sessionId, ownerId) as
+      | {
+          status: string;
+          archived_at: number | null;
+          workspace_id: string | null;
+        }
+      | undefined;
+    const last = db.prepare(UNDO_LAST_ASSISTANT).get(sessionId) as { id: number } | undefined;
+    const point = db.prepare(UNDO_POINT).get(messageId, sessionId) as
+      | { created_at: number }
+      | undefined;
+    if (
+      session === undefined ||
+      session.status === "running" ||
+      session.archived_at !== null ||
+      (last === undefined ? null : Number(last.id)) !== expectedLastAssistantId ||
+      point === undefined
+    ) {
+      throw new HttpError("session_busy");
+    }
+    const at = Number(point.created_at);
+    const snapshots = (
+      db.prepare(UNDO_REMOVED_SNAPSHOTS).all(sessionId, at, at, messageId) as Array<{
+        message_id: number;
+        workspace_id: string;
+        outcome: TurnSnapshotOutcome;
+      }>
+    ).map((row) => ({
+      messageId: Number(row.message_id),
+      workspaceId: row.workspace_id,
+      outcome: row.outcome,
+    }));
+    const remaining = db.prepare(UNDO_REMAINING_STATUS).get(sessionId, at, at, messageId) as
+      | { status: MessageStatus }
+      | undefined;
+    const status = remaining === undefined ? "idle" : remaining.status;
+    if (status === "running") {
+      throw new Error("undo leaves a running assistant");
+    }
+    const updated = db
+      .prepare(UNDO_SESSION_UPDATE)
+      .run(ompSessionFile, status, now, messageId, sessionId);
+    requireChanges(updated.changes, 1, "undo session update");
+    const removedMessages = Number(
+      db.prepare(UNDO_DELETE).run(sessionId, at, at, messageId).changes,
+    );
+    emit(db, {
+      kind: "session.undo",
+      actorId: ownerId,
+      title: "撤回消息",
+      detail: { sessionId, messageId, removedMessages, files },
+      ...(session.workspace_id === null ? {} : { workspaceId: session.workspace_id }),
+      ts: now,
+    });
+    return { removedMessages, snapshots };
+  });
 }

@@ -222,7 +222,7 @@ Minimal mergeable slice: 10.1 + 10.2（表与登记行读写，由迁移测试�
 前提：任务 0.2 已合入（design D11 的核对结论）；(a) 不成立时本组不开工。
 
 - [ ] 11.1 `core/errors` 增加 `undo_conflict`（409，message `其它会话在这之后改动过工作空间`）；`POST /api/sessions/:id/undo` 加入 content-parser 归属集（十三 → 十四）。测试：http-service-skeleton「归档与撤回冲突的错误码」「撤回与转正路由属于归属集」中 undo 的部分，以及「统一错误信封」各场景里的计数（十五码、fourteen identities）。
-- [ ] 11.2 撤回事务（`store-undo.ts`）：CAS 复核 → 删除该消息及其后的消息行 → 置 `omp_session_file`、`status`、`updated_at`、`todo` → `session.undo` 审计；返回被删消息的快照登记供清理。单测：删除范围（步骤、审批、快照行级联）、`status` 的三种取值与 `idle`、`todo` 还原（session-todo「任务清单持久化」的「快照步骤只读、撤回写回」）、CAS 失败不写、审计失败回滚（message-undo「审计失败则不回退」）。
+- [x] 11.2 撤回事务（`store-undo.ts`）：CAS 复核 → 删除该消息及其后的消息行 → 置 `omp_session_file`、`status`、`updated_at`、`todo` → `session.undo` 审计；返回被删消息的快照登记供清理。单测：删除范围（步骤、审批、快照行级联）、`status` 的三种取值与 `idle`、`todo` 还原（session-todo「任务清单持久化」的「快照步骤只读、撤回写回」）、CAS 失败不写、审计失败回滚（message-undo「审计失败则不回退」）。
   **实施注记（11.2，fixture 评审补充）**：
   - CAS 以 message-undo「对话原地回退」第 5 步为准，四项：非 `running`、**未归档**（`archived_at IS NULL`）、末条助手消息 id 等于调用方给的值、该用户消息行仍在（属于该会话与该所有者）。任一不满足抛 `HttpError("session_busy")`、不写任何行（先例 `store-branch.ts` 的两处 CAS）。该消息没有快照登记行同样按 CAS 失败处理。
   - 入参 `{ ownerId, sessionId, messageId, expectedLastAssistantId, ompSessionFile, files, now }` 加审计 `emit`；审计 `detail = { sessionId, messageId, removedMessages, files }`，`workspaceId` 取会话行的值。
