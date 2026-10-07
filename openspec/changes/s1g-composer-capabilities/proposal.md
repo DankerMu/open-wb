@@ -54,6 +54,7 @@ owner 于 2026-10-06 定下了 S1g 的全部产品决定（权限档位、整文
 - `sandbox-core`：「resolve 契约与逃逸向量」（`op=write`）。
 - `workspaces`：新增「文件上传」。
 - `http-service-skeleton`：「服务启动与装配」（C 之后的十九项加四键，共二十三项）、「统一错误信封」（C 之后的十五码加 `upload_too_large` 共十六码；十四条归属身份加上传路由共十五条）、「Shared agent module assembly」（纯配置 seam 的键数随之为二十三）。三条都以 C 的 delta 为底。
+- `omp-uid-isolation`：「CI uid-isolation job」（官方二进制对照文件不再逐个枚举，改为「`ci-uid-isolation.sh` 清单内的全部 `omp-official-*.test.ts`」）。
 - `omp-test-harness`：「假 omp 进程契约」（`approval-write` 场景、`set_model` / `set_thinking_level` 应答）、「假 omp 夹具模块划分」（新增一个纯构建模块）；新增「受控上游请求记录」（只读端点，供官方二进制对照用例核对 omp 发出的模型名）。
 - `chat-harness`：新增「输入框能力的冒烟与走查」；「会话元数据 HTTP 冒烟」（会话 DTO 的键数断言由十一改为十四；以 C 的 delta 为底）。
 
