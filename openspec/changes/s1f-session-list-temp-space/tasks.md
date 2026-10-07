@@ -95,13 +95,13 @@ Minimal mergeable slice: 3.1 + 3.2（store 能建、列表不列；没有 REST �
   - `promote` 返回五键的空间记录；UPDATE 命中 0 行（不是临时空间 / 他人的 / 不存在——store 不区分）返回 `null`，不写审计；4.2 的路由在 owner 预检之后把 `null` 映射为 400。方法自带 BEGIN / COMMIT，失败 ROLLBACK（仿 `create`，没有目录步骤——转正不移动目录）。
   - 审计 `workspace.promote` 的 `title` 为 `另存为工作空间 <name>`，`detail` 为 `{root}`。
   - 测试写进 `server/test/workspace-store-temporary.test.ts` 或新文件（`workspace-store.test.ts` 已 798 行）。四例之外加第五例：审计写入失败时该行仍是 `temporary = 1`、`name` 不变——4.3 的「审计移出事务 → 审计失败用例判红」靠它。
-- [ ] 4.2 路由 `POST /api/workspaces/:id/promote`（`server/src/workspaces/rest.ts`）：no-store、owner 判定先于 body 校验、body 恰 `{name}`；加入 content-parser 归属集（`server/src/http` 的归属清单，十二 → 十三；11.1 再加到十四）。测试（新文件 `server/test/workspace-promote.test.ts`，临时空间会话用 3.2 的辅助函数构造）：temporary-workspaces「转正」四个场景；http-service-skeleton「撤回与转正路由属于归属集」中 promote 的一半；workspaces「临时空间不在列表里，转正后出现」的后半。
+- [x] 4.2 路由 `POST /api/workspaces/:id/promote`（`server/src/workspaces/rest.ts`）：no-store、owner 判定先于 body 校验、body 恰 `{name}`；加入 content-parser 归属集（`server/src/http` 的归属清单，十二 → 十三；11.1 再加到十四）。测试（新文件 `server/test/workspace-promote.test.ts`，临时空间会话用 3.2 的辅助函数构造）：temporary-workspaces「转正」四个场景；http-service-skeleton「撤回与转正路由属于归属集」中 promote 的一半；workspaces「临时空间不在列表里，转正后出现」的后半。
   **实施注记（4.2，fixture 评审补充）**：
   - owner 预检放在 `preParsing` 钩子里（先例在 `sessions/rest.ts`）：`store.rootOf(principal, id) === null` → 404。否则「他人的空间 + 畸形 JSON」会先得到 content-parser 的 400，「鉴权」场景不成立。不复用 `ensureOwnedRoot`（它另外要求目录存在）。
   - handler：body 恰 `{name}`（`WORKSPACE_BODY_LIMIT`）；名字校验由 `store.promote` 自带（400）；`promote` 返回 `null`（不是临时空间，或已被转正）→ 400；`conflict` 原样抛。`promote` 自己开事务，路由不得包在别的事务里。
   - 归属集的同步面：`server/src/http/errors.ts` 的集合与两处「十二条」注释、`server/test/http-parser-owners.test.ts` 的 `TWELVE_OWNER_IDENTITIES` 与 `toBe(12)`（→ 13），写进偏离记录。
   - 4.3 的前两条变异落在 4.1 的 store 测试上（重跑并报告）；第三条（inode / cwd 不变）是本刀的新测试。
-- [ ] 4.3 变异证据：UPDATE 去掉 `temporary = 1` 条件 → 「对正式空间 promote 为 400」判红；审计移出事务 → 审计失败用例判红；转正时移动目录（故意）→ 「`notes.md` 的 inode 不变 / cwd 不变」判红。
+- [x] 4.3 变异证据：UPDATE 去掉 `temporary = 1` 条件 → 「对正式空间 promote 为 400」判红；审计移出事务 → 审计失败用例判红；转正时移动目录（故意）→ 「`notes.md` 的 inode 不变 / cwd 不变」判红。
 
 Risk packs: Error handling / rollback（审计与 UPDATE 同事务）、Auth（所有者作用域，0 行不区分原因）、Schema（`temporary = 1` 条件与所有者内名字唯一）、Public API（4.2 的新端点与归属集）。
 Suggested fixture level: expanded - 新的公共端点、审计同事务、归属集变更
