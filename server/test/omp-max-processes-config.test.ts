@@ -165,6 +165,89 @@ describe("production entry rejects invalid OMP_MAX_PROCESSES before effects", ()
   );
 });
 
+/** #936：四个 SNAPSHOT_* 键与其它数值配置同一规则——非法值在任何副作用之前使启动失败。 */
+describe("production entry rejects invalid SNAPSHOT_* settings before effects", () => {
+  const SNAPSHOT_INVALID = [
+    ...["SNAPSHOT_MAX_FILE_BYTES", "SNAPSHOT_MAX_TOTAL_BYTES", "SNAPSHOT_MAX_ENTRIES"].flatMap(
+      (key) => INVALID_VALUES.map((raw) => [key, raw] as const),
+    ),
+    ["SNAPSHOT_EXCLUDE_NAMES", "a/b"],
+    ["SNAPSHOT_EXCLUDE_NAMES", ".."],
+    ["SNAPSHOT_EXCLUDE_NAMES", "a,,b"],
+  ] as const;
+  let compiled: CompiledServerEntry;
+
+  beforeAll(async () => {
+    compiled = await compileServerEntry();
+  }, 90_000);
+
+  it("compiled entry URL 与 source 得到同一组缺省与覆盖", () => {
+    const patch = {
+      SNAPSHOT_MAX_FILE_BYTES: "10",
+      SNAPSHOT_MAX_TOTAL_BYTES: "20",
+      SNAPSHOT_MAX_ENTRIES: "2",
+      SNAPSHOT_EXCLUDE_NAMES: "",
+    };
+    for (const entry of [pathToFileURL(compiled.entry).href, SOURCE_ENTRY]) {
+      expect(resolveServerConfig({}, entry)).toMatchObject({
+        snapshotMaxFileBytes: 20_971_520,
+        snapshotMaxTotalBytes: 524_288_000,
+        snapshotMaxEntries: 50_000,
+        snapshotExcludeNames: ["node_modules", ".venv", "__pycache__"],
+      });
+      expect(resolveServerConfig(patch, entry)).toMatchObject({
+        snapshotMaxFileBytes: 10,
+        snapshotMaxTotalBytes: 20,
+        snapshotMaxEntries: 2,
+        snapshotExcludeNames: [],
+      });
+    }
+  });
+
+  it.each(SNAPSHOT_INVALID)(
+    "%s=%j：nonzero、恰一行 generic record、无 DB/state/sandbox/listen",
+    async (key, raw) => {
+      const root = scratch("open-wb-snapshot-config-");
+      const port = await reserveWildcardPort();
+      const env = compiledFixtureEnv(root, port, join(root, "bin", "omp"), { [key]: raw });
+      const server = startCompiledServer(compiled.entry, env);
+      const closed = await server.waitForClose();
+
+      expect(closed).toEqual({ code: 1, signal: null });
+      expect(server.stdout()).toBe("");
+      const stderr = server.stderr().replace(NODE_SQLITE_WARNING, "");
+      expect(stderr).toBe(FAILED_RECORD);
+      expect(stderr).not.toContain(key);
+      for (const owned of ["db", "state", "sandbox", "bin"]) {
+        expect(existsSync(join(root, owned))).toBe(false);
+      }
+      expect(existsSync(join(compiled.root, "var"))).toBe(false);
+      await expect(refused(port)).resolves.toBe(true);
+    },
+    20_000,
+  );
+
+  it("四个键取合法值（含空排除名单）时入口照常启动", async () => {
+    const root = scratch("open-wb-snapshot-config-ok-");
+    const port = await reserveWildcardPort();
+    const server = startCompiledServer(
+      compiled.entry,
+      compiledFixtureEnv(root, port, join(root, "bin", "omp"), {
+        SNAPSHOT_MAX_FILE_BYTES: "1",
+        SNAPSHOT_MAX_TOTAL_BYTES: "2147483647",
+        SNAPSHOT_MAX_ENTRIES: "50000",
+        SNAPSHOT_EXCLUDE_NAMES: "",
+      }),
+    );
+    try {
+      await server.waitForStarted();
+      expect(existsSync(join(root, "db", "dev.db"))).toBe(true);
+    } finally {
+      await server.dispose();
+    }
+  }, 30_000);
+});
+
 describe("process cap reaches the sessions module", () => {
   function scratchEnv(root: string): Record<string, string> {
     return {
