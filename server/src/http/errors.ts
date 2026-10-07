@@ -17,6 +17,7 @@ const HTTP_ERROR_STATUSES = Object.freeze({
   agent_capacity: 503,
   approval_settled: 409,
   session_archived: 409,
+  undo_conflict: 409,
 } as const satisfies Record<HttpErrorCode, number>);
 
 export function sendHttpError(reply: FastifyReply, code: HttpErrorCode): FastifyReply {
@@ -40,10 +41,10 @@ const ALLOWED_FASTIFY_REQUEST_ERROR_CODES = new Set([
   "FST_ERR_CTP_BODY_TOO_LARGE",
 ]);
 
-/** 受信 content-parser owner 的 exact 十三条 `<METHOD> <route template>` 身份：POST login（#9）、
+/** 受信 content-parser owner 的 exact 十四条 `<METHOD> <route template>` 身份：POST login（#9）、
  * POST logout（#10）、prompt、chat completions、两条工作空间、回合控制四条（#450）、会话
- * 元数据（#512）POST /api/sessions 与 PATCH /api/sessions/:id，以及临时空间转正（#927）
- * POST /api/workspaces/:id/promote。method 是身份的一部分：
+ * 元数据（#512）POST /api/sessions 与 PATCH /api/sessions/:id、临时空间转正（#927）
+ * POST /api/workspaces/:id/promote，以及撤回（#948）POST /api/sessions/:id/undo。method 是身份的一部分：
  * DELETE /api/sessions/:id 与 PATCH 同模板但不在集合内。模板须与 Fastify 路由注册逐字一致，
  * method 按 Fastify 原样（大写）比较、不做大小写归一。 */
 const CONTENT_PARSER_OWNED_ROUTES = new Set([
@@ -60,11 +61,12 @@ const CONTENT_PARSER_OWNED_ROUTES = new Set([
   "POST /api/sessions",
   "PATCH /api/sessions/:id",
   "POST /api/workspaces/:id/promote",
+  "POST /api/sessions/:id/undo",
 ]);
 
 /**
  * 构造函数-backed CTP 错误的 route-owner 结果：仅 `${method} ${route template}` 恰为
- * CONTENT_PARSER_OWNED_ROUTES 十三条之一时归一 exact 400（无单独的 POST 门；同模板的
+ * CONTENT_PARSER_OWNED_ROUTES 十四条之一时归一 exact 400（无单独的 POST 门；同模板的
  * 其他方法不被覆盖）；matched /api 或 /api/* catch-all 与 unmatched non-GET
  * （routeOptions.url undefined 且 method != GET）恢复 typed not_found 404；其他已注册
  * route 保持 generic 5xx。显式 typed HttpError 保持 route-independent。方法/URL 边界

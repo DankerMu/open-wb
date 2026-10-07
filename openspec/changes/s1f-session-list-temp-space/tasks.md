@@ -250,7 +250,7 @@ Minimal mergeable slice: 10.1 + 10.2（表与登记行读写，由迁移测试�
 
 前提：任务 0.2 已合入（design D11 的核对结论）；(a) 不成立时本组不开工。
 
-- [ ] 11.1 `core/errors` 增加 `undo_conflict`（409，message `其它会话在这之后改动过工作空间`）；`POST /api/sessions/:id/undo` 加入 content-parser 归属集（十三 → 十四）。测试：http-service-skeleton「归档与撤回冲突的错误码」「撤回与转正路由属于归属集」中 undo 的部分，以及「统一错误信封」各场景里的计数（十五码、fourteen identities）。
+- [x] 11.1 `core/errors` 增加 `undo_conflict`（409，message `其它会话在这之后改动过工作空间`）；`POST /api/sessions/:id/undo` 加入 content-parser 归属集（十三 → 十四）。测试：http-service-skeleton「归档与撤回冲突的错误码」「撤回与转正路由属于归属集」中 undo 的部分，以及「统一错误信封」各场景里的计数（十五码、fourteen identities）。
   **实施注记（11.1，fixture 评审补充）**：
   - undo 路由此时尚未注册（真实 HTTP 上 `POST /api/sessions/:id/undo` 仍是 404），本任务对它的证明只在错误处理接缝上：`http-parser-owners.test.ts` 的「身份 × 四种 content-parser 错误」矩阵加这一条身份。「自己的会话 + 四种坏 body → 400、no-store、无写入」的真实 HTTP 一半随 11.4 的路由一起测（写进 `session-undo.test.ts`）。
   - 归属集由十三条到十四条（`server/src/http/errors.ts` 的集合与两处计数注释）；错误码 `undo_conflict` 的状态码与文案各一处。
