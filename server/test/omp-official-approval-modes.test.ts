@@ -18,7 +18,8 @@
  *
  * Run locally: `make omp-fetch` (fetches the official v18.0.10 binary), then in `server/`
  *   WORKBUDDY_OMP_TEST=1 OMP_BIN="$PWD/../var/omp/omp" \
- *     npx vitest run test/omp-official-approval-modes.test.ts --coverage=false
+ *     npx vitest run test/omp-official-approval-modes.test.ts \
+ *     test/omp-official-model-commands.test.ts --coverage=false
  * (`OMP_BIN` is the binary's path, `var/omp/omp` under the repository root by default; it must be
  * absolute, because omp is spawned with the temporary workspace as its cwd.) Without
  * `WORKBUDDY_OMP_TEST=1` the whole file is skipped — also under `make test` — so a green local
