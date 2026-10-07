@@ -20,8 +20,8 @@ export const B = "b".repeat(32);
 export const C = "c".repeat(32);
 
 export const PINNED_AT = 1_750_000_000_000;
-export const RENAMED_TOAST = "已重命名";
-export const PINNED_TOAST = "已更新置顶状态";
+/** 列表动作曾经弹出的三条轻提示文案：页面任何位置都不得再出现。 */
+const RETIRED_TOASTS = ["已重命名", "已更新置顶状态", "任务已删除"];
 export const REQUEST_FAILED = "请求失败，请稍后重试";
 export const PIN = "置顶任务";
 export const UNPIN = "取消置顶";
@@ -34,7 +34,13 @@ type SessionStatus = "idle" | "running" | "done" | "failed" | "stopped";
 export function view(
   id: string,
   title: string | null,
-  meta: { pinnedAt?: number | null; status?: SessionStatus } = {},
+  meta: {
+    archivedAt?: number | null;
+    pinnedAt?: number | null;
+    status?: SessionStatus;
+    temporaryWorkspace?: boolean;
+    workspaceId?: string | null;
+  } = {},
 ) {
   return {
     ...NULL_SESSION_META,
@@ -252,6 +258,30 @@ export function patchOf(body: string) {
 /** 当前显示的 Toast 文案，按出现顺序。 */
 export function toasts() {
   return Array.from(document.querySelectorAll(".ui-toast-message"), (node) => node.textContent);
+}
+
+/** 列表动作不弹轻提示：没有任何 Toast，三条旧文案在页面任何位置都不出现。 */
+export function expectNoListToast() {
+  expect(toasts()).toEqual([]);
+  const text = document.body.textContent ?? "";
+  expect(RETIRED_TOASTS.filter((retired) => text.includes(retired))).toEqual([]);
+}
+
+/** 列表区顶部提示（`关闭提示` 按钮所在的 `role="alert"`）的文案；没有为 null。 */
+export function listAlert(nav: HTMLElement) {
+  const dismiss = within(nav).queryByRole("button", { hidden: true, name: "关闭提示" });
+  const alert = dismiss?.closest('[role="alert"]');
+  return alert ? alert.textContent : null;
+}
+
+/** 等列表区顶部提示恰为 `message`。 */
+export function findListAlert(nav: HTMLElement, message: string) {
+  return waitFor(() => expect(listAlert(nav)).toBe(message));
+}
+
+/** 列表区的 `新建会话`：条目被删除后焦点的落点。 */
+export function newSessionButton(nav: HTMLElement) {
+  return within(nav).getByRole("button", { hidden: true, name: "新建会话" });
 }
 
 /** 顶栏面包屑 heading（Dialog 打开期间 banner 被 aria-hidden）。 */

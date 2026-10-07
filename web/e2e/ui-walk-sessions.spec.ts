@@ -31,6 +31,7 @@ import { type AuthOracle, runWithBrowserErrorOracle } from "./ui-walk-oracle.js"
 import { expectNoProjectConfig, walkProjectConfig } from "./ui-walk-project-config.js";
 import {
   CURRENT_SESSION,
+  expectDeletedWithoutToast,
   expectSelectedIn,
   sections,
   step6Sidebar,
@@ -676,11 +677,7 @@ async function step11Delete(
       confirm.getByText(`确定要删除「${title}」吗？删除后不可恢复。`, { exact: true }),
     ).toBeVisible();
     await confirm.getByRole("button", { name: "删除", exact: true }).click();
-    await expect(page.locator(".ui-toast").filter({ hasText: "任务已删除" })).toBeVisible();
-    // 列表本身还在（否则下面两条计数 0 是空断言）。
-    await expect(list).toBeVisible();
-    await expect(list.locator(CURRENT_SESSION)).toHaveCount(0);
-    await expect(list.getByRole("button", { name: title, exact: true })).toHaveCount(0);
+    await expectDeletedWithoutToast(page, list, title);
     await expectFocusInNavOverlay(page, project);
   });
   await expect.poll(() => new URL(page.url()).searchParams.get("session")).toBeNull();

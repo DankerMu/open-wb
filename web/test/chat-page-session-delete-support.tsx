@@ -8,6 +8,7 @@ import {
   C,
   chooseEntryAction,
   entryTitles,
+  expectNoListToast,
   FIRST_ACCOUNT_TASK,
   findList,
   focusOn,
@@ -16,7 +17,6 @@ import {
   patchPath,
   SECOND_ACCOUNT_TASK,
   type SessionView,
-  toasts,
   view,
 } from "./chat-page-session-meta-support.js";
 import type { FetchRoutes } from "./chat-page-support.js";
@@ -33,7 +33,6 @@ export const OTHER = "需求评审";
 export const THIRD = "周报整理";
 export const SESSION_A = `/?session=${A}`;
 export const SESSION_B = `/?session=${B}`;
-export const DELETED_TOAST = "任务已删除";
 export const BUSY_MESSAGE = "会话正在生成，请稍候";
 export const HERO = "WorkBuddy，我帮你";
 const CONFIRM_TITLE = "删除任务";
@@ -123,11 +122,11 @@ export async function closeMenu(menu: HTMLElement) {
   await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
 }
 
-/** 未发请求的确认框：`取消` + 可用的 danger `删除`，无提示行。 */
+/** 未发请求的确认框：`取消` + 可用的危险样式 `删除`，无提示行。 */
 export function expectConfirmIdle({ buttons, cancel, confirm, dialog }: ConfirmControls) {
   expect(buttons.map((button) => button.textContent)).toEqual(["取消", "删除"]);
   expect(cancel.disabled).toBe(false);
-  expect(confirm.classList.contains("ui-btn--danger")).toBe(true);
+  expect(confirm.getAttribute("data-variant")).toBe("destructive");
   expect(confirm.disabled).toBe(false);
   expect(confirm.getAttribute("aria-busy")).toBeNull();
   expect(within(dialog).queryByText(/删除请求已发送/)).toBeNull();
@@ -140,16 +139,6 @@ export function expectConfirmBusy({ buttons, cancel, confirm, dialog }: ConfirmC
   expect(confirm.disabled).toBe(true);
   expect(confirm.getAttribute("aria-busy")).toBe("true");
   expect(within(dialog).getByText(PENDING_HINT).tagName).toBe("P");
-}
-
-/** 当前显示的 Toast，按出现顺序：`[文案, 含该文案的 .ui-toast 元素上的类型修饰类]`。 */
-export function toastTypes() {
-  return Array.from(document.querySelectorAll(".ui-toast-message"), (message) => [
-    message.textContent,
-    Array.from(message.closest(".ui-toast")?.classList ?? []).filter((name) =>
-      name.startsWith("ui-toast--"),
-    ),
-  ]);
 }
 
 /**
@@ -222,10 +211,10 @@ export async function expectReturnedToWelcome(
   expect(screen.queryByRole("alert")).toBeNull();
 }
 
-/** `SESSIONS` 里的 A 已移除（其余次序不变），Toast 恰为 `shown`。 */
-export function expectRemoved(nav: HTMLElement, shown = [DELETED_TOAST]) {
+/** `SESSIONS` 里的 A 已移除（其余次序不变），没有轻提示。 */
+export function expectRemoved(nav: HTMLElement) {
   expect(entryTitles(nav)).toEqual([OTHER, THIRD]);
-  expect(toasts()).toEqual(shown);
+  expectNoListToast();
 }
 
 /** 点选列表里的 `title` 会话，等 URL 与它的事件流就绪。 */

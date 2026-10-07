@@ -202,6 +202,7 @@ export function useChatSession() {
   const sessionActions = useSessionActions(client, setListState, setHistoryState, {
     abortHistory,
     closeSource,
+    list: listState,
     refreshList,
     requestedSessionRef,
   });

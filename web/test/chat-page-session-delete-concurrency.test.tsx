@@ -9,7 +9,6 @@ import {
   confirmGone,
   confirmPending,
   DELETE_REQUEST,
-  DELETED_TOAST,
   deleteEntry,
   expectConfirmBusy,
   expectConfirmIdle,
@@ -29,19 +28,24 @@ import {
   snapshotRoute,
   stream,
   THIRD,
-  toastTypes,
   watchCurrent,
 } from "./chat-page-session-delete-support.js";
 import {
   A,
   B,
+  chooseEntryAction,
   cleanupSessionMeta,
   crumb,
   entryTitles,
+  expectNoListToast,
   findList,
+  findListAlert,
+  focusOn,
   installNarrowViewport,
+  listAlert,
   messagesPath,
   mountSessions,
+  newSessionButton,
   openNavOverlay,
   openTopbarRename,
   patchPath,
@@ -54,20 +58,22 @@ import { FakeEventSource, settle } from "./chat-stream-support.js";
 import { calls, currentLocation, deferredResponse } from "./support.js";
 import { yieldMacrotask } from "./ui-support.js";
 
-// 条目菜单删除（#532）评审后补充的证据 F1–F6：在途标记、提示类型、两个会话同时在途、槽位节点
+// 条目菜单删除（#532）评审后补充的证据 F1–F6：在途标记、提示的去处、两个会话同时在途、槽位节点
 // 卸载、顶栏重命名、历史读取在途。R1–R13 在 `chat-page-session-delete.test.tsx`。
 
 const LIST = { name: "会话列表" };
 
 afterEach(cleanupSessionMeta);
 
-/** 挂起的 DELETE 以 204 返回，等 `任务已删除` 出现（`shown` 为此刻全部提示）。 */
-async function deleted(request: ReturnType<typeof deferredResponse>, shown = [DELETED_TOAST]) {
+/** 挂起的 DELETE 以 204 返回并让出一轮宏任务：成功没有任何提示。 */
+async function deleted(request: ReturnType<typeof deferredResponse>) {
   await settleDeferredResponse(request, noContent());
-  await waitFor(() => expect(toasts()).toEqual(shown));
+  await yieldMacrotask();
+  expectNoListToast();
+  expect(screen.queryByRole("button", { hidden: true, name: "关闭提示" })).toBeNull();
 }
 
-describe("成功后的在途标记与提示类型 (F1, F2)", () => {
+describe("成功后的在途标记与提示的去处 (F1, F2)", () => {
   /**
    * 欢迎态：A 的 DELETE 得 204（条目移除），随后 B 的 DELETE 得 409——失败触发的列表重读把 A 带回
    * （列表路由始终返回 A、B、C）。
@@ -83,7 +89,8 @@ describe("成功后的在途标记与提示类型 (F1, F2)", () => {
     await deleteEntry(nav, OTHER);
     await within(nav).findByRole("button", { name: CURRENT });
     expect(entryTitles(nav)).toEqual([CURRENT, OTHER, THIRD]);
-    expect(toasts()).toEqual([DELETED_TOAST, BUSY_MESSAGE]);
+    await findListAlert(nav, BUSY_MESSAGE);
+    expectNoListToast();
     return { ...mounted, nav };
   }
 
@@ -97,15 +104,19 @@ describe("成功后的在途标记与提示类型 (F1, F2)", () => {
     await confirmGone();
     expect(patchRequests(fetchMock, A)).toEqual([DELETE_REQUEST, DELETE_REQUEST]);
     expect(entryTitles(nav)).toEqual([OTHER, THIRD]);
-    expect(toasts()).toEqual([DELETED_TOAST, BUSY_MESSAGE, DELETED_TOAST]);
+    expect(listAlert(nav)).toBeNull();
+    expectNoListToast();
   });
 
-  it("F2 提示类型：204 的 任务已删除 是 ui-toast--success，失败的 message 是 ui-toast--error", async () => {
-    await deletedThenListedAgain();
-    expect(toastTypes()).toEqual([
-      [DELETED_TOAST, ["ui-toast--success"]],
-      [BUSY_MESSAGE, ["ui-toast--error"]],
-    ]);
+  it("F2 提示的去处：204 不留任何提示，失败的 message 是列表区顶部唯一的 role=alert，带 关闭提示，页面上没有 Toast 元素", async () => {
+    const { nav } = await deletedThenListedAgain();
+    const alerts = within(nav).getAllByRole("alert");
+    expect(alerts.map((alert) => alert.textContent)).toEqual([BUSY_MESSAGE]);
+    const [alert] = alerts as [HTMLElement];
+    expect(within(alert).getByRole("button", { name: "关闭提示" })).toBeTruthy();
+    // 列表区顶部：提示是 nav 的第一个子元素，在 `新建会话` 之前。
+    expect(nav.firstElementChild).toBe(alert);
+    expect(document.querySelectorAll(".ui-toast")).toHaveLength(0);
   });
 });
 
@@ -136,7 +147,7 @@ describe("两个会话的 DELETE 同时在途 (F3)", () => {
       expect(confirmBox()).toBe(reopened.dialog);
       expect(oneEach()).toEqual([[DELETE_REQUEST], [DELETE_REQUEST]]);
 
-      await deleted(pending[second], [DELETED_TOAST, DELETED_TOAST]);
+      await deleted(pending[second]);
       await confirmGone();
       expect(entryTitles(nav)).toEqual([THIRD]);
       expect(oneEach()).toEqual([[DELETE_REQUEST], [DELETE_REQUEST]]);
@@ -145,7 +156,7 @@ describe("两个会话的 DELETE 同时在途 (F3)", () => {
 });
 
 describe("槽位节点卸载 (F4)", () => {
-  it("F4 宽屏：DELETE 挂起时关闭确认框并折叠侧栏（列表区卸载），204 后提示、当前会话回欢迎态；展开后条目已消失", async () => {
+  it("F4 宽屏：DELETE 挂起时关闭确认框并折叠侧栏（列表区卸载），204 后无轻提示、当前会话回欢迎态；展开后条目已消失", async () => {
     const { nav, request } = await pendingDelete(SESSION_A, { close: true });
     const watched = watchCurrent(stream(A));
     const aside = screen.getByRole("complementary", { name: "侧栏" });
@@ -161,7 +172,7 @@ describe("槽位节点卸载 (F4)", () => {
     expectRemoved(await findList(OTHER));
   });
 
-  it("F4 ≤760px：覆盖层内确认删除当前会话，关闭确认框再关闭覆盖层，204 后提示、回欢迎态；重开覆盖层条目已消失", async () => {
+  it("F4 ≤760px：覆盖层内确认删除当前会话，关闭确认框再关闭覆盖层，204 后无轻提示、回欢迎态；重开覆盖层条目已消失", async () => {
     installNarrowViewport();
     const request = deferredResponse();
     mountSessions(SESSION_A, SESSIONS, { [patchPath(A)]: () => request.promise });
@@ -266,5 +277,30 @@ describe("历史读取在途时删除当前会话 (F6)", () => {
     expect(screen.queryByText("迟到的回答")).toBeNull();
     expect(FakeEventSource.instances).toEqual([]);
     expect(calls(fetchMock, messagesPath(A))).toHaveLength(1);
+  });
+});
+
+describe("条目删除后的焦点落点 (F7)", () => {
+  it("F7 列表区顶部提示在场时条目被删除：确认框关闭后焦点落到 新建会话，不落到 关闭提示、不落回 body", async () => {
+    const pin = deferredResponse();
+    const { nav, request } = await pendingDelete("/", {
+      close: true,
+      extra: { [patchPath(B)]: () => pin.promise },
+    });
+    await chooseEntryAction(nav, OTHER, "置顶任务");
+    const reopened = await openDelete(nav, CURRENT);
+    expectConfirmBusy(reopened);
+    await settleDeferredResponse(pin, sessionBusy());
+    await findListAlert(nav, BUSY_MESSAGE);
+
+    await settleDeferredResponse(request, noContent());
+    await confirmGone();
+    expect(entryTitles(nav)).toEqual([OTHER, THIRD]);
+    await focusOn(newSessionButton(nav));
+    await yieldMacrotask();
+    expect(document.activeElement).toBe(newSessionButton(nav));
+    // 删除成功不是「下一次列表动作发起」：置顶失败的提示仍在。
+    expect(listAlert(nav)).toBe(BUSY_MESSAGE);
+    expectNoListToast();
   });
 });

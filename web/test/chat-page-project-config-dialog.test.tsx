@@ -8,21 +8,16 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { quiesce } from "./chat-page-file-changes-support.js";
-import { settleDeferredResponse } from "./chat-page-lifecycle-support.js";
 import {
   cleanupSessionMeta,
   crumb,
   focusOn,
   messagesPath,
-  patchPath,
-  RENAMED_TOAST,
-  toasts,
   view,
 } from "./chat-page-session-meta-support.js";
 import { renderChatPage } from "./chat-page-support.js";
 import { PROJECT_A, welcomeRoutes } from "./chat-page-welcome-scene-support.js";
-import { deferredResponse, jsonResponse } from "./support.js";
-import { yieldMacrotask } from "./ui-support.js";
+import { jsonResponse } from "./support.js";
 
 const TITLE = "助手会读取的项目配置文件";
 const NOTE = "以下位置存在配置文件；同一层有多个说明文件时只有一个生效";
@@ -45,8 +40,8 @@ function slotTexts(scope: Element, slot: string) {
   return Array.from(scope.querySelectorAll(`[data-slot="${slot}"]`), (node) => node.textContent);
 }
 
-/** The session page on SESSION with its three files listed; `rename` answers the PATCH. */
-async function mount(rename: () => Promise<Response> | Response = () => jsonResponse(SESSION)) {
+/** The session page on SESSION with its three files listed. */
+async function mount() {
   renderChatPage(`/?session=${SESSION.id}`, {
     ...welcomeRoutes(),
     "/api/sessions": () => jsonResponse({ sessions: [SESSION] }),
@@ -58,7 +53,6 @@ async function mount(rename: () => Promise<Response> | Response = () => jsonResp
         todo: null,
       }),
     [`/api/project-config?workspaceId=${PROJECT_A.id}`]: () => jsonResponse({ files: FILES }),
-    [patchPath(SESSION.id)]: rename,
   });
   await quiesce();
   await crumb("绑定会话");
@@ -126,32 +120,6 @@ describe("项目配置入口：拷入层对话框 (H1–H4)", () => {
     await focusOn(button);
     expect(onButton.mock.calls).toEqual([[{ preventScroll: true }]]);
     expect(button.getAttribute("aria-expanded")).toBe("false");
-  });
-
-  // The toast is the session list's 已重命名. It arrives while the list is open, so it sits above
-  // the dialog in the Radix layer stack and takes its Escape.
-  it("H3 Escape closes the list while a toast is shown, and the focus is back on the header button", async () => {
-    const renamed = deferredResponse();
-    await mount(() => renamed.promise);
-    fireEvent.click(banner().getByRole("button", { name: "重命名" }));
-    const rename = await screen.findByRole("dialog", { name: "重命名任务" });
-    fireEvent.change(within(rename).getByRole("textbox", { name: "任务名称" }), {
-      target: { value: "新标题" },
-    });
-    fireEvent.click(within(rename).getByRole("button", { name: "保存" }));
-    fireEvent.click(within(rename).getByRole("button", { name: "取消" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    await yieldMacrotask();
-    const { button, dialog } = await openDialog();
-    await focusOn(within(dialog).getByRole("button", { name: "关闭" }));
-
-    await settleDeferredResponse(renamed, jsonResponse({ ...SESSION, title: "新标题" }));
-    await waitFor(() => expect(toasts()).toEqual([RENAMED_TOAST]));
-
-    fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
-
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    await focusOn(button);
   });
 
   it.each([

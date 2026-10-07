@@ -215,17 +215,19 @@ describe("(C5) static contract", () => {
     expect(view).not.toContain("新建会话");
   });
 
-  it("single-column layout lives in the view; chat.css holds only the row-menu and rename-dialog rules", () => {
+  it("single-column layout lives in the view; chat.css holds no rule (the row menu and the rename dialog moved to Tailwind classes)", () => {
     const view = readRepoFile("web/src/features/chat/conversation-view.tsx");
     expect(view).toContain("grid-cols-[minmax(0,1fr)]");
     expect(view).not.toMatch(/chat-(layout|main)/);
     const css = stripComments(readRepoFile("web/src/features/chat/chat.css"));
     expect(css).not.toContain(".chat-sidebar");
-    expect(ruleSelectors(css).length).toBeGreaterThan(0);
+    // 条目菜单与重命名对话框也已改用 Tailwind：文件留到守卫不再要求它为止，一条规则都没有。
+    expect(ruleSelectors(css)).toEqual([]);
     expect(foreignSelectors(css)).toEqual([]);
-    // 侧栏已改用 Tailwind：只属于它的规则不再留在 chat.css。
-    for (const selector of ruleSelectors(css)) {
-      expect(selector).toMatch(/\.chat-(session-more|rename-(form|actions))\b/);
+    for (const source of ["session-menu.tsx", "rename-dialog.tsx", "session-sidebar.tsx"]) {
+      expect(readRepoFile(`web/src/features/chat/${source}`)).not.toMatch(
+        /chat-(session-more|session-item|rename-(form|actions))/,
+      );
     }
   });
 
@@ -239,10 +241,9 @@ describe("(C5) static contract", () => {
       ".welcome { margin: 0; }",
     ].join("\n");
     expect(foreignSelectors(sample)).toEqual([".chat-composer", ".welcome"]);
-    // 真实文件确有一个带规则的 @media 块：上一条用例的空结果不是因为没进到块里。
+    // 真实文件已没有任何块（规则与 @media 都已删除）：进到块里的能力由上面的样本证明。
     const css = stripComments(readRepoFile("web/src/features/chat/chat.css"));
-    const media = topLevelBlocks(css).filter((block) => block.prelude.startsWith("@media"));
-    expect(media.flatMap((block) => ruleSelectors(block.body)).length).toBeGreaterThan(0);
+    expect(topLevelBlocks(css)).toEqual([]);
   });
 
   it("the single-column shell has no gap class, plain or narrow-prefixed; the chat column keeps gap-2", async () => {
@@ -271,7 +272,7 @@ describe("(C5) static contract", () => {
       expect(css).not.toContain(removed);
     }
     expect(raw).not.toMatch(COLOR_LITERAL_PATTERNS[0] as RegExp);
-    expect(raw).toContain("demo.html:282-298");
+    expect(css.trim()).toBe("");
   });
 
   it("ui-walk expects the Chinese session status", () => {

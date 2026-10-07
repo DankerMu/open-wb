@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
@@ -38,9 +38,12 @@ type EntryActions = {
 };
 
 type SessionSidebarProps = EntryActions & {
+  /** 列表动作的失败（没有对话框可显示的那些）：列表区顶部的一条可关闭提示；null 为没有。 */
+  actionAlert: string | null;
   listError: string | null;
   listLoading: boolean;
   onCreateSession(): void;
+  onDismissActionAlert(): void;
   onSelectSession(sessionId: string): void;
   requestedSessionId: string | null;
   sessions: ChatSession[] | null;
@@ -99,8 +102,8 @@ function SessionGroupSection({
           {group.sessions.map((session) => {
             const title = sessionTitle(session);
             return (
-              // `chat-session-item` 是尚未迁移的条目菜单（session-menu.tsx）悬停显隐规则的挂点。
-              <li className="chat-session-item flex min-w-0 items-center gap-0.5" key={session.id}>
+              // `group/session`：条目菜单的「更多」按钮（session-menu.tsx）按它的悬停与焦点显现。
+              <li className="group/session flex min-w-0 items-center gap-0.5" key={session.id}>
                 <button
                   aria-current={session.id === requestedSessionId ? "true" : undefined}
                   aria-label={title}
@@ -139,10 +142,12 @@ function SessionGroupSection({
  * 按时间分组的当前时间取渲染时刻，不设定时器。
  */
 export function SessionSidebar({
+  actionAlert,
   listError,
   listLoading,
   onCreateSession,
   onDeleteSession,
+  onDismissActionAlert,
   onRenameSession,
   onSelectSession,
   onTogglePin,
@@ -152,14 +157,37 @@ export function SessionSidebar({
   workspaces,
 }: SessionSidebarProps) {
   const onNavigate = useSidebarNavigate();
+  const createRef = useRef<HTMLButtonElement>(null);
   const searching = view.query.trim() !== "";
   const groups = sessions
     ? groupSessionList(searchSessions(sessions, view.query), workspaces, view.grouping, Date.now())
     : null;
   return (
     <nav aria-label="会话列表" className="flex min-h-0 flex-1 flex-col gap-2.5 pt-1 pb-3">
+      {actionAlert ? (
+        <p
+          className="m-0 flex flex-none items-start gap-2 rounded-lg bg-destructive/10 px-2.5 py-2 text-xs text-(--wb-status-error-text)"
+          role="alert"
+        >
+          <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{actionAlert}</span>
+          <Button
+            aria-label="关闭提示"
+            className="text-inherit"
+            onClick={() => {
+              onDismissActionAlert();
+              // 按钮随提示卸载，焦点交给 新建会话，不落回 body。
+              createRef.current?.focus();
+            }}
+            size="icon-xs"
+            variant="ghost"
+          >
+            <Icon name="x" />
+          </Button>
+        </p>
+      ) : null}
       <Button
         className="w-full flex-none"
+        ref={createRef}
         onClick={() => {
           onCreateSession();
           onNavigate?.();

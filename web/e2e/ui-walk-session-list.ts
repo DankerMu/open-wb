@@ -1,5 +1,6 @@
 // UI walk：会话列表区的选择器与第 6 步（chat-harness「UI 走查会话元数据」）。分组、折叠、搜索与
-// `分组方式` 的定位都集中在这里；`ui-walk-sessions.spec.ts` 的第 7、8、11 步经 `sections` 取分组。
+// `分组方式` 的定位都集中在这里；`ui-walk-sessions.spec.ts` 的第 7、8、11 步经 `sections` 取分组，
+// 第 11 步的「删除无提示」断言（`expectDeletedWithoutToast`）也在这里。
 import { randomUUID } from "node:crypto";
 import { expect, type Locator, type Page } from "@playwright/test";
 import { inspectSidebar, sessionList, type WalkProject } from "./ui-walk-layout.js";
@@ -34,6 +35,21 @@ export async function expectSelectedIn(
   for (const section of others) {
     await expect(section.locator(CURRENT_SESSION)).toHaveCount(0);
   }
+}
+
+// 第 11 步确认删除之后：选中的条目与标题为 `title` 的条目都从列表消失，且删除没有轻提示——条目
+// 消失后页面任何位置都没有 `任务已删除`，也没有任何 Toast 元素。先断言列表本身还在（否则两条
+// 计数 0 是空断言）。
+export async function expectDeletedWithoutToast(
+  page: Page,
+  list: Locator,
+  title: string,
+): Promise<void> {
+  await expect(list).toBeVisible();
+  await expect(list.locator(CURRENT_SESSION)).toHaveCount(0);
+  await expect(list.getByRole("button", { name: title, exact: true })).toHaveCount(0);
+  await expect(page.getByText("任务已删除")).toHaveCount(0);
+  await expect(page.locator(".ui-toast")).toHaveCount(0);
 }
 
 // 第 6 步：会话恰一次出现在 `workspaceName` 分组里，没有 `筛选任务`；随后在同一侧栏里（mobile 的覆盖层
