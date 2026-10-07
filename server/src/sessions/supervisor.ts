@@ -207,11 +207,12 @@ export class SessionSupervisor {
     });
   }
 
-  prompt(sessionId: string, text: string): Promise<void> {
+  /** `beforeDispatch` runs once the turn accepts a stop intent, before any wait or spawn. */
+  prompt(sessionId: string, text: string, beforeDispatch?: () => Promise<void>): Promise<void> {
     if (this.#closed) {
       return Promise.reject(new HttpError("agent_unavailable"));
     }
-    return this.#track(this.#prompt(sessionId, text));
+    return this.#track(this.#prompt(sessionId, text, beforeDispatch));
   }
 
   /** Regenerates the last answer (#465); REST is #467. Every failure is a rejection. */
@@ -339,7 +340,7 @@ export class SessionSupervisor {
     this.#retain(asError(failure.error));
   }
 
-  async #prompt(sessionId: string, text: string): Promise<void> {
+  async #prompt(sessionId: string, text: string, before?: () => Promise<void>): Promise<void> {
     const state = this.#store.runtimeState(sessionId);
     if (state === null || state.activeTurn === null) {
       throw new HttpError("not_found");
@@ -350,6 +351,14 @@ export class SessionSupervisor {
       throw new HttpError("session_busy");
     }
     this.#stops.open(assistantMessageId);
+    if (before !== undefined) {
+      try {
+        await before();
+      } catch (error) {
+        this.#stops.release(assistantMessageId);
+        throw translateSupervisorError(error);
+      }
+    }
     const existing = this.#slots.get(sessionId);
     if (existing?.retiring !== undefined) {
       await existing.retiring;
