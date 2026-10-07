@@ -20,6 +20,11 @@
  *   2. a directory entry replaced by a symbolic link between its `lstat` and its `readdir` is
  *      listed and copied whole from wherever the link points.
  *
+ * Deduplication (spec「未变文件的去重」): a file whose `fstat` says what the previous snapshot's
+ * manifest says of the same path is hard-linked from that snapshot's `tree/` instead of being
+ * read. Links only ever join two snapshots of this root. Copy-on-write is not used: `copyFile`
+ * takes a path, and copying by path would follow a symbolic link put there after classification.
+ *
  * Asynchronous on purpose: the snapshot runs as the supervisor's pre-dispatch step, during which
  * a stop must still be answered (spec「受理时做快照」), so the walk must not hold the event loop.
  */
@@ -53,6 +58,11 @@ interface TakeOptions {
   workspaceId: string;
   /** `chat_messages.id` of the accepted user message: a positive integer. */
   userMessageId: number;
+  /**
+   * `chat_messages.id` of the workspace's latest successful snapshot, when there is one: a
+   * positive integer other than `userMessageId`. Its directory is derived like this one's.
+   */
+  previousMessageId?: number;
   /** Directory names left out at any depth; a regular file of the same name is not affected. */
   excludeNames: readonly string[];
   /** A regular file larger than this is left out (`skipped`, `too_large`) without being read. */
@@ -68,9 +78,20 @@ export type TakeResult =
   | { outcome: "too_large" }
   | { outcome: "failed"; error: unknown };
 
+/** What a manifest records of a file's state; equal triples mean the file did not change. */
+interface FileState {
+  size: number;
+  mtimeMs: number;
+  ctimeMs: number;
+}
+
 interface Walk {
   workspaceRoot: string;
   treeRoot: string;
+  /** `tree/` of the previous snapshot, when the caller named one. */
+  previousTree: string | undefined;
+  /** The previous manifest's file entries by path; empty when there is no usable one. */
+  previous: ReadonlyMap<string, FileState>;
   excludeNames: ReadonlySet<string>;
   maxFileBytes: number;
   maxTotalBytes: number;
@@ -89,7 +110,7 @@ class LimitExceeded extends Error {}
  * unless the result is `ok`, the `<userMessageId>` directory this call created is removed.
  * Rejects only for a caller bug, before touching the disk: a path component that is not a
  * trusted row's id, a snapshot root that lies inside the workspace, or a limit that is not a
- * positive integer.
+ * positive integer. A previous snapshot that is missing or damaged never fails this one.
  */
 export async function take(options: TakeOptions): Promise<TakeResult> {
   const snapshotDir = snapshotDirOf(options);
@@ -113,7 +134,7 @@ export async function take(options: TakeOptions): Promise<TakeResult> {
 }
 
 function snapshotDirOf(options: TakeOptions): string {
-  const { workspaceId, userMessageId } = options;
+  const { workspaceId, userMessageId, previousMessageId } = options;
   for (const limit of [options.maxFileBytes, options.maxTotalBytes, options.maxEntries]) {
     // Anything else (NaN, a missing value) would compare false and switch the limit off.
     if (!Number.isSafeInteger(limit) || limit <= 0) {
@@ -125,6 +146,14 @@ function snapshotDirOf(options: TakeOptions): string {
   }
   if (!Number.isSafeInteger(userMessageId) || userMessageId <= 0) {
     throw new TypeError("snapshot message id must be a positive integer");
+  }
+  if (
+    previousMessageId !== undefined &&
+    (!Number.isSafeInteger(previousMessageId) ||
+      previousMessageId <= 0 ||
+      previousMessageId === userMessageId)
+  ) {
+    throw new TypeError("previous snapshot message id must be another positive integer");
   }
   const fromWorkspace = relative(resolve(options.workspaceRoot), resolve(options.snapshotsRoot));
   const outside =
@@ -159,9 +188,15 @@ async function ensurePrivateDir(path: string): Promise<void> {
 }
 
 async function write(options: TakeOptions, snapshotDir: string): Promise<TakeResult> {
+  const previousDir =
+    options.previousMessageId === undefined
+      ? undefined
+      : join(options.snapshotsRoot, options.workspaceId, String(options.previousMessageId));
   const walk: Walk = {
     workspaceRoot: options.workspaceRoot,
     treeRoot: join(snapshotDir, "tree"),
+    previousTree: previousDir === undefined ? undefined : join(previousDir, "tree"),
+    previous: previousDir === undefined ? new Map() : await previousFiles(previousDir),
     excludeNames: new Set(options.excludeNames),
     maxFileBytes: options.maxFileBytes,
     maxTotalBytes: options.maxTotalBytes,
@@ -178,6 +213,28 @@ async function write(options: TakeOptions, snapshotDir: string): Promise<TakeRes
   await fsp.writeFile(manifest, body, { mode: FILE_MODE, flag: "wx" });
   await fsp.chmod(manifest, FILE_MODE);
   return { outcome: "ok", skipped: walk.skipped };
+}
+
+/**
+ * The file entries of the previous snapshot's manifest. Whatever goes wrong (no directory, no
+ * manifest, not JSON, not a manifest) yields no entries: this snapshot then copies everything.
+ */
+async function previousFiles(previousDir: string): Promise<Map<string, FileState>> {
+  const files = new Map<string, FileState>();
+  try {
+    const manifest: unknown = JSON.parse(
+      await fsp.readFile(join(previousDir, "manifest.json"), "utf8"),
+    );
+    for (const entry of (manifest as { entries: unknown[] }).entries) {
+      const file = entry as { path: string; type: unknown } & FileState;
+      if (file.type === "file") {
+        files.set(file.path, { size: file.size, mtimeMs: file.mtimeMs, ctimeMs: file.ctimeMs });
+      }
+    }
+    return files;
+  } catch {
+    return new Map();
+  }
 }
 
 /** Names come from `readdir`, so none is empty, `.`, `..` or contains a separator. */
@@ -238,7 +295,8 @@ function claim(walk: Walk, bytes: number): void {
 /**
  * The handle, not the earlier `lstat`, decides what the entry is and what the manifest says of
  * it: the entry may have been replaced since it was classified. A file over the per-file limit
- * is left out before the other two limits are looked at, so it counts toward neither.
+ * is left out before the other two limits are looked at, so it counts toward neither. A file
+ * linked from the previous snapshot counts toward both like a copied one.
  */
 async function visitFile(walk: Walk, path: string): Promise<void> {
   const source = await readable(walk, path, () =>
@@ -258,7 +316,9 @@ async function visitFile(walk: Walk, path: string): Promise<void> {
       return;
     }
     claim(walk, stat.size);
-    const size = await copyContent(walk, path, source, stat.size);
+    const size = (await linkUnchanged(walk, path, stat))
+      ? stat.size
+      : await copyContent(walk, path, source, stat.size);
     if (size !== undefined) {
       walk.totalBytes += size;
       walk.entries.push({
@@ -272,6 +332,45 @@ async function visitFile(walk: Walk, path: string): Promise<void> {
     }
   } finally {
     await source.close();
+  }
+}
+
+/**
+ * Hard-links the previous snapshot's copy of `path` into this `tree/` when the previous manifest
+ * records the `size`, `mtimeMs` and `ctimeMs` that `stat` (the `fstat` of the opened workspace
+ * file) has; nothing of the file is read. `false` when it did not: no such entry, another
+ * triple, or any failure (the previous snapshot is being removed, the link count is at its
+ * limit, …) — the caller then copies through its handle.
+ *
+ * The link's source is a path under the previous `tree/`, never one in the workspace. `link`
+ * follows a symbolic link on some systems, so the source must be a regular file itself, of the
+ * recorded length, and not the inode of the workspace file: a damaged previous tree is copied
+ * over, not trusted. The linked inode keeps its 0600; `mode` in the manifest is the workspace's.
+ */
+async function linkUnchanged(walk: Walk, path: string, stat: Stats): Promise<boolean> {
+  const before = walk.previous.get(path);
+  if (
+    walk.previousTree === undefined ||
+    before?.size !== stat.size ||
+    before.mtimeMs !== stat.mtimeMs ||
+    before.ctimeMs !== stat.ctimeMs
+  ) {
+    return false;
+  }
+  const previousCopy = join(walk.previousTree, path);
+  try {
+    const kept = await fsp.lstat(previousCopy);
+    if (
+      !kept.isFile() ||
+      kept.size !== stat.size ||
+      (kept.ino === stat.ino && kept.dev === stat.dev)
+    ) {
+      return false;
+    }
+    await fsp.link(previousCopy, join(walk.treeRoot, path));
+    return true;
+  } catch {
+    return false;
   }
 }
 
