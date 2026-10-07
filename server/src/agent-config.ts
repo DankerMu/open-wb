@@ -1,12 +1,14 @@
 import { availableParallelism } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { assertSafeSudoPath, assertSetprivExecutable } from "./core/process-path.js";
+import { type ModelCatalog, resolveModelCatalog } from "./model-catalog.js";
+
+export { DEFAULT_MODEL_ID } from "./model-catalog.js";
 
 export const DEFAULT_OMP_BIN_RELATIVE = join("var", "omp", "omp");
 export const DEFAULT_OMP_STATE_RELATIVE = join("var", "omp-state");
 export const DEFAULT_SANDBOX_RELATIVE = join("var", "sandbox");
 export const DEFAULT_OMP_IDLE_MS = 600_000;
-export const DEFAULT_MODEL_ID = "deepseek-v4.1-flash";
 export const DEFAULT_OMP_MAX_PROCESSES = 16;
 /** 单个上传文件的字节上限缺省值：500 MiB。 */
 const DEFAULT_UPLOAD_MAX_BYTES = 524_288_000;
@@ -32,9 +34,12 @@ export interface AgentSettings {
   sandboxRoot: string;
   modelUpstreamBaseUrl?: string;
   modelUpstreamApiKey?: string;
+  /** 模型白名单与缺省模型（MODEL_CATALOG；未设置时为 MODEL_ID / MODEL_REASONING 的单模型）。 */
+  modelCatalog: ModelCatalog;
+  /** 白名单缺省模型的 id（派生值；读者迁到 modelCatalog 后删除）。 */
   modelId: string;
   ompUser?: string;
-  /** 托管 models.yml 是否声明 reasoning（MODEL_REASONING，缺省 on）。 */
+  /** 白名单缺省模型是否支持推理（派生值；读者迁到 modelCatalog 后删除）。 */
   modelReasoning: boolean;
   /** 所有会话可用审批档位的上界（APPROVAL_MAX_MODE，缺省 yolo 即三档都开放）。 */
   approvalMaxMode: "always-ask" | "write" | "yolo";
@@ -61,6 +66,7 @@ export function resolveAgentSettings(
     "MODEL_UPSTREAM_BASE_URL",
   );
   const modelUpstreamApiKey = optionalSetting(env.MODEL_UPSTREAM_API_KEY, "MODEL_UPSTREAM_API_KEY");
+  const modelCatalog = resolveModelCatalog(env);
   return {
     ompBin: resolveOwnedPath(env.OMP_BIN, DEFAULT_OMP_BIN_RELATIVE, repoRoot, "OMP_BIN"),
     ompStateDir: resolveOwnedPath(
@@ -88,9 +94,12 @@ export function resolveAgentSettings(
     ),
     ...(modelUpstreamBaseUrl === undefined ? {} : { modelUpstreamBaseUrl }),
     ...(modelUpstreamApiKey === undefined ? {} : { modelUpstreamApiKey }),
-    modelId: env.MODEL_ID === undefined ? DEFAULT_MODEL_ID : env.MODEL_ID,
+    modelCatalog,
+    modelId: modelCatalog.defaultModelId,
     ...(env.OMP_USER === undefined ? {} : { ompUser: resolveOmpUser(env.OMP_USER, env.PATH) }),
-    modelReasoning: resolveOnOff(env.MODEL_REASONING, true, "MODEL_REASONING"),
+    modelReasoning: modelCatalog.models.some(
+      (model) => model.id === modelCatalog.defaultModelId && model.reasoning,
+    ),
     approvalMaxMode: resolveApprovalMaxMode(env.APPROVAL_MAX_MODE),
     uploadMaxBytes: resolvePositiveInteger(
       env.UPLOAD_MAX_BYTES,
@@ -149,20 +158,6 @@ function resolvePositiveInteger(raw: string | undefined, fallback: number, key: 
     throw new Error(`${key} must be within 1..${MAX_POSITIVE_SETTING}`);
   }
   return value;
-}
-
-/** 只接受精确 on/off（不 trim、不改大小写）；错误只命名键，不回显输入值。 */
-function resolveOnOff(raw: string | undefined, fallback: boolean, key: string): boolean {
-  if (raw === undefined) {
-    return fallback;
-  }
-  if (raw === "on") {
-    return true;
-  }
-  if (raw === "off") {
-    return false;
-  }
-  throw new Error(`${key} must be exactly on or off`);
 }
 
 /** 只接受三个档位字面量的精确拼写（不 trim、不改大小写）；错误只命名键，不回显输入值。 */
