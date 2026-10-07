@@ -1,7 +1,9 @@
 /**
  * Issue #706 DELETE /api/sessions/:id, the artifact directory goes through the app-private trash
  * (change session-delete-trash): `lstat` → `rename` into `<state>/trash/<32 hex>` → `lstat` there →
- * recursive removal, or `unlink` plus one report when the entry was swapped before the rename.
+ * recursive removal, or `unlink` plus one report when the entry was swapped before the rename. A
+ * rename failing with `EXDEV` is reported and the directory left in place (#929: the in-place
+ * removal exists for temporary workspace directories only).
  * The DELETE cases run the production createApp → registerSessions assembly on real files; the two
  * cases that need something to happen between `lstat` and `rename` call `removeSessionFile` with a
  * `rename` that mutates the directory first and then performs the real rename. Oracles: the file
@@ -179,6 +181,25 @@ describe("DELETE removes the artifact directory through the trash (#706)", () =>
       ]);
     });
   }
+
+  it("a rename failing with EXDEV: the artifact directory is reported and left in place (no in-place removal here)", async () => {
+    const seeded = seededState();
+    const before = snapshot(seeded.artifacts);
+    const reports: unknown[] = [];
+
+    await removeSessionFile(
+      seeded.file,
+      seeded.stateDir,
+      OWNER_ID,
+      (error) => reports.push(error),
+      () => Promise.reject(Object.assign(new Error("cross-device link"), { code: "EXDEV" })),
+    );
+
+    expect(reports.map((error) => (error as NodeJS.ErrnoException).code)).toEqual(["EXDEV"]);
+    expect(snapshot(seeded.artifacts)).toEqual(before);
+    expect(before.map((line) => line.split(" ")[0])).toEqual(ARTIFACT_TREE);
+    expect(readdirSync(seeded.trash)).toEqual([]);
+  });
 
   it("a state dir reached through a symlink still uses the trash under its realpath", async () => {
     const seeded = seededState();

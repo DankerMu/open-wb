@@ -1,13 +1,13 @@
 /**
- * Issue #928 (s1f-session-list-temp-space tasks 5.1, 5.2): a temporary workspace goes with its
- * last session — temporary-workspaces 「共用与随最后一个会话删除」 (five scenarios) and 「临时空间目录的删除」
- * (「经 trash 删除且不跟随链接」「目标被换成符号链接」「删除失败不影响响应」), session-metadata 「继承临时空间」 and
- * the directory part of 「删除连同快照与独占的临时空间」.
+ * Issues #928, #929 (s1f-session-list-temp-space tasks 5.1–5.3): a temporary workspace goes with
+ * its last session — temporary-workspaces 「共用与随最后一个会话删除」 (five scenarios) and 「临时空间目录的删除」
+ * (「经 trash 删除且不跟随链接」「目标被换成符号链接」「跨文件系统退为原地删除」「删除失败不影响响应」), session-metadata
+ * 「继承临时空间」 and the directory part of 「删除连同快照与独占的临时空间」.
  * The DELETE cases run the production createApp → registerSessions assembly on a real SQLite and
  * real directories under the runtime's temp sandbox; sharing is built with the REST fork, the
  * promotion with the store's `promote` (its route is task 4.2). The
- * cases that need something to happen between `lstat` and `rename` call the exported removal
- * function with a `rename` that mutates the tree first. Oracles: SQL rows, `GET /api/audit`, the
+ * cases that need something to happen between `lstat` and `rename`, or a `rename` that fails, call
+ * the exported removal function with their own `rename`. Oracles: SQL rows, `GET /api/audit`, the
  * file system (account root, trash, the tree outside) and the service error channel. Every path
  * touched is a per-test temporary directory.
  */
@@ -538,10 +538,16 @@ function seededRoots() {
   return { accountRoot, trash, name, dir };
 }
 
-/** The removal with `before` run at the rename call site (then the real rename unless it fails). */
+/** A `rename` that fails the way a move between two file systems does. */
+function failing(code: string): typeof rename {
+  return () => Promise.reject(Object.assign(new Error(`rename ${code}`), { code }));
+}
+
+/** The removal with `before` run at the rename call site, then `move` (the real rename if none). */
 async function removeWith(
   target: { accountRoot: string; trash: string; name: string },
   before: () => void = () => {},
+  move: typeof rename = rename,
 ): Promise<{ reports: Error[]; renames: string[][] }> {
   const reports: Error[] = [];
   const renames: string[][] = [];
@@ -553,7 +559,7 @@ async function removeWith(
     (from, to) => {
       renames.push([String(from), String(to)]);
       before();
-      return rename(from, to);
+      return move(from, to);
     },
   );
   return { reports, renames };
@@ -668,20 +674,81 @@ describe("临时空间目录的删除 — removal function (#928)", () => {
     expect(readdirSync(seeded.trash)).toEqual([]);
   });
 
-  it("a rename failing with EXDEV is reported and the directory stays where it was", async () => {
+  it("跨文件系统退为原地删除: EXDEV removes it in place, what its links point at stays, no report", async () => {
+    const seeded = seededRoots();
+    const sibling = join(seeded.accountRoot, `tmp-${"b".repeat(32)}`);
+    const outsideFile = ownedFile();
+    const outsideDir = ownedDir();
+    fill(sibling);
+    fill(outsideDir);
+    const outside = [readFileSync(outsideFile, "utf8"), ...snapshot(outsideDir)];
+    symlinkSync(outsideFile, join(seeded.dir, "sub", "file-link"));
+    symlinkSync(outsideDir, join(seeded.dir, "dir-link"));
+
+    const { reports, renames } = await removeWith(seeded, undefined, failing("EXDEV"));
+
+    expect(reports).toEqual([]);
+    expect(renames).toHaveLength(1);
+    expect(readdirSync(seeded.accountRoot)).toEqual([`tmp-${"b".repeat(32)}`]);
+    expect(names(sibling)).toEqual(TREE);
+    expect([readFileSync(outsideFile, "utf8"), ...snapshot(outsideDir)]).toEqual(outside);
+    expect(names(outsideDir)).toEqual(TREE);
+    expect(readdirSync(seeded.trash)).toEqual([]);
+  });
+
+  it("EXDEV, then a symlink stands there: the link and its target stay, one report", async () => {
+    const seeded = seededRoots();
+    const target = ownedDir();
+    fill(target);
+    const before = snapshot(target);
+    const swap = () => {
+      rmSync(seeded.dir, { recursive: true });
+      symlinkSync(target, seeded.dir);
+    };
+
+    const { reports } = await removeWith(seeded, swap, failing("EXDEV"));
+
+    expect(reports.map((error) => error.message)).toEqual([NOT_A_DIRECTORY]);
+    expect(lstatSync(seeded.dir).isSymbolicLink()).toBe(true);
+    expect(snapshot(target)).toEqual(before);
+    expect(before.map((line) => line.split(" ")[0])).toEqual(TREE);
+  });
+
+  it("EXDEV, then the directory is gone: nothing reported", async () => {
+    const seeded = seededRoots();
+    const vanish = () => rmSync(seeded.dir, { recursive: true });
+
+    const { reports, renames } = await removeWith(seeded, vanish, failing("EXDEV"));
+
+    expect([reports, renames.length]).toEqual([[], 1]);
+    expect(readdirSync(seeded.accountRoot)).toEqual([]);
+  });
+
+  it.skipIf(process.getuid?.() === 0)(
+    "EXDEV, then the in-place removal fails: reported once, nothing thrown, the residue stays put",
+    async () => {
+      const seeded = seededRoots();
+      // A read-only (0500) directory: its entry cannot be unlinked, so the removal is partial.
+      chmodSync(join(seeded.dir, "sub"), 0o500);
+      try {
+        const { reports } = await removeWith(seeded, undefined, failing("EXDEV"));
+
+        expect(reports.map((error) => (error as NodeJS.ErrnoException).code)).toEqual(["EACCES"]);
+        expect(readFileSync(join(seeded.dir, "sub", "deep.txt"), "utf8")).toBe("nested\n");
+        expect(readdirSync(seeded.trash)).toEqual([]);
+      } finally {
+        chmodSync(join(seeded.dir, "sub"), 0o700);
+      }
+    },
+  );
+
+  it("a rename failing with another errno is reported and the directory stays where it was", async () => {
     const seeded = seededRoots();
     const before = snapshot(seeded.dir);
-    const reports: Error[] = [];
 
-    await removeTemporaryWorkspaceDir(
-      seeded,
-      (error) => {
-        reports.push(error as Error);
-      },
-      () => Promise.reject(Object.assign(new Error("cross-device link"), { code: "EXDEV" })),
-    );
+    const { reports } = await removeWith(seeded, undefined, failing("EACCES"));
 
-    expect(reports.map((error) => (error as NodeJS.ErrnoException).code)).toEqual(["EXDEV"]);
+    expect(reports.map((error) => (error as NodeJS.ErrnoException).code)).toEqual(["EACCES"]);
     expect(snapshot(seeded.dir)).toEqual(before);
     expect(before.map((line) => line.split(" ")[0])).toEqual(TREE);
     expect(readdirSync(seeded.trash)).toEqual([]);
