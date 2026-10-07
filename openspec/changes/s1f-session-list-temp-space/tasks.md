@@ -139,11 +139,16 @@ Minimal mergeable slice: 7.1、7.2 各自可单独合入（7.1 建出一个暂�
 - [x] 8.1 新模块 `server/src/workspaces/snapshots.ts` 的 `take`：遍历、清单、各类条目规则、`0700` / `0600` 权限、结果三态（`ok` / `too_large` / `failed`）、非 `ok` 时删掉半份。快照根与上限由调用方传入（生产装配在 10.5 接上；本组以测试为入口）。测试（新文件 `server/test/workspace-snapshots-take.test.ts`，真实临时目录）：workspace-snapshots「快照的存放位置」第一个场景、「快照内容规则」三个场景。
   入口形状在本任务定下，8.2、8.3 只往选项对象里加字段、不改签名：`take` 收一个选项对象，至少含工作空间根、快照根、`workspaceId`、`userMessageId` 与排除名单；数值上限（8.2）与上一份快照（8.3）是之后加进同一对象的字段。「各类条目」场景要求 `node_modules/` 以 `excluded` 进 `skipped`、`docs/node_modules` 普通文件照常进快照，所以**按名排除目录在本任务实现**（名单由调用方传入）；8.2 做三个数值上限与「版本库目录进快照」。结果类型现在就含 `too_large`，本任务没有产生它的路径。
   「失败不留半份」的 IO 错误用 `vi.spyOn(fs.promises, …)` 注入：`take` 是异步的（快照期间仍要能应答停止），模块经 `node:fs` 的 `promises` 对象调用文件系统，该对象与测试拿到的是同一个，所以不需要 `syncBuiltinESMExports()`。普通文件按 design D9「快照期间可能有写入者」以 `O_NOFOLLOW | O_NONBLOCK` 打开、`fstat` 后从句柄复制，测试覆盖三种分类之后的替换：文件换成指向工作空间外的符号链接（外部内容不进 `tree/`）、文件换成 FIFO（`take` 在有限时间内返回，条目按 `special` 跳过）、父目录换成指向工作空间外的符号链接（登记的残余：用例只钉住「按句柄读取」这一层，不声称挡住它；目录条目在 `readdir` 之前被替换的那一种没有用例，也挡不住）。调用方错误（`workspaceId` / `userMessageId` 不合法、快照根在工作空间之内）在落盘前抛 `TypeError`，不属于三态结果——10.5 的调用方要自己兜住；「读不了的子目录」在 root 下不成立，用例按 `geteuid() === 0` 跳过（先例 `sandbox-dirs.test.ts`）。
-- [ ] 8.2 上限：单文件、总量、条目数（按名排除目录已在 8.1 实现）；越限即停；`.git` 不被排除。测试：「快照上限与配置」的「单文件上限」「总量与条目上限」「版本库目录进快照」。
+- [x] 8.2 上限：单文件、总量、条目数（按名排除目录已在 8.1 实现）；越限即停；`.git` 不被排除。测试：「快照上限与配置」的「单文件上限」「总量与条目上限」「版本库目录进快照」。
+  测试写进新文件 `server/test/workspace-snapshots-limits.test.ts`（`workspace-snapshots-take.test.ts` 已 732 行）；该文件里的本地夹具（建工作空间、放文件、读清单等）抽到 `server/test/workspace-snapshots-helpers.ts`，两个测试文件与 8.3、9.1 共用（不复制实现，原文件的断言不改）。
+  计量口径：三个上限是 `take` 选项对象里新加的字段，本任务只加字段、不改签名。单文件与总量都用打开后 `fstat` 的 `size`；超过单文件上限的文件不读内容、不计入总量与条目数；`entries` 的条目数含目录与符号链接；被排除的目录与 `skipped` 的条目不计数；恰等于上限不算超限。总量或条目数将被越过时在**读那个文件之前**停止并返回 `too_large`（越限的那个文件不被读取），走既有的「非 `ok` 删半份」路径。
+  快照期间有写入者时上限仍要成立（design D9）：复制一个文件至多读它 `fstat` 的 `size` 个字节——复制期间被追加的内容不进快照，`tree/` 下副本的长度等于清单里的 `size`，总量上限不会被绕过。加一条用例钉住。
+  复制期间被截短的文件：清单 `size` 记实际复制的字节数（副本长度恒等于清单 `size`，总量按实际累计）。三个上限不是正的安全整数时属调用方错误，落盘前抛 `TypeError`（否则与 `NaN` 比较恒为假，上限被静默关掉）。
 - [ ] 8.3 去重：上一份清单比对三元组 → 硬链接，否则复制（8.1 起普通文件按句柄复制，与只收路径的 `COPYFILE_FICLONE` 不能同时成立——本任务定写时复制是否保留，见 design D9「快照期间可能有写入者」）；链接失败退为复制。判定「未变」用的三元组取自打开后的 `fstat`。测试：「未变文件的去重」四个场景（断言 inode 与 `nlink`）。
 - [ ] 8.4 变异证据：跟随符号链接 → 「各类条目」里指向工作空间外的链接被复制，判红；比对只看 `mtime` → 「内容变了而 mtime 被改回」判红；在工作空间与快照之间建硬链接 → 「不是同一个 inode」判红；越限后继续复制 → 用一个会抛错的读取桩证明越限后没有再读文件；把 `.git` 加回默认排除 → 「版本库目录进快照」判红。
 
 Suggested fixture level: expanded - 文件 IO、路径安全、资源上限与大输入（Critical Path）
+Risk packs: File IO / path safety（8.1 的条目规则与替换用例、8.3 的 inode 断言）、Resource limits / large input（8.2 三个上限与越限即停）、Error handling / partial outputs（「失败不留半份」、`too_large` 删半份）、Auth / permissions（`0700` / `0600`）；不选 Schema、Config（配置键在 7.2）、Public API（本组无生产调用方）。
 Minimal mergeable slice: 8.1（无去重、无上限的正确快照；模块由自己的测试文件引用，尚无生产调用方，线上行为不变）；8.2、8.3 各自随后
 
 ## 9. server — 快照还原（restore）与目录清理
