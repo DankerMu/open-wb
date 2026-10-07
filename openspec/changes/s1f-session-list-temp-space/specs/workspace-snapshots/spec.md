@@ -25,7 +25,7 @@
 ### Requirement: 快照内容规则
 `take(workspaceRoot, …)` SHALL 自工作空间根向下遍历，用不跟随符号链接的元数据判定每个条目，并写出清单 `manifest.json`：`{entries:[…], skipped:[{path,reason}]}`，`path` 为相对工作空间根的 POSIX 路径。规则：
 - 目录：记 `{path,type:"dir",mode}`，在 `tree/` 下建同名目录，继续向下；
-- 普通文件：记 `{path,type:"file",size,mtimeMs,ctimeMs,mode}`，内容放在 `tree/<path>`；
+- 普通文件：记 `{path,type:"file",size,mtimeMs,ctimeMs,ino,mode}`（`ino` 是该文件在工作空间里的 inode 号，只用来判定「是不是同一个文件」），内容放在 `tree/<path>`；
 - 符号链接：记 `{path,type:"symlink",target}`（`target` 为 `readlink` 的原字符串），SHALL NOT 跟随、SHALL NOT 复制目标内容；
 - FIFO、socket、设备等其它类型：不进 `entries`，记入 `skipped`，`reason` 为 `special`；
 - 名字在排除名单里的**目录**（任何层级，见「快照上限与配置」）：整棵不遍历，记入 `skipped`，`reason` 为 `excluded`；同名的普通文件不受影响；
@@ -74,7 +74,7 @@
 - **THEN** 配置解析失败，服务不启动
 
 ### Requirement: 未变文件的去重
-`take` SHALL 接受「上一份快照」——同一工作空间最近一条 `outcome='ok'` 的快照行所对应的目录（不限会话；以该行的消息 id 传入，目录位置由 `take` 按「快照的存放位置」拼出，不接受任意路径）；没有则为空。对每个进入 `entries` 的普通文件，若上一份清单里有相同 `path` 的 `file` 条目且 `size`、`mtimeMs`、`ctimeMs` 三者都与当前元数据（打开该文件后对句柄取得的）相等，SHALL 从上一份快照的 `tree/<path>` 建硬链接到本次的 `tree/<path>`，不读文件内容；否则 SHALL 经同一个已打开的句柄复制当前文件内容（与没有上一份时相同；不按路径复制，不使用写时复制）。上一份的目录或清单不存在、读不了或不可解析时 SHALL 按没有上一份处理；建硬链接失败（上一份正被删除、链接数上限等）SHALL 退为复制；两者都不使本次快照失败。被链接的文件与被复制的文件一样计入条目上限与总量上限，单文件上限的判定先于比对。硬链接只在快照根内部的两份快照之间建立，SHALL NOT 在快照与工作空间之间建立任何硬链接。删除一份快照 SHALL NOT 影响其它快照的可读性（链接计数保证）。
+`take` SHALL 接受「上一份快照」——同一工作空间最近一条 `outcome='ok'` 的快照行所对应的目录（不限会话；以该行的消息 id 传入，目录位置由 `take` 按「快照的存放位置」拼出，不接受任意路径）；没有则为空。对每个进入 `entries` 的普通文件，若上一份清单里有相同 `path` 的 `file` 条目且 `ino`、`size`、`mtimeMs`、`ctimeMs` 四者都与当前元数据（打开该文件后对句柄取得的）相等，SHALL 从上一份快照的 `tree/<path>` 建硬链接到本次的 `tree/<path>`，不读文件内容；否则 SHALL 经同一个已打开的句柄复制当前文件内容（与没有上一份时相同；不按路径复制，不使用写时复制）。上一份的目录或清单不存在、读不了或不可解析时 SHALL 按没有上一份处理；建硬链接失败（上一份正被删除、链接数上限等）SHALL 退为复制；两者都不使本次快照失败。被链接的文件与被复制的文件一样计入条目上限与总量上限，单文件上限的判定先于比对。硬链接只在快照根内部的两份快照之间建立，SHALL NOT 在快照与工作空间之间建立任何硬链接。删除一份快照 SHALL NOT 影响其它快照的可读性（链接计数保证）。
 
 #### Scenario: 未变文件不重复占用
 - **WHEN** 对含 `a.txt`、`b.txt` 的工作空间先后做两次快照，其间只改写 `b.txt`

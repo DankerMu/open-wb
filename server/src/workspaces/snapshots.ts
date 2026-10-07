@@ -21,8 +21,8 @@
  *      listed and copied whole from wherever the link points.
  *
  * Deduplication (spec「未变文件的去重」): a file whose `fstat` says what the previous snapshot's
- * manifest says of the same path is hard-linked from that snapshot's `tree/` instead of being
- * read. Links only ever join two snapshots of this root. Copy-on-write is not used: `copyFile`
+ * manifest says of the same path (inode number, size, both times) is hard-linked from that
+ * snapshot's `tree/` instead of being read. Links only ever join two snapshots of this root. Copy-on-write is not used: `copyFile`
  * takes a path, and copying by path would follow a symbolic link put there after classification.
  *
  * Asynchronous on purpose: the snapshot runs as the supervisor's pre-dispatch step, during which
@@ -46,7 +46,7 @@ interface SkippedEntry {
 
 type ManifestEntry =
   | { path: string; type: "dir"; mode: number }
-  | { path: string; type: "file"; size: number; mtimeMs: number; ctimeMs: number; mode: number }
+  | ({ path: string; type: "file" } & FileState & { mode: number })
   | { path: string; type: "symlink"; target: string };
 
 interface TakeOptions {
@@ -78,11 +78,18 @@ export type TakeResult =
   | { outcome: "too_large" }
   | { outcome: "failed"; error: unknown };
 
-/** What a manifest records of a file's state; equal triples mean the file did not change. */
+/**
+ * What a manifest records of a workspace file's identity and state; all four equal means the
+ * file did not change. `ino` cannot be left out: another file of the same size and times can be
+ * moved under the same path (renaming a parent directory leaves the file's `ctime` alone).
+ * An inode number above 2^53 loses precision as a `number`; a collision would also need the
+ * other three items equal.
+ */
 interface FileState {
   size: number;
   mtimeMs: number;
   ctimeMs: number;
+  ino: number;
 }
 
 interface Walk {
@@ -228,7 +235,8 @@ async function previousFiles(previousDir: string): Promise<Map<string, FileState
     for (const entry of (manifest as { entries: unknown[] }).entries) {
       const file = entry as { path: string; type: unknown } & FileState;
       if (file.type === "file") {
-        files.set(file.path, { size: file.size, mtimeMs: file.mtimeMs, ctimeMs: file.ctimeMs });
+        const { size, mtimeMs, ctimeMs, ino } = file;
+        files.set(file.path, { size, mtimeMs, ctimeMs, ino });
       }
     }
     return files;
@@ -327,6 +335,7 @@ async function visitFile(walk: Walk, path: string): Promise<void> {
         size,
         mtimeMs: stat.mtimeMs,
         ctimeMs: stat.ctimeMs,
+        ino: stat.ino,
         mode: stat.mode & 0o7777,
       });
     }
@@ -337,10 +346,12 @@ async function visitFile(walk: Walk, path: string): Promise<void> {
 
 /**
  * Hard-links the previous snapshot's copy of `path` into this `tree/` when the previous manifest
- * records the `size`, `mtimeMs` and `ctimeMs` that `stat` (the `fstat` of the opened workspace
- * file) has; nothing of the file is read. `false` when it did not: no such entry, another
- * triple, or any failure (the previous snapshot is being removed, the link count is at its
- * limit, …) — the caller then copies through its handle.
+ * records the `ino`, `size`, `mtimeMs` and `ctimeMs` that `stat` (the `fstat` of the opened
+ * workspace file) has; nothing of the file is read. `false` when it did not: no such entry, an
+ * item that differs or is not a number (a manifest written before `ino` was recorded, a damaged
+ * one: strict comparison with the `fstat` number rules both out), or any failure (the previous
+ * snapshot is being removed, the link count is at its limit, …). The caller then copies through
+ * its handle.
  *
  * The link's source is a path under the previous `tree/`, never one in the workspace. `link`
  * follows a symbolic link on some systems, so the source must be a regular file itself, of the
@@ -351,7 +362,8 @@ async function linkUnchanged(walk: Walk, path: string, stat: Stats): Promise<boo
   const before = walk.previous.get(path);
   if (
     walk.previousTree === undefined ||
-    before?.size !== stat.size ||
+    before?.ino !== stat.ino ||
+    before.size !== stat.size ||
     before.mtimeMs !== stat.mtimeMs ||
     before.ctimeMs !== stat.ctimeMs
   ) {

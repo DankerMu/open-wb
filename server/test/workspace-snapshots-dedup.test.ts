@@ -11,6 +11,7 @@ import fs, {
   lstatSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   symlinkSync,
   utimesSync,
@@ -30,6 +31,7 @@ import {
   manifestOf,
   put,
   run,
+  sameTimes,
   W,
 } from "./workspace-snapshots-helpers.js";
 
@@ -172,6 +174,66 @@ describe("未变文件的去重", () => {
     expect(manifestOf(second).entries).toEqual([fileEntry(f, "a.txt")]);
   });
 
+  it("an unchanged file is linked and both manifests record the workspace file's inode number", async () => {
+    const f = fixture();
+    const second = secondOf(f);
+    put(f.workspace, "a.txt", "alpha\n");
+    const inWorkspace = lstatSync(join(f.workspace, "a.txt")).ino;
+    expect(await run(f)).toEqual({ outcome: "ok", skipped: [] });
+
+    expect(await takeSecond(f)).toEqual({ outcome: "ok", skipped: [] });
+
+    expect(inode(treeFile(second, "a.txt"))).toBe(inode(treeFile(f, "a.txt")));
+    expect(inode(treeFile(f, "a.txt"))).not.toBe(inWorkspace);
+    expect(manifestOf(f).entries).toMatchObject([{ path: "a.txt", ino: inWorkspace }]);
+    expect(manifestOf(second).entries).toMatchObject([{ path: "a.txt", ino: inWorkspace }]);
+    expect(manifestOf(second).entries).toEqual([fileEntry(f, "a.txt")]);
+    expect(lstatSync(join(f.workspace, "a.txt")).ino).toBe(inWorkspace);
+  });
+
+  it("another file of the same size and times under the same path is copied: only ino tells them apart", async () => {
+    const f = fixture();
+    const second = secondOf(f);
+    const at = (path: string) => join(f.workspace, path);
+    put(f.workspace, "d1/f", "AAAAAA\n");
+    put(f.workspace, "d2/f", "BBBBBB\n");
+    await sameTimes(at("d1/f"), at("d2/f"), PINNED_SECONDS);
+    renameSync(at("d1"), at("sub"));
+    expect(await run(f)).toEqual({ outcome: "ok", skipped: [] });
+    const recorded = manifestOf(f).entries.find(
+      (entry) => (entry as { path: string }).path === "sub/f",
+    );
+
+    // Renaming the parent leaves the child's ctime alone: no race with `take` is involved.
+    renameSync(at("sub"), at("old"));
+    renameSync(at("d2"), at("sub"));
+    const now = lstatSync(at("sub/f"));
+    expect(recorded).toMatchObject({
+      size: now.size,
+      mtimeMs: now.mtimeMs,
+      ctimeMs: now.ctimeMs,
+    });
+    expect(now.mtimeMs).toBe(PINNED_SECONDS * 1000);
+    expect(now.ino).not.toBe(lstatSync(at("old/f")).ino);
+    const links = watchLinks();
+
+    expect(await takeSecond(f)).toEqual({ outcome: "ok", skipped: [] });
+
+    expect(readFileSync(treeFile(second, "sub/f"), "utf8")).toBe("BBBBBB\n");
+    expect(readFileSync(treeFile(f, "sub/f"), "utf8")).toBe("AAAAAA\n");
+    expect(links).toEqual([]);
+    expectCopied(f, "sub/f", "BBBBBB\n");
+    expect(inode(treeFile(second, "sub/f"))).not.toBe(inode(treeFile(f, "sub/f")));
+    expect(recorded).toMatchObject({ ino: lstatSync(at("old/f")).ino });
+    expect(manifestOf(second).entries).toEqual([
+      dirEntry(f, "old"),
+      fileEntry(f, "old/f"),
+      dirEntry(f, "sub"),
+      fileEntry(f, "sub/f"),
+    ]);
+    expect(manifestOf(second).entries[3]).toMatchObject({ ino: now.ino });
+  });
+
   it("上一份消失时退为复制: the previous directory is gone, the result is ok and the tree complete", async () => {
     const f = fixture();
     const second = secondOf(f);
@@ -301,13 +363,16 @@ describe("退路 — 上一份不可用时当作没有", () => {
       "the manifest's entries is not a list",
       (f) => writeFileSync(join(f.snapshot, "manifest.json"), '{"entries":5,"skipped":[]}'),
     ],
+    // Reading `type` of a null throws, which discards the whole manifest.
     [
-      "the manifest's entries are not entries",
-      (f) =>
+      "the manifest's entries hold a null",
+      (f) => {
+        const manifest = manifestOf(f);
         writeFileSync(
           join(f.snapshot, "manifest.json"),
-          JSON.stringify({ entries: [null, 7, "a.txt", { path: "a.txt" }, { type: "file" }] }),
-        ),
+          JSON.stringify({ ...manifest, entries: [null, ...manifest.entries] }),
+        );
+      },
     ],
     ["the previous tree lacks the file", (f) => rmSync(treeFile(f, "a.txt"))],
     ["the previous tree is gone", (f) => rmSync(join(f.snapshot, "tree"), { recursive: true })],
@@ -329,6 +394,74 @@ describe("退路 — 上一份不可用时当作没有", () => {
       skipped: [],
     });
   });
+
+  it.each([
+    ["a number", 7],
+    ["a string", "a.txt"],
+    ["an object with no type", { path: "a.txt" }],
+    ["a file entry with nothing else", { type: "file" }],
+    ["a list", []],
+  ])(
+    "an element of entries that is %s is passed over: the entries after it still link",
+    async (_name, element) => {
+      const f = fixture();
+      const second = secondOf(f);
+      put(f.workspace, "a.txt", "alpha\n");
+      put(f.workspace, "b.txt", "bravo\n");
+      expect(await run(f)).toEqual({ outcome: "ok", skipped: [] });
+      const manifest = manifestOf(f);
+      writeFileSync(
+        join(f.snapshot, "manifest.json"),
+        JSON.stringify({ ...manifest, entries: [element, ...manifest.entries] }),
+      );
+
+      expect(await takeSecond(f)).toEqual({ outcome: "ok", skipped: [] });
+
+      expect(inode(treeFile(second, "a.txt"))).toBe(inode(treeFile(f, "a.txt")));
+      expect(inode(treeFile(second, "b.txt"))).toBe(inode(treeFile(f, "b.txt")));
+      expect(manifestOf(second)).toEqual({
+        entries: [fileEntry(f, "a.txt"), fileEntry(f, "b.txt")],
+        skipped: [],
+      });
+    },
+  );
+
+  /** The manifest is valid but for one item of a.txt's entry; b.txt's entry is as written. */
+  const notTheNumber: [string, (value: unknown) => unknown][] = [
+    ["absent", () => undefined],
+    ["null", () => null],
+    ["the same digits as a string", (value) => String(value)],
+  ];
+  const items = ["ino", "size", "mtimeMs", "ctimeMs"].flatMap((item) =>
+    notTheNumber.map(([what, spoil]) => [item, what, spoil] as const),
+  );
+  it.each(items)(
+    "a previous entry whose %s is %s is not a match: that file is copied, the other still links",
+    async (item, _what, spoil) => {
+      const f = fixture();
+      const second = secondOf(f);
+      put(f.workspace, "a.txt", "alpha\n");
+      put(f.workspace, "b.txt", "bravo\n");
+      expect(await run(f)).toEqual({ outcome: "ok", skipped: [] });
+      const [a, b] = [fileEntry(f, "a.txt"), fileEntry(f, "b.txt")];
+      expect(manifestOf(f).entries).toEqual([a, b]);
+      writeFileSync(
+        join(f.snapshot, "manifest.json"),
+        JSON.stringify({ entries: [{ ...a, [item]: spoil(a[item]) }, b], skipped: [] }),
+      );
+      const links = watchLinks();
+
+      expect(await takeSecond(f)).toEqual({ outcome: "ok", skipped: [] });
+
+      expect(links).toEqual([[treeFile(f, "b.txt"), treeFile(second, "b.txt")]]);
+      expectCopied(f, "a.txt", "alpha\n");
+      expect(inode(treeFile(second, "b.txt"))).toBe(inode(treeFile(f, "b.txt")));
+      expect(manifestOf(second)).toEqual({
+        entries: [fileEntry(f, "a.txt"), fileEntry(f, "b.txt")],
+        skipped: [],
+      });
+    },
+  );
 
   it("a previous id that has no snapshot directory at all behaves like no previous snapshot", async () => {
     const f = fixture();
