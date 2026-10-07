@@ -184,7 +184,7 @@ Minimal mergeable slice: 8.1（无去重、无上限的正确快照；模块由�
   模块落点：`restore` 与父目录校验函数 `parentsAreReal` 在新模块 `server/src/workspaces/snapshots-restore.ts`（`snapshots.ts` 留给 `take` 与 9.3 的删除函数）；入参是 `{ workspaceRoot, snapshotDir }`，快照目录由 12.1 的调用方从受信任的行拼出。`removed` 只计清单里没有的多余条目（每个最顶层删除计一项）；清单路径上类型不对的占位者被替换时不计入 `removed`。写回文件的 `atime` 取清单的 `mtime`。某级父目录缺失（例如它因 `EACCES` 没建成）时该条目记 `failed`、不抛。测试分两个文件：`workspace-snapshots-restore.test.ts`（规格场景）与 `workspace-snapshots-restore-safety.test.ts`（白盒、替换与损坏快照）。
   非目标：非 UTF-8 文件名与遍历中途消失的条目（#1148 待定规格）——按上一条规则处理，不为它加用例。测试里改 umask 的用例在 `afterEach` 还原 umask。
 - [x] 9.2 路径安全：每次写 / 删之前逐级 `lstat` 父目录，遇符号链接或非目录记 `failed` 并跳过；单条目 `EACCES` / `EPERM` 记 `failed` 继续。父目录校验是一个导出的函数（测试 seam）：「父目录被换成符号链接」第二段直接对它给出一条某级父目录为符号链接的路径，9.4 的「去掉父目录校验」变异也靠它判红。测试：「父目录被换成符号链接」两段。
-- [ ] 9.3 `removeSnapshot(workspaceId, messageId)` 与 `removeWorkspaceSnapshots(workspaceId)`：只在快照根下、分量校验为十六进制 id 与十进制消息 id；不存在视为成功。测试：非法分量被拒、删除较早一份后较晚一份仍可读（与 8.3 的场景呼应）。
+- [x] 9.3 `removeSnapshot(workspaceId, messageId)` 与 `removeWorkspaceSnapshots(workspaceId)`：只在快照根下、分量校验为十六进制 id 与十进制消息 id；不存在视为成功。测试：非法分量被拒、删除较早一份后较晚一份仍可读（与 8.3 的场景呼应）。
   **实施注记（9.3，fixture 评审补充）**：
   - 两个函数都带快照根：`removeSnapshot({ snapshotsRoot, workspaceId, messageId })`、`removeWorkspaceSnapshots({ snapshotsRoot, workspaceId })`，落在 `server/src/workspaces/snapshots.ts`（还原模块不动）。分量校验与 `take` 同一套（空间 id 是 32 位小写十六进制；消息 id 是正的安全整数），不合法时在触碰磁盘之前抛 `TypeError`。
   - 只做递归删除（目标不存在视为成功）；SHALL NOT 对 `tree/` 里的文件做 `chmod` 或任何写入——它们与相邻快照共享 inode。其它错误原样抛给调用方（接线点负责报告，见 10.5 / 12.3）。

@@ -149,12 +149,8 @@ function snapshotDirOf(options: TakeOptions): string {
       throw new TypeError("snapshot limits must be positive integers");
     }
   }
-  if (typeof workspaceId !== "string" || !WORKSPACE_ID.test(workspaceId)) {
-    throw new TypeError("snapshot workspace id must be 32 lowercase hex characters");
-  }
-  if (!Number.isSafeInteger(userMessageId) || userMessageId <= 0) {
-    throw new TypeError("snapshot message id must be a positive integer");
-  }
+  requireWorkspaceId(workspaceId);
+  requireMessageId(userMessageId);
   if (
     previousMessageId !== undefined &&
     (!Number.isSafeInteger(previousMessageId) ||
@@ -167,6 +163,63 @@ function snapshotDirOf(options: TakeOptions): string {
     throw new TypeError("snapshot root must not be inside the workspace");
   }
   return join(options.snapshotsRoot, workspaceId, String(userMessageId));
+}
+
+/** The two path components under the snapshot root: ids of trusted rows, never free text. */
+function requireWorkspaceId(workspaceId: string): void {
+  if (typeof workspaceId !== "string" || !WORKSPACE_ID.test(workspaceId)) {
+    throw new TypeError("snapshot workspace id must be 32 lowercase hex characters");
+  }
+}
+
+function requireMessageId(messageId: number): void {
+  if (!Number.isSafeInteger(messageId) || messageId <= 0) {
+    throw new TypeError("snapshot message id must be a positive integer");
+  }
+}
+
+/**
+ * Removes `<snapshotsRoot>/<workspaceId>/<messageId>` (spec「快照清理」); a directory that is not
+ * there is success. Rejects with `TypeError` before touching the disk when a component is not a
+ * valid id. `<workspaceId>` must be a directory itself: through a symbolic link the removal
+ * would happen outside the root, so that is an error and nothing is removed. Only unlinks:
+ * files under `tree/` share inodes with the neighbouring snapshots and are never written or
+ * chmod-ed. Any other error propagates.
+ */
+export async function removeSnapshot(options: {
+  snapshotsRoot: string;
+  workspaceId: string;
+  messageId: number;
+}): Promise<void> {
+  requireWorkspaceId(options.workspaceId);
+  requireMessageId(options.messageId);
+  const workspaceDir = join(options.snapshotsRoot, options.workspaceId);
+  let stat: Stats;
+  try {
+    stat = await fsp.lstat(workspaceDir);
+  } catch (error) {
+    if (codeOf(error) === "ENOENT") {
+      return;
+    }
+    throw error;
+  }
+  if (!stat.isDirectory()) {
+    throw new Error("snapshot workspace directory is not a real directory");
+  }
+  await fsp.rm(join(workspaceDir, String(options.messageId)), { recursive: true, force: true });
+}
+
+/**
+ * Removes `<snapshotsRoot>/<workspaceId>` with every snapshot in it; missing is success. A
+ * symbolic link in that place is itself removed and not followed. Validation and errors as in
+ * `removeSnapshot`.
+ */
+export async function removeWorkspaceSnapshots(options: {
+  snapshotsRoot: string;
+  workspaceId: string;
+}): Promise<void> {
+  requireWorkspaceId(options.workspaceId);
+  await fsp.rm(join(options.snapshotsRoot, options.workspaceId), { recursive: true, force: true });
 }
 
 /** Whether `path` is `directory` itself or lies under it, by name: links are not resolved. */
