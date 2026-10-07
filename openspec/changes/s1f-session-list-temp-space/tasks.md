@@ -154,13 +154,20 @@ Minimal mergeable slice: 8.1（无去重、无上限的正确快照；模块由�
 
 ## 9. server — 快照还原（restore）与目录清理
 
-- [ ] 9.1 `snapshots.ts` 的 `restore`：结构校验先行；删除多余条目、确保目录；文件按三步判定（三元组相等不动 → 大小相同且内容逐字节相同不动 → 写回：临时文件 + `rename`、设回 `mtime`、显式 `chmod` 为 `(清单 mode & 0o777) | 0o660`）；重建符号链接；`skipped` 之下不碰；返回 `{restored,removed,skipped,failed}`，`restored` 只计内容被写回的文件与重建的符号链接，`removed` 把递归删除的目录计一项。测试（新文件 `server/test/workspace-snapshots-restore.test.ts`）：workspace-snapshots「还原」的「还原改动、新增与删除」「只计内容确有变化的文件」「跳过项不动并列出」「版本库随撤回还原」「写回文件的权限位」「结构性失败不动工作空间」「幂等」。
+- [x] 9.1 `snapshots.ts` 的 `restore`：结构校验先行；删除多余条目、确保目录；文件按三步判定（`ino` 与三元组都相等不动 → 大小相同且内容逐字节相同不动 → 写回：临时文件上设好 `mtime` 与权限位 `(清单 mode & 0o777) | 0o660` 后 `rename`）；重建符号链接；`skipped` 之下不碰；返回 `{restored,removed,skipped,failed}`，`restored` 只计内容被写回的文件与重建的符号链接，`removed` 把递归删除的目录计一项。测试（新文件 `server/test/workspace-snapshots-restore.test.ts`）：workspace-snapshots「还原」的「还原改动、新增与删除」「只计内容确有变化的文件」「跳过项不动并列出」「版本库随撤回还原」「写回文件的权限位」「结构性失败不动工作空间」「幂等」。
   「未变则不动」的判定同样要比 `ino`（#939 的同一条理由：只比大小与两个时间时，换掉父目录能让还原把另一个文件留在原地）；清单的 `file` 条目自 #939 起带 `ino`。`tree/` 下的文件可能与别的快照共享 inode（硬链接去重）：还原与清理对 `tree/` 只读、只删，不原地写、不 `chmod`。
-- [ ] 9.2 路径安全：每次写 / 删之前逐级 `lstat` 父目录，遇符号链接或非目录记 `failed` 并跳过；单条目 `EACCES` / `EPERM` 记 `failed` 继续。测试：「父目录被换成符号链接」两段。
+  结构校验细化：清单 JSON 可解析、`entries` / `skipped` 是数组、每个条目的类型与字段齐全、`path` 是相对 POSIX 路径（无空分量、`.`、`..`、不以 `/` 开头）；任何一条不合法都在动工作空间之前抛错。
+  处理次序：先删多余条目（遍历只用 `lstat`，不进入符号链接；目录递归删除计一项）→ 自顶向下确保目录（同名的非目录先删——是符号链接时只删链接本身；新建目录 `mkdir` 后经 `O_DIRECTORY | O_NOFOLLOW` 句柄 `fchmod 0o2770`）→ 文件 → 符号链接。
+  读工作空间文件一律经 `O_NOFOLLOW | O_NONBLOCK` 句柄并 `fstat` 确认是普通文件（与 8.1 同一手法；design D10）。写回：同目录、独占新建、名字带随机后缀的临时文件，内容从 `tree/<path>` 复制，**经临时文件的句柄** `fchmod` 与 `futimes`（清单 `mtime`）之后才 `rename` 到位；`rename` 之后不再按最终路径做任何操作。第二步的内容比较至多读清单 `size` 个字节。清单里位于某个 `skipped` 路径之下的条目按 `skipped` 处理（不碰）。崩溃留下的临时文件在下次还原时作为多余条目被删。
+  单条目的非权限类错误（`ENOENT`、`ENOTEMPTY`、`EIO` 等）向外抛（部分还原、可重试，由 12.1 映射为服务错误）；`EACCES` / `EPERM` 记 `failed` 继续（9.2）。
+  模块落点：`restore` 与父目录校验函数 `parentsAreReal` 在新模块 `server/src/workspaces/snapshots-restore.ts`（`snapshots.ts` 留给 `take` 与 9.3 的删除函数）；入参是 `{ workspaceRoot, snapshotDir }`，快照目录由 12.1 的调用方从受信任的行拼出。`removed` 只计清单里没有的多余条目（每个最顶层删除计一项）；清单路径上类型不对的占位者被替换时不计入 `removed`。写回文件的 `atime` 取清单的 `mtime`。某级父目录缺失（例如它因 `EACCES` 没建成）时该条目记 `failed`、不抛。测试分两个文件：`workspace-snapshots-restore.test.ts`（规格场景）与 `workspace-snapshots-restore-safety.test.ts`（白盒、替换与损坏快照）。
+  非目标：非 UTF-8 文件名与遍历中途消失的条目（#1148 待定规格）——按上一条规则处理，不为它加用例。测试里改 umask 的用例在 `afterEach` 还原 umask。
+- [x] 9.2 路径安全：每次写 / 删之前逐级 `lstat` 父目录，遇符号链接或非目录记 `failed` 并跳过；单条目 `EACCES` / `EPERM` 记 `failed` 继续。父目录校验是一个导出的函数（测试 seam）：「父目录被换成符号链接」第二段直接对它给出一条某级父目录为符号链接的路径，9.4 的「去掉父目录校验」变异也靠它判红。测试：「父目录被换成符号链接」两段。
 - [ ] 9.3 `removeSnapshot(workspaceId, messageId)` 与 `removeWorkspaceSnapshots(workspaceId)`：只在快照根下、分量校验为十六进制 id 与十进制消息 id；不存在视为成功。测试：非法分量被拒、删除较早一份后较晚一份仍可读（与 8.3 的场景呼应）。
-- [ ] 9.4 变异证据：先删后校验 → 「结构性失败不动工作空间」判红；写回改用硬链接 → 新增一条「还原后改写工作空间文件，快照内容不变」判红；去掉 `skipped` 的豁免 → 「跳过项不动」判红；去掉父目录校验 → 9.2 第二段判红；去掉第二步的内容比较 → 「幂等」的 `restored=0` 与「只计内容确有变化的文件」判红；写回时权限位直接取清单 `mode` → 「写回文件的权限位」判红；写回靠 umask 而不显式 `chmod` → 同一场景（umask `0o077`）判红。
+- [x] 9.4 变异证据：先删后校验 → 「结构性失败不动工作空间」判红；写回改用硬链接 → 新增一条「还原后改写工作空间文件，快照内容不变」判红；去掉 `skipped` 的豁免 → 「跳过项不动」判红；去掉父目录校验 → 9.2 第二段判红；去掉第二步的内容比较 → 「幂等」的 `restored=0` 与「只计内容确有变化的文件」判红；写回时权限位直接取清单 `mode` → 「写回文件的权限位」判红；写回靠 umask 而不显式 `chmod` → 同一场景（umask `0o077`）判红。
 
 Suggested fixture level: expanded - 在用户工作空间里写与删文件、路径安全、权限位规则（Critical Path）
+Risk packs: File IO / path safety / overwrite（9.1 的删除与写回、9.2 的父目录校验、no-follow 读取）、Auth / permissions（「写回文件的权限位」）、Error handling / partial outputs（「结构性失败不动工作空间」「幂等」、部分还原可重试）、Legacy compatibility（没有 `ino` 的清单落到第二步）；不选 Schema、Config、Public API（本组无生产调用方）。
 Minimal mergeable slice: 9.1 + 9.2 一起（没有父目录校验的还原不可合入）；9.3 随后
 
 ## 10. 契约 — 快照登记、派发前步骤、受理时做快照、消息 `undo` 键

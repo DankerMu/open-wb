@@ -33,7 +33,8 @@ import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
-const SOURCE_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+/** A workspace file is only ever opened like this: its last component is not followed, no blocking. */
+export const SOURCE_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 const COPY_CHUNK_BYTES = 64 * 1024;
 const WORKSPACE_ID = /^[0-9a-f]{32}$/;
 
@@ -44,7 +45,7 @@ interface SkippedEntry {
   reason: SkipReason;
 }
 
-type ManifestEntry =
+export type ManifestEntry =
   | { path: string; type: "dir"; mode: number }
   | ({ path: string; type: "file" } & FileState & { mode: number })
   | { path: string; type: "symlink"; target: string };
@@ -162,13 +163,16 @@ function snapshotDirOf(options: TakeOptions): string {
   ) {
     throw new TypeError("previous snapshot message id must be another positive integer");
   }
-  const fromWorkspace = relative(resolve(options.workspaceRoot), resolve(options.snapshotsRoot));
-  const outside =
-    fromWorkspace === ".." || fromWorkspace.startsWith(`..${sep}`) || isAbsolute(fromWorkspace);
-  if (!outside) {
+  if (isWithin(options.workspaceRoot, options.snapshotsRoot)) {
     throw new TypeError("snapshot root must not be inside the workspace");
   }
   return join(options.snapshotsRoot, workspaceId, String(userMessageId));
+}
+
+/** Whether `path` is `directory` itself or lies under it, by name: links are not resolved. */
+export function isWithin(directory: string, path: string): boolean {
+  const from = relative(resolve(directory), resolve(path));
+  return !(from === ".." || from.startsWith(`..${sep}`) || isAbsolute(from));
 }
 
 async function requireDirectory(workspaceRoot: string): Promise<void> {
@@ -448,6 +452,6 @@ async function readable<T>(
   }
 }
 
-function codeOf(error: unknown): unknown {
+export function codeOf(error: unknown): unknown {
   return typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
 }
