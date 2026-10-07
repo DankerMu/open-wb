@@ -267,8 +267,14 @@ Minimal mergeable slice: 13.1、13.2、13.3 各自可单独合入（每个导出
 
 ## 14. web — 列表重建：分组、折叠、状态标记、搜索
 
-- [ ] 14.1 纯函数（在 `web/src/features/chat/session-groups.ts` 里**新增**，旧的筛选函数、`SessionFilter` 类型与 `DEFAULT_SESSION_FILTER` 此时保留不动——它们仍被 `session-filter.tsx`、`use-chat-session.ts`、`session-sidebar.tsx`、`page.tsx` 与既有测试引用，删除动作在 14.4）：`groupSessions(sessions, workspaces, mode, now)` 产出置顶区与按工作空间 / 按时间的有序分组（含分组键）、`searchSessions(sessions, query)`、归档与否的划分。单测（新文件，不改写既有分组测试）：session-sidebar「按工作空间分组」「切换为按时间」「未知空间与读取失败」的归组部分、时间分组的日历日边界（今天 0 点、6 天前、7 天前、晚于当前）、搜索的大小写与空白。
-- [ ] 14.2 本地记忆（新文件 `web/src/features/chat/session-list-prefs.ts`）：两个 `localStorage` 键的读写与容错。单测：缺失、非法值、解析失败、读写抛错。
+- [x] 14.1 纯函数（在 `web/src/features/chat/session-groups.ts` 里**新增**，旧的筛选函数、`SessionFilter` 类型与 `DEFAULT_SESSION_FILTER` 此时保留不动——它们仍被 `session-filter.tsx`、`use-chat-session.ts`、`session-sidebar.tsx`、`page.tsx` 与既有测试引用，删除动作在 14.4）：`groupSessions(sessions, workspaces, mode, now)` 产出置顶区与按工作空间 / 按时间的有序分组（含分组键）、`searchSessions(sessions, query)`、归档与否的划分。单测（新文件，不改写既有分组测试）：session-sidebar「按工作空间分组」「切换为按时间」「未知空间与读取失败」的归组部分、时间分组的日历日边界（今天 0 点、6 天前、7 天前、晚于当前）、搜索的大小写与空白。
+- [x] 14.2 本地记忆（新文件 `web/src/features/chat/session-list-prefs.ts`）：两个 `localStorage` 键的读写与容错。单测：缺失、非法值、解析失败、读写抛错。
+  **实施注记（14.1 / 14.2，fixture 评审补充）**：
+  - 既有的两参 `groupSessions(sessions, now)` 仍被旧侧栏与既有测试引用，14.4 才删；新分组函数因此取**新名字**（如 `groupSessionList(sessions, workspaces, mode, now)`），不重载、不改旧函数。`filterSessions`、`SessionFilter`、`DEFAULT_SESSION_FILTER` 原样保留。
+  - 分组键按 design D2：`pinned`、`temporary`、`unknown`、`today`、`week`、`earlier` 与工作空间 id；`workspaces` 为 null 表示空间列表没有读到（「未知空间与读取失败」）。时间分组按**本地时间**的日历日边界（复用 `sameLocalDay`）。
+  - 14.2 的容错读写仿 `web/src/routes/shell/sidebar.tsx` 的既有写法；两个单测各一个新文件。
+  - `web/test/ui-layering.test.ts`：只把 `session-list-prefs.ts` 加进 `MIGRATED_AREAS` 与对应的逐字清单断言（字母序）；`SESSION_LIST_FILES` 不动（14.6）。
+  Risk packs（14.1 / 14.2）: Persistence（localStorage 容错）、Legacy compatibility（旧导出与既有测试不动）。
 - [ ] 14.3 状态标记（`status-label.ts` 加 `等待确认`；新组件）：六种文案的可访问名、三种可见标记与 `data-status-mark`、减少动态效果下不转动。组件测试：session-sidebar「会话状态标记」两个场景、chat-web「列表条目的状态元素」。
 - [ ] 14.4 重写 `session-sidebar.tsx`（拷入层的 `button`、`input`、`collapsible`、`dropdown-menu` + Tailwind）：`新建会话`、搜索框、`分组方式` 菜单、可折叠分组、条目、空态；删除 `session-filter.tsx` 及其测试，删除 `session-groups.ts` 里的筛选函数、`SessionFilter` 类型与 `DEFAULT_SESSION_FILTER`，既有分组测试里针对筛选的用例随之删除（写进偏离记录）；`use-chat-session.ts` / `page.tsx` 去掉筛选状态、加搜索与分组状态。整页测试（新文件 `web/test/chat-session-list.test.tsx`）：「分组侧栏」八个场景、「标题搜索」的「过滤与恢复」「不影响主区」、spa-shell「列表区承载重建后的会话列表」。
 - [ ] 14.5 既有走查第 6 步的改写（**与 14.4 同 PR**，否则 `make ui-walk` 在 14.4 合入时必红——旧步骤取 `筛选任务` 按钮）：`web/e2e/ui-walk-sessions.spec.ts` 的第 6 步按 chat-harness「UI 走查会话元数据」改为分组头折叠、搜索、`分组方式` 切换、无 `筛选任务`。选择器集中在新 helper `web/e2e/ui-walk-session-list.ts`，被改写的步骤移进该 helper，`ui-walk-sessions.spec.ts` 不净增行。验证：`make ui-walk`。
