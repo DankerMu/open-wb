@@ -11,6 +11,13 @@ export const DEFAULT_OMP_MAX_PROCESSES = 16;
 /** 单个上传文件的字节上限缺省值：500 MiB。 */
 const DEFAULT_UPLOAD_MAX_BYTES = 524_288_000;
 const DEFAULT_UPLOAD_MAX_FILES = 10;
+/** 快照的单文件上限缺省值：20 MiB。 */
+const DEFAULT_SNAPSHOT_MAX_FILE_BYTES = 20_971_520;
+/** 一份快照的总字节上限缺省值：500 MiB。 */
+const DEFAULT_SNAPSHOT_MAX_TOTAL_BYTES = 524_288_000;
+const DEFAULT_SNAPSHOT_MAX_ENTRIES = 50_000;
+/** 缺省只排除依赖目录；`.git` 不在其中（版本库目录进快照）。 */
+const DEFAULT_SNAPSHOT_EXCLUDE_NAMES: readonly string[] = ["node_modules", ".venv", "__pycache__"];
 /** 正整数键的共同上界（原生计时器上限）。 */
 const MAX_POSITIVE_SETTING = 2_147_483_647;
 
@@ -35,6 +42,14 @@ export interface AgentSettings {
   uploadMaxBytes: number;
   /** 一条消息可带的附件个数上限（UPLOAD_MAX_FILES，缺省 10）。 */
   uploadMaxFiles: number;
+  /** 进快照的单个文件的字节上限（SNAPSHOT_MAX_FILE_BYTES，缺省 20971520）。 */
+  snapshotMaxFileBytes: number;
+  /** 一份快照里文件大小之和的上限（SNAPSHOT_MAX_TOTAL_BYTES，缺省 524288000）。 */
+  snapshotMaxTotalBytes: number;
+  /** 一份快照的条目数上限（SNAPSHOT_MAX_ENTRIES，缺省 50000）。 */
+  snapshotMaxEntries: number;
+  /** 任何层级上整棵不进快照的目录名（SNAPSHOT_EXCLUDE_NAMES，缺省 node_modules,.venv,__pycache__）。 */
+  snapshotExcludeNames: readonly string[];
 }
 
 export function resolveAgentSettings(
@@ -87,6 +102,22 @@ export function resolveAgentSettings(
       DEFAULT_UPLOAD_MAX_FILES,
       "UPLOAD_MAX_FILES",
     ),
+    snapshotMaxFileBytes: resolvePositiveInteger(
+      env.SNAPSHOT_MAX_FILE_BYTES,
+      DEFAULT_SNAPSHOT_MAX_FILE_BYTES,
+      "SNAPSHOT_MAX_FILE_BYTES",
+    ),
+    snapshotMaxTotalBytes: resolvePositiveInteger(
+      env.SNAPSHOT_MAX_TOTAL_BYTES,
+      DEFAULT_SNAPSHOT_MAX_TOTAL_BYTES,
+      "SNAPSHOT_MAX_TOTAL_BYTES",
+    ),
+    snapshotMaxEntries: resolvePositiveInteger(
+      env.SNAPSHOT_MAX_ENTRIES,
+      DEFAULT_SNAPSHOT_MAX_ENTRIES,
+      "SNAPSHOT_MAX_ENTRIES",
+    ),
+    snapshotExcludeNames: resolveSnapshotExcludeNames(env.SNAPSHOT_EXCLUDE_NAMES),
   };
 }
 
@@ -143,6 +174,28 @@ function resolveApprovalMaxMode(raw: string | undefined): AgentSettings["approva
     return raw;
   }
   throw new Error("APPROVAL_MAX_MODE must be exactly always-ask, write or yolo");
+}
+
+/**
+ * 逗号分隔的目录名（不 trim、不去重、保持书写顺序）；空字符串表示不排除任何目录。
+ * 每个名字非空、不含 `/` 与 NUL、不是 `.` 或 `..`；错误只命名键，不回显输入值。
+ */
+function resolveSnapshotExcludeNames(raw: string | undefined): readonly string[] {
+  if (raw === undefined) {
+    return [...DEFAULT_SNAPSHOT_EXCLUDE_NAMES];
+  }
+  if (raw === "") {
+    return [];
+  }
+  const names = raw.split(",");
+  for (const name of names) {
+    if (name === "" || name === "." || name === ".." || name.includes("/") || name.includes("\0")) {
+      throw new Error(
+        "SNAPSHOT_EXCLUDE_NAMES must be comma-separated directory names without empty, '.', '..', '/' or NUL entries",
+      );
+    }
+  }
+  return names;
 }
 
 function optionalSetting(raw: string | undefined, key: string): string | undefined {
