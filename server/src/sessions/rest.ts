@@ -315,7 +315,7 @@ export function registerSessionRoutes(
   );
 }
 
-function currentPrincipal(request: FastifyRequest): { id: string } {
+export function currentPrincipal(request: FastifyRequest): { id: string } {
   const principal = request.principal;
   if (principal === null) {
     throw new HttpError("unauthorized");

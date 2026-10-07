@@ -135,8 +135,8 @@ Minimal mergeable slice: 5.1 + 5.2 一起（删了行不删目录会留下无主
 
 ## 6. server — 列表事件连接
 
-- [ ] 6.1 通知器与路由（新模块 `server/src/sessions/list-events.ts`）：按账号登记连接；`GET /api/sessions/events` 复用 `stream/sse.ts` 的 SSE 头常量、心跳常量与注入时钟（把共用的头与心跳写出函数从 `sse.ts` 导出，不复制）；`preClose` 销毁；关停后新连接 502；不写 `id:`。测试（新文件 `server/test/session-list-events.test.ts`，真实监听 + 原生读流）：session-list-push「列表事件端点」三个场景。
-- [ ] 6.2 背压与隔离：每条连接至多一条未写出的 `sessions.changed`；写失败只关该连接。测试：「一条连接写失败不影响请求」与一条合并用例（暂停读取时连发 5 次 notify，恢复后收到的条数 ≥1 且 <5）。
+- [x] 6.1 通知器与路由（新模块 `server/src/sessions/list-events.ts`）：按账号登记连接；`GET /api/sessions/events` 复用 `stream/sse.ts` 的 SSE 头常量、心跳常量与注入时钟（把共用的头与心跳写出函数从 `sse.ts` 导出，不复制）；`preClose` 销毁；关停后新连接 502；不写 `id:`。测试（新文件 `server/test/session-list-events.test.ts`，真实监听 + 原生读流）：session-list-push「列表事件端点」三个场景。
+- [x] 6.2 背压与隔离：每条连接至多一条未写出的 `sessions.changed`；写失败只关该连接。测试：「一条连接写失败不影响请求」与一条合并用例（暂停读取时连发 5 次 notify，恢复后收到的条数 ≥1 且 <5）。
   **实施注记（6.1 / 6.2，fixture 评审补充）**：
   - 通知器由 `registerSessions` 创建并随其返回值暴露（`app.sessions` 的类型同步加键），测试与 6.5 的注入都从这里取。
   - `stream/sse.ts` 导出 SSE 头常量、心跳间隔常量、一个只收 `ServerResponse` 的心跳写出函数，以及「关停中则 `Connection: close` + 502」的拒绝函数（该文件里已有两处重复）；不导出绑定流连接类型的 `armHeartbeat`。

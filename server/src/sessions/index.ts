@@ -5,6 +5,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance } from "fastify";
 import { emit } from "../core/audit/index.js";
 import type { ChatEvent } from "./events.js";
+import { registerSessionListEvents, type SessionListNotifier } from "./list-events.js";
 import type { SpawnLog } from "./omp/spawn-gate.js";
 import { registerSessionRoutes } from "./rest.js";
 import { registerCommandRoutes } from "./rest-commands.js";
@@ -56,7 +57,7 @@ export interface RegisterSessionsOptions {
 export function registerSessions(
   app: FastifyInstance,
   options: RegisterSessionsOptions,
-): { store: SessionStore; supervisor: SessionSupervisor } {
+): { store: SessionStore; supervisor: SessionSupervisor; listEvents: SessionListNotifier } {
   let supervisor!: SessionSupervisor;
   const store = createSessionStore(options.db, {
     onFlushError: (failure) => {
@@ -110,12 +111,14 @@ export function registerSessions(
     sandboxRoot: options.runtime.sandboxRoot,
     workspaceRootOf: options.workspaceRootOf,
   });
+  const clock = options.runtime.clock ?? defaultSessionClock();
   registerSessionEventStream(app, {
     store,
     supervisor,
-    clock: options.runtime.clock ?? defaultSessionClock(),
+    clock,
     isDeleting: (sessionId) => deleter.isDeleting(sessionId),
   });
+  const listEvents = registerSessionListEvents(app, { clock });
   app.addHook("preClose", (complete) => {
     void closeSessions(supervisor, store).then(
       () => {
@@ -126,7 +129,7 @@ export function registerSessions(
       },
     );
   });
-  return { store, supervisor };
+  return { store, supervisor, listEvents };
 }
 
 async function closeSessions(supervisor: SessionSupervisor, store: SessionStore): Promise<void> {

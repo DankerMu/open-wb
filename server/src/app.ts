@@ -35,6 +35,7 @@ import { registerModelProxy } from "./model-proxy/index.js";
 import { SERVICE_INFO } from "./service-info.js";
 import type { ChatEvent } from "./sessions/events.js";
 import { registerSessions } from "./sessions/index.js";
+import type { SessionListNotifier } from "./sessions/list-events.js";
 import { ompAgentDir } from "./sessions/omp/process.js";
 import type { SpawnLog } from "./sessions/omp/spawn-gate.js";
 import type { SessionStore } from "./sessions/store.js";
@@ -49,7 +50,11 @@ declare module "fastify" {
     db: DatabaseSync;
     authNow: () => number;
     authProviderName: string;
-    sessions: { store: SessionStore; supervisor: SessionSupervisor };
+    sessions: {
+      store: SessionStore;
+      supervisor: SessionSupervisor;
+      listEvents: SessionListNotifier;
+    };
   }
 }
 
