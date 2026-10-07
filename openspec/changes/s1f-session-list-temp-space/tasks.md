@@ -268,7 +268,7 @@ Minimal mergeable slice: 13.1、13.2、13.3 各自可单独合入（每个导出
   - 14.2 的容错读写仿 `web/src/routes/shell/sidebar.tsx` 的既有写法；两个单测各一个新文件。
   - `web/test/ui-layering.test.ts`：只把 `session-list-prefs.ts` 加进 `MIGRATED_AREAS` 与对应的逐字清单断言（字母序）；`SESSION_LIST_FILES` 不动（14.6）。
   Risk packs（14.1 / 14.2）: Persistence（localStorage 容错）、Legacy compatibility（旧导出与既有测试不动）。
-- [ ] 14.3 状态标记（`status-label.ts` 加 `等待确认`；新组件）：六种文案的可访问名、三种可见标记与 `data-status-mark`、减少动态效果下不转动。组件测试：session-sidebar「会话状态标记」两个场景、chat-web「列表条目的状态元素」。
+- [x] 14.3 状态标记（`status-label.ts` 加 `等待确认`；新组件）：六种文案的可访问名、三种可见标记与 `data-status-mark`、减少动态效果下不转动。组件测试：session-sidebar「会话状态标记」两个场景、chat-web「列表条目的状态元素」。
   **实施注记（14.3，fixture 评审补充）**：
   - `SESSION_STATUS_LABEL` 的五个键与文案不动（`chat-stream-stopped.test.ts` 钉着它，步骤卡与工具调用组也在用）；`等待确认` 作为**单独的导出**（如 `sessionStatusText(session)`，`pendingApproval` 优先于 `status`）。
   - 新组件文件 `web/src/features/chat/session-status-mark.tsx`：可见标记 `aria-hidden` 并带 `data-status-mark="waiting" | "running" | "failed"`；其余三种状态只有视觉隐藏的文案、没有该属性。减少动态效果用 Tailwind 的 `motion-reduce:` 变体表达并按类名断言。只用 Tailwind 与拷入层，不用 `ui-pulse` / `ui-sr-only`，不改 `chat.css`。
