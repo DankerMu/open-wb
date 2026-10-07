@@ -9,13 +9,16 @@
  *
  * A writer may be in the workspace while the walk runs (design D9「快照期间可能有写入者」): the
  * previous process of the session has not exited yet, and another session may share the
- * workspace. Every entry is classified by `lstat`, and a regular file is then read through a
- * handle opened without following its final component and without blocking, so an entry
- * replaced after classification is never read through a symbolic link (the open fails and so
- * does the snapshot) and never hangs the walk (a FIFO or device is skipped as `special`). What
- * remains: an intermediate path component replaced by a symbolic link after its directory was
- * listed is traversed by both `lstat` and the open — the residual registered in design D9 and
- * ADR-0010 (task 20.3).
+ * workspace. Every entry is classified by `lstat`. A regular file entry is then read through a
+ * handle opened without following its final component and without blocking, so a file replaced
+ * after classification is never read through a symbolic link (the open fails and so does the
+ * snapshot) and never hangs the walk (a FIFO or device is skipped as `special`). Directories
+ * have no such handle (Node has no `openat` / `fdopendir`), which leaves two residuals,
+ * registered in design D9 and ADR-0010 (task 20.3):
+ *   1. an intermediate path component replaced by a symbolic link after its directory was
+ *      listed is traversed by both `lstat` and the open;
+ *   2. a directory entry replaced by a symbolic link between its `lstat` and its `readdir` is
+ *      listed and copied whole from wherever the link points.
  *
  * Asynchronous on purpose: the snapshot runs as the supervisor's pre-dispatch step, during which
  * a stop must still be answered (spec「受理时做快照」), so the walk must not hold the event loop.
