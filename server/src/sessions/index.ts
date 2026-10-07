@@ -59,6 +59,8 @@ export function registerSessions(
   options: RegisterSessionsOptions,
 ): { store: SessionStore; supervisor: SessionSupervisor; listEvents: SessionListNotifier } {
   let supervisor!: SessionSupervisor;
+  // Created where its route is registered (below); the turn observer and the routes run later.
+  let listEvents!: SessionListNotifier;
   const store = createSessionStore(options.db, {
     onFlushError: (failure) => {
       supervisor.handleFlushError(failure);
@@ -77,7 +79,14 @@ export function registerSessions(
       options.runtime.sandboxRoot,
       options.workspaceRootOf,
     ),
-    ...(options.onEvent === undefined ? {} : { onEvent: options.onEvent }),
+    onEvent(sessionId, epoch, event) {
+      try {
+        notifyTurnChange(store, listEvents, sessionId, event);
+      } catch {
+        // The list notification is best effort: it never faults the turn that caused it.
+      }
+      return options.onEvent?.(sessionId, epoch, event);
+    },
     ...(options.log === undefined ? {} : { log: options.log }),
   });
   store.reconcileOnStartup();
@@ -101,6 +110,11 @@ export function registerSessions(
     deleter,
     agentDir: options.agentDir,
     sandboxRoot: options.runtime.sandboxRoot,
+    listEvents: {
+      notify(ownerId) {
+        listEvents.notify(ownerId);
+      },
+    },
   });
   registerCommandRoutes(app, {
     agentDir: options.agentDir,
@@ -118,7 +132,7 @@ export function registerSessions(
     clock,
     isDeleting: (sessionId) => deleter.isDeleting(sessionId),
   });
-  const listEvents = registerSessionListEvents(app, { clock });
+  listEvents = registerSessionListEvents(app, { clock });
   app.addHook("preClose", (complete) => {
     void closeSessions(supervisor, store).then(
       () => {
@@ -130,6 +144,26 @@ export function registerSessions(
     );
   });
   return { store, supervisor, listEvents };
+}
+
+/** A turn's terminal state and an approval's insertion or settlement change the owner's list. */
+function notifyTurnChange(
+  store: SessionStore,
+  listEvents: SessionListNotifier,
+  sessionId: string,
+  event: ChatEvent<number>,
+): void {
+  if (
+    event.type !== "turn.end" &&
+    event.type !== "approval.request" &&
+    event.type !== "approval.resolved"
+  ) {
+    return;
+  }
+  const ownerId = store.runtimeState(sessionId)?.ownerId;
+  if (ownerId !== undefined) {
+    listEvents.notify(ownerId);
+  }
 }
 
 async function closeSessions(supervisor: SessionSupervisor, store: SessionStore): Promise<void> {

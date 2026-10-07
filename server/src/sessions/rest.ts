@@ -9,6 +9,7 @@ import type {
   RawServerDefault,
 } from "fastify";
 import { HttpError } from "../core/errors/index.js";
+import type { SessionListNotifier } from "./list-events.js";
 import { registerSessionMetadataRoutes } from "./rest-metadata.js";
 import type { WorkspaceRootOf } from "./session-cwd.js";
 import type { SessionDeleter } from "./session-delete.js";
@@ -50,6 +51,8 @@ interface SessionRestDependencies {
   agentDir: string;
   /** With `workspaceRootOf`, the session cwd whose project skills the prompt route lists (#773). */
   sandboxRoot: string;
+  /** Told after each committed write of these routes that changes the owner's session list. */
+  listEvents: Pick<SessionListNotifier, "notify">;
 }
 
 interface PublicSession {
@@ -234,6 +237,7 @@ export function registerSessionRoutes(
         throw new HttpError("session_busy");
       }
       const accepted = dependencies.store.acceptPrompt(request.params.id, principal.id, text);
+      dependencies.listEvents.notify(principal.id);
       try {
         // The stored text stays as typed; only `/` text is classified, so no other prompt scans.
         // The skills are those of this session's cwd: its workspace root, else the owner root.
@@ -241,7 +245,10 @@ export function registerSessionRoutes(
         const skills = text.startsWith("/") ? skillsOf(principal.id, bound) : [];
         await dependencies.supervisor.prompt(request.params.id, toWireText(text, skills));
       } catch (error) {
-        dependencies.store.rollbackPrompt(accepted.assistantMessageId);
+        // false: the turn already reached a terminal state, which had its own notification.
+        if (dependencies.store.rollbackPrompt(accepted.assistantMessageId)) {
+          dependencies.listEvents.notify(principal.id);
+        }
         throw error;
       }
       return reply.code(202).send({
@@ -282,10 +289,21 @@ export function registerSessionRoutes(
         throw new HttpError("bad_request");
       }
       const principal = currentPrincipal(request);
-      const { assistantMessageId } = await dependencies.supervisor.regenerate(
-        request.params.id,
-        principal.id,
-      );
+      let assistantMessageId: number;
+      try {
+        ({ assistantMessageId } = await dependencies.supervisor.regenerate(
+          request.params.id,
+          principal.id,
+        ));
+      } catch (error) {
+        // A dispatch that failed after the commit settled the new row `failed` without a published
+        // event, and the route cannot tell it from an uncommitted 502: both notify once.
+        if (error instanceof HttpError && error.code === "agent_unavailable") {
+          dependencies.listEvents.notify(principal.id);
+        }
+        throw error;
+      }
+      dependencies.listEvents.notify(principal.id);
       return reply.code(202).send({ assistantMessageId });
     },
   );

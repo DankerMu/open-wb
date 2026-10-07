@@ -2,13 +2,25 @@
  * Issue #931 session list event connection at GET /api/sessions/events (S1f tasks 6.1 / 6.2).
  * Real listener, native stream reading; expected headers, frames and envelopes are spec literals.
  */
-import type { ClientRequest, IncomingMessage, ServerResponse } from "node:http";
-import { request as httpRequest } from "node:http";
+import type { ServerResponse } from "node:http";
 import { setImmediate as waitImmediate } from "node:timers/promises";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
-import { requestMe, UNAUTHORIZED_ENVELOPE } from "./auth-lifecycle-helpers.js";
-import { AGENT_UNAVAILABLE_ENVELOPE, cookieFor } from "./session-rest-helpers.js";
+import { UNAUTHORIZED_ENVELOPE } from "./auth-lifecycle-helpers.js";
+import {
+  accountOf,
+  bounded,
+  CHANGED_FRAME,
+  count,
+  EVENTS_URL,
+  HEARTBEAT_FRAME,
+  HEARTBEAT_MS,
+  type ListClient,
+  openList,
+  startRequest,
+  textOf,
+} from "./session-list-events-helpers.js";
+import { AGENT_UNAVAILABLE_ENVELOPE } from "./session-rest-helpers.js";
 import { readHttpHeaders } from "./session-sse-helpers.js";
 import {
   createRealFakeRuntime,
@@ -18,23 +30,12 @@ import {
 } from "./session-supervisor-helpers.js";
 import type { TestClock } from "./support/omp-runtime.js";
 
-const EVENTS_URL = "/api/sessions/events";
-const CHANGED_FRAME = "event: sessions.changed\ndata: {}\n\n";
-const HEARTBEAT_FRAME = ": keepalive\n\n";
-const HEARTBEAT_MS = 15_000;
 const SESSION_A = "0123456789abcdef0123456789abcdef";
 const SESSION_B = "fedcba9876543210fedcba9876543210";
 const CLIENT_HEADER = "x-list-client";
 
 function rewoundFrame(sessionId: string): string {
   return `event: session.rewound\ndata: {"sessionId":"${sessionId}"}\n\n`;
-}
-
-interface ListClient {
-  req: ClientRequest;
-  res: IncomingMessage;
-  text(): string;
-  closed(): boolean;
 }
 
 interface World {
@@ -53,6 +54,11 @@ interface World {
    * synchronously: which marked server-side responses were already destroyed, and the timer count.
    */
   closing: Promise<{ destroyed: Map<string, boolean>; timers: number }>;
+  /**
+   * The `x-list-client: stalled` connection: its transport refuses every heartbeat (`write`
+   * returns false, nothing is sent) and never finishes an `end()`, like a reader that stopped.
+   */
+  stalled: { writes: string[]; ends: number };
   clients: ListClient[];
   close(): Promise<void>;
 }
@@ -72,20 +78,10 @@ afterEach(async () => {
   await current.close();
 });
 
-async function accountOf(app: FastifyInstance, account: string) {
-  const cookie = await cookieFor(app, account);
-  const me = await requestMe(app, cookie);
-  expect(me.statusCode).toBe(200);
-  const id = (me.json() as { id: unknown }).id;
-  if (typeof id !== "string") {
-    throw new Error("GET /api/auth/me returned no principal id");
-  }
-  return { cookie, id };
-}
-
 async function openWorld(): Promise<World> {
   const runtime = createRealFakeRuntime();
   const raws = new Map<string, ServerResponse>();
+  const stalled: World["stalled"] = { writes: [], ends: 0 };
   let release!: () => void;
   const held = new Promise<void>((resolve) => {
     release = resolve;
@@ -118,6 +114,16 @@ async function openWorld(): Promise<World> {
               throw new Error("controlled list event writer failure");
             }) as typeof reply.raw.write;
           }
+          if (marker === "stalled") {
+            reply.raw.write = ((chunk: unknown) => {
+              stalled.writes.push(String(chunk));
+              return false;
+            }) as typeof reply.raw.write;
+            reply.raw.end = (() => {
+              stalled.ends += 1;
+              return reply.raw;
+            }) as typeof reply.raw.end;
+          }
         }
         done();
       });
@@ -149,6 +155,7 @@ async function openWorld(): Promise<World> {
       raws,
       hold: { entered: enteredGate, release },
       closing: closingGate,
+      stalled,
       clients: [],
       close,
     };
@@ -157,73 +164,6 @@ async function openWorld(): Promise<World> {
   } catch (error) {
     await close();
     throw error;
-  }
-}
-
-/** Sends the request; the returned promise settles with the response head (any status). */
-function startRequest(
-  opened: World,
-  cookie: string | undefined,
-  headers: Record<string, string> = {},
-): { req: ClientRequest; response: Promise<IncomingMessage> } {
-  let req!: ClientRequest;
-  const response = new Promise<IncomingMessage>((resolve, reject) => {
-    req = httpRequest(
-      `${opened.origin}${EVENTS_URL}`,
-      { agent: false, headers: { ...(cookie === undefined ? {} : { cookie }), ...headers } },
-      resolve,
-    );
-    req.on("error", reject);
-    req.end();
-  });
-  void response.catch(() => {});
-  return { req, response };
-}
-
-async function openList(
-  opened: World,
-  cookie: string,
-  headers: Record<string, string> = {},
-): Promise<ListClient> {
-  const { req, response } = startRequest(opened, cookie, headers);
-  const res = await response;
-  expect(res.statusCode).toBe(200);
-  let text = "";
-  let closed = false;
-  res.setEncoding("utf8");
-  res.on("data", (chunk: string) => {
-    text += chunk;
-  });
-  res.on("error", () => {});
-  res.on("close", () => {
-    closed = true;
-  });
-  req.on("error", () => {});
-  const client: ListClient = { req, res, text: () => text, closed: () => closed };
-  opened.clients.push(client);
-  return client;
-}
-
-function textOf(client: ListClient, expected: string): Promise<string> {
-  return waitFor(
-    () => (client.text().length >= expected.length ? client.text() : undefined),
-    `list event bytes ${JSON.stringify(expected)}`,
-  );
-}
-
-function count(text: string, frame: string): number {
-  return text.split(frame).length - 1;
-}
-
-async function bounded<T>(work: Promise<T>, description: string, ms = 3_000): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  const timeout = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error(`timed out: ${description}`)), ms);
-  });
-  try {
-    return await Promise.race([work, timeout]);
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -236,13 +176,20 @@ describe("session list event endpoint", () => {
     expect(head).toContain("\r\nCache-Control: no-store\r\n");
     expect(head).toContain("\r\nConnection: keep-alive\r\n");
 
-    const client = await openList(opened, opened.zhangsan.cookie);
+    const client = await openList(opened, opened.zhangsan.cookie, { [CLIENT_HEADER]: "beat" });
     expect(client.res.headers["content-type"]).toBe("text/event-stream; charset=utf-8");
     expect(client.res.headers["cache-control"]).toBe("no-store");
     expect(client.res.headers.connection).toBe("keep-alive");
 
+    // Bytes the server handed to the socket, read synchronously: none at 14999 ms, some at 15000.
+    const socket = opened.raws.get("beat")?.socket;
+    const headBytes = socket?.bytesWritten;
+    expect(headBytes).toBeGreaterThan(0);
     opened.clock.advance(HEARTBEAT_MS - 1);
+    expect(socket?.bytesWritten).toBe(headBytes);
+    expect(client.text()).toBe("");
     opened.clock.advance(1);
+    expect(socket?.bytesWritten).toBeGreaterThan(headBytes ?? 0);
     // The heartbeat bounds the wait: nothing preceded it, and it is exactly one comment line.
     expect(await textOf(client, HEARTBEAT_FRAME)).toBe(HEARTBEAT_FRAME);
     expect(client.closed()).toBe(false);
@@ -426,6 +373,40 @@ describe("session list notifier backpressure and isolation", () => {
     expect(() => notifier.notify(opened.zhangsan.id)).not.toThrow();
     expect(await textOf(healthy, CHANGED_FRAME.repeat(2))).toBe(CHANGED_FRAME.repeat(2));
     expect(opened.raws.get("healthy")?.destroyed).toBe(false);
+  });
+
+  it("a refused heartbeat stops delivery but keeps the connection for the module's preClose to destroy", {
+    timeout: 15_000,
+  }, async () => {
+    const opened = await openWorld();
+    const notifier = opened.app.sessions.listEvents;
+    const baseline = opened.clock.pending();
+    await openList(opened, opened.zhangsan.cookie, { [CLIENT_HEADER]: "stalled" });
+    const healthy = await openList(opened, opened.zhangsan.cookie, { [CLIENT_HEADER]: "healthy" });
+    expect(opened.clock.pending()).toBe(baseline + 2);
+
+    opened.clock.advance(HEARTBEAT_MS);
+    expect(await textOf(healthy, HEARTBEAT_FRAME)).toBe(HEARTBEAT_FRAME);
+    expect(opened.stalled).toEqual({ writes: [HEARTBEAT_FRAME], ends: 1 });
+    // Logically closed: its heartbeat is not re-armed, yet the transport is still there.
+    expect(opened.clock.pending()).toBe(baseline + 1);
+    expect(opened.raws.get("stalled")?.destroyed).toBe(false);
+
+    expect(() => notifier.notify(opened.zhangsan.id)).not.toThrow();
+    expect(() => notifier.notifyRewound(opened.zhangsan.id, SESSION_A)).not.toThrow();
+    opened.clock.advance(HEARTBEAT_MS);
+    const expected = HEARTBEAT_FRAME + CHANGED_FRAME + rewoundFrame(SESSION_A) + HEARTBEAT_FRAME;
+    expect(await textOf(healthy, expected)).toBe(expected);
+    // No sessions.changed, no rewound frame and no second heartbeat reached the refused transport.
+    expect(opened.stalled).toEqual({ writes: [HEARTBEAT_FRAME], ends: 1 });
+    expect(opened.raws.get("stalled")?.destroyed).toBe(false);
+
+    const closed = opened.close();
+    const seen = await opened.closing;
+    expect(seen.destroyed.get("stalled")).toBe(true);
+    expect(seen.destroyed.get("healthy")).toBe(true);
+    expect(seen.timers).toBe(baseline);
+    await bounded(closed, "app.close with a logically closed list event connection", 10_000);
   });
 
   it("notifyRewound carries the session id and is never coalesced", async () => {

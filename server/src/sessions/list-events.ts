@@ -27,6 +27,7 @@ interface ListConnection {
   heartbeat: unknown;
   /** A `sessions.changed` was handed to `write` and its callback has not fired yet. */
   changedPending: boolean;
+  /** Logically closed: no heartbeat, no delivery. It stays registered until its physical close. */
   closed: boolean;
 }
 
@@ -38,12 +39,16 @@ export function registerSessionListEvents(
   const byOwner = new Map<string, Set<ListConnection>>();
   let closing = false;
 
-  const release = (connection: ListConnection): void => {
+  const closeLogical = (connection: ListConnection): void => {
     if (connection.closed) {
       return;
     }
     connection.closed = true;
     clock.clearTimeout(connection.heartbeat);
+  };
+  /** The physical close (or a destroy): only now does the connection leave the registry. */
+  const release = (connection: ListConnection): void => {
+    closeLogical(connection);
     const owned = byOwner.get(connection.ownerId);
     owned?.delete(connection);
     if (owned?.size === 0) {
@@ -56,7 +61,10 @@ export function registerSessionListEvents(
       connection.raw.destroy();
     }
   };
-  /** The per-session stream's rule: a heartbeat the transport does not take ends the connection. */
+  /**
+   * The per-session stream's rule: a heartbeat the transport does not take ends the connection.
+   * `end()` may never flush to a stalled reader, so the connection stays registered for `preClose`.
+   */
   const armHeartbeat = (connection: ListConnection): void => {
     connection.heartbeat = clock.setTimeout(() => {
       if (connection.closed) {
@@ -64,7 +72,7 @@ export function registerSessionListEvents(
       }
       try {
         if (!writeHeartbeat(connection.raw)) {
-          release(connection);
+          closeLogical(connection);
           connection.raw.end();
           return;
         }
@@ -94,7 +102,9 @@ export function registerSessionListEvents(
   };
   const each = (ownerId: string, visit: (connection: ListConnection) => void): void => {
     for (const connection of [...(byOwner.get(ownerId) ?? [])]) {
-      visit(connection);
+      if (!connection.closed) {
+        visit(connection);
+      }
     }
   };
 
