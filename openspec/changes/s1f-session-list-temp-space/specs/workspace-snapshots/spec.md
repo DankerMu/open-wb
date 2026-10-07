@@ -23,7 +23,7 @@
 - **THEN** 得到 `EACCES`
 
 ### Requirement: 快照内容规则
-`take(workspaceRoot, …)` SHALL 自工作空间根向下遍历，用不跟随符号链接的元数据判定每个条目，并写出清单 `manifest.json`：`{entries:[…], skipped:[{path,reason}]}`，`path` 为相对工作空间根的 POSIX 路径。规则：
+`take(workspaceRoot, …)` SHALL 自工作空间根向下遍历，用不跟随符号链接的元数据判定每个条目，并写出清单 `manifest.json`：`{entries:[…], skipped:[{path,reason}]}`（遍历中有已列举的条目消失时另带 `incomplete: true`，见下），`path` 为相对工作空间根的 POSIX 路径。规则：
 - 目录：记 `{path,type:"dir",mode}`，在 `tree/` 下建同名目录，继续向下；
 - 普通文件：记 `{path,type:"file",size,mtimeMs,ctimeMs,ino,mode}`（`ino` 是该文件在工作空间里的 inode 号，只用来判定「是不是同一个文件」），内容放在 `tree/<path>`；
 - 符号链接：记 `{path,type:"symlink",target}`（`target` 为 `readlink` 的原字符串），SHALL NOT 跟随、SHALL NOT 复制目标内容；
@@ -31,14 +31,16 @@
 - 名字在排除名单里的**目录**（任何层级，见「快照上限与配置」）：整棵不遍历，记入 `skipped`，`reason` 为 `excluded`；同名的普通文件不受影响；
 - 大小超过单文件上限的普通文件：不进 `entries`，记入 `skipped`，`reason` 为 `too_large`；
 - 读取元数据、列举或复制时得到 `EACCES` / `EPERM` 的条目：记入 `skipped`，`reason` 为 `unreadable`（目录则整棵）。
-- 列举出来之后就不在了的条目（#1148）：对一个已被列举出的条目读取元数据、读链接目标、打开或列举其子项时得到 `ENOENT`（或 `ENOTDIR`：其路径的中间分量消失，或它自己在被判为目录之后被换成了别的东西），视为快照时它已不存在——不进 `entries`，不进 `skipped`，遍历继续。工作空间根自身不存在或不是目录仍是 `failed`；
+- 列举出来之后就不在了的条目（#1148）：对一个已被列举出的条目读取元数据、读链接目标、打开或列举其子项时得到 `ENOENT`（或 `ENOTDIR`：其路径的中间分量消失，或它自己在被判为目录之后被换成了别的东西），不进 `entries`，不进 `skipped`，遍历继续；但它可能只是被改了名（新名字不在已取得的列举里，快照没有捕获它），所以这份快照 SHALL 被标为不完整：清单写入 `incomplete: true`（没有出现过这种条目的清单不带该键）。不完整的快照仍是 `ok`，还原它时不删除任何多余条目（见「还原」）。工作空间根自身不存在或不是目录仍是 `failed`；
 - 名字不是合法 UTF-8 的条目（#1148）：列举 SHALL 按字节取名；名字的字节经 UTF-8 解码再编码得不回原字节的条目不进 `entries`、不读取（目录则整棵不遍历），记入 `skipped`，`reason` 为 `name_encoding`，`path` 为父路径加该名字的有损解码（非法字节以 U+FFFD 代替）。这个 `path` 只供展示，不保证能定位回该条目（同目录下两个这样的名字可以解码成同一个串，各记一项，不去重）；还原对这类条目的保护不依赖它，它也不参与「`skipped` 路径之下」的判定（见「还原」）。
 
 遍历 SHALL NOT 离开工作空间根（符号链接不跟随即保证）。`take` 结束时返回三种结果之一：`ok`（附 `skipped`）、`too_large`（见上限）、`failed`（上述规则之外的任何错误，含工作空间根不是目录）。结果不是 `ok` 时 SHALL 删除本次已写出的 `<userMessageId>` 目录，不留半份快照。`take` SHALL NOT 修改工作空间内的任何文件、时间戳或权限位。
 
 #### Scenario: 列举后消失的条目不使快照失败
 - **WHEN** 工作空间含 `a.txt`、`gone.txt` 与目录 `d/`（内有 `d/x.txt`），测试让 `gone.txt` 在根目录被列举之后、被读取元数据之前被删除，另一次让 `d/` 在被判为目录之后、被列举之前被整棵删除
-- **THEN** 两次的结果都是 `ok`；清单的 `entries` 含 `a.txt`，不含消失的条目及其之下的路径；`skipped` 为空；`tree/` 下没有消失条目的残留
+- **THEN** 两次的结果都是 `ok`；清单的 `entries` 含 `a.txt`，不含消失的条目及其之下的路径；`skipped` 为空；`tree/` 下没有消失条目的残留；清单带 `incomplete: true`
+- **WHEN** 遍历中没有任何条目消失
+- **THEN** 清单没有 `incomplete` 键
 - **WHEN** 工作空间根在 `take` 开始前就不存在
 - **THEN** 结果为 `failed`
 
@@ -143,6 +145,7 @@ prompt 路由 SHALL 把「快照步骤」作为 `supervisor.prompt` 的派发前
 ### Requirement: 还原
 `restore`（入参为工作空间根与快照目录）SHALL 把工作空间还原为清单描述的状态，并返回 `{restored,removed,skipped,failed}`（`restored` 为内容被写回的文件数与被重建的符号链接数之和，`removed` 为被删除的多余条目数——只计清单里没有的条目，被递归删除的目录连同其下内容计一项；清单路径上类型不对而被替换的占位者不计，`skipped` 为清单的 `skipped`，`failed` 为 `[{path}]`）。它 SHALL 先读清单并校验：清单可解析且每个条目形状合法（`path` 是相对的 POSIX 路径，不含空分量、`.`、`..`，不以 `/` 开头，条目类型与字段齐全，路径不重复，每个条目与每个 `skipped` 路径的父级是清单里的目录条目或位于某个 `skipped` 路径之下）、`tree/` 存在、快照目录不在工作空间之内、工作空间根是真实目录（`lstat`，非符号链接）；任一不成立 SHALL 在改动任何工作空间条目之前抛错。随后：
 - 现存而不在 `entries` 里、且不位于任何 `skipped` 路径之下（含其自身）的条目 SHALL 被删除（目录递归删除，不跟随符号链接）；
+- 清单带 `incomplete: true` 时（#1148）上一条不执行：SHALL NOT 删除任何不在 `entries` 里的条目，`removed` 为 0；其余各条（确保目录、写回文件、重建符号链接、清单路径上类型不对的占位者被替换）照常。理由：快照遍历期间被改名的条目以新名字留在工作空间里，快照里没有它的副本，删掉就丢了。清单校验 SHALL 只接受缺省或恰为 `true` 的 `incomplete`；
 - `entries` 里的目录 SHALL 存在（缺失则创建，mode `2770`；现存而不是目录的同名条目先删除）；
 - `entries` 里的文件按以下次序判定，命中即止：
   1. 当前是普通文件且 `ino`、`size`、`mtimeMs`、`ctimeMs` 都与清单相等 → 不动、不读内容、不计入 `restored`（清单条目没有 `ino` 时本步不成立）；
@@ -171,6 +174,12 @@ prompt 路由 SHALL 把「快照步骤」作为 `supervisor.prompt` 的派发前
 #### Scenario: 非 UTF-8 文件名的条目不被当作多余条目删除
 - **WHEN** 在 Linux 上快照时工作空间含 `a.txt`、目录 `d/` 与 `d/` 下一个名字含非法 UTF-8 字节的文件 B（快照把它记入 `skipped`，`name_encoding`）；之后 `a.txt` 被改写、根下新增了一个名字含非法 UTF-8 字节的文件 C、新增了目录 `new/`（内有一个名字含非法 UTF-8 字节的文件），然后还原
 - **THEN** `a.txt` 为快照内容；B 与 C 都还在、字节未变；`new/` 整棵不存在；返回的 `removed` 为 1、`failed` 为空、`skipped` 含 B 那一项
+
+#### Scenario: 遍历期间被改名的文件不因还原而丢失
+- **WHEN** 工作空间含 `a.txt`、`report.md` 与目录 `src/`（内有文件）；测试让 `report.md` 在根目录被列举之后、被读取元数据之前改名为 `report-final.md`，快照完成；之后 `a.txt` 被改写、新增了 `c.txt`，然后还原
+- **THEN** 快照结果为 `ok` 且清单带 `incomplete: true`；还原后 `a.txt` 为快照内容，`report-final.md` 与 `c.txt` 都还在、字节未变；返回的 `removed` 为 0
+- **WHEN** 同样的工作空间里没有任何条目在遍历期间消失，之后新增 `c.txt`，然后还原
+- **THEN** `c.txt` 被删除，`removed` 为 1
 
 #### Scenario: 版本库随撤回还原
 - **WHEN** 快照时 `.git/refs/heads/main` 的内容为提交 A；之后的回合里新增了对象文件 `.git/objects/cd/ef01`、把 `.git/refs/heads/main` 改为提交 B，并改写了 `src/app.ts`，然后还原
