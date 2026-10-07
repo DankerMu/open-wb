@@ -281,6 +281,64 @@ regenerate 在存活进程上只对最后一个条目 `branch` 且马上派发�
 
 三行互相独立，各按自己的结论处置；任务 0.2 把结论（命令与输出，不含主机信息）记在本节末尾的「核对结论」一段并抄进 Epic——三行都成立时这个 PR 只加这一段，否则同时带上表里对应的规格修订。
 
+**核对结论**（#918，任务 0.1 / 0.2；官方 release v18.0.10 的 `var/omp/omp`，`omp --version` 输出 `omp/18.0.10`；模型端点是仓库的受控上游 `server/test/support/fake-upstream.mjs`；一次性脚本不入库，连跑三遍逐条结果相同）：**三点都成立，规格与任务不改。**
+
+每个进程的启动参数相同，只差末尾的 `--resume`（`<tmp>` 是脚本的临时目录，`<repo>` 是仓库根）：
+
+```
+<repo>/var/omp/omp --mode rpc --cwd <tmp>/sandbox/u1/proj --session-dir <tmp>/state/sessions/u1
+  --model workbuddy/deepseek-v4.1-flash --approval-mode write --no-extensions --no-lsp --no-pty --no-title
+  --config <tmp>/state/home/.omp/agent/host-overlay.yml [--resume <会话文件>]
+```
+
+握手：`ready` → `negotiate_protocol(protocolVersion:2)` 成功 → `get_state` 成功并给出 `sessionFile`。受控上游每轮先发一个 bash 工具调用，审批一律 Deny，回合以 `agent_end` 结束。
+
+- **(a) 成立**（7 条子断言全过）。两轮 `第一轮：普通问题`、`第二轮：普通问题` 都完成后关停。临时进程 `--resume <原文件>`：
+  ```
+  >> {"type":"get_branch_messages"}
+  << {"success":true,"data":{"messages":[{"entryId":"688b88a8","text":"第一轮：普通问题"},{"entryId":"db528dae","text":"第二轮：普通问题"}]}}
+  >> {"type":"branch","entryId":"db528dae"}
+  << {"success":true,"data":{"text":"第二轮：普通问题","cancelled":false}}
+  >> {"type":"get_state"}
+  << sessionFile = <tmp>/state/sessions/u1/<新文件>.jsonl（不同于原文件；进程以退出码 0 关停后文件在磁盘上）
+  ```
+  新进程 `--resume <新文件>`：握手成功，`get_state.sessionFile` 就是该新文件；
+  ```
+  >> {"type":"get_branch_messages"}
+  << {"success":true,"data":{"messages":[{"entryId":"688b88a8","text":"第一轮：普通问题"}]}}
+  >> {"type":"prompt","message":"分支之后的新问题"}
+  << {"command":"prompt","success":true} … agent_end（带最终回复）
+  ```
+  `get_branch_messages` 只列用户条目（`{entryId,text}`）；新文件里是第一轮的整条链，条目 id 与原文件相同。
+- **(b) 成立**（7 条子断言全过）。同样的两轮会话，临时进程上对第一条用户条目 `branch`：
+  ```
+  >> {"type":"branch","entryId":"56137738"}
+  << {"success":true,"data":{"text":"第一轮：普通问题","cancelled":false}}
+  >> {"type":"get_state"}
+  << sessionFile = <tmp>/state/sessions/u1/<新文件>.jsonl（关停后文件在磁盘上，只有会话头的元数据行，没有消息条目）
+  ```
+  新进程 `--resume <新文件>`：握手成功；
+  ```
+  >> {"type":"get_branch_messages"}
+  << {"success":true,"data":{"messages":[]}}
+  >> {"type":"prompt","message":"分支之后的新问题"}
+  << {"command":"prompt","success":true} … agent_end（带最终回复）
+  ```
+- **(c) 成立**（6 条子断言全过，含一条对照）。第一轮普通 prompt，`/todo` 输出 `No todos. Use /todo append <task> to start one.`；第二轮 `WORKBUDDY_TODO 第二轮：建任务清单` 执行了 `todo` 工具，分支之前：
+  ```
+  >> {"type":"prompt","message":"/todo"}
+  << {"type":"command_output","text":"# 走查\n- [/] 整理需求\n- [ ] 输出结论"}
+  ```
+  对照（不分支，只 `--resume <原文件>` 后发 `/todo`）：输出仍是上面这份清单——清单能跨进程重启存活，所以下面的空清单是 `branch` 造成的。临时进程上对第二条用户条目 `branch`（`success:true`，`cancelled:false`）取得新文件，新进程 `--resume <新文件>`：
+  ```
+  >> {"type":"prompt","message":"/todo"}
+  << {"type":"command_output","text":"No todos. Use /todo append <task> to start one."}
+  << {"command":"prompt","success":true,"data":{"agentInvoked":false}}
+  ```
+  夹具说明：受控上游只在请求里完全没有 `tool` 消息时才发工具调用，同一会话第二轮起的 `WORKBUDDY_TODO` 直连时不会建清单（直连跑出来分支前 `/todo` 就是 `No todos. …`，无法判定）。所以这一点的脚本在 omp 与受控上游之间加了一层本地转发，只把请求的 `messages` 裁成「从最后一条 user 消息起」再原样交给受控上游；omp 一侧（二进制、参数、会话文件、RPC 帧）没有任何改动。给撤回后任务清单回退写自动化测试的任务（10.5、11.2、11.7）会遇到同一个夹具限制。
+
+核对中顺带确认的两点，与本 change 既有的前提一致、不引起修订：`/todo` 这类命令回合在会话文件与 `get_branch_messages` 里都不留条目（C-23 的前提）；`branch` 之后 `get_state.sessionFile` 立即换成新文件，其后在新文件上继续发 prompt 路径不再变。
+
 **与事件流的关系**：退役会丢弃该会话的 slot 与事件环并结束已连接的订阅；它们重连后拿到的是既有的 gap → 重读快照。为避免「重连发生在事务提交之前、读到旧历史」，
 提交后的 `session.rewound` 让选中该会话的页面再读一次。发起撤回的标签页直接用 200 之后的重读结果。
 
