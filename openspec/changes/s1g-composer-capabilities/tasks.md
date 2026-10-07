@@ -125,6 +125,14 @@ Minimal mergeable slice: atomic - 解析放宽、类型与透传必须同刀（�
 - [ ] 6.3 测试新文件 `server/test/fake-omp-composer.test.ts`：omp-test-harness delta 的两条新场景（`approval-write` 只在 `always-ask` 下请求确认；两种命令的应答与 `frames=`）；既有十二个场景的帧逐字节不变（跑既有测试即可）。
   `server/test/` 里核对模块划分的用例（导入方向、五个文件 ≤800 行）随规格更新。变异：`approval-write` 在 `write` 档也发 select、失败模型 id 也应答成功 → 判红。
 
+  **实施注记（fixture 评审补充）**：
+  - `get_state` 今天就带 `model` 与 `thinkingLevel`（夹具自第一版起如此），规格已改为「首次命令之前保持今天的值」；既有场景的 `get_state` 应答不变。
+  - `fake-omp-argv.mjs` 没有场景表（只有取值型 / 布尔型 argv 表），6.2 的「场景表加 `approval-write`」实际落在 `fake-omp.mjs` 的场景集合，写进偏离记录，不为此造一张表。
+  - `fake-omp.mjs` 已 774 行：帧构建全部放 `fake-omp-composer.mjs`，主文件只留分派与状态；仍超 800 就先做一次纯搬迁（单独提交）。
+  - 核对模块划分的用例是两处，都还没有 composer：`server/test/fake-omp-early-abort.test.ts`（四文件 → 五文件）与 `server/test/fake-omp-metadata-scenarios.test.ts`（`expectNodeOnlyLeaf` 的正则与循环）。`fake-omp-composer.mjs` 没有任何 import，对它放宽「至少一条 import」的断言，不为过断言加假的 `node:` 导入。
+  - 「回合在途时到达的命令在该回合终态 `agent_end` 之后应答」须有一例（例如 `approval` 场景、`--approval-mode write`，select 挂起时发 `set_model`，应答排在 `agent_end` 之后）；持有型回合需要显式的在途标记，在终态 `agent_end` 处冲刷。
+  - `write` 的 `tool_execution_end` 复用既有的构建函数，夹具不真的写文件。
+Risk packs: Test fixture / frame compatibility（既有十二个场景的帧逐字节不变）、Ordering（命令与在途回合的先后）。未选：产品代码、Schema、Auth。
 Suggested fixture level: compact - 只改测试夹具；不触产品代码与公共入口
 Minimal mergeable slice: 6.1 一刀（纯搬迁）；6.2 + 6.3 一刀（新场景与命令应答，带测试）
 
