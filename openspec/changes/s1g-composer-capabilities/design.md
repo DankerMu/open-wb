@@ -498,3 +498,69 @@ C 新增而本 change 没有修改的条文（temporary-workspaces、workspace-s
 - **web 整页挂载**（jsdom、假 API、假 EventSource）：能力行的次序与可达性、档位确认框、模型与强度切换、附件标签的全部状态、欢迎页暂存到首次发送的请求序列、用户气泡。上传传输层以可控的 `XMLHttpRequest` 替身测进度、取消与错误信封。
 - **web DTO 解析单元层**：键集的放宽与收紧。
 - **冒烟（Hurl，真栈）与 ui-walk（真浏览器）**：上传一个文件并让它出现在目录树、改档位后的会话视图；能力行在两种视口下不挤出发送键、档位确认框、附件标签。
+
+## 实机核对结果（2026-10-07）
+
+官方 omp v18.0.10 二进制对照用例的结论。权威输出是 CI uid-isolation job（linux-x64）：D2 与 (g) 见 PR #1139、PR #1151 各自的 job 输出（(g) 为 run 37577719753）；D7、D8、D18 见 PR #1159 的 run 37604867418（四个对照文件 40 例通过、无 skip；`omp-official-model-commands.test.ts` 的每个观察值以 `[model-commands] ` 行打印）。本机 darwin-arm64 的结果与之逐项相同（`/compact` 输出里的 token 数除外）。
+
+**三项不成立，待 owner 决定；在那之前本节只记结论，规格、任务与受影响 issue 的正文都还没有按退路修订，组 7 之后的 issue 不开工。**（(f) 成立，组 20 的前提不受影响。）
+
+### 逐项结论
+
+| 核对项 | 任务 | 结论 | 观察 |
+|---|---|---|---|
+| D2 (a) overlay 原样、argv `always-ask` 时 `write` 发起审批 | 1.1 | 成立 | write、bash 回合各恰一条审批 |
+| D2 (b) argv `yolo` 时不发起审批 | 1.1 | 成立 | bash、write 回合都是 0 条审批，工具都执行 |
+| D2 (c) `always-ask` 下项目层 `tools.approval: {write: allow}` 不绕过 | 1.2 | 成立 | 仍发起 `write` 审批 |
+| D2 (d) 换档后 `--resume` 历史仍在、新档位生效 | 1.3 | 成立 | 会话文件不变，新档位下恰一条 `write` 审批 |
+| D12 (g) 以换行开头的文本被原样保存 | 1.8 | 成立 | 以两个 U+000A 开头的 prompt 文本逐字节相等：`get_branch_messages` 末项与 `branch{entryId}` 的应答都等于发出的文本，回合多出恰一个条目 |
+| D8 (a) `set_model` 后 `get_state.model` 为所选 | 1.4 | 成立 | `provider` `workbuddy`、`id` `workbuddy-second` |
+| D8 (b) / D9 每个可选强度 v 之后 `thinkingLevel === v` | 1.4 | **不成立** | 见「强度」 |
+| D8 (c) 两个命令前后托管 `HOME` 下全局配置逐字节不变 | 1.4 | 成立 | 比较的是 `HOME` 下全部常规文件：`.env`、`.omp/agent/host-overlay.yml`、`.omp/agent/models.yml`，路径集合与 sha256 全等 |
+| D8 (d) 换模型后的回合带新 `model` 与此前的历史 | 1.4 | 成立 | 请求体 `model` 为 `workbuddy-second`，消息 6 条（第一个回合两条请求为 3、5 条） |
+| D8 (e) `--resume` 后不发命令的 `get_state`（观察值） | 1.4 | — | 模型回到 argv `--model` 的 `deepseek-v4.1-flash`，强度是会话里最后设的 `low`。模型以 argv 为准、强度以会话为准，所以「每个 generation 的第一次派发总是应用」是必要的，不能放宽 |
+| D7 带 `thinking` 与 `input` 两键的条目被接受且回显一致 | 1.5 | 成立 | `thinking: {mode: effort, efforts: [low, high]}`、`input: [text, image]` 原样回显 |
+| D7 只写 `reasoning: true` 的条目报出的强度集合 | 1.5 | **不成立（退路未写的情形）** | `deepseek-v4.1-flash` 报 `thinking: {mode: effort, efforts: [low, high, max]}`、`input: [text]`：非空，但不是全部六档 |
+| D18 (f) 每一个上游请求的 `model` 都在托管 `models.yml` 的 id 之内，且 `/compact` 确实发出请求 | 1.4 | 成立 | 见「上游请求」 |
+
+### 强度（D8 (b)、D9、D7）
+
+托管 `models.yml` 两条：`deepseek-v4.1-flash`（只写 `reasoning: true`）与 `workbuddy-second`（`efforts: [low, high]`、`input: [text, image]`）。`set_thinking_level{v}` 之后的 `get_state.thinkingLevel`：
+
+| v | `deepseek-v4.1-flash`（omp 报的集合 `[low, high, max]`） | `workbuddy-second`（声明 `[low, high]`） |
+|---|---|---|
+| `off` | `off` | `off` |
+| `minimal` | `low` | `low` |
+| `low` | `low` | `low` |
+| `medium` | `low` | `low` |
+| `high` | `high` | `high` |
+| `xhigh` | `high` | `high` |
+| `max` | `max` | `high` |
+| `auto` | `high` | `high` |
+
+- `set_thinking_level` 对这十六次调用没有一次拒绝。omp 报的是「不高于所请求值的最近一档该模型的强度，没有就取最低一档」；`auto` 不作为一个状态保留，报成 `high`。
+- 声明了 `efforts` 的模型：可选集合 `{off, low, high, auto}` 里只有 `auto` 不满足 `thinkingLevel === v`。D9 末段已写了这种情形的处理（把该取值从可选集合里拿掉并改规格），是否照办待 owner。
+- 未声明 `efforts` 的推理模型：D9「未声明则全部六档」的前提不成立——omp 自己给条目配了强度集合，`minimal`、`medium`、`xhigh` 被夹到相邻档。D7 只写了「集合为空」的退路。
+- 仅本机探针、不在 CI 输出里的补充（未入库，不作结论依据）：同样只写 `reasoning: true` 的条目，id 换成一个中性名字时报出的是 `[minimal, low, medium, high, xhigh]` 五档——集合随模型 id 变；未知取值（如 `bogus`）不被拒绝，之后 `thinkingLevel` 缺席。
+- 与 D8 正文不符的一处：D8 写「`setModel` 会把强度重置为新模型的缺省」。实测在第一个模型上设 `off` 后 `set_model` 到第二个模型，`get_state.thinkingLevel` 仍是 `off`。「先 `set_model` 后 `set_thinking_level`」的次序仍然无害，但理由要改。
+
+### 上游请求（D18 (f)）
+
+| 步骤 | 新增请求数 | `model` | 消息条数 |
+|---|---|---|---|
+| 新会话的第一个回合（工具轮） | 2 | `deepseek-v4.1-flash` ×2 | 3、5 |
+| 十六次 `set_thinking_level` 与一次 `set_model` | 0 | — | — |
+| 换模型后的回合 | 1 | `workbuddy-second` | 6 |
+| `/compact` | 3 | `workbuddy-second` ×3 | 2、2、2 |
+| `--resume` 后的 `get_state` | 0 | — | — |
+
+- 全部 6 条请求的 `model` 都在白名单内。
+- `/compact` 用的是**主手段**（cwd 的 `.omp/config.yml`：`keepRecentTokens: 1`、`methodOrder: [soft]`），没有用到备选。`command_output` 原文（CI）：`Compaction complete. Tokens: 13569 -> 13537 (saved 32).`，不含 `Nothing to compact` 与 `Already compacted`。三条断言都通过。Stage 4.5 验证门留下的那条残留（`soft` 方法在 RPC 会话里是否真的发出上游请求）就此核销。
+- `--no-title` 下第一个回合确无标题请求：工具轮的两条主请求之外的请求数为 0。
+- 观察、不作结论：`set_model` 之后 omp 自己的数据目录（`XDG_DATA_HOME` 下的 `omp/agent.db`，不在托管 `HOME` 的配置里）有写入；本机探针看到的是一张模型使用记录表多了一行，设置表没有变化。它是各会话共用的存储，但不是设置项。
+
+### 待 owner 决定
+
+1. `auto`：照 D9 末段把它从可选集合里拿掉，还是保留并在界面上说明它等同于缺省档？
+2. 未声明 `efforts` 的推理模型的可选强度：让写出器对每个推理模型都写 `thinking`（未声明时写全部六档——D7 为「集合为空」写的退路，是否对「非空但不是六档」同样有效，需要再跑一次对照用例确认 omp 接受并照此回显），还是界面与服务端校验改按 omp 为该 id 报的集合？
+3. 受影响的规格与 issue 在决定之后改：model-selection「模型与强度从下一条消息起生效」、model-proxy「托管 models.yml」（「单模型时字节不变」一句可能要改）、design D7 / D8 / D9，以及任务组 3、7 与依赖它们的 issue 正文。
