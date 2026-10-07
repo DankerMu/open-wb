@@ -85,7 +85,7 @@ Minimal mergeable slice: 1.0 + 1.1 + 1.2 + 1.3 一刀（world 扩展与档位核
   - 档位次序常量在 `model-catalog.ts` 导出为 `APPROVAL_MODES = ["always-ask", "write", "yolo"] as const` 与类型 `ApprovalMode`；`agent-config.ts` 里的内联联合类型与字面量比较改为引用它（`model-catalog.ts` 不得反向导入 `agent-config.ts`）。
   - 测试除七组输入外再加两例：入参冻结后求值不抛且入参不变；同一份 raw 在「调低再调回」的两份 config 下原始选择重新生效（有效值不回写）。
   Risk packs（2.3）: Legacy compatibility（三列全 NULL 等于今天的行为）、Config（最高档夹取）。
-- [ ] 2.4 入口级：`server/src/server.ts` 的纯配置 seam（`resolveServerConfig` 上方注释「消费十五项自有 key，agent 十一项」）在 C 之后已是十九项，本任务把注释与实现改到二十三项（agent 侧加四键，经 `resolveAgentSettings`）。
+- [x] 2.4 入口级：`server/src/server.ts` 的纯配置 seam（`resolveServerConfig` 上方注释「消费十五项自有 key，agent 十一项」）在 C 之后已是十九项，本任务把注释与实现改到二十三项（agent 侧加四键，经 `resolveAgentSettings`）。
   测试 `server/test/server-config.test.ts`：http-service-skeleton「Pure source and compiled configuration identity」改写后的断言（twenty-three application keys，源码入口与编译入口一致）；`server/test/server-startup-order.test.ts`（或 `server-entry-silent.test.ts`，以既有覆盖「非法配置 nonzero 退出、stderr 恰一行」的那个文件为准）：「四个新配置键的取值与非法值」的非法值一半——四键各自的非法取值都在任何 filesystem / database / listen 副作用之前 nonzero 退出、application stderr 恰一行 generic failure record。
   合法四键启动后 `GET /api/composer/options` 的回报与「托管 models.yml 含三个模型条目」属于同一场景的另一半，分别在 8.5 与 3.2 落（两处各自点名本场景）。变异：某个新键的非法值被当作缺省放行 → 判红。
   **实施注记（2.4，fixture 评审补充）**：
