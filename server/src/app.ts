@@ -31,6 +31,7 @@ import {
   sendHttpError,
 } from "./http/index.js";
 import { classifyRequestPath } from "./http/path-classifier.js";
+import type { ModelCatalog } from "./model-catalog.js";
 import { registerModelProxy } from "./model-proxy/index.js";
 import { SERVICE_INFO } from "./service-info.js";
 import type { ChatEvent } from "./sessions/events.js";
@@ -62,6 +63,8 @@ export interface AssemblyDependencies {
   tokens?: TokenRegistry;
   upstream?: { baseUrl: string; apiKey: string } | undefined;
   runtime?: SessionSupervisorRuntime;
+  /** 模型白名单；省略时只有 `runtime.modelId` 一个模型。 */
+  modelCatalog?: ModelCatalog;
   /**
    * Must return synchronously. createApp forwards this callback and its return
    * unchanged; a returned thenable is an owned programming error beside the source fault.
@@ -157,8 +160,10 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     modelId: DEFAULT_MODEL_ID,
     idleMs: DEFAULT_OMP_IDLE_MS,
   };
+  const modelIds = assembly?.modelCatalog?.models.map((model) => model.id) ?? [runtime.modelId];
   registerModelProxy(app, {
     tokens,
+    allowedModels: new Set(modelIds),
     ...(assembly?.upstream === undefined ? {} : { upstream: assembly.upstream }),
   });
   const store = createWorkspaceStore(db, {

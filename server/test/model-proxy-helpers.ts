@@ -31,6 +31,10 @@ const CLIENT_EXTRA_HEADER = "x-workbuddy-client";
 export const FOUR_MIB = 4 * 1024 * 1024;
 export const CONNECTION_DEADLINE_MS = 10_000;
 export const PROXY_PATH = "/v1/chat/completions";
+/** 代理测试共用的白名单（model-proxy「Model outside the whitelist is refused」的 `{"m1","m3"}`）。 */
+export const ALLOWED_MODELS: ReadonlySet<string> = new Set(["m1", "m3"]);
+/** 白名单内的最小请求体：不关心 body 内容的用例发它。 */
+export const MODEL_BODY = '{"model":"m1"}';
 
 export const UNAUTHORIZED_ENVELOPE = {
   error: { code: "unauthorized", message: "请先登录" },
@@ -189,7 +193,7 @@ export function tokensFrom(table: Map<string, string>): TokenLookup {
 }
 
 export function jsonBodyOfSize(size: number): string {
-  const prefix = '{"text":"你好","pad":"';
+  const prefix = '{"model":"m1","text":"你好","pad":"';
   const suffix = '"}';
   const overhead = Buffer.byteLength(prefix) + Buffer.byteLength(suffix);
   if (size < overhead) {
@@ -218,7 +222,7 @@ function proxyHeaders(init: CompletionsInit = {}): Record<string, string> {
 export function postCompletions(origin: string, init: CompletionsInit = {}): Promise<Response> {
   const body =
     init.body === undefined
-      ? "{}"
+      ? MODEL_BODY
       : typeof init.body === "string"
         ? init.body
         : new Uint8Array(init.body);
@@ -277,7 +281,7 @@ export function rawPostCompletions(
   init: CompletionsInit = {},
 ): Promise<RawProxyResponse> {
   const url = new URL(`${origin}${PROXY_PATH}`);
-  const body = Buffer.from(init.body ?? "{}");
+  const body = Buffer.from(init.body ?? MODEL_BODY);
   const headers = proxyHeaders(init);
   return new Promise((resolve, reject) => {
     const request = httpRequest(

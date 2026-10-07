@@ -2,6 +2,7 @@ import { gzipSync } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   AGENT_UNAVAILABLE_ENVELOPE,
+  ALLOWED_MODELS,
   API_KEY,
   expectFetchEnvelope,
   expectReplacedCredentials,
@@ -9,6 +10,7 @@ import {
   jsonBodyOfSize,
   LIVE_TOKEN,
   liveTokenTable,
+  MODEL_BODY,
   postCompletions,
   type RecordedRequest,
   rawPostCompletions,
@@ -24,7 +26,9 @@ afterEach(async () => {
   await resources.closeAll();
 });
 
-const RAW_JSON = Buffer.from(' { "escaped" : "\\u4f60", "text" : "你好", "number":1e0 }\n');
+const RAW_JSON = Buffer.from(
+  ' { "escaped" : "\\u4f60", "model" : "m1", "text" : "你好", "number":1e0 }\n',
+);
 const OPAQUE = Buffer.concat([Buffer.from("上游原始字节\n"), Buffer.from([0, 255, 254, 13, 10])]);
 const USER_HELLO = { role: "user", content: "hello from workbuddy" };
 const EXPECTED_COMMAND = "echo workbuddy-smoke";
@@ -34,6 +38,7 @@ const ERROR_MARKER = "WORKBUDDY_FAKE_ERROR";
 function configured(origin: string, basePath = "/v1") {
   return {
     tokens: tokensFrom(liveTokenTable()),
+    allowedModels: ALLOWED_MODELS,
     upstream: { baseUrl: `${origin}${basePath}`, apiKey: API_KEY },
   };
 }
@@ -167,7 +172,7 @@ describe("byte-preserving credential substitution", () => {
       }),
     );
     await withListeningProxy(configured(upstream.origin, ""), async (origin) => {
-      const response = await postCompletions(origin, { body: "{}" });
+      const response = await postCompletions(origin, { body: MODEL_BODY });
       expect(response.status).toBe(204);
       expect(upstream.requests).toHaveLength(1);
       expect(lastRecord(upstream.requests).url).toBe("/chat/completions");
@@ -201,7 +206,7 @@ describe("non5xx passthrough and 5xx sanitization", () => {
       }),
     );
     await withListeningProxy(configured(upstream.origin), async (origin) => {
-      const response = await postCompletions(origin, { body: '{"mode":"rate"}' });
+      const response = await postCompletions(origin, { body: '{"model":"m1","mode":"rate"}' });
       expect(response.status).toBe(429);
       expect(response.headers.get("cache-control")).toBe("no-store");
       expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
@@ -228,12 +233,14 @@ describe("non5xx passthrough and 5xx sanitization", () => {
       }),
     );
     await withListeningProxy(configured(upstream.origin), async (origin) => {
-      const redirected = await rawPostCompletions(origin, { body: '{"mode":"redirect"}' });
+      const redirected = await rawPostCompletions(origin, {
+        body: '{"model":"m1","mode":"redirect"}',
+      });
       expect(redirected.status).toBe(302);
       expect(redirected.body.toString("utf8")).toBe("redirect-body");
       expect(hits).toBe(1);
 
-      const gzipped = await rawPostCompletions(origin, { body: '{"mode":"gzip"}' });
+      const gzipped = await rawPostCompletions(origin, { body: '{"model":"m1","mode":"gzip"}' });
       expect(gzipped.status).toBe(200);
       expect(gzipped.headers["content-encoding"]).toBe("gzip");
       expect(gzipped.body.equals(compressed)).toBe(true);
@@ -250,7 +257,7 @@ describe("non5xx passthrough and 5xx sanitization", () => {
     );
     await withListeningProxy(configured(upstream.origin), async (origin) => {
       await expectFetchEnvelope(
-        await postCompletions(origin, { body: '{"mode":"error"}' }),
+        await postCompletions(origin, { body: '{"model":"m1","mode":"error"}' }),
         502,
         AGENT_UNAVAILABLE_ENVELOPE,
       );
@@ -278,13 +285,14 @@ describe("real #88 fake-upstream composition", () => {
     const fake = resources.track(await start({ apiKey: API_KEY }));
     await withListeningProxy(configured(`http://127.0.0.1:${fake.port}`), async (origin) => {
       const first = await postCompletions(origin, {
-        body: JSON.stringify({ messages: [USER_HELLO], stream: true }),
+        body: JSON.stringify({ model: "m1", messages: [USER_HELLO], stream: true }),
       });
       expect(first.headers.get("cache-control")).toBe("no-store");
       expectToolRound(first.status, first.headers.get("content-type") ?? "", await first.text());
 
       const second = await postCompletions(origin, {
         body: JSON.stringify({
+          model: "m1",
           messages: [USER_HELLO, { role: "tool", content: "workbuddy-smoke" }],
           stream: true,
         }),
@@ -293,6 +301,7 @@ describe("real #88 fake-upstream composition", () => {
 
       const failed = await postCompletions(origin, {
         body: JSON.stringify({
+          model: "m1",
           messages: [{ role: "user", content: `trigger ${ERROR_MARKER}` }],
           stream: true,
         }),
@@ -300,4 +309,92 @@ describe("real #88 fake-upstream composition", () => {
       await expectFetchEnvelope(failed, 502, AGENT_UNAVAILABLE_ENVELOPE);
     });
   });
+});
+
+/** model-proxy「Model outside the whitelist is refused」的十二个 body，加一个规格外的第十三个（见其行内说明）。 */
+const REFUSED: readonly (readonly [string, string])[] = [
+  ["不在白名单", '{"model":"m2","messages":[]}'],
+  ["大小写不同", '{"model":"M1","messages":[]}'],
+  ["前导空格", '{"model":" m1","messages":[]}'],
+  ["缺 model", '{"messages":[]}'],
+  ["model 是数字", '{"model":1}'],
+  ["model 是 null", '{"model":null}'],
+  ["model 是数组", '{"model":["m1"]}'],
+  ["顶层数组", '["m1"]'],
+  ["顶层字符串", '"m1"'],
+  ["重复键，白名单内的在前", '{"model":"m1","model":"other"}'],
+  ["重复键，白名单内的在后", '{"model":"other","model":"m1"}'],
+  ["重复键，后一个用转义拼写", String.raw`{"model":"other","mod\u0065l":"m1"}`],
+  // 规格外：转义拼写的那个键带白名单外的值——键名不解码的实现会把它当成唯一的 `m1` 放行。
+  ["重复键，前一个在白名单内、后一个用转义拼写", String.raw`{"model":"m1","mod\u0065l":"other"}`],
+];
+/** 每个 body 带与不带 `"stream":true` 各一次；`stream` 是对象成员，顶层不是对象的两个只有不带的一份。 */
+const REFUSED_BOTH_WAYS = REFUSED.flatMap(([name, body]) =>
+  body.endsWith("}")
+    ? [
+        [name, body],
+        [`${name}，带 stream`, body.replace(/\}$/u, ',"stream":true}')],
+      ]
+    : [[name, body]],
+);
+const FORWARDED = String.raw`{ "stream" : true, "metadata":{"model":"other"}, "mod\u0065l" : "m3", "messages":[{"role":"user","content":"你好"}] }`;
+const FORWARDED_NO_STREAM = String.raw`{ "metadata":{"model":"other"}, "mod\u0065l" : "m3", "messages":[{"role":"user","content":"你好"}] }`;
+const SSE_PARTS = ["data: 你好\n\n", "data: [DONE]\n\n"];
+const JSON_REPLY = '{ "choices" : [ {"message":{"content":"你好"}} ] }\n';
+
+describe("model whitelist", () => {
+  it("the refused table holds the escaped spellings and both stream forms", () => {
+    expect(REFUSED).toHaveLength(13);
+    expect(REFUSED_BOTH_WAYS).toHaveLength(24);
+    expect(REFUSED[11]?.[1]).toContain("\\u0065");
+    expect(REFUSED[12]?.[1]).toContain("\\u0065");
+  });
+
+  it.each(REFUSED_BOTH_WAYS)("refuses %s before any upstream contact: %s", async (_name, body) => {
+    const upstream = await opaque202Upstream();
+    await withListeningProxy(configured(upstream.origin), async (origin) => {
+      const response = await postCompletions(origin, { body });
+      expect(response.status).toBe(400);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      const text = await response.text();
+      expect(text).toBe('{"error":{"code":"bad_request","message":"请求格式不正确"}}');
+      for (const offered of ["m2", "M1", "other"]) {
+        expect(text).not.toContain(offered);
+      }
+      expect(upstream.requests).toEqual([]);
+    });
+  });
+
+  it.each([
+    ["streaming", FORWARDED],
+    ["non-streaming", FORWARDED_NO_STREAM],
+  ])(
+    "forwards a whitelisted %s body byte-identically and relays the response unchanged",
+    async (_name, body) => {
+      expect(body).toContain("\\u0065");
+      const upstream = resources.track(
+        await startRecordingUpstream(({ response, recorded }) => {
+          if (recorded.body.includes('"stream"')) {
+            response.writeHead(200, { "content-type": "text/event-stream" });
+            response.write(SSE_PARTS[0]);
+            response.end(SSE_PARTS[1]);
+            return;
+          }
+          response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+          response.end(JSON_REPLY);
+        }),
+      );
+      const streamed = body === FORWARDED;
+      await withListeningProxy(configured(upstream.origin), async (origin) => {
+        const response = await postCompletions(origin, { body });
+        expect(response.status).toBe(200);
+        expect(response.headers.get("content-type")).toBe(
+          streamed ? "text/event-stream" : "application/json; charset=utf-8",
+        );
+        expect(await response.text()).toBe(streamed ? SSE_PARTS.join("") : JSON_REPLY);
+        expect(upstream.requests).toHaveLength(1);
+        expectReplacedCredentials(lastRecord(upstream.requests), Buffer.from(body));
+      });
+    },
+  );
 });

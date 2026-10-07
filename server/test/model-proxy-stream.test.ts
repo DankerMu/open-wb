@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   AGENT_UNAVAILABLE_ENVELOPE,
+  ALLOWED_MODELS,
   API_KEY,
   createGate,
   createProxyApp,
@@ -36,6 +37,7 @@ const APP_CLOSE_TIMEOUT_MS = 20_000;
 function configured(origin: string) {
   return {
     tokens: tokensFrom(liveTokenTable()),
+    allowedModels: ALLOWED_MODELS,
     upstream: { baseUrl: `${origin}/v1`, apiKey: API_KEY },
   };
 }
@@ -45,7 +47,7 @@ describe("incremental non5xx passthrough", () => {
     const held = resources.track(await startHeldSse(FIRST, REST));
     await withListeningProxy(configured(held.origin), async (origin) => {
       try {
-        const pending = postCompletions(origin, { body: '{"mode":"stream"}' });
+        const pending = postCompletions(origin, { body: '{"model":"m1","mode":"stream"}' });
         const response = await waitFor(pending, 3_000, "proxy buffered before exposing headers");
         expect(response.status).toBe(200);
         expect(response.headers.get("cache-control")).toBe("no-store");
@@ -147,7 +149,7 @@ describe("cancellation and late stream failure", () => {
     await withListeningProxy(configured(upstream.origin), async (origin) => {
       try {
         const response = await waitFor(
-          postCompletions(origin, { body: '{"mode":"reset"}' }),
+          postCompletions(origin, { body: '{"model":"m1","mode":"reset"}' }),
           3_000,
           "missing headers before reset",
         );

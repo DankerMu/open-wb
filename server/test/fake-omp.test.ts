@@ -300,6 +300,7 @@ describe("fake-omp process contract", () => {
     expect(captured[0]?.url).toBe("/v1/chat/completions");
     expect(captured[0]?.authorization).toBe(`Bearer ${TOKEN}`);
     expect(asRecord(JSON.parse(captured[0]?.body ?? "{}")).stream).toBe(true);
+    expect(asRecord(JSON.parse(captured[0]?.body ?? "{}")).model).toBe("deepseek-v4.1-flash");
     expect(JSON.stringify(asRecord(JSON.parse(captured[0]?.body ?? "{}")).messages)).toContain(
       PROMPT.message,
     );
@@ -437,7 +438,12 @@ describe("fake-omp process contract", () => {
     );
     expect(recorded).toHaveLength(2);
     const [first, second] = recorded.map((exchange) => asRecord(JSON.parse(exchange.request)));
-    expect(first).toEqual({ stream: true, messages: [{ role: "user", content: PROMPT.message }] });
+    expect(first).toEqual({
+      model: "flash",
+      stream: true,
+      messages: [{ role: "user", content: PROMPT.message }],
+    });
+    expect(second?.model).toBe("flash");
     const starts = session.frames.filter((frame) => frame.type === "tool_execution_start");
     expect(starts).toHaveLength(1);
     const start = starts[0];

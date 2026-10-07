@@ -1,10 +1,12 @@
-import type { FastifyInstance } from "fastify";
+import fastify, { type FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { openDb } from "../src/core/db/index.js";
+import { registerModelProxy } from "../src/model-proxy/index.js";
 import { TokenRegistry } from "../src/sessions/tokens.js";
 import {
   AGENT_UNAVAILABLE_ENVELOPE,
+  ALLOWED_MODELS,
   API_KEY,
   BAD_REQUEST_ENVELOPE,
   expectInjectEnvelope,
@@ -13,6 +15,7 @@ import {
   jsonBodyOfSize,
   LIVE_TOKEN,
   liveTokenTable,
+  MODEL_BODY,
   PROXY_PATH,
   REVOKED_TOKEN,
   type RecordingUpstream,
@@ -50,7 +53,7 @@ const PARSER_FAILURES: ReadonlyArray<{ name: string; payload: string; contentTyp
   { name: "malformed JSON", payload: '{"messages":', contentType: "application/json" },
   { name: "empty JSON body", payload: "", contentType: "application/json" },
   { name: "unsupported octet-stream", payload: "binary", contentType: "application/octet-stream" },
-  { name: "text/plain JSON", payload: "{}", contentType: "text/plain" },
+  { name: "text/plain JSON", payload: MODEL_BODY, contentType: "text/plain" },
   {
     name: "oversize valid JSON",
     payload: jsonBodyOfSize(FOUR_MIB + 1),
@@ -61,9 +64,12 @@ const PARSER_FAILURES: ReadonlyArray<{ name: string; payload: string; contentTyp
 function configured(upstream: RecordingUpstream) {
   return {
     tokens: tokensFrom(liveTokenTable()),
+    allowedModels: ALLOWED_MODELS,
     upstream: { baseUrl: `${upstream.origin}/v1`, apiKey: API_KEY },
   };
 }
+
+const NO_UPSTREAM = { tokens: tokensFrom(liveTokenTable()), allowedModels: ALLOWED_MODELS };
 
 async function recordingEcho(): Promise<RecordingUpstream> {
   return resources.track(
@@ -101,7 +107,7 @@ async function injectProxy(
     method: "POST",
     url: PROXY_PATH,
     headers,
-    payload: init.payload ?? "{}",
+    payload: init.payload ?? MODEL_BODY,
   });
 }
 
@@ -124,7 +130,7 @@ describe("auth precedes config, parser, and upstream contact", () => {
   it.each(INVALID_BEARERS)(
     "$name is 401 even when upstream config is absent",
     async ({ authorization }) => {
-      await withProxyApp({ tokens: tokensFrom(liveTokenTable()) }, async (app) => {
+      await withProxyApp(NO_UPSTREAM, async (app) => {
         expectInjectEnvelope(
           await injectProxy(app, { authorization, payload: jsonBodyOfSize(FOUR_MIB + 1) }),
           401,
@@ -154,7 +160,7 @@ describe("auth precedes config, parser, and upstream contact", () => {
   );
 
   it("valid bearer with omitted upstream is 502 without throwing at registration", async () => {
-    await withProxyApp({ tokens: tokensFrom(liveTokenTable()) }, async (app) => {
+    await withProxyApp(NO_UPSTREAM, async (app) => {
       expectInjectEnvelope(
         await injectProxy(app, { authorization: `Bearer ${LIVE_TOKEN}`, payload: "{" }),
         502,
@@ -164,20 +170,36 @@ describe("auth precedes config, parser, and upstream contact", () => {
   });
 
   it("valid bearer with explicit undefined upstream is 502 before parser errors", async () => {
-    await withProxyApp(
-      { tokens: tokensFrom(liveTokenTable()), upstream: undefined },
-      async (app) => {
-        expectInjectEnvelope(
-          await injectProxy(app, {
-            authorization: `Bearer ${LIVE_TOKEN}`,
-            payload: jsonBodyOfSize(FOUR_MIB + 1),
-            contentType: "text/plain",
-          }),
-          502,
-          AGENT_UNAVAILABLE_ENVELOPE,
-        );
-      },
-    );
+    await withProxyApp({ ...NO_UPSTREAM, upstream: undefined }, async (app) => {
+      expectInjectEnvelope(
+        await injectProxy(app, {
+          authorization: `Bearer ${LIVE_TOKEN}`,
+          payload: jsonBodyOfSize(FOUR_MIB + 1),
+          contentType: "text/plain",
+        }),
+        502,
+        AGENT_UNAVAILABLE_ENVELOPE,
+      );
+    });
+  });
+
+  // model-proxy「Missing configuration after valid authentication」：无上游时 body 不被读取，白名单不参与。
+  it.each([
+    ["a whitelisted model", MODEL_BODY],
+    ["a model outside the whitelist", '{"model":"gpt-x","messages":[]}'],
+  ])("valid bearer without upstream is 502 for %s", async (_name, payload) => {
+    await withProxyApp(NO_UPSTREAM, async (app) => {
+      const response = await injectProxy(app, { authorization: `Bearer ${LIVE_TOKEN}`, payload });
+      expectInjectEnvelope(response, 502, AGENT_UNAVAILABLE_ENVELOPE);
+      expect(response.payload).not.toContain("gpt-x");
+    });
+  });
+
+  it("registration with an empty whitelist throws synchronously", () => {
+    const app = fastify({ logger: false });
+    expect(() =>
+      registerModelProxy(app, { tokens: tokensFrom(liveTokenTable()), allowedModels: new Set() }),
+    ).toThrow(/allowed model/u);
   });
 
   it.each(PARSER_FAILURES)(
@@ -205,6 +227,7 @@ describe("auth precedes config, parser, and upstream contact", () => {
     await withProxyApp(
       {
         tokens: tokensFrom(table),
+        allowedModels: ALLOWED_MODELS,
         upstream: { baseUrl: `${upstream.origin}/v1`, apiKey: API_KEY },
       },
       async (app) => {
@@ -237,7 +260,10 @@ describe("createApp sibling parser, guard, and cache isolation", () => {
       },
     });
     try {
-      const anonymous = await injectProxy(app, { authorization: `Bearer ${liveToken}` });
+      const anonymous = await injectProxy(app, {
+        authorization: `Bearer ${liveToken}`,
+        payload: '{"model":"deepseek-v4.1-flash"}',
+      });
       expect(anonymous.statusCode).toBe(202);
       expect(anonymous.headers["cache-control"]).toBe("no-store");
       expect(upstream.requests).toHaveLength(1);
