@@ -1,5 +1,5 @@
 /**
- * Fixtures shared by the workspace-snapshots test files (issues #937, #938): a workspace and a
+ * Fixtures shared by the workspace-snapshots test files (issues #937 to #939): a workspace and a
  * snapshot root on real temporary directories, the `take` runner, and the readers the expected
  * manifests are built from. Expected values come from the tests' own lstat of the workspace, not
  * from the module under test.
@@ -21,6 +21,7 @@ import fs, {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Worker } from "node:worker_threads";
 import { afterEach, vi } from "vitest";
 import { type TakeResult, take } from "../src/workspaces/snapshots.js";
 
@@ -141,6 +142,7 @@ export function fileEntry(f: Fixture, path: string): Record<string, unknown> {
     size: s.size,
     mtimeMs: s.mtimeMs,
     ctimeMs: s.ctimeMs,
+    ino: s.ino,
     mode: s.mode & 0o7777,
   };
 }
@@ -188,4 +190,61 @@ export function onCopyCreate(intercept: (path: string) => void): void {
     }
     return open(...args);
   });
+}
+
+/** Sets the times of its file whenever the round number moves, then counts itself done. */
+const TOUCH_ON_SIGNAL = `
+  const { workerData } = require("node:worker_threads");
+  const fs = require("node:fs");
+  const words = new Int32Array(workerData.shared);
+  const fd = fs.openSync(workerData.path, "r+");
+  Atomics.add(words, 1, 1);
+  for (let seen = 0; ; ) {
+    let round = Atomics.load(words, 0);
+    while (round === seen) round = Atomics.load(words, 0);
+    if (round < 0) break;
+    seen = round;
+    fs.futimesSync(fd, workerData.seconds, workerData.seconds);
+    Atomics.add(words, 1, 1);
+  }
+  fs.closeSync(fd);
+`;
+const PAIR_TRIES = 20_000;
+const PAIR_ROUND_MS = 10_000;
+
+/**
+ * Gives two files the same `mtimeMs` (`seconds`, whole) and the same `ctimeMs`; returns how many
+ * rounds that took, and throws when `PAIR_TRIES` were not enough. One `utimes` after the other
+ * is not enough where `ctime` is fine-grained (APFS: the two land microseconds apart), so two
+ * threads make their calls on the same signal until the two change times come out equal.
+ */
+export async function sameTimes(first: string, second: string, seconds: number): Promise<number> {
+  const shared = new SharedArrayBuffer(8);
+  const words = new Int32Array(shared); // [round, threads done with it]
+  const workers = [first, second].map(
+    (path) => new Worker(TOUCH_ON_SIGNAL, { eval: true, workerData: { shared, path, seconds } }),
+  );
+  const bothDone = (): void => {
+    const deadline = Date.now() + PAIR_ROUND_MS;
+    while (Atomics.load(words, 1) < 2) {
+      if (Date.now() > deadline) {
+        throw new Error("sameTimes: a thread did not answer");
+      }
+    }
+  };
+  try {
+    bothDone();
+    for (let tries = 1; tries <= PAIR_TRIES; tries++) {
+      Atomics.store(words, 1, 0);
+      Atomics.store(words, 0, tries);
+      bothDone();
+      if (lstatSync(first).ctimeMs === lstatSync(second).ctimeMs) {
+        return tries;
+      }
+    }
+    throw new Error(`sameTimes: no equal ctimeMs in ${PAIR_TRIES} tries`);
+  } finally {
+    Atomics.store(words, 0, -1);
+    await Promise.all(workers.map((worker) => worker.terminate()));
+  }
 }
