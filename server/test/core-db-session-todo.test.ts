@@ -22,33 +22,31 @@ import {
   withOpenDb,
 } from "./core-db-helpers.js";
 import {
-  CHAT_SEQUENCES,
-  chatSequences,
+  COLUMNS_035,
   columnNames,
   countReceipts,
   EXPECTED_ROWS,
   expectChatSchema,
+  expectFixture035,
   expectFixtureRows,
   type FixtureTable,
-  metadataRows,
   PRIOR_COLUMNS,
   preservedState,
   RECEIPTS_034,
+  RECEIPTS_035,
   receipts,
   S_A,
   S_B,
   S_C,
   S_D,
   seedPopulated034,
+  seedPopulated035,
   seedThrough,
   selectRows,
-  W_U1,
-  W_U2,
 } from "./core-db-session-fixture.js";
 
 afterEach(removeTempDirs);
 
-const RECEIPTS_035 = [...RECEIPTS_034, MIGRATION_035] as const;
 const LEDGER_TAIL: Array<[number, string]> = [
   [8, MIGRATION_034],
   [9, MIGRATION_035],
@@ -57,74 +55,19 @@ const LEDGER_TAIL: Array<[number, string]> = [
 const DUPLICATE_TODO = /duplicate column name: todo/;
 const TODO_TEXT =
   '{"phases":[{"name":"准备","tasks":[{"content":"读取需求","status":"pending"}]}]}';
-const THINKING = "先想 🧠\n再答";
-const CHANGES = '{"files":[{"path":"a.md","added":1,"removed":0,"kind":"edit"}]}';
-
-// Every column that exists before 036: the 034 columns plus the 035 tail.
-const COLUMNS_035 = {
-  ...PRIOR_COLUMNS,
-  chat_sessions: [...PRIOR_COLUMNS.chat_sessions, "workspace_id", "scene", "pinned_at"],
-  chat_messages: [...PRIOR_COLUMNS.chat_messages, "thinking"],
-  chat_steps: [...PRIOR_COLUMNS.chat_steps, "changes"],
-};
-// 035 values of the populated fixture: S_A is bound, has a scene and is pinned; S_B is its fork child.
-const SESSION_META = [
-  { id: S_A, workspace_id: W_U1, scene: "code", pinned_at: 150 },
-  { id: S_B, workspace_id: null, scene: null, pinned_at: null },
-  { id: S_C, workspace_id: W_U2, scene: "office", pinned_at: null },
-  { id: S_D, workspace_id: null, scene: null, pinned_at: null },
-];
-const MESSAGE_THINKING = [
-  { id: 1, thinking: null },
-  { id: 2, thinking: THINKING },
-  { id: 3, thinking: null },
-  { id: 4, thinking: null },
-  { id: 5, thinking: null },
-  { id: 6, thinking: "" },
-];
-const STEP_CHANGES = [
-  { id: 1, changes: CHANGES },
-  { id: 2, changes: null },
-  { id: 3, changes: null },
-  { id: 4, changes: null },
-];
 const ALL_TODO_NULL = [S_A, S_B, S_C, S_D].map((id) => ({ id, todo: null }));
-
-/** The populated 034 fixture with its 035 columns filled in (two owners, one fork child). */
-function seedPopulated035(db: DatabaseSync): void {
-  seedPopulated034(db);
-  const meta = db.prepare(
-    "UPDATE chat_sessions SET workspace_id = ?, scene = ?, pinned_at = ? WHERE id = ?",
-  );
-  meta.run(W_U1, "code", 150, S_A);
-  meta.run(W_U2, "office", null, S_C);
-  const thinking = db.prepare("UPDATE chat_messages SET thinking = ? WHERE id = ?");
-  thinking.run(THINKING, 2);
-  thinking.run("", 6);
-  db.prepare("UPDATE chat_steps SET changes = ? WHERE id = 1").run(CHANGES);
-}
-
-function expectFixture035(db: DatabaseSync): void {
-  expectFixtureRows(db);
-  expect(metadataRows(db)).toEqual({
-    sessions: SESSION_META,
-    messages: MESSAGE_THINKING,
-    steps: STEP_CHANGES,
-  });
-  expect(chatSequences(db)).toEqual(CHAT_SEQUENCES);
-}
 
 function todoRows(db: DatabaseSync) {
   return db.prepare("SELECT id, todo FROM chat_sessions ORDER BY id").all();
 }
 
 function expect036Applied(db: DatabaseSync): void {
-  expect(ledgerRows(db).slice(-3)).toEqual(LEDGER_TAIL);
-  expect(ledgerRows(db)).toHaveLength(10);
+  expect(ledgerRows(db).slice(7, 10)).toEqual(LEDGER_TAIL);
+  expect(ledgerRows(db)).toHaveLength(11);
   expect(countReceipts(db, MIGRATION_035)).toBe(1);
   expect(countReceipts(db, MIGRATION_036)).toBe(1);
   expectChatSchema(db);
-  expect(columnNames(db, "chat_sessions").at(-1)).toBe("todo");
+  expect(columnNames(db, "chat_sessions").slice(-2)).toEqual(["todo", "archived_at"]);
 }
 
 describe("migration 036 session todo column", () => {
@@ -132,7 +75,7 @@ describe("migration 036 session todo column", () => {
     ["in-memory", () => ":memory:"],
     ["new file", () => join(tempDir(), "fresh.db")],
   ])(
-    "%s database ends 034,035,036 with todo as the last nullable default-free column",
+    "%s database ends 034,035,036 with todo as a nullable default-free column ahead of 037",
     (_label, path) => {
       withOpenDb(path(), (db) => {
         expect036Applied(db);

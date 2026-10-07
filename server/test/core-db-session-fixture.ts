@@ -1,5 +1,5 @@
 /**
- * Shared chat-schema migration fixture for the 035 / 036 ADD COLUMN tests: a populated 034 database
+ * Shared chat-schema migration fixture for the 035 / 036 / 037 ADD COLUMN tests: a populated 034 database
  * across owners u1/u2 written as literals, plus catalog readers for the state an upgrade must keep.
  */
 import type { DatabaseSync } from "node:sqlite";
@@ -17,6 +17,7 @@ import {
   MIGRATION_032,
   MIGRATION_033,
   MIGRATION_034,
+  MIGRATION_035,
   MIGRATION_0010,
   tableIndexKeys,
   withDatabase,
@@ -32,6 +33,7 @@ export const RECEIPTS_033 = [
   MIGRATION_033,
 ] as const;
 export const RECEIPTS_034 = [...RECEIPTS_033, MIGRATION_034] as const;
+export const RECEIPTS_035 = [...RECEIPTS_034, MIGRATION_035] as const;
 export const S_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 export const S_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 export const S_C = "cccccccccccccccccccccccccccccccc";
@@ -42,7 +44,7 @@ export const W_U2 = "22222222222222222222222222222222";
 export const W_MISSING = "99999999999999999999999999999999";
 
 // [name, type, notnull, dflt_value, pk] of the current schema: 032/033/034 columns, the 035 tail,
-// then the 036 `todo` tail on chat_sessions.
+// then the 036 `todo` and 037 `archived_at` tails on chat_sessions.
 type ColumnInfo = [string, string, number, string | null, number];
 const CHAT_TABLE_INFO = {
   chat_sessions: [
@@ -59,6 +61,7 @@ const CHAT_TABLE_INFO = {
     ["scene", "TEXT", 0, null, 0],
     ["pinned_at", "INTEGER", 0, null, 0],
     ["todo", "TEXT", 0, null, 0],
+    ["archived_at", "INTEGER", 0, null, 0],
   ],
   chat_messages: [
     ["id", "INTEGER", 0, null, 1],
@@ -88,7 +91,7 @@ const SESSION_FOREIGN_KEYS = [
   { from: "workspace_id", table: "workspaces", to: "id", on_delete: "SET NULL" },
 ];
 
-/** Drops the trailing columns later migrations appended (035: 3/1/1, 036: one more on sessions). */
+/** Drops the trailing columns later migrations appended (035: 3/1/1, 036 and 037: one more each on sessions). */
 function namesBefore035(info: ColumnInfo[], newColumns: number): string[] {
   return info.slice(0, info.length - newColumns).map(([name]) => name);
 }
@@ -97,7 +100,7 @@ function namesBefore035(info: ColumnInfo[], newColumns: number): string[] {
 export const PRIOR_COLUMNS = {
   accounts: ["id", "account", "role", "disabled", "password_hash"],
   workspaces: ["id", "owner_id", "name", "dir", "created_at"],
-  chat_sessions: namesBefore035(CHAT_TABLE_INFO.chat_sessions, 4),
+  chat_sessions: namesBefore035(CHAT_TABLE_INFO.chat_sessions, 5),
   chat_messages: namesBefore035(CHAT_TABLE_INFO.chat_messages, 1),
   chat_steps: namesBefore035(CHAT_TABLE_INFO.chat_steps, 1),
   chat_approvals: [
@@ -322,4 +325,61 @@ export function expectChatSchema(db: DatabaseSync): void {
   }
   expect(sortedForeignKeys(db, "chat_sessions")).toEqual(SESSION_FOREIGN_KEYS);
   expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+}
+
+// The populated 035 fixture (shared by the 036 and 037 upgrade tests).
+const THINKING = "先想 🧠\n再答";
+const CHANGES = '{"files":[{"path":"a.md","added":1,"removed":0,"kind":"edit"}]}';
+
+// Every column that exists before 036: the 034 columns plus the 035 tail.
+export const COLUMNS_035 = {
+  ...PRIOR_COLUMNS,
+  chat_sessions: [...PRIOR_COLUMNS.chat_sessions, "workspace_id", "scene", "pinned_at"],
+  chat_messages: [...PRIOR_COLUMNS.chat_messages, "thinking"],
+  chat_steps: [...PRIOR_COLUMNS.chat_steps, "changes"],
+};
+// 035 values of the populated fixture: S_A is bound, has a scene and is pinned; S_B is its fork child.
+const SESSION_META = [
+  { id: S_A, workspace_id: W_U1, scene: "code", pinned_at: 150 },
+  { id: S_B, workspace_id: null, scene: null, pinned_at: null },
+  { id: S_C, workspace_id: W_U2, scene: "office", pinned_at: null },
+  { id: S_D, workspace_id: null, scene: null, pinned_at: null },
+];
+const MESSAGE_THINKING = [
+  { id: 1, thinking: null },
+  { id: 2, thinking: THINKING },
+  { id: 3, thinking: null },
+  { id: 4, thinking: null },
+  { id: 5, thinking: null },
+  { id: 6, thinking: "" },
+];
+const STEP_CHANGES = [
+  { id: 1, changes: CHANGES },
+  { id: 2, changes: null },
+  { id: 3, changes: null },
+  { id: 4, changes: null },
+];
+
+/** The populated 034 fixture with its 035 columns filled in (two owners, one fork child). */
+export function seedPopulated035(db: DatabaseSync): void {
+  seedPopulated034(db);
+  const meta = db.prepare(
+    "UPDATE chat_sessions SET workspace_id = ?, scene = ?, pinned_at = ? WHERE id = ?",
+  );
+  meta.run(W_U1, "code", 150, S_A);
+  meta.run(W_U2, "office", null, S_C);
+  const thinking = db.prepare("UPDATE chat_messages SET thinking = ? WHERE id = ?");
+  thinking.run(THINKING, 2);
+  thinking.run("", 6);
+  db.prepare("UPDATE chat_steps SET changes = ? WHERE id = 1").run(CHANGES);
+}
+
+export function expectFixture035(db: DatabaseSync): void {
+  expectFixtureRows(db);
+  expect(metadataRows(db)).toEqual({
+    sessions: SESSION_META,
+    messages: MESSAGE_THINKING,
+    steps: STEP_CHANGES,
+  });
+  expect(chatSequences(db)).toEqual(CHAT_SEQUENCES);
 }
