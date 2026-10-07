@@ -128,8 +128,13 @@ Minimal mergeable slice: 4.1 可先单独合入（store 方法由自己的 store
   - 共用的「移入 trash 再删」函数从 `session-delete.ts` 的产物目录流程抽出；本任务里它对 `EXDEV` 仍是「报告且不碰原位置」，原地删除的退路在 5.3 作为只对临时目录开启的参数加入——产物目录的行为不变，`removeSessionFile` 的签名不变（既有 trash 测试依赖它）。
   - 「目标被换成符号链接」在模块 seam 上测：直接调导出的删除函数，经 `rename` seam 或前置钩子注入替换（先例 `session-delete-trash.test.ts`）。「删除失败不影响响应」用 0500 子目录构造，以 root 运行时跳过。
   - 被删会话的快照目录在 12.3（#953）之前不清；此刻没有生产写入者，不留残余。
-- [ ] 5.3 `EXDEV` 退路：`rename` 以 `EXDEV` 失败时再 `lstat` 后原地递归删除。测试：「跨文件系统退为原地删除」（注入 `rename` 失败）。
-- [ ] 5.4 真实两文件系统验证（design D8 的首次验证）：在测试 VPS 上把 `SANDBOX_ROOT` 与 `OMP_STATE_DIR` 放在两个文件系统（如 tmpfs 与磁盘），删除一个用临时空间的会话，确认 `rename` 真的给出 `EXDEV`、目录被原地删除、无残留；结果（命令与输出，不含主机信息）写进 PR 描述。退路不成立时停下来报告。
+- [x] 5.3 `EXDEV` 退路：`rename` 以 `EXDEV` 失败时再 `lstat` 后原地递归删除。测试：「跨文件系统退为原地删除」（注入 `rename` 失败）。
+  **实施注记（5.3 / 5.4，fixture 评审补充）**：
+  - 5.2 合入时 `session-delete-temp-workspace.test.ts` 里的 `EXDEV` 用例钉的是「报告且不动原位置」（当时退路未落地）。本任务把它**翻转**为规格的结果：原地删除、无报告、指向目录之外的链接目标不变；偏离记录里注明这是规格落地，不是削弱断言。
+  - 退路是 `removeDirThroughTrash`（`workspaces/temp-dir-remove.ts`）上的一个参数，只由 `removeTemporaryWorkspaceDir` 打开：`rename` 得 `EXDEV` → 再 `lstat` → 仍是目录则 `rm({ recursive: true })`（不加 `force`，不跟随符号链接）；不是目录则报告且不删；`ENOENT` 视为成功。会话产物目录走的那条路径遇 `EXDEV` 仍是「报告且不动」，在 `session-delete-trash.test.ts` 补一条用例钉住。
+  - 注入式用例留在模块接缝（不传 `renameImpl` 的 REST 路径没有注入口）；规格场景里的「204」由 5.4 的实测承担。
+  - 5.4：5.6 尚未落地，没有 REST 路径能创建临时空间——用不入库的一次性脚本经测试辅助造数后走真实 DELETE。证据另附一次跨两个目录的 `rename` 输出与 `df` 两行（退路吞掉 `EXDEV` 不报告，仅凭删除成功不能证明 `rename` 真的失败过）。主机信息不进任何被跟踪文件与 PR。
+- [x] 5.4 真实两文件系统验证（design D8 的首次验证）：在测试 VPS 上把 `SANDBOX_ROOT` 与 `OMP_STATE_DIR` 放在两个文件系统（如 tmpfs 与磁盘），删除一个用临时空间的会话，确认 `rename` 真的给出 `EXDEV`、目录被原地删除、无残留；结果（命令与输出，不含主机信息）写进 PR 描述。退路不成立时停下来报告。
 - [x] 5.5 变异证据（删除）：不判引用计数直接删 → 「共用时保留到最后一个会话」判红；计数排除归档会话 → 「归档的会话仍算使用者」判红；递归删除改为跟随符号链接 → 「不跟随链接」判红；`lstat` 校验去掉 → 「目标被换成符号链接」判红。
 - [ ] 5.6 切换创建语义：`store-metadata.ts` 的 `createSession` 在未给 `workspaceId` 时于同一事务里调用 3.1 的方法并绑定；不写 `session.bind` / `workspace.create`。`createApp` 把 store 的方法注入会话模块（不反向导入）。测试（`server/test/session-temp-workspace.test.ts`）：session-metadata「会话创建与空间绑定」的「无 body 与空对象按默认创建」「绑定自有工作空间并选择场景」「只选场景不选空间」「非法 body 形状」「临时空间创建失败不留会话」、temporary-workspaces「不带空间创建会话」「每个新会话各有自己的临时空间」「目录创建失败不留行」的 REST 一半、chat-sessions「Create list and empty history」、http-service-skeleton「会话元数据 parser owner 的真实 HTTP 边界」里无 body 创建的 THEN、session-metadata「绑定不可改与工作目录」的三会话 cwd 场景与「存量未绑定会话照常可用」（其中 `undo` 断言留到 10.6）。
 - [ ] 5.7 改写受语义变化波及的既有测试（与 5.6 同 PR）：凡以无 body 的 `POST /api/sessions` 创建后断言 `workspaceId:null` 或 cwd 为账号根的用例，按意图二选一——意图是「普通新会话」的改断言为临时空间根；意图是「未绑定会话」的改为直接写库构造 `workspace_id` 为 NULL 的行（抽一个测试辅助函数）。逐条写进 PR 偏离记录。同时核对 `web/e2e/ui-walk.spec.ts` 与 `web/e2e/ui-walk-sessions.spec.ts`：经首次发送创建的会话现在用临时空间，凡依赖「跑在账号根目录」或能力栏读作 `任务启动于 未绑定` 的断言按新契约改写（此时 web 还没有 `临时空间` 标签，改为不断言该标签的文本，17.1 落地后由 19.2 断言）。

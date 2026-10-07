@@ -34,8 +34,8 @@ const TEMPORARY_DIR_NAME = /^tmp-[0-9a-f]{32}$/u;
  * (the caller resolves and checks it) and `name` exactly `tmp-<32 hex>`; anything else is reported
  * and nothing is touched, so the only path ever handled is one fixed entry directly inside the
  * account root. The entry itself then goes through `removeDirThroughTrash`: a symlink or a file
- * standing there is not removed. A rename failing with `EXDEV` (sandbox root and state dir on two
- * file systems) is reported like any other rename failure and the directory stays in place.
+ * standing there is not removed. Only here is the in-place fallback on: a rename failing with
+ * `EXDEV` (sandbox root and state dir on two file systems) removes the directory where it stands.
  * `renameImpl` is the test seam for a swap between `lstat` and `rename`; production passes nothing.
  */
 export async function removeTemporaryWorkspaceDir(
@@ -53,6 +53,7 @@ export async function removeTemporaryWorkspaceDir(
     MESSAGES,
     report,
     renameImpl,
+    true,
   );
 }
 
@@ -66,7 +67,8 @@ export async function removeTemporaryWorkspaceDir(
  * checked again: an entry swapped for a symlink or a file between `lstat` and `rename` is only
  * unlinked, and reported. A rename failing with ENOENT means the source is gone (success) or the
  * trash is missing, told apart by one more `lstat` of the source; any other rename failure is
- * reported and the source left alone.
+ * reported and the source left alone. That includes `EXDEV` unless `inPlaceOnExdev` is set (the
+ * temporary workspace directory only): then the source is removed in place, see `removeInPlace`.
  * No `force`: a failed or partial removal is reported, and what could not be removed stays in the
  * trash, not where it was. Residual: an omp-uid process that put its cwd or a directory fd inside
  * this tree before the move can still swap subdirectories through relative paths while `rm` walks
@@ -78,21 +80,18 @@ export async function removeDirThroughTrash(
   messages: TrashRemovalMessages,
   report: Report,
   renameImpl: typeof rename,
+  inPlaceOnExdev = false,
 ): Promise<void> {
   const trashed = join(trash, randomBytes(16).toString("hex"));
-  try {
-    if (!(await lstat(dir)).isDirectory()) {
-      report(new Error(messages.notADirectory));
-      return;
-    }
-  } catch (error) {
-    reportUnlessMissing(error, report);
+  if (!(await isRealDirectory(dir, messages, report))) {
     return;
   }
   try {
     await renameImpl(dir, trashed);
   } catch (error) {
-    if (!isMissing(error)) {
+    if (inPlaceOnExdev && (error as NodeJS.ErrnoException).code === "EXDEV") {
+      await removeInPlace(dir, messages, report);
+    } else if (!isMissing(error)) {
       report(error);
     } else if (await stillPresent(dir, report)) {
       report(new Error(messages.trashUnavailable, { cause: error }));
@@ -106,6 +105,45 @@ export async function removeDirThroughTrash(
       await unlink(trashed);
       report(new Error(messages.replacedBeforeMove));
     }
+  } catch (error) {
+    report(error);
+  }
+}
+
+/** `lstat`: a missing entry is silently not one; a symlink or a file is reported. */
+async function isRealDirectory(
+  dir: string,
+  messages: TrashRemovalMessages,
+  report: Report,
+): Promise<boolean> {
+  try {
+    if ((await lstat(dir)).isDirectory()) {
+      return true;
+    }
+    report(new Error(messages.notADirectory));
+  } catch (error) {
+    reportUnlessMissing(error, report);
+  }
+  return false;
+}
+
+/**
+ * The `EXDEV` fallback: no trash on this file system, so `dir` is checked once more (gone is
+ * success; a symlink or a file put there since the first check is reported and left alone) and
+ * removed where it stands. No `force`, and `rm` follows no symlink inside. Unlike the trash path,
+ * the tree stays reachable by path for the omp uid while `rm` walks it (design D8 residual), and
+ * what a failed removal leaves behind stays in the account root.
+ */
+async function removeInPlace(
+  dir: string,
+  messages: TrashRemovalMessages,
+  report: Report,
+): Promise<void> {
+  if (!(await isRealDirectory(dir, messages, report))) {
+    return;
+  }
+  try {
+    await rm(dir, { recursive: true });
   } catch (error) {
     report(error);
   }
