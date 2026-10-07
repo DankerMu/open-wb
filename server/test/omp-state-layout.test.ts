@@ -35,6 +35,7 @@ import {
   ompAgentDir,
   ompHome,
   ompSessionDir,
+  ompSnapshotsDir,
   ompTrashDir,
   ompXdgHome,
 } from "../src/sessions/omp/state-layout.js";
@@ -121,6 +122,7 @@ describe("managed omp state layout paths", () => {
     expect(ompXdgHome("/s", "cache")).toBe("/s/xdg/cache");
     expect(ompSessionDir("/s", OWNER)).toBe("/s/sessions/u1");
     expect(ompTrashDir("/s")).toBe("/s/trash");
+    expect(ompSnapshotsDir("/s")).toBe("/s/snapshots");
     // chat-sessions names process.ts as the exporter of these two.
     expect(processAgentDir).toBe(ompAgentDir);
     expect(processSessionDir).toBe(ompSessionDir);
@@ -137,11 +139,18 @@ describe("ensureOmpStateLayout", () => {
     expectLayout(state, TABLE);
     expect(modeOf(join(root, "missing"))).toBe(parentMode);
     expect(modeOf(join(root, "missing", "parents"))).toBe(parentMode);
-    expect(readdirSync(state).toSorted()).toEqual(["home", "sessions", "trash", "xdg"]);
+    expect(readdirSync(state).toSorted()).toEqual([
+      "home",
+      "sessions",
+      "snapshots",
+      "trash",
+      "xdg",
+    ]);
     expect(readdirSync(join(state, "home")).toSorted()).toEqual([".env", ".omp"]);
     expectHomeDotenv(state);
     expect(readdirSync(join(state, "sessions"))).toEqual([]);
     expect(readdirSync(join(state, "trash"))).toEqual([]);
+    expect(readdirSync(join(state, "snapshots"))).toEqual([]);
 
     const calls = await spawnRecorded(root, state);
     expect(calls).toHaveLength(1);
@@ -281,6 +290,64 @@ describe("ensureOmpStateLayout", () => {
     expect(calls).toEqual([]);
     expect(modeOf(elsewhere)).toBe(0o755);
     expect(readdirSync(elsewhere)).toEqual([]);
+  });
+
+  // #935 omp-runtime「快照目录属于布局」.
+  it("creates snapshots app-private at the path ompSnapshotsDir names, on a cold state dir", () => {
+    const state = join(tempRoot(), "state");
+
+    const root = ensureOmpStateLayout(state);
+
+    const stats = lstatSync(join(state, "snapshots"));
+    expect(stats.isDirectory()).toBe(true);
+    expect(stats.mode & 0o7777).toBe(0o700);
+    expect(stats.uid).toBe(process.geteuid?.());
+    expect(ompSnapshotsDir(root)).toBe(join(realpathSync(state), "snapshots"));
+  });
+
+  it("corrects a snapshots directory that was opened to the group", () => {
+    const state = join(tempRoot(), "state");
+    ensureOmpStateLayout(state);
+    chmodSync(join(state, "snapshots"), 0o770);
+    expect(modeOf(join(state, "snapshots"))).toBe(0o770);
+
+    ensureOmpStateLayout(state);
+
+    expect(modeOf(join(state, "snapshots"))).toBe(0o700);
+    expectLayout(state, TABLE);
+  });
+
+  it("refuses a symlink at snapshots, leaves its target alone and spawns nothing", async () => {
+    const root = tempRoot();
+    const state = join(root, "state");
+    const elsewhere = join(root, "elsewhere");
+    mkdirSync(state);
+    mkdirSync(elsewhere);
+    chmodSync(elsewhere, 0o755);
+    writeFileSync(join(elsewhere, "keep.txt"), "outside");
+    symlinkSync(elsewhere, join(state, "snapshots"));
+    const calls: SpawnCall[] = [];
+
+    expect(() => ensureOmpStateLayout(state)).toThrow(join(realpathSync(state), "snapshots"));
+    await expect(spawnRecorded(root, state, calls)).rejects.toThrow(
+      join(realpathSync(state), "snapshots"),
+    );
+
+    expect(calls).toEqual([]);
+    expect(modeOf(elsewhere)).toBe(0o755);
+    expect(readdirSync(elsewhere)).toEqual(["keep.txt"]);
+    expect(readFileSync(join(elsewhere, "keep.txt"), "utf8")).toBe("outside");
+    expect(lstatSync(join(state, "snapshots")).isSymbolicLink()).toBe(true);
+  });
+
+  it("refuses a regular file at snapshots and leaves it in place", () => {
+    const state = join(tempRoot(), "state");
+    mkdirSync(state);
+    writeFileSync(join(state, "snapshots"), "not-a-directory");
+
+    expect(() => ensureOmpStateLayout(state)).toThrow(join(realpathSync(state), "snapshots"));
+
+    expect(readFileSync(join(state, "snapshots"), "utf8")).toBe("not-a-directory");
   });
 
   it("applies the layout under the target of a symlinked state root and keeps the configured path in argv and env", async () => {

@@ -47,6 +47,14 @@ export function ompTrashDir(stateDir: string): string {
   return join(stateDir, "trash");
 }
 
+/**
+ * App-private: the per-turn workspace snapshots (design D9 of s1f-session-list-temp-space) live
+ * here, outside every workspace, so the omp uid cannot enter, list or rewrite them.
+ */
+export function ompSnapshotsDir(stateDir: string): string {
+  return join(stateDir, "snapshots");
+}
+
 const MANAGED = 0o2750;
 const OMP_WRITABLE = 0o2770;
 const OMP_HOME = 0o3770;
@@ -72,6 +80,7 @@ const LAYOUT: readonly (readonly [path: string, mode: number])[] = [
   ["xdg/cache/omp", OMP_WRITABLE],
   ["sessions", MANAGED],
   ["trash", APP_PRIVATE],
+  ["snapshots", APP_PRIVATE],
 ];
 
 /**
