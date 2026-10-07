@@ -331,6 +331,13 @@ Minimal mergeable slice: 13.1、13.2、13.3 各自可单独合入（每个导出
   - `docs/acceptance/functional-checklist.md` 里描述筛选的 SL 行归 14.8 改写；本 PR 在描述里标注它们暂时过期，不改清单。
   Risk packs（14.4–14.6）: Persistence（折叠与分组方式的本地记忆、存储不可用）、Legacy compatibility（删除筛选及既有用例）、CI gate（走查第 6 步）、Layering（迁移登记与 legacy 样式删除）、Accessibility（分组按钮、菜单、搜索框的可访问名与焦点）。
 - [ ] 14.7 列表事件接入页面：`use-chat-session.ts` 持有 13.3 的连接器——`open` 与 `sessions.changed` 触发单飞的列表重取（通知触发的失败静默），再次 `open` 时按规则补读所选会话的快照，`session.rewound` 触发所选会话的快照重读；卸载 / 换账号关闭。整页测试（新文件 `web/test/chat-list-events.test.tsx`）：session-list-push「web 列表事件消费」七个场景。
+  **实施注记（14.7，fixture 评审补充）**：
+  - 逻辑进新文件 `web/src/features/chat/use-session-list-events.ts`（登记进分层守卫的已迁移清单）；`use-chat-session.ts` 只做接线。
+  - 页面动作用的 `refreshList` 是「中止并重发、失败置错误」，不能给通知用。通知路径是静默变体（失败保留现有列表）；「在途 / 还要再取一次」的闩锁在新 hook 里，被后来者顶替时不丢；页面动作的 `refreshList` 语义不变。
+  - 重连补读与 `session.rewound` 走现有流连接的 `resync()`，不走 `loadHistory`。「本页有在途撤回」以 `() => false` 传入，18.4 接上。
+  - 整页测试全局替身的 `FakeEventSource` 被 22 个文件按下标 / 长度读 `instances`：列表连接进单独的 `listInstances`，既有整页断言零改动；只有连接器单测随之调整（记偏离）。
+  - 「没有 EventSource → 静默」在欢迎态上测；有选中会话时既有的错误文案不变。
+  - 验收清单原会话节没有描述三分区与筛选的行时，PR 写明「无可改写」。另一个标签页的增删改实时出现依赖 6.3（#932）。
 - [ ] 14.8 SL 行：在 `docs/acceptance/functional-checklist.md` 新增「会话列表（SL）」节，写分组与折叠、切换按时间、三种状态标记、搜索、无筛选入口、另一个标签页的变化不刷新就出现在列表里各一行，结论 `待签`；原会话节里描述三分区与筛选的行改写或删除并在 PR 说明。
 - [ ] 14.9 变异证据：置顶会话同时留在工作空间分组 → 「按工作空间分组」判红；折叠不写存储 → 「折叠与记忆」判红；搜索包含归档会话 → 「过滤与恢复」判红；通知到达时并发重取 → 「单飞与尾随重取」判红；重连后不补读所选会话 → 「重连补读所选会话」判红；已登记文件导入 `useToast` → 分层守卫判红。
 
