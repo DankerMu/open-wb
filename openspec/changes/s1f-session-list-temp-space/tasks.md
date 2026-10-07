@@ -362,6 +362,14 @@ Minimal mergeable slice: 14.1 + 14.2（只新增纯函数与偏好读写，旧�
 - [ ] 15.3 重写 `rename-dialog.tsx`（`dialog` + `input`）与 `delete-dialog.tsx`（`alert-dialog`）：行为与既有规格一致，去掉提示；删除确认文案的三种变体（共用判定用已加载的列表，含归档）。
 - [ ] 15.4 整页测试（新文件 `web/test/chat-session-menu.test.tsx`，旧的菜单 / 重命名 / 删除测试迁入并改写）：session-sidebar「会话条目菜单与重命名」中「从条目菜单重命名」「重命名失败保留对话框」「重命名请求中」「顶栏重命名入口」「置顶菜单文案与提示」「迟到的元数据响应」「删除确认文案」「删除当前会话」「删除请求中」；每条断言页面不出现 `已重命名` / `已更新置顶状态` / `任务已删除`。
 - [ ] 15.5 既有走查第 7、11 步的改写（**与 15.1–15.4 同 PR**，否则 `make ui-walk` 必红——旧步骤断言 `任务已删除` 的轻提示可见）：按 chat-harness「UI 走查会话元数据」改为「从 `ui-walk-sessions` 分组移到 `置顶任务`」与「删除无提示」，仍经 `ui-walk-session-list.ts`，`ui-walk-sessions.spec.ts` 不净增行。验证：`make ui-walk`。
+  **实施注记（15.1–15.5，fixture 评审补充）**：
+  - 旧用例约 70 条 / 2000 行（`chat-page-session-rename-pin`、`-delete`、`-pin`、`-delete-concurrency`），搬不进一个文件：`chat-session-menu.test.tsx` 只放 15.4 列的九个场景；旧文件就地改写（提示断言 → 无提示 / 就地 alert），逐条记偏离。
+  - 列表区顶部提示的状态放在 `session-actions.ts`（侧栏的槽位会卸载），在 `openRename`、`togglePin`、`openDelete`、提交与确认的入口清除。`session-sidebar.tsx` 只加槽位，并把条目的悬停显现改成 Tailwind `group`。
+  - `chat.css` 的规则全部删除，文件留到 15.6（守卫仍要求它存在）；同步断言其规则数的既有测试。
+  - `DeleteState` 带上 `workspaceId` / `temporaryWorkspace`；共用判定用打开对话框时已加载的列表（含归档）。
+  - 走查只改第 11 步的可见性断言（条目消失后页面任何位置都没有 `任务已删除`）；第 7 步已符合。
+  - 偏离（待 owner 追认）：三条借 `已重命名` 轻提示测 Escape 层叠的用例失去前提（生产代码不再有任何提示调用方）——`chat-page-artifacts-panel-focus`、`chat-page-project-config-dialog`、`chat-page-artifact-card-feedback` 中各一条。删除并记偏离；层叠本身仍由 `ui-toast-drawer-escape` 覆盖。不为它们加测试专用的提示触发器。
+  - 改用 `alert-dialog` 后，条目被删除时焦点的归还是风险点，须有断言。
 - [ ] 15.6 迁移终态：`session-menu.tsx`、`session-actions.ts`、`rename-dialog.tsx`、`delete-dialog.tsx` 登记；`SESSION_LIST_FILES` 清空并删除该常量与豁免分支；`web/src/features/chat/chat.css` 删除、`web/src/styles/legacy.css` 去掉对它的导入；守卫改为断言 ui-foundation「会话页迁移终态」（含四个注入样本）。`chat.css` 选择器归属断言的测试随文件删除而删除。
 - [ ] 15.7 SL 行：重命名、置顶、删除（三种确认文案）、失败就地显示各一行，`待签`。
 - [ ] 15.8 变异证据：成功后调用任何提示 → 15.4 的无提示断言判红；删除确认不区分共用 → 「删除确认文案」判红；保留 `chat.css` → 终态守卫判红；守卫保留豁免名单 → 注入样本「未登记的会话列表文件」不判失败，守卫自证测试判红。
