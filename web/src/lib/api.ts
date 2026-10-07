@@ -133,6 +133,7 @@ export type ApiClient = {
   logout(options?: ApiRequestOptions): Promise<void>;
   listWorkspaces(options?: ApiRequestOptions): Promise<WorkspaceList>;
   createWorkspace(input: CreateWorkspaceInput, options?: ApiRequestOptions): Promise<Workspace>;
+  promoteWorkspace(id: string, name: string, options?: ApiRequestOptions): Promise<Workspace>;
   listTree(workspaceId: string, path: string, options?: ApiRequestOptions): Promise<WorkspaceTree>;
   createDir(
     workspaceId: string,
@@ -380,7 +381,7 @@ function getRequestOptions(signal?: AbortSignal): RequestInit {
   };
 }
 
-function workspaceEndpoint(workspaceId: string, endpoint: "tree" | "dirs" | "file") {
+function workspaceEndpoint(workspaceId: string, endpoint: "tree" | "dirs" | "file" | "promote") {
   return `/api/workspaces/${encodeURIComponent(workspaceId)}/${endpoint}`;
 }
 
@@ -597,6 +598,26 @@ export function createApiClient({ onUnauthorized }: ApiClientOptions = {}): ApiC
       const workspace = parseWorkspace(response);
       if (!workspace) {
         throw requestFailed(201);
+      }
+
+      return workspace;
+    },
+
+    async promoteWorkspace(id, name, options) {
+      const response = await request(
+        workspaceEndpoint(id, "promote"),
+        {
+          ...requestOptions(options?.signal),
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name }),
+        },
+        onUnauthorized,
+        200,
+      );
+      const workspace = parseWorkspace(response);
+      if (!workspace) {
+        throw requestFailed(200);
       }
 
       return workspace;

@@ -87,6 +87,70 @@ describe("Files API client workspace creation contract", () => {
   });
 });
 
+describe("Files API client workspace promotion contract", () => {
+  const promoted = { ...workspace, name: "调研资料", dir: "调研资料" };
+
+  it("posts exactly the name to the encoded promote endpoint and returns the workspace", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => jsonResponse(promoted));
+    const controller = new AbortController();
+    vi.stubGlobal("fetch", fetchMock);
+    const client = createApiClient();
+
+    await expect(
+      client.promoteWorkspace("ws/%#?+ 中", "调研资料", { signal: controller.signal }),
+    ).resolves.toEqual(promoted);
+    await expect(client.promoteWorkspace("workspace-1", " 调研 ")).resolves.toEqual(promoted);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/workspaces/ws%2F%25%23%3F%2B%20%E4%B8%AD/promote",
+      {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: '{"name":"调研资料"}',
+        signal: controller.signal,
+      },
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/workspaces/workspace-1/promote", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: '{"name":" 调研 "}',
+    });
+  });
+
+  it.each([
+    [409, "conflict", "工作空间名称已存在"],
+    [400, "bad_request", "请求无效"],
+    [404, "not_found", "资源不存在"],
+  ])("keeps the %i %s envelope", async (status, code, message) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse({ error: { code, message } }, status)),
+    );
+
+    const error = await captureApiError(createApiClient().promoteWorkspace("workspace-1", "x"));
+
+    expect(error).toMatchObject({ status, code, message });
+  });
+
+  it.each([
+    ["a missing key", { id: "w", name: "n", dir: "d", root: "/r" }, 200],
+    ["a wrongly typed key", { ...promoted, createdAt: "1726000000000" }, 200],
+    ["an extra key", { ...promoted, temporary: false }, 200],
+    ["a wrapped workspace", { workspace: promoted }, 200],
+    ["a 201 status", promoted, 201],
+  ])("rejects a response with %s", async (_label, body, status) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(body, status)));
+
+    const error = await captureApiError(createApiClient().promoteWorkspace("workspace-1", "x"));
+
+    expectRequestFailure(error, status);
+  });
+});
+
 describe("Files API client workspace timestamp contract", () => {
   const signedTimestampWorkspace = {
     ...workspace,
