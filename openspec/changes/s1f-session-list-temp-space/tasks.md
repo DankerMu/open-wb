@@ -251,6 +251,10 @@ Minimal mergeable slice: 10.1 + 10.2（表与登记行读写，由迁移测试�
 前提：任务 0.2 已合入（design D11 的核对结论）；(a) 不成立时本组不开工。
 
 - [ ] 11.1 `core/errors` 增加 `undo_conflict`（409，message `其它会话在这之后改动过工作空间`）；`POST /api/sessions/:id/undo` 加入 content-parser 归属集（十三 → 十四）。测试：http-service-skeleton「归档与撤回冲突的错误码」「撤回与转正路由属于归属集」中 undo 的部分，以及「统一错误信封」各场景里的计数（十五码、fourteen identities）。
+  **实施注记（11.1，fixture 评审补充）**：
+  - undo 路由此时尚未注册（真实 HTTP 上 `POST /api/sessions/:id/undo` 仍是 404），本任务对它的证明只在错误处理接缝上：`http-parser-owners.test.ts` 的「身份 × 四种 content-parser 错误」矩阵加这一条身份。「自己的会话 + 四种坏 body → 400、no-store、无写入」的真实 HTTP 一半随 11.4 的路由一起测（写进 `session-undo.test.ts`）。
+  - 归属集由十三条到十四条（`server/src/http/errors.ts` 的集合与两处计数注释）；错误码 `undo_conflict` 的状态码与文案各一处。
+  - 随之同步的既有测试（写进偏离记录）：`http-parser-owners.test.ts` 的身份常量与计数、错误码计数；`http-typed-errors.test.ts` 的码表与「409 的几种来源」用例；`auth-lifecycle.test.ts` 的穷尽表（不同步则类型检查不过）。
 - [x] 11.2 撤回事务（`store-undo.ts`）：CAS 复核 → 删除该消息及其后的消息行 → 置 `omp_session_file`、`status`、`updated_at`、`todo` → `session.undo` 审计；返回被删消息的快照登记供清理。单测：删除范围（步骤、审批、快照行级联）、`status` 的三种取值与 `idle`、`todo` 还原（session-todo「任务清单持久化」的「快照步骤只读、撤回写回」）、CAS 失败不写、审计失败回滚（message-undo「审计失败则不回退」）。
   **实施注记（11.2，fixture 评审补充）**：
   - CAS 以 message-undo「对话原地回退」第 5 步为准，四项：非 `running`、**未归档**（`archived_at IS NULL`）、末条助手消息 id 等于调用方给的值、该用户消息行仍在（属于该会话与该所有者）。任一不满足抛 `HttpError("session_busy")`、不写任何行（先例 `store-branch.ts` 的两处 CAS）。该消息没有快照登记行同样按 CAS 失败处理。
