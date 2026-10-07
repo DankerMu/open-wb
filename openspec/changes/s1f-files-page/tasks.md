@@ -82,7 +82,7 @@ Minimal mergeable slice: 0.1 一刀（有差异才产生 PR）；0.2 随归档
 - [x] 1.1 PDF 内置查看器的可用性（design D16）。Depends on：无。挡住：组 19 中 PDF 与办公文档的部分、28.6。写一个一次性的本地页面（不入库），从端口 A 的页面以不带 `sandbox` 属性的 `iframe` 加载端口 B 上以 `Content-Type: application/pdf`、`X-Content-Type-Options: nosniff`、
   `Content-Security-Policy: frame-ancestors <A 的来源>` 返回的 PDF。在桌面 Chromium 与 Firefox 各看一次：查看器是否出现、能否翻页；再给响应加上 CSP `sandbox` 看一次以确认「加了就不行」。
   结果（浏览器版本、三种情况的现象）写进 `design.md` D16 下的「实测」小节。两个确定的分支：与设计相符 → 组 19 照规格实现；任一浏览器不显示 → 停下回 owner，组 19 的 PDF 与办公文档部分不开工，不自行改用 `<object>`、`<embed>` 或 pdf.js。
-- [ ] 1.2 应用用户移动 omp 用户创建的条目（design Risks）。Depends on：无。挡住：8.1 的 `moveToTrash` 半边、8.2、8.3 的 `workspaces-delete.test.ts`、9.1、9.2（执行 `rename` 的实现与它们的路由测试；8.1 的 `sweep` 半边与 9.3–9.4 的下载不在内）。在测试 VPS 的 uid 分离部署上，让助手用写文件工具与 `bash` 各建一个文件与一个含子目录的目录，随后以应用用户身份把它们 `rename` 到同一文件系统下应用用户持有的 `0700` 目录里、再移回。
+- [x] 1.2 应用用户移动 omp 用户创建的条目（design Risks）。Depends on：无。挡住：8.1 的 `moveToTrash` 半边、8.2、8.3 的 `workspaces-delete.test.ts`、9.1、9.2（执行 `rename` 的实现与它们的路由测试；8.1 的 `sweep` 半边与 9.3–9.4 的下载不在内）。在测试 VPS 的 uid 分离部署上，让助手用写文件工具与 `bash` 各建一个文件与一个含子目录的目录，随后以应用用户身份把它们 `rename` 到同一文件系统下应用用户持有的 `0700` 目录里、再移回。
   记录是否成功、失败时的 errno 与该条目的 mode，写进 `design.md` D22 下的「实测」小节。两个确定的分支：按 ADR-0010 规定的 `2770` 与 umask `007` 建出的条目都能移动 → 与设计相符，上述被挡的任务开工（被助手改掉组写位的条目移动失败属规格已定的 500，记入 ADR-0014 运维一节）；
   正常条目也移动失败 → 停下回 owner，上述被挡的任务不开工（其余任务不受影响）。
 - [ ] 1.3 sudo 模式下的 LibreOffice（design D18，owner D-21）。Depends on：无。挡住：28.2、28.6（只是记录的来源；不挡组 14——终止转换的做法已定）。在同一台 VPS 上安装 LibreOffice，加上 D18 的 sudoers 行，手工执行 D17 的命令行转换一份 docx：
