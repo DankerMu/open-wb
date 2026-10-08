@@ -277,6 +277,50 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
     不做代码分割，只量并记录包体；#824、#825、#826 在新会话页上解决。
   - **C `s1f-session-list-temp-space`**：会话列表（分组/置顶/状态/搜索/归档）与临时空间。**含后端**：临时空间的创建/删除/另存、
     归档字段、列表所需的「等待审批」「未读」状态。
+    - 状态（2026-10-08 留痕，#978）：Epic #917，实现已合入主干；**change 未归档，功能验收未签**。范围以下方「2026-10-06 owner 决定」
+      第 2、3 条为准（不做未读、并入撤回）。`tasks.md` 的任务组 0–12、14–17、21 全部勾选，另勾 13.1–13.3、18.1–18.5、19.1–19.4、
+      20.1–20.6；未勾的见本段末「尚未完成」。
+    - 交付记录（规格 PR #1125，与 D、S1g 的规格同一 PR；实现 PR 落在 #1130–#1228 区间，其间穿插 Epic #982（S1g）的先行项与 D 的实测记录，不连续）：
+      1. 会话列表（web，任务组 13–16）：置顶区 + 按工作空间 / 按时间的可折叠分组，分组方式与折叠记在浏览器本地；标题搜索；
+         三种可见状态标记（等待确认 / 运行中 / 失败）；条目菜单六项（重命名、置顶、归档、删除、另存为工作空间、导出记录）；
+         归档视图与已归档会话的只读呈现、恢复；列表动作不再弹轻提示，失败就地显示；`session-filter.tsx` 与 `chat.css` 已删除。
+      2. 列表状态刷新（任务组 1、6、13、14）：`GET /api/sessions/events`（只发通知 `sessions.changed`，无数据、无回放；
+         另有 `session.rewound`）；会话视图 8 键 → 11 键（`archivedAt`、`pendingApproval`、`temporaryWorkspace`）；
+         触发点为会话创建 / PATCH / 删除 / fork、回合生命周期与审批、工作空间创建与转正。
+      3. 归档（任务组 2、16）：`PATCH /api/sessions/:id` 增 `archived` 键（运行中归档 → 409 `session_busy`）；
+         已归档会话的 prompt / 重新生成 / fork / 撤回被拒（409 `session_archived`）。
+      4. 临时空间（任务组 3–5、17）：不带 `workspaceId` 的 `POST /api/sessions` 同事务创建临时空间（契约变更：此前创建未绑定会话；
+         存量未绑定会话不迁移）；`GET /api/workspaces` 不列出、按 id 可达、不能显式绑定；`POST /api/workspaces/:id/promote` 原地转正
+         （目录不移动，`workspace.promote` 审计）；fork 共用同一个临时空间；最后一个使用它的会话删除时删空间行与目录
+         （`workspace.delete` 审计，目录经 app 私有 trash 中转，`EXDEV` 时原地删）；临时空间会话照常渲染产物卡，导出记录由前端生成 Markdown。
+      5. 撤回（#907；任务组 7–12、18）：绑定空间的会话每受理一条用户消息，派发前做一份工作空间快照
+         （`<OMP_STATE_DIR>/snapshots`，未变文件硬链接到上一份；四个 `SNAPSHOT_*` 配置项）；`POST /api/sessions/:id/undo`
+         （body `{messageId, files}`，`files` 取 `keep` / `restore` / `force`；对话原地回退、文件还原；同空间别的会话其后改过文件 →
+         409 `undo_conflict`；`session.undo` 审计）；消息视图与 prompt 202 增 `undo` 键；web 的 `撤回` 按钮、冲突对话框、未还原文件说明。
+      6. 迁移 037（`chat_sessions.archived_at`）、038（`workspaces.temporary`）、039（`chat_turn_snapshots`）。
+      7. 契约增量（本 change 自身的增量，不是主干现值）：错误码 +2（`session_archived`、`undo_conflict`）；归属路由 +2（undo、promote）；
+         会话路由 +1（undo）；配置项 +4。
+      8. 任务组 0 的前置核对（#918，官方 omp v18.0.10）：对中间 / 首条用户条目 `branch` 后可 `--resume`、`branch` 后任务清单回退，
+         三点都成立，规格未因此修订（结论原文在 design D11）。
+      9. harness（任务组 19）：`smoke/session-meta.hurl` 的归档断言（#972）；`make ui-walk` 追加的第二个旅程，在真实 omp 上走临时空间、
+         列表事件、撤回（文件一并还原）、撤回后继续与 fork、归档、删除六步（#973）。
+      10. 文档（任务组 20）：`CONTEXT.md` 术语（#974）、ADR-0013 增补（#975）、ADR-0010 增补（#976）、
+         `docs/architecture/system.md` §9 部署与运维说明（#977）、功能验收清单收口（#979）。
+    - 实施期追加（立项时不在任务清单里，已合入）：快照遍历对「列举后消失的条目」与非 UTF-8 文件名的处置（#1148）；
+      遍历期间有变动的快照不可还原（#1190）；复制期间文件被原地改写得到撕裂副本的修正（#1206）；快照与还原不进入工作空间里的挂载点（#1212）；
+      还原的递归删除在并发改动下的处理（#1214）；启动失败记录带失败阶段 `reason`（#1203，任务组 21）；
+      测试夹具对齐临时空间形状（#1204）。残余风险的权威记录在 ADR-0010 的补充段。
+    - 与 design D15 模块清单的出入（以代码为准，清单见 `docs/architecture/system.md` §3.1、§5）：D15 列的六个服务端新模块都在；
+      另有三个 D15 未列的新模块——`sessions/branch-temp.ts`（fork 与撤回共用的对位、`branch` 与临时进程，#950）、
+      `sessions/store-view.ts`（会话视图的列集与映射，#921）、`workspaces/snapshots-restore.ts`（还原另立文件，#940；D15 把它放在 `snapshots.ts` 里）。
+      `supervisor.ts` 现 779 行（D15 约定 C 结束时不超过 792）。
+    - 尚未完成（本提交时点）：
+      1. 任务 13.4、18.6：两条「变异证据」条目在 `tasks.md` 里未勾（对应的实现任务 13.1–13.3、18.1–18.5 已勾；证据在各自 PR 的描述里，
+         归档前由 #980 核对后勾选）。
+      2. 任务 20.7（#980，未关闭）：归档前用当时的主规格对本 change 每条 MODIFIED 重新对底。S1g 的 `upload_too_large`（#1012）
+         已先于本 change 合入代码（主干错误码现为 16 个），对底时按 20.7 的口径处理。
+      3. change 目录仍在 `openspec/changes/s1f-session-list-temp-space/`，未归档。
+      4. 功能验收清单 `docs/acceptance/functional-checklist.md` 本 change 新增的 SL-01…SL-18 与 CH-58…CH-65 全部 `待签`。
   - **D `s1f-files-page`**：文件页重写。范围已扩大、含后端，见下方「2026-10-06 owner 决定」第 4 条。
 - 覆盖：F-UI-7、F-UI-8、F-CHAT-11a。
 - 必读增量：ADR-0013（含试验结论与未覆盖项）；assistant-ui 文档 ExternalStoreRuntime / Thread / ThreadList / Attachment。
