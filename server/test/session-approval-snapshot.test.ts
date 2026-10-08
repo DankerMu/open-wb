@@ -38,6 +38,7 @@ const MESSAGE_KEYS = [
   "status",
   "steps",
   "thinking",
+  "undo",
 ];
 
 interface SnapshotApproval {

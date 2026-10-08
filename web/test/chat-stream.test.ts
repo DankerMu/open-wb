@@ -27,6 +27,7 @@ const runningSession = {
 const historyUser = {
   id: -3,
   role: "user" as const,
+  undo: "none" as const,
   approvals: [] as [],
   content: USER_CONTENT,
   status: "done" as const,
@@ -38,6 +39,7 @@ const historyUser = {
 const userView = {
   id: -3,
   role: "user" as const,
+  undo: "none" as const,
   approvals: [] as [],
   content: USER_CONTENT,
   thinking: null,
@@ -71,6 +73,7 @@ function reducerSnapshot(
     messages.push({
       id: 0,
       role: "assistant",
+      undo: null,
       approvals: [],
       content: options.content ?? "",
       status: options.assistantStatus ?? "running",
@@ -125,6 +128,7 @@ describe("Chat stream reducer", () => {
         {
           id: 0,
           role: "assistant",
+          undo: null,
           approvals: [],
           content: STREAMED_BODY,
           status: "done",
@@ -155,6 +159,7 @@ describe("Chat stream reducer", () => {
           {
             id: 0,
             role: "assistant",
+            undo: null,
             approvals: [],
             content: "",
             status: "running",
@@ -220,6 +225,7 @@ describe("Chat stream reducer", () => {
         {
           id: 0,
           role: "assistant",
+          undo: null,
           approvals: [],
           content: STREAMED_BODY,
           status: "failed",
@@ -250,6 +256,7 @@ describe("Chat stream reducer", () => {
         {
           id: 0,
           role: "assistant",
+          undo: null,
           approvals: [],
           content: STREAMED_BODY,
           status: "failed",
@@ -289,6 +296,7 @@ describe("Chat stream reducer", () => {
     expect(dirty.messages[1]).toEqual({
       id: 0,
       role: "assistant",
+      undo: null,
       approvals: [],
       content: STREAMED_BODY,
       status: "failed",
@@ -312,6 +320,7 @@ describe("Chat stream reducer", () => {
     expect(reset.messages[1]).toEqual({
       id: 0,
       role: "assistant",
+      undo: null,
       approvals: [],
       content: "",
       status: "running",
@@ -342,6 +351,7 @@ describe("Chat stream reducer", () => {
         {
           id: 0,
           role: "assistant",
+          undo: null,
           approvals: [],
           content: "",
           status,
@@ -372,6 +382,7 @@ describe("Chat stream reducer", () => {
       {
         id: 0,
         role: "assistant",
+        undo: null,
         approvals: [],
         content: "",
         status: "failed",
@@ -512,6 +523,7 @@ describe("Chat stream reducer", () => {
     expect(done.messages[1]).toEqual({
       id: 0,
       role: "assistant",
+      undo: null,
       approvals: [],
       content: "",
       status: "done",

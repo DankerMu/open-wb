@@ -48,6 +48,7 @@ function userMessage(approvals: SnapshotApproval[] = []): SnapshotMessage {
   return {
     id: -3,
     role: "user",
+    undo: "none",
     content: "\u0000﻿Keep BOM 中文 😀",
     status: "done",
     createdAt: -1,
@@ -65,6 +66,7 @@ function assistantMessage(
   return {
     id,
     role: "assistant",
+    undo: null,
     content: "",
     status,
     createdAt: id,
@@ -294,6 +296,7 @@ describe("approval snapshot and event reduction", () => {
     expect(next.messages.at(-1)).toStrictEqual({
       id: 99,
       role: "assistant",
+      undo: null,
       content: "",
       status: "running",
       steps: [],

@@ -60,6 +60,7 @@ function snapshotFor(session: ChatSession, content: string): ChatMessageSnapshot
       {
         id: -11,
         role: "user",
+        undo: "none",
         approvals: [],
         content,
         status: "done",
@@ -354,7 +355,7 @@ describe("chat page ignored-abort GET, renewal, and concurrent submit", () => {
       },
       [sessionMessagesPath(FIRST_CREATED_ID)]: emptyCreatedMessages(),
       [sessionPromptPath(FIRST_CREATED_ID)]: jsonResponse(
-        { userMessageId: -3, assistantMessageId: 0 },
+        { userMessageId: -3, assistantMessageId: 0, undo: "none" },
         202,
       ),
     });
@@ -451,7 +452,7 @@ describe("chat page ignored-abort GET, renewal, and concurrent submit", () => {
       [SESSION_A_MESSAGES]: () => jsonResponse(snapshotFor(sessionA(), SESSION_A_TEXT)),
       [sessionMessagesPath(FIRST_CREATED_ID)]: emptyCreatedMessages(),
       [sessionPromptPath(FIRST_CREATED_ID)]: () =>
-        jsonResponse({ userMessageId: -3, assistantMessageId: 0 }, 202),
+        jsonResponse({ userMessageId: -3, assistantMessageId: 0, undo: "none" }, 202),
     });
 
     expect(await screen.findByText(SESSION_A_TEXT, { exact: true })).toBeTruthy();

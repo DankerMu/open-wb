@@ -11,6 +11,9 @@
  *
  * Input and output types are this module's own; nothing is imported from `workspaces/`.
  *
+ * `undoStatesOf` (#946, message-undo「可撤回状态」) is the pure projection of these rows onto the
+ * `undo` key of the message view and of the prompt's 202.
+ *
  * `commitUndo` (#949, message-undo「对话原地回退」step 5) is the one transaction that removes
  * messages from the middle of a session; it is at the end of this file.
  */
@@ -118,6 +121,26 @@ export function readStoredTodo(db: DatabaseSync, sessionId: string): string | nu
     | { todo: Uint8Array | null }
     | undefined;
   return row === undefined ? null : decodeNullableText(createSqliteTextDecoder(db), row.todo);
+}
+
+/** The `undo` value of a user message (message-undo「可撤回状态」); read-only and derived. */
+export type UndoState = "available" | "too_large" | "failed" | "command" | "unbound" | "none";
+
+/**
+ * The undo state of each user message of one session, from the session's registration rows and
+ * its binding: a row reads `available` for `ok` and its own `outcome` otherwise; a message with no
+ * row reads `unbound` on a session that has no workspace and `none` on a bound one.
+ */
+export function undoStatesOf(
+  rows: readonly Pick<TurnSnapshotRow, "messageId" | "outcome">[],
+  workspaceId: string | null,
+): (userMessageId: number) => UndoState {
+  const registered = new Map<number, UndoState>();
+  for (const { messageId, outcome } of rows) {
+    registered.set(messageId, outcome === "ok" ? "available" : outcome);
+  }
+  const unregistered: UndoState = workspaceId === null ? "unbound" : "none";
+  return (userMessageId) => registered.get(userMessageId) ?? unregistered;
 }
 
 function skippedText(skipped: readonly SkippedPath[]): string | null {

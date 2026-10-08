@@ -26,6 +26,7 @@ function completedSnapshot(): ChatMessageSnapshot {
       {
         id: 0,
         role: "assistant",
+        undo: null,
         approvals: [],
         content: COMPLETED_BODY,
         status: "done",
@@ -115,6 +116,7 @@ describe("Chat stream connector", () => {
         {
           id: 0,
           role: "assistant",
+          undo: null,
           approvals: [],
           content: COMPLETED_BODY,
           status: "done",
@@ -125,6 +127,7 @@ describe("Chat stream connector", () => {
         {
           id: 4,
           role: "assistant",
+          undo: null,
           approvals: [],
           content: "Z",
           status: "running",

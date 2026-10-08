@@ -10,281 +10,37 @@
  * Oracles: the spec's literals, the bytes written here, SQL read straight from the database, the
  * frames each child received on stdin. No sleeps: order is read at the moment a frame is written.
  */
-import { Buffer } from "node:buffer";
-import {
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import type { LightMyRequestResponse } from "fastify";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { resolveServerConfig, sessionRuntimeOf } from "../src/server.js";
-import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import type { TurnSnapshotService } from "../src/sessions/turn-snapshot.js";
-import { removeSnapshot, take } from "../src/workspaces/snapshots.js";
+import {
+  accepted,
+  closeWorldsAfterEach,
+  framesOfType,
+  heldService,
+  messageCount,
+  open,
+  plainRow,
+  put,
+  rows,
+  send,
+  statusOf,
+  turn,
+  turnEnds,
+} from "./prompt-snapshot-helpers.js";
 import { REAL, settle } from "./session-approval-helpers.js";
 import { postSessionAction } from "./session-bodyless-rest-helpers.js";
 import { sendDelete } from "./session-delete-helpers.js";
 import { observeDeletes } from "./session-delete-running-helpers.js";
-import { AGENT_UNAVAILABLE_ENVELOPE, deferred, postPrompt } from "./session-rest-helpers.js";
-import { collectRejections, type RejectionLog } from "./session-stop-helpers.js";
-import {
-  createRealFakeRuntime,
-  OWNER_ID,
-  openRecordingSession,
-  type RealFakeRuntime,
-  type RecordingWorld,
-  waitFor,
-} from "./session-supervisor-helpers.js";
-import { seedUnboundSession, workspaceOf } from "./support/temporary-workspace.js";
+import { AGENT_UNAVAILABLE_ENVELOPE } from "./session-rest-helpers.js";
+import { OWNER_ID, waitFor } from "./session-supervisor-helpers.js";
+import { seedUnboundSession } from "./support/temporary-workspace.js";
 import { contentsOf } from "./workspace-snapshots-helpers.js";
 
-interface Settings {
-  snapshotMaxFileBytes?: number;
-  snapshotMaxTotalBytes?: number;
-  snapshotMaxEntries?: number;
-  snapshotExcludeNames?: readonly string[];
-}
-
-interface World extends RecordingWorld {
-  rt: RealFakeRuntime;
-  db: DatabaseSync;
-  /** Per spawned child, the frames written to its stdin. */
-  stdin: OmpFrame[][];
-  /** At each `prompt` frame written to a child: the snapshot directories complete right then. */
-  completeAtPrompt: string[][];
-  workspaceId: string;
-  /** The session's workspace directory. */
-  root: string;
-  /** `<state dir>/snapshots/<workspaceId>`. */
-  snapshots: string;
-}
-
-interface OpenOptions {
-  scenario?: string;
-  settings?: Settings;
-  /** Builds the replacement service over a real one; omitted → the service createApp builds. */
-  service?: (real: TurnSnapshotService) => TurnSnapshotService;
-}
-
-interface Row {
-  message_id: number;
-  workspace_id: string;
-  outcome: string;
-  skipped: string | null;
-  todo_type: string;
-  /** `hex()` of SQL NULL is the empty string; `todo_type` tells NULL from empty text. */
-  todo_hex: string;
-  created_at: number;
-}
-
-const worlds: World[] = [];
-let rejections: RejectionLog | undefined;
-
-beforeEach(() => {
-  rejections = collectRejections();
-});
-
-afterEach(async () => {
-  try {
-    for (const world of worlds.splice(0)) {
-      await world.fixture.close().catch(() => undefined);
-    }
-    await settle();
-    expect(rejections?.reasons).toEqual([]);
-  } finally {
-    rejections?.dispose();
-    vi.restoreAllMocks();
-  }
-});
-
-/** `take` and `removeSnapshot` over the world's snapshots directory, with roomy limits. */
-function realService(stateDir: string): TurnSnapshotService {
-  const snapshotsRoot = join(stateDir, "snapshots");
-  return {
-    take: (workspaceRoot, workspaceId, userMessageId, previousMessageId) =>
-      take({
-        workspaceRoot,
-        snapshotsRoot,
-        workspaceId,
-        userMessageId,
-        ...(previousMessageId === undefined ? {} : { previousMessageId }),
-        excludeNames: [],
-        maxFileBytes: 1_000_000,
-        maxTotalBytes: 10_000_000,
-        maxEntries: 1_000,
-      }),
-    remove: (workspaceId, messageId) => removeSnapshot({ snapshotsRoot, workspaceId, messageId }),
-  };
-}
-
-/** The message ids under `dir` whose snapshot is complete (its manifest is written last). */
-function completeSnapshots(dir: string): string[] {
-  if (!existsSync(dir)) {
-    return [];
-  }
-  return readdirSync(dir)
-    .filter((name) => existsSync(join(dir, name, "manifest.json")))
-    .sort((left, right) => Number(left) - Number(right));
-}
-
-async function open(options: OpenOptions = {}): Promise<World> {
-  const rt = createRealFakeRuntime(options.scenario);
-  // The four snapshot settings travel in the runtime settings object, as `sessionRuntimeOf` puts them.
-  Object.assign(rt.runtime, options.settings ?? {});
-  const stdin: OmpFrame[][] = [];
-  const completeAtPrompt: string[][] = [];
-  const located = { snapshots: "" };
-  const inner = rt.runtime.spawnImpl;
-  rt.runtime.spawnImpl = (command, args, spawnOptions) => {
-    const child = inner(command, args, spawnOptions);
-    const frames: OmpFrame[] = [];
-    stdin.push(frames);
-    const forward = child.stdin.write.bind(child.stdin) as (...values: unknown[]) => boolean;
-    child.stdin.write = ((...values: unknown[]) => {
-      const chunk = values[0];
-      const text = typeof chunk === "string" ? chunk : Buffer.from(chunk as Uint8Array).toString();
-      for (const line of text.split("\n").filter((part) => part.length > 0)) {
-        const frame = JSON.parse(line) as OmpFrame;
-        frames.push(frame);
-        if (frame.type === "prompt") {
-          completeAtPrompt.push(completeSnapshots(located.snapshots));
-        }
-      }
-      return forward(...values);
-    }) as typeof child.stdin.write;
-    return child;
-  };
-  const recording = await openRecordingSession(
-    rt.runtime,
-    options.service === undefined
-      ? {}
-      : { snapshots: options.service(realService(rt.runtime.stateDir)) },
-  );
-  const db = recording.fixture.db;
-  const workspaceId = workspaceOf(db, recording.session);
-  located.snapshots = join(rt.runtime.stateDir, "snapshots", workspaceId);
-  const world: World = {
-    ...recording,
-    rt,
-    db,
-    stdin,
-    completeAtPrompt,
-    workspaceId,
-    root: realpathSync(join(rt.runtime.sandboxRoot, OWNER_ID, `tmp-${workspaceId}`)),
-    snapshots: located.snapshots,
-  };
-  worlds.push(world);
-  return world;
-}
-
-function put(world: World, path: string, bytes: string): void {
-  const target = join(world.root, path);
-  mkdirSync(join(target, ".."), { recursive: true });
-  writeFileSync(target, bytes);
-}
-
-function send(world: World, message: string, session = world.session) {
-  return postPrompt(world.fixture.app, session, world.cookie, JSON.stringify({ message }));
-}
-
-/** The exact 202 body of this change (10.6 adds `undo`); returns the user message id. */
-function accepted(response: LightMyRequestResponse): number {
-  expect(response.statusCode).toBe(202);
-  const body = response.json() as Record<string, unknown>;
-  expect(Object.keys(body)).toEqual(["userMessageId", "assistantMessageId"]);
-  return body.userMessageId as number;
-}
-
-function statusOf(world: World, session = world.session): string | undefined {
-  const row = world.db.prepare("SELECT status FROM chat_sessions WHERE id = ?").get(session) as
-    | { status: string }
-    | undefined;
-  return row?.status;
-}
-
-/** Sends a prompt, expects its 202 and waits until the session left `running` with `status`. */
-async function turn(world: World, message: string, status = "done", session = world.session) {
-  const id = accepted(await send(world, message, session));
-  await waitFor(() => (statusOf(world, session) === status ? true : undefined), `turn ${status}`);
-  return id;
-}
-
-/** Every registration row, columns read raw: `todo` as its storage class and its bytes in hex. */
-function rows(db: DatabaseSync): Row[] {
-  return (
-    db
-      .prepare(
-        "SELECT message_id, workspace_id, outcome, skipped, typeof(todo) AS todo_type, hex(CAST(todo AS BLOB)) AS todo_hex, created_at FROM chat_turn_snapshots ORDER BY message_id",
-      )
-      .all() as unknown as Row[]
-  ).map((row) => ({ ...row }));
-}
-
-/** A row with no skipped entry and no task list; `created_at` is checked against the bounds. */
-function plainRow(world: World, messageId: number, outcome: string, since: number) {
-  return {
-    message_id: messageId,
-    workspace_id: world.workspaceId,
-    outcome,
-    skipped: null,
-    todo_type: "null",
-    todo_hex: "",
-    created_at: expect.toSatisfy(
-      (at: unknown) => typeof at === "number" && at >= since && at <= Date.now(),
-    ),
-  };
-}
-
-function framesOfType(world: World, type: string): number {
-  return world.stdin.flat().filter((frame) => frame.type === type).length;
-}
-
-/** The status of every `turn.end` published, in order. */
-function turnEnds(world: World): string[] {
-  return world.events.flatMap(({ event }) =>
-    event.type === "turn.end" ? [event.data.status] : [],
-  );
-}
-
-function messageCount(db: DatabaseSync, session: string): number {
-  const row = db
-    .prepare("SELECT count(*) AS n FROM chat_messages WHERE session_id = ?")
-    .get(session) as { n: number };
-  return Number(row.n);
-}
-
-/** A service whose `take` waits for `gate` before running the real one. */
-function heldService() {
-  const entered = deferred();
-  const gate = deferred();
-  let released = false;
-  const service = (real: TurnSnapshotService): TurnSnapshotService => ({
-    ...real,
-    async take(...args) {
-      entered.resolve();
-      await gate.promise;
-      return real.take(...args);
-    },
-  });
-  return {
-    service,
-    entered: entered.promise,
-    release() {
-      released = true;
-      gate.resolve();
-    },
-    released: () => released,
-  };
-}
+closeWorldsAfterEach();
 
 describe("workspace-snapshots 受理时做快照 (#945)", () => {
   it(
@@ -380,7 +136,7 @@ describe("workspace-snapshots 受理时做快照 (#945)", () => {
       expect(rows(world.db)).toEqual([]);
 
       held.release();
-      const userMessageId = accepted(await prompting);
+      const { userMessageId } = accepted(await prompting);
       await waitFor(() => (statusOf(world) === "stopped" ? true : undefined), "the stopped turn");
 
       expect(world.rt.calls).toHaveLength(1);
@@ -635,16 +391,20 @@ describe("workspace-snapshots 受理时做快照 (#945)", () => {
 });
 
 describe("chat-sessions Snapshot precedes dispatch and never blocks it (#945)", () => {
-  // The scenario's `undo` value is task 10.6; the registration `outcome` stands in for it here.
-  const cases: Array<[string, string, (real: TurnSnapshotService) => TurnSnapshotService["take"]]> =
+  type TakeOf = (real: TurnSnapshotService) => TurnSnapshotService["take"];
+  const cases: Array<[string, string, string, TakeOf]> = [
+    ["a working snapshot module", "ok", "available", (real) => real.take],
     [
-      ["a working snapshot module", "ok", (real) => real.take],
-      ["a snapshot module that throws", "failed", () => () => Promise.reject(new Error("boom"))],
-    ];
+      "a snapshot module that throws",
+      "failed",
+      "failed",
+      () => () => Promise.reject(new Error("boom")),
+    ],
+  ];
   it.each(cases)(
-    "with %s the supervisor is called once, in the admission's own tick, before any take, and the row is %s",
+    "with %s the supervisor is called once, in the admission's own tick, before any take, the row is %s and the 202 says %s",
     REAL,
-    async (_name, outcome, takeOf) => {
+    async (_name, outcome, undo, takeOf) => {
       const order: string[] = [];
       const world = await open({
         service: (real) => {
@@ -674,8 +434,11 @@ describe("chat-sessions Snapshot precedes dispatch and never blocks it (#945)", 
         return dispatch(...args);
       });
 
-      const id = await turn(world, "plain text");
+      const body = accepted(await send(world, "plain text"));
+      await waitFor(() => (statusOf(world) === "done" ? true : undefined), "the turn");
+      const id = body.userMessageId;
 
+      expect(body.undo).toBe(undo);
       expect(prompt).toHaveBeenCalledTimes(1);
       expect(prompt.mock.calls[0]).toEqual([world.session, "plain text", expect.any(Function)]);
       // No await between admission and the supervisor call, and no take before that call.

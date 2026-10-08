@@ -55,6 +55,7 @@ describe("chat page confirmed ownership gaps", () => {
     const priorUser = {
       id: -9,
       role: "user" as const,
+      undo: "none" as const,
       approvals: [] as [],
       content: "prior distinct user",
       status: "done" as const,
@@ -75,6 +76,7 @@ describe("chat page confirmed ownership gaps", () => {
         {
           id: -4,
           role: "user",
+          undo: "none",
           approvals: [],
           content: PROMPT,
           status: "done",
@@ -85,6 +87,7 @@ describe("chat page confirmed ownership gaps", () => {
         {
           id: 1,
           role: "assistant",
+          undo: null,
           approvals: [],
           content: COMPLETED_BODY,
           status: "done",
@@ -152,7 +155,9 @@ describe("chat page confirmed ownership gaps", () => {
 
     currentSnapshot = acceptedSnapshot;
     await act(async () => {
-      pendingPrompt.resolve(jsonResponse({ userMessageId: -4, assistantMessageId: 1 }, 202));
+      pendingPrompt.resolve(
+        jsonResponse({ userMessageId: -4, assistantMessageId: 1, undo: "none" }, 202),
+      );
     });
     await waitFor(() => {
       expect(messageReads).toBe(3);
@@ -199,6 +204,7 @@ describe("chat page confirmed ownership gaps", () => {
         {
           id: -4,
           role: "user",
+          undo: "none",
           approvals: [],
           content: FOLLOW_UP,
           status: "done",
@@ -209,6 +215,7 @@ describe("chat page confirmed ownership gaps", () => {
         {
           id: 1,
           role: "assistant",
+          undo: null,
           approvals: [],
           content: "second",
           status: "done",
@@ -236,7 +243,9 @@ describe("chat page confirmed ownership gaps", () => {
       expect(prompts).toBe(1);
     });
     currentSnapshot = firstFollowUp;
-    firstAccept.resolve(jsonResponse({ userMessageId: -4, assistantMessageId: 1 }, 202));
+    firstAccept.resolve(
+      jsonResponse({ userMessageId: -4, assistantMessageId: 1, undo: "none" }, 202),
+    );
     expect(await within(messages).findByText(FOLLOW_UP, { exact: true })).toBeTruthy();
     expect(composer().disabled).toBe(false);
 
@@ -248,6 +257,7 @@ describe("chat page confirmed ownership gaps", () => {
         {
           id: -6,
           role: "user",
+          undo: "none",
           approvals: [],
           content: secondUser,
           status: "done",
@@ -258,6 +268,7 @@ describe("chat page confirmed ownership gaps", () => {
         {
           id: 2,
           role: "assistant",
+          undo: null,
           approvals: [],
           content: "third",
           status: "done",
@@ -274,7 +285,9 @@ describe("chat page confirmed ownership gaps", () => {
       expect(prompts).toBe(2);
     });
     currentSnapshot = secondFollowUp;
-    secondAccept.resolve(jsonResponse({ userMessageId: -6, assistantMessageId: 2 }, 202));
+    secondAccept.resolve(
+      jsonResponse({ userMessageId: -6, assistantMessageId: 2, undo: "none" }, 202),
+    );
     expect(await within(messages).findByText(secondUser, { exact: true })).toBeTruthy();
     expect(within(messages).getByText("third", { exact: true })).toBeTruthy();
     expect(composer().disabled).toBe(false);
@@ -352,6 +365,7 @@ describe("chat page confirmed ownership gaps", () => {
         {
           id: -4,
           role: "user",
+          undo: "none",
           approvals: [],
           content: PROMPT,
           status: "done",
@@ -362,6 +376,7 @@ describe("chat page confirmed ownership gaps", () => {
         {
           id: 0,
           role: "assistant",
+          undo: null,
           approvals: [],
           content: COMPLETED_BODY,
           status: "done",

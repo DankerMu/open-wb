@@ -86,7 +86,7 @@ describe("stop intent before the dispatch receipt (#490)", () => {
       const accepted = await response;
       expect(accepted.statusCode).toBe(202);
       const body = accepted.json<{ userMessageId: number; assistantMessageId: number }>();
-      expect(Object.keys(body).sort()).toEqual(["assistantMessageId", "userMessageId"]);
+      expect(Object.keys(body).sort()).toEqual(["assistantMessageId", "undo", "userMessageId"]);
       const before = await history(world);
       expect(before.messages.map((message) => message.id)).toEqual([
         body.userMessageId,

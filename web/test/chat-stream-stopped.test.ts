@@ -61,6 +61,7 @@ describe("turn.end stopped reduction", () => {
     expect(next.messages[1]).toEqual({
       id: 0,
       role: "assistant",
+      undo: null,
       approvals: [],
       content: "partial",
       status: "stopped",
@@ -90,6 +91,7 @@ describe("turn.end stopped reduction", () => {
     expect(next.messages[2]).toEqual({
       id: 9,
       role: "assistant",
+      undo: null,
       approvals: [],
       content: "",
       status: "stopped",

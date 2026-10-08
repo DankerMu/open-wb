@@ -114,7 +114,15 @@ describe("C1 connector resync", () => {
 });
 
 function message(id: number, role: Message["role"], status: Message["status"]): Message {
-  return { ...historyUser, id, role, status, content: "", createdAt: id };
+  return {
+    ...historyUser,
+    id,
+    role,
+    undo: role === "user" ? historyUser.undo : null,
+    status,
+    content: "",
+    createdAt: id,
+  };
 }
 
 function viewOf(...messages: Message[]) {

@@ -20,7 +20,7 @@ const STREAMED_BODY = "Hello \u0000\uFEFF中文 😀";
 /** 正文经 Markdown 渲染后的样子：段尾空白不保留，NUL 显示为 U+FFFD（CommonMark 规则）。 */
 export const STREAMED_SHOWN = "Hello \uFFFD\uFEFF中文 😀";
 export const exactText = { exact: true, collapseWhitespace: false, trim: false } as const;
-export const promptAccepted = { userMessageId: -3, assistantMessageId: 0 };
+export const promptAccepted = { userMessageId: -3, assistantMessageId: 0, undo: "none" };
 export const CREATED_MESSAGES = `/api/sessions/${CREATED_SESSION_ID}/messages`;
 export const CREATED_PROMPT = `/api/sessions/${CREATED_SESSION_ID}/prompt`;
 export const SESSION_MESSAGES = `/api/sessions/${SESSION_ID}/messages`;
@@ -95,6 +95,7 @@ export function runningCreatedSnapshot(): ChatMessageSnapshot {
       {
         id: -3,
         role: "user",
+        undo: "none",
         approvals: [],
         content: PROMPT,
         status: "done",
@@ -105,6 +106,7 @@ export function runningCreatedSnapshot(): ChatMessageSnapshot {
       {
         id: 0,
         role: "assistant",
+        undo: null,
         approvals: [],
         content: "",
         status: "running",
@@ -125,6 +127,7 @@ export function completedCreatedSnapshot(): ChatMessageSnapshot {
       {
         id: -3,
         role: "user",
+        undo: "none",
         approvals: [],
         content: PROMPT,
         status: "done",
@@ -135,6 +138,7 @@ export function completedCreatedSnapshot(): ChatMessageSnapshot {
       {
         id: 0,
         role: "assistant",
+        undo: null,
         approvals: [],
         content: STREAMED_BODY,
         status: "done",
@@ -176,6 +180,7 @@ export function otherSnapshot(): ChatMessageSnapshot {
       {
         id: -5,
         role: "user",
+        undo: "none",
         approvals: [],
         content: "other user",
         status: "done",

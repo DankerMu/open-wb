@@ -114,11 +114,17 @@ function workspaceRows(db: DatabaseSync): number {
 }
 
 /** One REST probe turn to done; returns the child's reported `cwd=` (the report's last field). */
-async function probeTurn(world: RegenWorld, session = world.session): Promise<string> {
+async function probeTurn(
+  world: RegenWorld,
+  session = world.session,
+  accepted: { undo?: string } = {},
+): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), "open-wb-521-probe-"));
   probeDirs.push(dir);
   const message = `probe:${String(process.pid)}:${join(dir, "out.txt")}`;
-  expect((await sendPrompt(world, message, session)).statusCode).toBe(202);
+  const response = await sendPrompt(world, message, session);
+  expect(response.statusCode).toBe(202);
+  expect(response.json()).toMatchObject(accepted);
   const tree = await waitForTurn(world.fixture, session, "done");
   await settle();
   const report = tree.messages.at(-1)?.content ?? "";
@@ -313,8 +319,8 @@ describe("绑定不可改与工作目录 — 三种会话的工作目录 (#930)"
         (snapshot.json() as { messages: Array<{ role: string }> }).messages.map((m) => m.role),
       ).toEqual(["user", "assistant", "user", "assistant"]);
 
-      // `probeTurn` asserts the prompt's 202 (its `undo` value is task 10.6).
-      const reported = await probeTurn(world, legacy);
+      // `probeTurn` asserts the prompt's 202 and its `undo`.
+      const reported = await probeTurn(world, legacy, { undo: "unbound" });
 
       expect(reported).toBe(realpathSync(ownerRoot));
       expectSpawnCwd(requiredCall(world.rt.calls, 0), ownerRoot);

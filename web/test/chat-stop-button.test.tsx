@@ -206,7 +206,8 @@ describe("stop button: layout and outcomes", () => {
     const stop = deferredResponse();
     const { fetchMock, page } = await mountPage(runningR(), {
       [STOP]: () => stop.promise,
-      [PROMPT_PATH]: () => jsonResponse({ userMessageId: 1, assistantMessageId: 2 }, 202),
+      [PROMPT_PATH]: () =>
+        jsonResponse({ userMessageId: 1, assistantMessageId: 2, undo: "none" }, 202),
     });
 
     fireEvent.click(stopButton());
@@ -471,7 +472,7 @@ describe("stop button: ownership and fences", () => {
     const reads = calls(fetchMock, MESSAGES).length;
     const sources = FakeEventSource.instances.length;
     page.snapshot = runningR();
-    prompt.resolve(jsonResponse({ userMessageId: 1, assistantMessageId: 2 }, 202));
+    prompt.resolve(jsonResponse({ userMessageId: 1, assistantMessageId: 2, undo: "none" }, 202));
     await flush();
     expect(calls(fetchMock, MESSAGES)).toHaveLength(reads + 1);
     expect(source.closeCount).toBe(1);
@@ -504,6 +505,7 @@ describe("stop button: stopped presentation from snapshots", () => {
       ...historyUser,
       id,
       role,
+      undo: role === "user" ? historyUser.undo : null,
       status,
       content,
       createdAt: id,

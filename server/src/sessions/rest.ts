@@ -23,6 +23,7 @@ import type {
   StepView,
 } from "./store.js";
 import type { SessionMetadataStore } from "./store-metadata.js";
+import type { UndoState } from "./store-undo.js";
 import type { SessionSupervisor, StreamCursor } from "./supervisor.js";
 import type { TurnSnapshots } from "./turn-snapshot.js";
 
@@ -54,7 +55,10 @@ interface SessionRestDependencies {
   sandboxRoot: string;
   /** Told after each committed write of these routes that changes the owner's session list. */
   listEvents: Pick<SessionListNotifier, "notify">;
-  /** The per-turn workspace snapshot: the prompt's pre-dispatch step and its cleanup. */
+  /**
+   * The per-turn workspace snapshot: the prompt's pre-dispatch step, its cleanup, and the `undo`
+   * values its registrations give the message view and the prompt's 202.
+   */
   turnSnapshots: TurnSnapshots;
 }
 
@@ -90,6 +94,8 @@ interface PublicMessage {
   status: string;
   createdAt: number;
   approvals: ApprovalEntry[];
+  /** Always null on an assistant message. */
+  undo: UndoState | null;
   steps: PublicStep[];
 }
 
@@ -97,6 +103,8 @@ interface OwnedSnapshot {
   tree: SessionMessageTree;
   streamCursor: StreamCursor;
   todo: SessionTodo | null;
+  /** The undo state of each user message; null until the history route's own hook reads it. */
+  undoOf: ((userMessageId: number) => UndoState) | null;
 }
 
 interface SessionIdParams {
@@ -156,13 +164,14 @@ export function registerSessionRoutes(
   > = (request, _reply, payload, done) => {
     const tree = requireOwnedSession(dependencies.store, request);
     const streamCursor = dependencies.supervisor.streamCursor(request.params.id);
-    authorizedHistory.set(request, { tree, streamCursor, todo: null });
+    authorizedHistory.set(request, { tree, streamCursor, todo: null, undoOf: null });
     done(null, payload);
   };
 
   /**
    * History route only, right after the owner check above and in the same synchronous segment, so
-   * the task list matches the tree and the cursor; no other route reads `chat_sessions.todo`.
+   * the task list and the undo states match the tree and the cursor; no other route reads
+   * `chat_sessions.todo`.
    */
   const readTodoBeforeParse: typeof authorizeOwnedBeforeParse = (
     request,
@@ -173,6 +182,10 @@ export function registerSessionRoutes(
     const snapshot = authorizedHistory.get(request);
     if (snapshot !== undefined) {
       snapshot.todo = dependencies.store.readTodo(request.params.id, currentPrincipal(request).id);
+      snapshot.undoOf = dependencies.turnSnapshots.undoStates(
+        request.params.id,
+        snapshot.tree.session.workspaceId,
+      );
     }
     done(null, payload);
   };
@@ -220,10 +233,10 @@ export function registerSessionRoutes(
     },
     async (request) => {
       const snapshot = authorizedHistory.get(request);
-      if (snapshot === undefined) {
+      if (snapshot === undefined || snapshot.undoOf === null) {
         throw new HttpError("not_found");
       }
-      return toPublicHistory(snapshot);
+      return toPublicHistory(snapshot, snapshot.undoOf);
     },
   );
   app.post<{ Params: SessionIdParams }>(
@@ -267,9 +280,14 @@ export function registerSessionRoutes(
         }
         throw error;
       }
+      // Read once `supervisor.prompt` has resolved: the snapshot step has settled by then, so the
+      // registration is the one the history will show. Outside the `try`: this turn is dispatched,
+      // and a failed read must not compensate it.
+      const undoOf = dependencies.turnSnapshots.undoStates(request.params.id, bound);
       return reply.code(202).send({
         userMessageId: accepted.userMessageId,
         assistantMessageId: accepted.assistantMessageId,
+        undo: undoOf(accepted.userMessageId),
       });
     },
   );
@@ -378,7 +396,10 @@ function toPublicSession(session: PublicSession): PublicSession {
   };
 }
 
-function toPublicHistory(snapshot: OwnedSnapshot): {
+function toPublicHistory(
+  snapshot: OwnedSnapshot,
+  undoOf: (userMessageId: number) => UndoState,
+): {
   session: PublicSession;
   messages: PublicMessage[];
   streamCursor: StreamCursor;
@@ -394,6 +415,7 @@ function toPublicHistory(snapshot: OwnedSnapshot): {
       status: message.status,
       createdAt: message.createdAt,
       approvals: message.approvals.map(toPublicApproval),
+      undo: message.role === "user" ? undoOf(message.id) : null,
       steps: message.steps.map((step) => ({
         id: step.id,
         ordinal: step.ordinal,

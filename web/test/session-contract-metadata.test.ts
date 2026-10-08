@@ -82,6 +82,7 @@ function snapshotWith(
       {
         id: -3,
         role: "user",
+        undo: "none",
         content: "写周报",
         thinking: null,
         status: "done",
@@ -93,6 +94,7 @@ function snapshotWith(
       {
         id: 0,
         role: "assistant",
+        undo: null,
         content: "好的",
         thinking: "先想一想",
         status: "done",
@@ -104,6 +106,7 @@ function snapshotWith(
       {
         id: 1,
         role: "assistant",
+        undo: null,
         content: "再答",
         thinking: null,
         status: "done",
