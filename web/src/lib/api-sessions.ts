@@ -7,6 +7,7 @@ import {
   parseSession,
   parseSessionFork,
   parseSessionList,
+  parseSessionUndo,
   parseSettledApproval,
 } from "./session-contract.js";
 
@@ -29,7 +30,7 @@ type SessionTransport = {
   ): Promise<unknown>;
 };
 
-type SessionEndpoint = "messages" | "prompt" | "stop" | "regenerate" | "fork";
+type SessionEndpoint = "messages" | "prompt" | "stop" | "regenerate" | "fork" | "undo";
 
 function sessionPath(sessionId: string) {
   return `/api/sessions/${encodeURIComponent(sessionId)}`;
@@ -74,6 +75,7 @@ export function createSessionMethods(
   | "stopSession"
   | "regenerateSession"
   | "forkSession"
+  | "undoMessage"
   | "decideApproval"
 > {
   return {
@@ -237,6 +239,26 @@ export function createSessionMethods(
       }
 
       return fork;
+    },
+
+    async undoMessage(sessionId, messageId, files, options) {
+      const response = await request(
+        sessionEndpoint(sessionId, "undo"),
+        {
+          ...requestOptions(options?.signal),
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messageId, files }),
+        },
+        onUnauthorized,
+        200,
+      );
+      const undo = parseSessionUndo(response);
+      if (!undo) {
+        throw requestFailed(200);
+      }
+
+      return undo;
     },
 
     async decideApproval(sessionId, approvalId, decision, options) {

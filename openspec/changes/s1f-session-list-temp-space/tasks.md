@@ -381,7 +381,7 @@ Minimal mergeable slice: 12.1 + 12.2 一起（没有冲突判定的 `restore` �
 
 ## 13. web lib — API 客户端与列表事件连接器
 
-- [ ] 13.1 `web/src/lib/api-sessions.ts`：`undoMessage(id, messageId, files)` 与响应解析（`session`、`draft`、`files` 的严格形状）。测试：chat-web「撤回与转正方法」的 undo 部分。
+- [x] 13.1 `web/src/lib/api-sessions.ts`：`undoMessage(id, messageId, files)` 与响应解析（`session`、`draft`、`files` 的严格形状）。测试：chat-web「撤回与转正方法」的 undo 部分。
 - [x] 13.2 `web/src/lib/api.ts`（或工作空间客户端所在文件）：`promoteWorkspace(id, name)`。测试：同一场景的 promote 部分。
 - [x] 13.3 列表事件连接器（新文件 `web/src/lib/session-list-events.ts`，纯逻辑、不渲染）：打开 `EventSource`、`open`（区分首次与再次打开）/ `sessions.changed` / `session.rewound` 回调、坏数据忽略、`close`；无 `EventSource` 时返回空实现。单测用假 `EventSource`：事件分发、首次与再次 `open` 的区分、非法 `data` 与非法 `sessionId` 被忽略、关闭后不再回调。
 - [ ] 13.4 变异证据（连接器两项已随 13.3 给出，#956；`files` 一项随 13.1）：`files` 解析放宽为任意对象 → 「200 body 缺 `files` / `mode` 非法」判红；连接器不校验 `sessionId` → 坏数据用例判红；连接器不区分首次与再次 `open` → 13.3 对应单测判红。
