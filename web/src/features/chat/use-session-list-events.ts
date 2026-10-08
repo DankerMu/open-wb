@@ -18,7 +18,7 @@ type ListEventsPage = {
    * 快照并整体替换视图。没有选中会话、或它的历史还没加载完时为 null。
    */
   selected(): { sessionId: string; running: boolean; resync(): void } | null;
-  /** 本页此刻有在途的撤回请求：它自己会对齐视图，列表事件不再重读。 */
+  /** 本页此刻有针对所选会话的在途撤回请求：它自己会对齐视图，列表事件不再重读。只在本来要重读时调用。 */
   undoInFlight(): boolean;
 };
 

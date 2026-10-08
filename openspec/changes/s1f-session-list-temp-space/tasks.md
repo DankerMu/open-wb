@@ -606,8 +606,17 @@ Minimal mergeable slice: 17.1、17.2、17.3、17.5 各自可单独合入（互�
   - 变异证据：不渲染 → (1)；关闭不清 → (1)；发送不清 → (2)；选择 effect 不清 → (4)；setter 挪到 `owned()` 之外 → (5)；末行用 `paths.length` 或只用 `skipped.count` → (3)；只渲染 `skipped` → (3)；0/0 不覆盖 → (6)。
   - CH-65（`待签`，不写悬停）：绑定工作空间里放一个超过单文件快照上限（默认 20 MiB）的文件 `big.bin`，发一句让助手改它和一个小文件的话，撤回；期望输入框上方出现「已撤回，以下文件未还原」并列出 `big.bin`，小文件已还原；点关闭后消失；再做一遍让它出现，发一条消息后消失。
   - 已知并报给 owner、本刀不处理：`files.skipped` 原样取自快照清单，含 `excluded`（如 `node_modules`）与 `mount` 项；带依赖目录的工作空间每次带还原的撤回都会出现这条说明。按规格实现，不在 web 侧过滤。
-- [ ] 18.4 与列表事件的配合：本页有在途撤回时忽略自己的 `session.rewound`（已由 200 之后的重读覆盖）。测试：在途撤回期间派发 `session.rewound`，消息快照读取恰一次。
-- [ ] 18.5 新文件登记进 `MIGRATED_AREAS`；CH 行：撤回并回填、一次退回多轮、文件一并还原（含 git 仓库里回合做的提交被撤销）、五种不可撤回原因、冲突三选一、未还原文件说明各一行，`待签`。若 #908 已合入，行里写「把鼠标移到该消息上」。
+- [x] 18.4 与列表事件的配合：本页有针对该会话的在途撤回时忽略自己的 `session.rewound`（200 被应用时由其后的重读覆盖；未被应用时在落定处补读）。测试（新文件 `web/test/chat-undo-list-events.test.tsx`）：session-list-push「自己的撤回」三例。
+- [x] 18.5 新文件登记进 `MIGRATED_AREAS`；CH 行：撤回并回填、一次退回多轮、文件一并还原（含 git 仓库里回合做的提交被撤销）、五种不可撤回原因、冲突三选一、未还原文件说明各一行，`待签`。若 #908 已合入，行里写「把鼠标移到该消息上」。
+  **实施注记（18.4 / 18.5，fixture 评审补充，#971）**：
+  - 谓词：删掉 `use-chat-session.ts` 的 `NO_UNDO_IN_FLIGHT` 与其注释，改传「`undoFlightRef.current` 的 `client === clientRef.current` 且 `sessionId === requestedSessionRef.current`」。`use-session-list-events.ts` 的签名与 `resyncSelected` 不改。
+  - 补读：`use-chat-session.ts` 加一个 ref（如 `undoSkippedResyncRef`）存被略过对齐的那次在途 owner——谓词返回真时记下，`onRewound` 与重连两条路径共用。ref 注入 `turn-actions.ts`（G2 禁止在那里 `useRef`）。`undoTurn` 的失败分支（非 401）与 `undo_conflict` 分支里：`owned()` 且 ref 是本次 owner → 调既有的 `reconcileSettled(ownedClient, sessionId)`（先例：regenerate 的 502 对齐）。`release` 里按身份清 ref。200 被应用的路径不补读（含其后的重读失败）；fence 丢弃的 200 不补读。
+  - 次序：事件先于 200（常态）→ 略过，200 后读一次；200 之后、重读落定之前 → 本来就不读；全部落定之后 → 按「另一个标签页的撤回」再读一次同内容快照，不压、不为它写「恰一次」。
+  - 「恰一次」的口径：数 `GET /api/sessions/<S>/messages`，自点击前的基线到 200 落定后、新的单会话连接 `emitOpen` 之前（每次 open 都会触发一次快照读取），与既有「撤回并回填」同一口径。事件在 `latestListSource()` 上派发。
+  - 测试：新文件 `web/test/chat-undo-list-events.test.tsx`，复用 `web/test/chat-undo-support.tsx`（#970 已抽取）。用例：(1) 事件后 200，恰一次；(2) 事件后网络失败：失败前 0 次、失败后恰一次，线程换成新快照，`promptError` 照常；(3) A 在途、切到 B、`rewound(B)`：B 恰一次；(4) 409 冲突对话框开着时 `rewound(A)` 照常读；(5) 在途期间列表连接重连（`emitError` 后 `emitOpen`），随后 200：恰一次。
+  - 变异证据：谓词恒假 → (1) 读两次；谓词改全局（只判 ref 非空）→ (3) 读零次；去掉补读 → (2)；200 也补读 → (1)；冲突分支不释放在途 → (4)。
+  - 18.5：`MIGRATED_AREAS` 已含组 18 的全部新文件；CH-60..CH-65 六行已在且均为 `待签`（CH-65 由 #970 加）。本刀没有用户可见变化，不新增 CH 行，只做核对与勾选。
+  - 行数：`use-chat-session.ts` 不得超过 800。
 - [ ] 18.6 变异证据：撤回前弹确认 → 「没有出现确认框」判红；不覆盖已有草稿 → 「草稿为 `第二个问题`」判红；`aria-disabled` 的按钮仍发请求 → 「不可撤回的原因」判红；冲突时直接 `force` → 「取消后没有第二个请求」判红；去掉 fence → 新增「请求在途时切换会话，草稿不变」判红。
   **实施注记（18.1 / 18.2 / 18.5 / 18.6，fixture 评审补充，#969）**：
   - `undo` 的传递链不存在，本刀补齐：`runtime-convert.ts` 的 `ChatMessageCustom` 增 `undo` → `message-thread.tsx` 的 `UserMessage` 取 `custom.undo` 并新增 `onUndo(messageId, trigger)` → `UserActions`。`onUndo` 与对话框 props 经 `conversation-view.tsx`、`page.tsx` 接线；`composer-locks.ts` 增一个只锁定、不算 `generating` 的输入（同 `forking`）。PR Boundary 相应含这六个文件。
@@ -647,7 +656,7 @@ Minimal mergeable slice: 19.1 单独可合；19.2 + 19.3 在组 18 之后一个 
 - [x] 20.3 ADR-0010 增补：`<OMP_STATE_DIR>/snapshots`（`0700`）进入托管布局；遍历期间有变动的快照不可还原（目录指纹的前后比较，#1190）及其残余（同一时间刻度内的改动、FUSE 挂载上的实测结果（已于 2026-10-08 写入 ADR-0010：sshfs 粒度 1 秒，rclone mount 目录时间不更新）、同一时间戳刻度内完成的等长原地改写、经 `mmap` 写入而时间戳未更新的改动（复制后的复核看不到，#1206））；临时空间目录经 trash 中转删除与 `EXDEV` 原地删除的残余；快照遍历（`take`）读到工作空间之外的两种残余（中间路径分量被替换；目录条目——含工作空间根自身——在 `lstat` 与 `readdir` 之间被换成符号链接、外部目录被整棵复制）与缓解（普通文件按句柄 `O_NOFOLLOW` 读取）；快照还原由 app 用户在共享目录里写 / 删文件的残余与缓解（逐级 `lstat`、本会话进程先退役、同空间运行时拒绝）；还原写回的文件权限位规则（属主属组读写一律补上）；升级说明（无需手工步骤）。
 - [ ] 20.4 部署与运维说明（放在现有部署文档或 README 的配置节，先 grep 现有位置，不新建重复文档）：四个 `SNAPSHOT_*` 环境变量与默认值；默认排除名单只含依赖目录、`.git` 进快照，带大仓库的空间更容易触发条目 / 总量上限以及可以怎么调（调大上限，或把 `.git` 加回排除名单并接受提交不随撤回还原）；`snapshots` 目录的磁盘规划与进程被杀后可能残留的半份快照目录（停服务后可手工删除没有登记行的目录）；每个会话页标签页多一条 SSE 与 HTTP/1.1 连接数的提示；回滚后可手工清理的目录。
 - [ ] 20.5 `IMPLEMENTATION_PLAN.md`：S1f 的 change C 状态行与交付记录（只记事实，不改 owner 决定的条文）；`docs/architecture/system.md` 若列有模块 / 端点清单则补新端点与新模块。
-- [ ] 20.6 `docs/acceptance/functional-checklist.md` 收口：核对组 14–18 新增的 SL / CH 行齐全、ID 不重复、全部 `待签`、格式守卫通过。（design D16 的九项「起草者自定的呈现细节」在建 Epic 时原样列进 Epic 描述供 owner 知悉；这是建 issue 的动作，不是实现任务，也不卡任何任务。）
+- [x] 20.6 `docs/acceptance/functional-checklist.md` 收口：核对组 14–18 新增的 SL / CH 行齐全、ID 不重复、全部 `待签`、格式守卫通过。（design D16 的九项「起草者自定的呈现细节」在建 Epic 时原样列进 Epic 描述供 owner 知悉；这是建 issue 的动作，不是实现任务，也不卡任何任务。）
 - [ ] 20.7 归档前对底：本 change 归档之前，用当时的 `openspec/specs/**` 对本 change 的每一条 MODIFIED 重新 diff（按条文、按场景）。diff 里只允许出现 design D15 重叠表与 D15 首段列出的增量；若 S1g 或 D 的内容已先进入主规格（次序被打乱），把它们的句子与场景并回本 change 的对应条文、计数改为「当时的值加本 change 的增量」后再归档。核对结果写进归档 PR 的描述。
 
 Suggested fixture level: none - 只改文档与清单，无运行时行为
