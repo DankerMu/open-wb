@@ -36,8 +36,10 @@ import {
   put,
   releaseAfterTest,
   run,
+  setPast,
   swapAfterLstat,
   W,
+  waitForClock,
 } from "./workspace-snapshots-helpers.js";
 
 const IS_ROOT = process.geteuid?.() === 0;
@@ -430,27 +432,26 @@ describe("快照期间可能有写入者", () => {
     expect(readFileSync(f.outside, "utf8")).toBe(OUTSIDE_BYTES);
   });
 
-  it("a file swapped for a FIFO does not hang the snapshot: skipped as special", async () => {
+  it("a file swapped for a FIFO does not hang the snapshot: failed, its directory changed", async () => {
     const f = fixture();
     put(f.workspace, "a.txt", "alpha\n");
     put(f.workspace, "b.txt", "bravo\n");
     put(f.workspace, "c.txt", "charlie\n");
     const victim = join(f.workspace, "b.txt");
     releaseAfterTest(victim);
+    // The names of the root stay what they were: its times are what tells (#1190).
+    setPast(f.workspace);
     swapAfterLstat(victim, () => {
+      waitForClock(f, f.workspace);
       rmSync(victim);
       execFileSync("mkfifo", [victim]);
     });
 
     const result = await run(f);
 
-    const skipped = [{ path: "b.txt", reason: "special" }];
-    expect(result).toEqual({ outcome: "ok", skipped });
-    expect(manifestOf(f)).toEqual({
-      entries: [fileEntry(f, "a.txt"), fileEntry(f, "c.txt")],
-      skipped,
-    });
-    expect(Object.keys(describeTree(join(f.snapshot, "tree")))).toEqual(["a.txt", "c.txt"]);
+    expect(result.outcome).toBe("failed");
+    expect(existsSync(f.snapshot)).toBe(false);
+    expect(readdirSync(f.workspace).sort()).toEqual(["a.txt", "b.txt", "c.txt"]);
     expect(lstatSync(victim).isFIFO()).toBe(true);
   }, 5000);
 

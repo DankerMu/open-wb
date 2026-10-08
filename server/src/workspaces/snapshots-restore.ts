@@ -87,11 +87,6 @@ interface Run {
  * is missing or the workspace root is not a real directory. Order: delete what the manifest does not have, then directories from the top down,
  * then files, then symbolic links. An entry of another type under a manifest path is replaced
  * by its phase and does not count toward `removed`.
- *
- * A manifest that says `incomplete` (#1148) comes from a walk that lost a listed entry, maybe to
- * a rename: something the snapshot has no copy of may be in the workspace under a name the
- * manifest lacks. The first phase is then left out, so nothing is deleted as an extra entry and
- * `removed` is 0; the other phases run as always.
  */
 export async function restore(options: RestoreOptions): Promise<RestoreResult> {
   if (isWithin(options.workspaceRoot, options.snapshotDir)) {
@@ -112,9 +107,7 @@ export async function restore(options: RestoreOptions): Promise<RestoreResult> {
     failed: new Set(),
   };
 
-  if (!manifest.incomplete) {
-    await removeExtras(run, "");
-  }
+  await removeExtras(run, "");
   // A parent's path is a prefix of its children's, so it sorts ahead of them.
   const entries = [...run.entries.values()].sort((a, b) => (a.path < b.path ? -1 : 1));
   for (const entry of entries) {
@@ -474,7 +467,9 @@ async function restoreSymlink(run: Run, path: string, target: string): Promise<v
  * Reads and checks the manifest. Beyond each item's shape: no path is listed twice, and the
  * parent of every entry and of every skipped path is a directory entry (or under a skipped
  * path), so no phase can be led to write below a file or delete above something skipped.
- * Entries under a skipped path are dropped here: they are skipped too.
+ * Entries under a skipped path are dropped here: they are skipped too. A manifest with an
+ * `incomplete` key, whatever its value, is refused (#1190): an older version wrote it after a
+ * walk that lost an entry, and such a snapshot may lack a copy of what a restore would destroy.
  *
  * `skippedPaths` is what "under a skipped path" means here and in `removeExtras`. An item whose
  * reason is `name_encoding` is not in it (#1148): its path is the lossy decoding of a name that
@@ -485,7 +480,6 @@ async function readManifest(snapshotDir: string): Promise<{
   entries: Map<string, Entry>;
   skipped: SkippedPath[];
   skippedPaths: Set<string>;
-  incomplete: boolean;
 }> {
   const manifest: unknown = JSON.parse(
     await fsp.readFile(join(snapshotDir, "manifest.json"), "utf8"),
@@ -493,10 +487,8 @@ async function readManifest(snapshotDir: string): Promise<{
   if (!isRecord(manifest) || !Array.isArray(manifest.entries) || !Array.isArray(manifest.skipped)) {
     throw new Error("snapshot manifest has no entries or no skipped list");
   }
-  const { incomplete } = manifest;
-  if (incomplete !== undefined && incomplete !== true) {
-    // Nothing else can be told apart from a damaged manifest, and a wrong guess deletes files.
-    throw new Error("snapshot manifest has a malformed incomplete flag");
+  if ("incomplete" in manifest) {
+    throw new Error("snapshot manifest has the retired incomplete key: it cannot be restored");
   }
   const skipped = manifest.skipped.map(parseSkipped);
   const byPath = skipped.filter((item) => item.reason !== "name_encoding");
@@ -518,7 +510,7 @@ async function readManifest(snapshotDir: string): Promise<{
       throw new Error("snapshot manifest has a path whose parent is not a directory entry");
     }
   }
-  return { entries, skipped, skippedPaths, incomplete: incomplete === true };
+  return { entries, skipped, skippedPaths };
 }
 
 function parseSkipped(raw: unknown): SkippedPath {
