@@ -1,5 +1,5 @@
 /**
- * Issue #951 undo endpoint, `files:"keep"` only (s1f-session-list-temp-space tasks 11.4–11.6) on
+ * Issue #951 undo endpoint with `files:"keep"` (s1f-session-list-temp-space tasks 11.4–11.6) on
  * the production createApp → registerSessions assembly. Undo is only ever requested over REST
  * (inject, a real socket for the parser-owner boundary, a real listener for the list event
  * connection). Real fake-omp `branch` children where the spec names them (the branch entry, the new
@@ -124,7 +124,7 @@ function expectOnlySpawned(
 }
 
 describe("undo REST: shape, owner and prechecks", () => {
-  it("形状与鉴权: every non-conforming body is 400 with nothing written; restore and force are 400 for now", async () => {
+  it("形状与鉴权: every non-conforming body is 400 with nothing written", async () => {
     const world = await openForkScripted(worlds, [{}]);
     const { u2 } = seedUndoable(world);
     const raw = (payload: string, contentType = "application/json"): BodyInput => ({
@@ -147,9 +147,6 @@ describe("undo REST: shape, owner and prechecks", () => {
       raw(JSON.stringify([{ messageId: u2, files: "keep" }])),
       MALFORMED_JSON,
       raw(JSON.stringify({ messageId: u2, files: "keep" }), "text/plain"),
-      // Well-formed, and refused until the file restore lands (task 12.1).
-      undoBody(u2, "restore"),
-      undoBody(u2, "force"),
     ];
     const before = observed(world);
 

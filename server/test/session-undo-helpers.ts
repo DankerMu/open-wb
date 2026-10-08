@@ -46,7 +46,7 @@ import {
 } from "./session-supervisor-helpers.js";
 
 export const THIRD = "third question";
-/** The `files` of every 200 here: `keep` restores nothing (message-undo「文件还原与结果」). */
+/** The `files` of a `keep` 200: nothing is restored (message-undo「文件还原与结果」). */
 const KEPT = {
   mode: "kept",
   restored: 0,
@@ -81,16 +81,24 @@ export function postUndo(
   world: RecordingWorld,
   messageId: number,
   session = world.session,
+  files: "restore" | "force" | "keep" = "keep",
 ): Promise<LightMyRequestResponse> {
-  return postSessionAction(world.fixture.app, "undo", session, world.cookie, undoBody(messageId));
+  const body = undoBody(messageId, files);
+  return postSessionAction(world.fixture.app, "undo", session, world.cookie, body);
 }
 
-/** A 200 with no-store whose body is exactly `{session:<eleven keys>, draft, files:<kept>}`. */
-export function undone(response: LightMyRequestResponse): UndoBody {
+/** A 200 with no-store whose body is exactly `{session:<eleven keys>, draft, files}`. */
+export function undoneWithFiles(response: LightMyRequestResponse): UndoBody {
   expect([response.statusCode, response.headers["cache-control"]]).toEqual([200, "no-store"]);
   const body = response.json() as UndoBody;
   expect(Object.keys(body)).toEqual(["session", "draft", "files"]);
   expect(Object.keys(body.session)).toEqual(SESSION_VIEW_KEYS);
+  return body;
+}
+
+/** The same 200 of a `keep` undo: its `files` is the kept one. */
+export function undone(response: LightMyRequestResponse): UndoBody {
+  const body = undoneWithFiles(response);
   expect(body.files).toEqual(KEPT);
   return body;
 }

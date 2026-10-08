@@ -30,6 +30,14 @@ type TakeOutcome =
   | { outcome: "too_large" }
   | { outcome: "failed"; error: unknown };
 
+/** What `restore` resolves with: the counts and the entries left as they were, by relative path. */
+export interface RestoreOutcome {
+  restored: number;
+  removed: number;
+  skipped: readonly SkippedPath[];
+  failed: readonly { path: string }[];
+}
+
 /** The one workspace-snapshots service of the app, bound to its snapshot root and limits. */
 export interface TurnSnapshotService {
   /**
@@ -44,6 +52,11 @@ export interface TurnSnapshotService {
   ): Promise<TakeOutcome>;
   /** Removes the snapshot directory of one message; a missing one is success. */
   remove(workspaceId: string, messageId: number): Promise<void>;
+  /**
+   * Puts the workspace back to the snapshot of `messageId`. Rejects on a structural failure (no
+   * or a damaged manifest, a root that is no directory); single entries end up in `failed`.
+   */
+  restore(workspaceRoot: string, workspaceId: string, messageId: number): Promise<RestoreOutcome>;
 }
 
 interface TurnSnapshotDependencies {
@@ -79,6 +92,11 @@ export interface TurnSnapshots {
    * throws when the database does.
    */
   undoStates(sessionId: string, workspaceId: string | null): (userMessageId: number) => UndoState;
+  /**
+   * Restores the owner's workspace from the snapshot of `messageId` (undo with `restore` /
+   * `force`). Rejects as the service does, and when the workspace root cannot be resolved.
+   */
+  restore(ownerId: string, workspaceId: string, messageId: number): Promise<RestoreOutcome>;
 }
 
 type Registration = { outcome: TurnSnapshotOutcome; skipped: readonly SkippedPath[] };
@@ -168,5 +186,12 @@ export function createTurnSnapshots(deps: TurnSnapshotDependencies): TurnSnapsho
     discard,
     undoStates: (sessionId, workspaceId) =>
       undoStatesOf(listSessionTurnSnapshots(db, sessionId), workspaceId),
+    restore: async (ownerId, workspaceId, messageId) => {
+      const root = deps.workspaceRootOf(ownerId, workspaceId);
+      if (root === null) {
+        throw new Error("undo restore: workspace root is unresolvable");
+      }
+      return snapshots.restore(root, workspaceId, messageId);
+    },
   };
 }

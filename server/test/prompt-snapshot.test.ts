@@ -316,6 +316,7 @@ describe("workspace-snapshots 受理时做快照 (#945)", () => {
       const removed: Array<[string, number]> = [];
       const world = await open({
         service: (real) => ({
+          ...real,
           async take(root, ...rest) {
             const result = await real.take(root, ...rest);
             rmSync(root, { recursive: true });
