@@ -22,7 +22,7 @@ import {
   connectSessionEvents,
   isUnknownTurn,
 } from "./stream.js";
-import { TERMINAL_REFRESH_GUIDANCE, useTurnActions } from "./turn-actions.js";
+import { TERMINAL_REFRESH_GUIDANCE, type UndoConflict, useTurnActions } from "./turn-actions.js";
 import type {
   ChatHistoryState,
   ChatListState,
@@ -65,6 +65,8 @@ export function useChatSession() {
   const [mutationOwner, setMutationOwner] = useState<ChatMutationOwner | null>(null);
   const [regenerateOwner, setRegenerateOwner] = useState<ChatMutationOwner | null>(null);
   const [forkOwner, setForkOwner] = useState<ChatMutationOwner | null>(null);
+  const [undoOwner, setUndoOwner] = useState<ChatMutationOwner | null>(null);
+  const [undoConflict, setUndoConflict] = useState<UndoConflict | null>(null);
   const {
     error: workspacesError,
     refresh: refreshWorkspaces,
@@ -87,6 +89,8 @@ export function useChatSession() {
   const createControllerRef = useRef<AbortController | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const focusOnWelcomeRef = useRef(false);
+  const focusOnUnlockRef = useRef(false);
+  const undoFlightRef = useRef<ChatMutationOwner | null>(null);
   const viewRunningRef = useRef(false);
 
   clientRef.current = client;
@@ -377,32 +381,40 @@ export function useChatSession() {
     [location.hash, location.pathname, location.search, navigate],
   );
 
+  const turn = useTurnActions({
+    abortMutation,
+    clientRef,
+    closeSource,
+    composerRef,
+    focusOnUnlockRef,
+    historyGenerationRef,
+    installSnapshot,
+    loadHistoryRef,
+    mountedRef,
+    mutationControllerRef,
+    mutationGenerationRef,
+    openSource,
+    pendingCreateSendRef,
+    refreshList,
+    releaseMutationIfOwned,
+    requestedSessionRef,
+    selectSession,
+    setCreating,
+    setDraft,
+    setForkOwner,
+    setListState,
+    setMutationOwner,
+    setPromptError,
+    setRegenerateOwner,
+    setStreamError,
+    setSubmitting,
+    setUndoConflict,
+    setUndoOwner,
+    undoConflict,
+    undoFlightRef,
+  });
   const { answerApproval, dispatchPrompt, forkTurn, regenerateTurn, restoreOwnedDraft, stopTurn } =
-    useTurnActions({
-      abortMutation,
-      clientRef,
-      closeSource,
-      historyGenerationRef,
-      installSnapshot,
-      loadHistoryRef,
-      mountedRef,
-      mutationControllerRef,
-      mutationGenerationRef,
-      openSource,
-      pendingCreateSendRef,
-      refreshList,
-      releaseMutationIfOwned,
-      requestedSessionRef,
-      selectSession,
-      setCreating,
-      setDraft,
-      setForkOwner,
-      setMutationOwner,
-      setPromptError,
-      setRegenerateOwner,
-      setStreamError,
-      setSubmitting,
-    });
+    turn;
 
   useEffect(() => {
     const pending = pendingCreateSendRef.current;
@@ -661,6 +673,7 @@ export function useChatSession() {
     historyLoading: ownedHistory && historyState.status === "loading",
     forking: ownsMutation(forkOwner, client, requestedSessionId),
     streamFailed: Boolean(ownedStreamError),
+    undoing: ownsMutation(undoOwner, client, requestedSessionId),
     draft,
   });
   const slashWorkspaceId = composerWorkspaceId(requestedSessionId, selected, welcome.workspace);
@@ -691,6 +704,14 @@ export function useChatSession() {
     focusOnWelcomeRef.current = false;
     composerRef.current?.focus();
   }, [composerDisabled, requestedSessionId]);
+  // 撤回成功后：同样在输入框解锁的那次提交里聚焦。
+  useEffect(() => {
+    if (composerDisabled || !focusOnUnlockRef.current) {
+      return;
+    }
+    focusOnUnlockRef.current = false;
+    composerRef.current?.focus();
+  }, [composerDisabled]);
 
   return {
     answerApproval,
@@ -721,6 +742,8 @@ export function useChatSession() {
     stopTurn,
     streamError: ownedStreamError,
     submitComposer,
+    undoConflict: turn.undoConflictFor(client, requestedSessionId),
+    undoTurn: turn.undoTurn,
     welcome,
     workspace,
     workspaces,
