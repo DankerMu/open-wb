@@ -91,21 +91,27 @@ describe("Undo API response parsing", () => {
     const body = undoBody(restoredFiles, draft);
     stubFetch(jsonResponse(body));
 
-    await expect(createApiClient().undoMessage(SESSION_ID, 1, "restore")).resolves.toEqual(body);
+    await expect(createApiClient().undoMessage(SESSION_ID, 1, "restore")).resolves.toEqual({
+      ...body,
+      attachments: [],
+    });
   });
 
   it("returns a kept undo unchanged", async () => {
     const body = undoBody(keptFiles, "");
     stubFetch(jsonResponse(body));
 
-    await expect(createApiClient().undoMessage(SESSION_ID, 1, "keep")).resolves.toEqual(body);
+    await expect(createApiClient().undoMessage(SESSION_ID, 1, "keep")).resolves.toEqual({
+      ...body,
+      attachments: [],
+    });
   });
 
   it.each([
     ["missing files", { session, draft: "" }],
     ["null files", undoBody(null)],
     ["array files", undoBody([])],
-    ["an extra top-level key", { ...undoBody(keptFiles), attachments: [] }],
+    ["an extra top-level key", { ...undoBody(keptFiles), extra: [] }],
     ["a missing draft", { session, files: keptFiles }],
     ["a non-string draft", undoBody(keptFiles, 1)],
     ["a null draft", undoBody(keptFiles, null)],

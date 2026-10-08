@@ -8,4 +8,7 @@ export const NULL_SESSION_META = {
   archivedAt: null,
   pendingApproval: false,
   temporaryWorkspace: false,
+  approvalMode: "write",
+  modelId: "m1",
+  reasoningEffort: null,
 } as const;

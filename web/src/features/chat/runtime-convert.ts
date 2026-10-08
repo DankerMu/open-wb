@@ -7,11 +7,11 @@ type ChatStepView = ChatMessageView["steps"][number];
 
 /**
  * 应用自有字段，经 `metadata.custom` 原值透传给应用层组件：审批、原始状态、错误文本、步骤
- * （步骤带 `changes` 与四态 `status`，tool-call part 表达不了它们）与用户消息的可撤回状态。
+ * （步骤带 `changes` 与四态 `status`，tool-call part 表达不了它们）、用户消息的可撤回状态与附件。
  */
 export type ChatMessageCustom = Pick<
   ChatMessageView,
-  "approvals" | "error" | "status" | "steps" | "undo"
+  "approvals" | "attachments" | "error" | "status" | "steps" | "undo"
 >;
 
 const STATUS: Record<ChatMessageView["status"], MessageStatus> = {
@@ -40,6 +40,7 @@ function toolCall(step: ChatStepView) {
 export function convertMessage(message: ChatMessageView): ThreadMessageLike {
   const custom: ChatMessageCustom = {
     approvals: message.approvals,
+    attachments: message.attachments,
     error: message.error,
     status: message.status,
     steps: message.steps,

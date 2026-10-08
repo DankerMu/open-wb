@@ -32,6 +32,7 @@ function message(id: number, role: "user" | "assistant") {
     createdAt: id,
     approvals: [],
     steps: [],
+    attachments: [],
   };
 }
 

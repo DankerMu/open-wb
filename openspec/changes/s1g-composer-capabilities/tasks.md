@@ -128,11 +128,11 @@ Minimal mergeable slice: 4.1 + 4.2 一刀（会话设置所需）；4.3 一刀�
 
 ## 5. web lib — DTO 解析接受新旧两种键集（三步走的第一步）
 
-- [ ] 5.1 `web/src/lib/session-contract.ts`：按 design D16「三步落地」第 1 步列出的过渡接受规则改解析（规格只描述最终形状，过渡规则以 D16 为准）——`parseSession` 接受 C 之后的十一键，或十一键加三键（三键同现同缺；缺时解析为 `write` / 空串 / `null`）；消息解析接受带或不带 `attachments`（缺时 `[]`；助手消息非空拒绝）；`parseSessionFork` 与 C 的 undo 响应解析接受带或不带 `attachments`（缺时 `[]`）。
+- [x] 5.1 `web/src/lib/session-contract.ts`：按 design D16「三步落地」第 1 步列出的过渡接受规则改解析（规格只描述最终形状，过渡规则以 D16 为准）——`parseSession` 接受 C 之后的十一键，或十一键加三键（三键同现同缺；缺时解析为 `write` / 空串 / `null`）；消息解析接受带或不带 `attachments`（缺时 `[]`；助手消息非空拒绝）；`parseSessionFork` 与 C 的 undo 响应解析接受带或不带 `attachments`（缺时 `[]`）。
   `ChatSession`、`ChatMessage`、`ChatSessionFork` 与 undo 结果类型加上新字段。这是合同迁移的过渡分支，不是并行实现（AGENTS「Code Canonicality」）：在该文件顶部注释写明它由任务 13.5 删除，并引用本 change 名。
-- [ ] 5.2 测试（`web/test/` 里会话合同解析的既有文件，或新文件 `web/test/session-contract-composer.test.ts`）：design D16 第 1 步的每一条——十一键会话通过并解析为 `write` / 空串 / `null`；带齐三键的十四键会话通过；只带 `approvalMode` 的会话整体拒绝；带与不带 `attachments` 的消息都通过（后者为 `[]`）、助手消息非空拒绝；`{session, draft}` 的 fork 响应与 `{session, draft, files}` 的 undo 响应通过且 `attachments` 为 `[]`，带 `attachments` 的同样通过。
+- [x] 5.2 测试（`web/test/` 里会话合同解析的既有文件，或新文件 `web/test/session-contract-composer.test.ts`）：design D16 第 1 步的每一条——十一键会话通过并解析为 `write` / 空串 / `null`；带齐三键的十四键会话通过；只带 `approvalMode` 的会话整体拒绝；带与不带 `attachments` 的消息都通过（后者为 `[]`）、助手消息非空拒绝；`{session, draft}` 的 fork 响应与 `{session, draft, files}` 的 undo 响应通过且 `attachments` 为 `[]`，带 `attachments` 的同样通过。
   既有的严格解析用例（C 的十一键、`undo` 键）的接受 / 拒绝判定不变；解析输出现在带缺省值，拿输出与输入做等值断言的既有期望经共享夹具升级（见下方实施注记），逐文件写进 PR 偏离记录。变异：允许只带一键、缺 `attachments` 时拒绝 → 判红。
-- [ ] 5.3 让新字段流到视图状态但不使用：`web/src/features/chat/stream.ts`（753 行，注意余量）/ `types.ts` 里由快照构造视图消息与会话的地方带上 `attachments` 与三键（纯透传）；`runtime-convert.ts` 把 `attachments` 作为应用自有字段透传。既有归约与渲染测试的判定不变（视图等值断言的期望随夹具带上 `attachments`）；本任务不渲染任何新界面。
+- [x] 5.3 让新字段流到视图状态但不使用：`web/src/features/chat/stream.ts`（753 行，注意余量）/ `types.ts` 里由快照构造视图消息与会话的地方带上 `attachments` 与三键（纯透传）；`runtime-convert.ts` 把 `attachments` 作为应用自有字段透传。既有归约与渲染测试的判定不变（视图等值断言的期望随夹具带上 `attachments`）；本任务不渲染任何新界面。
   **实施注记（5.1–5.3，fixture 评审补充，#996）**：
   - 接受矩阵（会话）：恰十一键 → 通过并补 `approvalMode:"write"`、`modelId:""`、`reasoningEffort:null`；恰十四键 → 通过并逐值保留；只带一键或两键、或多出别的键 → 整体拒绝。写法：两次 `hasExactlyKeys`（十一键表、十四键表），都不中即 `null`。
   - 三键在场时的值域（取规格最终形状）：`approvalMode ∈ {always-ask, write, yolo}`；`modelId` 任意字符串（含空串——「空串非法」是 13.5 的收紧项）；`reasoningEffort ∈ {off, minimal, low, medium, high, xhigh, max}` 或 `null`，`"auto"` 拒绝。

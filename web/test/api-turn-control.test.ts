@@ -205,6 +205,7 @@ describe("Turn control regenerate/fork/approval parsing", () => {
       await expect(createApiClient().forkSession(SESSION_ID, 1)).resolves.toEqual({
         session: stoppedSession,
         draft,
+        attachments: [],
       });
     },
   );
@@ -269,6 +270,7 @@ describe("Stopped status in sessions and snapshots", () => {
         id: -3,
         role: "user" as const,
         undo: "none" as const,
+        attachments: [],
         approvals: [],
         content: "hi",
         status: "done" as const,
@@ -280,6 +282,7 @@ describe("Stopped status in sessions and snapshots", () => {
         id: 0,
         role: "assistant" as const,
         undo: null,
+        attachments: [],
         approvals: [],
         content: "partial",
         status: "stopped" as const,

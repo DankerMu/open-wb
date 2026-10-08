@@ -116,6 +116,7 @@ export function undone(
       failed: NO_PATHS,
       ...files,
     },
+    attachments: [],
   } satisfies ChatSessionUndo);
 }
 

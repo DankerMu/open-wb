@@ -22,6 +22,7 @@ function stoppedView(): View {
     thinking: "先想一想",
     status: "stopped",
     undo: null,
+    attachments: [],
     steps: [
       {
         id: 31,
@@ -53,6 +54,7 @@ function runningView(): View {
     thinking: null,
     status: "running",
     undo: null,
+    attachments: [],
     steps: [],
     approvals: [],
     error: null,
