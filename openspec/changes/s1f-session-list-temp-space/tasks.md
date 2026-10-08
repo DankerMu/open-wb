@@ -270,6 +270,12 @@ Minimal mergeable slice: 9.1 + 9.2 一起（没有父目录校验的还原不可
   - 文档：`docs/` 里若有对 `incomplete` 或「消失条目略过」的描述一并改；ADR-0010 的登记归任务 20.3（已扩写）。
   - 不在本刀：复制期间文件被原地改写得到撕裂副本（既有残余，design D9 已登记）。
   Risk packs（10.4b）: File IO / path safety / delete（还原不得销毁快照里没有副本的内容）、Concurrency（遍历与并发写入）、Legacy compatibility（旧清单的 `incomplete` 键）。
+- [ ] 10.4c 复制期间被改写的文件使快照不可还原（#1206；Critical Path；**先于 12.1 合入**）：`snapshots.ts` 的文件复制路径在复制完成后经同一句柄再 `fstat` 一次，`size`、`mtimeMs`、`ctimeMs` 任一与复制之前不同，或复制的字节数不等于先前的 `size` → 抛出、走既有的 `failed` 出口。硬链接复用路径不动。清单内容在无改动时与现状逐字节相同。
+  - 测试（注入式，全平台；沿用既有的读取钩子，在「已取得元数据、复制未完成」的时刻改写）：workspace-snapshots「复制期间被改写的文件使快照不可还原」的每个 WHEN（追加、截断、等长覆盖写、复制完成之后才改写仍 `ok`、硬链接复用不读内容）。等长覆盖写一例不得依赖时钟粒度（先把 `mtime` 设为过去、注入前等时钟前进）。断言失败原因（错误信息），不只断言 `failed`。
+  - 既有用例里「复制期间文件被追加 / 改权限而快照仍 `ok`」的（如 `workspace-snapshots-take.test.ts`、`workspace-snapshots-limits.test.ts` 中经句柄读取的那几例）会翻转：逐条核对、按新规则改写并记偏离；只改权限（`chmod`）会动 `ctime`，同样是 `failed`。
+  - 变异证据：去掉复核 → 三例判红；只比 `size` → 等长覆盖写判红；只比时间、不比字节数 → 记录结果；复核放到 `close` 之后按路径取 → 记录结果。
+  - `uid-isolation` 的快照检查不得因此判红；不改 CI 脚本。
+  Risk packs（10.4c）: File IO（副本完整性）、Concurrency（复制与并发写入）。
 - [x] 10.5 快照步骤与路由接线：新模块 `server/src/sessions/turn-snapshot.ts`（自身不抛——未绑定不写行；命令回合写 `command`；其余调用 `take` 并写结果；失败只报告）；`createApp` 用 7.1 / 7.2 的布局与配置构造唯一的快照服务并注入；`rest.ts` 把步骤作为 `beforeDispatch` 传给 `supervisor.prompt`，受理与该调用之间不加 await；受理被补偿后删快照目录。测试（新文件 `server/test/prompt-snapshot.test.ts`，REST seam + fake omp）：workspace-snapshots「受理时做快照」六个场景（含「快照期间停止与删除」）、chat-sessions「Snapshot precedes dispatch and never blocks it」、http-service-skeleton「Shared agent module assembly」里快照服务的装配句。此时登记行已写入但还不经任何视图暴露。
   去重的接线（#939 留下）：调用 `take` 前用 10.2 的「取该工作空间最近一条 `ok`」查出上一份的 `message_id`，作为 `previousMessageId` 传入；查不到时**省略**该字段（传 `null` 会在落盘前抛 `TypeError`，被本模块的「自身不抛」吞成每个空间首回合都 `failed`）。REST 层加一条断言：同一空间连续两个回合、其间未改的文件在两份快照里是同一个 inode（`nlink` ≥ 2）——否则漏接时去重在生产上不生效而测试全绿。
   **实施注记（10.5，fixture 评审补充）**：
