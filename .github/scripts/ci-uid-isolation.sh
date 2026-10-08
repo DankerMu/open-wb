@@ -251,7 +251,7 @@ check_snapshots_closed() (
   left="$(find snapshots -mindepth 3 -maxdepth 3 -type f -name manifest.json)" || { echo "snapshot reach check failed: the app user cannot list snapshots" >&2; exit 1; }
   [ -z "$left" ] || { echo "snapshot reach check failed: the smoke left a snapshot manifest behind" >&2; exit 1; }
   mkdir "$probe" && echo kept > "$probe/note.txt" || { echo "snapshot reach check failed: cannot lay out the probe workspace" >&2; exit 1; }
-  "$node_bin" --input-type=module -e "$snapshot_probe" take "$dist" "$probe" "$OMP_STATE_DIR/snapshots" || { echo "snapshot reach check failed: take" >&2; exit 1; }
+  "$node_bin" --input-type=module -e "$snapshot_probe" take "$dist" "$probe" "$OMP_STATE_DIR/snapshots" || { echo "snapshot reach check failed: the probe snapshot could not be taken" >&2; exit 1; }
   [ -f "$own/1/manifest.json" ] || { echo "snapshot reach check failed: take left no snapshot manifest" >&2; exit 1; }
   seen="$(sudo -n -u omp -- /usr/bin/env "$node_bin" -e "$list_probe" snapshots)" || { echo "snapshot reach check failed: cannot run the probe as the omp user" >&2; exit 1; }
   [ "$seen" = EACCES ] || { echo "snapshot reach check failed: the omp user listing snapshots got ${seen:-no answer}, want EACCES" >&2; exit 1; }

@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TurnSnapshotService } from "../src/sessions/turn-snapshot.js";
 import { patch, patched } from "./session-archive-helpers.js";
 import { expectEnvelope } from "./session-bodyless-rest-helpers.js";
+import { INTERNAL_ERROR_ENVELOPE } from "./session-db-helpers.js";
 import {
   auditEvents,
   expectDeleted,
@@ -288,6 +289,35 @@ describe("快照清理 — 会话删除 (workspace-snapshots「快照清理」, 
   });
 });
 
+describe("快照清理 — 删除事务回滚 (workspace-snapshots「快照清理」: 事务提交后)", () => {
+  it("删除事务回滚: a failing audit write is the generic 5xx and leaves rows and snapshot directories", async () => {
+    const world = await openFilesWorld(worlds);
+    const { app, db } = world.fixture;
+    put(world, "a.txt", KEPT);
+    const own = await turns(world, 2);
+    const before = names(world.snapshots);
+    db.exec(
+      "CREATE TEMP TRIGGER delete_audit_down BEFORE INSERT ON audit_events WHEN NEW.kind = 'session.delete' BEGIN SELECT RAISE(ABORT, 'audit down'); END",
+    );
+
+    expectEnvelope(
+      await sendDelete(app, world.session, world.cookie),
+      500,
+      INTERNAL_ERROR_ENVELOPE,
+    );
+
+    db.exec("DROP TRIGGER delete_audit_down");
+    expect(sessionState(db, world.session)).toMatchObject({ messages: 4, row: { status: "done" } });
+    expect(registrations(world)).toBe(2);
+    expect(workspaceRow(world, world.workspaceId)).toBeDefined();
+    expect(names(world.snapshots)).toEqual(before);
+    for (const id of own) {
+      expectReadable(world, id);
+    }
+    expect(existsSync(world.root)).toBe(true);
+  });
+});
+
 describe("快照清理 — 归档 (session-metadata「归档保留临时空间与快照」)", () => {
   // Spawns: 0 the session's process, 1 the undo's temporary process.
   it("归档保留临时空间与快照: row, directory, files and both snapshots are unchanged; undo works once restored", async () => {
@@ -315,6 +345,7 @@ describe("快照清理 — 归档 (session-metadata「归档保留临时空间�
     const body = restoredBy(await undoWith(world, Number(u2), "restore"));
     expect(body.files).toMatchObject({ restored: 0, removed: 1 });
     expect(contents(world)).toEqual({ "a.txt": KEPT });
+    expect(existsSync(snapshotDir(world, Number(u2)))).toBe(false);
   });
 });
 
