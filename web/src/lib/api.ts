@@ -13,6 +13,7 @@ import type {
   ChatSession,
   ChatSessionFork,
   ChatSessionList,
+  ChatSessionUndo,
   ChatSettledApproval,
 } from "./session-contract.js";
 
@@ -170,6 +171,12 @@ export type ApiClient = {
     messageId: number,
     options?: ApiRequestOptions,
   ): Promise<ChatSessionFork>;
+  undoMessage(
+    sessionId: string,
+    messageId: number,
+    files: "restore" | "force" | "keep",
+    options?: ApiRequestOptions,
+  ): Promise<ChatSessionUndo>;
   decideApproval(
     sessionId: string,
     approvalId: number,

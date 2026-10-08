@@ -90,6 +90,32 @@ export type ChatSessionFork = {
   draft: string;
 };
 
+type ChatUndoSkipReason =
+  | "too_large"
+  | "excluded"
+  | "unreadable"
+  | "special"
+  | "name_encoding"
+  | "mount";
+type ChatUndoSkippedPath = { path: string; reason: ChatUndoSkipReason };
+type ChatUndoFailedPath = { path: string };
+/** `count` 是总数，`paths` 可能被服务端截断，所以 `count >= paths.length`。 */
+type ChatUndoPathList<T> = { count: number; paths: T[] };
+
+type ChatUndoFiles = {
+  mode: "restored" | "kept";
+  restored: number;
+  removed: number;
+  skipped: ChatUndoPathList<ChatUndoSkippedPath>;
+  failed: ChatUndoPathList<ChatUndoFailedPath>;
+};
+
+export type ChatSessionUndo = {
+  session: ChatSession;
+  draft: string;
+  files: ChatUndoFiles;
+};
+
 type ChatApprovalDecision = "allow" | "deny" | "timeout";
 
 type ChatApproval = {
@@ -113,6 +139,14 @@ const UNDO_STATES: ReadonlySet<unknown> = new Set<ChatUndoState>([
   "command",
   "unbound",
   "none",
+]);
+const UNDO_SKIP_REASONS: ReadonlySet<unknown> = new Set<ChatUndoSkipReason>([
+  "too_large",
+  "excluded",
+  "unreadable",
+  "special",
+  "name_encoding",
+  "mount",
 ]);
 const TODO_STATUSES: ReadonlySet<unknown> = new Set<ChatTodoStatus>([
   "pending",
@@ -455,6 +489,74 @@ export function parseSessionFork(value: unknown): ChatSessionFork | null {
 
   const session = parseSession(value.session);
   return session ? { session, draft: value.draft } : null;
+}
+
+function parseUndoSkippedPath(value: unknown): ChatUndoSkippedPath | null {
+  if (
+    !hasExactlyKeys(value, ["path", "reason"]) ||
+    typeof value.path !== "string" ||
+    !UNDO_SKIP_REASONS.has(value.reason)
+  ) {
+    return null;
+  }
+
+  return { path: value.path, reason: value.reason as ChatUndoSkipReason };
+}
+
+function parseUndoFailedPath(value: unknown): ChatUndoFailedPath | null {
+  if (!hasExactlyKeys(value, ["path"]) || typeof value.path !== "string") {
+    return null;
+  }
+
+  return { path: value.path };
+}
+
+function parseUndoPathList<T>(
+  value: unknown,
+  parseItem: (value: unknown) => T | null,
+): ChatUndoPathList<T> | null {
+  if (!hasExactlyKeys(value, ["count", "paths"])) {
+    return null;
+  }
+
+  const { count } = value;
+  const paths = parseJsonArray(value.paths, parseItem);
+  if (!paths || !isNonNegativeSafeInteger(count) || count < paths.length) {
+    return null;
+  }
+
+  return { count, paths };
+}
+
+function parseUndoFiles(value: unknown): ChatUndoFiles | null {
+  if (!hasExactlyKeys(value, ["mode", "restored", "removed", "skipped", "failed"])) {
+    return null;
+  }
+
+  const { mode, removed, restored } = value;
+  const skipped = parseUndoPathList(value.skipped, parseUndoSkippedPath);
+  const failed = parseUndoPathList(value.failed, parseUndoFailedPath);
+  if (
+    (mode !== "restored" && mode !== "kept") ||
+    !isNonNegativeSafeInteger(restored) ||
+    !isNonNegativeSafeInteger(removed) ||
+    !skipped ||
+    !failed
+  ) {
+    return null;
+  }
+
+  return { mode, restored, removed, skipped, failed };
+}
+
+export function parseSessionUndo(value: unknown): ChatSessionUndo | null {
+  if (!hasExactlyKeys(value, ["session", "draft", "files"]) || typeof value.draft !== "string") {
+    return null;
+  }
+
+  const session = parseSession(value.session);
+  const files = parseUndoFiles(value.files);
+  return session && files ? { session, draft: value.draft, files } : null;
 }
 
 function parseApproval(value: unknown): ChatApproval | null {
