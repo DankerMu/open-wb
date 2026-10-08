@@ -117,6 +117,7 @@ export function registerSessions(
     onError: options.onError,
   });
   registerSessionRoutes(app, {
+    db: options.db,
     store,
     supervisor,
     metadata,
@@ -127,6 +128,9 @@ export function registerSessions(
     listEvents: {
       notify(ownerId) {
         listEvents.notify(ownerId);
+      },
+      notifyRewound(ownerId, sessionId) {
+        listEvents.notifyRewound(ownerId, sessionId);
       },
     },
     turnSnapshots: createTurnSnapshots({
