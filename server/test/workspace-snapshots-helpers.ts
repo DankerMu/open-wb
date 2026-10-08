@@ -121,6 +121,17 @@ export function expectChanged(result: TakeResult, dir: string): void {
   });
 }
 
+/**
+ * `failed` by the look at a file after its copy (#1206): the file `path` (relative to the
+ * workspace root) changed between the `fstat` before its content was read and the one after.
+ */
+export function expectTorn(result: TakeResult, path: string): void {
+  expect(result).toMatchObject({
+    outcome: "failed",
+    error: { message: `workspace file changed while it was copied: "${path}"` },
+  });
+}
+
 /** One successful `take` of the fixture's workspace: the snapshot the restore tests start from. */
 export async function snapshot(f: Fixture, overrides: Partial<TakeOptions> = {}): Promise<void> {
   expect(await run(f, overrides)).toMatchObject({ outcome: "ok" });
@@ -245,23 +256,24 @@ export function beforeLstat(target: string, act: () => void): void {
 export const PAST_SECONDS = 1_600_000_000;
 
 /**
- * Sets the `mtime` of each directory to `PAST_SECONDS`, so a later change of its entries moves
- * its `mtime` whatever the grain of the file system's clock.
+ * Sets the `mtime` of each directory or file to `PAST_SECONDS`, so a later change of a
+ * directory's entries, or of a file's content, moves its `mtime` whatever the grain of the file
+ * system's clock.
  */
-export function setPast(...dirs: string[]): void {
-  for (const dir of dirs) {
-    utimesSync(dir, PAST_SECONDS, PAST_SECONDS);
+export function setPast(...paths: string[]): void {
+  for (const path of paths) {
+    utimesSync(path, PAST_SECONDS, PAST_SECONDS);
   }
 }
 
 /**
- * Returns once the file system stamps a time later than the change time `dir` has now, so the
- * next change of `dir` moves its `ctime` (Linux stamps from a clock that ticks every 1 to 10 ms).
- * The probe file lies beside the workspace, on the same file system.
+ * Returns once the file system stamps a time later than the change time `path` (a directory or a
+ * file) has now, so the next change of it moves its `ctime` (Linux stamps from a clock that ticks
+ * every 1 to 10 ms). The probe file lies beside the workspace, on the same file system.
  */
-export function waitForClock(f: Fixture, dir: string): void {
+export function waitForClock(f: Fixture, path: string): void {
   const probe = join(f.workspace, "..", "clock-probe");
-  const seen = lstatSync(dir, { bigint: true }).ctimeNs;
+  const seen = lstatSync(path, { bigint: true }).ctimeNs;
   const deadline = Date.now() + 5000;
   do {
     if (Date.now() > deadline) {
@@ -312,6 +324,61 @@ export function onCopyCreate(intercept: (path: string) => void): void {
     }
     return open(...args);
   });
+}
+
+type Handle = Awaited<ReturnType<typeof fs.promises.open>>;
+
+/**
+ * Every `fs.promises.open` of the walk is recorded (workspace-relative for a source, `tree/…`
+ * for a copy) and passed to `intercept` before the real open; the handle of a source goes to
+ * `patch` before the walk gets it.
+ */
+export function watchOpens(
+  f: Fixture,
+  intercept: (opened: string) => void,
+  patch: (path: string, handle: Handle) => void = () => undefined,
+): string[] {
+  const opened: string[] = [];
+  const open = fs.promises.open;
+  vi.spyOn(fs.promises, "open").mockImplementation(async (...args: Parameters<typeof open>) => {
+    const full = String(args[0]);
+    const source = full.startsWith(`${f.workspace}/`);
+    const name = source ? full.slice(f.workspace.length + 1) : full.slice(f.snapshot.length + 1);
+    opened.push(name);
+    intercept(name);
+    const handle = await open(...args);
+    if (source) {
+      patch(name, handle);
+    }
+    return handle;
+  });
+  return opened;
+}
+
+/**
+ * A writer that acts once the walk has the first `fstat` of `target`, before it reads any
+ * content. `write` runs once: a later `fstat` of the same handle does not repeat it.
+ */
+export function writeAfterFstat(f: Fixture, target: string, write: () => void): void {
+  let written = false;
+  watchOpens(
+    f,
+    () => undefined,
+    (path, handle) => {
+      if (path !== target) {
+        return;
+      }
+      const stat = handle.stat.bind(handle);
+      handle.stat = (async () => {
+        const result = await stat();
+        if (!written) {
+          written = true;
+          write();
+        }
+        return result;
+      }) as typeof handle.stat;
+    },
+  );
 }
 
 /** Sets the times of its file whenever the round number moves, then counts itself done. */

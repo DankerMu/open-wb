@@ -27,6 +27,9 @@
  * under a name the walk never reads. So every walked directory is fingerprinted when it is
  * listed and looked at again once all entries are done (`recheck`); and a listed entry that is
  * gone when it is read (`ENOENT`, `ENOTDIR`) fails the walk like any other error.
+ * The fingerprints tell of names, not of content: a file rewritten in place while it is copied
+ * leaves a copy that is part old, part new. So a copied file is looked at again through its
+ * handle once the copy is done, and one that changed fails the walk too (#1206).
  *
  * Names are listed as bytes (`splitNames`). A name that is not valid UTF-8 cannot be written in
  * the manifest, whose paths are JSON strings: the entry is left out as `name_encoding` and never
@@ -456,6 +459,11 @@ function claim(walk: Walk, bytes: number): void {
  * it: the entry may have been replaced since it was classified. A file over the per-file limit
  * is left out before the other two limits are looked at, so it counts toward neither. A file
  * linked from the previous snapshot counts toward both like a copied one.
+ *
+ * A copied file gets a second `fstat` of the same handle after its copy (#1206). A size or a
+ * time that moved, or a copy that is not as long as the first `fstat` said, means a writer was in
+ * the file meanwhile: this throws, `take` answers `failed` and removes the snapshot. A change
+ * after that second `fstat` is not in the copy. A linked file is not read, so not looked at again.
  */
 async function visitFile(walk: Walk, path: string): Promise<void> {
   const source = await readable(walk, path, () =>
@@ -475,21 +483,31 @@ async function visitFile(walk: Walk, path: string): Promise<void> {
       return;
     }
     claim(walk, stat.size);
-    const size = (await linkUnchanged(walk, path, stat))
-      ? stat.size
-      : await copyContent(walk, path, source, stat.size);
-    if (size !== undefined) {
-      walk.totalBytes += size;
-      walk.entries.push({
-        path,
-        type: "file",
-        size,
-        mtimeMs: stat.mtimeMs,
-        ctimeMs: stat.ctimeMs,
-        ino: stat.ino,
-        mode: stat.mode & 0o7777,
-      });
+    if (!(await linkUnchanged(walk, path, stat))) {
+      const copied = await copyContent(walk, path, source, stat.size);
+      if (copied === undefined) {
+        return;
+      }
+      const after = await source.stat();
+      if (
+        copied !== stat.size ||
+        after.size !== stat.size ||
+        after.mtimeMs !== stat.mtimeMs ||
+        after.ctimeMs !== stat.ctimeMs
+      ) {
+        throw new Error(`workspace file changed while it was copied: "${path}"`);
+      }
     }
+    walk.totalBytes += stat.size;
+    walk.entries.push({
+      path,
+      type: "file",
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      ctimeMs: stat.ctimeMs,
+      ino: stat.ino,
+      mode: stat.mode & 0o7777,
+    });
   } finally {
     await source.close();
   }
@@ -541,7 +559,8 @@ async function linkUnchanged(walk: Walk, path: string, stat: Stats): Promise<boo
  * Copies at most the first `limit` bytes `source` reads into a new private file under `tree/`
  * and returns how many that was. `limit` is the size the handle reported when it was opened:
  * what a writer appends meanwhile stays out, so the copy is never longer than what the limits
- * were checked against; a file truncated meanwhile ends early and the count says so.
+ * were checked against; a file truncated meanwhile ends early and the count says so. Either way
+ * the caller's second `fstat` then fails the snapshot.
  * `undefined` when a read was refused: the entry is then recorded as `unreadable` and its
  * partial copy removed. Errors of the copy's own side are not read errors and fail the snapshot.
  */

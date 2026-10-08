@@ -19,6 +19,7 @@ import { resolveAgentSettings } from "../src/agent-config.js";
 import {
   describeTree,
   dirEntry,
+  expectTorn,
   type Fixture,
   fileEntry,
   fixture,
@@ -28,58 +29,12 @@ import {
   run,
   swapAfterLstat,
   W,
+  watchOpens,
+  writeAfterFstat,
 } from "./workspace-snapshots-helpers.js";
 
 const TEN = "0123456789";
 const ELEVEN = "0123456789a";
-
-type Handle = Awaited<ReturnType<typeof fs.promises.open>>;
-
-/**
- * Every `fs.promises.open` of the walk is recorded (workspace-relative for a source, `tree/…`
- * for a copy) and passed to `intercept` before the real open; the handle of a source goes to
- * `patch` before the walk gets it.
- */
-function watchOpens(
-  f: Fixture,
-  intercept: (opened: string) => void,
-  patch: (path: string, handle: Handle) => void = () => undefined,
-): string[] {
-  const opened: string[] = [];
-  const open = fs.promises.open;
-  vi.spyOn(fs.promises, "open").mockImplementation(async (...args: Parameters<typeof open>) => {
-    const full = String(args[0]);
-    const source = full.startsWith(`${f.workspace}/`);
-    const name = source ? full.slice(f.workspace.length + 1) : full.slice(f.snapshot.length + 1);
-    opened.push(name);
-    intercept(name);
-    const handle = await open(...args);
-    if (source) {
-      patch(name, handle);
-    }
-    return handle;
-  });
-  return opened;
-}
-
-/** A writer that acts once the walk has the `fstat` of `target`, before it reads any content. */
-function writeAfterFstat(f: Fixture, target: string, write: () => void): void {
-  watchOpens(
-    f,
-    () => undefined,
-    (path, handle) => {
-      if (path !== target) {
-        return;
-      }
-      const stat = handle.stat.bind(handle);
-      handle.stat = (async () => {
-        const result = await stat();
-        write();
-        return result;
-      }) as typeof handle.stat;
-    },
-  );
-}
 
 function treeOf(f: Fixture): string[] {
   return Object.keys(describeTree(join(f.snapshot, "tree")));
@@ -377,12 +332,13 @@ describe("越限即停", () => {
   });
 });
 
+// Since #1206 a file that changed while it was copied fails the snapshot, so no copy of another
+// length than the one the limits were checked against is ever kept.
 describe("快照期间可能有写入者 — 上限仍成立", () => {
-  it("bytes appended while a file is copied stay out: the copy is as long as its fstat size", async () => {
+  it("bytes appended while a file is copied: failed, no snapshot over the limits is kept", async () => {
     const f = fixture();
     put(f.workspace, "a.bin", TEN);
     put(f.workspace, "b.bin", TEN);
-    const entries = [fileEntry(f, "a.bin"), fileEntry(f, "b.bin")];
     writeAfterFstat(f, "a.bin", () =>
       appendFileSync(join(f.workspace, "a.bin"), "APPENDED WHILE COPYING"),
     );
@@ -390,36 +346,33 @@ describe("快照期间可能有写入者 — 上限仍成立", () => {
     const result = await run(f, { maxFileBytes: 10, maxTotalBytes: 20 });
 
     expect(readFileSync(join(f.workspace, "a.bin")).length).toBe(32);
-    expect(result).toEqual({ outcome: "ok", skipped: [] });
-    expect(readFileSync(join(f.snapshot, "tree", "a.bin"), "utf8")).toBe(TEN);
-    expect(manifestOf(f).entries).toEqual(entries);
-    expect(entries[0]).toMatchObject({ size: 10 });
+    expectTorn(result, "a.bin");
+    expect(existsSync(f.snapshot)).toBe(false);
   });
 
-  it("a file longer than one read is cut at its fstat size too", async () => {
+  it("a file longer than one read that grows while it is copied: failed too", async () => {
     const f = fixture();
     const bytes = Buffer.alloc(150_000, "x");
     put(f.workspace, "a.bin", bytes.toString("latin1"));
     writeAfterFstat(f, "a.bin", () => appendFileSync(join(f.workspace, "a.bin"), "tail"));
 
-    expect(await run(f, { maxTotalBytes: 150_000 })).toEqual({ outcome: "ok", skipped: [] });
+    const result = await run(f, { maxTotalBytes: 150_000 });
 
-    expect(readFileSync(join(f.snapshot, "tree", "a.bin")).equals(bytes)).toBe(true);
-    expect(manifestOf(f).entries).toMatchObject([{ path: "a.bin", size: 150_000 }]);
+    expect(readFileSync(join(f.workspace, "a.bin")).length).toBe(150_004);
+    expectTorn(result, "a.bin");
+    expect(existsSync(f.snapshot)).toBe(false);
   });
 
-  it("a file truncated while it is copied: the manifest size is what was copied", async () => {
+  it("a file truncated while it is copied: failed, a shorter copy is not kept", async () => {
     const f = fixture();
     put(f.workspace, "a.bin", TEN);
     put(f.workspace, "b.bin", TEN);
-    const [a, b] = [fileEntry(f, "a.bin"), fileEntry(f, "b.bin")];
     writeAfterFstat(f, "a.bin", () => truncateSync(join(f.workspace, "a.bin"), 4));
 
-    const result = await run(f, { maxTotalBytes: 14 });
+    const result = await run(f, { maxTotalBytes: 20 });
 
-    // 4 + 10: the total is what entered the snapshot, so b.bin still fits.
-    expect(result).toEqual({ outcome: "ok", skipped: [] });
-    expect(readFileSync(join(f.snapshot, "tree", "a.bin"), "utf8")).toBe("0123");
-    expect(manifestOf(f).entries).toEqual([{ ...a, size: 4 }, b]);
+    expect(readFileSync(join(f.workspace, "a.bin"), "utf8")).toBe("0123");
+    expectTorn(result, "a.bin");
+    expect(existsSync(f.snapshot)).toBe(false);
   });
 });

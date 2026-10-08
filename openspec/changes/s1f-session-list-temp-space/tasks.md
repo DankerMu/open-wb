@@ -270,6 +270,12 @@ Minimal mergeable slice: 9.1 + 9.2 一起（没有父目录校验的还原不可
   - 文档：`docs/` 里若有对 `incomplete` 或「消失条目略过」的描述一并改；ADR-0010 的登记归任务 20.3（已扩写）。
   - 不在本刀：复制期间文件被原地改写得到撕裂副本（既有残余，design D9 已登记）。
   Risk packs（10.4b）: File IO / path safety / delete（还原不得销毁快照里没有副本的内容）、Concurrency（遍历与并发写入）、Legacy compatibility（旧清单的 `incomplete` 键）。
+- [x] 10.4c 复制期间被改写的文件使快照不可还原（#1206；Critical Path；**先于 12.1 合入**）：`snapshots.ts` 的文件复制路径在复制完成后经同一句柄再 `fstat` 一次，`size`、`mtimeMs`、`ctimeMs` 任一与复制之前不同，或复制的字节数不等于先前的 `size` → 抛出、走既有的 `failed` 出口。硬链接复用路径不动。清单内容在无改动时与现状逐字节相同。
+  - 测试（注入式，全平台；沿用既有的读取钩子，在「已取得元数据、复制未完成」的时刻改写）：workspace-snapshots「复制期间被改写的文件使快照不可还原」的每个 WHEN（追加、截断、等长覆盖写、复制完成之后才改写仍 `ok`、硬链接复用不读内容）。等长覆盖写一例不得依赖时钟粒度（先把 `mtime` 设为过去、注入前等时钟前进）。断言失败原因（错误信息），不只断言 `failed`。
+  - 既有用例里「复制期间文件被追加 / 改权限而快照仍 `ok`」的（如 `workspace-snapshots-take.test.ts`、`workspace-snapshots-limits.test.ts` 中经句柄读取的那几例）会翻转：逐条核对、按新规则改写并记偏离；只改权限（`chmod`）会动 `ctime`，同样是 `failed`。
+  - 变异证据：去掉复核 → 三例判红；只比 `size` → 等长覆盖写判红；只比时间、不比字节数 → 记录结果；复核放到 `close` 之后按路径取 → 记录结果。
+  - `uid-isolation` 的快照检查不得因此判红；不改 CI 脚本。
+  Risk packs（10.4c）: File IO（副本完整性）、Concurrency（复制与并发写入）。
 - [x] 10.5 快照步骤与路由接线：新模块 `server/src/sessions/turn-snapshot.ts`（自身不抛——未绑定不写行；命令回合写 `command`；其余调用 `take` 并写结果；失败只报告）；`createApp` 用 7.1 / 7.2 的布局与配置构造唯一的快照服务并注入；`rest.ts` 把步骤作为 `beforeDispatch` 传给 `supervisor.prompt`，受理与该调用之间不加 await；受理被补偿后删快照目录。测试（新文件 `server/test/prompt-snapshot.test.ts`，REST seam + fake omp）：workspace-snapshots「受理时做快照」六个场景（含「快照期间停止与删除」）、chat-sessions「Snapshot precedes dispatch and never blocks it」、http-service-skeleton「Shared agent module assembly」里快照服务的装配句。此时登记行已写入但还不经任何视图暴露。
   去重的接线（#939 留下）：调用 `take` 前用 10.2 的「取该工作空间最近一条 `ok`」查出上一份的 `message_id`，作为 `previousMessageId` 传入；查不到时**省略**该字段（传 `null` 会在落盘前抛 `TypeError`，被本模块的「自身不抛」吞成每个空间首回合都 `failed`）。REST 层加一条断言：同一空间连续两个回合、其间未改的文件在两份快照里是同一个 inode（`nlink` ≥ 2）——否则漏接时去重在生产上不生效而测试全绿。
   **实施注记（10.5，fixture 评审补充）**：
@@ -503,7 +509,7 @@ Minimal mergeable slice: 19.1 单独可合；19.2 + 19.3 在组 18 之后一个 
 
 - [x] 20.1 `CONTEXT.md`：改写「任务 task」词条（侧栏不再有「任务」分区；`临时空间` 分组的含义）；新增「临时空间」「回合快照」「撤回」「归档」四条术语与边界说明；「工作空间」词条补一句「临时空间是带标记的工作空间，文件页不列出」。
 - [x] 20.2 ADR-0013 增补（2026-10-06，change `s1f-session-list-temp-space`）：不用 `adapters.threadList`（「接入方式」对应一行的最终决定与理由）；会话列表动作的提示退场与失败呈现规则；会话视图由八键扩为十一键。
-- [ ] 20.3 ADR-0010 增补：`<OMP_STATE_DIR>/snapshots`（`0700`）进入托管布局；遍历期间有变动的快照不可还原（目录指纹的前后比较，#1190）及其残余（同一时间刻度内的改动、FUSE 挂载的目录时间未验证、复制期间原地改写的撕裂副本）；临时空间目录经 trash 中转删除与 `EXDEV` 原地删除的残余；快照遍历（`take`）读到工作空间之外的两种残余（中间路径分量被替换；目录条目——含工作空间根自身——在 `lstat` 与 `readdir` 之间被换成符号链接、外部目录被整棵复制）与缓解（普通文件按句柄 `O_NOFOLLOW` 读取）；快照还原由 app 用户在共享目录里写 / 删文件的残余与缓解（逐级 `lstat`、本会话进程先退役、同空间运行时拒绝）；还原写回的文件权限位规则（属主属组读写一律补上）；升级说明（无需手工步骤）。
+- [ ] 20.3 ADR-0010 增补：`<OMP_STATE_DIR>/snapshots`（`0700`）进入托管布局；遍历期间有变动的快照不可还原（目录指纹的前后比较，#1190）及其残余（同一时间刻度内的改动、FUSE 挂载的目录时间未验证、同一时间戳刻度内完成的等长原地改写、经 `mmap` 写入而时间戳未更新的改动（复制后的复核看不到，#1206））；临时空间目录经 trash 中转删除与 `EXDEV` 原地删除的残余；快照遍历（`take`）读到工作空间之外的两种残余（中间路径分量被替换；目录条目——含工作空间根自身——在 `lstat` 与 `readdir` 之间被换成符号链接、外部目录被整棵复制）与缓解（普通文件按句柄 `O_NOFOLLOW` 读取）；快照还原由 app 用户在共享目录里写 / 删文件的残余与缓解（逐级 `lstat`、本会话进程先退役、同空间运行时拒绝）；还原写回的文件权限位规则（属主属组读写一律补上）；升级说明（无需手工步骤）。
 - [ ] 20.4 部署与运维说明（放在现有部署文档或 README 的配置节，先 grep 现有位置，不新建重复文档）：四个 `SNAPSHOT_*` 环境变量与默认值；默认排除名单只含依赖目录、`.git` 进快照，带大仓库的空间更容易触发条目 / 总量上限以及可以怎么调（调大上限，或把 `.git` 加回排除名单并接受提交不随撤回还原）；`snapshots` 目录的磁盘规划与进程被杀后可能残留的半份快照目录（停服务后可手工删除没有登记行的目录）；每个会话页标签页多一条 SSE 与 HTTP/1.1 连接数的提示；回滚后可手工清理的目录。
 - [ ] 20.5 `IMPLEMENTATION_PLAN.md`：S1f 的 change C 状态行与交付记录（只记事实，不改 owner 决定的条文）；`docs/architecture/system.md` 若列有模块 / 端点清单则补新端点与新模块。
 - [ ] 20.6 `docs/acceptance/functional-checklist.md` 收口：核对组 14–18 新增的 SL / CH 行齐全、ID 不重复、全部 `待签`、格式守卫通过。（design D16 的九项「起草者自定的呈现细节」在建 Epic 时原样列进 Epic 描述供 owner 知悉；这是建 issue 的动作，不是实现任务，也不卡任何任务。）
