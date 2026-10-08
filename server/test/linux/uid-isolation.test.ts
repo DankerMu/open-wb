@@ -155,6 +155,9 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
         applyParentEnv(previous);
         ownedRoot = mkdtempSync(join(tmpdir(), "uid-delete-"));
         const layout = createOwnedLayout(ownedRoot);
+        // As the production entry does before it serves a prompt: the per-turn snapshot (#945)
+        // writes under `snapshots/` before the first spawn would lay the state dir out.
+        ensureOmpStateLayout(layout.stateDir);
         app = createApp({
           db,
           authRuntime: fixedRuntime(() => FIXED_NOW),
