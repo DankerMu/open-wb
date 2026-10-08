@@ -40,6 +40,8 @@ type ConversationViewProps = {
   /** 斜杠命令候选：输入框上方的面板（不可见时为 null）、先于 Enter 规则的按键拦截，以及「+」菜单的状态。 */
   slash: ReturnType<typeof useSlashMenu>;
   streamError: string | null;
+  /** 当前会话用的是临时空间（会话的 `temporaryWorkspace`；没有当前会话时为 false）：能力栏标签读作 `临时空间`。 */
+  temporaryWorkspace: boolean;
   /** 欢迎态的场景与空间选择（状态在会话页）；有当前会话时场景不渲染，空间位换成只读标签。 */
   welcome: WelcomeOptions;
   /** 当前会话的空间（取自空间列表）；未绑定、不在列表里、列表读取中或读取失败时为 undefined。 */
@@ -69,6 +71,7 @@ export function ConversationView({
   sendDisabled,
   slash,
   streamError,
+  temporaryWorkspace,
   welcome,
   workspace,
   workspaceId,
@@ -138,7 +141,9 @@ export function ConversationView({
               disabled={composerDisabled}
               inputRef={composerRef}
               plus={slash.plus}
-              {...(requestedSessionId ? { session: { id: workspaceId, workspace } } : {})}
+              {...(requestedSessionId
+                ? { session: { id: workspaceId, workspace, temporary: temporaryWorkspace } }
+                : {})}
             />
           }
           disabled={composerDisabled}

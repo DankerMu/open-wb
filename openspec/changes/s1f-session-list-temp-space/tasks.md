@@ -424,7 +424,14 @@ Minimal mergeable slice: 16.1（能归档、能在归档视图里恢复与删除
 
 ## 17. web — 临时空间、产物卡与导出记录
 
-- [ ] 17.1 临时空间的呈现：`capability-bar.tsx` 的只读标签加 `任务启动于 临时空间`（判定在最前：`temporaryWorkspace` 为 true）；用临时空间的会话以其 `workspaceId` 取命令目录与项目配置（核对现有取用处是否已按 `workspaceId` 传参，只补缺口）。测试：session-sidebar「未选择空间发送得到临时空间会话」「会话开始后只读」、chat-web「已选会话工作空间只读」（四种取值）；另加回归：绑定正式空间与未绑定的存量会话的标签不变。
+- [x] 17.1 临时空间的呈现：`capability-bar.tsx` 的只读标签加 `任务启动于 临时空间`（判定在最前：`temporaryWorkspace` 为 true）；用临时空间的会话以其 `workspaceId` 取命令目录与项目配置（核对现有取用处是否已按 `workspaceId` 传参，只补缺口）。测试：session-sidebar「未选择空间发送得到临时空间会话」「会话开始后只读」、chat-web「已选会话工作空间只读」（四种取值）；另加回归：绑定正式空间与未绑定的存量会话的标签不变。
+  **实施注记（17.1，fixture 评审补充）**：
+  - `CapabilityBar` 的 `session` 入参加 `temporary: boolean`；标签判定次序：`temporary` → `临时空间`，其后沿用既有的 `null` → `未绑定`、空间名、`已绑定空间`。该判定不依赖工作空间列表（列表取不到时仍是 `临时空间`）。
+  - 取值来自 `page.tsx` 已有的 `selected?.temporaryWorkspace ?? false`，经 `ConversationView` 的一个新入参传到能力栏；不往 `use-chat-session.ts` 里加。
+  - 「按 `workspaceId` 取命令目录与项目配置」经核对没有缺口（两处都直接用会话的 `workspaceId`，不查它是否在列表里）——不改生产代码，只补一条回归用例：临时空间会话以其 `workspaceId` 请求命令目录与项目配置。
+  - 测试：`chat-capability-bar.test.tsx` 加第四种会话（`temporaryWorkspace: true`、id 不在列表里）与「列表读取失败仍显示 `临时空间`」；已绑定 / 未绑定 / 空间已删三行留作回归。
+  - 清单：SL-01 已含「不选工作空间直接发送进入 `临时空间` 分组」——增补而不重复；能力栏标签另起下一空闲 SL 号；CH-09 由本 PR 重写（加临时空间一种、存量会话仍是 `未绑定`、去掉过期的「侧栏『空间』分区」说法）。新增与改写的行一律 `待签`。
+  - `EmptyThread` 与产物卡吃的是 `workspace`，本刀不动（17.5）。
 - [ ] 17.2 另存为工作空间（新文件 `web/src/features/chat/promote-dialog.tsx` + 13.2 的 `promoteWorkspace`）：对话框、校验、请求、成功后重取列表与工作空间。整页测试（新文件 `web/test/chat-promote.test.tsx`）：session-sidebar「另存为工作空间对话框」三个场景、「菜单项」场景。
 - [ ] 17.3 导出记录（新文件 `web/src/features/chat/export-markdown.ts` 纯函数 + 下载触发）：内容生成（块之间恰一个空行；空正文与无步骤的助手消息按规格）、文件名清洗、当前会话用视图 / 其它会话现读快照、失败走列表区顶部提示。单测逐字节断言 session-sidebar「导出内容」「空正文的助手消息」；整页测试「非当前会话与失败」（下载以对 `URL.createObjectURL` 与锚点点击的桩断言）。
 - [ ] 17.4 新文件登记进 `MIGRATED_AREAS`；SL 行：未选空间发送进入临时空间分组、能力栏标签、另存为工作空间、删除临时空间会话的确认文案、导出记录的内容各一行；CH 行：临时空间会话里助手写出的文件有产物卡并可预览 / 下载 / 复制、文件变更卡只显示文件名且没有「查看详情」一行。全部 `待签`。

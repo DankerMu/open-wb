@@ -116,7 +116,7 @@ function Bar({ enabled }: { enabled: boolean }) {
       disabled={!enabled}
       inputRef={inputRef}
       plus={plus}
-      session={{ id: null, workspace: undefined }}
+      session={{ id: null, workspace: undefined, temporary: false }}
     />
   );
 }
