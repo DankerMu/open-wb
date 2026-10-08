@@ -702,7 +702,7 @@ describe("POST /api/auth/logout", () => {
   });
 });
 
-describe("HTTP typed error map 恰十五码（auth 域只复用既有 unauthorized）", () => {
+describe("HTTP typed error map 恰十六码（auth 域只复用既有 unauthorized）", () => {
   const codes = {
     bad_request: { statusCode: 400, message: "请求格式不正确" },
     invalid_credentials: { statusCode: 401, message: "账号或密码不正确" },
@@ -719,6 +719,7 @@ describe("HTTP typed error map 恰十五码（auth 域只复用既有 unauthoriz
     approval_settled: { statusCode: 409, message: "该审批已处理" },
     session_archived: { statusCode: 409, message: "会话已归档，恢复后才能继续对话" },
     undo_conflict: { statusCode: 409, message: "其它会话在这之后改动过工作空间" },
+    upload_too_large: { statusCode: 413, message: "文件超过大小上限" },
   } as const satisfies Record<HttpErrorCode, { statusCode: number; message: string }>;
 
   /**

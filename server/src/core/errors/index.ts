@@ -18,6 +18,7 @@ export const HTTP_ERROR_MESSAGES = Object.freeze({
   approval_settled: "该审批已处理",
   session_archived: "会话已归档，恢复后才能继续对话",
   undo_conflict: "其它会话在这之后改动过工作空间",
+  upload_too_large: "文件超过大小上限",
 });
 
 export type HttpErrorCode = keyof typeof HTTP_ERROR_MESSAGES;

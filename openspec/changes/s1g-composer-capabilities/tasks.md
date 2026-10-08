@@ -209,8 +209,13 @@ Minimal mergeable slice: 9.1 一刀（档位重启，含 argv 取会话有效值
 
 - [x] 10.1 `server/src/core/sandbox/resolve.ts` 与 `index.ts`：`op` 联合类型加 `write`，词法规则与 `mkdir` 相同（共用同一段判定，不复制）。测试 `server/test/sandbox-resolve.test.ts`：sandbox-core delta「合法路径与边界」的 `write` 部分、「写操作的逃逸向量」、「非目录祖先不是越界」的 `write`；`sandbox-facade.test.ts` 加一例 `op=write` 被拒时审计 `detail.op="write"`。
   变异：`write` 不查最后一段反斜杠、`write` 跟随 `uploads` 符号链接 → 判红。
-- [ ] 10.2 `server/src/core/errors`：新增 `upload_too_large`（413，`文件超过大小上限`）。测试 `server/test/http-typed-errors.test.ts`：http-service-skeleton delta「上传超限码的信封形状」；断言码数的既有用例由 C 之后的十五改为十六。
-- [ ] 10.3 `server/src/http`（content-parser 归属表）：加入 `POST /api/workspaces/:id/uploads`。测试 `server/test/http-parser-owners.test.ts`：归属身份数由 C 之后的十四改为十五（「产品路由身份在共享映射器中的归属」的路由清单加上传路由）；「上传路由的 parser 归属」的映射层部分用测试路由钉住（真实路由在组 11）。
+- [x] 10.2 `server/src/core/errors`：新增 `upload_too_large`（413，`文件超过大小上限`）。测试 `server/test/http-typed-errors.test.ts`：http-service-skeleton delta「上传超限码的信封形状」；断言码数的既有用例由 C 之后的十五改为十六。
+- [x] 10.3 `server/src/http`（content-parser 归属表）：加入 `POST /api/workspaces/:id/uploads`。测试 `server/test/http-parser-owners.test.ts`：归属身份数由 C 之后的十四改为十五（「产品路由身份在共享映射器中的归属」的路由清单加上传路由）；「上传路由的 parser 归属」的映射层部分用测试路由钉住（真实路由在组 11）。
+  **实施注记（10.2 + 10.3，fixture 评审补充；两条同一个 PR）**：
+  - 10.2 单靠 `core/errors` 与 `http-typed-errors.test.ts` 过不了：`server/src/http/errors.ts` 的状态表是 `satisfies Record<HttpErrorCode, number>`（须加 413）；`server/test/auth-lifecycle.test.ts` 的穷尽表与 `server/test/http-parser-owners.test.ts` 的码集合断言也要同步（十五 → 十六）。名字里带计数的常量随之改名，逐处记偏离。
+  - 「上传超限码的信封形状」另需一条「两种 413 以 code 区分」（`preview_too_large` 仍是它自己的 code / message）；伪造对象与 no-store 两条经既有的新码过滤表自动覆盖。
+  - 10.3 的身份恰为 `POST /api/workspaces/:id/uploads`（模板不含查询串）。真实路由在组 11：本刀只在 `handleHttpError` 接缝上证明（身份 × 四种 content-parser 错误 → 400；同模板换方法不在集合内）。「上传路由的 parser 归属」两个 WHEN 的真实 HTTP 一半（400 / 404 / 401、no-store、不落文件与审计；超限是 413 不是 400）归 11.2 / 11.3，届时点名这条场景。
+  - 接缝上「真实的 body-too-large 在该身份上映射为 400」只是按身份映射的结果，不等于允许真实路由用框架的 `bodyLimit`；11.3 钉 413。
 
 Suggested fixture level: expanded - 沙箱路径安全（Critical Path）与统一错误信封的定义表
 Minimal mergeable slice: 10.1 一刀（`write` 尚无调用方；类型联合的扩大不产生未引用导出）；10.2 + 10.3 一刀（新码与归属身份，组 11 的前置；等 C 的 2.1、4.2、11.1 合入，不随 10.1 提前）
