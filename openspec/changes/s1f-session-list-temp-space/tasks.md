@@ -434,7 +434,7 @@ Minimal mergeable slice: 18.1 + 18.2 一个 PR（没有冲突对话框时 `undo_
 
 既有步骤的改写已随功能 PR 完成：`session-meta.hurl` 的键数（1.5）与无 body 创建（5.8）、`chat.hurl` 与 `ui-walk.spec.ts` 的清理（5.8）、走查第 6 步（14.5）与第 7、11 步（15.5）。本组只有追加的断言。
 
-- [ ] 19.1 `smoke/session-meta.hurl` 第 8 步的归档断言（依赖组 2；可在组 5 之后任何时候合入）：`PATCH {"archived":true}` → 200 且 `archivedAt` 非 null、prompt → 409 `session_archived`、`PATCH {"archived":false}` → 200，随后的 `DELETE` 与 tree 404 沿用 5.8 的断言。`make smoke` 连跑两遍通过，文件不留下它创建的会话与临时空间（chat-harness「临时空间与归档在冒烟里可见」）。
+- [x] 19.1 `smoke/session-meta.hurl` 第 8 步的归档断言（依赖组 2；可在组 5 之后任何时候合入）：`PATCH {"archived":true}` → 200 且 `archivedAt` 非 null、prompt → 409 `session_archived`、`PATCH {"archived":false}` → 200，随后的 `DELETE` 与 tree 404 沿用 5.8 的断言。`make smoke` 连跑两遍通过，文件不留下它创建的会话与临时空间（chat-harness「临时空间与归档在冒烟里可见」）。
 - [ ] 19.2 追加的六步（chat-harness「UI 走查临时空间、撤回与归档」，写进 `web/e2e/ui-walk-session-list.ts`）：临时空间（含产物卡预览与文件变更卡无 `查看详情`）、列表事件、撤回、撤回后继续与 fork 验证、归档、删除。两个 project 都跑；error oracle 的预期 401 次数不变。
 - [ ] 19.3 量 `make ui-walk` 总时长并写进 PR：须在既有 `globalTimeout` 内。超出时停下来报告（改 `globalTimeout` 要改规格，不在实现期自行放宽）。
 - [ ] 19.4 变异证据：按 chat-harness 两个「候选实现的反例」场景各做一次（撤回不还原文件、临时空间进列表、临时空间会话不渲染产物卡、删除后目录残留、归档会话接受 prompt），确认对应断言判红。
