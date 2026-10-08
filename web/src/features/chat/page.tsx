@@ -32,7 +32,7 @@ export function ChatPage() {
   const session = useChatSession();
   const { client, draft, historyView, requestedSessionId, selected, sessionActions, workspace } =
     session;
-  const artifacts = useArtifactsPanel(client, historyView, workspace, selected?.id);
+  const artifacts = useArtifactsPanel(client, historyView, session.space, selected?.id);
   const search = useConversationSearch(selected?.id, historyView);
   const config = useProjectConfig(client, selected);
   useTopbar(
@@ -97,6 +97,7 @@ export function ChatPage() {
         search={search}
         sendDisabled={session.sendDisabled}
         slash={slash}
+        space={session.space}
         streamError={session.streamError}
         temporaryWorkspace={selected?.temporaryWorkspace ?? false}
         welcome={session.welcome}

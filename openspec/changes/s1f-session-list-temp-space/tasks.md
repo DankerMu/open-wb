@@ -500,9 +500,18 @@ Minimal mergeable slice: 16.1（能归档、能在归档视图里恢复与删除
   - 下载触发（Blob → `URL.createObjectURL` → 锚点点击 → revoke）是同文件里另一个导出函数；jsdom 没有 `createObjectURL`，整页用例里打桩。
   - `导出记录` 是默认视图菜单的最后一项，任何状态可用，归档视图的菜单里没有。
   - 本刀在 16.1、17.2 之后合入，由它断言完整的「菜单项」场景（未归档：五项，临时空间会话六项；归档视图两项），并同步改 SL-08 的菜单项列表、加「导出记录」的 SL 行（`待签`）。
-- [ ] 17.4 新文件登记进 `MIGRATED_AREAS`；SL 行：未选空间发送进入临时空间分组、能力栏标签、另存为工作空间、删除临时空间会话的确认文案、导出记录的内容各一行；CH 行：临时空间会话里助手写出的文件有产物卡并可预览 / 下载 / 复制、文件变更卡只显示文件名且没有「查看详情」一行。全部 `待签`。
-- [ ] 17.5 临时空间会话的产物卡（owner C-26）：把文件变更卡、产物卡与产物面板三处的「空间可解析」判定收成一个函数（先 grep 这三处对 `listWorkspaces` 结果的取用，统一成 `workspaceId` 非 null 且（在已读取的列表里 或 `temporaryWorkspace` 为 true））；临时空间会话的行只显示空间内相对路径、不渲染 `查看详情`，产物卡与面板行的操作按钮照常渲染并以会话的 `workspaceId` 调 `fetchPreview`。测试（改写 / 新增在既有的产物卡测试文件）：turn-artifacts「文件变更卡」的「空间不可解析」（改写后）与「临时空间会话的文件变更卡」、「产物卡」的「临时空间会话照常渲染产物卡」（含转正后的一段）、「产物面板」的「临时空间会话的面板行」；既有三条 Requirement 的其余场景原样保持通过。
-- [ ] 17.6 变异证据：标签判定只看 `workspaceId` 是否在列表里 → 临时空间会话显示 `已绑定空间`，判红；导出包含 thinking → 「导出内容」判红；`另存为工作空间` 出现在正式空间会话上 → 「只在临时空间的会话上出现」判红；空间可解析判定不认 `temporaryWorkspace` → 「临时空间会话照常渲染产物卡」判红；临时空间会话渲染了 `查看详情` → 「临时空间会话的文件变更卡」判红；临时空间判定依赖空间列表读取成功 → 这两个场景里「空间列表读取失败的另一例」判红。
+- [x] 17.4 新文件登记进 `MIGRATED_AREAS`；SL 行：未选空间发送进入临时空间分组、能力栏标签、另存为工作空间、删除临时空间会话的确认文案、导出记录的内容各一行；CH 行：临时空间会话里助手写出的文件有产物卡并可预览 / 下载 / 复制、文件变更卡只显示文件名且没有「查看详情」一行。全部 `待签`。
+- [x] 17.5 临时空间会话的产物卡（owner C-26）：把文件变更卡、产物卡与产物面板三处的「空间可解析」判定收成一个函数（先 grep 这三处对 `listWorkspaces` 结果的取用，统一成 `workspaceId` 非 null 且（在已读取的列表里 或 `temporaryWorkspace` 为 true））；临时空间会话的行只显示空间内相对路径、不渲染 `查看详情`，产物卡与面板行的操作按钮照常渲染并以会话的 `workspaceId` 调 `fetchPreview`。测试（改写 / 新增在既有的产物卡测试文件）：turn-artifacts「文件变更卡」的「空间不可解析」（改写后）与「临时空间会话的文件变更卡」、「产物卡」的「临时空间会话照常渲染产物卡」（含转正后的一段）、「产物面板」的「临时空间会话的面板行」；既有三条 Requirement 的其余场景原样保持通过。
+  **实施注记（17.5 / 17.4 / 17.6，fixture 评审补充，#968）**：
+  - 「三处对 `listWorkspaces` 结果的取用」并不存在：查找只有一处（`use-chat-session.ts` 里的 `workspaces?.find(...)`），三个组件（`file-changes-card.tsx` 的 `useChangeSpace`、`artifact-card.tsx`、`artifacts-panel.tsx`）拿到的都是 `Workspace | null` 并各自判空——这个判空把「可解析」（要 id）与「可链接」（要 `dir` 前缀与 `查看详情`）并成了一件事。
+  - 判定函数放已登记的 `workspace-list.ts`（不新增生产文件，`MIGRATED_AREAS` 不动）。入参：会话的 `workspaceId`、`temporaryWorkspace` 与已读取的列表（null 表示未读到）；产出「不可解析」，或 `{ id, workspace }`，其中 `workspace` 为列表里的那项或 null。`id` 决定产物卡与面板行的按钮、`fetchPreview` 的入参；`workspace` 非 null 才有逻辑路径前缀与 `查看详情`。
+  - 在 `use-chat-session.ts` 那处查找旁算一次；`temporaryWorkspace` 取自 `selected`（列表优先），不取历史快照里的会话，否则转正一段翻不过来。结果经 `page.tsx`（`useArtifactsPanel` 的入参）→ `conversation-view.tsx` → `message-thread.tsx` 传到三处；PR Boundary 相应含这四个文件。`EmptyThread` 与能力栏继续吃原来的 `workspace`（「列表里的空间」语义不变）；临时空间会话的空态不出「工作空间」一行。
+  - 测试落点：`chat-page-file-changes.test.tsx`、`chat-page-artifact-card.test.tsx`、`chat-page-artifacts-panel.test.tsx` 都贴着 800 行守卫，**不净增行**。临时空间的三个新场景（文件变更卡、产物卡含转正一段、面板行）写进一个新测试文件（如 `web/test/chat-page-artifacts-temporary.test.tsx`），自带夹具：会话 `workspaceId` 为不在列表里的 32 位十六进制 id、`temporaryWorkspace:true`，预览路由按该 id 拼。既有 support 文件的导出签名不改（二十多个文件在用）。「空间不可解析（改写后）」只是把前提写明：既有用例的夹具本来就是 `temporaryWorkspace:false`，断言零改动；若一行不改，在 PR 里写明「无可改写」。
+  - 断言：三次操作 `previewCalls` 恰三条，路径逐条等于 `/api/workspaces/<该 id>/file?path=…`，点击前为零；文件变更卡整张卡内零个 `查看详情`，每行只显示空间内相对路径。
+  - 转正一段：把 `/api/sessions` 与 `/api/workspaces` 换成转正后的应答（空间 `dir` 为 `tmp-<id>`），在列表事件连接（`FakeEventSource.listInstances`）上派发 `sessions.changed` 触发重取；不走另存对话框。只用 `waitFor` 断言终态：三张产物卡在；行为 `<account>/tmp-<id>/<path>`；`查看详情` 指向 `/files?ws=<id>`。两个列表先后到达之间的一拍（`temporaryWorkspace:false` 且空间不在旧列表里 → 短暂不可解析）不断言、不为它加同步逻辑，在 PR 里写明是已知的中间态。
+  - 17.4 本刀只加两行 CH，取下两个空号，`待签`；第二行的期望写「每行只显示文件在空间内的相对路径，没有『查看详情』」（规格是相对路径，不是「文件名」）。既有的「正式空间 + 列表读不到 → 无产物卡」一行仍成立，不改。
+  - 17.6 属本刀的三条变异：判定不认 `temporaryWorkspace` → 「照常渲染产物卡」判红；临时空间会话渲染了 `查看详情` → 「临时空间会话的文件变更卡」判红；判定依赖空间列表读取成功 → 「另一例」判红——该例的 `/api/workspaces` 必须真的应答失败（挂起不等于失败）。
+- [x] 17.6 变异证据：标签判定只看 `workspaceId` 是否在列表里 → 临时空间会话显示 `已绑定空间`，判红；导出包含 thinking → 「导出内容」判红；`另存为工作空间` 出现在正式空间会话上 → 「只在临时空间的会话上出现」判红；空间可解析判定不认 `temporaryWorkspace` → 「临时空间会话照常渲染产物卡」判红；临时空间会话渲染了 `查看详情` → 「临时空间会话的文件变更卡」判红；临时空间判定依赖空间列表读取成功 → 这两个场景里「空间列表读取失败的另一例」判红。
 
 Suggested fixture level: expanded - 17.1 改会话页共享的 `capability-bar.tsx`，17.5 改文件变更卡 / 产物卡 / 产物面板共用的空间解析判定（失败模式是正式空间会话的产物卡或 `查看详情` 被误改）；17.2、17.3 是独立的新文件
 Minimal mergeable slice: 17.1、17.2、17.3、17.5 各自可单独合入（互不依赖；17.4 的清单行随对应任务的 PR 添加）

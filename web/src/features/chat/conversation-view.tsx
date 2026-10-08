@@ -18,7 +18,7 @@ import type { ChatState } from "./stream.js";
 import type { TranscriptHandle } from "./thread-viewport.js";
 import { WelcomeIntro, WelcomePlaybooks } from "./welcome.js";
 import type { WelcomeOptions } from "./welcome-options.js";
-import type { Workspace } from "./workspace-list.js";
+import type { SessionSpace, Workspace } from "./workspace-list.js";
 
 type AnswerApproval = ComponentProps<typeof ComposerDock>["onAnswerApproval"];
 type StopTurn = ComponentProps<typeof Composer>["onStop"];
@@ -53,6 +53,8 @@ type ConversationViewProps = {
   sendDisabled: boolean;
   /** 斜杠命令候选：输入框上方的面板（不可见时为 null）、先于 Enter 规则的按键拦截，以及「+」菜单的状态。 */
   slash: ReturnType<typeof useSlashMenu>;
+  /** 当前会话可解析的空间（文件变更卡与产物卡用；临时空间也算），不可解析时为 null。 */
+  space: SessionSpace | null;
   streamError: string | null;
   /** 当前会话用的是临时空间（会话的 `temporaryWorkspace`；没有当前会话时为 false）：能力栏标签读作 `临时空间`。 */
   temporaryWorkspace: boolean;
@@ -85,6 +87,7 @@ export function ConversationView({
   search,
   sendDisabled,
   slash,
+  space,
   streamError,
   temporaryWorkspace,
   welcome,
@@ -140,6 +143,7 @@ export function ConversationView({
             onSend={onSend}
             onStop={onStop}
             scrollHandleRef={search.handleRef}
+            space={space}
             view={historyView}
             workspace={workspace ?? null}
           />

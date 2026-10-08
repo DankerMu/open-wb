@@ -9,6 +9,25 @@ type WorkspaceListState = {
   error: string | null;
 };
 
+/** 会话可解析的空间：`id` 是会话的 `workspaceId`；`workspace` 是列表里的那一项，不在已读取的列表里（临时空间）时为 null。 */
+export type SessionSpace = { id: string; workspace: Workspace | null };
+
+/**
+ * 「空间可解析」判定（文件变更卡、产物卡与产物面板共用）：会话的 `workspaceId` 非 null，且它在已读取
+ * 的列表里或会话用的是临时空间；否则为 null（不可解析）。`workspaces` 为 null 表示列表未读到（读取中
+ * 或读取失败）——临时空间那一半只看会话，不依赖它。`id` 决定产物卡与面板行的按钮及预览请求；
+ * `workspace` 非 null 才有逻辑路径前缀与 `查看详情`。
+ */
+export function resolveSessionSpace(
+  workspaceId: string | null | undefined,
+  temporaryWorkspace: boolean,
+  workspaces: readonly Workspace[] | null,
+): SessionSpace | null {
+  if (workspaceId === null || workspaceId === undefined) return null;
+  const workspace = workspaces?.find((item) => item.id === workspaceId) ?? null;
+  return workspace !== null || temporaryWorkspace ? { id: workspaceId, workspace } : null;
+}
+
 /**
  * 会话页的工作空间列表：`workspaces` 是当前 client 最近一次成功读取的结果，首次读取完成前与
  * 最近一次读取失败后为 null。`refresh` 由会话页在每次读取会话列表时并行触发，两个请求互不等待；

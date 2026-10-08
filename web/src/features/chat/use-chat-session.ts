@@ -32,7 +32,7 @@ import type {
 } from "./types.js";
 import { useSessionListEvents } from "./use-session-list-events.js";
 import { useWelcomeOptions } from "./welcome-options.js";
-import { useWorkspaceList } from "./workspace-list.js";
+import { resolveSessionSpace, useWorkspaceList } from "./workspace-list.js";
 
 type SessionEventHandle = { close(): void; resync(): void };
 type ReadyHistory = Extract<ChatHistoryState, { status: "ready" }>;
@@ -645,6 +645,13 @@ export function useChatSession() {
   viewRunningRef.current = historyView?.status === "running";
   const selected = selectedSession(requestedSessionId, listForClient, ownedHistory, historyState);
   const workspace = workspaces?.find((item) => item.id === selected?.workspaceId);
+  // 产物用的「空间可解析」判定；`temporaryWorkspace` 取自 `selected`（列表优先），转正后随列表翻转。
+  const spaceId = selected?.workspaceId;
+  const temporary = selected?.temporaryWorkspace ?? false;
+  const space = useMemo(
+    () => resolveSessionSpace(spaceId, temporary, workspaces),
+    [spaceId, temporary, workspaces],
+  );
   const ownedBusy = ownsMutation(mutationOwner, client, requestedSessionId);
   const ownedStreamError = visibleOwnedAlert(streamError, client, requestedSessionId);
   const { composerDisabled, generating, sendDisabled } = composerLocks({
@@ -710,6 +717,7 @@ export function useChatSession() {
     setDraft,
     showWelcome,
     slashWorkspaceId,
+    space,
     stopTurn,
     streamError: ownedStreamError,
     submitComposer,

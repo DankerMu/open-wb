@@ -8,7 +8,7 @@ import { ArtifactRowAction } from "./artifact-card.js";
 import { FileChangeRow, useChangeSpace } from "./file-changes-card.js";
 import type { ChatState } from "./stream.js";
 import { artifactKind, summarizeChanges } from "./stream-artifacts.js";
-import type { Workspace } from "./workspace-list.js";
+import type { SessionSpace } from "./workspace-list.js";
 
 type SessionChanges = ReturnType<typeof summarizeChanges>;
 
@@ -26,18 +26,18 @@ function sessionChanges(view: ChatState): SessionChanges {
 /**
  * The panel's body: the empty state while there is no change, otherwise one file-change row per
  * change; while the workspace is resolved, a path that derives an artifact carries that artifact's
- * action after 查看详情.
+ * action after 查看详情 (a temporary workspace is resolved, yet its rows have no 查看详情).
  */
 function ArtifactsList({
   changes,
   client,
-  workspace,
+  space: resolved,
 }: {
   changes: SessionChanges;
   client: ApiClient;
-  workspace: Workspace | null;
+  space: SessionSpace | null;
 }) {
-  const space = useChangeSpace(workspace);
+  const space = useChangeSpace(resolved);
   if (changes.length === 0) {
     return (
       <p
@@ -57,12 +57,12 @@ function ArtifactsList({
         const artifact = artifactKind(change.path);
         return (
           <FileChangeRow change={change} key={change.path} space={space}>
-            {space !== null && artifact !== null ? (
+            {resolved !== null && artifact !== null ? (
               <ArtifactRowAction
                 artifact={artifact}
                 client={client}
                 path={change.path}
-                workspaceId={space.id}
+                workspaceId={resolved.id}
               />
             ) : null}
           </FileChangeRow>
@@ -74,8 +74,8 @@ function ArtifactsList({
 
 /**
  * The 产物面板 sheet of the session page. `view` is the current chat view, `null` while there is
- * none (history loading or failed, another session or account being read); `workspace` is the
- * session's workspace resolved in the workspace list; `sessionId` is the selected session.
+ * none (history loading or failed, another session or account being read); `space` is the
+ * session's resolved workspace (`resolveSessionSpace`); `sessionId` is the selected session.
  * `open(trigger)` always opens the panel: with no change of an ended step in the view, or no view
  * yet, it shows the empty state. The body is derived from `view` on every render while the panel
  * is open, never stored, so the empty state turns into the list with the first change. The panel
@@ -92,7 +92,7 @@ function ArtifactsList({
 export function useArtifactsPanel(
   client: ApiClient,
   view: ChatState | null,
-  workspace: Workspace | undefined,
+  space: SessionSpace | null,
   sessionId: string | undefined,
 ): { open(trigger: HTMLElement): void; panel: ReactNode } {
   /** Open for `sessionId`; `shown` once a view of it was shown. `null` while closed. */
@@ -136,7 +136,7 @@ export function useArtifactsPanel(
               <ArtifactsList
                 changes={view === null ? NO_CHANGES : sessionChanges(view)}
                 client={client}
-                workspace={workspace ?? null}
+                space={space}
               />
             ) : null}
           </div>

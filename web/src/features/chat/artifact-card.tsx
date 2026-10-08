@@ -7,7 +7,7 @@ import { Icon, type IconName, useEscapeFallback } from "../../ui/index.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
 import { artifactKind, summarizeChanges } from "./stream-artifacts.js";
 import type { ChatStepView } from "./stream-steps.js";
-import type { Workspace } from "./workspace-list.js";
+import type { SessionSpace } from "./workspace-list.js";
 
 type Artifact = NonNullable<ReturnType<typeof artifactKind>>;
 type FilePreview = Awaited<ReturnType<ApiClient["fetchPreview"]>>;
@@ -392,20 +392,20 @@ function ArtifactCard(props: ArtifactActionProps) {
 
 /**
  * The artifact cards of one assistant message: one per path of the file-change summary (same rows,
- * same order as the 文件变更 card) whose extension is previewable. `workspace` is the session's
- * workspace resolved in the workspace list; while it is `null` nothing is rendered, because the
- * preview request needs the workspace id. Calls no hook: every hook lives in `ArtifactCard`.
+ * same order as the 文件变更 card) whose extension is previewable. `space` is the session's
+ * resolved workspace (`resolveSessionSpace`; a temporary one counts); while it is `null` nothing is
+ * rendered, because the preview request needs its id. Calls no hook: every hook lives in `ArtifactCard`.
  */
 export function ArtifactCards({
   client,
+  space,
   steps,
-  workspace,
 }: {
   client: ApiClient;
+  space: SessionSpace | null;
   steps: readonly ChatStepView[];
-  workspace: Workspace | null;
 }) {
-  if (workspace === null) {
+  if (space === null) {
     return null;
   }
   return summarizeChanges(steps).map((change) => {
@@ -416,7 +416,7 @@ export function ArtifactCards({
         client={client}
         key={change.path}
         path={change.path}
-        workspaceId={workspace.id}
+        workspaceId={space.id}
       />
     );
   });
