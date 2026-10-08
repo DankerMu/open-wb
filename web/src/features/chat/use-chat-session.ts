@@ -28,6 +28,7 @@ import type {
   ChatListState,
   ChatMutationOwner,
   ChatOwnedAlert,
+  ChatUndoNotice,
   PendingCreateSend,
 } from "./types.js";
 import { useSessionListEvents } from "./use-session-list-events.js";
@@ -67,6 +68,7 @@ export function useChatSession() {
   const [forkOwner, setForkOwner] = useState<ChatMutationOwner | null>(null);
   const [undoOwner, setUndoOwner] = useState<ChatMutationOwner | null>(null);
   const [undoConflict, setUndoConflict] = useState<UndoConflict | null>(null);
+  const [undoNotice, setUndoNotice] = useState<ChatUndoNotice | null>(null);
   const {
     error: workspacesError,
     refresh: refreshWorkspaces,
@@ -409,8 +411,10 @@ export function useChatSession() {
     setStreamError,
     setSubmitting,
     setUndoConflict,
+    setUndoNotice,
     setUndoOwner,
     undoConflict,
+    undoNotice,
     undoFlightRef,
   });
   const { answerApproval, dispatchPrompt, forkTurn, regenerateTurn, restoreOwnedDraft, stopTurn } =
@@ -419,6 +423,7 @@ export function useChatSession() {
   useEffect(() => {
     // 待决的撤回冲突不跨选择：换会话或换账号即作废，回来时不再弹出。
     setUndoConflict(null);
+    setUndoNotice(null);
     const pending = pendingCreateSendRef.current;
     const keepOwnedPrompt = ownsCreateSend(pending, client, requestedSessionId);
     const keepOwnedCreate =
@@ -589,6 +594,7 @@ export function useChatSession() {
         return;
       }
       setDraft("");
+      setUndoNotice(null);
       if (!requestedSessionId) {
         createAndSelect(prompt);
         return;
@@ -745,6 +751,7 @@ export function useChatSession() {
     streamError: ownedStreamError,
     submitComposer,
     undoConflict: turn.undoConflictFor(client, requestedSessionId),
+    undoNotice: turn.undoNoticeFor(client, requestedSessionId),
     undoTurn: turn.undoTurn,
     welcome,
     workspace,

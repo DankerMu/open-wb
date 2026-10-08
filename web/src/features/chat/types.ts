@@ -29,6 +29,15 @@ export type ChatMutationOwner = {
   sessionId: string | null;
 };
 
+/** 撤回的 200 里没有还原的文件（`files.skipped` / `files.failed`），属于写入它的账号与会话。 */
+type UndoPathList = { count: number; paths: { path: string }[] };
+export type ChatUndoNotice = {
+  client: ApiClient;
+  sessionId: string;
+  skipped: UndoPathList;
+  failed: UndoPathList;
+};
+
 export type ChatOwnedAlert = {
   client: ApiClient;
   sessionId: string | null;
