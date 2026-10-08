@@ -243,8 +243,20 @@ Minimal mergeable slice: 10.1 一刀（`write` 尚无调用方；类型联合的
 
 ## 11. workspaces — 文件上传端点（Critical Path）
 
-- [ ] 11.1 新文件 `server/src/workspaces/upload.ts`：流式落盘的纯 IO 部分——独占创建临时文件（`wx`、mode 精确 `0660`）、带上限的计数管道、失败清理、候选名生成（`<主名> (n)<扩展名>` 规则）与 `link` 定名循环。不依赖 Fastify。
+- [x] 11.1 新文件 `server/src/workspaces/upload.ts`：流式落盘的纯 IO 部分——独占创建临时文件（`wx`、mode 精确 `0660`）、带上限的计数管道、失败清理、候选名生成（`<主名> (n)<扩展名>` 规则）与 `link` 定名循环。不依赖 Fastify。
   测试新文件 `server/test/workspace-upload-io.test.ts`（真实临时目录）：编号规则表（`a.pdf`、`README`、`.env`、`archive.tar.gz`）、并发同名各得其名、读取中超限即停并清理、流出错清理、mode 不随 umask（`000` 与 `077` 各一例）、目标已是符号链接时不跟随。
+  **实施注记（11.1，fixture 评审补充，#1014）**：
+  - 导出面（按 11.2 路由第 7、8 步的用法）：一个函数，如 `storeUpload({ dir, name, source, maxBytes })`，返回 `{ name, size }`。`dir` 是路由已过沙箱并建好的目录的绝对路径，`name` 是路由已校验的单段名字，`source` 是 `Readable`。路由要分得清三种结果：超限（413）、名额用尽（409）、其余原样上抛（500）。`server/src/core/errors/index.ts` 没有任何 import，直接抛 `HttpError("upload_too_large")` 与 `HttpError("conflict")` 不违反「不依赖 Fastify」；用哪种写进模块头注释。只导出测试要 import 的东西，不单独导出候选名生成器，不加 `signal` 参数。
+  - 临时文件：`join(dir, ".upload-" + randomBytes(16).toString("hex") + ".part")`，与目标同目录；`fsp.open(temp, "wx", 0o660)` 后立刻 `handle.chmod(0o660)`（规格写的是精确 0660，不照搬还原的「先 0600 再放宽」）。上传期间它在目录列举里可见，design Risks 已接受，不改 `tree.ts`。
+  - 计数管道：`pipeline(source, 计数 Transform, handle.createWriteStream())`；判定是 `total > maxBytes`（恰等于上限合法，0 字节合法），越界的那一块不写盘；`pipeline` 销毁 source 即「即停」。
+  - 清理：`finally` 里关句柄；任何抛出都 `rm(temp, { force: true })`（超限、流错、写盘失败、`link` 的非 `EEXIST` 错误）。不做 fsync。
+  - 候选名：`lastIndexOf(".")` 的结果 `<= 0` 视为无扩展名（不用 `path.extname`）；n 从 1 到 999，连原名共 1000 个候选。`a.pdf` → `a (1).pdf`；`README` → `README (1)`；`.env` → `.env (1)`；`archive.tar.gz` → `archive.tar (1).gz`。
+  - `link` 定名循环：`fsp.link(temp, join(dir, 候选))`，`EEXIST` 换下一个，其它错误上抛，成功后 `unlink(temp)`；没有 rename / copy 退路。候选名已是符号链接（含悬空链接）时 `link` 不跟随、报 `EEXIST`，取下一个候选，链接与其目标不变——这就是「不跟随」。
+  - 规格没写到的三个分支，按下述处理并写进 PR 偏离记录：编号后名字超长（`ENAMETOOLONG`）按普通写失败（清临时文件，上抛）；1000 个候选全占用 → 名额用尽的错误，补一例测试（预建 1000 个名字，断言错误、临时文件已删、没有 `(1000)`）；定名成功后删临时文件失败 → 上抛，不回删最终名。
+  - 归属：逐级 `lstat`、沙箱解析、名字规则都在 11.2 的路由里，不在本模块；本模块只留一条前置断言（`name` 含 `/` 或为空就抛），配一例测试。不引入目录句柄（`resolve` 之后父目录被换成符号链接是已登记残余）。
+  - 测试（真实临时目录，先 `realpath`）：umask 的设置与恢复照 `server/test/sandbox-dirs.test.ts` 放在 `try/finally` 里；mode 断言 `lstat.mode & 0o7777 === 0o660`，不断言属组；名字不要只靠大小写区分（APFS）。「即停」用永不结束的 `Readable`：断言 reject、`source.destroyed`、已拉取字节数不超过上限加一两个块。并发：两个同名并行，名字集合恰为原名与 `(1)`，内容各自完整。加一例恰等于上限。
+  - 变异：去掉 `chmod` → umask `077` 例红；`open` 用 0666 且无 `chmod` → umask `000` 例红；`>` 写成 `>=` → 恰等于上限例红；先读完再判超限 → 「即停」红；不删临时文件 → 超限、流出错两例红；用 `rename` 定名 → 并发例与符号链接例红；先 `exists` 再写 → 悬空符号链接例红；取第一个 `.` 当扩展名 → `archive.tar.gz` 红；不处理开头的点 → `.env` 红；n 从 0 或 2 起 → 编号表红；上界偏一 → 「占满 1000 个」例红。
+  - knip：server entry 含 `test/**/*.test.ts`，只被测试引用的导出不算未引用；若仍报，不加临时调用方，停下报告。
 - [ ] 11.2 `server/src/workspaces/rest.ts`（现约 175 行）：注册 `POST /api/workspaces/:id/uploads`——空间归属检查放在 preParsing（先于媒体类型解析），route-local 的 `application/octet-stream` 透传 parser，handler 按 workspaces delta「文件上传」的九步次序；`registerWorkspaces` 的依赖加 `uploadMaxBytes`。
   测试新文件 `server/test/workspace-upload-rest.test.ts`（`createApp` + 真 socket，注入式请求测不出流与中断）：「上传并自动建目录」「同名自动编号不覆盖」「超过大小上限」（声明超限不读体、分块超限、恰等于上限）「越界名字被拒绝并入审计」「名字规则与媒体类型」「他人与不存在的空间」「目录被占与审计失败」「临时空间同样可上传，并随最后一个会话删除」（归属判定走所有者作用域的 `rootOf`，对临时空间不加特例）。
 - [ ] 11.3 同文件：「中断与残留清理」（真实客户端发一半后断开；无 `.part`、无审计、无挂起请求）与「不进内存的流式写入」（32 MiB，堆增量阈值 8 MiB）。另加一条断言：应用的 `requestTimeout` 与 `connectionTimeout` 为 0（design D10），以及「超限恰为 413 而不是 400」（框架 body limit 没有抢先）。
