@@ -1,22 +1,22 @@
 ## ADDED Requirements
 
 ### Requirement: UI 走查临时空间、撤回与归档
-`web/e2e/ui-walk-sessions.spec.ts` 的旅程 SHALL 在既有第 11 步（删除）之后、结束旅程的退出登录之前，于两个 project 中各追加以下步骤（实现放在新的 helper 模块 `web/e2e/ui-walk-session-list.ts`，不给已近 800 行的 `ui-walk-sessions.spec.ts` 与 `ui-walk-layout.ts` 加行；真实服务栈、真实 omp、受控上游，不做浏览器路由拦截、不用假 EventSource、不任意 sleep，沿用同一 error oracle）：
+`web/e2e/ui-walk-sessions.spec.ts` SHALL 在既有旅程的全部步骤之后，于两个 project 中各追加以下步骤——作为同一文件里紧随其后的第二个串行旅程，自带登录、退出登录与 error oracle 实例，每个实例的预期 401 次数与既有旅程相同（单个旅程有 30 秒的单测上限，六步含两个真实回合，放不进既有旅程）（实现放在新的 helper 模块 `web/e2e/ui-walk-session-list.ts`，不给已近 800 行的 `ui-walk-sessions.spec.ts` 与 `ui-walk-layout.ts` 加行；真实服务栈、真实 omp、受控上游，不做浏览器路由拦截、不用假 EventSource、不任意 sleep，沿用同一 error oracle）：
 1. **临时空间**：在欢迎态确认能力栏按钮为 `任务启动于 未选择`，发送 `WORKBUDDY_WRITE 临时空间走查 <uuid>`。被观察（不被拦截）的 `POST /api/sessions` 请求体解析后不含 `workspaceId` 键，201 响应的 `temporaryWorkspace` 为 true。回合到达固定回复与完成态后：能力栏同一位置为只读文本 `任务启动于 临时空间`；侧栏里该会话恰一次出现在分组 `临时空间` 内；助手消息里名为 `文件变更（1 个）` 的卡片有一行 `写入` 与 `workbuddy-report.html`（只有空间内相对路径）且没有 `查看详情` 按钮，其后有一张 `HTML` 产物卡，点击 `打开网页预览 workbuddy-report.html` 打开含 `sandbox="allow-scripts"` iframe 的对话框（文档里有标题 `WorkBuddy`），关闭后继续（turn-artifacts「产物卡」：临时空间会话照常渲染产物卡）；经页面的请求上下文，`GET /api/workspaces` 不含该会话的 `workspaceId`，`GET /api/workspaces/<该 id>/tree` 的 `entries` 含 `workbuddy-report.html`。
-2. **列表事件**：整个旅程中恰观察到一条指向 `/api/sessions/events` 的请求处于打开状态（响应 `content-type` 以 `text/event-stream` 开头）；第 1 步发送后，侧栏该会话的状态元素先读作 `<title> 运行中`、回合结束后读作 `<title> 已完成`，其间走查没有触发任何页面导航或手动刷新。
-3. **撤回**：点击该用户消息的 `撤回`（先悬停该消息，如 #908 已合入）。不出现任何确认框；被观察的 `POST …/undo` 请求体为 `{"messageId":<id>,"files":"restore"}` 且响应 200；线程回到零消息空态；输入框草稿恰为第 1 步发送的全文；`GET /api/workspaces/<该 id>/tree` 的 `entries` 不再含 `workbuddy-report.html`（文件随撤回还原）；页面没有轻提示。
+2. **列表事件**：自本组步骤开头的一次导航起至第 6 步结束，恰观察到一条指向 `/api/sessions/events` 的请求处于打开状态（响应 `content-type` 以 `text/event-stream` 开头）；第 1 步发送后，侧栏该会话的状态元素先读作 `<title> 运行中`、回合结束后读作 `<title> 已完成`，其间走查没有触发任何页面导航或手动刷新。
+3. **撤回**：点击该用户消息的 `撤回`。不出现任何确认框；被观察的 `POST …/undo` 请求体为 `{"messageId":<id>,"files":"restore"}` 且响应 200；线程回到零消息空态；输入框草稿恰为第 1 步发送的全文；`GET /api/workspaces/<该 id>/tree` 的 `entries` 不再含 `workbuddy-report.html`（文件随撤回还原）；页面没有轻提示。
 4. **撤回后继续**：直接按 Enter 发送草稿，回合再次到达固定回复与完成态，tree 重新含 `workbuddy-report.html`；随后经请求上下文对这条新的用户消息 `POST …/fork {messageId}` → 201（分支对位要求 omp 的历史里只有这一条用户条目，由此证明被撤回的那一轮不在模型可见的历史里），并 `DELETE` 掉 fork 出的会话（204）。
 5. **归档**：该条目的菜单 → `归档`，条目从默认视图消失，主区显示 `该会话已归档，恢复后才能继续对话` 且没有输入框；点击侧栏底部 `已归档`，归档视图里恰有该条目；其菜单 → `恢复` 后归档视图显示 `没有匹配的任务`，`返回会话列表` 后条目回到 `临时空间` 分组，输入框重新出现。
 6. **删除临时空间会话**：菜单 → `删除`，确认框说明含 `临时空间里的文件会一并删除。`；确认后条目消失、页面回到欢迎态；`GET /api/workspaces/<该 id>/tree` → 404。
 
-`mobile-dark` 下侧栏操作经导航覆盖层进行。这些步骤 SHALL 不留下它们创建的会话与临时空间。`web/playwright.config.ts` 的 `testMatch`、projects 与其它取值不变；全部旅程仍 SHALL 在既有 `globalTimeout` 内完成。转正（`另存为工作空间`）不进走查与冒烟（没有删除工作空间的端点，重复运行会不断留下空间），由服务端测试与整页测试覆盖。
+`mobile-dark` 下侧栏操作经导航覆盖层进行。这些步骤 SHALL 不留下它们创建的会话与临时空间。`web/playwright.config.ts` 的 `testMatch`、projects 与其它取值不变；全部旅程仍 SHALL 在既有 `globalTimeout` 内完成，每个旅程在既有的单测 `timeout` 内完成。转正（`另存为工作空间`）不进走查与冒烟（没有删除工作空间的端点，重复运行会不断留下空间），由服务端测试与整页测试覆盖。
 
 #### Scenario: 真实栈上的临时空间、撤回与归档
 - **WHEN** `make ui-walk` 在两个 project 上运行追加后的旅程
 - **THEN** 六步的断言全部通过：未选空间的首次发送得到临时空间会话，其写出的 HTML 文件有产物卡并可预览、文件变更卡没有 `查看详情`；撤回把 `workbuddy-report.html` 从临时空间里拿掉并把原文放回输入框；撤回后的再次发送与随后的 fork 都成功；归档后只读、恢复后可用；删除后临时空间的 tree 端点为 404；error oracle 无意外的 console / page 错误；整个 `make ui-walk` 在 `globalTimeout` 内结束
 
 #### Scenario: 候选实现的反例
-- **WHEN** 候选实现让撤回不还原文件（tree 仍含 `workbuddy-report.html`）、撤回前弹确认框、撤回后不回填草稿、把临时空间列进 `GET /api/workspaces`、在临时空间会话里不渲染产物卡、或删除会话后保留临时空间目录
+- **WHEN** 候选实现让撤回不还原文件（tree 仍含 `workbuddy-report.html`）、撤回前弹确认框、撤回后不回填草稿、把临时空间列进 `GET /api/workspaces`、在临时空间会话里不渲染产物卡、或删除最后一个会话后保留临时空间（空间行未删，tree 仍为 200；行已删而只留下目录时 tree 同样是 404，走查分辨不出，由服务端测试覆盖）
 - **THEN** 对应步骤的断言失败
 
 ### Requirement: 冒烟与走查不留会话与临时空间
