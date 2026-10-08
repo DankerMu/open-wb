@@ -232,7 +232,7 @@ Minimal mergeable slice: 8.1（无去重、无上限的正确快照；模块由�
   结构校验细化：清单 JSON 可解析、`entries` / `skipped` 是数组、每个条目的类型与字段齐全、`path` 是相对 POSIX 路径（无空分量、`.`、`..`、不以 `/` 开头）；任何一条不合法都在动工作空间之前抛错。
   处理次序：先删多余条目（遍历只用 `lstat`，不进入符号链接；目录递归删除计一项）→ 自顶向下确保目录（同名的非目录先删——是符号链接时只删链接本身；新建目录 `mkdir` 后经 `O_DIRECTORY | O_NOFOLLOW` 句柄 `fchmod 0o2770`）→ 文件 → 符号链接。
   读工作空间文件一律经 `O_NOFOLLOW | O_NONBLOCK` 句柄并 `fstat` 确认是普通文件（与 8.1 同一手法；design D10）。写回：同目录、独占新建、名字带随机后缀的临时文件，内容从 `tree/<path>` 复制，**经临时文件的句柄** `fchmod` 与 `futimes`（清单 `mtime`）之后才 `rename` 到位；`rename` 之后不再按最终路径做任何操作。第二步的内容比较至多读清单 `size` 个字节。清单里位于某个 `skipped` 路径之下的条目按 `skipped` 处理（不碰）。崩溃留下的临时文件在下次还原时作为多余条目被删。
-  单条目的非权限类错误（`ENOENT`、`ENOTEMPTY`、`EIO` 等）向外抛（部分还原、可重试，由 12.1 映射为服务错误）；`EACCES` / `EPERM` 记 `failed` 继续（9.2）。
+  单条目的非权限类错误（`ENOENT`、`ENOTEMPTY`、`EIO` 等；删除动作的 `ENOENT` / `ENOTEMPTY` 除外，见 10.4e）向外抛（部分还原、可重试，由 12.1 映射为服务错误）；`EACCES` / `EPERM` 记 `failed` 继续（9.2）。
   模块落点：`restore` 与父目录校验函数 `parentsAreReal` 在新模块 `server/src/workspaces/snapshots-restore.ts`（`snapshots.ts` 留给 `take` 与 9.3 的删除函数）；入参是 `{ workspaceRoot, snapshotDir }`，快照目录由 12.1 的调用方从受信任的行拼出。`removed` 只计清单里没有的多余条目（每个最顶层删除计一项）；清单路径上类型不对的占位者被替换时不计入 `removed`。写回文件的 `atime` 取清单的 `mtime`。某级父目录缺失（例如它因 `EACCES` 没建成）时该条目记 `failed`、不抛。测试分两个文件：`workspace-snapshots-restore.test.ts`（规格场景）与 `workspace-snapshots-restore-safety.test.ts`（白盒、替换与损坏快照）。
   非目标：非 UTF-8 文件名与遍历中途消失的条目（#1148 待定规格）——按上一条规则处理，不为它加用例。测试里改 umask 的用例在 `afterEach` 还原 umask。
 - [x] 9.2 路径安全：每次写 / 删之前逐级 `lstat` 父目录，遇符号链接或非目录记 `failed` 并跳过；单条目 `EACCES` / `EPERM` 记 `failed` 继续。父目录校验是一个导出的函数（测试 seam）：「父目录被换成符号链接」第二段直接对它给出一条某级父目录为符号链接的路径，9.4 的「去掉父目录校验」变异也靠它判红。测试：「父目录被换成符号链接」两段。
@@ -291,6 +291,25 @@ Minimal mergeable slice: 9.1 + 9.2 一起（没有父目录校验的还原不可
   - 真实挂载上的验证（编排者在 Linux 测试机上做，不进 CI）：对一个 sshfs 挂载与一个 rclone 挂载各跑一次 `take` + `restore`，结果写进 PR。
   - `uid-isolation` 的快照检查不得因此判红；不改 CI 脚本。
   Risk packs（10.4d）: File IO / path safety / delete（还原不得删改挂载内的内容）、Legacy compatibility（旧清单没有 `mount` 项；`reason` 枚举增值）。
+- [x] 10.4e 还原的递归删除接住并发改动（#1214；Critical Path）：
+  - `snapshots-restore.ts` 的 `removeTree`：列举（`readdir`）、子项的 `lstat` / `unlink`、`rmdir` 得 `ENOENT` → 当作已删，继续（起点自身的列举得 `ENOENT` → 返回「已删净」）；`rmdir` 得 `ENOTEMPTY` / `EEXIST` → 该级路径记入 `run.failed`、返回「未删净」，不重试。`remove` 里非目录条目的 `unlink` 得 `ENOENT` → 当作已删（返回 true）。`removeExtras` 自己的 `lstat` 不动（照旧抛）。其它错误照旧抛出。`dev` 判定、按字节取名、不跟随链接都不变。
+  - 占位目录未删净时 `displace` 照旧抛（现在的 `MountInPlace`——它不再只代表挂载点，改一个贴切的名字并同步注释）；同一条目在 `failed` 里只出现一次。
+  - 改掉 #1212 之后字面不成立的三处注释：文件头「each single call that creates, deletes or renames」经 `guard`（`removeTree` 之内只有起点一次）；文件头说逐级删除在 `remove`（实际在 `removeTree`）；`restore` 说明里的「not in `failed`」只对找多余条目阶段发现的挂载点成立。文件头的 Errors 段补上本任务的两种情形。
+  - 测试（注入式，全平台；在 `server/test/workspace-snapshots-mounts.test.ts` 之外新开一个文件，沿用 `workspace-snapshots-helpers.ts` 的钩子，缺的钩子加在 helpers 里）：workspace-snapshots「删除期间的并发改动不中止还原」的八个 WHEN。注入点要落在列举与对应调用之间（包住模块用的 `fsp.readdir` / `fsp.lstat` / `fsp.rmdir`，在真实文件系统上做真实的删除或新增），不要伪造错误码。
+  - 补一例 `skipped` 去重（#1212 评审遗留，全平台）：`take` 之后手改 `manifest.json`，往 `skipped` 加 `{path:"m",reason:"name_encoding"}`；工作空间里建目录 `m` 并 `mountAt`；断言返回的 `skipped` 里 `m` 恰一项且 `reason` 为 `name_encoding`，`m` 没被列举。变异：去掉返回前的去重过滤 → 判红。
+  - 不得判红：`workspace-snapshots-mounts` / `-restore` / `-restore-safety` / `-names` 的既有用例；撤回的文件还原用例（`session-undo-files`）。
+  - 变异证据（逐站点）：子项 `lstat` 的 `ENOENT` 仍抛 → 第一个 WHEN 判红；子项 `unlink` 的仍抛 → 第二个；`readdir` 的仍抛 → 第三、第五个；`rmdir` 的 `ENOENT` 仍抛 → 第四个；`remove` 的 `unlink` 仍抛 → 第六个；`ENOTEMPTY` 仍抛 → 第七、第八个；`ENOTEMPTY` 当作已删净（返回 true）→ 第七个 `removed` 判红、第八个走到写回而判红；`ENOTEMPTY` 不记 `failed` → 第七个判红；`ENOTEMPTY` 后回头重删 → `late.txt` 判红。
+  - 不改 `snapshots.ts`、`turn-snapshot.ts`、CI 脚本。
+  实施注记（10.4e，fixture 评审补充，#1214）：
+  - `removeTree` 传给 `readdir` / `lstat` / `unlink` / `rmdir` 的路径是 Buffer。helpers 里 `onListing` / `afterListing` / `swapAfterLstat` / `beforeLstat` 用 `path === <string>` 比较，对 Buffer 永不命中（`mountAt`、`watchListings` 用 `String(path)`）。钩子不触发时用例会空过而全绿，所以钩子改成 `String(path)` 比较，且每例断言注入恰执行一次。只有 `removeExtras` 自己的 `lstat` / `readdir` 传 string（第五、第六个 WHEN 可用现有 `swapAfterLstat`）。
+  - 需要新钩子 `beforeRmdir(target, act)`，以及对 Buffer 路径生效的 lstat 之后 / 之前钩子。包的是 `fs.promises.*`，与模块的 `fsp` 同一对象。
+  - `ENOTEMPTY` 落在占位目录的更深一级时（清单 `x` 是文件，现为 `x/d/`，新增 `x/d/late`），`failed` 是 `x/d` 与 `x` 两项，是预期，不去重。第八个 WHEN 的「恰一次」只因那一级就是 `x` 自己（`run.failed` 是 Set）。
+  - `removeTree` 的 `path` 在非 UTF-8 名字之下是有损解码；`ENOTEMPTY` 落在这种级别时 `failed` 里是有损路径，注释写明。
+  - 不要对「lstat 之后被换成目录」写断言（`unlink` 在 Linux 得 `EISDIR`、macOS 得 `EPERM`，既有的平台差异）。
+  - 注释还要同步：`RestoreResult.removed` / `.failed` 的字段注释、`remove` 与 `removeTree` 的 doc（「`false` when one kept it」）、`attempt` 的 doc。`turn-snapshot.ts` 的注释因禁改保持。
+  - `leftovers()` 在 `workspace-snapshots-restore-safety.test.ts` 里；新文件要用就抽到 helpers，不要复制（jscpd）。
+  - 不在 undo 层为残留加重试。
+  Risk packs（10.4e）: File IO / path safety / delete（不得删掉列举之后才写下的内容）、Concurrency（列举与删除之间的改动）。
 - [x] 10.5 快照步骤与路由接线：新模块 `server/src/sessions/turn-snapshot.ts`（自身不抛——未绑定不写行；命令回合写 `command`；其余调用 `take` 并写结果；失败只报告）；`createApp` 用 7.1 / 7.2 的布局与配置构造唯一的快照服务并注入；`rest.ts` 把步骤作为 `beforeDispatch` 传给 `supervisor.prompt`，受理与该调用之间不加 await；受理被补偿后删快照目录。测试（新文件 `server/test/prompt-snapshot.test.ts`，REST seam + fake omp）：workspace-snapshots「受理时做快照」六个场景（含「快照期间停止与删除」）、chat-sessions「Snapshot precedes dispatch and never blocks it」、http-service-skeleton「Shared agent module assembly」里快照服务的装配句。此时登记行已写入但还不经任何视图暴露。
   去重的接线（#939 留下）：调用 `take` 前用 10.2 的「取该工作空间最近一条 `ok`」查出上一份的 `message_id`，作为 `previousMessageId` 传入；查不到时**省略**该字段（传 `null` 会在落盘前抛 `TypeError`，被本模块的「自身不抛」吞成每个空间首回合都 `failed`）。REST 层加一条断言：同一空间连续两个回合、其间未改的文件在两份快照里是同一个 inode（`nlink` ≥ 2）——否则漏接时去重在生产上不生效而测试全绿。
   **实施注记（10.5，fixture 评审补充）**：

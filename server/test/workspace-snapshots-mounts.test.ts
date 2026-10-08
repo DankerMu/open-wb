@@ -20,6 +20,7 @@ import {
   contentsOf,
   describeTree,
   dirEntry,
+  editManifest,
   type Fixture,
   fileEntry,
   fixture,
@@ -282,6 +283,30 @@ describe("挂载点不被还原也不被删除", () => {
       l: "dir",
       "l/r.txt": "in l\n",
     });
+    expect(listed).toEqual([f.workspace]);
+  });
+
+  it("a mount point the manifest's skipped has by path under another reason is reported once", async () => {
+    const f = fixture();
+    put(f.workspace, "a.txt", "a\n");
+    await snapshot(f);
+    editManifest(f, (manifest) => {
+      manifest.skipped.push({ path: "m", reason: "name_encoding" });
+    });
+    put(f.workspace, "m/r.txt", "r\n");
+    mountAt(at(f, "m"));
+    const listed = watchListings();
+
+    const result = await restoreRun(f);
+
+    // A `name_encoding` item does not protect by path, so `m` is looked at and found mounted.
+    expect(result).toEqual({
+      restored: 0,
+      removed: 0,
+      skipped: [{ path: "m", reason: "name_encoding" }],
+      failed: [],
+    });
+    expect(contentsOf(f.workspace)).toEqual({ "a.txt": "a\n", m: "dir", "m/r.txt": "r\n" });
     expect(listed).toEqual([f.workspace]);
   });
 
