@@ -115,12 +115,14 @@ describe("遍历期间有变动的快照不可还原 — a listed entry is gone"
     expect(readFileSync(d, "utf8")).toBe("a file now\n");
   });
 
-  it("a file removed after it was opened: no read fails, the second look at the root tells", async () => {
+  it("a file removed after it was copied: no read fails, the second look at the root tells", async () => {
+    // Removed while its own copy runs, the file's second fstat tells first (the unlink moves its
+    // ctime): that case is in workspace-snapshots-torn.test.ts.
     const f = fixture();
     put(f.workspace, "a.txt", "alpha\n");
     put(f.workspace, "b.txt", "bravo\n");
     onCopyCreate((path) => {
-      if (path === join(f.snapshot, "tree", "a.txt")) {
+      if (path === join(f.snapshot, "tree", "b.txt")) {
         rmSync(join(f.workspace, "a.txt"));
       }
     });

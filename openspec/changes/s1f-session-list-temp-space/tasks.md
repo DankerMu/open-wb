@@ -270,7 +270,7 @@ Minimal mergeable slice: 9.1 + 9.2 一起（没有父目录校验的还原不可
   - 文档：`docs/` 里若有对 `incomplete` 或「消失条目略过」的描述一并改；ADR-0010 的登记归任务 20.3（已扩写）。
   - 不在本刀：复制期间文件被原地改写得到撕裂副本（既有残余，design D9 已登记）。
   Risk packs（10.4b）: File IO / path safety / delete（还原不得销毁快照里没有副本的内容）、Concurrency（遍历与并发写入）、Legacy compatibility（旧清单的 `incomplete` 键）。
-- [ ] 10.4c 复制期间被改写的文件使快照不可还原（#1206；Critical Path；**先于 12.1 合入**）：`snapshots.ts` 的文件复制路径在复制完成后经同一句柄再 `fstat` 一次，`size`、`mtimeMs`、`ctimeMs` 任一与复制之前不同，或复制的字节数不等于先前的 `size` → 抛出、走既有的 `failed` 出口。硬链接复用路径不动。清单内容在无改动时与现状逐字节相同。
+- [x] 10.4c 复制期间被改写的文件使快照不可还原（#1206；Critical Path；**先于 12.1 合入**）：`snapshots.ts` 的文件复制路径在复制完成后经同一句柄再 `fstat` 一次，`size`、`mtimeMs`、`ctimeMs` 任一与复制之前不同，或复制的字节数不等于先前的 `size` → 抛出、走既有的 `failed` 出口。硬链接复用路径不动。清单内容在无改动时与现状逐字节相同。
   - 测试（注入式，全平台；沿用既有的读取钩子，在「已取得元数据、复制未完成」的时刻改写）：workspace-snapshots「复制期间被改写的文件使快照不可还原」的每个 WHEN（追加、截断、等长覆盖写、复制完成之后才改写仍 `ok`、硬链接复用不读内容）。等长覆盖写一例不得依赖时钟粒度（先把 `mtime` 设为过去、注入前等时钟前进）。断言失败原因（错误信息），不只断言 `failed`。
   - 既有用例里「复制期间文件被追加 / 改权限而快照仍 `ok`」的（如 `workspace-snapshots-take.test.ts`、`workspace-snapshots-limits.test.ts` 中经句柄读取的那几例）会翻转：逐条核对、按新规则改写并记偏离；只改权限（`chmod`）会动 `ctime`，同样是 `failed`。
   - 变异证据：去掉复核 → 三例判红；只比 `size` → 等长覆盖写判红；只比时间、不比字节数 → 记录结果；复核放到 `close` 之后按路径取 → 记录结果。
