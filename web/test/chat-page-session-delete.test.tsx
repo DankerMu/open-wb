@@ -104,7 +104,13 @@ describe("条目菜单第三项 删除 (R1)", () => {
 
     for (const { second, session } of kinds) {
       const { items, menu } = await openEntryMenu(nav, session.title ?? UNTITLED);
-      expect(items.map((item) => item.textContent)).toEqual(["重命名", second, "归档", "删除"]);
+      expect(items.map((item) => item.textContent)).toEqual([
+        "重命名",
+        second,
+        "归档",
+        "删除",
+        "导出记录",
+      ]);
       const remove = within(menu).getByRole("menuitem", { name: "删除" });
       expect(remove).toBe(items[3]);
       expect(remove.getAttribute("data-variant")).toBe("destructive");
@@ -113,7 +119,6 @@ describe("条目菜单第三项 删除 (R1)", () => {
       expect(remove.hasAttribute("data-disabled")).toBe(false);
       // 只有 `删除` 是危险样式项。
       expect(menu.querySelectorAll('[data-variant="destructive"]')).toHaveLength(1);
-      expect(within(menu).queryByRole("menuitem", { name: "导出记录" })).toBeNull();
       await closeMenu(menu);
     }
     // 条目行仍恰有两个同级按钮（选择 + 更多）。

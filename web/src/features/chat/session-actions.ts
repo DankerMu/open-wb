@@ -10,6 +10,8 @@ import { useLocation, useNavigate } from "react-router";
 import type { ApiClient } from "../../lib/api.js";
 import type { ChatSession } from "../../lib/session-contract.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
+import { downloadMarkdown, markdownFilename, sessionMarkdown } from "./export-markdown.js";
+import { ownsHistory } from "./ownership.js";
 import { sessionNavigation, sessionTitle } from "./session-path.js";
 import type { ChatHistoryState, ChatListState } from "./types.js";
 
@@ -69,11 +71,13 @@ type DeletingState = { client: ApiClient; ids: readonly string[] };
 
 /**
  * 页面交给删除用的句柄：中止历史读取、关闭事件流、重读列表、当前选中的会话 id（响应到达时读取），
- * 以及会话列表状态（打开删除确认框时判定临时空间是否共用）。
+ * 以及会话列表状态（打开删除确认框时判定临时空间是否共用）。`history` 是页面持有的历史（导出当前
+ * 会话时读它的视图）。
  */
 type PageHandles = {
   abortHistory(): void;
   closeSource(): void;
+  history: ChatHistoryState;
   list: ChatListState;
   refreshList(client: ApiClient): void;
   requestedSessionRef: RefObject<string | null>;
@@ -125,7 +129,7 @@ function withMeta(session: ChatSession, view: ChatSession, key: MetaKey): ChatSe
 }
 
 /**
- * 会话条目操作（重命名、置顶/取消置顶、归档/恢复、删除、另存为工作空间）：行菜单与顶栏 `重命名` 共用。
+ * 会话条目操作（重命名、置顶/取消置顶、归档/恢复、删除、另存为工作空间、导出记录）：行菜单与顶栏 `重命名` 共用。
  * 重命名、另存为工作空间的 Dialog 与删除确认框的状态在这里而不在侧栏槽位节点里（槽位节点随折叠与覆盖层关闭卸载）。
  *
  * 列表条目与快照会话的 `title`、`pinnedAt`、`archivedAt` 只来自 PATCH 200 的响应，且只合并该请求修改的那个
@@ -140,7 +144,7 @@ function withMeta(session: ChatSession, view: ChatSession, key: MetaKey): ChatSe
  * 完成。
  *
  * 不弹轻提示：成功以列表自身的变化为反馈；对话框开着时的失败在对话框内显示；没有对话框的动作
- * （置顶、归档、恢复）与对话框关闭后才到达的失败进 `alert`（列表区顶部提示），下一次列表动作发起时清除。
+ * （置顶、归档、恢复、导出）与对话框关闭后才到达的失败进 `alert`（列表区顶部提示），下一次列表动作发起时清除。
  */
 export function useSessionActions(
   client: ApiClient,
@@ -367,6 +371,38 @@ export function useSessionActions(
     send(session.id, "archivedAt", { archived: false }, () => {}, report);
   }
 
+  /**
+   * 导出记录：前端生成 Markdown 并触发下载，不改任何状态。会话是当前选中的且其历史对本 client 已就绪
+   * 时用页面视图（含快照之后的流式更新），不发请求；否则恰读一次快照。读取失败不下载，走列表区顶部提示。
+   */
+  function exportSession(session: ChatSession) {
+    setAlert(null);
+    const title = sessionTitle(session);
+    const save = (messages: Parameters<typeof sessionMarkdown>[0]["messages"]) =>
+      downloadMarkdown(markdownFilename(title), sessionMarkdown({ title, messages }));
+    const { history } = page;
+    if (
+      history.status === "ready" &&
+      page.requestedSessionRef.current === session.id &&
+      ownsHistory(history, client, session.id)
+    ) {
+      save(history.view.messages);
+      return;
+    }
+    const request = track();
+    void client
+      .getMessages(session.id, { signal: request.signal })
+      .finally(request.release)
+      .then(
+        (snapshot) => {
+          if (request.current()) save(snapshot.messages);
+        },
+        (error: unknown) => {
+          if (request.current()) report(error);
+        },
+      );
+  }
+
   function openDelete(session: ChatSession, trigger: HTMLElement | null) {
     setAlert(null);
     deleteReturnFocus.current = trigger;
@@ -437,6 +473,7 @@ export function useSessionActions(
     togglePin,
     archive,
     restore,
+    exportSession,
     openDelete,
     /** 列表区顶部提示的文案（null 为没有）与 `关闭提示`；属于上一个 client 的不显示。 */
     alert: alert && alert.client === client ? alert.message : null,

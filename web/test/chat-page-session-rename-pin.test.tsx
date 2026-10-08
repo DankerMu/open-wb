@@ -131,12 +131,19 @@ describe("条目「更多」菜单 (M1, M16)", () => {
       ["新会话", PIN],
     ] as const) {
       const { items, menu } = await openEntryMenu(nav, title);
-      expect(items.map((item) => item.textContent)).toEqual(["重命名", second, "归档", "删除"]);
+      expect(items.map((item) => item.textContent)).toEqual([
+        "重命名",
+        second,
+        "归档",
+        "删除",
+        "导出记录",
+      ]);
       expect(items.map((item) => item.querySelector("svg")?.getAttribute("class"))).toEqual([
         expect.stringContaining("lucide-pencil"),
         expect.stringContaining("lucide-star"),
         expect.stringContaining("lucide-archive"),
         expect.stringContaining("lucide-trash"),
+        expect.stringContaining("lucide-download"),
       ]);
       // 只有 `归档` 会被禁用，且只在 running 的会话上；其余项对任何状态可用。
       const disabled = title === "跑着的" ? ["归档"] : [];
@@ -146,7 +153,6 @@ describe("条目「更多」菜单 (M1, M16)", () => {
       expect(
         items.filter((item) => item.hasAttribute("data-disabled")).map((item) => item.textContent),
       ).toEqual(disabled);
-      expect(within(menu).queryByRole("menuitem", { name: "导出记录" })).toBeNull();
       fireEvent.keyDown(menu, { key: "Escape" });
       await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
     }

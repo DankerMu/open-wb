@@ -240,6 +240,7 @@ describe("会话条目菜单与重命名（session-sidebar）", () => {
       UNPIN,
       "归档",
       "删除",
+      "导出记录",
     ]);
     await closeMenu(reopened.menu);
 

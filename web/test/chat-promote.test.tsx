@@ -1,5 +1,5 @@
 // 另存为工作空间整页测试（任务 17.2）：session-sidebar「另存为工作空间对话框」三个场景与菜单项的
-// 出现条件。完整的「菜单项」场景（含 `导出记录`）由任务 17.3 断言，这里只断言本刀的那一项及其位置。
+// 出现条件。完整的「菜单项」场景由任务 17.3 的 `chat-export.test.tsx` 断言，这里断言本刀的那一项及其位置。
 import "./radix-platform.js";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
@@ -31,6 +31,7 @@ import { calls, deferredResponse, type FetchMock, jsonResponse } from "./support
 import { yieldMacrotask } from "./ui-support.js";
 
 const PROMOTE = "另存为工作空间";
+const EXPORT = "导出记录";
 const DESCRIPTION =
   "临时空间会原地变成正式工作空间，文件不移动；之后它出现在文件页，删除会话不再删除这些文件。";
 const TEMPORARY_GROUP = "临时空间";
@@ -192,7 +193,7 @@ describe("另存为工作空间对话框（session-sidebar）", () => {
     expect(calls(fetchMock, "/api/workspaces").length).toBeGreaterThan(workspaceReads);
     await waitFor(() => expect(capabilityLabel()).toBe(`任务启动于 ${NAME}`));
     for (const title of [DRAFT, SIBLING]) {
-      expect(await menuTexts(nav, title)).toEqual(["重命名", PIN, "归档", "删除"]);
+      expect(await menuTexts(nav, title)).toEqual(["重命名", PIN, "归档", "删除", EXPORT]);
     }
     expect(listAlert(nav)).toBeNull();
     expectNoListToast();
@@ -252,11 +253,18 @@ describe("另存为工作空间对话框（session-sidebar）", () => {
     );
     const nav = await findList(DRAFT);
 
-    expect(await menuTexts(nav, BOUND)).toEqual(["重命名", PIN, "归档", "删除"]);
-    expect(await menuTexts(nav, LEGACY)).toEqual(["重命名", PIN, "归档", "删除"]);
+    expect(await menuTexts(nav, BOUND)).toEqual(["重命名", PIN, "归档", "删除", EXPORT]);
+    expect(await menuTexts(nav, LEGACY)).toEqual(["重命名", PIN, "归档", "删除", EXPORT]);
 
     const { items, menu } = await openEntryMenu(nav, DRAFT);
-    expect(items.map((item) => item.textContent)).toEqual(["重命名", PIN, "归档", "删除", PROMOTE]);
+    expect(items.map((item) => item.textContent)).toEqual([
+      "重命名",
+      PIN,
+      "归档",
+      "删除",
+      PROMOTE,
+      EXPORT,
+    ]);
     // 会话运行中也可使用；危险样式仍只有 `删除`。
     const item = within(menu).getByRole("menuitem", { name: PROMOTE });
     expect(item.hasAttribute("aria-disabled")).toBe(false);
