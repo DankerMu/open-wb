@@ -14,13 +14,11 @@ import {
   cleanupSessionMeta,
   envelope,
   findList,
-  messagesPath,
   mountSessions,
   type SessionView,
   view,
 } from "./chat-page-session-meta-support.js";
 import { cataloguePaths, commandsOf, type } from "./chat-page-slash-support.js";
-import { renderChatPage } from "./chat-page-support.js";
 import {
   CREATED_IDS,
   createOf,
@@ -28,14 +26,15 @@ import {
   footerButton,
   HERO,
   leaveForWelcome,
+  mountWelcome,
   openExistingSession,
   openPicker,
   options,
   PROJECT_A,
   PROJECT_A_OPTION,
   queryFooterButton,
-  SUPPORT,
   SUPPORT_OPTION,
+  TEMP_WORKSPACE_IDS,
   workspaceList,
 } from "./chat-page-welcome-scene-support.js";
 import { currentLocation, type FetchMock, jsonResponse, paths } from "./support.js";
@@ -161,24 +160,7 @@ describe("能力栏：已选会话工作空间只读", () => {
 describe("能力栏：临时空间会话", () => {
   it("未选择空间发送：创建请求不带 workspaceId，返回临时空间会话后标签是 任务启动于 临时空间，条目在 临时空间 分组", async () => {
     const created = `${CREATED_IDS[0]}`;
-    const session = view(created, null, {
-      status: "idle",
-      temporaryWorkspace: true,
-      workspaceId: TEMP,
-    });
-    let listed = false;
-    const { fetchMock } = renderChatPage("/", {
-      "/api/sessions": (_path, options) => {
-        if (options?.method !== "POST") return jsonResponse({ sessions: listed ? [session] : [] });
-        listed = true;
-        return jsonResponse(session, 201);
-      },
-      "/api/workspaces": () => workspaceList(PROJECT_A, SUPPORT),
-      [messagesPath(created)]: () =>
-        jsonResponse({ session, messages: [], streamCursor: { epoch: 1, seq: 0 }, todo: null }),
-      [`/api/sessions/${created}/prompt`]: () => new Promise<Response>(() => {}),
-    });
-    await screen.findByRole("heading", { level: 1, name: HERO });
+    const { fetchMock } = await mountWelcome();
     expect(footerButton("任务启动于 未选择").disabled).toBe(false);
     const dialog = await openPicker();
     await waitFor(() =>
@@ -197,6 +179,10 @@ describe("能力栏：临时空间会话", () => {
     await waitFor(() => expect(currentLocation()).toBe(`/?session=${created}`));
     expect(createRequests(fetchMock)).toEqual([createOf('{"scene":"office"}')]);
     await expectReadOnly("任务启动于 临时空间");
+    // 夹具为这次创建铸的临时空间 id（不在上面弹层列出的空间里）：页面以它取项目配置。
+    await waitFor(() =>
+      expect(paths(fetchMock)).toContain(`${CONFIG}?workspaceId=${TEMP_WORKSPACE_IDS[0]}`),
+    );
     const group = await within(await findList("新会话")).findByRole("group", { name: "临时空间" });
     expect(within(group).getByRole("button", { name: "新会话" })).toBeTruthy();
   });
