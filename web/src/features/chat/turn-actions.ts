@@ -7,6 +7,7 @@ import type {
   ChatListState,
   ChatMutationOwner,
   ChatOwnedAlert,
+  ChatUndoNotice,
   PendingCreateSend,
 } from "./types.js";
 
@@ -69,9 +70,12 @@ type TurnActionDeps = {
   setStreamError: Dispatch<SetStateAction<ChatOwnedAlert | null>>;
   setSubmitting: Dispatch<SetStateAction<boolean>>;
   setUndoConflict: Dispatch<SetStateAction<UndoConflict | null>>;
+  setUndoNotice: Dispatch<SetStateAction<ChatUndoNotice | null>>;
   setUndoOwner: Dispatch<SetStateAction<ChatMutationOwner | null>>;
   /** 待决的撤回冲突（页面状态）。 */
   undoConflict: UndoConflict | null;
+  /** 最近一次被本页应用的撤回留下的未还原文件说明（页面状态）。 */
+  undoNotice: ChatUndoNotice | null;
   /** 同步的在途闩：同一会话的撤回在途时，下一次点击不发请求（状态要到下一次渲染才禁用按钮）。 */
   undoFlightRef: RefObject<ChatMutationOwner | null>;
 };
@@ -104,8 +108,10 @@ export function useTurnActions({
   setStreamError,
   setSubmitting,
   setUndoConflict,
+  setUndoNotice,
   setUndoOwner,
   undoConflict,
+  undoNotice,
   undoFlightRef,
 }: TurnActionDeps) {
   const restoreOwnedDraft = useCallback(
@@ -504,12 +510,18 @@ export function useTurnActions({
       setPromptError(null);
       setUndoOwner(owner);
       return ownedClient.undoMessage(sessionId, messageId, files).then(
-        ({ draft, session }) => {
+        ({ draft, files: { failed, skipped }, session }) => {
           if (!owned()) {
             release();
             return;
           }
           setDraft(draft);
+          // 每一次被应用的 200 都重新决定说明：有未还原的就换成这一份，没有就撤掉已有的。
+          setUndoNotice(
+            skipped.count + failed.count > 0
+              ? { client: ownedClient, sessionId, skipped, failed }
+              : null,
+          );
           // 只合并撤回会改的两个键；标题、置顶、归档等按 session-actions.ts 的规则不动。不另发列表 GET。
           setListState((list) =>
             list.status === "success" && list.client === ownedClient
@@ -559,6 +571,7 @@ export function useTurnActions({
       setPromptError,
       setStreamError,
       setUndoConflict,
+      setUndoNotice,
       setUndoOwner,
       undoFlightRef,
     ],
@@ -591,6 +604,22 @@ export function useTurnActions({
     };
   };
 
+  /** 未还原文件说明的 props；不属于 `client` 与当前选中的 `sessionId` 时为 null（不渲染）。 */
+  const undoNoticeFor = (client: ApiClient, sessionId: string | null) => {
+    if (undoNotice === null || undoNotice.client !== client || undoNotice.sessionId !== sessionId) {
+      return null;
+    }
+    return {
+      failed: undoNotice.failed,
+      // 关闭按钮随说明卸载：焦点交给输入框，不落回 body。
+      onDismiss: () => {
+        setUndoNotice(null);
+        composerRef.current?.focus({ preventScroll: true });
+      },
+      skipped: undoNotice.skipped,
+    };
+  };
+
   return {
     answerApproval,
     dispatchPrompt,
@@ -599,6 +628,7 @@ export function useTurnActions({
     restoreOwnedDraft,
     stopTurn,
     undoConflictFor,
+    undoNoticeFor,
     undoTurn,
   };
 }

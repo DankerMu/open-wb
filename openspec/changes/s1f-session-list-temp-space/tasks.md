@@ -594,7 +594,7 @@ Minimal mergeable slice: 17.1、17.2、17.3、17.5 各自可单独合入（互�
 
 - [x] 18.1 `撤回` 按钮（`message-action-row.tsx`）：位于 `从此处分叉` 之前；锁定时禁用；`undo` 非 `available` 时 `aria-disabled` 加五种原因的可访问描述（含 owner C-23 的 `命令消息无法撤回` 与 C-24 的 `这条消息没有文件快照，无法撤回`）；归档会话不渲染。动作（`turn-actions.ts` 或新文件 `undo-actions.ts`，遵守 `page → use-chat-session → turn-actions` 的导入方向）：调用 13.1 的 `undoMessage(…, "restore")`、请求期间锁输入框（不算生成中）、200 后重读快照、覆盖草稿、聚焦、更新列表条目；失败就地显示；所有权 fence（切会话 / 换账号 / 卸载后丢弃响应）。整页测试（新文件 `web/test/chat-undo.test.tsx`）：message-undo「web 撤回」的「撤回并回填」「不可撤回的原因」「失败就地显示」「锁定与归档时」、chat-web「用户消息操作行的按钮与次序」。
 - [x] 18.2 冲突对话框（新文件 `undo-conflict-dialog.tsx`，`alert-dialog`）：标题、说明（`这条消息发出之后，共用这个工作空间的其它会话还运行过回合。连文件一起还原会把它们的改动一并冲掉。`）、三个按钮、`取消` / Escape 的焦点归还、`keep` / `force` 重发。整页测试：「冲突三选一」两段。
-- [ ] 18.3 未还原文件说明（`conversation-view.tsx` 里线程与 `ComposerDock` 之间的一条 `role="status"`，可关闭，下次发送或切换会话消失）：`skipped` / `failed` 的列表与「等共 N 项」。整页测试（新文件 `web/test/chat-undo-notice.test.tsx`；`chat-undo.test.tsx` 已近 800 行）：「列出未还原的文件」「未还原文件被截断」。
+- [x] 18.3 未还原文件说明（`conversation-view.tsx` 里线程与 `ComposerDock` 之间的一条 `role="status"`，可关闭，下次发送或切换会话消失）：`skipped` / `failed` 的列表与「等共 N 项」。整页测试（新文件 `web/test/chat-undo-notice.test.tsx`；`chat-undo.test.tsx` 已近 800 行）：「列出未还原的文件」「未还原文件被截断」。
   **实施注记（18.3，fixture 评审补充，#970）**：
   - 状态：`use-chat-session.ts` 里一个 `useState`，形状仿 `ChatOwnedAlert`（`{client, sessionId, skipped, failed}`）；setter 注入 `useTurnActions`（G2 守卫 `chat-approval-bar.test.tsx` 禁止 `turn-actions.ts` 持状态）。写入点在 `undoTurn` 的 200 分支、`owned()` 之内、紧挨 `setDraft(draft)`：两个 `count` 之和大于 0 写入，否则写 null。被 fence 丢弃的 200 什么都不写。200 之后的重读失败时说明照留。
   - 清除三处：`sendPrompt` 越过早退之后（`setDraft("")` 处，发送被拒也不恢复）；已有 `setUndoConflict(null)` 的选择 effect（切会话与换账号）；关闭按钮。对外导出按 `client` 与 `requestedSessionId` 判属（仿 `visibleOwnedAlert`）。

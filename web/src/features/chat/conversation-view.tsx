@@ -16,6 +16,7 @@ import { Thread } from "./message-thread.js";
 import type { useSlashMenu } from "./slash-menu.js";
 import type { ChatState } from "./stream.js";
 import type { TranscriptHandle } from "./thread-viewport.js";
+import { UndoNotice } from "./undo-notice.js";
 import { WelcomeIntro, WelcomePlaybooks } from "./welcome.js";
 import type { WelcomeOptions } from "./welcome-options.js";
 import type { SessionSpace, Workspace } from "./workspace-list.js";
@@ -59,6 +60,8 @@ type ConversationViewProps = {
   streamError: string | null;
   /** 当前会话用的是临时空间（会话的 `temporaryWorkspace`；没有当前会话时为 false）：能力栏标签读作 `临时空间`。 */
   temporaryWorkspace: boolean;
+  /** 撤回后未还原文件的说明；没有时为 null。只读（已归档）时不渲染。 */
+  undoNotice: ComponentProps<typeof UndoNotice>["notice"];
   /** 欢迎态的场景与空间选择（状态在会话页）；有当前会话时场景不渲染，空间位换成只读标签。 */
   welcome: WelcomeOptions;
   /** 当前会话的空间（取自空间列表）；未绑定、不在列表里、列表读取中或读取失败时为 undefined。 */
@@ -92,6 +95,7 @@ export function ConversationView({
   space,
   streamError,
   temporaryWorkspace,
+  undoNotice,
   welcome,
   workspace,
   workspaceId,
@@ -160,6 +164,7 @@ export function ConversationView({
             />
           </div>
         )}
+        <UndoNotice notice={archived ? null : undoNotice} />
         {/* 停靠区保持挂载（展开状态按会话记在它里面）；只读时不给它视图，它就不渲染任何内容。 */}
         <ComposerDock
           inputLocked={composerDisabled}
