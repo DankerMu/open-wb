@@ -9,7 +9,7 @@
 >
 > 通用纪律：
 > - 每组按其 `Minimal mergeable slice` 出小 PR；每个 PR 合入后 `make check`、`make test-guardrails` 全绿，触及真栈的 PR 另跑 `make smoke` / `make ui-walk`；主干始终可运行。PR diff 以 400 行为评审目标，超出时再切。
-> - **800 行上限**：`server/src/sessions/omp/process.ts`（788）、`store.ts`（797）、`omp/runtime.ts`（798）、`server/test/support/fake-omp.mjs`（799）、`server/test/session-rest.test.ts`（789）、`web/e2e/ui-walk-sessions.spec.ts`（776）、`web/e2e/ui-walk-layout.ts`（793）
+> - **800 行上限**：`server/src/sessions/omp/process.ts`（788）、`store.ts`（797；C 之后 766）、`omp/runtime.ts`（798）、`server/test/support/fake-omp.mjs`（799；C 之后 797）、`server/test/session-rest.test.ts`（789；C 之后 788）、`web/e2e/ui-walk-sessions.spec.ts`（776；C 之后 681）、`web/e2e/ui-walk-layout.ts`（793）
 >   都没有余量；`supervisor.ts` 在 C 结束时不超过 792 行（C 的 design D15：C 的任务 10.3 腾行、10.4 与 11.5 各用掉一部分）。新增逻辑写进新文件或有余量的既有文件；必须落在这些文件里的改动，先由本 change 点名的纯搬迁任务腾出行数——7.0（`supervisor.ts`）、7.1 的第一次提交（`runtime.ts`）、8.0（`store.ts`）、6.1（`fake-omp.mjs`）——搬迁与功能改动分两次提交。新文件遵守各「源码模块划分」规格（无环、不新增未引用导出）。
 > - **knip 的前提**：`knip.json` 的 server 与 web entry 都含 `test/**/*.test.ts(x)`，所以「先由测试引用」的导出不算未引用；各组契约行里这样写的切片成立。
 > - **守卫**：`web/src/features/chat/` 下新增的 `.ts` / `.tsx` 在同一个 PR 里登记进 `web/test/ui-layering.test.ts` 的 `MIGRATED_AREAS` 并同步清单断言；已迁移文件不得导入 `useToast`；`web/test/chat-module-layout.test.ts` 的导入方向（`page.tsx → use-chat-session.ts → turn-actions.ts`）不变；knip 无未引用导出；jscpd ≤3%；覆盖率 ≥80%（不得收窄 include）。
@@ -22,9 +22,10 @@
 
 ## 0. 与 C 对底（归档顺序 C → 本 change → D）
 
-- [ ] 0.1 C 归档之后、本 change 的组 4 开工之前：对 design D16「与 C 重叠的 MODIFIED」表里底本为「C 的 MODIFIED / ADDED」的十九条，逐条把本 change 的 delta 文本与当时 `openspec/specs/**` 里的同名条文做句子级 diff。diff 里只允许出现该表「本 change 的增量」列所列的新增句、新增场景与改写场景；出现别的差异（C 在实现期改过条文、或本 change 漏了 C 的句子）就先改本 change 的 delta 与 D16 的表，再 `openspec validate s1g-composer-capabilities --strict --no-interactive`，以一个只改本 change 目录的 PR 落定。
+- [x] 0.1 C 归档之后、本 change 的组 4 开工之前：对 design D16「与 C 重叠的 MODIFIED」表里底本为「C 的 MODIFIED / ADDED」的十九条，逐条把本 change 的 delta 文本与当时 `openspec/specs/**` 里的同名条文做句子级 diff。diff 里只允许出现该表「本 change 的增量」列所列的新增句、新增场景与改写场景；出现别的差异（C 在实现期改过条文、或本 change 漏了 C 的句子）就先改本 change 的 delta 与 D16 的表，再 `openspec validate s1g-composer-capabilities --strict --no-interactive`，以一个只改本 change 目录的 PR 落定。
   场景标题另查一遍：本 change 每条 MODIFIED 的 `#### Scenario:` 标题集合是当时主规格同名条文标题集合的超集（缺一个就在原标题下补回正文，不改名）；两个 openspec CLI（仓库约定的 node 版本下的那个与较新的 1.13.x）的 `validate --strict` 都是 0 个 ERROR。
   同一次核对里确认：C 的 `tasks.md` 任务号与本文件文首所列一致；`supervisor.ts` 的行数不超过 792；会话视图列集与映射的落点（C 的 1.3 留在 `store.ts`，或搬去了 `store-view.ts` / `store-branch.ts`）——结果写进 PR 描述，供 7.0 与 8.0 使用。
+  核对记录（#983，2026-10-08，C 归档于 #980 之后）：十九条重叠 MODIFIED 的表头全部命中归档后的主规格，与主规格的差异只有 D16「本 change 的增量」列所列内容，场景标题集合都是主规格的超集；C 在实现期改过的五处（`reason` 枚举的 `name_encoding` / `mount`、启动失败 `reason` 与其场景、未还原文件说明的文案与场景「未还原文件被截断」、冲突对话框「遮罩点击不关闭」）本 change 都已带上；计数（十六码、十五条归属、二十三项配置、十四键、eleven routes、迁移 040–042 为第 14–16 个回执）均为「C 之后的值加本 change 的增量」。delta 无需修改，两个 openspec CLI（1.3.1 与 1.13.2）的 `validate --strict` 都通过。三项事实：C 的任务号与本文件文首所列一致（对照 `openspec/changes/archive/2026-10-08-s1f-session-list-temp-space/tasks.md`）；`supervisor.ts` 779 行；会话视图列集与映射在 `server/src/sessions/store-view.ts`（`SessionView`、`SessionDbRow`、`SESSION_COLUMNS`、`toSessionView`，`store.ts` 再导出），`store.ts` 766 行。组 8 加三键时另有三处手写的视图字面量要改：`store-metadata.ts` 的 `CreatedSessionView` 与 `createSession` 里的 `view()`、`store.ts` 里旧的 `create(ownerId)` 返回字面量、`rest.ts` 的 `PublicSession` 与 `toPublicSession`。
 - [ ] 0.2 本 change 归档之前：用当时的主规格把 0.1 再做一遍（C 归档后主规格若又被别的 change 改过，以当时的为准）；并把 D16 的表与「本 change 的增量恰为」一表交给 D 的对底任务（D 以「主规格 → C → 本 change」叠加后的文本为底）。
 
 Suggested fixture level: none - 只核对与修订本 change 目录下的规格文本，不改产品代码与测试
@@ -157,7 +158,8 @@ Minimal mergeable slice: 6.1 一刀（纯搬迁）；6.2 + 6.3 一刀（新场�
 
 ## 7. omp-runtime — argv 按会话取值与两种命令帧（Critical Path）
 
-- [ ] 7.0 `supervisor.ts` 行数预算（**行为不变的重构，如需则单独一个 PR**）：本 change 在该文件里的改动面只有三处——7.3 的调用点多传 `approvalMode` 与 `modelId`（至多 4 行）、9.1 的「启动档位不同则先退役」调用（至多 10 行）、9.2 的派发前对齐调用（至多 6 行），合计至多 20 行。以 0.1 记下的行数为准：不超过 780 行则本任务无事可做；否则沿用 C 的 10.3 的腾行方式与候选次序（C 的 design D15 第 1 点：`streamCursor` 的取值挪进 `supervisor-subscribers.ts`、`#retain` 挪进 `supervisor-faults.ts`；C 已挪走的跳过），再不足时把 `#retireSlot` 里纯计时的升级阶梯抽成 `pool.ts` 的函数，腾到不超过 780 行即止。验证：`make check`，既有 supervisor 测试原样通过。
+- [x] 7.0 `supervisor.ts` 行数预算（**行为不变的重构，如需则单独一个 PR**）：本 change 在该文件里的改动面只有三处——7.3 的调用点多传 `approvalMode` 与 `modelId`（至多 4 行）、9.1 的「启动档位不同则先退役」调用（至多 10 行）、9.2 的派发前对齐调用（至多 6 行），合计至多 20 行。以 0.1 记下的行数为准：不超过 780 行则本任务无事可做；否则沿用 C 的 10.3 的腾行方式与候选次序（C 的 design D15 第 1 点：`streamCursor` 的取值挪进 `supervisor-subscribers.ts`、`#retain` 挪进 `supervisor-faults.ts`；C 已挪走的跳过），再不足时把 `#retireSlot` 里纯计时的升级阶梯抽成 `pool.ts` 的函数，腾到不超过 780 行即止。验证：`make check`，既有 supervisor 测试原样通过。
+  核对记录（#999）：0.1 记下的行数是 779，不超过 780，本任务无事可做，未产生代码改动。
 - [ ] 7.1 `server/src/sessions/omp/process.ts`（788 行）与 `omp/runtime.ts`（798 行）：
   第一次提交（纯搬迁）：把 `runtime.ts` 里 `command()` 入参的内联帧联合类型（现 `runtime.ts:259-262`）原样搬到 `omp/commands.ts`（350 行）并具名导出，`runtime.ts` 只引用它（净减约 3 行）；行为不变，既有测试原样通过。
   第二次提交：`SpawnOmpOpts` 增 `approvalMode`，argv 的 `--approval-mode` 取它；不是三个字面量之一时不 spawn（抛出，走既有的准备失败路径）；`--model` 仍取 `opts.modelId`（调用方此后传会话的有效模型）。`OmpProcessOpts extends SpawnOmpOpts`，而 `runtime.ts:426-431` 是逐字段显式构造 `new OmpProcess({…})`——所以 `SessionRuntimeOpts` 同刀增 `approvalMode` 并在该构造处透传（约 +4 行，由第一次提交腾出）。`process.ts` 余量只有十来行：档位校验函数放进 `commands.ts`，不要顶破 800。1.0 留下的测试用 spawn 包装在本任务删除（world 改为直接传 `approvalMode`）。
@@ -173,8 +175,9 @@ Minimal mergeable slice: 7.0 一刀（仅当需要腾行）；7.1（搬迁提交
 
 ## 8. sessions store + REST — 会话的三项输入框设置
 
-- [ ] 8.0 `store.ts` 腾行（**纯搬迁，单独一次提交 / PR，行为不变**）：按 0.1 记下的落点——C 的 1.3 若已把 `SessionView` / `SESSION_COLUMNS` / `SessionDbRow` / `toSessionView` 搬出 `store.ts`（到 `store-view.ts` 或 `store-branch.ts`），沿用 C 的落点，本任务只确认 `store.ts` 的余量不少于 15 行，不足时把 `runtimeState` 的行映射也搬到同一个文件；
+- [x] 8.0 `store.ts` 腾行（**纯搬迁，单独一次提交 / PR，行为不变**）：按 0.1 记下的落点——C 的 1.3 若已把 `SessionView` / `SESSION_COLUMNS` / `SessionDbRow` / `toSessionView` 搬出 `store.ts`（到 `store-view.ts` 或 `store-branch.ts`），沿用 C 的落点，本任务只确认 `store.ts` 的余量不少于 15 行，不足时把 `runtimeState` 的行映射也搬到同一个文件；
   C 若把它们留在了 `store.ts`，本任务把这四个符号原样搬到新文件 `server/src/sessions/store-view.ts`（`store.ts` 改为从它导入并照旧再导出，调用方不动）。15 行的用途：8.1 的 `runtimeState` 三列（约 +4）与视图构造多收一个配置参数（约 +3）、12.2 的 `acceptPrompt` 多一个参数与一次调用（约 +4）。验证：`make check`，既有 store 与 REST 测试原样通过。
+  核对记录（#1003）：C 的 1.3 已把四个符号搬到 `store-view.ts`，沿用该落点；`store.ts` 766 行，余量 34 行，不少于 15 行，未产生代码改动。
 - [ ] 8.1 只读半边——会话视图发出三键：新文件 `server/src/sessions/store-composer.ts`（本任务只放读取：三列的列名常量、行到原始值的映射）；`SESSION_COLUMNS` 加三列、`toSessionView`（在 8.0 确定的文件里）统一经 `effectiveComposer`（组 2.3）加上三键——只有一处构造函数，列表、创建、PATCH、快照、fork、undo 共用；`runtimeState` 增报三个原始列（供组 9）。此时三列恒为 NULL，视图恒为缺省有效值。
   测试新文件 `server/test/session-composer-store.test.ts`：三列为 NULL 的行读成缺省有效值；直接写库的原始值经夹取 / 回落后进入视图（session-composer-settings「夹取与回落」在视图层的两例）；`runtimeState` 报出原始列。chat-sessions「Session views carry the three composer settings」里创建与列表两个出口的键集断言。
 - [ ] 8.2 REST 创建：`store-composer.ts` 增写入——创建时三列的取值（请求值 / 最近选择 / NULL）、`account_composer_prefs` 的读取与 upsert（只改所给列）；经 `store.ts` 的既有事务原语组合进创建事务（`store-metadata.ts` 189 行有余量，创建的入口在那里；C 的临时空间创建在同一个事务里，次序不变）。`server/src/sessions/rest-metadata.ts`（209 行）的 `POST /api/sessions` 接受三键并校验（session-metadata「会话创建与空间绑定」、session-composer-settings「创建会话时的设置与继承」；`reasoningEffort` 只校验是七个强度名之一且所对模型支持推理，不校验是否在该模型的可选强度内）；创建时的 `session.permission` 审计只按 session-permission-tier「档位变更审计」的条件（session-metadata 不另述条件）。
