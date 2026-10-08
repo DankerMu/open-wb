@@ -9,6 +9,7 @@ import { execFileSync } from "node:child_process";
 import fs, {
   appendFileSync,
   chmodSync,
+  constants,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -24,6 +25,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   describeTree,
   dirEntry,
+  expectChanged,
   type Fixture,
   fileEntry,
   fixture,
@@ -36,8 +38,10 @@ import {
   put,
   releaseAfterTest,
   run,
+  setPast,
   swapAfterLstat,
   W,
+  waitForClock,
 } from "./workspace-snapshots-helpers.js";
 
 const IS_ROOT = process.geteuid?.() === 0;
@@ -430,20 +434,53 @@ describe("快照期间可能有写入者", () => {
     expect(readFileSync(f.outside, "utf8")).toBe(OUTSIDE_BYTES);
   });
 
-  it("a file swapped for a FIFO does not hang the snapshot: skipped as special", async () => {
+  it("a file swapped for a FIFO does not hang the snapshot: failed, its directory changed", async () => {
     const f = fixture();
     put(f.workspace, "a.txt", "alpha\n");
     put(f.workspace, "b.txt", "bravo\n");
     put(f.workspace, "c.txt", "charlie\n");
     const victim = join(f.workspace, "b.txt");
     releaseAfterTest(victim);
+    // The names of the root stay what they were: its times are what tells (#1190).
+    setPast(f.workspace);
     swapAfterLstat(victim, () => {
+      waitForClock(f, f.workspace);
       rmSync(victim);
       execFileSync("mkfifo", [victim]);
     });
 
     const result = await run(f);
 
+    expectChanged(result, "");
+    expect(existsSync(f.snapshot)).toBe(false);
+    expect(readdirSync(f.workspace).sort()).toEqual(["a.txt", "b.txt", "c.txt"]);
+    expect(lstatSync(victim).isFIFO()).toBe(true);
+  }, 5000);
+
+  it("an entry whose handle turns out to be a FIFO is skipped as special, unread", async () => {
+    // The open of b.txt is answered with a FIFO from outside the workspace, as if b.txt had
+    // been swapped after its lstat; no directory of the workspace changes, so the result is ok.
+    const f = fixture();
+    put(f.workspace, "a.txt", "alpha\n");
+    put(f.workspace, "b.txt", "bravo\n");
+    put(f.workspace, "c.txt", "charlie\n");
+    const pipe = join(f.workspace, "..", "pipe");
+    execFileSync("mkfifo", [pipe]);
+    releaseAfterTest(pipe);
+    const open = fs.promises.open;
+    const flags: unknown[] = [];
+    vi.spyOn(fs.promises, "open").mockImplementation((...args: Parameters<typeof open>) => {
+      if (args[0] !== join(f.workspace, "b.txt")) {
+        return open(...args);
+      }
+      flags.push(args[1]);
+      return open(pipe, args[1], args[2]);
+    });
+
+    const result = await run(f);
+
+    // No writer ever opens the FIFO: without O_NONBLOCK this open would not return.
+    expect(flags).toEqual([constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK]);
     const skipped = [{ path: "b.txt", reason: "special" }];
     expect(result).toEqual({ outcome: "ok", skipped });
     expect(manifestOf(f)).toEqual({
@@ -451,7 +488,6 @@ describe("快照期间可能有写入者", () => {
       skipped,
     });
     expect(Object.keys(describeTree(join(f.snapshot, "tree")))).toEqual(["a.txt", "c.txt"]);
-    expect(lstatSync(victim).isFIFO()).toBe(true);
   }, 5000);
 
   it("登记的残余 — a swapped parent directory: the entry itself is still not followed", async () => {

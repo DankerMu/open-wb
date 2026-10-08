@@ -18,11 +18,15 @@
  *   1. an intermediate path component replaced by a symbolic link after its directory was
  *      listed is traversed by both `lstat` and the open;
  *   2. a directory entry replaced by a symbolic link between its `lstat` and its `readdir` is
- *      listed and copied whole from wherever the link points.
- * An entry that is gone by the time it is read is left out (`readable`); only the workspace root
- * itself missing fails the snapshot. Gone may mean renamed: the new name is in no listing taken
- * so far, so the snapshot has no copy of something that is still in the workspace. The manifest
- * of such a walk says `incomplete: true`, and a restore from it deletes nothing (#1148).
+ *      listed and copied whole from wherever the link points (the second look below then finds
+ *      another inode under that name and the snapshot fails, unless the swap was undone).
+ * A walk that saw the workspace change gives no snapshot (#1190): the result is `failed`. A
+ * manifest is only good for a restore, and a restore deletes what the manifest lacks and writes
+ * back what it has. An entry moved while the walk runs can be in no listing at all (moved from a
+ * directory not listed yet into one listed already, no read fails), or its new content can sit
+ * under a name the walk never reads. So every walked directory is fingerprinted when it is
+ * listed and looked at again once all entries are done (`recheck`); and a listed entry that is
+ * gone when it is read (`ENOENT`, `ENOTDIR`) fails the walk like any other error.
  *
  * Names are listed as bytes (`splitNames`). A name that is not valid UTF-8 cannot be written in
  * the manifest, whose paths are JSON strings: the entry is left out as `name_encoding` and never
@@ -36,7 +40,7 @@
  * Asynchronous on purpose: the snapshot runs as the supervisor's pre-dispatch step, during which
  * a stop must still be answered (spec「受理时做快照」), so the walk must not hold the event loop.
  */
-import { constants, promises as fsp, type Stats } from "node:fs";
+import { type BigIntStats, constants, promises as fsp, type Stats } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 const DIR_MODE = 0o700;
@@ -116,8 +120,11 @@ interface Walk {
   skipped: SkippedEntry[];
   /** Sum of `size` over the file entries. */
   totalBytes: number;
-  /** A listed entry was gone when it was read: the manifest is written as `incomplete`. */
-  vanished: boolean;
+  /**
+   * The fingerprint of every directory this walk listed, the root (`""`) included, by path. In
+   * memory only. A directory that was not listed (excluded, unreadable) is not in it.
+   */
+  listed: Map<string, string>;
 }
 
 /** Thrown by `claim` to end the walk where it stands; `take` turns it into `too_large`. */
@@ -278,19 +285,18 @@ async function write(options: TakeOptions, snapshotDir: string): Promise<TakeRes
     entries: [],
     skipped: [],
     totalBytes: 0,
-    vanished: false,
+    listed: new Map(),
   };
   await makePrivateDir(walk.treeRoot);
-  // Not through `readable`: the root itself gone is a failure, not an entry that vanished.
-  await visitChildren(walk, "", await fsp.readdir(options.workspaceRoot, { encoding: "buffer" }));
+  const root = await fsp.lstat(options.workspaceRoot, { bigint: true });
+  if (!root.isDirectory()) {
+    throw new Error("workspace root is not a directory");
+  }
+  await visitChildren(walk, "", await list(walk, "", root));
+  await recheck(walk);
 
   const manifest = join(snapshotDir, "manifest.json");
-  // The key is there only when it is true: a walk that lost nothing writes what it always did.
-  const body = JSON.stringify({
-    entries: walk.entries,
-    skipped: walk.skipped,
-    ...(walk.vanished ? { incomplete: true } : {}),
-  });
+  const body = JSON.stringify({ entries: walk.entries, skipped: walk.skipped });
   await fsp.writeFile(manifest, body, { mode: FILE_MODE, flag: "wx" });
   await fsp.chmod(manifest, FILE_MODE);
   return { outcome: "ok", skipped: walk.skipped };
@@ -337,6 +343,47 @@ export function splitNames(raw: readonly Buffer[]): { names: string[]; lossy: st
 }
 
 /**
+ * What tells whether a directory changed (design D9, #1190): which directory it is (`dev`,
+ * `ino`), its two times in nanoseconds, and its entry names as bytes. `mtime` moves when an entry
+ * is added, removed or renamed; `ctime` moves with it and cannot be set back by `utimes`. Each
+ * byte of a name is one character here; no name contains `/`, so the join is unambiguous.
+ */
+function fingerprintOf(stat: BigIntStats, raw: readonly Buffer[]): string {
+  const names = raw.map((name) => name.toString("latin1")).sort();
+  return [stat.dev, stat.ino, stat.mtimeNs, stat.ctimeNs, ...names].join("/");
+}
+
+/**
+ * Lists the workspace directory `path` and records its fingerprint. `stat` is the `lstat` that
+ * found it a directory, taken before this listing: a change between the two is in the times the
+ * second look compares against.
+ */
+async function list(walk: Walk, path: string, stat: BigIntStats): Promise<Buffer[]> {
+  const raw = await fsp.readdir(join(walk.workspaceRoot, path), { encoding: "buffer" });
+  walk.listed.set(path, fingerprintOf(stat, raw));
+  return raw;
+}
+
+/**
+ * The second look, after every entry was processed and before the manifest is written: each
+ * listed directory is listed again and then `lstat`-ed (the reverse of the first look, so a
+ * change at any moment between the two lists is between the two `lstat`s as well). A fingerprint
+ * that differs, or any error, throws: `take` answers `failed` and removes the snapshot.
+ *
+ * All first looks come before all second looks. Checking a directory right after its own
+ * children would miss a file moved into it later from a directory not listed yet.
+ */
+async function recheck(walk: Walk): Promise<void> {
+  for (const [path, before] of walk.listed) {
+    const dir = join(walk.workspaceRoot, path);
+    const raw = await fsp.readdir(dir, { encoding: "buffer" });
+    if (fingerprintOf(await fsp.lstat(dir, { bigint: true }), raw) !== before) {
+      throw new Error(`workspace changed during the snapshot: directory "${path}"`);
+    }
+  }
+}
+
+/**
  * Names come from `readdir`, so none is empty, `.`, `..` or contains a separator. An entry whose
  * name is not valid UTF-8 is recorded by its lossy decoding and nothing of it is read.
  */
@@ -353,7 +400,7 @@ async function visitChildren(walk: Walk, parent: string, raw: Buffer[]): Promise
 
 async function visit(walk: Walk, path: string, name: string): Promise<void> {
   const source = join(walk.workspaceRoot, path);
-  const stat = await readable(walk, path, () => fsp.lstat(source));
+  const stat = await readable(walk, path, () => fsp.lstat(source, { bigint: true }));
   if (stat === undefined) {
     return;
   }
@@ -372,21 +419,23 @@ async function visit(walk: Walk, path: string, name: string): Promise<void> {
   }
 }
 
-async function visitDirectory(walk: Walk, path: string, name: string, stat: Stats): Promise<void> {
+async function visitDirectory(
+  walk: Walk,
+  path: string,
+  name: string,
+  stat: BigIntStats,
+): Promise<void> {
   if (walk.excludeNames.has(name)) {
     walk.skipped.push({ path, reason: "excluded" });
     return;
   }
-  // Listed before anything is recorded: a directory that cannot be listed is skipped whole,
-  // and one that is gone by now leaves neither an entry nor a directory under `tree/`.
-  const names = await readable(walk, path, () =>
-    fsp.readdir(join(walk.workspaceRoot, path), { encoding: "buffer" }),
-  );
+  // Listed before anything is recorded: a directory that cannot be listed is skipped whole.
+  const names = await readable(walk, path, () => list(walk, path, stat));
   if (names === undefined) {
     return;
   }
   claim(walk, 0);
-  walk.entries.push({ path, type: "dir", mode: stat.mode & 0o7777 });
+  walk.entries.push({ path, type: "dir", mode: Number(stat.mode) & 0o7777 });
   await makePrivateDir(join(walk.treeRoot, path));
   await visitChildren(walk, path, names);
 }
@@ -532,12 +581,10 @@ async function copyContent(
 /**
  * Runs one read of a workspace entry that its parent's listing named: `lstat`, `readlink`,
  * `open` or `readdir` of its path in the workspace, or a read of its handle. Never a call on the
- * snapshot's side. Yields `undefined` when the entry is to be left out:
- *   - `EACCES` / `EPERM`: recorded as `unreadable`;
- *   - `ENOENT`, or `ENOTDIR` (a level of its path is no directory any more): it vanished after
- *     it was listed and is recorded nowhere, and the walk is marked (`vanished`): it may have
- *     been renamed to a name this walk never sees.
- * Every other error propagates and fails the snapshot.
+ * snapshot's side. Yields `undefined` when the read was refused (`EACCES` / `EPERM`): the entry
+ * is left out and recorded as `unreadable`. Every other error propagates and fails the snapshot.
+ * That includes `ENOENT` and `ENOTDIR`: the entry was listed and is gone, deleted or moved to a
+ * name this walk may never see (#1190).
  */
 async function readable<T>(
   walk: Walk,
@@ -548,10 +595,6 @@ async function readable<T>(
     return await read();
   } catch (error) {
     const code = codeOf(error);
-    if (code === "ENOENT" || code === "ENOTDIR") {
-      walk.vanished = true;
-      return undefined;
-    }
     if (code !== "EACCES" && code !== "EPERM") {
       throw error;
     }

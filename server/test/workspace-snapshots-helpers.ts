@@ -18,6 +18,7 @@ import fs, {
   readlinkSync,
   rmSync,
   type StatOptions,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -105,6 +106,18 @@ export function run(f: Fixture, overrides: Partial<TakeOptions> = {}): Promise<T
     maxTotalBytes: Number.MAX_SAFE_INTEGER,
     maxEntries: Number.MAX_SAFE_INTEGER,
     ...overrides,
+  });
+}
+
+/**
+ * `failed` by the walk's second look, which found the directory `dir` (relative to the workspace
+ * root, `""` for the root itself) changed: not by a read that failed, and not by a hook of the
+ * test that threw. `dir` is the first changed directory in the order the walk listed them.
+ */
+export function expectChanged(result: TakeResult, dir: string): void {
+  expect(result).toMatchObject({
+    outcome: "failed",
+    error: { message: `workspace changed during the snapshot: directory "${dir}"` },
   });
 }
 
@@ -213,6 +226,49 @@ export function swapAfterLstat(target: string, swap: () => void): void {
     }
     return stat;
   }) as typeof lstat);
+}
+
+/** `act` runs once, right before the walk's first `lstat` of `target`: nothing of it is read yet. */
+export function beforeLstat(target: string, act: () => void): void {
+  const lstat = fs.promises.lstat;
+  let done = false;
+  vi.spyOn(fs.promises, "lstat").mockImplementation(((path: PathLike, o?: StatOptions) => {
+    if (path === target && !done) {
+      done = true;
+      act();
+    }
+    return lstat(path, o);
+  }) as typeof lstat);
+}
+
+/** A whole second long ago: what `setPast` gives, and what a test sets back with `utimes`. */
+export const PAST_SECONDS = 1_600_000_000;
+
+/**
+ * Sets the `mtime` of each directory to `PAST_SECONDS`, so a later change of its entries moves
+ * its `mtime` whatever the grain of the file system's clock.
+ */
+export function setPast(...dirs: string[]): void {
+  for (const dir of dirs) {
+    utimesSync(dir, PAST_SECONDS, PAST_SECONDS);
+  }
+}
+
+/**
+ * Returns once the file system stamps a time later than the change time `dir` has now, so the
+ * next change of `dir` moves its `ctime` (Linux stamps from a clock that ticks every 1 to 10 ms).
+ * The probe file lies beside the workspace, on the same file system.
+ */
+export function waitForClock(f: Fixture, dir: string): void {
+  const probe = join(f.workspace, "..", "clock-probe");
+  const seen = lstatSync(dir, { bigint: true }).ctimeNs;
+  const deadline = Date.now() + 5000;
+  do {
+    if (Date.now() > deadline) {
+      throw new Error("waitForClock: the file system clock did not advance");
+    }
+    writeFileSync(probe, "");
+  } while (lstatSync(probe, { bigint: true }).ctimeNs <= seen);
 }
 
 type Listing = (path: PathLike, options: { encoding: "buffer" }) => Promise<Buffer[]>;

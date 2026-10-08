@@ -1,11 +1,12 @@
 /**
- * Issue #1148 (task 10.4a) workspace-snapshots「快照内容规则」(列举后消失的条目不使快照失败、
- * 非 UTF-8 文件名被跳过而不使快照失败) and「还原」(非 UTF-8 文件名的条目不被当作多余条目删除).
+ * Issue #1148 (task 10.4a) workspace-snapshots「快照内容规则」(非 UTF-8 文件名被跳过而不使快照失败)
+ * and「还原」(非 UTF-8 文件名的条目不被当作多余条目删除), with the errors of a walk that are not
+ * skipped. What #1148 ruled of an entry that vanishes after its listing is superseded by #1190:
+ * see workspace-snapshots-changed.test.ts.
  *
- * An entry vanishes for real wherever that can be arranged: the test removes it between two
- * calls of the walk, and the error is the file system's own. A name that is not valid UTF-8
- * exists only on Linux (APFS refuses to create one), so each rule about such names is tested
- * twice: on every platform with the name added to a listing, and on Linux with the entry on disk.
+ * A name that is not valid UTF-8 exists only on Linux (APFS refuses to create one), so each rule
+ * about such names is tested twice: on every platform with the name added to a listing, and on
+ * Linux with the entry on disk.
  */
 import fs, {
   existsSync,
@@ -15,15 +16,12 @@ import fs, {
   readdirSync,
   readFileSync,
   rmSync,
-  symlinkSync,
-  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { splitNames } from "../src/workspaces/snapshots.js";
 import {
-  afterListing,
   contentsOf,
   describeTree,
   dirEntry,
@@ -92,112 +90,7 @@ function strictManifest(f: Fixture): unknown {
   return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
 }
 
-describe("快照内容规则 — 列举后消失的条目不使快照失败", () => {
-  it("a file removed after the root was listed and before its lstat is left out; the rest is there", async () => {
-    const f = fixture();
-    put(f.workspace, "a.txt", "alpha\n");
-    put(f.workspace, "gone.txt", "gone\n");
-    put(f.workspace, "d/x.txt", "x\n");
-    afterListing(f.workspace, () => rmSync(join(f.workspace, "gone.txt")));
-
-    const result = await run(f);
-
-    expect(result).toEqual({ outcome: "ok", skipped: [] });
-    expect(manifestOf(f)).toEqual({
-      entries: [fileEntry(f, "a.txt"), dirEntry(f, "d"), fileEntry(f, "d/x.txt")],
-      skipped: [],
-      incomplete: true,
-    });
-    expect(treeOf(f)).toEqual(["a.txt", "d", "d/x.txt"]);
-  });
-
-  it.each([
-    {
-      what: "a file removed after its lstat and before its open",
-      make: (f: Fixture) => put(f.workspace, "gone", "gone\n"),
-      vanish: (path: string) => rmSync(path),
-    },
-    {
-      what: "a symbolic link removed after its lstat and before its readlink",
-      make: (f: Fixture) => symlinkSync("a.txt", join(f.workspace, "gone")),
-      vanish: (path: string) => unlinkSync(path),
-    },
-    {
-      what: "a directory removed whole after it was judged a directory and before its listing",
-      make: (f: Fixture) => {
-        put(f.workspace, "gone/x.txt", "x\n");
-        put(f.workspace, "gone/deep/y.txt", "y\n");
-      },
-      vanish: (path: string) => rmSync(path, { recursive: true }),
-    },
-  ])("$what: ok, no entry of it or below it, nothing skipped, nothing under tree/", async (c) => {
-    const f = fixture();
-    put(f.workspace, "a.txt", "alpha\n");
-    c.make(f);
-    put(f.workspace, "z.txt", "zulu\n");
-    const gone = join(f.workspace, "gone");
-    swapAfterLstat(gone, () => c.vanish(gone));
-
-    const result = await run(f);
-
-    expect(existsSync(gone)).toBe(false);
-    expect(result).toEqual({ outcome: "ok", skipped: [] });
-    expect(manifestOf(f)).toEqual({
-      entries: [fileEntry(f, "a.txt"), fileEntry(f, "z.txt")],
-      skipped: [],
-      incomplete: true,
-    });
-    expect(treeOf(f)).toEqual(["a.txt", "z.txt"]);
-  });
-
-  it("ENOTDIR: a listed directory replaced by a file — its children are left out, the walk goes on", async () => {
-    const f = fixture();
-    put(f.workspace, "a.txt", "alpha\n");
-    put(f.workspace, "d/x.txt", "x\n");
-    put(f.workspace, "d/y.txt", "y\n");
-    put(f.workspace, "z.txt", "zulu\n");
-    const d = join(f.workspace, "d");
-    // `d` was a directory when it was classified and listed: that is what the manifest says.
-    const listed = dirEntry(f, "d");
-    afterListing(d, () => {
-      rmSync(d, { recursive: true });
-      writeFileSync(d, "a file now\n");
-    });
-    const lstat = vi.spyOn(fs.promises, "lstat");
-
-    const result = await run(f);
-
-    const refused = await Promise.allSettled(lstat.mock.results.map((call) => call.value));
-    expect(
-      refused.flatMap((call) => (call.status === "rejected" ? [call.reason.code] : [])),
-    ).toEqual(["ENOTDIR", "ENOTDIR"]);
-    expect(result).toEqual({ outcome: "ok", skipped: [] });
-    expect(manifestOf(f)).toEqual({
-      entries: [fileEntry(f, "a.txt"), listed, fileEntry(f, "z.txt")],
-      skipped: [],
-      incomplete: true,
-    });
-    expect(treeOf(f)).toEqual(["a.txt", "d", "z.txt"]);
-  });
-
-  it("a file removed after it was opened is still copied from its handle", async () => {
-    const f = fixture();
-    put(f.workspace, "a.txt", "alpha\n");
-    const recorded = fileEntry(f, "a.txt");
-    onCopyCreate((path) => {
-      if (path === join(f.snapshot, "tree", "a.txt")) {
-        rmSync(join(f.workspace, "a.txt"));
-      }
-    });
-
-    const result = await run(f);
-
-    expect(result).toEqual({ outcome: "ok", skipped: [] });
-    // Unlinking moves the change time; the handle was read before that.
-    expect(manifestOf(f)).toEqual({ entries: [recorded], skipped: [] });
-    expect(readFileSync(join(f.snapshot, "tree", "a.txt"), "utf8")).toBe("alpha\n");
-  });
-
+describe("快照内容规则 — errors that are not skipped", () => {
   it("the workspace root removed after it was checked and before it is listed: failed", async () => {
     const f = fixture();
     put(f.workspace, "a.txt", "alpha\n");
