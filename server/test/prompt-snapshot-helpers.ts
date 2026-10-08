@@ -99,7 +99,7 @@ export function closeWorldsAfterEach(): void {
 
 /**
  * `take` and `removeSnapshot` over the world's snapshots directory, with roomy limits; the total
- * limit is the world's own when it sets one.
+ * limit is the world's own when it sets one. `restore` is the port's third method and unused here.
  */
 function realService(stateDir: string, settings: Settings): TurnSnapshotService {
   const snapshotsRoot = join(stateDir, "snapshots");
@@ -117,6 +117,7 @@ function realService(stateDir: string, settings: Settings): TurnSnapshotService 
         maxEntries: 1_000,
       }),
     remove: (workspaceId, messageId) => removeSnapshot({ snapshotsRoot, workspaceId, messageId }),
+    restore: () => Promise.reject(new Error("the snapshot worlds restore nothing")),
   };
 }
 

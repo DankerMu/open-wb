@@ -351,6 +351,8 @@ describe("stop on the dispatched path (#473)", () => {
         expect(own(messageRows(db))).toEqual(messagesBefore);
         expect(stepRows(db).filter((row) => ids.has(row.message_id))).toEqual(stepsBefore);
         expect(sessionRows(db).find((row) => row.id === running)?.status).toBe("failed");
+        // Reconciliation records no end: the conflict criterion of undo reads this (#952).
+        expect(sessionRows(db).find((row) => row.id === running)?.updated_at).toBe(T);
         expect(messageRows(db).find((row) => row.id === assistant)?.status).toBe("failed");
         expect(stepRows(db).find((row) => row.id === step)?.status).toBe("failed");
       } finally {

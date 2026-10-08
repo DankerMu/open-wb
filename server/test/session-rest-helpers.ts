@@ -117,6 +117,7 @@ export async function withSessionRest<T>(
             snapshots: {
               take: () => Promise.reject(new Error("session-rest harness takes no snapshot")),
               remove: () => Promise.resolve(),
+              restore: () => Promise.reject(new Error("session-rest harness restores nothing")),
             },
             workspaceRootOf: () => null,
             onError: () => undefined,

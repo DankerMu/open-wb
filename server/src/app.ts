@@ -49,6 +49,7 @@ import { TokenRegistry } from "./sessions/tokens.js";
 import type { TurnSnapshotService } from "./sessions/turn-snapshot.js";
 import { registerWorkspaces } from "./workspaces/index.js";
 import { removeSnapshot, take } from "./workspaces/snapshots.js";
+import { restore } from "./workspaces/snapshots-restore.js";
 import { createWorkspaceStore } from "./workspaces/store.js";
 
 declare module "fastify" {
@@ -266,9 +267,9 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
 }
 
 /**
- * The app's one workspace-snapshots service: `take` and `removeSnapshot` bound to the managed
- * snapshots directory of the state dir and to the four snapshot settings. Building it touches no
- * file; the directory belongs to the omp state layout.
+ * The app's one workspace-snapshots service: `take`, `removeSnapshot` and `restore` bound to the
+ * managed snapshots directory of the state dir and to the four snapshot settings. Building it
+ * touches no file; the directory belongs to the omp state layout.
  */
 function snapshotService(runtime: SessionRuntime): TurnSnapshotService {
   const snapshotsRoot = ompSnapshotsDir(runtime.stateDir);
@@ -289,6 +290,8 @@ function snapshotService(runtime: SessionRuntime): TurnSnapshotService {
         ...limits,
       }),
     remove: (workspaceId, messageId) => removeSnapshot({ snapshotsRoot, workspaceId, messageId }),
+    restore: (workspaceRoot, workspaceId, messageId) =>
+      restore({ workspaceRoot, snapshotDir: join(snapshotsRoot, workspaceId, String(messageId)) }),
   };
 }
 

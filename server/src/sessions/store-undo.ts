@@ -15,7 +15,8 @@
  * `undo` key of the message view and of the prompt's 202.
  *
  * `commitUndo` (#949, message-undo「对话原地回退」step 5) is the one transaction that removes
- * messages from the middle of a session; it is at the end of this file.
+ * messages from the middle of a session; it is at the end of this file, after the two reads of an
+ * undo that restores files (#952, message-undo「共用空间冲突」).
  */
 import type { DatabaseSync } from "node:sqlite";
 import type { emit as auditEmit } from "../core/audit/index.js";
@@ -64,7 +65,8 @@ type SnapshotDbRow = {
   created_at: number;
 };
 
-const SKIPPED_PATHS_LIMIT = 200;
+/** The most paths one list carries: a registration's `skipped`, an undo's `files` lists. */
+export const SKIPPED_PATHS_LIMIT = 200;
 const COLUMNS =
   "t.message_id, t.workspace_id, t.outcome, CAST(t.skipped AS BLOB) AS skipped, CAST(t.todo AS BLOB) AS todo, t.created_at";
 const INSERT =
@@ -188,6 +190,51 @@ function parseSkipped(text: string): TurnSnapshotRow["skipped"] {
     paths.push({ path, reason });
   }
   return { count, paths };
+}
+
+const OTHER_RUNNING =
+  "SELECT 1 FROM chat_sessions WHERE workspace_id = ? AND id <> ? AND status = 'running' LIMIT 1";
+// The registration rows of session `b`'s own messages (a fork copies none).
+const OWN_REGISTRATION =
+  "SELECT 1 FROM chat_turn_snapshots AS t JOIN chat_messages AS m ON m.id = t.message_id WHERE m.session_id = b.id";
+const LAST_ASSISTANT_AT =
+  "SELECT m.created_at FROM chat_messages AS m WHERE m.session_id = b.id AND m.role = 'assistant' ORDER BY m.created_at DESC, m.id DESC LIMIT 1";
+// `p.at` is T, the `created_at` of the undone message itself (not of its registration). Condition
+// 2 is the first parenthesis, 3 (a) / (b) / (c) the second.
+const UNDO_CONFLICT = `SELECT 1 FROM chat_sessions AS b, (SELECT created_at AS at FROM chat_messages WHERE id = ? AND session_id = ?) AS p
+  WHERE b.id <> ? AND b.owner_id = ? AND b.workspace_id = ?
+    AND (EXISTS (${OWN_REGISTRATION}) OR b.updated_at > b.created_at)
+    AND (EXISTS (${OWN_REGISTRATION} AND t.created_at >= p.at)
+      OR b.updated_at >= p.at
+      OR (b.status = 'failed' AND b.updated_at = (${LAST_ASSISTANT_AT})))
+  LIMIT 1`;
+
+/**
+ * 「撤回 REST」step 6: whether another session bound to this workspace is running, whoever owns
+ * it. Nothing is restored into a directory an agent is writing in.
+ */
+export function workspaceRunsElsewhere(
+  db: DatabaseSync,
+  sessionId: string,
+  workspaceId: string,
+): boolean {
+  return db.prepare(OTHER_RUNNING).get(workspaceId, sessionId) !== undefined;
+}
+
+/**
+ * 「共用空间冲突」(step 7, design D12): whether another session of the same owner and workspace was
+ * active itself (a registration row of its own, or `updated_at > created_at`) and cannot be shown
+ * to have gone quiet before the undone message was sent: (a) a registration of its own at or after
+ * T, (b) `updated_at >= T`, or (c) `failed` with `updated_at` still the `created_at` of its last
+ * assistant message (startup reconciliation, which records no end). Reads rows only.
+ */
+export function undoConflicts(
+  db: DatabaseSync,
+  input: { ownerId: string; sessionId: string; workspaceId: string; messageId: number },
+): boolean {
+  const { ownerId, sessionId, workspaceId, messageId } = input;
+  const row = db.prepare(UNDO_CONFLICT).get(messageId, sessionId, sessionId, ownerId, workspaceId);
+  return row !== undefined;
 }
 
 export interface UndoCommit {
