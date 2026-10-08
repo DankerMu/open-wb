@@ -291,7 +291,7 @@ Minimal mergeable slice: 9.1 + 9.2 一起（没有父目录校验的还原不可
   - 真实挂载上的验证（编排者在 Linux 测试机上做，不进 CI）：对一个 sshfs 挂载与一个 rclone 挂载各跑一次 `take` + `restore`，结果写进 PR。
   - `uid-isolation` 的快照检查不得因此判红；不改 CI 脚本。
   Risk packs（10.4d）: File IO / path safety / delete（还原不得删改挂载内的内容）、Legacy compatibility（旧清单没有 `mount` 项；`reason` 枚举增值）。
-- [ ] 10.4e 还原的递归删除接住并发改动（#1214；Critical Path）：
+- [x] 10.4e 还原的递归删除接住并发改动（#1214；Critical Path）：
   - `snapshots-restore.ts` 的 `removeTree`：列举（`readdir`）、子项的 `lstat` / `unlink`、`rmdir` 得 `ENOENT` → 当作已删，继续（起点自身的列举得 `ENOENT` → 返回「已删净」）；`rmdir` 得 `ENOTEMPTY` / `EEXIST` → 该级路径记入 `run.failed`、返回「未删净」，不重试。`remove` 里非目录条目的 `unlink` 得 `ENOENT` → 当作已删（返回 true）。`removeExtras` 自己的 `lstat` 不动（照旧抛）。其它错误照旧抛出。`dev` 判定、按字节取名、不跟随链接都不变。
   - 占位目录未删净时 `displace` 照旧抛（现在的 `MountInPlace`——它不再只代表挂载点，改一个贴切的名字并同步注释）；同一条目在 `failed` 里只出现一次。
   - 改掉 #1212 之后字面不成立的三处注释：文件头「each single call that creates, deletes or renames」经 `guard`（`removeTree` 之内只有起点一次）；文件头说逐级删除在 `remove`（实际在 `removeTree`）；`restore` 说明里的「not in `failed`」只对找多余条目阶段发现的挂载点成立。文件头的 Errors 段补上本任务的两种情形。

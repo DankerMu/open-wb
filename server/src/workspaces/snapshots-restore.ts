@@ -12,23 +12,29 @@
  * component not followed, no blocking), the content, mode and time of a written-back file (set
  * on the temporary file's handle before it gets its name), and the mode of a new directory.
  * Everything else goes by path. Each entry is first checked by `parentsAreReal` (every parent
- * level a real directory), and so is each single call that creates, deletes or renames
- * (`guard`). The check and the call it guards are still two steps (Node has no `openat`), so a
- * parent replaced by a symbolic link between them is traversed: the residual registered in
- * design D10 and ADR-0010 (task 20.3).
+ * level a real directory), and so is each single call that creates or renames, and each deletion
+ * at its starting point (`guard`): the calls of a recursive deletion below that point
+ * (`removeTree`) are not checked one by one. The check and the call it guards are still two steps
+ * (Node has no `openat`), so a parent replaced by a symbolic link between them is traversed: the
+ * residual registered in design D10 and ADR-0010 (task 20.3).
  *
  * A directory on another device than the workspace root (a mount point, judged by `dev` alone) is
  * not read, listed, written or deleted, whether the manifest's `skipped` has it or not: what was
  * mounted after the snapshot is in no manifest (#1212). Three places see to it: the search for
  * extra entries does not go into one, whatever the manifest has under that path (`removeExtras`);
- * a directory is deleted level by level and not across a device (`remove`); and `parentsAreReal`
- * compares `dev` at every level, for one that shows up later. Those found are in the result's
- * `skipped`.
+ * a directory is deleted level by level and not across a device (`removeTree`); and
+ * `parentsAreReal` compares `dev` at every level, for one that shows up later. Those found by the
+ * first two are in the result's `skipped`.
  *
  * Errors: `EACCES` / `EPERM` on one entry puts it in `failed` and the restore goes on; anything
  * else rejects, leaving the workspace partly restored. Calling again continues: what is already
  * as the manifest says is left alone. An entry whose place is held by a directory that could not
- * be deleted for a mount point in it is in `failed` too.
+ * be deleted, for a mount point in it or for what was added to it meanwhile, is in `failed` too.
+ * Two errors of a deletion are the other writer's doing and do not reject (#1214): `ENOENT`
+ * (what was to be deleted is gone already) counts as deleted, and `ENOTEMPTY` / `EEXIST` from
+ * `rmdir` (something was added after the directory was listed) keeps that directory with what
+ * was added and puts its path in `failed`. It is not tried again: a restore deletes what it
+ * listed and so ends, whatever the writer does; the next restore deletes the rest.
  */
 import { randomBytes } from "node:crypto";
 import { constants, promises as fsp, type Stats } from "node:fs";
@@ -72,8 +78,9 @@ interface RestoreResult {
   /** Files whose content was written back, plus symbolic links created again. */
   restored: number;
   /**
-   * Deleted entries the manifest does not have; a directory with all below it counts once, and
-   * not at all when a mount point in it kept it from being deleted whole.
+   * Deleted entries the manifest does not have, those another writer deleted first included; a
+   * directory with all below it counts once, and not at all when it was not deleted whole: a
+   * mount point in it, or a level that got a new entry after it was listed, kept it.
    */
   removed: number;
   /**
@@ -83,7 +90,9 @@ interface RestoreResult {
   skipped: SkippedPath[];
   /**
    * Entries left as they were: a parent level is not a real directory of the workspace's device,
-   * a directory in the entry's place holds a mount point, or permission denied.
+   * a directory in the entry's place could not be deleted whole, or permission denied. Also every
+   * directory a deletion kept because it got a new entry after it was listed (#1214): a level of
+   * an extra directory or of one in an entry's place, so a path the manifest may not have.
    */
   failed: { path: string }[];
 }
@@ -113,7 +122,8 @@ interface Run {
  * is missing or the workspace root is not a real directory. Order: delete what the manifest does not have, then directories from the top down,
  * then files, then symbolic links. An entry of another type under a manifest path is replaced
  * by its phase and does not count toward `removed`. A manifest entry at or under a mount point
- * found on the way is left to no phase: it is not restored and not in `failed`.
+ * found by the search for extra entries or by a deletion is left to no phase: it is not restored
+ * and not in `failed`. One under a mount point that only `parentsAreReal` meets is in `failed`.
  */
 export async function restore(options: RestoreOptions): Promise<RestoreResult> {
   if (isWithin(options.workspaceRoot, options.snapshotDir)) {
@@ -193,7 +203,7 @@ export async function parentsAreReal(workspaceRoot: string, path: string): Promi
 class ParentNotReal extends Error {}
 
 /** Thrown by `displace`; `attempt` turns it into a `failed` entry. */
-class MountInPlace extends Error {}
+class OccupantKept extends Error {}
 
 /** Called right ahead of every call that creates, deletes or renames something at `path`. */
 async function guard(run: Run, path: string): Promise<void> {
@@ -205,8 +215,8 @@ async function guard(run: Run, path: string): Promise<void> {
 /**
  * Runs what restores one entry, after checking its parents (so its reads are not led elsewhere
  * either). The entry goes to `failed` when a parent level is not a real directory, then or at a
- * later `guard`, when a mount point keeps a directory in its place (`displace`), or when the work
- * is refused (`EACCES` / `EPERM`); any other error propagates and ends the restore.
+ * later `guard`, when a directory in its place could not be deleted whole (`displace`), or when
+ * the work is refused (`EACCES` / `EPERM`); any other error propagates and ends the restore.
  */
 async function attempt(run: Run, path: string, work: () => Promise<void>): Promise<void> {
   try {
@@ -214,7 +224,7 @@ async function attempt(run: Run, path: string, work: () => Promise<void>): Promi
     await work();
   } catch (error) {
     const code = codeOf(error);
-    const kept = error instanceof ParentNotReal || error instanceof MountInPlace;
+    const kept = error instanceof ParentNotReal || error instanceof OccupantKept;
     if (!kept && code !== "EACCES" && code !== "EPERM") {
       throw error;
     }
@@ -232,9 +242,17 @@ async function requireDirectory(path: string, what: string): Promise<Stats> {
 }
 
 /** `lstat`, or `undefined` when nothing is there. */
-async function present(path: string): Promise<Stats | undefined> {
+function present(path: string | Buffer): Promise<Stats | undefined> {
+  return unlessGone(fsp.lstat(path));
+}
+
+/**
+ * What `call` resolves to, or `undefined` when it found nothing at its path (`ENOENT`). Around a
+ * call that deletes, "nothing there" is the same as deleted: another writer was first (#1214).
+ */
+async function unlessGone<T>(call: Promise<T>): Promise<T | undefined> {
   try {
-    return await fsp.lstat(path);
+    return await call;
   } catch (error) {
     if (codeOf(error) === "ENOENT") {
       return undefined;
@@ -246,16 +264,17 @@ async function present(path: string): Promise<Stats | undefined> {
 /**
  * Deletes the workspace entry `path`, which `stat` (its `lstat`) found there, and tells whether
  * it is gone. Anything but a directory goes by `unlink`, which never follows a link and never
- * deletes a directory. A directory goes with all below it, but for the mount points in it
- * (`removeTree`): `false` when one kept it. The three callers that delete a directory come here:
- * an extra one, and one in the place of a manifest file or symbolic link.
+ * deletes a directory; one that is gone by then counts as deleted. A directory goes with all
+ * below it (`removeTree`): `false` when a mount point in it, or an entry added to it meanwhile,
+ * kept it. The three callers that delete a directory come here: an extra one, and one in the
+ * place of a manifest file or symbolic link.
  */
 async function remove(run: Run, path: string, stat: Stats): Promise<boolean> {
   await guard(run, path);
   if (stat.isDirectory()) {
     return removeTree(run, path, Buffer.from(join(run.root, path)), stat);
   }
-  await fsp.unlink(join(run.root, path));
+  await unlessGone(fsp.unlink(join(run.root, path)));
   return true;
 }
 
@@ -267,9 +286,14 @@ async function remove(run: Run, path: string, stat: Stats): Promise<boolean> {
  * Each level is classified by `lstat`, and whatever is no directory goes by `unlink`: a link is
  * never followed.
  *
+ * Another writer may be in the tree (#1214). What it deleted first is deleted: `ENOENT` from the
+ * listing of a level (`dir` itself included), from the `lstat` or `unlink` of an entry, or from
+ * `rmdir`. A level it added an entry to after the listing is kept with that entry (`rmdir` says
+ * `ENOTEMPTY` or `EEXIST`), put in `failed` and not listed again; the rest of the tree goes.
+ *
  * Names are bytes from the listing to the call (#1148), so an entry whose name is not valid
- * UTF-8 goes like any other. `path` is for the record only: below such a name it is the lossy
- * decoding.
+ * UTF-8 goes like any other. `path` is for the record only (`skipped` and `failed`): below such
+ * a name it is the lossy decoding.
  */
 async function removeTree(run: Run, path: string, dir: Buffer, stat: Stats): Promise<boolean> {
   if (stat.dev !== run.rootDev) {
@@ -277,19 +301,32 @@ async function removeTree(run: Run, path: string, dir: Buffer, stat: Stats): Pro
     return false;
   }
   let emptied = true;
-  for (const name of await fsp.readdir(dir, { encoding: "buffer" })) {
+  for (const name of (await unlessGone(fsp.readdir(dir, { encoding: "buffer" }))) ?? []) {
     const child = Buffer.concat([dir, SEPARATOR, name]);
-    const childStat = await fsp.lstat(child);
+    const childStat = await present(child);
+    if (childStat === undefined) {
+      continue;
+    }
     if (!childStat.isDirectory()) {
-      await fsp.unlink(child);
+      await unlessGone(fsp.unlink(child));
     } else if (!(await removeTree(run, `${path}/${name.toString("utf8")}`, child, childStat))) {
       emptied = false;
     }
   }
-  if (emptied) {
-    await fsp.rmdir(dir);
+  if (!emptied) {
+    return false;
   }
-  return emptied;
+  try {
+    await unlessGone(fsp.rmdir(dir));
+  } catch (error) {
+    const code = codeOf(error);
+    if (code !== "ENOTEMPTY" && code !== "EEXIST") {
+      throw error;
+    }
+    run.failed.add(path);
+    return false;
+  }
+  return true;
 }
 
 /** Records the mount point `path`: from here on it protects like a skipped path of the manifest. */
@@ -299,12 +336,13 @@ function foundMount(run: Run, path: string): void {
 }
 
 /**
- * Deletes what holds the place of a manifest entry as another type. A directory that a mount
- * point kept from going throws: the entry is `failed`, and nothing is renamed or linked onto it.
+ * Deletes what holds the place of a manifest entry as another type. A directory that could not
+ * be deleted whole (`remove`) throws: the entry is `failed`, and nothing is renamed or linked
+ * onto it.
  */
 async function displace(run: Run, path: string, stat: Stats): Promise<void> {
   if (!(await remove(run, path, stat))) {
-    throw new MountInPlace();
+    throw new OccupantKept();
   }
 }
 
@@ -323,7 +361,7 @@ function underSkipped(skipped: ReadonlySet<string>, path: string): boolean {
  * An entry the manifest has as something else than it is now is left to that entry's phase.
  * A directory on another device is a mount point whatever the manifest has under its path, so
  * `dev` is looked at before the manifest: it is recorded and neither entered, deleted nor left
- * to a phase (#1212). An extra directory that a mount point kept from going is not counted.
+ * to a phase (#1212). An extra directory that was not deleted whole (`remove`) is not counted.
  *
  * Listed as bytes (#1148). `parent` is the root or a directory of the manifest, so it was there
  * when the snapshot was taken, and an entry of it whose name is not valid UTF-8 may have been
@@ -513,7 +551,7 @@ async function sameBytes(
  * umask applies, no setuid / setgid / sticky bit is carried) and the recorded `mtime` (`atime`
  * too: the manifest records none). Only then is it renamed over the final name, and nothing is
  * done to that name afterwards: it may be a link by then. A current entry that is not a regular
- * file is deleted first; a directory that a mount point keeps there ends the step before the
+ * file is deleted first; a directory that could not be deleted whole ends the step before the
  * rename. The temporary file does not outlive a failure; that clean-up is the one
  * unguarded call by path, and can only hit the name made up here.
  */

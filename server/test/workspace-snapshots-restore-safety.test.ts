@@ -11,7 +11,6 @@ import fs, {
   existsSync,
   lstatSync,
   mkdirSync,
-  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -23,9 +22,11 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   contentsOf,
+  editManifest,
   type Fixture,
   fixture,
   ioError,
+  leftovers,
   lock,
   manifestOf,
   OUTSIDE_BYTES,
@@ -42,17 +43,8 @@ const IS_ROOT = process.geteuid?.() === 0;
 const PINNED_SECONDS = 1_700_000_000;
 const TEMP_NAME = /^\.restore-[0-9a-f]{32}\.tmp$/;
 
-type Manifest = { entries: Record<string, unknown>[]; skipped: Record<string, unknown>[] };
-
 function at(f: Fixture, path: string): string {
   return join(f.workspace, path);
-}
-
-/** Rewrites the snapshot's manifest: what a damaged or older snapshot would hold. */
-function editManifest(f: Fixture, edit: (manifest: Manifest) => void): void {
-  const manifest = manifestOf(f) as Manifest;
-  edit(manifest);
-  writeFileSync(join(f.snapshot, "manifest.json"), JSON.stringify(manifest));
 }
 
 /** What changes when a file is written, replaced or chmod-ed (reading it moves only `atime`). */
@@ -81,11 +73,6 @@ function aroundRead(path: string, writer: { before?: () => void; after?: () => v
     }
     return handle;
   });
-}
-
-/** The temporary files a restore left in `dir`. */
-function leftovers(dir: string): string[] {
-  return readdirSync(dir).filter((name) => name.startsWith(".restore-"));
 }
 
 /** A changed workspace with an extra entry, its snapshot taken before the changes. */

@@ -201,6 +201,20 @@ export function manifestOf(f: Fixture): { entries: unknown[]; skipped: unknown[]
   return JSON.parse(readFileSync(join(f.snapshot, "manifest.json"), "utf8"));
 }
 
+type Manifest = { entries: Record<string, unknown>[]; skipped: Record<string, unknown>[] };
+
+/** Rewrites the snapshot's manifest: what a damaged or older snapshot would hold. */
+export function editManifest(f: Fixture, edit: (manifest: Manifest) => void): void {
+  const manifest = manifestOf(f) as Manifest;
+  edit(manifest);
+  writeFileSync(join(f.snapshot, "manifest.json"), JSON.stringify(manifest));
+}
+
+/** The temporary files a restore left in `dir`. */
+export function leftovers(dir: string): string[] {
+  return readdirSync(dir).filter((name) => name.startsWith(".restore-"));
+}
+
 export function fileEntry(f: Fixture, path: string): Record<string, unknown> {
   const s = lstatSync(join(f.workspace, path));
   return {
@@ -224,14 +238,15 @@ export function ioError(code: string): NodeJS.ErrnoException {
 
 /**
  * A writer between classification and reading: once the real `lstat` of `target` has returned,
- * `swap` runs (once) before the walk sees the result.
+ * `swap` runs (once) before the walk sees the result. `target` is compared as a string, so a path
+ * the module gives as bytes is met too (the restore's recursive deletion does).
  */
 export function swapAfterLstat(target: string, swap: () => void): void {
   const lstat = fs.promises.lstat;
   let swapped = false;
   vi.spyOn(fs.promises, "lstat").mockImplementation((async (path: PathLike, o?: StatOptions) => {
     const stat = await lstat(path, o);
-    if (path === target && !swapped) {
+    if (String(path) === target && !swapped) {
       swapped = true;
       swap();
     }
@@ -239,12 +254,15 @@ export function swapAfterLstat(target: string, swap: () => void): void {
   }) as typeof lstat);
 }
 
-/** `act` runs once, right before the walk's first `lstat` of `target`: nothing of it is read yet. */
+/**
+ * `act` runs once, right before the walk's first `lstat` of `target` (a string or bytes): nothing
+ * of it is read yet.
+ */
 export function beforeLstat(target: string, act: () => void): void {
   const lstat = fs.promises.lstat;
   let done = false;
   vi.spyOn(fs.promises, "lstat").mockImplementation(((path: PathLike, o?: StatOptions) => {
-    if (path === target && !done) {
+    if (String(path) === target && !done) {
       done = true;
       act();
     }
@@ -316,12 +334,15 @@ export function waitForClock(f: Fixture, path: string): void {
 
 type Listing = (path: PathLike, options: { encoding: "buffer" }) => Promise<Buffer[]>;
 
-/** The module's listing of `dir` goes through `change` (once the real one has returned). */
+/**
+ * The module's listing of `dir` (given as a string or as bytes) goes through `change` (once the
+ * real one has returned).
+ */
 export function onListing(dir: string, change: (names: Buffer[]) => Buffer[]): void {
   const readdir = fs.promises.readdir as unknown as Listing;
   vi.spyOn(fs.promises, "readdir").mockImplementation((async (path, options) => {
     const names = await readdir(path, options);
-    return path === dir ? change(names) : names;
+    return String(path) === dir ? change(names) : names;
   }) as Listing as unknown as typeof fs.promises.readdir);
 }
 
@@ -335,6 +356,22 @@ export function afterListing(dir: string, act: () => void): void {
     }
     return names;
   });
+}
+
+/**
+ * `act` runs once, right before the module's first `rmdir` of `target` (a string or bytes): what
+ * the module meant to delete below it is gone by then.
+ */
+export function beforeRmdir(target: string, act: () => void): void {
+  const rmdir = fs.promises.rmdir;
+  let done = false;
+  vi.spyOn(fs.promises, "rmdir").mockImplementation(((path: PathLike) => {
+    if (String(path) === target && !done) {
+      done = true;
+      act();
+    }
+    return rmdir(path);
+  }) as typeof rmdir);
 }
 
 /** A reader stuck opening `fifo` returns once a writer shows up; without a reader this is ENXIO. */
