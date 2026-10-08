@@ -359,6 +359,26 @@ export function afterListing(dir: string, act: () => void): void {
 }
 
 /**
+ * `act` runs once, right after the module's listing of `dir` (a string or bytes) has failed and
+ * before the module sees that error.
+ */
+export function afterListingFails(dir: string, act: () => void): void {
+  const readdir = fs.promises.readdir as unknown as Listing;
+  let done = false;
+  vi.spyOn(fs.promises, "readdir").mockImplementation((async (path, options) => {
+    try {
+      return await readdir(path, options);
+    } catch (error) {
+      if (String(path) === dir && !done) {
+        done = true;
+        act();
+      }
+      throw error;
+    }
+  }) as Listing as unknown as typeof fs.promises.readdir);
+}
+
+/**
  * `act` runs once, right before the module's first `rmdir` of `target` (a string or bytes): what
  * the module meant to delete below it is gone by then.
  */

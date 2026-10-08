@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   afterListing,
+  afterListingFails,
   beforeLstat,
   beforeRmdir,
   contentsOf,
@@ -118,6 +119,23 @@ describe("删除期间的并发改动不中止还原 — what is gone already co
 });
 
 describe("删除期间的并发改动不中止还原 — what was added after the listing stays", () => {
+  it("new/sub deleted whole before it is listed, then made again empty: what was made is not deleted", async () => {
+    const f = await withExtraDirectory();
+    const deleted = writer(swapAfterLstat, at(f, "new/sub"), () =>
+      rmSync(at(f, "new/sub"), { recursive: true }),
+    );
+    const madeAgain = writer(afterListingFails, at(f, "new/sub"), () =>
+      mkdirSync(at(f, "new/sub")),
+    );
+
+    const result = await restoreRun(f);
+
+    expect([deleted(), madeAgain()]).toEqual([1, 1]);
+    expect(contentsOf(f.workspace)).toEqual({ "a.txt": "alpha\n", new: "dir", "new/sub": "dir" });
+    // The level that was gone counts as deleted; the one above it got an entry after its listing.
+    expect(result).toEqual({ restored: 1, removed: 0, skipped: [], failed: [{ path: "new" }] });
+  });
+
   it("new/sub/late.txt added after new/sub was listed: that level is kept and failed, no retry", async () => {
     const f = await withExtraDirectory();
     const made = writer(afterListing, at(f, "new/sub"), () =>
@@ -170,5 +188,32 @@ describe("删除期间的并发改动不中止还原 — what was added after th
     });
     expect(result).toEqual({ restored: 1, removed: 0, skipped: [], failed: [{ path: "x" }] });
     expect(leftovers(f.workspace)).toEqual([]);
+  });
+});
+
+describe("删除期间的并发改动不中止还原 — what still rejects", () => {
+  it("an extra file gone before the lstat that classifies it: the search for extras rejects", async () => {
+    const f = fixture();
+    put(f.workspace, "a.txt", "alpha\n");
+    await snapshot(f);
+    put(f.workspace, "extra.txt", "extra\n");
+    const made = writer(beforeLstat, at(f, "extra.txt"), () => rmSync(at(f, "extra.txt")));
+
+    await expect(restoreRun(f)).rejects.toMatchObject({ code: "ENOENT", syscall: "lstat" });
+
+    expect(made()).toBe(1);
+  });
+
+  it("new/sub replaced by a regular file after its lstat, before it is listed: ENOTDIR rejects", async () => {
+    const f = await withExtraDirectory();
+    const made = writer(swapAfterLstat, at(f, "new/sub"), () => {
+      rmSync(at(f, "new/sub"), { recursive: true });
+      writeFileSync(at(f, "new/sub"), "a file now\n");
+    });
+
+    await expect(restoreRun(f)).rejects.toMatchObject({ code: "ENOTDIR" });
+
+    expect(made()).toBe(1);
+    expect(contentsOf(f.workspace)).toMatchObject({ "new/sub": "a file now\n" });
   });
 });

@@ -288,8 +288,10 @@ async function remove(run: Run, path: string, stat: Stats): Promise<boolean> {
  *
  * Another writer may be in the tree (#1214). What it deleted first is deleted: `ENOENT` from the
  * listing of a level (`dir` itself included), from the `lstat` or `unlink` of an entry, or from
- * `rmdir`. A level it added an entry to after the listing is kept with that entry (`rmdir` says
- * `ENOTEMPTY` or `EEXIST`), put in `failed` and not listed again; the rest of the tree goes.
+ * `rmdir`. A level whose listing found it gone is done with: no `rmdir` follows, which would
+ * delete a directory made again under that name. A level it added an entry to after the listing
+ * is kept with that entry (`rmdir` says `ENOTEMPTY` or `EEXIST`), put in `failed` and not listed
+ * again; the rest of the tree goes.
  *
  * Names are bytes from the listing to the call (#1148), so an entry whose name is not valid
  * UTF-8 goes like any other. `path` is for the record only (`skipped` and `failed`): below such
@@ -300,8 +302,12 @@ async function removeTree(run: Run, path: string, dir: Buffer, stat: Stats): Pro
     foundMount(run, path);
     return false;
   }
+  const names = await unlessGone(fsp.readdir(dir, { encoding: "buffer" }));
+  if (names === undefined) {
+    return true;
+  }
   let emptied = true;
-  for (const name of (await unlessGone(fsp.readdir(dir, { encoding: "buffer" }))) ?? []) {
+  for (const name of names) {
     const child = Buffer.concat([dir, SEPARATOR, name]);
     const childStat = await present(child);
     if (childStat === undefined) {
