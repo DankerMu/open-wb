@@ -79,7 +79,6 @@ import { envelope, SESSION_MESSAGES } from "./chat-page-ownership-support.js";
 import { deferred, historyUser, SESSION_ID } from "./chat-stream-support.js";
 import { hasLucideGlyph, imagePreviewResponse } from "./files-fixture.js";
 import { deferredResponse, jsonResponse, textPreviewResponse } from "./support.js";
-import { readRepoFile } from "./ui-support.js";
 
 const blobs = artifactCardFixture();
 
@@ -753,11 +752,5 @@ describe("产物卡 placement", () => {
 
     expect(rowTexts(cardNamed("文件变更（1 个）"))).toEqual(["写入zhangsan/proj/main.py"]);
     expect(artifactCards()).toEqual([]);
-  });
-});
-
-describe("artifact card static styles", () => {
-  it("A15 keeps artifact styles out of chat.css (guard)", () => {
-    expect(readRepoFile("web/src/features/chat/chat.css")).not.toContain("artifact-");
   });
 });

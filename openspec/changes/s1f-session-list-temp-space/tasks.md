@@ -398,9 +398,16 @@ Minimal mergeable slice: 14.1 + 14.2（只新增纯函数与偏好读写，旧�
   - 走查只改第 11 步的可见性断言（条目消失后页面任何位置都没有 `任务已删除`）；第 7 步已符合。
   - 偏离（待 owner 追认）：三条借 `已重命名` 轻提示测 Escape 层叠的用例失去前提（生产代码不再有任何提示调用方）——`chat-page-artifacts-panel-focus`、`chat-page-project-config-dialog`、`chat-page-artifact-card-feedback` 中各一条。删除并记偏离；层叠本身仍由 `ui-toast-drawer-escape` 覆盖。不为它们加测试专用的提示触发器。
   - 改用 `alert-dialog` 后，条目被删除时焦点的归还是风险点，须有断言。
-- [ ] 15.6 迁移终态：`session-menu.tsx`、`session-actions.ts`、`rename-dialog.tsx`、`delete-dialog.tsx` 登记；`SESSION_LIST_FILES` 清空并删除该常量与豁免分支；`web/src/features/chat/chat.css` 删除、`web/src/styles/legacy.css` 去掉对它的导入；守卫改为断言 ui-foundation「会话页迁移终态」（含四个注入样本）。`chat.css` 选择器归属断言的测试随文件删除而删除。
+- [x] 15.6 迁移终态：`session-menu.tsx`、`session-actions.ts`、`rename-dialog.tsx`、`delete-dialog.tsx` 登记；`SESSION_LIST_FILES` 清空并删除该常量与豁免分支；`web/src/features/chat/chat.css` 删除、`web/src/styles/legacy.css` 去掉对它的导入；守卫改为断言 ui-foundation「会话页迁移终态」（含四个注入样本）。`chat.css` 选择器归属断言的测试随文件删除而删除。
+  **实施注记（15.6 + 15.8，fixture 评审补充）**：
+  - 四个文件按字母序登记进 `MIGRATED_AREAS` 与逐字的名单断言；它们只从 `web/src/ui` 导入 `Icon` / `useEscapeFallback`，没有 `list-none`，登记即合规。
+  - 守卫终态（ui-foundation「会话页迁移终态」）：删除 `SESSION_LIST_FILES` 及其豁免分支；去掉对 `chat.css` 的放行——`features/chat` 下任何 `.css` 都是违规；「现状」用例改为：目录下每个 `.ts` / `.tsx` 都在名单里且反向相等、没有 `.css`、没有 `session-filter.tsx`、`web/src/styles/legacy.css` 不导入 `features/chat`。
+  - 四个注入样本各自判失败：未登记的文件；未登记的会话列表文件（如把 `session-menu.tsx` 从名单里滤掉——证明没有豁免残留）；目录里的 `.css`（含 `chat.css` 本身，原样本期望 `[]`，翻转）；已登记的会话列表文件导入 `useToast` 或 `Menu`（原对 `session-actions.ts` 断言 `[]`，翻转）。
+  - 删除 `web/src/features/chat/chat.css` 与 `legacy.css` 对它的导入；不改任何 `.tsx` 逻辑。
+  - 受波及的既有用例（经 `readRepoFile` 读 `chat.css` 的七个测试文件：`chat-steps`、`chat-messages`、`chat-composer`、`topbar`、`chat-page-artifact-card`、`chat-page-sidebar`、`chat-page-session-rename-pin`）：能翻成「不存在 / 不导入」的翻转，只为读该文件而存在的断言删除——逐条记偏离。
+  - `make ui-walk` 两个项目各跑一遍，确认没有视觉规则丢失（该文件自 #961 起已无规则）。
 - [x] 15.7 SL 行：重命名、置顶、删除（三种确认文案）、失败就地显示各一行，`待签`。
-- [ ] 15.8 变异证据：成功后调用任何提示 → 15.4 的无提示断言判红；删除确认不区分共用 → 「删除确认文案」判红；保留 `chat.css` → 终态守卫判红；守卫保留豁免名单 → 注入样本「未登记的会话列表文件」不判失败，守卫自证测试判红。
+- [x] 15.8 变异证据：成功后调用任何提示 → 15.4 的无提示断言判红；删除确认不区分共用 → 「删除确认文案」判红；保留 `chat.css` → 终态守卫判红；守卫保留豁免名单 → 注入样本「未登记的会话列表文件」不判失败，守卫自证测试判红。
 
 Suggested fixture level: expanded - 重写共享的列表动作入口、失败呈现规则改变、分层守卫终态与 legacy 样式删除、改写 CI 门禁的走查步骤
 Minimal mergeable slice: 15.1 + 15.2 + 15.3 + 15.4 + 15.5 atomic: 菜单、两个对话框与动作层互相依赖旧基元，逐个替换会让同一条动作一半有提示一半没有；提示一去掉，旧走查的 `任务已删除` 断言同时失效 → 15.6 紧随其后单独合入（纯守卫与样式删除）

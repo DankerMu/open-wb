@@ -1,3 +1,0 @@
-/* The session-list styles moved into Tailwind classes (session-menu.tsx, rename-dialog.tsx,
-   session-sidebar.tsx). The file is kept empty until the layering guard stops requiring it
-   (s1f-session-list-temp-space task 15.6 deletes it together with its import). */
