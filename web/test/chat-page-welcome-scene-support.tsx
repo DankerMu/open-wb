@@ -53,6 +53,12 @@ export const ALPHA_OPTION = "Alphazhangsan/misc";
 /** `POST /api/sessions` 依次返回的会话 id。 */
 export const CREATED_IDS = ["d", "e", "f"].map((digit) => digit.repeat(32));
 
+/**
+ * 不带 `workspaceId` 的创建依次得到的临时空间 id（与 `CREATED_IDS` 逐位对应）：服务端为每次这样的创建
+ * 新铸一个空间，它不在任何一次 `GET /api/workspaces` 的返回里。
+ */
+export const TEMP_WORKSPACE_IDS = ["4d", "4e", "4f"].map((pair) => pair.repeat(16));
+
 export function workspaceList(...workspaces: WorkspaceView[]) {
   return jsonResponse({ workspaces });
 }
@@ -71,18 +77,18 @@ type WelcomeFixture = {
 };
 
 /**
- * 欢迎态路由：`POST /api/sessions` 像服务端那样把请求体里的 `scene`/`workspaceId` 写进新会话并排到
- * 列表首位；各会话的历史为空快照，新会话的 prompt 挂起。
+ * 欢迎态路由：`POST /api/sessions` 像服务端那样建会话并排到列表首位——请求体带 `workspaceId` 时绑定
+ * 该空间（`temporaryWorkspace: false`），不带时用新铸的临时空间（`TEMP_WORKSPACE_IDS` 的下一个，
+ * `temporaryWorkspace: true`）；`scene` 照写。REST 不再建出 `workspaceId` 为 null 的会话：存量未绑定行
+ * 用 `existing: [view(...)]` 表达。各会话的历史为空快照，新会话的 prompt 挂起；临时空间的项目配置与
+ * 命令目录为空。
  */
 export function welcomeRoutes({
   create,
   existing = [],
   workspaces = () => workspaceList(PROJECT_A, SUPPORT),
 }: WelcomeFixture = {}): FetchRoutes {
-  const created: (Omit<SessionView, "scene" | "workspaceId"> & {
-    scene: string | null;
-    workspaceId: string | null;
-  })[] = [];
+  const created: (Omit<SessionView, "scene"> & { scene: string | null })[] = [];
   const routes: FetchRoutes = {
     "/api/sessions": (_path, options) => {
       if (options?.method !== "POST") {
@@ -90,15 +96,17 @@ export function welcomeRoutes({
       }
       if (create) return create();
       const id = CREATED_IDS[created.length];
-      if (id === undefined) throw new Error("夹具的会话 id 已用完");
+      const minted = TEMP_WORKSPACE_IDS[created.length];
+      if (id === undefined || minted === undefined) throw new Error("夹具的会话 id 已用完");
       const input = JSON.parse(typeof options.body === "string" ? options.body : "{}") as {
         scene?: string;
         workspaceId?: string;
       };
+      const temporaryWorkspace = input.workspaceId === undefined;
+      const workspaceId = input.workspaceId ?? minted;
       const session = {
-        ...view(id, null, { status: "idle" }),
+        ...view(id, null, { status: "idle", temporaryWorkspace, workspaceId }),
         scene: input.scene ?? null,
-        workspaceId: input.workspaceId ?? null,
       };
       created.push(session);
       return jsonResponse(session, 201);
@@ -113,6 +121,10 @@ export function welcomeRoutes({
   for (const id of CREATED_IDS) {
     routes[messagesPath(id)] = () => snapshotOf(created.find((session) => session.id === id));
     routes[sessionPromptPath(id)] = () => new Promise<Response>(() => {});
+  }
+  for (const id of TEMP_WORKSPACE_IDS) {
+    routes[`/api/project-config?workspaceId=${id}`] = () => jsonResponse({ files: [] });
+    routes[`/api/commands?workspaceId=${id}`] = () => jsonResponse({ commands: [] });
   }
   return routes;
 }
