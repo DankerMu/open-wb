@@ -607,6 +607,7 @@ describe("(R) size changes without a content change", () => {
             ...historyUser,
             id: 2,
             role: "assistant" as const,
+            undo: null,
             content: "",
             status: "running" as const,
             createdAt: 2,

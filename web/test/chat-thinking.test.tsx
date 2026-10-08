@@ -56,7 +56,7 @@ const SETTLED_APPROVAL: Message["approvals"][number] = {
 };
 
 function assistant(id: number, status: Status, fields: Partial<Message> = {}): Message {
-  const base = { content: "", thinking: null, createdAt: id, steps: [], approvals: [] };
+  const base = { content: "", thinking: null, createdAt: id, steps: [], approvals: [], undo: null };
   return { id, role: "assistant", status, ...base, ...fields };
 }
 
@@ -261,6 +261,7 @@ describe("thinking snapshot mapping and reduction", () => {
     expect(next.messages.at(-1)).toStrictEqual({
       id: 99,
       role: "assistant",
+      undo: null,
       status: "running",
       content: "",
       thinking: "y",

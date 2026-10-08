@@ -4,6 +4,8 @@ type ChatSessionStatus = "idle" | "running" | "done" | "failed" | "stopped";
 type ChatMessageRole = "user" | "assistant";
 type ChatDeliveryStatus = "running" | "done" | "failed" | "stopped";
 type ChatSessionScene = "office" | "code" | "design";
+/** 用户消息的可撤回状态（message-undo「可撤回状态」）；只读派生值。 */
+type ChatUndoState = "available" | "too_large" | "failed" | "command" | "unbound" | "none";
 
 type ChatSessionMeta = {
   scene: ChatSessionScene | null;
@@ -45,6 +47,8 @@ export type ChatMessage = {
   createdAt: number;
   steps: ChatStep[];
   approvals: ChatApproval[];
+  /** 助手消息恒为 null；用户消息恒为六个取值之一。 */
+  undo: ChatUndoState | null;
 };
 
 export type ChatStreamCursor = {
@@ -73,6 +77,8 @@ export type ChatMessageSnapshot = {
 export type ChatPromptAccepted = {
   userMessageId: number;
   assistantMessageId: number;
+  /** 刚受理的那条用户消息的可撤回状态。 */
+  undo: ChatUndoState;
 };
 
 export type ChatRegenerateAccepted = {
@@ -100,6 +106,14 @@ export type ChatSettledApproval = ChatApproval & { decision: ChatApprovalDecisio
 const SESSION_ID = /^[0-9a-f]{32}$/;
 const WORKSPACE_ID = /^[0-9a-f]{32}$/;
 const MAX_FILE_CHANGES = 50;
+const UNDO_STATES: ReadonlySet<unknown> = new Set<ChatUndoState>([
+  "available",
+  "too_large",
+  "failed",
+  "command",
+  "unbound",
+  "none",
+]);
 const TODO_STATUSES: ReadonlySet<unknown> = new Set<ChatTodoStatus>([
   "pending",
   "in_progress",
@@ -129,6 +143,10 @@ function isDeliveryStatus(value: unknown): value is ChatDeliveryStatus {
 
 function isApprovalDecision(value: unknown): value is ChatApprovalDecision {
   return value === "allow" || value === "deny" || value === "timeout";
+}
+
+function isUndoState(value: unknown): value is ChatUndoState {
+  return UNDO_STATES.has(value);
 }
 
 function isSessionScene(value: unknown): value is ChatSessionScene {
@@ -249,19 +267,21 @@ function parseMessage(value: unknown): ChatMessage | null {
       "createdAt",
       "steps",
       "approvals",
+      "undo",
     ])
   ) {
     return null;
   }
 
-  const { approvals, content, createdAt, id, role, status, steps, thinking } = value;
+  const { approvals, content, createdAt, id, role, status, steps, thinking, undo } = value;
   if (
     !isSafeInteger(id) ||
     !isMessageRole(role) ||
     typeof content !== "string" ||
     !isMessageThinking(thinking, role) ||
     !isDeliveryStatus(status) ||
-    !isSafeInteger(createdAt)
+    !isSafeInteger(createdAt) ||
+    !isMessageUndo(undo, role)
   ) {
     return null;
   }
@@ -281,7 +301,13 @@ function parseMessage(value: unknown): ChatMessage | null {
     createdAt,
     steps: parsedSteps,
     approvals: parsedApprovals,
+    undo,
   };
+}
+
+/** One of the six states on a user message; exactly null on an assistant message. */
+function isMessageUndo(value: unknown, role: ChatMessageRole): value is ChatUndoState | null {
+  return role === "user" ? isUndoState(value) : value === null;
 }
 
 /** A string or null on assistant messages; a user message never carries thinking. */
@@ -398,16 +424,16 @@ export function parseMessageSnapshot(value: unknown): ChatMessageSnapshot | null
 }
 
 export function parsePromptAccepted(value: unknown): ChatPromptAccepted | null {
-  if (!hasExactlyKeys(value, ["userMessageId", "assistantMessageId"])) {
+  if (!hasExactlyKeys(value, ["userMessageId", "assistantMessageId", "undo"])) {
     return null;
   }
 
-  const { assistantMessageId, userMessageId } = value;
-  if (!isSafeInteger(userMessageId) || !isSafeInteger(assistantMessageId)) {
+  const { assistantMessageId, undo, userMessageId } = value;
+  if (!isSafeInteger(userMessageId) || !isSafeInteger(assistantMessageId) || !isUndoState(undo)) {
     return null;
   }
 
-  return { userMessageId, assistantMessageId };
+  return { userMessageId, assistantMessageId, undo };
 }
 
 export function isStopAccepted(value: unknown): boolean {

@@ -16,9 +16,12 @@ import type { WorkspaceRootOf } from "./session-cwd.js";
 import {
   insertTurnSnapshot,
   latestOkTurnSnapshot,
+  listSessionTurnSnapshots,
   readStoredTodo,
   type SkippedPath,
   type TurnSnapshotOutcome,
+  type UndoState,
+  undoStatesOf,
 } from "./store-undo.js";
 
 /** What `take` resolves with; `skipped` reasons are stored as given and never interpreted. */
@@ -70,6 +73,12 @@ export interface TurnSnapshots {
    * went with the message). Never rejects; a failure is only reported.
    */
   discard(workspaceId: string | null, userMessageId: number): Promise<void>;
+  /**
+   * The `undo` value of each user message of the session, as its registration rows stand at this
+   * call (one synchronous read); `workspaceId` is the session's binding. Unlike the two above it
+   * throws when the database does.
+   */
+  undoStates(sessionId: string, workspaceId: string | null): (userMessageId: number) => UndoState;
 }
 
 type Registration = { outcome: TurnSnapshotOutcome; skipped: readonly SkippedPath[] };
@@ -157,5 +166,7 @@ export function createTurnSnapshots(deps: TurnSnapshotDependencies): TurnSnapsho
       }
     },
     discard,
+    undoStates: (sessionId, workspaceId) =>
+      undoStatesOf(listSessionTurnSnapshots(db, sessionId), workspaceId),
   };
 }

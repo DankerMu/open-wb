@@ -37,7 +37,16 @@ function message(
   content = "",
   approvals: Approval[] = [],
 ): Message {
-  return { ...historyUser, id, role, status, content, createdAt: id, approvals };
+  return {
+    ...historyUser,
+    id,
+    role,
+    undo: role === "user" ? historyUser.undo : null,
+    status,
+    content,
+    createdAt: id,
+    approvals,
+  };
 }
 
 function snapshotOf(status: Snapshot["session"]["status"], messages: Message[], seq: number) {
@@ -314,7 +323,7 @@ describe("unknown turn resync: own prompt", () => {
     expectAuthoritativeRows();
     await answerPending(fetchMock);
 
-    prompt.resolve(jsonResponse({ userMessageId: 1, assistantMessageId: 2 }, 202));
+    prompt.resolve(jsonResponse({ userMessageId: 1, assistantMessageId: 2, undo: "none" }, 202));
     await flush();
     expect(source.closeCount).toBe(1);
     expect(FakeEventSource.instances).toHaveLength(2);
@@ -327,7 +336,7 @@ describe("unknown turn resync: own prompt", () => {
 
   it("P5′ shows the approval prompt card after the 202 reconcile when the 202 comes first", async () => {
     const { fetchMock, prompt, reads, source } = await sendPrompt();
-    prompt.resolve(jsonResponse({ userMessageId: 1, assistantMessageId: 2 }, 202));
+    prompt.resolve(jsonResponse({ userMessageId: 1, assistantMessageId: 2, undo: "none" }, 202));
     await flush();
     expect(source.closeCount).toBe(1);
     expect(FakeEventSource.instances).toHaveLength(2);

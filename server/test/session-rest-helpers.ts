@@ -12,6 +12,7 @@ import {
   createSessionMetadataStore,
   type SessionMetadataStore,
 } from "../src/sessions/store-metadata.js";
+import { createTurnSnapshots } from "../src/sessions/turn-snapshot.js";
 import { bearerCookie, loginSessionId } from "./auth-lifecycle-helpers.js";
 import { PARSER_INPUTS, withStandaloneAuthApp } from "./http-guard-helpers.js";
 import { temporaryWorkspacePort } from "./support/temporary-workspace.js";
@@ -28,6 +29,16 @@ export const SESSION_ARCHIVED_ENVELOPE = {
 } as const;
 export const AGENT_UNAVAILABLE_ENVELOPE = {
   error: { code: "agent_unavailable", message: "Agent 运行时不可用" },
+} as const;
+/**
+ * What the view of a user message carries besides its own columns on a session with no workspace
+ * and no registration row — every session `store.create` makes here (#946: `undo` is `unbound`).
+ */
+export const UNBOUND_USER_VIEW = {
+  approvals: [],
+  undo: "unbound",
+  steps: [],
+  thinking: null,
 } as const;
 
 const oversizedParserInput = PARSER_INPUTS.find((entry) => entry.name === "oversized body");
@@ -96,8 +107,18 @@ export async function withSessionRest<T>(
               Promise.reject(new Error("session-rest harness does not serve DELETE")),
           },
           // The recording supervisor never runs the pre-dispatch step, so nothing is snapshotted
-          // here (#945); the real step is exercised in prompt-snapshot.test.ts.
-          turnSnapshots: { step: () => () => Promise.resolve(), discard: () => Promise.resolve() },
+          // here (#945) and no registration row is written: the real module reads `none` for a
+          // bound session and `unbound` for an unbound one (#946). The real step is exercised in
+          // prompt-snapshot.test.ts.
+          turnSnapshots: createTurnSnapshots({
+            db,
+            snapshots: {
+              take: () => Promise.reject(new Error("session-rest harness takes no snapshot")),
+              remove: () => Promise.resolve(),
+            },
+            workspaceRootOf: () => null,
+            onError: () => undefined,
+          }),
         });
         try {
           return await action({ app, db, store, supervisor, metadata, listNotified });

@@ -278,7 +278,7 @@ export async function openAnswering(sent: string) {
     [SESSION_MESSAGES]: () => jsonResponse(snapshot),
     [SESSION_PROMPT]: () => {
       snapshot = after;
-      return jsonResponse({ userMessageId: 1, assistantMessageId: 2 }, 202);
+      return jsonResponse({ userMessageId: 1, assistantMessageId: 2, undo: "none" }, 202);
     },
   });
   await type("/");

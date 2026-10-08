@@ -579,6 +579,7 @@ describe("approval prompt card: ownership fences", () => {
           ...historyUser,
           id: 2,
           role: "assistant",
+          undo: null,
           status: "running",
           content: "",
           createdAt: 2,
@@ -614,7 +615,7 @@ describe("approval prompt card: ownership fences", () => {
     const reads = calls(fetchMock, MESSAGES).length;
     expect(reads).toBe(3);
     const sources = FakeEventSource.instances.length;
-    prompt.resolve(jsonResponse({ userMessageId: 1, assistantMessageId: 2 }, 202));
+    prompt.resolve(jsonResponse({ userMessageId: 1, assistantMessageId: 2, undo: "none" }, 202));
     await flush();
     expect(calls(fetchMock, MESSAGES)).toHaveLength(reads + 1);
     expect(source.closeCount).toBe(1);

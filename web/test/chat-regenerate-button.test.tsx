@@ -43,7 +43,15 @@ const BUSY_B = envelope("session_busy", "B 会话忙");
 const UNAVAILABLE = envelope("agent_unavailable", "Agent 运行时不可用");
 
 function message(id: number, role: Message["role"], status: Message["status"], content = "") {
-  return { ...historyUser, id, role, status, content, createdAt: id };
+  return {
+    ...historyUser,
+    id,
+    role,
+    undo: role === "user" ? historyUser.undo : null,
+    status,
+    content,
+    createdAt: id,
+  };
 }
 
 /** 自建快照：会话状态、消息与游标都直接写进字面量（`stopped` 不在 `chatSnapshot` 选项里）。 */
@@ -256,7 +264,8 @@ describe("regenerate button: request, lock and reconcile", () => {
     const reconcile = deferredResponse();
     const { fetchMock, messages, source } = await mount(D, {
       [REGEN]: () => regen.promise,
-      [PROMPT_PATH]: () => jsonResponse({ userMessageId: 6, assistantMessageId: 7 }, 202),
+      [PROMPT_PATH]: () =>
+        jsonResponse({ userMessageId: 6, assistantMessageId: 7, undo: "none" }, 202),
     });
     await waitFor(() => expect(textarea().disabled).toBe(false));
     const reads = calls(fetchMock, MESSAGES).length;
@@ -446,7 +455,7 @@ describe("regenerate button: request, lock and reconcile", () => {
     const reads = calls(fetchMock, MESSAGES).length;
     const sources = FakeEventSource.instances.length;
     messages.reply = () => jsonResponse(N);
-    prompt.resolve(jsonResponse({ userMessageId: 6, assistantMessageId: 7 }, 202));
+    prompt.resolve(jsonResponse({ userMessageId: 6, assistantMessageId: 7, undo: "none" }, 202));
     await flush();
     expect(calls(fetchMock, PROMPT_PATH)).toHaveLength(1);
     expect(calls(fetchMock, MESSAGES)).toHaveLength(reads + 1);

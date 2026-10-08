@@ -48,6 +48,7 @@ const snapshot = {
     {
       id: -3,
       role: "user" as const,
+      undo: "none" as const,
       approvals: [],
       content: SNAPSHOT_CONTENT,
       status: "done" as const,
@@ -58,6 +59,7 @@ const snapshot = {
     {
       id: 0,
       role: "assistant" as const,
+      undo: null,
       approvals: [],
       content: "",
       status: "running" as const,
@@ -73,6 +75,7 @@ const snapshot = {
 const promptAccepted = {
   userMessageId: -3,
   assistantMessageId: 0,
+  undo: "none",
 };
 
 const sessionMethods = [
@@ -245,6 +248,7 @@ describe("Sessions API client snapshot domain contract", () => {
         {
           id: -SAFE_INTEGER_MAX,
           role: "user" as const,
+          undo: "none" as const,
           approvals: [],
           content: "",
           status: "failed" as const,
@@ -255,6 +259,7 @@ describe("Sessions API client snapshot domain contract", () => {
         {
           id: SAFE_INTEGER_MAX,
           role: "assistant" as const,
+          undo: null,
           approvals: [],
           content: SNAPSHOT_CONTENT,
           status: "done" as const,
@@ -285,6 +290,7 @@ describe("Sessions API client snapshot domain contract", () => {
     const accepted = {
       userMessageId: 0,
       assistantMessageId: -SAFE_INTEGER_MAX,
+      undo: "none",
     };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(accepted, 202)));
 
@@ -362,6 +368,7 @@ describe("Sessions API client snapshot rejection contract", () => {
           {
             id: -3,
             role: "user",
+            undo: "none",
             content: SNAPSHOT_CONTENT,
             status: "done",
             createdAt: -1,
@@ -513,7 +520,7 @@ describe("Sessions API client snapshot rejection contract", () => {
   });
 
   it.each([
-    ["a missing assistantMessageId", { userMessageId: -3 }],
+    ["a missing assistantMessageId", { userMessageId: -3, undo: "none" }],
     ["an extra field", { ...promptAccepted, requestId: "private" }],
     ["an unsafe userMessageId", { ...promptAccepted, userMessageId: UNSAFE_INTEGER }],
     ["a fractional assistantMessageId", { ...promptAccepted, assistantMessageId: 1.5 }],

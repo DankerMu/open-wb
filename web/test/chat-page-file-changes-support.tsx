@@ -79,6 +79,7 @@ export function assistantMessage(
   return {
     id: 0,
     role: "assistant",
+    undo: null,
     content: "",
     thinking: null,
     status,

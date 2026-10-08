@@ -98,6 +98,7 @@ interface ForkBody {
 interface PublicMessage {
   id: number;
   role: string;
+  undo: string | null;
   approvals: Array<Record<string, unknown>>;
   steps: Array<Record<string, unknown>>;
 }
@@ -204,7 +205,12 @@ describe("fork REST on real fake-omp branch children", () => {
       expect(copy.session).toEqual(body.session);
       expect(copy.streamCursor).toEqual({ epoch: 0, seq: null });
       expect(copy.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
-      expect(copy.messages.map(withoutIds)).toEqual(original.messages.slice(0, 2).map(withoutIds));
+      // Everything is copied but the snapshot registration: the copied user message reads `none`.
+      expect(original.messages.slice(0, 2).map((m) => m.undo)).toEqual(["available", null]);
+      const copied = (m: PublicMessage) => ({ ...m, undo: m.role === "user" ? "none" : null });
+      expect(copy.messages.map(withoutIds)).toEqual(
+        original.messages.slice(0, 2).map((m) => withoutIds(copied(m))),
+      );
       const sourceIds = original.messages.map((m) => m.id);
       expect(copy.messages.some((m) => sourceIds.includes(m.id))).toBe(false);
       const copiedAnswer = copy.messages[1];

@@ -50,7 +50,15 @@ function envelope(code: string, message: string) {
 const BUSY_B = envelope("session_busy", "B 会话忙");
 
 function message(id: number, role: Message["role"], status: Message["status"], content: string) {
-  return { ...historyUser, id, role, status, content, createdAt: id };
+  return {
+    ...historyUser,
+    id,
+    role,
+    undo: role === "user" ? historyUser.undo : null,
+    status,
+    content,
+    createdAt: id,
+  };
 }
 
 function session(id: string, status: ChatSession["status"], title: string, updatedAt: number) {

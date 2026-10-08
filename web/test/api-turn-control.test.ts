@@ -268,6 +268,7 @@ describe("Stopped status in sessions and snapshots", () => {
       {
         id: -3,
         role: "user" as const,
+        undo: "none" as const,
         approvals: [],
         content: "hi",
         status: "done" as const,
@@ -278,6 +279,7 @@ describe("Stopped status in sessions and snapshots", () => {
       {
         id: 0,
         role: "assistant" as const,
+        undo: null,
         approvals: [],
         content: "partial",
         status: "stopped" as const,

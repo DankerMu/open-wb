@@ -30,6 +30,7 @@ const MESSAGE_KEYS = [
   "status",
   "createdAt",
   "approvals",
+  "undo",
   "steps",
 ];
 const STEP_KEYS = ["id", "ordinal", "name", "detail", "output", "changes", "status"];

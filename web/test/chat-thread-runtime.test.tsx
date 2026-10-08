@@ -35,7 +35,8 @@ afterEach(() => {
 });
 
 function view(id: number, role: View["role"], status: View["status"], content = "x"): View {
-  return { id, role, content, thinking: null, status, steps: [], approvals: [], error: null };
+  const undo = role === "user" ? "none" : null;
+  return { id, role, content, thinking: null, status, undo, steps: [], approvals: [], error: null };
 }
 
 /** 只挂 hook：经运行时自己的线程接口读状态、触发三个回调。 */

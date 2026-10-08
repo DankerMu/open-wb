@@ -492,7 +492,7 @@ describe("stop REST on the real supervisor and fake-omp", () => {
       const accepted = await prompt;
       expect(accepted.statusCode).toBe(202);
       const body = accepted.json<{ userMessageId: number; assistantMessageId: number }>();
-      expect(Object.keys(body).sort()).toEqual(["assistantMessageId", "userMessageId"]);
+      expect(Object.keys(body).sort()).toEqual(["assistantMessageId", "undo", "userMessageId"]);
       await expectStoppedEnd(world, body.assistantMessageId);
       expect(frameTypes(afterPrompt(child.stdin))).toEqual(["abort"]);
       expect(spy).toHaveBeenCalledTimes(1);

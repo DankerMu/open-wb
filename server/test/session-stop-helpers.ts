@@ -135,7 +135,7 @@ export async function listedStatus(world: ApprovalWorld): Promise<string | undef
 }
 
 /**
- * REST probe prompt on the same session: 202 with exactly {userMessageId, assistantMessageId},
+ * REST probe prompt on the same session: 202 with exactly {userMessageId, assistantMessageId, undo},
  * then one `done` turn.end for that assistant; returns the fake's per-process `frames=` record.
  */
 export async function probeFrames(world: ApprovalWorld): Promise<string> {
@@ -150,7 +150,7 @@ export async function probeFrames(world: ApprovalWorld): Promise<string> {
   );
   expect(response.statusCode).toBe(202);
   const body = response.json<{ userMessageId: number; assistantMessageId: number }>();
-  expect(Object.keys(body).sort()).toEqual(["assistantMessageId", "userMessageId"]);
+  expect(Object.keys(body).sort()).toEqual(["assistantMessageId", "undo", "userMessageId"]);
   const ends = await waitForEvent(world, "turn.end", ended + 1);
   expect(ends.at(-1)).toEqual({
     type: "turn.end",

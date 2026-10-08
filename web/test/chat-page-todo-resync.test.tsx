@@ -36,7 +36,7 @@ function snapshotOf(
     session: { ...chatSnapshot().session, status: assistant.status },
     messages: [
       historyUser,
-      { ...historyUser, ...assistant, role: "assistant", createdAt: assistant.id },
+      { ...historyUser, ...assistant, role: "assistant", undo: null, createdAt: assistant.id },
     ],
     streamCursor: { epoch: 1, seq },
     todo,

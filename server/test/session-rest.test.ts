@@ -20,6 +20,7 @@ import {
   postPrompt,
   SESSION_BUSY_ENVELOPE,
   SESSION_NOW,
+  UNBOUND_USER_VIEW,
   UNKNOWN_SESSION_ID,
   withSessionRest,
 } from "./session-rest-helpers.js";
@@ -169,9 +170,7 @@ describe("session REST", () => {
             content: "saved title",
             status: "done",
             createdAt: SESSION_NOW + 5,
-            approvals: [],
-            steps: [],
-            thinking: null,
+            ...UNBOUND_USER_VIEW,
           },
           {
             id: first.assistantMessageId,
@@ -180,6 +179,7 @@ describe("session REST", () => {
             status: "done",
             createdAt: SESSION_NOW + 5,
             approvals: [],
+            undo: null,
             steps: [],
             thinking: null,
           },
@@ -189,9 +189,7 @@ describe("session REST", () => {
             content: "second turn",
             status: "done",
             createdAt: SESSION_NOW + 20,
-            approvals: [],
-            steps: [],
-            thinking: null,
+            ...UNBOUND_USER_VIEW,
           },
           {
             id: second.assistantMessageId,
@@ -200,6 +198,7 @@ describe("session REST", () => {
             status: "done",
             createdAt: SESSION_NOW + 20,
             approvals: [],
+            undo: null,
             steps: [
               {
                 id: firstStep,
@@ -429,6 +428,7 @@ describe("session REST", () => {
       expect(escaped.json()).toEqual({
         userMessageId: expect.any(Number),
         assistantMessageId: expect.any(Number),
+        undo: "unbound",
       });
       expect(supervisor.calls).toEqual([{ sessionId: escapedSession.id, text: decoded }]);
       expect(
@@ -511,6 +511,7 @@ describe("session REST", () => {
         expect(accepted.json()).toEqual({
           userMessageId: admitted[0]?.id,
           assistantMessageId: admitted[1]?.id,
+          undo: "unbound",
         });
         expect(sessionRow(db, session.id).status).toBe("running");
       } finally {
@@ -745,9 +746,7 @@ describe("session REST", () => {
               content: "saved title",
               status: "done",
               createdAt: SESSION_NOW + 4,
-              approvals: [],
-              steps: [],
-              thinking: null,
+              ...UNBOUND_USER_VIEW,
             },
             {
               id: first.assistantMessageId,
@@ -756,6 +755,7 @@ describe("session REST", () => {
               status: terminal,
               createdAt: SESSION_NOW + 4,
               approvals: [],
+              undo: null,
               steps: [],
               thinking: null,
             },
@@ -765,9 +765,7 @@ describe("session REST", () => {
               content: "follow up",
               status: "done",
               createdAt: SESSION_NOW + 12,
-              approvals: [],
-              steps: [],
-              thinking: null,
+              ...UNBOUND_USER_VIEW,
             },
             {
               id: body.assistantMessageId,
@@ -776,6 +774,7 @@ describe("session REST", () => {
               status: "running",
               createdAt: SESSION_NOW + 12,
               approvals: [],
+              undo: null,
               steps: [],
               thinking: null,
             },

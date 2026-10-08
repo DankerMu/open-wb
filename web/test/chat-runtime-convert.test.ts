@@ -21,6 +21,7 @@ function stoppedView(): View {
     content: "部分回答",
     thinking: "先想一想",
     status: "stopped",
+    undo: null,
     steps: [
       {
         id: 31,
@@ -51,6 +52,7 @@ function runningView(): View {
     content: "正在",
     thinking: null,
     status: "running",
+    undo: null,
     steps: [],
     approvals: [],
     error: null,
