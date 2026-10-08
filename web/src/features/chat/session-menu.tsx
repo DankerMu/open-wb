@@ -16,16 +16,27 @@ type SessionMenuProps = {
   /** `trigger` 是本菜单的「更多」按钮，供重命名对话框与删除确认框关闭后归还焦点。 */
   onRename(trigger: HTMLElement | null): void;
   onTogglePin(): void;
+  onArchive(): void;
+  onRestore(): void;
   onDelete(trigger: HTMLElement | null): void;
 };
 
 /**
- * 条目行尾的「更多」菜单（demo:1909-1921）：`重命名`、`置顶任务` | `取消置顶`、`删除`，对任何状态
- * 的会话可用。按钮始终在 DOM 中且可聚焦（demo:296-297 的「悬停才出现」不采用：触屏与键盘不可达）：
- * 只在可悬停的宽屏上以透明度弱化，条目（`group/session`，session-sidebar.tsx 的 `li`）悬停、其内
+ * 条目行尾的「更多」菜单（demo:1909-1921）。未归档的会话（默认视图）：`重命名`、`置顶任务` |
+ * `取消置顶`、`归档`、`删除`；`归档` 在 `running` 的会话上禁用，其余项对任何状态可用。已归档的会话
+ * （归档视图）：恰 `恢复`、`删除`。两个视图各只渲染一类会话，所以按 `archivedAt` 分支。按钮始终在 DOM 中且可聚焦（demo:296-297 的「悬停才出现」不采用：触屏与键盘不可达）：
+ * 只在可悬停的宽屏上以透明度弱化，条目（`group/session`，session-entry.tsx 的 `li`）悬停、其内
  * 有焦点或菜单打开时显现。`modal={false}`：外点关闭且点击到达目标，不锁 body 的指针事件。
  */
-export function SessionMenu({ session, title, onRename, onTogglePin, onDelete }: SessionMenuProps) {
+export function SessionMenu({
+  session,
+  title,
+  onRename,
+  onTogglePin,
+  onArchive,
+  onRestore,
+  onDelete,
+}: SessionMenuProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   return (
     <DropdownMenu modal={false}>
@@ -41,14 +52,27 @@ export function SessionMenu({ session, title, onRename, onTogglePin, onDelete }:
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-36" collisionPadding={8} loop>
-        <DropdownMenuItem onSelect={() => onRename(triggerRef.current)}>
-          <Icon name="pencil" size={14} />
-          重命名
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={onTogglePin}>
-          <Icon name="star" size={14} />
-          {session.pinnedAt === null ? "置顶任务" : "取消置顶"}
-        </DropdownMenuItem>
+        {session.archivedAt === null ? (
+          <>
+            <DropdownMenuItem onSelect={() => onRename(triggerRef.current)}>
+              <Icon name="pencil" size={14} />
+              重命名
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onTogglePin}>
+              <Icon name="star" size={14} />
+              {session.pinnedAt === null ? "置顶任务" : "取消置顶"}
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={session.status === "running"} onSelect={onArchive}>
+              <Icon name="archive" size={14} />
+              归档
+            </DropdownMenuItem>
+          </>
+        ) : (
+          <DropdownMenuItem onSelect={onRestore}>
+            <Icon name="refresh-cw" size={14} />
+            恢复
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem onSelect={() => onDelete(triggerRef.current)} variant="destructive">
           <Icon name="trash" size={14} />
           删除
