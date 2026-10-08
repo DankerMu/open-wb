@@ -111,8 +111,8 @@ CONTEXT.md 不变量 4（网关/kb 凭证不进 omp 可读环境）在同 uid �
   3. 把 `<state>/agent/skills` 的内容以 app uid 重新安装到 `<state>/home/.omp/agent/skills`（先核对内容——旧目录曾对 omp uid 可写）；
      宿主不自动搬。旧 `<state>/agent` 的其余文件（`agent.db` 等）不再被读写。
   4. 启动。会话文件位置不变，旧会话可继续续接。
-  排障：布局校验不通过时启动日志只有 generic 的 `server_start_failed`（既有合同，不带原因），运行中则表现为每次发消息 502
-  `agent_unavailable`。升级后出现这两种症状，先核对上表各目录的属主（必须是 app uid）、是否被符号链接或文件占位、以及 app uid 是否在共享组里。
+  排障：布局校验不通过时启动日志是一行 `{"event":"server_start_failed","reason":"state_layout"}`（`reason` 只标出失败的启动阶段，
+  不带原始错误与路径，#1203），运行中则表现为每次发消息 502 `agent_unavailable`。升级后出现这两种症状，先核对上表各目录的属主（必须是 app uid）、是否被符号链接或文件占位、以及 app uid 是否在共享组里。
 - **残余**：omp uid 仍可在 `<state>/home` 下建第三方配置目录（`~/.claude` 等）并在 `<state>/xdg/data/omp` 里持久化自己的状态
   （含用户级插件目录）；前者由 #708 的宿主 overlay 处理，后者与 #708 已接受的「项目插件/工具不拦」同类。
   `sessions/<ownerId>` 之内的递归删除竞态由 #706 的后续切片（删除前先移入 app 私有目录）关闭。

@@ -6,6 +6,7 @@
  * 主路径契约：
  * - 完整 env 配置在 SIGINT/SIGTERM 注册与任何文件系统/DB/listen 副作用之前同步校验；
  * - 配置失败只发一行 generic application stderr JSON，不安装 handler、不获取任何资源；
+ * - 失败记录带 reason：失败所处的启动阶段（封闭枚举的源码字面量，#1203），不带 error 的任何内容；
  * - 一个 per-entry AbortController 随 listen 传递：ready/pre-bind 窗口内的 signal 也会
  *   中止绑定，不会留下一个逃过 releaseOwned 的后到 listener（Fastify 也因 aborted 跳过
  *   server.listen/在 abort 时 close，Node 原生 listen signal 同样中止未完成绑定）；
@@ -182,9 +183,23 @@ function resolveSettingPath(raw: string, repoRoot: string): string {
   return isAbsolute(raw) ? raw : join(repoRoot, raw);
 }
 
-/** 失败记录：generic application stderr 一行；退出码已定。 */
-function emitStartupFailed(): Promise<void> {
-  return emitStderrRecord("server_start_failed");
+/**
+ * 启动失败所处的阶段（#1203）：封闭枚举，取值全是这里的字面量；只由「失败发生在哪一步」
+ * 决定，绝不取自 error 对象。
+ */
+type StartupStage =
+  | "config"
+  | "db"
+  | "app"
+  | "listen"
+  | "state_layout"
+  | "models_yml"
+  | "host_overlay"
+  | "publish";
+
+/** 失败记录：generic application stderr 一行，恰 event 与 reason 两个键；退出码已定。 */
+function emitStartupFailed(reason: StartupStage): Promise<void> {
+  return emitStderrRecord({ event: "server_start_failed", reason });
 }
 
 /**
@@ -192,7 +207,7 @@ function emitStartupFailed(): Promise<void> {
  * 以 void 调用，写入被拒绝也不会成为未处理 rejection。
  */
 function emitListenerForceClose(): void {
-  void emitStderrRecord("listener_force_close");
+  void emitStderrRecord({ event: "listener_force_close" });
 }
 
 /**
@@ -200,13 +215,13 @@ function emitListenerForceClose(): void {
  * （sink 契约不允许 thenable）；以 void 调用，写入被拒绝也不会成为未处理 rejection 或再次通知。
  */
 function emitSessionFault(): void {
-  void emitStderrRecord("session_fault");
+  void emitStderrRecord({ event: "session_fault" });
 }
 
 /** generic application stderr 一行；sink 不可用时吞掉（不递归/不抛原始 stack）。 */
-async function emitStderrRecord(event: string): Promise<void> {
+async function emitStderrRecord(record: { event: string; reason?: StartupStage }): Promise<void> {
   try {
-    await writeManagedLine(process.stderr, `${JSON.stringify({ event })}\n`);
+    await writeManagedLine(process.stderr, `${JSON.stringify(record)}\n`);
   } catch {
     // Sink unavailable: the generic line is physically impossible; exit code is decided elsewhere.
   }
@@ -226,6 +241,8 @@ interface OwnedResources {
   /** 已判定的真实启动失败（sticky）：signal 不得压制其 generic 发布或将退出码降为 0。 */
   failed: boolean;
   signalReceived: boolean;
+  /** 正在进行的启动步骤：每一步开始之前推进，失败出口读它作为 reason。 */
+  stage: StartupStage;
 }
 
 function runEntrypoint(): void {
@@ -235,7 +252,7 @@ function runEntrypoint(): void {
     config = resolveServerConfig(process.env, entryUrl);
   } catch {
     process.exitCode = 1;
-    void emitStartupFailed();
+    void emitStartupFailed("config");
     return;
   }
 
@@ -247,6 +264,7 @@ function runEntrypoint(): void {
     releaseFailed: false,
     failed: false,
     signalReceived: false,
+    stage: "db",
   };
 
   process.on("SIGINT", () => requestShutdown(owned));
@@ -262,6 +280,7 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
       preparePrivateDbFiles(config.dbPath);
     }
     owned.db = openDb(config.dbPath);
+    owned.stage = "app";
     owned.app = createApp({
       db: owned.db,
       staticRoot: config.staticRoot,
@@ -273,6 +292,7 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
       },
       assembly: appAssemblyOf(config),
     });
+    owned.stage = "listen";
     await owned.app.listen({
       host: config.host,
       port: config.port,
@@ -290,12 +310,14 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
     owned.failed = true;
     process.exitCode = 1;
     await releaseOwned(owned);
-    await emitStartupFailed();
+    await emitStartupFailed(owned.stage);
   }
 }
 
 /** 成功记录：listen 之后建托管布局、写托管 models 与宿主 overlay，再发实际 bound address/port。 */
 async function publishStarted(owned: OwnedResources, config: ServerConfig): Promise<void> {
+  // publish 涵盖发布步骤里三个具名子步骤之外的一切，包括开头这两项核对。
+  owned.stage = "publish";
   const app = owned.app;
   if (app === undefined) {
     throw new Error("startup owns no app instance");
@@ -307,12 +329,16 @@ async function publishStarted(owned: OwnedResources, config: ServerConfig): Prom
   if (owned.signalReceived) {
     return;
   }
+  owned.stage = "state_layout";
   ensureOmpStateLayout(config.ompStateDir);
+  owned.stage = "models_yml";
   await writeManagedModelsYml(ompAgentDir(config.ompStateDir), {
     proxyBaseUrl: deriveProxyBaseUrl(address),
     models: config.modelCatalog.models,
   });
+  owned.stage = "host_overlay";
   await writeHostOverlay(config.ompStateDir);
+  owned.stage = "publish";
   if (owned.signalReceived || owned.app === undefined) {
     return;
   }

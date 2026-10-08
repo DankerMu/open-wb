@@ -618,7 +618,9 @@ describe("production entry rejects invalid OMP_USER before effects", () => {
         .stderr()
         .replace(/^\(node:\d+\) /u, "")
         .replace(SQLITE_EXPERIMENTAL_WARNING, "");
-      expect(applicationStderr).toBe(`${JSON.stringify({ event: "server_start_failed" })}\n`);
+      expect(applicationStderr).toBe(
+        `${JSON.stringify({ event: "server_start_failed", reason: "config" })}\n`,
+      );
       expect(existsSync(dbParent)).toBe(false);
       expect(existsSync(state)).toBe(false);
       expect(existsSync(sandbox)).toBe(false);
@@ -752,8 +754,10 @@ function applicationStderr(stderr: string): string {
   return stderr.replace(/^\(node:\d+\) /u, "").replace(SQLITE_EXPERIMENTAL_WARNING, "");
 }
 
+/** Every caller fails while the private DB files are prepared: stage `db`. */
 function expectApplicationStderr(stderr: string): void {
-  expect(applicationStderr(stderr)).toBe(`${JSON.stringify({ event: "server_start_failed" })}\n`);
+  const record = { event: "server_start_failed", reason: "db" };
+  expect(applicationStderr(stderr)).toBe(`${JSON.stringify(record)}\n`);
 }
 
 async function expectGenericStartupFailure(server: StartedServer, port: number): Promise<void> {

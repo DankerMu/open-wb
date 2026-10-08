@@ -29,7 +29,7 @@ const RESOLVER_INVALID = ["", "ON", "Off", "true", "yes", " on"] as const;
 const ENTRY_INVALID = ["", "ON", "true", "yes"] as const;
 const PROXY_BASE_URL = "http://127.0.0.1:18016/v1";
 const MODEL_ID = "deepseek-v4.1-flash";
-const FAILED_RECORD = `${JSON.stringify({ event: "server_start_failed" })}\n`;
+const FAILED_RECORD = `${JSON.stringify({ event: "server_start_failed", reason: "config" })}\n`;
 const NODE_SQLITE_WARNING =
   /^\(node:\d+\) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n\(Use `node --trace-warnings \.\.\.` to show where the warning was created\)\n/u;
 
