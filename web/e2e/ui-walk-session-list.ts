@@ -307,6 +307,16 @@ async function expectTemporarySpace(walk: TempWalk, workspaceId: string): Promis
     await expectSelectedIn(list, temporary, [pinned]);
   });
 
+  // 服务端的两处先于卡片：空间列表漏出临时空间时，先红的是列表端点这一条。
+  const listed = await page.request.get("/api/workspaces");
+  expect(listed.status(), "GET /api/workspaces status").toBe(200);
+  const { workspaces } = (await listed.json()) as { workspaces: { id: string }[] };
+  expect(
+    workspaces.map((workspace) => workspace.id),
+    "GET /api/workspaces ids",
+  ).not.toContain(workspaceId);
+  expect(await treeNames(page, workspaceId), "temporary workspace tree").toEqual([file]);
+
   const card = page
     .getByRole("article", { name: "助手" })
     .getByRole("group", { name: "文件变更（1 个）", exact: true });
@@ -316,15 +326,6 @@ async function expectTemporarySpace(walk: TempWalk, workspaceId: string): Promis
   await expect(row.locator('[data-slot="file-change-kind"]')).toHaveText("写入");
   await expect(card.getByRole("button", { name: /查看详情/u })).toHaveCount(0);
   await walkArtifactPreview(page, file);
-
-  const listed = await page.request.get("/api/workspaces");
-  expect(listed.status(), "GET /api/workspaces status").toBe(200);
-  const { workspaces } = (await listed.json()) as { workspaces: { id: string }[] };
-  expect(
-    workspaces.map((workspace) => workspace.id),
-    "GET /api/workspaces ids",
-  ).not.toContain(workspaceId);
-  expect(await treeNames(page, workspaceId), "temporary workspace tree").toEqual([file]);
 }
 
 // 第 3 步：点 `撤回`，没有确认框；请求体严格等于 `{messageId, files:"restore"}`，200；线程回到零消息
@@ -375,8 +376,13 @@ async function resendAndFork(
 
   const messageId = await onlyUserMessageId(page, sessionId);
   await inspectSidebar(page, project, async (sidebar) => {
-    const entries = sessionList(sidebar).getByRole("button", { name: title, exact: true });
+    const list = sessionList(sidebar);
+    const entries = list.getByRole("button", { name: title, exact: true });
     await expect(entries).toHaveCount(1);
+    // 完成态先于 fork：最后一段正文与 `turn.end` 是两个事件，会话还在 `running` 时 fork 是 409。
+    await expect(list.locator(CURRENT_SESSION).getByRole("status")).toHaveAccessibleName(
+      `${title} 已完成`,
+    );
     const fork = await page.request.post(`/api/sessions/${sessionId}/fork`, {
       data: { messageId },
     });
