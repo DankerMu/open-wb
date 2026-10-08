@@ -1,8 +1,10 @@
 # workspaces Specification
 
 ## Purpose
-定义账号隔离的工作空间持久化 schema、保持Unicode名称身份的同步 store、惰性目录与失败补偿、单层列举/有界原始预览，以及五个带认证、审计、隔离与安全响应头的 REST 端点；生产启动装配由后续切片补充。
+定义账号隔离的工作空间持久化 schema、保持Unicode名称身份的同步 store、惰性目录与失败补偿、单层列举/有界原始预览，以及六个带认证、审计、隔离与安全响应头的 REST 端点；生产启动装配由后续切片补充。
+
 ## Requirements
+
 ### Requirement: 工作空间 schema
 迁移 `031_workspaces.sql` SHALL 建立 `workspaces(id TEXT PK 32 lowercase hex, owner_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, name TEXT NOT NULL CHECK 长度 1..64 且不含 U+0000–U+001F 与 U+007F, dir TEXT NOT NULL CHECK 只含 ASCII 字母数字、下划线、连字符与 CJK 统一表意文字且长度 1..64 且 NOT IN ('.','..'), created_at INTEGER NOT NULL)`，`UNIQUE(owner_id, name)`、`UNIQUE(owner_id, dir)`。受信任迁移目录计数断言 SHALL 随之 +1。
 
@@ -37,7 +39,7 @@
 - THEN completion/close/error follow native Readable behavior and owned descriptors are released; no silent error-to-empty fallback is introduced
 
 ### Requirement: 工作空间 store 与惰性目录事务
-`createWorkspaceStore(db,{sandboxRoot,ensureSharedDir,emit})` SHALL expose synchronous list(ownerId), create(principal,{name,dir?}), and rootOf(principal,workspaceId). list SHALL return only owner's workspace objects {id,name,dir,root,createdAt}, ordered created_at then id ascending; rootOf SHALL return an owned absolute root or null for foreign/missing rows. Reads SHALL NOT create directories. Root paths SHALL remain below the trusted pre-provisioned sandboxRoot without accepting unsafe owner path segments or existing owner/workspace symlinks. Those invalid persisted/configuration states SHALL fail generically without filesystem mutation, not become conflict or an unaudited sandbox_denied.
+`createWorkspaceStore(db,{sandboxRoot,ensureSharedDir,emit})` SHALL expose synchronous list(ownerId), create(principal,{name,dir?}), and rootOf(principal,workspaceId). list SHALL return only the owner's non-temporary (`temporary = 0`, migration 038) workspace objects {id,name,dir,root,createdAt}, ordered created_at then id ascending; rootOf SHALL return an owned absolute root or null for foreign/missing rows, and SHALL NOT distinguish temporary rows from ordinary ones. The store SHALL additionally expose the temporary-workspace operations specified by temporary-workspaces (creation inside the session-create transaction, promotion, and removal together with the last session using it); they SHALL share create's directory-ensure and compensation code rather than duplicate it, and create's own contract below is unchanged. Reads SHALL NOT create directories. Root paths SHALL remain below the trusted pre-provisioned sandboxRoot without accepting unsafe owner path segments or existing owner/workspace symlinks. Those invalid persisted/configuration states SHALL fail generically without filesystem mutation, not become conflict or an unaudited sandbox_denied.
 
 #### Scenario: owner scope 与稳定排序
 - WHEN legal rows exist for two owners with differing and tied signed created_at values
@@ -77,8 +79,12 @@
 - WHEN persisted owner id contains a path separator, traversal component or NUL, or an owner/workspace directory is a symlink
 - THEN no outside path is returned/adopted/created or removed, and no workspace/create event is committed
 
+#### Scenario: 列表不含临时空间
+- **WHEN** an owner has two ordinary rows and one row with `temporary = 1`
+- **THEN** list returns exactly the two ordinary five-field objects in created_at,id order, while rootOf returns the owned root for all three ids and null for the same ids under another owner
+
 ### Requirement: 列表与创建
-`GET /api/workspaces` SHALL 返回本账号空间按 `created_at, id` 升序 `{workspaces:[{id,name,dir,root,createdAt}]}`（`root` 为绝对路径字符串）。`POST /api/workspaces` SHALL 只接受 `application/json` body `{name:string, dir?:string}`（≤16 KiB，归属 content-parser 集）：`name` trim 后 1..64 Unicode scalar，拒绝孤立 UTF16 surrogate 且不含 U+0000–U+001F/U+007F，保留合法 supplementary 与字面 U+FFFD 不变；`dir` 缺省由 `name` 把不属于「ASCII 字母数字、下划线、连字符、CJK」的字符逐个替换为 `-` 派生（demo `newWorkspaceModal` 同法；派生结果为空、`.`、`..` 亦 400），显式给出时须满足 schema 规则；违反 → 400 `bad_request`（body 校验层，不触及文件系统、不写审计——design D2 边界判定）；`(owner,name)` 或 `(owner,dir)` 冲突 → 409 `conflict`，不建目录。成功 SHALL 在一个事务内插行并依次 `ensureSharedDir(沙箱根)`、`ensureSharedDir(root)`（目录已存在则直接采用）、`emit(workspace.create, title "创建工作空间 <name>")`，任一步失败回滚；返回 201 `{id,name,dir,root,createdAt}`，`no-store`。
+`GET /api/workspaces` SHALL 返回本账号的**非临时**空间（`temporary = 0`；临时空间见 temporary-workspaces，它们不出现在本列表，文件页因此不列出）按 `created_at, id` 升序 `{workspaces:[{id,name,dir,root,createdAt}]}`（`root` 为绝对路径字符串）；工作空间对象恰为这五键，不含 `temporary`。`POST /api/workspaces` 创建的行 `temporary` 恒为 0。`POST /api/workspaces` SHALL 只接受 `application/json` body `{name:string, dir?:string}`（≤16 KiB，归属 content-parser 集）：`name` trim 后 1..64 Unicode scalar，拒绝孤立 UTF16 surrogate 且不含 U+0000–U+001F/U+007F，保留合法 supplementary 与字面 U+FFFD 不变；`dir` 缺省由 `name` 把不属于「ASCII 字母数字、下划线、连字符、CJK」的字符逐个替换为 `-` 派生（demo `newWorkspaceModal` 同法；派生结果为空、`.`、`..` 亦 400），显式给出时须满足 schema 规则；违反 → 400 `bad_request`（body 校验层，不触及文件系统、不写审计——design D2 边界判定）；`(owner,name)` 或 `(owner,dir)` 冲突 → 409 `conflict`，不建目录。成功 SHALL 在一个事务内插行并依次 `ensureSharedDir(沙箱根)`、`ensureSharedDir(root)`（目录已存在则直接采用）、`emit(workspace.create, title "创建工作空间 <name>")`，任一步失败回滚；返回 201 `{id,name,dir,root,createdAt}`，`no-store`。
 
 #### Scenario: 创建与派生
 - WHEN zhangsan `POST {name:"智能 客服/重构"}`
@@ -87,6 +93,10 @@
 #### Scenario: 采用既有目录
 - WHEN 磁盘已存在 `<SANDBOX_ROOT>/u1/smoke-fixture` 且表中无记录，`POST {name:"smoke-fixture"}`
 - THEN 201 且既有文件保留；既有目录权限不被改动
+
+#### Scenario: 临时空间不在列表里，转正后出现
+- **WHEN** zhangsan 有正式空间 `项目A`，并以无 body 的 `POST /api/sessions` 得到一个用临时空间 T 的会话，随后 `GET /api/workspaces`；再对 T 调用 `POST /api/workspaces/<T>/promote {"name":"调研资料"}` 后重新读取
+- **THEN** 第一次列表恰含 `项目A`，每个对象恰五键；第二次列表依次含 `项目A` 与 `调研资料`（其 `dir` 为 `tmp-<T>`）
 
 ### Requirement: 目录树、新建目录与隔离
 `GET /api/workspaces/:id/tree?path=<rel>` SHALL 经 `resolve(op=list)` 后只列举**该一层**：`{path, entries:[{name, type:'dir'|'file', size, mtime}]}`，目录在前、同类按 UTF-8 字节序，跳过 symlink 与非普通文件；`path` 缺省空串，服务端按 URL 解码后的字符串交给 `resolve`（不做额外规范化）；目标不存在或非目录 → 404。`POST /api/workspaces/:id/dirs` body `{path:string}`（≤16 KiB，归属集）经 `resolve(op=mkdir)`：父目录不存在或非目录 → 404，目标已存在 → 409 `conflict`，成功创建（`0o2770`）+ `emit(dir.create, title "新建目录 <path>")` → 201 `{path}`。属他人或不存在的 `:id` SHALL 对全部端点一律 404 `not_found`。越界路径 → 403 `sandbox_denied` + 审计（sandbox-core）。全部响应 `no-store`。
@@ -143,4 +153,3 @@ registerWorkspaces(app,{store,sandbox,audit}) SHALL consume one canonical precon
 #### Scenario: root 原样返回本人
 - **WHEN** 已认证用户列出或创建自己的工作空间，并读取本人的审计事件
 - **THEN** 响应中的 `root` 与 `workspace.create` 事件的 `detail.root` 为该空间的绝对路径原文，他人的工作空间不出现在列表中
-

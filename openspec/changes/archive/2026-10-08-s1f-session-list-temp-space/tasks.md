@@ -441,7 +441,8 @@ Minimal mergeable slice: 12.1 + 12.2 一起（没有冲突判定的 `restore` �
 - [x] 13.1 `web/src/lib/api-sessions.ts`：`undoMessage(id, messageId, files)` 与响应解析（`session`、`draft`、`files` 的严格形状）。测试：chat-web「撤回与转正方法」的 undo 部分。
 - [x] 13.2 `web/src/lib/api.ts`（或工作空间客户端所在文件）：`promoteWorkspace(id, name)`。测试：同一场景的 promote 部分。
 - [x] 13.3 列表事件连接器（新文件 `web/src/lib/session-list-events.ts`，纯逻辑、不渲染）：打开 `EventSource`、`open`（区分首次与再次打开）/ `sessions.changed` / `session.rewound` 回调、坏数据忽略、`close`；无 `EventSource` 时返回空实现。单测用假 `EventSource`：事件分发、首次与再次 `open` 的区分、非法 `data` 与非法 `sessionId` 被忽略、关闭后不再回调。
-- [ ] 13.4 变异证据（连接器两项已随 13.3 给出，#956；`files` 一项随 13.1）：`files` 解析放宽为任意对象 → 「200 body 缺 `files` / `mode` 非法」判红；连接器不校验 `sessionId` → 坏数据用例判红；连接器不区分首次与再次 `open` → 13.3 对应单测判红。
+- [x] 13.4 变异证据（连接器两项已随 13.3 给出，#956；`files` 一项随 13.1）：`files` 解析放宽为任意对象 → 「200 body 缺 `files` / `mode` 非法」判红；连接器不校验 `sessionId` → 坏数据用例判红；连接器不区分首次与再次 `open` → 13.3 对应单测判红。
+  核对记录（#980）：连接器两项的判红见 PR #1178；`files` 一项见 PR #1218——偏离：按原文只放宽 `files` 的解析时「`mode` 非法」等 29 例判红，而「缺 `files`」仍绿（被顶层严格键集先拦下）；连同顶层键集一并放宽后两者都红（33 例）。
 
 Suggested fixture level: compact - 独立的客户端方法与一个无状态连接器，各自一条单测路径，不改既有入口
 Minimal mergeable slice: 13.1、13.2、13.3 各自可单独合入（每个导出都由自己的单测文件引用；调用方在组 14、17、18 接上）
@@ -617,7 +618,8 @@ Minimal mergeable slice: 17.1、17.2、17.3、17.5 各自可单独合入（互�
   - 变异证据：谓词恒假 → (1) 读两次；谓词改全局（只判 ref 非空）→ (3) 读零次；去掉补读 → (2)；200 也补读 → (1)；冲突分支不释放在途 → (4)。
   - 18.5：`MIGRATED_AREAS` 已含组 18 的全部新文件；CH-60..CH-65 六行已在且均为 `待签`（CH-65 由 #970 加）。本刀没有用户可见变化，不新增 CH 行，只做核对与勾选。
   - 行数：`use-chat-session.ts` 不得超过 800。
-- [ ] 18.6 变异证据：撤回前弹确认 → 「没有出现确认框」判红；不覆盖已有草稿 → 「草稿为 `第二个问题`」判红；`aria-disabled` 的按钮仍发请求 → 「不可撤回的原因」判红；冲突时直接 `force` → 「取消后没有第二个请求」判红；去掉 fence → 新增「请求在途时切换会话，草稿不变」判红。
+- [x] 18.6 变异证据：撤回前弹确认 → 「没有出现确认框」判红；不覆盖已有草稿 → 「草稿为 `第二个问题`」判红；`aria-disabled` 的按钮仍发请求 → 「不可撤回的原因」判红；冲突时直接 `force` → 「取消后没有第二个请求」判红；去掉 fence → 新增「请求在途时切换会话，草稿不变」判红。
+  核对记录（#980）：五项的判红见 PR #1220（弹确认 22 例、不覆盖草稿 4 例、`aria-disabled` 仍发请求 1 例、直接 `force` 7 例、去掉 fence 3 例）。
   **实施注记（18.1 / 18.2 / 18.5 / 18.6，fixture 评审补充，#969）**：
   - `undo` 的传递链不存在，本刀补齐：`runtime-convert.ts` 的 `ChatMessageCustom` 增 `undo` → `message-thread.tsx` 的 `UserMessage` 取 `custom.undo` 并新增 `onUndo(messageId, trigger)` → `UserActions`。`onUndo` 与对话框 props 经 `conversation-view.tsx`、`page.tsx` 接线；`composer-locks.ts` 增一个只锁定、不算 `generating` 的输入（同 `forking`）。PR Boundary 相应含这六个文件。
   - 动作写进 `turn-actions.ts`（不新建 `undo-actions.ts`）：`chat-module-layout.test.ts` 钉死 `turn-actions` 的导入者只有 `use-chat-session.ts`，新文件一旦导入 `TERMINAL_REFRESH_GUIDANCE` 或想复用 `ownsSessionWrite` 就判红。在途 owner 与冲突对话框状态由 `use-chat-session.ts` 持有、setter 注入给 `turn-actions.ts`（与 `forkOwner` / `regenerateOwner` 同款）——既有守卫（`chat-approval-bar.test.tsx` G2）禁止 `turn-actions.ts` 出现 `useState(` / `useEffect(` / `useRef(`，主规格 chat-web 也规定 fence 状态由 `useChatSession` 持有并注入（本注记初稿写成放在 `useTurnActions` 内，与两者矛盾，实现时已更正）。`use-chat-session.ts` 不得越 800 行。`MIGRATED_AREAS`（列表与清单断言两处）只增 `undo-conflict-dialog.tsx`。
@@ -670,7 +672,8 @@ Minimal mergeable slice: 19.1 单独可合；19.2 + 19.3 在组 18 之后一个 
 - [x] 20.4 部署与运维说明（放在现有部署文档或 README 的配置节，先 grep 现有位置，不新建重复文档）：四个 `SNAPSHOT_*` 环境变量与默认值；默认排除名单只含依赖目录、`.git` 进快照，带大仓库的空间更容易触发条目 / 总量上限以及可以怎么调（调大上限，或把 `.git` 加回排除名单并接受提交不随撤回还原）；`snapshots` 目录的磁盘规划与进程被杀后可能残留的半份快照目录（停服务后可手工删除没有登记行的目录）；每个会话页标签页多一条 SSE 与 HTTP/1.1 连接数的提示；回滚后可手工清理的目录。
 - [x] 20.5 `IMPLEMENTATION_PLAN.md`：S1f 的 change C 状态行与交付记录（只记事实，不改 owner 决定的条文）；`docs/architecture/system.md` 若列有模块 / 端点清单则补新端点与新模块。
 - [x] 20.6 `docs/acceptance/functional-checklist.md` 收口：核对组 14–18 新增的 SL / CH 行齐全、ID 不重复、全部 `待签`、格式守卫通过。（design D16 的九项「起草者自定的呈现细节」在建 Epic 时原样列进 Epic 描述供 owner 知悉；这是建 issue 的动作，不是实现任务，也不卡任何任务。）
-- [ ] 20.7 归档前对底：本 change 归档之前，用当时的 `openspec/specs/**` 对本 change 的每一条 MODIFIED 重新 diff（按条文、按场景）。diff 里只允许出现 design D15 重叠表与 D15 首段列出的增量；若 S1g 或 D 的内容已先进入主规格（次序被打乱），把它们的句子与场景并回本 change 的对应条文、计数改为「当时的值加本 change 的增量」后再归档。核对结果写进归档 PR 的描述。
+- [x] 20.7 归档前对底：本 change 归档之前，用当时的 `openspec/specs/**` 对本 change 的每一条 MODIFIED 重新 diff（按条文、按场景）。diff 里只允许出现 design D15 重叠表与 D15 首段列出的增量；若 S1g 或 D 的内容已先进入主规格（次序被打乱），把它们的句子与场景并回本 change 的对应条文、计数改为「当时的值加本 change 的增量」后再归档。核对结果写进归档 PR 的描述。
+  核对记录（#980）：主规格自本 change 起草以来没有变更（最后一次是归档 s1f-chat-followups，早于起草提交），S1g 与 D 没有内容先进入主规格；44 条 MODIFIED、3 条 REMOVED 的表头与主规格逐字一致，主规格现有场景在 MODIFIED 版本里一个不缺；计数（十五码、十四条归属、十九项配置、十一键、eleven routes）不需调整——`upload_too_large` 是 S1g 的增量，代码先合入、规格随 S1g 归档。逐条结果见归档 PR 的描述。
 
 Suggested fixture level: none - 只改文档与清单，无运行时行为
 Minimal mergeable slice: 20.1 可最先单独合入；20.2–20.5 在对应功能组合入后各自可单独合入；20.6、20.7 最后
