@@ -291,6 +291,16 @@ Minimal mergeable slice: 9.1 + 9.2 一起（没有父目录校验的还原不可
   - 真实挂载上的验证（编排者在 Linux 测试机上做，不进 CI）：对一个 sshfs 挂载与一个 rclone 挂载各跑一次 `take` + `restore`，结果写进 PR。
   - `uid-isolation` 的快照检查不得因此判红；不改 CI 脚本。
   Risk packs（10.4d）: File IO / path safety / delete（还原不得删改挂载内的内容）、Legacy compatibility（旧清单没有 `mount` 项；`reason` 枚举增值）。
+- [ ] 10.4e 还原的递归删除接住并发改动（#1214；Critical Path）：
+  - `snapshots-restore.ts` 的 `removeTree`：列举（`readdir`）、子项的 `lstat` / `unlink`、`rmdir` 得 `ENOENT` → 当作已删，继续（起点自身的列举得 `ENOENT` → 返回「已删净」）；`rmdir` 得 `ENOTEMPTY` → 该级路径记入 `run.failed`、返回「未删净」，不重试。其它错误照旧抛出。`dev` 判定、按字节取名、不跟随链接都不变。
+  - 占位目录未删净时 `displace` 照旧抛（现在的 `MountInPlace`——它不再只代表挂载点，改一个贴切的名字并同步注释）；同一条目在 `failed` 里只出现一次。
+  - 改掉 #1212 之后字面不成立的三处注释：文件头「each single call that creates, deletes or renames」经 `guard`（`removeTree` 之内只有起点一次）；文件头说逐级删除在 `remove`（实际在 `removeTree`）；`restore` 说明里的「not in `failed`」只对找多余条目阶段发现的挂载点成立。文件头的 Errors 段补上本任务的两种情形。
+  - 测试（注入式，全平台；在 `server/test/workspace-snapshots-mounts.test.ts` 之外新开一个文件，沿用 `workspace-snapshots-helpers.ts` 的钩子，缺的钩子加在 helpers 里）：workspace-snapshots「递归删除期间的并发改动不中止还原」的四个 WHEN。注入点要落在列举与对应调用之间（包住模块用的 `fsp.readdir` / `fsp.lstat` / `fsp.rmdir`，在真实文件系统上做真实的删除或新增），不要伪造错误码。
+  - 补一例 `skipped` 去重（#1212 评审遗留）：清单 `skipped` 里一项 `name_encoding` 的有损路径恰等于一个挂载点的路径时，返回的 `skipped` 里该路径不追加 `mount` 项。清单可以手写，不需要真的造非 UTF-8 文件名；若只能在 Linux 上造，macOS 显式跳过并写明原因。
+  - 不得判红：`workspace-snapshots-mounts` / `-restore` / `-restore-safety` / `-names` 的既有用例；撤回的文件还原用例（`session-undo-files`）。
+  - 变异证据：`ENOENT` 仍抛（子项 `unlink` / `lstat`）→ 第一个 WHEN 判红；子目录列举的 `ENOENT` 仍抛 → 第二个判红；`ENOTEMPTY` 仍抛 → 第三、第四个判红；`ENOTEMPTY` 当作已删净（返回 true）→ 第三个 `removed` 判红、第四个走到写回而判红；`ENOTEMPTY` 不记 `failed` → 第三个判红；`ENOTEMPTY` 后回头重删 → `late.txt` 一例判红。
+  - 不改 `snapshots.ts`、`turn-snapshot.ts`、CI 脚本。
+  Risk packs（10.4e）: File IO / path safety / delete（不得删掉列举之后才写下的内容）、Concurrency（列举与删除之间的改动）。
 - [x] 10.5 快照步骤与路由接线：新模块 `server/src/sessions/turn-snapshot.ts`（自身不抛——未绑定不写行；命令回合写 `command`；其余调用 `take` 并写结果；失败只报告）；`createApp` 用 7.1 / 7.2 的布局与配置构造唯一的快照服务并注入；`rest.ts` 把步骤作为 `beforeDispatch` 传给 `supervisor.prompt`，受理与该调用之间不加 await；受理被补偿后删快照目录。测试（新文件 `server/test/prompt-snapshot.test.ts`，REST seam + fake omp）：workspace-snapshots「受理时做快照」六个场景（含「快照期间停止与删除」）、chat-sessions「Snapshot precedes dispatch and never blocks it」、http-service-skeleton「Shared agent module assembly」里快照服务的装配句。此时登记行已写入但还不经任何视图暴露。
   去重的接线（#939 留下）：调用 `take` 前用 10.2 的「取该工作空间最近一条 `ok`」查出上一份的 `message_id`，作为 `previousMessageId` 传入；查不到时**省略**该字段（传 `null` 会在落盘前抛 `TypeError`，被本模块的「自身不抛」吞成每个空间首回合都 `failed`）。REST 层加一条断言：同一空间连续两个回合、其间未改的文件在两份快照里是同一个 inode（`nlink` ≥ 2）——否则漏接时去重在生产上不生效而测试全绿。
   **实施注记（10.5，fixture 评审补充）**：

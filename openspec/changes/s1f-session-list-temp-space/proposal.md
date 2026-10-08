@@ -53,7 +53,7 @@ owner 于 2026-10-06 把 #907（用户消息撤回）并入本 change：撤回�
 - 用临时空间的会话照常显示产物卡与产物面板的预览 / 下载 / 复制；跳到文件页的 `查看详情` 在这类会话上不渲染（文件页不列临时空间，入口随 change D 的侧边栏交付）。
 - 新增 `POST /api/sessions/:id/undo`；新增错误码 `session_archived`、`undo_conflict`。
 
-**不在本 change**：见 design.md Non-Goals（未读、列表全文搜索、消息编辑重发、挂载存储上的快照、#908–#912 等）。
+**不在本 change**：见 design.md Non-Goals（未读、列表全文搜索、消息编辑重发、#908–#912 等；挂载存储上的快照已在本 change 内决定——挂载目录不参与，D9 / #1212）。
 
 ## Capabilities
 
