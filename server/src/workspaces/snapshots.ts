@@ -35,6 +35,10 @@
  * the manifest, whose paths are JSON strings: the entry is left out as `name_encoding` and never
  * read (#1148).
  *
+ * A directory on another device than the workspace root (a mount point: its `lstat` says another
+ * `dev`) is left out whole as `mount` and never listed (#1212). Only directories are judged, and
+ * only by `dev`: FUSE, a bind mount and another volume are treated alike.
+ *
  * Deduplication (spec「未变文件的去重」): a file whose `fstat` says what the previous snapshot's
  * manifest says of the same path (inode number, size, both times) is hard-linked from that
  * snapshot's `tree/` instead of being read. Links only ever join two snapshots of this root. Copy-on-write is not used: `copyFile`
@@ -53,7 +57,7 @@ export const SOURCE_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constant
 const COPY_CHUNK_BYTES = 64 * 1024;
 const WORKSPACE_ID = /^[0-9a-f]{32}$/;
 
-type SkipReason = "special" | "excluded" | "too_large" | "unreadable" | "name_encoding";
+type SkipReason = "special" | "excluded" | "too_large" | "unreadable" | "name_encoding" | "mount";
 
 interface SkippedEntry {
   path: string;
@@ -110,6 +114,8 @@ interface FileState {
 
 interface Walk {
   workspaceRoot: string;
+  /** `dev` of the workspace root itself: a directory with another one is a mount point. */
+  rootDev: bigint;
   treeRoot: string;
   /** `tree/` of the previous snapshot, when the caller named one. */
   previousTree: string | undefined;
@@ -125,7 +131,8 @@ interface Walk {
   totalBytes: number;
   /**
    * The fingerprint of every directory this walk listed, the root (`""`) included, by path. In
-   * memory only. A directory that was not listed (excluded, unreadable) is not in it.
+   * memory only. A directory that was not listed (excluded, a mount point, unreadable) is not
+   * in it.
    */
   listed: Map<string, string>;
 }
@@ -276,11 +283,19 @@ async function write(options: TakeOptions, snapshotDir: string): Promise<TakeRes
     options.previousMessageId === undefined
       ? undefined
       : join(options.snapshotsRoot, options.workspaceId, String(options.previousMessageId));
+  const treeRoot = join(snapshotDir, "tree");
+  const previous = previousDir === undefined ? new Map() : await previousFiles(previousDir);
+  await makePrivateDir(treeRoot);
+  const root = await fsp.lstat(options.workspaceRoot, { bigint: true });
+  if (!root.isDirectory()) {
+    throw new Error("workspace root is not a directory");
+  }
   const walk: Walk = {
     workspaceRoot: options.workspaceRoot,
-    treeRoot: join(snapshotDir, "tree"),
+    rootDev: root.dev,
+    treeRoot,
     previousTree: previousDir === undefined ? undefined : join(previousDir, "tree"),
-    previous: previousDir === undefined ? new Map() : await previousFiles(previousDir),
+    previous,
     excludeNames: new Set(options.excludeNames),
     maxFileBytes: options.maxFileBytes,
     maxTotalBytes: options.maxTotalBytes,
@@ -290,11 +305,6 @@ async function write(options: TakeOptions, snapshotDir: string): Promise<TakeRes
     totalBytes: 0,
     listed: new Map(),
   };
-  await makePrivateDir(walk.treeRoot);
-  const root = await fsp.lstat(options.workspaceRoot, { bigint: true });
-  if (!root.isDirectory()) {
-    throw new Error("workspace root is not a directory");
-  }
   await visitChildren(walk, "", await list(walk, "", root));
   await recheck(walk);
 
@@ -430,6 +440,12 @@ async function visitDirectory(
 ): Promise<void> {
   if (walk.excludeNames.has(name)) {
     walk.skipped.push({ path, reason: "excluded" });
+    return;
+  }
+  // A mount point (#1212): judged by the `lstat` already taken, so nothing of it is listed, it
+  // gets no directory under `tree/` and counts toward no limit.
+  if (stat.dev !== walk.rootDev) {
+    walk.skipped.push({ path, reason: "mount" });
     return;
   }
   // Listed before anything is recorded: a directory that cannot be listed is skipped whole.
