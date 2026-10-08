@@ -39,6 +39,11 @@ export function ChatPage() {
     chatTopbar(selected, sessionActions.openRename, search.slot, artifacts.open, config.slot),
   );
   const listView = useSessionListView();
+  // 只读判定（chat-web「会话页」）：`archivedAt` 可以是 0，所以与 null 比较；会话还没解析出来时按未归档。
+  const archived =
+    selected !== undefined && selected.archivedAt !== null
+      ? sessionActions.restoreNotice(selected.id)
+      : null;
   const slash = useSlashMenu(
     client,
     session.slashWorkspaceId,
@@ -72,6 +77,7 @@ export function ChatPage() {
   return (
     <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <ConversationView
+        archived={archived}
         client={client}
         composerDisabled={session.composerDisabled}
         composerRef={session.composerRef}

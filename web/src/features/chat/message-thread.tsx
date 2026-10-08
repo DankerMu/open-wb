@@ -25,6 +25,8 @@ import { useThreadRuntime } from "./use-thread-runtime.js";
 import type { Workspace } from "./workspace-list.js";
 
 type ThreadProps = {
+  /** 选中的会话已归档（只读）：不渲染 `从此处分叉` 与 `重新生成`，零消息时也不显示空态。 */
+  archived: boolean;
   /** 当前账号的 API client；产物卡经它按需拉取预览。 */
   client: ApiClient;
   /** 对话内搜索的当前匹配；其余消息不带 `aria-current`。 */
@@ -59,6 +61,7 @@ function partText(message: MessageState, type: "reasoning" | "text"): string {
 }
 
 const UserMessage = memo(function UserMessage({
+  archived,
   current,
   custom,
   id,
@@ -66,6 +69,7 @@ const UserMessage = memo(function UserMessage({
   onFork,
   text,
 }: {
+  archived: boolean;
   current: boolean;
   custom: ChatMessageCustom;
   id: number;
@@ -88,7 +92,7 @@ const UserMessage = memo(function UserMessage({
         </p>
         <ToolCallGroup steps={custom.steps} />
         <MessageError error={custom.error} />
-        <UserActions disabled={locked} onFork={() => void onFork(id)} />
+        {archived ? null : <UserActions disabled={locked} onFork={() => void onFork(id)} />}
       </article>
     </MessagePrimitive.Root>
   );
@@ -197,7 +201,7 @@ const AssistantMessage = memo(function AssistantMessage({
 /**
  * 零消息空态（design D4）：装饰性图标、一行提示与只读的绑定工作空间名。`workspace` 为 null（未绑定，
  * 或空间名解析不出——列表读取中、读取失败、空间已删）时没有工作空间那一行。不是标题，也不是消息。
- * 只在输入框未锁定时渲染（见 `Thread` 的 `empty`）。
+ * 只在输入框未锁定且会话未归档时渲染（见 `Thread` 的 `empty`）。
  */
 function EmptyThread({ workspace }: { workspace: Workspace | null }) {
   return (
@@ -216,6 +220,7 @@ function EmptyThread({ workspace }: { workspace: Workspace | null }) {
 
 /** 选中会话的线程：运行时、滚动层与全部消息。按会话 `key` 挂载，切换会话即重置跟随状态。 */
 export function Thread({
+  archived,
   client,
   currentId,
   locked,
@@ -230,11 +235,13 @@ export function Thread({
   const messages = view?.messages ?? NO_MESSAGES;
   const runtime = useThreadRuntime({ messages, onRegenerate, onSend, onStop });
   // 空态跟随输入框锁定：只在历史已到（下面的 `view` 分支）、没有消息且输入框未锁定时出现——回合进行中、
-  // 或流错误带着刷新指引时都不显示。内容根此时撑满滚动容器，让它垂直居中。
-  const empty = messages.length === 0 && !locked;
+  // 或流错误带着刷新指引时都不显示；已归档的会话没有输入框，同样不显示。内容根此时撑满滚动容器，让它垂直居中。
+  const empty = messages.length === 0 && !locked && !archived;
   const last = messages.at(-1);
   const regenerableId =
-    view && last?.role === "assistant" && REGENERABLE.has(view.status) ? String(last.id) : null;
+    view && !archived && last?.role === "assistant" && REGENERABLE.has(view.status)
+      ? String(last.id)
+      : null;
   // 引用稳定的渲染函数：依赖就是闭包里用到的这几项，其余重渲染不换函数。
   const renderMessage = useCallback(
     ({ message }: { message: MessageState }) => {
@@ -255,6 +262,7 @@ export function Thread({
         />
       ) : (
         <UserMessage
+          archived={archived}
           current={current}
           custom={custom}
           id={Number(message.id)}
@@ -264,7 +272,7 @@ export function Thread({
         />
       );
     },
-    [client, currentId, locked, onFork, onRegenerate, regenerableId, workspace],
+    [archived, client, currentId, locked, onFork, onRegenerate, regenerableId, workspace],
   );
   return (
     <AssistantRuntimeProvider runtime={runtime}>

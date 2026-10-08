@@ -1,5 +1,14 @@
-import type { ComponentProps, FormEvent, ReactNode, Ref, RefObject } from "react";
+import {
+  type ComponentProps,
+  type FormEvent,
+  type ReactNode,
+  type Ref,
+  type RefObject,
+  useLayoutEffect,
+  useRef,
+} from "react";
 import type { ApiClient } from "../../lib/api.js";
+import { ArchivedNotice } from "./archived-notice.js";
 import { CapabilityBar } from "./capability-bar.js";
 import { Composer } from "./composer.js";
 import { ComposerDock } from "./composer-dock.js";
@@ -15,6 +24,11 @@ type AnswerApproval = ComponentProps<typeof ComposerDock>["onAnswerApproval"];
 type StopTurn = ComponentProps<typeof Composer>["onStop"];
 
 type ConversationViewProps = {
+  /**
+   * 选中的会话已归档时是只读说明的 props（`恢复` 的忙碌、失败文案与点击），否则为 null。非 null 时主区
+   * 只读：不渲染输入框（含能力栏）与停靠区的内容，线程不出 `从此处分叉` 与 `重新生成`。
+   */
+  archived: ComponentProps<typeof ArchivedNotice> | null;
   /** 当前账号的 API client；产物卡经它按需拉取预览。 */
   client: ApiClient;
   composerDisabled: boolean;
@@ -51,6 +65,7 @@ type ConversationViewProps = {
 };
 
 export function ConversationView({
+  archived,
   client,
   composerDisabled,
   composerRef,
@@ -76,6 +91,21 @@ export function ConversationView({
   workspace,
   workspaceId,
 }: ConversationViewProps) {
+  // 说明里的 `恢复` 成功后按钮随说明卸载：焦点若因此落回 body，就在输入框出现的那次提交里交给它。
+  // 只认「上一次提交时同一个会话的 `恢复` 在途」——换会话、行菜单的 `恢复` 都不动焦点。
+  const restoring = useRef<string | null>(null);
+  const restoringId = archived?.busy ? requestedSessionId : null;
+  useLayoutEffect(() => {
+    if (
+      !archived &&
+      restoring.current !== null &&
+      restoring.current === requestedSessionId &&
+      document.activeElement === document.body
+    ) {
+      composerRef.current?.focus();
+    }
+    restoring.current = restoringId;
+  });
   return (
     <div className="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)] overflow-hidden px-5 pt-4 pb-5 narrow:flex narrow:flex-col">
       <div
@@ -100,6 +130,7 @@ export function ConversationView({
         ) : null}
         {requestedSessionId ? (
           <Thread
+            archived={archived !== null}
             client={client}
             currentId={search.currentId}
             key={requestedSessionId}
@@ -122,43 +153,48 @@ export function ConversationView({
             />
           </div>
         )}
+        {/* 停靠区保持挂载（展开状态按会话记在它里面）；只读时不给它视图，它就不渲染任何内容。 */}
         <ComposerDock
           inputLocked={composerDisabled}
           inputRef={composerRef}
           onAnswerApproval={onAnswerApproval}
           sessionId={requestedSessionId}
-          view={historyView}
+          view={archived ? null : historyView}
         />
-        <Composer
-          capabilityBar={
-            <CapabilityBar
-              choice={{
-                onSelect: welcome.selectWorkspace,
-                workspace: welcome.workspace,
-                workspaces: welcome.workspaces,
-                workspacesError: welcome.workspacesError,
-              }}
-              disabled={composerDisabled}
-              inputRef={composerRef}
-              plus={slash.plus}
-              {...(requestedSessionId
-                ? { session: { id: workspaceId, workspace, temporary: temporaryWorkspace } }
-                : {})}
-            />
-          }
-          disabled={composerDisabled}
-          draft={draft}
-          generating={generating}
-          inputRef={composerRef}
-          interceptKeyDown={slash.interceptKeyDown}
-          onChangeDraft={onChangeDraft}
-          onStop={onStop}
-          onSubmit={onSubmit}
-          placeholder={requestedSessionId ? "继续追问，或派一个新任务…" : "今天帮你做些什么"}
-          sendDisabled={sendDisabled}
-          slashMenu={slash.menu}
-          stopSessionId={requestedSessionId}
-        />
+        {archived ? (
+          <ArchivedNotice {...archived} />
+        ) : (
+          <Composer
+            capabilityBar={
+              <CapabilityBar
+                choice={{
+                  onSelect: welcome.selectWorkspace,
+                  workspace: welcome.workspace,
+                  workspaces: welcome.workspaces,
+                  workspacesError: welcome.workspacesError,
+                }}
+                disabled={composerDisabled}
+                inputRef={composerRef}
+                plus={slash.plus}
+                {...(requestedSessionId
+                  ? { session: { id: workspaceId, workspace, temporary: temporaryWorkspace } }
+                  : {})}
+              />
+            }
+            disabled={composerDisabled}
+            draft={draft}
+            generating={generating}
+            inputRef={composerRef}
+            interceptKeyDown={slash.interceptKeyDown}
+            onChangeDraft={onChangeDraft}
+            onStop={onStop}
+            onSubmit={onSubmit}
+            placeholder={requestedSessionId ? "继续追问，或派一个新任务…" : "今天帮你做些什么"}
+            sendDisabled={sendDisabled}
+            slashMenu={slash.menu}
+            stopSessionId={requestedSessionId}
+          />
+        )}
         {requestedSessionId ? null : (
           <WelcomePlaybooks disabled={composerDisabled} onPick={onChangeDraft} />
         )}
