@@ -606,8 +606,8 @@ Minimal mergeable slice: 17.1、17.2、17.3、17.5 各自可单独合入（互�
   - 变异证据：不渲染 → (1)；关闭不清 → (1)；发送不清 → (2)；选择 effect 不清 → (4)；setter 挪到 `owned()` 之外 → (5)；末行用 `paths.length` 或只用 `skipped.count` → (3)；只渲染 `skipped` → (3)；0/0 不覆盖 → (6)。
   - CH-65（`待签`，不写悬停）：绑定工作空间里放一个超过单文件快照上限（默认 20 MiB）的文件 `big.bin`，发一句让助手改它和一个小文件的话，撤回；期望输入框上方出现「已撤回，以下文件未还原」并列出 `big.bin`，小文件已还原；点关闭后消失；再做一遍让它出现，发一条消息后消失。
   - 已知并报给 owner、本刀不处理：`files.skipped` 原样取自快照清单，含 `excluded`（如 `node_modules`）与 `mount` 项；带依赖目录的工作空间每次带还原的撤回都会出现这条说明。按规格实现，不在 web 侧过滤。
-- [ ] 18.4 与列表事件的配合：本页有针对该会话的在途撤回时忽略自己的 `session.rewound`（200 被应用时由其后的重读覆盖；未被应用时在落定处补读）。测试（新文件 `web/test/chat-undo-list-events.test.tsx`）：session-list-push「自己的撤回」三例。
-- [ ] 18.5 新文件登记进 `MIGRATED_AREAS`；CH 行：撤回并回填、一次退回多轮、文件一并还原（含 git 仓库里回合做的提交被撤销）、五种不可撤回原因、冲突三选一、未还原文件说明各一行，`待签`。若 #908 已合入，行里写「把鼠标移到该消息上」。
+- [x] 18.4 与列表事件的配合：本页有针对该会话的在途撤回时忽略自己的 `session.rewound`（200 被应用时由其后的重读覆盖；未被应用时在落定处补读）。测试（新文件 `web/test/chat-undo-list-events.test.tsx`）：session-list-push「自己的撤回」三例。
+- [x] 18.5 新文件登记进 `MIGRATED_AREAS`；CH 行：撤回并回填、一次退回多轮、文件一并还原（含 git 仓库里回合做的提交被撤销）、五种不可撤回原因、冲突三选一、未还原文件说明各一行，`待签`。若 #908 已合入，行里写「把鼠标移到该消息上」。
   **实施注记（18.4 / 18.5，fixture 评审补充，#971）**：
   - 谓词：删掉 `use-chat-session.ts` 的 `NO_UNDO_IN_FLIGHT` 与其注释，改传「`undoFlightRef.current` 的 `client === clientRef.current` 且 `sessionId === requestedSessionRef.current`」。`use-session-list-events.ts` 的签名与 `resyncSelected` 不改。
   - 补读：`use-chat-session.ts` 加一个 ref（如 `undoSkippedResyncRef`）存被略过对齐的那次在途 owner——谓词返回真时记下，`onRewound` 与重连两条路径共用。ref 注入 `turn-actions.ts`（G2 禁止在那里 `useRef`）。`undoTurn` 的失败分支（非 401）与 `undo_conflict` 分支里：`owned()` 且 ref 是本次 owner → 调既有的 `reconcileSettled(ownedClient, sessionId)`（先例：regenerate 的 502 对齐）。`release` 里按身份清 ref。200 被应用的路径不补读（含其后的重读失败）；fence 丢弃的 200 不补读。

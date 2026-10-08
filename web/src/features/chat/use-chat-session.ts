@@ -47,8 +47,6 @@ type PageHistoryState =
   | (ReadyHistory & { resync?: { source: SessionEventHandle } });
 
 const MISSING_EVENT_SOURCE = "无法连接会话事件";
-/** 「本页有在途撤回」：撤回动作接进页面（任务 18.4）之前恒为否。 */
-const NO_UNDO_IN_FLIGHT = () => false;
 
 export function useChatSession() {
   const { createSessionClient } = useAuth();
@@ -93,6 +91,7 @@ export function useChatSession() {
   const focusOnWelcomeRef = useRef(false);
   const focusOnUnlockRef = useRef(false);
   const undoFlightRef = useRef<ChatMutationOwner | null>(null);
+  const undoSkippedResyncRef = useRef<ChatMutationOwner | null>(null);
   const viewRunningRef = useRef(false);
 
   clientRef.current = client;
@@ -203,7 +202,18 @@ export function useChatSession() {
         ? { sessionId, running: viewRunningRef.current, resync: source.resync }
         : null;
     },
-    undoInFlight: NO_UNDO_IN_FLIGHT,
+    // 按会话计：只有针对当前选中会话的在途撤回才略过对齐，并记下这笔欠账（撤回落定处据此补读）。
+    undoInFlight() {
+      const flight = undoFlightRef.current;
+      if (
+        flight?.client !== clientRef.current ||
+        flight.sessionId !== requestedSessionRef.current
+      ) {
+        return false;
+      }
+      undoSkippedResyncRef.current = flight;
+      return true;
+    },
   });
   const sessionActions = useSessionActions(client, setListState, setHistoryState, {
     abortHistory,
@@ -416,6 +426,7 @@ export function useChatSession() {
     undoConflict,
     undoNotice,
     undoFlightRef,
+    undoSkippedResyncRef,
   });
   const { answerApproval, dispatchPrompt, forkTurn, regenerateTurn, restoreOwnedDraft, stopTurn } =
     turn;
