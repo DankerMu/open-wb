@@ -170,6 +170,13 @@ Minimal mergeable slice: 5.1 + 5.2 一起（删了行不删目录会留下无主
   - 「尚未写出」的定义是上一条 `sessions.changed` 的 `write` 回调尚未触发（或 `writableLength > 0`），不是 `write()` 返回 false。合并用例在同一同步段内连发 5 次 `notify`——跨 tick 发送时本机回环上 5 条都会写出。
   - 本刀还没有触发点（6.3–6.5）：「一条连接写失败不影响请求」在本刀直接调 `notify(ownerId)`，断言不抛、坏连接被关、另一条连接照常收到；经 PATCH 触发的版本随 6.3。`notifyRewound` 在本刀也要有一条用例（不合并、`data` 的形状），否则它是未被引用的导出。
 - [ ] 6.3 触发点接线之一——会话 CRUD 与 fork：会话创建、PATCH（含归档与恢复）、删除、fork 提交，在各自事务提交之后调用 `notify(ownerId)`（`rest-metadata.ts` / `session-delete.ts` / `rest.ts` 的 fork 路由处）。测试：session-list-push「每个触发点各自通知」里这五项（表驱动：每项写入之后所有者的连接恰多至少一条 `sessions.changed`）、「被拒绝的写入不通知」。
+  **实施注记（6.3 / 6.6，fixture 评审补充）**：
+  - 通知器经 `rest-metadata.ts` 的路由依赖传入（结构类型，只要 `notify`），唯一的调用点在 `rest.ts`；每条路由提交之后、应答之前通知一次：创建、PATCH（标题 / 场景 / 置顶 / 归档与恢复共用一处）、DELETE（在 `deleteSession` 返回之后，不给删除器加依赖）、fork（在 `supervisor.fork` 返回之后）。不改 `supervisor.ts`、`branching.ts`、`workspaces/`。
+  - 测试进新文件 `server/test/session-list-events-sessions.test.ts`（表驱动：创建、PATCH 标题、归档、恢复、fork 提交、DELETE；另一账号的连接保持静默），复用既有 helpers，不复制。
+  - 「被拒绝的写入不通知」除规格的三条外加一条**回滚**行（事务回滚的创建或删除）——否则「提交之前通知」的变异没有用例可判红。
+  - 「一条连接写失败不影响请求」的规格原形（对端重置的连接上 `PATCH {pinned:true}`）在本刀补上，放在已有重置夹具的 `session-list-events.test.ts`。
+  - 受波及的既有断言：`session-list-events-turns.test.ts` 里创建后对通知记录的精确断言（创建现在也通知）。
+  - 6.4、6.5 已合入，6.6 随本 PR 勾选。
 - [x] 6.4 触发点接线之二——回合生命周期与审批：prompt 受理与受理被补偿、regenerate 提交在 `rest.ts` 的对应路由处通知；回合终态落库、审批行插入与结算经 supervisor 既有的同步观察口 `onEvent` 得到（`turn.end`、`approval.request`、`approval.resolved` 三种事件；在 `sessions/index.ts` 里把通知器的观察函数与装配传入的 `onEvent` 串接：先调通知器（try/catch、丢弃结果），再调装配传入的 `onEvent` 并把它的返回值原样返回；所有者由 store 的会话行解析）。**不改 `supervisor.ts`**。测试：「状态变化推送给所有者的每条连接」「待决确认的出现与结算」、「每个触发点各自通知」里受理、回合结束、受理被补偿、regenerate 四项；另加一条「通知器的观察函数抛错时回合照常结束、supervisor 没有保留故障」；既有的「`onEvent` 返回 thenable 即故障」测试在串接之后原样通过。
   **实施注记（6.4，fixture 评审补充）**：
   - 6.1 的评审转交项并入本任务（`list-events.ts` 进 PR 边界）：心跳 `write` 返回 false 时只清心跳并停止投递，连接留在登记表里直到物理 `close`（与 `stream/sse.ts` 同构），这样 `preClose` 仍能销毁它；补一条用例——`write` 返回 false 的连接在心跳之后关停，断言它在模块自己的 `preClose` 内已 `destroyed`。心跳用例另加「14999 ms 时尚无字节」。
