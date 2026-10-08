@@ -360,7 +360,7 @@ Minimal mergeable slice: 18.1 + 18.2 一刀（Hurl）；18.3 + 18.4 一刀（ui-
 
 ## 19. 文档
 
-- [ ] 19.1 `docs/adr/0012-omp-project-config-host-overlay.md`：加一节「补充（S1g）：审批档位按会话取值」——档位不再钉死 `write`；argv 经 omp 的运行期覆盖层压过 overlay（附组 1 的实机结论与日期）；overlay 文件不随档位变化、其余键在三档下的作用；
+- [x] 19.1 `docs/adr/0012-omp-project-config-host-overlay.md`：加一节「补充（S1g）：审批档位按会话取值」——档位不再钉死 `write`；argv 经 omp 的运行期覆盖层压过 overlay（附组 1 的实机结论与日期）；overlay 文件不随档位变化、其余键在三档下的作用；
   `全部自动` 下 exec 档工具不再请求审批属于有意放宽，由管理员封顶、选择时确认、审计与独立 uid 约束；正文首段「cwd 是 agent 在 `--approval-mode write` 下无需审批即可写的目录」一句补上限定。组 1 若启用了「按档位各写一份 overlay」的退路，这一节按实际写。
 - [x] 19.2 `docs/adr/0013-assistant-ui-frontend-rebuild.md`：加一节「增补（S1g）」——能力行五项与次序；「+」按钮改名与草稿非空时的行为；附件是应用层状态，不使用 runtime 的 attachments 适配器；拷入层零改动、六类修改不变；模型与强度按 #906 的 owner 决定。
 - [x] 19.3 `CONTEXT.md` 术语表新增两行：**权限档位 permission tier**（会话的工具审批档位，三档对应 omp 的 `always-ask` / `write` / `yolo`；不是账号权限、不是 KB 可见范围）；**附件 attachment**（随一条消息告知助手的工作空间文件路径；文件本身是工作空间里的普通文件：不随消息删除，也不随绑定正式工作空间的会话删除；临时空间随最后一个会话删除时、撤回连文件一起还原时，按工作空间的规则一并变化）。

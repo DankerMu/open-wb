@@ -1,7 +1,7 @@
 # omp 项目层配置：宿主 overlay 钉住审批相关键，其余作为已接受残余
 
 omp 把会话 cwd（及其祖先）下的项目层内容当作配置加载：设置文件（`.omp/config.yml`、`.claude/settings.json` 等）、MCP 配置、
-自定义工具（`.omp/tools` 等）、插件、skills、`AGENTS.md`/`RULES.md`。cwd 是 agent 在 `--approval-mode write` 下无需审批即可写的目录，
+自定义工具（`.omp/tools` 等）、插件、skills、`AGENTS.md`/`RULES.md`。cwd 是 agent 在 `--approval-mode write` 下无需审批即可写的目录（S1g 起档位按会话取值：`write` 与 `yolo` 两档如此，`always-ask` 下写文件也要审批——见文末补充），
 所以被监管的一方可以改写监管它的策略（#708）：项目层 `tools.approval` / `bash.patterns` 让 exec 档工具不再请求审批，
 `shellPath`、解释器路径与项目 MCP stdio server 让宿主在审批之外执行命令。
 
@@ -56,3 +56,30 @@ omp 把会话 cwd（及其祖先）下的项目层内容当作配置加载：设
 - **项目级 MCP 与项目工具的方向**：长期不支持按工作空间开启。项目级 MCP 继续由 overlay 的 `mcp.enableProjectConfig: false` 关闭；需要 MCP 时由管理员装到平台级配置。
   出现真实的按工作空间需求时另开 issue，以管理员开启加审计为起点。`.omp/tools` 等项目工具仍是上文登记的已接受残余。
 - 完整结论、实测事实表与残余清单见已归档的 openspec 变更 `project-config-surface` 的 design。
+
+## 补充（S1g）：审批档位按会话取值
+
+本 ADR 写成时档位钉死 `write`，不在运行期切换。S1g（openspec 变更 `s1g-composer-capabilities`，design D1–D3）改为每个会话有自己的档位：`always-ask`、`write`、`yolo`（界面上的「全部自动」）。上文的两类划分与已接受残余不变，变的只有下面几点。
+
+- **档位由 argv 决定，overlay 不动。** 每次 spawn 的 argv 带 `--approval-mode <该会话的有效档位>`。omp 把 argv 写进运行期覆盖层，这一层高于 overlay，
+  所以 `host-overlay.yml` 里的 `tools.approvalMode: write` 只在 argv 缺席时起作用，作为兜底留着。overlay 仍是全局一份、字节不随档位变化，
+  `--config` 与 `PI_CONFIG_FILES` 三档下指向同一个文件；没有启用「按档位各写一份 overlay」的退路。
+- **实机结论（官方 v18.0.10，2026-10-07；CI uid-isolation job 的对照用例，逐项见该变更 design「实机核对结果」）：**
+  - overlay 原样、argv 为 `always-ask`：写文件与 bash 回合各恰一条审批。
+  - argv 为 `yolo`：bash 与写文件回合都是 0 条审批，工具都执行。
+  - `always-ask` 下项目层写 `tools.approval: {write: allow}`：仍发起写文件审批，项目层绕不过。
+  - 换档后以 `--resume` 重启同一会话文件：历史仍在，新档位生效。
+- **换档靠重启进程。** omp 的 RPC 没有切换档位的命令。修改档位只写库；下一次派发消息时，若存活进程的启动档位与会话此刻的有效档位不同，先退役它再以 `--resume` 启动。
+  在途回合与已弹出的确认卡继续用启动时的档位。
+- **overlay 其余键在三档下的作用不变。** `tools.approval: []` 与 `bash.patterns: []` 仍把项目层的逐工具放行与 bash 放行规则整体清掉；
+  `shellPath`、三个解释器路径、`bash.direnv`、`mcp.enableProjectConfig`、`todo.reminders`、`images.urls.enabled` 与档位无关。
+  `yolo` 下本来就全部放行，项目层无从再放宽；项目层自己写的收紧规则被清掉，仍是上文登记的残余，在 `yolo` 下同样不起作用。
+- **`yolo` 是有意的放宽。** 这一档下 exec 档工具（bash、eval 等）不再请求审批，助手不经确认执行命令——上文「被监管的一方改写策略」所防的那种执行，在这一档由用户自己选择放开。约束它的是四件事：
+  1. 管理员封顶：`APPROVAL_MAX_MODE` 是档位的上界，缺省 `yolo`（三档都开放）；设为 `write` 即整体关掉这一档，超界的选择在读取时被夹取。
+  2. 选择时确认：在界面上选「全部自动」要确认一次，选中后常驻警示色。新会话继承最近一次选择时不再弹确认，警示色与创建审计仍在。
+  3. 审计：有效档位每次变化、以及每个以非缺省档创建的会话，都写一条 `session.permission`。
+  4. 独立 uid（ADR-0010）：omp 能触及的范围仍以该 uid 为界，不因档位扩大。
+- **不因档位改变的行为。** 60 秒超时自动允许按审批条目计时，三档相同，`always-ask` 下写文件的确认卡同样会超时自动允许。
+  宿主不因档位自动应答或丢弃 omp 的确认请求：`yolo` 下 omp 若仍因工具自带策略请求确认，照常出确认卡。
+  「批准一次 `task` 后子代理以 yolo 运行」这条残余与会话档位无关，三档下都在。
+- **升级 omp 时**除了重新验证 overlay 的每个键，还要重跑上面四条对照用例：「argv 压过 overlay」与「项目层绕不过 `always-ask`」都依赖 v18.0.10 的层次次序。
