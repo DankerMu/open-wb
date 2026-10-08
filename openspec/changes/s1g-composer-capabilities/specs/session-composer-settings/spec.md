@@ -15,7 +15,7 @@
 - **THEN** 合法取值全部写入；`approval_mode` 与 `reasoning_effort` 的非法取值被 SQLite 拒绝；`model_id` 的任意文本被接受
 
 #### Scenario: 中途失败原子回滚
-- **WHEN** 在一份一次性副本里预置冲突对象（已存在的 `chat_sessions.approval_mode` 列）使 `040` 中途失败，随后移除冲突对象重试
+- **WHEN** 在一份一次性副本里预置冲突对象（已存在的 `chat_sessions.reasoning_effort` 列——`040` 的最后一条语句，失败时前两列已经加上，回滚才看得出来）使 `040` 中途失败，随后移除冲突对象重试
 - **THEN** 失败时没有任何 `040` 的列或回执留下，此前的回执与数据不变；重试时 `040` 恰应用一次
 
 ### Requirement: 迁移 041 账号最近选择表
