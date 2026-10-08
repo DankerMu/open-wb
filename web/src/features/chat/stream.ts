@@ -26,6 +26,7 @@ type ChatMessageView = {
   thinking: ChatMessage["thinking"];
   status: ChatMessage["status"];
   undo: ChatMessage["undo"];
+  attachments: ChatMessage["attachments"];
   steps: ChatStepView[];
   approvals: ChatApprovalView[];
   error: string | null;
@@ -107,6 +108,7 @@ export function chatStateFromSnapshot(snapshot: ChatMessageSnapshot): ChatState 
       thinking: message.thinking,
       status: message.status,
       undo: message.undo,
+      attachments: message.attachments,
       steps: message.steps.map((step) => ({
         id: step.id,
         name: step.name,
@@ -135,6 +137,7 @@ export function applyChatEvent(state: ChatState, event: ChatEvent): ChatState {
           thinking: null,
           status: "running",
           undo: null,
+          attachments: [],
           steps: [],
           approvals: [],
           error: null,
@@ -208,6 +211,7 @@ function emptyAssistant(messageId: number): ChatMessageView {
     content: "",
     thinking: null,
     undo: null,
+    attachments: [],
     steps: [],
     approvals: [],
     error: null,

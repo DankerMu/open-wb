@@ -1,3 +1,7 @@
+// 过渡分支（change `s1g-composer-capabilities`，design D16「三步落地」第 1 步）：`withTransitionalDefaults`
+// 与两个 `TRANSITIONAL_*` 常量让解析同时接受服务端发出新键之前与之后的键集（会话十一键或十四键；
+// 消息、fork 响应、undo 响应带或不带 `attachments`），缺席时补缺省值。这是合同迁移的过渡分支，
+// 不是并行实现：服务端（任务组 8、12）发出新键之后，由任务 13.5 整块删除，解析收回恰好键集。
 import { hasExactlyKeys, isNonNegativeSafeInteger, parseJsonArray } from "./api-json.js";
 
 type ChatSessionStatus = "idle" | "running" | "done" | "failed" | "stopped";
@@ -6,6 +10,19 @@ type ChatDeliveryStatus = "running" | "done" | "failed" | "stopped";
 type ChatSessionScene = "office" | "code" | "design";
 /** 用户消息的可撤回状态（message-undo「可撤回状态」）；只读派生值。 */
 type ChatUndoState = "available" | "too_large" | "failed" | "command" | "unbound" | "none";
+
+type ChatApprovalMode = "always-ask" | "write" | "yolo";
+type ChatReasoningEffort = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+
+/** 会话的三项输入框设置。 */
+type ChatSessionComposer = {
+  approvalMode: ChatApprovalMode;
+  modelId: string;
+  reasoningEffort: ChatReasoningEffort | null;
+};
+
+/** 消息附件：工作空间内的相对路径与字节数。 */
+type ChatAttachment = { path: string; size: number };
 
 type ChatSessionMeta = {
   scene: ChatSessionScene | null;
@@ -22,7 +39,8 @@ export type ChatSession = {
   status: ChatSessionStatus;
   createdAt: number;
   updatedAt: number;
-} & ChatSessionMeta;
+} & ChatSessionMeta &
+  ChatSessionComposer;
 
 type ChatFileChange =
   | { path: string; added: number; removed: number; kind: "edit" }
@@ -49,6 +67,8 @@ export type ChatMessage = {
   approvals: ChatApproval[];
   /** 助手消息恒为 null；用户消息恒为六个取值之一。 */
   undo: ChatUndoState | null;
+  /** 助手消息恒为空数组。 */
+  attachments: ChatAttachment[];
 };
 
 export type ChatStreamCursor = {
@@ -88,6 +108,7 @@ export type ChatRegenerateAccepted = {
 export type ChatSessionFork = {
   session: ChatSession;
   draft: string;
+  attachments: ChatAttachment[];
 };
 
 type ChatUndoSkipReason =
@@ -114,6 +135,7 @@ export type ChatSessionUndo = {
   session: ChatSession;
   draft: string;
   files: ChatUndoFiles;
+  attachments: ChatAttachment[];
 };
 
 type ChatApprovalDecision = "allow" | "deny" | "timeout";
@@ -148,6 +170,26 @@ const UNDO_SKIP_REASONS: ReadonlySet<unknown> = new Set<ChatUndoSkipReason>([
   "name_encoding",
   "mount",
 ]);
+const APPROVAL_MODES: ReadonlySet<unknown> = new Set<ChatApprovalMode>([
+  "always-ask",
+  "write",
+  "yolo",
+]);
+const REASONING_EFFORTS: ReadonlySet<unknown> = new Set<ChatReasoningEffort>([
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]);
+const TRANSITIONAL_SESSION_COMPOSER: ChatSessionComposer = {
+  approvalMode: "write",
+  modelId: "",
+  reasoningEffort: null,
+};
+const TRANSITIONAL_ATTACHMENTS: { attachments: ChatAttachment[] } = { attachments: [] };
 const TODO_STATUSES: ReadonlySet<unknown> = new Set<ChatTodoStatus>([
   "pending",
   "in_progress",
@@ -158,6 +200,21 @@ const TODO_STATUSES: ReadonlySet<unknown> = new Set<ChatTodoStatus>([
 /** `name` / `content` 各自的码点上限，以及跨阶段的任务总数上限。 */
 const MAX_TODO_TEXT_POINTS = 200;
 const MAX_TODO_TASKS = 200;
+
+/**
+ * 键集恰为 `base` 时补上 `defaults`；恰为 `base` 加 `defaults` 的各键时原样返回；其余（只带其中
+ * 一部分、或多出别的键）为 null。
+ */
+function withTransitionalDefaults(
+  value: unknown,
+  base: readonly string[],
+  defaults: Record<string, unknown>,
+): Record<string, unknown> | null {
+  if (hasExactlyKeys(value, base)) {
+    return { ...value, ...defaults };
+  }
+  return hasExactlyKeys(value, [...base, ...Object.keys(defaults)]) ? value : null;
+}
 
 function isSafeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value);
@@ -206,9 +263,27 @@ function parseSessionMeta(value: Record<string, unknown>): ChatSessionMeta | nul
   return { scene, workspaceId, pinnedAt, archivedAt, pendingApproval, temporaryWorkspace };
 }
 
-export function parseSession(value: unknown): ChatSession | null {
+function parseSessionComposer(value: Record<string, unknown>): ChatSessionComposer | null {
+  const { approvalMode, modelId, reasoningEffort } = value;
   if (
-    !hasExactlyKeys(value, [
+    !APPROVAL_MODES.has(approvalMode) ||
+    typeof modelId !== "string" ||
+    (reasoningEffort !== null && !REASONING_EFFORTS.has(reasoningEffort))
+  ) {
+    return null;
+  }
+
+  return {
+    approvalMode: approvalMode as ChatApprovalMode,
+    modelId,
+    reasoningEffort: reasoningEffort as ChatReasoningEffort | null,
+  };
+}
+
+export function parseSession(input: unknown): ChatSession | null {
+  const value = withTransitionalDefaults(
+    input,
+    [
       "id",
       "title",
       "status",
@@ -220,13 +295,16 @@ export function parseSession(value: unknown): ChatSession | null {
       "archivedAt",
       "pendingApproval",
       "temporaryWorkspace",
-    ])
-  ) {
+    ],
+    TRANSITIONAL_SESSION_COMPOSER,
+  );
+  if (!value) {
     return null;
   }
 
   const { createdAt, id, status, title, updatedAt } = value;
   const meta = parseSessionMeta(value);
+  const composer = parseSessionComposer(value);
   if (
     typeof id !== "string" ||
     !SESSION_ID.test(id) ||
@@ -234,12 +312,13 @@ export function parseSession(value: unknown): ChatSession | null {
     !isSessionStatus(status) ||
     !isNonNegativeSafeInteger(createdAt) ||
     !isNonNegativeSafeInteger(updatedAt) ||
-    !meta
+    !meta ||
+    !composer
   ) {
     return null;
   }
 
-  return { id, title, status, createdAt, updatedAt, ...meta };
+  return { id, title, status, createdAt, updatedAt, ...meta, ...composer };
 }
 
 /** `edit` carries non-negative line counts; `write` carries exactly null counts. */
@@ -290,20 +369,28 @@ function parseStep(value: unknown): ChatStep | null {
   return { id, ordinal, name, detail, output, changes: parsedChanges, status };
 }
 
-function parseMessage(value: unknown): ChatMessage | null {
-  if (
-    !hasExactlyKeys(value, [
-      "id",
-      "role",
-      "content",
-      "thinking",
-      "status",
-      "createdAt",
-      "steps",
-      "approvals",
-      "undo",
-    ])
-  ) {
+function parseAttachment(value: unknown): ChatAttachment | null {
+  if (!hasExactlyKeys(value, ["path", "size"])) {
+    return null;
+  }
+
+  const { path, size } = value;
+  return typeof path === "string" && path.length > 0 && isNonNegativeSafeInteger(size)
+    ? { path, size }
+    : null;
+}
+
+function parseAttachments(value: unknown): ChatAttachment[] | null {
+  return parseJsonArray(value, parseAttachment);
+}
+
+function parseMessage(input: unknown): ChatMessage | null {
+  const value = withTransitionalDefaults(
+    input,
+    ["id", "role", "content", "thinking", "status", "createdAt", "steps", "approvals", "undo"],
+    TRANSITIONAL_ATTACHMENTS,
+  );
+  if (!value) {
     return null;
   }
 
@@ -322,7 +409,14 @@ function parseMessage(value: unknown): ChatMessage | null {
 
   const parsedSteps = parseJsonArray(steps, parseStep);
   const parsedApprovals = parseMessageApprovals(approvals, role);
-  if (!parsedSteps || !parsedApprovals) {
+  const attachments = parseAttachments(value.attachments);
+  // 附件只属于用户消息。
+  if (
+    !parsedSteps ||
+    !parsedApprovals ||
+    !attachments ||
+    (role === "assistant" && attachments.length > 0)
+  ) {
     return null;
   }
 
@@ -336,6 +430,7 @@ function parseMessage(value: unknown): ChatMessage | null {
     steps: parsedSteps,
     approvals: parsedApprovals,
     undo,
+    attachments,
   };
 }
 
@@ -482,13 +577,15 @@ export function parseRegenerateAccepted(value: unknown): ChatRegenerateAccepted 
   return { assistantMessageId: value.assistantMessageId };
 }
 
-export function parseSessionFork(value: unknown): ChatSessionFork | null {
-  if (!hasExactlyKeys(value, ["session", "draft"]) || typeof value.draft !== "string") {
+export function parseSessionFork(input: unknown): ChatSessionFork | null {
+  const value = withTransitionalDefaults(input, ["session", "draft"], TRANSITIONAL_ATTACHMENTS);
+  if (!value || typeof value.draft !== "string") {
     return null;
   }
 
   const session = parseSession(value.session);
-  return session ? { session, draft: value.draft } : null;
+  const attachments = parseAttachments(value.attachments);
+  return session && attachments ? { session, draft: value.draft, attachments } : null;
 }
 
 function parseUndoSkippedPath(value: unknown): ChatUndoSkippedPath | null {
@@ -549,14 +646,22 @@ function parseUndoFiles(value: unknown): ChatUndoFiles | null {
   return { mode, restored, removed, skipped, failed };
 }
 
-export function parseSessionUndo(value: unknown): ChatSessionUndo | null {
-  if (!hasExactlyKeys(value, ["session", "draft", "files"]) || typeof value.draft !== "string") {
+export function parseSessionUndo(input: unknown): ChatSessionUndo | null {
+  const value = withTransitionalDefaults(
+    input,
+    ["session", "draft", "files"],
+    TRANSITIONAL_ATTACHMENTS,
+  );
+  if (!value || typeof value.draft !== "string") {
     return null;
   }
 
   const session = parseSession(value.session);
   const files = parseUndoFiles(value.files);
-  return session && files ? { session, draft: value.draft, files } : null;
+  const attachments = parseAttachments(value.attachments);
+  return session && files && attachments
+    ? { session, draft: value.draft, files, attachments }
+    : null;
 }
 
 function parseApproval(value: unknown): ChatApproval | null {

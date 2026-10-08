@@ -80,6 +80,7 @@ export function assistantMessage(
     id: 0,
     role: "assistant",
     undo: null,
+    attachments: [],
     content: "",
     thinking: null,
     status,

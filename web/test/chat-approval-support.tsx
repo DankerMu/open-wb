@@ -61,6 +61,7 @@ export function assistantRow(
     id,
     role: "assistant",
     undo: null,
+    attachments: [],
     approvals,
     content: `answer ${id}`,
     status,

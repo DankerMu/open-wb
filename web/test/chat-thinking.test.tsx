@@ -56,7 +56,15 @@ const SETTLED_APPROVAL: Message["approvals"][number] = {
 };
 
 function assistant(id: number, status: Status, fields: Partial<Message> = {}): Message {
-  const base = { content: "", thinking: null, createdAt: id, steps: [], approvals: [], undo: null };
+  const base = {
+    content: "",
+    thinking: null,
+    createdAt: id,
+    steps: [],
+    approvals: [],
+    undo: null,
+    attachments: [],
+  };
   return { id, role: "assistant", status, ...base, ...fields };
 }
 
@@ -262,6 +270,7 @@ describe("thinking snapshot mapping and reduction", () => {
       id: 99,
       role: "assistant",
       undo: null,
+      attachments: [],
       status: "running",
       content: "",
       thinking: "y",

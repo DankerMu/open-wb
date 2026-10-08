@@ -580,6 +580,7 @@ describe("approval prompt card: ownership fences", () => {
           id: 2,
           role: "assistant",
           undo: null,
+          attachments: [],
           status: "running",
           content: "",
           createdAt: 2,

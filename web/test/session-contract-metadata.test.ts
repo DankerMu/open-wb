@@ -49,14 +49,27 @@ const extendedSession = {
   temporaryWorkspace: true,
 };
 
+/** 本文件的会话夹具保持十一键：共享夹具已带齐十四键，这里去掉 #996 的三键。 */
+const {
+  approvalMode: _approvalMode,
+  modelId: _modelId,
+  reasoningEffort: _reasoningEffort,
+  ...NULL_ELEVEN_KEY_META
+} = NULL_SESSION_META;
+
 const nullMetaSession = {
   id: "abcdef0123456789abcdef0123456789",
   title: null,
   status: "idle",
   createdAt: 1_740_000_000_000,
   updatedAt: 1_740_000_000_000,
-  ...NULL_SESSION_META,
+  ...NULL_ELEVEN_KEY_META,
 };
+
+/** 十一键会话的解析结果：三项输入框设置取过渡期缺省值（#996，design D16 第 1 步）。 */
+function parsed(session: object) {
+  return { ...session, approvalMode: "write", modelId: "", reasoningEffort: null };
+}
 
 const editChange = { path: "src/app.ts", added: 2, removed: 1, kind: "edit" };
 const writeChange = { path: "out/index.html", added: null, removed: null, kind: "write" };
@@ -83,6 +96,7 @@ function snapshotWith(
         id: -3,
         role: "user",
         undo: "none",
+        attachments: [],
         content: "写周报",
         thinking: null,
         status: "done",
@@ -95,6 +109,7 @@ function snapshotWith(
         id: 0,
         role: "assistant",
         undo: null,
+        attachments: [],
         content: "好的",
         thinking: "先想一想",
         status: "done",
@@ -107,6 +122,7 @@ function snapshotWith(
         id: 1,
         role: "assistant",
         undo: null,
+        attachments: [],
         content: "再答",
         thinking: null,
         status: "done",
@@ -157,9 +173,13 @@ describe("Session contract: eleven-key session", () => {
     ["an archive time, a pending approval and a temporary workspace", extendedSession],
     ["archivedAt 0", { ...metaSession, archivedAt: 0 }],
   ])("accepts and preserves a session with %s in list, snapshot and fork", (_label, session) => {
-    expect(parseSessionList({ sessions: [session] })).toEqual({ sessions: [session] });
-    expect(parseSessionFork({ session, draft: "" })).toEqual({ session, draft: "" });
-    expect(parseMessageSnapshot(snapshotWith({ session }))?.session).toEqual(session);
+    expect(parseSessionList({ sessions: [session] })).toEqual({ sessions: [parsed(session)] });
+    expect(parseSessionFork({ session, draft: "" })).toEqual({
+      session: parsed(session),
+      draft: "",
+      attachments: [],
+    });
+    expect(parseMessageSnapshot(snapshotWith({ session }))?.session).toEqual(parsed(session));
   });
 
   it.each([
@@ -209,13 +229,13 @@ describe("Session contract: message thinking and step changes", () => {
   it("accepts and preserves thinking, null changes and edit/write changes", () => {
     const snapshot = snapshotWith();
 
-    expect(parseMessageSnapshot(snapshot)).toEqual(snapshot);
+    expect(parseMessageSnapshot(snapshot)).toEqual({ ...snapshot, session: parsed(metaSession) });
   });
 
   it("accepts the 1 and 50 element changes bounds", () => {
     for (const count of [1, 50]) {
       const snapshot = snapshotWith({ step: { changes: manyChanges(count) } });
-      expect(parseMessageSnapshot(snapshot)).toEqual(snapshot);
+      expect(parseMessageSnapshot(snapshot)).toEqual({ ...snapshot, session: parsed(metaSession) });
     }
   });
 
@@ -282,7 +302,9 @@ describe("Session contract: list response through the API client", () => {
     }
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(body)));
 
-    await expect(createApiClient().listSessions()).resolves.toEqual(body);
+    await expect(createApiClient().listSessions()).resolves.toEqual({
+      sessions: body.sessions.map(parsed),
+    });
   });
 
   it.each([
