@@ -8,8 +8,9 @@
 # → (6) GET /api/commands 恰两条内建 → /todo 回合：omp 原文、无步骤、无 thinking
 #     → /session WORKBUDDY_THINK 冒烟 回合：正文按原样落库、固定回复、thinking 逐字（转义文本到了模型）、无步骤
 # → (7) DELETE 204 + session.delete 审计 → messages 404 → 列表不含 → 再 DELETE 404
-# → (8) lisi 绑定他人空间 / PATCH / DELETE 均 404 且 lisi 的会话数不变 → zhangsan 复核并删除该会话
-#     → 其临时空间 tree 404 → 登出。
+# → (8) lisi 绑定他人空间 / PATCH / DELETE 均 404 且 lisi 的会话数不变 → zhangsan 复核该会话
+#     → 归档 200（archivedAt 非 null）→ prompt 409 session_archived → 恢复 200（archivedAt null）
+#     → 删除该会话 → 其临时空间 tree 404 → 登出。
 # 只由 make smoke 运行（smoke-live 不跑本文件），不使用 skip_turn_control。
 # 可重跑：工作空间保留供下次采用，自建会话在文件内删除，不留下 live authentication session 与 running 回合。
 # 库与 SANDBOX_ROOT 必须同生命周期：库在而空间目录被清掉时，创建仍成功，但 (4) 的回合会因空间根不存在而失败。
@@ -400,6 +401,30 @@ GET {{base_url}}/api/sessions/{{other_id}}/messages
 HTTP 200
 [Asserts]
 jsonpath "$.session.title" == null
+
+# (8) 属主归档该会话：exact 200，恰十一键，archivedAt 为整数时间戳。不重试。
+PATCH {{base_url}}/api/sessions/{{other_id}}
+Content-Type: application/json
+{"archived":true}
+HTTP 200
+[Asserts]
+jsonpath "$.*" count == 11
+jsonpath "$.archivedAt" isInteger
+
+# (8) 已归档的会话拒绝 prompt：exact 409 session_archived。不重试。
+POST {{base_url}}/api/sessions/{{other_id}}/prompt
+Content-Type: application/json
+{"message":"hi"}
+HTTP 409
+{"error":{"code":"session_archived","message":"会话已归档，恢复后才能继续对话"}}
+
+# (8) 属主恢复该会话：exact 200，archivedAt null。不重试。
+PATCH {{base_url}}/api/sessions/{{other_id}}
+Content-Type: application/json
+{"archived":false}
+HTTP 200
+[Asserts]
+jsonpath "$.archivedAt" == null
 
 # (8) 属主删除该会话：exact 204、空 body。不重试。
 DELETE {{base_url}}/api/sessions/{{other_id}}
