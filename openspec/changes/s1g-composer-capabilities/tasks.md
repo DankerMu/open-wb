@@ -280,7 +280,7 @@ Minimal mergeable slice: 12.1 一刀（纯函数与对齐，无附件时字节�
 
 - [ ] 13.1 `web/src/lib/api-sessions.ts` / `api.ts`：`createSession` 与 `patchSession` 的 input 类型加三键；`prompt(id, message, options)` 的 `options.attachments`（非空才进 body）。C 的 `undoMessage`（C 的 13.1）的响应类型带 `attachments`（解析在 5.1 已放宽、13.5 收紧）。`message` 原样进 body：空串不裁剪、不省略键、客户端不因它为空而拒绝。测试（既有 API 客户端测试文件）：chat-web「新输入与两个新方法」的前五个调用（含 `prompt(id, "", {attachments:[…]})` 的 body `{"message":"","attachments":[…]}`）、「回合控制四方法请求与响应」里 `forkSession` 的 201 三键。
 - [ ] 13.2 `getComposerOptions()`：方法与严格解析（解析放 `session-contract.ts` 或新文件 `web/src/lib/composer-contract.ts`，视行数）。测试：同场景的 options 部分（合法逐值返回；三种非法响应拒绝）。
-- [ ] 13.3 `uploadFile()`：新文件 `web/src/lib/api-upload.ts`（唯一用 `XMLHttpRequest` 的地方；same-origin、信封解析、request_failed 与 401 通知由 `api.ts` 注入，值导入方向 `api.ts → api-upload.ts`，与「API 客户端源码模块划分」对 `api-sessions.ts` 的规则一致）。
+- [x] 13.3 `uploadFile()`：新文件 `web/src/lib/api-upload.ts`（唯一用 `XMLHttpRequest` 的地方；same-origin、信封解析、request_failed 与 401 通知由 `api.ts` 注入，值导入方向 `api.ts → api-upload.ts`，与「API 客户端源码模块划分」对 `api-sessions.ts` 的规则一致）。
   测试新文件 `web/test/api-upload.test.ts`（可控的 `XMLHttpRequest` 替身）：chat-web delta「上传传输」四例。变异：文件名不编码、进度不取整、中止时不调 `abort()`、401 不通知 → 各判红。
   **实施注记（13.3，fixture 评审补充，#1023）**：
   - 模块形状照 `api-sessions.ts`：`web/src/lib/api-upload.ts` 导出 `createUploadMethods(onUnauthorized, { parseJsonResponse, requestFailed, isSuccessfulStatus }): Pick<ApiClient, "uploadFile">`；对 `./api.js` 只 `import type`，值只导入 `./api-json.js`；`api.ts`（现 758 行）在 `createApiClient` 里展开它。`ApiClient` 加 `uploadFile(workspaceId, file: File, options?: { signal?: AbortSignal; onProgress?: (percent: number) => void }): Promise<UploadedFile>`。

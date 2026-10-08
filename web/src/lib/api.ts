@@ -6,6 +6,7 @@ import {
   parseJsonArray,
 } from "./api-json.js";
 import { createSessionMethods } from "./api-sessions.js";
+import { createUploadMethods, type UploadedFile } from "./api-upload.js";
 import type {
   ChatMessageSnapshot,
   ChatPromptAccepted,
@@ -188,6 +189,11 @@ export type ApiClient = {
     workspaceId: string | null,
     options?: ApiRequestOptions,
   ): Promise<ProjectConfigFile[]>;
+  uploadFile(
+    workspaceId: string,
+    file: File,
+    options?: { signal?: AbortSignal; onProgress?: (percent: number) => void },
+  ): Promise<UploadedFile>;
 };
 
 export type ApiClientOptions = {
@@ -571,6 +577,11 @@ export function createApiClient({ onUnauthorized }: ApiClientOptions = {}): ApiC
       requestOptions,
     }),
     ...createCommandMethods(onUnauthorized, { getRequestOptions, request, requestFailed }),
+    ...createUploadMethods(onUnauthorized, {
+      isSuccessfulStatus,
+      parseJsonResponse,
+      requestFailed,
+    }),
 
     async listWorkspaces(options) {
       const response = await request(
