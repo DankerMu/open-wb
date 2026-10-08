@@ -70,6 +70,7 @@ const SELECT_BY_MESSAGE = `SELECT ${COLUMNS} FROM chat_turn_snapshots AS t WHERE
 // `message_id` is the autoincrement key of chat_messages, so the highest one is the latest turn;
 // `created_at` cannot say that for two rows of the same millisecond.
 const SELECT_LATEST_OK = `SELECT ${COLUMNS} FROM chat_turn_snapshots AS t WHERE t.workspace_id = ? AND t.outcome = 'ok' ORDER BY t.message_id DESC LIMIT 1`;
+const SELECT_STORED_TODO = "SELECT CAST(todo AS BLOB) AS todo FROM chat_sessions WHERE id = ?";
 const SELECT_BY_SESSION = `SELECT ${COLUMNS} FROM chat_turn_snapshots AS t JOIN chat_messages AS m ON m.id = t.message_id WHERE m.session_id = ? ORDER BY m.created_at ASC, m.id ASC`;
 
 /**
@@ -106,6 +107,17 @@ export function listSessionTurnSnapshots(db: DatabaseSync, sessionId: string): T
   const decoder = createSqliteTextDecoder(db);
   const rows = db.prepare(SELECT_BY_SESSION).all(sessionId) as unknown as SnapshotDbRow[];
   return rows.map((row) => toRow(row, decoder));
+}
+
+/**
+ * The stored text of the session's `chat_sessions.todo`, unparsed, or null for SQL NULL (and for a
+ * session that is not there): what a registration row's `todo` is written from.
+ */
+export function readStoredTodo(db: DatabaseSync, sessionId: string): string | null {
+  const row = db.prepare(SELECT_STORED_TODO).get(sessionId) as unknown as
+    | { todo: Uint8Array | null }
+    | undefined;
+  return row === undefined ? null : decodeNullableText(createSqliteTextDecoder(db), row.todo);
 }
 
 function skippedText(skipped: readonly SkippedPath[]): string | null {

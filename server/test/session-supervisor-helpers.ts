@@ -9,10 +9,12 @@ import { openDb } from "../src/core/db/index.js";
 import type { ChatEvent } from "../src/sessions/events.js";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import type { SpawnImpl } from "../src/sessions/omp/process.js";
+import { ensureOmpStateLayout } from "../src/sessions/omp/state-layout.js";
 import type { SessionStore } from "../src/sessions/store.js";
 import type { TodoWarn } from "../src/sessions/store-todo.js";
 import type { SessionSupervisor } from "../src/sessions/supervisor.js";
 import { TokenRegistry } from "../src/sessions/tokens.js";
+import type { TurnSnapshotService } from "../src/sessions/turn-snapshot.js";
 import { FIXED_NOW, fixedRuntime } from "./session-db-helpers.js";
 import { cookieFor, postPrompt } from "./session-rest-helpers.js";
 import { messageRows, sessionRow } from "./session-store-helpers.js";
@@ -88,6 +90,8 @@ export interface OpenSessionOptions {
   /** An already open database (a restart over the same rows); omitted → a fresh `:memory:` one. */
   db?: DatabaseSync;
   configureApp?: (app: FastifyInstance) => void;
+  /** Replaces the app's workspace-snapshots service (#945: a `take` held open or made to fail). */
+  snapshots?: TurnSnapshotService;
 }
 
 export function createRealFakeRuntime(
@@ -97,6 +101,9 @@ export function createRealFakeRuntime(
   const calls: SpawnCall[] = [];
   const children: ChildProcessWithoutNullStreams[] = [];
   const temp = harness.tempOpts("issue100-runtime-unused", "session-supervisor-real-");
+  // As the production entry does before it serves a prompt: the per-turn snapshot (#945) writes
+  // under `snapshots/` before the first spawn would lay the state dir out.
+  ensureOmpStateLayout(temp.stateDir);
   let scenario = initialScenario;
   const spawnImpl: SpawnImpl = (command, args, options) => {
     calls.push(recordedSpawn(command, args, options));
@@ -133,6 +140,8 @@ export function createControlledRuntime(
   const calls: SpawnCall[] = [];
   const children: FakeChild[] = [];
   const temp = harness.tempOpts("issue100-controlled-unused", "session-supervisor-controlled-");
+  // Laid out up front, like the real-fake runtime above.
+  ensureOmpStateLayout(temp.stateDir);
   const spawnImpl: SpawnImpl = (command, args, options) => {
     const call = recordedSpawn(command, args, options);
     calls.push(call);
@@ -176,6 +185,7 @@ function openSupervisorApp(input: OpenSupervisorAppInput): SupervisorApp {
       onError: input.onError ?? (() => {}),
       ...(input.onEvent === undefined ? {} : { onEvent: input.onEvent }),
       ...(input.warn === undefined ? {} : { warn: input.warn }),
+      ...(input.snapshots === undefined ? {} : { snapshots: input.snapshots }),
     },
   });
   input.configureApp?.(app);

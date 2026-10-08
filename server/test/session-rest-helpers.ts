@@ -95,6 +95,9 @@ export async function withSessionRest<T>(
             deleteSession: () =>
               Promise.reject(new Error("session-rest harness does not serve DELETE")),
           },
+          // The recording supervisor never runs the pre-dispatch step, so nothing is snapshotted
+          // here (#945); the real step is exercised in prompt-snapshot.test.ts.
+          turnSnapshots: { step: () => () => Promise.resolve(), discard: () => Promise.resolve() },
         });
         try {
           return await action({ app, db, store, supervisor, metadata, listNotified });

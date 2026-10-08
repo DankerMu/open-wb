@@ -28,14 +28,13 @@ import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
 import { type AgentSettings, resolveAgentSettings } from "./agent-config.js";
-import { type AssemblyDependencies, createApp } from "./app.js";
+import { type AssemblyDependencies, createApp, type SessionRuntime } from "./app.js";
 import { openDb } from "./core/db/index.js";
 import { deriveProxyBaseUrl, writeManagedModelsYml } from "./model-proxy/models-yml.js";
 import { writeHostOverlay } from "./sessions/omp/host-overlay.js";
 import type { HandshakeTimeoutRecord } from "./sessions/omp/spawn-gate.js";
 import { ensureOmpStateLayout, ompAgentDir } from "./sessions/omp/state-layout.js";
 import type { TodoRejection } from "./sessions/store-todo.js";
-import type { SessionSupervisorRuntime } from "./sessions/supervisor.js";
 import { writeManagedLine } from "./startup-writer.js";
 
 const PRIVATE_DB_FILE_MODE = 0o600;
@@ -78,8 +77,8 @@ export function resolveServerConfig(
   };
 }
 
-/** 纯 seam：sessions 模块的 runtime settings；idle 期限与两个上限同一对象、唯一来源为已解析 config。 */
-export function sessionRuntimeOf(config: ServerConfig): SessionSupervisorRuntime {
+/** 纯 seam：sessions 模块的 runtime settings；idle 期限、两个上限与四个快照设置同一对象、唯一来源为已解析 config。 */
+export function sessionRuntimeOf(config: ServerConfig): SessionRuntime {
   return {
     bin: config.ompBin,
     sandboxRoot: config.sandboxRoot,
@@ -88,6 +87,10 @@ export function sessionRuntimeOf(config: ServerConfig): SessionSupervisorRuntime
     idleMs: config.ompIdleMs,
     maxProcesses: config.ompMaxProcesses,
     spawnConcurrency: config.ompSpawnConcurrency,
+    snapshotMaxFileBytes: config.snapshotMaxFileBytes,
+    snapshotMaxTotalBytes: config.snapshotMaxTotalBytes,
+    snapshotMaxEntries: config.snapshotMaxEntries,
+    snapshotExcludeNames: config.snapshotExcludeNames,
     ...(config.ompUser === undefined ? {} : { ompUser: config.ompUser }),
   };
 }
