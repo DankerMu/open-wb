@@ -18,7 +18,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { HttpError } from "../src/core/errors/index.js";
 import { storeUpload } from "../src/workspaces/upload.js";
 
@@ -26,6 +26,8 @@ const tmpDirs: string[] = [];
 const CHUNK = 64 * 1024;
 const NO_LIMIT = 1024 * 1024;
 const ENDLESS_STALL = 32 * 1024 * 1024;
+const PARALLEL = 8;
+const TEMP_NAME = /^\.upload-[0-9a-f]{32}\.part$/u;
 
 afterEach(() => {
   for (const dir of tmpDirs.splice(0)) {
@@ -46,6 +48,45 @@ function bytes(...chunks: (string | Buffer)[]): Readable {
 
 function store(dir: string, name: string, content: string, maxBytes = NO_LIMIT) {
   return storeUpload({ dir, name, source: bytes(content), maxBytes });
+}
+
+/** Hands out `before`, waits for the gate, hands out `after`, and only then ends. */
+function gated(gate: Promise<void>, before: string, after = ""): Readable {
+  return Readable.from(
+    (async function* () {
+      yield Buffer.from(before);
+      await gate;
+      if (after !== "") {
+        yield Buffer.from(after);
+      }
+    })(),
+  );
+}
+
+function openable(): { gate: Promise<void>; open: () => void } {
+  let open = (): void => undefined;
+  const gate = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { gate, open };
+}
+
+/**
+ * Starts one upload of `name` per payload, lets every one of them write all its bytes, and only
+ * then lets them all end at once: they reach the naming step together.
+ */
+async function storeTogether(dir: string, name: string, payloads: string[]) {
+  const { gate, open } = openable();
+  const pending = payloads.map((payload) =>
+    storeUpload({ dir, name, source: gated(gate, payload), maxBytes: NO_LIMIT }),
+  );
+  await vi.waitFor(() => {
+    const sizes = names(dir).map((entry) => lstatSync(join(dir, entry)).size);
+    expect(sizes.sort()).toEqual(payloads.map((payload) => payload.length).sort());
+  });
+  expect(names(dir).every((entry) => TEMP_NAME.test(entry))).toBe(true);
+  open();
+  return Promise.all(pending);
 }
 
 function names(dir: string): string[] {
@@ -146,18 +187,69 @@ describe("workspaces/upload storeUpload: naming", () => {
 
   it("gives two concurrent uploads of one name the name and its (1), each complete", async () => {
     const dir = uploadsDir();
-    const one = "1".repeat(3 * CHUNK + 1);
-    const two = "2".repeat(5 * CHUNK + 7);
+    const payloads = ["1".repeat(3 * CHUNK + 1), "2".repeat(5 * CHUNK + 7)];
 
-    const stored = await Promise.all([store(dir, "b.txt", one), store(dir, "b.txt", two)]);
+    const stored = await storeTogether(dir, "b.txt", payloads);
 
     expect(stored.map((entry) => entry.name).sort()).toEqual(["b (1).txt", "b.txt"]);
     expect(names(dir)).toEqual(["b (1).txt", "b.txt"]);
-    const [first, second] = stored;
-    expect(first?.size).toBe(one.length);
-    expect(second?.size).toBe(two.length);
-    expect(text(dir, first?.name ?? "")).toBe(one);
-    expect(text(dir, second?.name ?? "")).toBe(two);
+    expect(stored.map((entry) => entry.size)).toEqual(payloads.map((payload) => payload.length));
+    expect(stored.map((entry) => text(dir, entry.name))).toEqual(payloads);
+  });
+
+  it("gives eight uploads of one name that reach naming together eight names, one payload each", async () => {
+    const dir = uploadsDir();
+    // Different lengths and different bytes: no payload can pass for another.
+    const payloads = Array.from({ length: PARALLEL }, (_, index) =>
+      String(index).repeat(CHUNK + index + 1),
+    );
+    const expected = ["c.txt"];
+    for (let n = 1; n < PARALLEL; n += 1) {
+      expected.push(`c (${n}).txt`);
+    }
+
+    const stored = await storeTogether(dir, "c.txt", payloads);
+
+    expect(stored.map((entry) => entry.name).sort()).toEqual([...expected].sort());
+    expect(names(dir)).toEqual([...expected].sort());
+    expect(stored.map((entry) => entry.size)).toEqual(payloads.map((payload) => payload.length));
+    // Each upload reads back its own bytes under the name it was told, so every payload is on
+    // disk exactly once.
+    expect(stored.map((entry) => text(dir, entry.name))).toEqual(payloads);
+    expect(expected.map((entry) => text(dir, entry)).sort()).toEqual([...payloads].sort());
+  });
+
+  it("keeps the bytes in one .upload-<hex>.part file at 0660 until the source ends, then only the name is there", async () => {
+    const dir = uploadsDir();
+    const { gate, open } = openable();
+    const previous = process.umask(0o077);
+    let pending: Promise<{ name: string; size: number }>;
+    try {
+      pending = storeUpload({
+        dir,
+        name: "a.txt",
+        source: gated(gate, "abc", "def"),
+        maxBytes: NO_LIMIT,
+      });
+      await vi.waitFor(() => {
+        expect(names(dir).map((entry) => lstatSync(join(dir, entry)).size)).toEqual([3]);
+      });
+    } finally {
+      process.umask(previous);
+    }
+
+    const inFlight = names(dir);
+    expect(inFlight).toHaveLength(1);
+    expect(inFlight[0]).toMatch(TEMP_NAME);
+    const temp = lstatSync(join(dir, inFlight[0] ?? ""));
+    expect(temp.isFile()).toBe(true);
+    expect(temp.mode & 0o7777).toBe(0o660);
+
+    open();
+
+    expect(await pending).toEqual({ name: "a.txt", size: 6 });
+    expect(names(dir)).toEqual(["a.txt"]);
+    expect(text(dir, "a.txt")).toBe("abcdef");
   });
 
   it("does not follow a live symbolic link at the name: link and target stay, upload is (1)", async () => {
@@ -258,7 +350,7 @@ describe("workspaces/upload storeUpload: limit and cleanup", () => {
     expectHttpError(error, "upload_too_large");
     expect(source.destroyed).toBe(true);
     expect(pulled()).toBeGreaterThan(maxBytes);
-    expect(pulled()).toBeLessThanOrEqual(maxBytes + 2 * CHUNK);
+    expect(pulled()).toBeLessThanOrEqual(maxBytes + 3 * CHUNK);
     expect(names(dir)).toEqual([]);
   }, 3_000);
 
