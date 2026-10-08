@@ -91,10 +91,12 @@ export async function withSessionRest<T>(
         });
         const listNotified: string[] = [];
         registerSessionRoutes(app, {
+          db,
           listEvents: {
             notify(ownerId) {
               listNotified.push(ownerId);
             },
+            notifyRewound() {},
           },
           store,
           supervisor,
@@ -175,6 +177,9 @@ function createSupervisor(): RecordingSupervisor {
     },
     fork() {
       return Promise.reject(new Error("unexpected fork call"));
+    },
+    undo() {
+      return Promise.reject(new Error("unexpected undo call"));
     },
     controlHeld() {
       return false;

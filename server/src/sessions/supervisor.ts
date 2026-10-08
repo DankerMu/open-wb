@@ -49,6 +49,7 @@ import {
 import { ThinkingBuffers } from "./thinking-buffer.js";
 import type { TokenRegistry } from "./tokens.js";
 import { ControlClaims, drain, persistEvent, TurnStops } from "./turn-control.js";
+import { type UndoRequest, type UndoResult, Undos } from "./undo.js";
 
 export { releasePumpExit } from "./pool.js";
 
@@ -133,6 +134,7 @@ export class SessionSupervisor {
   readonly #controls = new ControlClaims();
   readonly #regenerations: Regenerations;
   readonly #forks: Forks;
+  readonly #undos: Undos;
   readonly #cwdOf: ReturnType<typeof sessionCwdResolver>;
   #closed = false;
 
@@ -190,7 +192,7 @@ export class SessionSupervisor {
       settled: (settled) => this.#approvals.settled(settled),
       skills: options.skills,
     });
-    this.#forks = new Forks({
+    const ports = {
       store: this.#store,
       controls: this.#controls,
       pool: this.#pool,
@@ -199,12 +201,14 @@ export class SessionSupervisor {
       spawn: this.#spawn,
       closed: () => this.#closed,
       cwdOf: this.#cwdOf,
-      retireSource: (sessionId) => {
+      retireSource: (sessionId: string) => {
         const slot = this.#slots.get(sessionId);
         return slot === undefined ? Promise.resolve() : this.#retireSlot(slot);
       },
       skills: options.skills,
-    });
+    };
+    this.#forks = new Forks(ports);
+    this.#undos = new Undos({ ...ports, retireSource: (id) => this.retire(id) });
   }
 
   /** `beforeDispatch` runs once the turn accepts a stop intent, before any wait or spawn. */
@@ -223,6 +227,11 @@ export class SessionSupervisor {
   /** Forks at a user message of the session (#466); REST is #469. Every failure is a rejection. */
   fork(sessionId: string, ownerId: string, messageId: number): Promise<ForkResult> {
     return this.#control(() => this.#forks.run(sessionId, ownerId, messageId));
+  }
+
+  /** Undoes a user message in place (#951); REST is undo.ts. Every failure is a rejection. */
+  undo(request: UndoRequest): Promise<UndoResult> {
+    return this.#control(() => this.#undos.run(request));
   }
 
   /**
@@ -296,7 +305,7 @@ export class SessionSupervisor {
     this.#approvals.close();
     this.#subscribers.clear();
     // Temporary fork processes are not slots; closing them first lets a held command return.
-    const retirements: Promise<void>[] = [this.#forks.close()];
+    const retirements: Promise<void>[] = [this.#forks.close(), this.#undos.close()];
     for (const slot of this.#slots.values()) {
       retirements.push(this.#retireSlot(slot));
     }

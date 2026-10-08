@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import type { DatabaseSync } from "node:sqlite";
 import type {
   FastifyInstance,
   FastifyRequest,
@@ -26,6 +27,7 @@ import type { SessionMetadataStore } from "./store-metadata.js";
 import type { UndoState } from "./store-undo.js";
 import type { SessionSupervisor, StreamCursor } from "./supervisor.js";
 import type { TurnSnapshots } from "./turn-snapshot.js";
+import { registerUndoRoute, type UndoRequest, type UndoResult } from "./undo.js";
 
 type ForkResult = Awaited<ReturnType<SessionSupervisor["fork"]>>;
 
@@ -36,6 +38,7 @@ export interface SessionSupervisorPort {
   stop(sessionId: string): Promise<void>;
   regenerate(sessionId: string, ownerId: string): Promise<{ assistantMessageId: number }>;
   fork(sessionId: string, ownerId: string, messageId: number): Promise<ForkResult>;
+  undo(request: UndoRequest): Promise<UndoResult>;
   controlHeld(sessionId: string): boolean;
 }
 
@@ -44,6 +47,8 @@ export interface SessionOwnerStore {
 }
 
 interface SessionRestDependencies {
+  /** The undo route's two database steps: the undo state read and the undo transaction. */
+  db: DatabaseSync;
   store: SessionStore;
   supervisor: SessionSupervisorPort;
   metadata: SessionMetadataStore;
@@ -53,8 +58,11 @@ interface SessionRestDependencies {
   agentDir: string;
   /** With `workspaceRootOf`, the session cwd whose project skills the prompt route lists (#773). */
   sandboxRoot: string;
-  /** Told after each committed write of these routes that changes the owner's session list. */
-  listEvents: Pick<SessionListNotifier, "notify">;
+  /**
+   * Told after each committed write of these routes that changes the owner's session list; a
+   * committed undo also tells that the session was rewound.
+   */
+  listEvents: Pick<SessionListNotifier, "notify" | "notifyRewound">;
   /**
    * The per-turn workspace snapshot: the prompt's pre-dispatch step, its cleanup, and the `undo`
    * values its registrations give the message view and the prompt's 202.
@@ -359,6 +367,7 @@ export function registerSessionRoutes(
       });
     },
   );
+  registerUndoRoute(app, dependencies);
   app.post<{ Params: ApprovalParams }>(
     "/api/sessions/:id/approvals/:approvalId",
     { onRequest: noStoreSessionResponse, preParsing: authorizeApprovalBeforeParse },
@@ -380,7 +389,7 @@ export function currentPrincipal(request: FastifyRequest): { id: string } {
   return principal;
 }
 
-function toPublicSession(session: PublicSession): PublicSession {
+export function toPublicSession(session: PublicSession): PublicSession {
   return {
     id: session.id,
     title: session.title,
@@ -454,7 +463,7 @@ function parseApprovalId(raw: unknown): number {
   return approvalId;
 }
 
-function requirePlainRecord(body: unknown): Record<string, unknown> {
+export function requirePlainRecord(body: unknown): Record<string, unknown> {
   if (
     typeof body !== "object" ||
     body === null ||
