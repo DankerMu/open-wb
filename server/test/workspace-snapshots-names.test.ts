@@ -23,6 +23,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { splitNames } from "../src/workspaces/snapshots.js";
 import {
+  afterListing,
   contentsOf,
   describeTree,
   dirEntry,
@@ -32,6 +33,7 @@ import {
   ioError,
   manifestOf,
   onCopyCreate,
+  onListing,
   put,
   restoreRun,
   run,
@@ -51,27 +53,6 @@ const FE_TXT = Buffer.from([0xfe, 0x2e, 0x74, 0x78, 0x74]);
 const BAD_DIR = Buffer.from([0x62, 0xff, 0x64]);
 
 type Listing = (path: PathLike, options: { encoding: "buffer" }) => Promise<Buffer[]>;
-
-/** The module's listing of `dir` goes through `change` (once the real one has returned). */
-function onListing(dir: string, change: (names: Buffer[]) => Buffer[]): void {
-  const readdir = fs.promises.readdir as unknown as Listing;
-  vi.spyOn(fs.promises, "readdir").mockImplementation((async (path, options) => {
-    const names = await readdir(path, options);
-    return path === dir ? change(names) : names;
-  }) as Listing as unknown as typeof fs.promises.readdir);
-}
-
-/** `act` runs once, right after `dir` has been listed and before any of its entries is read. */
-function afterListing(dir: string, act: () => void): void {
-  let done = false;
-  onListing(dir, (names) => {
-    if (!done) {
-      done = true;
-      act();
-    }
-    return names;
-  });
-}
 
 /** Every path the calls of these `fs.promises` functions were given, as strings. */
 function pathsGivenTo(...names: (keyof typeof fs.promises)[]): () => string[] {
@@ -125,6 +106,7 @@ describe("快照内容规则 — 列举后消失的条目不使快照失败", ()
     expect(manifestOf(f)).toEqual({
       entries: [fileEntry(f, "a.txt"), dirEntry(f, "d"), fileEntry(f, "d/x.txt")],
       skipped: [],
+      incomplete: true,
     });
     expect(treeOf(f)).toEqual(["a.txt", "d", "d/x.txt"]);
   });
@@ -163,6 +145,7 @@ describe("快照内容规则 — 列举后消失的条目不使快照失败", ()
     expect(manifestOf(f)).toEqual({
       entries: [fileEntry(f, "a.txt"), fileEntry(f, "z.txt")],
       skipped: [],
+      incomplete: true,
     });
     expect(treeOf(f)).toEqual(["a.txt", "z.txt"]);
   });
@@ -192,6 +175,7 @@ describe("快照内容规则 — 列举后消失的条目不使快照失败", ()
     expect(manifestOf(f)).toEqual({
       entries: [fileEntry(f, "a.txt"), listed, fileEntry(f, "z.txt")],
       skipped: [],
+      incomplete: true,
     });
     expect(treeOf(f)).toEqual(["a.txt", "d", "z.txt"]);
   });

@@ -215,6 +215,29 @@ export function swapAfterLstat(target: string, swap: () => void): void {
   }) as typeof lstat);
 }
 
+type Listing = (path: PathLike, options: { encoding: "buffer" }) => Promise<Buffer[]>;
+
+/** The module's listing of `dir` goes through `change` (once the real one has returned). */
+export function onListing(dir: string, change: (names: Buffer[]) => Buffer[]): void {
+  const readdir = fs.promises.readdir as unknown as Listing;
+  vi.spyOn(fs.promises, "readdir").mockImplementation((async (path, options) => {
+    const names = await readdir(path, options);
+    return path === dir ? change(names) : names;
+  }) as Listing as unknown as typeof fs.promises.readdir);
+}
+
+/** `act` runs once, right after `dir` has been listed and before any of its entries is read. */
+export function afterListing(dir: string, act: () => void): void {
+  let done = false;
+  onListing(dir, (names) => {
+    if (!done) {
+      done = true;
+      act();
+    }
+    return names;
+  });
+}
+
 /** A reader stuck opening `fifo` returns once a writer shows up; without a reader this is ENXIO. */
 function releaseReader(fifo: string): void {
   try {

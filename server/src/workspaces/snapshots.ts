@@ -19,8 +19,10 @@
  *      listed is traversed by both `lstat` and the open;
  *   2. a directory entry replaced by a symbolic link between its `lstat` and its `readdir` is
  *      listed and copied whole from wherever the link points.
- * An entry that is gone by the time it is read was never there as far as the snapshot goes
- * (`readable`); only the workspace root itself missing fails it (#1148).
+ * An entry that is gone by the time it is read is left out (`readable`); only the workspace root
+ * itself missing fails the snapshot. Gone may mean renamed: the new name is in no listing taken
+ * so far, so the snapshot has no copy of something that is still in the workspace. The manifest
+ * of such a walk says `incomplete: true`, and a restore from it deletes nothing (#1148).
  *
  * Names are listed as bytes (`splitNames`). A name that is not valid UTF-8 cannot be written in
  * the manifest, whose paths are JSON strings: the entry is left out as `name_encoding` and never
@@ -114,6 +116,8 @@ interface Walk {
   skipped: SkippedEntry[];
   /** Sum of `size` over the file entries. */
   totalBytes: number;
+  /** A listed entry was gone when it was read: the manifest is written as `incomplete`. */
+  vanished: boolean;
 }
 
 /** Thrown by `claim` to end the walk where it stands; `take` turns it into `too_large`. */
@@ -274,13 +278,19 @@ async function write(options: TakeOptions, snapshotDir: string): Promise<TakeRes
     entries: [],
     skipped: [],
     totalBytes: 0,
+    vanished: false,
   };
   await makePrivateDir(walk.treeRoot);
   // Not through `readable`: the root itself gone is a failure, not an entry that vanished.
   await visitChildren(walk, "", await fsp.readdir(options.workspaceRoot, { encoding: "buffer" }));
 
   const manifest = join(snapshotDir, "manifest.json");
-  const body = JSON.stringify({ entries: walk.entries, skipped: walk.skipped });
+  // The key is there only when it is true: a walk that lost nothing writes what it always did.
+  const body = JSON.stringify({
+    entries: walk.entries,
+    skipped: walk.skipped,
+    ...(walk.vanished ? { incomplete: true } : {}),
+  });
   await fsp.writeFile(manifest, body, { mode: FILE_MODE, flag: "wx" });
   await fsp.chmod(manifest, FILE_MODE);
   return { outcome: "ok", skipped: walk.skipped };
@@ -525,7 +535,8 @@ async function copyContent(
  * snapshot's side. Yields `undefined` when the entry is to be left out:
  *   - `EACCES` / `EPERM`: recorded as `unreadable`;
  *   - `ENOENT`, or `ENOTDIR` (a level of its path is no directory any more): it vanished after
- *     it was listed, so it did not exist when the snapshot was taken and is recorded nowhere.
+ *     it was listed and is recorded nowhere, and the walk is marked (`vanished`): it may have
+ *     been renamed to a name this walk never sees.
  * Every other error propagates and fails the snapshot.
  */
 async function readable<T>(
@@ -538,6 +549,7 @@ async function readable<T>(
   } catch (error) {
     const code = codeOf(error);
     if (code === "ENOENT" || code === "ENOTDIR") {
+      walk.vanished = true;
       return undefined;
     }
     if (code !== "EACCES" && code !== "EPERM") {
