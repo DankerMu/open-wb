@@ -131,8 +131,19 @@ Minimal mergeable slice: 4.1 + 4.2 一刀（会话设置所需）；4.3 一刀�
 - [ ] 5.1 `web/src/lib/session-contract.ts`：按 design D16「三步落地」第 1 步列出的过渡接受规则改解析（规格只描述最终形状，过渡规则以 D16 为准）——`parseSession` 接受 C 之后的十一键，或十一键加三键（三键同现同缺；缺时解析为 `write` / 空串 / `null`）；消息解析接受带或不带 `attachments`（缺时 `[]`；助手消息非空拒绝）；`parseSessionFork` 与 C 的 undo 响应解析接受带或不带 `attachments`（缺时 `[]`）。
   `ChatSession`、`ChatMessage`、`ChatSessionFork` 与 undo 结果类型加上新字段。这是合同迁移的过渡分支，不是并行实现（AGENTS「Code Canonicality」）：在该文件顶部注释写明它由任务 13.5 删除，并引用本 change 名。
 - [ ] 5.2 测试（`web/test/` 里会话合同解析的既有文件，或新文件 `web/test/session-contract-composer.test.ts`）：design D16 第 1 步的每一条——十一键会话通过并解析为 `write` / 空串 / `null`；带齐三键的十四键会话通过；只带 `approvalMode` 的会话整体拒绝；带与不带 `attachments` 的消息都通过（后者为 `[]`）、助手消息非空拒绝；`{session, draft}` 的 fork 响应与 `{session, draft, files}` 的 undo 响应通过且 `attachments` 为 `[]`，带 `attachments` 的同样通过。
-  既有的严格解析用例（C 的十一键、`undo` 键）原样通过。变异：允许只带一键、缺 `attachments` 时拒绝 → 判红。
-- [ ] 5.3 让新字段流到视图状态但不使用：`web/src/features/chat/stream.ts`（749 行，注意余量）/ `types.ts` 里由快照构造视图消息与会话的地方带上 `attachments` 与三键（纯透传）；`runtime-convert.ts` 把 `attachments` 作为应用自有字段透传。既有归约与渲染测试原样通过；本任务不渲染任何新界面。
+  既有的严格解析用例（C 的十一键、`undo` 键）的接受 / 拒绝判定不变；解析输出现在带缺省值，拿输出与输入做等值断言的既有期望经共享夹具升级（见下方实施注记），逐文件写进 PR 偏离记录。变异：允许只带一键、缺 `attachments` 时拒绝 → 判红。
+- [ ] 5.3 让新字段流到视图状态但不使用：`web/src/features/chat/stream.ts`（753 行，注意余量）/ `types.ts` 里由快照构造视图消息与会话的地方带上 `attachments` 与三键（纯透传）；`runtime-convert.ts` 把 `attachments` 作为应用自有字段透传。既有归约与渲染测试的判定不变（视图等值断言的期望随夹具带上 `attachments`）；本任务不渲染任何新界面。
+  **实施注记（5.1–5.3，fixture 评审补充，#996）**：
+  - 接受矩阵（会话）：恰十一键 → 通过并补 `approvalMode:"write"`、`modelId:""`、`reasoningEffort:null`；恰十四键 → 通过并逐值保留；只带一键或两键、或多出别的键 → 整体拒绝。写法：两次 `hasExactlyKeys`（十一键表、十四键表），都不中即 `null`。
+  - 三键在场时的值域（取规格最终形状）：`approvalMode ∈ {always-ask, write, yolo}`；`modelId` 任意字符串（含空串——「空串非法」是 13.5 的收紧项）；`reasoningEffort ∈ {off, minimal, low, medium, high, xhigh, max}` 或 `null`，`"auto"` 拒绝。
+  - 消息：恰九键 → `attachments: []`；九键加 `attachments` → 解析；元素恰 `{path, size}`（`path` 非空字符串，`size` 非负安全整数），`null`、非数组、多键、负数拒绝；`role === "assistant"` 且非空 → 整条消息（即整个快照）拒绝。
+  - fork：`{session, draft}` 或加 `attachments`；undo：`{session, draft, files}` 或加 `attachments`；缺 → `[]`；元素规则同上；其它键集拒绝。
+  - 类型：新字段一律 required（optional 会让 13.5 多一轮类型改动，等值断言也照样红）。过渡分支集中成一处（一个小 helper 加缺省常量），13.5 可整块删。
+  - 顶部注释放在 `session-contract.ts` 第 1 行 import 之前，须含可 grep 的字面量 `s1g-composer-capabilities` 与 `任务 13.5`，并写一句理由（合同迁移的过渡分支，服务端组 8、12 发出新键后由 13.5 删除，不是并行实现）。AGENTS.md 没有成文的例外条款，注释写理由，不写「引用例外」。
+  - 5.3 透传（不渲染）：`stream.ts`（现 753 行）的 `ChatMessageView` 加 `attachments`，`chatStateFromSnapshot` 带上，`turn.start` 字面量与 `emptyAssistant` 各加 `attachments: []`；`runtime-convert.ts` 的 `ChatMessageCustom` 的 `Pick` 加 `"attachments"`，`convertMessage` 的 `custom` 带上。会话三键不经 `stream.ts`：它们随 `ChatSession` 类型到达 `ChatListState.sessions` 与历史快照，无需代码。不在 `features/chat/` 下新建文件。
+  - 既有测试：解析输出现在比输入多键，拿输出与原始输入做 `toEqual` 的既有用例必然要改期望（`session-contract-metadata`、`session-contract-undo`、`api-undo`、`api-sessions`、`api-turn-control`、`api-sessions-metadata`、`chat-stream` 等）。规则：**接受 / 拒绝的判定不变**；等值断言的期望经共享夹具升级（`web/test/session-meta-fixtures.ts` 的 `NULL_SESSION_META` 直接升到最终十四键、`modelId` 用非空值；消息的带类型字面量与被比较的期望集中在 `chat-stream-support.ts`、`chat-page-ownership-support.ts`、`chat-runtime-convert.test.ts`；线上 JSON 体不必改）。逐文件写进 PR 偏离记录；不得删断言、不得放宽匹配器。`tsc --noEmit` 覆盖 `web/test`，required 字段会逐一点名。
+  - 新测试文件 `web/test/session-contract-composer.test.ts`（13.5 整文件删）：design D16 第 1 步逐条，加一条视图透传（带附件的快照经 `chatStateFromSnapshot` 与 `convertMessage`，`custom.attachments` 逐值相等）。
+  - 变异：允许只带 `approvalMode` → 「只带一键拒绝」红；缺 `attachments` 时拒绝 → 消息、fork、undo 三条红；去掉助手非空拒绝 → 红；缺省 `write` 改成别的值 → 红。
 
 Suggested fixture level: expanded - 改严格解析的公共合同（会话 / 消息 / fork DTO），是服务端发出新键的前置
 Minimal mergeable slice: atomic - 解析放宽、类型与透传必须同刀（类型一变透传处即编译不过）；合入后服务端尚未发出新键，界面无变化
