@@ -6,6 +6,7 @@ import { useConversationSearch } from "./conversation-search.js";
 import { ConversationView } from "./conversation-view.js";
 import { DeleteDialog } from "./delete-dialog.js";
 import { useProjectConfig } from "./project-config.js";
+import { PromoteDialog } from "./promote-dialog.js";
 import { RenameDialog } from "./rename-dialog.js";
 import { SessionSidebar } from "./session-sidebar.js";
 import { useSlashMenu } from "./slash-menu.js";
@@ -54,6 +55,7 @@ export function ChatPage() {
       onArchiveSession={sessionActions.archive}
       onDeleteSession={sessionActions.openDelete}
       onDismissActionAlert={sessionActions.dismissAlert}
+      onPromoteSession={sessionActions.openPromote}
       onRenameSession={sessionActions.openRename}
       onRestoreSession={sessionActions.restore}
       onSelectSession={session.selectSession}
@@ -95,6 +97,7 @@ export function ChatPage() {
         workspaceId={session.slashWorkspaceId}
       />
       <RenameDialog rename={sessionActions.rename} />
+      <PromoteDialog promote={sessionActions.promote} />
       <DeleteDialog remove={sessionActions.remove} />
       {artifacts.panel}
       {config.dialog}

@@ -442,7 +442,7 @@ Minimal mergeable slice: 16.1（能归档、能在归档视图里恢复与删除
   - 测试：`chat-capability-bar.test.tsx` 加第四种会话（`temporaryWorkspace: true`、id 不在列表里）与「列表读取失败仍显示 `临时空间`」；已绑定 / 未绑定 / 空间已删三行留作回归。
   - 清单：SL-01 已含「不选工作空间直接发送进入 `临时空间` 分组」——增补而不重复；能力栏标签另起下一空闲 SL 号；CH-09 由本 PR 重写（加临时空间一种、存量会话仍是 `未绑定`、去掉过期的「侧栏『空间』分区」说法）。新增与改写的行一律 `待签`。
   - `EmptyThread` 与产物卡吃的是 `workspace`，本刀不动（17.5）。
-- [ ] 17.2 另存为工作空间（新文件 `web/src/features/chat/promote-dialog.tsx` + 13.2 的 `promoteWorkspace`）：对话框、校验、请求、成功后重取列表与工作空间。整页测试（新文件 `web/test/chat-promote.test.tsx`）：session-sidebar「另存为工作空间对话框」三个场景、「菜单项」场景。
+- [x] 17.2 另存为工作空间（新文件 `web/src/features/chat/promote-dialog.tsx` + 13.2 的 `promoteWorkspace`）：对话框、校验、请求、成功后重取列表与工作空间。整页测试（新文件 `web/test/chat-promote.test.tsx`）：session-sidebar「另存为工作空间对话框」三个场景、「菜单项」场景。
   **实施注记（17.2，fixture 评审补充）**：
   - 客户端已有 `promoteWorkspace(id, name)`（13.2）：以会话的 `workspaceId` 与去掉首尾空白的名称调用；409 经既有的错误文案出口得到信封文案。
   - 校验：去掉首尾空白后为空，或超过 64 个码点（与服务端上限一致）时 `保存` 禁用；其余拒绝在对话框内以 `role="alert"` 显示。
