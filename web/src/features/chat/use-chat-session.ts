@@ -22,7 +22,7 @@ import {
   connectSessionEvents,
   isUnknownTurn,
 } from "./stream.js";
-import { TERMINAL_REFRESH_GUIDANCE, useTurnActions } from "./turn-actions.js";
+import { TERMINAL_REFRESH_GUIDANCE, type UndoConflict, useTurnActions } from "./turn-actions.js";
 import type {
   ChatHistoryState,
   ChatListState,
@@ -65,6 +65,8 @@ export function useChatSession() {
   const [mutationOwner, setMutationOwner] = useState<ChatMutationOwner | null>(null);
   const [regenerateOwner, setRegenerateOwner] = useState<ChatMutationOwner | null>(null);
   const [forkOwner, setForkOwner] = useState<ChatMutationOwner | null>(null);
+  const [undoOwner, setUndoOwner] = useState<ChatMutationOwner | null>(null);
+  const [undoConflict, setUndoConflict] = useState<UndoConflict | null>(null);
   const {
     error: workspacesError,
     refresh: refreshWorkspaces,
@@ -87,6 +89,8 @@ export function useChatSession() {
   const createControllerRef = useRef<AbortController | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const focusOnWelcomeRef = useRef(false);
+  const focusOnUnlockRef = useRef(false);
+  const undoFlightRef = useRef<ChatMutationOwner | null>(null);
   const viewRunningRef = useRef(false);
 
   clientRef.current = client;
@@ -377,34 +381,44 @@ export function useChatSession() {
     [location.hash, location.pathname, location.search, navigate],
   );
 
+  const turn = useTurnActions({
+    abortMutation,
+    clientRef,
+    closeSource,
+    composerRef,
+    focusOnUnlockRef,
+    historyGenerationRef,
+    installSnapshot,
+    loadHistoryRef,
+    mountedRef,
+    mutationControllerRef,
+    mutationGenerationRef,
+    openSource,
+    pendingCreateSendRef,
+    refreshList,
+    releaseMutationIfOwned,
+    requestedSessionRef,
+    selectSession,
+    setCreating,
+    setDraft,
+    setForkOwner,
+    setListState,
+    setMutationOwner,
+    setPromptError,
+    setRegenerateOwner,
+    setStreamError,
+    setSubmitting,
+    setUndoConflict,
+    setUndoOwner,
+    undoConflict,
+    undoFlightRef,
+  });
   const { answerApproval, dispatchPrompt, forkTurn, regenerateTurn, restoreOwnedDraft, stopTurn } =
-    useTurnActions({
-      abortMutation,
-      clientRef,
-      closeSource,
-      historyGenerationRef,
-      installSnapshot,
-      loadHistoryRef,
-      mountedRef,
-      mutationControllerRef,
-      mutationGenerationRef,
-      openSource,
-      pendingCreateSendRef,
-      refreshList,
-      releaseMutationIfOwned,
-      requestedSessionRef,
-      selectSession,
-      setCreating,
-      setDraft,
-      setForkOwner,
-      setMutationOwner,
-      setPromptError,
-      setRegenerateOwner,
-      setStreamError,
-      setSubmitting,
-    });
+    turn;
 
   useEffect(() => {
+    // 待决的撤回冲突不跨选择：换会话或换账号即作废，回来时不再弹出。
+    setUndoConflict(null);
     const pending = pendingCreateSendRef.current;
     const keepOwnedPrompt = ownsCreateSend(pending, client, requestedSessionId);
     const keepOwnedCreate =
@@ -661,6 +675,7 @@ export function useChatSession() {
     historyLoading: ownedHistory && historyState.status === "loading",
     forking: ownsMutation(forkOwner, client, requestedSessionId),
     streamFailed: Boolean(ownedStreamError),
+    undoing: ownsMutation(undoOwner, client, requestedSessionId),
     draft,
   });
   const slashWorkspaceId = composerWorkspaceId(requestedSessionId, selected, welcome.workspace);
@@ -691,6 +706,14 @@ export function useChatSession() {
     focusOnWelcomeRef.current = false;
     composerRef.current?.focus();
   }, [composerDisabled, requestedSessionId]);
+  // 撤回落定后：标记只在置位后的第一次提交里有效（无依赖数组）。那次提交输入框若仍锁定，
+  // `focus()` 无效、标记照样清掉，不留到以后无关的解锁。
+  useEffect(() => {
+    if (focusOnUnlockRef.current) {
+      focusOnUnlockRef.current = false;
+      composerRef.current?.focus();
+    }
+  });
 
   return {
     answerApproval,
@@ -721,6 +744,8 @@ export function useChatSession() {
     stopTurn,
     streamError: ownedStreamError,
     submitComposer,
+    undoConflict: turn.undoConflictFor(client, requestedSessionId),
+    undoTurn: turn.undoTurn,
     welcome,
     workspace,
     workspaces,

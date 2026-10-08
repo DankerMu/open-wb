@@ -25,18 +25,20 @@ import { useThreadRuntime } from "./use-thread-runtime.js";
 import type { SessionSpace, Workspace } from "./workspace-list.js";
 
 type ThreadProps = {
-  /** 选中的会话已归档（只读）：不渲染 `从此处分叉` 与 `重新生成`，零消息时也不显示空态。 */
+  /** 选中的会话已归档（只读）：不渲染 `撤回`、`从此处分叉` 与 `重新生成`，零消息时也不显示空态。 */
   archived: boolean;
   /** 当前账号的 API client；产物卡经它按需拉取预览。 */
   client: ApiClient;
   /** 对话内搜索的当前匹配；其余消息不带 `aria-current`。 */
   currentId: number | null;
-  /** 输入框锁定期间分叉与重新生成禁用，零消息时也不显示空态。 */
+  /** 输入框锁定期间撤回、分叉与重新生成禁用，零消息时也不显示空态。 */
   locked: boolean;
   onFork(messageId: number): Promise<void>;
   onRegenerate(): Promise<void>;
   onSend(prompt: string): void;
   onStop(): Promise<unknown>;
+  /** `撤回`：`trigger` 是被点的按钮，冲突对话框关闭后焦点还给它。 */
+  onUndo(messageId: number, trigger: HTMLElement): Promise<void>;
   /** 对话内搜索经它调用滚动层的 `scrollToMessage`。 */
   scrollHandleRef: Ref<TranscriptHandle>;
   /** 会话可解析的空间（文件变更卡与产物卡用），不可解析时为 null。 */
@@ -70,6 +72,7 @@ const UserMessage = memo(function UserMessage({
   id,
   locked,
   onFork,
+  onUndo,
   text,
 }: {
   archived: boolean;
@@ -78,6 +81,7 @@ const UserMessage = memo(function UserMessage({
   id: number;
   locked: boolean;
   onFork: ThreadProps["onFork"];
+  onUndo: ThreadProps["onUndo"];
   text: string;
 }) {
   return (
@@ -95,7 +99,14 @@ const UserMessage = memo(function UserMessage({
         </p>
         <ToolCallGroup steps={custom.steps} />
         <MessageError error={custom.error} />
-        {archived ? null : <UserActions disabled={locked} onFork={() => void onFork(id)} />}
+        {archived ? null : (
+          <UserActions
+            disabled={locked}
+            onFork={() => void onFork(id)}
+            onUndo={(trigger) => void onUndo(id, trigger)}
+            undo={custom.undo}
+          />
+        )}
       </article>
     </MessagePrimitive.Root>
   );
@@ -231,6 +242,7 @@ export function Thread({
   onRegenerate,
   onSend,
   onStop,
+  onUndo,
   scrollHandleRef,
   space,
   view,
@@ -272,11 +284,12 @@ export function Thread({
           id={Number(message.id)}
           locked={locked}
           onFork={onFork}
+          onUndo={onUndo}
           text={text}
         />
       );
     },
-    [archived, client, currentId, locked, onFork, onRegenerate, regenerableId, space],
+    [archived, client, currentId, locked, onFork, onRegenerate, onUndo, regenerableId, space],
   );
   return (
     <AssistantRuntimeProvider runtime={runtime}>

@@ -1,9 +1,14 @@
-// 会话页回合操作：prompt 派发及其所有权 fence、审批作答、停止、重新生成、从此处分叉（由 useChatSession 调用并注入 fence 状态）。
+// 会话页回合操作：prompt 派发及其所有权 fence、审批作答、停止、重新生成、从此处分叉、撤回（由 useChatSession 调用并注入 fence 状态）。
 import { type Dispatch, type RefObject, type SetStateAction, useCallback } from "react";
 import { type ApiClient, ApiError } from "../../lib/api.js";
 import type { ChatMessageSnapshot } from "../../lib/session-contract.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
-import type { ChatMutationOwner, ChatOwnedAlert, PendingCreateSend } from "./types.js";
+import type {
+  ChatListState,
+  ChatMutationOwner,
+  ChatOwnedAlert,
+  PendingCreateSend,
+} from "./types.js";
 
 export const TERMINAL_REFRESH_GUIDANCE = "请刷新页面后重试";
 
@@ -20,10 +25,27 @@ function isUncommittedRegenerate(error: unknown) {
   return error instanceof ApiError && [400, 401, 409, 503].includes(error.status);
 }
 
+/** 409 `undo_conflict`：共用这个工作空间的其它会话在那之后运行过回合（按 `code` 认）。 */
+function isUndoConflict(error: unknown) {
+  return error instanceof ApiError && error.status === 409 && error.code === "undo_conflict";
+}
+
+type UndoFiles = Parameters<ApiClient["undoMessage"]>[2];
+/** 等待用户三选一的冲突：`trigger` 是当初被点的 `撤回` 按钮。 */
+export type UndoConflict = {
+  client: ApiClient;
+  sessionId: string;
+  messageId: number;
+  trigger: HTMLElement;
+};
+
 type TurnActionDeps = {
   abortMutation: () => void;
   clientRef: RefObject<ApiClient>;
   closeSource: () => void;
+  composerRef: RefObject<HTMLTextAreaElement | null>;
+  /** 置真后的下一次提交里聚焦输入框（请求期间它是 disabled，`focus()` 无效），只此一次。 */
+  focusOnUnlockRef: RefObject<boolean>;
   historyGenerationRef: RefObject<number>;
   installSnapshot: (snapshot: ChatMessageSnapshot, ownedClient: ApiClient) => void;
   /** A ref: `loadHistory` changes with the location, `dispatchPrompt` must not. */
@@ -40,17 +62,26 @@ type TurnActionDeps = {
   setCreating: Dispatch<SetStateAction<boolean>>;
   setDraft: Dispatch<SetStateAction<string>>;
   setForkOwner: Dispatch<SetStateAction<ChatMutationOwner | null>>;
+  setListState: Dispatch<SetStateAction<ChatListState>>;
   setMutationOwner: Dispatch<SetStateAction<ChatMutationOwner | null>>;
   setPromptError: Dispatch<SetStateAction<ChatOwnedAlert | null>>;
   setRegenerateOwner: Dispatch<SetStateAction<ChatMutationOwner | null>>;
   setStreamError: Dispatch<SetStateAction<ChatOwnedAlert | null>>;
   setSubmitting: Dispatch<SetStateAction<boolean>>;
+  setUndoConflict: Dispatch<SetStateAction<UndoConflict | null>>;
+  setUndoOwner: Dispatch<SetStateAction<ChatMutationOwner | null>>;
+  /** 待决的撤回冲突（页面状态）。 */
+  undoConflict: UndoConflict | null;
+  /** 同步的在途闩：同一会话的撤回在途时，下一次点击不发请求（状态要到下一次渲染才禁用按钮）。 */
+  undoFlightRef: RefObject<ChatMutationOwner | null>;
 };
 
 export function useTurnActions({
   abortMutation,
   clientRef,
   closeSource,
+  composerRef,
+  focusOnUnlockRef,
   historyGenerationRef,
   installSnapshot,
   loadHistoryRef,
@@ -66,11 +97,16 @@ export function useTurnActions({
   setCreating,
   setDraft,
   setForkOwner,
+  setListState,
   setMutationOwner,
   setPromptError,
   setRegenerateOwner,
   setStreamError,
   setSubmitting,
+  setUndoConflict,
+  setUndoOwner,
+  undoConflict,
+  undoFlightRef,
 }: TurnActionDeps) {
   const restoreOwnedDraft = useCallback(
     (prompt: string, ownedClient: ApiClient, sessionId: string | null) => {
@@ -427,5 +463,142 @@ export function useTurnActions({
     ],
   );
 
-  return { answerApproval, dispatchPrompt, forkTurn, regenerateTurn, restoreOwnedDraft, stopTurn };
+  /**
+   * `撤回`：regenerate 的锁形状（页面级、按身份释放），不带历史令牌——离开又回到同一会话后到达的 200
+   * 照常应用，否则原文丢失、线程停在提交前的快照上。不弹确认。200：覆盖草稿、合并列表条目、重读快照、
+   * 聚焦输入框。`restore` 遇 409 `undo_conflict` 时释放锁并交给冲突对话框；其余失败进输入框上的错误。
+   * 从不 reject。
+   */
+  const undoTurn = useCallback(
+    (messageId: number, trigger: HTMLElement, files: UndoFiles = "restore"): Promise<void> => {
+      const ownedClient = clientRef.current;
+      const sessionId = requestedSessionRef.current;
+      const flight = undoFlightRef.current;
+      if (
+        sessionId === null ||
+        (flight?.client === ownedClient && flight.sessionId === sessionId)
+      ) {
+        return Promise.resolve();
+      }
+      const owner: ChatMutationOwner = {
+        client: ownedClient,
+        originSessionId: sessionId,
+        sessionId,
+      };
+      const release = () => {
+        if (undoFlightRef.current === owner) {
+          undoFlightRef.current = null;
+        }
+        setUndoOwner((current) => (current === owner ? null : current));
+      };
+      const owned = () => ownsSessionWrite(ownedClient, sessionId);
+      const fail = (error: unknown, write: typeof setPromptError, suffix = "") => {
+        if (owned() && !isUnauthorized(error)) {
+          write({ client: ownedClient, sessionId, message: `${errorMessage(error)}${suffix}` });
+          // 对话框关闭时 `撤回` 按钮是禁用的，焦点还不回去：落在 body 上就交给输入框。
+          focusOnUnlockRef.current = document.activeElement === document.body;
+        }
+        release();
+      };
+      undoFlightRef.current = owner;
+      setPromptError(null);
+      setUndoOwner(owner);
+      return ownedClient.undoMessage(sessionId, messageId, files).then(
+        ({ draft, session }) => {
+          if (!owned()) {
+            release();
+            return;
+          }
+          setDraft(draft);
+          // 只合并撤回会改的两个键；标题、置顶、归档等按 session-actions.ts 的规则不动。不另发列表 GET。
+          setListState((list) =>
+            list.status === "success" && list.client === ownedClient
+              ? {
+                  ...list,
+                  sessions: list.sessions.map((entry) =>
+                    entry.id === session.id
+                      ? { ...entry, status: session.status, updatedAt: session.updatedAt }
+                      : entry,
+                  ),
+                }
+              : list,
+          );
+          closeSource();
+          void ownedClient.getMessages(sessionId).then(
+            (snapshot) => {
+              if (owned()) {
+                installSnapshot(snapshot, ownedClient);
+                openSource(snapshot, ownedClient);
+                focusOnUnlockRef.current = true;
+              }
+              release();
+            },
+            (error: unknown) => fail(error, setStreamError, `。${TERMINAL_REFRESH_GUIDANCE}`),
+          );
+        },
+        (error: unknown) => {
+          if (files === "restore" && isUndoConflict(error) && owned()) {
+            setUndoConflict({ client: ownedClient, sessionId, messageId, trigger });
+            release();
+            return;
+          }
+          fail(error, setPromptError);
+        },
+      );
+    },
+    [
+      clientRef,
+      closeSource,
+      focusOnUnlockRef,
+      installSnapshot,
+      openSource,
+      ownsSessionWrite,
+      requestedSessionRef,
+      setDraft,
+      setListState,
+      setPromptError,
+      setStreamError,
+      setUndoConflict,
+      setUndoOwner,
+      undoFlightRef,
+    ],
+  );
+
+  /**
+   * 冲突对话框的 props；冲突不属于 `client` 与当前选中的 `sessionId` 时为 null（不渲染）。`只撤回对话` /
+   * `连文件一起还原` 先关框再重发，重发的失败同样进输入框上的错误；关闭后焦点还给当初的 `撤回` 按钮，
+   * 它已卸载（消息被撤回）时落到输入框。
+   */
+  const undoConflictFor = (client: ApiClient, sessionId: string | null) => {
+    if (
+      undoConflict === null ||
+      undoConflict.client !== client ||
+      undoConflict.sessionId !== sessionId
+    ) {
+      return null;
+    }
+    const { messageId, trigger } = undoConflict;
+    const resend = (files: UndoFiles) => {
+      setUndoConflict(null);
+      void undoTurn(messageId, trigger, files);
+    };
+    return {
+      onCancel: () => setUndoConflict(null),
+      onForce: () => resend("force"),
+      onKeep: () => resend("keep"),
+      restoreFocus: () =>
+        (trigger.isConnected ? trigger : composerRef.current)?.focus({ preventScroll: true }),
+    };
+  };
+
+  return {
+    answerApproval,
+    dispatchPrompt,
+    forkTurn,
+    regenerateTurn,
+    restoreOwnedDraft,
+    stopTurn,
+    undoConflictFor,
+    undoTurn,
+  };
 }

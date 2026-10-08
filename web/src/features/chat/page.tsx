@@ -11,6 +11,7 @@ import { RenameDialog } from "./rename-dialog.js";
 import { SessionSidebar } from "./session-sidebar.js";
 import { useSlashMenu } from "./slash-menu.js";
 import { chatTopbar } from "./topbar-actions.js";
+import { UndoConflictDialog } from "./undo-conflict-dialog.js";
 import { useChatSession } from "./use-chat-session.js";
 import { useSessionListView } from "./use-session-list-view.js";
 
@@ -92,6 +93,7 @@ export function ChatPage() {
         onSend={session.sendPrompt}
         onStop={session.stopTurn}
         onSubmit={session.submitComposer}
+        onUndo={session.undoTurn}
         promptError={session.promptError}
         requestedSessionId={requestedSessionId}
         search={search}
@@ -107,6 +109,7 @@ export function ChatPage() {
       <RenameDialog rename={sessionActions.rename} />
       <PromoteDialog promote={sessionActions.promote} />
       <DeleteDialog remove={sessionActions.remove} />
+      <UndoConflictDialog conflict={session.undoConflict} />
       {artifacts.panel}
       {config.dialog}
     </section>

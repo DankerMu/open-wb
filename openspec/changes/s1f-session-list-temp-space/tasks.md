@@ -556,12 +556,27 @@ Minimal mergeable slice: 17.1、17.2、17.3、17.5 各自可单独合入（互�
 
 ## 18. web — 撤回
 
-- [ ] 18.1 `撤回` 按钮（`message-action-row.tsx`）：位于 `从此处分叉` 之前；锁定时禁用；`undo` 非 `available` 时 `aria-disabled` 加五种原因的可访问描述（含 owner C-23 的 `命令消息无法撤回` 与 C-24 的 `这条消息没有文件快照，无法撤回`）；归档会话不渲染。动作（`turn-actions.ts` 或新文件 `undo-actions.ts`，遵守 `page → use-chat-session → turn-actions` 的导入方向）：调用 13.1 的 `undoMessage(…, "restore")`、请求期间锁输入框（不算生成中）、200 后重读快照、覆盖草稿、聚焦、更新列表条目；失败就地显示；所有权 fence（切会话 / 换账号 / 卸载后丢弃响应）。整页测试（新文件 `web/test/chat-undo.test.tsx`）：message-undo「web 撤回」的「撤回并回填」「不可撤回的原因」「失败就地显示」「锁定与归档时」、chat-web「用户消息操作行的按钮与次序」。
-- [ ] 18.2 冲突对话框（新文件 `undo-conflict-dialog.tsx`，`alert-dialog`）：标题、说明（`这条消息发出之后，共用这个工作空间的其它会话还运行过回合。连文件一起还原会把它们的改动一并冲掉。`）、三个按钮、`取消` / Escape 的焦点归还、`keep` / `force` 重发。整页测试：「冲突三选一」两段。
+- [x] 18.1 `撤回` 按钮（`message-action-row.tsx`）：位于 `从此处分叉` 之前；锁定时禁用；`undo` 非 `available` 时 `aria-disabled` 加五种原因的可访问描述（含 owner C-23 的 `命令消息无法撤回` 与 C-24 的 `这条消息没有文件快照，无法撤回`）；归档会话不渲染。动作（`turn-actions.ts` 或新文件 `undo-actions.ts`，遵守 `page → use-chat-session → turn-actions` 的导入方向）：调用 13.1 的 `undoMessage(…, "restore")`、请求期间锁输入框（不算生成中）、200 后重读快照、覆盖草稿、聚焦、更新列表条目；失败就地显示；所有权 fence（切会话 / 换账号 / 卸载后丢弃响应）。整页测试（新文件 `web/test/chat-undo.test.tsx`）：message-undo「web 撤回」的「撤回并回填」「不可撤回的原因」「失败就地显示」「锁定与归档时」、chat-web「用户消息操作行的按钮与次序」。
+- [x] 18.2 冲突对话框（新文件 `undo-conflict-dialog.tsx`，`alert-dialog`）：标题、说明（`这条消息发出之后，共用这个工作空间的其它会话还运行过回合。连文件一起还原会把它们的改动一并冲掉。`）、三个按钮、`取消` / Escape 的焦点归还、`keep` / `force` 重发。整页测试：「冲突三选一」两段。
 - [ ] 18.3 未还原文件说明（`composer-dock.tsx` 上方的一条 `role="status"`，可关闭，下次发送或切换会话消失）：`skipped` / `failed` 的列表与「等共 N 项」。整页测试：「列出未还原的文件」。
 - [ ] 18.4 与列表事件的配合：本页有在途撤回时忽略自己的 `session.rewound`（已由 200 之后的重读覆盖）。测试：在途撤回期间派发 `session.rewound`，消息快照读取恰一次。
 - [ ] 18.5 新文件登记进 `MIGRATED_AREAS`；CH 行：撤回并回填、一次退回多轮、文件一并还原（含 git 仓库里回合做的提交被撤销）、五种不可撤回原因、冲突三选一、未还原文件说明各一行，`待签`。若 #908 已合入，行里写「把鼠标移到该消息上」。
 - [ ] 18.6 变异证据：撤回前弹确认 → 「没有出现确认框」判红；不覆盖已有草稿 → 「草稿为 `第二个问题`」判红；`aria-disabled` 的按钮仍发请求 → 「不可撤回的原因」判红；冲突时直接 `force` → 「取消后没有第二个请求」判红；去掉 fence → 新增「请求在途时切换会话，草稿不变」判红。
+  **实施注记（18.1 / 18.2 / 18.5 / 18.6，fixture 评审补充，#969）**：
+  - `undo` 的传递链不存在，本刀补齐：`runtime-convert.ts` 的 `ChatMessageCustom` 增 `undo` → `message-thread.tsx` 的 `UserMessage` 取 `custom.undo` 并新增 `onUndo(messageId, trigger)` → `UserActions`。`onUndo` 与对话框 props 经 `conversation-view.tsx`、`page.tsx` 接线；`composer-locks.ts` 增一个只锁定、不算 `generating` 的输入（同 `forking`）。PR Boundary 相应含这六个文件。
+  - 动作写进 `turn-actions.ts`（不新建 `undo-actions.ts`）：`chat-module-layout.test.ts` 钉死 `turn-actions` 的导入者只有 `use-chat-session.ts`，新文件一旦导入 `TERMINAL_REFRESH_GUIDANCE` 或想复用 `ownsSessionWrite` 就判红。在途 owner 与冲突对话框状态由 `use-chat-session.ts` 持有、setter 注入给 `turn-actions.ts`（与 `forkOwner` / `regenerateOwner` 同款）——既有守卫（`chat-approval-bar.test.tsx` G2）禁止 `turn-actions.ts` 出现 `useState(` / `useEffect(` / `useRef(`，主规格 chat-web 也规定 fence 状态由 `useChatSession` 持有并注入（本注记初稿写成放在 `useTurnActions` 内，与两者矛盾，实现时已更正）。`use-chat-session.ts` 不得越 800 行。`MIGRATED_AREAS`（列表与清单断言两处）只增 `undo-conflict-dialog.tsx`。
+  - 按钮：六种 `undo` 取值都渲染；归档时不渲染（`message-thread.tsx` 既有的只读分支）；锁定时原生 `disabled`（与 `从此处分叉` 同一 `locked`）；非 `available` 时 `aria-disabled="true"` 加 `aria-describedby` 指向一个视觉隐藏的原因文本，`title` 仍为 `撤回`，点击处理里显式不调用 `onUndo`（`aria-disabled` 的按钮 React 不会吞点击）；二者同时成立时两个属性都带。测试里的描述断言取 `aria-describedby` 所指元素的文本（仓库没有 jest-dom）。
+  - 动作形状照 `regenerateTurn`：fence 用 `ownsSessionWrite`（账号、当前选中会话、未卸载，在响应到达时判断），不带历史令牌——离开又回到同一会话后到达的响应照常应用，否则原文丢失且线程可能停在提交前的快照上。另加一个同步的在途闩（ref）：在途时第二次点击不发请求。401 不显示；按 `status === 409 && code === "undo_conflict"` 认冲突，且只认 `restore` 那次请求的。
+  - 200（仍属本页）：先 `setDraft(draft)`（直接覆盖，不用 `restoreOwnedDraft`）并用响应的 `session` 合并该列表条目的 `status`、`updatedAt`（其余键按 `session-actions.ts` 的规则不动，不另发列表 GET）→ `closeSource()` → `getMessages` → `installSnapshot` + `openSource`（同 `regenerateTurn` 成功路径；不用 `loadHistory`，线程不闪空）→ 释放锁。焦点在输入框解锁的那次提交里给（请求期间 textarea 是 `disabled`，`focus()` 无效；先例：`focusOnWelcomeRef`）。重读失败：草稿已写入，`streamError` 带刷新指引（同 regenerate）。
+  - 其它失败（400 / 404 / 409 `session_busy` / 409 `session_archived` / 502 / 503 / 网络）进既有的 `promptError` 槽（规格里的「输入框上」即此槽，分叉同款）；404 只显示、不导航；不重读、不动草稿、释放锁。
+  - 冲突对话框：状态带 client 与 sessionId，不属于当前选中会话或账号时为 null（`page.tsx` 无 state，照 `DeleteDialog` 的 props-or-null）。409 落定即释放锁，对话框开着时不锁输入框。`只撤回对话` / `连文件一起还原` 先关框再重发，没有框内失败态，重发的失败同样进 `promptError`。焦点归还照 `delete-dialog.tsx` 的 `onCloseAutoFocus` + `preventDefault`：目标是点击时由 `onUndo` 带上来的 `event.currentTarget`（不取 `document.activeElement`——测试用 `fireEvent.click`，不会聚焦按钮），已卸载时落到输入框。
+  - 规格修订（同 PR，已改）：message-undo「web 撤回」里「`取消`、Escape 与遮罩关闭对话框」删去「与遮罩」——`alert-dialog` 遮罩点击不关闭（同 `delete-dialog.tsx`），拷入层不改。
+  - 测试：既有夹具默认 `historyUser.undo` 为 `"none"`，18.x 的夹具逐条显式给 `undo`（「锁定与归档时」「按钮与次序」用 `available`）。服务端在提交前就结束本会话的流订阅，旧连接自动重连后每次 `open` 都触发一次快照读取，所以「随后恰一次消息快照读取」在新连接 `emitOpen` 之前计数，且测试不派发 `session.rewound`。新增用例「请求在途时切换会话，草稿不变」：草稿 `半句话` → 点 `撤回`（响应挂起）→ 切到 B → 兑现 200（`draft:"第二个问题"`）→ 输入框仍是 `半句话`、没有对 A 的消息读取、B 的输入框未锁定、无错误文案。
+  - 偏离记录：`chat-fork-button.test.tsx` 的「用户气泡里恰一个按钮」与 `chat-copy.test.tsx` 的 `["从此处分叉"]` 改写为 `撤回`、`从此处分叉` 依此次序（既有整页测试的用户气泡都会多一颗 `aria-disabled` 的 `撤回`）。
+  - 不属本刀：`use-chat-session.ts` 的 `NO_UNDO_IN_FLIGHT`、`use-session-list-events.ts`、`chat-list-events.test.tsx` 原样不动（18.4 / #971）。自己的 `session.rewound` 此时只多读一次同内容的快照，无害。#971 注意：忽略只在 200 必被应用时成立，网络失败或响应被 fence 丢弃时要靠这条事件对齐。
+  - 18.5 属本刀的 CH 行：取下五个空号，`待签`；不写悬停。「不可撤回原因」一行只写可人工复现的两种（`/todo` 命令消息、分叉拷贝来的消息）：按钮呈灰、点击无反应，原因文本用读屏或浏览器的无障碍面板读；其余三种注明由 `chat-undo.test.tsx` 覆盖。
+  - 本 PR 必带的清单修正（#968 评审遗留）：CH-58 末步改为「屏蔽 `/api/workspaces` 后刷新，确认三张卡与『产物面板』里的按钮都还在；取消屏蔽但不刷新，再把这几个按钮点一遍」，期望末句相应改为「屏蔽后刷新，卡与按钮都还在、页面没有报错；取消屏蔽（不刷新）后预览、下载、复制照常成功」（屏蔽该路径会连预览请求一起拦掉）。CH-27 删去「不选工作空间发送」的末步与期望里「没有选工作空间的会话里，即使助手写了文件，助手消息也没有这张卡」一句（与 CH-59 矛盾），保留「用户消息任何时候都没有这张卡」。
+  - 18.6 的前提：「不覆盖草稿」先 `fireEvent.change` 填入 `半句话`；「`aria-disabled` 仍发请求」五颗都点并断言 `/undo` 调用为 0；「撤回前弹确认」同时使「恰一次 POST」判红。
 
 Suggested fixture level: expanded - 破坏性操作的入口（不确认）、覆盖用户草稿、冲突分支、所有权 fence 与实时通道并发
 Minimal mergeable slice: 18.1 + 18.2 一个 PR（没有冲突对话框时 `undo_conflict` 只能显示成一条报错，用户无路可走）；18.3、18.4 随后

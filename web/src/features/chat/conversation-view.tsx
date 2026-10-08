@@ -26,7 +26,7 @@ type StopTurn = ComponentProps<typeof Composer>["onStop"];
 type ConversationViewProps = {
   /**
    * 选中的会话已归档时是只读说明的 props（`恢复` 的忙碌、失败文案与点击），否则为 null。非 null 时主区
-   * 只读：不渲染输入框（含能力栏）与停靠区的内容，线程不出 `从此处分叉` 与 `重新生成`。
+   * 只读：不渲染输入框（含能力栏）与停靠区的内容，线程不出 `撤回`、`从此处分叉` 与 `重新生成`。
    */
   archived: ComponentProps<typeof ArchivedNotice> | null;
   /** 当前账号的 API client；产物卡经它按需拉取预览。 */
@@ -46,6 +46,7 @@ type ConversationViewProps = {
   onSend(prompt: string): void;
   onStop: StopTurn;
   onSubmit(event: FormEvent<HTMLFormElement>): void;
+  onUndo: ComponentProps<typeof Thread>["onUndo"];
   promptError: string | null;
   requestedSessionId: string | null;
   /** 对话内搜索：搜索框（未打开时为 null）、当前匹配的消息 id、交给转录区的句柄。 */
@@ -82,6 +83,7 @@ export function ConversationView({
   onSend,
   onStop,
   onSubmit,
+  onUndo,
   promptError,
   requestedSessionId,
   search,
@@ -142,6 +144,7 @@ export function ConversationView({
             onRegenerate={onRegenerate}
             onSend={onSend}
             onStop={onStop}
+            onUndo={onUndo}
             scrollHandleRef={search.handleRef}
             space={space}
             view={historyView}
