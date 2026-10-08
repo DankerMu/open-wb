@@ -183,7 +183,7 @@ prompt 路由的 202 SHALL 为 `{userMessageId, assistantMessageId, undo}`，`un
 - `command`：`命令消息无法撤回`
 - `none`：`这条消息没有文件快照，无法撤回`
 
-`undo` 为 `available` 时点击 SHALL 不弹确认，恰调用一次 `undoMessage(sessionId, messageId, "restore")`，请求期间输入框锁定（不显示 `生成中` 与 `停止`）。200 时页面 SHALL：重读该会话的消息快照并替换线程；把输入框草稿设为响应的 `draft`，覆盖已有草稿；把焦点移到输入框；以响应的 `session` 更新列表条目。`files.skipped.count` 或 `files.failed.count` 大于 0 时 SHALL 在输入框上方就地显示一条可关闭的说明（`role="status"`），标题为 `已撤回，以下文件未还原`，列出 `paths`（超过所列条数时末行为 `等共 <count> 项`），下一次发送或切换会话时消失；二者都为 0 时不显示任何说明。
+`undo` 为 `available` 时点击 SHALL 不弹确认，恰调用一次 `undoMessage(sessionId, messageId, "restore")`，请求期间输入框锁定（不显示 `生成中` 与 `停止`）。200 时页面 SHALL：重读该会话的消息快照并替换线程；把输入框草稿设为响应的 `draft`，覆盖已有草稿；把焦点移到输入框；以响应的 `session` 更新列表条目。`files.skipped.count` 或 `files.failed.count` 大于 0 时 SHALL 在输入框上方就地显示一条可关闭的说明（`role="status"`），标题为 `已撤回，以下文件未还原`，其下每行一个路径：先 `skipped.paths`、后 `failed.paths`，各按响应里的次序，不去重、不显示原因；`skipped.count + failed.count` 大于所列行数时末行为 `等共 <skipped.count + failed.count> 项`（截断只发生在服务端，web 不另设上限）。每一次被本页应用的 200 都以它自己的 `files` 重新决定这条说明（二者都为 0 时不显示，并撤掉已有的说明）；点关闭、下一次发送、切换会话或换账号时消失，其后不再出现。
 
 409 `undo_conflict` SHALL 打开对话框，标题 `其它会话改动过这个工作空间`，说明 `这条消息发出之后，共用这个工作空间的其它会话还运行过回合。连文件一起还原会把它们的改动一并冲掉。`，三个按钮 `只撤回对话`、`连文件一起还原`、`取消`：前两者关闭对话框并分别以 `"keep"`、`"force"` 再调用一次 `undoMessage`；`取消` 与 Escape 关闭对话框（遮罩点击不关闭：`alert-dialog`，同删除对话框）且不发请求，焦点回到该 `撤回` 按钮。没有冲突时 SHALL NOT 出现该对话框。其它失败（400/404/409 `session_busy`/409 `session_archived`/502/503 与网络失败）SHALL 把信封文案（非信封失败为既有的安全文案）就地显示在输入框上，线程与草稿不变，输入框解锁。请求在途时切换会话、换账号或卸载页面，其后到达的响应 SHALL 被丢弃（不改草稿、不导航、不显示错误）。撤回 SHALL NOT 显示任何轻提示。
 
@@ -204,6 +204,10 @@ prompt 路由的 202 SHALL 为 `{userMessageId, assistantMessageId, undo}`，`un
 #### Scenario: 列出未还原的文件
 - **WHEN** undo 返回 200，`files.skipped` 为 `{count:1,paths:[{path:"big.bin",reason:"too_large"}]}`、`files.failed.count` 为 0
 - **THEN** 输入框上方出现 `已撤回，以下文件未还原` 与 `big.bin`；关闭后消失；发送下一条消息后不再出现
+
+#### Scenario: 未还原文件被截断
+- **WHEN** undo 返回 200，`files.skipped` 为 `{count:3,paths:[{path:"a.bin",reason:"too_large"}]}`、`files.failed` 为 `{count:1,paths:[{path:"b.txt"}]}`
+- **THEN** 说明里依次是 `a.bin`、`b.txt`、`等共 4 项`
 
 #### Scenario: 失败就地显示
 - **WHEN** undo 返回 502 `agent_unavailable`，或 409 `session_busy`

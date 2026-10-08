@@ -594,7 +594,18 @@ Minimal mergeable slice: 17.1、17.2、17.3、17.5 各自可单独合入（互�
 
 - [x] 18.1 `撤回` 按钮（`message-action-row.tsx`）：位于 `从此处分叉` 之前；锁定时禁用；`undo` 非 `available` 时 `aria-disabled` 加五种原因的可访问描述（含 owner C-23 的 `命令消息无法撤回` 与 C-24 的 `这条消息没有文件快照，无法撤回`）；归档会话不渲染。动作（`turn-actions.ts` 或新文件 `undo-actions.ts`，遵守 `page → use-chat-session → turn-actions` 的导入方向）：调用 13.1 的 `undoMessage(…, "restore")`、请求期间锁输入框（不算生成中）、200 后重读快照、覆盖草稿、聚焦、更新列表条目；失败就地显示；所有权 fence（切会话 / 换账号 / 卸载后丢弃响应）。整页测试（新文件 `web/test/chat-undo.test.tsx`）：message-undo「web 撤回」的「撤回并回填」「不可撤回的原因」「失败就地显示」「锁定与归档时」、chat-web「用户消息操作行的按钮与次序」。
 - [x] 18.2 冲突对话框（新文件 `undo-conflict-dialog.tsx`，`alert-dialog`）：标题、说明（`这条消息发出之后，共用这个工作空间的其它会话还运行过回合。连文件一起还原会把它们的改动一并冲掉。`）、三个按钮、`取消` / Escape 的焦点归还、`keep` / `force` 重发。整页测试：「冲突三选一」两段。
-- [ ] 18.3 未还原文件说明（`composer-dock.tsx` 上方的一条 `role="status"`，可关闭，下次发送或切换会话消失）：`skipped` / `failed` 的列表与「等共 N 项」。整页测试：「列出未还原的文件」。
+- [ ] 18.3 未还原文件说明（`conversation-view.tsx` 里线程与 `ComposerDock` 之间的一条 `role="status"`，可关闭，下次发送或切换会话消失）：`skipped` / `failed` 的列表与「等共 N 项」。整页测试（新文件 `web/test/chat-undo-notice.test.tsx`；`chat-undo.test.tsx` 已近 800 行）：「列出未还原的文件」「未还原文件被截断」。
+  **实施注记（18.3，fixture 评审补充，#970）**：
+  - 状态：`use-chat-session.ts` 里一个 `useState`，形状仿 `ChatOwnedAlert`（`{client, sessionId, skipped, failed}`）；setter 注入 `useTurnActions`（G2 守卫 `chat-approval-bar.test.tsx` 禁止 `turn-actions.ts` 持状态）。写入点在 `undoTurn` 的 200 分支、`owned()` 之内、紧挨 `setDraft(draft)`：两个 `count` 之和大于 0 写入，否则写 null。被 fence 丢弃的 200 什么都不写。200 之后的重读失败时说明照留。
+  - 清除三处：`sendPrompt` 越过早退之后（`setDraft("")` 处，发送被拒也不恢复）；已有 `setUndoConflict(null)` 的选择 effect（切会话与换账号）；关闭按钮。对外导出按 `client` 与 `requestedSessionId` 判属（仿 `visibleOwnedAlert`）。
+  - 行数：`use-chat-session.ts` 现 753 行，本刀控制在约 8 行以内（#971 还要约 8 行）。
+  - 组件：新文件（如 `undo-notice.tsx`），props 为 null 时不渲染；放在 `conversation-view.tsx` 的 `<Thread>` 之后、`<ComposerDock>` 之前（不进 dock：dock 无卡时返回 null，且它的防误点按子布局计）；`archived` 非 null 时不渲染。容器 `role="status"`、`flex-none`、自带限高与内部滚动（两张表合计至多 400 行加末行）。关闭按钮用 `@/components/ui/button`，`aria-label` 沿用既有的 `关闭提示`。
+  - 列表只显示 `path`，不自拟 `reason` 文案；React key 用「表名 + 下标」（有损路径可以重复）；末行用两个 `count` 之和。
+  - 守卫：新 `.tsx` 在 `web/test/ui-layering.test.ts` 登记两处（`MIGRATED_AREAS` 与终态 `toEqual` 清单）。
+  - 测试：`chat-undo.test.tsx` 的夹具全是模块内私有的；先抽到 `web/test/chat-undo-support.tsx`（jscpd 覆盖测试，不要照抄一份），`undone()` 要能传 `files`。页面上有多个 `role="status"`，用标题文本定位后取 `closest('[role="status"]')`。用例：(1) 场景原文，没有 `等共`，关闭后消失；(2) 再撤回一次重现，发送下一条后消失且 prompt 落定后不再出现；(3) 截断场景，三行依此次序；(4) 切到 B 再回 A 不再出现；(5) 请求在途时切到 B，200 带 skipped：B 上没有，回 A 也没有；(6) 说明在场时第二次撤回返回 0/0：说明撤掉。
+  - 变异证据：不渲染 → (1)；关闭不清 → (1)；发送不清 → (2)；选择 effect 不清 → (4)；setter 挪到 `owned()` 之外 → (5)；末行用 `paths.length` 或只用 `skipped.count` → (3)；只渲染 `skipped` → (3)；0/0 不覆盖 → (6)。
+  - CH-65（`待签`，不写悬停）：绑定工作空间里放一个超过单文件快照上限（默认 20 MiB）的文件 `big.bin`，发一句让助手改它和一个小文件的话，撤回；期望输入框上方出现「已撤回，以下文件未还原」并列出 `big.bin`，小文件已还原；点关闭后消失；再做一遍让它出现，发一条消息后消失。
+  - 已知并报给 owner、本刀不处理：`files.skipped` 原样取自快照清单，含 `excluded`（如 `node_modules`）与 `mount` 项；带依赖目录的工作空间每次带还原的撤回都会出现这条说明。按规格实现，不在 web 侧过滤。
 - [ ] 18.4 与列表事件的配合：本页有在途撤回时忽略自己的 `session.rewound`（已由 200 之后的重读覆盖）。测试：在途撤回期间派发 `session.rewound`，消息快照读取恰一次。
 - [ ] 18.5 新文件登记进 `MIGRATED_AREAS`；CH 行：撤回并回填、一次退回多轮、文件一并还原（含 git 仓库里回合做的提交被撤销）、五种不可撤回原因、冲突三选一、未还原文件说明各一行，`待签`。若 #908 已合入，行里写「把鼠标移到该消息上」。
 - [ ] 18.6 变异证据：撤回前弹确认 → 「没有出现确认框」判红；不覆盖已有草稿 → 「草稿为 `第二个问题`」判红；`aria-disabled` 的按钮仍发请求 → 「不可撤回的原因」判红；冲突时直接 `force` → 「取消后没有第二个请求」判红；去掉 fence → 新增「请求在途时切换会话，草稿不变」判红。
