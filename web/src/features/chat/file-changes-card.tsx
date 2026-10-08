@@ -7,19 +7,22 @@ import { useAuth } from "../auth/index.js";
 import { logicalPath } from "../files/file-meta.js";
 import { summarizeChanges } from "./stream-artifacts.js";
 import type { ChatStepView } from "./stream-steps.js";
-import type { Workspace } from "./workspace-list.js";
+import type { SessionSpace } from "./workspace-list.js";
 
 type FileChange = ReturnType<typeof summarizeChanges>[number];
 type ChangeSpace = { id: string; prefix: string };
+type ChangeSource = { space: SessionSpace | null; steps: readonly ChatStepView[] };
 
 const COUNT = "font-mono text-[11px]";
 
 /**
  * The workspace a row links to and the logical prefix `<account>/<dir>/` of its paths; `null` while
- * `workspace` is (see `FileChangesCard`) or no account is signed in.
+ * `space` is, while its workspace is in no list (a temporary one: resolved, yet not linkable; see
+ * `FileChangesCard`) or no account is signed in.
  */
-export function useChangeSpace(workspace: Workspace | null): ChangeSpace | null {
+export function useChangeSpace(space: SessionSpace | null): ChangeSpace | null {
   const account = useAuth().principal?.account;
+  const workspace = space?.workspace ?? null;
   return workspace !== null && account !== undefined
     ? { id: workspace.id, prefix: `${logicalPath(account, workspace.dir)}/` }
     : null;
@@ -82,19 +85,13 @@ export function FileChangeRow({
 }
 
 /**
- * One card per assistant message: the changes of its ended steps, one row per path. `workspace` is
- * the session's workspace resolved in the workspace list, `null` while that list is loading, after
- * it failed, or when the session is unbound or bound to an unlisted workspace; rows then show the
- * workspace-relative path and no 查看详情. Renders nothing while no ended step carries changes.
+ * One card per assistant message: the changes of its ended steps, one row per path. `space` is
+ * the session's resolved workspace (`resolveSessionSpace`). While it is `null`, or its workspace is
+ * in no list (a session using a temporary workspace), rows show the workspace-relative path and no
+ * 查看详情. Renders nothing while no ended step carries changes.
  */
-export function FileChangesCard({
-  steps,
-  workspace,
-}: {
-  steps: readonly ChatStepView[];
-  workspace: Workspace | null;
-}) {
-  const space = useChangeSpace(workspace);
+export function FileChangesCard({ space: resolved, steps }: ChangeSource) {
+  const space = useChangeSpace(resolved);
   const headId = useId();
   const changes = summarizeChanges(steps);
   if (changes.length === 0) {

@@ -22,7 +22,7 @@ import { ThinkingFold } from "./thinking-fold.js";
 import { ThreadViewport, type TranscriptHandle } from "./thread-viewport.js";
 import { ToolCallGroup } from "./tool-call-group.js";
 import { useThreadRuntime } from "./use-thread-runtime.js";
-import type { Workspace } from "./workspace-list.js";
+import type { SessionSpace, Workspace } from "./workspace-list.js";
 
 type ThreadProps = {
   /** 选中的会话已归档（只读）：不渲染 `从此处分叉` 与 `重新生成`，零消息时也不显示空态。 */
@@ -39,8 +39,11 @@ type ThreadProps = {
   onStop(): Promise<unknown>;
   /** 对话内搜索经它调用滚动层的 `scrollToMessage`。 */
   scrollHandleRef: Ref<TranscriptHandle>;
+  /** 会话可解析的空间（文件变更卡与产物卡用），不可解析时为 null。 */
+  space: SessionSpace | null;
   /** 选中会话的视图；历史尚未到达时为 null（滚动容器已在，内容根还没有）。 */
   view: ChatState | null;
+  /** 会话在空间列表里的空间（空态的工作空间名）。 */
   workspace: Workspace | null;
 };
 
@@ -137,9 +140,9 @@ const AssistantMessage = memo(function AssistantMessage({
   locked,
   onRegenerate,
   regenerable,
+  space,
   text,
   thinking,
-  workspace,
 }: {
   client: ApiClient;
   current: boolean;
@@ -148,9 +151,9 @@ const AssistantMessage = memo(function AssistantMessage({
   onRegenerate: ThreadProps["onRegenerate"];
   /** 仅转录末条助手消息、且会话状态允许时为真。 */
   regenerable: boolean;
+  space: SessionSpace | null;
   text: string;
   thinking: string;
-  workspace: Workspace | null;
 }) {
   const { approvals, error, status, steps } = custom;
   const running = status === "running";
@@ -174,8 +177,8 @@ const AssistantMessage = memo(function AssistantMessage({
           <ToolCallGroup steps={steps} />
           <ApprovalRecords approvals={approvals} />
           <MessageError error={error} />
-          <FileChangesCard steps={steps} workspace={workspace} />
-          <ArtifactCards client={client} steps={steps} workspace={workspace} />
+          <FileChangesCard space={space} steps={steps} />
+          <ArtifactCards client={client} space={space} steps={steps} />
           {status === "stopped" ? (
             <p
               aria-label="助手消息 已停止"
@@ -229,6 +232,7 @@ export function Thread({
   onSend,
   onStop,
   scrollHandleRef,
+  space,
   view,
   workspace,
 }: ThreadProps) {
@@ -256,9 +260,9 @@ export function Thread({
           locked={locked}
           onRegenerate={onRegenerate}
           regenerable={message.id === regenerableId}
+          space={space}
           text={text}
           thinking={partText(message, "reasoning")}
-          workspace={workspace}
         />
       ) : (
         <UserMessage
@@ -272,7 +276,7 @@ export function Thread({
         />
       );
     },
-    [archived, client, currentId, locked, onFork, onRegenerate, regenerableId, workspace],
+    [archived, client, currentId, locked, onFork, onRegenerate, regenerableId, space],
   );
   return (
     <AssistantRuntimeProvider runtime={runtime}>
