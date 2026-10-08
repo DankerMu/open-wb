@@ -236,6 +236,45 @@ check_omp_modes() (
   done
   exit 1
 )
+# Workspace snapshots under the omp uid (s1f-session-list-temp-space task 10.8; spec workspace-snapshots).
+# 「omp 用户不可达」: the smoke's turns left at least one snapshot under snapshots/ (a directory
+# that still holds its manifest.json is an `ok` one: take removes any other) and the omp user
+# cannot list that directory. The probe prints the errno name, so a missing directory (ENOENT) or
+# a listing that worked is not taken for the denial. No manifest at all fails.
+list_probe='try { require("node:fs").readdirSync(process.argv[1]); console.log("listed"); } catch (error) { console.log(error.code); }'
+check_snapshots_closed() (
+  cd "$OMP_STATE_DIR"
+  manifests="$(find snapshots -mindepth 3 -maxdepth 3 -type f -name manifest.json)" || { echo "snapshot reach check failed: the app user cannot list snapshots" >&2; exit 1; }
+  [ -n "$manifests" ] || { echo "snapshot reach check failed: the smoke turns left no snapshot manifest" >&2; exit 1; }
+  seen="$(sudo -n -u omp -- /usr/bin/env "$node_bin" -e "$list_probe" snapshots)" || { echo "snapshot reach check failed: cannot run the probe as the omp user" >&2; exit 1; }
+  [ "$seen" = EACCES ] || { echo "snapshot reach check failed: the omp user listing snapshots got ${seen:-no answer}, want EACCES" >&2; exit 1; }
+  echo "snapshot reach check passed: the omp user gets EACCES listing snapshots ($(printf '%s\n' "$manifests" | wc -l | tr -d ' ') manifest.json)"
+)
+# 「还原出的文件对 omp 用户可写」(design D10): a file that is 0644 when take snapshots it is deleted
+# by the omp user and written back by restore, both called from the compiled server. The file is
+# then the app user's, in the shared group through the setgid directory, with the group bits added
+# (0664), and the omp user appends to it. This shell is not in the shared group (the phases enter
+# it through sg), so the group can only come from the directory.
+snapshot_probe='const [op, dist, workspaceRoot, snapshotsRoot] = process.argv.slice(1);
+const workspaceId = "0".repeat(32);
+const result = op === "take"
+  ? await (await import(dist + "/snapshots.js")).take({ workspaceRoot, snapshotsRoot, workspaceId, userMessageId: 1, excludeNames: new Set(), maxFileBytes: 4096, maxTotalBytes: 4096, maxEntries: 8 })
+  : await (await import(dist + "/snapshots-restore.js")).restore({ workspaceRoot, snapshotDir: snapshotsRoot + "/" + workspaceId + "/1" });
+const want = op === "take" ? { outcome: "ok", skipped: [] } : { restored: 1, removed: 0, skipped: [], failed: [] };
+if (JSON.stringify(result) !== JSON.stringify(want)) { console.error(op + " returned " + JSON.stringify(result)); process.exit(1); }'
+check_restore_writable() (
+  probe="$job_root/snapshot-probe"; file="$probe/note 0644.txt"; store="$(dirname "$DB_PATH")/snapshot-probe"; dist="$GITHUB_WORKSPACE/server/dist/workspaces"
+  # Called on the left of `||`, so errexit is off in here: every step is checked by hand.
+  mkdir "$probe" "$store" && sudo chmod 2770 "$probe" && printf 'before\n' > "$file" && chmod 0644 "$file" || { echo "snapshot restore check failed: cannot lay out the probe workspace" >&2; exit 1; }
+  "$node_bin" --input-type=module -e "$snapshot_probe" take "$dist" "$probe" "$store" || { echo "snapshot restore check failed: take" >&2; exit 1; }
+  sudo -n -u omp -- /usr/bin/env rm -f -- "$file" && [ ! -e "$file" ] || { echo "snapshot restore check failed: the omp user could not delete the file" >&2; exit 1; }
+  "$node_bin" --input-type=module -e "$snapshot_probe" restore "$dist" "$probe" "$store" || { echo "snapshot restore check failed: restore" >&2; exit 1; }
+  seen="$(stat -c '%a %U %G' -- "$file")" || { echo "snapshot restore check failed: no restored file" >&2; exit 1; }
+  [ "$seen" = "664 $runner workbuddy" ] || { echo "snapshot restore check failed: the restored file is ${seen}, want 664 ${runner} workbuddy" >&2; exit 1; }
+  printf 'after\n' | sudo -n -u omp -- /usr/bin/env tee -a -- "$file" >/dev/null || { echo "snapshot restore check failed: the omp user cannot append to the restored file" >&2; exit 1; }
+  [ "$(cat -- "$file")" = "$(printf 'before\nafter')" ] || { echo "snapshot restore check failed: the restored file does not hold the snapshot content and the appended bytes" >&2; exit 1; }
+  echo "snapshot restore check passed: restored as ${seen}, the omp user appended to it"
+)
 trap on_exit EXIT; trap 'pending=1' TERM INT; honor_cancel
 preflight="$(env -i PATH="$PATH" HOME="$proof_home" sudo -n -u omp --preserve-env=HOME,PATH -- /usr/bin/env)"
 printf '%s\n' "$preflight"
@@ -252,4 +291,6 @@ honor_cancel
 reap_owned
 if [ "$primary_rc" -eq 0 ] && [ "$cleanup_rc" -eq 0 ]; then
   check_omp_modes || { primary_rc=1; exit 1; }
+  check_snapshots_closed || { primary_rc=1; exit 1; }
+  check_restore_writable || { primary_rc=1; exit 1; }
 fi
