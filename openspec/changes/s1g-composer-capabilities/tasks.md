@@ -236,7 +236,7 @@ Minimal mergeable slice: 10.1 一刀（`write` 尚无调用方；类型联合的
 
 ## 11. workspaces — 文件上传端点（Critical Path）
 
-- [ ] 11.1 新文件 `server/src/workspaces/upload.ts`：流式落盘的纯 IO 部分——独占创建临时文件（`wx`、mode 精确 `0660`）、带上限的计数管道、失败清理、候选名生成（`<主名> (n)<扩展名>` 规则）与 `link` 定名循环。不依赖 Fastify。
+- [x] 11.1 新文件 `server/src/workspaces/upload.ts`：流式落盘的纯 IO 部分——独占创建临时文件（`wx`、mode 精确 `0660`）、带上限的计数管道、失败清理、候选名生成（`<主名> (n)<扩展名>` 规则）与 `link` 定名循环。不依赖 Fastify。
   测试新文件 `server/test/workspace-upload-io.test.ts`（真实临时目录）：编号规则表（`a.pdf`、`README`、`.env`、`archive.tar.gz`）、并发同名各得其名、读取中超限即停并清理、流出错清理、mode 不随 umask（`000` 与 `077` 各一例）、目标已是符号链接时不跟随。
   **实施注记（11.1，fixture 评审补充，#1014）**：
   - 导出面（按 11.2 路由第 7、8 步的用法）：一个函数，如 `storeUpload({ dir, name, source, maxBytes })`，返回 `{ name, size }`。`dir` 是路由已过沙箱并建好的目录的绝对路径，`name` 是路由已校验的单段名字，`source` 是 `Readable`。路由要分得清三种结果：超限（413）、名额用尽（409）、其余原样上抛（500）。`server/src/core/errors/index.ts` 没有任何 import，直接抛 `HttpError("upload_too_large")` 与 `HttpError("conflict")` 不违反「不依赖 Fastify」；用哪种写进模块头注释。只导出测试要 import 的东西，不单独导出候选名生成器，不加 `signal` 参数。
