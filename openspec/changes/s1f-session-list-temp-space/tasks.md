@@ -261,6 +261,14 @@ Minimal mergeable slice: 9.1 + 9.2 一起（没有父目录校验的还原不可
 - [x] 10.4a 快照对两类普通状态的处置（#1148，2026-10-07 owner 裁决采用该 issue 的推荐方案；**先于 10.5 合入**）：`take` 把已列举条目的 `ENOENT` / 中间分量消失的 `ENOTDIR` 当作「快照时已不存在」略过；`take` 与 `restore` 的列举改为按字节取名，名字不能经 UTF-8 无损往返的条目在 `take` 里记入 `skipped`（`name_encoding`），在 `restore` 里（根与 `entries` 目录之下）不读、不改、不删。测试：workspace-snapshots「列举后消失的条目不使快照失败」（注入式，全平台）、「非 UTF-8 文件名被跳过而不使快照失败」与「非 UTF-8 文件名的条目不被当作多余条目删除」（Linux；macOS 上显式跳过并写明原因——APFS 拒绝创建这类名字）。变异证据：`ENOENT` 仍重抛 → 「列举后消失的条目」判红；根的 `ENOENT` 也略过 → 同场景末条判红；`restore` 按字符串列举 → 「不被当作多余条目删除」判红；`take` 不记 `skipped` → 「被跳过而不使快照失败」判红。
   补充裁决（2026-10-07，PR #1189 评审后）：出现过消失条目的快照在清单里标 `incomplete: true`；`restore` 对它不删除任何多余条目（`removed` 为 0）。测试：workspace-snapshots「遍历期间被改名的文件不因还原而丢失」（注入式，全平台；目录改名另加一例）。变异证据：不写 `incomplete` → 判红；`restore` 忽略 `incomplete` → 判红；`incomplete` 时连写回也跳过 → 判红。
   Risk packs（10.4a）: File IO / path safety / delete（还原不得删除未被快照的用户文件）、Concurrency（列举与读取之间的消失）、Platform（文件名字节只在 Linux 可造）。
+- [ ] 10.4b 遍历期间有变动的快照不可还原（#1190，2026-10-08 owner 裁决；Critical Path；**先于 12.1 合入**）。取代 10.4a 里「已列举条目的 `ENOENT` / `ENOTDIR` 略过、快照照常 `ok`」与补充裁决的 `incomplete` 标记；10.4a 的非 UTF-8 名字部分不变。
+  - `server/src/workspaces/snapshots.ts`：列举每个被遍历的目录时记下指纹（lstat 的 `mtimeMs` 与按字节的条目名集合，取 `mtime` 在列举之前）；全部条目处理完、写清单之前逐目录复查（先列举、后取 `mtime`）；不同或取不到 → 抛出、走既有的 `failed` 出口（快照目录清掉）。已列举条目的 `ENOENT` / `ENOTDIR` 不再略过，同样是 `failed`。去掉 `vanished` 与清单的 `incomplete`。
+  - `server/src/workspaces/snapshots-restore.ts`：去掉 `incomplete` 分支（`removeExtras` 恒执行）；清单校验拒绝带 `incomplete` 键的清单。
+  - 测试（注入式，全平台，沿用既有的读取钩子在指定时刻改动工作空间）：workspace-snapshots「遍历期间有变动的快照不可还原」的每个 WHEN（消失 ×2、跨目录移动、改名覆盖已捕获文件、类型互换、新增、同名重建、无变动）与「带 incomplete 标记的旧清单不被还原」。`workspace-snapshots-incomplete.test.ts` 改写或由新文件取代，被取代的旧用例逐条记偏离。
+  - 受波及面要核对：`sessions/turn-snapshot.ts` 与 `store-undo.ts` 不读 `incomplete`（应为零改动）；`.github/scripts/ci-uid-isolation.sh` 的两条快照检查依赖冒烟留下的 `ok` 快照——若因此判红，停下报告，不改 CI 脚本。
+  - 变异证据：不做复查 → 「跨目录移动」判红；复查只比名字集合、不比 `mtime` → 「同名重建」判红；复查只比 `mtime`、不比名字（若可区分）→ 记录结果；`ENOENT` 仍略过 → 「消失」两例判红；`failed` 时留下快照目录 → 判红；`restore` 接受 `incomplete` 清单 → 「旧清单不被还原」判红；`restore` 对合法清单不删多余 → 既有「还原」场景判红。
+  - 文档：ADR-0010 与本文件 12.3 等处提到「不完整快照」的地方同步；`docs/` 里若有对 `incomplete` 的描述一并改。
+  Risk packs（10.4b）: File IO / path safety / delete（还原不得销毁快照里没有副本的内容）、Concurrency（遍历与并发写入）、Legacy compatibility（旧清单的 `incomplete` 键）。
 - [x] 10.5 快照步骤与路由接线：新模块 `server/src/sessions/turn-snapshot.ts`（自身不抛——未绑定不写行；命令回合写 `command`；其余调用 `take` 并写结果；失败只报告）；`createApp` 用 7.1 / 7.2 的布局与配置构造唯一的快照服务并注入；`rest.ts` 把步骤作为 `beforeDispatch` 传给 `supervisor.prompt`，受理与该调用之间不加 await；受理被补偿后删快照目录。测试（新文件 `server/test/prompt-snapshot.test.ts`，REST seam + fake omp）：workspace-snapshots「受理时做快照」六个场景（含「快照期间停止与删除」）、chat-sessions「Snapshot precedes dispatch and never blocks it」、http-service-skeleton「Shared agent module assembly」里快照服务的装配句。此时登记行已写入但还不经任何视图暴露。
   去重的接线（#939 留下）：调用 `take` 前用 10.2 的「取该工作空间最近一条 `ok`」查出上一份的 `message_id`，作为 `previousMessageId` 传入；查不到时**省略**该字段（传 `null` 会在落盘前抛 `TypeError`，被本模块的「自身不抛」吞成每个空间首回合都 `failed`）。REST 层加一条断言：同一空间连续两个回合、其间未改的文件在两份快照里是同一个 inode（`nlink` ≥ 2）——否则漏接时去重在生产上不生效而测试全绿。
   **实施注记（10.5，fixture 评审补充）**：
@@ -269,14 +277,14 @@ Minimal mergeable slice: 9.1 + 9.2 一起（没有父目录校验的还原不可
   - 任务清单的原始存储文本此前没有读取函数：在 `store-undo.ts` 加一个按 `CAST(todo AS BLOB)` 读出的函数，登记行的 `todo` 与它逐字节相同（含 SQL NULL）。
   - 补偿：`rollbackPrompt` 之后 await `remove` 再重抛原错误；`remove` 失败只报告。
   - 「Snapshot precedes dispatch and never blocks it」里的 `undo` 取值属于 10.6：本刀改为断言登记行的 `outcome`，记偏离。
-  - #1148 之后清单可能带 `incomplete: true`、`skipped` 可能含 `name_encoding`：本刀原样登记 `take` 返回的 `skipped`，不解释 reason；`incomplete` 不进登记行（是否向前端透出见 #1190）。
+  - #1148 之后清单可能带 `incomplete: true`、`skipped` 可能含 `name_encoding`：本刀原样登记 `take` 返回的 `skipped`，不解释 reason；`incomplete` 不进登记行（该标记已由 10.4b / #1190 退役：有变动的遍历直接是 `failed`）。
 - [x] 10.6 消息视图 `undo` 与 prompt 202 的 `undo`（server）：`getMessages` 的出口在序列化处合入快照登记（不给 `store.ts` 加行：在路由的预解析缓存处或 `store-undo.ts` 的投影函数里合并）；202 body 加 `undo`。测试（同文件）：message-undo「可撤回状态」两个场景、chat-sessions「User messages carry an undo state」与「Accepted prompt and concurrent busy」的 `undo` 断言、turn-control「从此处分叉 REST」的「分叉共用临时空间且不带快照」、「stopped 终态」的「停止后继续对话」（三键）、session-metadata「存量未绑定会话照常可用」的 `unbound` 断言。
 - [x] 10.7 web 解析（与 10.6 同 PR）：`session-contract.ts` 的消息解析加 `undo`、prompt 202 解析加 `undo`；视图里由 202 本地加入的用户消息带上该值（`stream.ts` / `turn-actions.ts` 的受理处）。测试：chat-web「消息 undo 键严格解析」「prompt 的 202 带 undo」；测试夹具的消息对象补 `undo`。`smoke/chat.hurl` 与 `smoke/session-meta.hurl` 里对 202 body 键数的断言（如有）同步。
   **实施注记（10.6 + 10.7 + 10.9，fixture 评审补充；Critical Path，一个 PR）**：
   - 服务端落点：纯投影放 `store-undo.ts`（登记行 `ok` → `available`；`too_large` / `failed` / `command` 原样；无登记行且会话未绑定 → `unbound`；无登记行且已绑定 → `none`）；经 `TurnSnapshots` 新增的一个只读方法暴露（它已注入 `rest.ts` 并持有 `db`）。`store.ts`、`supervisor.ts` 不动。
   - 历史路由：在仅该路由使用的 `preParsing` 钩子里读取（与 `readTodoBeforeParse` 同一同步段），不放进共用的 `authorizeOwnedBeforeParse`；随 `OwnedSnapshot` 带到 `toPublicHistory`。键序由规格固定：`…,createdAt,approvals,undo,steps`；助手消息恒为 `null`。
   - 202：在 `await supervisor.prompt(...)` 返回之后读登记行（此时快照步骤已结算），按 `{userMessageId, assistantMessageId, undo}` 的次序应答。
-  - 各情形的取值：manifest `incomplete` 不在登记行里 → `available`（#1190 另议）；存量未绑定会话 → `unbound`；`/todo` 与 `/skill:…` → `command`；fork 复制出的消息 → `none`（零代码，只需钉住的用例）；被停止的回合随登记行、不随回合状态；登记行写失败或快照中途进程被杀 → `none`；regenerate 不改变任何取值。
+  - 各情形的取值：manifest `incomplete` 不在登记行里 → `available`（10.4b / #1190 之后不再有这种清单：有变动的遍历登记为 `failed`）；存量未绑定会话 → `unbound`；`/todo` 与 `/skill:…` → `command`；fork 复制出的消息 → `none`（零代码，只需钉住的用例）；被停止的回合随登记行、不随回合状态；登记行写失败或快照中途进程被杀 → `none`；regenerate 不改变任何取值。
   - 测试落点（「同文件」做不到——`prompt-snapshot.test.ts` 已 791 行）：把它的文件内 helpers 挪到 `server/test/prompt-snapshot-helpers.ts`，10.6 的场景写进新文件（如 `message-undo-state.test.ts`）；`session-workspace-cwd.test.ts` 的「存量未绑定会话照常可用」补 `undo:"unbound"`；10.9 新增一条「regenerate 不改变快照登记行数」。`session-rest.test.ts` 已 789 行，不得净增。
   - PR #1191 遗留的 P2 在新文件里补上：在全新的状态目录上（不调 `ensureOmpStateLayout`）构建 `createApp`，断言 `snapshots` 目录不存在。
   - web（同一 PR）：`session-contract.ts` 的消息解析与 202 解析加 `undo`（用户消息须为六个取值之一，助手消息须恰为 `null`，否则整份快照判非法）；`stream.ts` 的消息视图保留 `undo`，两处助手占位写 `undo: null`。先改共享的测试支撑文件，再改各用例的字面量。
