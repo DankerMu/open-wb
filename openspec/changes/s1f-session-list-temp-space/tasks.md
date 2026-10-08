@@ -417,7 +417,7 @@ Minimal mergeable slice: 16.1（能归档、能在归档视图里恢复与删除
 
 ## 17. web — 临时空间、产物卡与导出记录
 
-- [ ] 17.1 临时空间的呈现：`capability-bar.tsx` 的只读标签加 `任务启动于 临时空间`（判定在最前：`temporaryWorkspace` 为 true）；用临时空间的会话以其 `workspaceId` 取命令目录与项目配置（核对现有取用处是否已按 `workspaceId` 传参，只补缺口）。测试：session-sidebar「未选择空间发送得到临时空间会话」「会话开始后只读」、chat-web「已选会话工作空间只读」（四种取值）；另加回归：绑定正式空间与未绑定的存量会话的标签不变。
+- [x] 17.1 临时空间的呈现：`capability-bar.tsx` 的只读标签加 `任务启动于 临时空间`（判定在最前：`temporaryWorkspace` 为 true）；用临时空间的会话以其 `workspaceId` 取命令目录与项目配置（核对现有取用处是否已按 `workspaceId` 传参，只补缺口）。测试：session-sidebar「未选择空间发送得到临时空间会话」「会话开始后只读」、chat-web「已选会话工作空间只读」（四种取值）；另加回归：绑定正式空间与未绑定的存量会话的标签不变。
   **实施注记（17.1，fixture 评审补充）**：
   - `CapabilityBar` 的 `session` 入参加 `temporary: boolean`；标签判定次序：`temporary` → `临时空间`，其后沿用既有的 `null` → `未绑定`、空间名、`已绑定空间`。该判定不依赖工作空间列表（列表取不到时仍是 `临时空间`）。
   - 取值来自 `page.tsx` 已有的 `selected?.temporaryWorkspace ?? false`，经 `ConversationView` 的一个新入参传到能力栏；不往 `use-chat-session.ts` 里加。

@@ -87,6 +87,7 @@ export function ChatPage() {
         sendDisabled={session.sendDisabled}
         slash={slash}
         streamError={session.streamError}
+        temporaryWorkspace={selected?.temporaryWorkspace ?? false}
         welcome={session.welcome}
         workspace={workspace}
         workspaceId={session.slashWorkspaceId}

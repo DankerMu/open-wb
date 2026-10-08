@@ -38,9 +38,10 @@ type CapabilityBarProps = {
   plus: PlusMenu;
   /**
    * 已选会话绑定的工作空间：`id` 为 null 即未绑定，undefined 表示会话还没解析出来；`workspace` 是它在
-   * 已读取列表里的那一项（读取中、读取失败或空间已删时为 undefined）。欢迎态不传。
+   * 已读取列表里的那一项（读取中、读取失败或空间已删时为 undefined）；`temporary` 即会话的
+   * `temporaryWorkspace`（临时空间不在列表里，标签不靠列表判定）。欢迎态不传。
    */
-  session?: { id: string | null | undefined; workspace: Workspace | undefined };
+  session?: { id: string | null | undefined; workspace: Workspace | undefined; temporary: boolean };
 };
 
 export function CapabilityBar({ choice, disabled, inputRef, plus, session }: CapabilityBarProps) {
@@ -118,10 +119,13 @@ function CommandMenu({ inputRef, plus }: Pick<CapabilityBarProps, "inputRef" | "
   );
 }
 
-/** 只读标签：会话开始后工作空间即锁定，这里不可操作、不发请求。会话尚未解析出来时不渲染。 */
-function WorkspaceLabel({ id, workspace }: NonNullable<CapabilityBarProps["session"]>) {
+/**
+ * 只读标签：会话开始后工作空间即锁定，这里不可操作、不发请求。会话尚未解析出来时不渲染。四种取值，
+ * 临时空间的判定在最前：它有 `workspaceId` 却不在列表里，按列表判会读成 `已绑定空间`。
+ */
+function WorkspaceLabel({ id, temporary, workspace }: NonNullable<CapabilityBarProps["session"]>) {
   if (id === undefined) return null;
-  const name = id === null ? "未绑定" : (workspace?.name ?? "已绑定空间");
+  const name = temporary ? "临时空间" : id === null ? "未绑定" : (workspace?.name ?? "已绑定空间");
   return (
     <p
       className="m-0 flex min-w-0 items-center gap-1 px-2.5 text-[0.8rem] text-muted-foreground"
