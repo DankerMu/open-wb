@@ -29,6 +29,25 @@ type RenameState = {
   token: number;
 };
 
+/** 打开的 `另存为工作空间` 对话框；`workspaceId` 是打开那一刻该会话的临时空间。 */
+type PromoteState = {
+  client: ApiClient;
+  sessionId: string;
+  workspaceId: string;
+  busy: boolean;
+  error: string | null;
+  token: number;
+};
+
+/** 工作空间名字的码点上限，与服务端一致。 */
+const MAX_WORKSPACE_NAME_CODEPOINTS = 64;
+
+/** 去掉首尾空白后的工作空间名字；为空或超过码点上限时为 null（不可提交）。 */
+export function workspaceNameOf(text: string): string | null {
+  const name = text.trim();
+  return name.length === 0 || [...name].length > MAX_WORKSPACE_NAME_CODEPOINTS ? null : name;
+}
+
 /**
  * 打开的删除确认框；`title` 是打开那一刻的显示标题。`shared` 在打开时用已加载的列表（含已归档）
  * 判定：另有会话与它同 `workspaceId`。只对临时空间的会话有意义（确认文案的三种变体）。
@@ -106,8 +125,8 @@ function withMeta(session: ChatSession, view: ChatSession, key: MetaKey): ChatSe
 }
 
 /**
- * 会话条目操作（重命名、置顶/取消置顶、归档/恢复、删除）：行菜单与顶栏 `重命名` 共用。重命名 Dialog 与删除
- * 确认框的状态在这里而不在侧栏槽位节点里（槽位节点随折叠与覆盖层关闭卸载）。
+ * 会话条目操作（重命名、置顶/取消置顶、归档/恢复、删除、另存为工作空间）：行菜单与顶栏 `重命名` 共用。
+ * 重命名、另存为工作空间的 Dialog 与删除确认框的状态在这里而不在侧栏槽位节点里（槽位节点随折叠与覆盖层关闭卸载）。
  *
  * 列表条目与快照会话的 `title`、`pinnedAt`、`archivedAt` 只来自 PATCH 200 的响应，且只合并该请求修改的那个
  * 键——迟到的响应不会把已刷新的 `status` 或另一类请求刚写入的值改回去；不做乐观更新。同一会话
@@ -132,14 +151,17 @@ export function useSessionActions(
   const navigate = useNavigate();
   const location = useLocation();
   const [state, setState] = useState<RenameState | null>(null);
+  const [promoting, setPromoting] = useState<PromoteState | null>(null);
   const [removing, setRemoving] = useState<DeleteState | null>(null);
   const [deleting, setDeleting] = useState<DeletingState>({ client, ids: [] });
   const [alert, setAlert] = useState<AlertState | null>(null);
   const stateRef = useRef(state);
+  const promotingRef = useRef(promoting);
   const clientRef = useRef(client);
   const mountedRef = useRef(false);
   const tokenRef = useRef(0);
   const returnFocus = useRef<HTMLElement | null>(null);
+  const promoteReturnFocus = useRef<HTMLElement | null>(null);
   const deleteReturnFocus = useRef<HTMLElement | null>(null);
   /** 最近一次渲染的 location：删除响应到达时的 URL，而不是确认那一刻的。 */
   const locationRef = useRef(location);
@@ -147,6 +169,7 @@ export function useSessionActions(
   const controllersRef = useRef(new Set<AbortController>());
 
   stateRef.current = state;
+  promotingRef.current = promoting;
   clientRef.current = client;
   locationRef.current = location;
 
@@ -240,6 +263,32 @@ export function useSessionActions(
     if (!isUnauthorized(error)) setAlert({ client, message: errorMessage(error) });
   }
 
+  /**
+   * 一次打开（`token`）的名字对话框开始提交：置忙碌、清框内提示，返回状态更新与失败出口；重命名与
+   * 另存为工作空间共用。`update` 只改
+   * 发起本请求的那次打开，它已被关闭或被新的打开取代时不动。`failed`：401 只解除忙碌（交给既有的
+   * 未授权通知）；那次打开还在 → 对话框内提示；否则 → 列表区顶部提示。
+   */
+  function beginSubmit<Opening extends { busy: boolean; error: string | null; token: number }>(
+    setOpening: Dispatch<SetStateAction<Opening | null>>,
+    openingRef: RefObject<Opening | null>,
+    token: number,
+  ) {
+    const update = (next: (current: Opening) => Opening | null) =>
+      setOpening((current) => (current?.token === token ? next(current) : current));
+    const failed = (error: unknown) => {
+      if (isUnauthorized(error)) {
+        update((current) => ({ ...current, busy: false }));
+      } else if (openingRef.current?.token === token) {
+        update((current) => ({ ...current, busy: false, error: errorMessage(error) }));
+      } else {
+        report(error);
+      }
+    };
+    update((current) => ({ ...current, busy: true, error: null }));
+    return { update, failed };
+  }
+
   function openRename(session: ChatSession, trigger: HTMLElement | null) {
     setAlert(null);
     returnFocus.current = trigger;
@@ -258,26 +307,49 @@ export function useSessionActions(
     const title = text.trim();
     if (!state || state.busy || title.length === 0) return;
     setAlert(null);
-    const { sessionId, token } = state;
-    /** 只改发起本请求的那次打开；它已被关闭或被新的打开取代时不动。 */
-    const update = (next: (opening: RenameState) => RenameState | null) =>
-      setState((opening) => (opening?.token === token ? next(opening) : opening));
-    update((opening) => ({ ...opening, busy: true, error: null }));
-    send(
-      sessionId,
-      "title",
-      { title },
-      () => update(() => null),
-      (error) => {
-        if (isUnauthorized(error)) {
-          update((opening) => ({ ...opening, busy: false }));
-        } else if (stateRef.current?.token === token) {
-          update((opening) => ({ ...opening, busy: false, error: errorMessage(error) }));
-        } else {
-          report(error);
-        }
-      },
-    );
+    const { update, failed } = beginSubmit(setState, stateRef, state.token);
+    send(state.sessionId, "title", { title }, () => update(() => null), failed);
+  }
+
+  /** 只对用临时空间的会话打开（菜单项只在这类会话上渲染）。 */
+  function openPromote(session: ChatSession, trigger: HTMLElement | null) {
+    if (session.workspaceId === null) return;
+    setAlert(null);
+    promoteReturnFocus.current = trigger;
+    tokenRef.current += 1;
+    setPromoting({
+      client,
+      sessionId: session.id,
+      workspaceId: session.workspaceId,
+      busy: false,
+      error: null,
+      token: tokenRef.current,
+    });
+  }
+
+  /**
+   * 以去掉首尾空白的名字发一次 promote。200（含对话框关闭之后才到的）：重读会话列表——同一次
+   * 刷新也重读工作空间列表——并关闭这次打开的对话框；失败按 `beginSubmit` 的出口。
+   */
+  function submitPromote(text: string) {
+    const name = workspaceNameOf(text);
+    if (!promoting || promoting.busy || name === null) return;
+    setAlert(null);
+    const { update, failed } = beginSubmit(setPromoting, promotingRef, promoting.token);
+    const request = track();
+    void client
+      .promoteWorkspace(promoting.workspaceId, name, { signal: request.signal })
+      .finally(request.release)
+      .then(
+        () => {
+          if (!request.current()) return;
+          page.refreshList(client);
+          update(() => null);
+        },
+        (error: unknown) => {
+          if (request.current()) failed(error);
+        },
+      );
   }
 
   function togglePin(session: ChatSession) {
@@ -361,6 +433,7 @@ export function useSessionActions(
 
   return {
     openRename,
+    openPromote,
     togglePin,
     archive,
     restore,
@@ -382,6 +455,17 @@ export function useSessionActions(
             restoreFocus: () => restoreFocus(deleteReturnFocus.current),
             onConfirm: () => confirmDelete(removing.sessionId),
             onCancel: () => setRemoving(null),
+          }
+        : null,
+    /** `PromoteDialog` 的 props；没有打开的对话框、或它属于上一个 client 时为 null。 */
+    promote:
+      promoting && promoting.client === client
+        ? {
+            busy: promoting.busy,
+            error: promoting.error,
+            restoreFocus: () => restoreFocus(promoteReturnFocus.current),
+            onSubmit: submitPromote,
+            onCancel: () => setPromoting(null),
           }
         : null,
     /** `RenameDialog` 的 props；没有打开的重命名、或它属于上一个 client 时为 null。 */

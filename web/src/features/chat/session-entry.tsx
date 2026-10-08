@@ -6,8 +6,9 @@ import { SessionStatusMark } from "./session-status-mark.js";
 /** 条目菜单的动作，由会话页的 `useSessionActions` 提供；默认视图与归档视图的条目共用。 */
 export type EntryActions = {
   onArchiveSession(session: ChatSession): void;
-  /** `trigger` 是该条目的「更多」按钮：确认框与重命名 Dialog 关闭后把焦点还给它。 */
+  /** `trigger` 是该条目的「更多」按钮：确认框、重命名与另存为工作空间的对话框关闭后把焦点还给它。 */
   onDeleteSession(session: ChatSession, trigger: HTMLElement | null): void;
+  onPromoteSession(session: ChatSession, trigger: HTMLElement | null): void;
   onRenameSession(session: ChatSession, trigger: HTMLElement | null): void;
   onRestoreSession(session: ChatSession): void;
   onTogglePin(session: ChatSession): void;
@@ -23,6 +24,7 @@ type SessionEntryProps = EntryActions & {
 function SessionEntry({
   onArchiveSession,
   onDeleteSession,
+  onPromoteSession,
   onRenameSession,
   onRestoreSession,
   onSelect,
@@ -48,6 +50,7 @@ function SessionEntry({
       <SessionMenu
         onArchive={() => onArchiveSession(session)}
         onDelete={(trigger) => onDeleteSession(session, trigger)}
+        onPromote={(trigger) => onPromoteSession(session, trigger)}
         onRename={(trigger) => onRenameSession(session, trigger)}
         onRestore={() => onRestoreSession(session)}
         onTogglePin={() => onTogglePin(session)}

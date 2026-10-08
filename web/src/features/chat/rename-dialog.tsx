@@ -1,18 +1,39 @@
 import { type FormEvent, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useEscapeFallback } from "../../ui/index.js";
 
-type RenameProps = {
-  /** 服务端标题；null 时输入框为空。 */
-  title: string | null;
+/** 一次打开的名字对话框的状态与回调：重命名与另存为工作空间共用。 */
+export type NameDialogState = {
   busy: boolean;
   error: string | null;
   /** 关闭后把焦点还给打开它的按钮（按钮已卸载时落到列表区）。 */
   restoreFocus(): void;
   onSubmit(text: string): void;
   onCancel(): void;
+};
+
+type RenameProps = NameDialogState & {
+  /** 服务端标题；null 时输入框为空。 */
+  title: string | null;
+};
+
+type NameFormProps = NameDialogState & {
+  heading: string;
+  /** 标题下的说明；没有时对话框不带 `aria-describedby`。 */
+  description?: string;
+  /** 输入框的 accessible name。 */
+  label: string;
+  initial: string;
+  /** 输入框的文本能否提交；不能时 `保存` 禁用。 */
+  valid(text: string): boolean;
 };
 
 /**
@@ -22,12 +43,34 @@ type RenameProps = {
  * 请求不因此取消。失败在对话框内以 `role="alert"` 显示。
  */
 export function RenameDialog({ rename }: { rename: RenameProps | null }) {
-  return rename ? <RenameForm {...rename} /> : null;
+  if (!rename) return null;
+  const { title, ...state } = rename;
+  return (
+    <NameForm
+      {...state}
+      heading="重命名任务"
+      initial={title ?? ""}
+      label="任务名称"
+      valid={(text) => text.trim().length > 0}
+    />
+  );
 }
 
-function RenameForm({ title, busy, error, restoreFocus, onSubmit, onCancel }: RenameProps) {
+/** 一个名字输入框加 `取消` / `保存` 的对话框；按「有打开的对话框」条件挂载。 */
+export function NameForm({
+  heading,
+  description,
+  label,
+  initial,
+  valid,
+  busy,
+  error,
+  restoreFocus,
+  onSubmit,
+  onCancel,
+}: NameFormProps) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [text, setText] = useState(title ?? "");
+  const [text, setText] = useState(initial);
   const onOpenChange = (open: boolean) => {
     if (!open) onCancel();
   };
@@ -51,7 +94,7 @@ function RenameForm({ title, busy, error, restoreFocus, onSubmit, onCancel }: Re
   return (
     <Dialog onOpenChange={onOpenChange} open>
       <DialogContent
-        aria-describedby={undefined}
+        {...(description ? {} : { "aria-describedby": undefined })}
         aria-modal="true"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
@@ -66,11 +109,12 @@ function RenameForm({ title, busy, error, restoreFocus, onSubmit, onCancel }: Re
         ref={fallback.ref}
       >
         <DialogHeader className="pr-8">
-          <DialogTitle className="leading-5">重命名任务</DialogTitle>
+          <DialogTitle className="leading-5">{heading}</DialogTitle>
+          {description ? <DialogDescription>{description}</DialogDescription> : null}
         </DialogHeader>
         <form className="flex flex-col gap-3" onSubmit={submit}>
           <Input
-            aria-label="任务名称"
+            aria-label={label}
             onChange={(event) => setText(event.target.value)}
             ref={inputRef}
             value={text}
@@ -89,7 +133,7 @@ function RenameForm({ title, busy, error, restoreFocus, onSubmit, onCancel }: Re
             </Button>
             <Button
               aria-busy={busy ? true : undefined}
-              disabled={busy || text.trim().length === 0}
+              disabled={busy || !valid(text)}
               type="submit"
             >
               保存
