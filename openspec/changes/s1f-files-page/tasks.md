@@ -590,3 +590,8 @@ Minimal mergeable slice: (a)(c)(d)(e) 四步不依赖隔离来源，可先合；
 
 Suggested fixture level: none - 文档、术语与人工验证记录，不改运行时代码
 Minimal mergeable slice: 28.1–28.5 的文档可一个 PR 合入；28.6 的实测记录作为对 ADR-0014 的第二个小 PR
+
+## 启动失败记录的阶段取值（#1203 对齐）
+
+- [ ] 本 change 新增的启动步骤进入 `server_start_failed` 的 `reason` 枚举：建预览缓存目录 → `preview_cache`，预览监听器 listen → `preview_listen`；`server/src/server.ts` 在这两步开始之前推进阶段变量。测试：http-service-skeleton「启动失败记录带失败阶段」的写法（真实编译入口、整行精确相等）各加一例；既有「预览端口失败 → 恰一行 generic failure record」的断言改为带 `reason` 的整行。归档次序：本 change 的「服务启动与装配」MODIFIED 副本须保留 `s1f-session-list-temp-space` 引入的该场景（已同步进本副本）。
+

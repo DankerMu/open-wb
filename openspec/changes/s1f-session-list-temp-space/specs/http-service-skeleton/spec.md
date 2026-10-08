@@ -95,16 +95,16 @@ Runtime config/DB/app/listen/models.yml/success-record任一步失败 SHALL不�
 - **THEN** override逐项原样生效（含两个上限值；`MODEL_REASONING=off` 时models.yml模型条目不含 reasoning 声明），relative path仍绑定repo root；只创建non-memory DB的exact parent与OMP_STATE_DIR托管布局、绝不创建STATIC_ROOT或误建default DB；HOST=0.0.0.0时models.yml的baseUrl为http://127.0.0.1:<实际端口>/v1，IPv6通配绑定使用http://[::1]:<实际端口>/v1；build output中的完整migration tree与tracked source inventory/bytes一致，health/info/auth/static合同保持
 - **WHEN** `PORT`为empty/whitespace/sign/fraction/exponent/zero/out-of-range，HOST为empty/whitespace-only，DB/static/omp/state/sandbox path为explicit empty，OMP_IDLE_MS为empty/0/abc/负数/小数/非canonical或大于2147483647的整数，OMP_MAX_PROCESSES为empty/0/abc/负数/小数/非canonical（如`016`、`+8`）或大于2147483647的整数，OMP_SPAWN_CONCURRENCY为同一组非法值，`SNAPSHOT_MAX_FILE_BYTES`/`SNAPSHOT_MAX_TOTAL_BYTES`/`SNAPSHOT_MAX_ENTRIES`为同一组非法值，`SNAPSHOT_EXCLUDE_NAMES`为`a/b`、`..`或含空名段（如`a,,b`），`MODEL_REASONING`为empty/`ON`/`true`/`yes`，上游变量为explicit empty，或import `server.ts`但不命中main guard
 - **THEN** main-path非法config在任何filesystem/database/listen副作用前nonzero，application stderr恰一行上述generic failure record且无success；import-without-main保持silent且无filesystem/database/listen/signal副作用
+- **WHEN** DB parent为file/不可创建、DB file创建/chmod失败、DB open/migration失败、HOST由listen拒绝、port已占用、models.yml不可写或post-listen stdout sink失败
+- **THEN** 进程nonzero且stderr可写时只有generic failure record；stdout EPIPE不得输出raw stack；关闭所有已拥有的app/DB，不遗留可监听server、活跃omp原生子进程或active SQLite handle，parent/static/default路径无额外副作用；stderr同时不可写时允许无record但同样nonzero/cleanup
+- **WHEN** SIGINT/SIGTERM 落在listen invoke后、实际bind前，或成功后重复/混合到达
+- **THEN** pending bind由同一AbortSignal取消且无startup record，或已绑定listener幂等关闭；两种情况下均完成已拥有runtime原生退出后释放port、最后关DB；干净取消正常退出，successor可立即复用exact port/DB
 
 #### Scenario: 启动失败记录带失败阶段
 - **WHEN** 编译入口分别遇到：非法config；DB父目录位置是一个文件；监听端口已被占用；托管布局里 `home/.omp` 被一个文件占位；`host-overlay.yml` 的位置是一个目录；listen之后stdout sink写失败
 - **THEN** 每次进程nonzero，application stderr恰一行，依次整行等于 `{"event":"server_start_failed","reason":"config"}`、`…"reason":"db"}`、`…"reason":"listen"}`、`…"reason":"state_layout"}`、`…"reason":"host_overlay"}`、`…"reason":"publish"}`；该行的键集合恰为 `event` 与 `reason`
 - **WHEN** 托管布局校验失败，且状态目录的路径里含一个哨兵字符串、环境里的 `MODEL_UPSTREAM_API_KEY` 是另一个哨兵值
 - **THEN** stdout与stderr的任何位置都不出现这两个哨兵（失败记录不带原始error文本、路径与配置值）
-- **WHEN** DB parent为file/不可创建、DB file创建/chmod失败、DB open/migration失败、HOST由listen拒绝、port已占用、models.yml不可写或post-listen stdout sink失败
-- **THEN** 进程nonzero且stderr可写时只有generic failure record；stdout EPIPE不得输出raw stack；关闭所有已拥有的app/DB，不遗留可监听server、活跃omp原生子进程或active SQLite handle，parent/static/default路径无额外副作用；stderr同时不可写时允许无record但同样nonzero/cleanup
-- **WHEN** SIGINT/SIGTERM 落在listen invoke后、实际bind前，或成功后重复/混合到达
-- **THEN** pending bind由同一AbortSignal取消且无startup record，或已绑定listener幂等关闭；两种情况下均完成已拥有runtime原生退出后释放port、最后关DB；干净取消正常退出，successor可立即复用exact port/DB
 
 #### Scenario: Signal during managed model publication
 - **WHEN** a clean signal arrives while the post-listen model write is pending

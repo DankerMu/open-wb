@@ -25,6 +25,12 @@ Runtime config/DB/app/listen/models.yml/success-record任一步失败 SHALL不�
 - **WHEN** SIGINT/SIGTERM 落在listen invoke后、实际bind前，或成功后重复/混合到达
 - **THEN** pending bind由同一AbortSignal取消且无startup record，或已绑定listener幂等关闭；两种情况下均完成已拥有runtime原生退出后释放port、最后关DB；干净取消正常退出，successor可立即复用exact port/DB
 
+#### Scenario: 启动失败记录带失败阶段
+- **WHEN** 编译入口分别遇到：非法config；DB父目录位置是一个文件；监听端口已被占用；托管布局里 `home/.omp` 被一个文件占位；`host-overlay.yml` 的位置是一个目录；listen之后stdout sink写失败
+- **THEN** 每次进程nonzero，application stderr恰一行，依次整行等于 `{"event":"server_start_failed","reason":"config"}`、`…"reason":"db"}`、`…"reason":"listen"}`、`…"reason":"state_layout"}`、`…"reason":"host_overlay"}`、`…"reason":"publish"}`；该行的键集合恰为 `event` 与 `reason`
+- **WHEN** 托管布局校验失败，且状态目录的路径里含一个哨兵字符串、环境里的 `MODEL_UPSTREAM_API_KEY` 是另一个哨兵值
+- **THEN** stdout与stderr的任何位置都不出现这两个哨兵（失败记录不带原始error文本、路径与配置值）
+
 #### Scenario: Signal during managed model publication
 - **WHEN** a clean signal arrives while the post-listen model write is pending
 - **THEN** owned IO is settled without a startup/shutdown await cycle; no late success/failure record is emitted solely because of cancellation, no cleared app handle is dereferenced, and no resource is abandoned; a genuine writer failure remains a truthful nonzero generic failure

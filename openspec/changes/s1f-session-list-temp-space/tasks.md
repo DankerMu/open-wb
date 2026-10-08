@@ -517,7 +517,7 @@ Minimal mergeable slice: 20.1 可最先单独合入；20.2–20.5 在对应功�
 - [ ] 21.1 `server/src/server.ts`：入口维护一个随启动步骤推进的阶段变量（`config` → `db` → `app` → `listen` → `state_layout` → `models_yml` → `host_overlay` → `publish`），两个失败出口发射 `{"event":"server_start_failed","reason":"<阶段>"}`；`reason` 只来自这个变量，不读 error 对象。其余语义不变：退出码、sticky failure、信号取消期间不发失败记录、stderr sink 不可写时无记录、import-without-main 静默；`server_started`、`listener_force_close`、`session_fault`、`omp_handshake_timeout` 的输出不变。
   - 测试：http-service-skeleton「启动失败记录带失败阶段」的每个 WHEN（真实编译入口；`app` 与 `models_yml` 两个值若无法经真实入口稳定造出，用最接近真实的注入并写明）；防泄漏一例（路径哨兵 + 密钥哨兵）。既有以整行精确相等断言该记录的用例（`server-startup-order`、`server-startup-layout`、`listener-shutdown`、`model-proxy-reasoning`、`omp-max-processes-config`、`omp-spawn-concurrency-config` 等）改为带对应 `reason` 的整行精确相等——不得降级为子串或正则。
   - 文档：`docs/adr/0010-dedicated-omp-uid.md` 的排障段（布局校验不通过时 `reason` 为 `state_layout`）。
-  - 对齐：`s1f-files-page` 与 `s1g-composer-capabilities` 里同一条文的 MODIFIED 副本已同步为新文本；`s1f-files-page` 新增的启动步骤（预览监听等）在它自己的任务里给枚举加值。主规格里引用「generic failure record」的兄弟条文（omp-pool、omp-uid-isolation、omp-runtime、chat-sessions）按名引用，不改。
+  - 对齐：`s1f-files-page` 与 `s1g-composer-capabilities` 里同一条文的 MODIFIED 副本已同步为新文本；场景「启动失败记录带失败阶段」同样已加进这两份副本（晚归档的不会把它覆盖掉）；`s1f-files-page` 新增的两个启动步骤取值为 `preview_cache`、`preview_listen`，已写进它的副本与它的 tasks.md 末尾的对齐任务。主规格里引用「generic failure record」的兄弟条文（omp-pool、omp-uid-isolation、omp-runtime、chat-sessions）按名引用，不改。
   - 变异证据：`reason` 恒为 `config` → 各阶段用例判红；发射时附带 `error.message` → 整行相等与防泄漏两处判红；阶段变量在步骤完成之后才推进（晚一步）→ 判红。
 
 Suggested fixture level: standard - 改一条有意写下的日志合同（封闭枚举，源码字面量）
