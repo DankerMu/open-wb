@@ -29,7 +29,7 @@ const KEY = "OMP_MAX_PROCESSES";
 const CANONICAL_MESSAGE = `${KEY} must be a canonical ASCII decimal`;
 const RANGE_MESSAGE = `${KEY} must be within 1..2147483647`;
 const INVALID_VALUES = ["", "0", "abc", "-1", "1.5", "+3", "016", " 8", "2147483648"] as const;
-const FAILED_RECORD = `${JSON.stringify({ event: "server_start_failed" })}\n`;
+const FAILED_RECORD = `${JSON.stringify({ event: "server_start_failed", reason: "config" })}\n`;
 const NODE_SQLITE_WARNING =
   /^\(node:\d+\) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n\(Use `node --trace-warnings \.\.\.` to show where the warning was created\)\n/u;
 

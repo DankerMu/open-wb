@@ -22,7 +22,7 @@ const REPO_ROOT = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const ENTRY = pathToFileURL(join(REPO_ROOT, "server", "src", "server.ts")).href;
 const KEY = "OMP_SPAWN_CONCURRENCY";
 const REJECTED = ["", "0", "abc", "-1", "1.5", "+3", "016", " 8", "2147483648"];
-const GENERIC_FAILURE = '{"event":"server_start_failed"}\n';
+const GENERIC_FAILURE = '{"event":"server_start_failed","reason":"config"}\n';
 const SQLITE_WARNING = /^\(node:\d+\) ExperimentalWarning: SQLite[^\n]*\n\(Use `node[^\n]*\n/u;
 
 const roots: string[] = [];

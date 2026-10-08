@@ -30,7 +30,7 @@ const SPEC_DEFAULT_BUDGET_MS = 2_000;
 const HELD_BODY = { held: "released", filler: "x".repeat(4096) };
 const CONTINUE_LINE = "HTTP/1.1 100 Continue\r\n\r\n";
 const FORCE_CLOSE_RECORD = `${JSON.stringify({ event: "listener_force_close" })}\n`;
-const STARTUP_FAILED_RECORD = `${JSON.stringify({ event: "server_start_failed" })}\n`;
+const STARTUP_FAILED_RECORD = `${JSON.stringify({ event: "server_start_failed", reason: "models_yml" })}\n`;
 const SQLITE_EXPERIMENTAL_WARNING =
   "ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\n";
 

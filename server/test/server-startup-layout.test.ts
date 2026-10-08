@@ -38,7 +38,6 @@ import {
 } from "./server-startup-helpers.js";
 
 const MODEL_ID = "issue-706-layout-model";
-const FAILED_RECORD = `${JSON.stringify({ event: "server_start_failed" })}\n`;
 const NODE_SQLITE_WARNING =
   /^\(node:\d+\) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n\(Use `node --trace-warnings \.\.\.` to show where the warning was created\)\n/u;
 const scratch: string[] = [];
@@ -82,7 +81,11 @@ function modelEntries(text: string): unknown[] {
 }
 
 /** The entry exits 1 with nothing on stdout, only the generic record on stderr, and frees its port. */
-async function expectGenericStartFailure(root: string, state: string): Promise<void> {
+async function expectGenericStartFailure(
+  root: string,
+  state: string,
+  reason: "state_layout" | "host_overlay",
+): Promise<void> {
   const port = await reserveWildcardPort();
   const server = startCompiledServer(
     compiled.entry,
@@ -91,7 +94,9 @@ async function expectGenericStartFailure(root: string, state: string): Promise<v
   try {
     expect(await server.waitForClose()).toEqual({ code: 1, signal: null });
     expect(server.stdout()).toBe("");
-    expect(server.stderr().replace(NODE_SQLITE_WARNING, "")).toBe(FAILED_RECORD);
+    expect(server.stderr().replace(NODE_SQLITE_WARNING, "")).toBe(
+      `${JSON.stringify({ event: "server_start_failed", reason })}\n`,
+    );
     expect(server.stderr()).not.toContain(state);
     await expectBindable("127.0.0.1", port);
   } finally {
@@ -207,7 +212,7 @@ describe("production entry managed omp state layout", () => {
     const state = join(root, "state");
     mkdirSync(join(state, "home"), { recursive: true });
     writeFileSync(join(state, "home", ".omp"), "not-a-directory");
-    await expectGenericStartFailure(root, state);
+    await expectGenericStartFailure(root, state, "state_layout");
     expect(readFileSync(join(state, "home", ".omp"), "utf8")).toBe("not-a-directory");
     expect(existsSync(join(state, "xdg"))).toBe(false);
     expect(existsSync(join(state, "agent"))).toBe(false);
@@ -239,7 +244,7 @@ describe("production entry managed omp state layout", () => {
     const state = join(root, "state");
     const overlay = join(state, "home", ".omp", "agent", "host-overlay.yml");
     mkdirSync(overlay, { recursive: true });
-    await expectGenericStartFailure(root, state);
+    await expectGenericStartFailure(root, state, "host_overlay");
     expect(lstatSync(overlay).isDirectory()).toBe(true);
     expect(readdirSync(overlay)).toEqual([]);
     // models.yml was written first; the overlay's temporary file is removed on the failed rename.
