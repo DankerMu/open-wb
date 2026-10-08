@@ -1,15 +1,17 @@
 /**
- * Session list event connection test plumbing (issues #931 / #933): a real HTTP client on
+ * Session list event connection test plumbing (issues #931 / #933 / #932): a real HTTP client on
  * `GET /api/sessions/events` whose bytes are read natively, shared by the endpoint cases and the
  * trigger-point cases. Frames and the heartbeat interval are spec literals.
  */
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { ClientRequest, IncomingMessage } from "node:http";
 import { request as httpRequest } from "node:http";
 import type { FastifyInstance } from "fastify";
 import { expect } from "vitest";
 import { requestMe } from "./auth-lifecycle-helpers.js";
 import { cookieFor } from "./session-rest-helpers.js";
-import { waitFor } from "./session-supervisor-helpers.js";
+import { type RecordingWorld, waitFor } from "./session-supervisor-helpers.js";
+import { isLive } from "./session-supervisor-pool-helpers.js";
 import type { TestClock } from "./support/omp-runtime.js";
 
 export const EVENTS_URL = "/api/sessions/events";
@@ -28,6 +30,52 @@ export interface ListClient {
 export interface ListTarget {
   origin: string;
   clients: ListClient[];
+}
+
+/** A world whose app listens on a real port, with the clock that writes its heartbeats. */
+export type Listening<W extends RecordingWorld> = W & ListTarget & { clock: TestClock };
+
+const cleanups: Array<() => Promise<void>> = [];
+
+/** Starts the listener; `closeListening` destroys the clients, kills live children and closes. */
+export async function listening<W extends RecordingWorld>(
+  world: W,
+  clock: TestClock,
+  children: () => ChildProcessWithoutNullStreams[] = () => [],
+): Promise<Listening<W>> {
+  const clients: ListClient[] = [];
+  cleanups.push(async () => {
+    for (const client of clients) {
+      client.req.destroy();
+    }
+    for (const child of children()) {
+      if (isLive(child)) {
+        child.kill("SIGKILL");
+      }
+    }
+    await world.fixture.close().catch(() => undefined);
+  });
+  const origin = await world.fixture.app.listen({ host: "127.0.0.1", port: 0 });
+  return { ...world, origin, clients, clock };
+}
+
+/** For `afterEach`: tears down every world `listening` opened in this test file. */
+export async function closeListening(): Promise<void> {
+  for (const cleanup of cleanups.splice(0).reverse()) {
+    await cleanup();
+  }
+}
+
+/** The owner's `GET /api/sessions` entry for `session`; `undefined` when it is not listed. */
+export async function listedSession<T>(
+  app: FastifyInstance,
+  cookie: string,
+  session: string,
+): Promise<(T & { id: string }) | undefined> {
+  const response = await app.inject({ method: "GET", url: "/api/sessions", headers: { cookie } });
+  expect(response.statusCode).toBe(200);
+  const { sessions } = response.json<{ sessions: Array<T & { id: string }> }>();
+  return sessions.find((entry) => entry.id === session);
 }
 
 export async function accountOf(app: FastifyInstance, account: string) {

@@ -8,7 +8,8 @@
  * rollback keeps the new title; `archived: true` is refused whole with 409 `session_busy` while the
  * session runs or its control claim is held. `DELETE /api/sessions/:id` (#525): owner checked
  * before parsing, no body read (not a parser owner), the deletion itself is `session-delete.ts`;
- * 204 with no body.
+ * 204 with no body. Each of the three tells the list notifier once after its commit, before the
+ * reply (#932); a refused or rolled-back write throws before that line.
  * Imports only the supervisor port type from `rest.ts` (it imports this).
  */
 import type {
@@ -21,6 +22,7 @@ import type {
   RawServerDefault,
 } from "fastify";
 import { HttpError } from "../core/errors/index.js";
+import type { SessionListNotifier } from "./list-events.js";
 import type { SessionSupervisorPort } from "./rest.js";
 import type { WorkspaceRootOf } from "./session-cwd.js";
 import type { SessionDeleter } from "./session-delete.js";
@@ -38,6 +40,7 @@ interface SessionMetadataRouteDependencies {
   store: Pick<SessionStore, "getMessages" | "noteTitleWrite">;
   deleter: Pick<SessionDeleter, "deleteSession">;
   supervisor: Pick<SessionSupervisorPort, "controlHeld">;
+  listEvents: Pick<SessionListNotifier, "notify">;
 }
 
 interface SessionIdParams {
@@ -88,7 +91,9 @@ export function registerSessionMetadataRoutes(
       ) {
         throw new HttpError("not_found");
       }
-      return reply.code(201).send(dependencies.metadata.createSession(principal.id, input));
+      const created = dependencies.metadata.createSession(principal.id, input);
+      dependencies.listEvents.notify(principal.id);
+      return reply.code(201).send(created);
     },
   );
   app.patch<{ Params: SessionIdParams }>(
@@ -118,6 +123,7 @@ export function registerSessionMetadataRoutes(
       if (patch.title !== undefined) {
         dependencies.store.noteTitleWrite(request.params.id);
       }
+      dependencies.listEvents.notify(principal.id);
       return reply.code(200).send(view);
     },
   );
@@ -127,7 +133,10 @@ export function registerSessionMetadataRoutes(
     "/api/sessions/:id",
     { onRequest: noStoreMetadataResponse, preParsing: authorizeOwnedBeforeParse },
     async (request, reply) => {
-      await dependencies.deleter.deleteSession(request.params.id, createPrincipal(request).id);
+      const principal = createPrincipal(request);
+      // It rejects only before its commit: resolved means the row is gone.
+      await dependencies.deleter.deleteSession(request.params.id, principal.id);
+      dependencies.listEvents.notify(principal.id);
       return reply.code(204).send();
     },
   );

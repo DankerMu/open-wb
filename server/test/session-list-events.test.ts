@@ -1,5 +1,6 @@
 /**
- * Issue #931 session list event connection at GET /api/sessions/events (S1f tasks 6.1 / 6.2).
+ * Issue #931 session list event connection at GET /api/sessions/events (S1f tasks 6.1 / 6.2; the
+ * PATCH-triggered write failure case is #932's).
  * Real listener, native stream reading; expected headers, frames and envelopes are spec literals.
  */
 import type { ServerResponse } from "node:http";
@@ -7,6 +8,7 @@ import { setImmediate as waitImmediate } from "node:timers/promises";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 import { UNAUTHORIZED_ENVELOPE } from "./auth-lifecycle-helpers.js";
+import { patch, patched } from "./session-archive-helpers.js";
 import {
   accountOf,
   bounded,
@@ -24,6 +26,7 @@ import { AGENT_UNAVAILABLE_ENVELOPE } from "./session-rest-helpers.js";
 import { readHttpHeaders } from "./session-sse-helpers.js";
 import {
   createRealFakeRuntime,
+  createSession,
   openBareSession,
   type SupervisorApp,
   waitFor,
@@ -373,6 +376,32 @@ describe("session list notifier backpressure and isolation", () => {
     expect(() => notifier.notify(opened.zhangsan.id)).not.toThrow();
     expect(await textOf(healthy, CHANGED_FRAME.repeat(2))).toBe(CHANGED_FRAME.repeat(2));
     expect(opened.raws.get("healthy")?.destroyed).toBe(false);
+  });
+
+  it("一条连接写失败不影响请求: PATCH {pinned:true} beside a connection the peer reset is 200, that connection is closed and the other receives", async () => {
+    const opened = await openWorld();
+    const target = { fixture: opened.fixture, cookie: opened.zhangsan.cookie, session: "" };
+    target.session = await createSession(opened.app, target.cookie);
+    const reset = await openList(opened, target.cookie, { [CLIENT_HEADER]: "reset" });
+    const healthy = await openList(opened, target.cookie, { [CLIENT_HEADER]: "healthy" });
+    const timers = opened.clock.pending();
+
+    reset.res.socket.resetAndDestroy();
+    const view = await patched(patch(target, { pinned: true }));
+    expect(view.pinnedAt).toEqual(expect.any(Number));
+
+    expect(await textOf(healthy, CHANGED_FRAME)).toBe(CHANGED_FRAME);
+    await waitFor(
+      () => (opened.raws.get("reset")?.destroyed === true ? true : undefined),
+      "reset connection closed",
+    );
+    await waitFor(
+      () => (opened.clock.pending() === timers - 1 ? true : undefined),
+      "reset connection released",
+    );
+    expect(reset.text()).toBe("");
+    expect(opened.raws.get("healthy")?.destroyed).toBe(false);
+    expect(healthy.closed()).toBe(false);
   });
 
   it("a refused heartbeat stops delivery but keeps the connection for the module's preClose to destroy", {

@@ -7,7 +7,6 @@
  * Silence and "everything written so far has arrived" are both proven with the heartbeat: the
  * injected clock writes one comment line per connection, after whatever was written before it.
  */
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { LightMyRequestResponse } from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HttpError } from "../src/core/errors/index.js";
@@ -33,12 +32,15 @@ import {
   CHANGED_FRAME,
   changed,
   changedSince,
+  closeListening,
   count,
   drainedBy,
   expectOnlyChangedFrames,
   HEARTBEAT_FRAME,
   type ListClient,
-  type ListTarget,
+  type Listening,
+  listedSession,
+  listening,
   openList,
 } from "./session-list-events-helpers.js";
 import {
@@ -68,9 +70,8 @@ import {
   waitFor,
   waitForTurn,
 } from "./session-supervisor-helpers.js";
-import { isLive, presetSessionFile } from "./session-supervisor-pool-helpers.js";
+import { presetSessionFile } from "./session-supervisor-pool-helpers.js";
 import { holdNextPromptWrite } from "./support/omp-rpc.js";
-import type { TestClock } from "./support/omp-runtime.js";
 
 /** Longer than any clock advance below: an idle process is never evicted mid-case. */
 const NO_IDLE_EVICTION_MS = 3_600_000;
@@ -78,7 +79,6 @@ const ALLOW = JSON.stringify({ decision: "allow" });
 const SELECT_LINE = (line: string) => line.includes('"extension_ui_request"');
 const TERMINAL_LINE = (line: string) => line.includes('"agent_end"');
 
-type Listening<W extends RecordingWorld> = W & ListTarget & { clock: TestClock };
 type ScriptedWorld = Listening<RecordingWorld & { scripted: ScriptedChild[] }>;
 type RealWorld = Listening<ApprovalWorld>;
 type AnyWorld = Listening<RecordingWorld>;
@@ -88,35 +88,10 @@ interface Listed {
   pendingApproval: boolean;
 }
 
-const cleanups: Array<() => Promise<void>> = [];
-
 afterEach(async () => {
   vi.useRealTimers();
-  for (const cleanup of cleanups.splice(0).reverse()) {
-    await cleanup();
-  }
+  await closeListening();
 });
-
-async function listening<W extends RecordingWorld>(
-  world: W,
-  clock: TestClock,
-  children: () => ChildProcessWithoutNullStreams[] = () => [],
-): Promise<Listening<W>> {
-  const clients: ListClient[] = [];
-  cleanups.push(async () => {
-    for (const client of clients) {
-      client.req.destroy();
-    }
-    for (const child of children()) {
-      if (isLive(child)) {
-        child.kill("SIGKILL");
-      }
-    }
-    await world.fixture.close().catch(() => undefined);
-  });
-  const origin = await world.fixture.app.listen({ host: "127.0.0.1", port: 0 });
-  return { ...world, origin, clients, clock };
-}
 
 async function openScripted(script: ChildScript): Promise<ScriptedWorld> {
   const { rt, scripted } = scriptedRuntime([script]);
@@ -148,14 +123,7 @@ async function mark(world: AnyWorld, client: ListClient): Promise<number> {
 }
 
 async function listed(world: AnyWorld, session = world.session): Promise<Listed | undefined> {
-  const response = await world.fixture.app.inject({
-    method: "GET",
-    url: "/api/sessions",
-    headers: { cookie: world.cookie },
-  });
-  expect(response.statusCode).toBe(200);
-  const { sessions } = response.json<{ sessions: Array<Listed & { id: string }> }>();
-  const found = sessions.find((entry) => entry.id === session);
+  const found = await listedSession<Listed>(world.fixture.app, world.cookie, session);
   return found === undefined
     ? undefined
     : { status: found.status, pendingApproval: found.pendingApproval };
@@ -512,6 +480,8 @@ describe("session list events: rejected prompt and regenerate writes", () => {
     await withSessionRest(async ({ app, store, supervisor, listNotified }) => {
       const cookie = await cookieFor(app, "zhangsan");
       const session = await createSession(app, cookie);
+      // The create notified too (#932); only the prompt's notifications are counted below.
+      listNotified.length = 0;
       const body = JSON.stringify({ message: "ends before it fails" });
 
       // The turn reaches its terminal state before the supervisor rejects: nothing to roll back.
