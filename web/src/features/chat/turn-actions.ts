@@ -78,6 +78,8 @@ type TurnActionDeps = {
   undoNotice: ChatUndoNotice | null;
   /** 同步的在途闩：同一会话的撤回在途时，下一次点击不发请求（状态要到下一次渲染才禁用按钮）。 */
   undoFlightRef: RefObject<ChatMutationOwner | null>;
+  /** 在途期间被列表事件略过对齐的那次撤回（由列表事件的消费处写入）；它没有被应用时在落定处补读。 */
+  undoSkippedResyncRef: RefObject<ChatMutationOwner | null>;
 };
 
 export function useTurnActions({
@@ -113,6 +115,7 @@ export function useTurnActions({
   undoConflict,
   undoNotice,
   undoFlightRef,
+  undoSkippedResyncRef,
 }: TurnActionDeps) {
   const restoreOwnedDraft = useCallback(
     (prompt: string, ownedClient: ApiClient, sessionId: string | null) => {
@@ -495,6 +498,9 @@ export function useTurnActions({
         if (undoFlightRef.current === owner) {
           undoFlightRef.current = null;
         }
+        if (undoSkippedResyncRef.current === owner) {
+          undoSkippedResyncRef.current = null;
+        }
         setUndoOwner((current) => (current === owner ? null : current));
       };
       const owned = () => ownsSessionWrite(ownedClient, sessionId);
@@ -549,6 +555,11 @@ export function useTurnActions({
           );
         },
         (error: unknown) => {
+          // 没有以「200 被应用」告终：在途期间略过的对齐（服务端可能已提交）在这里补读一次。
+          const skipped = undoSkippedResyncRef.current === owner;
+          if (skipped && owned() && !isUnauthorized(error)) {
+            reconcileSettled(ownedClient, sessionId);
+          }
           if (files === "restore" && isUndoConflict(error) && owned()) {
             setUndoConflict({ client: ownedClient, sessionId, messageId, trigger });
             release();
@@ -565,6 +576,7 @@ export function useTurnActions({
       installSnapshot,
       openSource,
       ownsSessionWrite,
+      reconcileSettled,
       requestedSessionRef,
       setDraft,
       setListState,
@@ -574,6 +586,7 @@ export function useTurnActions({
       setUndoNotice,
       setUndoOwner,
       undoFlightRef,
+      undoSkippedResyncRef,
     ],
   );
 

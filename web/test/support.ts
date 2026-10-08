@@ -16,6 +16,8 @@ export const serviceInfo = {
 
 export type DeferredResponse = {
   promise: Promise<Response>;
+  /** 让请求以网络失败告终。 */
+  reject(error: Error): void;
   resolve(response: Response): void;
 };
 
@@ -26,10 +28,12 @@ type FetchRoutes = Record<string, FetchRoute>;
 
 export function deferredResponse(): DeferredResponse {
   let resolve!: (response: Response) => void;
-  const promise = new Promise<Response>((resolvePromise) => {
+  let reject!: (error: Error) => void;
+  const promise = new Promise<Response>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
+    reject = rejectPromise;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 export function jsonResponse(body: unknown, status = 200) {
