@@ -18,6 +18,7 @@ import {
   MIGRATION_038,
   MIGRATION_039,
   removeTempDirs,
+  TRACKED_MIGRATION_FILENAMES,
   tableExists,
   tableIndexKeys,
   tempDir,
@@ -138,7 +139,7 @@ function allSequences(db: DatabaseSync) {
 
 /** 037, 038 and 039 sit at positions eleven to thirteen, once each, and the table is the spec's. */
 function expect039Applied(db: DatabaseSync): void {
-  expect(ledgerRows(db).slice(10)).toEqual(LEDGER_TAIL);
+  expect(ledgerRows(db).slice(10, 13)).toEqual(LEDGER_TAIL);
   for (const [, filename] of LEDGER_TAIL) {
     expect(countReceipts(db, filename), filename).toBe(1);
   }
@@ -202,7 +203,7 @@ describe("migration 039 turn snapshot table", () => {
       // The table has no AUTOINCREMENT: neither creating it nor writing rows adds a sequence.
       expect(allSequences(db)).toEqual([
         ...before.sequences,
-        { name: "schema_migrations", seq: 13 },
+        { name: "schema_migrations", seq: TRACKED_MIGRATION_FILENAMES.length },
       ]);
       return receipts(db);
     });
@@ -227,7 +228,7 @@ describe("migration 039 turn snapshot table", () => {
     withOpenDb(file, (db) => {
       expect039Applied(db);
       expect(receipts(db).slice(0, 10)).toEqual(before);
-      expect(ledgerRows(db)).toHaveLength(13);
+      expect(ledgerRows(db)).toHaveLength(TRACKED_MIGRATION_FILENAMES.length);
       expectFixture035(db);
     });
   });

@@ -28,6 +28,7 @@ import {
   MIGRATION_037,
   MIGRATION_038,
   MIGRATION_039,
+  MIGRATION_040,
   MIGRATION_0010,
   migrationReceiptExists,
   removeTempDirs,
@@ -50,13 +51,14 @@ const RECEIPTS_033 = [
   MIGRATION_033,
 ] as const;
 const RECEIPTS_034 = [...RECEIPTS_033, MIGRATION_034] as const;
-const RECEIPTS_039 = [
+const RECEIPTS_040 = [
   ...RECEIPTS_034,
   MIGRATION_035,
   MIGRATION_036,
   MIGRATION_037,
   MIGRATION_038,
   MIGRATION_039,
+  MIGRATION_040,
 ] as const;
 const CHECK_FAILED = /CHECK constraint failed/;
 const UNIQUE_APPROVAL =
@@ -91,7 +93,7 @@ const STEP_COLUMNS = [
   "output",
 ] as const;
 
-// [name, type, notnull, dflt_value, pk] in declaration order (032 + 033 + 034, then the 035, 036 and 037 tails).
+// [name, type, notnull, dflt_value, pk] in declaration order (032 + 033 + 034, then the 035, 036, 037 and 040 tails).
 const TABLE_INFO: Record<string, Array<[string, string, number, string | null, number]>> = {
   chat_sessions: [
     ["id", "TEXT", 1, null, 1],
@@ -108,6 +110,9 @@ const TABLE_INFO: Record<string, Array<[string, string, number, string | null, n
     ["pinned_at", "INTEGER", 0, null, 0],
     ["todo", "TEXT", 0, null, 0],
     ["archived_at", "INTEGER", 0, null, 0],
+    ["approval_mode", "TEXT", 0, null, 0],
+    ["model_id", "TEXT", 0, null, 0],
+    ["reasoning_effort", "TEXT", 0, null, 0],
   ],
   chat_messages: [
     ["id", "INTEGER", 0, null, 1],
@@ -248,6 +253,7 @@ function seed033Database(path: string, seed: (db: DatabaseSync) => void): void {
         MIGRATION_037,
         MIGRATION_038,
         MIGRATION_039,
+        MIGRATION_040,
       ].includes(asset.filename),
   );
   const filenames = assets.map((asset) => asset.filename);
@@ -386,13 +392,14 @@ function indexes(db: DatabaseSync, table: string) {
 }
 
 function expect034Receipts(db: DatabaseSync): void {
-  expect(ledgerFilenames(db)).toEqual([...RECEIPTS_039]);
+  expect(ledgerFilenames(db).slice(0, 14)).toEqual([...RECEIPTS_040]);
   expect(ledgerRows(db)[7]).toEqual([8, MIGRATION_034]);
   expect(ledgerRows(db)[8]).toEqual([9, MIGRATION_035]);
   expect(ledgerRows(db)[9]).toEqual([10, MIGRATION_036]);
   expect(ledgerRows(db)[10]).toEqual([11, MIGRATION_037]);
   expect(ledgerRows(db)[11]).toEqual([12, MIGRATION_038]);
-  expect(ledgerRows(db).at(-1)).toEqual([13, MIGRATION_039]);
+  expect(ledgerRows(db)[12]).toEqual([13, MIGRATION_039]);
+  expect(ledgerRows(db)[13]).toEqual([14, MIGRATION_040]);
 }
 
 function expect034Schema(db: DatabaseSync): void {

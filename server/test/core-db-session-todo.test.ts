@@ -17,6 +17,7 @@ import {
   MIGRATION_036,
   migrationReceiptExists,
   removeTempDirs,
+  TRACKED_MIGRATION_FILENAMES,
   tempDir,
   withDatabase,
   withOpenDb,
@@ -63,11 +64,11 @@ function todoRows(db: DatabaseSync) {
 
 function expect036Applied(db: DatabaseSync): void {
   expect(ledgerRows(db).slice(7, 10)).toEqual(LEDGER_TAIL);
-  expect(ledgerRows(db)).toHaveLength(13);
+  expect(ledgerRows(db)).toHaveLength(TRACKED_MIGRATION_FILENAMES.length);
   expect(countReceipts(db, MIGRATION_035)).toBe(1);
   expect(countReceipts(db, MIGRATION_036)).toBe(1);
   expectChatSchema(db);
-  expect(columnNames(db, "chat_sessions").slice(-2)).toEqual(["todo", "archived_at"]);
+  expect(columnNames(db, "chat_sessions").slice(12, 14)).toEqual(["todo", "archived_at"]);
 }
 
 describe("migration 036 session todo column", () => {

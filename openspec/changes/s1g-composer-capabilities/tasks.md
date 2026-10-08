@@ -119,7 +119,7 @@ Minimal mergeable slice: atomic - 写出器签名变化必须与其唯一调用�
 
 ## 4. core/db — 迁移 040、041、042
 
-- [ ] 4.1 `server/src/core/db/migrations/040_chat_session_composer.sql`（session-composer-settings「迁移 040」）。测试新文件 `server/test/core-db-session-composer.test.ts`：新库与存量库、列约束（`reasoning_effort` 的 CHECK 是七个强度名，`auto` 被拒绝）、中途失败原子回滚三条场景；受信任迁移目录计数断言加一（`core-db-catalog.test.ts` 等处）。
+- [x] 4.1 `server/src/core/db/migrations/040_chat_session_composer.sql`（session-composer-settings「迁移 040」）。测试新文件 `server/test/core-db-session-composer.test.ts`：新库与存量库、列约束（`reasoning_effort` 的 CHECK 是七个强度名，`auto` 被拒绝）、中途失败原子回滚三条场景；受信任迁移目录计数断言加一（`core-db-catalog.test.ts` 等处）。
   **实施注记（4.1，fixture 评审补充，#993）**：
   - 040 的内容是 `chat_sessions` 上的三条 ADD COLUMN（没有新表；新表是 041），逐字照规格、顺序 `approval_mode`、`model_id`、`reasoning_effort`：都可空、无 DEFAULT；`approval_mode` 带 `CHECK (approval_mode IN ('always-ask','write','yolo'))`，`reasoning_effort` 带 `CHECK (reasoning_effort IN ('off','minimal','low','medium','high','xhigh','max'))`。文件不含事务语句、DEFAULT、索引；头注释照 037 的风格。存量行的 `NULL IN (...)` 求值为 NULL、CHECK 通过，不需要 `IS NULL OR`。
   - 「紧随上一个回执」：`POS = TRACKED_MIGRATION_FILENAMES.indexOf(MIGRATION_040)`；存量库用 `TRACKED_MIGRATION_FILENAMES.slice(0, POS)` 做种；断言 `ledgerRows(db)[POS]` 等于 `[POS+1, MIGRATION_040]`、前一格是前一个文件、040 的回执恰一条。不用 `.at(-1)`、不写死 `14`。
