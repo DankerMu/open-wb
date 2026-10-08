@@ -8,6 +8,7 @@
  * there before `take` starts) is in workspace-snapshots-take.test.ts.
  */
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -28,9 +29,11 @@ import {
   beforeLstat,
   contentsOf,
   dirEntry,
+  expectChanged,
   type Fixture,
   fileEntry,
   fixture,
+  lock,
   MESSAGE_ID,
   manifestOf,
   onCopyCreate,
@@ -44,6 +47,8 @@ import {
   W,
   waitForClock,
 } from "./workspace-snapshots-helpers.js";
+
+const IS_ROOT = process.geteuid?.() === 0;
 
 /** `failed`, and nothing of the snapshot is left: no manifest, no `tree/`, no directory. */
 function expectNotRestorable(f: Fixture, result: TakeResult): void {
@@ -120,7 +125,11 @@ describe("遍历期间有变动的快照不可还原 — a listed entry is gone"
       }
     });
 
-    expectNotRestorable(f, await run(f));
+    const result = await run(f);
+
+    expectChanged(result, "");
+    expectNotRestorable(f, result);
+    expect(existsSync(join(f.workspace, "a.txt"))).toBe(false);
   });
 });
 
@@ -140,6 +149,8 @@ describe("遍历期间有变动的快照不可还原 — moves", () => {
     const result = await run(f);
 
     expect(moment).toEqual([{ lib: "dir" }]);
+    // The root is as it was; `lib` is the first directory the second look finds changed.
+    expectChanged(result, "lib");
     expectNotRestorable(f, result);
     expect(contentsOf(f.workspace)).toEqual({
       lib: "dir",
@@ -194,7 +205,11 @@ describe("遍历期间有变动的快照不可还原 — a directory that was wa
     put(f.workspace, "a.txt", "alpha\n");
     afterListing(f.workspace, () => put(f.workspace, "new.txt", "new\n"));
 
-    expectNotRestorable(f, await run(f));
+    const result = await run(f);
+
+    expectChanged(result, "");
+    expectNotRestorable(f, result);
+    expect(readdirSync(f.workspace).sort()).toEqual(["a.txt", "new.txt"]);
   });
 
   it("新增: a file appears in a subdirectory that was walked already", async () => {
@@ -210,7 +225,9 @@ describe("遍历期间有变动的快照不可还原 — a directory that was wa
     const result = await run(f);
 
     expect(moment).toEqual([{ d: "dir", "d/x.txt": "x\n" }]);
+    expectChanged(result, "d");
     expectNotRestorable(f, result);
+    expect(readdirSync(join(f.workspace, "d")).sort()).toEqual(["new.txt", "x.txt"]);
   });
 
   it("同名重建: an entry deleted and made again as another type — same names, the times moved", async () => {
@@ -228,6 +245,8 @@ describe("遍历期间有变动的快照不可还原 — a directory that was wa
     const result = await run(f);
 
     expect(readdirSync(d)).toEqual(["x"]);
+    expect(lstatSync(join(d, "x")).isDirectory()).toBe(true);
+    expectChanged(result, "d");
     expectNotRestorable(f, result);
   });
 
@@ -255,6 +274,7 @@ describe("遍历期间有变动的快照不可还原 — a directory that was wa
     expect([after.dev, after.ino, after.mtimeNs]).toEqual([before.dev, before.ino, before.mtimeNs]);
     expect(after.ctimeNs).not.toBe(before.ctimeNs);
     expect(contentsOf(d)).toEqual({ x: "second\n", y: "first\n" });
+    expectChanged(result, "d");
     expectNotRestorable(f, result);
   });
 
@@ -285,6 +305,54 @@ describe("遍历期间有变动的快照不可还原 — a directory that was wa
       src: "dir",
       "src/x.ts": "export const x = 1;\n",
     });
+  });
+});
+
+describe("遍历期间有变动的快照不可还原 — directories that are not walked are not looked at again", () => {
+  it("a file appears in an excluded directory during the walk: ok", async () => {
+    const f = fixture();
+    put(f.workspace, "a.txt", "alpha\n");
+    put(f.workspace, "node_modules/x.js", "x\n");
+    put(f.workspace, "z.txt", "zulu\n");
+    // `node_modules` sorts ahead of `z.txt`: it was met and left out by then.
+    beforeLstat(join(f.workspace, "z.txt"), () => put(f.workspace, "node_modules/new.js", "new\n"));
+
+    const result = await run(f);
+
+    const skipped = [{ path: "node_modules", reason: "excluded" }];
+    expect(readdirSync(join(f.workspace, "node_modules")).sort()).toEqual(["new.js", "x.js"]);
+    expect(result).toEqual({ outcome: "ok", skipped });
+    expect(manifestOf(f)).toEqual({
+      entries: [fileEntry(f, "a.txt"), fileEntry(f, "z.txt")],
+      skipped,
+    });
+  });
+
+  // Root lists a directory of mode 000, so nothing is `unreadable` to it.
+  it.skipIf(IS_ROOT)("a file appears in an unreadable directory during the walk: ok", async () => {
+    const f = fixture();
+    put(f.workspace, "a.txt", "alpha\n");
+    put(f.workspace, "locked/secret.txt", "secret\n");
+    put(f.workspace, "z.txt", "zulu\n");
+    const locked = join(f.workspace, "locked");
+    lock(locked, 0o000);
+    // Its owner opens it, adds a file and closes it again: the root's names and times stay.
+    beforeLstat(join(f.workspace, "z.txt"), () => {
+      chmodSync(locked, 0o700);
+      put(f.workspace, "locked/new.txt", "new\n");
+      chmodSync(locked, 0o000);
+    });
+
+    const result = await run(f);
+
+    const skipped = [{ path: "locked", reason: "unreadable" }];
+    expect(result).toEqual({ outcome: "ok", skipped });
+    expect(manifestOf(f)).toEqual({
+      entries: [fileEntry(f, "a.txt"), fileEntry(f, "z.txt")],
+      skipped,
+    });
+    chmodSync(locked, 0o700);
+    expect(readdirSync(locked).sort()).toEqual(["new.txt", "secret.txt"]);
   });
 });
 

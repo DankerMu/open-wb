@@ -109,6 +109,18 @@ export function run(f: Fixture, overrides: Partial<TakeOptions> = {}): Promise<T
   });
 }
 
+/**
+ * `failed` by the walk's second look, which found the directory `dir` (relative to the workspace
+ * root, `""` for the root itself) changed: not by a read that failed, and not by a hook of the
+ * test that threw. `dir` is the first changed directory in the order the walk listed them.
+ */
+export function expectChanged(result: TakeResult, dir: string): void {
+  expect(result).toMatchObject({
+    outcome: "failed",
+    error: { message: `workspace changed during the snapshot: directory "${dir}"` },
+  });
+}
+
 /** One successful `take` of the fixture's workspace: the snapshot the restore tests start from. */
 export async function snapshot(f: Fixture, overrides: Partial<TakeOptions> = {}): Promise<void> {
   expect(await run(f, overrides)).toMatchObject({ outcome: "ok" });
