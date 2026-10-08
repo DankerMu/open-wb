@@ -451,7 +451,7 @@ Minimal mergeable slice: 16.1（能归档、能在归档视图里恢复与删除
   - 菜单项只在 `session.temporaryWorkspace` 为 true 时渲染，位于 `删除` 之后；归档视图的菜单里没有。
   - 清单：删除确认的几种文案已是 SL-09，不重复；只加「另存为工作空间」一行（下一空闲 SL 号，`待签`），并同步改 SL-08 的菜单项列表。
   - 转正成功后服务端还会发 `sessions.changed`：用例里允许多出的列表读取，「恰一次 POST promote」才是精确断言。
-- [ ] 17.3 导出记录（新文件 `web/src/features/chat/export-markdown.ts` 纯函数 + 下载触发）：内容生成（块之间恰一个空行；空正文与无步骤的助手消息按规格）、文件名清洗、当前会话用视图 / 其它会话现读快照、失败走列表区顶部提示。单测逐字节断言 session-sidebar「导出内容」「空正文的助手消息」；整页测试「非当前会话与失败」（下载以对 `URL.createObjectURL` 与锚点点击的桩断言）。
+- [x] 17.3 导出记录（新文件 `web/src/features/chat/export-markdown.ts` 纯函数 + 下载触发）：内容生成（块之间恰一个空行；空正文与无步骤的助手消息按规格）、文件名清洗、当前会话用视图 / 其它会话现读快照、失败走列表区顶部提示。单测逐字节断言 session-sidebar「导出内容」「空正文的助手消息」；整页测试「非当前会话与失败」（下载以对 `URL.createObjectURL` 与锚点点击的桩断言）。
   **实施注记（17.3，fixture 评审补充）**：
   - `export-markdown.ts` 的纯函数吃结构化入参 `{ title, messages: { role, content, steps: { name, status }[] }[] }`（页面视图与新读的快照都能喂）；输出为各块以恰一个空行相连、末尾恰一个换行；块：`# <标题>`，每条消息 `## 用户` / `## 助手`，正文非空才出，助手有步骤时一块 `- <name>（<状态文案>）` 逐行。状态文案沿用既有的状态标签表，不另建。
   - 文件名：标题去掉 `/`、`\` 与控制字符后去首尾空白，加 `.md`；为空则 `会话.md`；MIME `text/markdown;charset=utf-8`。一级标题保留原标题。

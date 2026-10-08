@@ -55,6 +55,7 @@ export function ChatPage() {
       onArchiveSession={sessionActions.archive}
       onDeleteSession={sessionActions.openDelete}
       onDismissActionAlert={sessionActions.dismissAlert}
+      onExportSession={sessionActions.exportSession}
       onPromoteSession={sessionActions.openPromote}
       onRenameSession={sessionActions.openRename}
       onRestoreSession={sessionActions.restore}

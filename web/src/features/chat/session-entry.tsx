@@ -8,6 +8,7 @@ export type EntryActions = {
   onArchiveSession(session: ChatSession): void;
   /** `trigger` 是该条目的「更多」按钮：确认框、重命名与另存为工作空间的对话框关闭后把焦点还给它。 */
   onDeleteSession(session: ChatSession, trigger: HTMLElement | null): void;
+  onExportSession(session: ChatSession): void;
   onPromoteSession(session: ChatSession, trigger: HTMLElement | null): void;
   onRenameSession(session: ChatSession, trigger: HTMLElement | null): void;
   onRestoreSession(session: ChatSession): void;
@@ -24,6 +25,7 @@ type SessionEntryProps = EntryActions & {
 function SessionEntry({
   onArchiveSession,
   onDeleteSession,
+  onExportSession,
   onPromoteSession,
   onRenameSession,
   onRestoreSession,
@@ -50,6 +52,7 @@ function SessionEntry({
       <SessionMenu
         onArchive={() => onArchiveSession(session)}
         onDelete={(trigger) => onDeleteSession(session, trigger)}
+        onExport={() => onExportSession(session)}
         onPromote={(trigger) => onPromoteSession(session, trigger)}
         onRename={(trigger) => onRenameSession(session, trigger)}
         onRestore={() => onRestoreSession(session)}
