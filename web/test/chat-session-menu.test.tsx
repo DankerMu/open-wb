@@ -235,7 +235,12 @@ describe("会话条目菜单与重命名（session-sidebar）", () => {
     expect(listAlert(nav)).toBeNull();
     expectNoListToast();
     const reopened = await openEntryMenu(nav, OTHER);
-    expect(reopened.items.map((item) => item.textContent)).toEqual(["重命名", UNPIN, "删除"]);
+    expect(reopened.items.map((item) => item.textContent)).toEqual([
+      "重命名",
+      UNPIN,
+      "归档",
+      "删除",
+    ]);
     await closeMenu(reopened.menu);
 
     // 置顶的 PATCH 返回 502：列表不变，列表区顶部出现信封文案。

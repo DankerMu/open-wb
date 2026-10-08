@@ -183,9 +183,15 @@ describe("(C4) session list status element", () => {
 
 describe("(C5) static contract", () => {
   it("session nav maps session status through SessionStatusMark (sessionStatusText)", () => {
-    const source = readRepoFile("web/src/features/chat/session-sidebar.tsx");
+    // 条目行在 session-entry.tsx（默认视图与归档视图共用），侧栏与归档视图都经它渲染条目。
+    const source = readRepoFile("web/src/features/chat/session-entry.tsx");
     expect(source).not.toMatch(/>\s*\{session\.status\}\s*</);
     expect(source).toContain("<SessionStatusMark ");
+    for (const file of ["session-sidebar.tsx", "archived-view.tsx"]) {
+      const list = readRepoFile(`web/src/features/chat/${file}`);
+      expect(list).not.toMatch(/>\s*\{session\.status\}\s*</);
+      expect(list).toContain("<SessionEntryList");
+    }
     expect(readRepoFile("web/src/features/chat/session-status-mark.tsx")).toContain(
       "sessionStatusText(session)",
     );

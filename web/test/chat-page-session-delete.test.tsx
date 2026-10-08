@@ -104,9 +104,9 @@ describe("条目菜单第三项 删除 (R1)", () => {
 
     for (const { second, session } of kinds) {
       const { items, menu } = await openEntryMenu(nav, session.title ?? UNTITLED);
-      expect(items.map((item) => item.textContent)).toEqual(["重命名", second, "删除"]);
+      expect(items.map((item) => item.textContent)).toEqual(["重命名", second, "归档", "删除"]);
       const remove = within(menu).getByRole("menuitem", { name: "删除" });
-      expect(remove).toBe(items[2]);
+      expect(remove).toBe(items[3]);
       expect(remove.getAttribute("data-variant")).toBe("destructive");
       expect(remove.querySelector("svg")?.getAttribute("class")).toContain("lucide-trash");
       expect(remove.hasAttribute("aria-disabled")).toBe(false);

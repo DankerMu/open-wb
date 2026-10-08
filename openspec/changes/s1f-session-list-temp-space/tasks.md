@@ -414,7 +414,7 @@ Minimal mergeable slice: 15.1 + 15.2 + 15.3 + 15.4 + 15.5 atomic: 菜单、两�
 
 ## 16. web — 归档视图与只读会话
 
-- [ ] 16.1 菜单 `归档` 动作与归档视图（新文件 `web/src/features/chat/archived-view.tsx`）：`已归档` 入口、标题、`返回会话列表`、平铺列表、菜单 `恢复` / `删除`、焦点归还；搜索在归档视图内生效。整页测试（新文件 `web/test/chat-archive.test.tsx`）：session-sidebar「归档视图」三个场景、「归档当前会话」、「标题搜索」的「归档视图里搜索」、「空状态」的全部已归档一例。
+- [x] 16.1 菜单 `归档` 动作与归档视图（新文件 `web/src/features/chat/archived-view.tsx`）：`已归档` 入口、标题、`返回会话列表`、平铺列表、菜单 `恢复` / `删除`、焦点归还；搜索在归档视图内生效。整页测试（新文件 `web/test/chat-archive.test.tsx`）：session-sidebar「归档视图」三个场景、「归档当前会话」、「标题搜索」的「归档视图里搜索」、「空状态」的全部已归档一例。
   **实施注记（16.1，fixture 评审补充）**：
   - 现状：已归档会话已不在默认视图里（`groupSessionList` 跳过它们），`splitArchived` 已有且已测——本刀做的是入口、视图与动作。
   - 动作放 `session-actions.ts`：`archive` / `restore` 先清列表顶部的告警，再发 `PATCH {archived}`，只合并应答里的 `archivedAt`；不弹提示；409 `会话正在生成，请稍候` 经既有的失败出口落到列表顶部的 `role="alert"`；会话保持选中、URL 不变。

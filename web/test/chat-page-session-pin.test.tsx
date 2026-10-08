@@ -100,7 +100,7 @@ describe("置顶与取消置顶 (M8, M9)", () => {
       expect(within(nav).getAllByRole("button", { name: MIDDLE })).toHaveLength(1);
 
       const { items, menu } = await openEntryMenu(nav, MIDDLE);
-      expect(items.map((item) => item.textContent)).toEqual(["重命名", UNPIN, "删除"]);
+      expect(items.map((item) => item.textContent)).toEqual(["重命名", UNPIN, "归档", "删除"]);
       fireEvent.click(within(menu).getByRole("menuitem", { name: UNPIN }));
       await waitFor(() => expectUnpinned(nav));
       expectNoListToast();
@@ -126,7 +126,7 @@ describe("置顶与取消置顶 (M8, M9)", () => {
     expectNoListToast();
     expectUnpinned(nav);
     const reopened = (await openEntryMenu(nav, MIDDLE)).items.map((item) => item.textContent);
-    expect(reopened).toEqual(["重命名", PIN, "删除"]);
+    expect(reopened).toEqual(["重命名", PIN, "归档", "删除"]);
 
     // 打开菜单不是列表动作：提示还在；再次发起置顶即清除（响应到达之前）。
     expect(listAlert(nav)).toBe(CONFLICT);

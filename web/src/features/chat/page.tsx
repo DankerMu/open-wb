@@ -51,9 +51,11 @@ export function ChatPage() {
       actionAlert={sessionActions.alert}
       listError={session.listError}
       listLoading={session.listLoading}
+      onArchiveSession={sessionActions.archive}
       onDeleteSession={sessionActions.openDelete}
       onDismissActionAlert={sessionActions.dismissAlert}
       onRenameSession={sessionActions.openRename}
+      onRestoreSession={sessionActions.restore}
       onSelectSession={session.selectSession}
       onShowWelcome={session.showWelcome}
       onTogglePin={sessionActions.togglePin}

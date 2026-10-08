@@ -13,8 +13,11 @@ import { errorMessage, isUnauthorized } from "./errors.js";
 import { sessionNavigation, sessionTitle } from "./session-path.js";
 import type { ChatHistoryState, ChatListState } from "./types.js";
 
-/** 一次元数据请求修改、也是唯一从其响应合并的键：重命名 → `title`，置顶 → `pinnedAt`。 */
-type MetaKey = "title" | "pinnedAt";
+/**
+ * 一次元数据请求修改、也是唯一从其响应合并的键：重命名 → `title`，置顶 → `pinnedAt`，
+ * 归档与恢复 → `archivedAt`。
+ */
+type MetaKey = "title" | "pinnedAt" | "archivedAt";
 
 type RenameState = {
   client: ApiClient;
@@ -97,19 +100,20 @@ function restoreFocus(trigger: HTMLElement | null) {
 }
 
 function withMeta(session: ChatSession, view: ChatSession, key: MetaKey): ChatSession {
-  return key === "title"
-    ? { ...session, title: view.title }
-    : { ...session, pinnedAt: view.pinnedAt };
+  if (key === "title") return { ...session, title: view.title };
+  if (key === "pinnedAt") return { ...session, pinnedAt: view.pinnedAt };
+  return { ...session, archivedAt: view.archivedAt };
 }
 
 /**
- * 会话条目操作（重命名、置顶/取消置顶、删除）：行菜单与顶栏 `重命名` 共用。重命名 Dialog 与删除
+ * 会话条目操作（重命名、置顶/取消置顶、归档/恢复、删除）：行菜单与顶栏 `重命名` 共用。重命名 Dialog 与删除
  * 确认框的状态在这里而不在侧栏槽位节点里（槽位节点随折叠与覆盖层关闭卸载）。
  *
- * 列表条目与快照会话的 `title`、`pinnedAt` 只来自 PATCH 200 的响应，且只合并该请求修改的那个
+ * 列表条目与快照会话的 `title`、`pinnedAt`、`archivedAt` 只来自 PATCH 200 的响应，且只合并该请求修改的那个
  * 键——迟到的响应不会把已刷新的 `status` 或另一类请求刚写入的值改回去；不做乐观更新。同一会话
  * 的同类请求只采用最后发出者的响应；不属于当前 client、或页面卸载后到达的响应一律丢弃（卸载时
- * abort 全部在途请求）。与回合互斥无关：任何状态（含 `running`）都可用。
+ * abort 全部在途请求）。重命名与置顶和回合互斥无关：任何状态（含 `running`）都可用；归档在
+ * `running` 的会话上由菜单禁用，服务端的 409 走列表区顶部提示。归档与恢复不改选中与 URL。
  *
  * 删除同样不做乐观更新：条目只在本 client 的 DELETE 得到 204 时移除，每个会话同一时刻至多一个
  * 在途 DELETE。「是否为当前会话」在响应到达时读 `page.requestedSessionRef`；是则先关闭事件流再
@@ -117,7 +121,7 @@ function withMeta(session: ChatSession, view: ChatSession, key: MetaKey): ChatSe
  * 完成。
  *
  * 不弹轻提示：成功以列表自身的变化为反馈；对话框开着时的失败在对话框内显示；没有对话框的动作
- * （置顶）与对话框关闭后才到达的失败进 `alert`（列表区顶部提示），下一次列表动作发起时清除。
+ * （置顶、归档、恢复）与对话框关闭后才到达的失败进 `alert`（列表区顶部提示），下一次列表动作发起时清除。
  */
 export function useSessionActions(
   client: ApiClient,
@@ -281,6 +285,16 @@ export function useSessionActions(
     send(session.id, "pinnedAt", { pinned: session.pinnedAt === null }, () => {}, report);
   }
 
+  function archive(session: ChatSession) {
+    setAlert(null);
+    send(session.id, "archivedAt", { archived: true }, () => {}, report);
+  }
+
+  function restore(session: ChatSession) {
+    setAlert(null);
+    send(session.id, "archivedAt", { archived: false }, () => {}, report);
+  }
+
   function openDelete(session: ChatSession, trigger: HTMLElement | null) {
     setAlert(null);
     deleteReturnFocus.current = trigger;
@@ -348,6 +362,8 @@ export function useSessionActions(
   return {
     openRename,
     togglePin,
+    archive,
+    restore,
     openDelete,
     /** 列表区顶部提示的文案（null 为没有）与 `关闭提示`；属于上一个 client 的不显示。 */
     alert: alert && alert.client === client ? alert.message : null,
