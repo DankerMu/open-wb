@@ -8,9 +8,10 @@
  * post-commit removal of the session file (validated first: the path is omp-reported and must
  * name a regular file directly inside the owner's session dir) and of the artifact directory omp
  * keeps next to it (issue #758; moved into the app-private trash first, #706), then of the
- * directory of a temporary workspace whose row that transaction deleted (#928). From the tombstone
- * up to `retire` is one synchronous segment. The tombstone set belongs to this deleter instance; the SSE route
- * asks `isDeleting` before it subscribes. The tombstone is lifted before the claim on every exit
+ * snapshot directories of the deleted messages (#953) — or, when that transaction deleted the row
+ * of a temporary workspace, of that workspace's whole snapshot directory and then of its own
+ * directory (#928). From the tombstone up to `retire` is one synchronous segment. The tombstone
+ * set belongs to this deleter instance; the SSE route asks `isDeleting` before it subscribes. The tombstone is lifted before the claim on every exit
  * path. No timer of its own: the bounds are the stop grace, retire escalation and acquisition's.
  */
 import { lstat, realpath, rename, unlink } from "node:fs/promises";
@@ -28,6 +29,7 @@ import type { SessionStore, SessionView } from "./store.js";
 import type { SessionMetadataStore } from "./store-metadata.js";
 import type { SessionSupervisor } from "./supervisor.js";
 import { asError } from "./supervisor-faults.js";
+import type { TurnSnapshots } from "./turn-snapshot.js";
 
 export interface SessionDeleter {
   deleteSession(sessionId: string, ownerId: string): Promise<void>;
@@ -38,6 +40,8 @@ interface SessionDeleterDependencies {
   store: Pick<SessionStore, "getMessages" | "runtimeState" | "turnReleased">;
   supervisor: Pick<SessionSupervisor, "controlHeld" | "holdControl" | "retire" | "stop">;
   metadata: Pick<SessionMetadataStore, "deleteSession">;
+  /** Removes snapshot directories below the app-private snapshot root; never rejects. */
+  turnSnapshots: Pick<TurnSnapshots, "discard" | "discardWorkspace">;
   /** `OMP_STATE_DIR`; the owner's session dir under it bounds what a delete may unlink. */
   stateDir: string;
   /** `SANDBOX_ROOT`; the owner's account root under it bounds a temporary workspace's removal. */
@@ -47,6 +51,7 @@ interface SessionDeleterDependencies {
 }
 
 type Report = (error: unknown) => void;
+type DeletedSession = NonNullable<ReturnType<SessionMetadataStore["deleteSession"]>>;
 
 const OUTSIDE_SESSION_DIR = "session delete: session file outside the owner session dir";
 const NOT_REGULAR_FILE = "session delete: session file is not a regular file";
@@ -102,14 +107,18 @@ export function createSessionDeleter(deps: SessionDeleterDependencies): SessionD
       await removeSessionFile(removed.ompSessionFile, deps.stateDir, ownerId, report);
     }
     // Only a committed delete reaches this line; the row is gone, so nothing below throws.
-    if (removed.temporaryWorkspace !== undefined) {
-      await removeTemporaryWorkspace(
-        removed.temporaryWorkspace,
-        deps.sandboxRoot,
-        deps.stateDir,
-        report,
-      );
+    if (removed.temporaryWorkspace === undefined) {
+      await discardSnapshots(deps.turnSnapshots, removed.snapshots);
+      return;
     }
+    // The workspace row is gone: the whole directory, with any half-taken snapshot no row names.
+    await deps.turnSnapshots.discardWorkspace(removed.temporaryWorkspace.id);
+    await removeTemporaryWorkspace(
+      removed.temporaryWorkspace,
+      deps.sandboxRoot,
+      deps.stateDir,
+      report,
+    );
   };
 
   return {
@@ -187,6 +196,21 @@ export async function removeSessionFile(
   const name = basename(path);
   if (await unlinkRegularFile(join(expected, name), report)) {
     await removeArtifactDir(expected, name, trash, report, renameImpl);
+  }
+}
+
+/**
+ * The snapshot directories of a deleted session whose workspace stays, with the snapshots of its
+ * other sessions: this session's only, one message at a time. Only an `ok` registration has one.
+ */
+async function discardSnapshots(
+  turnSnapshots: Pick<TurnSnapshots, "discard">,
+  snapshots: DeletedSession["snapshots"],
+): Promise<void> {
+  for (const { workspaceId, messageId, outcome } of snapshots) {
+    if (outcome === "ok") {
+      await turnSnapshots.discard(workspaceId, messageId);
+    }
   }
 }
 

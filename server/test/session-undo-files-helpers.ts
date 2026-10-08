@@ -13,6 +13,8 @@ import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { LightMyRequestResponse } from "fastify";
 import { expect, vi } from "vitest";
+import type { TurnSnapshotService } from "../src/sessions/turn-snapshot.js";
+import { realService } from "./prompt-snapshot-helpers.js";
 import { settle } from "./session-approval-helpers.js";
 import { postSessionAction } from "./session-bodyless-rest-helpers.js";
 import { FIRST, type forkWorlds } from "./session-fork-helpers.js";
@@ -24,7 +26,12 @@ import {
   sendPrompt,
 } from "./session-regenerate-helpers.js";
 import { type SessionSeed, seedSession } from "./session-store-helpers.js";
-import { OWNER_ID, openRecordingSession, waitForTurn } from "./session-supervisor-helpers.js";
+import {
+  OWNER_ID,
+  openRecordingSession,
+  type RecordingWorld,
+  waitForTurn,
+} from "./session-supervisor-helpers.js";
 import {
   postUndo,
   THIRD,
@@ -71,16 +78,20 @@ export function at(offset: number): void {
 /**
  * A scripted world opened at `at(0)`: child n runs `scripts[n]` (the last one repeats). The
  * snapshot settings travel in the runtime settings object, as `sessionRuntimeOf` puts them.
+ * `service` replaces the service createApp builds with one made over a real one (#953).
  */
 export async function openFilesWorld(
   worlds: ReturnType<typeof forkWorlds>,
   scripts: ChildScript[] = [{}],
   settings: Settings = {},
+  service?: (real: TurnSnapshotService) => TurnSnapshotService,
 ): Promise<FilesWorld> {
   at(0);
   const { rt, scripted } = scriptedRuntime(scripts);
   Object.assign(rt.runtime, settings);
-  const world = worlds.track({ ...(await openRecordingSession(rt.runtime)), rt, scripted });
+  const extra =
+    service === undefined ? {} : { snapshots: service(realService(rt.runtime.stateDir)) };
+  const world = worlds.track({ ...(await openRecordingSession(rt.runtime, extra)), rt, scripted });
   const workspaceId = workspaceOf(world.fixture.db, world.session);
   return {
     ...world,
@@ -126,7 +137,7 @@ export function contents(world: FilesWorld): Record<string, string | null> {
  * which reads `available`. Whatever the turn is to have written, the test writes after this.
  */
 export async function turnAt(
-  world: FilesWorld,
+  world: RecordingWorld,
   offset: number,
   message: string,
   session = world.session,
@@ -139,7 +150,7 @@ export async function turnAt(
 
 /** The 202 of a prompt sent at `at(offset)`; the turn is left to its script. */
 export async function acceptedAt(
-  world: FilesWorld,
+  world: RecordingWorld,
   offset: number,
   message: string,
   session = world.session,

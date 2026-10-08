@@ -15,7 +15,8 @@
  * writes its `session.delete` audit in one transaction: an audit failure keeps the row. In that
  * same transaction (#928, design D8) a temporary workspace the deleted session was the last user
  * of loses its row, with a `workspace.delete` audit; its directory is the deleter's job after the
- * commit.
+ * commit. So are the snapshot directories (#953): the registrations of the session's messages are
+ * read in that transaction before the delete cascades them away, and returned.
  */
 import { randomBytes } from "node:crypto";
 import { realpathSync } from "node:fs";
@@ -32,6 +33,7 @@ import {
   requireChanges,
   runOwnedTransaction,
 } from "./store-branch.js";
+import { listSessionTurnSnapshots, type TurnSnapshotOutcome } from "./store-undo.js";
 
 export type SessionScene = "office" | "code" | "design";
 
@@ -92,6 +94,8 @@ interface DeletedSession {
   messageCount: number;
   /** Present only when this delete also removed that temporary workspace's row. */
   temporaryWorkspace?: TemporaryWorkspaceRef;
+  /** The registrations of the deleted user messages; only an `ok` one has a snapshot directory. */
+  snapshots: { messageId: number; workspaceId: string; outcome: TurnSnapshotOutcome }[];
 }
 
 /** What the workspace store's `createTemporary` hands back, as far as session creation uses it. */
@@ -241,6 +245,10 @@ export function createSessionMetadataStore(
         const ompSessionFile = decodeNullableText(decoder, row.omp_session_file);
         const counted = db.prepare(COUNT_MESSAGES).get(sessionId) as { n: number | bigint };
         const messageCount = Number(counted.n);
+        // Before the delete: the registration rows go with their messages (039 cascade).
+        const snapshots = listSessionTurnSnapshots(db, sessionId).map(
+          ({ messageId, workspaceId, outcome }) => ({ messageId, workspaceId, outcome }),
+        );
         requireChanges(
           db.prepare(DELETE_SESSION).run(sessionId, ownerId).changes,
           1,
@@ -261,6 +269,7 @@ export function createSessionMetadataStore(
           ompSessionFile,
           messageCount,
           ...(temporaryWorkspace === undefined ? {} : { temporaryWorkspace }),
+          snapshots,
         };
       });
     },

@@ -14,6 +14,8 @@ import type { LightMyRequestResponse } from "fastify";
 import { expect } from "vitest";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import { insertTurnSnapshot, type TurnSnapshotOutcome } from "../src/sessions/store-undo.js";
+import type { TurnSnapshotService } from "../src/sessions/turn-snapshot.js";
+import { realService } from "./prompt-snapshot-helpers.js";
 import { auditCount } from "./session-approval-helpers.js";
 import { patch } from "./session-archive-helpers.js";
 import { type BodyInput, messageSeq, postSessionAction } from "./session-bodyless-rest-helpers.js";
@@ -221,11 +223,18 @@ export type ScriptedUndoWorld = Listening<UndoWorld & { scripted: ScriptedChild[
 
 /**
  * A scripted world on a real listener (closed by `closeListening`, never tracked by the fork
- * worlds), for the cases that read the owner's list event connection.
+ * worlds), for the cases that read the owner's list event connection. `service` replaces the
+ * snapshot service createApp builds with one made over a real one (#953).
  */
-export async function openListeningScripted(scripts: ChildScript[]): Promise<ScriptedUndoWorld> {
+export async function openListeningScripted(
+  scripts: ChildScript[],
+  service?: (real: TurnSnapshotService) => TurnSnapshotService,
+): Promise<ScriptedUndoWorld> {
   const { rt, scripted } = scriptedRuntime(scripts);
-  const world = await openRecordingSession(rt.runtime);
+  const world = await openRecordingSession(
+    rt.runtime,
+    service === undefined ? {} : { snapshots: service(realService(rt.runtime.stateDir)) },
+  );
   return listening({ ...world, rt, scripted }, rt.clock);
 }
 

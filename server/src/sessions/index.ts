@@ -46,7 +46,8 @@ export interface RegisterSessionsOptions {
   /**
    * The app's one workspace-snapshots service (createApp binds it to the managed snapshots
    * directory and the snapshot settings); the prompt route snapshots a bound session's workspace
-   * through it before each dispatch. Sessions does not import the workspaces module for it.
+   * through it before each dispatch, and undo and delete remove snapshot directories through it.
+   * Sessions does not import the workspaces module for it.
    */
   snapshots: TurnSnapshotService;
   /**
@@ -108,10 +109,17 @@ export function registerSessions(
     sandboxRoot: options.runtime.sandboxRoot,
     createTemporaryWorkspace: options.createTemporaryWorkspace,
   });
+  const turnSnapshots = createTurnSnapshots({
+    db: options.db,
+    snapshots: options.snapshots,
+    workspaceRootOf: options.workspaceRootOf,
+    onError: options.onError,
+  });
   const deleter = createSessionDeleter({
     store,
     supervisor,
     metadata,
+    turnSnapshots,
     stateDir: options.runtime.stateDir,
     sandboxRoot: options.runtime.sandboxRoot,
     onError: options.onError,
@@ -133,12 +141,7 @@ export function registerSessions(
         listEvents.notifyRewound(ownerId, sessionId);
       },
     },
-    turnSnapshots: createTurnSnapshots({
-      db: options.db,
-      snapshots: options.snapshots,
-      workspaceRootOf: options.workspaceRootOf,
-      onError: options.onError,
-    }),
+    turnSnapshots,
   });
   registerCommandRoutes(app, {
     agentDir: options.agentDir,

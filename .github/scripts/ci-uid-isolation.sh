@@ -236,19 +236,27 @@ check_omp_modes() (
   done
   exit 1
 )
-# Workspace snapshots under the omp uid (s1f-session-list-temp-space task 10.8; spec workspace-snapshots).
-# 「omp 用户不可达」: the smoke's turns left at least one snapshot under snapshots/ (a directory
-# that still holds its manifest.json is an `ok` one: take removes any other) and the omp user
-# cannot list that directory. The probe prints the errno name, so a missing directory (ENOENT) or
-# a listing that worked is not taken for the denial. No manifest at all fails.
+# Workspace snapshots under the omp uid (s1f-session-list-temp-space tasks 10.8, 12.3; spec workspace-snapshots).
+# The smoke deletes its sessions and their snapshots go with them (chat-harness「连跑两遍不积累临时空间」):
+# no manifest.json is left under snapshots/ (an empty <workspaceId> directory of an ordinary
+# workspace may be). 「omp 用户不可达」: so the check takes one snapshot of its own into snapshots/
+# through the compiled server ($snapshot_probe, defined below with check_restore_writable) and the
+# omp user cannot list that directory. The probe prints the errno name, so a missing directory
+# (ENOENT) or a listing that worked is not taken for the denial. The snapshot is removed afterwards.
 list_probe='try { require("node:fs").readdirSync(process.argv[1]); console.log("listed"); } catch (error) { console.log(error.code); }'
 check_snapshots_closed() (
   cd "$OMP_STATE_DIR"
-  manifests="$(find snapshots -mindepth 3 -maxdepth 3 -type f -name manifest.json)" || { echo "snapshot reach check failed: the app user cannot list snapshots" >&2; exit 1; }
-  [ -n "$manifests" ] || { echo "snapshot reach check failed: the smoke turns left no snapshot manifest" >&2; exit 1; }
+  probe="$job_root/snapshot-reach"; own="snapshots/00000000000000000000000000000000"; dist="$GITHUB_WORKSPACE/server/dist/workspaces"
+  # Called on the left of `||`, so errexit is off in here: every step is checked by hand.
+  left="$(find snapshots -mindepth 3 -maxdepth 3 -type f -name manifest.json)" || { echo "snapshot reach check failed: the app user cannot list snapshots" >&2; exit 1; }
+  [ -z "$left" ] || { echo "snapshot reach check failed: the smoke left a snapshot manifest behind" >&2; exit 1; }
+  mkdir "$probe" && echo kept > "$probe/note.txt" || { echo "snapshot reach check failed: cannot lay out the probe workspace" >&2; exit 1; }
+  "$node_bin" --input-type=module -e "$snapshot_probe" take "$dist" "$probe" "$OMP_STATE_DIR/snapshots" || { echo "snapshot reach check failed: take" >&2; exit 1; }
+  [ -f "$own/1/manifest.json" ] || { echo "snapshot reach check failed: take left no snapshot manifest" >&2; exit 1; }
   seen="$(sudo -n -u omp -- /usr/bin/env "$node_bin" -e "$list_probe" snapshots)" || { echo "snapshot reach check failed: cannot run the probe as the omp user" >&2; exit 1; }
   [ "$seen" = EACCES ] || { echo "snapshot reach check failed: the omp user listing snapshots got ${seen:-no answer}, want EACCES" >&2; exit 1; }
-  echo "snapshot reach check passed: the omp user gets EACCES listing snapshots ($(printf '%s\n' "$manifests" | wc -l | tr -d ' ') manifest.json)"
+  rm -rf -- "$own" "$probe" && [ ! -e "$own" ] || { echo "snapshot reach check failed: cannot remove the snapshot the check took" >&2; exit 1; }
+  echo "snapshot reach check passed: the smoke left no manifest.json, the omp user gets EACCES listing snapshots"
 )
 # 「还原出的文件对 omp 用户可写」(design D10): a file that is 0644 when take snapshots it is deleted
 # by the omp user and written back by restore, both called from the compiled server. The file is
