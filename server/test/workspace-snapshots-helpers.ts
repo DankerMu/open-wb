@@ -252,6 +252,37 @@ export function beforeLstat(target: string, act: () => void): void {
   }) as typeof lstat);
 }
 
+/**
+ * Mount points without a mount (#1212): the module's `lstat` of each given path (absolute; never
+ * the workspace root) says another device than the real one. `dev` is changed on the real result,
+ * which keeps its methods, as a `bigint` or a number, whichever the caller asked for. Returns the
+ * set of those paths: a path added later is a mount point from then on.
+ */
+export function mountAt(...paths: string[]): Set<string> {
+  const mounted = new Set(paths);
+  const lstat = fs.promises.lstat;
+  vi.spyOn(fs.promises, "lstat").mockImplementation((async (path: PathLike, o?: StatOptions) => {
+    const stat = await lstat(path, o);
+    if (mounted.has(String(path))) {
+      const there = stat as { dev: number | bigint };
+      there.dev = typeof there.dev === "bigint" ? there.dev + 1n : there.dev + 1;
+    }
+    return stat;
+  }) as typeof lstat);
+  return mounted;
+}
+
+/** Every directory the module lists from here on, by the path it gave `readdir`, in call order. */
+export function watchListings(): string[] {
+  const listed: string[] = [];
+  const readdir = fs.promises.readdir as unknown as Listing;
+  vi.spyOn(fs.promises, "readdir").mockImplementation(((path, options) => {
+    listed.push(String(path));
+    return readdir(path, options);
+  }) as Listing as unknown as typeof fs.promises.readdir);
+  return listed;
+}
+
 /** A whole second long ago: what `setPast` gives, and what a test sets back with `utimes`. */
 export const PAST_SECONDS = 1_600_000_000;
 
@@ -315,7 +346,10 @@ function releaseReader(fifo: string): void {
   }
 }
 
-/** Calls of `fs.promises.open` that create a file under `tree/` (flag `wx`) get `intercept`. */
+/**
+ * Calls of `fs.promises.open` that create a file (flag `wx`) get `intercept`: a copy under `tree/`
+ * in a take, the temporary file of a write-back in a restore.
+ */
 export function onCopyCreate(intercept: (path: string) => void): void {
   const open = fs.promises.open;
   vi.spyOn(fs.promises, "open").mockImplementation(async (...args: Parameters<typeof open>) => {

@@ -17,9 +17,18 @@
  * parent replaced by a symbolic link between them is traversed: the residual registered in
  * design D10 and ADR-0010 (task 20.3).
  *
+ * A directory on another device than the workspace root (a mount point, judged by `dev` alone) is
+ * not read, listed, written or deleted, whether the manifest's `skipped` has it or not: what was
+ * mounted after the snapshot is in no manifest (#1212). Three places see to it: the search for
+ * extra entries does not go into one, whatever the manifest has under that path (`removeExtras`);
+ * a directory is deleted level by level and not across a device (`remove`); and `parentsAreReal`
+ * compares `dev` at every level, for one that shows up later. Those found are in the result's
+ * `skipped`.
+ *
  * Errors: `EACCES` / `EPERM` on one entry puts it in `failed` and the restore goes on; anything
  * else rejects, leaving the workspace partly restored. Calling again continues: what is already
- * as the manifest says is left alone.
+ * as the manifest says is left alone. An entry whose place is held by a directory that could not
+ * be deleted for a mount point in it is in `failed` too.
  */
 import { randomBytes } from "node:crypto";
 import { constants, promises as fsp, type Stats } from "node:fs";
@@ -37,6 +46,7 @@ const TEMP_MODE = 0o600;
 const TREE_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW;
 const NEW_DIR_FLAGS = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
 const CHUNK_BYTES = 64 * 1024;
+const SEPARATOR = Buffer.from("/");
 /** What opening a path with `SOURCE_FLAGS` fails with when no regular file can be there. */
 const NO_REGULAR_FILE: ReadonlySet<unknown> = new Set(["ENOENT", "ELOOP", "ENXIO", "EOPNOTSUPP"]);
 
@@ -61,21 +71,37 @@ interface RestoreOptions {
 interface RestoreResult {
   /** Files whose content was written back, plus symbolic links created again. */
   restored: number;
-  /** Deleted entries the manifest does not have; a directory with all below it counts once. */
+  /**
+   * Deleted entries the manifest does not have; a directory with all below it counts once, and
+   * not at all when a mount point in it kept it from being deleted whole.
+   */
   removed: number;
-  /** The manifest's `skipped`: neither these paths nor anything under them was touched. */
+  /**
+   * The manifest's `skipped`, then the mount points this run met that are not among them by
+   * path, as `mount`: neither these paths nor anything under them was touched.
+   */
   skipped: SkippedPath[];
-  /** Entries left as they were: a parent level is not a real directory, or permission denied. */
+  /**
+   * Entries left as they were: a parent level is not a real directory of the workspace's device,
+   * a directory in the entry's place holds a mount point, or permission denied.
+   */
   failed: { path: string }[];
 }
 
 interface Run {
   root: string;
   tree: string;
+  /** `dev` of the workspace root: a directory with another one is a mount point. */
+  rootDev: number;
   /** The manifest's entries by path, without those under a skipped path. */
   entries: ReadonlyMap<string, Entry>;
-  /** The skipped paths that protect by path: every one but the `name_encoding` items. */
-  skipped: ReadonlySet<string>;
+  /**
+   * The skipped paths that protect by path: the manifest's, every one but the `name_encoding`
+   * items, and the mount points found so far.
+   */
+  skipped: Set<string>;
+  /** The mount points this run found, in the order it met them. */
+  mounts: Set<string>;
   restored: number;
   removed: number;
   failed: Set<string>;
@@ -86,7 +112,8 @@ interface Run {
  * snapshot directory lies inside the workspace, the manifest is not a well-formed one, `tree/`
  * is missing or the workspace root is not a real directory. Order: delete what the manifest does not have, then directories from the top down,
  * then files, then symbolic links. An entry of another type under a manifest path is replaced
- * by its phase and does not count toward `removed`.
+ * by its phase and does not count toward `removed`. A manifest entry at or under a mount point
+ * found on the way is left to no phase: it is not restored and not in `failed`.
  */
 export async function restore(options: RestoreOptions): Promise<RestoreResult> {
   if (isWithin(options.workspaceRoot, options.snapshotDir)) {
@@ -96,12 +123,14 @@ export async function restore(options: RestoreOptions): Promise<RestoreResult> {
   const manifest = await readManifest(options.snapshotDir);
   const tree = join(options.snapshotDir, "tree");
   await requireDirectory(tree, "snapshot tree");
-  await requireDirectory(options.workspaceRoot, "workspace root");
+  const root = await requireDirectory(options.workspaceRoot, "workspace root");
   const run: Run = {
     root: options.workspaceRoot,
     tree,
+    rootDev: root.dev,
     entries: manifest.entries,
     skipped: manifest.skippedPaths,
+    mounts: new Set(),
     restored: 0,
     removed: 0,
     failed: new Set(),
@@ -111,39 +140,49 @@ export async function restore(options: RestoreOptions): Promise<RestoreResult> {
   // A parent's path is a prefix of its children's, so it sorts ahead of them.
   const entries = [...run.entries.values()].sort((a, b) => (a.path < b.path ? -1 : 1));
   for (const entry of entries) {
-    if (entry.type === "dir") {
+    if (entry.type === "dir" && !underSkipped(run.skipped, entry.path)) {
       await attempt(run, entry.path, () => ensureDirectory(run, entry.path));
     }
   }
   for (const entry of entries) {
-    if (entry.type === "file") {
+    if (entry.type === "file" && !underSkipped(run.skipped, entry.path)) {
       await attempt(run, entry.path, () => restoreFile(run, entry));
     }
   }
   for (const entry of entries) {
-    if (entry.type === "symlink") {
+    if (entry.type === "symlink" && !underSkipped(run.skipped, entry.path)) {
       await attempt(run, entry.path, () => restoreSymlink(run, entry.path, entry.target));
     }
   }
+  const listed = new Set(manifest.skipped.map((item) => item.path));
+  const mounts = [...run.mounts].filter((path) => !listed.has(path));
   return {
     restored: run.restored,
     removed: run.removed,
-    skipped: manifest.skipped,
+    skipped: [...manifest.skipped, ...mounts.map((path) => ({ path, reason: "mount" }))],
     failed: [...run.failed].map((path) => ({ path })),
   };
 }
 
 /**
  * Whether every level above `path`, from the workspace root down, is a real directory right now
- * (by `lstat`: a symbolic link, another type or a missing level is not). The last component of
- * `path` is the entry itself and is not looked at. `restore` asks this before each write or
- * delete and puts the entry in `failed` on `false`; exported as the seam the tests call.
+ * (by `lstat`: a symbolic link, another type or a missing level is not) on the device of the
+ * workspace root, whose `dev` is that of the first level looked at: a level with another `dev` is
+ * a mount point (#1212). The last component of `path` is the entry itself and is not looked at.
+ * `restore` asks this before each write or delete and puts the entry in `failed` on `false`;
+ * exported as the seam the tests call.
  */
 export async function parentsAreReal(workspaceRoot: string, path: string): Promise<boolean> {
   let level = workspaceRoot;
+  let rootDev: number | undefined;
   for (const name of ["", ...path.split("/").slice(0, -1)]) {
     level = join(level, name);
-    if (!(await present(level))?.isDirectory()) {
+    const stat = await present(level);
+    if (!stat?.isDirectory()) {
+      return false;
+    }
+    rootDev ??= stat.dev;
+    if (stat.dev !== rootDev) {
       return false;
     }
   }
@@ -152,6 +191,9 @@ export async function parentsAreReal(workspaceRoot: string, path: string): Promi
 
 /** Thrown by `guard`; `attempt` turns it into a `failed` entry. */
 class ParentNotReal extends Error {}
+
+/** Thrown by `displace`; `attempt` turns it into a `failed` entry. */
+class MountInPlace extends Error {}
 
 /** Called right ahead of every call that creates, deletes or renames something at `path`. */
 async function guard(run: Run, path: string): Promise<void> {
@@ -163,8 +205,8 @@ async function guard(run: Run, path: string): Promise<void> {
 /**
  * Runs what restores one entry, after checking its parents (so its reads are not led elsewhere
  * either). The entry goes to `failed` when a parent level is not a real directory, then or at a
- * later `guard`, or when the work is refused (`EACCES` / `EPERM`); any other error propagates
- * and ends the restore.
+ * later `guard`, when a mount point keeps a directory in its place (`displace`), or when the work
+ * is refused (`EACCES` / `EPERM`); any other error propagates and ends the restore.
  */
 async function attempt(run: Run, path: string, work: () => Promise<void>): Promise<void> {
   try {
@@ -172,17 +214,21 @@ async function attempt(run: Run, path: string, work: () => Promise<void>): Promi
     await work();
   } catch (error) {
     const code = codeOf(error);
-    if (!(error instanceof ParentNotReal) && code !== "EACCES" && code !== "EPERM") {
+    const kept = error instanceof ParentNotReal || error instanceof MountInPlace;
+    if (!kept && code !== "EACCES" && code !== "EPERM") {
       throw error;
     }
     run.failed.add(path);
   }
 }
 
-async function requireDirectory(path: string, what: string): Promise<void> {
-  if (!(await fsp.lstat(path)).isDirectory()) {
+/** The `lstat` of `path`, which must be a directory itself. */
+async function requireDirectory(path: string, what: string): Promise<Stats> {
+  const stat = await fsp.lstat(path);
+  if (!stat.isDirectory()) {
     throw new Error(`${what} is not a directory`);
   }
+  return stat;
 }
 
 /** `lstat`, or `undefined` when nothing is there. */
@@ -198,17 +244,67 @@ async function present(path: string): Promise<Stats | undefined> {
 }
 
 /**
- * Deletes the workspace entry `path`, which `stat` (its `lstat`) found there. Anything but a
- * directory goes by `unlink`, which never follows a link and never deletes a directory. A
- * directory goes with all below it: `rm` classifies each level by `lstat` and unlinks links.
- * An entry replaced after its `lstat` is deleted as whatever it is by then.
+ * Deletes the workspace entry `path`, which `stat` (its `lstat`) found there, and tells whether
+ * it is gone. Anything but a directory goes by `unlink`, which never follows a link and never
+ * deletes a directory. A directory goes with all below it, but for the mount points in it
+ * (`removeTree`): `false` when one kept it. The three callers that delete a directory come here:
+ * an extra one, and one in the place of a manifest file or symbolic link.
  */
-async function remove(run: Run, path: string, stat: Stats): Promise<void> {
+async function remove(run: Run, path: string, stat: Stats): Promise<boolean> {
   await guard(run, path);
   if (stat.isDirectory()) {
-    await fsp.rm(join(run.root, path), { recursive: true });
-  } else {
-    await fsp.unlink(join(run.root, path));
+    return removeTree(run, path, Buffer.from(join(run.root, path)), stat);
+  }
+  await fsp.unlink(join(run.root, path));
+  return true;
+}
+
+/**
+ * Deletes the directory `dir` (`path` in the workspace, `stat` its `lstat`) and all below it
+ * without crossing a device (#1212; `rm` does not look at `dev`), and tells whether it is gone.
+ * A directory whose `dev` is not the workspace root's, `dir` itself included, is a mount point:
+ * left with all in it and recorded. A level that keeps one is not removed; the rest of it is.
+ * Each level is classified by `lstat`, and whatever is no directory goes by `unlink`: a link is
+ * never followed.
+ *
+ * Names are bytes from the listing to the call (#1148), so an entry whose name is not valid
+ * UTF-8 goes like any other. `path` is for the record only: below such a name it is the lossy
+ * decoding.
+ */
+async function removeTree(run: Run, path: string, dir: Buffer, stat: Stats): Promise<boolean> {
+  if (stat.dev !== run.rootDev) {
+    foundMount(run, path);
+    return false;
+  }
+  let emptied = true;
+  for (const name of await fsp.readdir(dir, { encoding: "buffer" })) {
+    const child = Buffer.concat([dir, SEPARATOR, name]);
+    const childStat = await fsp.lstat(child);
+    if (!childStat.isDirectory()) {
+      await fsp.unlink(child);
+    } else if (!(await removeTree(run, `${path}/${name.toString("utf8")}`, child, childStat))) {
+      emptied = false;
+    }
+  }
+  if (emptied) {
+    await fsp.rmdir(dir);
+  }
+  return emptied;
+}
+
+/** Records the mount point `path`: from here on it protects like a skipped path of the manifest. */
+function foundMount(run: Run, path: string): void {
+  run.skipped.add(path);
+  run.mounts.add(path);
+}
+
+/**
+ * Deletes what holds the place of a manifest entry as another type. A directory that a mount
+ * point kept from going throws: the entry is `failed`, and nothing is renamed or linked onto it.
+ */
+async function displace(run: Run, path: string, stat: Stats): Promise<void> {
+  if (!(await remove(run, path, stat))) {
+    throw new MountInPlace();
   }
 }
 
@@ -225,12 +321,15 @@ function underSkipped(skipped: ReadonlySet<string>, path: string): boolean {
  * Deletes every entry under `parent` that the manifest does not have, going down only into real
  * directories the manifest has as directories. A skipped path is neither looked at nor entered.
  * An entry the manifest has as something else than it is now is left to that entry's phase.
+ * A directory on another device is a mount point whatever the manifest has under its path, so
+ * `dev` is looked at before the manifest: it is recorded and neither entered, deleted nor left
+ * to a phase (#1212). An extra directory that a mount point kept from going is not counted.
  *
  * Listed as bytes (#1148). `parent` is the root or a directory of the manifest, so it was there
  * when the snapshot was taken, and an entry of it whose name is not valid UTF-8 may have been
  * too: no manifest path can name it, so it is dropped from the listing here and nothing of it is
  * read, deleted or counted, whatever `skipped` says. Such a name below a directory deleted as an
- * extra goes with it: `rm` lists as bytes as well.
+ * extra goes with it: `removeTree` lists as bytes as well.
  */
 async function removeExtras(run: Run, parent: string): Promise<void> {
   const raw = await fsp.readdir(join(run.root, parent), { encoding: "buffer" });
@@ -241,10 +340,13 @@ async function removeExtras(run: Run, parent: string): Promise<void> {
     }
     await attempt(run, path, async () => {
       const stat = await fsp.lstat(join(run.root, path));
+      if (stat.isDirectory() && stat.dev !== run.rootDev) {
+        foundMount(run, path);
+        return;
+      }
       const entry = run.entries.get(path);
       if (entry === undefined) {
-        await remove(run, path, stat);
-        run.removed += 1;
+        run.removed += (await remove(run, path, stat)) ? 1 : 0;
       } else if (entry.type === "dir" && stat.isDirectory()) {
         await removeExtras(run, path);
       }
@@ -264,7 +366,7 @@ async function ensureDirectory(run: Run, path: string): Promise<void> {
     return;
   }
   if (stat !== undefined) {
-    await remove(run, path, stat);
+    await displace(run, path, stat);
   }
   await guard(run, path);
   await fsp.mkdir(dir, { mode: NEW_DIR_MODE });
@@ -411,7 +513,8 @@ async function sameBytes(
  * umask applies, no setuid / setgid / sticky bit is carried) and the recorded `mtime` (`atime`
  * too: the manifest records none). Only then is it renamed over the final name, and nothing is
  * done to that name afterwards: it may be a link by then. A current entry that is not a regular
- * file is deleted first. The temporary file does not outlive a failure; that clean-up is the one
+ * file is deleted first; a directory that a mount point keeps there ends the step before the
+ * rename. The temporary file does not outlive a failure; that clean-up is the one
  * unguarded call by path, and can only hit the name made up here.
  */
 async function writeBack(run: Run, entry: FileEntry, copy: fsp.FileHandle): Promise<void> {
@@ -438,7 +541,7 @@ async function writeBack(run: Run, entry: FileEntry, copy: fsp.FileHandle): Prom
     }
     const occupant = await present(final);
     if (occupant !== undefined && !occupant.isFile()) {
-      await remove(run, entry.path, occupant);
+      await displace(run, entry.path, occupant);
     }
     await guard(run, entry.path);
     await fsp.rename(temp, final);
@@ -456,7 +559,7 @@ async function restoreSymlink(run: Run, path: string, target: string): Promise<v
     return;
   }
   if (stat !== undefined) {
-    await remove(run, path, stat);
+    await displace(run, path, stat);
   }
   await guard(run, path);
   await fsp.symlink(target, link);

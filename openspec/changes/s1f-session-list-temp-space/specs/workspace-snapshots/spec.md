@@ -31,6 +31,7 @@
 - 名字在排除名单里的**目录**（任何层级，见「快照上限与配置」）：整棵不遍历，记入 `skipped`，`reason` 为 `excluded`；同名的普通文件不受影响；
 - 大小超过单文件上限的普通文件：不进 `entries`，记入 `skipped`，`reason` 为 `too_large`；
 - 读取元数据、列举或复制时得到 `EACCES` / `EPERM` 的条目：记入 `skipped`，`reason` 为 `unreadable`（目录则整棵）。
+- 挂载点（#1212，2026-10-08 owner 裁决：挂载目录整体不参与快照与还原）：不跟随符号链接取得的 `dev` 与工作空间根的 `dev` 不同的**目录**，整棵不遍历、SHALL NOT 被列举，不进 `entries`，记入 `skipped`，`reason` 为 `mount`；它不计入条目数与总量上限。比较的对象是工作空间根自己的 `dev`（根本身位于哪个文件系统无关）。名字在排除名单里的目录仍记 `excluded`。只判目录：以挂载方式出现的单个文件不在本规则内。凡 `dev` 不同的目录都按此处理，不区分文件系统类型（FUSE、bind mount、另一个卷或子卷同样对待）；
 - 遍历期间工作空间有变动（#1190，2026-10-08 owner 裁决，取代 #1148 对「消失条目」的处置）：`take` SHALL 在列举每个被遍历的目录（含工作空间根）时记下它的指纹——不跟随符号链接取得的 `dev`、`ino`、`mtime`、`ctime`（纳秒精度）与按字节的条目名集合；全部条目处理完之后、写清单之前，对每个被遍历的目录再取一次指纹并与记下的比较。任一目录的两次指纹不同（条目多了、少了、改了名，目录被换成了另一个，或 `mtime` / `ctime` 变了），或第二次取不到，或遍历中对一个已被列举出的条目读取元数据、读链接目标、打开或列举其子项时得到 `ENOENT` / `ENOTDIR`，这份快照 SHALL 是 `failed`：不写清单，快照目录按 `failed` 的既有规则清掉，不可还原。理由：这些情形分不清条目是被删还是被挪到了别处（跨目录移动时两个目录各自的列举都不含它，没有任何读取出错），还原这样的快照会删掉或覆盖一份快照里没有副本的内容；两次指纹都相同则说明遍历结束那一刻每个目录都与它被列举时一样，清单是那一刻的名字空间（`ctime` 不能由 `utimes` 拨回，所以改动之后把 `mtime` 拨回原值遮不住它）。清单 SHALL NOT 带 `incomplete` 键。被排除的名字与记入 `skipped` 的目录不下行，也不取指纹；
 - 复制期间文件内容有变动（#1206，与上一条同一裁定）：对经句柄复制内容的普通文件，`take` SHALL 在复制完成后经同一句柄再取一次元数据；`size`、`mtime`、`ctime` 任一与复制之前取得的不同，或实际复制的字节数不等于复制之前的 `size`，这份快照 SHALL 是 `failed`（副本可能是撕裂的：一部分旧内容、一部分新内容）。经硬链接复用上一份副本的文件不读内容，不做这项复核。复制完成之后才发生的改写不影响结果；
 - 名字不是合法 UTF-8 的条目（#1148）：列举 SHALL 按字节取名；名字的字节经 UTF-8 解码再编码得不回原字节的条目不进 `entries`、不读取（目录则整棵不遍历），记入 `skipped`，`reason` 为 `name_encoding`，`path` 为父路径加该名字的有损解码（非法字节以 U+FFFD 代替）。这个 `path` 只供展示，不保证能定位回该条目（同目录下两个这样的名字可以解码成同一个串，各记一项，不去重）；还原对这类条目的保护不依赖它，它也不参与「`skipped` 路径之下」的判定（见「还原」）。
@@ -74,6 +75,14 @@
 #### Scenario: 读不了的子目录
 - **WHEN** 工作空间含一个 app 用户无权列举的子目录 `locked/`
 - **THEN** 结果为 `ok`；`skipped` 含 `{path:"locked",reason:"unreadable"}`；其余条目照常进快照
+
+#### Scenario: 挂载点整目录跳过
+- **WHEN** 工作空间含 `a.txt`、`docs/b.txt`、目录 `remote/`（其下有 `x.txt` 与 `sub/y.txt`）与 `docs/vol/`（其下有 `z.txt`）；`remote` 与 `docs/vol` 两个目录的 `dev` 与工作空间根不同（测试注入），其余条目与根相同
+- **THEN** 结果为 `ok`；`entries` 恰为 `a.txt`、`docs`、`docs/b.txt`；`skipped` 恰含 `{path:"remote",reason:"mount"}` 与 `{path:"docs/vol",reason:"mount"}`；`tree/` 下没有 `remote` 与 `docs/vol`；这两个目录没有被列举，其下的文件没有被打开
+- **WHEN** 条目数上限恰等于上例 `entries` 的条数
+- **THEN** 结果仍为 `ok`（挂载点及其下的内容不计入上限）
+- **WHEN** 排除名单里的目录 `node_modules/` 的 `dev` 与工作空间根不同
+- **THEN** `skipped` 里它的 `reason` 是 `excluded`
 
 #### Scenario: 失败不留半份
 - **WHEN** 复制中途注入一个非权限类 IO 错误，或工作空间根被换成普通文件
@@ -162,8 +171,8 @@ prompt 路由 SHALL 把「快照步骤」作为 `supervisor.prompt` 的派发前
 - **THEN** 该消息快照行的 `todo` 与 T 的存储文本逐字相同；`todo` 为 NULL 的会话其快照行 `todo` 为 NULL
 
 ### Requirement: 还原
-`restore`（入参为工作空间根与快照目录）SHALL 把工作空间还原为清单描述的状态，并返回 `{restored,removed,skipped,failed}`（`restored` 为内容被写回的文件数与被重建的符号链接数之和，`removed` 为被删除的多余条目数——只计清单里没有的条目，被递归删除的目录连同其下内容计一项；清单路径上类型不对而被替换的占位者不计，`skipped` 为清单的 `skipped`，`failed` 为 `[{path}]`）。它 SHALL 先读清单并校验：清单可解析且每个条目形状合法（`path` 是相对的 POSIX 路径，不含空分量、`.`、`..`，不以 `/` 开头，条目类型与字段齐全，路径不重复，每个条目与每个 `skipped` 路径的父级是清单里的目录条目或位于某个 `skipped` 路径之下）、`tree/` 存在、快照目录不在工作空间之内、工作空间根是真实目录（`lstat`，非符号链接）；任一不成立 SHALL 在改动任何工作空间条目之前抛错。随后：
-- 现存而不在 `entries` 里、且不位于任何 `skipped` 路径之下（含其自身）的条目 SHALL 被删除（目录递归删除，不跟随符号链接）；
+`restore`（入参为工作空间根与快照目录）SHALL 把工作空间还原为清单描述的状态，并返回 `{restored,removed,skipped,failed}`（`restored` 为内容被写回的文件数与被重建的符号链接数之和，`removed` 为被删除的多余条目数——只计清单里没有的条目，被递归删除的目录连同其下内容计一项；清单路径上类型不对而被替换的占位者不计，`skipped` 为清单的 `skipped`，其后接本次还原遇到的、清单 `skipped` 里没有同一 `path` 的挂载点各一项 `{path,reason:"mount"}`（见下），`failed` 为 `[{path}]`）。它 SHALL 先读清单并校验：清单可解析且每个条目形状合法（`path` 是相对的 POSIX 路径，不含空分量、`.`、`..`，不以 `/` 开头，条目类型与字段齐全，路径不重复，每个条目与每个 `skipped` 路径的父级是清单里的目录条目或位于某个 `skipped` 路径之下）、`tree/` 存在、快照目录不在工作空间之内、工作空间根是真实目录（`lstat`，非符号链接）；任一不成立 SHALL 在改动任何工作空间条目之前抛错。随后：
+- 现存而不在 `entries` 里、且不位于任何 `skipped` 路径之下（含其自身）的条目 SHALL 被删除（目录递归删除，不跟随符号链接；挂载点除外，见下）；
 - 清单校验 SHALL 拒绝带 `incomplete` 键的清单（#1190：该标记已退役；带它的是旧版本在有变动的遍历之后写下的快照，不可还原）——与其它清单非法的情形同样处理，工作空间不被触碰；
 - `entries` 里的目录 SHALL 存在（缺失则创建，mode `2770`；现存而不是目录的同名条目先删除）；
 - `entries` 里的文件按以下次序判定，命中即止：
@@ -172,11 +181,15 @@ prompt 路由 SHALL 把「快照步骤」作为 `supervisor.prompt` 的派发前
   3. 其余（不存在、不是普通文件、`size` 不同或内容不同）→ SHALL 从 `tree/<path>` 写回并计入 `restored`：在同一目录以独占方式新建一个名字不可预测的临时文件，写入内容后**在 `rename` 之前经它的句柄**把 `mtime` 设为清单值、把权限位显式置为 `(清单 mode & 0o777) | 0o660`（不受进程 umask 影响；setuid、setgid、sticky 位一律不带），再 `rename` 到位——`rename` 之后 SHALL NOT 再按最终路径改时间或权限位（那条路径此时可被换成符号链接）；写回 SHALL 复制内容，SHALL NOT 在工作空间与快照之间建硬链接；现存而不是普通文件的同名条目先删除；
 - `entries` 里的符号链接：当前不是目标相同的符号链接则重建并计入 `restored`；
 - `skipped` 路径及其之下的一切 SHALL NOT 被读取、改写或删除。
+- 挂载点（#1212）：`restore` SHALL NOT 读取、列举、改写或删除任何 `dev` 与工作空间根不同的目录及其之下的内容——不论清单的 `skipped` 里有没有它（快照之后才出现的挂载点清单里没有）。具体地：
+  - 找多余条目时遇到的现存目录，`dev` 与工作空间根不同的：不论清单里有没有这个路径、记的是什么类型，都不进入、不删除、不替换；它记入返回的 `skipped`（`reason` 为 `mount`），清单里位于该路径（含其自身）之下的条目不还原，也不记入 `failed`；
+  - 任何递归删除（清单里没有的多余目录，或清单路径上类型不对而要被替换的目录）SHALL NOT 越过设备边界：被删的目录自身及其下 `dev` 与工作空间根不同的目录连同内容保留，并记入返回的 `skipped`（`reason` 为 `mount`）；通往它的各级目录因而保留，其余内容照常删除（符号链接只删链接本身）。因此没能删净的多余目录不计入 `removed`，也不记入 `failed`（挂载点已在 `skipped` 里报告）；因此没能被替换的清单条目记入 `failed`、不写回，还原继续；
+  - 下文「每次写或删之前」的逐级检查同时比较 `dev`。被上面两条发现的挂载点之下的清单条目不进入后面的阶段（不还原、不进 `failed`）；逐级检查只兜住那之后才出现的挂载点，那时条目记入 `failed`。
 - 名字不是合法 UTF-8 的条目（#1148）：还原列举工作空间时 SHALL 按字节取名；在工作空间根或 `entries` 里的目录之下，名字的字节不能经 UTF-8 无损往返的条目及其之下的一切 SHALL NOT 被读取、改写或删除，也不计入 `removed` 与 `failed`——这一条与清单的 `skipped` 无关，不靠路径字符串匹配；相应地，清单里 `reason` 为 `name_encoding` 的 `skipped` 项 SHALL NOT 参与上一条「`skipped` 路径及其之下」的判定（它的 `path` 是有损的，可能恰与一个名字合法的条目相同，那个条目照常还原）。不在 `entries` 里的多余目录照旧整棵删除，其下这类名字的条目一并删除（该目录在快照时不存在，其下的一切都是之后才出现的）。
 
 写回的文件 SHALL 对属主与属组都可读写（上式的 `0o660`）：清单里是 `0644` 的文件写回后为 `0664`，`0755` 写回后为 `0775`，`0600` 写回后为 `0660`。理由是写回的文件由 app 用户持有、靠父目录的 setgid 继承共享组，omp 用户只能经组权限继续读写它（ADR-0010）；其它用户位与执行位保持清单值。第 1、2 两种「不动」的文件权限位不被修改。
 
-每次写或删之前 SHALL 对该条目自工作空间根起的各级父目录做 `lstat`：任何一级是符号链接或不是目录时，SHALL 跳过该条目并把它记入 `failed`，SHALL NOT 经由它写入或删除；单个条目的 `EACCES` / `EPERM` 同样记入 `failed` 并继续；其它错误（`ENOENT`、`EIO` 等）SHALL 向外抛出——此时工作空间处于部分还原的状态，重新调用可以继续。读取工作空间里的文件（元数据与内容比较）SHALL 经不跟随符号链接、不阻塞的句柄，确认是普通文件后才读。`restore` SHALL NOT 改动工作空间根之外的任何路径，SHALL NOT 修改快照目录（清单里的 `ctimeMs` 不随写回更新，所以被写回过的文件在下一次还原时走第 2 步的内容比较）。对同一份快照重复调用 SHALL 是幂等的：工作空间状态相同，且在两次调用之间工作空间没有别的改动时，第二次的 `restored` 与 `removed` 都为 0。
+每次写或删之前 SHALL 对该条目自工作空间根起的各级父目录做 `lstat`：任何一级是符号链接、不是目录，或（工作空间根以下的某一级）`dev` 与工作空间根不同时，SHALL 跳过该条目并把它记入 `failed`，SHALL NOT 经由它写入或删除；单个条目的 `EACCES` / `EPERM` 同样记入 `failed` 并继续；其它错误（`ENOENT`、`EIO` 等）SHALL 向外抛出——此时工作空间处于部分还原的状态，重新调用可以继续。读取工作空间里的文件（元数据与内容比较）SHALL 经不跟随符号链接、不阻塞的句柄，确认是普通文件后才读。`restore` SHALL NOT 改动工作空间根之外的任何路径，SHALL NOT 修改快照目录（清单里的 `ctimeMs` 不随写回更新，所以被写回过的文件在下一次还原时走第 2 步的内容比较）。对同一份快照重复调用 SHALL 是幂等的：工作空间状态相同，且在两次调用之间工作空间没有别的改动时，第二次的 `restored` 与 `removed` 都为 0。
 
 #### Scenario: 还原改动、新增与删除
 - **WHEN** 快照时工作空间为 `a.txt`（"1"）、`dir/b.txt`（"2"）、`keep.txt`（"3"）；之后 `a.txt` 被改为 "x"、`dir/b.txt` 被删除、新增了 `c.txt` 与 `new/d.txt`，然后还原
@@ -189,6 +202,24 @@ prompt 路由 SHALL 把「快照步骤」作为 `supervisor.prompt` 的派发前
 #### Scenario: 跳过项不动并列出
 - **WHEN** 快照的 `skipped` 含 `big.bin`（`too_large`）与 `node_modules`（`excluded`），其后二者内容都被改动，另新增了 `node_modules/x/y.js`，然后还原
 - **THEN** `big.bin` 与 `node_modules` 之下的内容保持改动后的样子（包括新增的文件）；返回的 `skipped` 含这两项
+
+#### Scenario: 挂载点不被还原也不被删除
+- **WHEN** 快照的 `skipped` 含 `{path:"remote",reason:"mount"}`，其后 `remote/x.txt` 被改写、新增了 `remote/new.txt`，然后还原
+- **THEN** `remote` 之下保持改动后的样子；返回的 `skipped` 里 `remote` 恰出现一次
+- **WHEN** 快照时 `data/` 是普通目录（`entries` 含 `data`、`data/a.txt`、`data/sub`、`data/sub/c.txt`）；其后 `data` 的 `dev` 变得与工作空间根不同（测试注入：之后有东西挂到了它上面），其下 `a.txt` 被改写、新增了 `b.txt`、`sub/` 被删；工作空间根下的 `top.txt` 也被改写；然后还原
+- **THEN** `data` 之下保持改动后的样子（`a.txt` 是改写后的内容，`b.txt` 还在，`sub` 没有被重建），`data` 没有被列举；`top.txt` 为快照内容；返回的 `skipped` 含 `{path:"data",reason:"mount"}`；`failed` 为空；`removed` 为 0
+- **WHEN** 快照之后根下新增了目录 `m/`（其下有 `r.txt`），`m` 的 `dev` 与工作空间根不同
+- **THEN** `m/r.txt` 还在；`removed` 为 0；返回的 `skipped` 含 `{path:"m",reason:"mount"}`
+- **WHEN** 快照之后新增了普通目录 `new/`，其下有 `f.txt`、`deep/g.txt` 与 `deep/remote/r.txt`，其中 `deep/remote` 的 `dev` 与工作空间根不同
+- **THEN** `new/f.txt` 与 `new/deep/g.txt` 被删除；`new/deep/remote/r.txt` 还在（`new`、`new/deep`、`new/deep/remote` 三级目录还在）；`removed` 为 0；`failed` 为空；返回的 `skipped` 含 `{path:"new/deep/remote",reason:"mount"}`；再还原一次结果相同
+- **WHEN** 清单里 `x` 是普通文件；现在 `x` 是一个目录，其下有 `y.txt` 与 `remote/r.txt`，`x/remote` 的 `dev` 与工作空间根不同
+- **THEN** `x/remote/r.txt` 还在；`x/y.txt` 被删除；`x` 仍是目录、记入 `failed`，没有被写回成文件，其所在目录里没有留下临时文件；返回的 `skipped` 含 `{path:"x/remote",reason:"mount"}`；还原没有抛出，其它条目照常还原
+- **WHEN** 清单里 `y` 是符号链接；现在 `y` 是一个目录，其下有 `z.txt` 与 `remote/r.txt`，`y/remote` 的 `dev` 与工作空间根不同
+- **THEN** `y/remote/r.txt` 还在；`y/z.txt` 被删除；`y` 仍是目录、记入 `failed`；返回的 `skipped` 含 `{path:"y/remote",reason:"mount"}`
+- **WHEN** 清单里 `f` 是普通文件、`l` 是符号链接；现在二者都是 `dev` 与工作空间根不同的目录，其下各有 `r.txt`
+- **THEN** 两个 `r.txt` 都还在，`f` 与 `l` 没有被替换、没有被列举；返回的 `skipped` 含 `{path:"f",reason:"mount"}` 与 `{path:"l",reason:"mount"}`；`failed` 为空
+- **WHEN** 对一条路径做逐级父目录检查，其中一级是真实目录但 `dev` 与工作空间根不同
+- **THEN** 检查不通过（该条目记入 `failed`，不经由它写入或删除）
 
 #### Scenario: 非 UTF-8 文件名的条目不被当作多余条目删除
 - **WHEN** 在 Linux 上快照时工作空间含 `a.txt`、目录 `d/` 与 `d/` 下一个名字含非法 UTF-8 字节的文件 B（快照把它记入 `skipped`，`name_encoding`）；之后 `a.txt` 被改写、根下新增了一个名字含非法 UTF-8 字节的文件 C、新增了目录 `new/`（内有一个名字含非法 UTF-8 字节的文件），然后还原

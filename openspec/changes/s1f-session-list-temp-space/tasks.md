@@ -276,6 +276,21 @@ Minimal mergeable slice: 9.1 + 9.2 一起（没有父目录校验的还原不可
   - 变异证据：去掉复核 → 三例判红；只比 `size` → 等长覆盖写判红；只比时间、不比字节数 → 记录结果；复核放到 `close` 之后按路径取 → 记录结果。
   - `uid-isolation` 的快照检查不得因此判红；不改 CI 脚本。
   Risk packs（10.4c）: File IO（副本完整性）、Concurrency（复制与并发写入）。
+- [x] 10.4d 挂载点不参与快照与还原（#1212；Critical Path；**先于 12.1 合入**）：
+  - `snapshots.ts`：目录的 `lstat`（已有的那一次）`dev` 与工作空间根的 `dev` 不同 → 记 `skipped`（新 `reason` `mount`）、不列举、不建 `tree/` 目录、不占上限；排除名单的判定在它之前。无挂载点时清单与现状逐字节相同。
+  - `snapshots-restore.ts`：开始时取工作空间根的 `dev`。
+    - (a) `removeExtras`：`dev` 判定在查清单之前——现存目录 `dev` 不同 → 不进入、不删、不替换，不论清单把该路径记成什么类型；记入返回的 `skipped`，并入 `underSkipped` 查的同一个集合，三个阶段据此不处理其下的清单条目（不还原、不进 `failed`；「同一 `path` 不重复」由集合保证）。
+    - (b) 改 `remove` 本身（三个会删目录的调用点共用：多余目录、文件阶段替换目录、符号链接阶段替换目录）：用 `fsp.readdir({encoding:"buffer"})` + `fsp.lstat` 自己逐级下行（按字节取名——非 UTF-8 名字的条目照旧随多余目录删除，不得回归），符号链接只 `unlink`、不跟随；`dev` 不同的目录（含被删的起点自身）保留并记入返回的 `skipped`；留有挂载点的各级目录不 `rmdir`。多余目录：未删净则不计 `removed`、不进 `failed`。占位目录：未删净则抛一个 `attempt` 映射为 `failed` 的错（与 `ParentNotReal` 同类），不得走到 `rename` / `symlink`，临时文件照旧清掉。
+    - (c) `parentsAreReal` 逐级同时比较 `dev`（它已经从根起逐级 `lstat`，根的 `dev` 取自第一级；签名不变）。
+    - 同步改注释与类型：`RestoreResult.skipped`、文件头与 `restore` / `remove` 的说明；`snapshots.ts` 的 `SkipReason` 与文件头。
+  - 测试（注入式，全平台；CI 里不建真实挂载）：workspace-snapshots「挂载点整目录跳过」「挂载点不被还原也不被删除」的每个 WHEN。既有的 `lstat` 钩子（`swapAfterLstat` / `beforeLstat`）只透传结果，需要新 helper：在真实的 `Stats` 对象上改 `dev`（不要展开对象，否则丢 `isDirectory()`），按 `typeof stat.dev` 同时支持 `bigint`（`take`）与 number（`restore`）。断言「没有被列举 / 没有被打开」要看调用（`readdir` / `open` 的记录），不只看结果。最后一例直接调 `parentsAreReal`。
+  - 不得判红：既有的「非 UTF-8 文件名的条目不被当作多余条目删除」（仅 Linux，`new/` 整棵不存在）、「跳过项不动并列出」「父目录被换成符号链接」「幂等」「还原改动、新增与删除」。
+  - 变异证据：
+    - `take`：去掉判定 → 挂载内文件进 `tree/`，判红；判定放在列举之后 → 「没有被列举」判红；判定放在 `claim` 之后 → 上限一例判红；判定放在排除名单之前 → `excluded` 一例判红。
+    - `restore`：去掉 (a) → `data` 被列举、`data/*` 进 `failed`，判红；同时去掉 (a) 与 (c) → `data/sub` 被重建、`b.txt` 被删，判红；(a) 只在清单没有该路径或记为目录时生效 → `f` / `l` 一例判红；(b) 退回 `fsp.rm` 递归 → `new/deep/remote/r.txt` 被删，判红；(b) 不比起点自身 → 记录结果；占位目录未删净时不抛 → `x` 一例整次还原抛出，判红；去掉 (c) → 最后一例判红。
+  - 真实挂载上的验证（编排者在 Linux 测试机上做，不进 CI）：对一个 sshfs 挂载与一个 rclone 挂载各跑一次 `take` + `restore`，结果写进 PR。
+  - `uid-isolation` 的快照检查不得因此判红；不改 CI 脚本。
+  Risk packs（10.4d）: File IO / path safety / delete（还原不得删改挂载内的内容）、Legacy compatibility（旧清单没有 `mount` 项；`reason` 枚举增值）。
 - [x] 10.5 快照步骤与路由接线：新模块 `server/src/sessions/turn-snapshot.ts`（自身不抛——未绑定不写行；命令回合写 `command`；其余调用 `take` 并写结果；失败只报告）；`createApp` 用 7.1 / 7.2 的布局与配置构造唯一的快照服务并注入；`rest.ts` 把步骤作为 `beforeDispatch` 传给 `supervisor.prompt`，受理与该调用之间不加 await；受理被补偿后删快照目录。测试（新文件 `server/test/prompt-snapshot.test.ts`，REST seam + fake omp）：workspace-snapshots「受理时做快照」六个场景（含「快照期间停止与删除」）、chat-sessions「Snapshot precedes dispatch and never blocks it」、http-service-skeleton「Shared agent module assembly」里快照服务的装配句。此时登记行已写入但还不经任何视图暴露。
   去重的接线（#939 留下）：调用 `take` 前用 10.2 的「取该工作空间最近一条 `ok`」查出上一份的 `message_id`，作为 `previousMessageId` 传入；查不到时**省略**该字段（传 `null` 会在落盘前抛 `TypeError`，被本模块的「自身不抛」吞成每个空间首回合都 `failed`）。REST 层加一条断言：同一空间连续两个回合、其间未改的文件在两份快照里是同一个 inode（`nlink` ≥ 2）——否则漏接时去重在生产上不生效而测试全绿。
   **实施注记（10.5，fixture 评审补充）**：
