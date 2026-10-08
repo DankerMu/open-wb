@@ -15,11 +15,17 @@ import { existsSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { settle } from "./session-approval-helpers.js";
+import { patch } from "./session-archive-helpers.js";
 import { expectEnvelope, postSessionAction } from "./session-bodyless-rest-helpers.js";
-import { INTERNAL_ERROR_ENVELOPE } from "./session-db-helpers.js";
+import { BAD_REQUEST_ENVELOPE, INTERNAL_ERROR_ENVELOPE } from "./session-db-helpers.js";
 import { FIRST, forkWorlds, messagesOf } from "./session-fork-helpers.js";
 import { held, QUESTION, scriptedAt } from "./session-regenerate-helpers.js";
-import { cookieFor, SESSION_BUSY_ENVELOPE } from "./session-rest-helpers.js";
+import {
+  AGENT_UNAVAILABLE_ENVELOPE,
+  cookieFor,
+  SESSION_ARCHIVED_ENVELOPE,
+  SESSION_BUSY_ENVELOPE,
+} from "./session-rest-helpers.js";
 import { seedMessage, sessionId } from "./session-store-helpers.js";
 import { completeHeldTurn, OWNER_ID, waitForTurn } from "./session-supervisor-helpers.js";
 import {
@@ -63,6 +69,19 @@ function everything(world: FilesWorld) {
     files: contents(world),
     live: world.fixture.supervisor.liveProcessCount(),
     frames: world.scripted.map((child) => child.frames.length),
+  };
+}
+
+/**
+ * `before` after an undo that failed past its prechecks: one more spawn (the temporary process,
+ * exited), the session's own process retired, and nothing else.
+ */
+function afterOneTemp(before: ReturnType<typeof everything>) {
+  return {
+    ...before,
+    rows: { ...before.rows, spawns: before.rows.spawns + 1 },
+    live: 0,
+    frames: [...before.frames, expect.any(Number)],
   };
 }
 
@@ -229,18 +248,35 @@ describe("undo restoring the workspace (message-undo「文件还原与结果」)
 
     // Nothing was committed: the four message rows are there.
     expect(messagesOf(world.fixture.db, world.session)).toHaveLength(4);
-    // Only the temporary process was spawned (and has exited); the session's own was retired.
-    expect(everything(world)).toEqual({
-      ...before,
-      rows: { ...before.rows, spawns: before.rows.spawns + 1 },
-      live: 0,
-      frames: [...before.frames, expect.any(Number)],
-    });
+    expect(everything(world)).toEqual(afterOneTemp(before));
     expect(held(world)).toBe(false);
 
     undone(await undoWith(world, u2, "keep"));
     expect(await messageIds(world)).toEqual([u1, u1 + 1]);
     expect(contents(world)).toEqual(before.files);
+  });
+
+  // Spawns: 0 the session's process, 1 a temporary process that exits instead of answering the
+  // post-branch get_state, 2 and 3 temporary processes that branch onto one fixed file.
+  it("临时进程失败时不还原: a 502 from the temporary process or from the same-file check restores nothing", async () => {
+    const world = await openFilesWorld(worlds, [{}, { exitOnState: true }, {}]);
+    const { u1, u2 } = await editedInSecondTurn(world);
+    at(30);
+    const before = everything(world);
+    expect(before.files).toMatchObject({ "a.txt": REWRITTEN, "out/b.html": expect.any(String) });
+
+    expectEnvelope(await undoWith(world, u2, "restore"), 502, AGENT_UNAVAILABLE_ENVELOPE);
+
+    expect(everything(world)).toEqual(afterOneTemp(before));
+    expect(held(world)).toBe(false);
+
+    // The session is now on the scripted branch file: the next branch leaves it there, which is
+    // the 502 after `branchAt`. The files u1's snapshot would take back are still as they were.
+    undone(await undoWith(world, u2, "keep"));
+    const onBranch = everything(world);
+    expectEnvelope(await undoWith(world, u1, "restore"), 502, AGENT_UNAVAILABLE_ENVELOPE);
+    expect(everything(world)).toEqual(afterOneTemp(onBranch));
+    expect([onBranch.files, held(world)]).toEqual([before.files, false]);
   });
 
   // Spawns: 0 the session's process, 1 the undo's temporary process (three entries).
@@ -361,6 +397,54 @@ describe("undo in a workspace other sessions share (message-undo「共用空间�
     await expectConflict(world, u2);
 
     expect(contents(world)["late.txt"]).toBe("written late by the other session");
+    // T is the message's own `created_at` (20): its registration stamped after B settled (35 >
+    // 30) does not move it.
+    db.prepare("UPDATE chat_turn_snapshots SET created_at = ? WHERE message_id = ?").run(
+      moment(35),
+      u2,
+    );
+    expect(registeredAt(db, world.session)).toEqual([moment(2), moment(35)]);
+    await expectConflict(world, u2);
+  });
+
+  // Spawns: 0 S's process, 1 the fork's temporary process, 2 F's process. Script 3 is what an
+  // undo let through would run on.
+  it("a fork whose only turn ran within the instant it was made is active by its registration alone", async () => {
+    const world = await openFilesWorld(worlds);
+    const { db } = world.fixture;
+    const { u2, fork } = await forkedAfterSecondTurn(world);
+    await turnAt(world, 30, "a turn in the instant of the fork", fork);
+    put(world, "f.txt", "written by the fork's turn");
+    expect(registeredAt(db, fork)).toEqual([moment(30)]);
+    expect(clockOf(db, fork)).toEqual({
+      status: "done",
+      createdAt: moment(30),
+      updatedAt: moment(30),
+    });
+    at(40);
+
+    await expectConflict(world, u2);
+  });
+
+  // Spawns: 0 S's process, 1 the fork's temporary process, 2 F's process; no undo gets further.
+  it("撤回 REST steps 1–5 come before the shared-workspace checks: 400, 400 and session_archived, not undo_conflict", async () => {
+    const world = await openFilesWorld(worlds);
+    const { db } = world.fixture;
+    const { u1, u2 } = await forkActiveAfter(world);
+    await expectConflict(world, u2);
+    // u1 without its registration reads `none`: not undoable, whatever `files` is.
+    db.prepare("DELETE FROM chat_turn_snapshots WHERE message_id = ?").run(u1);
+    const refused = async (name: string, messageId: number, status: number, envelope: object) => {
+      const before = everything(world);
+      expectEnvelope(await undoWith(world, messageId, "restore"), status, envelope);
+      expect([name, everything(world)]).toEqual([name, before]);
+    };
+
+    await refused("an assistant message", u2 + 1, 400, BAD_REQUEST_ENVELOPE);
+    await refused("a message that is not undoable", u1, 400, BAD_REQUEST_ENVELOPE);
+    expect((await patch(world, { archived: true })).statusCode).toBe(200);
+    await refused("archived", u2, 409, SESSION_ARCHIVED_ENVELOPE);
+    expect([world.rt.calls.length, held(world)]).toEqual([3, false]);
   });
 
   // Spawns: 0 S's process, 1 the fork's temporary process, 2 the undo's.
