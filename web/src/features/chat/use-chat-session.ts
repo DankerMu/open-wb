@@ -417,6 +417,8 @@ export function useChatSession() {
     turn;
 
   useEffect(() => {
+    // 待决的撤回冲突不跨选择：换会话或换账号即作废，回来时不再弹出。
+    setUndoConflict(null);
     const pending = pendingCreateSendRef.current;
     const keepOwnedPrompt = ownsCreateSend(pending, client, requestedSessionId);
     const keepOwnedCreate =
@@ -704,14 +706,14 @@ export function useChatSession() {
     focusOnWelcomeRef.current = false;
     composerRef.current?.focus();
   }, [composerDisabled, requestedSessionId]);
-  // 撤回成功后：同样在输入框解锁的那次提交里聚焦。
+  // 撤回落定后：标记只在置位后的第一次提交里有效（无依赖数组）。那次提交输入框若仍锁定，
+  // `focus()` 无效、标记照样清掉，不留到以后无关的解锁。
   useEffect(() => {
-    if (composerDisabled || !focusOnUnlockRef.current) {
-      return;
+    if (focusOnUnlockRef.current) {
+      focusOnUnlockRef.current = false;
+      composerRef.current?.focus();
     }
-    focusOnUnlockRef.current = false;
-    composerRef.current?.focus();
-  }, [composerDisabled]);
+  });
 
   return {
     answerApproval,

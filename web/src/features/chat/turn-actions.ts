@@ -44,7 +44,7 @@ type TurnActionDeps = {
   clientRef: RefObject<ApiClient>;
   closeSource: () => void;
   composerRef: RefObject<HTMLTextAreaElement | null>;
-  /** 置真后，输入框解锁的那次提交里聚焦它（请求期间它是 disabled，`focus()` 无效）。 */
+  /** 置真后的下一次提交里聚焦输入框（请求期间它是 disabled，`focus()` 无效），只此一次。 */
   focusOnUnlockRef: RefObject<boolean>;
   historyGenerationRef: RefObject<number>;
   installSnapshot: (snapshot: ChatMessageSnapshot, ownedClient: ApiClient) => void;
@@ -495,6 +495,8 @@ export function useTurnActions({
       const fail = (error: unknown, write: typeof setPromptError, suffix = "") => {
         if (owned() && !isUnauthorized(error)) {
           write({ client: ownedClient, sessionId, message: `${errorMessage(error)}${suffix}` });
+          // 对话框关闭时 `撤回` 按钮是禁用的，焦点还不回去：落在 body 上就交给输入框。
+          focusOnUnlockRef.current = document.activeElement === document.body;
         }
         release();
       };

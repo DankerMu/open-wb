@@ -394,6 +394,55 @@ describe("撤回动作", () => {
     expect(buttons(UNDO_LABEL).map((b) => b.disabled)).toEqual([false]);
   });
 
+  it("同步在途闩：同一次提交前的两次点击只发一次请求", async () => {
+    const undo = deferredResponse();
+    const { fetchMock } = await mount(S, { [UNDO]: () => undo.promise });
+    const button = secondUndo();
+    act(() => {
+      button.click();
+      button.click();
+    });
+    await flush();
+    expect(undoBodies(fetchMock)).toEqual(['{"messageId":3,"files":"restore"}']);
+    expect(textarea().disabled).toBe(true);
+  });
+
+  it("401：交给登录，不显示错误与对话框，不重读", async () => {
+    const { fetchMock, source } = await mount(S, {
+      [UNDO]: () => jsonResponse(envelope("unauthorized", "登录已失效"), 401),
+    });
+    const reads = calls(fetchMock, MESSAGES).length;
+    await clickUndo();
+    expect(await screen.findByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeTruthy();
+    expect(undoBodies(fetchMock)).toHaveLength(1);
+    expect(alerts()).toEqual([]);
+    expectNoDialog();
+    expect(screen.queryByText("登录已失效")).toBeNull();
+    expect(calls(fetchMock, MESSAGES)).toHaveLength(reads);
+    expect(source.closeCount).toBe(1);
+  });
+
+  it("重读到的快照仍在运行（输入框没有解锁）：焦点标记不留到之后无关的解锁", async () => {
+    const running = snapshotOf({ ...REWOUND_SESSION, status: "running" }, [
+      user(1, "第一个问题", "available"),
+      assistant(2, "", "running"),
+    ]);
+    const { router } = await mount(S, { [UNDO]: () => undone(() => jsonResponse(running)) });
+    await clickUndo();
+    await waitFor(() => expect(transcript()).toEqual(["第一个问题", ""]));
+    expect(textarea().value).toBe("第二个问题");
+    expect(textarea().disabled).toBe(true);
+    expect(document.activeElement).not.toBe(textarea());
+
+    await act(async () => {
+      await router.navigate(`/?session=${OTHER_SESSION_ID}${QUERY}`);
+    });
+    await flush();
+    await waitFor(() => expect(textarea().disabled).toBe(false));
+    expect(transcript()).toEqual(["B 问", "B 回答"]);
+    expect(document.activeElement).not.toBe(textarea());
+  });
+
   it("草稿为空时同样写入原文；撤回第一条后线程为空", async () => {
     const empty = snapshotOf({ ...REWOUND_SESSION, status: "idle" }, []);
     const { fetchMock } = await mount(S, {
@@ -577,18 +626,68 @@ describe("撤回冲突对话框", () => {
     },
   );
 
-  it("重发的失败（含再次 undo_conflict）进输入框上的错误，不再开对话框", async () => {
-    const { fetchMock } = await mountConflict(CONFLICT);
+  it("重发的失败（含再次 undo_conflict）进输入框上的错误，不再开对话框，焦点交给输入框", async () => {
+    const second = deferredResponse();
+    const { fetchMock } = await mountConflict(() => second.promise);
     fireEvent.click(
       within(conflictDialog() as HTMLElement).getByRole("button", { name: "连文件一起还原" }),
     );
     await flush();
     await waitFor(() => expectNoDialog());
+    expect(document.activeElement).toBe(document.body);
+
+    second.resolve(CONFLICT());
+    await flush();
+    expectNoDialog();
     expect(undoBodies(fetchMock)).toHaveLength(2);
     expect(alerts()).toEqual(["别的会话动过"]);
     expect(transcript()).toEqual(FULL);
     expect(textarea().value).toBe("半句话");
     expect(textarea().disabled).toBe(false);
+    expect(document.activeElement).toBe(textarea());
+  });
+
+  it.each([
+    ["只撤回对话 两次", "只撤回对话", "只撤回对话"],
+    ["只撤回对话 再 连文件一起还原", "只撤回对话", "连文件一起还原"],
+  ] as const)("对话框里同一次提交前的两次点击（%s）恰再发一次", async (_, first, then) => {
+    const second = deferredResponse();
+    const { fetchMock } = await mountConflict(() => second.promise);
+    const dialog = within(conflictDialog() as HTMLElement);
+    const one = dialog.getByRole("button", { name: first });
+    const two = dialog.getByRole("button", { name: then });
+    act(() => {
+      one.click();
+      two.click();
+    });
+    await flush();
+    expect(undoBodies(fetchMock)).toEqual([
+      '{"messageId":3,"files":"restore"}',
+      '{"messageId":3,"files":"keep"}',
+    ]);
+  });
+
+  it("换会话后冲突作废：回到原会话不再弹出对话框，没有新的 undo 请求，输入框可用", async () => {
+    const { fetchMock, router } = await mountConflict();
+    await act(async () => {
+      await router.navigate(`/?session=${OTHER_SESSION_ID}${QUERY}`);
+    });
+    await flush();
+    expectNoDialog();
+    expect(transcript()).toEqual(["B 问", "B 回答"]);
+    await act(async () => {
+      await router.navigate(A_URL);
+    });
+    await flush();
+    act(() => latestSource().emitOpen());
+    await flush();
+    expect(transcript()).toEqual(FULL);
+    expectNoDialog();
+    expect(undoBodies(fetchMock)).toHaveLength(1);
+    expect(textarea().disabled).toBe(false);
+    typeDraft("还能打字");
+    expect(textarea().value).toBe("还能打字");
+    expect(alerts()).toEqual([]);
   });
 });
 
