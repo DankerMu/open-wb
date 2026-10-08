@@ -8,7 +8,7 @@
 > 通用纪律：
 > - 每组按各自的 `Minimal mergeable slice` 拆成小 PR，每个 PR 合入后 `make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿、主干可运行。PR diff 以 400 行为评审参考，超出时按任务再拆。
 > - **严格键集同刀落地**：会话 DTO 的三键（组 1）、消息 `undo` 与 prompt 202 的 `undo`（组 10）在服务端与 web 解析必须同一个 PR 合入，否则会话页整体失效。这两组因此跨 server 与 web，是有意的例外。
-> - **行数上限 800**：`server/src/sessions/store.ts`（797）不再加行，新逻辑进新模块；`supervisor.ts`（提案时 800；10.3 之后 761）只按 design D15 列出的三处改，且先做腾行（任务 10.3）；`server/test/session-rest.test.ts`（789）、`web/e2e/ui-walk-sessions.spec.ts`（776）、`web/e2e/ui-walk-layout.ts`（793）不净增行，新测试与新走查步骤写进新文件。
+> - **行数上限 800**：`server/src/sessions/store.ts`（797）不再加行，新逻辑进新模块；`supervisor.ts`（提案时 800；10.3 之后 761）只按 design D15 列出的三处改，且先做腾行（任务 10.3）；`server/test/session-rest.test.ts`（789）、`web/e2e/ui-walk-sessions.spec.ts`（776；19.2 时 699，为第二个旅程的接线可净增至多 20 行）、`web/e2e/ui-walk-layout.ts`（793）不净增行，新测试与新走查步骤写进新文件。
 > - **knip 的真实前提**：`knip.json` 里 server 与 web 两个 workspace 的 `entry` 都含 `test/**/*.test.ts(x)`，被自己的测试文件引用的导出不算未引用。所以带单测的新模块可以先于它的生产调用方合入；切片行里凡是把任务捆在一起的，理由都是运行期的（主干行为或门禁会坏），不是 knip。
 > - **分层守卫**：`web/src/features/chat/` 下新增或重写的 `.ts`/`.tsx` 在同一个 PR 里登记进 `web/test/ui-layering.test.ts` 的 `MIGRATED_AREAS` 并同步清单断言；已登记文件只可从 `web/src/ui` 导入 `Icon`、`IconName`、`BrandMark`、`useEscapeFallback`，不得导入 `useToast`、`Menu`、`Dialog`、`Button` 等旧基元。`chat-module-layout.test.ts` 的导入方向与导出归属约束照旧。
 > - **拷入层**（`web/src/components/ui`、`web/src/components/assistant-ui`）不改：本 change 只用已拷入的 `button`、`input`、`dialog`、`alert-dialog`、`dropdown-menu`、`collapsible`、`tooltip`。若确需改动，只限 ADR-0013 的六类修改并在 PR 说明；不拷入新的 registry 组件。`web/src/ui/**` 冻结。
@@ -642,9 +642,22 @@ Minimal mergeable slice: 18.1 + 18.2 一个 PR（没有冲突对话框时 `undo_
 既有步骤的改写已随功能 PR 完成：`session-meta.hurl` 的键数（1.5）与无 body 创建（5.8）、`chat.hurl` 与 `ui-walk.spec.ts` 的清理（5.8）、走查第 6 步（14.5）与第 7、11 步（15.5）。本组只有追加的断言。
 
 - [x] 19.1 `smoke/session-meta.hurl` 第 8 步的归档断言（依赖组 2；可在组 5 之后任何时候合入）：`PATCH {"archived":true}` → 200 且 `archivedAt` 非 null、prompt → 409 `session_archived`、`PATCH {"archived":false}` → 200，随后的 `DELETE` 与 tree 404 沿用 5.8 的断言。`make smoke` 连跑两遍通过，文件不留下它创建的会话与临时空间（chat-harness「临时空间与归档在冒烟里可见」）。
-- [ ] 19.2 追加的六步（chat-harness「UI 走查临时空间、撤回与归档」，写进 `web/e2e/ui-walk-session-list.ts`）：临时空间（含产物卡预览与文件变更卡无 `查看详情`）、列表事件、撤回、撤回后继续与 fork 验证、归档、删除。两个 project 都跑；error oracle 的预期 401 次数不变。
-- [ ] 19.3 量 `make ui-walk` 总时长并写进 PR：须在既有 `globalTimeout` 内。超出时停下来报告（改 `globalTimeout` 要改规格，不在实现期自行放宽）。
-- [ ] 19.4 变异证据：按 chat-harness 两个「候选实现的反例」场景各做一次（撤回不还原文件、临时空间进列表、临时空间会话不渲染产物卡、删除后目录残留、归档会话接受 prompt），确认对应断言判红。
+- [x] 19.2 追加的六步（chat-harness「UI 走查临时空间、撤回与归档」，写进 `web/e2e/ui-walk-session-list.ts`）：临时空间（含产物卡预览与文件变更卡无 `查看详情`）、列表事件、撤回、撤回后继续与 fork 验证、归档、删除。两个 project 都跑；error oracle 的预期 401 次数不变。
+- [x] 19.3 量时长并写进 PR：两个 project 各旅程的单测时长须在既有单测 `timeout`（30 秒）内，`make ui-walk` 总时长须在既有 `globalTimeout` 内。超出时停下来报告（改这两个值要改规格，不在实现期自行放宽）。
+- [x] 19.4 变异证据：按 chat-harness 走查的「候选实现的反例」场景六项各做一次（撤回不还原文件、撤回前弹确认框、撤回后不回填草稿、临时空间进列表、临时空间会话不渲染产物卡、删除最后一个会话后空间仍在），确认对应断言判红。「归档会话接受 prompt」属冒烟场景，证据见 19.1 的 PR。
+  **实施注记（19.2–19.4，fixture 评审补充，#973）**：
+  - 时间：`web/playwright.config.ts` 的单测 `timeout` 是 30 秒、`globalTimeout` 300 秒。既有 sessions 旅程 desktop-light 约 12.5 秒、mobile-dark 约 15.3 秒，六步估计再加 10–14 秒，所以六步作为 `ui-walk-sessions.spec.ts` 里紧随其后的第二个串行 `test()`（自带 login、logout 与 oracle 实例，每实例预期 401 仍是 2 次）。spec 文件现 699 行，允许为这段接线净增至多 20 行；步骤本体都在 helper。PR 给出两个 project 两个旅程各自的单测时长与 `make ui-walk` 总时长。任何一个旅程超过 30 秒就停下报告，不改 timeout。
+  - 接线：六步写进 `web/e2e/ui-walk-session-list.ts`，导出一个入口。spec 里私有的 `rowMenu`、`menuItem`、`expectFocusInNavOverlay`、`expectTurnDone`、`welcomeHeading` 等要用就搬进 helper 再导回（jscpd）。第 6 步复用 `expectDeletedWithoutToast`，产物预览复用 `ui-walk-steps.ts` 的 `walkArtifactPreview`。不改 `server/`、`web/src`、上游夹具，不开第二个浏览器上下文。
+  - 受控上游：现有的 `WORKBUDDY_WRITE` 标记足够（`server/test/support/fake-upstream.mjs` 在历史里没有 `tool` 角色时发 `write` 调用写 `workbuddy-report.html`；写入级工具不触发审批）。
+  - 第 1 步：先挂 `request` / `requestfinished` / `requestfailed` 监听，再自己 `page.goto("/")`；断言按钮 `任务启动于 未选择`；发送后观察 `POST /api/sessions`（body 无 `workspaceId` 键，201 的 `temporaryWorkspace === true`），id 一到手就记进清理持有者。完成后：能力栏只读文本、文件变更卡（路径恰为 `workbuddy-report.html`、标 `写入`、`查看详情` 计数 0）、`walkArtifactPreview`、`GET /api/workspaces` 不含该 id、tree 的 `entries` 名字恰为 `["workbuddy-report.html"]`。不要断言 `临时空间` 分组的条目总数（别的步骤的会话可能还在该组）。
+  - 第 2 步：按 pathname 精确等于 `/api/sessions/events` 计数（单会话流是 `/api/sessions/<id>/events`）；`运行中` 用可访问名断言，回车后立刻读、中间不插别的断言。没有 gate，回合约 2 秒，mobile 要先开覆盖层才看得到列表：若 `运行中` 读不稳，停下报告（确定性的办法是 gate，要改规格的 prompt 文本）。
+  - 第 3 步：点击前断言 `撤回` 没有 `aria-disabled`；`messageId` 从 `GET …/messages` 取；观察 `POST …/undo`（body 严格等于 `{messageId, files:"restore"}`，200）；之后空态、输入框 `toHaveValue(prompt)`、tree 不含该文件、`已撤回，以下文件未还原` 计数 0、没有轻提示与 `alertdialog`。撤回必须在 fork 之前（此时空间里只有这一个会话，不会有冲突与 `session_busy`）。
+  - 第 4 步：输入框已聚焦，直接回车；等完成；tree 重新含文件；取新用户消息 id，`page.request.post(…/fork)` 期望 201，`session.id` 立刻记进清理持有者，再 `DELETE` 期望 204。进第 5 步前等侧栏里同标题条目回到 1 条（fork 的删除靠列表事件对齐，否则第 6 步的确认框可能读成共用临时空间的文案）。
+  - 第 5 步：行菜单 `归档`（须等回合完成）；主区提示与输入框计数 0；`已归档` 视图 listitem 恰 1 条（依赖该账号没有别的已归档会话，CI 新库成立）；行菜单的 menuitem `恢复`（主区另有同名 button，按角色区分）；`没有匹配的任务`；`返回会话列表`。mobile 上每个侧栏回调末尾等焦点回到覆盖层内。
+  - 第 6 步：确认框文本含 `临时空间里的文件会一并删除。`；确认后 `expectDeletedWithoutToast`、欢迎态、tree 404。
+  - 清理：helper 自带 `try/finally`，对临时会话 id 与 fork id 各调既有的删除清理（接受 204 或 404）。两个 project 串行、共享服务与库。
+  - error oracle：REST 探测全走 `page.request`；页面自己的请求不应有 4xx。
+  - 19.4（各需重建并重启服务；写进 PR）：撤回不还原文件（让 `undo.ts` 的 restore 回调空转，不要弄成 500）→ 第 3 步 tree；临时空间进列表（`workspaces/store.ts` 去掉 `temporary = 0`）→ 第 1 步；不渲染产物卡（`workspace-list.ts` 的 `resolveSessionSpace`）→ 第 1 步预览；删除最后一个会话后空间行不删（`store-metadata.ts`）→ 第 6 步 tree 404；撤回前弹确认框、撤回不回填草稿（`turn-actions.ts` 的 `undoTurn`）→ 第 3 步。变异只在本地做、逐个还原，不提交。
 
 Suggested fixture level: expanded - CI 门禁的真实栈冒烟与走查、总时长上限、与真实 omp 的回退路径
 Minimal mergeable slice: 19.1 单独可合；19.2 + 19.3 在组 18 之后一个 PR
@@ -655,7 +668,7 @@ Minimal mergeable slice: 19.1 单独可合；19.2 + 19.3 在组 18 之后一个 
 - [x] 20.2 ADR-0013 增补（2026-10-06，change `s1f-session-list-temp-space`）：不用 `adapters.threadList`（「接入方式」对应一行的最终决定与理由）；会话列表动作的提示退场与失败呈现规则；会话视图由八键扩为十一键。
 - [x] 20.3 ADR-0010 增补：`<OMP_STATE_DIR>/snapshots`（`0700`）进入托管布局；遍历期间有变动的快照不可还原（目录指纹的前后比较，#1190）及其残余（同一时间刻度内的改动、FUSE 挂载上的实测结果（已于 2026-10-08 写入 ADR-0010：sshfs 粒度 1 秒，rclone mount 目录时间不更新）、同一时间戳刻度内完成的等长原地改写、经 `mmap` 写入而时间戳未更新的改动（复制后的复核看不到，#1206））；临时空间目录经 trash 中转删除与 `EXDEV` 原地删除的残余；快照遍历（`take`）读到工作空间之外的两种残余（中间路径分量被替换；目录条目——含工作空间根自身——在 `lstat` 与 `readdir` 之间被换成符号链接、外部目录被整棵复制）与缓解（普通文件按句柄 `O_NOFOLLOW` 读取）；快照还原由 app 用户在共享目录里写 / 删文件的残余与缓解（逐级 `lstat`、本会话进程先退役、同空间运行时拒绝）；还原写回的文件权限位规则（属主属组读写一律补上）；升级说明（无需手工步骤）。
 - [x] 20.4 部署与运维说明（放在现有部署文档或 README 的配置节，先 grep 现有位置，不新建重复文档）：四个 `SNAPSHOT_*` 环境变量与默认值；默认排除名单只含依赖目录、`.git` 进快照，带大仓库的空间更容易触发条目 / 总量上限以及可以怎么调（调大上限，或把 `.git` 加回排除名单并接受提交不随撤回还原）；`snapshots` 目录的磁盘规划与进程被杀后可能残留的半份快照目录（停服务后可手工删除没有登记行的目录）；每个会话页标签页多一条 SSE 与 HTTP/1.1 连接数的提示；回滚后可手工清理的目录。
-- [ ] 20.5 `IMPLEMENTATION_PLAN.md`：S1f 的 change C 状态行与交付记录（只记事实，不改 owner 决定的条文）；`docs/architecture/system.md` 若列有模块 / 端点清单则补新端点与新模块。
+- [x] 20.5 `IMPLEMENTATION_PLAN.md`：S1f 的 change C 状态行与交付记录（只记事实，不改 owner 决定的条文）；`docs/architecture/system.md` 若列有模块 / 端点清单则补新端点与新模块。
 - [x] 20.6 `docs/acceptance/functional-checklist.md` 收口：核对组 14–18 新增的 SL / CH 行齐全、ID 不重复、全部 `待签`、格式守卫通过。（design D16 的九项「起草者自定的呈现细节」在建 Epic 时原样列进 Epic 描述供 owner 知悉；这是建 issue 的动作，不是实现任务，也不卡任何任务。）
 - [ ] 20.7 归档前对底：本 change 归档之前，用当时的 `openspec/specs/**` 对本 change 的每一条 MODIFIED 重新 diff（按条文、按场景）。diff 里只允许出现 design D15 重叠表与 D15 首段列出的增量；若 S1g 或 D 的内容已先进入主规格（次序被打乱），把它们的句子与场景并回本 change 的对应条文、计数改为「当时的值加本 change 的增量」后再归档。核对结果写进归档 PR 的描述。
 
