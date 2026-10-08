@@ -90,7 +90,7 @@ function expect038Applied(db: DatabaseSync): void {
       )
       .all(),
   ).toEqual([{ name: "temporary", type: "INTEGER", not_null: 1, dflt_value: "0", pk: 0 }]);
-  expect(columnNames(db, "chat_sessions")).toEqual(COLUMNS_037.chat_sessions);
+  expect(columnNames(db, "chat_sessions").slice(0, 14)).toEqual(COLUMNS_037.chat_sessions);
   expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
 }
 
@@ -198,7 +198,7 @@ describe("migration 038 workspace temporary flag", () => {
 
     const retried = withOpenDb(file, (db) => {
       expect038Applied(db);
-      expect(ledgerRows(db).slice(11)).toEqual([
+      expect(ledgerRows(db).slice(11, 13)).toEqual([
         [12, MIGRATION_038],
         [13, MIGRATION_039],
       ]);

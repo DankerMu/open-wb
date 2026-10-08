@@ -119,7 +119,14 @@ Minimal mergeable slice: atomic - 写出器签名变化必须与其唯一调用�
 
 ## 4. core/db — 迁移 040、041、042
 
-- [ ] 4.1 `server/src/core/db/migrations/040_chat_session_composer.sql`（session-composer-settings「迁移 040」）。测试新文件 `server/test/core-db-session-composer.test.ts`：新库与存量库、列约束（`reasoning_effort` 的 CHECK 是七个强度名，`auto` 被拒绝）、中途失败原子回滚三条场景；受信任迁移目录计数断言加一（`core-db-catalog.test.ts` 等处）。
+- [x] 4.1 `server/src/core/db/migrations/040_chat_session_composer.sql`（session-composer-settings「迁移 040」）。测试新文件 `server/test/core-db-session-composer.test.ts`：新库与存量库、列约束（`reasoning_effort` 的 CHECK 是七个强度名，`auto` 被拒绝）、中途失败原子回滚三条场景；受信任迁移目录计数断言加一（`core-db-catalog.test.ts` 等处）。
+  **实施注记（4.1，fixture 评审补充，#993）**：
+  - 040 的内容是 `chat_sessions` 上的三条 ADD COLUMN（没有新表；新表是 041），逐字照规格、顺序 `approval_mode`、`model_id`、`reasoning_effort`：都可空、无 DEFAULT；`approval_mode` 带 `CHECK (approval_mode IN ('always-ask','write','yolo'))`，`reasoning_effort` 带 `CHECK (reasoning_effort IN ('off','minimal','low','medium','high','xhigh','max'))`。文件不含事务语句、DEFAULT、索引；头注释照 037 的风格。存量行的 `NULL IN (...)` 求值为 NULL、CHECK 通过，不需要 `IS NULL OR`。
+  - 「紧随上一个回执」：`POS = TRACKED_MIGRATION_FILENAMES.indexOf(MIGRATION_040)`；存量库用 `TRACKED_MIGRATION_FILENAMES.slice(0, POS)` 做种；断言 `ledgerRows(db)[POS]` 等于 `[POS+1, MIGRATION_040]`、前一格是前一个文件、040 的回执恰一条。不用 `.at(-1)`、不写死 `14`。
+  - 三条场景照 `core-db-session-archive.test.ts` 与 `core-db-turn-snapshots.test.ts` 的先例：新库（`:memory:` 与新文件各一例）；存量库（种到 039、前后状态相等、三列全 NULL、`PRAGMA foreign_key_check` 为空、重开两次目录不变）；三列各断言 `pragma_table_info` 的 `notnull=0`、`dflt_value=null`；列约束（`''`、`Write`、`High`、`auto` 被拒）。
+  - 回滚场景预置的冲突列用 **`reasoning_effort`**（040 的最后一条语句），失败后断言 `approval_mode`、`model_id` 都不在 `chat_sessions` 上、回执与数据不变，`DROP COLUMN reasoning_effort` 后重开 040 恰一次。预置第一列证明不了回滚（规格该场景的括号已随本 PR 改正）。
+  - 必须同步的既有断言（以 `make check` 的红项为准，下面是起点）：`server/test/core-db-helpers.ts`（`MIGRATION_040`、`COMPLETE_CATALOG`、计数 13 → 14）、`core-db-session-fixture.ts`（`expectChatSchema` 列尾加三行）、`core-db-chat-schema.test.ts`、`migration-034.test.ts`（列尾、回执列表、排除表、`.at(-1)` 改成钉 039 的下标）、`core-db-chat-step-output.test.ts`（排除表）、`core-db-session-todo.test.ts`、`core-db-turn-snapshots.test.ts`、`core-db-workspace-temporary.test.ts`。凡 `slice(-n)` / `.at(-1)` / 整列相等的写法改成钉住具体下标或前缀比较，免得 041、042 来时再改一遍。不放宽、不删任何断言。
+  - 属于 040 的变异（写进 PR；任务号 4.4 在 #995 勾）：去掉任一列的 CHECK → 「列约束」红；把 `auto` 加回强度 CHECK → 红；任一列加 DEFAULT → 「新库与存量库」红。
 - [ ] 4.2 `041_account_composer_prefs.sql`（「迁移 041」）。测试并入同文件：建表与约束、随账号级联。
 - [ ] 4.3 `042_chat_message_attachments.sql`（message-attachments「迁移 042」）。测试并入同文件：新库与存量库、中途失败原子回滚。
 - [ ] 4.4 变异证据：去掉任一 CHECK、给列加缺省值、把 041 写成 `IF NOT EXISTS` → 对应场景判红。三个文件按编号顺序各自独立应用。本组在 C 的 037–039 合入之后才合入（见文首；不得让 040 先于 037–039 进入任何持久库）；测试断言 040「紧随上一个回执」而不是写死序数。

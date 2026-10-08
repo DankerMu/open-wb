@@ -297,6 +297,9 @@ describe("core/db chat schema", () => {
         ["pinned_at", "INTEGER", 0, null, 0, 0],
         ["todo", "TEXT", 0, null, 0, 0],
         ["archived_at", "INTEGER", 0, null, 0, 0],
+        ["approval_mode", "TEXT", 0, null, 0, 0],
+        ["model_id", "TEXT", 0, null, 0, 0],
+        ["reasoning_effort", "TEXT", 0, null, 0, 0],
       ]);
       expect(columnInfo(db, "chat_messages")).toEqual([
         ["id", "INTEGER", 0, null, 1, 0],

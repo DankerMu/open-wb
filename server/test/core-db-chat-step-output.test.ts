@@ -21,6 +21,7 @@ import {
   MIGRATION_037,
   MIGRATION_038,
   MIGRATION_039,
+  MIGRATION_040,
   removeTempDirs,
   TRACKED_MIGRATION_FILENAMES,
   tempDir,
@@ -68,11 +69,12 @@ function seedPre033Database(path: string): void {
       asset.filename !== MIGRATION_036 &&
       asset.filename !== MIGRATION_037 &&
       asset.filename !== MIGRATION_038 &&
-      asset.filename !== MIGRATION_039,
+      asset.filename !== MIGRATION_039 &&
+      asset.filename !== MIGRATION_040,
   );
   const filenames = assets.map((asset) => asset.filename);
   expect(filenames).toEqual(TRACKED_MIGRATION_FILENAMES.slice(0, 6));
-  expect(filenames.at(-1)).toBe(MIGRATION_032);
+  expect(filenames[5]).toBe(MIGRATION_032);
   withDatabase(path, (db) => {
     createCanonicalLedger(db);
     db.exec("PRAGMA foreign_keys = ON");

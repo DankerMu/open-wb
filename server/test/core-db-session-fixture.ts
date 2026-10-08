@@ -44,7 +44,7 @@ export const W_U2 = "22222222222222222222222222222222";
 export const W_MISSING = "99999999999999999999999999999999";
 
 // [name, type, notnull, dflt_value, pk] of the current schema: 032/033/034 columns, the 035 tail,
-// then the 036 `todo` and 037 `archived_at` tails on chat_sessions.
+// then the 036 `todo`, 037 `archived_at` and 040 composer-setting tails on chat_sessions.
 type ColumnInfo = [string, string, number, string | null, number];
 const CHAT_TABLE_INFO = {
   chat_sessions: [
@@ -62,6 +62,9 @@ const CHAT_TABLE_INFO = {
     ["pinned_at", "INTEGER", 0, null, 0],
     ["todo", "TEXT", 0, null, 0],
     ["archived_at", "INTEGER", 0, null, 0],
+    ["approval_mode", "TEXT", 0, null, 0],
+    ["model_id", "TEXT", 0, null, 0],
+    ["reasoning_effort", "TEXT", 0, null, 0],
   ],
   chat_messages: [
     ["id", "INTEGER", 0, null, 1],
@@ -91,7 +94,7 @@ const SESSION_FOREIGN_KEYS = [
   { from: "workspace_id", table: "workspaces", to: "id", on_delete: "SET NULL" },
 ];
 
-/** Drops the trailing columns later migrations appended (035: 3/1/1, 036 and 037: one more each on sessions). */
+/** Drops the trailing columns later migrations appended (035: 3/1/1; on sessions 036 and 037 one more each, 040 three). */
 function namesBefore035(info: ColumnInfo[], newColumns: number): string[] {
   return info.slice(0, info.length - newColumns).map(([name]) => name);
 }
@@ -100,7 +103,7 @@ function namesBefore035(info: ColumnInfo[], newColumns: number): string[] {
 export const PRIOR_COLUMNS = {
   accounts: ["id", "account", "role", "disabled", "password_hash"],
   workspaces: ["id", "owner_id", "name", "dir", "created_at"],
-  chat_sessions: namesBefore035(CHAT_TABLE_INFO.chat_sessions, 5),
+  chat_sessions: namesBefore035(CHAT_TABLE_INFO.chat_sessions, 8),
   chat_messages: namesBefore035(CHAT_TABLE_INFO.chat_messages, 1),
   chat_steps: namesBefore035(CHAT_TABLE_INFO.chat_steps, 1),
   chat_approvals: [
