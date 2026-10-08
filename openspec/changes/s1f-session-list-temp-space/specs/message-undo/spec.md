@@ -87,7 +87,7 @@ prompt 路由的 202 SHALL 为 `{userMessageId, assistantMessageId, undo}`，`un
 ### Requirement: 文件还原与结果
 `files` 为 `restore` 或 `force` 时，undo SHALL 在「对话原地回退」的第 4 步，用被撤回消息的快照（`<快照根>/<workspaceId>/<messageId>`）对会话的工作空间根调用 workspace-snapshots「还原」，使工作空间回到该消息发出之前的状态（快照里有的都还原，含 `.git`；`skipped` 里的路径——超限文件、排除的依赖目录、读不了的条目——保持现状）；`force` 与 `restore` 的差别只在前置校验是否因冲突而拒绝。`files` 为 `keep` 时 SHALL NOT 读取快照、SHALL NOT 改动工作空间内的任何条目。还原在本会话没有存活进程时进行（第 1 步已退役）。还原抛错（清单缺失或损坏、工作空间根不是目录等结构性失败）SHALL 使请求以通用 5xx 结束，不执行第 5 步，对话保持原样；再次请求可重试。
 
-200 的 `files` SHALL 为 `{mode, restored, removed, skipped, failed}`：`mode` 为 `restored`（`restore` / `force`）或 `kept`（`keep`）；`restored`（内容被写回的文件数与被重建的符号链接数）、`removed`（被删除的条目数）为非负整数，取自 workspace-snapshots「还原」的返回值（`kept` 时为 0）；`skipped` 为 `{count, paths}`，`paths` 是至多 200 项 `{path, reason}`（`reason` ∈ `too_large|excluded|unreadable|special`），`count` 是总数；`failed` 为 `{count, paths}`，`paths` 是至多 200 项 `{path}`。`kept` 时二者均为 `{count:0, paths:[]}`。其中的 `path` 都是相对工作空间根的路径，SHALL NOT 含绝对路径。个别条目还原失败（进入 `failed`）SHALL NOT 使请求失败：对话照常回退。
+200 的 `files` SHALL 为 `{mode, restored, removed, skipped, failed}`：`mode` 为 `restored`（`restore` / `force`）或 `kept`（`keep`）；`restored`（内容被写回的文件数与被重建的符号链接数）、`removed`（被删除的条目数）为非负整数，取自 workspace-snapshots「还原」的返回值（`kept` 时为 0）；`skipped` 为 `{count, paths}`，`paths` 是至多 200 项 `{path, reason}`（`reason` ∈ `too_large|excluded|unreadable|special|name_encoding`），`count` 是总数；`failed` 为 `{count, paths}`，`paths` 是至多 200 项 `{path}`。`kept` 时二者均为 `{count:0, paths:[]}`。其中的 `path` 都是相对工作空间根的路径，SHALL NOT 含绝对路径。个别条目还原失败（进入 `failed`）SHALL NOT 使请求失败：对话照常回退。
 
 #### Scenario: 连文件一起还原
 - **WHEN** 绑定工作空间 W 的会话，第二轮（u2）里 fake omp `edit-write` 场景改写了 `a.txt` 并新建了目录 `out/` 与其下的 `out/b.html`；所有者 undo `{messageId:<u2>, files:"restore"}`
