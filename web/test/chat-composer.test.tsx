@@ -4,12 +4,7 @@ import { cleanupChatPage, renderChatPage } from "./chat-page-support.js";
 import { chatSnapshot, FakeEventSource, latestSource, SESSION_ID } from "./chat-stream-support.js";
 import { NULL_SESSION_META } from "./session-meta-fixtures.js";
 import { deferredResponse, jsonResponse } from "./support.js";
-import {
-  COLOR_LITERAL_PATTERNS,
-  readRepoFile,
-  stripComments,
-  topLevelBlocks,
-} from "./ui-support.js";
+import { readRepoFile } from "./ui-support.js";
 
 const COMPOSER_NAME = "给助手发消息";
 const HINT = "Enter 发送 · Shift+Enter 换行";
@@ -53,20 +48,6 @@ function composerParts(input: HTMLElement) {
     throw new Error("expected the composer toolbar inside the card");
   }
   return { form, card, toolbar };
-}
-
-/** 样式规则的选择器，`@media` 等 at-rule 块展开为其内的规则（递归）。 */
-function ruleSelectors(css: string): string[] {
-  return topLevelBlocks(css).flatMap((block) =>
-    block.prelude.startsWith("@") ? ruleSelectors(block.body) : [block.prelude],
-  );
-}
-
-/** chat.css 的归属规则：每条规则的选择器都属于会话列表（含新建会话与重命名）。 */
-function foreignSelectors(css: string): string[] {
-  return ruleSelectors(css).filter(
-    (selector) => !/\.chat-(session|new-session|rename)\b/.test(selector),
-  );
 }
 
 function precedes(first: Node, second: Node) {
@@ -215,35 +196,16 @@ describe("(C5) static contract", () => {
     expect(view).not.toContain("新建会话");
   });
 
-  it("single-column layout lives in the view; chat.css holds no rule (the row menu and the rename dialog moved to Tailwind classes)", () => {
+  it("single-column layout lives in the view; the row menu and the rename dialog carry no legacy class", () => {
     const view = readRepoFile("web/src/features/chat/conversation-view.tsx");
     expect(view).toContain("grid-cols-[minmax(0,1fr)]");
     expect(view).not.toMatch(/chat-(layout|main)/);
-    const css = stripComments(readRepoFile("web/src/features/chat/chat.css"));
-    expect(css).not.toContain(".chat-sidebar");
-    // 条目菜单与重命名对话框也已改用 Tailwind：文件留到守卫不再要求它为止，一条规则都没有。
-    expect(ruleSelectors(css)).toEqual([]);
-    expect(foreignSelectors(css)).toEqual([]);
+    // 条目菜单与重命名对话框已改用 Tailwind；chat.css 已删除（分层守卫断言目录下没有 .css）。
     for (const source of ["session-menu.tsx", "rename-dialog.tsx", "session-sidebar.tsx"]) {
       expect(readRepoFile(`web/src/features/chat/${source}`)).not.toMatch(
         /chat-(session-more|session-item|rename-(form|actions))/,
       );
     }
-  });
-
-  it("the ownership rule reaches into at-rule blocks: a foreign selector inside @media is reported", () => {
-    const sample = [
-      ".chat-session-more { flex: none; }",
-      "@media (hover: hover) and (min-width: 761px) {",
-      "  .chat-session-item:hover .chat-session-more { opacity: 1; }",
-      "  .chat-composer { opacity: 0; }",
-      "}",
-      ".welcome { margin: 0; }",
-    ].join("\n");
-    expect(foreignSelectors(sample)).toEqual([".chat-composer", ".welcome"]);
-    // 真实文件已没有任何块（规则与 @media 都已删除）：进到块里的能力由上面的样本证明。
-    const css = stripComments(readRepoFile("web/src/features/chat/chat.css"));
-    expect(topLevelBlocks(css)).toEqual([]);
   });
 
   it("the single-column shell has no gap class, plain or narrow-prefixed; the chat column keeps gap-2", async () => {
@@ -256,23 +218,6 @@ describe("(C5) static contract", () => {
     expect(shell.classList.contains("grid-cols-[minmax(0,1fr)]")).toBe(true);
     expect([...shell.classList].filter((token) => /(^|:)-?gap-/.test(token))).toEqual([]);
     expect(column.classList.contains("gap-2")).toBe(true);
-  });
-
-  it("chat.css drops the badge styles and holds no composer rules", () => {
-    const raw = readRepoFile("web/src/features/chat/chat.css");
-    const css = stripComments(raw);
-    for (const removed of [
-      ".chat-session-status",
-      ".chat-session-dot",
-      ".chat-composer",
-      ".chat-send",
-      ".chat-workspace-",
-      "outline: none",
-    ]) {
-      expect(css).not.toContain(removed);
-    }
-    expect(raw).not.toMatch(COLOR_LITERAL_PATTERNS[0] as RegExp);
-    expect(css.trim()).toBe("");
   });
 
   it("ui-walk expects the Chinese session status", () => {

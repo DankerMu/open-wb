@@ -6,7 +6,7 @@ import type { ChatMessageSnapshot } from "../src/lib/session-contract.js";
 import { cleanupChatPage, expandToolGroups, renderChatPage } from "./chat-page-support.js";
 import { chatSnapshot, historyUser, latestSource, SESSION_ID } from "./chat-stream-support.js";
 import { jsonResponse } from "./support.js";
-import { COLOR_LITERAL_PATTERNS, listRepoFiles, readRepoFile } from "./ui-support.js";
+import { listRepoFiles, readRepoFile } from "./ui-support.js";
 
 const messagesPath = `/api/sessions/${SESSION_ID}/messages`;
 const exactText = { exact: true, collapseWhitespace: false, trim: false } as const;
@@ -208,12 +208,7 @@ describe("(M5) static contract", () => {
     expect(injecting).toEqual([]);
   });
 
-  it("the message area has no stylesheet left: chat.css is the directory's only .css", () => {
-    expect(listRepoFiles("web/src/features/chat", (path) => path.endsWith(".css"))).toEqual([
-      "web/src/features/chat/chat.css",
-    ]);
-    for (const pattern of COLOR_LITERAL_PATTERNS) {
-      expect(readRepoFile("web/src/features/chat/chat.css")).not.toMatch(pattern);
-    }
+  it("the message area has no stylesheet left: the chat directory holds no .css", () => {
+    expect(listRepoFiles("web/src/features/chat", (path) => path.endsWith(".css"))).toEqual([]);
   });
 });

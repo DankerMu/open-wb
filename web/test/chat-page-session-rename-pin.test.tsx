@@ -44,7 +44,7 @@ import {
 } from "./chat-page-session-meta-support.js";
 import { settle } from "./chat-stream-support.js";
 import { calls, currentLocation, deferredResponse, jsonResponse } from "./support.js";
-import { pressPointer, readRepoFile, stripComments, yieldMacrotask } from "./ui-support.js";
+import { pressPointer, yieldMacrotask } from "./ui-support.js";
 
 const OLD = "季度复盘";
 const OTHER = "需求评审";
@@ -204,10 +204,6 @@ describe("条目「更多」菜单 (M1, M16)", () => {
     expect(trigger.getAttribute("data-state")).toBe("open");
     fireEvent.keyDown(menu, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
-    // 旧的类规则已随 chat.css 清空而消失。
-    const css = stripComments(readRepoFile("web/src/features/chat/chat.css"));
-    expect(css).not.toContain("chat-session-more");
-    expect(css).not.toMatch(/display\s*:\s*none|visibility\s*:\s*hidden/);
   });
 });
 

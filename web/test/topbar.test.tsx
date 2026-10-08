@@ -270,7 +270,6 @@ describe("静态契约 (T8)", () => {
     for (const path of [
       "web/src/styles.css",
       "web/src/styles/legacy.css",
-      "web/src/features/chat/chat.css",
       "web/src/features/files/files.css",
     ]) {
       expect(readRepoFile(path), path).not.toContain("ui-page-heading");

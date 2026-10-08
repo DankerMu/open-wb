@@ -4,7 +4,7 @@ import type { ChatMessageSnapshot } from "../src/lib/session-contract.js";
 import { cleanupChatPage, expandToolGroups, renderChatPage } from "./chat-page-support.js";
 import { chatSnapshot, latestSource, SESSION_ID } from "./chat-stream-support.js";
 import { jsonResponse } from "./support.js";
-import { COLOR_LITERAL_PATTERNS, readRepoFile, stripComments } from "./ui-support.js";
+import { readRepoFile } from "./ui-support.js";
 
 const messagesPath = `/api/sessions/${SESSION_ID}/messages`;
 const BASH_START = '{"command":"echo workbuddy-smoke"}';
@@ -129,20 +129,9 @@ describe("(S2) step cards render icon, Chinese badge, summary and collapsed raw 
     expect(screen.queryByRole("status", { name: /running|done|failed/ })).toBeNull();
   });
 
-  it("keeps the step-card rules out of the chat stylesheet; messages.css is gone", () => {
-    const chatRaw = readRepoFile("web/src/features/chat/chat.css");
-    expect(chatRaw.split("\n").length).toBeLessThanOrEqual(800);
-    for (const pattern of COLOR_LITERAL_PATTERNS) {
-      expect(chatRaw).not.toMatch(pattern);
-    }
-    expect(chatRaw).not.toContain("--wb-palette");
-    const chat = stripComments(chatRaw);
-    for (const moved of [".chat-step", ".chat-md", ".chat-msg-"]) {
-      expect(chat).not.toContain(moved);
-    }
-
+  it("the legacy stylesheet imports nothing from the chat page; chat.css and messages.css are gone", () => {
     const styles = readRepoFile("web/src/styles/legacy.css");
-    expect(styles).toContain('@import "../features/chat/chat.css";');
+    expect(styles).not.toContain("features/chat");
     expect(styles).not.toContain("messages.css");
     expect(styles).not.toContain(".chat-md");
     expect(styles).toContain(".files-md :is(ul, ol)");

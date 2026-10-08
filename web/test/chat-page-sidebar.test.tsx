@@ -14,7 +14,7 @@ import { settle } from "./chat-stream-support.js";
 import { createMediaQuery, installMatchMedia, uninstallMatchMedia } from "./media-query-support.js";
 import { NULL_SESSION_META } from "./session-meta-fixtures.js";
 import { calls, currentLocation, deferredResponse, jsonResponse } from "./support.js";
-import { listRepoFiles, readRepoFile, stripComments, yieldMacrotask } from "./ui-support.js";
+import { listRepoFiles, readRepoFile, yieldMacrotask } from "./ui-support.js";
 
 const HERO = "WorkBuddy，我帮你";
 const SEARCH = "搜索任务";
@@ -569,7 +569,7 @@ describe("旧列表组件已移除 (S12)", () => {
     );
   });
 
-  it("S12 滚动：分组容器是唯一滚动容器，覆盖层内不滚动，列表与 nav 自身无 overflow；chat.css 不再有侧栏规则", async () => {
+  it("S12 滚动：分组容器是唯一滚动容器，覆盖层内不滚动，列表与 nav 自身无 overflow", async () => {
     renderChatPage("/", sidebarRoutes([listed(A, "会话A")]));
     const nav = await findList("会话A");
     const scroller = nav.querySelector('[data-slot="session-groups"]');
@@ -583,9 +583,5 @@ describe("旧列表组件已移除 (S12)", () => {
     );
     expect(overflowing).toEqual([scroller]);
     expect(nav.className).not.toContain("overflow");
-    const css = stripComments(readRepoFile("web/src/features/chat/chat.css"));
-    for (const gone of ["chat-session-groups", "chat-session-nav", "chat-session-list"]) {
-      expect(css).not.toContain(gone);
-    }
   });
 });
