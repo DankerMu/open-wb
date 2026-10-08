@@ -19,6 +19,7 @@ import type { TodoWarn } from "./store-todo.js";
 import { defaultSessionClock, registerSessionEventStream } from "./stream/sse.js";
 import { SessionSupervisor, type SessionSupervisorRuntime } from "./supervisor.js";
 import type { TokenRegistry } from "./tokens.js";
+import { createTurnSnapshots, type TurnSnapshotService } from "./turn-snapshot.js";
 
 export interface RegisterSessionsOptions {
   db: DatabaseSync;
@@ -42,6 +43,12 @@ export interface RegisterSessionsOptions {
    * spawn's `HOME`, omp's default agent dir; sessions never computes it a second way.
    */
   agentDir: string;
+  /**
+   * The app's one workspace-snapshots service (createApp binds it to the managed snapshots
+   * directory and the snapshot settings); the prompt route snapshots a bound session's workspace
+   * through it before each dispatch. Sessions does not import the workspaces module for it.
+   */
+  snapshots: TurnSnapshotService;
   /**
    * Must return synchronously. A returned thenable is retained beside the source
    * fault without calling this sink again. registerSessions forwards the return
@@ -122,6 +129,12 @@ export function registerSessions(
         listEvents.notify(ownerId);
       },
     },
+    turnSnapshots: createTurnSnapshots({
+      db: options.db,
+      snapshots: options.snapshots,
+      workspaceRootOf: options.workspaceRootOf,
+      onError: options.onError,
+    }),
   });
   registerCommandRoutes(app, {
     agentDir: options.agentDir,

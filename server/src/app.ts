@@ -11,6 +11,8 @@ import {
   DEFAULT_OMP_IDLE_MS,
   DEFAULT_OMP_STATE_RELATIVE,
   DEFAULT_SANDBOX_RELATIVE,
+  DEFAULT_SNAPSHOT_SETTINGS,
+  type SnapshotSettings,
 } from "./agent-config.js";
 import {
   type AuthRuntime,
@@ -39,11 +41,14 @@ import { registerSessions } from "./sessions/index.js";
 import type { SessionListNotifier } from "./sessions/list-events.js";
 import { ompAgentDir } from "./sessions/omp/process.js";
 import type { SpawnLog } from "./sessions/omp/spawn-gate.js";
+import { ompSnapshotsDir } from "./sessions/omp/state-layout.js";
 import type { SessionStore } from "./sessions/store.js";
 import type { TodoWarn } from "./sessions/store-todo.js";
 import type { SessionSupervisor, SessionSupervisorRuntime } from "./sessions/supervisor.js";
 import { TokenRegistry } from "./sessions/tokens.js";
+import type { TurnSnapshotService } from "./sessions/turn-snapshot.js";
 import { registerWorkspaces } from "./workspaces/index.js";
+import { removeSnapshot, take } from "./workspaces/snapshots.js";
 import { createWorkspaceStore } from "./workspaces/store.js";
 
 declare module "fastify" {
@@ -59,10 +64,21 @@ declare module "fastify" {
   }
 }
 
+/**
+ * The sessions module's runtime settings object: the supervisor's settings plus the four snapshot
+ * settings (an omitted one takes its default).
+ */
+export type SessionRuntime = SessionSupervisorRuntime & Partial<SnapshotSettings>;
+
 export interface AssemblyDependencies {
   tokens?: TokenRegistry;
   upstream?: { baseUrl: string; apiKey: string } | undefined;
-  runtime?: SessionSupervisorRuntime;
+  runtime?: SessionRuntime;
+  /**
+   * Replaces the workspace-snapshots service createApp would build from `runtime` (tests that hold
+   * a snapshot open or make it fail). Omitted in production.
+   */
+  snapshots?: TurnSnapshotService;
   /** 模型白名单；省略时只有 `runtime.modelId` 一个模型。 */
   modelCatalog?: ModelCatalog;
   /**
@@ -153,7 +169,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
   const assembly = options.assembly;
   const tokens = assembly?.tokens ?? new TokenRegistry();
   const repoRoot = resolve(fileURLToPath(new URL("../../", import.meta.url)));
-  const runtime = assembly?.runtime ?? {
+  const runtime: SessionRuntime = assembly?.runtime ?? {
     bin: join(repoRoot, DEFAULT_OMP_BIN_RELATIVE),
     sandboxRoot: join(repoRoot, DEFAULT_SANDBOX_RELATIVE),
     stateDir: join(repoRoot, DEFAULT_OMP_STATE_RELATIVE),
@@ -183,6 +199,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
       return store.createTemporary({ id: ownerId });
     },
     agentDir: ompAgentDir(runtime.stateDir),
+    snapshots: assembly?.snapshots ?? snapshotService(runtime),
     onError: assembly?.onError ?? (() => {}),
     ...(assembly?.onEvent === undefined ? {} : { onEvent: assembly.onEvent }),
     ...(assembly?.log === undefined ? {} : { log: assembly.log }),
@@ -246,6 +263,33 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
   });
 
   return app;
+}
+
+/**
+ * The app's one workspace-snapshots service: `take` and `removeSnapshot` bound to the managed
+ * snapshots directory of the state dir and to the four snapshot settings. Building it touches no
+ * file; the directory belongs to the omp state layout.
+ */
+function snapshotService(runtime: SessionRuntime): TurnSnapshotService {
+  const snapshotsRoot = ompSnapshotsDir(runtime.stateDir);
+  const limits = {
+    excludeNames: runtime.snapshotExcludeNames ?? DEFAULT_SNAPSHOT_SETTINGS.snapshotExcludeNames,
+    maxFileBytes: runtime.snapshotMaxFileBytes ?? DEFAULT_SNAPSHOT_SETTINGS.snapshotMaxFileBytes,
+    maxTotalBytes: runtime.snapshotMaxTotalBytes ?? DEFAULT_SNAPSHOT_SETTINGS.snapshotMaxTotalBytes,
+    maxEntries: runtime.snapshotMaxEntries ?? DEFAULT_SNAPSHOT_SETTINGS.snapshotMaxEntries,
+  };
+  return {
+    take: (workspaceRoot, workspaceId, userMessageId, previousMessageId) =>
+      take({
+        workspaceRoot,
+        snapshotsRoot,
+        workspaceId,
+        userMessageId,
+        ...(previousMessageId === undefined ? {} : { previousMessageId }),
+        ...limits,
+      }),
+    remove: (workspaceId, messageId) => removeSnapshot({ snapshotsRoot, workspaceId, messageId }),
+  };
 }
 
 function validateListenerCloseBudget(budgetMs: number): number {

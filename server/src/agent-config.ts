@@ -25,6 +25,18 @@ const DEFAULT_SNAPSHOT_MAX_TOTAL_BYTES = 524_288_000;
 const DEFAULT_SNAPSHOT_MAX_ENTRIES = 50_000;
 /** 缺省只排除依赖目录；`.git` 不在其中（版本库目录进快照）。 */
 const DEFAULT_SNAPSHOT_EXCLUDE_NAMES: readonly string[] = ["node_modules", ".venv", "__pycache__"];
+/** 四个快照设置；经 sessions 的 runtime settings 对象到达 createApp 构造的快照服务。 */
+export type SnapshotSettings = Pick<
+  AgentSettings,
+  "snapshotMaxFileBytes" | "snapshotMaxTotalBytes" | "snapshotMaxEntries" | "snapshotExcludeNames"
+>;
+/** runtime settings 对象未带某项时 createApp 取的值，与 `resolveAgentSettings` 的缺省同源。 */
+export const DEFAULT_SNAPSHOT_SETTINGS: SnapshotSettings = {
+  snapshotMaxFileBytes: DEFAULT_SNAPSHOT_MAX_FILE_BYTES,
+  snapshotMaxTotalBytes: DEFAULT_SNAPSHOT_MAX_TOTAL_BYTES,
+  snapshotMaxEntries: DEFAULT_SNAPSHOT_MAX_ENTRIES,
+  snapshotExcludeNames: DEFAULT_SNAPSHOT_EXCLUDE_NAMES,
+};
 /** 正整数键的共同上界（原生计时器上限）。 */
 const MAX_POSITIVE_SETTING = 2_147_483_647;
 

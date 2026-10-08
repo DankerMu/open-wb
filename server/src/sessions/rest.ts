@@ -14,7 +14,7 @@ import { registerSessionMetadataRoutes } from "./rest-metadata.js";
 import type { WorkspaceRootOf } from "./session-cwd.js";
 import type { SessionDeleter } from "./session-delete.js";
 import type { SessionTodo } from "./session-todo.js";
-import { sessionSkillsResolver, toWireText } from "./slash-commands.js";
+import { classifyPrompt, sessionSkillsResolver, toWireText } from "./slash-commands.js";
 import type {
   ApprovalEntry,
   ApprovalView,
@@ -24,11 +24,12 @@ import type {
 } from "./store.js";
 import type { SessionMetadataStore } from "./store-metadata.js";
 import type { SessionSupervisor, StreamCursor } from "./supervisor.js";
+import type { TurnSnapshots } from "./turn-snapshot.js";
 
 type ForkResult = Awaited<ReturnType<SessionSupervisor["fork"]>>;
 
 export interface SessionSupervisorPort {
-  prompt(sessionId: string, text: string): Promise<void>;
+  prompt(sessionId: string, text: string, beforeDispatch?: () => Promise<void>): Promise<void>;
   streamCursor(sessionId: string): StreamCursor;
   decide(sessionId: string, approvalId: number, decision: "allow" | "deny"): Promise<ApprovalView>;
   stop(sessionId: string): Promise<void>;
@@ -53,6 +54,8 @@ interface SessionRestDependencies {
   sandboxRoot: string;
   /** Told after each committed write of these routes that changes the owner's session list. */
   listEvents: Pick<SessionListNotifier, "notify">;
+  /** The per-turn workspace snapshot: the prompt's pre-dispatch step and its cleanup. */
+  turnSnapshots: TurnSnapshots;
 }
 
 interface PublicSession {
@@ -238,16 +241,28 @@ export function registerSessionRoutes(
       }
       const accepted = dependencies.store.acceptPrompt(request.params.id, principal.id, text);
       dependencies.listEvents.notify(principal.id);
+      // The binding is immutable, so the tree cached before the body arrived still has it.
+      const bound = authorizedHistory.get(request)?.tree.session.workspaceId ?? null;
       try {
         // The stored text stays as typed; only `/` text is classified, so no other prompt scans.
         // The skills are those of this session's cwd: its workspace root, else the owner root.
-        const bound = authorizedHistory.get(request)?.tree.session.workspaceId ?? null;
         const skills = text.startsWith("/") ? skillsOf(principal.id, bound) : [];
-        await dependencies.supervisor.prompt(request.params.id, toWireText(text, skills));
+        // The snapshot is the supervisor's pre-dispatch step, not awaited here: a stop is only
+        // kept once `supervisor.prompt` has opened the turn (design D9「接入点」).
+        const snapshot = dependencies.turnSnapshots.step({
+          ownerId: principal.id,
+          sessionId: request.params.id,
+          workspaceId: bound,
+          userMessageId: accepted.userMessageId,
+          command: classifyPrompt(text, skills).kind !== "text",
+        });
+        await dependencies.supervisor.prompt(request.params.id, toWireText(text, skills), snapshot);
       } catch (error) {
-        // false: the turn already reached a terminal state, which had its own notification.
+        // false: the turn already reached a terminal state, which had its own notification, and
+        // its user message (with its snapshot registration) stays.
         if (dependencies.store.rollbackPrompt(accepted.assistantMessageId)) {
           dependencies.listEvents.notify(principal.id);
+          await dependencies.turnSnapshots.discard(bound, accepted.userMessageId);
         }
         throw error;
       }
