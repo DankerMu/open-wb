@@ -642,9 +642,9 @@ Minimal mergeable slice: 18.1 + 18.2 一个 PR（没有冲突对话框时 `undo_
 既有步骤的改写已随功能 PR 完成：`session-meta.hurl` 的键数（1.5）与无 body 创建（5.8）、`chat.hurl` 与 `ui-walk.spec.ts` 的清理（5.8）、走查第 6 步（14.5）与第 7、11 步（15.5）。本组只有追加的断言。
 
 - [x] 19.1 `smoke/session-meta.hurl` 第 8 步的归档断言（依赖组 2；可在组 5 之后任何时候合入）：`PATCH {"archived":true}` → 200 且 `archivedAt` 非 null、prompt → 409 `session_archived`、`PATCH {"archived":false}` → 200，随后的 `DELETE` 与 tree 404 沿用 5.8 的断言。`make smoke` 连跑两遍通过，文件不留下它创建的会话与临时空间（chat-harness「临时空间与归档在冒烟里可见」）。
-- [ ] 19.2 追加的六步（chat-harness「UI 走查临时空间、撤回与归档」，写进 `web/e2e/ui-walk-session-list.ts`）：临时空间（含产物卡预览与文件变更卡无 `查看详情`）、列表事件、撤回、撤回后继续与 fork 验证、归档、删除。两个 project 都跑；error oracle 的预期 401 次数不变。
-- [ ] 19.3 量时长并写进 PR：两个 project 各旅程的单测时长须在既有单测 `timeout`（30 秒）内，`make ui-walk` 总时长须在既有 `globalTimeout` 内。超出时停下来报告（改这两个值要改规格，不在实现期自行放宽）。
-- [ ] 19.4 变异证据：按 chat-harness 走查的「候选实现的反例」场景六项各做一次（撤回不还原文件、撤回前弹确认框、撤回后不回填草稿、临时空间进列表、临时空间会话不渲染产物卡、删除最后一个会话后空间仍在），确认对应断言判红。「归档会话接受 prompt」属冒烟场景，证据见 19.1 的 PR。
+- [x] 19.2 追加的六步（chat-harness「UI 走查临时空间、撤回与归档」，写进 `web/e2e/ui-walk-session-list.ts`）：临时空间（含产物卡预览与文件变更卡无 `查看详情`）、列表事件、撤回、撤回后继续与 fork 验证、归档、删除。两个 project 都跑；error oracle 的预期 401 次数不变。
+- [x] 19.3 量时长并写进 PR：两个 project 各旅程的单测时长须在既有单测 `timeout`（30 秒）内，`make ui-walk` 总时长须在既有 `globalTimeout` 内。超出时停下来报告（改这两个值要改规格，不在实现期自行放宽）。
+- [x] 19.4 变异证据：按 chat-harness 走查的「候选实现的反例」场景六项各做一次（撤回不还原文件、撤回前弹确认框、撤回后不回填草稿、临时空间进列表、临时空间会话不渲染产物卡、删除最后一个会话后空间仍在），确认对应断言判红。「归档会话接受 prompt」属冒烟场景，证据见 19.1 的 PR。
   **实施注记（19.2–19.4，fixture 评审补充，#973）**：
   - 时间：`web/playwright.config.ts` 的单测 `timeout` 是 30 秒、`globalTimeout` 300 秒。既有 sessions 旅程 desktop-light 约 12.5 秒、mobile-dark 约 15.3 秒，六步估计再加 10–14 秒，所以六步作为 `ui-walk-sessions.spec.ts` 里紧随其后的第二个串行 `test()`（自带 login、logout 与 oracle 实例，每实例预期 401 仍是 2 次）。spec 文件现 699 行，允许为这段接线净增至多 20 行；步骤本体都在 helper。PR 给出两个 project 两个旅程各自的单测时长与 `make ui-walk` 总时长。任何一个旅程超过 30 秒就停下报告，不改 timeout。
   - 接线：六步写进 `web/e2e/ui-walk-session-list.ts`，导出一个入口。spec 里私有的 `rowMenu`、`menuItem`、`expectFocusInNavOverlay`、`expectTurnDone`、`welcomeHeading` 等要用就搬进 helper 再导回（jscpd）。第 6 步复用 `expectDeletedWithoutToast`，产物预览复用 `ui-walk-steps.ts` 的 `walkArtifactPreview`。不改 `server/`、`web/src`、上游夹具，不开第二个浏览器上下文。

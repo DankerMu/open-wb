@@ -32,9 +32,15 @@ import { expectNoProjectConfig, walkProjectConfig } from "./ui-walk-project-conf
 import {
   CURRENT_SESSION,
   expectDeletedWithoutToast,
+  expectFocusInNavOverlay,
   expectSelectedIn,
+  expectTurnDone,
+  menuItem,
+  rowMenu,
   sections,
   step6Sidebar,
+  walkTemporarySpace,
+  welcomeHeading,
 } from "./ui-walk-session-list.js";
 import {
   expandToolGroup,
@@ -58,7 +64,6 @@ const EXPECTED_THINKING = "先读需求，再列要点，最后作答。";
 // 真 omp 对无参数 `/todo` 的原文（新会话没有 todo）；`<task>` 在页面上是转义后的文本。
 const TODO_REPLY = "No todos. Use /todo append <task> to start one.";
 const SLASH_LABELS = ["整理上下文", "任务清单"];
-const APPROVAL_BARS = ["需要你的确认", "已允许执行", "已拒绝执行", "超时自动允许"];
 const EXPECTED_CHANGES = [{ path: REPORT_FILE, added: null, removed: null, kind: "write" }];
 const SCENE_PILLS = ["日常办公", "代码开发", "创意设计"];
 const CODE_CHIPS = ["日常开发", "网站开发", "Agent 应用", "Skill 开发", "CI/CD"];
@@ -66,8 +71,6 @@ const HEX_ID = /^[0-9a-f]{32}$/;
 const CURRENT_MATCH = 'article[aria-current="true"]';
 // 建会话后的标题：提示词的前 18 个码点，每次运行都相同。
 const INITIAL_TITLE = "WORKBUDDY_THINK WO";
-// 真 omp 的两轮回合（write 工具轮 + 思考与回复轮）；只有等回合完成的那条断言（`expectTurnDone`）带显式超时。
-const TURN_DONE_TIMEOUT_MS = 10_000;
 
 /** 建会话的 201 一到就记下 id，`finally` 凭它删除——先于对该请求的任何断言。 */
 type CreatedSession = { id: string | null };
@@ -96,6 +99,20 @@ test("session metadata journey binds a code session to a workspace and shows its
     { watchAssets: project === "desktop-light" },
     (oracle) => walkSessionMeta(page, oracle, project),
   );
+});
+
+// 第二个旅程（chat-harness「UI 走查临时空间、撤回与归档」）：自带登录、退出与 oracle 实例，六步在 helper。
+test("temporary workspace journey undoes a turn with its file, archives, restores and deletes the session", async ({
+  baseURL,
+  page,
+}, testInfo) => {
+  const project = walkProject(testInfo.project.name);
+  const options = { watchAssets: project === "desktop-light" };
+  await runWithBrowserErrorOracle(page, baseURL, options, async (oracle) => {
+    await step1Login(page, oracle, project);
+    await walkTemporarySpace(page, project, EXPECTED_REPLY, REPORT_FILE);
+    await logout(page, oracle, project);
+  });
 });
 
 async function walkSessionMeta(
@@ -162,10 +179,6 @@ async function walkSessionMeta(
   mark("cleanup");
   await logout(page, oracle, project);
   mark("logout");
-}
-
-function welcomeHeading(page: Page): Locator {
-  return page.getByRole("heading", { level: 1, name: "WorkBuddy，我帮你", exact: true });
 }
 
 // 转录就绪：助手消息的固定回复可见（真实导航或 reload 之后历史从 REST 恢复）。
@@ -264,16 +277,6 @@ async function step2ProjectSkill(page: Page, workspaceId: string): Promise<void>
   await expect(composer).toHaveValue(`/skill:${SKILL_LABEL} `);
   await expect(listbox).toHaveCount(0);
   await composer.fill("");
-}
-
-// 回合完成：该助手消息的正文恰为 `reply`（文件里唯一带显式超时的断言），整页没有提问卡与审批记录。
-async function expectTurnDone(assistant: Locator, reply: string): Promise<void> {
-  await expect(assistant.locator('[data-slot="message-body"]')).toHaveText(reply, {
-    timeout: TURN_DONE_TIMEOUT_MS,
-  });
-  for (const name of APPROVAL_BARS) {
-    await expect(assistant.page().getByRole("group", { name })).toHaveCount(0);
-  }
 }
 
 // 只观测 `POST /api/sessions`；返回会话 id。
@@ -406,27 +409,6 @@ async function step5ViewDetails(page: Page, workspaceId: string, sessionId: stri
   ).toBeVisible();
   await page.goto(`/?session=${sessionId}`);
   await expectTranscriptReady(page);
-}
-
-// 选中条目所在 `li` 里的行菜单触发按钮（`更多操作：<标题>`）；菜单本身经 portal 渲染在页面层。
-function rowMenu(sidebar: Locator): Locator {
-  return sidebar
-    .locator("li")
-    .filter({ has: sidebar.page().locator(CURRENT_SESSION) })
-    .getByRole("button", { name: /^更多操作：/u });
-}
-
-function menuItem(page: Page, name: string): Locator {
-  return page.getByRole("menuitem", { name, exact: true });
-}
-
-// mobile 上 `inspectSidebar` 回调结束后紧接着按 `Escape` 关覆盖层。菜单、对话框关闭后 Radix 在下一个
-// 宏任务才把焦点还回来：按键早于它时目标是 `body`，而 Toast 在场时覆盖层只靠目标在自身子树内的兜底
-// 关闭，于是关不掉。回调的最后一句等焦点回到覆盖层内（它自己或其后代）；desktop 没有覆盖层。
-async function expectFocusInNavOverlay(page: Page, project: WalkProject): Promise<void> {
-  if (project === "desktop-light") return;
-  const overlay = page.getByRole("dialog", { name: "导航", exact: true });
-  await expect(overlay.and(page.locator(":focus-within"))).toHaveCount(1);
 }
 
 // 置顶不是乐观更新：PATCH 成功后条目换到 `置顶任务` 分组（DOM 节点重挂）。菜单在覆盖层的 DOM
