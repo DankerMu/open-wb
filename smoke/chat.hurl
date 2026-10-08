@@ -23,6 +23,7 @@ jsonpath "$.title" == null
 jsonpath "$.status" == "idle"
 
 # 发送 prompt：exact 202；捕获 assistantMessageId。不重试本 POST。
+# undo 为 available：受理时的工作空间快照已成功落盘（uid 分离下同样成立，#953）。
 POST {{base_url}}/api/sessions/{{session_id}}/prompt
 Content-Type: application/json
 {"message":"你好"}
@@ -33,6 +34,7 @@ user_message_id: jsonpath "$.userMessageId"
 [Asserts]
 jsonpath "$.userMessageId" exists
 jsonpath "$.assistantMessageId" exists
+jsonpath "$.undo" == "available"
 
 # 审批轮询：有界 retry（约 20s，须 < 60s 自动允许）直到 captured assistant 恰一条 pending bash 审批。
 GET {{base_url}}/api/sessions/{{session_id}}/messages

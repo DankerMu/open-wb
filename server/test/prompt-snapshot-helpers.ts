@@ -12,7 +12,7 @@ import type { LightMyRequestResponse } from "fastify";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import type { TurnSnapshotService } from "../src/sessions/turn-snapshot.js";
-import { removeSnapshot, take } from "../src/workspaces/snapshots.js";
+import { removeSnapshot, removeWorkspaceSnapshots, take } from "../src/workspaces/snapshots.js";
 import { settle } from "./session-approval-helpers.js";
 import { deferred, postPrompt } from "./session-rest-helpers.js";
 import { collectRejections, type RejectionLog } from "./session-stop-helpers.js";
@@ -98,10 +98,10 @@ export function closeWorldsAfterEach(): void {
 }
 
 /**
- * `take` and `removeSnapshot` over the world's snapshots directory, with roomy limits; the total
- * limit is the world's own when it sets one. `restore` is the port's third method and unused here.
+ * `take` and the two removals over the world's snapshots directory, with roomy limits; the total
+ * limit is the world's own when it sets one. `restore` is the port's last method and unused here.
  */
-function realService(stateDir: string, settings: Settings): TurnSnapshotService {
+export function realService(stateDir: string, settings: Settings = {}): TurnSnapshotService {
   const snapshotsRoot = join(stateDir, "snapshots");
   return {
     take: (workspaceRoot, workspaceId, userMessageId, previousMessageId) =>
@@ -117,6 +117,7 @@ function realService(stateDir: string, settings: Settings): TurnSnapshotService 
         maxEntries: 1_000,
       }),
     remove: (workspaceId, messageId) => removeSnapshot({ snapshotsRoot, workspaceId, messageId }),
+    removeWorkspace: (workspaceId) => removeWorkspaceSnapshots({ snapshotsRoot, workspaceId }),
     restore: () => Promise.reject(new Error("the snapshot worlds restore nothing")),
   };
 }

@@ -392,10 +392,27 @@ Minimal mergeable slice: 11.1（错误码与归属集，由信封测试引用）
   - 「别的会话正在运行」：F 的回合在 S 的 u2 之后受理（这样去掉第 6 步时 `restore` 得到的是 `undo_conflict` 而不是 `session_busy`）；两次 409 之后断言无 spawn、S 的存活进程数不变、文件与行不变。变异证据补一条：去掉第 6 步 → 本场景判红。
   - 「对账不触碰 stopped」：在既有的 `session-stop.test.ts` S6 里加「被置为 `failed` 的会话 `updated_at` 等于种入值」一条断言（PR Boundary 含该文件；只加不改）。
   Risk packs（12.1–12.2）: File IO / path safety / delete（在共用空间里还原与删除）、Concurrency（占用、冲突判定与还原之间的窗口）、Error handling / rollback（结构性失败后可重试）、Audit、Legacy compatibility（`files` 结果的 `reason` 枚举含 `mount`）。
-- [ ] 12.3 清理接线：撤回提交后删除被移除消息的快照目录；会话删除提交后删除其各快照目录（`session-delete.ts` 用 11.2 / 10.2 的读取）；临时空间目录删除时一并删其整个快照目录（5.2 的模块里补调用）。测试：workspace-snapshots「快照清理」三个场景、session-metadata「删除连同快照与独占的临时空间」的快照部分与「绑定正式空间的会话只清自己的快照」、「归档保留临时空间与快照」；chat-harness「连跑两遍不积累临时空间」里快照目录那一半。
+- [x] 12.3 清理接线：撤回提交后删除被移除消息的快照目录；会话删除提交后删除其各快照目录（`session-delete.ts` 用 11.2 / 10.2 的读取）；临时空间目录删除时一并删其整个快照目录（5.2 的模块里补调用）。测试：workspace-snapshots「快照清理」三个场景、session-metadata「删除连同快照与独占的临时空间」的快照部分与「绑定正式空间的会话只清自己的快照」、「归档保留临时空间与快照」；chat-harness「连跑两遍不积累临时空间」里快照目录那一半。
   交接（#947 留下）：CI `uid-isolation` 的 `check_snapshots_closed` 依赖冒烟回合留下的快照目录（冒烟末尾删会话，而此刻删除不清快照）。本任务接上清理后该检查会以「the smoke turns left no snapshot manifest」判红——同一个 PR 里给它一轮自己的、快照未被清理的回合，并同步 `scripts/test-ci-harness.sh` 的对应条目。
   另（#945 评审留下）：10.5 合入到本任务合入之间被删除的会话会留下没有登记行的快照目录，按行清理回收不到——本任务加一次按目录的清扫，或在 PR 里写明残留的处置。
-- [ ] 12.4 变异证据：`keep` 时也还原 → 「只撤回对话」判红；冲突判定不限同一所有者 → 「他人的会话不参与判定」判红；`force` 也做冲突判定 → 「以 `force` 重发 200」判红；还原放到事务之后 → 「还原的结构性失败」里消息行已被删，判红；清理删了别的会话的快照 → 「另一个会话的快照仍可读」判红；冲突判据逐条变异——去掉 `updated_at >= T` 一支（或退回「另一会话有 `created_at >= T` 的消息」的旧判据）→ 「重叠回合」判红；去掉第 2 条「自己活动过」（或把 `updated_at > created_at` 写成 `>=`）→ 「仅有 fork 拷贝行的会话不算」判红；第 2 条只留登记行一支（去掉 `updated_at > created_at`）→ 「分叉会话只重新生成过拷贝来的末轮」判红；去掉 `failed` 一支 → 「被启动对账置为失败的回合」第一段判红；把 `failed` 一支写成不看 `updated_at` → 同场景第二段判红。
+  **实施注记（12.3，fixture 评审补充，#953）**：
+  - 三处清理都走 `TurnSnapshots` 这一个端口，不在 `sessions/` 里自己拼快照根：`TurnSnapshotService` 增加 `removeWorkspace(workspaceId)`（`app.ts` 的 `snapshotService` 绑到 `removeWorkspaceSnapshots`），`TurnSnapshots` 增加与 `discard` 同约定（自身不拒绝、失败只报告）的 `discardWorkspace(workspaceId)`。`index.ts` 里把 `createTurnSnapshots(…)` 提成局部常量，同时交给路由与 `createSessionDeleter`。测试装配同步补桩、不改断言（`session-rest-helpers.ts`、`prompt-snapshot-helpers.ts`、`session-supervisor-helpers.ts`），记入偏离记录。不改 `snapshots.ts` 的两个删除函数。
+  - 撤回：路由闭包用一个局部变量接住 `commitUndo(…).snapshots`（`commit` 回调的签名不变，与 #952 留住还原结果同一手法）；`supervisor.undo` 返回之后、两次通知之前，对其中 `outcome === "ok"` 的逐条 `await turnSnapshots.discard(workspaceId, messageId)`，然后通知、200（规格第 6 步的次序）。`supervisor.undo` 抛错的路径不清理任何目录。类型用 `ReturnType<typeof commitUndo>["snapshots"]`（两个模块各有一个 `UndoResult`，不再导出同名类型）。`supervisor.ts`、`store-undo.ts` 不改。
+  - 会话删除：任务原文的「`session-delete.ts` 用 11.2 / 10.2 的读取」改为——`store-metadata.ts` 的 `deleteSession` 在事务内、`DELETE` 之前调用 10.2 的 `listSessionTurnSnapshots`，结果随 `DeletedSession` 返回（`snapshots: {messageId, workspaceId, outcome}[]`）。11.2 的查询是 `commitUndo` 私有的、按撤回点截取，不复用。deleter 没有 `db`，不在事务外另读。事务回滚时没有返回值，也就没有清理。
+  - `session-delete.ts` 的提交后次序：会话文件与产物目录 → 临时空间行未被删时，对 `ok` 的登记逐条 `discard`；临时空间行被删时，只调一次 `discardWorkspace(id)`（整目录已含各消息目录与没有登记行的半份目录），再走既有的 `removeTemporaryWorkspace`。`discardWorkspace` 的触发条件是「行被删」，不放进 `removeTemporaryWorkspace` / `removeTemporaryWorkspaceDir` 的早退路径之后；`temp-dir-remove.ts` 不改，继续不知道快照根（任务原文「5.2 的模块里补调用」按此落在它的调用方）。
+  - 全部在应答之前 await（先例：prompt 补偿后的 `discard`、会话文件删除），没有后台工作，关停无须另行跟踪。一份删除失败不影响其余各份。
+  - 测试进新文件（既有的删除与撤回测试文件贴着 800 行，不净增）：生产 `createApp` 装配加真实 `take` 产生的目录，不用 `insertTurnSnapshot` 只种行。
+    - 「清理失败不影响删除」固定为正式空间上恰一份 `ok` 快照、令 `remove` 拒绝 → 204、恰一次报告；另一例临时空间上令 `removeWorkspace` 拒绝 → 204、恰一次报告、`tmp-<T>` 目录照常被删。
+    - 「临时空间删除时整目录清理」的会话先有一份 `ok` 快照，删除前断言 `<T>` 目录存在。
+    - 「随会话删除清理」与「绑定正式空间的会话只清自己的快照」里另一个会话的快照在同一个 `<W>` 目录下，断言读它的 `manifest.json` 与一个 `tree/` 文件的内容。
+  - 撤回的清理规格没有场景，补三条断言（写进偏离记录，属加强）：u1→u2→u3 各有真实 `ok` 快照，同一空间另一会话有一份，撤回 u2 → 200 之后 u2、u3 的目录不存在，u1 的与另一会话的仍可读；「最终事务复核失败」之后各快照目录仍在；令 `remove` 拒绝时撤回仍 200、两种通知照发、报告次数等于被移除的 `ok` 份数。
+  - 交接两条的取法：
+    - CI `uid-isolation` 的 `check_snapshots_closed` 不再依赖冒烟回合的残留（清理接上后残留没有了，原检查必以「the smoke turns left no snapshot manifest」判红），改为像 `check_restore_writable` 那样由脚本自己经编译产物 `take` 出一份——落在 `$OMP_STATE_DIR/snapshots` 下，检查后删除；`scripts/test-ci-harness.sh` 的对应条目同步。**PR Boundary 因此包含 `.github/scripts/ci-uid-isolation.sh` 与 `scripts/test-ci-harness.sh`，PR 描述必须标注改了 CI 文件**（AGENTS.md）。
+    - #945 留下的无登记目录**不做清扫**（规格「快照清理」明文不在启动时扫描快照根）：PR 描述写明处置——随所属临时空间删除被整目录回收，正式空间下的由运维按任务 20.4 的说明停服务后手工删。
+  - 冒烟残留检查的口径以 chat-harness「连跑两遍不积累临时空间」为准：`<OMP_STATE_DIR>/snapshots` 下没有任何 `manifest.json`；正式空间留下的空 `<workspaceId>` 目录允许存在（issue 验收里的「没有残留目录」按此读）。
+  - 12.4 中属本任务的变异（替换原文「清理删了别的会话的快照」一条的范围）：会话删除时对正式空间调了 `discardWorkspace` → 「随会话删除清理」「绑定正式空间的会话只清自己的快照」判红；撤回的清理同样写错 → 「u1 的与另一会话的仍可读」判红；撤回的清理挪到 `commitUndo` 之前 → 「最终事务复核失败」的目录断言判红；`discard` 的错误不吞 → 「清理失败不影响删除」与撤回的拒绝例判红；临时空间行被删时不调 `discardWorkspace` → 「删除连同快照与独占的临时空间」判红。「只过滤 `ok`」在真实目录上不可观测，不列为变异。
+  Risk packs（12.3）: File IO / delete（只经受信任的行 id 拼路径、只删不写）、Error handling / partial failure（提交后失败只报告）、Concurrency / ordering（读登记先于级联、清理后于提交）、CI harness（uid-isolation 的快照可达性检查）。
+- [x] 12.4 变异证据：`keep` 时也还原 → 「只撤回对话」判红；冲突判定不限同一所有者 → 「他人的会话不参与判定」判红；`force` 也做冲突判定 → 「以 `force` 重发 200」判红；还原放到事务之后 → 「还原的结构性失败」里消息行已被删，判红；清理删了别的会话的快照 → 「另一个会话的快照仍可读」判红；冲突判据逐条变异——去掉 `updated_at >= T` 一支（或退回「另一会话有 `created_at >= T` 的消息」的旧判据）→ 「重叠回合」判红；去掉第 2 条「自己活动过」（或把 `updated_at > created_at` 写成 `>=`）→ 「仅有 fork 拷贝行的会话不算」判红；第 2 条只留登记行一支（去掉 `updated_at > created_at`）→ 「分叉会话只重新生成过拷贝来的末轮」判红；去掉 `failed` 一支 → 「被启动对账置为失败的回合」第一段判红；把 `failed` 一支写成不看 `updated_at` → 同场景第二段判红。
 
 Suggested fixture level: expanded - 在共用工作空间里还原与删除文件、跨会话冲突判定、失败后的可重试性（Critical Path）
 Minimal mergeable slice: 12.1 + 12.2 一起（没有冲突判定的 `restore` 会静默冲掉别的会话的改动，不可单独合入）；12.3 随后（此前只是快照目录不被清理）

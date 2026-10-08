@@ -3,7 +3,7 @@
  * message-undo「撤回 REST」「对话原地回退」「文件还原与结果」): `POST /api/sessions/:id/undo` and its
  * orchestration. `files:"keep"` rewinds the conversation and leaves the workspace as it is;
  * `restore` / `force` also put the workspace back to the message's snapshot (#952), after two more
- * prechecks. The snapshot directory cleanup is task 12.3.
+ * prechecks. Once committed, the snapshot directories of the removed messages are deleted (#953).
  *
  * It is fork's process policy applied to the session itself: with the session's control claim
  * held, the session's own process is retired, a temporary process (pool admitted, never a slot or a
@@ -16,8 +16,8 @@
  *
  * The supervisor has no database, snapshot service, audit sink or list notifier, so the database
  * steps (the undo state of the message, the shared-workspace checks, the transaction) and the
- * restore are callbacks the route passes in with the request, and the route sends the two list
- * events once `supervisor.undo` has resolved.
+ * restore are callbacks the route passes in with the request, and the route removes the snapshot
+ * directories and sends the two list events once `supervisor.undo` has resolved.
  * Used inside `sessions/` only.
  */
 import { randomBytes } from "node:crypto";
@@ -225,7 +225,7 @@ interface UndoRouteDependencies {
   store: Pick<SessionStore, "getMessages">;
   supervisor: Pick<SessionSupervisorPort, "undo">;
   listEvents: Pick<SessionListNotifier, "notify" | "notifyRewound">;
-  turnSnapshots: Pick<TurnSnapshots, "restore">;
+  turnSnapshots: Pick<TurnSnapshots, "restore" | "discard">;
 }
 
 type UndoFiles = UndoCommit["files"];
@@ -265,7 +265,7 @@ function restoredFiles({ restored, removed, skipped, failed }: RestoreOutcome) {
 /**
  * `POST /api/sessions/:id/undo`: owner checked before the body is parsed, an exact
  * `{messageId, files}` body, the prechecks and the orchestration in `supervisor.undo`, then the
- * two list events and 200 `{session, draft, files}`.
+ * removed messages' snapshot directories, the two list events and 200 `{session, draft, files}`.
  */
 export function registerUndoRoute(app: FastifyInstance, dependencies: UndoRouteDependencies): void {
   const { db, listEvents, turnSnapshots } = dependencies;
@@ -285,6 +285,7 @@ export function registerUndoRoute(app: FastifyInstance, dependencies: UndoRouteD
       const ownerId = currentPrincipal(request).id;
       const sessionId = request.params.id;
       let outcome: RestoreOutcome | undefined;
+      let removed: ReturnType<typeof commitUndo>["snapshots"] = [];
       // `keep` passes neither: no other session is looked at and no snapshot is read.
       const withFiles: Pick<UndoRequest, "sharing" | "restore"> = {
         sharing: (workspaceId) => {
@@ -313,17 +314,23 @@ export function registerUndoRoute(app: FastifyInstance, dependencies: UndoRouteD
           undoStatesOf(listSessionTurnSnapshots(db, sessionId), workspaceId)(messageId),
         ...(files === "keep" ? {} : withFiles),
         commit: (branched) => {
-          commitUndo(db, emit, {
+          removed = commitUndo(db, emit, {
             ownerId,
             sessionId,
             messageId,
             files,
             now: Date.now(),
             ...branched,
-          });
+          }).snapshots;
         },
       });
-      // After the commit, before the reply; a refused or failed undo threw above and tells no one.
+      // After the commit, before the reply; a refused or failed undo threw above: it removes no
+      // snapshot directory and tells no one.
+      for (const snapshot of removed) {
+        if (snapshot.outcome === "ok") {
+          await turnSnapshots.discard(snapshot.workspaceId, snapshot.messageId);
+        }
+      }
       listEvents.notify(ownerId);
       listEvents.notifyRewound(ownerId, sessionId);
       return reply.code(200).send({

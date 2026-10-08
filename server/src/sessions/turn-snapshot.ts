@@ -52,6 +52,8 @@ export interface TurnSnapshotService {
   ): Promise<TakeOutcome>;
   /** Removes the snapshot directory of one message; a missing one is success. */
   remove(workspaceId: string, messageId: number): Promise<void>;
+  /** Removes the workspace's whole snapshot directory; a missing one is success. */
+  removeWorkspace(workspaceId: string): Promise<void>;
   /**
    * Puts the workspace back to the snapshot of `messageId`. Rejects on a structural failure (no
    * or a damaged manifest, a root that is no directory); single entries end up in `failed`.
@@ -82,10 +84,16 @@ export interface TurnSnapshots {
   /** The pre-dispatch step of this turn. Building it does nothing; running it never rejects. */
   step(turn: AcceptedTurn): () => Promise<void>;
   /**
-   * After a compensated acceptance: removes the message's snapshot directory (its registration row
-   * went with the message). Never rejects; a failure is only reported.
+   * After a compensated acceptance, a committed undo or a committed session delete: removes the
+   * message's snapshot directory (its registration row went with the message). Never rejects; a
+   * failure is only reported.
    */
   discard(workspaceId: string | null, userMessageId: number): Promise<void>;
+  /**
+   * After the row of a temporary workspace was deleted: removes its whole snapshot directory.
+   * Never rejects; a failure is only reported.
+   */
+  discardWorkspace(workspaceId: string): Promise<void>;
   /**
    * The `undo` value of each user message of the session, as its registration rows stand at this
    * call (one synchronous read); `workspaceId` is the session's binding. Unlike the two above it
@@ -184,6 +192,13 @@ export function createTurnSnapshots(deps: TurnSnapshotDependencies): TurnSnapsho
       }
     },
     discard,
+    discardWorkspace: async (workspaceId) => {
+      try {
+        await snapshots.removeWorkspace(workspaceId);
+      } catch (error) {
+        report(error);
+      }
+    },
     undoStates: (sessionId, workspaceId) =>
       undoStatesOf(listSessionTurnSnapshots(db, sessionId), workspaceId),
     restore: async (ownerId, workspaceId, messageId) => {
