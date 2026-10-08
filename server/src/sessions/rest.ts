@@ -210,6 +210,7 @@ export function registerSessionRoutes(
     store: dependencies.store,
     deleter: dependencies.deleter,
     supervisor: dependencies.supervisor,
+    listEvents: dependencies.listEvents,
   });
   app.get<{ Params: SessionIdParams }>(
     "/api/sessions/:id/messages",
@@ -333,6 +334,7 @@ export function registerSessionRoutes(
       const messageId = parseForkMessageId(request.body);
       const principal = currentPrincipal(request);
       const result = await dependencies.supervisor.fork(request.params.id, principal.id, messageId);
+      dependencies.listEvents.notify(principal.id);
       return reply.code(201).send({
         session: toPublicSession(result.session),
         draft: result.draft,
