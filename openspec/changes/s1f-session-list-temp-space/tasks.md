@@ -455,9 +455,20 @@ Minimal mergeable slice: 15.1 + 15.2 + 15.3 + 15.4 + 15.5 atomic: 菜单、两�
   - **主区域的两句推迟到 16.2**：「归档当前会话」「打开已归档的会话」里关于主区域的断言（`该会话已归档，恢复后才能继续对话`、不渲染输入框）属 16.2；本刀只断言 PATCH body、条目离开默认视图、URL 与列表部分。记偏离。
   - 清单：SL 节已存在；本刀的行取下一空闲 SL 号（归档、查看已归档、恢复、运行中不能归档各一行，`待签`）；SL-08 的期望写的是菜单三项，本刀同步改写。
   - `ui-walk` 两个项目各跑一遍：底部入口在 `ui-walk-layout.ts` 量的侧栏里（该文件 793 行，不得净增）。
-- [ ] 16.2 只读会话（会话页的共享入口 `conversation-view.tsx` / `page.tsx` + 新文件 `archived-notice.tsx`）：`archivedAt` 非 null 时不渲染输入框、能力栏、停靠区，显示说明与 `恢复`；`message-action-row.tsx` 在只读时不渲染 `重新生成` / `从此处分叉`（`撤回` 在 18.1 加入时同样处理）。整页测试（同文件）：chat-web「归档会话只读呈现与恢复」三段；另加一条回归：未归档的会话（`archivedAt` 为 null）输入框、能力栏、停靠区与两条操作行按钮都照常渲染。
-- [ ] 16.3 新文件登记进 `MIGRATED_AREAS`；SL 行：归档、查看已归档、恢复、归档后只读、运行中不能归档各一行，`待签`。
-- [ ] 16.4 变异证据：归档会话仍出现在 `置顶任务` → 「查看、恢复」判红；只读时仍渲染输入框 → 16.2 判红；只读判定写反（未归档也隐藏输入框）→ 16.2 的回归用例判红；`恢复` 失败时切回可写 → 第三段判红。
+- [x] 16.2 只读会话（会话页的共享入口 `conversation-view.tsx` / `page.tsx` + 新文件 `archived-notice.tsx`）：`archivedAt` 非 null 时不渲染输入框、能力栏、停靠区，显示说明与 `恢复`；`message-action-row.tsx` 在只读时不渲染 `重新生成` / `从此处分叉`（`撤回` 在 18.1 加入时同样处理）。整页测试（同文件）：chat-web「归档会话只读呈现与恢复」三段；另加一条回归：未归档的会话（`archivedAt` 为 null）输入框、能力栏、停靠区与两条操作行按钮都照常渲染。
+  **实施注记（16.2–16.4，fixture 评审补充，#964）**：
+  - 只读分支落在 `message-thread.tsx`（按钮出不出现由它决定，`message-action-row.tsx` 不知道会话状态，预计不改）：`ThreadProps` 加 `archived: boolean`，进 `renderMessage` 的依赖数组；只读时不渲染 `UserActions`（整行不出，不留空的 `message-actions` 行），`regenerableId` 取 null（空正文的助手消息因此也不出操作行）。`复制` 由既有的 `text !== ""` 分支保证。PR Boundary 相应含 `message-thread.tsx`。
+  - 判定用 `selected.archivedAt !== null`，不用真值判断（契约允许 0）。`selected` 未解析出来时按未归档呈现；用例用 `findBy`，不断言过渡态。
+  - 只读是「不渲染」，没有「禁用」。不渲染：`Composer`（含 `CapabilityBar`）、`ComposerDock`（`data-slot="composer-dock"`，任务清单与确认卡随之不出）、`从此处分叉`、`重新生成`。照常：线程、`复制`、文件变更卡与产物卡及其按钮、对话内搜索、顶栏全部动作、三条错误提示。「没有能力栏」断言 `任务启动于` 文本不存在；「没有停靠区」断言该 slot 不存在。
+  - 说明里的 `恢复`：`sessionActions.restore` 原样留给行菜单（失败 → 列表顶部）。说明的按钮走 `session-actions.ts` 里另一个出口：同一个 `send(…, "archivedAt", {archived:false}, succeeded, failed)`，忙碌与失败文案的状态放 `session-actions.ts`（带 `sessionId`，换会话即不显示），不放 `page.tsx`（它不许有 `useState` / `useRef` / `useEffect`）。失败文案用 `errorMessage()`；401 只解除忙碌；点击时清列表顶部提示与上一条失败；被同键的后一个请求顶替时也要解除忙碌。说明里的 `恢复` 不切侧栏视图。
+  - 测试：三段写成两条用例——① 只读呈现 → `恢复` 200；② 另起一个已归档会话 → 502。② 的断言：alert 在说明容器内（`within`），列表区顶部没有 alert，恰一次 PATCH，响应落定后仍没有 composer 文本框且说明仍在，`恢复` 可再点。列表项与消息快照里的 `session` 都带 `archivedAt`。回归用例取一个 `done` 且末条是助手消息的会话（否则 `重新生成` 本来就不渲染，断言是空的）。
+  - 偏离（规格未写或与现状不符，写进 PR、待 owner 确认）：(1) 归档与恢复都不动 `draft`，不新增按会话清草稿的逻辑；第二段只断言「输入框出现且可输入」，不断言草稿为空（`draft` 是页面级状态、切换会话本来就不清，与规格「selection never changed」一句不符）。(2) 零消息的已归档会话不显示空态文案（`Thread` 的 `empty` 加上「非只读」）。(3) `恢复` 200 后按钮卸载，在输入框出现的那次提交里聚焦它，并断言 `document.activeElement`。
+  - `archived-notice.tsx` 只用拷入层 `button` 与 Tailwind，文案是组件内字面量；登记进 `web/test/ui-layering.test.ts` 的两处（名单与逐字断言）。
+  - 16.3：SL 节已存在，组 16 的另四行已随 16.1 加入；本刀只加「归档后只读」一行，取下一个空号，`待签`。
+  - 16.4：「归档会话仍出现在 `置顶任务`」属 16.1、已有用例覆盖，本刀只需另三条；「`恢复` 失败时切回可写」靠 ② 的「502 之后仍无输入框」判红。
+  - 行数：三个相关文件都有余量；不往 `use-chat-session.ts` 里加东西。
+- [x] 16.3 新文件登记进 `MIGRATED_AREAS`；SL 行：归档、查看已归档、恢复、归档后只读、运行中不能归档各一行，`待签`。
+- [x] 16.4 变异证据：归档会话仍出现在 `置顶任务` → 「查看、恢复」判红；只读时仍渲染输入框 → 16.2 判红；只读判定写反（未归档也隐藏输入框）→ 16.2 的回归用例判红；`恢复` 失败时切回可写 → 第三段判红。
 
 Suggested fixture level: expanded - 16.2 改会话页的共享入口（`conversation-view.tsx`、`page.tsx`、`message-action-row.tsx`），失败模式是未归档会话的输入框或操作行被误隐藏；16.1 是独立的新视图
 Minimal mergeable slice: 16.1（能归档、能在归档视图里恢复与删除；此时打开归档会话仍显示输入框，发送会被服务端 409 拒绝并就地显示——可接受的中间态）；16.2 随后

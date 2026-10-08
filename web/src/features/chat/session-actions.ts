@@ -63,6 +63,12 @@ type DeleteState = {
   shared: boolean;
 };
 
+/**
+ * 只读说明（archived-notice.tsx）里 `恢复` 的忙碌与失败文案，属于 `client` 的 `sessionId` 会话：
+ * 换账号或换会话后不显示。
+ */
+type NoticeState = { client: ApiClient; sessionId: string; busy: boolean; error: string | null };
+
 /** 列表区顶部提示：没有对话框可显示的失败。属于 `client`，换账号后不再显示。 */
 type AlertState = { client: ApiClient; message: string };
 
@@ -145,6 +151,7 @@ function withMeta(session: ChatSession, view: ChatSession, key: MetaKey): ChatSe
  *
  * 不弹轻提示：成功以列表自身的变化为反馈；对话框开着时的失败在对话框内显示；没有对话框的动作
  * （置顶、归档、恢复、导出）与对话框关闭后才到达的失败进 `alert`（列表区顶部提示），下一次列表动作发起时清除。
+ * 已归档会话主区说明里的 `恢复` 是另一个出口（`restoreNotice`）：忙碌与失败留在说明里。
  */
 export function useSessionActions(
   client: ApiClient,
@@ -159,6 +166,7 @@ export function useSessionActions(
   const [removing, setRemoving] = useState<DeleteState | null>(null);
   const [deleting, setDeleting] = useState<DeletingState>({ client, ids: [] });
   const [alert, setAlert] = useState<AlertState | null>(null);
+  const [notice, setNotice] = useState<NoticeState | null>(null);
   const stateRef = useRef(state);
   const promotingRef = useRef(promoting);
   const clientRef = useRef(client);
@@ -361,14 +369,40 @@ export function useSessionActions(
     send(session.id, "pinnedAt", { pinned: session.pinnedAt === null }, () => {}, report);
   }
 
-  function archive(session: ChatSession) {
+  /** 行菜单的归档与恢复。它顶替同一会话说明里在途的 `恢复`（后者的回调不再触发），所以先清说明的状态。 */
+  function setArchived(session: ChatSession, archived: boolean) {
     setAlert(null);
-    send(session.id, "archivedAt", { archived: true }, () => {}, report);
+    setNotice((current) => closedFor(current, client, session.id));
+    send(session.id, "archivedAt", { archived }, () => {}, report);
   }
 
-  function restore(session: ChatSession) {
+  /** 只读说明里为 `sessionId` 记的状态；没有、或属于上一个 client 或别的会话时为 null。 */
+  function noticeFor(sessionId: string) {
+    return notice && notice.client === client && notice.sessionId === sessionId ? notice : null;
+  }
+
+  /**
+   * 只读说明里的 `恢复`：与行菜单同一个请求，但忙碌与失败留在说明里。点击即清列表区顶部提示与上一条
+   * 失败；200 后会话视图已合并（主区回到可写），状态清空；401 只解除忙碌（交给既有的未授权通知）；
+   * 其它失败在按钮旁显示。不切侧栏视图。
+   */
+  function restoreFromNotice(sessionId: string) {
+    if (noticeFor(sessionId)?.busy) return;
+    const settle = (error: string | null) =>
+      setNotice((current) =>
+        current?.client === client && current.sessionId === sessionId && current.busy
+          ? { ...current, busy: false, error }
+          : current,
+      );
     setAlert(null);
-    send(session.id, "archivedAt", { archived: false }, () => {}, report);
+    setNotice({ client, sessionId, busy: true, error: null });
+    send(
+      sessionId,
+      "archivedAt",
+      { archived: false },
+      () => settle(null),
+      (error) => settle(isUnauthorized(error) ? null : errorMessage(error)),
+    );
   }
 
   /**
@@ -471,8 +505,14 @@ export function useSessionActions(
     openRename,
     openPromote,
     togglePin,
-    archive,
-    restore,
+    archive: (session: ChatSession) => setArchived(session, true),
+    restore: (session: ChatSession) => setArchived(session, false),
+    /** `ArchivedNotice` 的 props：当前选中的已归档会话 `sessionId` 的 `恢复`。 */
+    restoreNotice: (sessionId: string) => ({
+      busy: noticeFor(sessionId)?.busy ?? false,
+      error: noticeFor(sessionId)?.error ?? null,
+      onRestore: () => restoreFromNotice(sessionId),
+    }),
     exportSession,
     openDelete,
     /** 列表区顶部提示的文案（null 为没有）与 `关闭提示`；属于上一个 client 的不显示。 */
