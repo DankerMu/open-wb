@@ -379,3 +379,29 @@
 - 变异：结果直接返回 `<job>/out/*.pdf` 而不复制 → 「落定路径内容等于假进程所写 PDF」判红（作业目录已删，读不到）。
 - 变异：去掉 `close()` 后的 `aborted` 短路 → 「`close()` 之后的 `convert`」判红；去掉 `available:false` 的短路 → 「未配置」的零次 spawn 与 `work` 下无新目录判红。
 - 变异：预计不可观察：`lstat` 与复制之间的换链接竞态（假进程无法定时注入）；`OMP_USER` 模式下真实后代残留（已登记残余，归 28.6 人工验证）。
+
+## 23.1（#1104）
+
+- 不触 Critical Path（无沙箱、omp 子进程、审批）；单评审席即可；无配置键、无 `docs/architecture/system.md` 表改动；纯拷入、无用户可见变化——no checklist rows；不登记 `MIGRATED_AREAS`。
+- 依赖：边表「23.1 只 ← 0.1」（#1049 / PR #1285 视为已合），代码层面也无其它前提；不等 1.1 / 1.2 / 1.3，与 #1052 的裁决无关；不依赖同批任何兄弟刀。唯一下游是 #1105（23.2–23.6，另 ← 21.1）。
+- 合并次序：本刀改根 `package-lock.json`、`web/package.json`、`ATTRIBUTION.md` 第 3 节；同批凡加 npm 依赖的刀（proposal 点名服务端 `yauzl`，属组 10）会在锁文件与 `ATTRIBUTION.md` 冲突，串行合，后合者 rebase 后重跑 `npm install`，不手工合锁文件。
+- registry 原件取自 `https://ui.shadcn.com/r/styles/radix-nova/resizable.json`（`web/components.json` 的 style 即 `radix-nova`）：单文件约 50 行，导出 `ResizableHandle`、`ResizablePanel`、`ResizablePanelGroup`，只导入 `cn` 与 `react-resizable-panels`，不导入 `radix-ui`、`lucide-react`、`react`。
+- 六类修改实际只有两类，PR 描述逐条列：（三）Biome 格式化（双引号、分号、行宽 100、导入排序；首行 `"use client";` 保留，先例 `web/src/components/ui/collapsible.tsx:1`）；（四）`import { cn } from "cn"` 改为 `from "@/lib/utils"`。颜色类全是主题变量（`bg-border`、`ring-ring`、`ring-offset-background`），无可见文案，预期无需类型适配，不做透传修改。
+- 依赖：`npm install react-resizable-panels --workspace web`，当前 4.14.3，MIT，无运行时依赖，peer 为 react / react-dom ^18 || ^19。registry 原件用的是 v4 API（`Group` / `Panel` / `Separator`、`GroupProps` / `PanelProps` / `SeparatorProps`），不得装 3.x。`web/package.json` 的 `@radix-ui/*` 仍是 7 个，PR 描述贴 diff 佐证。
+- `ATTRIBUTION.md` 第 3 节新增条目，标题行须满足 `ui-guardrails.test.ts:231` 的 `hasEntry` 格式：``- **react-resizable-panels** —— `MIT License`,版权归 Brian Vaughn（https://github.com/bvaughn/react-resizable-panels）``，下接「用途」（shadcn/ui `resizable` 的依赖，会话页工作空间侧边栏分隔线用；本刀尚无应用层调用方）与「义务」两行。版权人以安装后包内许可文件为准。shadcn/ui 条目的用途句补一句「`resizable` 随 s1f-files-page 任务 23.1 拷入,新增依赖 `react-resizable-panels`」。
+- 新测试 `web/test/components-ui-resizable.test.tsx`（命名先例 `components-ui-button.test.tsx`、`components-ui-radio-group.test.tsx`；它是 knip 眼里唯一的导入方）：渲染 `ResizablePanelGroup` + 两个 `ResizablePanel` + `ResizableHandle withHandle`。断言三个 `data-slot`（`resizable-panel-group` / `resizable-panel` / `resizable-handle`）、`getByRole("separator")` 存在且可聚焦、`withHandle` 时分隔线内有一个子 `div`、调用方 `className` 透传到 Group 与 Handle。
+- jsdom 坑：库在 Group 挂载时无条件 `new ownerDocument.defaultView.ResizeObserver(...)`，jsdom 没有它，`web/test` 也没有现成桩。测试内 `vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} })`，`afterEach` 里 `vi.unstubAllGlobals()` 与 `cleanup`；桩写在本测试文件内，不新建共享 helper。
+- 上述渲染断言在 jsdom 下未经执行验证（只确认了 `ResizeObserver` 一处硬依赖，`adoptedStyleSheets` 有守卫）。若还有别的缺口使 Group 挂不上，停下报告，不 mock 整个库、不改拷入文件。
+- `web/test/ui-guardrails.test.ts`（254 行）的 `describe("ATTRIBUTION.md")` 加一条：`hasEntry(attribution, "react-resizable-panels", /\bMIT\b/)` 为真，且 `web/package.json` 的 `dependencies` 含该包。这是唯一要动的既有测试文件，只增不改。
+- 豁免核对，全部按目录通配，无事可做：`constraints.yaml:169`（`web/src/components/ui/**`）、`web/vitest.config.ts:16`、`.jscpd.json:9`、`scripts/size-guard.sh:20`、`biome.json:44`（只关 linter，formatter 与导入排序仍生效）、`knip.json` 的 `ignore`。`web/test/ui-layering.test.ts:520` 钉死 `knip.json` 只有这两条 `ignore`；不加 `ignoreDependencies`（issue 禁止改 knip 规则）。
+- 既有守卫不受影响：`ui-layering.test.ts:704` 只钉 `assistant-ui` 目录的文件集，`components/ui` 无文件清单断言；拷入文件无动态 `import()`；应用层零导入，主包字节数不变。
+- 偏离记录写三条：（1）新增测试文件作为唯一导入方，原因见 knip 行为；（2）六类修改只用到两类；（3）版本落在 v4。
+- 变异清单：
+- 删 `ATTRIBUTION.md` 的 `react-resizable-panels` 条目标题行，或去掉其 `MIT` → `ui-guardrails.test.ts` 新增用例红。
+- 删 `web/test/components-ui-resizable.test.tsx`（或去掉其对 `@/components/ui/resizable` 的导入）→ `npx knip` 报 `react-resizable-panels` 未使用依赖，`make check` 的 anti-drift 红（预期，按源码推断）。
+- `resizable.tsx` 的 `ResizableHandle` 去掉 `{...props}` 或 `data-slot` → `components-ui-resizable.test.tsx` 的 `data-slot` / `className` 透传断言红。
+- `ResizableHandle` 把 `withHandle &&` 改成恒假 → 「分隔线内有子 `div`」断言红。
+- 测试里去掉 `ResizeObserver` 桩 → 同文件渲染即抛错变红（证明桩是必需的，不是装饰）。
+- `web/package.json` 多加一个未登记的 `@radix-ui/react-*` → 既有 `ui-guardrails.test.ts:219`「Radix 条目列出 web 已安装的每个 @radix-ui/* 包」红。
+- 把 `cn` 导入改回 `"cn"` → `npm run typecheck` 与测试的模块解析红。
+- 预期不可观测：把 `bg-border` 换成颜色字面量（拷入层关了 linter，无颜色守卫扫 `components/ui`）——只能靠评审对照 registry 原件 diff，PR 描述附逐行对照。
