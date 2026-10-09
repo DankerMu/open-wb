@@ -235,70 +235,73 @@ export function useTurnActions({
         sessionId,
       });
       setPromptError(null);
-      // 与清空草稿同一次事件里取走标签；`prompt` 原样发出，不裁剪、不补字。
-      const sent = replaceAttachments(sessionId, []);
-      void ownedClient
-        .prompt(sessionId, prompt, {
-          attachments: sent.flatMap(({ path }) => path ?? []),
-          signal: controller.signal,
-        })
-        .then(() => {
-          if (
-            !mountedRef.current ||
-            controller.signal.aborted ||
-            mutationGeneration !== mutationGenerationRef.current ||
-            pendingCreateSendRef.current?.generation !== generation ||
-            ownedClient !== clientRef.current ||
-            requestedSessionRef.current !== sessionId
-          ) {
-            return;
-          }
-          pendingCreateSendRef.current = { ...pendingCreateSendRef.current, accepted: true };
-          // Before the history read: once accepted the page may leave, and the sidebar entry
-          // (title, status) must not wait for a read that leaving aborts.
-          refreshList(ownedClient);
-          closeSource();
-          return ownedClient.getMessages(sessionId, { signal: controller.signal }).then(
-            (snapshot) => {
-              if (
-                !mountedRef.current ||
-                controller.signal.aborted ||
-                mutationGeneration !== mutationGenerationRef.current ||
-                pendingCreateSendRef.current?.generation !== generation ||
-                ownedClient !== clientRef.current ||
-                requestedSessionRef.current !== sessionId
-              ) {
-                return;
-              }
-              installSnapshot(snapshot, ownedClient);
-              openSource(snapshot, ownedClient);
-              finishCreateSend(generation);
-              releaseMutationIfOwned(controller);
-            },
-            (error: unknown) => {
-              failOwnedPrompt(
-                controller,
-                mutationGeneration,
-                ownedClient,
-                error,
-                generation,
-                true,
-                sent,
-              );
-            },
-          );
-        })
-        .catch((error: unknown) => {
-          failOwnedPrompt(
-            controller,
-            mutationGeneration,
-            ownedClient,
-            error,
-            generation,
-            false,
-            sent,
-          );
-        });
+      const send = () => {
+        // 与清空草稿同一次事件里取走标签；`prompt` 原样发出，不裁剪、不补字。
+        const sent = replaceAttachments(sessionId, []);
+        void ownedClient
+          .prompt(sessionId, prompt, {
+            attachments: sent.flatMap(({ path }) => path ?? []),
+            signal: controller.signal,
+          })
+          .then(() => {
+            if (
+              !mountedRef.current ||
+              controller.signal.aborted ||
+              mutationGeneration !== mutationGenerationRef.current ||
+              pendingCreateSendRef.current?.generation !== generation ||
+              ownedClient !== clientRef.current ||
+              requestedSessionRef.current !== sessionId
+            ) {
+              return;
+            }
+            pendingCreateSendRef.current = { ...pendingCreateSendRef.current, accepted: true };
+            // Before the history read: once accepted the page may leave, and the sidebar entry
+            // (title, status) must not wait for a read that leaving aborts.
+            refreshList(ownedClient);
+            closeSource();
+            return ownedClient.getMessages(sessionId, { signal: controller.signal }).then(
+              (snapshot) => {
+                if (
+                  !mountedRef.current ||
+                  controller.signal.aborted ||
+                  mutationGeneration !== mutationGenerationRef.current ||
+                  pendingCreateSendRef.current?.generation !== generation ||
+                  ownedClient !== clientRef.current ||
+                  requestedSessionRef.current !== sessionId
+                ) {
+                  return;
+                }
+                installSnapshot(snapshot, ownedClient);
+                openSource(snapshot, ownedClient);
+                finishCreateSend(generation);
+                releaseMutationIfOwned(controller);
+              },
+              (error: unknown) => {
+                failOwnedPrompt(
+                  controller,
+                  mutationGeneration,
+                  ownedClient,
+                  error,
+                  generation,
+                  true,
+                  sent,
+                );
+              },
+            );
+          })
+          .catch((error: unknown) => {
+            failOwnedPrompt(
+              controller,
+              mutationGeneration,
+              ownedClient,
+              error,
+              generation,
+              false,
+              sent,
+            );
+          });
+      };
+      send();
     },
     [
       abortMutation,
