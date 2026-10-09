@@ -256,3 +256,60 @@
 - 实施更正（#1037）：CH-97 没有照注记的草稿写——欢迎页选入的文件在发送前一直是「待上传」，「等标签没有状态字样」做不到；改成在欢迎页选文件并发送，从气泡记下名字，并补了空间保持、审批、第一次撤回遇冲突的兜底、甲的辨认方式。失败分支其实写得出变异（在 `fail` 里或开冲突对话框前清空标签），补了两例「失败不动标签」。`turn-actions.ts` 722 → 725。
 - 17.3 的勾（#1037）：十条里有两条没有独立的变异。「刷新后不显示」——受理后与刷新后是同一条快照读路径，写不出只影响刷新的变异，由 #1274 的「去掉列表」连带咬住刷新后的用例。「本地呈现与快照呈现不一致（空白草稿渲染出空白段落）」——页面不自己先呈现用户消息，没有这条代码路径（#1035 注记已记）。其余各条：气泡三条见 #1274 的表，分叉两条见 #1278 的 M1 / M3，撤回一条见本 PR 的 M5。
 - 17.5 的清单行（#1037）：任务原文「附件文件已被删掉的不带回」只在「只撤回对话」下成立。缺省撤回先还原文件再判存在（design D19），被删的附件会被还原并带回；CH-97 按实际行为写（第二次撤回走冲突对话框的「只撤回对话」）。
+
+## 19.4（#1045）
+
+- 落点：`docs/architecture/system.md` 末尾新增 `### 9.3 输入框能力（S1g，change \`s1g-composer-capabilities\`）`，下设六个加粗小标题：**配置**、**`MODEL_CATALOG`**、**模型代理白名单**、**全部自动（`yolo`）**、**上传与反向代理**、**上传残留**。只改这一个文件，另勾 `tasks.md:891` 的 19.4。偏离记录写明：定位提示失效；README 不动。
+- **配置**，引语「`server/src/agent-config.ts` 与 `server/src/model-catalog.ts`；四项都可选」，表四行照 9.1 的列：
+- `APPROVAL_MAX_MODE`｜缺省 `yolo`（三档都开放）｜「所有会话可用审批档位的上界；取值恰为 `always-ask`、`write`、`yolo` 之一，不去空格、不改大小写」（`agent-config.ts:172-182`，次序 `model-catalog.ts:79`）。
+- `UPLOAD_MAX_BYTES`｜`524288000`（500 MiB）｜字节｜「单个上传文件的上限；恰等于上限的文件被接受」（`agent-config.ts:19,113-117`，`upload.ts:46,96`）。
+- `UPLOAD_MAX_FILES`｜`10`｜个｜「一条消息可带的附件个数上限；超过时 prompt 请求得到 400」（`agent-config.ts:20,118-122`，`prompt-attachments.ts:36-69`）。
+- `MODEL_CATALOG`｜未设置（即 `MODEL_ID` 一个模型）｜JSON 数组｜「模型白名单，见下」（`model-catalog.ts:37-56`）。
+- 表下三句：
+- 「两个数值：规范十进制正整数（无前导零），范围 `1..2147483647`——单文件上限因此调不过约 2 GiB。」（`agent-config.ts:41,157-170`）
+- 「任一项非法，服务启动失败（退出码 1）；标准错误只有一行 `{"event":"server_start_failed","reason":"config"}`，不指出是哪一项、也不回显取值，需自行逐项核对。」（`server.ts:203-205,254-259`）
+- 「两个上传上限与可选档位经 `GET /api/composer/options` 发给界面，界面每次页面加载读一次；改配置要重启服务，已打开的页面要刷新。」前半句依据 `rest-composer.ts:44-60`；「每次页面加载读一次」来自 addendum，本次未在 web 代码里核对，实施者写前先核或删掉这半句。
+- **`MODEL_CATALOG`** 的格式句（全部来自 `model-catalog.ts`）：
+- 「1 到 32 个对象的 JSON 数组；每个对象只接受 `id`、`name`、`reasoning`、`vision`、`efforts` 五个键。」（`:32-33,130,148-150`）
+- 「`id` 是发给上游的模型名：1 到 128 个 UTF-8 字节、无控制字符、不重复。`name` 是界面显示名，缺省等于 `id`，1 到 64 个码点。`reasoning`、`vision` 是布尔，缺省 `false`。」（`:136-138,153-170`）
+- 「`reasoning: true` 的元素必须写 `efforts`，其余元素不得写；`efforts` 是 `minimal`、`low`、`medium`、`high`、`xhigh`、`max` 的非空子集，按此次序升序书写，不写 `off`。」（`:171-173,181-195`）
+- 「界面可选强度是 `off` 加所声明的各档；缺省强度：声明了 `high` 取 `high`，否则取低于 `high` 的最高一档，再否则取声明的第一档。」（`:59-76`）
+- 示例照抄，占位 id，不带地址与密钥：`MODEL_CATALOG='[{"id":"model-a","name":"通用","reasoning":true,"efforts":["low","medium","high"]},{"id":"model-b","name":"快速"}]'`
+- 与 `MODEL_ID` / `MODEL_REASONING` 的关系：
+- 「未设置 `MODEL_CATALOG`：白名单只有 `MODEL_ID` 一项（缺省 `deepseek-v4.1-flash`），是否推理取 `MODEL_REASONING`（恰为 `on` / `off`，缺省 `on`）。这一项不带 `efforts`，界面列出 `off` 加全部六档，而 omp 按模型 id 自定强度集合并静默夹取——界面显示的强度可能与实际使用的不同。要一致就配置 `MODEL_CATALOG` 并写明 `efforts`。」（`:7,39-44,60,212-223`；`design.md` O2-legacy）
+- 「设置了 `MODEL_CATALOG`：同时设置 `MODEL_REASONING` 则启动失败；`MODEL_ID` 未设置时第一项是缺省模型，设置了就必须等于某一项的 `id`，否则启动失败。」（`:46-54`）
+- 「所有模型共用同一个上游（`MODEL_UPSTREAM_BASE_URL` / `MODEL_UPSTREAM_API_KEY`）。」（`design.md:89`）
+- 「从清单里拿掉一个模型后，存着它的会话与账号的最近选择在读取时回落到缺省模型，不需要改库。」（`:101-103`，`store-composer.ts:29-31`）
+- 「强度只校验是七个名字之一且所选模型支持推理，不校验是否在该模型的 `efforts` 之内；集合外的值原样交给 omp 夹取。」（`store-composer.ts:120-127`，`model-catalog.ts:111`）
+- **模型代理白名单**：
+- 「白名单就是 `MODEL_CATALOG` 各项的 `id`（未设置时恰为 `MODEL_ID` 一项）；界面与会话设置的校验、托管 `models.yml`、模型代理三处用同一份。」（`app.ts:188-194`，`server.ts:108`，`models-yml.ts:11-31`）
+- 「`POST /v1/chat/completions` 的请求体顶层必须恰有一个 `model` 成员，其值是白名单里某个 `id` 的字符串；缺少、重复、不是字符串或不在白名单内，一律 400 `bad_request`，不到达上游，响应不回显模型名。」（`model-proxy/index.ts:150-167`，`model-guard.ts:138-152`，`http/errors.ts:6`）
+- 「校验排在认证（401）与上游是否配置（502）之后。」（`design.md` D18）
+- 「要让某个模型可用：把它写进 `MODEL_CATALOG` 并重启。白名单是接入了哪些模型的清单，不是费用边界（[ADR-0008](../adr/0008-model-proxy-credentials.md)）。」（`tasks.md` 文首 Critical Path 条）
+- **全部自动（`yolo`）**，首句链接 [ADR-0012](../adr/0012-omp-project-config-host-overlay.md)「补充（S1g）：审批档位按会话取值」（`:60-85`），不复述论证。本页写：
+- 「档位按会话取值，三档：`每次都问`（`always-ask`，写文件与执行命令前都确认）、`只问命令`（`write`，缺省；执行命令前确认）、`全部自动`（`yolo`，不经确认执行命令与修改文件）。」（`permission-tier.tsx:27-29`，`model-catalog.ts:96`）
+- 「`全部自动` 下助手执行命令不再等人确认。它能触及的范围仍以 omp 进程的系统用户为界（[ADR-0010](../adr/0010-dedicated-omp-uid.md)）；未设置 `OMP_USER` 时 omp 与 app-server 同一用户运行，没有这层隔离——生产部署开放这一档之前先配好 `OMP_USER`。」（`agent-config.ts:111`，`ADR-0010:13,33`）
+- 「另两档也不是硬闸：确认卡 60 秒无人作答即自动允许，三档相同。」（`store-approvals.ts:17`，`ADR-0012:82`）
+- 「`全部自动` 下 omp 若因工具自带策略仍请求确认，照常出确认卡。」（`ADR-0012:83`）
+- 「在界面上选 `全部自动` 要确认一次。选过之后它记为该账号的最近选择，此后新建的会话默认沿用，不再弹确认；警示色仍在。」（`permission-tier.tsx:103,141-167`，`store-composer.ts:144-158,186-214`，迁移 041）
+- 「修改档位从该会话的下一条消息起生效（进程重启），在途回合与已弹出的确认卡用旧档位。」（`composer-align.ts:29-34`，`process.ts:100-101`，`ADR-0012:72`）
+- 「审计：会话的有效档位每次变化写一条 `session.permission`（`from` / `to`）；以不同于缺省的有效档位创建的会话也写一条（`from` 为 `null`）。」（`store-metadata.ts:204-214,385-393`，`store-composer.ts:221-230`）
+- 「关掉它：设 `APPROVAL_MAX_MODE=write` 并重启。此后界面不再列出 `全部自动`，请求这一档的创建与修改得到 400；已存的 `全部自动`（会话上的与账号最近选择里的）在读取时按 `write` 生效，不需要改库。设为 `always-ask` 时缺省的 `write` 同样被压到 `always-ask`。」（`rest-composer.ts:45`，`store-composer.ts:107-111`，`model-catalog.ts:96-100`，`design.md:109`）
+- **上传与反向代理**（路由 `POST /api/workspaces/:id/uploads`，`workspaces/rest.ts:296-358`）：
+- 「一次请求一个文件，请求体是原始字节流（`Content-Type: application/octet-stream`，不是 multipart），边收边写盘，不进内存，不受框架 body 上限约束。」（`:40,299-303`；`workspace-upload-stream.test.ts:183-185`）
+- 「超限两种时机：声明的 `Content-Length` 超过 `UPLOAD_MAX_BYTES` 时不读请求体直接 413；否则在越界的那一块 413 并停止读取。两者都写 `upload.reject` 审计。」（`:320-322,340-343,189-199`，`upload.ts:96-98`）
+- 「任何失败的上传响应都带 `Connection: close`，服务端随后关闭连接。」（`:57-65,307`）
+- 「反向代理：把这条路由的请求体上限放到不小于 `UPLOAD_MAX_BYTES`，并关闭请求缓冲——否则代理先把整个文件收完再转发，进度失真、代理磁盘被占，超限的文件也要传完才被拒绝。」（`design.md:236`）
+- 「app-server 对请求与连接都不设超时，停住的上传连接它不会主动断；代理的读取 / 发送超时是唯一的时钟，按可接受的最慢上传设。」（`workspace-upload-stream.test.ts:163-180` 钉住四个值为 0）
+- nginx 示例放在只匹配该路由的 `location` 里：`client_max_body_size 500m;`（等于缺省上限）、`proxy_request_buffering off;`、`proxy_http_version 1.1;`、`proxy_read_timeout` / `proxy_send_timeout` / `client_body_timeout`。上游地址写成 `http://<app-server 监听地址>`。指令语义是 nginx 的，不在本仓库可证，PR 里注明。
+- 末句「HTTP/2 的建议见 9.2。」
+- **上传残留**：
+- 「文件落在会话所绑工作空间（正式或临时）根下的 `uploads/`，重名自动编号为 `名字 (1)` … `(999)`，不覆盖。」（`rest.ts:39,329-337`，`upload.ts:60-79`）
+- 「没有配额：占用上限约为 `UPLOAD_MAX_BYTES` × 并发 × 用户数，自行给沙箱根所在文件系统留空间。」（`design.md:455,489`）
+- 「上传中的字节写在同目录的 `.upload-<32 位十六进制>.part`（`0660`）里。客户端中断、超限、写盘失败都会删掉它；只有进程被杀会留下。」（`upload.ts:36,87-90,110-113`）
+- 「宿主不清扫残留，启动时也不扫；上传期间与残留的 `.part` 都出现在文件页的 `uploads/` 列举里，可手工删除。」（`design.md:98,456-457`，`tree.ts:27-52` 不按名字过滤）
+- 「临时空间的目录随它的最后一个会话删除而整目录删除（连同其中的上传与残留）。」（`store-metadata.ts:24-27`，`temp-dir-remove.ts:1-9`）
+- 「正式空间里上传的文件是普通文件，不随消息或会话删除。」依据是 19.3 的术语条文（`tasks.md:889`）；本次未读 `CONTEXT.md` 原文，写前先对一遍。
+- 证据形式：本刀没有代码、没有测试、没有变异（per-mutation 表填「无：纯文档，无守卫解析 `system.md`」）。替代证据是 PR 正文里的「句子 → file:line」表，就用上面各条括号里的出处，对应验收「文档评审逐条核对」。
+- 清单：不增改 `docs/acceptance/functional-checklist.md` 的任何行（19.5 的事）。
+- 不可越界：不改产品代码、测试、CI、清单；只勾 19.4。公开仓库——示例里不出现 owner 部署的主机名、IP、用户名、密钥、供应商名或其 base URL，占位只用 `example.com`、`model-a` / `model-b`、`<…>`。`deepseek-v4.1-flash` 作为 `MODEL_ID` 缺省值已在被跟踪源码里（`model-catalog.ts:7`），可以写。
