@@ -6,6 +6,10 @@
  * throws the same `not_found` and rolls the row back. A create without a workspace (#930, design
  * D6) makes a temporary one in that same transaction and binds it, with no audit row; when the
  * transaction rolls back, the directories that creation made are removed afterwards.
+ * Both creations (#1005) open their transaction by settling the three composer columns
+ * (`resolveCreateComposer`: a refused value throws before any write or directory), and close it
+ * with the account's last choice and the creation's `session.permission` audit, so a failure of
+ * either leaves no session row, no workspace row and no last choice.
  * A PATCH is one owner-scoped UPDATE of only the given columns: it
  * never touches `updated_at`, `status`, `workspace_id`, the generation columns or message rows.
  * `archived: true` (#922) puts `status != 'running'` on that whole UPDATE, so a running session
@@ -33,13 +37,20 @@ import {
   requireChanges,
   runOwnedTransaction,
 } from "./store-branch.js";
-import type { ComposerConfig } from "./store-composer.js";
+import {
+  COMPOSER_COLUMNS,
+  type ComposerConfig,
+  type ComposerInput,
+  resolveCreateComposer,
+  saveComposerPrefs,
+} from "./store-composer.js";
 import { listSessionTurnSnapshots, type TurnSnapshotOutcome } from "./store-undo.js";
 import { readSessionView } from "./store-view.js";
 
 export type SessionScene = "office" | "code" | "design";
 
-export interface SessionCreateInput {
+/** The three composer keys arrive as unchecked strings: `createSession` validates their values. */
+export interface SessionCreateInput extends ComposerInput {
   workspaceId?: string;
   scene?: SessionScene;
 }
@@ -53,7 +64,10 @@ export interface SessionPatch {
 }
 
 export interface SessionMetadataStore {
-  /** The new session's view, read back from its committed row. */
+  /**
+   * The new session's view, read back from its committed row. Throws `bad_request` for a composer
+   * value the configuration refuses, before anything is written.
+   */
   createSession(ownerId: string, input: SessionCreateInput): SessionView;
   /**
    * The updated session view; null when this owner has no such row (unknown or deleted); `"busy"`
@@ -112,8 +126,7 @@ interface DeletedRow {
   workspace_id: string | null;
 }
 
-const INSERT_SESSION =
-  "INSERT INTO chat_sessions(id, owner_id, title, status, created_at, updated_at, workspace_id, scene) VALUES (?, ?, NULL, 'idle', ?, ?, ?, ?)";
+const INSERT_SESSION = `INSERT INTO chat_sessions(id, owner_id, title, status, created_at, updated_at, workspace_id, scene, ${COMPOSER_COLUMNS}) VALUES (?, ?, NULL, 'idle', ?, ?, ?, ?, ?, ?, ?)`;
 
 const SELECT_TEMPORARY = "SELECT temporary FROM workspaces WHERE id = ?";
 
@@ -150,22 +163,54 @@ export function createSessionMetadataStore(
       const now = Date.now();
       const id = randomBytes(16).toString("hex");
       const scene = input.scene ?? null;
-      const insert = (workspaceId: string): void => {
+      type Composer = ReturnType<typeof resolveCreateComposer>;
+      // First in either transaction: reads the last choice and refuses an invalid value.
+      const resolve = (): Composer => resolveCreateComposer(db, ownerId, input, options.composer);
+      const insert = (workspaceId: string, { row }: Composer): void => {
         requireChanges(
-          db.prepare(INSERT_SESSION).run(id, ownerId, now, now, workspaceId, scene).changes,
+          db
+            .prepare(INSERT_SESSION)
+            .run(
+              id,
+              ownerId,
+              now,
+              now,
+              workspaceId,
+              scene,
+              row.approval_mode,
+              row.model_id,
+              row.reasoning_effort,
+            ).changes,
           1,
           "session create",
         );
+      };
+      // Last in either transaction: the last choice, then the creation's permission audit.
+      const settle = (workspaceId: string, { given, auditTo }: Composer): void => {
+        saveComposerPrefs(db, ownerId, given, now);
+        if (auditTo !== null) {
+          options.emit(db, {
+            kind: "session.permission",
+            actorId: ownerId,
+            title: "修改权限档位",
+            workspaceId,
+            detail: { sessionId: id, from: null, to: auditTo },
+          });
+        }
       };
       const view = (): SessionView =>
         readSessionView(db, id, options.composer, "created session row missing");
       const workspaceId = input.workspaceId;
       if (workspaceId === undefined) {
-        createInTemporaryWorkspace(db, options, ownerId, insert);
+        createInTemporaryWorkspace(db, options, ownerId, resolve, (temporaryId, composer) => {
+          insert(temporaryId, composer);
+          settle(temporaryId, composer);
+        });
         return view();
       }
       runOwnedTransaction(db, "session create rollback failed", () => {
-        insert(workspaceId);
+        const composer = resolve();
+        insert(workspaceId, composer);
         const bound = db.prepare(SELECT_TEMPORARY).get(workspaceId) as
           | { temporary: number | bigint }
           | undefined;
@@ -180,6 +225,7 @@ export function createSessionMetadataStore(
           workspaceId,
           detail: { sessionId: id, scene },
         });
+        settle(workspaceId, composer);
       });
       return view();
     },
@@ -324,23 +370,25 @@ function patchAssignments(
 }
 
 /**
- * One transaction: the owner's new temporary workspace, then the session row bound to it — no
- * `session.bind` and no `workspace.create` audit. Returns the workspace id. When the transaction
+ * One transaction: `prepare` (reads and checks only — when it throws, no workspace and no
+ * directory was made), the owner's new temporary workspace, then `insertSession` with the session
+ * row bound to it — no `session.bind` and no `workspace.create` audit. When the transaction
  * rolls back after the workspace's directories were made, they are removed here, after the
  * rollback; never once it has committed. The original failure is what propagates.
  */
-function createInTemporaryWorkspace(
+function createInTemporaryWorkspace<T>(
   db: DatabaseSync,
   options: SessionMetadataStoreOptions,
   ownerId: string,
-  insertSession: (workspaceId: string) => void,
-): string {
+  prepare: () => T,
+  insertSession: (workspaceId: string, prepared: T) => void,
+): void {
   let created: CreatedTemporaryWorkspace | undefined;
   try {
-    return runOwnedTransaction(db, "session create rollback failed", () => {
+    runOwnedTransaction(db, "session create rollback failed", () => {
+      const prepared = prepare();
       created = options.createTemporaryWorkspace(ownerId);
-      insertSession(created.workspace.id);
-      return created.workspace.id;
+      insertSession(created.workspace.id, prepared);
     });
   } catch (error) {
     try {
