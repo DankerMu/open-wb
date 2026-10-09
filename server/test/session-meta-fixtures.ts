@@ -1,4 +1,4 @@
-// 会话 DTO 元数据（#517、#921、#1004、#1005）共享夹具：既有测试只经这些常量补键，不在各文件内重复字面量。
+// 会话 DTO 元数据（#517、#921、#1004、#1005、#1008）共享夹具：既有测试只经这些常量补键，不在各文件内重复字面量。
 import type { ComposerConfig } from "../src/sessions/store-composer.js";
 
 /**
@@ -33,6 +33,27 @@ export const THREE_MODEL_CATALOG: ComposerConfig["modelCatalog"] = {
     { id: "m3", name: "M Three", reasoning: true, vision: true, efforts: ["low", "high"] },
   ],
   defaultModelId: "m1",
+};
+
+/**
+ * `GET /api/composer/options` 在缺省配置下的响应体（session-composer-settings「输入框选项端点」的
+ * 「缺省配置」场景），键序同规格。手写字面量，不经 `selectableEfforts` / `defaultEffort`；与 web 的
+ * `DEFAULT_COMPOSER_OPTIONS`（`web/test/session-meta-fixtures.ts`）逐键相同。
+ */
+export const DEFAULT_COMPOSER_OPTIONS = {
+  approvalModes: ["always-ask", "write", "yolo"],
+  models: [
+    {
+      id: "deepseek-v4.1-flash",
+      name: "deepseek-v4.1-flash",
+      reasoning: true,
+      vision: false,
+      efforts: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+      defaultEffort: "high",
+    },
+  ],
+  defaults: { approvalMode: "write", modelId: "deepseek-v4.1-flash", reasoningEffort: "high" },
+  upload: { maxBytes: 524_288_000, maxFiles: 10 },
 };
 
 /**

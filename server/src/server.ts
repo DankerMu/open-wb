@@ -108,6 +108,7 @@ export function appAssemblyOf(config: ServerConfig): AssemblyDependencies {
     modelCatalog: config.modelCatalog,
     approvalMaxMode: config.approvalMaxMode,
     uploadMaxBytes: config.uploadMaxBytes,
+    uploadMaxFiles: config.uploadMaxFiles,
     ...(config.modelUpstreamBaseUrl !== undefined && config.modelUpstreamApiKey !== undefined
       ? { upstream: { baseUrl: config.modelUpstreamBaseUrl, apiKey: config.modelUpstreamApiKey } }
       : {}),

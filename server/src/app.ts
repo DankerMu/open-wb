@@ -13,6 +13,7 @@ import {
   DEFAULT_SANDBOX_RELATIVE,
   DEFAULT_SNAPSHOT_SETTINGS,
   DEFAULT_UPLOAD_MAX_BYTES,
+  DEFAULT_UPLOAD_MAX_FILES,
   type SnapshotSettings,
 } from "./agent-config.js";
 import {
@@ -87,6 +88,8 @@ export interface AssemblyDependencies {
   approvalMaxMode?: ApprovalMode;
   /** 单个上传文件的字节上限；省略时取缺省 524288000。 */
   uploadMaxBytes?: number;
+  /** 一条消息可带的附件个数上限；省略时取缺省 10。 */
+  uploadMaxFiles?: number;
   /**
    * Must return synchronously. createApp forwards this callback and its return
    * unchanged; a returned thenable is an owned programming error beside the source fault.
@@ -194,6 +197,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     ensureSharedDir,
     emit,
   });
+  const upload = uploadLimits(assembly);
   const registered = registerSessions(app, {
     db,
     tokens,
@@ -207,6 +211,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     },
     agentDir: ompAgentDir(runtime.stateDir),
     composer: { approvalMaxMode: assembly?.approvalMaxMode ?? "yolo", modelCatalog },
+    upload,
     snapshots: assembly?.snapshots ?? snapshotService(runtime),
     onError: assembly?.onError ?? (() => {}),
     ...(assembly?.onEvent === undefined ? {} : { onEvent: assembly.onEvent }),
@@ -221,7 +226,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     sandbox,
     audit,
     listEvents: registered.listEvents,
-    uploadMaxBytes: assembly?.uploadMaxBytes ?? DEFAULT_UPLOAD_MAX_BYTES,
+    uploadMaxBytes: upload.maxBytes,
   });
   registerAccounts(app, { db });
 
@@ -277,6 +282,17 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
   });
 
   return app;
+}
+
+/** 两个上传上限的生效值：装配没给的取缺省。 */
+function uploadLimits(assembly: AssemblyDependencies | undefined): {
+  maxBytes: number;
+  maxFiles: number;
+} {
+  return {
+    maxBytes: assembly?.uploadMaxBytes ?? DEFAULT_UPLOAD_MAX_BYTES,
+    maxFiles: assembly?.uploadMaxFiles ?? DEFAULT_UPLOAD_MAX_FILES,
+  };
 }
 
 /**

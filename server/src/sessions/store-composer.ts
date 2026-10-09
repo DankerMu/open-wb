@@ -8,6 +8,7 @@
  * the upsert of that last choice, and whether the creation writes a `session.permission` audit.
  * The write side of a PATCH (#1006, design D5): the same value checks against the session's own
  * current model, the same upsert, and an audit only when the effective mode changes.
+ * The read of the last choice alone (#1008) serves `GET /api/composer/options`.
  * All of it runs inside the caller's transaction; nothing here opens one.
  */
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
@@ -127,6 +128,11 @@ function checkComposerInput(
   return given;
 }
 
+/** The owner's last choice as stored, raw; all three NULL for an account that never chose. */
+export function readComposerPrefs(db: DatabaseSync, ownerId: string): ComposerDbRow {
+  return (db.prepare(SELECT_PREFS).get(ownerId) as ComposerDbRow | undefined) ?? NO_CHOICE;
+}
+
 /**
  * Reads the owner's last choice and validates the request's keys (`checkComposerInput`; the
  * effort's model, when the request names none, is the effective one of the last choice) — a read
@@ -141,7 +147,7 @@ export function resolveCreateComposer(
   input: ComposerInput,
   config: ComposerConfig,
 ): CreateComposer {
-  const last = (db.prepare(SELECT_PREFS).get(ownerId) as ComposerDbRow | undefined) ?? NO_CHOICE;
+  const last = readComposerPrefs(db, ownerId);
   const given = checkComposerInput(
     input,
     config,

@@ -9,6 +9,7 @@ import { registerSessionListEvents, type SessionListNotifier } from "./list-even
 import type { SpawnLog } from "./omp/spawn-gate.js";
 import { registerSessionRoutes } from "./rest.js";
 import { registerCommandRoutes } from "./rest-commands.js";
+import { registerComposerRoutes } from "./rest-composer.js";
 import { registerProjectConfigRoutes } from "./rest-project-config.js";
 import type { WorkspaceRootOf } from "./session-cwd.js";
 import { createSessionDeleter } from "./session-delete.js";
@@ -49,6 +50,11 @@ export interface RegisterSessionsOptions {
    * three composer settings are the stored choices resolved against it.
    */
   composer: ComposerConfig;
+  /**
+   * The effective upload limits (createApp's configuration), reported by `GET /api/composer/options`;
+   * sessions enforces neither here.
+   */
+  upload: { maxBytes: number; maxFiles: number };
   /**
    * The app's one workspace-snapshots service (createApp binds it to the managed snapshots
    * directory and the snapshot settings); the prompt route snapshots a bound session's workspace
@@ -159,6 +165,11 @@ export function registerSessions(
   registerProjectConfigRoutes(app, {
     sandboxRoot: options.runtime.sandboxRoot,
     workspaceRootOf: options.workspaceRootOf,
+  });
+  registerComposerRoutes(app, {
+    db: options.db,
+    composer: options.composer,
+    upload: options.upload,
   });
   const clock = options.runtime.clock ?? defaultSessionClock();
   registerSessionEventStream(app, {

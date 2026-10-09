@@ -32,6 +32,8 @@ import {
   compiledFixtureEnv,
   compileServerEntry,
   expectBindable,
+  getJson,
+  login,
   releaseStartupFixtures,
   reserveWildcardPort,
   startCompiledServer,
@@ -142,7 +144,9 @@ describe("production entry managed omp state layout", () => {
     }
   }, 60_000);
 
-  it("a three-model MODEL_CATALOG writes three model entries in whitelist order", async () => {
+  // http-service-skeleton「四个新配置键的取值与非法值」: both halves of the valid four-key start — the
+  // managed models.yml, and what `GET /api/composer/options` reports (#1008).
+  it("a three-model MODEL_CATALOG writes three model entries in whitelist order, and the four keys reach GET /api/composer/options", async () => {
     const root = scratchRoot("open-wb-layout-catalog-");
     const catalog = [
       { id: "m1", name: "通用", reasoning: true, efforts: ["minimal", "low", "medium", "high"] },
@@ -154,6 +158,9 @@ describe("production entry managed omp state layout", () => {
       compiled.entry,
       compiledFixtureEnv(root, port, join(root, "bin", "omp"), {
         MODEL_CATALOG: JSON.stringify(catalog),
+        APPROVAL_MAX_MODE: "write",
+        UPLOAD_MAX_BYTES: "1048576",
+        UPLOAD_MAX_FILES: "3",
       }),
     );
     try {
@@ -180,6 +187,42 @@ describe("production entry managed omp state layout", () => {
         },
       ]);
       expect(readdirSync(agentDir).toSorted()).toEqual(["host-overlay.yml", "models.yml"]);
+
+      const options = await getJson(port, "/api/composer/options", await login(port));
+
+      expect(options.status).toBe(200);
+      expect(options.headers.get("cache-control")).toBe("no-store");
+      expect(options.body).toEqual({
+        approvalModes: ["always-ask", "write"],
+        models: [
+          {
+            id: "m1",
+            name: "通用",
+            reasoning: true,
+            vision: false,
+            efforts: ["off", "minimal", "low", "medium", "high"],
+            defaultEffort: "high",
+          },
+          {
+            id: "m2",
+            name: "m2",
+            reasoning: false,
+            vision: false,
+            efforts: [],
+            defaultEffort: null,
+          },
+          {
+            id: "m3",
+            name: "深度",
+            reasoning: true,
+            vision: true,
+            efforts: ["off", "low", "high"],
+            defaultEffort: "high",
+          },
+        ],
+        defaults: { approvalMode: "write", modelId: "m1", reasoningEffort: "high" },
+        upload: { maxBytes: 1048576, maxFiles: 3 },
+      });
     } finally {
       await server.dispose();
     }

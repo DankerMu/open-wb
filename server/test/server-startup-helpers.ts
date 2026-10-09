@@ -270,6 +270,18 @@ export function expectPromptStatus(
   );
 }
 
+/** GET `path` with the session cookie; the body is parsed as JSON. */
+export function getJson(
+  port: number,
+  path: string,
+  cookie: string,
+): Promise<{ status: number; headers: Headers; body: unknown }> {
+  return requestJson(port, "GET", path, cookie).then((response) => ({
+    ...response,
+    body: JSON.parse(response.body) as unknown,
+  }));
+}
+
 function requestJson(
   port: number,
   method: string,
