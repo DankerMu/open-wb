@@ -1,7 +1,6 @@
 import fs, { fstatSync, mkdirSync, truncateSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
-import type { Readable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import {
   classifyPreview,
@@ -14,6 +13,8 @@ import {
   expectedTextHeaders,
   spyMetadataIo,
   TEXT_MIME,
+  waitForClose,
+  waitForOpen,
   workspaceTempDir,
 } from "./workspace-file-helpers.js";
 
@@ -36,19 +37,6 @@ function expectedImageHeaders(contentType: string, size: number): Record<string,
     "Cache-Control": "no-store",
     "X-Workbuddy-Size": String(size),
   };
-}
-
-function waitForClose(stream: Readable): Promise<void> {
-  return new Promise((resolve) => {
-    stream.once("close", () => resolve());
-  });
-}
-
-function waitForOpen(stream: Readable): Promise<number> {
-  return new Promise((resolve, reject) => {
-    stream.once("open", (fd: number) => resolve(fd));
-    stream.once("error", reject);
-  });
 }
 
 describe("classifyPreview", () => {

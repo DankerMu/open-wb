@@ -82,3 +82,16 @@ export async function collectBytes(stream: Readable): Promise<Buffer> {
   }
   return Buffer.concat(chunks);
 }
+
+export function waitForClose(stream: Readable): Promise<void> {
+  return new Promise((resolve) => {
+    stream.once("close", () => resolve());
+  });
+}
+
+export function waitForOpen(stream: Readable): Promise<number> {
+  return new Promise((resolve, reject) => {
+    stream.once("open", (fd: number) => resolve(fd));
+    stream.once("error", reject);
+  });
+}
