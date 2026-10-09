@@ -2,8 +2,11 @@
 // 冲突对话框与所有权 fence。seam：整页挂载 + 假 API / 假 EventSource。测试不派发 `session.rewound`。
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ChatSessionUndo } from "../src/lib/session-contract.js";
+import { area, chips, choose, file, land, send, statuses } from "./chat-attachments-support.js";
 import { renderChatPageWithAuthProbe, renewAccount } from "./chat-page-lifecycle-support.js";
-import { OTHER_SESSION_ID } from "./chat-page-ownership-support.js";
+import { OTHER_SESSION_ID, promptAccepted } from "./chat-page-ownership-support.js";
+import { PROJECT_A, workspaceList } from "./chat-page-welcome-scene-support.js";
 import {
   FakeEventSource,
   latestSource,
@@ -43,6 +46,7 @@ import {
   selectInNav,
   session,
   snapshotOf,
+  TRIMMED,
   textarea,
   transcript,
   typeDraft,
@@ -55,6 +59,7 @@ import {
   userArticles,
 } from "./chat-undo-support.js";
 import { calls, currentLocation, deferredResponse, jsonResponse, paths } from "./support.js";
+import { FakeXhr, installFakeXhr } from "./upload-support.js";
 
 afterEach(cleanupUndoPage);
 
@@ -318,6 +323,140 @@ describe("撤回动作", () => {
     expect(alerts()).toEqual([`Agent 不可用。${GUIDANCE}`]);
     expect(textarea().disabled).toBe(true);
     expect(bar().queryByText("生成中")).toBeNull();
+  });
+});
+
+describe("撤回带附件的消息恢复标签", () => {
+  // `S` 的会话没有工作空间，种不出标签：这一组用绑定了项目 A 的同一个会话。
+  const BOUND = { ...S.session, workspaceId: PROJECT_A.id };
+  const PROMPT = `/api/sessions/${SESSION_ID}/prompt`;
+  const A_PDF: ChatSessionUndo["attachments"] = [{ path: "uploads/a.pdf", size: 3 }];
+  const rewound = () =>
+    jsonResponse(
+      snapshotOf({ ...BOUND, updatedAt: REWOUND_SESSION.updatedAt }, S.messages.slice(0, 2)),
+    );
+
+  /** u1/a2 之后的 u3 是 `content` 加 `attachments`；undo 回 `draft` 与 `back`。挂载后装上 `FakeXhr`。 */
+  async function mountBound(
+    content: string,
+    attachments: ChatSessionUndo["attachments"],
+    reply: () => Response | Promise<Response>,
+    withB = false,
+  ) {
+    const u3 = { ...user(3, content, "available"), attachments };
+    const mounted = await mount(
+      snapshotOf(BOUND, [...S.messages.slice(0, 2), u3, assistant(4, "二")]),
+      {
+        "/api/workspaces": () => workspaceList(PROJECT_A),
+        [PROMPT]: () => jsonResponse(promptAccepted, 202),
+        [UNDO]: reply,
+      },
+      withB,
+    );
+    installFakeXhr();
+    return mounted;
+  }
+
+  async function seedOld() {
+    await choose(file("old.txt"));
+    await land(0, "old.txt");
+    expect(chips()).toEqual(["old.txt10 B"]);
+    expect(statuses()).toEqual(["uploaded"]);
+  }
+
+  it("仍在的附件覆盖已有标签，不发上传请求；直接发送带的就是它", async () => {
+    const two = [...A_PDF, { path: "uploads/b.png", size: 5 }];
+    const { fetchMock } = await mountBound("看看这两个", two, () =>
+      undone(rewound, "看看这两个", {}, A_PDF),
+    );
+    await seedOld();
+    await clickUndo();
+    await waitFor(() => expect(transcript()).toEqual(TRIMMED));
+
+    expect(textarea().value).toBe("看看这两个");
+    expect(chips()).toEqual(["a.pdf3 B"]);
+    expect(statuses()).toEqual(["uploaded"]);
+    // 唯一的上传请求是种 `old.txt` 的那一个。
+    expect(FakeXhr.instances).toHaveLength(1);
+    expect(alerts()).toEqual([]);
+
+    await waitFor(() => expect(send().disabled).toBe(false));
+    fireEvent.click(send());
+    await flush();
+    expect(calls(fetchMock, PROMPT).map(([, init]) => init?.body)).toEqual([
+      '{"message":"看看这两个","attachments":["uploads/a.pdf"]}',
+    ]);
+    expect(FakeXhr.instances).toHaveLength(1);
+  });
+
+  it("响应的 attachments 为空：附件区不渲染（已有标签被清掉），草稿照常回填", async () => {
+    await mountBound("第二个问题", A_PDF, () => undone(rewound));
+    await seedOld();
+    await clickUndo();
+    await waitFor(() => expect(transcript()).toEqual(TRIMMED));
+
+    expect(area()).toBeNull();
+    expect(textarea().value).toBe("第二个问题");
+    expect(FakeXhr.instances).toHaveLength(1);
+    expect(alerts()).toEqual([]);
+  });
+
+  it("撤回只有附件的消息：空 draft 覆盖已有草稿，标签恢复，发送可用", async () => {
+    await mountBound("", A_PDF, () => undone(rewound, "", {}, A_PDF));
+    typeDraft("半句话");
+    expect(userArticles()).toHaveLength(2);
+    expect(send().disabled).toBe(false);
+    await clickUndo();
+    await waitFor(() => expect(userArticles()).toHaveLength(1));
+
+    expect(transcript()).toEqual(TRIMMED);
+    expect(textarea().value).toBe("");
+    expect(chips()).toEqual(["a.pdf3 B"]);
+    expect(statuses()).toEqual(["uploaded"]);
+    await waitFor(() => expect(send().disabled).toBe(false));
+    expect(FakeXhr.instances).toHaveLength(0);
+    expect(alerts()).toEqual([]);
+  });
+
+  it.each([
+    ["502", () => jsonResponse(envelope("agent_unavailable", "Agent 不可用"), 502), false],
+    ["409 undo_conflict", CONFLICT, true],
+  ] as const)("失败不动标签：%s 之后已有的标签还在", async (_, reply, dialog) => {
+    await mountBound("看看这两个", A_PDF, reply);
+    await seedOld();
+    await clickUndo();
+
+    expect(conflictDialog() !== null).toBe(dialog);
+    if (dialog) {
+      // 对话框开着时页面其余部分是 `aria-hidden`，标签按角色查不到：先取消。
+      fireEvent.click(
+        within(conflictDialog() as HTMLElement).getByRole("button", { name: "取消" }),
+      );
+      await waitFor(() => expectNoDialog());
+    }
+    expect(chips()).toEqual(["old.txt10 B"]);
+    expect(statuses()).toEqual(["uploaded"]);
+    expect(transcript()).toEqual(["第一个问题", "一", "看看这两个", "二"]);
+    expect(FakeXhr.instances).toHaveLength(1);
+  });
+
+  it("请求在途时切换会话：迟到的 200 不动标签，回到原会话也没有", async () => {
+    const undo = deferredResponse();
+    await mountBound("看看这两个", A_PDF, () => undo.promise, true);
+    await clickUndo();
+    await selectInNav("other session", OTHER_SESSION_ID);
+
+    undo.resolve(undone(rewound, "看看这两个", {}, A_PDF));
+    await flush();
+    expect(area()).toBeNull();
+    expect(textarea().value).toBe("");
+
+    // 标签按会话存：写进了 A 的记录要回到 A 才看得见。
+    await selectInNav("saved title", SESSION_ID);
+    act(() => latestSource().emitOpen());
+    await flush();
+    expect(area()).toBeNull();
+    expect(FakeXhr.instances).toHaveLength(0);
   });
 });
 

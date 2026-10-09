@@ -549,8 +549,8 @@ export function useTurnActions({
 
   /**
    * `撤回`：regenerate 的锁形状（页面级、按身份释放），不带历史令牌——离开又回到同一会话后到达的 200
-   * 照常应用，否则原文丢失、线程停在提交前的快照上。不弹确认。200：覆盖草稿、合并列表条目、重读快照、
-   * 聚焦输入框。`restore` 遇 409 `undo_conflict` 时释放锁并交给冲突对话框；其余失败进输入框上的错误。
+   * 照常应用，否则原文丢失、线程停在提交前的快照上。不弹确认。200：覆盖草稿与附件标签、合并列表条目、
+   * 重读快照、聚焦输入框。`restore` 遇 409 `undo_conflict` 时释放锁并交给冲突对话框；其余失败进输入框上的错误。
    * 从不 reject。
    */
   const undoTurn = useCallback(
@@ -591,12 +591,14 @@ export function useTurnActions({
       setPromptError(null);
       setUndoOwner(owner);
       return ownedClient.undoMessage(sessionId, messageId, files).then(
-        ({ draft, files: { failed, skipped }, session }) => {
+        ({ attachments, draft, files: { failed, skipped }, session }) => {
           if (!owned()) {
             release();
             return;
           }
           setDraft(draft);
+          // 空数组也调：撤回后仍在的附件覆盖输入框里已有的标签（在途上传中止），不发请求。
+          restoreAttachments(sessionId, attachments);
           // 每一次被应用的 200 都重新决定说明：有未还原的就换成这一份，没有就撤掉已有的。
           setUndoNotice(
             skipped.count + failed.count > 0
@@ -653,6 +655,7 @@ export function useTurnActions({
       ownsSessionWrite,
       reconcileSettled,
       requestedSessionRef,
+      restoreAttachments,
       setDraft,
       setListState,
       setPromptError,

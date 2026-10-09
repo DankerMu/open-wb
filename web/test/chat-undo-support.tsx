@@ -103,6 +103,7 @@ export function undone(
   after: () => Response = () => jsonResponse(REWOUND),
   draft = "第二个问题",
   files: Partial<ChatSessionUndo["files"]> = {},
+  attachments: ChatSessionUndo["attachments"] = [],
 ) {
   afterUndo = after;
   return jsonResponse({
@@ -116,7 +117,7 @@ export function undone(
       failed: NO_PATHS,
       ...files,
     },
-    attachments: [],
+    attachments,
   } satisfies ChatSessionUndo);
 }
 
