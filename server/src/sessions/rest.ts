@@ -456,7 +456,7 @@ export function toPublicSession(session: PublicSession): PublicSession {
 }
 
 /** Exactly the two declared keys, whatever else the element carries. */
-function toPublicAttachment({ path, size }: StoredAttachment): StoredAttachment {
+export function toPublicAttachment({ path, size }: StoredAttachment): StoredAttachment {
   return { path, size };
 }
 

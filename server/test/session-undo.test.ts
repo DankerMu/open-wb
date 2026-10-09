@@ -380,7 +380,7 @@ describe("undo REST: shape, owner and prechecks", () => {
 
 describe("undo in place on real fake-omp branch children", () => {
   it(
-    "撤回中间的一条: 200 {session, draft, files}, u1 and a1 left as they were, the session on the branch file",
+    "撤回中间的一条: 200 {session, draft, files, attachments}, u1 and a1 left as they were, the session on the branch file",
     REAL,
     async () => {
       const world = worlds.track(await openForkWorld({ entries: [THIRD] }));
