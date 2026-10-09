@@ -94,6 +94,8 @@ interface UndoPlan {
   /** The undone message's stored content, and the session's user messages in order to align it. */
   text: string;
   users: readonly StoredUser[];
+  /** Message id → the attachment paths it stores (#1018), read with `users`. */
+  attachments: ReadonlyMap<number, readonly string[]>;
   /** The last assistant message of the whole session as the precheck read it. */
   expectedLastAssistantId: number | null;
   file: string;
@@ -134,6 +136,8 @@ export class Undos {
     const { store } = this.#ports;
     const { sessionId, ownerId, messageId } = request;
     const tree = store.getMessages(sessionId, ownerId);
+    // Same synchronous segment as the messages: the paths are those of the rows just read.
+    const attachments = store.attachmentPaths(sessionId);
     const resume = store.runtimeState(sessionId);
     if (tree === null || resume === null) {
       throw new HttpError("not_found");
@@ -162,6 +166,7 @@ export class Undos {
     return {
       text: user.content,
       users,
+      attachments,
       expectedLastAssistantId: assistant?.id ?? null,
       file: resume.ompSessionFile,
       workspaceId: resume.workspaceId,
@@ -183,6 +188,7 @@ export class Undos {
       resumePath: plan.file,
       messageId,
       users: plan.users,
+      attachments: plan.attachments,
     });
     if (this.#ports.closed()) {
       throw new HttpError("agent_unavailable");
@@ -207,7 +213,8 @@ export class Undos {
     if (tree === null) {
       throw new HttpError("not_found");
     }
-    // The stored content, not the branch text: an escaped entry carries the wire-side space.
+    // The stored content, not the branch text: an escaped entry carries the wire-side space, and
+    // the entry of a message with attachments their suffix.
     return { session: tree.session, draft: plan.text };
   }
 }

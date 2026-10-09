@@ -4,8 +4,10 @@
  * dispatches on the session's own process; fork (#466) runs the commands on a temporary process
  * admitted after the source's process retired, shuts it down and only then commits. Both pick the
  * branch entry by wire candidates (#555): a whitelisted command turn has no entry and is refused,
- * escaped text has one with a leading space. Regenerate dispatches the branch text escaped when it
- * starts with `/` (#711), so an entry left before the prompt route escaped is never re-sent bare.
+ * escaped text has one with a leading space, and a message stored with attachments has one ending
+ * in their suffix (#1018; the paths are read in the precheck, with the messages). Regenerate
+ * dispatches the branch text escaped when it starts with `/` (#711), so an entry left before the
+ * prompt route escaped is never re-sent bare.
  */
 import { randomBytes } from "node:crypto";
 import { HttpError } from "../core/errors/index.js";
@@ -53,6 +55,8 @@ interface RegeneratePlan {
   sessionId: string;
   expectedId: number;
   question: string;
+  /** The attachment paths the last user message stores (none: `[]`). */
+  paths: readonly string[];
   resume: Resume;
 }
 
@@ -77,6 +81,8 @@ export class Regenerations {
   #precheck(sessionId: string, ownerId: string): RegeneratePlan {
     const { store, controls } = this.#ports;
     const tree = store.getMessages(sessionId, ownerId);
+    // Same synchronous segment as the messages: the paths are those of the rows just read.
+    const attachments = store.attachmentPaths(sessionId);
     const resume = store.runtimeState(sessionId);
     if (tree === null || resume === null) {
       throw new HttpError("not_found");
@@ -96,17 +102,23 @@ export class Regenerations {
     ) {
       throw new HttpError("bad_request");
     }
-    return { sessionId, expectedId: assistant.id, question: user.content, resume };
+    return {
+      sessionId,
+      expectedId: assistant.id,
+      question: user.content,
+      paths: attachments.get(user.id) ?? [],
+      resume,
+    };
   }
 
   async #regenerate(slot: Slot, plan: RegeneratePlan): Promise<{ assistantMessageId: number }> {
-    const entryId = await this.#lastEntry(slot, plan.question);
+    const entryId = await this.#lastEntry(slot, plan);
     const branched = await branchTo(slot.runtime, entryId);
     return this.#commit(slot, plan, dispatchText(branched.text), branched.sessionFile);
   }
 
   /** (a)+(b): the only command whose acquisition fault (re-admission) may surface. */
-  async #lastEntry(slot: Slot, question: string): Promise<string> {
+  async #lastEntry(slot: Slot, plan: RegeneratePlan): Promise<string> {
     const before = slot.generation;
     let data: unknown;
     try {
@@ -121,7 +133,7 @@ export class Regenerations {
       }
     }
     // Only the last pair is compared: earlier entries are not read.
-    const entryId = entryFor(branchEntries(data).at(-1), question);
+    const entryId = entryFor(branchEntries(data).at(-1), plan.question, plan.paths);
     if (entryId === undefined) {
       throw new HttpError("agent_unavailable");
     }
@@ -203,6 +215,8 @@ interface ForkPlan {
   /** The fork point's stored content, and the source's user messages in order to align it. */
   text: string;
   users: readonly StoredUser[];
+  /** Message id → the attachment paths it stores, read with `users`. */
+  attachments: ReadonlyMap<number, readonly string[]>;
   expectedAssistantId: number | null;
   file: string;
   workspaceId: string | null;
@@ -242,6 +256,8 @@ export class Forks {
   #precheck(sourceId: string, ownerId: string, messageId: number, busy: boolean): ForkPlan {
     const { store } = this.#ports;
     const tree = store.getMessages(sourceId, ownerId);
+    // Same synchronous segment as the messages: the paths are those of the rows just read.
+    const attachments = store.attachmentPaths(sourceId);
     const resume = store.runtimeState(sourceId);
     if (tree === null || resume === null) {
       throw new HttpError("not_found");
@@ -272,6 +288,7 @@ export class Forks {
       messageId,
       text: user.content,
       users,
+      attachments,
       expectedAssistantId: assistant?.id ?? null,
       file: resume.ompSessionFile,
       workspaceId: resume.workspaceId,
@@ -291,6 +308,7 @@ export class Forks {
       resumePath: plan.file,
       messageId: plan.messageId,
       users: plan.users,
+      attachments: plan.attachments,
     });
     return this.#commit(plan, branched);
   }
@@ -317,7 +335,8 @@ export class Forks {
     } catch (error) {
       throw error instanceof HttpError ? error : new HttpError("agent_unavailable");
     }
-    // The stored content, not the branch text: an escaped entry carries the wire-side space.
+    // The stored content, not the branch text: an escaped entry carries the wire-side space, and
+    // the entry of a message with attachments their suffix.
     return { session, draft: plan.text };
   }
 }

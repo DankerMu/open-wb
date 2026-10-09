@@ -17,6 +17,7 @@ import {
   settlePendingApproval,
   turnSignal,
 } from "./store-approvals.js";
+import { readAttachmentPaths } from "./store-attachments.js";
 import {
   copyForkHistory,
   decodeNullableText,
@@ -169,6 +170,8 @@ export interface SessionStore extends SessionTodoStore {
   create(ownerId: string): SessionView;
   list(ownerId: string): SessionView[];
   getMessages(sessionId: string, ownerId: string): SessionMessageTree | null;
+  /** Message id → stored attachment paths (#1018, store-attachments.ts); absent means none. */
+  attachmentPaths(sessionId: string): Map<number, string[]>;
   acceptPrompt(sessionId: string, ownerId: string, text: string): AcceptedPrompt;
   rollbackPrompt(assistantMessageId: number): boolean;
   /** A metadata PATCH wrote the title: an in-flight admission's rollback keeps it (no-op if idle). */
@@ -626,6 +629,8 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
         decidedAt,
       });
     },
+
+    attachmentPaths: (sessionId) => readAttachmentPaths(db, sessionId),
 
     runtimeState(sessionId) {
       const decoder = createSqliteTextDecoder(db);
