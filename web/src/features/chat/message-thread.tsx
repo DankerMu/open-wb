@@ -2,6 +2,7 @@
 // thread-viewport.tsx，思考折叠在 thinking-fold.tsx，工具调用组在 tool-call-group.tsx，操作行在
 // message-action-row.tsx，已结算审批记录在 approval-card.tsx（待决审批不在消息里，见 composer-dock.tsx）。
 // 文件变更卡在 file-changes-card.tsx，产物卡在 artifact-card.tsx，按 D4 的块次序挂在助手消息里。
+// 用户消息的附件列表（design D15）就在本文件，数据取自透传字段。
 import {
   AssistantRuntimeProvider,
   MessagePrimitive,
@@ -11,6 +12,7 @@ import {
 import { memo, type Ref, useCallback } from "react";
 import type { ApiClient } from "../../lib/api.js";
 import { BrandMark, Icon } from "../../ui/index.js";
+import { formatSize } from "../files/file-meta.js";
 import { ApprovalRecords } from "./approval-card.js";
 import { ArtifactCards } from "./artifact-card.js";
 import { FileChangesCard } from "./file-changes-card.js";
@@ -91,12 +93,15 @@ const UserMessage = memo(function UserMessage({
         aria-label="用户"
         className={`flex max-w-[80%] min-w-0 flex-col gap-2 self-end rounded-2xl rounded-br-sm bg-(--wb-bg-hover-light) px-[15px] py-2.5 narrow:max-w-full ${CURRENT_MATCH}`}
       >
-        <p
-          className="m-0 text-sm leading-[1.65] wrap-anywhere whitespace-pre-wrap text-foreground"
-          data-slot="message-body"
-        >
-          {text}
-        </p>
+        {text === "" ? null : (
+          <p
+            className="m-0 text-sm leading-[1.65] wrap-anywhere whitespace-pre-wrap text-foreground"
+            data-slot="message-body"
+          >
+            {text}
+          </p>
+        )}
+        <MessageAttachments attachments={custom.attachments} />
         <ToolCallGroup steps={custom.steps} />
         <MessageError error={custom.error} />
         {archived ? null : (
@@ -111,6 +116,29 @@ const UserMessage = memo(function UserMessage({
     </MessagePrimitive.Root>
   );
 });
+
+/**
+ * 用户消息的附件（design D15）：文本下方一项一行，文件名（路径最后一段）与大小，按数组次序。纯文本，
+ * 不是链接也不是按钮；文件名长了换行、不截断。没有附件时不渲染。
+ */
+function MessageAttachments({ attachments }: { attachments: ChatMessageCustom["attachments"] }) {
+  return attachments.length === 0 ? null : (
+    <ul
+      aria-label="附件"
+      className="m-0 flex min-w-0 list-none flex-col gap-1 p-0 text-xs leading-5 text-foreground"
+      data-slot="message-attachments"
+      // biome-ignore lint/a11y/noRedundantRoles: list-none 会让 Safari 丢掉列表语义，显式写回。
+      role="list"
+    >
+      {attachments.map(({ path, size }) => (
+        <li className="flex min-w-0 gap-1.5" key={path}>
+          <span className="min-w-0 wrap-anywhere">{path.slice(path.lastIndexOf("/") + 1)}</span>
+          <span className="flex-none text-(--wb-text-secondary)">{formatSize(size)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 function MessageError({ error }: { error: string | null }) {
   return error ? (
