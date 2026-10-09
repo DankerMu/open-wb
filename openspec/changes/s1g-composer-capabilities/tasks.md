@@ -370,7 +370,7 @@ Minimal mergeable slice: 10.1 一刀（`write` 尚无调用方；类型联合的
 - [x] 11.2 `server/src/workspaces/rest.ts`（现约 175 行）：注册 `POST /api/workspaces/:id/uploads`——空间归属检查放在 preParsing（先于媒体类型解析），route-local 的 `application/octet-stream` 透传 parser，handler 按 workspaces delta「文件上传」的九步次序；`registerWorkspaces` 的依赖加 `uploadMaxBytes`。
   测试新文件 `server/test/workspace-upload-rest.test.ts`（`createApp` + 真 socket，注入式请求测不出流与中断）：「上传并自动建目录」「同名自动编号不覆盖」「超过大小上限」（声明超限不读体、分块超限、恰等于上限）「越界名字被拒绝并入审计」「名字规则与媒体类型」「他人与不存在的空间」「目录被占与审计失败」「临时空间同样可上传，并随最后一个会话删除」（归属判定走所有者作用域的 `rootOf`，对临时空间不加特例）。
 - [x] 11.3 同文件：「中断与残留清理」（真实客户端发一半后断开；无 `.part`、无审计、无挂起请求）与「不进内存的流式写入」（32 MiB，`heapUsed + arrayBuffers` 增量阈值 8 MiB）。另加一条断言：应用的 `requestTimeout` 与 `connectionTimeout` 为 0（design D10），以及「超限恰为 413 而不是 400」（框架 body limit 没有抢先）。
-- [ ] 11.4 竞态现状记录（design D11 / Risks）：一条测试在 `resolve` 之后、打开之前把 `uploads` 换成指向沙箱内另一目录的符号链接，记录当前结果（预期：独占创建落在链接目标里）；用例标题与注释写明这是已登记的残余、不是保证，PR 描述里点名请白盒审查。
+- [x] 11.4 竞态现状记录（design D11 / Risks）：一条测试在 `resolve` 之后、打开之前把 `uploads` 换成指向沙箱内另一目录的符号链接，记录当前结果（预期：独占创建落在链接目标里）；用例标题与注释写明这是已登记的残余、不是保证，PR 描述里点名请白盒审查。
   **实施注记（11.4，fixture 评审补充，#1017）**：
   - 新文件 `server/test/workspace-upload-race.test.ts`。不放进 `workspace-upload-rest.test.ts`（766/800 行）。只从 `workspace-upload-helpers.ts` 取 `withUploadWorld`、`createWorkspace`、`upload`、`expectWire`、`auditOf`，不新增导出，不改产品代码。
   - 接缝：`import fsp from "node:fs/promises"`，`vi.spyOn(fsp, "open")` 后调 `syncBuiltinESMExports()`。先例是 `model-proxy-models-yml.test.ts:13-14,360-373`，被测的 `core/replace-file.ts:2` 与 `upload.ts:25` 一样是具名导入。`try/finally` 里 `mockRestore()` 再 `syncBuiltinESMExports()`。
