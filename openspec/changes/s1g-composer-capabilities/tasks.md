@@ -827,7 +827,7 @@ Minimal mergeable slice: 13.1 + 13.2 + 13.4 一刀；13.3 一刀；13.5 一刀�
   - 本刀验不了（偏离记录）：场景 THEN 的「第一项是 `上传文件`」与拉取中一例的「`上传文件` 项在」随 16.2a 落。守卫：无新文件，`MIGRATED_AREAS` 不动；`locked` 由 `capability-bar.tsx` 消费，knip 无新报；`ui-layering.test.ts:643` 不受影响。
   - 变异（PR 描述）：`disabled` 改回含草稿 → `:144/:164` 与用例（a）红；复位仍看草稿 → 用例（a）「菜单仍在」红；去掉条目 `disabled` → `aria-disabled` 断言红；`onPick` 的门去掉草稿条件 → `:376` 段红；去掉提示行 → `textContent` 断言红；`locked` 改为实时值，或 `onPick` 不先关菜单 → 用例（b）红、`make ui-walk` 的 `body.gap` 红；提示行在目录为空时也显示 → `:206/:235/:255` 红。
   - 实施更正（#1028）：上面的变异预期有两处与实测不符。「`disabled` 改回含草稿」红的是主用例与 `:376` 段，用例（a）不红（它不断言按钮）；「提示行在目录为空时也显示」原本全绿（`:206/:235/:255` 都在空白草稿下打开菜单，`locked` 恒为 false），已在空目录用例末尾补「`半句` 下重开菜单，文本仍恰为 `暂无可用项`」后判红。`locked` 改实时值与 `onPick` 不先关菜单两项，实际在变异下重建并跑了 ui-walk，都红在 `ui-walk-sessions.spec.ts:573`。
-- [ ] 14.3 权限档位控件：新文件 `web/src/features/chat/permission-tier.tsx`（登记 `MIGRATED_AREAS`）：按钮、单选菜单、说明与底部提示、`全部自动` 的确认框、警示色与 `data-tier`、提交与失败回退、不随输入框锁定禁用。已选会话走 `patchSession`（经 `turn-actions.ts` 或 `session-actions.ts` 里的一个 handler，带既有的所有权 fence：切走会话后迟到的响应不改界面）；欢迎态改内存值并进入首次发送的 `createSession` input。
+- [x] 14.3 权限档位控件：新文件 `web/src/features/chat/permission-tier.tsx`（登记 `MIGRATED_AREAS`）：按钮、单选菜单、说明与底部提示、`全部自动` 的确认框、警示色与 `data-tier`、提交与失败回退、不随输入框锁定禁用。已选会话走 `patchSession`（经 `turn-actions.ts` 或 `session-actions.ts` 里的一个 handler，带既有的所有权 fence：切走会话后迟到的响应不改界面）；欢迎态改内存值并进入首次发送的 `createSession` input。
   测试新文件 `web/test/chat-permission-tier.test.tsx`（整页挂载）：session-permission-tier「权限档位控件」五条场景；chat-web delta「能力行的次序」「锁定时三个控件仍可用」的权限部分。
   **实施注记（14.3 + 14.4 + 14.5，fixture 评审补充，#1029）**：
   - 现状漂移：`capability-bar.tsx` 268 行、`use-chat-session.ts` 774 行；`composerOptions` 已由 `use-chat-session.ts:741` 返回但没有消费者。issue 的 PR 边界漏了接线与夹具：`conversation-view.tsx`（216 → 约 232；`CapabilityBar` 在 `:181`）、`page.tsx`（118 → 约 121）、`use-chat-session.ts`（1 行）、`web/test/chat-page-welcome-scene-support.tsx`，以及下面点名的四个既有测试文件；写进偏离记录。
@@ -844,8 +844,8 @@ Minimal mergeable slice: 13.1 + 13.2 + 13.4 一刀；13.3 一刀；13.5 一刀�
   - 变异（14.4 七条 + 补充）：yolo 不经确认直接 `onChange` →「要确认」的第一次零 PATCH 红；`取消` 也调 `onChange` → 同一条红；去掉 `data-tier` 或警示类 → 该场景末句与「继承的呈现」红；`disabled={pending || 锁定}` →「生成中可改」、「锁定时仍可用」与改后的 S1 红；控件内存本地值做乐观显示 →「失败回退」红；欢迎态 `onChange` 接到 `patchComposer` → 选择时零请求红，改调空函数 → 创建体断言红；权限位挪到工作空间位之前 → `expectOrder` 与 `:255` 名单红；失败分支去掉 `requestedSessionRef` 判定 → 切走再回来的一例红；合并用请求值 →「以响应为准」红；去掉同值早退 →「零请求」红。
   - 守卫：`permission-tier.tsx` 登记进 `ui-layering.test.ts` 的 `MIGRATED_AREAS`（`:13` 起）与清单断言（`:337` 起），都插在 `page.tsx` 与 `project-config.tsx` 之间，710 → 712；新导出只有 `PermissionTier`（`capability-bar.tsx` 导入），knip 无新报；不导入 `useToast`，不直接导入 radix，不改拷入层；`session-actions.ts` 仍只被 `use-chat-session.ts` 导入。
   - 14.5：行加在「会话（CH）」节，现末行 CH-65，本刀从 CH-66 起、与 #1031 等并行 PR 撞号时后合入者改号；七行全 `待签`。「能力行的五项与次序」此刻只有三项可见，本刀写「+」、工作空间、权限三项与次序，模型与强度由 15.x 的 PR 补进同一行（偏离记录）；「管理员封顶」行写明要改 `APPROVAL_MAX_MODE` 并重启服务。
-- [ ] 14.4 变异证据：去掉确认框 →「切换到全部自动要确认」判红；取消后仍提交 → 判红；`yolo` 不带警示标记 → 判红；控件随锁定禁用 →「生成中可改」判红；失败后显示新值 →「失败回退」判红；欢迎态选择发了请求或没进创建 input →「欢迎态的选择进入创建请求」判红；左组次序错 →「能力行的次序」判红。
-- [ ] 14.5 功能验收清单「会话（CH）」新增行（`待签`）：能力行的五项与次序；三档的名称与说明；选 `全部自动` 的确认与警示色；生成中改档位、下一条消息起生效（操作步骤：`只问命令` 下让助手执行命令出现确认卡 → 改为 `全部自动` → 再发一条同样的话不再出现确认卡）；`每次都问` 下让助手写文件出现确认卡；新会话沿用上次的档位；管理员封顶后菜单里没有被封的档位（写明需要管理员改配置并重启）。
+- [x] 14.4 变异证据：去掉确认框 →「切换到全部自动要确认」判红；取消后仍提交 → 判红；`yolo` 不带警示标记 → 判红；控件随锁定禁用 →「生成中可改」判红；失败后显示新值 →「失败回退」判红；欢迎态选择发了请求或没进创建 input →「欢迎态的选择进入创建请求」判红；左组次序错 →「能力行的次序」判红。
+- [x] 14.5 功能验收清单「会话（CH）」新增行（`待签`）：能力行的五项与次序；三档的名称与说明；选 `全部自动` 的确认与警示色；生成中改档位、下一条消息起生效（操作步骤：`只问命令` 下让助手执行命令出现确认卡 → 改为 `全部自动` → 再发一条同样的话不再出现确认卡）；`每次都问` 下让助手写文件出现确认卡；新会话沿用上次的档位；管理员封顶后菜单里没有被封的档位（写明需要管理员改配置并重启）。
 
 Suggested fixture level: expanded - 权限控件是审批策略放宽的用户入口（确认、警示、失败回退、所有权 fence）；改一个被测试与走查按名引用的可访问名
 Minimal mergeable slice: 14.1 + 14.2a + 14.2b + 14.2c 一刀（options 状态、重排与改名、窄屏、菜单语义；此刀后权限 / 模型控件与 `上传文件` 项都尚未渲染）；14.3 + 14.4 + 14.5 一刀
