@@ -8,7 +8,7 @@ import { DEFAULT_OMP_MAX_PROCESSES } from "../agent-config.js";
 import { HttpError } from "../core/errors/index.js";
 import { ApprovalRegistry } from "./approvals.js";
 import { type ForkResult, Forks, Regenerations, type Resume } from "./branching.js";
-import { effectiveOf } from "./composer-align.js";
+import { effectiveOf, reusable } from "./composer-align.js";
 import { applyFailure, applyFrame, applyStop, type ChatEvent, createEventState } from "./events.js";
 import type { OmpFrame } from "./omp/frame.js";
 import type { SpawnImpl } from "./omp/process.js";
@@ -425,6 +425,10 @@ export class SessionSupervisor {
     const effective = effectiveOf(resume.composer, this.#composer);
     const fresh = () => this.#onNewSlot(sessionId, resume, effective, claim, use);
     if (live === undefined || live.retiring !== undefined || !this.#pool.holds(live.entry)) {
+      return fresh();
+    }
+    if (!reusable(live, effective)) {
+      await this.#retireSlot(live);
       return fresh();
     }
     if (claim !== undefined) {

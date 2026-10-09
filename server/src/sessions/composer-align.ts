@@ -4,7 +4,7 @@
  * reports and the configuration the assembly hands down. Only effective values reach a spawn's argv
  * — the mode clamped by `approvalMaxMode`, the model inside the whitelist — never a raw column.
  */
-import { effectiveComposer } from "../model-catalog.js";
+import { type ApprovalMode, effectiveComposer } from "../model-catalog.js";
 import type { ComposerConfig } from "./store-composer.js";
 
 /** The three raw composer columns of a session, each null when never chosen. */
@@ -16,4 +16,15 @@ export function effectiveOf(
   config: ComposerConfig,
 ): ReturnType<typeof effectiveComposer> {
   return effectiveComposer(raw, config);
+}
+
+/**
+ * Whether a live slot can serve a dispatch whose effective values are `effective`: only the mode
+ * decides, because omp takes it from argv alone. A model or effort change needs no restart.
+ */
+export function reusable(
+  slot: { approvalMode: ApprovalMode },
+  effective: { approvalMode: ApprovalMode },
+): boolean {
+  return slot.approvalMode === effective.approvalMode;
 }

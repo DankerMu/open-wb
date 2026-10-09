@@ -365,7 +365,7 @@ Minimal mergeable slice: 8.0 一刀（纯搬迁）；8.1 + 8.6 一刀（视图�
 
 ## 9. sessions supervisor — 派发前按会话设置对齐进程（Critical Path）
 
-- [ ] 9.1 档位：`pool.ts` 的 `Slot` 增 `approvalMode`（启动档位）；`branching.ts` 的 `Resume` 增三项原始值；`supervisor.ts`（C 结束时不超过 792 行；本任务的行数用 7.0 腾出的余量）的 `#onSlot` 判定「存活 slot 的启动档位 ≠ 有效档位 → 先 `#retireSlot` 再 `fresh()`」。把有效值计算与「是否可复用」的判定写成新文件 `server/src/sessions/composer-align.ts` 里的函数，`supervisor.ts` 只调用（至多 10 行，用 7.0 的余量，行数写进 PR 描述）。regenerate 的取得进程处用同一个判定（turn-control「重新生成 REST」：存活进程的启动档位不同时先退役）。
+- [x] 9.1 档位：`pool.ts` 的 `Slot` 增 `approvalMode`（启动档位）；`branching.ts` 的 `Resume` 增三项原始值；`supervisor.ts`（C 结束时不超过 792 行；本任务的行数用 7.0 腾出的余量）的 `#onSlot` 判定「存活 slot 的启动档位 ≠ 有效档位 → 先 `#retireSlot` 再 `fresh()`」。把有效值计算与「是否可复用」的判定写成新文件 `server/src/sessions/composer-align.ts` 里的函数，`supervisor.ts` 只调用（至多 10 行，用 7.0 的余量，行数写进 PR 描述）。regenerate 的取得进程处用同一个判定（turn-control「重新生成 REST」：存活进程的启动档位不同时先退役）。
   组 7.3 留下的调用点改为传会话的有效档位与有效模型（fork 与 C 的撤回的临时进程取该会话的）。
   同刀核对 `SessionSupervisorRuntime.modelId`：两个调用点不再读它之后，剩下的读者只有 `createApp` 在装配未给 `modelCatalog` 时的单模型回退；回退仍在就保留该字段并把注释改成「未给白名单时的单模型 id」，回退已不存在就删除字段与各测试 helper 里的字面量。结果写进 PR 描述。
   测试新文件 `server/test/session-composer-dispatch.test.ts`（假 omp 真子进程 + 记录 argv 的 spawn 包装）：chat-sessions「档位不同则以新档位重启」「修改设置本身不动进程」「对齐期间的并发请求」、session-permission-tier「档位进入 argv」「生成中改档位」「未改档位不重启」「调低上界」的 argv 部分；turn-control「档位不同时先退役再重新生成」「分叉继承三项输入框设置」的 argv 部分。
@@ -395,7 +395,7 @@ Minimal mergeable slice: 8.0 一刀（纯搬迁）；8.1 + 8.6 一刀（视图�
 - [ ] 9.2 模型与强度：`Generation`（`pool.ts`）增「已应用的模型与强度」；`composer-align.ts` 里实现 chat-sessions「派发前按会话设置对齐进程」第 2 步（先 `set_model` 后 `set_thinking_level`，成功后才记）。两个调用点：prompt 路径在取得进程之后、`#bindDispatch` 写 `prompt` 之前；regenerate 路径在取得进程之后、`get_branch_messages` 之前（`branching.ts` 的 regenerate 编排里，先于 `branch` 与事务——失败属事务前，行不变）。`supervisor.ts` 至多 6 行。
   测试同文件：model-selection「换模型与强度后的帧序」（逐字核对 `frames=`）、「新进程重新应用」「生成中修改不打断」「命令失败按派发前失败处理」「消息不带模型」（两个模型下各完成一个回合后：快照每条消息的键集恰为 chat-sessions「会话 REST」所列、`PRAGMA table_info(chat_messages)` 没有模型或强度列）；chat-sessions「对齐失败按派发前失败补偿」「regenerate 的对齐失败不动任何行」「regenerate 用当前设置」（帧序：`set_model`、`set_thinking_level` 先于 `get_branch_messages`）；turn-control「模型对齐失败发生在事务之前」；session-metadata「继承三项设置」的 argv 与帧序部分。
   既有经宿主驱动假 omp 并断言完整 `frames=` 序列的宿主测试（`grep -rn "frames=" server/test` 里以 `negotiate_protocol,get_state,prompt` 开头的宿主级断言）按「每个 generation 首次派发多 `set_model` 与 `set_thinking_level`」改写并写进偏离记录；假 omp 夹具自身的单元用例（`fake-omp.test.ts`）不经宿主，不改。
-- [ ] 9.3 审批在非 `write` 档下的端到端：`server/test/session-approvals*.test.ts` 新增一例——`always-ask` 会话 + 假 omp `approval-write`：登记、事件、作答、`chat_approvals.tool="write"`、审计（tool-approval delta 场景）；session-permission-tier「每次都问下的超时」（注入时钟 59999 / 60000）。
+- [x] 9.3 审批在非 `write` 档下的端到端：`server/test/session-approvals*.test.ts` 新增一例——`always-ask` 会话 + 假 omp `approval-write`：登记、事件、作答、`chat_approvals.tool="write"`、审计（tool-approval delta 场景）；session-permission-tier「每次都问下的超时」（注入时钟 59999 / 60000）。
 - [ ] 9.4 变异证据：去掉档位比较 →「以新档位重启」判红；PATCH 时就退役 →「修改设置本身不动进程」「生成中改档位」判红；`set_thinking_level` 先于 `set_model` → 帧序判红；每次派发都无条件发命令 → 帧序第三条 prompt 处判红；新 generation 不重发 →「新进程重新应用」判红；命令失败后仍写 prompt →「命令失败」判红；把 regenerate 的对齐挪到事务之后 →「regenerate 的对齐失败不动任何行」「模型对齐失败发生在事务之前」判红（旧助手行被删）。
   「对齐期间的并发请求」钉的是既有的认领 fence（对齐发生在认领之后），没有独立变异，写进偏离记录。
 - [ ] 9.5 `make smoke` 通过（缺省配置下全部会话为 `write`、单模型：除每个 generation 首次派发多一条 `set_model` 加一条 `set_thinking_level` 外行为不变；真 omp 对这两条命令的应答已由组 1 核对）。

@@ -196,7 +196,7 @@ function tapReady(record: SpawnRecord): void {
  * Buffers the child's `exit`/`close` emissions (Node has already set exitCode/signalCode) so every
  * listener — the runtime's native-exit wait included — sees them only after `release()`.
  */
-function holdExitEvents(child: ChildProcessWithoutNullStreams): ExitHold {
+export function holdExitEvents(child: ChildProcessWithoutNullStreams): ExitHold {
   const emit = child.emit.bind(child);
   const buffered: Array<[string, unknown[]]> = [];
   let holding = true;
