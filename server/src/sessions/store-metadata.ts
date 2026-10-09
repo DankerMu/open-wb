@@ -13,7 +13,11 @@
  * A PATCH is one owner-scoped UPDATE of only the given columns: it
  * never touches `updated_at`, `status`, `workspace_id`, the generation columns or message rows.
  * `archived: true` (#922) puts `status != 'running'` on that whole UPDATE, so a running session
- * gets none of the PATCH's keys.
+ * gets none of the PATCH's keys. Its transaction (#1006) first reads the row's composer columns
+ * and settles the three composer keys (`resolvePatchComposer`: a refused value throws before the
+ * UPDATE), and after an UPDATE that wrote the row saves the account's last choice and — only when
+ * the effective approval mode changed — the `session.permission` audit: an audit failure leaves
+ * the row and the last choice as they were.
  * A delete (#525) reads the file and message count, deletes the owner's row (messages, steps and
  * approvals cascade; fork children's `parent_session_id` is set NULL by the foreign keys) and
  * writes its `session.delete` audit in one transaction: an audit failure keeps the row. In that
@@ -40,8 +44,10 @@ import {
 import {
   COMPOSER_COLUMNS,
   type ComposerConfig,
+  type ComposerDbRow,
   type ComposerInput,
   resolveCreateComposer,
+  resolvePatchComposer,
   saveComposerPrefs,
 } from "./store-composer.js";
 import { listSessionTurnSnapshots, type TurnSnapshotOutcome } from "./store-undo.js";
@@ -55,8 +61,11 @@ export interface SessionCreateInput extends ComposerInput {
   scene?: SessionScene;
 }
 
-/** At least one key (the route guarantees it); `title` is already trimmed and 1..80 code points. */
-export interface SessionPatch {
+/**
+ * At least one key (the route guarantees it); `title` is already trimmed and 1..80 code points.
+ * The three composer keys arrive as unchecked strings: `patchSession` validates their values.
+ */
+export interface SessionPatch extends ComposerInput {
   title?: string;
   scene?: SessionScene;
   pinned?: boolean;
@@ -71,7 +80,8 @@ export interface SessionMetadataStore {
   createSession(ownerId: string, input: SessionCreateInput): SessionView;
   /**
    * The updated session view; null when this owner has no such row (unknown or deleted); `"busy"`
-   * when the row exists but `archived: true` met a running session — nothing was written.
+   * when the row exists but `archived: true` met a running session — nothing was written. Throws
+   * `bad_request` for a composer value the configuration refuses, before anything is written.
    */
   patchSession(
     ownerId: string,
@@ -151,7 +161,12 @@ const SET_UNARCHIVED = "archived_at = NULL";
 const PATCH_OWNED = "WHERE id = ? AND owner_id = ?";
 /** Archiving and prompt admission (which writes `running`) cannot both succeed. */
 const PATCH_OWNED_NOT_RUNNING = `${PATCH_OWNED} AND status != 'running'`;
-const SELECT_OWNED = `SELECT 1 FROM chat_sessions ${PATCH_OWNED}`;
+const SET_COMPOSER = {
+  approval_mode: "approval_mode = ?",
+  model_id: "model_id = ?",
+  reasoning_effort: "reasoning_effort = ?",
+} as const;
+const SELECT_PATCHED = `SELECT ${COMPOSER_COLUMNS}, workspace_id FROM chat_sessions ${PATCH_OWNED}`;
 const SELECT_ARCHIVED_AT = `SELECT archived_at FROM chat_sessions ${PATCH_OWNED}`;
 
 export function createSessionMetadataStore(
@@ -231,19 +246,12 @@ export function createSessionMetadataStore(
     },
 
     patchSession(ownerId, sessionId, patch) {
-      const { assignments, values } = patchAssignments(patch, Date.now());
-      const guarded = patch.archived === true;
-      const where = guarded ? PATCH_OWNED_NOT_RUNNING : PATCH_OWNED;
-      const changes = db
-        .prepare(`UPDATE chat_sessions SET ${assignments} ${where}`)
-        .run(...values, sessionId, ownerId).changes;
-      requireAtMostOne(changes, "session patch");
-      if (!hasChanges(changes)) {
-        // Zero rows under the guard means either no such row or a running one: re-read to tell.
-        const present = guarded && db.prepare(SELECT_OWNED).get(sessionId, ownerId) !== undefined;
-        return present ? "busy" : null;
-      }
-      return readSessionView(db, sessionId, options.composer, "patched session row missing");
+      const written = runOwnedTransaction(db, "session patch rollback failed", () =>
+        writePatch(db, options, ownerId, sessionId, patch),
+      );
+      return written === "written"
+        ? readSessionView(db, sessionId, options.composer, "patched session row missing")
+        : written;
     },
 
     archivedAt(sessionId, ownerId) {
@@ -339,9 +347,57 @@ function deleteUnusedTemporaryWorkspace(
   return { id: workspaceId, ownerId };
 }
 
+/**
+ * Inside the PATCH transaction, in this order: the row's composer columns (no row of this owner:
+ * null), the composer keys' validation (throws `bad_request` before any write), the UPDATE (zero
+ * rows under the `archived: true` guard: `"busy"`, and nothing below runs), the account's last
+ * choice, then the `session.permission` audit when the effective mode changed.
+ */
+function writePatch(
+  db: DatabaseSync,
+  options: SessionMetadataStoreOptions,
+  ownerId: string,
+  sessionId: string,
+  patch: SessionPatch,
+): "written" | "busy" | null {
+  const current = db.prepare(SELECT_PATCHED).get(sessionId, ownerId) as
+    | (ComposerDbRow & { workspace_id: string | null })
+    | undefined;
+  if (current === undefined) {
+    return null;
+  }
+  const { given, audit } = resolvePatchComposer(current, patch, options.composer);
+  // One clock read for the pin / archive time and the last choice's `updated_at`.
+  const now = Date.now();
+  const { assignments, values } = patchAssignments(patch, given, now);
+  const guarded = patch.archived === true;
+  const changes = db
+    .prepare(
+      `UPDATE chat_sessions SET ${assignments} ${guarded ? PATCH_OWNED_NOT_RUNNING : PATCH_OWNED}`,
+    )
+    .run(...values, sessionId, ownerId).changes;
+  requireAtMostOne(changes, "session patch");
+  if (!hasChanges(changes)) {
+    // The row was read above in this same transaction: zero rows is the guard, a running session.
+    return guarded ? "busy" : null;
+  }
+  saveComposerPrefs(db, ownerId, given, now);
+  if (audit !== null) {
+    options.emit(db, {
+      kind: "session.permission",
+      actorId: ownerId,
+      title: "修改权限档位",
+      ...(current.workspace_id === null ? {} : { workspaceId: current.workspace_id }),
+      detail: { sessionId, from: audit.from, to: audit.to },
+    });
+  }
+  return "written";
+}
+
 /** The SET clause from source-constant fragments only; every value travels as a parameter. */
 function patchAssignments(
   patch: SessionPatch,
+  composer: Partial<ComposerDbRow>,
   now: number,
 ): { assignments: string; values: SQLInputValue[] } {
   const fragments: string[] = [];
@@ -365,6 +421,14 @@ function patchAssignments(
     values.push(now);
   } else if (patch.archived === false) {
     fragments.push(SET_UNARCHIVED);
+  }
+  // The validated columns, never the request's strings; a column the request did not name stays.
+  for (const column of ["approval_mode", "model_id", "reasoning_effort"] as const) {
+    const value = composer[column];
+    if (value !== undefined) {
+      fragments.push(SET_COMPOSER[column]);
+      values.push(value);
+    }
   }
   return { assignments: fragments.join(", "), values };
 }

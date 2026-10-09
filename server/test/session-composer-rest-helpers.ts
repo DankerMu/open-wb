@@ -1,7 +1,7 @@
 /**
  * The world of the composer-settings REST tests (#1005, moved here by #1006 so the PATCH scenarios
- * share it): production createApp → registerSessions with the three-model catalog of「有效值解析」 and
- * a chosen `approvalMaxMode`, a real in-memory SQLite and real directories under the runtime's
+ * share it): production createApp → registerSessions with the three-model catalog of「有效值解析」 (or
+ * none) and a chosen `approvalMaxMode`, a real in-memory SQLite and real directories under the runtime's
  * temporary sandbox root; no omp child is ever spawned. Three seeded accounts: zhangsan (`u1`) and
  * zhaoliu (`u2`) are members, lisi (`u3`) is the administrator. Importing this file registers the
  * `afterEach` that closes every world it opened.
@@ -44,7 +44,7 @@ export interface PermissionAudit {
   detail: unknown;
 }
 
-interface World {
+export interface World {
   app: FastifyInstance;
   db: DatabaseSync;
   sandboxRoot: string;
@@ -59,8 +59,11 @@ afterEach(async () => {
   }
 });
 
-/** `cap` undefined is `APPROVAL_MAX_MODE` unset: the assembly's `yolo`. */
-export async function openWorld(cap?: Cap): Promise<World> {
+/**
+ * `cap` undefined is `APPROVAL_MAX_MODE` unset: the assembly's `yolo`. `catalog` "default" hands the
+ * assembly no whitelist either: the single default model of an unset `MODEL_CATALOG`.
+ */
+export async function openWorld(cap?: Cap, catalog: "three" | "default" = "three"): Promise<World> {
   const db = openDb(":memory:");
   cleanups.push(() => {
     db.close();
@@ -73,7 +76,7 @@ export async function openWorld(cap?: Cap): Promise<World> {
     authRuntime: fixedRuntime(() => FIXED_NOW),
     assembly: {
       runtime,
-      modelCatalog: THREE_MODEL_CATALOG,
+      ...(catalog === "three" ? { modelCatalog: THREE_MODEL_CATALOG } : {}),
       ...(cap === undefined ? {} : { approvalMaxMode: cap }),
     },
   });

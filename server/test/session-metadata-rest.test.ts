@@ -488,7 +488,9 @@ describe("POST /api/sessions audit atomicity and visibility", () => {
 /*
  * Issue #524 PATCH /api/sessions/:id (parent tasks 4.2, design D2 "PATCH 决定"): rename, scene and
  * pin through the same production assembly. "Row unchanged" = every `chat_sessions` column of the
- * target plus its `chat_messages` count deep-equal before and after.
+ * target plus its `chat_messages` count deep-equal before and after. A PATCH writes no audit
+ * except `session.permission` when the effective approval mode changes (#1006,
+ * session-composer-patch.test.ts); none of the keys used here can change it.
  */
 interface PatchWorld extends World {
   fixture: SupervisorApp;
@@ -565,7 +567,7 @@ async function laterThan(ms: number): Promise<void> {
 }
 
 describe("PATCH /api/sessions/:id metadata writes", () => {
-  it("E1 rename, scene, pin, re-pin and unpin keep updatedAt, order, audit and spawns", async () => {
+  it("E1 rename, scene, pin, re-pin and unpin keep updatedAt, order and spawns and write no audit (only an approval-mode change writes session.permission)", async () => {
     const world = await openPatchWorld();
     const id = world.session;
     const prompt = await postPrompt(world.app, id, world.cookie, JSON.stringify({ message: "hi" }));

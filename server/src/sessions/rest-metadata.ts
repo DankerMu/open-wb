@@ -5,10 +5,12 @@
  * malformed ids share one 404, and so does the caller's own temporary workspace (#925, thrown by
  * `createSession`). The three composer keys only have to be strings here: this route has no
  * configuration, their values are checked by `createSession` (400 `bad_request`, nothing written).
- * `PATCH /api/sessions/:id` (#524, #922): a non-empty exact `{title?, scene?, pinned?, archived?}`
- * body, owner checked before parsing; a title write marks the session's in-flight admission so its
- * rollback keeps the new title; `archived: true` is refused whole with 409 `session_busy` while the
- * session runs or its control claim is held. `DELETE /api/sessions/:id` (#525): owner checked
+ * `PATCH /api/sessions/:id` (#524, #922, #1006): a non-empty exact `{title?, scene?, pinned?,
+ * archived?, approvalMode?, modelId?, reasoningEffort?}` body, owner checked before parsing; a title
+ * write marks the session's in-flight admission so its rollback keeps the new title; `archived:
+ * true` is refused whole with 409 `session_busy` while the session runs or its control claim is
+ * held. The three composer keys are strings here and judged by `patchSession` like a creation's
+ * (400, nothing written); they never reach the supervisor: a running turn is not touched. `DELETE /api/sessions/:id` (#525): owner checked
  * before parsing, no body read (not a parser owner), the deletion itself is `session-delete.ts`;
  * 204 with no body. Each of the three tells the list notifier once after its commit, before the
  * reply (#932); a refused or rolled-back write throws before that line.
@@ -52,7 +54,13 @@ interface SessionIdParams {
 const SESSION_METADATA_BODY_LIMIT = 16 * 1024;
 const COMPOSER_KEYS = ["approvalMode", "modelId", "reasoningEffort"] as const;
 const CREATE_KEYS: ReadonlySet<string> = new Set(["workspaceId", "scene", ...COMPOSER_KEYS]);
-const PATCH_KEYS: ReadonlySet<string> = new Set(["title", "scene", "pinned", "archived"]);
+const PATCH_KEYS: ReadonlySet<string> = new Set([
+  "title",
+  "scene",
+  "pinned",
+  "archived",
+  ...COMPOSER_KEYS,
+]);
 const SCENES: ReadonlySet<string> = new Set<SessionScene>(["office", "code", "design"]);
 const TITLE_MAX_CODE_POINTS = 80;
 
@@ -168,17 +176,26 @@ function parseCreateBody(body: unknown): SessionCreateInput {
   if (Object.hasOwn(body, "scene")) {
     input.scene = requireScene(body.scene);
   }
-  for (const key of COMPOSER_KEYS) {
-    if (Object.hasOwn(body, key)) {
-      input[key] = requireString(body[key]);
-    }
-  }
+  readComposerKeys(body, input);
   return input;
 }
 
+/** Copies the composer keys the body has into `into`; each must be a string (`null` is not). */
+function readComposerKeys(
+  body: Record<string, unknown>,
+  into: SessionCreateInput | SessionPatch,
+): void {
+  for (const key of COMPOSER_KEYS) {
+    if (Object.hasOwn(body, key)) {
+      into[key] = requireString(body[key]);
+    }
+  }
+}
+
 /**
- * A non-empty plain JSON object whose keys ⊆ {title, scene, pinned, archived}; strings
- * (text/plain) are never parsed. Every field is validated before anything is written.
+ * A non-empty plain JSON object whose keys ⊆ the seven PATCH keys; strings (text/plain) are never
+ * parsed. Every field's shape is validated before anything is written; the three composer keys
+ * are any string here, their values are judged by `patchSession` before it writes.
  */
 function parsePatchBody(body: unknown): SessionPatch {
   if (!isPlainObject(body)) {
@@ -201,6 +218,7 @@ function parsePatchBody(body: unknown): SessionPatch {
   if (Object.hasOwn(body, "archived")) {
     patch.archived = requireBoolean(body.archived);
   }
+  readComposerKeys(body, patch);
   return patch;
 }
 
