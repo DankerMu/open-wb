@@ -32,7 +32,8 @@ function isUndoConflict(error: unknown) {
   return error instanceof ApiError && error.status === 409 && error.code === "undo_conflict";
 }
 
-type ReplaceAttachments = ReturnType<typeof useAttachmentsState>["replace"];
+type Attachments = ReturnType<typeof useAttachmentsState>;
+type ReplaceAttachments = Attachments["replace"];
 type UndoFiles = Parameters<ApiClient["undoMessage"]>[2];
 /** 等待用户三选一的冲突：`trigger` 是当初被点的 `撤回` 按钮。 */
 export type UndoConflict = {
@@ -47,6 +48,8 @@ type TurnActionDeps = {
   clientRef: RefObject<ApiClient>;
   closeSource: () => void;
   composerRef: RefObject<HTMLTextAreaElement | null>;
+  /** 发送前把某个会话里 `待上传` 的标签逐个传完：没有就同步返回 null，否则 resolve undefined 或让它停下的错误。 */
+  flushAttachments: Attachments["flush"];
   /** 置真后的下一次提交里聚焦输入框（请求期间它是 disabled，`focus()` 无效），只此一次。 */
   focusOnUnlockRef: RefObject<boolean>;
   historyGenerationRef: RefObject<number>;
@@ -91,6 +94,7 @@ export function useTurnActions({
   clientRef,
   closeSource,
   composerRef,
+  flushAttachments,
   focusOnUnlockRef,
   historyGenerationRef,
   installSnapshot,
@@ -156,7 +160,8 @@ export function useTurnActions({
       error: unknown,
       generation: number,
       accepted: boolean,
-      sent: ReturnType<ReplaceAttachments>,
+      /** 这次派发取走的标签；待上传的文件没传完就停下时为 null（标签原样留在输入框里，不放回）。 */
+      sent: ReturnType<ReplaceAttachments> | null,
     ) => {
       const pending =
         pendingCreateSendRef.current?.generation === generation
@@ -185,7 +190,11 @@ export function useTurnActions({
       }
       restoreOwnedDraft(pending?.prompt ?? "", ownedClient, ownedSessionId);
       // 标签与草稿一起回来。不并进 `restoreOwnedDraft`：它在草稿为空时提前返回，只发附件的那次会漏掉。
-      if (ownedSessionId !== null && requestedSessionRef.current === ownedSessionId) {
+      if (
+        sent !== null &&
+        ownedSessionId !== null &&
+        requestedSessionRef.current === ownedSessionId
+      ) {
         replaceAttachments(ownedSessionId, sent);
       }
       setPromptError({
@@ -301,7 +310,31 @@ export function useTurnActions({
             );
           });
       };
-      send();
+      // 欢迎态暂存的文件先传完再发 prompt（首次发送失败后的续发也一样）；切走会话时上面的 controller 已
+      // 被中止，迟到的上传结果不改界面。
+      const staged = flushAttachments(sessionId);
+      if (staged === null) {
+        send();
+        return;
+      }
+      void staged.then((failure) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+        if (failure === undefined) {
+          send();
+          return;
+        }
+        failOwnedPrompt(
+          controller,
+          mutationGeneration,
+          ownedClient,
+          failure,
+          generation,
+          false,
+          null,
+        );
+      });
     },
     [
       abortMutation,
@@ -309,6 +342,7 @@ export function useTurnActions({
       closeSource,
       failOwnedPrompt,
       finishCreateSend,
+      flushAttachments,
       installSnapshot,
       mountedRef,
       mutationControllerRef,

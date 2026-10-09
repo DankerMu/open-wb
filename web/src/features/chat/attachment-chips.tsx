@@ -88,16 +88,16 @@ type AttachmentAreaInput = {
   locked: boolean;
   /** 输入框选项（上传上限）已取得。 */
   ready: boolean;
-  /** 当前会话 id；欢迎态为 null，此时没有 `上传文件` 项，拖入与粘贴也不处理。 */
+  /** 当前会话 id；欢迎态为 null，此时收下的文件只是 `待上传` 标签，首次发送时才上传。 */
   sessionId: string | null;
-  /** 当前会话的工作空间：没有为 null，会话还没解析出来为 undefined。 */
+  /** 输入框所在的工作空间：没有为 null（欢迎态未选空间也是），会话还没解析出来为 undefined。 */
   workspaceId: string | null | undefined;
 };
 
 /**
  * 附件区交给会话页的五块：`chips` 进输入卡（没有标签时为 null），`notice` 是数量与大小的提示，`input` 是
  * 隐藏的文件输入框，`upload` 是「+」菜单 `上传文件` 项的 props（不可用时带原因），`receive` 是文件框、拖入与
- * 粘贴共用的接收入口。欢迎态的 `upload` 与 `receive` 都是 undefined。
+ * 粘贴共用的接收入口。欢迎态同样可以选入：那里未选工作空间不算没有上传目标，建出的会话总有空间。
  */
 export function useAttachmentArea({
   attachments,
@@ -109,14 +109,15 @@ export function useAttachmentArea({
   chips: ReactNode;
   input: ReactNode;
   notice: ReactNode;
-  receive: ((files: File[]) => void) | undefined;
-  upload: { disabled: boolean; reason: string | null; open(): void } | undefined;
+  receive(files: File[]): void;
+  upload: { disabled: boolean; reason: string | null; open(): void };
 } {
   const inputRef = useRef<HTMLInputElement>(null);
   const { accept, items, notice, remove } = attachments;
   const receive = (files: File[]) => {
     if (!locked) accept(files);
   };
+  const unbound = sessionId !== null && workspaceId === null;
   return {
     chips: items.length === 0 ? null : <AttachmentChips items={items} onRemove={remove} />,
     input: (
@@ -140,14 +141,11 @@ export function useAttachmentArea({
           {notice}
         </p>
       ),
-    receive: sessionId === null ? undefined : receive,
-    upload:
-      sessionId === null
-        ? undefined
-        : {
-            disabled: !ready || workspaceId == null,
-            open: () => inputRef.current?.click(),
-            reason: workspaceId === null ? NO_WORKSPACE : null,
-          },
+    receive,
+    upload: {
+      disabled: !ready || unbound || workspaceId === undefined,
+      open: () => inputRef.current?.click(),
+      reason: unbound ? NO_WORKSPACE : null,
+    },
   };
 }

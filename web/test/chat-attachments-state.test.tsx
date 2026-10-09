@@ -1,4 +1,4 @@
-// `useAttachmentsState`（hook 层 + 假 `uploadFile`）：串行队列、移除、限制、清空与迟到结果、恢复。
+// `useAttachmentsState`（hook 层 + 假 `uploadFile`）：串行队列、移除、限制、清空与迟到结果、恢复、欢迎态暂存的交接与上传。
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useAttachmentsState } from "../src/features/chat/attachments-state.js";
@@ -66,6 +66,25 @@ function mount(overrides: Partial<Props> = {}) {
       }),
     restore: (...args: Parameters<typeof result.current.restore>) =>
       act(() => result.current.restore(...args)),
+    adopt: (...args: Parameters<typeof result.current.adopt>) =>
+      act(() => result.current.adopt(...args)),
+    /** `flush` 的返回值：没有待上传的为 null，否则落定后写进 `outcome.value`。 */
+    flush(key: string) {
+      const outcome: { started: boolean; settled: boolean; value: unknown } = {
+        started: false,
+        settled: false,
+        value: undefined,
+      };
+      act(() => {
+        const flushing = result.current.flush(key);
+        outcome.started = flushing !== null;
+        void flushing?.then((value) => {
+          outcome.settled = true;
+          outcome.value = value;
+        });
+      });
+      return outcome;
+    },
     rerender(next: Partial<Props>) {
       props = { ...props, ...next };
       hook.rerender(props);
@@ -415,5 +434,158 @@ describe("从 fork / undo 响应恢复", () => {
     page.restore("B", [{ path: "uploads/a.pdf", size: 3 }]);
     expect(page.calls[1]?.signal.aborted).toBe(false);
     expect(page.shown()).toEqual(["a.bin uploaded 100", "b.bin uploading 40", "c.bin uploading 0"]);
+  });
+});
+
+describe("欢迎态暂存的交接与上传", () => {
+  const OTHER_SPACE = "2".repeat(32);
+
+  /** 欢迎态（所选空间不是 W）暂存 `names`，交给会话 A（空间为 `workspaceId`）并选中它。 */
+  function handedOver(workspaceId: string | null, ...names: string[]) {
+    const page = mount({ scopeKey: null, workspaceId: OTHER_SPACE });
+    page.accept(...names.map((name) => file(name)));
+    page.adopt("A", workspaceId);
+    page.rerender({ scopeKey: "A", workspaceId: undefined });
+    return page;
+  }
+
+  it("adopt 把待上传的记录改归新会话：仍是待上传、文件还在、不发请求；flush 按次序逐个传到该会话的空间", async () => {
+    const page = handedOver(W, "a.pdf", "b.png");
+    expect(page.shown()).toEqual(["a.pdf pending 0", "b.png pending 0"]);
+    expect(page.items().map((item) => item.scopeKey)).toEqual(["A", "A"]);
+    expect(page.sent()).toEqual([]);
+
+    const outcome = page.flush("A");
+    expect(outcome.started).toBe(true);
+    expect(page.sent()).toEqual(["a.pdf"]);
+    expect(page.calls[0]?.workspaceId).toBe(W);
+    expect(page.shown()).toEqual(["a.pdf uploading 0", "b.png pending 0"]);
+    act(() => page.calls[0]?.onProgress(50));
+    expect(page.shown()).toEqual(["a.pdf uploading 50", "b.png pending 0"]);
+
+    await settle(page.calls[0], done("a.pdf"));
+    expect(page.sent()).toEqual(["a.pdf", "b.png"]);
+    expect(outcome.settled).toBe(false);
+    await settle(page.calls[1], done("b (1).png"));
+    expect(outcome).toEqual({ started: true, settled: true, value: undefined });
+    expect(page.items()).toMatchObject([
+      { name: "a.pdf", status: "uploaded", path: "uploads/a.pdf" },
+      { name: "b (1).png", status: "uploaded", path: "uploads/b (1).png" },
+    ]);
+    expect(page.flush("A").started).toBe(false);
+    expect(page.sent()).toHaveLength(2);
+  });
+
+  it("交接之后、选中新会话之前的渲染里欢迎态照样给出这些标签；改去别的会话则丢弃", () => {
+    const page = mount({ scopeKey: null, workspaceId: OTHER_SPACE });
+    page.accept(file("a.pdf"), file("b.png"));
+    page.adopt("A", W);
+    expect(page.shown()).toEqual(["a.pdf pending 0", "b.png pending 0"]);
+    page.rerender({ scopeKey: "A" });
+    expect(page.shown()).toEqual(["a.pdf pending 0", "b.png pending 0"]);
+
+    // 回到欢迎态不再给出会话 A 的标签，新暂存的照常给出。
+    page.rerender({ scopeKey: null });
+    expect(page.items()).toEqual([]);
+    page.accept(file("c.txt"));
+    expect(page.shown()).toEqual(["c.txt pending 0"]);
+    page.rerender({ scopeKey: "A" });
+    expect(page.items()).toEqual([]);
+    expect(page.sent()).toEqual([]);
+  });
+
+  it("adopt 只改欢迎态的记录：别的会话的标签不动；没有待上传的记录时什么也不做", () => {
+    const page = mount({ scopeKey: null });
+    const before = page.items();
+    page.adopt("A", W);
+    expect(page.items()).toBe(before);
+
+    page.accept(file("a.pdf"));
+    page.restore("B", [{ path: "uploads/x.pdf", size: 3 }]);
+    page.adopt("A", W);
+    expect(page.shown()).toEqual(["a.pdf pending 0"]);
+    page.rerender({ scopeKey: "B" });
+    expect(page.shown()).toEqual(["x.pdf uploaded 100"]);
+    expect(page.sent()).toEqual([]);
+  });
+
+  it("失败即停：给出那个错误，失败的标记失败、其后的仍是待上传；再 flush 只传剩下的", async () => {
+    const page = handedOver(W, "a.pdf", "b.png", "c.txt");
+    const outcome = page.flush("A");
+    await settle(page.calls[0], done("a.pdf"));
+    const denied = new ApiError(403, "sandbox_denied", TOO_BIG);
+    await settle(page.calls[1], denied);
+
+    expect(outcome).toEqual({ started: true, settled: true, value: denied });
+    expect(page.shown()).toEqual(["a.pdf uploaded 100", "b.png failed 0", "c.txt pending 0"]);
+    expect(page.items()[1]?.message).toBe(TOO_BIG);
+    expect(page.sent()).toEqual(["a.pdf", "b.png"]);
+    expect(page.notice()).toBeNull();
+
+    page.remove("b.png");
+    const again = page.flush("A");
+    expect(page.sent()).toEqual(["a.pdf", "b.png", "c.txt"]);
+    await settle(page.calls[2], done("c.txt"));
+    expect(again).toEqual({ started: true, settled: true, value: undefined });
+    expect(page.shown()).toEqual(["a.pdf uploaded 100", "c.txt uploaded 100"]);
+  });
+
+  it("交接到没有工作空间的会话：不发请求，给出带原因的错误，标签仍是待上传", async () => {
+    const page = handedOver(null, "a.pdf");
+    const outcome = page.flush("A");
+    await act(async () => {});
+    expect(outcome.settled).toBe(true);
+    expect(outcome.value).toBeInstanceOf(ApiError);
+    expect((outcome.value as ApiError).message).toBe("此会话没有工作空间，无法上传文件");
+    expect(page.sent()).toEqual([]);
+    expect(page.shown()).toEqual(["a.pdf pending 0"]);
+  });
+
+  it("没有待上传的记录：同步返回 null，不发请求", async () => {
+    const page = mount();
+    expect(page.flush("A").started).toBe(false);
+    page.accept(file("a.pdf"));
+    await settle(page.calls[0], done("a.pdf"));
+    expect(page.flush("A").started).toBe(false);
+    expect(page.flush("B").started).toBe(false);
+    expect(page.sent()).toEqual(["a.pdf"]);
+  });
+
+  it("上传中被移除的不算失败：中止它，接着传下一个", async () => {
+    const page = handedOver(W, "a.pdf", "b.png");
+    const outcome = page.flush("A");
+    page.remove("a.pdf");
+    expect(page.calls[0]?.signal.aborted).toBe(true);
+    await settle(page.calls[0], aborted());
+    expect(page.sent()).toEqual(["a.pdf", "b.png"]);
+    expect(outcome.settled).toBe(false);
+    await settle(page.calls[1], done("b.png"));
+    expect(outcome).toEqual({ started: true, settled: true, value: undefined });
+    expect(page.shown()).toEqual(["b.png uploaded 100"]);
+  });
+
+  it.each([
+    ["中止的拒绝", aborted()],
+    ["迟到的成功", done("a.pdf")],
+  ])("上传中切走会话：在途的中止、其余不发出，%s不写回，也不算失败", async (_, late) => {
+    const page = handedOver(W, "a.pdf", "b.png");
+    const outcome = page.flush("A");
+    page.rerender({ scopeKey: "B", workspaceId: W });
+    expect(page.calls[0]?.signal.aborted).toBe(true);
+    await settle(page.calls[0], late);
+    expect(outcome).toEqual({ started: true, settled: true, value: undefined });
+    expect(page.sent()).toEqual(["a.pdf"]);
+    expect(page.items()).toEqual([]);
+    page.rerender({ scopeKey: "A" });
+    expect(page.items()).toEqual([]);
+  });
+
+  it("adopt 与 flush 的引用不随渲染变化", () => {
+    const page = mount({ scopeKey: null });
+    const { adopt, flush } = page.hook.result.current;
+    page.accept(file("a.pdf"));
+    page.rerender({ scopeKey: "A" });
+    expect(page.hook.result.current.adopt).toBe(adopt);
+    expect(page.hook.result.current.flush).toBe(flush);
   });
 });
