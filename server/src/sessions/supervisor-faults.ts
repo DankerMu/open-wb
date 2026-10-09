@@ -6,6 +6,7 @@ import { HttpError } from "../core/errors/index.js";
 import type { ChatEvent } from "./events.js";
 import { AgentUnavailableError, OmpProtocolError } from "./omp/process.js";
 import { SessionBusyError } from "./omp/runtime.js";
+import { ReadmissionRequired } from "./pool.js";
 
 export function throwCollected(faults: Error[]): void {
   if (faults.length === 1) {
@@ -78,7 +79,10 @@ export function observerViolation(
 
 /**
  * The prompt/regenerate/fork rejection: an HttpError as is, a runtime busy error as `session_busy`,
- * a runtime or protocol failure as `agent_unavailable`, anything else unchanged.
+ * a runtime or protocol failure as `agent_unavailable`, anything else unchanged. A re-admission
+ * that reaches here was not absorbed by the live slot's one fresh admission: the process of a newly
+ * admitted slot died between two runtime calls of the same dispatch (#1010), which is
+ * `agent_unavailable` too.
  */
 export function translateSupervisorError(error: unknown): unknown {
   if (error instanceof HttpError) {
@@ -87,7 +91,11 @@ export function translateSupervisorError(error: unknown): unknown {
   if (error instanceof SessionBusyError) {
     return new HttpError("session_busy");
   }
-  if (error instanceof AgentUnavailableError || error instanceof OmpProtocolError) {
+  if (
+    error instanceof AgentUnavailableError ||
+    error instanceof OmpProtocolError ||
+    error instanceof ReadmissionRequired
+  ) {
     return new HttpError("agent_unavailable");
   }
   return error;

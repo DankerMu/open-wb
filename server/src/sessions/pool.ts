@@ -3,7 +3,8 @@
  * omp process pool: live-process registry, serialized admission, least-recently-active eviction.
  */
 import { HttpError } from "../core/errors/index.js";
-import type { ApprovalMode } from "../model-catalog.js";
+import type { ApprovalMode, Effort } from "../model-catalog.js";
+import type { RuntimeCommandFrame } from "./omp/commands.js";
 import type { SessionRuntime, SessionRuntimeOpts } from "./omp/runtime.js";
 import type { SessionStore } from "./store.js";
 import { RingBuffer } from "./stream/ring-buffer.js";
@@ -17,6 +18,11 @@ export interface Generation {
   dispatchCount: number;
   pumpCount: number;
   sealed: boolean;
+  /**
+   * The model and effort last applied on this generation by a successful command; undefined until
+   * its first dispatch aligned it. `effort` is undefined right after a `set_model`.
+   */
+  applied: { modelId: string; effort: Effort | undefined } | undefined;
 }
 
 export interface Slot {
@@ -269,6 +275,7 @@ export function generationTokens(
         dispatchCount: 1,
         pumpCount: 0,
         sealed: false,
+        applied: undefined,
       };
       slot.generation = generation;
       try {
@@ -314,6 +321,28 @@ export function temporaryTokens(
       tokens.revoke(sessionId);
     },
   };
+}
+
+/**
+ * One out-of-turn command on the slot's runtime, for a caller that dispatches afterwards. The
+ * command that acquires the process creates the generation with its dispatch already counted: that
+ * count is handed back here, so the prompt that follows counts once. An acquisition fault
+ * (re-admission, a failed epoch bump or token issue) is rethrown as itself, not as the runtime's
+ * `AgentUnavailableError`.
+ */
+export async function commandOn(slot: Slot, frame: RuntimeCommandFrame): Promise<unknown> {
+  const before = slot.generation;
+  try {
+    return await slot.runtime.command(frame);
+  } catch (error) {
+    const fault = slot.acquisitionFault;
+    slot.acquisitionFault = undefined;
+    throw fault ?? error;
+  } finally {
+    if (slot.generation !== before) {
+      releaseDispatch(slot, slot.generation);
+    }
+  }
 }
 
 export function releaseDispatch(slot: Slot, generation: Generation | undefined): void {

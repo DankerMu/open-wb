@@ -12,8 +12,9 @@
  * over REST. A mode REST would refuse (`yolo` under a `write` cap) is planted by SQL. Oracles: the
  * recorded spawn argv, Node's own exit state of each child at every spawn, per-child stdin frames,
  * `stream_epoch`, SQLite rows and the published events; never supervisor internals.
- * The model and effort commands before a prompt are task 9.2: until then a process started for a
- * regenerate receives `get_branch_messages` first.
+ * The model and effort commands a dispatch sends ahead of its prompt are pinned in
+ * `session-composer-align.test.ts` (#1010); here they only show as the two frames a new process
+ * receives before `get_branch_messages`.
  */
 import { mkdirSync } from "node:fs";
 import type { LightMyRequestResponse } from "fastify";
@@ -32,20 +33,18 @@ import {
 } from "./session-approval-helpers.js";
 import { patch } from "./session-archive-helpers.js";
 import { postSessionAction } from "./session-bodyless-rest-helpers.js";
+import { holdFirstExit, plant, processOf, setMode } from "./session-composer-helpers.js";
 import { forkWorlds, openForkWorld, rowCounts } from "./session-fork-helpers.js";
 import { THREE_MODEL_CATALOG } from "./session-meta-fixtures.js";
 import {
   answered,
-  epochOf,
   openRegenWorld,
   QUESTION,
   sendPrompt,
-  sessionFile,
   types,
   waitDead,
 } from "./session-regenerate-helpers.js";
 import { getSessionMessages, SESSION_BUSY_ENVELOPE } from "./session-rest-helpers.js";
-import { holdExitEvents } from "./session-spawn-gate-helpers.js";
 import {
   IDLE_MS,
   requiredCall,
@@ -72,13 +71,6 @@ function post(world: World, url: string, body: unknown): Promise<LightMyRequestR
   });
 }
 
-function plant(world: World, column: "approval_mode" | "model_id", value: string): void {
-  const written = world.fixture.db
-    .prepare(`UPDATE chat_sessions SET ${column} = ? WHERE id = ?`)
-    .run(value, world.session);
-  expect(Number(written.changes)).toBe(1);
-}
-
 function rawMode(world: World): unknown {
   return world.fixture.db
     .prepare("SELECT approval_mode FROM chat_sessions WHERE id = ?")
@@ -90,39 +82,6 @@ async function shownMode(world: World): Promise<unknown> {
   const response = await getSessionMessages(world.fixture.app, world.session, world.cookie);
   expect(response.statusCode).toBe(200);
   return (response.json() as { session: { approvalMode: unknown } }).session.approvalMode;
-}
-
-/** The owner picks `approvalMode` over REST: 200, and the view reads it back. */
-async function setMode(world: World, approvalMode: (typeof MODES)[number]): Promise<void> {
-  const response = await patch(world, { approvalMode });
-  expect(response.statusCode).toBe(200);
-  expect((response.json() as { approvalMode: unknown }).approvalMode).toBe(approvalMode);
-}
-
-/** The session's file, epoch, spawn count and live process count, as one comparable value. */
-function processOf(world: World) {
-  const { db, supervisor } = world.fixture;
-  return {
-    file: sessionFile(db, world.session),
-    epoch: epochOf(db, world.session),
-    spawns: world.rt.calls.length,
-    live: supervisor.liveProcessCount(),
-  };
-}
-
-/**
- * Holds the `exit`/`close` events of the world's first child (wrapped before any spawn), so its
- * retirement stays pending until `release()`.
- */
-function holdFirstExit(world: World): { held(): number; release(): void } {
-  let hold: ReturnType<typeof holdExitEvents> | undefined;
-  const inner = world.rt.runtime.spawnImpl;
-  world.rt.runtime.spawnImpl = (command, args, options) => {
-    const child = inner(command, args, options);
-    hold ??= holdExitEvents(child);
-    return child;
-  };
-  return { held: () => hold?.held() ?? 0, release: () => hold?.release() };
 }
 
 /**
@@ -479,7 +438,7 @@ describe("换档从下一条消息起生效 (session-permission-tier)", () => {
 
 describe("重新生成 REST：档位不同时先退役再重新生成 (turn-control)", () => {
   it(
-    "202；旧进程退出后新进程才启动，argv 为 always-ask 与 --resume，epoch 恰加一，新进程收到 branch 三命令与 prompt",
+    "202；旧进程退出后新进程才启动，argv 为 always-ask 与 --resume，epoch 恰加一，新进程先收到两条对齐命令，再是 branch 三命令与 prompt",
     REAL,
     async () => {
       const world = worlds.track(await openForkWorld());
@@ -506,10 +465,12 @@ describe("重新生成 REST：档位不同时先退役再重新生成 (turn-cont
         before.process.file,
       ]);
       expect(processOf(world)).toMatchObject({ epoch: before.process.epoch + 1, spawns: 2 });
-      // Until task 9.2 nothing precedes `get_branch_messages` but the handshake.
+      // A new generation: the model and the effort are applied before `get_branch_messages`.
       expect(types(spawnedAt(world, 1).stdin)).toEqual([
         "negotiate_protocol",
         "get_state",
+        "set_model",
+        "set_thinking_level",
         "get_branch_messages",
         "branch",
         "get_state",

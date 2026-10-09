@@ -127,7 +127,9 @@ describe("stop on the dispatched path (#473)", () => {
       expectAlive(world);
       expect(sessionEvents(world)).toHaveLength(observed);
 
-      expect(await probeFrames(world)).toBe("negotiate_protocol,get_state,prompt,abort,prompt");
+      expect(await probeFrames(world)).toBe(
+        "negotiate_protocol,get_state,set_model,set_thinking_level,prompt,abort,prompt",
+      );
       expect(world.rt.calls).toHaveLength(1);
       const after = await history(world);
       expect(after.session.status).toBe("done");
@@ -206,7 +208,7 @@ describe("stop on the dispatched path (#473)", () => {
       ]);
 
       expect(await probeFrames(world)).toBe(
-        "negotiate_protocol,get_state,prompt,extension_ui_response,abort,prompt",
+        "negotiate_protocol,get_state,set_model,set_thinking_level,prompt,extension_ui_response,abort,prompt",
       );
       expect(world.rt.calls).toHaveLength(1);
     },
@@ -236,7 +238,7 @@ describe("stop on the dispatched path (#473)", () => {
     expect(assistantSteps(world).steps.map((step) => step.status)).toEqual(["failed", "failed"]);
 
     expect(await probeFrames(world)).toBe(
-      "negotiate_protocol,get_state,prompt,extension_ui_response,extension_ui_response,abort,prompt",
+      "negotiate_protocol,get_state,set_model,set_thinking_level,prompt,extension_ui_response,extension_ui_response,abort,prompt",
     );
     expect(world.rt.calls).toHaveLength(1);
   });

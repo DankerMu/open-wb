@@ -106,14 +106,16 @@ describe("queued acquisitions and shutdown (G4a)", () => {
         spawnConcurrency: 1,
       });
       const [a, b] = world.sessions as [string, string];
-      const prompts = vi.spyOn(SessionRuntime.prototype, "prompt");
+      // A dispatch enters its runtime through the first alignment command (#1010): that call is
+      // what queues b's acquisition on the spawn gate.
+      const entered = vi.spyOn(SessionRuntime.prototype, "command");
       try {
         const first = send(world, a, "a handshaking");
         await waitSpawns(world, 1);
         const queued = send(world, b, "b queued");
         await waitFor(
-          () => (prompts.mock.calls.length === 2 ? true : undefined),
-          "b's runtime prompt",
+          () => (entered.mock.calls.length === 2 ? true : undefined),
+          "b's runtime acquisition",
         );
         await settle();
         expect(world.spawns).toHaveLength(1);
@@ -127,7 +129,7 @@ describe("queued acquisitions and shutdown (G4a)", () => {
         expect((await first).statusCode).toBe(502);
         expect(world.spawns).toHaveLength(1);
       } finally {
-        prompts.mockRestore();
+        entered.mockRestore();
       }
     },
   );
