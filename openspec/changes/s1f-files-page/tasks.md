@@ -572,7 +572,7 @@ Minimal mergeable slice: 25.1（文件变更卡）与 25.2（产物卡）可各�
 
 ## 26. files-harness — 夹具与 `files.hurl`
 
-- [ ] 26.1 夹具：`smoke/fixtures/sandbox/u1/smoke-fixture/` 新增 `site/index.html`、`site/style.css`、`sample.py`、`clip.wav`（按 files-harness「沙箱夹具与 files.hurl」的内容约定；`clip.wav` 由一段不入库的脚本生成，生成方式记入 `smoke/fixtures/README.md`）。
+- [x] 26.1 夹具：`smoke/fixtures/sandbox/u1/smoke-fixture/` 新增 `site/index.html`、`site/style.css`、`sample.py`、`clip.wav`（按 files-harness「沙箱夹具与 files.hurl」的内容约定；`clip.wav` 由一段不入库的脚本生成，生成方式记入 `smoke/fixtures/README.md`）。
   实施注记见 `implementation-notes.md`「26.1（#1111）」。
 - [ ] 26.2 `smoke/files.hurl`：追加范围请求、下载、`hurl-a` → `hurl-b` 的重命名与删除（宽容状态码保证可重复）、同名移动 409、越界删除 403、`preview-token` 与隔离来源的 html / css / 伪造令牌 404、主站对同一 html 的 `text/plain`、他账号的三个 404。
 - [ ] 26.3 验证：对同一服务连续两次 `make smoke` 全绿；在 `POST move` 之后人为中断一次再跑仍全绿；跑完后空间里没有 `hurl-a` / `hurl-b`、夹具文件未变（`git status` 干净）。
