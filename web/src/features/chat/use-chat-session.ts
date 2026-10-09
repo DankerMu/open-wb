@@ -425,6 +425,7 @@ export function useChatSession() {
     pendingCreateSendRef,
     refreshList,
     releaseMutationIfOwned,
+    flushAttachments: attachments.flush,
     replaceAttachments: attachments.replace,
     requestedSessionRef,
     selectSession,
@@ -566,6 +567,7 @@ export function useChatSession() {
             setCreating(false);
             setMutationOwner(null);
           }
+          attachments.adopt(session.id, session.workspaceId);
           refreshList(client);
           navigate(
             sessionNavigation(location.pathname, location.search, location.hash, session.id),
@@ -601,6 +603,7 @@ export function useChatSession() {
         });
     },
     [
+      attachments.adopt,
       client,
       location.hash,
       location.pathname,

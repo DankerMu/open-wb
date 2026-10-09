@@ -169,3 +169,49 @@
 - 守卫：不新增文件（`MIGRATED_AREAS` 不动），不新增导出（`useFileDrop` 模块内私有，knip 无新报），没有文件接近 800 行；拷入层与 `web/src/ui/**` 不改。
 - 清单：新增 CH-89（拖入）、CH-90（粘贴），`待签`（#1034 先合则顺延改号）。两行都在绑定了工作空间的已完成会话里做，不提欢迎页，不用刷新页面，不涉及管理员配置，末尾写「看完点各标签的移除按钮；文件留在该空间的 `uploads` 里」。CH-89：拖两个文件到输入框上方出现与聚焦相同的高亮边框，移开或放下后消失，标签逐个上传；拖一段选中的文字进去则文字进入、无高亮无标签；回答生成中拖文件无高亮无标签、页面不跳走；拖文件夹无标签。CH-90：用系统截图工具把截图复制到剪贴板后粘贴，多一个图片标签（不写死文件名，各浏览器不同）、输入框没有多出文字；再粘贴一句文字，文字进入、无新标签。行里不写 `data-drop-active`。
 - 实施更正（#1033）：清单行是 CH-92 / CH-93（CH-89–91 已被 #1035 占用）；行末不写「文件留在该空间的 `uploads` 里」——不去文件页看不到，而这两行不需要文件页。「放下直接调 `uploadFile`、绕过 `accept`」在 `composer.tsx` 里写不出来（它拿不到 client），改由「放下不交给入口」加超个数、未绑定两例咬住。多出两处行为：进入计数钳到 0；空批（只有文件夹）不调 `onFiles`，所以不清既有提示。
+
+## 16.4 + 16.5 + 16.6（#1034）
+
+- 现状漂移（偏离记录）：建会话在 `use-chat-session.ts:513-614` 的 `createAndSelect`，`turn-actions.ts`（680 行，条文写 431）只有 `dispatchPrompt`（`:224-323`），它由 `use-chat-session.ts:500-510` 的 effect 在导航之后触发。此时 `attachments-state.ts:138-141` 已把 key 为 null 的记录连同 `File` 丢弃，`:239` 的 `sent` 恒为空。所以本刀必须越界改 `attachments-state.ts`、`attachment-chips.tsx`、`use-chat-session.ts`（+3 行）、`chat-page-plus-menu.test.tsx`、`chat-attachments-state.test.tsx`。
+- 交接入口（hook 上唯一的改归属入口）：`adopt(key: string, workspaceId: string | null): void`。它把当前 client 下 `scopeKey === null` 的记录改成 `scopeKey: key`，`workspaceId` 取传入值，`file` 保留、`status` 仍为 `pending`，不发请求，引用稳定。不走 `replace`（它写 `file: null`）。
+- `adopt` 的调用点：`use-chat-session.ts:560-564` 的 `setMutationOwner(...)` 之后、`:570` 的 `navigate` 之前，写 `attachments.adopt(session.id, session.workspaceId);`。`workspaceId` 取建出的会话视图，不取 `slashWorkspaceId`（交接期间它是 undefined）。
+- 上传入口（第二个入口，因为 `File` 不出 hook）：`flush(key: string): Promise<unknown> | null`。该 key 没有 `pending` 记录时同步返回 null，调用方走原同步路径，既有用例的时序不变。否则按标签次序逐个上传：一次只把一个 `pending` 翻成 `uploading`，占用 `flightRef` 闩，进度与结果按 `id` 写回。
+- `flush` 的结果：全部传完 resolve `undefined`。某个失败时把该标签置 `failed` 并 resolve 那个错误，其后的保持 `pending`。首个待传记录的 `workspaceId === null` 时不发请求，resolve `new ApiError(400, "no_workspace", NO_WORKSPACE)`。上传中被移除或丢弃的记录不算失败，继续下一个。建议把 `pump`（`:85-119`）里「发一个」抽成两处共用的函数；文件 253 → 约 300 行。
+- 时序放在 `dispatchPrompt`（续发也要「先传待上传的」，所以不放 `createAndSelect`）：`:226-237` 的上锁与 controller 不动，把 `:239-301`（取走标签加 prompt 链）包成局部函数 `send()`，缩进变化单独一个提交。之后 `const staged = flushAttachments(sessionId);`，为 null 就直接 `send()`；否则在 `staged.then` 里：`controller.signal.aborted` 则静默返回；结果是 `undefined` 则 `send()`；其余调 `failOwnedPrompt(controller, mutationGeneration, ownedClient, error, generation, false, null)`。不要第三次粘贴 `:246-253` 的六项 fence（jscpd 阈值 3%）。
+- `failOwnedPrompt` 的改动：第 7 参改为 `ReturnType<ReplaceAttachments> | null`，`:188` 的条件加 `sent !== null &&`。上传失败时不得调 `replaceAttachments`，否则标签被清空或 `File` 丢失。其余收尾原样复用：恢复草稿、`setPromptError`、`finishCreateSend`、首次发送补读历史、401 静默。
+- 行数预算：`TurnActionDeps` 加 `flushAttachments`，`turn-actions.ts` 约 710 行。`use-chat-session.ts` 786 → 789：`adopt` 调用一行、`createAndSelect` 依赖数组加 `attachments.adopt,` 一行、`useTurnActions({…})` 加 `flushAttachments: attachments.flush,` 一行。`useChatSession` 函数体不加任何分支；rebase 后 `wc -l` 超过 792 就停下报告。`types.ts` 不动。
+- 各失败点：(a) 建会话失败走 `:574-601` 原样，标签仍在欢迎态为 `待上传`，不上传。(b) 上传失败：无 prompt，URL 停在新会话并补读一次历史（零消息空态），草稿恢复，标签为已上传 / `失败：<文案>` / `待上传`，alert 恰为该文案，`发送` 因有失败标签而禁用。移除失败标签后再发走 `sendPrompt:630-645`，不建会话；`flush` 只传剩下的 `pending`，已上传的不重传。(c) `workspaceId` 为 null：零上传零 prompt，alert 恰为 `NO_WORKSPACE`（走 `promptError`，不走 hook 的 `notice`），标签仍 `待上传`；历史读回后 `上传文件` 禁用并带原因。(d) prompt 未受理：`sent` 已全是已上传记录，`replace` 放回，不重传。(e) 上传中切换会话：`:465-473` 中止 controller，hook 丢弃记录并中止在途，`then` 静默返回。
+- 规格未写的分支（偏离记录）：(c) 之后再点 `发送` 重复同一提示，不另设禁用；上传阶段移除键仍可点，全部移走且草稿空白时照发 `{"message":""}`，由服务端 400 走既有被拒收尾；会话里新选入的文件照旧即传，`待上传` 的等到发送。
+- `canSend` 不改：`composer-locks.ts:23-26` 已把 `pending` 算可发送，按钮与 `use-chat-session.ts:621` 共用，空草稿加 `待上传` 标签可发。16.5 里关于启用条件的五条变异沿用 #1032 的表，本 PR 引用，不重跑。
+- 欢迎态入口：`attachment-chips.tsx:137-144` 改为恒返回 `upload`，`disabled: !ready || (sessionId !== null && workspaceId == null)`，`reason` 仅在 `sessionId !== null && workspaceId === null` 时为 `NO_WORKSPACE`（欢迎态未选空间时 `workspaceId` 是 null，旧式子会禁用）；同步改 `:90`、`:98` 的注释。
+- 必翻的既有断言：`chat-page-plus-menu.test.tsx:357-375` 欢迎态一例的 `itemTexts` 首项加 `UPLOAD`，`:47` 的注释同改。`chat-capability-bar.test.tsx:269`、`chat-page.test.tsx:347`、`ui-walk-sessions.spec.ts:566` 不受影响；别的既有用例变红先查原因，不放宽。
+- 新测试 `web/test/chat-attachments-first-send.test.tsx`：路由用 `welcomeRoutes()`，显式加 `composerOptionsRoute({...DEFAULT_COMPOSER_OPTIONS, upload:{maxBytes:1000,maxFiles:3}})`，覆写 `sessionPromptPath(CREATED_IDS[0])`（缺省挂起），挂载后 `installFakeXhr()`；不导入 `use-chat-session.ts` / `turn-actions.ts`。用例：
+- F1 次序：`create` 挂起时零 xhr；放行后恰一个 xhr 指向 W 的 `a.pdf`，第二个标签仍是 `待上传`，零 prompt，输入框锁定并显示 `生成中`；逐个落定后恰一次 prompt，body 为 `{message:"看看",attachments:[两个 path]}`。
+- F2 只选文件：选入后 `发送` 即可用；body 字符串恰为 `{"message":"","attachments":["uploads/a.pdf"]}`；侧栏标题取列表返回的视图。
+- F3 / F4 规格的两文件失败与续发：创建恰一次、xhr 仍为 2、prompt 只带 `a.pdf`。
+- F5 三文件（a 成功、b 403、c）：状态为 `[uploaded, failed, pending]`、xhr 为 2；移除 b 再发，只新增 c 的 xhr，prompt 带 a 与 c。规格示例只有两个文件，这例是补充（偏离记录）。
+- F6 无空间：欢迎态选了项目 A，而 `create` 覆写返回 `workspaceId: null`。须自配该会话的列表与历史路由，否则菜单项没有原因文字。
+- F7 临时空间：xhr 指向 `TEMP_WORKSPACE_IDS[0]`。
+- F8 上传中切到既有会话：`aborts === 1`，第二个文件无 xhr，无 prompt，无 alert，草稿为空，创建恰一次。
+- F9 欢迎态未选空间：菜单首项 `上传文件` 可点且无原因；选入后是 `待上传`，零请求。
+- 测试的其它落点：17.1 未合入，「气泡显示附件」只断言出现一条 `用户` article 且附件区清空（同 #1032 的偏离）。`chat-attachments-state.test.tsx`（419 行）加 `adopt` / `flush` 的 hook 级用例：保留 `File`、失败即停、null 空间零调用、无 `pending` 时同步返回 null、丢弃后迟到结果不写回。
+- 变异与判红用例（PR 描述逐条列表）：
+- 欢迎态选入即上传，或上传先于建会话 → F1「挂起时零 xhr」、F9。
+- 不调 `adopt`、导航后才调、或经 `replace` 交接 → F1 的 xhr 与 body。
+- prompt 不等上传 → F1「落定前零 prompt」。
+- 一次全翻成 `uploading`，或并行上传 → F1「第二个仍 `待上传`、xhr 为 1」。
+- 失败后队列继续 → F5。
+- 上传失败时调了 `replaceAttachments` → F5 续发。
+- 失败后重建会话 → F4 的创建次数。
+- 续发时重传已完成的文件 → F4 的 xhr 数。
+- `adopt` 取欢迎态所选空间而非建出的视图，或 null 时仍上传 / 发 prompt → F6、F7。
+- 切换时不中止，或仍发第二个 / prompt → F8。
+- 收尾不补读历史或不恢复草稿 → F3。
+- 欢迎态入口仍隐藏或被禁用 → plus-menu 欢迎态一例与 F9。
+- 验收清单新增两行（master 末行是 CH-88，#1033 先合入就顺延），结论 `待签`：
+- CH-89 欢迎页先选文件：选一个正式工作空间，开网络面板，从「+」菜单选两个此前没传过的文件（否则名字带编号），看到两个 `待上传` 且没有上传请求；输入一句话发送；到文件页看该空间的 `uploads`。期望写请求次序与标签的变化，不写「气泡显示附件」。
+- CH-90 只带附件：已选会话里，空输入不能发，附件传完后 `发送` 亮起；再回欢迎页，不选工作空间（新临时空间不会重名编号）、不输入文字，只选一个 ASCII 短文件名的文件发送，侧栏标题等于该文件名（格式守卫拒收中文主干文件名）。行里写明会留下一个临时空间会话。
+- 验收清单必改的两行：CH-11 末句改为「欢迎页的菜单第一项同样是可点的上传文件，它下面只有一句暂无可用项」；CH-09 期望里「旁边没有权限、上传文件、专家之类的控件」去掉 `上传文件`。这两行都按「步骤可顺序执行、不写本刀未交付的行为」自查。
+- 实施更正（#1034）：清单行是 CH-94 / CH-95；CH-09 改得比注记宽（那句的「最左」「没有权限」在 master 上已不成立）。注记之外加了 `heirRef`：`adopt` 的状态更新先于路由导航提交，中间有一次提交附件区会整个消失，hook 记下刚交接的会话 id，欢迎态在导航提交前照常给出这些标签。`adopt` 放在 `refreshList` 之前、if/else 之外；`patch` 返回记录是否还在；`attachments-state.ts` 改为值导入 `ApiError`。「`adopt` 挪到 `navigate` 之后」「上传失败分支不看中止」「去掉 `sendPrompt` 的在途闸」三条变异不可观测，原因见 PR 描述。上传失败路径没有清单行（签收人无法稳定造出上传失败）。
+- 评审更正（#1034 第 1 轮）：16.5 点名的变异里有三条没有逐条的判红记录——「移除已上传的标签发了请求」「切换会话时不中止在途上传、或仍发出排队项」「数量提示仍是旧文案」。#1272、#1275 与本 PR 的表都不含它们；#1267（#1031）的 PR 描述只写了「31 项 30 红」，没有清单。钉住它们的断言在 `web/test/chat-attachments.test.tsx`（移除已上传不发请求、数量提示文案两例）与 `web/test/chat-attachments-state.test.tsx`（「清空」组与切换会话两例）。16.5 的勾是按「断言在、其余各条有表」打的，这三条不是逐条重跑的结论。PR 对 M20 的归因也不全：`createControllerRef` 置空到 effect 置 `mutationControllerRef` 之间，挡住重复提交的是 `sendPrompt` 闭包里的 `creating || submitting`。
+- 清单更正（同轮）：CH-09 的步骤「这次不选工作空间直接发送」改为先在弹层里选「未选择」——欢迎页的空间选择在页面内保留。CH-58、CH-84 有同样的旧措辞，本 PR 不动，交 19.5 收口。

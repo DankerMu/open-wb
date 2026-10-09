@@ -44,7 +44,7 @@ const A = PROJECT_A.id;
 const BOUND = { ...view("a".repeat(32), "绑定会话"), workspaceId: A };
 const EMPTY = "暂无可用项";
 const HINT = "清空输入后可选择命令";
-/** 已选会话里菜单的第一项（欢迎态没有）。 */
+/** 菜单的第一项，已选会话与欢迎态都有。 */
 const UPLOAD = "上传文件";
 /** 规格场景里空间 A 的目录：两条内建、平台技能 `skill:weekly-report`、项目技能 `skill:deploy`。 */
 const FOUR = [COMPACT, TODO, WEEKLY, project("deploy", "部署到测试环境")];
@@ -360,6 +360,7 @@ describe("「+」菜单写入草稿", () => {
 
     const menu = await openMenu();
     expect(itemTexts(menu)).toEqual([
+      UPLOAD,
       "整理上下文压缩较长对话的上下文，保留要点",
       "任务清单查看或修改助手的任务清单",
       "weekly-report写周报",

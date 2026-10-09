@@ -2,8 +2,23 @@
 // 经隐藏的文件框选入、串行上传、标签与进度、发送闸、带附件发送与被拒后的恢复、切换会话清空。seam：整页挂载 +
 // 假 API + `FakeXhr`。期望文案与请求体取自规格条文。拖入与粘贴走同一个入口；jsdom 没有 `DataTransfer` 也没有
 // 缺省动作，事件带的是普通对象，「没有被拦」以 `fireEvent.*` 返回 true 断言。
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  alerts,
+  area,
+  chips,
+  choose,
+  file,
+  fileInput,
+  land,
+  openMenu,
+  remove,
+  send,
+  statuses,
+  uploadItem,
+  xhr,
+} from "./chat-attachments-support.js";
 import { quiesce } from "./chat-page-file-changes-support.js";
 import { typeDraft } from "./chat-page-lifecycle-support.js";
 import { composer, envelope, promptAccepted, SESSION_BUSY } from "./chat-page-ownership-support.js";
@@ -29,10 +44,6 @@ afterEach(() => {
   cleanupSessionMeta();
   vi.restoreAllMocks();
 });
-
-function file(name: string, size = 10) {
-  return new File([new Uint8Array(size)], name);
-}
 
 function messagesPath(id: string) {
   return `/api/sessions/${id}/messages`;
@@ -85,29 +96,6 @@ async function open(session: SessionView = S, extra: FetchRoutes = {}, after: st
   return page;
 }
 
-function fileInput() {
-  const input = document.querySelector('[data-slot="composer-file-input"]');
-  if (!(input instanceof HTMLInputElement)) throw new Error("没有文件输入框");
-  return input;
-}
-
-async function choose(...files: File[]) {
-  fireEvent.change(fileInput(), { target: { files } });
-  await quiesce();
-}
-
-function xhr(index: number) {
-  const request = FakeXhr.instances[index];
-  if (!request) throw new Error(`没有第 ${index + 1} 个上传请求`);
-  return request;
-}
-
-/** 第 `index` 个上传请求应答 201，文件落在 `uploads/<name>`。 */
-async function land(index: number, name: string, size = 10) {
-  act(() => xhr(index).respond(201, JSON.stringify({ path: `uploads/${name}`, name, size })));
-  await quiesce();
-}
-
 async function fail(index: number) {
   act(() =>
     xhr(index).respond(413, JSON.stringify({ error: { code: "too_large", message: TOO_BIG } })),
@@ -115,44 +103,8 @@ async function fail(index: number) {
   await quiesce();
 }
 
-/** 输入框的附件区；用户气泡里也有名为 `附件` 的列表，所以按 slot 取。 */
-function area() {
-  return document.querySelector<HTMLElement>('[data-slot="composer-attachments"]');
-}
-
-/** 每个标签的全部文字：名字、大小、状态。 */
-function chips() {
-  const list = area();
-  return list
-    ? within(list)
-        .getAllByRole("listitem")
-        .map((item) => item.textContent)
-    : [];
-}
-
-function statuses() {
-  const list = area();
-  return list
-    ? within(list)
-        .getAllByRole("listitem")
-        .map((item) => item.getAttribute("data-status"))
-    : [];
-}
-
-function send() {
-  return screen.getByRole("button", { name: "发送" }) as HTMLButtonElement;
-}
-
-function remove(name: string) {
-  fireEvent.click(screen.getByRole("button", { name: `移除 ${name}` }));
-}
-
 function bodies(fetchMock: FetchMock) {
   return calls(fetchMock, PROMPT).map(([, options]) => options?.body);
-}
-
-function alerts() {
-  return screen.queryAllByRole("alert").map((alert) => alert.textContent);
 }
 
 async function pressEnter() {
@@ -221,23 +173,6 @@ async function paste(types: string[], ...files: File[]) {
   const allowed = fireEvent.paste(composer(), { clipboardData: { types, files } });
   await quiesce();
   return allowed;
-}
-
-function plusButton() {
-  return screen.getByRole("button", { hidden: true, name: "添加文件或命令" }) as HTMLButtonElement;
-}
-
-async function openMenu() {
-  fireEvent.pointerDown(plusButton(), { button: 0, ctrlKey: false, pointerType: "mouse" });
-  const menu = await screen.findByRole("menu");
-  await quiesce();
-  return menu;
-}
-
-function uploadItem(menu: HTMLElement) {
-  const first = within(menu).getAllByRole("menuitem")[0];
-  if (!first) throw new Error("菜单里没有条目");
-  return first;
 }
 
 describe("选择即上传", () => {
@@ -691,7 +626,7 @@ describe("拖入与粘贴没有上传目标", () => {
     expect(FakeXhr.instances).toHaveLength(0);
   });
 
-  it("欢迎态：拖入与粘贴都不处理（暂存属首次发送一刀）", async () => {
+  it("欢迎态：拖入与粘贴各得到一个 `待上传` 标签，拖拽被拦且有高亮，没有上传请求，`发送` 可用", async () => {
     renderChatPage("/", {
       "/api/workspaces": () => workspaceList(PROJECT_A),
       ...composerOptionsRoute(OPTIONS),
@@ -702,15 +637,21 @@ describe("拖入与粘贴没有上传目标", () => {
     await quiesce();
     installFakeXhr();
     expect(composer().disabled).toBe(false);
+    expect(send().disabled).toBe(true);
 
-    expect(fireEvent.dragEnter(card(), hovering("Files"))).toBe(true);
-    expect(fireEvent.dragOver(card(), hovering("Files"))).toBe(true);
+    expect(fireEvent.dragEnter(card(), hovering("Files"))).toBe(false);
+    expect(fireEvent.dragOver(card(), hovering("Files"))).toBe(false);
+    expect(dropActive()).toBe("true");
+    expect(await drop([file("a.pdf")])).toBe(false);
     expect(card().hasAttribute("data-drop-active")).toBe(false);
-    expect(await drop([file("a.pdf")])).toBe(true);
-    expect(await paste(["Files"], file("image.png"))).toBe(true);
-    expect(area()).toBeNull();
+    expect(chips()).toEqual(["a.pdf10 B待上传"]);
+    expect(await paste(["Files"], file("image.png", 20))).toBe(false);
+    expect(chips()).toEqual(["a.pdf10 B待上传", "image.png20 B待上传"]);
+    expect(statuses()).toEqual(["pending", "pending"]);
+    expect(screen.queryByRole("progressbar")).toBeNull();
     expect(alerts()).toEqual([]);
     expect(FakeXhr.instances).toHaveLength(0);
-    expect(send().disabled).toBe(true);
+    expect(composer().value).toBe("");
+    expect(send().disabled).toBe(false);
   });
 });
