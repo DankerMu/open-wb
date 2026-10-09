@@ -71,6 +71,7 @@ function user(id: number, content: string) {
     steps: [],
     approvals: [],
     undo: "none" as const,
+    attachments: [],
   };
 }
 
@@ -101,6 +102,7 @@ function assistant(
     steps: options.steps ?? [],
     approvals: [],
     undo: null,
+    attachments: [],
   };
 }
 

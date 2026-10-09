@@ -87,7 +87,9 @@ describe("Turn control API requests", () => {
   });
 
   it("POSTs fork with exactly the JSON messageId body", async () => {
-    const fetchMock = stubFetch(jsonResponse({ session: stoppedSession, draft: "" }, 201));
+    const fetchMock = stubFetch(
+      jsonResponse({ session: stoppedSession, draft: "", attachments: [] }, 201),
+    );
     const controller = new AbortController();
 
     await createApiClient().forkSession(ENCODED_SESSION_ID, -3, { signal: controller.signal });
@@ -166,6 +168,8 @@ describe("Turn control stop responses", () => {
 });
 
 describe("Turn control regenerate/fork/approval parsing", () => {
+  const forkBody = { session: stoppedSession, draft: "", attachments: [] };
+
   it("returns a signed safe-integer assistantMessageId unchanged", async () => {
     stubFetch(jsonResponse({ assistantMessageId: SAFE_INTEGER_MIN }, 202));
 
@@ -200,13 +204,10 @@ describe("Turn control regenerate/fork/approval parsing", () => {
   it.each(["", "  原文\n"])(
     "returns fork draft %j and a stopped session unchanged",
     async (draft) => {
-      stubFetch(jsonResponse({ session: stoppedSession, draft }, 201));
+      const body = { ...forkBody, draft };
+      stubFetch(jsonResponse(body, 201));
 
-      await expect(createApiClient().forkSession(SESSION_ID, 1)).resolves.toEqual({
-        session: stoppedSession,
-        draft,
-        attachments: [],
-      });
+      await expect(createApiClient().forkSession(SESSION_ID, 1)).resolves.toEqual(body);
     },
   );
 
@@ -221,12 +222,19 @@ describe("Turn control regenerate/fork/approval parsing", () => {
   });
 
   it.each([
-    ["a non-string draft", { session: stoppedSession, draft: 1 }],
-    ["an extra key", { session: stoppedSession, draft: "", parentSessionId: SESSION_ID }],
-    ["a missing draft", { session: stoppedSession }],
-    ["a missing session", { draft: "" }],
-    ["an extra session key", { session: { ...stoppedSession, parent_session_id: "p" }, draft: "" }],
-    ["an unknown session status", { session: { ...stoppedSession, status: "pending" }, draft: "" }],
+    ["a non-string draft", { ...forkBody, draft: 1 }],
+    ["an extra key", { ...forkBody, parentSessionId: SESSION_ID }],
+    ["a missing attachments", { session: stoppedSession, draft: "" }],
+    ["a missing draft", { session: stoppedSession, attachments: [] }],
+    ["a missing session", { draft: "", attachments: [] }],
+    [
+      "an extra session key",
+      { ...forkBody, session: { ...stoppedSession, parent_session_id: "p" } },
+    ],
+    [
+      "an unknown session status",
+      { ...forkBody, session: { ...stoppedSession, status: "pending" } },
+    ],
   ] as const)("rejects fork with %s", async (_label, body) => {
     stubFetch(jsonResponse(body, 201));
 

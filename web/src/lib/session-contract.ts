@@ -1,7 +1,3 @@
-// 过渡分支（change `s1g-composer-capabilities`，design D16「三步落地」第 1 步）：`withTransitionalDefaults`
-// 与两个 `TRANSITIONAL_*` 常量让解析同时接受服务端发出新键之前与之后的键集（会话十一键或十四键；
-// 消息、fork 响应、undo 响应带或不带 `attachments`），缺席时补缺省值。这是合同迁移的过渡分支，
-// 不是并行实现：服务端（任务组 8、12）发出新键之后，由任务 13.5 整块删除，解析收回恰好键集。
 import { hasExactlyKeys, isNonNegativeSafeInteger, parseJsonArray } from "./api-json.js";
 
 type ChatSessionStatus = "idle" | "running" | "done" | "failed" | "stopped";
@@ -184,12 +180,6 @@ export const REASONING_EFFORTS: ReadonlySet<unknown> = new Set<ChatReasoningEffo
   "xhigh",
   "max",
 ]);
-const TRANSITIONAL_SESSION_COMPOSER: ChatSessionComposer = {
-  approvalMode: "write",
-  modelId: "",
-  reasoningEffort: null,
-};
-const TRANSITIONAL_ATTACHMENTS: { attachments: ChatAttachment[] } = { attachments: [] };
 const TODO_STATUSES: ReadonlySet<unknown> = new Set<ChatTodoStatus>([
   "pending",
   "in_progress",
@@ -200,21 +190,6 @@ const TODO_STATUSES: ReadonlySet<unknown> = new Set<ChatTodoStatus>([
 /** `name` / `content` 各自的码点上限，以及跨阶段的任务总数上限。 */
 const MAX_TODO_TEXT_POINTS = 200;
 const MAX_TODO_TASKS = 200;
-
-/**
- * 键集恰为 `base` 时补上 `defaults`；恰为 `base` 加 `defaults` 的各键时原样返回；其余（只带其中
- * 一部分、或多出别的键）为 null。
- */
-function withTransitionalDefaults(
-  value: unknown,
-  base: readonly string[],
-  defaults: Record<string, unknown>,
-): Record<string, unknown> | null {
-  if (hasExactlyKeys(value, base)) {
-    return { ...value, ...defaults };
-  }
-  return hasExactlyKeys(value, [...base, ...Object.keys(defaults)]) ? value : null;
-}
 
 function isSafeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value);
@@ -268,6 +243,7 @@ function parseSessionComposer(value: Record<string, unknown>): ChatSessionCompos
   if (
     !APPROVAL_MODES.has(approvalMode) ||
     typeof modelId !== "string" ||
+    modelId === "" ||
     (reasoningEffort !== null && !REASONING_EFFORTS.has(reasoningEffort))
   ) {
     return null;
@@ -280,10 +256,9 @@ function parseSessionComposer(value: Record<string, unknown>): ChatSessionCompos
   };
 }
 
-export function parseSession(input: unknown): ChatSession | null {
-  const value = withTransitionalDefaults(
-    input,
-    [
+export function parseSession(value: unknown): ChatSession | null {
+  if (
+    !hasExactlyKeys(value, [
       "id",
       "title",
       "status",
@@ -295,10 +270,11 @@ export function parseSession(input: unknown): ChatSession | null {
       "archivedAt",
       "pendingApproval",
       "temporaryWorkspace",
-    ],
-    TRANSITIONAL_SESSION_COMPOSER,
-  );
-  if (!value) {
+      "approvalMode",
+      "modelId",
+      "reasoningEffort",
+    ])
+  ) {
     return null;
   }
 
@@ -384,13 +360,21 @@ function parseAttachments(value: unknown): ChatAttachment[] | null {
   return parseJsonArray(value, parseAttachment);
 }
 
-function parseMessage(input: unknown): ChatMessage | null {
-  const value = withTransitionalDefaults(
-    input,
-    ["id", "role", "content", "thinking", "status", "createdAt", "steps", "approvals", "undo"],
-    TRANSITIONAL_ATTACHMENTS,
-  );
-  if (!value) {
+function parseMessage(value: unknown): ChatMessage | null {
+  if (
+    !hasExactlyKeys(value, [
+      "id",
+      "role",
+      "content",
+      "thinking",
+      "status",
+      "createdAt",
+      "steps",
+      "approvals",
+      "undo",
+      "attachments",
+    ])
+  ) {
     return null;
   }
 
@@ -577,9 +561,11 @@ export function parseRegenerateAccepted(value: unknown): ChatRegenerateAccepted 
   return { assistantMessageId: value.assistantMessageId };
 }
 
-export function parseSessionFork(input: unknown): ChatSessionFork | null {
-  const value = withTransitionalDefaults(input, ["session", "draft"], TRANSITIONAL_ATTACHMENTS);
-  if (!value || typeof value.draft !== "string") {
+export function parseSessionFork(value: unknown): ChatSessionFork | null {
+  if (
+    !hasExactlyKeys(value, ["session", "draft", "attachments"]) ||
+    typeof value.draft !== "string"
+  ) {
     return null;
   }
 
@@ -646,13 +632,11 @@ function parseUndoFiles(value: unknown): ChatUndoFiles | null {
   return { mode, restored, removed, skipped, failed };
 }
 
-export function parseSessionUndo(input: unknown): ChatSessionUndo | null {
-  const value = withTransitionalDefaults(
-    input,
-    ["session", "draft", "files"],
-    TRANSITIONAL_ATTACHMENTS,
-  );
-  if (!value || typeof value.draft !== "string") {
+export function parseSessionUndo(value: unknown): ChatSessionUndo | null {
+  if (
+    !hasExactlyKeys(value, ["session", "draft", "files", "attachments"]) ||
+    typeof value.draft !== "string"
+  ) {
     return null;
   }
 

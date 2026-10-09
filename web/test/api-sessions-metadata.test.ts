@@ -91,7 +91,7 @@ describe("Session metadata client: createSession", () => {
       `{"workspaceId":"${WORKSPACE_ID}","scene":"code"}`,
     ],
     ["scene only", { scene: "code" } as const, '{"scene":"code"}'],
-  ])("sends %s as exact JSON and returns the eleven-key session", async (_label, input, body) => {
+  ])("sends %s as exact JSON and returns the fourteen-key session", async (_label, input, body) => {
     const fetchMock = stubFetch(jsonResponse(createdSession, 201));
 
     await expect(createApiClient().createSession(input)).resolves.toEqual(createdSession);
@@ -163,7 +163,7 @@ describe("Session metadata client: createSession", () => {
 });
 
 describe("Session metadata client: patchSession", () => {
-  it("PATCHes the encoded path with the exact JSON and returns the eleven-key session", async () => {
+  it("PATCHes the encoded path with the exact JSON and returns the fourteen-key session", async () => {
     const fetchMock = stubFetch(jsonResponse(patchedSession));
     const controller = new AbortController();
 

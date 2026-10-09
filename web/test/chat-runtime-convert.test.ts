@@ -1,7 +1,9 @@
 // chat-web「会话页源码模块划分」场景「convertMessage 映射」：会话视图消息 → 运行时消息的纯映射。
 import { describe, expect, it } from "vitest";
 import { convertMessage, messageCustom } from "../src/features/chat/runtime-convert.js";
-import type { ChatState } from "../src/features/chat/stream.js";
+import { type ChatState, chatStateFromSnapshot } from "../src/features/chat/stream.js";
+import { parseMessageSnapshot } from "../src/lib/session-contract.js";
+import { NULL_SESSION_META } from "./session-meta-fixtures.js";
 
 type View = ChatState["messages"][number];
 
@@ -150,5 +152,50 @@ describe("convertMessage 映射", () => {
       expect(convertMessage(view)).toEqual(convertMessage(make()));
       expect(view).toEqual(frozen);
     }
+  });
+});
+
+describe("附件透传：快照 → 视图消息 → 运行时消息的应用自有字段", () => {
+  const FILE = { path: "uploads/a.pdf", size: 3 };
+
+  function wire(id: number, role: "user" | "assistant", attachments: unknown[]) {
+    return {
+      id,
+      role,
+      content: role === "user" ? "问" : "答",
+      thinking: null,
+      status: "done",
+      createdAt: id,
+      steps: [],
+      approvals: [],
+      undo: role === "user" ? "available" : null,
+      attachments,
+    };
+  }
+
+  it("用户消息的每个附件经 chatStateFromSnapshot 与 convertMessage 原值到达，助手消息为空数组", () => {
+    const snapshot = parseMessageSnapshot({
+      session: {
+        id: "0123456789abcdef0123456789abcdef",
+        title: "saved title",
+        status: "done",
+        createdAt: 1_740_000_000_000,
+        updatedAt: 1_740_000_000_023,
+        ...NULL_SESSION_META,
+      },
+      messages: [wire(1, "user", [FILE]), wire(2, "assistant", [])],
+      streamCursor: { epoch: 1, seq: null },
+      todo: null,
+    });
+    if (!snapshot) {
+      throw new Error("the snapshot did not parse");
+    }
+
+    const view = chatStateFromSnapshot(snapshot);
+
+    expect(view.messages.map((item) => item.attachments)).toEqual([[FILE], []]);
+    expect(view.messages.map((item) => convertMessage(item).metadata?.custom?.attachments)).toEqual(
+      [[FILE], []],
+    );
   });
 });
