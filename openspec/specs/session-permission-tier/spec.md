@@ -1,7 +1,7 @@
 # session-permission-tier Specification
 
 ## Purpose
-定义会话的权限档位：三档与 omp 审批模式的对应、换档从该会话的下一条消息起生效（两个回合之间重启进程）、确认卡的超时规则各档相同、管理员最高档（`APPROVAL_MAX_MODE`，读取时夹取）、档位变更的审计（`session.permission`），以及 web 侧的权限档位控件（选「全部自动」时确认一次）。
+定义会话的权限档位：三档与 omp 审批模式的对应、换档从该会话的下一条消息起生效（两个回合之间重启进程）、确认卡的超时规则各档相同、管理员最高档（`APPROVAL_MAX_MODE`，读取时夹取）、档位变更的审计（`session.permission`），以及 web 侧的权限档位控件（每次从别的档位选到「全部自动」都先确认）。
 
 ## Requirements
 
