@@ -127,7 +127,7 @@ Minimal mergeable slice: atomic - 写出器签名变化必须与其唯一调用�
   - 回滚场景预置的冲突列用 **`reasoning_effort`**（040 的最后一条语句），失败后断言 `approval_mode`、`model_id` 都不在 `chat_sessions` 上、回执与数据不变，`DROP COLUMN reasoning_effort` 后重开 040 恰一次。预置第一列证明不了回滚（规格该场景的括号已随本 PR 改正）。
   - 必须同步的既有断言（以 `make check` 的红项为准，下面是起点）：`server/test/core-db-helpers.ts`（`MIGRATION_040`、`COMPLETE_CATALOG`、计数 13 → 14）、`core-db-session-fixture.ts`（`expectChatSchema` 列尾加三行）、`core-db-chat-schema.test.ts`、`migration-034.test.ts`（列尾、回执列表、排除表、`.at(-1)` 改成钉 039 的下标）、`core-db-chat-step-output.test.ts`（排除表）、`core-db-session-todo.test.ts`、`core-db-turn-snapshots.test.ts`、`core-db-workspace-temporary.test.ts`。凡 `slice(-n)` / `.at(-1)` / 整列相等的写法改成钉住具体下标或前缀比较，免得 041、042 来时再改一遍。不放宽、不删任何断言。
   - 属于 040 的变异（写进 PR；任务号 4.4 在 #995 勾）：去掉任一列的 CHECK → 「列约束」红；把 `auto` 加回强度 CHECK → 红；任一列加 DEFAULT → 「新库与存量库」红。
-- [ ] 4.2 `041_account_composer_prefs.sql`（「迁移 041」）。测试并入同文件：建表与约束、随账号级联。
+- [x] 4.2 `041_account_composer_prefs.sql`（「迁移 041」）。测试并入同文件：建表与约束、随账号级联。
   **实施注记（4.2，fixture 评审补充，#994）**：
   - DDL 逐字照规格、风格照 039（列级约束，一条 `CREATE TABLE`）：`account_id TEXT NOT NULL PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE`、`approval_mode TEXT NULL CHECK (approval_mode IN ('always-ask','write','yolo'))`、`model_id TEXT NULL`、`reasoning_effort TEXT NULL CHECK (reasoning_effort IN ('off','minimal','low','medium','high','xhigh','max'))`、`updated_at INTEGER NOT NULL CHECK (typeof(updated_at)='integer' AND updated_at >= 0)`。`accounts.id` 是 `TEXT NOT NULL` + `PRIMARY KEY (id)`（`010_auth_schema_seed.sql:5-11`）。
   - 文件不含 `IF NOT EXISTS`、`WITHOUT ROWID`、`STRICT`、索引、DEFAULT、AUTOINCREMENT、事务语句；头注释照 039 / 040，写明「同名冲突必须使本迁移事务失败」。`sqlite_sequence` 不增行。

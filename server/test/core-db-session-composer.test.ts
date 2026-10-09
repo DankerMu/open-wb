@@ -5,6 +5,10 @@
  * 「中途失败原子回滚」). 040 is located by its position in the tracked catalog, so later migrations
  * may follow it. Expected columns, legal values and rows are literals from the spec text and the
  * shared fixture, never recomputed from the migration.
+ *
+ * Issue #994 migration 041: the table `account_composer_prefs`, one row per account, created whole
+ * in the runner's transaction and deleted with its account (spec「迁移 041 账号最近选择表」Scenarios
+ * 「建表与约束」「随账号级联」). Located the same way, right after 040.
  */
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -16,9 +20,11 @@ import {
   ledgerRows,
   MIGRATION_039,
   MIGRATION_040,
+  MIGRATION_041,
   migrationReceiptExists,
   removeTempDirs,
   TRACKED_MIGRATION_FILENAMES,
+  tableExists,
   tempDir,
   withDatabase,
   withOpenDb,
@@ -37,6 +43,7 @@ import {
   S_D,
   seedPopulated035,
   seedThrough,
+  sortedForeignKeys,
 } from "./core-db-session-fixture.js";
 
 afterEach(removeTempDirs);
@@ -276,6 +283,248 @@ describe("migration 040 atomic rollback", () => {
       expect(receipts(db)).toEqual(retried);
       expect(countReceipts(db, MIGRATION_040)).toBe(1);
       expect(composerRows(db)).toEqual(ALL_UNSET);
+    });
+  });
+});
+
+// 041 follows 040 the same way; `POS` above stays 040's.
+const POS_041 = TRACKED_MIGRATION_FILENAMES.indexOf(MIGRATION_041);
+const RECEIPTS_BEFORE_041 = TRACKED_MIGRATION_FILENAMES.slice(0, POS_041);
+// Every column that exists before 041 on the tables an upgrade must keep: 039's plus the 040 tail.
+const COLUMNS_040 = {
+  ...COLUMNS_039,
+  chat_sessions: [...COLUMNS_039.chat_sessions, ...NEW_COLUMNS],
+};
+const PREFS = "account_composer_prefs";
+const PREFS_TABLE_INFO = [
+  { name: "account_id", type: "TEXT", not_null: 1, dflt_value: null, pk: 1 },
+  { name: "approval_mode", type: "TEXT", not_null: 0, dflt_value: null, pk: 0 },
+  { name: "model_id", type: "TEXT", not_null: 0, dflt_value: null, pk: 0 },
+  { name: "reasoning_effort", type: "TEXT", not_null: 0, dflt_value: null, pk: 0 },
+  { name: "updated_at", type: "INTEGER", not_null: 1, dflt_value: null, pk: 0 },
+];
+const PREFS_FOREIGN_KEYS = [
+  { from: "account_id", table: "accounts", to: "id", on_delete: "CASCADE" },
+];
+const PLANTED_PREFS = "CREATE TABLE account_composer_prefs (account_id TEXT PRIMARY KEY)";
+const PREFS_EXISTS = /table account_composer_prefs already exists/;
+const NOT_NULL_FAILED = /NOT NULL constraint failed/;
+const UNIQUE_FAILED = /UNIQUE constraint failed/;
+const FOREIGN_KEY_FAILED = /FOREIGN KEY constraint failed/;
+type PrefsRow = {
+  account_id: string | null;
+  approval_mode: Value;
+  model_id: Value;
+  reasoning_effort: Value;
+  updated_at: number | null;
+};
+const prefs = (
+  account_id: string,
+  approval_mode: Value,
+  model_id: Value,
+  reasoning_effort: Value,
+  updated_at: number,
+): PrefsRow => ({ account_id, approval_mode, model_id, reasoning_effort, updated_at });
+// u1, u2 and u3 are accounts seeded by 010. u1 never chose anything; u2 chose all three.
+const U1_PREFS = prefs("u1", null, null, null, 0);
+const U2_PREFS = prefs("u2", "yolo", "Vendor/模型 🚀 v2", "max", 1760000000000);
+// A legal row for a third account: each rejected case changes exactly one of its values.
+const U3_PREFS = prefs("u3", "write", "deepseek-v4.1-flash", "high", 5);
+
+function prefsRows(db: DatabaseSync) {
+  return db.prepare(`SELECT * FROM ${PREFS} ORDER BY account_id`).all();
+}
+
+function insertPrefs(db: DatabaseSync, row: PrefsRow): void {
+  db.prepare(
+    `INSERT INTO ${PREFS}(account_id, approval_mode, model_id, reasoning_effort, updated_at) VALUES (?, ?, ?, ?, ?)`,
+  ).run(row.account_id, row.approval_mode, row.model_id, row.reasoning_effort, row.updated_at);
+}
+
+/** A current-schema in-memory database holding the rows of u1 and u2. */
+function withPrefs(action: (db: DatabaseSync) => void): void {
+  withOpenDb(":memory:", (db) => {
+    insertPrefs(db, U1_PREFS);
+    insertPrefs(db, U2_PREFS);
+    expect(prefsRows(db)).toEqual([U1_PREFS, U2_PREFS]);
+    action(db);
+  });
+}
+
+/** 041's receipt sits right after 040's, once; the table is the five columns and one key of the spec. */
+function expect041Applied(db: DatabaseSync): void {
+  expect(POS_041).toBeGreaterThan(0);
+  const ledger = ledgerRows(db);
+  expect(ledger[POS_041 - 1]).toEqual([POS_041, MIGRATION_040]);
+  expect(ledger[POS_041]).toEqual([POS_041 + 1, MIGRATION_041]);
+  expect(countReceipts(db, MIGRATION_041)).toBe(1);
+  expect(
+    db
+      .prepare(
+        `SELECT name, type, "notnull" AS not_null, dflt_value, pk FROM pragma_table_info('${PREFS}')`,
+      )
+      .all(),
+  ).toEqual(PREFS_TABLE_INFO);
+  expect(sortedForeignKeys(db, PREFS)).toEqual(PREFS_FOREIGN_KEYS);
+  // An ordinary rowid table whose only index is the one its TEXT primary key brings.
+  expect(db.prepare(`SELECT wr, strict FROM pragma_table_list('${PREFS}')`).all()).toEqual([
+    { wr: 0, strict: 0 },
+  ]);
+  expect(
+    db
+      .prepare("SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ?")
+      .all(PREFS),
+  ).toEqual([{ name: "sqlite_autoindex_account_composer_prefs_1", sql: null }]);
+  expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+}
+
+describe("migration 041 account composer prefs table", () => {
+  it.each([
+    ["in-memory", () => ":memory:"],
+    ["new file", () => join(tempDir(), "fresh-041.db")],
+  ])("%s database has 041 right after 040 and an empty five-column table", (_label, path) => {
+    withOpenDb(path(), (db) => {
+      expect041Applied(db);
+      expect040Applied(db);
+      expect(prefsRows(db)).toEqual([]);
+    });
+  });
+
+  it("populated database ending at 040 gains 041 once and keeps every prior value, key, index and sequence", () => {
+    const file = join(tempDir(), "populated-before-041.db");
+    seedThrough(file, RECEIPTS_BEFORE_041, seedPopulated035);
+    const before = withDatabase(file, (db) => {
+      expect(ledgerFilenames(db)).toEqual([...RECEIPTS_BEFORE_041]);
+      expect(tableExists(db, PREFS)).toBe(false);
+      expect(columnNames(db, "chat_sessions")).toEqual(COLUMNS_040.chat_sessions);
+      expectFixture035(db);
+      return { receipts: receipts(db), state: preservedState(db, COLUMNS_040) };
+    });
+    expect(before.receipts).toHaveLength(POS_041);
+
+    const upgraded = withOpenDb(file, (db) => {
+      expect041Applied(db);
+      expect(receipts(db).slice(0, POS_041)).toEqual(before.receipts);
+      expect(preservedState(db, COLUMNS_040)).toEqual(before.state);
+      expectFixture035(db);
+      expect(composerRows(db)).toEqual(ALL_UNSET);
+      expect(prefsRows(db)).toEqual([]);
+      return receipts(db);
+    });
+
+    expectRepeatedOpenStable(file, (db) => {
+      expect(receipts(db)).toEqual(upgraded);
+      expect(preservedState(db, COLUMNS_040)).toEqual(before.state);
+      expectFixture035(db);
+      expect(prefsRows(db)).toEqual([]);
+      expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    });
+  });
+
+  it("a pre-existing table of the same name fails 041 leaving it and the receipts as they were, and a retry applies it once", () => {
+    const file = join(tempDir(), "conflict-prefs-table.db");
+    const prefsSql = (db: DatabaseSync) =>
+      db.prepare("SELECT type, sql FROM sqlite_master WHERE name = ?").all(PREFS);
+    seedThrough(file, RECEIPTS_BEFORE_041, (db) => {
+      seedPopulated035(db);
+      db.exec(PLANTED_PREFS);
+    });
+    const before = withDatabase(file, (db) => ({
+      receipts: receipts(db),
+      state: preservedState(db, COLUMNS_040),
+    }));
+    expect(before.receipts).toHaveLength(POS_041);
+
+    expectOpenDbFailure(file, PREFS_EXISTS);
+
+    withDatabase(file, (db) => {
+      expect(prefsSql(db)).toEqual([{ type: "table", sql: PLANTED_PREFS }]);
+      expect(ledgerFilenames(db)).toEqual([...RECEIPTS_BEFORE_041]);
+      expect(migrationReceiptExists(db, MIGRATION_041)).toBe(false);
+      expect(receipts(db)).toEqual(before.receipts);
+      expect(preservedState(db, COLUMNS_040)).toEqual(before.state);
+      expectFixture035(db);
+      db.exec(`DROP TABLE ${PREFS}`);
+    });
+
+    const retried = withOpenDb(file, (db) => {
+      expect041Applied(db);
+      expect(receipts(db).slice(0, POS_041)).toEqual(before.receipts);
+      expectFixture035(db);
+      expect(prefsRows(db)).toEqual([]);
+      return receipts(db);
+    });
+    expectRepeatedOpenStable(file, (db) => {
+      expect(receipts(db)).toEqual(retried);
+      expect(countReceipts(db, MIGRATION_041)).toBe(1);
+    });
+  });
+});
+
+describe("migration 041 constraints", () => {
+  it("stores an all-NULL row with updated_at 0 and an all-set row, and takes every legal value", () => {
+    withPrefs((db) => {
+      expect(
+        db.prepare(`SELECT typeof(updated_at) AS t FROM ${PREFS} ORDER BY account_id`).all(),
+      ).toEqual([{ t: "integer" }, { t: "integer" }]);
+      for (const [column, legal] of [
+        ["approval_mode", APPROVAL_MODES],
+        ["reasoning_effort", REASONING_EFFORTS],
+        ["model_id", MODEL_IDS],
+      ] as Array<[keyof PrefsRow, string[]]>) {
+        const update = db.prepare(`UPDATE ${PREFS} SET ${column} = ? WHERE account_id = 'u1'`);
+        for (const value of [...legal, null]) {
+          expect(update.run(value).changes, `${column} ${value}`).toBe(1);
+          expect(prefsRows(db)).toEqual([{ ...U1_PREFS, [column]: value }, U2_PREFS]);
+        }
+      }
+      // The key is not AUTOINCREMENT: writing rows adds nothing to sqlite_sequence.
+      expect(db.prepare("SELECT name FROM sqlite_sequence WHERE name = ?").all(PREFS)).toEqual([]);
+    });
+  });
+
+  it.each([
+    ["account_id", "u1", UNIQUE_FAILED],
+    ["approval_mode", "Write", CHECK_FAILED],
+    ["approval_mode", "auto", CHECK_FAILED],
+    ["approval_mode", "", CHECK_FAILED],
+    ["reasoning_effort", "auto", CHECK_FAILED],
+    ["reasoning_effort", "ultra", CHECK_FAILED],
+    ["reasoning_effort", "High", CHECK_FAILED],
+    ["reasoning_effort", "", CHECK_FAILED],
+    ["updated_at", -1, CHECK_FAILED],
+    ["updated_at", 1.5, CHECK_FAILED],
+    ["updated_at", null, NOT_NULL_FAILED],
+    ["account_id", null, NOT_NULL_FAILED],
+    ["account_id", "nobody", FOREIGN_KEY_FAILED],
+  ] as Array<[keyof PrefsRow, string | number | null, RegExp]>)(
+    "rejects %s %j on insert and update and keeps the stored rows",
+    (column, value, failure) => {
+      withPrefs((db) => {
+        // Insert: u3's otherwise legal row. Update: the same single value written onto u2's row.
+        expect(() => insertPrefs(db, { ...U3_PREFS, [column]: value })).toThrow(failure);
+        expect(() =>
+          db.prepare(`UPDATE ${PREFS} SET ${column} = ? WHERE account_id = 'u2'`).run(value),
+        ).toThrow(failure);
+        expect(prefsRows(db)).toEqual([U1_PREFS, U2_PREFS]);
+        // The base row itself is legal, so each refusal above is due to the one changed value.
+        insertPrefs(db, U3_PREFS);
+        expect(prefsRows(db)).toEqual([U1_PREFS, U2_PREFS, U3_PREFS]);
+      });
+    },
+  );
+});
+
+describe("migration 041 cascade", () => {
+  it("deleting an account removes its row and leaves the other account's row as it was", () => {
+    withPrefs((db) => {
+      expect(db.prepare("PRAGMA foreign_keys").all()).toEqual([{ foreign_keys: 1 }]);
+      expect(db.prepare("DELETE FROM accounts WHERE id = 'u1'").run().changes).toBe(1);
+      expect(prefsRows(db)).toEqual([U2_PREFS]);
+      expect(db.prepare("SELECT id FROM accounts WHERE id IN ('u1', 'u2')").all()).toEqual([
+        { id: "u2" },
+      ]);
+      expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     });
   });
 });
