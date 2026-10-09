@@ -160,3 +160,36 @@
 - 变异：逃逸，`op`：把 `"read"` 换成 `"list"` → 新增用例里审计行 `op` 的断言判红。
   - 实施后更正一（规格文本）：场景「由别处提供与不支持」原把 `i.exe` 与八个「由别处提供」的名字并列为「即使带 `sniffedText: true` 也抛」，与条文表格 `text` 行（不在表内任何一行且 `sniffedText === true` 即 `text`）矛盾。以条文为准，场景改为：八个名字带 `sniffedText: true` 仍抛；`i.exe` 在 `sniffedText` 未提供或为 `false` 时抛。测试里第九个名字用 `I.PDF`（顺带钉住大小写归一）。此处改动待 owner 确认。
   - 实施后更正二（变异预测）：「去掉 `file` 路由的 `ensureOwnedRoot`」不会让「他人 id」用例判红——`core/sandbox/index.ts` 的 facade 自己先查 `rootOf`，为空即 `not_found` 且无审计，是双重保证；该变异只在 `workspaces-http-failures.test.ts` 的「owned missing root」用例判红。
+
+## 7.1（#1057）
+
+- 不触及 Critical Path：本刀不调 `sandbox.resolve`、不加 `op`、不加路由、没有生产调用方；`openRangeStream` 与既有 `openPreviewStream` 同约，只收已解析的 `absPath`（`server/src/workspaces/preview.ts:1-8` 文首注释写明 resolve 在模块外）。逃逸向量随 #1058（7.3）的路由接入评审，本刀一个评审席位即可。
+- 前提：只有 0.1（#1049 / PR #1285）。7.1 在「组 2–7 不等 1.2」之列，不等 1.1 / 1.3，不等 5.1（边表写明 7.1 以参数收值）；6.1 只挡 7.3，不挡 7.1。
+- 现状无漂移：`preview.ts` 78 行，导出只有 `PreviewClassification`、`classifyPreview`、`openPreviewStream`；全仓 `git grep 'parseRange\|openRangeStream\|range-parser'` 在 `server`、`web`、`openspec/specs` 零命中，不引入依赖。`rest.ts` 416 行，本刀不动。
+- 签名：`export type RangeResult = { start: number; end: number } | "unsatisfiable" | "ignore"`；`export function parseRange(header: string | undefined, size: number): RangeResult`；`export function openRangeStream(absPath: string, start: number, end: number): Readable`，实现就是 `createReadStream(absPath, { start, end })`（两端含）。
+- `parseRange` 用一条正则字面量 `/^bytes=(\d*)-(\d*)$/`，不用 `new RegExp`（semgrep）。判定次序固定：不匹配或两组皆空 → `ignore`；两组皆有且 `a > b` → `ignore`；`size === 0` → `unsatisfiable`；有 `a` 且 `a >= size` → `unsatisfiable`；后缀 `n === 0` → `unsatisfiable`；否则返回区间，`end = min(b, size-1)`。
+- 规格没写、取最简并记入偏离记录的分支：`header` 为 `undefined` 或空串 → `ignore`；后缀 `n > size` → `{0, size-1}`；`Bytes=` 等非小写单位 → `ignore`（只认字面 `bytes=`）；前导零按十进制接受；既 `a > b` 又 `a >= size`（如 `bytes=1000-999`）→ `ignore`；语法不合的头在 `size = 0` 时仍是 `ignore`。
+- `openRangeStream` 不加任何校验：`start > end` 时 Node 同步抛 `ERR_OUT_OF_RANGE`（已实测），调用方只传 `parseRange` 的结果；`size = 0` 不会走到这里。
+- 测试放新文件 `server/test/workspace-preview-range.test.ts`（过 naming-guard），不追加进 `workspace-preview.test.ts`——那个文件 #1055 同批要改写（三参改四参、`IMAGE_LIMIT`）。
+- 辅助函数：`workspace-preview.test.ts:75-94` 的 `collectBytes`、`waitForClose`、`waitForOpen` 原样搬进 `server/test/workspace-file-helpers.ts`（现 28 行）并导出，两个测试文件都从那里导入；原文件 `:4` 的 `Readable` 导入随之无引用，一并删掉。断言一条不动，记入偏离记录。若 #1055 先合且已搬过，直接复用。不复制函数（jscpd）。
+- `parseRange` 用例：`it.each` 十行，`size = 1000`，逐字用规格的十个输入与期望（`bytes=0-99`→`{0,99}`、`900-`→`{900,999}`、`-100`→`{900,999}`、`990-2000`→`{990,999}`、`1000-`与`-0`→`unsatisfiable`、`5-2`、`0-1,5-6`、`items=0-1`、`bytes= 0-1`→`ignore`），用 `toEqual` 断言。上一条所列的自选分支各补一行。
+- `openRangeStream` 用例四条，文件为 64 字节且每字节等于下标：(a) `(path, 10, 19)` 收到的字节恰为 `Buffer.from([10..19])`、长度 10；(b) 读完后等 `close`，`fstatSync(fd)` 抛 `EBADF`；(c) `open` 后立即 `destroy()`，等 `close`，同样 `EBADF`；(d) 不存在的路径以 `ENOENT` 拒绝且有 `close`。
+- (b) 不可省：实测 `autoClose: false` 时读完后描述符仍开着，而 `destroy()` 照样关闭——任务点名的「读完前销毁」用例单独抓不住描述符泄漏。
+- knip：`knip.json` 的 server 入口含 `test/**/*.test.ts`，`parseRange`、`openRangeStream` 以测试为唯一导入方即可；`RangeResult` 也要被测试文件 `import type` 引用（如给 `it.each` 的表标类型），否则报未引用导出。
+- 其余门槛与文档：`preview.ts` 增约 35 行、新测试约 110 行，远离 800；不加配置键，`docs/architecture/system.md` 第 9 节与配置计数测试不动；纯服务端函数无用户可见变化，no checklist rows；文首注释补一句「范围解析与闭区间流同在本模块」。
+- 与 #1055 的合并次序：两刀都改 `preview.ts`。本刀把新函数加在 `openPreviewStream` 之后、`classified` 之前，不动 13–52 行；后合的一方 rebase，不在本刀预先适配 `rangeable`。
+- 变异：`bytes=-100` 当成 `0-100`（7.5 分摊条款）→ `parseRange` 的 `bytes=-100` 行判红（得到 `{0,100}`，期望 `{900,999}`）。
+- 变异：去掉 `end` 的截断 → `bytes=990-2000` 行判红（`{990,2000}`）。
+- 变异：`bytes=<a>-` 的 `end` 取 `size` 而非 `size-1` → `bytes=900-` 行判红。
+- 变异：去掉 `a >= size` 判定 → `bytes=1000-` 行判红。
+- 变异：去掉 `n === 0` 判定 → `bytes=-0` 行判红。
+- 变异：去掉 `a > b` 判定，或把它改回 `unsatisfiable` → `bytes=5-2` 行判红。
+- 变异：多段时取第一段（正则去掉 `$` 锚）→ `bytes=0-1,5-6` 行判红。
+- 变异：不校验单位（`[a-z]+=`）→ `items=0-1` 行判红。
+- 变异：解析前 `trim` 或允许 `\s*` → `bytes= 0-1` 行判红。
+- 变异：判定次序写反（先判 `size === 0` 或 `a >= size`，再判语法与 `a > b`）→ 自选分支的 `bytes=1000-999` 行与 `size = 0` 的非法头行判红；规格的十行抓不住，所以这两行必须写。
+- 变异：后缀 `n > size` 不夹到 0 → 自选分支的 `bytes=-1500` 行判红（`start` 为负）。
+- 变异：`openRangeStream` 的 `end` 当开区间（`end - 1`）→ 用例 (a) 判红（9 字节）；`start` 写成 0 → (a) 判红（字节值不是 10..19）。
+- 变异：`createReadStream` 加 `autoClose: false` → 用例 (b) 判红（`close` 不来，超时）；用例 (c) 仍绿，已实测。
+- 变异：「销毁时不释放描述符」预期不可观测：薄封装下释放由 Node 的 `ReadStream._destroy` 完成，没有可以去掉的实现行；用例 (c) 只在有人把它换成自管 `fs.open` 的实现时才会红。PR 表里照此标注。
+- 变异：把 open 错误吞成空流（如捕获后返回 `Readable.from([])`）→ 用例 (d) 判红。

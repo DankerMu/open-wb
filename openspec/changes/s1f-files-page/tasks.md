@@ -235,6 +235,7 @@ Minimal mergeable slice: 6.1 + 6.2 中「路由按新签名调用、上限仍取
 ## 7. workspaces — 音视频的范围请求
 
 - [ ] 7.1 `preview.ts` 新增纯函数 `parseRange` 与 `openRangeStream`（只有函数与导出，路由不变）。测试：`parseRange` 的十个输入（workspaces「嗅探与范围解析」场景）；`openRangeStream(path, 10, 19)` 恰产出第 10–19 字节，读完前销毁时描述符释放。
+  实施注记见 `implementation-notes.md`「7.1（#1057）」。
 - [ ] 7.2 把「按区间发送一个文件」做成 `server/src/workspaces/` 下可复用的小函数（200 / 206 / 416 的头与正文；组 12、15 的预览监听器直接用它）。
 - [ ] 7.3 `file` 路由对 `rangeable` 的类别经 7.2 的函数按 workspaces「文件预览」返回 200 / 206 / 416，其余类别忽略 `Range`。
 - [ ] 7.4 测试：路由层「音视频的范围请求」场景，206 用真实监听的 HTTP 客户端断言字节与 `Content-Range`（`inject` 之外再走一次真连接）；流在区间读完前被客户端中止时描述符释放。
