@@ -472,6 +472,11 @@ describe("workspace REST", () => {
       expect(html.headers["content-type"]).toBe("text/plain; charset=utf-8");
       expect(html.headers["content-type"]).not.toContain("text/html");
       expect(html.rawPayload.equals(htmlBytes)).toBe(true);
+      // The name classified is the resolved file's, not the last segment of the request string.
+      const dotted = await requestWorkspaceFile(app, U1_PREVIEW, cookie, "page.html/.");
+      expect(dotted.statusCode).toBe(200);
+      expect(dotted.headers["content-type"]).toBe("text/plain; charset=utf-8");
+      expect(dotted.rawPayload.equals(htmlBytes)).toBe(true);
 
       const png = await requestWorkspaceFile(app, U1_PREVIEW, cookie, "logo.png");
       expect(png.statusCode).toBe(200);
@@ -480,6 +485,13 @@ describe("workspace REST", () => {
       expect(png.headers["x-content-type-options"]).toBe("nosniff");
       expect(png.headers["cache-control"]).toBe("no-store");
       expect(png.rawPayload.equals(pngBytes)).toBe(true);
+      // 11 MiB: above the former 10 MiB image limit, below the 20 MiB one.
+      writeFileSync(join(root, "large.png"), "");
+      truncateSync(join(root, "large.png"), 11_534_336);
+      const largePng = await requestWorkspaceFile(app, U1_PREVIEW, cookie, "large.png");
+      expect(largePng.statusCode).toBe(200);
+      expect(largePng.headers["content-type"]).toBe("image/png");
+      expect(largePng.headers["x-workbuddy-size"]).toBe("11534336");
 
       const jpeg = await requestWorkspaceFile(app, U1_PREVIEW, cookie, "photo.JPEG");
       expect(jpeg.statusCode).toBe(200);

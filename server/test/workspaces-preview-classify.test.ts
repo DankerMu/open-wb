@@ -45,7 +45,7 @@ const MEDIA_TABLE = [
   ["mp4", "video", "video/mp4"],
   ["webm", "video", "video/webm"],
 ] as const;
-const SNIFFED_NAMES = ["dockerfile", "notes.proto", "LICENSE", ".gitignore"];
+const SNIFFED_NAMES = ["dockerfile", "makefile", "notes.proto", "LICENSE", ".gitignore"];
 
 /** The header set of every non-text class; only the rangeable ones advertise ranges. */
 function binaryHeaders(contentType: string, size: number, rangeable: boolean) {
@@ -252,6 +252,24 @@ describe("classifyPreview limits", () => {
     });
   });
 
+  it("classifies a 5 GiB wav as rangeable audio without a size limit", () => {
+    const size = 5 * 1024 * 1024 * 1024;
+    expect(classifyPreview("/opaque/take.wav", "take.wav", size, DEFAULTS)).toEqual({
+      kind: "audio",
+      contentType: "audio/wav",
+      truncated: false,
+      limit: 5_368_709_120,
+      rangeable: true,
+      headers: {
+        "Content-Type": "audio/wav",
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "no-store",
+        "X-Workbuddy-Size": "5368709120",
+        "Accept-Ranges": "bytes",
+      },
+    });
+  });
+
   it("classifies wav as rangeable audio", () => {
     const result = classifyPreview("/opaque/clip.wav", "clip.wav", 44, DEFAULTS);
     expect(result.kind).toBe("audio");
@@ -280,7 +298,7 @@ describe("classifyPreview limits", () => {
     );
   });
 
-  it("rejects the names served elsewhere and unknown binaries even with sniffedText true", () => {
+  it("rejects the names served elsewhere even with sniffedText true, and an unsniffed unknown binary", () => {
     const missingPath = join(workspaceTempDir(), "does-not-exist");
     const spies = spyMetadataIo();
     const names = [
@@ -305,7 +323,8 @@ describe("classifyPreview limits", () => {
         "preview_unsupported",
       );
     }
-    // `exe` is in no set: the route's sniff of its bytes is what keeps it out.
+    // `exe` is in no set and the route does not sniff yet: once #1056 wires the sniff in, its
+    // bytes are what keep it out.
     for (const options of [DEFAULTS, { limits: DEFAULT_PREVIEW_LIMITS, sniffedText: false }]) {
       expectCanonicalError(
         () => classifyPreview(missingPath, "i.exe", 20, options),
