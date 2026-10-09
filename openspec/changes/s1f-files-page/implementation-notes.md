@@ -407,3 +407,28 @@
 - `web/package.json` 多加一个未登记的 `@radix-ui/react-*` → 既有 `ui-guardrails.test.ts:219`「Radix 条目列出 web 已安装的每个 @radix-ui/* 包」红。
 - 把 `cn` 导入改回 `"cn"` → `npm run typecheck` 与测试的模块解析红。
 - 预期不可观测：把 `bg-border` 换成颜色字面量（拷入层关了 linter，无颜色守卫扫 `components/ui`）——只能靠评审对照 registry 原件 diff，PR 描述附逐行对照。
+
+## 26.1（#1111）
+
+- 不触及 Critical Path：只加四个被跟踪的数据文件并改 `smoke/fixtures/README.md`，不动 `sandbox.resolve`、`op`、路由、omp 子进程或审批；单席评审即可，无需 owner 白盒。
+- 依赖：边表「26.1 只 ← 0.1」，0.1 即 #1049（PR #1285）；不等实测 1.1 / 1.2 / 1.3，与 #1052 的裁决无关；代码上不依赖同批任何一刀（#1053、#1054、#1055、#1057、#1059、#1061、#1063、#1066、#1068、#1071、#1076、#1077、#1104），可排在批内任意位置。下游是 26.2（#1112）、27.1 的 (a)(b)(c) 与 27.2。
+- 引用核对无漂移：夹具目录在 `origin/master` 恰为 `readme.md`（369 B）、`notes.csv`（42 B）、`logo.png`（1277 B）；`smoke/files.hurl:38-43` 对 `tree` 只有三条 `exists` 断言，无计数、无顺序；`web/e2e/ui-walk.spec.ts:326-330` 的 `expectRootFileButtons` 只按名取三个按钮，`:246` 的 `toHaveCount(0)` 只针对 `walk-out`。新增文件不会让既有断言变红。
+- 夹具经既有 `cp -R smoke/fixtures/sandbox/u1/. "$SANDBOX_ROOT/u1/"` 进 CI（`.github/scripts/ci-compiled-server.sh:16`、`ci-uid-isolation.sh:95`，后者 `:97` 的 `find -type d -exec chmod 2770` 自动覆盖新目录 `site/`）；`scripts/test-ci-harness.sh:466-469` 只 `cmp` 三个旧文件，本刀不改它。
+- `site/index.html`（纯 ASCII、LF、文末换行、两格缩进）：`<!doctype html>`、`<html lang="en">`、`<meta charset="utf-8">`、`<title>smoke-site</title>`、`<link rel="stylesheet" href="./style.css">`、`<h1>smoke-site</h1>`。不放 `<script>`、内联 `style`、外链地址、favicon 链接：27.1(b) 的 oracle 是「只有预览来源的非 `baseURL` 请求、零 console 错误」。
+- `site/style.css` 只有一条规则 `h1 { color: rgb(0, 128, 0); }`；不在 `index.html` 里重复颜色，否则 27.2「删掉 `style.css` 必红」失效。
+- `sample.py` 两行、四格缩进、文末换行、模式 100644、无 shebang：`def greet(name):` 与 `    return f"hello, {name}"`。首行必须含会被 `highlight.js` 着色的记号（`def` 关键字），因为 27.1(a) 断言首行至少一个高亮元素；首行不要写空行或纯标识符。
+- `clip.wav` 定为 844 字节：Python 3 标准库 `wave` + `struct`，单声道、16 位、8000 Hz、400 帧，第 `i` 帧取 `8000 if (i // 9) % 2 == 0 else -8000`（纯整数方波，可逐字节复现）。我在 scratchpad 实测：44 字节文件头、`data` 块 800 字节、0–3 字节为 `RIFF`，`file` 输出 `RIFF (little-endian) data, WAVE audio, Microsoft PCM, 16 bit, mono 8000 Hz`，sha256 前缀 `6aef1c67`。
+- README 须改的现有句子（否则文档为假）：`:7`「恰好三个文件」改为七个（根下五个加 `site/` 下两个）；`:12` 标题「三个夹具文件」改为「夹具文件」并加四行（用途与内容要点）；`:40`「必须恰好列出五个文件」改为九个并列全；新增一节「`clip.wav` 的生成方式」。
+- README 的写法决定（记入偏离记录）：生成方式仿 `logo.png` 一节用文字写参数与逐帧规则，加一句 `file` 核对输出，不贴可运行的代码块（验收写「仓库里没有生成脚本」）；「消费方」一节本刀不加行，因为新文件此刻没有消费方，由 26.2、27.1 各自补；「替换夹具时要同步检查」加一条：标题 `smoke-site`、相对地址 `./style.css`、颜色 `rgb(0, 128, 0)`、`clip.wav` 不超过 1 KiB 由 files-harness 条文钉死。
+- 守卫都不会触发：四个路径未被 `.gitignore` 命中（`git check-ignore` 无命中）；biome、ruff、jscpd、knip、semgrep 都不扫 `smoke/`；`size-guard` 对暂存的 `sample.py` 只查 800 行；`naming-guard` 无禁用后缀；`clip.wav` 是二进制 diff，gitleaks 不看内容。`.gitattributes` 不用改（Linux CI 不换行尾，`logo.png` 已有先例）。
+- 无清单行：本刀没有产品代码与用户可见行为变化，`docs/acceptance/functional-checklist.md` 不动（该文件现无 `smoke-fixture` 或 `readme.md` 字样）；FL 行随 27.1 与组 17–22。
+- 验证证据（写进 PR）：用含新夹具的沙箱起服务，连跑两次 `make smoke` 全绿，并跑 `make ui-walk`（目录树多出 `site`、`sample.py`、`clip.wav` 三行，既有步骤应不变）；另贴 `git ls-files smoke/fixtures/sandbox`（九行）、`wc -c clip.wav`（844）、`file clip.wav` 的输出。
+- PR 边界之外允许的唯一改动：`openspec/changes/s1f-files-page/tasks.md` 勾选 26.1 并留注记指针（issue 正文要求）；不改 `smoke/*.hurl`、`.github/**`、`scripts/**`、`web/e2e/**`。
+- 变异：删掉 `site/style.css` → 本刀不可观测；27.2 在标题颜色断言处判红，26.2 的 `GET {{base}}site/style.css` 200 判红。
+- 变异：`index.html` 的 `href` 写成绝对地址或 `style.css` 改名 → 本刀不可观测；27.1(b) 的 `rgb(0, 128, 0)` 判红。
+- 变异：`<h1>` 文本不是 `smoke-site` → 本刀不可观测；27.1(b) 的标题断言与源码视图断言判红。
+- 变异：`sample.py` 首行改为空行 → 本刀不可观测；27.1(a) 的首行高亮元素断言判红。
+- 变异：`clip.wav` 截成不足 4 字节或换成非 RIFF 内容 → 本刀不可观测；26.2 的 `Range: bytes=0-3` 206 与 4 字节正文判红（仅当 26.2 比对字节；规格只要求长度，见下）。
+- 变异：`clip.wav` 超过 1 KiB → 任何切片都不可观测（条文禁止长度字面断言）；只靠本刀 PR 里的 `wc -c` 与 README 的同步检查项。
+- 变异：夹具文件漏提交（只在本机沙箱里）→ 本刀 CI 不红（既有 hurl 不取新文件）；PR 里的 `git ls-files` 九行是唯一证据，26.2 的 CI 才会红。
+- 变异：回归方向（本刀可观测）：误改 `readme.md`、`notes.csv`、`logo.png` 任一字节 → `ui-walk.spec.ts:250-282` 的标题、五行、256×256 断言判红；`files.hurl:89-103` 因 `file,` 自引用不会红。
