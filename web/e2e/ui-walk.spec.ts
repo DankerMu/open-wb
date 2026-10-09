@@ -251,7 +251,7 @@ async function walkFiles(page: Page, project: WalkProject): Promise<void> {
   await expect(
     preview.getByRole("heading", { level: 1, name: SMOKE_FIXTURE, exact: true }),
   ).toBeVisible();
-  // 旧 markdown 面的列表符号由 legacy.css 从 preflight 手里还原（随文件页迁移删除）。
+  // 列表符号由预览 markdown 容器上的 Tailwind 类从 preflight 手里还原。
   expect(
     await preview
       .getByRole("list")
@@ -263,7 +263,7 @@ async function walkFiles(page: Page, project: WalkProject): Promise<void> {
   const sourceRow = preview.getByRole("row").first();
   await expect(sourceRow.getByRole("cell").nth(0)).toHaveText("1");
   await expect(sourceRow.getByRole("cell").nth(1)).toHaveText(`# ${SMOKE_FIXTURE}`);
-  await expectScrollableX(preview.locator(".files-code"));
+  await expectScrollableX(preview.locator('[data-slot="preview-code"]'));
 
   await tree.getByRole("button", { name: "notes.csv", exact: true }).click();
   await expect(preview.getByRole("columnheader", { name: "name", exact: true })).toBeVisible();
@@ -272,7 +272,7 @@ async function walkFiles(page: Page, project: WalkProject): Promise<void> {
   await expect(preview.getByRole("row", { name: "alpha 1" })).toBeVisible();
   await expect(preview.getByRole("row", { name: "beta 2" })).toBeVisible();
   await expect(preview.getByText("共 4 行 · 大文件仅预览前若干行", { exact: true })).toBeVisible();
-  await expectScrollableX(preview.locator(".files-table"));
+  await expectScrollableX(preview.locator('[data-slot="preview-table"]'));
 
   await tree.getByRole("button", { name: "logo.png", exact: true }).click();
   const logo = preview.getByRole("img", { name: "logo.png", exact: true });

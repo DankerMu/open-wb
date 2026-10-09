@@ -156,7 +156,7 @@ describe("PreviewPane metadata", () => {
 
     expect(screen.getByText("docs/notes.txt")).toBeTruthy();
     expect(screen.getByText(`42 B · ${FILE_MTIME_TEXT}`)).toBeTruthy();
-    const meta = document.querySelector(".files-preview-meta")?.textContent ?? "";
+    const meta = document.querySelector('[data-slot="preview-meta"]')?.textContent ?? "";
     expect(meta).toMatch(/^\S+ \S+ · \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
     expect(meta).not.toMatch(/T\d{2}:|Z$/);
   });
@@ -192,15 +192,16 @@ describe("PreviewPane Markdown", () => {
     expect(screen.getByRole("button", { name: "查看源码" })).toBeTruthy();
   });
 
-  it("styles the 查看源码/渲染视图 toggle as a secondary ui-btn in both modes", () => {
+  it("renders the 查看源码/渲染视图 toggle as a type=button without the legacy button class in both modes", () => {
     render(textPreview("readme.md", "# 样式"));
 
     const toggle = screen.getByRole("button", { name: "查看源码" });
-    expect(toggle.className).toBe("ui-btn ui-btn--secondary ui-btn--md");
+    expect(toggle.getAttribute("type")).toBe("button");
+    expect(toggle.className).not.toMatch(/\bui-btn/);
     fireEvent.click(toggle);
-    expect(screen.getByRole("button", { name: "渲染视图" }).className).toBe(
-      "ui-btn ui-btn--secondary ui-btn--md",
-    );
+    const back = screen.getByRole("button", { name: "渲染视图" });
+    expect(back.getAttribute("type")).toBe("button");
+    expect(back.className).not.toMatch(/\bui-btn/);
   });
 
   it("replaces same-path document content without resetting the chosen mode", () => {
@@ -493,7 +494,7 @@ describe("PreviewPane unsupported error and truncation", () => {
     );
 
     expect(screen.getByText("该类型不支持预览")).toBeTruthy();
-    expect(document.querySelector(".ui-empty-state-desc")?.textContent).toBe(
+    expect(document.querySelector('[data-slot="empty-state-desc"]')?.textContent).toBe(
       "归档.zip · 91 B\u3000二进制或未识别格式",
     );
     expect(screen.getByText(`91 B · ${FILE_MTIME_TEXT}`)).toBeTruthy();
@@ -512,7 +513,7 @@ describe("PreviewPane unsupported error and truncation", () => {
     );
 
     expect(screen.getByText("该类型不支持预览")).toBeTruthy();
-    expect(document.querySelector(".ui-empty-state-desc")?.textContent).toBe(
+    expect(document.querySelector('[data-slot="empty-state-desc"]')?.textContent).toBe(
       `${name} · 91 B\u3000二进制或未识别格式`,
     );
     expect(document.querySelector("img")).toBeNull();

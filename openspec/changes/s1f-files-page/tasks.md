@@ -96,7 +96,7 @@ Minimal mergeable slice: 三项各自独立，可分别记录、分别成 PR（�
 
 ## 2. files-web — 首刀 a：预览面板与对话框换底座
 
-- [ ] 2.1 `web/src/features/files/preview.tsx`：改用 `components/ui` 的 `button` 与 Tailwind 类重写 `PreviewPane`、`CsvTable`、`CodeView`，行为与今天完全相同（十二个扩展名、不支持态、截断提示、Markdown 模式切换，文案逐字不变）。
+- [x] 2.1 `web/src/features/files/preview.tsx`：改用 `components/ui` 的 `button` 与 Tailwind 类重写 `PreviewPane`、`CsvTable`、`CodeView`，行为与今天完全相同（十二个扩展名、不支持态、截断提示、Markdown 模式切换，文案逐字不变）。
   从 `web/src/ui` 只留 `Icon`：冻结区的 `Button`、`EmptyState` 不再导入（不支持态的标题与副行自己用 Tailwind 渲染），不再使用 `files-*`、`ui-alert`、`ui-muted` 类名。把该文件单独登记进 `MIGRATED_AREAS`（目录整体在 3.4 登记）。
   稳定定位（测试与走查按这些名字取元素；名字在此定死，组 17 把预览搬进 `previewers/` 时原样带走）：预览头 `data-slot="preview-header"`，其中路径 `preview-path`、元数据 `preview-meta`；源码、表格、Markdown 渲染三个滚动容器分别是 `preview-code`、`preview-table`、`preview-markdown`，都带 Tailwind 的 `overflow-auto`
   （`preview-markdown` 同时保留既有的 `data-markdown-body` 属性）；不支持态的块 `empty-state`，其副行 `empty-state-desc`。

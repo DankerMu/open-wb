@@ -69,7 +69,9 @@ describe("files empty states", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "归档.zip" }));
     const unsupported = await screen.findByText("该类型不支持预览", { exact: true });
-    const description = emptyStateOf(unsupported)?.querySelector(".ui-empty-state-desc");
+    const block = unsupported.closest('[data-slot="empty-state"]');
+    expect(block).not.toBeNull();
+    const description = block?.querySelector('[data-slot="empty-state-desc"]');
     expect(description?.textContent).toBe("归档.zip · 86.3 MB\u3000二进制或未识别格式");
     expect(fetchMock.mock.calls.filter(([path]) => path.includes("/file?"))).toEqual([]);
   });
