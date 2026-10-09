@@ -66,6 +66,8 @@ type TurnActionDeps = {
   replaceAttachments: ReplaceAttachments;
   releaseMutationIfOwned: (controller: AbortController) => void;
   requestedSessionRef: RefObject<string | null>;
+  /** 把某个会话的附件标签换成一组已经在 `uploads` 里的文件（已上传状态，不发请求）：分叉回填用。 */
+  restoreAttachments: Attachments["restore"];
   selectSession: (sessionId: string | null) => void;
   setCreating: Dispatch<SetStateAction<boolean>>;
   setDraft: Dispatch<SetStateAction<string>>;
@@ -108,6 +110,7 @@ export function useTurnActions({
   releaseMutationIfOwned,
   replaceAttachments,
   requestedSessionRef,
+  restoreAttachments,
   selectSession,
   setCreating,
   setDraft,
@@ -517,6 +520,7 @@ export function useTurnActions({
           release();
           if (owned()) {
             setDraft(fork.draft);
+            restoreAttachments(fork.session.id, fork.attachments);
             refreshList(ownedClient);
             selectSession(fork.session.id);
           }
@@ -535,6 +539,7 @@ export function useTurnActions({
       ownsSessionWrite,
       refreshList,
       requestedSessionRef,
+      restoreAttachments,
       selectSession,
       setDraft,
       setForkOwner,

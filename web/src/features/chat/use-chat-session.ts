@@ -428,6 +428,7 @@ export function useChatSession() {
     flushAttachments: attachments.flush,
     replaceAttachments: attachments.replace,
     requestedSessionRef,
+    restoreAttachments: attachments.restore,
     selectSession,
     setCreating,
     setDraft,
