@@ -254,3 +254,4 @@
 - 变异：去掉 `exposeHeadRoute: false` → HEAD 用例判红（多出一条 `file.download`）。
 - 变异：去掉 `onError` 清头 → 「打开失败」用例的 `content-type` 为 JSON、无 `content-disposition` 断言判红。
 - 变异：预期不可观察：把流的 `end` 截界去掉（改成无界 `createReadStream`）。测试里文件不会在 lstat 后增长，属防御性实现，PR 表中标注「不可观察」。
+  - 实施后更正：上面「流不按 `size` 截界 → 预期不可观察」已不成立——交付的测试加了「审计后文件增长」用例，该变异判红。规格点名的外账号 `lisi` 是种子里唯一的管理员（`u3`），评审后测试的两处外账号改为 `lisi`（另保留普通成员一行）；「去掉 `ensureOwnedRoot`」由「属于自己但根目录缺失的 id」夹具判红（他人 id 的 404 是 facade 的双重保证）。`rest.ts` 在本刀之前是 418 行。lstat → 打开窗口的完整陈述（中间目录分量、FIFO）见 #1286。
