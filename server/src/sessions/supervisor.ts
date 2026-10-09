@@ -14,6 +14,7 @@ import type { SpawnImpl } from "./omp/process.js";
 import { type PromptDispatchReceipt, type SessionClock, SessionRuntime } from "./omp/runtime.js";
 import { SpawnGate, type SpawnLog } from "./omp/spawn-gate.js";
 import {
+  emptySlot,
   type Generation,
   generationTokens,
   type PoolEntry,
@@ -442,19 +443,7 @@ export class SessionSupervisor {
   ): Promise<T> {
     // First, before any claim or admission: an unusable root spawns nothing and holds nothing.
     const cwd = this.#cwdOf(resume.ownerId, resume.workspaceId);
-    const slot: Slot = {
-      sessionId,
-      runtime: undefined as unknown as SessionRuntime,
-      epoch: 0,
-      generation: undefined,
-      claimedAssistantId: undefined,
-      pump: undefined,
-      retiring: undefined,
-      acquisitionFault: undefined,
-      infraFaulted: false,
-      entry: undefined,
-      workspaceRoot: resume.workspaceId === null ? null : cwd,
-    };
+    const slot = emptySlot(sessionId, resume.workspaceId === null ? null : cwd);
     const unclaim = () => {
       if (claim !== undefined) {
         releaseClaim(this.#claims, slot, claim);

@@ -33,6 +33,23 @@ export interface Slot {
   workspaceRoot: string | null;
 }
 
+/** A slot before its admission: no runtime, no pool entry, no generation, no turn. */
+export function emptySlot(sessionId: string, workspaceRoot: string | null): Slot {
+  return {
+    sessionId,
+    runtime: undefined as unknown as SessionRuntime,
+    epoch: 0,
+    generation: undefined,
+    claimedAssistantId: undefined,
+    pump: undefined,
+    retiring: undefined,
+    acquisitionFault: undefined,
+    infraFaulted: false,
+    entry: undefined,
+    workspaceRoot,
+  };
+}
+
 interface ClaimSlot {
   claimedAssistantId: number | undefined;
   pump: Promise<void> | undefined;
