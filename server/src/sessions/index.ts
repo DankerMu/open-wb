@@ -106,6 +106,7 @@ export function registerSessions(
     store,
     tokens: options.tokens,
     runtime: options.runtime,
+    composer: options.composer,
     workspaceRootOf: options.workspaceRootOf,
     onError: options.onError,
     skills: sessionSkillsResolver(

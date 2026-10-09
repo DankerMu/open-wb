@@ -16,7 +16,9 @@
  * and an approval cap; the source's columns come from `POST /api/sessions` with the three keys or,
  * for values REST refuses, from a direct `UPDATE`. Oracles: the 201 view and list entry, the three
  * columns with `typeof`, the account's last-choice row and the `session.permission` row count.
- * The temp process's argv and the frames before the fork's first prompt are task group 9.
+ * Issue #1009 (task 9.1): the temporary process is started with the source's EFFECTIVE mode and
+ * model (turn-control「分叉继承三项输入框设置」, the argv part) — read from its recorded spawn argv. The
+ * frames before the fork's first prompt are task 9.2.
  */
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,7 +26,7 @@ import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { LightMyRequestResponse } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
-import { auditCount, REAL, settle } from "./session-approval-helpers.js";
+import { auditCount, flagValue, REAL, settle } from "./session-approval-helpers.js";
 import { postSessionAction } from "./session-bodyless-rest-helpers.js";
 import { forkWorlds, openForkWorld, type Seeded, seedTwoTurns } from "./session-fork-helpers.js";
 import { SESSION_VIEW_KEYS, THREE_MODEL_CATALOG } from "./session-meta-fixtures.js";
@@ -387,6 +389,12 @@ function cwdArg(args: readonly string[]): string | undefined {
   return at === -1 ? undefined : args[at + 1];
 }
 
+/** `--approval-mode` and `--model` of the fork's temporary process (the world's only spawn). */
+function tempArgv(world: RegenWorld): Array<string | undefined> {
+  const { args } = requiredCall(world.rt.calls, 0);
+  return [flagValue(args, "--approval-mode"), flagValue(args, "--model")];
+}
+
 /** One REST probe turn on `session` to done; returns the child's reported `cwd=` (last field). */
 async function probeTurn(world: RegenWorld, session: string): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), "open-wb-527-probe-"));
@@ -596,6 +604,7 @@ describe("fork inherits the three composer settings (#1007)", () => {
 
       expect(composerOf(source)).toEqual(chosen);
       expect(composerOf(session)).toEqual(chosen);
+      expect(tempArgv(world)).toEqual(["yolo", "workbuddy/m3"]);
       expect(await listedOf(world, session.id)).toEqual(session);
       expect(composerColumns(db, source.id)).toEqual(storedAs(chosen));
       expect(composerColumns(db, session.id)).toEqual(composerColumns(db, source.id));
@@ -630,6 +639,8 @@ describe("fork inherits the three composer settings (#1007)", () => {
 
       expect(composerColumns(db, session.id)).toEqual(storedAs(raw));
       expect(composerColumns(db, source.id)).toEqual(storedAs(raw));
+      // The argv takes the clamped mode and the whitelisted model, never the raw columns.
+      expect(tempArgv(world)).toEqual(["write", "workbuddy/m1"]);
       expect(composerOf(session)).toEqual({
         approvalMode: "write",
         modelId: "m1",

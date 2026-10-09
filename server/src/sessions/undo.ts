@@ -26,6 +26,7 @@ import type { FastifyInstance } from "fastify";
 import { emit } from "../core/audit/index.js";
 import { HttpError } from "../core/errors/index.js";
 import { type Branched, BranchTemps, type StoredUser } from "./branch-temp.js";
+import { effectiveOf, type RawComposer } from "./composer-align.js";
 import type { SessionListNotifier } from "./list-events.js";
 import {
   currentPrincipal,
@@ -100,6 +101,8 @@ interface UndoPlan {
   expectedLastAssistantId: number | null;
   file: string;
   workspaceId: string | null;
+  /** The session's raw composer columns, read with `file`. */
+  composer: RawComposer;
 }
 
 /**
@@ -170,6 +173,7 @@ export class Undos {
       expectedLastAssistantId: assistant?.id ?? null,
       file: resume.ompSessionFile,
       workspaceId: resume.workspaceId,
+      composer: resume.composer,
     };
   }
 
@@ -178,6 +182,7 @@ export class Undos {
     const { sessionId, ownerId, messageId } = request;
     // Before admission: an unusable root fails the undo without taking (or evicting) capacity.
     const cwd = this.#ports.cwdOf(ownerId, plan.workspaceId);
+    const { approvalMode, modelId } = effectiveOf(plan.composer, this.#ports.composer);
     // Claim key: the session. Token key: a fresh one, never the session's id — the session's own
     // process revoked its token as it retired, and the cleanup below revokes this key.
     const branched = await this.#temps.branchAt({
@@ -185,6 +190,8 @@ export class Undos {
       tokenKey: randomBytes(16).toString("hex"),
       ownerId,
       cwd,
+      approvalMode,
+      modelId,
       resumePath: plan.file,
       messageId,
       users: plan.users,

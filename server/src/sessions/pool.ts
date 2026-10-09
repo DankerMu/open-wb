@@ -3,6 +3,7 @@
  * omp process pool: live-process registry, serialized admission, least-recently-active eviction.
  */
 import { HttpError } from "../core/errors/index.js";
+import type { ApprovalMode } from "../model-catalog.js";
 import type { SessionRuntime, SessionRuntimeOpts } from "./omp/runtime.js";
 import type { SessionStore } from "./store.js";
 import { RingBuffer } from "./stream/ring-buffer.js";
@@ -31,10 +32,19 @@ export interface Slot {
   entry: PoolEntry | undefined;
   /** The workspace root a bound session's process runs in; null for an unbound session. */
   workspaceRoot: string | null;
+  /**
+   * The `--approval-mode` this slot's process was started with: the runtime's is fixed at
+   * construction, so every generation of the slot runs under it. Never rewritten.
+   */
+  approvalMode: ApprovalMode;
 }
 
 /** A slot before its admission: no runtime, no pool entry, no generation, no turn. */
-export function emptySlot(sessionId: string, workspaceRoot: string | null): Slot {
+export function emptySlot(
+  sessionId: string,
+  workspaceRoot: string | null,
+  approvalMode: ApprovalMode,
+): Slot {
   return {
     sessionId,
     runtime: undefined as unknown as SessionRuntime,
@@ -47,6 +57,7 @@ export function emptySlot(sessionId: string, workspaceRoot: string | null): Slot
     infraFaulted: false,
     entry: undefined,
     workspaceRoot,
+    approvalMode,
   };
 }
 
