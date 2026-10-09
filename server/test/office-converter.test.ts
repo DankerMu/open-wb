@@ -34,8 +34,12 @@ const PDF = "%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 
 const HEX_32 = /^[0-9a-f]{32}$/u;
 const HEX_32_PDF = /^[0-9a-f]{32}\.pdf$/u;
 /** 夹具睡 30 秒；这里的时限远小于它，所以「已不存在」只能是被杀掉的结果。 */
-const GONE_WITHIN_MS = 5_000;
+const GONE_WITHIN_MS = 4_000;
+const RECORD_WITHIN_MS = 6_000;
+/** 转换器自己的超时：不测超时的用例里它不该先到。 */
 const LONG_TIMEOUT_MS = 20_000;
+/** 等记录、等进程消失的两组用例的单测时限：大于上面两个等待之和，先报错的是带说明的那个。 */
+const SLOW_TEST_MS = 15_000;
 /** 低熵占位值：只用来证明父环境里的键不进子进程。 */
 const PARENT_ONLY = { MODEL_UPSTREAM_API_KEY: "placeholder", DB_PATH: "/placeholder/app.db" };
 
@@ -62,7 +66,7 @@ interface Stage {
   launches: Launch[];
   spawn(command: string, args: readonly string[], options: SpawnOptions): ChildProcess;
   /** 在「工作空间」里写一个输入文件，返回它的绝对路径。 */
-  input(name: string): string;
+  input(name: string, content?: string): string;
 }
 
 type Converter = ReturnType<typeof createOfficeConverter>;
@@ -162,9 +166,9 @@ function stage(layout: { work: boolean } = { work: true }): Stage {
       everyCommand.push(command);
       return child;
     },
-    input(name) {
+    input(name, content = "not a real office document") {
       const path = join(ws, name);
-      writeFileSync(path, "not a real office document");
+      writeFileSync(path, content);
       return path;
     },
   };
@@ -267,7 +271,7 @@ async function waitForRecord(on: Stage, needChild = false): Promise<FakeRecord> 
       const record = readRecord(jobOf(launch));
       return needChild && record.childPid === undefined ? undefined : record;
     },
-    LONG_TIMEOUT_MS,
+    RECORD_WITHIN_MS,
   );
 }
 
@@ -280,17 +284,17 @@ function isGone(pid: number): boolean {
   }
 }
 
+/** 全部 pid 共用一个时限。 */
 async function expectGone(pids: Array<number | undefined>): Promise<void> {
-  for (const pid of pids) {
-    if (pid === undefined) {
-      throw new Error("a pid that should have been recorded is missing");
-    }
-    await waitFor(
-      `process ${pid} to disappear`,
-      () => (isGone(pid) ? true : undefined),
-      GONE_WITHIN_MS,
-    );
+  const known = pids.filter((pid) => pid !== undefined);
+  if (known.length !== pids.length) {
+    throw new Error("a pid that should have been recorded is missing");
   }
+  await waitFor(
+    `processes ${known.join(", ")} to disappear`,
+    () => (known.every(isGone) ? true : undefined),
+    GONE_WITHIN_MS,
+  );
 }
 
 /** 转换器经 `process.kill` 发出的信号（不含探测存活用的信号 0）。 */
@@ -414,6 +418,17 @@ describe("转换器调用契约：argv、环境与成功判定", () => {
     expect(readFileSync(second, "utf8")).toBe(PDF);
   });
 
+  it("输入文件名有多个点时只去掉最后一个扩展名", async () => {
+    const on = stage();
+    // 假 soffice 把 PDF 写到输入内容给出的名字上；转换器找的不是这个名字就拿不到输出。
+    const input = on.input("report.v2@named.tar.docx", "report.v2@named.tar.pdf");
+
+    const result = await converterFor(on).convert(input);
+
+    expect(on.launches[0]?.child.exitCode).toBe(0);
+    expect(readFileSync(result, "utf8")).toBe(PDF);
+  });
+
   it.skipIf(process.geteuid?.() === 0)(
     "作业目录里有删不掉的残留时转换仍然成功，结果可读",
     async () => {
@@ -452,8 +467,12 @@ describe("转换器调用契约：sudo 前缀", () => {
       shell: false,
       detached: false,
     });
-    // 被启动的确实是临时 bin 目录里的假 sudo。
-    expect(readRecord(job).argv[0]).toBe(join(on.bin, "sudo"));
+    // 被启动的确实是临时 bin 目录里的假 sudo，它自身的环境也只有这三个键。
+    const record = readRecord(job);
+    expect(record.argv[0]).toBe(join(on.bin, "sudo"));
+    const { __CF_USER_TEXT_ENCODING: _injected, ...sudoEnv } = record.env;
+    expect(sudoEnv).toEqual({ PATH: process.env.PATH, LANG: "C.UTF-8", HOME: job });
+    expect(JSON.stringify(record.env)).not.toContain("placeholder");
     expect(readFileSync(result, "utf8")).toBe(PDF);
   });
 
@@ -491,25 +510,43 @@ describe("转换器调用契约：sudo 前缀", () => {
 
 describe("转换器调用契约：各类失败", () => {
   it.each([
-    ["以退出码 1 结束", "a@exit1.docx"],
-    ["以 0 结束但不写输出", "a@no-output.docx"],
-    ["写出 0 字节的 PDF", "a@empty.docx"],
-    ["把输出写成指向别处的符号链接", "a@symlink.docx"],
-    ["把输出写成命名管道", "a@fifo.docx"],
+    ["以退出码 1 结束", "a@exit1.docx", 1],
+    ["写出完好的 PDF 后以退出码 2 结束", "a@exit2.docx", 2],
+    ["以 0 结束但不写输出", "a@no-output.docx", 0],
+    ["写出 0 字节的 PDF", "a@empty.docx", 0],
+    ["把输出写成指向别处的符号链接", "a@symlink.docx", 0],
+    ["把输出写成命名管道", "a@fifo.docx", 0],
   ])(
     "假 soffice %s：failed，作业目录被删，缓存里没有新增文件，错误不含路径",
-    async (_case, name) => {
+    async (_case, name, exitCode) => {
       const on = stage();
       const input = on.input(name);
 
       const error = await failureOf(converterFor(on).convert(input));
 
       expect(on.launches).toHaveLength(1);
-      expect(on.launches[0]?.child.exitCode).toBe(name === "a@exit1.docx" ? 1 : 0);
+      expect(on.launches[0]?.child.exitCode).toBe(exitCode);
       expectBareKind(error, "failed", [input, jobOf(on.launches[0]), on.cacheDir]);
       expectNothingLeft(on);
     },
   );
+
+  it("假 soffice 写出完好的 PDF 后被信号结束：failed，转换器没有发信号，缓存里没有新增文件", async () => {
+    const on = stage();
+    const kill = vi.spyOn(process, "kill");
+    const input = on.input("a@self-kill.docx");
+
+    const error = await failureOf(converterFor(on).convert(input));
+
+    expect(on.launches).toHaveLength(1);
+    const child = on.launches[0]?.child;
+    expect(child?.signalCode).toBe("SIGTERM");
+    expect(child?.exitCode).toBeNull();
+    // 信号是假进程自己发给自己的，不是转换器发的。
+    expect(signalsSent(kill)).toEqual([]);
+    expectBareKind(error, "failed", [input, jobOf(on.launches[0]), on.cacheDir]);
+    expectNothingLeft(on);
+  });
 
   it("officeBin 指向不存在的文件：failed，作业目录被删，缓存里没有新增文件", async () => {
     const on = stage();
@@ -570,7 +607,7 @@ describe("转换器调用契约：各类失败", () => {
   });
 });
 
-describe("转换器调用契约：超时与中止（同 uid 模式）", () => {
+describe("转换器调用契约：超时与中止（同 uid 模式）", { timeout: SLOW_TEST_MS }, () => {
   it("超时：timeout，假进程及其子进程都已不存在，作业目录被删", async () => {
     const on = stage();
     const kill = vi.spyOn(process, "kill");
@@ -656,7 +693,7 @@ describe("转换器调用契约：超时与中止（同 uid 模式）", () => {
   });
 });
 
-describe("转换器调用契约：OMP_USER 模式下终止的是 sudo", () => {
+describe("转换器调用契约：OMP_USER 模式下终止的是 sudo", { timeout: SLOW_TEST_MS }, () => {
   it("超时：timeout，假 sudo 被 SIGKILL 结束且恰被启动一次，没有别的信号与进程", async () => {
     const on = stage();
     useFakeSudo(on);
@@ -693,6 +730,35 @@ describe("转换器调用契约：OMP_USER 模式下终止的是 sudo", () => {
     expect(on.launches.map(({ command }) => command)).toEqual(["sudo"]);
     expect(signalsSent(kill)).toEqual([]);
     await expectGone([record.pid]);
+  });
+});
+
+describe("转换器调用契约：只接受绝对路径", () => {
+  it.each([["-env:UserInstallation=file:///x.docx"], ["--accept=x.docx"], ["ws/a.docx"]])(
+    "absInput 为 %s：failed，不启动进程，不建作业目录",
+    async (input) => {
+      const on = stage();
+
+      const error = await failureOf(converterFor(on).convert(input));
+
+      expectBareKind(error, "failed", [input, on.cacheDir]);
+      expect(on.launches).toEqual([]);
+      expect(readdirSync(on.work)).toEqual([]);
+    },
+  );
+
+  it.each([
+    ["cacheDir", { officeBin: FAKE, cacheDir: "var/preview-cache" }],
+    ["cacheDir（未配置 officeBin 时同样）", { cacheDir: "var/preview-cache" }],
+    ["officeBin（裸名）", { officeBin: "soffice", cacheDir: tmpdir() }],
+    ["officeBin（./ 开头）", { officeBin: "./soffice", cacheDir: tmpdir() }],
+  ])("%s 不是绝对路径：构造即抛错，错误不含该值，不启动进程", (_which, paths) => {
+    const on = stage();
+    const construct = (): Converter =>
+      createOfficeConverter({ ...paths, timeoutMs: LONG_TIMEOUT_MS, spawn: on.spawn });
+
+    expect(construct).toThrow(new Error("cacheDir and officeBin must be absolute paths"));
+    expect(on.launches).toEqual([]);
   });
 });
 
