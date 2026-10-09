@@ -22,6 +22,7 @@ import {
   MIGRATION_038,
   MIGRATION_039,
   MIGRATION_040,
+  MIGRATION_041,
   removeTempDirs,
   TRACKED_MIGRATION_FILENAMES,
   tempDir,
@@ -70,7 +71,8 @@ function seedPre033Database(path: string): void {
       asset.filename !== MIGRATION_037 &&
       asset.filename !== MIGRATION_038 &&
       asset.filename !== MIGRATION_039 &&
-      asset.filename !== MIGRATION_040,
+      asset.filename !== MIGRATION_040 &&
+      asset.filename !== MIGRATION_041,
   );
   const filenames = assets.map((asset) => asset.filename);
   expect(filenames).toEqual(TRACKED_MIGRATION_FILENAMES.slice(0, 6));
