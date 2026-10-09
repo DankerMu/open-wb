@@ -368,3 +368,20 @@
 - 验证与证据：纯文档，无变异表，PR 写明「不适用」。验证路径是 `make check`（含 `functional-checklist.test.ts`）。我没有跑它，只对 21 个新串跑了正则副本，实施者须在拼好的文件上跑一遍。逐行判定全部来自读代码，没有起真栈——CH-68–72 的账号上次选择链、CH-97 的兜底与 CH-60 的 20 MiB 推断，建议实施者在真实浏览器里各走一遍再提交。
 - 实施更正（#1046）：21 处替换全部应用，实机按序走查（一个浏览器页面从头用到尾、跨四次服务重启）没有推翻任何一条。与注记不同的只有 CH-97：(b) 的「可能列在…说明里」改成确定句——实测连文件的第一次撤回之后一定出现「已撤回，以下文件未还原」并列出超过 20 MiB 的文件，第二次「只撤回对话」没有；期望列补「第三个文件也从 `uploads` 目录里消失」，并加一句「这时先不要离开对话页去核对」——实测撤回后去文件页再回来，还原出的草稿与标签都丢了。CH-60 的 20 MiB 推断已实机证实（22020101 字节的上传在撤回后列为未还原），保留在已改的行里。
 - 走查用的替身（#1046）：仓库的受控上游在整段历史里出现过工具消息后就不再发工具调用，同一会话第二轮是空转，CH-69、CH-70 的后半句验不了；走查用的是它在仓库外的一个变体（按最后一条用户消息之后判断，并能指定命令与多文件写入），没有入库。CH-97 走的是兜底分支（模型不删、到服务器上删），「模型照做」的主路径没有走；CH-84「助手的回答里有那个文件的内容」在替身下只能在工具输出里看到。
+
+## 0.2（#1047）
+
+- 开工门槛：#1036、#1037、#1040、#1045、#1046 全部关闭，`tasks.md` 除 0.2 外无 `- [ ]`；任一未满足就停下报告，不归档。
+- 对底在合入上述各项后的 master 上重做，机械判据两条：`git log b64eddb.. -- openspec/specs` 为空；`git diff 1f3ab62 HEAD -- openspec/changes/s1g-composer-capabilities/specs` 只含 `session-composer-settings`、`session-permission-tier`、`workspaces`、`message-attachments`（本刀的粘贴修订）四个文件，且都在 ADDED 条文内。两条都成立时 0.1 的结论原样成立；任一不成立就对受影响条文重做句子级 diff。
+- delta 修订一（`specs/message-attachments/spec.md` 第 125 行「输入框附件标签」入口段）：把「在文本框里粘贴且剪贴板带文件（含截图）——只在剪贴板带文件时拦截粘贴，粘贴纯文字照常进入草稿。」改为「在文本框里粘贴且剪贴板带文件而不带文字（含截图）——只在剪贴板带文件且类型里没有 `text/plain` 时拦截粘贴；粘贴纯文字照常进入草稿；剪贴板同时带文字与文件时（表格、文档里复制的文字会附带一张渲染图）文字照常进入草稿、文件不收。」
+- delta 修订二（同文件场景「拖入与粘贴」第 146–147 行）：WHEN 末尾加「；再粘贴一段从表格里复制的内容（剪贴板 `types` 含 `text/plain`，`files` 含一张渲染图 `image.png`）」；THEN 末尾加「；文字附带渲染图的一例没有被拦截，文字进入草稿，没有新标签，没有上传请求」。对应既有用例 `web/test/chat-attachments.test.tsx:557`（`文字附带一张渲染图`），不新增测试。
+- 该 capability 主规格尚无文件，全是 ADDED；这两处修订不触及 D16 的任何一张表。`design.md` 不改。
+- 其余三处核对过、不改 delta：全部自动确认框「点击遮罩不关闭」、欢迎态只改强度只带 `reasoningEffort`、撤回的存在性在还原之后判（D19）。#1269 在归档时仍开着，写进核对记录的「已知遗留」；修它时另开 change 改主规格的「每个 client 取一次」。
+- 校验（orchestrator 手工跑，CI 目前不校验 change，见 #1126）：修订后两个 CLI 各一次 `openspec validate s1g-composer-capabilities --strict --no-interactive`，0 个 ERROR；归档后再跑 `openspec validate --specs --strict`。
+- 0.2 下写一行核对记录（仿 0.1）：「核对记录（#1047，<日期>）：主规格自 C 归档（#980）起未被任何 change 改过；本 change 的 delta 自 #983 起只改过 ADDED 条文（上传路由的超长文件名与内存采样、迁移 040 回滚场景、全部自动确认框的遮罩、粘贴时文字优先），十九条重叠 MODIFIED 一字未动；表头全部命中，场景标题集合都是主规格的超集；D16 两张表无需修改；两个 CLI 的 `validate --strict` 都通过。已知遗留：#1269。两张表已交给 D：<#1049 评论链接>。」
+- 交给 D：在 #1049 发一条评论（#1048 的 Epic 正文可加一行指向它），内容为归档提交上 `design.md` 的「本 change 的增量恰为」表（第 334–350 行）与「与 C 重叠的 MODIFIED」表（第 356–380 行）全文，外加四句：两表自 #983 起未变；S1g 归档后的绝对值为二十三项配置、十五条归属身份、十六码、`op ∈ {read, list, mkdir, write}`、迁移回执到 042；D 与本 change 同名的五条（如上）以归档后的主规格为底；归档提交的 hash。不改 `openspec/changes/s1f-files-page/` 下任何文件。
+- 归档（同一个 PR，照 `b64eddb` 的做法）：`openspec archive s1g-composer-capabilities`；给四个新 capability（`message-attachments`、`model-selection`、`session-composer-settings`、`session-permission-tier`）补写 `## Purpose`，Purpose 有变的既有 capability 一并更新；`IMPLEMENTATION_PLAN.md` 的 S1g 状态行跟改。后者不在 issue 的 PR Boundary 内，写进偏离记录。
+- 归档后自查：`git diff --stat` 里 `openspec/specs/**` 只有本 change 的 19 个 capability；`openspec/changes/` 下只剩 `s1f-files-page` 与 `archive/`；被 MODIFIED 的每条在主规格里的场景数等于 delta 的场景数（如「会话 REST」12、「API 客户端扩展」17、「输入框与能力栏」13）。
+- 回填：Epic #982 的「对底记录」写入核对记录同文；勾 #982 清单里的 #1047；PR 描述贴 (a)–(d) 的结果与 #1049 的评论链接。
+- 不做：产品代码与测试（`server/`、`web/`、`smoke/`、`docs/acceptance/`）；手改 `openspec/specs/**`（Purpose 除外）；D 的 delta 或 D25 表；把任何 CH 行从 `待签` 改掉；为 #1269 改规格。
+- 变异证据不适用（无行为代码），PR 描述写明；回归门禁 `make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 照 issue 跑。
