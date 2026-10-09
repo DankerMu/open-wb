@@ -105,6 +105,34 @@ describe("Session metadata client: createSession", () => {
     });
   });
 
+  it("sends the three composer keys as exact JSON and returns them unchanged", async () => {
+    const composerSession = {
+      ...createdSession,
+      scene: null,
+      approvalMode: "always-ask",
+      modelId: "m3",
+      reasoningEffort: "low",
+    };
+    const fetchMock = stubFetch(jsonResponse(composerSession, 201));
+
+    await expect(
+      createApiClient().createSession({
+        workspaceId: WORKSPACE_ID,
+        approvalMode: "always-ask",
+        modelId: "m3",
+        reasoningEffort: "low",
+      }),
+    ).resolves.toEqual(composerSession);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith("/api/sessions", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: `{"workspaceId":"${WORKSPACE_ID}","approvalMode":"always-ask","modelId":"m3","reasoningEffort":"low"}`,
+    });
+  });
+
   it("passes the signal and rejects with the existing cancellation failure after abort", async () => {
     const controller = new AbortController();
     const fetchMock = vi.fn(
@@ -173,6 +201,17 @@ describe("Session metadata client: patchSession", () => {
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe(`/api/sessions/${SESSION_ID}`);
     expect(fetchMock.mock.calls[0]?.[1]?.body).toBe('{"archived":true}');
+  });
+
+  it("sends an approval-mode-only patch as exactly that JSON", async () => {
+    const fetchMock = stubFetch(jsonResponse({ ...patchedSession, approvalMode: "yolo" }));
+
+    await expect(
+      createApiClient().patchSession(SESSION_ID, { approvalMode: "yolo" }),
+    ).resolves.toEqual({ ...patchedSession, approvalMode: "yolo" });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(`/api/sessions/${SESSION_ID}`);
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe('{"approvalMode":"yolo"}');
   });
 
   it("rejects an empty patch with TypeError without calling fetch", async () => {

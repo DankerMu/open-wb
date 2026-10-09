@@ -107,6 +107,13 @@ describe("Undo API response parsing", () => {
     });
   });
 
+  it("returns an undo that carries attachments unchanged", async () => {
+    const body = { ...undoBody(restoredFiles), attachments: [{ path: "uploads/a.pdf", size: 3 }] };
+    stubFetch(jsonResponse(body));
+
+    await expect(createApiClient().undoMessage(SESSION_ID, 1, "restore")).resolves.toEqual(body);
+  });
+
   it.each([
     ["missing files", { session, draft: "" }],
     ["null files", undoBody(null)],

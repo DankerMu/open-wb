@@ -290,7 +290,7 @@ Minimal mergeable slice: 12.1 一刀（纯函数与对齐，无附件时字节�
 
 ## 13. web lib — API 方法、上传传输与解析收紧
 
-- [ ] 13.1 `web/src/lib/api-sessions.ts` / `api.ts`：`createSession` 与 `patchSession` 的 input 类型加三键；`prompt(id, message, options)` 的 `options.attachments`（非空才进 body）。C 的 `undoMessage`（C 的 13.1）的响应类型带 `attachments`（解析在 5.1 已放宽、13.5 收紧）。`message` 原样进 body：空串不裁剪、不省略键、客户端不因它为空而拒绝。测试（既有 API 客户端测试文件）：chat-web「新输入与两个新方法」的前五个调用（含 `prompt(id, "", {attachments:[…]})` 的 body `{"message":"","attachments":[…]}`）、「回合控制四方法请求与响应」里 `forkSession` 的 201 三键。
+- [x] 13.1 `web/src/lib/api-sessions.ts` / `api.ts`：`createSession` 与 `patchSession` 的 input 类型加三键；`prompt(id, message, options)` 的 `options.attachments`（非空才进 body）。C 的 `undoMessage`（C 的 13.1）的响应类型带 `attachments`（解析在 5.1 已放宽、13.5 收紧）。`message` 原样进 body：空串不裁剪、不省略键、客户端不因它为空而拒绝。测试（既有 API 客户端测试文件）：chat-web「新输入与两个新方法」的前五个调用（含 `prompt(id, "", {attachments:[…]})` 的 body `{"message":"","attachments":[…]}`）、「回合控制四方法请求与响应」里 `forkSession` 的 201 三键。
   **实施注记（13.1，fixture 评审补充，#1021）**：
   - 现状漂移：issue「Current behavior」称 `undoMessage` 响应类型没有 `attachments`，在 origin/master 不成立——`ChatSessionUndo`（`session-contract.ts:134-139`）与 `ChatSessionFork`（`:108-112`）已由 #996 带上该字段；这两项零产品代码改动，只补客户端层用例，旧句子写进 PR 偏离记录。
   - 产品改动只有两处：`web/src/lib/api.ts`（769 行）的类型，和 `web/src/lib/api-sessions.ts`（284 行）第 177 行的 prompt body；`session-contract.ts` 一行不动。
