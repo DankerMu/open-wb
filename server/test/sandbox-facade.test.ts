@@ -67,6 +67,8 @@ describe("core/sandbox createSandbox", () => {
         audit,
       });
       expectCanonicalError(() => resolve(PRINCIPAL, workspaceId, "../escape", "read"), "not_found");
+      expectCanonicalError(() => resolve(PRINCIPAL, workspaceId, "", "delete"), "not_found");
+      expectCanonicalError(() => resolve(PRINCIPAL, workspaceId, "a/", "move"), "not_found");
       expect(audit.events).toEqual([]);
     }
 
@@ -176,6 +178,23 @@ describe("core/sandbox createSandbox", () => {
         reason: expect.stringMatching(/\S/),
       },
     });
+
+    for (const [relPath, op] of [
+      ["", "delete"],
+      ["a/", "move"],
+    ] as const) {
+      const emitted = audit.events.length;
+      expectCanonicalError(() => resolve(PRINCIPAL, WORKSPACE_ID, relPath, op), "sandbox_denied");
+      expect(audit.events, `${op} ${JSON.stringify(relPath)}`).toHaveLength(emitted + 1);
+      expect(audit.events[emitted]).toEqual({
+        kind: "sandbox.reject",
+        actorId: PRINCIPAL.id,
+        workspaceId: WORKSPACE_ID,
+        title: "越界访问被沙箱拦截",
+        detail: { relPath, op, reason: expect.stringMatching(/\S/) },
+      });
+    }
+    expect(audit.events).toHaveLength(6);
 
     expect(readdirSync(parent).toSorted()).toEqual(beforeParent);
     expect(readdirSync(sandbox).toSorted()).toEqual(beforeSandbox);
