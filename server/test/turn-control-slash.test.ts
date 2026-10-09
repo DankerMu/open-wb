@@ -203,12 +203,20 @@ async function expectRegenerated(
   const { assistantMessageId } = response.json<{ assistantMessageId: number }>();
   const ended = await waitForTurn(world.fixture, world.session, "done");
   expect(ended.messages.at(-1)?.id).toBe(assistantMessageId);
+  // A cold process: the two alignment commands (#1010) precede `get_branch_messages`.
   const frames = spawnedAt(world, 0).stdin.slice(2);
-  expect(types(frames)).toEqual(["get_branch_messages", "branch", "get_state", "prompt"]);
-  expect(frames[1]).toMatchObject({ type: "branch", entryId });
+  expect(types(frames)).toEqual([
+    "set_model",
+    "set_thinking_level",
+    "get_branch_messages",
+    "branch",
+    "get_state",
+    "prompt",
+  ]);
+  expect(frames[3]).toMatchObject({ type: "branch", entryId });
   // Never escaped twice: an entry that already carries the wire-side space gets no second one.
-  expect(String(frames[3]?.message)).not.toMatch(/^ {2}/);
-  expect(frames[3]?.message).toBe(wire);
+  expect(String(frames[5]?.message)).not.toMatch(/^ {2}/);
+  expect(frames[5]?.message).toBe(wire);
   expect(userTexts(world)).toEqual(texts);
 }
 

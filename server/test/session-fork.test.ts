@@ -224,8 +224,10 @@ describe("fork over real fake-omp branch children (#466)", () => {
       const file = sessionFile(db, result.session.id);
       const { assistantMessageId } = await regenerate(world, result.session.id);
       expect(resumePath(requiredCall(world.rt.calls, 1).args)).toBe(file);
+      // The fork's own cold process: its two alignment commands (#1010) come first.
       const frames = afterHandshake(spawnedAt(world, 1).stdin);
-      expect(frames[1]).toMatchObject({ type: "branch", entryId: "fake-entry-3" });
+      expect(types(frames.slice(0, 2))).toEqual(["set_model", "set_thinking_level"]);
+      expect(frames[3]).toMatchObject({ type: "branch", entryId: "fake-entry-3" });
       const tree = await waitForTurn(world.fixture, result.session.id, "done");
       expect(tree.messages.at(-1)?.id).toBe(assistantMessageId);
     });

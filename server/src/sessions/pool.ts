@@ -3,7 +3,7 @@
  * omp process pool: live-process registry, serialized admission, least-recently-active eviction.
  */
 import { HttpError } from "../core/errors/index.js";
-import type { ApprovalMode } from "../model-catalog.js";
+import type { ApprovalMode, Effort } from "../model-catalog.js";
 import type { RuntimeCommandFrame } from "./omp/commands.js";
 import type { SessionRuntime, SessionRuntimeOpts } from "./omp/runtime.js";
 import type { SessionStore } from "./store.js";
@@ -18,6 +18,11 @@ export interface Generation {
   dispatchCount: number;
   pumpCount: number;
   sealed: boolean;
+  /**
+   * The model and effort last applied on this generation by a successful command; undefined until
+   * its first dispatch aligned it. `effort` is undefined right after a `set_model`.
+   */
+  applied: { modelId: string; effort: Effort | undefined } | undefined;
 }
 
 export interface Slot {
@@ -270,6 +275,7 @@ export function generationTokens(
         dispatchCount: 1,
         pumpCount: 0,
         sealed: false,
+        applied: undefined,
       };
       slot.generation = generation;
       try {

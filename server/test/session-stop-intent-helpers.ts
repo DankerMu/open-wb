@@ -20,8 +20,12 @@ import {
 import { isLive } from "./session-supervisor-pool-helpers.js";
 import type { TestClock } from "./support/omp-runtime.js";
 
-/** Probe record of a process whose only turn before the probe was stopped by one `abort`. */
-export const PROBED = "negotiate_protocol,get_state,prompt,abort,prompt";
+/**
+ * Probe record of a process whose only turn before the probe was stopped by one `abort`. The two
+ * alignment commands precede the generation's first prompt only (#1010).
+ */
+export const PROBED =
+  "negotiate_protocol,get_state,set_model,set_thinking_level,prompt,abort,prompt";
 
 export function ended(messageId: number, status: string) {
   return { type: "turn.end", data: { messageId, status } };

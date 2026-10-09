@@ -212,6 +212,8 @@ describe("a failed acquisition or dispatch drops the intent (#490)", () => {
         expect(frameTypes(spawnedAt(world, 0).stdin)).toEqual([
           "negotiate_protocol",
           "get_state",
+          "set_model",
+          "set_thinking_level",
           "prompt",
         ]);
       }

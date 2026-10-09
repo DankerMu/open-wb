@@ -89,7 +89,14 @@ describe("supervisor.prompt pre-dispatch step (#944)", () => {
       await waitFor(() => (abortCount(stdin) === 1 ? true : undefined), "abort");
       await waitForEvent(world, "turn.end");
       await settle();
-      expect(frameTypes(stdin)).toEqual(["negotiate_protocol", "get_state", "prompt", "abort"]);
+      expect(frameTypes(stdin)).toEqual([
+        "negotiate_protocol",
+        "get_state",
+        "set_model",
+        "set_thinking_level",
+        "prompt",
+        "abort",
+      ]);
       expect(turnEnds(world)).toEqual([ended(pending.assistantMessageId, "stopped")]);
       expectNoError(world);
       expect(await probeFrames(world)).toBe(PROBED);
@@ -169,6 +176,8 @@ describe("supervisor.prompt pre-dispatch step (#944)", () => {
       expect(frameTypes(spawnedAt(world, 0).stdin)).toEqual([
         "negotiate_protocol",
         "get_state",
+        "set_model",
+        "set_thinking_level",
         "prompt",
       ]);
       expect(turnEnds(world)).toEqual([ended(pending.assistantMessageId, "done")]);

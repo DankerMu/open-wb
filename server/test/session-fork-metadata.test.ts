@@ -17,8 +17,9 @@
  * for values REST refuses, from a direct `UPDATE`. Oracles: the 201 view and list entry, the three
  * columns with `typeof`, the account's last-choice row and the `session.permission` row count.
  * Issue #1009 (task 9.1): the temporary process is started with the source's EFFECTIVE mode and
- * model (turn-control「分叉继承三项输入框设置」, the argv part) — read from its recorded spawn argv. The
- * frames before the fork's first prompt are task 9.2.
+ * model (turn-control「分叉继承三项输入框设置」, the argv part) — read from its recorded spawn argv.
+ * Issue #1010 (task 9.2): the fork's own first dispatch starts its process under the inherited mode
+ * and applies the inherited model and effort before its prompt — read from that child's stdin.
  */
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -620,6 +621,26 @@ describe("fork inherits the three composer settings (#1007)", () => {
       expect(ownerPrefs(db)).toEqual(prefsBefore);
       expect([permissionRows, permissionCount(db)]).toEqual([1, 1]);
       expect(auditCount(db)).toBe(auditRows);
+
+      // The fork's own first dispatch: the inherited mode in argv, then the inherited model and
+      // effort ahead of its prompt.
+      expect((await sendPrompt(world, QUESTION, session.id)).statusCode).toBe(202);
+      await waitForTurn(world.fixture, session.id, "done");
+      expect(world.rt.calls).toHaveLength(2);
+      const { args } = requiredCall(world.rt.calls, 1);
+      expect([flagValue(args, "--approval-mode"), flagValue(args, "--model")]).toEqual([
+        "yolo",
+        "workbuddy/m3",
+      ]);
+      const sent = world.spawned[1]?.stdin.slice(2, 5) ?? [];
+      expect(sent.map((frame) => frame.type)).toEqual([
+        "set_model",
+        "set_thinking_level",
+        "prompt",
+      ]);
+      expect(sent[0]).toMatchObject({ provider: "workbuddy", modelId: "m3" });
+      expect(sent[1]).toMatchObject({ level: "low" });
+      expect(permissionCount(db)).toBe(1);
     },
   );
 

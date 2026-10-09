@@ -8,7 +8,7 @@ import { DEFAULT_OMP_MAX_PROCESSES } from "../agent-config.js";
 import { HttpError } from "../core/errors/index.js";
 import { ApprovalRegistry } from "./approvals.js";
 import { type ForkResult, Forks, Regenerations, type Resume } from "./branching.js";
-import { effectiveOf, reusable } from "./composer-align.js";
+import { alignModel, effectiveOf, reusable } from "./composer-align.js";
 import { applyFailure, applyFrame, applyStop, type ChatEvent, createEventState } from "./events.js";
 import type { OmpFrame } from "./omp/frame.js";
 import type { SpawnImpl } from "./omp/process.js";
@@ -423,7 +423,8 @@ export class SessionSupervisor {
   ): Promise<T> {
     const live = this.#slots.get(sessionId);
     const effective = effectiveOf(resume.composer, this.#composer);
-    const fresh = () => this.#onNewSlot(sessionId, resume, effective, claim, use);
+    const aligned = (slot: Slot) => alignModel(slot, effective).then(() => use(slot));
+    const fresh = () => this.#onNewSlot(sessionId, resume, effective, claim, aligned);
     if (live === undefined || live.retiring !== undefined || !this.#pool.holds(live.entry)) {
       return fresh();
     }
@@ -435,7 +436,7 @@ export class SessionSupervisor {
       this.#claim(live, claim);
     }
     try {
-      return await use(live);
+      return await aligned(live);
     } catch (error) {
       if (live.pump === undefined) {
         await this.#retireSlot(live);
