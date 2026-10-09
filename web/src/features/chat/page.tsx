@@ -78,9 +78,11 @@ export function ChatPage() {
   return (
     <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <ConversationView
+        approvalMode={selected?.approvalMode}
         archived={archived}
         client={client}
         composerDisabled={session.composerDisabled}
+        composerOptions={session.composerOptions}
         composerRef={session.composerRef}
         draft={draft}
         generating={session.generating}
@@ -89,6 +91,7 @@ export function ChatPage() {
         onAnswerApproval={session.answerApproval}
         onChangeDraft={session.setDraft}
         onFork={session.forkTurn}
+        onPatchComposer={sessionActions.patchComposer}
         onRegenerate={session.regenerateTurn}
         onSend={session.sendPrompt}
         onStop={session.stopTurn}

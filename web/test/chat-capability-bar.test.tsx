@@ -1,7 +1,8 @@
 // 能力行（chat-web「输入框与能力栏」、session-sidebar「composer footer 工作空间选择」）：已选会话的工作空间位
 // 是只读标签的四种文案（临时空间的判定在最前，不看工作空间列表），回到欢迎态后是可操作的选择器；左组次序
-// 是「+」、工作空间，`发送` 在右组；能力行没有专家与麦克风控件。临时空间会话以其 workspaceId 取命令目录与
-// 项目配置。窄屏的换行与截断只断言类名与结构（jsdom 不排版）。选项读取失败后的重取只数请求次数。
+// 是「+」、工作空间、权限档位（输入框选项取得后才有），`发送` 在右组；能力行没有专家与麦克风控件。临时空间
+// 会话以其 workspaceId 取命令目录与项目配置。窄屏的换行与截断只断言类名与结构（jsdom 不排版）。选项读取
+// 失败后没有权限控件，重取成功后出现。
 // seam：整页挂载 + 假 API。期望文案取自规格条文。
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
@@ -52,6 +53,7 @@ const TEMP = "7".repeat(32);
 const CONFIG = "/api/project-config";
 const OPTIONS = "/api/composer/options";
 const PLUS = "添加文件或命令";
+const TIER = "权限：只问命令";
 /** 名称长到窄屏必然截断的工作空间。 */
 const LONG = {
   ...PROJECT_A,
@@ -103,13 +105,20 @@ function toolbarGroups() {
   return { left, right, toolbar };
 }
 
-/** 左组恰为「+」按钮、工作空间位，右组恰为 `发送`；工具行里没有错误提示。 */
-function expectOrder() {
+/**
+ * 左组恰为「+」按钮、工作空间位与可访问名为 `tier` 的权限按钮（`tier` 为 null 即没有权限控件，左组恰两项），
+ * 右组恰为 `发送`；工具行里没有错误提示。
+ */
+function expectOrder(tier: string | null) {
   const { left, right, toolbar } = toolbarGroups();
   expect(Array.from(left.children)).toEqual([
     within(toolbar).getByRole("button", { name: PLUS }),
     workspaceSlot(),
+    ...(tier === null ? [] : [within(toolbar).getByRole("button", { name: tier })]),
   ]);
+  expect(within(toolbar).queryAllByRole("button", { name: /^权限：/ })).toHaveLength(
+    tier === null ? 0 : 1,
+  );
   expect(Array.from(right.children)).toEqual([
     within(toolbar).getByRole("button", { name: "发送" }),
   ]);
@@ -247,20 +256,22 @@ describe("能力栏：临时空间会话", () => {
 });
 
 describe("能力栏：欢迎态", () => {
-  it("「+」按钮在左组最前、工作空间选择器其后，发送键在右组；没有专家与麦克风控件，未选入文件时没有附件标签区", async () => {
+  it("「+」按钮在左组最前、工作空间选择器其后、权限按钮第三，发送键在右组；没有专家与麦克风控件，未选入文件时没有附件标签区", async () => {
     mountSessions("/", []);
     await screen.findByRole("heading", { level: 1, name: HERO });
     const { left, right, toolbar } = toolbarGroups();
 
+    await within(toolbar).findByRole("button", { name: TIER });
     const buttons = within(toolbar).getAllByRole("button");
     expect(
       buttons.map((button) => button.getAttribute("aria-label") ?? button.textContent),
-    ).toEqual([PLUS, "任务启动于 未选择", "发送"]);
+    ).toEqual([PLUS, "任务启动于 未选择", TIER, "发送"]);
     expect(toolbar.firstElementChild).toBe(left);
     expect(left.children[0]).toBe(buttons[0]);
     expect(left.children[1]).toBe(workspaceSlot());
-    expect(right.contains(buttons[2] as HTMLElement)).toBe(true);
-    expect(left.contains(buttons[2] as HTMLElement)).toBe(false);
+    expect(left.children[2]).toBe(buttons[2]);
+    expect(right.contains(buttons[3] as HTMLElement)).toBe(true);
+    expect(left.contains(buttons[3] as HTMLElement)).toBe(false);
     for (const text of ["专家", "麦克风", "完全访问", "默认权限"]) {
       expect(toolbar.textContent).not.toContain(text);
     }
@@ -269,17 +280,17 @@ describe("能力栏：欢迎态", () => {
 });
 
 describe("能力行的次序", () => {
-  it("已选绑定会话：`添加文件或命令`、只读 任务启动于 项目A、发送；回欢迎态次序相同且第二项是可点的选择器；全程恰一次选项请求", async () => {
+  it("已选绑定会话：`添加文件或命令`、只读 任务启动于 项目A、权限：只问命令、发送；回欢迎态次序相同且第二项是可点的选择器；全程恰一次选项请求", async () => {
     const mounted = mountSessions("/", sessions(), {
       "/api/workspaces": () => workspaceList(PROJECT_A),
     });
     await openExistingSession(await findList("绑定会话"), "绑定会话", A);
     await expectReadOnly("任务启动于 项目A");
-    expectOrder();
+    expectOrder(TIER);
 
     await leaveForWelcome(mounted);
     await screen.findByRole("heading", { level: 1, name: HERO });
-    expectOrder();
+    expectOrder(TIER);
     const trigger = footerButton("任务启动于 未选择");
     expect(trigger.disabled).toBe(false);
     expect(workspaceSlot().contains(trigger)).toBe(true);
@@ -294,19 +305,19 @@ describe("能力行的次序", () => {
     });
     const nav = await findList("绑定会话");
     await quiesce();
-    expectOrder();
+    expectOrder(null);
 
     await openExistingSession(nav, "绑定会话", A);
     await expectReadOnly("任务启动于 项目A");
     await quiesce();
-    expectOrder();
+    expectOrder(null);
     expect(screen.queryAllByRole("alert")).toEqual([]);
     expect(optionsRequests(mounted.fetchMock)).toBe(2);
   });
 });
 
 describe("选项读取失败后重取", () => {
-  it("第一次失败后选中会话恰发出第二次请求，成功后再切两次会话不再请求（全程恰两次）", async () => {
+  it("第一次失败后没有权限控件；选中会话恰发出第二次请求，成功后控件出现，再切两次会话不再请求（全程恰两次）", async () => {
     let asked = 0;
     const { fetchMock } = mountSessions("/", sessions(), {
       [OPTIONS]: () => {
@@ -317,13 +328,17 @@ describe("选项读取失败后重取", () => {
     const nav = await findList("绑定会话");
     await quiesce();
     expect(asked).toBe(1);
+    expectOrder(null);
 
     await openExistingSession(nav, "绑定会话", A);
     await waitFor(() => expect(asked).toBe(2));
+    await screen.findByRole("button", { name: TIER });
+    expectOrder(TIER);
     await openExistingSession(nav, "未绑定会话", B);
     await openExistingSession(nav, "空间已删", C);
     await quiesce();
 
+    expectOrder(TIER);
     expect(asked).toBe(2);
     expect(optionsRequests(fetchMock)).toBe(2);
   });

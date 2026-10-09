@@ -13,13 +13,19 @@ import { errorMessage, isUnauthorized } from "./errors.js";
 import { downloadMarkdown, markdownFilename, sessionMarkdown } from "./export-markdown.js";
 import { ownsHistory } from "./ownership.js";
 import { sessionNavigation, sessionTitle } from "./session-path.js";
-import type { ChatHistoryState, ChatListState } from "./types.js";
+import type { ChatHistoryState, ChatListState, ChatOwnedAlert } from "./types.js";
 
 /**
  * 一次元数据请求修改、也是唯一从其响应合并的键：重命名 → `title`，置顶 → `pinnedAt`，
- * 归档与恢复 → `archivedAt`。
+ * 归档与恢复 → `archivedAt`，输入框设置 → `composer`（档位、模型、强度三个键一起）。
  */
-type MetaKey = "title" | "pinnedAt" | "archivedAt";
+type MetaKey = "title" | "pinnedAt" | "archivedAt" | "composer";
+
+/** 输入框能力行的控件能改的会话设置。 */
+type ComposerPatch = Pick<
+  Parameters<ApiClient["patchSession"]>[1],
+  "approvalMode" | "modelId" | "reasoningEffort"
+>;
 
 type RenameState = {
   client: ApiClient;
@@ -78,7 +84,7 @@ type DeletingState = { client: ApiClient; ids: readonly string[] };
 /**
  * 页面交给删除用的句柄：中止历史读取、关闭事件流、重读列表、当前选中的会话 id（响应到达时读取），
  * 以及会话列表状态（打开删除确认框时判定临时空间是否共用）。`history` 是页面持有的历史（导出当前
- * 会话时读它的视图）。
+ * 会话时读它的视图）。`setPromptError` 写输入框上的就地提示（输入框设置提交失败时用）。
  */
 type PageHandles = {
   abortHistory(): void;
@@ -87,6 +93,7 @@ type PageHandles = {
   list: ChatListState;
   refreshList(client: ApiClient): void;
   requestedSessionRef: RefObject<string | null>;
+  setPromptError: Dispatch<SetStateAction<ChatOwnedAlert | null>>;
 };
 
 /** 为 `client` 的 `sessionId` 会话打开的 Dialog 关闭（null）；为别的会话打开的原样返回。 */
@@ -131,6 +138,10 @@ function restoreFocus(trigger: HTMLElement | null) {
 function withMeta(session: ChatSession, view: ChatSession, key: MetaKey): ChatSession {
   if (key === "title") return { ...session, title: view.title };
   if (key === "pinnedAt") return { ...session, pinnedAt: view.pinnedAt };
+  if (key === "composer") {
+    const { approvalMode, modelId, reasoningEffort } = view;
+    return { ...session, approvalMode, modelId, reasoningEffort };
+  }
   return { ...session, archivedAt: view.archivedAt };
 }
 
@@ -437,6 +448,35 @@ export function useSessionActions(
       );
   }
 
+  /**
+   * 能力行控件（权限档位；模型与强度共用）的提交：恰一次 PATCH。返回的 promise 在任何结果下都落定、
+   * 从不 reject——控件靠它解除自己的在途禁用，所以不走 `send()`（它的回调被 fence 挡掉时不调用）。
+   * 发起时清掉输入框上的提示。200 且通过 fence：把响应视图的三个设置键合并进列表与快照，不看此刻
+   * 选中的是哪个会话；显示值只来自这次合并，不做乐观更新。失败：仅当通过 fence、此刻选中的仍是
+   * `sessionId` 且不是 401 时，把信封文案写到输入框上——切走后迟到的失败不改界面。
+   */
+  function patchComposer(sessionId: string, patch: ComposerPatch): Promise<void> {
+    page.setPromptError(null);
+    const request = track();
+    return client
+      .patchSession(sessionId, patch, { signal: request.signal })
+      .finally(request.release)
+      .then(
+        (view) => {
+          if (request.current()) merge(client, view, "composer");
+        },
+        (error: unknown) => {
+          if (
+            request.current() &&
+            page.requestedSessionRef.current === sessionId &&
+            !isUnauthorized(error)
+          ) {
+            page.setPromptError({ client, sessionId, message: errorMessage(error) });
+          }
+        },
+      );
+  }
+
   function openDelete(session: ChatSession, trigger: HTMLElement | null) {
     setAlert(null);
     deleteReturnFocus.current = trigger;
@@ -514,6 +554,7 @@ export function useSessionActions(
       onRestore: () => restoreFromNotice(sessionId),
     }),
     exportSession,
+    patchComposer,
     openDelete,
     /** 列表区顶部提示的文案（null 为没有）与 `关闭提示`；属于上一个 client 的不显示。 */
     alert: alert && alert.client === client ? alert.message : null,

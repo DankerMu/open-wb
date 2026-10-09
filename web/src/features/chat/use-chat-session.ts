@@ -225,6 +225,7 @@ export function useChatSession() {
     list: listState,
     refreshList,
     requestedSessionRef,
+    setPromptError,
   });
 
   useEffect(() => {

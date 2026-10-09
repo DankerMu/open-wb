@@ -296,7 +296,7 @@ describe("composer footer 空间选择 (W5–W9)", () => {
     expect(pageHtml()).not.toContain(ROOT_MARK);
   });
 
-  it("W6 无权限元素与无匹配：footer 只有空间按钮与「+」按钮；搜索无匹配只剩 未选择 与提示；按名称过滤（去首尾空白、不分大小写、不匹配逻辑路径）", async () => {
+  it("W6 无权限元素与无匹配：footer 只有「+」按钮、空间按钮与权限档位按钮；搜索无匹配只剩 未选择 与提示；按名称过滤（去首尾空白、不分大小写、不匹配逻辑路径）", async () => {
     const { fetchMock } = await mountWelcome({
       workspaces: () => workspaceList(PROJECT_A, SUPPORT, ALPHA),
     });
@@ -306,6 +306,7 @@ describe("composer footer 空间选择 (W5–W9)", () => {
     expect(within(picker).getAllByRole("button")).toEqual([
       screen.getByRole("button", { name: "添加文件或命令" }),
       footerButton(UNSELECTED_BUTTON),
+      screen.getByRole("button", { name: "权限：只问命令" }),
     ]);
 
     const dialog = await openPicker();

@@ -1,7 +1,7 @@
 // 输入框底部的能力栏（design D6、D13、D14），即工具行的左组，自左向右：「+」菜单（添加文件或命令）、
 // 工作空间位（欢迎态是选择器，会话开始后是只读标签）；权限档位控件排在其后。专家、麦克风等控件不渲染，
 // 也不摆禁用占位。窄屏下工作空间位有最大宽度，完整文字在 `title` 里。
-import { type RefObject, useRef, useState } from "react";
+import { type ComponentProps, type RefObject, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -14,6 +14,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Icon } from "../../ui/index.js";
 import { useAuth } from "../auth/index.js";
 import { logicalPath } from "../files/file-meta.js";
+import { PermissionTier } from "./permission-tier.js";
 import { sourceTag, type useSlashMenu } from "./slash-menu.js";
 import type { WelcomeOptions } from "./welcome-options.js";
 import type { Workspace } from "./workspace-list.js";
@@ -35,6 +36,11 @@ type CapabilityBarProps = {
   disabled: boolean;
   /** 输入框元素：「+」菜单点选后把焦点交给它。 */
   inputRef: RefObject<HTMLTextAreaElement | null>;
+  /**
+   * 权限档位控件的 props；输入框选项未取得（或已选会话还没解析出来）时不传，控件不渲染、不摆占位。
+   * `scope` 是它的 `key`：换会话即重挂，在途禁用与打开的确认框不带到另一个会话。不随 `disabled` 禁用。
+   */
+  permission?: ComponentProps<typeof PermissionTier> & { scope: string };
   /** 「+」菜单的目录、开合与可用条件（与斜杠候选同出 `useSlashMenu`，共用一份目录）。 */
   plus: PlusMenu;
   /**
@@ -45,7 +51,14 @@ type CapabilityBarProps = {
   session?: { id: string | null | undefined; workspace: Workspace | undefined; temporary: boolean };
 };
 
-export function CapabilityBar({ choice, disabled, inputRef, plus, session }: CapabilityBarProps) {
+export function CapabilityBar({
+  choice,
+  disabled,
+  inputRef,
+  permission,
+  plus,
+  session,
+}: CapabilityBarProps) {
   return (
     <div
       className="flex min-w-0 flex-1 items-center gap-1 narrow:basis-auto"
@@ -56,6 +69,14 @@ export function CapabilityBar({ choice, disabled, inputRef, plus, session }: Cap
         <WorkspacePicker {...choice} disabled={disabled} />
       ) : (
         <WorkspaceLabel {...session} />
+      )}
+      {permission === undefined ? null : (
+        <PermissionTier
+          key={permission.scope}
+          mode={permission.mode}
+          modes={permission.modes}
+          onChange={permission.onChange}
+        />
       )}
     </div>
   );

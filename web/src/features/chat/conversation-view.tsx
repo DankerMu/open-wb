@@ -8,6 +8,8 @@ import {
   useRef,
 } from "react";
 import type { ApiClient } from "../../lib/api.js";
+import type { ComposerOptions } from "../../lib/composer-contract.js";
+import type { ChatSession } from "../../lib/session-contract.js";
 import { ArchivedNotice } from "./archived-notice.js";
 import { CapabilityBar } from "./capability-bar.js";
 import { Composer } from "./composer.js";
@@ -24,7 +26,48 @@ import type { SessionSpace, Workspace } from "./workspace-list.js";
 type AnswerApproval = ComponentProps<typeof ComposerDock>["onAnswerApproval"];
 type StopTurn = ComponentProps<typeof Composer>["onStop"];
 
+type PermissionSlot = Pick<ComponentProps<typeof CapabilityBar>, "permission">;
+
+/**
+ * 能力栏的权限档位位（展开进 `CapabilityBar` 的 props）：输入框选项未取得时没有；已选会话取其视图的档位、选择即提交 PATCH（视图还没解析
+ * 出来时没有）；欢迎态取页面内存里选过的值、没选过回落到缺省档，选择只改内存、不发请求。
+ */
+function permissionSlot({
+  approvalMode,
+  composerOptions,
+  onPatchComposer,
+  requestedSessionId,
+  welcome,
+}: Pick<
+  ConversationViewProps,
+  "approvalMode" | "composerOptions" | "onPatchComposer" | "requestedSessionId" | "welcome"
+>): PermissionSlot {
+  if (composerOptions === null) return {};
+  const modes = composerOptions.approvalModes;
+  if (!requestedSessionId) {
+    return {
+      permission: {
+        mode: welcome.picked.approvalMode ?? composerOptions.defaults.approvalMode,
+        modes,
+        onChange: (mode) => welcome.pick({ approvalMode: mode }),
+        scope: "",
+      },
+    };
+  }
+  if (approvalMode === undefined) return {};
+  return {
+    permission: {
+      mode: approvalMode,
+      modes,
+      onChange: (mode) => onPatchComposer(requestedSessionId, { approvalMode: mode }),
+      scope: requestedSessionId,
+    },
+  };
+}
+
 type ConversationViewProps = {
+  /** 当前会话视图的权限档位；欢迎态与会话还没解析出来时为 undefined。 */
+  approvalMode: ChatSession["approvalMode"] | undefined;
   /**
    * 选中的会话已归档时是只读说明的 props（`恢复` 的忙碌、失败文案与点击），否则为 null。非 null 时主区
    * 只读：不渲染输入框（含能力栏）与停靠区的内容，线程不出 `撤回`、`从此处分叉` 与 `重新生成`。
@@ -33,6 +76,8 @@ type ConversationViewProps = {
   /** 当前账号的 API client；产物卡经它按需拉取预览。 */
   client: ApiClient;
   composerDisabled: boolean;
+  /** 输入框选项（可用档位与缺省值）；拉取中或失败时为 null，权限档位控件不渲染。 */
+  composerOptions: ComposerOptions | null;
   /** 输入框元素：回到欢迎态后由会话页聚焦它，「+」菜单点选后也聚焦它。 */
   composerRef: RefObject<HTMLTextAreaElement | null>;
   draft: string;
@@ -42,6 +87,11 @@ type ConversationViewProps = {
   onAnswerApproval: AnswerApproval;
   onChangeDraft(value: string): void;
   onFork(messageId: number): Promise<void>;
+  /** 已选会话的设置提交（恰一次 PATCH）；返回的 promise 在任何结果下都落定。 */
+  onPatchComposer(
+    sessionId: string,
+    patch: { approvalMode: ChatSession["approvalMode"] },
+  ): Promise<void>;
   onRegenerate(): Promise<void>;
   /** 现有发送路径的文本入口：运行时适配器的 `onNew` 委托给它。 */
   onSend(prompt: string): void;
@@ -71,9 +121,11 @@ type ConversationViewProps = {
 };
 
 export function ConversationView({
+  approvalMode,
   archived,
   client,
   composerDisabled,
+  composerOptions,
   composerRef,
   draft,
   generating,
@@ -82,6 +134,7 @@ export function ConversationView({
   onAnswerApproval,
   onChangeDraft,
   onFork,
+  onPatchComposer,
   onRegenerate,
   onSend,
   onStop,
@@ -114,6 +167,13 @@ export function ConversationView({
       composerRef.current?.focus();
     }
     restoring.current = restoringId;
+  });
+  const permission = permissionSlot({
+    approvalMode,
+    composerOptions,
+    onPatchComposer,
+    requestedSessionId,
+    welcome,
   });
   return (
     <div className="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)] overflow-hidden px-5 pt-4 pb-5 narrow:flex narrow:flex-col">
@@ -188,6 +248,7 @@ export function ConversationView({
                 disabled={composerDisabled}
                 inputRef={composerRef}
                 plus={slash.plus}
+                {...permission}
                 {...(requestedSessionId
                   ? { session: { id: workspaceId, workspace, temporary: temporaryWorkspace } }
                   : {})}

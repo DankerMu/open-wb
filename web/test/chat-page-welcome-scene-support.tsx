@@ -79,7 +79,7 @@ type WelcomeFixture = {
 /**
  * 欢迎态路由：`POST /api/sessions` 像服务端那样建会话并排到列表首位——请求体带 `workspaceId` 时绑定
  * 该空间（`temporaryWorkspace: false`），不带时用新铸的临时空间（`TEMP_WORKSPACE_IDS` 的下一个，
- * `temporaryWorkspace: true`）；`scene` 照写。REST 不再建出 `workspaceId` 为 null 的会话：存量未绑定行
+ * `temporaryWorkspace: true`）；`scene` 与 `approvalMode` 照写（没带档位时是夹具缺省的 `write`）。REST 不再建出 `workspaceId` 为 null 的会话：存量未绑定行
  * 用 `existing: [view(...)]` 表达。各会话的历史为空快照，新会话的 prompt 挂起；临时空间的项目配置与
  * 命令目录为空。
  */
@@ -88,7 +88,10 @@ export function welcomeRoutes({
   existing = [],
   workspaces = () => workspaceList(PROJECT_A, SUPPORT),
 }: WelcomeFixture = {}): FetchRoutes {
-  const created: (Omit<SessionView, "scene"> & { scene: string | null })[] = [];
+  const created: (Omit<SessionView, "scene" | "approvalMode"> & {
+    approvalMode: string;
+    scene: string | null;
+  })[] = [];
   const routes: FetchRoutes = {
     "/api/sessions": (_path, options) => {
       if (options?.method !== "POST") {
@@ -99,6 +102,7 @@ export function welcomeRoutes({
       const minted = TEMP_WORKSPACE_IDS[created.length];
       if (id === undefined || minted === undefined) throw new Error("夹具的会话 id 已用完");
       const input = JSON.parse(typeof options.body === "string" ? options.body : "{}") as {
+        approvalMode?: string;
         scene?: string;
         workspaceId?: string;
       };
@@ -107,6 +111,7 @@ export function welcomeRoutes({
       const session = {
         ...view(id, null, { status: "idle", temporaryWorkspace, workspaceId }),
         scene: input.scene ?? null,
+        ...(input.approvalMode === undefined ? {} : { approvalMode: input.approvalMode }),
       };
       created.push(session);
       return jsonResponse(session, 201);
