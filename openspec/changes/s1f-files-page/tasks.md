@@ -49,7 +49,7 @@
 > - 分层守卫：`web/test/ui-layering.test.ts` 的 `MIGRATED_AREAS` 与清单断言两处同步改。组 3 起 `web/src/features/files` 整目录在清单里；`web/src/features/chat/` 下新增的 `.ts`/`.tsx` 在同一 PR 逐个登记。
 >   已迁移文件从 `web/src/ui` 只可导入 `Icon`、`IconName`、`BrandMark`、`useEscapeFallback`，不得导入 `useToast`。`web/test/chat-module-layout.test.ts` 的导入方向不变（`page.tsx → use-chat-session.ts → turn-actions.ts`）。
 > - 拷入层（`web/src/components/ui`、`web/src/components/assistant-ui`）：只新增 `resizable`（组 23），且只做 ADR-0013 的六类修改；既有拷入文件不动。`web/src/ui/**` 冻结区不动、不加图标。
-> - 门槛：knip（不留未引用导出）、jscpd、单文件 800 行（`web/src/lib/api.ts` 729 行不再加方法；`web/src/lib/md-render.ts` 797 行不改；`web/e2e/ui-walk-sessions.spec.ts` 776 行与 `web/e2e/ui-walk-layout.ts` 793 行不加行，
+> - 门槛：knip（不留未引用导出）、jscpd、单文件 800 行（`web/src/lib/api.ts` 778 行不再加方法；`web/src/lib/md-render.ts` 797 行不改；`web/e2e/ui-walk-sessions.spec.ts` 681 行与 `web/e2e/ui-walk-layout.ts` 793 行不加行，
 >   新走查步骤写进新 helper 文件；`server/src/workspaces/rest.ts` 的新路由放进新文件）、覆盖率 80%。
 > - 代码分割只在 `web/src/features/files/previewers/index.ts`（组 17 起有守卫）；`vite.config.ts` 不加 `manualChunks`。
 > - 一切用户给的路径过 `sandbox.resolve`；属他人与不存在的工作空间 id 一律是相同的 404 且先于路径检查；越界必写 `sandbox.reject`。
@@ -65,13 +65,15 @@
 
 ## 0. 规格对底（归档顺序 C → S1g → 本 change）
 
-- [ ] 0.1 C 与 S1g 归档之后、本 change 的任何代码组开工之前：对 design D25「重叠表」里的十三条，逐条把本 change 的 delta 文本与当时 `openspec/specs/**` 里的同名条文做句子级 diff
+- [x] 0.1 C 与 S1g 归档之后、本 change 的任何代码组开工之前：对 design D25「重叠表」里的十三条，逐条把本 change 的 delta 文本与当时 `openspec/specs/**` 里的同名条文做句子级 diff
   （http-service-skeleton「服务启动与装配」「统一错误信封」「Shared agent module assembly」、sandbox-core「resolve 契约与逃逸向量」、chat-web「会话页」、session-sidebar「会话条目菜单与重命名」、spa-shell「路由 IA 与侧栏」、
   ui-foundation「组件分层」、chat-harness「UI 走查会话元数据」「UI 走查临时空间、撤回与归档」、turn-artifacts「文件变更卡」「产物卡」，以及被移除的「产物面板」）。
   diff 里只允许出现该表「本 change 的增量」列所列的新增句、新增场景与改写场景；出现别的差异（C 或 S1g 在实现期改过条文、或本 change 漏了它们的句子）就先改本 change 的 delta 与 D25 的表，再继续。
   同时核对绝对计数与当时的主规格相符：配置项 = 主规格的项数 + 12、归属身份 = 主规格的条数 + 2、错误码不变、`op` 集合 = 主规格的集合加 `delete` 与 `move`；同一条文内正文与场景的计数、枚举一致。
   表外另核一处：ui-primitives「按钮单一实现与旧类退役」（底本是主规格，不属重叠）的场景「迁移后行为不回归」引用了 C 的 session-sidebar「分组侧栏」与 ui-foundation「组件分层」对 `新建会话` 的规定——确认当时主规格里这两条仍是「名称与行为不变」「`session-sidebar.tsx` 在已迁移清单里」，且主规格的 ui-primitives 该条没有被 C / S1g 改过。
   每条 MODIFIED 保留主规格该条文现有的全部场景标题。验证：`$HOME/.nvm/versions/node/v24.13.1/bin/openspec validate s1f-files-page --strict --no-interactive` 与 `$HOME/.local/bin/openspec validate s1f-files-page --strict --no-interactive` 都通过且 ERROR 为 0。
+  实施注记见 `implementation-notes.md`「0.1（#1049）」。
+  核对记录（#1049，2026-10-09，底本为 C 归档于 #980、S1g 归档于 #1047 / PR #1284 之后的主规格，合并提交 `7e0e6d3`）：D25 表十三条（十二条 MODIFIED 与被移除的「产物面板」）的表头全部命中主规格，本 change 另十四条 MODIFIED 的表头同样命中、35 条 ADDED 的表头在主规格里都不存在（预期归档输出 +35、~26、-1）；十三条与主规格的句子级差异只有 D25「本 change 的增量」列所列内容，外加一处表里漏列的本 change 自己的增量——「服务启动与装配」失败记录 `reason` 枚举的 `preview_cache` / `preview_listen` 一句（#1203 对齐时加入），已补进 D25 的表，delta 无需修改。与 S1g 同名的五条（chat-web「会话页」、http-service-skeleton 三条、sandbox-core「resolve 契约与逃逸向量」）带着 S1g 已交付的全部句子与场景；C 在实现期改过的各处（启动失败 `reason` 枚举与场景「启动失败记录带失败阶段」等）也都在。26 条 MODIFIED 的场景标题集合都是主规格同名条文的超集。计数：主规格为二十三项配置、十五条归属身份、十六码、`op ∈ {read, list, mkdir, write}`、迁移回执到 042；本 change 为三十五项（+12）、十七条（+2）、十六码（不变）、`op` 加 `delete` 与 `move`，不新增迁移；同一条文内正文与场景的计数、枚举一致。表外一处：主规格 session-sidebar「分组侧栏」仍写「既有的 `新建会话` 按钮（名称与行为不变）」，ui-foundation「组件分层」的场景「会话页迁移终态」仍把 `session-sidebar.tsx` 列在已迁移清单里，ui-primitives「按钮单一实现与旧类退役」自本 change 起草以来未被 C / S1g 改过。本 change 独自修改的十三条的主规格底本自起草以来逐字未变。两个 openspec CLI（1.3.1 与 1.13.2）的 `validate --strict` 都通过，0 个 ERROR。文首所列行数的现值（已同步进文首与 design）：`web/src/lib/api.ts` 778、`web/src/lib/md-render.ts` 797、`web/e2e/ui-walk-sessions.spec.ts` 681、`web/e2e/ui-walk-layout.ts` 793、`server/src/workspaces/rest.ts` 416。
 - [ ] 0.2 本 change 归档之前：用当时的主规格把 0.1 再做一遍（期间主规格若又被别的 change 改过，以当时的为准），diff 里仍只允许出现 D25 表里列的增量。
 
 Suggested fixture level: none - 只核对与修正规格文本，不改运行时代码
