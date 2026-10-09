@@ -174,7 +174,10 @@ export function createSessionMethods(
           ...requestOptions(options?.signal),
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message }),
+          body: JSON.stringify({
+            message,
+            ...(options?.attachments?.length ? { attachments: options.attachments } : {}),
+          }),
         },
         onUnauthorized,
         202,

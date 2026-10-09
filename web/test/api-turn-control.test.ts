@@ -211,6 +211,16 @@ describe("Turn control regenerate/fork/approval parsing", () => {
   );
 
   it.each([
+    ["one attachment", [{ path: "uploads/a.pdf", size: 3 }]],
+    ["no attachments", []],
+  ])("returns the three-key fork body with %s unchanged", async (_label, attachments) => {
+    const body = { session: stoppedSession, draft: "x", attachments };
+    stubFetch(jsonResponse(body, 201));
+
+    await expect(createApiClient().forkSession(SESSION_ID, 1)).resolves.toEqual(body);
+  });
+
+  it.each([
     ["a non-string draft", { session: stoppedSession, draft: 1 }],
     ["an extra key", { session: stoppedSession, draft: "", parentSessionId: SESSION_ID }],
     ["a missing draft", { session: stoppedSession }],

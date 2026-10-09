@@ -211,6 +211,45 @@ describe("Sessions API client prompt contract", () => {
       signal: controller.signal,
     });
   });
+
+  it("adds a non-empty attachments list after the message and keeps the signal out of the body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(promptAccepted, 202));
+    const controller = new AbortController();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      createApiClient().prompt(SESSION_ID, "看看", {
+        attachments: ["uploads/a.pdf"],
+        signal: controller.signal,
+      }),
+    ).resolves.toEqual(promptAccepted);
+
+    expect(fetchMock).toHaveBeenCalledWith(`/api/sessions/${SESSION_ID}/prompt`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: '{"message":"看看","attachments":["uploads/a.pdf"]}',
+      signal: controller.signal,
+    });
+  });
+
+  it.each([
+    ["omits an empty attachments list", "看看", [], '{"message":"看看"}'],
+    [
+      "sends an empty message as is with its attachments",
+      "",
+      ["uploads/a.pdf"],
+      '{"message":"","attachments":["uploads/a.pdf"]}',
+    ],
+  ])("%s", async (_label, message, attachments, body) => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(promptAccepted, 202));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createApiClient().prompt(SESSION_ID, message, { attachments });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(body);
+  });
 });
 
 describe("Sessions API client snapshot domain contract", () => {

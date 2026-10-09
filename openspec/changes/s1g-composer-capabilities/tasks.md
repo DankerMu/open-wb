@@ -306,7 +306,22 @@ Minimal mergeable slice: 12.1 一刀（纯函数与对齐，无附件时字节�
 
 ## 13. web lib — API 方法、上传传输与解析收紧
 
-- [ ] 13.1 `web/src/lib/api-sessions.ts` / `api.ts`：`createSession` 与 `patchSession` 的 input 类型加三键；`prompt(id, message, options)` 的 `options.attachments`（非空才进 body）。C 的 `undoMessage`（C 的 13.1）的响应类型带 `attachments`（解析在 5.1 已放宽、13.5 收紧）。`message` 原样进 body：空串不裁剪、不省略键、客户端不因它为空而拒绝。测试（既有 API 客户端测试文件）：chat-web「新输入与两个新方法」的前五个调用（含 `prompt(id, "", {attachments:[…]})` 的 body `{"message":"","attachments":[…]}`）、「回合控制四方法请求与响应」里 `forkSession` 的 201 三键。
+- [x] 13.1 `web/src/lib/api-sessions.ts` / `api.ts`：`createSession` 与 `patchSession` 的 input 类型加三键；`prompt(id, message, options)` 的 `options.attachments`（非空才进 body）。C 的 `undoMessage`（C 的 13.1）的响应类型带 `attachments`（解析在 5.1 已放宽、13.5 收紧）。`message` 原样进 body：空串不裁剪、不省略键、客户端不因它为空而拒绝。测试（既有 API 客户端测试文件）：chat-web「新输入与两个新方法」的前五个调用（含 `prompt(id, "", {attachments:[…]})` 的 body `{"message":"","attachments":[…]}`）、「回合控制四方法请求与响应」里 `forkSession` 的 201 三键。
+  **实施注记（13.1，fixture 评审补充，#1021）**：
+  - 现状漂移：issue「Current behavior」称 `undoMessage` 响应类型没有 `attachments`，在 origin/master 不成立——`ChatSessionUndo`（`session-contract.ts:134-139`）与 `ChatSessionFork`（`:108-112`）已由 #996 带上该字段；这两项零产品代码改动，只补客户端层用例，旧句子写进 PR 偏离记录。
+  - 产品改动只有两处：`web/src/lib/api.ts`（769 行）的类型，和 `web/src/lib/api-sessions.ts`（284 行）第 177 行的 prompt body；`session-contract.ts` 一行不动。
+  - 三键类型在 `api.ts` 内用索引访问派生（同第 117 行 `ChatSessionScene` 的写法，`session-contract.ts:14-15` 的两个类型未导出）：`approvalMode?: ChatSession["approvalMode"]`、`modelId?: string`、`reasoningEffort?: NonNullable<ChatSession["reasoningEffort"]>`，加进 `ChatSessionCreateInput`（119-122）与 `ChatSessionPatch`（124-129）。
+  - `prompt` 签名（`api.ts:160-164`）改为 `options?: ApiRequestOptions & { attachments?: string[] }`；`attachments` 是路径字符串数组，不是 `{path,size}`。`api.ts` 合计约 +9 行，到约 778 行。
+  - body 写法：`JSON.stringify({ message, ...(options?.attachments?.length ? { attachments: options.attachments } : {}) })`，键序即规格字面量；`message` 不 trim、不判空；路径不在客户端校验。
+  - `createSession` / `patchSession` 的实现不改：`createSessionBody`（`api-sessions.ts:44-50`）与 `JSON.stringify(patch)`（`:127`）本来就原样发所给的键。
+  - 缺键与 null：规格写「只发送所给的键」「不得为 `null`」。键缺席即不发；`null` 只靠类型排除，不加运行期守卫（服务端对 `null` 回 400）；值为 `undefined` 的键被 `JSON.stringify` 丢掉是既有行为。三点写进偏离记录。
+  - 既有断言一条都不改：无 body 创建、`{"workspaceId":…,"scene":"code"}`、`{"title":"周报","pinned":true}`、`{"pinned":true}`、`{"archived":true}`、空 patch `TypeError`、`{"message":…}`（`api-sessions.test.ts:196`）、`{"messageId":-3}`、undo body 全部保持；点名之外变红先查原因。`api-sessions.test.ts` 的 `sessionMethods` 表（`options?: {signal?}`）照常通过类型检查。
+  - 新用例 `web/test/api-sessions-metadata.test.ts`（271 行）：`createSession({workspaceId, approvalMode:"always-ask", modelId:"m3", reasoningEffort:"low"})` 的 body 恰为该四键 JSON，201 回带这三值的十四键会话并逐值返回；`patchSession(id, {approvalMode:"yolo"})` 的 body 恰为 `{"approvalMode":"yolo"}`。
+  - 新用例 `web/test/api-sessions.test.ts`（683 行，加完约 710，受 size-guard 管）「prompt contract」里三例：`("看看", {attachments:["uploads/a.pdf"]})` → `{"message":"看看","attachments":["uploads/a.pdf"]}`；`{attachments:[]}` → `{"message":"看看"}`；`("", {attachments:[…]})` → `{"message":"","attachments":["uploads/a.pdf"]}`。其中一例同时带 `signal`，断言它进了 fetch 选项而不进 body。
+  - 新用例 `web/test/api-turn-control.test.ts`（393 行）：`forkSession` 收到 201 `{session, draft:"x", attachments:[{path:"uploads/a.pdf",size:3}]}` 逐值返回，另一例 `attachments:[]`；既有两键响应期望 `attachments: []` 的用例（`:200-211`）是过渡断言，留给 13.5。
+  - 新用例 `web/test/api-undo.test.ts`（225 行）：「撤回与转正方法」的字面量带 `attachments:[{path:"uploads/a.pdf",size:3}]` 逐值返回；既有不带 `attachments` 的两例（`:90-108`）同样留给 13.5。
+  - fork / undo 两条是固定用例，不是新行为：`session-contract-composer.test.ts` 在 13.5 整文件删除后，它们是客户端层唯一的正向断言。它们的变异落在 `session-contract.ts`（`parseSessionFork` / `parseSessionUndo` 丢掉 `attachments` → 判红），PR 里注明。
+  - 变异：空数组也发 `attachments` → 第二例红；非空时不发 → 第一、三例红；trim 或空串拒绝 / 省略 `message` → 第三例红；从 create / patch body 过滤任一新键 → 四键例与 `{"approvalMode":"yolo"}` 例红。服务端组 8、12 未合入，全部用 fetch 替身，不碰 `make smoke` 断言。
 - [ ] 13.2 `getComposerOptions()`：方法与严格解析（解析放 `session-contract.ts` 或新文件 `web/src/lib/composer-contract.ts`，视行数）。测试：同场景的 options 部分（合法逐值返回；三种非法响应拒绝）。
 - [x] 13.3 `uploadFile()`：新文件 `web/src/lib/api-upload.ts`（唯一用 `XMLHttpRequest` 的地方；same-origin、信封解析、request_failed 与 401 通知由 `api.ts` 注入，值导入方向 `api.ts → api-upload.ts`，与「API 客户端源码模块划分」对 `api-sessions.ts` 的规则一致）。
   测试新文件 `web/test/api-upload.test.ts`（可控的 `XMLHttpRequest` 替身）：chat-web delta「上传传输」四例。变异：文件名不编码、进度不取整、中止时不调 `abort()`、401 不通知 → 各判红。

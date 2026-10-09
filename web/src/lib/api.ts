@@ -116,12 +116,19 @@ type ApiRequestOptions = {
 
 type ChatSessionScene = NonNullable<ChatSession["scene"]>;
 
-type ChatSessionCreateInput = {
+/** 会话的三项输入框设置；只发送所给的键。 */
+type ChatSessionComposerInput = {
+  approvalMode?: ChatSession["approvalMode"];
+  modelId?: string;
+  reasoningEffort?: NonNullable<ChatSession["reasoningEffort"]>;
+};
+
+type ChatSessionCreateInput = ChatSessionComposerInput & {
   workspaceId?: string;
   scene?: ChatSessionScene;
 };
 
-type ChatSessionPatch = {
+type ChatSessionPatch = ChatSessionComposerInput & {
   title?: string;
   scene?: ChatSessionScene;
   pinned?: boolean;
@@ -160,7 +167,7 @@ export type ApiClient = {
   prompt(
     sessionId: string,
     message: string,
-    options?: ApiRequestOptions,
+    options?: ApiRequestOptions & { attachments?: string[] },
   ): Promise<ChatPromptAccepted>;
   stopSession(sessionId: string, options?: ApiRequestOptions): Promise<"stopping" | "idle">;
   regenerateSession(
