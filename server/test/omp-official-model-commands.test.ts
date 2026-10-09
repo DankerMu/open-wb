@@ -29,6 +29,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
+import type { RuntimeCommandFrame } from "../src/sessions/omp/commands.js";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import type { SessionRuntime } from "../src/sessions/omp/runtime.js";
 import type { FakeUpstreamRequest } from "./support/fake-upstream.mjs";
@@ -96,9 +97,8 @@ function note(label: string, value: unknown): void {
   console.log(`[model-commands] ${JSON.stringify({ [label]: value })}`);
 }
 
-/** omp RPC commands the runtime's `command` does not type yet (s1g group 7 adds them). */
-function rpc(runtime: SessionRuntime, frame: Record<string, unknown>): Promise<unknown> {
-  return runtime.command(frame as never);
+function rpc(runtime: SessionRuntime, frame: RuntimeCommandFrame): Promise<unknown> {
+  return runtime.command(frame);
 }
 
 async function state(runtime: SessionRuntime): Promise<{ model: unknown; level: unknown }> {
@@ -133,7 +133,8 @@ async function levelTable(runtime: SessionRuntime): Promise<Row[]> {
 async function managedModels(
   runtime: SessionRuntime,
 ): Promise<Map<unknown, Record<string, unknown>>> {
-  const data = (await rpc(runtime, { type: "get_available_models" })) as {
+  // The host never sends this command, so the runtime's frame union does not carry it.
+  const data = (await runtime.command({ type: "get_available_models" } as never)) as {
     models: Array<Record<string, unknown>>;
   };
   note(
