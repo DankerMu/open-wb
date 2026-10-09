@@ -1,4 +1,4 @@
-// 能力栏「+」菜单（chat-web「输入框与能力栏」场景「「+」菜单写入草稿」）：`技能与命令` 按钮的可用条件、菜单
+// 能力栏「+」菜单（chat-web「输入框与能力栏」场景「「+」菜单写入草稿」）：`添加文件或命令` 按钮的可用条件、菜单
 // 列出的目录与项目标记、点选写入草稿并聚焦输入框而不发送、拉取中与失败的 `暂无可用项`、与斜杠候选共用
 // 一份目录。seam：整页挂载 + 假 API；「菜单开着时输入框被锁定」用 `useSlashMenu` + 裸 `CapabilityBar`。
 // 期望文案与条目取自规格条文。
@@ -75,7 +75,7 @@ async function openBound(commands: FetchRoutes[string]) {
 }
 
 function plusButton() {
-  return screen.getByRole("button", { hidden: true, name: "技能与命令" }) as HTMLButtonElement;
+  return screen.getByRole("button", { hidden: true, name: "添加文件或命令" }) as HTMLButtonElement;
 }
 
 /** 左键 pointerdown 打开菜单（Radix DropdownMenu 不认 click），并让它触发的目录请求走完。 */
@@ -259,7 +259,7 @@ describe("「+」菜单写入草稿", () => {
     expect(errors).not.toHaveBeenCalled();
   });
 
-  it("点菜单外关闭：草稿不变，焦点回到 `技能与命令` 按钮", async () => {
+  it("点菜单外关闭：草稿不变，焦点回到 `添加文件或命令` 按钮", async () => {
     const { fetchMock } = await openBound(catalogue(FOUR));
     await openMenu();
     // 外点监听在菜单挂载后的下一个宏任务里才登记。
@@ -274,7 +274,7 @@ describe("「+」菜单写入草稿", () => {
     expect(prompts(fetchMock)).toEqual([]);
   });
 
-  it("Esc 关闭菜单：草稿不变，焦点回到 `技能与命令` 按钮", async () => {
+  it("Esc 关闭菜单：草稿不变，焦点回到 `添加文件或命令` 按钮", async () => {
     const { fetchMock } = await openBound(catalogue(FOUR));
     const menu = await openMenu();
 
@@ -326,7 +326,7 @@ describe("「+」菜单写入草稿", () => {
 });
 
 describe("「+」按钮随输入框锁定", () => {
-  it("回合进行中（输入框锁定）：`技能与命令` 按钮禁用，草稿为空白也一样，不发目录请求", async () => {
+  it("回合进行中（输入框锁定）：`添加文件或命令` 按钮禁用，草稿为空白也一样，不发目录请求", async () => {
     const running = chatSnapshot();
     const { fetchMock } = renderChatPage(`/?session=${running.session.id}`, {
       ...accountRoutes(catalogue()),

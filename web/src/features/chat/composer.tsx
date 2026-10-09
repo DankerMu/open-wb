@@ -16,7 +16,7 @@ import { Icon } from "../../ui/index.js";
 type StopTurn = () => Promise<"stopping" | null>;
 
 type ComposerProps = {
-  /** 工具栏左侧的能力栏（工作空间位）；不传时工具栏只有发送键。 */
+  /** 工具栏的左组，即能力栏（「+」菜单、工作空间位）；不传时工具栏只有右组。 */
   capabilityBar?: ReactNode;
   disabled: boolean;
   draft: string;
@@ -36,7 +36,10 @@ type ComposerProps = {
   stopSessionId: string | null;
 };
 
-/** 输入卡：候选面板、textarea、底部工具栏（能力栏在左，`生成中` 与发送/停止键在右）；提示行在卡外。 */
+/**
+ * 输入卡：候选面板、textarea、底部工具栏（能力栏是左组，`生成中` 与发送/停止键是右组）；提示行在卡外。
+ * 窄屏下工具栏可换行，右组作为一个整体落到下一行并靠右。
+ */
 export function Composer({
   capabilityBar,
   disabled,
@@ -97,9 +100,12 @@ export function Composer({
           rows={2}
           value={draft}
         />
-        <div className="flex min-h-8 items-center gap-2" data-slot="composer-toolbar">
+        <div
+          className="flex min-h-8 items-center gap-2 narrow:flex-wrap narrow:gap-y-1"
+          data-slot="composer-toolbar"
+        >
           {capabilityBar}
-          <div className="ml-auto flex flex-none items-center gap-2">
+          <div className="ml-auto flex flex-none items-center gap-2" data-slot="composer-actions">
             {generating ? (
               <p className="m-0 text-[13px] text-(--wb-brand-primary-deep)" role="status">
                 生成中

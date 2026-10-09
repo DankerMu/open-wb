@@ -1,5 +1,6 @@
-// 输入框底部的能力栏（design D6、D13），自左向右：工作空间位（欢迎态是选择器，会话开始后是只读标签）、
-// 「+」菜单（技能与命令）。权限、上传、专家等控件不渲染，也不摆禁用占位。
+// 输入框底部的能力栏（design D6、D13、D14），即工具行的左组，自左向右：「+」菜单（添加文件或命令）、
+// 工作空间位（欢迎态是选择器，会话开始后是只读标签）；权限档位控件排在其后。专家、麦克风等控件不渲染，
+// 也不摆禁用占位。窄屏下工作空间位有最大宽度，完整文字在 `title` 里。
 import { type RefObject, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,19 +47,22 @@ type CapabilityBarProps = {
 
 export function CapabilityBar({ choice, disabled, inputRef, plus, session }: CapabilityBarProps) {
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-1" data-slot="composer-capabilities">
+    <div
+      className="flex min-w-0 flex-1 items-center gap-1 narrow:basis-auto"
+      data-slot="composer-capabilities"
+    >
+      <CommandMenu inputRef={inputRef} plus={plus} />
       {session === undefined ? (
         <WorkspacePicker {...choice} disabled={disabled} />
       ) : (
         <WorkspaceLabel {...session} />
       )}
-      <CommandMenu inputRef={inputRef} plus={plus} />
     </div>
   );
 }
 
 /**
- * `技能与命令` 按钮与菜单：按目录顺序列出命令与技能（名称、项目标记、描述）；目录未持有（拉取中或失败）时
+ * `添加文件或命令` 按钮与菜单：按目录顺序列出命令与技能（名称、项目标记、描述）；目录未持有（拉取中或失败）时
  * 只有 `暂无可用项`，目录到达后列表就地替换它。点选把草稿写成 `/<name> `，菜单关闭后焦点交给输入框而不是
  * 回到按钮（此时草稿非空白，按钮已禁用）；Esc 等其它关闭方式仍按菜单默认把焦点还给按钮。
  */
@@ -68,7 +72,7 @@ function CommandMenu({ inputRef, plus }: Pick<CapabilityBarProps, "inputRef" | "
     <DropdownMenu onOpenChange={plus.onOpenChange} open={plus.open}>
       <DropdownMenuTrigger asChild>
         <Button
-          aria-label="技能与命令"
+          aria-label="添加文件或命令"
           className="flex-none text-muted-foreground"
           disabled={plus.disabled}
           size="icon-sm"
@@ -126,35 +130,42 @@ function CommandMenu({ inputRef, plus }: Pick<CapabilityBarProps, "inputRef" | "
 function WorkspaceLabel({ id, temporary, workspace }: NonNullable<CapabilityBarProps["session"]>) {
   if (id === undefined) return null;
   const name = temporary ? "临时空间" : id === null ? "未绑定" : (workspace?.name ?? "已绑定空间");
+  const text = `${PREFIX} ${name}`;
   return (
     <p
-      className="m-0 flex min-w-0 items-center gap-1 px-2.5 text-[0.8rem] text-muted-foreground"
+      className="m-0 flex min-w-0 items-center gap-1 px-2.5 text-[0.8rem] text-muted-foreground narrow:max-w-40"
       data-slot="composer-workspace"
+      title={text}
     >
       <Icon name="folder" size={14} />
-      <span className="min-w-0 truncate">{`${PREFIX} ${name}`}</span>
+      <span className="min-w-0 truncate">{text}</span>
     </p>
   );
 }
 
-/** `任务启动于 …` 按钮与空间选择弹层；输入框锁定时按钮禁用，已打开的弹层关闭且解锁后不重开。 */
+/**
+ * `任务启动于 …` 按钮与空间选择弹层；输入框锁定时按钮禁用，已打开的弹层关闭且解锁后不重开。窄屏的最大宽度
+ * 取代了 `max-w-full`，按钮靠 `narrow:shrink` 仍随外层收窄（拷入层的按钮默认不收缩），不越出左组。
+ */
 function WorkspacePicker({ disabled, ...choice }: WorkspaceChoice & { disabled: boolean }) {
   const [open, setOpen] = useState(false);
   // 渲染期间复位（与 slash-menu.tsx 同一做法）：锁定的那次渲染就不再带着打开的弹层。
   if (disabled && open) setOpen(false);
+  const text = `${PREFIX} ${choice.workspace?.name ?? UNSELECTED}`;
   return (
     <div className="flex min-w-0 items-center" data-slot="composer-workspace">
       <Popover onOpenChange={setOpen} open={open}>
         <PopoverTrigger asChild>
           <Button
-            className="max-w-full min-w-0 font-normal text-muted-foreground"
+            className="max-w-full min-w-0 font-normal text-muted-foreground narrow:max-w-40 narrow:shrink"
             disabled={disabled}
             size="sm"
+            title={text}
             type="button"
             variant="ghost"
           >
             <Icon name="folder" size={14} />
-            <span className="min-w-0 truncate">{`${PREFIX} ${choice.workspace?.name ?? UNSELECTED}`}</span>
+            <span className="min-w-0 truncate">{text}</span>
             <Icon name="chevron-down" size={12} />
           </Button>
         </PopoverTrigger>
