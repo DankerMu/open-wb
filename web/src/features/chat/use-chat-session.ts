@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from "react-router";
 import type { ApiClient } from "../../lib/api.js";
 import type { ChatMessageSnapshot } from "../../lib/session-contract.js";
 import { useAuth } from "../auth/index.js";
+import { useAttachmentsState } from "./attachments-state.js";
 import { composerLocks } from "./composer-locks.js";
 import { useComposerOptions } from "./composer-options.js";
 import { errorMessage, isNotFound, isUnauthorized } from "./errors.js";
@@ -395,6 +396,17 @@ export function useChatSession() {
     [location.hash, location.pathname, location.search, navigate],
   );
 
+  const ownedHistory = ownsHistory(historyState, client, requestedSessionId);
+  const listForClient =
+    listState.client === client && listState.status === "success" ? listState : null;
+  const selected = selectedSession(requestedSessionId, listForClient, ownedHistory, historyState);
+  const slashWorkspaceId = composerWorkspaceId(requestedSessionId, selected, welcome.workspace);
+  const attachments = useAttachmentsState({
+    client,
+    scopeKey: requestedSessionId,
+    workspaceId: slashWorkspaceId,
+    upload: composerOptions?.upload,
+  });
   const turn = useTurnActions({
     abortMutation,
     clientRef,
@@ -671,12 +683,8 @@ export function useChatSession() {
     }
   }, [resyncRequest]);
 
-  const ownedHistory = ownsHistory(historyState, client, requestedSessionId);
-  const listForClient =
-    listState.client === client && listState.status === "success" ? listState : null;
   const historyView = ownedHistory && historyState.status === "ready" ? historyState.view : null;
   viewRunningRef.current = historyView?.status === "running";
-  const selected = selectedSession(requestedSessionId, listForClient, ownedHistory, historyState);
   const workspace = workspaces?.find((item) => item.id === selected?.workspaceId);
   // 产物用的「空间可解析」判定；`temporaryWorkspace` 取自 `selected`（列表优先），转正后随列表翻转。
   const spaceId = selected?.workspaceId;
@@ -697,7 +705,6 @@ export function useChatSession() {
     undoing: ownsMutation(undoOwner, client, requestedSessionId),
     draft,
   });
-  const slashWorkspaceId = composerWorkspaceId(requestedSessionId, selected, welcome.workspace);
 
   // `新建会话`：replace 导航回欢迎态，不发请求、不动草稿。`focusComposer` 为假（侧栏是覆盖层）时
   // 焦点交给外壳；已在欢迎态时只聚焦。离开会话后输入框解锁的那次提交里才聚焦（锁定时 focus 无效）。
@@ -736,6 +743,7 @@ export function useChatSession() {
 
   return {
     answerApproval,
+    attachments,
     client,
     composerDisabled,
     composerOptions,
