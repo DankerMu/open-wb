@@ -44,6 +44,8 @@ const A = PROJECT_A.id;
 const BOUND = { ...view("a".repeat(32), "绑定会话"), workspaceId: A };
 const EMPTY = "暂无可用项";
 const HINT = "清空输入后可选择命令";
+/** 已选会话里菜单的第一项（欢迎态没有）。 */
+const UPLOAD = "上传文件";
 /** 规格场景里空间 A 的目录：两条内建、平台技能 `skill:weekly-report`、项目技能 `skill:deploy`。 */
 const FOUR = [COMPACT, TODO, WEEKLY, project("deploy", "部署到测试环境")];
 const FOUR_LABELS = ["整理上下文", "任务清单", "weekly-report", "deploy"];
@@ -129,11 +131,17 @@ async function openBar() {
   return { bar, menu: await openMenu() };
 }
 
-/** 方向键下移到第一项，再在该项上按 `key`（Radix 菜单项对 Enter 与空格都触发点选）。 */
-function pickFirstByKey(menu: HTMLElement, key: string) {
+/**
+ * 方向键下移到第一条命令（菜单第一项是 `上传文件`，再按一次到它之后），再在该项上按 `key`（Radix 菜单项对
+ * Enter 与空格都触发点选）。
+ */
+async function pickFirstByKey(menu: HTMLElement, key: string) {
   fireEvent.keyDown(menu, { key: "ArrowDown" });
-  const first = within(menu).getAllByRole("menuitem")[0];
-  expect(document.activeElement).toBe(first);
+  const [upload, first] = within(menu).getAllByRole("menuitem");
+  expect(document.activeElement).toBe(upload);
+  // 条目之间的移动由 Radix 的 roving focus 在下一个宏任务里完成。
+  fireEvent.keyDown(upload as HTMLElement, { key: "ArrowDown" });
+  await waitFor(() => expect(document.activeElement).toBe(first));
   fireEvent.keyDown(first as HTMLElement, { key });
 }
 
@@ -148,10 +156,14 @@ describe("「+」菜单写入草稿", () => {
 
     const locked = await openMenu();
 
-    expect(locked.textContent).toBe(HINT + FOUR_TEXTS.join(""));
+    expect(locked.textContent).toBe(UPLOAD + HINT + FOUR_TEXTS.join(""));
     const items = within(locked).getAllByRole("menuitem");
-    expect(items.map((item) => item.getAttribute("aria-disabled"))).toEqual(FOUR.map(() => "true"));
-    const deploy = items[3] as HTMLElement;
+    // `上传文件` 不看草稿：只有四条命令不可选。
+    expect(items.map((item) => item.getAttribute("aria-disabled"))).toEqual([
+      null,
+      ...FOUR.map(() => "true"),
+    ]);
+    const deploy = items[4] as HTMLElement;
     fireEvent.click(deploy);
     // 方向键跳过不可选的条目，Enter 直接按在条目上。
     fireEvent.keyDown(deploy, { key: "Enter" });
@@ -166,6 +178,15 @@ describe("「+」菜单写入草稿", () => {
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(plusButton()));
 
+    // 草稿仍是 `半句`：`上传文件` 照常可点，打开文件选择框、关闭菜单、不动草稿。
+    const pick = vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => undefined);
+    fireEvent.click(within(await openMenu()).getByRole("menuitem", { name: UPLOAD }));
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    expect(pick).toHaveBeenCalledTimes(1);
+    expect(pick.mock.contexts[0]).toBe(document.querySelector('[data-slot="composer-file-input"]'));
+    expect(composer().value).toBe("半句");
+    expect(cataloguePaths(fetchMock)).toEqual([commandsOf(A)]);
+
     await type("  \n ");
     expect(plusButton().disabled).toBe(false);
     await type("");
@@ -173,9 +194,9 @@ describe("「+」菜单写入草稿", () => {
 
     const menu = await openMenu();
 
-    expect(itemTexts(menu)).toEqual(FOUR_TEXTS);
-    expect(menu.textContent).toBe(FOUR_TEXTS.join(""));
-    for (const absent of ["权限", "上传", "专家"]) expect(menu.textContent).not.toContain(absent);
+    expect(itemTexts(menu)).toEqual([UPLOAD, ...FOUR_TEXTS]);
+    expect(menu.textContent).toBe(UPLOAD + FOUR_TEXTS.join(""));
+    for (const absent of ["权限", "专家"]) expect(menu.textContent).not.toContain(absent);
     expect(cataloguePaths(fetchMock)).toEqual([commandsOf(A)]);
 
     fireEvent.click(within(menu).getByRole("menuitem", { name: /deploy/ }));
@@ -203,7 +224,7 @@ describe("「+」菜单写入草稿", () => {
 
     const menu = await openMenu();
 
-    expect(itemTexts(menu)).toEqual(["<b>x</b>项目 · 覆盖平台技能<img src=x>"]);
+    expect(itemTexts(menu)).toEqual([UPLOAD, "<b>x</b>项目 · 覆盖平台技能<img src=x>"]);
     expect(menu.querySelector("b, img")).toBeNull();
   });
 
@@ -215,7 +236,7 @@ describe("「+」菜单写入草稿", () => {
 
     const menu = await openMenu();
 
-    expect(itemTexts(menu)).toEqual(FOUR_TEXTS);
+    expect(itemTexts(menu)).toEqual([UPLOAD, ...FOUR_TEXTS]);
     expect(cataloguePaths(fetchMock)).toEqual([commandsOf(A)]);
   });
 
@@ -225,15 +246,15 @@ describe("「+」菜单写入草稿", () => {
 
     const menu = await openMenu();
 
-    expect(menu.textContent).toBe(EMPTY);
-    expect(itemTexts(menu)).toEqual([]);
+    expect(menu.textContent).toBe(UPLOAD + EMPTY);
+    expect(itemTexts(menu)).toEqual([UPLOAD]);
     expect(cataloguePaths(fetchMock)).toEqual([commandsOf(A)]);
 
     await settleDeferredResponse(pending, jsonResponse({ commands: FOUR }));
 
     // 同一个菜单元素：没有关闭重开。
     expect(screen.getByRole("menu")).toBe(menu);
-    expect(itemTexts(menu)).toEqual(FOUR_TEXTS);
+    expect(itemTexts(menu)).toEqual([UPLOAD, ...FOUR_TEXTS]);
     expect(menu.textContent).not.toContain(EMPTY);
     expect(cataloguePaths(fetchMock)).toEqual([commandsOf(A)]);
   });
@@ -254,15 +275,15 @@ describe("「+」菜单写入草稿", () => {
 
     const menu = await openMenu();
 
-    expect(menu.textContent).toBe(EMPTY);
-    expect(itemTexts(menu)).toEqual([]);
+    expect(menu.textContent).toBe(UPLOAD + EMPTY);
+    expect(itemTexts(menu)).toEqual([UPLOAD]);
     expect(screen.queryAllByRole("alert", { hidden: true })).toEqual([]);
     expect(document.body.textContent).not.toContain("服务暂不可用");
     expect(cataloguePaths(fetchMock)).toHaveLength(2);
 
     fireEvent.keyDown(menu, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
-    expect(itemTexts(await openMenu())).toEqual(FOUR_TEXTS);
+    expect(itemTexts(await openMenu())).toEqual([UPLOAD, ...FOUR_TEXTS]);
     expect(cataloguePaths(fetchMock)).toHaveLength(3);
     expect(errors).not.toHaveBeenCalled();
   });
@@ -274,8 +295,8 @@ describe("「+」菜单写入草稿", () => {
 
     const menu = await openMenu();
 
-    expect(menu.textContent).toBe(EMPTY);
-    expect(itemTexts(menu)).toEqual([]);
+    expect(menu.textContent).toBe(UPLOAD + EMPTY);
+    expect(itemTexts(menu)).toEqual([UPLOAD]);
     expect(screen.queryAllByRole("alert", { hidden: true })).toEqual([]);
     expect(cataloguePaths(fetchMock)).toEqual([commandsOf(A)]);
 
@@ -283,7 +304,7 @@ describe("「+」菜单写入草稿", () => {
     fireEvent.keyDown(menu, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
     await type("半句");
-    expect((await openMenu()).textContent).toBe(EMPTY);
+    expect((await openMenu()).textContent).toBe(UPLOAD + EMPTY);
     expect(errors).not.toHaveBeenCalled();
   });
 
@@ -323,7 +344,7 @@ describe("「+」菜单写入草稿", () => {
       const { fetchMock } = await openBound(catalogue(FOUR));
       const menu = await openMenu();
 
-      pickFirstByKey(menu, key);
+      await pickFirstByKey(menu, key);
 
       await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
       expect(composer().value).toBe("/compact ");

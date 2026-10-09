@@ -5,7 +5,7 @@ import type { ApiClient } from "../../lib/api.js";
 import type { ChatMessageSnapshot } from "../../lib/session-contract.js";
 import { useAuth } from "../auth/index.js";
 import { useAttachmentsState } from "./attachments-state.js";
-import { composerLocks } from "./composer-locks.js";
+import { canSend, composerLocks } from "./composer-locks.js";
 import { useComposerOptions } from "./composer-options.js";
 import { errorMessage, isNotFound, isUnauthorized } from "./errors.js";
 import {
@@ -408,6 +408,7 @@ export function useChatSession() {
     workspaceId: slashWorkspaceId,
     upload: composerOptions?.upload,
   });
+  const tags = attachments.items;
   const turn = useTurnActions({
     abortMutation,
     clientRef,
@@ -424,6 +425,7 @@ export function useChatSession() {
     pendingCreateSendRef,
     refreshList,
     releaseMutationIfOwned,
+    replaceAttachments: attachments.replace,
     requestedSessionRef,
     selectSession,
     setCreating,
@@ -616,7 +618,7 @@ export function useChatSession() {
       if (creating || submitting || createControllerRef.current || mutationControllerRef.current) {
         return;
       }
-      if (prompt.trim().length === 0) {
+      if (!canSend(prompt, tags)) {
         return;
       }
       setDraft("");
@@ -642,7 +644,7 @@ export function useChatSession() {
       });
       dispatchPrompt(requestedSessionId, prompt, generation, client);
     },
-    [client, createAndSelect, creating, dispatchPrompt, requestedSessionId, submitting],
+    [client, createAndSelect, creating, dispatchPrompt, requestedSessionId, submitting, tags],
   );
   const submitComposer = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
@@ -705,6 +707,7 @@ export function useChatSession() {
     streamFailed: Boolean(ownedStreamError),
     undoing: ownsMutation(undoOwner, client, requestedSessionId),
     draft,
+    attachments: tags,
   });
 
   // `新建会话`：replace 导航回欢迎态，不发请求、不动草稿。`focusComposer` 为假（侧栏是覆盖层）时

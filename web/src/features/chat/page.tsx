@@ -2,6 +2,7 @@ import type { ComponentProps } from "react";
 import { useSidebarNavigate, useSidebarSlot } from "../../lib/sidebar-slot.js";
 import { useTopbar } from "../../lib/topbar.js";
 import { useArtifactsPanel } from "./artifacts-panel.js";
+import { useAttachmentArea } from "./attachment-chips.js";
 import { useConversationSearch } from "./conversation-search.js";
 import { ConversationView } from "./conversation-view.js";
 import { DeleteDialog } from "./delete-dialog.js";
@@ -52,6 +53,13 @@ export function ChatPage() {
     !session.composerDisabled,
     session.setDraft,
   );
+  const files = useAttachmentArea({
+    attachments: session.attachments,
+    locked: session.composerDisabled,
+    ready: session.composerOptions !== null,
+    sessionId: requestedSessionId,
+    workspaceId: session.slashWorkspaceId,
+  });
   // 列表渲染进 shell 侧栏列表区（issue 424）；数据与回调经 SessionSidebar 的既有 props 传入。
   useSidebarSlot(
     <SessionList
@@ -85,6 +93,7 @@ export function ChatPage() {
         composerOptions={session.composerOptions}
         composerRef={session.composerRef}
         draft={draft}
+        files={files}
         generating={session.generating}
         historyError={session.historyError}
         historyView={historyView}
