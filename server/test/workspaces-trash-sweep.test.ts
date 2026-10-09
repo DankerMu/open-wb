@@ -141,7 +141,7 @@ describe("trash sweep: 到期的批次被清除", () => {
     await sweep(sandboxRoot, 30, NOW);
 
     expect(readdirSync(ws)).toEqual([]);
-    expect(lstatSync(ws).mode & 0o7777).toBe(PRIVATE_MODE);
+    expect(modeOf(ws)).toBe(PRIVATE_MODE);
     expect(readdirSync(join(trash, "u1"))).toEqual([WS]);
   });
 });
@@ -184,15 +184,102 @@ describe("trash sweep: `.trash` 被占位", () => {
     expect(snapshot(trash)).toEqual(before);
   });
 
-  it("still sweeps a `.trash` whose mode is not 0700, without correcting the mode", async () => {
+  // 0770 is what an account root carries; 0750 has only a group bit, 0701 only an other bit.
+  it.each([
+    ["0770", 0o770],
+    ["0750", 0o750],
+    ["0701", 0o701],
+  ])(
+    "does nothing when `.trash` has mode %s, and leaves the mode as it is",
+    async (_label, mode) => {
+      const { sandboxRoot, trash } = openTrash();
+      const expired = batch(privateDirs(trash, "u1", WS), EXPIRED);
+      chmodSync(trash, mode);
+      const before = snapshot(trash);
+
+      await expect(sweep(sandboxRoot, 30, NOW)).resolves.toBeUndefined();
+
+      expect(existsSync(expired)).toBe(true);
+      expect(snapshot(trash)).toEqual(before);
+      expect(modeOf(trash)).toBe(mode);
+    },
+  );
+});
+
+// file-operations「删除」: all four levels are 0700 directories of the app uid. Anything else was
+// not made by the app, so the sweep neither walks nor removes it.
+describe("trash sweep: 非 0700 或非本用户的层级不清扫", () => {
+  it("skips an owner directory with mode 0770 and still sweeps its sibling", async () => {
+    const { sandboxRoot, trash } = openTrash();
+    const loose = privateDirs(trash, "u1");
+    const kept = batch(privateDirs(loose, WS), EXPIRED);
+    const siblingExpired = batch(privateDirs(trash, "u2", WS), EXPIRED);
+    chmodSync(loose, 0o770);
+    const before = snapshot(loose);
+
+    await expect(sweep(sandboxRoot, 30, NOW)).resolves.toBeUndefined();
+
+    expect(existsSync(kept)).toBe(true);
+    expect(snapshot(loose)).toEqual(before);
+    expect(modeOf(loose)).toBe(0o770);
+    expect(existsSync(siblingExpired)).toBe(false);
+  });
+
+  it("skips a workspace directory with mode 0770 and still sweeps its sibling", async () => {
+    const { sandboxRoot, trash } = openTrash();
+    const loose = privateDirs(trash, "u1", WS);
+    const kept = batch(loose, EXPIRED);
+    const siblingExpired = batch(privateDirs(trash, "u1", OTHER_WS), EXPIRED);
+    chmodSync(loose, 0o770);
+    const before = snapshot(loose);
+
+    await expect(sweep(sandboxRoot, 30, NOW)).resolves.toBeUndefined();
+
+    expect(existsSync(kept)).toBe(true);
+    expect(snapshot(loose)).toEqual(before);
+    expect(modeOf(loose)).toBe(0o770);
+    expect(existsSync(siblingExpired)).toBe(false);
+  });
+
+  it("skips an expired batch with mode 0770 and removes the 0700 one beside it", async () => {
+    const { sandboxRoot, trash } = openTrash();
+    const ws = privateDirs(trash, "u1", WS);
+    const loose = batch(ws, `${NOW - 32 * DAY}-${SUFFIX}`);
+    const proper = batch(ws, EXPIRED);
+    chmodSync(loose, 0o770);
+    const before = snapshot(loose);
+
+    await expect(sweep(sandboxRoot, 30, NOW)).resolves.toBeUndefined();
+
+    expect(snapshot(loose)).toEqual(before);
+    expect(modeOf(loose)).toBe(0o770);
+    expect(existsSync(proper)).toBe(false);
+    expect(readdirSync(ws)).toEqual([`${NOW - 32 * DAY}-${SUFFIX}`]);
+  });
+
+  // No unprivileged way to chown one level. The tree is a single chain, the sweep checks its
+  // levels in order (`.trash`, owner, workspace, batch) and asks for the euid once per check, so
+  // answering truthfully `passing` times and then as someone else fails exactly one level.
+  it.each([
+    ["the owner directory", 1],
+    ["the workspace directory", 2],
+    ["the batch", 3],
+  ])("does nothing when %s belongs to another uid", async (_level, passing) => {
     const { sandboxRoot, trash } = openTrash();
     const expired = batch(privateDirs(trash, "u1", WS), EXPIRED);
-    chmodSync(trash, 0o755);
+    const before = snapshot(trash);
+    const uid = lstatSync(trash).uid;
+    const geteuid = vi.spyOn(process, "geteuid").mockReturnValue(uid + 1);
+    for (let call = 0; call < passing; call += 1) {
+      geteuid.mockReturnValueOnce(uid);
+    }
 
-    await sweep(sandboxRoot, 30, NOW);
+    await expect(sweep(sandboxRoot, 30, NOW)).resolves.toBeUndefined();
 
-    expect(existsSync(expired)).toBe(false);
-    expect(lstatSync(trash).mode & 0o7777).toBe(0o755);
+    expect(existsSync(expired)).toBe(true);
+    expect(snapshot(trash)).toEqual(before);
+    // The level that failed is the one meant, and nothing below it was looked at.
+    expect(geteuid).toHaveBeenCalledTimes(passing + 1);
   });
 });
 
@@ -307,16 +394,26 @@ describe("trash sweep: 账号 id 不以点开头", () => {
     });
   });
 
-  it("refuses an account whose id is `.trash` as a workspace owner, creating nothing", () => {
+  it("refuses an account whose id starts with a dot as a workspace owner, creating nothing", () => {
     const sandboxRoot = realpathSync(tempDir());
     withOpenDb(":memory:", (db) => {
-      db.prepare(
+      const insertAccount = db.prepare(
         "INSERT INTO accounts(id, account, role, disabled, password_hash) VALUES (?, ?, ?, ?, ?)",
-      ).run(".trash", "dotowner", "成员", 0, ACCOUNT_HASH);
+      );
+      insertAccount.run(".trash", "dotowner", "成员", 0, ACCOUNT_HASH);
+      insertAccount.run(".x", "dotother", "成员", 0, ACCOUNT_HASH);
       const store = createWorkspaceStore(db, { sandboxRoot, ensureSharedDir, emit });
 
-      expectGenericRejection(() => store.create({ id: ".trash" }, { name: "alpha" }));
-      expectGenericRejection(() => store.createTemporary({ id: ".trash" }));
+      expectOwnerPathRejection(() => store.create({ id: ".trash" }, { name: "alpha" }));
+      expectOwnerPathRejection(() => store.create({ id: ".x" }, { name: "alpha" }));
+      // Inside a transaction, as its callers are: outside one it is refused for that reason first.
+      db.exec("BEGIN");
+      try {
+        expectOwnerPathRejection(() => store.createTemporary({ id: ".trash" }));
+        expectOwnerPathRejection(() => store.createTemporary({ id: ".x" }));
+      } finally {
+        db.exec("ROLLBACK");
+      }
 
       expect(existsSync(join(sandboxRoot, ".trash"))).toBe(false);
       expect(readdirSync(sandboxRoot)).toEqual([]);
@@ -327,8 +424,8 @@ describe("trash sweep: 账号 id 不以点开头", () => {
       db.prepare(
         "INSERT INTO workspaces(id, owner_id, name, dir, created_at) VALUES (?, ?, ?, ?, ?)",
       ).run(WS, ".trash", "alpha", "alpha", 1);
-      expectGenericRejection(() => store.list(".trash"));
-      expectGenericRejection(() => store.rootOf({ id: ".trash" }, WS));
+      expectOwnerPathRejection(() => store.list(".trash"));
+      expectOwnerPathRejection(() => store.rootOf({ id: ".trash" }, WS));
       expect(readdirSync(sandboxRoot)).toEqual([]);
     });
   });
@@ -396,11 +493,16 @@ function snapshot(dir: string, prefix = ""): Record<string, string> {
   return entries;
 }
 
+function modeOf(path: string): number {
+  return lstatSync(path).mode & 0o7777;
+}
+
 function count(db: DatabaseSync, sql: string): number {
   return (db.prepare(sql).get() as { count: number }).count;
 }
 
-function expectGenericRejection(run: () => unknown): void {
+/** The store's own refusal of the owner segment: a plain `Error`, never an `HttpError`. */
+function expectOwnerPathRejection(run: () => unknown): void {
   let thrown: unknown;
   try {
     run();
@@ -409,4 +511,5 @@ function expectGenericRejection(run: () => unknown): void {
   }
   expect(thrown).toBeInstanceOf(Error);
   expect(thrown).not.toBeInstanceOf(HttpError);
+  expect((thrown as Error).message).toMatch(/invalid workspace owner path/u);
 }
