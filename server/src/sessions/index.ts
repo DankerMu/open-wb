@@ -7,6 +7,7 @@ import { emit } from "../core/audit/index.js";
 import type { ChatEvent } from "./events.js";
 import { registerSessionListEvents, type SessionListNotifier } from "./list-events.js";
 import type { SpawnLog } from "./omp/spawn-gate.js";
+import type { SessionSandboxPort } from "./prompt-attachments.js";
 import { registerSessionRoutes } from "./rest.js";
 import { registerCommandRoutes } from "./rest-commands.js";
 import { registerComposerRoutes } from "./rest-composer.js";
@@ -51,10 +52,16 @@ export interface RegisterSessionsOptions {
    */
   composer: ComposerConfig;
   /**
-   * The effective upload limits (createApp's configuration), reported by `GET /api/composer/options`;
-   * sessions enforces neither here.
+   * The effective upload limits (createApp's configuration), reported by `GET /api/composer/options`.
+   * `maxFiles` is also how many attachments one prompt may carry; `maxBytes` is not enforced here.
    */
   upload: { maxBytes: number; maxFiles: number };
+  /**
+   * The app's one sandbox facade — the instance createApp hands the workspaces module, with its
+   * rootOf and its audit emit: the prompt route resolves every attachment path through it.
+   * Sessions imports neither the facade nor the workspaces module for it.
+   */
+  sandbox: SessionSandboxPort;
   /**
    * The app's one workspace-snapshots service (createApp binds it to the managed snapshots
    * directory and the snapshot settings); the prompt route snapshots a bound session's workspace
@@ -156,6 +163,8 @@ export function registerSessions(
       },
     },
     turnSnapshots,
+    sandbox: options.sandbox,
+    uploadMaxFiles: options.upload.maxFiles,
   });
   registerCommandRoutes(app, {
     agentDir: options.agentDir,

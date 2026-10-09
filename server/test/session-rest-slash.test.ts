@@ -10,6 +10,8 @@
  * regenerate and fork」): the skills are those of the session's own cwd. Workspaces are created
  * over `POST /api/workspaces`, bound sessions over `POST /api/sessions {workspaceId}`, project
  * skills are real `SKILL.md` files under `<root>/.omp/skills`.
+ * Issue #1019 (message-attachments Scenario「与斜杠规则的组合」): the attachment suffix follows the
+ * wire form the slash rules decided; the attached file is written into the workspace's `uploads/`.
  */
 import fs, { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
@@ -270,4 +272,38 @@ describe("prompt route classifies with the session's own skills (#813)", () => {
     expect(await promptOn(world, DEPLOY, await bound.session())).toBe(DEPLOY);
     expect(spy.mock.calls.length).toBeGreaterThan(0);
   });
+});
+
+describe("slash text with attachments (#1019)", () => {
+  const SUFFIX =
+    "\n\n用户随本条消息上传了以下文件（相对当前工作目录的路径），需要时请读取：\n- uploads/a.pdf";
+
+  it.each([
+    ["an installed skill", "/skill:weekly-report 写周报", "/skill:weekly-report 写周报"],
+    ["escaped plain text", "/etc/hosts 是什么", " /etc/hosts 是什么"],
+  ])(
+    "sends %s in its wire form followed by the suffix, and stores it as typed",
+    async (_n, typed, wire) => {
+      const world = await openWorld();
+      installSkill(world, SKILL);
+      const bound = await openBound(world, "proj");
+      mkdirSync(join(bound.root, "uploads"));
+      writeFileSync(join(bound.root, "uploads", "a.pdf"), "pdf");
+      const session = await bound.session();
+
+      const response = await postPrompt(
+        world.fixture.app,
+        session,
+        world.cookie,
+        JSON.stringify({ message: typed, attachments: ["uploads/a.pdf"] }),
+      );
+
+      expect(response.statusCode).toBe(202);
+      expect(world.wire.mock.calls.map(([id, text]) => [id, text])).toEqual([
+        [session, `${wire}${SUFFIX}`],
+      ]);
+      expect(userContents(world, session)).toEqual([typed]);
+      expect(world.spawns).toHaveLength(0);
+    },
+  );
 });

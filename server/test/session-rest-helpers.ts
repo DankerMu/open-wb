@@ -127,6 +127,13 @@ export async function withSessionRest<T>(
             workspaceRootOf: () => null,
             onError: () => undefined,
           }),
+          // No session of this harness has a workspace on disk: no prompt gets to a path.
+          sandbox: {
+            resolve() {
+              throw new Error("session-rest harness resolves no attachment");
+            },
+          },
+          uploadMaxFiles: 10,
         });
         try {
           return await action({ app, db, store, supervisor, metadata, listNotified });

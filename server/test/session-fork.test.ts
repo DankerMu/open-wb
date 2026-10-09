@@ -7,6 +7,8 @@
  * SQL rows, the source file's bytes and mtime, per-child stdin frames and stdout replies, spawn
  * argv/env, published events and the public supervisor surface.
  */
+import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { HttpError } from "../src/core/errors/index.js";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
@@ -616,9 +618,24 @@ describe("fork alignment of messages with attachments (#1018)", () => {
       );
       presetSessionFile(db, world.session, realSource().file);
       const before = snapshot(db, world.session, true);
+      // The two files, in the session's (temporary) workspace: a fork copies rows, never files.
+      const { sandboxRoot } = world.rt.runtime;
+      const dir = db
+        .prepare(
+          "SELECT w.dir FROM workspaces w JOIN chat_sessions s ON s.workspace_id = w.id WHERE s.id = ?",
+        )
+        .get(world.session)?.dir;
+      const root = join(sandboxRoot, OWNER_ID, String(dir));
+      mkdirSync(join(root, "uploads"), { recursive: true });
+      writeFileSync(join(root, A_PDF.path), "pdf");
+      writeFileSync(join(root, bPng.path), "12345");
+      const files = () => readdirSync(sandboxRoot, { recursive: true }).sort();
+      const onDisk = files();
 
       const result = await forked(world, u2 ?? -1);
 
+      expect(files()).toEqual(onDisk);
+      expect(onDisk).toHaveLength(5);
       expect(result).toEqual({ draft: text, attachments: [bPng], branch: ["e-2"] });
       const fresh = String(
         db.prepare("SELECT id FROM chat_sessions WHERE parent_session_id = ?").get(world.session)
