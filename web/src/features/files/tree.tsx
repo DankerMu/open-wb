@@ -1,7 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ApiClient, ApiError } from "../../lib/api.js";
-import { EmptyState, Icon, type IconName } from "../../ui/index.js";
-import { CreationMenu, DirectoryDialog } from "./dialogs.js";
+import { Button, EmptyState, Icon, type IconName, Menu } from "../../ui/index.js";
+import { DirectoryDialog } from "./dialogs.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
 import { fileIcon, formatSize, logicalPath } from "./file-meta.js";
 import { PreviewPane } from "./preview.js";
@@ -246,6 +246,29 @@ export function EmptyPreview() {
     <div className="files-preview-empty">
       <EmptyState description="在左侧目录树中选择一个文件进行预览" title="未选择文件" />
     </div>
+  );
+}
+
+type CreationMenuProps = {
+  /** 回调带上菜单触发器，供对话框在取消类关闭后把焦点还给它。 */
+  onNewDirectory(trigger: HTMLElement | null): void;
+  onNewWorkspace(trigger: HTMLElement | null): void;
+};
+
+function CreationMenu({ onNewDirectory, onNewWorkspace }: CreationMenuProps) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  return (
+    <Menu
+      items={[
+        { label: "新建文件夹", onSelect: () => onNewDirectory(triggerRef.current) },
+        { label: "新建工作空间", onSelect: () => onNewWorkspace(triggerRef.current) },
+      ]}
+      trigger={
+        <Button aria-label="新建" ref={triggerRef}>
+          ＋
+        </Button>
+      }
+    />
   );
 }
 
