@@ -34,7 +34,7 @@ prompt 路由的 202 SHALL 为 `{userMessageId, assistantMessageId, undo}`，`un
 6. `files` 为 `restore` 或 `force`，且存在另一个 `workspace_id` 相同、`status="running"` 的会话 → 409 `session_busy`；
 7. `files` 为 `restore` 且存在冲突（「共用空间冲突」的判据，只读数据库）→ 409 `undo_conflict`。
 
-校验通过即登记该会话的控制占用（turn-control「会话级控制占用」），持有至本次调用结束并在每一种结束路径上释放；持有期间同一会话的 prompt、regenerate、fork、undo、DELETE SHALL 409 `session_busy`。成功 SHALL 返回 200 `{session, draft, files}`：`session` 为撤回后的会话视图，`draft` 为被撤回消息所存的 `content` 原文（不带转义空格），`files` 见「文件还原与结果」。
+校验通过即登记该会话的控制占用（turn-control「会话级控制占用」），持有至本次调用结束并在每一种结束路径上释放；持有期间同一会话的 prompt、regenerate、fork、undo、DELETE SHALL 409 `session_busy`。成功 SHALL 返回 200 `{session, draft, files, attachments}`：`session` 为撤回后的会话视图，`draft` 为被撤回消息所存的 `content` 原文（不带转义空格；只发附件的消息为空串），`files` 见「文件还原与结果」，`attachments` 为被撤回消息所存的附件（message-attachments「附件落库与快照」）里撤回完成后仍然存在的那些——按存储次序，元素恰为所存的 `{path, size}`；该消息没有附件或它们都已不存在时为 `[]`。所存的附件数组 SHALL 在「对话原地回退」第 5 步删除该消息行之前读出；是否存在 SHALL 在第 4 步的文件还原（`files` 不是 `keep` 时）之后判定：路径按 sandbox-core「resolve 契约与逃逸向量」（`op=read`）在该会话的工作空间内解析成功，且目标经 `lstat`（不跟随符号链接）是普通文件，即为存在。这一判定是服务端读回它受理时校验过的路径，不是用户请求：SHALL 使用不写审计的解析（不产生 `sandbox.reject`），解析被拒或 `lstat` 出错都按不存在处理，SHALL NOT 使撤回失败，也不读取文件内容。
 
 #### Scenario: 形状与鉴权
 - **WHEN** 所有者以 `{}`、`{messageId:1}`、`{messageId:"1",files:"restore"}`、`{messageId:1,files:"yes"}`、`{messageId:1,files:"keep",x:1}`、`[]`、malformed JSON、`text/plain` body 调用 undo
@@ -49,6 +49,12 @@ prompt 路由的 202 SHALL 为 `{userMessageId, assistantMessageId, undo}`，`un
 #### Scenario: 撤回期间的并发请求
 - **WHEN** undo 的临时进程 `branch` 应答未到时，对同一会话发 prompt、regenerate、fork、第二个 undo 与 DELETE
 - **THEN** 五者均 409 `session_busy`；原 undo 照常 200；之后对该会话的 prompt 返回 202
+
+#### Scenario: 响应带回仍存在的附件
+- **WHEN** 用户消息 u2 受理时带附件 `uploads/a.pdf` 与 `uploads/b.png`，其后的回合里 `uploads/b.png` 被删除；所有者 undo `{messageId:<u2>, files:"keep"}`；另一例同样的前提以 `files:"restore"` 撤回（u2 的快照里有这两个文件）；再一例撤回一条不带附件的消息；再一例 u2 的附件路径在受理之后被带外换成了符号链接
+- **THEN** 第一例 200 的 `attachments` 恰为 `[{path:"uploads/a.pdf", size:<所存大小>}]`；第二例两项都在、次序与所存相同（`b.png` 已被还原）；第三例为 `[]`；第四例不含那一项；四例的 body 都恰含 `session`、`draft`、`files`、`attachments` 四键，审计都没有新增 `sandbox.reject`
+- **WHEN** 被撤回的 u2 只有附件（`content` 为空串、附件 `uploads/a.pdf`，fake omp 的条目文本为附件后缀本身），所有者以 `files:"keep"` 撤回
+- **THEN** 200；`draft` 为 `""`，`attachments` 为 `[{path:"uploads/a.pdf", size:<所存大小>}]`；对位成功（不是 502）
 
 ### Requirement: 对话原地回退
 校验通过后，undo SHALL 按以下次序执行（fork 的进程策略，作用于当前会话）：
@@ -188,9 +194,9 @@ prompt 路由的 202 SHALL 为 `{userMessageId, assistantMessageId, undo}`，`un
 - `command`：`命令消息无法撤回`
 - `none`：`这条消息没有文件快照，无法撤回`
 
-`undo` 为 `available` 时点击 SHALL 不弹确认，恰调用一次 `undoMessage(sessionId, messageId, "restore")`，请求期间输入框锁定（不显示 `生成中` 与 `停止`）。200 时页面 SHALL：重读该会话的消息快照并替换线程；把输入框草稿设为响应的 `draft`，覆盖已有草稿；把焦点移到输入框；以响应的 `session` 更新列表条目。`files.skipped.count` 或 `files.failed.count` 大于 0 时 SHALL 在输入框上方就地显示一条可关闭的说明（`role="status"`），标题为 `已撤回，以下文件未还原`，其下每行一个路径：先 `skipped.paths`、后 `failed.paths`，各按响应里的次序，不去重、不显示原因；`skipped.count + failed.count` 大于所列行数时末行为 `等共 <skipped.count + failed.count> 项`（截断只发生在服务端，web 不另设上限）。每一次被本页应用的 200 都以它自己的 `files` 重新决定这条说明（二者都为 0 时不显示，并撤掉已有的说明）；点关闭、下一次发送、切换会话或换账号时消失，其后不再出现。
+`undo` 为 `available` 时点击 SHALL 不弹确认，恰调用一次 `undoMessage(sessionId, messageId, "restore")`，请求期间输入框锁定（不显示 `生成中` 与 `停止`）。200 时页面 SHALL：重读该会话的消息快照并替换线程；把输入框草稿设为响应的 `draft`，覆盖已有草稿（`draft` 为空串——被撤回的是只发附件的消息——时草稿被清空）；把输入框的附件标签设为响应 `attachments` 所列各项（已上传状态，文件名取路径的最后一段，大小取 `size`；覆盖已有标签——在途的上传中止、排队的撤掉，与 message-attachments「输入框附件标签」切换会话时的规则相同），不发出任何上传请求；把焦点移到输入框；以响应的 `session` 更新列表条目。`files.skipped.count` 或 `files.failed.count` 大于 0 时 SHALL 在输入框上方就地显示一条可关闭的说明（`role="status"`），标题为 `已撤回，以下文件未还原`，其下每行一个路径：先 `skipped.paths`、后 `failed.paths`，各按响应里的次序，不去重、不显示原因；`skipped.count + failed.count` 大于所列行数时末行为 `等共 <skipped.count + failed.count> 项`（截断只发生在服务端，web 不另设上限）。每一次被本页应用的 200 都以它自己的 `files` 重新决定这条说明（二者都为 0 时不显示，并撤掉已有的说明）；点关闭、下一次发送、切换会话或换账号时消失，其后不再出现。
 
-409 `undo_conflict` SHALL 打开对话框，标题 `其它会话改动过这个工作空间`，说明 `这条消息发出之后，共用这个工作空间的其它会话还运行过回合。连文件一起还原会把它们的改动一并冲掉。`，三个按钮 `只撤回对话`、`连文件一起还原`、`取消`：前两者关闭对话框并分别以 `"keep"`、`"force"` 再调用一次 `undoMessage`；`取消` 与 Escape 关闭对话框（遮罩点击不关闭：`alert-dialog`，同删除对话框）且不发请求，焦点回到该 `撤回` 按钮。没有冲突时 SHALL NOT 出现该对话框。其它失败（400/404/409 `session_busy`/409 `session_archived`/502/503 与网络失败）SHALL 把信封文案（非信封失败为既有的安全文案）就地显示在输入框上，线程与草稿不变，输入框解锁。请求在途时切换会话、换账号或卸载页面，其后到达的响应 SHALL 被丢弃（不改草稿、不导航、不显示错误）。撤回 SHALL NOT 显示任何轻提示。
+409 `undo_conflict` SHALL 打开对话框，标题 `其它会话改动过这个工作空间`，说明 `这条消息发出之后，共用这个工作空间的其它会话还运行过回合。连文件一起还原会把它们的改动一并冲掉。`，三个按钮 `只撤回对话`、`连文件一起还原`、`取消`：前两者关闭对话框并分别以 `"keep"`、`"force"` 再调用一次 `undoMessage`；`取消` 与 Escape 关闭对话框（遮罩点击不关闭：`alert-dialog`，同删除对话框）且不发请求，焦点回到该 `撤回` 按钮。没有冲突时 SHALL NOT 出现该对话框。其它失败（400/404/409 `session_busy`/409 `session_archived`/502/503 与网络失败）SHALL 把信封文案（非信封失败为既有的安全文案）就地显示在输入框上，线程、草稿与附件标签不变，输入框解锁。请求在途时切换会话、换账号或卸载页面，其后到达的响应 SHALL 被丢弃（不改草稿与附件标签、不导航、不显示错误）。撤回 SHALL NOT 显示任何轻提示。
 
 #### Scenario: 撤回并回填
 - **WHEN** 输入框草稿为 `半句话`，点击第二条用户消息（文本 `第二个问题`，`undo` 为 `available`）的 `撤回`，undo 返回 200（`files.skipped.count` 与 `files.failed.count` 均为 0）
@@ -221,3 +227,11 @@ prompt 路由的 202 SHALL 为 `{userMessageId, assistantMessageId, undo}`，`un
 #### Scenario: 锁定与归档时
 - **WHEN** 回合进行中；另一例打开一个已归档的会话
 - **THEN** 前者每条用户消息的 `撤回` 为禁用；后者用户消息没有 `撤回` 按钮
+
+#### Scenario: 撤回带附件的消息恢复标签
+- **WHEN** 输入框里已有一个已上传的标签 `old.txt`，点击一条带附件 `uploads/a.pdf`、`uploads/b.png` 的用户消息（文本 `看看这两个`）的 `撤回`，undo 返回 200 且 `attachments` 为 `[{path:"uploads/a.pdf", size:3}]`（`b.png` 已不存在）
+- **THEN** 草稿为 `看看这两个`；附件区恰有一个已上传状态的 `a.pdf` 标签，没有 `old.txt` 与 `b.png`；没有发出任何上传请求；此时直接发送，prompt 的 `attachments` 恰为 `["uploads/a.pdf"]`
+- **WHEN** 另一例 undo 返回的 `attachments` 为 `[]`
+- **THEN** 附件区不渲染；草稿照常回填
+- **WHEN** 输入框草稿为 `半句话`，撤回一条只有附件的用户消息，undo 返回 200 且 `draft` 为 `""`、`attachments` 为 `[{path:"uploads/a.pdf", size:3}]`
+- **THEN** 草稿为空（`半句话` 被覆盖）；附件区恰有一个已上传状态的 `a.pdf` 标签；`发送` 可用；线程里不再有那条只有附件的消息；没有发出上传请求
