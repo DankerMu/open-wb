@@ -6,6 +6,7 @@ import { mountAuthenticatedApp } from "./render-app-router.js";
 import { NULL_SESSION_META } from "./session-meta-fixtures.js";
 import {
   authenticatedPrincipal,
+  composerOptionsRoute,
   createFetchMock,
   deferredResponse,
   type FetchMock,
@@ -116,6 +117,7 @@ function mountChat(path = "/", strict = false) {
     "/api/auth/me": () => jsonResponse(authenticatedPrincipal),
     "/api/workspaces": () => jsonResponse({ workspaces: [] }),
     "/api/sessions": () => jsonResponse({ sessions: [LIST_SESSION] }),
+    ...composerOptionsRoute(),
     "/api/info": () =>
       jsonResponse({
         name: "workbuddy-app-server",
@@ -206,6 +208,7 @@ describe("侧栏会话列表区 (S11)", () => {
       "/api/auth/me": () => jsonResponse(authenticatedPrincipal),
       "/api/workspaces": () => jsonResponse({ workspaces: [] }),
       "/api/sessions": sessions,
+      ...composerOptionsRoute(),
       "/api/info": () =>
         jsonResponse({
           name: "workbuddy-app-server",

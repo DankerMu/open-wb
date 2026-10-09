@@ -9,6 +9,7 @@ import { FakeEventSource, resetFakeEventSources } from "./chat-stream-support.js
 import { createMediaQuery, installMatchMedia, uninstallMatchMedia } from "./media-query-support.js";
 import {
   authenticatedPrincipal,
+  composerOptionsRoute,
   createFetchMock,
   type FetchMock,
   jsonResponse,
@@ -64,6 +65,7 @@ async function mountShell(narrow: boolean): Promise<FetchMock> {
     "/api/info": () => jsonResponse(serviceInfo),
     "/api/sessions": () => jsonResponse({ sessions: [] }),
     "/api/workspaces": () => jsonResponse({ workspaces: [] }),
+    ...composerOptionsRoute(),
   });
   vi.stubGlobal("fetch", fetchMock);
   const router = createAppRouter();

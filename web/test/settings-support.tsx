@@ -5,6 +5,7 @@ import { expect, vi } from "vitest";
 import { createAppRouter } from "../src/routes/index.js";
 import { ToastProvider } from "../src/ui/index.js";
 import {
+  composerOptionsRoute,
   createFetchMock,
   currentLocation,
   jsonResponse,
@@ -18,6 +19,7 @@ export function authenticatedRoutes(routes: Parameters<typeof createFetchMock>[0
     "/api/auth/me": jsonResponse(principal),
     "/api/workspaces": jsonResponse({ workspaces: [] }),
     "/api/sessions": jsonResponse({ sessions: [] }),
+    ...composerOptionsRoute(),
     ...routes,
   };
 }

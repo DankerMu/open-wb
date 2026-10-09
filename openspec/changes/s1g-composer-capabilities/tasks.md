@@ -772,7 +772,7 @@ Minimal mergeable slice: 13.1 + 13.2 + 13.4 一刀；13.3 一刀；13.5 一刀�
 
 ## 14. web — 能力行布局与权限档位控件
 
-- [ ] 14.1 options 状态：新文件 `web/src/features/chat/composer-options.ts`（hook：每个 client 取一次 `getComposerOptions` 并缓存，失败后在下一次进入欢迎态或选中会话时重取；登记 `MIGRATED_AREAS`）。由 `use-chat-session.ts`（702 行）调用并把结果与欢迎态的三项内存选择交给页面；欢迎态选择的状态放进 `welcome-options.ts`（35 行）或该新文件，不加大 `use-chat-session.ts` 超过必要的几行。
+- [x] 14.1 options 状态：新文件 `web/src/features/chat/composer-options.ts`（hook：每个 client 取一次 `getComposerOptions` 并缓存，失败后在下一次进入欢迎态或选中会话时重取；登记 `MIGRATED_AREAS`）。由 `use-chat-session.ts`（702 行）调用并把结果与欢迎态的三项内存选择交给页面；欢迎态选择的状态放进 `welcome-options.ts`（35 行）或该新文件，不加大 `use-chat-session.ts` 超过必要的几行。
   测试新文件 `web/test/chat-composer-options.test.tsx`（hook 层 + 假 `getComposerOptions`）：同一个 client 下多次挂载、切换会话恰取一次；第一次失败后，切到另一个会话或回到欢迎态触发恰一次重取，重取成功后结果可用且此后不再取；换 client（换账号）重新取。整页层由 chat-web「选项读取失败后重取」钉住（14.2a 的测试文件）。变异：去掉重取 → 两处都判红（失败一次后控件永不出现）；每次切换都取 →「恰两次」判红。
   **实施注记（14.1，fixture 评审补充，#1026）**：
   - 现状漂移：`use-chat-session.ts` 在 origin/master 是 771 行，不是任务与 issue 写的 702；余量 29 行，本刀只加 3 行（import、调用、返回键 `composerOptions`），到约 774。`welcome-options.ts` 35 行属实；`web/src/features` 下没有 `getComposerOptions` 调用方属实。
