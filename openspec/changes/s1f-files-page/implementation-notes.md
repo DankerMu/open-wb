@@ -255,3 +255,36 @@
 - 变异：去掉 `onError` 清头 → 「打开失败」用例的 `content-type` 为 JSON、无 `content-disposition` 断言判红。
 - 变异：预期不可观察：把流的 `end` 截界去掉（改成无界 `createReadStream`）。测试里文件不会在 lstat 后增长，属防御性实现，PR 表中标注「不可观察」。
   - 实施后更正：上面「流不按 `size` 截界 → 预期不可观察」已不成立——交付的测试加了「审计后文件增长」用例，该变异判红。规格点名的外账号 `lisi` 是种子里唯一的管理员（`u3`），评审后测试的两处外账号改为 `lisi`（另保留普通成员一行）；「去掉 `ensureOwnedRoot`」由「属于自己但根目录缺失的 id」夹具判红（他人 id 的 404 是 facade 的双重保证）。`rest.ts` 在本刀之前是 418 行。lstat → 打开窗口的完整陈述（中间目录分量、FIFO）见 #1286。
+
+## 11.1（#1066）
+
+- Critical Path：代码本身不碰 `sandbox.resolve`、`op`、路径或文件系统（规格明文禁止），不落在 `AGENTS.md` 两条白盒路径内；但它是预览监听器读用户文件的唯一凭据，issue 已要求 PR 标注白盒审查，建议按两个评审席位处理。
+- 依赖：边表 11.1 只 ← 0.1（#1049 / PR #1285，按已合计）；不在 1.2 挡住的集合里，不等 1.1、1.3，与 #1052 的裁决无关；代码上只导入 `node:crypto`，同批兄弟切片都不是前提。
+- 下游：等本刀的是 #1067（11.2–11.3）、#1069（12.1 收 `tokens`）及经它们的 13.1；#1068（12.2）不等它，它若也在 `server/src/preview/` 下建文件，谁先合都不冲突。
+- 命名与唯一实现：`server/src/sessions/tokens.ts:9` 已有 `TokenRegistry`（39 行；单键、轮换、`revoke`、无到期）；新文件导出 `createPreviewTokens()`（或类 `PreviewTokenRegistry`），不得再叫 `TokenRegistry`，不拷贝其函数体（jscpd 含测试文件）。
+- 偏离记录写明不扩展旧表的理由：复合键、到期与续期、无吊销；D13 写的是「同一做法」，文件位置由规格钉在 `server/src/preview/`。
+- 签名照规格逐字：`issue({ownerId, workspaceId, embedOrigin}, now) → {token, expiresAt}`、`lookup(token, now) → {ownerId, workspaceId, embedOrigin} | null`；`now` 是两个调用上必填的毫秒 `number`，不设 `Date.now` 缺省、不在构造时收时钟；`embedOrigin: string | null`；`lookup` 恰返回三键，不带 `expiresAt` 与 `token`。
+- 复合键不得用分隔符拼接（`ownerId`、`workspaceId` 都是 `string`，`server/src/auth/index.ts:32`）：用嵌套 `Map<ownerId, Map<workspaceId, token>>` 加 `Map<token, 记录>`，不用普通对象当表；清除一条记录时两张表同时删。
+- 到期判定在 `issue` 与 `lookup` 用同一个谓词 `now >= expiresAt`（规格只在 `lookup` 一句写了边界，`issue` 恰在 `t + 900000` 时按已过期生成新令牌并删掉旧令牌的记录）；续期一律赋值为 `now + 900000`，时钟回拨时到期时间随之前移，不做单调保护。
+- 规格未写的随机数撞车：沿用 `sessions/tokens.ts:15-17` 的失败关闭——新令牌已在表里则抛不含令牌的 `Error`，既有记录不动；否则静默覆盖会把别人的令牌改指到本次的账号与空间。
+- 规格未写的残留：不做全表清扫；工作空间删除后既不再签发也不再查找的过期记录留到进程重启（每条常数字节），记入偏离记录。
+- 测试 `server/test/preview-tokens.test.ts`（新）：三个场景各一个 `describe`，真实 `randomBytes`；到期一律写字面量 `900000` / `899999`，不从源文件导入 TTL 常量（常量不导出）；正则用字面量 `/^[0-9a-f]{64}$/u`。
+- 场景之外必须补的断言：再次签发后 `lookup` 的 `embedOrigin` 是本次的值（含改成 `null`）；不经任何 `lookup` 直接在 `t + 900000` 再签发得到新令牌（规格场景二先 `lookup` 清除了记录，会掩盖 `issue` 自己的到期判断）；`("a:b","c")` 与 `("a","b:c")` 得到不同令牌；`lookup("constructor")`、`lookup("__proto__")` 为 `null`；两个实例互不可见。
+- 撞车用例按 `server/test/session-tokens.test.ts:80-88` 的写法（`vi.spyOn(nodeCrypto, "randomBytes")` 加 `syncBuiltinESMExports`，`afterEach` 还原），所以源文件必须用具名导入 `import { randomBytes } from "node:crypto"`；测试里不出现 64 位十六进制字面量（gitleaks），未知令牌由活令牌派生（`toUpperCase()`、`slice(0, 63)`），大写用例先断言令牌含 `[a-f]`。
+- 门槛与范围：knip 的 server 入口含 `test/**/*.test.ts`（`knip.json:9`），测试作唯一导入方合法，但未被测试导入的导出类型也会报，只导出测试实际导入的名字；既有测试无一需要改（没有测试枚举 `server/src` 目录或读 `docs/architecture/system.md`，`http-parser-owners.test.ts` 的条数属 #1067）；不是配置切片，不动 `system.md` 第 9 节；服务端纯模块，no checklist rows；只勾 11.1，11.3、11.5 的任务号留给 #1067、#1075。
+- 变异：`lookup` 顺手把 `expiresAt` 推后 → 「到期与查找不续期」里 `t + 899999` 查过之后 `t + 900000` 不再是 `null`，判红（`lookup` 不返回 `expiresAt`，这是唯一的观察方式）。
+- 变异：到期判定 `>=` 写成 `>` → 同一用例 `t + 900000` 的 `lookup` 非 `null`，判红。
+- 变异：`lookup` 到期时不清除记录而只返回 `null` → 「到期后再签发得到新令牌、旧令牌仍为 `null`」判红。
+- 变异：`issue` 不判到期、直接复用键上的旧记录 → 补充用例「不经 `lookup` 在 `t + 900000` 再签发」判红；规格场景二原样写法下此变异不可观察。
+- 变异：未过期再签发时生成新令牌 → 「签发、复用与续期」的同一令牌断言判红。
+- 变异：再签发不推后到期时间（保持 `t + 900000`）→ 同场景 `expiresAt = t + 5 分钟 + 900000` 判红。
+- 变异：再签发不更新 `embedOrigin` → 补充的 `embedOrigin` 断言判红。
+- 变异：键只用 `ownerId` → `(u1, w2)` 与 `(u1, w1)` 同令牌，判红；键只用 `workspaceId` → `(u2, w1)` 同令牌，判红（跨账号、跨空间的隔离向量）。
+- 变异：键改成 `ownerId + ":" + workspaceId` 拼接 → 分隔符碰撞用例判红。
+- 变异：令牌改成 16 字节或大写十六进制 → `/^[0-9a-f]{64}$/u` 判红。
+- 变异：`lookup` 改成不区分大小写或前缀匹配 → 「未知令牌」判红。
+- 变异：存储换成普通对象 → `lookup("constructor")` 非 `null`，判红。
+- 变异：去掉撞车检查 → 撞车用例里另一键的令牌被改指，判红。
+- 变异：登记表改成模块级单例 → 「两个实例互不可见」判红。
+- 变异：不可观察：「不写日志、不进审计」——纯模块没有日志与审计依赖，无从断言；证据在 #1067 的响应头与日志断言。
+- 变异：不可观察：遍历、符号链接、「他人空间 404 先于路径检查」「越界写 `sandbox.reject`」——登记表不接触路径，这些向量属 #1067、#1069 与 11.4。

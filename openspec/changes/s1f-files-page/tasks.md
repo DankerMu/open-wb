@@ -288,7 +288,8 @@ Minimal mergeable slice: 10.1（tar / gz 的遍历器）与它在 10.4 里的用
 
 ## 11. preview-origin — 令牌登记表与签发端点
 
-- [ ] 11.1 新文件 `server/src/preview/tokens.ts`：preview-origin「预览令牌登记表」（时钟由参数传入，便于测试）。
+- [x] 11.1 新文件 `server/src/preview/tokens.ts`：preview-origin「预览令牌登记表」（时钟由参数传入，便于测试）。
+  实施注记见 `implementation-notes.md`「11.1（#1066）」。
 - [ ] 11.2 `POST /api/workspaces/:id/preview-token`（`server/src/workspaces/` 下的新路由文件，仅在 `assembly.preview` 存在时注册）：响应六键、`base` 的推导（`PREVIEW_ORIGIN` 优先，否则请求协议 + 主机名 + 预览端口函数的返回值）、`embedOrigin` 取 `Origin` 头；
   `errors.ts` 的归属路由集合加入它。
 - [ ] 11.3 测试：`server/test/preview-tokens.test.ts`（登记表三个场景）；`server/test/preview-token-rest.test.ts`（「签发与复用」「对外来源与转换可用」「归属与请求体」；IPv6 主机名的方括号；响应头与日志不含令牌）；未装配 `preview` 时 404（http-service-skeleton「未装配预览的可注入 app」）。
