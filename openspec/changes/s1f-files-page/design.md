@@ -18,7 +18,7 @@
   - `audit_events.kind` 只有格式约束（小写点分），新增审计种类不需要迁移。
   - `web/package.json` 没有任何高亮、PDF、办公文档、Notebook、压缩包相关的库；`hast-util-to-jsx-runtime` 已随 `@assistant-ui/react-markdown` 进了 `node_modules`。
   - 包体 `web/dist` JS 1,086,670 字节（gzip 326,274），`vite.config.ts` 没有 `manualChunks`，全站没有动态 `import()`。
-  - `web/src/lib/api.ts` 729 行、`md-render.ts` 797 行，离 800 行上限都很近。
+  - `web/src/lib/api.ts` 778 行、`md-render.ts` 797 行，离 800 行上限都很近。
 - **约束**：ADR-0013（拷入层六类修改、应用层不引 Radix）；ADR-0010（omp 以专用系统用户运行，凭证不进 omp 可读环境）；ADR-0011（界面只显示逻辑路径）；
   `CONTEXT.md` 不变量 3（一切路径过 `resolve`）；功能验收清单的行由 owner 签。
 - **实现与归档次序**：C `s1f-session-list-temp-space` → S1g `s1g-composer-capabilities` → 本 change。上面的「现状」是 master 的代码事实；本 change 的规格 delta 里凡与 C 或 S1g 同名的 MODIFIED，都以「主规格 → C → S1g」叠加后的文本为底再加本 change 的增量（见 D25 的重叠表）。
@@ -325,7 +325,7 @@ OpenSpec 的 MODIFIED 是整条替换，归档次序固定为 C → S1g → 本 
 
 | 条文（capability / Requirement） | 底本 | 本 change 的增量 |
 |---|---|---|
-| http-service-skeleton / 服务启动与装配 | S1g 的 MODIFIED | 配置项二十三 → 三十五（键清单末尾加「以及下一段列出的十二个预览与文件键」，「缺省值分别为」改为「前二十三项的缺省值分别为」）；新增一段：十二个键的名称、缺省值与校验规则；成功次序在 `createApp` 与 `listen` 之间加「预览监听器 listen（先于主监听器）」，在写 models.yml 与 success record 之间加「建立预览缓存目录并启动两个周期清理」；失败清单加「预览监听器 listen」「预览缓存目录」；失败清理的对象加预览监听器。改写场景：「干净启动与一致命令面」（三十五项）、「HOST=localhost 单一 binding」（两个监听器各一个 binding）。新增场景：「预览与文件键的缺省与覆盖」「预览与文件键的非法值」。启动记录不变。C 的四个 `SNAPSHOT_*` 键与 S1g 的四个键、缺省值、解析规则与场景原样保留 |
+| http-service-skeleton / 服务启动与装配 | S1g 的 MODIFIED | 配置项二十三 → 三十五（键清单末尾加「以及下一段列出的十二个预览与文件键」，「缺省值分别为」改为「前二十三项的缺省值分别为」）；新增一段：十二个键的名称、缺省值与校验规则；成功次序在 `createApp` 与 `listen` 之间加「预览监听器 listen（先于主监听器）」，在写 models.yml 与 success record 之间加「建立预览缓存目录并启动两个周期清理」；失败清单加「预览监听器 listen」「预览缓存目录」；失败记录 `reason` 封闭枚举一句末尾加「本change新增的两步各有自己的取值：`preview_cache`（建预览缓存目录）、`preview_listen`（预览监听器listen）」（#1203 对齐时加入，既有八个取值原样保留）；失败清理的对象加预览监听器。改写场景：「干净启动与一致命令面」（三十五项）、「HOST=localhost 单一 binding」（两个监听器各一个 binding）。新增场景：「预览与文件键的缺省与覆盖」「预览与文件键的非法值」。成功记录（`server_started` 四键）不变，失败记录的键集合不变。C 的四个 `SNAPSHOT_*` 键与 S1g 的四个键、缺省值、解析规则与场景原样保留 |
 | http-service-skeleton / 统一错误信封 | S1g 的 MODIFIED | 归属身份十五 → 十七（清单加 `POST /api/workspaces/:id/move`、`POST /api/workspaces/:id/preview-token`；「其余十四条」→「其余十六条」）；新增句三句：`preview-token` 为 bodyless 归属路由、`move` 的 content-parser 错误为 400、`DELETE /api/workspaces/:id/entries` 不属归属集；新增句：definition map 不因本 change 改变、416 不属于 definition map。改写场景：「auth POST 请求 parse/validation 错误稳定映射」（十七条）、「产品路由身份在共享映射器中的归属」（WHEN 的路由清单加两条；seventeen-identity）、「工作空间 parser owner 的真实 HTTP 边界」（seventeen-owner、fifteen other owners）。新增场景：「工作空间新增两条归属路由」。错误码仍为十六码，C 的两码、S1g 的 `upload_too_large` 与各自的场景原样保留 |
 | http-service-skeleton / Shared agent module assembly | S1g 的 MODIFIED | 新增句：`registerWorkspaces` 的依赖对象另收预览上限、回收目录服务与可选的预览依赖，不引入第二个 store / facade / audit。改写场景：「Pure source and compiled configuration identity」（twenty-three → thirty-five application keys；缺省值清单末尾加十二个预览与文件键的指引）。无其它差异 |
 | sandbox-core / resolve 契约与逃逸向量 | S1g 的 MODIFIED | `op` 集合加 `delete`、`move` 及括注；末段校验从「`mkdir` 与 `write`」扩到四种 `op`，加「空串因此被拒绝，根不能被删除、移动或作为移动的目标」；新增句：`delete` 与 `move` 的含义、与 `mkdir` 同规则、本 change 不使用 `write`。改写场景：「合法路径与边界」（加 `delete`/`move` 的成功与拒绝输入）、「非目录祖先不是越界」（`read/list/mkdir/write/delete/move`）。新增场景：「删除与移动的逃逸向量」。S1g 的 `write` 各句与「写操作的逃逸向量」原样保留 |
@@ -429,7 +429,7 @@ OpenSpec 的 MODIFIED 是整条替换，归档次序固定为 C → S1g → 本 
 - **整条替换的规格冲突** → 本 change 的十三条重叠条文以 C、S1g 当前的 delta 为底（D25 的表）。它们在实现期若再改这些条文，本 change 的同名条文要跟着改——由 tasks 0.1（开工前）与 0.2（归档前）的对底发现：diff 里出现表外的差异就先改本 change 的 delta 与表。
 - **走查的请求 oracle** → 现有「零非 `baseURL` 源请求」会被预览来源打破；本 change 把例外限定为「预览令牌响应给出的那个来源」，其余仍为零。
 - **包体** → 主包多出 `react-resizable-panels` 与侧边栏、文件操作的代码；高亮、Notebook 等在按需块里。数字在收尾时量并写进 ADR-0013 增补。
-- **800 行上限** → `api.ts`（729）不再加方法，新方法进 `api-files.ts`；`md-render.ts`（797）不改；`ui-walk-sessions.spec.ts`（776）与 `ui-walk-layout.ts`（793）不加行，新走查步骤进新 helper 文件。
+- **800 行上限** → `api.ts`（778）不再加方法，新方法进 `api-files.ts`；`md-render.ts`（797）不改；`ui-walk-sessions.spec.ts`（681）与 `ui-walk-layout.ts`（793）不加行，新走查步骤进新 helper 文件。
 
 ## Migration Plan
 
