@@ -73,7 +73,9 @@ export interface Turn {
 export type RuntimeCommandFrame =
   | { type: "get_branch_messages" }
   | { type: "get_state" }
-  | { type: "branch"; entryId: string };
+  | { type: "branch"; entryId: string }
+  | { type: "set_model"; provider: string; modelId: string }
+  | { type: "set_thinking_level"; level: string };
 
 // A child that never obtained a pid (spawn failed) is never live, whether or not
 // Node has reported the failure yet; 'error' alone never means "dead" (#205).

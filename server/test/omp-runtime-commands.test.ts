@@ -56,6 +56,8 @@ const BRANCH_MESSAGES = [
   { entryId: "fake-entry-1", text: "first question" },
   { entryId: "fake-entry-2", text: "second question" },
 ];
+const SET_MODEL = { type: "set_model", provider: "workbuddy", modelId: "m3" } as const;
+const SET_LEVEL = { type: "set_thinking_level", level: "low" } as const;
 const harness = createRpcHarness();
 
 /** One stdin write: the frame plus how many tokens the owner had issued at that moment. */
@@ -525,16 +527,22 @@ describe("SessionRuntime command()", () => {
       expect(() => world.runtime.command({ type: "get_branch_messages" })).toThrow(
         SessionBusyError,
       );
+      expect(() => world.runtime.command(SET_MODEL)).toThrow(SessionBusyError);
+      expect(() => world.runtime.command(SET_LEVEL)).toThrow(SessionBusyError);
       await turn.dispatched;
       expect(() => world.runtime.command({ type: "get_branch_messages" })).toThrow(
         SessionBusyError,
       );
+      expect(() => world.runtime.command(SET_MODEL)).toThrow(SessionBusyError);
+      expect(() => world.runtime.command(SET_LEVEL)).toThrow(SessionBusyError);
 
       await untilDeltas(iterator, 2);
       const pending = mustAbort(world.runtime);
       await drain(iterator);
       await pending;
       expect(written(world, "get_branch_messages")).toEqual([]);
+      expect(written(world, "set_model")).toEqual([]);
+      expect(written(world, "set_thinking_level")).toEqual([]);
 
       await expect(world.runtime.command({ type: "get_state" })).resolves.toMatchObject({
         sessionFile: DEFAULT_SESSION,
@@ -686,6 +694,53 @@ describe("SessionRuntime command()", () => {
 
     world.child.endStdout();
     await world.runtime.shutdown();
+  });
+
+  it(
+    "C10 set_model and set_thinking_level between turns: one frame each, then the next prompt",
+    REAL,
+    async () => {
+      const world = openReal("normal");
+      await expect(world.runtime.command(SET_MODEL)).resolves.toEqual({
+        provider: "workbuddy",
+        id: "m3",
+      });
+      expect(world.runtime.sessionFile).toBe(DEFAULT_SESSION);
+      await expect(world.runtime.command(SET_LEVEL)).resolves.toBeUndefined();
+      expect(world.runtime.sessionFile).toBe(DEFAULT_SESSION);
+
+      const models = written(world, "set_model");
+      const levels = written(world, "set_thinking_level");
+      expect(models).toEqual([{ ...SET_MODEL, id: models[0]?.id }]);
+      expect(levels).toEqual([{ ...SET_LEVEL, id: levels[0]?.id }]);
+      expect(typeof models[0]?.id).toBe("string");
+      expect(world.stdin.find((entry) => entry.frame.type === "set_model")?.issued).toBe(1);
+
+      const frames = await collectPrompt(world.runtime.prompt("hi"));
+      expect(frames.at(-1)).toMatchObject({ type: "agent_end" });
+      expect(await probeFrames(world.runtime)).toBe(
+        "negotiate_protocol,get_state,set_model,set_thinking_level,prompt,prompt",
+      );
+      expect(world.argv).toHaveLength(1);
+      expect(world.tokens.issued).toHaveLength(1);
+      await world.runtime.shutdown();
+    },
+  );
+
+  it("C11 set_model to a missing model rejects and the generation carries on", REAL, async () => {
+    const world = openReal("normal");
+    await expect(
+      world.runtime.command({ ...SET_MODEL, modelId: "workbuddy-missing-model" }),
+    ).rejects.toBeInstanceOf(AgentUnavailableError);
+    expect(world.exits).toEqual([]);
+    expect(world.runtime.sessionFile).toBe(DEFAULT_SESSION);
+
+    await expect(world.runtime.command(SET_MODEL)).resolves.toEqual({
+      provider: "workbuddy",
+      id: "m3",
+    });
+    expect(world.exits).toEqual([]);
+    await expectSameGeneration(world, "hi");
   });
 });
 
