@@ -20,7 +20,7 @@ import {
   type StoredUser,
 } from "./branch-temp.js";
 import { effectiveOf, type RawComposer } from "./composer-align.js";
-import { type ProcessPool, releaseDispatch, type Slot, type SpawnShared } from "./pool.js";
+import { commandOn, type ProcessPool, type Slot, type SpawnShared } from "./pool.js";
 import { classifyPrompt } from "./slash-commands.js";
 import type { SessionStore, SettledApproval } from "./store.js";
 import type { StoredAttachment } from "./store-attachments.js";
@@ -126,21 +126,9 @@ export class Regenerations {
     return this.#commit(slot, plan, dispatchText(branched.text), branched.sessionFile);
   }
 
-  /** (a)+(b): the only command whose acquisition fault (re-admission) may surface. */
+  /** (a)+(b): through `commandOn`, so an acquisition fault (re-admission) surfaces as itself. */
   async #lastEntry(slot: Slot, plan: RegeneratePlan): Promise<string> {
-    const before = slot.generation;
-    let data: unknown;
-    try {
-      data = await slot.runtime.command({ type: "get_branch_messages" });
-    } catch (error) {
-      const fault = slot.acquisitionFault;
-      slot.acquisitionFault = undefined;
-      throw fault ?? error;
-    } finally {
-      if (slot.generation !== before) {
-        releaseDispatch(slot, slot.generation);
-      }
-    }
+    const data = await commandOn(slot, { type: "get_branch_messages" });
     // Only the last pair is compared: earlier entries are not read.
     const entryId = entryFor(branchEntries(data).at(-1), plan.question, plan.paths);
     if (entryId === undefined) {

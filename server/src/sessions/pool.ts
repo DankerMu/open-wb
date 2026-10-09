@@ -4,6 +4,7 @@
  */
 import { HttpError } from "../core/errors/index.js";
 import type { ApprovalMode } from "../model-catalog.js";
+import type { RuntimeCommandFrame } from "./omp/commands.js";
 import type { SessionRuntime, SessionRuntimeOpts } from "./omp/runtime.js";
 import type { SessionStore } from "./store.js";
 import { RingBuffer } from "./stream/ring-buffer.js";
@@ -314,6 +315,28 @@ export function temporaryTokens(
       tokens.revoke(sessionId);
     },
   };
+}
+
+/**
+ * One out-of-turn command on the slot's runtime, for a caller that dispatches afterwards. The
+ * command that acquires the process creates the generation with its dispatch already counted: that
+ * count is handed back here, so the prompt that follows counts once. An acquisition fault
+ * (re-admission, a failed epoch bump or token issue) is rethrown as itself, not as the runtime's
+ * `AgentUnavailableError`.
+ */
+export async function commandOn(slot: Slot, frame: RuntimeCommandFrame): Promise<unknown> {
+  const before = slot.generation;
+  try {
+    return await slot.runtime.command(frame);
+  } catch (error) {
+    const fault = slot.acquisitionFault;
+    slot.acquisitionFault = undefined;
+    throw fault ?? error;
+  } finally {
+    if (slot.generation !== before) {
+      releaseDispatch(slot, slot.generation);
+    }
+  }
 }
 
 export function releaseDispatch(slot: Slot, generation: Generation | undefined): void {
