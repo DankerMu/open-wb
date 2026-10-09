@@ -197,10 +197,10 @@ Minimal mergeable slice: 3.1–3.5 同刀（目录登记、`files.css` 删除、
 
 ## 4. sandbox-core — `delete` 与 `move` 两个 `op`
 
-- [ ] 4.1 `server/src/core/sandbox/resolve.ts` 与 `index.ts`：`op` 联合在 S1g 之后的成员（`read`、`list`、`mkdir`、`write`）上增加 `delete`、`move`（不动 `write` 的任何规则）；末段校验（非空、非 `.`/`..`、不含反斜杠）从 `mkdir`、`write` 扩到四个 `op`。facade 的审计 `detail.op` 原样带出新值。
+- [x] 4.1 `server/src/core/sandbox/resolve.ts` 与 `index.ts`：`op` 联合在 S1g 之后的成员（`read`、`list`、`mkdir`、`write`）上增加 `delete`、`move`（不动 `write` 的任何规则）；末段校验（非空、非 `.`/`..`、不含反斜杠）从 `mkdir`、`write` 扩到四个 `op`。facade 的审计 `detail.op` 原样带出新值。
   实施注记见 `implementation-notes.md`「4.1–4.3（#1053）」。
-- [ ] 4.2 测试（`server/test/sandbox-resolve.test.ts`、`sandbox-facade.test.ts`）：sandbox-core「删除与移动的逃逸向量」场景的八种输入各对两个 `op`；合法路径；`regular-file/child` 对新 `op` 不是越界；facade 对 `delete` 的拒绝写出 `detail.op === "delete"`。
-- [ ] 4.3 变异证据：把空串放行给 `delete` → 「根不能被删除」用例判红；去掉 `move` 的末段校验 → `a/` 用例判红。
+- [x] 4.2 测试（`server/test/sandbox-resolve.test.ts`、`sandbox-facade.test.ts`）：sandbox-core「删除与移动的逃逸向量」场景的八种输入各对两个 `op`；合法路径；`regular-file/child` 对新 `op` 不是越界；facade 对 `delete` 的拒绝写出 `detail.op === "delete"`。
+- [x] 4.3 变异证据：把空串放行给 `delete` → 「根不能被删除」用例判红；去掉 `move` 的末段校验 → `a/` 用例判红。
 
 Suggested fixture level: expanded - 路径安全的核心函数增加两种操作，是删除与移动的唯一边界
 Minimal mergeable slice: atomic - 一个纯函数加它的 facade 类型，测试同刀
