@@ -328,6 +328,7 @@ Minimal mergeable slice: atomic - 两个监听器与回收目录定时器在入�
 ## 14. office-preview — 转换器
 
 - [ ] 14.1 新文件 `server/src/preview/office.ts`：`createOfficeConverter`——作业目录、argv 与环境、sudo 前缀（复用 `core/process-path` 的 `setpriv` 检查）、成功判定；终止在途转换（超时、`signal` 中止、`close()`）按 office-preview「转换器调用契约」的两种模式：同 uid 模式以新进程组启动并对进程组发 `SIGKILL`，`OMP_USER` 模式只杀自己启动的 `sudo`（不执行 `kill`/`pkill`/第二次 `sudo`，不新增 sudoers 规则）。
+  实施注记见 `implementation-notes.md`「14.1、14.4（#1071）」。
 - [ ] 14.2 同文件或 `office-queue.ts`：并发上限、排队上限 8、按缓存键去重、排队中中止出队（office-preview「并发上限与排队」）。
 - [ ] 14.3 缓存与周期清理（office-preview「转换缓存」）：键的计算、命中更新修改时间、输出**复制**后改名进 `pdf/`、失败不入缓存、7 天清理函数、启动时清空 `work/`（周期定时器在 15.1 接进 `server.ts`）。
 - [ ] 14.4 测试夹具 `server/test/fixtures/fake-soffice.mjs`（可执行；按输入文件名里的标记：正常写出一个最小 PDF、退出码 1、不写输出、写空文件、写符号链接、睡眠、先起一个子进程再睡眠；把收到的 argv 与环境写到作业目录旁的记录文件）。

@@ -349,3 +349,32 @@
 - 变异：把 `.gz` 的判定排到 `.tar.gz` 之前 → `x.tar.gz` 的 `format` 断言判红。
 - 变异：去掉 `finally` 里的 gunzip `destroy()` → 本刀不可观察（没有可数的句柄），靠白盒审查。
 - 变异：目录遍历、符号链接、跨工作空间 id、他人工作空间 404、越界审计 → 本刀没有路由，不可观察，归 #1065 / #1075。
+
+## 14.1、14.4（#1071）
+
+- 触及 Critical Path「omp 子进程治理」同类（spawn / 回收、sudo 身份、环境不得带凭证）：两个评审席位，PR 标白盒审查；不经 `sandbox.resolve`（输入已是绝对路径）；纯服务端，无验收清单行；不动 `docs/architecture/system.md`。
+- 现状核对：`server/src/preview/` 与 `server/test/fixtures/` 都不存在（既有假可执行文件在 `server/test/support/`，`fake-omp.mjs` 为 100755）；按任务原文新建 `test/fixtures/`，`naming-guard` 的草稿目录正则不命中，约定不一致记入偏离记录。
+- 复用点：`server/src/core/process-path.ts` 的 `SETPRIV_PATH`（:5）、`assertSafeSudoPath`（:11）、`assertSetprivExecutable`（:26），调用形态照 `sessions/omp/process.ts:74-77`，每次 `convert` 在 spawn 前检查，抛错即 `failed` 且不 spawn、不回退；作业目录用 `core/sandbox/dirs.ts:41` 的 `ensureOwnedDir(job, 0o2770)`。
+- 不导入 `sessions/omp/process.ts:56` 的 `SpawnImpl`（返回 `ChildProcessWithoutNullStreams`，与 `stdio:"ignore"` 不符）；`office.ts` 自定本地 spawn 类型，缺省 `node:child_process` 的 `spawn`。
+- 签名偏离：选项为 `{officeBin?, cacheDir, timeoutMs, ompUser?, spawn?}`；`spawn` 是规格五键之外的测试 seam；`concurrency` 本刀不收（无行为可证），由 #1073 加入；错误为 `OfficeConvertError`，`kind ∈ unavailable|failed|timeout|aborted`，`message` 恒等于 `kind`。
+- 输出落点（规格未写，#1072 正文「输出留在作业目录」与规格「作业目录已不存在」冲突，以规格为准）：成功后复制为 `<cacheDir>/pdf/<随机名>.pdf` 再删 `<job>` 并返回该路径；#1072 只把随机名换成缓存键并加命中；`work/`、`pdf/` 由调用方建，本刀不 mkdir，`work/` 缺失即 `failed`。
+- 成功判定与复制同一个 fd：`open(O_RDONLY|O_NOFOLLOW)` → `fstat` 为普通文件且 `size>0` → 从该 fd 读出写入 `wx`、`0600` 的新文件；不用「`lstat` 后 `copyFile`」（`OMP_USER` 模式下中间可被换成符号链接）；输出名为 `parse(basename(absInput)).name + ".pdf"`。
+- 删作业目录：`rmSync(job,{recursive:true,force:true})` 必须包 try/catch（本机实测：子目录 `0500` 时 `force` 仍抛 `ENOTEMPTY`）；`out/`、`profile/` 不预建，由假 `soffice` 自己 `mkdir -p`。
+- 终止：同 uid 模式 `detached:true`，仅当 `child.pid` 为正整数且未退出时 `process.kill(-pid,"SIGKILL")`（`officeBin` 不存在时 `pid` 为 `undefined`，不得落成 `kill(0)` 杀掉自己的进程组）；`OMP_USER` 模式不 `detached`，`child.kill("SIGKILL")`；两者都等 `exit` 后才落定；spawn 的 `error` 事件即 `failed`。
+- 未写明的分支：调用时 `signal` 已中止 → `aborted`，不 spawn、不建作业目录；`close()` 幂等，其后 `convert` 立即 `aborted`；`LANG` 缺席时不设该键。
+- 夹具 `fake-soffice.mjs`（100755，`#!/usr/bin/env node`）：记录写在 `dirname(<job>)/<job 名>.record.json`，内容 `{argv: process.argv.slice(1), env, pid, childPid?}`；标记取自最后一个 argv 的文件名；「先起子进程再睡眠」的子进程与睡眠都设上限（如 30 秒）自行退出。
+- 另加第八个标记（偏离 14.4 的七种）：在 `<job>` 下留一个 `0500` 的非空目录后正常写 PDF，用例断言 `convert` 仍成功、结果可读，`afterEach` 先 `chmod` 再清；这是 #1052 第 1 点在同 uid 下的等价物，没有它 try/catch 分支无证。
+- 测试 `office-converter.test.ts`：注入的 spawn 包装器记录每次的 `command`、`args`、`options.env` 与 `ChildProcess`，是「恰启动一次」「命令为 `sudo`」「`exit` 的 signal 为 `SIGKILL`」「basename 不为 `soffice` / `libreoffice`」的判据；假 `sudo` 是临时 bin 目录里名为 `sudo`、指向夹具的符号链接，`process.env.PATH` 设为「临时 bin:`dirname(process.execPath)`:/usr/bin:/bin」并在 `afterEach` 还原；sudo 用例套 `useSetprivStub()`（`test/support/setpriv.ts`）。
+- 断言口径（偏离记录）：环境键集合对包装器的 `options.env` 精确断言，对子进程记录先去掉 macOS 运行时注入的 `__CF_USER_TEXT_ENCODING` 再精确断言；`LANG` 随 `process.env.LANG` 条件断言；父环境里的 `MODEL_UPSTREAM_API_KEY` 用低熵占位值；「缓存目录里没有新增文件」落实为 `pdf/` 为空且 `work/` 下没有目录（只剩记录文件）；「都已不存在」为对 `pid`、`childPid` 轮询 `process.kill(pid,0)` 直到 `ESRCH`，先断言 `childPid` 已记录；中止与 `close()` 用例先等记录出现再动手；`OMP_USER` 场景末句「并发名额已释放」留给 #1073；`OMP_USER` 用例不断言作业目录已删。
+- 门槛：`convert` 拆成 argv / 环境构造、spawn 与等待、终止、输出判定四个函数（Biome 复杂度 15）；sudo 前缀数组不照抄 `process.ts:137-153` 的结构与注释（jscpd），也不抽共用 helper 进 `core/process-path`；knip 以 `test/**/*.test.ts` 为入口，测试是唯一导入方即可，只导出测试用到的符号；`.mjs` 不计 800 行但受 Biome 约束；200 毫秒超时若在 CI 上抖，放大数值并记偏离，不放松断言。
+- 变异：同 uid 超时改为只 `child.kill("SIGKILL")` → 「超时与中止」的 `childPid` 不存在断言判红。
+- 变异：`OMP_USER` 终止改为经注入的 spawn 再起一个 `sudo … pkill` → 「假 `sudo` 恰被启动一次」判红。绕过注入 spawn 直接调 `child_process` 的写法测试观察不到，靠白盒审查。
+- 变异：sudo 立即失败后回退直接启动 `officeBin` → 「sudo 前缀」的启动次数与命令断言判红。
+- 变异：环境改为继承 `process.env` → 「argv、环境与成功判定」的键集合断言判红（记录里出现 `MODEL_UPSTREAM_API_KEY`）。
+- 变异：`HOME` 不指向作业目录，或 `UserInstallation` / `--outdir` 不在同一作业目录下 → 同一场景的 argv / `HOME` 断言判红。
+- 变异：输出判定把 `O_NOFOLLOW` / `fstat` 换成跟随链接的 `stat` → 「各类失败」的符号链接例判红；去掉 `size>0` → 空文件例判红；不看退出码 → 退出码 1 例判红。
+- 变异：错误 `message` 带上输入路径或作业目录 → 「各类失败」的「不含路径」断言判红。
+- 变异：去掉成败后的删作业目录 → 「作业目录已不存在」判红；让删除失败上抛 → 第八标记用例判红。
+- 变异：结果直接返回 `<job>/out/*.pdf` 而不复制 → 「落定路径内容等于假进程所写 PDF」判红（作业目录已删，读不到）。
+- 变异：去掉 `close()` 后的 `aborted` 短路 → 「`close()` 之后的 `convert`」判红；去掉 `available:false` 的短路 → 「未配置」的零次 spawn 与 `work` 下无新目录判红。
+- 变异：预计不可观察：`lstat` 与复制之间的换链接竞态（假进程无法定时注入）；`OMP_USER` 模式下真实后代残留（已登记残余，归 28.6 人工验证）。
