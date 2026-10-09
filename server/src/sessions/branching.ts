@@ -19,15 +19,23 @@ import {
   entryFor,
   type StoredUser,
 } from "./branch-temp.js";
+import { effectiveOf, type RawComposer } from "./composer-align.js";
 import { type ProcessPool, releaseDispatch, type Slot, type SpawnShared } from "./pool.js";
 import { classifyPrompt } from "./slash-commands.js";
 import type { SessionStore, SettledApproval } from "./store.js";
 import type { StoredAttachment } from "./store-attachments.js";
+import type { ComposerConfig } from "./store-composer.js";
 import type { SessionSupervisorRuntime } from "./supervisor.js";
 import type { TokenRegistry } from "./tokens.js";
 import type { ControlClaims, TurnStops } from "./turn-control.js";
 
-export type Resume = { ownerId: string; ompSessionFile: string | null; workspaceId: string | null };
+export type Resume = {
+  ownerId: string;
+  ompSessionFile: string | null;
+  workspaceId: string | null;
+  /** The raw composer columns, from the one `store.runtimeState` read of the dispatch. */
+  composer: RawComposer;
+};
 
 interface SkillsPort {
   /**
@@ -198,6 +206,8 @@ interface ForkPorts extends SkillsPort {
   pool: ProcessPool;
   tokens: TokenRegistry;
   config: SessionSupervisorRuntime;
+  /** What turns the source's raw composer columns into the temporary process's mode and model. */
+  composer: ComposerConfig;
   /** The supervisor's spawn gate and log: the temporary process queues on the same permits. */
   spawn: SpawnShared;
   closed(): boolean;
@@ -223,6 +233,8 @@ interface ForkPlan {
   expectedAssistantId: number | null;
   file: string;
   workspaceId: string | null;
+  /** The source's raw composer columns, read with `file`. */
+  composer: RawComposer;
 }
 
 export type ForkResult = {
@@ -300,6 +312,7 @@ export class Forks {
       expectedAssistantId: assistant?.id ?? null,
       file: resume.ompSessionFile,
       workspaceId: resume.workspaceId,
+      composer: resume.composer,
     };
   }
 
@@ -307,12 +320,15 @@ export class Forks {
     await retired;
     // Before admission: an unusable root fails the fork without taking (or evicting) capacity.
     const cwd = this.#ports.cwdOf(plan.ownerId, plan.workspaceId);
+    const { approvalMode, modelId } = effectiveOf(plan.composer, this.#ports.composer);
     // Claim key: the source session; token key: the new session's pre-generated id.
     const branched = await this.#temps.branchAt({
       claimKey: plan.sourceId,
       tokenKey: plan.sessionId,
       ownerId: plan.ownerId,
       cwd,
+      approvalMode,
+      modelId,
       resumePath: plan.file,
       messageId: plan.messageId,
       users: plan.users,

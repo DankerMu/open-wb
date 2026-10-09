@@ -1,7 +1,8 @@
 /**
  * Issue #464 approval-registration test plumbing. Every world runs the production assembly
  * (createApp → registerSessions) over real fake-omp children under the production argv
- * (`--approval-mode write`, so the approval scenarios gate).
+ * (`--approval-mode <the session's effective mode>`: `write` by default, so the approval scenarios
+ * gate; `approval-write` gates its one `write` call under `always-ask` only, #1009).
  * The spawn wrapper records each child's stdin frames and can hold stdout lines (released as one
  * write, line boundaries and EOF preserved). Oracles are SQLite rows, stdin frames, the recorded
  * onEvent stream and real SSE bytes, never supervisor internals.
@@ -85,7 +86,7 @@ export interface SseFrame {
 }
 
 export async function openApprovalWorld(
-  scenario: "approval" | "approval-parallel",
+  scenario: "approval" | "approval-parallel" | "approval-write",
   options: ApprovalWorldOptions = {},
 ): Promise<ApprovalWorld> {
   const rt = createRealFakeRuntime(scenario);
@@ -371,6 +372,12 @@ export function seqOf(frame: SseFrame | undefined): number {
     throw new Error("missing SSE frame");
   }
   return Number(frame.id.slice(frame.id.indexOf(":") + 1));
+}
+
+/** The argv element right after `flag` (`--approval-mode`, `--model`); undefined when absent. */
+export function flagValue(args: readonly string[], flag: string): string | undefined {
+  const at = args.indexOf(flag);
+  return at === -1 ? undefined : args[at + 1];
 }
 
 export function isToolStart(line: string): boolean {

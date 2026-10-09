@@ -3,6 +3,11 @@
  * Real fake-omp `approval` children under `--approval-mode write`, real SQLite, the injected clock
  * and the production createApp → registerSessions assembly. Expected rows, frames and payloads are
  * fixture literals from the tool-approval spec (T, T+60000, "Approve"/"Deny", audit title).
+ *
+ * Issue #1009 (s1g-composer-capabilities task 9.3), W1–W2: the same flow for the `write` tool of an
+ * `always-ask` session (fake-omp `approval-write`, which gates under `--approval-mode always-ask`
+ * only) — tool-approval「审批请求识别」 and session-permission-tier「每次都问下的超时」. The session is
+ * moved to `always-ask` over `PATCH /api/sessions/:id` before its first prompt.
  */
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -10,14 +15,17 @@ import {
   type ApprovalWorld,
   approvalAuditCount,
   approvalRow,
+  approvalRows,
   assistantSteps,
   auditCount,
   DENIED_OUTPUT,
   expectQuiet,
   extraSession,
+  flagValue,
   ofType,
   openApprovalWorld,
   pendingApproval,
+  prompted,
   REAL,
   rejection,
   responses,
@@ -31,7 +39,13 @@ import {
   waitForResponses,
   waitForRows,
 } from "./session-approval-helpers.js";
-import { assistantIdFor, OWNER_ID, waitForTurn } from "./session-supervisor-helpers.js";
+import { patch } from "./session-archive-helpers.js";
+import {
+  assistantIdFor,
+  OWNER_ID,
+  requiredCall,
+  waitForTurn,
+} from "./session-supervisor-helpers.js";
 
 const worlds: ApprovalWorld[] = [];
 
@@ -418,4 +432,130 @@ describe("approval ownership", () => {
     expectQuiet(world);
     expect(await waitForEvent(world, "approval.request")).toHaveLength(1);
   });
+});
+
+describe("approvals of an always-ask session (#1009)", () => {
+  /** fake-omp-composer.mjs WRITE_CALL / WRITE_SELECT_ID, as omp v18.0.10 titles a `write` call. */
+  const WRITE_TITLE = "Allow tool: write\nPath: workbuddy-report.html";
+
+  /** An `approval-write` world; `always-ask` is chosen over REST before the first prompt. */
+  async function openWrite(mode?: "always-ask"): Promise<ApprovalWorld> {
+    const world = await openApprovalWorld("approval-write");
+    worlds.push(world);
+    if (mode !== undefined) {
+      expect((await patch(world, { approvalMode: mode })).statusCode).toBe(200);
+    }
+    return world;
+  }
+
+  /** The `detail` of every `session.approval` audit, oldest first. */
+  function approvalAudits(world: ApprovalWorld): unknown[] {
+    return world.fixture.db
+      .prepare("SELECT detail FROM audit_events WHERE kind = 'session.approval' ORDER BY id")
+      .all()
+      .map((row) => JSON.parse(String(row.detail)) as unknown);
+  }
+
+  it(
+    "W1 a `write` call registers, is published and answered Approve once; `write` mode asks nothing",
+    REAL,
+    async () => {
+      const world = await openWrite("always-ask");
+      const row = await pendingApproval(world);
+      await settle();
+
+      expect(flagValue(requiredCall(world.rt.calls, 0).args, "--approval-mode")).toBe("always-ask");
+      const assistantId = assistantIdFor(world.fixture, world.session);
+      expect(await waitForRows(world, 1)).toEqual([
+        {
+          id: row.id,
+          message_id: assistantId,
+          request_id: "w1",
+          tool: "write",
+          title: WRITE_TITLE,
+          requested_at: T,
+          expires_at: T + TTL_MS,
+          decision: null,
+          decided_at: null,
+        },
+      ]);
+      expect(ofType(sessionEvents(world), "approval.request").map((event) => event.data)).toEqual([
+        {
+          messageId: assistantId,
+          approvalId: row.id,
+          tool: "write",
+          title: WRITE_TITLE,
+          expiresAt: T + TTL_MS,
+        },
+      ]);
+      // The PATCH wrote a `session.permission`: only the approval audits are counted.
+      expectQuiet(world);
+
+      const settled = await world.fixture.supervisor.decide(world.session, row.id, "allow");
+
+      expect(settled).toMatchObject({ id: row.id, tool: "write", decision: "allow" });
+      await waitForTurn(world.fixture, world.session, "done");
+      await settle();
+      expect(responses(spawnedAt(world, 0))).toEqual([
+        { type: "extension_ui_response", id: "w1", value: "Approve" },
+      ]);
+      expect(resolvedFor(world)).toEqual([
+        { messageId: assistantId, approvalId: row.id, decision: "allow" },
+      ]);
+      expect(approvalAudits(world)).toEqual([
+        { sessionId: world.session, messageId: assistantId, tool: "write", decision: "allow" },
+      ]);
+      expect(world.errors).toEqual([]);
+
+      // The control: the same scenario on a session left at `write` asks for nothing.
+      const control = await openWrite();
+      await prompted(control);
+      await waitForTurn(control.fixture, control.session, "done");
+      await settle();
+      expect(flagValue(requiredCall(control.rt.calls, 0).args, "--approval-mode")).toBe("write");
+      expect(approvalRows(control.fixture.db, control.session)).toEqual([]);
+      expect(ofType(sessionEvents(control), "approval.request")).toEqual([]);
+      expectQuiet(control);
+    },
+  );
+
+  it(
+    "W2 每次都问下的超时: pending at T+59999; T+60000 settles timeout and answers Approve",
+    REAL,
+    async () => {
+      const world = await openWrite("always-ask");
+      const row = await pendingApproval(world);
+      expect(row).toMatchObject({ tool: "write", request_id: "w1", expires_at: T + TTL_MS });
+
+      world.clock.advance(TTL_MS - 1);
+      await settle();
+      expect(approvalRow(world.fixture.db, row.id)).toMatchObject({
+        decision: null,
+        decided_at: null,
+      });
+      expectQuiet(world);
+
+      world.clock.advance(1);
+      expect(approvalRow(world.fixture.db, row.id)).toMatchObject({
+        decision: "timeout",
+        decided_at: T + TTL_MS,
+      });
+      expect(await waitForResponses(spawnedAt(world, 0), 1)).toEqual([
+        { type: "extension_ui_response", id: "w1", value: "Approve" },
+      ]);
+      await waitForTurn(world.fixture, world.session, "done");
+      expect(resolvedFor(world)).toEqual([
+        { messageId: row.message_id, approvalId: row.id, decision: "timeout" },
+      ]);
+      expect(approvalAudits(world)).toEqual([
+        {
+          sessionId: world.session,
+          messageId: row.message_id,
+          tool: "write",
+          decision: "timeout",
+        },
+      ]);
+      expect(world.errors).toEqual([]);
+    },
+  );
 });

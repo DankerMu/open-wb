@@ -6,6 +6,7 @@
  * the commit stay with the caller.
  */
 import { HttpError } from "../core/errors/index.js";
+import type { ApprovalMode } from "../model-catalog.js";
 import { SessionRuntime } from "./omp/runtime.js";
 import {
   type PoolEntry,
@@ -15,6 +16,7 @@ import {
   temporaryTokens,
 } from "./pool.js";
 import { attachmentSuffix } from "./slash-commands.js";
+import type { ComposerConfig } from "./store-composer.js";
 import type { SessionSupervisorRuntime } from "./supervisor.js";
 import type { TokenRegistry } from "./tokens.js";
 import type { ControlClaims } from "./turn-control.js";
@@ -28,6 +30,8 @@ interface BranchTempPorts {
   pool: ProcessPool;
   tokens: TokenRegistry;
   config: SessionSupervisorRuntime;
+  /** What the callers turn their session's raw composer columns into effective values with. */
+  composer: ComposerConfig;
   /** The supervisor's spawn gate and log: the temporary process queues on the same permits. */
   spawn: SpawnShared;
   closed(): boolean;
@@ -44,6 +48,12 @@ interface BranchTempPlan {
   ownerId: string;
   /** Resolved by the caller before admission: an unusable root takes (or evicts) no capacity. */
   cwd: string;
+  /**
+   * The effective mode and model of the session the process stands in for (fork: the source), as
+   * its spawn argv takes them. It writes no prompt, so no model or effort command follows.
+   */
+  approvalMode: ApprovalMode;
+  modelId: string;
   /** The omp session file the temporary process resumes. */
   resumePath: string;
   /** The branch point's message id, and the session's user messages in order to align it. */
@@ -90,8 +100,8 @@ export class BranchTemps {
         sessionId: plan.tokenKey,
         ownerId: plan.ownerId,
         cwd: plan.cwd,
-        approvalMode: "write",
-        modelId: this.#ports.config.modelId,
+        approvalMode: plan.approvalMode,
+        modelId: plan.modelId,
         resumePath: plan.resumePath,
         tokens: temporaryTokens(pool, entry, tokens),
         onExit: () => {

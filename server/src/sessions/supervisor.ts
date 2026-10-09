@@ -8,12 +8,14 @@ import { DEFAULT_OMP_MAX_PROCESSES } from "../agent-config.js";
 import { HttpError } from "../core/errors/index.js";
 import { ApprovalRegistry } from "./approvals.js";
 import { type ForkResult, Forks, Regenerations, type Resume } from "./branching.js";
+import { effectiveOf, reusable } from "./composer-align.js";
 import { applyFailure, applyFrame, applyStop, type ChatEvent, createEventState } from "./events.js";
 import type { OmpFrame } from "./omp/frame.js";
 import type { SpawnImpl } from "./omp/process.js";
 import { type PromptDispatchReceipt, type SessionClock, SessionRuntime } from "./omp/runtime.js";
 import { SpawnGate, type SpawnLog } from "./omp/spawn-gate.js";
 import {
+  emptySlot,
   type Generation,
   generationTokens,
   type PoolEntry,
@@ -31,6 +33,7 @@ import {
 } from "./pool.js";
 import { sessionCwdResolver, type WorkspaceRootOf } from "./session-cwd.js";
 import type { ApprovalView, SessionStore, SettledApproval } from "./store.js";
+import type { ComposerConfig } from "./store-composer.js";
 import type { RetainedEvent } from "./stream/ring-buffer.js";
 import {
   asError,
@@ -70,7 +73,7 @@ export interface SessionSupervisorRuntime {
   bin: string;
   sandboxRoot: string;
   stateDir: string;
-  modelId: string;
+  modelId: string; // The single model's id when the assembly gives no whitelist; no spawn reads it.
   idleMs?: number;
   /** Global live-process cap resolved by agent-config; undefined → DEFAULT_OMP_MAX_PROCESSES (16). */
   maxProcesses?: number;
@@ -104,6 +107,8 @@ export interface SessionSupervisorOptions {
   log?: SpawnLog;
   /** The skills of a session's cwd right now, for the branch-family command check (branching.ts). */
   skills: (ownerId: string, workspaceId: string | null) => readonly { name: string }[];
+  /** What turns a session's raw composer columns into the mode and model of its spawns. */
+  composer: ComposerConfig;
 }
 
 interface FlushFailure {
@@ -136,6 +141,7 @@ export class SessionSupervisor {
   readonly #forks: Forks;
   readonly #undos: Undos;
   readonly #cwdOf: ReturnType<typeof sessionCwdResolver>;
+  readonly #composer: ComposerConfig;
   #closed = false;
 
   constructor(options: SessionSupervisorOptions) {
@@ -144,6 +150,7 @@ export class SessionSupervisor {
     this.#runtime = options.runtime;
     this.#onError = options.onError;
     this.#onEvent = options.onEvent;
+    this.#composer = options.composer;
     this.#cwdOf = sessionCwdResolver(options.runtime.sandboxRoot, options.workspaceRootOf);
     const clock = options.runtime.clock;
     this.#pool = new ProcessPool(
@@ -198,6 +205,7 @@ export class SessionSupervisor {
       pool: this.#pool,
       tokens: this.#tokens,
       config: this.#runtime,
+      composer: this.#composer,
       spawn: this.#spawn,
       closed: () => this.#closed,
       cwdOf: this.#cwdOf,
@@ -414,8 +422,13 @@ export class SessionSupervisor {
     use: (slot: Slot) => Promise<T>,
   ): Promise<T> {
     const live = this.#slots.get(sessionId);
-    const fresh = () => this.#onNewSlot(sessionId, resume, claim, use);
+    const effective = effectiveOf(resume.composer, this.#composer);
+    const fresh = () => this.#onNewSlot(sessionId, resume, effective, claim, use);
     if (live === undefined || live.retiring !== undefined || !this.#pool.holds(live.entry)) {
+      return fresh();
+    }
+    if (!reusable(live, effective)) {
+      await this.#retireSlot(live);
       return fresh();
     }
     if (claim !== undefined) {
@@ -437,24 +450,13 @@ export class SessionSupervisor {
   async #onNewSlot<T>(
     sessionId: string,
     resume: Resume,
+    { approvalMode, modelId }: ReturnType<typeof effectiveOf>,
     claim: number | undefined,
     use: (slot: Slot) => Promise<T>,
   ): Promise<T> {
     // First, before any claim or admission: an unusable root spawns nothing and holds nothing.
     const cwd = this.#cwdOf(resume.ownerId, resume.workspaceId);
-    const slot: Slot = {
-      sessionId,
-      runtime: undefined as unknown as SessionRuntime,
-      epoch: 0,
-      generation: undefined,
-      claimedAssistantId: undefined,
-      pump: undefined,
-      retiring: undefined,
-      acquisitionFault: undefined,
-      infraFaulted: false,
-      entry: undefined,
-      workspaceRoot: resume.workspaceId === null ? null : cwd,
-    };
+    const slot = emptySlot(sessionId, resume.workspaceId === null ? null : cwd, approvalMode);
     const unclaim = () => {
       if (claim !== undefined) {
         releaseClaim(this.#claims, slot, claim);
@@ -484,8 +486,8 @@ export class SessionSupervisor {
         sessionId,
         ownerId: resume.ownerId,
         cwd,
-        approvalMode: "write",
-        modelId: this.#runtime.modelId,
+        approvalMode,
+        modelId,
         resumePath: resume.ompSessionFile,
         tokens: generationTokens(slot, this.#pool, this.#store, this.#tokens),
         onExit: () => {
