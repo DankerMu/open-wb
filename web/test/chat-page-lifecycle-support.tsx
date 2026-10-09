@@ -13,6 +13,7 @@ import { cleanupChatPage } from "./chat-page-support.js";
 import { FakeEventSource, resetFakeEventSources } from "./chat-stream-support.js";
 import {
   authenticatedPrincipal,
+  composerOptionsRoute,
   createFetchMock,
   jsonResponse,
   setBrowserPath,
@@ -75,6 +76,7 @@ function authenticatedChatLifecycleRoutes(routes: FetchRoutes = {}): FetchRoutes
     "/api/auth/me": () => jsonResponse(authenticatedPrincipal),
     "/api/auth/login": () => jsonResponse(secondPrincipal),
     "/api/workspaces": () => jsonResponse({ workspaces: [] }),
+    ...composerOptionsRoute(),
     ...routes,
   };
 }

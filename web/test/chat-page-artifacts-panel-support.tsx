@@ -30,6 +30,7 @@ import {
 } from "./chat-stream-support.js";
 import {
   authenticatedPrincipal,
+  composerOptionsRoute,
   createFetchMock,
   jsonResponse,
   setBrowserPath,
@@ -213,6 +214,7 @@ export async function openProbedSession(snapshot: Snapshot) {
   vi.stubGlobal(
     "fetch",
     createFetchMock({
+      ...composerOptionsRoute(),
       "/api/auth/me": () => jsonResponse(authenticatedPrincipal),
       "/api/auth/login": () => jsonResponse({ id: "user-2", account: "lisi", role: "member" }),
       "/api/sessions": () => jsonResponse({ sessions: [snapshot.session] }),
