@@ -42,6 +42,8 @@ const U1_DIR_PARSER = "d".repeat(32);
 const U1_STREAM_FAILURE = "0".repeat(32);
 const U1_PREVIEW = "6".repeat(32);
 const U1_TEMPORARY = "7".repeat(32);
+const U1_ESCAPE = "8".repeat(32);
+const MISSING_ESCAPE = "9".repeat(32);
 
 describe("workspace REST", () => {
   it("lists only the authenticated account's collection and applies no-store before guard", async () => {
@@ -429,8 +431,42 @@ describe("workspace REST", () => {
       writeFileSync(join(root, "photo.JPEG"), jpegBytes);
       writeFileSync(join(root, "empty.txt"), "");
       writeFileSync(join(root, "big.log"), bigBytes);
+      const svgBytes = Buffer.from(
+        '<svg xmlns="http://www.w3.org/2000/svg"><script>1</script></svg>',
+      );
+      const xmlBytes = Buffer.from('<?xml version="1.0"?><rss/>');
+      const gifBytes = Buffer.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x00, 0xff]);
+      const webpBytes = Buffer.from([0x52, 0x49, 0x46, 0x46, 0x00, 0x57, 0x45, 0x42, 0x50]);
+      writeFileSync(join(root, "logo.svg"), svgBytes);
+      writeFileSync(join(root, "page.htm"), htmlBytes);
+      writeFileSync(join(root, "feed.xml"), xmlBytes);
+      writeFileSync(join(root, "anim.gif"), gifBytes);
+      writeFileSync(join(root, "pic.webp"), webpBytes);
       insertWorkspace(db, U1_PREVIEW, "u1", "preview", "preview", 1);
       const cookie = bearerCookie(await loginSessionId(app, "zhangsan"));
+      // The main origin never returns a workspace file as a document a browser would render.
+      for (const [path, bytes] of [
+        ["logo.svg", svgBytes],
+        ["page.htm", htmlBytes],
+        ["feed.xml", xmlBytes],
+      ] as const) {
+        const text = await requestWorkspaceFile(app, U1_PREVIEW, cookie, path);
+        expect(text.statusCode, path).toBe(200);
+        expect(text.headers["content-type"], path).toBe("text/plain; charset=utf-8");
+        expect(text.headers["x-content-type-options"], path).toBe("nosniff");
+        expect(text.rawPayload.equals(bytes), path).toBe(true);
+      }
+      for (const [path, contentType, bytes] of [
+        ["anim.gif", "image/gif", gifBytes],
+        ["pic.webp", "image/webp", webpBytes],
+      ] as const) {
+        const image = await requestWorkspaceFile(app, U1_PREVIEW, cookie, path);
+        expect(image.statusCode, path).toBe(200);
+        expect(image.headers["content-type"], path).toBe(contentType);
+        expect(image.headers["x-content-type-options"], path).toBe("nosniff");
+        expect(image.headers["accept-ranges"], path).toBeUndefined();
+        expect(image.rawPayload.equals(bytes), path).toBe(true);
+      }
       const html = await requestWorkspaceFile(app, U1_PREVIEW, cookie, "page.html");
       expect(html.statusCode).toBe(200);
       expect(html.headers["content-type"]).toBe("text/plain; charset=utf-8");
@@ -471,9 +507,12 @@ describe("workspace REST", () => {
     await withWorkspacesApp(async ({ app, db, sandboxRoot }) => {
       const root = join(sandboxRoot, "u1", "preview");
       mkdirSync(join(root, "out.zip"), { recursive: true });
+      mkdirSync(join(root, "out"));
       writeFileSync(join(root, "archive.zip"), "PK");
+      writeFileSync(join(root, "doc.pdf"), "%PDF-1.7");
+      writeFileSync(join(root, "deck.pptx"), "PK");
       writeFileSync(join(root, "huge.png"), "");
-      truncateSync(join(root, "huge.png"), 11 * 1024 * 1024);
+      truncateSync(join(root, "huge.png"), 21 * 1024 * 1024);
       writeFileSync(join(root, "file.__proto__"), "x");
       writeFileSync(join(root, "file.constructor"), "x");
       execFileSync("mkfifo", [join(root, "pipe.zip")]);
@@ -494,6 +533,21 @@ describe("workspace REST", () => {
           path: "pipe.zip",
           status: 404,
           body: NOT_FOUND_ENVELOPE,
+        },
+        {
+          path: "out",
+          status: 404,
+          body: NOT_FOUND_ENVELOPE,
+        },
+        {
+          path: "doc.pdf",
+          status: 415,
+          body: { error: { code: "preview_unsupported", message: "该类型不支持预览" } },
+        },
+        {
+          path: "deck.pptx",
+          status: 415,
+          body: { error: { code: "preview_unsupported", message: "该类型不支持预览" } },
         },
         {
           path: "archive.zip",
@@ -521,6 +575,54 @@ describe("workspace REST", () => {
         const response = await requestWorkspaceFile(app, U1_PREVIEW, cookie, previewCase.path);
         expectWorkspaceResponse(response, previewCase.status, previewCase.body);
       }
+    });
+  });
+  it("denies traversal and outward symlinks on the file route with read audits and keeps foreign ids at 404", async () => {
+    await withWorkspacesApp(async ({ app, db, sandboxRoot }) => {
+      const root = join(sandboxRoot, "u1", "escape");
+      mkdirSync(root, { recursive: true });
+      // Both targets exist and would classify as text: only the sandbox keeps them unread.
+      writeFileSync(join(sandboxRoot, "u1", "outside.html"), "<h1>outside</h1>");
+      writeFileSync(join(sandboxRoot, "secret.svg"), "<svg>secret</svg>");
+      symlinkSync(join(sandboxRoot, "secret.svg"), join(root, "link.svg"));
+      insertWorkspace(db, U1_ESCAPE, "u1", "escape", "escape", 1);
+      const ownerCookie = bearerCookie(await loginSessionId(app, "zhangsan"));
+      const foreignCookie = bearerCookie(await loginSessionId(app, "zhaoliu"));
+      const rejections = () =>
+        db
+          .prepare(
+            "SELECT actor_id, kind, workspace_id, json_extract(detail, '$.relPath') AS rel_path, json_extract(detail, '$.op') AS op FROM audit_events ORDER BY rowid",
+          )
+          .all();
+      const rejection = (path: string) => ({
+        actor_id: "u1",
+        kind: "sandbox.reject",
+        workspace_id: U1_ESCAPE,
+        rel_path: path,
+        op: "read",
+      });
+
+      for (const [index, path] of ["../outside.html", "link.svg"].entries()) {
+        const denied = await requestWorkspaceFile(app, U1_ESCAPE, ownerCookie, path);
+        expectWorkspaceResponse(denied, 403, {
+          error: { code: "sandbox_denied", message: "目标路径不在你的沙箱内，操作已拒绝" },
+        });
+        expect(denied.headers["x-workbuddy-size"], path).toBeUndefined();
+        expect(denied.payload, path).not.toContain("outside");
+        expect(denied.payload, path).not.toContain("secret");
+        expect(rejections()).toEqual(
+          ["../outside.html", "link.svg"].slice(0, index + 1).map(rejection),
+        );
+      }
+
+      for (const [id, cookie] of [
+        [U1_ESCAPE, foreignCookie],
+        [MISSING_ESCAPE, ownerCookie],
+      ] as const) {
+        const hidden = await requestWorkspaceFile(app, id, cookie, "../x.html");
+        expectWorkspaceResponse(hidden, 404, NOT_FOUND_ENVELOPE);
+      }
+      expect(rejections()).toEqual(["../outside.html", "link.svg"].map(rejection));
     });
   });
   it("uses the exact 16 KiB parser boundary and exact JSON body shapes on both POST routes", async () => {
