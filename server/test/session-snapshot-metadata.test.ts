@@ -1,6 +1,6 @@
 /**
  * Issue #517 (parent s1c tasks 5.1) session DTO metadata projection over `app.inject()` and real
- * SQLite: the eleven-key session view on create, list and snapshot (fork 201 is pinned by
+ * SQLite: the fourteen-key session view on create, list and snapshot (fork 201 is pinned by
  * `session-fork-rest-real.test.ts` via `SESSION_VIEW_KEYS`), stored `scene`/`workspace_id`/
  * `pinned_at` columns read back per value, message `thinking` and step `changes` read from their
  * columns. Oracles: the literal values written by SQL and the key order listed in the spec delta.
@@ -95,8 +95,8 @@ function writeChanges(db: DatabaseSync, stepId: number, changes: string): void {
   expect(receipt.changes).toBe(1);
 }
 
-describe("session DTO metadata: eleven-key session view", () => {
-  it("returns eleven keys with the default metadata from create, list and snapshot", async () => {
+describe("session DTO metadata: fourteen-key session view", () => {
+  it("returns fourteen keys with the default metadata from create, list and snapshot", async () => {
     await withSessionRest(async ({ app }) => {
       const cookie = await cookieFor(app, "zhangsan");
       const created = await app.inject({
@@ -122,6 +122,9 @@ describe("session DTO metadata: eleven-key session view", () => {
         archivedAt: null,
         pendingApproval: false,
         temporaryWorkspace: true,
+        approvalMode: "write",
+        modelId: "deepseek-v4.1-flash",
+        reasoningEffort: "high",
       });
 
       const listed = await listSessions(app, cookie);

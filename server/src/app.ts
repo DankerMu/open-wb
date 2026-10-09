@@ -33,7 +33,7 @@ import {
   sendHttpError,
 } from "./http/index.js";
 import { classifyRequestPath } from "./http/path-classifier.js";
-import type { ModelCatalog } from "./model-catalog.js";
+import { type ApprovalMode, type ModelCatalog, resolveModelCatalog } from "./model-catalog.js";
 import { registerModelProxy } from "./model-proxy/index.js";
 import { SERVICE_INFO } from "./service-info.js";
 import type { ChatEvent } from "./sessions/events.js";
@@ -82,6 +82,8 @@ export interface AssemblyDependencies {
   snapshots?: TurnSnapshotService;
   /** 模型白名单；省略时只有 `runtime.modelId` 一个模型。 */
   modelCatalog?: ModelCatalog;
+  /** 审批档位的最高档；省略时不封顶（`yolo`）。 */
+  approvalMaxMode?: ApprovalMode;
   /**
    * Must return synchronously. createApp forwards this callback and its return
    * unchanged; a returned thenable is an owned programming error beside the source fault.
@@ -177,10 +179,11 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     modelId: DEFAULT_MODEL_ID,
     idleMs: DEFAULT_OMP_IDLE_MS,
   };
-  const modelIds = assembly?.modelCatalog?.models.map((model) => model.id) ?? [runtime.modelId];
+  // 代理白名单与会话视图的有效值用同一份目录。
+  const modelCatalog = assembly?.modelCatalog ?? resolveModelCatalog({ MODEL_ID: runtime.modelId });
   registerModelProxy(app, {
     tokens,
-    allowedModels: new Set(modelIds),
+    allowedModels: new Set(modelCatalog.models.map((model) => model.id)),
     ...(assembly?.upstream === undefined ? {} : { upstream: assembly.upstream }),
   });
   const store = createWorkspaceStore(db, {
@@ -200,6 +203,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
       return store.createTemporary({ id: ownerId });
     },
     agentDir: ompAgentDir(runtime.stateDir),
+    composer: { approvalMaxMode: assembly?.approvalMaxMode ?? "yolo", modelCatalog },
     snapshots: assembly?.snapshots ?? snapshotService(runtime),
     onError: assembly?.onError ?? (() => {}),
     ...(assembly?.onEvent === undefined ? {} : { onEvent: assembly.onEvent }),

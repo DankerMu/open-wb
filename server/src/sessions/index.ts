@@ -14,6 +14,7 @@ import type { WorkspaceRootOf } from "./session-cwd.js";
 import { createSessionDeleter } from "./session-delete.js";
 import { sessionSkillsResolver } from "./slash-commands.js";
 import { createSessionStore, type SessionStore } from "./store.js";
+import type { ComposerConfig } from "./store-composer.js";
 import { createSessionMetadataStore, type SessionMetadataStoreOptions } from "./store-metadata.js";
 import type { TodoWarn } from "./store-todo.js";
 import { defaultSessionClock, registerSessionEventStream } from "./stream/sse.js";
@@ -43,6 +44,11 @@ export interface RegisterSessionsOptions {
    * spawn's `HOME`, omp's default agent dir; sessions never computes it a second way.
    */
   agentDir: string;
+  /**
+   * The approval ceiling and the model catalog (createApp's configuration): every session view's
+   * three composer settings are the stored choices resolved against it.
+   */
+  composer: ComposerConfig;
   /**
    * The app's one workspace-snapshots service (createApp binds it to the managed snapshots
    * directory and the snapshot settings); the prompt route snapshots a bound session's workspace
@@ -81,6 +87,7 @@ export function registerSessions(
     },
     emit,
     warn: options.warn,
+    composer: options.composer,
   });
   supervisor = new SessionSupervisor({
     store,
@@ -108,6 +115,7 @@ export function registerSessions(
     emit,
     sandboxRoot: options.runtime.sandboxRoot,
     createTemporaryWorkspace: options.createTemporaryWorkspace,
+    composer: options.composer,
   });
   const turnSnapshots = createTurnSnapshots({
     db: options.db,

@@ -1,6 +1,6 @@
 # 会话元数据冒烟（session-meta.hurl）：从空 cookie store 独立可运行，不依赖 public/auth/chat/files。
 # 登录 zhangsan → 创建/采用 smoke-sessions（201 或 409）→ 列表按 name 取 id
-# → (1) 绑定创建 201 十一键 + session.bind 审计 → (2) 未知空间 404 / 多余键 400 且审计不变、无 body 创建 201
+# → (1) 绑定创建 201 十四键（三项输入框设置为缺省有效值）+ session.bind 审计 → (2) 未知空间 404 / 多余键 400 且审计不变、无 body 创建 201
 #     带临时空间（列表不含、tree 200 且为空、显式绑定 404）
 # → (3) PATCH title/scene/pinned、多余键 400、列表反映、取消置顶
 # → (4) WORKBUDDY_THINK prompt → 作答唯一 bash 审批 → 仅 messages GET 有界重试至 done
@@ -13,6 +13,8 @@
 #     → 删除该会话 → 其临时空间 tree 404 → 登出。
 # 只由 make smoke 运行（smoke-live 不跑本文件），不使用 skip_turn_control。
 # 可重跑：工作空间保留供下次采用，自建会话在文件内删除，不留下 live authentication session 与 running 回合。
+# 三项输入框设置的逐键断言只在缺省单模型配置的服务上成立（未设 MODEL_CATALOG / MODEL_ID / MODEL_REASONING，
+# APPROVAL_MAX_MODE 未设或为 write / yolo）。
 # 库与 SANDBOX_ROOT 必须同生命周期：库在而空间目录被清掉时，创建仍成功，但 (4) 的回合会因空间根不存在而失败。
 
 # 成功登录：exact 200 Principal + 合规 session cookie。
@@ -41,7 +43,8 @@ workspace_id: jsonpath "$.workspaces[?(@.name=='smoke-sessions')].id"
 jsonpath "$.workspaces[?(@.name=='smoke-sessions' && count($.workspaces[?(@.name=='smoke-sessions')])==1)]" exists
 jsonpath "$.workspaces[?(@.name=='smoke-sessions')].id" exists
 
-# (1) 绑定创建：exact 201，恰十一键且逐键点名，title null、idle、scene code、workspaceId 为捕获值、pinnedAt 与 archivedAt null、pendingApproval 与 temporaryWorkspace false；捕获会话 id。不重试。
+# (1) 绑定创建：exact 201，恰十四键且逐键点名，title null、idle、scene code、workspaceId 为捕获值、pinnedAt 与 archivedAt null、pendingApproval 与 temporaryWorkspace false、
+# approvalMode write、modelId deepseek-v4.1-flash、reasoningEffort high（三列为 NULL 时缺省单模型配置下的有效值）；捕获会话 id。不重试。
 POST {{base_url}}/api/sessions
 Content-Type: application/json
 {"workspaceId":"{{workspace_id}}","scene":"code"}
@@ -49,7 +52,7 @@ HTTP 201
 [Captures]
 session_id: jsonpath "$.id"
 [Asserts]
-jsonpath "$.*" count == 11
+jsonpath "$.*" count == 14
 jsonpath "$.id" matches "^[0-9a-f]{32}$"
 jsonpath "$.title" == null
 jsonpath "$.status" == "idle"
@@ -61,6 +64,9 @@ jsonpath "$.pinnedAt" == null
 jsonpath "$.archivedAt" == null
 jsonpath "$.pendingApproval" == false
 jsonpath "$.temporaryWorkspace" == false
+jsonpath "$.approvalMode" == "write"
+jsonpath "$.modelId" == "deepseek-v4.1-flash"
+jsonpath "$.reasoningEffort" == "high"
 
 # (1) 最新审计是本次会话的 session.bind（detail.sessionId 区分同库上一轮留下的同类事件）。
 GET {{base_url}}/api/audit?limit=1
@@ -94,7 +100,7 @@ jsonpath "$.events" count == 1
 jsonpath "$.events[0].kind" == "session.bind"
 jsonpath "$.events[0].detail.sessionId" == "{{session_id}}"
 
-# (2) 无 body 创建现在带一个临时空间：exact 201，恰十一键且逐键点名，scene null、temporaryWorkspace true、
+# (2) 无 body 创建现在带一个临时空间：exact 201，恰十四键且逐键点名，scene null、temporaryWorkspace true、三项输入框设置同 (1)、
 # workspaceId 为 32 位十六进制；捕获该会话 id 与临时空间 id。bodyless：无 Content-Type、无 body；不重试。
 POST {{base_url}}/api/sessions
 HTTP 201
@@ -102,7 +108,7 @@ HTTP 201
 other_id: jsonpath "$.id"
 temp_ws: jsonpath "$.workspaceId"
 [Asserts]
-jsonpath "$.*" count == 11
+jsonpath "$.*" count == 14
 jsonpath "$.id" matches "^[0-9a-f]{32}$"
 jsonpath "$.title" == null
 jsonpath "$.status" == "idle"
@@ -114,6 +120,9 @@ jsonpath "$.pinnedAt" == null
 jsonpath "$.archivedAt" == null
 jsonpath "$.pendingApproval" == false
 jsonpath "$.temporaryWorkspace" == true
+jsonpath "$.approvalMode" == "write"
+jsonpath "$.modelId" == "deepseek-v4.1-flash"
+jsonpath "$.reasoningEffort" == "high"
 
 # (2) 工作空间列表不含该临时空间（采用的 smoke-sessions 仍在）。
 GET {{base_url}}/api/workspaces
@@ -135,13 +144,13 @@ Content-Type: application/json
 HTTP 404
 {"error":{"code":"not_found","message":"请求的资源不存在"}}
 
-# (3) PATCH title/scene/pinned：exact 200，恰十一键且逐键点名，pinnedAt 为整数时间戳，id/status/workspaceId 不变。不重试。
+# (3) PATCH title/scene/pinned：exact 200，恰十四键且逐键点名，pinnedAt 为整数时间戳，id/status/workspaceId 与三项输入框设置不变。不重试。
 PATCH {{base_url}}/api/sessions/{{session_id}}
 Content-Type: application/json
 {"title":"冒烟会话","scene":"design","pinned":true}
 HTTP 200
 [Asserts]
-jsonpath "$.*" count == 11
+jsonpath "$.*" count == 14
 jsonpath "$.id" == "{{session_id}}"
 jsonpath "$.title" == "冒烟会话"
 jsonpath "$.status" == "idle"
@@ -153,6 +162,9 @@ jsonpath "$.workspaceId" == "{{workspace_id}}"
 jsonpath "$.archivedAt" == null
 jsonpath "$.pendingApproval" == false
 jsonpath "$.temporaryWorkspace" == false
+jsonpath "$.approvalMode" == "write"
+jsonpath "$.modelId" == "deepseek-v4.1-flash"
+jsonpath "$.reasoningEffort" == "high"
 
 # (3) PATCH 多余键：exact 400 bad_request。不重试。
 PATCH {{base_url}}/api/sessions/{{session_id}}
@@ -402,13 +414,13 @@ HTTP 200
 [Asserts]
 jsonpath "$.session.title" == null
 
-# (8) 属主归档该会话：exact 200，恰十一键，archivedAt 为整数时间戳。不重试。
+# (8) 属主归档该会话：exact 200，恰十四键，archivedAt 为整数时间戳。不重试。
 PATCH {{base_url}}/api/sessions/{{other_id}}
 Content-Type: application/json
 {"archived":true}
 HTTP 200
 [Asserts]
-jsonpath "$.*" count == 11
+jsonpath "$.*" count == 14
 jsonpath "$.archivedAt" isInteger
 
 # (8) 已归档的会话拒绝 prompt：exact 409 session_archived。不重试。

@@ -29,6 +29,7 @@ import {
   waitForEvent,
   waitForRows,
 } from "./session-approval-helpers.js";
+import { TEST_COMPOSER } from "./session-meta-fixtures.js";
 import {
   approvalAudits,
   denyAudit,
@@ -223,7 +224,11 @@ describe("graceful shutdown settlement (C4)", () => {
         await settle();
         expect(sideEffects(world)).toEqual(frozen);
 
-        const restarted = createSessionStore(db, { onFlushError() {}, emit });
+        const restarted = createSessionStore(db, {
+          onFlushError() {},
+          emit,
+          composer: TEST_COMPOSER,
+        });
         const tree = restarted.getMessages(world.session, OWNER_ID);
         expect(tree?.messages[1]?.approvals.map((entry) => entry.decision)).toEqual([
           "deny",

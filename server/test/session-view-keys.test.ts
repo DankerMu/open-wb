@@ -30,7 +30,7 @@ import { OWNER_ID, waitForTurn } from "./session-supervisor-helpers.js";
 import { seedTemporaryWorkspaceSession } from "./support/temporary-workspace.js";
 import { insertWorkspace } from "./workspaces-http-helpers.js";
 
-const ELEVEN_KEYS = [
+const FOURTEEN_KEYS = [
   "id",
   "title",
   "status",
@@ -42,6 +42,9 @@ const ELEVEN_KEYS = [
   "archivedAt",
   "pendingApproval",
   "temporaryWorkspace",
+  "approvalMode",
+  "modelId",
+  "reasoningEffort",
 ];
 const ORDINARY_WORKSPACE = "a".repeat(32);
 const TEMPORARY_WORKSPACE = "b".repeat(32);
@@ -75,6 +78,9 @@ function idleView(id: string, overrides: Record<string, unknown> = {}): View {
     archivedAt: null,
     pendingApproval: false,
     temporaryWorkspace: false,
+    approvalMode: "write",
+    modelId: "deepseek-v4.1-flash",
+    reasoningEffort: "high",
     ...overrides,
   };
 }
@@ -118,7 +124,7 @@ function archive(db: DatabaseSync, sessionId: string): void {
 }
 
 describe("会话视图扩展键 (deterministic store)", () => {
-  it("三键的取值：五个会话各十一键，仅对应的那一个取非默认值，列表项与快照 session 逐键相等", async () => {
+  it("三键的取值：五个会话各十四键，仅对应的那一个取非默认值，列表项与快照 session 逐键相等", async () => {
     await withSessionRest(async ({ app, db, store }) => {
       plantWorkspaces(db);
       const a = store.create("u1").id;
@@ -137,7 +143,7 @@ describe("会话视图扩展键 (deterministic store)", () => {
 
       expect(sessions).toHaveLength(5);
       for (const session of sessions) {
-        expect(Object.keys(session)).toEqual(ELEVEN_KEYS);
+        expect(Object.keys(session)).toEqual(FOURTEEN_KEYS);
       }
       const byId = new Map(sessions.map((session) => [session.id, session]));
       expect(byId.get(a)).toEqual(idleView(a, { workspaceId: ORDINARY_WORKSPACE }));
@@ -152,7 +158,7 @@ describe("会话视图扩展键 (deterministic store)", () => {
 
       for (const session of sessions) {
         const snapshot = await snapshotView(app, cookie, session.id);
-        expect(Object.keys(snapshot)).toEqual(ELEVEN_KEYS);
+        expect(Object.keys(snapshot)).toEqual(FOURTEEN_KEYS);
         expect(snapshot).toEqual(session);
       }
     });
@@ -268,12 +274,12 @@ describe("会话视图扩展键 (deterministic store)", () => {
       expect(fromSnapshot).toEqual(expected);
       expect(fromPatch).toEqual({ ...expected, pinnedAt: SESSION_NOW });
       for (const view of [fromList, fromSnapshot, fromPatch]) {
-        expect(Object.keys(view)).toEqual(ELEVEN_KEYS);
+        expect(Object.keys(view)).toEqual(FOURTEEN_KEYS);
       }
     });
   });
 
-  it("无 body 创建的 201 视图恰十一键，三键为 null / false / true（新建的临时空间），并与列表项相等", async () => {
+  it("无 body 创建的 201 视图恰十四键，三键为 null / false / true（新建的临时空间），并与列表项相等", async () => {
     await withSessionRest(async ({ app }) => {
       const cookie = await cookieFor(app, "zhangsan");
 
@@ -285,7 +291,7 @@ describe("会话视图扩展键 (deterministic store)", () => {
 
       expect(created.statusCode).toBe(201);
       const body = created.json() as View;
-      expect(Object.keys(body)).toEqual(ELEVEN_KEYS);
+      expect(Object.keys(body)).toEqual(FOURTEEN_KEYS);
       // A create without a workspace makes a temporary one (#930): a fresh 32-hex id.
       expect(body).toEqual(
         idleView(body.id, {
@@ -314,7 +320,7 @@ describe("会话视图扩展键 over the production assembly (real fake-omp appr
       const row = await pendingApproval(world);
 
       const pending = await listedView(app, world.cookie, world.session);
-      expect(Object.keys(pending)).toEqual(ELEVEN_KEYS);
+      expect(Object.keys(pending)).toEqual(FOURTEEN_KEYS);
       expect(pending).toMatchObject({
         status: "running",
         archivedAt: null,
@@ -335,7 +341,7 @@ describe("会话视图扩展键 over the production assembly (real fake-omp appr
       await waitForTurn(world.fixture, world.session, "done");
 
       const settled = await listedView(app, world.cookie, world.session);
-      expect(Object.keys(settled)).toEqual(ELEVEN_KEYS);
+      expect(Object.keys(settled)).toEqual(FOURTEEN_KEYS);
       expect(settled).toMatchObject({ status: "done", pendingApproval: false });
       expect(await snapshotView(app, world.cookie, world.session)).toEqual(settled);
     },
@@ -366,7 +372,7 @@ describe("会话视图扩展键 over the production assembly (real fake-omp appr
       });
       expect(created.statusCode).toBe(201);
       const body = created.json() as View;
-      expect(Object.keys(body)).toEqual(ELEVEN_KEYS);
+      expect(Object.keys(body)).toEqual(FOURTEEN_KEYS);
       expect(body).toMatchObject({
         workspaceId: ordinary,
         archivedAt: null,
@@ -387,7 +393,7 @@ describe("会话视图扩展键 over the production assembly (real fake-omp appr
       });
       expect(refused.statusCode).toBe(404);
       const listedTemporary = await listedView(app, world.cookie, ORPHAN_SESSION);
-      expect(Object.keys(listedTemporary)).toEqual(ELEVEN_KEYS);
+      expect(Object.keys(listedTemporary)).toEqual(FOURTEEN_KEYS);
       expect(listedTemporary).toMatchObject({
         workspaceId: temporary,
         archivedAt: null,

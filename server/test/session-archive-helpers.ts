@@ -6,7 +6,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance, LightMyRequestResponse } from "fastify";
 import { expect } from "vitest";
 
-const ELEVEN_KEYS = [
+const FOURTEEN_KEYS = [
   "id",
   "title",
   "status",
@@ -18,6 +18,9 @@ const ELEVEN_KEYS = [
   "archivedAt",
   "pendingApproval",
   "temporaryWorkspace",
+  "approvalMode",
+  "modelId",
+  "reasoningEffort",
 ];
 
 export type View = Record<string, unknown> & { archivedAt: number | null; pinnedAt: number | null };
@@ -43,13 +46,13 @@ export function patch(
   });
 }
 
-/** 200 + no-store + exactly the eleven keys in wire order. */
+/** 200 + no-store + exactly the fourteen keys in wire order. */
 export async function patched(response: Promise<LightMyRequestResponse>): Promise<View> {
   const settled = await response;
   expect(settled.statusCode).toBe(200);
   expect(settled.headers["cache-control"]).toBe("no-store");
   const view = settled.json() as View;
-  expect(Object.keys(view)).toEqual(ELEVEN_KEYS);
+  expect(Object.keys(view)).toEqual(FOURTEEN_KEYS);
   return view;
 }
 

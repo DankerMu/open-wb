@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import { emit } from "../src/core/audit/index.js";
 import { openDb } from "../src/core/db/index.js";
 import { createSessionStore, type SessionStore } from "../src/sessions/store.js";
+import { TEST_COMPOSER } from "./session-meta-fixtures.js";
 
 const T = 1_700_000_000_000;
 const TITLE = "Allow tool: bash\nCommand: echo workbuddy-smoke";
@@ -36,7 +37,7 @@ describe("SessionStore approval settlement", () => {
   it("R20 settles only with an audit emit; without one it throws and writes nothing", () => {
     const db = openDb(":memory:");
     try {
-      const bare = createSessionStore(db, { onFlushError() {} });
+      const bare = createSessionStore(db, { onFlushError() {}, composer: TEST_COMPOSER });
       const first = pendingIn(bare);
       expect(first.pending).toStrictEqual({
         approvalId: expect.any(Number),
@@ -53,7 +54,7 @@ describe("SessionStore approval settlement", () => {
       });
       expect(approvalAudits(db)).toEqual([]);
 
-      const audited = createSessionStore(db, { onFlushError() {}, emit });
+      const audited = createSessionStore(db, { onFlushError() {}, emit, composer: TEST_COMPOSER });
       const second = pendingIn(audited);
       expect(
         audited.settleApproval(second.session, second.pending.approvalId, "allow", T + 1),

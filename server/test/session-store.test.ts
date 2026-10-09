@@ -134,6 +134,7 @@ describe("SessionStore admission, metadata, and compensation", () => {
           streamEpoch: 0,
           activeTurn: accepted,
           workspaceId: null,
+          composer: { approvalMode: null, modelId: null, reasoningEffort: null },
         });
         expect(sessionRow(db, session.id)).toMatchObject({
           title: "😀".repeat(18),
@@ -163,6 +164,7 @@ describe("SessionStore admission, metadata, and compensation", () => {
           streamEpoch: 1,
           activeTurn: null,
           workspaceId: null,
+          composer: { approvalMode: null, modelId: null, reasoningEffort: null },
         });
         expect(store.rollbackPrompt(accepted.assistantMessageId)).toBe(false);
       });
@@ -342,6 +344,7 @@ describe("SessionStore admission, metadata, and compensation", () => {
           streamEpoch: 1,
           activeTurn: accepted,
           workspaceId: null,
+          composer: { approvalMode: null, modelId: null, reasoningEffort: null },
         });
         expect(store.finishTurn(accepted.assistantMessageId, "done")).toBe(true);
       });

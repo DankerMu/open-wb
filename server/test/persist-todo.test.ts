@@ -11,6 +11,7 @@ import type { ChatEvent } from "../src/sessions/events.js";
 import { createSessionStore, type SessionStore } from "../src/sessions/store.js";
 import type { TodoRejection } from "../src/sessions/store-todo.js";
 import { persistEvent } from "../src/sessions/turn-control.js";
+import { TEST_COMPOSER } from "./session-meta-fixtures.js";
 
 const OWNER = "u1";
 const PHASES = [
@@ -60,6 +61,7 @@ function open(warn?: (record: TodoRejection) => void): World {
   const store = createSessionStore(db, {
     onFlushError: () => {},
     warn: warn ?? ((record) => warns.push(record)),
+    composer: TEST_COMPOSER,
   });
   const session = store.create(OWNER).id;
   const assistant = store.acceptPrompt(session, OWNER, "列个清单").assistantMessageId;
@@ -252,13 +254,13 @@ describe("the stored list survives terminal settlement and startup reconciliatio
   it("a running session reconciled at startup keeps the list", () => {
     const db = openDb(":memory:");
     try {
-      const before = createSessionStore(db, { onFlushError: () => {} });
+      const before = createSessionStore(db, { onFlushError: () => {}, composer: TEST_COMPOSER });
       const session = before.create(OWNER).id;
       db.prepare("UPDATE chat_sessions SET status = 'running', todo = ? WHERE id = ?").run(
         STORED,
         session,
       );
-      const restarted = createSessionStore(db, { onFlushError: () => {} });
+      const restarted = createSessionStore(db, { onFlushError: () => {}, composer: TEST_COMPOSER });
       restarted.reconcileOnStartup();
       expect(row(db, session).status).not.toBe("running");
       expect(row(db, session).todo).toBe(STORED);

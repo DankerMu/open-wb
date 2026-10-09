@@ -16,6 +16,7 @@ import {
   TRACKED_MIGRATION_FILENAMES,
   tempDir,
 } from "./core-db-helpers.js";
+import { TEST_COMPOSER } from "./session-meta-fixtures.js";
 import { withSessionStore } from "./session-store-helpers.js";
 
 const NUL = String.fromCharCode(0);
@@ -96,6 +97,7 @@ function withStore<T>(db: DatabaseSync, run: (store: SessionStore) => T): T {
     onFlushError(failure) {
       throw failure.error instanceof Error ? failure.error : new Error("flush failed");
     },
+    composer: TEST_COMPOSER,
   });
   try {
     return run(store);

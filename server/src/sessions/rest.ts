@@ -82,6 +82,9 @@ interface PublicSession {
   archivedAt: number | null;
   pendingApproval: boolean;
   temporaryWorkspace: boolean;
+  approvalMode: string;
+  modelId: string;
+  reasoningEffort: string | null;
 }
 
 interface PublicStep {
@@ -402,6 +405,9 @@ export function toPublicSession(session: PublicSession): PublicSession {
     archivedAt: session.archivedAt,
     pendingApproval: session.pendingApproval,
     temporaryWorkspace: session.temporaryWorkspace,
+    approvalMode: session.approvalMode,
+    modelId: session.modelId,
+    reasoningEffort: session.reasoningEffort,
   };
 }
 
