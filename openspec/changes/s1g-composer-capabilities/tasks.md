@@ -894,6 +894,7 @@ Minimal mergeable slice: 18.1 + 18.2 一刀（Hurl）；18.3 + 18.4 一刀（ui-
   反向代理须放开请求体大小并关闭请求缓冲；上传没有配额、`uploads/` 可能残留 `.part` 文件；`全部自动` 的安全含义（选过一次之后新会话默认沿用它）与如何用 `APPROVAL_MAX_MODE` 关掉它；模型代理只放行白名单内的模型名（白名单外的请求得到 400，不到达上游；想让某个模型可用就把它写进 `MODEL_CATALOG`）。
   实施注记见 `implementation-notes.md`「19.4（#1045）」。
 - [ ] 19.5 核对功能验收清单：组 14–17 新增的各行都在、ID 不重复、结论均为 `待签`；`web/test/functional-checklist.test.ts` 通过；因「+」按钮改名而失实的既有行（提到 `技能与命令` 按钮名的）改写并回到 `待签`。
+  实施注记见 `implementation-notes.md`「19.5（#1046）」。
 
 Suggested fixture level: none - 只改文档；清单格式由既有守卫检查
 Minimal mergeable slice: 19.2 + 19.3 一刀（ADR-0013 增补与术语，可随时合入）；19.1 一刀（ADR-0012 补充，在组 1 的结论写入 design 之后）；19.4 一刀（在组 2、8、9、11、12、20 之后）；19.5 随组 17 之后
