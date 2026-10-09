@@ -106,6 +106,7 @@ export function appAssemblyOf(config: ServerConfig): AssemblyDependencies {
   return {
     runtime: sessionRuntimeOf(config),
     modelCatalog: config.modelCatalog,
+    approvalMaxMode: config.approvalMaxMode,
     ...(config.modelUpstreamBaseUrl !== undefined && config.modelUpstreamApiKey !== undefined
       ? { upstream: { baseUrl: config.modelUpstreamBaseUrl, apiKey: config.modelUpstreamApiKey } }
       : {}),

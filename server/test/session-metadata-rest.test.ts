@@ -22,6 +22,7 @@ import {
   NOT_FOUND_ENVELOPE,
   UNAUTHORIZED_ENVELOPE,
 } from "./session-db-helpers.js";
+import { TEST_COMPOSER } from "./session-meta-fixtures.js";
 import { cookieFor, postPrompt, UNKNOWN_SESSION_ID } from "./session-rest-helpers.js";
 import {
   createRealFakeRuntime,
@@ -37,7 +38,7 @@ import { temporaryWorkspacePort } from "./support/temporary-workspace.js";
 
 const JSON_TYPE = "application/json";
 const BODY_LIMIT = 16 * 1024;
-const ELEVEN_KEYS = [
+const FOURTEEN_KEYS = [
   "id",
   "title",
   "status",
@@ -49,6 +50,9 @@ const ELEVEN_KEYS = [
   "archivedAt",
   "pendingApproval",
   "temporaryWorkspace",
+  "approvalMode",
+  "modelId",
+  "reasoningEffort",
 ] as const;
 const SESSION_ID = /^[0-9a-f]{32}$/u;
 /** A create that names no workspace gets a new temporary one (#930): a fresh 32-hex id. */
@@ -165,7 +169,7 @@ function sessionColumns(db: DatabaseSync, id: string): unknown {
     .get(id);
 }
 
-/** 201 + no-store + exactly the eleven keys in wire order with the default columns. */
+/** 201 + no-store + exactly the fourteen keys in wire order with the default columns. */
 function expectCreated(
   response: LightMyRequestResponse,
   expected: { scene: string | null; workspaceId: string | typeof TEMPORARY },
@@ -174,7 +178,7 @@ function expectCreated(
   expect(response.headers["cache-control"]).toBe("no-store");
   const body = response.json() as CreatedSession & { workspaceId: string };
   const temporary = expected.workspaceId === TEMPORARY;
-  expect(Object.keys(body)).toEqual([...ELEVEN_KEYS]);
+  expect(Object.keys(body)).toEqual([...FOURTEEN_KEYS]);
   expect(body).toEqual({
     id: expect.stringMatching(SESSION_ID),
     title: null,
@@ -187,6 +191,9 @@ function expectCreated(
     archivedAt: null,
     pendingApproval: false,
     temporaryWorkspace: temporary,
+    approvalMode: "write",
+    modelId: "deepseek-v4.1-flash",
+    reasoningEffort: "high",
   });
   expect(Number.isSafeInteger(body.createdAt)).toBe(true);
   return body;
@@ -224,7 +231,7 @@ function paddedSceneBody(bytes: number): string {
 }
 
 describe("POST /api/sessions default creation", () => {
-  it("E1 no body and JSON {} both create the default eleven-key session without audit", async () => {
+  it("E1 no body and JSON {} both create the default fourteen-key session without audit", async () => {
     const world = await openWorld();
     const before = rowCounts(world.db);
 
@@ -284,7 +291,7 @@ describe("POST /api/sessions workspace binding and scene", () => {
     const sessions = (listed.json() as { sessions: CreatedSession[] }).sessions;
     const row = sessions.find((session) => session.id === created.id);
     expect(row).toEqual(created);
-    expect(Object.keys(row ?? {})).toEqual([...ELEVEN_KEYS]);
+    expect(Object.keys(row ?? {})).toEqual([...FOURTEEN_KEYS]);
     expect(world.rt.calls).toEqual([]);
   });
 
@@ -535,12 +542,12 @@ function rowState(db: DatabaseSync, id: string) {
   return { row: db.prepare(FULL_ROW).get(id), messages: Number(messages.n) };
 }
 
-/** 200 + no-store + exactly the eleven keys in wire order. */
+/** 200 + no-store + exactly the fourteen keys in wire order. */
 function expectPatched(response: LightMyRequestResponse): CreatedSession {
   expect(response.statusCode).toBe(200);
   expect(response.headers["cache-control"]).toBe("no-store");
   const body = response.json() as CreatedSession;
-  expect(Object.keys(body)).toEqual([...ELEVEN_KEYS]);
+  expect(Object.keys(body)).toEqual([...FOURTEEN_KEYS]);
   return body;
 }
 
@@ -698,6 +705,7 @@ describe("PATCH /api/sessions/:id ownership and binding", () => {
       emit,
       sandboxRoot: world.rt.runtime.sandboxRoot,
       createTemporaryWorkspace: temporaryWorkspacePort(world.db, world.rt.runtime.sandboxRoot),
+      composer: TEST_COMPOSER,
     });
     const before = rowState(world.db, world.session);
 

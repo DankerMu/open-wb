@@ -15,6 +15,7 @@ import {
 import { createTurnSnapshots } from "../src/sessions/turn-snapshot.js";
 import { bearerCookie, loginSessionId } from "./auth-lifecycle-helpers.js";
 import { PARSER_INPUTS, withStandaloneAuthApp } from "./http-guard-helpers.js";
+import { TEST_COMPOSER } from "./session-meta-fixtures.js";
 import { temporaryWorkspacePort } from "./support/temporary-workspace.js";
 
 export const SESSION_NOW = 1_740_000_000_000;
@@ -81,6 +82,7 @@ export async function withSessionRest<T>(
             throw new Error(`unexpected flush error: ${String(failure.error)}`);
           },
           emit,
+          composer: TEST_COMPOSER,
         });
         // A real directory: a body-less create makes its temporary workspace under it.
         const sandboxRoot = mkdtempSync(join(tmpdir(), "workbuddy-session-rest-"));
@@ -88,6 +90,7 @@ export async function withSessionRest<T>(
           emit,
           sandboxRoot,
           createTemporaryWorkspace: temporaryWorkspacePort(db, sandboxRoot),
+          composer: TEST_COMPOSER,
         });
         const listNotified: string[] = [];
         registerSessionRoutes(app, {

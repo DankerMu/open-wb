@@ -30,6 +30,7 @@ import {
   UNAUTHORIZED_ENVELOPE,
 } from "./session-db-helpers.js";
 import { auditEvents, auditRows } from "./session-delete-helpers.js";
+import { TEST_COMPOSER } from "./session-meta-fixtures.js";
 import {
   HOLD,
   heldLine,
@@ -322,6 +323,7 @@ describe("patchSession tri-state (store)", REAL, () => {
       emit,
       sandboxRoot: world.rt.runtime.sandboxRoot,
       createTemporaryWorkspace: temporaryWorkspacePort(fixture.db, world.rt.runtime.sandboxRoot),
+      composer: TEST_COMPOSER,
     });
     const done = rowOf(fixture.db, session);
 

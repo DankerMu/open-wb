@@ -25,7 +25,7 @@ import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import type { emit as canonicalEmit } from "../core/audit/index.js";
 import { createSqliteTextDecoder } from "../core/db/index.js";
 import { HttpError } from "../core/errors/index.js";
-import { SESSION_COLUMNS, type SessionDbRow, type SessionView, toSessionView } from "./store.js";
+import type { SessionView } from "./store.js";
 import {
   decodeNullableText,
   hasChanges,
@@ -33,27 +33,15 @@ import {
   requireChanges,
   runOwnedTransaction,
 } from "./store-branch.js";
+import type { ComposerConfig } from "./store-composer.js";
 import { listSessionTurnSnapshots, type TurnSnapshotOutcome } from "./store-undo.js";
+import { readSessionView } from "./store-view.js";
 
 export type SessionScene = "office" | "code" | "design";
 
 export interface SessionCreateInput {
   workspaceId?: string;
   scene?: SessionScene;
-}
-
-interface CreatedSessionView {
-  id: string;
-  title: null;
-  status: "idle";
-  createdAt: number;
-  updatedAt: number;
-  scene: SessionScene | null;
-  workspaceId: string | null;
-  pinnedAt: null;
-  archivedAt: null;
-  pendingApproval: false;
-  temporaryWorkspace: boolean;
 }
 
 /** At least one key (the route guarantees it); `title` is already trimmed and 1..80 code points. */
@@ -65,7 +53,8 @@ export interface SessionPatch {
 }
 
 export interface SessionMetadataStore {
-  createSession(ownerId: string, input: SessionCreateInput): CreatedSessionView;
+  /** The new session's view, read back from its committed row. */
+  createSession(ownerId: string, input: SessionCreateInput): SessionView;
   /**
    * The updated session view; null when this owner has no such row (unknown or deleted); `"busy"`
    * when the row exists but `archived: true` met a running session — nothing was written.
@@ -114,6 +103,8 @@ export interface SessionMetadataStoreOptions {
   createTemporaryWorkspace: (ownerId: string) => CreatedTemporaryWorkspace;
   /** `SANDBOX_ROOT`: the `root` a `workspace.delete` audit names is built from its realpath. */
   sandboxRoot: string;
+  /** What turns the three raw composer columns into a view's effective values. */
+  composer: ComposerConfig;
 }
 
 interface DeletedRow {
@@ -166,22 +157,12 @@ export function createSessionMetadataStore(
           "session create",
         );
       };
-      const view = (workspaceId: string, temporaryWorkspace: boolean): CreatedSessionView => ({
-        id,
-        title: null,
-        status: "idle",
-        createdAt: now,
-        updatedAt: now,
-        scene,
-        workspaceId,
-        pinnedAt: null,
-        archivedAt: null,
-        pendingApproval: false,
-        temporaryWorkspace,
-      });
+      const view = (): SessionView =>
+        readSessionView(db, id, options.composer, "created session row missing");
       const workspaceId = input.workspaceId;
       if (workspaceId === undefined) {
-        return view(createInTemporaryWorkspace(db, options, ownerId, insert), true);
+        createInTemporaryWorkspace(db, options, ownerId, insert);
+        return view();
       }
       runOwnedTransaction(db, "session create rollback failed", () => {
         insert(workspaceId);
@@ -200,7 +181,7 @@ export function createSessionMetadataStore(
           detail: { sessionId: id, scene },
         });
       });
-      return view(workspaceId, false);
+      return view();
     },
 
     patchSession(ownerId, sessionId, patch) {
@@ -216,13 +197,7 @@ export function createSessionMetadataStore(
         const present = guarded && db.prepare(SELECT_OWNED).get(sessionId, ownerId) !== undefined;
         return present ? "busy" : null;
       }
-      const row = db
-        .prepare(`SELECT ${SESSION_COLUMNS} FROM chat_sessions WHERE id = ?`)
-        .get(sessionId) as unknown as SessionDbRow | undefined;
-      if (row === undefined) {
-        throw new Error("patched session row missing");
-      }
-      return toSessionView(row, createSqliteTextDecoder(db));
+      return readSessionView(db, sessionId, options.composer, "patched session row missing");
     },
 
     archivedAt(sessionId, ownerId) {

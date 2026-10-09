@@ -29,6 +29,7 @@ import {
   withDatabase,
   withOpenDb,
 } from "./core-db-helpers.js";
+import { TEST_COMPOSER } from "./session-meta-fixtures.js";
 import { seedMessage, seedSession } from "./session-store-helpers.js";
 
 afterEach(removeTempDirs);
@@ -143,7 +144,10 @@ describe("core/db chat step output migration", () => {
       expect(stepRows(db, "*")).toEqual(
         PRE_033_STEPS.map((step) => ({ ...step, output: null, changes: null })),
       );
-      const store = createSessionStore(db, { onFlushError: () => undefined });
+      const store = createSessionStore(db, {
+        onFlushError: () => undefined,
+        composer: TEST_COMPOSER,
+      });
       const tree = store.getMessages(SESSION_ID, "u1");
       expect(tree?.messages[1]?.steps.map((step) => [step.detail, step.output])).toEqual([
         ['{"output":"legacy end-overwritten"}', ""],

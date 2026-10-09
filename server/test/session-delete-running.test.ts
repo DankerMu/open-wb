@@ -46,6 +46,7 @@ import {
   presetOwnedFile,
   runningWorlds,
 } from "./session-delete-running-helpers.js";
+import { TEST_COMPOSER } from "./session-meta-fixtures.js";
 import {
   AGENT_UNAVAILABLE_ENVELOPE,
   cookieFor,
@@ -384,7 +385,10 @@ describe("store turn release signal (evidence 9)", () => {
   const FLUSH_BLOCKED = "flush blocked";
   const openStore = () => {
     const db = openDb(":memory:");
-    const store = createSessionStore(db, { onFlushError: () => undefined });
+    const store = createSessionStore(db, {
+      onFlushError: () => undefined,
+      composer: TEST_COMPOSER,
+    });
     const { id } = store.create(OWNER_ID);
     return { db, store, id };
   };

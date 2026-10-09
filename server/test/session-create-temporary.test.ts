@@ -43,7 +43,7 @@ const OWNER = "u1";
 const OTHER = "u2";
 const HEX32 = /^[0-9a-f]{32}$/u;
 const SHARED_MODE = 0o2770;
-const ELEVEN_KEYS = [
+const FOURTEEN_KEYS = [
   "id",
   "title",
   "status",
@@ -55,6 +55,9 @@ const ELEVEN_KEYS = [
   "archivedAt",
   "pendingApproval",
   "temporaryWorkspace",
+  "approvalMode",
+  "modelId",
+  "reasoningEffort",
 ];
 
 interface View {
@@ -69,6 +72,9 @@ interface View {
   archivedAt: number | null;
   pendingApproval: boolean;
   temporaryWorkspace: boolean;
+  approvalMode: string;
+  modelId: string;
+  reasoningEffort: string | null;
 }
 
 interface World {
@@ -136,7 +142,7 @@ function created(response: LightMyRequestResponse): View {
   expect(response.statusCode).toBe(201);
   expect(response.headers["cache-control"]).toBe("no-store");
   const view = response.json() as View;
-  expect(Object.keys(view)).toEqual(ELEVEN_KEYS);
+  expect(Object.keys(view)).toEqual(FOURTEEN_KEYS);
   return view;
 }
 
@@ -154,6 +160,9 @@ function expectTemporaryView(view: View, scene: string | null): void {
     archivedAt: null,
     pendingApproval: false,
     temporaryWorkspace: true,
+    approvalMode: "write",
+    modelId: "deepseek-v4.1-flash",
+    reasoningEffort: "high",
   });
   expect(Number.isSafeInteger(view.createdAt)).toBe(true);
 }
@@ -229,7 +238,7 @@ async function listed(world: World, cookie: string): Promise<View[]> {
 }
 
 describe("会话创建与空间绑定 — 不带空间即创建临时空间 (#930)", () => {
-  it("无 body 与空对象按默认创建: two eleven-key views on two new temporary workspaces, no audit, no child (also the parser-owner boundary's bodyless THEN)", async () => {
+  it("无 body 与空对象按默认创建: two fourteen-key views on two new temporary workspaces, no audit, no child (also the parser-owner boundary's bodyless THEN)", async () => {
     const world = await openWorld();
     const before = counts(world.db);
     const auditBefore = await audit(world, world.owner);
@@ -289,6 +298,9 @@ describe("会话创建与空间绑定 — 不带空间即创建临时空间 (#93
       archivedAt: null,
       pendingApproval: false,
       temporaryWorkspace: false,
+      approvalMode: "write",
+      modelId: "deepseek-v4.1-flash",
+      reasoningEffort: "high",
     });
     expect(sessionRow(world.db, view.id)).toEqual({
       owner_id: OWNER,

@@ -36,6 +36,12 @@ import {
   toStepView,
 } from "./store-branch.js";
 import { setStepChanges as setStepChangesText } from "./store-changes.js";
+import {
+  COMPOSER_COLUMNS,
+  type ComposerConfig,
+  type ComposerDbRow,
+  rawComposer,
+} from "./store-composer.js";
 import { appendThinking as appendThinkingText } from "./store-thinking.js";
 import {
   createSessionTodoStore,
@@ -43,6 +49,7 @@ import {
   type SessionTodoStore,
 } from "./store-todo.js";
 import {
+  readSessionView,
   SESSION_COLUMNS,
   type SessionDbRow,
   type SessionStatus,
@@ -50,7 +57,7 @@ import {
   toSessionView,
 } from "./store-view.js";
 
-export { SESSION_COLUMNS, type SessionDbRow, type SessionView, toSessionView };
+export type { SessionView };
 
 export type MessageRole = "user" | "assistant";
 export type MessageStatus = "done" | "running" | "failed" | "stopped";
@@ -98,6 +105,8 @@ interface SessionRuntimeState {
   streamEpoch: number;
   activeTurn: AcceptedPrompt | null;
   workspaceId: string | null;
+  /** The three raw composer columns, each null when never chosen (`effectiveComposer`'s `raw`). */
+  composer: ReturnType<typeof rawComposer>;
 }
 
 interface FlushError {
@@ -110,6 +119,8 @@ export interface SessionStoreOptions extends SessionTodoOptions {
   onFlushError: (failure: FlushError) => void;
   /** core/audit emit bound per call to this DB; settling an approval without it fails closed. */
   emit?: typeof emit;
+  /** What turns the three raw composer columns into a view's effective values. */
+  composer: ComposerConfig;
 }
 
 export type ApprovalOutcome = "allow" | "deny" | "timeout";
@@ -200,7 +211,7 @@ export interface SessionStore extends SessionTodoStore {
   close(): void;
 }
 
-type RuntimeDbRow = {
+type RuntimeDbRow = ComposerDbRow & {
   owner_id: string;
   omp_session_file: Uint8Array | null;
   stream_epoch: number;
@@ -258,19 +269,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
           "session create",
         );
       });
-      return {
-        id,
-        title: null,
-        status: "idle",
-        createdAt: now,
-        updatedAt: now,
-        scene: null,
-        workspaceId: null,
-        pinnedAt: null,
-        archivedAt: null,
-        pendingApproval: false,
-        temporaryWorkspace: false,
-      };
+      return readSessionView(db, id, options.composer, "created session row missing");
     },
 
     list(ownerId) {
@@ -282,7 +281,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
         .all(ownerId) as unknown as SessionDbRow[];
       const listed: SessionView[] = [];
       for (const row of rows) {
-        listed.push(toSessionView(row, decoder));
+        listed.push(toSessionView(row, decoder, options.composer));
       }
       return listed;
     },
@@ -331,7 +330,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
           approvals: approvalsByMessage.get(message.id) ?? [],
         });
       }
-      return { session: toSessionView(session, decoder), messages: views };
+      return { session: toSessionView(session, decoder, options.composer), messages: views };
     },
 
     acceptPrompt(sessionId, ownerId, text) {
@@ -400,13 +399,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
     commitFork(input) {
       assertOpen(closed);
       copyForkHistory(db, input, Date.now());
-      const row = db
-        .prepare(`SELECT ${SESSION_COLUMNS} FROM chat_sessions WHERE id = ?`)
-        .get(input.sessionId) as unknown as SessionDbRow | undefined;
-      if (row === undefined) {
-        throw new Error("forked session row missing");
-      }
-      return toSessionView(row, createSqliteTextDecoder(db));
+      return readSessionView(db, input.sessionId, options.composer, "forked session row missing");
     },
 
     rollbackPrompt(assistantMessageId) {
@@ -638,7 +631,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
       const decoder = createSqliteTextDecoder(db);
       const row = db
         .prepare(
-          "SELECT owner_id, CAST(omp_session_file AS BLOB) AS omp_session_file, stream_epoch, workspace_id FROM chat_sessions WHERE id = ? LIMIT 1",
+          `SELECT owner_id, CAST(omp_session_file AS BLOB) AS omp_session_file, stream_epoch, workspace_id, ${COMPOSER_COLUMNS} FROM chat_sessions WHERE id = ? LIMIT 1`,
         )
         .get(sessionId) as unknown as RuntimeDbRow | undefined;
       if (row === undefined) {
@@ -656,6 +649,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
             ? null
             : { userMessageId: turn.userMessageId, assistantMessageId: turn.assistantMessageId },
         workspaceId: row.workspace_id,
+        composer: rawComposer(row),
       };
     },
 

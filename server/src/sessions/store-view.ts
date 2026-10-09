@@ -1,11 +1,21 @@
 /**
  * The session view (#921): its column set, row type and mapping, shared by every exit that returns
- * a session — list, snapshot, PATCH and fork commit. `SESSION_COLUMNS` is written for the
+ * a session — list, snapshot, create, PATCH and fork commit. `SESSION_COLUMNS` is written for the
  * unaliased single-table `SELECT … FROM chat_sessions` statements: the two derived columns are
  * correlated subqueries on `chat_sessions.id` / `chat_sessions.workspace_id`, so no caller changes
- * its FROM clause.
+ * its FROM clause. `toSessionView` is the only constructor of a view (#1004): a write that returns
+ * one reads its row back through `readSessionView` after it committed.
  */
+import type { DatabaseSync } from "node:sqlite";
+import { createSqliteTextDecoder } from "../core/db/index.js";
+import { type ApprovalMode, type Effort, effectiveComposer } from "../model-catalog.js";
 import { decodeNullableText } from "./store-branch.js";
+import {
+  COMPOSER_COLUMNS,
+  type ComposerConfig,
+  type ComposerDbRow,
+  rawComposer,
+} from "./store-composer.js";
 
 export type SessionStatus = "idle" | "running" | "done" | "failed" | "stopped";
 
@@ -25,9 +35,14 @@ export interface SessionView {
   pendingApproval: boolean;
   /** The bound workspace carries `temporary = 1`; false when no workspace is bound. */
   temporaryWorkspace: boolean;
+  /** The three composer settings: effective values of the raw columns, never the raw columns. */
+  approvalMode: ApprovalMode;
+  modelId: string;
+  /** null when the model does not support reasoning. */
+  reasoningEffort: Effort | null;
 }
 
-export type SessionDbRow = {
+export type SessionDbRow = ComposerDbRow & {
   id: string;
   owner_id: string;
   title: Uint8Array | null;
@@ -51,9 +66,14 @@ const PENDING_APPROVAL = `EXISTS (
 const TEMPORARY_WORKSPACE =
   "COALESCE((SELECT w.temporary FROM workspaces AS w WHERE w.id = chat_sessions.workspace_id), 0)";
 
-export const SESSION_COLUMNS = `id, owner_id, CAST(title AS BLOB) AS title, status, CAST(omp_session_file AS BLOB) AS omp_session_file, stream_epoch, created_at, updated_at, workspace_id, scene, pinned_at, archived_at, ${PENDING_APPROVAL} AS pending_approval, ${TEMPORARY_WORKSPACE} AS temporary_workspace`;
+export const SESSION_COLUMNS = `id, owner_id, CAST(title AS BLOB) AS title, status, CAST(omp_session_file AS BLOB) AS omp_session_file, stream_epoch, created_at, updated_at, workspace_id, scene, pinned_at, archived_at, ${PENDING_APPROVAL} AS pending_approval, ${TEMPORARY_WORKSPACE} AS temporary_workspace, ${COMPOSER_COLUMNS}`;
 
-export function toSessionView(row: SessionDbRow, decoder: TextDecoder): SessionView {
+export function toSessionView(
+  row: SessionDbRow,
+  decoder: TextDecoder,
+  composer: ComposerConfig,
+): SessionView {
+  const effective = effectiveComposer(rawComposer(row), composer);
   return {
     id: row.id,
     title: decodeNullableText(decoder, row.title),
@@ -66,5 +86,24 @@ export function toSessionView(row: SessionDbRow, decoder: TextDecoder): SessionV
     archivedAt: row.archived_at === null ? null : Number(row.archived_at),
     pendingApproval: Number(row.pending_approval) === 1,
     temporaryWorkspace: Number(row.temporary_workspace) === 1,
+    approvalMode: effective.approvalMode,
+    modelId: effective.modelId,
+    reasoningEffort: effective.reasoningEffort,
   };
+}
+
+/** The view of a row a write just committed; `missing` is the error when the row is not there. */
+export function readSessionView(
+  db: DatabaseSync,
+  sessionId: string,
+  composer: ComposerConfig,
+  missing: string,
+): SessionView {
+  const row = db
+    .prepare(`SELECT ${SESSION_COLUMNS} FROM chat_sessions WHERE id = ?`)
+    .get(sessionId) as unknown as SessionDbRow | undefined;
+  if (row === undefined) {
+    throw new Error(missing);
+  }
+  return toSessionView(row, createSqliteTextDecoder(db), composer);
 }

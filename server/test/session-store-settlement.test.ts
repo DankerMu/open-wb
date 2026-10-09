@@ -14,6 +14,7 @@ import {
   type SessionStore,
   type SettledApproval,
 } from "../src/sessions/store.js";
+import { TEST_COMPOSER } from "./session-meta-fixtures.js";
 import { approvalAudits, denyAudit } from "./session-settlement-helpers.js";
 import {
   persistenceSnapshot,
@@ -59,7 +60,7 @@ function withDb(run: (db: DatabaseSync) => void): void {
 }
 
 function audited(db: DatabaseSync): SessionStore {
-  return createSessionStore(db, { onFlushError() {}, emit });
+  return createSessionStore(db, { onFlushError() {}, emit, composer: TEST_COMPOSER });
 }
 
 /** An accepted `u2` turn with pending r1, r2 requested at T. */
@@ -231,7 +232,7 @@ describe("audit failure rolls the whole terminal transaction back (N3)", () => {
 describe("a store without an audit emit (N4)", () => {
   it("N4a without approval rows, reconcile, finishTurn and close all still succeed", () => {
     withDb((db) => {
-      const bare = createSessionStore(db, { onFlushError() {} });
+      const bare = createSessionStore(db, { onFlushError() {}, composer: TEST_COMPOSER });
       bare.reconcileOnStartup();
       const session = bare.create("u1").id;
       const first = bare.acceptPrompt(session, "u1", "first");
@@ -250,7 +251,7 @@ describe("a store without an audit emit (N4)", () => {
 
   it("N4b with a pending row, finishTurn fails closed and commits nothing", () => {
     withDb((db) => {
-      const bare = createSessionStore(db, { onFlushError() {} });
+      const bare = createSessionStore(db, { onFlushError() {}, composer: TEST_COMPOSER });
       const turn = pendingTurn(bare);
       const before = everything(db);
       const settled: SettledApproval[] = [];

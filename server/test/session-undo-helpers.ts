@@ -89,7 +89,7 @@ export function postUndo(
   return postSessionAction(world.fixture.app, "undo", session, world.cookie, body);
 }
 
-/** A 200 with no-store whose body is exactly `{session:<eleven keys>, draft, files}`. */
+/** A 200 with no-store whose body is exactly `{session:<fourteen keys>, draft, files}`. */
 export function undoneWithFiles(response: LightMyRequestResponse): UndoBody {
   expect([response.statusCode, response.headers["cache-control"]]).toEqual([200, "no-store"]);
   const body = response.json() as UndoBody;

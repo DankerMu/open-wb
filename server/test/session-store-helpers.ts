@@ -3,6 +3,7 @@ import { expect, vi } from "vitest";
 import { openDb } from "../src/core/db/index.js";
 import { HttpError } from "../src/core/errors/index.js";
 import { createSessionStore, type SessionStore } from "../src/sessions/store.js";
+import { TEST_COMPOSER } from "./session-meta-fixtures.js";
 
 export const FIXED_NOW = 1_740_000_000_000;
 export const HEX32 = /^[0-9a-f]{32}$/u;
@@ -108,6 +109,7 @@ export function withSessionStore<T>(
       onFlushError(failure) {
         flushFailures.push(failure);
       },
+      composer: TEST_COMPOSER,
     });
     result = { value: run({ db, store, flushFailures }) };
   } catch (error) {

@@ -115,11 +115,14 @@ describe("fork over real fake-omp branch children (#466)", () => {
     expect(Object.keys(result)).toEqual(["session", "draft"]);
     expect(result.draft).toBe(QUESTION);
     expect(Object.keys(result.session).sort()).toEqual([
+      "approvalMode",
       "archivedAt",
       "createdAt",
       "id",
+      "modelId",
       "pendingApproval",
       "pinnedAt",
+      "reasoningEffort",
       "scene",
       "status",
       "temporaryWorkspace",

@@ -28,7 +28,7 @@ import { holdNextPromptWrite, observePromise } from "./support/omp-rpc.js";
 /** 23 code points; the admission title is its first 18 (`store.ts` titlePrefix). */
 const PROMPT_TEXT = "请帮我整理一下本季度的销售数据并生成汇报材料";
 const PROMPT_PREFIX = "请帮我整理一下本季度的销售数据并生成";
-const ELEVEN_KEYS = [
+const FOURTEEN_KEYS = [
   "id",
   "title",
   "status",
@@ -40,6 +40,9 @@ const ELEVEN_KEYS = [
   "archivedAt",
   "pendingApproval",
   "temporaryWorkspace",
+  "approvalMode",
+  "modelId",
+  "reasoningEffort",
 ];
 
 const fixtures: SupervisorApp[] = [];
@@ -97,7 +100,7 @@ async function expectPatched(response: Promise<LightMyRequestResponse>) {
   expect(settled.statusCode).toBe(200);
   expect(settled.headers["cache-control"]).toBe("no-store");
   const view = settled.json() as { title: string | null; scene: string | null; status: string };
-  expect(Object.keys(view)).toEqual(ELEVEN_KEYS);
+  expect(Object.keys(view)).toEqual(FOURTEEN_KEYS);
   return view;
 }
 

@@ -24,6 +24,7 @@ import {
   waitForEvent,
   waitForRows,
 } from "./session-approval-helpers.js";
+import { TEST_COMPOSER } from "./session-meta-fixtures.js";
 import {
   abortCount,
   afterPrompt,
@@ -345,7 +346,7 @@ describe("stop on the dispatched path (#473)", () => {
           startedAt: T,
           endedAt: null,
         });
-        createSessionStore(db, { onFlushError() {} }).reconcileOnStartup();
+        createSessionStore(db, { onFlushError() {}, composer: TEST_COMPOSER }).reconcileOnStartup();
 
         expect(sessionRow(db, world.session)).toEqual(sessionBefore);
         expect(own(messageRows(db))).toEqual(messagesBefore);
