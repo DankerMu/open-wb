@@ -198,6 +198,9 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     emit,
   });
   const upload = uploadLimits(assembly);
+  // One facade for the workspaces routes and the prompt route's attachment check.
+  const audit = { emit: (event: Parameters<typeof emit>[1]) => emit(db, event) };
+  const sandbox = createSandbox({ rootOf: store.rootOf, audit });
   const registered = registerSessions(app, {
     db,
     tokens,
@@ -212,6 +215,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     agentDir: ompAgentDir(runtime.stateDir),
     composer: { approvalMaxMode: assembly?.approvalMaxMode ?? "yolo", modelCatalog },
     upload,
+    sandbox,
     snapshots: assembly?.snapshots ?? snapshotService(runtime),
     onError: assembly?.onError ?? (() => {}),
     ...(assembly?.onEvent === undefined ? {} : { onEvent: assembly.onEvent }),
@@ -219,8 +223,6 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     ...(assembly?.warn === undefined ? {} : { warn: assembly.warn }),
   });
   app.decorate("sessions", registered);
-  const audit = { emit: (event: Parameters<typeof emit>[1]) => emit(db, event) };
-  const sandbox = createSandbox({ rootOf: store.rootOf, audit });
   registerWorkspaces(app, {
     store,
     sandbox,

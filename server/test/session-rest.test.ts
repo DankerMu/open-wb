@@ -180,6 +180,7 @@ describe("session REST", () => {
             createdAt: SESSION_NOW + 5,
             approvals: [],
             undo: null,
+            attachments: [],
             steps: [],
             thinking: null,
           },
@@ -199,6 +200,7 @@ describe("session REST", () => {
             createdAt: SESSION_NOW + 20,
             approvals: [],
             undo: null,
+            attachments: [],
             steps: [
               {
                 id: firstStep,
@@ -756,6 +758,7 @@ describe("session REST", () => {
               createdAt: SESSION_NOW + 4,
               approvals: [],
               undo: null,
+              attachments: [],
               steps: [],
               thinking: null,
             },
@@ -775,6 +778,7 @@ describe("session REST", () => {
               createdAt: SESSION_NOW + 12,
               approvals: [],
               undo: null,
+              attachments: [],
               steps: [],
               thinking: null,
             },

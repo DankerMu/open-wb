@@ -31,6 +31,7 @@ const E = T + 60_000;
 const TITLE_U = "Allow tool: bash\nCommand: echo 中文 😀\u0000尾";
 const MESSAGE_KEYS = [
   "approvals",
+  "attachments",
   "content",
   "createdAt",
   "id",

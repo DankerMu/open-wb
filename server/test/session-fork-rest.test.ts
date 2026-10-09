@@ -25,6 +25,7 @@ import {
   NOT_FOUND_ENVELOPE,
   UNAUTHORIZED_ENVELOPE,
 } from "./session-db-helpers.js";
+import { A_PDF } from "./session-fork-helpers.js";
 import { NULL_SESSION_META, SESSION_VIEW_KEYS } from "./session-meta-fixtures.js";
 import {
   AGENT_UNAVAILABLE_ENVELOPE,
@@ -140,11 +141,12 @@ function forkedSession(status: Forked["session"]["status"]): Forked["session"] {
   };
 }
 
-/** A 201 whose payload is exactly `{session:<five keys>, draft}`, with no-store. */
+/** A 201 whose payload is exactly `{session:<five keys>, draft, attachments}`, with no-store. */
 function expectForked(
   response: LightMyRequestResponse,
   session: Forked["session"],
   draft: string,
+  attachments: Forked["attachments"] = [],
 ): void {
   const expected = {
     session: {
@@ -156,6 +158,7 @@ function expectForked(
       ...NULL_SESSION_META,
     },
     draft,
+    attachments,
   };
   expect({
     status: response.statusCode,
@@ -163,7 +166,7 @@ function expectForked(
     payload: response.payload,
   }).toEqual({ status: 201, cacheControl: "no-store", payload: JSON.stringify(expected) });
   const body = JSON.parse(response.payload) as { session: object; draft: unknown };
-  expect(Object.keys(body)).toEqual(["session", "draft"]);
+  expect(Object.keys(body)).toEqual(["session", "draft", "attachments"]);
   expect(Object.keys(body.session)).toEqual(SESSION_VIEW_KEYS);
   expect(typeof body.draft).toBe("string");
 }
@@ -181,7 +184,7 @@ function expectQuiet(
 }
 
 describe("fork REST status matrix on the stub supervisor", () => {
-  it("A1 idle/done/failed/stopped: 201 with exactly {session, draft}, extra keys dropped", async () => {
+  it("A1 idle/done/failed/stopped: 201 with exactly {session, draft, attachments}, extra keys dropped", async () => {
     await withSessionRest(async (fixture) => {
       const cookie = await cookieFor(fixture.app, "zhangsan");
       const session = endedSession(fixture.store, "done");
@@ -194,13 +197,16 @@ describe("fork REST status matrix on the stub supervisor", () => {
         const leaky = {
           session: { ...forked, parent_session_id: session, omp_session_file: "/f", extra: 1 },
           draft,
+          attachments: [{ ...A_PDF, extra: 1 }],
           extra: 1,
         };
-        spy.mockResolvedValueOnce(index === 0 ? leaky : { session: forked, draft });
+        spy.mockResolvedValueOnce(
+          index === 0 ? leaky : { session: forked, draft, attachments: [] },
+        );
 
         const response = await postFork(fixture, session, cookie, VALID);
 
-        expectForked(response, forked, draft);
+        expectForked(response, forked, draft, index === 0 ? [A_PDF] : []);
         expect(response.payload).not.toMatch(/parent_session_id|omp_session_file|extra/u);
         expect(spy).toHaveBeenCalledTimes(index + 1);
         expect(spy).toHaveBeenLastCalledWith(session, "u1", MESSAGE_ID);
@@ -224,7 +230,7 @@ describe("fork REST status matrix on the stub supervisor", () => {
       expect(observed.outcome).toBe("pending");
 
       const forked = forkedSession("done");
-      gate.resolve({ session: forked, draft: "later" });
+      gate.resolve({ session: forked, draft: "later", attachments: [] });
       expectForked(await response, forked, "later");
     });
   });
@@ -326,7 +332,7 @@ describe("fork REST status matrix on the stub supervisor", () => {
       expectQuiet(fixture, spy, before);
 
       const forked = forkedSession("done");
-      spy.mockResolvedValue({ session: forked, draft: "d" });
+      spy.mockResolvedValue({ session: forked, draft: "d", attachments: [] });
       expectForked(await postFork(fixture, session, cookie, VALID), forked, "d");
       expect(spy).toHaveBeenCalledTimes(1);
       expect(spy).toHaveBeenCalledWith(session, "u1", MESSAGE_ID);

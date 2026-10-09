@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { HttpError } from "../core/errors/index.js";
 import type { MessageRole, MessageStatus, MessageView, StepStatus, StepView } from "./store.js";
+import { parseAttachments } from "./store-attachments.js";
 
 export type MessageDbRow = {
   id: number;
@@ -10,6 +11,8 @@ export type MessageDbRow = {
   status: MessageStatus;
   created_at: number;
   thinking: Uint8Array | null;
+  /** Bare column: whatever storage class it holds is judged by `parseAttachments`. */
+  attachments: unknown;
 };
 
 export type StepDbRow = {
@@ -26,11 +29,11 @@ export type StepDbRow = {
 };
 
 export const MESSAGE_COLUMNS =
-  "id, session_id, role, CAST(content AS BLOB) AS content, status, created_at, CAST(thinking AS BLOB) AS thinking";
+  "id, session_id, role, CAST(content AS BLOB) AS content, status, created_at, CAST(thinking AS BLOB) AS thinking, attachments";
 export const STEP_COLUMNS =
   "s.id, s.message_id, s.ordinal, CAST(s.name AS BLOB) AS name, CAST(s.detail AS BLOB) AS detail, CAST(s.output AS BLOB) AS output, s.status, s.started_at, s.ended_at, CAST(s.changes AS BLOB) AS changes";
 export const INSERT_MESSAGE =
-  "INSERT INTO chat_messages(session_id, role, content, status, created_at) VALUES (?, ?, ?, ?, ?)";
+  "INSERT INTO chat_messages(session_id, role, content, status, created_at, attachments) VALUES (?, ?, ?, ?, ?, ?)";
 
 export function decodeNullableText(decoder: TextDecoder, bytes: Uint8Array | null): string | null {
   return bytes === null ? null : decoder.decode(bytes);
@@ -61,6 +64,7 @@ export function toMessageView(
     thinking: decodeNullableText(decoder, row.thinking),
     status: row.status,
     createdAt: Number(row.created_at),
+    attachments: parseAttachments(row.attachments),
   };
 }
 
@@ -163,7 +167,9 @@ export function replaceLastAssistant(
     }
     const deleted = db.prepare("DELETE FROM chat_messages WHERE id = ?").run(expectedAssistantId);
     requireChanges(deleted.changes, 1, "regenerate assistant delete");
-    const inserted = db.prepare(INSERT_MESSAGE).run(sessionId, "assistant", "", "running", now);
+    const inserted = db
+      .prepare(INSERT_MESSAGE)
+      .run(sessionId, "assistant", "", "running", now, null);
     requireChanges(inserted.changes, 1, "regenerate assistant insert");
     const moved = db.prepare(CAS_MOVE).run(sessionFile, now, sessionId);
     requireChanges(moved.changes, 1, "regenerate session update");
@@ -188,7 +194,7 @@ const FORK_SESSION =
 const FORK_HISTORY =
   "SELECT id, role, status FROM chat_messages WHERE session_id = ? AND (created_at < ? OR (created_at = ? AND id < ?)) ORDER BY created_at ASC, id ASC";
 const FORK_MESSAGE =
-  "INSERT INTO chat_messages(session_id, role, content, status, created_at, thinking) SELECT ?, role, content, status, created_at, thinking FROM chat_messages WHERE id = ?";
+  "INSERT INTO chat_messages(session_id, role, content, status, created_at, thinking, attachments) SELECT ?, role, content, status, created_at, thinking, attachments FROM chat_messages WHERE id = ?";
 const FORK_STEPS =
   "INSERT INTO chat_steps(message_id, ordinal, name, detail, output, status, started_at, ended_at, changes) SELECT ?, ordinal, name, detail, output, status, started_at, ended_at, changes FROM chat_steps WHERE message_id = ? ORDER BY ordinal ASC, id ASC";
 const FORK_APPROVALS =

@@ -477,7 +477,7 @@ describe("regenerate of a turn whose user message has attachments (#1018)", () =
   ] as const;
   for (const [name, content, entry] of aligned) {
     it(`aligns ${name} and dispatches the branch text as it is`, REAL, async () => {
-      const { world, row } = await attached(content, entry);
+      const { world, db, row } = await attached(content, entry);
       const before = row();
 
       const { assistantMessageId } = await regenerate(world);
@@ -494,6 +494,10 @@ describe("regenerate of a turn whose user message has attachments (#1018)", () =
       expect(tree.messages[0]?.content).toBe(content);
       expect(tree.messages[1]?.id).toBe(assistantMessageId);
       expect(row()).toEqual(before);
+      // The replacement assistant row is inserted with a NULL column, not the turn's list (#1019).
+      expect(
+        db.prepare("SELECT attachments FROM chat_messages WHERE id = ?").get(assistantMessageId),
+      ).toEqual({ attachments: null });
     });
   }
 

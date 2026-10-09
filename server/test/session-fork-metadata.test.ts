@@ -93,6 +93,7 @@ interface PublicHistory {
   messages: Array<{
     role: string;
     thinking: string | null;
+    attachments: unknown;
     steps: Array<{ ordinal: number; changes: unknown }>;
   }>;
 }
@@ -208,6 +209,15 @@ function thinkingColumn(db: DatabaseSync, session: string) {
     .all(session);
 }
 
+/** `attachments` of every message of `session`, in snapshot order, with its storage class. */
+function attachmentsColumn(db: DatabaseSync, session: string) {
+  return db
+    .prepare(
+      "SELECT attachments, typeof(attachments) AS type FROM chat_messages WHERE session_id = ? ORDER BY created_at, id",
+    )
+    .all(session);
+}
+
 /** `changes` of every step of `session`, message then ordinal order, with its storage class. */
 function changesColumn(db: DatabaseSync, session: string) {
   return db
@@ -226,7 +236,9 @@ function insertStep(db: DatabaseSync, messageId: number, ordinal: number, change
 /**
  * u1 → a1 → u2 → a2 → u3 (QUESTION) → a3 through the store; a1 carries THINKING and two steps
  * (CHANGES_A1, then NULL), a2 a NULL thinking and one CHANGES_A2 step; a3 (after the fork point)
- * carries its own thinking and step, which must stay behind.
+ * carries its own thinking and step, which must stay behind. u1 and u2 hold attachment columns no
+ * admission writes (`[]` and `not json`, #1019): both read as no attachment, so alignment is as
+ * without them, and a copy that re-serialized instead of copying would not reproduce either.
  */
 function seedHistory(world: RegenWorld, session: string): Seeded {
   const { db } = world.fixture;
@@ -236,6 +248,9 @@ function seedHistory(world: RegenWorld, session: string): Seeded {
   insertStep(db, seeded.a1, 0, JSON.stringify(CHANGES_A1));
   insertStep(db, seeded.a1, 1, null);
   insertStep(db, seeded.a2, 0, JSON.stringify(CHANGES_A2));
+  const setAttachments = db.prepare("UPDATE chat_messages SET attachments = ? WHERE id = ?");
+  expect(Number(setAttachments.run("[]", seeded.u1).changes)).toBe(1);
+  expect(Number(setAttachments.run("not json", seeded.u2).changes)).toBe(1);
   const a3 = db
     .prepare("SELECT MAX(id) AS id FROM chat_messages WHERE session_id = ? AND role = 'assistant'")
     .get(session) as { id: number };
@@ -342,10 +357,11 @@ async function forkSource(
 
 /** The 201 `session`: exactly the fourteen view keys in wire order, draft = the u3 text. */
 function forkedSession(fork: LightMyRequestResponse): SessionView {
-  const body = fork.json() as { session: SessionView; draft: string };
-  expect(Object.keys(body)).toEqual(["session", "draft"]);
+  const body = fork.json() as { session: SessionView; draft: string; attachments: unknown };
+  expect(Object.keys(body)).toEqual(["session", "draft", "attachments"]);
   expect(Object.keys(body.session)).toEqual([...SESSION_VIEW_KEYS]);
   expect(body.draft).toBe(QUESTION);
+  expect(body.attachments).toEqual([]);
   return body.session;
 }
 
@@ -439,6 +455,24 @@ describe("fork inherits workspace and scene but not pin", () => {
         { thinking: null, type: "null" },
       ]);
       expect(column).toEqual(thinkingColumn(db, source).slice(0, 4));
+    },
+  );
+
+  it(
+    "every copied message's attachments column equals the source's verbatim, unparsed",
+    REAL,
+    async () => {
+      const { db, source, fresh, copy } = await copiedHistories();
+
+      const column = attachmentsColumn(db, fresh);
+      expect(column).toEqual([
+        { attachments: "[]", type: "text" },
+        { attachments: null, type: "null" },
+        { attachments: "not json", type: "text" },
+        { attachments: null, type: "null" },
+      ]);
+      expect(column).toEqual(attachmentsColumn(db, source).slice(0, 4));
+      expect(copy.map((m) => m.attachments)).toEqual([[], [], [], []]);
     },
   );
 

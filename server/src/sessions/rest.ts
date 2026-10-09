@@ -1,4 +1,3 @@
-import { Buffer } from "node:buffer";
 import type { DatabaseSync } from "node:sqlite";
 import type {
   FastifyInstance,
@@ -11,11 +10,21 @@ import type {
 } from "fastify";
 import { HttpError } from "../core/errors/index.js";
 import type { SessionListNotifier } from "./list-events.js";
+import {
+  admitAttachments,
+  parsePromptBody,
+  type SessionSandboxPort,
+} from "./prompt-attachments.js";
 import { registerSessionMetadataRoutes } from "./rest-metadata.js";
 import type { WorkspaceRootOf } from "./session-cwd.js";
 import type { SessionDeleter } from "./session-delete.js";
 import type { SessionTodo } from "./session-todo.js";
-import { classifyPrompt, sessionSkillsResolver, toWireText } from "./slash-commands.js";
+import {
+  attachmentSuffix,
+  classifyPrompt,
+  sessionSkillsResolver,
+  toWireText,
+} from "./slash-commands.js";
 import type {
   ApprovalEntry,
   ApprovalView,
@@ -23,6 +32,7 @@ import type {
   SessionStore,
   StepView,
 } from "./store.js";
+import type { StoredAttachment } from "./store-attachments.js";
 import type { SessionMetadataStore } from "./store-metadata.js";
 import type { UndoState } from "./store-undo.js";
 import type { SessionSupervisor, StreamCursor } from "./supervisor.js";
@@ -68,6 +78,13 @@ interface SessionRestDependencies {
    * values its registrations give the message view and the prompt's 202.
    */
   turnSnapshots: TurnSnapshots;
+  /**
+   * The app's one sandbox facade (the instance the workspaces routes use): every attachment path
+   * of a prompt is resolved through it, and it alone audits a refusal.
+   */
+  sandbox: SessionSandboxPort;
+  /** The effective `UPLOAD_MAX_FILES`: how many attachments one prompt may carry. */
+  uploadMaxFiles: number;
 }
 
 interface PublicSession {
@@ -107,6 +124,8 @@ interface PublicMessage {
   approvals: ApprovalEntry[];
   /** Always null on an assistant message. */
   undo: UndoState | null;
+  /** The list recorded at admission; never re-checked against the files on a read. */
+  attachments: StoredAttachment[];
   steps: PublicStep[];
 }
 
@@ -127,7 +146,6 @@ interface ApprovalParams {
   approvalId: string;
 }
 
-const MESSAGE_LIMIT = 32_768;
 const CANONICAL_APPROVAL_ID = /^[1-9][0-9]*$/;
 /** Fastify 拒绝 bodyLimit 0（须 >0），故取最小合法值；显式 no-body 校验负责 0 字节合同。 */
 const BODYLESS_BODY_LIMIT = 1;
@@ -255,23 +273,42 @@ export function registerSessionRoutes(
     { onRequest: noStoreSessionResponse, preParsing: authorizeOwnedBeforeParse },
     async (request, reply) => {
       const principal = currentPrincipal(request);
-      const text = parsePromptMessage(request.body);
-      // Archive read, claim check and admission share one synchronous segment: no await in
-      // between. The read is fresh: the tree cached before the body arrived may predate a PATCH.
+      const { text, paths } = parsePromptBody(
+        requirePlainRecord(request.body),
+        dependencies.uploadMaxFiles,
+      );
+      // Archive read, claim check, attachment checks and admission share one synchronous segment:
+      // no await in between. The read is fresh: the tree cached before the body arrived may
+      // predate a PATCH.
       if (dependencies.metadata.archivedAt(request.params.id, principal.id) !== null) {
         throw new HttpError("session_archived");
       }
       if (dependencies.supervisor.controlHeld(request.params.id)) {
         throw new HttpError("session_busy");
       }
-      const accepted = dependencies.store.acceptPrompt(request.params.id, principal.id, text);
-      dependencies.listEvents.notify(principal.id);
-      // The binding is immutable, so the tree cached before the body arrived still has it.
+      // The binding is immutable, so the tree cached before the body arrived still has it. It is
+      // the session's own: nothing in the body names a workspace.
       const bound = authorizedHistory.get(request)?.tree.session.workspaceId ?? null;
+      // The stored text stays as typed; only `/` text is classified, so no other prompt scans.
+      // The skills are those of this session's cwd: its workspace root, else the owner root.
+      const skills = text.startsWith("/") ? skillsOf(principal.id, bound) : [];
+      // message-attachments「prompt 携带附件」conditions 2 to 5 (1 was the body's); `[]` for a
+      // prompt without attachments.
+      const attachments = admitAttachments({
+        sandbox: dependencies.sandbox,
+        principal,
+        workspaceId: bound,
+        builtin: classifyPrompt(text, skills).kind === "builtin",
+        paths,
+      });
+      const accepted = dependencies.store.acceptPrompt(
+        request.params.id,
+        principal.id,
+        text,
+        attachments,
+      );
+      dependencies.listEvents.notify(principal.id);
       try {
-        // The stored text stays as typed; only `/` text is classified, so no other prompt scans.
-        // The skills are those of this session's cwd: its workspace root, else the owner root.
-        const skills = text.startsWith("/") ? skillsOf(principal.id, bound) : [];
         // The snapshot is the supervisor's pre-dispatch step, not awaited here: a stop is only
         // kept once `supervisor.prompt` has opened the turn (design D9「接入点」).
         const snapshot = dependencies.turnSnapshots.step({
@@ -281,7 +318,13 @@ export function registerSessionRoutes(
           userMessageId: accepted.userMessageId,
           command: classifyPrompt(text, skills).kind !== "text",
         });
-        await dependencies.supervisor.prompt(request.params.id, toWireText(text, skills), snapshot);
+        // The suffix is built from the admitted list, in request order; it is never stored.
+        const suffix = attachmentSuffix(attachments.map((attachment) => attachment.path));
+        await dependencies.supervisor.prompt(
+          request.params.id,
+          toWireText(text, skills) + suffix,
+          snapshot,
+        );
       } catch (error) {
         // false: the turn already reached a terminal state, which had its own notification, and
         // its user message (with its snapshot registration) stays.
@@ -367,6 +410,7 @@ export function registerSessionRoutes(
       return reply.code(201).send({
         session: toPublicSession(result.session),
         draft: result.draft,
+        attachments: result.attachments.map(toPublicAttachment),
       });
     },
   );
@@ -411,6 +455,11 @@ export function toPublicSession(session: PublicSession): PublicSession {
   };
 }
 
+/** Exactly the two declared keys, whatever else the element carries. */
+function toPublicAttachment({ path, size }: StoredAttachment): StoredAttachment {
+  return { path, size };
+}
+
 function toPublicHistory(
   snapshot: OwnedSnapshot,
   undoOf: (userMessageId: number) => UndoState,
@@ -431,6 +480,7 @@ function toPublicHistory(
       createdAt: message.createdAt,
       approvals: message.approvals.map(toPublicApproval),
       undo: message.role === "user" ? undoOf(message.id) : null,
+      attachments: message.attachments.map(toPublicAttachment),
       steps: message.steps.map((step) => ({
         id: step.id,
         ordinal: step.ordinal,
@@ -508,20 +558,4 @@ function parseForkMessageId(body: unknown): number {
     throw new HttpError("bad_request");
   }
   return messageId;
-}
-
-function parsePromptMessage(body: unknown): string {
-  const record = requirePlainRecord(body);
-  if (
-    Object.keys(record).length !== 1 ||
-    !Object.hasOwn(record, "message") ||
-    typeof record.message !== "string"
-  ) {
-    throw new HttpError("bad_request");
-  }
-  const trimmed = record.message.trim();
-  if (trimmed.length === 0 || Buffer.byteLength(trimmed, "utf8") > MESSAGE_LIMIT) {
-    throw new HttpError("bad_request");
-  }
-  return trimmed;
 }

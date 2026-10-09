@@ -93,8 +93,11 @@ export interface OpenSessionOptions {
   configureApp?: (app: FastifyInstance) => void;
   /** Replaces the app's workspace-snapshots service (#945: a `take` held open or made to fail). */
   snapshots?: TurnSnapshotService;
-  /** The app's model whitelist and approval cap (#1007); omitted → one model, cap `yolo`. */
-  assembly?: Partial<ComposerConfig>;
+  /**
+   * The app's model whitelist and approval cap (#1007); omitted → one model, cap `yolo`. And the
+   * attachment count limit of a prompt (#1019); omitted → the default.
+   */
+  assembly?: Partial<ComposerConfig> & { uploadMaxFiles?: number };
 }
 
 export function createRealFakeRuntime(

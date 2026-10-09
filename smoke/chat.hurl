@@ -168,6 +168,7 @@ skip: {{skip_turn_control}}
 HTTP 201
 [Captures]
 session2_id: jsonpath "$.id"
+session2_workspace_id: jsonpath "$.workspaceId"
 [Asserts]
 jsonpath "$.status" == "idle"
 
@@ -275,17 +276,33 @@ jsonpath "$.messages[1].content" matches "{{content_pattern}}"
 jsonpath "$.messages[1].steps[?(@.name=='bash')].status" == "done"
 jsonpath "$.messages[1].steps[?(@.status!='done')]" not exists
 
-# (4) 再 prompt：exact 202；捕获 assistantMessageId。不重试。
+# (4) 向第二会话的临时空间上传 9 个内联字节：201；捕获 path 与 size，供下一步作附件。
+# 该空间随会话删除，不留文件。
+POST {{base_url}}/api/workspaces/{{session2_workspace_id}}/uploads?name=smoke-attach.txt
+Content-Type: application/octet-stream
+[Options]
+skip: {{skip_turn_control}}
+hex,776f726b6275646479;
+HTTP 201
+[Captures]
+attach_path: jsonpath "$.path"
+attach_size: jsonpath "$.size"
+[Asserts]
+jsonpath "$.size" == 9
+
+# (4) 再 prompt，带上刚上传的附件：exact 202；捕获两个消息 id。不重试。
 POST {{base_url}}/api/sessions/{{session2_id}}/prompt
 Content-Type: application/json
 [Options]
 skip: {{skip_turn_control}}
-{"message":"你好"}
+{"message":"你好","attachments":["{{attach_path}}"]}
 HTTP 202
 [Captures]
+followup2_user_id: jsonpath "$.userMessageId"
 followup2_assistant_id: jsonpath "$.assistantMessageId"
 
 # (4) 轮询至 done（≥90s）：正文匹配；历史已有 tool result，本轮无工具调用，故不断言审批与 bash 计数。
+# 该用户消息带回受理时记下的附件：恰一项，path 与 size 即上传响应的值。
 GET {{base_url}}/api/sessions/{{session2_id}}/messages
 [Options]
 skip: {{skip_turn_control}}
@@ -296,6 +313,9 @@ HTTP 200
 jsonpath "$.session.status" == "done"
 jsonpath "$.messages[?(@.id=={{followup2_assistant_id}})].status" == "done"
 jsonpath "$.messages[?(@.id=={{followup2_assistant_id}})].content" matches "{{content_pattern}}"
+jsonpath "$.messages[?(@.id=={{followup2_user_id}})].attachments" count == 1
+jsonpath "$.messages[?(@.id=={{followup2_user_id}})].attachments[0].path" == "{{attach_path}}"
+jsonpath "$.messages[?(@.id=={{followup2_user_id}})].attachments[0].size" == {{attach_size}}
 
 # 本账号登出：exact 204 + clear cookie。
 POST {{base_url}}/api/auth/logout

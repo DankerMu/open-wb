@@ -93,6 +93,7 @@ const worlds = forkWorlds();
 interface ForkBody {
   session: { id: string; title: string | null; status: string };
   draft: string;
+  attachments: unknown[];
 }
 
 interface PublicMessage {
@@ -125,17 +126,17 @@ function postRegenerate(world: RecordingWorld, session = world.session) {
   return postSessionAction(world.fixture.app, "regenerate", session, world.cookie);
 }
 
-/** The body of a wire or inject 201: exactly `{session:<five keys>, draft:<string>}`. */
+/** The body of a wire or inject 201: exactly `{session:<five keys>, draft:<string>, attachments}`. */
 function forkedBody(text: string): ForkBody {
   const body = JSON.parse(text) as ForkBody;
-  expect(Object.keys(body)).toEqual(["session", "draft"]);
+  expect(Object.keys(body)).toEqual(["session", "draft", "attachments"]);
   expect(Object.keys(body.session)).toEqual(SESSION_KEYS);
   expect(body.session.id).toMatch(HEX32);
   expect(typeof body.draft).toBe("string");
   return body;
 }
 
-/** A 201 with no-store whose body is exactly `{session, draft}`. */
+/** A 201 with no-store whose body is exactly `{session, draft, attachments}`. */
 function forked(response: LightMyRequestResponse): ForkBody {
   expect([response.statusCode, response.headers["cache-control"]]).toEqual([201, "no-store"]);
   return forkedBody(response.payload);
@@ -192,6 +193,7 @@ describe("fork REST on real fake-omp branch children", () => {
       expect(fork).toHaveBeenCalledTimes(1);
       expect(fork).toHaveBeenCalledWith(source, OWNER_ID, u2.id);
       expect(body.draft).toBe(QUESTION);
+      expect(body.attachments).toEqual([]);
       expect(body.session).toMatchObject({ title: FIRST, status: "done" });
       const fresh = body.session.id;
       expect(fresh).not.toBe(source);

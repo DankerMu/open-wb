@@ -1,4 +1,6 @@
 import { Buffer } from "node:buffer";
+import type { DatabaseSync } from "node:sqlite";
+import type { LightMyRequestResponse } from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NULL_SESSION_META } from "./session-meta-fixtures.js";
 import {
@@ -135,6 +137,7 @@ describe("session REST snapshot capture", () => {
             createdAt: SESSION_NOW,
             approvals: [],
             undo: "unbound",
+            attachments: [],
             steps: [],
             thinking: null,
           },
@@ -146,6 +149,7 @@ describe("session REST snapshot capture", () => {
             createdAt: SESSION_NOW,
             approvals: [],
             undo: null,
+            attachments: [],
             steps: [],
             thinking: null,
           },
@@ -216,4 +220,102 @@ describe("session REST snapshot capture", () => {
       });
     },
   );
+});
+
+/**
+ * Issue #1019 (message-attachments「附件落库与快照」): the column is written by `store.acceptPrompt`
+ * itself — the prompt route does not pass attachments yet — and read back over the history route.
+ */
+describe("session REST snapshot attachments (#1019)", () => {
+  const STORED = [
+    { path: "uploads/a.pdf", size: 3 },
+    { path: "uploads/子目录/b.png", size: 0 },
+  ];
+  const column = (db: DatabaseSync, id: number) =>
+    db
+      .prepare("SELECT attachments, typeof(attachments) AS kind FROM chat_messages WHERE id = ?")
+      .get(id);
+  const attachmentsOf = (history: LightMyRequestResponse) => {
+    expect(history.statusCode).toBe(200);
+    const { messages } = history.json() as {
+      messages: Array<{ id: number; attachments: unknown }>;
+    };
+    return messages.map((message) => [message.id, message.attachments]);
+  };
+
+  it("serves the stored list in stored order on its message and [] on every other", async () => {
+    await withSessionRest(async ({ app, db, store }) => {
+      const session = store.create("u1");
+      const plain = store.acceptPrompt(session.id, "u1", "no files");
+      store.finishTurn(plain.assistantMessageId, "done");
+      const accepted = store.acceptPrompt(session.id, "u1", "", STORED);
+      const cookie = await cookieFor(app, "zhangsan");
+
+      expect(attachmentsOf(await getSessionMessages(app, session.id, cookie))).toEqual([
+        [plain.userMessageId, []],
+        [plain.assistantMessageId, []],
+        [accepted.userMessageId, STORED],
+        [accepted.assistantMessageId, []],
+      ]);
+      const tree = store.getMessages(session.id, "u1");
+      expect(tree?.messages.map((message) => message.attachments)).toEqual([[], [], STORED, []]);
+      expect(tree?.messages[2]?.content).toBe("");
+      expect(column(db, accepted.userMessageId)).toEqual({
+        attachments: '[{"path":"uploads/a.pdf","size":3},{"path":"uploads/子目录/b.png","size":0}]',
+        kind: "text",
+      });
+      expect(column(db, accepted.assistantMessageId)).toEqual({ attachments: null, kind: "null" });
+    });
+  });
+
+  it("a compensated admission leaves no message, and so no attachment, in the snapshot", async () => {
+    await withSessionRest(async ({ app, store }) => {
+      const session = store.create("u1");
+      const accepted = store.acceptPrompt(session.id, "u1", "看看", STORED);
+
+      expect(store.rollbackPrompt(accepted.assistantMessageId)).toBe(true);
+
+      const history = await getSessionMessages(app, session.id, await cookieFor(app, "zhangsan"));
+      expect(attachmentsOf(history)).toEqual([]);
+    });
+  });
+
+  // 「补偿与坏值」: only an out-of-band write gets these into the column.
+  it.each(["not json", "{}", '[{"path":1}]', '[{"path":"a.pdf","size":3},{"path":"","size":1}]'])(
+    "reads a column holding %s as [] and leaves the column alone",
+    async (tampered) => {
+      await withSessionRest(async ({ app, db, store }) => {
+        const session = store.create("u1");
+        const accepted = store.acceptPrompt(session.id, "u1", "看看", STORED);
+        db.prepare("UPDATE chat_messages SET attachments = ? WHERE id = ?").run(
+          tampered,
+          accepted.userMessageId,
+        );
+
+        const history = await getSessionMessages(app, session.id, await cookieFor(app, "zhangsan"));
+
+        expect(attachmentsOf(history)).toEqual([
+          [accepted.userMessageId, []],
+          [accepted.assistantMessageId, []],
+        ]);
+        expect(column(db, accepted.userMessageId)).toEqual({ attachments: tampered, kind: "text" });
+      });
+    },
+  );
+
+  it("serves exactly {path, size} of a stored element that carries more", async () => {
+    await withSessionRest(async ({ app, db, store }) => {
+      const session = store.create("u1");
+      const accepted = store.acceptPrompt(session.id, "u1", "看看");
+      db.prepare("UPDATE chat_messages SET attachments = ? WHERE id = ?").run(
+        '[{"size":3,"absPath":"/srv/a.pdf","path":"uploads/a.pdf"}]',
+        accepted.userMessageId,
+      );
+
+      const history = await getSessionMessages(app, session.id, await cookieFor(app, "zhangsan"));
+
+      expect(history.payload).toContain('"attachments":[{"path":"uploads/a.pdf","size":3}]');
+      expect(history.payload).not.toContain("absPath");
+    });
+  });
 });

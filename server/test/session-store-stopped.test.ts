@@ -187,6 +187,7 @@ describe("session REST — stopped read-back", () => {
             createdAt: SESSION_NOW,
             approvals: [],
             undo: "unbound",
+            attachments: [],
             steps: [],
             thinking: null,
           },
@@ -198,6 +199,7 @@ describe("session REST — stopped read-back", () => {
             createdAt: SESSION_NOW,
             approvals: [],
             undo: null,
+            attachments: [],
             steps: [
               {
                 id: runningStep,
