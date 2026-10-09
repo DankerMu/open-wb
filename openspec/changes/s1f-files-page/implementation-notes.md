@@ -297,13 +297,13 @@
 - 漂移一：issue 的 Current behavior 属实，`origin/master` 的 `server/src` 里没有 CSP、`frame-ancestors`、`Referrer-Policy`，`nosniff` 只在 `server/src/workspaces/preview.ts:70`。但规格说的「与 workspaces 分类器相同」在代码里不成立：`preview.ts:17-21` 只有 png/jpg/jpeg，其余要等 6.1（#1055）。
 - 类型值的处置：按 D 的 workspaces delta（`specs/workspaces/spec.md:9-11`）写死字面量：`image/gif`、`image/webp`、`image/bmp`、`image/x-icon`、`audio/mpeg`、`audio/wav`、`video/mp4`、`video/webm`。不 import `workspaces/preview.ts`（`docs/architecture/system.md:79` 不许 feature 间未声明的依赖），测试里也不调 `classifyPreview`（#1055 会把它改成四参，谁后合谁红）。
 - 漂移二：issue 正文与 D14 标题写 `Access-Control-Allow-Origin: *`「一律」，且都没提 `Cross-Origin-Resource-Policy: cross-origin`。规格条文是：ACAO、CORP、CSP 只在成功响应，失败响应只有三项公共头加 `text/plain`。以规格为准，记入偏离记录；issue 验收第三条的「一律带 ACAO」按「成功响应一律」读。
-- 新文件 `server/src/preview/headers.ts`（约 70 行，无 import），两个导出：`previewHeaders(name: string, embedOrigin: string | null): Record<string, string>` 与 `previewFailureHeaders(): Record<string, string>`。类型表与常量不导出；knip 的 server entry 含 `test/**/*.test.ts`，测试是唯一引用方即可过。
+- 新文件 `server/src/preview/headers.ts`（实际 106 行，无 import），两个导出：`previewHeaders(name: string, embedOrigin: string | null): Record<string, string>` 与 `previewFailureHeaders(): Record<string, string>`。类型表与常量不导出；knip 的 server entry 含 `test/**/*.test.ts`，测试是唯一引用方即可过。
 - 成功响应恰七键，键名大小写沿用 `preview.ts:68-72`：`Content-Type`、`X-Content-Type-Options: nosniff`、`Cache-Control: no-store`、`Referrer-Policy: no-referrer`、`Access-Control-Allow-Origin: *`、`Cross-Origin-Resource-Policy: cross-origin`、`Content-Security-Policy`。失败响应恰四键：`Content-Type: text/plain; charset=utf-8` 加前三项公共头，416 也用它。状态码与 `预览不存在或已过期` 文案归 #1069，本刀不放。
 - 类型表用 `Map`，共 29 个扩展名：html htm css js mjs json map svg png jpg jpeg gif webp bmp ico woff woff2 ttf otf pdf mp3 wav mp4 webm txt md csv tsv xml。取法是 `lastIndexOf(".")`，为 `-1` 时直接 `application/octet-stream`，否则取其后小写。不能用对象字面量，否则 `a.constructor`、`a.__proto__` 会命中原型；也不能直接 `slice(lastIndexOf+1)`，否则无扩展名的文件 `html` 会得到 `text/html`。
 - 未写明分支一：`name` 可以是带 `/` 的相对路径，含 `/` 的「扩展名」不在表里，自然落到 octet-stream（`site.v2/README`）。`a.`、`.gitignore`、`a.tar.gz` 都是 octet-stream；`.html` 按字面规则是 `text/html`，带 sandbox。`xml` 是 `text/plain`，不是 XML 类型。
 - 未写明分支二：CSP 是否带 `sandbox` 只看算出的 `Content-Type === "application/pdf"`，不看原始文件名，所以 `X.PDF` 也走例外，`a.svg` 必带 sandbox。15.1 的 `/o/` 成功响应以一个 `.pdf` 名调用同一函数，本刀不为它加第三个参数。1.1 实测留给 owner 的「PDF 例外是否保留」不挡本刀，照规格实现。
-- 未写明分支三（偏离记录，请白盒评审确认）：`embedOrigin` 来自签发请求的 `Origin` 头，账号本人用非浏览器客户端可发 `*`、`null`、`http://a; x`。汇点处 fail-closed：仅当 `URL.canParse(e) && new URL(e).origin === e` 时原样写入，否则与 `null` 一样取 `'none'`。不写正则，避开 semgrep 的 `detect-non-literal-regexp`。
-- 新文件 `server/test/preview-headers.test.ts`（约 150 行，先写红），用例：HTML 七键整对象 `toEqual` 且 CSP 逐字相等；PDF 的 CSP 恰为 `frame-ancestors http://127.0.0.1:3000`，`null` 时恰为 `frame-ancestors 'none'`；29 行 `it.each` 全表字面量；表外一组全为 octet-stream（`README`、`data.bin`、`html`、`pdf`、`a.`、`a.xhtml`、`a.ts`、`a.docx`、`a.zip`、`a.constructor`、`a.__proto__`、`site.v2/README`）；大小写 `A.HTML`、`X.PDF`；失败四键整对象相等且三项公共头与成功响应逐值相同；非法 `embedOrigin` 一组（`*`、`null`、`http://a.test/`、`http://a.test; sandbox allow-same-origin`、`javascript:alert(1)`）取 `'none'`，合法的 `http://[::1]:3000`、`https://preview.example.test` 原样。
+- 未写明分支三（偏离记录，请白盒评审确认）：`embedOrigin` 来自签发请求的 `Origin` 头，账号本人用非浏览器客户端可发 `*`、`null`、`http://a; x`。汇点处 fail-closed：仅当 `URL.canParse(e) && new URL(e).origin === e` 时原样写入，否则与 `null` 一样取 `'none'`。实施时追加第三个条件（`headers.ts:50`、`:70`）：含 `*`、`;`、`,`、`'` 任一字符即取 `'none'`——`http://*`、`http://*.a.test`、`http://a;b`、`http://a,b`、`http://a'b` 都能通过前两个条件原样往返，前两者是 CSP 通配，后三者是指令或策略分隔符。不写正则，避开 semgrep 的 `detect-non-literal-regexp`。
+- 新文件 `server/test/preview-headers.test.ts`（实际 284 行，先写红；另有「能当来源解析但含 CSP 语法字符」一组六例，先自证输入能原样往返），用例：HTML 七键整对象 `toEqual` 且 CSP 逐字相等；PDF 的 CSP 恰为 `frame-ancestors http://127.0.0.1:3000`，`null` 时恰为 `frame-ancestors 'none'`；29 行 `it.each` 全表字面量；表外一组全为 octet-stream（`README`、`data.bin`、`html`、`pdf`、`a.`、`a.xhtml`、`a.ts`、`a.docx`、`a.zip`、`a.constructor`、`a.__proto__`、`site.v2/README`）；大小写 `A.HTML`、`X.PDF`；失败四键整对象相等且三项公共头与成功响应逐值相同；非法 `embedOrigin` 一组（`*`、`null`、`http://a.test/`、`http://a.test; sandbox allow-same-origin`、`javascript:alert(1)`）取 `'none'`，合法的 `http://[::1]:3000`、`https://preview.example.test` 原样。
 - 门槛与清单：既有测试无一需要改（纯新增两文件，`server/test/workspace-preview.test.ts` 不动）；800 行、jscpd、naming-guard、gitleaks 都不触发，覆盖率要求两个分支都被上面的用例走到。不是配置刀，不动 `system.md` 第 9 节的表与配置条数断言。未接线、无用户可见变化，no checklist rows。`tasks.md` 只勾 12.2，12.3 / 12.4 留给 #1069。
 - 变异：非 PDF 的 CSP 加上 `allow-same-origin` → 「HTML 响应是不透明来源」的 CSP 逐字相等断言判红（issue 指定的那条）。
 - 变异：CSP 加 `allow-popups`、`allow-top-navigation` 或 `default-src 'self'` → 同一条逐字相等断言判红。
@@ -312,6 +312,8 @@
 - 变异：把 `svg` 也列入不带 sandbox 的例外 → `a.svg` 带 sandbox 的断言判红。
 - 变异：`embedOrigin` 为 `null` 时输出 `frame-ancestors *` 或省略该指令 → `'none'` 用例判红。
 - 变异：去掉 `embedOrigin` 校验、原样拼接 → 非法 `embedOrigin` 一组判红。
+- 变异：退回只有前两个条件的原式（去掉字符检查）→ 「含 CSP 语法字符」一组判红。
+- 变异：字符表 `*`、`;`、`,`、`'` 各去一个 → 该组对应字符的用例判红。
 - 变异：表外回退改成 `text/plain` 或 `text/html` → `README`、`data.bin` 用例判红。
 - 变异：`lastIndexOf` 为 `-1` 时不提前返回 → 文件名 `html`、`pdf` 的用例判红。
 - 变异：`Map` 换成对象字面量 → `a.constructor`、`a.__proto__` 用例判红。
