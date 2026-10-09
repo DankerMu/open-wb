@@ -752,7 +752,7 @@ Minimal mergeable slice: 17.1 一刀（气泡附件：`message-thread.tsx`，mes
   - 审计可见性：`core/audit/index.ts:72-106`——非管理员只见 `actor_id` 为自己的事件，管理员（lisi）见全部；`ORDER BY id DESC`（AUTOINCREMENT）；`limit` 为 1–200 的整数，缺省 50，越界 400。新断言全部在 zhangsan 登录态下，所以别的账号的事件插不进来；不要挪到 lisi 登录态。
   - 变异（均为预测，未运行）。判红：去掉 PATCH 的 `SET_COMPOSER` → 步骤 b；去掉 PATCH 的审计 emit、重复 emit 或 from/to 写反 → 步骤 c；PATCH 不调 `saveComposerPrefs` 或创建不读最近选择 → 步骤 e 的 `approvalMode`；options 的 `defaults` 不读最近选择 → 步骤 d；创建审计去掉 → 步骤 e 的审计（视图仍绿）；枚举校验去掉 → 步骤 f（预计撞迁移 040 的 CHECK 得 500）；临时空间不随末会话删除 → 步骤 h。HTTP 层保持绿：进程 argv 与 supervisor 的任何改动、`APPROVAL_MODES.slice` 封顶与超上界拒绝（缺省上界即 `yolo`）、审计用原始值而非有效值、审计与业务不同事务、`updated_at` 不更新、另一个非管理员账号看不到该事件——这些只有 server 单测能钉，写进 PR 的变异证据时照此如实标注。
   - 偏离记录：块的位置（(3) 与 (4) 之间）与载体会话的选择规格未定；步骤 d、步骤 e 的创建审计、步骤 g 的恢复审计与 options 复核是 delta 所列之外的加断言。既有断言一条不改不删。
-- [ ] 18.2 `smoke/chat.hurl`：`yolo` 会话的 bash 回合不经作答轮询到 `done`、`approvals` 为 `[]`；该会话与文件里的其它会话一样在退出登录前删除。`make smoke` 通过；AGENTS.md 验证矩阵里「五文件」的表述不变。
+- [x] 18.2 `smoke/chat.hurl`：`yolo` 会话的 bash 回合不经作答轮询到 `done`、`approvals` 为 `[]`；该会话与文件里的其它会话一样在退出登录前删除。`make smoke` 通过；AGENTS.md 验证矩阵里「五文件」的表述不变。
   **实施注记（18.2，fixture 评审补充，#1039）**：
   - 只改 `smoke/chat.hurl`（现 392 行，改后约 470；`size-guard.sh` 不扫 hurl，`scripts/test-ci-harness.sh` 只钉 Makefile 配方与 `AGENTS.md:89`）。AGENTS.md 不动：第 89 行「五文件」原样。不新增 Hurl 变量（`test-ci-harness.sh:122` 钉死 `--variable` 列表）。既有 (1)–(4) 的步骤、次序、断言、门控不变，唯一例外是下面点名的附件迁移。
   - 新块「(5) yolo 会话」插在 (4) 末尾轮询（现 :306-318）之后、zhangsan 首次登出（:320）之前，账号 zhangsan（`u1`）。块内每一步（含恢复与删除）都带 `[Options] skip: {{skip_turn_control}}`：`smoke-live` 只跑本文件且主规格场景「smoke-live 跳过回合控制」未被 delta 修改；创建被跳过即无污染。写进偏离记录。
