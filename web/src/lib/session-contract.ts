@@ -170,12 +170,12 @@ const UNDO_SKIP_REASONS: ReadonlySet<unknown> = new Set<ChatUndoSkipReason>([
   "name_encoding",
   "mount",
 ]);
-const APPROVAL_MODES: ReadonlySet<unknown> = new Set<ChatApprovalMode>([
+export const APPROVAL_MODES: ReadonlySet<unknown> = new Set<ChatApprovalMode>([
   "always-ask",
   "write",
   "yolo",
 ]);
-const REASONING_EFFORTS: ReadonlySet<unknown> = new Set<ChatReasoningEffort>([
+export const REASONING_EFFORTS: ReadonlySet<unknown> = new Set<ChatReasoningEffort>([
   "off",
   "minimal",
   "low",
