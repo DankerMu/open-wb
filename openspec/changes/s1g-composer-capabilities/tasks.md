@@ -890,7 +890,7 @@ Minimal mergeable slice: 18.1 + 18.2 一刀（Hurl）；18.3 + 18.4 一刀（ui-
 - [x] 19.2 `docs/adr/0013-assistant-ui-frontend-rebuild.md`：加一节「增补（S1g）」——能力行五项与次序；「+」按钮改名与草稿非空时的行为；附件是应用层状态，不使用 runtime 的 attachments 适配器；拷入层零改动、六类修改不变；模型与强度按 #906 的 owner 决定。
 - [x] 19.3 `CONTEXT.md` 术语表新增两行：**权限档位 permission tier**（会话的工具审批档位，三档对应 omp 的 `always-ask` / `write` / `yolo`；不是账号权限、不是 KB 可见范围）；**附件 attachment**（随一条消息告知助手的工作空间文件路径；文件本身是工作空间里的普通文件：不随消息删除，也不随绑定正式工作空间的会话删除；临时空间随最后一个会话删除时、撤回连文件一起还原时，按工作空间的规则一并变化）。
   「审计」一行的边界说明补上档位变更与上传。`openspec/glossary.md` 若存在同名词条，保持单一来源（指向 `CONTEXT.md`）。
-- [ ] 19.4 部署与配置文档（`README.md` 的配置表或 `docs/` 下现行的部署页，先 grep `OMP_MAX_PROCESSES` 找到列环境变量的那一处）：四个新变量的含义、缺省值与示例（`MODEL_CATALOG` 给一个两模型的 JSON 示例，不含真实供应商密钥或地址）；`MODEL_CATALOG` 与 `MODEL_ID` / `MODEL_REASONING` 的关系；`MODEL_CATALOG` 里的推理模型必须写 `efforts`（示例照此）；不设 `MODEL_CATALOG` 的单模型配置下 omp 按模型 id 自定强度集合，界面显示的强度可能与实际使用的不同，要一致就配置 `MODEL_CATALOG` 并给出 `efforts`；
+- [x] 19.4 部署与配置文档（`README.md` 的配置表或 `docs/` 下现行的部署页，先 grep `OMP_MAX_PROCESSES` 找到列环境变量的那一处）：四个新变量的含义、缺省值与示例（`MODEL_CATALOG` 给一个两模型的 JSON 示例，不含真实供应商密钥或地址）；`MODEL_CATALOG` 与 `MODEL_ID` / `MODEL_REASONING` 的关系；`MODEL_CATALOG` 里的推理模型必须写 `efforts`（示例照此）；不设 `MODEL_CATALOG` 的单模型配置下 omp 按模型 id 自定强度集合，界面显示的强度可能与实际使用的不同，要一致就配置 `MODEL_CATALOG` 并给出 `efforts`；
   反向代理须放开请求体大小并关闭请求缓冲；上传没有配额、`uploads/` 可能残留 `.part` 文件；`全部自动` 的安全含义（选过一次之后新会话默认沿用它）与如何用 `APPROVAL_MAX_MODE` 关掉它；模型代理只放行白名单内的模型名（白名单外的请求得到 400，不到达上游；想让某个模型可用就把它写进 `MODEL_CATALOG`）。
   实施注记见 `implementation-notes.md`「19.4（#1045）」。
 - [ ] 19.5 核对功能验收清单：组 14–17 新增的各行都在、ID 不重复、结论均为 `待签`；`web/test/functional-checklist.test.ts` 通过；因「+」按钮改名而失实的既有行（提到 `技能与命令` 按钮名的）改写并回到 `待签`。
