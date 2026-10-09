@@ -547,11 +547,11 @@ async function sendSlashTurn(
   await expect(composer).toHaveValue("");
 }
 
-// 能力栏「+」菜单（接在 step10Slash 之后，目录已由斜杠候选取回）：空白草稿下打开 `技能与命令`，列出同一份
+// 能力栏「+」菜单（接在 step10Slash 之后，目录已由斜杠候选取回）：空白草稿下打开 `添加文件或命令`，列出同一份
 // 目录；点选把草稿写成 `/<name> `、菜单关闭、焦点在输入框，没有发出 prompt；草稿非空白时按钮禁用。
 async function step10PlusMenu(page: Page): Promise<void> {
   const composer = page.getByLabel("给助手发消息");
-  const trigger = page.getByRole("button", { name: "技能与命令", exact: true });
+  const trigger = page.getByRole("button", { name: "添加文件或命令", exact: true });
   const menu = page.getByRole("menu");
   const requests: string[] = [];
   const record = (request: { method(): string; url(): string }) => {

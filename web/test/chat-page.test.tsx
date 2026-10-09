@@ -15,6 +15,7 @@ import {
   emptyCreatedSnapshot,
   idleCreatedSession,
 } from "./chat-page-ownership-support.js";
+import { cardChildren } from "./chat-page-slash-support.js";
 import {
   cleanupChatPage,
   expandToolGroups,
@@ -342,7 +343,9 @@ describe("welcome state", () => {
 
     const input = welcomeInput();
     expect(input.placeholder).toBe("今天帮你做些什么");
-    expect(screen.queryByRole("button", { name: /查看更多|附件|模型|麦克风/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /查看更多|专家|麦克风/ })).toBeNull();
+    // 未选入文件：输入卡里没有附件标签区。
+    expect(cardChildren()).toEqual(["label", "textarea", "composer-toolbar"]);
 
     const hero = screen.getByRole("heading", { level: 1, name: HERO });
     expect(precedes(hero, quickRow())).toBe(true);

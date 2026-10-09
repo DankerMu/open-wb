@@ -1,6 +1,7 @@
-// 能力栏的工作空间位（chat-web「输入框与能力栏」、session-sidebar「composer footer 工作空间选择」）：已选会话
-// 是只读标签的四种文案（临时空间的判定在最前，不看工作空间列表），回到欢迎态后是可操作的选择器；欢迎态
-// 能力栏不渲染权限、上传与专家控件。临时空间会话以其 workspaceId 取命令目录与项目配置。
+// 能力行（chat-web「输入框与能力栏」、session-sidebar「composer footer 工作空间选择」）：已选会话的工作空间位
+// 是只读标签的四种文案（临时空间的判定在最前，不看工作空间列表），回到欢迎态后是可操作的选择器；左组次序
+// 是「+」、工作空间，`发送` 在右组；能力行没有专家与麦克风控件。临时空间会话以其 workspaceId 取命令目录与
+// 项目配置。窄屏的换行与截断只断言类名与结构（jsdom 不排版）。选项读取失败后的重取只数请求次数。
 // seam：整页挂载 + 假 API。期望文案取自规格条文。
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
@@ -14,11 +15,12 @@ import {
   cleanupSessionMeta,
   envelope,
   findList,
+  messagesPath,
   mountSessions,
   type SessionView,
   view,
 } from "./chat-page-session-meta-support.js";
-import { cataloguePaths, commandsOf, type } from "./chat-page-slash-support.js";
+import { cardChildren, cataloguePaths, commandsOf, type } from "./chat-page-slash-support.js";
 import {
   CREATED_IDS,
   createOf,
@@ -32,11 +34,14 @@ import {
   options,
   PROJECT_A,
   PROJECT_A_OPTION,
+  pickOption,
   queryFooterButton,
   SUPPORT_OPTION,
   TEMP_WORKSPACE_IDS,
   workspaceList,
 } from "./chat-page-welcome-scene-support.js";
+import { chatSnapshot } from "./chat-stream-support.js";
+import { DEFAULT_COMPOSER_OPTIONS } from "./session-meta-fixtures.js";
 import { currentLocation, type FetchMock, jsonResponse, paths } from "./support.js";
 import { pressPointer } from "./ui-support.js";
 
@@ -45,6 +50,14 @@ const GONE = "9".repeat(32);
 /** 临时空间的 id：不在任何一次 `GET /api/workspaces` 的返回里。 */
 const TEMP = "7".repeat(32);
 const CONFIG = "/api/project-config";
+const OPTIONS = "/api/composer/options";
+const PLUS = "添加文件或命令";
+/** 名称长到窄屏必然截断的工作空间。 */
+const LONG = {
+  ...PROJECT_A,
+  id: "5".repeat(32),
+  name: "一个名字很长很长很长很长很长很长的工作空间",
+};
 
 afterEach(cleanupSessionMeta);
 
@@ -76,6 +89,35 @@ async function expectReadOnly(text: string) {
   expect(workspaceSlot().querySelector("a, input, select, [tabindex]")).toBeNull();
   expect(queryFooterButton()).toBeNull();
   expect(screen.queryByRole("dialog", { name: "选择工作空间" })).toBeNull();
+}
+
+/** 工具行的两个子元素：左组（能力栏）与右组（`生成中`、`停止` / `发送`）。 */
+function toolbarGroups() {
+  const toolbar = composer().closest("form")?.querySelector('[data-slot="composer-toolbar"]');
+  if (!(toolbar instanceof HTMLElement)) throw new Error("输入框没有工具栏");
+  expect(Array.from(toolbar.children, (child) => child.getAttribute("data-slot"))).toEqual([
+    "composer-capabilities",
+    "composer-actions",
+  ]);
+  const [left, right] = Array.from(toolbar.children) as [HTMLElement, HTMLElement];
+  return { left, right, toolbar };
+}
+
+/** 左组恰为「+」按钮、工作空间位，右组恰为 `发送`；工具行里没有错误提示。 */
+function expectOrder() {
+  const { left, right, toolbar } = toolbarGroups();
+  expect(Array.from(left.children)).toEqual([
+    within(toolbar).getByRole("button", { name: PLUS }),
+    workspaceSlot(),
+  ]);
+  expect(Array.from(right.children)).toEqual([
+    within(toolbar).getByRole("button", { name: "发送" }),
+  ]);
+  expect(within(toolbar).queryAllByRole("alert")).toEqual([]);
+}
+
+function optionsRequests(fetchMock: FetchMock) {
+  return paths(fetchMock).filter((path) => path === OPTIONS).length;
 }
 
 function mutations(fetchMock: FetchMock) {
@@ -205,20 +247,136 @@ describe("能力栏：临时空间会话", () => {
 });
 
 describe("能力栏：欢迎态", () => {
-  it("工作空间选择器在能力栏最左，发送键在其后；没有权限、上传与专家控件", async () => {
+  it("「+」按钮在左组最前、工作空间选择器其后，发送键在右组；没有专家与麦克风控件，未选入文件时没有附件标签区", async () => {
     mountSessions("/", []);
     await screen.findByRole("heading", { level: 1, name: HERO });
-    const toolbar = composer().closest("form")?.querySelector('[data-slot="composer-toolbar"]');
-    if (!(toolbar instanceof HTMLElement)) throw new Error("输入框没有工具栏");
+    const { left, right, toolbar } = toolbarGroups();
 
     const buttons = within(toolbar).getAllByRole("button");
     expect(
       buttons.map((button) => button.getAttribute("aria-label") ?? button.textContent),
-    ).toEqual(["任务启动于 未选择", "技能与命令", "发送"]);
-    expect(toolbar.firstElementChild?.firstElementChild).toBe(workspaceSlot());
-    for (const text of ["权限", "完全访问", "默认权限", "上传", "专家"]) {
+    ).toEqual([PLUS, "任务启动于 未选择", "发送"]);
+    expect(toolbar.firstElementChild).toBe(left);
+    expect(left.children[0]).toBe(buttons[0]);
+    expect(left.children[1]).toBe(workspaceSlot());
+    expect(right.contains(buttons[2] as HTMLElement)).toBe(true);
+    expect(left.contains(buttons[2] as HTMLElement)).toBe(false);
+    for (const text of ["专家", "麦克风", "完全访问", "默认权限"]) {
       expect(toolbar.textContent).not.toContain(text);
     }
-    expect(toolbar.querySelector('input[type="file"]')).toBeNull();
+    expect(cardChildren()).toEqual(["label", "textarea", "composer-toolbar"]);
+  });
+});
+
+describe("能力行的次序", () => {
+  it("已选绑定会话：`添加文件或命令`、只读 任务启动于 项目A、发送；回欢迎态次序相同且第二项是可点的选择器；全程恰一次选项请求", async () => {
+    const mounted = mountSessions("/", sessions(), {
+      "/api/workspaces": () => workspaceList(PROJECT_A),
+    });
+    await openExistingSession(await findList("绑定会话"), "绑定会话", A);
+    await expectReadOnly("任务启动于 项目A");
+    expectOrder();
+
+    await leaveForWelcome(mounted);
+    await screen.findByRole("heading", { level: 1, name: HERO });
+    expectOrder();
+    const trigger = footerButton("任务启动于 未选择");
+    expect(trigger.disabled).toBe(false);
+    expect(workspaceSlot().contains(trigger)).toBe(true);
+    await quiesce();
+    expect(optionsRequests(mounted.fetchMock)).toBe(1);
+  });
+
+  it("选项读取失败：能力行同样只有 `添加文件或命令`、工作空间项与发送，没有占位元素与错误提示", async () => {
+    const mounted = mountSessions("/", sessions(), {
+      "/api/workspaces": () => workspaceList(PROJECT_A),
+      [OPTIONS]: () => envelope(503, "服务暂不可用"),
+    });
+    const nav = await findList("绑定会话");
+    await quiesce();
+    expectOrder();
+
+    await openExistingSession(nav, "绑定会话", A);
+    await expectReadOnly("任务启动于 项目A");
+    await quiesce();
+    expectOrder();
+    expect(screen.queryAllByRole("alert")).toEqual([]);
+    expect(optionsRequests(mounted.fetchMock)).toBe(2);
+  });
+});
+
+describe("选项读取失败后重取", () => {
+  it("第一次失败后选中会话恰发出第二次请求，成功后再切两次会话不再请求（全程恰两次）", async () => {
+    let asked = 0;
+    const { fetchMock } = mountSessions("/", sessions(), {
+      [OPTIONS]: () => {
+        asked += 1;
+        return asked === 1 ? envelope(503, "服务暂不可用") : jsonResponse(DEFAULT_COMPOSER_OPTIONS);
+      },
+    });
+    const nav = await findList("绑定会话");
+    await quiesce();
+    expect(asked).toBe(1);
+
+    await openExistingSession(nav, "绑定会话", A);
+    await waitFor(() => expect(asked).toBe(2));
+    await openExistingSession(nav, "未绑定会话", B);
+    await openExistingSession(nav, "空间已删", C);
+    await quiesce();
+
+    expect(asked).toBe(2);
+    expect(optionsRequests(fetchMock)).toBe(2);
+  });
+});
+
+describe("能力行：窄屏的类名与结构", () => {
+  it("工具行可换行，左组让出整行，右组整体靠右；回合进行中 生成中 与 停止 都在右组内", async () => {
+    const running = { ...bound(A, "绑定会话", PROJECT_A.id), status: "running" as const };
+    mountSessions("/", [running], {
+      "/api/workspaces": () => workspaceList(PROJECT_A),
+      [messagesPath(A)]: () => jsonResponse({ ...chatSnapshot(), session: running }),
+    });
+    await openExistingSession(await findList("绑定会话"), "绑定会话", A);
+    const { left, right, toolbar } = toolbarGroups();
+    const stop = await within(toolbar).findByRole("button", { name: "停止" });
+
+    expect(toolbar.classList.contains("narrow:flex-wrap")).toBe(true);
+    expect(left.classList.contains("narrow:basis-auto")).toBe(true);
+    expect(left.classList.contains("min-w-0")).toBe(true);
+    expect(right.classList.contains("ml-auto")).toBe(true);
+    expect(right.classList.contains("flex-none")).toBe(true);
+    const status = within(toolbar).getByRole("status");
+    expect(status.textContent).toBe("生成中");
+    expect(Array.from(right.children)).toEqual([status, stop]);
+  });
+
+  it("长名空间：选择器按钮与只读标签各有最大宽度，title 带完整文字，内层文字截断", async () => {
+    const full = `任务启动于 ${LONG.name}`;
+    const mounted = mountSessions("/", [bound(A, "长名会话", LONG.id)], {
+      "/api/workspaces": () => workspaceList(LONG),
+    });
+    await screen.findByRole("heading", { level: 1, name: HERO });
+    await pickOption(`${LONG.name}zhangsan/${LONG.dir}`);
+    const trigger = footerButton(full);
+    expect(trigger.classList.contains("narrow:max-w-40")).toBe(true);
+    // 最大宽度取代了 max-w-full：按钮要能随外层收窄，否则左组不够宽时越出输入卡。
+    for (const name of ["min-w-0", "narrow:shrink"]) {
+      expect(trigger.classList.contains(name)).toBe(true);
+    }
+    expect(trigger.title).toBe(full);
+    expect(within(trigger).getByText(full, { exact: true }).classList.contains("truncate")).toBe(
+      true,
+    );
+
+    await openExistingSession(await findList("长名会话"), "长名会话", A);
+    await expectReadOnly(full);
+    const label = workspaceSlot();
+    expect(label.classList.contains("narrow:max-w-40")).toBe(true);
+    expect(label.classList.contains("min-w-0")).toBe(true);
+    expect(label.title).toBe(full);
+    expect(within(label).getByText(full, { exact: true }).classList.contains("truncate")).toBe(
+      true,
+    );
+    expect(mutations(mounted.fetchMock)).toEqual([]);
   });
 });

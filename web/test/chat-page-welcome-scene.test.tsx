@@ -242,7 +242,7 @@ describe("composer footer 空间选择 (W5–W9)", () => {
     const trigger = footerButton(UNSELECTED_BUTTON);
     expect(trigger.type).toBe("button");
     expect(trigger.querySelector("svg")?.classList.contains("lucide-folder")).toBe(true);
-    // 选择器在卡片末尾的工具栏里、能力栏最左。
+    // 选择器在卡片末尾的工具栏里、左组第二项。
     const toolbar = trigger.closest('[data-slot="composer-toolbar"]');
     expect(trigger.closest('[data-slot="composer-card"]')?.lastElementChild).toBe(toolbar);
     expect(toolbar?.firstElementChild?.contains(trigger)).toBe(true);
@@ -304,13 +304,13 @@ describe("composer footer 空间选择 (W5–W9)", () => {
     const picker = document.querySelector('[data-slot="composer-capabilities"]');
     if (!(picker instanceof HTMLElement)) throw new Error("未渲染 footer");
     expect(within(picker).getAllByRole("button")).toEqual([
+      screen.getByRole("button", { name: "添加文件或命令" }),
       footerButton(UNSELECTED_BUTTON),
-      screen.getByRole("button", { name: "技能与命令" }),
     ]);
 
     const dialog = await openPicker();
     const none = [[UNSELECTED, "true"]];
-    const forbidden = ["权限", "完全访问", "默认权限", "新建工作空间", "挂载目录到当前空间"];
+    const forbidden = ["完全访问", "默认权限", "新建工作空间", "挂载目录到当前空间"];
     for (const text of forbidden) expect(pageText()).not.toContain(text);
     expect(within(dialog).queryByText(NO_MATCH, { exact: true })).toBeNull();
 

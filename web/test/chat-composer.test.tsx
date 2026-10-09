@@ -76,7 +76,7 @@ describe("(C2) composer card structure", () => {
 
     const buttons = within(form).queryAllByRole("button");
     expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([
-      "技能与命令",
+      "添加文件或命令",
       "发送",
     ]);
     const send = within(form).getByRole("button", { name: "发送" }) as HTMLButtonElement;
