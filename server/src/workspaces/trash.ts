@@ -4,15 +4,20 @@
  * entries in comes with the delete route. Not `<state>/trash` (`temp-dir-remove.ts`), which is
  * "move in, then remove at once" and has no retention.
  * The sweep looks at the directory structure and the timestamp in the batch name, nothing else: no
- * db, no audit, no log, no mtime. It follows no symlink (`lstat` on `.trash`, `Dirent` types
- * below it, and `rm` unlinks a link inside a batch instead of walking it), touches nothing but
- * expired batch directories, creates nothing, and never rejects: whatever fails is left for the
- * next round.
- * Residual: the checks and the `rm` go by path (Node has no `*at` calls). `.trash` and its levels
- * are 0700 and owned by the app uid, so the omp uid cannot enter them; but `SANDBOX_ROOT` itself is
- * group-writable, and a process that renames `.trash` away between the `lstat` and a `readdir` can
- * put a link in its place. What the sweep then removes is still only a real directory named like
- * an expired batch, exactly three real directory levels below the link's target.
+ * db, no audit, no log, no mtime. Every level it reads or removes — `.trash`, an owner directory, a
+ * workspace directory, a batch — must first pass one `lstat` check: a real directory (not a
+ * symlink), owned by this process's euid, with no group or other permission bit. A level that fails
+ * is skipped as it is: not read, not removed, not chmod'ed. The sweep touches nothing but expired
+ * batch directories, creates nothing, and never rejects: whatever fails is left for the next round.
+ * Residual: the checks and the `rm` go by path (Node has no `*at` calls). Each level is resolved by
+ * path again after its check, for the `readdir` or the `rm`, and the recursion inside `rm` goes by
+ * path too, so nothing here is atomic. What closes the practical attack is that every level has to
+ * be a 0700 directory of this uid: the app creates none on the workspace side, and the omp uid can
+ * neither create one nor write into one, so it has nothing to rename into place of a level and
+ * cannot reach below one by path. What remains is a process that can already write inside a 0700
+ * directory owned by the app uid — another process of this uid, or one that still holds a handle
+ * (an open descriptor, a working directory) on a directory that was moved into a batch. The
+ * content of a batch is not checked, and against such a process the sweep guarantees nothing.
  */
 import { lstat, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -31,28 +36,45 @@ export function createTrash(options: { sandboxRoot: string; retentionDays: numbe
      * stamped exactly at that limit stays. Emptied owner and workspace directories stay too.
      */
     async sweep(now: number): Promise<void> {
-      if (!(await isOwnDirectory(trashDir))) {
+      if (!(await isPrivateOwnDirectory(trashDir))) {
         return;
       }
       const limit = now - options.retentionDays * DAY_MS;
       for (const ownerDir of await subdirectories(trashDir)) {
-        for (const workspaceDir of await subdirectories(ownerDir)) {
-          for (const batchDir of await subdirectories(workspaceDir, (name) =>
-            isExpired(name, limit),
-          )) {
-            await removeBatch(batchDir);
-          }
-        }
+        await sweepOwner(ownerDir, limit);
       }
     },
   };
 }
 
-/** `lstat`: missing, a symlink, a file, or a directory of another uid is not ours to walk. */
-async function isOwnDirectory(dir: string): Promise<boolean> {
+async function sweepOwner(ownerDir: string, limit: number): Promise<void> {
+  if (!(await isPrivateOwnDirectory(ownerDir))) {
+    return;
+  }
+  for (const workspaceDir of await subdirectories(ownerDir)) {
+    await sweepWorkspace(workspaceDir, limit);
+  }
+}
+
+async function sweepWorkspace(workspaceDir: string, limit: number): Promise<void> {
+  if (!(await isPrivateOwnDirectory(workspaceDir))) {
+    return;
+  }
+  for (const batchDir of await subdirectories(workspaceDir, (name) => isExpired(name, limit))) {
+    await removeBatch(batchDir);
+  }
+}
+
+/**
+ * `lstat`: only a real directory of this uid that nobody else can enter, list or write is ours to
+ * walk or remove. Missing, a symlink, a file, another uid, or any group/other bit: not ours.
+ */
+async function isPrivateOwnDirectory(dir: string): Promise<boolean> {
   try {
     const status = await lstat(dir);
-    return status.isDirectory() && status.uid === process.geteuid?.();
+    return (
+      status.isDirectory() && status.uid === process.geteuid?.() && (status.mode & 0o077) === 0
+    );
   } catch {
     return false;
   }
@@ -77,8 +99,14 @@ async function subdirectories(
   }
 }
 
-/** No `force`, and `rm` follows no symlink inside: a link in the batch is unlinked, not walked. */
+/**
+ * The batch passes the same `lstat` check as the levels above it, right before the `rm`. No
+ * `force`, and `rm` follows no symlink inside: a link in the batch is unlinked, not walked.
+ */
 async function removeBatch(batchDir: string): Promise<void> {
+  if (!(await isPrivateOwnDirectory(batchDir))) {
+    return;
+  }
   try {
     await rm(batchDir, { recursive: true });
   } catch {
