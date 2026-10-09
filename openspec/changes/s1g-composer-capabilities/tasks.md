@@ -384,7 +384,20 @@ Minimal mergeable slice: 10.1 一刀（`write` 尚无调用方；类型联合的
 - [x] 11.2 `server/src/workspaces/rest.ts`（现约 175 行）：注册 `POST /api/workspaces/:id/uploads`——空间归属检查放在 preParsing（先于媒体类型解析），route-local 的 `application/octet-stream` 透传 parser，handler 按 workspaces delta「文件上传」的九步次序；`registerWorkspaces` 的依赖加 `uploadMaxBytes`。
   测试新文件 `server/test/workspace-upload-rest.test.ts`（`createApp` + 真 socket，注入式请求测不出流与中断）：「上传并自动建目录」「同名自动编号不覆盖」「超过大小上限」（声明超限不读体、分块超限、恰等于上限）「越界名字被拒绝并入审计」「名字规则与媒体类型」「他人与不存在的空间」「目录被占与审计失败」「临时空间同样可上传，并随最后一个会话删除」（归属判定走所有者作用域的 `rootOf`，对临时空间不加特例）。
 - [x] 11.3 同文件：「中断与残留清理」（真实客户端发一半后断开；无 `.part`、无审计、无挂起请求）与「不进内存的流式写入」（32 MiB，`heapUsed + arrayBuffers` 增量阈值 8 MiB）。另加一条断言：应用的 `requestTimeout` 与 `connectionTimeout` 为 0（design D10），以及「超限恰为 413 而不是 400」（框架 body limit 没有抢先）。
-- [ ] 11.4 竞态现状记录（design D11 / Risks）：一条测试在 `resolve` 之后、打开之前把 `uploads` 换成指向沙箱内另一目录的符号链接，记录当前结果（预期：独占创建落在链接目标里）；用例标题与注释写明这是已登记的残余、不是保证，PR 描述里点名请白盒审查。
+- [x] 11.4 竞态现状记录（design D11 / Risks）：一条测试在 `resolve` 之后、打开之前把 `uploads` 换成指向沙箱内另一目录的符号链接，记录当前结果（预期：独占创建落在链接目标里）；用例标题与注释写明这是已登记的残余、不是保证，PR 描述里点名请白盒审查。
+  **实施注记（11.4，fixture 评审补充，#1017）**：
+  - 新文件 `server/test/workspace-upload-race.test.ts`。不放进 `workspace-upload-rest.test.ts`（766/800 行）。只从 `workspace-upload-helpers.ts` 取 `withUploadWorld`、`createWorkspace`、`upload`、`expectWire`、`auditOf`，不新增导出，不改产品代码。
+  - 接缝：`import fsp from "node:fs/promises"`，`vi.spyOn(fsp, "open")` 后调 `syncBuiltinESMExports()`。先例是 `model-proxy-models-yml.test.ts:13-14,360-373`，被测的 `core/replace-file.ts:2` 与 `upload.ts:25` 一样是具名导入。`try/finally` 里 `mockRestore()` 再 `syncBuiltinESMExports()`。
+  - spy 的行为：第一个参数是以 `<w.root>/uploads/.upload-` 开头的字符串时，先记下 `lstatSync(uploads).isDirectory()`（应为 true，证明已过路由的 `lstat`），再 `renameSync(uploads, <w.root>/uploads-was)`、`symlinkSync(<w.root>/elsewhere, uploads)`，然后原样转调真 `open`；只触发一次，其余调用直通。
+  - 布置：`createWorkspace` 后预建 `<w.root>/uploads`（真目录）与 `<w.root>/elsewhere`。链接目标在同一工作空间内，即沙箱内。然后 `upload(world, w.id, "a.txt", "abc")`。
+  - 记录的现状，逐条断言：响应 201 `{path:"uploads/a.txt", name:"a.txt", size:3}`；`readdirSync(elsewhere)` 恰为 `["a.txt"]`，内容 `abc`，没有 `.part`；`readdirSync(uploads-was)` 为 `[]`；`lstatSync(uploads).isSymbolicLink()` 为 true；审计有一条 `file.upload`，`detail.path` 为 `uploads/a.txt`（审计记的是逻辑路径，不是实际落点）；spy 恰触发一次。
+  - 不用 `uploadsOf(w)` 当正向判据：它经 `existsSync` / `readdirSync` 跟随链接，会因错误的理由看到 `a.txt`。
+  - 沙箱外无落点：`readdirSync(world.sandboxRoot)` 恰为 `["u1"]`，`readdirSync(join(sandboxRoot, "u1"))` 恰为该空间的目录，`readdirSync(w.root).sort()` 恰为 `["elsewhere", "uploads", "uploads-was"]`。另外对 `dirname(world.sandboxRoot)` 下除 `sandbox/` 外的部分做一次递归列举，上传前后相等。
+  - 同一用例里先做对照：不装 spy 时同样的上传落在真 `uploads/` 里、`elsewhere` 为空。这样「落在目标里」能归因于替换。
+  - W1a 不写用例（要 mock `rest.ts` 的 `lstatSync`，超出「一条测试」），只在文件头注释里分两种情况写明（评审核对代码后更正，#1017）：请求到达前链接已在位的，由 `sandbox.resolve` 的逐分量 `lstat` 以 403 `sandbox_denied` 拒绝并入审计（`workspace-upload-rest.test.ts` 已有用例）；`resolve` 之后、路由 `lstat` 之前放入的，由 `ensureUploadsDir` 以 409 拒绝——这一段**没有用例**（既有的 409 用例是 `uploads` 为普通文件）。
+  - 标题与注释：标题写成 `records a registered residual, not a guarantee: uploads swapped for a symlink between the route's lstat and the exclusive create — the file lands in the link target`。文件头引用 design D11 / Risks，并写明：这条变红说明窗口被关上或行为变了，应更新记录与 Risks，不是把断言改回去。
+  - 变异不适用（现状记录，没有要守的实现）。PR 描述里用三样代替：对照段；spy 内「此刻仍是目录」加触发次数；一句说明「引入目录句柄 / `O_NOFOLLOW` 式父目录校验后本用例应红」。PR 描述点名请白盒审查。
+  - 前提：依赖 vitest 缺省的 forks 池按文件隔离内建模块的改写。除通用纪律外没有别的守卫会碰到。
 - [x] 11.5 变异证据：先做名字规则再过沙箱 → `../../etc/passwd` 得到 400 而无审计，「越界」判红；用 `rename` 定名 →「同名不覆盖」判红；不删临时文件 →「超限」「中断」判红；先缓冲再写 →「不进内存」判红；归属检查放在 handler 里 → 他人空间加错误媒体类型得到 400，「他人与不存在的空间」判红。
   **实施注记（11.2 + 11.3 + 11.5，fixture 评审补充，#1015）**：
   - 漂移：`rest.ts` 现 270 行（不是约 175，C 加了 promote 与 `requireOwnedBeforeParse`）；依赖现为 `{store, sandbox, audit, listEvents}`（`rest.ts:19-25`、`app.ts:212`），`registerWorkspaces` 在 `workspaces/index.ts:4`，只转调 `registerWorkspaceRest`；加完上传约 380 行，不拆文件。既有测试没有必须改写的断言，点名之外变红先查原因。
