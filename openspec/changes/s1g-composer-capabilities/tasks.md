@@ -373,6 +373,21 @@ Minimal mergeable slice: 10.1 一刀（`write` 尚无调用方；类型联合的
   - 临时空间：`inject` 无 body 的 `POST /api/sessions` 得到 T（根为 `<sandboxRoot>/u1/tmp-<T>`），删除用 `session-delete-helpers.ts` 的 `sendDelete`，未派发过 prompt 就不会起进程。审计失败照 `workspaces-http-failures.test.ts:264-300` 的 `db.setAuthorizer` 拒绝 `audit_events` 的 INSERT。256 字节名字在 `uploads` 存在与不存在时各一例，另加一例 86 个汉字（258 字节）。
   - 变异（11.5 的五条之外）：`source` 换成迭代器包装 → 分块超限收不到 413；去掉 `Connection: close` → keep-alive 一例超时；改用 `parseAs: "buffer"` → 声明超限、32 MiB 等例红（单加 `bodyLimit` 实测不改变任何行为：透传流的 parser 不查大小，#1015 的 PR 记为不可观测）；不 `removeAllContentTypeParsers` → `application/json` 变 500 或 201；去掉 (a) → 无 body 一例 500；(c) 与 (b) 对调 → 缺 `name` 加超限得 413；去掉 (d) → `uploads` 已存在的 256 字节例得 403；(g) 不判非目录 → 409 例变 500；`>` 写成 `>=` → 恰 1024 例 413；去掉校验 → `NaN` 例不抛；`createApp` 不取 `assembly.uploadMaxBytes` → 1024 上限各例红；`fastify({ requestTimeout: 1 })` → 超时断言红。11.5 里「用 rename 定名」「不删临时文件」两条改的是 `upload.ts`，在 REST 层判红。
 - [ ] 11.6 `smoke/files.hurl`：chat-harness delta 的上传断言（201、编号、目录树、403、400、404）；`make smoke` 通过。
+  **实施注记（11.6，fixture 评审补充，#1016）**：
+  - 只改 `smoke/files.hurl`（现 128 行）。它用 zhangsan（`u1`）的正式空间 `smoke-fixture`，id 在第 29 行捕获为 `workspace_id`；不建会话，没有要删的东西。文首第 1–6 行的流程注释同步补上上传步骤。
+  - 属主侧五步插在 `notes.csv` 预览（第 96–100 行）之后、zhangsan 登出（第 102 行）之前，次序照 chat-harness delta 第 9 行：201 → 同名 201 → `tree?path=uploads` → 403 → 400。404 一步插在 lisi 登录（第 110–116 行）之后、lisi 登出之前，挨着既有的树 404。
+  - 请求体用内联字节 `hex,776f726b6275646479;`（9 字节），请求头显式写 `Content-Type: application/octet-stream`。实测 hurl 8.0.1 发出的就是该媒体类型加 `Content-Length: 9`，不分块。不用 `file,…;` 引夹具，这样 `size == 9` 不随夹具变，`smoke/fixtures/README.md` 不用动。
+  - 第一次上传 `POST …/uploads?name=smoke-upload.txt` → `HTTP 201`：捕获 `upload_first: jsonpath "$.name"`；断言 `jsonpath "$.name" matches /^smoke-upload( \(\d+\))?\.txt$/`、`jsonpath "$.path" == "uploads/{{upload_first}}"`、`jsonpath "$.size" == 9`。
+  - 第二次同请求 → `HTTP 201`：捕获 `upload_second`；断言 `matches /^smoke-upload \(\d+\)\.txt$/`、`jsonpath "$.name" != "{{upload_first}}"`、`size == 9`。不写死编号：`make smoke` 连跑两遍，第二遍得到 `(2)`、`(3)`。
+  - 目录树 `GET …/tree?path=uploads` → 200：两条 `jsonpath "$.entries[?(@.name=='{{upload_first}}' && @.type=='file')]" exists`（第二条换 `upload_second`）。必须用 `exists`：实测单条命中时 `count == 1` 报 `invalid filter input type`。过滤器里的模板与含空格括号的名字实测可用。
+  - 403：URL 里字面写 `?name=../escape.txt`，不用 `[QueryStringParams]`，不做百分号编码。实测原样到达服务端，与第 64 行 `tree?path=../..` 同一机制。响应体与第 66 行的 `sandbox_denied` 信封逐字相同。
+  - 403 的审计按第 57–78 行的写法加上：前面 `GET /api/audit?limit=1` 捕获 `upload_audit_before`，之后断言 `body != "{{upload_audit_before}}"`、`kind == "sandbox.reject"`、`actorId == "u1"`、`workspaceId == "{{workspace_id}}"`、`detail.op == "write"`、`detail.relPath == "uploads/../escape.txt"`。harness delta 没要求这条，但任务 18.5 把 11.6 列为「越界入审计」的证据；属于加严，记偏离。
+  - 400：`?name=smoke-upload.txt` 加 `Content-Type: application/json`、body `{}` → `HTTP 400`，响应体 `{"error":{"code":"bad_request","message":"请求格式不正确"}}`（同 `smoke/session-meta.hurl:93`）。不另加 `name=sub/a.txt` 一类，delta 只点了媒体类型这一条。
+  - 404：lisi（`u3`）对 `{{workspace_id}}` 发同样的 octet-stream 上传 → `HTTP 404`，响应体同第 121 行。issue 标题里的「不存在的空间」已由 `workspace-upload-rest.test.ts:587` 起的用例覆盖，冒烟不重复，记偏离。
+  - 失败响应都带 `Connection: close`（`rest.ts:62-65`）。实测 hurl 在 403、400 之后自动换新连接继续，`--retry 0` 与 Makefile 第 64 行不用改。请求体保持几个字节，避免服务端带着未读字节关连接。
+  - 不清理上传的文件：delta 第 20 行明写正式空间 `uploads/` 里的冒烟文件留着。每跑一遍加两个文件，同一沙箱本地连跑约 500 遍后编号用尽变 409；CI 每次是新沙箱。
+  - 守卫都不受影响：`make smoke` 按文件名列五个文件，`scripts/test-ci-harness.sh` 的 contract 不读 `smoke/*.hurl`，AGENTS.md:89 的「五文件」不变。`ci-uid-isolation.sh` 的 `check_snapshots_closed` 只看 `snapshots/` 下的 `manifest.json`，`reap_owned` 查的是进程。`web/e2e/ui-walk.spec.ts:312-316` 只断言三个夹具按钮可见，多一个 `uploads` 目录不碍事。
+  - 变异证据（改产品代码起本地服务跑 `make smoke`，或把对应字面量写错跑一次）：`upload.ts` 的 `link` 换成 `rename` → 第二次的 `name != upload_first` 红；`assertUploadName` 挪到 `sandbox.resolve` 之前 → 403 步红；去掉 `removeAllContentTypeParsers` → 400 步红；去掉路由的 preParsing 归属检查 → lisi 的 404 步红；`size` 字面量写成 8 → 红。
 
 Suggested fixture level: expanded - 文件写入与路径安全、资源上限与大输入、部分输出清理、账号隔离；Critical Path
 Minimal mergeable slice: 11.1 一刀（纯 IO，带测试；导出被 11.2 引用前由其测试引用，knip 配置若报未引用则与 11.2 同刀）；11.2 + 11.3 + 11.5 一刀；11.4 一刀；11.6 随第二刀
