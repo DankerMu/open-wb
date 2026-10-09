@@ -35,7 +35,7 @@ function sevenDefaults(config: {
   sandboxRoot?: string;
   modelUpstreamBaseUrl?: string;
   modelUpstreamApiKey?: string;
-  modelId?: string;
+  modelCatalog?: { defaultModelId: string };
   ompUser?: string;
 }): AgentSettings {
   return {
@@ -45,7 +45,7 @@ function sevenDefaults(config: {
     sandboxRoot: config.sandboxRoot,
     modelUpstreamBaseUrl: config.modelUpstreamBaseUrl,
     modelUpstreamApiKey: config.modelUpstreamApiKey,
-    modelId: config.modelId,
+    modelId: config.modelCatalog?.defaultModelId,
     ompUser: config.ompUser,
   };
 }
@@ -114,7 +114,7 @@ describe("resolveServerConfig — 缺省身份", () => {
       expect(fromTmp.ompStateDir).toBe(DEFAULT_OMP_STATE_DIR);
       expect(fromTmp.sandboxRoot).toBe(DEFAULT_SANDBOX_ROOT);
       expect(fromTmp.ompIdleMs).toBe(DEFAULT_OMP_IDLE_MS);
-      expect(fromTmp.modelId).toBe(DEFAULT_MODEL_ID);
+      expect(fromTmp.modelCatalog.defaultModelId).toBe(DEFAULT_MODEL_ID);
       expect(fromTmp.modelUpstreamBaseUrl).toBeUndefined();
       expect(fromTmp.modelUpstreamApiKey).toBeUndefined();
     } finally {
@@ -249,7 +249,7 @@ describe("resolveServerConfig — 新增七项缺省与逐项覆盖", () => {
       ompStateDir: DEFAULT_OMP_STATE_DIR,
       ompIdleMs: DEFAULT_OMP_IDLE_MS,
       sandboxRoot: DEFAULT_SANDBOX_ROOT,
-      modelId: DEFAULT_MODEL_ID,
+      modelCatalog: { defaultModelId: DEFAULT_MODEL_ID },
     });
     expect(config.modelUpstreamBaseUrl).toBeUndefined();
     expect(config.modelUpstreamApiKey).toBeUndefined();
@@ -275,7 +275,7 @@ describe("resolveServerConfig — 新增七项缺省与逐项覆盖", () => {
       sandboxRoot: join(REPO_ROOT, "sandboxes", "root"),
       modelUpstreamBaseUrl: "http://upstream.example/v1",
       modelUpstreamApiKey: "key-with-space ",
-      modelId: " custom-model ",
+      modelCatalog: { defaultModelId: " custom-model " },
     });
     expect(resolveServerConfig({ OMP_BIN: "/opt/../opt/omp" }, SOURCE_ENTRY).ompBin).toBe(
       "/opt/../opt/omp",
@@ -318,7 +318,7 @@ describe("resolveServerConfig — 新增七项缺省与逐项覆盖", () => {
         sandboxRoot: "/srv/sandbox",
         modelUpstreamBaseUrl: "https://models.example",
         modelUpstreamApiKey: "sentinel-key",
-        modelId: "model-bytes",
+        modelCatalog: { defaultModelId: "model-bytes" },
         repoRoot: REPO_ROOT,
       });
       for (const config of [fromSource, fromDist]) {

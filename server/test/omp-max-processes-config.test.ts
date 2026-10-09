@@ -96,7 +96,7 @@ describe("resolveServerConfig — OMP_MAX_PROCESSES 缺省与合法值", () => {
       ompStateDir: join(REPO_ROOT, "var", "omp-state"),
       ompIdleMs: 600_000,
       sandboxRoot: join(REPO_ROOT, "var", "sandbox"),
-      modelId: "deepseek-v4.1-flash",
+      modelCatalog: { defaultModelId: "deepseek-v4.1-flash" },
     });
     expect(Object.hasOwn(config, "modelUpstreamBaseUrl")).toBe(false);
     expect(Object.hasOwn(config, "modelUpstreamApiKey")).toBe(false);
@@ -309,6 +309,15 @@ describe("process cap reaches the sessions module", () => {
     );
     expect(runtime).toMatchObject({ idleMs: 1234, maxProcesses: 7 });
     expect(sessionRuntimeOf(resolveServerConfig({}, SOURCE_ENTRY)).maxProcesses).toBe(16);
+  });
+
+  it("sessionRuntimeOf 的 modelId 取白名单的缺省模型，不是白名单第一项", () => {
+    const root = scratch("open-wb-max-model-");
+    const MODEL_CATALOG = JSON.stringify([{ id: "m1" }, { id: "m2" }, { id: "m3" }]);
+    const runtime = sessionRuntimeOf(
+      resolveServerConfig({ ...scratchEnv(root), MODEL_CATALOG, MODEL_ID: "m3" }, SOURCE_ENTRY),
+    );
+    expect(runtime.modelId).toBe("m3");
   });
 
   it("createApp 把含 maxProcesses 的同一 runtime 对象交给 registerSessions", () => {
