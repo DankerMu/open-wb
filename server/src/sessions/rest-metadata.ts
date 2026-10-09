@@ -1,8 +1,10 @@
 /**
- * Session metadata routes (parent D2). `POST /api/sessions` (#523): an optional exact
- * `{workspaceId?, scene?}` body; a named workspace must be the caller's through the injected
- * owner-scoped `workspaceRootOf`; unknown, foreign and malformed ids share one 404, and so does the
- * caller's own temporary workspace (#925, thrown by `createSession`).
+ * Session metadata routes (parent D2). `POST /api/sessions` (#523, #1005): an optional exact
+ * `{workspaceId?, scene?, approvalMode?, modelId?, reasoningEffort?}` body; a named workspace must
+ * be the caller's through the injected owner-scoped `workspaceRootOf`; unknown, foreign and
+ * malformed ids share one 404, and so does the caller's own temporary workspace (#925, thrown by
+ * `createSession`). The three composer keys only have to be strings here: this route has no
+ * configuration, their values are checked by `createSession` (400 `bad_request`, nothing written).
  * `PATCH /api/sessions/:id` (#524, #922): a non-empty exact `{title?, scene?, pinned?, archived?}`
  * body, owner checked before parsing; a title write marks the session's in-flight admission so its
  * rollback keeps the new title; `archived: true` is refused whole with 409 `session_busy` while the
@@ -48,7 +50,8 @@ interface SessionIdParams {
 }
 
 const SESSION_METADATA_BODY_LIMIT = 16 * 1024;
-const CREATE_KEYS: ReadonlySet<string> = new Set(["workspaceId", "scene"]);
+const COMPOSER_KEYS = ["approvalMode", "modelId", "reasoningEffort"] as const;
+const CREATE_KEYS: ReadonlySet<string> = new Set(["workspaceId", "scene", ...COMPOSER_KEYS]);
 const PATCH_KEYS: ReadonlySet<string> = new Set(["title", "scene", "pinned", "archived"]);
 const SCENES: ReadonlySet<string> = new Set<SessionScene>(["office", "code", "design"]);
 const TITLE_MAX_CODE_POINTS = 80;
@@ -150,17 +153,25 @@ function createPrincipal(request: FastifyRequest): { id: string } {
   return principal;
 }
 
-/** A plain JSON object whose keys ⊆ {workspaceId, scene}; strings (text/plain) are never parsed. */
+/**
+ * A plain JSON object whose keys ⊆ the five create keys; strings (text/plain) are never parsed.
+ * `workspaceId` and the three composer keys are any string: their values are judged later.
+ */
 function parseCreateBody(body: unknown): SessionCreateInput {
   if (!isPlainObject(body) || Object.keys(body).some((key) => !CREATE_KEYS.has(key))) {
     throw new HttpError("bad_request");
   }
   const input: SessionCreateInput = {};
   if (Object.hasOwn(body, "workspaceId")) {
-    input.workspaceId = requireWorkspaceId(body.workspaceId);
+    input.workspaceId = requireString(body.workspaceId);
   }
   if (Object.hasOwn(body, "scene")) {
     input.scene = requireScene(body.scene);
+  }
+  for (const key of COMPOSER_KEYS) {
+    if (Object.hasOwn(body, key)) {
+      input[key] = requireString(body[key]);
+    }
   }
   return input;
 }
@@ -219,7 +230,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   );
 }
 
-function requireWorkspaceId(value: unknown): string {
+function requireString(value: unknown): string {
   if (typeof value !== "string") {
     throw new HttpError("bad_request");
   }

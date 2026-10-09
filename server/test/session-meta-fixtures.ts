@@ -1,4 +1,4 @@
-// 会话 DTO 元数据（#517、#921、#1004）共享夹具：既有测试只经这些常量补键，不在各文件内重复字面量。
+// 会话 DTO 元数据（#517、#921、#1004、#1005）共享夹具：既有测试只经这些常量补键，不在各文件内重复字面量。
 import type { ComposerConfig } from "../src/sessions/store-composer.js";
 
 /**
@@ -14,6 +14,25 @@ export const TEST_COMPOSER: ComposerConfig = {
     ],
     defaultModelId: "deepseek-v4.1-flash",
   },
+};
+
+/**
+ * session-composer-settings「有效值解析」场景的三模型白名单：缺省模型 `m1`，`m2` 不支持推理，
+ * `m3` 的可选强度只有 `low`、`high`。
+ */
+export const THREE_MODEL_CATALOG: ComposerConfig["modelCatalog"] = {
+  models: [
+    {
+      id: "m1",
+      name: "M One",
+      reasoning: true,
+      vision: false,
+      efforts: ["minimal", "low", "medium", "high", "xhigh", "max"],
+    },
+    { id: "m2", name: "M Two", reasoning: false, vision: false },
+    { id: "m3", name: "M Three", reasoning: true, vision: true, efforts: ["low", "high"] },
+  ],
+  defaultModelId: "m1",
 };
 
 /**

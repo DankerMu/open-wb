@@ -5,8 +5,13 @@
  * No writer exists yet, so non-NULL columns are planted by SQL. Real SQLite, real stores; the
  * configuration is passed in, never read from the environment. Oracles: the spec's key order and
  * session-composer-settings「有效值解析」(夹取与回落), written here as literals.
+ *
+ * Issue #1005 (task 8.2) adds the store half of the creation writer: (g) the last-choice upsert
+ * touches only the given columns, (h) a failing `session.permission` audit rolls the whole
+ * creation back on both paths, (i) invalid values are refused before the temporary workspace is
+ * made. The REST scenarios are in session-composer-rest.test.ts.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -19,9 +24,10 @@ import type { ComposerConfig } from "../src/sessions/store-composer.js";
 import {
   createSessionMetadataStore,
   type SessionMetadataStore,
+  type SessionMetadataStoreOptions,
 } from "../src/sessions/store-metadata.js";
 import { FIXED_NOW, fixedRuntime } from "./session-db-helpers.js";
-import { TEST_COMPOSER } from "./session-meta-fixtures.js";
+import { TEST_COMPOSER, THREE_MODEL_CATALOG } from "./session-meta-fixtures.js";
 import { cookieFor, SESSION_NOW, withSessionRest } from "./session-rest-helpers.js";
 import { createControlledRuntime } from "./session-supervisor-helpers.js";
 import { temporaryWorkspacePort } from "./support/temporary-workspace.js";
@@ -46,27 +52,14 @@ const FOURTEEN_KEYS = [
 const NOW = 1_740_000_000_000;
 const HEX32 = /^[0-9a-f]{32}$/u;
 const WORKSPACE = "a".repeat(32);
-/** session-composer-settings「有效值解析」的白名单：缺省模型 `m1`，`m2` 不支持推理。 */
-const CATALOG: ComposerConfig["modelCatalog"] = {
-  models: [
-    {
-      id: "m1",
-      name: "M One",
-      reasoning: true,
-      vision: false,
-      efforts: ["minimal", "low", "medium", "high", "xhigh", "max"],
-    },
-    { id: "m2", name: "M Two", reasoning: false, vision: false },
-    { id: "m3", name: "M Three", reasoning: true, vision: true, efforts: ["low", "high"] },
-  ],
-  defaultModelId: "m1",
-};
+const CATALOG = THREE_MODEL_CATALOG;
 
 type Composer = { approvalMode: string; modelId: string; reasoningEffort: string | null };
 
 interface Stores {
   store: SessionStore;
   metadata: SessionMetadataStore;
+  sandboxRoot: string;
 }
 
 const cleanups: Array<() => void | Promise<void>> = [];
@@ -86,8 +79,17 @@ function openDatabase(): DatabaseSync {
   return db;
 }
 
-/** Both stores over `db`, each handed `composer` directly; closed (store) after the test. */
-function openStores(db: DatabaseSync, composer: ComposerConfig): Stores {
+/**
+ * Both stores over `db`, each handed `composer` directly; closed (store) after the test.
+ * `port` replaces the metadata store's `emit` / `createTemporaryWorkspace`, given the real one.
+ */
+function openStores(
+  db: DatabaseSync,
+  composer: ComposerConfig,
+  port: (
+    real: Pick<SessionMetadataStoreOptions, "emit" | "createTemporaryWorkspace">,
+  ) => Partial<SessionMetadataStoreOptions> = () => ({}),
+): Stores {
   const sandboxRoot = mkdtempSync(join(tmpdir(), "workbuddy-composer-store-"));
   const store = createSessionStore(db, { onFlushError() {}, emit, composer });
   const metadata = createSessionMetadataStore(db, {
@@ -95,12 +97,34 @@ function openStores(db: DatabaseSync, composer: ComposerConfig): Stores {
     sandboxRoot,
     createTemporaryWorkspace: temporaryWorkspacePort(db, sandboxRoot),
     composer,
+    ...port({ emit, createTemporaryWorkspace: temporaryWorkspacePort(db, sandboxRoot) }),
   });
   cleanups.push(() => {
     store.close();
     rmSync(sandboxRoot, { recursive: true, force: true });
   });
-  return { store, metadata };
+  return { store, metadata, sandboxRoot };
+}
+
+function prefsRows(db: DatabaseSync): unknown[] {
+  return db
+    .prepare(
+      "SELECT account_id, approval_mode, model_id, reasoning_effort, updated_at FROM account_composer_prefs ORDER BY account_id",
+    )
+    .all();
+}
+
+function count(db: DatabaseSync, table: "chat_sessions" | "workspaces" | "audit_events"): number {
+  const row = db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number };
+  return Number(row.n);
+}
+
+/** The `tmp-*` directories under `u1`'s account root; none when the root was never made. */
+function temporaryDirs(sandboxRoot: string): string[] {
+  const accountRoot = join(sandboxRoot, "u1");
+  return existsSync(accountRoot)
+    ? readdirSync(accountRoot).filter((name) => name.startsWith("tmp-"))
+    : [];
 }
 
 function plant(
@@ -442,5 +466,161 @@ describe("REST 出口的十四键 (chat-sessions「Session views carry the three
       modelId: controlled.runtime.modelId,
       reasoningEffort: "high",
     });
+  });
+});
+
+describe("创建写入最近选择 (session-composer-settings「创建会话时的设置与继承」)", () => {
+  it("(g) upsert 只改所给列：先两键再一键，前两列不变且 updated_at 前进；无键创建整行不变", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+    const db = openDatabase();
+    insertWorkspace(db, WORKSPACE, "u1", "周报空间", "weekly", NOW);
+    const { metadata } = openStores(db, { approvalMaxMode: "yolo", modelCatalog: CATALOG });
+
+    const first = metadata.createSession("u1", { approvalMode: "always-ask", modelId: "m3" });
+
+    expect(prefsRows(db)).toEqual([
+      {
+        account_id: "u1",
+        approval_mode: "always-ask",
+        model_id: "m3",
+        reasoning_effort: null,
+        updated_at: NOW,
+      },
+    ]);
+    expect(rawColumns(db, first.id)).toEqual({
+      approval_mode: "always-ask",
+      model_id: "m3",
+      reasoning_effort: null,
+    });
+
+    vi.setSystemTime(NOW + 7);
+    const second = metadata.createSession("u1", { workspaceId: WORKSPACE, reasoningEffort: "low" });
+
+    const afterSecond = {
+      account_id: "u1",
+      approval_mode: "always-ask",
+      model_id: "m3",
+      reasoning_effort: "low",
+      updated_at: NOW + 7,
+    };
+    expect(prefsRows(db)).toEqual([afterSecond]);
+    // 未给的两键照抄最近选择的原始值。
+    expect(rawColumns(db, second.id)).toEqual({
+      approval_mode: "always-ask",
+      model_id: "m3",
+      reasoning_effort: "low",
+    });
+
+    vi.setSystemTime(NOW + 20);
+    const third = metadata.createSession("u1", {});
+    const fourth = metadata.createSession("u1", { workspaceId: WORKSPACE, scene: "code" });
+
+    expect(prefsRows(db)).toEqual([afterSecond]);
+    for (const inherited of [third, fourth]) {
+      expect(composerOf(inherited)).toEqual({
+        approvalMode: "always-ask",
+        modelId: "m3",
+        reasoningEffort: "low",
+      });
+    }
+
+    // 另一个账号不受影响：没有最近选择，三列为 NULL。
+    const foreign = metadata.createSession("u2", {});
+    expect(rawColumns(db, foreign.id)).toEqual({
+      approval_mode: null,
+      model_id: null,
+      reasoning_effort: null,
+    });
+    expect(prefsRows(db)).toEqual([afterSecond]);
+  });
+
+  it.each<[string, string | undefined]>([
+    ["绑定工作空间的创建", WORKSPACE],
+    ["临时空间的创建", undefined],
+  ])(
+    "(h) %s：session.permission 审计失败则会话行、空间行、审计与最近选择都不落",
+    (_name, workspaceId) => {
+      const db = openDatabase();
+      insertWorkspace(db, WORKSPACE, "u1", "周报空间", "weekly", NOW);
+      const { metadata, sandboxRoot } = openStores(
+        db,
+        { approvalMaxMode: "yolo", modelCatalog: CATALOG },
+        (real) => ({
+          emit(target, event) {
+            if (event.kind === "session.permission") {
+              throw new Error("audit down");
+            }
+            return real.emit(target, event);
+          },
+        }),
+      );
+      // 先落一行最近选择（档位为 NULL，不写审计），它必须原样留下。
+      metadata.createSession("u1", { workspaceId: WORKSPACE, modelId: "m3" });
+      const before = {
+        sessions: count(db, "chat_sessions"),
+        workspaces: count(db, "workspaces"),
+        audits: count(db, "audit_events"),
+        prefs: prefsRows(db),
+        dirs: temporaryDirs(sandboxRoot),
+      };
+      expect(before).toMatchObject({ sessions: 1, workspaces: 1, audits: 1, dirs: [] });
+
+      expect(() =>
+        metadata.createSession("u1", {
+          ...(workspaceId === undefined ? {} : { workspaceId }),
+          approvalMode: "yolo",
+          reasoningEffort: "max",
+        }),
+      ).toThrow("audit down");
+
+      expect({
+        sessions: count(db, "chat_sessions"),
+        workspaces: count(db, "workspaces"),
+        audits: count(db, "audit_events"),
+        prefs: prefsRows(db),
+        dirs: temporaryDirs(sandboxRoot),
+      }).toEqual(before);
+      expect(db.isTransaction).toBe(false);
+    },
+  );
+
+  it("(i) 取值不合法：先于临时空间的创建被拒绝，createTemporaryWorkspace 调用零次", () => {
+    const db = openDatabase();
+    const calls: string[] = [];
+    const { metadata, sandboxRoot } = openStores(
+      db,
+      { approvalMaxMode: "write", modelCatalog: CATALOG },
+      (real) => ({
+        createTemporaryWorkspace(ownerId) {
+          calls.push(ownerId);
+          return real.createTemporaryWorkspace(ownerId);
+        },
+      }),
+    );
+
+    for (const input of [
+      { approvalMode: "yolo" },
+      { approvalMode: "nope" },
+      { modelId: "gone" },
+      { reasoningEffort: "auto" },
+      { modelId: "m2", reasoningEffort: "high" },
+    ]) {
+      expect(() => metadata.createSession("u1", input)).toThrow(
+        expect.objectContaining({ name: "HttpError", code: "bad_request" }),
+      );
+    }
+
+    expect(calls).toEqual([]);
+    expect(count(db, "chat_sessions")).toBe(0);
+    expect(count(db, "workspaces")).toBe(0);
+    expect(prefsRows(db)).toEqual([]);
+    expect(temporaryDirs(sandboxRoot)).toEqual([]);
+    expect(db.isTransaction).toBe(false);
+
+    // 合法取值走到临时空间的创建：上面的零次不是因为端口没接上。
+    metadata.createSession("u1", { approvalMode: "write" });
+    expect(calls).toEqual(["u1"]);
+    expect(temporaryDirs(sandboxRoot)).toHaveLength(1);
   });
 });
