@@ -257,6 +257,7 @@ describe("GET /api/commands", () => {
         ownerId: "u1",
         cwd: join(root, "sandbox", "u1"),
         modelId: MODEL,
+        approvalMode: "write",
         token: "a".repeat(64),
         resumePath: null,
       },

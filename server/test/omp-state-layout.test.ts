@@ -105,6 +105,7 @@ async function spawnRecorded(
       ownerId: OWNER,
       cwd: join(root, "sandbox", OWNER),
       modelId: MODEL,
+      approvalMode: "write",
       token: "a".repeat(64),
       resumePath: null,
     },
@@ -510,6 +511,7 @@ describe("spawned child environment under the managed layout", () => {
         ownerId: OWNER,
         cwd: join(sandbox, OWNER),
         modelId: MODEL,
+        approvalMode: "write",
         tokens: new TokenRegistry(),
       });
       runtimes.push(runtime);

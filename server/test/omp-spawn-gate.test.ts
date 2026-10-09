@@ -117,6 +117,7 @@ function gatedRuntime(
     ownerId: "u1",
     cwd: temp.cwd,
     modelId: temp.modelId,
+    approvalMode: "write",
     tokens: createTokens(`wb-652-${sessionId}`),
     clock,
     spawnGate: gate,

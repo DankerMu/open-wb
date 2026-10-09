@@ -11,6 +11,7 @@ import {
   SETPRIV_PATH,
 } from "../../core/process-path.js";
 import { ensureSharedDir } from "../../core/sandbox/dirs.js";
+import { APPROVAL_MODES, type ApprovalMode } from "../../model-catalog.js";
 import {
   MAX_RPC_FRAME_BYTES,
   MAX_RPC_REASSEMBLED_BYTES,
@@ -44,6 +45,7 @@ export interface SpawnOmpOpts {
   stateDir: string;
   ownerId: string;
   modelId: string;
+  approvalMode: ApprovalMode;
   token: string;
   resumePath: string | null;
   ompUser?: string;
@@ -66,6 +68,9 @@ export async function spawnOmp(
   opts: SpawnOmpOpts,
   spawnImpl: SpawnImpl = spawn as SpawnImpl,
 ): Promise<ChildProcessWithoutNullStreams> {
+  if (!APPROVAL_MODES.includes(opts.approvalMode)) {
+    throw new Error("invalid approval mode");
+  }
   if (opts.ompUser !== undefined) {
     assertSafeSudoPath(process.env.PATH);
     assertSetprivExecutable();
@@ -93,7 +98,7 @@ export async function spawnOmp(
     "--model",
     `workbuddy/${opts.modelId}`,
     "--approval-mode",
-    "write",
+    opts.approvalMode,
     "--no-extensions",
     "--no-lsp",
     "--no-pty",

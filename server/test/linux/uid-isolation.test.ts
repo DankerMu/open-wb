@@ -353,6 +353,7 @@ function runtimeOpts(layout: OwnedLayout, ompUser: string, sessionId: string): S
     ownerId: OWNER_ID,
     cwd: join(layout.sandboxRoot, OWNER_ID),
     modelId: MODEL_ID,
+    approvalMode: "write",
     tokens: new TokenRegistry(),
     ompUser,
   };

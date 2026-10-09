@@ -106,6 +106,7 @@ function openReal(scenario: string, options: RealOptions = {}): RealWorld {
   };
   world.runtime = new SessionRuntime({
     ...real.runtime,
+    approvalMode: "write",
     sessionId: SESSION_ID,
     ownerId: "u1",
     cwd: join(real.runtime.sandboxRoot, "u1"),

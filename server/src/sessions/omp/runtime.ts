@@ -3,6 +3,7 @@
  * Token crypto, persistence and event mapping live elsewhere.
  */
 import { type ChildProcessWithoutNullStreams, type SpawnOptions, spawn } from "node:child_process";
+import type { ApprovalMode } from "../../model-catalog.js";
 import {
   awaitChild,
   canAbort,
@@ -24,6 +25,7 @@ import {
   localSignal,
   nonempty,
   openDeferredAbort,
+  type RuntimeCommandFrame,
   signalLive,
   stateSessionFile,
   TERM_GRACE_MS,
@@ -64,6 +66,7 @@ export interface SessionRuntimeOpts {
   stateDir: string;
   ownerId: string;
   modelId: string;
+  approvalMode: ApprovalMode;
   tokens: SessionTokens;
   ompUser?: string;
   cwd: string;
@@ -111,6 +114,7 @@ export class SessionRuntime {
   readonly #stateDir: string;
   readonly #ownerId: string;
   readonly #modelId: string;
+  readonly #approvalMode: ApprovalMode;
   readonly #ompUser: string | undefined;
   readonly #cwd: string;
   readonly #tokens: SessionTokens;
@@ -144,6 +148,7 @@ export class SessionRuntime {
     this.#stateDir = opts.stateDir;
     this.#ownerId = opts.ownerId;
     this.#modelId = opts.modelId;
+    this.#approvalMode = opts.approvalMode;
     this.#ompUser = opts.ompUser;
     this.#cwd = opts.cwd;
     this.#tokens = opts.tokens;
@@ -255,12 +260,7 @@ export class SessionRuntime {
   }
 
   /** Correlated out-of-turn request on the prompt acquisition path; resolves the response data. */
-  command(
-    frame:
-      | { type: "get_branch_messages" }
-      | { type: "get_state" }
-      | { type: "branch"; entryId: string },
-  ): Promise<unknown> {
+  command(frame: RuntimeCommandFrame): Promise<unknown> {
     if (this.#closed) {
       throw new AgentUnavailableError("runtime shutdown");
     }
@@ -429,6 +429,7 @@ export class SessionRuntime {
       stateDir: this.#stateDir,
       ownerId: this.#ownerId,
       modelId: this.#modelId,
+      approvalMode: this.#approvalMode,
       token,
       resumePath: this.#resumePath,
       ...(this.#ompUser === undefined ? {} : { ompUser: this.#ompUser }),

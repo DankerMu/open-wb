@@ -77,6 +77,7 @@ function open(scenario: string, extraArgs: string[], idleMs = 600_000): World {
   };
   world.runtime = new SessionRuntime({
     ...real.runtime,
+    approvalMode: "write",
     sessionId: "sess-abort-start-650",
     ownerId: "u1",
     cwd: `${real.runtime.sandboxRoot}/u1`,
