@@ -434,6 +434,7 @@ describe("切换会话", () => {
     await quiesce();
     expect(area()).toBeNull();
     expect(bodies(fetchMock)).toEqual([]);
+    expect(fetchMock.mock.calls.filter(([, options]) => options?.method === "DELETE")).toEqual([]);
   });
 
   it.each(["另一个会话", "新建会话"] as const)(
@@ -443,6 +444,9 @@ describe("切换会话", () => {
       await choose(file("a.pdf"), file("b.pdf"), file("c.pdf"));
       await land(0, "a.pdf");
       expect(FakeXhr.instances).toHaveLength(2);
+      // b 传到 40% 时切走。
+      act(() => xhr(1).progress(4, 10));
+      expect(chips()).toEqual(["a.pdf10 B", "b.pdf10 B上传中 40%", "c.pdf10 B上传中 0%"]);
 
       await leave(target);
       expect(xhr(1).aborts).toBe(1);
