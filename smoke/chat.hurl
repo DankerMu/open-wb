@@ -1,8 +1,13 @@
 # 对话冒烟（chat.hurl）：从空 cookie store 独立可运行，不依赖 public/auth。
 # 登录 → 首轮 prompt → 审批作答 → 仅 messages GET 有界重试至 captured assistant/session done
-# → 回合控制 → 他账号404 → 本账号删除自己创建的会话 → 无 bearer 代理401。
-# 审批作答与回合控制仅在 skip_turn_control=false 时执行。
+# → 回合控制 → (5) yolo 会话（bash 回合不经作答到 done、零审批；上传后带附件再 prompt）
+# → 他账号404 → 本账号删除自己创建的会话 → 无 bearer 代理401。
+# 审批作答、回合控制与 (5) 整块仅在 skip_turn_control=false 时执行。
 # 两账号均登出，不留下 live authentication session、running 回合与本文件创建的会话。
+# (5) 以 approvalMode yolo 创建会话会把 zhangsan 的最近选择记为 yolo，下一步即对首会话 PATCH write 改回，
+# 并在本遍内由 options 见证（只动档位一列，不动模型与推理强度，lisi 的不碰）。
+# 在这两步之间失败的一遍，会把 zhangsan 的最近选择留在 yolo：库若保留，下一遍首会话的审批轮询先判红。
+# 恢复办法：以 zhangsan 对自己的任一会话 PATCH {"approvalMode":"write"}，或换一个新库（连同 SANDBOX_ROOT）。
 
 # 成功登录：exact 200 Principal + 合规 session cookie。
 POST {{base_url}}/api/auth/login
@@ -168,7 +173,6 @@ skip: {{skip_turn_control}}
 HTTP 201
 [Captures]
 session2_id: jsonpath "$.id"
-session2_workspace_id: jsonpath "$.workspaceId"
 [Asserts]
 jsonpath "$.status" == "idle"
 
@@ -276,9 +280,93 @@ jsonpath "$.messages[1].content" matches "{{content_pattern}}"
 jsonpath "$.messages[1].steps[?(@.name=='bash')].status" == "done"
 jsonpath "$.messages[1].steps[?(@.status!='done')]" not exists
 
-# (4) 向第二会话的临时空间上传 9 个内联字节：201；捕获 path 与 size，供下一步作附件。
+# (4) 再 prompt：exact 202；捕获 assistantMessageId。不重试。
+POST {{base_url}}/api/sessions/{{session2_id}}/prompt
+Content-Type: application/json
+[Options]
+skip: {{skip_turn_control}}
+{"message":"你好"}
+HTTP 202
+[Captures]
+followup2_assistant_id: jsonpath "$.assistantMessageId"
+
+# (4) 轮询至 done（≥90s）：正文匹配；历史已有 tool result，本轮无工具调用，故不断言审批与 bash 计数。
+GET {{base_url}}/api/sessions/{{session2_id}}/messages
+[Options]
+skip: {{skip_turn_control}}
+retry: 180
+retry-interval: 500ms
+HTTP 200
+[Asserts]
+jsonpath "$.session.status" == "done"
+jsonpath "$.messages[?(@.id=={{followup2_assistant_id}})].status" == "done"
+jsonpath "$.messages[?(@.id=={{followup2_assistant_id}})].content" matches "{{content_pattern}}"
+
+# (5) yolo 会话：以 approvalMode yolo 创建，exact 201 idle，带临时空间；捕获会话 id 与临时空间 id。
+# JSON body，须带 Content-Type；不重试。本步把 zhangsan 的最近选择记为 yolo，下一步改回。
+POST {{base_url}}/api/sessions
+Content-Type: application/json
+[Options]
+skip: {{skip_turn_control}}
+{"approvalMode":"yolo"}
+HTTP 201
+[Captures]
+yolo_session_id: jsonpath "$.id"
+yolo_workspace_id: jsonpath "$.workspaceId"
+[Asserts]
+jsonpath "$.approvalMode" == "yolo"
+jsonpath "$.temporaryWorkspace" == true
+jsonpath "$.status" == "idle"
+
+# (5) 恢复最近选择：对首会话 PATCH write（它本就是 write，档位不变、不写审计，最近选择照记）：exact 200。不重试。
+# yolo 会话自己的档位仍是 yolo。
+PATCH {{base_url}}/api/sessions/{{session_id}}
+Content-Type: application/json
+[Options]
+skip: {{skip_turn_control}}
+{"approvalMode":"write"}
+HTTP 200
+[Asserts]
+jsonpath "$.approvalMode" == "write"
+
+# (5) 最近选择已恢复：options 的缺省档位为 write（本遍内见证，不留给下一遍）。
+GET {{base_url}}/api/composer/options
+[Options]
+skip: {{skip_turn_control}}
+HTTP 200
+[Asserts]
+jsonpath "$.defaults.approvalMode" == "write"
+
+# (5) yolo 会话 prompt（受控上游在历史无 tool result 的轮次发 bash）：exact 202；捕获 assistantMessageId。不重试。
+POST {{base_url}}/api/sessions/{{yolo_session_id}}/prompt
+Content-Type: application/json
+[Options]
+skip: {{skip_turn_control}}
+{"message":"你好"}
+HTTP 202
+[Captures]
+yolo_assistant_id: jsonpath "$.assistantMessageId"
+
+# (5) 不轮询审批、不作答，直接轮询至 done（≥90s）：正文匹配、bash 步骤 done、步骤全 done，
+# 该助手的 approvals 为空数组（count 数的是数组元素；yolo 下 bash 不经确认）。
+# 若留有审批（60s 自动允许后回合仍会 done），重试耗尽即判红——那是产品缺陷，不加长重试。
+GET {{base_url}}/api/sessions/{{yolo_session_id}}/messages
+[Options]
+skip: {{skip_turn_control}}
+retry: 180
+retry-interval: 500ms
+HTTP 200
+[Asserts]
+jsonpath "$.messages[?(@.id=={{yolo_assistant_id}})].status" == "done"
+jsonpath "$.messages[?(@.id=={{yolo_assistant_id}})].content" matches "{{content_pattern}}"
+jsonpath "$.messages[?(@.id=={{yolo_assistant_id}} && count(@.steps[?(@.name=='bash')]) >= {{min_bash_steps}})]" exists
+jsonpath "$.messages[?(@.id=={{yolo_assistant_id}})].steps[?(@.status!='done')]" not exists
+jsonpath "$.messages[?(@.id=={{yolo_assistant_id}})].approvals" count == 0
+jsonpath "$.session.status" == "done"
+
+# (5) 向 yolo 会话的临时空间上传 9 个内联字节：201；捕获 path 与 size，供下一步作附件。
 # 该空间随会话删除，不留文件。
-POST {{base_url}}/api/workspaces/{{session2_workspace_id}}/uploads?name=smoke-attach.txt
+POST {{base_url}}/api/workspaces/{{yolo_workspace_id}}/uploads?name=smoke-attach.txt
 Content-Type: application/octet-stream
 [Options]
 skip: {{skip_turn_control}}
@@ -290,20 +378,20 @@ attach_size: jsonpath "$.size"
 [Asserts]
 jsonpath "$.size" == 9
 
-# (4) 再 prompt，带上刚上传的附件：exact 202；捕获两个消息 id。不重试。
-POST {{base_url}}/api/sessions/{{session2_id}}/prompt
+# (5) 再 prompt，带上刚上传的附件：exact 202；捕获两个消息 id。不重试。
+POST {{base_url}}/api/sessions/{{yolo_session_id}}/prompt
 Content-Type: application/json
 [Options]
 skip: {{skip_turn_control}}
 {"message":"你好","attachments":["{{attach_path}}"]}
 HTTP 202
 [Captures]
-followup2_user_id: jsonpath "$.userMessageId"
-followup2_assistant_id: jsonpath "$.assistantMessageId"
+yolo_followup_user_id: jsonpath "$.userMessageId"
+yolo_followup_assistant_id: jsonpath "$.assistantMessageId"
 
-# (4) 轮询至 done（≥90s）：正文匹配；历史已有 tool result，本轮无工具调用，故不断言审批与 bash 计数。
+# (5) 轮询至 done（≥90s）：正文匹配；历史已有 tool result，本轮无工具调用，该助手的 approvals 为空数组。
 # 该用户消息带回受理时记下的附件：恰一项，path 与 size 即上传响应的值。
-GET {{base_url}}/api/sessions/{{session2_id}}/messages
+GET {{base_url}}/api/sessions/{{yolo_session_id}}/messages
 [Options]
 skip: {{skip_turn_control}}
 retry: 180
@@ -311,11 +399,12 @@ retry-interval: 500ms
 HTTP 200
 [Asserts]
 jsonpath "$.session.status" == "done"
-jsonpath "$.messages[?(@.id=={{followup2_assistant_id}})].status" == "done"
-jsonpath "$.messages[?(@.id=={{followup2_assistant_id}})].content" matches "{{content_pattern}}"
-jsonpath "$.messages[?(@.id=={{followup2_user_id}})].attachments" count == 1
-jsonpath "$.messages[?(@.id=={{followup2_user_id}})].attachments[0].path" == "{{attach_path}}"
-jsonpath "$.messages[?(@.id=={{followup2_user_id}})].attachments[0].size" == {{attach_size}}
+jsonpath "$.messages[?(@.id=={{yolo_followup_assistant_id}})].status" == "done"
+jsonpath "$.messages[?(@.id=={{yolo_followup_assistant_id}})].content" matches "{{content_pattern}}"
+jsonpath "$.messages[?(@.id=={{yolo_followup_assistant_id}})].approvals" count == 0
+jsonpath "$.messages[?(@.id=={{yolo_followup_user_id}})].attachments" count == 1
+jsonpath "$.messages[?(@.id=={{yolo_followup_user_id}})].attachments[0].path" == "{{attach_path}}"
+jsonpath "$.messages[?(@.id=={{yolo_followup_user_id}})].attachments[0].size" == {{attach_size}}
 
 # 本账号登出：exact 204 + clear cookie。
 POST {{base_url}}/api/auth/logout
@@ -376,6 +465,21 @@ skip: {{skip_turn_control}}
 HTTP 204
 [Asserts]
 body == ""
+
+# 删除 yolo 会话：exact 204；门控同其创建步骤。
+DELETE {{base_url}}/api/sessions/{{yolo_session_id}}
+[Options]
+skip: {{skip_turn_control}}
+HTTP 204
+[Asserts]
+body == ""
+
+# 它的临时空间（连同上传的文件）随之消失：目录树 exact 404 not_found；门控同上。
+GET {{base_url}}/api/workspaces/{{yolo_workspace_id}}/tree
+[Options]
+skip: {{skip_turn_control}}
+HTTP 404
+{"error":{"code":"not_found","message":"请求的资源不存在"}}
 
 # 本账号再次登出：exact 204 + clear cookie。
 POST {{base_url}}/api/auth/logout
