@@ -3,6 +3,9 @@
 # → (1) 绑定创建 201 十四键（三项输入框设置为缺省有效值）+ session.bind 审计 → (2) 未知空间 404 / 多余键 400 且审计不变、无 body 创建 201
 #     带临时空间（列表不含、tree 200 且为空、显式绑定 404）
 # → (3) PATCH title/scene/pinned、多余键 400、列表反映、取消置顶
+# → (3c) 输入框设置：options 逐字 → 档位改 yolo + session.permission 审计（恰新增一条）→ options 缺省档位为 yolo
+#     → 无 body 新建沿用 yolo + 创建审计（from null）→ 非法档位 400 → 改回 write + 审计 → options 复原
+#     → 删除该新建会话 → 其临时空间 tree 404
 # → (4) WORKBUDDY_THINK prompt → 作答唯一 bash 审批 → 仅 messages GET 有界重试至 done
 # → (5) thinking 逐字、bash 步骤 done、标题仍为 PATCH 所设
 # → (6) GET /api/commands 恰两条内建 → /todo 回合：omp 原文、无步骤、无 thinking
@@ -15,6 +18,9 @@
 # 可重跑：工作空间保留供下次采用，自建会话在文件内删除，不留下 live authentication session 与 running 回合。
 # 三项输入框设置的逐键断言只在缺省单模型配置的服务上成立（未设 MODEL_CATALOG / MODEL_ID / MODEL_REASONING，
 # APPROVAL_MAX_MODE 未设或为 write / yolo）。
+# (3c) 只动 zhangsan 的最近选择里的档位一列，并在本遍内改回 write（不动模型与推理强度，lisi 的不碰）。
+# 在 (3c) 的改档位与恢复之间失败的一遍，会把 zhangsan 的最近选择留在 yolo：库若保留，下一遍 (1) 的 approvalMode 断言即判红。
+# 恢复办法：以 zhangsan 对自己的任一会话 PATCH {"approvalMode":"write"}，或换一个新库（连同 SANDBOX_ROOT）。
 # 库与 SANDBOX_ROOT 必须同生命周期：库在而空间目录被清掉时，创建仍成功，但 (4) 的回合会因空间根不存在而失败。
 
 # 成功登录：exact 200 Principal + 合规 session cookie。
@@ -191,6 +197,127 @@ HTTP 200
 jsonpath "$.pinnedAt" == null
 jsonpath "$.title" == "冒烟会话"
 jsonpath "$.scene" == "design"
+
+# (3c) 输入框设置的可选项：exact 200，body 逐字（缺省单模型配置：档位上界 yolo、推理开、上传 524288000 字节 / 10 个；
+# 该账号的最近选择为空或 write）。请求不带 query：路由对任何 `?` 都回 400。
+GET {{base_url}}/api/composer/options
+HTTP 200
+{"approvalModes":["always-ask","write","yolo"],"models":[{"id":"deepseek-v4.1-flash","name":"deepseek-v4.1-flash","reasoning":true,"vision":false,"efforts":["off","minimal","low","medium","high","xhigh","max"],"defaultEffort":"high"}],"defaults":{"approvalMode":"write","modelId":"deepseek-v4.1-flash","reasoningEffort":"high"},"upload":{"maxBytes":524288000,"maxFiles":10}}
+
+# (3c) 改档位：exact 200，恰十四键，approvalMode yolo，title/scene 与另两项设置不变。不重试。
+# 本文件不对非 write 的会话发 prompt：(4) 之前改回 write。
+PATCH {{base_url}}/api/sessions/{{session_id}}
+Content-Type: application/json
+{"approvalMode":"yolo"}
+HTTP 200
+[Asserts]
+jsonpath "$.*" count == 14
+jsonpath "$.id" == "{{session_id}}"
+jsonpath "$.approvalMode" == "yolo"
+jsonpath "$.title" == "冒烟会话"
+jsonpath "$.scene" == "design"
+jsonpath "$.modelId" == "deepseek-v4.1-flash"
+jsonpath "$.reasoningEffort" == "high"
+
+# (3c) 恰新增一条审计：最新为本会话的 session.permission（write → yolo），其前一条仍是 (1) 的 session.bind
+# （(2) 的无 body 创建与 (3) 的 PATCH 都不写审计；非管理员只见自己的事件）。捕获该审计 id。
+GET {{base_url}}/api/audit?limit=2
+HTTP 200
+[Captures]
+perm_audit_id: jsonpath "$.events[0].id"
+[Asserts]
+jsonpath "$.events" count == 2
+jsonpath "$.events[0].kind" == "session.permission"
+jsonpath "$.events[0].title" == "修改权限档位"
+jsonpath "$.events[0].actorId" == "u1"
+jsonpath "$.events[0].workspaceId" == "{{workspace_id}}"
+jsonpath "$.events[0].detail.sessionId" == "{{session_id}}"
+jsonpath "$.events[0].detail.from" == "write"
+jsonpath "$.events[0].detail.to" == "yolo"
+jsonpath "$.events[1].kind" == "session.bind"
+jsonpath "$.events[1].detail.sessionId" == "{{session_id}}"
+
+# (3c) 最近选择已记下：options 的缺省档位随之为 yolo。
+GET {{base_url}}/api/composer/options
+HTTP 200
+[Asserts]
+jsonpath "$.defaults.approvalMode" == "yolo"
+
+# (3c) 无 body 新建的会话沿用最近选择：exact 201，恰十四键，approvalMode yolo，带临时空间；捕获会话 id 与临时空间 id。
+# bodyless：无 Content-Type、无 body；不重试。该会话从不 prompt，本块结束前删除。
+POST {{base_url}}/api/sessions
+HTTP 201
+[Captures]
+composer_id: jsonpath "$.id"
+composer_ws: jsonpath "$.workspaceId"
+[Asserts]
+jsonpath "$.*" count == 14
+jsonpath "$.id" matches "^[0-9a-f]{32}$"
+jsonpath "$.workspaceId" matches "^[0-9a-f]{32}$"
+jsonpath "$.approvalMode" == "yolo"
+jsonpath "$.temporaryWorkspace" == true
+jsonpath "$.scene" == null
+
+# (3c) 继承来的非缺省档在创建时写一条 session.permission（from null → yolo，workspaceId 为其临时空间）；
+# 其前一条是上面那次改档位的审计（临时空间创建不写 workspace.create）。捕获该审计 id。
+GET {{base_url}}/api/audit?limit=2
+HTTP 200
+[Captures]
+create_audit_id: jsonpath "$.events[0].id"
+[Asserts]
+jsonpath "$.events" count == 2
+jsonpath "$.events[0].kind" == "session.permission"
+jsonpath "$.events[0].title" == "修改权限档位"
+jsonpath "$.events[0].actorId" == "u1"
+jsonpath "$.events[0].workspaceId" == "{{composer_ws}}"
+jsonpath "$.events[0].detail.sessionId" == "{{composer_id}}"
+jsonpath "$.events[0].detail.from" == null
+jsonpath "$.events[0].detail.to" == "yolo"
+jsonpath "$.events[1].id" == {{perm_audit_id}}
+
+# (3c) 枚举外的档位：exact 400 bad_request。不重试。
+PATCH {{base_url}}/api/sessions/{{session_id}}
+Content-Type: application/json
+{"approvalMode":"auto"}
+HTTP 400
+{"error":{"code":"bad_request","message":"请求格式不正确"}}
+
+# (3c) 恢复：把档位（连同该账号的最近选择）改回 write：exact 200。不重试。
+PATCH {{base_url}}/api/sessions/{{session_id}}
+Content-Type: application/json
+{"approvalMode":"write"}
+HTTP 200
+[Asserts]
+jsonpath "$.*" count == 14
+jsonpath "$.approvalMode" == "write"
+
+# (3c) 最新审计是这次恢复（yolo → write）；其前一条是创建审计：被拒的 auto 没有写审计。
+GET {{base_url}}/api/audit?limit=2
+HTTP 200
+[Asserts]
+jsonpath "$.events" count == 2
+jsonpath "$.events[0].kind" == "session.permission"
+jsonpath "$.events[0].workspaceId" == "{{workspace_id}}"
+jsonpath "$.events[0].detail.sessionId" == "{{session_id}}"
+jsonpath "$.events[0].detail.from" == "yolo"
+jsonpath "$.events[0].detail.to" == "write"
+jsonpath "$.events[1].id" == {{create_audit_id}}
+
+# (3c) 最近选择已恢复：options 的 body 与本块开头逐字相同（本遍内见证，不留给下一遍）。
+GET {{base_url}}/api/composer/options
+HTTP 200
+{"approvalModes":["always-ask","write","yolo"],"models":[{"id":"deepseek-v4.1-flash","name":"deepseek-v4.1-flash","reasoning":true,"vision":false,"efforts":["off","minimal","low","medium","high","xhigh","max"],"defaultEffort":"high"}],"defaults":{"approvalMode":"write","modelId":"deepseek-v4.1-flash","reasoningEffort":"high"},"upload":{"maxBytes":524288000,"maxFiles":10}}
+
+# (3c) 删除沿用 yolo 的那个会话（从未 prompt、未起进程）：exact 204、空 body。不重试。
+DELETE {{base_url}}/api/sessions/{{composer_id}}
+HTTP 204
+[Asserts]
+body == ""
+
+# (3c) 它的临时空间随之消失：目录树 exact 404 not_found。
+GET {{base_url}}/api/workspaces/{{composer_ws}}/tree
+HTTP 404
+{"error":{"code":"not_found","message":"请求的资源不存在"}}
 
 # (4) 发送含 WORKBUDDY_THINK 标记的 prompt：exact 202；捕获 assistantMessageId。不重试本 POST。
 POST {{base_url}}/api/sessions/{{session_id}}/prompt

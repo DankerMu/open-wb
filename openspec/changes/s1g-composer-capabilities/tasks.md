@@ -630,7 +630,7 @@ Minimal mergeable slice: 17.1 一刀（气泡附件：`message-thread.tsx`，mes
 
 ## 18. harness — 冒烟与走查
 
-- [ ] 18.1 `smoke/session-meta.hurl`：chat-harness delta 列出的 options、档位修改与审计、最近选择继承、非法值 400，以及结束前把最近选择改回 `write`、把本步骤无 body 新建的会话 `DELETE` → 204（它用的是临时空间；C 的「冒烟与走查不留会话与临时空间」）。（`files.hurl` 与 `chat.hurl` 的附件部分已在 11.6、12.5 落下。）
+- [x] 18.1 `smoke/session-meta.hurl`：chat-harness delta 列出的 options、档位修改与审计、最近选择继承、非法值 400，以及结束前把最近选择改回 `write`、把本步骤无 body 新建的会话 `DELETE` → 204（它用的是临时空间；C 的「冒烟与走查不留会话与临时空间」）。（`files.hurl` 与 `chat.hurl` 的附件部分已在 11.6、12.5 落下。）
   **实施注记（18.1，fixture 评审补充，#1038）**：
   - 只改 `smoke/session-meta.hurl`（现 457 行，改后约 560；`scripts/size-guard.sh` 只扫 ts/tsx/py，`scripts/test-ci-harness.sh` 只钉 Makefile 文件序与 AGENTS.md:89，都不读 hurl 内容）。新块「(3c) 输入框设置」插在第 193 行（取消置顶的最后一条断言）之后、第 195 行（(4) 的注释）之前，全程在 zhangsan（`u1`，成员）首次登录态内；(1)–(8) 不重编号，文首第 3–5 行流程注释与第 15–17 行前提同步补写。
   - 载体会话用 `{{session_id}}`（绑定 `smoke-sessions`，审计的 `workspaceId` 可断言为 `{{workspace_id}}`），且在 (4) 的 prompt 之前改回 `write`。本文件不对任何非 `write` 会话发 prompt，不断言进程行为：`supervisor.ts:487` 仍写死 `approvalMode: "write"`，#1009 合入后 (4) 派发时该会话有效档位就是 `write`，审批轮询不变。
