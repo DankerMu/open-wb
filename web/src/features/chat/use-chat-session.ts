@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from "react-router";
 import type { ApiClient } from "../../lib/api.js";
 import type { ChatMessageSnapshot } from "../../lib/session-contract.js";
 import { useAuth } from "../auth/index.js";
+import { useAttachmentsState } from "./attachments-state.js";
 import { composerLocks } from "./composer-locks.js";
 import { useComposerOptions } from "./composer-options.js";
 import { errorMessage, isNotFound, isUnauthorized } from "./errors.js";
@@ -400,6 +401,12 @@ export function useChatSession() {
     listState.client === client && listState.status === "success" ? listState : null;
   const selected = selectedSession(requestedSessionId, listForClient, ownedHistory, historyState);
   const slashWorkspaceId = composerWorkspaceId(requestedSessionId, selected, welcome.workspace);
+  const attachments = useAttachmentsState({
+    client,
+    scopeKey: requestedSessionId,
+    workspaceId: slashWorkspaceId,
+    upload: composerOptions?.upload,
+  });
   const turn = useTurnActions({
     abortMutation,
     clientRef,
@@ -736,6 +743,7 @@ export function useChatSession() {
 
   return {
     answerApproval,
+    attachments,
     client,
     composerDisabled,
     composerOptions,
