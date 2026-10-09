@@ -499,6 +499,7 @@ function optsOf(roots: SpawnRoots, resumePath: string | null, user?: string): Sp
     ownerId: OWNER,
     cwd: roots.cwd,
     modelId: MODEL,
+    approvalMode: "write",
     token: CALLER_TOKEN,
     resumePath,
     ...(user === undefined ? {} : { ompUser: user }),

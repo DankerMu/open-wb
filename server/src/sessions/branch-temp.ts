@@ -83,6 +83,8 @@ export class BranchTemps {
         sessionId: plan.tokenKey,
         ownerId: plan.ownerId,
         cwd: plan.cwd,
+        approvalMode: "write",
+        modelId: this.#ports.config.modelId,
         resumePath: plan.resumePath,
         tokens: temporaryTokens(pool, entry, tokens),
         onExit: () => {

@@ -8,13 +8,16 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parse } from "yaml";
+import { APPROVAL_MODES } from "../src/model-catalog.js";
 import { writeHostOverlay } from "../src/sessions/omp/host-overlay.js";
+import { type SpawnImpl, spawnOmp } from "../src/sessions/omp/process.js";
 import {
   ensureOmpStateLayout,
   ompAgentDir,
   ompHostOverlayPath,
 } from "../src/sessions/omp/state-layout.js";
 import { expectHostOverlay, HOST_OVERLAY_YAML } from "./omp-layout-helpers.js";
+import { FakeChild } from "./support/omp-rpc.js";
 
 let root: string;
 
@@ -83,6 +86,36 @@ describe("writeHostOverlay", () => {
     await writeHostOverlay(state);
     expectHostOverlay(state);
     expect(readdirSync(ompAgentDir(state))).toEqual(["host-overlay.yml"]);
+  });
+
+  it("does not vary with the approval mode: same bytes and the same --config path for all three", async () => {
+    const state = stateDir();
+    ensureOmpStateLayout(state);
+    await writeHostOverlay(state);
+    const configs: unknown[] = [];
+    const spawnImpl: SpawnImpl = (command, args, options) => {
+      configs.push(args[args.indexOf("--config") + 1], options.env?.PI_CONFIG_FILES);
+      return new FakeChild().spawnImpl(command, args, options);
+    };
+    for (const approvalMode of APPROVAL_MODES) {
+      await spawnOmp(
+        {
+          bin: join(root, "omp"),
+          sandboxRoot: join(root, "sandbox"),
+          stateDir: state,
+          ownerId: "u1",
+          cwd: join(root, "sandbox", "u1"),
+          modelId: "m1",
+          approvalMode,
+          token: "t".repeat(64),
+          resumePath: null,
+        },
+        spawnImpl,
+      );
+      expectHostOverlay(state);
+      expect(readdirSync(ompAgentDir(state))).toEqual(["host-overlay.yml"]);
+    }
+    expect(configs).toEqual(Array<string>(6).fill(ompHostOverlayPath(state)));
   });
 
   it("rejects when the managed agent dir is missing and creates nothing", async () => {
