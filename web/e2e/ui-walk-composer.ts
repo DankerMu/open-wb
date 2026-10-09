@@ -6,6 +6,8 @@
 // 第一条 prompt 带 WORKBUDDY_WRITE：`只问命令` 下 write 工具不问，缺省的 bash 轮会弹审批卡；第二条因历史
 // 已有 tool result 是纯文本轮。`finally` 先把账号的最近选择改回 `只问命令`（两个 project 共用一个库，第 2
 // 步中途失败会把 `全部自动` 留给下一个 project 的审批走查），再删除会话。上传的文件留在 `smoke-fixture/uploads/`。
+// 删除之前页面先回到 `/`：服务端删会话时结束它的事件流，还停在该会话上的页面会在 EventSource 的缺省延迟后
+// 重连并拿到 404，error oracle 把它记成意外的 console error。
 
 import { randomUUID } from "node:crypto";
 import { expect, type Locator, type Page, type Request } from "@playwright/test";
@@ -209,10 +211,10 @@ function countPatches(page: Page, sessionId: string): PatchCount {
   return { count: () => seen, stop: () => page.off("request", onRequest) };
 }
 
-// 权限菜单里选一档。单选项的可访问名是界面名加说明，按界面名开头匹配。
-async function pickTier(page: Page, from: string, to: string): Promise<void> {
+// 权限菜单里选一档。单选项的可访问名是界面名加说明，`to` 按界面名开头匹配。
+async function pickTier(page: Page, from: string, to: RegExp): Promise<void> {
   await tierButton(page, from).click();
-  await page.getByRole("menuitemradio", { name: new RegExp(`^${to}`, "u") }).click();
+  await page.getByRole("menuitemradio", { name: to }).click();
 }
 
 // 第 2 步：`全部自动` 先确认——`取消` 不提交，`确认切换` 才提交，按钮转为警示色；选回 `只问命令` 不经确认。
@@ -221,14 +223,14 @@ async function stepTier(page: Page, patches: PatchCount): Promise<void> {
   const dialog = page.getByRole("alertdialog");
   const title = dialog.getByRole("heading", { name: "切换到全部自动？", exact: true });
 
-  await pickTier(page, "只问命令", "全部自动");
+  await pickTier(page, "只问命令", /^全部自动/u);
   await expect(title).toBeVisible();
   await dialog.getByRole("button", { name: "取消", exact: true }).click();
   await expect(dialog).toHaveCount(0);
   await expect(tierButton(page, "只问命令")).toBeVisible();
   expect(patches.count(), "取消 sends no PATCH").toBe(0);
 
-  await pickTier(page, "只问命令", "全部自动");
+  await pickTier(page, "只问命令", /^全部自动/u);
   await expect(title).toBeVisible();
   await dialog.getByRole("button", { name: "确认切换", exact: true }).click();
   const warned = tierButton(page, "全部自动");
@@ -240,7 +242,7 @@ async function stepTier(page: Page, patches: PatchCount): Promise<void> {
     .poll(() => warned.evaluate((el) => getComputedStyle(el).color), "全部自动 text colour")
     .toBe(warning);
 
-  await pickTier(page, "全部自动", "只问命令");
+  await pickTier(page, "全部自动", /^只问命令/u);
   await expect(tierButton(page, "只问命令")).toBeVisible();
   await expect(dialog).toHaveCount(0);
   expect(patches.count(), "one PATCH to 全部自动, one back to 只问命令").toBe(2);
@@ -308,9 +310,17 @@ async function stepAttachment(page: Page, project: WalkProject, reply: string): 
   await expectBubbleAttachment(page, name);
 }
 
-// `finally` 里调用：只产生 soft 失败。先把最近选择改回 `只问命令`（200；会话已不在时 404），再删除会话。
+// `finally` 里调用：只产生 soft 失败。先离开会话页（只等欢迎态标题，不读欢迎态的三个控件——#1269），
+// 再把最近选择改回 `只问命令`（200；会话已不在时 404），最后删除会话。离开失败不挡后两步：它们走
+// `page.request`，不依赖页面。
 async function resetTierAndDelete(page: Page, sessionId: string | null): Promise<void> {
   if (sessionId === null) return;
+  try {
+    await page.goto("/");
+    await expect(welcomeHeading(page)).toBeVisible();
+  } catch (error) {
+    expect.soft(String(error), "cleanup: return to the welcome page failed").toBe("");
+  }
   try {
     const reset = await page.request.patch(`/api/sessions/${sessionId}`, {
       data: { approvalMode: "write" },
