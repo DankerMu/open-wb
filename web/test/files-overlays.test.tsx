@@ -130,7 +130,7 @@ describe("files creation overlays focus loop", () => {
 
     await openDirectoryDialog();
     await yieldMacrotask();
-    const overlay = document.querySelector(".ui-dialog-overlay");
+    const overlay = document.querySelector('[data-slot="dialog-overlay"]');
     if (!overlay) throw new Error("expected the dialog overlay");
     pressPointer(overlay);
     await dialogGone("新建文件夹");
@@ -205,7 +205,7 @@ describe("files creation overlays focus loop", () => {
     expect(posts(fetchMock, DIRS_PATH)).toHaveLength(1);
 
     await yieldMacrotask();
-    const overlay = document.querySelector(".ui-dialog-overlay");
+    const overlay = document.querySelector('[data-slot="dialog-overlay"]');
     if (!overlay) throw new Error("expected the dialog overlay");
     pressPointer(overlay);
     await dialogGone("新建文件夹");
@@ -214,11 +214,55 @@ describe("files creation overlays focus loop", () => {
     await focusedOn(menuTrigger);
     expect(posts(fetchMock, DIRS_PATH)).toHaveLength(1);
   });
+
+  it("O10 leaves focus on 工作空间名称 when a create is submitted from the field", async () => {
+    const held = deferredResponse();
+    renderWorkspace({ "/api/workspaces": workspaceRoute([workspace], () => held.promise) });
+    await screen.findByRole("button", { name: "新建" });
+
+    const dialog = await openWorkspaceDialogFromMenu();
+    const name = within(dialog).getByLabelText("工作空间名称") as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "挂起" } });
+    await yieldMacrotask();
+    expect(document.activeElement).toBe(name);
+    const form = name.closest("form");
+    if (!form) throw new Error("expected the creation form");
+    fireEvent.submit(form);
+    const create = within(dialog).getByRole("button", { name: "创建" }) as HTMLButtonElement;
+    await waitFor(() => expect(create.disabled).toBe(true));
+    expect(document.activeElement).toBe(name);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    await dialogGone("新建工作空间");
+  });
+
+  it("O11 moves focus to 关闭 when a folder create starts with focus already lost to body", async () => {
+    const held = deferredResponse();
+    renderWorkspace({ [DIRS_PATH]: () => held.promise });
+    await screen.findByRole("button", { name: "新建" });
+
+    const dialog = await openDirectoryDialog();
+    const name = within(dialog).getByLabelText("文件夹名称") as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "held" } });
+    await yieldMacrotask();
+    (document.activeElement as HTMLElement).blur();
+    expect(document.activeElement).toBe(document.body);
+    const form = name.closest("form");
+    if (!form) throw new Error("expected the creation form");
+    fireEvent.submit(form);
+    const create = within(dialog).getByRole("button", { name: "创建" }) as HTMLButtonElement;
+    await waitFor(() => expect(create.disabled).toBe(true));
+    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "关闭" }));
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    await dialogGone("新建文件夹");
+  });
 });
 
 describe("files buttons render through the Button primitive", () => {
   it("O8 styles 新建, ＋ 新建工作空间, 取消 and 创建 as ui-btn variants", async () => {
-    renderWorkspace();
+    const held = deferredResponse();
+    renderWorkspace({ "/api/workspaces": workspaceRoute([workspace], () => held.promise) });
     const menuTrigger = await screen.findByRole("button", { name: "新建" });
     expect(menuTrigger.className).toBe("ui-btn ui-btn--secondary ui-btn--md");
 
@@ -229,12 +273,21 @@ describe("files buttons render through the Button primitive", () => {
 
     fireEvent.click(newWorkspace);
     const dialog = await screen.findByRole("dialog", { name: "新建工作空间" });
-    expect(within(dialog).getByRole("button", { name: "取消" }).className).toBe(
-      "ui-btn ui-btn--secondary ui-btn--md",
-    );
+    const cancel = within(dialog).getByRole("button", { name: "取消" }) as HTMLButtonElement;
+    expect(cancel.className).not.toContain("ui-btn");
+    expect(cancel.type).toBe("button");
     const create = within(dialog).getByRole("button", { name: "创建" }) as HTMLButtonElement;
-    expect(create.className).toBe("ui-btn ui-btn--primary ui-btn--md");
+    expect(create.className).not.toContain("ui-btn");
     expect(create.type).toBe("submit");
+    expect(create.disabled).toBe(false);
+
+    // 请求挂起期间 `创建` 禁用；`取消` 仍可用，点它即中止等待。
+    fireEvent.change(within(dialog).getByLabelText("工作空间名称"), { target: { value: "挂起" } });
+    fireEvent.click(create);
+    await waitFor(() => expect(create.disabled).toBe(true));
+    expect(cancel.disabled).toBe(false);
+    fireEvent.click(cancel);
+    await dialogGone("新建工作空间");
   });
 });
 
@@ -254,7 +307,7 @@ describe("files overlays come only from primitives", () => {
     const primitiveImport = (names: string) =>
       new RegExp(`import \\{ ${names} \\} from "\\.\\./\\.\\./ui/index\\.js";`);
     expect(readRepoFile("web/src/features/files/dialogs.tsx")).toMatch(
-      primitiveImport("Button, Dialog, Menu"),
+      primitiveImport("useEscapeFallback"),
     );
     expect(readRepoFile("web/src/features/files/page.tsx")).toMatch(
       primitiveImport("Button, EmptyState, Icon, Popover"),

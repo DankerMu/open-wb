@@ -86,6 +86,7 @@ const MIGRATED_AREAS: string[] = [
   "web/src/features/chat/welcome-options.ts",
   "web/src/features/chat/welcome.tsx",
   "web/src/features/chat/workspace-list.ts",
+  "web/src/features/files/dialogs.tsx",
   "web/src/features/files/preview.tsx",
 ];
 const MIGRATED_ALLOWED_IMPORTS = ["Icon", "IconName", "BrandMark", "useEscapeFallback"];
@@ -414,6 +415,7 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
       "web/src/features/chat/welcome-options.ts",
       "web/src/features/chat/welcome.tsx",
       "web/src/features/chat/workspace-list.ts",
+      "web/src/features/files/dialogs.tsx",
       "web/src/features/files/preview.tsx",
     ]);
     expect(MIGRATED_AREAS).not.toContain("web/src/features/chat");
