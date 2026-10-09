@@ -875,9 +875,9 @@ Minimal mergeable slice: 17.1 一刀（气泡附件：`message-thread.tsx`，mes
   - 进程与其它 job：峰值存活进程 3 个（首会话、第二会话、yolo 会话；fork 只用临时进程），上限缺省 16（`agent-config.ts:17`），CI 不设 `OMP_MAX_PROCESSES` / `APPROVAL_MAX_MODE`；三个会话都在文件内 DELETE，进程随之退役。uid-isolation 以 `OMP_USER=omp` 再跑同一遍（`ci-uid-isolation.sh:297`），机制与既有回合相同。ui-walk 独立 `DB_PATH`，不受影响。
   - 变异（均为预测，未运行）。判红：spawn 的档位写死 `write`（`supervisor.ts:489` 或 `process.ts:100-101`）→ 步骤 c 的 `approvals count == 0`（60 秒自动允许后回合仍 done，但留一条审批，90 秒重试耗尽，不是 done 超时）；创建不落 `approval_mode` 列 → 步骤 a 的 `approvalMode`；PATCH 不调 `saveComposerPrefs` → 步骤 b 的 options；prompt 不落附件 → 步骤 d 的三条；DELETE 不删行 → 步骤 e。
   - 保持绿（如实写进 PR）：创建审计去掉、封顶夹取、#1009 的「档位不同则重启」（yolo 会话首次派发就是新进程，本文件不换档后再发）。「全程无审批」的完整证据是官方对照用例，冒烟只是旁证。
-- [ ] 18.3 ui-walk：新 helper 文件 `web/e2e/ui-walk-composer.ts`，实现 chat-harness delta 的五个步骤，helper 在包住步骤的 `finally` 里删除它创建的会话（204 或 404 均接受）；由 `web/e2e/ui-walk.spec.ts`（594 行）调用。`ui-walk-sessions.spec.ts` 与 `ui-walk-layout.ts` 不加行。两种视口下通过；error oracle 生效。
+- [x] 18.3 ui-walk：新 helper 文件 `web/e2e/ui-walk-composer.ts`，实现 chat-harness delta 的五个步骤，helper 在包住步骤的 `finally` 里删除它创建的会话（204 或 404 均接受）；由 `web/e2e/ui-walk.spec.ts`（594 行）调用。`ui-walk-sessions.spec.ts` 与 `ui-walk-layout.ts` 不加行。两种视口下通过；error oracle 生效。
   实施注记见 `implementation-notes.md`「18.3、18.4（#1040）」。
-- [ ] 18.4 判红证据：按 chat-harness delta「走查对旧实现判红」，本地临时去掉确认框与附件标签渲染各跑一次走查，记录第 2、4 步失败的输出到 PR 描述（不提交这两处临时改动）。
+- [x] 18.4 判红证据：按 chat-harness delta「走查对旧实现判红」，本地临时去掉确认框与附件标签渲染各跑一次走查，记录第 2、4 步失败的输出到 PR 描述（不提交这两处临时改动）。
 - [x] 18.5 `IMPLEMENTATION_PLAN.md` S1g 的 Verify 三条对照：各档位下审批是否出现（组 1 的对照用例 + 18.2）；上传的越界 / 超限全拒且入审计（组 11 + 11.6）；双账号互不可见（11.2、12.3、8.3 的隔离用例 + 11.6）。在 Epic 里逐条贴出对应的测试名与最近一次 CI 运行。
 
 Suggested fixture level: compact - 只加真栈断言与走查步骤；发现产品缺陷则停下报告，不在本组修
