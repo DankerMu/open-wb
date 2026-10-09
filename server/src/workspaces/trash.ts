@@ -9,15 +9,20 @@
  * symlink), owned by this process's euid, with no group or other permission bit. A level that fails
  * is skipped as it is: not read, not removed, not chmod'ed. The sweep touches nothing but expired
  * batch directories, creates nothing, and never rejects: whatever fails is left for the next round.
- * Residual: the checks and the `rm` go by path (Node has no `*at` calls). Each level is resolved by
- * path again after its check, for the `readdir` or the `rm`, and the recursion inside `rm` goes by
- * path too, so nothing here is atomic. What closes the practical attack is that every level has to
- * be a 0700 directory of this uid: the app creates none on the workspace side, and the omp uid can
- * neither create one nor write into one, so it has nothing to rename into place of a level and
- * cannot reach below one by path. What remains is a process that can already write inside a 0700
- * directory owned by the app uid — another process of this uid, or one that still holds a handle
- * (an open descriptor, a working directory) on a directory that was moved into a batch. The
- * content of a batch is not checked, and against such a process the sweep guarantees nothing.
+ * Residual, not closed here (issue #1286 — settle it before anything schedules this sweep): the
+ * checks and the `rm` go by path (Node has no `*at` calls). Each level is resolved by path again
+ * after its check, and the recursion inside `rm` goes by path too, so nothing here is atomic. The
+ * per-level check stops a level from being replaced by a directory the omp uid can write: every
+ * level has to be a 0700 directory of this uid, and the app creates none on the workspace side.
+ * It does not tie the walk to the real `.trash`. `SANDBOX_ROOT` is group-writable without the
+ * sticky bit, so after `.trash` has passed its check the omp uid can put a symlink in its place,
+ * and every later path goes through that link. The three levels below then pass wherever the link
+ * points at a tree of this uid's 0700 directories — the snapshot store has that shape, with its
+ * last level named after a top-level workspace directory, a name the omp uid chooses. Winning that
+ * one window lets the sweep remove a directory outside `.trash`, so the batch-name pattern is not a
+ * security boundary either. Separately, the content of a batch is not checked: a process that still
+ * holds a handle (an open descriptor, a working directory) on a directory that was moved into a
+ * batch can swap links inside it under the recursion.
  */
 import { lstat, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
