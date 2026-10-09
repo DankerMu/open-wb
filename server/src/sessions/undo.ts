@@ -3,7 +3,8 @@
  * message-undo「撤回 REST」「对话原地回退」「文件还原与结果」): `POST /api/sessions/:id/undo` and its
  * orchestration. `files:"keep"` rewinds the conversation and leaves the workspace as it is;
  * `restore` / `force` also put the workspace back to the message's snapshot (#952), after two more
- * prechecks. Once committed, the snapshot directories of the removed messages are deleted (#953).
+ * prechecks. Once committed, the snapshot directories of the removed messages are deleted (#953),
+ * and the 200 hands back the undone message's attachments that are still there (#1020).
  *
  * It is fork's process policy applied to the session itself: with the session's control claim
  * held, the session's own process is retired, a temporary process (pool admitted, never a slot or a
@@ -21,10 +22,12 @@
  * Used inside `sessions/` only.
  */
 import { randomBytes } from "node:crypto";
+import { lstatSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance } from "fastify";
 import { emit } from "../core/audit/index.js";
 import { HttpError } from "../core/errors/index.js";
+import { resolve } from "../core/sandbox/resolve.js";
 import { type Branched, BranchTemps, type StoredUser } from "./branch-temp.js";
 import { effectiveOf, type RawComposer } from "./composer-align.js";
 import type { SessionListNotifier } from "./list-events.js";
@@ -34,9 +37,11 @@ import {
   requireOwnedSession,
   requirePlainRecord,
   type SessionSupervisorPort,
+  toPublicAttachment,
   toPublicSession,
 } from "./rest.js";
 import type { SessionMessageTree, SessionStore } from "./store.js";
+import type { StoredAttachment } from "./store-attachments.js";
 import {
   commitUndo,
   listSessionTurnSnapshots,
@@ -76,8 +81,15 @@ export interface UndoRequest {
   commit(input: Pick<UndoCommit, "expectedLastAssistantId" | "ompSessionFile">): void;
 }
 
-/** The session as the commit left it, and the undone message's stored content. */
-export type UndoResult = { session: SessionMessageTree["session"]; draft: string };
+/**
+ * The session as the commit left it, the undone message's stored content, and those of its stored
+ * attachments that are still a regular file inside the workspace.
+ */
+export type UndoResult = {
+  session: SessionMessageTree["session"];
+  draft: string;
+  attachments: StoredAttachment[];
+};
 
 /** The fork ports this needs: the temporary process's, the store, the cwd and the retirement. */
 type UndoPorts = ConstructorParameters<typeof BranchTemps>[0] & {
@@ -94,6 +106,8 @@ type UndoPorts = ConstructorParameters<typeof BranchTemps>[0] & {
 interface UndoPlan {
   /** The undone message's stored content, and the session's user messages in order to align it. */
   text: string;
+  /** The undone message's stored attachments (#1020), read with `text`: the commit deletes the row. */
+  stored: StoredAttachment[];
   users: readonly StoredUser[];
   /** Message id → the attachment paths it stores (#1018), read with `users`. */
   attachments: ReadonlyMap<number, readonly string[]>;
@@ -168,6 +182,7 @@ export class Undos {
     const assistant = tree.messages.findLast((message) => message.role === "assistant");
     return {
       text: user.content,
+      stored: user.attachments,
       users,
       attachments,
       expectedLastAssistantId: assistant?.id ?? null,
@@ -222,7 +237,40 @@ export class Undos {
     }
     // The stored content, not the branch text: an escaped entry carries the wire-side space, and
     // the entry of a message with attachments their suffix.
-    return { session: tree.session, draft: plan.text };
+    return { session: tree.session, draft: plan.text, attachments: this.#surviving(request, plan) };
+  }
+
+  /**
+   * Those of the undone message's stored attachments that are a regular file inside the workspace
+   * now, the restore (if any) and the commit behind it; stored order, stored sizes. The root is
+   * resolved again rather than taken from before the temporary process: `resolve` canonicalises
+   * whatever it is given. Never throws and writes no audit — a root that cannot be had is no
+   * attachment at all.
+   */
+  #surviving(request: UndoRequest, plan: UndoPlan): StoredAttachment[] {
+    if (plan.workspaceId === null) {
+      return [];
+    }
+    try {
+      const root = this.#ports.cwdOf(request.ownerId, plan.workspaceId);
+      return plan.stored.filter(({ path }) => isRegularFile(root, path));
+    } catch {
+      return [];
+    }
+  }
+}
+
+/**
+ * Whether `path` under `root` is a regular file reached through no link. The pure sandbox
+ * resolution, not the facade: a refusal here is not a `sandbox.reject` and not a 403, the item is
+ * simply not handed back. Metadata only; anything that throws reads as not there.
+ */
+function isRegularFile(root: string, path: string): boolean {
+  try {
+    const resolved = resolve(root, path, "read");
+    return resolved.ok && lstatSync(resolved.absPath, { throwIfNoEntry: false })?.isFile() === true;
+  } catch {
+    return false;
   }
 }
 
@@ -279,7 +327,8 @@ function restoredFiles({ restored, removed, skipped, failed }: RestoreOutcome) {
 /**
  * `POST /api/sessions/:id/undo`: owner checked before the body is parsed, an exact
  * `{messageId, files}` body, the prechecks and the orchestration in `supervisor.undo`, then the
- * removed messages' snapshot directories, the two list events and 200 `{session, draft, files}`.
+ * removed messages' snapshot directories, the two list events and 200
+ * `{session, draft, files, attachments}`.
  */
 export function registerUndoRoute(app: FastifyInstance, dependencies: UndoRouteDependencies): void {
   const { db, listEvents, turnSnapshots } = dependencies;
@@ -351,6 +400,7 @@ export function registerUndoRoute(app: FastifyInstance, dependencies: UndoRouteD
         session: toPublicSession(result.session),
         draft: result.draft,
         files: outcome === undefined ? KEPT_FILES : restoredFiles(outcome),
+        attachments: result.attachments.map(toPublicAttachment),
       });
     },
   );

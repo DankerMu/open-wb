@@ -6,12 +6,19 @@
  * requested over REST on the production assembly; the entry list is the scripted child's. The
  * scripted `branch` always answers QUESTION: a `draft` that is anything else is the stored text.
  *
- * The `attachments` key of the undo response is #1020's: the body here is still exactly
- * `{session, draft, files}`.
+ * Issue #1020 the attachments an undo hands back (task 12.6; spec message-undo「撤回 REST」
+ * 「响应带回仍存在的附件」): the 200 is exactly `{session, draft, files, attachments}`, and
+ * `attachments` is what the undone message stored, less the items that are no longer a regular
+ * file inside the workspace once the undo (and its restore) is done. The second describe admits
+ * its messages over the real prompt route, in a real workspace directory with real snapshots.
  */
-import { describe, expect, it } from "vitest";
+import { mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { settle } from "./session-approval-helpers.js";
 import { expectEnvelope } from "./session-bodyless-rest-helpers.js";
 import {
+  A_PDF,
   A_PDF_STORED,
   A_PDF_SUFFIX,
   attach,
@@ -20,8 +27,18 @@ import {
   messagesOf,
   openForkScripted,
 } from "./session-fork-helpers.js";
-import { held, QUESTION, scriptedAt, types } from "./session-regenerate-helpers.js";
-import { AGENT_UNAVAILABLE_ENVELOPE } from "./session-rest-helpers.js";
+import { count, held, QUESTION, scriptedAt, types } from "./session-regenerate-helpers.js";
+import { AGENT_UNAVAILABLE_ENVELOPE, postPrompt } from "./session-rest-helpers.js";
+import { waitForTurn } from "./session-supervisor-helpers.js";
+import {
+  at,
+  type FilesWorld,
+  openFilesWorld,
+  put,
+  restoredBy,
+  turnAt,
+  undoWith,
+} from "./session-undo-files-helpers.js";
 import { observed, postUndo, seedUndoable, undone } from "./session-undo-helpers.js";
 
 const worlds = forkWorlds();
@@ -45,7 +62,7 @@ async function attached(u1Entry: string, content?: string) {
 }
 
 /** The entry ids the n-th spawned process was asked to branch to. */
-function branchedTo(world: Awaited<ReturnType<typeof attached>>["world"], index: number) {
+function branchedTo(world: Pick<FilesWorld, "scripted">, index: number) {
   return scriptedAt(world.scripted, index)
     .frames.filter((frame) => frame.type === "branch")
     .map((frame) => frame.entryId);
@@ -116,4 +133,161 @@ describe("undo alignment of messages with attachments (#1018)", () => {
       seeded.unchanged();
     },
   );
+});
+
+const B_PNG = { path: "uploads/b.png", size: 1 };
+/** The suffix omp was given for both paths, spelled out as `A_PDF_SUFFIX` is. */
+const BOTH_SUFFIX = `${A_PDF_SUFFIX}\n- uploads/b.png`;
+
+/**
+ * u1 (FIRST, no attachment) → a1 → u2 (`message` with `paths`) → a2 over the real prompt route,
+ * both undoable; `uploads/a.pdf` (3 bytes) and `uploads/b.png` (1 byte) are there before either
+ * turn, so u2's snapshot holds both. Spawns: 0 the session's process, 1 the undo's temporary one,
+ * which lists FIRST and then `u2Entry`.
+ */
+async function admitted(message: string, paths: string[], u2Entry: string) {
+  const world = await openFilesWorld(worlds, [
+    {},
+    {
+      messages: [
+        { entryId: "e-1", text: FIRST },
+        { entryId: "e-2", text: u2Entry },
+      ],
+    },
+  ]);
+  put(world, A_PDF.path, "pdf");
+  put(world, B_PNG.path, "p");
+  const u1 = await turnAt(world, 10, FIRST);
+  at(20);
+  const payload = JSON.stringify({ message, attachments: paths });
+  const response = await postPrompt(world.fixture.app, world.session, world.cookie, payload);
+  expect([response.statusCode, response.json()]).toEqual([
+    202,
+    expect.objectContaining({ undo: "available" }),
+  ]);
+  await waitForTurn(world.fixture, world.session, "done");
+  await settle();
+  at(30);
+  return { world, u1, u2: (response.json() as { userMessageId: number }).userMessageId };
+}
+
+/** u2 is `QUESTION` with both files attached. */
+function withBoth() {
+  return admitted(QUESTION, [A_PDF.path, B_PNG.path], `${QUESTION}${BOTH_SUFFIX}`);
+}
+
+function rejections(world: FilesWorld): number {
+  const sql = "SELECT COUNT(*) AS count FROM audit_events WHERE kind = 'sandbox.reject'";
+  return count(world.fixture.db, sql);
+}
+
+describe("the attachments an undo hands back (#1020)", () => {
+  beforeEach(() => {
+    // `Date` alone: the bare form would also freeze the timers the scripted runtime runs on.
+    vi.useFakeTimers({ toFake: ["Date"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("响应带回仍存在的附件 keep: a deleted file is left out, a rewritten one keeps its stored size", async () => {
+    const { world, u2 } = await withBoth();
+    rmSync(join(world.root, B_PNG.path));
+    put(world, A_PDF.path, "no longer three bytes");
+
+    const body = undone(await undoWith(world, u2, "keep"));
+
+    expect(body.attachments).toEqual([A_PDF]);
+    expect(body.draft).toBe(QUESTION);
+    expect(rejections(world)).toBe(0);
+  });
+
+  it("响应带回仍存在的附件 restore: the file the restore put back is handed back, in stored order", async () => {
+    const { world, u2 } = await withBoth();
+    rmSync(join(world.root, B_PNG.path));
+
+    const body = restoredBy(await undoWith(world, u2, "restore"));
+
+    expect(body.attachments).toEqual([A_PDF, B_PNG]);
+    expect(body.files.restored).toBe(1);
+    expect(rejections(world)).toBe(0);
+  });
+
+  it("响应带回仍存在的附件: a message stored without attachments hands back []", async () => {
+    const { world, u1 } = await withBoth();
+
+    const body = undone(await undoWith(world, u1, "keep"));
+
+    expect(body.attachments).toEqual([]);
+    expect(branchedTo(world, 1)).toEqual(["e-1"]);
+    expect(rejections(world)).toBe(0);
+  });
+
+  it("响应带回仍存在的附件: a file swapped for a link to a real file outside is left out", async () => {
+    const { world, u2 } = await withBoth();
+    const outside = join(world.root, "..", "outside-1020.pdf");
+    writeFileSync(outside, "pdf");
+    rmSync(join(world.root, A_PDF.path));
+    symlinkSync(outside, join(world.root, A_PDF.path));
+
+    const body = undone(await undoWith(world, u2, "keep"));
+
+    expect(body.attachments).toEqual([B_PNG]);
+    expect(rejections(world)).toBe(0);
+  });
+
+  it("a directory on the way swapped for a link to itself: nothing under it is handed back", async () => {
+    const { world, u2 } = await withBoth();
+    renameSync(join(world.root, "uploads"), join(world.root, "moved"));
+    symlinkSync(join(world.root, "moved"), join(world.root, "uploads"), "dir");
+
+    const body = undone(await undoWith(world, u2, "keep"));
+
+    expect(body.attachments).toEqual([]);
+    expect(rejections(world)).toBe(0);
+  });
+
+  it("a file swapped for a directory of its name is left out", async () => {
+    const { world, u2 } = await withBoth();
+    rmSync(join(world.root, A_PDF.path));
+    mkdirSync(join(world.root, A_PDF.path));
+
+    const body = undone(await undoWith(world, u2, "keep"));
+
+    expect(body.attachments).toEqual([B_PNG]);
+    expect(rejections(world)).toBe(0);
+  });
+
+  it("a name only a read may carry (a backslash) is handed back: the resolution is a read", async () => {
+    const name = { path: "uploads/a\\b.pdf", size: 2 };
+    const entry = A_PDF_SUFFIX.replace(A_PDF.path, name.path);
+    const world = await openFilesWorld(worlds, [
+      {},
+      { messages: [{ entryId: "e-1", text: entry }] },
+    ]);
+    put(world, name.path, "ab");
+    at(10);
+    const payload = JSON.stringify({ message: "", attachments: [name.path] });
+    const response = await postPrompt(world.fixture.app, world.session, world.cookie, payload);
+    expect(response.statusCode).toBe(202);
+    await waitForTurn(world.fixture, world.session, "done");
+    await settle();
+    const u1 = (response.json() as { userMessageId: number }).userMessageId;
+
+    const body = undone(await undoWith(world, u1, "keep"));
+
+    expect(body.attachments).toEqual([name]);
+    expect(rejections(world)).toBe(0);
+  });
+
+  it("只有附件的消息: draft is the empty string, the attachment is handed back, the suffix entry aligned", async () => {
+    const { world, u2 } = await admitted("", [A_PDF.path], A_PDF_SUFFIX);
+
+    const body = undone(await undoWith(world, u2, "keep"));
+
+    expect(body.draft).toBe("");
+    expect(body.attachments).toEqual([A_PDF]);
+    expect(branchedTo(world, 1)).toEqual(["e-2"]);
+    expect(rejections(world)).toBe(0);
+  });
 });

@@ -66,6 +66,7 @@ export interface UndoBody {
   session: Record<string, unknown> & { id: string; status: string; title: string | null };
   draft: string;
   files: unknown;
+  attachments: unknown;
 }
 
 interface UndoHistory {
@@ -89,11 +90,11 @@ export function postUndo(
   return postSessionAction(world.fixture.app, "undo", session, world.cookie, body);
 }
 
-/** A 200 with no-store whose body is exactly `{session:<fourteen keys>, draft, files}`. */
+/** A 200 with no-store whose body is exactly `{session:<fourteen keys>, draft, files, attachments}`. */
 export function undoneWithFiles(response: LightMyRequestResponse): UndoBody {
   expect([response.statusCode, response.headers["cache-control"]]).toEqual([200, "no-store"]);
   const body = response.json() as UndoBody;
-  expect(Object.keys(body)).toEqual(["session", "draft", "files"]);
+  expect(Object.keys(body)).toEqual(["session", "draft", "files", "attachments"]);
   expect(Object.keys(body.session)).toEqual(SESSION_VIEW_KEYS);
   return body;
 }
