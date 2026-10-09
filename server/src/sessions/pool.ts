@@ -175,7 +175,7 @@ export class ReadmissionRequired extends Error {
 
 type PerRuntime = Pick<
   SessionRuntimeOpts,
-  "sessionId" | "ownerId" | "cwd" | "tokens" | "onApproval"
+  "sessionId" | "ownerId" | "cwd" | "modelId" | "approvalMode" | "tokens" | "onApproval"
 > & {
   resumePath: string | null;
   onExit: () => void;
@@ -197,7 +197,8 @@ export function sessionRuntimeOpts(
     stateDir: base.stateDir,
     ownerId: per.ownerId,
     cwd: per.cwd,
-    modelId: base.modelId,
+    modelId: per.modelId,
+    approvalMode: per.approvalMode,
     tokens: per.tokens,
     resumePath: per.resumePath,
     onExit: per.onExit,

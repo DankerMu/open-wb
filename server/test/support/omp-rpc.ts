@@ -72,6 +72,7 @@ export class RpcHarness {
       ownerId: "u1",
       cwd: join(root, "sandbox", "u1"),
       modelId: "deepseek-v4.1-flash",
+      approvalMode: "write",
       token,
       resumePath: null,
     };

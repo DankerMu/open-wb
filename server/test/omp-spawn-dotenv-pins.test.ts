@@ -68,6 +68,7 @@ async function capture(ompUser?: string): Promise<Captured> {
       ownerId: OWNER,
       cwd: join(root, "sandbox", OWNER),
       modelId: "deepseek-v4.1-flash",
+      approvalMode: "write",
       token: TOKEN,
       resumePath: null,
       ...(ompUser === undefined ? {} : { ompUser }),

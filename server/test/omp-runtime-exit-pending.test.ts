@@ -98,6 +98,7 @@ function openReal(options: RealOptions = {}): RealWorld {
   };
   world.runtime = new SessionRuntime({
     ...real.runtime,
+    approvalMode: "write",
     ...(options.bin === undefined ? {} : { bin: options.bin }),
     sessionId: SESSION_ID,
     ownerId: "u1",

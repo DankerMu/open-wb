@@ -37,8 +37,8 @@ export interface OfficialDirs {
 /** What one runtime of the world is started with; every key defaults to what production does. */
 interface OfficialRuntimeOptions {
   /**
-   * Rewrites the argv `spawnOmp` builds: the `--approval-mode` value, and with `hostOverlay: false`
-   * the overlay is dropped from both of its sources (argv `--config` and env `PI_CONFIG_FILES`).
+   * `approvalMode` is the runtime's own (`write` when absent); with `hostOverlay: false` the
+   * overlay is dropped from both of its sources (argv `--config` and env `PI_CONFIG_FILES`).
    */
   spawnArgs?: { approvalMode?: "always-ask" | "write" | "yolo"; hostOverlay?: boolean };
   /** The answer to an approval request; deny when absent, so nothing is executed. */
@@ -90,23 +90,16 @@ function officialBin(): string {
 }
 
 /**
- * Test-only spawn wrapper: the product argv pins `--approval-mode write` and the overlay until the
- * tier reaches `spawnOmp` (s1g task 7.1, #1000, deletes this wrapper).
+ * Test-only spawn wrapper for the negative contrast: the product has no spawn without the overlay,
+ * so this drops it from the argv `spawnOmp` built and from the env.
  */
-function rewritingSpawn(rewrite: NonNullable<OfficialRuntimeOptions["spawnArgs"]>): SpawnImpl {
-  return (command, args, options) => {
-    const argv = [...args];
-    const env = { ...options.env };
-    if (rewrite.approvalMode !== undefined) {
-      argv[argv.indexOf("--approval-mode") + 1] = rewrite.approvalMode;
-    }
-    if (rewrite.hostOverlay === false) {
-      argv.splice(argv.indexOf("--config"), 2);
-      delete env.PI_CONFIG_FILES;
-    }
-    return (spawn as SpawnImpl)(command, argv, { ...options, env });
-  };
-}
+const rewritingSpawn: SpawnImpl = (command, args, options) => {
+  const argv = [...args];
+  const env = { ...options.env };
+  argv.splice(argv.indexOf("--config"), 2);
+  delete env.PI_CONFIG_FILES;
+  return (spawn as SpawnImpl)(command, argv, { ...options, env });
+};
 
 /** Headers of one hop only, and the length the forwarder recomputes. */
 const HOP_HEADERS = new Set(["host", "connection", "content-length", "transfer-encoding"]);
@@ -253,11 +246,10 @@ export async function openOfficialWorld(
       ownerId: OWNER_ID,
       cwd: workspaceRoot,
       modelId: MODEL_ID,
+      approvalMode: runtimeOptions.spawnArgs?.approvalMode ?? "write",
       tokens: { issue: () => UPSTREAM_KEY, revoke: () => {} },
       resumePath,
-      ...(runtimeOptions.spawnArgs === undefined
-        ? {}
-        : { spawnImpl: rewritingSpawn(runtimeOptions.spawnArgs) }),
+      ...(runtimeOptions.spawnArgs?.hostOverlay === false ? { spawnImpl: rewritingSpawn } : {}),
       onApproval: (request) => {
         approvals.push(request);
         runtime.respondApproval(request.id, runtimeOptions.onApproval?.(request) ?? "deny");

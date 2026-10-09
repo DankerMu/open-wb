@@ -484,6 +484,8 @@ export class SessionSupervisor {
         sessionId,
         ownerId: resume.ownerId,
         cwd,
+        approvalMode: "write",
+        modelId: this.#runtime.modelId,
         resumePath: resume.ompSessionFile,
         tokens: generationTokens(slot, this.#pool, this.#store, this.#tokens),
         onExit: () => {

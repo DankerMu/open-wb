@@ -7,8 +7,17 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type SpawnImpl, type SpawnOmpOpts, spawnOmp } from "../src/sessions/omp/process.js";
+import type { ApprovalMode } from "../src/model-catalog.js";
+import {
+  AgentUnavailableError,
+  type SpawnImpl,
+  type SpawnOmpOpts,
+  spawnOmp,
+} from "../src/sessions/omp/process.js";
 import { SessionRuntime } from "../src/sessions/omp/runtime.js";
+import { SpawnGate } from "../src/sessions/omp/spawn-gate.js";
+import { ompHostOverlayPath } from "../src/sessions/omp/state-layout.js";
+import { sessionRuntimeOpts } from "../src/sessions/pool.js";
 import { sudoPrefix } from "./session-supervisor-helpers.js";
 import { FakeChild } from "./support/omp-rpc.js";
 import { createTokens } from "./support/omp-runtime.js";
@@ -80,13 +89,20 @@ function recorder(watch: readonly string[]): { calls: Recorded[]; spawnImpl: Spa
   return { calls, spawnImpl };
 }
 
-function spawnOpts(roots: Roots, cwd = roots.ownerRoot, ompUser?: string): SpawnOmpOpts {
+function spawnOpts(
+  roots: Roots,
+  cwd = roots.ownerRoot,
+  ompUser?: string,
+  mode: ApprovalMode = "write",
+  model = MODEL,
+): SpawnOmpOpts {
   return {
     bin: roots.bin,
     sandboxRoot: roots.sandboxRoot,
     stateDir: roots.stateDir,
     ownerId: OWNER,
-    modelId: MODEL,
+    modelId: model,
+    approvalMode: mode,
     token: TOKEN,
     resumePath: null,
     cwd,
@@ -106,7 +122,12 @@ async function launch(
 }
 
 /** The omp contract argv (independent of the implementation's assembly). */
-function contractArgs(roots: Roots, cwd: string): string[] {
+function contractArgs(
+  roots: Roots,
+  cwd: string,
+  mode: ApprovalMode = "write",
+  model = MODEL,
+): string[] {
   return [
     "--mode",
     "rpc",
@@ -115,9 +136,9 @@ function contractArgs(roots: Roots, cwd: string): string[] {
     "--session-dir",
     roots.sessionDir,
     "--model",
-    `workbuddy/${MODEL}`,
+    `workbuddy/${model}`,
     "--approval-mode",
-    "write",
+    mode,
     "--no-extensions",
     "--no-lsp",
     "--no-pty",
@@ -214,6 +235,75 @@ describe("spawnOmp cwd (direct)", () => {
   });
 });
 
+describe("spawnOmp approval mode and model", () => {
+  it.each([
+    ["always-ask", "m3"],
+    ["yolo", "m1"],
+  ] as const)(
+    "puts %s and %s into the cold and the resumed argv, env and --config unchanged",
+    async (mode, model) => {
+      const roots = makeRoots();
+      const overlay = ompHostOverlayPath(roots.stateDir);
+      const resumePath = join(roots.sessionDir, "prior.jsonl");
+      const base = await launch(roots);
+      const { calls, spawnImpl } = recorder(ownDirs(roots));
+      const opts = spawnOpts(roots, roots.ownerRoot, undefined, mode, model);
+      await spawnOmp(opts, spawnImpl);
+      await spawnOmp({ ...opts, resumePath }, spawnImpl);
+      expect(calls).toHaveLength(2);
+      const expected = contractArgs(roots, roots.ownerRoot, mode, model);
+      expect(calls[0]?.args).toEqual(expected);
+      expect(calls[1]?.args).toEqual([...expected, "--resume", resumePath]);
+      for (const call of calls) {
+        expect(call.options.env).toEqual(base.options.env);
+        expect(call.args[call.args.indexOf("--config") + 1]).toBe(overlay);
+        expect(call.options.env?.PI_CONFIG_FILES).toBe(overlay);
+      }
+    },
+  );
+
+  it.each(["auto", "", undefined])(
+    "rejects approval mode %j without spawning or creating a directory",
+    async (mode) => {
+      const roots = makeRoots();
+      const { calls, spawnImpl } = recorder(ownDirs(roots));
+      const opts = { ...spawnOpts(roots), approvalMode: mode as never };
+      await expect(spawnOmp(opts, spawnImpl)).rejects.toThrow("invalid approval mode");
+      expect(calls).toHaveLength(0);
+      for (const dir of ownDirs(roots)) {
+        expect(existsSync(dir), dir).toBe(false);
+      }
+    },
+  );
+});
+
+describe("sessionRuntimeOpts", () => {
+  it("takes the approval mode and the model from the per-runtime input, not the base runtime", () => {
+    const roots = makeRoots();
+    const opts = sessionRuntimeOpts(
+      {
+        bin: roots.bin,
+        sandboxRoot: roots.sandboxRoot,
+        stateDir: roots.stateDir,
+        modelId: "base-model",
+      },
+      { spawnGate: new SpawnGate(1), log: () => {} },
+      {
+        sessionId: "s-pool",
+        ownerId: OWNER,
+        cwd: roots.ownerRoot,
+        tokens: createTokens("pool"),
+        resumePath: null,
+        onExit: () => {},
+        approvalMode: "yolo",
+        modelId: "m3",
+      },
+    );
+    expect(opts.approvalMode).toBe("yolo");
+    expect(opts.modelId).toBe("m3");
+  });
+});
+
 describe("spawnOmp cwd (sudo)", () => {
   useSetprivStub();
   let savedPath: string | undefined;
@@ -249,7 +339,12 @@ describe("spawnOmp cwd (sudo)", () => {
 });
 
 describe("SessionRuntime cwd wiring", () => {
-  async function firstSpawn(roots: Roots, cwd = roots.ownerRoot): Promise<Recorded> {
+  async function firstSpawn(
+    roots: Roots,
+    cwd = roots.ownerRoot,
+    mode: ApprovalMode = "write",
+    model = MODEL,
+  ): Promise<Recorded> {
     const calls: Recorded[] = [];
     let recorded: (call: Recorded) => void = () => {};
     const first = new Promise<Recorded>((resolve) => {
@@ -272,7 +367,8 @@ describe("SessionRuntime cwd wiring", () => {
       sandboxRoot: roots.sandboxRoot,
       stateDir: roots.stateDir,
       ownerId: OWNER,
-      modelId: MODEL,
+      modelId: model,
+      approvalMode: mode,
       tokens: createTokens("cwd"),
       spawnImpl,
       handshakeTimeoutMs: 60_000,
@@ -280,7 +376,7 @@ describe("SessionRuntime cwd wiring", () => {
     });
     const stream = runtime.prompt("hello");
     stream.dispatched.catch(() => {});
-    const call = await first;
+    const call = await Promise.race([first, stream.dispatched.then(() => first)]);
     await runtime.shutdown();
     expect(calls).toHaveLength(1);
     return call;
@@ -293,5 +389,40 @@ describe("SessionRuntime cwd wiring", () => {
     const call = await firstSpawn(roots, proj);
     expect(cwdArg(call.args)).toBe(proj);
     expect(call.options.cwd).toBe(proj);
+  });
+
+  it("passes the runtime's approval mode and model through to the spawned omp", async () => {
+    const roots = makeRoots();
+    const call = await firstSpawn(roots, roots.ownerRoot, "always-ask", "m3");
+    expect(call.args).toEqual(contractArgs(roots, roots.ownerRoot, "always-ask", "m3"));
+  });
+
+  it("fails the acquisition on an invalid approval mode: no spawn, the issued token revoked", async () => {
+    const roots = makeRoots();
+    const { calls, spawnImpl } = recorder(ownDirs(roots));
+    const tokens = createTokens("mode");
+    const runtime = new SessionRuntime({
+      sessionId: "s-mode",
+      bin: roots.bin,
+      sandboxRoot: roots.sandboxRoot,
+      stateDir: roots.stateDir,
+      ownerId: OWNER,
+      modelId: MODEL,
+      approvalMode: "auto" as never,
+      tokens,
+      spawnImpl,
+      handshakeTimeoutMs: 60_000,
+      cwd: roots.ownerRoot,
+    });
+    const error = await runtime.prompt("hello").dispatched.catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(AgentUnavailableError);
+    expect(calls).toHaveLength(0);
+    expect(tokens.issued).toHaveLength(1);
+    expect(tokens.revoked).toEqual(tokens.issued);
+    expect(tokens.live.size).toBe(0);
+    for (const dir of ownDirs(roots)) {
+      expect(existsSync(dir), dir).toBe(false);
+    }
+    await runtime.shutdown();
   });
 });
