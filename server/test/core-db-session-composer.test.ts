@@ -9,6 +9,11 @@
  * Issue #994 migration 041: the table `account_composer_prefs`, one row per account, created whole
  * in the runner's transaction and deleted with its account (spec「迁移 041 账号最近选择表」Scenarios
  * 「建表与约束」「随账号级联」). Located the same way, right after 040.
+ *
+ * Issue #995 migration 042: one nullable, default-free, unconstrained column `attachments` appended
+ * to `chat_messages` (message-attachments spec「迁移 042 消息附件列」Scenarios「新库与存量库」
+ * 「中途失败原子回滚」), right after 041; plus the proof that 040, 041 and 042 are applied in order,
+ * each in its own transaction.
  */
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -21,6 +26,7 @@ import {
   MIGRATION_039,
   MIGRATION_040,
   MIGRATION_041,
+  MIGRATION_042,
   migrationReceiptExists,
   removeTempDirs,
   TRACKED_MIGRATION_FILENAMES,
@@ -33,8 +39,10 @@ import {
   COLUMNS_035,
   columnNames,
   countReceipts,
+  EXPECTED_ROWS,
   expectChatSchema,
   expectFixture035,
+  type PriorTable,
   preservedState,
   receipts,
   S_A,
@@ -525,6 +533,224 @@ describe("migration 041 cascade", () => {
         { id: "u2" },
       ]);
       expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    });
+  });
+});
+
+// 042 follows 041 the same way; `POS` and `POS_041` above stay 040's and 041's.
+const POS_042 = TRACKED_MIGRATION_FILENAMES.indexOf(MIGRATION_042);
+const RECEIPTS_BEFORE_042 = TRACKED_MIGRATION_FILENAMES.slice(0, POS_042);
+const ATTACHMENTS_INFO = {
+  name: "attachments",
+  type: "TEXT",
+  not_null: 0,
+  dflt_value: null,
+  pk: 0,
+};
+const ATTACHMENTS_JSON = '[{"path":"uploads/a.txt","size":3}]';
+const DUPLICATE_ATTACHMENTS = /duplicate column name: attachments/;
+// The six messages the populated fixture keeps, none with attachments.
+const NO_ATTACHMENTS = EXPECTED_ROWS.chat_messages.map(({ id }) => ({ id, attachments: null }));
+// The planted column is unconstrained and holds a value on message 5.
+const PLANTED_ATTACHMENTS = NO_ATTACHMENTS.map((row) =>
+  row.id === 5 ? { ...row, attachments: "planted" } : row,
+);
+type Columns = Record<PriorTable, readonly string[]>;
+type Kept = { receipts: unknown[]; state: unknown; sql?: unknown };
+
+function attachmentRows(db: DatabaseSync) {
+  return db.prepare("SELECT id, attachments FROM chat_messages ORDER BY id").all();
+}
+
+function messagesSql(db: DatabaseSync) {
+  return db.prepare("SELECT sql FROM sqlite_master WHERE name = 'chat_messages'").get();
+}
+
+/** 042's receipt sits right after 041's, once; `attachments` is the eighth column of chat_messages. */
+function expect042Applied(db: DatabaseSync): void {
+  expect(POS_042).toBeGreaterThan(0);
+  const ledger = ledgerRows(db);
+  expect(ledger[POS_042 - 1]).toEqual([POS_042, MIGRATION_041]);
+  expect(ledger[POS_042]).toEqual([POS_042 + 1, MIGRATION_042]);
+  expect(countReceipts(db, MIGRATION_042)).toBe(1);
+  expect(
+    db
+      .prepare(
+        "SELECT name, type, \"notnull\" AS not_null, dflt_value, pk FROM pragma_table_info('chat_messages') WHERE name = 'attachments'",
+      )
+      .all(),
+  ).toEqual([ATTACHMENTS_INFO]);
+  const names = columnNames(db, "chat_messages");
+  expect(names.slice(0, 7)).toEqual(COLUMNS_035.chat_messages);
+  expect(names.slice(7, 8)).toEqual(["attachments"]);
+  expectChatSchema(db);
+}
+
+/** The populated fixture plus a pre-existing `attachments` column: 042's only statement collides. */
+function seedPlantedAttachments(db: DatabaseSync): void {
+  seedPopulated035(db);
+  db.exec("ALTER TABLE chat_messages ADD COLUMN attachments TEXT");
+  db.prepare("UPDATE chat_messages SET attachments = 'planted' WHERE id = 5").run();
+}
+
+/** What a 042 upgrade or failure must leave alone, read before `openDb` touches the file. */
+function keptBefore042(file: string, prior: Columns): Kept {
+  return withDatabase(file, (db) => {
+    expectFixture035(db);
+    return { receipts: receipts(db), state: preservedState(db, prior), sql: messagesSql(db) };
+  });
+}
+
+/** The receipts and every prior row, key, index and sequence are those read before. */
+function expectKept(db: DatabaseSync, before: Kept, prior: Columns): void {
+  expect(receipts(db).slice(0, before.receipts.length)).toEqual(before.receipts);
+  expect(preservedState(db, prior)).toEqual(before.state);
+  expectFixture035(db);
+  expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+}
+
+/** `openDb` applies 042 once onto the kept data, every message reads NULL, and reopening changes nothing. */
+function expectUpgradedTo042(file: string, before: Kept, prior: Columns): void {
+  const upgraded = withOpenDb(file, (db) => {
+    expect042Applied(db);
+    expectKept(db, before, prior);
+    expect(attachmentRows(db)).toEqual(NO_ATTACHMENTS);
+    return receipts(db);
+  });
+  expectRepeatedOpenStable(file, (db) => {
+    expect(receipts(db)).toEqual(upgraded);
+    for (const migration of [MIGRATION_040, MIGRATION_041, MIGRATION_042]) {
+      expect(countReceipts(db, migration), migration).toBe(1);
+    }
+    expectKept(db, before, prior);
+    expect(attachmentRows(db)).toEqual(NO_ATTACHMENTS);
+  });
+}
+
+describe("migration 042 message attachments column", () => {
+  it.each([
+    ["in-memory", () => ":memory:"],
+    ["new file", () => join(tempDir(), "fresh-042.db")],
+  ])(
+    "%s database has 040, 041, 042 in order and a nullable default-free attachments column",
+    (_label, path) => {
+      withOpenDb(path(), (db) => {
+        expect042Applied(db);
+        expect041Applied(db);
+        expect040Applied(db);
+        expect(ledgerRows(db).slice(POS, POS + 3)).toEqual([
+          [POS + 1, MIGRATION_040],
+          [POS + 2, MIGRATION_041],
+          [POS + 3, MIGRATION_042],
+        ]);
+        expect(attachmentRows(db)).toEqual([]);
+      });
+    },
+  );
+
+  it("populated database ending at 041 gains 042 once and keeps every prior value, key, index and sequence", () => {
+    const file = join(tempDir(), "populated-before-042.db");
+    seedThrough(file, RECEIPTS_BEFORE_042, seedPopulated035);
+    withDatabase(file, (db) => {
+      expect(ledgerFilenames(db)).toEqual([...RECEIPTS_BEFORE_042]);
+      expect(ledgerFilenames(db)[POS_042 - 1]).toBe(MIGRATION_041);
+      expect(columnNames(db, "chat_messages")).toEqual(COLUMNS_035.chat_messages);
+    });
+    expect(NO_ATTACHMENTS).toHaveLength(6);
+    const before = keptBefore042(file, COLUMNS_040);
+    expect(before.receipts).toHaveLength(POS_042);
+
+    expectUpgradedTo042(file, before, COLUMNS_040);
+  });
+
+  // 042 carries no CHECK: whatever text the application writes is stored and read back verbatim.
+  it.each([
+    [null, "null"],
+    [ATTACHMENTS_JSON, "text"],
+    ["not json", "text"],
+    ["", "text"],
+  ])(
+    "attachments is NULL when omitted and stores %j verbatim on insert and update",
+    (value, type) => {
+      withSession((db) => {
+        const stored = db.prepare(
+          "SELECT attachments AS v, typeof(attachments) AS t FROM chat_messages ORDER BY id",
+        );
+        db.prepare(
+          "INSERT INTO chat_messages(session_id, role, content, status, created_at) VALUES (?, 'assistant', '', 'done', 1)",
+        ).run(S_A);
+        expect(stored.all()).toEqual([{ v: null, t: "null" }]);
+        db.prepare(
+          "INSERT INTO chat_messages(session_id, role, content, status, created_at, attachments) VALUES (?, 'user', 'hello', 'done', 2, ?)",
+        ).run(S_A, value);
+        expect(stored.all()).toEqual([
+          { v: null, t: "null" },
+          { v: value, t: type },
+        ]);
+        expect(
+          db.prepare("UPDATE chat_messages SET attachments = ? WHERE id = 1").run(value).changes,
+        ).toBe(1);
+        expect(stored.all()).toEqual([
+          { v: value, t: type },
+          { v: value, t: type },
+        ]);
+      });
+    },
+  );
+});
+
+describe("migration 042 atomic rollback", () => {
+  it("a pre-existing attachments column fails 042 leaving it, the receipts and the data as they were, and a retry applies it once", () => {
+    const file = join(tempDir(), "conflict-attachments.db");
+    seedThrough(file, RECEIPTS_BEFORE_042, seedPlantedAttachments);
+    const before = keptBefore042(file, COLUMNS_040);
+    expect(before.receipts).toHaveLength(POS_042);
+
+    expectOpenDbFailure(file, DUPLICATE_ATTACHMENTS);
+
+    withDatabase(file, (db) => {
+      expect(ledgerFilenames(db)).toEqual([...RECEIPTS_BEFORE_042]);
+      expect(migrationReceiptExists(db, MIGRATION_042)).toBe(false);
+      expect(receipts(db)).toEqual(before.receipts);
+      expect(messagesSql(db)).toEqual(before.sql);
+      expect(attachmentRows(db)).toEqual(PLANTED_ATTACHMENTS);
+      expectKept(db, before, COLUMNS_040);
+      db.exec("ALTER TABLE chat_messages DROP COLUMN attachments");
+    });
+
+    expectUpgradedTo042(file, before, COLUMNS_040);
+  });
+
+  it("a database ending at 039 commits 040 and 041 on their own when 042 fails in the same openDb run, and a retry applies 042 once", () => {
+    const file = join(tempDir(), "conflict-attachments-from-039.db");
+    seedThrough(file, RECEIPTS_BEFORE, seedPlantedAttachments);
+    const before = keptBefore042(file, COLUMNS_039);
+    expect(before.receipts).toHaveLength(POS);
+    withDatabase(file, (db) => {
+      expect(columnNames(db, "chat_sessions")).toEqual(COLUMNS_039.chat_sessions);
+      expect(tableExists(db, PREFS)).toBe(false);
+    });
+
+    expectOpenDbFailure(file, DUPLICATE_ATTACHMENTS);
+
+    withDatabase(file, (db) => {
+      // One transaction per file: 040's columns and 041's table stayed, only 042 was rolled back.
+      expect(ledgerFilenames(db)).toEqual([...RECEIPTS_BEFORE_042]);
+      expect(migrationReceiptExists(db, MIGRATION_042)).toBe(false);
+      expect(columnNames(db, "chat_sessions")).toEqual(COLUMNS_040.chat_sessions);
+      expect(composerRows(db)).toEqual(ALL_UNSET);
+      expect(tableExists(db, PREFS)).toBe(true);
+      expect(prefsRows(db)).toEqual([]);
+      expect(messagesSql(db)).toEqual(before.sql);
+      expect(attachmentRows(db)).toEqual(PLANTED_ATTACHMENTS);
+      expectKept(db, before, COLUMNS_039);
+      db.exec("ALTER TABLE chat_messages DROP COLUMN attachments");
+    });
+
+    expectUpgradedTo042(file, before, COLUMNS_039);
+    withOpenDb(file, (db) => {
+      expect041Applied(db);
+      expect040Applied(db);
     });
   });
 });

@@ -309,6 +309,7 @@ describe("core/db chat schema", () => {
         ["status", "TEXT", 1, null, 0, 0],
         ["created_at", "INTEGER", 1, null, 0, 0],
         ["thinking", "TEXT", 0, null, 0, 0],
+        ["attachments", "TEXT", 0, null, 0, 0],
       ]);
       expect(columnInfo(db, "chat_steps")).toEqual([
         ["id", "INTEGER", 0, null, 1, 0],
