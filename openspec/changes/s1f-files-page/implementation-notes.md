@@ -57,3 +57,37 @@
 - `files-overlays.test.tsx` 的新增断言：O8 对话框半条在「不含 `ui-btn`」「`创建` 为 submit」之外，加 `取消` 的 `type` 为 `button`，以及「请求挂起期间禁用」（给 O8 的 `/api/workspaces` 换成 `workspaceRoute([workspace], () => held.promise)`，填名、点 `创建`、`waitFor(create.disabled)`，结束前点 `取消`）；O1–O6、O9 一行不改。
 - 变异表（2.3 分摊到本刀的四条在前）：(1) 把 `位置` 的初始焦点 ref 挂到 `文件夹名称` → O3 `:126` 红；(2) 去掉 `aria-modal` → O1 `:75`、O3 `:124` 红；(3) `CreationMenu` 留在 `dialogs.tsx` → 分层守卫「web/src 现状」与 O7 新断言红；(4) 去掉挂起期移焦点，或改成聚焦首个可用控件 → O4 `:152`、O5 `:173` 红（jsdom 走已禁用控件分支），走查 `ui-walk.spec.ts:316` 红（Chromium 走 `body` 分支，jsdom 观察不到）；另加：去掉 `取消` 的 `type="button"` → O8 新断言与 O2 红；去掉 `onCloseAutoFocus` → O1 `:82`、O2 `:114`、O3 `:129` 红；去掉 `disabled={pending}` → O4 `:151`、O5 `:172` 红。
 - 预计观察不到的变异与偏离记录：整段删掉 `onOpenAutoFocus` 不会红——拷入层把 `关闭` 放在 `children` 之后，Radix 默认聚焦的首个可聚焦控件本来就是 `位置` / `工作空间名称`，所以变异 (1) 必须写成「挪到别的控件」；去掉 `useEscapeFallback` 在 `files-*` 用例里也不会红（没有轻提示在场）。偏离记录写：Tab 顺序里 `关闭` 由最前变最后；宽度用拷入层默认、不再是冻结区的中号；`returnFocus.current` 为空时不再回落到打开者（两条入口都传真实触发器）；`export` 去掉；走查行号改引用。功能验收清单本刀不加行——「文件（FL）」节现为空表，首批行由 3.6 随组 3 加，那时 `新建工作空间` / `新建文件夹` 两行要覆盖四种取消类关闭、挂起说明与同名冲突提示留在对话框内。
+
+## 4.1–4.3（#1053）
+
+- **Critical Path：沙箱与文件边界**（`server/src/core/sandbox/resolve.ts`、`index.ts`）；PR 标注请求白盒审查，分配两个评审席；PR 描述带逐条变异表。
+- 漂移核对：issue 的「Current behavior」与代码一致——`resolve.ts` 78 行，`op` 联合在 `:14`，末段判定门在 `:31`（`createsEntry(op) && !isValidMkdirTerminal(...)`），私有谓词在 `:56-59`；`index.ts` 50 行，联合在 `:29`，审计在 `:39-45`；`sandbox-resolve.test.ts` 315 行、`sandbox-facade.test.ts` 258 行。无漂移。
+- 必须改的类型点恰三处：`resolve.ts:14`、`index.ts:29`、`server/test/sandbox-resolve.test.ts:90`（`expectRejected` 的 `op` 参数，不改则 tsc TS2345）。其余不动：`workspaces/rest.ts:23` 用 `ReturnType<typeof createSandbox>` 自动变宽；`sessions/prompt-attachments.ts:24` 的窄端口 `op:"read"` 仍可赋值；`workspaces/store.ts:307`、`sessions/undo.ts:270` 直接调纯 `resolve` 且恒为 `"read"`。
+- 仓库里没有对 `op` 的 `switch`、穷尽表或「四种 op」计数断言；钉住 `op` 集合的只有两个沙箱测试文件和 `smoke/files.hurl:81,159`（只断言 `list`、`write`，本刀不动）。
+- 产品改动只有三点：两处联合加 `"delete" | "move"`；`:58` 的析取加这两个成员；`:56` 的注释改写（「都在目标位置新建条目」对新 op 不成立）。私有谓词 `createsEntry` 改名为 `namesEntry` 之类，不导出。不要内联进 `resolve`（PR #1138 记录内联会让 Biome 认知复杂度从 15 升到 16），不要做 per-op 表，不要抽 `SandboxOp` 导出类型。
+- 契约，符号链接：任一已存在分量（含末段）经 `lstat` 为符号链接即拒绝，与 `op` 无关。`delete`/`move` 对「末段是链接」是拒绝，不是「作用于链接本身」（file-operations「拒绝项」`path=link` → 403、「不能经符号链接移出」`{from:"link"}` → 403）。逐分量循环 `:36-48` 一行不改。
+- 契约，目标与 `move`：`resolve` 不判定目标是否存在、是什么类型（`regular-file/child` 对新 op 返回 `ok:true`，由路由回 404）。移动的源与目标各解析一次，都用 `op=move`，目标不复用 `write`/`mkdir`。空串对两个 op 都被末段规则拒绝，这是「根不能被删除、移动或作为移动目标」的唯一防线。
+- 契约，拒绝原因：`reason` 是自由字符串，不是封闭枚举，本刀不新增值。现有六个是 `cannot resolve sandbox root`(:20)、`path contains a NUL byte`(:24)、`path is absolute`(:27)、`mkdir name is invalid`(:32)、`path is not inside the sandbox root`(:38,:46)、`path escapes the sandbox root`(:51)。`mount` 是 `workspaces/snapshots.ts:60` 的快照 `SkipReason`，与沙箱无关。
+- 偏离记录一：新 op 被末段规则拒绝时 `detail.reason` 仍是 `mkdir name is invalid`。沿 PR #1138 先例不改文案；全仓无人断言该字符串（测试只用 `/\S/`）。
+- 契约，`resolve` 不做的事（不加规则，记偏离）：不折叠大小写，不做 Unicode 规范化（字节透传，先例 `uploads/图 (1).png`），除 NUL 外不拒控制字符，没有点开头名字的规则，不看 `dev`/挂载点，不预检名字长度。超过 255 字节的分量在 `lstat` 抛 `ENAMETOOLONG` 后落到 `:46` 被拒，即 403 加审计，既有用例 `:293-304` 已钉。
+- 契约，回收目录与临时空间：`<SANDBOX_ROOT>/.trash` 在任何空间根之外，`../.trash` 被 `..` 规则拒绝，经 `resolve` 不可寻址；空间内名叫 `.trash` 的条目只是普通条目。临时空间根 `tmp-<id>` 走同一个 `rootOf`，无特殊分支，它的根同样由空串规则保护。
+- 审计：`sandbox.reject` 只在 facade 写（`index.ts:39-45`，字段 `kind`、`actorId`、`workspaceId`、`title`、`detail:{relPath, op, reason}`，先 emit 后抛 `sandbox_denied`）；纯 `resolve` 不写。新 op 靠 `detail.op` 原样带出，产品代码除类型外零改动。`rootOf` 为 null 时在 `index.ts:31-33` 抛 `not_found`，先于路径检查且无审计，与 `op` 无关。
+- `sandbox-resolve.test.ts` 新增四个 `it`（沿用 `createLayout`、`expectRejected`、前后 `snapshotTree` 比对，以 `for (const op of ["delete","move"] as const)` 循环）：
+- (a) 七个与 op 无关的向量：`../x`、`a/../../x`、`/etc/passwd`、`a\0b`、`outside-link`、`linkdir/child`、`dangling`。
+- (b) 标题含 `the workspace root cannot be deleted`，断言空串对 `delete` 与 `move` 都被拒；它是场景的第八个向量，也是 4.3 第一条变异的落点。
+- (c) `a`、`a/b/c.md` 对两个 op 返回精确的 `absPath`。
+- (d) `a/.`、`a/..`、`a/b\c`、`a/` 对两个 op 被拒。
+- `sandbox-resolve.test.ts` 既有用例只追加，不改标题、不削弱断言：`:266` 的 `regular-file/child` 用例加 `delete`、`move` 两条 `ok:true`，以及 `regular-file/child/..` 对 `delete` 的拒绝。另建议在 (a) 加 `a/../a` 对两个 op 的拒绝（规格外的补充行，记偏离记录二）：它是新 op 下「根内的 `..`」的唯一见证，没有它变异 M5 无法归到新 op。`write` 的六个既有用例（`:165-252`）逐字不动。
+- `sandbox-facade.test.ts` 只在两个既有 `it` 里追加：`:102` 的审计用例末尾加一个循环 `[["", "delete"], ["a/", "move"]] as const`，各断言恰新增一条事件（长度 5、6）且 `detail` 为 `{relPath, op, reason: /\S/}`；`:58` 的 `not_found` 循环对 `"delete"`、`"move"` 各加一次调用（仍无审计）。不单开同形 `it`（PR #1138 记录会多出 4 个 jscpd clone；`.jscpd.json` 阈值 3%、无忽略项）。
+- 门槛：改后 `resolve.ts` 约 80 行、`index.ts` 50 行、两个测试约 390 与 280 行，远低于 800。knip 无影响：没有新导出，联合变宽不产生未引用导出，与 10.1 的处理相同；`delete`/`move` 在 #1060、#1062 之前没有调用方，只有这两个测试文件能观察到。
+- 实现前的红：tsc TS2345（三处联合）。运行期只有与 op 相关的八条断言红，即空串、`a/.`、`a/b\c`、`a/` 各对两个 op；vitest 不做类型检查。其余向量在旧代码下已是绿的，PR 描述照 #1138 的写法如实说明。
+- 变异表（4.3 两条加补充）：
+- M1 谓词去掉 `delete`（空串放行）→ (b)、(d) 的 delete 行与 facade 的 `["", "delete"]` 红。
+- M2 谓词去掉 `move` → (d) 的 `a/` 等 move 行、(b) 的 move 行与 facade 的 `["a/", "move"]` 红。
+- M3 `inspectExisting` 恒返回 true → (a) 的三个符号链接行红；与 op 无关，既有用例同时红。
+- M4 去掉 `:26` 的绝对路径判定 → (a) 的 `/etc/passwd` 红（解析为 `<root>/etc/passwd`）。
+- M5 去掉 `:37` 的 `..` 判定 → 仅 `a/../a` 行与既有 `regular-file/child/..`（read）红；`../x`、`a/../../x` 仍被 `:50` 的边界匹配拒绝。
+- M6 去掉 `:50` 的边界匹配 → 不可观察（有 `..` 与符号链接两条规则在前，属纵深防御）。
+- M7 去掉 `:23` 的 NUL 判定 → 预期不可观察（`lstatSync` 对含 NUL 的路径抛错，落到 `:46` 仍被拒，只是原因不同；测试不钉原因）。
+- M8 facade 把审计挪到抛出之后或去掉 → `:102` 用例的长度断言红。
+- 不新增也不修改功能验收清单行：纯服务端，没有路由使用新 op，无用户可见变化。

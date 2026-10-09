@@ -11,7 +11,7 @@ import { join } from "node:path";
 export function resolve(
   root: string,
   relPath: string,
-  op: "read" | "list" | "mkdir" | "write",
+  op: "read" | "list" | "mkdir" | "write" | "delete" | "move",
 ): { ok: true; absPath: string } | { ok: false; reason: string } {
   let canonicalRoot: string;
   try {
@@ -28,7 +28,7 @@ export function resolve(
   }
 
   const components = relPath.split("/");
-  if (createsEntry(op) && !isValidMkdirTerminal(components.at(-1))) {
+  if (namesEntry(op) && !isValidMkdirTerminal(components.at(-1))) {
     return { ok: false, reason: "mkdir name is invalid" };
   }
 
@@ -53,9 +53,12 @@ export function resolve(
   return { ok: true, absPath: current };
 }
 
-/** mkdir 与 write 都在目标位置新建条目，共用同一段末段词法判定。 */
-function createsEntry(op: string): boolean {
-  return op === "mkdir" || op === "write";
+/**
+ * mkdir、write、delete、move 的末段都必须点名一个条目，共用同一段末段词法判定；
+ * 空串（空间根本身）因此不能被新建、删除、移动或作为移动的目标。
+ */
+function namesEntry(op: string): boolean {
+  return op === "mkdir" || op === "write" || op === "delete" || op === "move";
 }
 
 function isValidMkdirTerminal(name: string | undefined): boolean {

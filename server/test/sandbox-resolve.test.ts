@@ -87,7 +87,7 @@ function snapshotTree(root: string): string[] {
 function expectRejected(
   root: string,
   relPath: string,
-  op: "read" | "list" | "mkdir" | "write" = "read",
+  op: "read" | "list" | "mkdir" | "write" | "delete" | "move" = "read",
 ): void {
   const result = resolve(root, relPath, op);
   expect(result.ok, `${op} ${JSON.stringify(relPath)}`).toBe(false);
@@ -251,6 +251,68 @@ describe("core/sandbox resolve", () => {
     }
   });
 
+  it("delete and move reject the op-independent escape vectors without adding, renaming, or removing entries", () => {
+    const layout = createLayout();
+    const before = snapshotTree(layout.parent);
+
+    for (const op of ["delete", "move"] as const) {
+      expectRejected(layout.sandbox, "../x", op);
+      expectRejected(layout.sandbox, "a/../../x", op);
+      expectRejected(layout.sandbox, "/etc/passwd", op);
+      expectRejected(layout.sandbox, "a\0b", op);
+      expectRejected(layout.sandbox, "outside-link", op);
+      expectRejected(layout.sandbox, "linkdir/child", op);
+      expectRejected(layout.sandbox, "dangling", op);
+      // 规格外的补充行：根内的 `..` 归一化后仍在根内，只有逐分量规则拦得住。
+      expectRejected(layout.sandbox, "a/../a", op);
+    }
+
+    expect(snapshotTree(layout.parent)).toEqual(before);
+  });
+
+  it("the workspace root cannot be deleted, moved, or named as a move target: the empty path is rejected", () => {
+    const layout = createLayout();
+    const before = snapshotTree(layout.parent);
+
+    for (const op of ["delete", "move"] as const) {
+      expectRejected(layout.sandbox, "", op);
+    }
+
+    expect(snapshotTree(layout.parent)).toEqual(before);
+  });
+
+  it("delete and move return exact canonical paths for a and missing a/b/c.md", () => {
+    const layout = createLayout();
+    const before = snapshotTree(layout.parent);
+
+    for (const op of ["delete", "move"] as const) {
+      expect(resolve(layout.sandbox, "a", op), `${op} a`).toEqual({
+        ok: true,
+        absPath: `${layout.canonicalSandbox}/a`,
+      });
+      expect(resolve(layout.sandbox, "a/b/c.md", op), `${op} a/b/c.md`).toEqual({
+        ok: true,
+        absPath: `${layout.canonicalSandbox}/a/b/c.md`,
+      });
+    }
+
+    expect(snapshotTree(layout.parent)).toEqual(before);
+  });
+
+  it("delete and move reject dot, dotdot, backslash, and trailing slash", () => {
+    const layout = createLayout();
+    const before = snapshotTree(layout.parent);
+
+    for (const op of ["delete", "move"] as const) {
+      expectRejected(layout.sandbox, "a/.", op);
+      expectRejected(layout.sandbox, "a/..", op);
+      expectRejected(layout.sandbox, "a/b\\c", op);
+      expectRejected(layout.sandbox, "a/", op);
+    }
+
+    expect(snapshotTree(layout.parent)).toEqual(before);
+  });
+
   it("rejects in-root symlinks even when a following dot or empty segment would normalize them away", () => {
     const layout = createLayout();
     const before = snapshotTree(layout.parent);
@@ -286,6 +348,13 @@ describe("core/sandbox resolve", () => {
     });
     expectRejected(layout.sandbox, "regular-file/child/..", "read");
     expectRejected(layout.sandbox, "regular-file/child/..", "write");
+    for (const op of ["delete", "move"] as const) {
+      expect(resolve(layout.sandbox, "regular-file/child", op), op).toEqual({
+        ok: true,
+        absPath: join(layout.canonicalSandbox, "regular-file", "child"),
+      });
+    }
+    expectRejected(layout.sandbox, "regular-file/child/..", "delete");
 
     expect(snapshotTree(layout.parent)).toEqual(before);
   });
