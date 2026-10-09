@@ -119,14 +119,18 @@ function SlashMenu({
 }
 
 /**
- * Whether the 「+」 menu can be opened and is open: `disabled` while the composer is not `enabled`
- * or the draft is not blank, and an open menu closes then (reset during render) and stays closed.
+ * Whether the 「+」 menu can be opened and is open: `disabled` while the composer is not `enabled`,
+ * and an open menu closes then (reset during render) and stays closed. `locked` (the command items
+ * cannot be picked) follows the draft only while the menu is open: true while the draft is not
+ * blank. A closed menu keeps the last value, so its items do not change while it fades out.
  */
 function usePlusState(enabled: boolean, draft: string) {
   const [open, setOpen] = useState(false);
-  const disabled = !enabled || draft.trim() !== "";
-  if (open && disabled) setOpen(false);
-  return { disabled, open: open && !disabled, onOpenChange: setOpen };
+  const [locked, setLocked] = useState(false);
+  const nonBlank = draft.trim() !== "";
+  if (open && !enabled) setOpen(false);
+  if (open && enabled && locked !== nonBlank) setLocked(nonBlank);
+  return { disabled: !enabled, locked, open: open && enabled, onOpenChange: setOpen };
 }
 
 /**
@@ -150,14 +154,15 @@ function usePlusState(enabled: boolean, draft: string) {
  * and leaves a dismissal in place (both reset during render, as in conversation-search.tsx); the
  * highlighted option is scrolled into view from the key handler.
  *
- * `plus` is the 「+」 menu of the capability bar. It can be opened while the composer is `enabled`
- * and the draft is blank (nothing but whitespace), which never coincides with a slash draft; it is
- * `disabled` otherwise, and an open one closes (reset during render) and stays closed. While it is
- * open the catalogue is wanted exactly as for the panel, so the same single call per client and
- * workspace id serves both. `commands` is the catalogue of the current workspace id, undefined
- * while it is not held (in flight, failed, or the workspace id unknown) and the same whether the
- * menu is open or not, so a closing menu keeps its items; `onPick` leaves the draft the panel's
- * pick leaves and does nothing while the menu is `disabled`.
+ * `plus` is the 「+」 menu of the capability bar. It can be opened while the composer is `enabled`,
+ * whatever the draft; it is `disabled` otherwise, and an open one closes (reset during render) and
+ * stays closed. While it is open the catalogue is wanted exactly as for the panel, so the same
+ * single call per client and workspace id serves both, and its command items are `locked` (not to
+ * be picked) while the draft is not blank (anything but whitespace). `commands` is the catalogue
+ * of the current workspace id, undefined while it is not held (in flight, failed, or the workspace
+ * id unknown) and the same whether the menu is open or not, so a closing menu keeps its items;
+ * `onPick` closes the menu and leaves the draft the panel's pick leaves, and does nothing while
+ * the menu is `disabled` or the draft is not blank.
  */
 export function useSlashMenu(
   client: ApiClient,
@@ -171,6 +176,7 @@ export function useSlashMenu(
   plus: {
     commands: readonly Command[] | undefined;
     disabled: boolean;
+    locked: boolean;
     open: boolean;
     onOpenChange(open: boolean): void;
     onPick(command: Command): void;
@@ -254,9 +260,13 @@ export function useSlashMenu(
   const active = state.index < matches.length ? state.index : 0;
   const current = matches[active];
   const pick = (command: Command) => setDraft(pickText(command.name));
-  // The items of a closing menu are still there to be picked: nothing lands once it is disabled.
+  // The items of a closing menu are still there to be picked: nothing lands once it is disabled or
+  // the draft is not blank. Closed before the draft is written: the menu commits the pick before it
+  // closes itself, and a frame of an open menu over the picked draft would lock its fading items.
   const onPick = (command: Command) => {
-    if (!plusState.disabled) pick(command);
+    if (!enabled || draft.trim() !== "") return;
+    plusState.onOpenChange(false);
+    pick(command);
   };
   const plus = { ...plusState, commands, onPick };
   if (current === undefined) return { menu: null, interceptKeyDown: () => false, plus };
