@@ -264,8 +264,9 @@ Minimal mergeable slice: 8.1 的 `sweep` 半边与 `workspaces-trash-sweep.test.
 
 - [ ] 9.1 `rest-entries.ts`：`POST /api/workspaces/:id/move`（严格的 `{from,to}` body、检查次序、409 不覆盖、子树 400、审计 `file.move` 与两种 `title`）；`server/src/http/errors.ts` 的归属路由集合加入 `POST /api/workspaces/:id/move`。
 - [ ] 9.2 测试（新文件 `server/test/workspaces-move.test.ts`）：file-operations「重命名与移动」六个场景（含「子树判断先于存在性」：`d1/sub` 存在与不存在两种夹具都是 400，`d1 → d10` 不被误判）；`server/test/http-parser-owners.test.ts` 加该路由的四种 content-parser 错误 → 400 且无文件变化。
-- [ ] 9.3 `rest-entries.ts`：`GET /api/workspaces/:id/download`（附件头、`filename` 与 `filename*` 的生成做成纯函数、审计先于首字节、不支持 `Range`）。
-- [ ] 9.4 测试（新文件 `server/test/workspaces-download.test.ts`）：file-operations「下载」四个场景；文件名函数对中文、空格、引号、反斜杠、控制字符的输出；preview-origin「主站不把工作空间文件当文档返回」场景的 `download` 半边（html、svg、pdf、xml 都是 `application/octet-stream` 附件；`file` 半边在 6.3）。
+- [x] 9.3 `rest-entries.ts`：`GET /api/workspaces/:id/download`（附件头、`filename` 与 `filename*` 的生成做成纯函数、审计先于首字节、不支持 `Range`）。
+  实施注记见 `implementation-notes.md`「9.3、9.4（#1061）」。
+- [x] 9.4 测试（新文件 `server/test/workspaces-download.test.ts`）：file-operations「下载」四个场景；文件名函数对中文、空格、引号、反斜杠、控制字符的输出；preview-origin「主站不把工作空间文件当文档返回」场景的 `download` 半边（html、svg、pdf、xml 都是 `application/octet-stream` 附件；`file` 半边在 6.3）。
 - [ ] 9.5 变异证据：目标存在时仍 `rename` → 「同名拒绝」里内容被覆盖而判红；不查子树 → `d1 → d1/sub/d1`（`d1/sub` 已存在的夹具）得到 `rename` 的失败或成功而不是 400，判红；把子树判断放回父目录检查之后 → `d1/sub` 不存在的夹具得到 404 而不是 400，判红；用不带 `/` 的前缀比较 → `d1 → d10` 被误拒而判红；审计挪到发送之后 → 「审计失败不发文件」判红；`Content-Type` 改用真实类型 → html 下载的类型断言判红。
 
 Suggested fixture level: expanded - 改动文件位置的公共 API 与无上限的文件读出，含冲突、越界与审计次序

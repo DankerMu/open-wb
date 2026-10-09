@@ -222,3 +222,36 @@
 - 变异：去掉 `rejectUnsafeOwnerSegment` 的点开头分支 →「账号 id 不以点开头」第 ② 条判红（`<sandboxRoot>/.trash` 被建出）。
 - 变异：种子里加一个点开头 id → 第 ① 条判红。
 - 变异：「清理去查 `workspaces` 表」→ **不可观察**（结构上排除：`createTrash` 不收 `db`）；评审以签名为证。
+
+## 9.3、9.4（#1061）
+
+- **Critical Path：沙箱与文件边界**（无上限读出用户文件、审计次序）——两个评审席位 + owner 白盒；前置只有 0.1，不等任何实测与兄弟刀。
+- 漂移：`server/src/workspaces/rest-entries.ts` 在 origin/master 不存在，由本刀新建；`index.ts`（9 行）只调 `registerWorkspaceRest`，本刀加一行 `registerWorkspaceEntries(app, dependencies)`，签名 `(app: FastifyInstance, dependencies: WorkspaceRestDependencies): void`。
+- 复用而不复制（jscpd）：给 `rest.ts`（416 行）的 `currentPrincipal`、`ensureOwnedRoot`、`parsePathQuery`、`lstatExisting`、`noStoreWorkspaceResponse` 加 `export`，`rest-entries.ts` 单向导入；knip 由该导入满足；不改 `core/sandbox`、`http/errors.ts`（GET 无 body，不进归属集）、`preview.ts`。
+- 处理次序：`onRequest: noStoreWorkspaceResponse` → `currentPrincipal` → `ensureOwnedRoot` → `parsePathQuery(query, true)` → `sandbox.resolve(principal, id, path, "read")` → `lstatExisting` 非 `isFile()` 则 404 → `audit.emit({kind:"file.download", actorId, workspaceId, title:` `下载 ${path}` `, detail:{path, size}})` → 之后才设头 → `reply.send(openPreviewStream(absPath, status.size))`。
+- 头：`Content-Type: application/octet-stream`、`Content-Disposition`、`Content-Length: String(status.size)`（必须显式设）、`X-Content-Type-Options: nosniff`；流按 `size` 截界，文件在 lstat 后增长也不会多发字节，0 字节文件由 `openPreviewStream` 的空流分支处理。
+- 纯函数 `export function attachmentDisposition(name: string): string`（放 `rest-entries.ts`，测试是 knip 入口）：入参 `basename(absPath)`，不取请求串末段（`a/b.md/` 的末段是空串）。
+- ASCII 回退名按码点替换：`0x20–0x7E` 之外及 `"`、`\` 各换一个 `_`，一个代理对只换一个 `_`；`季度 报告"v2".pdf` → `__ ___v2_.pdf`。
+- `filename*` 按 `Buffer.from(name, "utf8")` 逐字节编码：RFC 5987 attr-char（字母数字与 ``!#$&+-.^_`|~``）原样，其余 `%XX` 大写。不用 `encodeURIComponent`：它放过 `'()*`，遇孤立代理项抛 `URIError`。不写动态 `new RegExp`（semgrep）。
+- 规格未写的分支（记入偏离记录）：(a) 路由设 `exposeHeadRoute: false`，否则 Fastify 自动的 HEAD 会跑同一 handler、写一条没发字节的 `file.download`；HEAD 落到 `/api/*` 兜底 → 404、无审计。(b) 审计后、发头前打开失败（文件消失，或 omp 用户建的不可读文件）→ 500 信封，审计行保留。(c) 符号链接 → 403 + `sandbox.reject`。(d) `path=` 空串 → 解析到根 → 404。
+- 分支 (b) 需要路由级 `onError` 钩子移除 `Content-Type`、`Content-Disposition`、`Content-Length`，否则 500 的 JSON 会带着 `octet-stream` 与 attachment 头发出；`rest.ts:51` 的 `clearPreviewHeadersOnError` 是同一理由。
+- 新文件 `server/test/workspaces-download.test.ts`（用 `withWorkspacesApp`、`insertWorkspace`、`loginSessionId`、`bearerCookie`）：「任意文件作为附件」五个文件加一个 0 字节文件，`rawPayload.equals`，审计五行的 `detail.path` / `detail.size`；`big.bin` 30 MiB 运行时在临时目录生成，不入库。
+- 「拒绝项」六例各断言没有 `file.download` 行，另加：重复 `path` → 400；`lisi` 带 `../x` 请求 zhangsan 的 id 与不存在的 id → 相同 404 且审计零行；符号链接指向空间外文件 → 403，`detail.op="read"`；HEAD → 404 无审计。
+- 「审计失败不发文件」沿用 `workspaces-http-failures.test.ts:267` 的 `db.setAuthorizer` 拒绝 `audit_events` INSERT：断言 500 `INTERNAL_ERROR_ENVELOPE`、`no-store`、无 `content-disposition`、`content-type` 为 JSON、正文不含文件内容，且 `spyBodyIo()` 的 `createReadStream` 对该文件零调用。最后一条让「审计挪到发送之后」确定判红，不依赖 Fastify 的发头时机（未读 Fastify 源码核实）。
+- 其余用例：「不支持范围」（100 字节，200，无 `content-range`、无 `accept-ranges`）；html / svg / pdf / xml 四例都是 `application/octet-stream` + attachment；纯函数表驱动（中文、空格、`"`、`\`、`\n` 与 `\x7f`、emoji、`'()*`）；打开失败用 `workspaces-http.test.ts:577` 的 `onSend` 里 `unlinkSync` 手法；文件名含 `\n` 的真实文件下载 → 200。
+- 既有测试无须改：`workspaces-http-failures.test.ts:231` 的 "all five routes" 是显式 URL 列表，`server-assembly.test.ts:560` 只包 `registerWorkspaces`。不要往 `workspaces-http.test.ts`「完整真实装配与隔离」加 `download` 行（那是 11.4）。无 checklist 行（纯服务端；CH-33 归 25.6）；不动 `docs/architecture/system.md` §9；`smoke/files.hurl` 归 26.2。`reply.send(stream)` 若被 semgrep 标记，仿 `rest.ts:298` 加 `nosemgrep`。
+- 变异：`audit.emit` 挪到 `reply.send(stream)` 之后 → 「审计失败不发文件」判红。状态码与正文断言是否判红取决于发头时机；`createReadStream` 零调用断言保证判红。
+- 变异：`Content-Type` 改用真实类型（按扩展名）→ 「主站不把工作空间文件当文档返回·download 半边」的 html / svg / pdf / xml 断言判红，「任意文件作为附件」的 `page.html` 也红。
+- 变异：去掉 `ensureOwnedRoot`，或挪到 `resolve` 之后 → 「lisi + `../x` → 404 且审计零行」判红（变成 403 加一条 `sandbox.reject`）。
+- 变异：`resolve` 的 `op` 换成跳过沙箱的直接 `join(root, path)` → 「`../x` → 403 + `sandbox.reject`」与符号链接用例判红。
+- 变异：去掉 `isFile()` 判断 → 「拒绝项」的 `out` 目录用例判红（变成 500 或 `EISDIR`）。
+- 变异：`parsePathQuery(query, false)` → 缺 `path` 的 400 判红（变成 404）。
+- 变异：下载改走 `classifyPreview` 的上限 → 30 MiB `big.bin` 与 `archive.zip` 判红（413 / 415）。
+- 变异：去掉 `Content-Length`，或取截断值 → 「精确的 `Content-Length`」判红。
+- 变异：ASCII 回退名不替换 `"` 或 `\` → 纯函数用例判红；不替换控制字符 → `\n` 文件名的真实下载判红（`setHeader` 抛 `ERR_INVALID_CHAR` → 500）。
+- 变异：`filename*` 改用 `encodeURIComponent` → `'()*` 用例判红。
+- 变异：支持 `Range`（返回 206）→ 「不支持范围」判红。
+- 变异：去掉 `exposeHeadRoute: false` → HEAD 用例判红（多出一条 `file.download`）。
+- 变异：去掉 `onError` 清头 → 「打开失败」用例的 `content-type` 为 JSON、无 `content-disposition` 断言判红。
+- 变异：预期不可观察：把流的 `end` 截界去掉（改成无界 `createReadStream`）。测试里文件不会在 lstat 后增长，属防御性实现，PR 表中标注「不可观察」。
+  - 实施后更正：上面「流不按 `size` 截界 → 预期不可观察」已不成立——交付的测试加了「审计后文件增长」用例，该变异判红。规格点名的外账号 `lisi` 是种子里唯一的管理员（`u3`），评审后测试的两处外账号改为 `lisi`（另保留普通成员一行）；「去掉 `ensureOwnedRoot`」由「属于自己但根目录缺失的 id」夹具判红（他人 id 的 404 是 facade 的双重保证）。`rest.ts` 在本刀之前是 418 行。lstat → 打开窗口的完整陈述（中间目录分量、FIFO）见 #1286。

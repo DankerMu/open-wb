@@ -42,7 +42,7 @@ const UPLOAD_NAME_MAX_BYTES = 255;
 /** Reserved for the temporary files `storeUpload` writes into the same directory. */
 const UPLOAD_TEMP_PREFIX = ".upload-";
 
-const noStoreWorkspaceResponse: onRequestHookHandler = (_request, reply, done) => {
+export const noStoreWorkspaceResponse: onRequestHookHandler = (_request, reply, done) => {
   reply.header("Cache-Control", "no-store");
   done();
 };
@@ -64,7 +64,7 @@ const closeUploadConnectionOnError: onErrorHookHandler = (_request, reply, _erro
   done();
 };
 
-function currentPrincipal(request: FastifyRequest): { id: string } {
+export function currentPrincipal(request: FastifyRequest): { id: string } {
   const principal = request.principal;
   if (principal === null) {
     throw new HttpError("unauthorized");
@@ -72,7 +72,7 @@ function currentPrincipal(request: FastifyRequest): { id: string } {
   return principal;
 }
 
-function ensureOwnedRoot(
+export function ensureOwnedRoot(
   dependencies: WorkspaceRestDependencies,
   principal: { id: string },
   workspaceId: string,
@@ -83,7 +83,7 @@ function ensureOwnedRoot(
   }
 }
 
-function parsePathQuery(query: unknown, required: boolean): string {
+export function parsePathQuery(query: unknown, required: boolean): string {
   if (typeof query !== "object" || query === null || Array.isArray(query)) {
     throw new HttpError("bad_request");
   }
@@ -144,7 +144,7 @@ function isOrdinaryDirectory(path: string): boolean {
   return lstatExisting(path)?.isDirectory() === true;
 }
 
-function lstatExisting(path: string) {
+export function lstatExisting(path: string) {
   try {
     return lstatSync(path, { throwIfNoEntry: false });
   } catch (error) {
