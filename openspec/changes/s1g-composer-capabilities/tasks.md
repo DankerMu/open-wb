@@ -852,7 +852,7 @@ Minimal mergeable slice: 14.1 + 14.2a + 14.2b + 14.2c 一刀（options 状态、
 
 ## 15. web — 模型与推理强度控件
 
-- [ ] 15.1 新文件 `web/src/features/chat/model-picker.tsx`（登记 `MIGRATED_AREAS`）：模型按钮与菜单（能力标签、截断与 `title`、`modelId` 不在 options 里时退为原文）、强度按钮与菜单（七个界面名的映射常量放在同一文件或 `composer-options.ts`，没有 `自动`；当前强度不在当前模型的 `efforts` 里时按钮照常显示其界面名、菜单没有选中项）、提交与失败回退、两个控件互相禁用在途、不随输入框锁定禁用；欢迎态换模型时强度的重算规则。提交的 handler 与组 14 的权限共用一个 `patchComposer(sessionId, patch)`（不写第二份 fence 逻辑）。
+- [x] 15.1 新文件 `web/src/features/chat/model-picker.tsx`（登记 `MIGRATED_AREAS`）：模型按钮与菜单（能力标签、截断与 `title`、`modelId` 不在 options 里时退为原文）、强度按钮与菜单（七个界面名的映射常量放在同一文件或 `composer-options.ts`，没有 `自动`；当前强度不在当前模型的 `efforts` 里时按钮照常显示其界面名、菜单没有选中项）、提交与失败回退、两个控件互相禁用在途、不随输入框锁定禁用；欢迎态换模型时强度的重算规则。提交的 handler 与组 14 的权限共用一个 `patchComposer(sessionId, patch)`（不写第二份 fence 逻辑）。
   **实施注记（15.1–15.4，fixture 评审补充，#1030）**：
   - 现状漂移：右组不在 `capability-bar.tsx`（275 行，本刀不改），在 `composer.tsx:113` 的 `composer-actions`（159 行）。必改而 issue 边界没列的文件：`composer.tsx`、`conversation-view.tsx`（216 行）、`page.tsx`（118 行），以及下面点名的三个既有测试；写进偏离记录。下文行号均为 origin/master，#1029 合入后重定位。
   - `use-chat-session.ts` 加零行：`composerOptions`（`:749`）、`welcome`、`sessionActions`、`selected` 都已返回。`page.tsx` 多传 `modelId={selected?.modelId}` 与 `reasoningEffort={selected?.reasoningEffort}` 两行（照 #1029 传 `approvalMode` 的写法）；开工先确认 `composerOptions` / `onPatchComposer` 已到 `ConversationView`，没有就停下报告。
@@ -872,9 +872,9 @@ Minimal mergeable slice: 14.1 + 14.2a + 14.2b + 14.2c 一刀（options 状态、
   - 守卫：`model-picker.tsx` 登记进 `ui-layering.test.ts`，两处都插在 `message-thread.tsx`（`:40`、`:364`）之后，712 → 714 行。新导出只有 `ModelPicker`，knip 无新报。与 `permission-tier.tsx` 同是「触发按钮加单选菜单」，rebase 后看 jscpd；超了就把共用的触发按钮抽成新文件并登记，不调阈值。
   - 变异（PR 描述，15.3 五条之外）：`patchComposer` 忽略响应 → `{m3, high}` 一步红（改的是 #1029 的文件，注明）；乐观显示在这一步不红，由「失败回退」判红。去掉 `pending` → 在途时按钮 `disabled` 断言红。`disabled` 接上 `composerDisabled` → 生成中一例红。去掉 `title` 或 `max-w-40` → 长名一例红。标签条件写反 → 菜单 `textContent` 红。欢迎态选模型不写强度键 → 创建 input 的 `reasoningEffort:"high"` 红。
   - 15.4：行接在 #1029 的 14.5 各行之后（master 末行是 CH-65，后合入者改号）。「新会话沿用上次的选择」一行的操作必须含「刷新页面后再看欢迎页」：`options.defaults` 每个 client 只取一次，会话里改过之后，欢迎页按钮在刷新前仍是旧缺省（偏离记录）。
-- [ ] 15.2 测试新文件 `web/test/chat-model-picker.test.tsx`（整页挂载）：model-selection「模型与推理强度控件」五条场景。
-- [ ] 15.3 变异证据：不支持推理时仍渲染强度控件 → 判红；换模型后不以响应为准 →「切换模型与强度」的 `{m3, high}` 一步判红；欢迎态保留新模型不支持的强度 →「欢迎态的选择」判红；当前强度不在 `efforts` 里时按钮退为空或原文、或菜单里有选中项 →「切换模型与强度」的 `{m3, xhigh}` 一例判红；`reasoningEffort` 在不支持推理的模型下仍进创建 input → 判红。
-- [ ] 15.4 功能验收清单新增行（`待签`）：输入框下方右侧显示模型名与推理强度；点模型名切换（需要管理员配置多个模型，写明配置前只有一项）；强度的档位列表（缺省单模型配置下七项，没有 `自动`；写明该配置下所选强度可能被 omp 取成相邻的一档，要一致需管理员配置 `MODEL_CATALOG` 的 `efforts`）；不支持推理的模型不显示强度；生成中切换不影响正在生成的回答、下一条消息起生效；重新生成用当前选择；分叉出的会话沿用原会话的选择；新会话沿用上次的选择。
+- [x] 15.2 测试新文件 `web/test/chat-model-picker.test.tsx`（整页挂载）：model-selection「模型与推理强度控件」五条场景。
+- [x] 15.3 变异证据：不支持推理时仍渲染强度控件 → 判红；换模型后不以响应为准 →「切换模型与强度」的 `{m3, high}` 一步判红；欢迎态保留新模型不支持的强度 →「欢迎态的选择」判红；当前强度不在 `efforts` 里时按钮退为空或原文、或菜单里有选中项 →「切换模型与强度」的 `{m3, xhigh}` 一例判红；`reasoningEffort` 在不支持推理的模型下仍进创建 input → 判红。
+- [x] 15.4 功能验收清单新增行（`待签`）：输入框下方右侧显示模型名与推理强度；点模型名切换（需要管理员配置多个模型，写明配置前只有一项）；强度的档位列表（缺省单模型配置下七项，没有 `自动`；写明该配置下所选强度可能被 omp 取成相邻的一档，要一致需管理员配置 `MODEL_CATALOG` 的 `efforts`）；不支持推理的模型不显示强度；生成中切换不影响正在生成的回答、下一条消息起生效；重新生成用当前选择；分叉出的会话沿用原会话的选择；新会话沿用上次的选择。
 
 Suggested fixture level: compact - 独立的两个下拉控件，复用组 14 的提交路径与 options；无新的公共入口
 Minimal mergeable slice: atomic - 两个控件共用一份提交与强度重算逻辑，拆开会留下半个不可验收的状态；测试与清单行同刀
