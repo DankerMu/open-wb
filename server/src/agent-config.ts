@@ -53,11 +53,7 @@ export interface AgentSettings {
   modelUpstreamApiKey?: string;
   /** 模型白名单与缺省模型（MODEL_CATALOG；未设置时为 MODEL_ID / MODEL_REASONING 的单模型）。 */
   modelCatalog: ModelCatalog;
-  /** 白名单缺省模型的 id（派生值；读者迁到 modelCatalog 后删除）。 */
-  modelId: string;
   ompUser?: string;
-  /** 白名单缺省模型是否支持推理（派生值；读者迁到 modelCatalog 后删除）。 */
-  modelReasoning: boolean;
   /** 所有会话可用审批档位的上界（APPROVAL_MAX_MODE，缺省 yolo 即三档都开放）。 */
   approvalMaxMode: ApprovalMode;
   /** 单个上传文件的字节上限（UPLOAD_MAX_BYTES，缺省 524288000）。 */
@@ -112,11 +108,7 @@ export function resolveAgentSettings(
     ...(modelUpstreamBaseUrl === undefined ? {} : { modelUpstreamBaseUrl }),
     ...(modelUpstreamApiKey === undefined ? {} : { modelUpstreamApiKey }),
     modelCatalog,
-    modelId: modelCatalog.defaultModelId,
     ...(env.OMP_USER === undefined ? {} : { ompUser: resolveOmpUser(env.OMP_USER, env.PATH) }),
-    modelReasoning: modelCatalog.models.some(
-      (model) => model.id === modelCatalog.defaultModelId && model.reasoning,
-    ),
     approvalMaxMode: resolveApprovalMaxMode(env.APPROVAL_MAX_MODE),
     uploadMaxBytes: resolvePositiveInteger(
       env.UPLOAD_MAX_BYTES,

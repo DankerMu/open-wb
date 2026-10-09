@@ -304,8 +304,11 @@ describe("推理强度集合 — 可选强度与缺省强度", () => {
 
 describe("resolveAgentSettings — 白名单进入配置", () => {
   const root = join(REPO_ROOT, "server");
+  /** 白名单里 id 等于 defaultModelId 的那一项（缺省模型的推理位从这里读）。 */
+  const defaultModelOf = (catalog: ModelCatalog): CatalogModel | undefined =>
+    catalog.models.find((model) => model.id === catalog.defaultModelId);
 
-  it("缺省：modelCatalog 为单模型，modelId / modelReasoning 是缺省模型的派生值", () => {
+  it("缺省：modelCatalog 为单模型，缺省模型即该项且支持推理", () => {
     const settings = resolveAgentSettings({}, root);
     expect(settings.modelCatalog).toStrictEqual({
       models: [
@@ -318,18 +321,18 @@ describe("resolveAgentSettings — 白名单进入配置", () => {
       ],
       defaultModelId: "deepseek-v4.1-flash",
     });
-    expect(settings.modelId).toBe("deepseek-v4.1-flash");
-    expect(settings.modelReasoning).toBe(true);
+    expect(settings.modelCatalog.defaultModelId).toBe("deepseek-v4.1-flash");
+    expect(defaultModelOf(settings.modelCatalog)?.reasoning).toBe(true);
   });
 
-  it("旧式单模型：MODEL_ID 与 MODEL_REASONING 原样进入三处", () => {
+  it("旧式单模型：MODEL_ID 与 MODEL_REASONING 原样进入 modelCatalog", () => {
     const settings = resolveAgentSettings({ MODEL_ID: "qwen-x", MODEL_REASONING: "off" }, root);
     expect(settings.modelCatalog).toStrictEqual({
       models: [{ id: "qwen-x", name: "qwen-x", reasoning: false, vision: false }],
       defaultModelId: "qwen-x",
     });
-    expect(settings.modelId).toBe("qwen-x");
-    expect(settings.modelReasoning).toBe(false);
+    expect(settings.modelCatalog.defaultModelId).toBe("qwen-x");
+    expect(defaultModelOf(settings.modelCatalog)?.reasoning).toBe(false);
   });
 
   it.each([
@@ -344,8 +347,8 @@ describe("resolveAgentSettings — 白名单进入配置", () => {
         models: THREE_MODELS_PARSED,
         defaultModelId: expectedId,
       });
-      expect(settings.modelId).toBe(expectedId);
-      expect(settings.modelReasoning).toBe(reasoning);
+      expect(settings.modelCatalog.defaultModelId).toBe(expectedId);
+      expect(defaultModelOf(settings.modelCatalog)?.reasoning).toBe(reasoning);
     },
   );
 

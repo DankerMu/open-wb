@@ -4,6 +4,12 @@
  * passed to every spawn as `--config` (global < project < overlay < CLI) and pins the keys that
  * would skip an approval or run a command outside one. The values were verified against omp
  * v18.0.10 and are not schema-checked by it: re-verify them on an omp upgrade.
+ *
+ * `tools.approvalMode: write` sits below argv: omp v18.0.10 writes `--approval-mode` into a runtime
+ * override layer above the overlay, so for an `always-ask` or `yolo` session the argv value is the
+ * one in effect and that line is only the fallback for a spawn without the flag (every spawn
+ * passes it). All sessions and all approval modes share this one file and its bytes never vary
+ * with the mode: a session changes mode by being re-spawned, never by rewriting the overlay.
  */
 import { basename, dirname } from "node:path";
 import { replaceFile } from "../../core/replace-file.js";

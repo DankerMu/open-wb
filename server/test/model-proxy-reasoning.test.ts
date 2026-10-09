@@ -97,21 +97,24 @@ afterAll(async () => {
 describe("resolveServerConfig — MODEL_REASONING", () => {
   it("未设置时为 true（缺省 on），且是自有字段", () => {
     const config = resolveServerConfig({}, SOURCE_ENTRY);
-    expect(Object.hasOwn(config, "modelReasoning")).toBe(true);
-    expect(config.modelReasoning).toBe(true);
+    expect(Object.hasOwn(config, "modelCatalog")).toBe(true);
+    expect(Object.hasOwn(config.modelCatalog.models[0] ?? {}, "reasoning")).toBe(true);
+    expect(config.modelCatalog.models[0]?.reasoning).toBe(true);
   });
 
   it.each([
     ["on", true],
     ["off", false],
   ])("精确 %s → %s", (raw, expected) => {
-    expect(resolveServerConfig({ [KEY]: raw }, SOURCE_ENTRY).modelReasoning).toBe(expected);
+    expect(
+      resolveServerConfig({ [KEY]: raw }, SOURCE_ENTRY).modelCatalog.models[0]?.reasoning,
+    ).toBe(expected);
   });
 
   it("设置 MODEL_REASONING 不改变其它键的解析与命名消息", () => {
     const config = resolveServerConfig({ [KEY]: "off", OMP_IDLE_MS: "7" }, SOURCE_ENTRY);
     expect(config.ompIdleMs).toBe(7);
-    expect(config.modelId).toBe(MODEL_ID);
+    expect(config.modelCatalog.defaultModelId).toBe(MODEL_ID);
     expect(thrownMessage({ [KEY]: "on", OMP_IDLE_MS: "01" })).toBe(
       "OMP_IDLE_MS must be a canonical ASCII decimal",
     );
@@ -180,8 +183,10 @@ describe("production entry — MODEL_REASONING", () => {
 
   it("compiled entry URL 与 source 得到同一缺省", () => {
     const compiledEntry = pathToFileURL(compiled.entry).href;
-    expect(resolveServerConfig({}, compiledEntry).modelReasoning).toBe(true);
-    expect(resolveServerConfig({ [KEY]: "off" }, compiledEntry).modelReasoning).toBe(false);
+    expect(resolveServerConfig({}, compiledEntry).modelCatalog.models[0]?.reasoning).toBe(true);
+    expect(
+      resolveServerConfig({ [KEY]: "off" }, compiledEntry).modelCatalog.models[0]?.reasoning,
+    ).toBe(false);
   });
 
   it.each(ENTRY_INVALID)(

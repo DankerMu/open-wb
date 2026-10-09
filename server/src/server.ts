@@ -84,7 +84,7 @@ export function sessionRuntimeOf(config: ServerConfig): SessionRuntime {
     bin: config.ompBin,
     sandboxRoot: config.sandboxRoot,
     stateDir: config.ompStateDir,
-    modelId: config.modelId,
+    modelId: config.modelCatalog.defaultModelId,
     idleMs: config.ompIdleMs,
     maxProcesses: config.ompMaxProcesses,
     spawnConcurrency: config.ompSpawnConcurrency,
