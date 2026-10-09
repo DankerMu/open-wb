@@ -395,6 +395,82 @@ Minimal mergeable slice: 8.0 一刀（纯搬迁）；8.1 + 8.6 一刀（视图�
 - [ ] 9.2 模型与强度：`Generation`（`pool.ts`）增「已应用的模型与强度」；`composer-align.ts` 里实现 chat-sessions「派发前按会话设置对齐进程」第 2 步（先 `set_model` 后 `set_thinking_level`，成功后才记）。两个调用点：prompt 路径在取得进程之后、`#bindDispatch` 写 `prompt` 之前；regenerate 路径在取得进程之后、`get_branch_messages` 之前（`branching.ts` 的 regenerate 编排里，先于 `branch` 与事务——失败属事务前，行不变）。`supervisor.ts` 至多 6 行。
   测试同文件：model-selection「换模型与强度后的帧序」（逐字核对 `frames=`）、「新进程重新应用」「生成中修改不打断」「命令失败按派发前失败处理」「消息不带模型」（两个模型下各完成一个回合后：快照每条消息的键集恰为 chat-sessions「会话 REST」所列、`PRAGMA table_info(chat_messages)` 没有模型或强度列）；chat-sessions「对齐失败按派发前失败补偿」「regenerate 的对齐失败不动任何行」「regenerate 用当前设置」（帧序：`set_model`、`set_thinking_level` 先于 `get_branch_messages`）；turn-control「模型对齐失败发生在事务之前」；session-metadata「继承三项设置」的 argv 与帧序部分。
   既有经宿主驱动假 omp 并断言完整 `frames=` 序列的宿主测试（`grep -rn "frames=" server/test` 里以 `negotiate_protocol,get_state,prompt` 开头的宿主级断言）按「每个 generation 首次派发多 `set_model` 与 `set_thinking_level`」改写并写进偏离记录；假 omp 夹具自身的单元用例（`fake-omp.test.ts`）不经宿主，不改。
+  **实施注记（9.2 + 9.4 + 9.5，fixture 评审补充，#1010）**：
+  - 行数现状：`supervisor.ts` 783、`pool.ts` 353、`composer-align.ts` 30、`branching.ts` 375、`omp/runtime.ts` 799、`fake-omp.mjs` 797、`fake-omp-composer.mjs` 120、`omp-runtime-commands.test.ts` 798、`support/omp-rpc.ts` 518、`session-composer-dispatch.test.ts` 522。本刀不碰 `omp/runtime.ts`、`omp/process.ts`、`omp/commands.ts`、两个 fake-omp 文件、`omp-runtime-commands.test.ts`、`fake-omp*.test.ts`。
+  - 不需要 `RealWorld` / `openReal` 的纯搬迁，也不必先加官方对照用例：runtime 级的 C10（`omp-runtime-commands.test.ts:700-722`）与 C11（`:730-738`）已钉住两帧与失败拒绝；实现只看 `command()` 成功或拒绝，不读返回值与错误文案。
+  - 首次派发的对齐不能因 argv 已带 `--model` 而省：D8 (e) 实测 `--resume` 后模型以 argv 为准，强度却是会话文件里的旧值；规格写明「每个 generation 第一次派发无条件 `set_model`」，不做「argv 相同就跳过」的优化。
+  - `pool.ts`：`Generation` 加 `applied: { modelId: string; effort: Effort | undefined } | undefined`，`generationTokens.issue` 的字面量里初值 `undefined`。临时进程没有 generation，不涉及。
+  - `pool.ts` 新增 `commandOn(slot: Slot, frame: RuntimeCommandFrame): Promise<unknown>`，从 `branching.ts:132-146` 的 `#lastEntry` 原样抽出：记 `before = slot.generation`；catch 里取出并清空 `slot.acquisitionFault` 后 `throw fault ?? error`；finally 里 `slot.generation !== before` 则 `releaseDispatch(slot, slot.generation)`。`#lastEntry` 改调它，行为不变。
+  - 为什么必须经 `commandOn`：新 slot 上第一条 `command()` 触发获取，`issue()` 生出的 generation 自带 `dispatchCount: 1`，随后 `#bindDispatch`（`supervisor.ts:497-499`）见它已存在再加一，generation 永不封存。`session-supervisor-faults.test.ts:79-84`（`rejects.toBe(tokens.issueFailure)`）与其上的 epoch 触发器例钉着获取故障的原样上抛，现在故障发生在 `set_model` 而不是 `prompt`。
+  - `composer-align.ts` 新增 `alignModel(slot: Slot, effective: { modelId: string; reasoningEffort: Effort | null }): Promise<void>`，本地常量 `PROVIDER = "workbuddy"`（`process.ts:99` 是字面量，不为此改它）。它值导入 `./pool.js`（`pool.ts` 对 `supervisor.js` 只有 type 导入，无值环），偏离 9.1 注记「不导入 pool.js」。
+  - `alignModel` 算法：`slot.generation?.applied` 为空或 `modelId` 不同 → `commandOn(set_model)`，成功后在当时的 `slot.generation` 上记 `{ modelId, effort: undefined }`；随后 `reasoningEffort !== null` 且与 `applied.effort` 不同 → `commandOn(set_thinking_level)`，成功后记 `effort`。`effort: undefined` 就是「刚发过 `set_model`」；两者都未变时不碰 runtime。
+  - 线上取值：`level` 原样发有效强度，`off` 也发（实机表 `off → off`），集合外的值不夹取（O3）。不支持推理的模型有效强度恒为 null，即使原始列有值也不发 `set_thinking_level`，「帧序」第五步（PATCH `m2`）钉这一点。
+  - `supervisor.ts` 只改 `#onSlot`（至多 4 行，终值不超过 787）：`const aligned = (slot: Slot) => alignModel(slot, effective).then(() => use(slot));`，`fresh()` 与存活路径都传 `aligned`，import 并入第 11 行。regenerate 经 `acquire → #onSlot` 自动落在 `get_branch_messages` 之前，`branching.ts` 只改 `#lastEntry` 与其注释——偏离任务原文「在 `branching.ts` 的 regenerate 编排里」。
+  - 窗口：prompt 路径的认领先于对齐（存活路径 `#claim(live, claim)`、新 slot 在 `admit` 之前认领）；regenerate 路径靠 `controls.during`。池的 `busy()` 两者都看，所以对齐中的 slot 不会被驱逐，`#onProcessExit` 也不会抢先退役。命令应答到 `runtime.prompt()` 之间只有 promise 续体，`alignModel` 与 `aligned` 里不得插入任何 I/O await 或定时器。无命令可发时也多一个微任务，fence 是认领而不是同步性；因此变红的既有用例先查原因。
+  - 失败处理不需要新产品代码：`#onSlot` 的 catch（`live.pump === undefined` → `#retireSlot`）与 `#onNewSlot` 的 catch 给出「slot 被退役」；`translateSupervisorError` 把 `AgentUnavailableError` 映射为 `agent_unavailable`，`agent_capacity` 原样透传；prompt 的受理对由 REST 既有路径补偿。「成功后才记」没有独立变异（失败必退役，提前记不可观察），写进偏离记录。
+  - 逐情形期望：
+  - prompt + `set_model` 失败：502；受理对删除，`status` / `updatedAt` 复原（基线取在 PATCH 之后）；该进程无新增 `prompt` 帧并已退役；审计不增；改回可用模型后 202（新 spawn 带 `--resume`）。
+  - prompt + `set_thinking_level` 失败：同上。
+  - prompt + 进程在对齐中退出：`agent_unavailable`，活进程 0，token 已撤销，下一条 prompt 新 spawn 并重发两命令。
+  - prompt 换档后准入满：503 `agent_capacity`，受理对补偿，旧进程已退出，无新 spawn，`session.permission` 只有 PATCH 那一条。
+  - regenerate + 失败模型：502；无 `get_branch_messages` / `branch` / `prompt`；a1 及其步骤、审批逐值不变；`status`、`updated_at`、`omp_session_file` 不变；进程已退役、占用释放；改回后 202。
+  - regenerate 换档后准入满：503，行同样不变。
+  - 冷进程上对齐失败时 `stream_epoch` 已加一（取得进程即 bump，同今天的 `get_branch_messages` 失败），断言不写 epoch 不变。
+  - 失败装置：
+  - 失败模型：`workbuddy-missing-model` 必须进测试世界的白名单（`THREE_MODEL_CATALOG` 加一项 `reasoning:false`），否则被 `effectiveComposer` 回落成缺省模型，用例测不到失败。
+  - 失败强度：`workbuddy-bad-level` 不是七个强度名，REST 与迁移 040 的 CHECK 都拒绝；用 `PRAGMA ignore_check_constraints = ON` 直接写库再关掉（已在 node:sqlite 上验证可行，有效值解析对非 null 原始强度原样透传）。恢复用 PATCH `{reasoningEffort:"high"}`。写进偏离记录。
+  - 对齐中进程死亡：FakeChild 脚本世界 `child.onCommand("set_model", () => child.exit(1))`，写法同 `session-fork-faults.test.ts:392`。
+  - 503 的造法——prompt：上限 1，A 存活空闲，`holdFirstExit` 扣住 A 的 exit，PATCH A 换档后发 prompt（卡在 `#retireSlot`）；B 发 prompt，它的准入把 A 的旧 slot 当驱逐对象一起等；放开后 B 先入池且已认领，A 的 `fresh()` 无可驱逐 → 503。B 回合结束后 A 再发 202。
+  - 503 的造法——regenerate：上限 1 的造法不适用（A 持有控制占用，旧 slot 不可驱逐）。用上限 2 加四个会话：D、A 依次各完成一回合（D 最久未活动，扣住 D 的 exit）；C1 发 prompt（驱逐 D 并等待），C2 发 prompt（排队）；PATCH A 换档后 regenerate（退役 A，其准入排第三）；等 A 的旧进程死后放开 D → C1、C2 入池且都已认领 → A 得 503。
+  - 先做一次测试支撑提交：`support/omp-rpc.ts` 的 `FakeChild.replyHandshake`（`:416-424`）加 `set_model`（data `{provider, id: modelId}`）与 `set_thinking_level`（无 data）的成功应答。所有 supervisor 级 FakeChild 世界都经它（`session-supervisor-helpers.ts:157`、`session-delete-helpers.ts:308`、`session-supervisor-pool-exit.test.ts:412`；`scriptChild` 与 `session-fork-faults.test.ts:355` 只覆盖 `get_state`）。不加的话这些世界的每次派发都挂死在 `set_model`。此提交单独全绿。
+  - 必须改写的帧序断言（缺省与 `TEST_COMPOSER` 世界都是推理模型、强度 `high`，前缀一律是 `set_model,set_thinking_level`）：
+  - `session-stop-intent-helpers.ts:24` 的 `PROBED` → `negotiate_protocol,get_state,set_model,set_thinking_level,prompt,abort,prompt`（八处读者随之）。
+  - `session-stop.test.ts:130`、`:209`、`:239`：在 `get_state` 后插两帧。
+  - `session-supervisor-before-dispatch.test.ts:92`、`:169-173`：同样插两帧。
+  - `session-stop-intent-windows.test.ts:212-216`：同样插两帧。
+  - `session-composer-dispatch.test.ts:510-517` → `…get_state,set_model,set_thinking_level,get_branch_messages,branch,get_state,prompt`；同时改 `:15-16`、`:508` 的注释。
+  - `turn-control-slash.test.ts:206-211`：冷进程 regenerate，`slice(2)` 之后多两帧，`frames[1]` / `frames[3]` 变 `[3]` / `[5]`。
+  - `session-fork.test.ts:227-228`：R2b 是分叉会话自己的冷进程，`frames[1]` 变 `[3]`。
+  - 不改且必须原样通过：
+  - `session-regenerate.test.ts:96` 与 `session-regenerate-rest-real.test.ts:132`：同一 generation 上的第二次派发，无前缀；它们是「无条件发命令」变异的判红点之一。
+  - 临时进程的帧序：`session-fork.test.ts:96,177,208`、`session-fork-rest-real.test.ts:236`、`session-fork-faults.test.ts:404-408`、`session-undo.test.ts:432-433`。
+  - runtime / OmpProcess 级：`omp-approval-requests.test.ts:239-317`、`omp-runtime-commands.test.ts:359`。
+  - `prompt-snapshot.test.ts:79`（数的是子进程个数）与 `linux/uid-isolation.test.ts`（不断言 `frames`）。
+  - 临时进程：fork 不做第 2 步（chat-sessions 明文），`branch-temp.ts` 不动；message-undo delta 对撤回的临时进程未写，按 fork 同样处理，写进偏离记录。
+  - 新测试放新文件 `server/test/session-composer-align.test.ts`（原文件加十来例会破 800，偏离「测试同文件」与 issue 的 PR Boundary）；`plant` / `processOf` / `setMode` / `holdFirstExit` 搬进 `session-composer-helpers.ts` 两处共用（jscpd）。
+  - 新用例：
+  - 「帧序」：三模型世界，`probeFrames` 逐字等于规格那一串；另断言 stdin 帧 `{type:"set_model", provider:"workbuddy", modelId:"m3"}` 与 `level` 依次为 `high,low,high`；`world.rt.calls` 恒为 1。
+  - 「新进程重新应用」：接上例，推进 `IDLE_MS` 回收后新进程收到 `set_model,prompt`；改回 `m1` 后收到 `set_model,set_thinking_level,prompt`。
+  - 「生成中修改不打断」：`approval` 场景挂起回合。
+  - 「消息不带模型」：键集加 `PRAGMA table_info(chat_messages)`；负断言，无变异。
+  - 「regenerate 用当前设置」。
+  - 「继承三项设置」的帧序加在 `session-fork-metadata.test.ts:576` 既有例上：新会话 prompt 后 argv 为 `yolo`，前缀两帧为 `m3`、`low`。
+  - 规格外补一例：`set_model` 应答被扣住时 stop → 202，放开后帧序为 `…set_model,set_thinking_level,prompt,abort`。
+  - 9.5：CI 冒烟是官方 omp v18.0.10 加 `fake-upstream.mjs`（只读 `model` / `messages`，`ci.yml` 的 smoke、ui-walk、uid-isolation 三个 job 都用真 omp）；hurl 不数帧；缺省配置下推理开启，所以两条命令都会发；`chat.hurl:87` 的 regenerate 落在已对齐的 generation 上，无额外命令。纯回归。
+  - 验证缺口：官方对照用例只在首回合之后的存活进程上发过这两条命令，没覆盖两种情形——「新会话握手后、首条 prompt 之前」（冒烟是唯一证据，本 PR 首次覆盖）；「`--resume` 冷进程上先两命令再 `get_branch_messages`」（对照与冒烟都不覆盖）。建议在 `omp-official-model-commands.test.ts`（327 行）补这两步只断言成功；该文件只在 CI uid-isolation job 运行。
+  - 提交接缝：(1) `replyHandshake` 应答；(2) `commandOn` 抽取，行为不变；(3) `Generation.applied`、`alignModel`、`#onSlot` 接线，加帧序断言改写与成功路径新例；(4) 失败与 503 用例，勾 9.2 / 9.4 / 9.5。(3) 单独即可合并。
+  - 变异 → 判红：
+  - 两命令次序对调 → 「帧序」。
+  - 每次派发都发 → 「帧序」第三条 prompt 与 `session-regenerate.test.ts:96`。
+  - 新 generation 不重发 → 「新进程重新应用」与 `PROBED`。
+  - 强度不同也不发 → 「帧序」第四条。
+  - 不支持推理仍发 level → 第五条。
+  - provider 写错 → `set_model` 帧断言。
+  - 失败后仍 `use` → 「命令失败」两例。
+  - 失败不退役 → 「该进程已被 retire」。
+  - 对齐挪到 `acceptRegenerate` 之后 → 「regenerate 的对齐失败不动任何行」「模型对齐失败发生在事务之前」。
+  - 对齐挪到 `get_branch_messages` 之后 → 「regenerate 用当前设置」。
+  - 不上抛 `acquisitionFault` → `session-supervisor-faults.test.ts:79-84`。
+  - 去掉 `commandOn` 的 `releaseDispatch` → 先看既有 `session-supervisor-pool-exit` / `session-supervisor-stream` 哪条红；都不红就补「空闲回收的退役窗口内（扣住 exit）快照游标 `seq` 为 null」。
+  - 白盒不变量（交 owner 审）：
+  - (1) 两命令只在 `#onSlot` 包住的 `use` 之前发，认领或控制占用已在手，PATCH 不通知 supervisor。
+  - (2) 次序恒为 `set_model` → `set_thinking_level` → `prompt` / `get_branch_messages`。
+  - (3) 已应用值只存在于 generation，新 generation 为空；失败必退役，脏值不会被后续派发读到。
+  - (4) 发出的只有白名单内的有效模型与有效强度。
+  - (5) 对齐不产生幽灵 `dispatchCount`。
+  - (6) regenerate 的对齐先于任何行改动。
+  - (7) 临时进程不发这两条命令。
+  - (8) `omp/runtime.ts` 字节不变，命令与回合互斥仍由它的 `#turn` / `#commanding` 把关。
 - [x] 9.3 审批在非 `write` 档下的端到端：`server/test/session-approvals*.test.ts` 新增一例——`always-ask` 会话 + 假 omp `approval-write`：登记、事件、作答、`chat_approvals.tool="write"`、审计（tool-approval delta 场景）；session-permission-tier「每次都问下的超时」（注入时钟 59999 / 60000）。
 - [ ] 9.4 变异证据：去掉档位比较 →「以新档位重启」判红；PATCH 时就退役 →「修改设置本身不动进程」「生成中改档位」判红；`set_thinking_level` 先于 `set_model` → 帧序判红；每次派发都无条件发命令 → 帧序第三条 prompt 处判红；新 generation 不重发 →「新进程重新应用」判红；命令失败后仍写 prompt →「命令失败」判红；把 regenerate 的对齐挪到事务之后 →「regenerate 的对齐失败不动任何行」「模型对齐失败发生在事务之前」判红（旧助手行被删）。
   「对齐期间的并发请求」钉的是既有的认领 fence（对齐发生在认领之后），没有独立变异，写进偏离记录。
