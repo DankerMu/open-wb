@@ -372,7 +372,7 @@ Minimal mergeable slice: 10.1 一刀（`write` 尚无调用方；类型联合的
   - 32 MiB：`vitest.shared.mjs` 没有 `--expose-gc`，用 `v8.setFlagsFromString("--expose-gc")` 加 `vm.runInNewContext("gc")`，不改配置。payload 在基线之前分配，基线前与每次采样前都 gc，采样 `heapUsed + arrayBuffers`，按 64 KiB `subarray` 加 `drain` 发送；内容比对在采样结束之后做；用例超时 30 s；依赖 vitest 缺省的 forks 池（同进程里的其它文件会污染读数）。
   - 临时空间：`inject` 无 body 的 `POST /api/sessions` 得到 T（根为 `<sandboxRoot>/u1/tmp-<T>`），删除用 `session-delete-helpers.ts` 的 `sendDelete`，未派发过 prompt 就不会起进程。审计失败照 `workspaces-http-failures.test.ts:264-300` 的 `db.setAuthorizer` 拒绝 `audit_events` 的 INSERT。256 字节名字在 `uploads` 存在与不存在时各一例，另加一例 86 个汉字（258 字节）。
   - 变异（11.5 的五条之外）：`source` 换成迭代器包装 → 分块超限收不到 413；去掉 `Connection: close` → keep-alive 一例超时；改用 `parseAs: "buffer"` → 声明超限、32 MiB 等例红（单加 `bodyLimit` 实测不改变任何行为：透传流的 parser 不查大小，#1015 的 PR 记为不可观测）；不 `removeAllContentTypeParsers` → `application/json` 变 500 或 201；去掉 (a) → 无 body 一例 500；(c) 与 (b) 对调 → 缺 `name` 加超限得 413；去掉 (d) → `uploads` 已存在的 256 字节例得 403；(g) 不判非目录 → 409 例变 500；`>` 写成 `>=` → 恰 1024 例 413；去掉校验 → `NaN` 例不抛；`createApp` 不取 `assembly.uploadMaxBytes` → 1024 上限各例红；`fastify({ requestTimeout: 1 })` → 超时断言红。11.5 里「用 rename 定名」「不删临时文件」两条改的是 `upload.ts`，在 REST 层判红。
-- [ ] 11.6 `smoke/files.hurl`：chat-harness delta 的上传断言（201、编号、目录树、403、400、404）；`make smoke` 通过。
+- [x] 11.6 `smoke/files.hurl`：chat-harness delta 的上传断言（201、编号、目录树、403、400、404）；`make smoke` 通过。
   **实施注记（11.6，fixture 评审补充，#1016）**：
   - 只改 `smoke/files.hurl`（现 128 行）。它用 zhangsan（`u1`）的正式空间 `smoke-fixture`，id 在第 29 行捕获为 `workspace_id`；不建会话，没有要删的东西。文首第 1–6 行的流程注释同步补上上传步骤。
   - 属主侧五步插在 `notes.csv` 预览（第 96–100 行）之后、zhangsan 登出（第 102 行）之前，次序照 chat-harness delta 第 9 行：201 → 同名 201 → `tree?path=uploads` → 403 → 400。404 一步插在 lisi 登录（第 110–116 行）之后、lisi 登出之前，挨着既有的树 404。
