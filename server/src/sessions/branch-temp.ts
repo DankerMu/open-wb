@@ -1,8 +1,9 @@
 /**
  * The part of the branch family that fork (#466) and undo share (#950): the entry alignment by
- * wire candidates (#555), `branch` → `get_state`, and the temporary process that runs them — pool
- * admitted, never a slot or a generation, shut down before its caller commits anything. The
- * prechecks, the control claim and the commit stay with the caller.
+ * wire candidates (#555; with the attachment suffix of a message that stores attachments, #1018),
+ * `branch` → `get_state`, and the temporary process that runs them — pool admitted, never a slot or
+ * a generation, shut down before its caller commits anything. The prechecks, the control claim and
+ * the commit stay with the caller.
  */
 import { HttpError } from "../core/errors/index.js";
 import { SessionRuntime } from "./omp/runtime.js";
@@ -13,6 +14,7 @@ import {
   sessionRuntimeOpts,
   temporaryTokens,
 } from "./pool.js";
+import { attachmentSuffix } from "./slash-commands.js";
 import type { SessionSupervisorRuntime } from "./supervisor.js";
 import type { TokenRegistry } from "./tokens.js";
 import type { ControlClaims } from "./turn-control.js";
@@ -47,6 +49,11 @@ interface BranchTempPlan {
   /** The branch point's message id, and the session's user messages in order to align it. */
   messageId: number;
   users: readonly StoredUser[];
+  /**
+   * Message id → the attachment paths it stores, read with `users` in the caller's precheck; a
+   * message with no entry has no attachment.
+   */
+  attachments: ReadonlyMap<number, readonly string[]>;
 }
 
 /**
@@ -116,7 +123,9 @@ export class BranchTemps {
     } catch {
       throw new HttpError("agent_unavailable");
     }
-    const entryId = alignBranchEntries(plan.users, branchEntries(data)).get(plan.messageId);
+    const entryId = alignBranchEntries(plan.users, branchEntries(data), plan.attachments).get(
+      plan.messageId,
+    );
     if (entryId === undefined) {
       throw new HttpError("agent_unavailable");
     }
@@ -155,12 +164,18 @@ export async function branchTo(runtime: SessionRuntime, entryId: string): Promis
 }
 
 /**
- * Whether an entry's text is a wire candidate of stored user content: the content itself (sent
- * verbatim before the prompt route escaped) or, for `/` text, its escaped form. Text only — the
- * current skill set is never consulted, so installing or removing a skill moves no alignment.
+ * Whether an entry's text is a wire candidate of a stored user message: its content (sent verbatim
+ * before the prompt route escaped) or, for `/` text, its escaped form — each followed by the
+ * attachment suffix of the paths the message stores, which is empty for none. A message with
+ * attachments and no text therefore has one candidate, the suffix itself. The stored row only —
+ * the current skill set is never consulted, so installing or removing a skill moves no alignment.
  */
-function matches(entryText: string, content: string): boolean {
-  return entryText === content || (content.startsWith("/") && entryText === ` ${content}`);
+function matches(entryText: string, content: string, paths: readonly string[]): boolean {
+  const suffix = attachmentSuffix(paths);
+  return (
+    entryText === content + suffix ||
+    (content.startsWith("/") && entryText === ` ${content}${suffix}`)
+  );
 }
 
 /** The entries of a get_branch_messages answer; anything but a list is no entry. */
@@ -169,10 +184,17 @@ export function branchEntries(data: unknown): readonly unknown[] {
   return Array.isArray(messages) ? messages : [];
 }
 
-/** The entryId of `entry` when it is well formed and its text is a wire candidate of `content`. */
-export function entryFor(entry: unknown, content: string): string | undefined {
+/**
+ * The entryId of `entry` when it is well formed and its text is a wire candidate of the message
+ * stored as `content` with the attachment `paths`.
+ */
+export function entryFor(
+  entry: unknown,
+  content: string,
+  paths: readonly string[],
+): string | undefined {
   const { entryId, text } = record(entry) ?? {};
-  return typeof entryId === "string" && typeof text === "string" && matches(text, content)
+  return typeof entryId === "string" && typeof text === "string" && matches(text, content, paths)
     ? entryId
     : undefined;
 }
@@ -185,11 +207,12 @@ export function entryFor(entry: unknown, content: string): string | undefined {
 function alignBranchEntries(
   users: readonly StoredUser[],
   entries: readonly unknown[],
+  attachments: ReadonlyMap<number, readonly string[]>,
 ): Map<number, string> {
   const aligned = new Map<number, string>();
   let next = 0;
   for (const user of users) {
-    const entryId = entryFor(entries[next], user.content);
+    const entryId = entryFor(entries[next], user.content, attachments.get(user.id) ?? []);
     if (entryId !== undefined) {
       aligned.set(user.id, entryId);
       next += 1;

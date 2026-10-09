@@ -283,6 +283,21 @@ export function toWireText(text: string, skills: readonly { name: string }[]): s
   return text.startsWith("/") && classifyPrompt(text, skills).kind === "text" ? ` ${text}` : text;
 }
 
+/** The line every attachment suffix opens with; the paths follow it one per line. */
+const ATTACHMENT_NOTE = "用户随本条消息上传了以下文件（相对当前工作目录的路径），需要时请读取：";
+
+/**
+ * What follows the wire text of a prompt sent with attachments (#1018): two U+000A, the fixed
+ * line, then U+000A and `- ` before each path as given, in order, and no trailing newline; the
+ * empty string for no path. The one construction of it: the prompt route and the branch alignment
+ * (branch-temp.ts) both come here, so the entry omp stored is matched byte for byte.
+ */
+export function attachmentSuffix(paths: readonly string[]): string {
+  return paths.length === 0
+    ? ""
+    : `\n\n${ATTACHMENT_NOTE}${paths.map((path) => `\n- ${path}`).join("")}`;
+}
+
 function byName(left: Skill, right: Skill): number {
   return compareCodePoints(left.name, right.name);
 }

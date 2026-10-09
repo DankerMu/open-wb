@@ -436,7 +436,7 @@ Minimal mergeable slice: 11.1 一刀（纯 IO，带测试；导出被 11.2 引�
 
 ## 12. sessions — prompt 携带附件
 
-- [ ] 12.1 `server/src/sessions/slash-commands.ts`（480 行）：导出 `attachmentSuffix(paths)`（message-attachments「交给 omp 的附件后缀」的确切字节）；wire candidates 的计算接受附件并接上后缀（chat-sessions delta 的 Branch alignment）。
+- [x] 12.1 `server/src/sessions/slash-commands.ts`（480 行）：导出 `attachmentSuffix(paths)`（message-attachments「交给 omp 的附件后缀」的确切字节）；wire candidates 的计算接受附件并接上后缀（chat-sessions delta 的 Branch alignment）。
   测试 `server/test/session-rest-slash.test.ts` 或新文件：「后缀的确切字节」「与斜杠规则的组合」；`server/test/session-regenerate.test.ts` / `session-fork.test.ts`：「Branch alignment of a message with attachments」三例（经既有的 runtime 替身给条目表）；C 的撤回测试文件：message-attachments「带附件消息的撤回对位」（wire candidates 对 undo 同样生效；条目文本缺后缀时 502）。
   只发附件的消息（`content` 为空串）不另写分支：候选恰一个，即后缀本身。测试并入上述文件：「与斜杠规则的组合」的空文本一段（`classifyPrompt("")` 为 `text`、`toWireText("")` 为空串）；「带附件回合的重新生成」的只有附件一段（条目文本为后缀 → 202；去掉开头两个换行的后缀 → 502）；「分叉拷贝与回填」的只有附件一段（`draft:""`）；「带附件消息的撤回对位」的只有附件一段。组 1 的 (g) 若不成立，本任务按 D12 的退路改过的 delta 实现。
   **实施注记（12.1，fixture 评审补充，#1018）**：
