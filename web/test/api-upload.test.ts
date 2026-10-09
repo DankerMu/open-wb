@@ -8,59 +8,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApiClient } from "../src/lib/api.js";
 import { captureApiError, expectRequestFailure, unauthorizedResponseCases } from "./support.js";
+import { FakeXhr, installFakeXhr, lastFakeXhr, resetFakeXhr } from "./upload-support.js";
 
 const WORKSPACE = "0123456789abcdef0123456789abcdef";
 const UPLOADS = `/api/workspaces/${WORKSPACE}/uploads?name=%E6%8A%A5%E5%91%8A%201.pdf`;
 const UPLOADED = { path: "uploads/报告 1.pdf", name: "报告 1.pdf", size: 10 };
-
-/** Records what the client does to it; the case drives `upload`, `load`, `error` and `abort`. */
-class FakeXhr extends EventTarget {
-  static instances: FakeXhr[] = [];
-
-  readonly upload = new EventTarget();
-  status = 0;
-  responseText = "";
-  withCredentials = false;
-  responseType = "";
-  timeout = 0;
-  readonly opens: unknown[][] = [];
-  readonly headers: [string, string][] = [];
-  readonly bodies: unknown[] = [];
-  aborts = 0;
-
-  constructor() {
-    super();
-    FakeXhr.instances.push(this);
-  }
-
-  open(...args: unknown[]) {
-    this.opens.push(args);
-  }
-
-  setRequestHeader(name: string, value: string) {
-    this.headers.push([name, value]);
-  }
-
-  send(body: unknown) {
-    this.bodies.push(body);
-  }
-
-  /** Like the browser, an in-flight `abort()` reports itself with an `abort` event. */
-  abort() {
-    this.aborts += 1;
-    this.dispatchEvent(new Event("abort"));
-  }
-
-  progress(loaded: number, total: number, lengthComputable = true) {
-    this.upload.dispatchEvent(new ProgressEvent("progress", { lengthComputable, loaded, total }));
-  }
-
-  respond(status: number, responseText: string) {
-    this.status = status;
-    this.responseText = responseText;
-    this.dispatchEvent(new Event("load"));
-  }
-}
 
 function report() {
   return new File(["0123456789"], "报告 1.pdf", { type: "application/pdf" });
@@ -76,7 +28,7 @@ function start(
     file?: File;
   } = {},
 ) {
-  vi.stubGlobal("XMLHttpRequest", FakeXhr);
+  installFakeXhr();
   const file = options.file ?? report();
   const client = createApiClient(
     options.onUnauthorized ? { onUnauthorized: options.onUnauthorized } : {},
@@ -85,12 +37,7 @@ function start(
     ...(options.signal ? { signal: options.signal } : {}),
     ...(options.onProgress ? { onProgress: options.onProgress } : {}),
   });
-  const xhr = FakeXhr.instances.at(-1);
-  if (!xhr) {
-    throw new Error("expected uploadFile to create a request");
-  }
-
-  return { file, upload, xhr };
+  return { file, upload, xhr: lastFakeXhr() };
 }
 
 /** The failure of an upload answered with `status` and `responseText`. */
@@ -101,7 +48,7 @@ function rejection(status: number, responseText: string, onUnauthorized?: () => 
 }
 
 afterEach(() => {
-  FakeXhr.instances = [];
+  resetFakeXhr();
   vi.unstubAllGlobals();
 });
 
@@ -196,7 +143,7 @@ describe("uploadFile (上传传输)", () => {
     const onUnauthorized = vi.fn();
     const controller = new AbortController();
     controller.abort();
-    vi.stubGlobal("XMLHttpRequest", FakeXhr);
+    installFakeXhr();
 
     const error = await captureApiError(
       createApiClient({ onUnauthorized }).uploadFile(WORKSPACE, report(), {

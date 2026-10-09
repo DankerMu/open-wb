@@ -1,6 +1,8 @@
 import { waitFor } from "@testing-library/react";
 import { expect, vi } from "vitest";
 import { ApiError } from "../src/lib/api.js";
+import type { ComposerOptions } from "../src/lib/composer-contract.js";
+import { DEFAULT_COMPOSER_OPTIONS } from "./session-meta-fixtures.js";
 
 export const authenticatedPrincipal = {
   id: "user-1",
@@ -103,6 +105,16 @@ export function createFetchMock(routes: FetchRoutes) {
   );
 }
 
+/**
+ * 路由表里 `GET /api/composer/options` 的一项，缺省应答「缺省配置」。共用的整页路由表把它放在用例的
+ * `routes` 之前，用例写同一个键即覆盖。应答是 resolver：`Response` 体只能读一次，同一页可能重取。
+ */
+export function composerOptionsRoute(
+  body: ComposerOptions = DEFAULT_COMPOSER_OPTIONS,
+): FetchRoutes {
+  return { "/api/composer/options": () => jsonResponse(body) };
+}
+
 export function allowWorkspaceListFetch() {
   const fetchMock = vi.mocked(fetch);
   const defaultHandler = fetchMock.getMockImplementation();
@@ -112,6 +124,9 @@ export function allowWorkspaceListFetch() {
     }
     if (path === "/api/sessions") {
       return Promise.resolve(jsonResponse({ sessions: [] }));
+    }
+    if (path === "/api/composer/options") {
+      return Promise.resolve(jsonResponse(DEFAULT_COMPOSER_OPTIONS));
     }
     if (!defaultHandler) {
       throw new Error(`unexpected request ${String(path)}`);

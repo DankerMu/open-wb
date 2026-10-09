@@ -4,11 +4,13 @@ import { FakeEventSource, resetFakeEventSources } from "./chat-stream-support.js
 import { mountAuthenticatedApp } from "./render-app-router.js";
 import {
   authenticatedPrincipal,
+  composerOptionsRoute,
   createFetchMock,
   currentLocation,
   jsonResponse,
   setBrowserPath,
 } from "./support.js";
+import { resetFakeXhr } from "./upload-support.js";
 
 export type FetchRoutes = Parameters<typeof createFetchMock>[0];
 
@@ -18,6 +20,7 @@ function authenticatedChatRoutes(routes: FetchRoutes = {}): FetchRoutes {
   return {
     "/api/auth/me": () => jsonResponse(authenticatedPrincipal),
     "/api/workspaces": () => jsonResponse({ workspaces: [] }),
+    ...composerOptionsRoute(),
     ...routes,
   };
 }
@@ -58,6 +61,7 @@ export function cleanupChatPage() {
   disposeRouter = undefined;
   vi.unstubAllGlobals();
   resetFakeEventSources();
+  resetFakeXhr();
   document.body.replaceChildren();
   setBrowserPath("/");
 }
