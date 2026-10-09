@@ -15,6 +15,7 @@ import { mountAuthenticatedApp } from "./render-app-router.js";
 import {
   authenticatedPrincipal,
   calls,
+  composerOptionsRoute,
   createFetchMock,
   currentLocation,
   type DeferredResponse,
@@ -43,7 +44,11 @@ afterEach(() => {
 });
 
 function loginFetchMock(routes: LoginRoutes = {}): FetchMock {
-  return createFetchMock({ "/api/auth/me": () => unauthenticatedResponse(), ...routes });
+  return createFetchMock({
+    "/api/auth/me": () => unauthenticatedResponse(),
+    ...composerOptionsRoute(),
+    ...routes,
+  });
 }
 
 /** 经路由挂载的登录页；登录成功后 `/files` 会读取工作空间列表。 */

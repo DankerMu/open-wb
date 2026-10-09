@@ -5,6 +5,7 @@ import type { ApiClient } from "../../lib/api.js";
 import type { ChatMessageSnapshot } from "../../lib/session-contract.js";
 import { useAuth } from "../auth/index.js";
 import { composerLocks } from "./composer-locks.js";
+import { useComposerOptions } from "./composer-options.js";
 import { errorMessage, isNotFound, isUnauthorized } from "./errors.js";
 import {
   blocksNewSession,
@@ -73,6 +74,7 @@ export function useChatSession() {
     workspaces,
   } = useWorkspaceList(client);
   const welcome = useWelcomeOptions(workspaces, workspacesError);
+  const composerOptions = useComposerOptions(client, requestedSessionId);
   const mountedRef = useRef(false);
   const clientRef = useRef(client);
   const requestedSessionRef = useRef(requestedSessionId);
@@ -736,6 +738,7 @@ export function useChatSession() {
     answerApproval,
     client,
     composerDisabled,
+    composerOptions,
     composerRef,
     draft,
     forkTurn,

@@ -5,7 +5,13 @@ import { SHELL_NARROW_QUERY } from "../src/lib/viewport.js";
 import { chatSnapshot, FakeEventSource, resetFakeEventSources } from "./chat-stream-support.js";
 import { createMediaQuery, installMatchMedia, uninstallMatchMedia } from "./media-query-support.js";
 import { mountAuthenticatedApp } from "./render-app-router.js";
-import { authenticatedPrincipal, createFetchMock, jsonResponse, serviceInfo } from "./support.js";
+import {
+  authenticatedPrincipal,
+  composerOptionsRoute,
+  createFetchMock,
+  jsonResponse,
+  serviceInfo,
+} from "./support.js";
 import { yieldMacrotask } from "./ui-support.js";
 
 /*
@@ -41,6 +47,7 @@ async function mountNarrow(path: string, heading: string, sessions: unknown[] = 
       "/api/info": () => jsonResponse(serviceInfo),
       "/api/sessions": () => jsonResponse({ sessions }),
       "/api/workspaces": () => jsonResponse({ workspaces: [] }),
+      ...composerOptionsRoute(),
     }),
   );
   disposeRouter = () => mounted.router.dispose();

@@ -9,6 +9,7 @@ import { FakeEventSource, resetFakeEventSources } from "./chat-stream-support.js
 import { createMediaQuery, installMatchMedia, uninstallMatchMedia } from "./media-query-support.js";
 import {
   authenticatedPrincipal,
+  composerOptionsRoute,
   createFetchMock,
   jsonResponse,
   serviceInfo,
@@ -122,6 +123,7 @@ async function mountNarrowShell() {
       "/api/info": () => jsonResponse(serviceInfo),
       "/api/sessions": () => jsonResponse({ sessions: [] }),
       "/api/workspaces": () => jsonResponse({ workspaces: [] }),
+      ...composerOptionsRoute(),
     }),
   );
   trackKeydownListeners();

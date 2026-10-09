@@ -15,6 +15,7 @@ import { chatSnapshot, FakeEventSource, resetFakeEventSources } from "./chat-str
 import { mountAuthenticatedApp } from "./render-app-router.js";
 import {
   authenticatedPrincipal,
+  composerOptionsRoute,
   createFetchMock,
   deferredResponse,
   jsonResponse,
@@ -75,6 +76,7 @@ function mountApp(path: string, routes: FetchRoutes = {}) {
         version: "0.0.0",
         auth: { provider: "dev-stub" },
       }),
+    ...composerOptionsRoute(),
     ...routes,
   });
   const mounted = mountAuthenticatedApp(path, fetchMock);
