@@ -12,7 +12,11 @@ import { HttpError } from "../src/core/errors/index.js";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import { REAL, rejection, settle, spawnedAt } from "./session-approval-helpers.js";
 import {
+  A_PDF_STORED,
+  A_PDF_SUFFIX,
   approvalsOf,
+  attach,
+  baseline,
   expectForkDone,
   expectForkRejected,
   expectSourceClaimed,
@@ -24,6 +28,7 @@ import {
   listedIds,
   messagesOf,
   openCappedWorld,
+  openForkScripted,
   openForkWorld,
   realSource,
   rowCounts,
@@ -42,6 +47,7 @@ import {
   QUESTION,
   regenerate,
   rejectedCode,
+  scriptedAt,
   seedDone,
   sendPrompt,
   sessionFile,
@@ -494,4 +500,97 @@ describe("fork over real fake-omp branch children (#466)", () => {
     expectWithinCap(world.liveAtSpawn, 2);
     expect(rowCounts(db).sessions).toBe(sessions + (outcomes[3] === "ok" ? 1 : 0));
   });
+});
+
+/**
+ * Issue #1018 (message-attachments「分叉拷贝与回填」, chat-sessions「Branch alignment of a message
+ * with attachments」): the entry list is the scripted child's, so the entry of a message with an
+ * attachment can be anywhere in it. The scripted `branch` always answers QUESTION: a `draft` that
+ * is anything else was read from the stored row.
+ */
+describe("fork alignment of messages with attachments (#1018)", () => {
+  const entries = (first: string, second: string) => [
+    { entryId: "e-1", text: first },
+    { entryId: "e-2", text: second },
+  ];
+
+  /** FIRST → QUESTION seeded, then `uploads/a.pdf` stored on one of the two user messages. */
+  async function attached(
+    messages: ReturnType<typeof entries>,
+    target: "u1" | "u2",
+    content?: string,
+  ) {
+    const world = await openForkScripted(worlds, [{ messages }]);
+    const { db } = world.fixture;
+    const seeded = seedTwoTurns(world);
+    attach(db, seeded[target], content);
+    return { world, db, seeded };
+  }
+
+  /** The fork at `messageId`: its draft, its exact keys and the entry its `branch` named. */
+  async function forked(world: Awaited<ReturnType<typeof attached>>["world"], messageId: number) {
+    const spawned = world.rt.calls.length;
+    const result = await forkAt(world, messageId);
+    expect(Object.keys(result)).toEqual(["session", "draft"]);
+    const frames = scriptedAt(world.scripted, spawned).frames;
+    const branch = frames.filter((frame) => frame.type === "branch").map((frame) => frame.entryId);
+    return { draft: result.draft, branch };
+  }
+
+  it.each([
+    ["the text followed by the suffix", FIRST, `${FIRST}${A_PDF_SUFFIX}`],
+    [
+      "escaped `/` text followed by the suffix",
+      "/etc/hosts 是什么",
+      ` /etc/hosts 是什么${A_PDF_SUFFIX}`,
+    ],
+    [
+      "unescaped `/` text followed by the suffix",
+      "/etc/hosts 是什么",
+      `/etc/hosts 是什么${A_PDF_SUFFIX}`,
+    ],
+    ["no text: the suffix alone", "", A_PDF_SUFFIX],
+  ])(
+    "aligns %s, and the message after it; the draft is the stored text",
+    async (_n, text, entry) => {
+      const { world, db, seeded } = await attached(entries(entry, QUESTION), "u1", text);
+      const before = snapshot(db, world.session, true);
+
+      expect(await forked(world, seeded.u2)).toEqual({ draft: QUESTION, branch: ["e-2"] });
+      expect(await forked(world, seeded.u1)).toEqual({ draft: text, branch: ["e-1"] });
+
+      expect(snapshot(db, world.session, true)).toEqual(before);
+      expect(messagesOf(db, world.session)[0]).toMatchObject({ id: seeded.u1, content: text });
+      expect(
+        db.prepare("SELECT attachments FROM chat_messages WHERE id = ?").get(seeded.u1),
+      ).toEqual({ attachments: A_PDF_STORED });
+    },
+  );
+
+  it("aligns an attachment-only message that is not the first: its draft is empty", async () => {
+    const { world, seeded } = await attached(entries(FIRST, A_PDF_SUFFIX), "u2", "");
+
+    expect(await forked(world, seeded.u2)).toEqual({ draft: "", branch: ["e-2"] });
+    expect(await forked(world, seeded.u1)).toEqual({ draft: FIRST, branch: ["e-1"] });
+  });
+
+  it.each([
+    ["the text alone", undefined, FIRST],
+    ["the suffix without its two leading newlines", "", A_PDF_SUFFIX.slice(2)],
+  ])(
+    "an entry that is %s aligns neither that message nor the one after it: 502",
+    async (_n, text, entry) => {
+      const { world, db, seeded } = await attached(entries(entry, QUESTION), "u1", text);
+      const { before, rows } = baseline(world);
+
+      for (const target of [seeded.u2, seeded.u1]) {
+        const spawned = world.rt.calls.length;
+        await expectForkRejected(world, forkAt(world, target), "agent_unavailable", rows);
+        const frames = types(scriptedAt(world.scripted, spawned).frames);
+        expect(frames).toContain("get_branch_messages");
+        expect(frames).not.toContain("branch");
+      }
+      expect(snapshot(db, world.session, true)).toEqual(before);
+    },
+  );
 });

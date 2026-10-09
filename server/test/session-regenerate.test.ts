@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import type { RetainedEvent } from "../src/sessions/stream/ring-buffer.js";
 import { REAL, settle, spawnedAt } from "./session-approval-helpers.js";
+import { A_PDF_STORED, A_PDF_SUFFIX, attach, messagesOf } from "./session-fork-helpers.js";
 import {
   answered,
   count,
@@ -445,4 +446,95 @@ describe("regenerate over real fake-omp branch children (#465)", () => {
     expect(atClose).toEqual(before);
     expect(world.fixture.supervisor.liveProcessCount()).toBe(0);
   });
+});
+
+/**
+ * Issue #1018 (message-attachments「带附件回合的重新生成」, chat-sessions「Branch alignment of a
+ * message with attachments」): the last user message stores `uploads/a.pdf`, and the fake's last
+ * branch entry is the `--branch-entry` text. Regenerate compares that pair only.
+ */
+describe("regenerate of a turn whose user message has attachments (#1018)", () => {
+  /** A seeded done session whose user message is `content` with the attachment; its row. */
+  async function attached(content: string, entry: string) {
+    const world = worlds.track(await openRegenWorld({ entries: [entry] }));
+    const { db } = world.fixture;
+    seedDone(world);
+    const user = messagesOf(db, world.session)[0]?.id ?? -1;
+    attach(db, user, content);
+    const row = () => db.prepare("SELECT * FROM chat_messages WHERE id = ?").get(user);
+    expect(row()).toMatchObject({ role: "user", content, attachments: A_PDF_STORED });
+    return { world, db, row };
+  }
+
+  const aligned = [
+    ["the text followed by the suffix", "看看这个", `看看这个${A_PDF_SUFFIX}`],
+    [
+      "escaped `/` text followed by the suffix",
+      "/etc/hosts 是什么",
+      ` /etc/hosts 是什么${A_PDF_SUFFIX}`,
+    ],
+    ["no text: the suffix alone", "", A_PDF_SUFFIX],
+  ] as const;
+  for (const [name, content, entry] of aligned) {
+    it(`aligns ${name} and dispatches the branch text as it is`, REAL, async () => {
+      const { world, row } = await attached(content, entry);
+      const before = row();
+
+      const { assistantMessageId } = await regenerate(world);
+
+      const sent = spawnedAt(world, 0).stdin;
+      expect(sent.filter((frame) => frame.type === "branch")).toEqual([
+        expect.objectContaining({ entryId: "fake-entry-3" }),
+      ]);
+      expect(sent.filter((frame) => frame.type === "prompt")).toEqual([
+        expect.objectContaining({ message: entry }),
+      ]);
+      const tree = await waitForTurn(world.fixture, world.session, "done");
+      expect(tree.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+      expect(tree.messages[0]?.content).toBe(content);
+      expect(tree.messages[1]?.id).toBe(assistantMessageId);
+      expect(row()).toEqual(before);
+    });
+  }
+
+  it(
+    "aligns unescaped `/` text followed by the suffix and dispatches it escaped",
+    REAL,
+    async () => {
+      const { world, row } = await attached(
+        "/etc/hosts 是什么",
+        `/etc/hosts 是什么${A_PDF_SUFFIX}`,
+      );
+      const before = row();
+
+      await regenerate(world);
+
+      expect(spawnedAt(world, 0).stdin.filter((frame) => frame.type === "prompt")).toEqual([
+        expect.objectContaining({ message: ` /etc/hosts 是什么${A_PDF_SUFFIX}` }),
+      ]);
+      await waitForTurn(world.fixture, world.session, "done");
+      expect(row()).toEqual(before);
+    },
+  );
+
+  const refused = [
+    ["the text alone", "看看这个", "看看这个"],
+    ["the suffix alone for a message with text", "看看这个", A_PDF_SUFFIX],
+    ["the suffix of other paths", "看看这个", `看看这个${A_PDF_SUFFIX}\n- uploads/b.png`],
+    ["the suffix without its two leading newlines", "", A_PDF_SUFFIX.slice(2)],
+    ["no text at all", "", ""],
+    ["the suffix after a space", "", ` ${A_PDF_SUFFIX}`],
+  ] as const;
+  for (const [name, content, entry] of refused) {
+    it(`an entry that is ${name} is no candidate: 502 and no row changes`, REAL, async () => {
+      const { world, db } = await attached(content, entry);
+      const before = snapshot(db, world.session);
+
+      expect(await rejectedCode(regenerate(world))).toBe("agent_unavailable");
+
+      expect(types(spawnedAt(world, 0).stdin)).not.toContain("branch");
+      expect(snapshot(db, world.session)).toEqual(before);
+      expect(held(world)).toBe(false);
+    });
+  }
 });

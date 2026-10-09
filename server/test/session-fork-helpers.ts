@@ -42,6 +42,15 @@ import { presetSessionFile, sampleSpawns } from "./session-supervisor-pool-helpe
 
 export const FIRST = "first question";
 
+/**
+ * The attachment suffix omp was given for `["uploads/a.pdf"]`, spelled out from message-attachments
+ * 「交给 omp 的附件后缀」; never built by the module under test.
+ */
+export const A_PDF_SUFFIX =
+  "\n\n用户随本条消息上传了以下文件（相对当前工作目录的路径），需要时请读取：\n- uploads/a.pdf";
+/** What `attach` stores: the column as an admission would have written it. */
+export const A_PDF_STORED = '[{"path":"uploads/a.pdf","size":3}]';
+
 type Forked = Awaited<ReturnType<SessionSupervisor["fork"]>>;
 type Worlds = ReturnType<typeof regenWorlds>;
 
@@ -117,6 +126,18 @@ export function seedTwoTurns(
     file: source.file,
     unchanged: source.unchanged,
   };
+}
+
+/**
+ * Gives a seeded user message the attachment `uploads/a.pdf` (#1018), and `content` when given
+ * (`""` is an attachment-only message, which no route admits yet). Written straight to the row:
+ * the prompt route does not take attachments before #1019.
+ */
+export function attach(db: DatabaseSync, messageId: number, content?: string): void {
+  db.prepare("UPDATE chat_messages SET attachments = ? WHERE id = ?").run(A_PDF_STORED, messageId);
+  if (content !== undefined) {
+    db.prepare("UPDATE chat_messages SET content = ? WHERE id = ?").run(content, messageId);
+  }
 }
 
 /** `supervisor.fork` asserted not to throw synchronously; every failure must be a rejection. */
