@@ -8,7 +8,14 @@
  * 再改名，轮询的一方读不到半截）。凡睡眠都有上限，到时自行退出，不留长命进程。
  */
 import { execFileSync, spawn } from "node:child_process";
-import { chmodSync, mkdirSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { basename, dirname, join, parse } from "node:path";
 
 /** 正常转换写出的全部字节；测试里另抄一份字面量来对。 */
@@ -56,6 +63,20 @@ const behaviours = {
   exit1() {
     writeFileSync(output, PDF);
     process.exit(1);
+  },
+  /** 同上，退出码既不是 0 也不是 1：只把 1 当失败的实现会把它当成功。 */
+  exit2() {
+    writeFileSync(output, PDF);
+    process.exit(2);
+  },
+  /** 输出完好，随后被信号结束（没有退出码）：把「没有非 0 退出码」当成功的实现会放行它。 */
+  "self-kill"() {
+    writeFileSync(output, PDF);
+    process.kill(process.pid, "SIGTERM");
+  },
+  /** 输出文件名取自输入文件的内容（测试写的字面量），不在这里从输入文件名推导。 */
+  named() {
+    writeFileSync(join(outdir, readFileSync(input, "utf8")), PDF);
   },
   "no-output"() {},
   empty() {

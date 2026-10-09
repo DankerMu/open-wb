@@ -14,7 +14,7 @@ import { type ChildProcess, type SpawnOptions, spawn } from "node:child_process"
 import { randomBytes } from "node:crypto";
 import { constants, createWriteStream, rmSync } from "node:fs";
 import { open, unlink } from "node:fs/promises";
-import { basename, join, parse } from "node:path";
+import { basename, isAbsolute, join, parse } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { assertSafeSudoPath, assertSetprivExecutable, SETPRIV_PATH } from "../core/process-path.js";
 import { ensureOwnedDir } from "../core/sandbox/dirs.js";
@@ -190,6 +190,10 @@ function removeJob(job: string): void {
 
 export function createOfficeConverter(options: OfficeConverterOptions): OfficeConverter {
   const { officeBin, cacheDir, timeoutMs, ompUser } = options;
+  // 相对的 cacheDir 会随 cwd 漂移；officeBin 是 sudoers 规则里逐字写的那条路径，不经 PATH 查找。
+  if (!isAbsolute(cacheDir) || (officeBin !== undefined && !isAbsolute(officeBin))) {
+    throw new Error("cacheDir and officeBin must be absolute paths");
+  }
   const spawnImpl = options.spawn ?? (spawn as OfficeSpawn);
   let closed = false;
   /** 在途子进程各自的终止函数，给 `close()` 用。 */
@@ -251,6 +255,10 @@ export function createOfficeConverter(options: OfficeConverterOptions): OfficeCo
     }
     if (closed || signal?.aborted === true) {
       throw new OfficeConvertError("aborted");
+    }
+    // 输入是 argv 的最后一项：不是绝对路径（例如以 `-` 开头）会被 office 当成选项。
+    if (!isAbsolute(absInput)) {
+      throw new OfficeConvertError("failed");
     }
     if (ompUser !== undefined) {
       // 与 omp 的 spawn 同一组前置检查；抛错即失败，不启动、不回退。
