@@ -184,15 +184,17 @@ describe("stop button: layout and outcomes", () => {
     const bar = toolbar();
     expect(within(bar).queryByRole("button", { name: "发送" })).toBeNull();
     const buttons = within(bar).getAllByRole("button");
-    // 能力栏的「+」按钮（回合进行中禁用）与权限按钮（不随锁定禁用）之后只有停止键。
+    // 能力栏的「+」按钮（回合进行中禁用）、权限按钮与模型按钮（都不随锁定禁用）之后只有停止键。
     expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([
       "添加文件或命令",
       "权限：只问命令",
+      "模型：m1",
       "停止",
     ]);
     expect((buttons[0] as HTMLButtonElement).disabled).toBe(true);
     expect((buttons[1] as HTMLButtonElement).disabled).toBe(false);
-    const stop = buttons[2] as HTMLButtonElement;
+    expect((buttons[2] as HTMLButtonElement).disabled).toBe(false);
+    const stop = buttons[3] as HTMLButtonElement;
     expect(stop.getAttribute("aria-label")).toBe("停止");
     expect(stop.disabled).toBe(false);
     expect(stop.type).toBe("button");
