@@ -323,3 +323,32 @@
 - 变异：失败响应多带 ACAO 或 CSP，或 `Content-Type` 变成 JSON → 失败四键整对象相等判红。
 - 变异：预期不可观察：「按内容嗅探」。函数签名里没有内容参数，本刀写不出这条变异；它的证据是签名本身，路由层的证明在 #1069 的「类型只看文件名」（`notes.txt` 内容是 HTML）。
 - 变异：预期不可观察：404 状态码与正文文案、令牌与 `Origin` 的往返。本刀没有监听器，归 #1069。
+
+## 10.1（#1063）
+
+- Critical Path：本刀不碰 `sandbox.resolve`、不加 `op`、不加路由（那是 #1065），但解析的是用户文件里攻击者可控的字节，按 issue 要求 PR 标注白盒审查、两个评审席；本层的逃逸向量是内存与时间上界、成员名只是数据，「他人工作空间 → 相同 404」「越界 → `sandbox.reject`」归 #1065 / #1075。
+- 解析层契约（规格只写了路由层，此处定死）：`archive.ts` 导出 `archiveFormat(name: string): "tar" | "tar.gz" | "gz" | null` 与 `listArchive(format, name, readAt, options): Promise<{format, entries, truncated}>`；`readAt: (position: number, length: number) => Promise<Buffer>`（文件尾返回短 Buffer）；`options: {maxEntries: number; now: () => number}`；条目是 `{path: string; type: "file" | "dir"; size: number | null}`（`size` 必填，`exactOptionalPropertyTypes`）；「不支持」一律 `throw new HttpError("preview_unsupported")`（同 `preview.ts:51` 的做法）。
+- `archive.ts` 本刀不导入 `node:fs`、`node:os`、`node:path`：文件由调用方打开并给出 `readAt`，「不落盘、不访问成员路径」由此在结构上成立；只导入 `node:zlib` 与 `../core/errors/index.js`。#1064 的 zip 需要 fd 或路径时由那一刀自己扩签名，记入其偏离记录。
+- `archiveFormat` 按小写文件名判定，先判 `.tar.gz` / `.tgz`、再 `.tar`、最后 `.gz`；`.zip` 在本刀返回 null，由 #1064 加入，本刀不写「`.zip` → null」的断言（否则下一刀要改），用 `readme.md` → null 覆盖该分支；`gz` 不读任何字节，`path` 为 `name.slice(0, -3)`（保留原大小写），`size: null`——内容不是 gzip 的 `x.gz` 也返回一项，记入偏离记录。
+- 一个遍历器、两个字节源（否则 jscpd 3% 会咬）：内部 `ByteSource {read(n), skip(n)}`；`tar` 的 `skip` 只挪位置不读；`tar.gz` 以固定 65536 字节的块经 `readAt` 取压缩字节喂 `zlib.createGunzip()`，`skip` 丢弃解压出的字节；任何退出路径（上限、时限、损坏、抛错）都在 `finally` 里 `destroy()` gunzip；每次 `readAt` 的 `length` 因此至多 65536。
+- 头校验（规格未写，「一项都读不出 → 415」靠它才可测）：每个 512 字节头验 ustar 校验和（校验和域按八个空格计、无符号求和）；`size` 只认八进制，base-256 或非法字符按损坏；`prefix` 只在 magic 恰为 `ustar\0` 时拼接（GNU 的 `ustar␠␠\0` 该区域不是 prefix）；名字取到首个 NUL，优先级 pax `path` > `L` > `prefix/name`；`Buffer.toString("utf8")` 自带 U+FFFD 替换。
+- 结束与损坏的判定：读到一个全零块 → 正常结束（零项时返回 `entries: []`、`truncated: false`，不是 415）；短头、缺头（文件尾没有零块）、坏校验和、坏 `size`、gunzip 报错、坏 pax 记录都算损坏——此前零项则抛不支持，已有项则停读并置 `truncated: true`；头已读全而正文被截断的成员计入结果（`cut.tar` 两种切法各一例：切在第二个头中间 → 一项；切在最后一个成员正文中间 → 含该成员）；不取文件大小。
+- 扩展记录：`L` 与 `x` 先看声明的 `size`，大于 65536 即不读、按损坏处理；读入后名字（去尾 NUL）超过 4096 字节同样按损坏，该成员不计入；`K`、`g` 整段 `skip`、不读入、不成为条目；pax 用 `indexOf` 逐条按字节解析 `LEN key=value\n`，只取 `path`，不用 `RegExp`（semgrep）；ustar 拼接名最长 256 字节，不会触上限。
+- 类型与大小：`typeflag` 为 `5` → `dir`，其余一律 `file`；`path` 原样（含尾部 `/`、`..`、前导 `/`）；`size` 取头里的值，pax 的 `size` 记录不认；正文一律按头里的 `size` 向上取整到 512 跳过。
+- 上限：`entries.length === maxEntries` 时立即停读并置 `truncated: true`，不探下一个头（规格字面）；后果是恰有 `maxEntries` 个成员的包也报 `truncated`，用「上限 3、三个成员」一例钉住并记入偏离记录。
+- 时限 5000 毫秒是模块常量：开始取一次 `now()`，每轮取头之前判一次（扩展记录那一轮也判，否则一串 `g` 头不受限），`tar.gz` 的 `skip` 每丢一块再判一次；`slow.tar` 的时钟由测试的 `readAt` 驱动——收到第三个成员头的位置时把假时钟拨到 +6000，期望恰三项；另加规格外的 `bomb.tgz`（第一个成员正文 8 MiB 的零、后跟一个成员，假时钟每调用一次加 1000）期望一项 + `truncated`，它同时钉住 `tar.gz` 也有时限。
+- 测试落位：字节构造器（`tarHeader`、`tarFile`、`paxRecord`、记录最大 `length` 的 `readAt` 包装）放新文件 `server/test/workspaces-archive-helpers.ts`，因为 `workspaces-archive.test.ts` 还要被 #1064、#1065 续写，本刀控制在约 300 行内；helper 的每个导出都要有测试导入（`knip.json` 里 `test/**` 的非 `.test.ts` 文件只是 project 不是 entry）；`archive.ts` 的导出只被测试引用是合规的。
+- 「无新增文件」要能判红：包写进 `tempDir()`（`server/test/core-db-helpers.ts:128`），`readAt` 用真实文件句柄；用 `vi.stubEnv("TMPDIR", <空子目录>)` 后断言该子目录仍为空、包所在目录的列表前后相同，不要快照全局 `os.tmpdir()`（并行 worker 会抖）；恶意成员名一例另用 `spyBodyIo()`（`server/test/workspace-file-helpers.ts:17`）断言没有任何调用收到成员名路径。
+- 门槛与清单：biome 认知复杂度上限 15，遍历循环必须拆成 `parseHeader` / `readExtension` / `parsePax` / `walk` 等小函数；`noUncheckedIndexedAccess` 下取字节用 `readUInt8` 或 `subarray`；覆盖率分支 80%，损坏分支逐条有用例（随机 1 KiB 的 `junk.tar` → 不支持、非 gzip 的 `x.tgz` → 不支持、0 字节 `.tar` → 不支持）；不新增配置键、不动 `docs/architecture/system.md` 第 9 节、不动 `server/src/workspaces/index.ts`；纯服务端库函数，no checklist rows。
+- 变异：到上限后继续读 → 1500 成员 `big.tar.gz` 的「恰 1000 项」与上限 3 的 `x.tar`「恰 3 项」判红。
+- 变异：不认 GNU `L` → 200 字符长路径用例判红；不认 pax `path` → 中文路径用例判红。
+- 变异：去掉扩展记录 65536 的声明长度判定（按声明长度分配或读取）→ `evil.tar` / `evil2.tar` 的「`readAt` 最大 `length` ≤ 65536」判红；`evil.tar` 也可能先以 `ERR_OUT_OF_RANGE` 抛出，同样算红。
+- 变异：去掉成员名 4096 字节上限 → `long2.tar` 的「恰一项 + `truncated`、没有超过 4096 字节的 `path`」判红。
+- 变异：时限只套在 `tar.gz` 上 → `slow.tar`「恰三项」判红；时限只套在 `tar` 上，或去掉 `skip` 里的逐块判定 → `bomb.tgz`「恰一项」判红。
+- 变异：去掉校验和校验 → `sum.tar` 判红（会列出 `xad.txt`）；`junk.tar` 不红——它在第 148 字节是 `M`，先被八进制校验和域拒掉。
+- 变异：不论 magic 都拼 `prefix` → 需要一例 GNU magic 且 `prefix` 区域非零的头，期望 `path` 只取 `name`；不加这一例则此变异不可观察，建议加。
+- 变异：把 `x`、`g`、`K` 记录当成员 → 中文路径用例的条数断言判红。
+- 变异：对成员名做规范化（`path.normalize` 或去前导 `/`）→ 恶意成员名用例的原样断言判红；对成员名做文件系统访问 → `spyBodyIo` 断言判红，但只拦得住回调与同步 API，`fs.promises` 不在其内。完整的「空间外无读写」归 #1065。
+- 变异：把 `.gz` 的判定排到 `.tar.gz` 之前 → `x.tar.gz` 的 `format` 断言判红。
+- 变异：去掉 `finally` 里的 gunzip `destroy()` → 本刀不可观察（没有可数的句柄），靠白盒审查。
+- 变异：目录遍历、符号链接、跨工作空间 id、他人工作空间 404、越界审计 → 本刀没有路由，不可观察，归 #1065 / #1075。
