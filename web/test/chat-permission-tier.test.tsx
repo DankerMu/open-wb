@@ -492,6 +492,49 @@ describe("权限档位控件：欢迎态的选择进入创建请求", () => {
 
     expect(createRequests(fetchMock)).toEqual([createOf('{"scene":"office"}')]);
   });
+
+  it("缺省档位是 全部自动：欢迎态按钮直接是警示色的 权限：全部自动、没有确认框；选当前档位不弹框不发请求，创建体不含 approvalMode 键；回到欢迎态改选 只问命令 后创建体带 write", async () => {
+    const { fetchMock, router } = mountSessions("/", [], {
+      ...welcomeRoutes(),
+      ...composerOptionsRoute({
+        ...DEFAULT_COMPOSER_OPTIONS,
+        defaults: { ...DEFAULT_COMPOSER_OPTIONS.defaults, approvalMode: "yolo" },
+      }),
+    });
+    await screen.findByRole("heading", { level: 1, name: HERO });
+    await findTier();
+    await quiesce();
+    expect(shown()).toEqual(WARNED);
+    expect(screen.queryAllByRole("alertdialog", { hidden: true })).toEqual([]);
+    const before = paths(fetchMock);
+
+    await pick(YOLO);
+    await quiesce();
+    expect(confirmBox()).toBeNull();
+    expect(shown()).toEqual(WARNED);
+    expect(paths(fetchMock)).toEqual(before);
+
+    typeDraft("你好");
+    clickSend();
+    await waitFor(() => expect(currentLocation()).toBe(`/?session=${CREATED_IDS[0]}`));
+    expect(createRequests(fetchMock)).toEqual([createOf('{"scene":"office"}')]);
+
+    // 没选过档位：回到欢迎态仍取缺省档。
+    await act(() => router.navigate("/", { replace: true }));
+    await screen.findByRole("heading", { level: 1, name: HERO });
+    await waitFor(() => expect(shown()).toEqual(WARNED));
+    await pick(WRITE);
+    expect(shown()).toEqual(plain(WRITE));
+    expect(confirmBox()).toBeNull();
+    typeDraft("再来");
+    clickSend();
+    await waitFor(() => expect(currentLocation()).toBe(`/?session=${CREATED_IDS[1]}`));
+    expect(createRequests(fetchMock)).toEqual([
+      createOf('{"scene":"office"}'),
+      createOf('{"scene":"office","approvalMode":"write"}'),
+    ]);
+    expect(mutations(fetchMock).filter(([method]) => method === "PATCH")).toEqual([]);
+  });
 });
 
 describe("权限档位控件：封顶与继承的呈现", () => {
