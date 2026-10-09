@@ -1,5 +1,5 @@
 import { lstatSync } from "node:fs";
-import { dirname, extname } from "node:path";
+import { basename, dirname } from "node:path";
 import { Readable } from "node:stream";
 import type {
   FastifyInstance,
@@ -13,7 +13,7 @@ import type {
 } from "fastify";
 import { HttpError } from "../core/errors/index.js";
 import type { createSandbox } from "../core/sandbox/index.js";
-import { classifyPreview, openPreviewStream } from "./preview.js";
+import { classifyPreview, DEFAULT_PREVIEW_LIMITS, openPreviewStream } from "./preview.js";
 import type { WorkspaceStore } from "./store.js";
 import { listOneLevel } from "./tree.js";
 import { storeUpload } from "./upload.js";
@@ -285,11 +285,13 @@ export function registerWorkspaceRest(
       if (status === undefined || !status.isFile()) {
         throw new HttpError("not_found");
       }
-      const preview = classifyPreview(absPath, extname(absPath).slice(1), status.size);
+      const preview = classifyPreview(absPath, basename(absPath), status.size, {
+        limits: DEFAULT_PREVIEW_LIMITS,
+      });
       for (const [name, value] of Object.entries(preview.headers)) {
         reply.header(name, value);
       }
-      // nosemgrep: javascript.express.security.audit.xss.direct-response-write.direct-response-write -- classifier permits non-HTML text/images only; nosniff remains set.
+      // nosemgrep: javascript.express.security.audit.xss.direct-response-write.direct-response-write -- classifier permits text/plain, raster images, audio and video only (html/svg/xml go out as text/plain); nosniff remains set.
       return reply.send(openPreviewStream(absPath, preview.limit));
     },
   );

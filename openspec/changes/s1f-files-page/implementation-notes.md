@@ -123,3 +123,40 @@
 - 不可观察：`:65` 注释里的数字、展开次序。
 - 十二个键 → 字段名与缺省（规则以规格「服务启动与装配」的十二键一段为准；前四个字段名由场景「预览与文件键的缺省与覆盖」给定，后八个由本注记定）：`PREVIEW_PORT` → `previewPort`（`0`；canonical 十进制 `0..65535`）；`PREVIEW_ORIGIN` → `previewOrigin?`（缺席；给出时整体匹配 `^https?://[^/?#\s]+$`，空串非法）；`PREVIEW_CACHE_DIR` → `previewCacheDir`（repo root 下 `var/preview-cache`；relative 相对 repo root，空串非法）；`OFFICE_BIN` → `officeBin?`（缺席即转换关闭；给出时须为绝对路径，空串非法，不查存在性）；`OFFICE_CONVERT_TIMEOUT_MS` → `officeConvertTimeoutMs`（`60000`）；`OFFICE_CONVERT_CONCURRENCY` → `officeConvertConcurrency`（`2`）；`PREVIEW_TEXT_MAX_BYTES` → `previewTextMaxBytes`（`1048576`）；`PREVIEW_IMAGE_MAX_BYTES` → `previewImageMaxBytes`（`20971520`）；`PREVIEW_DOCUMENT_MAX_BYTES` → `previewDocumentMaxBytes`（`104857600`）；`PREVIEW_NOTEBOOK_MAX_BYTES` → `previewNotebookMaxBytes`（`10485760`）；`PREVIEW_ARCHIVE_MAX_ENTRIES` → `previewArchiveMaxEntries`（`1000`）；`TRASH_RETENTION_DAYS` → `trashRetentionDays`（`30`）。后八个数值键与 `OMP_IDLE_MS` 同一解析纪律（`1..2147483647`）。
 - 安全缺省由解析层用例钉住：`PREVIEW_ORIGIN`、`OFFICE_BIN` 缺省时对象上没有该键；`OFFICE_BIN` 的相对名（`soffice`、`./soffice`）被拒（这条路径之后会进 sudoers 行）；`PREVIEW_CACHE_DIR` 空串被拒（不得落成 repo root）；各上限与 `TRASH_RETENTION_DAYS` 的 `0` 被拒。
+
+## 6.1、6.2 最小接线（#1055）
+
+- 触及 Critical Path「沙箱与文件边界」（用户文件预览的内容类型与上限；`sandbox.resolve` 调用本身不动）：两个评审席位 + owner 白盒审查。前提只有 0.1（#1049）；不等 1.1 / 1.2 / 1.3，不等 4.1、5.1。
+- 漂移一：`server/src/workspaces/preview.ts:31-35` 的第二参是 `ext` 而不是 issue 写的 `name`，`rest.ts:288` 传 `extname(absPath).slice(1)`。`workspace-preview.test.ts` 的 15 处调用（:102 :113 :129 :145 :174 :185 :189 :192 :194 :207 :225 :226 :236 :265 :326）全传裸扩展名，新语义下「无点 = 无扩展名」会全红，须逐处改成文件名（如 `"x." + ext.toUpperCase()`、`"big.log"`）并加第四参，逐条进偏离记录。
+- 漂移二：该文件三处整对象 `toEqual`（:103-109、:114-120、:175-181）因返回值新增 `rangeable` 变红，各补 `rangeable: false`，不得降成 `toMatchObject`。`:11` 的 `IMAGE_LIMIT` 改 `20_971_520`，`:159` 标题改 20 MiB，`:171/:189` 的 11 MiB 改 21 MiB，并补一条「11 MiB 的 png 现在被允许」。`:97` 标题里的 exact 去掉（全表断言在新文件）。
+- 行数：`preview.ts` 78、`rest.ts` 416、`workspace-preview.test.ts` 342、`workspaces-http.test.ts` 622。最后一个本刀后约 710，#1056 / #1058 的路由用例必须另开文件。
+- 签名与导出：`classifyPreview(absPath: string, name: string, size: number, options: { limits: PreviewLimits; sniffedText?: boolean })`，`options` 与 `limits` 必填。导出 `DEFAULT_PREVIEW_LIMITS = { text: 1_048_576, image: 20_971_520, notebook: 10_485_760 }`、`sniffText(bytes: Uint8Array): boolean`，以及 `IMAGE_EXTENSIONS` / `AUDIO_EXTENSIONS` / `VIDEO_EXTENSIONS` / `NOTEBOOK_EXTENSIONS`（均为 `ReadonlySet<string>`，图片集合取自类型表的键）。
+- 扩展名解析：`const i = name.lastIndexOf("."); ext = i <= 0 ? "" : name.slice(i + 1).toLowerCase()`，不用正则。`Dockerfile` / `Makefile` 精确且区分大小写。查表只用 `Set` / `Map`，不用对象字面量（`workspace-preview.test.ts:203` 的原型名用例保留，名字改成 `"file." + ext`）。
+- 判定次序：文本表 / 两个文件名 → 图片 → 音频 → 视频 → `ipynb` → 「由别处提供」集合（`pdf docx xlsx pptx zip tar gz tgz`，模块内不导出，直接抛 `preview_unsupported`）→ `options.sniffedText === true` 才是 `text` → 否则抛。`g.tar.gz` 的扩展名是 `gz`。
+- `sniffText` 最简实现：`bytes.includes(0)` 为假，且 `new TextDecoder("utf-8", { fatal: true }).decode(bytes, { stream: true })` 不抛。`stream: true` 正好容忍末尾未完整的多字节序列；函数自身不截 8192（那是 #1056 路由的事）。GBK 用例用字节 `D6 D0 CE C4`，不要用恰好以合法前缀结尾的串。
+- 路由接线（`rest.ts:288`）：`classifyPreview(absPath, basename(absPath), status.size, { limits: DEFAULT_PREVIEW_LIMITS })`。取 `basename(absPath)` 而不是查询串末段：`resolve` 会吞掉 `""` 与 `.` 分量（`page.html/.` 的 `absPath` 仍以 `page.html` 结尾），且逐分量拒绝符号链接，两者不会不一致。`:292` 的 `nosemgrep` 行保留在 `reply.send` 正上方，只改理由文字（现含音视频）。
+- 规格没写的分支（进偏离记录）：本刀到 #1058 之间，`mp3 / wav / mp4 / webm` 经 `file` 路由返回 200 全量并带 `Accept-Ranges: bytes`，`Range` 被忽略。`clearPreviewHeadersOnError` 不加 `Accept-Ranges` 的清除，留给 #1058 的区间发送函数。本刀路由不传 `sniffedText`，`LICENSE` 与 `workspaces-http.test.ts:509-517` 的 `file.__proto__` / `file.constructor` 仍是 415。
+- 新文件 `server/test/workspaces-preview-classify.test.ts` 只放新断言：全表（含 `A.YAML`、`x.env`、两个文件名）、`sniffedText` 三态（`dockerfile`、`notes.proto`、`LICENSE`、`.gitignore`）、图片七种与恰 20 MiB / +1 的 `gif`、`ipynb` 恰 10 MiB / +1、5 GiB `mp4`（只传数字，不建文件）、`wav`、`limits.image = 1024`、「由别处提供」九个名字带 `sniffedText: true`、`sniffText` 六个输入、`html` / `htm` / `svg` 跨截断点。另补 `.env` 不带嗅探 → `preview_unsupported`：场景里的 `.gitignore` 区分不出「点在开头视为无扩展名」，`.env` 才能。
+- 「流关闭和错误」的 `openPreviewStream` 部分已由 `workspace-preview.test.ts:277-316` 五条钉死，原样保留，新文件不复制，在偏离记录里写明对应关系（`openRangeStream` 属 #1057）。边界值一律写字面量，不从 `DEFAULT_PREVIEW_LIMITS` 取，否则「用回 10 MiB」的变异测不出来。
+- 门槛：jscpd 把 `server/test` 计入。`expectCanonicalError`、`expectedTextHeaders`、`collectBytes`、`spyMetadataIo` 从 `workspace-preview.test.ts` 搬进 `server/test/workspace-file-helpers.ts`（现 28 行），两个测试文件导入，搬家不改断言。knip 的 server 入口含 `test/**/*.test.ts`，新导出每个都要被新测试文件导入。`PreviewLimits` 类型照 `PreviewClassification` 的先例导出（master 上零导入方且门禁为绿）；若 knip 报，就在测试里 `import type` 一次。
+- 路由层（`workspaces-http.test.ts`，在 :419 与 :470 两条里加行）：`logo.svg`、`page.htm`、`feed.xml` 为 `text/plain; charset=utf-8`，`anim.gif`、`pic.webp` 为 200 对应类型，`doc.pdf`、`deck.pptx` 为 415，目录 `out` 为 404，`huge.png` 改 21 MiB（:476）。另加一条 `file` 路由的逃逸用例，因为现有路由层只有 `tree` 的越界审计（`workspaces-http-failures.test.ts:169`）：属主请求 `../outside.html` 与指向空间外的符号链接 `link.svg` → 403 `sandbox_denied` 且各一行 `sandbox.reject`（`op` 为 `read`）；他人的 id 带 `../x.html` → 404 且审计行数不变。
+- 不加验收清单行：`web/src/features/files/tree.tsx:69-98` 的 `supportsPreview` 仍只放行旧十二种，`web/src/lib/api.ts:425` 仍只认 png / jpeg。唯一可见变化是 10–20 MiB 的 png / jpg 由「文件过大」变成可预览，清单里没有钉 10 MiB 的行。不是配置切片：不碰 `docs/architecture/system.md` 第 9 节与配置计数测试。
+- 变异：`svg` 的类型改成 `image/svg+xml` → 新文件「html / htm / svg 永不以文档类型返回」与路由 `logo.svg` 的 `content-type` 断言判红。
+- 变异：图片上限用回 `10_485_760` → 新文件「恰 20 MiB 的 gif」与 `workspace-preview.test.ts` 改写后的恰 20 MiB png、「11 MiB 的 png 被允许」判红。路由层 21 MiB 的 `huge.png` 在此变异下仍是 413，不可观察。
+- 变异：图片判定 `>` 写成 `>=` → 恰 20 MiB 用例判红。
+- 变异：Notebook 超限改成截断或改用文本上限 → 「10 MiB+1 的 ipynb 抛 `preview_too_large`」与「恰 10 MiB 不截断」判红。
+- 变异：去掉「由别处提供」集合的判定 → 「九个名字带 `sniffedText: true` 仍抛」判红。路由层 `doc.pdf` 不可观察（本刀路由不传 `sniffedText`）。
+- 变异：`sniffedText` 缺省当成 `true` → 新文件「未提供时抛」与路由 `file.__proto__` / `file.constructor` 的 415 判红。
+- 变异：去掉小写归一 → `A.YAML` 判红；`Dockerfile` 改成不区分大小写 → `dockerfile` 未嗅探用例判红。
+- 变异：点在开头也算扩展名（`i < 0` 代替 `i <= 0`）→ 补的 `.env` 用例判红；场景原文的 `.gitignore` 不可观察。
+- 变异：无视 `options.limits`，用模块常量 → `limits.image = 1024` 的 2 KiB png 判红。
+- 变异：去掉 `mp4` 的 `rangeable` 或 `Accept-Ranges` → 5 GiB mp4 用例判红；给图片也加 `Accept-Ranges` → `workspace-preview.test.ts` 的整对象 `toEqual` 判红。
+- 变异：`sniffText` 去掉 NUL 判定 → 「含一个 0x00」判红；去掉 `stream: true` → 「截在汉字第二字节」判红；恒返回 `true` → GBK 与 PNG 头判红。
+- 变异：文本表漏掉 `xml` 或 `htm` → 路由 `feed.xml` / `page.htm` 判红。
+- 变异：用对象字面量查表 → `workspace-preview.test.ts:203` 的原型名用例判红。
+- 变异：逃逸，他人或不存在的 id：去掉 `file` 路由的 `ensureOwnedRoot` → `workspaces-http-failures.test.ts:57`（`file?path=keep.txt` 的相同 404、零审计）与新增的「他人 id 带越界路径」判红。
+- 变异：逃逸，穿越：跳过 `sandbox.resolve` 或直接拼路径 → 新增的 `../outside.html` 403 + `sandbox.reject`（`op` 为 `read`）判红。
+- 变异：逃逸，符号链接：把 `lstat` 换成 `stat` 且绕过 `resolve` → 新增的 `link.svg` 用例判红。只换 `lstatExisting` 而保留 `resolve` 时不可观察（`resolve` 已先拒），在表里标注。
+- 变异：逃逸，`op`：把 `"read"` 换成 `"list"` → 新增用例里审计行 `op` 的断言判红。
+  - 实施后更正一（规格文本）：场景「由别处提供与不支持」原把 `i.exe` 与八个「由别处提供」的名字并列为「即使带 `sniffedText: true` 也抛」，与条文表格 `text` 行（不在表内任何一行且 `sniffedText === true` 即 `text`）矛盾。以条文为准，场景改为：八个名字带 `sniffedText: true` 仍抛；`i.exe` 在 `sniffedText` 未提供或为 `false` 时抛。测试里第九个名字用 `I.PDF`（顺带钉住大小写归一）。此处改动待 owner 确认。
+  - 实施后更正二（变异预测）：「去掉 `file` 路由的 `ensureOwnedRoot`」不会让「他人 id」用例判红——`core/sandbox/index.ts` 的 facade 自己先查 `rootOf`，为空即 `not_found` 且无审计，是双重保证；该变异只在 `workspaces-http-failures.test.ts` 的「owned missing root」用例判红。

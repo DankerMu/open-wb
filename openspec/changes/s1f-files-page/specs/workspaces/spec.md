@@ -28,7 +28,7 @@
 - **THEN** 恰 20 MiB 的 `gif` 为 `image/gif`、`limit = size`；20 MiB+1 抛 `preview_too_large`；PNG 与 JPEG 的字节经流读出后与原文件完全一致、类型为 `image/png` 与 `image/jpeg` 并带安全头与大小头；`webp`、`ico` 为 `image/webp`、`image/x-icon`；`zip` 抛 `preview_unsupported`；被拒绝的分类都发生在打开或读取正文之前，不产生部分成功的响应；恰 10 MiB 的 `ipynb` 为 `notebook`、不截断，10 MiB+1 抛 `preview_too_large`；`mp4` 为 `video/mp4`、`rangeable`、头含 `Accept-Ranges: bytes`、不抛错；`wav` 为 `audio/wav`；改小上限后的 `png` 抛 `preview_too_large`
 
 #### Scenario: 由别处提供与不支持
-- **WHEN** 分类 `a.pdf`、`b.docx`、`c.xlsx`、`d.pptx`、`e.zip`、`f.tar`、`g.tar.gz`、`h.tgz`、`i.exe`，其中任何一个即使带 `sniffedText: true`
+- **WHEN** 分类 `a.pdf`、`b.docx`、`c.xlsx`、`d.pptx`、`e.zip`、`f.tar`、`g.tar.gz`、`h.tgz`，其中任何一个即使带 `sniffedText: true`；以及分类 `i.exe` 而 `sniffedText` 未提供或为 `false`
 - **THEN** 都抛 `preview_unsupported`，没有正文被打开
 
 #### Scenario: 嗅探与范围解析
