@@ -161,7 +161,7 @@ describe("workspace download: any file as an attachment", () => {
       const cookie = bearerCookie(await loginSessionId(app, "zhangsan"));
       spyBodyIo();
 
-      // The last segment of this request is empty: the name comes from the resolved path.
+      // A trailing slash alone proves little: `basename` of this request is `b.md` already.
       const nested = await download(app, cookie, "docs/b.md/");
       expect(nested.statusCode).toBe(200);
       expect(nested.payload).toBe("nested");
@@ -169,6 +169,16 @@ describe("workspace download: any file as an attachment", () => {
         "attachment; filename=\"b.md\"; filename*=UTF-8''b.md",
       );
       expect(readStreamOpens(target)).toBe(1);
+
+      // The request ends in `.`, which the resolver skips: the name is the resolved entry's,
+      // not the last segment of the request. The audit keeps the request as it was sent.
+      const dotted = await download(app, cookie, "docs/b.md/.");
+      expect(dotted.statusCode).toBe(200);
+      expect(dotted.payload).toBe("nested");
+      expect(dotted.headers["content-disposition"]).toBe(
+        "attachment; filename=\"b.md\"; filename*=UTF-8''b.md",
+      );
+      expect(readStreamOpens(target)).toBe(2);
 
       // A control character in a real file name must not reach the header.
       const odd = await download(app, cookie, "a\nb.txt");
@@ -179,6 +189,7 @@ describe("workspace download: any file as an attachment", () => {
       );
       expect(auditRows(db, "file.download")).toEqual([
         downloadAudit("docs/b.md/", 6),
+        downloadAudit("docs/b.md/.", 6),
         downloadAudit("a\nb.txt", 8),
       ]);
     });
@@ -238,7 +249,9 @@ describe("workspace download: refusals", () => {
       writeFileSync(join(sandboxRoot, "u1", "x"), "outside-the-workspace");
       execFileSync("mkfifo", [join(root, "pipe.bin")]);
       const cookie = bearerCookie(await loginSessionId(app, "zhangsan"));
-      const foreignCookie = bearerCookie(await loginSessionId(app, "zhaoliu"));
+      // lisi is the seeded administrator: the role opens no other owner's workspace.
+      const adminCookie = bearerCookie(await loginSessionId(app, "lisi"));
+      const memberCookie = bearerCookie(await loginSessionId(app, "zhaoliu"));
       const base = `/api/workspaces/${WORKSPACE}/download`;
       const cases: Array<
         [label: string, url: string, cookie: string, status: number, body: object]
@@ -247,7 +260,8 @@ describe("workspace download: refusals", () => {
         ["missing", `${base}?path=missing.md`, cookie, 404, NOT_FOUND_ENVELOPE],
         ["traversal", `${base}?path=..%2Fx`, cookie, 403, SANDBOX_DENIED_ENVELOPE],
         ["no path", base, cookie, 400, BAD_REQUEST_ENVELOPE],
-        ["foreign", `${base}?path=readme.md`, foreignCookie, 404, NOT_FOUND_ENVELOPE],
+        ["foreign admin", `${base}?path=readme.md`, adminCookie, 404, NOT_FOUND_ENVELOPE],
+        ["foreign member", `${base}?path=readme.md`, memberCookie, 404, NOT_FOUND_ENVELOPE],
         ["anonymous", `${base}?path=readme.md`, "", 401, UNAUTHORIZED_ENVELOPE],
         ["path twice", `${base}?path=readme.md&path=readme.md`, cookie, 400, BAD_REQUEST_ENVELOPE],
         ["empty path", `${base}?path=`, cookie, 404, NOT_FOUND_ENVELOPE],
@@ -290,10 +304,13 @@ describe("workspace download: refusals", () => {
       // Owned, but its directory is gone: not a sandbox rejection either.
       insertWorkspace(db, ROOTLESS_WORKSPACE, "u1", "rootless", "rootless", 2);
       const cookie = bearerCookie(await loginSessionId(app, "zhangsan"));
-      const foreignCookie = bearerCookie(await loginSessionId(app, "zhaoliu"));
+      // lisi is the seeded administrator, zhaoliu an ordinary member: neither owns the workspace.
+      const foreignCookie = bearerCookie(await loginSessionId(app, "lisi"));
+      const memberCookie = bearerCookie(await loginSessionId(app, "zhaoliu"));
 
       const responses = [
         await download(app, foreignCookie, "../x"),
+        await download(app, memberCookie, "../x"),
         await download(app, cookie, "../x", {}, MISSING_WORKSPACE),
         await download(app, cookie, "../x", {}, ROOTLESS_WORKSPACE),
         await download(app, cookie, "readme.md", {}, ROOTLESS_WORKSPACE),
