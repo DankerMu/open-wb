@@ -240,6 +240,16 @@ describe("ATTRIBUTION.md", () => {
     expect(hasEntry(attribution, "radix-ui", /\bMIT\b/)).toBe(true);
   });
 
+  it("登记 react-resizable-panels（MIT），且它在 web 的 dependencies 里", () => {
+    expect(hasEntry(readRepoFile("ATTRIBUTION.md"), "react-resizable-panels", /\bMIT\b/)).toBe(
+      true,
+    );
+    const { dependencies } = JSON.parse(readRepoFile("web/package.json")) as {
+      dependencies: Record<string, string>;
+    };
+    expect(Object.keys(dependencies)).toContain("react-resizable-panels");
+  });
+
   it("登记判定自证：缺许可、名称只出现在正文、名称不全等都不算登记", () => {
     expect(hasEntry("- **radix-ui** —— `MIT License`,版权归 WorkOS", "radix-ui", /\bMIT\b/)).toBe(
       true,

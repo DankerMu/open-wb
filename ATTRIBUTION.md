@@ -42,8 +42,12 @@
   - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;随打包产物分发时须附带该 MIT 声明。
 
 - **shadcn/ui** —— `MIT License`,版权归 shadcn（https://github.com/shadcn-ui/ui）
-  - 用途：`web/src/components/ui/` 的组件源码由其 registry（`radix-nova` 版式,配置见 `web/components.json`）拷入,拷入后只做颜色变量、中文文案、格式化、`cn` 导入归一（`@/lib/utils`）、严格 TS 选项下的纯类型适配与把被原文丢弃的调用方 `children` 或属性原样透传给底层基元（只转发、不写默认值）六类修改;`dialog` 随会话页的 html 产物预览拷入（s1f-chat-surface 任务 7.2）,未新增依赖;组件依赖 `class-variance-authority`（Apache-2.0）、`clsx`（MIT）、`tailwind-merge`（MIT）。
+  - 用途：`web/src/components/ui/` 的组件源码由其 registry（`radix-nova` 版式,配置见 `web/components.json`）拷入,拷入后只做颜色变量、中文文案、格式化、`cn` 导入归一（`@/lib/utils`）、严格 TS 选项下的纯类型适配与把被原文丢弃的调用方 `children` 或属性原样透传给底层基元（只转发、不写默认值）六类修改;`dialog` 随会话页的 html 产物预览拷入（s1f-chat-surface 任务 7.2）,未新增依赖;`resizable` 随 s1f-files-page 任务 23.1 拷入,新增依赖 `react-resizable-panels`;组件依赖 `class-variance-authority`（Apache-2.0）、`clsx`（MIT）、`tailwind-merge`（MIT）。
   - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;拷入的源码随打包产物分发时须附带该 MIT 声明。
+
+- **react-resizable-panels** —— `MIT License`,版权归 Brian Vaughn（https://github.com/bvaughn/react-resizable-panels）
+  - 用途：shadcn/ui `resizable` 的依赖（可拖拽、键盘可达的分栏与分隔线）,只供拷入层 `web/src/components/ui/resizable.tsx` 导入,会话页工作空间侧边栏的分隔线用;随 s1f-files-page 任务 23.1 加入,此刻尚无应用层调用方。
+  - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;包自带 `LICENSE.md`,随打包产物分发时须附带该 MIT 声明。
 
 - **Tailwind CSS** —— `MIT License`,版权归 Tailwind Labs, Inc.（https://github.com/tailwindlabs/tailwindcss）
   - 用途：`web/` 样式引擎。`tailwindcss`（theme / preflight / utilities 三段,经 `web/src/styles.css` 分层导入）与构建插件 `@tailwindcss/vite`;生成的 CSS 构建时打包进 `web/dist`,运行时零网络请求。
