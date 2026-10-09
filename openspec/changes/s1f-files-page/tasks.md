@@ -327,11 +327,11 @@ Minimal mergeable slice: atomic - 两个监听器与回收目录定时器在入�
 
 ## 14. office-preview — 转换器
 
-- [ ] 14.1 新文件 `server/src/preview/office.ts`：`createOfficeConverter`——作业目录、argv 与环境、sudo 前缀（复用 `core/process-path` 的 `setpriv` 检查）、成功判定；终止在途转换（超时、`signal` 中止、`close()`）按 office-preview「转换器调用契约」的两种模式：同 uid 模式以新进程组启动并对进程组发 `SIGKILL`，`OMP_USER` 模式只杀自己启动的 `sudo`（不执行 `kill`/`pkill`/第二次 `sudo`，不新增 sudoers 规则）。
+- [x] 14.1 新文件 `server/src/preview/office.ts`：`createOfficeConverter`——作业目录、argv 与环境、sudo 前缀（复用 `core/process-path` 的 `setpriv` 检查）、成功判定；终止在途转换（超时、`signal` 中止、`close()`）按 office-preview「转换器调用契约」的两种模式：同 uid 模式以新进程组启动并对进程组发 `SIGKILL`，`OMP_USER` 模式只杀自己启动的 `sudo`（不执行 `kill`/`pkill`/第二次 `sudo`，不新增 sudoers 规则）。
   实施注记见 `implementation-notes.md`「14.1、14.4（#1071）」。
 - [ ] 14.2 同文件或 `office-queue.ts`：并发上限、排队上限 8、按缓存键去重、排队中中止出队（office-preview「并发上限与排队」）。
 - [ ] 14.3 缓存与周期清理（office-preview「转换缓存」）：键的计算、命中更新修改时间、输出**复制**后改名进 `pdf/`、失败不入缓存、7 天清理函数、启动时清空 `work/`（周期定时器在 15.1 接进 `server.ts`）。
-- [ ] 14.4 测试夹具 `server/test/fixtures/fake-soffice.mjs`（可执行；按输入文件名里的标记：正常写出一个最小 PDF、退出码 1、不写输出、写空文件、写符号链接、睡眠、先起一个子进程再睡眠；把收到的 argv 与环境写到作业目录旁的记录文件）。
+- [x] 14.4 测试夹具 `server/test/fixtures/fake-soffice.mjs`（可执行；按输入文件名里的标记：正常写出一个最小 PDF、退出码 1、不写输出、写空文件、写符号链接、睡眠、先起一个子进程再睡眠；把收到的 argv 与环境写到作业目录旁的记录文件）。
 - [ ] 14.5 测试（新文件 `server/test/office-converter.test.ts`、`office-queue.test.ts`、`office-cache.test.ts`）：三条需求的全部场景，对着 14.4 的假可执行文件真实 spawn；「超时与中止」在同 uid 模式下断言假进程及其子进程都不存在；sudo 前缀与「OMP_USER 模式下终止的是 sudo」用记录型假 `sudo`（记录 pid 后睡眠：断言它被 `SIGKILL`、恰被启动一次、名额已释放）。office-preview「自动化测试不需要 LibreOffice」：转换器经注入的 spawn 函数启动进程，测试记录每次启动的可执行文件路径，断言其 basename 没有一个恰为 `soffice` 或 `libreoffice`（夹具名是 `fake-soffice.mjs`）。
 - [ ] 14.6 变异证据：把输出改名进缓存而不是复制 → inode / 属主断言判红；同 uid 模式超时只杀直接子进程 → 「子进程也不存在」判红；`OMP_USER` 模式改为再起一个 `sudo … pkill` → 「假 `sudo` 恰被启动一次」判红；去掉去重 → 「恰启动一次」判红；失败结果写缓存 → 「失败不入缓存」判红。
 
