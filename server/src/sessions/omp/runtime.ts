@@ -24,6 +24,7 @@ import {
   localSignal,
   nonempty,
   openDeferredAbort,
+  type RuntimeCommandFrame,
   signalLive,
   stateSessionFile,
   TERM_GRACE_MS,
@@ -255,12 +256,7 @@ export class SessionRuntime {
   }
 
   /** Correlated out-of-turn request on the prompt acquisition path; resolves the response data. */
-  command(
-    frame:
-      | { type: "get_branch_messages" }
-      | { type: "get_state" }
-      | { type: "branch"; entryId: string },
-  ): Promise<unknown> {
+  command(frame: RuntimeCommandFrame): Promise<unknown> {
     if (this.#closed) {
       throw new AgentUnavailableError("runtime shutdown");
     }
