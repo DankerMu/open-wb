@@ -8,6 +8,7 @@ import {
   GNU_MAGIC,
   LONG_LINK,
   list,
+  paxRecord,
   TAR_END,
   THREE_MEMBERS,
   tarFile,
@@ -66,6 +67,25 @@ describe("tar 遍历器：上限的边界", () => {
     expect(over.listing.entries.map((entry) => entry.path)).toEqual(["first"]);
     expect(over.listing.truncated).toBe(true);
     expect(over.file.maxLength()).toBe(512);
+  });
+
+  it("成员名的 4096 上限按字节计而不是按字符：1365 个汉字（4095 字节）计入，1366 个（4098 字节）不计入", async () => {
+    const fits = "字".repeat(1365);
+    const over = "字".repeat(1366);
+    expect(Buffer.byteLength(fits)).toBe(4095);
+    expect(Buffer.byteLength(over)).toBe(4098);
+    const { listing } = await list(
+      "bytes.tar",
+      Buffer.concat([
+        tarFile("PaxHeaders/a", paxRecord("path", fits), { typeflag: "x" }),
+        tarFile("short"),
+        tarFile("PaxHeaders/b", paxRecord("path", over), { typeflag: "x" }),
+        tarFile("short"),
+        TAR_END,
+      ]),
+    );
+    expect(listing.entries).toEqual([{ path: fits, type: "file", size: 0 }]);
+    expect(listing.truncated).toBe(true);
   });
 
   it("时限恰到 5000 毫秒即停；4999 毫秒时照常读完", async () => {
@@ -154,6 +174,54 @@ describe("tar 遍历器：头的形态", () => {
   });
 });
 
+describe("tar 遍历器：扩展记录给出的名字", () => {
+  const paths = async (...blocks: Buffer[]) => {
+    const { listing } = await list("names.tar", Buffer.concat([...blocks, TAR_END]));
+    expect(listing.truncated).toBe(false);
+    return listing.entries.map((entry) => entry.path);
+  };
+
+  it("pax 全局头 g 里的 path 记录不作用于后面的成员：path 是成员头自己的名字", async () => {
+    expect(
+      await paths(
+        tarFile("pax_global_header", paxRecord("path", "ignored-global.txt"), { typeflag: "g" }),
+        tarFile("own-name.txt", "abc"),
+      ),
+    ).toEqual(["own-name.txt"]);
+  });
+
+  it("GNU 的 K（长链接目标）记录紧挨着成员、中间没有 L 或 x：path 是成员头自己的名字", async () => {
+    expect(
+      await paths(
+        tarFile(LONG_LINK, "link-target\u0000", { typeflag: "K" }),
+        tarFile("own-name.txt", "", { typeflag: "2" }),
+      ),
+    ).toEqual(["own-name.txt"]);
+  });
+
+  it("同一个成员的 pax x 记录排在 GNU L 记录之前时，仍是 pax 的 path 优先", async () => {
+    expect(
+      await paths(
+        tarFile("PaxHeaders/x", paxRecord("path", "from-pax.txt"), { typeflag: "x" }),
+        tarFile(LONG_LINK, "from-long-name.txt\u0000", { typeflag: "L" }),
+        tarFile("from-header.txt"),
+        tarFile("next.txt"),
+      ),
+    ).toEqual(["from-pax.txt", "next.txt"]);
+  });
+
+  it("一个 pax 扩展头里有两条 path 记录时取后一条", async () => {
+    expect(
+      await paths(
+        tarFile("PaxHeaders/x", paxRecord("path", "first.txt") + paxRecord("path", "second.txt"), {
+          typeflag: "x",
+        }),
+        tarFile("from-header.txt"),
+      ),
+    ).toEqual(["second.txt"]);
+  });
+});
+
 describe("tar 遍历器：损坏", () => {
   const junk = Buffer.from(Array.from({ length: 1024 }, (_, index) => (index * 31 + 7) % 251));
   const badChecksum = tarHeader({ name: "bad.txt" });
@@ -217,8 +285,13 @@ describe("tar 遍历器：损坏", () => {
 
     // How many members come out before a gzip error depends on zlib's block boundaries, so the
     // count is only bracketed; what is pinned is that the listed ones are a prefix, in order.
-    const whole = gzipSync(Buffer.concat(emptyMembers(3000)));
+    // `whole` is a complete archive, end blocks included, and lists as one: what the two cases
+    // below report is caused by the cut and by the trailing bytes alone.
+    const whole = gzipSync(Buffer.concat([...emptyMembers(3000), TAR_END]));
     expect(whole.length).toBeGreaterThan(4096);
+    const intact = await list("whole.tgz", whole, { maxEntries: 5000, now: () => 0 });
+    expect(intact.listing.entries).toHaveLength(3000);
+    expect(intact.listing.truncated).toBe(false);
     for (const [name, bytes] of [
       ["cut.tar.gz", whole.subarray(0, Math.floor(whole.length / 2))],
       ["tail.tgz", Buffer.concat([whole, Buffer.alloc(300_000, "j")])],
