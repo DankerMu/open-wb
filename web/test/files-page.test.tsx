@@ -503,13 +503,13 @@ describe("workspace tree entry meta", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "readme.md" }));
     const toolbar = await waitFor(() => {
-      const header = document.querySelector(".files-preview-toolbar");
+      const header = document.querySelector('[data-slot="preview-header"]');
       expect(header).not.toBeNull();
       return header as HTMLElement;
     });
     expect(hasLucideGlyph(toolbar, "file-text")).toBe(true);
-    expect(toolbar.querySelector(".files-preview-path")?.textContent).toBe("readme.md");
-    expect(toolbar.querySelector(".files-preview-meta")?.textContent).toBe(
+    expect(toolbar.querySelector('[data-slot="preview-path"]')?.textContent).toBe("readme.md");
+    expect(toolbar.querySelector('[data-slot="preview-meta"]')?.textContent).toBe(
       `2.0 KB · ${formatMtime(102)}`,
     );
   });

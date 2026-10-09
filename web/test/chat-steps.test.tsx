@@ -134,7 +134,7 @@ describe("(S2) step cards render icon, Chinese badge, summary and collapsed raw 
     expect(styles).not.toContain("features/chat");
     expect(styles).not.toContain("messages.css");
     expect(styles).not.toContain(".chat-md");
-    expect(styles).toContain(".files-md :is(ul, ol)");
+    expect(styles).not.toContain(".files-md");
   });
 });
 
