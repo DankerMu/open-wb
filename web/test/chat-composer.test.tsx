@@ -70,17 +70,18 @@ describe("(C1) composer placeholder", () => {
 });
 
 describe("(C2) composer card structure", () => {
-  it("renders textarea, sr-only label, toolbar with the 「+」 button and one icon send button, and the hint", async () => {
+  it("renders textarea, sr-only label, toolbar with the 「+」 button, the permission tier and one icon send button, and the hint", async () => {
     const { input } = await mountSelectedDone();
     const { form, card, toolbar } = composerParts(input);
 
     const buttons = within(form).queryAllByRole("button");
     expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([
       "添加文件或命令",
+      "权限：只问命令",
       "发送",
     ]);
     const send = within(form).getByRole("button", { name: "发送" }) as HTMLButtonElement;
-    expect(buttons[1]).toBe(send);
+    expect(buttons[2]).toBe(send);
     expect(send.type).toBe("submit");
     expect(send.querySelector("svg")?.classList.contains("lucide-send")).toBe(true);
     expect(card.contains(send)).toBe(true);
