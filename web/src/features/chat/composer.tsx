@@ -1,7 +1,10 @@
 // 会话页输入框（design D6）：应用层组件，不用 ComposerPrimitive——拷入层的受控 textarea 加按钮，值即应用的
 // `draft`，提交走页面既有的表单受理路径。`generating` 与 `disabled` 是两回事：前者驱动 `生成中` 与 `停止`，
-// 后者只锁定输入框（历史加载中、分叉在途、连接器终止失败时只有后者为真）。
+// 后者只锁定输入框（历史加载中、分叉在途、连接器终止失败时只有后者为真）。拖进输入卡或粘贴进文本框的文件交给
+// `onFiles`（message-attachments「输入框附件标签」的入口一段）。
 import {
+  type ClipboardEvent,
+  type DragEvent,
   type FormEvent,
   Fragment,
   type KeyboardEvent,
@@ -15,6 +18,56 @@ import { Textarea } from "@/components/ui/textarea";
 import { Icon } from "../../ui/index.js";
 
 type StopTurn = () => Promise<"stopping" | null>;
+type OnFiles = ((files: File[]) => void) | undefined;
+
+/** 放下的文件：文件夹跳过（不支持上传文件夹），同批的文件照常。 */
+function droppedFiles(data: DataTransfer): File[] {
+  return Array.from(data.items).flatMap((item) => {
+    if (item.kind !== "file" || item.webkitGetAsEntry?.()?.isDirectory) return [];
+    return item.getAsFile() ?? [];
+  });
+}
+
+/**
+ * 输入卡的文件拖拽与文本框的文件粘贴。只认带 `Files` 的拖拽（经过时 `files` 还是空的，只能看 `types`），文字
+ * 拖拽不碰；认下的拖拽每次都拦缺省动作，否则收不到 `drop`、浏览器会打开该文件——锁定时也拦，只是不高亮，文件
+ * 由 `onFiles` 那头拒收。高亮用进入计数：指针移到子元素上也会触发 `dragleave`。
+ */
+function useFileDrop(onFiles: OnFiles, disabled: boolean) {
+  const [depth, setDepth] = useState(0);
+  /** 是文件拖拽且有去处：拦下缺省动作并给出去处。 */
+  const claim = (event: DragEvent<HTMLDivElement>) => {
+    if (onFiles === undefined || !event.dataTransfer.types.includes("Files")) return undefined;
+    event.preventDefault();
+    return onFiles;
+  };
+  return {
+    card: {
+      "data-drop-active": depth > 0 && !disabled ? "true" : undefined,
+      onDragEnter: (event: DragEvent<HTMLDivElement>) => {
+        if (claim(event)) setDepth((count) => count + 1);
+      },
+      onDragLeave: (event: DragEvent<HTMLDivElement>) => {
+        if (claim(event)) setDepth((count) => Math.max(0, count - 1));
+      },
+      onDragOver: claim,
+      onDrop: (event: DragEvent<HTMLDivElement>) => {
+        const receive = claim(event);
+        if (receive === undefined) return;
+        setDepth(0);
+        const files = droppedFiles(event.dataTransfer);
+        if (files.length > 0) receive(files);
+      },
+    },
+    /** 只在剪贴板带文件且不带文字时拦截：表格、文档里复制的文字会附带一张渲染图，那时文字优先。 */
+    onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => {
+      const { files, types } = event.clipboardData;
+      if (onFiles === undefined || files.length === 0 || types.includes("text/plain")) return;
+      event.preventDefault();
+      onFiles(Array.from(files));
+    },
+  };
+}
 
 type ComposerProps = {
   /** 工具栏右组最前面的控件（模型、推理强度）；不传时右组只有 `生成中` 与发送/停止键。 */
@@ -31,6 +84,8 @@ type ComposerProps = {
   /** 先于既有 Enter 规则调用；返回 true 表示按键已被处理，不再提交。 */
   interceptKeyDown?(event: KeyboardEvent<HTMLTextAreaElement>): boolean;
   onChangeDraft(value: string): void;
+  /** 拖进输入卡或粘贴进文本框的文件的去处；不传（欢迎态）时拖拽与粘贴都不处理。 */
+  onFiles?: OnFiles;
   onStop: StopTurn;
   onSubmit(event: FormEvent<HTMLFormElement>): void;
   placeholder: string;
@@ -43,7 +98,7 @@ type ComposerProps = {
 
 /**
  * 输入卡：候选面板、附件标签区、textarea、底部工具栏（能力栏是左组，`actions`、`生成中` 与发送/停止键是右组）；提示行在卡外。
- * 窄屏下工具栏可换行，右组作为一个整体落到下一行并靠右。
+ * 窄屏下工具栏可换行，右组作为一个整体落到下一行并靠右。文件拖到卡上方时卡带 `data-drop-active` 并显示聚焦环。
  */
 export function Composer({
   actions,
@@ -55,6 +110,7 @@ export function Composer({
   inputRef,
   interceptKeyDown,
   onChangeDraft,
+  onFiles,
   onStop,
   onSubmit,
   placeholder,
@@ -62,6 +118,7 @@ export function Composer({
   slashMenu,
   stopSessionId,
 }: ComposerProps) {
+  const drop = useFileDrop(onFiles, disabled);
   const inputId = useId();
   const hintId = useId();
   return (
@@ -71,8 +128,9 @@ export function Composer({
       onSubmit={onSubmit}
     >
       <div
-        className="relative flex flex-col gap-3 rounded-2xl border border-border bg-card p-3 shadow-(--wb-shadow-input) has-[textarea:focus-visible]:border-ring has-[textarea:focus-visible]:ring-3 has-[textarea:focus-visible]:ring-ring/50"
+        className="relative flex flex-col gap-3 rounded-2xl border border-border bg-card p-3 shadow-(--wb-shadow-input) has-[textarea:focus-visible]:border-ring has-[textarea:focus-visible]:ring-3 has-[textarea:focus-visible]:ring-ring/50 data-[drop-active=true]:border-ring data-[drop-active=true]:ring-3 data-[drop-active=true]:ring-ring/50"
         data-slot="composer-card"
+        {...drop.card}
       >
         {slashMenu}
         {attachments}
@@ -103,6 +161,7 @@ export function Composer({
               event.currentTarget.form?.requestSubmit();
             }
           }}
+          onPaste={drop.onPaste}
           placeholder={placeholder}
           ref={inputRef}
           rows={2}

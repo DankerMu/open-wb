@@ -1,5 +1,6 @@
 // 输入框的附件区（design D12）：文本框上方的标签列表，以及把它接到会话页的 `useAttachmentArea`——隐藏的
-// 文件输入框、数量与大小的提示、「+」菜单 `上传文件` 项的可用判定。标签状态与上传队列在 attachments-state.ts。
+// 文件输入框、数量与大小的提示、「+」菜单 `上传文件` 项的可用判定、拖入与粘贴共用的接收入口。标签状态与上传队列在
+// attachments-state.ts。
 import { type ReactNode, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Icon } from "../../ui/index.js";
@@ -83,19 +84,20 @@ function AttachmentChips({ items, onRemove }: { items: Attachment[]; onRemove(id
 
 type AttachmentAreaInput = {
   attachments: Attachments;
-  /** 输入框锁定：文件框此时收到的文件不接受（文件对话框开着时回合开始的情形）。 */
+  /** 输入框锁定：此时收到的文件不接受（文件对话框开着时回合开始、回合进行中拖入的情形）。 */
   locked: boolean;
   /** 输入框选项（上传上限）已取得。 */
   ready: boolean;
-  /** 当前会话 id；欢迎态为 null，此时没有 `上传文件` 项。 */
+  /** 当前会话 id；欢迎态为 null，此时没有 `上传文件` 项，拖入与粘贴也不处理。 */
   sessionId: string | null;
   /** 当前会话的工作空间：没有为 null，会话还没解析出来为 undefined。 */
   workspaceId: string | null | undefined;
 };
 
 /**
- * 附件区交给会话页的四块：`chips` 进输入卡（没有标签时为 null），`notice` 是数量与大小的提示，`input` 是
- * 隐藏的文件输入框，`upload` 是「+」菜单 `上传文件` 项的 props（不可用时带原因；欢迎态为 undefined）。
+ * 附件区交给会话页的五块：`chips` 进输入卡（没有标签时为 null），`notice` 是数量与大小的提示，`input` 是
+ * 隐藏的文件输入框，`upload` 是「+」菜单 `上传文件` 项的 props（不可用时带原因），`receive` 是文件框、拖入与
+ * 粘贴共用的接收入口。欢迎态的 `upload` 与 `receive` 都是 undefined。
  */
 export function useAttachmentArea({
   attachments,
@@ -107,10 +109,14 @@ export function useAttachmentArea({
   chips: ReactNode;
   input: ReactNode;
   notice: ReactNode;
+  receive: ((files: File[]) => void) | undefined;
   upload: { disabled: boolean; reason: string | null; open(): void } | undefined;
 } {
   const inputRef = useRef<HTMLInputElement>(null);
   const { accept, items, notice, remove } = attachments;
+  const receive = (files: File[]) => {
+    if (!locked) accept(files);
+  };
   return {
     chips: items.length === 0 ? null : <AttachmentChips items={items} onRemove={remove} />,
     input: (
@@ -119,7 +125,7 @@ export function useAttachmentArea({
         hidden
         multiple
         onChange={(event) => {
-          if (!locked) accept(Array.from(event.target.files ?? []));
+          receive(Array.from(event.target.files ?? []));
           // 清掉选择：同一个文件可以再选一次。
           event.target.value = "";
         }}
@@ -134,6 +140,7 @@ export function useAttachmentArea({
           {notice}
         </p>
       ),
+    receive: sessionId === null ? undefined : receive,
     upload:
       sessionId === null
         ? undefined

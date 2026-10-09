@@ -325,6 +325,7 @@ export function ConversationView({
             inputRef={composerRef}
             interceptKeyDown={slash.interceptKeyDown}
             onChangeDraft={onChangeDraft}
+            onFiles={files.receive}
             onStop={onStop}
             onSubmit={onSubmit}
             placeholder={requestedSessionId ? "继续追问，或派一个新任务…" : "今天帮你做些什么"}

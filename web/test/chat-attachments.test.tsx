@@ -1,6 +1,7 @@
 // 输入框附件（message-attachments「输入框附件标签」「没有工作空间的会话」、chat-web「输入框与能力栏」）：已选会话里
 // 经隐藏的文件框选入、串行上传、标签与进度、发送闸、带附件发送与被拒后的恢复、切换会话清空。seam：整页挂载 +
-// 假 API + `FakeXhr`。期望文案与请求体取自规格条文。
+// 假 API + `FakeXhr`。期望文案与请求体取自规格条文。拖入与粘贴走同一个入口；jsdom 没有 `DataTransfer` 也没有
+// 缺省动作，事件带的是普通对象，「没有被拦」以 `fireEvent.*` 返回 true 断言。
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { quiesce } from "./chat-page-file-changes-support.js";
@@ -171,6 +172,55 @@ async function withUploaded(extra: FetchRoutes = {}, after: string[] = []) {
   await land(0, "a.pdf");
   expect(chips()).toEqual(["a.pdf10 B"]);
   return page;
+}
+
+function card() {
+  return composer().closest('[data-slot="composer-card"]') as HTMLElement;
+}
+
+function dropActive() {
+  return card().getAttribute("data-drop-active");
+}
+
+type Dragged = { types: string[]; files: File[]; items: unknown[] };
+
+/** 拖拽经过时的 `dataTransfer`：真实浏览器此时只给 `types`，`files` 是空的。 */
+function hovering(...types: string[]): { dataTransfer: Dragged } {
+  return { dataTransfer: { types, files: [], items: [] } };
+}
+
+/** 放下时的 `dataTransfer`；`folders` 里的名字是文件夹（真实浏览器里它在 `files` 中也占一项）。 */
+function dropped(files: File[], folders: string[] = []): { dataTransfer: Dragged } {
+  const entry = (item: File, isDirectory: boolean) => ({
+    kind: "file",
+    getAsFile: () => item,
+    webkitGetAsEntry: () => ({ isDirectory }),
+  });
+  const dirs = folders.map((name) => file(name, 0));
+  return {
+    dataTransfer: {
+      types: ["Files"],
+      files: [...dirs, ...files],
+      items: [...dirs.map((dir) => entry(dir, true)), ...files.map((item) => entry(item, false))],
+    },
+  };
+}
+
+const TEXT_DRAG: { dataTransfer: Dragged } = {
+  dataTransfer: { types: ["text/plain"], files: [], items: [{ kind: "string" }] },
+};
+
+async function drop(files: File[], folders: string[] = []) {
+  const allowed = fireEvent.drop(card(), dropped(files, folders));
+  await quiesce();
+  return allowed;
+}
+
+/** 粘贴：`types` 是剪贴板里的类型，带文件时浏览器给 `Files`。 */
+async function paste(types: string[], ...files: File[]) {
+  const allowed = fireEvent.paste(composer(), { clipboardData: { types, files } });
+  await quiesce();
+  return allowed;
 }
 
 function plusButton() {
@@ -501,5 +551,166 @@ describe("没有上传目标", () => {
     expect(area()).toBeNull();
     expect(alerts()).toEqual([]);
     expect(FakeXhr.instances).toHaveLength(0);
+  });
+});
+
+describe("拖入与粘贴", () => {
+  it("文件拖到输入框上方：容器带 `data-drop-active`，放下后去掉，两个文件成为标签并逐个上传", async () => {
+    await open();
+    expect(card().hasAttribute("data-drop-active")).toBe(false);
+
+    expect(fireEvent.dragEnter(card(), hovering("Files"))).toBe(false);
+    expect(fireEvent.dragOver(card(), hovering("Files"))).toBe(false);
+    expect(dropActive()).toBe("true");
+    expect(area()).toBeNull();
+
+    expect(await drop([file("a.pdf"), file("b.png", 20)])).toBe(false);
+    expect(card().hasAttribute("data-drop-active")).toBe(false);
+    expect(chips()).toEqual(["a.pdf10 B上传中 0%", "b.png20 B上传中 0%"]);
+    expect(FakeXhr.instances).toHaveLength(1);
+    expect(xhr(0).opens).toEqual([["POST", `/api/workspaces/${W}/uploads?name=a.pdf`]]);
+    await land(0, "a.pdf");
+    expect(FakeXhr.instances).toHaveLength(2);
+    await land(1, "b.png", 20);
+    expect(statuses()).toEqual(["uploaded", "uploaded"]);
+  });
+
+  it("指针在容器的子元素之间移动时高亮不闪：进入两次、离开一次仍在，再离开才去掉", async () => {
+    await open();
+    fireEvent.dragEnter(card(), hovering("Files"));
+    fireEvent.dragEnter(composer(), hovering("Files"));
+    fireEvent.dragLeave(card(), hovering("Files"));
+    expect(dropActive()).toBe("true");
+    fireEvent.dragLeave(composer(), hovering("Files"));
+    expect(card().hasAttribute("data-drop-active")).toBe(false);
+    expect(area()).toBeNull();
+
+    // 多出来的一次离开不欠账：下一次进入照常高亮。
+    fireEvent.dragLeave(card(), hovering("Files"));
+    fireEvent.dragEnter(card(), hovering("Files"));
+    expect(dropActive()).toBe("true");
+  });
+
+  it("拖入一段文字：不处理，没有高亮，不产生标签", async () => {
+    await open();
+    typeDraft("半句");
+    expect(fireEvent.dragEnter(card(), TEXT_DRAG)).toBe(true);
+    expect(fireEvent.dragOver(card(), TEXT_DRAG)).toBe(true);
+    expect(card().hasAttribute("data-drop-active")).toBe(false);
+    expect(fireEvent.dragLeave(card(), TEXT_DRAG)).toBe(true);
+    expect(fireEvent.drop(card(), TEXT_DRAG)).toBe(true);
+    await quiesce();
+    expect(card().hasAttribute("data-drop-active")).toBe(false);
+    expect(area()).toBeNull();
+    expect(alerts()).toEqual([]);
+    expect(composer().value).toBe("半句");
+    expect(FakeXhr.instances).toHaveLength(0);
+  });
+
+  it("粘贴截图：多一个 `image.png` 标签，草稿没有多出文字", async () => {
+    await withUploaded();
+    typeDraft("半句");
+    expect(await paste(["Files"], file("image.png"))).toBe(false);
+    expect(chips()).toEqual(["a.pdf10 B", "image.png10 B上传中 0%"]);
+    expect(composer().value).toBe("半句");
+    expect(FakeXhr.instances).toHaveLength(2);
+    expect(xhr(1).opens).toEqual([["POST", `/api/workspaces/${W}/uploads?name=image.png`]]);
+  });
+
+  it.each<[string, string[], File[]]>([
+    ["纯文字", ["text/plain"], []],
+    ["文字附带一张渲染图", ["text/plain", "text/html", "Files"], [file("image.png")]],
+  ])("粘贴%s：不拦截，没有新标签", async (_name, types, files) => {
+    await open();
+    typeDraft("半句");
+    expect(await paste(types, ...files)).toBe(true);
+    expect(area()).toBeNull();
+    expect(alerts()).toEqual([]);
+    expect(composer().value).toBe("半句");
+    expect(FakeXhr.instances).toHaveLength(0);
+  });
+
+  it("拖入的文件走同一个入口：超过个数时整批不接受并提示", async () => {
+    await open();
+    const four = ["a.pdf", "b.pdf", "c.pdf", "d.pdf"].map((name) => file(name));
+    expect(await drop(four)).toBe(false);
+    expect(area()).toBeNull();
+    expect(alerts()).toEqual(["每条消息最多 3 个附件"]);
+    expect(FakeXhr.instances).toHaveLength(0);
+  });
+
+  it("拖入文件夹：文件夹被跳过，同批的文件照常", async () => {
+    await open();
+    expect(await drop([file("a.pdf")], ["资料"])).toBe(false);
+    expect(chips()).toEqual(["a.pdf10 B上传中 0%"]);
+    expect(alerts()).toEqual([]);
+    expect(FakeXhr.instances).toHaveLength(1);
+
+    // 只有文件夹：什么都不发生，已有的提示也不动。
+    await choose(file("big.bin", 1001));
+    expect(alerts()).toEqual(["「big.bin」超过大小上限"]);
+    expect(await drop([], ["资料"])).toBe(false);
+    expect(chips()).toEqual(["a.pdf10 B上传中 0%"]);
+    expect(alerts()).toEqual(["「big.bin」超过大小上限"]);
+  });
+});
+
+describe("拖入与粘贴没有上传目标", () => {
+  // 提示是单槽：拖入与粘贴各用一个会话，连着做时后一半永远判不了红。
+  it.each<[string, () => Promise<boolean>]>([
+    ["拖入一个文件", () => drop([file("a.pdf")])],
+    ["粘贴一张截图", () => paste(["Files"], file("image.png"))],
+  ])("未绑定会话%s：输入框上显示原因，没有标签，不发请求，草稿不变", async (_name, give) => {
+    const { fetchMock } = await open(UNBOUND);
+    typeDraft("半句");
+    const before = paths(fetchMock).length;
+
+    expect(await give()).toBe(false);
+    expect(alerts()).toEqual([NO_WORKSPACE]);
+    expect(area()).toBeNull();
+    expect(FakeXhr.instances).toHaveLength(0);
+    expect(paths(fetchMock)).toHaveLength(before);
+    expect(composer().value).toBe("半句");
+  });
+
+  it("回合进行中：拖入的文件不接受也没有高亮，但缺省动作仍被拦下（页面不被带走）", async () => {
+    const running = { ...S, status: "running" as const };
+    await open(S, {
+      "/api/sessions": () => jsonResponse({ sessions: [running] }),
+      [messagesPath(S.id)]: () => jsonResponse(snapshotOf(running)),
+    });
+    expect(composer().disabled).toBe(true);
+
+    expect(fireEvent.dragEnter(card(), hovering("Files"))).toBe(false);
+    expect(fireEvent.dragOver(card(), hovering("Files"))).toBe(false);
+    expect(card().hasAttribute("data-drop-active")).toBe(false);
+    expect(await drop([file("a.pdf")])).toBe(false);
+    await paste(["Files"], file("image.png"));
+    expect(area()).toBeNull();
+    expect(alerts()).toEqual([]);
+    expect(FakeXhr.instances).toHaveLength(0);
+  });
+
+  it("欢迎态：拖入与粘贴都不处理（暂存属首次发送一刀）", async () => {
+    renderChatPage("/", {
+      "/api/workspaces": () => workspaceList(PROJECT_A),
+      ...composerOptionsRoute(OPTIONS),
+      "/api/sessions": () => jsonResponse({ sessions: [S] }),
+      [COMMANDS]: catalogue(),
+    });
+    await screen.findByRole("textbox", { name: "给助手发消息" });
+    await quiesce();
+    installFakeXhr();
+    expect(composer().disabled).toBe(false);
+
+    expect(fireEvent.dragEnter(card(), hovering("Files"))).toBe(true);
+    expect(fireEvent.dragOver(card(), hovering("Files"))).toBe(true);
+    expect(card().hasAttribute("data-drop-active")).toBe(false);
+    expect(await drop([file("a.pdf")])).toBe(true);
+    expect(await paste(["Files"], file("image.png"))).toBe(true);
+    expect(area()).toBeNull();
+    expect(alerts()).toEqual([]);
+    expect(FakeXhr.instances).toHaveLength(0);
+    expect(send().disabled).toBe(true);
   });
 });
