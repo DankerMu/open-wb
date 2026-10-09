@@ -128,10 +128,11 @@ Minimal mergeable slice: 三项各自独立，可分别记录、分别成 PR（�
   - `web/test/files-overlays.test.tsx:220-238` 的 O8 用例（`O8 styles 新建, ＋ 新建工作空间, 取消 and 创建 as ui-btn variants`）横跨两刀。**这一刀只改对话框的两个按钮**：`取消`（`:232-234`）与 `创建`（`:235-236`）的 `className` 由「恰为 `ui-btn ui-btn--secondary|primary ui-btn--md`」改为「不含 `ui-btn`」，
     `创建` 仍为 `type="submit"`（`:237`），另补一条「请求挂起期间禁用」（ui-primitives「按钮单一实现与旧类退役」场景「迁移后行为不回归」）。`新建`（`:223`）与 `＋ 新建工作空间`（`:228`）两条断言这一刀**原样保留**（两个按钮仍由冻结区 `Button` 渲染），分别在 3.1、3.2 改；用例标题到 3.2 再改。
   - `files-overlays.test.tsx:133`、`:208` 的 `document.querySelector(".ui-dialog-overlay")` → `[data-slot="dialog-overlay"]`（「点遮罩」的语义不变）。
-  - `files-overlays.test.tsx:254-258`（O7 里断言 `dialogs.tsx` 恰有 `import { Button, Dialog, Menu } from "../../ui/index.js"`）→ 断言 `dialogs.tsx` 不再从 `ui/index.js` 导入任何名字（ui-foundation「组件分层」；分层守卫是更强的证明）。
+  - `files-overlays.test.tsx:254-258`（O7 里断言 `dialogs.tsx` 恰有 `import { Button, Dialog, Menu } from "../../ui/index.js"`）→ 断言 `dialogs.tsx` 从 `../../ui/index.js` 的具名导入恰为 `useEscapeFallback`（复用该用例既有的 `primitiveImport` 帮手，不新增动态 `RegExp`；Escape 兜底与会话页对话框同一写法；`Button` / `Dialog` / `Menu` 不得再出现由分层守卫证明）。
     同一用例 `:259-261` 对 `page.tsx` 的导入断言这一刀不动（3.2 改）；O7 的禁用字面量清单（`<dialog`、`role="menu"`、`showModal` 等）原样通过——拷入层源码里没有这些字面量。
   核对过、原样通过的：`files-overlays.test.tsx` 的 O1–O6、O9（「创建流程焦点闭环」「取消类关闭无模态残留」「挂起期点遮罩中止请求」三个场景逐条对照；`expectModalSet` / `expectModalCleared` 读的 `aria-hidden` 与 `body` 的 `pointer-events` 来自 Radix Dialog，新旧相同）、
   `files-errors.test.tsx`、`files-concurrency.test.tsx`、`files-fixture.tsx`（这三个文件没有类名或结构选择器落在对话框上）、走查 `ui-walk.spec.ts:205-219`、`:262-264`、`:286-300`（按角色与标签定位）。
+  实施注记见 `implementation-notes.md`「2.2、2.3（#1077）」。
 - [ ] 2.3 变异证据：把 `新建文件夹` 对话框的初始焦点从 `位置` 挪走 → 焦点闭环用例判红；去掉预览头的 `data-slot` → 修改时间格式用例判红；`查看源码` 改回冻结区的 `Button` → 「`className` 不含 `ui-btn`」判红（分层守卫同时判红）；
   去掉 Markdown 容器上还原列表符号的类 → 走查的「列表符号不为 `none`」判红；去掉 `DialogContent` 的 `aria-modal` → 「初始焦点经受延迟回焦」用例判红；把 `CreationMenu` 留在 `dialogs.tsx` → 分层守卫判红；
   去掉挂起上升沿移焦点到关闭按钮的那段逻辑（或改成聚焦首个可用控件）→ O4、O5 的「活动元素是 `关闭`」与走查的 `关闭` `toBeFocused` 判红。
