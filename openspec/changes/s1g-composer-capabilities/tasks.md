@@ -808,7 +808,7 @@ Minimal mergeable slice: 13.1 + 13.2 + 13.4 一刀；13.3 一刀；13.5 一刀�
   - 变异（PR 描述）：「+」与工作空间对调 → 次序用例与 W6 红；`aria-label` 改回 → C2、S1、W6、plus-menu 红；去 `narrow:flex-wrap` / `narrow:basis-auto` / `ml-auto` / `title` → 窄屏用例各一条红；`发送` 挪出右组 → 结构断言红；在 14.1 的 hook 里去掉重取 → 计数停在 1；每次切换都取 → 计数为 4（这两条变异改的是 14.1 的文件，PR 里注明）。
   - 守卫：不新建 `web/src/features/chat/` 文件，`MIGRATED_AREAS` 与清单断言不动；无新导出，knip 无新报；`ui-layering.test.ts:641` 要求 `capability-bar.tsx` 仍含 `list-none` 的 `<ul>`，不动 `WorkspaceOptions`；不改拷入层的 `button.tsx`（其 `shrink-0 whitespace-nowrap` 靠调用处的 `min-w-0` 与 `max-w` 覆盖，沿用现写法）；`chat-module-layout.test.ts` 不受影响。
 - [x] 14.2b 窄屏：工具行换行、右组整体落行靠右、工作空间与模型按钮的最大宽度与截断（`title` 带完整文字）。验证：类名 / 结构断言（jsdom 不作像素断言），真实布局由 18.3 的走查钉住。
-- [ ] 14.2c 「+」菜单的可用性语义：按钮只在锁定时禁用；`上传文件` 菜单项本任务不渲染（它随组 16 的真实行为一起出现，不先摆一个禁用的空壳；规格里「第一项是 `上传文件`」的断言也在组 16 落）；草稿非空时命令条目 `aria-disabled` 与提示行。验证：chat-web delta「「+」菜单写入草稿」改写后的断言；断言「草稿非空时按钮禁用」的既有用例按 delta 改写为「按钮可用、命令条目不可选」（偏离记录）。
+- [x] 14.2c 「+」菜单的可用性语义：按钮只在锁定时禁用；`上传文件` 菜单项本任务不渲染（它随组 16 的真实行为一起出现，不先摆一个禁用的空壳；规格里「第一项是 `上传文件`」的断言也在组 16 落）；草稿非空时命令条目 `aria-disabled` 与提示行。验证：chat-web delta「「+」菜单写入草稿」改写后的断言；断言「草稿非空时按钮禁用」的既有用例按 delta 改写为「按钮可用、命令条目不可选」（偏离记录）。
   （14.2a 的）改名波及的既有引用一次改完：`web/test/chat-composer.test.tsx`、`chat-page-welcome-scene.test.tsx`、`chat-page-plus-menu.test.tsx`、`chat-capability-bar.test.tsx`、`chat-stop-button.test.tsx`、`web/e2e/ui-walk-sessions.spec.ts`（只改字符串，不加行）。
   **实施注记（14.2c，fixture 评审补充，#1028）**：
   - 现状漂移：`capability-bar.tsx` 现为 268 行（14.2a 注记写 257）。禁用语义不在它里面，而在 `slash-menu.tsx`（288 行）的 `usePlusState` `:125-130`（`disabled = !enabled || draft.trim() !== ""`）与 `onPick` `:258-260`。issue 的 PR 边界没列 `slash-menu.tsx`，它是必改文件，写进偏离记录。`page.tsx:48-52`、`conversation-view.tsx:188-190` 不改。
@@ -826,6 +826,7 @@ Minimal mergeable slice: 13.1 + 13.2 + 13.4 一刀；13.3 一刀；13.5 一刀�
   - 清单（通用纪律，19.5 只管改名）：`docs/acceptance/functional-checklist.md:77` 的 CH-11 同 PR 改写，结论保持 `待签`。预期列的「有文字时按钮是灰的，清空后可点」改为：有文字时按钮可点，菜单里各项是灰的、点了没反应，最上面一行 `清空输入后可选择命令`，清空后各项可点。「没有权限设置、上传文件、专家」本刀仍成立，留给 16.6。
   - 本刀验不了（偏离记录）：场景 THEN 的「第一项是 `上传文件`」与拉取中一例的「`上传文件` 项在」随 16.2a 落。守卫：无新文件，`MIGRATED_AREAS` 不动；`locked` 由 `capability-bar.tsx` 消费，knip 无新报；`ui-layering.test.ts:643` 不受影响。
   - 变异（PR 描述）：`disabled` 改回含草稿 → `:144/:164` 与用例（a）红；复位仍看草稿 → 用例（a）「菜单仍在」红；去掉条目 `disabled` → `aria-disabled` 断言红；`onPick` 的门去掉草稿条件 → `:376` 段红；去掉提示行 → `textContent` 断言红；`locked` 改为实时值，或 `onPick` 不先关菜单 → 用例（b）红、`make ui-walk` 的 `body.gap` 红；提示行在目录为空时也显示 → `:206/:235/:255` 红。
+  - 实施更正（#1028）：上面的变异预期有两处与实测不符。「`disabled` 改回含草稿」红的是主用例与 `:376` 段，用例（a）不红（它不断言按钮）；「提示行在目录为空时也显示」原本全绿（`:206/:235/:255` 都在空白草稿下打开菜单，`locked` 恒为 false），已在空目录用例末尾补「`半句` 下重开菜单，文本仍恰为 `暂无可用项`」后判红。`locked` 改实时值与 `onPick` 不先关菜单两项，实际在变异下重建并跑了 ui-walk，都红在 `ui-walk-sessions.spec.ts:573`。
 - [ ] 14.3 权限档位控件：新文件 `web/src/features/chat/permission-tier.tsx`（登记 `MIGRATED_AREAS`）：按钮、单选菜单、说明与底部提示、`全部自动` 的确认框、警示色与 `data-tier`、提交与失败回退、不随输入框锁定禁用。已选会话走 `patchSession`（经 `turn-actions.ts` 或 `session-actions.ts` 里的一个 handler，带既有的所有权 fence：切走会话后迟到的响应不改界面）；欢迎态改内存值并进入首次发送的 `createSession` input。
   测试新文件 `web/test/chat-permission-tier.test.tsx`（整页挂载）：session-permission-tier「权限档位控件」五条场景；chat-web delta「能力行的次序」「锁定时三个控件仍可用」的权限部分。
 - [ ] 14.4 变异证据：去掉确认框 →「切换到全部自动要确认」判红；取消后仍提交 → 判红；`yolo` 不带警示标记 → 判红；控件随锁定禁用 →「生成中可改」判红；失败后显示新值 →「失败回退」判红；欢迎态选择发了请求或没进创建 input →「欢迎态的选择进入创建请求」判红；左组次序错 →「能力行的次序」判红。
