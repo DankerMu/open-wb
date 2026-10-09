@@ -65,6 +65,8 @@ export interface ApprovalWorldOptions {
   prepare?: (db: DatabaseSync) => void;
   onEvent?: (sessionId: string, epoch: number, event: ChatEvent<number>) => void;
   assembly?: OpenSessionOptions["assembly"];
+  /** The live-process cap, set on the runtime object before the supervisor reads it. */
+  maxProcesses?: number;
 }
 
 export interface ApprovalRow {
@@ -93,6 +95,9 @@ export async function openApprovalWorld(
   rt.clock.nowMs = T;
   if (options.idleMs !== undefined) {
     rt.runtime.idleMs = options.idleMs;
+  }
+  if (options.maxProcesses !== undefined) {
+    rt.runtime.maxProcesses = options.maxProcesses;
   }
   const spawned: SpawnedChild[] = [];
   let hold = options.hold;

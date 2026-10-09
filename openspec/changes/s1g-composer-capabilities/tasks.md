@@ -392,7 +392,7 @@ Minimal mergeable slice: 8.0 一刀（纯搬迁）；8.1 + 8.6 一刀（视图�
   - 实机、overlay、冒烟：`host-overlay.ts:8-12` 的「靠重新 spawn 换档」自本刀起成立，文件与常量不动。官方对照用例不加（`omp-official-approval-modes.test.ts` 已钉住 D2 的 (a)–(d)，本刀只改取值来源，不改 spawn 契约；该文件仅 CI uid-isolation job 运行，写明验证缺口）。`smoke/session-meta.hurl`（#1038 之后）在首条 prompt 之前把载体会话 PATCH 到 `yolo` 又改回 `write`、其间没有进程，`yolo` 出生的那个会话未 prompt 即删除，所以没有冒烟步骤在非 `write` 档起进程或触发重启（#1009 评审更正），`chat.hurl` 无 PATCH，ui-walk 不碰档位；`make smoke` 是纯回归，18.1 / 18.2 以后再加档位用例。
   - 变异 → 判红：去掉 `reusable` 判定 →「以新档位重启」「生成中改档位」「先退役再重新生成」；拿原始列比较 →「未改档位不重启」的 PATCH `write` 一步与「调低上界」的恰一次 spawn；`Slot.approvalMode` 写死 `write` → 换回 `write` 时不重启（在「以新档位重启」末尾加一步 PATCH 回 `write` 再发 prompt，断言新 spawn）；PATCH 里调退役 →「修改设置本身不动进程」「生成中改档位」；supervisor 调用点仍传 `write` →「档位进入 argv」与 9.3 登记例；`branch-temp.ts` 仍写死 → 分叉 argv；传原始 `model_id` 而非有效值 → 封顶例的 `m1`；重启不等退役完成 → 第二次 spawn 时旧进程仍存活的断言。
   - 白盒不变量（交 owner 审）：(1) 档位只在 `#onSlot` 比较，位于「存活且持有名额」守卫之后、认领之前，PATCH 路径不调 supervisor；(2) 一个 slot 的启动档位与其 runtime 的 argv 档位出自同一个变量，终生不变；(3) 换档等于 `#retireSlot`（等待完成）加一次普通新准入，名额先释放后申请，同一会话任一时刻至多一个进程；(4) 进入 argv 的只有夹取后的档位与白名单内的模型，原始列与 `runtime.modelId` 都不进；(5) 每次派发只读一次原始值，且与受理或预检同一同步段；(6) 宿主在任何档位下都不自动应答 `extension_ui_request`，60 秒超时规则不变；(7) overlay 字节不变。
-- [ ] 9.2 模型与强度：`Generation`（`pool.ts`）增「已应用的模型与强度」；`composer-align.ts` 里实现 chat-sessions「派发前按会话设置对齐进程」第 2 步（先 `set_model` 后 `set_thinking_level`，成功后才记）。两个调用点：prompt 路径在取得进程之后、`#bindDispatch` 写 `prompt` 之前；regenerate 路径在取得进程之后、`get_branch_messages` 之前（`branching.ts` 的 regenerate 编排里，先于 `branch` 与事务——失败属事务前，行不变）。`supervisor.ts` 至多 6 行。
+- [x] 9.2 模型与强度：`Generation`（`pool.ts`）增「已应用的模型与强度」；`composer-align.ts` 里实现 chat-sessions「派发前按会话设置对齐进程」第 2 步（先 `set_model` 后 `set_thinking_level`，成功后才记）。两个调用点：prompt 路径在取得进程之后、`#bindDispatch` 写 `prompt` 之前；regenerate 路径在取得进程之后、`get_branch_messages` 之前（`branching.ts` 的 regenerate 编排里，先于 `branch` 与事务——失败属事务前，行不变）。`supervisor.ts` 至多 6 行。
   测试同文件：model-selection「换模型与强度后的帧序」（逐字核对 `frames=`）、「新进程重新应用」「生成中修改不打断」「命令失败按派发前失败处理」「消息不带模型」（两个模型下各完成一个回合后：快照每条消息的键集恰为 chat-sessions「会话 REST」所列、`PRAGMA table_info(chat_messages)` 没有模型或强度列）；chat-sessions「对齐失败按派发前失败补偿」「regenerate 的对齐失败不动任何行」「regenerate 用当前设置」（帧序：`set_model`、`set_thinking_level` 先于 `get_branch_messages`）；turn-control「模型对齐失败发生在事务之前」；session-metadata「继承三项设置」的 argv 与帧序部分。
   既有经宿主驱动假 omp 并断言完整 `frames=` 序列的宿主测试（`grep -rn "frames=" server/test` 里以 `negotiate_protocol,get_state,prompt` 开头的宿主级断言）按「每个 generation 首次派发多 `set_model` 与 `set_thinking_level`」改写并写进偏离记录；假 omp 夹具自身的单元用例（`fake-omp.test.ts`）不经宿主，不改。
   **实施注记（9.2 + 9.4 + 9.5，fixture 评审补充，#1010）**：
@@ -408,6 +408,7 @@ Minimal mergeable slice: 8.0 一刀（纯搬迁）；8.1 + 8.6 一刀（视图�
   - `supervisor.ts` 只改 `#onSlot`（至多 4 行，终值不超过 787）：`const aligned = (slot: Slot) => alignModel(slot, effective).then(() => use(slot));`，`fresh()` 与存活路径都传 `aligned`，import 并入第 11 行。regenerate 经 `acquire → #onSlot` 自动落在 `get_branch_messages` 之前，`branching.ts` 只改 `#lastEntry` 与其注释——偏离任务原文「在 `branching.ts` 的 regenerate 编排里」。
   - 窗口：prompt 路径的认领先于对齐（存活路径 `#claim(live, claim)`、新 slot 在 `admit` 之前认领）；regenerate 路径靠 `controls.during`。池的 `busy()` 两者都看，所以对齐中的 slot 不会被驱逐，`#onProcessExit` 也不会抢先退役。命令应答到 `runtime.prompt()` 之间只有 promise 续体，`alignModel` 与 `aligned` 里不得插入任何 I/O await 或定时器。无命令可发时也多一个微任务，fence 是认领而不是同步性；因此变红的既有用例先查原因。
   - 失败处理不需要新产品代码：`#onSlot` 的 catch（`live.pump === undefined` → `#retireSlot`）与 `#onNewSlot` 的 catch 给出「slot 被退役」；`translateSupervisorError` 把 `AgentUnavailableError` 映射为 `agent_unavailable`，`agent_capacity` 原样透传；prompt 的受理对由 REST 既有路径补偿。「成功后才记」没有独立变异（失败必退役，提前记不可观察），写进偏离记录。
+  - 实施更正（#1010）：上一条在一个窗口不成立。新准入的 slot 上，进程成功应答 `set_model` 后原生退出，下一次 runtime 入口取 token 时抛 `ReadmissionRequired`；它不经存活路径那一次重新准入，原样到达 `translateSupervisorError`，REST 成了 500。修法是 `supervisor-faults.ts` 的 `translateSupervisorError` 把它并入 `agent_unavailable` 分支（`supervisor.ts` 不动，不加重试）；`session-composer-align.test.ts` 冷 prompt 与冷 regenerate 各一例（502、已退役、已补偿、下一条 prompt 在新进程上重新对齐），去掉映射时恰这两例红。只在 FakeChild 上构造过；「`set_thinking_level` 之后退出」走同一翻译路径，未单独成例。
   - 逐情形期望：
   - prompt + `set_model` 失败：502；受理对删除，`status` / `updatedAt` 复原（基线取在 PATCH 之后）；该进程无新增 `prompt` 帧并已退役；审计不增；改回可用模型后 202（新 spawn 带 `--resume`）。
   - prompt + `set_thinking_level` 失败：同上。
@@ -472,9 +473,9 @@ Minimal mergeable slice: 8.0 一刀（纯搬迁）；8.1 + 8.6 一刀（视图�
   - (7) 临时进程不发这两条命令。
   - (8) `omp/runtime.ts` 字节不变，命令与回合互斥仍由它的 `#turn` / `#commanding` 把关。
 - [x] 9.3 审批在非 `write` 档下的端到端：`server/test/session-approvals*.test.ts` 新增一例——`always-ask` 会话 + 假 omp `approval-write`：登记、事件、作答、`chat_approvals.tool="write"`、审计（tool-approval delta 场景）；session-permission-tier「每次都问下的超时」（注入时钟 59999 / 60000）。
-- [ ] 9.4 变异证据：去掉档位比较 →「以新档位重启」判红；PATCH 时就退役 →「修改设置本身不动进程」「生成中改档位」判红；`set_thinking_level` 先于 `set_model` → 帧序判红；每次派发都无条件发命令 → 帧序第三条 prompt 处判红；新 generation 不重发 →「新进程重新应用」判红；命令失败后仍写 prompt →「命令失败」判红；把 regenerate 的对齐挪到事务之后 →「regenerate 的对齐失败不动任何行」「模型对齐失败发生在事务之前」判红（旧助手行被删）。
+- [x] 9.4 变异证据：去掉档位比较 →「以新档位重启」判红；PATCH 时就退役 →「修改设置本身不动进程」「生成中改档位」判红；`set_thinking_level` 先于 `set_model` → 帧序判红；每次派发都无条件发命令 → 帧序第三条 prompt 处判红；新 generation 不重发 →「新进程重新应用」判红；命令失败后仍写 prompt →「命令失败」判红；把 regenerate 的对齐挪到事务之后 →「regenerate 的对齐失败不动任何行」「模型对齐失败发生在事务之前」判红（旧助手行被删）。
   「对齐期间的并发请求」钉的是既有的认领 fence（对齐发生在认领之后），没有独立变异，写进偏离记录。
-- [ ] 9.5 `make smoke` 通过（缺省配置下全部会话为 `write`、单模型：除每个 generation 首次派发多一条 `set_model` 加一条 `set_thinking_level` 外行为不变；真 omp 对这两条命令的应答已由组 1 核对）。
+- [x] 9.5 `make smoke` 通过（缺省配置下全部会话为 `write`、单模型：除每个 generation 首次派发多一条 `set_model` 加一条 `set_thinking_level` 外行为不变；真 omp 对这两条命令的应答已由组 1 核对）。
 
 Suggested fixture level: expanded - omp 子进程治理（审批策略放宽开始生效）、并发与补偿路径、生成世代；Critical Path
 Minimal mergeable slice: 9.1 一刀（档位重启，含 argv 取会话有效值）；9.2 一刀（模型与强度的 RPC）；9.3 随 9.1；9.5 随各刀
@@ -831,7 +832,7 @@ Minimal mergeable slice: 17.1 一刀（气泡附件：`message-thread.tsx`，mes
 - [ ] 18.2 `smoke/chat.hurl`：`yolo` 会话的 bash 回合不经作答轮询到 `done`、`approvals` 为 `[]`；该会话与文件里的其它会话一样在退出登录前删除。`make smoke` 通过；AGENTS.md 验证矩阵里「五文件」的表述不变。
 - [ ] 18.3 ui-walk：新 helper 文件 `web/e2e/ui-walk-composer.ts`，实现 chat-harness delta 的五个步骤，helper 在包住步骤的 `finally` 里删除它创建的会话（204 或 404 均接受）；由 `web/e2e/ui-walk.spec.ts`（594 行）调用。`ui-walk-sessions.spec.ts` 与 `ui-walk-layout.ts` 不加行。两种视口下通过；error oracle 生效。
 - [ ] 18.4 判红证据：按 chat-harness delta「走查对旧实现判红」，本地临时去掉确认框与附件标签渲染各跑一次走查，记录第 2、4 步失败的输出到 PR 描述（不提交这两处临时改动）。
-- [ ] 18.5 `IMPLEMENTATION_PLAN.md` S1g 的 Verify 三条对照：各档位下审批是否出现（组 1 的对照用例 + 18.2）；上传的越界 / 超限全拒且入审计（组 11 + 11.6）；双账号互不可见（11.2、12.3、8.3 的隔离用例 + 11.6）。在 Epic 里逐条贴出对应的测试名与最近一次 CI 运行。
+- [x] 18.5 `IMPLEMENTATION_PLAN.md` S1g 的 Verify 三条对照：各档位下审批是否出现（组 1 的对照用例 + 18.2）；上传的越界 / 超限全拒且入审计（组 11 + 11.6）；双账号互不可见（11.2、12.3、8.3 的隔离用例 + 11.6）。在 Epic 里逐条贴出对应的测试名与最近一次 CI 运行。
 
 Suggested fixture level: compact - 只加真栈断言与走查步骤；发现产品缺陷则停下报告，不在本组修
 Minimal mergeable slice: 18.1 + 18.2 一刀（Hurl）；18.3 + 18.4 一刀（ui-walk）；18.5 不产生代码

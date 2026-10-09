@@ -152,7 +152,7 @@ export interface RegenWorld extends ApprovalWorld {
  * Real fake-omp world: opened as `approval` (the helper's only scenarios), switched to `branch`
  * before any spawn. `hold` gates the first child's stdout; `entries` appends `--branch-entry`.
  */
-export interface RegenWorldOptions extends Pick<ApprovalWorldOptions, "assembly"> {
+export interface RegenWorldOptions extends Pick<ApprovalWorldOptions, "assembly" | "maxProcesses"> {
   hold?: LineMatch;
   entries?: string[];
   scenario?: string;
@@ -162,6 +162,7 @@ export async function openRegenWorld(options: RegenWorldOptions = {}): Promise<R
   const world = await openApprovalWorld("approval", {
     ...(options.hold === undefined ? {} : { hold: options.hold }),
     ...(options.assembly === undefined ? {} : { assembly: options.assembly }),
+    ...(options.maxProcesses === undefined ? {} : { maxProcesses: options.maxProcesses }),
   });
   world.rt.setScenario(options.scenario ?? "branch");
   const replies: OmpFrame[][] = [];

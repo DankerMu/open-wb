@@ -16,6 +16,8 @@ import { describe, expect, it } from "vitest";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import {
   type ApprovalWorld,
+  auditCount,
+  extraSession,
   flagValue,
   openApprovalWorld,
   pendingApproval,
@@ -25,22 +27,55 @@ import {
   spawnedAt,
 } from "./session-approval-helpers.js";
 import { postSessionAction } from "./session-bodyless-rest-helpers.js";
-import { choose, holdFirstExit, processOf, setMode } from "./session-composer-helpers.js";
-import { forkWorlds, messagesOf, openForkWorld } from "./session-fork-helpers.js";
+import {
+  BAD_LEVEL,
+  choose,
+  FAILING_MODEL_CATALOG,
+  holdFirstExit,
+  MISSING_MODEL,
+  plantBadLevel,
+  processOf,
+  setMode,
+} from "./session-composer-helpers.js";
+import {
+  forkWorlds,
+  insertApproval,
+  messagesOf,
+  openForkScripted,
+  openForkWorld,
+  turn,
+} from "./session-fork-helpers.js";
 import { THREE_MODEL_CATALOG } from "./session-meta-fixtures.js";
 import {
   answered,
+  count,
   heldLine,
   openRegenWorld,
+  QUESTION,
+  scriptedAt,
+  seedDone,
   sendPrompt,
+  snapshot,
   types,
   waitDead,
 } from "./session-regenerate-helpers.js";
-import { getSessionMessages } from "./session-rest-helpers.js";
+import { AGENT_UNAVAILABLE_ENVELOPE, getSessionMessages } from "./session-rest-helpers.js";
 import { probeFrames } from "./session-stop-helpers.js";
-import { IDLE_MS, requiredCall, waitFor, waitForTurn } from "./session-supervisor-helpers.js";
+import {
+  IDLE_MS,
+  OWNER_ID,
+  type RecordingWorld,
+  requiredCall,
+  requiredToken,
+  resumePath,
+  waitFor,
+  waitForTurn,
+} from "./session-supervisor-helpers.js";
+import { expectCapacity, isLive } from "./session-supervisor-pool-helpers.js";
+import type { FakeChild } from "./support/omp-rpc.js";
 
 const THREE = { assembly: { modelCatalog: THREE_MODEL_CATALOG } };
+const FAILING = { assembly: { modelCatalog: FAILING_MODEL_CATALOG } };
 /** What a generation's first dispatch sends ahead of its prompt for a reasoning model. */
 const ALIGNED = ["negotiate_protocol", "get_state", "set_model", "set_thinking_level"];
 /** The keys of a message in the snapshot, as chat-sessions「会话 REST」 lists them. */
@@ -83,7 +118,7 @@ async function reclaimed(world: World, index: number): Promise<void> {
   );
 }
 
-function regenerate(world: World) {
+function regenerate(world: RecordingWorld) {
   return postSessionAction(world.fixture.app, "regenerate", world.session, world.cookie);
 }
 
@@ -339,6 +374,339 @@ describe("派发前按会话设置对齐进程：模型与强度 (chat-sessions)
       expect(messagesOf(world.fixture.db, world.session).at(-1)?.status).toBe("stopped");
       expect(world.rt.calls).toHaveLength(1);
       expect(world.errors).toEqual([]);
+    },
+  );
+});
+
+/** A turn-free session's rows, compared across a dispatch that must leave them alone. */
+function rowsOf(world: World, session = world.session) {
+  return snapshot(world.fixture.db, session, true);
+}
+
+function permissionAudits(world: World): number {
+  return count(
+    world.fixture.db,
+    "SELECT COUNT(*) AS count FROM audit_events WHERE kind = 'session.permission'",
+  );
+}
+
+function expectUnavailable(response: { statusCode: number; json(): unknown }): void {
+  expect([response.statusCode, response.json()]).toEqual([502, AGENT_UNAVAILABLE_ENVELOPE]);
+}
+
+/**
+ * The REST prompt order without the route's snapshot step (real file I/O of unknown length): the
+ * pair is admitted and the dispatch reaches the pool's admission queue in this synchronous segment,
+ * so its place ahead of a later admission does not depend on timing.
+ */
+function admitted(world: World, session: string): Promise<void> {
+  const { store, supervisor } = world.fixture;
+  store.acceptPrompt(session, OWNER_ID, "takes a slot");
+  return supervisor.prompt(session, "takes a slot");
+}
+
+type Scripted = Awaited<ReturnType<typeof openForkScripted>>;
+
+/** What a child received when `set_model` was the last frame written to it. */
+const ANSWERED_ONCE = ["negotiate_protocol", "get_state", "set_model"];
+
+/** Runs `configure` on the scripted world's first child, right after its script. */
+function onFirstChild(world: Scripted, configure: (child: FakeChild) => void): void {
+  const inner = world.rt.runtime.spawnImpl;
+  world.rt.runtime.spawnImpl = (command, args, options) => {
+    const spawned = inner(command, args, options);
+    if (world.scripted.length === 1) {
+      configure(scriptedAt(world.scripted, 0).child);
+    }
+    return spawned;
+  };
+}
+
+/** Answers `set_model` with success, then exits natively in the same segment (stdout ended). */
+function answersThenExits(child: FakeChild): void {
+  child.onCommand("set_model", (frame) => {
+    child.emitLine({ id: frame.id, type: "response", command: "set_model", success: true });
+    child.nativeExit(1);
+    child.endStdout();
+  });
+}
+
+/** The next prompt is accepted on a second process, aligned from scratch before its prompt. */
+async function realignsOnNewProcess(world: Scripted): Promise<void> {
+  expect((await sendPrompt(world)).statusCode).toBe(202);
+  await waitForTurn(world.fixture, world.session, "done");
+  expect(world.rt.calls).toHaveLength(2);
+  expect(types(scriptedAt(world.scripted, 1).frames)).toEqual([...ALIGNED, "prompt"]);
+}
+
+/** How many frames of each of `kinds` the child received. */
+function received(frames: readonly OmpFrame[], ...kinds: string[]): number[] {
+  return kinds.map((kind) => frames.filter((frame) => frame.type === kind).length);
+}
+
+describe("对齐失败按派发前失败处理 (model-selection「命令失败」, chat-sessions「对齐失败按派发前失败补偿」)", () => {
+  it(
+    "set_model 应答失败：502，受理对被补偿、状态与 updatedAt 复原，没有 prompt 帧，进程已退役；改回可用模型后 202",
+    REAL,
+    async () => {
+      const world = worlds.track(await openForkWorld(FAILING));
+      const { db, supervisor } = world.fixture;
+      await answered(world);
+      const first = spawnedAt(world, 0);
+      const sent = first.stdin.length;
+      await choose(world, { modelId: MISSING_MODEL });
+      const before = { rows: rowsOf(world), audits: auditCount(db), process: processOf(world) };
+
+      const response = await sendPrompt(world, "under the missing model");
+
+      expectUnavailable(response);
+      expect(rowsOf(world)).toEqual(before.rows);
+      expect(auditCount(db)).toBe(before.audits);
+      // The refused command was the last frame this process received: no prompt followed it.
+      expect(first.stdin.slice(sent)).toEqual([
+        expect.objectContaining({ type: "set_model", modelId: MISSING_MODEL }),
+      ]);
+      expect([isLive(first.child), supervisor.liveProcessCount()]).toEqual([false, 0]);
+
+      await choose(world, { modelId: "m1" });
+      expect((await sendPrompt(world)).statusCode).toBe(202);
+      await waitForTurn(world.fixture, world.session, "done");
+      expect(world.rt.calls).toHaveLength(2);
+      expect(resumePath(requiredCall(world.rt.calls, 1).args)).toBe(before.process.file);
+      expect(types(spawnedAt(world, 1).stdin)).toEqual([...ALIGNED, "prompt"]);
+      expect(world.errors).toEqual([]);
+    },
+  );
+
+  it(
+    "set_thinking_level 应答失败（回收后的新进程）：502，受理对被补偿，没有 prompt 帧，进程已退役；改回可用强度后 202",
+    REAL,
+    async () => {
+      const world = worlds.track(await openForkWorld());
+      const { supervisor } = world.fixture;
+      await answered(world);
+      await reclaimed(world, 0);
+      plantBadLevel(world);
+      // The epoch moves with the acquisition, as it does for any failed first command.
+      const before = snapshot(world.fixture.db, world.session);
+
+      const response = await sendPrompt(world, "under the bad level");
+
+      expectUnavailable(response);
+      expect(snapshot(world.fixture.db, world.session)).toEqual(before);
+      const second = spawnedAt(world, 1);
+      expect(types(second.stdin)).toEqual(ALIGNED);
+      expect(levels(second.stdin)).toEqual([BAD_LEVEL]);
+      expect([isLive(second.child), supervisor.liveProcessCount()]).toEqual([false, 0]);
+
+      await choose(world, { reasoningEffort: "high" });
+      expect((await sendPrompt(world)).statusCode).toBe(202);
+      await waitForTurn(world.fixture, world.session, "done");
+      expect(world.rt.calls).toHaveLength(3);
+      expect(types(spawnedAt(world, 2).stdin)).toEqual([...ALIGNED, "prompt"]);
+      expect(levels(spawnedAt(world, 2).stdin)).toEqual(["high"]);
+      expect(world.errors).toEqual([]);
+    },
+  );
+
+  it("进程在 set_model 期间退出：502，受理对被补偿，名额与 token 都已释放；下一条 prompt 新 spawn 并重发两条命令", async () => {
+    const world = await openForkScripted(worlds, [{}]);
+    const { supervisor, tokens } = world.fixture;
+    onFirstChild(world, (child) => {
+      child.onCommand("set_model", () => {
+        child.exit(1);
+      });
+    });
+    const before = snapshot(world.fixture.db, world.session);
+
+    const response = await sendPrompt(world);
+
+    expectUnavailable(response);
+    expect(snapshot(world.fixture.db, world.session)).toEqual(before);
+    expect(types(scriptedAt(world.scripted, 0).frames)).toEqual(ANSWERED_ONCE);
+    expect(supervisor.liveProcessCount()).toBe(0);
+    expect(tokens.lookup(requiredToken(requiredCall(world.rt.calls, 0).token))).toBeNull();
+    await realignsOnNewProcess(world);
+  });
+
+  it("新进程应答 set_model 之后原生退出（prompt）：下一条命令的重新获取失败仍是 502，受理对被补偿，没有 prompt 帧，进程已退役；下一条 prompt 新 spawn 并重新对齐", async () => {
+    const world = await openForkScripted(worlds, [{}]);
+    const { supervisor, tokens } = world.fixture;
+    onFirstChild(world, answersThenExits);
+    const before = snapshot(world.fixture.db, world.session);
+
+    const response = await sendPrompt(world);
+
+    expectUnavailable(response);
+    expect(snapshot(world.fixture.db, world.session)).toEqual(before);
+    expect(types(scriptedAt(world.scripted, 0).frames)).toEqual(ANSWERED_ONCE);
+    expect([world.rt.calls.length, supervisor.liveProcessCount()]).toEqual([1, 0]);
+    expect(tokens.lookup(requiredToken(requiredCall(world.rt.calls, 0).token))).toBeNull();
+    await realignsOnNewProcess(world);
+    expect(world.errors).toEqual([]);
+  });
+
+  it("新进程应答 set_model 之后原生退出（regenerate）：502，没有 get_branch_messages，行不变，占用释放；下一条 prompt 新 spawn 并重新对齐", async () => {
+    const world = await openForkScripted(worlds, [{}]);
+    const { supervisor, tokens } = world.fixture;
+    seedDone(world);
+    onFirstChild(world, answersThenExits);
+    const before = snapshot(world.fixture.db, world.session);
+
+    const response = await regenerate(world);
+
+    expectUnavailable(response);
+    expect(snapshot(world.fixture.db, world.session)).toEqual(before);
+    expect(types(scriptedAt(world.scripted, 0).frames)).toEqual(ANSWERED_ONCE);
+    expect([world.rt.calls.length, supervisor.liveProcessCount()]).toEqual([1, 0]);
+    expect(supervisor.controlHeld(world.session)).toBe(false);
+    expect(tokens.lookup(requiredToken(requiredCall(world.rt.calls, 0).token))).toBeNull();
+    await realignsOnNewProcess(world);
+    expect(world.errors).toEqual([]);
+  });
+
+  it(
+    "换档后的 prompt 重新准入时进程上限已满且无可驱逐：503，受理对被补偿，旧进程已退出，没有新 spawn，审计只有 PATCH 那一条；之后 202",
+    REAL,
+    async () => {
+      const world = worlds.track(await openRegenWorld({ maxProcesses: 1 }));
+      const hold = holdFirstExit(world);
+      const other = await extraSession(world);
+      try {
+        await answered(world);
+        const old = spawnedAt(world, 0);
+        await setMode(world, "always-ask");
+        const before = rowsOf(world);
+
+        // Waits for the old process's held exit; the other session's admission evicts that same
+        // slot and waits with it, ahead of this session's own re-admission.
+        const switched = Promise.resolve(sendPrompt(world, "after the switch"));
+        await waitFor(() => (hold.held() > 0 ? true : undefined), "the held exit");
+        await settle();
+        const taking = admitted(world, other);
+        await settle();
+        expect(world.rt.calls).toHaveLength(1);
+        hold.release();
+
+        expectCapacity(await switched);
+        await expect(taking).resolves.toBeUndefined();
+        expect(rowsOf(world)).toEqual(before);
+        expect(isLive(old.child)).toBe(false);
+        expect(received(old.stdin, "prompt")).toEqual([1]);
+        await waitForTurn(world.fixture, other, "done");
+        await settle();
+        // The first session's process and the other one's: the refused prompt spawned nothing.
+        expect(world.rt.calls).toHaveLength(2);
+        expect(permissionAudits(world)).toBe(1);
+
+        expect((await sendPrompt(world)).statusCode).toBe(202);
+        await waitForTurn(world.fixture, world.session, "done");
+        expect(world.rt.calls).toHaveLength(3);
+        expect(flagValue(requiredCall(world.rt.calls, 2).args, "--approval-mode")).toBe(
+          "always-ask",
+        );
+        expect(world.errors).toEqual([]);
+      } finally {
+        hold.release();
+      }
+    },
+  );
+});
+
+describe("regenerate 的对齐失败不动任何行 (chat-sessions; turn-control「模型对齐失败发生在事务之前」)", () => {
+  it(
+    "失败模型：502，没有 get_branch_messages、branch 与 prompt，a1 及其步骤、审批与会话行逐值不变，进程已退役、占用释放；改回后 202",
+    REAL,
+    async () => {
+      const world = worlds.track(await openForkWorld(FAILING));
+      const { db, supervisor } = world.fixture;
+      await answered(world);
+      const a1 = messagesOf(db, world.session).at(-1)?.id ?? -1;
+      // The `branch` scenario's turn ran one tool step; the approval is written beside it.
+      insertApproval(db, a1, "r1", "allow", 70);
+      const first = spawnedAt(world, 0);
+      const sent = first.stdin.length;
+      await choose(world, { modelId: MISSING_MODEL });
+      const before = rowsOf(world);
+      expect([before.steps.length, before.approvals.length]).toEqual([1, 1]);
+
+      const response = await regenerate(world);
+
+      expectUnavailable(response);
+      expect(rowsOf(world)).toEqual(before);
+      expect(first.stdin.slice(sent)).toEqual([
+        expect.objectContaining({ type: "set_model", modelId: MISSING_MODEL }),
+      ]);
+      expect([isLive(first.child), supervisor.liveProcessCount()]).toEqual([false, 0]);
+      expect(supervisor.controlHeld(world.session)).toBe(false);
+
+      await choose(world, { modelId: "m1" });
+      expect((await regenerate(world)).statusCode).toBe(202);
+      expect(world.rt.calls).toHaveLength(2);
+      expect(types(spawnedAt(world, 1).stdin)).toEqual([
+        ...ALIGNED,
+        "get_branch_messages",
+        "branch",
+        "get_state",
+        "prompt",
+      ]);
+      await waitForTurn(world.fixture, world.session, "done");
+      expect(world.errors).toEqual([]);
+    },
+  );
+
+  it(
+    "换档后的 regenerate 重新准入时进程上限已满且无可驱逐：503，行不变，没有 branch 三命令与 prompt；之后 202",
+    REAL,
+    async () => {
+      const world = worlds.track(await openRegenWorld({ maxProcesses: 2 }));
+      const { app, supervisor } = world.fixture;
+      const hold = holdFirstExit(world);
+      const a = await extraSession(world);
+      const waiters = [await extraSession(world), await extraSession(world)] as const;
+      const again = () => postSessionAction(app, "regenerate", a, world.cookie);
+      try {
+        // The world's own session is the least recently active: its process is the one evicted.
+        await turn(world, QUESTION);
+        await turn(world, QUESTION, a);
+        const old = spawnedAt(world, 1);
+        const sent = old.stdin.length;
+        const taking = waiters.map((session) => admitted(world, session));
+        await waitFor(() => (hold.held() > 0 ? true : undefined), "the held exit");
+        await settle();
+        await setMode(world, "always-ask", a);
+        const before = rowsOf(world, a);
+
+        // Retires its own process, then queues its re-admission behind the two prompts.
+        const refused = Promise.resolve(again());
+        await waitDead(world, 1);
+        await settle();
+        expect(world.rt.calls).toHaveLength(2);
+        hold.release();
+
+        expectCapacity(await refused);
+        await expect(Promise.all(taking)).resolves.toEqual([undefined, undefined]);
+        expect(rowsOf(world, a)).toEqual(before);
+        expect(old.stdin).toHaveLength(sent);
+        expect(supervisor.controlHeld(a)).toBe(false);
+        for (const session of waiters) {
+          await waitForTurn(world.fixture, session, "done");
+        }
+        await settle();
+        // Only the four sessions' own processes: the refused regenerate spawned nothing.
+        expect(world.rt.calls).toHaveLength(4);
+        const branching = world.spawned.flatMap((spawned) =>
+          received(spawned.stdin, "get_branch_messages", "branch"),
+        );
+        expect(branching).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
+
+        expect((await again()).statusCode).toBe(202);
+        await waitForTurn(world.fixture, a, "done");
+        expect(world.rt.calls).toHaveLength(5);
+        expect(world.errors).toEqual([]);
+      } finally {
+        hold.release();
+      }
     },
   );
 });

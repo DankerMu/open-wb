@@ -7,8 +7,10 @@
  * value. Oracles stay public: SQLite rows, spawn argv, stdin frames, Node's own exit state.
  */
 import { expect } from "vitest";
+import type { ComposerConfig } from "../src/sessions/store-composer.js";
 import type { ApprovalWorld } from "./session-approval-helpers.js";
 import { patch } from "./session-archive-helpers.js";
+import { THREE_MODEL_CATALOG } from "./session-meta-fixtures.js";
 import { epochOf, sessionFile } from "./session-regenerate-helpers.js";
 import { holdExitEvents } from "./session-spawn-gate-helpers.js";
 
@@ -16,6 +18,23 @@ import { holdExitEvents } from "./session-spawn-gate-helpers.js";
 type World = ApprovalWorld;
 
 type Mode = "always-ask" | "write" | "yolo";
+
+/** The model id fake-omp refuses in `set_model` (`fake-omp-composer.mjs`, `Model not found`). */
+export const MISSING_MODEL = "workbuddy-missing-model";
+/** The level fake-omp refuses in `set_thinking_level`; no REST request can store it. */
+export const BAD_LEVEL = "workbuddy-bad-level";
+
+/**
+ * The three-model whitelist plus the model fake-omp refuses: off the whitelist the id would read
+ * as the default model and no failing command would ever be sent.
+ */
+export const FAILING_MODEL_CATALOG: ComposerConfig["modelCatalog"] = {
+  models: [
+    ...THREE_MODEL_CATALOG.models,
+    { id: MISSING_MODEL, name: "Missing", reasoning: false, vision: false },
+  ],
+  defaultModelId: THREE_MODEL_CATALOG.defaultModelId,
+};
 
 /** Writes a raw composer column REST would refuse to store (above the cap, off the whitelist). */
 export function plant(
@@ -28,6 +47,23 @@ export function plant(
     .prepare(`UPDATE chat_sessions SET ${column} = ? WHERE id = ?`)
     .run(value, session);
   expect(Number(written.changes)).toBe(1);
+}
+
+/**
+ * Stores `BAD_LEVEL` as the session's raw effort. Migration 040's CHECK admits the seven effort
+ * names only, so the constraint is switched off for this one statement.
+ */
+export function plantBadLevel(world: World): void {
+  const { db } = world.fixture;
+  db.exec("PRAGMA ignore_check_constraints = ON");
+  try {
+    const written = db
+      .prepare("UPDATE chat_sessions SET reasoning_effort = ? WHERE id = ?")
+      .run(BAD_LEVEL, world.session);
+    expect(Number(written.changes)).toBe(1);
+  } finally {
+    db.exec("PRAGMA ignore_check_constraints = OFF");
+  }
 }
 
 /** The owner picks `approvalMode` over REST: 200, and the view reads it back. */
