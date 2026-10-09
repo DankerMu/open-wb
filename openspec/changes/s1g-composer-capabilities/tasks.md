@@ -144,8 +144,8 @@ Minimal mergeable slice: atomic - 写出器签名变化必须与其唯一调用�
   - 「随账号级联」：`withOpenDb(":memory:")`（`openDb` 已执行 `PRAGMA foreign_keys = ON`，先断言它为 1）。给 `u1`、`u2` 各插一行，`DELETE FROM accounts WHERE id = 'u1'`，断言 `u1` 的行消失、`u2` 的行逐列不变、`foreign_key_check` 为空。
   - 041 的变异（写进 PR；任务号 4.4 在 #995 勾）：去掉任一列 CHECK 或把 `auto` 加回强度 CHECK → 「建表与约束」红；去掉 `updated_at` 的 `typeof` 半句 → `1.5` 用例红；去掉 `account_id` 的 `NOT NULL` → NULL 用例红；去掉 `REFERENCES` → `'nobody'` 用例红；去掉 `ON DELETE CASCADE` → 「随账号级联」红；任一列加 DEFAULT → `pragma_table_info` 字面量红；写成 `IF NOT EXISTS` → 第三条 `it` 红。
   - 守卫：测试文件 281 → 约 430 行，给 042 留余量；取值用 `it.each` 表，不整段抄 `core-db-turn-snapshots.test.ts`（jscpd）。
-- [ ] 4.3 `042_chat_message_attachments.sql`（message-attachments「迁移 042」）。测试并入同文件：新库与存量库、中途失败原子回滚。
-- [ ] 4.4 变异证据：去掉任一 CHECK、给列加缺省值、把 041 写成 `IF NOT EXISTS` → 对应场景判红。三个文件按编号顺序各自独立应用。本组在 C 的 037–039 合入之后才合入（见文首；不得让 040 先于 037–039 进入任何持久库）；测试断言 040「紧随上一个回执」而不是写死序数。
+- [x] 4.3 `042_chat_message_attachments.sql`（message-attachments「迁移 042」）。测试并入同文件：新库与存量库、中途失败原子回滚。
+- [x] 4.4 变异证据：去掉任一 CHECK、给列加缺省值、把 041 写成 `IF NOT EXISTS` → 对应场景判红。三个文件按编号顺序各自独立应用。本组在 C 的 037–039 合入之后才合入（见文首；不得让 040 先于 037–039 进入任何持久库）；测试断言 040「紧随上一个回执」而不是写死序数。
   **实施注记（4.3、4.4，fixture 评审补充，#995）**：
   - DDL 逐字照规格，仅一条：`ALTER TABLE chat_messages ADD COLUMN attachments TEXT NULL;`。规格写明「不带 CHECK」，所以不加 `json_valid` / `json_type` 之类约束，内容合法性是 12.1 的应用层职责（D12）；无 DEFAULT、无索引、无事务语句。先例是 `035_chat_session_metadata.sql:12`（`thinking`）与 033（`output`），头注释照 040 / 041 风格。
   - 定位照 4.1 / 4.2：`POS_042 = TRACKED_MIGRATION_FILENAMES.indexOf(MIGRATION_042)`、`RECEIPTS_BEFORE_042 = TRACKED_MIGRATION_FILENAMES.slice(0, POS_042)`。`expect042Applied(db)` 断言 `ledgerRows(db)[POS_042 - 1]` 等于 `[POS_042, MIGRATION_041]`、`[POS_042]` 等于 `[POS_042 + 1, MIGRATION_042]`、`countReceipts === 1`，不写死 `16`、不用 `.at(-1)`；既有的 `POS`、`POS_041` 不改名。
