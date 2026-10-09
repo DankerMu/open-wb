@@ -193,3 +193,32 @@
 - 变异：`createReadStream` 加 `autoClose: false` → 用例 (b) 判红（`close` 不来，超时）；用例 (c) 仍绿，已实测。
 - 变异：「销毁时不释放描述符」预期不可观测：薄封装下释放由 Node 的 `ReadStream._destroy` 完成，没有可以去掉的实现行；用例 (c) 只在有人把它换成自管 `fs.open` 的实现时才会红。PR 表里照此标注。
 - 变异：把 open 错误吞成空流（如捕获后返回 `Readable.from([])`）→ 用例 (d) 判红。
+
+## 8.1 的 sweep 半边，含分摊的 8.3 / 8.4 条款（#1059）
+
+- **Critical Path：沙箱与文件边界**（回收目录、递归删除、符号链接）——双评审席位并请 owner 白盒审查；仅服务端、无调用方，**不加验收清单行**，不碰配置键与 `docs/architecture/system.md` 第 9 节的表。
+- 前提与实测：唯一前提 0.1（#1049）；**不依赖 #1053**（4.1 只通向 8.2、9.1）与 #1054（`retentionDays` 以参数收值）。本刀是 8.1 不执行 `rename` 的半边，**不在 1.2 所挡集合内**；1.2 已记录为「与设计相符」（`design.md` D22「实测」），`moveToTrash` 半边（#1060）也已放行，它另等 4.1。1.3 与本刀无关。
+- **任务前提与现码不符**：8.1 说以「`store` 的 owner 段校验」为证，但 `server/src/workspaces/store.ts:287-298` 的 `rejectUnsafeOwnerSegment` 只拒空串、`.`、`..`、NUL、`/`、`\`；`core/sandbox/resolve.ts:36-48` 也不拒点开头分量；`010_auth_schema_seed.sql:12` 只 CHECK `length(id) > 0`。今天 id 为 `.trash` 的账号能把 `<SANDBOX_ROOT>/.trash` 建成 `2770` 的账号根。处置：给 `rejectUnsafeOwnerSegment` 加一行 `ownerId.startsWith(".")`（主规格 workspaces 的「without accepting unsafe owner path segments」已涵盖，不改规格），**PR Boundary 需放宽到 `store.ts`（487 行）**，记入偏离记录；编排者若不放宽，则测试只钉种子账号，store 缺口另开 issue。
+- 「账号 id 不以点开头」写在新文件里（`workspace-store.test.ts` 已 798 行，**不得加行**），两条：① `withOpenDb(":memory:")` 迁移后 `accounts` 恰四行且 `id LIKE '.%'` 为 0 行；② 照 `workspace-store.test.ts:613` 的 `insertUnsafeOwnerAccount` 插入 id=`.trash` 的账号，`store.create({id:".trash"},{name:"alpha"})`、`store.list(".trash")` 都以非 `HttpError` 抛出，`<sandboxRoot>/.trash` 不存在，`workspaces` 与审计各 0 行。
+- 形状：`server/src/workspaces/trash.ts` 只导出 `createTrash(options: { sandboxRoot: string; retentionDays: number }): { sweep(now: number): Promise<void> }`。**不声明 `rename?`**（本半边无读者，#1060 加可选字段不破坏调用方，记偏离）；不导出返回类型接口（knip 报未用类型；#1070 用 `ReturnType<typeof createTrash>`）。构造函数不碰文件系统。knip 的 server entry 含 `test/**/*.test.ts`，测试是唯一导入方即可过。
+- 「目录校验」在本半边 = `sweep` 开头对 `join(sandboxRoot, ".trash")` 的一次 `lstat`：不存在、非目录（含符号链接）、`uid !== process.geteuid?.()` 时本轮直接返回。**不调 `ensureOwnedDir`**（`core/sandbox/dirs.ts:41`，它会 `mkdir` 并 `chmod`，与「不存在时不创建」冲突；规格括注只列三项、不含 mode），留给 #1060。本刀不 import `core/sandbox`。
+- 遍历用 `fs/promises`（异步，不堵事件循环）：三层 `readdir(…, { withFileTypes: true })`，owner 层、workspace 层、批次层都只认 `dirent.isDirectory()`（Dirent 不跟随符号链接）。批次名用正则**字面量** `/^(\d+)-[0-9a-f]{16}$/`（semgrep），`Number(m[1]) < now - retentionDays * 86_400_000` 才 `rm(batch, { recursive: true })`，不带 `force`；`rm` 不跟随批次内部的链接。
+- 规格未写明的分支，取最简并记偏离：时间戳恰等于界限 → 保留；批次名合规但是普通文件或符号链接 → 不碰；清空后的 `<ownerId>`、`<workspaceId>` 空目录 → 不删（免与 #1060 建批次竞态）；`.trash` 的 mode 不是 `0700` → 照常清理、不校正；超长数字时间戳 → 视为未到期。
+- 出错不外溢：每个批次的 `rm` 单独 `try/catch`，每层 `readdir` 也 `catch` 后继续下一个兄弟，`sweep` 永不 reject；不写审计、不打日志。
+- 夹具（`server/test/workspaces-trash-sweep.test.ts`，复用 `core-db-helpers.ts` 的 `tempDir` / `removeTempDirs` / `withOpenDb`）：`sandboxRoot = realpathSync(tempDir())`，四级目录 `mkdirSync(…, 0o700)` 直接建出，批次名 `${ts}-${"0123456789abcdef"}`。8.3 的「修改时间由夹具设定」易误导——清理只看批次名，夹具用 `utimesSync` 把 mtime **设反**（到期批次设为现在，未到期设为 40 天前）以钉住这一点。
+- 用例（一）：「到期的批次被清除」——31 天前被删；29 天前（含内容）、`keep-me`、指向空间外目录的符号链接都在，链接目标内容逐字节不变；另加批次名合规且已到期的符号链接、owner 层与 workspace 层的符号链接，目标内都放到期批次形状的目录，断言全部未动。「`.trash` 被占位」——符号链接指向含到期批次形状的目录树、普通文件各一例，什么都不删。
+- 用例（二）：「临时空间删除后批次保留到期满」——夹具等价：不建 DB、不建 `tmp-<T>`，只有 `.trash/u1/<T>/<批次>`；`sweep(删除时刻 + 29 天)` 不动，`sweep(+31 天)` 删除。「不查 `workspaces` 表」由签名保证（无 `db` 参数）；场景里「经路由删除」「`tree`/`file` 404」归 #1060。「保留期可配置」——`retentionDays: 1` 删 2 天前的批次，同一夹具 `retentionDays: 30` 不删；`TRASH_RETENTION_DAYS` 与启动首扫归 #1054 / #1070。
+- 用例（三）：「清理出错不外溢」——到期批次 A 内有 `chmodSync(…, 0o500)` 的子目录含一文件，另有可删的到期批次 B：`await expect(sweep(now)).resolves.toBeUndefined()`，B 被删、A 仍在；`it.skipIf(process.geteuid?.() === 0)`（范式见 `sandbox-dirs.test.ts:336`），`afterEach` 先 `chmod 0o700` 再 `removeTempDirs()`。`.trash` 不存在一例不跳过：不抛，事后 `existsSync(".trash") === false`。
+- 守卫与存量：两个新文件远低于 800 行；`workspaces/` 下无模块清单类断言。放宽 `store.ts` 后既有测试无一变红（全库没有点开头的 owner id 用例，`workspace-store.test.ts:554` 用 `bad/id`）；`<state>/trash` 相关断言（`omp-state-layout.test.ts:125,147,185`、`server-startup-layout.test.ts:134`）不动——那是另一套「移入即删」的目录（`state-layout.ts:46`、`temp-dir-remove.ts:77-105`），不要复用 `removeDirThroughTrash`。覆盖率门槛是全局 80%，上述用例已覆盖各 `catch` 分支。
+- 变异：清理跟随符号链接（`isDirectory()` 换成 `stat` 后判断，或对批次层链接也 `rm`）→「到期的批次被清除」里「链接目标内容不变」判红（8.4 点名的那条）。
+- 变异：去掉 `.trash` 的 `lstat` 校验 →「`.trash` 被占位」符号链接一例里目标目录下的到期批次被删而判红。
+- 变异：owner 层或 workspace 层不过滤符号链接 → 对应两条「链接目标内未动」断言判红。
+- 变异：正则放宽（去掉 `^…$` 或 `{16}`）→ 需在夹具加一个 `<31 天前毫秒>-zz` 之类近似名才判红；只有 `keep-me` 时**不可观察**，所以夹具必须带近似名。
+- 变异：比较写反或用 `<=` → 29 天前批次被删判红；`<=` 另需一条「恰等于界限保留」用例，否则不可观察。
+- 变异：用 mtime 代替批次名里的时间戳 → mtime 设反的夹具下 31 天前批次未删、29 天前被删，判红。
+- 变异：保留期写死 30 →「保留期可配置」`retentionDays: 1` 一例判红。
+- 变异：去掉单批次的 `try/catch` →「清理出错不外溢」里 `resolves` 判红，或批次 B 未删判红（root 下跳过，不可观察）。
+- 变异：`.trash` 不存在时 `mkdir`（或改调 `ensureOwnedDir`）→「没有被创建」判红。
+- 变异：去掉 `rejectUnsafeOwnerSegment` 的点开头分支 →「账号 id 不以点开头」第 ② 条判红（`<sandboxRoot>/.trash` 被建出）。
+- 变异：种子里加一个点开头 id → 第 ① 条判红。
+- 变异：「清理去查 `workspaces` 表」→ **不可观察**（结构上排除：`createTrash` 不收 `db`）；评审以签名为证。

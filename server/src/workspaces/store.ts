@@ -289,6 +289,7 @@ function rejectUnsafeOwnerSegment(ownerId: string): void {
     ownerId.length === 0 ||
     ownerId === "." ||
     ownerId === ".." ||
+    ownerId.startsWith(".") ||
     ownerId.includes("\0") ||
     ownerId.includes("/") ||
     ownerId.includes("\\")
