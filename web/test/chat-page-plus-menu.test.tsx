@@ -1,5 +1,5 @@
-// 能力栏「+」菜单（chat-web「输入框与能力栏」场景「「+」菜单写入草稿」）：`添加文件或命令` 按钮的可用条件、菜单
-// 列出的目录与项目标记、点选写入草稿并聚焦输入框而不发送、拉取中与失败的 `暂无可用项`、与斜杠候选共用
+// 能力栏「+」菜单（chat-web「输入框与能力栏」场景「「+」菜单写入草稿」）：`添加文件或命令` 按钮只随锁定禁用、草稿
+// 非空白时命令条目不可选并有提示行、菜单列出的目录与项目标记、点选写入草稿并聚焦输入框而不发送、拉取中与失败的 `暂无可用项`、与斜杠候选共用
 // 一份目录。seam：整页挂载 + 假 API；「菜单开着时输入框被锁定」用 `useSlashMenu` + 裸 `CapabilityBar`。
 // 期望文案与条目取自规格条文。
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -43,6 +43,7 @@ import { pressPointer, yieldMacrotask } from "./ui-support.js";
 const A = PROJECT_A.id;
 const BOUND = { ...view("a".repeat(32), "绑定会话"), workspaceId: A };
 const EMPTY = "暂无可用项";
+const HINT = "清空输入后可选择命令";
 /** 规格场景里空间 A 的目录：两条内建、平台技能 `skill:weekly-report`、项目技能 `skill:deploy`。 */
 const FOUR = [COMPACT, TODO, WEEKLY, project("deploy", "部署到测试环境")];
 const FOUR_LABELS = ["整理上下文", "任务清单", "weekly-report", "deploy"];
@@ -137,17 +138,38 @@ function pickFirstByKey(menu: HTMLElement, key: string) {
 }
 
 describe("「+」菜单写入草稿", () => {
-  it("草稿非空白时禁用、空白时可用；菜单按目录顺序列四项并标出项目技能；点选写入 `/skill:deploy `、关闭菜单、聚焦输入框、不发送；之后的斜杠候选用同一份目录", async () => {
+  it("草稿非空白时按钮可用、命令条目不可选并有提示行，清空后可选；菜单按目录顺序列四项并标出项目技能；点选写入 `/skill:deploy `、关闭菜单、聚焦输入框、不发送；之后的斜杠候选用同一份目录", async () => {
     const { fetchMock } = await openBound(catalogue(FOUR));
 
     await type("半句");
-    expect(plusButton().disabled).toBe(true);
+    expect(plusButton().disabled).toBe(false);
+    // 菜单没打开过：还没有任何目录请求。
+    expect(cataloguePaths(fetchMock)).toEqual([]);
+
+    const locked = await openMenu();
+
+    expect(locked.textContent).toBe(HINT + FOUR_TEXTS.join(""));
+    const items = within(locked).getAllByRole("menuitem");
+    expect(items.map((item) => item.getAttribute("aria-disabled"))).toEqual(FOUR.map(() => "true"));
+    const deploy = items[3] as HTMLElement;
+    fireEvent.click(deploy);
+    // 方向键跳过不可选的条目，Enter 直接按在条目上。
+    fireEvent.keyDown(deploy, { key: "Enter" });
+    await quiesce();
+    // 菜单开着时页面其余部分是 aria-hidden，输入框按 hidden 取。
+    const input = screen.getByRole("textbox", { hidden: true, name: "给助手发消息" });
+    expect((input as HTMLTextAreaElement).value).toBe("半句");
+    expect(screen.getByRole("menu")).toBe(locked);
+    // 草稿非空白时打开菜单照常取一次目录。
+    expect(cataloguePaths(fetchMock)).toEqual([commandsOf(A)]);
+    fireEvent.keyDown(locked, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(plusButton()));
+
     await type("  \n ");
     expect(plusButton().disabled).toBe(false);
     await type("");
     expect(plusButton().disabled).toBe(false);
-    // 菜单没打开过：还没有任何目录请求。
-    expect(cataloguePaths(fetchMock)).toEqual([]);
 
     const menu = await openMenu();
 
@@ -161,7 +183,7 @@ describe("「+」菜单写入草稿", () => {
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
     expect(composer().value).toBe("/skill:deploy ");
     await waitFor(() => expect(document.activeElement).toBe(composer()));
-    expect(plusButton().disabled).toBe(true);
+    expect(plusButton().disabled).toBe(false);
     await quiesce();
     expect(prompts(fetchMock)).toEqual([]);
 
@@ -246,7 +268,7 @@ describe("「+」菜单写入草稿", () => {
   });
 
   // 真实后端的目录至少有内建命令，到不了这一分支：只能在这里钉。
-  it("目录请求成功但为空：菜单只显示 `暂无可用项`，不列条目、不显示错误", async () => {
+  it("目录请求成功但为空：菜单只显示 `暂无可用项`，不列条目、不显示错误；草稿非空白时也不加提示行", async () => {
     const { fetchMock } = await openBound(catalogue([]));
     const errors = vi.spyOn(console, "error");
 
@@ -256,6 +278,12 @@ describe("「+」菜单写入草稿", () => {
     expect(itemTexts(menu)).toEqual([]);
     expect(screen.queryAllByRole("alert", { hidden: true })).toEqual([]);
     expect(cataloguePaths(fetchMock)).toEqual([commandsOf(A)]);
+
+    // 草稿非空白时也一样：没有可选的条目，就不加提示行。
+    fireEvent.keyDown(menu, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    await type("半句");
+    expect((await openMenu()).textContent).toBe(EMPTY);
     expect(errors).not.toHaveBeenCalled();
   });
 
@@ -373,10 +401,48 @@ describe("「+」按钮随输入框锁定", () => {
     expect(seam.plus.commands).toEqual(CATALOGUE);
   });
 
-  it("菜单已禁用时的点选不落地：草稿非空白时不覆盖草稿，输入框锁定时不写入", async () => {
+  it("菜单开着时草稿变为非空白：菜单仍在，条目不可选并有提示行；草稿回到空白后条目就地恢复可选", async () => {
+    const { menu } = await openBar();
+    const disabled = () =>
+      within(menu)
+        .getAllByRole("menuitem")
+        .map((item) => item.getAttribute("aria-disabled"));
+
+    act(() => seam.setDraft("半句"));
+
+    expect(screen.getByRole("menu")).toBe(menu);
+    expect(seam.plus.open).toBe(true);
+    expect(disabled()).toEqual(["true", "true", "true"]);
+    expect(menu.firstElementChild?.textContent).toBe(HINT);
+
+    act(() => seam.setDraft(""));
+
+    expect(menu.textContent).not.toContain(HINT);
+    expect(disabled()).toEqual([null, null, null]);
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /任务清单/ }));
+    expect(seam.draft).toBe("/todo ");
+  });
+
+  it("点选后退场中的菜单不变：`locked` 停在点选前的值，重开菜单时才跟上草稿", async () => {
+    const { menu } = await openBar();
+
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /任务清单/ }));
+
+    expect(seam.draft).toBe("/todo ");
+    expect(seam.plus.open).toBe(false);
+    expect(seam.plus.locked).toBe(false);
+
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    await openMenu();
+
+    expect(seam.plus.locked).toBe(true);
+  });
+
+  it("不可选时的点选不落地：草稿非空白时不覆盖草稿，输入框锁定时不写入", async () => {
     const { bar } = await openBar();
     act(() => seam.setDraft("半句"));
-    expect(seam.plus.disabled).toBe(true);
+    expect(seam.plus.disabled).toBe(false);
+    expect(seam.plus.locked).toBe(true);
     expect(seam.plus.commands).toEqual(CATALOGUE);
 
     act(() => seam.plus.onPick(TODO));

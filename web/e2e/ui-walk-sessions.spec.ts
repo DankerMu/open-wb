@@ -548,7 +548,7 @@ async function sendSlashTurn(
 }
 
 // 能力栏「+」菜单（接在 step10Slash 之后，目录已由斜杠候选取回）：空白草稿下打开 `添加文件或命令`，列出同一份
-// 目录；点选把草稿写成 `/<name> `、菜单关闭、焦点在输入框，没有发出 prompt；草稿非空白时按钮禁用。
+// 目录；点选把草稿写成 `/<name> `、菜单关闭、焦点在输入框，没有发出 prompt；草稿非空白时按钮仍可用。
 async function step10PlusMenu(page: Page): Promise<void> {
   const composer = page.getByLabel("给助手发消息");
   const trigger = page.getByRole("button", { name: "添加文件或命令", exact: true });
@@ -573,7 +573,7 @@ async function step10PlusMenu(page: Page): Promise<void> {
   await expect(page.locator("body.gap"), "退场中的菜单出现 暂无可用项").toHaveCount(0);
   await expect(composer).toHaveValue("/compact ");
   await expect(composer).toBeFocused();
-  await expect(trigger).toBeDisabled();
+  await expect(trigger).toBeEnabled();
   await composer.fill("");
   await expect(trigger).toBeEnabled();
   page.off("request", record);

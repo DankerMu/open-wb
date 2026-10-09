@@ -61,10 +61,13 @@ export function CapabilityBar({ choice, disabled, inputRef, plus, session }: Cap
   );
 }
 
+const MENU_NOTE = "m-0 px-1.5 py-1 text-sm text-muted-foreground";
+
 /**
  * `添加文件或命令` 按钮与菜单：按目录顺序列出命令与技能（名称、项目标记、描述）；目录未持有（拉取中或失败）时
  * 只有 `暂无可用项`，目录到达后列表就地替换它。点选把草稿写成 `/<name> `，菜单关闭后焦点交给输入框而不是
- * 回到按钮（此时草稿非空白，按钮已禁用）；Esc 等其它关闭方式仍按菜单默认把焦点还给按钮。
+ * 回到按钮；Esc 等其它关闭方式仍按菜单默认把焦点还给按钮。草稿非空白时菜单照常打开，命令条目不可选，
+ * 列表前有一行 `清空输入后可选择命令`（菜单的直接子元素）。
  */
 function CommandMenu({ inputRef, plus }: Pick<CapabilityBarProps, "inputRef" | "plus">) {
   const picked = useRef(false);
@@ -94,29 +97,33 @@ function CommandMenu({ inputRef, plus }: Pick<CapabilityBarProps, "inputRef" | "
         side="top"
       >
         {plus.commands === undefined || plus.commands.length === 0 ? (
-          <p className="m-0 px-1.5 py-1 text-sm text-muted-foreground">暂无可用项</p>
+          <p className={MENU_NOTE}>暂无可用项</p>
         ) : (
-          plus.commands.map((command) => {
-            const tag = sourceTag(command);
-            return (
-              <DropdownMenuItem
-                className="flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[13px] leading-5 wrap-anywhere"
-                key={command.name}
-                onSelect={() => {
-                  picked.current = true;
-                  plus.onPick(command);
-                }}
-              >
-                <span className="font-medium">{command.label}</span>
-                {tag === null ? null : (
-                  <span className="rounded bg-(--wb-brand-primary-subtle) px-1.5 text-xs text-(--wb-brand-primary-deep)">
-                    {tag}
-                  </span>
-                )}
-                <span className="text-muted-foreground">{command.description}</span>
-              </DropdownMenuItem>
-            );
-          })
+          <>
+            {plus.locked ? <p className={MENU_NOTE}>清空输入后可选择命令</p> : null}
+            {plus.commands.map((command) => {
+              const tag = sourceTag(command);
+              return (
+                <DropdownMenuItem
+                  className="flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[13px] leading-5 wrap-anywhere"
+                  disabled={plus.locked}
+                  key={command.name}
+                  onSelect={() => {
+                    picked.current = true;
+                    plus.onPick(command);
+                  }}
+                >
+                  <span className="font-medium">{command.label}</span>
+                  {tag === null ? null : (
+                    <span className="rounded bg-(--wb-brand-primary-subtle) px-1.5 text-xs text-(--wb-brand-primary-deep)">
+                      {tag}
+                    </span>
+                  )}
+                  <span className="text-muted-foreground">{command.description}</span>
+                </DropdownMenuItem>
+              );
+            })}
+          </>
         )}
       </DropdownMenuContent>
     </DropdownMenu>
