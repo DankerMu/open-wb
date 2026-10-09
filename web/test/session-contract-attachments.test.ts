@@ -67,6 +67,7 @@ describe("三键与附件的严格解析: the three composer settings of a sessi
   });
 
   it.each([
+    ["only the eleven keys", {}],
     ["approvalMode only", { approvalMode: "write" }],
     ["approvalMode and modelId only", { approvalMode: "write", modelId: "m3" }],
     ["approvalMode and reasoningEffort only", { approvalMode: "write", reasoningEffort: null }],
@@ -75,6 +76,7 @@ describe("三键与附件的严格解析: the three composer settings of a sessi
     ["two of the three keys and a foreign one", { approvalMode: "write", modelId: "m3", x: null }],
     ["approvalMode auto", { ...THREE, approvalMode: "auto" }],
     ["a non-string modelId", { ...THREE, modelId: 3 }],
+    ["an empty modelId", { ...THREE, modelId: "" }],
     ["reasoningEffort auto", { ...THREE, reasoningEffort: "auto" }],
     ["reasoningEffort ultra", { ...THREE, reasoningEffort: "ultra" }],
   ])("rejects a session with %s", (_label, extra) => {
@@ -119,6 +121,7 @@ describe("三键与附件的严格解析: message attachments (#1025)", () => {
   });
 
   it.each([
+    ["no attachments", message(1, "user")],
     ["files in place of attachments", { ...message(1, "user"), files: [] }],
     ["a foreign eleventh key", { ...message(1, "user"), attachments: [], files: [] }],
   ])("rejects the snapshot when a message has %s", (_label, item) => {
@@ -142,6 +145,7 @@ describe("三键与附件的严格解析: fork and undo responses (#1025)", () =
   });
 
   it.each([
+    ["no attachments", { session: SESSION, draft: "" }],
     ["files in place of attachments", { session: SESSION, draft: "", files: FILES }],
     ["a foreign fourth key", { ...FORK, x: 1 }],
     ["null attachments", { ...FORK, attachments: null }],
@@ -151,6 +155,7 @@ describe("三键与附件的严格解析: fork and undo responses (#1025)", () =
   });
 
   it.each([
+    ["no attachments", { session: SESSION, draft: "", files: FILES }],
     ["a foreign key in place of attachments", { session: SESSION, draft: "", files: FILES, x: 1 }],
     ["attachments in place of files", { session: SESSION, draft: "", attachments: [] }],
     ["a foreign fifth key", { ...UNDO, x: 1 }],

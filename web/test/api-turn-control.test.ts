@@ -204,13 +204,10 @@ describe("Turn control regenerate/fork/approval parsing", () => {
   it.each(["", "  原文\n"])(
     "returns fork draft %j and a stopped session unchanged",
     async (draft) => {
-      stubFetch(jsonResponse({ session: stoppedSession, draft }, 201));
+      const body = { ...forkBody, draft };
+      stubFetch(jsonResponse(body, 201));
 
-      await expect(createApiClient().forkSession(SESSION_ID, 1)).resolves.toEqual({
-        session: stoppedSession,
-        draft,
-        attachments: [],
-      });
+      await expect(createApiClient().forkSession(SESSION_ID, 1)).resolves.toEqual(body);
     },
   );
 
@@ -227,6 +224,7 @@ describe("Turn control regenerate/fork/approval parsing", () => {
   it.each([
     ["a non-string draft", { ...forkBody, draft: 1 }],
     ["an extra key", { ...forkBody, parentSessionId: SESSION_ID }],
+    ["a missing attachments", { session: stoppedSession, draft: "" }],
     ["a missing draft", { session: stoppedSession, attachments: [] }],
     ["a missing session", { draft: "", attachments: [] }],
     [

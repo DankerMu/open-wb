@@ -110,6 +110,7 @@ describe("Undo API response parsing", () => {
 
   it.each([
     ["missing files", { session, draft: "", attachments: [] }],
+    ["missing attachments", { session, draft: "", files: keptFiles }],
     ["null files", undoBody(null)],
     ["array files", undoBody([])],
     ["an extra top-level key", { ...undoBody(keptFiles), extra: [] }],

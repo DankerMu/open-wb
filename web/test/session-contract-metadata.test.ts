@@ -214,6 +214,7 @@ describe("Session contract: fourteen-key session", () => {
   it.each([
     [5, withoutMeta(metaSession)],
     [8, withoutExtension(metaSession)],
+    [11, withoutComposer(metaSession)],
   ])("rejects a legacy %i-key session in list, snapshot and fork", (keyCount, legacy) => {
     expect(Object.keys(legacy)).toHaveLength(keyCount);
     expect(parseSessionList({ sessions: [legacy] })).toBeNull();
@@ -306,6 +307,7 @@ describe("Session contract: list response through the API client", () => {
     ["a thirteen-key item without pinnedAt", withoutKey(metaSession, "pinnedAt")],
     ["a thirteen-key item without archivedAt", withoutKey(metaSession, "archivedAt")],
     ["a legacy eight-key item", withoutExtension(metaSession)],
+    ["a legacy eleven-key item", withoutComposer(metaSession)],
     ["a fifteen-key item with parentSessionId", { ...metaSession, parentSessionId: SESSION_ID }],
     ["an item with scene chat", { ...metaSession, scene: "chat" }],
     ["an item with pendingApproval yes", { ...metaSession, pendingApproval: "yes" }],
