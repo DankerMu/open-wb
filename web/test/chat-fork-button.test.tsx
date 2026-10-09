@@ -1,6 +1,7 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessageSnapshot, ChatSession } from "../src/lib/session-contract.js";
+import { area, chips, statuses } from "./chat-attachments-support.js";
 import {
   cleanupChatLifecycle,
   renderChatPageWithAuthProbe,
@@ -25,6 +26,7 @@ import {
   jsonResponse,
   paths,
 } from "./support.js";
+import { FakeXhr, installFakeXhr } from "./upload-support.js";
 
 const FORK_ID = "c".repeat(32);
 const FORK = `/api/sessions/${SESSION_ID}/fork`;
@@ -42,6 +44,7 @@ const FORK_LABEL = "从此处分叉";
 type Snapshot = ChatMessageSnapshot;
 type Message = Snapshot["messages"][number];
 type Cursor = Snapshot["streamCursor"];
+type Attachments = Message["attachments"];
 
 function envelope(code: string, message: string) {
   return { error: { code, message } };
@@ -49,12 +52,19 @@ function envelope(code: string, message: string) {
 
 const BUSY_B = envelope("session_busy", "B 会话忙");
 
-function message(id: number, role: Message["role"], status: Message["status"], content: string) {
+function message(
+  id: number,
+  role: Message["role"],
+  status: Message["status"],
+  content: string,
+  attachments: Attachments = [],
+) {
   return {
     ...historyUser,
     id,
     role,
     undo: role === "user" ? historyUser.undo : null,
+    attachments,
     status,
     content,
     createdAt: id,
@@ -96,8 +106,16 @@ const B = snapshotOf(session(OTHER_SESSION_ID, "done", "other session", 1_740_00
   message(22, "assistant", "done", "B 回答"),
 ]);
 
-const forked = (s: Snapshot, draft: string) =>
-  jsonResponse({ session: s.session, draft, attachments: [] }, 201);
+/** SA：S 之后再有一对「只有附件的用户消息 + 回答」。单独一份：F1 要求 S 的每个用户气泡都有文本块。 */
+const A_PDF: Attachments = [{ path: "uploads/a.pdf", size: 3 }];
+const SA = snapshotOf(S.session, [
+  ...S.messages,
+  message(5, "user", "done", "", A_PDF),
+  message(6, "assistant", "done", "三"),
+]);
+
+const forked = (s: Snapshot, draft: string, attachments: Attachments = []) =>
+  jsonResponse({ session: s.session, draft, attachments }, 201);
 
 /** 以 `?session=A&tab=x#frag` 挂载并 open。`listing.sessions` 决定此后列表 GET 的回复。 */
 async function mount(initial: Snapshot, routes: FetchRoutes = {}, withB = false) {
@@ -114,6 +132,7 @@ async function mount(initial: Snapshot, routes: FetchRoutes = {}, withB = false)
   act(() => source.emitOpen());
   await flush();
   await waitFor(() => expect(textarea().disabled).toBe(initial.session.status === "running"));
+  installFakeXhr();
   return { fetchMock: mounted.fetchMock, listing, router: mounted.router, source };
 }
 
@@ -277,7 +296,7 @@ describe("fork button: request, navigation and draft", () => {
 
     const lists = listGets(fetchMock);
     listing.sessions = [N.session, S.session];
-    fork.resolve(forked(N, "second question"));
+    fork.resolve(forked(N, "second question", A_PDF));
     await flush();
     expect(currentLocation()).toBe(`/?session=${FORK_ID}${QUERY}`);
     await waitFor(() => expect(FakeEventSource.instances).toHaveLength(2));
@@ -296,11 +315,37 @@ describe("fork button: request, navigation and draft", () => {
     expect(textarea().value).toBe("second question");
     expect(textarea().disabled).toBe(false);
     expect(sendButton().disabled).toBe(false);
+    expect(chips()).toEqual(["a.pdf3 B"]);
+    expect(statuses()).toEqual(["uploaded"]);
 
     act(() => next.emitOpen());
     await flush();
     expect(textarea().value).toBe("second question");
+    expect(chips()).toEqual(["a.pdf3 B"]);
     expectNothingSent(fetchMock);
+    expect(FakeXhr.instances).toHaveLength(0);
+    expect(alerts()).toEqual([]);
+  });
+
+  it("F2b forks an attachment-only message: the empty draft replaces the old one, the chip is back", async () => {
+    const { fetchMock, listing } = await mount(SA, { [FORK]: () => forked(N, "", A_PDF) });
+    listing.sessions = [N.session, SA.session];
+    typeDraft("旧草稿");
+    const u5 = userArticles()[2] as HTMLElement;
+    expect(u5.querySelector('[data-slot="message-body"]')).toBeNull();
+    await clickFork(u5);
+
+    const posts = calls(fetchMock, FORK);
+    expect(posts).toHaveLength(1);
+    expect(posts[0]?.[1]?.body).toBe('{"messageId":5}');
+    await expectChatLocation(`/?session=${FORK_ID}${QUERY}`);
+    await waitFor(() => expect(sendButton().disabled).toBe(false));
+    expect(transcript()).toEqual(["first question", "一"]);
+    expect(textarea().value).toBe("");
+    expect(chips()).toEqual(["a.pdf3 B"]);
+    expect(statuses()).toEqual(["uploaded"]);
+    expectNothingSent(fetchMock);
+    expect(FakeXhr.instances).toHaveLength(0);
     expect(alerts()).toEqual([]);
   });
 
@@ -332,6 +377,7 @@ describe("fork button: request, navigation and draft", () => {
     );
     expect(textarea().value).toBe("first question");
     expect(textarea().disabled).toBe(false);
+    expect(area()).toBeNull();
     expectNothingSent(fetchMock);
   });
 
@@ -462,7 +508,7 @@ describe("fork button: ownership fences", () => {
 
   it("F8 drops a late 201 after leaving A and coming back (ABA)", async () => {
     const forkA = deferredResponse();
-    const { fetchMock, listing } = await mount(S, { [FORK]: () => forkA.promise }, true);
+    const { fetchMock, listing, router } = await mount(S, { [FORK]: () => forkA.promise }, true);
     const [, u3] = userArticles() as [HTMLElement, HTMLElement];
     await clickFork(u3);
     await selectInNav("other session", OTHER_SESSION_ID);
@@ -474,13 +520,25 @@ describe("fork button: ownership fences", () => {
 
     const lists = listGets(fetchMock);
     listing.sessions = [N.session, S.session, B.session];
-    forkA.resolve(forked(N, "second question"));
+    forkA.resolve(forked(N, "second question", A_PDF));
     await flush();
     expect(currentLocation()).toBe(A_URL);
     expect(listGets(fetchMock)).toBe(lists);
     expect(calls(fetchMock, N_MESSAGES)).toHaveLength(0);
     expect(textarea().disabled).toBe(false);
     expect(textarea().value).toBe("");
+    expect(area()).toBeNull();
+
+    // 被丢弃的 201 也没有给分叉出的会话留下标签（侧栏此时还没有它，所以直接导航过去）。
+    await act(async () => {
+      await router.navigate(`/?session=${FORK_ID}${QUERY}`);
+    });
+    await flush();
+    expect(currentLocation()).toBe(`/?session=${FORK_ID}${QUERY}`);
+    await waitFor(() => expect(calls(fetchMock, N_MESSAGES)).toHaveLength(1));
+    await flush();
+    expect(area()).toBeNull();
+    expect(FakeXhr.instances).toHaveLength(0);
   });
 
   it.each(late)("F9 drops a late %s from the old client after renewal", async (_, reply) => {
