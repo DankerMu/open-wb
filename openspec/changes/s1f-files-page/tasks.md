@@ -276,6 +276,7 @@ Minimal mergeable slice: 9.1–9.2（移动）与 9.3–9.4（下载）互不依
 
 - [ ] 10.1 新文件 `server/src/workspaces/archive.ts` 的 tar / tar.gz / gz 部分：`node:zlib` 加 512 字节头的遍历器（ustar `name`/`prefix`、GNU `L`、pax `path`；成员正文跳过不读）；单个 gz 一项；到条目上限停读；tar 与 tar.gz 的 5 秒时限（时钟可注入）；
   扩展记录 65536 字节与成员名 4096 字节的硬上限——按头里**声明**的长度在读取之前判定，超出即停读并置 `truncated`（一项都没读出时为不支持）。读取经一个可注入的读函数，测试用它记录单次读取的最大长度。
+  实施注记见 `implementation-notes.md`「10.1（#1063）」。
 - [ ] 10.2 `archive.ts` 的 zip 部分：`yauzl`（新依赖，MIT，登记 `ATTRIBUTION.md`）只读中央目录；成员名超过 4096 字节的成员不计入结果，停读并置 `truncated`（名字随中央目录项读入后判定——`zip` 的名长字段只有 2 字节，读入量有界；不要求在 `yauzl` 交出该项之前拦截）。
 - [ ] 10.3 `GET /api/workspaces/:id/archive` 路由（新文件或并入 `rest-entries.ts`），`PREVIEW_ARCHIVE_MAX_ENTRIES` 经 `limits` 传入。
 - [ ] 10.4 测试（新文件 `server/test/workspaces-archive.test.ts`）：workspaces「压缩包列表」五个场景（含「声明超大的长文件名记录」：1 KiB 文件声明 4 GiB 的 `L` 记录、两个成员之后声明 1 GiB 的 pax 头、5000 字节的 zip 成员名与 `L` 名字、注入时钟的未压缩 tar 超时）。
