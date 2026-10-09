@@ -115,6 +115,7 @@ Minimal mergeable slice: 三项各自独立，可分别记录、分别成 PR（�
     `:233-239` 的「`readme.md` 的列表符号不为 `none`」断言**原样保留**（它现在证明 Tailwind 的还原生效；去掉还原这条就红），只改 `:232` 那行说它靠 `legacy.css` 的注释。该文件 594 行，改写不增行。
   核对过、这一刀不受影响的（开工时确认仍成立）：`web/test/chat-messages.test.tsx:185-187`（`preview.tsx` 含 `MarkdownView`、不含 `function renderBlock`）；`files-page.test.tsx:537-541`（`preview.tsx` 含 `fileIcon(`、`formatSize(`）；
   `files-empty-layout.test.tsx:174-181` 与 `ui-tokens.test.ts:76-88` 读的 `files.css` 规则（暂留）；`files-empty-layout.test.tsx:190-194`；走查 `ui-walk-layout.ts:304-311` 的 `.ui-btn` 探针（它在选中文件之前运行，取到的是 `新建`，不是 `查看源码`）。
+  实施注记见 `implementation-notes.md`「2.1（#1076）」。
 - [ ] 2.2 `web/src/features/files/dialogs.tsx`：`新建工作空间`、`新建文件夹` 两个对话框改用拷入层 `dialog`、`input`、`label`、`button`；文案、校验、409 映射、忙碌态、取消中止与焦点规则不变。单独登记进 `MIGRATED_AREAS`。
   五个定点（都是既有断言依赖的）：前四个是属性与元素的选择，`DialogContent` 上显式传 `aria-modal="true"`（拷入的 `dialog` 不自带，冻结区 `Dialog` 是自己补的；`files-overlays.test.tsx:75`、`:124` 与 files-web「创建浮层的焦点时序与模态清理」断言它）；遮罩用拷入层自带的 `data-slot="dialog-overlay"`；
   右上的 `关闭` 用拷入层自带的关闭按钮（可访问名 `关闭`）；`位置` 仍是原生 `<select>`（拷入层没有 `select`，本 change 不新拷入；走查 `ui-walk.spec.ts:288` 的 `getByLabel("位置").selectOption(…)` 依赖它）。
