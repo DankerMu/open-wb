@@ -809,7 +809,7 @@ Minimal mergeable slice: atomic - 两个控件共用一份提交与强度重算�
 - [x] 16.2a 标签与菜单入口：新文件 `web/src/features/chat/attachment-chips.tsx`（登记）：附件区列表、每项的名字 / 大小 / 状态 / 进度条 / 移除按钮；`composer.tsx` 在文本框上方渲染它；「+」菜单加入 `上传文件` 项（隐藏的文件输入框、真实的禁用判定与原因文字，message-attachments「没有工作空间的会话」）。大小的格式化复用文件页既有的函数（先 grep `web/src/features/files/`，没有可复用的再在 `web/src/lib/` 加一个并让文件页也用它）。
   测试新文件 `web/test/chat-attachments.test.tsx`（整页挂载）：message-attachments「选择即上传」的标签部分、「数量与大小限制」「失败、移除与取消」「切换会话清空标签」「上传中切换会话」的已选会话一段、「未绑定会话没有上传目标」的菜单部分；chat-web delta「「+」菜单写入草稿」里「第一项是 `上传文件`」。
   实施注记见 `implementation-notes.md`「16.2a + 16.2c + 16.3（#1032）」。
-- [ ] 16.2b 拖拽与粘贴：`composer.tsx` 接上拖拽（`data-drop-active`）与粘贴（只在剪贴板带文件时拦截），都交给 16.1 的统一入口。测试同文件：「拖入与粘贴」四例、「未绑定会话没有上传目标」的拖入与粘贴部分。
+- [x] 16.2b 拖拽与粘贴：`composer.tsx` 接上拖拽（`data-drop-active`）与粘贴（只在剪贴板带文件时拦截），都交给 16.1 的统一入口。测试同文件：「拖入与粘贴」四例、「未绑定会话没有上传目标」的拖入与粘贴部分。
   实施注记见 `implementation-notes.md`「16.2b（#1033）」。
 - [x] 16.2c 发送闸：有标签处于 `上传中` 或 `失败` 时 `发送` 禁用、Enter 不提交；启用条件改为「草稿非空，或至少有一个标签且全部处于可发送状态（已上传 / `待上传`）」（message-attachments「输入框附件标签」的**发送**一段、chat-web「输入框与能力栏」）。现有两道闸都要改，只改按钮会留下「按钮亮着、点了不发」：`web/src/features/chat/composer-locks.ts` 的 `sendDisabled`（现为 `draft.trim().length === 0`）与 `use-chat-session.ts` 提交入口对空白草稿的提前返回（`use-chat-session.ts:555` 一带）；判定写成一个纯函数，两处共用。
   测试同文件：「选择即上传」里上传期间与完成后的 `发送` 状态、「失败、移除与取消」里的 `发送` 状态（含「草稿为空白且已没有标签时仍禁用」）、「只有附件时可发送」的启用 / 禁用各段；`web/test/chat-composer.test.tsx`（或覆盖键盘发送的既有文件）：chat-web「输入框键盘发送」改写后的断言（没有附件标签的空草稿 Enter 不提交；带可发送附件的空白草稿 Enter 提交恰一次）。既有断言「空白草稿 `发送` 禁用」的用例在没有附件标签的前提下原样通过。chat-web「会话页」改写后的那一句（空白发送只在没有处于可发送状态的附件标签时禁用）由同一批断言钉住；覆盖「会话页」空白发送的既有整页用例（`web/test/chat-page-*.test.tsx` 里断言欢迎态与已选会话空白草稿不可发送的）核对其前提是「没有附件标签」，原样通过。
