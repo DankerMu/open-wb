@@ -147,6 +147,11 @@ describe("appAssemblyOf (L2)", () => {
       appAssemblyOf(resolveServerConfig({ APPROVAL_MAX_MODE: "always-ask" }, ENTRY))
         .approvalMaxMode,
     ).toBe("always-ask");
+    expect(
+      [assembly, appAssemblyOf(resolveServerConfig({ UPLOAD_MAX_FILES: "3" }, ENTRY))].map(
+        (made) => made.uploadMaxFiles,
+      ),
+    ).toEqual([10, 3]);
     expect(Object.hasOwn(assembly, "upstream")).toBe(false);
     expect(typeof assembly.log).toBe("function");
     expect(upstream.upstream).toEqual({ baseUrl: "http://127.0.0.1:9/v1", apiKey: "k-652" });

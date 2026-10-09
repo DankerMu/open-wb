@@ -61,9 +61,14 @@ afterEach(async () => {
 
 /**
  * `cap` undefined is `APPROVAL_MAX_MODE` unset: the assembly's `yolo`. `catalog` "default" hands the
- * assembly no whitelist either: the single default model of an unset `MODEL_CATALOG`.
+ * assembly no whitelist either: the single default model of an unset `MODEL_CATALOG`. `upload`
+ * undefined is both upload limits unset: the assembly's defaults.
  */
-export async function openWorld(cap?: Cap, catalog: "three" | "default" = "three"): Promise<World> {
+export async function openWorld(
+  cap?: Cap,
+  catalog: "three" | "default" = "three",
+  upload?: { maxBytes: number; maxFiles: number },
+): Promise<World> {
   const db = openDb(":memory:");
   cleanups.push(() => {
     db.close();
@@ -78,6 +83,9 @@ export async function openWorld(cap?: Cap, catalog: "three" | "default" = "three
       runtime,
       ...(catalog === "three" ? { modelCatalog: THREE_MODEL_CATALOG } : {}),
       ...(cap === undefined ? {} : { approvalMaxMode: cap }),
+      ...(upload === undefined
+        ? {}
+        : { uploadMaxBytes: upload.maxBytes, uploadMaxFiles: upload.maxFiles }),
     },
   });
   cleanups.push(() => app.close());
@@ -200,6 +208,19 @@ export function footprint(world: World): unknown {
     prefs: prefs(world),
     dirs: dirs.sort(),
   };
+}
+
+/** `account` undefined sends no cookie. */
+export function getOptions(
+  world: World,
+  account?: Account,
+  query = "",
+): Promise<LightMyRequestResponse> {
+  return world.app.inject({
+    method: "GET",
+    url: `/api/composer/options${query}`,
+    headers: account === undefined ? {} : { cookie: world.cookies[account] },
+  });
 }
 
 export function expectBadRequest(response: LightMyRequestResponse): void {

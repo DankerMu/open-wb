@@ -17,7 +17,7 @@ export const DEFAULT_OMP_IDLE_MS = 600_000;
 export const DEFAULT_OMP_MAX_PROCESSES = 16;
 /** 单个上传文件的字节上限缺省值：500 MiB。 */
 export const DEFAULT_UPLOAD_MAX_BYTES = 524_288_000;
-const DEFAULT_UPLOAD_MAX_FILES = 10;
+export const DEFAULT_UPLOAD_MAX_FILES = 10;
 /** 快照的单文件上限缺省值：20 MiB。 */
 const DEFAULT_SNAPSHOT_MAX_FILE_BYTES = 20_971_520;
 /** 一份快照的总字节上限缺省值：500 MiB。 */
