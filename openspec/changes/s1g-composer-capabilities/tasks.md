@@ -672,6 +672,23 @@ Minimal mergeable slice: 12.1 一刀（纯函数与对齐，无附件时字节�
   - 行数与边界：`chat-page-support.tsx` 74 行、`support.ts` 174 行、`api-upload.test.ts` 变短，都远离 800。不改 `web/src/**`；新文件在 `web/test`，不涉及 `MIGRATED_AREAS`。
 - [ ] 13.5 解析收紧（三步走的第三步；在组 8、12 的服务端 PR 都合入之后）：删除任务 5.1 的全部过渡分支与顶部注释，`parseSession` 只接受十四键、消息必须带 `attachments`、fork 响应与 undo 响应必须带 `attachments`、`modelId` 空串为非法。
   测试：chat-web「三键与附件的严格解析」「撤回与转正方法」（缺 `attachments` 的 undo 200 为无效响应）、session-sidebar「十一键接受与其它键集拒绝」（标题沿用 C 的原名，正文为十四键）；删除 5.2 的过渡用例；全仓库搜不到过渡注释里的标记。变异：恢复任一过渡分支 → 判红。`make smoke`、`make ui-walk` 通过。
+  **实施注记（13.5，fixture 评审补充，#1025）**：
+  - 过渡代码只在 `web/src/lib/session-contract.ts`（694 行，删后约 665）：头注释 `:1-4`、`TRANSITIONAL_SESSION_COMPOSER` 与 `TRANSITIONAL_ATTACHMENTS` `:187-192`、`withTransitionalDefaults` `:204-217`，四个调用点 `parseSession:284`、`parseMessage:388`、`parseSessionFork:581`、`parseSessionUndo:650`；`composer-contract.ts`、`api-sessions.ts`、`api.ts`、`stream.ts`、`runtime-convert.ts` 没有过渡分支，不改。
+  - 收紧后一律单次 `hasExactlyKeys`：会话恰十四键（现接受十一或十四）；消息恰十键 `{id,role,content,thinking,status,createdAt,steps,approvals,undo,attachments}`（现九或十）；fork 恰 `{session,draft,attachments}`（现二或三）；undo 恰 `{session,draft,files,attachments}`（现三或四）；`parseSessionComposer:270` 加 `modelId === ""` 拒绝（内联写，`composer-contract.ts` 反向导入本文件，不能从它取 `isNonEmptyString`）。
+  - 服务端出口逐一核过，全部恒发新形状：列表 `rest.ts:246`、快照 `rest.ts:473-482`、fork `rest.ts:410-414`、undo `undo.ts:399-403`；创建 `rest-metadata.ts:107` 与 PATCH（含归档）`:138` 直接发 `SessionView`，不经 `toPublicSession`，但视图唯一构造处是 `store-view.ts:71` 的 `toSessionView`（十四字段）。
+  - 不含会话视图或消息对象的出口：列表事件 `list-events.ts:11` 只发 `data: {}`；会话 SSE 不带视图与 `attachments`（web 在 `stream.ts:140,214` 本地补 `attachments: []`，不经解析）；prompt 202、regenerate 202、错误信封都不含。
+  - `session-contract-composer.test.ts`（217 行）删除前先迁走最终形状断言：`:201-217` 非空附件经 `chatStateFromSnapshot` 与 `convertMessage` 的透传迁到 `chat-runtime-convert.test.ts`（154 行）；`:79-90` 三键值域与十五键、`:102-139` 附件元素规则与助手非空拒绝、`:176-198` fork/undo 拒绝表迁到新文件 `web/test/session-contract-attachments.test.ts`，基底换成十四键与带 `attachments` 的形状。
+  - 该文件里只删四条过渡用例 `:62`、`:94`、`:145`、`:161`，各改写成拒绝行；`:70` 的「an empty model id」由接受改为拒绝。
+  - `session-contract-metadata.test.ts`（375 行）必须改基底，否则 `:185-215` 与 `:310-328` 的拒绝表全因「十一键」被拒而空转：删 `NULL_ELEVEN_KEY_META` `:52-58` 与 `parsed()` `:69-72`，`metaSession` 补三键，`:177/:213/:223` 的 fork 体加 `attachments: []`，`:301` 改 `toHaveLength(14)`。
+  - 同文件补行：`:217-225` 遗留表加十一键；`:310-320` 加「十一键」「`approvalMode:"auto"`」两行，标签 ten-key 改 thirteen、twelve-key 改 fifteen；`:298` 用例名保留「十一键接受」字样（规格标题沿用 C 的原名）。
+  - `api-turn-control.test.ts`（403 行）：`:90` 请求用例的 201 体加 `attachments: []`；`:200-211` 两键期望 `[]` 的过渡断言改成拒绝行「a missing attachments」；`:224-229` 六行各加 `attachments: []`，保证每行只有一个缺陷。
+  - `api-undo.test.ts`（232 行）：`undoBody` `:51-52` 加 `attachments: []`，`:90-108` 改为 `toEqual(body)`，`:118-131` 的手写体同样补键，新增「missing attachments」行（规格「缺 `attachments` 的 undo 200 为无效响应」）。
+  - 整页夹具三处仍是旧形状：`chat-fork-button.test.tsx:99` 的 `forked()`、`chat-page-new-session.test.tsx:413`（N6 断言「迟到 201 不导航」，不补键会因响应非法而空过）、`chat-export.test.tsx:63-104` 的 `user()` / `assistant()`（九键，经 fetch 进解析）；各加 `attachments: []`。
+  - 其余夹具已是新形状，不改：会话全经 `session-meta-fixtures.ts` 的 `NULL_SESSION_META`（十四键，`modelId:"m1"`），消息经 `chat-stream-support.ts` 与 `chat-page-ownership-support.ts`，`chat-undo-support.tsx:108-120` 已四键；`chat-export-markdown.test.ts` 与 `search-match.test.ts` 是纯函数用例，不经解析。
+  - 守卫：被删 helper 与常量都未导出，knip 无新报；`APPROVAL_MODES` / `REASONING_EFFORTS` 仍被 `composer-contract.ts:2` 引用；改动的测试最大是 `chat-fork-button.test.tsx`（547 行），远离 800；新文件在 `web/test`，不涉及 `MIGRATED_AREAS`；新文件的 `message()` 与 `session-contract-undo.test.ts:25-37` 相近，留意 jscpd。
+  - 标记验收命令：`git grep -n -i "withTransitional\|TRANSITIONAL_\|过渡分支\|过渡期\|任务 13\.5" -- . ':!openspec' ':!IMPLEMENTATION_PLAN.md'` 须为空（现命中 `session-contract.ts`、`session-contract-composer.test.ts:2-5`、`session-contract-metadata.test.ts:69`）；顺手把 `api-sessions-metadata.test.ts:94,166` 用例名里的 eleven-key 改成 fourteen-key。
+  - 变异（恢复旧形状 → 判红）：`parseSession` 再收十一键 → metadata 遗留表与列表表的十一键行；放行 `modelId:""` → 新文件空串行；`parseMessage` 再收九键 → 新文件「消息缺 attachments」行；fork 再收两键 → `api-turn-control`「a missing attachments」；undo 再收三键 → `api-undo`「missing attachments」。
+  - 提交缝与 PR 用句：提交一只补夹具并迁移断言（过渡解析下仍全绿），提交二删过渡代码与旧文件并翻转拒绝行。版本偏斜：web 包由同一 server 进程经 `@fastify/static` 提供（`app.ts:5,263`），无部署次序问题；已打开的旧包仍接受十四键。`web/e2e` 只有 `route-hold.ts:20` 与 `ui-walk-layout.ts:70`（登出）两处拦截，不伪造会话体，`make ui-walk` 走真实出口。
 
 Suggested fixture level: expanded - 浏览器 API 客户端的公共合同（新方法、新输入、严格键集收紧）
 Minimal mergeable slice: 13.1 + 13.2 + 13.4 一刀；13.3 一刀；13.5 一刀（最后，依赖服务端两处键集都已发出）
