@@ -114,8 +114,9 @@ async function fail(index: number) {
   await quiesce();
 }
 
+/** 输入框的附件区；用户气泡里也有名为 `附件` 的列表，所以按 slot 取。 */
 function area() {
-  return screen.queryByRole("list", { name: "附件" });
+  return document.querySelector<HTMLElement>('[data-slot="composer-attachments"]');
 }
 
 /** 每个标签的全部文字：名字、大小、状态。 */
