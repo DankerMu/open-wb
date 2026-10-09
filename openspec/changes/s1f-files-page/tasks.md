@@ -507,7 +507,8 @@ Minimal mergeable slice: 22.1（重命名）、22.4（删除）、22.2（移动�
 
 ## 23. workspace-sidebar — 外壳：顶栏按钮、并排布局、窄屏覆盖；移除产物面板
 
-- [ ] 23.1 拷入 shadcn `resizable` 到 `web/src/components/ui/resizable.tsx`（`react-resizable-panels` 加入依赖并登记 `ATTRIBUTION.md`；只做六类修改；确认没有引入新的 `@radix-ui/*` 包）。
+- [x] 23.1 拷入 shadcn `resizable` 到 `web/src/components/ui/resizable.tsx`（`react-resizable-panels` 加入依赖并登记 `ATTRIBUTION.md`；只做六类修改；确认没有引入新的 `@radix-ui/*` 包）。
+  实施注记见 `implementation-notes.md`「23.1（#1104）」。
 - [ ] 23.2 新文件 `web/src/features/chat/workspace-sidebar.tsx` 与 `use-workspace-sidebar.ts`（登记 `MIGRATED_AREAS`）：开合意图、宽屏的 `complementary` + 分隔线、宽度读写 `localStorage` 键 `workbuddy-workspace-sidebar`（读失败与非法值回缺省）、窄屏的全屏 `sheet`（焦点进 `关闭`、Escape、焦点归还且 `preventScroll`）、
   切换会话保持、未绑定会话与欢迎态不渲染但保留意图。主体先挂 `WorkspaceBrowser`（`stacked` 布局，无标记、无过滤）与头部的 `刷新`、`关闭`、`在文件页打开`。
 - [ ] 23.3 `topbar-actions.ts`：第四项改为 `{key:"workspace", label:"工作空间侧边栏", icon:"folder"}`，带 `expanded`，只在 `workspaceId` 非 null 时填入；`page.tsx` 的主区改为对话区 + 侧边栏两栏。
@@ -527,7 +528,7 @@ Minimal mergeable slice: 22.1（重命名）、22.4（删除）、22.2（移动�
 - [ ] 23.7 变异证据：切换会话时关闭侧边栏 → 「切换会话保持打开」判红；未绑定会话也上报按钮 → 可用性用例判红；窄屏关闭后不还焦点 → 窄屏用例判红；`localStorage` 抛错未兜住 → 「存储值不合法」判红。
 
 Suggested fixture level: expanded - 改共享入口（会话页 `page.tsx` 的主区布局与 `CHAT_TOPBAR_ACTIONS` 的顶栏槽位）、新增持久化的 `localStorage` 键、删除一个既有面板及其测试（BREAKING）；评审要看顶栏槽位的其它消费方与回合、连接、草稿不受影响（「不打断回合」用例）
-Minimal mergeable slice: 23.1（拷入组件与依赖登记，无调用方时需在 knip 配置已有的拷入层豁免内）先合；23.2–23.6 同刀——顶栏槽位只有一个，面板的移除与侧边栏的引入、走查与清单必须一起换；同刀之内先搬 support 的四个导出、改两个导入方，再删面板的四个测试文件
+Minimal mergeable slice: 23.1（拷入组件与依赖登记；knip 的拷入层豁免只压住该文件自身的未使用文件与未使用导出，压不住 web/package.json 上的「未使用依赖」，故同刀新增 web/test/components-ui-resizable.test.tsx 作为唯一导入方，不改 knip.json）先合；23.2–23.6 同刀——顶栏槽位只有一个，面板的移除与侧边栏的引入、走查与清单必须一起换；同刀之内先搬 support 的四个导出、改两个导入方，再删面板的四个测试文件
 
 ## 24. workspace-sidebar — 本会话改动标记与过滤、随助手改动刷新
 
