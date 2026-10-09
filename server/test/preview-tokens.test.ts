@@ -178,6 +178,44 @@ describe("预览令牌登记表：到期与查找不续期", () => {
     expect(tokens.lookup(reissued.token, T + 900_000)).toStrictEqual(U1_W1);
   });
 
+  it("同一账号两个空间：一个经查找到期被清除后，另一个未到期的再签发仍是原来的令牌", () => {
+    const tokens = createPreviewTokens();
+    const first = tokens.issue(U1_W1, T);
+    const second = tokens.issue(U1_W2, T + 1_000);
+    expect(second.token).not.toBe(first.token);
+
+    // w1 恰好到期并被清除；w2 晚签发 1000 毫秒，此刻还有效。
+    expect(tokens.lookup(first.token, T + 900_000)).toBeNull();
+    expect(tokens.lookup(second.token, T + 900_000)).toStrictEqual(U1_W2);
+
+    // 清除 w1 不能连带丢掉 w2 的登记：否则这里会生成第二个令牌，而旧的那个仍然有效。
+    const renewed = tokens.issue(U1_W2, T + 900_000);
+    expect(renewed.token).toBe(second.token);
+    expect(renewed.expiresAt).toBe(T + 900_000 + 900_000);
+    expect(tokens.lookup(second.token, T + 900_000)).toStrictEqual(U1_W2);
+    expect(tokens.lookup(first.token, T + 900_000)).toBeNull();
+  });
+
+  it("同一账号两个空间：一个经再签发到期换新后，另一个未到期的再签发仍是原来的令牌", () => {
+    const tokens = createPreviewTokens();
+    const first = tokens.issue(U1_W1, T);
+    const second = tokens.issue(U1_W2, T + 1_000);
+    expect(second.token).not.toBe(first.token);
+
+    // 不经任何查找：w1 恰好到期，再签发换成新令牌并删掉旧记录。
+    const reissued = tokens.issue(U1_W1, T + 900_000);
+    expect(reissued.token).toMatch(LOWER_HEX_64);
+    expect(new Set([first.token, second.token, reissued.token]).size).toBe(3);
+    expect(tokens.lookup(first.token, T + 900_000)).toBeNull();
+
+    // 删掉 w1 的旧记录不能连带丢掉 w2 的登记。
+    const renewed = tokens.issue(U1_W2, T + 900_000);
+    expect(renewed.token).toBe(second.token);
+    expect(renewed.expiresAt).toBe(T + 900_000 + 900_000);
+    expect(tokens.lookup(second.token, T + 900_000)).toStrictEqual(U1_W2);
+    expect(tokens.lookup(reissued.token, T + 900_000)).toStrictEqual(U1_W1);
+  });
+
   it("恰在 t + 899999 再签发仍是同一个令牌", () => {
     const tokens = createPreviewTokens();
     const issued = tokens.issue(U1_W1, T);
