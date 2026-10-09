@@ -306,7 +306,24 @@ Minimal mergeable slice: 12.1 一刀（纯函数与对齐，无附件时字节�
   - 新用例 `web/test/api-undo.test.ts`（225 行）：「撤回与转正方法」的字面量带 `attachments:[{path:"uploads/a.pdf",size:3}]` 逐值返回；既有不带 `attachments` 的两例（`:90-108`）同样留给 13.5。
   - fork / undo 两条是固定用例，不是新行为：`session-contract-composer.test.ts` 在 13.5 整文件删除后，它们是客户端层唯一的正向断言。它们的变异落在 `session-contract.ts`（`parseSessionFork` / `parseSessionUndo` 丢掉 `attachments` → 判红），PR 里注明。
   - 变异：空数组也发 `attachments` → 第二例红；非空时不发 → 第一、三例红；trim 或空串拒绝 / 省略 `message` → 第三例红；从 create / patch body 过滤任一新键 → 四键例与 `{"approvalMode":"yolo"}` 例红。服务端组 8、12 未合入，全部用 fetch 替身，不碰 `make smoke` 断言。
-- [ ] 13.2 `getComposerOptions()`：方法与严格解析（解析放 `session-contract.ts` 或新文件 `web/src/lib/composer-contract.ts`，视行数）。测试：同场景的 options 部分（合法逐值返回；三种非法响应拒绝）。
+- [ ] 13.2 `getComposerOptions()`：方法与严格解析（解析放 `session-contract.ts` 或新文件 `web/src/lib/composer-contract.ts`，视行数）。测试：同场景的 options 部分（合法逐值返回；四种非法响应拒绝（chat-web 场景的 THEN 列了四种；O1 之后加了 `efforts` 含 `auto`））。
+  **实施注记（13.2，fixture 评审补充，#1022）**：
+  - 计数漂移：任务与 issue 写「三种非法响应」，chat-web「新输入与两个新方法」的 THEN 列了四种——`approvalModes` 为空、`models` 元素缺 `defaultEffort`、`efforts` 含 `auto`（O1 后加）、`upload.maxFiles` 为 0。以场景为准四种全测，偏离记录写明。
+  - 服务端 `GET /api/composer/options`（任务 8.5）未合入，`server/src` 搜不到该路径；本刀全部是 fetch 替身，不加 smoke / ui-walk 断言。
+  - 方法放 `web/src/lib/api-sessions.ts`（284 行，加完约 300），不新建 `api-composer.ts`：该端点由 sessions 模块注册，`createSessionMethods` 已拿到 `request` / `getRequestOptions` / `requestFailed`，只需在 `Pick<ApiClient, …>`（`:67`）加 `"getComposerOptions"`，`api.ts` 的装配处零改动。
+  - 方法体：`request("/api/composer/options", getRequestOptions(options?.signal), onUnauthorized, 200)` → `parseComposerOptions`，失败 `throw requestFailed(200)`。
+  - `api.ts`（#1021 之后约 778 行）只加 `import type { ComposerOptions } from "./composer-contract.js"` 与 `ApiClient` 成员 `getComposerOptions(options?: ApiRequestOptions): Promise<ComposerOptions>`，约 +2 行；不从 `api.ts` 再导出该类型（消费者直接从 `lib/composer-contract.js` 取，同 `Command` / `ProjectConfigFile` 的先例）。
+  - 解析放新文件 `web/src/lib/composer-contract.ts`（约 90 行）：`session-contract.ts` 现 694 行，放进去会到约 780。导出 `type ComposerOptions` 与 `parseComposerOptions(value: unknown): ComposerOptions | null`。
+  - 值域单一来源：把 `session-contract.ts:173` 的 `APPROVAL_MODES` 与 `:178` 的 `REASONING_EFFORTS` 改为 `export const`（只加关键字，行数不变，解析规则不变），新文件值导入它们与 `./api-json.js`；类型用 `ChatSession["approvalMode"]` 与 `NonNullable<ChatSession["reasoningEffort"]>` 派生。
+  - 值导入方向：`api.ts → api-sessions.ts → composer-contract.ts → {session-contract.ts, api-json.ts}`，无环；`api-sessions.ts` 对 `./api.js` 仍只有 `import type`。
+  - 类型：`ComposerOptions = { approvalModes: Mode[]; models: ComposerModel[]; defaults: { approvalMode: Mode; modelId: string; reasoningEffort: Effort | null }; upload: { maxBytes: number; maxFiles: number } }`；`ComposerModel = { id: string; name: string; reasoning: boolean; vision: boolean; efforts: Effort[]; defaultEffort: Effort | null }`。
+  - 规则（各层 `hasExactlyKeys`，无过渡分支）：顶层恰四键；`approvalModes` 非空、不重复、元素为三档之一；`models` 非空，元素恰六键，`efforts` 可为 `[]`、每个元素为七个名字之一，`defaultEffort` 为七名之一或 `null`；`defaults` 恰三键；`upload` 恰两键，均为 `isNonNegativeSafeInteger` 且 `> 0`。
+  - 规格未写明、取最简并记偏离：`id` / `name` / `defaults.modelId` 为非空字符串，`reasoning` / `vision` 为布尔。
+  - 不做跨字段一致性校验，写成一条偏离记录：缺省档位在 `approvalModes` 内、缺省模型在 `models` 内、`defaultEffort` 在该模型 `efforts` 内、`defaults.reasoningEffort` 在该模型 `efforts` 内、`approvalModes` 与 `efforts` 的次序、`efforts` 不重复、模型 `id` 不重复。规格未列，服务端「有效值解析」保证；其中 `defaults.reasoningEffort` 按 O3 合法地可以在集合之外（如 `m3` + `xhigh`），校验它会误拒。
+  - 新测试文件 `web/test/api-composer.test.ts`（`api-sessions.test.ts` 在 #1021 后约 710 行，不再往里加）。合法体用 session-composer-settings「缺省配置」字面量与「封顶、白名单」的三模型体（`m2` 为 `efforts:[]`、`defaultEffort:null`，另加一例 `defaults.reasoningEffort:"xhigh"` 配 `m3`），逐值 `toEqual`。请求恰为 `("/api/composer/options", {method:"GET", credentials:"same-origin", cache:"no-store", signal})`。「缺省配置」体作为共享常量放 `web/test/session-meta-fixtures.ts`，供 13.4 与组 14 复用。
+  - 拒绝例（均为 `request_failed`、不泄露响应内容）：场景四种，另加顶层多键 / 缺键、档位重复、未知档位、`models:[]`、模型多键、`defaultEffort:"auto"`、`defaults.reasoningEffort:"auto"`、`defaults` 多键、`maxBytes` 为 0 / 负数 / 非安全整数 / 字符串、201 而非 200、非 JSON；401 用 `unauthorizedResponseCases()`，通知恰一次；非 401 信封保留 `ApiError`。
+  - 变异：去掉非空检查 → `approvalModes:[]` 与 `models:[]` 红；去掉去重 → 重复例红；强度集合放进 `auto` → 两条 `auto` 例红；`> 0` 改 `>= 0` → `maxFiles:0` 红；模型改成非恰好键集 → 缺 `defaultEffort` 与多键例红；`getRequestOptions` 换成 `requestOptions` → 请求字面量（`cache`）红；加上「`defaults.reasoningEffort` 须在 `efforts` 内」→ `xhigh` 例红。
+  - knip：`getComposerOptions` 是类型成员加对象属性，不是导出，在组 14 之前无调用方也不报——`uploadFile` 同样只出现在 `api.ts:192` 与 `api-upload.ts`；`parseComposerOptions`、`ComposerOptions` 与两个新导出的集合都有 `src` 内引用。
 - [x] 13.3 `uploadFile()`：新文件 `web/src/lib/api-upload.ts`（唯一用 `XMLHttpRequest` 的地方；same-origin、信封解析、request_failed 与 401 通知由 `api.ts` 注入，值导入方向 `api.ts → api-upload.ts`，与「API 客户端源码模块划分」对 `api-sessions.ts` 的规则一致）。
   测试新文件 `web/test/api-upload.test.ts`（可控的 `XMLHttpRequest` 替身）：chat-web delta「上传传输」四例。变异：文件名不编码、进度不取整、中止时不调 `abort()`、401 不通知 → 各判红。
   **实施注记（13.3，fixture 评审补充，#1023）**：
