@@ -5,7 +5,8 @@
  * (limits, and whether a prefix sniffed as text) and never opens the opaque
  * absPath; sniffText judges only the bytes it is handed. openPreviewStream
  * streams native bytes up to a nonnegative caller-supplied limit; HTTP status
- * mapping and sandbox resolve remain outside this module.
+ * mapping and sandbox resolve remain outside this module. Range parsing
+ * (parseRange) and the closed-interval stream (openRangeStream) live here too.
  */
 import { createReadStream } from "node:fs";
 import { Readable } from "node:stream";
@@ -142,6 +143,46 @@ export function openPreviewStream(absPath: string, limit: number): Readable {
     return Readable.from([], { objectMode: false });
   }
   return createReadStream(absPath, { start: 0, end: limit - 1 });
+}
+
+/** A single satisfiable byte interval (both ends included), a 416, or a header to disregard. */
+export type RangeResult = { start: number; end: number } | "unsatisfiable" | "ignore";
+
+/**
+ * One `bytes=<a>-<b>`, `bytes=<a>-` or `bytes=-<n>` and nothing else: any other unit, several
+ * ranges, whitespace or `a > b` is `ignore` — judged before satisfiability, whatever the size.
+ */
+export function parseRange(header: string | undefined, size: number): RangeResult {
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header ?? "");
+  if (match === null) {
+    return "ignore";
+  }
+  const first = match[1] ?? "";
+  const last = match[2] ?? "";
+  if (first === "" && last === "") {
+    return "ignore";
+  }
+  if (first !== "" && last !== "" && Number(first) > Number(last)) {
+    return "ignore";
+  }
+  if (size === 0) {
+    return "unsatisfiable";
+  }
+  if (first === "") {
+    // Suffix form: the last n bytes, all of the file when n exceeds it.
+    const n = Number(last);
+    return n === 0 ? "unsatisfiable" : { start: Math.max(0, size - n), end: size - 1 };
+  }
+  const start = Number(first);
+  if (start >= size) {
+    return "unsatisfiable";
+  }
+  return { start, end: last === "" ? size - 1 : Math.min(Number(last), size - 1) };
+}
+
+/** Bytes start through end, both included. Callers pass a parseRange interval; nothing is validated here. */
+export function openRangeStream(absPath: string, start: number, end: number): Readable {
+  return createReadStream(absPath, { start, end });
 }
 
 function text(size: number, textLimit: number): PreviewClassification {
