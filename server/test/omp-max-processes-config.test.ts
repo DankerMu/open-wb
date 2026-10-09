@@ -293,6 +293,65 @@ describe("production entry rejects invalid composer settings before effects", ()
   );
 });
 
+/** #1054：十二个预览与文件键的非法值（规格场景逐键逐值）同样在任何副作用之前使启动失败。 */
+describe("production entry rejects invalid preview and file settings before effects", () => {
+  const POSITIVE_INVALID = ["", "0", "abc", "-1", "1.5", "016", "2147483648"] as const;
+  const PREVIEW_INVALID = [
+    ...["", "abc", "-1", "65536", "01", "1.5"].map((raw) => ["PREVIEW_PORT", raw] as const),
+    ...["", "preview.example.test", "https://a.test/", "https://a.test/x", "ftp://a.test"].map(
+      (raw) => ["PREVIEW_ORIGIN", raw] as const,
+    ),
+    ["PREVIEW_CACHE_DIR", ""],
+    ["OFFICE_BIN", ""],
+    ["OFFICE_BIN", "soffice"],
+    ...[
+      "OFFICE_CONVERT_TIMEOUT_MS",
+      "OFFICE_CONVERT_CONCURRENCY",
+      "PREVIEW_TEXT_MAX_BYTES",
+      "PREVIEW_IMAGE_MAX_BYTES",
+      "PREVIEW_DOCUMENT_MAX_BYTES",
+      "PREVIEW_NOTEBOOK_MAX_BYTES",
+      "PREVIEW_ARCHIVE_MAX_ENTRIES",
+      "TRASH_RETENTION_DAYS",
+    ].flatMap((key) => POSITIVE_INVALID.map((raw) => [key, raw] as const)),
+  ] as const;
+  let compiled: CompiledServerEntry;
+
+  beforeAll(async () => {
+    compiled = await compileServerEntry();
+  }, 90_000);
+
+  it("规格列出的非法取值共七十例", () => {
+    expect(PREVIEW_INVALID).toHaveLength(70);
+  });
+
+  it.each(PREVIEW_INVALID)(
+    "%s=%j：nonzero、恰一行 generic record、无 DB/state/sandbox/listen",
+    async (key, raw) => {
+      const root = scratch("open-wb-preview-config-");
+      const port = await reserveWildcardPort();
+      const env = compiledFixtureEnv(root, port, join(root, "bin", "omp"), { [key]: raw });
+      const server = startCompiledServer(compiled.entry, env);
+      const closed = await server.waitForClose();
+
+      expect(closed).toEqual({ code: 1, signal: null });
+      expect(server.stdout()).toBe("");
+      const stderr = server.stderr().replace(NODE_SQLITE_WARNING, "");
+      expect(stderr).toBe(FAILED_RECORD);
+      expect(stderr).not.toContain(key);
+      if (raw.length > 0) {
+        expect(stderr).not.toContain(raw);
+      }
+      for (const owned of ["db", "state", "sandbox", "bin"]) {
+        expect(existsSync(join(root, owned))).toBe(false);
+      }
+      expect(existsSync(join(compiled.root, "var"))).toBe(false);
+      await expect(refused(port)).resolves.toBe(true);
+    },
+    20_000,
+  );
+});
+
 describe("process cap reaches the sessions module", () => {
   function scratchEnv(root: string): Record<string, string> {
     return {

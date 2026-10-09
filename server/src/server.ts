@@ -32,6 +32,7 @@ import { type AgentSettings, resolveAgentSettings } from "./agent-config.js";
 import { type AssemblyDependencies, createApp, type SessionRuntime } from "./app.js";
 import { openDb } from "./core/db/index.js";
 import { deriveProxyBaseUrl, writeManagedModelsYml } from "./model-proxy/models-yml.js";
+import { type PreviewSettings, resolvePreviewSettings } from "./preview-config.js";
 import { writeHostOverlay } from "./sessions/omp/host-overlay.js";
 import type { HandshakeTimeoutRecord } from "./sessions/omp/spawn-gate.js";
 import { ensureOmpStateLayout, ompAgentDir } from "./sessions/omp/state-layout.js";
@@ -54,7 +55,7 @@ const STARTUP_MODULES = [
   "accounts",
 ];
 
-export interface ServerConfig extends AgentSettings {
+export interface ServerConfig extends AgentSettings, PreviewSettings {
   host: string;
   port: number;
   dbPath: string;
@@ -62,7 +63,7 @@ export interface ServerConfig extends AgentSettings {
   repoRoot: string;
 }
 
-/** 纯配置 seam：消费二十三项应用 key——四项自有，agent 十九项经 resolveAgentSettings，未知 key 忽略；repo root 由 entry identity 推导。 */
+/** 纯配置 seam：消费三十五项应用 key——四项自有，agent 十九项经 resolveAgentSettings，预览与文件十二项经 resolvePreviewSettings，未知 key 忽略；repo root 由 entry identity 推导。 */
 export function resolveServerConfig(
   env: Record<string, string | undefined>,
   entryUrl: string,
@@ -75,6 +76,7 @@ export function resolveServerConfig(
     staticRoot: resolveStaticRoot(env.STATIC_ROOT, repoRoot),
     repoRoot,
     ...resolveAgentSettings(env, repoRoot),
+    ...resolvePreviewSettings(env, repoRoot),
   };
 }
 
