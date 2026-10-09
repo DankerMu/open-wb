@@ -1,5 +1,6 @@
 import { lstatSync } from "node:fs";
 import { dirname, extname } from "node:path";
+import { Readable } from "node:stream";
 import type {
   FastifyInstance,
   FastifyRequest,
@@ -15,6 +16,7 @@ import type { createSandbox } from "../core/sandbox/index.js";
 import { classifyPreview, openPreviewStream } from "./preview.js";
 import type { WorkspaceStore } from "./store.js";
 import { listOneLevel } from "./tree.js";
+import { storeUpload } from "./upload.js";
 
 export interface WorkspaceRestDependencies {
   store: WorkspaceStore;
@@ -22,9 +24,23 @@ export interface WorkspaceRestDependencies {
   audit: Parameters<typeof createSandbox>[0]["audit"];
   /** Session list notifier, injected by the assembly: called after a committed create or promote. */
   listEvents: { notify(ownerId: string): void };
+  /** Byte limit of one uploaded file (UPLOAD_MAX_BYTES): a positive safe integer. */
+  uploadMaxBytes: number;
 }
 
+type OwnedPreParsing = preParsingHookHandler<
+  RawServerDefault,
+  RawRequestDefaultExpression<RawServerDefault>,
+  RawReplyDefaultExpression<RawServerDefault>,
+  { Params: { id: string } }
+>;
+
 const WORKSPACE_BODY_LIMIT = 16 * 1024;
+const UPLOADS_DIR = "uploads";
+const UPLOAD_MEDIA_TYPE = "application/octet-stream";
+const UPLOAD_NAME_MAX_BYTES = 255;
+/** Reserved for the temporary files `storeUpload` writes into the same directory. */
+const UPLOAD_TEMP_PREFIX = ".upload-";
 
 const noStoreWorkspaceResponse: onRequestHookHandler = (_request, reply, done) => {
   reply.header("Cache-Control", "no-store");
@@ -35,6 +51,16 @@ const clearPreviewHeadersOnError: onErrorHookHandler = (_request, reply, _error,
   reply.removeHeader("Content-Type");
   reply.removeHeader("X-Workbuddy-Size");
   reply.removeHeader("X-Workbuddy-Truncated");
+  done();
+};
+
+/**
+ * Every failed upload closes its connection. After an early answer Node would otherwise keep
+ * reading the rest of the request body on a kept-alive connection and discard it; closing is
+ * also what ends a body nothing has started reading.
+ */
+const closeUploadConnectionOnError: onErrorHookHandler = (_request, reply, _error, done) => {
+  reply.header("Connection", "close");
   done();
 };
 
@@ -74,6 +100,46 @@ function parsePathQuery(query: unknown, required: boolean): string {
   return record.path;
 }
 
+/** `name` must be in the query exactly once and not empty: twice parses to an array. */
+function parseUploadName(query: unknown): string {
+  const name =
+    typeof query === "object" && query !== null ? (query as Record<string, unknown>).name : null;
+  if (typeof name !== "string" || name === "") {
+    throw new HttpError("bad_request");
+  }
+  return name;
+}
+
+function hasControlCharacter(text: string): boolean {
+  for (let index = 0; index < text.length; index += 1) {
+    const unit = text.charCodeAt(index);
+    if (unit <= 0x1f || unit === 0x7f) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * The name rules that come after the sandbox. A `/` the sandbox let through (`sub/a.txt`,
+ * `./a.txt`) would put the file somewhere other than directly under `uploads`.
+ */
+function assertUploadName(name: string): void {
+  if (name.includes("/") || hasControlCharacter(name) || name.startsWith(UPLOAD_TEMP_PREFIX)) {
+    throw new HttpError("bad_request");
+  }
+}
+
+/** Makes `dir` when nothing is there (no `dir.create` audit); anything but a directory is 409. */
+function ensureUploadsDir(dependencies: WorkspaceRestDependencies, dir: string): void {
+  const existing = lstatExisting(dir);
+  if (existing === undefined) {
+    dependencies.sandbox.ensureSharedDir(dir);
+  } else if (!existing.isDirectory()) {
+    throw new HttpError("conflict");
+  }
+}
+
 function isOrdinaryDirectory(path: string): boolean {
   return lstatExisting(path)?.isDirectory() === true;
 }
@@ -102,17 +168,34 @@ export function registerWorkspaceRest(
   app: FastifyInstance,
   dependencies: WorkspaceRestDependencies,
 ): void {
+  const maxBytes = dependencies.uploadMaxBytes;
+  // Here and not inside the plugin below: there it would only throw at `ready`.
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+    throw new Error("upload max bytes must be a positive safe integer");
+  }
+
   /** Runs before the body is parsed: another owner's id answers 404 whatever the body is. */
-  const requireOwnedBeforeParse: preParsingHookHandler<
-    RawServerDefault,
-    RawRequestDefaultExpression<RawServerDefault>,
-    RawReplyDefaultExpression<RawServerDefault>,
-    { Params: { id: string } }
-  > = (request, _reply, payload, done) => {
+  const requireOwnedBeforeParse: OwnedPreParsing = (request, _reply, payload, done) => {
     if (dependencies.store.rootOf(currentPrincipal(request), request.params.id) === null) {
       throw new HttpError("not_found");
     }
     done(null, payload);
+  };
+  /** The whole of upload step 1, before the media type is looked at and before any body byte. */
+  const requireOwnedRootBeforeParse: OwnedPreParsing = (request, _reply, payload, done) => {
+    ensureOwnedRoot(dependencies, currentPrincipal(request), request.params.id);
+    done(null, payload);
+  };
+  /** Audits an upload refused for its size and returns the error to throw. */
+  const rejectOversized = (principal: { id: string }, workspaceId: string, name: string) => {
+    dependencies.audit.emit({
+      kind: "upload.reject",
+      actorId: principal.id,
+      workspaceId,
+      title: "上传被拒绝：文件超过大小上限",
+      detail: { name, limit: maxBytes },
+    });
+    return new HttpError("upload_too_large");
   };
 
   app.get("/api/workspaces", { onRequest: noStoreWorkspaceResponse }, async (request) => {
@@ -210,6 +293,69 @@ export function registerWorkspaceRest(
       return reply.send(openPreviewStream(absPath, preview.limit));
     },
   );
+  // A scope of its own: the only content type it knows is the one that hands the request stream
+  // over untouched, so nothing buffers the body and no framework body limit applies — the limit
+  // is enforced below and by `storeUpload` (413; a framework limit would surface as 400).
+  app.register((scope, _options, done) => {
+    scope.removeAllContentTypeParsers();
+    scope.addContentTypeParser(UPLOAD_MEDIA_TYPE, (_request, payload, complete) => {
+      complete(null, payload);
+    });
+    scope.post<{ Params: { id: string } }>(
+      "/api/workspaces/:id/uploads",
+      {
+        onError: closeUploadConnectionOnError,
+        onRequest: noStoreWorkspaceResponse,
+        preParsing: requireOwnedRootBeforeParse,
+      },
+      async (request, reply) => {
+        const principal = currentPrincipal(request);
+        const workspaceId = request.params.id;
+        // Without a media type and without a body no parser runs and there is no stream.
+        const source = request.body;
+        if (!(source instanceof Readable)) {
+          throw new HttpError("bad_request");
+        }
+        const name = parseUploadName(request.query);
+        if (Number(request.headers["content-length"]) > maxBytes) {
+          throw rejectOversized(principal, workspaceId, name);
+        }
+        // Before the sandbox, the one name rule that is: with `uploads` present the sandbox's
+        // lstat of an over-long name fails (ENAMETOOLONG) and it would deny what is only too long.
+        if (!name.includes("/") && Buffer.byteLength(name) > UPLOAD_NAME_MAX_BYTES) {
+          throw new HttpError("bad_request");
+        }
+        // The sandbox before the other name rules: an escaping name leaves its audit event.
+        const absPath = dependencies.sandbox.resolve(
+          principal,
+          workspaceId,
+          `${UPLOADS_DIR}/${name}`,
+          "write",
+        );
+        assertUploadName(name);
+        const dir = dirname(absPath);
+        ensureUploadsDir(dependencies, dir);
+        // `source` is the request itself: destroying a wrapper around it on the way out of an
+        // over-limit upload takes the socket with it, and the 413 would never be sent.
+        const stored = await storeUpload({ dir, name, source, maxBytes }).catch((error) => {
+          if (error instanceof HttpError && error.code === "upload_too_large") {
+            throw rejectOversized(principal, workspaceId, name);
+          }
+          throw error;
+        });
+        const path = `${UPLOADS_DIR}/${stored.name}`;
+        dependencies.audit.emit({
+          kind: "file.upload",
+          actorId: principal.id,
+          workspaceId,
+          title: `上传文件 ${path}`,
+          detail: { path, size: stored.size },
+        });
+        return reply.code(201).send({ path, name: stored.name, size: stored.size });
+      },
+    );
+    done();
+  });
 }
 
 function parseBodyRecord(body: unknown): Record<string, unknown> {

@@ -9,7 +9,7 @@
 1. 空间归属：经工作空间 store 所有者作用域的 `rootOf(principal, id)` 判定，对临时空间与正式空间不作区分（temporary-workspaces「临时空间的可见性」：所有者自己的临时空间 id 与正式空间行为一致）。`:id` 属他人或不存在（含格式不合法的 id、他人的临时空间）→ 404 `not_found`，与其它工作空间端点逐字相同；不读取请求体、不写审计、不触及文件系统。自有空间的根目录不存在或不是普通目录 → 404。
 2. `name`：SHALL 是 query 里恰一个非空字符串（缺失、重复、空串 → 400 `bad_request`）；服务端按 URL 解码后的字符串使用，不做额外规范化。
 3. 声明的大小：请求带 `Content-Length` 且其值大于上限 → 413 `upload_too_large`，不读取请求体，并写一条 `upload.reject` 审计（见下）。
-4. 沙箱：经 facade `resolve(principal, id, "uploads/" + name, "write")`。被拒绝的（任一分量为 `..`、含 NUL、`uploads` 或目标本身是符号链接、最后一段含反斜杠或为空等，sandbox-core）→ 403 `sandbox_denied`，facade 先写一条 `sandbox.reject` 审计（`detail.op="write"`、`detail.relPath` 为 `uploads/` 加所给名字）。本步 SHALL 先于第 5 步，使越界的名字留下审计而不是被名字规则的 400 抢先。
+4. 沙箱：经 facade `resolve(principal, id, "uploads/" + name, "write")`。被拒绝的（任一分量为 `..`、含 NUL、`uploads` 或目标本身是符号链接、最后一段含反斜杠或为空等，sandbox-core）→ 403 `sandbox_denied`，facade 先写一条 `sandbox.reject` 审计（`detail.op="write"`、`detail.relPath` 为 `uploads/` 加所给名字）。本步 SHALL 先于第 5 步，使越界的名字留下审计而不是被名字规则的 400 抢先；唯一的例外是长度：不含 `/` 且超过 255 个 UTF-8 字节的名字 SHALL 在本步之前即为 400 `bad_request`（不写审计、不触及文件系统）——`uploads` 已存在时对这样的名字 `lstat` 得到 `ENAMETOOLONG`，sandbox-core 对意外的元数据错误一律拒绝，否则一个只是太长的文件名会得到 403 与一条 `sandbox.reject`。
 5. 名字规则：解析出的目标 SHALL 直接位于 `uploads` 目录之下（名字含 `/` 而成为嵌套路径 → 400）；名字 SHALL 为 1 到 255 个 UTF-8 字节，不含 U+0000–U+001F 与 U+007F，不以 `.upload-` 开头。违反 → 400 `bad_request`，不写审计、不触及文件系统。
 6. 目录：`uploads` 不存在时经 `ensureSharedDir` 创建（mode `0o2770`，不写 `dir.create` 审计）；存在但不是普通目录 → 409 `conflict`。
 7. 写入：在 `uploads` 内独占创建（目标路径已存在即失败、不跟随符号链接）一个名字以 `.upload-` 开头、以 `.part` 结尾、中间为随机十六进制串的临时文件，mode 精确为 `0660`（不受进程 umask 影响），把请求体流式写入并累计字节数。累计超过上限的那一刻 SHALL 停止读取请求体、删除临时文件，返回 413 `upload_too_large` 并写一条 `upload.reject` 审计（响应之后服务端可以关闭连接）。客户端中断、请求流出错或磁盘写入失败 SHALL 删除临时文件，不写审计；能响应时为 generic 500。
@@ -42,7 +42,7 @@
 - **THEN** 每一个都是 403 `sandbox_denied`，各恰新增一条 `sandbox.reject`（`detail.op="write"`），没有 `file.upload`；沙箱外没有新文件，符号链接的目标未被改动；`uploads` 下没有 `.part` 文件
 
 #### Scenario: 名字规则与媒体类型
-- **WHEN** 以缺失的 `name`、重复两次的 `name`、空串、256 字节的名字、含换行的名字、`name=sub/a.txt`、`name=.upload-x.part` 上传；另以 `Content-Type: application/json` 或 `multipart/form-data` 上传
+- **WHEN** 以缺失的 `name`、重复两次的 `name`、空串、256 字节的名字（`uploads` 不存在与已存在各一例）、含换行的名字、`name=sub/a.txt`、`name=.upload-x.part` 上传；另以 `Content-Type: application/json` 或 `multipart/form-data` 上传
 - **THEN** 均为 400 `bad_request` 与 no-store；没有文件、没有审计新增
 
 #### Scenario: 他人与不存在的空间
@@ -54,8 +54,8 @@
 - **THEN** `uploads` 下没有该文件的最终名，也没有 `.part` 文件；没有 `file.upload` 与 `upload.reject` 审计；服务端没有残留未释放的文件描述符或挂起的请求
 
 #### Scenario: 不进内存的流式写入
-- **WHEN** 上限设为 64 MiB，上传一个 32 MiB 的文件，测试在写入过程中采样服务进程的堆使用量
-- **THEN** 201 且落盘内容与发送的字节逐字节相同；写入期间堆使用量的增量远小于文件大小（测试给出的阈值为 8 MiB）
+- **WHEN** 上限设为 64 MiB，上传一个 32 MiB 的文件，测试在写入过程中采样服务进程的内存使用量（`process.memoryUsage()` 的 `heapUsed` 与 `arrayBuffers` 之和；请求体字节是 `Buffer`，不计入 `heapUsed`）
+- **THEN** 201 且落盘内容与发送的字节逐字节相同；写入期间该使用量的增量远小于文件大小（测试给出的阈值为 8 MiB）
 
 #### Scenario: 目录被占与审计失败
 - **WHEN** 空间根下 `uploads` 是一个普通文件时上传；另一例成功写入后审计插入失败（测试注入）

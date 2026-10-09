@@ -12,6 +12,7 @@ import {
   DEFAULT_OMP_STATE_RELATIVE,
   DEFAULT_SANDBOX_RELATIVE,
   DEFAULT_SNAPSHOT_SETTINGS,
+  DEFAULT_UPLOAD_MAX_BYTES,
   type SnapshotSettings,
 } from "./agent-config.js";
 import {
@@ -84,6 +85,8 @@ export interface AssemblyDependencies {
   modelCatalog?: ModelCatalog;
   /** 审批档位的最高档；省略时不封顶（`yolo`）。 */
   approvalMaxMode?: ApprovalMode;
+  /** 单个上传文件的字节上限；省略时取缺省 524288000。 */
+  uploadMaxBytes?: number;
   /**
    * Must return synchronously. createApp forwards this callback and its return
    * unchanged; a returned thenable is an owned programming error beside the source fault.
@@ -213,7 +216,13 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
   app.decorate("sessions", registered);
   const audit = { emit: (event: Parameters<typeof emit>[1]) => emit(db, event) };
   const sandbox = createSandbox({ rootOf: store.rootOf, audit });
-  registerWorkspaces(app, { store, sandbox, audit, listEvents: registered.listEvents });
+  registerWorkspaces(app, {
+    store,
+    sandbox,
+    audit,
+    listEvents: registered.listEvents,
+    uploadMaxBytes: assembly?.uploadMaxBytes ?? DEFAULT_UPLOAD_MAX_BYTES,
+  });
   registerAccounts(app, { db });
 
   app.all("/api", (request, reply) => sendNotFound(reply, request));
