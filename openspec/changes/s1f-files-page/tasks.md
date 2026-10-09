@@ -274,7 +274,7 @@ Minimal mergeable slice: 9.1–9.2（移动）与 9.3–9.4（下载）互不依
 
 ## 10. workspaces — 压缩包列表
 
-- [ ] 10.1 新文件 `server/src/workspaces/archive.ts` 的 tar / tar.gz / gz 部分：`node:zlib` 加 512 字节头的遍历器（ustar `name`/`prefix`、GNU `L`、pax `path`；成员正文跳过不读）；单个 gz 一项；到条目上限停读；tar 与 tar.gz 的 5 秒时限（时钟可注入）；
+- [x] 10.1 新文件 `server/src/workspaces/archive.ts` 的 tar / tar.gz / gz 部分：`node:zlib` 加 512 字节头的遍历器（ustar `name`/`prefix`、GNU `L`、pax `path`；成员正文跳过不读）；单个 gz 一项；到条目上限停读；tar 与 tar.gz 的 5 秒时限（时钟可注入）；
   扩展记录 65536 字节与成员名 4096 字节的硬上限——按头里**声明**的长度在读取之前判定，超出即停读并置 `truncated`（一项都没读出时为不支持）。读取经一个可注入的读函数，测试用它记录单次读取的最大长度。
   实施注记见 `implementation-notes.md`「10.1（#1063）」。
 - [ ] 10.2 `archive.ts` 的 zip 部分：`yauzl`（新依赖，MIT，登记 `ATTRIBUTION.md`）只读中央目录；成员名超过 4096 字节的成员不计入结果，停读并置 `truncated`（名字随中央目录项读入后判定——`zip` 的名长字段只有 2 字节，读入量有界；不要求在 `yauzl` 交出该项之前拦截）。
@@ -305,7 +305,7 @@ Minimal mergeable slice: 11.1 的登记表与测试先合（只依赖 0.1）；�
 ## 12. preview-origin — 预览监听器与响应头
 
 - [ ] 12.1 新文件 `server/src/preview/app.ts`：`createPreviewApp({store, sandbox, tokens, converter, limits})`，只有 `/w/<token>/*`（`/o/` 在组 15 加）；校验次序、不读 cookie、404 / 403 的固定纯文本、复用组 7 的区间发送函数；有界关停沿用 `app.ts` 的 `registerListenerShutdown`（必要时把它提到两个实例都能导入的模块）。
-- [ ] 12.2 响应头与类型表（preview-origin「预览响应头与内容类型」）：做成一个纯函数 `previewHeaders(name, embedOrigin)`，成功与失败响应都经它或其子集。
+- [x] 12.2 响应头与类型表（preview-origin「预览响应头与内容类型」）：做成一个纯函数 `previewHeaders(name, embedOrigin)`，成功与失败响应都经它或其子集。
   实施注记见 `implementation-notes.md`「12.2（#1068）」。
 - [ ] 12.3 测试（新文件 `server/test/preview-app.test.ts` 与 `preview-headers.test.ts`）：「令牌放行，cookie 不放行」「相对资源与子目录」「拒绝项」「作用域只有一个工作空间」「空间消失后令牌失效」「范围请求」，以及响应头的五个场景。
   「不认 cookie」的证据：同一请求带与不带有效 `workbuddy_session` 的响应逐字节相同，且该实例上没有注册 cookie 解析与认证钩子。
