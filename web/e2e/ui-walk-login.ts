@@ -9,7 +9,7 @@ const TRANSPARENT = "rgba(0, 0, 0, 0)";
  * 自定义属性的计算颜色：`getPropertyValue("--x")` 给的是未归一的原文，所以挂一个探针元素，
  * 把 `var(--x)` 设成它的 `color` 再读计算值，得到与其它计算颜色同格式的串。
  */
-function resolvedColor(page: Page, variable: string): Promise<string> {
+export function resolvedColor(page: Page, variable: string): Promise<string> {
   return page.evaluate((name) => {
     const probe = document.createElement("span");
     probe.style.color = `var(${name})`;
