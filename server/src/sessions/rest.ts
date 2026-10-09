@@ -23,6 +23,7 @@ import type {
   SessionStore,
   StepView,
 } from "./store.js";
+import type { StoredAttachment } from "./store-attachments.js";
 import type { SessionMetadataStore } from "./store-metadata.js";
 import type { UndoState } from "./store-undo.js";
 import type { SessionSupervisor, StreamCursor } from "./supervisor.js";
@@ -107,6 +108,8 @@ interface PublicMessage {
   approvals: ApprovalEntry[];
   /** Always null on an assistant message. */
   undo: UndoState | null;
+  /** The list recorded at admission; never re-checked against the files on a read. */
+  attachments: StoredAttachment[];
   steps: PublicStep[];
 }
 
@@ -367,6 +370,7 @@ export function registerSessionRoutes(
       return reply.code(201).send({
         session: toPublicSession(result.session),
         draft: result.draft,
+        attachments: result.attachments.map(toPublicAttachment),
       });
     },
   );
@@ -411,6 +415,11 @@ export function toPublicSession(session: PublicSession): PublicSession {
   };
 }
 
+/** Exactly the two declared keys, whatever else the element carries. */
+function toPublicAttachment({ path, size }: StoredAttachment): StoredAttachment {
+  return { path, size };
+}
+
 function toPublicHistory(
   snapshot: OwnedSnapshot,
   undoOf: (userMessageId: number) => UndoState,
@@ -431,6 +440,7 @@ function toPublicHistory(
       createdAt: message.createdAt,
       approvals: message.approvals.map(toPublicApproval),
       undo: message.role === "user" ? undoOf(message.id) : null,
+      attachments: message.attachments.map(toPublicAttachment),
       steps: message.steps.map((step) => ({
         id: step.id,
         ordinal: step.ordinal,

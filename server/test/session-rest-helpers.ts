@@ -38,6 +38,7 @@ export const AGENT_UNAVAILABLE_ENVELOPE = {
 export const UNBOUND_USER_VIEW = {
   approvals: [],
   undo: "unbound",
+  attachments: [],
   steps: [],
   thinking: null,
 } as const;

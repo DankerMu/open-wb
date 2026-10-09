@@ -45,6 +45,7 @@ const MESSAGE_KEYS = [
   "createdAt",
   "approvals",
   "undo",
+  "attachments",
   "steps",
 ];
 
@@ -164,7 +165,7 @@ describe("message-undo 可撤回状态 (#946)", () => {
   );
 
   it(
-    "User messages carry an undo state: one turn on a body-less created session reads available on the user message and null on the assistant, with exactly the nine keys in order",
+    "User messages carry an undo state: one turn on a body-less created session reads available on the user message and null on the assistant, with exactly the ten keys in order",
     REAL,
     async () => {
       const world = await open();

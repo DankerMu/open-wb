@@ -12,6 +12,7 @@ import { HttpError } from "../src/core/errors/index.js";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import { REAL, rejection, settle, spawnedAt } from "./session-approval-helpers.js";
 import {
+  A_PDF,
   A_PDF_STORED,
   A_PDF_SUFFIX,
   approvalsOf,
@@ -118,8 +119,9 @@ describe("fork over real fake-omp branch children (#466)", () => {
 
     const result = await forkAt(world, u2.id);
 
-    expect(Object.keys(result)).toEqual(["session", "draft"]);
+    expect(Object.keys(result)).toEqual(["session", "draft", "attachments"]);
     expect(result.draft).toBe(QUESTION);
+    expect(result.attachments).toEqual([]);
     expect(Object.keys(result.session).sort()).toEqual([
       "approvalMode",
       "archivedAt",
@@ -506,7 +508,8 @@ describe("fork over real fake-omp branch children (#466)", () => {
  * Issue #1018 (message-attachments「分叉拷贝与回填」, chat-sessions「Branch alignment of a message
  * with attachments」): the entry list is the scripted child's, so the entry of a message with an
  * attachment can be anywhere in it. The scripted `branch` always answers QUESTION: a `draft` that
- * is anything else was read from the stored row.
+ * is anything else was read from the stored row, and so were the `attachments` beside it (#1019,
+ * turn-control「分叉点消息的附件随响应返回」).
  */
 describe("fork alignment of messages with attachments (#1018)", () => {
   const entries = (first: string, second: string) => [
@@ -527,14 +530,14 @@ describe("fork alignment of messages with attachments (#1018)", () => {
     return { world, db, seeded };
   }
 
-  /** The fork at `messageId`: its draft, its exact keys and the entry its `branch` named. */
+  /** The fork at `messageId`: its draft and attachments, exact keys, the entry `branch` named. */
   async function forked(world: Awaited<ReturnType<typeof attached>>["world"], messageId: number) {
     const spawned = world.rt.calls.length;
     const result = await forkAt(world, messageId);
-    expect(Object.keys(result)).toEqual(["session", "draft"]);
+    expect(Object.keys(result)).toEqual(["session", "draft", "attachments"]);
     const frames = scriptedAt(world.scripted, spawned).frames;
     const branch = frames.filter((frame) => frame.type === "branch").map((frame) => frame.entryId);
-    return { draft: result.draft, branch };
+    return { draft: result.draft, attachments: result.attachments, branch };
   }
 
   it.each([
@@ -556,8 +559,16 @@ describe("fork alignment of messages with attachments (#1018)", () => {
       const { world, db, seeded } = await attached(entries(entry, QUESTION), "u1", text);
       const before = snapshot(db, world.session, true);
 
-      expect(await forked(world, seeded.u2)).toEqual({ draft: QUESTION, branch: ["e-2"] });
-      expect(await forked(world, seeded.u1)).toEqual({ draft: text, branch: ["e-1"] });
+      expect(await forked(world, seeded.u2)).toEqual({
+        draft: QUESTION,
+        attachments: [],
+        branch: ["e-2"],
+      });
+      expect(await forked(world, seeded.u1)).toEqual({
+        draft: text,
+        attachments: [A_PDF],
+        branch: ["e-1"],
+      });
 
       expect(snapshot(db, world.session, true)).toEqual(before);
       expect(messagesOf(db, world.session)[0]).toMatchObject({ id: seeded.u1, content: text });
@@ -570,9 +581,65 @@ describe("fork alignment of messages with attachments (#1018)", () => {
   it("aligns an attachment-only message that is not the first: its draft is empty", async () => {
     const { world, seeded } = await attached(entries(FIRST, A_PDF_SUFFIX), "u2", "");
 
-    expect(await forked(world, seeded.u2)).toEqual({ draft: "", branch: ["e-2"] });
-    expect(await forked(world, seeded.u1)).toEqual({ draft: FIRST, branch: ["e-1"] });
+    expect(await forked(world, seeded.u2)).toEqual({
+      draft: "",
+      attachments: [A_PDF],
+      branch: ["e-2"],
+    });
+    expect(await forked(world, seeded.u1)).toEqual({
+      draft: FIRST,
+      attachments: [],
+      branch: ["e-1"],
+    });
   });
+
+  // message-attachments「分叉拷贝与回填」: both lists written by the admission itself.
+  it.each([
+    ["a message with text", QUESTION],
+    ["an attachment-only message", ""],
+  ])(
+    "a fork at %s answers its stored list; the copy before it keeps its column",
+    async (_n, text) => {
+      const bPng = { path: "uploads/b.png", size: 5 };
+      const bPngSuffix =
+        "\n\n用户随本条消息上传了以下文件（相对当前工作目录的路径），需要时请读取：\n- uploads/b.png";
+      const world = await openForkScripted(worlds, [
+        { messages: entries(`${FIRST}${A_PDF_SUFFIX}`, `${text}${bPngSuffix}`) },
+      ]);
+      const { db, store } = world.fixture;
+      const [u1, u2] = [[FIRST, A_PDF] as const, [text, bPng] as const].map(
+        ([content, attachment]) => {
+          const accepted = store.acceptPrompt(world.session, OWNER_ID, content, [attachment]);
+          store.finishTurn(accepted.assistantMessageId, "done");
+          return accepted.userMessageId;
+        },
+      );
+      presetSessionFile(db, world.session, realSource().file);
+      const before = snapshot(db, world.session, true);
+
+      const result = await forked(world, u2 ?? -1);
+
+      expect(result).toEqual({ draft: text, attachments: [bPng], branch: ["e-2"] });
+      const fresh = String(
+        db.prepare("SELECT id FROM chat_sessions WHERE parent_session_id = ?").get(world.session)
+          ?.id,
+      );
+      expect(
+        db
+          .prepare(
+            "SELECT role, attachments, typeof(attachments) AS type FROM chat_messages WHERE session_id = ? ORDER BY id",
+          )
+          .all(fresh),
+      ).toEqual([
+        { role: "user", attachments: A_PDF_STORED, type: "text" },
+        { role: "assistant", attachments: null, type: "null" },
+      ]);
+      const copied = store.getMessages(fresh, OWNER_ID)?.messages;
+      expect(copied?.map((message) => message.attachments)).toEqual([[A_PDF], []]);
+      expect(snapshot(db, world.session, true)).toEqual(before);
+      expect((await forked(world, u1 ?? -1)).attachments).toEqual([A_PDF]);
+    },
+  );
 
   it.each([
     ["the text alone", undefined, FIRST],

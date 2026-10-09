@@ -74,6 +74,7 @@ describe("SessionStore owner-scoped persisted views", () => {
               status: "done",
               createdAt: FIXED_NOW + 20,
               approvals: [],
+              attachments: [],
               steps: [],
               thinking: null,
             },
@@ -84,6 +85,7 @@ describe("SessionStore owner-scoped persisted views", () => {
               status: "running",
               createdAt: FIXED_NOW + 20,
               approvals: [],
+              attachments: [],
               steps: [
                 {
                   id: firstStepId,

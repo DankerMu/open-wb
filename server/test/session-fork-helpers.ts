@@ -48,6 +48,8 @@ export const FIRST = "first question";
  */
 export const A_PDF_SUFFIX =
   "\n\n用户随本条消息上传了以下文件（相对当前工作目录的路径），需要时请读取：\n- uploads/a.pdf";
+/** The stored attachment the views and the fork response give back for `A_PDF_STORED`. */
+export const A_PDF = { path: "uploads/a.pdf", size: 3 };
 /** What `attach` stores: the column as an admission would have written it. */
 export const A_PDF_STORED = '[{"path":"uploads/a.pdf","size":3}]';
 

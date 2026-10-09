@@ -7,12 +7,17 @@
  * hold, then release it into a failed prompt receipt (`success:false`) before any turn progress:
  * the supervisor rejects with `agent_unavailable`, the route rolls the accepted pair back and
  * answers 502. Oracles: response status/headers/bytes and `chat_sessions`/`chat_messages` rows.
+ *
+ * Issue #1019 (chat-sessions「Attachment-only admission titles from the first file name」): the last
+ * describe drives `store.acceptPrompt` itself on a bare store — the prompt route does not pass
+ * attachments yet — and reads the rows the admission and its rollback leave.
  */
 import type { DatabaseSync } from "node:sqlite";
 import type { LightMyRequestResponse } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 import { expectEnvelope } from "./session-bodyless-rest-helpers.js";
 import { AGENT_UNAVAILABLE_ENVELOPE, postPrompt } from "./session-rest-helpers.js";
+import { withSessionStore } from "./session-store-helpers.js";
 import {
   closeOnEof,
   completeHeldTurn,
@@ -261,6 +266,82 @@ describe("PATCH while a turn is running", { timeout: 15_000 }, () => {
       status: "done",
       scene: "office",
       pinned_at: pinned.pinned_at,
+    });
+  });
+});
+
+describe("attachment-only admission titles from the first file name (#1019)", () => {
+  const LONG = [
+    { path: "uploads/子目录/2026 年第三季度销售数据汇总与分析报告.xlsx", size: 3 },
+    { path: "uploads/b.png", size: 5 },
+  ];
+  const LONG_STORED =
+    '[{"path":"uploads/子目录/2026 年第三季度销售数据汇总与分析报告.xlsx","size":3},{"path":"uploads/b.png","size":5}]';
+  const ASSISTANT = { role: "assistant", content: "", kind: "text", attachments: null };
+
+  /** The session's title, and each message's role, content (with storage class) and column. */
+  function rowsOf(db: DatabaseSync, id: string) {
+    const messages = db
+      .prepare(
+        "SELECT role, content, typeof(content) AS kind, attachments FROM chat_messages WHERE session_id = ? ORDER BY id",
+      )
+      .all(id);
+    return { title: metadataRow(db, id).title, messages };
+  }
+
+  it.each([
+    ["the file name's first 18 code points", null, "", LONG, "2026 年第三季度销售数据汇总与分"],
+    ["a path without a directory whole", null, "", [{ path: "a.pdf", size: 3 }], "a.pdf"],
+    ["the text when there is text", null, "看看", LONG, "看看"],
+    ["nothing over an existing title", "季度汇报", "", LONG, "季度汇报"],
+  ])("takes %s; the content is the given text", (_name, titled, text, attachments, title) => {
+    withSessionStore(({ db, store }) => {
+      const session = store.create("u1");
+      db.prepare("UPDATE chat_sessions SET title = ? WHERE id = ?").run(titled, session.id);
+
+      store.acceptPrompt(session.id, "u1", text, attachments);
+
+      const stored = attachments === LONG ? LONG_STORED : '[{"path":"a.pdf","size":3}]';
+      expect(rowsOf(db, session.id)).toEqual({
+        title,
+        messages: [{ role: "user", content: text, kind: "text", attachments: stored }, ASSISTANT],
+      });
+    });
+  });
+
+  it("an absent or empty list stores NULL, and extra keys of an element are not stored", () => {
+    const wide = { path: "a.pdf", size: 3, absPath: "/srv/a.pdf" };
+    withSessionStore(({ db, store }) => {
+      for (const [attachments, stored] of [
+        [undefined, null],
+        [[], null],
+        [[wide], '[{"path":"a.pdf","size":3}]'],
+      ] as const) {
+        const session = store.create("u1");
+
+        store.acceptPrompt(session.id, "u1", "看看", attachments);
+
+        expect(rowsOf(db, session.id)).toEqual({
+          title: "看看",
+          messages: [
+            { role: "user", content: "看看", kind: "text", attachments: stored },
+            ASSISTANT,
+          ],
+        });
+      }
+    });
+  });
+
+  it("rolled back unprogressed, the title reads NULL again and the accepted pair is gone", () => {
+    withSessionStore(({ db, store }) => {
+      const session = store.create("u1");
+      const accepted = store.acceptPrompt(session.id, "u1", "", LONG);
+      expect(metadataRow(db, session.id).title).toBe("2026 年第三季度销售数据汇总与分");
+
+      expect(store.rollbackPrompt(accepted.assistantMessageId)).toBe(true);
+
+      expect(rowsOf(db, session.id)).toEqual({ title: null, messages: [] });
+      expect(metadataRow(db, session.id).status).toBe("idle");
     });
   });
 });

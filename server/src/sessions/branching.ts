@@ -22,6 +22,7 @@ import {
 import { type ProcessPool, releaseDispatch, type Slot, type SpawnShared } from "./pool.js";
 import { classifyPrompt } from "./slash-commands.js";
 import type { SessionStore, SettledApproval } from "./store.js";
+import type { StoredAttachment } from "./store-attachments.js";
 import type { SessionSupervisorRuntime } from "./supervisor.js";
 import type { TokenRegistry } from "./tokens.js";
 import type { ControlClaims, TurnStops } from "./turn-control.js";
@@ -217,12 +218,18 @@ interface ForkPlan {
   users: readonly StoredUser[];
   /** Message id → the attachment paths it stores, read with `users`. */
   attachments: ReadonlyMap<number, readonly string[]>;
+  /** The fork point's stored attachments, read with `text`; handed back beside the draft. */
+  stored: StoredAttachment[];
   expectedAssistantId: number | null;
   file: string;
   workspaceId: string | null;
 }
 
-export type ForkResult = { session: ReturnType<SessionStore["commitFork"]>; draft: string };
+export type ForkResult = {
+  session: ReturnType<SessionStore["commitFork"]>;
+  draft: string;
+  attachments: StoredAttachment[];
+};
 
 /**
  * Fork (#466): precheck + claim of the source, source process retired first, a temporary process
@@ -289,6 +296,7 @@ export class Forks {
       text: user.content,
       users,
       attachments,
+      stored: user.attachments,
       expectedAssistantId: assistant?.id ?? null,
       file: resume.ompSessionFile,
       workspaceId: resume.workspaceId,
@@ -336,8 +344,8 @@ export class Forks {
       throw error instanceof HttpError ? error : new HttpError("agent_unavailable");
     }
     // The stored content, not the branch text: an escaped entry carries the wire-side space, and
-    // the entry of a message with attachments their suffix.
-    return { session, draft: plan.text };
+    // the entry of a message with attachments their suffix. The attachments are the stored list.
+    return { session, draft: plan.text, attachments: plan.stored };
   }
 }
 

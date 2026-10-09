@@ -17,7 +17,12 @@ import {
   settlePendingApproval,
   turnSignal,
 } from "./store-approvals.js";
-import { readAttachmentPaths } from "./store-attachments.js";
+import {
+  readAttachmentPaths,
+  type StoredAttachment,
+  serializeAttachments,
+  titleSource,
+} from "./store-attachments.js";
 import {
   copyForkHistory,
   decodeNullableText,
@@ -85,6 +90,8 @@ export interface MessageView {
   thinking: string | null;
   status: MessageStatus;
   createdAt: number;
+  /** The list stored at admission (#1019); `[]` for none, for an assistant and for a bad column. */
+  attachments: StoredAttachment[];
   steps: StepView[];
   /** Every approval row of this message in ascending id order; `[]` for user messages. */
   approvals: ApprovalEntry[];
@@ -172,7 +179,12 @@ export interface SessionStore extends SessionTodoStore {
   getMessages(sessionId: string, ownerId: string): SessionMessageTree | null;
   /** Message id → stored attachment paths (#1018, store-attachments.ts); absent means none. */
   attachmentPaths(sessionId: string): Map<number, string[]>;
-  acceptPrompt(sessionId: string, ownerId: string, text: string): AcceptedPrompt;
+  acceptPrompt(
+    sessionId: string,
+    ownerId: string,
+    text: string,
+    attachments?: readonly StoredAttachment[],
+  ): AcceptedPrompt;
   rollbackPrompt(assistantMessageId: number): boolean;
   /** A metadata PATCH wrote the title: an in-flight admission's rollback keeps it (no-op if idle). */
   noteTitleWrite(sessionId: string): void;
@@ -336,7 +348,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
       return { session: toSessionView(session, decoder, options.composer), messages: views };
     },
 
-    acceptPrompt(sessionId, ownerId, text) {
+    acceptPrompt(sessionId, ownerId, text, attachments) {
       assertOpen(closed);
       const now = Date.now();
       const accepted = runOwnedTransaction(db, "prompt admission rollback failed", () => {
@@ -352,14 +364,17 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
         if (session.status === "running") {
           throw new HttpError("session_busy");
         }
-        const userReceipt = db.prepare(INSERT_MESSAGE).run(sessionId, "user", text, "done", now);
+        const userReceipt = db
+          .prepare(INSERT_MESSAGE)
+          .run(sessionId, "user", text, "done", now, serializeAttachments(attachments));
         requireChanges(userReceipt.changes, 1, "user message insert");
         const assistantReceipt = db
           .prepare(INSERT_MESSAGE)
-          .run(sessionId, "assistant", "", "running", now);
+          .run(sessionId, "assistant", "", "running", now, null);
         requireChanges(assistantReceipt.changes, 1, "assistant message insert");
         const previousTitle = decodeNullableText(decoder, session.title);
-        const title = previousTitle === null ? titlePrefix(text) : previousTitle;
+        const title =
+          previousTitle === null ? titlePrefix(titleSource(text, attachments)) : previousTitle;
         requireChanges(
           db
             .prepare(
