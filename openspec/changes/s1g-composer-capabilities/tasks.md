@@ -555,6 +555,53 @@ Minimal mergeable slice: 11.1 一刀（纯 IO，带测试；导出被 11.2 引�
 - [ ] 12.6 撤回响应的附件（owner S-24，message-undo「撤回 REST」的 MODIFIED）：在 C 的 `server/src/sessions/undo.ts` / `store-undo.ts` 里——撤回事务删除消息行之前读出被撤回消息所存的附件数组（用 `store-attachments.ts` 的解析）；文件还原（如有）之后逐项判定是否仍存在（`core/sandbox` 的纯 `resolve`，`op=read`，不经会写审计的 facade；再 `lstat` 为普通文件）；200 的 body 加 `attachments`。判定出错按不存在处理，不使撤回失败。
   测试（C 的撤回 REST 测试文件，或新文件 `server/test/session-undo-attachments.test.ts`）：「响应带回仍存在的附件」四例（`keep` 下被删的不带回、`restore` 后被还原的带回、无附件为 `[]`、换成符号链接的不带回；四键 body；无 `sandbox.reject`）与同场景的只有附件一段（`draft` 为 `""`、附件带回、对位成功）；C 的 undo 既有用例里断言响应「恰 `{session, draft, files}`」的改为四键（偏离记录）。
   变异：不做存在性判定 → 第一例判红；在还原之前判定 → 第二例判红；用 facade 判定 → 第四例多出 `sandbox.reject`，判红；在事务之后才读附件 → 全部为 `[]`，判红。
+  **实施注记（12.6，fixture 评审补充，#1020）**：
+  - 现状核对（origin/master 3ec1fd1）：`undo.ts` 371 行（`UndoResult` :79、`#precheck` :135、`attachmentPaths` 调用 :140、`cwd` :180、`request.restore` :201、`#commit` :206-219、200 的三键 :343-347）；`store-undo.ts` 364、`rest.ts` 561、`store.ts` 780；`session-undo-attachments.test.ts` 119、`session-undo.test.ts` 747（新用例不进后者）。
+  - 读出点：`#precheck` 里 `store.getMessages` 得到的 `user`（:153）已带 `attachments: StoredAttachment[]`（#1019，`toMessageView` 即 `parseAttachments`）；仿 `branching.ts:299` 往 `UndoPlan` 加 `stored: user.attachments`，与 `text: user.content` 同一次读。不新增 store 调用，`store-undo.ts`、`store.ts`、`store-attachments.ts` 一行不改（偏离记录：任务点名 `store-undo.ts` 但无需改动，「用 `store-attachments.ts` 的解析」经 `toMessageView` 满足）。
+  - 判定点：`#commit` 里 `request.commit(...)` 成功之后（已在 :201 的 `await request.restore?.()` 之后），同步段内算 `attachments = surviving(root, plan.stored)`，`UndoResult` 加 `attachments: StoredAttachment[]`；commit 抛错时不碰 fs。
+  - 判定 API：`undo.ts` 值导入 `resolve`（`../core/sandbox/resolve.js`）与 `lstatSync`；每项 `resolve(root, path, "read")` 为 `ok` 且 `lstatSync(absPath, {throwIfNoEntry:false})?.isFile() === true` 才保留，整段包在 `try/catch`，任何异常按不存在。不用注入的 `SessionSandboxPort`（facade 会写 `sandbox.reject` 并抛 403，`core/sandbox/index.ts:39-46`）。#1019 的不变量「不用纯 `resolve`」只约束 prompt 路由，本任务按 delta 原文反过来，PR 描述里写明。
+  - root 与装配：`Undos` 已有 `cwdOf` 端口，绑定会话时它就是 `store.rootOf({id: ownerId}, workspaceId)`，与 facade 同一 root。判定时在 `try` 里重新调一次 `this.#ports.cwdOf(ownerId, plan.workspaceId)`，不复用 :180 的字符串（纯 `resolve` 对 root 做 `realpath`，root 中途被换成符号链接时只有重新走 `rootOf` 才拒绝）；`plan.workspaceId === null` 直接 `[]`。不加端口，`index.ts`、`supervisor.ts`、`app.ts` 不动；`cwdOf` 抛错与 `workspaceId === null` 两支写不出变异，记为防御性分支。
+  - 响应：`undo.ts:343` 发 `{session, draft, files, attachments}`，`attachments` 排最后，元素经 `toPublicAttachment`（`rest.ts:459`，加 `export`，行数不变；`undo.ts` 已从 `./rest.js` 导入）。同步改 :78、:275 两处注释。`size` 一律是所存值（D17 第 7 项），不取 `lstat` 的。
+  - 各分支（一律 200、该项不带回、无审计，写进偏离记录）：
+  - 文件已删：`resolve` 放行，`lstat` 无条目。
+  - 换成目录：`isFile()` 为 false。
+  - 末段换成符号链接，或中间目录换成符号链接：`resolve` 拒绝。
+  - 大小变了：照带回，`size` 为所存值。
+  - 空间根在请求中途消失或不可用：`cwdOf` 抛错或 `realpath` 失败，结果为 `[]`。请求开始时就没了的走 :180 既有的 502，不变。
+  - 列是坏值：`parseAttachments` 读成 `[]`，结果为 `[]`，对位也按无附件。
+  - 所存路径重复或含 `..`（只能带外写入）：逐项独立判定，不去重。
+  - `SessionStore.attachmentPaths` / `readAttachmentPaths` 本刀保留：`undo.ts:140`、`branching.ts:86`、`:267` 一行不改，`store-attachments.test.ts:95-137` 与 #1018 的对位用例原样通过。删除要动 `branching.ts`、`branch-temp.ts:56/:210`、`store.ts:21/181/648` 并删两条 #1018 用例，超出 PR Boundary 且无正确性收益；另立 issue。
+  - 必改的既有断言（偏离记录）只有一处：`session-undo-helpers.ts:96` 的 `["session","draft","files"]` 改四键，`UndoBody`（:65-69）加 `attachments: unknown`，:92 注释同步。它经 `undoneWithFiles` / `undone` / `restoredBy` 覆盖 `session-undo.test.ts`、`session-undo-files.test.ts`、`session-snapshot-cleanup.test.ts`、`session-undo-attachments.test.ts` 的全部调用点。措辞同步两处：`session-undo.test.ts:383` 的标题、`session-undo-attachments.test.ts:9-10` 的文首注释。`session-rest-helpers.ts:194` 的 `undo()` 替身只 reject，不改。
+  - web 不改：`parseSessionUndo`（`web/src/lib/session-contract.ts:649`）经 `withTransitionalDefaults` 三键、四键都接受，`web/test/session-contract-composer.test.ts:162-197` 已覆盖；收紧归 13.5。`smoke/` 无 undo body 断言。
+  - 新用例放 `session-undo-attachments.test.ts` 的新 `describe`（约 119 → 260 行），自带 `vi.useFakeTimers({toFake:["Date"]})` 的 before/after（`at()` 需要），不影响文件里 #1018 的用例：
+  - 世界：`openFilesWorld(worlds, [{}, {messages:[{entryId:"e-1",text:FIRST},{entryId:"e-2",text:<u2 文本+后缀>}]}])`。
+  - 布置走真路由，不用 `attach()` 的 UPDATE：先 `put(world,"uploads/a.pdf","pdf")`、`put(world,"uploads/b.png","p")`（受理要 lstat，受理前的快照要含 `b.png`），`turnAt(world,10,FIRST)`，再 `at(20)` 用 `postPrompt(app, session, cookie, JSON.stringify({message, attachments}))` 发 u2（`sendPrompt` 只发 `{message}`），断言 202 且 `undo:"available"`，然后 `waitForTurn` + `settle`。
+  - 后缀：双路径在测试里逐字拼出，`${A_PDF_SUFFIX}\n- uploads/b.png`；只有附件一段 `message:""`，条目文本恰为 `A_PDF_SUFFIX`。
+  - 用例与断言：
+  - (1) `keep`：删 `b.png`，并把 `a.pdf` 改写成别的长度，结果恰为 `[{path:"uploads/a.pdf",size:3}]`。
+  - (2) `restore`：删 `b.png`，结果两项按存储次序，`files.restored` 为 1。
+  - (3) 撤回无附件的 u1，结果为 `[]`。
+  - (4) `keep`：`a.pdf` 换成指向空间外真实文件的符号链接，结果不含该项。
+  - (5) `keep`：把 `uploads` 改名后换成指向它的符号链接（中间段），结果为 `[]`。
+  - (6) `keep`：`a.pdf` 换成同名目录，结果不含该项。
+  - (7) 只有附件：`draft` 为 `""`，附件带回，`branch` 帧的 `entryId` 为 `e-2`。
+  - 每例断言四键，以及 `count(db, "SELECT COUNT(*) AS count FROM audit_events WHERE kind = 'sandbox.reject'")` 为 0。不能用 `observed().audits`：成功的撤回必写一条 `session.undo`。
+  - 白盒不变量（PR 描述里列出，请求白盒审查）：
+  - 路径只来自被撤回消息所存的列，root 只来自 `cwdOf(已认证 ownerId, 会话自己的绑定)`，都不取自请求体。
+  - `op` 恒为 `"read"`；fs 调用只有 `resolve` 内部的 lstat/realpath 加一次 `lstatSync`，没有 `stat` / `open` / `read`，不读内容。
+  - `absPath` 不进响应、库或审计；这一步不写任何审计，也不抛错。
+  - 所存数组在事务之前、与用户消息同一同步段读出；判定在还原与提交之后。
+  - 前置校验的拒绝路径零 fs 调用；`keep` 不读快照。
+  - 残余窗口（同 12.3）：`resolve` 之后、终点 `lstat` 之前中间目录被换成链接，只会多带回或少带回一个标签；下一次 prompt 的受理校验兜底。
+  - 变异（PR 描述给证据）：
+  - 不做存在性判定 → (1)、(4)、(5)、(6) 红。
+  - 在 `restore` 之前判定 → (2) 红。
+  - 用 facade 判定 → (4)、(5) 多出 `sandbox.reject` 或撤回变 403，红。
+  - 事务之后再读附件 → (1)、(2)、(7) 为 `[]`，红。
+  - 返回 `lstat` 的 size → (1) 红。
+  - 跳过 `resolve` 只 `lstat(join(root, path))` → 只有 (5) 红；末段符号链接本来 `isFile()` 就是 false，任务原列的第四例杀不掉这条。
+  - 去掉 `isFile()` → (6) 红；漏发 `attachments` 键 → 四键断言全红；`draft` 取 branch 文本 → (7) 红。
+  - `lstat` 换成 `stat` 写不出变异（符号链接已被 `resolve` 拒绝），记入偏离记录。
 
 Suggested fixture level: expanded - 公共 API（prompt body、消息与 fork 的键集）、沙箱读解析、与重新生成 / 分叉共享的对齐不变量
 Minimal mergeable slice: 12.1 一刀（纯函数与对齐，无附件时字节不变）；12.2 + 12.3 + 12.5 + 12.6 一刀（消息键集、fork 响应与 undo 响应的 `attachments` 是同一批严格键集变化，web 已由组 5 放宽；服务端这三处同刀发出，组 13.5 才能一次收紧）
