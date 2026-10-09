@@ -2,6 +2,7 @@
 import { type Dispatch, type RefObject, type SetStateAction, useCallback } from "react";
 import { type ApiClient, ApiError } from "../../lib/api.js";
 import type { ChatMessageSnapshot } from "../../lib/session-contract.js";
+import type { useAttachmentsState } from "./attachments-state.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
 import type {
   ChatListState,
@@ -31,6 +32,7 @@ function isUndoConflict(error: unknown) {
   return error instanceof ApiError && error.status === 409 && error.code === "undo_conflict";
 }
 
+type ReplaceAttachments = ReturnType<typeof useAttachmentsState>["replace"];
 type UndoFiles = Parameters<ApiClient["undoMessage"]>[2];
 /** 等待用户三选一的冲突：`trigger` 是当初被点的 `撤回` 按钮。 */
 export type UndoConflict = {
@@ -57,6 +59,8 @@ type TurnActionDeps = {
   openSource: (snapshot: ChatMessageSnapshot, ownedClient: ApiClient) => void;
   pendingCreateSendRef: RefObject<PendingCreateSend | null>;
   refreshList: (ownedClient: ApiClient) => void;
+  /** 把某个会话的附件标签整个换掉并返回原来的：派发时取走，未受理时放回（只传这一个引用稳定的函数）。 */
+  replaceAttachments: ReplaceAttachments;
   releaseMutationIfOwned: (controller: AbortController) => void;
   requestedSessionRef: RefObject<string | null>;
   selectSession: (sessionId: string | null) => void;
@@ -98,6 +102,7 @@ export function useTurnActions({
   pendingCreateSendRef,
   refreshList,
   releaseMutationIfOwned,
+  replaceAttachments,
   requestedSessionRef,
   selectSession,
   setCreating,
@@ -151,6 +156,7 @@ export function useTurnActions({
       error: unknown,
       generation: number,
       accepted: boolean,
+      sent: ReturnType<ReplaceAttachments>,
     ) => {
       const pending =
         pendingCreateSendRef.current?.generation === generation
@@ -178,6 +184,10 @@ export function useTurnActions({
         return;
       }
       restoreOwnedDraft(pending?.prompt ?? "", ownedClient, ownedSessionId);
+      // 标签与草稿一起回来。不并进 `restoreOwnedDraft`：它在草稿为空时提前返回，只发附件的那次会漏掉。
+      if (ownedSessionId !== null && requestedSessionRef.current === ownedSessionId) {
+        replaceAttachments(ownedSessionId, sent);
+      }
       setPromptError({
         client: ownedClient,
         sessionId: ownedSessionId,
@@ -203,6 +213,7 @@ export function useTurnActions({
       mutationGenerationRef,
       pendingCreateSendRef,
       releaseMutationIfOwned,
+      replaceAttachments,
       requestedSessionRef,
       restoreOwnedDraft,
       setPromptError,
@@ -224,8 +235,13 @@ export function useTurnActions({
         sessionId,
       });
       setPromptError(null);
+      // 与清空草稿同一次事件里取走标签；`prompt` 原样发出，不裁剪、不补字。
+      const sent = replaceAttachments(sessionId, []);
       void ownedClient
-        .prompt(sessionId, prompt, { signal: controller.signal })
+        .prompt(sessionId, prompt, {
+          attachments: sent.flatMap(({ path }) => path ?? []),
+          signal: controller.signal,
+        })
         .then(() => {
           if (
             !mountedRef.current ||
@@ -260,12 +276,28 @@ export function useTurnActions({
               releaseMutationIfOwned(controller);
             },
             (error: unknown) => {
-              failOwnedPrompt(controller, mutationGeneration, ownedClient, error, generation, true);
+              failOwnedPrompt(
+                controller,
+                mutationGeneration,
+                ownedClient,
+                error,
+                generation,
+                true,
+                sent,
+              );
             },
           );
         })
         .catch((error: unknown) => {
-          failOwnedPrompt(controller, mutationGeneration, ownedClient, error, generation, false);
+          failOwnedPrompt(
+            controller,
+            mutationGeneration,
+            ownedClient,
+            error,
+            generation,
+            false,
+            sent,
+          );
         });
     },
     [
@@ -282,6 +314,7 @@ export function useTurnActions({
       pendingCreateSendRef,
       refreshList,
       releaseMutationIfOwned,
+      replaceAttachments,
       requestedSessionRef,
       setMutationOwner,
       setPromptError,

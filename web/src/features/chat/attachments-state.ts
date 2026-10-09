@@ -37,7 +37,7 @@ type AttachmentsScope = {
   upload: ComposerOptions["upload"] | null | undefined;
 };
 
-const NO_WORKSPACE = "此会话没有工作空间，无法上传文件";
+export const NO_WORKSPACE = "此会话没有工作空间，无法上传文件";
 
 function owns(entry: Entry, client: UploadClient, scopeKey: string | null) {
   return entry.client === client && entry.item.scopeKey === scopeKey;
@@ -196,19 +196,39 @@ export function useAttachmentsState(scope: AttachmentsScope) {
     [retain],
   );
 
-  // 覆盖 `key` 的既有标签；`key` 不必是当前会话（fork 在选中新会话之前恢复）。
-  const restore = useCallback(
-    (key: string, attachments: ChatSessionFork["attachments"]) => {
+  // 把 `key` 的标签整个换成 `items`（不发请求），返回被换掉的；`key` 不必是当前会话。发送时取走、
+  // 未受理时原样放回，fork / undo 的恢复也走这里。
+  const replace = useCallback(
+    (key: string, items: Attachment[]) => {
       const owner = scopeRef.current.client;
+      const replaced = entriesRef.current
+        .filter((entry) => owns(entry, owner, key))
+        .map((entry) => entry.item);
       retain((entry) => !owns(entry, owner, key));
-      const restored = attachments.map(({ path, size }): Entry => {
-        const id = nextIdRef.current;
-        nextIdRef.current += 1;
-        return {
+      const written = items.map(
+        (item): Entry => ({
           client: owner,
           file: null,
           workspaceId: null,
-          item: {
+          item: { ...item, scopeKey: key },
+        }),
+      );
+      commit([...entriesRef.current, ...written]);
+      setNotice(null);
+      return replaced;
+    },
+    [commit, retain],
+  );
+
+  // 覆盖 `key` 的既有标签；fork 在选中新会话之前恢复。
+  const restore = useCallback(
+    (key: string, attachments: ChatSessionFork["attachments"]) => {
+      replace(
+        key,
+        attachments.map(({ path, size }) => {
+          const id = nextIdRef.current;
+          nextIdRef.current += 1;
+          return {
             id,
             scopeKey: key,
             name: path.slice(path.lastIndexOf("/") + 1),
@@ -217,13 +237,11 @@ export function useAttachmentsState(scope: AttachmentsScope) {
             percent: 100,
             path,
             message: null,
-          },
-        };
-      });
-      commit([...entriesRef.current, ...restored]);
-      setNotice(null);
+          };
+        }),
+      );
     },
-    [commit, retain],
+    [replace],
   );
 
   const items = useMemo(
@@ -231,5 +249,5 @@ export function useAttachmentsState(scope: AttachmentsScope) {
     [client, entries, scopeKey],
   );
 
-  return { items, notice, accept, remove, restore };
+  return { items, notice, accept, remove, replace, restore };
 }

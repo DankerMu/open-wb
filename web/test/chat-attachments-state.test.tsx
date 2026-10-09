@@ -374,6 +374,42 @@ describe("从 fork / undo 响应恢复", () => {
     expect(page.shown()).toEqual(["top.txt uploaded 100", "z.png uploaded 100"]);
   });
 
+  it("replace 取走该会话的标签并原样放回：名字与 id 不变，不发请求", async () => {
+    const page = mount();
+    page.accept(file("a.pdf"), file("b.png"));
+    await settle(page.calls[0], done("a.pdf"));
+    await settle(page.calls[1], { path: "uploads/b (1).png", name: "b (1).png", size: 21 });
+    page.accept(file("big.bin", 1001));
+    expect(page.notice()).not.toBeNull();
+    const before = page.items();
+    expect(before.map((item) => `${item.id} ${item.name}`)).toEqual(["1 a.pdf", "2 b (1).png"]);
+
+    let taken: ReturnType<typeof page.items> = [];
+    act(() => {
+      taken = page.hook.result.current.replace("A", []);
+    });
+    expect(taken).toEqual(before);
+    expect(page.items()).toEqual([]);
+    expect(page.notice()).toBeNull();
+
+    let displaced: ReturnType<typeof page.items> = taken;
+    act(() => {
+      displaced = page.hook.result.current.replace("A", taken);
+    });
+    expect(displaced).toEqual([]);
+    expect(page.items()).toEqual(before);
+    expect(page.sent()).toEqual(["a.pdf", "b.png"]);
+  });
+
+  it("replace 的引用不随渲染变化", () => {
+    const page = mount();
+    const first = page.hook.result.current.replace;
+    expect(typeof first).toBe("function");
+    page.accept(file("a.pdf"));
+    page.rerender({ scopeKey: "B" });
+    expect(page.hook.result.current.replace).toBe(first);
+  });
+
   it("恢复别的会话不动当前会话的标签与在途上传", async () => {
     const page = await midQueue();
     page.restore("B", [{ path: "uploads/a.pdf", size: 3 }]);

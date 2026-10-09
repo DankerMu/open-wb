@@ -49,6 +49,11 @@ type CapabilityBarProps = {
    * `temporaryWorkspace`（临时空间不在列表里，标签不靠列表判定）。欢迎态不传。
    */
   session?: { id: string | null | undefined; workspace: Workspace | undefined; temporary: boolean };
+  /**
+   * 「+」菜单的 `上传文件` 项：`open` 打开文件选择框；`disabled` 时不可选，`reason` 非 null 则跟在后面。
+   * 不传（欢迎态）就没有这一项。
+   */
+  upload?: { disabled: boolean; reason: string | null; open(): void } | undefined;
 };
 
 export function CapabilityBar({
@@ -58,13 +63,14 @@ export function CapabilityBar({
   permission,
   plus,
   session,
+  upload,
 }: CapabilityBarProps) {
   return (
     <div
       className="flex min-w-0 flex-1 items-center gap-1 narrow:basis-auto"
       data-slot="composer-capabilities"
     >
-      <CommandMenu inputRef={inputRef} plus={plus} />
+      <CommandMenu inputRef={inputRef} plus={plus} upload={upload} />
       {session === undefined ? (
         <WorkspacePicker {...choice} disabled={disabled} />
       ) : (
@@ -88,9 +94,14 @@ const MENU_NOTE = "m-0 px-1.5 py-1 text-sm text-muted-foreground";
  * `添加文件或命令` 按钮与菜单：按目录顺序列出命令与技能（名称、项目标记、描述）；目录未持有（拉取中或失败）时
  * 只有 `暂无可用项`，目录到达后列表就地替换它。点选把草稿写成 `/<name> `，菜单关闭后焦点交给输入框而不是
  * 回到按钮；Esc 等其它关闭方式仍按菜单默认把焦点还给按钮。草稿非空白时菜单照常打开，命令条目不可选，
- * 列表前有一行 `清空输入后可选择命令`（菜单的直接子元素）。
+ * 列表前有一行 `清空输入后可选择命令`（菜单的直接子元素）。给出 `upload` 时第一项是 `上传文件`：它不看草稿、
+ * 不看目录（拉取中、失败、为空时都在），点选只打开文件选择框，不动草稿。
  */
-function CommandMenu({ inputRef, plus }: Pick<CapabilityBarProps, "inputRef" | "plus">) {
+function CommandMenu({
+  inputRef,
+  plus,
+  upload,
+}: Pick<CapabilityBarProps, "inputRef" | "plus" | "upload">) {
   const picked = useRef(false);
   return (
     <DropdownMenu onOpenChange={plus.onOpenChange} open={plus.open}>
@@ -117,6 +128,18 @@ function CommandMenu({ inputRef, plus }: Pick<CapabilityBarProps, "inputRef" | "
         }}
         side="top"
       >
+        {upload === undefined ? null : (
+          <DropdownMenuItem
+            className="flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[13px] leading-5"
+            disabled={upload.disabled}
+            onSelect={upload.open}
+          >
+            <span className="font-medium">上传文件</span>
+            {upload.reason === null ? null : (
+              <span className="text-muted-foreground">{upload.reason}</span>
+            )}
+          </DropdownMenuItem>
+        )}
         {plus.commands === undefined || plus.commands.length === 0 ? (
           <p className={MENU_NOTE}>暂无可用项</p>
         ) : (

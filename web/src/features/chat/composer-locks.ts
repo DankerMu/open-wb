@@ -12,7 +12,18 @@ type ComposerInputs = {
   /** 连接器终止失败（刷新指引已显示）。 */
   streamFailed: boolean;
   draft: string;
+  /** 当前会话的附件标签（只读状态）。 */
+  attachments: readonly { status: string }[];
 };
+
+/**
+ * 可否发送（`发送` 键与提交入口共用）：没有上传中或失败的标签，且草稿非空白或至少有一个标签（已上传、
+ * 待上传都算）。只判定，不改草稿。
+ */
+export function canSend(draft: string, tags: readonly { status: string }[]): boolean {
+  if (tags.some(({ status }) => status === "uploading" || status === "failed")) return false;
+  return draft.trim().length > 0 || tags.length > 0;
+}
 
 /**
  * 输入框的派生量（design D1）：`generating` 只指回合进行中（发送在途、重新生成在途、权威状态 running），
@@ -26,6 +37,6 @@ export function composerLocks(input: ComposerInputs) {
   return {
     composerDisabled,
     generating: turnActive && !input.streamFailed,
-    sendDisabled: composerDisabled || input.draft.trim().length === 0,
+    sendDisabled: composerDisabled || !canSend(input.draft, input.attachments),
   };
 }

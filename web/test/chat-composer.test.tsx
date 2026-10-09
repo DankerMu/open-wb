@@ -5,6 +5,7 @@ import { chatSnapshot, FakeEventSource, latestSource, SESSION_ID } from "./chat-
 import { NULL_SESSION_META } from "./session-meta-fixtures.js";
 import { deferredResponse, jsonResponse } from "./support.js";
 import { readRepoFile } from "./ui-support.js";
+import { FakeXhr, installFakeXhr, lastFakeXhr } from "./upload-support.js";
 
 const COMPOSER_NAME = "给助手发消息";
 const HINT = "Enter 发送 · Shift+Enter 换行";
@@ -112,6 +113,67 @@ describe("(C2) composer card structure", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => {
       expect(fetchMock.mock.calls.filter(([path]) => path === PROMPT_PATH)).toHaveLength(1);
+    });
+  });
+});
+
+describe("(C7) 输入框键盘发送与附件标签", () => {
+  const WORKSPACE = "1".repeat(32);
+
+  /** 绑定了工作空间的 done 会话；`uploaded` 为真时先经文件框选入一个文件并传完。 */
+  async function mountBound(uploaded: boolean) {
+    const snapshot = doneSnapshot();
+    const session = { ...snapshot.session, workspaceId: WORKSPACE };
+    const { fetchMock } = renderChatPage(`/?session=${SESSION_ID}`, {
+      "/api/sessions": () => jsonResponse({ sessions: [session] }),
+      [MESSAGES_PATH]: () => jsonResponse({ ...snapshot, session }),
+      [PROMPT_PATH]: () => deferredResponse().promise,
+    });
+    const input = (await screen.findByRole("textbox", {
+      name: COMPOSER_NAME,
+    })) as HTMLTextAreaElement;
+    await waitFor(() => expect(input.disabled).toBe(false));
+    if (uploaded) {
+      installFakeXhr();
+      const picker = document.querySelector('[data-slot="composer-file-input"]') as HTMLElement;
+      // 上传上限随输入框选项到达；模型按钮出现即已到达。
+      await screen.findByRole("button", { name: /^模型：/ });
+      fireEvent.change(picker, { target: { files: [new File(["x"], "a.txt")] } });
+      expect(FakeXhr.instances).toHaveLength(1);
+      act(() =>
+        lastFakeXhr().respond(
+          201,
+          JSON.stringify({ path: "uploads/a.txt", name: "a.txt", size: 1 }),
+        ),
+      );
+      await screen.findByRole("list", { name: "附件" });
+      await waitFor(() => expect(screen.queryByRole("progressbar")).toBeNull());
+    }
+    return { fetchMock, input };
+  }
+
+  const prompts = (fetchMock: { mock: { calls: unknown[][] } }) =>
+    fetchMock.mock.calls.filter(([path]) => path === PROMPT_PATH);
+
+  it("没有附件标签的空草稿：Enter 不提交", async () => {
+    const { fetchMock, input } = await mountBound(false);
+    expect(input.value).toBe("");
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.submit(input.form as HTMLFormElement);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(prompts(fetchMock)).toHaveLength(0);
+  });
+
+  it("带已上传标签的空白草稿：Enter 提交恰一次", async () => {
+    const { fetchMock, input } = await mountBound(true);
+    fireEvent.change(input, { target: { value: " " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(prompts(fetchMock)).toHaveLength(1));
+    expect(prompts(fetchMock)[0]?.[1]).toMatchObject({
+      body: '{"message":" ","attachments":["uploads/a.txt"]}',
     });
   });
 });

@@ -11,6 +11,7 @@ import type { ApiClient } from "../../lib/api.js";
 import type { ComposerOptions } from "../../lib/composer-contract.js";
 import type { ChatSession } from "../../lib/session-contract.js";
 import { ArchivedNotice } from "./archived-notice.js";
+import type { useAttachmentArea } from "./attachment-chips.js";
 import { CapabilityBar } from "./capability-bar.js";
 import { Composer } from "./composer.js";
 import { ComposerDock } from "./composer-dock.js";
@@ -121,6 +122,8 @@ type ConversationViewProps = {
   /** 输入框元素：回到欢迎态后由会话页聚焦它，「+」菜单点选后也聚焦它。 */
   composerRef: RefObject<HTMLTextAreaElement | null>;
   draft: string;
+  /** 附件区的四块：输入卡里的标签、提示、隐藏的文件输入框与「+」菜单的 `上传文件` 项。 */
+  files: ReturnType<typeof useAttachmentArea>;
   generating: boolean;
   historyError: string | null;
   historyView: ChatState | null;
@@ -175,6 +178,7 @@ export function ConversationView({
   composerOptions,
   composerRef,
   draft,
+  files,
   generating,
   historyError,
   historyView,
@@ -254,6 +258,7 @@ export function ConversationView({
             {streamError}
           </p>
         ) : null}
+        {files.notice}
         {requestedSessionId ? (
           <Thread
             archived={archived !== null}
@@ -295,6 +300,7 @@ export function ConversationView({
         ) : (
           <Composer
             actions={actions}
+            attachments={files.chips}
             capabilityBar={
               <CapabilityBar
                 choice={{
@@ -306,6 +312,7 @@ export function ConversationView({
                 disabled={composerDisabled}
                 inputRef={composerRef}
                 plus={slash.plus}
+                upload={files.upload}
                 {...permission}
                 {...(requestedSessionId
                   ? { session: { id: workspaceId, workspace, temporary: temporaryWorkspace } }
@@ -329,6 +336,7 @@ export function ConversationView({
         {requestedSessionId ? null : (
           <WelcomePlaybooks disabled={composerDisabled} onPick={onChangeDraft} />
         )}
+        {files.input}
       </div>
     </div>
   );

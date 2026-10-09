@@ -19,6 +19,8 @@ type StopTurn = () => Promise<"stopping" | null>;
 type ComposerProps = {
   /** 工具栏右组最前面的控件（模型、推理强度）；不传时右组只有 `生成中` 与发送/停止键。 */
   actions?: ReactNode;
+  /** 卡片内、输入框上方的附件标签区；没有标签时是 null。 */
+  attachments?: ReactNode;
   /** 工具栏的左组，即能力栏（「+」菜单、工作空间位）；不传时工具栏只有右组。 */
   capabilityBar?: ReactNode;
   disabled: boolean;
@@ -40,11 +42,12 @@ type ComposerProps = {
 };
 
 /**
- * 输入卡：候选面板、textarea、底部工具栏（能力栏是左组，`actions`、`生成中` 与发送/停止键是右组）；提示行在卡外。
+ * 输入卡：候选面板、附件标签区、textarea、底部工具栏（能力栏是左组，`actions`、`生成中` 与发送/停止键是右组）；提示行在卡外。
  * 窄屏下工具栏可换行，右组作为一个整体落到下一行并靠右。
  */
 export function Composer({
   actions,
+  attachments,
   capabilityBar,
   disabled,
   draft,
@@ -72,6 +75,7 @@ export function Composer({
         data-slot="composer-card"
       >
         {slashMenu}
+        {attachments}
         <label className="sr-only" htmlFor={inputId}>
           给助手发消息
         </label>
