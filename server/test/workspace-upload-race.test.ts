@@ -1,17 +1,28 @@
 /**
  * Issue #1017 (s1g-composer-capabilities task 11.4): a record of what happens today when
- * `uploads` is replaced by a symbolic link inside the upload's window — after the route has looked
- * at the directory, before `storeUpload` creates its temporary file in it. This is the residual
- * registered in design D11 (「竞态」) and Risks (「上传的符号链接竞态」), not a guarantee of the spec:
- * the exclusive create does not follow a link in its last component, but the parent is opened by
- * path, so the file lands in the link's target.
+ * `uploads` is replaced by a symbolic link inside the upload's window — after the route's own
+ * `lstat` of the directory, before `storeUpload` creates its temporary file in it. This is the
+ * residual registered in design D11 (「竞态」) and Risks (「上传的符号链接竞态」), not a guarantee of
+ * the spec: the exclusive create does not follow a link in its last component, but the parent is
+ * opened by path, so the file lands in the link's target.
  *
  * If this case goes red, the window has been closed (a directory handle, an `O_NOFOLLOW`-style
  * check of the parent) or the behaviour has changed: update this record and the Risks entry. Do
  * not change the assertions back.
  *
- * The earlier half of the window — a link in place before the route looks — is not a case here:
- * the route's own `lstat` answers it with 409.
+ * Scope: the link's target is another directory of the same workspace. A target outside the
+ * sandbox is not recorded here.
+ *
+ * Before the window, and not cases here:
+ * - a link already there when the request arrives: the sandbox's `lstat` of each component
+ *   refuses it, 403 `sandbox_denied` with a `sandbox.reject` event (workspace-upload-rest.test.ts,
+ *   "refuses an uploads directory that is a symbolic link out of the sandbox");
+ * - a link put in after the sandbox's `lstat` and before the route's: the route answers 409. Read
+ *   from the code; no test covers it (the 409 case in workspace-upload-rest.test.ts is `uploads`
+ *   being a regular file).
+ * After the window, also read from the code and not measured: a swap once the temporary file
+ * exists and before `link`. Both of `link`'s paths would go through the link and miss the
+ * temporary file, so it would fail, and the temporary file would stay in the moved directory.
  *
  * The seam is `node:fs/promises` `open`, patched on the builtin and synced to its named exports
  * (as model-proxy-models-yml.test.ts does for `rename`); it relies on vitest's default forks pool
@@ -164,7 +175,8 @@ describe("POST /api/workspaces/:id/uploads — symbolic-link race (design D11 / 
       expect(readdirSync(uploadsWas)).toEqual([]);
       await expectOneUploadEvent(world, workspace);
 
-      // Nothing landed anywhere else: not in the workspace, not in the sandbox, not beside it.
+      // With the target inside the workspace, that is the only place written: this follows from
+      // the arrangement, it is not a property of the route.
       expect(readdirSync(workspace.root).sort()).toEqual(["elsewhere", "uploads", "uploads-was"]);
       expect(readdirSync(world.sandboxRoot)).toEqual(["u1"]);
       expect(readdirSync(join(world.sandboxRoot, "u1"))).toEqual([basename(workspace.root)]);

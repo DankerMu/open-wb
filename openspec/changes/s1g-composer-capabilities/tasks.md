@@ -380,7 +380,7 @@ Minimal mergeable slice: 10.1 一刀（`write` 尚无调用方；类型联合的
   - 不用 `uploadsOf(w)` 当正向判据：它经 `existsSync` / `readdirSync` 跟随链接，会因错误的理由看到 `a.txt`。
   - 沙箱外无落点：`readdirSync(world.sandboxRoot)` 恰为 `["u1"]`，`readdirSync(join(sandboxRoot, "u1"))` 恰为该空间的目录，`readdirSync(w.root).sort()` 恰为 `["elsewhere", "uploads", "uploads-was"]`。另外对 `dirname(world.sandboxRoot)` 下除 `sandbox/` 外的部分做一次递归列举，上传前后相等。
   - 同一用例里先做对照：不装 spy 时同样的上传落在真 `uploads/` 里、`elsewhere` 为空。这样「落在目标里」能归因于替换。
-  - W1a 不写用例（要 mock `rest.ts` 的 `lstatSync`，超出「一条测试」），只在文件头注释里写一句：这一段由路由自己的 `lstat` 以 409 收口。
+  - W1a 不写用例（要 mock `rest.ts` 的 `lstatSync`，超出「一条测试」），只在文件头注释里分两种情况写明（评审核对代码后更正，#1017）：请求到达前链接已在位的，由 `sandbox.resolve` 的逐分量 `lstat` 以 403 `sandbox_denied` 拒绝并入审计（`workspace-upload-rest.test.ts` 已有用例）；`resolve` 之后、路由 `lstat` 之前放入的，由 `ensureUploadsDir` 以 409 拒绝——这一段**没有用例**（既有的 409 用例是 `uploads` 为普通文件）。
   - 标题与注释：标题写成 `records a registered residual, not a guarantee: uploads swapped for a symlink between the route's lstat and the exclusive create — the file lands in the link target`。文件头引用 design D11 / Risks，并写明：这条变红说明窗口被关上或行为变了，应更新记录与 Risks，不是把断言改回去。
   - 变异不适用（现状记录，没有要守的实现）。PR 描述里用三样代替：对照段；spy 内「此刻仍是目录」加触发次数；一句说明「引入目录句柄 / `O_NOFOLLOW` 式父目录校验后本用例应红」。PR 描述点名请白盒审查。
   - 前提：依赖 vitest 缺省的 forks 池按文件隔离内建模块的改写。除通用纪律外没有别的守卫会碰到。
