@@ -11,6 +11,7 @@ import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import type { SpawnImpl } from "../src/sessions/omp/process.js";
 import { ensureOmpStateLayout } from "../src/sessions/omp/state-layout.js";
 import type { SessionStore } from "../src/sessions/store.js";
+import type { ComposerConfig } from "../src/sessions/store-composer.js";
 import type { TodoWarn } from "../src/sessions/store-todo.js";
 import type { SessionSupervisor } from "../src/sessions/supervisor.js";
 import { TokenRegistry } from "../src/sessions/tokens.js";
@@ -92,6 +93,8 @@ export interface OpenSessionOptions {
   configureApp?: (app: FastifyInstance) => void;
   /** Replaces the app's workspace-snapshots service (#945: a `take` held open or made to fail). */
   snapshots?: TurnSnapshotService;
+  /** The app's model whitelist and approval cap (#1007); omitted → one model, cap `yolo`. */
+  assembly?: Partial<ComposerConfig>;
 }
 
 export function createRealFakeRuntime(
@@ -186,6 +189,7 @@ function openSupervisorApp(input: OpenSupervisorAppInput): SupervisorApp {
       ...(input.onEvent === undefined ? {} : { onEvent: input.onEvent }),
       ...(input.warn === undefined ? {} : { warn: input.warn }),
       ...(input.snapshots === undefined ? {} : { snapshots: input.snapshots }),
+      ...input.assembly,
     },
   });
   input.configureApp?.(app);

@@ -19,6 +19,7 @@ import {
   createRealFakeRuntime,
   createSession,
   type ObservedEvent,
+  type OpenSessionOptions,
   OWNER_ID,
   openRecordingSession,
   type RealFakeRuntime,
@@ -62,6 +63,7 @@ export interface ApprovalWorldOptions {
   hold?: LineMatch;
   prepare?: (db: DatabaseSync) => void;
   onEvent?: (sessionId: string, epoch: number, event: ChatEvent<number>) => void;
+  assembly?: OpenSessionOptions["assembly"];
 }
 
 export interface ApprovalRow {
@@ -105,6 +107,7 @@ export async function openApprovalWorld(
   const world = await openRecordingSession(rt.runtime, {
     ...(options.prepare === undefined ? {} : { prepare: options.prepare }),
     ...(options.onEvent === undefined ? {} : { onEvent: options.onEvent }),
+    ...(options.assembly === undefined ? {} : { assembly: options.assembly }),
   });
   return {
     ...world,
