@@ -96,7 +96,8 @@ const B = snapshotOf(session(OTHER_SESSION_ID, "done", "other session", 1_740_00
   message(22, "assistant", "done", "B 回答"),
 ]);
 
-const forked = (s: Snapshot, draft: string) => jsonResponse({ session: s.session, draft }, 201);
+const forked = (s: Snapshot, draft: string) =>
+  jsonResponse({ session: s.session, draft, attachments: [] }, 201);
 
 /** 以 `?session=A&tab=x#frag` 挂载并 open。`listing.sessions` 决定此后列表 GET 的回复。 */
 async function mount(initial: Snapshot, routes: FetchRoutes = {}, withB = false) {

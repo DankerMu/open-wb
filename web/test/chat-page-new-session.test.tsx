@@ -410,7 +410,7 @@ describe("新建会话只回欢迎态", () => {
 
     await settleDeferredResponse(
       held,
-      jsonResponse({ session: view(C, "分叉会话"), draft: "分叉草稿" }, 201),
+      jsonResponse({ session: view(C, "分叉会话"), draft: "分叉草稿", attachments: [] }, 201),
     );
     await act(yieldMacrotask);
     expect(currentLocation()).toBe("/");

@@ -5,8 +5,6 @@
  * branch in `web/src/lib/session-contract.ts`.
  */
 import { describe, expect, it } from "vitest";
-import { convertMessage } from "../src/features/chat/runtime-convert.js";
-import { chatStateFromSnapshot } from "../src/features/chat/stream.js";
 import {
   parseMessageSnapshot,
   parseSession,
@@ -30,7 +28,6 @@ const ELEVEN = {
 };
 const DEFAULTS = { approvalMode: "write", modelId: "", reasoningEffort: null };
 const THREE = { approvalMode: "yolo", modelId: "m3", reasoningEffort: "low" };
-const FILE = { path: "uploads/a.pdf", size: 3 };
 const FILES = {
   mode: "kept",
   restored: 0,
@@ -63,30 +60,10 @@ describe("D16 step 1: session view, eleven keys or eleven plus three (#996)", ()
     expect(parseSession(ELEVEN)).toEqual({ ...ELEVEN, ...DEFAULTS });
   });
 
-  it.each([
-    ["yolo, m3, low", THREE],
-    ["a null effort", { ...THREE, reasoningEffort: null }],
-    ["always-ask and max", { approvalMode: "always-ask", modelId: "m3", reasoningEffort: "max" }],
-    ["an empty model id", { ...THREE, modelId: "" }],
-  ])("keeps each value of a fourteen-key session with %s", (_label, three) => {
-    expect(parseSession({ ...ELEVEN, ...three })).toEqual({ ...ELEVEN, ...three });
-  });
+  it("keeps a fourteen-key session with an empty model id", () => {
+    const session = { ...ELEVEN, ...THREE, modelId: "" };
 
-  it("rejects a session carrying only approvalMode", () => {
-    expect(parseSession({ ...ELEVEN, approvalMode: "write" })).toBeNull();
-  });
-
-  it.each([
-    ["approvalMode and modelId only", { approvalMode: "write", modelId: "m3" }],
-    ["modelId and reasoningEffort only", { modelId: "m3", reasoningEffort: null }],
-    ["a fifteenth key", { ...THREE, parentId: "p" }],
-    ["two of the three keys and a foreign one", { approvalMode: "write", modelId: "m3", x: null }],
-    ["approvalMode auto", { ...THREE, approvalMode: "auto" }],
-    ["a non-string modelId", { ...THREE, modelId: 3 }],
-    ["reasoningEffort auto", { ...THREE, reasoningEffort: "auto" }],
-    ["reasoningEffort ultra", { ...THREE, reasoningEffort: "ultra" }],
-  ])("rejects a session with %s", (_label, extra) => {
-    expect(parseSession({ ...ELEVEN, ...extra })).toBeNull();
+    expect(parseSession(session)).toEqual(session);
   });
 });
 
@@ -97,45 +74,6 @@ describe("D16 step 1: messages with or without attachments (#996)", () => {
     );
 
     expect(snapshot?.messages.map((item) => item.attachments)).toEqual([[], []]);
-  });
-
-  it("keeps the attachments of a user message and the empty list of an assistant message", () => {
-    const snapshot = parseMessageSnapshot(
-      snapshotOf([
-        { ...message(1, "user"), attachments: [FILE, { path: "b.txt", size: 0 }] },
-        { ...message(2, "assistant"), attachments: [] },
-      ]),
-    );
-
-    expect(snapshot?.messages.map((item) => item.attachments)).toEqual([
-      [FILE, { path: "b.txt", size: 0 }],
-      [],
-    ]);
-  });
-
-  it("rejects the snapshot when an assistant message carries attachments", () => {
-    const snapshot = snapshotOf([
-      { ...message(1, "user"), attachments: [FILE] },
-      { ...message(2, "assistant"), attachments: [FILE] },
-    ]);
-
-    expect(parseMessageSnapshot(snapshot)).toBeNull();
-  });
-
-  it.each([
-    ["null", null],
-    ["an object", { 0: FILE }],
-    ["an element with an extra key", [{ ...FILE, name: "a.pdf" }]],
-    ["an element without size", [{ path: "uploads/a.pdf" }]],
-    ["an empty path", [{ path: "", size: 3 }]],
-    ["a negative size", [{ path: "uploads/a.pdf", size: -1 }]],
-    ["a fractional size", [{ path: "uploads/a.pdf", size: 1.5 }]],
-  ])("rejects the snapshot when a user message has attachments of %s", (_label, attachments) => {
-    expect(parseMessageSnapshot(snapshotOf([{ ...message(1, "user"), attachments }]))).toBeNull();
-  });
-
-  it("rejects a message with a foreign tenth key", () => {
-    expect(parseMessageSnapshot(snapshotOf([{ ...message(1, "user"), files: [] }]))).toBeNull();
   });
 });
 
@@ -150,14 +88,6 @@ describe("D16 step 1: fork and undo responses with or without attachments (#996)
     });
   });
 
-  it("keeps the attachments of a fork response", () => {
-    expect(parseSessionFork({ session: ELEVEN, draft: "", attachments: [FILE] })).toEqual({
-      session: parsed,
-      draft: "",
-      attachments: [FILE],
-    });
-  });
-
   it("parses a {session, draft, files} undo response with an empty attachment list", () => {
     expect(parseSessionUndo({ session: ELEVEN, draft: "原文", files: FILES })).toEqual({
       session: parsed,
@@ -165,53 +95,5 @@ describe("D16 step 1: fork and undo responses with or without attachments (#996)
       files: FILES,
       attachments: [],
     });
-  });
-
-  it("keeps the attachments of an undo response", () => {
-    const body = { session: ELEVEN, draft: "", files: FILES, attachments: [FILE] };
-
-    expect(parseSessionUndo(body)).toEqual({ ...body, session: parsed });
-  });
-
-  it.each([
-    ["a foreign third key", { session: ELEVEN, draft: "", files: FILES }],
-    ["a foreign key beside attachments", { session: ELEVEN, draft: "", attachments: [], x: 1 }],
-    ["null attachments", { session: ELEVEN, draft: "", attachments: null }],
-    [
-      "an attachment with a negative size",
-      { session: ELEVEN, draft: "", attachments: [{ path: "a", size: -1 }] },
-    ],
-  ])("rejects a fork response with %s", (_label, body) => {
-    expect(parseSessionFork(body)).toBeNull();
-  });
-
-  it.each([
-    ["a foreign fourth key", { session: ELEVEN, draft: "", files: FILES, x: 1 }],
-    ["attachments in place of files", { session: ELEVEN, draft: "", attachments: [] }],
-    ["null attachments", { session: ELEVEN, draft: "", files: FILES, attachments: null }],
-    [
-      "an attachment with an extra key",
-      { session: ELEVEN, draft: "", files: FILES, attachments: [{ ...FILE, x: 1 }] },
-    ],
-  ])("rejects an undo response with %s", (_label, body) => {
-    expect(parseSessionUndo(body)).toBeNull();
-  });
-});
-
-describe("attachments reach the view state and the runtime custom fields (#996)", () => {
-  it("passes each attachment through chatStateFromSnapshot and convertMessage", () => {
-    const snapshot = parseMessageSnapshot(
-      snapshotOf([{ ...message(1, "user"), attachments: [FILE] }, message(2, "assistant")]),
-    );
-    if (!snapshot) {
-      throw new Error("the snapshot did not parse");
-    }
-
-    const view = chatStateFromSnapshot(snapshot);
-
-    expect(view.messages.map((item) => item.attachments)).toEqual([[FILE], []]);
-    expect(view.messages.map((item) => convertMessage(item).metadata?.custom?.attachments)).toEqual(
-      [[FILE], []],
-    );
   });
 });

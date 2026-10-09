@@ -49,7 +49,7 @@ const keptFiles = {
 const skippedPath = { path: "a.bin", reason: "too_large" };
 
 function undoBody(files: unknown, draft: unknown = "原文") {
-  return { session, draft, files };
+  return { session, draft, files, attachments: [] };
 }
 
 function stubFetch(response: Response) {
@@ -91,20 +91,14 @@ describe("Undo API response parsing", () => {
     const body = undoBody(restoredFiles, draft);
     stubFetch(jsonResponse(body));
 
-    await expect(createApiClient().undoMessage(SESSION_ID, 1, "restore")).resolves.toEqual({
-      ...body,
-      attachments: [],
-    });
+    await expect(createApiClient().undoMessage(SESSION_ID, 1, "restore")).resolves.toEqual(body);
   });
 
   it("returns a kept undo unchanged", async () => {
     const body = undoBody(keptFiles, "");
     stubFetch(jsonResponse(body));
 
-    await expect(createApiClient().undoMessage(SESSION_ID, 1, "keep")).resolves.toEqual({
-      ...body,
-      attachments: [],
-    });
+    await expect(createApiClient().undoMessage(SESSION_ID, 1, "keep")).resolves.toEqual(body);
   });
 
   it("returns an undo that carries attachments unchanged", async () => {
@@ -115,14 +109,14 @@ describe("Undo API response parsing", () => {
   });
 
   it.each([
-    ["missing files", { session, draft: "" }],
+    ["missing files", { session, draft: "", attachments: [] }],
     ["null files", undoBody(null)],
     ["array files", undoBody([])],
     ["an extra top-level key", { ...undoBody(keptFiles), extra: [] }],
-    ["a missing draft", { session, files: keptFiles }],
+    ["a missing draft", { session, files: keptFiles, attachments: [] }],
     ["a non-string draft", undoBody(keptFiles, 1)],
     ["a null draft", undoBody(keptFiles, null)],
-    ["a missing session", { draft: "", files: keptFiles }],
+    ["a missing session", { draft: "", files: keptFiles, attachments: [] }],
     ["an unknown session status", { ...undoBody(keptFiles), session: { ...session, status: "x" } }],
     ["an extra session key", { ...undoBody(keptFiles), session: { ...session, parentId: "p" } }],
     [

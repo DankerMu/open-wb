@@ -4,7 +4,9 @@
  * whole-response rejection, and the SSE `step.end` guard that still refuses a `changes` key.
  * Issue #921 (s1f task 1.4) widens the session object to eleven keys (`archivedAt`,
  * `pendingApproval`, `temporaryWorkspace`): session-sidebar 「会话 DTO 严格解析」 and chat-web
- * 「八键会话与思考、变更字段严格解析」. Oracles: the spec delta's literal fixtures and key sets.
+ * 「八键会话与思考、变更字段严格解析」. Issue #1025 (s1g task 13.5) widens it to fourteen keys
+ * (`approvalMode`, `modelId`, `reasoningEffort`). Oracles: the spec delta's literal fixtures and
+ * key sets.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApiClient } from "../src/lib/api.js";
@@ -39,6 +41,9 @@ const metaSession = {
   archivedAt: null,
   pendingApproval: false,
   temporaryWorkspace: false,
+  approvalMode: "yolo",
+  modelId: "m3",
+  reasoningEffort: "low",
 };
 
 /** 三键都取非默认值：已归档、有待决审批、绑定的是临时空间。 */
@@ -49,27 +54,14 @@ const extendedSession = {
   temporaryWorkspace: true,
 };
 
-/** 本文件的会话夹具保持十一键：共享夹具已带齐十四键，这里去掉 #996 的三键。 */
-const {
-  approvalMode: _approvalMode,
-  modelId: _modelId,
-  reasoningEffort: _reasoningEffort,
-  ...NULL_ELEVEN_KEY_META
-} = NULL_SESSION_META;
-
 const nullMetaSession = {
   id: "abcdef0123456789abcdef0123456789",
   title: null,
   status: "idle",
   createdAt: 1_740_000_000_000,
   updatedAt: 1_740_000_000_000,
-  ...NULL_ELEVEN_KEY_META,
+  ...NULL_SESSION_META,
 };
-
-/** 十一键会话的解析结果：三项输入框设置取过渡期缺省值（#996，design D16 第 1 步）。 */
-function parsed(session: object) {
-  return { ...session, approvalMode: "write", modelId: "", reasoningEffort: null };
-}
 
 const editChange = { path: "src/app.ts", added: 2, removed: 1, kind: "edit" };
 const writeChange = { path: "out/index.html", added: null, removed: null, kind: "write" };
@@ -141,10 +133,15 @@ function withoutKey(value: Record<string, unknown>, key: string) {
   return rest;
 }
 
-/** The pre-#921 eight-key session: no `archivedAt`, `pendingApproval`, `temporaryWorkspace`. */
+/** The pre-#1025 eleven-key session: none of the three composer settings. */
+function withoutComposer(session: Record<string, unknown>) {
+  return withoutKey(withoutKey(withoutKey(session, "approvalMode"), "modelId"), "reasoningEffort");
+}
+
+/** The pre-#921 eight-key session. */
 function withoutExtension(session: Record<string, unknown>) {
   return withoutKey(
-    withoutKey(withoutKey(session, "archivedAt"), "pendingApproval"),
+    withoutKey(withoutKey(withoutComposer(session), "archivedAt"), "pendingApproval"),
     "temporaryWorkspace",
   );
 }
@@ -166,20 +163,20 @@ afterEach(() => {
   resetFakeEventSources();
 });
 
-describe("Session contract: eleven-key session", () => {
+describe("Session contract: fourteen-key session", () => {
   it.each([
     ["stored metadata", metaSession],
     ["null metadata", nullMetaSession],
     ["an archive time, a pending approval and a temporary workspace", extendedSession],
     ["archivedAt 0", { ...metaSession, archivedAt: 0 }],
   ])("accepts and preserves a session with %s in list, snapshot and fork", (_label, session) => {
-    expect(parseSessionList({ sessions: [session] })).toEqual({ sessions: [parsed(session)] });
-    expect(parseSessionFork({ session, draft: "" })).toEqual({
-      session: parsed(session),
+    expect(parseSessionList({ sessions: [session] })).toEqual({ sessions: [session] });
+    expect(parseSessionFork({ session, draft: "", attachments: [] })).toEqual({
+      session,
       draft: "",
       attachments: [],
     });
-    expect(parseMessageSnapshot(snapshotWith({ session }))?.session).toEqual(parsed(session));
+    expect(parseMessageSnapshot(snapshotWith({ session }))?.session).toEqual(session);
   });
 
   it.each([
@@ -210,7 +207,7 @@ describe("Session contract: eleven-key session", () => {
     ],
   ])("rejects a session with %s in list, snapshot and fork", (_label, session) => {
     expect(parseSessionList({ sessions: [nullMetaSession, session] })).toBeNull();
-    expect(parseSessionFork({ session, draft: "" })).toBeNull();
+    expect(parseSessionFork({ session, draft: "", attachments: [] })).toBeNull();
     expect(parseMessageSnapshot(snapshotWith({ session }))).toBeNull();
   });
 
@@ -220,7 +217,7 @@ describe("Session contract: eleven-key session", () => {
   ])("rejects a legacy %i-key session in list, snapshot and fork", (keyCount, legacy) => {
     expect(Object.keys(legacy)).toHaveLength(keyCount);
     expect(parseSessionList({ sessions: [legacy] })).toBeNull();
-    expect(parseSessionFork({ session: legacy, draft: "" })).toBeNull();
+    expect(parseSessionFork({ session: legacy, draft: "", attachments: [] })).toBeNull();
     expect(parseMessageSnapshot(snapshotWith({ session: legacy }))).toBeNull();
   });
 });
@@ -229,13 +226,13 @@ describe("Session contract: message thinking and step changes", () => {
   it("accepts and preserves thinking, null changes and edit/write changes", () => {
     const snapshot = snapshotWith();
 
-    expect(parseMessageSnapshot(snapshot)).toEqual({ ...snapshot, session: parsed(metaSession) });
+    expect(parseMessageSnapshot(snapshot)).toEqual(snapshot);
   });
 
   it("accepts the 1 and 50 element changes bounds", () => {
     for (const count of [1, 50]) {
       const snapshot = snapshotWith({ step: { changes: manyChanges(count) } });
-      expect(parseMessageSnapshot(snapshot)).toEqual({ ...snapshot, session: parsed(metaSession) });
+      expect(parseMessageSnapshot(snapshot)).toEqual(snapshot);
     }
   });
 
@@ -295,25 +292,24 @@ describe("Session contract: message thinking and step changes", () => {
 });
 
 describe("Session contract: list response through the API client", () => {
-  it("十一键接受：accepts a valid eleven-key list and keeps every value", async () => {
+  it("十一键接受：accepts a valid fourteen-key list and keeps every value", async () => {
     const body = { sessions: [metaSession, nullMetaSession, extendedSession] };
     for (const session of body.sessions) {
-      expect(Object.keys(session)).toHaveLength(11);
+      expect(Object.keys(session)).toHaveLength(14);
     }
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(body)));
 
-    await expect(createApiClient().listSessions()).resolves.toEqual({
-      sessions: body.sessions.map(parsed),
-    });
+    await expect(createApiClient().listSessions()).resolves.toEqual(body);
   });
 
   it.each([
-    ["a ten-key item without pinnedAt", withoutKey(metaSession, "pinnedAt")],
-    ["a ten-key item without archivedAt", withoutKey(metaSession, "archivedAt")],
+    ["a thirteen-key item without pinnedAt", withoutKey(metaSession, "pinnedAt")],
+    ["a thirteen-key item without archivedAt", withoutKey(metaSession, "archivedAt")],
     ["a legacy eight-key item", withoutExtension(metaSession)],
-    ["a twelve-key item with parentSessionId", { ...metaSession, parentSessionId: SESSION_ID }],
+    ["a fifteen-key item with parentSessionId", { ...metaSession, parentSessionId: SESSION_ID }],
     ["an item with scene chat", { ...metaSession, scene: "chat" }],
     ["an item with pendingApproval yes", { ...metaSession, pendingApproval: "yes" }],
+    ["an item with approvalMode auto", { ...metaSession, approvalMode: "auto" }],
     [
       "an item with a null workspaceId and temporaryWorkspace true",
       { ...metaSession, workspaceId: null, temporaryWorkspace: true },
