@@ -263,6 +263,7 @@ describe("压缩包列表：声明超大的长文件名记录", () => {
     expect(listing.entries.map((entry) => entry.path)).toEqual(["m0", "m1", "m2"]);
     expect(listing.truncated).toBe(true);
     expect(file.positions).toEqual([0, 1024, 2048]);
+    expect(file.maxLength()).toBeLessThanOrEqual(EXTENSION_LIMIT);
   });
 
   it("bomb.tgz：跳过 8 MiB 成员正文的途中时钟越过 5 秒 → 恰一项并置 truncated", async () => {
