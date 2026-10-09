@@ -306,7 +306,7 @@ Minimal mergeable slice: 12.1 一刀（纯函数与对齐，无附件时字节�
   - 新用例 `web/test/api-undo.test.ts`（225 行）：「撤回与转正方法」的字面量带 `attachments:[{path:"uploads/a.pdf",size:3}]` 逐值返回；既有不带 `attachments` 的两例（`:90-108`）同样留给 13.5。
   - fork / undo 两条是固定用例，不是新行为：`session-contract-composer.test.ts` 在 13.5 整文件删除后，它们是客户端层唯一的正向断言。它们的变异落在 `session-contract.ts`（`parseSessionFork` / `parseSessionUndo` 丢掉 `attachments` → 判红），PR 里注明。
   - 变异：空数组也发 `attachments` → 第二例红；非空时不发 → 第一、三例红；trim 或空串拒绝 / 省略 `message` → 第三例红；从 create / patch body 过滤任一新键 → 四键例与 `{"approvalMode":"yolo"}` 例红。服务端组 8、12 未合入，全部用 fetch 替身，不碰 `make smoke` 断言。
-- [ ] 13.2 `getComposerOptions()`：方法与严格解析（解析放 `session-contract.ts` 或新文件 `web/src/lib/composer-contract.ts`，视行数）。测试：同场景的 options 部分（合法逐值返回；四种非法响应拒绝（chat-web 场景的 THEN 列了四种；O1 之后加了 `efforts` 含 `auto`））。
+- [x] 13.2 `getComposerOptions()`：方法与严格解析（解析放 `session-contract.ts` 或新文件 `web/src/lib/composer-contract.ts`，视行数）。测试：同场景的 options 部分（合法逐值返回；四种非法响应拒绝（chat-web 场景的 THEN 列了四种；O1 之后加了 `efforts` 含 `auto`））。
   **实施注记（13.2，fixture 评审补充，#1022）**：
   - 计数漂移：任务与 issue 写「三种非法响应」，chat-web「新输入与两个新方法」的 THEN 列了四种——`approvalModes` 为空、`models` 元素缺 `defaultEffort`、`efforts` 含 `auto`（O1 后加）、`upload.maxFiles` 为 0。以场景为准四种全测，偏离记录写明。
   - 服务端 `GET /api/composer/options`（任务 8.5）未合入，`server/src` 搜不到该路径；本刀全部是 fetch 替身，不加 smoke / ui-walk 断言。

@@ -7,6 +7,7 @@ import {
 } from "./api-json.js";
 import { createSessionMethods } from "./api-sessions.js";
 import { createUploadMethods, type UploadedFile } from "./api-upload.js";
+import type { ComposerOptions } from "./composer-contract.js";
 import type {
   ChatMessageSnapshot,
   ChatPromptAccepted,
@@ -191,6 +192,7 @@ export type ApiClient = {
     decision: "allow" | "deny",
     options?: ApiRequestOptions,
   ): Promise<ChatSettledApproval>;
+  getComposerOptions(options?: ApiRequestOptions): Promise<ComposerOptions>;
   listCommands(workspaceId: string | null, options?: ApiRequestOptions): Promise<Command[]>;
   listProjectConfig(
     workspaceId: string | null,

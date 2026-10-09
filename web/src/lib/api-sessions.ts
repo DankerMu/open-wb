@@ -1,4 +1,5 @@
 import type { ApiClient, ApiClientOptions, ApiError } from "./api.js";
+import { parseComposerOptions } from "./composer-contract.js";
 import {
   isStopAccepted,
   parseMessageSnapshot,
@@ -77,6 +78,7 @@ export function createSessionMethods(
   | "forkSession"
   | "undoMessage"
   | "decideApproval"
+  | "getComposerOptions"
 > {
   return {
     async listSessions(options) {
@@ -282,6 +284,21 @@ export function createSessionMethods(
       }
 
       return approval;
+    },
+
+    async getComposerOptions(options) {
+      const response = await request(
+        "/api/composer/options",
+        getRequestOptions(options?.signal),
+        onUnauthorized,
+        200,
+      );
+      const composerOptions = parseComposerOptions(response);
+      if (!composerOptions) {
+        throw requestFailed(200);
+      }
+
+      return composerOptions;
     },
   };
 }
