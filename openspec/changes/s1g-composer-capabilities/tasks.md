@@ -387,7 +387,7 @@ Minimal mergeable slice: 10.1 一刀（`write` 尚无调用方；类型联合的
   - 失败响应都带 `Connection: close`（`rest.ts:62-65`）。实测 hurl 在 403、400 之后自动换新连接继续，`--retry 0` 与 Makefile 第 64 行不用改。请求体保持几个字节，避免服务端带着未读字节关连接。
   - 不清理上传的文件：delta 第 20 行明写正式空间 `uploads/` 里的冒烟文件留着。每跑一遍加两个文件，同一沙箱本地连跑约 500 遍后编号用尽变 409；CI 每次是新沙箱。
   - 守卫都不受影响：`make smoke` 按文件名列五个文件，`scripts/test-ci-harness.sh` 的 contract 不读 `smoke/*.hurl`，AGENTS.md:89 的「五文件」不变。`ci-uid-isolation.sh` 的 `check_snapshots_closed` 只看 `snapshots/` 下的 `manifest.json`，`reap_owned` 查的是进程。`web/e2e/ui-walk.spec.ts:312-316` 只断言三个夹具按钮可见，多一个 `uploads` 目录不碍事。
-  - 变异证据（改产品代码起本地服务跑 `make smoke`，或把对应字面量写错跑一次）：`upload.ts` 的 `link` 换成 `rename` → 第二次的 `name != upload_first` 红；`assertUploadName` 挪到 `sandbox.resolve` 之前 → 403 步红；去掉 `removeAllContentTypeParsers` → 400 步红；去掉路由的 preParsing 归属检查 → lisi 的 404 步红；`size` 字面量写成 8 → 红。
+  - 变异证据（实测，#1016；每条改产品代码 → 重新 build → 按 CI 方式跑冒烟 → 改回）：`size` 字面量写成 8 → 红；`upload.ts` 的 `link` 换成 `rename` → 红，但落在第一次上传（得 500：随后的 `unlink(temp)` 抛 ENOENT），再让临时文件清理容忍不存在才落到第二次的编号正则与 `name != upload_first`；`assertUploadName` 挪到 `sandbox.resolve` 之前 → 403 步红（得 400）。**两条保持绿色，冒烟在 HTTP 层区分不了**：去掉 `removeAllContentTypeParsers`（`{}` 被解析成对象，路由因 body 不是流回同一个 400 信封）、去掉路由 preParsing 的归属检查（`sandbox.resolve` 自己回 404，变的只是先拒绝还是先读 body）。这两道防线只由 `server/test/workspace-upload-rest.test.ts` 钉住；冒烟的 400、404 两步钉的是对外行为，引用 11.6 作证据时（如 18.5）不要把它算作这两道防线的证据。
 
 Suggested fixture level: expanded - 文件写入与路径安全、资源上限与大输入、部分输出清理、账号隔离；Critical Path
 Minimal mergeable slice: 11.1 一刀（纯 IO，带测试；导出被 11.2 引用前由其测试引用，knip 配置若报未引用则与 11.2 同刀）；11.2 + 11.3 + 11.5 一刀；11.4 一刀；11.6 随第二刀
