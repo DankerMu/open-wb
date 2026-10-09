@@ -252,6 +252,18 @@ export function useSessionActions(
     };
   }
 
+  /** 登记一次 PATCH：`track()` 的 fence 之外另加一条——是该「会话 + 键」最后发出的请求。 */
+  function trackLatest(sessionId: string, key: MetaKey) {
+    const sequenceKey = `${sessionId}:${key}`;
+    const sequence = (sequencesRef.current.get(sequenceKey) ?? 0) + 1;
+    sequencesRef.current.set(sequenceKey, sequence);
+    const request = track();
+    return {
+      ...request,
+      current: () => request.current() && sequence === sequencesRef.current.get(sequenceKey),
+    };
+  }
+
   /** 发出一次 PATCH。两个回调只在响应通过 fence 时调用；`succeeded` 调用前响应视图已合并。 */
   function send(
     sessionId: string,
@@ -260,23 +272,18 @@ export function useSessionActions(
     succeeded: () => void,
     failed: (error: unknown) => void,
   ) {
-    const sequenceKey = `${sessionId}:${key}`;
-    const sequence = (sequencesRef.current.get(sequenceKey) ?? 0) + 1;
-    sequencesRef.current.set(sequenceKey, sequence);
-    const request = track();
-    /** fence 之外另加一条：是该「会话 + 键」最后发出的请求。 */
-    const current = () => request.current() && sequence === sequencesRef.current.get(sequenceKey);
+    const request = trackLatest(sessionId, key);
     void client
       .patchSession(sessionId, patch, { signal: request.signal })
       .finally(request.release)
       .then(
         (view) => {
-          if (!current()) return;
+          if (!request.current()) return;
           merge(client, view, key);
           succeeded();
         },
         (error: unknown) => {
-          if (current()) failed(error);
+          if (request.current()) failed(error);
         },
       );
   }
@@ -451,13 +458,17 @@ export function useSessionActions(
   /**
    * 能力行控件（权限档位；模型与强度共用）的提交：恰一次 PATCH。返回的 promise 在任何结果下都落定、
    * 从不 reject——控件靠它解除自己的在途禁用，所以不走 `send()`（它的回调被 fence 挡掉时不调用）。
-   * 发起时清掉输入框上的提示。200 且通过 fence：把响应视图的三个设置键合并进列表与快照，不看此刻
-   * 选中的是哪个会话；显示值只来自这次合并，不做乐观更新。失败：仅当通过 fence、此刻选中的仍是
-   * `sessionId` 且不是 401 时，把信封文案写到输入框上——切走后迟到的失败不改界面。
+   * 发起时清掉输入框上的提示。fence 与 `send()` 同一条：只采用该会话最后发出的那次设置提交的结果
+   * （三个控件共用一个序号，响应是完整视图），更早发出的迟到响应不合并、不提示。接受的取舍：同一会话
+   * 两次设置提交重叠而后发的那次失败时，先发那次的成功响应也被丢掉，显示停在旧值直到下一次重读列表。
+   * 200 且通过 fence：
+   * 把响应视图的三个设置键合并进列表与快照，不看此刻选中的是哪个会话；显示值只来自这次合并，不做乐观
+   * 更新。失败：仅当通过 fence、此刻选中的仍是 `sessionId` 且不是 401 时，把信封文案写到输入框上——
+   * 切走后迟到的失败不改界面。
    */
   function patchComposer(sessionId: string, patch: ComposerPatch): Promise<void> {
     page.setPromptError(null);
-    const request = track();
+    const request = trackLatest(sessionId, "composer");
     return client
       .patchSession(sessionId, patch, { signal: request.signal })
       .finally(request.release)

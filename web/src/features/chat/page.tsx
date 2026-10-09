@@ -88,6 +88,7 @@ export function ChatPage() {
         generating={session.generating}
         historyError={session.historyError}
         historyView={historyView}
+        modelId={selected?.modelId}
         onAnswerApproval={session.answerApproval}
         onChangeDraft={session.setDraft}
         onFork={session.forkTurn}
@@ -98,6 +99,7 @@ export function ChatPage() {
         onSubmit={session.submitComposer}
         onUndo={session.undoTurn}
         promptError={session.promptError}
+        reasoningEffort={selected?.reasoningEffort}
         requestedSessionId={requestedSessionId}
         search={search}
         sendDisabled={session.sendDisabled}

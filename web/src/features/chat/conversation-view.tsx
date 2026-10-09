@@ -15,6 +15,7 @@ import { CapabilityBar } from "./capability-bar.js";
 import { Composer } from "./composer.js";
 import { ComposerDock } from "./composer-dock.js";
 import { Thread } from "./message-thread.js";
+import { ModelPicker } from "./model-picker.js";
 import type { useSlashMenu } from "./slash-menu.js";
 import type { ChatState } from "./stream.js";
 import type { TranscriptHandle } from "./thread-viewport.js";
@@ -65,6 +66,45 @@ function permissionSlot({
   };
 }
 
+/**
+ * 输入框右组的模型与强度控件：输入框选项未取得时没有；已选会话取其视图的模型与强度、选择即提交 PATCH（视图
+ * 还没解析出来时没有）；欢迎态读写页面内存里选过的值。`key` 是会话 id：换会话即重挂，在途禁用不带过去。
+ */
+function modelSlot({
+  composerOptions,
+  modelId,
+  onPatchComposer,
+  reasoningEffort,
+  requestedSessionId,
+  welcome,
+}: Pick<
+  ConversationViewProps,
+  | "composerOptions"
+  | "modelId"
+  | "onPatchComposer"
+  | "reasoningEffort"
+  | "requestedSessionId"
+  | "welcome"
+>): ReactNode {
+  if (composerOptions === null) return null;
+  if (!requestedSessionId) {
+    return <ModelPicker key="" options={composerOptions} session={null} welcome={welcome} />;
+  }
+  if (modelId === undefined || reasoningEffort === undefined) return null;
+  return (
+    <ModelPicker
+      key={requestedSessionId}
+      options={composerOptions}
+      session={{
+        modelId,
+        patch: (patch) => onPatchComposer(requestedSessionId, patch),
+        reasoningEffort,
+      }}
+      welcome={welcome}
+    />
+  );
+}
+
 type ConversationViewProps = {
   /** 当前会话视图的权限档位；欢迎态与会话还没解析出来时为 undefined。 */
   approvalMode: ChatSession["approvalMode"] | undefined;
@@ -76,7 +116,7 @@ type ConversationViewProps = {
   /** 当前账号的 API client；产物卡经它按需拉取预览。 */
   client: ApiClient;
   composerDisabled: boolean;
-  /** 输入框选项（可用档位与缺省值）；拉取中或失败时为 null，权限档位控件不渲染。 */
+  /** 输入框选项（可用档位、模型白名单与缺省值）；拉取中或失败时为 null，权限、模型与强度控件都不渲染。 */
   composerOptions: ComposerOptions | null;
   /** 输入框元素：回到欢迎态后由会话页聚焦它，「+」菜单点选后也聚焦它。 */
   composerRef: RefObject<HTMLTextAreaElement | null>;
@@ -84,13 +124,18 @@ type ConversationViewProps = {
   generating: boolean;
   historyError: string | null;
   historyView: ChatState | null;
+  /** 当前会话视图的模型；欢迎态与会话还没解析出来时为 undefined。 */
+  modelId: ChatSession["modelId"] | undefined;
   onAnswerApproval: AnswerApproval;
   onChangeDraft(value: string): void;
   onFork(messageId: number): Promise<void>;
   /** 已选会话的设置提交（恰一次 PATCH）；返回的 promise 在任何结果下都落定。 */
   onPatchComposer(
     sessionId: string,
-    patch: { approvalMode: ChatSession["approvalMode"] },
+    patch: Pick<
+      Parameters<ApiClient["patchSession"]>[1],
+      "approvalMode" | "modelId" | "reasoningEffort"
+    >,
   ): Promise<void>;
   onRegenerate(): Promise<void>;
   /** 现有发送路径的文本入口：运行时适配器的 `onNew` 委托给它。 */
@@ -99,6 +144,8 @@ type ConversationViewProps = {
   onSubmit(event: FormEvent<HTMLFormElement>): void;
   onUndo: ComponentProps<typeof Thread>["onUndo"];
   promptError: string | null;
+  /** 当前会话视图的推理强度（模型不支持推理时为 null）；欢迎态与会话还没解析出来时为 undefined。 */
+  reasoningEffort: ChatSession["reasoningEffort"] | undefined;
   requestedSessionId: string | null;
   /** 对话内搜索：搜索框（未打开时为 null）、当前匹配的消息 id、交给转录区的句柄。 */
   search: { box: ReactNode; currentId: number | null; handleRef: Ref<TranscriptHandle> };
@@ -131,6 +178,7 @@ export function ConversationView({
   generating,
   historyError,
   historyView,
+  modelId,
   onAnswerApproval,
   onChangeDraft,
   onFork,
@@ -141,6 +189,7 @@ export function ConversationView({
   onSubmit,
   onUndo,
   promptError,
+  reasoningEffort,
   requestedSessionId,
   search,
   sendDisabled,
@@ -172,6 +221,14 @@ export function ConversationView({
     approvalMode,
     composerOptions,
     onPatchComposer,
+    requestedSessionId,
+    welcome,
+  });
+  const actions = modelSlot({
+    composerOptions,
+    modelId,
+    onPatchComposer,
+    reasoningEffort,
     requestedSessionId,
     welcome,
   });
@@ -237,6 +294,7 @@ export function ConversationView({
           <ArchivedNotice {...archived} />
         ) : (
           <Composer
+            actions={actions}
             capabilityBar={
               <CapabilityBar
                 choice={{

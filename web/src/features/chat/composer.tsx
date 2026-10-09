@@ -3,6 +3,7 @@
 // 后者只锁定输入框（历史加载中、分叉在途、连接器终止失败时只有后者为真）。
 import {
   type FormEvent,
+  Fragment,
   type KeyboardEvent,
   type ReactNode,
   type Ref,
@@ -16,6 +17,8 @@ import { Icon } from "../../ui/index.js";
 type StopTurn = () => Promise<"stopping" | null>;
 
 type ComposerProps = {
+  /** 工具栏右组最前面的控件（模型、推理强度）；不传时右组只有 `生成中` 与发送/停止键。 */
+  actions?: ReactNode;
   /** 工具栏的左组，即能力栏（「+」菜单、工作空间位）；不传时工具栏只有右组。 */
   capabilityBar?: ReactNode;
   disabled: boolean;
@@ -37,10 +40,11 @@ type ComposerProps = {
 };
 
 /**
- * 输入卡：候选面板、textarea、底部工具栏（能力栏是左组，`生成中` 与发送/停止键是右组）；提示行在卡外。
+ * 输入卡：候选面板、textarea、底部工具栏（能力栏是左组，`actions`、`生成中` 与发送/停止键是右组）；提示行在卡外。
  * 窄屏下工具栏可换行，右组作为一个整体落到下一行并靠右。
  */
 export function Composer({
+  actions,
   capabilityBar,
   disabled,
   draft,
@@ -106,6 +110,8 @@ export function Composer({
         >
           {capabilityBar}
           <div className="ml-auto flex flex-none items-center gap-2" data-slot="composer-actions">
+            {/* 包一层带固定 key 的 Fragment：`actions` 与停止键都以会话 id 为 key，直接做兄弟节点会相撞。 */}
+            <Fragment key="actions">{actions}</Fragment>
             {generating ? (
               <p className="m-0 text-[13px] text-(--wb-brand-primary-deep)" role="status">
                 生成中
