@@ -6,7 +6,9 @@
  * The write side of creation (#1005, design D4/D6): which raw values a new session row gets — the
  * request's, else the account's last choice (`account_composer_prefs`, migration 041), else NULL —
  * the upsert of that last choice, and whether the creation writes a `session.permission` audit.
- * All of it runs inside the caller's creation transaction; nothing here opens one.
+ * The write side of a PATCH (#1006, design D5): the same value checks against the session's own
+ * current model, the same upsert, and an audit only when the effective mode changes.
+ * All of it runs inside the caller's transaction; nothing here opens one.
  */
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { HttpError } from "../core/errors/index.js";
@@ -42,7 +44,7 @@ export function rawComposer(row: ComposerDbRow): Parameters<typeof effectiveComp
   };
 }
 
-/** The three keys of a create body as the route hands them over: strings, values unchecked. */
+/** The three keys of a create or PATCH body as the route hands them over: strings, unchecked. */
 export interface ComposerInput {
   approvalMode?: string;
   modelId?: string;
@@ -57,6 +59,14 @@ interface CreateComposer {
   given: Partial<ComposerDbRow>;
   /** The `to` of the creation's `session.permission` audit; null when none is written. */
   auditTo: ApprovalMode | null;
+}
+
+/** What `resolvePatchComposer` settles for one PATCH. */
+interface PatchComposer {
+  /** Only the columns the request named: written to the session row and to the last choice. */
+  given: Partial<ComposerDbRow>;
+  /** The effective modes before and after; null when they are the same (no audit). */
+  audit: { from: ApprovalMode; to: ApprovalMode } | null;
 }
 
 /** The seven effort names; `auto` is not one. */
@@ -81,21 +91,16 @@ const SET_REASONING_EFFORT = "reasoning_effort = excluded.reasoning_effort";
 const SET_UPDATED_AT = "updated_at = excluded.updated_at";
 
 /**
- * Reads the owner's last choice and validates the request's keys against the configuration — a
- * read only, so it goes first in the creation transaction; an invalid value throws `bad_request`
- * before anything is written or any directory made.
- * A mode above `approvalMaxMode` is refused, not stored and clamped. An effort needs a reasoning
- * model — the request's, else the effective one of the last choice — but is not checked against
- * that model's `efforts` (omp clamps). Keys the request does not name copy the last choice's raw
- * columns as they are, valid under today's configuration or not (design D3: clamped on read).
+ * Validates the request's keys against the configuration and returns the columns they name; an
+ * invalid value throws `bad_request`. A mode above `approvalMaxMode` is refused, not stored and
+ * clamped. An effort needs a reasoning model — the request's, else `fallbackModelId()` — but is not
+ * checked against that model's `efforts` (omp clamps).
  */
-export function resolveCreateComposer(
-  db: DatabaseSync,
-  ownerId: string,
+function checkComposerInput(
   input: ComposerInput,
   config: ComposerConfig,
-): CreateComposer {
-  const last = (db.prepare(SELECT_PREFS).get(ownerId) as ComposerDbRow | undefined) ?? NO_CHOICE;
+  fallbackModelId: () => string,
+): Partial<ComposerDbRow> {
   const { models } = config.modelCatalog;
   const given: Partial<ComposerDbRow> = {};
   if (input.approvalMode !== undefined) {
@@ -112,17 +117,60 @@ export function resolveCreateComposer(
     given.model_id = input.modelId;
   }
   if (input.reasoningEffort !== undefined) {
-    const modelId =
-      given.model_id ??
-      effectiveComposer(rawComposer({ ...NO_CHOICE, model_id: last.model_id }), config).modelId;
+    const modelId = given.model_id ?? fallbackModelId();
     const reasons = models.find((model) => model.id === modelId)?.reasoning === true;
     if (!Object.hasOwn(EFFORTS, input.reasoningEffort) || !reasons) {
       throw new HttpError("bad_request");
     }
     given.reasoning_effort = input.reasoningEffort as Effort;
   }
+  return given;
+}
+
+/**
+ * Reads the owner's last choice and validates the request's keys (`checkComposerInput`; the
+ * effort's model, when the request names none, is the effective one of the last choice) — a read
+ * only, so it goes first in the creation transaction; an invalid value throws `bad_request` before
+ * anything is written or any directory made.
+ * Keys the request does not name copy the last choice's raw columns as they are, valid under
+ * today's configuration or not (design D3: clamped on read).
+ */
+export function resolveCreateComposer(
+  db: DatabaseSync,
+  ownerId: string,
+  input: ComposerInput,
+  config: ComposerConfig,
+): CreateComposer {
+  const last = (db.prepare(SELECT_PREFS).get(ownerId) as ComposerDbRow | undefined) ?? NO_CHOICE;
+  const given = checkComposerInput(
+    input,
+    config,
+    () => effectiveComposer(rawComposer({ ...NO_CHOICE, model_id: last.model_id }), config).modelId,
+  );
   const row = { ...last, ...given };
   return { row, given, auditTo: creationAuditTo(row.approval_mode, config) };
+}
+
+/**
+ * The PATCH counterpart, a pure function of the session's `current` raw columns: validates the
+ * request's keys (the effort's model, when the request names none, is the session's current
+ * effective one — not the account's last choice) and compares the effective mode before and after.
+ * session-permission-tier「档位变更审计」: `from` / `to` are effective modes, so re-choosing the current
+ * mode, or replacing a raw mode the cap already clamps by the mode it reads as, is no change.
+ */
+export function resolvePatchComposer(
+  current: ComposerDbRow,
+  input: ComposerInput,
+  config: ComposerConfig,
+): PatchComposer {
+  const given = checkComposerInput(
+    input,
+    config,
+    () => effectiveComposer(rawComposer(current), config).modelId,
+  );
+  const from = effectiveMode(current.approval_mode, config);
+  const to = effectiveMode({ ...current, ...given }.approval_mode, config);
+  return { given, audit: from === to ? null : { from, to } };
 }
 
 /**
@@ -171,8 +219,11 @@ function creationAuditTo(
   if (approvalMode === null) {
     return null;
   }
-  const effectiveOf = (mode: ApprovalMode | null): ApprovalMode =>
-    effectiveComposer(rawComposer({ ...NO_CHOICE, approval_mode: mode }), config).approvalMode;
-  const effective = effectiveOf(approvalMode);
-  return effective === effectiveOf(null) ? null : effective;
+  const effective = effectiveMode(approvalMode, config);
+  return effective === effectiveMode(null, config) ? null : effective;
+}
+
+/** The effective mode of a raw one under this configuration: it depends on no other column. */
+function effectiveMode(mode: ApprovalMode | null, config: ComposerConfig): ApprovalMode {
+  return effectiveComposer(rawComposer({ ...NO_CHOICE, approval_mode: mode }), config).approvalMode;
 }

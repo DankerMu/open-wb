@@ -10,6 +10,8 @@
  * touches only the given columns, (h) a failing `session.permission` audit rolls the whole
  * creation back on both paths, (i) invalid values are refused before the temporary workspace is
  * made. The REST scenarios are in session-composer-rest.test.ts.
+ *
+ * Issue #1006 (task 8.3): the `yolo` row of (c) is written by `patchSession`, not planted.
  */
 import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -318,10 +320,24 @@ describe("会话视图发出三键：原始列经夹取与回落后进入视图"
     });
   });
 
-  it("(c) 调低上界：同一库先后以 yolo、write、yolo 开 store，视图读 yolo / write / yolo，列值不变", () => {
+  it("(c) 调低上界：PATCH 写出的 yolo 行，同一库先后以 yolo、write、yolo 开 store，视图读 yolo / write / yolo，列值与审计不变", () => {
     const db = openDatabase();
-    const session = openStores(db, TEST_COMPOSER).store.create("u1").id;
-    plant(db, session, "yolo", null, null);
+    const opened = openStores(db, TEST_COMPOSER);
+    const session = opened.store.create("u1").id;
+    // 未绑定空间的行：这一条 session.permission 的 workspaceId 为 null。
+    expect(
+      composerOf(opened.metadata.patchSession("u1", session, { approvalMode: "yolo" })),
+    ).toEqual({ approvalMode: "yolo", modelId: "deepseek-v4.1-flash", reasoningEffort: "high" });
+    expect(
+      db.prepare("SELECT kind, actor_id, workspace_id, detail FROM audit_events").all(),
+    ).toEqual([
+      {
+        kind: "session.permission",
+        actor_id: "u1",
+        workspace_id: null,
+        detail: JSON.stringify({ sessionId: session, from: "write", to: "yolo" }),
+      },
+    ]);
     const read: unknown[] = [];
 
     for (const approvalMaxMode of ["yolo", "write", "yolo"] as const) {
@@ -333,6 +349,8 @@ describe("会话视图发出三键：原始列经夹取与回落后进入视图"
     }
 
     expect(read).toEqual(["yolo", "yolo", "write", "yolo", "yolo", "yolo"]);
+    // 换上界重开与读取都不是用户动作：审计仍只有 PATCH 的那一条。
+    expect(count(db, "audit_events")).toBe(1);
   });
 });
 
