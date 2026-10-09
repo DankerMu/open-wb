@@ -207,11 +207,12 @@ Minimal mergeable slice: atomic - 一个纯函数加它的 facade 类型，测�
 
 ## 5. http-service-skeleton — 十二个配置键（纯配置 seam）
 
-- [ ] 5.1 `server/src/agent-config.ts`（或并列的新文件 `server/src/preview-config.ts`，由 `resolveServerConfig` 合并）：解析 `PREVIEW_PORT`、`PREVIEW_ORIGIN`、`PREVIEW_CACHE_DIR`、`OFFICE_BIN`、`OFFICE_CONVERT_TIMEOUT_MS`、`OFFICE_CONVERT_CONCURRENCY`、
+- [x] 5.1 `server/src/agent-config.ts`（或并列的新文件 `server/src/preview-config.ts`，由 `resolveServerConfig` 合并）：解析 `PREVIEW_PORT`、`PREVIEW_ORIGIN`、`PREVIEW_CACHE_DIR`、`OFFICE_BIN`、`OFFICE_CONVERT_TIMEOUT_MS`、`OFFICE_CONVERT_CONCURRENCY`、
   `PREVIEW_TEXT_MAX_BYTES`、`PREVIEW_IMAGE_MAX_BYTES`、`PREVIEW_DOCUMENT_MAX_BYTES`、`PREVIEW_NOTEBOOK_MAX_BYTES`、`PREVIEW_ARCHIVE_MAX_ENTRIES`、`TRASH_RETENTION_DAYS`，缺省值与校验按 http-service-skeleton「服务启动与装配」；
   错误只命名键、不回显值。本任务只到 `ServerConfig` 的字段，不接任何消费方。
-- [ ] 5.2 测试（`server/test/server-config.test.ts` 或新文件）：「预览与文件键的缺省与覆盖」的解析部分；「预览与文件键的非法值」逐键逐值；既有按键数断言的用例按「主规格当时的项数 + 12」更新（C、S1g 之后为二十三项，加十二为三十五项；http-service-skeleton「Shared agent module assembly」的场景「Pure source and compiled configuration identity」同步）；`server-entry-silent.test.ts` 的非法配置路径加两三个新键的样本（编译入口 nonzero、恰一行 generic 记录、无副作用）。
-- [ ] 5.3 变异证据：让 `PREVIEW_PORT` 拒绝 `0` → 缺省用例判红；让 `PREVIEW_ORIGIN` 接受带路径的值 → 非法值用例判红；错误 message 带上输入值 → 「不含输入值」断言判红。
+  实施注记见 `implementation-notes.md`「5.1–5.3（#1054）」。
+- [x] 5.2 测试（`server/test/server-config.test.ts` 或新文件）：「预览与文件键的缺省与覆盖」的解析部分；「预览与文件键的非法值」逐键逐值；既有按键数断言的用例按「主规格当时的项数 + 12」更新（C、S1g 之后为二十三项，加十二为三十五项；http-service-skeleton「Shared agent module assembly」的场景「Pure source and compiled configuration identity」同步）；`server-entry-silent.test.ts` 的非法配置路径加两三个新键的样本（编译入口 nonzero、恰一行 generic 记录、无副作用）。
+- [x] 5.3 变异证据：让 `PREVIEW_PORT` 拒绝 `0` → 缺省用例判红；让 `PREVIEW_ORIGIN` 接受带路径的值 → 非法值用例判红；错误 message 带上输入值 → 「不含输入值」断言判红。
 
 Suggested fixture level: expanded - 生产配置面新增十二个键，非法值必须在任何副作用之前失败
 Minimal mergeable slice: atomic - 纯解析函数与其测试；没有消费方时合入不改变任何运行期行为

@@ -91,3 +91,35 @@
 - M7 去掉 `:23` 的 NUL 判定 → 预期不可观察（`lstatSync` 对含 NUL 的路径抛错，落到 `:46` 仍被拒，只是原因不同；测试不钉原因）。
 - M8 facade 把审计挪到抛出之后或去掉 → `:102` 用例的长度断言红。
 - 不新增也不修改功能验收清单行：纯服务端，没有路由使用新 op，无用户可见变化。
+
+## 5.1–5.3（#1054）
+
+- 不触及 Critical Path：纯解析、无消费方、不放宽任何边界，`sandbox.resolve`、omp 子进程、审批档位都不动；一个评审席即可。服务端纯函数，无用户可见变化，no checklist rows；文档不动（十二键一览归 28.1 的 ADR-0014 运维一节，#1118）。
+- 落点：新文件 `server/src/preview-config.ts`，沿 `model-catalog.ts` 的先例；导出 `interface PreviewSettings`（上表十二字段，两个可选）与 `resolvePreviewSettings(env: Record<string, string | undefined>, repoRoot: string): PreviewSettings`，无任何 fs / IO。`server/src/server.ts:57` 改为 `ServerConfig extends AgentSettings, PreviewSettings`，`resolveServerConfig` 末尾展开它，`:65` 注释改成「三十五项——四项自有，agent 十九项，预览与文件十二项」。`appAssemblyOf`、`sessionRuntimeOf`、`app.ts`、启动次序都不动。
+- 复用：`server/src/agent-config.ts`（223 行）把 `resolvePositiveInteger` 与 `resolveOwnedPath` 改为导出，由 `preview-config.ts` 导入，不反向导入。knip 不报：两个函数有导入方，接口成员不计（S1g 2.1 先例）。`DEFAULT_*` 常量不导出，测试写规格字面量。
+- 逐键实现：八个数值键用 `resolvePositiveInteger`；`PREVIEW_CACHE_DIR` 用 `resolveOwnedPath`；`PREVIEW_PORT` 另写一个 `0..65535` 的函数（正则 `/^[0-9]+$/u` 加前导零判定加范围）；`PREVIEW_ORIGIN` 用正则字面量 `/^https?:\/\/[^/?#\s]+$/u`（不用 `new RegExp`，不 trim，不加 `i`）；`OFFICE_BIN` 用 `isAbsolute(raw)`，不绑 repo root、不规范化。可选键缺席时对象上不出现该键（`exactOptionalPropertyTypes`，同 `ompUser`）。
+- 错误文本逐字钉住（与输入无关）：数值键沿用 `<KEY> must be a canonical ASCII decimal` 与 `<KEY> must be within 1..2147483647`；`PREVIEW_PORT must be a canonical ASCII decimal` 与 `PREVIEW_PORT must be within 0..65535`；`PREVIEW_ORIGIN must be a scheme and authority only`（空串同文）；`PREVIEW_CACHE_DIR must not be empty`；`OFFICE_BIN must be an absolute path`（空串同文）。
+- 漂移一：`server/test/server-config.test.ts` 已 771 行，不得加行。新建 `server/test/preview-config.test.ts`，放缺省、覆盖、非法值，以及「Pure source and compiled configuration identity」的十二键部分（`SOURCE_ENTRY` 与 `DIST_ENTRY` 两个 URL、`process.chdir(tmpdir())` 下，缺省与覆盖 `toEqual`）。
+- 漂移二：5.2 点名的 `server-entry-silent.test.ts`（60 行）只有 import-without-main 一例，没有「非法配置路径」，不改它。编译入口用例照 #989 落在 `server/test/omp-max-processes-config.test.ts`（338 行）第四个 `describe`，复用其 `scratch`、`refused`、`FAILED_RECORD`、`NODE_SQLITE_WARNING`。
+- 漂移三：不存在「按键数断言」的既有用例。`git grep` 二十三 / twenty-three 在代码里只中 `server/src/server.ts:65` 一条注释；`server-config.test.ts` 的 `toEqual(base)` 类断言在加键后保持绿。因此没有既有测试必须改，计数「三十五」不被任何机械检查钉住，issue 里 Width exception 的「同时变红」不成立，写进偏离记录。
+- 解析层用例：(a) `{}` 下十二字段逐个 `toBe` 缺省，`Object.hasOwn` 对 `previewOrigin`、`officeBin` 为 false，显式 `undefined` 同缺省；(b) 十二键全给非缺省（`PREVIEW_ORIGIN=https://preview.example.test`、relative `PREVIEW_CACHE_DIR=cache/p` 得 `join(REPO_ROOT,"cache","p")`、`OFFICE_BIN=/opt/x/../soffice` 原样）后，与 base 不同的字段集合恰为这十二个；(c) 逐键单独覆盖时其余十一项仍为缺省；(d) 边界：`PREVIEW_PORT` 显式 `"0"`、`"1"`、`"65535"` 被接受，八个数值键的 `"1"` 与 `"2147483647"` 被接受，`PREVIEW_ORIGIN` 接受 `http://127.0.0.1:8080` 与 `https://[::1]:9443`。
+- 非法值表按规格逐键逐值共 70 例（6 + 5 + 1 + 2 + 8×7），每例用 `expectKeyOnlyMessage` 式的整句相等加 `toContain(key)`；带哨兵的值另断言 message 不含它（空串跳过，先例在 `omp-max-processes-config.test.ts:127`）。规格之外补：`PREVIEW_PORT` 的 `" 1"`、`"+1"`、`"1e2"`、`"00"`；`PREVIEW_ORIGIN` 的 `https://`、`HTTPS://a.test`、`" https://a.test"`、`https://a.test?x`、`https://a.test#f`、`"https://a.test\n"`、`https://a b`；`OFFICE_BIN` 的 `./soffice`、`bin/soffice`。
+- 编译入口用例：同一张 70 例表（就地 `flatMap` 生成，另一条 `toHaveLength(70)`），每例断言 `{code:1, signal:null}`、stdout 为空、stderr 去掉 sqlite 警告后整行等于 `{"event":"server_start_failed","reason":"config"}\n` 且不含键名、`db` / `state` / `sandbox` / `bin` 与 `compiled.root/var` 都不存在、端口拒连；非空取值另断言 stderr 不含该值。5.2 写「两三个样本」，但场景 THEN 写「每一例」，按场景与 #989 先例取全表，记入偏离记录。
+- 规格没写的分支，取最简处理并记偏离：`PREVIEW_PORT` 等于 `PORT` 不在配置层拒绝（留给 13.1 的 `preview_listen` 失败）；`PREVIEW_ORIGIN` 只按正则，不做 `new URL` 解析；`PREVIEW_CACHE_DIR` 不查与 `SANDBOX_ROOT` / `OMP_STATE_DIR` 的包含关系；`OFFICE_BIN` 不查存在性、空白与 NUL；多键同时非法时点名哪一个不保证。
+- 场景「预览与文件键的缺省与覆盖」里「预览监听器绑定端口」与 `server_started` 四键属 13.2（#1070），本刀只做「解析出的配置」半边，PR 描述写明。
+- 守卫：`preview-config.ts` 约 90 行，`agent-config.ts` 只加两个 `export`，`omp-max-processes-config.test.ts` 约到 400 行，新测试文件约 250 行，都远离 800。jscpd 若把端口函数判为与 `server.ts` 的 `resolvePort` 重复，就在 `agent-config.ts` 抽一个带上下界的整数解析函数，由 `resolvePositiveInteger` 与端口共用，既有两句错误文本不变；不加 ignore。测试里不出现真实主机名、IP 或像密钥的串。
+- 变异表（进 PR 描述；红在 `preview-config.test.ts` 的称「解析层」，红在 `omp-max-processes-config.test.ts` 的称「入口层」）：
+- 任一缺省值改动 → 解析层 (a)。
+- `PREVIEW_PORT` 拒绝 `0` → 解析层 (d) 的显式 `"0"`。5.3 写「缺省用例判红」不准：未设置时不经过范围判定。
+- `PREVIEW_PORT` 上界改 65536，或接受 `01` → 解析层非法值 `65536` / `01`。
+- 数值键下界改 0，或上界加 1 → 解析层 `0` / `2147483648`；上界减 1 → (d) 的 `2147483647`。
+- `PREVIEW_ORIGIN` 接受带路径的值、去掉 `$`、加 `i` 或先 trim → 解析层对应非法值。
+- `OFFICE_BIN` 改用 `resolveOwnedPath` → 解析层 `soffice` 用例；空串放行为未配置 → 解析层空值用例。
+- `PREVIEW_CACHE_DIR` 空串放行 → 解析层空值用例。
+- 任一 message 拼入输入值 → 整句相等断言。
+- `resolveServerConfig` 漏掉展开 → 解析层 (a) 与入口层全表。
+- 两键读串（如 TEXT 读成 IMAGE）→ 解析层 (c)。
+- 入口吞掉配置错误继续启动 → 入口层 `code:1` 与端口拒连。
+- 不可观察：`:65` 注释里的数字、展开次序。
+- 十二个键 → 字段名与缺省（规则以规格「服务启动与装配」的十二键一段为准；前四个字段名由场景「预览与文件键的缺省与覆盖」给定，后八个由本注记定）：`PREVIEW_PORT` → `previewPort`（`0`；canonical 十进制 `0..65535`）；`PREVIEW_ORIGIN` → `previewOrigin?`（缺席；给出时整体匹配 `^https?://[^/?#\s]+$`，空串非法）；`PREVIEW_CACHE_DIR` → `previewCacheDir`（repo root 下 `var/preview-cache`；relative 相对 repo root，空串非法）；`OFFICE_BIN` → `officeBin?`（缺席即转换关闭；给出时须为绝对路径，空串非法，不查存在性）；`OFFICE_CONVERT_TIMEOUT_MS` → `officeConvertTimeoutMs`（`60000`）；`OFFICE_CONVERT_CONCURRENCY` → `officeConvertConcurrency`（`2`）；`PREVIEW_TEXT_MAX_BYTES` → `previewTextMaxBytes`（`1048576`）；`PREVIEW_IMAGE_MAX_BYTES` → `previewImageMaxBytes`（`20971520`）；`PREVIEW_DOCUMENT_MAX_BYTES` → `previewDocumentMaxBytes`（`104857600`）；`PREVIEW_NOTEBOOK_MAX_BYTES` → `previewNotebookMaxBytes`（`10485760`）；`PREVIEW_ARCHIVE_MAX_ENTRIES` → `previewArchiveMaxEntries`（`1000`）；`TRASH_RETENTION_DAYS` → `trashRetentionDays`（`30`）。后八个数值键与 `OMP_IDLE_MS` 同一解析纪律（`1..2147483647`）。
+- 安全缺省由解析层用例钉住：`PREVIEW_ORIGIN`、`OFFICE_BIN` 缺省时对象上没有该键；`OFFICE_BIN` 的相对名（`soffice`、`./soffice`）被拒（这条路径之后会进 sudoers 行）；`PREVIEW_CACHE_DIR` 空串被拒（不得落成 repo root）；各上限与 `TRASH_RETENTION_DAYS` 的 `0` 被拒。

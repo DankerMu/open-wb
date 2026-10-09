@@ -139,7 +139,7 @@ export function resolveAgentSettings(
   };
 }
 
-function resolveOwnedPath(
+export function resolveOwnedPath(
   raw: string | undefined,
   relativeDefault: string,
   repoRoot: string,
@@ -155,7 +155,11 @@ function resolveOwnedPath(
 }
 
 /** canonical ASCII decimal 正整数 1..2147483647；错误只命名键，不回显输入值。 */
-function resolvePositiveInteger(raw: string | undefined, fallback: number, key: string): number {
+export function resolvePositiveInteger(
+  raw: string | undefined,
+  fallback: number,
+  key: string,
+): number {
   if (raw === undefined) {
     return fallback;
   }
