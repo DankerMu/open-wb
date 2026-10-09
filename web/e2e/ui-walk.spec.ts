@@ -10,6 +10,7 @@ import {
 import { holdRoute } from "./route-hold.js";
 import { allowFirstApproval, expectAllowedBar, generatingStatus } from "./ui-walk-approval.js";
 import { type CreatedSessions, watchCreatedSessions } from "./ui-walk-cleanup.js";
+import { walkComposer } from "./ui-walk-composer.js";
 import { createSessionFromSidebar } from "./ui-walk-create-session.js";
 import { armGate, controlOrigin, deleteGate, gatePhase, releaseGate } from "./ui-walk-gate.js";
 import {
@@ -72,6 +73,19 @@ test("fresh browser journey logs in, walks four routes, persists theme, and logs
   const options = { watchAssets: project === "desktop-light" };
   await runWithBrowserErrorOracle(page, baseURL, options, (oracle) =>
     walkProductionOrigin(page, oracle, project),
+  );
+});
+
+// 输入框能力（chat-harness「输入框能力的冒烟与走查」）：独立 test，自带登录、退出与 oracle 实例；五步在 helper。
+// 不并进上面的旅程：它在 mobile-dark 下已接近单测时限。
+test("composer journey walks the capability row, confirms the permission tier, reads the model menus and sends an attachment", async ({
+  baseURL,
+  page,
+}, testInfo) => {
+  const project = walkProject(testInfo.project.name);
+  const options = { watchAssets: project === "desktop-light" };
+  await runWithBrowserErrorOracle(page, baseURL, options, (oracle) =>
+    walkComposer(page, oracle, project, EXPECTED_REPLY),
   );
 });
 
