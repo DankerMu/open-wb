@@ -11,6 +11,7 @@ import { HttpError } from "../src/core/errors/index.js";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import {
   type ApprovalWorld,
+  type ApprovalWorldOptions,
   openApprovalWorld,
   rejection,
   settle,
@@ -151,13 +152,17 @@ export interface RegenWorld extends ApprovalWorld {
  * Real fake-omp world: opened as `approval` (the helper's only scenarios), switched to `branch`
  * before any spawn. `hold` gates the first child's stdout; `entries` appends `--branch-entry`.
  */
-export async function openRegenWorld(
-  options: { hold?: LineMatch; entries?: string[]; scenario?: string } = {},
-): Promise<RegenWorld> {
-  const world = await openApprovalWorld(
-    "approval",
-    options.hold === undefined ? {} : { hold: options.hold },
-  );
+export interface RegenWorldOptions extends Pick<ApprovalWorldOptions, "assembly"> {
+  hold?: LineMatch;
+  entries?: string[];
+  scenario?: string;
+}
+
+export async function openRegenWorld(options: RegenWorldOptions = {}): Promise<RegenWorld> {
+  const world = await openApprovalWorld("approval", {
+    ...(options.hold === undefined ? {} : { hold: options.hold }),
+    ...(options.assembly === undefined ? {} : { assembly: options.assembly }),
+  });
   world.rt.setScenario(options.scenario ?? "branch");
   const replies: OmpFrame[][] = [];
   const inner = world.rt.runtime.spawnImpl;

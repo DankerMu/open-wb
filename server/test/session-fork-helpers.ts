@@ -19,6 +19,7 @@ import {
   type LineMatch,
   openRegenWorld,
   QUESTION,
+  type RegenWorldOptions,
   regenerate,
   regenWorlds,
   rejectedCode,
@@ -215,9 +216,7 @@ export async function listedIds(world: RecordingWorld): Promise<string[]> {
 }
 
 /** A regenerate world (real fake-omp `branch`) with every spawn's live children sampled. */
-export async function openForkWorld(
-  options: { hold?: LineMatch; entries?: string[]; scenario?: string } = {},
-) {
+export async function openForkWorld(options: RegenWorldOptions = {}) {
   const world = await openRegenWorld(options);
   const liveAtSpawn = sampleSpawns({ runtime: world.rt.runtime, children: world.rt.children });
   return { ...world, liveAtSpawn };

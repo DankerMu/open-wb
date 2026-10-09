@@ -10,6 +10,13 @@
  * fork 201 body, `GET /api/sessions`, the public snapshot, SQLite columns (with `typeof`), the
  * admin `GET /api/audit` view, spawn argv and the probe turn's reported `cwd=`. Paths are compared
  * through realpath (macOS tmpdir is /var → /private/var).
+ *
+ * Issue #1007 (s1g-composer-capabilities task 8.4, design D5/D6): the fork copies the source's
+ * three RAW composer columns. Those worlds open the same assembly with the three-model whitelist
+ * and an approval cap; the source's columns come from `POST /api/sessions` with the three keys or,
+ * for values REST refuses, from a direct `UPDATE`. Oracles: the 201 view and list entry, the three
+ * columns with `typeof`, the account's last-choice row and the `session.permission` row count.
+ * The temp process's argv and the frames before the fork's first prompt are task group 9.
  */
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,10 +27,15 @@ import { afterEach, describe, expect, it } from "vitest";
 import { auditCount, REAL, settle } from "./session-approval-helpers.js";
 import { postSessionAction } from "./session-bodyless-rest-helpers.js";
 import { forkWorlds, openForkWorld, type Seeded, seedTwoTurns } from "./session-fork-helpers.js";
-import { SESSION_VIEW_KEYS } from "./session-meta-fixtures.js";
+import { SESSION_VIEW_KEYS, THREE_MODEL_CATALOG } from "./session-meta-fixtures.js";
 import { QUESTION, type RegenWorld, sendPrompt } from "./session-regenerate-helpers.js";
 import { cookieFor, getSessionMessages } from "./session-rest-helpers.js";
-import { OWNER_ID, requiredCall, waitForTurn } from "./session-supervisor-helpers.js";
+import {
+  type OpenSessionOptions,
+  OWNER_ID,
+  requiredCall,
+  waitForTurn,
+} from "./session-supervisor-helpers.js";
 import { seedUnboundSession } from "./support/temporary-workspace.js";
 
 const JSON_TYPE = "application/json";
@@ -56,6 +68,25 @@ interface SessionView {
   scene: Scene | null;
   workspaceId: string | null;
   pinnedAt: number | null;
+  approvalMode: string;
+  modelId: string;
+  reasoningEffort: string | null;
+}
+
+/** The three composer settings: the request keys of a creation, or the three raw columns. */
+interface Composer {
+  approvalMode: string | null;
+  modelId: string | null;
+  reasoningEffort: string | null;
+}
+
+/** How a composer case lays its world and source out; `{}` is the single-model, cap-`yolo` world. */
+interface ComposerSetup {
+  assembly?: NonNullable<OpenSessionOptions["assembly"]>;
+  /** Sent with the source's `POST /api/sessions`. */
+  create?: Composer;
+  /** Written over the source's three columns by SQL after its creation (values REST refuses). */
+  raw?: Composer;
 }
 
 interface PublicHistory {
@@ -82,6 +113,9 @@ interface ForkWorld {
   auditBefore: unknown[];
   /** `audit_events` row count right before the fork. */
   auditRows: number;
+  /** The owner's last-choice row and the `session.permission` row count right before the fork. */
+  prefsBefore: unknown;
+  permissionRows: number;
   fork: LightMyRequestResponse;
 }
 
@@ -121,6 +155,48 @@ function sessionMeta(db: DatabaseSync, id: string) {
   return db
     .prepare("SELECT workspace_id, scene, pinned_at FROM chat_sessions WHERE id = ?")
     .get(id);
+}
+
+/** The three raw composer columns of `id`, each with its SQLite storage class. */
+function composerColumns(db: DatabaseSync, id: string) {
+  return db
+    .prepare(
+      "SELECT approval_mode, typeof(approval_mode) AS approval_type, model_id, typeof(model_id) AS model_type, reasoning_effort, typeof(reasoning_effort) AS effort_type FROM chat_sessions WHERE id = ?",
+    )
+    .get(id);
+}
+
+/** What `composerColumns` reads for a row storing `raw`. */
+function storedAs(raw: Composer) {
+  const type = (value: string | null) => (value === null ? "null" : "text");
+  return {
+    approval_mode: raw.approvalMode,
+    approval_type: type(raw.approvalMode),
+    model_id: raw.modelId,
+    model_type: type(raw.modelId),
+    reasoning_effort: raw.reasoningEffort,
+    effort_type: type(raw.reasoningEffort),
+  };
+}
+
+/** The owner's whole `account_composer_prefs` row (`updated_at` included); undefined when none. */
+function ownerPrefs(db: DatabaseSync) {
+  return db.prepare("SELECT * FROM account_composer_prefs WHERE account_id = ?").get(OWNER_ID);
+}
+
+function permissionCount(db: DatabaseSync): number {
+  const row = db
+    .prepare("SELECT COUNT(*) AS count FROM audit_events WHERE kind = 'session.permission'")
+    .get() as { count: number };
+  return Number(row.count);
+}
+
+function composerOf(view: SessionView | undefined) {
+  return {
+    approvalMode: view?.approvalMode,
+    modelId: view?.modelId,
+    reasoningEffort: view?.reasoningEffort,
+  };
 }
 
 /** `thinking` of every message of `session`, in snapshot order, with its SQLite storage class. */
@@ -176,13 +252,20 @@ function seedHistory(world: RegenWorld, session: string): Seeded {
 /**
  * A real `branch` world (sandbox root created) whose source is created with `body`, optionally
  * pinned, seeded with the three-turn history above and forked over REST at u3. Nothing about the
- * inherited columns is asserted here: each case owns its own column family.
+ * inherited columns is asserted here: each case owns its own column family. `composer` picks the
+ * world's whitelist and cap and the source's three settings (#1007).
  */
 async function forkSource(
   body: { workspace: boolean; scene: Scene },
   pin: boolean,
+  composer: ComposerSetup = {},
 ): Promise<ForkWorld> {
-  const world = worlds.track(await openForkWorld({ entries: [QUESTION] }));
+  const world = worlds.track(
+    await openForkWorld({
+      entries: [QUESTION],
+      ...(composer.assembly === undefined ? {} : { assembly: composer.assembly }),
+    }),
+  );
   const sandboxRoot = world.rt.runtime.sandboxRoot;
   mkdirSync(sandboxRoot, { recursive: true });
   const ownerRoot = join(realpathSync(sandboxRoot), OWNER_ID);
@@ -207,9 +290,19 @@ async function forkSource(
     const created = await inject(world, "POST", "/api/sessions", {
       workspaceId: workspace.id,
       scene: body.scene,
+      ...composer.create,
     });
     expect(created.statusCode).toBe(201);
     source = created.json() as SessionView;
+  }
+  if (composer.raw !== undefined) {
+    const { approvalMode, modelId, reasoningEffort } = composer.raw;
+    const written = world.fixture.db
+      .prepare(
+        "UPDATE chat_sessions SET approval_mode = ?, model_id = ?, reasoning_effort = ? WHERE id = ?",
+      )
+      .run(approvalMode, modelId, reasoningEffort, source.id);
+    expect(Number(written.changes)).toBe(1);
   }
   if (pin) {
     const pinned = await inject(world, "PATCH", `/api/sessions/${source.id}`, { pinned: true });
@@ -224,6 +317,8 @@ async function forkSource(
   }
   const auditBefore = await adminAudit(world);
   const auditRows = auditCount(world.fixture.db);
+  const prefsBefore = ownerPrefs(world.fixture.db);
+  const permissionRows = permissionCount(world.fixture.db);
   const fork = await postSessionAction(world.fixture.app, "fork", source.id, world.cookie, {
     name: "fork body",
     payload: JSON.stringify({ messageId: seeded.u3 }),
@@ -239,6 +334,8 @@ async function forkSource(
     sourceBefore,
     auditBefore,
     auditRows,
+    prefsBefore,
+    permissionRows,
     fork,
   };
 }
@@ -444,6 +541,95 @@ describe("an unbound source with a scene", () => {
       expect(realpathSync(cwdArg(requiredCall(world.rt.calls, 1).args) ?? "")).toBe(ownerRoot);
       expect(reported).toBe(ownerRoot);
       expect(auditCount(db)).toBe(auditRows);
+    },
+  );
+});
+
+describe("fork inherits the three composer settings (#1007)", () => {
+  it(
+    "a `yolo`/`m3`/`low` source forks to the same view and raw columns; last choice and audit untouched",
+    REAL,
+    async () => {
+      const chosen = { approvalMode: "yolo", modelId: "m3", reasoningEffort: "low" };
+      const forked = await forkSource({ workspace: true, scene: "code" }, false, {
+        assembly: { modelCatalog: THREE_MODEL_CATALOG, approvalMaxMode: "yolo" },
+        create: chosen,
+      });
+      const { world, source, auditRows, prefsBefore, permissionRows, fork } = forked;
+      const { db } = world.fixture;
+
+      const session = forkedSession(fork);
+
+      expect(composerOf(source)).toEqual(chosen);
+      expect(composerOf(session)).toEqual(chosen);
+      expect(await listedOf(world, session.id)).toEqual(session);
+      expect(composerColumns(db, source.id)).toEqual(storedAs(chosen));
+      expect(composerColumns(db, session.id)).toEqual(composerColumns(db, source.id));
+      // The source's creation wrote the last-choice row and one `session.permission`; the fork
+      // adds to neither.
+      expect(prefsBefore).toEqual({
+        account_id: OWNER_ID,
+        approval_mode: "yolo",
+        model_id: "m3",
+        reasoning_effort: "low",
+        updated_at: source.createdAt,
+      });
+      expect(ownerPrefs(db)).toEqual(prefsBefore);
+      expect([permissionRows, permissionCount(db)]).toEqual([1, 1]);
+      expect(auditCount(db)).toBe(auditRows);
+    },
+  );
+
+  it(
+    "raw values above the cap or off the whitelist are copied raw; the view clamps like the source's",
+    REAL,
+    async () => {
+      const raw = { approvalMode: "yolo", modelId: "gone", reasoningEffort: "xhigh" };
+      const { world, source, sourceBefore, fork } = await forkSource(
+        { workspace: true, scene: "code" },
+        false,
+        { assembly: { modelCatalog: THREE_MODEL_CATALOG, approvalMaxMode: "write" }, raw },
+      );
+      const { db } = world.fixture;
+
+      const session = forkedSession(fork);
+
+      expect(composerColumns(db, session.id)).toEqual(storedAs(raw));
+      expect(composerColumns(db, source.id)).toEqual(storedAs(raw));
+      expect(composerOf(session)).toEqual({
+        approvalMode: "write",
+        modelId: "m1",
+        reasoningEffort: "xhigh",
+      });
+      expect(composerOf(session)).toEqual(composerOf(sourceBefore));
+      expect(await listedOf(world, session.id)).toEqual(session);
+    },
+  );
+
+  it(
+    "three NULL columns stay NULL on the fork; its view reads the default effective values",
+    REAL,
+    async () => {
+      const unset = { approvalMode: null, modelId: null, reasoningEffort: null };
+      const { world, source, prefsBefore, permissionRows, fork } = await forkSource(
+        { workspace: true, scene: "code" },
+        false,
+        { assembly: { modelCatalog: THREE_MODEL_CATALOG, approvalMaxMode: "yolo" } },
+      );
+      const { db } = world.fixture;
+
+      const session = forkedSession(fork);
+
+      expect(composerColumns(db, source.id)).toEqual(storedAs(unset));
+      expect(composerColumns(db, session.id)).toEqual(storedAs(unset));
+      expect(composerOf(session)).toEqual({
+        approvalMode: "write",
+        modelId: "m1",
+        reasoningEffort: "high",
+      });
+      expect(composerOf(session)).toEqual(composerOf(source));
+      expect([prefsBefore, ownerPrefs(db)]).toEqual([undefined, undefined]);
+      expect([permissionRows, permissionCount(db)]).toEqual([0, 0]);
     },
   );
 });
