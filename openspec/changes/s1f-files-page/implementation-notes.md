@@ -666,4 +666,9 @@
 - 变异：无条件注册路由 → (5) 的 404 判红（`preview` 为 `undefined` 时 handler 抛错成 500）。
 - 变异：时钟传常量或 0 → (1) 的 `expiresAt` 恰等判红。
 - 变异：400 分支放到 `issue` 之后（先签发再拒绝）→ (3) 与空 `Host` 用例的 `issue` 调用数 0 判红。
+- 变异（预审补）：协议写死 `"http"`（不取 `request.protocol`）→ 新增的「TLS 连接上是 `https`」一例判红。inject 没有 TLS，夹具的 `onRequest` 钩子给带标记请求的 socket 置 `encrypted`（Fastify 5 不开 `trustProxy` 时 `request.protocol` 只看这一位）。
+- 变异（预审补）：`embedOrigin` 的 `??` 换成 `||` → (1) 的 `Origin` 原样登记一例判红（循环里补了空串）。
+- 变异（预审补）：`errors.ts` 集合不加本路由，最终树上重跑为红 13：`http-parser-owners` 新行 4 例、真实 socket 一例、(3) 的 body 目录 7 行（`{}` 超限、坏 JSON、空 JSON、不支持的媒体类型、`{"x":1}`、无 content-type 的 `1`、1.1 MB）、(4) 一例。
+- 变异（预审补）：分支 (a) 后半（通过 `canParse` 的怪 `Host`）补一行钉现状：`Host: a.test/x:3000` → `base` 为 `http://a.test/x:<预览端口>/w/<token>/`；「去掉 `canParse`」重跑仍只红拒绝的三行与 (4)。
+- 变异（预审补）：不可观察：根路径上是普通文件时不是 404 而是通用 500——`rootOf` 里的 `computeSafeRoot`（`store.ts:312-315`）先抛，`GET …/tree` 实测相同，既有行为；`ensureOwnedRoot` 的「存在但不是目录」一支走不到，没有能钉它的变异，用例标题去掉「or is no directory」。上文「只做一次 `lstat`」应读作 `rootOf` 里一次加 `ensureOwnedRoot` 一次。
 - 变异：不可观察：遍历与符号链接（本路由没有路径参数）、「越界写 `sandbox.reject`」——归 #1069 与 11.4（#1075）。`lookup` 顺手续期属 #1066，已有证据。

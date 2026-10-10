@@ -56,6 +56,7 @@ const SIX_KEYS = [
 ];
 const TOKEN_SHAPE = /^[0-9a-f]{64}$/u;
 const DROP_HOST_HEADER = "x-test-drop-host";
+const TLS_SOCKET_HEADER = "x-test-tls-socket";
 
 type Binding = Parameters<PreviewTokens["issue"]>[0];
 
@@ -113,10 +114,14 @@ async function withPreviewWorld(
       await action({ app, db, sandboxRoot, registry, issueCalls, zhangsan, lisi });
     },
     // HTTP/1.0 may come without a Host header; inject always adds one, so a marked request drops it.
+    // Inject has no TLS either: a marked request gets the flag a TLS socket carries.
     ({ app }) => {
       app.addHook("onRequest", (request, _reply, done) => {
         if (request.raw.headers[DROP_HOST_HEADER] !== undefined) {
           delete request.raw.headers.host;
+        }
+        if (request.raw.headers[TLS_SOCKET_HEADER] !== undefined) {
+          Object.assign(request.raw.socket, { encrypted: true });
         }
         done();
       });
@@ -241,7 +246,7 @@ describe("preview-token: 签发与复用", () => {
       expect(registry.lookup(token, T0)?.embedOrigin).toBeNull();
 
       // Not validated and not normalised here: the trailing slash, the literal and the junk stay.
-      for (const origin of ["http://a.test/", "null", "HTTP://A.test:3000", "not an origin"]) {
+      for (const origin of ["http://a.test/", "null", "HTTP://A.test:3000", "not an origin", ""]) {
         const renewed = issuedOf(await issueToken(app, WORKSPACE, zhangsan, { origin }));
         expect(renewed.token, origin).toBe(token);
         expect(registry.lookup(token, T0)?.embedOrigin, origin).toBe(origin);
@@ -302,6 +307,8 @@ describe("preview-token: 对外来源与转换可用", () => {
     ["an IPv6 literal without a port", "[2001:db8::1]", "http://[2001:db8::1]"],
     ["a name without a port", "workbuddy.example.test", "http://workbuddy.example.test"],
     ["a name with the main port", "workbuddy.example.test:8443", "http://workbuddy.example.test"],
+    // Not a host name, but it still makes a URL: it goes into the answer as sent.
+    ["a name carrying a path", "a.test/x:3000", "http://a.test/x"],
   ])(
     "derives the origin from %s: the host name of the request and the preview port",
     async (_name, host, expected) => {
@@ -325,6 +332,16 @@ describe("preview-token: 对外来源与转换可用", () => {
       );
       expect(issued.base).toBe(`http://127.0.0.1:${PREVIEW_PORT}/w/${issued.token}/`);
       expect(issued.officeBase).toBe(`http://127.0.0.1:${PREVIEW_PORT}/o/${issued.token}/`);
+    });
+  });
+
+  it("takes the protocol from the connection of the request: https over TLS", async () => {
+    await withPreviewWorld(async ({ app, zhangsan }) => {
+      const issued = issuedOf(
+        await issueToken(app, WORKSPACE, zhangsan, { [TLS_SOCKET_HEADER]: "1" }),
+      );
+      expect(issued.base).toBe(`https://127.0.0.1:${PREVIEW_PORT}/w/${issued.token}/`);
+      expect(issued.officeBase).toBe(`https://127.0.0.1:${PREVIEW_PORT}/o/${issued.token}/`);
     });
   });
 
@@ -475,7 +492,7 @@ describe("preview-token: 归属与请求体", () => {
     },
   );
 
-  it("answers 404 once the workspace's root directory is gone or is no directory", async () => {
+  it("answers 404 once the workspace's root directory is gone", async () => {
     await withPreviewWorld(async ({ app, sandboxRoot, issueCalls, zhangsan }) => {
       const root = join(sandboxRoot, ZHANGSAN, "files");
       renameSync(root, join(sandboxRoot, ZHANGSAN, "moved"));
