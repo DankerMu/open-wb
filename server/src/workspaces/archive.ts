@@ -346,7 +346,8 @@ function paxRecord(data: Buffer, offset: number): { key: string; value: Buffer; 
  * What yauzl reads a zip through. yauzl asks for up to 65577 bytes at once (the search for the end
  * record) and up to 196605 (name, extra field and comment of one record): each request is served
  * in pieces of at most 65536 bytes, so that bound on one `readAt` call holds for a zip as well.
- * What yauzl itself holds is those two buffers, one at a time.
+ * What yauzl itself holds is both buffers together — the archive comment is a view that keeps the
+ * search buffer alive until close — and, per record, up to 16383 parsed extra fields.
  *
  * A request that does not lie within the `size` bytes of the archive is refused before `readAt`
  * is called: an offset in a zip64 record can be anything up to 2^64.
