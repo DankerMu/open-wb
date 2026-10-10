@@ -155,6 +155,7 @@ Minimal mergeable slice: 2.1 与 2.2 互不依赖，各自一刀，各自合入�
   - `web/test/files-empty-layout.test.tsx:21-25` 的 `emptyStateOf` 帮手：`.ui-empty-state` → `[data-slot="empty-state"]`（服务于 `:38-40`、`:47-48`、`:82`；`:39`、`:48`、`:82` 里直接写的 `closest(".ui-empty-state")` 同改）。
   - `web/test/files-overlays.test.tsx:223`（O8 的 `新建`）：`className` 由「恰为 `ui-btn ui-btn--secondary ui-btn--md`」改为「不含 `ui-btn`」（2.2 留下的两条之一）。
   这三个文件与 `ui-tokens.test.ts`、`topbar.test.tsx` 里**读 `files.css` 规则体**的断言不是选择器改动，随 3.3 逐条处理（见 3.3）。
+  实施注记见 `implementation-notes.md`「3.1–3.7（#1078）」。
 - [ ] 3.2 `web/src/features/files/page.tsx`：分栏与窄屏纵排改用 Tailwind（宽于 760 左右分栏，否则纵排），加 `刷新` 按钮（files-web「目录树与预览」的「手动刷新」场景）；`?ws=` 的缺省、纠正与归属隔离不变。
   工作空间切换器（今天是 `page.tsx:90` 起的冻结区 `Popover`，其中 `:149` 的 `＋ 新建工作空间` 用冻结区 `Button`）改用拷入层 `popover` 与 `button`，必要时拆出 `workspace-switcher.tsx`。切换器弹层保留 `role="dialog"` 与可及名 `工作空间切换器`
   （ui-primitives「基元组件库」的场景「既有对话框迁移不回归」仍断言它；`web/test/files-page.test.tsx`、`files-overlays.test.tsx`、`files-logical-path.test.tsx` 与走查 `ui-walk.spec.ts:206` 按这个名字定位切换器，这些定位原样保留）；
