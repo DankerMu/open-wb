@@ -72,6 +72,8 @@ describe("fetchPreview 的图片类型集合", () => {
     ["image/vnd.microsoft.icon"],
     ["image/ico"],
     ["image/gif+xml"],
+    ["image/jpg"],
+    ["image/pjpeg"],
   ])("%s 的 200 响应按失败处理，不读成预览也不分配图片地址", async (contentType) => {
     const createObjectURL = vi.fn();
     vi.stubGlobal("URL", { createObjectURL });
