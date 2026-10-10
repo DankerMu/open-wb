@@ -6,7 +6,9 @@
  * 被转换的是不可信文档：子进程环境只有 `PATH`、`LANG`、`HOME`，不继承 `process.env`；配置了
  * `ompUser` 时经 `sudo … setpriv --pdeathsig KILL --` 以该用户运行，前置检查不过就是失败，从不
  * 回退为同 uid 启动。终止在途转换不新增任何提权规则：同 uid 模式杀进程组，`ompUser` 模式只杀
- * 自己启动的 `sudo`（其后代可能残留，是已登记的残余）。
+ * 自己启动的 `sudo`。后者杀不到 LibreOffice 包装脚本再派生的 `soffice.bin`：它每次都留下，把整份
+ * 转换跑完才自行退出（实测最长在终止之后 128 秒），又不占转换名额，所以实际同时运行的转换进程
+ * 可以多于配置的并发上限——已登记的残余（design D18、owner D-25）。
  *
  * `work/` 与 `pdf/` 由调用方建好，本模块不 mkdir 它们。并发上限、排队与缓存不在这里。
  */
@@ -21,6 +23,8 @@ import { ensureOwnedDir } from "../core/sandbox/dirs.js";
 
 const JOB_DIR_MODE = 0o2770;
 const RANDOM_NAME_BYTES = 16;
+/** 输出 PDF 的大小上限，200 MiB；写死，不是配置项。 */
+const OUTPUT_LIMIT_BYTES = 209_715_200;
 
 type OfficeConvertErrorKind = "unavailable" | "failed" | "timeout" | "aborted";
 
@@ -140,6 +144,9 @@ function terminate(child: ChildProcess, ownGroup: boolean): void {
  * 成功判定与复制用同一个 fd：`O_NOFOLLOW` 打开（符号链接即失败）、`fstat` 为大小大于 0 的普通
  * 文件，再从这个 fd 读出、写进独占创建的 `0600` 新文件。不做「先 `lstat` 再按路径复制」——
  * `ompUser` 模式下两步之间输出可以被换成符号链接。`O_NONBLOCK` 让命名管道的 open 立即返回。
+ *
+ * 复制的字节数以这次 `fstat` 的 `size` 为准：超过上限的一个字节都不读；只读前 `size` 个字节，
+ * 此后追加的不读（还活着的后代可以一直往里写）；读到的不足 `size`（取得大小之后被截短）即失败。
  * 任何一步不成立都返回 `null`。
  */
 async function collectOutput(
@@ -157,15 +164,18 @@ async function collectOutput(
   }
   try {
     const stats = await source.stat();
-    if (!stats.isFile() || stats.size === 0) {
+    const { size } = stats;
+    if (!stats.isFile() || size === 0 || size > OUTPUT_LIMIT_BYTES) {
       return null;
     }
     const copy = join(pdfDir, `${randomName()}.pdf`);
+    // `end` 是闭区间的末位。文件比它短时读流正常结束、不报错，所以读完还要比对字节数。
+    const reader = source.createReadStream({ autoClose: false, start: 0, end: size - 1 });
     try {
-      await pipeline(
-        source.createReadStream({ autoClose: false }),
-        createWriteStream(copy, { flags: "wx", mode: 0o600 }),
-      );
+      await pipeline(reader, createWriteStream(copy, { flags: "wx", mode: 0o600 }));
+      if (reader.bytesRead !== size) {
+        throw new Error("short read");
+      }
     } catch {
       // 半截的副本不留在 pdf/ 里；名字是本次调用刚取的随机数，不会是别人的文件。
       await unlink(copy).catch(() => undefined);

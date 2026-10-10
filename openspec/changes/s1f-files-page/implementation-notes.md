@@ -467,3 +467,26 @@
 - 变异：去掉 `finally` 里的 `destroy()` → 仍不可观察（87 条全绿），同 10.1，靠白盒审查。
 - 变异：预期不可观察：「`listArchive` 返回之后没有迟到的 zlib 回调去碰 `readAt`」。结构上成立——`readAt` 只在 `fill` 里、由遍历的 `read` / `skip` 串行 `await` 调用，没有后台循环；没有用例能数出迟到的调用，靠白盒审查。
 - 变异：预期不可观察：内存上界。每片仍是 1024 字节压缩输入，流尾至多再拼 8 字节，头的解析只在第一次读取的缓冲上做 `indexOf`；没有可断言的内存计数，证据是 `readAt` 的最大 `length` 与 `positions`。
+
+## 14.7（#1302）
+
+- Critical Path 同 14.1（处理不可信文档的子进程的输出）：PR 标白盒审查。只动 `server/src/preview/office.ts` 的 `collectOutput` 与头注释、夹具 `fake-soffice.mjs`（加两个标记，仍是 100755）、新测试文件 `server/test/office-converter-output.test.ts`；`office-converter.test.ts`（795 行）一个字节没动，没有抽共用 helper——新文件自带一份只够用的搭建（建目录、记下 cwd 的 spawn 包装、`afterEach` 关转换器并删临时目录），形状与旧文件的 `stage()` 不同，jscpd 在两个文件之间没有报出克隆。
+- 机制：`open` + `fstat` 之后取 `size`。`size > OUTPUT_LIMIT_BYTES`（模块常量 `209_715_200`，不进 `OfficeConverterOptions`、不读环境）与「不是普通文件」「`size === 0`」并在同一个判定里返回 `null`，此时还没有建读流、也没有在 `pdf/` 下取名。复制用 `source.createReadStream({ autoClose: false, start: 0, end: size - 1 })`（`end` 是闭区间），读流因此只读前 `size` 个字节。文件比 `end` 短时读流正常结束、不报错，所以 `pipeline` 落定后再比 `reader.bytesRead !== size`，不等即抛进既有的 `catch`：`unlink` 掉 `wx` 建出的副本、返回 `null`。其余原样：`O_NOFOLLOW|O_NONBLOCK`、同一个 fd、`wx` + `0600`、`finally` 里关 fd、错误只带种类。
+- 给了 `start: 0` 之后读流用的是按位置读（`pread`），不再依赖 fd 的当前偏移；该 fd 是本次调用刚打开的，两者在这里等价。
+- 头注释：「其后代可能残留」改为实测事实——`ompUser` 模式杀不到包装脚本再派生的 `soffice.bin`，它每次都留下、把整份转换跑完才退出（实测最长在终止之后 128 秒）、不占名额，实际并发可以超过配置的上限（design D18、owner D-25）。只改注释。
+- 没有新增源码 seam。「取得大小之后」这个时刻由测试在 `FileHandle.prototype.stat` 上的探针给出（`vi.spyOn`，`afterEach` 里 `vi.restoreAllMocks()`）：探针先调原函数，用设备号与 inode 认出这是输出文件，在把结果交还转换器之前同步 `appendFileSync` / `truncateSync`——改动确定落在 `fstat` 与第一次读取之间，没有竞态，也不需要假进程留下帮手。输出路径由注入的 spawn 包装（14.1 已有的测试 seam）记下的 `cwd` 拼出。
+- 「没有读取输出的内容」的判据：同一个探针记下输出句柄，另在 `FileHandle.prototype.read` 上逐次记录 `this`，断言该句柄上的 `read` 为 0 次。会话草稿目录的探针脚本（不入库）在 Node v24.13.1 上确认：`FileHandle#createReadStream` 的每次读取都经过 `FileHandle.prototype.read`；追加一例里同一计数大于 0，证明 0 次不是因为探针看不见。
+- 夹具新增标记 `sparse-limit`、`sparse-over`：`writeFileSync(output, "")` 后 `truncateSync` 到 209715200 / 209715201，只设长度、不写数据。上限在夹具、测试、源码里各持一份字面量。
+- 200 MiB 一例的实测：转换器真的往临时目录写出 200 MiB 的零；本机（APFS、SSD）该例 0.12–0.27 秒（连跑 10 次的范围），整个文件 6 条约 0.3 秒；用例时限给 60 秒，临时目录在 `afterEach` 删。超限一例在本刀之后不写任何数据（约 0.03 秒）；在本刀之前的源码上它会写出 200 MiB + 1 字节（红跑时 0.16 秒）。
+- 先红后绿：在本刀之前的源码上 6 条里 5 条红（追加一例结果是 86093 字节而不是 77；超限与截短三例 `convert` 成功）。「恰 200 MiB」一例在之前的源码上本来就通过，不是先红后绿，作用是钉住 `>` 不退成 `>=`。
+- 偏离记录：
+  - 截短一例做成三行（少 1 字节、一半、0 字节），规格场景只列一种；0 字节那行钉住「`wx` 建出的空文件也不留下」。
+  - 短读的判定用读流的 `bytesRead`，不是写流的 `bytesWritten`；`pipeline` 成功时两者相等。
+  - 规格写「读取之前被截短」；读到一半才被截短走的是同一个比较，但没有用例（探针只在 `fstat` 处有确定的时刻）。
+- 变异：去掉上限判定（`|| size > OUTPUT_LIMIT_BYTES`）→ 「200 MiB + 1 字节」一例判红（`convert` 成功）。
+- 变异：上限改在复制之后才判（读完再拒）→ 同一例的「`read` 为 0 次」判红（实得 3201 次）；`convert` 仍是 `failed`、`pdf/` 仍为空，只有这一条断言看得见。
+- 变异：去掉读流的 `start` / `end`（读到文件末尾）→ 追加一例判红（多读的字节使字节数比对不等，`convert` 以 `failed` 落定）；连比对一起去掉即本刀之前的源码，同一例以「86093 字节」判红。
+- 变异：去掉 `bytesRead` 与 `size` 的比对 → 截短三行判红（`convert` 成功，短的副本进了 `pdf/`）。
+- 变异：短读时直接返回 `null`、不删副本 → 截短三行的「`pdf/` 为空」判红（各剩 1 个文件）。
+- 变异：`>` 改成 `>=` → 「恰 200 MiB」一例判红（`failed`）。
+- 变异：预期不可观察：上限做成可配置（选项或环境变量）而缺省值不变——没有用例会去设它，靠白盒审查与 `OfficeConverterOptions` 的键集合；fd 在失败路径上是否关闭（同 14.1，没有可数的句柄计数）；绕过 `FileHandle#read`（例如按 fd 号调 `fs.read`）读取超限输出的写法探针看不见。
