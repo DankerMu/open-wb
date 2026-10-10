@@ -551,3 +551,38 @@
 - 变异：嗅探通过的文本不走文本上限 → 用例一的 1.5 MiB 未知扩展名截断与用例三的 `LICENSE` 截到 16 判红。
 - 变异：原型名：查表改成对象字面量 → `workspaces-http.test.ts:574-583`（改成二进制内容后）的 415 判红。
 - 变异：不可观察：`closeSync` 漏掉（描述符泄漏，`inject` 下无断言能抓，评审读代码确认 `finally`）；0 字节文件是否跳过读取。
+
+## 7.2、7.3、7.4、7.5（#1058）
+
+- **Critical Path：沙箱与文件边界**。本刀给用户文件的读取加了一种由客户端给定偏移的按路径打开，7.1 注记已把逃逸向量留到本刀，所以要两个评审席位加 owner 白盒。前提 0.1、6.1、7.1 按代码都已在 origin/master（`server/src/workspaces/preview.ts:77` 的 `rangeable`、`:152-185` 的 `parseRange` / `openRangeStream`）。不等 1.1 / 1.2 / 1.3，不等 5.1。
+- 同批交集：#1056 也改 `server/src/workspaces/rest.ts` 的 `file` 处理器（origin/master `:271-296`，嗅探与 `limits`），尚未合入。边表里 6.2 不是 7.3 的前提，但两刀改同一个处理器，本刀必须排在 #1056 之后并以它的分支为底。`rest.ts` 现为 418 行（文首写的 416 已漂移），本刀净增约 6 行。本刀不动 `rest-entries.ts`、`index.ts`、`preview.ts`、`server/src/preview/`。
+- issue 与 `tasks.md` 的差异：7.2–7.4 逐字相同，7.5 只多一句分摊登记；本刀承担「`readme.md` 回 206」与「416 带信封」两条变异，后缀区间一条已随 #1057 交付。issue 把 `workspaces-http.test.ts` 列为可选落点，但它已 736 行，用例一律进新文件。issue 没提 D-23，见下面的窗口一条。
+- 7.2 新文件 `server/src/workspaces/range-send.ts`（约 45 行，只 import `./preview.js` 与 fastify 类型）。签名供 #1069 原样复用：`export function sendFileRange(request: Pick<FastifyRequest, "method" | "headers">, reply: FastifyReply, file: { absPath: string; size: number; headers: Readonly<Record<string, string>>; unsatisfiableHeaders: Readonly<Record<string, string>> }): FastifyReply`。
+- 签名的两点理由：`request` 用 `Pick` 是因为带路由泛型的 `FastifyRequest` 传不进缺省泛型的参数，`reply: FastifyReply` 则有 `sessions/stream/sse.ts:26` 的先例。`file` 的类型内联、不另导出具名类型，免得 knip 报未引用导出；函数本身由 `rest.ts` 导入即可。
+- 函数行为：`parseRange(request.headers.range, size)` 得区间时回 206，写 `headers`、`Accept-Ranges: bytes`、`Content-Range: bytes a-b/size`、`Content-Length` 为区间长度，正文用 `openRangeStream`。`ignore`（含无头、多段、非 `bytes`）回 200，写 `headers`、`Accept-Ranges`、`Content-Length: size`，正文用 `openPreviewStream(absPath, size)`，它在 `size = 0` 时不开文件。`unsatisfiable` 回 `reply.code(416)`，只写 `unsatisfiableHeaders` 与 `Content-Range: bytes */size`，然后无参 `send()`，不打开文件，也不 `throw HttpError`（416 不在 definition map）。
+- HEAD（规格没写，进偏离记录）：preview-origin 规定监听器响应 `GET`（及其 `HEAD`），而 `file` 路由现有 Fastify 自动生成的 HEAD，其 onSend 对流载荷做 `resume()`，会把整个文件读一遍，对无上限的音视频是白读。函数在 `request.method === "HEAD"` 时状态与头照旧，正文用 `openPreviewStream(absPath, 0)` 的空流。不能无参 `send()`，那样 Fastify 会把 `Content-Length` 改写成 `0`。这一条是读 fastify 5.12.1 的 `lib/head-route.js` 与 `reply.js:646-652` 推出的，没有运行过，以 HEAD 用例为证。
+- 7.3 路由接入：分类之后 `if (preview.rangeable) return sendFileRange(request, reply, { absPath, size: status.size, headers: preview.headers, unsatisfiableHeaders: { "X-Content-Type-Options": "nosniff" } })`，`no-store` 仍由 `onRequest` 钩子给。其余类别走原来的「写头循环 + `openPreviewStream(absPath, preview.limit)`」，一行不改，所以文本与图片仍是分块、不带 `Content-Length` 与 `Content-Range`。`clearPreviewHeadersOnError`（`rest.ts:51`）补删 `Content-Range` 与 `Accept-Ranges`（6.1 注记留给本刀）；`Content-Type` 与 `Content-Length` 由 Fastify 的 `handleError` 自己删。
+- 其余自定分支（进偏离记录）：`If-Range` 不读，带它的请求仍只按 `Range` 判，因为规格条文只认 `Range`，且服务端不发 `ETag` / `Last-Modified`、响应是 `no-store`，浏览器不会带它，用一条用例钉住。重复的 `Range` 头被 Node 合并成逗号串，按 `ignore` 回 200。0 字节的 `empty.mp4` 无 `Range` 回 200 且 `Content-Length: 0`，带 `bytes=0-` 回 416 `bytes */0`。206 也带 `X-Workbuddy-Size`（全长）。416 不带 `Content-Type`、`Accept-Ranges`、`X-Workbuddy-Size`。
+- #1286 窗口的措辞（D22「已知残余」、ADR-0011:30；PR 不得写成已闭合）：本刀之后 `file` 路由仍是「`lstatExisting(absPath)` 判为普通文件 → `createReadStream` 按路径打开一次」，没有 `O_NOFOLLOW` / `O_NONBLOCK`，其间条目或任一中间目录被换成符号链接时读到链接目标的 `[start, end]` 字节，换成命名管道时 `open` 占住一个线程池线程。本刀不加第二次 `stat` 或打开，416 与 HEAD 不打开文件，窗口不变宽。新增一点如实登记：`Content-Length` / `Content-Range` 取 `lstat` 时的大小，其间文件变短则正文短于声明长度（与已交付的 `download` 相同），变长不多发。
+- 7.4 新文件 `server/test/workspaces-file-range.test.ts`（约 260 行），复用 `withWorkspacesApp`、`insertWorkspace`、`withListeningApp`、`spyBodyIo`、`waitForClose`。`requestWorkspaceFile` 不能带头，在新文件里写一个本地 `inject` 小函数，不改共享 helper。夹具是 1000 字节的 `clip.mp4`（第 i 字节为 `i % 251`）、2 KB 的 `readme.md`、`song.mp3`、`logo.png`、0 字节的 `empty.mp4`。既有测试没有一条因本刀变红，`workspaces-http.test.ts:467` 的图片无 `accept-ranges` 与 `:691` 的打开失败用例原样保留。
+- `inject` 用例：规格七行逐字，每行断言状态、`content-type`、`content-range`、`content-length`、`accept-ranges`、`nosniff`、`no-store` 与字节。另补 `bytes=990-2000` → `990-999/1000` 且长度 10、`bytes=0-0`、`song.mp3` 的 206、`logo.png` 带 `Range` → 200 无 `content-range`、空文件两例、`If-Range` 一例。416 断言 `payload === ""`、`content-length: "0"`、无 `content-type`、`createReadStream` 零调用。HEAD 两例：无 `Range` 回 200 且 `content-length: "1000"`，带 `Range` 回 206；都是空体、`createReadStream` 零调用。打开失败沿用 `:691` 的 `onSend` 里 `unlinkSync` 手法并带 `Range`，期望 500 信封、无 `content-range` 与 `accept-ranges`。逃逸向量带 `Range: bytes=0-9`：`../outside.mp4` 与外指符号链接 `link.mp4` → 403 加一行 `sandbox.reject`（`op` 为 `read`）且无 `content-range`；他人 id 与不存在的 id 带 `../x.mp4` → 相同 404、审计零行。
+- 真连接用例两条。(a) `fetch` 带 `Range: bytes=0-99`：206、`content-range: bytes 0-99/1000`、`content-length: 100`、字节等于文件前 100 字节。(b) 中止：`truncateSync` 出 64 MiB 的稀疏 `big.mp4`，`node:http` 带 `Range: bytes=0-` 收到首个 `data` 即 `res.destroy()`；从 `createReadStream` 的 spy 取流，等 `close`，断言 `destroyed`、`bytesRead` 小于文件大小（否则用例恒真）、`fstatSync(fd)` 抛 `EBADF`，随后 `app.close()` 不挂。workspaces「流错误与真实客户端中止」目前在路由层没有真中止用例，这是第一条。
+- 门槛与文档：size-guard、jscpd、naming-guard 都不触发；`reply.send(stream)` 若被 CI 的 semgrep 标记，仿 `rest.ts:294` 加带理由的 `nosemgrep`。不是配置刀，不动 `docs/architecture/system.md` 第 9 节与配置计数测试。纯服务端，`web/src/features/files/tree.tsx` 的 `supportsPreview` 还不放行音视频，no checklist rows。`smoke/files.hurl` 的范围步骤归 26.2。`tasks.md` 勾 7.2、7.3、7.4；7.5 的勾选条件（两条分摊变异在 PR 表里、后缀一条已随 #1057）本刀合入即满足，一并勾。
+- 变异：对 `readme.md` 也回 206（去掉 `preview.rangeable` 判断，7.5）→ 「其余类别忽略」的 `readme.md` 与 `logo.png` 两行判红。
+- 变异：416 带上 JSON 信封（`reply.code(416).send({error:…})`，7.5）→ 416 的 `payload === ""`、`content-length: "0"`、无 `content-type` 判红。
+- 变异：`unsatisfiable` 当成 `ignore` 回 200 → `bytes=1000-` 行判红；416 的 `Content-Range` 写成 `bytes 0-999/1000` 或漏写 → 同行判红。
+- 变异：416 用 `headers` 而不是 `unsatisfiableHeaders` → 416 的「无 `content-type` / `accept-ranges` / `x-workbuddy-size`」判红；416 丢掉 `nosniff` → 同用例判红。
+- 变异：先开流再判 416（泄漏描述符）→ 416 的 `createReadStream` 零调用判红。
+- 变异：206 的 `Content-Length` 写成全长 → `inject` 的 `content-length` 字面量断言与真连接用例 (a) 判红；`Content-Range` 的 `end` 取开区间 → `bytes 0-99/1000` 判红。
+- 变异：206 的正文用 `openPreviewStream(absPath, size)`（发整段）→ 「100 字节且等于文件前 100 字节」与 `bytes=900-` 的字节断言判红。
+- 变异：状态码漏设 206 → 四个 206 行判红；200 不带 `Content-Length` 或 `Accept-Ranges` → 无 `Range` 行判红。
+- 变异：多段取第一段回 206 → `bytes=0-1,5-6` 行判红（`parseRange` 层已由 #1057 钉住，此处是路由层重复证据）。
+- 变异：读 `If-Range` 并据此回 200 → `If-Range` 用例判红（自定分支的钉子）。
+- 变异：HEAD 时照常打开区间流 → HEAD 两例的 `createReadStream` 零调用判红；HEAD 改成无参 `send()` → `content-length: "1000"` 判红。
+- 变异：去掉 `clearPreviewHeadersOnError` 新增的两行 → 「带 `Range` 的打开失败」里无 `content-range` / `accept-ranges` 判红。
+- 变异：改成手写 `stream.pipe(reply.raw)` 且不处理响应关闭 → 中止用例 (b) 判红（等不到 `close`，超时）。预期不可观察：薄封装下「中止时销毁流」是 Fastify `reply.js:858-865` 做的，本刀没有可以删掉的实现行，PR 表照此标注。
+- 变异：逃逸，穿越：`rangeable` 分支绕过 `sandbox.resolve` 直接拼路径 → `../outside.mp4` 的 403 加 `sandbox.reject` 判红。
+- 变异：逃逸，符号链接：`rangeable` 分支绕过 `resolve` 且把 `lstat` 换成 `stat` → `link.mp4` 用例判红。只换 `lstatExisting` 而保留 `resolve` 时不可观察（`resolve` 先拒）。
+- 变异：逃逸，他人或不存在的 id：把 `ensureOwnedRoot` 挪到 `resolve` 之后 → 「他人 id 带 `../x.mp4` → 404 且审计零行」预期不可观察（facade 自己先查 `rootOf`，见 6.1 的实施后更正二），只在 `workspaces-http-failures.test.ts` 的「根目录缺失」用例判红。
+- 变异：逃逸，`op`：`"read"` 换成 `"list"` → 审计行 `op` 断言判红。
+- 变异：预期不可观察：`lstat` 之后文件被替换或截短（#1286 窗口），测试不制造竞态，属登记的残余。
