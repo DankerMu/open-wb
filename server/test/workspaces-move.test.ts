@@ -238,6 +238,8 @@ describe("workspace move: 其它拒绝", () => {
         [{ from: "a.md", to: "" }, 403, SANDBOX_DENIED_ENVELOPE],
         [{ from: "a.md", to: "../a.md" }, 403, SANDBOX_DENIED_ENVELOPE],
         [{ from: "a.md", to: "x/" }, 403, SANDBOX_DENIED_ENVELOPE],
+        // Both ends are resolved before the source is looked up: a missing source is still 403.
+        [{ from: "missing", to: "../x" }, 403, SANDBOX_DENIED_ENVELOPE],
         [{ from: "a.md" }, 400, BAD_REQUEST_ENVELOPE],
         [{ from: "a.md", to: "b", extra: 1 }, 400, BAD_REQUEST_ENVELOPE],
         [{ from: 1, to: "b" }, 400, BAD_REQUEST_ENVELOPE],
@@ -253,6 +255,9 @@ describe("workspace move: 其它拒绝", () => {
         // A source that is neither a file nor a directory, and a parent that is a file.
         [{ from: "pipe.bin", to: "pipe2.bin" }, 404, NOT_FOUND_ENVELOPE],
         [{ from: "d1", to: "a.md/d1" }, 404, NOT_FOUND_ENVELOPE],
+        // The source is judged before the target: 404, not the 409 of an existing target.
+        [{ from: "missing", to: "a.md" }, 404, NOT_FOUND_ENVELOPE],
+        [{ from: "pipe.bin", to: "a.md" }, 404, NOT_FOUND_ENVELOPE],
         [{ from: "a.md", to: "b.md" }, 401, UNAUTHORIZED_ENVELOPE, ""],
       ];
 
@@ -268,8 +273,9 @@ describe("workspace move: 其它拒绝", () => {
         rejection("", INVALID_NAME),
         rejection("../a.md", NOT_INSIDE),
         rejection("x/", INVALID_NAME),
+        rejection("../x", NOT_INSIDE),
       ]);
-      expect(auditCount(db)).toEqual({ count: 4 });
+      expect(auditCount(db)).toEqual({ count: 5 });
     });
   });
 
@@ -334,6 +340,8 @@ describe("workspace move: 子树判断先于存在性", () => {
       const inside: Array<[from: string, to: string]> = [
         ["d1", "d1/sub/d1"],
         ["d1", "d1/nodir/x"],
+        // An existing target inside the source: 400, not the 409 of an existing target.
+        ["d1", "d1/sub"],
         ["missing", "missing/x"],
         // Beyond the scenario: a file as the source, and the comparison on the resolved paths.
         ["a.md", "a.md/x"],

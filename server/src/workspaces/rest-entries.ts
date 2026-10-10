@@ -7,16 +7,26 @@
  *
  * Known residual of the move route (design D22 / D-23, #1286 stays open; nothing here closes
  * it): every check is by path and the `rename` resolves both paths again, re-checking nothing.
- * - Not overwriting is look-then-rename, not atomic. The handler is synchronous, so no request of
- *   this process comes in between, but another process (the assistant) can: what it creates at
- *   `to` after the lstat there is replaced by the rename when it is a non-directory and the
- *   source is a file, or an empty directory and the source is a directory. Every other
- *   combination makes the rename fail (500, the source in place).
+ * Derived from the code and from bare `renameSync` runs; never reproduced through the route.
+ * - Not overwriting is look-then-rename, not atomic. Having no `await` in between keeps other
+ *   handlers' JavaScript out, not the filesystem: a call that another request of this process
+ *   has already handed to the thread pool (the `link` of an upload, a step of a snapshot
+ *   restore) can land between the lstat at `to` and the rename, and so can another process (the
+ *   assistant). What appears at `to` in between is replaced by the rename when it is a
+ *   non-directory and the source is a file, or an empty directory and the source is a directory:
+ *   an upload linked there answers 201 for bytes that are gone, the move 200 with an ordinary
+ *   audit row. A hard link to the source appearing there makes the rename succeed and do
+ *   nothing: 200 and the audit row, the entry still at `from`. Every other combination makes the
+ *   rename fail (500, the source in place).
  * - A component of either path swapped for a symlink after its lstat is followed by the rename:
  *   in `from`, an entry outside the workspace that this process can move is moved in; in `to`
- *   (the parent just checked included), the entry is moved out. The last component is not
- *   followed: a link swapped in as `from` is itself moved, one at `to` is the case above. The
- *   audit row names the logical paths either way.
+ *   (the parent just checked included), the entry lands in the link's target directory. Swapped
+ *   after the lstat at `to`, that directory was never looked at: a same-named non-directory
+ *   there (a file source) or empty directory (a directory source) is replaced, in whatever
+ *   directory of this filesystem this process can write — another owner's workspace, the
+ *   recycle directory and a snapshot included. The last component is not followed: a link
+ *   swapped in as `from` is itself moved, one at `to` is the case above. The audit row names
+ *   the logical paths either way.
  */
 import { renameSync } from "node:fs";
 import { basename, dirname } from "node:path";
