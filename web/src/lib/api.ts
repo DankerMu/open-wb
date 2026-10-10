@@ -1,4 +1,5 @@
 import { type Command, createCommandMethods, type ProjectConfigFile } from "./api-commands.js";
+import { fileUrl, workspaceEndpoint } from "./api-files.js";
 import {
   hasExactlyKeys,
   isNonNegativeSafeInteger,
@@ -403,10 +404,6 @@ function getRequestOptions(signal?: AbortSignal): RequestInit {
   };
 }
 
-function workspaceEndpoint(workspaceId: string, endpoint: "tree" | "dirs" | "file" | "promote") {
-  return `/api/workspaces/${encodeURIComponent(workspaceId)}/${endpoint}`;
-}
-
 function parsePreviewSize(value: string | null): number | null {
   if (value === null || !/^\d+$/.test(value)) {
     return null;
@@ -687,7 +684,7 @@ export function createApiClient({ onUnauthorized }: ApiClientOptions = {}): ApiC
 
     async fetchPreview(workspaceId, path, options) {
       return previewRequest(
-        `${workspaceEndpoint(workspaceId, "file")}?path=${encodeURIComponent(path)}`,
+        fileUrl(workspaceId, path),
         getRequestOptions(options?.signal),
         onUnauthorized,
       );
@@ -776,3 +773,5 @@ export function createApiClient({ onUnauthorized }: ApiClientOptions = {}): ApiC
     },
   };
 }
+
+export { downloadUrl, fileUrl } from "./api-files.js";
