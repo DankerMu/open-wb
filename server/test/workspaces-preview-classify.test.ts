@@ -7,6 +7,7 @@ import {
   DEFAULT_PREVIEW_LIMITS,
   IMAGE_EXTENSIONS,
   NOTEBOOK_EXTENSIONS,
+  needsTextSniff,
   openPreviewStream,
   type PreviewLimits,
   sniffText,
@@ -334,6 +335,34 @@ describe("classifyPreview limits", () => {
     for (const spy of spies) {
       expect(spy).not.toHaveBeenCalled();
     }
+  });
+});
+
+describe("needsTextSniff", () => {
+  it("is true only for names outside every row of the table", () => {
+    for (const name of [...SNIFFED_NAMES, ".env", "i.exe", "file.constructor", "a.b.unknownext"]) {
+      expect(needsTextSniff(name), name).toBe(true);
+    }
+    const known = [
+      ...TEXT_TABLE.map((ext) => `x.${ext}`),
+      ...IMAGE_TABLE.map(([ext]) => `x.${ext}`),
+      ...MEDIA_TABLE.map(([ext]) => `x.${ext}`),
+      "x.ipynb",
+      "Dockerfile",
+      "Makefile",
+      "A.YAML",
+      "g.tar.gz",
+    ];
+    for (const name of known) {
+      expect(needsTextSniff(name), name).toBe(false);
+    }
+  });
+
+  it("is false for the names served elsewhere: their content is never read here", () => {
+    for (const ext of "pdf docx xlsx pptx zip tar gz tgz".split(" ")) {
+      expect(needsTextSniff(`x.${ext}`), ext).toBe(false);
+    }
+    expect(needsTextSniff("I.PDF")).toBe(false);
   });
 });
 
