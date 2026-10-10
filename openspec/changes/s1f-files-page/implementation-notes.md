@@ -845,3 +845,29 @@
 - 预审补：变异：`api-files.ts` 加 `import { x } from "@/lib/api";` → 「拆出的 API 模块对 api.ts 只有类型导入」判红；同一变异对改之前的判定全绿。`SPECIFIER` 只认双引号 → 「类型导入判定自证：值导入、内联 type…」判红。`fileUrl` 加 `.trim()` → 「路径是数据，不规范化：首尾空白」判红；加 `.normalize("NFC")` → 「…：分解形式（NFD）的重音字符」判红。
 - 预审补：上面「不在 `api-files.ts` 另写一份拼接，否则 id 编码有两个来源」一句只对 `api.ts` 一侧成立：`web/src/lib/api-upload.ts:44` 的 `uploadEndpoint` 早就独立拼 `/api/workspaces/<id>/uploads?name=…`，本刀不动，PR 的范围外已列。
 - 预审补：`api.ts` 实测 777 / 800 行（上面估的「约 776」偏 1），余量 23 行；#1080、#1082–#1084 里必须有一刀把既有工作空间方法挪进 `api-files.ts`。
+
+## 16.3（#1081）
+
+- 不是 Critical Path：纯浏览器端的 Content-Type 判定，不碰 `sandbox.resolve`、路径、`op`、路由；D-23 的 resolve→open 窗口本刀没有，不闭合也不加宽。前置 6.1（#1055）已合入（`server/src/workspaces/preview.ts:27-35`）；不等 1.1 / 1.2 / 1.3；一个评审席即可。
+- 现状：两种类型的判定在 `web/src/lib/api.ts:420-430` 的 `parsePreviewKind`（:425 `contentType === "image/png" || contentType === "image/jpeg"`），经 `parsePreviewMetadata`（:432）到 `previewRequest`（:457-494）。`api.ts` 现为 778 行；#1079 的 issue 写的「729 行」已过时。
+- 改动点跟着 `parsePreviewKind` 走：#1079 若把预览函数挪进 `web/src/lib/api-files.ts` 就改那里，否则改 `api.ts`。`fetchPreview` 是既有方法，规格只要求「新增方法」放 `api-files.ts`，本刀不为此搬家。
+- 六种类型的精确字符串（规格 files-web:4 与服务端一致）：`image/png`、`image/jpeg`、`image/gif`、`image/webp`、`image/bmp`、`image/x-icon`。ico 是 `image/x-icon`，不接受 `image/vnd.microsoft.icon`、`image/ico`。既有的 `split(";", 1)` + `trim` + `toLowerCase` 归一保留。
+- 实现建议零增行：把 :425 的条件换成正则字面量 `/^image\/(?:png|jpeg|gif|webp|bmp|x-icon)$/.test(contentType ?? "")`，两端锚定，不用 `new RegExp`、不用 `startsWith("image/")`。若改用 `Set` 约增 3 行，须先量叠加 #1079 后的行数，不得超过 800。
+- 不支持的类型今天的表现不变：`parsePreviewMetadata` 返回 null → `requestFailed(200)`（稳定的 request_failed 文案），不读正文、不调 `URL.createObjectURL`；文件页落到 `tree.tsx:538-545` 的 `{status:"error"}`，产物卡落到 `artifact-card.tsx` 的 `failed(...)`。它不是 `unsupported` 态（那个只由 `supportsPreview` 给出）。
+- 既有断言盘点（已重跑 grep `fetchPreview|image/` 于 `web/src web/test web/e2e`）：没有任何用例把 gif / webp / bmp / ico 钉成「被拒绝」；唯一的拒绝类型行是 `web/test/api-files.test.ts:483-491` 的 `application/octet-stream`。本刀是纯新增，不改写、不放松任何既有断言。`web/test/preview.test.tsx:441-480`（`PreviewPane` 不分配不释放 Blob 地址）与 `web/test/files-fixture.tsx:62` 不动。
+- 用例放新文件 `web/test/api-files-preview-types.test.ts`（偏离 16.4 的「`api-files.test.ts` 扩充」，记入偏离记录）。理由：`api-files.test.ts` 已 743 行，本刀约增 40–60 行，#1079 先在同一文件加地址函数用例，其后还有 #1080、#1082–#1084，800 行必破。knip 入口 `test/**/*.test.ts` 已覆盖，naming-guard 不拦这个名字，不改 `knip.json`。
+- 用例一（「预览元数据与资源」）：一条 `it.each`，行为 `image/gif`、`image/webp`、`image/bmp`、`image/x-icon`，外加一行带参数与大写的 `IMAGE/GIF; charset=binary`。断言 `{kind:"image", url, size:<头值>, truncated:false}`，`size` 头值故意不等于正文长度；`createObjectURL` 恰好调用 1 次，入参 `Blob` 的字节与响应正文一致，`blob.type` 等于响应头的类型；调用方 `URL.revokeObjectURL(preview.url)` 可释放。bmp / x-icon 两行超出 16.4 点名的两种，是加强，记入偏离记录。
+- 用例二（「失败不变成预览」）：一条 `it.each`，行为 `text/html`、`image/svg+xml`、`video/mp4`，另加 `audio/mpeg`（16.3 任务文本含 `audio/*`）。每行响应 200，带合法 `X-Workbuddy-Size`，正文 `private preview body`。断言 `expectRequestFailure(error, 200)`、`error.message` 不含正文、`createObjectURL` 未被调用。helper 用 `./support.js` 的 `captureApiError`、`expectRequestFailure`；`stubPreviewResponse` 是 `api-files.test.ts:18-22` 的本地函数，新文件自写等价的两行 stub，不为复用去动旧文件。不要复制 :524-559 的 jpeg 整块（jscpd）。
+- 不加验收清单行：没有用户可见变化。文件页 `tree.tsx:69-98` 的 `previewableExtensions` / `supportsPreview` 仍只放行 png / jpg / jpeg；产物卡 `stream-artifacts.ts:51-64` 的 `ARTIFACT_KINDS` 同样只有 png / jpg / jpeg。新类型在界面上可达要等 17.x / 18.4（#1090）。不是配置切片，不碰 `docs/architecture/system.md` 第 9 节。
+- 同文件排序：与 #1079 共用 `web/src/lib/api.ts`（或其新建的 `api-files.ts`），按 #1079 → #1081 叠放；用例放新文件后，两刀在测试文件上不再相交。#1078（3.1–3.5）不碰 `api.ts`、`api-files*.test.ts`，也不改 `fetchPreview` 的契约，与本刀无文件交集；它改 `tree.tsx` 时若扩 `previewableExtensions`，属于它或 17.x 的范围。issue 写明本刀不依赖 #1079，#1079 若卡住可直接落在 master 的 `api.ts` 上。
+- issue 与 `tasks.md` 的差异：16.3、16.4 的 16.3 一行、16.5 的第三条逐字一致，无差异。issue 的 PR Boundary 写 `web/test/api-files.test.ts`，按上条改为新测试文件；「不改 `web/src/features/**`」照办。
+- 变异：把 `video/mp4` 加进图片集合 → 用例二的 `video/mp4` 行判红（16.5 指定的那条）。
+- 变异：把 `image/svg+xml` 加进集合，或把判定放宽为 `image/` 前缀 → 用例二的 `image/svg+xml` 行判红；去掉正则的 `$` 锚 → `image/gif+xml` 行判红（实施时更正：`svg+xml` 不以六种子类型之一开头，去锚后仍被拒）。这是 D4 的逃逸向量：主站来源下的 SVG Blob 地址。
+- 变异：把 `text/html` 当作 `text` 或 `image` → 用例二的 `text/html` 行判红。
+- 变异：把 `audio/mpeg` 加进集合 → 用例二的 `audio/mpeg` 行判红。
+- 变异：从集合去掉 `image/gif` → 用例一的 gif 行与 `IMAGE/GIF; charset=binary` 行判红。
+- 变异：从集合去掉 `image/webp` → 用例一的 webp 行判红。
+- 变异：从集合去掉 `image/bmp` 或 `image/x-icon`，或把后者写成 `image/vnd.microsoft.icon` → 用例一对应行判红。若只按 16.4 写 gif / webp 两行，这条变异不可观测，所以四行都要有。
+- 变异：去掉 `toLowerCase` 或 `split(";")` 归一 → 用例一的 `IMAGE/GIF; charset=binary` 行判红。
+- 变异：失败分支改成先读正文再判类型（先 `response.blob()` + `createObjectURL`） → 用例二的「`createObjectURL` 未被调用」判红。
+- 变异：预期不可观测：去掉正则的 `^` 锚（如 `x-image/png`）——没有对应用例，真实输入域里服务端不会发，不补。

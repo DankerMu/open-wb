@@ -419,7 +419,7 @@ function parsePreviewKind(value: string | null): PreviewKind | null {
     return "text";
   }
 
-  if (contentType === "image/png" || contentType === "image/jpeg") {
+  if (/^image\/(?:png|jpeg|gif|webp|bmp|x-icon)$/.test(contentType ?? "")) {
     return "image";
   }
 
