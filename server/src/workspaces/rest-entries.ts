@@ -1,20 +1,37 @@
 /**
- * workspaces/rest-entries — routes on one entry of a workspace beyond the preview: download and
- * delete.
+ * workspaces/rest-entries — routes on one entry of a workspace beyond the preview: download,
+ * delete, and rename / move.
  *
  * The same order as every scoped workspace route: principal, owned root (404 for another
- * owner's and for an unknown id alike), then the query, then the sandbox.
+ * owner's and for an unknown id alike), then the query or the body, then the sandbox.
+ *
+ * Known residual of the move route (design D22 / D-23, #1286 stays open; nothing here closes
+ * it): every check is by path and the `rename` resolves both paths again, re-checking nothing.
+ * - Not overwriting is look-then-rename, not atomic. The handler is synchronous, so no request of
+ *   this process comes in between, but another process (the assistant) can: what it creates at
+ *   `to` after the lstat there is replaced by the rename when it is a non-directory and the
+ *   source is a file, or an empty directory and the source is a directory. Every other
+ *   combination makes the rename fail (500, the source in place).
+ * - A component of either path swapped for a symlink after its lstat is followed by the rename:
+ *   in `from`, an entry outside the workspace that this process can move is moved in; in `to`
+ *   (the parent just checked included), the entry is moved out. The last component is not
+ *   followed: a link swapped in as `from` is itself moved, one at `to` is the case above. The
+ *   audit row names the logical paths either way.
  */
-import { basename } from "node:path";
+import { renameSync } from "node:fs";
+import { basename, dirname } from "node:path";
 import type { FastifyInstance, onErrorHookHandler } from "fastify";
 import { HttpError } from "../core/errors/index.js";
 import { openPreviewStream } from "./preview.js";
 import {
   currentPrincipal,
   ensureOwnedRoot,
+  isOrdinaryDirectory,
   lstatExisting,
   noStoreWorkspaceResponse,
+  parseBodyRecord,
   parsePathQuery,
+  WORKSPACE_BODY_LIMIT,
   type WorkspaceRestDependencies,
 } from "./rest.js";
 
@@ -51,6 +68,31 @@ const clearDownloadHeadersOnError: onErrorHookHandler = (_request, reply, _error
   reply.removeHeader("Content-Length");
   done();
 };
+
+/** What delete and move act on: an ordinary file or a directory; anything else is not there. */
+function entryTypeOf(absPath: string): "file" | "dir" {
+  const status = lstatExisting(absPath);
+  if (status?.isFile() === true) {
+    return "file";
+  }
+  if (status?.isDirectory() === true) {
+    return "dir";
+  }
+  throw new HttpError("not_found");
+}
+
+/** Exactly the two keys, both strings; what they name is the sandbox's to judge. */
+function parseMoveBody(body: unknown): { from: string; to: string } {
+  const record = parseBodyRecord(body);
+  if (
+    Object.keys(record).length !== 2 ||
+    typeof record.from !== "string" ||
+    typeof record.to !== "string"
+  ) {
+    throw new HttpError("bad_request");
+  }
+  return { from: record.from, to: record.to };
+}
 
 export function registerWorkspaceEntries(
   app: FastifyInstance,
@@ -102,10 +144,7 @@ export function registerWorkspaceEntries(
       const path = parsePathQuery(request.query, true);
       // `delete` refuses the empty path too: the workspace root itself is not an entry.
       const absPath = dependencies.sandbox.resolve(principal, workspaceId, path, "delete");
-      const status = lstatExisting(absPath);
-      if (status === undefined || !(status.isFile() || status.isDirectory())) {
-        throw new HttpError("not_found");
-      }
+      const type = entryTypeOf(absPath);
       // One rename into the recycle directory; it throws with the entry still in place.
       const trashId = dependencies.trash.moveToTrash(principal.id, workspaceId, absPath);
       // After the rename and not rolled back: if this throws, the entry is in batch `trashId`.
@@ -114,9 +153,59 @@ export function registerWorkspaceEntries(
         actorId: principal.id,
         workspaceId,
         title: `删除 ${path}`,
-        detail: { path, type: status.isFile() ? "file" : "dir", trashId },
+        detail: { path, type, trashId },
       });
       return reply.code(204).send();
+    },
+  );
+  app.post<{ Params: { id: string } }>(
+    "/api/workspaces/:id/move",
+    {
+      bodyLimit: WORKSPACE_BODY_LIMIT,
+      onRequest: noStoreWorkspaceResponse,
+      // Before the body is parsed: another owner's id, an unknown one and a workspace whose root
+      // is gone answer the same 404 whatever the body is.
+      preParsing: (request, _reply, payload, done) => {
+        ensureOwnedRoot(dependencies, currentPrincipal(request), request.params.id);
+        done(null, payload);
+      },
+    },
+    // Synchronous from the first resolve to the rename: no `await` may come in between.
+    async (request) => {
+      const principal = currentPrincipal(request);
+      const workspaceId = request.params.id;
+      const { from, to } = parseMoveBody(request.body);
+      // `from` first: when it is denied, `to` is not looked at and one rejection is audited.
+      const fromAbs = dependencies.sandbox.resolve(principal, workspaceId, from, "move");
+      const toAbs = dependencies.sandbox.resolve(principal, workspaceId, to, "move");
+      // Into its own subtree. On the two resolved paths and before anything is looked up: it
+      // holds whether or not either exists.
+      if (toAbs.startsWith(`${fromAbs}/`)) {
+        throw new HttpError("bad_request");
+      }
+      const type = entryTypeOf(fromAbs);
+      // The parent is never made here.
+      if (!isOrdinaryDirectory(dirname(toAbs))) {
+        throw new HttpError("not_found");
+      }
+      // Whatever is there, `from` itself included: nothing is overwritten or merged.
+      if (lstatExisting(toAbs) !== undefined) {
+        throw new HttpError("conflict");
+      }
+      // One rename; it throws (500) with the source in place, and there is no fallback.
+      renameSync(fromAbs, toAbs);
+      // After the rename and not rolled back: if this throws, the entry is at `to`.
+      dependencies.audit.emit({
+        kind: "file.move",
+        actorId: principal.id,
+        workspaceId,
+        title:
+          dirname(fromAbs) === dirname(toAbs)
+            ? `重命名 ${from} → ${basename(toAbs)}`
+            : `移动 ${from} → ${to}`,
+        detail: { from, to, type },
+      });
+      return { path: to };
     },
   );
 }

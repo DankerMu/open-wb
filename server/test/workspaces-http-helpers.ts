@@ -1,6 +1,14 @@
-import { existsSync, mkdirSync, realpathSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+} from "node:fs";
 import { join } from "node:path";
-import type { DatabaseSync } from "node:sqlite";
+import { constants, type DatabaseSync } from "node:sqlite";
 import type { FastifyInstance } from "fastify";
 import { expect } from "vitest";
 import type { AssemblyDependencies } from "../src/app.js";
@@ -134,4 +142,48 @@ export function auditRows(db: DatabaseSync, kind: string) {
     )
     .all(kind)
     .map((row) => ({ ...row, detail: JSON.parse(String(row.detail)) as Record<string, unknown> }));
+}
+
+export function auditCount(db: DatabaseSync): unknown {
+  return db.prepare("SELECT count(*) AS count FROM audit_events").get();
+}
+
+/** From here on every audit insert fails; undo with `db.setAuthorizer(null)`. */
+export function denyAuditInserts(db: DatabaseSync): void {
+  db.setAuthorizer((actionCode, table) =>
+    actionCode === constants.SQLITE_INSERT && table === "audit_events"
+      ? constants.SQLITE_DENY
+      : constants.SQLITE_OK,
+  );
+}
+
+export function expectEnvelope(
+  response: InjectResponse,
+  status: number,
+  body: object,
+  label = "",
+): void {
+  expect(response.statusCode, label).toBe(status);
+  expect(response.json(), label).toEqual(body);
+  expect(response.headers["cache-control"], label).toBe("no-store");
+}
+
+/** Every entry below `dir` by relative path: a file's content, a link's target, or its kind. */
+export function contentOf(dir: string, prefix = ""): Record<string, string> {
+  const found: Record<string, string> = {};
+  for (const name of readdirSync(dir).sort()) {
+    const path = join(dir, name);
+    const status = lstatSync(path);
+    if (status.isSymbolicLink()) {
+      found[`${prefix}${name}`] = `link:${readlinkSync(path)}`;
+    } else if (status.isDirectory()) {
+      found[`${prefix}${name}/`] = "dir";
+      Object.assign(found, contentOf(path, `${prefix}${name}/`));
+    } else {
+      found[`${prefix}${name}`] = status.isFile()
+        ? `file:${readFileSync(path, "utf8")}`
+        : "special";
+    }
+  }
+  return found;
 }
