@@ -70,7 +70,7 @@
 
 周期清理 SHALL 在启动时与此后每 24 小时各运行一次：删除 `pdf` 下修改时间早于「当前时刻 − 7 天」的普通文件；`work` 下的全部条目在启动时删除。清理中的任何错误 SHALL 被吞掉，留待下一轮，不影响请求与退出码。缓存没有总量上限。
 
-启动时对 `work` 的清空 SHALL 先于转换器受理第一次转换，并分两种情况（owner D-24）。`ompUser` 与 `officeBin` 没有同时提供时（同 uid 模式；或提供了 `ompUser` 而没有 `officeBin`——没有转换器，`work` 下不会有属该用户的东西）：由本进程递归删除 `work` 下的全部条目，SHALL NOT 启动 `sudo`。两者都提供时：SHALL 先启动恰一次子进程 `sudo -n -u <ompUser> -- /usr/bin/find <cacheDir 的绝对路径>/work -mindepth 1 -delete` 并等它结束（argv 逐项固定，`shell:false`，不经 `setpriv`，标准输入输出与错误全部丢弃，环境只有 `PATH` 与存在时的 `LANG`；启动之前对 `PATH` 做与 spawn 前缀相同的安全检查，检查不过即按该命令失败处理、不启动），再由本进程照前一种情况递归删除余下的条目——本进程自己的递归删除在每一种情况下都执行。该命令失败（前置检查不过、启动失败、非 0 退出、被信号终止）SHALL 在 application stderr 记恰一行 `{"event":"preview_work_clear_failed"}`（没有其它键，不含路径、用户名与子进程输出），SHALL NOT 使启动失败，本进程自己的删除照常进行。这条命令在一次进程生命周期里只在启动时执行一次：周期清理与单次转换之后都不执行它，单次转换后对作业目录的删除仍是「转换器调用契约」的尽力而为。
+启动时对 `work` 的清空 SHALL 先于转换器受理第一次转换，并分两种情况（owner D-24）。`ompUser` 与 `officeBin` 没有同时提供时（同 uid 模式；或提供了 `ompUser` 而没有 `officeBin`——没有转换器，`work` 下不会有属该用户的东西）：由本进程递归删除 `work` 下的全部条目，SHALL NOT 启动 `sudo`。两者都提供时：SHALL 先启动恰一次子进程 `sudo -n -u <ompUser> -- /usr/bin/find <cacheDir 的绝对路径>/work -mindepth 1 -delete` 并等它结束（argv 逐项固定，其中的路径是 `join(cacheDir, "work")` 的结果；`shell:false`，不经 `setpriv`，工作目录为 `/`——GNU `find` 退出前要回到初始目录，omp 用户进不去服务端的工作目录时它会在删除完成后仍以非 0 退出；标准输入输出与错误全部丢弃，环境只有 `PATH` 与存在时的 `LANG`；启动之前对 `PATH` 做与 spawn 前缀相同的安全检查，检查不过即按该命令失败处理、不启动），再由本进程照前一种情况递归删除余下的条目——本进程自己的递归删除在每一种情况下都执行。该命令失败（前置检查不过、启动失败、非 0 退出、被信号终止）SHALL 在 application stderr 记恰一行 `{"event":"preview_work_clear_failed"}`（没有其它键，不含路径、用户名与子进程输出），SHALL NOT 使启动失败，本进程自己的删除照常进行。这条命令在一次进程生命周期里只在启动时执行一次：周期清理与单次转换之后都不执行它，单次转换后对作业目录的删除仍是「转换器调用契约」的尽力而为。
 
 #### Scenario: 命中、失效与复制
 - **WHEN** 转换 `a.docx` 两次；随后改写 `a.docx`（大小或修改时间变化）再转换一次

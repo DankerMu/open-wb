@@ -242,7 +242,7 @@ spawn 行沿用 omp 的形态：`sudo -n -u <OMP_USER> --preserve-env=PATH,LANG,
 - sudoers 再加**恰一行**，参数逐项固定、没有通配：`<app-user> ALL=(<OMP_USER>) NOPASSWD: /usr/bin/find <PREVIEW_CACHE_DIR 的绝对路径>/work -mindepth 1 -delete`。
   它只让应用用户以 omp 用户的身份删除 `work/` 之下的条目（`-mindepth 1` 不删 `work/` 自身）；`find` 缺省不跟随符号链接，而且命令以 omp 用户的身份运行，删得掉的只是 omp 用户自己本来就删得掉的东西。
   规则里的路径必须与服务端解析 `PREVIEW_CACHE_DIR` 得到的绝对路径逐字相同（相对值按 repo root 解析；不带末尾斜杠、不经符号链接换写）：sudo 按字面比对参数，差一个字符就是拒绝。
-- 服务端**只在同时配置了 `OMP_USER` 与 `OFFICE_BIN` 时**、**启动时执行一次** `sudo -n -u <OMP_USER> -- /usr/bin/find <PREVIEW_CACHE_DIR 的绝对路径>/work -mindepth 1 -delete`，在转换器受理第一次转换之前；随后照旧由自己递归删除 `work/` 下余下的条目（属应用用户的那部分）。
+- 服务端**只在同时配置了 `OMP_USER` 与 `OFFICE_BIN` 时**、**启动时执行一次** `sudo -n -u <OMP_USER> -- /usr/bin/find <PREVIEW_CACHE_DIR 的绝对路径>/work -mindepth 1 -delete`，在转换器受理第一次转换之前；随后照旧由自己递归删除 `work/` 下余下的条目（属应用用户的那部分）。子进程的工作目录固定为 `/`（GNU `find` 退出前要回到初始目录，omp 用户进不去时会把已完成的删除报成失败）；路径取 `join(cacheDir, "work")`，sudoers 里写的必须是同一个规范化结果，含空格等特殊字符时按 sudoers 语法转义。上一次运行残留的 `soffice.bin` 若仍在写它的 `<job>`，这一次可能删不净，留到下一次启动。
   配了 `OMP_USER` 而没配 `OFFICE_BIN` 时不执行 `sudo`：没有转换器，`work/` 下不会有属 omp 用户的东西，这样的部署也不需要这一行 sudoers。服务端自己的递归删除在每一种模式下都执行。
   启动前对 `PATH` 做与 spawn 前缀相同的安全检查（`sudo` 经 `PATH` 查找）；不经 `setpriv`（它是一次性的短命令，没有需要随父进程结束的东西）；环境只有 `PATH` 与 `LANG`。
 - 该命令失败（规则没配、`find` 不在该路径、非 0 退出）只记一行日志（`preview_work_clear_failed`，不带路径），**不阻止启动**：规则漏配的部署照常提供转换，只是 `work/` 不归零。
