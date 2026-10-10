@@ -838,6 +838,13 @@
 - 变异：`web/src` 下另一个文件直接导入 `api-files.js` → 断言 (a) 判红。
 - 变异：`workspaceEndpoint` 搬家时丢掉 `encodeURIComponent` → `api-files.test.ts:107` 的 promote 地址与 `:261` 的预览地址判红。
 - 变异：预期不可观察：`fetchPreview` 退回内联拼接而不调 `fileUrl`。输出相同，`:261` 照过，属复用选择，PR 表里标注「不可观察」。
+- 预审补：导入方向判定原先只认字面量 `./api.js`，而 `@/lib/api`、`@/lib/api.js`、`./api`、`../lib/api.js` 都解析到 `api.ts`（`moduleResolution: Bundler` + `@/*` 别名；`web/src/features/settings/page.tsx:6` 就在用 `@/lib/api`），经它们的值导入会全绿通过。`importsApiAsTypeOnly` 改为 `(from, text)`：遍历同文件的 `SPECIFIER` 匹配，留下 `resolveModule(from, 说明符)` 等于 `web/src/lib/api` 的，再做「语句以 `import type` 开头」的检查；`API_SPECIFIER` 删除。用例标题改为「拆出的 API 模块对 api.ts 只有类型导入」。
+- 预审补：自证加一例「别名、无后缀与上级目录写法指向同一个 api.ts，别处的同名模块不算」，原自证例加一条单引号的值导入判违规（原来的单引号样例只期望合规，双引号专用的正则能活下来）。别名说明符经变量拼入，不写成 `from "@/…"` 字面量。
+- 预审补：判定的已知漏判如实记：语句边界取上一个分号，不带分号的 `import type … from "./other.js"` 后紧跟对 `api.ts` 的值导入会漏判（biome 强制分号，进不了仓库）；`SPECIFIER` 不认反引号说明符与 `require()`。不写「不会漏判」。
+- 预审补：「不规范化」原先只钉了路径结构（`..`、首尾 `/`、空串）。加两行：首尾空白 `" a "` → `%20a%20`；NFD 的 `"e\u0301"` → `e%CC%81`，解码后仍是分解形式。`api-files-url.test.ts` 70 → 72 行、9 → 11 例。
+- 预审补：变异：`api-files.ts` 加 `import { x } from "@/lib/api";` → 「拆出的 API 模块对 api.ts 只有类型导入」判红；同一变异对改之前的判定全绿。`SPECIFIER` 只认双引号 → 「类型导入判定自证：值导入、内联 type…」判红。`fileUrl` 加 `.trim()` → 「路径是数据，不规范化：首尾空白」判红；加 `.normalize("NFC")` → 「…：分解形式（NFD）的重音字符」判红。
+- 预审补：上面「不在 `api-files.ts` 另写一份拼接，否则 id 编码有两个来源」一句只对 `api.ts` 一侧成立：`web/src/lib/api-upload.ts:44` 的 `uploadEndpoint` 早就独立拼 `/api/workspaces/<id>/uploads?name=…`，本刀不动，PR 的范围外已列。
+- 预审补：`api.ts` 实测 777 / 800 行（上面估的「约 776」偏 1），余量 23 行；#1080、#1082–#1084 里必须有一刀把既有工作空间方法挪进 `api-files.ts`。
 
 ## 16.3（#1081）
 

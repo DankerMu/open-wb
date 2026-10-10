@@ -46,6 +46,8 @@ describe("工作空间文件的地址函数", () => {
     ["首尾斜杠", "/a/", "%2Fa%2F"],
     ["上级目录段", "../x/./y", "..%2Fx%2F.%2Fy"],
     ["空路径", "", ""],
+    ["首尾空白", " a ", "%20a%20"],
+    ["分解形式（NFD）的重音字符", "e\u0301", "e%CC%81"],
   ])("路径是数据，不规范化：%s", (_name, path, encoded) => {
     expect(fileUrl("w1", path)).toBe(`/api/workspaces/w1/file?path=${encoded}`);
     expect(downloadUrl("w1", path)).toBe(`/api/workspaces/w1/download?path=${encoded}`);

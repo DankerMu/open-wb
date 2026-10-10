@@ -42,56 +42,76 @@ function importersOf(module: string): string[] {
   );
 }
 
-const API_SPECIFIER = /["']\.\/api\.js["']/g;
+const LIB = "web/src/lib";
 
 /**
- * 去注释后的源码里，说明符 `./api.js` 的每次出现是否都在以 `import type` 开头的语句内。按语句（上一个分号
- * 之后）而不是按行判定，所以多行的 `import type {…}` 合规，`import { type X }`、`export … from` 与动态
- * `import()` 都违规；一次都不出现也合规。
+ * `from` 处去注释后的源码里，指向 `web/src/lib/api` 的每个说明符（`./api.js`、`./api`、`@/lib/api`、
+ * `../lib/api.js` 等写法经 `resolveModule` 归一）是否都在以 `import type` 开头的语句内。按语句（上一个
+ * 分号之后）而不是按行判定，所以多行的 `import type {…}` 合规，`import { type X }`、`export … from`、
+ * 副作用导入与动态 `import()` 都违规；一次都不出现也合规。
  */
-function importsApiAsTypeOnly(text: string): boolean {
+function importsApiAsTypeOnly(from: string, text: string): boolean {
   const code = stripTsComments(text);
-  return [...code.matchAll(API_SPECIFIER)].every(({ index }) => {
-    const statement = code.slice(code.lastIndexOf(";", index) + 1, index);
-    return /^\s*import\s+type\s/.test(statement);
-  });
+  return [...code.matchAll(SPECIFIER)]
+    .filter(([, specifier = ""]) => resolveModule(from, specifier) === `${LIB}/api`)
+    .every(({ index }) => {
+      const statement = code.slice(code.lastIndexOf(";", index) + 1, index);
+      return /^\s*import\s+type\s/.test(statement);
+    });
 }
 
 describe("API 客户端源码模块划分", () => {
-  const LIB = "web/src/lib";
-
   it("api-files.ts 的导出只被 api.ts 消费", () => {
     expect(importersOf(`${LIB}/api-files`)).toEqual([`${LIB}/api.ts`]);
   });
 
-  it("拆出的 API 模块对 ./api.js 只有类型导入", () => {
+  it("拆出的 API 模块对 api.ts 只有类型导入", () => {
     for (const module of ["api-sessions", "api-upload", "api-commands", "api-files"]) {
-      expect(importsApiAsTypeOnly(readRepoFile(`${LIB}/${module}.ts`)), module).toBe(true);
+      const path = `${LIB}/${module}.ts`;
+      expect(importsApiAsTypeOnly(path, readRepoFile(path)), module).toBe(true);
     }
   });
 
   it("类型导入判定自证：值导入、内联 type、再导出与动态导入违规，多行类型导入与注释合规", () => {
-    // 样例里的说明符相对本文件解析到不存在的模块，不会被上面的导入者扫描算作对真实模块的导入。
-    expect(importsApiAsTypeOnly('import type { ApiClient } from "./api.js";')).toBe(true);
-    expect(
-      importsApiAsTypeOnly('import type {\n  ApiClient,\n  ApiError,\n} from "./api.js";'),
-    ).toBe(true);
-    expect(importsApiAsTypeOnly("import type { A } from './api.js';\nconst a = 1;")).toBe(true);
-    expect(importsApiAsTypeOnly('// import { a } from "./api.js";\nconst a = 1;')).toBe(true);
-    expect(importsApiAsTypeOnly('import { a } from "./other.js";')).toBe(true);
-    expect(importsApiAsTypeOnly('import { requestFailed } from "./api.js";')).toBe(false);
-    expect(importsApiAsTypeOnly('import { type ApiClient } from "./api.js";')).toBe(false);
-    expect(importsApiAsTypeOnly('import {\n  type ApiClient,\n} from "./api.js";')).toBe(false);
-    expect(importsApiAsTypeOnly('export { requestFailed } from "./api.js";')).toBe(false);
-    expect(importsApiAsTypeOnly('export type { ApiClient } from "./api.js";')).toBe(false);
-    expect(importsApiAsTypeOnly('const api = await import("./api.js");')).toBe(false);
-    expect(importsApiAsTypeOnly('import "./api.js";')).toBe(false);
+    // 样例按 `web/src/lib` 下的文件解析；本文件在 `web/test`，这些串不会被上面的导入者扫描算作对真实模块的导入。
+    const typeOnly = (text: string) => importsApiAsTypeOnly(`${LIB}/api-files.ts`, text);
+    expect(typeOnly('import type { ApiClient } from "./api.js";')).toBe(true);
+    expect(typeOnly('import type {\n  ApiClient,\n  ApiError,\n} from "./api.js";')).toBe(true);
+    expect(typeOnly("import type { A } from './api.js';\nconst a = 1;")).toBe(true);
+    expect(typeOnly('// import { a } from "./api.js";\nconst a = 1;')).toBe(true);
+    expect(typeOnly('import { a } from "./other.js";')).toBe(true);
+    expect(typeOnly('import { requestFailed } from "./api.js";')).toBe(false);
+    expect(typeOnly("import { a } from './api.js';")).toBe(false);
+    expect(typeOnly('import { type ApiClient } from "./api.js";')).toBe(false);
+    expect(typeOnly('import {\n  type ApiClient,\n} from "./api.js";')).toBe(false);
+    expect(typeOnly('export { requestFailed } from "./api.js";')).toBe(false);
+    expect(typeOnly('export type { ApiClient } from "./api.js";')).toBe(false);
+    expect(typeOnly('const api = await import("./api.js");')).toBe(false);
+    expect(typeOnly('import "./api.js";')).toBe(false);
     // 一条合规的类型导入不替后面的值导入背书。
     expect(
-      importsApiAsTypeOnly(
-        'import type { A } from "./api.js";\nimport { requestFailed } from "./api.js";',
-      ),
+      typeOnly('import type { A } from "./api.js";\nimport { requestFailed } from "./api.js";'),
     ).toBe(false);
+  });
+
+  it("类型导入判定自证：别名、无后缀与上级目录写法指向同一个 api.ts，别处的同名模块不算", () => {
+    const typeOnly = (text: string) => importsApiAsTypeOnly(`${LIB}/api-files.ts`, text);
+    expect(typeOnly('import { a } from "./api";')).toBe(false);
+    expect(typeOnly('import { a } from "./api.ts";')).toBe(false);
+    expect(typeOnly('import { a } from "../lib/api.js";')).toBe(false);
+    expect(typeOnly('import type { A } from "./api";')).toBe(true);
+    // 别名说明符经变量拼入，与下面导入者扫描自证的同款写法一致。
+    for (const alias of ["@/lib/api", "@/lib/api.js"]) {
+      expect(typeOnly(`import { a } from "${alias}";`), alias).toBe(false);
+      expect(typeOnly(`const api = await import("${alias}");`), alias).toBe(false);
+      expect(typeOnly(`import type { A } from "${alias}";`), alias).toBe(true);
+      expect(typeOnly(`import type {\n  A,\n} from '${alias}';`), alias).toBe(true);
+    }
+    // 同一行源码放到别的目录，`./api.js` 指向的不是 `web/src/lib/api`。
+    const elsewhere = "web/src/features/chat/x.ts";
+    expect(importsApiAsTypeOnly(elsewhere, 'import { a } from "./api.js";')).toBe(true);
+    expect(importsApiAsTypeOnly(elsewhere, 'import { a } from "../../lib/api.js";')).toBe(false);
+    expect(typeOnly('import { a } from "./api-json.js";')).toBe(true);
   });
 });
 
