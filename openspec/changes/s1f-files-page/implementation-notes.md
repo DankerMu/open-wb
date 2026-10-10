@@ -708,3 +708,38 @@
 - 变异：去掉 `onRequest: noStoreWorkspaceResponse` → ③ 未登录 401 与各例的 `cache-control` 断言红。
 - 变异：补偿改成递归 `rm` 整个 `<workspaceId>` 级 → ②（第一个批次被连带删除）需配一例「已有批次后再注入失败」才红；⑤ 里加这一步。
 - 预审补：**残余 · 目标侧还有一条不需要竞态的**（读 `dirs.ts:69-96` 与 `trash.ts` 的四级循环推出，**未在 uid 分离部署上实测**）。上面「预先占位由逐级校验挡住」只对符号链接、普通文件、他人持有的目录成立；`ensureOwnedDir` 容忍 `EEXIST`，已存在的条目只要是**应用用户持有的真实目录**就被接受，不看 mode（校正为 `0700`）、不看是谁挪来的。规格（file-operations `:6`）只设想了 omp 用户放「符号链接或自己的目录」，没有设想它挪动应用用户的目录：账号根正是应用用户持有的 `2770` 目录，omp 用户可以在 `.trash` 出现之前、或把真正的 `.trash` 改名挪开之后，把某个账号根改名为 `<SANDBOX_ROOT>/.trash`。此后任一其他账号的下一次删除把该账号根校正为 `0700`、在其中建后三级、把条目改名进去、答 204 并写审计。后果：该账号根变 `0700`（与上一条相同，omp 用户进不去，账号自己的请求因根不在原处得 404）；被挪开的真正 `.trash` 里的既有批次清理再也扫不到；新批次落在被劫持的目录里——**只在它仍叫 `.trash` 期间**清理扫得到（与符号链接变体不同：这里 `.trash` 是通过 `lstat` 校验的真实目录；清理还会走进该账号根，其下 `2770` 的空间目录过不了校验、被跳过），改回原名后批次留在账号根下、扫不到。确定性、无窗口；没有新增权限（omp 用户本来就能改写 `SANDBOX_ROOT` 下的一切，ADR-0010 信任模型）。属 #1286 / D-23 已登记残余的同一类，不闭合、不加复核；头注释与 PR「已知残余」同步写明。
+
+## 9.1、9.2、9.5（#1062）
+
+- **Critical Path：沙箱与文件边界**（改动用户文件位置、`op=move` 两端、审计次序）：两个评审席 + owner 白盒；纯服务端，**no checklist rows**（FL-01 已在）；不碰配置键、`docs/architecture/system.md` §9、`core/sandbox`、`trash.ts`、`smoke/files.hurl`（26.2）、`workspaces-http.test.ts`（736 行；11.4 归 #1075）。
+- 与 `tasks.md` 的出入：issue 里 9.1 / 9.2 / 9.5 的任务原文与 `tasks.md` 逐字一致。issue 其余四处过时：① PR Boundary 写「`rest-entries.ts` 不存在则本 PR 建」，主干已有（93 行，下载路由，`index.ts:10` 已注册）；② 「已知残余」只写了微秒级覆盖窗口，裁决后登记的是 D22「已知残余」的整段替换窗口（见下）；③ PR Boundary 漏了 `rest.ts`（只加 `export`）与 `http-typed-errors.test.ts:190` 的标题；④ 11.3 引的 `http-parser-owners.test.ts:29-42`、`:144-146` 现为 `:28-45`、`:149-155`。
+- 归属条数以合入时的底为准，底数加一：主干是 15（`errors.ts:52-68`、`FIFTEEN_OWNER_IDENTITIES`）；按本批栈序 #1067 在前，本刀是 16 → 17，#1067 未在底上则是 15 → 16。规格 delta 与 D25 写的「十七条 / 其余十六条」是终态。须同步改：`errors.ts:45-51` 与 `:72` 的注释、集合加 `"POST /api/workspaces/:id/move"`；`http-parser-owners.test.ts` 的常量名、`:28` 注释、`:149-150` 两个标题、`:152` 的 `toBe(n)`；`http-typed-errors.test.ts:190` 的标题（只列十条、无条数断言，仅改标题，记偏离）。另在「证据 3」的 `NON_OWNER_METHODS` 加 `["PUT", "/api/workspaces/:id/move"]`。
+- 9.2 与现码不符：`http-parser-owners.test.ts` 不挂产品路由（文件头 `:6-9`，`requestShaped` 接缝），「无文件变化」在那里不可观察。该文件只加身份行（`it.each` 自动得到 ×4 个真实 CTP 错误）；「400 且无文件变化、无审计、`no-store`」写在 `workspaces-move.test.ts`，走 `app.inject`，仿 `workspace-promote.test.ts:574-600`。
+- 复用而不复制：`rest.ts`（418 行，#1056、#1058 也改它）只给 `WORKSPACE_BODY_LIMIT`（:38）、`isOrdinaryDirectory`（:143）、`parseBodyRecord`（:363）加 `export`，零新增行；已导出的 `currentPrincipal`、`ensureOwnedRoot`、`lstatExisting`、`noStoreWorkspaceResponse` 照用。`parseMoveBody` 写在 `rest-entries.ts`：`parseBodyRecord` 后判 `Object.keys(record).length === 2` 且 `from`、`to` 都是 string。
+- 与 #1060 的共用：DELETE 无 body，没有 body 校验可复用；可共用的只有「`lstat` 结果 → `"file" | "dir"`，否则 404」这一个模块私有函数（两条路由的 404 判定与 `detail.type`）。#1060 先合则直接用它的，没有就由本刀写成一个并让 DELETE 改用，不各写一份。测试侧的 `auditRows`、`SANDBOX_DENIED_ENVELOPE`、建空间夹具同理：`workspaces-http-helpers.ts`（101 行）里已有就导入，没有就放进去共用，不从 `workspaces-download.test.ts:36-68` 整段粘贴（jscpd 3%，无忽略项）。
+- 合并排序：`rest-entries.ts` #1060 → #1062；`errors.ts` 与 `http-parser-owners.test.ts` #1067 → #1062；`rest.ts` 在 #1056、#1058 之后。
+- 路由选项：`bodyLimit: WORKSPACE_BODY_LIMIT`、`onRequest: noStoreWorkspaceResponse`、路由内联 `preParsing`（`ensureOwnedRoot(dependencies, currentPrincipal(request), request.params.id); done(null, payload)`，同 `rest.ts:185-188` 的做法，不为它把闭包提出 `rest.ts`）。没有这个钩子，他人 id 带坏 body 会先得到 400，违背「归属 404 在先」。用查根的那一版，自己名下但根目录缺失的 id 也是 404。
+- 处理体（全程同步，检查与改名之间不 `await`）：`parseMoveBody` → `resolve(from,"move")` → `resolve(to,"move")`（前者抛出则后者不执行）→ `toAbs.startsWith(fromAbs + "/")` → 400 → `lstatExisting(fromAbs)` 非文件非目录 → 404 → `!isOrdinaryDirectory(dirname(toAbs))` → 404 → `lstatExisting(toAbs) !== undefined` → 409 → `renameSync(fromAbs, toAbs)`（`node:fs` 具名导入，不 try/catch）→ `audit.emit` → `{ path: to }`。`resolve` 已跳过空分量与 `.`（`resolve.ts:40`），所以词法前缀比较与 `dirname(fromAbs) === dirname(toAbs)` 都在已解析路径上做；`title` 是 `重命名 ${from} → ${basename(toAbs)}` 或 `移动 ${from} → ${to}`，`detail` 与响应带原始的 `from`、`to`。
+- 「不覆盖」按 D23 是先看再改名，不是原子的：Node 没有 `RENAME_NOREPLACE`，D23 否决 `link` + `unlink`（`fs.protected_hardlinks`）。同步实现使本进程内的并发请求插不进来，窗口只对别的进程（助手）开着：`lstat(to)` 之后被建出的文件会被覆盖（目录源遇空目录同样），非空目录则 `ENOTEMPTY` → 500。PR 不得写「已闭合」。
+- D-23 残余的精确陈述：`resolve` 对 `from` 与 `to` 的每个已存在分量（含末段）各 `lstat` 一次，路由再 `lstat` 三处（`from`、`to` 的父目录、`to`）；此后 `rename` 按路径重新解析两端的全部中间分量，无一被复核。`from` 的中间分量被换成符号链接 → 空间外、应用用户够得着的条目被移进来；`to` 的中间分量（含刚查过的父目录）被换 → 条目被移出去；末段被换成链接只会移动链接本身。不得加宽：不加 `await`、不重试、不做复制回退、不 `mkdir -p` 目标父目录。
+- 规格未写明的分支，取最简，记偏离（一）：① 审计在 `rename` 之后失败 → 500，条目已在 `to`，不回滚（与删除的明文一致）；② `rename` 的任何失败（`EACCES`、`EXDEV`、`ENOENT`、`EINVAL`、`EBUSY`）一律 generic 500，源留原处；空间内子目录是挂载点时的 `EXDEV` 也在此列，`resolve` 不看 `st_dev`；③ `to` 已存在且是符号链接 → 403（`resolve` 先拒），不是 409；④ `{from:"a.md",to:"a.md/x"}`（源是文件）→ 400；⑤ 不加 `resolve` 之外的名字规则（控制字符、点开头、`uploads` 都可移动）。
+- 规格未写明的分支（二）：⑥ 仅大小写不同的改名在大小写不敏感的文件系统（macOS 开发机）是 409，Linux 是 200；`{from:"d1",to:"D1/x"}` 在前者是 `EINVAL` → 500。不做特判，测试里不出现仅大小写不同的名字。⑦ 临时空间走同一个 `rootOf`，无分支，加一例 200 即可。⑧ 「无上限的文件读出」指同组的下载半边（9.3，已交付）；移动只做 `lstat`，不读任何文件字节，响应只有 `{path}`。
+- 新文件 `server/test/workspaces-move.test.ts`（预计 450 行以内）：六个场景照规格，每例断言前后目录树、文件内容与 `file.move` / `sandbox.reject` 行数；「改名失败」用 `vi.spyOn(fs, "renameSync").mockImplementationOnce(抛带 code 的错)` + `syncBuiltinESMExports()`，`EACCES` 与 `EXDEV` 各一例，导入 `workspace-file-helpers.ts` 以复用它的 `afterEach` 还原，断言 500 `INTERNAL_ERROR_ENVELOPE`、`no-store`、正文不含 errno 与路径、`to` 不存在。不加依赖字段 `rename?`。
+- 规格外补充用例：`{from:"../a",to:"../b"}` 恰一条 `sandbox.reject` 且 `relPath` 为 `../a`；`{from:"link/x.md",to:"x.md"}` → 403，空间外文件仍在；`lisi`（种子管理员 `u3`）与不存在的 id 带越界 `from`、带坏 JSON、带超限 body → 逐字相同的 404，零审计；未登录带坏 body → 401；审计失败（`db.setAuthorizer`，仿 `workspaces-http-failures.test.ts:270`）；parser 四例（坏 JSON、空 JSON body、`text/plain`、超 16 KiB）加 `application/octet-stream`；恰 16 KiB 的合法 body（空格补齐，仿 `workspaces-http.test.ts:644`）→ 200。
+- 变异：9.5 ①：去掉 `lstat(to)` 的 409 判断 → 「同名拒绝」的 `a.md → b.md` 里 `b.md` 内容被覆盖，判红（文件覆盖文件时 `rename` 不抛错）。
+- 变异：9.5 ②：不查子树 → 「子树判断先于存在性」的 `d1 → d1/sub/d1`（`d1/sub` 存在）得到 500 而非 400，判红。
+- 变异：9.5 ③：子树判断挪到父目录检查之后 → `d1 → d1/nodir/x`、`missing → missing/x` 与「其它拒绝」的 `d1 → d1/sub/d1` 得到 404，判红。
+- 变异：9.5 ④：前缀比较不带 `/` → `d1 → d10` 得到 400 而非 200，判红。
+- 变异：`resolve` 的 `op` 换成直接 `join(root, path)`（任一端）→ `../a.md`、`link/a.md`、`link/x.md` 的 403 与 `sandbox.reject`（`detail.op="move"`）判红，空间外出现或丢失文件。
+- 变异：先解析 `to`，或一端失败后仍解析另一端 → 「恰一条、`relPath` 为 `../a`」判红。
+- 变异：`to` 改用 `op="mkdir"` 或 `"write"` → 状态码不变，仅 `detail.op` 断言判红（断言须写 `op`）。
+- 变异：去掉 `preParsing` → 他人或未知 id 带坏 JSON、带超限 body 得到 400 而非 404，判红；只留处理体里的 `ensureOwnedRoot` 时同样红。
+- 变异：去掉 `ensureOwnedRoot` → 根目录缺失的自有 id 得到 403 加审计行而非 404，判红；他人 id 的 404 由 facade 的 `rootOf` 双重保证，仅靠该例**不可观察**。
+- 变异：`errors.ts` 不加身份 → `http-parser-owners.test.ts` 的新行 ×4 与 move 测试的坏 JSON、空 body、octet-stream、超限四例判红（500）；`text/plain` 一例**不可观察**（内置 parser 给出 string，处理体自己回 400）。
+- 变异：去掉 `bodyLimit` → 只有「合法 `{from,to}` 加空格超 16 KiB」的例子判红（变成 200 且文件被移动）；用非法形状的大 body 时**不可观察**，所以夹具必须是合法形状。
+- 变异：body 放宽（允许多余键、不查类型）→ `{from,to,extra:1}`、`{from:1,to:"b"}` 判红。
+- 变异：审计挪到 `rename` 之前 → 「改名失败」出现 `file.move` 行，判红；去掉审计或在审计前就返回 → 「重命名与移动」的三行与审计失败例判红。
+- 变异：`title` 恒用「移动」，或用原始字符串比较父目录 → `重命名 a.md → b.md` 的标题断言判红；后一种须有 `{from:"a.md",to:"./c.md"}` 的例子才可观察。
+- 变异：`rename` 失败后做复制回退 → `EXDEV` 例里 `to` 出现，判红；吞掉 `rename` 的错并返回 200 → 「改名失败」判红。
+- 变异：自动创建目标父目录 → `a.md → nodir/a.md` 得到 200，判红；源类型判断放宽到任意类型 → 需加命名管道夹具（`mkfifo`）才可观察，否则标注**不可观察**。
+- 变异：`renameSync` 换成 `await rename()` → 现有用例**不可观察**（spy 落空会使「改名失败」变红，但窗口加宽本身测不出），由评审按「同步、无 `await`」核对。

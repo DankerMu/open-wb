@@ -267,6 +267,7 @@ Minimal mergeable slice: 8.1 的 `sweep` 半边与 `workspaces-trash-sweep.test.
 ## 9. file-operations — 重命名 / 移动与下载
 
 - [ ] 9.1 `rest-entries.ts`：`POST /api/workspaces/:id/move`（严格的 `{from,to}` body、检查次序、409 不覆盖、子树 400、审计 `file.move` 与两种 `title`）；`server/src/http/errors.ts` 的归属路由集合加入 `POST /api/workspaces/:id/move`。
+  实施注记见 `implementation-notes.md`「9.1、9.2、9.5（#1062）」。
 - [ ] 9.2 测试（新文件 `server/test/workspaces-move.test.ts`）：file-operations「重命名与移动」六个场景（含「子树判断先于存在性」：`d1/sub` 存在与不存在两种夹具都是 400，`d1 → d10` 不被误判）；`server/test/http-parser-owners.test.ts` 加该路由的四种 content-parser 错误 → 400 且无文件变化。
 - [x] 9.3 `rest-entries.ts`：`GET /api/workspaces/:id/download`（附件头、`filename` 与 `filename*` 的生成做成纯函数、审计先于首字节、不支持 `Range`）。
   实施注记见 `implementation-notes.md`「9.3、9.4（#1061）」。
