@@ -4,10 +4,13 @@ import { archiveFormat, listArchive } from "../src/workspaces/archive.js";
 import {
   archiveOnDisk,
   DEFAULTS,
+  EMPTY_MEMBER,
   emptyMembers,
   GNU_MAGIC,
+  gzipMember,
   LONG_LINK,
   list,
+  noise,
   paxRecord,
   TAR_END,
   THREE_MEMBERS,
@@ -136,6 +139,447 @@ describe("tar.gz：解压不出字节的输入也受时限约束", () => {
       expect(file.positions).toEqual([0]);
     },
   );
+});
+
+describe("tar.gz：gzip 流的头、流尾与流之后的字节", () => {
+  const JUNK = Buffer.alloc(300_000, "j");
+  const THREE_PATHS = ["a.txt", "dir/", "dir/b.md"];
+  const paths = (listing: { entries: { path: string }[] }) =>
+    listing.entries.map((entry) => entry.path);
+
+  it("多成员 gzip（两个流首尾相接）：第一个流已到结束块则不读第二个流，没到则接着读；无关字节不是流", async () => {
+    const second = gzipSync(Buffer.concat([tarFile("second.txt", "2"), TAR_END]));
+    const complete = await list("multi.tgz", Buffer.concat([gzipSync(THREE_MEMBERS), second]));
+    expect(paths(complete.listing)).toEqual(THREE_PATHS);
+    expect(complete.listing.truncated).toBe(false);
+
+    // The first stream has no end blocks: alone it is two members and a missing header; with the
+    // second stream after it the walk goes on into that one and finds its end blocks.
+    const first = gzipSync(Buffer.concat(emptyMembers(2)));
+    const bare = await list("multi.tgz", first);
+    const TWO = [
+      { path: "m0", type: "file", size: 0 },
+      { path: "m1", type: "file", size: 0 },
+    ];
+    expect(bare.listing).toEqual({ format: "tar.gz", entries: TWO, truncated: true });
+    const open = await list("multi.tgz", Buffer.concat([first, second]));
+    expect(open.listing).toEqual({
+      format: "tar.gz",
+      entries: [...TWO, { path: "second.txt", type: "file", size: 1 }],
+      truncated: false,
+    });
+
+    // The walk asks for a third header and what follows the stream is no gzip header: none of it
+    // is fed to the inflater or fetched, however much of it there is.
+    const junk = await list("multi.tgz", Buffer.concat([first, JUNK]));
+    expect(junk.listing).toEqual(bare.listing);
+    expect(junk.file.positions).toEqual([0]);
+    expect(open.file.positions).toEqual([0]);
+  });
+
+  it("压缩流跨多次读取、后跟无关字节：读到流尾为止，每次读取不超过 65536 字节", async () => {
+    const whole = gzipSync(
+      Buffer.concat([tarFile("noise.bin", noise(200_000)), tarFile("after.txt", "x"), TAR_END]),
+    );
+    expect(whole.length).toBeGreaterThan(3 * EXTENSION_LIMIT);
+    expect(whole.length).toBeLessThan(4 * EXTENSION_LIMIT);
+    const { file, listing } = await list("wide.tgz", Buffer.concat([whole, JUNK]));
+    expect(listing).toEqual({
+      format: "tar.gz",
+      entries: [
+        { path: "noise.bin", type: "file", size: 200_000 },
+        { path: "after.txt", type: "file", size: 1 },
+      ],
+      truncated: false,
+    });
+    expect(file.positions).toEqual([0, 65_536, 131_072, 196_608]);
+    expect(file.maxLength()).toBe(EXTENSION_LIMIT);
+  });
+
+  it("带尾部字节的包同样受时限约束：跳过 8 MiB 正文途中到时 → 恰一项并置 truncated", async () => {
+    const bytes = gzipSync(
+      Buffer.concat([
+        tarFile("zeros.bin", Buffer.alloc(8 * 1024 * 1024)),
+        tarFile("after.txt", "x"),
+        TAR_END,
+      ]),
+    );
+    const { file, listing } = await list("bombtail.tgz", Buffer.concat([bytes, JUNK]), {
+      maxEntries: 1000,
+      now: tickingClock(1000),
+    });
+    expect(listing.entries).toEqual([{ path: "zeros.bin", type: "file", size: 8_388_608 }]);
+    expect(listing.truncated).toBe(true);
+    expect(file.maxLength()).toBeLessThanOrEqual(EXTENSION_LIMIT);
+  });
+
+  it("带尾部字节的包到上限即停", async () => {
+    const whole = gzipSync(Buffer.concat([...emptyMembers(5), TAR_END]));
+    const { listing } = await list("captail.tgz", Buffer.concat([whole, JUNK]), {
+      maxEntries: 3,
+      now: () => 0,
+    });
+    expect(paths(listing)).toEqual(["m0", "m1", "m2"]);
+    expect(listing.truncated).toBe(true);
+  });
+
+  it("gzip 头的可选字段（FEXTRA、FNAME、FCOMMENT、FHCRC）被跳过，gzip(1) 写的带文件名的头同样可读", async () => {
+    const full = gzipMember(THREE_MEMBERS, {
+      extra: Buffer.from("extra-field"),
+      name: "x.tar",
+      comment: "made by hand",
+      headerCrc: true,
+    });
+    for (const bytes of [
+      full,
+      Buffer.concat([full, JUNK]),
+      gzipMember(THREE_MEMBERS, { name: "x.tar" }),
+      gzipMember(THREE_MEMBERS),
+    ]) {
+      const { listing } = await list("fields.tgz", bytes);
+      expect(paths(listing)).toEqual(THREE_PATHS);
+      expect(listing.truncated).toBe(false);
+    }
+  });
+
+  it("流尾的 CRC 与长度恰好跨在两次读取之间：照常核对，后跟无关字节也不多列不少列", async () => {
+    // FEXTRA is sized so that the 8 trailer bytes start 4 bytes before the 65536 boundary.
+    const bare = gzipMember(THREE_MEMBERS);
+    const straddling = gzipMember(THREE_MEMBERS, {
+      extra: Buffer.alloc(EXTENSION_LIMIT - 4 - 2 - (bare.length - 8)),
+    });
+    expect(straddling.length).toBe(EXTENSION_LIMIT + 4);
+    for (const bytes of [straddling, Buffer.concat([straddling, JUNK])]) {
+      const { file, listing } = await list("straddle.tgz", bytes);
+      expect(paths(listing)).toEqual(THREE_PATHS);
+      expect(listing.truncated).toBe(false);
+      expect(file.positions).toEqual([0, 65_536]);
+      expect(file.maxLength()).toBe(EXTENSION_LIMIT);
+    }
+  });
+
+  // A deflate block of the reserved type 3: zlib refuses it wherever it stands.
+  const BAD_BLOCK = Buffer.from([0x07, 0xff, 0xff, 0xff, 0xff, 0xff]);
+
+  it("deflate 数据在第一片之后才不合法 → 此前各片解出的成员照常列出并置 truncated（后跟无关字节同样）", async () => {
+    const broken = Buffer.concat([
+      gzipSync(THREE_MEMBERS).subarray(0, 10),
+      deflateRawSync(Buffer.concat([tarFile("noise.bin", noise(4096)), tarFile("after.txt")]), {
+        finishFlush: constants.Z_SYNC_FLUSH,
+      }),
+      BAD_BLOCK,
+    ]);
+    expect(broken.length).toBeGreaterThan(4096);
+    for (const bytes of [broken, Buffer.concat([broken, JUNK])]) {
+      const { listing } = await list("broken.tgz", bytes);
+      expect(listing).toEqual({
+        format: "tar.gz",
+        entries: [{ path: "noise.bin", type: "file", size: 4096 }],
+        truncated: true,
+      });
+    }
+  });
+
+  const flipped = (bytes: Buffer, at: number) => {
+    const copy = Buffer.from(bytes);
+    copy.writeUInt8(copy.readUInt8(at) ^ 1, at);
+    return copy;
+  };
+  const gz = gzipSync(THREE_MEMBERS);
+  const withHeaderCrc = gzipMember(THREE_MEMBERS, { headerCrc: true });
+  const reserved = Buffer.from(gz);
+  reserved.writeUInt8(0x20, 3);
+  // Fixed part 10 + FEXTRA length 2 + 65524: the deflate data starts exactly at 65536.
+  const filling = gzipMember(THREE_MEMBERS, { extra: Buffer.alloc(EXTENSION_LIMIT - 12) });
+  // FNAME is flagged and the seven bytes after the fixed part are all there is: none of them is a NUL.
+  const unnamed = Buffer.from([
+    0x1f, 0x8b, 8, 8, 0, 0, 0, 0, 0, 3, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67,
+  ]);
+
+  it.each<[string, Buffer]>([
+    ["流尾的 CRC-32 不符", flipped(gz, gz.length - 8)],
+    ["流尾的长度不符", flipped(gz, gz.length - 4)],
+    ["流尾的 CRC-32 不符，后跟无关字节", Buffer.concat([flipped(gz, gz.length - 8), JUNK])],
+    ["压缩方法不是 deflate", flipped(gz, 2)],
+    ["头里置了保留标志位", reserved],
+    ["FHCRC 不符", flipped(withHeaderCrc, 10)],
+    ["FNAME 没有结尾的 NUL", unnamed],
+    ["FEXTRA 的长度读不全", Buffer.from([0x1f, 0x8b, 8, 4, 0, 0, 0, 0, 0, 3, 9])],
+    ["FEXTRA 声明的长度超出文件", Buffer.from([0x1f, 0x8b, 8, 4, 0, 0, 0, 0, 0, 3, 9, 0, 1])],
+    ["deflate 数据一开始就不合法", Buffer.concat([gz.subarray(0, 10), BAD_BLOCK])],
+    ["只有 10 字节的头", gz.subarray(0, 10)],
+    ["头恰好占满第一次读取的 65536 字节", filling],
+    ["不足 10 字节", gz.subarray(0, 9)],
+  ])("gzip 流自身损坏、一项都读不出 → 不支持：%s", async (_label, bytes) => {
+    await expect(list("bad.tgz", bytes)).rejects.toMatchObject(UNSUPPORTED);
+  });
+
+  it("流尾的 8 个字节不全（切掉末 3 字节）而结束块已读到 → 照常列出，不置 truncated", async () => {
+    const { listing } = await list("short-trailer.tgz", gz.subarray(0, gz.length - 3));
+    expect(paths(listing)).toEqual(THREE_PATHS);
+    expect(listing.truncated).toBe(false);
+  });
+});
+
+describe("tar.gz：多成员 gzip 的边界", () => {
+  const JUNK = Buffer.alloc(300_000, "j");
+  // `a.txt` without end blocks, then `b.txt` with them: the tar ends only inside a second stream.
+  const A_TAR = tarFile("a.txt", "hello");
+  const B_TAR = Buffer.concat([tarFile("b.txt", "world!"), TAR_END]);
+  const A = gzipSync(A_TAR);
+  const B = gzipSync(B_TAR);
+  const A_ENTRY = { path: "a.txt", type: "file", size: 5 };
+  const B_ENTRY = { path: "b.txt", type: "file", size: 6 };
+  const ONLY_A = { format: "tar.gz", entries: [A_ENTRY], truncated: true };
+  const BOTH = { format: "tar.gz", entries: [A_ENTRY, B_ENTRY], truncated: false };
+  const increasing = (positions: number[]) =>
+    positions.every((position, index) => index === 0 || position > (positions[index - 1] ?? 0));
+
+  // A tar without end blocks whose deflate data is a whole number of 1024-byte slices: the body
+  // length is searched for, since the compressed length does not follow from it.
+  const alignedTar = () => {
+    for (let length = 2500; length < 6000; length += 1) {
+      const tar = Buffer.concat([tarFile("pad.bin", noise(length)), tarFile("after.txt")]);
+      if (deflateRawSync(tar).length % 1024 === 0) {
+        return { tar, length };
+      }
+    }
+    throw new Error("no body length aligns the deflate data to 1024 bytes");
+  };
+
+  it("deflate 数据恰在 1024 字节的片边界结束（流尾整个落在下一片）：有无 300000 个尾部字节列表相同，尾部不读；后跟第二个流则接着读", async () => {
+    const { tar, length } = alignedTar();
+    const member = gzipMember(tar);
+    // 10 header bytes, the deflate data, 8 trailer bytes: the slices start right after the header.
+    expect((member.length - 10 - 8) % 1024).toBe(0);
+    expect(member.length).toBeLessThan(EXTENSION_LIMIT);
+    const entries = [
+      { path: "pad.bin", type: "file", size: length },
+      { path: "after.txt", type: "file", size: 0 },
+    ];
+    const bare = await list("aligned.tgz", member);
+    expect(bare.listing).toEqual({ format: "tar.gz", entries, truncated: true });
+    expect(bare.file.positions).toEqual([0]);
+    const tailed = await list("aligned.tgz", Buffer.concat([member, JUNK]));
+    expect(tailed.listing).toEqual(bare.listing);
+    expect(tailed.file.positions).toEqual([0]);
+
+    const continued = await list("aligned.tgz", Buffer.concat([member, B, JUNK]));
+    expect(continued.listing).toEqual({
+      format: "tar.gz",
+      entries: [...entries, B_ENTRY],
+      truncated: false,
+    });
+    expect(continued.file.positions).toEqual([0]);
+    // Trailer and second stream together are less than one slice, and the file ends with them.
+    const last = await list("aligned.tgz", Buffer.concat([member, B]));
+    expect(last.listing).toEqual(continued.listing);
+  });
+
+  it("50 个空的 gzip 流（各 20 字节、解出零字节）被逐个越过，其后的流照常列出", async () => {
+    expect(EMPTY_MEMBER).toHaveLength(20);
+    const chain = Buffer.alloc(50 * 20, EMPTY_MEMBER);
+    const { file, listing } = await list("empties.tgz", Buffer.concat([chain, A, chain, B]));
+    expect(listing).toEqual(BOTH);
+    expect(file.positions).toEqual([0]);
+  });
+
+  it.each([
+    ["一开始就是", Buffer.alloc(0), []],
+    ["一个成员之后是", A, [A_ENTRY]],
+  ])(
+    "%s 100000 个空的 gzip 流 → 到时返回已读到的项并置 truncated，只取了第一块压缩字节",
+    async (_label, lead, entries) => {
+      const chain = Buffer.alloc(100_000 * 20, EMPTY_MEMBER);
+      const { file, listing } = await list("chain.tgz", Buffer.concat([lead, chain, B]), {
+        maxEntries: 1000,
+        now: tickingClock(1000),
+      });
+      expect(listing).toEqual({ format: "tar.gz", entries, truncated: true });
+      expect(file.positions).toEqual([0]);
+    },
+  );
+
+  it.each([
+    ["头的 10 个字节有 5 个在第一次读取里", 65_531, [0, 65_531]],
+    ["头只有第一个字节在第一次读取里", 65_535, [0, 65_535]],
+    ["头恰从第二次读取的开头起", 65_536, [0, 65_536]],
+    ["前一个流的流尾跨在两次读取之间", 65_540, [0, 65_536]],
+  ])(
+    "下一个流的头跨在 65536 字节的读取边界上（%s）→ 从该流的偏移另读一次，不回头、不超 65536",
+    async (_label, boundary, positions) => {
+      // FEXTRA is sized so that the first stream, trailer included, ends at `boundary`.
+      const first = gzipMember(A_TAR, {
+        extra: Buffer.alloc(boundary - 2 - gzipMember(A_TAR).length),
+      });
+      expect(first).toHaveLength(boundary);
+      const second = gzipMember(B_TAR, { extra: Buffer.from("subfield"), name: "b.tar" });
+      const { file, listing } = await list("straddle.tgz", Buffer.concat([first, second, JUNK]));
+      expect(listing).toEqual(BOTH);
+      expect(file.positions).toEqual(positions);
+      expect(file.maxLength()).toBe(EXTENSION_LIMIT);
+    },
+  );
+
+  it("跨多次读取的 400 多个流：读取位置严格递增（不重放），每次不超过 65536 字节", async () => {
+    const tar = Buffer.concat([
+      tarFile("noise.bin", noise(200_000)),
+      tarFile("after.txt"),
+      TAR_END,
+    ]);
+    const streams = Array.from({ length: tar.length / 512 }, (_, index) =>
+      gzipSync(tar.subarray(index * 512, (index + 1) * 512)),
+    );
+    const bytes = Buffer.concat(streams);
+    expect(bytes.length).toBeGreaterThan(3 * EXTENSION_LIMIT);
+    const { file, listing } = await list("blocks.tgz", bytes);
+    expect(listing).toEqual({
+      format: "tar.gz",
+      entries: [
+        { path: "noise.bin", type: "file", size: 200_000 },
+        { path: "after.txt", type: "file", size: 0 },
+      ],
+      truncated: false,
+    });
+    expect(file.positions[0]).toBe(0);
+    expect(increasing(file.positions)).toBe(true);
+    // Every read but a re-read at a straddling header moves on by 65536: no read per stream.
+    expect(file.positions.length).toBeLessThanOrEqual(
+      2 * Math.ceil(bytes.length / EXTENSION_LIMIT),
+    );
+    expect(file.maxLength()).toBe(EXTENSION_LIMIT);
+  });
+
+  const header = (flags: number, ...rest: number[]) =>
+    Buffer.from([0x1f, 0x8b, 8, flags, 0, 0, 0, 0, 0, 3, ...rest]);
+  const reserved = Buffer.from(B);
+  reserved.writeUInt8(0x40, 3);
+  const badHeaderCrc = gzipMember(B_TAR, { headerCrc: true });
+  badHeaderCrc.writeUInt8(badHeaderCrc.readUInt8(10) ^ 1, 10);
+
+  it.each<[string, Buffer]>([
+    ["1024 个零字节（按块补齐的填充）", Buffer.alloc(1024)],
+    ["300000 个零字节", Buffer.alloc(300_000)],
+    ["只有魔数的第一个字节", Buffer.from([0x1f])],
+    ["不足 10 字节的头", header(0).subarray(0, 9)],
+    ["恰 10 字节的头，其后没有数据", header(0)],
+    ["FNAME 没有结尾的 NUL", header(8, 0x61, 0x62, 0x63)],
+    ["FEXTRA 声明的长度超出文件", header(4, 9, 0, 1)],
+    ["头里置了保留标志位的完整的流", reserved],
+    ["FHCRC 不符的完整的流", badHeaderCrc],
+  ])("完整的流之后不构成合法 gzip 头的字节被忽略，不多读：%s", async (_label, tail) => {
+    const bare = await list("tail.tgz", A);
+    expect(bare.listing).toEqual(ONLY_A);
+    const open = await list("tail.tgz", Buffer.concat([A, tail]));
+    expect(open.listing).toEqual(ONLY_A);
+    expect(open.file.positions).toEqual([0]);
+
+    const closed = await list("tail.tgz", Buffer.concat([A, B, tail]));
+    expect(closed.listing).toEqual(BOTH);
+    expect(closed.file.positions).toEqual([0]);
+  });
+
+  it.each([
+    ["紧跟在第一次读取里的流之后", gzipMember(A_TAR).length + 2],
+    ["恰从第二次读取的开头起", 65_536],
+  ])(
+    "下一个流的头在一次 65536 字节的读取里结束不了（FNAME 70000 字节没有 NUL，%s）→ 忽略，至多为它另读一次",
+    async (_label, at) => {
+      const first = gzipMember(A_TAR, { extra: Buffer.alloc(at - 2 - gzipMember(A_TAR).length) });
+      const endless = Buffer.concat([header(8), Buffer.alloc(70_000, "n")]);
+      const { file, listing } = await list("endless.tgz", Buffer.concat([first, endless]));
+      expect(listing).toEqual(ONLY_A);
+      expect(file.positions).toEqual([0, at]);
+    },
+  );
+
+  it("第二个流在 deflate 数据中途被截断 → 此前解出的成员照常列出并置 truncated", async () => {
+    const second = gzipSync(
+      Buffer.concat([tarFile("b.txt", "world!"), tarFile("noise.bin", noise(8192)), TAR_END]),
+    );
+    expect(second.length).toBeGreaterThan(8192);
+    const { listing } = await list("cut.tgz", Buffer.concat([A, second.subarray(0, 4096)]));
+    expect(listing).toEqual({
+      format: "tar.gz",
+      entries: [A_ENTRY, B_ENTRY, { path: "noise.bin", type: "file", size: 8192 }],
+      truncated: true,
+    });
+  });
+
+  it("流尾的 CRC-32 不符的流之后不接着读下一个流", async () => {
+    const flip = (bytes: Buffer) => {
+      const copy = Buffer.from(bytes);
+      copy.writeUInt8(copy.readUInt8(copy.length - 8) ^ 1, copy.length - 8);
+      return copy;
+    };
+    // The first stream's own listing is refused as before; `b.txt` does not stand in for it.
+    await expect(list("crc.tgz", Buffer.concat([flip(A), B]))).rejects.toMatchObject(UNSUPPORTED);
+    // The second stream's members are dropped with its bad trailer, the third is not read.
+    const third = gzipSync(Buffer.concat([tarFile("c.txt"), TAR_END]));
+    const { listing } = await list(
+      "crc.tgz",
+      Buffer.concat([A, flip(gzipSync(tarFile("b.txt"))), third]),
+    );
+    expect(listing).toEqual(ONLY_A);
+  });
+
+  it("条目上限在第二个流里达到 → 到上限即停并置 truncated", async () => {
+    const first = gzipSync(Buffer.concat(emptyMembers(2)));
+    const second = gzipSync(Buffer.concat([...emptyMembers(5), TAR_END]));
+    const { listing } = await list("cap.tgz", Buffer.concat([first, second]), {
+      maxEntries: 4,
+      now: () => 0,
+    });
+    expect(listing.entries.map((entry) => entry.path)).toEqual(["m0", "m1", "m0", "m1"]);
+    expect(listing.truncated).toBe(true);
+  });
+});
+
+describe("tar 遍历器：没有正文的成员", () => {
+  it.each([
+    ["1", "硬链接", "file"],
+    ["2", "符号链接", "file"],
+    ["3", "字符设备", "file"],
+    ["4", "块设备", "file"],
+    ["5", "目录", "dir"],
+    ["6", "FIFO", "file"],
+  ] as const)(
+    "类型 %s（%s）头里的大小 1536 不跳过任何字节：下一个头紧随其后（tar.gz 同样）",
+    async (typeflag, _kind, type) => {
+      const bytes = Buffer.concat([
+        tarHeader({ name: "bodyless", typeflag, size: 1536 }),
+        tarFile("after.txt", "x"),
+        TAR_END,
+      ]);
+      for (const name of ["kinds.tar", "kinds.tgz"]) {
+        const { listing } = await list(name, name === "kinds.tar" ? bytes : gzipSync(bytes));
+        expect(listing.entries, name).toEqual([
+          { path: "bodyless", type, size: 1536 },
+          { path: "after.txt", type: "file", size: 1 },
+        ]);
+        expect(listing.truncated).toBe(false);
+      }
+    },
+  );
+
+  it.each([
+    ["0", "普通文件"],
+    ["\u0000", "旧式普通文件"],
+    ["7", "连续文件"],
+    ["S", "未知类型"],
+  ])("类型 %j（%s）有正文：按头里的大小跳过", async (typeflag) => {
+    const body = Buffer.concat([tarHeader({ name: "inside-body.txt" }), Buffer.alloc(100, "b")]);
+    const { file, listing } = await list(
+      "bodies.tar",
+      Buffer.concat([tarFile("with-body", body, { typeflag }), tarFile("after.txt"), TAR_END]),
+    );
+    expect(listing.entries).toEqual([
+      { path: "with-body", type: "file", size: 612 },
+      { path: "after.txt", type: "file", size: 0 },
+    ]);
+    expect(listing.truncated).toBe(false);
+    expect(file.positions).toEqual([0, 1536, 2048]);
+  });
 });
 
 describe("tar 遍历器：头的形态", () => {
@@ -271,7 +715,7 @@ describe("tar 遍历器：损坏", () => {
     }
   });
 
-  it("读出若干项之后才损坏（坏校验和、没有结束块、gzip 流被截断或后跟无关字节）→ 已读到的项并置 truncated", async () => {
+  it("读出若干项之后才损坏（坏校验和、没有结束块、gzip 流被截断或中途损坏）→ 已读到的项并置 truncated；完整的流后跟无关字节不算损坏", async () => {
     const afterTwo = await list(
       "sum.tar",
       Buffer.concat([...emptyMembers(2), badChecksum, TAR_END]),
@@ -286,25 +730,36 @@ describe("tar 遍历器：损坏", () => {
     // How many members come out before a gzip error depends on zlib's block boundaries, so the
     // count is only bracketed; what is pinned is that the listed ones are a prefix, in order.
     // `whole` is a complete archive, end blocks included, and lists as one: what the two cases
-    // below report is caused by the cut and by the trailing bytes alone.
+    // below report is caused by the cut and by the overwritten bytes alone.
     const whole = gzipSync(Buffer.concat([...emptyMembers(3000), TAR_END]));
     expect(whole.length).toBeGreaterThan(4096);
     const intact = await list("whole.tgz", whole, { maxEntries: 5000, now: () => 0 });
     expect(intact.listing.entries).toHaveLength(3000);
     expect(intact.listing.truncated).toBe(false);
+    const middle = Math.floor(whole.length / 2);
+    const garbled = Buffer.from(whole);
+    garbled.fill(0xff, middle, middle + 64);
     for (const [name, bytes] of [
-      ["cut.tar.gz", whole.subarray(0, Math.floor(whole.length / 2))],
-      ["tail.tgz", Buffer.concat([whole, Buffer.alloc(300_000, "j")])],
+      ["cut.tar.gz", whole.subarray(0, middle)],
+      ["garbled.tgz", garbled],
+      ["garbled-tail.tgz", Buffer.concat([garbled, Buffer.alloc(300_000, "j")])],
     ] as const) {
       const { listing } = await list(name, bytes, { maxEntries: 5000, now: () => 0 });
       const count = listing.entries.length;
       expect(count, name).toBeGreaterThan(0);
-      expect(count, name).toBeLessThanOrEqual(3000);
+      expect(count, name).toBeLessThan(3000);
       expect(listing.entries.map((entry) => entry.path)).toEqual(
         Array.from({ length: count }, (_, index) => `m${index}`),
       );
       expect(listing.truncated).toBe(true);
     }
+
+    // Bytes after the complete stream are not part of it: the same listing as without them.
+    const tail = await list("tail.tgz", Buffer.concat([whole, Buffer.alloc(300_000, "j")]), {
+      maxEntries: 5000,
+      now: () => 0,
+    });
+    expect(tail.listing).toEqual(intact.listing);
   });
 
   it("读函数自己的失败原样抛出，不当作包损坏", async () => {
@@ -313,7 +768,12 @@ describe("tar 遍历器：损坏", () => {
     await expect(listArchive("tar", "x.tar", failing, DEFAULTS)).rejects.toBe(failure);
     await expect(listArchive("tar.gz", "x.tgz", failing, DEFAULTS)).rejects.toBe(failure);
 
-    const file = await archiveOnDisk("x.tgz", gzipSync(Buffer.concat(emptyMembers(2))));
+    // The body does not compress: the stream runs past the first 65536 bytes, so a second read is due.
+    const bytes = gzipSync(
+      Buffer.concat([...emptyMembers(2), tarFile("noise.bin", noise(100_000))]),
+    );
+    expect(bytes.length).toBeGreaterThan(EXTENSION_LIMIT);
+    const file = await archiveOnDisk("x.tgz", bytes);
     const failsLater = (position: number, length: number) =>
       position === 0 ? file.readAt(position, length) : Promise.reject(failure);
     await expect(listArchive("tar.gz", "x.tgz", failsLater, DEFAULTS)).rejects.toBe(failure);
