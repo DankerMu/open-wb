@@ -172,7 +172,7 @@ describe("files page shows logical paths instead of the server root", () => {
     expect(hasLucideGlyph(button, "shield")).toBe(true);
     expect(hasLucideGlyph(button, "folder")).toBe(false);
     const subline = button.nextElementSibling;
-    expect(subline?.matches('[data-slot="tree-root-path"]')).toBe(true);
+    expect(subline?.matches('p[data-slot="tree-root-path"]')).toBe(true);
     expect(subline?.classList.contains("truncate")).toBe(true);
     expect(subline?.textContent).toBe("zhangsan/analytics");
     await waitFor(() => expect(subline?.nextElementSibling?.matches("ul")).toBe(true));

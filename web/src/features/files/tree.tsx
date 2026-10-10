@@ -593,17 +593,18 @@ export function WorkspaceBrowser({
     [client, loadDirectory, workspace.id],
   );
 
-  // 手动刷新：重取已加载的每一层目录（根始终在内，首载失败后可由此重试）与当前文件；
-  // 展开状态、选中与预览模式不动，失败沿用各目录的错误行、旧列表保留。
+  // 手动刷新：重取已加载的每一层目录、正显示读取错误的目录（根始终在内，首载失败后可由此重试）
+  // 与当前文件；展开状态、选中与预览模式不动，失败沿用各目录的错误行、旧列表保留。
   const refresh = useCallback(() => {
-    for (const path of new Set(["", ...loadedDirectoryPaths(cacheRef.current)])) {
+    const loaded = loadedDirectoryPaths(cacheRef.current);
+    for (const path of new Set(["", ...loaded, ...Object.keys(directoryErrors)])) {
       loadDirectory(path, true);
     }
     const selected = selectedFileRef.current;
     if (selected) {
       selectFile(selected.entry, selected.path);
     }
-  }, [loadDirectory, selectFile]);
+  }, [directoryErrors, loadDirectory, selectFile]);
 
   const directoriesForDialog = useMemo(() => loadedDirectoryPaths(directories), [directories]);
 

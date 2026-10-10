@@ -10,7 +10,7 @@ import {
   workspaceRoute,
 } from "./files-fixture.js";
 import { jsonResponse, textPreviewResponse } from "./support.js";
-import { readRepoFile } from "./ui-support.js";
+import { listRepoFiles, readRepoFile } from "./ui-support.js";
 
 afterEach(() => {
   cleanupFilesFixture();
@@ -199,12 +199,13 @@ describe("files long names and layout rules", () => {
       expect(body.classList.contains("overflow-auto"), slot).toBe(true);
     }
 
-    const tree = readRepoFile("web/src/features/files/tree.tsx");
-    const page = readRepoFile("web/src/features/files/page.tsx");
-    for (const source of [tree, page]) {
-      expect(source).not.toContain("此文件夹为空");
-      expect(source).not.toContain("files-tree-empty");
-      expect(source).not.toContain('ui-empty"');
+    const components = listRepoFiles("web/src/features/files", (path) => path.endsWith(".tsx"));
+    expect(components).toContain("web/src/features/files/columns.tsx");
+    for (const path of components) {
+      const source = readRepoFile(path);
+      expect(source, path).not.toContain("此文件夹为空");
+      expect(source, path).not.toContain("files-tree-empty");
+      expect(source, path).not.toContain('ui-empty"');
     }
     for (const path of ["preview.tsx", "types.ts"]) {
       expect(readRepoFile(`web/src/features/files/${path}`)).not.toContain(

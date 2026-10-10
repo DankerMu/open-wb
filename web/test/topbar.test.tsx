@@ -20,7 +20,7 @@ import {
   deferredResponse,
   jsonResponse,
 } from "./support.js";
-import { readRepoFile } from "./ui-support.js";
+import { listRepoFiles, readRepoFile } from "./ui-support.js";
 import "./radix-platform.js";
 
 const HERO = "WorkBuddy，我帮你";
@@ -260,9 +260,13 @@ describe("上报次序 (T5/T5b/T6/T7)", () => {
 
 describe("静态契约 (T8)", () => {
   it("页面不再渲染自有 h1，样式与依赖方向符合顶栏归属", () => {
+    const filesComponents = listRepoFiles("web/src/features/files", (path) =>
+      path.endsWith(".tsx"),
+    );
+    expect(filesComponents).toContain("web/src/features/files/columns.tsx");
     for (const path of [
       "web/src/features/chat/page.tsx",
-      "web/src/features/files/page.tsx",
+      ...filesComponents,
       "web/src/features/settings/page.tsx",
       "web/src/routes/router.tsx",
     ]) {
