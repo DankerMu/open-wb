@@ -21,6 +21,7 @@ import {
   type PreviewLimits,
   sniffText,
 } from "./preview.js";
+import { sendFileRange } from "./range-send.js";
 import type { WorkspaceStore } from "./store.js";
 import { listOneLevel } from "./tree.js";
 import { storeUpload } from "./upload.js";
@@ -62,6 +63,8 @@ const clearPreviewHeadersOnError: onErrorHookHandler = (_request, reply, _error,
   reply.removeHeader("Content-Type");
   reply.removeHeader("X-Workbuddy-Size");
   reply.removeHeader("X-Workbuddy-Truncated");
+  reply.removeHeader("Content-Range");
+  reply.removeHeader("Accept-Ranges");
   done();
 };
 
@@ -331,6 +334,15 @@ export function registerWorkspaceRest(
         limits,
         ...(needsTextSniff(name) ? { sniffedText: sniffedAsText(absPath) } : {}),
       });
+      if (preview.rangeable) {
+        // Audio and video only, and only here: after the sandbox, the lstat and the classifier.
+        return sendFileRange(request, reply, {
+          absPath,
+          size: status.size,
+          headers: preview.headers,
+          unsatisfiableHeaders: { "X-Content-Type-Options": "nosniff" },
+        });
+      }
       for (const [header, value] of Object.entries(preview.headers)) {
         reply.header(header, value);
       }
