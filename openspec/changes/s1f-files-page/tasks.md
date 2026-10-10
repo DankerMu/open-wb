@@ -301,6 +301,7 @@ Minimal mergeable slice: 10.1（tar / gz 的遍历器）与它在 10.4 里的用
   实施注记见 `implementation-notes.md`「11.1（#1066）」。
 - [ ] 11.2 `POST /api/workspaces/:id/preview-token`（`server/src/workspaces/` 下的新路由文件，仅在 `assembly.preview` 存在时注册）：响应六键、`base` 的推导（`PREVIEW_ORIGIN` 优先，否则请求协议 + 主机名 + 预览端口函数的返回值）、`embedOrigin` 取 `Origin` 头；
   `errors.ts` 的归属路由集合加入它。
+  实施注记见 `implementation-notes.md`「11.2、11.3（#1067）」。
 - [ ] 11.3 测试：`server/test/preview-tokens.test.ts`（登记表三个场景）；`server/test/preview-token-rest.test.ts`（「签发与复用」「对外来源与转换可用」「归属与请求体」；IPv6 主机名的方括号；响应头与日志不含令牌）；未装配 `preview` 时 404（http-service-skeleton「未装配预览的可注入 app」）。
   `server/test/http-parser-owners.test.ts` 的归属身份表（`:29-42`，与 `:144-146` 的条数断言、常量名里的条数）加入 `POST /api/workspaces/:id/preview-token`，做法同 9.2 对 `move` 的处理；先合的那一个把条数加一，后合的再加一。
 - [ ] 11.4 跨路由边界测试（扩展 `server/test/workspaces-http.test.ts` 既有的「完整真实装配与隔离」用例，写成一份表驱动）：workspaces「工作空间 HTTP 集成边界」的场景「新增路由沿用同一边界」——对 `archive`、`download`、`DELETE entries`、`move`、`preview-token` 五条路由逐条断言：

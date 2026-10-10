@@ -626,3 +626,43 @@
 - 变异：给 zip 加或不加时限 → 不可观察（规格不给 zip 时限）；可加一条「`now` 抛错的时钟下 zip 照常列出」把「zip 不读时钟」钉住。
 - 变异：目录遍历、符号链接、跨工作空间 id、他人工作空间 404、越界审计 → 本刀没有路由，不可观察，归 #1065 / #1075。
 - 变异：删掉 `ATTRIBUTION.md` 的 yauzl 行 → `ui-guardrails.test.ts` 新增的那条判红；不加该用例则不可观察。
+
+## 11.2、11.3（#1067）
+
+- Critical Path：本路由不调 `sandbox.resolve`、不加 `op`、不读写用户路径，但它签发的令牌是预览来源上读用户文件的全部凭据，按 Critical Path 处理（两个评审席位加 owner 白盒）。D-23：本路由只对空间根目录做一次 `lstat`（`ensureOwnedRoot`），没有「解析后按路径操作」的替换窗口，不闭合也不扩大 #1286。
+- 前提已齐（按代码核对）：0.1 已合；5.1 的 `server/src/preview-config.ts` 有 `previewOrigin?`、`previewDocumentMaxBytes`、`officeBin?`；11.1 的 `server/src/preview/tokens.ts`（96 行）导出 `createPreviewTokens` 与 `PreviewTokens`；#1013 的 `POST /api/workspaces/:id/uploads` 已在 `server/src/http/errors.ts:54-70`。不在 1.2 挡住的集合里，不等 1.1、1.3。issue 的任务摘录与 `tasks.md` 的 11.2、11.3 逐字一致，无差异。
+- 漂移（行号与计数）：`tasks.md` 写的 `http-parser-owners.test.ts:29-42` 与 `:144-146`，现为身份表 `:29-45`、条数断言 `:149-153`。底数 15 属实（`errors.ts` 集合 15 项，主规格 `openspec/specs/http-service-skeleton/spec.md:129` 为 fifteen-identity）。按本批次序本刀先于 #1062，本刀是 15 → 16，#1062 再到 17；本刀任何文字都不写「十七」。
+- 漂移（issue 的 PR Boundary 漏列）：`server/src/app.ts`（490 行）必须改。`AssemblyDependencies`（`:76-108`）没有 `preview`，`registerWorkspaces` 的调用在 `:226-232`。`server.ts` 的 `appAssemblyOf`（`:107`）不动，所以合入后生产入口不注册该路由（404），直到 13.1（#1070）；issue 写的「签发出的地址无人应答」不准，记入偏离记录。
+- 落点：新文件 `server/src/workspaces/rest-preview-token.ts`（约 70 行，命名守卫不触发），导出 `registerWorkspacePreviewToken(app, dependencies, preview)` 与 `interface WorkspacePreviewDependencies { tokens: { issue(binding: { ownerId: string; workspaceId: string; embedOrigin: string | null }, now: number): { token: string; expiresAt: number } }; port: () => number; origin?: string; documentMaxBytes: number; officeAvailable: boolean }`。`tokens` 写成结构类型，不从 `../preview/tokens.js` 导入（`docs/architecture/system.md` 第 2 条不许未声明的 feature 间依赖，12.2 同一做法）。`workspaces/index.ts`（11 行）的 `registerWorkspaces` 加第三个可选参数，`!== undefined` 时才注册；`app.ts` 加 `preview?: WorkspacePreviewDependencies` 并原样传入。
+- 处理次序（先例 `server/src/sessions/rest.ts:348-359` 的 stop）：`onRequest: noStoreWorkspaceResponse`（401 也带 `no-store`）→ 根守卫 401 → 路由级 `preParsing` 内 `ensureOwnedRoot(dependencies, currentPrincipal(request), request.params.id)`（他人、不存在、根目录不在都是同一 404，先于 body 解析）→ `bodyLimit: 1` → handler 里 `request.body !== undefined` 即 `bad_request` → 算预览来源 → `tokens.issue(…, Date.now())` → 回六键。`BODYLESS_BODY_LIMIT`（`sessions/rest.ts:151`）与 `rest.ts:178-186` 的两个 `preParsing` 闭包都没导出：常量本地定义，`preParsing` 就地内联（写法同 `sessions/undo.ts:341`），`rest.ts` 零改动。
+- 响应与取值：键序恰为 `token, base, officeBase, expiresAt, documentMaxBytes, officeAvailable`。`embedOrigin` 为 `request.headers.origin ?? null`，原样传入（空串、`null` 字面、任意垃圾都不校验，校验在 `server/src/preview/headers.ts` 写头处）。`ownerId` 为 `principal.id`。时钟用 `Date.now()`，不给 `assembly.preview` 加时钟字段（规格只列五项）。不调 `audit.emit`，不写日志（`createApp` 是 `logger: false`）。
+- 预览来源：有 `preview.origin` 时原样用且不调 `preview.port()`；否则为 `${request.protocol}://${request.hostname}:${preview.port()}`。Fastify 5.12.1 的 `request.hostname` 已去端口并保留 IPv6 方括号，不要手写拆分，不用 `request.host` 与 `request.port`。`createApp` 没开 `trustProxy`，`X-Forwarded-Host/Proto` 不被采信，TLS 终结在前时必须配 `PREVIEW_ORIGIN`（D12 已写），本刀不加 `trustProxy`。
+- 规格未写的分支（偏离记录，请白盒确认）：(a) `Host` 缺失或拼出的串 `URL.canParse` 为假 → 400 `bad_request`，不签发；通过 `canParse` 的怪值（`a.test/x`）原样进 `base`，只回给伪造者本人。(b) 临时空间照常签发：`rootOf` 的 SQL（`store.ts:84`）不滤 `temporary`，转正后 id 与目录不变、令牌继续有效。(c) 登记表撞车抛错 → 通用 500，信封不含令牌。(d) 无频率限制：每个 (账号, 空间) 至多一条记录，条数以该账号的空间数为界，已删空间的过期记录留到重启（11.1 已登记）。(e) 没有 CSRF 令牌，靠 `SameSite=Lax`（`auth/session.ts:218`）；`Origin` 只记录不拦截。
+- 必须改的既有文件：`errors.ts:55-70` 的集合加一行，`:45` 与 `:72` 的「十五条」注释改十六；`http-parser-owners.test.ts` 的 `FIFTEEN_OWNER_IDENTITIES` 改名 `SIXTEEN_OWNER_IDENTITIES` 并加一行，`:28` 注释（十五条 POST 加一条 PATCH）、`:149-150` 两处标题、`:152` 的 `toBe(15)` 改 16，证据 3 的 `NON_OWNER_METHODS` 加 `["PUT", "/api/workspaces/:id/preview-token"]`。任务未点名的 grep 命中：`http-typed-errors.test.ts:190` 的 describe 标题写「十五条」但不断言条数，只改标题文字。其余既有断言不动。
+- 新测试 `server/test/preview-token-rest.test.ts`（约 280 行）：夹具给 `workspaces-http-helpers.ts`（101 行）的 `withWorkspacesApp` 加一个可选的 assembly 追加参数，不另抄 `runtime` 块（jscpd）。登记表用真的 `createPreviewTokens()` 并包一层数 `issue` 次数；`vi.useFakeTimers({ toFake: ["Date"] })`（先例 `session-rest-helpers.ts:74`）钉 `expiresAt`；body 目录复用 `session-bodyless-rest-helpers.ts` 导出的 `INJECT_BODIES`、`PRE_PARSER_BODIES`，inject 自己写。不出现 64 位十六进制字面量（gitleaks），正则用字面量。
+- 用例：(1) 签发与复用：`Origin` 与 `Host` 用端口 3000、`port: () => P`（P 不等于 3000）→ 两次 200 同令牌，`base`、`officeBase` 逐字相等，`expiresAt` 恰为 `t + 900000` 与 `t + 300000 + 900000`，`audit_events` 行数不变，`lookup(token)` 恰为 `{ownerId, workspaceId, embedOrigin}`；无 `Origin` 时为 `null`，换 `Origin` 再签随之更新。(2) 来源：`origin` 已设且 `port` 是会抛的函数 → `base` 恰为该值；`Host: [::1]:3000` → `http://[::1]:<P>/w/…`；`Host` 不带端口；带 `X-Forwarded-Host/Proto` 时 `base` 不变；`documentMaxBytes` 注入非缺省值；`officeAvailable: true`；空 `Host` → 400。(3) 归属与请求体：lisi 对 zhangsan 的 id、不存在的 id、`%2e%2e` → 相同 404；未登录 → 401；自己的空间上 `INJECT_BODIES` 逐例 400；lisi 带 `{}` 仍是 404；根目录移走 → 404；每例 `issue` 调用数为 0 且带 `no-store`。(4) 令牌不外泄：全部响应头的值、请求期间被 spy 的 `process.stdout/stderr.write` 与 `assembly.log/warn/onError` 都不含令牌。(5) 未装配：不带 `preview` 时 typed 404，同 app 的 `GET …/tree` 200。(6) 临时空间 200。
+- 本刀测不到的场景部分：「对外来源与转换可用」只能在 assembly 接缝测，`PREVIEW_ORIGIN`、`OFFICE_BIN` 到 `assembly.preview` 的映射归 #1070 与 #1074。「归属与请求体」THEN 里「访问预览监听器得不到文件」要到 #1069 才可观察，本刀以 `issue` 调用数为 0 代替。11.4 的五路由表归 #1075。
+- 门槛与清单：全部文件远离 800 行；knip 不报（新导出由 `index.ts`、`app.ts` 与测试引用）；不是配置刀，不动 `system.md` 第 9 节与配置条数断言；服务端且生产入口未接线，no checklist rows；`tasks.md` 勾 11.2，11.3 按 issue 约定在各分摊刀合入后再勾。
+- 同批共改文件，请 orchestrator 排序：`server/src/app.ts`（#1056 接 `limits`，本刀接 `preview`）；`server/test/workspaces-http-helpers.ts`（#1056 多半也要传装配项）；`server/src/http/errors.ts` 与 `server/test/http-parser-owners.test.ts`（#1062 再加一，常量再改名）；`server/src/workspaces/index.ts`（本刀改签名，#1060、#1062 若新建路由文件也会动它）。本刀不碰 `rest.ts`、`rest-entries.ts`。
+- 变异：去掉 `preParsing` 的归属检查（他人的空间也签发）→ (3) 的 lisi 404 与 `issue` 调用数 0 判红（issue 指定的第一条）。
+- 变异：`base` 用 `request.host` 或 `Host` 头里的端口 → (1) 的 `base` 逐字相等判红，因为 P 不等于 3000（issue 指定的第二条）。
+- 变异：归属检查挪进 handler（晚于 body 解析）→ (3)「lisi 带 `{}` 仍是 404」变 400，判红。
+- 变异：`ensureOwnedRoot` 换成只查 `rootOf !== null` → (3)「根目录移走 → 404」判红。
+- 变异：`ownerId` 取自别处，或 `workspaceId` 不取 `:id` → (1) 的 `lookup` 三键相等判红（跨账号、跨空间向量）。
+- 变异：`errors.ts` 集合不加本路由 → (3) 的 body 目录出现 500 判红，`http-parser-owners` 新行判红。
+- 变异：去掉 handler 的 `request.body !== undefined` → (3) 里 `1`（1 字节合法 JSON，过得了 `bodyLimit: 1`）变 200，判红。
+- 变异：`bodyLimit` 放大到 16 KiB → 预期不可观察：`{}` 被解析后仍由 handler 判 400；只有同时去掉上一条才红。
+- 变异：`embedOrigin` 写死 `null`，或取 `Referer`、`Host` → (1) 的 `embedOrigin` 断言判红；在路由处校验或规范化它 → 补一例 `Origin: http://a.test/` 断言 `lookup` 原样返回，判红。
+- 变异：`origin` 已设仍拼请求主机，或提前调 `port()` → (2) 会抛的 `port` 用例判红。
+- 变异：手写 `split(":")` 取主机名 → (2) 的 `[::1]` 用例判红。
+- 变异：开 `trustProxy` 或读 `X-Forwarded-*` → (2) 的转发头用例判红。
+- 变异：`officeBase` 写成 `/w/`，或 `base` 少结尾斜杠 → (1) 的逐字相等判红。
+- 变异：`documentMaxBytes` 写死缺省值、`officeAvailable` 写死 `false` → (2) 的注入值用例判红。
+- 变异：响应多一键、少一键或键序变 → (1) 的 `Object.keys` 相等判红。
+- 变异：写一条审计（如 `preview.token`）→ (1) 的 `audit_events` 行数判红。
+- 变异：令牌放进响应头（`Location`、`ETag`）或打日志 → (4) 判红。
+- 变异：去掉 `onRequest` 的 no-store → 各例 `cache-control` 断言判红（含 401、404、400）。
+- 变异：无条件注册路由 → (5) 的 404 判红（`preview` 为 `undefined` 时 handler 抛错成 500）。
+- 变异：时钟传常量或 0 → (1) 的 `expiresAt` 恰等判红。
+- 变异：400 分支放到 `issue` 之后（先签发再拒绝）→ (3) 与空 `Host` 用例的 `issue` 调用数 0 判红。
+- 变异：不可观察：遍历与符号链接（本路由没有路径参数）、「越界写 `sandbox.reject`」——归 #1069 与 11.4（#1075）。`lookup` 顺手续期属 #1066，已有证据。
