@@ -748,3 +748,63 @@
 - 预审补：**唯一「成功却没动」的组合**：窗口里在 `to` 出现的是 `from` 的硬链接时，POSIX `rename` 什么都不做并返回成功（本机 APFS 对裸 `fs.renameSync` 实测：不抛错、两个名字都在、`nlink` 为 2；Linux 按 `rename(2)` 推出）→ 路由答 200 并写 `file.move`，条目仍在 `from`。检查时刻已存在的硬链接由 `lstat(to)` 看见，答 409。
 - 预审补：次序用例四行，都加在既有的 `it` 里（文件 518 → 526 行）：`missing → a.md`、`pipe.bin → a.md` → 404（变异：`entryTypeOf(fromAbs)` 挪到 409 判断之后，修复前存活）；`d1 → d1/sub`（`d1/sub` 存在）→ 400（变异：409 判断挪到子树判断之前，修复前存活）；`missing → ../x` → 403 加一条 `sandbox.reject`（变异：`entryTypeOf(fromAbs)` 挪到 `resolve(to)` 之前——预审报它存活，实测修复前已被 `missing → missing/x` 判红，新行另钉沙箱先于源存在性）。整份变异脚本 40 条在最终树上重跑全红。
 - 预审补：上面「规格未写明的分支（一）」里 ②、③、④ 其实由规格决定，不是偏离：② `rename` 失败 → generic 500、源留原处是 file-operations `spec.md:54` 的明文；③ 已存在的符号链接 → 403 而非 409 来自 `spec.md:52` 的次序加 sandbox-core `spec.md:4`（任一已存在分量为符号链接即拒，悬空在内）；④ `a.md → a.md/x` → 400 来自 `spec.md:52`（纯词法、先于一切存在性检查）。body 形状不符先于沙箱同样是 `spec.md:52` 的次序。真正未写明的只剩 ①、⑤、⑥、⑦ 与「无 body → 400」。
+
+## 14.3，含分摊的 14.5 / 14.6 条款（#1072）
+
+- Critical Path 两次命中：「omp 子进程治理」（新增一处 spawn）与提权策略改动（owner D-24 的 `sudo … find`）；两个评审席位，PR 标白盒审查，测试通过不豁免。纯服务端、合入后生产入口无调用方（15.1 才接）：无验收清单行、无配置键、不动 `docs/architecture/system.md`、不动 `server.ts` 与 `.github/scripts/ci-uid-isolation.sh`；ADR-0010 增补的两行 sudoers 归 28.1 / 28.2。
+- 前置核对（按代码，不按勾选框）：0.1、14.1、14.4、14.7 均已在 origin/master（`server/src/preview/office.ts` 324 行，`collectOutput` 已带 200 MiB 上界；`fake-soffice.mjs` 在）；不在 1.2 挡住的集合里，1.1 / 1.3 不挡；不依赖 5.1、13.1（全部以参数收值）。与本批其它切片无共用源文件，只有 `tasks.md` 与 `implementation-notes.md` 的叠栈冲突。
+- issue 正文与 `tasks.md` 14.3 的差异（以 tasks.md 为准）：①「Current behavior：输出留在作业目录」不实，现状是 `convert` 返回 `<cacheDir>/pdf/<32 位十六进制>.pdf`，复制已由 14.1 / 14.7 交付，本刀不重做；② 正文没有 D-24 的两种情况（`sudo` argv、`cwd:"/"`、环境、`assertSafeSudoPath`、失败日志、共用 spawn seam）；③ 验收写三个场景，规格「转换缓存」现为四个（多「OMP_USER 模式下启动时清空 work」），「周期清理」另缺「`pdf` 不可读时不抛」；④ 14.6 摘录 2 条变异，tasks.md 另有 8 条启动清空的变异；⑤ 键的写法缺 UTF-8、十进制、小写十六进制、`lstat`；⑥ tasks.md 14.5 的「新文件 `office-converter.test.ts`」已过时（已存在，795 行）。
+- 分层（定案）：包一层，不改 `createOfficeConverter`。新文件 `server/src/preview/office-cache.ts`；`office.ts` 只给 `OfficeConverter`、`OfficeSpawn` 两个类型加 `export`，并更正 `office.ts:13` 头注释的「缓存不在这里」去向，`collectOutput` 一个字节不动。理由：`office-converter.test.ts:378`（`HEX_32_PDF`）与 `:402-419`（同一输入转两次、断言启动两次且结果不同）钉的是单次转换契约，缓存进 `convert` 会让两处变红；包一层使 14.1 / 14.7 的源码与两个测试文件保持原样。
+- `createOfficeCache({cacheDir, converter}) → {available, convert, close}`（与 `OfficeConverter` 同形）：`convert` 先判 `!converter.available || 已 close || signal 已中止 || !isAbsolute(absInput)`，任一成立即原样转交 `converter.convert`，由它按规格次序给出 `unavailable` / `aborted` / `failed`，不重复造错；`close()` 置位后转交。随后 `lstat(absInput)`，失败即 `OfficeConvertError("failed")`、不启动进程。再查 `pdf/<key>.pdf`：`lstat` 为普通文件且 `size>0` 则 `utimes` 为当前时刻并返回；命中路径任何错误（含与清理撞车的 `ENOENT`）一律当未命中。未命中则 `await converter.convert()` 得 `pdf/<随机名>.pdf`，`rename` 成 `<key>.pdf` 后返回；`rename` 失败则 `unlink` 随机名并报 `failed`。随机名即规格的「同目录临时名」；同目录、`0700`、同属主，改名安全，不二次打开输出。
+- 键：导出 `officeCacheKey(absInput): Promise<string>`，值为 `sha256(absInput + "\0" + String(stats.mtimeMs) + "\0" + String(stats.size))` 的小写十六进制。`mtimeMs` 在纳秒级文件系统上带小数，原样 `String()`，不取整、不用 bigint（偏离记录）。它是 #1073 去重的唯一键来源。并发与去重不在本刀：两个同键未命中各转一次，后到的 `rename` 原子覆盖，返回同一路径。15.1 的组合次序是缓存在最外（命中不占名额、不判 `busy`）→ 排队 → 单次转换；排队插在未命中路径上，由 #1073 落位。
+- 清理：`createOfficeCleanup({cacheDir, officeBin?, ompUser?, spawn?, log?}) → {clearWork(): Promise<void>, sweepPdf(now: number): Promise<void>}`，形状照 `workspaces/trash.ts` 的 `sweep(now)`，两者永不 reject。模块顶层零副作用，不建定时器；24 小时定时器与 `unref` 归 15.1（#1074），只重跑 `sweepPdf`。两个工厂在 `cacheDir` 非绝对路径时同步抛 `cacheDir and officeBin must be absolute paths`（参数错误不是清理错误，偏离记录）。`sweepPdf`：`readdir` → 逐项 `lstat` → 普通文件且 `mtimeMs < now − 7×86_400_000` 才 `unlink`，逐项 try/catch；目录与符号链接不碰；崩溃遗留的随机名 `.pdf` 同样按 7 天清掉。
+- `clearWork`：仅当 `ompUser` 与 `officeBin` 都提供时，先 `assertSafeSudoPath(process.env.PATH)`（不调 `assertSetprivExecutable`），再经注入的 spawn 起恰一次 `sudo`，argv 恰为 `["-n","-u",ompUser,"--","/usr/bin/find",join(cacheDir,"work"),"-mindepth","1","-delete"]`，选项恰为 `{cwd:"/", env:{PATH, LANG?}, stdio:"ignore", shell:false}`（没有 `HOME`、没有 `detached`）。等它落定：`exit` 的 code 为 0 才算成功；无 pid 的 `error`、spawn 同步抛、非 0、被信号结束、前置检查抛都算失败，失败恰调一次 `log({event:"preview_work_clear_failed"})`，`log` 自身抛错吞掉。之后每种模式都执行本进程的删除：`readdirSync(work)` 后逐项 `rmSync(…,{recursive:true,force:true})`，逐项 try/catch（14.1 实测 `0500` 子目录会让 `force` 仍抛，一项删不掉不得挡住其余），不删 `work` 自身。拆成「跑 sudo 得布尔」与「自己删」两个函数以过 Biome 复杂度 15。
+- 日志口径（偏离记录）：`server/src` 里没有模块直接写 `process.stderr`，惯例是注入端口由 `server.ts` 的 `writeRecord` 落行（`spawn-gate.ts` 的 `SpawnLog`、`store-todo.ts` 的 `warn`；`startup-writer.ts` 头注释写明 `server.ts` 是唯一消费方）。本刀按惯例用 `log?` 端口，测试断言恰一次调用且 `JSON.stringify(record) === '{"event":"preview_work_clear_failed"}'`；真实 stderr 的整行相等由 15.1 把 `writeRecord` 的联合类型放宽后在 15.2 证明。tasks.md 14.5「stderr 恰多一行」在本刀按此落实。
+- 窗口声明（D-23：不宣称闭合、不放宽）：本刀没有路由、不经 `sandbox.resolve`。缓存读写全在 `pdf/`（`0700`）与 `cacheDir`（`2750`）之下，omp 用户写不进，没有 #1286 类窗口。有两处按路径的操作：① `lstat(absInput)` 算键之后转换进程才按路径读输入，其间输入被改写时旧键下可能存进新内容的 PDF（下次 `lstat` 得新键，旧条目只在 mtime 与 size 都撞上时才会再命中，属 D17「不按内容哈希」的既定取舍）；② 本进程在 `work/`（`2770`，omp 用户可写）下的递归删除：作业目录的父目录就是 `work/` 自己（`2770`、不带 sticky 位；`2750` 的是 `cacheDir`），所以顶层条目与其内部任何一级都可在本进程检查之后被存活的 omp uid 进程换成符号链接——检查那一刻已是符号链接的顶层条目只被解除、不被跟随；与已交付的 `removeJob` 同类。统一用 `rmSync`（Node 24.13.1 走原生 `binding.rmSync`，异步 `rm` 是按路径的 JS 递归）；原生实现的抗竞态性没有实测。
+- 既有测试：`office-converter.test.ts`（795）与 `office-converter-output.test.ts`（189）零改动；`fake-soffice.mjs` 不加标记。新夹具 `server/test/fixtures/fake-sudo-find.mjs`（100755）：既有假 `sudo`（指向 `fake-soffice.mjs` 的链接）在没有 `--outdir` 时以 64 退出，不能复用。新夹具从 argv 找到 `/usr/bin/find` 之后的路径，把 `{argv, env, cwd, pid, entriesAtStart, entriesAtExit}` 写到 `<cacheDir>/sudo.record.json`，两次列目录之间睡约 150 毫秒，自己什么都不删，退出方式读同级哨兵文件（缺省 0；`1`；`signal` 为自杀）。测试把它链成临时 bin 目录里的 `sudo`，`PATH` 为「临时 bin:`dirname(process.execPath)`:/usr/bin:/bin」，`afterEach` 还原。
+- 新测试 `server/test/office-cache.test.ts`（预计 450–600 行，超 700 行则把启动清空一组拆到 `office-work-clear.test.ts` 并记偏离）；自带搭建，不从 795 行的旧文件抽 helper，写成不同形状以免 jscpd 报克隆。用例清单：
+- 「命中、失效与复制」：结果文件名等于测试按规格字面算出的键且等于 `officeCacheKey` 的返回；第二次调用零启动、同路径、修改时间被更新（先把缓存文件 `utimes` 到一天前）。输入的 mtime 先 `utimes` 成整秒，再分别做「只改大小（改写后把 mtime 设回）」「只改 mtime」「同大小同 mtime 的另一路径」三例，各自重新启动。缓存文件 `0600`、`uid` 为本进程。inode 用 14.7 的 `FileHandle.prototype.stat` 探针在 `fstat` 时刻取作业输出的 `ino` 比对（此刻两文件并存，不受 inode 复用影响）。键位置上预先放空文件或指向非空文件的符号链接，都按未命中处理。
+- 「失败不入缓存」：同一转换器、同一输入。第一次由注入的 spawn 包装器换成内联 node 脚本——先在 `<cwd>/out/<名>.pdf` 写出完好 PDF，再分别退出码 1 / 睡过 `timeoutMs` / 睡到被中止（D-25 的真实形状：被终止的作业留下完整 PDF）；断言 `pdf/` 为空；第二次放行到真夹具，启动一次并成功。超时例的 `timeoutMs` 取 1000 起，抖动则放大数值并记偏离，不放松断言。
+- 「周期清理」：8 天前删、6 天前留、恰在界上的留；旧 mtime 的子目录与指向外部文件的符号链接都留，外部文件原样；`pdf` 置 `000`（`it.skipIf(euid===0)`）与 `pdf` 不存在两例都不抛；`clearWork` 清掉遗留作业目录。
+- 「启动时清空 work」：规格四例 + `PATH` 含相对项 + `PATH` 里没有 `sudo`（`error` 无 pid）+ 被信号结束，各恰一条日志、不抛。成功例断言包装器记录的 `command`、`args`、`options` 逐项 `toEqual`，夹具记录的 `argv`、`cwd === "/"` 与之相符，且 `entriesAtStart`、`entriesAtExit` 都含遗留目录、返回后 `work` 为空且仍是 `2770` 目录。另有：`cacheDir` 带尾斜杠时 argv 第 6 项仍是 `<cacheDir>/work`；`work` 下指向外部目录的符号链接被解除而外部文件仍在；一个 `0500` 非空目录删不掉时同级其余条目照删（`afterEach` 先 `chmod` 再清）。
+- 环境断言沿用 14.1 口径：对 `options.env` 精确断言，对子进程记录先去掉 `__CF_USER_TEXT_ENCODING`；父环境占位值用低熵字面量；正则一律字面量。
+- 门槛：knip 的 server 入口含 `test/**/*.test.ts`，`createOfficeCleanup` 在 15.1 之前只有测试导入即可，`officeCacheKey` 同理（#1073 接手后有源码导入方）；只导出用到的符号。`office-cache.ts` 对 `office.ts` 只做 `import type` 与 `OfficeConvertError` 的单向导入，`office.ts` 不反向导入。`.mjs` 夹具不计 800 行但受 Biome 约束。规格签名 `createOfficeConverter({…, concurrency})` 的合成体由 14.2 / 15.1 给出，本刀不改该签名（偏离记录）。
+- 否决的方案：把键与命中做进 `createOfficeConverter.convert`（`office-converter.test.ts` 要改两处，且命中查询会在 `closed` 检查与 spawn 之间引入 `await`，`close()` 之后可能仍起进程）；从作业目录直接 `rename` 进 `pdf/`（D18 明令禁止）；在本模块 `setInterval` 或直接写 `process.stderr`。
+- 变异：`collectOutput` 改成把作业输出 `rename` 进 `pdf/` → 「命中、失效与复制」的 `ino` 不同与 `0600` 断言判红（既有 `office-converter.test.ts:380-383` 同时判红）。
+- 变异：失败后仍收集并入缓存（如 `timeout` / `aborted` / 非 0 退出之后照样取输出改名）→ 「失败不入缓存」三例的「`pdf/` 为空」判红。
+- 变异：内存里按键记住失败结果 → 同三例的「第二次启动了进程并成功」判红。
+- 变异：键里去掉 `size` / 去掉 `mtimeMs` / 去掉路径 → 分别是「只改大小」「只改 mtime」「另一路径」一例的启动次数与路径断言判红。
+- 变异：去掉 `0x00` 分隔或换算法 → 「文件名等于字面算出的键」判红。
+- 变异：命中时不 `utimes` → 「修改时间被更新」判红。
+- 变异：命中判定用跟随链接的 `stat`，或去掉 `size>0` → 符号链接例、空文件例的「重新启动」判红。
+- 变异：命中不短路（每次都转换）→ 「第二次零启动」判红。
+- 变异：`close()` 之后命中仍返回成功，或 `signal` 已中止仍返回命中 → 对应两例的 `aborted` 判红。
+- 变异：未配置 `officeBin` 时先 `lstat` 后报 `failed` → 「`unavailable` 且零启动」判红。
+- 变异：相对路径的 `absInput` 走到 `lstat` → 「`failed`、不按 cwd 解析」判红（在 cwd 下放同名文件作陷阱）。
+- 变异：`sweepPdf` 阈值改 6 天或 9 天 → 6 天 / 8 天例判红；`<` 改 `<=` → 界上例判红。
+- 变异：`sweepPdf` 用 `stat` 跟随链接或连目录也删 → 「链接与子目录都留」判红。
+- 变异：`sweepPdf` / `clearWork` 让错误上抛 → 「`pdf` 不可读 / 不存在不抛」「`0500` 目录例不抛」判红。
+- 变异：同 uid 模式也执行 `sudo` → 「没有启动 `sudo`」判红。
+- 变异：判定只看 `ompUser` → 「有 `ompUser` 无 `officeBin` 时零启动」判红。
+- 变异：跳过 `sudo` 时连自己的删除也跳过 → 该两例的「`work` 为空」判红。
+- 变异：argv 加通配、换命令、路径用字符串拼接、加 `setpriv` 前缀 → argv 逐项相等与尾斜杠例判红。
+- 变异：`cwd` 不是 `/`、`shell:true`、环境带 `HOME` 或继承 `process.env` → `options` 的 `toEqual` 与夹具记录的 `cwd` 判红。
+- 变异：不等 `sudo` 结束就开始自己的删除 → `entriesAtExit` 含遗留目录的断言判红。
+- 变异：命令失败时抛出 → 「不抛出」判红；失败不记日志、记两次、记录带路径或用户名 → 「恰一次且整串相等」判红。
+- 变异：去掉 `assertSafeSudoPath` → 「`PATH` 含相对项时零启动且一条日志」判红。
+- 变异：自己的删除遇到第一项失败即停 → 「`0500` 目录旁的条目照删」判红。
+- 变异：自己的删除跟随顶层符号链接，或把 `work` 自身删掉 → 「外部文件仍在」「`work` 仍是 `2770` 目录」判红。
+- 变异：周期清理里也调 `sudo … find`：本刀不可观察（定时器不在本刀），归 15.2 与白盒审查。
+- 变异：预期不可观察：绕过注入的 spawn 直接调 `child_process`（夹具仍会留下记录，但启动次数的判据失效，靠白盒审查）；作业目录内部递归期间换入链接的竞态（无法定时注入）；`OMP_USER` 模式下属主不同于本进程的真实情形（同 uid 测试里 `uid` 断言恒真，判据是 `ino` 与 mode，真实属主归 28.6 人工验证）；`find` 在真实 sudoers 下的字面匹配（归 28.x）。
+- 变异：不适用的越界向量：目录穿越、跨空间 id、他人空间 404 先于路径检查、`sandbox.reject` 审计——本刀没有路由与 `resolve`，这些随 15.1 的 `/o/` 路由。
+- 预审补：**上面「窗口声明」② 原写「顶层条目换不走（父目录 `2750`）」是错的**（已就地改正；`office-cache.ts` 头注释 `:17-19` 与 PR「已知残余」第 1 条同改）。`2750` 是 `cacheDir`，作业目录的父目录是 `work/`（`2770`、无 sticky），omp 用户可以在 `removeOwnEntries` 的 `readdirSync` 之后、`rmSync` 判定之后改名或替换顶层条目。原生 `rmSync` 递归途中是否跟随换入的链接取决于运行时的 Node 版本（`.tool-versions` 的 `nodejs 24.13.1` 只约束开发与 CI，`package.json` 没有 `engines`），没有核实、没有实测、不闭合。源码除这三行头注释外一个字节没动。
+- 预审补：修复前存活的四条变异，各补一处断言后判红（`office-cache.test.ts` 429 → 462 行、21 → 23 例）：
+  - `sweepPdf` 用 `atimeMs` 判 → 「删掉修改时间早于 7 天的普通文件…」：`aged()` 多一个访问时间参数，`on-the-limit.pdf` 的访问时间放到 8 天前、`just-over.pdf` 的放到 1 天前（原先 atime 恒等于 mtime）。
+  - 键用 `String(Math.trunc(mtimeMs))` → 新例「把修改时间改成带小数毫秒的值：重新启动进程，结果是另一个键的文件」：修改时间取 `1700000000 + 1/64` 秒，`mtimeMs` 为 `1700000000015.625`（二进制与微秒 / 纳秒粒度下都精确），期望键里的字面量是 `1700000000015.625`；用例先断言 `lstat` 读回的就是这个值，粒度更粗的文件系统上它以夹具前置断言失败而不是静默通过。本机 APFS 可观察。
+  - `sweepPdf` 只删 `.pdf` 后缀 → 同一例加 8 天前的无后缀普通文件 `eight-days-no-suffix`，断言被删。
+  - `officeCacheKey` 用跟随链接的 `stat` → 新例「输入是指向另一个文件的符号链接：键取自链接自己的 lstat，不是目标的大小与修改时间」：相对目标 `a.docx`（链接自己的 `size` 为 6）、`lutimes` 把链接的修改时间钉在 `1700000001000`，期望键按这两个字面量拼；`officeCacheKey` 与经缓存的 `convert` 两层都断言（转换进程按路径读输入、跟随链接，转换本身成功）。
+- 预审补：「一个 0500 的非空目录删不掉…」（现名「两个 0500 的非空目录删不掉：不抛，同级其余条目照删」）原夹具靠名字排序（`a-first` / `m-locked` / `z-last`），而 `readdirSync` 的次序由文件系统定（APFS、ext4 `dir_index` 按哈希）：`0500` 目录恰排在最后时「遇第一项失败即停」存活。改为建五个各含一个 `keep` 的目录，读一次实际次序，锁其中第 2、第 4 项——可删的条目在两个锁住的目录前面、中间、后面都有，与次序无关；断言留下的恰是这两项且各自的 `keep` 原样、没有日志。变异在新夹具上判红（`office-work-clear.test.ts` 280 → 287 行，例数不变）。
+- 预审补：PR 里两条「由实现者定」的分支其实已有定案：`sweepPdf` 不看文件名来自规格「转换缓存」的「删除 `pdf` 下修改时间早于『当前时刻 − 7 天』的普通文件」（`spec.md:75`，没有名字条件），上面「清理」一条也写了崩溃遗留的随机名 `.pdf` 同样清；同键并发未命中各转一次不是自由选择——规格「并发上限与排队」（`spec.md:58`）要求共用同一次转换，上面「键」一条把它推给 #1073。
+- 预审补：**与 #1073 的交接**：去重必须把 `rename` 包在里面（落在缓存的未命中路径之内，`office-cache.ts:87-93`）。只在转换器一层去重时，共用同一次转换的调用拿到的是同一个 `pdf/<随机名>.pdf`，第一个 `rename` 成功、其余的以 `ENOENT` 失败并报 `failed`。`office-cache.test.ts:239-251`「同一个键的两次并发未命中各转一次…」里的 `launches` 长度为 2 钉的是今天不去重的行为，#1073 落地时预期改它。
+- 预审补：`sudo … find` 无超时的后果补全（原只写了「`clearWork` 不落定」）：这个 `ChildProcess` 没有 `unref`，它不退出时事件循环一直活着；`createOfficeCleanup` 不交出任何能终止它的句柄，关停或 `process.exit` 时 `sudo` / `find` 可能成为孤儿并继续在 `work/` 下删除，下一个实例在途的作业目录可能被它删到。是否加超时、是否交出句柄归 15.1（#1074）定，本刀不改。
+- 预审补：CI 口径：「写出完好 PDF 之后以 timeout 结束…」的 `timeoutMs` 是 1000，负载高的 runner 上可能抖动（上面已定：抖动则放大数值、不放松断言）；「pdf 目录不可读…」与「两个 0500 的非空目录删不掉…」两例在 root 下跳过（`it.skipIf(euid===0)`），容器里以 root 跑测试时这两条变异没有判据。

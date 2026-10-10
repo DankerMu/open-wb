@@ -343,7 +343,7 @@ Minimal mergeable slice: atomic - 两个监听器与回收目录定时器在入�
 - [x] 14.1 新文件 `server/src/preview/office.ts`：`createOfficeConverter`——作业目录、argv 与环境、sudo 前缀（复用 `core/process-path` 的 `setpriv` 检查）、成功判定；终止在途转换（超时、`signal` 中止、`close()`）按 office-preview「转换器调用契约」的两种模式：同 uid 模式以新进程组启动并对进程组发 `SIGKILL`，`OMP_USER` 模式只杀自己启动的 `sudo`（不执行 `kill`/`pkill`/第二次 `sudo`，不新增 sudoers 规则）。
   实施注记见 `implementation-notes.md`「14.1、14.4（#1071）」。
 - [ ] 14.2 同文件或 `office-queue.ts`：并发上限、排队上限 8、按缓存键去重、排队中中止出队（office-preview「并发上限与排队」）。
-- [ ] 14.3 缓存与周期清理（office-preview「转换缓存」）：键的计算、命中更新修改时间、输出**复制**后改名进 `pdf/`、失败不入缓存、7 天清理函数、启动时清空 `work/`（周期定时器在 15.1 接进 `server.ts`）。
+- [x] 14.3 缓存与周期清理（office-preview「转换缓存」）：键的计算、命中更新修改时间、输出**复制**后改名进 `pdf/`、失败不入缓存、7 天清理函数、启动时清空 `work/`（周期定时器在 15.1 接进 `server.ts`）。
   启动时清空 `work/` 按 office-preview「转换缓存」分两种情况（owner D-24，design D18「作业目录的清理」；**审批 / 提权策略的改动，落在 Critical Path「omp 子进程治理」，PR 标注白盒审查**）：
   - `ompUser` 与 `officeBin` 没有同时提供（同 uid 模式；或有 `ompUser` 而没有 `officeBin`）：只由本进程递归删除，不启动 `sudo`。
   - 两者都提供：先 spawn 恰一次，命令 `sudo`，argv 恰为 `-n -u <ompUser> -- /usr/bin/find <cacheDir 的绝对路径>/work -mindepth 1 -delete`（逐项固定：路径取 `join(cacheDir, "work")`，不拼字符串、不加通配、不经 `setpriv`；`shell:false`、`cwd: "/"`（14.5 的假 `sudo` 记录并断言它）、标准流全部丢弃、环境只有 `PATH` 与存在时的 `LANG`），等它结束，再做本进程自己的递归删除。
@@ -351,6 +351,7 @@ Minimal mergeable slice: atomic - 两个监听器与回收目录定时器在入�
   - 该命令失败（检查不过、spawn 失败、非 0 退出、被信号终止）：application stderr 恰一行 `{"event":"preview_work_clear_failed"}`（没有其它键），不抛出，本进程自己的删除照常进行。
   - spawn 经可注入的函数（与 14.1 同一个 seam），测试用记录型假 `sudo`（14.5）；变异证据在 14.6。
   - CI：`uid-isolation` job 不设 `OFFICE_BIN`，这条命令在那里不执行，`.github/scripts/ci-uid-isolation.sh` 不需要改。
+  实施注记见 `implementation-notes.md`「14.3，含分摊的 14.5 / 14.6 条款（#1072）」。
 - [x] 14.4 测试夹具 `server/test/fixtures/fake-soffice.mjs`（可执行；按输入文件名里的标记：正常写出一个最小 PDF、退出码 1、不写输出、写空文件、写符号链接、睡眠、先起一个子进程再睡眠；把收到的 argv 与环境写到作业目录旁的记录文件）。
 - [x] 14.7 `office.ts` 的输出复制设界（owner 裁决 2026-10-09；规格条文随本任务的代码 PR 落地，不在此前写）。Depends on：14.1。挡住：14.5、15.1。
   对输出按同一个 fd 的 `fstat` 所得 `size` 复制恰好这么多字节：`size` 大于 200 MiB → 不读，`failed`；读到的字节少于 `size` → `failed`（半截的副本不留在 `pdf/`）。上限是写死的常量，不加配置键。

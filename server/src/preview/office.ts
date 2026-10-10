@@ -10,7 +10,8 @@
  * 转换跑完才自行退出（实测最长在终止之后 128 秒），又不占转换名额，所以实际同时运行的转换进程
  * 可以多于配置的并发上限——已登记的残余（design D18、owner D-25）。
  *
- * `work/` 与 `pdf/` 由调用方建好，本模块不 mkdir 它们。并发上限、排队与缓存不在这里。
+ * `work/` 与 `pdf/` 由调用方建好，本模块不 mkdir 它们。这里只有单次转换：缓存键、命中与两个清理
+ * 函数在包在外面的 `office-cache.ts`，并发上限与排队不在这两个文件里。
  */
 import { type ChildProcess, type SpawnOptions, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -40,7 +41,7 @@ export class OfficeConvertError extends Error {
 }
 
 /** 与 `node:child_process` 的 `spawn` 同形；标准流全部丢弃，所以返回的是没有流的 `ChildProcess`。 */
-type OfficeSpawn = (
+export type OfficeSpawn = (
   command: string,
   args: readonly string[],
   options: SpawnOptions,
@@ -58,7 +59,7 @@ interface OfficeConverterOptions {
   spawn?: OfficeSpawn;
 }
 
-interface OfficeConverter {
+export interface OfficeConverter {
   readonly available: boolean;
   /** `absInput` 是调用方已经过 `sandbox.resolve` 的绝对路径。成功时落定为 `pdf/` 下的新文件。 */
   convert(absInput: string, signal?: AbortSignal): Promise<string>;
