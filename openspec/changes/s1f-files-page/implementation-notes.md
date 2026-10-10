@@ -862,7 +862,7 @@
 - 同文件排序：与 #1079 共用 `web/src/lib/api.ts`（或其新建的 `api-files.ts`），按 #1079 → #1081 叠放；用例放新文件后，两刀在测试文件上不再相交。#1078（3.1–3.5）不碰 `api.ts`、`api-files*.test.ts`，也不改 `fetchPreview` 的契约，与本刀无文件交集；它改 `tree.tsx` 时若扩 `previewableExtensions`，属于它或 17.x 的范围。issue 写明本刀不依赖 #1079，#1079 若卡住可直接落在 master 的 `api.ts` 上。
 - issue 与 `tasks.md` 的差异：16.3、16.4 的 16.3 一行、16.5 的第三条逐字一致，无差异。issue 的 PR Boundary 写 `web/test/api-files.test.ts`，按上条改为新测试文件；「不改 `web/src/features/**`」照办。
 - 变异：把 `video/mp4` 加进图片集合 → 用例二的 `video/mp4` 行判红（16.5 指定的那条）。
-- 变异：把 `image/svg+xml` 加进集合，或把判定放宽为 `image/` 前缀 / 去掉正则的 `$` 锚 → 用例二的 `image/svg+xml` 行判红。这是 D4 的逃逸向量：主站来源下的 SVG Blob 地址。
+- 变异：把 `image/svg+xml` 加进集合，或把判定放宽为 `image/` 前缀 → 用例二的 `image/svg+xml` 行判红；去掉正则的 `$` 锚 → `image/gif+xml` 行判红（实施时更正：`svg+xml` 不以六种子类型之一开头，去锚后仍被拒）。这是 D4 的逃逸向量：主站来源下的 SVG Blob 地址。
 - 变异：把 `text/html` 当作 `text` 或 `image` → 用例二的 `text/html` 行判红。
 - 变异：把 `audio/mpeg` 加进集合 → 用例二的 `audio/mpeg` 行判红。
 - 变异：从集合去掉 `image/gif` → 用例一的 gif 行与 `IMAGE/GIF; charset=binary` 行判红。
