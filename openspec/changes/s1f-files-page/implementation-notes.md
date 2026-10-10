@@ -667,3 +667,38 @@
 - 变异：时钟传常量或 0 → (1) 的 `expiresAt` 恰等判红。
 - 变异：400 分支放到 `issue` 之后（先签发再拒绝）→ (3) 与空 `Host` 用例的 `issue` 调用数 0 判红。
 - 变异：不可观察：遍历与符号链接（本路由没有路径参数）、「越界写 `sandbox.reject`」——归 #1069 与 11.4（#1075）。`lookup` 顺手续期属 #1066，已有证据。
+
+## 8.1 的 moveToTrash 半边、8.2、8.3、8.4（#1060）
+
+- **Critical Path：沙箱与文件边界**（删除用户数据、回收目录、`rename` 与文件系统补偿）——两个评审席位并请 owner 白盒审查；纯服务端，**不加验收清单行**（FL-01 已在 `docs/acceptance/functional-checklist.md:193`），不碰配置键计数与 `docs/architecture/system.md` 第 9 节。
+- 漂移：`server/src/workspaces/rest-entries.ts` 已存在（93 行，#1061 的下载路由），本刀在 `registerWorkspaceEntries` 里加路由，不新建文件；`trash.ts` 126 行，`createTrash`（`:36`）没有 `rename?`、不 import `core/sandbox`；`rest.ts` 418 行（不加路由，只给 `WorkspaceRestDependencies` `:21` 加字段）、`workspaces/index.ts` 11 行（不用改）、`app.ts` 490 行、`workspaces-http-helpers.ts` 101 行；堆叠分支上先重读这些行号。
+- issue 与 tasks.md / 规格的差异（后者为准）：① issue 写「新文件 `rest-entries.ts`」，tasks 8.2 也这么写，实际已存在；② issue 验收写「符号链接 / 非目录 / 他人持有 → 500」，规格场景「回收目录被预先占位」的三例是符号链接、普通文件、`.trash/u1` 为 `0777`（**校正为 `0700` 后删除成功**），没有「他人持有」的路由用例；③ issue 的 8.1 摘录缺 tasks 里指向 #1059 注记的那一行；④ 定时器 issue 写 #1070，tasks 写 13.1，同一件事。编排方提示里的「多路径批量、部分失败、16 KiB body 校验」规格里都不存在：一次请求一个 `path`，「批次」只是每次删除一个目录，路由不设 `bodyLimit`。
+- 形状：`createTrash(options: { sandboxRoot: string; retentionDays: number; rename?: (from: string, to: string) => void })`，返回对象加**同步**的 `moveToTrash(ownerId: string, workspaceId: string, absPath: string): string`，`rename` 缺省 `renameSync`。流程：`.trash`、`<ownerId>`、`<workspaceId>`、`<batch>` 四级依次 `ensureOwnedDir(…, 0o700)`（从 `../core/sandbox/dirs.js` 导入，先例 `preview/office.ts:22`）→ `rename(absPath, join(batchDir, basename(absPath)))` → 失败时 `rmdirSync(batchDir)`（非递归、只删批次这一级、吞掉自身错误）后抛原错。批次名 `${Date.now()}-${randomBytes(8).toString("hex")}`。不导出新的模块级符号，不给两个段加校验（`ownerId` 已过 `rejectUnsafeOwnerSegment`，`workspaceId` 是库里命中的行；记偏离）。
+- 注入缝：`AssemblyDependencies`（`app.ts`）加 `trash?: ReturnType<typeof createTrash>`（仿 `snapshots?`），缺省由 `createApp` 以 `runtime.sandboxRoot` 建一个；`WorkspaceRestDependencies` 加**必填** `trash`，`app.ts:226` 的调用传入。缺省的 `retentionDays`：把 `preview-config.ts:24` 的 `DEFAULT_TRASH_RETENTION_DAYS` 加 `export` 后导入 `app.ts`（13.1 之前无人调 `sweep`，零运行期影响；记偏离）。`appAssemblyOf` 不动，13.1（#1070）沿用 `assembly.trash` 拿到同一个服务。`withWorkspacesApp` 加第三个可选参数 `assemblyOf?: (sandboxRoot: string) => Pick<AssemblyDependencies, "trash">`。
+- 路由次序：`onRequest: noStoreWorkspaceResponse` → `currentPrincipal` → `ensureOwnedRoot` → `parsePathQuery(query, true)` → `sandbox.resolve(principal, id, path, "delete")` → `lstatExisting`：不存在 404、非 `isFile()` 且非 `isDirectory()` 404 → `trash.moveToTrash(principal.id, id, absPath)` → `audit.emit({kind:"file.delete", actorId, workspaceId, title:` `删除 ${path}` `, detail:{path, type, trashId}})` → `reply.code(204).send()`。`detail.path` 用请求原串。不改 `core/sandbox`、`http/errors.ts`。
+- 规格未写明的分支（最简处理，记偏离）：(a) 带合法 JSON body → 忽略，204；`Content-Type: application/json` 加畸形 body → generic 500 且目标未动（非归属路由的既有语义，他人 id 同样是 500，因为 parser 先于处理器），这条 http-service-skeleton「工作空间新增两条归属路由」的 DELETE 分句写在本刀新测试文件里，不进 `http-parser-owners.test.ts`（它归 #1062 / #1067）；(b) FIFO → 404；(c) `rename` 得 `ENOENT`（条目在 `lstat` 后消失）→ 500；(d) 空的 `<ownerId>`、`<workspaceId>` 目录在失败后保留；(e) `uploads` 等顶层目录可删，只有根（空串）被 `op=delete` 的末段规则拒绝；(f) 空间内名叫 `.trash` 的条目是普通条目，可删。
+- `trash.ts:1-27` 头注释：第 2–3 行「this half only sweeps…moving entries in comes with the delete route」在本刀变假，必须改写；`:12` 的「settle it before anything schedules this sweep」**同刀**改成已裁决现状（D-23：登记为已知残余、#1286 保持打开），因为紧挨着要新增 `moveToTrash` 的残余段落，留着会自相矛盾。记偏离「提前履行 tasks 13.1 注记的那半句」；#1070 以 `git grep 'settle it before'` 零命中为证，其余陈述不动。
+- **残余（D-23，不声称闭合，写进头注释与 PR 描述）· 源侧**：`resolve` 对每个分量各 `lstat` 一次，路由对末段再 `lstat` 一次，此后 `rename` 按路径、什么都不复查。空间根及其下各级都是 `2770`、omp 用户可写：任一**中间**分量在检查后被换成符号链接，`rename` 就跟随它，把链接目标目录里同名、应用用户移得动、且在同一文件系统上的条目（别的账号的空间、同盘的状态目录条目）收进回收目录，到期被清理，审计仍记空间内的逻辑路径；跨文件系统则 `EXDEV` → 500。末段被换成链接时只是链接本身被移走（`rename` 不跟随末段），`type` 记错。
+- **残余 · 目标侧**（读代码推出，未实测）：四级各校验一次，校验的是「属应用用户的 `0700` 真实目录」，没有把路径绑定在真正的 `.trash` 下。`.trash` 通过第一级校验后可被 omp 用户改名挪开并换成符号链接（`SANDBOX_ROOT` 组可写、无 sticky；1.2 附带实测同父目录内改名成功），后三级就在链接目标下被 `mkdir` / `chmod`。后果两条：批次落在 `.trash` 之外（omp 用户读不到，但清理也扫不到）；链接指向 `SANDBOX_ROOT` 自身时，第二级 `ensureOwnedDir` 把账号根 `<SANDBOX_ROOT>/<ownerId>`（应用用户持有的 `2770`）**校正为 `0700`**，omp 用户从此进不去该账号的全部空间，直到管理员改回。补偿的 `rmdir` 同样按路径。这是规格规定的逐级 `ensureOwnedDir` 语义加 D22 已登记的同一类窗口，本刀没有放宽它；**不加 `realpath` 复核**（不闭合，只会被读成闭合）。
+- 1.2 实测供引用：uid 分离部署下工作空间与 `.trash` 同一 `st_dev`，无 `EXDEV`；omp 用户建的 `0660` 文件与 `2770` 目录（含子树）都能被应用用户 `rename` 进 `0700` 批次并移回，inode、属主、组、mode 不变——移入后条目仍属 omp 用户，只是按路径够不着（仍持有描述符或工作目录的进程除外）；`chmod g-w` 的目录跨父目录移动得 `EACCES` → 规格的 500、条目留在原处。未测「去掉组写位的目录里的单个文件」。
+- 新文件 `server/test/workspaces-delete.test.ts`（`workspaces-http.test.ts` 736 行不得加行），用例：① 删除文件与目录（204、空体、`no-store`；批次名匹配字面量 `/^\d+-[0-9a-f]{16}$/u`；四级目录 `mode & 0o7777 === 0o700`；`out` 子树完整；`file.delete` 两行 `detail` 恰三键）② 同名先后删除 ③ 拒绝项九例（四个 403 各一条 `sandbox.reject`、`detail.op === "delete"`；断言 `existsSync(<root>/.trash) === false`，比「没有新增批次」更强）④ lisi、不存在的 id、无根目录的自有 id → 逐字相同的 404，审计零行，文件未动，`.trash` 不存在 ⑤ 注入抛 `EXDEV` 的 `rename` → `INTERNAL_ERROR_ENVELOPE`、`readdirSync(.trash/u1/<id>)` 为空、无 `file.delete` ⑥ 预先占位三例 ⑦ 回收目录不可见（本空间与另一空间各级 `tree`；`path=.trash` → 404，`path=../.trash` → 403，`tree` 与 `file` 都测）⑧ 审计失败（`db.setAuthorizer`，范式在 `workspaces-http-failures.test.ts:267`）→ 500 且条目在批次里 ⑨ body 两例 ⑩ FIFO → 404（`mkfifo` 已在 knip `ignoreBinaries`）。204 不能用 `expectWorkspaceResponse`（它调 `.json()`）。
+- 夹具与守卫：⑥ 第三例先建 `0700` 的 `.trash`，再 `mkdirSync` + `chmodSync(…, 0o777)` 建 `u1`（`mkdir` 的 mode 受 umask 影响）。「他人持有」在路由层不可夹具（非 root 无法在临时目录造他人持有的目录），由 `sandbox-dirs.test.ts:336` 钉住，不许用改写 `geteuid` 伪造；规格括注「进程为 root 时归属一例跳过」在三例里没有对应项，三例都不跳过。jscpd：`auditRows`、`SANDBOX_DENIED_ENVELOPE`、`seedWorkspace` 与 `workspaces-download.test.ts:27-72` 同形，报 clone 就搬进 `workspaces-http-helpers.ts`，下载测试只改 import（等价改写，记偏离）。既有测试无须改断言：`server-assembly.test.ts:560` 只包一层 `registerWorkspaces`，`workspaces-http-failures.test.ts:231` 是显式 URL 列表，`<state>/trash` 的断言是另一套目录。
+- 同批共用文件（按既定堆叠次序）：`rest.ts` 的 `WorkspaceRestDependencies` 与 `app.ts:226` 的调用——#1056（`limits`）、#1067（`preview?`）在前，本刀加 `trash`；`rest-entries.ts`——本刀在前，#1062 在其上加 `move`；`workspaces-http-helpers.ts`——本刀加第三参数，#1062 复用。合入后 13.1 之前回收目录只进不清，属 tasks 已定的次序，PR 描述写明。
+- 变异：批次目录（或任一级）建成 `0755` → ① 的 mode 断言红（8.4 第一条）。
+- 变异：用递归 `mkdirSync(batchDir, { recursive: true })` 代替逐级 `ensureOwnedDir` → ⑥ 符号链接例里 `notes.md` 被移进链接目标而红；普通文件例仍是 500，**不可观察**（8.4 第二条）。
+- 变异：`rename` 失败后不 `rmdir` 批次 → ⑤「没有残留」红（8.4 第三条）。
+- 变异：「删除先于归属检查」（8.4 第四条）：只去掉 `ensureOwnedRoot` 时，他人 id 仍被 facade 的 `rootOf(principal)` 挡成 404，**不可观察**；它由 ④ 的无根自有 id 判红（404 变成 403 加一条 `sandbox.reject`）。要让 ④ 的 lisi 用例红，变异体须按空间属主查根，PR 表两种都列。
+- 变异：`resolve` 的 `op` 写成 `"read"` → ③ 的 `path=`（空串）变成移走空间根或 500，且 `detail.op` 断言红。
+- 变异：跳过 `resolve`，直接 `join(root, path)` → ③ 的 `../x`、`link` 与 ⑦ 的 `../.trash` 红。
+- 变异：去掉 `isFile() / isDirectory()` 判定 → ⑩ FIFO 用例红（变成 204）。
+- 变异：存在性检查挪到 `moveToTrash` 之后 → ③ `missing.md` 的「`.trash` 不存在」红。
+- 变异：`audit.emit` 挪到 `rename` 之前 → ⑧「条目已在回收目录」红（条目仍在原处）；吞掉审计错误 → ⑧ 的 500 红。
+- 变异：审计 `detail` 多一键或少 `trashId` → ① 的三键 `toEqual` 红；`trashId` 不等于实际批次名 → ① 红。
+- 变异：批次名不带随机段（只用毫秒）→ ② 需在同一毫秒内两删才红；用 `vi.spyOn(Date, "now")` 固定时间，否则**不可观察**。
+- 变异：去掉 `rename` 注入（恒用 `renameSync`）→ ⑤ 红（204）。
+- 变异：`parsePathQuery(query, false)` → ③ 缺 `path` 的 400 红（变成 403）。
+- 变异：目标名取查询串末段而非 `basename(absPath)` → 预期**不可观察**（末段规则已拒 `a/`、`a/.`）；加 `./notes.md` 用例也只钉 `detail.path` 原串。
+- 变异：把 `.trash` 建在空间根下 → ⑦ 的 `tree` 断言与 ① 的位置断言红。
+- 变异：把路由加进 `http/errors.ts` 归属集 → ⑨ 畸形 body 的 500 红（变成 400）。
+- 变异：去掉 `onRequest: noStoreWorkspaceResponse` → ③ 未登录 401 与各例的 `cache-control` 断言红。
+- 变异：补偿改成递归 `rm` 整个 `<workspaceId>` 级 → ②（第一个批次被连带删除）需配一例「已有批次后再注入失败」才红；⑤ 里加这一步。
