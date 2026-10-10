@@ -6,6 +6,7 @@
 import { writeFileSync } from "node:fs";
 import { type FileHandle, open } from "node:fs/promises";
 import { join } from "node:path";
+import { crc32, deflateRawSync } from "node:zlib";
 import { afterEach } from "vitest";
 import { archiveFormat, listArchive } from "../src/workspaces/archive.js";
 import { removeTempDirs, tempDir } from "./core-db-helpers.js";
@@ -22,7 +23,7 @@ const SERVED_AT_MOST = 1_048_576;
 interface HeaderFields {
   name: string | Buffer;
   size?: number;
-  /** One character: `0` file, `5` directory, `2` symlink, `L` / `K` GNU, `x` / `g` pax. */
+  /** One character: `0` file, `1` hard link, `2` symlink, `5` directory, `L` / `K` GNU, `x` / `g` pax. */
   typeflag?: string;
   prefix?: string | Buffer;
   magic?: string;
@@ -75,6 +76,52 @@ export function paxRecord(key: string, value: string): string {
     length += 1;
   }
   return `${length} ${key}=${value}\n`;
+}
+
+/** `length` bytes that do not compress: a fixed Lehmer sequence, the same on every run. */
+export function noise(length: number): Buffer {
+  let state = 12_345;
+  return Buffer.from(
+    Array.from({ length }, () => {
+      state = (state * 48_271) % 2_147_483_647;
+      return Math.floor(state / 256) % 256;
+    }),
+  );
+}
+
+/**
+ * One gzip member written by hand (RFC 1952): the optional header fields asked for, raw deflate,
+ * then the CRC-32 and the length of `data`. `extra` is the FEXTRA payload, at most 65535 bytes.
+ */
+export function gzipMember(
+  data: Buffer,
+  fields: { extra?: Buffer; name?: string; comment?: string; headerCrc?: boolean } = {},
+): Buffer {
+  const flags =
+    (fields.headerCrc ? 2 : 0) +
+    (fields.extra ? 4 : 0) +
+    (fields.name === undefined ? 0 : 8) +
+    (fields.comment === undefined ? 0 : 16);
+  const parts: Buffer[] = [Buffer.from([0x1f, 0x8b, 8, flags, 0, 0, 0, 0, 0, 3])];
+  if (fields.extra) {
+    const length = Buffer.alloc(2);
+    length.writeUInt16LE(fields.extra.length);
+    parts.push(length, fields.extra);
+  }
+  for (const text of [fields.name, fields.comment]) {
+    if (text !== undefined) {
+      parts.push(Buffer.from(`${text}\u0000`, "latin1"));
+    }
+  }
+  if (fields.headerCrc) {
+    const headerCrc = Buffer.alloc(2);
+    headerCrc.writeUInt16LE(crc32(Buffer.concat(parts)) % 65_536);
+    parts.push(headerCrc);
+  }
+  const trailer = Buffer.alloc(8);
+  trailer.writeUInt32LE(crc32(data), 0);
+  trailer.writeUInt32LE(data.length % 4_294_967_296, 4);
+  return Buffer.concat([...parts, deflateRawSync(data), trailer]);
 }
 
 const handles: FileHandle[] = [];
