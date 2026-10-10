@@ -51,6 +51,7 @@ import { TokenRegistry } from "./sessions/tokens.js";
 import type { TurnSnapshotService } from "./sessions/turn-snapshot.js";
 import { registerWorkspaces } from "./workspaces/index.js";
 import type { PreviewLimits } from "./workspaces/preview.js";
+import type { WorkspacePreviewDependencies } from "./workspaces/rest-preview-token.js";
 import { removeSnapshot, removeWorkspaceSnapshots, take } from "./workspaces/snapshots.js";
 import { restore } from "./workspaces/snapshots-restore.js";
 import { createWorkspaceStore } from "./workspaces/store.js";
@@ -93,6 +94,11 @@ export interface AssemblyDependencies {
   uploadMaxFiles?: number;
   /** 预览的文本、图片、Notebook 三个字节上限；省略时取规格缺省值（由 workspaces 模块给出）。 */
   previewLimits?: PreviewLimits;
+  /**
+   * 预览依赖（令牌登记表、预览端口、对外来源、文档上限、转换是否可用）；省略时不注册
+   * `POST /api/workspaces/:id/preview-token`。
+   */
+  preview?: WorkspacePreviewDependencies;
   /**
    * Must return synchronously. createApp forwards this callback and its return
    * unchanged; a returned thenable is an owned programming error beside the source fault.
@@ -226,14 +232,18 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     ...(assembly?.warn === undefined ? {} : { warn: assembly.warn }),
   });
   app.decorate("sessions", registered);
-  registerWorkspaces(app, {
-    store,
-    sandbox,
-    audit,
-    listEvents: registered.listEvents,
-    uploadMaxBytes: upload.maxBytes,
-    ...(assembly?.previewLimits === undefined ? {} : { limits: assembly.previewLimits }),
-  });
+  registerWorkspaces(
+    app,
+    {
+      store,
+      sandbox,
+      audit,
+      listEvents: registered.listEvents,
+      uploadMaxBytes: upload.maxBytes,
+      ...(assembly?.previewLimits === undefined ? {} : { limits: assembly.previewLimits }),
+    },
+    assembly?.preview,
+  );
   registerAccounts(app, { db });
 
   app.all("/api", (request, reply) => sendNotFound(reply, request));
