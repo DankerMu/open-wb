@@ -6,13 +6,11 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
-  readlinkSync,
   renameSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { constants, type DatabaseSync } from "node:sqlite";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTrash } from "../src/workspaces/trash.js";
@@ -27,7 +25,11 @@ import {
 } from "./auth-lifecycle-helpers.js";
 import { removeTempDirs } from "./core-db-helpers.js";
 import {
+  auditCount,
   auditRows,
+  contentOf,
+  denyAuditInserts,
+  expectEnvelope,
   insertWorkspace,
   SANDBOX_DENIED_ENVELOPE,
   seedWorkspace,
@@ -75,12 +77,6 @@ function expectDeleted(response: InjectResponse): void {
   expect(response.headers["cache-control"]).toBe("no-store");
 }
 
-function expectEnvelope(response: InjectResponse, status: number, body: object, label = ""): void {
-  expect(response.statusCode, label).toBe(status);
-  expect(response.json(), label).toEqual(body);
-  expect(response.headers["cache-control"], label).toBe("no-store");
-}
-
 function trashOf(sandboxRoot: string, id = WORKSPACE): string {
   return join(sandboxRoot, ".trash", "u1", id);
 }
@@ -93,30 +89,6 @@ function modeOf(path: string): number {
   return lstatSync(path).mode & 0o7777;
 }
 
-/** Every entry below `dir` by relative path: a file's content, a link's target, or its kind. */
-function contentOf(dir: string, prefix = ""): Record<string, string> {
-  const found: Record<string, string> = {};
-  for (const name of readdirSync(dir).sort()) {
-    const path = join(dir, name);
-    const status = lstatSync(path);
-    if (status.isSymbolicLink()) {
-      found[`${prefix}${name}`] = `link:${readlinkSync(path)}`;
-    } else if (status.isDirectory()) {
-      found[`${prefix}${name}/`] = "dir";
-      Object.assign(found, contentOf(path, `${prefix}${name}/`));
-    } else {
-      found[`${prefix}${name}`] = status.isFile()
-        ? `file:${readFileSync(path, "utf8")}`
-        : "special";
-    }
-  }
-  return found;
-}
-
-function auditCount(db: DatabaseSync): unknown {
-  return db.prepare("SELECT count(*) AS count FROM audit_events").get();
-}
-
 function deleteAudit(path: string, type: "file" | "dir", trashId: string | undefined) {
   return {
     actor_id: "u1",
@@ -124,14 +96,6 @@ function deleteAudit(path: string, type: "file" | "dir", trashId: string | undef
     title: `删除 ${path}`,
     detail: { path, type, trashId },
   };
-}
-
-function denyAuditInserts(db: DatabaseSync): void {
-  db.setAuthorizer((actionCode, table) =>
-    actionCode === constants.SQLITE_INSERT && table === "audit_events"
-      ? constants.SQLITE_DENY
-      : constants.SQLITE_OK,
-  );
 }
 
 function tree(app: FastifyInstance, cookie: string, id: string, path: string) {

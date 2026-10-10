@@ -49,7 +49,7 @@ type OwnedPreParsing = preParsingHookHandler<
   { Params: { id: string } }
 >;
 
-const WORKSPACE_BODY_LIMIT = 16 * 1024;
+export const WORKSPACE_BODY_LIMIT = 16 * 1024;
 const UPLOADS_DIR = "uploads";
 const UPLOAD_MEDIA_TYPE = "application/octet-stream";
 const UPLOAD_NAME_MAX_BYTES = 255;
@@ -158,7 +158,7 @@ function ensureUploadsDir(dependencies: WorkspaceRestDependencies, dir: string):
   }
 }
 
-function isOrdinaryDirectory(path: string): boolean {
+export function isOrdinaryDirectory(path: string): boolean {
   return lstatExisting(path)?.isDirectory() === true;
 }
 
@@ -428,7 +428,7 @@ export function registerWorkspaceRest(
   });
 }
 
-function parseBodyRecord(body: unknown): Record<string, unknown> {
+export function parseBodyRecord(body: unknown): Record<string, unknown> {
   if (
     typeof body !== "object" ||
     body === null ||
