@@ -1,7 +1,7 @@
 /**
- * Byte builders for the archive listing tests: tar blocks are written by hand here (no binary
- * fixture is committed, no tar library), and every archive is read back through a real file handle
- * whose `readAt` records the largest length it was asked for.
+ * Byte builders for the archive listing tests: tar blocks and zip central directories are written
+ * by hand here (no binary fixture is committed, no tar or zip library), and every archive is read
+ * back through a real file handle whose `readAt` records the largest length it was asked for.
  */
 import { writeFileSync } from "node:fs";
 import { type FileHandle, open } from "node:fs/promises";
@@ -127,6 +127,68 @@ export function gzipMember(
 /** A gzip member that holds nothing: the 10-byte header, an empty deflate stream, CRC-32 0 and length 0. */
 export const EMPTY_MEMBER = gzipMember(Buffer.alloc(0));
 
+interface ZipMember {
+  name: string | Buffer;
+  /** The uncompressed size; `compressedSize` is the same unless given. */
+  size?: number;
+  compressedSize?: number;
+  /** 0 stored (the default), 8 deflate. */
+  method?: number;
+  /** General purpose bit flag: 0x800 says the name is UTF-8, 0x40 is strong encryption. */
+  flags?: number;
+  extra?: Buffer;
+  comment?: Buffer;
+  /** External file attributes; 0x10 is the MS-DOS directory bit. */
+  attributes?: number;
+}
+
+/** One central directory record (APPNOTE 4.3.12): 46 fixed bytes, then name, extra field, comment. */
+export function zipCentral(member: ZipMember): Buffer {
+  const name = Buffer.from(member.name);
+  const extra = member.extra ?? Buffer.alloc(0);
+  const comment = member.comment ?? Buffer.alloc(0);
+  const fixed = Buffer.alloc(46);
+  fixed.writeUInt32LE(0x02014b50, 0);
+  fixed.writeUInt16LE(20, 4);
+  fixed.writeUInt16LE(20, 6);
+  fixed.writeUInt16LE(member.flags ?? 0, 8);
+  fixed.writeUInt16LE(member.method ?? 0, 10);
+  fixed.writeUInt32LE(member.compressedSize ?? member.size ?? 0, 20);
+  fixed.writeUInt32LE(member.size ?? 0, 24);
+  fixed.writeUInt16LE(name.length, 28);
+  fixed.writeUInt16LE(extra.length, 30);
+  fixed.writeUInt16LE(comment.length, 32);
+  fixed.writeUInt32LE(member.attributes ?? 0, 38);
+  return Buffer.concat([fixed, name, extra, comment]);
+}
+
+/**
+ * `prefix`, the central directory, then the 22-byte end record (APPNOTE 4.3.16) and `tail`. No
+ * local file header and no member data is written: listing reads neither. The end record declares
+ * `records.length` entries and the directory at `prefix.length` unless `count` / `offset` say otherwise.
+ */
+export function zipArchive(
+  records: Buffer[],
+  layout: { prefix?: Buffer; count?: number; offset?: number; tail?: Buffer } = {},
+): Buffer {
+  const prefix = layout.prefix ?? Buffer.alloc(0);
+  const directory = Buffer.concat(records);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(layout.count ?? records.length, 8);
+  end.writeUInt16LE(layout.count ?? records.length, 10);
+  end.writeUInt32LE(directory.length, 12);
+  end.writeUInt32LE(layout.offset ?? prefix.length, 16);
+  return Buffer.concat([prefix, directory, end, layout.tail ?? Buffer.alloc(0)]);
+}
+
+/** The central directory of `a.txt` (5 bytes, deflated to 7), `dir/` and `dir/b.md` (7 bytes); no attribute marks `dir/`. */
+export const ZIP_THREE_RECORDS = [
+  zipCentral({ name: "a.txt", size: 5, compressedSize: 7, method: 8 }),
+  zipCentral({ name: "dir/" }),
+  zipCentral({ name: "dir/b.md", size: 7 }),
+];
+
 const handles: FileHandle[] = [];
 
 afterEach(async () => {
@@ -137,6 +199,7 @@ afterEach(async () => {
 /**
  * Writes the archive into `dir` and opens it. `readAt` returns a short Buffer at the end of the
  * file; `maxLength()` is the largest `length` any call asked for and `positions` every `position`.
+ * `size` is the byte length of the archive, what a zip listing has to be told.
  */
 export async function archiveOnDisk(
   name: string,
@@ -144,6 +207,7 @@ export async function archiveOnDisk(
   dir: string = tempDir(),
 ): Promise<{
   dir: string;
+  size: number;
   readAt: (position: number, length: number) => Promise<Buffer>;
   maxLength: () => number;
   positions: number[];
@@ -155,6 +219,7 @@ export async function archiveOnDisk(
   const positions: number[] = [];
   return {
     dir,
+    size: bytes.length,
     async readAt(position, length) {
       maxLength = Math.max(maxLength, length);
       positions.push(position);
@@ -167,7 +232,7 @@ export async function archiveOnDisk(
   };
 }
 
-export const DEFAULTS = { maxEntries: 1000, now: () => 0 };
+export const DEFAULTS = { maxEntries: 1000, now: () => 0, size: 0 };
 export const UNSUPPORTED = { name: "HttpError", code: "preview_unsupported" };
 /** The name GNU tar gives the header of an `L` / `K` record. */
 export const LONG_LINK = "././@LongLink";
@@ -184,14 +249,23 @@ export function emptyMembers(count: number): Buffer[] {
   return Array.from({ length: count }, (_, index) => tarFile(`m${index}`));
 }
 
-/** Writes the archive to disk and lists it in the format its name gives. */
-export async function list(name: string, bytes: Buffer, options = DEFAULTS) {
+/** Writes the archive to disk and lists it in the format its name gives; `size` is always the real one. */
+export async function list(
+  name: string,
+  bytes: Buffer,
+  options: { maxEntries: number; now: () => number } = DEFAULTS,
+) {
   const file = await archiveOnDisk(name, bytes);
   const format = archiveFormat(name);
   if (format === null) {
     throw new Error(`not an archive name: ${name}`);
   }
-  return { file, listing: await listArchive(format, name, file.readAt, options) };
+  const listing = await listArchive(format, name, file.readAt, {
+    maxEntries: options.maxEntries,
+    now: options.now,
+    size: file.size,
+  });
+  return { file, listing };
 }
 
 /** A clock that moves `step` milliseconds forward every time it is read. */

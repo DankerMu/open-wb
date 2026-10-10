@@ -69,6 +69,10 @@
   - 用途：助手正文 Markdown 的 GFM 扩展（表格、删除线、任务列表、自动链接）,由拷入的 `markdown-text` 使用,构建时打包进 `web/dist`。
   - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;随打包产物分发时须附带该 MIT 声明。
 
+- **yauzl** —— `MIT License`,版权归 Josh Wolfe（https://github.com/thejoshwolfe/yauzl）
+  - 用途：`server/` 压缩包列表读取 zip 的中央目录（`server/src/workspaces/archive.ts`,s1f-files-page 任务 10.2）,只列成员名与大小,不解压任何成员;运行时依赖,随 server 安装。其唯一的间接依赖 `pend`（MIT,版权归 Andrew Kelley）随之安装;类型声明 `@types/yauzl`（MIT）只在开发期使用。
+  - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;两个包各自带 `LICENSE`,**若 server 的 `node_modules` 进入本项目发行物**,发行物须附带这两份 MIT 声明。
+
 ## 4. 本仓库自有内容
 
 - `app-reference/analysis/*.md` —— 结构分析文档（仓库作者）

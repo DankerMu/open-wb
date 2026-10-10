@@ -1,20 +1,28 @@
 /**
- * workspaces/archive — the member list of a tar / tar.gz, and the single item of a bare .gz
- * (s1f-files-page design D7, workspaces「压缩包列表」). The zip half and the route come later.
+ * workspaces/archive — the member list of a zip / tar / tar.gz, and the single item of a bare .gz
+ * (s1f-files-page design D7, workspaces「压缩包列表」). The route comes later.
  *
  * The bytes are a user's file and every field in them is attacker-controlled. What this module
  * holds on to, whatever the archive declares:
- * - it reads through the caller's `readAt` only and imports no fs / os / path module: nothing is
- *   unpacked, nothing is written, and a member name is never anything but a string;
+ * - it reads through the caller's `readAt` only and itself imports no fs / os / path module:
+ *   nothing is unpacked, nothing is written, and a member name is never anything but a string.
+ *   The zip parser, yauzl, does `require("fs")` when it is loaded; it is given a
+ *   `RandomAccessReader` over `readAt` and none of its entry points that open, stat or read a
+ *   file (`open`, `fromFd`, `openReadStream`) is called;
  * - one `readAt` call asks for at most 65536 bytes: a 512-byte header, an extension record whose
- *   declared size was checked before the read, or one chunk of compressed input;
+ *   declared size was checked before the read, one chunk of compressed input, or one piece of
+ *   what yauzl asked for (see `ZipReader`);
  * - a GNU `L` or pax `x` record declaring more than 65536 bytes is not read, a name longer than
- *   4096 bytes is not listed; either one ends the walk as corruption does;
- * - the walk stops at `maxEntries` and 5000 ms after it began; the clock is read before every
- *   header and, in a tar.gz, before every 1024 compressed bytes handed to the inflater and before
- *   every gzip stream that is begun.
+ *   4096 bytes is not listed; either one ends the walk as corruption does. A zip name comes with
+ *   its central directory record, whose three length fields are two bytes each, and is judged
+ *   once that record is in;
+ * - the walk stops at `maxEntries`; a tar / tar.gz also stops 5000 ms after it began: the clock is
+ *   read before every header and, in a tar.gz, before every 1024 compressed bytes handed to the
+ *   inflater and before every gzip stream that is begun. A zip has no time limit and does not
+ *   read the clock: only the central directory is read, a bounded number of bounded reads per
+ *   entry listed, and nothing is inflated.
  * Corruption (a short or missing header, a bad checksum, a non-octal size, a bad pax record, a
- * gzip stream that is not one or breaks off) with nothing listed yet is `preview_unsupported`;
+ * gzip stream that is not one or breaks off, anything yauzl refuses in a zip) with nothing listed yet is `preview_unsupported`;
  * after the first entry it ends the walk with `truncated`. Running out of time is never
  * `preview_unsupported`: it returns what was listed, possibly nothing, with `truncated`. A failure
  * of `readAt` itself is rethrown as it is.
@@ -22,11 +30,15 @@
  * inflated data is read as one tar, as `tar xzf` reads it. Where a complete stream is not followed
  * by a valid gzip header — padding, junk, a header cut short — the data ends there: what follows is
  * not read as archive data and is not corruption.
+ * A zip is told differently: bytes after its end record, or before a central directory whose
+ * offset does not count them (a self-extracting archive), are corruption. Its end record is
+ * taken at its word for the number of entries: fewer than the directory holds lists that many.
  */
 import { crc32, createInflateRaw, type InflateRaw } from "node:zlib";
+import { fromRandomAccessReaderPromise, RandomAccessReader, type ZipFile } from "yauzl";
 import { HttpError } from "../core/errors/index.js";
 
-type ArchiveFormat = "tar" | "tar.gz" | "gz";
+type ArchiveFormat = "zip" | "tar" | "tar.gz" | "gz";
 type ReadAt = (position: number, length: number) => Promise<Buffer>;
 type Expired = () => boolean;
 
@@ -34,7 +46,7 @@ interface ArchiveEntry {
   /** The member name as the archive gives it: no normalisation, `..` and a leading `/` included. */
   path: string;
   type: "file" | "dir";
-  /** The size in the member's header; null where the format does not say (a bare .gz). */
+  /** The size in the member's header (a zip: the uncompressed size); null where the format does not say (a bare .gz). */
   size: number | null;
 }
 
@@ -102,6 +114,9 @@ class CorruptArchive extends Error {}
 /** By the lowercased file name; `.tar.gz` and `.tgz` are checked before `.gz`. */
 export function archiveFormat(name: string): ArchiveFormat | null {
   const lower = name.toLowerCase();
+  if (lower.endsWith(".zip")) {
+    return "zip";
+  }
   if (lower.endsWith(".tar.gz") || lower.endsWith(".tgz")) {
     return "tar.gz";
   }
@@ -113,17 +128,21 @@ export function archiveFormat(name: string): ArchiveFormat | null {
 
 /**
  * `readAt(position, length)` returns up to `length` bytes of the archive, fewer only at its end.
- * `gz` reads nothing: its one item is `name` without the trailing `.gz`.
+ * `gz` reads nothing: its one item is `name` without the trailing `.gz`. `size` is the byte length
+ * of the archive; only `zip`, which is read from its end, uses it.
  */
 export async function listArchive(
   format: ArchiveFormat,
   name: string,
   readAt: ReadAt,
-  options: { maxEntries: number; now: () => number },
+  options: { maxEntries: number; now: () => number; size: number },
 ): Promise<{ format: ArchiveFormat } & Walked> {
   if (format === "gz") {
     const entries: ArchiveEntry[] = [{ path: name.slice(0, -3), type: "file", size: null }];
     return { format, entries, truncated: false };
+  }
+  if (format === "zip") {
+    return { format, ...(await walkZip(readAt, options.size, options.maxEntries)) };
   }
   const expired = deadline(options.now);
   if (format === "tar") {
@@ -321,6 +340,120 @@ function paxRecord(data: Buffer, offset: number): { key: string; value: Buffer; 
     value: data.subarray(equals + 1, end - 1),
     end,
   };
+}
+
+/**
+ * What yauzl reads a zip through. yauzl asks for up to 65577 bytes at once (the search for the end
+ * record) and up to 196605 (name, extra field and comment of one record): each request is served
+ * in pieces of at most 65536 bytes, so that bound on one `readAt` call holds for a zip as well.
+ * What yauzl itself holds is those two buffers, one at a time.
+ *
+ * A request that does not lie within the `size` bytes of the archive is refused before `readAt`
+ * is called: an offset in a zip64 record can be anything up to 2^64.
+ *
+ * yauzl takes the bytes for read unless `callback` is given an error (its own EOF check reads a
+ * second argument that is never passed here), and its buffer is `Buffer.allocUnsafe`: a piece
+ * that comes back short — the file shrank — therefore has to end in an error, or what the buffer
+ * held before would be listed as a member name.
+ */
+class ZipReader extends RandomAccessReader {
+  /** What `readAt` threw or rejected with, kept so that the walk rethrows it as it is. */
+  failure: { error: unknown } | null = null;
+
+  constructor(
+    private readonly readAt: ReadAt,
+    private readonly size: number,
+  ) {
+    super();
+  }
+
+  override read(
+    buffer: Buffer,
+    offset: number,
+    length: number,
+    position: number,
+    callback: (error: Error | null) => void,
+  ): void {
+    this.fill(buffer, offset, length, position).then(
+      () => callback(null),
+      () => callback(new CorruptArchive()),
+    );
+  }
+
+  private async fill(buffer: Buffer, offset: number, length: number, position: number) {
+    if (position + length > this.size) {
+      throw new CorruptArchive();
+    }
+    for (let done = 0; done < length; done += MAX_EXTENSION_BYTES) {
+      const wanted = Math.min(length - done, MAX_EXTENSION_BYTES);
+      const piece = await this.piece(position + done, wanted);
+      if (piece.length < wanted) {
+        throw new CorruptArchive();
+      }
+      piece.copy(buffer, offset + done, 0, wanted);
+    }
+  }
+
+  private async piece(position: number, length: number): Promise<Buffer> {
+    try {
+      return await this.readAt(position, length);
+    } catch (error) {
+      this.failure ??= { error };
+      throw error;
+    }
+  }
+}
+
+/**
+ * The central directory of a zip, one record per step; no local header and no member data is read.
+ * A name is the record's raw bytes as UTF-8, whatever the language-encoding flag and the Unicode
+ * path extra field say, and a member is a directory when that name ends with `/` and only then.
+ * Whatever yauzl refuses — no end record, bytes after it, a record that is not one, strong
+ * encryption, an extra field that overruns — is corruption; a failure of `readAt` is not.
+ */
+async function walkZip(readAt: ReadAt, size: number, maxEntries: number): Promise<Walked> {
+  const reader = new ZipReader(readAt, size);
+  const entries: ArchiveEntry[] = [];
+  let zipfile: ZipFile | undefined;
+  try {
+    // `decodeStrings` off: yauzl neither decodes a name nor refuses `..`, a leading `/` or a `\`.
+    // `validateEntrySizes` off: a stored member whose two sizes differ is listed like any other.
+    zipfile = await fromRandomAccessReaderPromise(reader, size, {
+      decodeStrings: false,
+      validateEntrySizes: false,
+    });
+    // yauzl reports through the iterator below; this keeps an 'error' it emits once the iterator
+    // has let go from being an uncaught event.
+    zipfile.on("error", () => {});
+    for await (const entry of zipfile.eachEntry()) {
+      if (entry.fileNameRaw.length > MAX_NAME_BYTES) {
+        throw new CorruptArchive();
+      }
+      const path = entry.fileNameRaw.toString("utf8");
+      entries.push({
+        path,
+        type: path.endsWith("/") ? "dir" : "file",
+        size: entry.uncompressedSize,
+      });
+      // Judged before the next record is asked for, and without trusting the declared count: an
+      // archive of exactly `maxEntries` members is `truncated` too, as a tar is.
+      if (entries.length >= maxEntries) {
+        return { entries, truncated: true };
+      }
+    }
+    return { entries, truncated: false };
+  } catch {
+    if (reader.failure !== null) {
+      throw reader.failure.error;
+    }
+    if (entries.length === 0) {
+      throw new HttpError("preview_unsupported");
+    }
+    return { entries, truncated: true };
+  } finally {
+    // Every way out releases yauzl's hold on the reader; nothing is in flight by then.
+    zipfile?.close();
+  }
 }
 
 /** An uncompressed tar: stepping over a body moves the position and reads nothing. */
