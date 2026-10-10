@@ -37,6 +37,7 @@ import {
 import { classifyRequestPath } from "./http/path-classifier.js";
 import { type ApprovalMode, type ModelCatalog, resolveModelCatalog } from "./model-catalog.js";
 import { registerModelProxy } from "./model-proxy/index.js";
+import { DEFAULT_TRASH_RETENTION_DAYS } from "./preview-config.js";
 import { SERVICE_INFO } from "./service-info.js";
 import type { ChatEvent } from "./sessions/events.js";
 import { registerSessions } from "./sessions/index.js";
@@ -55,6 +56,7 @@ import type { WorkspacePreviewDependencies } from "./workspaces/rest-preview-tok
 import { removeSnapshot, removeWorkspaceSnapshots, take } from "./workspaces/snapshots.js";
 import { restore } from "./workspaces/snapshots-restore.js";
 import { createWorkspaceStore } from "./workspaces/store.js";
+import { createTrash } from "./workspaces/trash.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -84,6 +86,11 @@ export interface AssemblyDependencies {
    * a snapshot open or make it fail). Omitted in production.
    */
   snapshots?: TurnSnapshotService;
+  /**
+   * Replaces the recycle directory service createApp would build on `runtime.sandboxRoot` (tests
+   * that make the rename fail). Omitted in production.
+   */
+  trash?: ReturnType<typeof createTrash>;
   /** 模型白名单；省略时只有 `runtime.modelId` 一个模型。 */
   modelCatalog?: ModelCatalog;
   /** 审批档位的最高档；省略时不封顶（`yolo`）。 */
@@ -240,6 +247,13 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
       audit,
       listEvents: registered.listEvents,
       uploadMaxBytes: upload.maxBytes,
+      // Building it touches no file system; nothing schedules its sweep here.
+      trash:
+        assembly?.trash ??
+        createTrash({
+          sandboxRoot: runtime.sandboxRoot,
+          retentionDays: DEFAULT_TRASH_RETENTION_DAYS,
+        }),
       ...(assembly?.previewLimits === undefined ? {} : { limits: assembly.previewLimits }),
     },
     assembly?.preview,

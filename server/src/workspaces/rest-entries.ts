@@ -1,5 +1,6 @@
 /**
- * workspaces/rest-entries — routes on one entry of a workspace beyond the preview: download.
+ * workspaces/rest-entries — routes on one entry of a workspace beyond the preview: download and
+ * delete.
  *
  * The same order as every scoped workspace route: principal, owned root (404 for another
  * owner's and for an unknown id alike), then the query, then the sandbox.
@@ -88,6 +89,34 @@ export function registerWorkspaceEntries(
       // Any size and no Range. Bounded by the size just read: a file that grows meanwhile
       // sends no byte beyond the declared length.
       return reply.send(openPreviewStream(absPath, status.size));
+    },
+  );
+  // No body semantics and not an owned-parser route: a well-formed body is ignored.
+  app.delete<{ Params: { id: string } }>(
+    "/api/workspaces/:id/entries",
+    { onRequest: noStoreWorkspaceResponse },
+    async (request, reply) => {
+      const principal = currentPrincipal(request);
+      const workspaceId = request.params.id;
+      ensureOwnedRoot(dependencies, principal, workspaceId);
+      const path = parsePathQuery(request.query, true);
+      // `delete` refuses the empty path too: the workspace root itself is not an entry.
+      const absPath = dependencies.sandbox.resolve(principal, workspaceId, path, "delete");
+      const status = lstatExisting(absPath);
+      if (status === undefined || !(status.isFile() || status.isDirectory())) {
+        throw new HttpError("not_found");
+      }
+      // One rename into the recycle directory; it throws with the entry still in place.
+      const trashId = dependencies.trash.moveToTrash(principal.id, workspaceId, absPath);
+      // After the rename and not rolled back: if this throws, the entry is in batch `trashId`.
+      dependencies.audit.emit({
+        kind: "file.delete",
+        actorId: principal.id,
+        workspaceId,
+        title: `删除 ${path}`,
+        detail: { path, type: status.isFile() ? "file" : "dir", trashId },
+      });
+      return reply.code(204).send();
     },
   );
 }

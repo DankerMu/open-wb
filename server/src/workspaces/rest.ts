@@ -24,6 +24,7 @@ import {
 } from "./preview.js";
 import { sendFileRange } from "./range-send.js";
 import type { WorkspaceStore } from "./store.js";
+import type { createTrash } from "./trash.js";
 import { listOneLevel } from "./tree.js";
 import { storeUpload } from "./upload.js";
 
@@ -37,6 +38,8 @@ export interface WorkspaceRestDependencies {
   uploadMaxBytes: number;
   /** Preview limits (text, image, notebook); omitted means the specification defaults. */
   limits?: PreviewLimits;
+  /** The recycle directory service of the assembly: where a deleted entry is moved. */
+  trash: ReturnType<typeof createTrash>;
 }
 
 type OwnedPreParsing = preParsingHookHandler<

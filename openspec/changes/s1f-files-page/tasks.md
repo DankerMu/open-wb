@@ -249,16 +249,17 @@ Minimal mergeable slice: 7.1（纯函数与其测试）先合；7.2–7.4（发�
 
 ## 8. file-operations — 删除、回收目录与清理
 
-- [ ] 8.1 新文件 `server/src/workspaces/trash.ts`：`createTrash({sandboxRoot, retentionDays, rename?})` 提供 `moveToTrash(ownerId, workspaceId, absPath) → trashId`（四级目录逐级 `ensureOwnedDir(…, 0o700)`——符号链接、非目录、他人持有都拒绝——、一次 `rename`、失败时删掉空批次并抛出）与 `sweep(now)`（file-operations「回收目录的保留与清理」）。
+- [x] 8.1 新文件 `server/src/workspaces/trash.ts`：`createTrash({sandboxRoot, retentionDays, rename?})` 提供 `moveToTrash(ownerId, workspaceId, absPath) → trashId`（四级目录逐级 `ensureOwnedDir(…, 0o700)`——符号链接、非目录、他人持有都拒绝——、一次 `rename`、失败时删掉空批次并抛出）与 `sweep(now)`（file-operations「回收目录的保留与清理」）。
   断言账号 id 不以 `.` 开头（design D22）：以种子账号与 `store` 的 owner 段校验为证，写成一条测试——它只读账号与目录校验、不执行 `rename`，归 `sweep` 半边，写在 `workspaces-trash-sweep.test.ts` 里（不等 1.2）。
   本任务按是否执行 `rename` 分两半交付：`sweep` 半边（`createTrash` 的构造与目录校验、`sweep`）不 `rename` 用户条目，不等 1.2，是 13.1 的前提；`moveToTrash` 半边 Depends on 1.2，是 8.2 的前提。
   实施注记见 `implementation-notes.md`「8.1 的 sweep 半边，含分摊的 8.3 / 8.4 条款（#1059）」。
-- [ ] 8.2 新文件 `server/src/workspaces/rest-entries.ts`：`DELETE /api/workspaces/:id/entries`，检查次序、审计 `file.delete`（`detail` 三键）与失败语义按 file-operations「删除到回收目录」；由 `registerWorkspaces` 注册，`trash` 经依赖对象传入。
-- [ ] 8.3 测试（新文件 `server/test/workspaces-delete.test.ts`）：「删除文件与目录」「同名先后删除互不覆盖」「拒绝项」「改名失败不丢文件」（注入抛 `EXDEV` 的 `rename`）「回收目录被预先占位」「回收目录不可见」；审计失败时 500 且条目已在回收目录。这个测试文件与 8.2 的路由、8.1 的 `moveToTrash` 半边 Depends on 1.2：其结论与设计相符才开工。
+  实施注记见 `implementation-notes.md`「8.1 的 moveToTrash 半边、8.2、8.3、8.4（#1060）」。
+- [x] 8.2 新文件 `server/src/workspaces/rest-entries.ts`：`DELETE /api/workspaces/:id/entries`，检查次序、审计 `file.delete`（`detail` 三键）与失败语义按 file-operations「删除到回收目录」；由 `registerWorkspaces` 注册，`trash` 经依赖对象传入。
+- [x] 8.3 测试（新文件 `server/test/workspaces-delete.test.ts`）：「删除文件与目录」「同名先后删除互不覆盖」「拒绝项」「改名失败不丢文件」（注入抛 `EXDEV` 的 `rename`）「回收目录被预先占位」「回收目录不可见」；审计失败时 500 且条目已在回收目录。这个测试文件与 8.2 的路由、8.1 的 `moveToTrash` 半边 Depends on 1.2：其结论与设计相符才开工。
   `server/test/workspaces-trash-sweep.test.ts`（随 8.1 的 `sweep` 半边，不等 1.2）：「到期的批次被清除」「临时空间删除后批次保留到期满」（空间行与 `tmp-<id>` 目录都不存在时，批次在保留期内不动、期满被清；清理不查 `workspaces` 表）「保留期可配置」「清理出错不外溢」，以及 8.1 的「账号 id 不以点开头」。
   这个文件里的批次一律**由夹具直接在回收目录下建出**（按 file-operations 规定的四级目录、mode 与批次名，修改时间由夹具设定），不经 `DELETE …/entries` 路由——场景「临时空间删除后批次保留到期满」的 WHEN 里「先经 `DELETE …/entries` 删除」在这里以夹具等价替代；
   「经路由删除产生的批次落在同一位置、同一形状」由 `workspaces-delete.test.ts` 的「删除文件与目录」证明，两个文件合起来覆盖该场景。
-- [ ] 8.4 变异证据：批次目录建成 `0755` → mode 断言判红；用递归 `mkdir` 代替逐级校验 → 「预先占位」的符号链接用例里文件被移走而判红；`rename` 失败后不删空批次 → 「没有残留」断言判红；清理跟随符号链接 → 「链接目标内容不变」判红；删除先于归属检查 → 他账号 404 用例里出现文件变化而判红。
+- [x] 8.4 变异证据：批次目录建成 `0755` → mode 断言判红；用递归 `mkdir` 代替逐级校验 → 「预先占位」的符号链接用例里文件被移走而判红；`rename` 失败后不删空批次 → 「没有残留」断言判红；清理跟随符号链接 → 「链接目标内容不变」判红；删除先于归属检查 → 他账号 404 用例里出现文件变化而判红。
 
 Suggested fixture level: expanded - 删除行为、路径安全、审计与文件系统补偿都在这一组
 Minimal mergeable slice: 8.1 的 `sweep` 半边与 `workspaces-trash-sweep.test.ts` 先合（不等 1.2；没有调用方时无运行期影响，13.1 只依赖这一半）；8.1 的 `moveToTrash` 半边 + 8.2 的路由 + `workspaces-delete.test.ts` 等 1.2 的结论后同刀（Depends on 4.1）。定时启动在 13.1 接线

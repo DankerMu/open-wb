@@ -16,30 +16,22 @@ import {
 // Its `afterEach` restores the spies and removes the temporary directories of this file too.
 import { spyBodyIo } from "./workspace-file-helpers.js";
 import {
+  auditRows,
   expectWorkspaceResponse,
   insertWorkspace,
+  SANDBOX_DENIED_ENVELOPE,
+  seedWorkspace,
+  FILES_WORKSPACE as WORKSPACE,
   withWorkspacesApp,
 } from "./workspaces-http-helpers.js";
 
-const WORKSPACE = "a".repeat(32);
 const MISSING_WORKSPACE = "b".repeat(32);
 const ROOTLESS_WORKSPACE = "c".repeat(32);
 const DOWNLOAD_ROUTE = "/api/workspaces/:id/download";
-const SANDBOX_DENIED_ENVELOPE = {
-  error: { code: "sandbox_denied", message: "目标路径不在你的沙箱内，操作已拒绝" },
-};
 const CHINESE_NAME = '季度 报告"v2".pdf';
 const BIG_SIZE = 30 * 1024 * 1024;
 
 type Fixture = { app: FastifyInstance; db: DatabaseSync; sandboxRoot: string };
-
-/** zhangsan's workspace `files` with its root directory; returns the root. */
-function seedWorkspace({ db, sandboxRoot }: Fixture): string {
-  const root = join(sandboxRoot, "u1", "files");
-  mkdirSync(root, { recursive: true });
-  insertWorkspace(db, WORKSPACE, "u1", "files", "files", 1);
-  return root;
-}
 
 function downloadUrl(id: string, path: string): string {
   return `/api/workspaces/${id}/download?path=${encodeURIComponent(path)}`;
@@ -53,15 +45,6 @@ function download(
   id = WORKSPACE,
 ) {
   return app.inject({ method: "GET", url: downloadUrl(id, path), headers: { cookie, ...headers } });
-}
-
-function auditRows(db: DatabaseSync, kind: string) {
-  return db
-    .prepare(
-      "SELECT actor_id, workspace_id, title, detail FROM audit_events WHERE kind = ? ORDER BY id",
-    )
-    .all(kind)
-    .map((row) => ({ ...row, detail: JSON.parse(String(row.detail)) as Record<string, unknown> }));
 }
 
 function downloadAudit(path: string, size: number) {
