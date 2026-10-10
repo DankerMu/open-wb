@@ -381,7 +381,7 @@ Minimal mergeable slice: atomic - 一条路由、它的映射表与转换器在�
 - [ ] 16.1 新文件 `web/src/lib/api-files.ts`：两个地址函数 `fileUrl`、`downloadUrl` 与 `listArchive`；传输由 `api.ts` 注入、对 `api.ts` 只有类型导入；响应严格解析。`api.ts` 只加接线与类型再导出（不超过 800 行；必要时把既有工作空间方法一并挪进 `api-files.ts`）。
   实施注记见 `implementation-notes.md`「16.1 的地址函数部分，含分摊的 16.4 / 16.5 条款（#1079）」。
 - [ ] 16.2 `api-files.ts`：`moveEntry`、`deleteEntry`、`issuePreviewToken`（同样的注入与严格解析）。
-- [ ] 16.3 `fetchPreview` 的图片类型集合扩到六种，`audio/*`、`video/*`、`image/svg+xml`、`text/html` 仍按失败处理。
+- [x] 16.3 `fetchPreview` 的图片类型集合扩到六种，`audio/*`、`video/*`、`image/svg+xml`、`text/html` 仍按失败处理。
   实施注记见 `implementation-notes.md`「16.3（#1081）」。
 - [ ] 16.4 测试（`web/test/api-files.test.ts` 扩充）：files-web「API 客户端扩展」五个场景，随 16.1–16.3 各自的方法分批加入，对应如下——
   地址函数一刀（`fileUrl`、`downloadUrl`）：「地址函数与严格解析」里两个地址的编码与「没有发出请求」；「模块划分可持续验证」（`api-files.ts` 对 `./api.js` 只有 `import type`，size-guard 与 knip 通过——这一刀建文件时就成立，之后每一刀都重跑）。
