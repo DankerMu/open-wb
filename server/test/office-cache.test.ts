@@ -11,6 +11,7 @@ import {
   chmodSync,
   existsSync,
   lstatSync,
+  lutimesSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -161,6 +162,15 @@ describe("转换缓存：命中、失效与复制", () => {
         return [first, "1700000001000", "26"];
       },
     ],
+    [
+      // 1/64 秒 = 15.625 毫秒：微秒与纳秒粒度的文件系统上都精确，键里的小数原样写入、不取整。
+      "把修改时间改成带小数毫秒的值",
+      (_on, first) => {
+        utimesSync(first, INPUT_MTIME_S + 0.015625, INPUT_MTIME_S + 0.015625);
+        expect(lstatSync(first).mtimeMs).toBe(1_700_000_000_015.625);
+        return [first, "1700000000015.625", "26"];
+      },
+    ],
     ["同大小同修改时间的另一路径", (on) => [on.input("b.docx"), "1700000000000", "26"]],
   ])("%s：重新启动进程，结果是另一个键的文件", async (_case, change) => {
     const on = bench();
@@ -176,6 +186,24 @@ describe("转换缓存：命中、失效与复制", () => {
     expect(second).toBe(join(on.pdf, `${literalKey(path, mtimeMs, size)}.pdf`));
     expect(second).not.toBe(first);
     expect(readdirSync(on.pdf).sort()).toEqual([basename(first), basename(second)].sort());
+  });
+
+  it("输入是指向另一个文件的符号链接：键取自链接自己的 lstat，不是目标的大小与修改时间", async () => {
+    const on = bench();
+    const target = on.input("a.docx");
+    const link = join(on.root, "ws", "link.docx");
+    // 相对目标 `a.docx`：链接自己的 size 是 6；修改时间用不跟随链接的 lutimes 钉住。
+    symlinkSync("a.docx", link);
+    lutimesSync(link, INPUT_MTIME_S + 1, INPUT_MTIME_S + 1);
+    expect(lstatSync(target).mtimeMs).toBe(1_700_000_000_000);
+    expect(lstatSync(target).size).toBe(26);
+    const key = literalKey(link, "1700000001000", "6");
+
+    expect(await officeCacheKey(link)).toBe(key);
+    expect(await cacheOn(on).convert(link)).toBe(join(on.pdf, `${key}.pdf`));
+
+    expect(on.launches).toHaveLength(1);
+    expect(readdirSync(on.pdf)).toEqual([`${key}.pdf`]);
   });
 
   it("键的位置上是 0 字节文件：不算命中，重新转换", async () => {
@@ -359,22 +387,27 @@ describe("转换缓存：周期清理", () => {
   /** 整秒，`utimes` 设得准；界上的那个文件的修改时间恰等于 `NOW − 7 天`。 */
   const NOW = 1_800_000_000_000;
 
-  function aged(path: string, ageMs: number): void {
-    utimesSync(path, (NOW - ageMs) / 1000, (NOW - ageMs) / 1000);
+  /** 访问时间缺省与修改时间相同；另给时是为了让「按访问时间判」的实现判反。 */
+  function aged(path: string, ageMs: number, atimeAgeMs = ageMs): void {
+    utimesSync(path, (NOW - atimeAgeMs) / 1000, (NOW - ageMs) / 1000);
   }
 
   it("删掉修改时间早于 7 天的普通文件：8 天前与 7 天又 1 秒前的删，恰 7 天与 6 天又 1 秒前的留", async () => {
     const on = bench();
-    const ages: Array<[string, number]> = [
+    // 第三列是访问时间：界两侧的两个文件各放在界的另一侧。没有后缀的旧文件同样是普通文件。
+    const ages: Array<[string, number, number?]> = [
       ["eight-days.pdf", 8 * DAY_MS],
-      ["just-over.pdf", 7 * DAY_MS + 1_000],
-      ["on-the-limit.pdf", 7 * DAY_MS],
+      ["eight-days-no-suffix", 8 * DAY_MS],
+      ["just-over.pdf", 7 * DAY_MS + 1_000, DAY_MS],
+      ["on-the-limit.pdf", 7 * DAY_MS, 8 * DAY_MS],
       ["six-days.pdf", 6 * DAY_MS + 1_000],
     ];
-    for (const [name, age] of ages) {
+    for (const [name, age, atimeAge] of ages) {
       writeFileSync(join(on.pdf, name), PDF);
-      aged(join(on.pdf, name), age);
+      aged(join(on.pdf, name), age, atimeAge);
     }
+    expect(lstatSync(join(on.pdf, "just-over.pdf")).atimeMs).toBe(NOW - DAY_MS);
+    expect(lstatSync(join(on.pdf, "on-the-limit.pdf")).atimeMs).toBe(NOW - 8 * DAY_MS);
 
     await expect(createOfficeCleanup({ cacheDir: on.cacheDir }).sweepPdf(NOW)).resolves.toBe(
       undefined,

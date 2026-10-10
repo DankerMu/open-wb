@@ -260,21 +260,28 @@ describe("转换缓存：启动时清空 work", () => {
     expect(readFileSync(join(outside, "keep"), "utf8")).toBe("not ours");
   });
 
-  it.skipIf(isRoot)("一个 0500 的非空目录删不掉：不抛，同级其余条目照删", async () => {
+  it.skipIf(isRoot)("两个 0500 的非空目录删不掉：不抛，同级其余条目照删", async () => {
     const on = bench();
-    // 排在最前、中间、最后各放一个可删的条目：遇到删不掉的那项就停的实现会留下后面的。
-    for (const name of ["a-first", "z-last"]) {
-      leftover(on, name);
+    for (const name of ["a-first", "g-second", "m-third", "s-fourth", "z-last"]) {
+      mkdirSync(join(on.work, name));
+      writeFileSync(join(on.work, name, "keep"), "x");
     }
-    mkdirSync(join(on.work, "m-locked"));
-    writeFileSync(join(on.work, "m-locked", "keep"), "x");
-    chmodSync(join(on.work, "m-locked"), 0o500);
+    // 列目录的次序由文件系统定、与名字无关：按实际次序锁第 2、第 4 项，可删的条目因此在它们的
+    // 前面、中间、后面都有——遇到删不掉的那项就停的实现无论按什么次序都会留下后面的。
+    const order = readdirSync(on.work);
+    expect(order).toHaveLength(5);
+    const locked = [String(order[1]), String(order[3])];
+    for (const name of locked) {
+      chmodSync(join(on.work, name), 0o500);
+    }
     const cleared = cleanupOn(on, {});
 
     await expect(cleared.clearWork()).resolves.toBe(undefined);
 
-    expect(readdirSync(on.work)).toEqual(["m-locked"]);
-    expect(readdirSync(join(on.work, "m-locked"))).toEqual(["keep"]);
+    expect(readdirSync(on.work).sort()).toEqual([...locked].sort());
+    for (const name of locked) {
+      expect(readdirSync(join(on.work, name))).toEqual(["keep"]);
+    }
     expect(cleared.logs).toEqual([]);
   });
 });
