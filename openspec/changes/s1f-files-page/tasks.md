@@ -351,6 +351,7 @@ Minimal mergeable slice: atomic - 两个监听器与回收目录定时器在入�
   - 该命令失败（检查不过、spawn 失败、非 0 退出、被信号终止）：application stderr 恰一行 `{"event":"preview_work_clear_failed"}`（没有其它键），不抛出，本进程自己的删除照常进行。
   - spawn 经可注入的函数（与 14.1 同一个 seam），测试用记录型假 `sudo`（14.5）；变异证据在 14.6。
   - CI：`uid-isolation` job 不设 `OFFICE_BIN`，这条命令在那里不执行，`.github/scripts/ci-uid-isolation.sh` 不需要改。
+  实施注记见 `implementation-notes.md`「14.3，含分摊的 14.5 / 14.6 条款（#1072）」。
 - [x] 14.4 测试夹具 `server/test/fixtures/fake-soffice.mjs`（可执行；按输入文件名里的标记：正常写出一个最小 PDF、退出码 1、不写输出、写空文件、写符号链接、睡眠、先起一个子进程再睡眠；把收到的 argv 与环境写到作业目录旁的记录文件）。
 - [x] 14.7 `office.ts` 的输出复制设界（owner 裁决 2026-10-09；规格条文随本任务的代码 PR 落地，不在此前写）。Depends on：14.1。挡住：14.5、15.1。
   对输出按同一个 fd 的 `fstat` 所得 `size` 复制恰好这么多字节：`size` 大于 200 MiB → 不读，`failed`；读到的字节少于 `size` → `failed`（半截的副本不留在 `pdf/`）。上限是写死的常量，不加配置键。
