@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance } from "fastify";
 import { expect } from "vitest";
+import type { AssemblyDependencies } from "../src/app.js";
 import type { PreviewLimits } from "../src/workspaces/preview.js";
 import { type InjectResponse, NOT_FOUND_ENVELOPE, withApp } from "./auth-lifecycle-helpers.js";
 import { tempDir } from "./core-db-helpers.js";
@@ -19,12 +20,17 @@ interface WorkspaceHttpFixture {
 export async function withWorkspacesApp<T>(
   action: (fixture: WorkspaceHttpFixture) => Promise<T>,
   beforeRoutes?: (fixture: WorkspaceHttpFixture) => void,
-  options: { previewLimits?: PreviewLimits } = {},
+  options: {
+    previewLimits?: PreviewLimits;
+    /** Further assembly members (the preview dependency, sinks); `runtime` stays the one below. */
+    assembly?: Omit<AssemblyDependencies, "runtime">;
+  } = {},
 ): Promise<T> {
   const sandboxRoot = realpathSync(tempDir());
   return withApp(
     {
       assembly: {
+        ...options.assembly,
         runtime: {
           bin: join(sandboxRoot, "omp"),
           sandboxRoot,
