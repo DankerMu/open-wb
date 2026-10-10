@@ -250,6 +250,14 @@ describe("ATTRIBUTION.md", () => {
     expect(Object.keys(dependencies)).toContain("react-resizable-panels");
   });
 
+  it("登记 yauzl（MIT），且它在 server 的 dependencies 里", () => {
+    expect(hasEntry(readRepoFile("ATTRIBUTION.md"), "yauzl", /\bMIT\b/)).toBe(true);
+    const { dependencies } = JSON.parse(readRepoFile("server/package.json")) as {
+      dependencies: Record<string, string>;
+    };
+    expect(Object.keys(dependencies)).toContain("yauzl");
+  });
+
   it("登记判定自证：缺许可、名称只出现在正文、名称不全等都不算登记", () => {
     expect(hasEntry("- **radix-ui** —— `MIT License`,版权归 WorkOS", "radix-ui", /\bMIT\b/)).toBe(
       true,

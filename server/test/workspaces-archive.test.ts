@@ -18,6 +18,9 @@ import {
   tarHeader,
   tickingClock,
   UNSUPPORTED,
+  ZIP_THREE_RECORDS,
+  zipArchive,
+  zipCentral,
 } from "./workspaces-archive-helpers.js";
 
 // Literals on purpose: the limits and the expected listings come from the spec (workspaces
@@ -44,18 +47,21 @@ describe("压缩包列表：三种格式的列表", () => {
     ["Backup.TGZ", "tar.gz"],
     ["notes.txt.gz", "gz"],
     ["OLD.TAR", "tar"],
+    ["x.zip", "zip"],
+    ["X.ZIP", "zip"],
     ["readme.md", null],
     ["tar", null],
   ])("archiveFormat(%s) 按小写文件名判定为 %s", (name, format) => {
     expect(archiveFormat(name)).toBe(format);
   });
 
-  it("x.tar、x.tar.gz、x.tgz 列出同样的三项，包所在目录与临时目录没有新增文件", async () => {
+  it("x.zip、x.tar、x.tar.gz、x.tgz 列出同样的三项，包所在目录与临时目录没有新增文件", async () => {
     const dir = tempDir();
     const emptyTmp = tempDir();
     const tar = await archiveOnDisk("x.tar", THREE_MEMBERS, dir);
     const tarGz = await archiveOnDisk("x.tar.gz", gzipSync(THREE_MEMBERS), dir);
     const tgz = await archiveOnDisk("x.tgz", gzipSync(THREE_MEMBERS), dir);
+    const zip = await archiveOnDisk("x.zip", zipArchive(ZIP_THREE_RECORDS), dir);
     const before = readdirSync(dir);
     vi.stubEnv("TMPDIR", emptyTmp);
 
@@ -64,6 +70,12 @@ describe("压缩包列表：三种格式的列表", () => {
       entries: THREE_ENTRIES,
       truncated: false,
     });
+    expect(await listArchive("zip", "x.zip", zip.readAt, { ...DEFAULTS, size: zip.size })).toEqual({
+      format: "zip",
+      entries: THREE_ENTRIES,
+      truncated: false,
+    });
+    expect(zip.maxLength()).toBeLessThanOrEqual(EXTENSION_LIMIT);
     for (const [name, file] of [
       ["x.tar.gz", tarGz],
       ["x.tgz", tgz],
@@ -109,6 +121,25 @@ describe("压缩包列表：上限与长文件名", () => {
     expect(listing.entries[999]).toEqual({ path: "m999", type: "file", size: 0 });
     expect(listing.truncated).toBe(true);
     expect(file.maxLength()).toBeLessThanOrEqual(EXTENSION_LIMIT);
+  });
+
+  it("1500 个成员的 big.zip 恰 1000 项并置 truncated，第 1001 个目录项不读，单次读取不超过 65536 字节", async () => {
+    // Fixed-width names: every record is 46 + 5 bytes, so record N begins at 51 * N.
+    const records = Array.from({ length: 1500 }, (_, index) =>
+      zipCentral({ name: `m${String(index).padStart(4, "0")}`, size: index }),
+    );
+    const bytes = zipArchive(records);
+    expect(bytes).toHaveLength(1500 * 51 + 22);
+    expect(bytes.length).toBeGreaterThan(65_577);
+    const { file, listing } = await list("big.zip", bytes);
+    expect(listing.entries).toHaveLength(1000);
+    expect(listing.entries[0]).toEqual({ path: "m0000", type: "file", size: 0 });
+    expect(listing.entries[999]).toEqual({ path: "m0999", type: "file", size: 999 });
+    expect(listing.format).toBe("zip");
+    expect(listing.truncated).toBe(true);
+    expect(file.maxLength()).toBeLessThanOrEqual(EXTENSION_LIMIT);
+    expect(file.positions).toContain(51 * 999);
+    expect(file.positions).not.toContain(51 * 1000);
   });
 
   it("上限 3 时 5 个成员的 x.tar 恰 3 项并置 truncated，到上限后不再读下一个头", async () => {
@@ -247,6 +278,30 @@ describe("压缩包列表：声明超大的长文件名记录", () => {
     },
   );
 
+  it("long.zip：两个正常成员之后成员名 5000 字节的成员不计入 → 恰两项并置 truncated，其后的成员不列", async () => {
+    const { file, listing } = await list(
+      "long.zip",
+      zipArchive([
+        zipCentral({ name: "one.txt", size: 1 }),
+        zipCentral({ name: "two.txt", size: 2 }),
+        zipCentral({ name: "n".repeat(5000), size: 3 }),
+        zipCentral({ name: "after.txt", size: 4 }),
+      ]),
+    );
+    expect(listing).toEqual({
+      format: "zip",
+      entries: [
+        { path: "one.txt", type: "file", size: 1 },
+        { path: "two.txt", type: "file", size: 2 },
+      ],
+      truncated: true,
+    });
+    for (const entry of listing.entries) {
+      expect(Buffer.byteLength(entry.path)).toBeLessThanOrEqual(NAME_LIMIT);
+    }
+    expect(file.maxLength()).toBeLessThanOrEqual(EXTENSION_LIMIT);
+  });
+
   it("slow.tar：未压缩的 tar 在时钟越过 5 秒后返回已读到的三项并置 truncated", async () => {
     const members = Array.from({ length: 5 }, (_, index) => tarFile(`m${index}`, "12345"));
     const file = await archiveOnDisk("slow.tar", Buffer.concat([...members, TAR_END]));
@@ -259,6 +314,7 @@ describe("压缩包列表：声明超大的长文件名记录", () => {
     const listing = await listArchive("tar", "slow.tar", readAt, {
       maxEntries: 1000,
       now: () => clock,
+      size: 0,
     });
     expect(listing.entries.map((entry) => entry.path)).toEqual(["m0", "m1", "m2"]);
     expect(listing.truncated).toBe(true);
@@ -398,7 +454,17 @@ describe("压缩包列表：恶意成员名只是数据", () => {
     const bytes = Buffer.concat([...names.map((name) => tarFile(name, "x")), TAR_END]);
     const tar = await archiveOnDisk("names.tar", bytes);
     const tgz = await archiveOnDisk("names.tgz", gzipSync(bytes));
+    // A zip name may carry a backslash too: it is neither turned into `/` nor refused.
+    const zipNames = [...names, "..\\..\\win\\x.txt", "C:/drive/x"];
+    const zip = await archiveOnDisk(
+      "names.zip",
+      zipArchive(zipNames.map((name) => zipCentral({ name, size: 1 }))),
+    );
     const spies = spyBodyIo();
+    const zipListing = await listArchive("zip", "names.zip", zip.readAt, {
+      ...DEFAULTS,
+      size: zip.size,
+    });
 
     const listings = [
       await listArchive("tar", "names.tar", tar.readAt, DEFAULTS),
@@ -408,6 +474,8 @@ describe("压缩包列表：恶意成员名只是数据", () => {
     for (const spy of spies) {
       expect(spy).not.toHaveBeenCalled();
     }
+    expect(zipListing.entries.map((entry) => entry.path)).toEqual(zipNames);
+    expect(zipListing.truncated).toBe(false);
     for (const listing of listings) {
       expect(listing.entries.map((entry) => entry.path)).toEqual(names);
       expect(listing.truncated).toBe(false);
@@ -416,6 +484,13 @@ describe("压缩包列表：恶意成员名只是数据", () => {
 });
 
 describe("压缩包列表：损坏", () => {
+  it("fake.zip：内容不是 zip → 不支持", async () => {
+    await expect(list("fake.zip", Buffer.from("this is not a zip at all\n"))).rejects.toMatchObject(
+      UNSUPPORTED,
+    );
+    await expect(list("fake.zip", THREE_MEMBERS)).rejects.toMatchObject(UNSUPPORTED);
+  });
+
   it("cut.tar：切在第二个头中间 → 一项；切在最后一个成员正文中间 → 含该成员；都置 truncated", async () => {
     const midHeader = await list("cut.tar", THREE_MEMBERS.subarray(0, 1024 + 100));
     expect(midHeader.listing).toEqual({

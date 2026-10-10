@@ -106,6 +106,7 @@ describe("tar 遍历器：上限的边界", () => {
       const listing = await listArchive("tar", "edge.tar", readAt, {
         maxEntries: 1000,
         now: () => clock,
+        size: 0,
       });
       expect(listing.entries, String(elapsed)).toHaveLength(count);
       expect(listing.truncated).toBe(count === 1);
