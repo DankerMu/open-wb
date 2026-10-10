@@ -106,6 +106,11 @@ describe("入口结构（ui-foundation「入口结构不可缺失或重排」）
     expect(importers).toEqual([UI_BARREL]);
     expect(importStatements(readRepoFile(THEME))).toEqual([]);
   });
+
+  it("文件页样式已退出 legacy 层：legacy.css 不导入 features/files，该目录下没有 .css", () => {
+    expect(readRepoFile(LEGACY)).not.toContain("features/files");
+    expect(listRepoFiles("web/src/features/files", (path) => path.endsWith(".css"))).toEqual([]);
+  });
 });
 
 const SEMANTIC_COLORS = [

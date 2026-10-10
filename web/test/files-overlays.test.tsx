@@ -259,17 +259,19 @@ describe("files creation overlays focus loop", () => {
   });
 });
 
-describe("files buttons render through the Button primitive", () => {
-  it("O8 styles 新建, ＋ 新建工作空间, 取消 and 创建 as ui-btn variants", async () => {
+describe("files buttons carry no legacy button class", () => {
+  it("O8 renders 新建, ＋ 新建工作空间, 取消 and 创建 without the ui-btn class", async () => {
     const held = deferredResponse();
     renderWorkspace({ "/api/workspaces": workspaceRoute([workspace], () => held.promise) });
     const menuTrigger = await screen.findByRole("button", { name: "新建" });
-    expect(menuTrigger.className).toBe("ui-btn ui-btn--secondary ui-btn--md");
+    expect(menuTrigger.className).not.toContain("ui-btn");
+    expect((menuTrigger as HTMLButtonElement).type).toBe("button");
 
     fireEvent.click(screen.getByRole("button", { name: "选择工作空间" }));
     const switcher = await screen.findByRole("dialog", { name: "工作空间切换器" });
     const newWorkspace = within(switcher).getByRole("button", { name: "＋ 新建工作空间" });
-    expect(newWorkspace.className).toBe("ui-btn ui-btn--secondary ui-btn--md");
+    expect(newWorkspace.className).not.toContain("ui-btn");
+    expect((newWorkspace as HTMLButtonElement).type).toBe("button");
 
     fireEvent.click(newWorkspace);
     const dialog = await screen.findByRole("dialog", { name: "新建工作空间" });
@@ -304,13 +306,5 @@ describe("files overlays come only from primitives", () => {
     for (const removed of ["../src/lib/dialog.ts", "./dialog.test.tsx", "./dialog-platform.ts"]) {
       expect(existsSync(new URL(removed, import.meta.url)), removed).toBe(false);
     }
-    const primitiveImport = (names: string) =>
-      new RegExp(`import \\{ ${names} \\} from "\\.\\./\\.\\./ui/index\\.js";`);
-    expect(readRepoFile("web/src/features/files/dialogs.tsx")).toMatch(
-      primitiveImport("useEscapeFallback"),
-    );
-    expect(readRepoFile("web/src/features/files/page.tsx")).toMatch(
-      primitiveImport("Button, EmptyState, Icon, Popover"),
-    );
   });
 });

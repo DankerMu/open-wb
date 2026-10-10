@@ -86,8 +86,7 @@ const MIGRATED_AREAS: string[] = [
   "web/src/features/chat/welcome-options.ts",
   "web/src/features/chat/welcome.tsx",
   "web/src/features/chat/workspace-list.ts",
-  "web/src/features/files/dialogs.tsx",
-  "web/src/features/files/preview.tsx",
+  "web/src/features/files",
 ];
 const MIGRATED_ALLOWED_IMPORTS = ["Icon", "IconName", "BrandMark", "useEscapeFallback"];
 
@@ -329,6 +328,21 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
     }
   });
 
+  it("判定自证：文件页整目录受管，目录下的旧基元导入、.css 与子目录文件各判失败", () => {
+    const real: LayeringRules = { migrated: MIGRATED_AREAS, frozen: FROZEN_FILES };
+    const dir = "web/src/features/files";
+    const check = (path: string, text = "") => layeringViolations([{ path, text }], real);
+    expect(check(`${dir}/tree.tsx`, 'import { Dialog } from "../../ui/index.js";')).toEqual([
+      `${dir}/tree.tsx: 已迁移区域从 ${FROZEN_DIR} 导入 Dialog`,
+    ]);
+    expect(check(`${dir}/files.css`)).toEqual([`${dir}/files.css: 已迁移区域出现 .css`]);
+    // 子目录自动在内：不必逐个文件登记。
+    expect(
+      check(`${dir}/previewers/x.tsx`, 'import { Menu } from "../../../ui/index.js";'),
+    ).toEqual([`${dir}/previewers/x.tsx: 已迁移区域从 ${FROZEN_DIR} 导入 Menu`]);
+    expect(check(`${dir}/tree.tsx`, 'import { Icon } from "../../ui/index.js";')).toEqual([]);
+  });
+
   it("冻结清单恰为 32 个互不相同的文件名", () => {
     expect(new Set(FROZEN_FILES).size).toBe(32);
     expect(FROZEN_FILES).toHaveLength(32);
@@ -415,8 +429,7 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
       "web/src/features/chat/welcome-options.ts",
       "web/src/features/chat/welcome.tsx",
       "web/src/features/chat/workspace-list.ts",
-      "web/src/features/files/dialogs.tsx",
-      "web/src/features/files/preview.tsx",
+      "web/src/features/files",
     ]);
     expect(MIGRATED_AREAS).not.toContain("web/src/features/chat");
     expect(

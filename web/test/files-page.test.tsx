@@ -22,12 +22,11 @@ import {
 } from "./files-fixture.js";
 import { deferredResponse, jsonResponse, textPreviewResponse } from "./support.js";
 import {
-  blockBody,
   COLOR_LITERAL_PATTERNS,
   listRepoFiles,
   pressPointer,
   readRepoFile,
-  stripComments,
+  stripTsComments,
   yieldMacrotask,
 } from "./ui-support.js";
 
@@ -126,7 +125,7 @@ describe("workspace page route integration", () => {
     expect(
       within(tree)
         .getAllByRole("button")
-        .map((button) => button.querySelector(".files-tree-name")?.textContent),
+        .map((button) => button.querySelector('[data-slot="tree-name"]')?.textContent),
     ).toEqual(["设计文档", "out", "in", "readme.md", "notes.csv", "logo.png", "archive.zip"]);
     fireEvent.click(screen.getByRole("button", { name: "展开 out" }));
     await collapseAndExpand("out");
@@ -496,9 +495,13 @@ describe("workspace tree entry meta", () => {
     for (const [name, icon, size] of rows) {
       const button = screen.getByRole("button", { name });
       expect(hasLucideGlyph(button, icon)).toBe(true);
-      const sizeLabel = button.querySelector(".files-tree-size");
+      const sizeLabel = button.querySelector('[data-slot="tree-size"]');
       expect(sizeLabel?.textContent).toBe(size);
       expect(sizeLabel?.getAttribute("aria-hidden")).toBe("true");
+      // 名称元素带单行省略的样式（files-web「长名截断与布局规则」）。
+      const nameLabel = button.querySelector('[data-slot="tree-name"]');
+      expect(nameLabel?.textContent).toBe(name);
+      expect(nameLabel?.classList.contains("truncate")).toBe(true);
     }
 
     fireEvent.click(screen.getByRole("button", { name: "readme.md" }));
@@ -543,17 +546,14 @@ describe("workspace tree entry meta", () => {
     expect(tree).not.toContain("M2 4.5h4l1.5 2H14V13H2z");
     expect(tree).toContain("size={14}");
 
-    const css = readRepoFile("web/src/features/files/files.css");
-    expect(css).toContain("demo.html:694-706");
-    const rules = stripComments(css);
-    const sizeRule = blockBody(rules, /^\.files-tree-size \{/m);
-    expect(sizeRule).toContain("var(--wb-text-tertiary)");
-    expect(sizeRule).toContain("font-size: 10.5px");
-    const nameRule = blockBody(rules, /^\.files-tree-name \{/m);
-    expect(nameRule).toContain("text-overflow: ellipsis");
-    expect(nameRule).not.toContain("overflow-wrap");
-    for (const pattern of COLOR_LITERAL_PATTERNS) {
-      expect(rules).not.toMatch(pattern);
+    // 已迁移区域的样式只用 Tailwind 类与主题变量：该目录的 .tsx 去掉注释后不含颜色字面量。
+    const components = listRepoFiles("web/src/features/files", (path) => path.endsWith(".tsx"));
+    expect(components).toContain("web/src/features/files/tree.tsx");
+    for (const path of components) {
+      const code = stripTsComments(readRepoFile(path));
+      for (const pattern of COLOR_LITERAL_PATTERNS) {
+        expect(code, path).not.toMatch(pattern);
+      }
     }
   });
 });

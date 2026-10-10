@@ -2,6 +2,7 @@
 // Project branches live here so the journey in ui-walk.spec.ts stays a single path.
 
 import { type Browser, expect, type Locator, type Page, test } from "@playwright/test";
+import { expectLegacyOverPreflight } from "./ui-walk-files.js";
 import { isExpectedUnauthorizedNetworkLog } from "./ui-walk-oracle.js";
 
 export const DEV_ACCOUNT = "zhangsan";
@@ -186,7 +187,7 @@ export async function withViewport(
   }
 }
 
-// desktop 逐路由临时缩到 1024×768 断无溢出；/files 另断树栏宽度档位（mobile 为纵向堆叠）。
+// desktop 逐路由临时缩到 1024×768 断无溢出；/files 另断树与预览并排（mobile 为纵向堆叠）与层序探针。
 export async function expectRouteViewports(
   page: Page,
   project: WalkProject,
@@ -298,18 +299,6 @@ async function expectQuickChipsOneScrollingRow(
     .toEqual({ chips: 6, rows: 1, rowScrolls: true, pageOverflow: 0 });
 }
 
-// ui-foundation「旧页面规则压过 preflight」：button.css 在 legacy 层，压过 base 层 preflight 的
-// `padding: 0`。限定在 main 内：外壳已不用旧按钮，.ui-btn 只由尚未迁移的页面渲染在 main 里。
-// 随 legacy 层整体移除（change s1f-files-page 收尾）删除。
-async function expectLegacyOverPreflight(page: Page): Promise<void> {
-  const padding = await page
-    .getByRole("main")
-    .locator(".ui-btn")
-    .first()
-    .evaluate((el) => getComputedStyle(el).paddingLeft);
-  expect(padding, "first .ui-btn padding-left in main on /files").not.toBe("0px");
-}
-
 async function expectFilesColumns(page: Page, project: WalkProject): Promise<void> {
   const tree = page.getByRole("complementary", { name: "工作空间文件" });
   const preview = page.getByRole("region", { name: "文件预览" });
@@ -320,21 +309,14 @@ async function expectFilesColumns(page: Page, project: WalkProject): Promise<voi
     );
     return;
   }
-  await expectTreeBesidePreview(tree, preview, 280);
+  await expectTreeBesidePreview(tree, preview);
   await withViewport(page, MEDIUM_DESKTOP, async () => {
-    await expectTreeBesidePreview(tree, preview, 210);
+    await expectTreeBesidePreview(tree, preview);
     await expectNoHorizontalOverflow(page);
   });
 }
 
-async function expectTreeBesidePreview(
-  tree: Locator,
-  preview: Locator,
-  width: number,
-): Promise<void> {
-  const treeWidth = async () => (await tree.boundingBox())?.width ?? 0;
-  await expect.poll(treeWidth, `tree column ${width}px`).toBeGreaterThanOrEqual(width - 1);
-  await expect.poll(treeWidth, `tree column ${width}px`).toBeLessThanOrEqual(width + 1);
+async function expectTreeBesidePreview(tree: Locator, preview: Locator): Promise<void> {
   const [treeBox, previewBox] = await boxes(tree, preview);
   expect(previewBox.x, "preview right of tree").toBeGreaterThanOrEqual(
     treeBox.x + treeBox.width - 1,
@@ -357,7 +339,7 @@ export async function expectTruncatedRow(
 ): Promise<void> {
   await expect(row).toHaveAttribute("title", fullName);
   const [nameScroll, nameClient] = await row
-    .locator(".files-tree-name")
+    .locator('[data-slot="tree-name"]')
     .evaluate((el) => [el.scrollWidth, el.clientWidth]);
   expect(nameScroll, "tree row name is ellipsized").toBeGreaterThan(nameClient ?? 0);
   await expectRowFits(row);

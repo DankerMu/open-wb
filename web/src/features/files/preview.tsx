@@ -12,6 +12,7 @@ import type { ApiClient } from "../../lib/api.js";
 import { MarkdownView } from "../../lib/markdown-view.js";
 import { Icon } from "../../ui/index.js";
 import { parseCsv } from "./csv.js";
+import { EmptyState } from "./empty-state.js";
 import { fileIcon, formatMtime, formatSize } from "./file-meta.js";
 
 type FilePreviewSuccess = Awaited<ReturnType<ApiClient["fetchPreview"]>>;
@@ -186,15 +187,10 @@ function PreviewBody({
   if (preview.status === "unsupported") {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center">
-        <div
-          className="flex min-w-0 flex-col items-center justify-center gap-2.5 px-5 py-14 text-center text-(--wb-text-secondary)"
-          data-slot="empty-state"
-        >
-          <p className="text-[14px] font-medium">该类型不支持预览</p>
-          <p className="text-[12.5px] [overflow-wrap:anywhere]" data-slot="empty-state-desc">
-            {`${name} · ${formatSize(size)}\u3000二进制或未识别格式`}
-          </p>
-        </div>
+        <EmptyState
+          description={`${name} · ${formatSize(size)}\u3000二进制或未识别格式`}
+          title="该类型不支持预览"
+        />
       </div>
     );
   }
