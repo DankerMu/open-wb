@@ -143,7 +143,7 @@ Minimal mergeable slice: 2.1 与 2.2 互不依赖，各自一刀，各自合入�
 
 ## 3. files-web / ui-foundation — 首刀 b：目录树、页面、退出旧样式层
 
-- [ ] 3.1 `web/src/features/files/tree.tsx`（644 行，另加 2.2 搬来的 `CreationMenu`）：改用 `button`、`dropdown-menu`（`新建` 的两项菜单）与 Tailwind，保持每个文件远离 800 行。两处空态（空根的 `该工作空间暂无目录`、未选文件的 `未选择文件`）不再用冻结区 `EmptyState`，
+- [x] 3.1 `web/src/features/files/tree.tsx`（644 行，另加 2.2 搬来的 `CreationMenu`）：改用 `button`、`dropdown-menu`（`新建` 的两项菜单）与 Tailwind，保持每个文件远离 800 行。两处空态（空根的 `该工作空间暂无目录`、未选文件的 `未选择文件`）不再用冻结区 `EmptyState`，
   按 2.1 不支持态的同一写法渲染（块 `data-slot="empty-state"`、副行 `empty-state-desc`；与 2.1、3.2 重复的部分抽成该目录下的一个小组件）。
   行为不变：惰性一层、展开缓存、图标与大小、空目录 / 空根文案、逻辑路径、绝对 `root` 不出界面、长名省略与 `title`。`新建`（菜单触发器）不再带 `ui-btn` 类，可访问名、菜单开合（恰两项）与关闭回焦不变（ui-primitives「按钮单一实现与旧类退役」）。
   稳定定位：树与预览的分栏容器带 `data-slot="files-layout"`，预览区容器带 `data-slot="files-preview"`（这两个是 files-web「文件界面与键盘可用性」规定的名字）；树条目的名称元素 `tree-name`、大小元素 `tree-size`（保留 `aria-hidden="true"`）、树根的逻辑路径副行 `tree-root-path`。
@@ -156,7 +156,7 @@ Minimal mergeable slice: 2.1 与 2.2 互不依赖，各自一刀，各自合入�
   - `web/test/files-overlays.test.tsx:223`（O8 的 `新建`）：`className` 由「恰为 `ui-btn ui-btn--secondary ui-btn--md`」改为「不含 `ui-btn`」（2.2 留下的两条之一）。
   这三个文件与 `ui-tokens.test.ts`、`topbar.test.tsx` 里**读 `files.css` 规则体**的断言不是选择器改动，随 3.3 逐条处理（见 3.3）。
   实施注记见 `implementation-notes.md`「3.1–3.7（#1078）」。
-- [ ] 3.2 `web/src/features/files/page.tsx`：分栏与窄屏纵排改用 Tailwind（宽于 760 左右分栏，否则纵排），加 `刷新` 按钮（files-web「目录树与预览」的「手动刷新」场景）；`?ws=` 的缺省、纠正与归属隔离不变。
+- [x] 3.2 `web/src/features/files/page.tsx`：分栏与窄屏纵排改用 Tailwind（宽于 760 左右分栏，否则纵排），加 `刷新` 按钮（files-web「目录树与预览」的「手动刷新」场景）；`?ws=` 的缺省、纠正与归属隔离不变。
   工作空间切换器（今天是 `page.tsx:90` 起的冻结区 `Popover`，其中 `:149` 的 `＋ 新建工作空间` 用冻结区 `Button`）改用拷入层 `popover` 与 `button`，必要时拆出 `workspace-switcher.tsx`。切换器弹层保留 `role="dialog"` 与可及名 `工作空间切换器`
   （ui-primitives「基元组件库」的场景「既有对话框迁移不回归」仍断言它；`web/test/files-page.test.tsx`、`files-overlays.test.tsx`、`files-logical-path.test.tsx` 与走查 `ui-walk.spec.ts:206` 按这个名字定位切换器，这些定位原样保留）；
   列表容器带 `data-slot="switcher-list"`，列表项仍是 `li`、空间名仍在 `strong` 里。`＋ 新建工作空间` 不再带 `ui-btn` 类，可访问名与行为不变。无空间时的 `先选择或创建工作空间` 空态按 3.1 的同一写法。
@@ -165,7 +165,7 @@ Minimal mergeable slice: 2.1 与 2.2 互不依赖，各自一刀，各自合入�
   - `web/test/files-overlays.test.tsx:228`（O8 的 `＋ 新建工作空间`）：`className` 改为「不含 `ui-btn`」；至此 O8 的四条都已改写，用例标题与所在 `describe` 的标题同步改为不再提 `ui-btn variants` / `Button primitive` 的说法。
   - `files-overlays.test.tsx:259-261`（O7 里断言 `page.tsx` 恰有 `import { Button, EmptyState, Icon, Popover } from "../../ui/index.js"`）→ **删除**，连同 2.2 改写的 `dialogs.tsx` 那一条（3.4 的整目录分层守卫已覆盖这两个文件，且更强）；O7 其余断言不动。
   测试：`files-concurrency.test.tsx`、`files-errors.test.tsx` 原样通过（没有类名或结构选择器）；`topbar.test.tsx:263`（`page.tsx` 不含 `<h1`）原样通过；新增「手动刷新」用例。
-- [ ] 3.3 删除 `web/src/features/files/files.css` 与 `web/src/styles/legacy.css` 里对它的 `@import`（`legacy.css` 的三条 `.files-md` 规则已在 2.1 删除；`.ui-alert`、`.ui-muted`、`.ui-empty` 三条全局规则不是文件页独有——会话页与路由也用——不动）；确认 `web/src/features/files` 不再从 `web/src/ui` 导入四项白名单之外的名字。
+- [x] 3.3 删除 `web/src/features/files/files.css` 与 `web/src/styles/legacy.css` 里对它的 `@import`（`legacy.css` 的三条 `.files-md` 规则已在 2.1 删除；`.ui-alert`、`.ui-muted`、`.ui-empty` 三条全局规则不是文件页独有——会话页与路由也用——不动）；确认 `web/src/features/files` 不再从 `web/src/ui` 导入四项白名单之外的名字。
   `files.css` 一删，下列五个既有测试文件里读它的断言立即失败（`readRepoFile` 对不存在的文件抛错），必须与删除同一个 PR 处理，逐条记入 PR 的偏离记录（文首通用纪律）：
   - `web/test/files-page.test.tsx` 的 `keeps formatSize as the single size formatter and the tree glyphs on the icon primitive`：读 `tree.tsx` / `preview.tsx` 源码的断言（`fileIcon(`、`formatSize(`、无手写路径、`formatByteSize` 零引用）原样保留。读 `files.css` 的部分——
     **删除**：来源注释 `demo.html:694-706`、`.files-tree-size` 的三级文字色与 `font-size: 10.5px`（主规格 files-web「文件界面与键盘可用性」与「工作空间页」里的类名、像素值已被本 change 的 MODIFIED 去掉，「树条目图标与大小」只规定图标与大小文本，不规定字号）；
@@ -182,17 +182,17 @@ Minimal mergeable slice: 2.1 与 2.2 互不依赖，各自一刀，各自合入�
     `web/e2e/ui-walk-files.ts` 在 `/files` 选中文件之后读取 `data-slot="files-layout"` 与 `data-slot="files-preview"` 两个元素的计算 `background-color`，断言都是 `rgba(0, 0, 0, 0)`，两个 project 都做
     （规格依据：files-web「文件界面与键盘可用性」新增的句子与场景「文件页不自涂底色」、files-harness「走查 /files 步骤」；页面底色等于 `body` 的 `--background` 仍由 `ui-walk-layout.ts` 既有的 `pageBackground` 断言证明）。该文件其余 `describe` 不动。
   - `web/test/topbar.test.tsx` 的 `页面不再渲染自有 h1，样式与依赖方向符合顶栏归属`：「不含 `ui-page-heading`」的文件清单里去掉 `web/src/features/files/files.css` 一项（文件已不存在，无可断言；`ui-page-heading` 的规则只可能写在 `.css` 里，而 3.4 的分层守卫保证该目录下不再有 `.css`），清单其余项与该用例其余断言不动。
-- [ ] 3.4 守卫：`web/test/ui-layering.test.ts` 的 `MIGRATED_AREAS` 把 2.1、2.2 的两个单文件条目换成目录 `web/src/features/files`，同步清单断言；新增 ui-foundation「文件页整目录已迁移」的注入样本（该目录下一个文件导入旧 `Dialog`、目录下出现 `.css`）；
+- [x] 3.4 守卫：`web/test/ui-layering.test.ts` 的 `MIGRATED_AREAS` 把 2.1、2.2 的两个单文件条目换成目录 `web/src/features/files`，同步清单断言；新增 ui-foundation「文件页整目录已迁移」的注入样本（该目录下一个文件导入旧 `Dialog`、目录下出现 `.css`）；
   `web/test/ui-foundation-entry.test.ts` 加「`legacy.css` 不导入 `features/files`」。
-- [ ] 3.5 走查里文件页的断言（`.files-code`、`.files-table` 两个选择器已在 2.1 改掉，这里是其余的）。写作时 `grep -nE 'files-|ui-btn|280|210' web/e2e/*.ts` 的命中逐条处理：
+- [x] 3.5 走查里文件页的断言（`.files-code`、`.files-table` 两个选择器已在 2.1 改掉，这里是其余的）。写作时 `grep -nE 'files-|ui-btn|280|210' web/e2e/*.ts` 的命中逐条处理：
   - `web/e2e/ui-walk-layout.ts:360`（`expectTruncatedRow` 里的 `row.locator(".files-tree-name")`）→ `[data-slot="tree-name"]`，「名称被省略、行不溢出、`title` 为全名」的断言不变。
   - `ui-walk-layout.ts:313-341`（`expectFilesColumns` / `expectTreeBesidePreview`）：缺省桌面宽度下的「树栏 280px」与 880×800 下的「树栏 210px」两处宽度断言去掉（主规格 files-web 里的这两个像素值已被本 change 改写掉），保留并只断言「树在左、预览在右」与 880×800 下无横向溢出
     （verification-harness「UI 走查（Playwright）」）；`mobile-dark` 的「树在上、预览在下」不变。
   - `ui-walk-layout.ts:300-311`（`expectLegacyOverPreflight`，取 `main` 里第一个 `.ui-btn` 的 `padding-left`）：3.1 之后文件页不再有 `.ui-btn`，探针改为 ui-foundation「旧页面规则压过 preflight」现在规定的 `ui-icon` 探针（临时插入 `body` 的 `svg.ui-icon`，计算 `display` 为 `inline-block`，读完移除）。
   - 新增 #420 的计算样式断言（3.3：`files-layout` 与 `files-preview` 的计算 `background-color` 为 `rgba(0, 0, 0, 0)`，两个 project）。
   `ui-walk.spec.ts` 的 `walkFiles` 里按角色、可及名与文本定位的既有断言（夹具预览、列表符号、目录创建挂起期焦点、重载保持）全部保留、无需改动。`ui-walk-layout.ts` 已 793 行：改写不增行，放不下的搬进新 helper `web/e2e/ui-walk-files.ts`。
-- [ ] 3.6 功能验收清单「文件（FL）」节新增首批行（空间切换与新建、目录树浏览与图标大小、Markdown / CSV / 图片 / 源码预览、新建文件夹、窄屏纵排、深色主题、刷新），结论 `待签`。
-- [ ] 3.7 变异证据：恢复 `legacy.css` 对 `files.css` 的导入 → 入口守卫判红；在 `features/files` 下的文件里导入旧 `Menu` → 分层守卫判红；把窄屏断点条件写反 → 走查的并排断言判红；把层声明里的 `legacy` 挪到 `base` 之前 → `ui-icon` 探针判红（入口守卫同时判红）；给预览区容器加上 `bg-card` → 走查的「文件页不自涂底色」断言判红；去掉名称元素的 `truncate` → 「名称元素带单行省略的样式」断言判红；切换器弹层改名或去掉 `role="dialog"` → 按 `工作空间切换器` 定位的既有用例判红；`新建` 改回冻结区 `Button` → O8 的「不含 `ui-btn`」判红；把条目的 `ul` 挪出 `li` → `files-fixture.tsx` 的展开帮手取不到子层，「一次浏览」用例判红。
+- [x] 3.6 功能验收清单「文件（FL）」节新增首批行（空间切换与新建、目录树浏览与图标大小、Markdown / CSV / 图片 / 源码预览、新建文件夹、窄屏纵排、深色主题、刷新），结论 `待签`。
+- [x] 3.7 变异证据：恢复 `legacy.css` 对 `files.css` 的导入 → 入口守卫判红；在 `features/files` 下的文件里导入旧 `Menu` → 分层守卫判红；把窄屏断点条件写反 → 走查的并排断言判红；把层声明里的 `legacy` 挪到 `base` 之前 → `ui-icon` 探针判红（入口守卫同时判红）；给预览区容器加上 `bg-card` → 走查的「文件页不自涂底色」断言判红；去掉名称元素的 `truncate` → 「名称元素带单行省略的样式」断言判红；切换器弹层改名或去掉 `role="dialog"` → 按 `工作空间切换器` 定位的既有用例判红；`新建` 改回冻结区 `Button` → O8 的「不含 `ui-btn`」判红；把条目的 `ul` 挪出 `li` → `files-fixture.tsx` 的展开帮手取不到子层，「一次浏览」用例判红。
 
 Suggested fixture level: compact - 页面换底座、行为不变；风险在守卫、走查选择器与随 `files.css` 删除而改写的既有断言，由注入样本、既有走查与 3.3 的逐条对照覆盖
 Minimal mergeable slice: 3.1–3.5 同刀（目录登记、`files.css` 删除、3.1 / 3.2 点名的选择器与 O8、O7 的后半、3.3 点名的五个既有测试文件的规则体断言、3.5 的走查选择器与探针必须一起改——`tree.tsx` 一换类名、`files.css` 一删，这些文件立即变红，不能留到后一个 PR）；3.6 的清单行随同一 PR
