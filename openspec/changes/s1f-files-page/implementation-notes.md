@@ -808,3 +808,33 @@
 - 预审补：**与 #1073 的交接**：去重必须把 `rename` 包在里面（落在缓存的未命中路径之内，`office-cache.ts:87-93`）。只在转换器一层去重时，共用同一次转换的调用拿到的是同一个 `pdf/<随机名>.pdf`，第一个 `rename` 成功、其余的以 `ENOENT` 失败并报 `failed`。`office-cache.test.ts:239-251`「同一个键的两次并发未命中各转一次…」里的 `launches` 长度为 2 钉的是今天不去重的行为，#1073 落地时预期改它。
 - 预审补：`sudo … find` 无超时的后果补全（原只写了「`clearWork` 不落定」）：这个 `ChildProcess` 没有 `unref`，它不退出时事件循环一直活着；`createOfficeCleanup` 不交出任何能终止它的句柄，关停或 `process.exit` 时 `sudo` / `find` 可能成为孤儿并继续在 `work/` 下删除，下一个实例在途的作业目录可能被它删到。是否加超时、是否交出句柄归 15.1（#1074）定，本刀不改。
 - 预审补：CI 口径：「写出完好 PDF 之后以 timeout 结束…」的 `timeoutMs` 是 1000，负载高的 runner 上可能抖动（上面已定：抖动则放大数值、不放松断言）；「pdf 目录不可读…」与「两个 0500 的非空目录删不掉…」两例在 root 下跳过（`it.skipIf(euid===0)`），容器里以 root 跑测试时这两条变异没有判据。
+
+## 16.1 的地址函数部分，含分摊的 16.4 / 16.5 条款（#1079）
+
+- 非 Critical Path（只拼字符串，无路由，无 `sandbox.resolve`，D-23 / #1286 的窗口不涉及）。前置 0.1（#1049）与 9.3（#1061）已在 origin/master：`server/src/workspaces/rest-entries.ts:59` 有 `GET /api/workspaces/:id/download`。16.1 属「不等 1.2」一句，三项实测都不挡。
+- 文件位置：规格、`tasks.md:374` 与 issue 一致写 `web/src/lib/api-files.ts`（origin/master 不存在，本刀新建）。编排提示里的 `web/src/features/files/api-files.ts` 是笔误，不照做。因此不动 `web/src/features/**`，`web/test/ui-layering.test.ts` 的 `MIGRATED_AREAS` 与清单断言都不改。
+- 漂移：issue「Current behavior」写 `api.ts` 729 行，实际 778 行（`tasks.md` 文首与 design:471 的 778 正确）。issue 的 16.1 任务引文与 `tasks.md:374` 逐字一致，无差异。「既有六个方法」数字自洽：`promoteWorkspace` 归 chat-web / session-sidebar，不在 files-web 的六个里。
+- 形态：`export function fileUrl(workspaceId: string, path: string): string` 与 `downloadUrl(同签名)` 是模块级纯函数，不是 `ApiClient` 的成员（规格写「纯函数」，17.2 / 20.1 / 25.2 直接当 `href` / `src` 用）。`ApiClient` 类型不变，既有的客户端替身不用改。
+- 复用既有助手：把 `api.ts:406-408` 的 `workspaceEndpoint` 挪进 `api-files.ts` 并导出，联合类型加 `"download"`。`api.ts` 值导入它（`tree` / `dirs` / `promote` 三处照用），方向是允许的 `api.ts → api-files.ts`。不在 `api-files.ts` 另写一份拼接，否则 id 编码有两个来源，且 `api-files.ts` 不能从 `./api.js` 值导入。
+- `api.ts` 的改动共四处：删 406-408；加 `import { fileUrl, workspaceEndpoint } from "./api-files.js";`；加 `export { downloadUrl, fileUrl } from "./api-files.js";`；`fetchPreview`（690 行）改为请求 `fileUrl(workspaceId, path)`。净约 −2 行（778 → 约 776）。偏离记录：issue 写「只加接线与类型再导出」，实际是值再导出、一个助手搬家、一行改写。
+- 不建空的 `createFileMethods` 工厂（两个函数不需要传输，空工厂是占位）；工厂随第一个发请求的方法（#1080）落地。所以本刀 `api-files.ts` 里没有任何 `./api.js` 导入，「只有 `import type`」此刻是空真，要靠下一条的自证用例才有牙。
+- 编码：两处都用 `encodeURIComponent`（id 段与 `path` 值），返回同源相对地址。不用 `URLSearchParams`（空格会变 `+`，解码仍相等但违反规格）。服务端 `parsePathQuery`（`rest.ts:86`）读 Fastify 默认解码后的 `query.path`，`server/src` 没有自定义 `querystringParser`，兼容。
+- 规格没写的分支，取最简并记入偏离记录：`path` 为空串 → `…?path=`（服务端解析到根 → 404）；孤立代理项 → `encodeURIComponent` 同步抛 `URIError`，与 `listTree` / `fetchPreview` 现状一致，不捕获；不规范化 `..` 或前导 `/`，路径是数据，由服务端沙箱裁决。
+- 测试文件：`web/test/api-files.test.ts` 已 743 行，后面还有五刀要加用例，本刀用例放新文件 `web/test/api-files-url.test.ts`（偏离 16.4 的「扩充」字样与 issue 的 PR Boundary）。它只从 `../src/lib/api.js` 导入，不直接导入 `api-files.js`，否则「导出只供 `api.ts` 使用」的断言会红。
+- 地址用例断言整串字面量，并另断言 `new URL(url, "http://x").searchParams.get("path")` 等于原路径：`fileUrl("w1", "报告 2026/a b#1.mp4")` → `/api/workspaces/w1/file?path=%E6%8A%A5%E5%91%8A%202026%2Fa%20b%231.mp4`；`downloadUrl("w1", "a&b.txt")` → `/api/workspaces/w1/download?path=a%26b.txt`；id 用 `ws/%#?+ 中` → 段为 `ws%2F%25%23%3F%2B%20%E4%B8%AD`。`vi.stubGlobal("fetch", vi.fn())` 后调用两个函数，断言 `fetch` 零调用。
+- 导入方向断言放 `web/test/chat-module-layout.test.ts`（122 行，`importersOf` 未导出，别处复用会被 jscpd 抓）。(a) `importersOf("web/src/lib/api-files")` 等于 `["web/src/lib/api.ts"]`。(b) 新纯函数判定「去注释后的源码里，说明符 `./api.js` 的每次出现都在以 `import type` 开头的语句内」，按语句判定而不是按行，用正则字面量（semgrep）。
+- 断言 (b) 的自证样例：值导入、`import { type X } from`、`export … from`、动态 `import()` 都判违规，多行 `import type {…}` 判合规。把它同时用在 `api-sessions.ts`、`api-upload.ts`、`api-commands.ts`（各有一条真实的 `import type`）和 `api-files.ts`。样例串不要写成指向真实模块的字面量（该文件 64 行的同款注意）。
+- 既有测试不必改、不许放松：`api-files.test.ts:261` 的预览请求地址字面量现在顺带钉住 `fileUrl` 的编码；`chat-page-artifact-card*`、`files-page*` 等对 `…/file?path=` 的断言原样通过。knip 由 `api.ts` 的值导入和新测试经 `api.js` 的引用满足，`knip.json` 不改；`api-files.ts` 约 15 行，命名守卫无碍。
+- 同批同文件的排序：本刀动 `api.ts` 的 1-10、406-408、690 行和文末一行；#1081（16.3）动的是 `api.ts:419-430` 的 `parsePreviewKind` 与 `api-files.test.ts`，与本刀零行重叠，可按既定顺序叠。提示里说 #1081 改 `api-files.ts`，按 origin/master 的代码它改的是 `api.ts`，除非它把预览那一簇搬家。
+- `api.ts` 的余量：本刀后约 776 行，#1080、#1082–#1084 各加 `ApiClient` 成员和接线后会逼近 800。「必要时把既有工作空间方法挪进 `api-files.ts`」要由其中一刀执行，不是本刀；建议在 #1081 或 #1080 的 fixture 里定。
+- 无 checklist 行（纯函数，无界面变化）；不动 `docs/architecture/system.md` §9；不涉及配置；`tasks.md` 的 16.1 复选框由 #1080 勾，本刀只在 PR 描述里给出 16.4 / 16.5 的分摊条款与变异表。
+- 变异：`downloadUrl` 不编码 `&`（直接拼 `path`）→ `api-files-url.test.ts` 的 `a&b.txt` 字面量与 `searchParams.get("path")` 两条断言判红（16.5 指定项）。
+- 变异：两个函数改用 `encodeURI` → `报告 2026/a b#1.mp4` 字面量判红（`/` 与 `#` 没编码，`#` 之后变成片段，往返也红）。
+- 变异：改用 `URLSearchParams` → 字面量判红（空格成 `+`）；往返断言不红，所以字面量断言不可省。
+- 变异：id 段不编码 → `ws/%#?+ 中` 用例判红。
+- 变异：`fileUrl` 与 `downloadUrl` 的端点名互换 → 两条字面量判红，`api-files.test.ts:261` 的预览地址也红。
+- 变异：任一函数内部调用 `fetch` → 「没有发出请求」判红。
+- 变异：`api-files.ts` 加一条从 `./api.js` 的值导入（或 `import { type X }`）→ 断言 (b) 判红，另有自证样例保证判定函数本身有牙。
+- 变异：`web/src` 下另一个文件直接导入 `api-files.js` → 断言 (a) 判红。
+- 变异：`workspaceEndpoint` 搬家时丢掉 `encodeURIComponent` → `api-files.test.ts:107` 的 promote 地址与 `:261` 的预览地址判红。
+- 变异：预期不可观察：`fetchPreview` 退回内联拼接而不调 `fileUrl`。输出相同，`:261` 照过，属复用选择，PR 表里标注「不可观察」。
