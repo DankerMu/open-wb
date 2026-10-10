@@ -346,7 +346,7 @@ Minimal mergeable slice: atomic - 两个监听器与回收目录定时器在入�
   - spawn 经可注入的函数（与 14.1 同一个 seam），测试用记录型假 `sudo`（14.5）；变异证据在 14.6。
   - CI：`uid-isolation` job 不设 `OFFICE_BIN`，这条命令在那里不执行，`.github/scripts/ci-uid-isolation.sh` 不需要改。
 - [x] 14.4 测试夹具 `server/test/fixtures/fake-soffice.mjs`（可执行；按输入文件名里的标记：正常写出一个最小 PDF、退出码 1、不写输出、写空文件、写符号链接、睡眠、先起一个子进程再睡眠；把收到的 argv 与环境写到作业目录旁的记录文件）。
-- [ ] 14.7 `office.ts` 的输出复制设界（owner 裁决 2026-10-09；规格条文随本任务的代码 PR 落地，不在此前写）。Depends on：14.1。挡住：14.5、15.1。
+- [x] 14.7 `office.ts` 的输出复制设界（owner 裁决 2026-10-09；规格条文随本任务的代码 PR 落地，不在此前写）。Depends on：14.1。挡住：14.5、15.1。
   对输出按同一个 fd 的 `fstat` 所得 `size` 复制恰好这么多字节：`size` 大于 200 MiB → 不读，`failed`；读到的字节少于 `size` → `failed`（半截的副本不留在 `pdf/`）。上限是写死的常量，不加配置键。
   同一个 PR 更正 `server/src/preview/office.ts:9` 头注释里的「其后代可能残留」：按 design D18 与 owner D-25 写成实测事实（`OMP_USER` 模式下 `soffice.bin` 每次都留下并把转换跑完，实际并发可以超过上限）。
   各带用例与变异证据（去掉上限 → 超限输出被读入而判红；不比对读到的字节数 → 短读的输出进了 `pdf/` 而判红）。

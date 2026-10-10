@@ -14,6 +14,7 @@ import {
   readFileSync,
   renameSync,
   symlinkSync,
+  truncateSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, parse } from "node:path";
@@ -91,6 +92,16 @@ const behaviours = {
   /** 输出位置是一个没有写端的命名管道：阻塞式 open 会一直挂着。 */
   fifo() {
     execFileSync("mkfifo", [output]);
+  },
+  /** 恰 200 MiB 的稀疏文件（任务 14.7，#1302）：只设长度，不写这么多字节。 */
+  "sparse-limit"() {
+    writeFileSync(output, "");
+    truncateSync(output, 209_715_200);
+  },
+  /** 比上面多 1 字节。 */
+  "sparse-over"() {
+    writeFileSync(output, "");
+    truncateSync(output, 209_715_201);
   },
   sleep() {
     sleepThenExit();

@@ -7,7 +7,7 @@
 
 子进程环境 SHALL 精确为 `{PATH, LANG, HOME}`（`LANG` 缺席时不设；`HOME` 为作业目录），不继承 `process.env` 的任何其它键。`ompUser` 存在时 SHALL 在其前加前缀 `sudo -n -u <ompUser> --preserve-env=PATH,LANG,HOME -- /usr/bin/setpriv --pdeathsig KILL --`（与 omp-uid-isolation 的 spawn 前缀同形；`sudo` 进程自身的环境即上述集合），不存在时直接启动 `officeBin`；sudo 立即失败 SHALL 是转换失败，SHALL NOT 回退为同 uid 直接启动。
 
-转换成功当且仅当子进程以退出码 0 结束，且 `<作业目录>/out/<输入文件名去掉最后一个扩展名>.pdf` 是大小大于 0 的普通文件（符号链接不算）。其余情况——启动失败、非 0 退出、被信号终止、没有输出、输出为空——SHALL 以 `failed` 失败。失败的错误对象 SHALL 只带上述种类，不带子进程输出、路径或环境。无论成败，`convert` 落定前 SHALL 对作业目录做一次递归删除；这一步是尽力而为，删除失败不改变结果。`OMP_USER` 模式下它对真实的 LibreOffice 删不全：LibreOffice 在作业目录下建的 `profile` 与 `.cache` 属该用户、只有该用户可进入（design D18「实测」），应用用户删不掉，所以该模式下 `work` 在一次运行期间可以只增不减，由启动时对 `work` 的清空（「转换缓存」）归零。
+转换成功当且仅当子进程以退出码 0 结束，且 `<作业目录>/out/<输入文件名去掉最后一个扩展名>.pdf` 是大小大于 0 的普通文件（符号链接不算）。输出的大小以打开它之后对同一文件描述符取得的 `size` 为准：`size` 大于 200 MiB（209715200 字节，固定常量，不是配置项）SHALL 以 `failed` 失败且不读取其内容；复制 SHALL 恰读取该 `size` 个字节，此后追加到该文件的内容不读；实际读到的字节数少于该 `size`（取得大小之后被截短）SHALL 以 `failed` 失败，且缓存目录里不留下这次复制的任何文件。其余情况——启动失败、非 0 退出、被信号终止、没有输出、输出为空——SHALL 以 `failed` 失败。失败的错误对象 SHALL 只带上述种类，不带子进程输出、路径或环境。无论成败，`convert` 落定前 SHALL 对作业目录做一次递归删除；这一步是尽力而为，删除失败不改变结果。`OMP_USER` 模式下它对真实的 LibreOffice 删不全：LibreOffice 在作业目录下建的 `profile` 与 `.cache` 属该用户、只有该用户可进入（design D18「实测」），应用用户删不掉，所以该模式下 `work` 在一次运行期间可以只增不减，由启动时对 `work` 的清空（「转换缓存」）归零。
 
 路径参数只接受绝对路径。构造时 `cacheDir` 不是绝对路径，或提供了 `officeBin` 而它不是绝对路径（裸名、`./` 开头的相对路径）→ `createOfficeConverter` SHALL 直接抛出，不返回转换器、不启动任何进程；抛出的是普通错误而不是上述带种类的失败，message 固定、不含传入的值；`officeBin` 未提供时 `cacheDir` 同样受此检查。`convert` 的 `absInput` 不是绝对路径（它是 argv 的最后一项，例如以 `-` 开头时会被转换器当成选项）→ SHALL 以 `failed` 失败，不启动进程、不建作业目录。`convert` 在建作业目录之前的检查次序 SHALL 为：`officeBin` 未提供 → `unavailable`；已 `close()` 或 `signal` 已中止 → `aborted`；`absInput` 不是绝对路径 → `failed`；`ompUser` 存在时随后才是对 `PATH` 与 `/usr/bin/setpriv` 的前置检查（不过同样是 `failed`，不启动、不回退）。
 
@@ -37,6 +37,10 @@
 #### Scenario: OMP_USER 模式下终止的是 sudo
 - **WHEN** 以 `ompUser: "omp"` 构造，`sudo` 被替换为一个记录自己 pid、随后长时间睡眠的假可执行文件；转换超过 `timeoutMs`；另一例调用 `close()`
 - **THEN** 两例分别以 `timeout`、`aborted` 失败；那个假 `sudo` 进程在有界时间内已不存在且是被 `SIGKILL` 结束的；转换器没有执行 `kill`、`pkill` 或第二次 `sudo`（记录型假 `sudo` 恰被启动一次）；该次调用占用的并发名额已释放（随后的一次转换立即启动）
+
+#### Scenario: 输出复制的字节上界
+- **WHEN** 转换的输出分别是：一份完好的 PDF，取得大小之后、复制结束之前又被追加了字节；一个 `size` 为 200 MiB + 1 字节的稀疏文件；一份 PDF，取得大小之后、读取之前被截短；一个恰 200 MiB 的稀疏文件
+- **THEN** 第一例 `convert` 成功，结果文件的字节数等于取得大小时的 `size`、内容是那一刻的前缀；第二例以 `failed` 失败，没有读取输出的内容，`pdf` 目录没有新增文件；第三例以 `failed` 失败，`pdf` 目录没有新增文件；第四例成功，结果文件恰 200 MiB
 
 #### Scenario: 输入不是绝对路径
 - **WHEN** 分别以 `-env:UserInstallation=file:///x.docx`、`--accept=x.docx`、`ws/a.docx` 作为 `absInput` 调用 `convert`
