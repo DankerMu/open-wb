@@ -223,13 +223,13 @@ Minimal mergeable slice: atomic - 纯解析函数与其测试；没有消费方�
 - [x] 6.1 `server/src/workspaces/preview.ts`：`classifyPreview(absPath, name, size, options)` 按 workspaces「预览分类元数据与有界字节流」的表重写（文本扩展名与 `Dockerfile` / `Makefile`、图片七种、音视频四种、Notebook、由别处提供的集合、`sniffedText`、`limits`）；新增纯函数 `sniffText`。
   导出图片、音频、视频、Notebook 四个扩展名集合供组 17 的契约测试读取。
   实施注记见 `implementation-notes.md`「6.1、6.2 最小接线（#1055）」。
-- [ ] 6.2 `server/src/workspaces/rest.ts` 的 `file` 路由：未知 / 无扩展名时读前至多 8192 字节嗅探后再分类；`limits` 经 `registerWorkspaces` 的依赖对象传入（缺省为规格缺省值），`server/src/app.ts` 把 `ServerConfig` 的三个上限接进来（`assembly` 新增可选字段）。
+- [x] 6.2 `server/src/workspaces/rest.ts` 的 `file` 路由：未知 / 无扩展名时读前至多 8192 字节嗅探后再分类；`limits` 经 `registerWorkspaces` 的依赖对象传入（缺省为规格缺省值），`server/src/app.ts` 把 `ServerConfig` 的三个上限接进来（`assembly` 新增可选字段）。
   实施注记见 `implementation-notes.md`「6.2（部分）、6.3、6.4（#1056）」。
-- [ ] 6.3 测试：`server/test/` 新文件 `workspaces-preview-classify.test.ts`（分类器六个场景中除范围解析外的全部）与既有工作空间路由测试里补「未知与无扩展名文件的嗅探」「图片与拒绝」「Notebook 与可配置上限」「文本、截断与 html」（含 `svg`、`htm` 为 `text/plain`）。
+- [x] 6.3 测试：`server/test/` 新文件 `workspaces-preview-classify.test.ts`（分类器六个场景中除范围解析外的全部）与既有工作空间路由测试里补「未知与无扩展名文件的嗅探」「图片与拒绝」「Notebook 与可配置上限」「文本、截断与 html」（含 `svg`、`htm` 为 `text/plain`）。
   断言已知扩展名的请求不发生嗅探读取（以对 `open`/`read` 的计数或注入的读函数为证）。preview-origin「主站不把工作空间文件当文档返回」的 `file` 半边（`page.html`、`logo.svg`、`feed.xml` 为 `text/plain`，`doc.pdf` 为 415）也在这里断言。
   随条文改写的既有测试（与 6.1 同 PR，逐条记入偏离记录）：`server/test/workspace-preview.test.ts`（`classifyPreview` 的三参调用改四参；`IMAGE_LIMIT = 10_485_760` 与「11 MiB 的 png 被拒」改为 20 MiB 边界）、
   `server/test/workspaces-http.test.ts`（路由层「11 MiB 的 `huge.png` 期望 413」改为 21 MiB）。`server/test/app.test.ts`、`http-typed-errors.test.ts`、`http-parser-owners.test.ts`、`auth-lifecycle.test.ts`、`auth-request-errors.test.ts` 里只引用 `preview_too_large` / `preview_unsupported` 两个错误码本身的用例不受影响，逐个确认后原样保留。
-- [ ] 6.4 变异证据：把 `svg` 的类型改成 `image/svg+xml` → 「永不以文档类型返回」用例判红；对已知扩展名也嗅探 → 读取计数用例判红；图片上限用回 10 MiB → 20 MiB 边界用例判红。
+- [x] 6.4 变异证据：把 `svg` 的类型改成 `image/svg+xml` → 「永不以文档类型返回」用例判红；对已知扩展名也嗅探 → 读取计数用例判红；图片上限用回 10 MiB → 20 MiB 边界用例判红。
 
 Suggested fixture level: expanded - 公共 API 的内容类型与上限变化，含「主站不把不可信文件当文档返回」的安全性质
 Minimal mergeable slice: 6.1 + 6.2 中「路由按新签名调用、上限仍取规格缺省值」的最小接线 + 6.3 点名的两个既有测试文件的改写同刀（签名与图片上限一变，这两个文件立即变红，不能分开）；嗅探与 `ServerConfig` 上限的接入（6.2 其余部分）随后
@@ -238,11 +238,11 @@ Minimal mergeable slice: 6.1 + 6.2 中「路由按新签名调用、上限仍取
 
 - [x] 7.1 `preview.ts` 新增纯函数 `parseRange` 与 `openRangeStream`（只有函数与导出，路由不变）。测试：`parseRange` 的十个输入（workspaces「嗅探与范围解析」场景）；`openRangeStream(path, 10, 19)` 恰产出第 10–19 字节，读完前销毁时描述符释放。
   实施注记见 `implementation-notes.md`「7.1（#1057）」。
-- [ ] 7.2 把「按区间发送一个文件」做成 `server/src/workspaces/` 下可复用的小函数（200 / 206 / 416 的头与正文；组 12、15 的预览监听器直接用它）。
+- [x] 7.2 把「按区间发送一个文件」做成 `server/src/workspaces/` 下可复用的小函数（200 / 206 / 416 的头与正文；组 12、15 的预览监听器直接用它）。
   实施注记见 `implementation-notes.md`「7.2、7.3、7.4、7.5（#1058）」。
-- [ ] 7.3 `file` 路由对 `rangeable` 的类别经 7.2 的函数按 workspaces「文件预览」返回 200 / 206 / 416，其余类别忽略 `Range`。
-- [ ] 7.4 测试：路由层「音视频的范围请求」场景，206 用真实监听的 HTTP 客户端断言字节与 `Content-Range`（`inject` 之外再走一次真连接）；流在区间读完前被客户端中止时描述符释放。
-- [ ] 7.5 变异证据：`bytes=-100` 当成 `0-100` → 后缀区间用例判红；对 `readme.md` 也回 206 → 「其余类别忽略」用例判红；416 带上 JSON 信封 → 空体断言判红。
+- [x] 7.3 `file` 路由对 `rangeable` 的类别经 7.2 的函数按 workspaces「文件预览」返回 200 / 206 / 416，其余类别忽略 `Range`。
+- [x] 7.4 测试：路由层「音视频的范围请求」场景，206 用真实监听的 HTTP 客户端断言字节与 `Content-Range`（`inject` 之外再走一次真连接）；流在区间读完前被客户端中止时描述符释放。
+- [x] 7.5 变异证据：`bytes=-100` 当成 `0-100` → 后缀区间用例判红；对 `readme.md` 也回 206 → 「其余类别忽略」用例判红；416 带上 JSON 信封 → 空体断言判红。
 
 Suggested fixture level: expanded - 公共 API 新增部分内容响应，区间边界与资源释放都要钉死
 Minimal mergeable slice: 7.1（纯函数与其测试）先合；7.2–7.4（发送函数、路由接入与路由测试）随后
@@ -284,7 +284,7 @@ Minimal mergeable slice: 9.1–9.2（移动）与 9.3–9.4（下载）互不依
   (a) 一个完整的 gzip 流之后的字节被忽略：带尾部字节的 tar.gz / gz 的列表等于去掉尾部后的列表，`truncated` 为 `false`。
   (b) typeflag 为 `1`–`6` 的 tar 成员没有正文：遍历器不按其头里的 `size` 跳过字节，下一个头紧随其后；该条目的 `size` 仍显示头里的值。
   各带用例与变异证据（去掉 (a) → 带尾部的包与无尾部的包列表不等或 `truncated` 为 `true` 而判红；去掉 (b) → 这类成员之后的成员丢失或错位而判红）。
-- [ ] 10.2 `archive.ts` 的 zip 部分：`yauzl`（新依赖，MIT，登记 `ATTRIBUTION.md`）只读中央目录；成员名超过 4096 字节的成员不计入结果，停读并置 `truncated`（名字随中央目录项读入后判定——`zip` 的名长字段只有 2 字节，读入量有界；不要求在 `yauzl` 交出该项之前拦截）。
+- [x] 10.2 `archive.ts` 的 zip 部分：`yauzl`（新依赖，MIT，登记 `ATTRIBUTION.md`）只读中央目录；成员名超过 4096 字节的成员不计入结果，停读并置 `truncated`（名字随中央目录项读入后判定——`zip` 的名长字段只有 2 字节，读入量有界；不要求在 `yauzl` 交出该项之前拦截）。
   实施注记见 `implementation-notes.md`「10.2（#1064）」。
 - [ ] 10.3 `GET /api/workspaces/:id/archive` 路由（新文件或并入 `rest-entries.ts`），`PREVIEW_ARCHIVE_MAX_ENTRIES` 经 `limits` 传入。
 - [ ] 10.4 测试（新文件 `server/test/workspaces-archive.test.ts`）：workspaces「压缩包列表」五个场景（含「声明超大的长文件名记录」：1 KiB 文件声明 4 GiB 的 `L` 记录、两个成员之后声明 1 GiB 的 pax 头、5000 字节的 zip 成员名与 `L` 名字、注入时钟的未压缩 tar 超时）。
