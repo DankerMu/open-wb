@@ -42,6 +42,59 @@ function importersOf(module: string): string[] {
   );
 }
 
+const API_SPECIFIER = /["']\.\/api\.js["']/g;
+
+/**
+ * 去注释后的源码里，说明符 `./api.js` 的每次出现是否都在以 `import type` 开头的语句内。按语句（上一个分号
+ * 之后）而不是按行判定，所以多行的 `import type {…}` 合规，`import { type X }`、`export … from` 与动态
+ * `import()` 都违规；一次都不出现也合规。
+ */
+function importsApiAsTypeOnly(text: string): boolean {
+  const code = stripTsComments(text);
+  return [...code.matchAll(API_SPECIFIER)].every(({ index }) => {
+    const statement = code.slice(code.lastIndexOf(";", index) + 1, index);
+    return /^\s*import\s+type\s/.test(statement);
+  });
+}
+
+describe("API 客户端源码模块划分", () => {
+  const LIB = "web/src/lib";
+
+  it("api-files.ts 的导出只被 api.ts 消费", () => {
+    expect(importersOf(`${LIB}/api-files`)).toEqual([`${LIB}/api.ts`]);
+  });
+
+  it("拆出的 API 模块对 ./api.js 只有类型导入", () => {
+    for (const module of ["api-sessions", "api-upload", "api-commands", "api-files"]) {
+      expect(importsApiAsTypeOnly(readRepoFile(`${LIB}/${module}.ts`)), module).toBe(true);
+    }
+  });
+
+  it("类型导入判定自证：值导入、内联 type、再导出与动态导入违规，多行类型导入与注释合规", () => {
+    // 样例里的说明符相对本文件解析到不存在的模块，不会被上面的导入者扫描算作对真实模块的导入。
+    expect(importsApiAsTypeOnly('import type { ApiClient } from "./api.js";')).toBe(true);
+    expect(
+      importsApiAsTypeOnly('import type {\n  ApiClient,\n  ApiError,\n} from "./api.js";'),
+    ).toBe(true);
+    expect(importsApiAsTypeOnly("import type { A } from './api.js';\nconst a = 1;")).toBe(true);
+    expect(importsApiAsTypeOnly('// import { a } from "./api.js";\nconst a = 1;')).toBe(true);
+    expect(importsApiAsTypeOnly('import { a } from "./other.js";')).toBe(true);
+    expect(importsApiAsTypeOnly('import { requestFailed } from "./api.js";')).toBe(false);
+    expect(importsApiAsTypeOnly('import { type ApiClient } from "./api.js";')).toBe(false);
+    expect(importsApiAsTypeOnly('import {\n  type ApiClient,\n} from "./api.js";')).toBe(false);
+    expect(importsApiAsTypeOnly('export { requestFailed } from "./api.js";')).toBe(false);
+    expect(importsApiAsTypeOnly('export type { ApiClient } from "./api.js";')).toBe(false);
+    expect(importsApiAsTypeOnly('const api = await import("./api.js");')).toBe(false);
+    expect(importsApiAsTypeOnly('import "./api.js";')).toBe(false);
+    // 一条合规的类型导入不替后面的值导入背书。
+    expect(
+      importsApiAsTypeOnly(
+        'import type { A } from "./api.js";\nimport { requestFailed } from "./api.js";',
+      ),
+    ).toBe(false);
+  });
+});
+
 describe("会话页源码模块划分", () => {
   it("页面只被 index.ts 导入；use-chat-session.ts 与 turn-actions.ts 不导入页面、不经 index 绕回", () => {
     expect(importersOf(`${CHAT}/page`)).toEqual([INDEX]);
