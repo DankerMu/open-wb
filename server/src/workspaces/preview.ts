@@ -3,7 +3,8 @@
  *
  * classifyPreview uses the trusted file name, the size and the caller's options
  * (limits, and whether a prefix sniffed as text) and never opens the opaque
- * absPath; sniffText judges only the bytes it is handed. openPreviewStream
+ * absPath; needsTextSniff tells the caller whether that prefix is wanted at all;
+ * sniffText judges only the bytes it is handed. openPreviewStream
  * streams native bytes up to a nonnegative caller-supplied limit; HTTP status
  * mapping and sandbox resolve remain outside this module. Range parsing
  * (parseRange) and the closed-interval stream (openRangeStream) live here too.
@@ -85,9 +86,7 @@ export function classifyPreview(
   options: { limits: PreviewLimits; sniffedText?: boolean },
 ): PreviewClassification {
   const { limits } = options;
-  // No dot, or the only dot leading (`.env`, `.gitignore`): no extension.
-  const dot = name.lastIndexOf(".");
-  const ext = dot <= 0 ? "" : name.slice(dot + 1).toLowerCase();
+  const ext = extensionOf(name);
 
   if (TEXT_EXTENSIONS.has(ext) || TEXT_FILE_NAMES.has(name)) {
     return text(size, limits.text);
@@ -120,6 +119,29 @@ export function classifyPreview(
     return text(size, limits.text);
   }
   throw new HttpError("preview_unsupported");
+}
+
+/**
+ * Whether `classifyPreview` would look at `sniffedText` for this name: it is in no row of the
+ * table and not served elsewhere. Only then may a caller read the file to sniff it.
+ */
+export function needsTextSniff(name: string): boolean {
+  const ext = extensionOf(name);
+  return !(
+    TEXT_EXTENSIONS.has(ext) ||
+    TEXT_FILE_NAMES.has(name) ||
+    IMAGE_CONTENT_TYPES.has(ext) ||
+    AUDIO_CONTENT_TYPES.has(ext) ||
+    VIDEO_CONTENT_TYPES.has(ext) ||
+    NOTEBOOK_EXTENSIONS.has(ext) ||
+    SERVED_ELSEWHERE.has(ext)
+  );
+}
+
+/** Lower-cased; no dot, or the only dot leading (`.env`, `.gitignore`): no extension. */
+function extensionOf(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot <= 0 ? "" : name.slice(dot + 1).toLowerCase();
 }
 
 /**

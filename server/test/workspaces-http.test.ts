@@ -525,8 +525,8 @@ describe("workspace REST", () => {
       writeFileSync(join(root, "deck.pptx"), "PK");
       writeFileSync(join(root, "huge.png"), "");
       truncateSync(join(root, "huge.png"), 21 * 1024 * 1024);
-      writeFileSync(join(root, "file.__proto__"), "x");
-      writeFileSync(join(root, "file.constructor"), "x");
+      writeFileSync(join(root, "file.__proto__"), Buffer.from([0x78, 0x00]));
+      writeFileSync(join(root, "file.constructor"), Buffer.from([0x78, 0x00]));
       execFileSync("mkfifo", [join(root, "pipe.zip")]);
       insertWorkspace(db, U1_PREVIEW, "u1", "preview", "preview", 1);
       const cookie = bearerCookie(await loginSessionId(app, "zhangsan"));

@@ -1,4 +1,4 @@
-import { lstatSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import { Readable } from "node:stream";
 import type {
@@ -13,7 +13,14 @@ import type {
 } from "fastify";
 import { HttpError } from "../core/errors/index.js";
 import type { createSandbox } from "../core/sandbox/index.js";
-import { classifyPreview, DEFAULT_PREVIEW_LIMITS, openPreviewStream } from "./preview.js";
+import {
+  classifyPreview,
+  DEFAULT_PREVIEW_LIMITS,
+  needsTextSniff,
+  openPreviewStream,
+  type PreviewLimits,
+  sniffText,
+} from "./preview.js";
 import type { WorkspaceStore } from "./store.js";
 import { listOneLevel } from "./tree.js";
 import { storeUpload } from "./upload.js";
@@ -26,6 +33,8 @@ export interface WorkspaceRestDependencies {
   listEvents: { notify(ownerId: string): void };
   /** Byte limit of one uploaded file (UPLOAD_MAX_BYTES): a positive safe integer. */
   uploadMaxBytes: number;
+  /** Preview limits (text, image, notebook); omitted means the specification defaults. */
+  limits?: PreviewLimits;
 }
 
 type OwnedPreParsing = preParsingHookHandler<
@@ -41,6 +50,8 @@ const UPLOAD_MEDIA_TYPE = "application/octet-stream";
 const UPLOAD_NAME_MAX_BYTES = 255;
 /** Reserved for the temporary files `storeUpload` writes into the same directory. */
 const UPLOAD_TEMP_PREFIX = ".upload-";
+/** How much of an unknown or extensionless file is read to decide whether it is text. */
+const SNIFF_BYTES = 8192;
 
 export const noStoreWorkspaceResponse: onRequestHookHandler = (_request, reply, done) => {
   reply.header("Cache-Control", "no-store");
@@ -155,6 +166,34 @@ export function lstatExisting(path: string) {
   }
 }
 
+/**
+ * Reads at most the first SNIFF_BYTES of a file the route has just lstat-ed as regular and says
+ * whether they read as text. The path may have been replaced since that lstat, so the open neither
+ * follows a final symlink nor waits on a pipe, and what was opened is checked from its descriptor
+ * before any read: anything but a regular file is the same `not_found` as in the route.
+ */
+function sniffedAsText(absPath: string): boolean {
+  let fd: number;
+  try {
+    fd = openSync(absPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ELOOP") {
+      throw new HttpError("not_found");
+    }
+    throw error;
+  }
+  try {
+    if (!fstatSync(fd).isFile()) {
+      throw new HttpError("not_found");
+    }
+    const buffer = Buffer.alloc(SNIFF_BYTES);
+    const bytesRead = readSync(fd, buffer, 0, SNIFF_BYTES, 0);
+    return sniffText(buffer.subarray(0, bytesRead));
+  } finally {
+    closeSync(fd);
+  }
+}
+
 function isStructuralAbsence(error: unknown): boolean {
   return (
     typeof error === "object" &&
@@ -169,6 +208,7 @@ export function registerWorkspaceRest(
   dependencies: WorkspaceRestDependencies,
 ): void {
   const maxBytes = dependencies.uploadMaxBytes;
+  const limits = dependencies.limits ?? DEFAULT_PREVIEW_LIMITS;
   // Here and not inside the plugin below: there it would only throw at `ready`.
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
     throw new Error("upload max bytes must be a positive safe integer");
@@ -285,11 +325,14 @@ export function registerWorkspaceRest(
       if (status === undefined || !status.isFile()) {
         throw new HttpError("not_found");
       }
-      const preview = classifyPreview(absPath, basename(absPath), status.size, {
-        limits: DEFAULT_PREVIEW_LIMITS,
+      const name = basename(absPath);
+      // A known extension is never opened here: only a name the table does not decide is sniffed.
+      const preview = classifyPreview(absPath, name, status.size, {
+        limits,
+        ...(needsTextSniff(name) ? { sniffedText: sniffedAsText(absPath) } : {}),
       });
-      for (const [name, value] of Object.entries(preview.headers)) {
-        reply.header(name, value);
+      for (const [header, value] of Object.entries(preview.headers)) {
+        reply.header(header, value);
       }
       // nosemgrep: javascript.express.security.audit.xss.direct-response-write.direct-response-write -- classifier permits text/plain, raster images, audio and video only (html/svg/xml go out as text/plain); nosniff remains set.
       return reply.send(openPreviewStream(absPath, preview.limit));
