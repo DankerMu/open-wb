@@ -530,7 +530,7 @@
 - 判定「要不要嗅探」需要谓词：`preview.ts` 新增导出 `needsTextSniff(name: string): boolean`（不在五行表、不是两个文件名、不在 `SERVED_ELSEWHERE` 时为真），与 `classifyPreview` 共用一个模块内的扩展名提取函数；分类表与集合一个字不动，守住「不改分类表」。不许用「先分类、捕获 `preview_unsupported` 再嗅探重试」：那样 `doc.pdf` 也会被读，违反「文件预览」条文。
 - 读取实现钉死：`rest.ts` 从 `node:fs` 取 `openSync` / `readSync` / `closeSync`，`readSync(fd, Buffer.alloc(8192), 0, 8192, 0)` 一次，`finally` 里关，把 `buf.subarray(0, bytesRead)` 交给 `sniffText`，结果作为 `sniffedText` 传入。不用 `fs.promises`（`workspace-file-helpers.ts:20` 的 `spyBodyIo` 看不见，读取计数会空过）。0 字节文件也走同一条路，不加特例。
 - 依赖对象：`WorkspaceRestDependencies`（`rest.ts:21`）加 `limits?: PreviewLimits`，`registerWorkspaceRest` 内 `dependencies.limits ?? DEFAULT_PREVIEW_LIMITS`，替换 `:289`。`AssemblyDependencies`（`app.ts:76`）加 `previewLimits?: PreviewLimits`，`app.ts:226` 按 `exactOptionalPropertyTypes` 条件展开转发，缺省只在 workspaces 一处。路由不读环境变量。
-- 规格没写的分支（进偏离记录）：`limits` 不做 `uploadMaxBytes` 式的正整数校验（配置层已限 `1..2147483647`）；嗅探的 `openSync` / `readSync` 失败（含文件在 `lstat` 后消失）原样抛出，即 generic 500，此时尚未写任何预览头；不传 `limits` 的对象整体缺省，不支持只给部分字段；音视频中间态不变（200 全量带 `Accept-Ranges: bytes`、忽略 `Range`，到 #1058 为止）。
+- 规格没写的分支（进偏离记录）：`limits` 不做 `uploadMaxBytes` 式的正整数校验（配置层已限 `1..2147483647`）；嗅探打开被拒时，`ENOENT` / `ENOTDIR`（文件或其父目录在 `lstat` 后消失，复用 `isStructuralAbsence`）、`ELOOP`（换成符号链接）、`ENXIO`（Linux）/ `EOPNOTSUPP`（macOS，换成 unix socket）都按路由既有的 404 处理、不写审计（预审补记，规格「目标不存在 → 404」）；其余 `openSync` / `fstatSync` / `readSync` 失败（`EACCES`、`EIO`、`EMFILE` 等）原样抛出，即 generic 500，此时尚未写任何预览头。macOS 的 `EOPNOTSUPP`（102）在 Node 里没有名字，`error.code` 是 `Unknown system error -102`，所以按 `errno === -os.constants.errno.EOPNOTSUPP` 比，为此 `rest.ts` 多一行 `node:os` 的 import；不传 `limits` 的对象整体缺省，不支持只给部分字段；音视频中间态不变（200 全量带 `Accept-Ranges: bytes`、忽略 `Range`，到 #1058 为止）。
 - D-23 窗口如实陈述：未知或无扩展名文件在 `resolve` → `lstat` 之后的按路径打开由一次（读流）变两次（嗅探加读流），都没有 `O_NOFOLLOW` / `O_NONBLOCK`，嗅探的同步 `openSync` 遇到被换入的命名管道会卡住事件循环（原先只卡线程池）。它属 D22「已知残余」里 `file` 那一条的同一个窗口，本刀不闭合、不加防护，也不对已知扩展名引入新的打开。两次打开之间文件被换时，响应类型仍是 `text/plain` 加 `nosniff`，不会变成文档类型。**实施时由编排方覆盖（不得加宽残余）**：嗅探那一次打开改为 `O_RDONLY | O_NOFOLLOW | O_NONBLOCK`，随后 `fstatSync(fd).isFile()`，非普通文件与 `ELOOP` 都按路由既有的 404 处理、不调 `readSync`——所以被换入的命名管道不会卡住事件循环，末段被换成的符号链接不被跟随。其后的读流仍按路径 `createReadStream`，窗口没有闭合。
 - 测试落新文件 `server/test/workspaces-file-sniff.test.ts`（`workspaces-http.test.ts` 已 736 行，只做漂移二的两处内容改写，不加行）。`workspaces-http-helpers.ts:18` 的 `withWorkspacesApp` 加第三个可选参 `options: { previewLimits?: PreviewLimits } = {}` 并入 `assembly`（先例 `workspace-upload-helpers.ts:83`），不另抄一份（jscpd）。
 - 用例一「未知与无扩展名文件的嗅探」：`LICENSE`、`.gitignore`、`schema.proto`、0 字节 `empty` 为 200 `text/plain; charset=utf-8` 精确字节（`empty` 空体、`X-Workbuddy-Size: 0`）；含 `0x00` 的 `blob.bin` 与 `core` 为 415 信封，无 `X-Workbuddy-Size`。另补：文本内容的 `x.constructor` 为 200；10 KiB 文件 NUL 在偏移 8192 为 200、在 8191 为 415；8192 处切开三字节汉字仍为 200；1.5 MiB 的未知扩展名文本被截到 1048576 并带截断头。
@@ -550,7 +550,10 @@
 - 变异：缺省值改成别的数 → 既有 `big.log`（1048576）、`large.png`（11 MiB 为 200）与用例三的 `big.ipynb` 413 判红。
 - 变异：嗅探通过的文本不走文本上限 → 用例一的 1.5 MiB 未知扩展名截断与用例三的 `LICENSE` 截到 16 判红。
 - 变异：原型名：查表改成对象字面量 → `workspaces-http.test.ts:574-583`（改成二进制内容后）的 415 判红。
-- 变异：不可观察：`closeSync` 漏掉（描述符泄漏，`inject` 下无断言能抓，评审读代码确认 `finally`）；0 字节文件是否跳过读取。
+- 变异：`closeSync` 漏掉 → 可观察（测试另 spy 了 `fs.closeSync`）：用例二对照组 `LICENSE` 的「关掉的正是嗅探打开的那个 fd」，以及替换用例里换成命名管道、换成目录两例的「打开的 fd 都已关」判红。不可观察的只剩：0 字节文件是否跳过读取。
+- 替换用例怎么注入替换：`fs.openSync` 的 spy 在路由第一次以目标路径调用时，先删掉目标、放上替换物（命名管道 / 符号链接 / 目录 / 什么都不放 / 把父目录换成普通文件 / unix socket），再调真实的 `openSync`——正好落在路由的 `lstat` 与嗅探打开之间，不依赖沙箱内部 `lstat` 的次数。`EACCES` 一例在同一处把文件放回原样后直接抛出带 `code: "EACCES"` 的错误。命名管道一例不再带 `skipIf`（同文件用例四与既有 `workspaces-http.test.ts` 本来就无条件调用 `mkfifo`）。
+- 变异（预审补）：所有打开错误都映射成 404 → `EACCES` 一例判红（404 而非 500）；去掉 `ENOENT` → 「删除」一例判红；去掉 `ENOTDIR` → 「父目录换成普通文件」一例判红；去掉 socket 的两个 errno、或只去掉 `EOPNOTSUPP`、或把它写成按名字比（`code === "EOPNOTSUPP"`）→ unix socket 一例在 macOS 判红；只去掉 `ENXIO` 在 macOS 不可观察，Linux（CI）上该例判红（容器里探过：Linux 打开 socket 得到 `ENXIO`）。
+- 变异（预审补）：已知扩展名改用 `readFileSync(absPath)` 嗅探 → 用例二判红；带 `"utf8"` 的写法不经过 `openSync`，靠新加的「工作空间根下零 `readFileSync` / `readFile`」断言抓到（原断言放过）。响应读流自己会对路径调一次异步 `fs.open`，所以对 200 的已知名字断言的是「异步打开恰一次」，对 `doc.pdf`（415）断言路径下零打开。
 
 ## 7.2、7.3、7.4、7.5（#1058）
 
