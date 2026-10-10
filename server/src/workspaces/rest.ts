@@ -1,4 +1,5 @@
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from "node:fs";
+import { constants as osConstants } from "node:os";
 import { basename, dirname } from "node:path";
 import { Readable } from "node:stream";
 import type {
@@ -170,14 +171,23 @@ export function lstatExisting(path: string) {
  * Reads at most the first SNIFF_BYTES of a file the route has just lstat-ed as regular and says
  * whether they read as text. The path may have been replaced since that lstat, so the open neither
  * follows a final symlink nor waits on a pipe, and what was opened is checked from its descriptor
- * before any read: anything but a regular file is the same `not_found` as in the route.
+ * before any read: anything but a regular file is the same `not_found` as in the route. So is an
+ * open refused because nothing is there any more (ENOENT, ENOTDIR), because a symlink is (ELOOP),
+ * or because a socket is (ENXIO on Linux, EOPNOTSUPP on macOS); any other failure is thrown as is.
  */
 function sniffedAsText(absPath: string): boolean {
   let fd: number;
   try {
     fd = openSync(absPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   } catch (error) {
-    if (typeof error === "object" && error !== null && "code" in error && error.code === "ELOOP") {
+    const { code, errno } = error instanceof Error ? (error as NodeJS.ErrnoException) : {};
+    if (
+      isStructuralAbsence(error) ||
+      code === "ELOOP" ||
+      code === "ENXIO" ||
+      // By number: Node has no name for macOS's EOPNOTSUPP and reports "Unknown system error".
+      errno === -osConstants.errno.EOPNOTSUPP
+    ) {
       throw new HttpError("not_found");
     }
     throw error;

@@ -1,12 +1,25 @@
 import { execFileSync, spawn } from "node:child_process";
-import fs, { mkdirSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import fs, {
+  lstatSync,
+  mkdirSync,
+  rmSync,
+  symlinkSync,
+  truncateSync,
+  writeFileSync,
+} from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
+import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { appAssemblyOf, resolveServerConfig } from "../src/server.js";
-import { bearerCookie, loginSessionId, NOT_FOUND_ENVELOPE } from "./auth-lifecycle-helpers.js";
+import {
+  bearerCookie,
+  INTERNAL_ERROR_ENVELOPE,
+  loginSessionId,
+  NOT_FOUND_ENVELOPE,
+} from "./auth-lifecycle-helpers.js";
 import { spyBodyIo, TEXT_MIME } from "./workspace-file-helpers.js";
 import {
   expectWorkspaceResponse,
@@ -25,15 +38,6 @@ const TOO_LARGE_ENVELOPE = { error: { code: "preview_too_large", message: "æ–‡ä»
 const SOURCE_ENTRY = pathToFileURL(
   join(resolve(dirname(fileURLToPath(import.meta.url)), "..", ".."), "server", "src", "server.ts"),
 ).href;
-const MKFIFO_AVAILABLE = (() => {
-  try {
-    execFileSync("mkfifo", ["--version"], { stdio: "ignore" });
-    return true;
-  } catch (error) {
-    // Present but without `--version` (BSD) exits non-zero; only a missing binary has no status.
-    return typeof (error as { status?: unknown }).status === "number";
-  }
-})();
 
 /** The workspace `sniff` of u1, with `files` written before anything is spied on. */
 function seed(
@@ -57,6 +61,10 @@ function spyOpenAndRead() {
   const read = vi.mocked(fs.readSync);
   const close = vi.spyOn(fs, "closeSync");
   syncBuiltinESMExports();
+  const pathsBelow = (dir: string, spies: readonly unknown[]) =>
+    spies
+      .flatMap((spied) => vi.mocked(spied as typeof fs.openSync).mock.calls.map(([path]) => path))
+      .filter((path) => typeof path === "string" && path.startsWith(dir));
   return {
     open,
     read,
@@ -66,9 +74,11 @@ function spyOpenAndRead() {
     opensOf: (path: string) => open.mock.calls.filter(([opened]) => opened === path),
     /** Every path-based open or stream below `dir`, whichever call made it. */
     opensBelow: (dir: string) =>
-      [fs.openSync, fs.open, fs.createReadStream, fs.readFileSync, fs.readFile]
-        .flatMap((spied) => vi.mocked(spied).mock.calls.map(([opened]) => opened))
-        .filter((opened) => typeof opened === "string" && opened.startsWith(dir)),
+      pathsBelow(dir, [fs.openSync, fs.open, fs.createReadStream, fs.readFileSync, fs.readFile]),
+    /** Whole-file reads by path below `dir`. */
+    wholeReadsBelow: (dir: string) => pathsBelow(dir, [fs.readFileSync, fs.readFile]),
+    /** Asynchronous opens of `path`: the response stream makes exactly one of its own. */
+    asyncOpensOf: (path: string) => pathsBelow(path, [fs.open]),
   };
 }
 
@@ -195,10 +205,15 @@ describe("file route: sniff reads", () => {
         const response = await requestWorkspaceFile(app, U1_SNIFF, cookie, path);
         expect(response.statusCode, path).toBe(status);
         expect(io.opensOf(join(root, path)), path).toEqual([]);
+        // The one asynchronous open is the response stream's; the refused one has no stream.
+        expect(io.asyncOpensOf(join(root, path)), path).toHaveLength(status === 200 ? 1 : 0);
       }
       // No descriptor was opened by path, so nothing was read through one either.
       expect(io.open.mock.calls.filter(([opened]) => String(opened).startsWith(root))).toEqual([]);
       expect(io.sniffReads()).toEqual([]);
+      // Nor was any of them read whole by path: the response stream is all there is.
+      expect(io.wholeReadsBelow(root)).toEqual([]);
+      expect(io.opensBelow(join(root, "doc.pdf"))).toEqual([]);
 
       const license = await requestWorkspaceFile(app, U1_SNIFF, cookie, "LICENSE");
       expect(license.statusCode).toBe(200);
@@ -370,11 +385,14 @@ describe("file route: the sniff stays behind the sandbox", () => {
 describe("file route: the target is swapped between lstat and the sniff open", () => {
   interface Swapped {
     status: number;
+    headers: Record<string, unknown>;
     payload: string;
     elapsedMs: number;
     /** Descriptors the sniff open returned for the target, and the reads made through them. */
     descriptors: number[];
     readsThroughThem: number;
+    /** Reads of the sniff's length through any descriptor at all. */
+    sniffReads: number;
     closed: number[];
     streamsOfTarget: number;
     audits: unknown;
@@ -412,10 +430,12 @@ describe("file route: the target is swapped between lstat and the sniff open", (
         });
         return {
           status: response.statusCode,
+          headers: response.headers,
           payload: response.payload,
           elapsedMs,
           descriptors,
           readsThroughThem: io.read.mock.calls.filter(([fd]) => descriptors.includes(fd)).length,
+          sniffReads: io.sniffReads().length,
           closed: io.closed(),
           streamsOfTarget: vi
             .mocked(fs.createReadStream)
@@ -443,24 +463,20 @@ describe("file route: the target is swapped between lstat and the sniff open", (
   // A blocking open of a pipe nobody writes to stops the event loop, and with it the test's own
   // timer. The delayed writer below releases such an open after three seconds, so that failure
   // shows as a slow answer instead of a run that never ends.
-  it.skipIf(!MKFIFO_AVAILABLE)(
-    "a named pipe: answers 404 promptly without reading from it",
-    async () => {
-      const swapped = await requestWithSwap((target) => {
-        execFileSync("mkfifo", [target]);
-        const writer = spawn("sh", ["-c", 'sleep 3; exec 3>"$0"', target], { stdio: "ignore" });
-        return () => {
-          writer.kill("SIGKILL");
-        };
-      });
+  it("a named pipe: answers 404 promptly without reading from it", async () => {
+    const swapped = await requestWithSwap((target) => {
+      execFileSync("mkfifo", [target]);
+      const writer = spawn("sh", ["-c", 'sleep 3; exec 3>"$0"', target], { stdio: "ignore" });
+      return () => {
+        writer.kill("SIGKILL");
+      };
+    });
 
-      expectNotFoundUnread(swapped);
-      // The pipe was opened (not refused by path) and recognised from its descriptor.
-      expect(swapped.descriptors).toHaveLength(1);
-      expect(swapped.elapsedMs).toBeLessThan(1500);
-    },
-    15_000,
-  );
+    expectNotFoundUnread(swapped);
+    // The pipe was opened (not refused by path) and recognised from its descriptor.
+    expect(swapped.descriptors).toHaveLength(1);
+    expect(swapped.elapsedMs).toBeLessThan(1500);
+  }, 15_000);
 
   it("a symlink to a file outside the workspace: answers 404 and never opens the target", async () => {
     const swapped = await requestWithSwap((target, sandboxRoot) => {
@@ -480,5 +496,67 @@ describe("file route: the target is swapped between lstat and the sniff open", (
 
     expectNotFoundUnread(swapped);
     expect(swapped.descriptors).toHaveLength(1);
+  }, 15_000);
+
+  /** Refused by the open itself: no descriptor, so nothing to read from or to close. */
+  function expectNotFoundUnopened(swapped: Swapped): void {
+    expectNotFoundUnread(swapped);
+    expect(swapped.descriptors).toEqual([]);
+    expect(swapped.sniffReads).toBe(0);
+  }
+
+  it("nothing at all (the file was deleted): answers 404 without a descriptor", async () => {
+    // The harness has already removed the target; nothing takes its place.
+    expectNotFoundUnopened(await requestWithSwap(() => undefined));
+  }, 15_000);
+
+  it("a regular file where its parent directory was: answers 404 without a descriptor", async () => {
+    const swapped = await requestWithSwap((target) => {
+      rmSync(dirname(target), { recursive: true });
+      writeFileSync(dirname(target), "no longer a directory\n");
+      return undefined;
+    });
+
+    expectNotFoundUnopened(swapped);
+  }, 15_000);
+
+  it("a unix socket: answers 404 without a descriptor", async () => {
+    let boundAsSocket = false;
+    const swapped = await requestWithSwap((target) => {
+      // The bind is synchronous; a refused one is reported later and leaves nothing at the path.
+      const server = createServer().on("error", () => undefined);
+      server.listen(target);
+      boundAsSocket = lstatSync(target, { throwIfNoEntry: false })?.isSocket() === true;
+      return () => {
+        server.close();
+      };
+    });
+
+    expect(boundAsSocket).toBe(true);
+    expectNotFoundUnopened(swapped);
+  }, 15_000);
+
+  it("an open refused for any other reason is the generic 500, not a 404", async () => {
+    const swapped = await requestWithSwap((target) => {
+      // Put the file back: the path is a regular text file again and only the open fails.
+      writeFileSync(target, "inside text\n");
+      throw Object.assign(new Error(`EACCES: permission denied, open '${target}'`), {
+        code: "EACCES",
+        errno: -13,
+        syscall: "open",
+        path: target,
+      });
+    });
+
+    expect(swapped.status).toBe(500);
+    expect(JSON.parse(swapped.payload)).toEqual(INTERNAL_ERROR_ENVELOPE);
+    expect(swapped.payload).not.toContain("notes.proto");
+    expect(swapped.payload).not.toContain("sniff");
+    expect(swapped.headers["x-workbuddy-size"]).toBeUndefined();
+    expect(swapped.headers["x-workbuddy-truncated"]).toBeUndefined();
+    expect(swapped.headers["content-type"]).toBe("application/json; charset=utf-8");
+    expect(swapped.sniffReads).toBe(0);
+    expect(swapped.streamsOfTarget).toBe(0);
+    expect(swapped.audits).toEqual({ count: 0 });
   }, 15_000);
 });
