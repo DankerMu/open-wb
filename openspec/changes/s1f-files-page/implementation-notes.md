@@ -589,3 +589,40 @@
 - 变异：逃逸，他人或不存在的 id：把 `ensureOwnedRoot` 挪到 `resolve` 之后 → 「他人 id 带 `../x.mp4` → 404 且审计零行」预期不可观察（facade 自己先查 `rootOf`，见 6.1 的实施后更正二），只在 `workspaces-http-failures.test.ts` 的「根目录缺失」用例判红。
 - 变异：逃逸，`op`：`"read"` 换成 `"list"` → 审计行 `op` 断言判红。
 - 变异：预期不可观察：`lstat` 之后文件被替换或截短（#1286 窗口），测试不制造竞态，属登记的残余。
+
+## 10.2（#1064）
+
+- Critical Path（沙箱与文件边界类）：本刀在服务进程里解析攻击者可控的字节，并首次让第三方解析器 `yauzl` 接触这些字节；不碰 `sandbox.resolve`、不加 `op`、不加路由，没有 resolve→open 窗口，对 #1286（D-23）既不闭合也不放宽。PR 标注白盒审查、两个评审席；「他人工作空间 → 相同 404」「越界 → `sandbox.reject`」归 #1065。
+- 前置与漂移：0.1、10.1（#1063）、10.6（#1301）都已合入，不等 1.1/1.2/1.3。issue 的 10.2 原文与 `tasks.md:285` 逐字相同。差异三处：issue 引的切片声明缺 10.6 一句；issue 的「只认 tar/tar.gz/gz」仍成立，但 gzip 容器已由 `archive.ts` 自己解析；`archive.ts` 现为 588 行，文首 `:3` 的「The zip half and the route come later」与 `:7-10` 的不变量段要改写。
+- 依赖事实：`yauzl` 3.4.0，MIT（© 2014 Josh Wolfe），唯一间接依赖 `pend ~1.2.0`（MIT，© 2014 Andrew Kelley），两包都没有 install 脚本；GHSA-gmq8-994r-jv83 只影响 `=3.2.0`。`server/package.json` 的 `dependencies` 加 `"yauzl": "^3.4.0"`，新建 `devDependencies` 放 `"@types/yauzl": "^3.4.0"`（MIT；与 `yauzl` 同一 manifest，knip 若仍报再挪到根）。根 `package-lock.json` 现无这三个包，必须重生成，否则 CI 的 `npm ci` 失败。
+- 依赖守卫：仓库没有许可证扫描，`constraints.yaml` 没有依赖规则，`docs/architecture/system.md` 没有依赖表（不动）。`ATTRIBUTION.md` 第 3 节加一行，以 `- **yauzl** —— \`MIT License\`,版权归 Josh Wolfe（https://github.com/thejoshwolfe/yauzl）` 开头，用途里写明 `pend`（MIT）。在 `web/test/ui-guardrails.test.ts:243` 的 `react-resizable-panels` 用例旁加一条 `hasEntry(…, "yauzl", /\bMIT\b/)`，并断言 `server/package.json` 的 `dependencies` 含 `yauzl`（该文件 264 行）。PR 描述按 `AGENTS.md:40` 写 D7 的理由。
+- 签名扩展（10.1 注记已预留，记入偏离记录）：`ArchiveFormat` 加 `"zip"`，`archiveFormat` 认 `.zip`。`listArchive` 的 `options` 改为 `{maxEntries: number; now: () => number; size: number}`，`size` 是压缩包字节数，必填，只有 zip 读它。不做可选：漏传会让 yauzl 同步抛错，被映射成所有 zip 都 415。`readAt` 契约不变。
+- 喂给 yauzl 的方式：`class … extends RandomAccessReader`，只 `override read(buffer, offset, length, position, callback)`，不实现 `_readStreamForRange`，不用 `open`/`fromFd`/`fromBuffer`。yauzl 一次会要 65577 字节（EOCD 搜索，文件 ≥ 65577 字节时）和至多 196605 字节（单个目录项的名字+扩展+注释）。适配器按 ≤65536 字节一片循环调 `readAt`，保住「单次 `readAt` ≤ 65536」对全部格式成立；内存上界另记为 yauzl 自己的两个缓冲。
+- 短读必须报错：`@types/yauzl` 的回调类型是 `(err) => void`，而 yauzl 只靠第二个实参 `bytesRead < length` 判 EOF，缓冲是 `Buffer.allocUnsafe`。短读时调 `callback(null)` 会把未初始化的堆内存当成成员名返回。任一片短读即 `callback(new CorruptArchive())`。`readAt` 的拒绝先存到 reader 上再交给 callback，外层据此原样重抛。
+- 选项与取值：用 `fromRandomAccessReaderPromise(reader, size, {decodeStrings: false, validateEntrySizes: false})` 加 `for await (… of zipfile.eachEntry())`。`decodeStrings: true` 时 `validateFileName` 会把 `../../etc/passwd`、`/abs/x`、含 `\` 的名字变成错误；`validateEntrySizes: true` 时 stored 成员大小不等也成错误。不读 `entry.fileName`（运行时是 Buffer），`path = entry.fileNameRaw.toString("utf8")`，`type` 只看 `path.endsWith("/")`，`size = entry.uncompressedSize`。
+- 名字解码的偏离记录：不看位 11、不做 CP437、不认 0x7075 扩展，即不用 `getFileNameLowLevel`。理由是规格字面写「不合法的 UTF-8 → U+FFFD」，与 tar 一致，未置位的 UTF-8 名仍正确，且名字长度只有 `fileNameLength` 一个来源。4096 上限按 `entry.fileNameRaw.length`（同 tar 的 `memberName`）：超出则不计入、停读、`truncated: true`，此前零项则 415。
+- 上限与结束：push 之后 `entries.length === maxEntries` 即返回 `truncated: true`，不读下一项，也不信 `entryCount`；恰有上限那么多成员的包同样报 `truncated`，与 tar 一致，记入偏离记录。`finally` 里 `zipfile?.close()`，并挂一个常驻的 `zipfile.on("error", () => {})`。zip 不读时钟（规格与 D7 只给 tar/tar.gz 5 秒）；有限性靠读取次数 ≤ 2·maxEntries + 3（未分片计）、每次有界、不解压。
+- 错误映射只有一条，同 tar：yauzl 的任何拒绝在零项时是 `HttpError("preview_unsupported")`，已有项时是 `truncated: true`，存下的 `readAt` 失败原样抛。实测落入此规则的有：找不到 EOCD（`fake.zip`、0 字节、目录被截断）、EOCD 之后有多余字节、目录偏移越界或没算前缀（自解压包）、条目数虚高、强加密位 0x40、扩展字段长度越界。前缀与尾部两种 415 和 10.6 的 gzip 尾部忽略不同，记入偏离记录。
+- 按声明如实返回、不算损坏的情形：条目数虚低或为 0 时只列声明的那么多，`truncated: false`；空 zip 是 `entries: []`、`truncated: false`；zip64 的 `size` 超过 2^53 时是失精度的 number（实测 18446744073709552000）。
+- 行数与落位：zip 约 110–130 行，`archive.ts` 到约 710 行，留在本文件，不必拆兄弟文件；草稿超过约 760 行才拆 `archive-zip.ts`。文首注释写明 yauzl 加载时 `require("fs")`，但经 `RandomAccessReader` 从不调用。字节构造器 `zipCentral`、`zipArchive` 进 `workspaces-archive-helpers.ts`（204 行），不写本地文件头和成员正文，每个导出都被测试导入；`archiveOnDisk`/`list` 给出 `size: bytes.length`，`list` 的 `options` 参数显式标注为不含 `size` 的类型，`DEFAULTS` 加 `size: 0`。
+- 测试与清单：规格点名的五例进 `workspaces-archive.test.ts`（441 行）——`archiveFormat` 的 `x.zip`/`X.ZIP` 行、`x.zip` 三项并入「无新增文件」用例、1500 成员的 `big.zip`（>65577 字节，断言恰 1000 项、`maxLength() ≤ 65536`、`positions` 不含第 1001 项的偏移）、`long.zip`、`fake.zip`、恶意名并入既有 `spyBodyIo` 用例。其余边界进新文件 `server/test/workspaces-archive-zip.test.ts`。既有断言不用改，只有两处内联 `options` 各加一行 `size`（`workspaces-archive.test.ts:259`、`workspaces-archive-tar.test.ts:106`，后者 781 → 782 行，不得再加）。纯服务端库函数，no checklist rows；不新增配置键。
+- 变异：到上限后继续读，或把上限判定挪到取下一项之后 → `big.zip` 的「恰 1000 项」与 `positions` 断言判红。
+- 变异：去掉 4096 上限 → `long.zip` 的「恰两项 + `truncated`、没有超过 4096 字节的 `path`」判红；超长成员「跳过后继续」→ 同例判红，夹具在超长成员后须再放一个正常成员。
+- 变异：`decodeStrings: true` → 恶意成员名用例判红（一项之后 `truncated`）。
+- 变异：对名字做规范化（`\` → `/`、去前导 `/`）→ 恶意名用例判红，名单里须含一个带 `\` 的名字。
+- 变异：改用 `yauzl.open(path)` 或 `fromFd` → `spyBodyIo` 的 `fs.open`/`fs.read` 断言判红。
+- 变异：`validateEntrySizes: true` → 新例「stored 成员 compressedSize ≠ uncompressedSize 仍被列出」判红。
+- 变异：`size` 取 `compressedSize` → 新例「method 8、两个大小不等」判红。
+- 变异：目录按外部属性或 `size === 0` 判 → `x.zip` 的 `dir/` 与新例「零字节文件是 `file`」判红。
+- 变异：适配器不分片 → `big.zip` 的 `maxLength() ≤ 65536` 判红（实测为 65577）；新例「扩展 65532 + 注释 65535 的胖目录项」同样判红（实测为 131068）。
+- 变异：短读当作读满（`callback(null)`）→ 新例「中央目录在第二项中间被截断、EOCD 仍指向它」判红：应为一项 + `truncated`，变异后多出垃圾名。
+- 变异：`readAt` 失败被吞成 415 或 `truncated` → 新例「zip 的读函数失败原样抛出」（首次读失败、读出两项后失败各一）判红。
+- 变异：用 `getFileNameLowLevel` 或 CP437 解码 → 新例「未置位 11 的 UTF-8 中文名原样」「`ff fe 41` → `\ufffd\ufffdA`」判红。
+- 变异：`archiveFormat` 不认 `.zip`，或 `format` 回错 → `x.zip` 行与三项用例判红。
+- 变异：EOCD 后的多余字节改为容忍、条目数改为不信声明 → 新例「尾部 4 字节 → 不支持」「条目数虚高 → 三项 + `truncated`」「虚低 → 一项、`truncated: false`」判红。
+- 变异：空 zip 判成 415 → 新例「22 字节的空 zip → `[]`、`truncated: false`」判红。
+- 变异：整包读入内存 → `maxLength` 与 `positions` 断言判红；`x.zip` 加 100000 字节前缀并修正偏移，断言 `positions` 不含 0。
+- 变异：去掉 `finally` 里的 `close()`、去掉常驻 `error` 监听 → 不可观察（惰性读取下返回后没有在途读取，探针未见迟到的读），靠白盒审查。
+- 变异：给 zip 加或不加时限 → 不可观察（规格不给 zip 时限）；可加一条「`now` 抛错的时钟下 zip 照常列出」把「zip 不读时钟」钉住。
+- 变异：目录遍历、符号链接、跨工作空间 id、他人工作空间 404、越界审计 → 本刀没有路由，不可观察，归 #1065 / #1075。
+- 变异：删掉 `ATTRIBUTION.md` 的 yauzl 行 → `ui-guardrails.test.ts` 新增的那条判红；不加该用例则不可观察。
