@@ -152,6 +152,7 @@ describe("workspace delete: 删除文件与目录", () => {
       writeFileSync(join(root, "out", "a.md"), "a-content");
       writeFileSync(join(root, "out", "sub", "deep.txt"), "deep-content");
       const cookie = bearerCookie(await loginSessionId(app, "zhangsan"));
+      const inodes = ["notes.md", "out"].map((name) => lstatSync(join(root, name)).ino);
 
       const before = Date.now();
       expectDeleted(await remove(app, cookie, "notes.md"));
@@ -181,6 +182,11 @@ describe("workspace delete: 删除文件与目录", () => {
         "out/sub/": "dir",
         "out/sub/deep.txt": "file:deep-content",
       });
+      // Renamed, not copied: each is the inode it was.
+      expect([
+        lstatSync(join(trashOf(sandboxRoot), String(notesBatch), "notes.md")).ino,
+        lstatSync(join(trashOf(sandboxRoot), String(outBatch), "out")).ino,
+      ]).toEqual(inodes);
 
       const levels = [
         join(sandboxRoot, ".trash"),
@@ -229,6 +235,7 @@ describe("workspace delete: 删除文件与目录", () => {
         ["uploads", "dir"],
         [".trash", "dir"],
       ]);
+      expect(rows).toMatchObject(sent.map((path) => ({ title: `删除 ${path}` })));
       const trashed = rows.map((row) =>
         contentOf(join(trashOf(sandboxRoot), String(row.detail.trashId))),
       );

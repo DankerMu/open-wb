@@ -46,6 +46,15 @@
  * which `ensureOwnedDir` corrects from 2770 to 0700 — the omp uid is then locked out of all of
  * that account's workspaces until an administrator restores the mode. The `rmdir` after a failed
  * rename goes by path as well.
+ * One case on the target side needs no race (read from the code, not measured on a uid-separated
+ * deployment). `ensureOwnedDir` refuses a symlink, a regular file and a directory of another uid,
+ * but an existing directory of this uid is taken whatever its mode and whoever moved it there. An
+ * account root is such a directory, and the omp uid can rename it to `<SANDBOX_ROOT>/.trash`,
+ * before `.trash` exists or after moving the real one aside. The next deletion by any other
+ * account corrects that root to 0700, makes the three lower levels inside it, renames the entry
+ * there and is answered and audited as a success. The omp uid is locked out of that account as
+ * above; the batches of a `.trash` moved aside are out of the sweep's reach, and the new batch is
+ * in it only while the root keeps that name.
  */
 import { randomBytes } from "node:crypto";
 import { renameSync, rmdirSync } from "node:fs";
