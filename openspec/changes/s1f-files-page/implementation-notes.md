@@ -614,6 +614,7 @@
 - 变异：`validateEntrySizes: true` → 新例「stored 成员 compressedSize ≠ uncompressedSize 仍被列出」判红。
 - 变异：`size` 取 `compressedSize` → 新例「method 8、两个大小不等」判红。
 - 变异：目录按外部属性或 `size === 0` 判 → `x.zip` 的 `dir/` 与新例「零字节文件是 `file`」判红。
+- 变异（预审补）：以 `\` 结尾的名字也判成 `dir` → 「只有以 / 结尾的名字是 dir」一例判红，名单里须含一个以 `\` 结尾的名字（`back\`，应为 `file`）。
 - 变异：适配器不分片 → `big.zip` 的 `maxLength() ≤ 65536` 判红（实测为 65577）；新例「扩展 65532 + 注释 65535 的胖目录项」同样判红（实测为 131068）。
 - 变异：短读当作读满（`callback(null)`）→ 新例「中央目录在第二项中间被截断、EOCD 仍指向它」判红：应为一项 + `truncated`，变异后多出垃圾名。
 - 变异：`readAt` 失败被吞成 415 或 `truncated` → 新例「zip 的读函数失败原样抛出」（首次读失败、读出两项后失败各一）判红。

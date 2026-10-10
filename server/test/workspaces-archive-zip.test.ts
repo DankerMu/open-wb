@@ -70,6 +70,7 @@ describe("zip 列表：从中央目录项里取什么", () => {
         zipCentral({ name: "marked-dir", attributes: 0x10 }),
         zipCentral({ name: "sub/", size: 9 }),
         zipCentral({ name: "unix-dir", attributes: 0o040755 * 65_536 }),
+        plain("back\\", 4),
       ]),
     );
     expect(listing.entries).toEqual([
@@ -77,6 +78,7 @@ describe("zip 列表：从中央目录项里取什么", () => {
       { path: "marked-dir", type: "file", size: 0 },
       { path: "sub/", type: "dir", size: 9 },
       { path: "unix-dir", type: "file", size: 0 },
+      { path: "back\\", type: "file", size: 4 },
     ]);
     expect(listing.truncated).toBe(false);
   });
