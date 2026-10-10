@@ -205,7 +205,7 @@ createApp SHALL create exactly one workspace store with its caller-owned DB, run
 ## ADDED Requirements
 
 ### Requirement: 预览监听器的装配与关停
-生产入口 SHALL 在同一进程内装配第二个 Fastify 实例（preview-origin「预览监听器」的 `createPreviewApp`），与主实例共用同一个 DB 句柄、工作空间 store、沙箱 facade 与预览令牌登记表，并 SHALL 在主监听器 `listen` **之前**让它在同一 `HOST` 的 `PREVIEW_PORT` 上监听，使主监听器开始受理请求时预览地址已经可用；两次 `listen` 传同一个 `AbortSignal`。预览监听器绑定失败（端口被占用、地址被拒）SHALL 走与主监听器相同的 partial-start failure cleanup。监听成功之后、发出 success record 之前，入口 SHALL 以 `ensureOwnedDir` 建立并校正 `PREVIEW_CACHE_DIR`（`2750`）、其下的 `work`（`2770`）与 `pdf`（`0700`），清空 `work` 的既有内容，并启动 file-operations「回收目录的保留与清理」与 office-preview「转换缓存」的周期清理（定时器 SHALL `unref`，不阻止进程退出）；目录建立失败同样是启动失败。`server_started` 记录 SHALL 不因预览监听器增加任何键，其 `port` 仍是主监听器的端口，`modules` 仍是既有七项。
+生产入口 SHALL 在同一进程内装配第二个 Fastify 实例（preview-origin「预览监听器」的 `createPreviewApp`），与主实例共用同一个 DB 句柄、工作空间 store、沙箱 facade 与预览令牌登记表，并 SHALL 在主监听器 `listen` **之前**让它在同一 `HOST` 的 `PREVIEW_PORT` 上监听，使主监听器开始受理请求时预览地址已经可用；两次 `listen` 传同一个 `AbortSignal`。预览监听器绑定失败（端口被占用、地址被拒）SHALL 走与主监听器相同的 partial-start failure cleanup。监听成功之后、发出 success record 之前，入口 SHALL 以 `ensureOwnedDir` 建立并校正 `PREVIEW_CACHE_DIR`（`2750`）、其下的 `work`（`2770`）与 `pdf`（`0700`），按 office-preview「转换缓存」清空 `work` 的既有内容（同时配置了 `OMP_USER` 与 `OFFICE_BIN` 时先执行那一条固定参数的 `sudo … /usr/bin/find`，它失败只记一行 `preview_work_clear_failed`，不是启动失败），并启动 file-operations「回收目录的保留与清理」与 office-preview「转换缓存」的周期清理（定时器 SHALL `unref`，不阻止进程退出）；目录建立失败同样是启动失败。`server_started` 记录 SHALL 不因预览监听器增加任何键，其 `port` 仍是主监听器的端口，`modules` 仍是既有七项。
 
 可注入装配：`createApp` 的 `assembly` SHALL 接受可选的 `preview`（令牌登记表、返回预览监听器已绑定端口的函数、可选的对外来源、文档上限与转换是否可用）；未提供时 `POST /api/workspaces/:id/preview-token` SHALL 不注册（落到 `/api/*` 的 typed 404），其余工作空间路由不受影响。`createPreviewApp` SHALL 不监听、不关闭调用方的 DB。
 
