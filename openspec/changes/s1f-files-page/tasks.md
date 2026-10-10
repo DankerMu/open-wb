@@ -223,13 +223,13 @@ Minimal mergeable slice: atomic - 纯解析函数与其测试；没有消费方�
 - [x] 6.1 `server/src/workspaces/preview.ts`：`classifyPreview(absPath, name, size, options)` 按 workspaces「预览分类元数据与有界字节流」的表重写（文本扩展名与 `Dockerfile` / `Makefile`、图片七种、音视频四种、Notebook、由别处提供的集合、`sniffedText`、`limits`）；新增纯函数 `sniffText`。
   导出图片、音频、视频、Notebook 四个扩展名集合供组 17 的契约测试读取。
   实施注记见 `implementation-notes.md`「6.1、6.2 最小接线（#1055）」。
-- [ ] 6.2 `server/src/workspaces/rest.ts` 的 `file` 路由：未知 / 无扩展名时读前至多 8192 字节嗅探后再分类；`limits` 经 `registerWorkspaces` 的依赖对象传入（缺省为规格缺省值），`server/src/app.ts` 把 `ServerConfig` 的三个上限接进来（`assembly` 新增可选字段）。
+- [x] 6.2 `server/src/workspaces/rest.ts` 的 `file` 路由：未知 / 无扩展名时读前至多 8192 字节嗅探后再分类；`limits` 经 `registerWorkspaces` 的依赖对象传入（缺省为规格缺省值），`server/src/app.ts` 把 `ServerConfig` 的三个上限接进来（`assembly` 新增可选字段）。
   实施注记见 `implementation-notes.md`「6.2（部分）、6.3、6.4（#1056）」。
-- [ ] 6.3 测试：`server/test/` 新文件 `workspaces-preview-classify.test.ts`（分类器六个场景中除范围解析外的全部）与既有工作空间路由测试里补「未知与无扩展名文件的嗅探」「图片与拒绝」「Notebook 与可配置上限」「文本、截断与 html」（含 `svg`、`htm` 为 `text/plain`）。
+- [x] 6.3 测试：`server/test/` 新文件 `workspaces-preview-classify.test.ts`（分类器六个场景中除范围解析外的全部）与既有工作空间路由测试里补「未知与无扩展名文件的嗅探」「图片与拒绝」「Notebook 与可配置上限」「文本、截断与 html」（含 `svg`、`htm` 为 `text/plain`）。
   断言已知扩展名的请求不发生嗅探读取（以对 `open`/`read` 的计数或注入的读函数为证）。preview-origin「主站不把工作空间文件当文档返回」的 `file` 半边（`page.html`、`logo.svg`、`feed.xml` 为 `text/plain`，`doc.pdf` 为 415）也在这里断言。
   随条文改写的既有测试（与 6.1 同 PR，逐条记入偏离记录）：`server/test/workspace-preview.test.ts`（`classifyPreview` 的三参调用改四参；`IMAGE_LIMIT = 10_485_760` 与「11 MiB 的 png 被拒」改为 20 MiB 边界）、
   `server/test/workspaces-http.test.ts`（路由层「11 MiB 的 `huge.png` 期望 413」改为 21 MiB）。`server/test/app.test.ts`、`http-typed-errors.test.ts`、`http-parser-owners.test.ts`、`auth-lifecycle.test.ts`、`auth-request-errors.test.ts` 里只引用 `preview_too_large` / `preview_unsupported` 两个错误码本身的用例不受影响，逐个确认后原样保留。
-- [ ] 6.4 变异证据：把 `svg` 的类型改成 `image/svg+xml` → 「永不以文档类型返回」用例判红；对已知扩展名也嗅探 → 读取计数用例判红；图片上限用回 10 MiB → 20 MiB 边界用例判红。
+- [x] 6.4 变异证据：把 `svg` 的类型改成 `image/svg+xml` → 「永不以文档类型返回」用例判红；对已知扩展名也嗅探 → 读取计数用例判红；图片上限用回 10 MiB → 20 MiB 边界用例判红。
 
 Suggested fixture level: expanded - 公共 API 的内容类型与上限变化，含「主站不把不可信文件当文档返回」的安全性质
 Minimal mergeable slice: 6.1 + 6.2 中「路由按新签名调用、上限仍取规格缺省值」的最小接线 + 6.3 点名的两个既有测试文件的改写同刀（签名与图片上限一变，这两个文件立即变红，不能分开）；嗅探与 `ServerConfig` 上限的接入（6.2 其余部分）随后
