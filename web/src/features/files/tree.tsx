@@ -1,7 +1,9 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ApiClient, ApiError } from "../../lib/api.js";
-import { Button, EmptyState, Icon, type IconName, Menu } from "../../ui/index.js";
+import { Icon, type IconName } from "../../ui/index.js";
+import { ALERT_BOX, EmptyPreview, STATUS_TEXT, WorkspaceColumns } from "./columns.js";
 import { DirectoryDialog } from "./dialogs.js";
+import { EmptyState } from "./empty-state.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
 import { fileIcon, formatSize, logicalPath } from "./file-meta.js";
 import { PreviewPane } from "./preview.js";
@@ -57,14 +59,14 @@ type PreviewAreaProps = {
   selectedFile: SelectedFile | null;
 };
 
-type WorkspaceColumnsProps = {
-  directory: ReactNode;
-  folderNotice?: string | null;
-  onNewDirectory(trigger: HTMLElement | null): void;
-  onNewWorkspace(trigger: HTMLElement | null): void;
-  preview: ReactNode;
-  switcher: ReactNode;
-};
+/** 树行（目录与文件同一写法）；选中的文件行由 `aria-current` 着色。 */
+const ROW =
+  "group/row flex w-full min-w-0 cursor-pointer items-center gap-[0.4rem] rounded-[6px] px-2 py-[0.32rem] text-left text-[0.8rem] leading-[1.35] text-(--wb-text-primary) hover:bg-(--wb-brand-primary-subtle) aria-[current=true]:bg-(--wb-brand-primary-subtle) aria-[current=true]:text-(--wb-brand-primary-deep)";
+const GLYPH =
+  "inline-flex size-[14px] shrink-0 text-(--wb-text-secondary) group-aria-[current=true]/row:text-(--wb-brand-primary-deep)";
+const ROW_NAME = "min-w-0 flex-1 truncate";
+/** 行下方的附注（错误、读取中、空目录、根的逻辑路径）与行内文字左对齐。 */
+const ROW_NOTE = "mr-2 ml-7";
 
 const previewableExtensions: Record<string, true> = {
   md: true,
@@ -141,42 +143,65 @@ function DirectoryNode({
   const error = errors[path];
 
   return (
-    <li className="files-tree-item">
+    <li className="min-w-0">
       <button
         aria-expanded={expanded}
         aria-label={`${expanded ? "折叠" : "展开"} ${label}`}
-        className="files-tree-node"
+        className={ROW}
         onClick={() => onToggleDirectory(path)}
         title={label}
         type="button"
       >
-        <svg aria-hidden="true" className="files-tree-glyph files-tree-caret" viewBox="0 0 16 16">
+        <svg
+          aria-hidden="true"
+          className={`${GLYPH} transition-transform duration-120 ${expanded ? "rotate-0" : "-rotate-90"}`}
+          viewBox="0 0 16 16"
+        >
           <path d="M4 6l4 5 4-5" fill="none" stroke="currentColor" strokeWidth="1.5" />
         </svg>
-        <span className="files-tree-glyph">
+        <span className={GLYPH}>
           <Icon name={icon} size={14} />
         </span>
-        <span className="files-tree-name">{label}</span>
+        <span className={ROW_NAME} data-slot="tree-name">
+          {label}
+        </span>
       </button>
-      {subline ? <p className="files-tree-root-path">{subline}</p> : null}
+      {subline ? (
+        <p
+          className={`${ROW_NOTE} mb-[0.35rem] truncate font-(family-name:--wb-mono) text-[0.65rem] leading-[1.3] text-(--wb-text-tertiary)`}
+          data-slot="tree-root-path"
+        >
+          {subline}
+        </p>
+      ) : null}
       {error ? (
-        <p className="ui-alert" role="alert">
+        <p
+          className={`${ROW_NOTE} ${ALERT_BOX} mt-[0.2rem] mb-[0.35rem] text-[0.75rem]`}
+          role="alert"
+        >
           {error}
         </p>
       ) : null}
       {expanded && loading && !entries ? (
-        <p className="files-status ui-muted" role="status">
+        <p
+          className={`${ROW_NOTE} mt-[0.2rem] mb-[0.35rem] text-[0.75rem] text-muted-foreground`}
+          role="status"
+        >
           正在读取目录
         </p>
       ) : null}
       {expanded && entries ? (
-        <ul className="files-tree-list">
+        <ul className="pl-[0.85rem]">
           {entries.length === 0 ? (
-            <li className="files-tree-item">
+            <li className="min-w-0">
               {path === "" ? (
                 <EmptyState description="点击左上角 ＋ 新建文件夹" title="该工作空间暂无目录" />
               ) : (
-                <p className="files-tree-folder-empty ui-muted">空目录</p>
+                <p
+                  className={`${ROW_NOTE} mt-[0.15rem] mb-[0.4rem] text-[0.75rem] text-muted-foreground`}
+                >
+                  空目录
+                </p>
               )}
             </li>
           ) : (
@@ -201,23 +226,25 @@ function DirectoryNode({
               }
 
               return (
-                <li className="files-tree-item" key={entryPath}>
+                <li className="min-w-0" key={entryPath}>
                   <button
                     aria-current={selectedPath === entryPath ? "true" : undefined}
-                    className={
-                      selectedPath === entryPath
-                        ? "files-tree-file files-tree-file--selected"
-                        : "files-tree-file"
-                    }
+                    className={ROW}
                     onClick={() => onSelectFile(entry, entryPath)}
                     title={entry.name}
                     type="button"
                   >
-                    <span className="files-tree-glyph">
+                    <span className={GLYPH}>
                       <Icon name={fileIcon(entry.name)} size={14} />
                     </span>
-                    <span className="files-tree-name">{entry.name}</span>
-                    <span aria-hidden="true" className="files-tree-size">
+                    <span className={ROW_NAME} data-slot="tree-name">
+                      {entry.name}
+                    </span>
+                    <span
+                      aria-hidden="true"
+                      className="ml-auto flex-none text-[10.5px] whitespace-nowrap text-(--wb-text-tertiary)"
+                      data-slot="tree-size"
+                    >
                       {formatSize(entry.size)}
                     </span>
                   </button>
@@ -234,71 +261,10 @@ function DirectoryNode({
 function DirectoryTree({ rootPath, workspaceName, ...state }: DirectoryTreeProps) {
   return (
     <nav aria-label="工作空间目录树">
-      <ul className="files-tree-list">
+      <ul>
         <DirectoryNode {...state} icon="shield" label={workspaceName} path="" subline={rootPath} />
       </ul>
     </nav>
-  );
-}
-
-export function EmptyPreview() {
-  return (
-    <div className="files-preview-empty">
-      <EmptyState description="在左侧目录树中选择一个文件进行预览" title="未选择文件" />
-    </div>
-  );
-}
-
-type CreationMenuProps = {
-  /** 回调带上菜单触发器，供对话框在取消类关闭后把焦点还给它。 */
-  onNewDirectory(trigger: HTMLElement | null): void;
-  onNewWorkspace(trigger: HTMLElement | null): void;
-};
-
-function CreationMenu({ onNewDirectory, onNewWorkspace }: CreationMenuProps) {
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  return (
-    <Menu
-      items={[
-        { label: "新建文件夹", onSelect: () => onNewDirectory(triggerRef.current) },
-        { label: "新建工作空间", onSelect: () => onNewWorkspace(triggerRef.current) },
-      ]}
-      trigger={
-        <Button aria-label="新建" ref={triggerRef}>
-          ＋
-        </Button>
-      }
-    />
-  );
-}
-
-export function WorkspaceColumns({
-  directory,
-  folderNotice,
-  onNewDirectory,
-  onNewWorkspace,
-  preview,
-  switcher,
-}: WorkspaceColumnsProps) {
-  return (
-    <div className="files-layout">
-      <aside aria-label="工作空间文件" className="files-tree">
-        {switcher}
-        <div className="files-tree-head">
-          <h2>工作空间目录</h2>
-          <CreationMenu onNewDirectory={onNewDirectory} onNewWorkspace={onNewWorkspace} />
-        </div>
-        {folderNotice ? (
-          <p className="ui-alert files-notice" role="alert">
-            {folderNotice}
-          </p>
-        ) : null}
-        <div className="files-tree-scroll">{directory}</div>
-      </aside>
-      <section aria-label="文件预览" className="files-preview">
-        {preview}
-      </section>
-    </div>
   );
 }
 
@@ -308,7 +274,7 @@ function PreviewArea({ loading, selectedFile }: PreviewAreaProps) {
   }
 
   return (
-    <div className="files-preview-body">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       {selectedFile.preview ? (
         <PreviewPane
           mtime={selectedFile.entry.mtime}
@@ -318,12 +284,12 @@ function PreviewArea({ loading, selectedFile }: PreviewAreaProps) {
           size={selectedFile.entry.size}
         />
       ) : (
-        <p className="files-status ui-muted" role="status">
+        <p className={STATUS_TEXT} role="status">
           正在读取文件
         </p>
       )}
       {loading && selectedFile.preview ? (
-        <p className="files-status ui-muted" role="status">
+        <p className={STATUS_TEXT} role="status">
           正在读取文件
         </p>
       ) : null}
@@ -627,6 +593,19 @@ export function WorkspaceBrowser({
     [client, loadDirectory, workspace.id],
   );
 
+  // 手动刷新：重取已加载的每一层目录、正显示读取错误的目录（根始终在内，首载失败后可由此重试）
+  // 与当前文件；展开状态、选中与预览模式不动，失败沿用各目录的错误行、旧列表保留。
+  const refresh = useCallback(() => {
+    const loaded = loadedDirectoryPaths(cacheRef.current);
+    for (const path of new Set(["", ...loaded, ...Object.keys(directoryErrors)])) {
+      loadDirectory(path, true);
+    }
+    const selected = selectedFileRef.current;
+    if (selected) {
+      selectFile(selected.entry, selected.path);
+    }
+  }, [directoryErrors, loadDirectory, selectFile]);
+
   const directoriesForDialog = useMemo(() => loadedDirectoryPaths(directories), [directories]);
 
   return (
@@ -648,6 +627,7 @@ export function WorkspaceBrowser({
         folderNotice={folderNotice}
         onNewDirectory={openFolderDialog}
         onNewWorkspace={onNewWorkspace}
+        onRefresh={refresh}
         preview={<PreviewArea loading={previewLoading} selectedFile={selectedFile} />}
         switcher={switcher}
       />

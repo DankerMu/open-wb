@@ -12,6 +12,7 @@ import { allowFirstApproval, expectAllowedBar, generatingStatus } from "./ui-wal
 import { type CreatedSessions, watchCreatedSessions } from "./ui-walk-cleanup.js";
 import { walkComposer } from "./ui-walk-composer.js";
 import { createSessionFromSidebar } from "./ui-walk-create-session.js";
+import { expectFilesUnpainted } from "./ui-walk-files.js";
 import { armGate, controlOrigin, deleteGate, gatePhase, releaseGate } from "./ui-walk-gate.js";
 import {
   clickRoute,
@@ -280,6 +281,7 @@ async function walkFiles(page: Page, project: WalkProject): Promise<void> {
   await expect
     .poll(() => logo.evaluate((img: HTMLImageElement) => [img.naturalWidth, img.naturalHeight]))
     .toEqual([256, 256]);
+  await expectFilesUnpainted(page);
 
   await files.getByRole("button", { name: "新建", exact: true }).click();
   await page.getByRole("menuitem", { name: "新建文件夹" }).click();

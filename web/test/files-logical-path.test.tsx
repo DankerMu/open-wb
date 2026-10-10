@@ -11,7 +11,6 @@ import {
   workspace,
 } from "./files-fixture.js";
 import { jsonResponse } from "./support.js";
-import { blockBody, COLOR_LITERAL_PATTERNS, readRepoFile, stripComments } from "./ui-support.js";
 
 const PRIVATE_PREFIX = "/srv/private-sandbox";
 const analytics = {
@@ -87,7 +86,7 @@ function openSwitcher() {
 }
 
 function listedWorkspaceNames(switcher: HTMLElement) {
-  return [...switcher.querySelectorAll(".files-switcher-list li")].map(
+  return [...switcher.querySelectorAll('[data-slot="switcher-list"] li')].map(
     (item) => item.querySelector("strong")?.textContent,
   );
 }
@@ -173,21 +172,11 @@ describe("files page shows logical paths instead of the server root", () => {
     expect(hasLucideGlyph(button, "shield")).toBe(true);
     expect(hasLucideGlyph(button, "folder")).toBe(false);
     const subline = button.nextElementSibling;
-    expect(subline?.matches("p.files-tree-root-path")).toBe(true);
+    expect(subline?.matches('p[data-slot="tree-root-path"]')).toBe(true);
+    expect(subline?.classList.contains("truncate")).toBe(true);
     expect(subline?.textContent).toBe("zhangsan/analytics");
     await waitFor(() => expect(subline?.nextElementSibling?.matches("ul")).toBe(true));
     expect(within(tree()).queryByText("root", { exact: true })).toBeNull();
-
-    const rule = blockBody(
-      stripComments(readRepoFile("web/src/features/files/files.css")),
-      /^\.files-tree-root-path \{/m,
-    );
-    expect(rule).toContain("var(--wb-text-tertiary)");
-    expect(rule).toContain("text-overflow: ellipsis");
-    expect(rule).toContain("white-space: nowrap");
-    for (const pattern of COLOR_LITERAL_PATTERNS) {
-      expect(rule).not.toMatch(pattern);
-    }
   });
 
   it("L5 filters by workspace name or logical path, case-insensitively", async () => {

@@ -72,16 +72,3 @@ describe("未定义引用守卫", () => {
     expect(undefinedRefs).toEqual([]);
   });
 });
-
-describe("文件页不自涂底色（#420）", () => {
-  // 只锚顶层基础规则（行首选择器），@media 内缩进的同名规则不算。页面底色只来自 body
-  // （theme.css 的 --background；计算值由 ui-walk 断言）。
-  const files = stripComments(readRepoFile("web/src/features/files/files.css"));
-
-  it.each([
-    [".files-layout", /^\.files-layout \{/m],
-    [".files-preview", /^\.files-preview \{/m],
-  ])("%s 不自涂底色（demo:666、702）", (_selector, opener) => {
-    expect(blockBody(files, opener)).not.toMatch(/\bbackground[\w-]*\s*:/);
-  });
-});

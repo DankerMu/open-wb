@@ -1,13 +1,14 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { type ApiClient, ApiError } from "../../lib/api.js";
-import { Button, EmptyState, Icon, Popover } from "../../ui/index.js";
 import { useAuth } from "../auth/index.js";
+import { ALERT_BOX, EmptyPreview, STATUS_TEXT, WorkspaceColumns } from "./columns.js";
 import { WorkspaceDialog } from "./dialogs.js";
+import { EmptyState } from "./empty-state.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
-import { logicalPath } from "./file-meta.js";
-import { EmptyPreview, WorkspaceBrowser, WorkspaceColumns } from "./tree.js";
+import { WorkspaceBrowser } from "./tree.js";
 import type { Workspace } from "./types.js";
+import { WorkspaceSwitcher } from "./workspace-switcher.js";
 
 type WorkspaceListState =
   | { status: "loading" }
@@ -19,15 +20,6 @@ type WorkspaceDialogState = {
   error: string | null;
   location: string;
   pending: boolean;
-};
-
-type WorkspaceSwitcherProps = {
-  account: string;
-  currentWorkspace: Workspace | null;
-  workspaces: readonly Workspace[];
-  /** 回调带上切换器触发器，供对话框在取消类关闭后把焦点还给它。 */
-  onCreateWorkspace(trigger: HTMLElement | null): void;
-  onSelectWorkspace(id: string): void;
 };
 
 function workspaceNavigation(
@@ -59,104 +51,6 @@ function currentWorkspaceFromList(
     listForClient.workspaces.find((workspace) => workspace.id === requestedWorkspaceId) ??
     listForClient.workspaces[0] ??
     null
-  );
-}
-
-function WorkspaceSwitcher({
-  account,
-  currentWorkspace,
-  onCreateWorkspace,
-  onSelectWorkspace,
-  workspaces,
-}: WorkspaceSwitcherProps) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const filteredWorkspaces = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase();
-    if (normalizedQuery.length === 0) {
-      return workspaces;
-    }
-
-    return workspaces.filter((workspace) =>
-      [workspace.name, logicalPath(account, workspace.dir)].some((text) =>
-        text.toLocaleLowerCase().includes(normalizedQuery),
-      ),
-    );
-  }, [account, query, workspaces]);
-
-  return (
-    <div className="files-switcher">
-      <Popover
-        contentLabel="工作空间切换器"
-        onOpenChange={setOpen}
-        open={open}
-        trigger={
-          <button
-            aria-label="选择工作空间"
-            className="files-switcher-trigger"
-            ref={triggerRef}
-            type="button"
-          >
-            <Icon name="layout-grid" size={16} />
-            <span className="files-switcher-copy">
-              <strong>{currentWorkspace?.name ?? "未选择工作空间"}</strong>
-              <span>{currentWorkspace ? logicalPath(account, currentWorkspace.dir) : "—"}</span>
-            </span>
-          </button>
-        }
-      >
-        <div className="files-switcher-panel">
-          <label className="files-switcher-search">
-            搜索工作空间
-            <input
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜索工作空间"
-              value={query}
-            />
-          </label>
-          <ul className="files-switcher-list">
-            {filteredWorkspaces.map((workspace) => {
-              const current = workspace.id === currentWorkspace?.id;
-              return (
-                <li key={workspace.id}>
-                  <button
-                    aria-pressed={current}
-                    className="files-switcher-item"
-                    onClick={() => {
-                      setOpen(false);
-                      onSelectWorkspace(workspace.id);
-                    }}
-                    type="button"
-                  >
-                    <span className="files-switcher-item-copy">
-                      <strong>{workspace.name}</strong>
-                      <span>{logicalPath(account, workspace.dir)}</span>
-                    </span>
-                    {current ? (
-                      <span aria-label="当前工作空间" className="files-switcher-check" role="img">
-                        ✓
-                      </span>
-                    ) : null}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-          {filteredWorkspaces.length === 0 ? (
-            <p className="files-switcher-empty ui-muted">无匹配的工作空间</p>
-          ) : null}
-          <Button
-            onClick={() => {
-              setOpen(false);
-              onCreateWorkspace(triggerRef.current);
-            }}
-          >
-            ＋ 新建工作空间
-          </Button>
-        </div>
-      </Popover>
-    </div>
   );
 }
 
@@ -400,13 +294,13 @@ export function FilesPage() {
   ) : null;
 
   return (
-    <section className="files-page">
+    <section className="flex h-full min-h-0 min-w-0 flex-col text-(--wb-text-primary)">
       {listForClient ? null : listState.status === "error" ? (
-        <p className="ui-alert" role="alert">
+        <p className={`${ALERT_BOX} text-[12px]`} role="alert">
           {listState.message}
         </p>
       ) : (
-        <p className="files-status ui-muted" role="status">
+        <p className={STATUS_TEXT} role="status">
           正在读取工作空间
         </p>
       )}
