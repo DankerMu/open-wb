@@ -223,13 +223,13 @@ Minimal mergeable slice: atomic - 纯解析函数与其测试；没有消费方�
 - [x] 6.1 `server/src/workspaces/preview.ts`：`classifyPreview(absPath, name, size, options)` 按 workspaces「预览分类元数据与有界字节流」的表重写（文本扩展名与 `Dockerfile` / `Makefile`、图片七种、音视频四种、Notebook、由别处提供的集合、`sniffedText`、`limits`）；新增纯函数 `sniffText`。
   导出图片、音频、视频、Notebook 四个扩展名集合供组 17 的契约测试读取。
   实施注记见 `implementation-notes.md`「6.1、6.2 最小接线（#1055）」。
-- [ ] 6.2 `server/src/workspaces/rest.ts` 的 `file` 路由：未知 / 无扩展名时读前至多 8192 字节嗅探后再分类；`limits` 经 `registerWorkspaces` 的依赖对象传入（缺省为规格缺省值），`server/src/app.ts` 把 `ServerConfig` 的三个上限接进来（`assembly` 新增可选字段）。
+- [x] 6.2 `server/src/workspaces/rest.ts` 的 `file` 路由：未知 / 无扩展名时读前至多 8192 字节嗅探后再分类；`limits` 经 `registerWorkspaces` 的依赖对象传入（缺省为规格缺省值），`server/src/app.ts` 把 `ServerConfig` 的三个上限接进来（`assembly` 新增可选字段）。
   实施注记见 `implementation-notes.md`「6.2（部分）、6.3、6.4（#1056）」。
-- [ ] 6.3 测试：`server/test/` 新文件 `workspaces-preview-classify.test.ts`（分类器六个场景中除范围解析外的全部）与既有工作空间路由测试里补「未知与无扩展名文件的嗅探」「图片与拒绝」「Notebook 与可配置上限」「文本、截断与 html」（含 `svg`、`htm` 为 `text/plain`）。
+- [x] 6.3 测试：`server/test/` 新文件 `workspaces-preview-classify.test.ts`（分类器六个场景中除范围解析外的全部）与既有工作空间路由测试里补「未知与无扩展名文件的嗅探」「图片与拒绝」「Notebook 与可配置上限」「文本、截断与 html」（含 `svg`、`htm` 为 `text/plain`）。
   断言已知扩展名的请求不发生嗅探读取（以对 `open`/`read` 的计数或注入的读函数为证）。preview-origin「主站不把工作空间文件当文档返回」的 `file` 半边（`page.html`、`logo.svg`、`feed.xml` 为 `text/plain`，`doc.pdf` 为 415）也在这里断言。
   随条文改写的既有测试（与 6.1 同 PR，逐条记入偏离记录）：`server/test/workspace-preview.test.ts`（`classifyPreview` 的三参调用改四参；`IMAGE_LIMIT = 10_485_760` 与「11 MiB 的 png 被拒」改为 20 MiB 边界）、
   `server/test/workspaces-http.test.ts`（路由层「11 MiB 的 `huge.png` 期望 413」改为 21 MiB）。`server/test/app.test.ts`、`http-typed-errors.test.ts`、`http-parser-owners.test.ts`、`auth-lifecycle.test.ts`、`auth-request-errors.test.ts` 里只引用 `preview_too_large` / `preview_unsupported` 两个错误码本身的用例不受影响，逐个确认后原样保留。
-- [ ] 6.4 变异证据：把 `svg` 的类型改成 `image/svg+xml` → 「永不以文档类型返回」用例判红；对已知扩展名也嗅探 → 读取计数用例判红；图片上限用回 10 MiB → 20 MiB 边界用例判红。
+- [x] 6.4 变异证据：把 `svg` 的类型改成 `image/svg+xml` → 「永不以文档类型返回」用例判红；对已知扩展名也嗅探 → 读取计数用例判红；图片上限用回 10 MiB → 20 MiB 边界用例判红。
 
 Suggested fixture level: expanded - 公共 API 的内容类型与上限变化，含「主站不把不可信文件当文档返回」的安全性质
 Minimal mergeable slice: 6.1 + 6.2 中「路由按新签名调用、上限仍取规格缺省值」的最小接线 + 6.3 点名的两个既有测试文件的改写同刀（签名与图片上限一变，这两个文件立即变红，不能分开）；嗅探与 `ServerConfig` 上限的接入（6.2 其余部分）随后
@@ -238,41 +238,41 @@ Minimal mergeable slice: 6.1 + 6.2 中「路由按新签名调用、上限仍取
 
 - [x] 7.1 `preview.ts` 新增纯函数 `parseRange` 与 `openRangeStream`（只有函数与导出，路由不变）。测试：`parseRange` 的十个输入（workspaces「嗅探与范围解析」场景）；`openRangeStream(path, 10, 19)` 恰产出第 10–19 字节，读完前销毁时描述符释放。
   实施注记见 `implementation-notes.md`「7.1（#1057）」。
-- [ ] 7.2 把「按区间发送一个文件」做成 `server/src/workspaces/` 下可复用的小函数（200 / 206 / 416 的头与正文；组 12、15 的预览监听器直接用它）。
+- [x] 7.2 把「按区间发送一个文件」做成 `server/src/workspaces/` 下可复用的小函数（200 / 206 / 416 的头与正文；组 12、15 的预览监听器直接用它）。
   实施注记见 `implementation-notes.md`「7.2、7.3、7.4、7.5（#1058）」。
-- [ ] 7.3 `file` 路由对 `rangeable` 的类别经 7.2 的函数按 workspaces「文件预览」返回 200 / 206 / 416，其余类别忽略 `Range`。
-- [ ] 7.4 测试：路由层「音视频的范围请求」场景，206 用真实监听的 HTTP 客户端断言字节与 `Content-Range`（`inject` 之外再走一次真连接）；流在区间读完前被客户端中止时描述符释放。
-- [ ] 7.5 变异证据：`bytes=-100` 当成 `0-100` → 后缀区间用例判红；对 `readme.md` 也回 206 → 「其余类别忽略」用例判红；416 带上 JSON 信封 → 空体断言判红。
+- [x] 7.3 `file` 路由对 `rangeable` 的类别经 7.2 的函数按 workspaces「文件预览」返回 200 / 206 / 416，其余类别忽略 `Range`。
+- [x] 7.4 测试：路由层「音视频的范围请求」场景，206 用真实监听的 HTTP 客户端断言字节与 `Content-Range`（`inject` 之外再走一次真连接）；流在区间读完前被客户端中止时描述符释放。
+- [x] 7.5 变异证据：`bytes=-100` 当成 `0-100` → 后缀区间用例判红；对 `readme.md` 也回 206 → 「其余类别忽略」用例判红；416 带上 JSON 信封 → 空体断言判红。
 
 Suggested fixture level: expanded - 公共 API 新增部分内容响应，区间边界与资源释放都要钉死
 Minimal mergeable slice: 7.1（纯函数与其测试）先合；7.2–7.4（发送函数、路由接入与路由测试）随后
 
 ## 8. file-operations — 删除、回收目录与清理
 
-- [ ] 8.1 新文件 `server/src/workspaces/trash.ts`：`createTrash({sandboxRoot, retentionDays, rename?})` 提供 `moveToTrash(ownerId, workspaceId, absPath) → trashId`（四级目录逐级 `ensureOwnedDir(…, 0o700)`——符号链接、非目录、他人持有都拒绝——、一次 `rename`、失败时删掉空批次并抛出）与 `sweep(now)`（file-operations「回收目录的保留与清理」）。
+- [x] 8.1 新文件 `server/src/workspaces/trash.ts`：`createTrash({sandboxRoot, retentionDays, rename?})` 提供 `moveToTrash(ownerId, workspaceId, absPath) → trashId`（四级目录逐级 `ensureOwnedDir(…, 0o700)`——符号链接、非目录、他人持有都拒绝——、一次 `rename`、失败时删掉空批次并抛出）与 `sweep(now)`（file-operations「回收目录的保留与清理」）。
   断言账号 id 不以 `.` 开头（design D22）：以种子账号与 `store` 的 owner 段校验为证，写成一条测试——它只读账号与目录校验、不执行 `rename`，归 `sweep` 半边，写在 `workspaces-trash-sweep.test.ts` 里（不等 1.2）。
   本任务按是否执行 `rename` 分两半交付：`sweep` 半边（`createTrash` 的构造与目录校验、`sweep`）不 `rename` 用户条目，不等 1.2，是 13.1 的前提；`moveToTrash` 半边 Depends on 1.2，是 8.2 的前提。
   实施注记见 `implementation-notes.md`「8.1 的 sweep 半边，含分摊的 8.3 / 8.4 条款（#1059）」。
   实施注记见 `implementation-notes.md`「8.1 的 moveToTrash 半边、8.2、8.3、8.4（#1060）」。
-- [ ] 8.2 新文件 `server/src/workspaces/rest-entries.ts`：`DELETE /api/workspaces/:id/entries`，检查次序、审计 `file.delete`（`detail` 三键）与失败语义按 file-operations「删除到回收目录」；由 `registerWorkspaces` 注册，`trash` 经依赖对象传入。
-- [ ] 8.3 测试（新文件 `server/test/workspaces-delete.test.ts`）：「删除文件与目录」「同名先后删除互不覆盖」「拒绝项」「改名失败不丢文件」（注入抛 `EXDEV` 的 `rename`）「回收目录被预先占位」「回收目录不可见」；审计失败时 500 且条目已在回收目录。这个测试文件与 8.2 的路由、8.1 的 `moveToTrash` 半边 Depends on 1.2：其结论与设计相符才开工。
+- [x] 8.2 新文件 `server/src/workspaces/rest-entries.ts`：`DELETE /api/workspaces/:id/entries`，检查次序、审计 `file.delete`（`detail` 三键）与失败语义按 file-operations「删除到回收目录」；由 `registerWorkspaces` 注册，`trash` 经依赖对象传入。
+- [x] 8.3 测试（新文件 `server/test/workspaces-delete.test.ts`）：「删除文件与目录」「同名先后删除互不覆盖」「拒绝项」「改名失败不丢文件」（注入抛 `EXDEV` 的 `rename`）「回收目录被预先占位」「回收目录不可见」；审计失败时 500 且条目已在回收目录。这个测试文件与 8.2 的路由、8.1 的 `moveToTrash` 半边 Depends on 1.2：其结论与设计相符才开工。
   `server/test/workspaces-trash-sweep.test.ts`（随 8.1 的 `sweep` 半边，不等 1.2）：「到期的批次被清除」「临时空间删除后批次保留到期满」（空间行与 `tmp-<id>` 目录都不存在时，批次在保留期内不动、期满被清；清理不查 `workspaces` 表）「保留期可配置」「清理出错不外溢」，以及 8.1 的「账号 id 不以点开头」。
   这个文件里的批次一律**由夹具直接在回收目录下建出**（按 file-operations 规定的四级目录、mode 与批次名，修改时间由夹具设定），不经 `DELETE …/entries` 路由——场景「临时空间删除后批次保留到期满」的 WHEN 里「先经 `DELETE …/entries` 删除」在这里以夹具等价替代；
   「经路由删除产生的批次落在同一位置、同一形状」由 `workspaces-delete.test.ts` 的「删除文件与目录」证明，两个文件合起来覆盖该场景。
-- [ ] 8.4 变异证据：批次目录建成 `0755` → mode 断言判红；用递归 `mkdir` 代替逐级校验 → 「预先占位」的符号链接用例里文件被移走而判红；`rename` 失败后不删空批次 → 「没有残留」断言判红；清理跟随符号链接 → 「链接目标内容不变」判红；删除先于归属检查 → 他账号 404 用例里出现文件变化而判红。
+- [x] 8.4 变异证据：批次目录建成 `0755` → mode 断言判红；用递归 `mkdir` 代替逐级校验 → 「预先占位」的符号链接用例里文件被移走而判红；`rename` 失败后不删空批次 → 「没有残留」断言判红；清理跟随符号链接 → 「链接目标内容不变」判红；删除先于归属检查 → 他账号 404 用例里出现文件变化而判红。
 
 Suggested fixture level: expanded - 删除行为、路径安全、审计与文件系统补偿都在这一组
 Minimal mergeable slice: 8.1 的 `sweep` 半边与 `workspaces-trash-sweep.test.ts` 先合（不等 1.2；没有调用方时无运行期影响，13.1 只依赖这一半）；8.1 的 `moveToTrash` 半边 + 8.2 的路由 + `workspaces-delete.test.ts` 等 1.2 的结论后同刀（Depends on 4.1）。定时启动在 13.1 接线
 
 ## 9. file-operations — 重命名 / 移动与下载
 
-- [ ] 9.1 `rest-entries.ts`：`POST /api/workspaces/:id/move`（严格的 `{from,to}` body、检查次序、409 不覆盖、子树 400、审计 `file.move` 与两种 `title`）；`server/src/http/errors.ts` 的归属路由集合加入 `POST /api/workspaces/:id/move`。
+- [x] 9.1 `rest-entries.ts`：`POST /api/workspaces/:id/move`（严格的 `{from,to}` body、检查次序、409 不覆盖、子树 400、审计 `file.move` 与两种 `title`）；`server/src/http/errors.ts` 的归属路由集合加入 `POST /api/workspaces/:id/move`。
   实施注记见 `implementation-notes.md`「9.1、9.2、9.5（#1062）」。
-- [ ] 9.2 测试（新文件 `server/test/workspaces-move.test.ts`）：file-operations「重命名与移动」六个场景（含「子树判断先于存在性」：`d1/sub` 存在与不存在两种夹具都是 400，`d1 → d10` 不被误判）；`server/test/http-parser-owners.test.ts` 加该路由的四种 content-parser 错误 → 400 且无文件变化。
+- [x] 9.2 测试（新文件 `server/test/workspaces-move.test.ts`）：file-operations「重命名与移动」六个场景（含「子树判断先于存在性」：`d1/sub` 存在与不存在两种夹具都是 400，`d1 → d10` 不被误判）；`server/test/http-parser-owners.test.ts` 加该路由的四种 content-parser 错误 → 400 且无文件变化。
 - [x] 9.3 `rest-entries.ts`：`GET /api/workspaces/:id/download`（附件头、`filename` 与 `filename*` 的生成做成纯函数、审计先于首字节、不支持 `Range`）。
   实施注记见 `implementation-notes.md`「9.3、9.4（#1061）」。
 - [x] 9.4 测试（新文件 `server/test/workspaces-download.test.ts`）：file-operations「下载」四个场景；文件名函数对中文、空格、引号、反斜杠、控制字符的输出；preview-origin「主站不把工作空间文件当文档返回」场景的 `download` 半边（html、svg、pdf、xml 都是 `application/octet-stream` 附件；`file` 半边在 6.3）。
-- [ ] 9.5 变异证据：目标存在时仍 `rename` → 「同名拒绝」里内容被覆盖而判红；不查子树 → `d1 → d1/sub/d1`（`d1/sub` 已存在的夹具）得到 `rename` 的失败或成功而不是 400，判红；把子树判断放回父目录检查之后 → `d1/sub` 不存在的夹具得到 404 而不是 400，判红；用不带 `/` 的前缀比较 → `d1 → d10` 被误拒而判红；审计挪到发送之后 → 「审计失败不发文件」判红；`Content-Type` 改用真实类型 → html 下载的类型断言判红。
+- [x] 9.5 变异证据：目标存在时仍 `rename` → 「同名拒绝」里内容被覆盖而判红；不查子树 → `d1 → d1/sub/d1`（`d1/sub` 已存在的夹具）得到 `rename` 的失败或成功而不是 400，判红；把子树判断放回父目录检查之后 → `d1/sub` 不存在的夹具得到 404 而不是 400，判红；用不带 `/` 的前缀比较 → `d1 → d10` 被误拒而判红；审计挪到发送之后 → 「审计失败不发文件」判红；`Content-Type` 改用真实类型 → html 下载的类型断言判红。
 
 Suggested fixture level: expanded - 改动文件位置的公共 API 与无上限的文件读出，含冲突、越界与审计次序
 Minimal mergeable slice: 9.1–9.2（移动）与 9.3–9.4（下载）互不依赖，各自可单独合入：下载一刀不执行 `rename`，不等 1.2、不依赖组 4 与组 6（「主站不把工作空间文件当文档返回」的 `file` 半边已归 6.3），可最先合；移动一刀 Depends on 1.2 与 4.1
@@ -286,7 +286,7 @@ Minimal mergeable slice: 9.1–9.2（移动）与 9.3–9.4（下载）互不依
   (a) 一个完整的 gzip 流之后的字节被忽略：带尾部字节的 tar.gz / gz 的列表等于去掉尾部后的列表，`truncated` 为 `false`。
   (b) typeflag 为 `1`–`6` 的 tar 成员没有正文：遍历器不按其头里的 `size` 跳过字节，下一个头紧随其后；该条目的 `size` 仍显示头里的值。
   各带用例与变异证据（去掉 (a) → 带尾部的包与无尾部的包列表不等或 `truncated` 为 `true` 而判红；去掉 (b) → 这类成员之后的成员丢失或错位而判红）。
-- [ ] 10.2 `archive.ts` 的 zip 部分：`yauzl`（新依赖，MIT，登记 `ATTRIBUTION.md`）只读中央目录；成员名超过 4096 字节的成员不计入结果，停读并置 `truncated`（名字随中央目录项读入后判定——`zip` 的名长字段只有 2 字节，读入量有界；不要求在 `yauzl` 交出该项之前拦截）。
+- [x] 10.2 `archive.ts` 的 zip 部分：`yauzl`（新依赖，MIT，登记 `ATTRIBUTION.md`）只读中央目录；成员名超过 4096 字节的成员不计入结果，停读并置 `truncated`（名字随中央目录项读入后判定——`zip` 的名长字段只有 2 字节，读入量有界；不要求在 `yauzl` 交出该项之前拦截）。
   实施注记见 `implementation-notes.md`「10.2（#1064）」。
 - [ ] 10.3 `GET /api/workspaces/:id/archive` 路由（新文件或并入 `rest-entries.ts`），`PREVIEW_ARCHIVE_MAX_ENTRIES` 经 `limits` 传入。
 - [ ] 10.4 测试（新文件 `server/test/workspaces-archive.test.ts`）：workspaces「压缩包列表」五个场景（含「声明超大的长文件名记录」：1 KiB 文件声明 4 GiB 的 `L` 记录、两个成员之后声明 1 GiB 的 pax 头、5000 字节的 zip 成员名与 `L` 名字、注入时钟的未压缩 tar 超时）。
@@ -301,10 +301,10 @@ Minimal mergeable slice: 10.1（tar / gz 的遍历器）与它在 10.4 里的用
 
 - [x] 11.1 新文件 `server/src/preview/tokens.ts`：preview-origin「预览令牌登记表」（时钟由参数传入，便于测试）。
   实施注记见 `implementation-notes.md`「11.1（#1066）」。
-- [ ] 11.2 `POST /api/workspaces/:id/preview-token`（`server/src/workspaces/` 下的新路由文件，仅在 `assembly.preview` 存在时注册）：响应六键、`base` 的推导（`PREVIEW_ORIGIN` 优先，否则请求协议 + 主机名 + 预览端口函数的返回值）、`embedOrigin` 取 `Origin` 头；
+- [x] 11.2 `POST /api/workspaces/:id/preview-token`（`server/src/workspaces/` 下的新路由文件，仅在 `assembly.preview` 存在时注册）：响应六键、`base` 的推导（`PREVIEW_ORIGIN` 优先，否则请求协议 + 主机名 + 预览端口函数的返回值）、`embedOrigin` 取 `Origin` 头；
   `errors.ts` 的归属路由集合加入它。
   实施注记见 `implementation-notes.md`「11.2、11.3（#1067）」。
-- [ ] 11.3 测试：`server/test/preview-tokens.test.ts`（登记表三个场景）；`server/test/preview-token-rest.test.ts`（「签发与复用」「对外来源与转换可用」「归属与请求体」；IPv6 主机名的方括号；响应头与日志不含令牌）；未装配 `preview` 时 404（http-service-skeleton「未装配预览的可注入 app」）。
+- [x] 11.3 测试：`server/test/preview-tokens.test.ts`（登记表三个场景）；`server/test/preview-token-rest.test.ts`（「签发与复用」「对外来源与转换可用」「归属与请求体」；IPv6 主机名的方括号；响应头与日志不含令牌）；未装配 `preview` 时 404（http-service-skeleton「未装配预览的可注入 app」）。
   `server/test/http-parser-owners.test.ts` 的归属身份表（`:29-42`，与 `:144-146` 的条数断言、常量名里的条数）加入 `POST /api/workspaces/:id/preview-token`，做法同 9.2 对 `move` 的处理；先合的那一个把条数加一，后合的再加一。
 - [ ] 11.4 跨路由边界测试（扩展 `server/test/workspaces-http.test.ts` 既有的「完整真实装配与隔离」用例，写成一份表驱动）：workspaces「工作空间 HTTP 集成边界」的场景「新增路由沿用同一边界」——对 `archive`、`download`、`DELETE entries`、`move`、`preview-token` 五条路由逐条断言：
   他人与不存在的 id 带越界路径（或越界的 `from`/`to`）→ 相同的 404、没有 `sandbox.reject` 审计行、没有文件系统变化；未认证 → 401；`archive`、`download`、`DELETE entries` 的重复 `path` → 400；全部响应带 `Cache-Control: no-store`。Depends on 8.2、9.1、9.3、10.3、11.2（被测的五条路由；因 8.2、9.1 而间接等 1.2。组 11 里只有本任务与 11.5 的最后一条变异有这个依赖）。
@@ -343,7 +343,7 @@ Minimal mergeable slice: atomic - 两个监听器与回收目录定时器在入�
 - [x] 14.1 新文件 `server/src/preview/office.ts`：`createOfficeConverter`——作业目录、argv 与环境、sudo 前缀（复用 `core/process-path` 的 `setpriv` 检查）、成功判定；终止在途转换（超时、`signal` 中止、`close()`）按 office-preview「转换器调用契约」的两种模式：同 uid 模式以新进程组启动并对进程组发 `SIGKILL`，`OMP_USER` 模式只杀自己启动的 `sudo`（不执行 `kill`/`pkill`/第二次 `sudo`，不新增 sudoers 规则）。
   实施注记见 `implementation-notes.md`「14.1、14.4（#1071）」。
 - [ ] 14.2 同文件或 `office-queue.ts`：并发上限、排队上限 8、按缓存键去重、排队中中止出队（office-preview「并发上限与排队」）。
-- [ ] 14.3 缓存与周期清理（office-preview「转换缓存」）：键的计算、命中更新修改时间、输出**复制**后改名进 `pdf/`、失败不入缓存、7 天清理函数、启动时清空 `work/`（周期定时器在 15.1 接进 `server.ts`）。
+- [x] 14.3 缓存与周期清理（office-preview「转换缓存」）：键的计算、命中更新修改时间、输出**复制**后改名进 `pdf/`、失败不入缓存、7 天清理函数、启动时清空 `work/`（周期定时器在 15.1 接进 `server.ts`）。
   启动时清空 `work/` 按 office-preview「转换缓存」分两种情况（owner D-24，design D18「作业目录的清理」；**审批 / 提权策略的改动，落在 Critical Path「omp 子进程治理」，PR 标注白盒审查**）：
   - `ompUser` 与 `officeBin` 没有同时提供（同 uid 模式；或有 `ompUser` 而没有 `officeBin`）：只由本进程递归删除，不启动 `sudo`。
   - 两者都提供：先 spawn 恰一次，命令 `sudo`，argv 恰为 `-n -u <ompUser> -- /usr/bin/find <cacheDir 的绝对路径>/work -mindepth 1 -delete`（逐项固定：路径取 `join(cacheDir, "work")`，不拼字符串、不加通配、不经 `setpriv`；`shell:false`、`cwd: "/"`（14.5 的假 `sudo` 记录并断言它）、标准流全部丢弃、环境只有 `PATH` 与存在时的 `LANG`），等它结束，再做本进程自己的递归删除。
