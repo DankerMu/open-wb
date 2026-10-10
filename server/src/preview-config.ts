@@ -21,7 +21,7 @@ const DEFAULT_PREVIEW_DOCUMENT_MAX_BYTES = 104_857_600;
 /** Notebook 预览的字节上限缺省值：10 MiB。 */
 const DEFAULT_PREVIEW_NOTEBOOK_MAX_BYTES = 10_485_760;
 const DEFAULT_PREVIEW_ARCHIVE_MAX_ENTRIES = 1_000;
-const DEFAULT_TRASH_RETENTION_DAYS = 30;
+export const DEFAULT_TRASH_RETENTION_DAYS = 30;
 
 export interface PreviewSettings {
   /** 预览监听器的端口（PREVIEW_PORT，缺省 0 即由系统分配）。 */

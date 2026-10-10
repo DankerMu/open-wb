@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance } from "fastify";
@@ -10,6 +10,12 @@ import { tempDir } from "./core-db-helpers.js";
 
 const INSERT_WORKSPACE_SQL =
   "INSERT INTO workspaces(id, owner_id, name, dir, created_at) VALUES (?, ?, ?, ?, ?)";
+
+/** The id of the workspace `seedWorkspace` makes. */
+export const FILES_WORKSPACE = "a".repeat(32);
+export const SANDBOX_DENIED_ENVELOPE = {
+  error: { code: "sandbox_denied", message: "目标路径不在你的沙箱内，操作已拒绝" },
+};
 
 interface WorkspaceHttpFixture {
   app: FastifyInstance;
@@ -24,6 +30,8 @@ export async function withWorkspacesApp<T>(
     previewLimits?: PreviewLimits;
     /** Further assembly members (the preview dependency, sinks); `runtime` stays the one below. */
     assembly?: Omit<AssemblyDependencies, "runtime">;
+    /** Members that need the sandbox root, which only exists in here: the trash service. */
+    assemblyOf?: (sandboxRoot: string) => Pick<AssemblyDependencies, "trash">;
   } = {},
 ): Promise<T> {
   const sandboxRoot = realpathSync(tempDir());
@@ -31,6 +39,7 @@ export async function withWorkspacesApp<T>(
     {
       assembly: {
         ...options.assembly,
+        ...options.assemblyOf?.(sandboxRoot),
         runtime: {
           bin: join(sandboxRoot, "omp"),
           sandboxRoot,
@@ -107,4 +116,22 @@ export function insertWorkspace(
   createdAt: number,
 ): void {
   db.prepare(INSERT_WORKSPACE_SQL).run(id, ownerId, name, dir, createdAt);
+}
+
+/** zhangsan's workspace `files` with its root directory; returns the root. */
+export function seedWorkspace({ db, sandboxRoot }: WorkspaceHttpFixture): string {
+  const root = join(sandboxRoot, "u1", "files");
+  mkdirSync(root, { recursive: true });
+  insertWorkspace(db, FILES_WORKSPACE, "u1", "files", "files", 1);
+  return root;
+}
+
+/** The audit rows of one kind in order, `detail` parsed. */
+export function auditRows(db: DatabaseSync, kind: string) {
+  return db
+    .prepare(
+      "SELECT actor_id, workspace_id, title, detail FROM audit_events WHERE kind = ? ORDER BY id",
+    )
+    .all(kind)
+    .map((row) => ({ ...row, detail: JSON.parse(String(row.detail)) as Record<string, unknown> }));
 }
