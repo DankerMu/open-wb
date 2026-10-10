@@ -9,6 +9,7 @@
 >   - 1.1 挡：19.2 的 PDF 与办公文档部分、19.3 的「PDF 与办公文档」三个场景、19.4 的 pdf 与办公文档行、28.6。
 >   - 1.2 挡（只有执行 `rename` 的实现及其路由测试）：8.1 的 `moveToTrash` 半边、8.2、8.3 的 `workspaces-delete.test.ts`、9.1、9.2。8.1 的 `sweep` 半边（`createTrash` 的目录校验 + `sweep` + `workspaces-trash-sweep.test.ts`）不做跨 uid 的 `rename`，不等 1.2；9.3–9.4（下载）不等 1.2。
 >   - 1.3 挡：28.2、28.6（只是记录的来源；不挡组 14——终止转换的做法已定）。
+> - **#1286 不挡任何任务**（owner 裁决 2026-10-09，design D22「已知残余」、D32 的 D-23）：检查之后按路径操作的替换窗口登记为已知残余，本 change 不闭合。8.1 的 `moveToTrash` 半边、8.2、9.1、9.2 与 13.1 都不等它（前四项仍等 1.2，已有结论）。
 > - **文件页首刀**：2.1 与 2.2 互不依赖；3.1–3.5 同刀，整刀 ← 2.1（预览的 `data-slot` 已定）与 2.2（`CreationMenu` 已搬进 `tree.tsx`）；3.4 把 2.1、2.2 的两个单文件登记换成目录。组 2、3 不依赖任何服务端任务。
 > - **服务端**：
 >   - 4.1 → 8.2、9.1（`delete` / `move` 两个 `op`；9.3 的下载用既有的 `read`，不等组 4）。
@@ -17,12 +18,12 @@
 >   - 7.1 → 7.2 → 7.3 → 7.4；7.2 → 12.1（区间发送函数）。
 >   - 8.1 的 `moveToTrash` 半边 → 8.2 → 8.3 的 `workspaces-delete.test.ts`；8.1 的 `sweep` 半边 → 13.1（入口只启动清理定时器）。
 >   - 9.1 → 9.2；9.3 → 9.4（两半互不依赖）。
->   - 10.1、10.2 → 10.3 → 10.4 中路由层的用例。
+>   - 10.1、10.2 → 10.3 → 10.4 中路由层的用例；10.6 ← 10.1，10.6 → 10.3。
 >   - 11.1 → 11.2 → 11.3；11.4 ← 8.2、9.1、9.3、10.3、11.2（表驱动测试覆盖的五条路由；组 11 只有这一个任务依赖组 8、9、10）；11.5 的最后一条变异随 11.4。
 >   - 12.2 → 12.1；12.1 ← 6.1、7.2、11.1。
 >   - 13.1 ← 5.1、8.1 的 `sweep` 半边、11.2（`assembly.preview`）、12.1；13.1 → 13.2。
->   - 14.1（连同 14.4 的假可执行文件）→ 14.2、14.3 → 14.5；组 14 不依赖组 13。
->   - 15.1 ← 5.1、11.2（`officeAvailable`）、12.1、13.1、14.1–14.3；15.1 → 15.2。
+>   - 14.1（连同 14.4 的假可执行文件）→ 14.2、14.3 → 14.5；14.7 ← 14.1，14.7 → 14.5、15.1；组 14 不依赖组 13。
+>   - 15.1 ← 5.1、11.2（`officeAvailable`）、12.1、13.1、14.1–14.3、14.7；15.1 → 15.2。
 > - **前端**：
 >   - 16.1 按方法：地址函数 `fileUrl`、`downloadUrl` ← 9.3，`listArchive` ← 10.3；16.2 按方法：`issuePreviewToken` ← 11.2，`moveEntry` ← 9.1，`deleteEntry` ← 8.2；16.3 ← 6.1。
 >   - 17.1 ← 3.1–3.5；17.2 ← 17.1、16.1 的地址函数、6.2（未知扩展名由服务端嗅探）；17.3 ← 17.1、3.5；17.4 ← 17.1、6.1。
@@ -277,6 +278,10 @@ Minimal mergeable slice: 9.1–9.2（移动）与 9.3–9.4（下载）互不依
 - [x] 10.1 新文件 `server/src/workspaces/archive.ts` 的 tar / tar.gz / gz 部分：`node:zlib` 加 512 字节头的遍历器（ustar `name`/`prefix`、GNU `L`、pax `path`；成员正文跳过不读）；单个 gz 一项；到条目上限停读；tar 与 tar.gz 的 5 秒时限（时钟可注入）；
   扩展记录 65536 字节与成员名 4096 字节的硬上限——按头里**声明**的长度在读取之前判定，超出即停读并置 `truncated`（一项都没读出时为不支持）。读取经一个可注入的读函数，测试用它记录单次读取的最大长度。
   实施注记见 `implementation-notes.md`「10.1（#1063）」。
+- [ ] 10.6 `archive.ts` 遍历器的两处修正（owner 裁决 2026-10-09；规格条文随本任务的代码 PR 落地，不在此前写）。Depends on：10.1。挡住：10.3。
+  (a) 一个完整的 gzip 流之后的字节被忽略：带尾部字节的 tar.gz / gz 的列表等于去掉尾部后的列表，`truncated` 为 `false`。
+  (b) typeflag 为 `1`–`6` 的 tar 成员没有正文：遍历器不按其头里的 `size` 跳过字节，下一个头紧随其后；该条目的 `size` 仍显示头里的值。
+  各带用例与变异证据（去掉 (a) → 带尾部的包与无尾部的包列表不等或 `truncated` 为 `true` 而判红；去掉 (b) → 这类成员之后的成员丢失或错位而判红）。
 - [ ] 10.2 `archive.ts` 的 zip 部分：`yauzl`（新依赖，MIT，登记 `ATTRIBUTION.md`）只读中央目录；成员名超过 4096 字节的成员不计入结果，停读并置 `truncated`（名字随中央目录项读入后判定——`zip` 的名长字段只有 2 字节，读入量有界；不要求在 `yauzl` 交出该项之前拦截）。
 - [ ] 10.3 `GET /api/workspaces/:id/archive` 路由（新文件或并入 `rest-entries.ts`），`PREVIEW_ARCHIVE_MAX_ENTRIES` 经 `limits` 传入。
 - [ ] 10.4 测试（新文件 `server/test/workspaces-archive.test.ts`）：workspaces「压缩包列表」五个场景（含「声明超大的长文件名记录」：1 KiB 文件声明 4 GiB 的 `L` 记录、两个成员之后声明 1 GiB 的 pax 头、5000 字节的 zip 成员名与 `L` 名字、注入时钟的未压缩 tar 超时）。
@@ -285,7 +290,7 @@ Minimal mergeable slice: 9.1–9.2（移动）与 9.3–9.4（下载）互不依
   去掉扩展记录的长度上限（按声明长度分配或读取）→ tar 用例的「单次读取不超过 65536 字节」判红；时限只套在 tar.gz 上 → 未压缩 `slow.tar` 的超时用例判红。
 
 Suggested fixture level: expanded - 解析不可信的二进制格式并对外新增端点；条目上限、长度上限与「不解压、不落盘」是硬约束
-Minimal mergeable slice: 10.1（tar / gz 的遍历器）与它在 10.4 里的用例先合；10.2（zip，带新依赖）与 10.3 的路由随后，各带自己的用例（10.3 Depends on 5.1 与 6.2 的 `limits` 依赖对象；10.1、10.2 只依赖 0.1）
+Minimal mergeable slice: 10.1（tar / gz 的遍历器）与它在 10.4 里的用例先合；10.6（遍历器的两处修正，带自己的用例）单独一刀，先于 10.3；10.2（zip，带新依赖）与 10.3 的路由随后，各带自己的用例（10.3 Depends on 5.1 与 6.2 的 `limits` 依赖对象；10.1、10.2 只依赖 0.1）
 
 ## 11. preview-origin — 令牌登记表与签发端点
 
@@ -318,6 +323,8 @@ Minimal mergeable slice: 12.2 的头函数与其测试先合；监听器实例�
 
 - [ ] 13.1 `server/src/server.ts`：按 http-service-skeleton「预览监听器的装配与关停」——预览监听器先于主监听器 `listen`、同一 `AbortSignal`、失败走既有 cleanup；监听成功后建 `PREVIEW_CACHE_DIR` 三个目录并清空 `work`；
   启动回收目录清理（8.1 的 `sweep` 半边）的定时器（`unref`）；`OwnedResources` 增加预览实例与该定时器；关停次序（回收目录清理的定时器 → 预览监听器 → 主监听器 → DB；转换器与转换缓存清理在组 15 接入这个序列）；`listener_force_close` 至多一行。`appAssemblyOf` 带上 `preview`。
+  清空 `work`：本任务只做本进程自己的递归删除（此时入口还没有转换器，`work` 下不会有属 omp 用户的东西）；同时配置了 `OMP_USER` 与 `OFFICE_BIN` 时先执行的那条 `sudo … find`（owner D-24）由 14.3 提供、在 15.1 连同真实转换器一起接进入口。
+  #1286：启动与周期清理的接线不等它（owner D-23，design D22「已知残余」）。`server/src/workspaces/trash.ts:12` 的头注释写着「settle it before anything schedules this sweep」，同一个代码 PR 把这半句改成已裁决的现状（登记为已知残余、issue 保持打开）；注释的其余陈述不动。
 - [ ] 13.2 测试（`server/test/server-startup-order.test.ts`、`listener-shutdown.test.ts` 或新文件，用既有 `server-startup-helpers` 起编译入口）：「两个监听器的启动与干净关停」「预览端口被占用」「关停期间的在途请求与转换」中在途请求的部分（转换的部分在 15.2）；
   「预览与文件键的缺省与覆盖」里关于实际绑定端口与四键启动记录的部分；信号落在两次 `listen` 之间时两个端口都可立即复用。
 - [ ] 13.3 变异证据：先起主监听器 → 「主监听器受理时预览已可用」的断言判红（在 success record 之前对预览端口的探测）；关停时先关 DB → 在途预览请求的用例出现 5xx 而判红；启动记录多一个键 → 精确四键断言判红。
@@ -331,22 +338,36 @@ Minimal mergeable slice: atomic - 两个监听器与回收目录定时器在入�
   实施注记见 `implementation-notes.md`「14.1、14.4（#1071）」。
 - [ ] 14.2 同文件或 `office-queue.ts`：并发上限、排队上限 8、按缓存键去重、排队中中止出队（office-preview「并发上限与排队」）。
 - [ ] 14.3 缓存与周期清理（office-preview「转换缓存」）：键的计算、命中更新修改时间、输出**复制**后改名进 `pdf/`、失败不入缓存、7 天清理函数、启动时清空 `work/`（周期定时器在 15.1 接进 `server.ts`）。
+  启动时清空 `work/` 按 office-preview「转换缓存」分两种情况（owner D-24，design D18「作业目录的清理」；**审批 / 提权策略的改动，落在 Critical Path「omp 子进程治理」，PR 标注白盒审查**）：
+  - `ompUser` 与 `officeBin` 没有同时提供（同 uid 模式；或有 `ompUser` 而没有 `officeBin`）：只由本进程递归删除，不启动 `sudo`。
+  - 两者都提供：先 spawn 恰一次，命令 `sudo`，argv 恰为 `-n -u <ompUser> -- /usr/bin/find <cacheDir 的绝对路径>/work -mindepth 1 -delete`（逐项固定：路径取 `join(cacheDir, "work")`，不拼字符串、不加通配、不经 `setpriv`；`shell:false`、`cwd: "/"`（14.5 的假 `sudo` 记录并断言它）、标准流全部丢弃、环境只有 `PATH` 与存在时的 `LANG`），等它结束，再做本进程自己的递归删除。
+  - `PATH` 的安全检查复用 `server/src/core/process-path.ts` 的 `assertSafeSudoPath`（与转换的 spawn 同一个函数，不另写）；`assertSetprivExecutable` 不适用。检查不过按该命令失败处理，不启动。
+  - 该命令失败（检查不过、spawn 失败、非 0 退出、被信号终止）：application stderr 恰一行 `{"event":"preview_work_clear_failed"}`（没有其它键），不抛出，本进程自己的删除照常进行。
+  - spawn 经可注入的函数（与 14.1 同一个 seam），测试用记录型假 `sudo`（14.5）；变异证据在 14.6。
+  - CI：`uid-isolation` job 不设 `OFFICE_BIN`，这条命令在那里不执行，`.github/scripts/ci-uid-isolation.sh` 不需要改。
 - [x] 14.4 测试夹具 `server/test/fixtures/fake-soffice.mjs`（可执行；按输入文件名里的标记：正常写出一个最小 PDF、退出码 1、不写输出、写空文件、写符号链接、睡眠、先起一个子进程再睡眠；把收到的 argv 与环境写到作业目录旁的记录文件）。
+- [ ] 14.7 `office.ts` 的输出复制设界（owner 裁决 2026-10-09；规格条文随本任务的代码 PR 落地，不在此前写）。Depends on：14.1。挡住：14.5、15.1。
+  对输出按同一个 fd 的 `fstat` 所得 `size` 复制恰好这么多字节：`size` 大于 200 MiB → 不读，`failed`；读到的字节少于 `size` → `failed`（半截的副本不留在 `pdf/`）。上限是写死的常量，不加配置键。
+  同一个 PR 更正 `server/src/preview/office.ts:9` 头注释里的「其后代可能残留」：按 design D18 与 owner D-25 写成实测事实（`OMP_USER` 模式下 `soffice.bin` 每次都留下并把转换跑完，实际并发可以超过上限）。
+  各带用例与变异证据（去掉上限 → 超限输出被读入而判红；不比对读到的字节数 → 短读的输出进了 `pdf/` 而判红）。
 - [ ] 14.5 测试（新文件 `server/test/office-converter.test.ts`、`office-queue.test.ts`、`office-cache.test.ts`）：三条需求的全部场景，对着 14.4 的假可执行文件真实 spawn；「超时与中止」在同 uid 模式下断言假进程及其子进程都不存在；sudo 前缀与「OMP_USER 模式下终止的是 sudo」用记录型假 `sudo`（记录 pid 后睡眠：断言它被 `SIGKILL`、恰被启动一次、名额已释放）。office-preview「自动化测试不需要 LibreOffice」：转换器经注入的 spawn 函数启动进程，测试记录每次启动的可执行文件路径，断言其 basename 没有一个恰为 `soffice` 或 `libreoffice`（夹具名是 `fake-soffice.mjs`）。
+  「OMP_USER 模式下启动时清空 work」（`office-cache.test.ts`，记录型假 `sudo`）：假 `sudo` 恰被启动一次且 argv 逐项相等、环境的键只有 `PATH`（与 `LANG`）、它结束之后本进程才开始删除、结束时 `work` 为空；假 `sudo` 以退出码 1 结束 → stderr 恰多一行 `{"event":"preview_work_clear_failed"}`、不抛出、本进程可删的条目照常被删；`PATH` 含相对项 → 假 `sudo` 没有被启动、同一行日志；不提供 `ompUser` → 没有启动 `sudo`；提供 `ompUser` 而不提供 `officeBin` → 没有启动 `sudo`、stderr 没有新增行，`work` 照常被本进程清空。
 - [ ] 14.6 变异证据：把输出改名进缓存而不是复制 → inode / 属主断言判红；同 uid 模式超时只杀直接子进程 → 「子进程也不存在」判红；`OMP_USER` 模式改为再起一个 `sudo … pkill` → 「假 `sudo` 恰被启动一次」判红；去掉去重 → 「恰启动一次」判红；失败结果写缓存 → 「失败不入缓存」判红。
+  启动时清空 `work`（14.3）：同 uid 模式也执行 `sudo` → 「没有启动 `sudo`」判红；判定里去掉 `officeBin`（只看 `ompUser`）→ 「有 `ompUser` 而没有 `officeBin` 时没有启动 `sudo`」判红；跳过 `sudo` 时连本进程自己的删除也跳过 → 该例的「`work` 为空」判红；argv 改成带通配或换成别的命令 → argv 逐项相等的断言判红；不等 `sudo` 结束就开始自己的删除 → 次序断言判红；该命令失败时抛出 → 「不抛出」判红；失败时不记日志或日志带路径 → stderr 整行相等的断言判红；去掉 `assertSafeSudoPath` → 「`PATH` 含相对项时不启动」判红。
 
 Suggested fixture level: expanded - 启动外部进程处理不可信输入：身份、超时、并发与缓存完整性
-Minimal mergeable slice: 14.1 + 14.4 + 对应测试（单次转换的契约）先合；排队与缓存各自随后（整组以参数收值、对着假可执行文件测试，只依赖 0.1，不依赖组 13，可与组 4–13 并行）
+Minimal mergeable slice: 14.1 + 14.4 + 对应测试（单次转换的契约）先合；14.7（输出复制设界与头注释更正，带自己的用例）单独一刀；排队与缓存各自随后（整组以参数收值、对着假可执行文件测试，只依赖 0.1，不依赖组 13，可与组 4–13 并行）
 
 ## 15. office-preview — `/o/` 路由
 
 - [ ] 15.1 `server/src/preview/app.ts`：`GET /o/<token>/*`，校验次序、扩展名与文档上限的前置拒绝、转换结果到状态码与固定文案的映射、客户端断开即中止、成功时按 PDF 的头与单段 `Range` 返回缓存文件。`server.ts` 用 `ServerConfig` 构造真实转换器并传入；令牌响应的 `officeAvailable` 接到 `converter.available`。
   同一任务把转换器接进入口的生命周期：`converter.close()` 与转换缓存每 24 小时的清理定时器（`unref`）纳入 `OwnedResources`，关停序列里排在回收目录清理定时器之前、预览监听器之前（http-service-skeleton「预览监听器的装配与关停」：转换器 `close` → 两个定时器 → 预览监听器 → 主监听器 → DB）。
+  启动时清空 `work` 改为调用 14.3 的函数（同时配置了 `OMP_USER` 与 `OFFICE_BIN` 时先执行 `sudo … find`，owner D-24；CI 的 `uid-isolation` job 不设 `OFFICE_BIN`，其 sudoers 脚本不需要改），取代 13.1 自己的那次删除；它必须在转换器受理第一次转换之前完成——预览监听器此时已在监听，`/o/` 在清空完成之前不得启动转换（次序由本任务保证并在 15.2 以一条用例证明）。Critical Path「omp 子进程治理」，PR 标注白盒审查。
 - [ ] 15.2 测试（`server/test/preview-office-route.test.ts`，注入转换器替身）：office-preview「办公文档预览路由」四个场景；http-service-skeleton「关停期间的在途请求与转换」中转换的部分（编译入口 + 假 `soffice`：SIGTERM 后假进程不存在、请求以失败结束、DB 最后关）。
 - [ ] 15.3 变异证据：超限检查放到转换之后 → 「`convert` 未被调用」判红；失败文案带上文件名 → 「正文不含文件名」判红；PDF 响应加 CSP `sandbox` → 头断言判红；关停时不调 `converter.close()` → 「SIGTERM 后假进程不存在」判红。
 
 Suggested fixture level: expanded - 对外路由把外部进程的结果变成响应，失败面多
-Minimal mergeable slice: atomic - 一条路由、它的映射表与转换器在入口的启停接线必须同刀（路由先合而不接关停会留下不被回收的转换进程），替身测试同刀（Depends on 5.1、11.2、12.1、13.1、14.1–14.3）
+Minimal mergeable slice: atomic - 一条路由、它的映射表与转换器在入口的启停接线必须同刀（路由先合而不接关停会留下不被回收的转换进程），替身测试同刀（Depends on 5.1、11.2、12.1、13.1、14.1–14.3、14.7）
 
 ## 16. files-web — API 客户端：`api-files.ts`
 
@@ -594,8 +615,8 @@ Minimal mergeable slice: (a)(c)(d)(e) 四步不依赖隔离来源，可先合；
 ## 28. 文档与真实环境验证
 
 - [ ] 28.1 新增 `docs/adr/0014-isolated-preview-origin.md`：隔离预览来源的决定（独立端口、路径令牌、不认 cookie、CSP `sandbox` 与 PDF 的例外、外部资源放行及其后果）、办公文档经 LibreOffice 转换、回收目录；
-  运维一节：`PREVIEW_PORT` / `PREVIEW_ORIGIN` 的设置与反向代理、放行端口、安装 LibreOffice 与 `OFFICE_BIN`、十二个环境变量一览、按审计 `trashId` 从 `<SANDBOX_ROOT>/.trash` 恢复的步骤、`PREVIEW_CACHE_DIR` 没有总量上限、`OMP_USER` 模式下被终止的转换可能留下进程（同 28.2）、助手改掉组写位的条目删除 / 移动会失败（1.2 的结论）、临时空间删除后其回收批次保留到期满、上传中的 `.part` 文件在目录树里可见。
-- [ ] 28.2 `docs/adr/0010-dedicated-omp-uid.md` 增补：转换进程以 omp 用户运行、新增的 sudoers 行（只有这一行）、`PREVIEW_CACHE_DIR` 三个目录的 mode；终止转换的做法（owner D-21：`OMP_USER` 模式杀 `sudo`、直接子进程靠 pdeathsig）与**已知残余**（其后代进程可能残留、不占转换名额、如何查与杀）；1.3 的实测结论（残留是否出现）。
+  运维一节：`PREVIEW_PORT` / `PREVIEW_ORIGIN` 的设置与反向代理、放行端口、安装 LibreOffice 与 `OFFICE_BIN`、十二个环境变量一览、按审计 `trashId` 从 `<SANDBOX_ROOT>/.trash` 恢复的步骤、`PREVIEW_CACHE_DIR` 没有总量上限、`OMP_USER` 模式下被终止的转换每次都留下 `soffice.bin` 并把转换跑完（owner D-25：怎样按作业目录查到这些进程、以哪个身份结束它们；实际并发可以超过 `OFFICE_CONVERT_CONCURRENCY`；同 28.2）、同时配置了 `OMP_USER` 与 `OFFICE_BIN` 时 `work` 在一次运行期间增长而重启时归零及其所需的那一行 sudoers（owner D-24：没配 `OFFICE_BIN` 的部署不执行这条命令、不需要这一行；规则里的路径必须与服务端解析出的 `PREVIEW_CACHE_DIR` 绝对路径逐字相同；漏配时启动日志里的 `preview_work_clear_failed`）、#1286 的已知残余与它的界限（owner D-23，design D22「已知残余」）、助手改掉组写位的条目删除 / 移动会失败（1.2 的结论）、临时空间删除后其回收批次保留到期满、上传中的 `.part` 文件在目录树里可见。
+- [ ] 28.2 `docs/adr/0010-dedicated-omp-uid.md` 增补：转换进程以 omp 用户运行、新增的两行 sudoers（转换的 spawn 前缀一行；启动时清空 `work` 的固定参数、无通配的 `/usr/bin/find <PREVIEW_CACHE_DIR 的绝对路径>/work -mindepth 1 -delete` 一行，owner D-24——写明它是提权面的扩大、作用范围、只在同时配置了 `OMP_USER` 与 `OFFICE_BIN` 时于启动时执行一次、失败不阻止启动、单次转换后的删除不提权；没有第三行，不存在 `kill` / `pkill` 规则）、`PREVIEW_CACHE_DIR` 三个目录的 mode；终止转换的做法（owner D-21：`OMP_USER` 模式杀 `sudo`、直接子进程靠 pdeathsig）与**已知残余**（owner D-25，按 1.3 的实测写事实：`soffice.bin` 每次都留下、把整份转换跑完才退出、最长在终止之后 128 秒、不占转换名额所以实际并发可以超过上限；如何查与杀）；1.3 的其余实测结论；CI `uid-isolation` job 不设 `OFFICE_BIN`，两行在那里都用不到，其 sudoers 不变。
 - [ ] 28.3 `docs/adr/0013-assistant-ui-frontend-rebuild.md` 增补：预览器按需加载是唯一放开的代码分割；本 change 完成后 `web/dist` 入口 JS 与各按需块的字节数（原始与 gzip），仍不设上限；新拷入的 `resizable`。
 - [ ] 28.4 `CONTEXT.md` 术语表：新增「工作空间侧边栏」「隔离预览来源」「回收目录」，去掉或改写「产物面板」的提法；`AGENTS.md` 的 Directory Map（`server/` 加预览监听器与文档转换）与命令面里提到的环境变量、`smoke/` 的夹具描述，连同 source-derived oracle 的文案同 PR 同步。
 - [ ] 28.5 `IMPLEMENTATION_PLAN.md`：S1f 的 D 一节标注已交付的范围与本 change 留下的后续（旧样式层整体移除的清理 issue、包体上限）；在「S4b 单机部署包」一节加一行：部署镜像要安装 LibreOffice 并设 `OFFICE_BIN`、发布 `PREVIEW_PORT`（压测第 5 条；本 change 不配 `OFFICE_BIN` 即功能关闭）。

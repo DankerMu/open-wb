@@ -66,7 +66,7 @@
 - **THEN** 依次为 206（`Content-Range: bytes 0-99/1000`、100 字节）、416（`Content-Range: bytes */1000`、空体）、200（1000 字节、`Accept-Ranges: bytes`）
 
 ### Requirement: 预览响应头与内容类型
-预览监听器的**每一个**响应（成功与失败）SHALL 带 `X-Content-Type-Options: nosniff`、`Cache-Control: no-store`、`Referrer-Policy: no-referrer`。`/w/` 与 `/o/` 的成功响应 SHALL 另带 `Access-Control-Allow-Origin: *`、`Cross-Origin-Resource-Policy: cross-origin` 与 `Content-Security-Policy`：`Content-Type` 为 `application/pdf` 的响应为 `frame-ancestors <E>`；其余一律为 `sandbox allow-scripts allow-forms allow-modals; frame-ancestors <E>`。`<E>` 是该令牌登记的 `embedOrigin`，为 `null` 时取 `'none'`。CSP SHALL NOT 含 `allow-same-origin`、`allow-top-navigation`、`allow-popups`，SHALL NOT 含任何限制取源的指令（`default-src`、`script-src`、`connect-src` 等）——HTML 预览加载外部资源是被允许的。
+预览监听器的**每一个**响应（成功与失败）SHALL 带 `X-Content-Type-Options: nosniff`、`Cache-Control: no-store`、`Referrer-Policy: no-referrer`。`/w/` 与 `/o/` 的成功响应 SHALL 另带 `Access-Control-Allow-Origin: *`、`Cross-Origin-Resource-Policy: cross-origin` 与 `Content-Security-Policy`：`Content-Type` 为 `application/pdf` 的响应为 `frame-ancestors <E>`；其余一律为 `sandbox allow-scripts allow-forms allow-modals; frame-ancestors <E>`。`<E>` 由写响应头的这一步从该令牌登记的 `embedOrigin` 得出：当且仅当它不是 `null`、能被解析为 URL、解析结果的 `origin` 与它逐字相等（即它恰是一个序列化的来源 `scheme://host[:port]`），并且不含 `*`、`;`、`,`、`'` 四个字符中的任何一个时，`<E>` SHALL 逐字为该值；其余一切情况（含 `null`）`<E>` SHALL 为 `'none'`。这项校验只在写头处做：「预览令牌登记表」原样保存 `embedOrigin`，不做校验。CSP SHALL NOT 含 `allow-same-origin`、`allow-top-navigation`、`allow-popups`，SHALL NOT 含任何限制取源的指令（`default-src`、`script-src`、`connect-src` 等）——HTML 预览加载外部资源是被允许的。
 
 `/w/` 的 `Content-Type` SHALL 按文件名最后一个 `.` 之后的小写扩展名取自固定表：`html`/`htm` → `text/html; charset=utf-8`；`css` → `text/css; charset=utf-8`；`js`/`mjs` → `text/javascript; charset=utf-8`；`json`/`map` → `application/json; charset=utf-8`；`svg` → `image/svg+xml`；`png`、`jpg`/`jpeg`、`gif`、`webp`、`bmp`、`ico` → 与 workspaces 分类器相同的 `image/*`；`woff`、`woff2`、`ttf`、`otf` → `font/<同名>`；`pdf` → `application/pdf`；`mp3`、`wav`、`mp4`、`webm` → 与 workspaces 分类器相同的类型；`txt`、`md`、`csv`、`tsv`、`xml` → `text/plain; charset=utf-8`；表外（含无扩展名）一律 `application/octet-stream`。类型只由文件名决定，SHALL NOT 嗅探内容。
 
@@ -74,7 +74,11 @@
 
 #### Scenario: HTML 响应是不透明来源
 - **WHEN** 以 `Origin: http://127.0.0.1:3000` 签发令牌后请求 `/w/<T>/site/index.html`
-- **THEN** 响应头恰含 `Content-Security-Policy: sandbox allow-scripts allow-forms allow-modals; frame-ancestors http://127.0.0.1:3000`、`Referrer-Policy: no-referrer`、`X-Content-Type-Options: nosniff`、`Cache-Control: no-store`、`Access-Control-Allow-Origin: *`；CSP 中没有 `allow-same-origin` 与 `default-src`
+- **THEN** 「预览响应头与内容类型」规定的头恰为七个：`Content-Type: text/html; charset=utf-8`、`X-Content-Type-Options: nosniff`、`Cache-Control: no-store`、`Referrer-Policy: no-referrer`、`Access-Control-Allow-Origin: *`、`Cross-Origin-Resource-Policy: cross-origin`、`Content-Security-Policy: sandbox allow-scripts allow-forms allow-modals; frame-ancestors http://127.0.0.1:3000`；CSP 中没有 `allow-same-origin` 与 `default-src`
+
+#### Scenario: embedOrigin 不是一个来源时按没有处理
+- **WHEN** 令牌登记的 `embedOrigin` 分别为：`*`、`null`（四个字符的字符串）、空串、`'none'`、`http://a.test/`、`http://a.test/path`、`http://a.test; sandbox allow-same-origin`、`http://a.test http://evil.test`、`http://a.test, http://evil.test`、`javascript:alert(1)`、`data:text/html,x`、`http:`；以及能解析且 `origin` 原样往返、但含上述四个字符之一的 `http://*`、`http://*.a.test`、`http://a.test;sandbox`、`http://a.test,x`、`http://a'none'`；另以 `https://preview.example.test` 为对照。各请求 `/w/<T>/a.html` 与 `/w/<T>/doc.pdf`
+- **THEN** 对照之外的每一例，`a.html` 的 CSP 恰为 `sandbox allow-scripts allow-forms allow-modals; frame-ancestors 'none'`，`doc.pdf` 的 CSP 恰为 `frame-ancestors 'none'`，登记的值不出现在任何响应头里；对照一例两者的 `frame-ancestors` 之后恰为 `https://preview.example.test`
 
 #### Scenario: PDF 响应不带 sandbox
 - **WHEN** 请求 `/w/<T>/doc.pdf`；另一个令牌在没有 `Origin` 头的请求里签发后请求同一文件

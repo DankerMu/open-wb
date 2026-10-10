@@ -70,7 +70,7 @@ owner 在 2026-10-06 验收时又提出三点（#913）：HTML 只能看源码�
 - **依赖**：前端 `lowlight`（MIT）+ `highlight.js`（BSD-3-Clause）、`hast-util-to-jsx-runtime`（MIT，已是间接依赖，转为直接依赖）、
   `react-resizable-panels`（MIT，随 `resizable` 拷入）；服务端 `yauzl`（MIT）。全部登记 `ATTRIBUTION.md`。Notebook 渲染与 tar 列表不引库。
 - **部署**：多发布一个端口（`PREVIEW_PORT`）；反向代理后需要设 `PREVIEW_ORIGIN`；要预览办公文档需安装 LibreOffice 并设 `OFFICE_BIN`，
-  uid 分离部署下 sudoers 多一行（只有这一行；终止转换不新增提权规则，owner D-21）；新增十二个环境变量（全部有缺省值）。记入新的 ADR-0014 与 ADR-0010 增补。
+  配了 `OFFICE_BIN` 的 uid 分离部署下 sudoers 多两行（放行转换的 spawn 前缀一行，放行启动时清空转换作业目录的固定参数 `find` 一行，owner D-24；终止转换不新增提权规则，owner D-21）；新增十二个环境变量（全部有缺省值）。记入新的 ADR-0014 与 ADR-0010 增补。
 - **跨 change 依赖**：`Depends on change s1f-session-list-temp-space`（临时空间的定义与 `temporaryWorkspace` 视图键、临时空间会话的产物卡、会话列表文件迁移后的已迁移清单）。
   归档次序依赖 C 与 S1g（`s1g-composer-capabilities`）：三个 change 共改同一批条文（design D25 的重叠表，十三条），本 change 的同名 MODIFIED 以「主规格 → C → S1g」叠加后的文本为底，必须在两者之后归档；
   对 S1g 没有功能依赖——不使用它的 `write`、上传端点与附件。实现与归档次序 C → S1g → D。
