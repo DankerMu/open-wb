@@ -353,6 +353,45 @@ describe("压缩包列表：gzip 流之后的字节与没有正文的成员", ()
   });
 });
 
+describe("压缩包列表：多成员 gzip", () => {
+  // The first stream has no tar end blocks: `b.txt` and the end blocks are in the second one.
+  const first = gzipSync(tarFile("a.txt", "hello"));
+  const second = gzipSync(Buffer.concat([tarFile("b.txt", "world!"), TAR_END]));
+  const A_ENTRY = { path: "a.txt", type: "file", size: 5 };
+  const B_ENTRY = { path: "b.txt", type: "file", size: 6 };
+
+  it.each([
+    ["multi.tgz：两个流首尾相接", "multi.tgz", Buffer.alloc(0)],
+    ["multi-tail.tgz：其后再跟 10 个非零字节", "multi-tail.tgz", Buffer.alloc(10, "j")],
+  ])("%s → 恰 a.txt、b.txt 两项，truncated:false", async (_label, name, tail) => {
+    const { file, listing } = await list(name, Buffer.concat([first, second, tail]));
+    expect(listing).toEqual({ format: "tar.gz", entries: [A_ENTRY, B_ENTRY], truncated: false });
+    expect(file.positions).toEqual([0]);
+    expect(file.maxLength()).toBeLessThanOrEqual(EXTENSION_LIMIT);
+  });
+
+  it("blocks.tgz：一个 tar 每 512 字节压成一个 gzip 流 → 恰三个成员，truncated:false", async () => {
+    const streams = Array.from({ length: THREE_MEMBERS.length / 512 }, (_, index) =>
+      gzipSync(THREE_MEMBERS.subarray(index * 512, (index + 1) * 512)),
+    );
+    expect(streams).toHaveLength(7);
+    const { file, listing } = await list("blocks.tgz", Buffer.concat(streams));
+    expect(listing).toEqual({ format: "tar.gz", entries: THREE_ENTRIES, truncated: false });
+    expect(file.maxLength()).toBeLessThanOrEqual(EXTENSION_LIMIT);
+  });
+
+  it("multi-bad.tgz：第二个流的头魔数对、压缩方法不是 8 → 恰 a.txt 一项并置 truncated，与只有第一个流时相同", async () => {
+    const bad = Buffer.from(second);
+    expect(bad.readUInt16BE(0)).toBe(0x1f8b);
+    bad.writeUInt8(9, 2);
+    const bare = await list("multi-bad.tgz", first);
+    const { file, listing } = await list("multi-bad.tgz", Buffer.concat([first, bad]));
+    expect(listing).toEqual({ format: "tar.gz", entries: [A_ENTRY], truncated: true });
+    expect(listing).toEqual(bare.listing);
+    expect(file.positions).toEqual([0]);
+  });
+});
+
 describe("压缩包列表：恶意成员名只是数据", () => {
   it("../、绝对路径、含 <script> 的名字原样出现在 path 里，列表过程不碰文件系统", async () => {
     const names = ["../../etc/passwd", "/abs/x", "<script>alert(1)</script>.txt", "a/./b//c/../d"];

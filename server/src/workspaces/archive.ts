@@ -11,14 +11,17 @@
  * - a GNU `L` or pax `x` record declaring more than 65536 bytes is not read, a name longer than
  *   4096 bytes is not listed; either one ends the walk as corruption does;
  * - the walk stops at `maxEntries` and 5000 ms after it began; the clock is read before every
- *   header and, in a tar.gz, before every 1024 compressed bytes handed to the inflater.
+ *   header and, in a tar.gz, before every 1024 compressed bytes handed to the inflater and before
+ *   every gzip stream that is begun.
  * Corruption (a short or missing header, a bad checksum, a non-octal size, a bad pax record, a
  * gzip stream that is not one or breaks off) with nothing listed yet is `preview_unsupported`;
  * after the first entry it ends the walk with `truncated`. Running out of time is never
  * `preview_unsupported`: it returns what was listed, possibly nothing, with `truncated`. A failure
  * of `readAt` itself is rethrown as it is.
- * A tar.gz is its first gzip stream: what follows the end of that stream — padding, junk, another
- * gzip stream — is not read as archive data and is not corruption.
+ * A tar.gz is one gzip stream or several end to end (bgzip, eStargz, `cat a.tgz b.tgz`): their
+ * inflated data is read as one tar, as `tar xzf` reads it. Where a complete stream is not followed
+ * by a valid gzip header — padding, junk, a header cut short — the data ends there: what follows is
+ * not read as archive data and is not corruption.
  */
 import { crc32, createInflateRaw, type InflateRaw } from "node:zlib";
 import { HttpError } from "../core/errors/index.js";
@@ -337,144 +340,198 @@ function positionalSource(readAt: ReadAt): ByteSource {
 }
 
 /**
- * The length of the gzip header at the start of `start` (the first read of the file): the fixed
- * part, then FEXTRA, FNAME, FCOMMENT and FHCRC where the flags say so. What zlib refuses is
- * refused: another magic or method, a reserved flag, a header CRC that does not match. A header
- * that does not end before `start` does is refused too.
+ * The length of the gzip header that `bytes` begins with: the fixed part, then FEXTRA, FNAME,
+ * FCOMMENT and FHCRC where the flags say so. "invalid" is what zlib refuses, whatever might follow:
+ * another magic or method, a reserved flag, a header CRC that does not match. "incomplete" is a
+ * header that `bytes` holds no more than the beginning of; one that reaches the very end of `bytes`
+ * counts as that too, because deflate data has to follow it in the same read.
  */
-function gzipHeaderLength(start: Buffer): number {
-  if (start.length < GZIP_FIXED_BYTES || start.readUInt16BE(0) !== GZIP_MAGIC) {
-    throw new CorruptArchive();
+function gzipHeaderLength(bytes: Buffer): number | "invalid" | "incomplete" {
+  if (bytes.length >= 2 && bytes.readUInt16BE(0) !== GZIP_MAGIC) {
+    return "invalid";
   }
-  const flags = start.readUInt8(3);
-  if (start.readUInt8(2) !== GZIP_DEFLATE || (flags & GZIP_RESERVED) !== 0) {
-    throw new CorruptArchive();
+  if (bytes.length < GZIP_FIXED_BYTES) {
+    return "incomplete";
   }
-  let length = GZIP_FIXED_BYTES;
-  if ((flags & GZIP_EXTRA) !== 0) {
-    length += 2 + uint16(start, length);
+  const flags = bytes.readUInt8(3);
+  if (bytes.readUInt8(2) !== GZIP_DEFLATE || (flags & GZIP_RESERVED) !== 0) {
+    return "invalid";
   }
-  for (const field of [GZIP_NAME, GZIP_COMMENT]) {
-    if ((flags & field) !== 0) {
-      length = start.indexOf(0, length) + 1;
-    }
-    // `indexOf` found no NUL: past the end of `start`, or nothing left to search.
-    if (length === 0) {
-      throw new CorruptArchive();
-    }
-  }
+  let length = gzipFieldsEnd(bytes, flags);
   if ((flags & GZIP_HEADER_CRC) !== 0) {
-    if (uint16(start, length) !== crc32(start.subarray(0, length)) % 65_536) {
-      throw new CorruptArchive();
+    if (length + 2 > bytes.length) {
+      return "incomplete";
+    }
+    if (bytes.readUInt16LE(length) !== crc32(bytes.subarray(0, length)) % 65_536) {
+      return "invalid";
     }
     length += 2;
   }
-  // Deflate data has to follow in the same read: a header that fills it is refused as well.
-  if (length >= start.length) {
-    throw new CorruptArchive();
-  }
-  return length;
+  return length < bytes.length ? length : "incomplete";
 }
 
-/** The little-endian 16-bit number at `offset`; corruption where `bytes` does not reach that far. */
-function uint16(bytes: Buffer, offset: number): number {
-  if (offset + 2 > bytes.length) {
-    throw new CorruptArchive();
+/** Where FEXTRA, FNAME and FCOMMENT end; `bytes.length` or more where one of them is not all there. */
+function gzipFieldsEnd(bytes: Buffer, flags: number): number {
+  let end = GZIP_FIXED_BYTES;
+  if ((flags & GZIP_EXTRA) !== 0) {
+    end += 2 + (end + 2 <= bytes.length ? bytes.readUInt16LE(end) : bytes.length);
   }
-  return bytes.readUInt16LE(offset);
+  for (const field of [GZIP_NAME, GZIP_COMMENT]) {
+    if ((flags & field) !== 0) {
+      const nul = end < bytes.length ? bytes.indexOf(0, end) : -1;
+      end = nul === -1 ? bytes.length : nul + 1;
+    }
+  }
+  return end;
 }
 
 /**
  * A tar.gz. Nothing runs in the background: compressed bytes are fetched with `readAt` and fed to
  * the inflater only when the walk asks for more, one `FEED_BYTES` slice at a time, and the next
- * slice waits until this one is consumed. What is held is therefore what one slice inflates to
- * (deflate tops out near 1032:1, about 1 MiB) plus what the walk asked for (at most 65536 bytes).
+ * slice waits until this one is consumed. What is held is therefore the last read (at most 65536
+ * bytes), what one slice inflates to (deflate tops out near 1032:1, about 1 MiB) and what the walk
+ * asked for (at most 65536 bytes).
  *
  * The gzip framing is read here and only the deflate data goes to a raw inflater. zlib's gunzip
- * cannot be told to stop at the end of a stream: it takes the bytes after it for a further stream,
- * fails on them and gives nothing for the slice it failed in. A raw inflater stops at the last
- * deflate block and reports, through `bytesWritten`, how many bytes it used; the stream's CRC-32
- * and length follow there, and nothing after them is fed or read.
+ * gives nothing for the slice in which it fails on the bytes after a stream, and cannot be told
+ * what to take for a further stream. A raw inflater stops at the last deflate block and reports,
+ * through `bytesWritten`, how many bytes it used: the stream's CRC-32 and length follow there, and
+ * `cursor` is moved back onto them, so that nothing after a stream is held anywhere but in the
+ * last read.
+ *
+ * After a stream whose CRC-32 and length match, the next stream begins only when the walk asks for
+ * more and only where a valid gzip header follows; it gets an inflater of its own and its data
+ * comes after what the streams before it gave. Each call of `fill` takes one step — begins one
+ * stream or feeds one slice — and the callers read the clock between steps, so a file of streams
+ * that inflate to nothing is walked one stream per step and no further than the time allows.
  *
  * An inflate error ends the data: what earlier slices inflated is still handed out (zlib gives
  * nothing for the slice the error is in), and the walk then meets a short read — corruption. A
- * CRC-32 or length that does not match is treated the same way.
+ * CRC-32 or length that does not match ends the data too and no stream after it is read; what the
+ * slice that showed the end of the deflate data inflated to is not handed out (that is nothing
+ * where the deflate data ended exactly with the slice before it).
  */
 function gunzipSource(readAt: ReadAt, expired: Expired): ByteSource & { close(): void } {
-  const inflater = createInflateRaw();
-  // Errors are taken from the write / end callbacks; this keeps them from being uncaught events.
-  inflater.on("error", () => {});
+  /** The stream being inflated; null before the first one and between two. */
+  let inflater: InflateRaw | null = null;
   let incoming: Buffer[] = [];
   let available = 0;
   let checksum32 = 0;
   let inflated = 0;
-  inflater.on("data", (chunk: Buffer) => {
-    incoming.push(chunk);
-    available += chunk.length;
-    checksum32 = crc32(chunk, checksum32);
-    inflated += chunk.length;
-  });
   let rest: Buffer = Buffer.alloc(0);
-  let input: Buffer = Buffer.alloc(0);
-  let position = 0;
+  /** The last read, the file offset it was read at, and how much of it has been consumed. */
+  let buffer: Buffer = Buffer.alloc(0);
+  let start = 0;
+  let cursor = 0;
   let fed = 0;
   let ended = false;
+  /** False once a read came back shorter than was asked for: that is the end of the file, nothing is read after it. */
+  let more = true;
 
-  /** Up to `length` of the compressed bytes that come next; none where the file has no more. */
+  async function fetch(position: number): Promise<void> {
+    buffer = await readAt(position, MAX_EXTENSION_BYTES);
+    more = buffer.length === MAX_EXTENSION_BYTES;
+    start = position;
+    cursor = 0;
+  }
+
+  /** Up to `length` of the compressed bytes that come next, all from one read; none where the file has no more. */
   async function compressed(length: number): Promise<Buffer> {
-    if (input.length === 0) {
-      input = await readAt(position, MAX_EXTENSION_BYTES);
-      // Nothing was read before this: the file starts with the gzip header, which is not deflate data.
-      const header = position === 0 ? gzipHeaderLength(input) : 0;
-      position += input.length;
-      input = input.subarray(header);
+    if (cursor === buffer.length && more) {
+      await fetch(start + buffer.length);
     }
-    const taken = input.subarray(0, length);
-    input = input.subarray(length);
+    const taken = buffer.subarray(cursor, cursor + length);
+    cursor += taken.length;
     return taken;
   }
 
   /**
-   * Whether the eight bytes after the deflate data, `unused` first and the file after it, are all
-   * there and are not the CRC-32 and the length of what was inflated. A trailer cut short by the
-   * end of the file is not a mismatch: zlib would have handed the data out before it found out.
+   * Begins the stream at `cursor`, or ends the data where no valid header is there. A header the
+   * last read holds only the beginning of is read again from its own offset, once: the read is a
+   * later one than the last and a header has to fit in it. A file that does not begin with a
+   * stream ends the data as well: the walk finds no tar header in it, which is corruption.
    */
-  async function trailerMismatch(unused: Buffer): Promise<boolean> {
-    let trailer = unused.subarray(0, GZIP_TRAILER_BYTES);
-    while (trailer.length < GZIP_TRAILER_BYTES) {
-      const more = await compressed(GZIP_TRAILER_BYTES - trailer.length);
-      if (more.length === 0) {
-        return false;
-      }
-      trailer = Buffer.concat([trailer, more]);
+  async function begin(): Promise<void> {
+    if (cursor === buffer.length && more) {
+      await fetch(start + buffer.length);
     }
-    return trailer.readUInt32LE(0) !== checksum32 || trailer.readUInt32LE(4) !== inflated >>> 0;
+    let length = gzipHeaderLength(buffer.subarray(cursor));
+    if (length === "incomplete" && cursor > 0 && more) {
+      await fetch(start + cursor);
+      length = gzipHeaderLength(buffer);
+    }
+    if (typeof length !== "number") {
+      ended = true;
+      return;
+    }
+    cursor += length;
+    fed = 0;
+    checksum32 = 0;
+    inflated = 0;
+    inflater = createInflateRaw();
+    // Errors are taken from the write / end callbacks; this keeps them from being uncaught events.
+    inflater.on("error", () => {});
+    inflater.on("data", (chunk: Buffer) => {
+      incoming.push(chunk);
+      available += chunk.length;
+      checksum32 = crc32(chunk, checksum32);
+      inflated += chunk.length;
+    });
   }
 
-  /** Feeds one slice, or ends the stream when the file has no more; a `readAt` failure is thrown as it is. */
-  async function fill(): Promise<void> {
+  /**
+   * Whether the eight bytes at `cursor` are all there and are the CRC-32 and the length of what
+   * the stream inflated to; null where the file ends before the eighth.
+   */
+  async function trailerMatches(): Promise<boolean | null> {
+    let trailer: Buffer = Buffer.alloc(0);
+    while (trailer.length < GZIP_TRAILER_BYTES) {
+      const part = await compressed(GZIP_TRAILER_BYTES - trailer.length);
+      if (part.length === 0) {
+        return null;
+      }
+      trailer = Buffer.concat([trailer, part]);
+    }
+    return trailer.readUInt32LE(0) === checksum32 && trailer.readUInt32LE(4) === inflated >>> 0;
+  }
+
+  /** Feeds one slice to `current`, or ends it when the file has no more; a `readAt` failure is thrown as it is. */
+  async function feed(current: InflateRaw): Promise<void> {
     const slice = await compressed(FEED_BYTES);
     if (slice.length === 0) {
-      await settled(inflater, (done) => inflater.end(done));
+      await settled(current, (done) => current.end(done));
       ended = true;
       return;
     }
     const before = { chunks: incoming.length, bytes: available };
     fed += slice.length;
     // An errored stream is destroyed and takes no further call.
-    if (!(await settled(inflater, (done) => inflater.write(slice, done)))) {
+    if (!(await settled(current, (done) => current.write(slice, done)))) {
       ended = true;
       return;
     }
-    // The inflater left input unused: the deflate data ended inside this slice, the trailer follows.
-    const unused = fed - inflater.bytesWritten;
-    if (unused > 0) {
-      ended = true;
-      if (await trailerMismatch(slice.subarray(slice.length - unused))) {
-        incoming.length = before.chunks;
-        available = before.bytes;
-      }
+    // The inflater left input unused: the deflate data ended in this slice or right before it.
+    const unused = fed - current.bytesWritten;
+    if (unused === 0) {
+      return;
     }
+    current.destroy();
+    inflater = null;
+    // A slice comes from one read, so the unused bytes are still the ones before `cursor`.
+    cursor -= unused;
+    const matches = await trailerMatches();
+    if (matches === false) {
+      incoming.length = before.chunks;
+      available = before.bytes;
+    }
+    // A trailer cut short by the end of the file is not a mismatch (zlib would have handed the
+    // data out before it found out), and there is no file left for a further stream either.
+    ended = matches !== true;
+  }
+
+  /** One step: begins a stream, or feeds a slice to the one that is open. */
+  function fill(): Promise<void> {
+    return inflater === null ? begin() : feed(inflater);
   }
 
   /** Removes and returns up to `length` inflated bytes. */
@@ -491,8 +548,9 @@ function gunzipSource(readAt: ReadAt, expired: Expired): ByteSource & { close():
 
   return {
     async read(length) {
-      // Compressed input can go on for long without inflating to anything: the clock is read here
-      // too. The walk takes the short block as the end of what could be read in time.
+      // Compressed input can go on for long without inflating to anything — one stream that
+      // stalls, or stream after stream that is empty: the clock is read before every step. The
+      // walk takes the short block as the end of what could be read in time.
       while (available < length && !ended && !expired()) {
         await fill();
       }
@@ -506,7 +564,7 @@ function gunzipSource(readAt: ReadAt, expired: Expired): ByteSource & { close():
       }
     },
     close() {
-      inflater.destroy();
+      inflater?.destroy();
     },
   };
 }

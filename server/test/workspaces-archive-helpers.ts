@@ -124,6 +124,9 @@ export function gzipMember(
   return Buffer.concat([...parts, deflateRawSync(data), trailer]);
 }
 
+/** A gzip member that holds nothing: the 10-byte header, an empty deflate stream, CRC-32 0 and length 0. */
+export const EMPTY_MEMBER = gzipMember(Buffer.alloc(0));
+
 const handles: FileHandle[] = [];
 
 afterEach(async () => {
