@@ -520,3 +520,34 @@
 - 变异：短读时直接返回 `null`、不删副本 → 截短三行的「`pdf/` 为空」判红（各剩 1 个文件）。
 - 变异：`>` 改成 `>=` → 「恰 200 MiB」一例判红（`failed`）。
 - 变异：预期不可观察：上限做成可配置（选项或环境变量）而缺省值不变——没有用例会去设它，靠白盒审查与 `OfficeConverterOptions` 的键集合；fd 在失败路径上是否关闭（同 14.1，没有可数的句柄计数）；绕过 `FileHandle#read`（例如按 fd 号调 `fs.read`）读取超限输出的写法探针看不见。
+
+## 6.2（部分）、6.3、6.4（#1056）
+
+- 触及 Critical Path「沙箱与文件边界」（`file` 路由在分类前新增一次对用户文件的按路径读取，决定主站返回的内容类型）：两个评审席位加 owner 白盒审查。前提 0.1（#1049）、5.1（#1054，`server/src/preview-config.ts:40/42/46`）、6.1（#1055，`preview.ts:129` 的 `sniffText`）都已在 origin/master（97cc5786）的代码里；不等 1.1 / 1.2 / 1.3，#1286 不挡。
+- 6.2 已交付的半边（#1055）：`rest.ts:288-290` 四参调用，`limits` 写死 `DEFAULT_PREVIEW_LIMITS`，不传 `sniffedText`。本刀剩下三件：嗅探、`limits` 依赖对象、配置到装配的接线。issue 的 6.2 / 6.3 / 6.4 摘录与 `tasks.md` 逐字一致，无条文差异。
+- 漂移一（issue 的 PR Boundary 写「不改 `server.ts`」，做不到）：`app.ts` 看不到 `ServerConfig`，映射在 `server/src/server.ts:107` 的 `appAssemblyOf`（先例 `:112` 的 `uploadMaxBytes`）。本刀必须在那里加 `previewLimits: { text: config.previewTextMaxBytes, image: config.previewImageMaxBytes, notebook: config.previewNotebookMaxBytes }`，否则生产永远拿缺省值。tasks 6.2 的「`app.ts` 把 `ServerConfig` 接进来」同样不精确，记入偏离记录首条。`server-handshake-log.test.ts:129-160` 逐字段断言，不会红。
+- 漂移二（既有断言必须改）：`server/test/workspaces-http.test.ts:528-529` 的 `file.__proto__` / `file.constructor` 内容是 `"x"`，`:574-583` 断言 415；接上嗅探后会变 200。把两文件内容改成含 `0x00` 的字节，415 断言原样保留（「原型名不继承命中」的原意不变），逐条记入偏离记录。#1055 注记引的 `:509-517` 已过期。其余 `file` 路由调用方（`workspaces-http-failures.test.ts:47/79/123/152/160/249`、`session-temp-workspace.test.ts:123`、`smoke/files.hurl:84-99`）全是已知扩展名，不受影响。
+- 判定「要不要嗅探」需要谓词：`preview.ts` 新增导出 `needsTextSniff(name: string): boolean`（不在五行表、不是两个文件名、不在 `SERVED_ELSEWHERE` 时为真），与 `classifyPreview` 共用一个模块内的扩展名提取函数；分类表与集合一个字不动，守住「不改分类表」。不许用「先分类、捕获 `preview_unsupported` 再嗅探重试」：那样 `doc.pdf` 也会被读，违反「文件预览」条文。
+- 读取实现钉死：`rest.ts` 从 `node:fs` 取 `openSync` / `readSync` / `closeSync`，`readSync(fd, Buffer.alloc(8192), 0, 8192, 0)` 一次，`finally` 里关，把 `buf.subarray(0, bytesRead)` 交给 `sniffText`，结果作为 `sniffedText` 传入。不用 `fs.promises`（`workspace-file-helpers.ts:20` 的 `spyBodyIo` 看不见，读取计数会空过）。0 字节文件也走同一条路，不加特例。
+- 依赖对象：`WorkspaceRestDependencies`（`rest.ts:21`）加 `limits?: PreviewLimits`，`registerWorkspaceRest` 内 `dependencies.limits ?? DEFAULT_PREVIEW_LIMITS`，替换 `:289`。`AssemblyDependencies`（`app.ts:76`）加 `previewLimits?: PreviewLimits`，`app.ts:226` 按 `exactOptionalPropertyTypes` 条件展开转发，缺省只在 workspaces 一处。路由不读环境变量。
+- 规格没写的分支（进偏离记录）：`limits` 不做 `uploadMaxBytes` 式的正整数校验（配置层已限 `1..2147483647`）；嗅探的 `openSync` / `readSync` 失败（含文件在 `lstat` 后消失）原样抛出，即 generic 500，此时尚未写任何预览头；不传 `limits` 的对象整体缺省，不支持只给部分字段；音视频中间态不变（200 全量带 `Accept-Ranges: bytes`、忽略 `Range`，到 #1058 为止）。
+- D-23 窗口如实陈述：未知或无扩展名文件在 `resolve` → `lstat` 之后的按路径打开由一次（读流）变两次（嗅探加读流），都没有 `O_NOFOLLOW` / `O_NONBLOCK`，嗅探的同步 `openSync` 遇到被换入的命名管道会卡住事件循环（原先只卡线程池）。它属 D22「已知残余」里 `file` 那一条的同一个窗口，本刀不闭合、不加防护，也不对已知扩展名引入新的打开。两次打开之间文件被换时，响应类型仍是 `text/plain` 加 `nosniff`，不会变成文档类型。
+- 测试落新文件 `server/test/workspaces-file-sniff.test.ts`（`workspaces-http.test.ts` 已 736 行，只做漂移二的两处内容改写，不加行）。`workspaces-http-helpers.ts:18` 的 `withWorkspacesApp` 加第三个可选参 `options: { previewLimits?: PreviewLimits } = {}` 并入 `assembly`（先例 `workspace-upload-helpers.ts:83`），不另抄一份（jscpd）。
+- 用例一「未知与无扩展名文件的嗅探」：`LICENSE`、`.gitignore`、`schema.proto`、0 字节 `empty` 为 200 `text/plain; charset=utf-8` 精确字节（`empty` 空体、`X-Workbuddy-Size: 0`）；含 `0x00` 的 `blob.bin` 与 `core` 为 415 信封，无 `X-Workbuddy-Size`。另补：文本内容的 `x.constructor` 为 200；10 KiB 文件 NUL 在偏移 8192 为 200、在 8191 为 415；8192 处切开三字节汉字仍为 200；1.5 MiB 的未知扩展名文本被截到 1048576 并带截断头。
+- 用例二「已知扩展名不发生嗅探读取」：夹具先写完再 `spyBodyIo()`（`writeFileSync` 内部也走 `openSync`），断言 `openSync` / `readSync` 没有任何一次首参等于目标路径（按路径过滤，不比绝对次数）；对象为 `readme.md`、`logo.png`、`doc.pdf`、`a.ipynb`、`Dockerfile`。对照组 `LICENSE` 恰一次 `openSync`，且 `readSync` 的长度参数为 8192。
+- 用例三「Notebook 与可配置上限」与接线：缺省装配下 3 KB `a.ipynb` 为 200 无截断头，11 MiB `big.ipynb`（`truncateSync` 造）为 413；`previewLimits = { text: 16, image: 1024, notebook: 2048 }` 装配下 20 字节 `t.txt` 为 200 恰 16 字节加 `X-Workbuddy-Truncated: 1`、`X-Workbuddy-Size: 20`，2 KiB `p.png` 与 3 KB `a.ipynb` 为 413，嗅探通过的 20 字节 `LICENSE` 同样截到 16。再加 `appAssemblyOf(resolveServerConfig({ PREVIEW_TEXT_MAX_BYTES: "16", … }, ENTRY)).previewLimits` 的 `toEqual`，以及空 env 下等于三个缺省字面量（先例 `workspace-upload-rest.test.ts:758-765`，该文件 766 行，不往里加）。缺省边界已由既有 `big.log` / `large.png` / `huge.png` 钉住，不复制。
+- 用例四（逃逸）与其它：既有逃逸用例（`workspaces-http.test.ts:592`）只用已知扩展名，本刀补未知扩展名的：`../OUTSIDE` 与指向空间外的符号链接 `link.proto` 为 403 `sandbox_denied`、各一行 `sandbox.reject`（`op` 为 `read`）、对目标零 `openSync`；他人 id 与不存在的 id 带 `../x.proto` 为相同 404、审计行数不变、零读取；目录 `dir.proto` 为 404 且零读取。`needsTextSniff` 的真值表加进 `workspaces-preview-classify.test.ts`（396 行）。与兄弟刀共用文件：`rest.ts:275-297` 之后由 #1058 再改，`app.ts` / `server.ts` 的装配字段之后由 #1067、13.1 再加，#1065 往同一个 `limits` 里加条目上限；本刀在栈底，后者 rebase。行数：`rest.ts` 418 加约 25，`app.ts` 490，`server.ts` 471，都远离 800。no checklist rows（`web/src/features/files/tree.tsx:92` 的 `supportsPreview` 在 17.2 之前仍挡住未知扩展名）；`docs/architecture/system.md` 第 9 节不动（十二键表归 28.1）；不加配置键，启动失败契约不涉及。
+- 变异：对已知扩展名也嗅探（去掉 `needsTextSniff` 判定，6.4 分摊条款）→ 用例二 `readme.md` / `logo.png` 的「无 `openSync`」判红。
+- 变异：两遍分类法（捕获 `preview_unsupported` 后嗅探）或谓词漏掉 `SERVED_ELSEWHERE` → 用例二的 `doc.pdf` 与 classify 文件里的谓词真值表判红；`doc.pdf` 的状态码仍是 415，单看状态不可观察。
+- 变异：不嗅探（`sniffedText` 恒不传）→ 用例一 `LICENSE` 等四个 200 判红；恒传 `true` → `blob.bin` / `core` 的 415 判红。
+- 变异：漏掉 `subarray(0, bytesRead)` → 用例一所有小于 8 KiB 的文本（`LICENSE`）变 415 判红。
+- 变异：读取长度改成整文件或大于 8192 → 「NUL 在 8192 处为 200」与 `readSync` 长度参数断言判红；改成 8191 → 「NUL 在 8191 处为 415」判红。
+- 变异：嗅探挪到 `sandbox.resolve` 或 `lstat` 之前 → 用例四的 `../OUTSIDE`、`link.proto`、`dir.proto` 零读取断言判红。
+- 变异：逃逸，穿越与符号链接：跳过 `resolve` → 用例四的 403 与 `sandbox.reject` 判红；`op` 换成 `list` → 审计行 `op` 断言判红。
+- 变异：逃逸，他人与不存在的 id：嗅探放在 `ensureOwnedRoot` 之前 → 用例四的零读取判红；只去掉 `ensureOwnedRoot` 时 404 不变（facade 自查 `rootOf`，#1055 更正二），标为不可观察。
+- 变异：路由无视 `dependencies.limits`、继续用 `DEFAULT_PREVIEW_LIMITS` → 用例三的 `t.txt` 16 字节、`p.png` 413 判红。
+- 变异：`app.ts` 不转发 `previewLimits` → 用例三同上判红；`appAssemblyOf` 漏接或把 text / image 读串 → `appAssemblyOf(...).previewLimits` 的 `toEqual` 判红。
+- 变异：缺省值改成别的数 → 既有 `big.log`（1048576）、`large.png`（11 MiB 为 200）与用例三的 `big.ipynb` 413 判红。
+- 变异：嗅探通过的文本不走文本上限 → 用例一的 1.5 MiB 未知扩展名截断与用例三的 `LICENSE` 截到 16 判红。
+- 变异：原型名：查表改成对象字面量 → `workspaces-http.test.ts:574-583`（改成二进制内容后）的 415 判红。
+- 变异：不可观察：`closeSync` 漏掉（描述符泄漏，`inject` 下无断言能抓，评审读代码确认 `finally`）；0 字节文件是否跳过读取。
