@@ -1,5 +1,14 @@
 import { type Command, createCommandMethods, type ProjectConfigFile } from "./api-commands.js";
-import { fileUrl, workspaceEndpoint } from "./api-files.js";
+import {
+  type CreateDirResult,
+  type CreateWorkspaceInput,
+  createFileMethods,
+  type FilePreview,
+  type PreviewToken,
+  type Workspace,
+  type WorkspaceList,
+  type WorkspaceTree,
+} from "./api-files.js";
 import {
   hasExactlyKeys,
   isNonNegativeSafeInteger,
@@ -37,54 +46,6 @@ export type LoginCredentials = {
   password: string;
 };
 
-type Workspace = {
-  id: string;
-  name: string;
-  dir: string;
-  root: string;
-  createdAt: number;
-};
-
-type WorkspaceList = {
-  workspaces: Workspace[];
-};
-
-type CreateWorkspaceInput = {
-  name: string;
-  dir?: string;
-};
-
-type WorkspaceTreeEntry = {
-  name: string;
-  type: "dir" | "file";
-  size: number;
-  mtime: number;
-};
-
-type WorkspaceTree = {
-  path: string;
-  entries: WorkspaceTreeEntry[];
-};
-
-type CreateDirResult = {
-  path: string;
-};
-
-type FilePreview =
-  | {
-      kind: "text";
-      text: string;
-      size: number;
-      truncated: boolean;
-    }
-  | {
-      kind: "image";
-      /** Caller-owned Blob URL; revoke it on replacement or unmount. */
-      url: string;
-      size: number;
-      truncated: boolean;
-    };
-
 type AuditEvent = {
   id: number;
   ts: number;
@@ -102,14 +63,6 @@ type AuditList = {
 type AuditFilter = {
   limit?: number;
   before?: string;
-};
-
-type PreviewKind = FilePreview["kind"];
-
-type PreviewMetadata = {
-  kind: PreviewKind;
-  size: number;
-  truncated: boolean;
 };
 
 type ApiRequestOptions = {
@@ -156,6 +109,7 @@ export type ApiClient = {
     path: string,
     options?: ApiRequestOptions,
   ): Promise<FilePreview>;
+  issuePreviewToken(workspaceId: string, options?: ApiRequestOptions): Promise<PreviewToken>;
   listAudit(filter?: AuditFilter, options?: ApiRequestOptions): Promise<AuditList>;
   listSessions(options?: ApiRequestOptions): Promise<ChatSessionList>;
   createSession(input?: ChatSessionCreateInput, options?: ApiRequestOptions): Promise<ChatSession>;
@@ -272,71 +226,6 @@ function parseServiceInfo(value: unknown): ServiceInfo | null {
   return { name, version, auth: { provider } };
 }
 
-function parseWorkspace(value: unknown): Workspace | null {
-  if (!hasExactlyKeys(value, ["id", "name", "dir", "root", "createdAt"])) {
-    return null;
-  }
-
-  const { createdAt, dir, id, name, root } = value;
-  if (
-    typeof id !== "string" ||
-    typeof name !== "string" ||
-    typeof dir !== "string" ||
-    typeof root !== "string" ||
-    typeof createdAt !== "number" ||
-    !Number.isSafeInteger(createdAt)
-  ) {
-    return null;
-  }
-
-  return { id, name, dir, root, createdAt };
-}
-
-function parseWorkspaceList(value: unknown): WorkspaceList | null {
-  if (!hasExactlyKeys(value, ["workspaces"])) {
-    return null;
-  }
-
-  const workspaces = parseJsonArray(value.workspaces, parseWorkspace);
-  return workspaces ? { workspaces } : null;
-}
-
-function parseWorkspaceTreeEntry(value: unknown): WorkspaceTreeEntry | null {
-  if (!hasExactlyKeys(value, ["name", "type", "size", "mtime"])) {
-    return null;
-  }
-
-  const { mtime, name, size, type } = value;
-  if (
-    typeof name !== "string" ||
-    (type !== "dir" && type !== "file") ||
-    !isNonNegativeSafeInteger(size) ||
-    typeof mtime !== "number" ||
-    !Number.isFinite(mtime)
-  ) {
-    return null;
-  }
-
-  return { name, type, size, mtime };
-}
-
-function parseWorkspaceTree(value: unknown): WorkspaceTree | null {
-  if (!hasExactlyKeys(value, ["path", "entries"]) || typeof value.path !== "string") {
-    return null;
-  }
-
-  const entries = parseJsonArray(value.entries, parseWorkspaceTreeEntry);
-  return entries ? { path: value.path, entries } : null;
-}
-
-function parseCreateDirResult(value: unknown): CreateDirResult | null {
-  if (!hasExactlyKeys(value, ["path"]) || typeof value.path !== "string") {
-    return null;
-  }
-
-  return { path: value.path };
-}
-
 function parseAuditEvent(value: unknown): AuditEvent | null {
   if (!hasExactlyKeys(value, ["id", "ts", "actorId", "kind", "title", "detail", "workspaceId"])) {
     return null;
@@ -404,42 +293,6 @@ function getRequestOptions(signal?: AbortSignal): RequestInit {
   };
 }
 
-function parsePreviewSize(value: string | null): number | null {
-  if (value === null || !/^\d+$/.test(value)) {
-    return null;
-  }
-
-  const size = Number(value);
-  return isNonNegativeSafeInteger(size) ? size : null;
-}
-
-function parsePreviewKind(value: string | null): PreviewKind | null {
-  const contentType = value?.split(";", 1)[0]?.trim().toLowerCase();
-  if (contentType === "text/plain") {
-    return "text";
-  }
-
-  if (/^image\/(?:png|jpeg|gif|webp|bmp|x-icon)$/.test(contentType ?? "")) {
-    return "image";
-  }
-
-  return null;
-}
-
-function parsePreviewMetadata(response: Response): PreviewMetadata | null {
-  const kind = parsePreviewKind(response.headers.get("Content-Type"));
-  const size = parsePreviewSize(response.headers.get("X-Workbuddy-Size"));
-  if (!kind || size === null) {
-    return null;
-  }
-
-  return {
-    kind,
-    size,
-    truncated: response.headers.get("X-Workbuddy-Truncated") === "1",
-  };
-}
-
 function notifyUnauthorized(
   onUnauthorized: ApiClientOptions["onUnauthorized"],
   signal: AbortSignal | undefined,
@@ -448,47 +301,6 @@ function notifyUnauthorized(
     void Promise.resolve(onUnauthorized?.(signal)).catch(() => undefined);
   } catch {
     // The response contract must remain stable if a consumer callback fails.
-  }
-}
-
-async function previewRequest(
-  path: string,
-  options: RequestInit,
-  onUnauthorized: ApiClientOptions["onUnauthorized"],
-): Promise<FilePreview> {
-  const response = await fetchResponse(path, options);
-  if (response.status !== 200) {
-    if (isSuccessfulStatus(response.status)) {
-      throw requestFailed(response.status);
-    }
-
-    await parseJsonResponse(response, options.signal ?? undefined, onUnauthorized);
-    throw requestFailed(response.status);
-  }
-
-  const metadata = parsePreviewMetadata(response);
-  if (!metadata) {
-    throw requestFailed(response.status);
-  }
-
-  try {
-    if (metadata.kind === "text") {
-      return {
-        kind: "text",
-        text: await response.text(),
-        size: metadata.size,
-        truncated: metadata.truncated,
-      };
-    }
-
-    return {
-      kind: "image",
-      url: URL.createObjectURL(await response.blob()),
-      size: metadata.size,
-      truncated: metadata.truncated,
-    };
-  } catch {
-    throw requestFailed(response.status);
   }
 }
 
@@ -572,124 +384,24 @@ async function logoutRequest(
 }
 
 export function createApiClient({ onUnauthorized }: ApiClientOptions = {}): ApiClient {
+  const transport = {
+    fetchResponse,
+    getRequestOptions,
+    isSuccessfulStatus,
+    parseJsonResponse,
+    request,
+    requestFailed,
+    requestOptions,
+  };
   return {
-    ...createSessionMethods(onUnauthorized, {
-      fetchResponse,
-      getRequestOptions,
-      isSuccessfulStatus,
-      parseJsonResponse,
-      request,
-      requestFailed,
-      requestOptions,
-    }),
+    ...createSessionMethods(onUnauthorized, transport),
+    ...createFileMethods(onUnauthorized, transport),
     ...createCommandMethods(onUnauthorized, { getRequestOptions, request, requestFailed }),
     ...createUploadMethods(onUnauthorized, {
       isSuccessfulStatus,
       parseJsonResponse,
       requestFailed,
     }),
-
-    async listWorkspaces(options) {
-      const response = await request(
-        "/api/workspaces",
-        getRequestOptions(options?.signal),
-        onUnauthorized,
-        200,
-      );
-      const workspaces = parseWorkspaceList(response);
-      if (!workspaces) {
-        throw requestFailed(200);
-      }
-
-      return workspaces;
-    },
-
-    async createWorkspace(input, options) {
-      const response = await request(
-        "/api/workspaces",
-        {
-          ...requestOptions(options?.signal),
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: input.name,
-            ...(input.dir === undefined ? {} : { dir: input.dir }),
-          }),
-        },
-        onUnauthorized,
-        201,
-      );
-      const workspace = parseWorkspace(response);
-      if (!workspace) {
-        throw requestFailed(201);
-      }
-
-      return workspace;
-    },
-
-    async promoteWorkspace(id, name, options) {
-      const response = await request(
-        workspaceEndpoint(id, "promote"),
-        {
-          ...requestOptions(options?.signal),
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name }),
-        },
-        onUnauthorized,
-        200,
-      );
-      const workspace = parseWorkspace(response);
-      if (!workspace) {
-        throw requestFailed(200);
-      }
-
-      return workspace;
-    },
-
-    async listTree(workspaceId, path, options) {
-      const response = await request(
-        `${workspaceEndpoint(workspaceId, "tree")}?path=${encodeURIComponent(path)}`,
-        getRequestOptions(options?.signal),
-        onUnauthorized,
-        200,
-      );
-      const tree = parseWorkspaceTree(response);
-      if (!tree) {
-        throw requestFailed(200);
-      }
-
-      return tree;
-    },
-
-    async createDir(workspaceId, path, options) {
-      const response = await request(
-        workspaceEndpoint(workspaceId, "dirs"),
-        {
-          ...requestOptions(options?.signal),
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ path }),
-        },
-        onUnauthorized,
-        201,
-      );
-      const directory = parseCreateDirResult(response);
-      if (!directory) {
-        throw requestFailed(201);
-      }
-
-      return directory;
-    },
-
-    async fetchPreview(workspaceId, path, options) {
-      return previewRequest(
-        fileUrl(workspaceId, path),
-        getRequestOptions(options?.signal),
-        onUnauthorized,
-      );
-    },
-
     async listAudit(filter, options) {
       const search = new URLSearchParams();
       if (filter?.limit !== undefined) {
