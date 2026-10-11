@@ -244,6 +244,7 @@ describe("压缩包预览器：损坏的压缩包与其它失败", () => {
           name="x.zip"
           path="uploads/x.zip"
           preview={{ status: "archive", load }}
+          previewToken={{ status: "idle" }}
           size={2048}
           workspaceId="w1"
         />

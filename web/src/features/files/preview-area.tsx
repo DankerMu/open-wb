@@ -6,8 +6,9 @@ import { ApiError } from "../../lib/api.js";
 import { EmptyPreview, STATUS_TEXT } from "./columns.js";
 import { errorMessage } from "./errors.js";
 import { PreviewPane } from "./preview.js";
-import { previewKind } from "./previewers/index.js";
-import type { PreviewState, TreeEntry } from "./types.js";
+import { previewKind, textView } from "./previewers/index.js";
+import type { FetchedPreview, PreviewState, TreeEntry } from "./types.js";
+import type { usePreviewToken } from "./use-preview-token.js";
 
 export type SelectedFile = {
   entry: TreeEntry;
@@ -19,10 +20,13 @@ type PreviewAreaProps = {
   loading: boolean;
   selectedFile: SelectedFile | null;
   workspaceId: string;
+  /** 宿主那一次 `usePreviewToken` 的结果，原样交给预览面板。 */
+  previewToken: ReturnType<typeof usePreviewToken>;
+  onWebViewChange(view: WebView): void;
 };
 
 /** 取预览失败后的呈现：不支持与超限按信封的 code 认，其余显示信封 message 或安全文案。 */
-export function failedPreview(error: unknown): PreviewState {
+export function failedPreview(error: unknown): FetchedPreview {
   const code = error instanceof ApiError ? error.code : null;
   if (code === "preview_unsupported") {
     return { status: "unsupported" };
@@ -35,18 +39,41 @@ export function failedPreview(error: unknown): PreviewState {
 }
 
 type ArchiveLoad = Extract<PreviewState, { status: "archive" }>["load"];
+type WebPreview = Extract<PreviewState, { status: "web" }>;
+type WebView = WebPreview["view"];
+
+/**
+ * 把一次 `file` 请求的结局放进当前预览：网页的源码视图收进 `source`，视图与 `reload` 不动（所以
+ * 源码请求失败后仍是网页预览，切换按钮还在）；其余类别结局就是预览本身。
+ */
+export function withFetched(current: PreviewState | null, fetched: FetchedPreview): PreviewState {
+  return current?.status === "web" ? { ...current, source: fetched } : fetched;
+}
 
 /**
  * 选中即有、不发 `file` 请求的预览；`null` 表示这个文件照常请求。音视频：把文件自己的地址 `url`
  * 交给媒体元素，由浏览器去取。压缩包：把 `listArchive`（对这个文件的一次成员列表请求）交给压缩包
  * 预览器，由它在挂上之后调用。
+ * 网页：默认是渲染视图，由预览器把隔离预览来源的地址交给框，页面不为它发 `file` 请求。`previous`
+ * 是同一路径上一次的预览（换了文件为 `null`，视图因此回到渲染）：再次选中或刷新时，渲染视图
+ * `reload` 加一并丢掉取过的源码（下次看源码重新取）；源码视图返回 `null`，照常请求一次，结局由
+ * `withFetched` 收进 `source`。
  */
 export function immediatePreview(
   entry: TreeEntry,
   url: string,
   listArchive: ArchiveLoad,
+  previous: PreviewState | null,
 ): PreviewState | null {
   const kind = previewKind(entry.name);
+  if (kind === "text" && textView(entry.name) === "web") {
+    if (previous?.status !== "web") {
+      return { status: "web", view: "rendered", reload: 0, source: null };
+    }
+    return previous.view === "source"
+      ? null
+      : { ...previous, reload: previous.reload + 1, source: null };
+  }
   if (kind === "archive") {
     return { status: "archive", load: listArchive };
   }
@@ -60,7 +87,13 @@ export function immediatePreview(
   return null;
 }
 
-export function PreviewArea({ loading, selectedFile, workspaceId }: PreviewAreaProps) {
+export function PreviewArea({
+  loading,
+  onWebViewChange,
+  previewToken,
+  selectedFile,
+  workspaceId,
+}: PreviewAreaProps) {
   if (!selectedFile) {
     return <EmptyPreview />;
   }
@@ -71,8 +104,10 @@ export function PreviewArea({ loading, selectedFile, workspaceId }: PreviewAreaP
         <PreviewPane
           mtime={selectedFile.entry.mtime}
           name={selectedFile.entry.name}
+          onWebViewChange={onWebViewChange}
           path={selectedFile.path}
           preview={selectedFile.preview}
+          previewToken={previewToken}
           size={selectedFile.entry.size}
           workspaceId={workspaceId}
         />
