@@ -341,3 +341,85 @@
 - 变异：逃逸向量：符号链接 → 本表不重复，红测是既有的 `workspaces-download.test.ts:317`、`workspaces-archive-route.test.ts:460`、`workspaces-move.test.ts:375`、`workspaces-delete.test.ts:245`（九种拒绝项）。
 - 变异：逃逸向量：跨工作空间 id、他人空间 → 用例一；「删掉路由层归属检查后他人空间的文件被改动」不可观察（sandbox 的 `rootOf` 兜住）。
 - 变异：检查之后的替换窗口（#1286）→ 不可观察，本表不测，不声称。
+
+## 16.1 的 listArchive 部分、16.4、16.5（#1080）
+
+- 非 Critical Path（读代码推出）：本刀只有浏览器端一个方法，无路由、无 `sandbox.resolve`、无 `op`，一个评审席即可。D-23 / #1286：客户端自身没有 resolve→open 窗口（读代码推出，无实测）；被调路由的读窗口已登记在 `design.md:322`，证据等级照抄该行——末段换入为「钩子辅助复现：包裹 `fs.openSync`、测试装配下的源码处理器经 `inject`；不是编译产物，未在 uid 分离部署上跑，不是自然竞态」，中间分量换入为「读代码推出，未测，未挡住」。本刀不闭合、不加宽，注释与 PR 不得写「列表一定来自空间内的文件」。
+- 前置按代码核对已齐：0.1（#1049）；10.3（#1065）的 `server/src/workspaces/rest-archive.ts:84` 路由，在 `server/src/workspaces/index.ts:18` 无条件注册；#1079 / #1082 / #1083 / #1084 的 `createFileMethods(onUnauthorized, transport)` 已在（`web/src/lib/api-files.ts` 488 行，`web/src/lib/api.ts` 497 行）。16.1 属 `tasks.md:45`「不等 1.2」一句，三项实测都不挡。
+- 与 issue / `tasks.md` / 编排提示的差异（origin/master 为准）：
+- 提示写「16.1/16.2 listArchive part」，16.2 已由 #1084 勾，本刀是 16.1 的 `listArchive` 半边加 16.4、16.5 收口。
+- issue 写形状 `{path, type, size}`，实际 `size` 是 `number | null`（`archive.ts:50`，workspaces「压缩包列表」的 `gz` 行）。
+- issue 写「模块骨架已在 #1079」，工厂其实随 #1082 落地；issue 依赖只列 #1049 / #1065 / #1079，实际还叠在 #1082–#1084 上。
+- issue 写 16.4「任务号登记在 #1084」，`tasks.md:394` 未勾，由本刀勾。
+- PR Boundary 与 `tasks.md:394` 写「`api-files.test.ts` 扩充」，该文件 743 行不加行，用例进新文件（先例 #1079–#1084）。
+- `tasks.md:400` / issue 写「把总数断言改为十」，但 `web/test` 里没有任何九或十的总数断言可改（`git grep` 无命中），本刀是新建。
+- 实现（`api-files.ts`）：`WorkspaceEndpoint` 联合加 `"archive"`，`Pick<ApiClient, …>` 加 `"listArchive"`。方法体为 `request(`${workspaceEndpoint(workspaceId, "archive")}?path=${encodeURIComponent(path)}`, getRequestOptions(options?.signal), onUnauthorized, 200)`，解析失败 `throw requestFailed(200)`。init 恰为 `{credentials:"same-origin", method:"GET", cache:"no-store"}` 加可选 `signal`，无 `headers` / `body`。
+- 类型与 knip：`api-files.ts` 导出 `ArchiveListing = { format: "zip"|"tar"|"tar.gz"|"gz"; entries: {path: string; type: "file"|"dir"; size: number|null}[]; truncated: boolean }`，条目类型与两个解析器不导出。`api.ts` 只加一个 `type ArchiveListing` 导入名和一行 `ApiClient` 成员 `listArchive(workspaceId: string, path: string, options?: ApiRequestOptions): Promise<ArchiveListing>`，不加公共类型再导出；#1097 用 `Awaited<ReturnType<ApiClient["listArchive"]>>`。行数估算（未实测，以 `scripts/size-guard.sh` 为准）：`api-files.ts` 约 545，`api.ts` 约 500。
+- 严格解析：顶层 `hasExactlyKeys` 三键，`format` 属四值，`truncated` 为 `boolean`，`entries` 经 `parseJsonArray`；条目 `hasExactlyKeys` 三键，`path` 为 `string`（空串也收，成员名是数据），`type` 属两值，`size === null || isNonNegativeSafeInteger(size)`。目录的 `size` 原样保留（规格 `links.tar` 的目录 `size` 为 1024），不按 `type` 或 `format` 交叉校验。
+- 由规格定死、不算「未规定」的分支：
+- 成功码只认 200（workspaces「压缩包列表」首句「返回 200」加 files-web:4「键集或类型不符的成功响应按 request_failed」），201 → `request_failed(201)`。
+- `type:"link"` 拒绝（files-web 场景「地址函数与严格解析」）。
+- 空 `entries` 是合法响应（file-previewers「压缩包列表」的 `压缩包内没有文件`；`archive.ts:188` 超时可返回空列表加 `truncated:true`）。
+- `size:null` 合法（`gz` 行）。
+- 规格没写、取最简并记入偏离记录：
+- `format` 收紧到四个字面量（先例 `WorkspaceTreeEntry.type`），服务端新增格式时客户端按失败处理。
+- `null` 的 `size` 不限于 `gz`。
+- 超出安全整数的 `size` 使整个列表按 `request_failed(200)` 处理。zip64 是否能给出这样的值未核对：yauzl `^3.4.0` 的源码不在 git 对象里，只知 `archive.ts:424` 关了 `validateEntrySizes`。
+- 空串 `path` 发出 `…?path=`，不预检、不 `trim`、不规范化。
+- 孤立代理项使 `encodeURIComponent` 抛 `URIError`，与 `listTree` 同，不捕获。
+- 测试放新文件 `web/test/api-files-archive.test.ts`（估约 200 行），只从 `../src/lib/api.js` 导入，否则 `chat-module-layout.test.ts:64-65` 判红。辅助用 `./support.js` 的 `jsonResponse`、`captureApiError`、`expectRequestFailure`、`unauthorizedResponseCases`。每例新建 `vi.fn()`，`afterEach` 里 `vi.restoreAllMocks()` 加 `vi.unstubAllGlobals()`。
+- 用例 A–C：
+- (A) id `ws/%#?+ 中`、path `" /x/../报告 2026/\u00e9e\u0301 b#1&x.md "`、带 `signal`：`fetchMock.mock.calls` 用 `toStrictEqual` 等于 `[["/api/workspaces/ws%2F%25%23%3F%2B%20%E4%B8%AD/archive?path=%20%2Fx%2F..%2F%E6%8A%A5%E5%91%8A%202026%2F%C3%A9e%CC%81%20b%231%26x.md%20", {method:"GET", credentials:"same-origin", cache:"no-store", signal}]]`（编码串与 `api-files-delete.test.ts:44` 相同）。
+- (B) 空串 path 且不给 `signal`：地址为 `…/archive?path=`，init 里没有 `signal` 键。
+- (C) 返回值 `toStrictEqual`，`it.each` 五行：规格三项的 zip；`format:"tar.gz"`；`gz` 的 `size:null`；`{format:"tar", entries:[], truncated:true}`；成员名为 `../../etc/passwd`、`/abs/x`、`<script>`、`" a "`、`\u00e9` 与 `e\u0301`、目录 `size:1024` 的一行。
+- 用例 D–G：
+- (D) `it.each` 残缺响应：`type:"link"`（16.4 点名）、顶层多一键、条目多一键、条目缺 `size`、`size:"5"`、`size:-1`、`size:1.5`、`path:1`、`format:"rar"`、缺 `truncated`、`truncated:1`、`entries:{}`，各 `expectRequestFailure(…, 200)`。
+- (E) 201 → `expectRequestFailure(…, 201)`。
+- (F) `it.each` 错误信封 403 `sandbox_denied`、409 `conflict`、413 `preview_too_large`、415 `preview_unsupported`、404 `not_found`，断言 status / code / message 原样、`fetch` 恰一次、`onUnauthorized` 零次。四种照 16.4 字面与先例 `api-files.test.ts:314-319`；本路由实际只发 400 / 401 / 403 / 404 / 415 / 500（读 `rest-archive.ts` 推出），409 / 413 那两行钉的是与路由无关的客户端映射，PR 里照此写明。
+- (G) `it.each(unauthorizedResponseCases())`：`onUnauthorized.mock.calls` 等于 `[[signal]]`。
+- 「十个发请求的方法」总数（同文件第二个 `describe`）：
+- 一张恰十行的表 `[名字, 调用, 期望地址, 期望 method]`，名字依规格句序为 `listWorkspaces`、`createWorkspace`、`listTree`、`createDir`、`fetchPreview`、`listAudit`、`listArchive`、`moveEntry`、`deleteEntry`、`issuePreviewToken`。`promoteWorkspace` 不在内，它归 chat-web（#1079 注记）。
+- 先断言名字列表 `toStrictEqual` 这十个。
+- 逐行新建 `fetch`，返回 500 `{error:{code:"internal_error", message}}`，断言 `fetch` 恰一次、`mock.calls[0][0]` 与 `[1].method` 等于该行、拒绝值保留 status / code / message。
+- 各方法的 body 与返回形状仍由各自既有文件承担，这里不重复。这张表是声明式的：新增第十一个发请求的方法而不加行，它看不出（不可观察，如实写进 PR）。
+- 既有测试零改动，也不许放松：
+- `chat-module-layout.test.ts:64-73` 两条原样重跑；`api-files*.test.ts` 六个文件原样全绿，就是既有方法不回归的证据。
+- `ApiClient` 替身都是类型断言（`chat-new-session-block.test.ts:9-10`、`workspace-list-silent.test.tsx:23`），加成员不破。
+- 源码扫描类测试已重查，没有读 `api-files.ts` 源码找方法名的。
+- jscpd 未跑：这是第五个 `api-files-*.test.ts`，信封与 401 两段同形。若 3% 报警，把共用段提到 `web/test/support.ts`（189 行）并把多动的文件记入偏离，不加 ignore。
+- 守卫与清单：
+- 不动 `web/src/features/**`、`ui-layering.test.ts`、`knip.json`、配置、`docs/architecture/system.md` 第 9 节；无界面调用方（表格在 #1097），no checklist rows；不动 hurl。
+- PR 触及 `openspec/`，须在描述里写明：勾 `tasks.md` 的 16.1、16.4、16.5；16.1 下加一行注记指针；`tasks.md:53`、`design.md:21`、`design.md:497` 的「经 #1083、#1084 后 497 行」补上本刀后的实测行数。
+- 16.5 的三条变异分属已合的 #1079 / #1082 / #1081，PR 表只引用、不重做。
+- 批内无共改文件（读各 issue 的 PR Boundary）：#1070 / #1075 是服务端；#1086–#1092 在 `web/src/features/files/**` 与各自的测试文件，#1090 明写不改 `web/src/lib/api*.ts`。本刀与它们可任意排序。
+- 变异：方法写成 `POST`，或丢 `cache:"no-store"` / `credentials` / `signal` → 用例 A 的 `mock.calls` 严格相等判红。
+- 变异：误加 `headers` 或 `body` → 用例 A 判红。
+- 变异：端点段写成 `archives` / `file`，或把 path 放进路径段 → 用例 A 与十行表的 `listArchive` 行判红。
+- 变异：id 段不编码（跨空间 id 注入向量）→ 用例 A 的 `ws%2F…` 字面量判红。
+- 变异：path 不编码或改用 `encodeURI` → 用例 A 判红（`/`、`#`、`&`）。
+- 变异：path 加 `.trim()` → 用例 A 判红（首尾 `%20`）。
+- 变异：path 加 `.normalize("NFC")` 或 `("NFD")` → 用例 A 判红（`%C3%A9e%CC%81`，两个方向都看得出）。
+- 变异：path 剥前导 `/` 或折叠 `..` → 用例 A 判红。
+- 变异：空串 path 被预检拦下或改成别的值 → 用例 B 判红。
+- 变异：不给 `signal` 时仍写出 `signal: undefined` 键 → 用例 B 的 `toStrictEqual` 判红。
+- 变异：接受 `type:"link"`（去掉 `type` 的两值检查）→ 用例 D 的 `link` 行判红（16.4 点名项）。
+- 变异：顶层或条目的 `hasExactlyKeys` 换成只查必需键 → 用例 D 的两条「多一键」行判红。
+- 变异：`size` 放宽为任意 `number` → 用例 D 的 `-1`、`1.5` 行判红；去掉类型检查 → `"5"` 行与「缺 `size`」行判红。
+- 变异：拒绝 `size:null`（只用 `isNonNegativeSafeInteger`）→ 用例 C 的 `gz` 行判红。
+- 变异：按 `type` 把目录的 `size` 改成 0 或 `null` → 用例 C 的目录 `size:1024` 行判红。
+- 变异：拒绝空 `entries` → 用例 C 的 `entries:[]` 行判红。
+- 变异：`format` 白名单漏掉 `"tar.gz"`（如写成 `"tgz"`）→ 用例 C 的 `tar.gz` 行判红；不校验 `format` → 用例 D 的 `rar` 行判红。
+- 变异：`truncated` 用 `Boolean(…)` 强转或设为可选 → 用例 D 的 `truncated:1` 与缺 `truncated` 行判红。
+- 变异：对成员名做 `normalize`、`trim` 或去前导 `/` → 用例 C 的恶意成员名行判红。
+- 变异：去掉 `expectedStatus` 200 → 用例 E 判红。
+- 变异：方法内 `catch` 后一律抛 `request_failed`（吞信封）→ 用例 F 五行与十行表的 `listArchive` 行判红。
+- 变异：不传 `onUnauthorized`，或 401 通知两次 → 用例 G 判红。
+- 变异：`createFileMethods` 的返回里漏掉 `listArchive` → 类型检查失败；绕过类型后用例 A 与十行表该行判红（不是函数）。
+- 变异：`api-files.ts` 从 `./api.js`（或 `@/lib/api`）值导入 → `chat-module-layout.test.ts`「拆出的 API 模块对 api.ts 只有类型导入」判红。
+- 变异：新测试或 `web/src/features/**` 直接导入 `api-files.js` → 「api-files.ts 的导出只被 api.ts 消费」判红。
+- 变异：既有九个方法之一的地址或 method 被改 → 十行表对应行判红（各自文件的字面量断言也红）。
+- 变异：不可观察：地址经 `workspaceEndpoint` 还是内联拼同一个字符串。
+- 变异：不可观察：第十一个发请求的方法未加进十行表。
+- 变异：不可观察：`ArchiveListing` 多留一个无人用的导出（只有 knip 报，没有测试会红）。
+- 变异：不可观察：超出安全整数的 `size`（规格无场景，不为它造用例）。
+- 变异：不适用于本刀：穿越、符号链接、他人空间 404、`sandbox.reject` 审计都是服务端行为，已由 #1065 的 `server/test/workspaces-archive-route.test.ts` 承担。客户端只有「路径是数据」（用例 A、B）与 id 编码（用例 A）两条。

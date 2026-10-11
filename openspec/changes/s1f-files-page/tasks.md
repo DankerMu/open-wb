@@ -388,6 +388,7 @@ Minimal mergeable slice: atomic - 一条路由、它的映射表与转换器在�
 
 - [ ] 16.1 新文件 `web/src/lib/api-files.ts`：两个地址函数 `fileUrl`、`downloadUrl` 与 `listArchive`；传输由 `api.ts` 注入、对 `api.ts` 只有类型导入；响应严格解析。`api.ts` 只加接线与类型再导出（不超过 800 行；必要时把既有工作空间方法一并挪进 `api-files.ts`）。
   实施注记见 `implementation-notes-1.md`「16.1 的地址函数部分，含分摊的 16.4 / 16.5 条款（#1079）」。
+  实施注记见 `implementation-notes.md`「16.1 的 listArchive 部分、16.4、16.5（#1080）」。
 - [x] 16.2 `api-files.ts`：`moveEntry`、`deleteEntry`、`issuePreviewToken`（同样的注入与严格解析）。
   实施注记见 `implementation-notes.md`「16.2 的 issuePreviewToken 部分，含分摊的 16.4 / 16.5 条款（#1082）」。
   实施注记见 `implementation-notes.md`「16.2 的 moveEntry 部分，含分摊的 16.4 条款（#1083）」。
