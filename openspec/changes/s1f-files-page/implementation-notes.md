@@ -595,3 +595,57 @@
 - 既有用例的影响（都不必改，推断未跑）：`previewers-loading.test.tsx` 的替身展开了原模块，`loadHighlighter` 是真的，`main.py`、`a.ts`、`b.ts` 会真加载高亮块；它的断言比 `textContent`，`:81` 的 `findByRole("cell", { name })` 在着色提交前首轮即命中。`files-empty-layout.test.tsx:202-209` 与 `topbar.test.tsx:262` 只扫 `.tsx`，新文件不含被禁字符串。走查 `ui-walk.spec.ts:266-268` 用 `toHaveText` 比文本；首行高亮元素断言归 #1114。
 - 门槛与批内同文件：新文件远低于 800 行，`preview.test.tsx` 594 + 2；`previewers/` 已在 `MIGRATED_AREAS`，`ui-layering.test.ts`（735）不动；`highlightLanguage`、`highlightLines` 的导入方含测试（knip 入口），无未引用导出；覆盖率靠用例真加载 `highlight.ts`。与兄弟刀共用：`previewers/index.ts`（#1089 加 svg 加载项）、`docs/acceptance/functional-checklist.md`（#1087–#1090 各加 FL 行，本刀最后取号）、`previewers/svg.tsx`（#1089 建，本刀传 `name`）、`ATTRIBUTION.md`——按既定顺序栈式合入。
 - FL 行（取 FL 节当时的下一个序号，现末行 FL-08；用 `ts` 而不是 `py`，因为 `tree.tsx:71-84` 的白名单在 #1087 合入前没有 `py`）。操作：`接 FL-08（浅色主题）。回到 FL-05 的会话标签页，从「+」菜单「上传文件」传入自备的 main.ts（两行：第一行 const greeting = "hello"; // note，第二行 export function greet(name: string) { return greeting + name; }）与内容相同的 plain.txt；回文件页点「刷新」，在 uploads 里依次点 main.ts、plain.txt；再到「设置」把主题切为「深色」，回文件页用切换器切回这个空间，展开 uploads 点 main.ts；看完把主题切回「浅色」`。期望：`main.ts 带行号 1、2；const、export、function 这些关键字、引号里的 hello、双斜杠后的注释三者颜色互不相同；plain.txt 同样两行、带行号，整段只有一种文字颜色；深色下 main.ts 仍按这三类区分颜色且每种都看得清；两种主题下行号与文字内容相同`。结论 `待签`。坑：从设置回来落在第一个空间须重新切换；会话须空闲才能上传；「先内容后颜色」签字人看不出，不写进行里。
+
+## 19.1（#1092）
+
+- 非 Critical Path（按代码推得）：只加浏览器端一个 hook 与一个测试文件，不碰 `sandbox.resolve`、`op`、路由与路径（`AGENTS.md:119-120` 两类都不涉及）；issue 自己要求白盒审查（凭据的前端生命周期），PR 照标。D-23 / #1286：hook 没有任何「解析后按路径操作」的窗口，被调路由无路径参数，本刀不闭合也不加宽该残余，证据级别「按代码推得」，无实测。
+- 前提已齐（查代码而非勾选框）：0.1（#1049）已合；`issuePreviewToken` 在 `web/src/lib/api-files.ts:434`、`ApiClient` 成员在 `web/src/lib/api.ts:113`（#1082）；不在 1.1 / 1.2 / 1.3 挡住的集合里（`tasks.md:45`）；不依赖未合的 #1085；#1070 未合，真实服务今天对该端点回 typed 404，即 hook 的失败分支。
+- 共用方式（本刀的核心决定）：状态放在预览器之上的单一宿主，签名 `usePreviewToken(client: Pick<ApiClient, "issuePreviewToken">, workspaceId: string | null, needed: boolean)`，无模块级 store、无订阅计数、无测试专用 reset 导出。原因：`preview.tsx:173` 的 `<PreviewBody key={path}>` 每换文件就重挂，hook 放进 `previewers/frame.tsx` 等于每次预览重新签发（正是 19.5 的变异）。
+- 交给 #1093：在持有 `client` 与选中条目的那个组件里调用一次（今天是 `page.tsx`，21.1 之后是 `WorkspaceBrowser`），`needed` 由类别表得出（html / pdf / 办公文档为真，html 切到源码时仍为真），结果以 prop 传给 `frame.tsx`，`frame.tsx` 内不得调用本 hook。「两个 html 加一个 pdf 合计恰一次签发」的整页断言归 #1093 的 `previewers-frame.test.tsx`；本刀在 hook 一级用 `rerender` 证明。一个页面一个宿主，两个宿主会各签一次（服务端返回同一令牌，`specs/preview-origin/spec.md:4`）。
+- 返回值：`{status:"idle"}`（从未需要）、`{status:"loading"}`、`{status:"ready", base, officeBase, documentMaxBytes, officeAvailable}`、`{status:"error", message}`；状态类型不导出（knip），调用方用 `ReturnType<typeof usePreviewToken>`。`token` 与 `expiresAt` 不进 state、ref 与返回值；`base` 本身含令牌，返回值必然携带，本刀只证明 hook 不写存储、地址与日志。「不出现在界面可见文本」在 hook 一级不可观察，归 #1093。
+- 换空间或换 client 的同一次渲染就不得返回旧值：state 存 `{client, workspaceId, value}`，渲染时比对不符即 `loading`（先例 `composer-options.ts:46`）。否则新空间的 iframe 会以旧空间的 `base` 拼同名相对路径，显示错空间的文件。键必须含 client 对象，因为 `page.tsx:84` 随登录纪元重建 client；键变时清掉缓存 ref。
+- 节拍（常量 `300_000`，链式 `setTimeout`，不用 `setInterval`）：`needed` 为真期间，每次尝试落定后 5 分钟再调一次，成败都继续——依据规格句「只要有这样的预览处于挂载状态，页面 SHALL 每 5 分钟再调用一次」，不是未指定。`needed` 变假或卸载时清定时器并中止在途请求，缓存保留。
+- 规格未写的分支（取最简，记入偏离记录）：`needed` 再变真时，本地 `Date.now() - issuedAt < 300_000` 则复用且不发请求，下一次定在 `issuedAt + 300_000`；否则丢弃缓存、回 `loading` 并立即签发。不看 `expiresAt`（服务端时钟，避免偏差；两次签发最大间隔小于 10 分钟，低于 15 分钟 TTL，按代码推得）。续期失败保留上一份 `ready`，不翻成 `error`，下一拍再试。
+- 中止的坑：`api.ts:314-320` 的 `fetchResponse` 把 AbortError 吞成 `requestFailed(0)`，被中止的签发表现为 status 0 的 `ApiError`。所以成功与失败两个回调第一句都是 `if (controller.signal.aborted) return`（先例 `page.tsx:126,137`），不能靠 `error.name` 判断；用 `.then(ok, err)` 双参形式，不留悬空 promise。
+- 失败与 401：非 401 用 `./errors.js` 的 `errorMessage`（信封 message 或 `REQUEST_FAILED_MESSAGE`）。401 由规格句「签发失败（非 401）时…」决定不显示：保持 `loading`、不设 `error`，client 已自行通知 `onUnauthorized`（先例 `page.tsx:139`）；节拍不为 401 另开分支。
+- StrictMode：`web/src/main.tsx:9-13` 没有 `<StrictMode>`。包上之后模拟卸载会跑 cleanup，结果是两次 POST、第一次被中止、第二次成功（按代码推得）；这与 `composer-options.ts:13-16`「不中止」的做法相反，是 issue「卸载时中止」要求的后果。若加 StrictMode 用例，只断言「结果可用、第一次的 signal 已中止、无未处理拒绝」，不断言「恰一次」。
+- 测试 `web/test/use-preview-token.test.tsx`（新，约 300 行）：`renderHook` 加 `rerender`，替身为 `{ issuePreviewToken: vi.fn() }`。先 `vi.useFakeTimers()` 再 `renderHook`，一律 `await act(() => vi.advanceTimersByTimeAsync(n))` 推进后同步断言，初次签发也靠 `advanceTimersByTimeAsync(0)` 落定，不用 `waitFor` / `findBy`。调用断言用 `mock.calls` 的 `toStrictEqual([["ws-1", { signal: expect.any(AbortSignal) }], …])`。夹具令牌用 `"t".repeat(64)`，`expiresAt` 任意（hook 不读），正则用字面量；`afterEach` 里 `vi.useRealTimers()`、清存储、`restoreAllMocks`。
+- 用例：
+- T1「共用与续期」：`needed=false` 时 0 次；变真并落定后先断言恰 1 次（起点）；同 props `rerender` 两次仍 1；推进 299_999 仍 1，再 +1 为 2，再 +300_000 为 3，再 +60_000 仍 3；`needed=false` 后 +360_000 仍 3；三次的 workspaceId 相同。
+- T2 复用与过期：第 11 分钟变假、第 12 分钟变真 → 无新请求，到第 15 分钟才有；变假 6 分钟后再变真 → 立即一次且先为 `loading`。
+- T3 引用稳定：续期返回相同四字段 → `result.current` `toBe` 原对象；`base` 不同 → 新对象。
+- T4 `ready` 值 `toStrictEqual` 恰五键。
+- T5 卸载：挂起的签发的 `signal.aborted === true`，迟到的 resolve 不落地，再推进 300_000 无新请求。
+- T6 换空间与换 client：`rerender` 后的首个 `result.current` 即 `loading`，旧请求已中止，旧结果迟到不显示，新结果落地。
+- T7「签发失败」：`ApiError(404,"not_found",m)` → `{status:"error", message:m}`；非 `ApiError` → `REQUEST_FAILED_MESSAGE`；`process.on("unhandledRejection")` 监听零调用，测后摘除（按代码推得，未跑）；下一拍成功 → `ready`。
+- T8 401 → `loading`。
+- T9 续期失败 → 仍是同一个 `ready` 对象，下一拍再调。
+- T10 用真实 `createApiClient()` 加 `fetch` 桩：`needed` 真→假→真，第一次被中止后以 AbortError 拒绝 → 不出现 `error`；三次地址恒为 `/api/workspaces/ws-1/preview-token`；`Storage.prototype.setItem`、`history.pushState/replaceState`、`console.*` 的 spy 零调用，`location.href` 不变。
+- 守卫：新文件在整目录受管的 `web/src/features/files`（`ui-layering.test.ts:89,331-343`），`MIGRATED_AREAS` 与清单断言都不改；只 `import type { ApiClient } from "../../lib/api.js"` 与 `./errors.js`，不得导入 `api-files.js`（`chat-module-layout.test.ts:64-66`）。只导出 `usePreviewToken`，测试是唯一导入者（`knip.json` 的 web 入口含 `test/**/*.test.tsx`）。hook 内无 `console`。约 110 行，不碰任何近 800 行的文件。
+- 与 issue / `tasks.md` 的差异及文档：19.1 引文与 `tasks.md:491` 逐字一致。issue 的「Current behavior」不完整——`api-files.ts` 现 488 行、`api.ts` 497 行，且 `moveEntry`、`deleteEntry` 已合。issue 写「hook 在被 #1093 引用」，按本注记是由宿主引用、`frame.tsx` 收 prop。分摊的 19.3 / 19.5 任务号本刀不勾，只勾 19.1；PR 改 `openspec/`（`tasks.md` 勾选与注记指针），须在描述里写明。无 checklist 行（无界面调用方），不动 `docs/architecture/system.md` 第 9 节，无新依赖；与本批 #1070–#1091 无文件交集，排序无约束。
+- 变异：每次预览都重新签发（`needed` 变假时丢缓存，或 effect 依赖里混入每次渲染都变的值）→ T2 的「第 12 分钟无新请求」与 T1 的「`rerender` 两次仍 1」判红（19.5 指定项）。
+- 变异：续期间隔写成 4 或 6 分钟 → T1 的 299_999 / +1 边界判红。
+- 变异：`needed=false` 时不清定时器 → T1 末段「仍 3」判红。
+- 变异：复用时重排整 5 分钟而不是 `issuedAt + 300_000` → T2 的「第 15 分钟」判红。
+- 变异：过期缓存仍复用（去掉 `>= 300_000` 判断）→ T2 的「立即一次且 `loading`」判红。
+- 变异：续期成功后总是 `setState` 新对象 → T3 的 `toBe` 判红。
+- 变异：`base` 变了却不更新 → T3 后半判红。
+- 变异：把整个响应展开进 state（带上 `token` / `expiresAt`）→ T4 判红。
+- 变异：卸载不中止 → T5 的 `signal.aborted` 判红。
+- 变异：卸载不清定时器 → T5 的「无新请求」判红。
+- 变异：去掉渲染期的 client / workspaceId 比对 → T6 的「首个 `result.current` 即 `loading`」判红。
+- 变异：换空间不中止旧请求 → T6 的旧 signal 断言判红。
+- 变异：失败回调去掉 `signal.aborted` 判断 → T10 的「不出现 `error`」判红。
+- 变异：成功回调去掉 `signal.aborted` 判断 → T5 的「迟到的 resolve 不落地」判红。
+- 变异：去掉失败回调（`.then(ok)` 单参）→ T7 的 `unhandledRejection` 监听判红，vitest 也会报 Unhandled Rejection（按代码推得）。
+- 变异：失败时固定用安全文案、丢掉信封 message → T7 首行判红；非 `ApiError` 透出原始 `error.message` → T7 次行判红。
+- 变异：失败后不再排下一拍 → T7 末行与 T9 末行判红。
+- 变异：401 显示成 `error` → T8 判红。
+- 变异：续期失败翻成 `error` → T9 判红。
+- 变异：调用时不传 `signal` 或多传键 → T1 的 `mock.calls` `toStrictEqual` 判红。
+- 变异：hook 把 `base` 或令牌写进 `localStorage` / `sessionStorage` / 地址 / `console` → T10 的 spy 判红。
+- 变异：不可观察：用 `setInterval` 还是链式 `setTimeout`（请求瞬时落定时节拍相同）。
+- 变异：不可观察：401 之后是否继续节拍（真实页面随会话清除而卸载）。
+- 变异：不可观察：键变时是否清缓存 ref（渲染期比对已挡住，只影响令牌在内存里的驻留）。
+- 变异：不可观察：「令牌不出现在界面可见文本」与 iframe 是否重载（jsdom 无 iframe 行为，归 #1093 与走查）。
+- 变异：不可观察：遍历、符号链接、跨空间 id、他人空间 404、`sandbox.reject`（本刀无路径参数、无服务端代码；归 #1067 已有证据与 11.4 / #1075）。

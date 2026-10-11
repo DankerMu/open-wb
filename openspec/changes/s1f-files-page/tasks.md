@@ -500,6 +500,7 @@ Minimal mergeable slice: 18.2（tsv）、18.3（svg）、18.4（图片）三刀�
 ## 19. file-previewers — 隔离来源：网页渲染、PDF 与办公文档
 
 - [ ] 19.1 `web/src/features/files/use-preview-token.ts`：按工作空间共用一次签发、有需要它的预览挂载时每 5 分钟续期、无挂载时不续期、卸载与换空间时中止；令牌不进地址栏与存储。
+  实施注记见 `implementation-notes.md`「19.1（#1092）」。
 - [ ] 19.2 `previewers/frame.tsx`：网页渲染视图（`sandbox="allow-scripts allow-forms allow-modals"`、`referrerpolicy="no-referrer"`、无 `srcdoc`、渲染 / 源码切换；选中 html 时不发 `file` 请求，切到源码才发）、PDF 与办公文档（无 `sandbox`、`正在转换文档…` 遮层、三种不建 iframe 的情况）；路径按段编码。
   PDF 与办公文档的部分 Depends on 1.1：其结论与设计相符才开工（不符时这一部分停下，网页渲染视图照常交付）。
 - [ ] 19.3 测试（新文件 `web/test/previewers-frame.test.tsx`、`use-preview-token.test.tsx`）：file-previewers「隔离来源的嵌入与令牌」四个场景与「PDF 与办公文档」三个场景（假定时器驱动续期；`navigator.pdfViewerEnabled` 打桩）。
