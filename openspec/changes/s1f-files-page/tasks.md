@@ -452,7 +452,7 @@ Minimal mergeable slice: 16.1 按方法分两刀——地址函数 `fileUrl`、`
   - 不搬的：`csv.ts`（`web/test/csv.test.ts:2` 导入 `parseCsv`；表格模块导入它）、`file-meta.ts` 的 `fileIcon` / `formatSize` / `formatMtime` / `logicalPath`（`file-meta.test.ts:2`、`files-page.test.tsx:3`、`preview.test.tsx:3`、`files-logical-path.test.tsx:3` 导入；`kind.ts` 的图标映射调用或扩充 `fileIcon`，不另立导出）、
     预览头（`files-page.test.tsx:537-541` 断言 `preview.tsx` 含 `fileIcon(`、`formatSize(`）。`files-empty-layout.test.tsx:190-194` 读的 `preview.tsx`、`types.ts` 仍在原处。
   实施注记见 `implementation-notes.md`「17.1、17.3（#1085）」。
-- [ ] 17.2 `preview.tsx`：按 `previewKind` 选预览器（加载中的 `正在加载预览…` 与加载失败的 `预览组件加载失败` + `重试` 已在 17.1 落地，这里只是让新类别也走同一段逻辑）；预览头的 `下载 <文件名>` 链接（`downloadUrl` + `download` 属性）对所有文件渲染；不支持 / 超限 / 截断 / 其它错误的文案表（file-previewers「预览头、下载与不可预览的呈现」）。
+- [x] 17.2 `preview.tsx`：按 `previewKind` 选预览器（加载中的 `正在加载预览…` 与加载失败的 `预览组件加载失败` + `重试` 已在 17.1 落地，这里只是让新类别也走同一段逻辑）；预览头的 `下载 <文件名>` 链接（`downloadUrl` + `download` 属性）对所有文件渲染；不支持 / 超限 / 截断 / 其它错误的文案表（file-previewers「预览头、下载与不可预览的呈现」）。
   `tree.tsx` / `page.tsx` 去掉扩展名白名单的预判：非按扩展名分流的文件一律发一次 `file` 请求（files-web「目录树与预览」；网页的渲染视图这一例外在组 19 引入，此前 html 仍是源码视图、发一次 `file` 请求）。
   过渡规则：预览器模块尚未合入的类别（pdf、办公文档、音视频、Notebook、压缩包——组 19、20 才有）在此之前按「未知」处理——发一次 `file` 请求，由服务端裁决并沿用既有呈现：pdf、办公文档、压缩包得到 415（workspaces「文件预览」）→ `该类型不支持预览`；Notebook 得到 `text/plain` → 源码视图；音视频得到 `audio/*` / `video/*` → `fetchPreview` 按「失败不变成预览」走 request_failed 的安全文案。每种情况预览头都有下载链接。各自的预览器合入时在那一刀改成该类别的呈现，并改掉受影响的既有断言。
   随条文改写的既有断言（白名单一去、文案一改就红；与 17.2 同 PR，记入偏离记录）：
@@ -466,8 +466,8 @@ Minimal mergeable slice: 16.1 按方法分两刀——地址函数 `fileUrl`、`
   走查本来就对 `npm run build --workspace web` 的产物运行（CI 的 ui-walk job 先 build 再起服务），所以不新增构建步骤、不改 `.github/workflows/ci.yml` 的步骤序列，也不动 `scripts/test-ci-harness.sh` 的期望；`make check` 与 `make test-guardrails` 不执行构建，不放这条断言。
 - [x] 17.4 契约测试（`web/test/preview-kind-contract.test.ts`）：读取服务端 `preview.ts` 导出的四个扩展名集合与 `kind.ts` 的对应集合，断言两两相等（file-previewers「与服务端的扩展名表一致」）。
   实施注记见 `implementation-notes.md`「17.4（#1086）」。
-- [ ] 17.5 测试（`web/test/preview.test.tsx` 扩充、`web/test/previewers-loading.test.tsx` 扩充——该文件与它的三条 `PreviewPane` 级用例已随 17.1 建立，这里补页面级场景，其中「加载失败可重试」的 `下载 main.py` 断言依赖 17.2 的预览头；凡取预览正文的断言一律 `await screen.findBy…` / `waitFor`，不在 `render` 或点击之后同步取）：「判定表」「未知文件由服务端裁决」「第一次才加载」「加载失败可重试」「每个文件都能下载」「截断提示」「请求归属与资源释放」。
-- [ ] 17.6 FL 行：每个文件都有下载按钮、未知类型文件的两种结果（看得了 / 不支持加下载）；结论 `待签`。
+- [x] 17.5 测试（`web/test/preview.test.tsx` 扩充、`web/test/previewers-loading.test.tsx` 扩充——该文件与它的三条 `PreviewPane` 级用例已随 17.1 建立，这里补页面级场景，其中「加载失败可重试」的 `下载 main.py` 断言依赖 17.2 的预览头；凡取预览正文的断言一律 `await screen.findBy…` / `waitFor`，不在 `render` 或点击之后同步取）：「判定表」「未知文件由服务端裁决」「第一次才加载」「加载失败可重试」「每个文件都能下载」「截断提示」「请求归属与资源释放」。
+- [x] 17.6 FL 行：每个文件都有下载按钮、未知类型文件的两种结果（看得了 / 不支持加下载）；结论 `待签`。
 - [ ] 17.7 变异证据：在 `page.tsx` 里静态导入 `previewers/code` → 守卫判红；把 `previewers/index.ts` 的动态 `import()` 全改成静态导入 → 走查的「选中时新增 `.js` 响应」断言判红；不支持态去掉下载链接 → 「每个文件都能下载」判红；恢复扩展名白名单 → `schema.proto` 用例判红；去掉加载期间的 `正在加载预览…` 占位，或让 `重试` 不重新发起加载 → `previewers-loading.test.tsx` 对应用例判红（这两条随 17.1 的 PR）。
 
 Suggested fixture level: compact - 前端展示层的结构调整；全站唯一的代码分割点由静态守卫钉住
@@ -482,7 +482,7 @@ Minimal mergeable slice: 17.1 + 17.3（搬家、加载占位与失败重试、�
   - 改写一处——`describe("PreviewPane Markdown")` › `renders deep reconstructed Markdown with every literal text pair and link`（`:228-261`）：它把 `console.error` 换成 spy 并在 `:257` 断言输出为空串；`:241` 切到源码视图后 `deep.md` 按 `md` 着色，高亮模块的加载在 `act` 之外落定时 React 报「not wrapped in act」，`:257` 即红。
     在 `:241` 的点击之后与 `:242` 的 `rerender` 之后各加一行 `await act(async () => { await loadHighlighter(); })`——`loadHighlighter` 指 `previewers/index.ts` 导出的那个带缓存的高亮加载函数（高亮库的动态 `import()` 只能写在该文件，`code.tsx` 与测试都从它取；名字以实现为准）（等的是同一个带缓存的 promise，着色的提交因此落在 `act` 之内；高亮模块已被同文件前面的用例加载过时这两行是空操作），`:257` 原样保留。
     这里等加载函数而不用 `findBy`，是因为该用例要证明的是「没有 `act` 之外的更新」而不是某段内容出现，且这段输入着色后有没有可供等待的着色元素取决于语法定义。同文件另两处 `console.error` 的 spy（`:104`、`:144`）只匹配 `same key`，不受影响。
-- [ ] 18.2 `previewers/table.tsx` 支持 `tsv`（制表符分列）。
+- [x] 18.2 `previewers/table.tsx` 支持 `tsv`（制表符分列）。
   实施注记见 `implementation-notes.md`「18.2，含分摊的 18.5 / 18.6 条款（#1088）」。
 - [ ] 18.3 `previewers/svg.tsx`：`data:` 地址的 `img`、图片 / 源码切换、截断时只显示源码、`img` 的 `error` → `无法显示该图片`（仍可看源码）。
   实施注记见 `implementation-notes.md`「18.3，含分摊的 18.5 / 18.6 / 18.7 条款（#1089）」。

@@ -63,7 +63,8 @@ describe("表格预览器：tsv 与 csv", () => {
   });
 
   it("tsv 开头与结尾的空单元格各占一格，表头不相对数据左移", () => {
-    const table = renderTable("t.tsv", "\tx\n1\t");
+    // 首尾各一个换行：只去换行，不去紧挨着它的制表符。
+    const table = renderTable("t.tsv", "\n\tx\n1\t\n");
 
     expect(table.headers).toEqual(["", "x"]);
     expect(table.rows).toEqual([["1", ""]]);
