@@ -177,7 +177,7 @@ describe("appAssemblyOf (L2)", () => {
     expect(Object.hasOwn(appAssemblyOf(bare), "preview")).toBe(false);
     expect(Object.hasOwn(appAssemblyOf(configured), "preview")).toBe(false);
 
-    const byDefault = appAssemblyOf(bare, { tokens, port }).preview;
+    const byDefault = appAssemblyOf(bare, { tokens, port, officeAvailable: false }).preview;
     expect(byDefault).toEqual({
       tokens,
       port,
@@ -186,13 +186,15 @@ describe("appAssemblyOf (L2)", () => {
     });
     expect(Object.hasOwn(byDefault ?? {}, "origin")).toBe(false);
 
-    const withOrigin = appAssemblyOf(configured, { tokens, port }).preview;
+    // `officeAvailable` is the caller's value, passed through as given (#1074: the entry hands
+    // over its converter's `available`); the configuration does not decide it here.
+    const withOrigin = appAssemblyOf(configured, { tokens, port, officeAvailable: true }).preview;
     expect(withOrigin).toEqual({
       tokens,
       port,
       origin: "https://preview.example.test:8443",
       documentMaxBytes: 12_345,
-      officeAvailable: false,
+      officeAvailable: true,
     });
     expect(withOrigin?.tokens).toBe(tokens);
     expect(withOrigin?.port).toBe(port);

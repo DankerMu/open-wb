@@ -1,6 +1,7 @@
 /**
- * 生产唯一入口（Issue #7）：validate → DB-parent prepare → openDb → createApp → 预览监听器 listen →
- * listen → 托管布局与两个托管文件 → 预览缓存目录 → 成功记录 → 回收目录首扫（#1070）。
+ * 生产唯一入口（Issue #7）：validate → DB-parent prepare → openDb → 办公文档转换器 → createApp →
+ * 预览监听器 listen → listen → 托管布局与两个托管文件 → 预览缓存目录（含清空 `work/`）→ 转换器开始
+ * 受理 → 成功记录 → 回收目录首扫（#1070、#1074）。
  *
  * ESM main guard：import 本模块只暴露纯配置 seam（resolveServerConfig），不产生任何
  * startup/signal/filesystem 副作用；只有直接执行本模块（import.meta.main）才进入主路径。
@@ -12,12 +13,16 @@
  *   ready/pre-bind 窗口内的 signal 也会中止绑定，不会留下一个逃过 releaseOwned 的后到 listener
  *   （Fastify 也因 aborted 跳过 server.listen/在 abort 时 close，Node 原生 listen signal 同样
  *   中止未完成绑定）；两次都成功之后才换新的 controller；
- * - 关停与失败清理同一条路：回收目录清理的定时器 → 预览监听器 → 主实例（其 preClose 里 runtime
- *   退出，再关主监听器）→ DB。预览监听器先于 runtime 关：omp 只连主监听器上的模型代理，预览实例
- *   没有 `/api` 与 `/v1`；
+ * - 关停与失败清理同一条路：终止启动时那条 `sudo … find`（若仍在途）→ 转换器 `close()`（终止在途
+ *   转换并等自己启动的进程退出）→ 两个周期清理的定时器 → 预览监听器 → 主实例（其 preClose 里
+ *   runtime 退出，再关主监听器）→ DB。预览监听器先于 runtime 关：omp 只连主监听器上的模型代理，
+ *   预览实例没有 `/api` 与 `/v1`。转换器先于预览监听器关：在途的 `/o/` 请求因此立即以断开结束，
+ *   不占监听器的关停预算；
+ * - 转换器在第一次 `listen` 之前构造（构造不碰文件系统、不起进程），但 `/o/` 要到 `clearWork`
+ *   落定之后才启动转换（此前答 503）：那条清空会删掉在途转换的作业目录；
  * - 已知残余（#1286 未闭合，owner D-23）：自本入口起，回收目录的 `sweep`、预览监听器的 `/w/` 与
- *   启动时对 `work/` 的 `clearWork` 有了生产调用方，`sweep` 每次启动与每 6 小时无需任何用户动作就
- *   走一遍。三者检查之后按路径操作的替换窗口原样存在，各自的陈述与证据等级见
+ *   `/o/`、启动时对 `work/` 的 `clearWork` 有了生产调用方，`sweep` 每次启动与每 6 小时无需任何用户
+ *   动作就走一遍。它们检查之后按路径操作的替换窗口原样存在，各自的陈述与证据等级见
  *   `workspaces/trash.ts`、`preview/app.ts`、`preview/office-cache.ts` 的头注释；本入口只是调用方，
  *   没有为它们加任何检查；
  * - 启动成功/失败发布都走 Promise 管理的单行 writer：同步 throw / write callback /
@@ -44,7 +49,8 @@ import { openDb } from "./core/db/index.js";
 import { ensureOwnedDir } from "./core/sandbox/dirs.js";
 import { deriveProxyBaseUrl, writeManagedModelsYml } from "./model-proxy/models-yml.js";
 import { createPreviewApp } from "./preview/app.js";
-import { createOfficeCleanup } from "./preview/office-cache.js";
+import { createOfficeConverter, type OfficeConverter } from "./preview/office.js";
+import { createOfficeCache, createOfficeCleanup } from "./preview/office-cache.js";
 import { createPreviewTokens, type PreviewTokens } from "./preview/tokens.js";
 import { type PreviewSettings, resolvePreviewSettings } from "./preview-config.js";
 import { writeHostOverlay } from "./sessions/omp/host-overlay.js";
@@ -61,6 +67,8 @@ const PREVIEW_WORK_DIR_MODE = 0o2770;
 const PREVIEW_PDF_DIR_MODE = 0o700;
 /** 回收目录的清理周期（design D22）：6 小时。 */
 const TRASH_SWEEP_INTERVAL_MS = 21_600_000;
+/** 转换缓存 `pdf/` 的清理周期（office-preview「转换缓存」）：24 小时。 */
+const PDF_SWEEP_INTERVAL_MS = 86_400_000;
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 3000;
@@ -125,11 +133,12 @@ export function sessionRuntimeOf(config: ServerConfig): SessionRuntime {
  * 写失败吞掉；
  * onError 把 supervisor 每次通知的保留故障写成一行 generic `session_fault`（#664）。
  * 恒带按 `TRASH_RETENTION_DAYS` 建的回收目录服务（构造不碰文件系统）：删除路由与入口的周期清理用同一个。
- * 给了 `preview`（令牌登记表与返回预览监听器已绑定端口的函数）才带预览依赖，签发端点由此注册。
+ * 给了 `preview`（令牌登记表、返回预览监听器已绑定端口的函数、转换是否可用）才带预览依赖，签发
+ * 端点由此注册；`officeAvailable` 原样透传，入口给的是转换器的 `available`。
  */
 export function appAssemblyOf(
   config: ServerConfig,
-  preview?: { tokens: PreviewTokens; port: () => number },
+  preview?: { tokens: PreviewTokens; port: () => number; officeAvailable: boolean },
 ): AssemblyDependencies & { trash: ReturnType<typeof createTrash> } {
   return {
     runtime: sessionRuntimeOf(config),
@@ -145,8 +154,7 @@ export function appAssemblyOf(
             port: preview.port,
             ...(config.previewOrigin === undefined ? {} : { origin: config.previewOrigin }),
             documentMaxBytes: config.previewDocumentMaxBytes,
-            // 入口尚未装配转换器（#1074）。
-            officeAvailable: false,
+            officeAvailable: preview.officeAvailable,
           },
         }),
     modelCatalog: config.modelCatalog,
@@ -168,10 +176,35 @@ export function appAssemblyOf(
   };
 }
 
-function writeRecord(record: HandshakeTimeoutRecord | TodoRejection): void {
+function writeRecord(
+  record: HandshakeTimeoutRecord | TodoRejection | { event: "preview_work_clear_failed" },
+): void {
   void writeManagedLine(process.stderr, `${JSON.stringify(record)}\n`).catch(() => {
     // Sink unavailable: the record is observation only and never changes the request or exit code.
   });
+}
+
+type OfficeCleanup = ReturnType<typeof createOfficeCleanup>;
+
+/**
+ * 办公文档转换器（单次转换外面包缓存、排队与去重）与预览缓存目录的清理对象。构造不碰文件系统、
+ * 不起进程；`OFFICE_BIN` 未配置时转换器的 `available` 为 `false`。两者拿到的是同一组
+ * `cacheDir` / `officeBin` / `ompUser`：`clearWork` 只在后两者同时配置时执行 `sudo … find`。
+ */
+function officeOf(config: ServerConfig): { converter: OfficeConverter; cleanup: OfficeCleanup } {
+  const identity = {
+    cacheDir: config.previewCacheDir,
+    ...(config.officeBin === undefined ? {} : { officeBin: config.officeBin }),
+    ...(config.ompUser === undefined ? {} : { ompUser: config.ompUser }),
+  };
+  return {
+    converter: createOfficeCache({
+      cacheDir: config.previewCacheDir,
+      converter: createOfficeConverter({ ...identity, timeoutMs: config.officeConvertTimeoutMs }),
+      concurrency: config.officeConvertConcurrency,
+    }),
+    cleanup: createOfficeCleanup({ ...identity, log: writeRecord }),
+  };
 }
 
 function repoRootOf(entryUrl: string): string {
@@ -286,14 +319,22 @@ if (import.meta.main) {
   runEntrypoint();
 }
 
-/** 入口拥有的一次性资源状态：定时器、两个实例与 DB 均只在此关闭，避免重复/二次关闭。 */
+/** 入口拥有的一次性资源状态：转换器、定时器、两个实例与 DB 均只在此关闭，避免重复/二次关闭。 */
 interface OwnedResources {
   controller: AbortController;
   app: FastifyInstance | undefined;
   /** 预览监听器的实例：先于主实例 listen，先于主实例关闭。 */
   preview: FastifyInstance | undefined;
+  /** 办公文档转换器：先于两个监听器关闭。 */
+  converter: OfficeConverter | undefined;
+  /** 终止启动时那条 `sudo … find`；没有在途的即无事发生。 */
+  stopWorkClear: (() => void) | undefined;
+  /** `clearWork` 落定之后才为真：此前 `/o/` 不启动转换。 */
+  officeReady: boolean;
   /** 回收目录清理的周期定时器（已 unref）。 */
   trashTimer: NodeJS.Timeout | undefined;
+  /** 转换缓存清理的周期定时器（已 unref）。 */
+  pdfTimer: NodeJS.Timeout | undefined;
   /** 一次关停无论几个监听器被强制回收，`listener_force_close` 至多一行。 */
   forceCloseEmitted: boolean;
   db: DatabaseSync | undefined;
@@ -321,7 +362,11 @@ function runEntrypoint(): void {
     controller: new AbortController(),
     app: undefined,
     preview: undefined,
+    converter: undefined,
+    stopWorkClear: undefined,
+    officeReady: false,
     trashTimer: undefined,
+    pdfTimer: undefined,
     forceCloseEmitted: false,
     db: undefined,
     releasing: undefined,
@@ -355,7 +400,15 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
     // 预览监听器绑定之后才有值。主监听器在它之后才 listen，受理签发请求时这里已是绑定的端口。
     let previewPort = 0;
     const tokens = createPreviewTokens();
-    const assembly = appAssemblyOf(config, { tokens, port: () => previewPort });
+    // 先登记到 owned 再做别的：此后任何一步失败或收到信号，releaseOwned 都会关掉转换器、终止清空。
+    const office = officeOf(config);
+    owned.converter = office.converter;
+    owned.stopWorkClear = office.cleanup.stopWorkClear;
+    const assembly = appAssemblyOf(config, {
+      tokens,
+      port: () => previewPort,
+      officeAvailable: office.converter.available,
+    });
     owned.app = createApp({
       db: owned.db,
       staticRoot: config.staticRoot,
@@ -364,7 +417,15 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
     });
     // 与主实例同一个 store 与沙箱 facade（越界由它写 sandbox.reject），同一张令牌登记表。
     const { store, sandbox } = owned.app.workspaces;
-    owned.preview = createPreviewApp({ store, sandbox, tokens, onListenerForceClose });
+    owned.preview = createPreviewApp({
+      store,
+      sandbox,
+      tokens,
+      converter: office.converter,
+      limits: { documentMaxBytes: config.previewDocumentMaxBytes },
+      officeReady: () => owned.officeReady,
+      onListenerForceClose,
+    });
     owned.stage = "preview_listen";
     await owned.preview.listen({
       host: config.host,
@@ -387,7 +448,7 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
       await releaseOwned(owned);
       return;
     }
-    await publishStarted(owned, config, assembly.trash);
+    await publishStarted(owned, config, assembly.trash, office.cleanup);
   } catch {
     // 真实失败判定必须先于本失败路径的第一次 yield：一旦决定失败，signal 不得压制其
     // generic 发布，也不得把退出码降为 0（sticky failure）。
@@ -399,13 +460,15 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
 }
 
 /**
- * 成功记录：listen 之后建托管布局、写托管 models 与宿主 overlay、建预览缓存目录，再发主监听器
- * 实际的 bound address/port；记录写出之后回收目录扫第一轮，入口不等它。
+ * 成功记录：listen 之后建托管布局、写托管 models 与宿主 overlay、建预览缓存目录并清空 `work/`，
+ * 然后才让 `/o/` 受理转换、扫一轮转换缓存并起它的周期清理，再发主监听器实际的 bound
+ * address/port；记录写出之后回收目录扫第一轮，入口不等它。
  */
 async function publishStarted(
   owned: OwnedResources,
   config: ServerConfig,
   trash: ReturnType<typeof createTrash>,
+  cleanup: OfficeCleanup,
 ): Promise<void> {
   // publish 涵盖发布步骤里具名子步骤之外的一切，包括开头这两项核对。
   owned.stage = "publish";
@@ -427,7 +490,7 @@ async function publishStarted(
   owned.stage = "host_overlay";
   await writeHostOverlay(config.ompStateDir);
   owned.stage = "preview_cache";
-  await preparePreviewCache(config.previewCacheDir);
+  await preparePreviewCache(config.previewCacheDir, cleanup);
   owned.stage = "publish";
   if (owned.signalReceived || owned.app === undefined) {
     return;
@@ -437,7 +500,13 @@ async function publishStarted(
     throw new Error("startup bound address changed before publication");
   }
   // 上面的 signalReceived 核对到这里是同步代码（没有 await）：releaseOwned 若已开始，上面已经返回；
-  // 之后才开始的 releaseOwned 会清掉这个定时器。
+  // 之后才开始的 releaseOwned 会清掉这两个定时器。
+  // `clearWork` 已经落定（成功、失败、超时或被终止都算）：从这里起 `/o/` 才启动转换。
+  owned.officeReady = true;
+  // 不等待：sweepPdf 永不 reject。启动时扫一轮，此后每 24 小时一轮；不看 OFFICE_BIN 是否配置。
+  void cleanup.sweepPdf(Date.now());
+  owned.pdfTimer = setInterval(() => void cleanup.sweepPdf(Date.now()), PDF_SWEEP_INTERVAL_MS);
+  owned.pdfTimer.unref();
   owned.trashTimer = setInterval(() => void trash.sweep(Date.now()), TRASH_SWEEP_INTERVAL_MS);
   owned.trashTimer.unref();
   await writeManagedLine(
@@ -457,15 +526,17 @@ async function publishStarted(
 
 /**
  * 预览缓存目录（office-preview「转换缓存」）：三个目录各自校正到精确 mode，再清空 `work` 的遗留。
- * `ensureOwnedDir` 不递归，所以先建缺失的父目录（与 DB 父目录同一做法）。清空走不带 `ompUser` 的
- * 分支：不提权、不 spawn，只删本进程删得掉的条目，`clearWork` 永不 reject。
+ * `ensureOwnedDir` 不递归，所以先建缺失的父目录（与 DB 父目录同一做法）。同时配置了 `OMP_USER` 与
+ * `OFFICE_BIN` 时 `clearWork` 先以 omp 用户执行那条固定参数的 `sudo … find`（owner D-24；有 10 秒
+ * 时限，关停时由 `stopWorkClear` 终止，owner D-26），否则不提权、不 spawn；两种情况下都再删本进程
+ * 删得掉的条目。`clearWork` 永不 reject：它失败只记一行 `preview_work_clear_failed`，不是启动失败。
  */
-async function preparePreviewCache(cacheDir: string): Promise<void> {
+async function preparePreviewCache(cacheDir: string, cleanup: OfficeCleanup): Promise<void> {
   mkdirSync(dirname(cacheDir), { recursive: true });
   ensureOwnedDir(cacheDir, PREVIEW_CACHE_DIR_MODE);
   ensureOwnedDir(join(cacheDir, "work"), PREVIEW_WORK_DIR_MODE);
   ensureOwnedDir(join(cacheDir, "pdf"), PREVIEW_PDF_DIR_MODE);
-  await createOfficeCleanup({ cacheDir }).clearWork();
+  await cleanup.clearWork();
 }
 
 /** 已绑定的 TCP 地址；未绑定（含 listen 被 signal 中止后 resolve 的情形）即抛出。 */
@@ -507,13 +578,31 @@ function addressOf(app: FastifyInstance): AddressInfo | undefined {
 async function releaseOwned(owned: OwnedResources): Promise<void> {
   if (owned.releasing === undefined) {
     owned.releasing = (async () => {
+      // 先终止仍在途的 `sudo … find`，再关转换器：两者都只处置本进程自己启动的子进程。
+      owned.stopWorkClear?.();
+      await closeOwnedConverter(owned);
       clearInterval(owned.trashTimer);
+      clearInterval(owned.pdfTimer);
       await closeOwnedInstance(owned, "preview");
       await closeOwnedInstance(owned, "app");
       closeOwnedDb(owned);
     })();
   }
   await owned.releasing;
+}
+
+/** 终止在途转换并等它们落定；此后的 `/o/` 请求以断开结束。 */
+async function closeOwnedConverter(owned: OwnedResources): Promise<void> {
+  const converter = owned.converter;
+  if (converter === undefined) {
+    return;
+  }
+  owned.converter = undefined;
+  try {
+    await converter.close();
+  } catch {
+    owned.releaseFailed = true;
+  }
 }
 
 async function closeOwnedInstance(owned: OwnedResources, which: "preview" | "app"): Promise<void> {
