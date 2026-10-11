@@ -10,10 +10,12 @@ import { Button } from "@/components/ui/button";
 import { MarkdownView } from "../../../lib/markdown-view.js";
 import { CodeView, SCROLL_BODY } from "./code.js";
 
-/** Markdown typography: preflight strips list markers and heading weight, these put them back. */
-const MARKDOWN_BODY = [
-  SCROLL_BODY,
-  "max-w-[52rem] px-5 pt-4 pb-6 [overflow-wrap:anywhere]",
+/**
+ * Markdown typography: preflight strips list markers and heading weight, these put them back.
+ * No scroll container and no padding in it: the Notebook previewer puts it on each Markdown cell.
+ */
+export const MARKDOWN_TYPOGRAPHY = [
+  "[overflow-wrap:anywhere]",
   "[&_:is(h1,h2,h3,h4)]:mb-[0.6rem] [&_:is(h1,h2,h3,h4)]:leading-[1.35] [&_:is(h1,h2,h3,h4)]:font-bold",
   "[&_h1]:text-[1.35rem] [&_h2]:mt-[1.35rem] [&_h2]:text-[1rem]",
   "[&_:is(h3,h4)]:mt-[1.1rem] [&_:is(h3,h4)]:text-[0.9rem]",
@@ -27,6 +29,8 @@ const MARKDOWN_BODY = [
   "[&_:is(th,td)]:border [&_:is(th,td)]:border-(--wb-border-default)",
   "[&_:is(th,td)]:px-[0.55rem] [&_:is(th,td)]:py-[0.35rem] [&_:is(th,td)]:text-left",
 ].join(" ");
+
+const MARKDOWN_BODY = `${SCROLL_BODY} max-w-[52rem] px-5 pt-4 pb-6 ${MARKDOWN_TYPOGRAPHY}`;
 
 function RenderedMarkdownDocument({ text }: { text: string }) {
   return (
