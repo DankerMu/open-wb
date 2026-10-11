@@ -257,7 +257,9 @@ describe("production entry with the preview listener", () => {
         `${JSON.stringify({ event: "server_started", host: "127.0.0.1", port, modules: STARTUP_MODULES })}\n`,
       );
       expect(Object.keys(started as object)).toEqual(["event", "host", "port", "modules"]);
-      expect(entry.readTrace()).toBe(`listening:${previewPort}\nlistening:${port}\n`);
+      expect(entry.readTrace()).toBe(
+        `listening:127.0.0.1:${previewPort}\nlistening:127.0.0.1:${port}\n`,
+      );
 
       const health = await fetch(`http://127.0.0.1:${port}/api/healthz`);
       expect(health.status).toBe(200);
@@ -276,10 +278,28 @@ describe("production entry with the preview listener", () => {
       expect(await server.stop()).toBe(0);
       expect(applicationStderr(server.stderr())).toBe("");
       expect(entry.readTrace()).toBe(
-        `listening:${previewPort}\nlistening:${port}\nlistener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
+        `listening:127.0.0.1:${previewPort}\nlistening:127.0.0.1:${port}\nlistener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
       );
       await expectBindable("127.0.0.1", port);
       await expectBindable("127.0.0.1", previewPort);
+    } finally {
+      await server.dispose();
+    }
+  }, 60_000);
+
+  it("binds both listeners to the configured HOST when it is the wildcard address", async () => {
+    const entry = await startEntry({ env: () => ({ HOST: "0.0.0.0" }) });
+    const { server, port, previewPort } = entry;
+    try {
+      expect(await server.waitForStarted()).toMatchObject({ host: "0.0.0.0", port });
+      expect(entry.readTrace()).toBe(
+        `listening:0.0.0.0:${previewPort}\nlistening:0.0.0.0:${port}\n`,
+      );
+      expect(await server.stop()).toBe(0);
+      expect(applicationStderr(server.stderr())).toBe("");
+      expect(entry.readTrace()).toBe(
+        `listening:0.0.0.0:${previewPort}\nlistening:0.0.0.0:${port}\nlistener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
+      );
     } finally {
       await server.dispose();
     }
@@ -429,7 +449,7 @@ describe("production entry preview bind failure", () => {
     const entry = await startEntry({ previewPort: "same-as-main" });
     await expectStartFailure(entry, "listen");
     expect(entry.readTrace()).toBe(
-      `listening:${entry.port}\nlistener-close:${entry.port}\nlistener-close:-\ndb-close\n`,
+      `listening:127.0.0.1:${entry.port}\nlistener-close:${entry.port}\nlistener-close:-\ndb-close\n`,
     );
     await expectBindable("127.0.0.1", entry.port);
   }, 60_000);
@@ -453,7 +473,7 @@ describe("production entry shutdown with preview requests in flight", () => {
       expect(await stopping).toBe(0);
       expect(applicationStderr(server.stderr())).toBe("");
       expect(entry.readTrace()).toBe(
-        `listening:${previewPort}\nlistening:${port}\nlistener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
+        `listening:127.0.0.1:${previewPort}\nlistening:127.0.0.1:${port}\nlistener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
       );
     } finally {
       download?.destroy();
@@ -494,7 +514,7 @@ describe("production entry shutdown with preview requests in flight", () => {
       await partial.closed;
       expect(applicationStderr(server.stderr())).toBe(FORCE_CLOSE_RECORD);
       expect(entry.readTrace()).toBe(
-        `listening:${previewPort}\nlistening:${port}\nlistener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
+        `listening:127.0.0.1:${previewPort}\nlistening:127.0.0.1:${port}\nlistener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
       );
     } finally {
       download?.destroy();
@@ -523,7 +543,7 @@ describe("production entry SIGTERM between the two listens", () => {
         await waitForFile(join(root, "listen-entered"), 15_000);
         expect(existsSync(join(root, "listen-released"))).toBe(false);
         const before = entry.readTrace();
-        expect(before).toBe(nth === 1 ? "" : `listening:${previewPort}\n`);
+        expect(before).toBe(nth === 1 ? "" : `listening:127.0.0.1:${previewPort}\n`);
         await server.stop();
         expect(await server.waitForClose()).toEqual({ code: 0, signal: null });
         expect(existsSync(join(root, "listen-released"))).toBe(true);
@@ -533,7 +553,7 @@ describe("production entry SIGTERM between the two listens", () => {
         expect(entry.readTrace()).toBe(
           nth === 1
             ? "listener-close:-\ndb-close\n"
-            : `listening:${previewPort}\nlistener-close:${previewPort}\nlistener-close:-\ndb-close\n`,
+            : `listening:127.0.0.1:${previewPort}\nlistener-close:${previewPort}\nlistener-close:-\ndb-close\n`,
         );
         await expectBindable("127.0.0.1", port);
         await expectBindable("127.0.0.1", previewPort);

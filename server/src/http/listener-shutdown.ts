@@ -4,9 +4,13 @@
 import type { FastifyInstance } from "fastify";
 
 /**
- * listener 关停预算默认值。生产入口有两个监听器，各用一次本预算、先后关停：最坏为预览监听器 2s +
- * native 8s（TERM 5s + KILL 3s）+ 主监听器 2s = 12s（读代码推出，未实测），超过 docker 默认 stop
+ * listener 关停预算默认值。生产入口有两个监听器，各用一次本预算、先后关停。监听器与 runtime 三段
+ * 至多为预览监听器 2s + native 8s（TERM 5s + KILL 3s）+ 主监听器 2s = 12s，超过 docker 默认 stop
  * grace 10s——三段都耗尽时进程会在收尾完成之前被 KILL（已知取舍，不是隐含保证）。
+ * 12s 不是进程退出的上界：之外还要加上在途那一轮回收目录 `sweep` 的剩余时间，它没有上界（到期批次
+ * 很大时）——入口关停只清定时器，不等待也不中止在途的一轮，也不调 `process.exit`（`server.ts` 的
+ * `publishStarted` 与 `releaseOwned`；#1070 偏离记录「关停不等待、不中止在途的 sweep」）。
+ * 以上均为读代码推出，未实测。
  */
 export const LISTENER_CLOSE_BUDGET_MS = 2_000;
 /** Node setTimeout 可表示的最大延迟；超出会被静默改成 1ms。 */
