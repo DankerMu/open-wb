@@ -1,7 +1,9 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatMtime } from "../src/features/files/file-meta.js";
-import { CodeView, CsvTable, PreviewPane } from "../src/features/files/preview.js";
+import { PreviewPane } from "../src/features/files/preview.js";
+import { CodeView } from "../src/features/files/previewers/code.js";
+import { CsvTable } from "../src/features/files/previewers/table.js";
 import { mdRender } from "../src/lib/md-render.js";
 
 afterEach(() => {
@@ -38,10 +40,11 @@ function textPreview(
   );
 }
 
-function renderMarkdownProjections(src: string) {
+async function renderMarkdownProjections(src: string) {
   const html = document.createElement("div");
   html.innerHTML = mdRender(src);
   const { container } = render(textPreview("readme.md", src));
+  await screen.findByRole("button", { name: "查看源码" });
   const reactRoot = container.querySelector("[data-markdown-body]");
   if (!(reactRoot instanceof HTMLElement)) {
     throw new Error("expected React Markdown body");
@@ -163,22 +166,21 @@ describe("PreviewPane metadata", () => {
 });
 
 describe("PreviewPane CSV routing", () => {
-  it("routes a successful CSV preview through CsvTable", () => {
+  it("routes a successful CSV preview through CsvTable", async () => {
     render(textPreview("notes.csv", "name,size\nalpha,1\nbeta,2\n"));
 
-    expect([...screen.getAllByRole("columnheader")].map((node) => node.textContent)).toEqual([
-      "name",
-      "size",
-    ]);
+    expect(
+      [...(await screen.findAllByRole("columnheader"))].map((node) => node.textContent),
+    ).toEqual(["name", "size"]);
     expect(screen.getByText("共 2 行 · 大文件仅预览前若干行")).toBeTruthy();
   });
 });
 
 describe("PreviewPane Markdown", () => {
-  it("defaults to rendered Markdown and resets after changing file identity", () => {
+  it("defaults to rendered Markdown and resets after changing file identity", async () => {
     const view = render(textPreview("readme.md", "# 第一份"));
 
-    expect(screen.getByRole("heading", { level: 1, name: "第一份" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "第一份" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "查看源码" }));
     expect(screen.queryByRole("heading", { level: 1, name: "第一份" })).toBeNull();
     expect(screen.getByRole("button", { name: "渲染视图" })).toBeTruthy();
@@ -188,14 +190,14 @@ describe("PreviewPane Markdown", () => {
 
     view.rerender(textPreview("notes.md", "# 第二份", { path: "notes.md" }));
 
-    expect(screen.getByRole("heading", { level: 1, name: "第二份" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "第二份" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "查看源码" })).toBeTruthy();
   });
 
-  it("renders the 查看源码/渲染视图 toggle as a type=button without the legacy button class in both modes", () => {
+  it("renders the 查看源码/渲染视图 toggle as a type=button without the legacy button class in both modes", async () => {
     render(textPreview("readme.md", "# 样式"));
 
-    const toggle = screen.getByRole("button", { name: "查看源码" });
+    const toggle = await screen.findByRole("button", { name: "查看源码" });
     expect(toggle.getAttribute("type")).toBe("button");
     expect(toggle.className).not.toMatch(/\bui-btn/);
     fireEvent.click(toggle);
@@ -204,11 +206,11 @@ describe("PreviewPane Markdown", () => {
     expect(back.className).not.toMatch(/\bui-btn/);
   });
 
-  it("replaces same-path document content without resetting the chosen mode", () => {
+  it("replaces same-path document content without resetting the chosen mode", async () => {
     const path = "docs/readme.md";
     const view = render(textPreview("readme.md", "# 初始", { path }));
 
-    expect(screen.getByRole("heading", { level: 1, name: "初始" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "初始" })).toBeTruthy();
     view.rerender(textPreview("readme.md", "## 渲染更新", { path }));
     expect(screen.queryByRole("heading", { level: 1, name: "初始" })).toBeNull();
     expect(screen.getByRole("heading", { level: 2, name: "渲染更新" })).toBeTruthy();
@@ -226,11 +228,12 @@ describe("PreviewPane Markdown", () => {
     expect(screen.getByRole("heading", { level: 3, name: "源码更新" })).toBeTruthy();
   });
 
-  it("renders deep reconstructed Markdown with every literal text pair and link", () => {
+  it("renders deep reconstructed Markdown with every literal text pair and link", async () => {
     const input = "[**x](u**)t";
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     try {
       const view = render(textPreview("deep.md", input.repeat(3), { path: "docs/deep.md" }));
+      await screen.findByRole("button", { name: "查看源码" });
       let body = view.container.querySelector("[data-markdown-body]");
       if (!(body instanceof HTMLElement)) {
         throw new Error("expected React Markdown body");
@@ -252,7 +255,7 @@ describe("PreviewPane Markdown", () => {
       view.rerender(textPreview("deep.md", "# 普通", { path: "docs/deep.md" }));
       expect(screen.getByRole("heading", { level: 1, name: "普通" })).toBeTruthy();
       view.rerender(textPreview("other.md", "# 另一份", { path: "docs/other.md" }));
-      expect(screen.getByRole("heading", { level: 1, name: "另一份" })).toBeTruthy();
+      expect(await screen.findByRole("heading", { level: 1, name: "另一份" })).toBeTruthy();
       expect(screen.getByRole("button", { name: "查看源码" })).toBeTruthy();
       view.unmount();
       expect(error.mock.calls.flat().join("\n")).toBe("");
@@ -261,10 +264,11 @@ describe("PreviewPane Markdown", () => {
     }
   }, 30_000);
 
-  it("renders bold and a later href# link after malformed link syntax", () => {
+  it("renders bold and a later href# link after malformed link syntax", async () => {
     const { container } = render(
       textPreview("readme.md", "[unfinished **bold**\n[x]( [A](one) **later**"),
     );
+    await screen.findByRole("button", { name: "查看源码" });
     const body = container.querySelector("[data-markdown-body]");
     if (!(body instanceof HTMLElement)) {
       throw new Error("expected React Markdown body");
@@ -278,7 +282,7 @@ describe("PreviewPane Markdown", () => {
     expect(body.textContent).toContain("[x]( A later");
   });
 
-  it("matches demo bold and formatted-label structure in both HTML and React projections", () => {
+  it("matches demo bold and formatted-label structure in both HTML and React projections", async () => {
     const src = [
       "**a*b**",
       "[**bold**](url)",
@@ -291,7 +295,7 @@ describe("PreviewPane Markdown", () => {
       "[`**code**`](url)",
       "[unfinished **bold**`code`[A](one)",
     ].join("\n");
-    const { htmlParagraphs, reactParagraphs } = renderMarkdownProjections(src);
+    const { htmlParagraphs, reactParagraphs } = await renderMarkdownProjections(src);
 
     expect(htmlParagraphs[0]?.textContent).toBe("**a*b**");
     expect(htmlParagraphs[0]?.querySelector("strong")).toBeNull();
@@ -352,9 +356,9 @@ describe("PreviewPane Markdown", () => {
     expect(reactParagraphs[9]?.querySelector("a a")).toBeNull();
   });
 
-  it("matches demo link punctuation around inline code in both HTML and React projections", () => {
+  it("matches demo link punctuation around inline code in both HTML and React projections", async () => {
     const src = ["[x](`a b`)", "[x](`a)b`)", "[`a]b`](url)"].join("\n");
-    const { htmlParagraphs, reactParagraphs } = renderMarkdownProjections(src);
+    const { htmlParagraphs, reactParagraphs } = await renderMarkdownProjections(src);
 
     expect(htmlParagraphs[0]?.textContent).toBe("[x](a b)");
     expect(reactParagraphs[0]?.textContent).toBe("[x](a b)");
@@ -377,9 +381,10 @@ describe("PreviewPane Markdown", () => {
     expect(htmlParagraphs[2]?.querySelector("code")?.textContent).toBe("a]b");
     expect(reactParagraphs[2]?.querySelector("code")?.textContent).toBe("a]b");
   });
-  it("leaves the URL unchanged for mouse and keyboard activation of href# Markdown links", () => {
+  it("leaves the URL unchanged for mouse and keyboard activation of href# Markdown links", async () => {
     const hrefBefore = window.location.href;
     const { container } = render(textPreview("readme.md", "[文档](https://evil.example/docs)"));
+    await screen.findByRole("button", { name: "查看源码" });
     const body = container.querySelector("[data-markdown-body]");
     const link = body?.querySelector("a");
     if (!(link instanceof HTMLAnchorElement)) {
@@ -396,7 +401,7 @@ describe("PreviewPane Markdown", () => {
     expect(window.location.href).not.toContain("evil.example");
   });
 
-  it("matches mdRender HTML structure including href# anchors", () => {
+  it("matches mdRender HTML structure including href# anchors", async () => {
     const src = [
       "# 一级标题",
       "## 二级标题",
@@ -423,7 +428,7 @@ describe("PreviewPane Markdown", () => {
       "const n = 1;",
       "```",
     ].join("\n");
-    const { html, reactRoot } = renderMarkdownProjections(src);
+    const { html, reactRoot } = await renderMarkdownProjections(src);
 
     expect([...reactRoot.children].map((node) => node.tagName)).toEqual(
       [...html.children].map((node) => node.tagName),
@@ -439,10 +444,10 @@ describe("PreviewPane Markdown", () => {
 });
 
 describe("PreviewPane image ownership", () => {
-  it("renders the supplied image URL without allocating or revoking Blob URLs", () => {
+  it("renders the supplied image URL without allocating or revoking Blob URLs", async () => {
     const createObjectURL = vi.fn(() => "blob:should-not-allocate");
     const revokeObjectURL = vi.fn();
-    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
+    vi.stubGlobal("URL", Object.assign(class extends URL {}, { createObjectURL, revokeObjectURL }));
     const view = render(
       <PreviewPane
         mtime={FILE_MTIME}
@@ -456,7 +461,7 @@ describe("PreviewPane image ownership", () => {
       />,
     );
 
-    const image = screen.getByRole("img", { name: "logo.png" });
+    const image = await screen.findByRole("img", { name: "logo.png" });
     expect(image.getAttribute("src")).toBe("blob:preview-image-1");
 
     view.rerender(
@@ -478,6 +483,28 @@ describe("PreviewPane image ownership", () => {
 
     expect(createObjectURL).not.toHaveBeenCalled();
     expect(revokeObjectURL).not.toHaveBeenCalled();
+  });
+
+  it("follows the payload when the same path turns from an image into text", async () => {
+    const view = render(
+      <PreviewPane
+        mtime={FILE_MTIME}
+        name="logo.png"
+        path="assets/logo.png"
+        preview={{
+          data: { kind: "image", size: 4096, truncated: false, url: "blob:preview-image-1" },
+          status: "success",
+        }}
+        size={4096}
+      />,
+    );
+    expect(await screen.findByRole("img", { name: "logo.png" })).toBeTruthy();
+
+    view.rerender(textPreview("logo.png", "not an image", { path: "assets/logo.png" }));
+
+    expect(await screen.findByRole("cell", { name: "not an image" })).toBeTruthy();
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.queryByText("blob:preview-image-1")).toBeNull();
   });
 });
 
@@ -545,8 +572,9 @@ describe("PreviewPane unsupported error and truncation", () => {
 });
 
 describe("PreviewPane JSON", () => {
-  it("pretty-prints valid JSON and keeps invalid JSON as original source", () => {
+  it("pretty-prints valid JSON and keeps invalid JSON as original source", async () => {
     const valid = render(textPreview("data.json", '{"name":"alpha","count":2}'));
+    await screen.findAllByRole("row");
     expect(
       within(valid.container.querySelector("table") as HTMLElement)
         .getAllByRole("cell")
@@ -557,6 +585,7 @@ describe("PreviewPane JSON", () => {
     valid.unmount();
     const invalidSource = "{not json";
     const invalid = render(textPreview("data.json", invalidSource));
+    await screen.findAllByRole("row");
     expect(
       within(invalid.container.querySelector("table") as HTMLElement).getAllByRole("cell")[1]
         ?.textContent,
