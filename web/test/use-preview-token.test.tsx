@@ -114,7 +114,7 @@ describe("usePreviewToken", () => {
   it("T2 复用与过期：5 分钟内再需要时不发请求、续期点不后移，过了 5 分钟立即重新签发", async () => {
     const client = stubClient();
     client.issuePreviewToken.mockResolvedValue(issued());
-    const { result, rerender } = mount(client);
+    const { frames, result, rerender } = mount(client);
     await advance(11 * MINUTE);
     expect(client.issuePreviewToken.mock.calls).toHaveLength(3);
     const ready = result.current;
@@ -135,10 +135,16 @@ describe("usePreviewToken", () => {
     rerender({ client, workspaceId: "ws-1", needed: false });
     await advance(6 * MINUTE);
     expect(client.issuePreviewToken.mock.calls).toHaveLength(4);
+    // 同键、同 client 下缓存已过期：再需要的那一次渲染仍交出上一份 ready（同一个对象，可能已失效），
+    // effect 之后才是 loading。这是设计如此，不是遗漏。
+    const from = frames.length;
     rerender({ client, workspaceId: "ws-1", needed: true });
     expect(client.issuePreviewToken.mock.calls).toHaveLength(5);
+    expect(frames.slice(from)).toStrictEqual([READY, LOADING]);
+    expect(frames[from]).toBe(ready);
     expect(result.current).toStrictEqual(LOADING);
     await advance(0);
+    expect(frames.slice(from)).toStrictEqual([READY, LOADING, READY]);
     expect(result.current).toStrictEqual(READY);
   });
 
@@ -154,6 +160,34 @@ describe("usePreviewToken", () => {
     rerender({ client, workspaceId: "ws-1", needed: true });
     expect(client.issuePreviewToken.mock.calls).toHaveLength(2);
     expect(result.current).toStrictEqual(LOADING);
+  });
+
+  it("T2 时钟拨回后的签发失败：作废的签发时刻不再用来复用，时钟追上后再需要时立即签发", async () => {
+    const client = stubClient();
+    client.issuePreviewToken
+      .mockResolvedValueOnce(issued())
+      .mockRejectedValueOnce(new ApiError(500, "internal", "服务器内部错误"))
+      .mockResolvedValueOnce(issued());
+    const { result, rerender } = mount(client);
+    await advance(0);
+    const issuedAt = Date.now();
+    expect(result.current).toStrictEqual(READY);
+
+    rerender({ client, workspaceId: "ws-1", needed: false });
+    vi.setSystemTime(issuedAt - 60 * MINUTE);
+    rerender({ client, workspaceId: "ws-1", needed: true });
+    await advance(0);
+    expect(client.issuePreviewToken.mock.calls).toHaveLength(2);
+    expect(result.current).toStrictEqual({ status: "error", message: "服务器内部错误" });
+
+    // 时钟追到「第一次签发 + 1 分钟」：按那一次算还在 5 分钟内，但它在拨回时已作废。
+    rerender({ client, workspaceId: "ws-1", needed: false });
+    vi.setSystemTime(issuedAt + MINUTE);
+    rerender({ client, workspaceId: "ws-1", needed: true });
+    expect(client.issuePreviewToken.mock.calls).toHaveLength(3);
+    expect(result.current).toStrictEqual(LOADING);
+    await advance(0);
+    expect(result.current).toStrictEqual(READY);
   });
 
   it("T3 引用稳定：续期返回相同四字段时是同一个对象，base 变了才换新对象", async () => {
@@ -177,6 +211,28 @@ describe("usePreviewToken", () => {
     expect(result.current).not.toBe(first);
     expect(result.current).toStrictEqual({ ...READY, base: moved });
   });
+
+  it.each([
+    ["base", { base: `https://preview.example.test/w/${"u".repeat(64)}/` }],
+    ["officeBase", { officeBase: `https://preview.example.test/o/${"u".repeat(64)}/` }],
+    ["documentMaxBytes", { documentMaxBytes: 2_000 }],
+    ["officeAvailable", { officeAvailable: false }],
+  ] satisfies [string, Partial<Issued>][])(
+    "T3 四字段逐一：续期只有 %s 变了，就是带新值的新对象",
+    async (_field, patch) => {
+      const client = stubClient();
+      client.issuePreviewToken.mockResolvedValueOnce(issued()).mockResolvedValueOnce(issued(patch));
+      const { result } = mount(client);
+      await advance(0);
+      const first = result.current;
+      expect(first).toStrictEqual(READY);
+
+      await advance(300_000);
+      expect(client.issuePreviewToken.mock.calls).toHaveLength(2);
+      expect(result.current).not.toBe(first);
+      expect(result.current).toStrictEqual({ ...READY, ...patch });
+    },
+  );
 
   it("T4 ready 的值恰五键，不带 token 与 expiresAt", async () => {
     const client = stubClient();
