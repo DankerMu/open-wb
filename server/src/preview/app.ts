@@ -16,9 +16,12 @@
  * （`download` 与 `file` 的音视频分支同样没有）；读到的至多是 `lstat` 时 `size` 个字节，该值由换入方
  * 决定。凭据是路径里的令牌而不是 cookie，持令牌者包括被预览文档自己的脚本（成功响应带
  * `Access-Control-Allow-Origin: *`，CSP 允许脚本且不设取源指令，文档地址里就有令牌）：该文档由 omp
- * 侧写入，与能换路径的是同一方，它可以在预览打开期间自行重复请求去撞窗口，并把读到的内容发往外部；
- * `file` / `download` 的字节只回到带 cookie 的主站页面。`/w/` 的成功读取不写审计行（`download` 写
- * `file.download`）。`Content-Length` 取 `lstat` 时的大小，其间文件变短则正文短于声明。
+ * 侧写入，与能换路径的是同一方，它可以自行重复请求去撞窗口，并把读到的内容发往外部；它也可以把令牌
+ * 本身发往外部，此后任何持令牌方（含换路径的 omp 侧进程——前提是它连得到预览监听端口，绑定地址由
+ * #1070 定）在令牌有效期内（900 秒，主站每次签发都会续期）都可以直接请求并与自己的替换动作对时，
+ * 不限于预览打开期间，也不需要浏览器；`file` / `download` 的字节只回到带 cookie 的主站页面。`/w/` 的
+ * 成功读取不写审计行（`download` 写 `file.download`）。`Content-Length` 取 `lstat` 时的大小，其间
+ * 文件变短则正文短于声明。
  */
 import { basename } from "node:path";
 import fastify, { type FastifyInstance, type FastifyReply } from "fastify";
