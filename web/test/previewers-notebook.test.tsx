@@ -524,14 +524,14 @@ describe("Notebook 预览器：代码单元的语言", () => {
   });
 
   it("超过源码视图着色上限的代码单元不着色、仍带行号（上限对 Notebook 照旧）", async () => {
-    const long = `x = 1\n${"# pad\n".repeat(20_000)}`;
+    const long = `x = 1\n${`# ${"x".repeat(998)}\n`.repeat(100)}`;
     expect(long.length).toBeGreaterThan(100_000);
     const container = renderNotebook(notebook([code(long)]));
 
     await flush();
     expect(stub.loadHighlighter).not.toHaveBeenCalled();
     expect(container.querySelectorAll(COLORED)).toHaveLength(0);
-    expect(sourceLines(container)).toHaveLength(20_002);
+    expect(sourceLines(container)).toHaveLength(102);
   });
 });
 
