@@ -105,7 +105,8 @@ export function reserveWildcardPort(): Promise<number> {
 /**
  * 以显式环境启动 compiled main，并成为新进程组组长，便于失败时整组强杀。
  * 不继承调用方环境，避免把密钥带进子进程。
- * orderTrace 只观察真实 listener/DB close，不替换生产模块。
+ * orderTrace 只观察真实 listener 的绑定与关闭、runtime 退出、DB close，不替换生产模块；
+ * 每行一个事件：`listening:<port>`、`listener-close:<port>`（从未绑定为 `-`）、`runtime-exit`、`db-close`。
  */
 export function startCompiledServer(
   entry: string,
@@ -189,6 +190,7 @@ export function compiledFixtureEnv(
     OMP_STATE_DIR: join(scratchRoot, "state"),
     SANDBOX_ROOT: join(scratchRoot, "sandbox"),
     OMP_BIN: bin,
+    PREVIEW_CACHE_DIR: join(scratchRoot, "preview-cache"),
     ...extra,
   };
 }
@@ -655,7 +657,14 @@ cp.spawn = function observedSpawn(...args) {
 Module.syncBuiltinESMExports();
 const listen = net.Server.prototype.listen;
 net.Server.prototype.listen = function observedListen(...args) {
-  this.once('close', () => mark('listener-close'));
+  // 两个监听器：每行带端口才分得出谁先。端口在 listening 时记下；从未绑定的记 '-'。
+  let port = '-';
+  this.once('listening', () => {
+    const address = this.address();
+    port = address !== null && typeof address === 'object' ? address.port : '-';
+    mark('listening:' + port);
+  });
+  this.once('close', () => mark('listener-close:' + port));
   return listen.apply(this, args);
 };
 const close = sqlite.DatabaseSync.prototype.close;

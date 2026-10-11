@@ -140,13 +140,14 @@ describe("production entry lifecycle", () => {
   it("records native exit before listener close before database close", async () => {
     const compiled = await compileServerEntry();
     const port = await reserveWildcardPort();
+    const previewPort = await reserveWildcardPort();
     const scratchRoot = mkdtempSync(join(tmpdir(), "open-wb-startup-order-"));
     scratch.push(scratchRoot);
     const tracePath = join(scratchRoot, "order.log");
     const bin = writeFakeOmpLauncher(scratchRoot, "hang-eof");
     const server = startCompiledServer(
       compiled.entry,
-      compiledFixtureEnv(scratchRoot, port, bin, { MODEL_ID }),
+      compiledFixtureEnv(scratchRoot, port, bin, { MODEL_ID, PREVIEW_PORT: String(previewPort) }),
       { orderTrace: tracePath },
     );
     let exitCode: number | null = 1;
@@ -156,7 +157,10 @@ describe("production entry lifecycle", () => {
       const session = await createSession(port, cookie);
       await prompt(port, cookie, session, "stay-alive");
       exitCode = await server.stop();
-      expect(readFileSync(tracePath, "utf8")).toBe("runtime-exit\nlistener-close\ndb-close\n");
+      // 预览监听器先绑定、先关闭；主监听器仍在 runtime 退出之后关，DB 最后。
+      expect(readFileSync(tracePath, "utf8")).toBe(
+        `listening:${previewPort}\nlistening:${port}\nlistener-close:${previewPort}\nruntime-exit\nlistener-close:${port}\ndb-close\n`,
+      );
       expect(exitCode).toBe(0);
     } finally {
       await server.dispose();
@@ -209,6 +213,7 @@ describe("production entry lifecycle", () => {
   it("publishes nothing when SIGTERM arrives while the models.yml write is held", async () => {
     const compiled = await compileServerEntry();
     const port = await reserveWildcardPort();
+    const previewPort = await reserveWildcardPort();
     const scratchRoot = mkdtempSync(join(tmpdir(), "open-wb-held-write-"));
     scratch.push(scratchRoot);
     const tracePath = join(scratchRoot, "order.log");
@@ -220,6 +225,7 @@ describe("production entry lifecycle", () => {
       compiled.entry,
       compiledFixtureEnv(scratchRoot, port, join(scratchRoot, "bin", "omp"), {
         MODEL_ID,
+        PREVIEW_PORT: String(previewPort),
         MODELS_ENTERED: entered,
         MODELS_RELEASE: observed,
       }),
@@ -237,8 +243,11 @@ describe("production entry lifecycle", () => {
       expect(parse(readFileSync(written, "utf8"))).toMatchObject({
         providers: { workbuddy: { baseUrl: `http://127.0.0.1:${port}/v1` } },
       });
-      expect(readFileSync(tracePath, "utf8")).toBe("listener-close\ndb-close\n");
+      expect(readFileSync(tracePath, "utf8")).toBe(
+        `listening:${previewPort}\nlistening:${port}\nlistener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
+      );
       await expectBindable("127.0.0.1", port);
+      await expectBindable("127.0.0.1", previewPort);
     } finally {
       await server.dispose();
     }

@@ -22,13 +22,17 @@ import {
   startCompiledServer,
   waitForFile,
 } from "./server-startup-helpers.js";
+import {
+  CONTINUE_LINE,
+  openPartialRequest,
+  type PartialRequest,
+} from "./server-startup-order-helpers.js";
 
 /** 与 issue 反例同一 deadline。 */
 const SETTLE_DEADLINE_MS = 2_000;
 /** http-service-skeleton 规格的默认 listener 预算。 */
 const SPEC_DEFAULT_BUDGET_MS = 2_000;
 const HELD_BODY = { held: "released", filler: "x".repeat(4096) };
-const CONTINUE_LINE = "HTTP/1.1 100 Continue\r\n\r\n";
 const FORCE_CLOSE_RECORD = `${JSON.stringify({ event: "listener_force_close" })}\n`;
 const STARTUP_FAILED_RECORD = `${JSON.stringify({ event: "server_start_failed", reason: "models_yml" })}\n`;
 const SQLITE_EXPERIMENTAL_WARNING =
@@ -121,44 +125,6 @@ function settleWithin(pending: Promise<unknown>, startedAt: number, ms: number):
 
 function pause(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-interface PartialRequest {
-  received(): string;
-  closed: Promise<void>;
-  destroy(): void;
-}
-
-/**
- * 发出头部完整、body 永不补齐的请求（Content-Length 大于已写字节）。
- * `Expect: 100-continue` 让服务端在解析完头部后回 100，作为请求已被接受的确定性信号。
- */
-async function openPartialRequest(port: number, target: string): Promise<PartialRequest> {
-  const socket = connect({ host: "127.0.0.1", port });
-  let received = "";
-  const closed = new Promise<void>((resolve) => socket.once("close", () => resolve()));
-  socket.on("error", () => undefined);
-  socket.setEncoding("utf8");
-  await new Promise<void>((resolve, reject) => {
-    socket.once("connect", resolve);
-    socket.once("error", reject);
-  });
-  const accepted = new Promise<void>((resolve, reject) => {
-    socket.on("data", (chunk: string) => {
-      received += chunk;
-      if (received.includes(CONTINUE_LINE)) {
-        resolve();
-      }
-    });
-    socket.once("close", () => reject(new Error(`closed before 100 Continue: ${received}`)));
-  });
-  socket.write(
-    `POST ${target} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nContent-Type: application/json\r\n` +
-      "Content-Length: 64\r\nExpect: 100-continue\r\n\r\n",
-  );
-  await accepted;
-  socket.write('{"partial":');
-  return { received: () => received, closed, destroy: () => socket.destroy() };
 }
 
 describe("listener shutdown re-drain", () => {
@@ -553,10 +519,12 @@ describe("production entry HOST=localhost", () => {
   it("binds only 127.0.0.1 so the bounded shutdown drains the single listener", async () => {
     const compiled = await compileServerEntry();
     const port = await reserveWildcardPort();
+    const previewPort = await reserveWildcardPort();
     const root = mkdtempSync(join(tmpdir(), "open-wb-localhost-"));
     const server = startCompiledServer(compiled.entry, {
       HOST: "localhost",
       PORT: String(port),
+      PREVIEW_PORT: String(previewPort),
       DB_PATH: join(root, "db", "dev.db"),
       OMP_STATE_DIR: join(root, "state"),
       SANDBOX_ROOT: join(root, "sandbox"),
@@ -575,6 +543,9 @@ describe("production entry HOST=localhost", () => {
       expect(await connectOutcome("127.0.0.1", port)).toBe("connected");
       // ::1 存在时应 ECONNREFUSED，不存在时 EADDRNOTAVAIL/ENETUNREACH；任何成功连接都是第二个 binding。
       expect(await connectOutcome("::1", port)).not.toBe("connected");
+      // 预览监听器同样只有 127.0.0.1 一个 binding。
+      expect(await connectOutcome("127.0.0.1", previewPort)).toBe("connected");
+      expect(await connectOutcome("::1", previewPort)).not.toBe("connected");
       expect(await server.stop()).toBe(0);
       expect(applicationStderr(server.stderr())).toBe("");
     } finally {

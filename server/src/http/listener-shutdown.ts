@@ -4,8 +4,9 @@
 import type { FastifyInstance } from "fastify";
 
 /**
- * listener 关停预算默认值：native 最坏 8s（TERM 5s + KILL 3s）+ listener 2s = 10s，恰等于
- * docker 默认 stop grace 10s——native 最坏情况下余量为零（已知取舍，不是隐含保证）。
+ * listener 关停预算默认值。生产入口有两个监听器，各用一次本预算、先后关停：最坏为预览监听器 2s +
+ * native 8s（TERM 5s + KILL 3s）+ 主监听器 2s = 12s（读代码推出，未实测），超过 docker 默认 stop
+ * grace 10s——三段都耗尽时进程会在收尾完成之前被 KILL（已知取舍，不是隐含保证）。
  */
 export const LISTENER_CLOSE_BUDGET_MS = 2_000;
 /** Node setTimeout 可表示的最大延迟；超出会被静默改成 1ms。 */

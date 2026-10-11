@@ -202,6 +202,23 @@ describe("startup failure record carries the failed stage (#1203)", () => {
     expect(existsSync(join(root, "state"))).toBe(false);
   }, 60_000);
 
+  it("preview_listen: the preview port is already taken", async () => {
+    const root = scratchRoot();
+    const previewPort = await reserveWildcardPort();
+    const holder = await listenOn(previewPort);
+    let failure: Failure;
+    try {
+      failure = await failStartup(root, { PREVIEW_PORT: String(previewPort) });
+    } finally {
+      await new Promise((resolve) => holder.close(resolve));
+    }
+    expectReason(failure.stderr, "preview_listen");
+    expect(existsSync(join(root, "db", "dev.db"))).toBe(true);
+    expect(existsSync(join(root, "state"))).toBe(false);
+    expect(existsSync(join(root, "preview-cache"))).toBe(false);
+    await expectBindable("127.0.0.1", failure.port);
+  }, 60_000);
+
   it("state_layout: home/.omp is occupied by a file", async () => {
     const root = scratchRoot();
     mkdirSync(join(root, "state", "home"), { recursive: true });
@@ -227,6 +244,18 @@ describe("startup failure record carries the failed stage (#1203)", () => {
     const failure = await failStartup(root);
     expectReason(failure.stderr, "host_overlay");
     expect(existsSync(join(agentDir, "models.yml"))).toBe(true);
+  }, 60_000);
+
+  it("preview_cache: the preview cache location is a file", async () => {
+    const root = scratchRoot();
+    const previewPort = await reserveWildcardPort();
+    writeFileSync(join(root, "preview-cache"), "not-a-directory");
+    const failure = await failStartup(root, { PREVIEW_PORT: String(previewPort) });
+    expectReason(failure.stderr, "preview_cache");
+    const agentDir = join(root, "state", "home", ".omp", "agent");
+    expect(existsSync(join(agentDir, "host-overlay.yml"))).toBe(true);
+    await expectBindable("127.0.0.1", failure.port);
+    await expectBindable("127.0.0.1", previewPort);
   }, 60_000);
 
   it("publish: the stdout sink fails after listen", async () => {

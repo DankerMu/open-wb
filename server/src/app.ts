@@ -60,7 +60,7 @@ import type { PreviewLimits } from "./workspaces/preview.js";
 import type { WorkspacePreviewDependencies } from "./workspaces/rest-preview-token.js";
 import { removeSnapshot, removeWorkspaceSnapshots, take } from "./workspaces/snapshots.js";
 import { restore } from "./workspaces/snapshots-restore.js";
-import { createWorkspaceStore } from "./workspaces/store.js";
+import { createWorkspaceStore, type WorkspaceStore } from "./workspaces/store.js";
 import { createTrash } from "./workspaces/trash.js";
 
 declare module "fastify" {
@@ -72,6 +72,11 @@ declare module "fastify" {
       store: SessionStore;
       supervisor: SessionSupervisor;
       listEvents: SessionListNotifier;
+    };
+    /** The one workspace store and sandbox facade of this app; the preview listener shares them. */
+    workspaces: {
+      store: WorkspaceStore;
+      sandbox: ReturnType<typeof createSandbox>;
     };
   }
 }
@@ -239,6 +244,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     ...(assembly?.warn === undefined ? {} : { warn: assembly.warn }),
   });
   app.decorate("sessions", registered);
+  app.decorate("workspaces", { store, sandbox });
   registerWorkspaces(
     app,
     {
