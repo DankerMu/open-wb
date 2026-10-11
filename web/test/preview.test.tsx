@@ -1,8 +1,9 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatMtime } from "../src/features/files/file-meta.js";
 import { PreviewPane } from "../src/features/files/preview.js";
 import { CodeView } from "../src/features/files/previewers/code.js";
+import { loadHighlighter } from "../src/features/files/previewers/index.js";
 import { CsvTable } from "../src/features/files/previewers/table.js";
 import { mdRender } from "../src/lib/md-render.js";
 
@@ -244,7 +245,13 @@ describe("PreviewPane Markdown", () => {
       );
 
       fireEvent.click(screen.getByRole("button", { name: "查看源码" }));
+      await act(async () => {
+        await loadHighlighter();
+      });
       view.rerender(textPreview("deep.md", input.repeat(10_000), { path: "docs/deep.md" }));
+      await act(async () => {
+        await loadHighlighter();
+      });
       expect(screen.getByRole("button", { name: "渲染视图" })).toBeTruthy();
       fireEvent.click(screen.getByRole("button", { name: "渲染视图" }));
       body = view.container.querySelector("[data-markdown-body]");

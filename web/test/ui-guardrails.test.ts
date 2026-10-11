@@ -258,6 +258,19 @@ describe("ATTRIBUTION.md", () => {
     expect(Object.keys(dependencies)).toContain("yauzl");
   });
 
+  it("登记 lowlight（MIT）、highlight.js（BSD-3-Clause）与 hast-util-to-jsx-runtime（MIT），且三者都在 web 的 dependencies 里", () => {
+    const attribution = readRepoFile("ATTRIBUTION.md");
+    expect(hasEntry(attribution, "lowlight", /\bMIT\b/)).toBe(true);
+    expect(hasEntry(attribution, "highlight.js", /\bBSD-3-Clause\b/)).toBe(true);
+    expect(hasEntry(attribution, "hast-util-to-jsx-runtime", /\bMIT\b/)).toBe(true);
+    const { dependencies } = JSON.parse(readRepoFile("web/package.json")) as {
+      dependencies: Record<string, string>;
+    };
+    expect(Object.keys(dependencies)).toEqual(
+      expect.arrayContaining(["lowlight", "highlight.js", "hast-util-to-jsx-runtime"]),
+    );
+  });
+
   it("登记判定自证：缺许可、名称只出现在正文、名称不全等都不算登记", () => {
     expect(hasEntry("- **radix-ui** —— `MIT License`,版权归 WorkOS", "radix-ui", /\bMIT\b/)).toBe(
       true,
