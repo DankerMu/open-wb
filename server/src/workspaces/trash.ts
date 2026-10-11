@@ -59,9 +59,10 @@
  * account root is such a directory, and the omp uid can rename it to `<SANDBOX_ROOT>/.trash`,
  * before `.trash` exists or after moving the real one aside. The next deletion by any other
  * account corrects that root to 0700, makes the three lower levels inside it, renames the entry
- * there and is answered and audited as a success. The omp uid is locked out of that account as
- * above; the batches of a `.trash` moved aside are out of the sweep's reach, and the new batch is
- * in it only while the root keeps that name.
+ * there (measured); that the DELETE route answers 204 and writes its audit row for it is read
+ * from the code, not run. The omp uid is locked out of that account as above; the batches of a
+ * `.trash` moved aside are out of the sweep's reach, and the new batch is in it only while the
+ * root keeps that name.
  */
 import { randomBytes } from "node:crypto";
 import { renameSync, rmdirSync } from "node:fs";
