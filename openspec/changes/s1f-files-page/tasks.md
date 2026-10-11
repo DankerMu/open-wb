@@ -515,7 +515,7 @@ Minimal mergeable slice: 19.1 的 hook 与测试先合；`frame.tsx` 的网页�
 
 ## 20. file-previewers — 音视频、Notebook、压缩包
 
-- [ ] 20.1 `previewers/media.tsx`：`audio` / `video`（`controls`、`preload="metadata"`、`src` 为 `fileUrl`、`error` → `无法播放该文件`）。
+- [x] 20.1 `previewers/media.tsx`：`audio` / `video`（`controls`、`preload="metadata"`、`src` 为 `fileUrl`、`error` → `无法播放该文件`）。
   实施注记见 `implementation-notes.md`「20.1，及分摊的 20.4 / 20.5 / 20.6 音视频部分（#1095）」。
 - [ ] 20.2 `previewers/notebook.tsx`：nbformat 4 的只读渲染（design D6 与 file-previewers「Notebook」）；Markdown 单元经 `mdRender`（只调用，不改 `md-render.ts`）；代码单元复用 18.1 的着色；输出按类型；解析失败退回源码。
 - [ ] 20.3 `previewers/archive.tsx`：`listArchive` 的表格、`共 N 项` / `仅显示前 N 项`、空包、415。
