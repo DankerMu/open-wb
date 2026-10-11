@@ -496,3 +496,56 @@
 - 变异：单元格改用 `dangerouslySetInnerHTML` → 用例 ⑤ 判红（出现 `script` 元素）；`preview.test.tsx:100` 那条不承担这条证明。
 - 变异：去掉 `data-slot="preview-table"` → 用例 ① 与 `files-empty-layout.test.tsx` E5（`:190`）判红。
 - 变异：不可观察：tsv 表格在真实浏览器里的内部横向滚动（jsdom 不排版，走查只测 `notes.csv`；与 csv 同容器，属由代码推出）；`"\t"` 与等价正则的写法差异；CRLF 行内 `\r` 的处理；只含空白的 tsv 的呈现；首尾换行正则里 `\r` 的有无（没有用例喂 CRLF）。
+
+## 18.3，含分摊的 18.5 / 18.6 / 18.7 条款（#1089）
+
+- 前提与边界：不触及 Critical Path（根 `AGENTS.md:115-120` 只列沙箱与文件边界、omp 子进程治理；本刀纯前端展示，不取数、不处理路径、不加路由），一个评审席；没有服务端路由，对 #1286 的替换窗口既不闭合也不加宽；不在 1.1 / 1.2 / 1.3 挡住的集合里。前置按代码核实已合：17.1（`87f7bc45`，`previewers/` 六个文件在）、6.1（`server/src/workspaces/preview.ts:24` 把 `svg` 列为文本）。PR 要勾 `tasks.md` 的 18.3 并归档本注记，须在 PR 描述里写明「触及 `openspec/`」。
+- 与 issue 的差异（origin/master 为准，进偏离记录）：(a) `kind.ts:8,40` 已有 `"svg"` 视图与 `["svg","svg"]`，`kind.ts` 不用改；(b) **`web/src/features/files/preview.tsx` 必须改**，PR Boundary 漏列——`previewerFor`（`:68-73`）现在把 svg 归到 `code`，只在 `index.ts` 登记不生效；(c) `tasks.md` 18.4 下的 `preview.test.tsx:441` 现为 `:447`，另两处行号未复核（本刀不触发图片 `error`，无影响）；(d) 重跑 `grep -nE '\.(tsv|svg|gif|webp|bmp|ico)'`（加扫 `previewers-*` 与 `file-meta.test.ts`）零命中，不改任何既有用例。
+- 页面可达性依赖 #1087（issue 的 Depends on 未列）：`tree.tsx:71-84` 的白名单仍在且无 `svg`，#1087 合入前 svg 行点不开。本刀的自动化用例不受影响（直接渲染模块或 `PreviewPane`），但 FL 行在 #1087 之前不可执行，「损坏的图片」里 `bad.svg` 的 `下载 <文件名>` 断言也要等它的预览头。批内次序 #1087 在前即可；若次序调整，本刀的 FL 行顺延。
+- 截断信息没有通道，改两处：`index.ts:14` 的 `Previewer` 属性改为 `{ name: string; content: string; truncated: boolean }`，`PreviewerId` 加 `"svg"`，`LOADERS` 加 `svg: () => import("./svg.js").then((module) => module.SvgPreviewer)`；`preview.tsx` 的 `LoadedPreview` 加 `truncated` 属性并传 `preview.data.truncated`，`previewerFor` 在 `view === "svg"` 时返回 `"svg"`。既有四个预览器只解构 `{name, content}`，类型仍可赋值，不动；`previewers-loading.test.tsx` 把 `CodePreviewer` 当 `Previewer` 用，同理不动；`previewers-code-split.test.ts` 不用改。
+- `previewers/svg.tsx`（新，约 60 行）：`export function SvgPreviewer({ name, content, truncated })`。
+- `truncated` 为真时只返回 `<CodeView text={content} />`，无 `img`、无按钮；截断提示行仍由 `preview.tsx:98-100` 渲染，模块不重复。
+- 否则两个状态：`showSource`，与记录「哪个地址失败过」的 `failedSrc: string | null`。
+- 地址为 `` `data:image/svg+xml;charset=utf-8,${encodeURIComponent(content)}` ``，不建 Blob，不导出辅助函数（knip）。
+- 图片视图是 `<img alt={name} src={src} onError={…}>`，容器类串同 `image.tsx:7-8`；`failedSrc === src` 时换成一个 `<p>无法显示该图片</p>`，不渲染 `img`。
+- 切换按钮用拷入层 `Button type="button" variant="secondary"`，文案 `查看源码` / `图片视图`，失败态下仍在；源码视图静态导入 `./code.js` 的 `CodeView`。
+- 模块里不得用 `Icon`（它渲染内联 `svg`，会让「没有内联 svg」断言无法成立）。
+- 规格未写明的分支，取最简并进偏离记录：(1) 失败后切到源码再切回，仍显示 `无法显示该图片`，不重新挂 `img`；(2) 同一 `path` 刷新取回不同内容时失败态自动解除（靠 `failedSrc === src` 的比较，不用 effect），依据是规格句「移除**该** `img`」——新内容是新图；(3) `无法显示该图片` 不加 `role`（规格没给，只禁 Toast），用例按文案取；(4) 源码视图本刀不传文件名给 `CodeView`，按 xml 着色由 #1091 在加可选文件名参数时把 `svg.tsx` 的调用一并补上。
+- 证据级别（措辞不得超过证据）：「`img` 里的 SVG 不执行脚本」「非法 SVG 会触发 `error`」「`data:` 地址能显示图片」都是由浏览器行为推导，未实测——jsdom 不加载图片也不派发 `error`，失败用例用 `fireEvent.error(img)` 人工触发，PR 里照此标注。接近 1 MiB 的 SVG 百分号编码后地址可达数 MiB，浏览器能否承受未实测，记为残余。`encodeURIComponent` 遇孤立代理项会抛 `URIError`；经 `fetchPreview` 的文本来自 `response.text()`（`api-files.ts:298`）的 UTF-8 解码，由代码推导不会产生孤立代理项，不加防护、不加用例。
+- 测试落在 `web/test/previewers-table-svg.test.tsx`，`describe("SvgPreviewer")`，静态导入模块直接渲染、同步断言。夹具文本须含 `<script>`、`#`、`%`、中文与换行（不要写颜色字面量）。
+- 「图片方式加载」：渲染前先断言 `document.querySelector("svg, script")` 为 null；渲染后 `img` 的 `src` 以完整字面量 `toBe`（含 `%3Cscript%3E` 与 `%23`，不在期望里再调 `encodeURIComponent`），`alt` 为文件名，`document.querySelector("svg, script")` 仍为 null，`createObjectURL` 未被调用。
+- 切换：点 `查看源码` 后各行文本等于原文各行（含 `<script>` 那行，证明内容确实到了），按钮名为 `图片视图`，无 `img`；点回后 `img` 复现。
+- 「被截断」：`truncated` 为真时有行、无 `img`、`queryByRole("button")` 为 null。
+- `error`：`fireEvent.error` 后出现文案、`queryByRole("img")` 为 null，点 `查看源码` 见原文，再点 `图片视图` 仍是文案；`observeUnhandledRejections`（`chat-stream-support.ts`）为空。
+- 同 `path` 换内容后 `img` 复现。
+- `URL` 的桩照 `preview.test.tsx:450` 写成可构造的子类加两个 spy，不用普通对象。
+- `PreviewPane` 级两条（同文件，`findBy`；证明 `preview.tsx` 的两处接线）：`logo.svg` 的文本成功态 → `await screen.findByRole("img", { name: "logo.svg" })` 且 `src` 以 `data:image/svg+xml` 开头；`big.svg` 带 `truncated: true` → `await screen.findAllByRole("row")`，无 `img`、无 `查看源码` 按钮。这两条不得断言「文档里没有 `svg`」——预览头 `preview.tsx:85` 的 `Icon` 本身是内联 `svg`，该断言只在直接渲染模块的用例里成立。截断提示行的文案 #1087 要改写，这里不断言文案。
+- 静态断言（同文件）：`listRepoFiles("web/src/features/files/previewers", …)` 的每个文件原文（含注释）不含 `dangerouslySetInnerHTML` 与 `.innerHTML`（先例 `chat-messages.test.tsx:206`）；先断言列表含 `svg.tsx` 防空转；检查写成纯函数并用一个注入样本自证判红。当前 `previewers/` 零命中；自此该目录的注释里也不能写这两个词，`svg.tsx` 的文件头注释要绕开。
+- 守卫与门槛：
+- `files-empty-layout.test.tsx:202-208` 与 `topbar.test.tsx:262-272` 递归扫 `features/files` 下每个 `.tsx`，`svg.tsx` 不得出现退役字符串、`<h1`、颜色字面量、井号加数字的注释、`list-none`。
+- `previewers/` 已在 `MIGRATED_AREAS` 内，`ui-layering.test.ts`（735 行）不动。
+- 新文件远低于 800 行，`preview.tsx` 201 行有余量；无新依赖。
+- 切换外壳与 `markdown.tsx:47-60` 相似，可能被 jscpd 计一处克隆；阈值是全仓 3%，推断不会判红，未实测。本刀不为此改 `markdown.tsx`。
+- 批内共用文件，请编排者排序：
+- `web/test/previewers-table-svg.test.tsx`：#1088、#1089、#1090 共用，先合者建文件，后者只追加自己的 `describe`，留意合计行数。
+- `previewers/index.ts`：与 #1091。
+- `preview.tsx`：与 #1087；#1090 若要在 `error` 时释放 Blob 地址也会碰。
+- `docs/acceptance/functional-checklist.md` 的 FL 节：全体共用。
+- `无法显示该图片` 文案 #1090 会在 `image.tsx` 再写一遍，是否合并由 #1090 决定。
+- FL 行（origin/master 上 FL 节到 FL-08，取合入时的下一个编号，结论 `待签`）。
+- 操作：「接 FL-05 的空间与会话标签页，从「+」菜单「上传文件」再传入自备的 logo.svg（一张能正常显示的矢量图，文件里另含一个调用 alert 的 script 元素）与 bad.svg（内容只有一行普通文字）；回文件页点「刷新」，展开 uploads，依次点 logo.svg、点「查看源码」、点「图片视图」、点 bad.svg、点「查看源码」」
+- 期望：「logo.svg 显示为图片且不超出预览区，全程不弹出任何提示框；「查看源码」后是带行号的 SVG 原文（能看到 script 那一段），按钮变为「图片视图」；点回后又是图片；bad.svg 显示「无法显示该图片」，没有破图图标，仍可点「查看源码」看到那行文字」
+- 坑：依赖 #1087 去掉白名单；会话上传是否限制 `svg` 扩展名未核实（grep 未见扩展名白名单，属推断），实现者先走一遍；被截断的 SVG 需要 1 MiB 以上的文件，不进清单行。
+- 变异：`svg.tsx` 用 `dangerouslySetInnerHTML={{ __html: content }}` 渲染 → 「图片方式加载」的 `querySelector("svg, script")` 判红，静态断言同红。
+- 变异：经 ref 写 `.innerHTML` → 同上两条判红（静态断言靠 `.innerHTML` 一项）。
+- 变异：去掉 `encodeURIComponent`，或换成 `encodeURI` → `src` 的完整字面量断言判红（`%3C` / `%23`）。
+- 变异：改用 `URL.createObjectURL(new Blob(…))` → 「`createObjectURL` 未被调用」与 `src` 字面量判红。
+- 变异：`truncated` 时仍渲染 `img` 或按钮 → 模块级「被截断」判红。
+- 变异：`preview.tsx` 不传 `truncated`（或恒为假）→ `PreviewPane` 级 `big.svg` 用例判红。
+- 变异：`previewerFor` 仍把 svg 归 `code`，或 `index.ts` 不登记 `svg` → `PreviewPane` 级 `logo.svg` 的 `findByRole("img")` 判红（后者先被 tsc 拦下）。
+- 变异：去掉 `onError` 处理 → `error` 用例判红（文案不出现、`img` 残留）。
+- 变异：失败态同时去掉切换按钮 → 「仍可看源码」判红。
+- 变异：按钮文案不随视图变 → 切换用例的 `图片视图` 判红。
+- 变异：失败态用布尔而非按地址记 → 「同 `path` 换内容后 `img` 复现」判红。
+- 变异：`img` 的 `alt` 不是文件名 → 各处 `getByRole("img", { name })` 判红。
+- 变异：不可观察——把 SVG 原文作为文本节点放进 DOM（源码视图本来就这样做，符合规格）；`charset=utf-8` 之外的真实浏览器解码差异；`img` 的缩放类串写错（jsdom 无布局，只有 FL 行能看）；真实浏览器里脚本是否执行与非法 SVG 是否触发 `error`（只有 FL 行）。
