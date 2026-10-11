@@ -28,7 +28,7 @@ export function CodeView({ text }: { text: string }) {
                 {lineNumber + 1}
               </td>
               <td className="pr-4 whitespace-pre text-(--wb-text-primary)">
-                {line.value === "" ? " " : line.value}
+                {line.value === "" ? "\u00a0" : line.value}
               </td>
             </tr>
           ))}

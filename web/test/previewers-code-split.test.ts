@@ -10,6 +10,7 @@ import { listRepoFiles, readRepoFile, stripTsComments } from "./ui-support.js";
 const SRC = "web/src";
 const PREVIEWERS = `${SRC}/features/files/previewers`;
 const INDEX = `${PREVIEWERS}/index.ts`;
+const KIND = `${PREVIEWERS}/kind.js`;
 const VITE_CONFIG = "web/vite.config.ts";
 
 const DYNAMIC_IMPORT = /\bimport\s*\(/;
@@ -25,20 +26,33 @@ function resolveSpecifier(importer: string, specifier: string): string | null {
   return null;
 }
 
+/**
+ * 只对会进入口包的文件调用：previewers/ 之外的文件，以及 `index.ts` 自己（它被外部静态导入）。
+ * 前者只许碰 `index.js`，后者在目录内只许碰 `kind.js`——否则那个预览器连同它的依赖就进了入口包。
+ */
+function specifierViolation(path: string, specifier: string): string | null {
+  const fromIndex = path === INDEX;
+  if (HIGHLIGHT_LIBRARY.test(specifier)) {
+    return fromIndex
+      ? `${path}: 静态导入高亮库 ${specifier}`
+      : `${path}: previewers/ 之外导入高亮库 ${specifier}`;
+  }
+  const target = resolveSpecifier(path, specifier);
+  if (target === null) return null;
+  if (target !== PREVIEWERS && !target.startsWith(`${PREVIEWERS}/`)) return null;
+  if (fromIndex) {
+    return target === KIND ? null : `${path}: 只许静态导入 ./kind.js，不得静态导入 ${specifier}`;
+  }
+  return target === `${PREVIEWERS}/index.js`
+    ? null
+    : `${path}: previewers/ 之外静态导入其内部模块 ${specifier}`;
+}
+
 function staticImportViolations(path: string, code: string): string[] {
   const violations: string[] = [];
   for (const match of code.matchAll(STATIC_SPECIFIER)) {
-    const specifier = match[1] as string;
-    if (HIGHLIGHT_LIBRARY.test(specifier)) {
-      violations.push(`${path}: previewers/ 之外导入高亮库 ${specifier}`);
-      continue;
-    }
-    const target = resolveSpecifier(path, specifier);
-    if (target === null) continue;
-    const insidePreviewers = target === PREVIEWERS || target.startsWith(`${PREVIEWERS}/`);
-    if (insidePreviewers && target !== `${PREVIEWERS}/index.js`) {
-      violations.push(`${path}: previewers/ 之外静态导入其内部模块 ${specifier}`);
-    }
+    const violation = specifierViolation(path, match[1] as string);
+    if (violation !== null) violations.push(violation);
   }
   return violations;
 }
@@ -55,7 +69,7 @@ function codeSplitViolations(files: SourceFile[]): string[] {
     if (path === VITE_CONFIG && code.includes("manualChunks")) {
       violations.push(`${path}: 不得配置 manualChunks`);
     }
-    if (!path.startsWith(`${PREVIEWERS}/`)) {
+    if (path === INDEX || !path.startsWith(`${PREVIEWERS}/`)) {
       violations.push(...staticImportViolations(path, code));
     }
   }
@@ -65,7 +79,8 @@ function codeSplitViolations(files: SourceFile[]): string[] {
 
 const COMPLIANT_INDEX: SourceFile = {
   path: INDEX,
-  source: 'export const load = () => import("./code.js").then((m) => m.CodePreviewer);',
+  source:
+    'import type { ReactElement } from "react";\nexport { previewKind, textView } from "./kind.js";\nexport const load = () => import("./code.js").then((m) => m.CodePreviewer);',
 };
 
 describe("预览器按需加载是唯一的代码分割", () => {
@@ -79,7 +94,7 @@ describe("预览器按需加载是唯一的代码分割", () => {
     expect(codeSplitViolations(files)).toEqual([]);
   });
 
-  it("自证：previewers/index.ts 自身的动态导入、同目录模块之间的静态导入与目录内的高亮库导入都合规", () => {
+  it("自证：previewers/index.ts 自身的动态导入与它对 kind 的静态再导出、同目录其它模块之间的静态导入与目录内的高亮库导入都合规", () => {
     expect(
       codeSplitViolations([
         COMPLIANT_INDEX,
@@ -115,7 +130,32 @@ describe("预览器按需加载是唯一的代码分割", () => {
   it("自证：previewers/index.ts 的动态导入全改成静态后判失败", () => {
     expect(
       codeSplitViolations([{ path: INDEX, source: 'export { CodePreviewer } from "./code.js";' }]),
-    ).toEqual([`${INDEX}: 没有动态 import()`]);
+    ).toEqual([
+      `${INDEX}: 只许静态导入 ./kind.js，不得静态导入 ./code.js`,
+      `${INDEX}: 没有动态 import()`,
+    ]);
+  });
+
+  it("自证：previewers/index.ts 只把一个预览器改成静态导入、其余仍动态时判失败，静态导入高亮库也算", () => {
+    expect(
+      codeSplitViolations([
+        {
+          path: INDEX,
+          source: [
+            'import { CodePreviewer } from "./code.js";',
+            'import { common } from "lowlight";',
+            'export { previewKind } from "./kind.js";',
+            'export const markdown = () => import("./markdown.js");',
+            'export const table = () => import("./table.js");',
+            'export const image = () => import("./image.js");',
+            "export const code = () => Promise.resolve(CodePreviewer);",
+          ].join("\n"),
+        },
+      ]),
+    ).toEqual([
+      `${INDEX}: 只许静态导入 ./kind.js，不得静态导入 ./code.js`,
+      `${INDEX}: 静态导入高亮库 lowlight`,
+    ]);
   });
 
   it("自证：previewers/ 之外静态导入 previewers/code 或 previewers/kind 判失败，相对路径、别名与再导出都算", () => {
