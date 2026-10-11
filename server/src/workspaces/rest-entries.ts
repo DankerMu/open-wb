@@ -7,7 +7,16 @@
  *
  * Known residual of the move route (design D22 / D-23, #1286 stays open; nothing here closes
  * it): every check is by path and the `rename` resolves both paths again, re-checking nothing.
- * Derived from the code and from bare `renameSync` runs; never reproduced through the route.
+ * Evidence, from a uid-separated Linux deployment (ext4 and overlayfs, Node 24.13.1). Measured
+ * with bare `renameSync`: a same-named file and an empty directory replaced through a symlinked
+ * component, the hard-link no-op, `EXDEV` across filesystems, a case-only rename succeeding.
+ * Through this handler (compiled, `inject`; sandbox, store and audit stubbed): a symlink swapped
+ * in, and a hard link to the source created, after the lstat at `to` were both reproduced (200
+ * each) only with that window held open by a hook around `lstatSync`, which did the swap itself.
+ * A natural race did not reproduce it: 20000 rounds of the handler's call sequence (a script,
+ * not the handler) against an omp-uid process flipping the component, 16814 reaching the rename,
+ * none escaping. Not run: the thread-pool timing, the audit rows, the `from` side and the status
+ * codes of the failing combinations; those are derived from the code.
  * - Not overwriting is look-then-rename, not atomic. Having no `await` in between keeps other
  *   handlers' JavaScript out, not the filesystem: a call that another request of this process
  *   has already handed to the thread pool (the `link` of an upload, a step of a snapshot
@@ -24,7 +33,9 @@
  *   after the lstat at `to`, that directory was never looked at: a same-named non-directory
  *   there (a file source) or empty directory (a directory source) is replaced, in whatever
  *   directory of this filesystem this process can write — another owner's workspace, the
- *   recycle directory and a snapshot included. The last component is not followed: a link
+ *   recycle directory and a snapshot included. Only of this filesystem: a link into another
+ *   one makes the rename fail with `EXDEV`, one of the failing combinations above (500, the
+ *   source in place). The last component is not followed: a link
  *   swapped in as `from` is itself moved, one at `to` is the case above. The audit row names
  *   the logical paths either way.
  */
