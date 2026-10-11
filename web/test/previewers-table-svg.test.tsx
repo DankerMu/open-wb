@@ -1,10 +1,19 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PreviewPane } from "../src/features/files/preview.js";
+import { ImagePreviewer } from "../src/features/files/previewers/image.js";
 import { SvgPreviewer } from "../src/features/files/previewers/svg.js";
 import { TablePreviewer } from "../src/features/files/previewers/table.js";
 import { ToastProvider } from "../src/ui/index.js";
 import { observeUnhandledRejections, settle } from "./chat-stream-support.js";
+import {
+  authenticatedFilesRoutes,
+  cleanupFilesFixture,
+  renderFiles,
+  stubBlobUrls,
+  workspace,
+} from "./files-fixture.js";
+import { jsonResponse } from "./support.js";
 import { listRepoFiles, readRepoFile } from "./ui-support.js";
 
 afterEach(cleanup);
@@ -295,5 +304,158 @@ describe("SvgPreviewer", () => {
     const files = listRepoFiles("web/src/features/files/previewers", () => true);
     expect(files).toContain("web/src/features/files/previewers/svg.tsx");
     expect(files.filter((path) => injectsHtml(readRepoFile(path)))).toEqual([]);
+  });
+});
+
+/** 根目录下恰有 `files`（文件名 → 应答的 Content-Type）的文件页；正文是八个与类型无关的字节。 */
+function renderImageFiles(files: Record<string, string>) {
+  const names = Object.keys(files);
+  return renderFiles(
+    "/files?ws=workspace-1",
+    authenticatedFilesRoutes([workspace], {
+      "/api/workspaces/workspace-1/tree?path=": () =>
+        jsonResponse({
+          path: "",
+          entries: names.map((name, index) => ({
+            name,
+            type: "file",
+            size: 8,
+            mtime: 101 + index,
+          })),
+        }),
+      ...Object.fromEntries(
+        names.map((name) => [
+          `/api/workspaces/workspace-1/file?path=${name}`,
+          () =>
+            new Response(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]), {
+              headers: { "Content-Type": files[name] ?? "", "X-Workbuddy-Size": "8" },
+            }),
+        ]),
+      ),
+    }),
+  );
+}
+
+// file-previewers「Markdown、表格、图片与 SVG」的场景「损坏的图片」的 broken.png 半边，与图片预览接受的六种类型。
+describe("ImagePreviewer", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    cleanupFilesFixture();
+  });
+
+  it("img 触发 error 后显示无法显示该图片并移除 img，只把这一个 Blob 地址释放一次，不新建地址", () => {
+    const blobUrls = stubBlobUrls([]);
+    render(<ImagePreviewer content="blob:broken" name="broken.png" />);
+    const image = screen.getByRole("img", { name: "broken.png" });
+    expect(image.getAttribute("src")).toBe("blob:broken");
+    expect(screen.queryByText("无法显示该图片")).toBeNull();
+    expect(blobUrls.revokeObjectURL).not.toHaveBeenCalled();
+
+    fireEvent.error(image);
+
+    expect(screen.getByText("无法显示该图片")).toBeTruthy();
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(blobUrls.revokeObjectURL.mock.calls).toStrictEqual([["blob:broken"]]);
+    expect(blobUrls.createObjectURL).not.toHaveBeenCalled();
+  });
+
+  it("失败按地址记：同一文件换了新的 Blob 地址后 img 复现，地址不变时仍是失败文案，不再多释放；新地址再出错照样释放并换成文案", () => {
+    const blobUrls = stubBlobUrls([]);
+    const view = render(<ImagePreviewer content="blob:broken" name="broken.png" />);
+    fireEvent.error(screen.getByRole("img", { name: "broken.png" }));
+
+    view.rerender(<ImagePreviewer content="blob:broken" name="broken.png" />);
+    expect(screen.getByText("无法显示该图片")).toBeTruthy();
+    expect(screen.queryByRole("img")).toBeNull();
+
+    view.rerender(<ImagePreviewer content="blob:next" name="broken.png" />);
+    const next = screen.getByRole("img", { name: "broken.png" });
+    expect(next.getAttribute("src")).toBe("blob:next");
+    expect(screen.queryByText("无法显示该图片")).toBeNull();
+    expect(blobUrls.revokeObjectURL.mock.calls).toStrictEqual([["blob:broken"]]);
+
+    fireEvent.error(next);
+
+    expect(screen.getByText("无法显示该图片")).toBeTruthy();
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(blobUrls.revokeObjectURL.mock.calls).toStrictEqual([["blob:broken"], ["blob:next"]]);
+  });
+
+  it("没有 error 就不释放：渲染、重渲染、换地址与卸载都不动调用方的 Blob 地址", () => {
+    const blobUrls = stubBlobUrls([]);
+    const view = render(<ImagePreviewer content="blob:fine" name="logo.png" />);
+    expect(screen.getByRole("img", { name: "logo.png" }).getAttribute("src")).toBe("blob:fine");
+
+    view.rerender(<ImagePreviewer content="blob:fine" name="logo.png" />);
+    view.rerender(<ImagePreviewer content="blob:other" name="logo.png" />);
+    view.unmount();
+
+    expect(blobUrls.revokeObjectURL).not.toHaveBeenCalled();
+    expect(blobUrls.createObjectURL).not.toHaveBeenCalled();
+  });
+
+  it("文件页选中损坏的 broken.png：提示出现且没有 Toast、img 被移除、Blob 地址被释放、下载链接仍在；改选 logo.png 时持有者对同一地址再释放一次", async () => {
+    const blobUrls = stubBlobUrls(["blob:broken", "blob:logo"]);
+    const consoleError = vi.spyOn(console, "error");
+    const rejections = observeUnhandledRejections();
+    try {
+      renderImageFiles({ "broken.png": "image/png", "logo.png": "image/png" });
+      const toasts = screen.getByRole("region", { name: "通知" });
+      const preview = within(await screen.findByRole("region", { name: "文件预览" }));
+
+      fireEvent.click(await screen.findByRole("button", { name: "broken.png" }));
+      const image = await preview.findByRole("img", { name: "broken.png" });
+      expect(image.getAttribute("src")).toBe("blob:broken");
+      expect(blobUrls.revokeObjectURL).not.toHaveBeenCalled();
+
+      fireEvent.error(image);
+
+      expect(preview.getByText("无法显示该图片")).toBeTruthy();
+      expect(preview.queryByRole("img")).toBeNull();
+      expect(blobUrls.revokeObjectURL.mock.calls).toStrictEqual([["blob:broken"]]);
+      // Toast 是通知区列表里的一项（类名 ui-toast，自身不带 role）；预览区此时也不该有 alert。
+      expect(within(toasts).queryByRole("listitem")).toBeNull();
+      expect(document.querySelector(".ui-toast")).toBeNull();
+      expect(preview.queryByRole("alert")).toBeNull();
+      const link = preview.getByRole("link", { name: "下载 broken.png" });
+      expect(link.getAttribute("href")).toBe(
+        "/api/workspaces/workspace-1/download?path=broken.png",
+      );
+      expect(link.hasAttribute("download")).toBe(true);
+
+      // 记录在案的偏离：持有者（tree.tsx）不知道图片模块已经释放过，改选别的文件时对同一地址再释放一次。
+      fireEvent.click(screen.getByRole("button", { name: "logo.png" }));
+      const logo = await preview.findByRole("img", { name: "logo.png" });
+      expect(logo.getAttribute("src")).toBe("blob:logo");
+      expect(preview.queryByText("无法显示该图片")).toBeNull();
+      expect(blobUrls.revokeObjectURL.mock.calls).toStrictEqual([["blob:broken"], ["blob:broken"]]);
+
+      await settle();
+      expect(rejections.unhandled).toEqual([]);
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      rejections.stop();
+    }
+  });
+
+  it.each([
+    ["shot.png", "image/png"],
+    ["photo.jpeg", "image/jpeg"],
+    ["anim.gif", "image/gif"],
+    ["photo.webp", "image/webp"],
+    ["scan.bmp", "image/bmp"],
+    ["favicon.ico", "image/x-icon"],
+  ])("文件页选中 %s（%s）显示为 img，src 是为它分配的 Blob 地址", async (name, contentType) => {
+    const blobUrls = stubBlobUrls(["blob:picture"]);
+    renderImageFiles({ [name]: contentType });
+
+    fireEvent.click(await screen.findByRole("button", { name }));
+
+    const image = await screen.findByRole("img", { name });
+    expect(image.getAttribute("src")).toBe("blob:picture");
+    expect(screen.queryByText("无法显示该图片")).toBeNull();
+    expect(screen.queryByText("该类型不支持预览")).toBeNull();
+    expect(blobUrls.createObjectURL).toHaveBeenCalledTimes(1);
+    expect(blobUrls.revokeObjectURL).not.toHaveBeenCalled();
   });
 });
