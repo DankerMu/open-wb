@@ -16,6 +16,18 @@
  * LibreOffice 在作业目录下建的 `profile`、`.cache` 属该用户，本进程删不掉；这是一条提权命令，
  * argv 里除构造时给定的 `ompUser` 与 `cacheDir` 外没有任何变量。它失败只记一条不带路径的日志。
  *
+ * 这条命令有界（owner D-26，design D18「启动清空的超时与终止」）：固定 10 秒未结束，或入口在关停时
+ * 调用 `stopWorkClear()`，都对**自己启动的那个 `sudo`** 发 `SIGTERM`，2 秒内仍未退出再发 `SIGKILL`，
+ * 按该命令失败处理（同一行日志，至多一行）；本进程自己的删除照常，不向启动抛出。sudoers 行不变，
+ * 不新增任何提权面：应用用户处置的只是自己的子进程。`stopWorkClear()` 是一次性的、不可撤回：调用过
+ * 之后（哪怕当时没有在途的命令），此后的 `clearWork()` 不再启动 `sudo`，同样按该命令失败处理、记
+ * 同一行日志——关停请求先于清空到达时不能丢。证据等级——对假 `sudo`：实测（
+ * `office-work-clear.test.ts`，被哪个信号结束、pid 不存在、日志行数）。对真实 `sudo`：先发 `SIGTERM`
+ * 是因为 `sudo` 会把它收到的 `SIGTERM` 转给所运行的命令，而 `SIGKILL` 无法转发，这条命令又不经
+ * `setpriv --pdeathsig`——**读 sudo 手册推出，未测**。`sudo` 结束之后它之下的 `find` 是否随之结束，
+ * 只能在真实 Linux `sudo` 的 uid 分离部署上观察，**未测**：应用用户无权向 omp 用户的进程发信号，
+ * `find` 若留下，本模块没有别的手段处置它，那时它仍在 `work/` 下删除。
+ *
  * 没有闭合的窗口（第一条读代码推出，没有实测；第二条在 uid 分离的 Linux 测试部署上实测过）：
  * - 键取自 `lstat` 那一刻，转换进程随后才按路径读输入；其间输入被改写，旧键下存进的就是新内容。
  *   排队把这段间隔拉长了：键在到达时取，进程在轮到这一组时才启动，最坏约
@@ -37,13 +49,17 @@ import { lstatSync, readdirSync, rmSync, utimesSync } from "node:fs";
 import { lstat, readdir, rename, unlink } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { assertSafeSudoPath } from "../core/process-path.js";
-import { OfficeConvertError, type OfficeConverter, type OfficeSpawn } from "./office.js";
+import { OfficeConvertError, type OfficeConverter, type OfficeSpawn, terminate } from "./office.js";
 import { createOfficeQueue } from "./office-queue.js";
 
 /** sudoers 规则里逐字写的那条路径；不经 `PATH` 查找。 */
 const FIND_PATH = "/usr/bin/find";
 /** `pdf/` 下的文件超过这么久没有被命中就清掉；写死，不是配置项。 */
 const PDF_RETENTION_MS = 7 * 86_400_000;
+/** 启动时那条 `sudo … find` 的时限（owner D-26）；写死，不是配置项。 */
+const WORK_CLEAR_TIMEOUT_MS = 10_000;
+/** `SIGTERM` 之后等这么久，仍未退出才发 `SIGKILL`。 */
+const WORK_CLEAR_KILL_GRACE_MS = 2_000;
 const BAD_PATHS = "cacheDir and officeBin must be absolute paths";
 
 /**
@@ -181,11 +197,19 @@ export function createOfficeCleanup(options: {
   ompUser?: string;
   /** 测试 seam，与转换器的是同一个；缺省为 `node:child_process` 的 `spawn`。 */
   spawn?: OfficeSpawn;
-  /** `sudo … find` 失败时恰调一次；记录没有其它键。缺省不记。 */
+  /** `sudo … find` 失败（含超时与被终止）时恰调一次；记录没有其它键。缺省不记。 */
   log?: (record: { event: "preview_work_clear_failed" }) => void;
+  /** 测试 seam：`sudo … find` 的时限（毫秒）。入口不传，用固定的 10 秒。 */
+  clearTimeoutMs?: number;
 }): {
   /** 启动时调用一次，先于转换器受理第一次转换。 */
   clearWork(): Promise<void>;
+  /**
+   * 关停时调用：终止在途的那条 `sudo … find`，`clearWork` 随后照常落定。调用过之后（当时有没有
+   * 在途的都算），此后的 `clearWork` 不再启动 `sudo`，按该命令失败处理（同一行日志），本进程自己的
+   * 删除照常。可重复调用。
+   */
+  stopWorkClear(): void;
   /** 删除 `pdf/` 下修改时间早于 `now − 7 天` 的普通文件；恰在界上的留着。 */
   sweepPdf(now: number): Promise<void>;
 } {
@@ -194,12 +218,18 @@ export function createOfficeCleanup(options: {
     throw new Error(BAD_PATHS);
   }
   const spawnImpl = options.spawn ?? (spawn as OfficeSpawn);
+  const clearTimeoutMs = options.clearTimeoutMs ?? WORK_CLEAR_TIMEOUT_MS;
   const work = join(cacheDir, "work");
   const pdfDir = join(cacheDir, "pdf");
+  /** 在途那条 `sudo … find` 的终止函数；没有在途的即 `undefined`。 */
+  let stopInFlight: (() => void) | undefined;
+  /** `stopWorkClear` 调用过即为真，不再复位：此后不启动 `sudo`。 */
+  let stopRequested = false;
 
   /**
-   * 以 `user` 的身份删掉 `work` 下它自己的条目，等命令结束。只有以退出码 0 结束才是 `true`；
-   * `PATH` 检查不过、spawn 抛出或失败、非 0 退出、被信号结束都是 `false`。
+   * 以 `user` 的身份删掉 `work` 下它自己的条目，等命令结束。只有没被本进程终止、以退出码 0 结束
+   * 才是 `true`；`PATH` 检查不过、spawn 抛出或失败、非 0 退出、被信号结束、超时、被 `stopWorkClear`
+   * 终止都是 `false`。只 resolve 一次，所以调用方至多记一行日志。
    */
   function runSudoFind(user: string): Promise<boolean> {
     return new Promise((resolve) => {
@@ -216,11 +246,34 @@ export function createOfficeCleanup(options: {
           ["-n", "-u", user, "--", FIND_PATH, work, "-mindepth", "1", "-delete"],
           { cwd: "/", env, stdio: "ignore", shell: false },
         );
-        child.once("exit", (code) => resolve(code === 0));
+        let stopped = false;
+        let killTimer: NodeJS.Timeout | undefined;
+        // 超时与关停走同一处：先 SIGTERM（理由见头注释），到期仍在才 SIGKILL。只对自己启动的
+        // `sudo` 发信号，守卫（pid 为正、尚未退出）是 `office.ts` 的那一份。
+        const stop = (): void => {
+          if (stopped) {
+            return;
+          }
+          stopped = true;
+          terminate(child, false, "SIGTERM");
+          killTimer = setTimeout(
+            () => terminate(child, false, "SIGKILL"),
+            WORK_CLEAR_KILL_GRACE_MS,
+          );
+        };
+        const timer = setTimeout(stop, clearTimeoutMs);
+        const settle = (succeeded: boolean): void => {
+          clearTimeout(timer);
+          clearTimeout(killTimer);
+          stopInFlight = undefined;
+          resolve(succeeded);
+        };
+        stopInFlight = stop;
+        child.once("exit", (code) => settle(!stopped && code === 0));
         // 没有 pid 的 error 是 spawn 失败，不会再有 exit。
         child.on("error", () => {
           if (child.pid === undefined) {
-            resolve(false);
+            settle(false);
           }
         });
       } catch {
@@ -232,7 +285,10 @@ export function createOfficeCleanup(options: {
   return {
     async clearWork() {
       // 没有 officeBin 就没有转换器，work 下不会有属 omp 用户的东西：不提权。
-      if (ompUser !== undefined && officeBin !== undefined && !(await runSudoFind(ompUser))) {
+      // 从这里到 `runSudoFind` 里的 spawn 是同步的（Promise 的执行器同步运行）：`stopRequested` 的
+      // 这一次核对就是 spawn 之前的最后一次，其后到达的 `stopWorkClear` 走 `stopInFlight`。
+      const privileged = ompUser !== undefined && officeBin !== undefined;
+      if (privileged && (stopRequested || !(await runSudoFind(ompUser)))) {
         try {
           log?.({ event: "preview_work_clear_failed" });
         } catch {
@@ -240,6 +296,10 @@ export function createOfficeCleanup(options: {
         }
       }
       removeOwnEntries(work);
+    },
+    stopWorkClear() {
+      stopRequested = true;
+      stopInFlight?.();
     },
     async sweepPdf(now) {
       const limit = now - PDF_RETENTION_MS;

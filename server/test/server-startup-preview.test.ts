@@ -10,32 +10,22 @@ import {
   existsSync,
   ftruncateSync,
   mkdirSync,
-  mkdtempSync,
   openSync,
   readdirSync,
   readFileSync,
-  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { get as httpGet } from "node:http";
 import { connect as connectTcp, type Server } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { expectFixedFailure, rawAnswer } from "./preview-app-helpers.js";
 import {
-  type CompiledServerEntry,
-  compiledFixtureEnv,
-  compileServerEntry,
   expectBindable,
   getJson,
-  login,
-  releaseStartupFixtures,
   reserveWildcardPort,
-  type StartedServer,
-  startCompiledServer,
   waitForFile,
 } from "./server-startup-helpers.js";
 import {
@@ -45,6 +35,15 @@ import {
   openPartialRequest,
   type PartialRequest,
 } from "./server-startup-order-helpers.js";
+import {
+  compileEntry,
+  type Entry,
+  makeSandboxRoot,
+  openWorkspace,
+  releaseEntries,
+  startEntry,
+  ZHANGSAN,
+} from "./server-startup-preview-helpers.js";
 
 const STARTUP_MODULES = [
   "core/db",
@@ -58,117 +57,12 @@ const STARTUP_MODULES = [
 const FORCE_CLOSE_RECORD = `${JSON.stringify({ event: "listener_force_close" })}\n`;
 const BIG_FILE_BYTES = 64 * 1024 * 1024;
 const DAY_MS = 86_400_000;
-/** 种子账号 zhangsan 的 id：回收目录的账号一级以它命名。 */
-const ZHANGSAN = "u1";
-const scratch: string[] = [];
-let compiled: CompiledServerEntry;
 
-beforeAll(async () => {
-  compiled = await compileServerEntry();
-}, 90_000);
-
-afterAll(async () => {
-  await releaseStartupFixtures();
-  for (const root of scratch.splice(0)) {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-interface Entry {
-  server: StartedServer;
-  root: string;
-  port: number;
-  /** 显式给了 PREVIEW_PORT 时才有意义；缺省端口的用例从签发响应里取。 */
-  previewPort: number;
-  readTrace(): string;
-}
-
-/**
- * 起入口。端口缺省各预留一个；`ports` 由调用方先定（要先占住再起）；`previewPort: "default"` 时
- * 不设 PREVIEW_PORT。`hook` 是预加载的源码文本。
- */
-async function startEntry(
-  options: {
-    ports?: { port: number; previewPort: number };
-    previewPort?: "default" | "same-as-main";
-    env?: (root: string) => Record<string, string>;
-    hook?: string;
-    prepare?: (root: string) => void;
-  } = {},
-): Promise<Entry> {
-  const port = options.ports?.port ?? (await reserveWildcardPort());
-  const previewPort =
-    options.ports?.previewPort ??
-    (options.previewPort === "same-as-main" ? port : await reserveWildcardPort());
-  const root = mkdtempSync(join(tmpdir(), "open-wb-startup-preview-"));
-  scratch.push(root);
-  options.prepare?.(root);
-  const trace = join(root, "order.log");
-  const hookPath = join(root, "preload.cjs");
-  if (options.hook !== undefined) {
-    writeFileSync(hookPath, options.hook);
-  }
-  const server = startCompiledServer(
-    compiled.entry,
-    compiledFixtureEnv(root, port, join(root, "bin", "missing-omp"), {
-      ...(options.previewPort === "default" ? {} : { PREVIEW_PORT: String(previewPort) }),
-      ...options.env?.(root),
-    }),
-    { orderTrace: trace, ...(options.hook === undefined ? {} : { requireHook: hookPath }) },
-  );
-  return {
-    server,
-    root,
-    port,
-    previewPort,
-    readTrace: () => (existsSync(trace) ? readFileSync(trace, "utf8") : ""),
-  };
-}
-
-/**
- * 入口启动时不建 SANDBOX_ROOT，而它不存在时 `POST /api/workspaces` 答 500（既有行为，不属本文件）：
- * 要建正式工作空间的用例先把它建好。
- */
-function makeSandboxRoot(root: string): void {
-  mkdirSync(join(root, "sandbox"));
-}
+beforeAll(compileEntry, 90_000);
+afterAll(releaseEntries);
 
 function modeOf(path: string): number {
   return statSync(path).mode & 0o7777;
-}
-
-interface Workspace {
-  cookie: string;
-  id: string;
-  root: string;
-  /** `http://127.0.0.1:<预览端口>/w/<token>/` */
-  base: string;
-}
-
-/** 登录 → 建正式工作空间 → 签发预览令牌，全部经主监听器的真实路由。 */
-async function openWorkspace(entry: Entry): Promise<Workspace> {
-  const cookie = await login(entry.port);
-  const post = async (path: string, body?: unknown): Promise<{ status: number; body: unknown }> => {
-    const response = await fetch(`http://127.0.0.1:${entry.port}${path}`, {
-      method: "POST",
-      headers: { cookie, ...(body === undefined ? {} : { "content-type": "application/json" }) },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      signal: AbortSignal.timeout(10_000),
-    });
-    return { status: response.status, body: (await response.json()) as unknown };
-  };
-  const created = await post("/api/workspaces", { name: "preview-entry", dir: "preview-entry" });
-  expect(created.status).toBe(201);
-  const { id } = created.body as { id: string };
-  const issued = await post(`/api/workspaces/${id}/preview-token`);
-  expect(issued.status).toBe(200);
-  return {
-    cookie,
-    id,
-    // 沙箱里的落点由账号 id 与空间目录名决定（workspaces「工作空间根」），不取自响应。
-    root: join(entry.root, "sandbox", ZHANGSAN, "preview-entry"),
-    base: (issued.body as { base: string }).base,
-  };
 }
 
 interface HeldDownload {
