@@ -656,13 +656,15 @@ describe("PreviewPane download link", () => {
 });
 
 describe("PreviewPane TSV", () => {
-  it("shows a tab-separated file as numbered source rather than a comma-split table", async () => {
+  it("shows a tab-separated file as a table split on tabs rather than as source", async () => {
     render(textPreview("t.tsv", "name\tsize\nalpha\t1\n"));
 
-    expect(await screen.findByRole("cell", { name: "name\tsize" })).toBeTruthy();
-    expect(document.querySelector('[data-slot="preview-code"]')).not.toBeNull();
-    expect(document.querySelector('[data-slot="preview-table"]')).toBeNull();
-    expect(screen.queryByRole("columnheader")).toBeNull();
+    expect(
+      [...(await screen.findAllByRole("columnheader"))].map((node) => node.textContent),
+    ).toEqual(["name", "size"]);
+    expect(document.querySelector('[data-slot="preview-table"]')).not.toBeNull();
+    expect(document.querySelector('[data-slot="preview-code"]')).toBeNull();
+    expect(screen.getAllByRole("cell").map((node) => node.textContent)).toEqual(["alpha", "1"]);
   });
 });
 
