@@ -1046,3 +1046,42 @@
 - 变异：`office-cache.test.ts` 既有「失败不入缓存」三例 ← 失败的组不从键表删除（第二次调用拿到旧的拒绝）。
 - 变异：不可观察：准入改回异步后的乱序与双启动（时序竞态，无法定时注入，T1 / T3 只会偶发红，靠白盒审查）；绕过注入的 spawn 直接起进程；`OMP_USER` 模式下残留 `soffice.bin` 使实际并发超过上限（已登记残余 D-25，归 28.6 人工验证）；排队拉长窗口期间输入被换（同上，无法定时注入）。
 - 变异：不适用的越界向量：目录穿越、符号链接、跨空间 id、他人空间 404 先于路径检查、`sandbox.reject` 审计——本刀没有路由与 `resolve`，随 15.1 的 `/o/` 路由。
+
+## 16.2 的 issuePreviewToken 部分，含分摊的 16.4 / 16.5 条款（#1082）
+
+- 非 Critical Path（按代码推得）：本刀只有浏览器端的一个方法与一次文件间搬家，不碰 `sandbox.resolve`、`op`、路由与路径处理，根 `AGENTS.md:115-120` 的两类都不涉及，一个评审席即可。D-23 / #1286：客户端没有任何「解析后按路径操作」的窗口，被调路由也没有路径参数（`server/src/workspaces/rest-preview-token.ts:58-92`），本刀不闭合也不加宽该残余，证据级别为「按代码推得」，无实测。
+- 前提按代码核对已齐：0.1（#1049）已合；11.2（#1067）的路由在 `rest-preview-token.ts`；#1079 的 `web/src/lib/api-files.ts`（19 行）已在。不在 1.2 挡住的集合里（`tasks.md` 文首第二句点名「16.2 的 `issuePreviewToken`」不等），1.1、1.3 也不挡。
+- 搬家由本刀执行（批内第一个 api-files 刀，`api.ts` 777/800）。从 `api.ts` 挪进 `api-files.ts` 的方法共六个：`listWorkspaces`、`createWorkspace`、`promoteWorkspace`、`listTree`、`createDir`、`fetchPreview`（`:592-691`）。随行的有类型 `:40-86` 与 `:107-113`、解析器 `:275-338`、预览一簇 `:407-441` 与 `previewRequest`（`:454-493`）。`listAudit`（`:693-715`，不是工作空间端点）及 `parseAudit*`、auth 三方法、传输函数、`ApiClient` / `ApiError` 留在 `api.ts`。
+- 形态照 `api-sessions.ts:15`：`api-files.ts` 新增 `type FileTransport`，七项为 `fetchResponse`、`getRequestOptions`、`isSuccessfulStatus`、`parseJsonResponse`、`request`、`requestFailed`、`requestOptions`。导出 `createFileMethods(onUnauthorized, transport): Pick<ApiClient, 六个既有方法 | "issuePreviewToken">`。`createApiClient` 里把 `:577-583` 的七键对象提成一个 `const transport`，同时传给 `createSessionMethods` 与 `createFileMethods`，不抄第二份字面量。
+- 守卫一（`web/test/chat-module-layout.test.ts:64-66`）：`importersOf("web/src/lib/api-files")` 必须恒等于 `["web/src/lib/api.ts"]`。所以新测试只从 `../src/lib/api.js` 取 `createApiClient`，`web/src` 与 `web/test` 里任何别的文件都不得导入 `api-files.js`。类型不新增公共再导出，调用方沿用 `Awaited<ReturnType<ApiClient["…"]>>`（先例 `web/src/features/chat/workspace-list.ts:5`、`web/src/features/files/preview.tsx:18`）。
+- 守卫二（同文件 `:68-73`）：`api-files.ts` 里指向 `api.ts` 的说明符只能在 `import type` 开头的语句内，即 `import type { ApiClient, ApiClientOptions, ApiError } from "./api.js";`。`import { type X }`、值导入、再导出都会红，所以传输一律走注入，不能从 `./api.js` 取 `requestFailed`。对 `./api-json.js` 的值导入不受限。搬家后该断言对 `api-files.ts` 才不再是空真；守卫文件本身零改动。
+- knip（未设 `ignoreExportsUsedInFile`）：搬家后 `workspaceEndpoint` 在 `api.ts` 已无使用，必须去掉 `export`，并从 `api.ts:2` 的导入删除；`fileUrl` 也不再被 `api.ts` 值导入，只留 `:777` 的再导出。`api-files.ts` 只导出 `createFileMethods`、`fileUrl`、`downloadUrl`，以及 `ApiClient` 用到的类型（`Workspace`、`WorkspaceList`、`CreateWorkspaceInput`、`WorkspaceTree`、`CreateDirResult`、`FilePreview`、`PreviewToken`）。`WorkspaceTreeEntry`、`PreviewKind`、`PreviewMetadata` 与全部解析器不导出。`api.ts` 的 `api-json.js` 四个导入仍全部在用（`parsePrincipal`、`parseAudit*`）。
+- 行数估算（未实测，合入时以 `scripts/size-guard.sh` 为准）：`api.ts` 约 777 → 约 495，`api-files.ts` 约 19 → 约 390。#1083、#1084 及批外的 #1080 各只需在 `api.ts` 加一行 `ApiClient` 成员与一个类型导入名。
+- `issuePreviewToken(workspaceId, options?)`：`WorkspaceEndpoint` 联合加 `"preview-token"`；请求为 `request(workspaceEndpoint(id, "preview-token"), { ...requestOptions(signal), method: "POST" }, onUnauthorized, 200)`，不带 `headers`、不带 `body`（先例 `api-sessions.ts:196`）。服务端 `rest-preview-token.ts:70` 对任何 body 回 400。
+- 严格解析：`hasExactlyKeys` 六键 `token, base, officeBase, expiresAt, documentMaxBytes, officeAvailable`；三个字符串须为 `string` 且非空，`expiresAt` 与 `documentMaxBytes` 过 `isNonNegativeSafeInteger`，`officeAvailable` 为 `boolean`；不符即 `requestFailed(200)`。方法体内不写存储、不动地址、不打日志，令牌只在返回值里。
+- 规格未写的分支（取最简，记入偏离记录）：(a) 客户端不校验 `token` 的 64 位十六进制形态，也不校验 `base` 是否为 URL 或是否含令牌，那是服务端契约；(b) 空串按残缺拒绝（先例 `api-upload.ts:32-34`）；(c) 成功状态非 200（如 201）→ `request_failed`，由 `expectedStatus` 决定，不是未指定；(d) 「四种错误信封」里的 403 / 409 / 413 / 415 本路由不会发（按代码推得：只有 401 / 404 / 400 / 500），用例取 404 `not_found` 与 400 `bad_request` 断言 status / code / message 原样保留。
+- 测试放新文件 `web/test/api-files-preview-token.test.ts`（约 110 行；`api-files.test.ts` 743 行不加行，偏离 16.4 的「扩充」字样与 issue 的 PR Boundary）。用例：(1) id 为 `ws/%#?+ 中` 时 `fetch` 恰一次，`toHaveBeenCalledWith("/api/workspaces/ws%2F%25%23%3F%2B%20%E4%B8%AD/preview-token", { method: "POST", credentials: "same-origin", signal })`，返回值 `toEqual` 六键；(2) `it.each` 残缺响应：缺 `base`（16.5 指定）、多一键、`expiresAt` 为字符串、`officeAvailable` 为 `0`、`documentMaxBytes` 为 `-1`、`base` 为空串、状态 201 → `expectRequestFailure`；(3) 404 / 400 信封保留；(4) `unauthorizedResponseCases()` 逐例 `onUnauthorized` 恰一次；(5) `Storage.prototype.setItem` 的 spy 零调用且 `location.href` 不变。夹具令牌用 `"t".repeat(64)` 之类，不写 64 位十六进制字面量（gitleaks）；正则用字面量。
+- 既有测试零改动，也不许放松：`api-files.test.ts`、`api-files-url.test.ts`、`api-files-preview-types.test.ts` 与 `files-*`、`chat-page-artifact-*` 都经 `createApiClient` 走公共入口，搬家后原样全绿就是六个方法不回归的证据。源码扫描类测试已重查（`git grep "readRepoFile(.*api\|lib/api"` 于 `web/test web/e2e scripts`）：只有 `chat-module-layout.test.ts`，且已含 `api-files`。`{} as ApiClient` 与 `as unknown as ApiClient` 的替身（`chat-new-session-block.test.ts:9`、`workspace-list-silent.test.tsx:23`）不受新成员影响。
+- 与 issue / `tasks.md` 的差异（origin/master 为准）：issue 的任务引文与 `tasks.md` 16.2、16.4、16.5 逐字一致。`tasks.md:53` 与 `design.md:495` 写 `api.ts` 778 行，实为 777。issue 的 PR Boundary 写「`api.ts`（接线，如需）」与 `api-files.test.ts`，实际是约 290 行搬家加新测试文件。`implementation-notes.md` 16.3 节引用的 `api.ts:420-430`（`parsePreviewKind`，现 `:416-427`）在本刀后位于 `api-files.ts`。生产入口 `server/src/server.ts` 尚未装配 `preview`（13.1 / #1070 未合），该方法对真实服务得到 typed 404，本刀无界面调用方，所以不加 checklist 行，不动 `docs/architecture/system.md` 第 9 节。`tasks.md` 的 16.2 由 #1084 勾，16.1 仍等 #1080，本刀都不勾；「十个发请求的方法」总数本刀不断言。
+- 同批共改文件，请 orchestrator 排序：#1083、#1084 都改 `web/src/lib/api-files.ts`（`WorkspaceEndpoint` 联合、`createFileMethods` 的 `Pick` 与方法体）和 `web/src/lib/api.ts`（`ApiClient` 成员一行），必须叠在本刀之上，各自的用例再开新测试文件。#1065、#1069、#1073、#1085 与本刀无文件交集。
+- 变异：接受缺 `base` 的令牌响应（去掉键集检查或把 `base` 设为可选）→ (2) 的「缺 `base`」行判红（16.5 指定项）。
+- 变异：`hasExactlyKeys` 换成只查必需键 → (2) 的「多一键」行判红。
+- 变异：去掉 `expiresAt` / `officeAvailable` / `documentMaxBytes` 任一类型检查 → (2) 对应行判红。
+- 变异：去掉非空检查 → (2) 的「`base` 为空串」行判红。
+- 变异：去掉 `expectedStatus` 200 → (2) 的 201 行判红。
+- 变异：请求加 `body`（如 `"{}"`）或 `Content-Type` 头 → (1) 的 init 精确相等判红。
+- 变异：方法写成 `GET`，或端点名写成 `preview_token` / `preview-tokens` → (1) 的路径与 init 判红。
+- 变异：id 段不编码（绕过 `workspaceEndpoint`）→ (1) 的 `ws%2F…` 字面量判红。
+- 变异：丢掉 `signal` 或 `credentials: "same-origin"` → (1) 判红。
+- 变异：错误信封被吞成 `request_failed` → (3) 判红。
+- 变异：401 不通知或通知两次 → (4) 判红。
+- 变异：方法里把令牌写进 `sessionStorage` / `localStorage` 或地址 → (5) 判红。
+- 变异：`api-files.ts` 从 `./api.js`（或 `@/lib/api`）值导入 `requestFailed` → `chat-module-layout.test.ts`「拆出的 API 模块对 api.ts 只有类型导入」判红。
+- 变异：测试或 `web/src/features/**` 直接导入 `api-files.js` → 「api-files.ts 的导出只被 api.ts 消费」判红。
+- 变异：搬家时 `listTree` / `createDir` / `promoteWorkspace` 丢了 `encodeURIComponent`，或 `createWorkspace` 多发字段 → `api-files.test.ts` 既有的地址与 body 字面量（`:93-122`、`:182-232`）判红。
+- 变异：搬家时 `previewRequest` 改成先读正文再判类型 → `api-files.test.ts`「parses image-shaped preview errors before any success body reader」与 `api-files-preview-types.test.ts` 的 `createObjectURL` 未调用判红。
+- 变异：`createFileMethods` 没把 `onUnauthorized` 传给 `previewRequest` → `api-files.test.ts`「notifies once for valid, malformed, and non-JSON preview 401 errors」判红。
+- 变异：不可观察：`transport` 提成常量还是保留两份字面量（行为相同，只影响行数与 jscpd）。
+- 变异：不可观察：`workspaceEndpoint` 留着 `export`（没有测试会红，只有 knip 报）。
+- 变异：不可观察：客户端不校验令牌的十六进制形态（按 (a) 有意不做，无用例）。
+- 变异：不可观察：遍历、符号链接、跨空间 id、他人空间 404、`sandbox.reject`（本刀无路径参数、无服务端代码；归 #1067 已有证据与 11.4 / #1075）。
