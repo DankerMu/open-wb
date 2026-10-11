@@ -122,8 +122,14 @@ function buildLaunch(
  * 终止只有这一处。还活着且有正整数 pid 才发信号：spawn 失败时 `pid` 是 `undefined`，绝不能落成
  * `kill(0)`（那是本进程自己的进程组）；已退出的 pid 可能已被别的进程复用。
  * 同 uid 模式对进程组发 `SIGKILL`；`ompUser` 模式只对自己启动的 `sudo` 发，不再起任何进程。
+ * `signal` 缺省 `SIGKILL`（转换的终止只用它）；启动时清空 `work` 的那条 `sudo … find` 先发
+ * `SIGTERM`（`office-cache.ts`），守卫是同一份。
  */
-function terminate(child: ChildProcess, ownGroup: boolean): void {
+export function terminate(
+  child: ChildProcess,
+  ownGroup: boolean,
+  signal: "SIGTERM" | "SIGKILL" = "SIGKILL",
+): void {
   const pid = child.pid;
   if (pid === undefined || !Number.isInteger(pid) || pid <= 0) {
     return;
@@ -133,9 +139,9 @@ function terminate(child: ChildProcess, ownGroup: boolean): void {
   }
   try {
     if (ownGroup) {
-      process.kill(-pid, "SIGKILL");
+      process.kill(-pid, signal);
     } else {
-      child.kill("SIGKILL");
+      child.kill(signal);
     }
   } catch {
     // 信号没送到（进程组刚好已经不在）：结局仍由 exit 事件给出。

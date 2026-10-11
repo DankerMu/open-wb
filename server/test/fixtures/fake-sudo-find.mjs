@@ -7,12 +7,17 @@
  * 150 毫秒、再列一次，把 `{argv, env, cwd, pid, entriesAtStart, entriesAtExit}` 写到
  * `<work 的上一级>/sudo.record.json`（先写临时名再改名）。两次列目录都还看得见遗留条目，就是
  * 「调用方等它结束之后才开始自己的删除」的判据。退出方式读同级的哨兵文件 `sudo.exit`：没有即 0；
- * 内容 `1` 即退出码 1；`signal` 即被信号结束（没有退出码）。
+ * 内容 `1` 即退出码 1；`signal` 即被信号结束（没有退出码）；`hang` 即写完记录之后一直睡眠（owner D-26，
+ * #1074：超时与关停终止的用例）——不设信号处理器，`SIGTERM` 与 `SIGKILL` 都结束它；睡眠有上限，
+ * 到时以 0 退出，不留长命进程。`hang-deaf` 同 `hang`，但先装一个空的 `SIGTERM` 处理器：只有 `SIGKILL`
+ * 结束得了它；`hang-exit0` 收到 `SIGTERM` 即以退出码 0 退出（被终止的命令照样报成功的情形）。三者都
+ * 不睡开头那 150 毫秒：记录里的 pid 要尽早可读。
  */
 import { readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 const SETTLE_MS = 150;
+const HANG_MS = 30_000;
 
 const argv = process.argv.slice(1);
 const findAt = argv.indexOf("/usr/bin/find");
@@ -38,8 +43,18 @@ function exitMode() {
   }
 }
 
+const mode = exitMode();
 const entriesAtStart = list();
-Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, SETTLE_MS);
+const hangs = mode === "hang" || mode === "hang-deaf" || mode === "hang-exit0";
+if (mode === "hang-deaf") {
+  process.on("SIGTERM", () => undefined);
+}
+if (mode === "hang-exit0") {
+  process.on("SIGTERM", () => process.exit(0));
+}
+if (!hangs) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, SETTLE_MS);
+}
 const record = {
   argv,
   env: { ...process.env },
@@ -52,8 +67,9 @@ const path = join(beside, "sudo.record.json");
 writeFileSync(`${path}.part`, JSON.stringify(record));
 renameSync(`${path}.part`, path);
 
-const mode = exitMode();
-if (mode === "signal") {
+if (hangs) {
+  setTimeout(() => process.exit(0), HANG_MS);
+} else if (mode === "signal") {
   process.kill(process.pid, "SIGKILL");
 } else {
   process.exit(mode === "1" ? 1 : 0);
