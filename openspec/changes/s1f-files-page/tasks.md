@@ -530,7 +530,7 @@ Minimal mergeable slice: 三个预览器各自可单独合入（20.1、20.2、20
 
 ## 21. files-web — `WorkspaceBrowser` 与地址定位到文件
 
-- [ ] 21.1 把目录树 + 预览 + 请求归属从 `page.tsx` 抽成 `web/src/features/files/workspace-browser.tsx`，经 `index.ts` 导出（files-web「工作空间浏览器组件」）：受控的 `path` / `onPathChange`、`layout`、`reveal`、`refresh`、`markedPaths`、`onlyPaths`。文件页改为它的一层包装。
+- [x] 21.1 把目录树 + 预览 + 请求归属从 `page.tsx` 抽成 `web/src/features/files/workspace-browser.tsx`，经 `index.ts` 导出（files-web「工作空间浏览器组件」）：受控的 `path` / `onPathChange`、`layout`、`reveal`、`refresh`、`markedPaths`、`onlyPaths`。文件页改为它的一层包装。
   既有测试里按文件路径读源码的断言随抽取核对：`web/test/files-page.test.tsx:536-544`（`tree.tsx` 含 `fileIcon(`、`formatSize(`、`size={14}`，不含手写图标路径）、`files-empty-layout.test.tsx:183-189`（`tree.tsx`、`page.tsx` 不含 `此文件夹为空` 等三个字面量）、`topbar.test.tsx:263`（`page.tsx` 不含 `<h1`）——
   树条目的渲染留在 `tree.tsx` 则都原样通过；若把它一并搬进新文件，这些断言读的路径同刀改指新文件（断言内容不变，记入偏离记录）。`data-slot` 与 3.1 列的 DOM 结构随组件原样带走。
   实施注记见 `implementation-notes.md`「21.1，含分摊的 21.3 / 21.5 条款（#1098）」。
