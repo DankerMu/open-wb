@@ -135,7 +135,7 @@ describe("workspace page route integration", () => {
     const markdownSourceButton = await screen.findByRole("button", { name: "查看源码" });
     expect(screen.getAllByRole("heading", { level: 1, name: "工作空间" })).toHaveLength(1);
     expect(
-      within(screen.getByRole("region", { name: "文件预览" })).getByRole("heading", {
+      await within(screen.getByRole("region", { name: "文件预览" })).findByRole("heading", {
         level: 1,
         name: "第一份",
       }),

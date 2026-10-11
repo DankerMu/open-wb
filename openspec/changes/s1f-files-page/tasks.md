@@ -50,7 +50,7 @@
 > - 分层守卫：`web/test/ui-layering.test.ts` 的 `MIGRATED_AREAS` 与清单断言两处同步改。组 3 起 `web/src/features/files` 整目录在清单里；`web/src/features/chat/` 下新增的 `.ts`/`.tsx` 在同一 PR 逐个登记。
 >   已迁移文件从 `web/src/ui` 只可导入 `Icon`、`IconName`、`BrandMark`、`useEscapeFallback`，不得导入 `useToast`。`web/test/chat-module-layout.test.ts` 的导入方向不变（`page.tsx → use-chat-session.ts → turn-actions.ts`）。
 > - 拷入层（`web/src/components/ui`、`web/src/components/assistant-ui`）：只新增 `resizable`（组 23），且只做 ADR-0013 的六类修改；既有拷入文件不动。`web/src/ui/**` 冻结区不动、不加图标。
-> - 门槛：knip（不留未引用导出）、jscpd、单文件 800 行（`web/src/lib/api.ts` 778 行不再加方法；`web/src/lib/md-render.ts` 797 行不改；`web/e2e/ui-walk-sessions.spec.ts` 681 行与 `web/e2e/ui-walk-layout.ts` 793 行不加行，
+> - 门槛：knip（不留未引用导出）、jscpd、单文件 800 行（`web/src/lib/api.ts` 当时 778 行不再加方法（#1082 把工作空间方法搬进 `api-files.ts` 之后为 489 行，经 #1083、#1084 后 497 行，新方法仍只进 `api-files.ts`）；`web/src/lib/md-render.ts` 797 行不改；`web/e2e/ui-walk-sessions.spec.ts` 681 行与 `web/e2e/ui-walk-layout.ts` 793 行不加行，
 >   新走查步骤写进新 helper 文件；`server/src/workspaces/rest.ts` 的新路由放进新文件）、覆盖率 80%。
 > - 代码分割只在 `web/src/features/files/previewers/index.ts`（组 17 起有守卫）；`vite.config.ts` 不加 `manualChunks`。
 > - 一切用户给的路径过 `sandbox.resolve`；属他人与不存在的工作空间 id 一律是相同的 404 且先于路径检查；越界必写 `sandbox.reject`。
@@ -386,9 +386,10 @@ Minimal mergeable slice: atomic - 一条路由、它的映射表与转换器在�
 
 - [ ] 16.1 新文件 `web/src/lib/api-files.ts`：两个地址函数 `fileUrl`、`downloadUrl` 与 `listArchive`；传输由 `api.ts` 注入、对 `api.ts` 只有类型导入；响应严格解析。`api.ts` 只加接线与类型再导出（不超过 800 行；必要时把既有工作空间方法一并挪进 `api-files.ts`）。
   实施注记见 `implementation-notes-1.md`「16.1 的地址函数部分，含分摊的 16.4 / 16.5 条款（#1079）」。
-- [ ] 16.2 `api-files.ts`：`moveEntry`、`deleteEntry`、`issuePreviewToken`（同样的注入与严格解析）。
+- [x] 16.2 `api-files.ts`：`moveEntry`、`deleteEntry`、`issuePreviewToken`（同样的注入与严格解析）。
   实施注记见 `implementation-notes.md`「16.2 的 issuePreviewToken 部分，含分摊的 16.4 / 16.5 条款（#1082）」。
   实施注记见 `implementation-notes.md`「16.2 的 moveEntry 部分，含分摊的 16.4 条款（#1083）」。
+  实施注记见 `implementation-notes.md`「16.2（deleteEntry）、16.4、16.5（#1084）」。
 - [x] 16.3 `fetchPreview` 的图片类型集合扩到六种，`audio/*`、`video/*`、`image/svg+xml`、`text/html` 仍按失败处理。
   实施注记见 `implementation-notes-1.md`「16.3（#1081）」。
 - [ ] 16.4 测试（`web/test/api-files.test.ts` 扩充）：files-web「API 客户端扩展」五个场景，随 16.1–16.3 各自的方法分批加入，对应如下——
@@ -406,7 +407,7 @@ Minimal mergeable slice: 16.1 按方法分两刀——地址函数 `fileUrl`、`
 
 ## 17. file-previewers — 框架：类别判定、按需加载、预览头与下载
 
-- [ ] 17.1 新目录 `web/src/features/files/previewers/`：`index.ts`（唯一含动态 `import()` 的文件，按类别返回带缓存的加载函数）与 `kind.ts`（`previewKind`、`textView`、图标映射）。把组 2 的 Markdown、表格、源码、图片四个既有预览各搬成一个模块，经 `index.ts` 加载；2.1 定的 `data-slot`（`preview-code`、`preview-table`、`preview-markdown` 等）随模块原样带走。这一刀里 `preview.tsx` 即经 `kind.ts` 的 `previewKind` / `textView` 在这四类之间分流（两个导出在本刀就有生产调用方，knip 不报未引用）；其余类别的分流随 17.2。
+- [x] 17.1 新目录 `web/src/features/files/previewers/`：`index.ts`（唯一含动态 `import()` 的文件，按类别返回带缓存的加载函数）与 `kind.ts`（`previewKind`、`textView`、图标映射）。把组 2 的 Markdown、表格、源码、图片四个既有预览各搬成一个模块，经 `index.ts` 加载；2.1 定的 `data-slot`（`preview-code`、`preview-table`、`preview-markdown` 等）随模块原样带走。这一刀里 `preview.tsx` 即经 `kind.ts` 的 `previewKind` / `textView` 在这四类之间分流（两个导出在本刀就有生产调用方，knip 不报未引用）；其余类别的分流随 17.2。
   这一刀的边界（定死，下面的测试处置以它为前提）：
   - 留在 `preview.tsx`、同步渲染的：预览头（图标、路径、元数据）、截断提示行、不支持态、错误态——它们不经任何预览器模块。
   - 进模块、首次经动态 `import()` 才出现的：表格（`CsvTable`）、源码（`CodeView`，含 `json` 的格式化）、图片（`img`）、Markdown（`MarkdownPreview` 整个搬走，**`查看源码` / `渲染视图` 切换按钮留在 Markdown 模块里**，不上提到预览头；Markdown 模块在 `previewers/` 内部静态导入源码模块的 `CodeView`，所以同一次挂载里切换视图仍是同步的）。
@@ -447,6 +448,7 @@ Minimal mergeable slice: 16.1 按方法分两刀——地址函数 `fileUrl`、`
   - `web/test/chat-messages.test.tsx:185-187` 断言 `preview.tsx` 含 `MarkdownView`、不含 `function renderBlock`——读的文件改为 Markdown 预览器模块（「文件页的 Markdown 仍经 `lib/markdown-view`、不自带渲染器」的意思不变）。
   - 不搬的：`csv.ts`（`web/test/csv.test.ts:2` 导入 `parseCsv`；表格模块导入它）、`file-meta.ts` 的 `fileIcon` / `formatSize` / `formatMtime` / `logicalPath`（`file-meta.test.ts:2`、`files-page.test.tsx:3`、`preview.test.tsx:3`、`files-logical-path.test.tsx:3` 导入；`kind.ts` 的图标映射调用或扩充 `fileIcon`，不另立导出）、
     预览头（`files-page.test.tsx:537-541` 断言 `preview.tsx` 含 `fileIcon(`、`formatSize(`）。`files-empty-layout.test.tsx:190-194` 读的 `preview.tsx`、`types.ts` 仍在原处。
+  实施注记见 `implementation-notes.md`「17.1、17.3（#1085）」。
 - [ ] 17.2 `preview.tsx`：按 `previewKind` 选预览器（加载中的 `正在加载预览…` 与加载失败的 `预览组件加载失败` + `重试` 已在 17.1 落地，这里只是让新类别也走同一段逻辑）；预览头的 `下载 <文件名>` 链接（`downloadUrl` + `download` 属性）对所有文件渲染；不支持 / 超限 / 截断 / 其它错误的文案表（file-previewers「预览头、下载与不可预览的呈现」）。
   `tree.tsx` / `page.tsx` 去掉扩展名白名单的预判：非按扩展名分流的文件一律发一次 `file` 请求（files-web「目录树与预览」；网页的渲染视图这一例外在组 19 引入，此前 html 仍是源码视图、发一次 `file` 请求）。
   过渡规则：预览器模块尚未合入的类别（pdf、办公文档、音视频、Notebook、压缩包——组 19、20 才有）在此之前按「未知」处理——发一次 `file` 请求，由服务端裁决并沿用既有呈现：pdf、办公文档、压缩包得到 415（workspaces「文件预览」）→ `该类型不支持预览`；Notebook 得到 `text/plain` → 源码视图；音视频得到 `audio/*` / `video/*` → `fetchPreview` 按「失败不变成预览」走 request_failed 的安全文案。每种情况预览头都有下载链接。各自的预览器合入时在那一刀改成该类别的呈现，并改掉受影响的既有断言。
@@ -455,7 +457,7 @@ Minimal mergeable slice: 16.1 按方法分两刀——地址函数 `fileUrl`、`
   - `web/test/files-empty-layout.test.tsx:51-75`（E2）：`归档.zip` 的副行同上；`:74` 的「零次 `file` 请求」改为「恰一次 `file` 请求、415 后显示不支持」，夹具补该路由的 415 信封，用例标题里的 `without a file request` 同改。
   - `web/test/files-page.test.tsx:162-169`：`archive.zip` 的 `file` 请求数由 0 改为 1（夹具补 415），`该类型不支持预览` 的断言不变。
   写作时既有测试里受白名单影响的只有 zip 这一种扩展名（`grep -rnE '\.zip|\.bin|不支持预览' web/test web/e2e`）；走查不选不支持的文件，不受影响。
-- [ ] 17.3 守卫（新文件 `web/test/previewers-code-split.test.ts`）：ui-foundation「预览器按需加载是唯一的代码分割」两个场景的静态部分（动态 `import()` 只在 `previewers/index.ts`、`previewers/` 之外不静态导入其内部模块、`vite.config.ts` 无 `manualChunks`、注入样本自证）；
+- [x] 17.3 守卫（新文件 `web/test/previewers-code-split.test.ts`）：ui-foundation「预览器按需加载是唯一的代码分割」两个场景的静态部分（动态 `import()` 只在 `previewers/index.ts`、`previewers/` 之外不静态导入其内部模块、`vite.config.ts` 无 `manualChunks`、注入样本自证）；
   「构建产物确有按需块」的唯一落点是 `make ui-walk`：在 `web/e2e/ui-walk-files.ts`（组 3 建的 helper）里，`/files` 步骤选中 `readme.md` 之前记录已成功加载的 `.js`，选中时断言新增了至少一个来自同源 `assets/` 的 200 `.js` 响应。
   走查本来就对 `npm run build --workspace web` 的产物运行（CI 的 ui-walk job 先 build 再起服务），所以不新增构建步骤、不改 `.github/workflows/ci.yml` 的步骤序列，也不动 `scripts/test-ci-harness.sh` 的期望；`make check` 与 `make test-guardrails` 不执行构建，不放这条断言。
 - [ ] 17.4 契约测试（`web/test/preview-kind-contract.test.ts`）：读取服务端 `preview.ts` 导出的四个扩展名集合与 `kind.ts` 的对应集合，断言两两相等（file-previewers「与服务端的扩展名表一致」）。

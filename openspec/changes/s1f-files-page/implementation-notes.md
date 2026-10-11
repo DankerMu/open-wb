@@ -226,7 +226,7 @@
 - `sweep` 的 `.trash` 替换窗口：读代码推出，未测。自本刀起每次启动与每 6 小时无需任何用户动作就走一遍。#1318 第 1 项的后果（账号根被改名成 `.trash` 期间其中的新批次被 `sweep` 删掉）是实测，驱动的是编译后的 `sweep`，不经入口。
 - `/w/` 读窗口（第三条读路由）：读代码推出，未测。
 - 启动时 `clearWork` 对 `work/` 的删除：预先放好的链接不被跟随是实测（Node 24.13.1，#1318 第 3 项），边删边换未测。
-- 绑定地址随主监听器的 `HOST`（缺省 `127.0.0.1`）：实测（`server-startup-preview.test.ts` 的启动轨迹 `listening:<address>:<port>`，T1 与 T12）。同机的 omp 用户进程连得到预览端口、端口为 0 时仍可从文档自身的地址得知：读代码推出，未测。
+- 绑定地址随主监听器的 `HOST`（缺省 `127.0.0.1`）：实测（`server-startup-preview.test.ts` `:261`、`:296` 的启动轨迹，`HOST` 缺省与 `0.0.0.0` 各一例）。同机的 omp 用户进程连得到预览端口、端口为 0 时仍可从文档自身的地址得知：读代码推出，未测。
 - 同刀改三处文字：`design.md` D22 的「尚无调用方」与「绑定地址由 #1070 定」两句，`preview/app.ts:21` 的头注释（只改注释）。**PR 须写明触碰了 `openspec/`。**
 - 三项公共头的裁决（偏离记录，读代码推出、未测，不在本刀闭合）：规格「每个响应」按「本实例处理器产生的响应」解释。关停窗口里已建连接上的新请求由 Fastify 答 503 固定 JSON（`lib/route.js:489-495`）；socket 层的 400 / 408 / 431 由 `defaultClientErrorHandler` 答固定 JSON（`fastify.js:963-987`）。四者都不带三项头、都不回显路径或令牌；要改得动 `preview/app.ts` 的实例选项，超出本刀边界。测试陷阱：「在途请求不出现 5xx」的用例不得在 SIGTERM 之后往预览端口发新请求。根目录被换成文件或符号链接时答 500 而非 404 是 #1316，不在本刀修。
 - 门槛与文档：`server.ts` 477 行增到约 600 行；`server-startup-helpers.ts` 686 行只改标记（约 700 行）；`listener-shutdown.test.ts` 搬走 helper 后变短。knip 方面 `createPreviewApp`、`createTrash`、`createOfficeCleanup`、`createPreviewTokens` 都有了源码导入方，新 helper 导出须被测试导入。正则一律字面量。不是配置刀，不动 `system.md` 第 9 节与配置计数，只改 `:91` 的目录树注释。界面尚无调用方（#1092 / #1093），**no checklist rows**。本批无共用源文件，后续 #1074 在 `server.ts` 与 `releaseOwned` 上叠加。`tasks.md` 勾 13.1–13.3 与 `:649`。
@@ -246,3 +246,69 @@
 - 变异：`assembly.trash` 不注入而只在入口另建一个扫 → **不可观察**（`moveToTrash` 不读保留期）。
 - 变异：去掉 `unref`、把 6 小时改成别的值、关停不 `clearInterval` → 均**不可观察**（定时器已 `unref`，编译入口等不到第二轮）。
 - 变异：HOST=localhost 时预览绑到别的地址 → `listener-shutdown.test.ts:552` 新增的 `::1` 断言判红。
+
+## 16.2（deleteEntry）、16.4、16.5（#1084）
+
+- 不是 Critical Path 的服务端切片，但它是 Critical Path 路由的浏览器端：无路由、无 `sandbox.resolve`、路径只当数据。D-23 / #1286 的窗口本刀自己没有（读代码推出），属于 `server/src/workspaces/rest-entries.ts:158-181` 的删除路由与 `moveToTrash`（D22「实测（#1318）」第 1 项）；本刀不闭合，也不新增调用点（界面在 #1101）。一个评审席即可。
+- 前置已在 origin/master：0.1（#1049 关闭）、8.2（#1060 关闭，`rest-entries.ts:158` `app.delete(".../entries")`、`:179` 204）、#1079（`web/src/lib/api-files.ts` 19 行）。1.2 在 `tasks.md` 已勾选、#1051 关闭，不挡。
+- 需要 #1082 / #1083 先交付：`api-files.ts` 里的 `createFileMethods(onUnauthorized, transport)` 工厂与传输类型，并已把既有工作空间方法挪出 `api.ts`（今 777 / 800）。开工先重量 `api.ts`、`api-files.ts` 行数，再看传输类型有哪些字段。
+- `deleteEntry` 不能走 `request(…, 204)`：`parseJsonResponse`（`api.ts:501`）对空体 `response.json()` 抛错，变成 `requestFailed(204)`。须照 `api-sessions.ts:142-155` 的 `deleteSession` 形状：204 直接返回且不读正文；其它 2xx → `requestFailed(status)`；非 2xx → `parseJsonResponse` 抛信封错误。
+- 复制 `deleteSession` 是这个 204 形状的第三份（另一份是 `api.ts:557-572` 的 `logoutRequest`），jscpd 3% 全仓、无 ignore。最省做法：把 `logoutRequest(options, onUnauthorized)` 改成 `noContentRequest(path, options, onUnauthorized)`，`logout` 传 `"/api/auth/logout"`，再注入传输；`api.ts` 净增约 1 行，不动 `api-sessions.ts`。记入偏离记录，PR 前跑 jscpd。
+- 签名：`ApiClient` 加一行 `deleteEntry(workspaceId: string, path: string, options?: ApiRequestOptions): Promise<void>;`。请求为 `${workspaceEndpoint(workspaceId, "entries")}?path=${encodeURIComponent(path)}`，init 恰为 `{ credentials: "same-origin", method: "DELETE" }` 加可选 `signal`；`WorkspaceEndpoint` 联合加 `"entries"`。
+- 不带 `body`、`headers`、`cache`。带 `Content-Type: application/json` 而无体时 Fastify 默认解析器会答 400——这是框架行为的推断，本仓库未测（`server/test/workspaces-delete.test.ts:642` 只测了合法体与残缺体）。
+- 规格已定的分支，客户端不预检：空串 `path` 发出 `…?path=`，由服务端答 403（file-operations「拒绝项」：`path=`（空串）→ 403 `sandbox_denied`）；不 `trim`、不规范化 `..`、不重试。
+- 沿用现状并记偏离：孤立代理项使 `encodeURIComponent` 抛 `URIError`，方法以它拒绝（不是 `ApiError`，与 `listTree` 同）；中止与网络失败是 `requestFailed(0)`（`api.ts:493-499`）；500 信封原样成 `ApiError`。
+- 测试放新文件 `web/test/api-files-delete.test.ts`（`api-files.test.ts` 743 行；偏离 16.4「扩充」与 issue 的 PR Boundary，先例 #1079 / #1081）。只从 `../src/lib/api.js` 导入：`chat-module-layout.test.ts:40-44` 的 `importersOf` 也扫 `web/test`，直接导入 `api-files.js` 会让 `:64-65` 判红。
+- 用例：① id `ws/%#?+ 中`、path `报告 2026/a b#1&x.md`、带 `signal`，`toHaveBeenCalledWith("/api/workspaces/ws%2F%25%23%3F%2B%20%E4%B8%AD/entries?path=<编码>", { method: "DELETE", credentials: "same-origin", signal })`，无 `body`，resolve 为 `undefined`，204 响应的 `json` / `text` 未被调用；② 200 → `expectRequestFailure(…, 200)`；③ `it.each` 403 `sandbox_denied`、404 `not_found`、400 `bad_request`、500 保留 status / code / message（message 用任意字面量）；④ `unauthorizedResponseCases()` 三行各通知一次且入参是 `signal`；⑤ `fetch` 拒绝 → `requestFailed(0)`。
+- 不要整段粘贴 `api-sessions-metadata.test.ts:252-306`，`stubFetch`（`:45-49`）与 `unreadableResponse`（`:51-61`）是该文件的局部函数。新文件自写两三行等价 stub，或把 `unreadableResponse` 提到 `web/test/support.ts`（那就多动两个测试文件，记入偏离）。
+- 既有测试不必改：唯一的整客户端替身 `web/test/workspace-list-silent.test.tsx:23` 是 `as unknown as ApiClient`，加成员不破类型检查；`chat-module-layout.test.ts:68-73` 的 `import type` 断言对 `api-files.ts` 原样重跑。knip 由新测试经 `api.js` 的引用满足，`knip.json` 不改；`ui-layering.test.ts` 不动。
+- 「十个发请求的方法」本刀不成立：#1080（`listArchive`）仍 OPEN 且不在本批次序里，本刀合入后是九个。本刀只断言自己那一行，既有六个方法不回归，总数断言留给 #1080。issue 验收第二条按此读，记入偏离。
+- 复选框：16.2 由本刀勾（三个方法中最后合入）；16.1、16.4 不勾（等 #1080）。16.5 的三条变异分属 #1079、#1082、#1081，本刀合入时三刀都已合，按 issue 的字面规则可勾——是否等 #1080 一起勾请编排方定。
+- 与 issue 的差异（origin/master 为准）：PR Boundary 写 `api-files.test.ts`，实际用新文件；issue 称本刀是「序号最大的一刀」，但不是最后合入的；`tasks.md` 文首写 `api.ts` 778 行，实测 777。
+- 无 checklist 行（无界面变化，确认框在 #1101）；非配置切片，不碰 `docs/architecture/system.md` 第 9 节。与 #1082 / #1083 共用 `api-files.ts` 和 `api.ts`，按既定顺序叠放；与 #1085 无文件交集。
+- 变异：方法写成 `POST` 或 `GET` → 用例①的 `toHaveBeenCalledWith` 判红。
+- 变异：加 `body`（如 `JSON.stringify({ path })`）或 `Content-Type` 头 → 用例①判红（init 精确匹配，且断言无 `body`）。
+- 变异：`path` 不编码或改用 `encodeURI` → 用例①的地址字面量判红（`&`、`#`、`/`）。
+- 变异：id 段不编码（跨空间 id 注入向量）→ 用例①的 `ws%2F…` 判红。
+- 变异：端点名写错（`entry`、`file`）或把 path 放进路径段 → 用例①判红。
+- 变异：丢 `credentials: "same-origin"` 或不转发 `signal` → 用例①判红。
+- 变异：改用 `request(…, 204)` 或在 204 上读正文 → 用例①判红（`json` 被调用，或以 `requestFailed(204)` 拒绝）。
+- 变异：把任意 2xx 当成功 → 用例②判红。
+- 变异：非 2xx 时跳过 `parseJsonResponse`，直接抛 `requestFailed` → 用例③（code / message 丢失）与用例④的合法 401 行判红。
+- 变异：去掉 401 通知或通知两次 → 用例④判红。
+- 变异：网络失败原样抛出而不映射 → 用例⑤判红。
+- 变异：客户端对 path 做 `trim` 或 `normalize` → 仅当用例①的 path 带首尾空白才可观察；地址函数的同款断言在 `api-files-url.test.ts`，本刀不重复，标「不可观察」。（评审订正：这个理由不成立——`api-files-url.test.ts` 钉的是 `fileUrl` / `downloadUrl`，`deleteEntry` 不调用它们；删除是破坏性操作，改为在本刀的用例里用带首尾空白、`..` 段与两种 é 的 path 钉住，变异须判红。）
+- 变异：不可观察：地址经 `workspaceEndpoint` 还是内联拼接；204 分支走 `noContentRequest` 还是内联写法。
+- 变异：16.5 指定的三条变异不属本刀（#1079、#1082、#1081），PR 表里只引用，不重做。
+
+## 17.1、17.3（#1085）
+
+- 前提与边界：不触及 Critical Path（纯前端展示层，不取数、不处理路径、不碰 `sandbox.resolve`、不加路由），一个评审席；本刀没有服务端路由，对 #1286 的替换窗口既不闭合也不加宽；不在 1.1 / 1.2 / 1.3 挡住的集合里。前置 3.1–3.5 按代码核实已合：`web/e2e/ui-walk-files.ts` 存在（32 行），`ui-layering.test.ts:341` 已自证 `previewers/x.tsx` 受管，`preview.tsx:10` 已用拷入层 `Button`。issue 的 17.1 摘录与 `tasks.md:403-443` 逐字相同。不加 FL 行（占位是瞬时的，失败态签字人无法复现；下载与未知类型的行归 17.6）。
+- 现状核对：`preview.tsx` 256 行，静态含四种预览，分流在 `:207-223`；`web/src` 与 `vite.config.ts` 里 `import(` 零命中，无 `lazy` / `Suspense`，无 `manualChunks`；`web/src` 无 `new URL(`。`tree.tsx` 647 行；扩展名白名单 `supportsPreview` 在 `:71-99`，本刀不动。`tree.tsx:287,292` 的 `正在读取文件` 已带 `role="status"`，页面上可能同时有两个 `status`——新用例按文案取元素再断言角色，不用 `getByRole("status")` 单取。
+- 导入路径由规格句裁定（不是未规定）：ui-foundation「动态导入只有一处」写明 `previewers/` 之外不得静态导入 `index.ts` 以外的模块，所以 `preview.tsx` 不能直接导入 `./previewers/kind.js`。做法：`index.ts` 写 `export { previewKind, textView } from "./kind.js"`，`preview.tsx` 只从 `./previewers/index.js` 导入；守卫不为 `kind.ts` 开例外。`preview.tsx` 里不写 `typeof import("…")` 类型（文本含 `import(`，守卫会判红），类型由 `index.ts` 导出后 `import type`。
+- 偏离任务措辞（缓存位置，进偏离记录）：任务写「`index.ts` 按类别返回带缓存的加载函数」，但规格「第一次才加载」以「对 `index.ts` 加载函数的调用次数」为证，而 `previewers-loading.test.tsx` 用 `vi.mock` 整个替换 `index.ts`——缓存若在 `index.ts` 里，被替换的正是它，「不再调用」测的是替身。定为：`index.ts` 只是无状态的表，`loadPreviewer(id: PreviewerId): Promise<Previewer>`，`PreviewerId = "markdown" | "table" | "code" | "image"`，四条 `import("./x.js").then((m) => m.X)`；缓存在 `preview.tsx` 模块级：`Map<PreviewerId, Promise<Previewer>>`（在途，拒绝时删条目）加 `Map<PreviewerId, Previewer>`（已就绪）。
+- `preview.tsx` 的三态用「状态 + effect」，不用 `React.lazy`（被拒绝的 lazy 不能重试，还得写 class 错误边界）。初始状态同步读已就绪表，命中则首帧直接渲染，不经 effect。未命中显示 `<p role="status">正在加载预览…</p>`；拒绝时显示 `预览组件加载失败` 加拷入层 `Button type="button"` 的 `重试`（重新调 `loadPreviewer`）。effect 清理置取消标志，卸载后不 `setState`。在途表使 StrictMode 双 effect 只调一次加载函数（`render-app-router.tsx:19` 支持 strict，17.5 的页面级「恰一次」依赖这一点）。`PreviewBody key={path}` 保留。
+- 分流（保持现行为，数据形状优先）：`data.kind === "image"` → `image`；否则 `previewKind(name) === "text"` 时按 `textView(name)` 取，`markdown` → `markdown`，`table` → `table`，其余（含网页、svg）→ `code`；`previewKind` 非 `text` 而数据是文本时 → `code`（与 17.2 过渡规则「Notebook 得到文本 → 源码视图」一致）。`previewKind` 按规格表一次写全八类；`textView` 返回 `"markdown" | "table" | "web" | "svg" | "code"`（规格未给字面量，自定）。四个扩展名集合本刀不导出（17.4 才有导入方，knip 会报）。
+- 两处小行为变化（由规格句「唯一的 `.` 在开头时视为无扩展名」决定，进偏离记录）：文件名恰为点加 `md` / `csv` / `json` 的文件由 Markdown / 表格 / 格式化改为源码原文（现 `preview.tsx:56-59` 把它们当有扩展名）；无既有用例覆盖。`tsv` 经 `textView` 归表格，但本刀从页面不可达（白名单无 `tsv`，推断自 `tree.tsx:71-84`），直接渲染 `PreviewPane` 时会按逗号解析。压缩包行写的是「以…结尾」，先套无扩展名规则再判后缀（名字恰为点加 `gz` 的文件算文本），不加用例。
+- 模块落点（名字对齐 18.x 的 `previewers/code.tsx`、`table.tsx`）：`code.tsx`（`CodeView({ text })` 原样具名导出，`lineDocuments`、`prettyJson` 随迁——`preview.tsx` 不能再静态用它，json 判定用 `kind.ts` 的扩展名函数）、`table.tsx`（`CsvTable({ text })` 原样导出，`csvCells`、`CSV_CELL` 随迁，导入 `../csv.js`）、`markdown.tsx`（`MarkdownPreview`、`RenderedMarkdownDocument`、`MARKDOWN_BODY`、切换按钮；静态导入 `./code.js` 的 `CodeView`；`key={text}` 与 `data-markdown-body`、三个 `data-slot` 原样）、`image.tsx`。四个模块各另导出一个同签名的预览器 `(props: { name: string; content: string })`（文本类传文本，图片传调用方持有的 Blob 地址）。`SCROLL_BODY`、`WIDE_TABLE` 两个类串放 `code.tsx` 导出给同目录用，不留在 `preview.tsx`。`fileIcon(`、`formatSize(` 必须字面留在 `preview.tsx`（`files-page.test.tsx:540-544` 读源码）。
+- 图标不动：规格「文件图标按类别取…其它文本 → `file-code`」没有场景，照做会让 `file-meta.test.ts:34`（点开头的环境文件 → `file`）与 `files-page.test.tsx:520`（`x.constructor` → `file`）变红，也违反本刀「除首次加载的异步外行为不变」。本刀 `kind.ts` 不含图标映射，`fileIcon` 与 `file-meta.ts` 原样；记偏离，归属见 OUT-OF-SCOPE。
+- 行号漂移（进偏离记录；用例与断言都在，改法不变）：`preview.test.tsx` 565 行、23 个 `it`，`:198` 之前与任务一致，自 `replaces same-path…` 起整体加 1——`:207/:211`、`:229/:234/:255/:258`、`:264/:268`、`:281`、`:355`、`:380/:383`、`:399`、`:442/:445/:459/:462/:474/:479-480`、`:485/:503/:522/:537`、`:548/:551/:561`；`:195` 的标题已改写（任务预告过）。`files-page.test.tsx`：`it` 在 `:80`，`await 查看源码` 在 `:135`，要改的 `getByRole("heading")` 在 `:138`（非 `:139`），源码扫描在 `:536-556`。`chat-messages.test.tsx:185-187` 一致。`ui-walk.spec.ts` 624 行（非 622），`walkFiles` 在 `:225`，选中 `readme.md` 在 `:251`（任务写 `:228-261`）。
+- 重跑 grep 的新命中，都不用改：`files-refresh.test.tsx`（#1078 新增）`:74/:76/:85` 已是 `findBy`，`:98-99` 在同一次挂载内；`files-empty-layout.test.tsx` 的 E5（`:186-199`）已用 `waitFor`，`:200-208` 与 `topbar.test.tsx:266` 递归扫 `features/files` 下每个 `.tsx`（`listRepoFiles` 递归），新模块里不得出现退役字符串、`<h1`、颜色字面量、井号加数字的注释、`list-none`。`files-fixture.tsx:154-174` 只改 `URL` 的两个属性、不替换 `URL`，页面级用例不需要任务给 `preview.test.tsx:445` 的那种改法；`:445` 照任务改成可构造的子类（「加载路径上会 `new URL`」未验证，属推断，改了无害）。`markdown-view.tsx:3` 的注释提到 `features/files/preview.tsx`，顺手改指 `previewers/markdown.tsx`。
+- `previewers-loading.test.tsx`（新）：`preview.tsx` 有模块级缓存，三条用例互相污染，所以每条 `vi.resetModules()` 后 `await import("../src/features/files/preview.js")`（先例 `main.test.tsx:32`、`theme-provider.test.tsx:51`；测试文件里的动态导入不受守卫管）。`vi.mock` 用 `importOriginal` 展开后只换 `loadPreviewer`（否则 `previewKind` / `textView` 的再导出丢失；先例 `chat-page-new-session-wiring.test.tsx:20-21`），替身经 `vi.hoisted` 持有，放行时给静态导入的真 `CodeView` 包装。「没有未处理的拒绝」复用 `chat-stream-support.ts:111` 的 `observeUnhandledRejections`（jsdom 不派发 `window` 的 `unhandledrejection`）。第二条断言总调用次数恰为 1（`a.ts` → 换 `path` 的 `b.ts`）。
+- 17.3 守卫 `previewers-code-split.test.ts`（新）：写成纯函数 `codeSplitViolations(files: { path; source }[])`，自证样本走函数，不落真实文件（`stripTsComments` 保留字符串字面量，样本串别写成指向真实模块的字面量）。规则：去注释后匹配 `/\bimport\s*\(/` 的文件恰为 `previewers/index.ts`；`previewers/` 之外的 `from` 说明符落在 `previewers/` 下且不是 `index.js` 即违规；`lowlight`、`highlight.js` 只许 `previewers/` 内导入（现零命中，规则仍写）；`vite.config.ts` 不含 `manualChunks`。只用正则字面量（semgrep）。自证至少四条：会话页文件写动态导入、`page.tsx` 静态导入 `previewers/code`、`preview.tsx` 静态导入 `previewers/kind`、`index.ts` 自身合规。
+- 走查：`/files` 步骤在 `ui-walk.spec.ts` 的 `walkFiles`，不在 helper 里，所以 **`web/e2e/ui-walk.spec.ts` 必须改**（issue 的 PR Boundary 漏列；加一个导入、把 `:251` 的点击包进 helper，624 行有余量），`ui-walk-layout.ts`（775）不碰。helper `expectOnDemandChunk(page, select)` 放 `ui-walk-files.ts`：先 `page.evaluate` 取 `performance.getEntriesByType("resource")` 中同源 `/assets/*.js` 的集合并断言非空（防快照空转），再挂 `page.on("response")`，执行 `select()`，`expect.poll` 等到至少一个状态 200、同源、路径匹配 `/^\/assets\/[^/]+\.js$/` 且不在快照里的响应，最后摘监听。规格 THEN 第一句「选中之前没有预览器块」只由集合差间接保证，没有直接断言。本地 `make ui-walk` 不构建（`Makefile:70`），要先 `npm run build --workspace web` 且服务指向该产物，对 dev server 跑必红。
+- 门槛与批内次序：新文件都远低于 800 行，`preview.tsx` 缩到约 150 行（评审订正：实际 256 → 201 行）；`previewers/` 自动在 `MIGRATED_AREAS` 内，`ui-layering.test.ts`（735）不动；knip 无未引用导出（`CsvTable` 的导入方是 `preview.test.tsx`，测试是 knip 入口）；搬家不产生 jscpd 克隆；无新依赖。与 #1065 / #1069 / #1073 / #1082–#1084 无共同文件；唯一关联是 `preview.tsx:11` 的 `import type { ApiClient } from "../../lib/api.js"`——#1082 搬方法时该类型仍须从 `api.ts` 可得。残余（未实测）：浏览器对失败的动态导入是否允许同地址重取因实现而异，`重试` 在真实断网恢复后的效果只有 jsdom 替身证据；按需块的切分形态与「选中前不预取」是对 Vite 缺省行为的推断，由走查断言兜底。
+- 变异：`page.tsx` 静态导入 `previewers/code` → `previewers-code-split.test.ts`「web/src 现状」判红。
+- 变异：`preview.tsx` 直接导入 `./previewers/kind.js` → 同一条现状用例判红。
+- 变异：在 `features/chat` 任一文件写动态 `import()` → 现状用例判红；`vite.config.ts` 加 `manualChunks` → 同文件对应用例判红。
+- 变异：`index.ts` 的四条动态 `import()` 全改静态 → `make check` 里守卫的「恰为 `index.ts`」判红（集合变空）；走查 `expectOnDemandChunk` 判红（两个 project）。
+- 变异：去掉 `正在加载预览…` 占位或其 `role="status"` → `previewers-loading.test.tsx` 第一条判红。
+- 变异：去掉 `preview.tsx` 的已就绪 / 在途缓存（每次挂载都调加载函数）→ 第二条（调用恰 1 次）判红。
+- 变异：拒绝后不删在途条目，或 `重试` 不重新调加载函数 → 第三条判红（调用次数停在 1、源码不出现）。
+- 变异：去掉拒绝分支的处理 → 第三条判红（失败文案不出现，`observeUnhandledRejections` 非空）。
+- 变异：分流把 `md` 送到 `code` → `preview.test.tsx` 的 Markdown 九条判红；把 `csv` 送到 `code` → `:166` CSV routing 判红；图片数据送到 `code` → `:442` 判红。
+- 变异：`prettyJson` 没随迁或 json 判定丢失 → `:548` JSON 用例判红。
+- 变异：Markdown 模块丢 `data-markdown-body` → `renderMarkdownProjections` 抛错，三条调用方加 `:229`、`:264`、`:380` 判红；丢 `preview-code` / `preview-table` / `preview-markdown` 任一 `data-slot` → `files-empty-layout.test.tsx` E5 判红，走查 `expectScrollableX` 同红。
+- 变异：Markdown 模块自带渲染器（出现 `function renderBlock`）或不经 `MarkdownView` → `chat-messages.test.tsx:185-187`（改读 `previewers/markdown.tsx` 后）判红。
+- 变异：加载在 `act` 之外落定（比如用例改成手工 `await Promise.resolve()`）→ `:229` 用例的「`console.error` 为空串」（`:258`）判红。（评审订正：实测不红——vitest 未开 `globals`，没有任何地方把 `IS_REACT_ACT_ENVIRONMENT` 设为真，React 不报 act 警告；该断言保留，但不承担这条证明，记为不可观察。）
+- 变异：不可观察：effect 清理不置取消标志（卸载后 `setState` 在 React 19 无告警）；命中缓存时改走 effect 而非同步首帧（既有断言都是 `findBy`，规格只要求不再调用）；`previewKind` 表中 pdf / office / 音视频 / Notebook / 压缩包行写错（本刀这些行都落到 `code`，「判定表」用例归 17.5）；仅文件名恰为点加 `md` / `csv` / `json` 的三种变化；真实浏览器里 `重试` 是否真的重新取块。
