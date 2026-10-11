@@ -1124,3 +1124,48 @@
 - 变异：不可观察：复用 `parseCreateDirResult` 还是另写一份等价解析（行为相同，只有 jscpd 可能拦，不保证）。
 - 变异：不可观察：比对返回的 `path` 与 `to`——规格不要求，本刀不做，也不为它造用例。
 - 变异：不适用：穿越、符号链接、跨工作空间 id、他人工作空间 404、`sandbox.reject` 审计，都是服务端行为，已由 #1062 的 `workspaces-move.test.ts` 承担；客户端一侧只有「路径是数据」（用例②）与 id 编码（用例①）两条。
+
+## 13.1、13.2、13.3（#1070）
+
+- **Critical Path：沙箱与文件边界**——本刀是 `sweep`（定时删回收目录）的第一个生产调用方，并把读用户文件的 `/w/` 监听面接进生产入口；两个评审席位加 owner 白盒。不属「omp 子进程治理」（不 spawn，`clearWork` 走不带 `ompUser` 的分支）。前提按代码已齐：5.1（`server/src/preview-config.ts`）、8.1 sweep（`workspaces/trash.ts:123`）、11.2（`workspaces/rest-preview-token.ts` 与 `app.ts:113` 的 `preview?`）、12.1（`preview/app.ts:73`）；不在 1.2 挡住的集合里，1.1、1.3 不挡。
+- 与 issue / `tasks.md` 的差异（origin/master 为准）：① 13.1 要改的 `trash.ts:12`「settle it before…」已由 #1060 改完，`git grep 'settle it before'` 零命中，本刀不动 `trash.ts`；② `tasks.md:649` 未编号的「启动失败记录的阶段取值（#1203 对齐）」必须本刀做并勾选，它说的「既有预览端口失败断言」并不存在，直接新写；③ 13.1「自己做递归删除」已过时，14.3 已合入，改调 `createOfficeCleanup({ cacheDir: config.previewCacheDir }).clearWork()`（不传 `officeBin` / `ompUser` / `log`，不提权、不 spawn），15.1 再补键；④ 规格要求启动两个周期清理，tasks 把 `sweepPdf` 的定时器划给 15.1，本刀只起回收目录那一个；⑤ D11 写 `createPreviewApp` 五键，实际七键；⑥ issue 的 PR Boundary 漏列 `server-startup-helpers.ts`、`server-startup-failure-reason.test.ts`、`listener-shutdown.ts:7-8` 注释、`preview/app.ts:21` 头注释、`design.md`、`docs/architecture/system.md:91`；⑦ issue 评论「Blocked by #1286」已被 D-23 取代。
+- 共用 store / 沙箱（规格句「与主实例共用同一个 DB 句柄、工作空间 store、沙箱 facade 与预览令牌登记表」决定，不算自定）：`createApp` 在 `app.ts:211-219` 内部建这两样且不外露。做法是在 `app.ts:241` 旁加 `app.decorate("workspaces", { store, sandbox })`，并扩 `:66-77` 的 `declare module`；`start()` 在 `createApp` 之后从 `owned.app.workspaces` 取来建预览实例。不在 `server.ts` 另建第二对。
+- 装配缝：`appAssemblyOf(config, preview?: { tokens: PreviewTokens; port: () => number })`。单参调用方保持绿、仍零输出（`server-handshake-log.test.ts:139-151`、`workspace-upload-rest.test.ts:763`、`workspaces-file-sniff.test.ts:308`）。恒带 `trash: createTrash({ sandboxRoot: config.sandboxRoot, retentionDays: config.trashRetentionDays })`。给了第二参才带 `preview: { tokens, port, origin?: config.previewOrigin, documentMaxBytes: config.previewDocumentMaxBytes, officeAvailable: false }`（15.1 再接 `converter.available`）。`start()` 的次序：`createPreviewTokens()` → `createApp` → `createPreviewApp({ store, sandbox, tokens, onListenerForceClose })`。`converter`、`limits`、`listenerCloseBudgetMs` 都不传，两实例同取缺省常量。
+- 启动次序与阶段：`StartupStage` 加 `"preview_listen" | "preview_cache"`。`stage="preview_listen"` → `await preview.listen({ host: config.host, port: config.previewPort, signal })`；若 `signalReceived` 则 `releaseOwned` 后返回；`stage="listen"` → 主 `listen`（同一个 signal）；**两次都成功之后**才换新的 `AbortController`。`requestShutdown` 的 `bound` 仍只看主实例（`server.ts:383`）。`publishStarted` 里在 `host_overlay` 之后置 `stage="preview_cache"`，再回到 `publish`。
+- 缓存目录：`ensureOwnedDir` 不递归，CI 与多数编译入口用例里 `<repo>/var` 不存在。先 `mkdirSync(dirname(cacheDir), { recursive: true })`（同 DB 父目录的做法，规格未写，记偏离），再 `ensureOwnedDir` 三次：`cacheDir` 为 `0o2750`、`work` 为 `0o2770`、`pdf` 为 `0o700`，然后 `await clearWork()`。setgid 经编译入口生效已有 `ensureOmpStateLayout` 的先例。
+- 定时器：`OwnedResources` 加 `preview`、`trashTimer`、`forceCloseEmitted`。成功记录之前 `setInterval(() => void trash.sweep(Date.now()), 21_600_000).unref()`；首扫在成功记录写出之后 `void trash.sweep(Date.now())`，不等它（file-operations「启动成功之后运行一次」）。关停只 `clearInterval`，在途的一轮不等待、不中止，进程待它落定后自然退出（记偏离）。`app.ts:250` 的注释仍真，缺省 30 天只剩测试装配在用。
+- 关停次序（偏离记录第一条，请 owner 在白盒审查里确认）：`releaseOwned` = `clearInterval` → `await preview.close()` → `await app.close()`（其 preClose 里 runtime 退出，再关主监听器）→ `db.close()`。它与 13.1 原文、D11「在主监听器之前关停」逐字一致，DB 最后。规格句「保持 runtime → listener → database，其中 listener 一步为…预览…主」按字面是 runtime 先于预览监听器，本做法是预览先关；理由是 omp 只连主站代理，预览实例没有 `/api` 与 `/v1`。字面做法（在主实例上追加 preClose 钩子关预览）在前面的钩子失败时会被 Fastify 跳过，仍需回退路径，不取。最坏关停时长由 8s+2s 变为 2s+8s+2s，`listener-shutdown.ts:7-8` 的「恰等于 10s」注释同刀改正。
+- `listener_force_close` 至多一行：两个实例共用一个回调 `if (!owned.failed && !owned.forceCloseEmitted) { owned.forceCloseEmitted = true; emit }`。信号落在两次 listen 之间时 Fastify 自己会对已绑定的预览实例 `close()`（`lib/server.js:53-57`），`releaseOwned` 再关一次；avvio 的第二次 `close` 只回调，钩子与 `server.close` 各跑一次，主实例既有同一路径。
+- **必须改的既有断言**（等价改写，逐条进偏离记录）：`server-startup-helpers.ts:656-660` 的预加载对每个 listen 过的 `net.Server` 记一行，两个监听器会多一行且分不出谁先。改为 `listening:<port>` 与 `listener-close:<port>`（端口在 listening 时记下，从未绑定的记 `listener-close:-`）。`server-startup-order.test.ts:159` 改为显式给 `PREVIEW_PORT=<pv>` 后的 `listening:<pv>\nlistening:<port>\nlistener-close:<pv>\nruntime-exit\nlistener-close:<port>\ndb-close\n`；`:240` 改为 `listening:<pv>\nlistening:<port>\nlistener-close:<pv>\nlistener-close:<port>\ndb-close\n`。`compiledFixtureEnv` 加 `PREVIEW_CACHE_DIR: join(scratchRoot, "preview-cache")`；内联 env 的三处（`listener-shutdown.test.ts:451`、`:557`、`server-startup-order.test.ts:68`）仍落到 `<compiled.root>/var/preview-cache`，无断言受影响（`existsSync(var) false` 只在非法配置循环里）。
+- 新用例放新文件 `server/test/server-startup-preview.test.ts`，共用件进 `server-startup-order-helpers.ts`（29 行；`openPartialRequest` 从 `listener-shutdown.test.ts` 原样搬入）：
+- 启动与干净关停：`<a>` 的 healthz 为 200；`<b>` 的 `/` 与 `/api/healthz` 为 404 纯文本；记录恰四键；预置的 `work/stale/x` 被清、`pdf/keep.pdf` 仍在；三个目录 mode 正确；trace 里 `listening:<b>` 先于 `listening:<a>`；退出码 0 且两个端口 `expectBindable`。
+- 缺省 `PREVIEW_PORT`：登录 → 建空间 → `preview-token`，其 `base` 的端口非 0 且不等于主端口；`GET <base>文件` 为 200；真实 socket 发 `<base>%2e%2e/%2e%2e/x` 得 403，且主站 `/api/audit` 多一行 `sandbox.reject`。
+- 预览端口被占：整行 `reason:"preview_listen"`，trace 里没有任何 `listening:` 行（即主端口从未绑定）。两个端口都被占同样是 `preview_listen`。`PREVIEW_PORT === PORT` 得到的是 `listen`（预览先绑上），不是 #1054 注记预期的 `preview_listen`，记偏离。
+- 在途请求：64 MiB 稀疏文件读首块后 SIGTERM，读完得 200 且字节数齐、stderr 为空。预览停读加主站半截请求同时在场：恰一行 `listener_force_close`，退出码 0。
+- 信号窗口：`requireHook` 包 `net.Server.prototype.listen`，在第 N 次调用处写 ENTERED、装 SIGTERM 监听写 RELEASE、轮询后才调原生 listen。N=1 与 N=2 各一例：退出码 0、无任何记录、两端口可绑、`db-close` 最后。证据等级写「钩子辅助（预加载推迟原生 listen）、真实编译入口、真实 SIGTERM」。
+- `TRASH_RETENTION_DAYS=1`：预置 `0700` 的 `.trash/u1/<ws>/` 下两个 2 天前批次（名字排在一个 12 小时前批次的前后各一）。等两个过期批次都消失后，再断言未到期的仍在。
+- `server-startup-failure-reason.test.ts`（260 行）加两例：`preview_listen`；`PREVIEW_CACHE_DIR` 位置是普通文件 → `preview_cache`。`listener-shutdown.test.ts:552` 的 HOST=localhost 用例加 `PREVIEW_PORT`，并断言 `::1` 上预览端口连不上。
+- D-23 / #1286（不宣称闭合；本刀不新增路由、不新增窗口，但把两个已登记窗口从「无生产调用方」变成生产可达）：
+- `sweep` 的 `.trash` 替换窗口：读代码推出，未测。自本刀起每次启动与每 6 小时无需任何用户动作就走一遍。#1318 第 1 项的后果（账号根被改名成 `.trash` 期间其中的新批次被 `sweep` 删掉）是实测，驱动的是编译后的 `sweep`，不经入口。
+- `/w/` 读窗口（第三条读路由）：读代码推出，未测。
+- 启动时 `clearWork` 对 `work/` 的删除：预先放好的链接不被跟随是实测（Node 24.13.1，#1318 第 3 项），边删边换未测。
+- 绑定地址随主监听器的 `HOST`（缺省 `127.0.0.1`），同机的 omp 用户进程连得到预览端口；端口为 0 时仍可从文档自身的地址得知。读代码推出，未测。
+- 同刀改三处文字：`design.md` D22 的「尚无调用方」与「绑定地址由 #1070 定」两句，`preview/app.ts:21` 的头注释（只改注释）。**PR 须写明触碰了 `openspec/`。**
+- 三项公共头的裁决（偏离记录，读代码推出、未测，不在本刀闭合）：规格「每个响应」按「本实例处理器产生的响应」解释。关停窗口里已建连接上的新请求由 Fastify 答 503 固定 JSON（`lib/route.js:489-495`）；socket 层的 400 / 408 / 431 由 `defaultClientErrorHandler` 答固定 JSON（`fastify.js:963-987`）。四者都不带三项头、都不回显路径或令牌；要改得动 `preview/app.ts` 的实例选项，超出本刀边界。测试陷阱：「在途请求不出现 5xx」的用例不得在 SIGTERM 之后往预览端口发新请求。根目录被换成文件或符号链接时答 500 而非 404 是 #1316，不在本刀修。
+- 门槛与文档：`server.ts` 477 行增到约 600 行；`server-startup-helpers.ts` 686 行只改标记（约 700 行）；`listener-shutdown.test.ts` 搬走 helper 后变短。knip 方面 `createPreviewApp`、`createTrash`、`createOfficeCleanup`、`createPreviewTokens` 都有了源码导入方，新 helper 导出须被测试导入。正则一律字面量。不是配置刀，不动 `system.md` 第 9 节与配置计数，只改 `:91` 的目录树注释。界面尚无调用方（#1092 / #1093），**no checklist rows**。本批无共用源文件，后续 #1074 在 `server.ts` 与 `releaseOwned` 上叠加。`tasks.md` 勾 13.1–13.3 与 `:649`。
+- 变异：先起主监听器 → trace 的 `listening:<b>` 先于 `listening:<a>` 判红，且「两端口都被占 → `preview_listen`」变成 `listen` 判红。13.3 原写的「success record 时探测预览端口」在该变异下仍通过，**不可观察**，探测只作验收断言保留。
+- 变异：关停时先关 DB → `:159`、`:240` 与新用例的 trace 里 `db-close` 不在最后而判红。13.3 原写的「在途预览请求出现 5xx」**不可观察**：流式响应进处理器后不再碰 DB，新请求无论 DB 状态都由 Fastify 答 503。
+- 变异：启动记录多一个键 → `server-startup-order.test.ts:80-93` 的整行相等与新用例的恰四键判红。
+- 变异：`appAssemblyOf` 不带 `preview` → 缺省端口用例的 `preview-token` 变 404 判红。
+- 变异：预览实例另建一对指向别处的 store / 沙箱 → `GET <base>文件` 的 200 判红；沙箱不带审计 → `sandbox.reject` 行判红。用同一 `db` 与同一根另建第二对：**不可观察**（store 无实例状态）。
+- 变异：逃逸向量（入口层只证接线）：穿越 → 上面的 403 加审计行。符号链接、跨空间、他人空间、`op` 值在入口层**不可观察**，由未改动的 `preview-app.test.ts` 与 `workspaces-trash-sweep.test.ts` 承担，二者一行不改即为证据。
+- 变异：预览 listen 不传 signal → 信号窗口 N=1 例进程不退出或 `<b>` 不可绑而判红。主 listen 不传 signal → N=2 例同样判红。
+- 变异：预览 listen 之后就换 `AbortController` → **不可观察**（`requestShutdown` 中止的是当前控制器，主 listen 用的正是它）。去掉两次 listen 之间的 `signalReceived` 检查 → **不可观察**（Fastify 见已中止的信号直接 `close`）。
+- 变异：关停不关预览实例 → 干净关停用例的 `<b>` 不可绑或进程不退出判红。预览在主监听器之后才关 → trace 次序判红。
+- 变异：去掉 `forceCloseEmitted` → 「两端同时被强制回收」例出现两行判红。预览实例不传 `onListenerForceClose` → 「仅预览停读」时零行，**不可观察**（规格是「至多一行」）；要钉住就加断言「仅预览被强制回收时恰一行」。
+- 变异：不建缓存目录或 mode 写错 → 三个 mode 断言判红。不调 `clearWork` → `work/stale` 仍在判红。漏掉父目录的 `mkdir` → 全部不设 `PREVIEW_CACHE_DIR` 的编译入口用例以 `preview_cache` 失败。
+- 变异：阶段变量不推进 → `server-startup-failure-reason.test.ts` 两个新例的整行相等判红。
+- 变异：不做首扫、或保留期写死 30 天不读配置 → `TRASH_RETENTION_DAYS=1` 例的过期批次不消失判红。
+- 变异：`assembly.trash` 不注入而只在入口另建一个扫 → **不可观察**（`moveToTrash` 不读保留期）。
+- 变异：去掉 `unref`、把 6 小时改成别的值、关停不 `clearInterval` → 均**不可观察**（定时器已 `unref`，编译入口等不到第二轮）。
+- 变异：HOST=localhost 时预览绑到别的地址 → `listener-shutdown.test.ts:552` 新增的 `::1` 断言判红。
