@@ -463,7 +463,7 @@ Minimal mergeable slice: 16.1 按方法分两刀——地址函数 `fileUrl`、`
 - [x] 17.3 守卫（新文件 `web/test/previewers-code-split.test.ts`）：ui-foundation「预览器按需加载是唯一的代码分割」两个场景的静态部分（动态 `import()` 只在 `previewers/index.ts`、`previewers/` 之外不静态导入其内部模块、`vite.config.ts` 无 `manualChunks`、注入样本自证）；
   「构建产物确有按需块」的唯一落点是 `make ui-walk`：在 `web/e2e/ui-walk-files.ts`（组 3 建的 helper）里，`/files` 步骤选中 `readme.md` 之前记录已成功加载的 `.js`，选中时断言新增了至少一个来自同源 `assets/` 的 200 `.js` 响应。
   走查本来就对 `npm run build --workspace web` 的产物运行（CI 的 ui-walk job 先 build 再起服务），所以不新增构建步骤、不改 `.github/workflows/ci.yml` 的步骤序列，也不动 `scripts/test-ci-harness.sh` 的期望；`make check` 与 `make test-guardrails` 不执行构建，不放这条断言。
-- [ ] 17.4 契约测试（`web/test/preview-kind-contract.test.ts`）：读取服务端 `preview.ts` 导出的四个扩展名集合与 `kind.ts` 的对应集合，断言两两相等（file-previewers「与服务端的扩展名表一致」）。
+- [x] 17.4 契约测试（`web/test/preview-kind-contract.test.ts`）：读取服务端 `preview.ts` 导出的四个扩展名集合与 `kind.ts` 的对应集合，断言两两相等（file-previewers「与服务端的扩展名表一致」）。
   实施注记见 `implementation-notes.md`「17.4（#1086）」。
 - [ ] 17.5 测试（`web/test/preview.test.tsx` 扩充、`web/test/previewers-loading.test.tsx` 扩充——该文件与它的三条 `PreviewPane` 级用例已随 17.1 建立，这里补页面级场景，其中「加载失败可重试」的 `下载 main.py` 断言依赖 17.2 的预览头；凡取预览正文的断言一律 `await screen.findBy…` / `waitFor`，不在 `render` 或点击之后同步取）：「判定表」「未知文件由服务端裁决」「第一次才加载」「加载失败可重试」「每个文件都能下载」「截断提示」「请求归属与资源释放」。
 - [ ] 17.6 FL 行：每个文件都有下载按钮、未知类型文件的两种结果（看得了 / 不支持加下载）；结论 `待签`。
