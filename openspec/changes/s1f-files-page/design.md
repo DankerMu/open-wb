@@ -90,6 +90,7 @@
 理由：`lowlight` 自身约 60 KB、产出语法树而不是 HTML 字符串，不需要 `dangerouslySetInnerHTML`；`highlight.js` 可按语言引入；树到 JSX 的工具已在依赖树里。
 否决：Shiki（MIT，TextMate 语法 + 正则引擎，体积大一个量级）；Prism / refractor（语言包维护较少，同样需要自己接行号）；手写高亮（不现实）。
 范围：只用于文件预览（文件页与侧边栏）；会话消息里的代码块不动（owner 划出）。
+实现补充（#1091，规格未写，待 owner 知悉）：文本超过 100 000 个字符时不着色、仍带行号——着色在主线程同步进行并为每个记号生成一个元素；100 000 是经验值，上限处实测「未着色提交 → 着色提交」在无头 Chromium 上为 `ts` 约 60 ms、`json` 约 130 ms（本机，单次量级）。高亮块加载失败时静默退回未着色；在 Chromium 上该失败之后再选文件不会重新请求该块，整页刷新后恢复（实测，仅 Chromium，原因未查）。
 
 **D6 Notebook 不引库，自己渲染 nbformat v4 的 JSON。**
 Markdown 单元用既有 `md-render`（源 HTML 已按文本转义）；代码单元用 D5 的高亮；输出按类型：`stream` 与 `text/plain` → 等宽文本；
