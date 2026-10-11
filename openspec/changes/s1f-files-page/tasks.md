@@ -460,6 +460,7 @@ Minimal mergeable slice: 16.1 按方法分两刀——地址函数 `fileUrl`、`
   - `web/test/files-empty-layout.test.tsx:51-75`（E2）：`归档.zip` 的副行同上；`:74` 的「零次 `file` 请求」改为「恰一次 `file` 请求、415 后显示不支持」，夹具补该路由的 415 信封，用例标题里的 `without a file request` 同改。
   - `web/test/files-page.test.tsx:162-169`：`archive.zip` 的 `file` 请求数由 0 改为 1（夹具补 415），`该类型不支持预览` 的断言不变。
   写作时既有测试里受白名单影响的只有 zip 这一种扩展名（`grep -rnE '\.zip|\.bin|不支持预览' web/test web/e2e`）；走查不选不支持的文件，不受影响。
+  实施注记见 `implementation-notes.md`「17.2、17.5、17.6、17.7 分摊部分（#1087）」。
 - [x] 17.3 守卫（新文件 `web/test/previewers-code-split.test.ts`）：ui-foundation「预览器按需加载是唯一的代码分割」两个场景的静态部分（动态 `import()` 只在 `previewers/index.ts`、`previewers/` 之外不静态导入其内部模块、`vite.config.ts` 无 `manualChunks`、注入样本自证）；
   「构建产物确有按需块」的唯一落点是 `make ui-walk`：在 `web/e2e/ui-walk-files.ts`（组 3 建的 helper）里，`/files` 步骤选中 `readme.md` 之前记录已成功加载的 `.js`，选中时断言新增了至少一个来自同源 `assets/` 的 200 `.js` 响应。
   走查本来就对 `npm run build --workspace web` 的产物运行（CI 的 ui-walk job 先 build 再起服务），所以不新增构建步骤、不改 `.github/workflows/ci.yml` 的步骤序列，也不动 `scripts/test-ci-harness.sh` 的期望；`make check` 与 `make test-guardrails` 不执行构建，不放这条断言。
