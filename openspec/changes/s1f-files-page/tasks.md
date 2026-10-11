@@ -289,10 +289,11 @@ Minimal mergeable slice: 9.1–9.2（移动）与 9.3–9.4（下载）互不依
   各带用例与变异证据（去掉 (a) → 带尾部的包与无尾部的包列表不等或 `truncated` 为 `true` 而判红；去掉 (b) → 这类成员之后的成员丢失或错位而判红）。
 - [x] 10.2 `archive.ts` 的 zip 部分：`yauzl`（新依赖，MIT，登记 `ATTRIBUTION.md`）只读中央目录；成员名超过 4096 字节的成员不计入结果，停读并置 `truncated`（名字随中央目录项读入后判定——`zip` 的名长字段只有 2 字节，读入量有界；不要求在 `yauzl` 交出该项之前拦截）。
   实施注记见 `implementation-notes.md`「10.2（#1064）」。
-- [ ] 10.3 `GET /api/workspaces/:id/archive` 路由（新文件或并入 `rest-entries.ts`），`PREVIEW_ARCHIVE_MAX_ENTRIES` 经 `limits` 传入。
-- [ ] 10.4 测试（新文件 `server/test/workspaces-archive.test.ts`）：workspaces「压缩包列表」五个场景（含「声明超大的长文件名记录」：1 KiB 文件声明 4 GiB 的 `L` 记录、两个成员之后声明 1 GiB 的 pax 头、5000 字节的 zip 成员名与 `L` 名字、注入时钟的未压缩 tar 超时）。
+- [x] 10.3 `GET /api/workspaces/:id/archive` 路由（新文件或并入 `rest-entries.ts`），`PREVIEW_ARCHIVE_MAX_ENTRIES` 经 `limits` 传入。
+  实施注记见 `implementation-notes.md`「10.3、10.4、10.5（#1065）」。
+- [x] 10.4 测试（新文件 `server/test/workspaces-archive.test.ts`）：workspaces「压缩包列表」五个场景（含「声明超大的长文件名记录」：1 KiB 文件声明 4 GiB 的 `L` 记录、两个成员之后声明 1 GiB 的 pax 头、5000 字节的 zip 成员名与 `L` 名字、注入时钟的未压缩 tar 超时）。
   测试用的压缩包在测试里用 `node:zlib` 与手写的 tar / zip 字节现场生成（不入库二进制夹具）；断言请求前后工作空间与临时目录无新增文件。
-- [ ] 10.5 变异证据：到上限后继续读 → 1500 项用例的条数断言判红；对成员名做路径解析 → 「恶意成员名只是数据」里出现空间外访问而判红；不认 GNU 长文件名 → 长路径用例判红；
+- [x] 10.5 变异证据：到上限后继续读 → 1500 项用例的条数断言判红；对成员名做路径解析 → 「恶意成员名只是数据」里出现空间外访问而判红；不认 GNU 长文件名 → 长路径用例判红；
   去掉扩展记录的长度上限（按声明长度分配或读取）→ tar 用例的「单次读取不超过 65536 字节」判红；时限只套在 tar.gz 上 → 未压缩 `slow.tar` 的超时用例判红。
 
 Suggested fixture level: expanded - 解析不可信的二进制格式并对外新增端点；条目上限、长度上限与「不解压、不落盘」是硬约束

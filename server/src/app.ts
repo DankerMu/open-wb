@@ -99,7 +99,7 @@ export interface AssemblyDependencies {
   uploadMaxBytes?: number;
   /** 一条消息可带的附件个数上限；省略时取缺省 10。 */
   uploadMaxFiles?: number;
-  /** 预览的文本、图片、Notebook 三个字节上限；省略时取规格缺省值（由 workspaces 模块给出）。 */
+  /** 预览的文本、图片、Notebook 三个字节上限与压缩包列表的条目数上限；省略时取规格缺省值（由 workspaces 模块给出）。 */
   previewLimits?: PreviewLimits;
   /**
    * 预览依赖（令牌登记表、预览端口、对外来源、文档上限、转换是否可用）；省略时不注册

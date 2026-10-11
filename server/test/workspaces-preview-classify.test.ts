@@ -111,7 +111,12 @@ describe("classifyPreview table", () => {
 
   it("exports the default limits and the four extension sets of the table", () => {
     const limits: PreviewLimits = DEFAULT_PREVIEW_LIMITS;
-    expect(limits).toEqual({ text: 1_048_576, image: 20_971_520, notebook: 10_485_760 });
+    expect(limits).toEqual({
+      text: 1_048_576,
+      image: 20_971_520,
+      notebook: 10_485_760,
+      archiveEntries: 1000,
+    });
     expect([...IMAGE_EXTENSIONS].sort()).toEqual(IMAGE_TABLE.map(([ext]) => ext).sort());
     expect([...AUDIO_EXTENSIONS].sort()).toEqual(["mp3", "wav"]);
     expect([...VIDEO_EXTENSIONS].sort()).toEqual(["mp4", "webm"]);
@@ -280,7 +285,7 @@ describe("classifyPreview limits", () => {
   });
 
   it("applies the limits it is given instead of the defaults", () => {
-    const limits = { text: 16, image: 1024, notebook: 32 };
+    const limits = { text: 16, image: 1024, notebook: 32, archiveEntries: 1000 };
     expectCanonicalError(
       () => classifyPreview("/opaque/small.png", "small.png", 2048, { limits }),
       "preview_too_large",

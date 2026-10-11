@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { registerWorkspaceRest, type WorkspaceRestDependencies } from "./rest.js";
+import { registerWorkspaceArchive } from "./rest-archive.js";
 import { registerWorkspaceEntries } from "./rest-entries.js";
 import {
   registerWorkspacePreviewToken,
@@ -14,6 +15,7 @@ export function registerWorkspaces(
 ): void {
   registerWorkspaceRest(app, dependencies);
   registerWorkspaceEntries(app, dependencies);
+  registerWorkspaceArchive(app, dependencies);
   if (preview !== undefined) {
     registerWorkspacePreviewToken(app, dependencies, preview);
   }
