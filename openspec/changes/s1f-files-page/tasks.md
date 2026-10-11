@@ -525,10 +525,11 @@ Minimal mergeable slice: 19.1 的 hook 与测试先合；`frame.tsx` 的网页�
   压缩包至此不再走 17.2 的过渡规则，17.2 改过的两处 zip 断言同刀再改（记入偏离记录）：`web/test/files-page.test.tsx:162-169` 与 `files-empty-layout.test.tsx` 的 E2 里，选中 zip 由「一次 `file` 请求、415、`该类型不支持预览`」改为「一次 `archive` 请求、零次 `file` 请求、显示成员列表」
   （files-web「目录树与预览」的场景「一次浏览」；夹具补 `archive` 路由的响应）。两处都把原来 `await screen.findByText("该类型不支持预览", …)` 那一行换成 `await screen.findByText(<夹具里的一个成员路径>)`，请求次数的断言排在它之后（成员列表要等压缩包模块加载与 `listArchive` 两步，不能同步取）。E2 的另一半（空目录文案）不动。组 19、20 的其余类别（pdf、办公文档、音视频、Notebook）在写作时的既有测试里没有用例，各自合入时以开工的 grep 为准。
   实施注记见 `implementation-notes.md`「20.3、20.4 / 20.5 / 20.6 的压缩包分摊部分（#1097）」。
-- [ ] 20.4 测试（新文件 `web/test/previewers-media.test.tsx`、`previewers-notebook.test.tsx`、`previewers-archive.test.tsx`）：三条需求的全部场景。写法：三个文件静态导入各自的预览器模块直接渲染；`audio` / `video` 的属性、Notebook 的单元格结构与输出同步断言，Notebook 代码单元的着色元素 `await waitFor(…)`，压缩包的表格与文案在 `listArchive` 落定后才有，一律 `await screen.findBy…`；
+- [x] 20.4 测试（新文件 `web/test/previewers-media.test.tsx`、`previewers-notebook.test.tsx`、`previewers-archive.test.tsx`）：三条需求的全部场景。写法：三个文件静态导入各自的预览器模块直接渲染；`audio` / `video` 的属性、Notebook 的单元格结构与输出同步断言，Notebook 代码单元的着色元素 `await waitFor(…)`，压缩包的表格与文案在 `listArchive` 落定后才有，一律 `await screen.findBy…`；
   「没有经 `fetchPreview` 发出的请求」「点击它们没有任何请求」这类计数断言排在取到正文之后。20.1、20.2 不改动任何既有用例（音视频与 `ipynb` 在既有测试里没有用例，见 20.3 末句）。
-- [ ] 20.5 FL 行：mp3 / mp4 可播放并可拖动进度、ipynb 的单元格与输出、zip / tar.gz 的文件列表与上限说明；结论 `待签`。
-- [ ] 20.6 变异证据：Notebook 的 `text/html` 输出直接插入页面 → 「主文档没有新增 `script` / `table`」判红；压缩包成员名当 HTML 渲染 → 「恶意成员名只是文字」判红；媒体改用 `fetchPreview` → 「没有经 `fetchPreview` 的请求」判红。
+  合入记录：三刀（#1095 / #1096 / #1097）都已合入；「20.1、20.2 不改动任何既有用例」一句不成立——#1095 拆写了 `files-preview-states.test.tsx` 的 mp4 用例，#1096 收窄了 `previewers-table-svg.test.tsx` 的静态扫描，均记在各自 PR 的偏离记录里。FL 行为 FL-16 / FL-18 / FL-17，结论均「待签」。
+- [x] 20.5 FL 行：mp3 / mp4 可播放并可拖动进度、ipynb 的单元格与输出、zip / tar.gz 的文件列表与上限说明；结论 `待签`。
+- [x] 20.6 变异证据：Notebook 的 `text/html` 输出直接插入页面 → 「主文档没有新增 `script` / `table`」判红；压缩包成员名当 HTML 渲染 → 「恶意成员名只是文字」判红；媒体改用 `fetchPreview` → 「没有经 `fetchPreview` 的请求」判红。
 
 Suggested fixture level: compact - 三个互不相干的预览器模块；不可信输出的处理各有反例断言
 Minimal mergeable slice: 三个预览器各自可单独合入（20.1、20.2、20.3 各带自己的测试；20.3 另带它点名的两处 zip 既有断言的改写）
