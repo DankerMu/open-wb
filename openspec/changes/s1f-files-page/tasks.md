@@ -308,10 +308,10 @@ Minimal mergeable slice: 10.1（tar / gz 的遍历器）与它在 10.4 里的用
   实施注记见 `implementation-notes-1.md`「11.2、11.3（#1067）」。
 - [x] 11.3 测试：`server/test/preview-tokens.test.ts`（登记表三个场景）；`server/test/preview-token-rest.test.ts`（「签发与复用」「对外来源与转换可用」「归属与请求体」；IPv6 主机名的方括号；响应头与日志不含令牌）；未装配 `preview` 时 404（http-service-skeleton「未装配预览的可注入 app」）。
   `server/test/http-parser-owners.test.ts` 的归属身份表（`:29-42`，与 `:144-146` 的条数断言、常量名里的条数）加入 `POST /api/workspaces/:id/preview-token`，做法同 9.2 对 `move` 的处理；先合的那一个把条数加一，后合的再加一。
-- [ ] 11.4 跨路由边界测试（扩展 `server/test/workspaces-http.test.ts` 既有的「完整真实装配与隔离」用例，写成一份表驱动）：workspaces「工作空间 HTTP 集成边界」的场景「新增路由沿用同一边界」——对 `archive`、`download`、`DELETE entries`、`move`、`preview-token` 五条路由逐条断言：
+- [x] 11.4 跨路由边界测试（扩展 `server/test/workspaces-http.test.ts` 既有的「完整真实装配与隔离」用例，写成一份表驱动）：workspaces「工作空间 HTTP 集成边界」的场景「新增路由沿用同一边界」——对 `archive`、`download`、`DELETE entries`、`move`、`preview-token` 五条路由逐条断言：
   他人与不存在的 id 带越界路径（或越界的 `from`/`to`）→ 相同的 404、没有 `sandbox.reject` 审计行、没有文件系统变化；未认证 → 401；`archive`、`download`、`DELETE entries` 的重复 `path` → 400；全部响应带 `Cache-Control: no-store`。Depends on 8.2、9.1、9.3、10.3、11.2（被测的五条路由；因 8.2、9.1 而间接等 1.2。组 11 里只有本任务与 11.5 的最后一条变异有这个依赖）。
   实施注记见 `implementation-notes.md`「11.4、11.5 的最后一条变异（#1075）」。落点订正：用例在新文件 `server/test/workspaces-http-boundary.test.ts`，写成一份表驱动；`workspaces-http.test.ts` 不加行（736 行，加表会破 800）。
-- [ ] 11.5 变异证据：`lookup` 顺手续期 → 「查找不续期」判红；他人的工作空间也签发 → 归属用例判红；`base` 用 `Host` 头里的端口 → 端口断言判红；任一新路由把路径检查放到归属检查之前 → 11.4 的表里该路由出现 403 与审计行而判红。
+- [x] 11.5 变异证据：`lookup` 顺手续期 → 「查找不续期」判红；他人的工作空间也签发 → 归属用例判红；`base` 用 `Host` 头里的端口 → 端口断言判红；任一新路由把路径检查放到归属检查之前 → 11.4 的表里该路由出现 403 与审计行而判红。
   订正（#1075，实测）：本条末句「路径检查放到归属检查之前 → 任一新路由出现 403 与审计行」过强。沙箱的 `resolve` 自己先查归属，所以该变异下他人与不存在的 id 的越界行仍是 404、无审计行（它们的畸形行因解析随之前移而得 400，也判红）；403 加一条 `sandbox.reject` 只出现在「属自己但根目录不在」的 id。`preview-token` 没有路径参数，该变异对它不可观察，替代变异是把归属检查挪到 body 判断之后。
 
 Suggested fixture level: expanded - 新的鉴权凭据及其签发端点
