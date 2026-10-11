@@ -511,7 +511,7 @@
 - 切换按钮用拷入层 `Button type="button" variant="secondary"`，文案 `查看源码` / `图片视图`，失败态下仍在；源码视图静态导入 `./code.js` 的 `CodeView`。
 - 模块里不得用 `Icon`（它渲染内联 `svg`，会让「没有内联 svg」断言无法成立）。
 - 规格未写明的分支，取最简并进偏离记录：(1) 失败后切到源码再切回，仍显示 `无法显示该图片`，不重新挂 `img`；(2) 同一 `path` 刷新取回不同内容时失败态自动解除（靠 `failedSrc === src` 的比较，不用 effect），依据是规格句「移除**该** `img`」——新内容是新图；(3) `无法显示该图片` 不加 `role`（规格没给，只禁 Toast），用例按文案取；(4) 源码视图本刀不传文件名给 `CodeView`，按 xml 着色由 #1091 在加可选文件名参数时把 `svg.tsx` 的调用一并补上。
-- 证据级别（措辞不得超过证据）：「`img` 里的 SVG 不执行脚本」「非法 SVG 会触发 `error`」「`data:` 地址能显示图片」都是由浏览器行为推导，未实测——jsdom 不加载图片也不派发 `error`，失败用例用 `fireEvent.error(img)` 人工触发，PR 里照此标注。接近 1 MiB 的 SVG 百分号编码后地址可达数 MiB，浏览器能否承受未实测，记为残余。`encodeURIComponent` 遇孤立代理项会抛 `URIError`；经 `fetchPreview` 的文本来自 `response.text()`（`api-files.ts:298`）的 UTF-8 解码，由代码推导不会产生孤立代理项，不加防护、不加用例。
+- 证据级别（措辞不得超过证据）：「`img` 里的 SVG 不执行脚本」「非法 SVG 会触发 `error`」「`data:` 地址能显示图片」都是由浏览器行为推导，未实测——jsdom 不加载图片也不派发 `error`，失败用例用 `fireEvent.error(img)` 人工触发，PR 里照此标注。接近 1 MiB 的 SVG 百分号编码后地址可达数 MiB，浏览器能否承受未实测，记为残余。`encodeURIComponent` 遇孤立代理项会抛 `URIError`；经 `fetchPreview` 的文本来自 `response.text()`（`api-files.ts:298`）的 UTF-8 解码，由代码推导不会产生孤立代理项，不加防护、不加用例。（实施后订正：这三项在真实栈走查里已实测，仅 Chromium——提示框监听带正对照，全程 0 个；`bad.svg` 显示失败文案；613,773 字节的 SVG 编码后约 151 万字符的地址正常显示。Firefox、WebKit 未测。）
 - 测试落在 `web/test/previewers-table-svg.test.tsx`，`describe("SvgPreviewer")`，静态导入模块直接渲染、同步断言。夹具文本须含 `<script>`、`#`、`%`、中文与换行（不要写颜色字面量）。
 - 「图片方式加载」：渲染前先断言 `document.querySelector("svg, script")` 为 null；渲染后 `img` 的 `src` 以完整字面量 `toBe`（含 `%3Cscript%3E` 与 `%23`，不在期望里再调 `encodeURIComponent`），`alt` 为文件名，`document.querySelector("svg, script")` 仍为 null，`createObjectURL` 未被调用。
 - 切换：点 `查看源码` 后各行文本等于原文各行（含 `<script>` 那行，证明内容确实到了），按钮名为 `图片视图`，无 `img`；点回后 `img` 复现。
@@ -535,7 +535,7 @@
 - FL 行（origin/master 上 FL 节到 FL-08，取合入时的下一个编号，结论 `待签`）。
 - 操作：「接 FL-05 的空间与会话标签页，从「+」菜单「上传文件」再传入自备的 logo.svg（一张能正常显示的矢量图，文件里另含一个调用 alert 的 script 元素）与 bad.svg（内容只有一行普通文字）；回文件页点「刷新」，展开 uploads，依次点 logo.svg、点「查看源码」、点「图片视图」、点 bad.svg、点「查看源码」」
 - 期望：「logo.svg 显示为图片且不超出预览区，全程不弹出任何提示框；「查看源码」后是带行号的 SVG 原文（能看到 script 那一段），按钮变为「图片视图」；点回后又是图片；bad.svg 显示「无法显示该图片」，没有破图图标，仍可点「查看源码」看到那行文字」
-- 坑：依赖 #1087 去掉白名单；会话上传是否限制 `svg` 扩展名未核实（grep 未见扩展名白名单，属推断），实现者先走一遍；被截断的 SVG 需要 1 MiB 以上的文件，不进清单行。
+- 坑：依赖 #1087 去掉白名单；会话上传是否限制 `svg` 扩展名未核实（grep 未见扩展名白名单，属推断），实现者先走一遍；被截断的 SVG 需要 1 MiB 以上的文件，不进清单行。（实施后订正：`.svg` 可经会话上传，实测。）
 - 变异：`svg.tsx` 用 `dangerouslySetInnerHTML={{ __html: content }}` 渲染 → 「图片方式加载」的 `querySelector("svg, script")` 判红，静态断言同红。
 - 变异：经 ref 写 `.innerHTML` → 同上两条判红（静态断言靠 `.innerHTML` 一项）。
 - 变异：去掉 `encodeURIComponent`，或换成 `encodeURI` → `src` 的完整字面量断言判红（`%3C` / `%23`）。
