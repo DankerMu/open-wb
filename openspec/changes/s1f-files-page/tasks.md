@@ -386,7 +386,7 @@ Minimal mergeable slice: atomic - 一条路由、它的映射表与转换器在�
 
 ## 16. files-web — API 客户端：`api-files.ts`
 
-- [ ] 16.1 新文件 `web/src/lib/api-files.ts`：两个地址函数 `fileUrl`、`downloadUrl` 与 `listArchive`；传输由 `api.ts` 注入、对 `api.ts` 只有类型导入；响应严格解析。`api.ts` 只加接线与类型再导出（不超过 800 行；必要时把既有工作空间方法一并挪进 `api-files.ts`）。
+- [x] 16.1 新文件 `web/src/lib/api-files.ts`：两个地址函数 `fileUrl`、`downloadUrl` 与 `listArchive`；传输由 `api.ts` 注入、对 `api.ts` 只有类型导入；响应严格解析。`api.ts` 只加接线与类型再导出（不超过 800 行；必要时把既有工作空间方法一并挪进 `api-files.ts`）。
   实施注记见 `implementation-notes-1.md`「16.1 的地址函数部分，含分摊的 16.4 / 16.5 条款（#1079）」。
   实施注记见 `implementation-notes.md`「16.1 的 listArchive 部分、16.4、16.5（#1080）」。
 - [x] 16.2 `api-files.ts`：`moveEntry`、`deleteEntry`、`issuePreviewToken`（同样的注入与严格解析）。
@@ -395,7 +395,7 @@ Minimal mergeable slice: atomic - 一条路由、它的映射表与转换器在�
   实施注记见 `implementation-notes.md`「16.2（deleteEntry）、16.4、16.5（#1084）」。
 - [x] 16.3 `fetchPreview` 的图片类型集合扩到六种，`audio/*`、`video/*`、`image/svg+xml`、`text/html` 仍按失败处理。
   实施注记见 `implementation-notes-1.md`「16.3（#1081）」。
-- [ ] 16.4 测试（`web/test/api-files.test.ts` 扩充）：files-web「API 客户端扩展」五个场景，随 16.1–16.3 各自的方法分批加入，对应如下——
+- [x] 16.4 测试（`web/test/api-files.test.ts` 扩充）：files-web「API 客户端扩展」五个场景，随 16.1–16.3 各自的方法分批加入，对应如下——
   地址函数一刀（`fileUrl`、`downloadUrl`）：「地址函数与严格解析」里两个地址的编码与「没有发出请求」；「模块划分可持续验证」（`api-files.ts` 对 `./api.js` 只有 `import type`，size-guard 与 knip 通过——这一刀建文件时就成立，之后每一刀都重跑）。
   `listArchive` 一刀：「方法与错误码」里它的一行（`GET …/archive?path=`、返回形状、四种错误信封）；「地址函数与严格解析」里 `entries` 含 `type` 为 `link` 的残缺响应。
   `issuePreviewToken` 一刀：「方法与错误码」里它的一行（无 body 的 `POST …/preview-token`）；「地址函数与严格解析」里缺 `base` 的残缺响应。
@@ -403,7 +403,7 @@ Minimal mergeable slice: atomic - 一条路由、它的映射表与转换器在�
   16.3 一刀：「预览元数据与资源」里 `image/gif`、`image/webp` 两种类型；「失败不变成预览」里 `text/html`、`image/svg+xml`、`video/mp4` 三种 Content-Type（该场景其余既有断言不动）。
   「方法与错误码」里「十个发请求的方法」这个总数，随四个新方法中最后合入的那一刀成立；先合的各刀只断言自己那一行与既有六个方法不回归。
   `web/test/chat-module-layout.test.ts` 同款的导入方向断言加上 `api-files.ts`（对 `./api.js` 只有 `import type`）。
-- [ ] 16.5 变异证据：`downloadUrl` 不编码 `&` → 地址函数用例判红；接受缺 `base` 的令牌响应 → 严格解析用例判红；把 `video/mp4` 当图片 → 「失败不变成预览」判红。
+- [x] 16.5 变异证据：`downloadUrl` 不编码 `&` → 地址函数用例判红；接受缺 `base` 的令牌响应 → 严格解析用例判红；把 `video/mp4` 当图片 → 「失败不变成预览」判红。
 
 Suggested fixture level: compact - 客户端方法的机械扩充，契约由 mock fetch 测试钉住
 Minimal mergeable slice: 16.1 按方法分两刀——地址函数 `fileUrl`、`downloadUrl`（Depends on 9.3）带用例先合，`listArchive`（Depends on 10.3）带用例随后，组 17 只依赖前一刀；16.3（Depends on 6.1）带自己的用例随后；16.2 按方法分刀——`issuePreviewToken`（Depends on 11.2）、`moveEntry`（Depends on 9.1）、`deleteEntry`（Depends on 8.2）各带自己的用例，后两个间接等 1.2，前一个不等。每个方法都有测试引用（`web/test/**/*.test.ts(x)` 是 knip 的入口），不需要为过 knip 另造调用点，也不改 `knip.json`
