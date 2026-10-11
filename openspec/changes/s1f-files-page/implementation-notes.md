@@ -424,3 +424,24 @@
 - 变异：不可观察：`ArchiveListing` 多留一个无人用的导出（只有 knip 报，没有测试会红）。
 - 变异：不可观察：超出安全整数的 `size`（规格无场景，不为它造用例）。
 - 变异：不适用于本刀：穿越、符号链接、他人空间 404、`sandbox.reject` 审计都是服务端行为，已由 #1065 的 `server/test/workspaces-archive-route.test.ts` 承担。客户端只有「路径是数据」（用例 A、B）与 id 编码（用例 A）两条。
+
+## 17.4（#1086）
+
+- 前提与边界：不触及 Critical Path（一个新测试文件加纯数据导出，不取数、不处理路径、不加路由），一个评审席；对 #1286 的替换窗口既不闭合也不加宽（本刀没有路由）；不在 1.1 / 1.2 / 1.3 挡住的集合里；不加 FL 行（无用户可见变化）；不涉及配置与文档表。前置按代码核实已合：17.1（#1085，`web/src/features/files/previewers/kind.ts` 56 行）与 6.1（`server/src/workspaces/preview.ts:50-53` 导出 `IMAGE_EXTENSIONS` / `AUDIO_EXTENSIONS` / `VIDEO_EXTENSIONS` / `NOTEBOOK_EXTENSIONS`，文件 246 行）。issue 的 17.4 摘录与 `tasks.md` 的 17.4 逐字相同。
+- 与 issue 的差异（origin/master 为准）：issue 写「`kind.ts` 为此导出的四个集合（若 #1085 尚未导出）」——确实未导出，`kind.ts:10-33` 只有一张未导出的 `KIND_BY_EXTENSION: Map<string, PreviewKind>`（#1085 注记写明留给本刀），所以**本刀必须改 `kind.ts`**。`design.md:81` 只说「图片与音视频」，规格句与任务写四个集合含 Notebook——以规格句为准，不改 design。
+- `kind.ts` 的导出形状：四个集合必须从 `KIND_BY_EXTENSION` **派生**，不得另写字面量（否则只改 `previewKind` 实际查的那张表时契约测试看不见）。加一个未导出的 `extensionsOf(kind: PreviewKind): ReadonlySet<string>`（过滤 Map 的值），再导出 `IMAGE_EXTENSIONS = extensionsOf("image")` 及 `AUDIO_` / `VIDEO_` / `NOTEBOOK_` 三个同形常量，名字与服务端一致；`previewKind` / `textView` / `fileExtension` 不动，`previewers/index.ts` 不加再导出（`web/src` 内无导入方）。`kind.ts` 改后约 70 行。
+- 取服务端集合的方式（规格未规定手段；任务写「读取…导出的四个集合」，issue 补充说明写「沿用读源码断言、不把服务端运行时代码 import 进浏览器包」，两者都无先例：`web/**` 没有任何文件导入 `server/`，读源码的只有 `web/test/ui-support.ts:11` 的 `readRepoFile`）。定为**测试文件直接导入** `../../server/src/workspaces/preview.js` 的四个常量：测试不是浏览器包，`web/src` 仍零服务端导入；记入 PR 偏离记录。
+- 直接导入可行性（推断，未实测）：`preview.ts` 只依赖 `node:fs`、`node:stream` 与 `server/src/core/errors/index.ts`（后者无导入）；`web/tsconfig.json` 已有 `types: ["node"]`，`@types/node` 在根 `package.json`；web 与 server 共用 `tsconfig.base.json` 的严格项，仅模块解析不同（Bundler 可把 `.js` 说明符解析到 `.ts`）；jsdom 环境下 `node:fs` 可用（`ui-support.ts:1` 已在用）；服务端文件不计入 web 覆盖率（评审订正：起作用的是 vitest 的 `allowExternal` 缺省为 `false`，不是 `include` 的 `src/**`；日后若打开 `allowExternal`，`preview.ts` 会进 web 覆盖率分母。读配置推出，未测）。
+- 退路（仅当 `npm run typecheck --workspace web` 或 `npx knip` 因跨工作区导入报错时启用，并在 PR 说明原因）：`readRepoFile("server/src/workspaces/preview.ts")` 读源码。注意 `:50-52` 三个集合是 `new Set(X_CONTENT_TYPES.keys())` 派生的，必须从 `:28-44` 三张 Map 的字面量取键、从 `:53` 取 Notebook 字面量，并断言 `:50-52` 仍是那三行派生式、每个取到的集合非空；只用正则字面量（semgrep）。服务端日后挪动这些表时该测试须跟着改（教训 4）。
+- `web/test/preview-kind-contract.test.ts`（新，约 40 行）：直接导入 `../src/features/files/previewers/kind.js`——17.3 守卫的现状用例只扫 `web/src` 与 `vite.config.ts`（`previewers-code-split.test.ts:88`），测试文件不受「`previewers/` 之外不得静态导入内部模块」约束（由代码得出）。两侧同名常量用 `import { IMAGE_EXTENSIONS as SERVER_IMAGE … }` 区分。
+- 断言形式：`it.each` 四行（图片 / 音频 / 视频 / Notebook），每行 `expect([...client].sort()).toStrictEqual([...server].sort())`，判红时能指出是哪个集合；再加一条把导出集合绑回判定函数：对服务端四个集合的每个扩展名，`previewKind("x." + ext)` 等于该类别。不写集合大小的字面量（内容归 #1055 / #1085，服务端字面量已由 `server/test/workspaces-preview-classify.test.ts:120-123` 钉住）。
+- 现状两侧相等（逐项读表）：图片 `png jpg jpeg gif webp bmp ico`、音频 `mp3 wav`、视频 `mp4 webm`、Notebook `ipynb`——测试合入即绿，本刀不改任何既有测试。重跑 grep：四个 `*_EXTENSIONS` 名字在 `web/` 零命中，无重名；`web/test` 下没有名字含 `kind` 的既有文件。
+- 门槛：新文件远低于 800 行；knip 上新导出的导入方是测试（`knip.json` 的 web 入口含 `test/**/*.test.ts`），服务端四个导出已有 `server` 侧导入方；knip 对「web 测试导入 server 源文件」是否有额外报告未实测（见退路）；jscpd 无克隆；`ui-layering.test.ts` 不动；无新依赖；文件名过 naming-guard。PR 勾选 `tasks.md` 的 17.4，即触及 `openspec/`，PR 描述须写明（教训 9）。
+- 批内次序与共同文件：本刀改 `kind.ts`；#1087（17.2）、#1088（18.2 tsv）、#1089 / #1090（18.x svg、图片）都可能改 `kind.ts`，给定次序里本刀在它们之前，无需调整。本刀合入后，任何给图片 / 音频 / 视频 / Notebook 增删扩展名的刀必须同一 PR 同改 `server/src/workspaces/preview.ts` 与 `kind.ts`，否则 `make check` 红；pdf / office / archive / `TEXT_VIEW_BY_EXTENSION` 的改动不受本测试约束。
+- 覆盖强度：契约测试只证明两张表相等，以及导出集合与 `previewKind` 一致（由代码得出）。它不证明服务端路由对这些扩展名的实际响应（归 6.x 的服务端测试），也不覆盖 pdf / office / 压缩包行（issue 明确出范围；「判定表」归 17.5）。
+- 变异：`kind.ts` 的 `KIND_BY_EXTENSION` 加 `["avif", "image"]` → `preview-kind-contract.test.ts` 图片行判红（唯一红点，即验收要求的自证之一）。
+- 变异：`KIND_BY_EXTENSION` 删 `["ico", "image"]`，或把 `["wav", "audio"]` 改成 `"video"` → 对应行判红（后者音频、视频两行同红），绑定用例同红。
+- 变异：服务端 `IMAGE_CONTENT_TYPES` 加 `["avif", "image/avif"]` → 契约测试图片行与绑定用例判红，`server/test/workspaces-preview-classify.test.ts:120` 同红（验收自证之二；临时改动，不提交）。
+- 变异：服务端 `NOTEBOOK_EXTENSIONS` 改成 `new Set(["ipynb", "nb"])` → 契约测试 Notebook 行判红，`workspaces-preview-classify.test.ts:123` 同红。
+- 变异：`extensionsOf` 的过滤条件写错（如恒真）→ 四行全红；把某个导出改成手写字面量、之后只改 `KIND_BY_EXTENSION` → 绑定用例判红（仅当服务端有而 Map 缺时）。
+- 变异：不可观察：集合内元素顺序（比较前排序）；pdf / office / archive 行与 `TEXT_VIEW_BY_EXTENSION` 的任何改动（出范围）；导出改成字面量后往 `KIND_BY_EXTENSION` **多加**一个服务端没有的扩展名（绑定用例只遍历服务端集合）——这正是规定「必须派生」的理由，靠评审把住。
