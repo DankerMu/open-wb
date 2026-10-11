@@ -6,15 +6,15 @@
  * records every `issue` call.
  *
  * What is new here: the five routes compared byte for byte with the 404 of `GET …/tree` for the
- * same id and caller; audit and file system unchanged against an asserted starting point; and
- * `no-store` on every row, `preview-token` included. The 401 and duplicate-`path` 400 rows repeat
- * what each route's own file already pins.
+ * same id and caller; audit and file system unchanged against an asserted starting point;
+ * `no-store` on every row; the 401 for a rootless id, and for an unknown one on the four routes
+ * with a path. The 401 on an owned id and the duplicate-`path` 400 repeat each route's own file.
  *
  * What it does not show: it pins the order of the checks, one request at a time, through `inject`
  * and the source handlers. No row opens a window between a check and the open or the rename that
  * follows it (design D22 / D-23, #1286 stays open; nothing here closes or widens it).
  */
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance } from "fastify";
@@ -314,8 +314,18 @@ describe("workspace routes: 新增路由沿用同一边界", () => {
         "files/b.md": "file:keep",
         x: "file:outside",
       });
+      // `x.zip` was moved, not removed: one batch in the recycle directory of this workspace
+      // holds it, bytes intact, and the audit row names that batch.
+      const trash = join(sandboxRoot, ".trash", "u1", id);
+      const batches = readdirSync(trash);
+      expect(batches).toHaveLength(1);
+      expect(contentOf(join(trash, String(batches[0])))).toEqual({
+        "x.zip": START["u1/files/x.zip"],
+      });
       expect(auditRows(db, "file.download").map((row) => row.detail.path)).toEqual(["keep.md"]);
-      expect(auditRows(db, "file.delete").map((row) => row.detail.path)).toEqual(["x.zip"]);
+      expect(auditRows(db, "file.delete").map((row) => row.detail)).toEqual([
+        { path: "x.zip", type: "file", trashId: batches[0] },
+      ]);
       expect(auditRows(db, "file.move").map((row) => row.detail)).toEqual([
         { from: "keep.md", to: "b.md", type: "file" },
       ]);
@@ -325,17 +335,22 @@ describe("workspace routes: 新增路由沿用同一边界", () => {
 
   it("answers 401 without a session on all five routes, before the id and the path are looked at", async () => {
     await withBoundaryWorld(async (world) => {
-      for (const route of ROUTES) {
-        for (const request of [
-          ...route.escaping(FILES_WORKSPACE),
-          ...route.malformed(FILES_WORKSPACE),
-        ]) {
-          expectEnvelope(
-            await send(world.app, request, null),
-            401,
-            UNAUTHORIZED_ENVELOPE,
-            `${route.name}, ${request.label}`,
-          );
+      // The ids case one answers 404 for when zhangsan asks, and the one that is there.
+      const ids: Array<[label: string, id: string]> = [
+        ["owned id", FILES_WORKSPACE],
+        ["unknown id", MISSING_WORKSPACE],
+        ["rootless id", ROOTLESS_WORKSPACE],
+      ];
+      for (const [kind, id] of ids) {
+        for (const route of ROUTES) {
+          for (const request of [...route.escaping(id), ...route.malformed(id)]) {
+            expectEnvelope(
+              await send(world.app, request, null),
+              401,
+              UNAUTHORIZED_ENVELOPE,
+              `${kind}, ${route.name}, ${request.label}`,
+            );
+          }
         }
       }
 
