@@ -1012,3 +1012,37 @@
 - 变异：搬家时改了 `registerListenerShutdown` 的行为 → 既有 `listener-shutdown.test.ts` 判红（它未改即为证据）。
 - 变异：不可观察：`lstat` 与打开之间的替换（#1286 窗口），测试不造竞态，属登记残余。
 - 变异：不可观察：畸形请求行、超大请求头这类 socket 层 400 / 431，由 Node 的 `clientError` 路径应答，不经本实例的任何处理器，本刀不测。
+
+## 14.2，含分摊的 14.5 / 14.6 条款（#1073）
+
+- Critical Path「omp 子进程治理」同类（本刀决定转换进程何时启动、何时被中止杀掉；不新增 spawn、不改 sudo 前缀）：两个评审席位，PR 标白盒审查。没有路由、不经 `sandbox.resolve`；纯服务端、生产入口无调用方（15.1 才接）：无验收清单行、无配置键（`server/src/preview-config.ts:38` 的 `officeConvertConcurrency` 已在，本刀不读）、不动 `docs/architecture/system.md` 与 `server.ts`。
+- 前置核对（按代码）：0.1、14.1、14.4、14.7、14.3 均已在 origin/master（`office.ts` 325 行、`office-cache.ts` 226 行、`fake-soffice.mjs` 在）；不在 1.2 挡住的集合里，1.1 / 1.3 不挡。与本批 #1065、#1069、#1082–#1085 无共用源文件，只有 `tasks.md` / `implementation-notes.md` 的叠栈冲突。
+- 落位（由交接与既有测试定死）：新文件 `server/src/preview/office-queue.ts` 导出 `createOfficeQueue({concurrency}) → {run(key, task: (signal: AbortSignal) => Promise<string>, signal?): Promise<string>; close(): void}`，不碰 fs；`createOfficeCache` 选项加必填 `concurrency`，在 `office-cache.ts:93-100` 的未命中路径上调 `queue.run(key, 共用任务)`，共用任务 = `converter.convert(absInput, 内部 signal)` + `rename` + 失败时 `unlink`。
+- 否决的两种落位：做进 `createOfficeConverter`（`office-converter.test.ts:402-419` 钉着同一输入转两次、启动两次）；包在缓存与转换器之间（共用者拿到同一个 `pdf/<随机名>.pdf`，第一个 `rename` 成功，其余 `ENOENT → failed`）。
+- 与 issue「PR Boundary」的差异（origin/master 为准）：除 `office-queue.ts` 与新测试外必须改四处——`office-cache.ts`（接线 + 头注释 `:7-8`「各转一次…去重不在这里」改写）、`office.ts`（`:30` 的种类并集加 `"busy"`，头注释 `:13-14` 指向新文件，其余不动）、`office-cache.test.ts`（见下）、`fake-soffice.mjs`（加一个标记）。没有测试钉种类集合（`kindOf` / `expectBareKind` 只比字符串）。
+- 到达次序必须在 `convert()` 调用的同一拍内定下（读代码推出，抖动未实测）：现在的 `await lstat(输入)`、`await lstat(槽)` 走线程池、完成次序不保证，五个同时调用会乱序入队，同键调用也会都越过未命中检查。
+- 定案：`officeCacheKey` 与 `touchIfCached` 改用 `lstatSync` / `utimesSync`，`cached()` 在调 `queue.run` 之前没有 `await`；`officeCacheKey` 返回值由 `Promise<string>` 变 `string`（偏离记录）。`office-cache.test.ts:103`、`:202` 的 `await` 运行时照常通过，Biome 若报就去掉 `await`，属等价改写。否决：用 promise 链串行化准入（多一层状态，仍要处理链上的中止）。
+- 队列语义（`QUEUE_LIMIT = 8` 写死在模块里）：键已在表里 → 加入，不占新位置、不判 `busy`（`spec.md:58`「只占一个运行或排队位置」定的，不是未写明分支）；否则有空位即同步启动，没空位且排队组数 < 8 入队，= 8 则以 `OfficeConvertError("busy")` 拒绝。排队深度按组计，不按调用计。名额在整个共用任务（含 `rename`）落定时释放，成败都放，按 FIFO 启动下一组；组落定时从表里删掉（成败都删）。
+- 检查次序（`spec.md:12` 的次序 + 「转换缓存」「命中…直接返回，不启动进程」定的）：`unavailable` → `aborted`（已 `close` 或 signal 已中止）→ 非绝对路径 `failed` → 输入 `lstat` 失败 `failed` → 命中直接返回（队满也不是 `busy`）→ 加入已有的键 → `busy` → 入队。`PATH` / `setpriv` 前置检查在出队启动时才由转换器做。
+- 中止（`spec.md:58` 末句）：交给转换器的是每组一个的内部 `AbortController`，按存活调用计数。某个调用的 signal 中止 → 它立即以 `aborted` 落定并摘掉监听，其余不受影响。计数归零时：排队中的组出队、删键、不启动；运行中的组 `abort()` 内部控制器并立即删键（其后同键的新调用另开一组），名额等该进程落定才放。没有等待者的共用 promise 要挂空 `catch`，不得冒出未处理的拒绝。
+- 本刀自定的未写明分支（偏离记录）：`close()` 先把排队的组全部以 `aborted` 拒绝（零启动），再中止运行中的组并 `await converter.close()`，最后等共用任务落定；`concurrency` 不是正整数时 `createOfficeCache` 同步抛固定 message 的普通错误（0 会让每个调用永远排队）；规格签名里的 `concurrency` 落在缓存工厂上，合成体归 15.1。
+- 窗口声明（D-23：不宣称闭合；全部读代码推出，没有实测）：本刀没有路由，不新增按路径的操作。但排队把两段既有间隔拉长了——① 键的 `lstat` → 转换进程按路径读输入；② 15.1 的 `resolve` → 转换进程打开输入（#1286 同类，同 uid 模式下读的一方是应用用户）。原先是毫秒级；现在最坏约 `ceil(8 / concurrency) × timeoutMs`（缺省值下约 4 分钟，`concurrency` 为 1 时约 8 分钟）。这是 D17 排队的固有结果，是否算「放宽」需 owner 认定，PR「已知残余」须照此写。
+- 既有测试：`office-cache.test.ts:239-251` 的标题与 `:248` 的 `toHaveLength(2)` 改为共用一次、`toHaveLength(1)`（#1072 交接点名的改写，逐条进偏离记录），`:62-73` 的 `cacheOn` 传 `concurrency`；`:185`、`:377` 是顺序调用，不变。`office-converter.test.ts`（795）、`office-converter-output.test.ts`、`office-work-clear.test.ts` 零改动。
+- 夹具：`fake-soffice.mjs` 现有 14 个标记里没有「等放行」的，加 `gate`——写记录、写出完好 PDF、轮询 `<输入路径>.release`（30 秒上限），出现即退出码 0；既有标记不动。`standIn` 只换一次，带不动五个并发。
+- 新测试 `server/test/office-queue.test.ts`（预计 350–450 行）：用 `office-cache-helpers.ts` 的 `bench` / `closers` / `setEnv` / `FAKE_SOFFICE` / `PDF`，不另抄脚手架（jscpd）；用例标题见变异清单 T1–T11；T1–T3 是规格三场景。准入同步，所以「至多 2 个」「零启动」直接断言 `on.launches`，不靠定时等待。T9 是 14.1 留下的 `OMP_USER`「名额已释放」：`bench({sudo:false})` 后把 `<bin>/sudo` 链到 `fake-soffice.mjs`（不是 `fake-sudo-find.mjs`，它对转换的 argv 行为不对）、`useSetprivStub()`、`concurrency: 1`、`a@spawn-sleep.docx` + 短超时。
+- 门槛：`createOfficeQueue` 的导入方是 `office-cache.ts`，knip 无虞，只导出用到的符号；`office-queue.ts` 不反向导入 `office-cache.ts`；函数拆小过 Biome 复杂度 15；正则一律字面量；超时用例抖动则放大数值、不放松断言。
+- 变异：T1「并发 2、五个不同输入：同时运行至多 2 个，放行一个恰启动下一个，启动次序等于到达次序」← 去掉并发上限（五次调用返回时 `launches` 为 5）；出队改 LIFO；落定时一次启动两个。
+- 变异：T2「并发 1、一个运行八个排队：第十个立即 busy，零启动、不建作业目录，先前九个成功」← 排队上限改 9 或去掉；`busy` 改成入队等待；`busy` 前先建作业目录不可达（建目录在转换器内），不可观察。
+- 变异：T3「同一输入并发三次：恰启动一次、同一路径；一个中止其余两个成功，进程没被杀」← 去掉去重（14.6 点名的那条；`office-cache.test.ts:239` 同时判红）；任一调用中止即杀进程；把调用方的 signal 直接传给转换器。
+- 变异：T3 ← 只在转换器一层去重、`rename` 留在外面：后两个调用得 `failed`。
+- 变异：T4「同键三个调用全部中止：进程被 SIGKILL、`pdf/` 为空，随后同一输入重新启动并成功」← 全部中止后不杀进程；归零后不删键（新调用挂在将死的组上得 `aborted`）。
+- 变异：T5「排队中的调用被中止：立即 aborted，不启动、不建作业目录，腾出的位置可再用」← 中止后不出队（放行前一个后 `launches` 多一项）；出队但不腾排队计数（再来一个得 `busy`）；中止的调用等到轮到它才落定。
+- 变异：T6「队满时加入已在排队或运行的键：不是 busy，不占新位置」← `busy` 判定放在加入之前；排队深度按调用数计。
+- 变异：T7「close()：排队的全部 aborted 且零启动，运行中的被终止，其后 convert 为 aborted」← `close()` 不清队列。预期只有「`close()` 返回时排队者已全部落定」这一条断言能抓住（不清队列时排队者仍会在转换器的 `closed` 短路上得 `aborted`、零启动）；实现者须先确认它确实判红，否则记不可观察。
+- 变异：T8「超时与非 0 退出之后名额已释放：下一个立即启动（同 uid）」← 只在成功时释放名额；名额在中止那一刻而不是落定时释放（改为断言被杀进程 `exit` 之前第二个没有启动）。
+- 变异：T9「OMP_USER 模式：假 sudo 被 SIGKILL 后名额已释放，随后的转换立即启动」← 同上「只在成功时释放」在 sudo 分支的判据；假 `sudo` 恰启动一次的断言沿用 14.1。
+- 变异：T10「已缓存的输入在队满时照常命中，不是 busy、零启动」← 命中检查放到排队之后。
+- 变异：T11「concurrency 为 0、负数、小数：构造即抛固定 message」← 去掉校验。
+- 变异：`office-cache.test.ts` 既有「失败不入缓存」三例 ← 失败的组不从键表删除（第二次调用拿到旧的拒绝）。
+- 变异：不可观察：准入改回异步后的乱序与双启动（时序竞态，无法定时注入，T1 / T3 只会偶发红，靠白盒审查）；绕过注入的 spawn 直接起进程；`OMP_USER` 模式下残留 `soffice.bin` 使实际并发超过上限（已登记残余 D-25，归 28.6 人工验证）；排队拉长窗口期间输入被换（同上，无法定时注入）。
+- 变异：不适用的越界向量：目录穿越、符号链接、跨空间 id、他人空间 404 先于路径检查、`sandbox.reject` 审计——本刀没有路由与 `resolve`，随 15.1 的 `/o/` 路由。
