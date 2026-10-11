@@ -362,8 +362,8 @@ export function WorkspaceBrowser({
     revealRef.current = null;
   }, [awaitDirectory, expandDirectories, loadDirectory, onPathChange, selectFile]);
 
-  // `path` 属性只在变化时生效一次（与当前选中相同则不动，`null` 清掉选中）；其后每当目录列表或
-  // 进行中的目录请求有变化，推进定位。
+  // `path` 属性只在变化时生效一次，每次都顶掉进行中的定位：与当前选中相同就只是放弃它，`null` 另清掉
+  // 选中，其余换成对 `path` 的定位。其后每当目录列表或进行中的目录请求有变化，推进定位。
   // biome-ignore lint/correctness/useExhaustiveDependencies: `directories` 与 `loadingPaths` 是推进定位的触发条件。
   useEffect(() => {
     if (appliedPathRef.current !== path) {
@@ -378,8 +378,9 @@ export function WorkspaceBrowser({
           publishSelectedFile(null);
           setPreviewLoading(false);
         }
-      } else if (selectedFileRef.current?.path !== path) {
-        revealRef.current = { asked: new Set(), notify: false, path };
+      } else {
+        revealRef.current =
+          selectedFileRef.current?.path === path ? null : { asked: new Set(), notify: false, path };
       }
     }
     continueReveal();
