@@ -263,13 +263,28 @@ describe("文件页的预览状态", () => {
     expect(fileRequests(fetchMock)).toStrictEqual([`${FILE}readme.md`]);
   });
 
-  it("媒体地址按整段路径编码：名字含空格、中文与井号的视频，src 与下载地址都是写死的编码结果", async () => {
+  it("媒体地址按整段路径编码：uploads 下名字含空格、中文与井号的视频，src 与下载地址都是写死的含 uploads%2F 的编码结果", async () => {
     const name = "会议 录像#1.mp4";
-    const encoded = "%E4%BC%9A%E8%AE%AE%20%E5%BD%95%E5%83%8F%231.mp4";
-    const { fetchMock } = renderWorkspaceWith({
-      [name]: { size: 2048, route: new Error("the video must not be fetched") },
-    });
+    // 整段路径 `uploads/会议 录像#1.mp4` 的编码：目录分隔符也在里面，只传文件名得不到它。
+    const encoded = "uploads%2F%E4%BC%9A%E8%AE%AE%20%E5%BD%95%E5%83%8F%231.mp4";
+    const { fetchMock } = renderFiles(
+      "/files?ws=workspace-1",
+      authenticatedFilesRoutes([workspace, secondWorkspace], {
+        "/api/workspaces/workspace-1/tree?path=": () =>
+          jsonResponse({
+            path: "",
+            entries: [{ name: "uploads", type: "dir", size: 0, mtime: 100 }],
+          }),
+        "/api/workspaces/workspace-1/tree?path=uploads": () =>
+          jsonResponse({
+            path: "uploads",
+            entries: [{ name, type: "file", size: 2048, mtime: 101 }],
+          }),
+        [`${FILE}${encoded}`]: new Error("the video must not be fetched"),
+      }),
+    );
 
+    fireEvent.click(await screen.findByRole("button", { name: "展开 uploads" }));
     await select(name);
     const video = await waitFor(() => mediaElement("video"));
     expect(video.getAttribute("src")).toBe(`${FILE}${encoded}`);
