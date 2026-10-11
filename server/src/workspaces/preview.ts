@@ -59,12 +59,15 @@ export interface PreviewLimits {
   image: number;
   /** A notebook beyond this many bytes is `preview_too_large`: truncated JSON cannot be parsed. */
   notebook: number;
+  /** An archive listing stops at this many entries and is `truncated`. */
+  archiveEntries: number;
 }
 
 export const DEFAULT_PREVIEW_LIMITS: PreviewLimits = {
   text: 1_048_576,
   image: 20_971_520,
   notebook: 10_485_760,
+  archiveEntries: 1000,
 };
 
 type PreviewKind = "text" | "image" | "audio" | "video" | "notebook";

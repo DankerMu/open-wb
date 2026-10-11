@@ -36,7 +36,7 @@ export interface WorkspaceRestDependencies {
   listEvents: { notify(ownerId: string): void };
   /** Byte limit of one uploaded file (UPLOAD_MAX_BYTES): a positive safe integer. */
   uploadMaxBytes: number;
-  /** Preview limits (text, image, notebook); omitted means the specification defaults. */
+  /** Preview limits (text, image, notebook, archive entries); omitted means the specification defaults. */
   limits?: PreviewLimits;
   /** The recycle directory service of the assembly: where a deleted entry is moved. */
   trash: ReturnType<typeof createTrash>;
@@ -174,14 +174,16 @@ export function lstatExisting(path: string) {
 }
 
 /**
- * Reads at most the first SNIFF_BYTES of a file the route has just lstat-ed as regular and says
- * whether they read as text. The path may have been replaced since that lstat, so the open neither
- * follows a final symlink nor waits on a pipe, and what was opened is checked from its descriptor
- * before any read: anything but a regular file is the same `not_found` as in the route. So is an
- * open refused because nothing is there any more (ENOENT, ENOTDIR), because a symlink is (ELOOP),
- * or because a socket is (ENXIO on Linux, EOPNOTSUPP on macOS); any other failure is thrown as is.
+ * Opens for reading a file a route has just lstat-ed as regular; the caller closes the descriptor.
+ * The path may have been replaced since that lstat, so the open neither follows a final symlink
+ * nor waits on a pipe, and what was opened is checked from its descriptor before it is handed
+ * out: anything but a regular file is closed here and is the same `not_found` as in the route. So
+ * is an open refused because nothing is there any more (ENOENT, ENOTDIR), because a symlink is
+ * (ELOOP), or because a socket is (ENXIO on Linux, EOPNOTSUPP on macOS); any other failure is
+ * thrown as is. Only the last component is guarded: `O_NOFOLLOW` does not keep the open from
+ * following a symlink that has replaced a directory on the way to it.
  */
-function sniffedAsText(absPath: string): boolean {
+export function openRegularFile(absPath: string): number {
   let fd: number;
   try {
     fd = openSync(absPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
@@ -202,6 +204,20 @@ function sniffedAsText(absPath: string): boolean {
     if (!fstatSync(fd).isFile()) {
       throw new HttpError("not_found");
     }
+  } catch (error) {
+    closeSync(fd);
+    throw error;
+  }
+  return fd;
+}
+
+/**
+ * Reads at most the first SNIFF_BYTES of a file the route has just lstat-ed as regular and says
+ * whether they read as text; what is not a regular file any more is `not_found` and is not read.
+ */
+function sniffedAsText(absPath: string): boolean {
+  const fd = openRegularFile(absPath);
+  try {
     const buffer = Buffer.alloc(SNIFF_BYTES);
     const bytesRead = readSync(fd, buffer, 0, SNIFF_BYTES, 0);
     return sniffText(buffer.subarray(0, bytesRead));

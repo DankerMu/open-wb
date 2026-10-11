@@ -115,6 +115,7 @@ export function appAssemblyOf(config: ServerConfig): AssemblyDependencies {
       text: config.previewTextMaxBytes,
       image: config.previewImageMaxBytes,
       notebook: config.previewNotebookMaxBytes,
+      archiveEntries: config.previewArchiveMaxEntries,
     },
     ...(config.modelUpstreamBaseUrl !== undefined && config.modelUpstreamApiKey !== undefined
       ? { upstream: { baseUrl: config.modelUpstreamBaseUrl, apiKey: config.modelUpstreamApiKey } }

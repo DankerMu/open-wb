@@ -290,16 +290,17 @@ describe("file route: configurable preview limits", () => {
         }
       },
       undefined,
-      { previewLimits: { text: 16, image: 1024, notebook: 2048 } },
+      { previewLimits: { text: 16, image: 1024, notebook: 2048, archiveEntries: 1000 } },
     );
   });
 
-  it("the entry's assembly carries the three configured preview limits", () => {
+  it("the entry's assembly carries the four configured preview limits", () => {
     const configured = resolveServerConfig(
       {
         PREVIEW_TEXT_MAX_BYTES: "16",
         PREVIEW_IMAGE_MAX_BYTES: "1024",
         PREVIEW_NOTEBOOK_MAX_BYTES: "2048",
+        PREVIEW_ARCHIVE_MAX_ENTRIES: "3",
       },
       SOURCE_ENTRY,
     );
@@ -308,11 +309,13 @@ describe("file route: configurable preview limits", () => {
       text: 16,
       image: 1024,
       notebook: 2048,
+      archiveEntries: 3,
     });
     expect(appAssemblyOf(resolveServerConfig({}, SOURCE_ENTRY)).previewLimits).toEqual({
       text: 1_048_576,
       image: 20_971_520,
       notebook: 10_485_760,
+      archiveEntries: 1000,
     });
   });
 });

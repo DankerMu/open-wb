@@ -1,6 +1,6 @@
 /**
  * workspaces/archive — the member list of a zip / tar / tar.gz, and the single item of a bare .gz
- * (s1f-files-page design D7, workspaces「压缩包列表」). The route comes later.
+ * (s1f-files-page design D7, workspaces「压缩包列表」). The route is in `rest-archive.ts`.
  *
  * The bytes are a user's file and every field in them is attacker-controlled. What this module
  * holds on to, whatever the archive declares:
