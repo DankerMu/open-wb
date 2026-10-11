@@ -12,11 +12,17 @@
  * LibreOffice 在作业目录下建的 `profile`、`.cache` 属该用户，本进程删不掉；这是一条提权命令，
  * argv 里除构造时给定的 `ompUser` 与 `cacheDir` 外没有任何变量。它失败只记一条不带路径的日志。
  *
- * 没有闭合的窗口（读代码推出，没有实测）：
+ * 没有闭合的窗口（第一条读代码推出，没有实测；第二条在 uid 分离的 Linux 测试部署上实测过）：
  * - 键取自 `lstat` 那一刻，转换进程随后才按路径读输入；其间输入被改写，旧键下存进的就是新内容。
- * - 本进程对 `work/`（`2770`、无 sticky，omp 用户可写）的递归删除按路径进行：顶层条目与其内部任何
- *   一级都可在检查之后被该用户的存活进程换成符号链接（`office.ts` 的 `removeJob` 同类）。Node 原生
- *   `rmSync` 递归途中是否跟随它取决于运行时版本（仓库只为开发与 CI 钉了版本），这里没有核实。
+ * - 本进程对 `work/`（`2770`、无 sticky，omp 用户可写）的递归删除交给 `rmSync`：顶层条目与其内部
+ *   任何一级都可在检查之后被该用户的存活进程换成符号链接（`office.ts` 的 `removeJob` 同类）。已在
+ *   钉定的 Node 24.13.1（官方 Linux 构建）上核实不跟随。strace 跟的是一次参数与这里相同的裸
+ *   `rmSync`，不是 `clearWork`：顶层按路径打开（`openat(AT_FDCWD, <路径>, …O_NOFOLLOW|O_DIRECTORY)`），
+ *   最后对它的 `rmdir` 也按路径；其下各级才是 `openat`（父目录描述符 + 名字，
+ *   `O_NOFOLLOW|O_DIRECTORY`）再 `unlinkat`，按描述符。经真实的 `clearWork`（不提供 `ompUser` 的
+ *   分支，链接由 omp 用户以自己的 uid 放），预先放好的顶层与嵌套链接都只删掉链接本身；删除途中
+ *   换入没有测过。这是该运行时版本的实现，不是 Node 的承诺（仓库只为开发与 CI 钉了版本）：仍登记
+ *   在此，换版本须重新核实。
  */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";

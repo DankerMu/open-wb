@@ -74,7 +74,7 @@
 
 周期清理 SHALL 在启动时与此后每 24 小时各运行一次：删除 `pdf` 下修改时间早于「当前时刻 − 7 天」的普通文件；`work` 下的全部条目在启动时删除。清理中的任何错误 SHALL 被吞掉，留待下一轮，不影响请求与退出码。缓存没有总量上限。
 
-启动时对 `work` 的清空 SHALL 先于转换器受理第一次转换，并分两种情况（owner D-24）。`ompUser` 与 `officeBin` 没有同时提供时（同 uid 模式；或提供了 `ompUser` 而没有 `officeBin`——没有转换器，`work` 下不会有属该用户的东西）：由本进程递归删除 `work` 下的全部条目，SHALL NOT 启动 `sudo`。两者都提供时：SHALL 先启动恰一次子进程 `sudo -n -u <ompUser> -- /usr/bin/find <cacheDir 的绝对路径>/work -mindepth 1 -delete` 并等它结束（argv 逐项固定，其中的路径是 `join(cacheDir, "work")` 的结果；`shell:false`，不经 `setpriv`，工作目录为 `/`——GNU `find` 退出前要回到初始目录，omp 用户进不去服务端的工作目录时它会在删除完成后仍以非 0 退出；标准输入输出与错误全部丢弃，环境只有 `PATH` 与存在时的 `LANG`；启动之前对 `PATH` 做与 spawn 前缀相同的安全检查，检查不过即按该命令失败处理、不启动），再由本进程照前一种情况递归删除余下的条目——本进程自己的递归删除在每一种情况下都执行。该命令失败（前置检查不过、启动失败、非 0 退出、被信号终止）SHALL 在 application stderr 记恰一行 `{"event":"preview_work_clear_failed"}`（没有其它键，不含路径、用户名与子进程输出），SHALL NOT 使启动失败，本进程自己的删除照常进行。这条命令在一次进程生命周期里只在启动时执行一次：周期清理与单次转换之后都不执行它，单次转换后对作业目录的删除仍是「转换器调用契约」的尽力而为。
+启动时对 `work` 的清空 SHALL 先于转换器受理第一次转换，并分两种情况（owner D-24）。`ompUser` 与 `officeBin` 没有同时提供时（同 uid 模式；或提供了 `ompUser` 而没有 `officeBin`——没有转换器，`work` 下不会有属该用户的东西）：由本进程递归删除 `work` 下的全部条目，SHALL NOT 启动 `sudo`。两者都提供时：SHALL 先启动恰一次子进程 `sudo -n -u <ompUser> -- /usr/bin/find <cacheDir 的绝对路径>/work -mindepth 1 -delete` 并等它结束（argv 逐项固定，其中的路径是 `join(cacheDir, "work")` 的结果；`shell:false`，不经 `setpriv`，工作目录为 `/`——GNU `find` 退出前要回到初始目录，omp 用户进不去服务端的工作目录时它会在删除完成后仍以非 0 退出；标准输入输出与错误全部丢弃，环境只有 `PATH` 与存在时的 `LANG`；启动之前对 `PATH` 做与 spawn 前缀相同的安全检查，检查不过即按该命令失败处理、不启动），再由本进程照前一种情况递归删除余下的条目——本进程自己的递归删除在每一种情况下都执行。等待有固定的上限（应用一侧的固定常量，不是配置项；owner D-26）：到期时该子进程仍未结束 SHALL 由本进程杀掉它并按该命令失败处理，sudoers 规则不因此改变。该命令失败（前置检查不过、启动失败、非 0 退出、被信号终止、超时）SHALL 在 application stderr 记恰一行 `{"event":"preview_work_clear_failed"}`（没有其它键，不含路径、用户名与子进程输出；一次清空无论以哪几种方式失败都至多这一行），SHALL NOT 使启动失败，本进程自己的删除照常进行。清理对象 SHALL 另外提供一个终止句柄：调用时若该子进程仍在运行即杀掉它，没有在途的子进程时什么都不做；入口 SHALL 在关停时调用它。这条命令在一次进程生命周期里只在启动时执行一次：周期清理与单次转换之后都不执行它，单次转换后对作业目录的删除仍是「转换器调用契约」的尽力而为。
 
 #### Scenario: 命中、失效与复制
 - **WHEN** 转换 `a.docx` 两次；随后改写 `a.docx`（大小或修改时间变化）再转换一次
@@ -91,6 +91,10 @@
 #### Scenario: OMP_USER 模式下启动时清空 work
 - **WHEN** `work` 下有一个遗留的作业目录，`sudo` 被替换为记录型假可执行文件，以 `ompUser: "omp"` 与一个 `officeBin` 运行一次启动时清理；另一例假 `sudo` 以退出码 1 结束；另一例不提供 `ompUser`；另一例提供 `ompUser: "omp"` 而不提供 `officeBin`
 - **THEN** 第一例假 `sudo` 恰被启动一次，argv 恰为 `-n -u omp -- /usr/bin/find <cacheDir>/work -mindepth 1 -delete`，其环境的键只有 `PATH`（及父进程有 `LANG` 时的 `LANG`），它结束之后本进程才开始自己的删除，清理结束时 `work` 为空；第二例 application stderr 恰多一行 `{"event":"preview_work_clear_failed"}`，清理没有抛出，`work` 下本进程可删的条目照常被删除；第三例与第四例都没有启动 `sudo`，`work` 为空，stderr 没有新增行
+
+#### Scenario: 启动清空超时与关停终止
+- **WHEN** 以 `ompUser: "omp"` 与一个 `officeBin` 运行一次启动时清理，`sudo` 被替换为记录自己的 pid 之后一直睡眠的假可执行文件；另一例在该假 `sudo` 仍在运行时调用清理对象的终止句柄
+- **THEN** 第一例清理在超时之后落定且没有抛出，application stderr 恰多一行 `{"event":"preview_work_clear_failed"}`，那个假 `sudo` 在有界时间内已不存在，`work` 下本进程可删的条目照常被删除，假 `sudo` 恰被启动一次；第二例那个假 `sudo` 在有界时间内已不存在，清理照常落定且没有抛出，application stderr 同样恰多一行 `{"event":"preview_work_clear_failed"}`（被信号终止按该命令失败处理）
 
 ### Requirement: 办公文档预览路由
 预览监听器的 `GET /o/<token>/<path>` SHALL 以与 preview-origin「预览监听器」`/w/` 相同的次序校验令牌、空间根与路径（`resolve(op=read)`，越界 403 + 审计，不存在或非普通文件 404），随后：扩展名（小写）不是 `docx`、`xlsx`、`pptx` → 415；文件大小超过 `PREVIEW_DOCUMENT_MAX_BYTES` → 413（不启动转换）；转换器 `available` 为 `false` → 503；否则调用 `convert`，以请求连接的关闭作为其 `signal`。成功时 SHALL 以 `Content-Type: application/pdf`、preview-origin「预览响应头与内容类型」对 PDF 规定的头返回缓存文件的完整字节，并支持单段 `Range`。`PREVIEW_DOCUMENT_MAX_BYTES` 在服务端只由本路由执行：`/w/<token>/<path>` 对任何文件（含 `pdf`）都没有大小上限——它还要提供 HTML 页面引用的任意相对资源，持有令牌本就可以经它读到该空间的任何文件，按扩展名单独拦 `pdf` 不减少暴露面；PDF 的预览上限因此只是浏览器侧的呈现门槛，由页面按令牌响应的 `documentMaxBytes` 判定是否建 iframe（file-previewers「PDF 与办公文档」）。

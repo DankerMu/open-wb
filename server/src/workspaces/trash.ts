@@ -17,9 +17,14 @@
  * batch directories, creates nothing, and never rejects: whatever fails is left for the next round.
  * Residual, not closed here (issue #1286 stays open; owner ruling D-23 registers it as a known
  * residual of this change, left to the deployment model of ADR-0010: one dedicated omp uid and
- * trusted accounts). In the sweep: the checks and the `rm` go by path (Node has no `*at` calls).
- * Each level is resolved by path again
- * after its check, and the recursion inside `rm` goes by path too, so nothing here is atomic. The
+ * trusted accounts). In the sweep: the checks and the `rm` go by path. Node gives its callers no
+ * `*at` calls, and the one recursion found to use them is not the one used here: `rmSync` walks by
+ * descriptor below its top level (Node 24.13.1 on Linux, strace: `openat` with
+ * `O_NOFOLLOW|O_DIRECTORY`, then `unlinkat`), while this `rm` is the `fs/promises` one, in that
+ * runtime a JavaScript walk doing
+ * `lstat`, `readdir`, `rmdir` and `unlink` on a path each (read from the runtime's source, not
+ * traced). Each level is resolved by path again after its check,
+ * and the recursion inside `rm` goes by path too, so nothing here is atomic. The
  * per-level check stops a level from being replaced by a directory the omp uid can write: every
  * level has to be a 0700 directory of this uid, and the app creates none on the workspace side.
  * It does not tie the walk to the real `.trash`. `SANDBOX_ROOT` is group-writable without the
@@ -46,15 +51,18 @@
  * which `ensureOwnedDir` corrects from 2770 to 0700 — the omp uid is then locked out of all of
  * that account's workspaces until an administrator restores the mode. The `rmdir` after a failed
  * rename goes by path as well.
- * One case on the target side needs no race (read from the code, not measured on a uid-separated
- * deployment). `ensureOwnedDir` refuses a symlink, a regular file and a directory of another uid,
+ * One case on the target side needs no race (measured on a uid-separated Linux deployment, ext4
+ * and overlayfs, Node 24.13.1, driving the compiled `moveToTrash` and `sweep`, not the route, with
+ * no `.trash` present). `ensureOwnedDir` refuses a symlink, a regular file and a directory of
+ * another uid (measured at `.trash`, the last one at the owner level as well; on ext4 only),
  * but an existing directory of this uid is taken whatever its mode and whoever moved it there. An
  * account root is such a directory, and the omp uid can rename it to `<SANDBOX_ROOT>/.trash`,
  * before `.trash` exists or after moving the real one aside. The next deletion by any other
  * account corrects that root to 0700, makes the three lower levels inside it, renames the entry
- * there and is answered and audited as a success. The omp uid is locked out of that account as
- * above; the batches of a `.trash` moved aside are out of the sweep's reach, and the new batch is
- * in it only while the root keeps that name.
+ * there (measured); that the DELETE route answers 204 and writes its audit row for it is read
+ * from the code, not run. The omp uid is locked out of that account as above; the batches of a
+ * `.trash` moved aside are out of the sweep's reach, and the new batch is in it only while the
+ * root keeps that name.
  */
 import { randomBytes } from "node:crypto";
 import { renameSync, rmdirSync } from "node:fs";
