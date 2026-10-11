@@ -711,6 +711,119 @@
 - 变异：不可观察（jsdom）：`preload="metadata"` 是否真的只取元数据；是否真的发范围请求及 206 的使用；元素移除后播放是否停止、连接是否断开；视频等比缩放（只是类名）；`刷新` 后正在播放的媒体不重载。这些只由 FL 行与后续走查（#1114）覆盖。
 - 变异：未做：StrictMode 专门用例（本刀无分配，无可断言的释放次数）。
 
+## 15.1、15.2、15.3（#1074）
+
+- **Critical Path 两条都命中**：「沙箱与文件边界」（新的对外路由 `GET /o/<token>/*`，凭令牌调 `sandbox.resolve(op=read)` 并把用户文件交给外部进程）与「omp 子进程治理」（转换进程首次有网络可达的调用方；D-26 改 `sudo … find` 的处置）；两个评审席位加 owner 白盒。纯服务端：**no checklist rows**（浏览器侧归 #1094）；不是配置刀，不动 `docs/architecture/system.md` 第 9 节与配置计数；与同批 #1093 / #1095–#1098 / #1112 没有共用源文件。
+- 与 issue / `tasks.md` 的差异（origin/master 为准）：① issue 的 15.1 摘录缺 `tasks.md:379-380` 两段（`clearWork` 改带 `officeBin` / `ompUser`、「清空完成前不得启动转换」、D-26），验收标准也没有对应条目，这些必须做；② issue 的依赖缺 14.7（#1302，已合入）；③ issue「入口不知道转换器」已漂移：`server.ts:47,468` 已调 `createOfficeCleanup({cacheDir}).clearWork()`，只有 `:149` 的 `officeAvailable: false` 仍是写死；④ `tasks.md:380` 把 D-26 用例放在 `office-cache.test.ts`，而 `clearWork` 的用例实际在 `server/test/office-work-clear.test.ts`（287 行），加在后者；⑤ 规格签名 `createOfficeConverter({…, concurrency})` 与代码不符，`concurrency` 在 `createOfficeCache` 上，合成体由本刀在入口给出（偏离记录）；⑥ 规格「转换缓存」要求 `pdf/` 清理启动时也跑一次，issue 与 `server.ts` 都没有，本刀补；⑦ issue 的 PR Boundary 漏列 `office-cache.ts`、`office.ts`（导出 `terminate`）、`fixtures/fake-sudo-find.mjs`、`office-work-clear.test.ts`、`server-handshake-log.test.ts`、`preview-app.test.ts`、`preview-app-helpers.ts`、`server-startup-preview.test.ts`（搬 helper）；⑧ 头注释随改：`preview/app.ts:3,47-50`、`server.ts:2-3,15-22,148,459-461`。
+- 路由（`preview/app.ts`，144 行增到约 230 行）：把 `/w/` 的「令牌 → 根 → 空路径 → `resolve` → `lstat` 普通文件」抽成一个本地函数给两条路由共用（#1069 交接；不抽会触发 jscpd）。其后次序由规格条文与场景「拒绝在转换之前」定死：扩展名 → 415；`status.size > limits.documentMaxBytes` → 413（恰等于放行）；`converter.available === false` → 503 未启用（路由自己判，不靠 `convert` 抛 `unavailable`）；`officeReady()` 为假 → 503 繁忙；`convert(absPath, signal)`。扩展名取最后一个 `.` 之后并转小写（规格「扩展名（小写）」）：`A.DOCX` 放行，`a.docx `（尾随空格）、`a.docx.bak`、无点的 `docx` 都是 415。
+- `limits` 的最终类型（#1069 交接）：`converter: OfficeConverter` 与 `limits: { documentMaxBytes: number }` 都改为**必填**，不留「缺席」分支（缺 `limits` 等于没有上限，不能当缺省）。连带改四个调用点：`preview-app-helpers.ts:114`、`preview-app.test.ts:411,540,555`；在 `preview-app-helpers.ts` 导出一个 `available:false` 的替身供它们用。另加可选 `officeReady?: () => boolean`（缺省恒真）。偏离记录：D11 写五键，现为八键。
+- 映射：`fail()` 的状态类型放宽到 `403|404|413|415|502|503|504`，六条文案逐字照规格表（两条 503 文案不同），头仍是 `previewFailureHeaders()`。`aborted` 表里没有行，自定（偏离记录）：`reply.hijack()` 后 `request.raw.destroy()`，不写任何字节——客户端断开与关停时 `close()` 两种来源走同一条路，关停场景的「请求以失败结束」由连接被断满足。非 `OfficeConvertError` 的异常沿用既有的无文案 500。HEAD 与 GET 同样启动转换（框架自动派生 HEAD），不特判。
+- 断开即中止：监听 `request.raw.socket` 的 `close`，不要监听 `request.raw` 的 `close`（读 Node 文档推出、未测：后者在请求正常收完时也触发）。`convert` 落定后必须摘掉监听，keep-alive 连接复用同一个 socket。用例必须走真实 socket（`inject` 测不了）：经 `beforeListen` 钩子抓服务端 socket，断言 `signal.aborted === true`、`socket.bytesWritten === 0`、进程级 `unhandledRejection` 监听零次（先断言替身的 `convert` 确实被调用过一次，避免空过）。
+- 成功响应：对 `convert` 返回的路径 `lstatExisting`，取不到（刚被周期清理删掉）按 `failed` 答 502；否则 `sendFileRange`，头用 `previewHeaders("a.pdf", binding.embedOrigin)`（固定字面量名，#1068 注记已定，不带原文件名）。断言 CSP 整串等于 `frame-ancestors <E>`，`Range: bytes=0-9` 得 206 与前 10 字节，`convert.mock.calls` 用 `toStrictEqual([[<join(root,"报告.docx")>, expect.any(AbortSignal)]])`。
+- 入口（`server.ts`，588 行增到约 670 行）：`createApp` 之前构造 `createOfficeCache({cacheDir: config.previewCacheDir, converter: createOfficeConverter({officeBin?, cacheDir, timeoutMs: config.officeConvertTimeoutMs, ompUser?}), concurrency: config.officeConvertConcurrency})`。`appAssemblyOf` 第二参加必填 `officeAvailable: boolean`，入口传 `converter.available`，函数保持纯、零输出。`preparePreviewCache` 改为 `createOfficeCleanup({cacheDir, officeBin?, ompUser?, log: writeRecord})`，`writeRecord` 的联合类型加 `{event:"preview_work_clear_failed"}`；`clearWork` 落定后才把 `officeReady` 置真，再不等待地跑一次 `sweepPdf(Date.now())` 并起 24 小时 `unref` 定时器。目录是否存在不看 `OFFICE_BIN`，`sweepPdf` 也不看（规格未加条件）。
+- 启动阶段名：不新增 `StartupStage` 取值（规格的枚举是封闭的十项）。两个构造函数只在路径非绝对或并发非正整数时抛，而配置层已保证（`preview-config.ts:144`、`resolvePositiveInteger`），所以「转换器启动失败」在合法配置下不可达；万一抛出，此时 `owned.stage === "app"`（读代码推出，编译入口无法触发，不可观察）。建目录失败仍是 `preview_cache`；`clearWork` 永不让启动失败。
+- 关停（`releaseOwned`）：`OwnedResources` 加 `converter`、`pdfTimer`、`stopWorkClear`。次序为 `stopWorkClear()` → `await converter.close()` → 两个 `clearInterval` → 预览监听器 → 主实例 → DB（规格定了「转换器在先」；终止句柄的位置规格没写，放最前，偏离记录）。相对两个监听器：转换器在第一次 `listen` 之前构造，但到 `clearWork` 落定才受理转换，此时两个监听器都已在监听；关停时先于两者关闭。
+- D-26（改 `office-cache.ts`，266 行增到约 300 行）：常量 `WORK_CLEAR_TIMEOUT_MS = 10_000`，取值写进 PR（须小于 `server-startup-helpers` 的 `waitForStarted` 缺省 15 秒）。`createOfficeCleanup` 另收测试用的 `clearTimeoutMs?`（入口不传），返回值加 `stopWorkClear(): void`。到期与 `stopWorkClear` 都先对自己启动的 `sudo` 发 `SIGTERM`，2 秒内未退出再 `SIGKILL`，`exit` 时清计时器，只 resolve 一次所以日志至多一行。发信号的守卫复用 `office.ts:126` 的 `terminate`（pid 为正、未退出），导出它或加信号参数，不抄第二份。**先发 `SIGTERM` 的理由**：`sudo` 会把收到的 `SIGTERM` 转给命令，`SIGKILL` 转不了，而这条命令不经 `setpriv --pdeathsig`——读 sudo 手册推出，**未测**。`find` 是否随之结束只能在真实 Linux `sudo` 的 uid 分离部署上观察，PR 按观察结果标「实测」或「未测」；`find` 留下即停下回 owner（design D18 该条），不改 sudoers。
+- #1286 / D-23（不宣称闭合；以下全部读代码推出，未测）：`/o/` 是读窗口的第四条路由，有两段。① `resolve` / `lstat` → 转换进程按路径打开输入：排队把这段间隔从毫秒级拉长到最坏约 `ceil(8 / concurrency) × timeoutMs`（缺省约 4 分钟，`concurrency` 为 1 时约 8 分钟）；其间条目被换成符号链接时转换进程读的是链接目标，文档上限用的是 `lstat` 时的大小，换入的内容不受它约束（输出仍受 200 MiB 上限）。`OMP_USER` 模式下读的一方是 omp 用户，同 uid 模式下是应用用户。② `convert` 落定 → `lstat` → `sendFileRange` 按路径打开缓存 PDF：`pdf/` 为 `0700`、属应用用户。PR 的「已知残余」照此写；design D22「已知残余」读窗口清单补一句 `/o/`、`preview/app.ts` 头注释补同一段，PR 正文列出动过的每个 `openspec/` 文件。
+- 必改的既有断言（逐条进偏离记录，不得放宽）：`preview-app.test.ts:121-139` 的「exactly one route」与两段 `printRoutes` 字面量改成两条路由的实际输出；`:276` 的 `/o/${token}/readme.md` 从「一律 404」列表移出（现为 415，由新文件钉住）；`server-handshake-log.test.ts:171-197` 的两处 `appAssemblyOf(…, {tokens, port})` 补 `officeAvailable` 并各断言 `true` / `false` 原样透传；`office-work-clear.test.ts:58-73` 的本地封装跟随返回形状。`office-cache.test.ts`（462 行）与 `office-converter.test.ts`（795 行）不动。没有扫描 `server.ts` / `preview/app.ts` 源码文本的测试（`git grep` 只命中把 `server.ts` 当入口 URL 的用例）。
+- 新测试文件与夹具：`server/test/preview-office-route.test.ts`（规格四个场景，加大写扩展名、尾随空格、恰等于上限、`officeReady` 为假；docx 由用例写进 `world.root`，不改 `seedFiles`；「路径是数据」一例含前导与尾随空格、`..` 段、前导 `/`、合成与分解字符两种写法，期望对照 `/w/` 同向量的既有用例；失败正文一律 `toBe(<文案>)` 加 `content-length`）。`server/test/server-startup-office.test.ts`（编译入口，显式预留 `PREVIEW_PORT`，#1337）含三例：(a) 同 uid、`OFFICE_BIN` 指向 `fake-soffice.mjs`，用其睡眠标记发起 `/o/` 后 SIGTERM——记录文件里的 pid 在有界时间内不存在、请求被拒、退出码 0、application stderr 为空、次序 trace 以 `listener-close:<预览>`、`listener-close:<主>`、`db-close` 结尾；(b) `pdf/` 预置一个 8 天前的文件，启动后被删；(c) `OMP_USER=omp` 加 `OFFICE_BIN`、`PATH` 首项是含假 `sudo` 的临时目录：假 `sudo` 挂起期间签发令牌请求 `/o/` 得 503 繁忙且没有 soffice 记录，随后 SIGTERM——假 `sudo` 的 pid 不存在、stderr 恰一行 `preview_work_clear_failed`、没有 `server_started`、退出码 0。(c) 需要只桩 `/usr/bin/setpriv` 存在性的预加载钩子（`server-startup-omp-user.test.ts:141-165` 的钩子同时替换了 `spawn`，不能照搬），且不能等 `waitForStarted`，改等假 `sudo` 的记录文件。`fake-sudo-find.mjs` 加 `sudo.exit` 取值 `hang`：先写含 pid 的记录再睡眠，睡眠有上限。`startEntry` / `openWorkspace` / `makeSandboxRoot` 等是 `server-startup-preview.test.ts:77-233` 的本地函数，搬进新的 `server/test/server-startup-preview-helpers.ts` 由两个文件导入；`server-startup-helpers.ts`（697 行）不加行。
+- 变异（15.3 的四条加补充；每条写明判红用例）：
+- 上限检查挪到 `convert` 之后 → 「拒绝在转换之前」的 `convert` 零调用断言。
+- 扩展名检查挪到 `convert` 之后或删掉 → 同上（`readme.md`、`doc.pdf` 两行）。
+- 扩展名比较不转小写 → `A.DOCX` 得 PDF 的用例；改成前缀 / 包含匹配 → `a.docx.bak` 与尾随空格两例的 415。
+- `>` 写成 `>=` → 恰等于上限放行的用例。
+- 路由不自己判 `available` → `available:false` 替身一例的 `convert` 零调用。
+- 失败文案带文件名 → 「转换结果到状态码」的正文 `toBe`。
+- `busy` 与 `failed` 的状态或文案对调，或只对调其中一个 → 同场景对应行。
+- PDF 响应加 CSP `sandbox`，或用原文件名调 `previewHeaders` → 「成功与缓存」的 CSP 整串相等与 `Content-Type`。
+- 不接断开信号 → 「客户端断开即中止」的 `signal.aborted`；`aborted` 时照常写响应 → 同用例的 `bytesWritten === 0`。
+- `/o/` 跳过 `resolve` → `%2e%2e/x.docx` 的 403 与 `sandbox.reject` 行（`op` 为 `read`、actor 为令牌的账号）；`link` / `linkdir` 符号链接同为 403。
+- 令牌检查挪到路径之后 → 未知令牌加穿越得 404 且审计零行。
+- 用 A 的令牌请求只在 B 或他人空间里的文件名 → 404，`convert` 零调用。
+- 去掉 `officeReady` 判定 → 路由文件的「未就绪 503」；入口在 `clearWork` 之前置真 → 编译入口 (c) 的 503。
+- 关停不调 `converter.close()` → 编译入口 (a) 的「pid 不存在」。
+- `close()` 挪到预览监听器之后 → 同例 stderr 多一行 `listener_force_close`（读代码推出：在途请求撑满 2 秒预算后被强制回收）。
+- 启动不跑 `sweepPdf` → 编译入口 (b)。
+- 去掉 D-26 超时 → `office-work-clear.test.ts` 的「挂起的假 `sudo`，`clearWork` 在超时后落定」；超时后不记日志或记两行 → 同例日志整行相等。
+- 关停不调 `stopWorkClear` → 编译入口 (c) 的假 `sudo` pid 仍在；`stopWorkClear` 在没有在途子进程时抛出 → 单测「清空落定之后才调用 stopWorkClear…」（评审后 `stopWorkClear` 改为一次性，原「空闲时调用无事发生」拆成它与「先于清空到达的关停不丢…」）。
+- `clearWork` 仍不传 `officeBin` / `ompUser` → 编译入口 (c) 没有假 `sudo` 记录。
+- `officeAvailable` 仍写死 `false` → `server-handshake-log` 的 `true` 一例。
+- 不可观察：24 小时这个周期值、定时器的 `unref`、两个 `clearInterval` 之间的先后、`stopWorkClear` 与 `converter.close()` 的先后、构造失败时的阶段名、`SIGTERM` 换成 `SIGKILL`（假 `sudo` 两者都死，差别只在真实 `sudo` 下的 `find`）。
+
+## 20.3、20.4 / 20.5 / 20.6 的压缩包分摊部分（#1097）
+
+- 非 Critical Path（读代码推出）：本刀只是 `GET …/archive` 的第一个界面调用方，不加路由、`sandbox.resolve` 或 `op`，一个评审席即可。D-23 / #1286：浏览器侧没有 resolve→open 窗口（读代码推出，无实测）；被调路由的读窗口与证据等级照抄 `design.md:322`（末段替换答 404 为「钩子辅助复现：包裹 `fs.openSync`、测试装配下的源码处理器经 `inject`」，中间目录分量被换为「读代码推出，未测，未挡住」）。本刀不闭合、不加宽，界面文案与 PR 不得写「列表一定来自空间内的文件」。
+- 前置按代码核对已齐、三项实测都不挡（`tasks.md:45`「组 17–21 不等 1.2」）：`listArchive` 在 `web/src/lib/api-files.ts:542`（#1080），加载框架在 `previewers/index.ts` 与 `preview.tsx:44-62`（#1085），白名单已去（#1087，`tree.tsx:437-507` 对每个文件都发 `fetchPreview`）。#1091 / #1092 不在 origin/master（最新合入是 #1090），本刀不依赖它们。批内 #1093 / #1095 / #1096 未合入也无注记段，它们对同一批文件的改法没能核对。
+- 与 issue / `tasks.md` 的差异（origin/master 为准，进偏离记录）：
+- PR Boundary 漏列必改的 `tree.tsx`（639 行）、`preview.tsx`（219 行）、`types.ts`（39 行）；多列了不必改的 `kind.ts`（`archive` 类与四个扩展名已在 `kind.ts:28-31`）。
+- issue 写三列「路径、类型、大小」，规格是两列（路径、目录带图标；大小），以规格为准，不设类型列。
+- `files-page.test.tsx` 的 zip 断言在 `:165-172`、路由在 `:116-119`（任务写 `:162-169`）；E2 在 `files-empty-layout.test.tsx:51-83`。
+- 任务没点名、重跑 grep 命中的第三处是 `files-preview-states.test.tsx:122-156`。
+- 「过渡呈现在 `index.ts` / `kind.ts` 里登记」不成立：过渡是 `tree.tsx` 的 415 映射，没有登记项可替换。
+- 谁发请求（先定这条）：预览器自己调，依据是 file-previewers「压缩包预览器 SHALL 调用 `listArchive(workspaceId, path)`」与 20.4「表格与文案在 `listArchive` 落定后才有」。
+- `types.ts` 的 `PreviewState` 加 `{ status: "archive"; load: (signal: AbortSignal) => Promise<ArchiveListing> }`，类型取 `Awaited<ReturnType<ApiClient["listArchive"]>>`（#1080 注记），不加新导出类型。
+- `tree.tsx` 的 `selectFile` 在 `:452` 的 `publishSelectedFile(next)` 处对 `previewKind(entry.name) === "archive"`（从 `./previewers/index.js` 取）改为发布 `preview: { status: "archive", load: (signal) => client.listArchive(workspace.id, path, { signal }) }`、`setPreviewLoading(false)` 后返回，不调 `fetchPreview`。
+- 分支必须排在 `:439-450` 之后：先中止上一个在途预览并 `releaseOwnedImage()`，`files-page.test.tsx:167` 的 `blob:logo` 释放断言靠它。
+- 每次选中或 `刷新`（`tree.tsx:591` 重调 `selectFile`）都得到新的 `load`，预览器以它为 effect 依赖重新列出，这就满足 files-web:90「重新取当前文件的预览」，不另设计数器。
+- `preview.tsx` / `index.ts`：
+- `PreviewerId` 加 `"archive"`，`LOADERS.archive = () => import("./archive.js").then((m) => m.ArchivePreviewer)`。
+- `Previewer` 的属性加可选 `load?`，`PreviewBody` 对 `status === "archive"` 渲染 `<LoadedPreview id="archive" content="" truncated={false} load={preview.load} …>`；`index.ts` 里不得用 `as` 断言。
+- `ArchivePreviewer({ name, load })` 在 `load` 缺失时显示 request_failed 安全文案、零请求，用一条直接渲染用例钉住，不留无测试分支。
+- `PreviewPane` 仍按状态而不是按文件名分流，所以 `preview.test.tsx:516-553` 那两条（`.zip` 名字加 `status:"unsupported"`）不改且仍有意义。
+- 共同文件与次序：`tree.tsx`、`preview.tsx`、`previewers/index.ts`、`types.ts` 是 #1093（网页零 `file` 请求）、#1095（音视频直接地址）、#1096（`LOADERS`）与本刀都要改的，#1098 随后整体搬 `tree.tsx`。给定次序里本刀排在 #1096 之后，开工先看前三刀是否已有「该类别不发 `fetchPreview`」的分支和属性加宽：有就并进去，不另立一套；没有就按上两条。`files-preview-states.test.tsx` 的「每个文件都能下载」用例可能也被 #1095 动。
+- `previewers/archive.tsx`（新，估 110 行）：
+- 请求归属：effect 里 `new AbortController()` → `load(signal)`，清理函数 `abort()`，落定时 `signal.aborted` 即丢弃。切文件靠 `PreviewBody key={path}` 重挂，切空间靠 `WorkspaceBrowser key`，刷新靠 `load` 变（均读代码推出，由下面的归属用例实测）。
+- 读取中显示 `正在读取文件`（`role="status"`，`STATUS_TEXT` 取自 `../columns.js`）；规格没给文案，沿用 `tree.tsx:280`，记偏离。
+- 可静态导入 `../file-meta.js`、`../errors.js`、`../columns.js` 与 `../../../ui/index.js` 的 `Icon`：`previewers-code-split.test.ts:72` 只查 `index.ts` 与目录外文件，`features/files` 整目录已在 `ui-layering.test.ts:89`。
+- 表格每行两格：路径格内容为 `{entry.path}`，`title={entry.path}` 原样，不 `trim`、不规范化、不拼地址；目录行前加 `Icon name="folder"`。大小格：`type==="dir"` 为空串（zip 目录 `size` 是 0、tar 可为 1024，都不显示），`size===null` 为 `—`，其余 `formatSize`。
+- 行的 `key` 不能用 `path`（成员名可重复、可为空串），照 `table.tsx:13-26` 预先编号。
+- 表内不得有 `a`、`button`、`onClick`，模块内不得出现 `fetch`、`fileUrl`、`downloadUrl`：成员永不被请求。
+- 首尾空格只保证 DOM 文本与 `title` 原样（测试实测）；`truncate` 的 `nowrap` 会在视觉上合并空格（读 CSS 推出，未测），不为此加样式。
+- 由规格定死的分支（不算未规定）：
+- 计数行在表格上方：`truncated:false` → `共 N 项`；`true` → `仅显示前 N 项`，且不同时出现 `共 N 项`（规格句的分号对举加场景「后者显示 `仅显示前 1000 项`」；截断时总数未知）。
+- `entries` 为空 → 只显示 `压缩包内没有文件`，无表格、无计数行（「条目为空时显示…」；计数行位置是「表格上方」，没有表格就没有它）。
+- `ApiError.code === "preview_unsupported"` → `无法读取该压缩包`，按 code 认，不按 status（先例 #1087：信封残缺的 415 已落成 request_failed）。
+- 401 不改状态（「401 交由认证守卫」）；其它 `ApiError` → 信封 message，网络失败或非法响应 → request_failed 安全文案（都经 `errorMessage`）。
+- 路由实际只发 400 / 401 / 403 / 404 / 415 / 500（读 `rest-archive.ts` 推出），所以 413 一行钉的只是客户端映射：显示信封 message `文件过大，无法预览`，不是不支持态。
+- 取最简并记偏离：失败文案（含 415）统一放一个 `role="alert"` 段落（类名同 `preview.tsx:134`），不用 `EmptyState`（预览器拿不到文件大小）、不用 Toast。
+- `web/test/previewers-archive.test.tsx`（新，估 300 行；静态导入 `ArchivePreviewer`，`load` 用 `vi.fn`，正文一律 `await screen.findBy…`）：
+- 「列表与截断」：三项 → `共 3 项`、三行，大小格 `textContent` 依次 `"5 B"`、`""`、`"7 B"`，第二行有目录图标，`within(table).queryAllByRole("button"|"link")` 为空。
+- 1000 项加 `truncated:true` → `仅显示前 1000 项`、1000 行，且 `queryByText("共 1000 项")` 为空；`gz` 的 `size:null` → `—`。
+- 空包 → `压缩包内没有文件` 且无 `table`；`{entries:[], truncated:true}` 同样。
+- 「恶意成员名只是文字」夹具：`../../etc/passwd`、`/abs/x`、`<img src=x onerror=alert(1)>`、`<script>alert(1)</script>`、`" a "`、`\u00e9` 与 `e\u0301`、空串、重复一项。逐行断言路径格 `textContent` 与 `title` 都 `toBe` 原值（`findByText` 会折叠空白，不能用来证首尾空格）、行数等于项数、`document.querySelector("img, script")` 为空。
+- 点击：先断言 `load` 恰被调用一次、全局 `fetch` 桩零次，再逐格 `fireEvent.click`，两个计数都不变。
+- 「损坏的压缩包」经 `PreviewPane` 渲染（下载链接在预览头）：`load` 以 415 `preview_unsupported` 拒绝 → `无法读取该压缩包`、`下载 x.zip` 链接的 `href` 与 `download` 属性都在、「通知」区无 `listitem`、无 `.ui-toast`。
+- `it.each`：413 → 信封 message，404 → 信封 message，`TypeError` → 安全文案，401 → 仍是 `正在读取文件` 且无 `alert`。
+- 归属：挂起的 `load` 在卸载后 `signal.aborted === true`，随后落定不出现表格、无未处理拒绝；`rerender` 换新 `load` 后旧 signal 中止、新 `load` 被调一次、显示新列表。
+- 既有断言改写（逐条进偏离记录，不削弱）：
+- `files-page.test.tsx`：`:116-119` 的路由换成 `"/api/workspaces/workspace-1/archive?path=archive.zip": jsonResponse({format:"zip", entries:[{path:"a.txt",type:"file",size:5}], truncated:false})`；`:166` 换成 `await screen.findByText("a.txt")`；`:167` 的释放断言保留；`:168-172` 改为 `archive?path=archive.zip` 恰一次、`file?path=archive.zip` 零次。
+- `files-empty-layout.test.tsx` E2：路由键用编码后的 `…/archive?path=%E5%BD%92%E6%A1%A3.zip`（不编码会落成 `unexpected request`）；`:75` 换成 `findByText(成员路径)`；`:80-82` 改为 `file?` 请求 `toStrictEqual([])` 加恰一次 `archive?`；`:51` 标题改写。`:76-79` 的副行断言随条文删除，副行仍由 `files-preview-states.test.tsx:102` 与 `preview.test.tsx:529` 钉住；空目录那半不动。
+- `files-preview-states.test.tsx:133、:148-154`：`archive.zip` 改走 `archive` 路由（`renderWorkspaceWith` 只会拼 `file` 路由，需加一个额外路由入参），断言成员行加 `expectDownloadLink("archive.zip")`，`fileRequests` 剩三项，另断言恰一次 `archive?`。
+- 不改：`preview.test.tsx`、`previewers-loading.test.tsx`、`api-files-archive.test.ts`（没有新的 `ApiClient` 方法）、`preview-kind*.test.ts`、`previewers-table-svg.test.tsx`（`:296` 的静态扫描自动覆盖 `archive.tsx`）。
+- 门槛：
+- 行数估算（未实测，以 `scripts/size-guard.sh` 为准）：`tree.tsx` 约 655，`preview.tsx` 约 235，`files-page.test.tsx` 563 基本不变，新测试文件约 300。
+- knip：`ArchivePreviewer` 由 `index.ts` 的动态导入与测试引用，不加别的导出。
+- 新增一个按需块，`web/e2e/ui-walk-files.ts:38` 的 `expectOnDemandChunk` 只要求「至少一个」，不受影响（读代码推出）；走查里没有选中 zip 的步骤，不加。
+- 无新依赖；测试里不写动态 `new RegExp`。
+- PR 正文要列出动到的 `openspec/` 文件：`tasks.md` 勾 20.3，20.4–20.6 待各分摊刀齐了再勾，加注记文件。
+- FL 行（20.5）：编号取合入时 FL 节的下一个；origin/master 末行是 FL-14，#1091 与批内三刀都可能先占号，行首「接 FL-xx」随之改。FL-13、FL-14 之后会话里挂着 3 个附件，前面各刀再加多少没能核对，所以行首自带清理。格式守卫会拒点号紧跟字母的裸扩展名，文件名都用 ASCII 主干。草稿：
+- 操作：`接上一行（文件页停在 FL-05 的空间，uploads 已展开）；在 FL-10 用的那个会话标签页里（文件页所在的标签页不动），先把输入框上方还挂着的附件标签逐个点右端的叉号移除（没有就跳过），再经「+」菜单「上传文件」传入三个自备文件：demo.zip（内含 a.txt 与文件夹 dir，dir 里有 b.md）、同样内容打成的 demo.tar.gz、many.zip（内含 1001 个以上的小文件，可用脚本生成），等标签传完；回到文件页点「刷新」，在 uploads 里依次点 demo.zip、点列表里的任意一行、点 demo.tar.gz、点 many.zip`
+- 期望：`demo.zip 与 demo.tar.gz 都显示成员表格，每行是包内路径与大小，表格上方写着「共 N 项」且 N 等于表格行数；列表里若有文件夹行，它带文件夹图标、不显示大小；点任意一行什么都不发生，页面不跳转、不下载；many.zip 上方写的是「仅显示前 1000 项」（服务用缺省上限时），表格恰 1000 行；三个文件的预览头都有下载图标`
+- 结论 `待签`。不写固定的项数：不同打包工具是否写目录项、是否夹带额外成员不一样。
+- 变异证据（PR 描述带表）：
+- 成员名经 `dangerouslySetInnerHTML` 渲染 → 「恶意成员名只是文字」的 `img, script` 断言与 `previewers-table-svg.test.tsx:296` 都红（20.6 点名的那条）。
+- `title` 或文本只 `trimStart` / 只 `trimEnd` → `" a "` 行的 `toBe` 红（两侧各算一条）。
+- 路径包成 `<a>` 或 `<button>` → 「表格里没有按钮或链接」红。
+- 成员点击时发请求 → 点击前后计数断言红。
+- 目录行显示大小 → `""` 那格红；`null` 显示成 `0 B` → `—` 红。
+- 截断时仍写 `共 N 项` → 1000 项用例红；空包仍渲染表格或计数行 → 空包用例红。
+- 415 文案写成 `该类型不支持预览`，或按 status 而不按 code 判 → 「损坏的压缩包」与 413 行红。
+- 401 显示错误 → 401 行红；清理函数不 `abort` → 归属用例红。
+- `selectFile` 仍对压缩包调 `fetchPreview` → `files-page.test.tsx` 的零次 `file` 与 E2 的 `[]` 红；压缩包分支提到 `tree.tsx:448` 之前 → `files-page.test.tsx:167` 红。
+- `key` 用 `path` → 重复成员的行数断言红（React 对重复 key 的实际去重行为未核对，红不了就在 PR 里写「未做」）。
+- 不可观察：成员格的截断样式与空格的视觉合并（jsdom 无布局）。
+- 未做：`刷新` 后压缩包重新列出的页面级断言。建议在 `files-preview-states.test.tsx` 加一条（点 `刷新` 后 `archive?` 请求恰两次），不加就在 PR 里如实写未做。
+
 ## 26.2 只读步骤，含分摊的 26.3 / 26.4 条款（#1112）
 
 - 不触及 Critical Path：只改 `smoke/files.hurl` 与 `smoke/fixtures/README.md`，不动 `sandbox.resolve`、`op`、路由。D-23：本刀不新增路由，只对 `file` / `download` / `/w/` 各发单次只读请求，不与替换动作对时；#1286 的 resolve→open 读窗口既不收窄也不放宽，冒烟对它不构成证据（读代码推出）。

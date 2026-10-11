@@ -13,6 +13,7 @@ import { emit } from "../src/core/audit/index.js";
 import { ensureSharedDir } from "../src/core/sandbox/dirs.js";
 import { createSandbox } from "../src/core/sandbox/index.js";
 import { createPreviewApp } from "../src/preview/app.js";
+import { OfficeConvertError, type OfficeConverter } from "../src/preview/office.js";
 import { createPreviewTokens, type PreviewTokens } from "../src/preview/tokens.js";
 import { createWorkspaceStore } from "../src/workspaces/store.js";
 import { rawHttpRequest, withListeningApp } from "./raw-http-helpers.js";
@@ -42,6 +43,21 @@ export const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 
 export const README_TEXT = "# 读我\n";
 /** What lies outside workspace A and must never leave through a token for A. */
 export const OUTSIDE_SECRET = "outside-secret-bytes";
+
+/** The default of `PREVIEW_DOCUMENT_MAX_BYTES`: what the token response and `/o/` both go by. */
+export const DOCUMENT_MAX_BYTES = 104_857_600;
+
+/**
+ * The converter of a listener whose test is not about `/o/` (#1074 made it a required dependency):
+ * the feature is off, and a `convert` that is reached anyway fails the way the real one does.
+ */
+export function unavailableConverter(): OfficeConverter {
+  return {
+    available: false,
+    convert: () => Promise.reject(new OfficeConvertError("unavailable")),
+    close: () => Promise.resolve(),
+  };
+}
 
 type Binding = Parameters<PreviewTokens["issue"]>[0];
 
@@ -81,6 +97,12 @@ interface PreviewWorldOptions {
   onListenerForceClose?: () => void;
   /** Runs on the preview app before it listens (test-only hooks). */
   beforeListen?: (preview: FastifyInstance, root: string) => void;
+  /** `/o/`'s converter; the unavailable stand-in when omitted. */
+  converter?: OfficeConverter;
+  /** `/o/`'s document limit; the configured default when omitted. */
+  documentMaxBytes?: number;
+  /** Whether `/o/` may start a conversion yet; always, when omitted. */
+  officeReady?: () => boolean;
 }
 
 /**
@@ -115,6 +137,9 @@ export async function withPreviewWorld(
         store,
         sandbox,
         tokens,
+        converter: options.converter ?? unavailableConverter(),
+        limits: { documentMaxBytes: options.documentMaxBytes ?? DOCUMENT_MAX_BYTES },
+        ...(options.officeReady === undefined ? {} : { officeReady: options.officeReady }),
         ...(options.listenerCloseBudgetMs === undefined
           ? {}
           : { listenerCloseBudgetMs: options.listenerCloseBudgetMs }),
@@ -146,7 +171,7 @@ export async function withPreviewWorld(
         preview: {
           tokens,
           port: () => 1,
-          documentMaxBytes: 104_857_600,
+          documentMaxBytes: DOCUMENT_MAX_BYTES,
           officeAvailable: false,
         },
       },

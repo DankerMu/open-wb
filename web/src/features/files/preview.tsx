@@ -3,6 +3,7 @@
  * unsupported, too-large and error states render here, synchronously. The body of a successful
  * preview comes from a previewer module under `previewers/`, loaded on first use through
  * `previewers/index.ts` (the app's only code split); this module owns the cache of loaded previewers.
+ * An archive has no fetched body: its previewer is loaded the same way and lists the members itself.
  * Blob URLs are caller-owned; this module never allocates or revokes them.
  * Markdown mode is keyed by `path`; callers must remount across workspaces
  * if the same relative path can name different files.
@@ -140,6 +141,18 @@ function PreviewBody({
       </p>
     );
   }
+  if (preview.status === "archive") {
+    return (
+      <LoadedPreview
+        content=""
+        id="archive"
+        key="archive"
+        load={preview.load}
+        name={name}
+        truncated={false}
+      />
+    );
+  }
   const id = previewerFor(name, preview.data);
   return (
     <LoadedPreview
@@ -163,11 +176,13 @@ function LoadedPreview({
   name,
   content,
   truncated,
+  load,
 }: {
   id: PreviewerId;
   name: string;
   content: string;
   truncated: boolean;
+  load?: Parameters<Previewer>[0]["load"];
 }) {
   const [loaded, setLoaded] = useState<Loaded>(() => {
     const Previewer = readyPreviewers.get(id);
@@ -193,7 +208,7 @@ function LoadedPreview({
   }, [id, loading]);
 
   if (loaded.status === "ready") {
-    return <loaded.Previewer content={content} name={name} truncated={truncated} />;
+    return <loaded.Previewer content={content} load={load} name={name} truncated={truncated} />;
   }
   if (loading) {
     return (

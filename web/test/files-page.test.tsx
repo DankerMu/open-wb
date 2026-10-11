@@ -113,10 +113,11 @@ describe("workspace page route integration", () => {
           "name,size\nalpha,1\nbeta,2\n",
         ),
         "/api/workspaces/workspace-1/file?path=logo.png": imagePreviewResponse(),
-        "/api/workspaces/workspace-1/file?path=archive.zip": jsonResponse(
-          { error: { code: "preview_unsupported", message: "该类型不支持预览" } },
-          415,
-        ),
+        "/api/workspaces/workspace-1/archive?path=archive.zip": jsonResponse({
+          format: "zip",
+          entries: [{ path: "a.txt", type: "file", size: 5 }],
+          truncated: false,
+        }),
         "/api/workspaces/workspace-1/dirs": (_path, options) => {
           expect(options).toMatchObject({ body: '{"path":"drafts"}', method: "POST" });
           return jsonResponse({ path: "drafts" }, 201);
@@ -163,13 +164,18 @@ describe("workspace page route integration", () => {
     fireEvent.click(screen.getByRole("button", { name: "logo.png" }));
     expect(await screen.findByRole("img", { name: "logo.png" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "archive.zip" }));
-    expect(await screen.findByText("该类型不支持预览", { exact: true })).toBeTruthy();
+    expect(await screen.findByText("a.txt", { exact: true })).toBeTruthy();
     expect(blobUrls.revokeObjectURL).toHaveBeenCalledWith("blob:logo");
+    expect(
+      fetchMock.mock.calls.filter(
+        ([path]) => path === "/api/workspaces/workspace-1/archive?path=archive.zip",
+      ),
+    ).toHaveLength(1);
     expect(
       fetchMock.mock.calls.filter(
         ([path]) => path === "/api/workspaces/workspace-1/file?path=archive.zip",
       ),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
 
     const menuTrigger = screen.getByRole("button", { name: "新建" });
     pressPointer(menuTrigger);

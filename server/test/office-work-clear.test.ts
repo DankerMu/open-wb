@@ -6,6 +6,11 @@
  * `sudo` 与 `find` 一次都不执行（搭建见 `office-cache-helpers.ts`）。假 `sudo` 自己什么都不删，只
  * 记录收到的 argv、环境、工作目录与前后两次看到的 `work` 条目。期望的 argv 与日志串是照规格抄的
  * 字面量，不引用源码常量。
+ *
+ * Issue #1074（任务 15.1，owner D-26）：场景「启动清空超时与关停终止」。假 `sudo` 的 `hang` 模式写完
+ * 带 pid 的记录之后一直睡眠；它是否还在以 `kill(pid, 0)` 判定，被哪个信号结束取自 `ChildProcess`。
+ * 这里看得到的只是本进程对自己启动的那个假 `sudo` 做了什么；真实 `sudo` 之下的 `find` 是否随之
+ * 结束不在这些用例的观察范围内。
  */
 import {
   chmodSync,
@@ -14,6 +19,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -283,5 +289,208 @@ describe("转换缓存：启动时清空 work", () => {
       expect(readdirSync(join(on.work, name))).toEqual(["keep"]);
     }
     expect(cleared.logs).toEqual([]);
+  });
+});
+
+describe("转换缓存：启动清空的超时与关停终止（owner D-26）", () => {
+  /** 远短于假 `sudo` 的 30 秒睡眠上限，又留得出它启动并写记录的时间。 */
+  const SHORT_TIMEOUT_MS = 1_000;
+
+  function hangingBench(mode: "hang" | "hang-deaf" | "hang-exit0" = "hang"): Bench {
+    const on = bench();
+    mkdirSync(join(on.work, "0123abcd", "out"), { recursive: true });
+    writeFileSync(join(on.work, "0123abcd", "out", "a.pdf"), PDF);
+    setEnv("PATH", `${on.bin}:${dirname(process.execPath)}:/usr/bin:/bin`);
+    writeFileSync(join(on.cacheDir, "sudo.exit"), mode);
+    return on;
+  }
+
+  function cleanupOf(on: Bench, clearTimeoutMs?: number) {
+    const logs: unknown[] = [];
+    const cleanup = createOfficeCleanup({
+      cacheDir: on.cacheDir,
+      ...OMP_MODE,
+      spawn: on.spawn,
+      log: (record) => logs.push(record),
+      ...(clearTimeoutMs === undefined ? {} : { clearTimeoutMs }),
+    });
+    return { logs, cleanup };
+  }
+
+  async function recordedPid(on: Bench): Promise<number> {
+    const path = join(on.cacheDir, "sudo.record.json");
+    const deadlineAt = performance.now() + 10_000;
+    while (!existsSync(path)) {
+      if (performance.now() > deadlineAt) {
+        throw new Error("the fake sudo never wrote its record");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    return (JSON.parse(readFileSync(path, "utf8")) as SudoRecord).pid;
+  }
+
+  function isAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  /** 恰启动一次、那个进程已不存在、恰一行日志、`work` 为空且权限位原样。 */
+  function expectTerminated(
+    on: Bench,
+    logs: unknown[],
+    pid: number,
+    signal: "SIGTERM" | "SIGKILL",
+  ): void {
+    expect(on.launches).toHaveLength(1);
+    expect(on.launches[0]?.child.pid).toBe(pid);
+    expect(on.launches[0]?.child.signalCode).toBe(signal);
+    expect(on.launches[0]?.child.exitCode).toBe(null);
+    expect(isAlive(pid)).toBe(false);
+    expect(logs).toHaveLength(1);
+    expect(JSON.stringify(logs[0])).toBe(WORK_CLEAR_FAILED);
+    expect(readdirSync(on.work)).toEqual([]);
+    expect(modeOf(on.work)).toBe(0o2770);
+  }
+
+  it("挂起的假 sudo，clearWork 在超时后落定：SIGTERM 结束它，恰一行日志，不抛，本进程的删除照常", async () => {
+    const on = hangingBench();
+    const { logs, cleanup } = cleanupOf(on, SHORT_TIMEOUT_MS);
+    const startedAt = performance.now();
+
+    await expect(cleanup.clearWork()).resolves.toBe(undefined);
+
+    const elapsed = performance.now() - startedAt;
+    // 不早于超时（计时器允许 1 毫秒的舍入），远早于假 sudo 自己睡醒的 30 秒。
+    expect(elapsed).toBeGreaterThanOrEqual(SHORT_TIMEOUT_MS - 1);
+    expect(elapsed).toBeLessThan(10_000);
+    expectTerminated(on, logs, await recordedPid(on), "SIGTERM");
+  }, 20_000);
+
+  it("入口不传超时时用的是固定的 10 秒", async () => {
+    const on = hangingBench();
+    const { logs, cleanup } = cleanupOf(on);
+    const startedAt = performance.now();
+
+    await expect(cleanup.clearWork()).resolves.toBe(undefined);
+
+    const elapsed = performance.now() - startedAt;
+    expect(elapsed).toBeGreaterThanOrEqual(9_999);
+    // 上界压在 10 秒 + 2 秒宽限之内：时限被改长（比如 15 秒）或落到 SIGKILL 升级都会越过它。
+    expect(elapsed).toBeLessThan(12_000);
+    expectTerminated(on, logs, await recordedPid(on), "SIGTERM");
+  }, 30_000);
+
+  it("不理会 SIGTERM 的假 sudo：2 秒后改发 SIGKILL，仍只一行日志", async () => {
+    const on = hangingBench("hang-deaf");
+    const { logs, cleanup } = cleanupOf(on, SHORT_TIMEOUT_MS);
+    const startedAt = performance.now();
+
+    await expect(cleanup.clearWork()).resolves.toBe(undefined);
+
+    const elapsed = performance.now() - startedAt;
+    expect(elapsed).toBeGreaterThanOrEqual(SHORT_TIMEOUT_MS + 2_000 - 2);
+    // 1 秒超时 + 2 秒宽限 = 3 秒；宽限被改长（比如 5 秒）就会越过这个上界。
+    expect(elapsed).toBeLessThan(5_000);
+    expectTerminated(on, logs, await recordedPid(on), "SIGKILL");
+  }, 20_000);
+
+  it("被终止的假 sudo 以退出码 0 退出：仍按失败处理，恰一行日志", async () => {
+    const on = hangingBench("hang-exit0");
+    const { logs, cleanup } = cleanupOf(on, SHORT_TIMEOUT_MS);
+
+    await expect(cleanup.clearWork()).resolves.toBe(undefined);
+
+    const pid = await recordedPid(on);
+    expect(on.launches).toHaveLength(1);
+    expect(on.launches[0]?.child.exitCode).toBe(0);
+    expect(on.launches[0]?.child.signalCode).toBe(null);
+    expect(isAlive(pid)).toBe(false);
+    expect(logs).toHaveLength(1);
+    expect(JSON.stringify(logs[0])).toBe(WORK_CLEAR_FAILED);
+    expect(readdirSync(on.work)).toEqual([]);
+  }, 20_000);
+
+  it("关停终止：假 sudo 仍在运行时调用 stopWorkClear，它被 SIGTERM 结束，清理照常落定，恰一行日志", async () => {
+    const on = hangingBench();
+    const { logs, cleanup } = cleanupOf(on);
+    const startedAt = performance.now();
+    const clearing = cleanup.clearWork();
+    const pid = await recordedPid(on);
+    expect(isAlive(pid)).toBe(true);
+    expect(logs).toEqual([]);
+
+    cleanup.stopWorkClear();
+    // 第二次调用不再发信号，也不多记一行。
+    cleanup.stopWorkClear();
+
+    await expect(clearing).resolves.toBe(undefined);
+    // 远早于固定的 10 秒超时：结束它的是终止句柄。
+    expect(performance.now() - startedAt).toBeLessThan(8_000);
+    expectTerminated(on, logs, pid, "SIGTERM");
+  }, 20_000);
+
+  it("先于清空到达的关停不丢：stopWorkClear 之后的 clearWork 不启动 sudo，按失败记恰一行日志，本进程的删除照常", async () => {
+    const on = hangingBench();
+    // 假 sudo 若被启动，会立刻以 0 退出并留下记录。
+    rmSync(join(on.cacheDir, "sudo.exit"));
+    const { logs, cleanup } = cleanupOf(on);
+
+    expect(cleanup.stopWorkClear()).toBe(undefined);
+    await expect(cleanup.clearWork()).resolves.toBe(undefined);
+    expect(cleanup.stopWorkClear()).toBe(undefined);
+
+    expect(on.launches).toEqual([]);
+    expect(existsSync(join(on.cacheDir, "sudo.record.json"))).toBe(false);
+    expect(logs).toHaveLength(1);
+    expect(JSON.stringify(logs[0])).toBe(WORK_CLEAR_FAILED);
+    expect(readdirSync(on.work)).toEqual([]);
+    expect(modeOf(on.work)).toBe(0o2770);
+
+    // 不可撤回：再清一次仍不启动，那一次自己再记一行。
+    await expect(cleanup.clearWork()).resolves.toBe(undefined);
+    expect(on.launches).toEqual([]);
+    expect(logs).toHaveLength(2);
+  });
+
+  it("清空落定之后才调用 stopWorkClear：不抛，不多记日志，已完成的那次清空不受影响", async () => {
+    const on = hangingBench();
+    rmSync(join(on.cacheDir, "sudo.exit"));
+    const { logs, cleanup } = cleanupOf(on);
+
+    await expect(cleanup.clearWork()).resolves.toBe(undefined);
+    expect(cleanup.stopWorkClear()).toBe(undefined);
+
+    expect(on.launches).toHaveLength(1);
+    expect(on.launches[0]?.child.exitCode).toBe(0);
+    expect(on.launches[0]?.child.signalCode).toBe(null);
+    expect(logs).toEqual([]);
+    expect(readdirSync(on.work)).toEqual([]);
+  });
+
+  it("同 uid 模式没有 sudo 可终止：stopWorkClear 之前、之后的清空都不启动进程、不记日志", async () => {
+    const on = hangingBench();
+    const logs: unknown[] = [];
+    const cleanup = createOfficeCleanup({
+      cacheDir: on.cacheDir,
+      officeBin: FAKE_SOFFICE,
+      spawn: on.spawn,
+      log: (record) => logs.push(record),
+    });
+
+    await cleanup.clearWork();
+    expect(cleanup.stopWorkClear()).toBe(undefined);
+    // 没有那条命令，也就没有「该命令失败」：关停之后的清空同样不记日志。
+    await cleanup.clearWork();
+
+    expect(on.launches).toEqual([]);
+    expect(logs).toEqual([]);
+    expect(readdirSync(on.work)).toEqual([]);
   });
 });
