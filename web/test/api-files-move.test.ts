@@ -49,8 +49,9 @@ describe("moveEntry", () => {
     // 返回的 path 故意与 to 不同：客户端不比对，原样交回服务端的值。
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ path: "服务端说的" }));
     vi.stubGlobal("fetch", fetchMock);
-    // 首尾的空格、前导 `/`、`..` 与未合成的 é（`e\u0301`，`normalize()` 会把它并成一个码位）都原样发出。
-    const input = { from: " ../a 报告/e\u0301 ", to: "/b/../e\u0301 ", extra: 1 };
+    // 前导 `/`、中间的 `..` 段、尾部空格都原样发出；é 两种写法并排：已合成的 `\u00e9`（NFD 会拆开它）
+    // 与未合成的 `e\u0301`（NFC 会并掉它），所以两个方向的 `normalize` 都看得出。
+    const input = { from: "/x/../a 报告/\u00e9e\u0301 ", to: "/b/../\u00e9e\u0301 ", extra: 1 };
 
     const moved = await createApiClient().moveEntry("workspace-1", input);
 
@@ -61,7 +62,7 @@ describe("moveEntry", () => {
           method: "POST",
           credentials: "same-origin",
           headers: JSON_HEADERS,
-          body: '{"from":" ../a 报告/e\u0301 ","to":"/b/../e\u0301 "}',
+          body: '{"from":"/x/../a 报告/\u00e9e\u0301 ","to":"/b/../\u00e9e\u0301 "}',
         },
       ],
     ]);
