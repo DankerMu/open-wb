@@ -374,12 +374,13 @@ Minimal mergeable slice: 14.1 + 14.4 + 对应测试（单次转换的契约）�
 
 ## 15. office-preview — `/o/` 路由
 
-- [ ] 15.1 `server/src/preview/app.ts`：`GET /o/<token>/*`，校验次序、扩展名与文档上限的前置拒绝、转换结果到状态码与固定文案的映射、客户端断开即中止、成功时按 PDF 的头与单段 `Range` 返回缓存文件。`server.ts` 用 `ServerConfig` 构造真实转换器并传入；令牌响应的 `officeAvailable` 接到 `converter.available`。
+- [x] 15.1 `server/src/preview/app.ts`：`GET /o/<token>/*`，校验次序、扩展名与文档上限的前置拒绝、转换结果到状态码与固定文案的映射、客户端断开即中止、成功时按 PDF 的头与单段 `Range` 返回缓存文件。`server.ts` 用 `ServerConfig` 构造真实转换器并传入；令牌响应的 `officeAvailable` 接到 `converter.available`。
   同一任务把转换器接进入口的生命周期：`converter.close()` 与转换缓存每 24 小时的清理定时器（`unref`）纳入 `OwnedResources`，关停序列里排在回收目录清理定时器之前、预览监听器之前（http-service-skeleton「预览监听器的装配与关停」：转换器 `close` → 两个定时器 → 预览监听器 → 主监听器 → DB）。
   启动时清空 `work` 改为调用 14.3 的函数（同时配置了 `OMP_USER` 与 `OFFICE_BIN` 时先执行 `sudo … find`，owner D-24；CI 的 `uid-isolation` job 不设 `OFFICE_BIN`，其 sudoers 脚本不需要改），取代 13.1 自己的那次删除；它必须在转换器受理第一次转换之前完成——预览监听器此时已在监听，`/o/` 在清空完成之前不得启动转换（次序由本任务保证并在 15.2 以一条用例证明）。Critical Path「omp 子进程治理」，PR 标注白盒审查。
   同一任务给 14.3 的那条 `sudo … find` 加超时与终止（owner D-26，design D18「启动清空的超时与终止」；sudoers 行不变）：应用一侧的固定超时（固定常量，不是配置项，取值写进 PR）；到期杀掉 `sudo`，恰记一行 `{"event":"preview_work_clear_failed"}`，本进程自己的删除照常执行、不向启动抛出；清理对象交出终止句柄，入口在关停时调用，不留仍在 `work/` 下删除的孤儿。测试（`office-cache.test.ts` 与编译入口各一处，记录型假 `sudo`）：假 `sudo` 永不退出 → `clearWork` 在超时之后落定、stderr 恰多这一行、本进程可删的条目照常被删；关停时仍在运行的假 `sudo` 被终止（它在有界时间内已不存在，stderr 同样恰多这一行）。`sudo` 被终止后其下的 `find` 是否随之结束须在 PR 里按实际观察写明（design 该条：未测）。
-- [ ] 15.2 测试（`server/test/preview-office-route.test.ts`，注入转换器替身）：office-preview「办公文档预览路由」四个场景；http-service-skeleton「关停期间的在途请求与转换」中转换的部分（编译入口 + 假 `soffice`：SIGTERM 后假进程不存在、请求以失败结束、DB 最后关）。
-- [ ] 15.3 变异证据：超限检查放到转换之后 → 「`convert` 未被调用」判红；失败文案带上文件名 → 「正文不含文件名」判红；PDF 响应加 CSP `sandbox` → 头断言判红；关停时不调 `converter.close()` → 「SIGTERM 后假进程不存在」判红。
+  实施注记见 `implementation-notes.md`「15.1、15.2、15.3（#1074）」。
+- [x] 15.2 测试（`server/test/preview-office-route.test.ts`，注入转换器替身）：office-preview「办公文档预览路由」四个场景；http-service-skeleton「关停期间的在途请求与转换」中转换的部分（编译入口 + 假 `soffice`：SIGTERM 后假进程不存在、请求以失败结束、DB 最后关）。
+- [x] 15.3 变异证据：超限检查放到转换之后 → 「`convert` 未被调用」判红；失败文案带上文件名 → 「正文不含文件名」判红；PDF 响应加 CSP `sandbox` → 头断言判红；关停时不调 `converter.close()` → 「SIGTERM 后假进程不存在」判红。
 
 Suggested fixture level: expanded - 对外路由把外部进程的结果变成响应，失败面多
 Minimal mergeable slice: atomic - 一条路由、它的映射表与转换器在入口的启停接线必须同刀（路由先合而不接关停会留下不被回收的转换进程），替身测试同刀（Depends on 5.1、11.2、12.1、13.1、14.1–14.3、14.7）
@@ -519,7 +520,7 @@ Minimal mergeable slice: 19.1 的 hook 与测试先合；`frame.tsx` 的网页�
   实施注记见 `implementation-notes.md`「20.1，及分摊的 20.4 / 20.5 / 20.6 音视频部分（#1095）」。
 - [ ] 20.2 `previewers/notebook.tsx`：nbformat 4 的只读渲染（design D6 与 file-previewers「Notebook」）；Markdown 单元经 `MarkdownView`（#1096 更正：原写 `mdRender`，它返回 HTML 字符串，用它就得把字符串当 HTML 插入；`md-render.ts` 不改）；代码单元复用 18.1 的着色；输出按类型；解析失败退回源码。
   实施注记见 `implementation-notes.md`「20.2，含分摊的 20.4 / 20.5 / 20.6 条款（#1096）」。
-- [ ] 20.3 `previewers/archive.tsx`：`listArchive` 的表格、`共 N 项` / `仅显示前 N 项`、空包、415。
+- [x] 20.3 `previewers/archive.tsx`：`listArchive` 的表格、`共 N 项` / `仅显示前 N 项`、空包、415。
   压缩包至此不再走 17.2 的过渡规则，17.2 改过的两处 zip 断言同刀再改（记入偏离记录）：`web/test/files-page.test.tsx:162-169` 与 `files-empty-layout.test.tsx` 的 E2 里，选中 zip 由「一次 `file` 请求、415、`该类型不支持预览`」改为「一次 `archive` 请求、零次 `file` 请求、显示成员列表」
   （files-web「目录树与预览」的场景「一次浏览」；夹具补 `archive` 路由的响应）。两处都把原来 `await screen.findByText("该类型不支持预览", …)` 那一行换成 `await screen.findByText(<夹具里的一个成员路径>)`，请求次数的断言排在它之后（成员列表要等压缩包模块加载与 `listArchive` 两步，不能同步取）。E2 的另一半（空目录文案）不动。组 19、20 的其余类别（pdf、办公文档、音视频、Notebook）在写作时的既有测试里没有用例，各自合入时以开工的 grep 为准。
   实施注记见 `implementation-notes.md`「20.3、20.4 / 20.5 / 20.6 的压缩包分摊部分（#1097）」。
@@ -629,6 +630,7 @@ Minimal mergeable slice: 25.1（文件变更卡）与 25.2（产物卡）可各�
 - [x] 26.1 夹具：`smoke/fixtures/sandbox/u1/smoke-fixture/` 新增 `site/index.html`、`site/style.css`、`sample.py`、`clip.wav`（按 files-harness「沙箱夹具与 files.hurl」的内容约定；`clip.wav` 由一段不入库的脚本生成，生成方式记入 `smoke/fixtures/README.md`）。
   实施注记见 `implementation-notes-1.md`「26.1（#1111）」。
 - [ ] 26.2 `smoke/files.hurl`：追加范围请求、下载、`hurl-a` → `hurl-b` 的重命名与删除（宽容状态码保证可重复）、同名移动 409、越界删除 403、`preview-token` 与隔离来源的 html / css / 伪造令牌 404、主站对同一 html 的 `text/plain`、他账号的三个 404。
+  实施注记见 `implementation-notes.md`「26.2 只读步骤，含分摊的 26.3 / 26.4 条款（#1112）」。
 - [ ] 26.3 验证：对同一服务连续两次 `make smoke` 全绿；在 `POST move` 之后人为中断一次再跑仍全绿；跑完后空间里没有 `hurl-a` / `hurl-b`、夹具文件未变（`git status` 干净）。
 - [ ] 26.4 变异证据（对临时改坏的服务各跑一次，结果写进 PR）：预览监听器对 html 返回 `text/plain` → hurl 判红；主站对 html 返回 `text/html` → hurl 判红；删除后条目仍在 → 第二次删除的 404 断言判红。
 

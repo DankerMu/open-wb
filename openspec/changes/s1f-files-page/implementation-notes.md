@@ -711,6 +711,45 @@
 - 变异：不可观察（jsdom）：`preload="metadata"` 是否真的只取元数据；是否真的发范围请求及 206 的使用；元素移除后播放是否停止、连接是否断开；视频等比缩放（只是类名）；`刷新` 后正在播放的媒体不重载。这些只由 FL 行与后续走查（#1114）覆盖。
 - 变异：未做：StrictMode 专门用例（本刀无分配，无可断言的释放次数）。
 
+## 15.1、15.2、15.3（#1074）
+
+- **Critical Path 两条都命中**：「沙箱与文件边界」（新的对外路由 `GET /o/<token>/*`，凭令牌调 `sandbox.resolve(op=read)` 并把用户文件交给外部进程）与「omp 子进程治理」（转换进程首次有网络可达的调用方；D-26 改 `sudo … find` 的处置）；两个评审席位加 owner 白盒。纯服务端：**no checklist rows**（浏览器侧归 #1094）；不是配置刀，不动 `docs/architecture/system.md` 第 9 节与配置计数；与同批 #1093 / #1095–#1098 / #1112 没有共用源文件。
+- 与 issue / `tasks.md` 的差异（origin/master 为准）：① issue 的 15.1 摘录缺 `tasks.md:379-380` 两段（`clearWork` 改带 `officeBin` / `ompUser`、「清空完成前不得启动转换」、D-26），验收标准也没有对应条目，这些必须做；② issue 的依赖缺 14.7（#1302，已合入）；③ issue「入口不知道转换器」已漂移：`server.ts:47,468` 已调 `createOfficeCleanup({cacheDir}).clearWork()`，只有 `:149` 的 `officeAvailable: false` 仍是写死；④ `tasks.md:380` 把 D-26 用例放在 `office-cache.test.ts`，而 `clearWork` 的用例实际在 `server/test/office-work-clear.test.ts`（287 行），加在后者；⑤ 规格签名 `createOfficeConverter({…, concurrency})` 与代码不符，`concurrency` 在 `createOfficeCache` 上，合成体由本刀在入口给出（偏离记录）；⑥ 规格「转换缓存」要求 `pdf/` 清理启动时也跑一次，issue 与 `server.ts` 都没有，本刀补；⑦ issue 的 PR Boundary 漏列 `office-cache.ts`、`office.ts`（导出 `terminate`）、`fixtures/fake-sudo-find.mjs`、`office-work-clear.test.ts`、`server-handshake-log.test.ts`、`preview-app.test.ts`、`preview-app-helpers.ts`、`server-startup-preview.test.ts`（搬 helper）；⑧ 头注释随改：`preview/app.ts:3,47-50`、`server.ts:2-3,15-22,148,459-461`。
+- 路由（`preview/app.ts`，144 行增到约 230 行）：把 `/w/` 的「令牌 → 根 → 空路径 → `resolve` → `lstat` 普通文件」抽成一个本地函数给两条路由共用（#1069 交接；不抽会触发 jscpd）。其后次序由规格条文与场景「拒绝在转换之前」定死：扩展名 → 415；`status.size > limits.documentMaxBytes` → 413（恰等于放行）；`converter.available === false` → 503 未启用（路由自己判，不靠 `convert` 抛 `unavailable`）；`officeReady()` 为假 → 503 繁忙；`convert(absPath, signal)`。扩展名取最后一个 `.` 之后并转小写（规格「扩展名（小写）」）：`A.DOCX` 放行，`a.docx `（尾随空格）、`a.docx.bak`、无点的 `docx` 都是 415。
+- `limits` 的最终类型（#1069 交接）：`converter: OfficeConverter` 与 `limits: { documentMaxBytes: number }` 都改为**必填**，不留「缺席」分支（缺 `limits` 等于没有上限，不能当缺省）。连带改四个调用点：`preview-app-helpers.ts:114`、`preview-app.test.ts:411,540,555`；在 `preview-app-helpers.ts` 导出一个 `available:false` 的替身供它们用。另加可选 `officeReady?: () => boolean`（缺省恒真）。偏离记录：D11 写五键，现为八键。
+- 映射：`fail()` 的状态类型放宽到 `403|404|413|415|502|503|504`，六条文案逐字照规格表（两条 503 文案不同），头仍是 `previewFailureHeaders()`。`aborted` 表里没有行，自定（偏离记录）：`reply.hijack()` 后 `request.raw.destroy()`，不写任何字节——客户端断开与关停时 `close()` 两种来源走同一条路，关停场景的「请求以失败结束」由连接被断满足。非 `OfficeConvertError` 的异常沿用既有的无文案 500。HEAD 与 GET 同样启动转换（框架自动派生 HEAD），不特判。
+- 断开即中止：监听 `request.raw.socket` 的 `close`，不要监听 `request.raw` 的 `close`（读 Node 文档推出、未测：后者在请求正常收完时也触发）。`convert` 落定后必须摘掉监听，keep-alive 连接复用同一个 socket。用例必须走真实 socket（`inject` 测不了）：经 `beforeListen` 钩子抓服务端 socket，断言 `signal.aborted === true`、`socket.bytesWritten === 0`、进程级 `unhandledRejection` 监听零次（先断言替身的 `convert` 确实被调用过一次，避免空过）。
+- 成功响应：对 `convert` 返回的路径 `lstatExisting`，取不到（刚被周期清理删掉）按 `failed` 答 502；否则 `sendFileRange`，头用 `previewHeaders("a.pdf", binding.embedOrigin)`（固定字面量名，#1068 注记已定，不带原文件名）。断言 CSP 整串等于 `frame-ancestors <E>`，`Range: bytes=0-9` 得 206 与前 10 字节，`convert.mock.calls` 用 `toStrictEqual([[<join(root,"报告.docx")>, expect.any(AbortSignal)]])`。
+- 入口（`server.ts`，588 行增到约 670 行）：`createApp` 之前构造 `createOfficeCache({cacheDir: config.previewCacheDir, converter: createOfficeConverter({officeBin?, cacheDir, timeoutMs: config.officeConvertTimeoutMs, ompUser?}), concurrency: config.officeConvertConcurrency})`。`appAssemblyOf` 第二参加必填 `officeAvailable: boolean`，入口传 `converter.available`，函数保持纯、零输出。`preparePreviewCache` 改为 `createOfficeCleanup({cacheDir, officeBin?, ompUser?, log: writeRecord})`，`writeRecord` 的联合类型加 `{event:"preview_work_clear_failed"}`；`clearWork` 落定后才把 `officeReady` 置真，再不等待地跑一次 `sweepPdf(Date.now())` 并起 24 小时 `unref` 定时器。目录是否存在不看 `OFFICE_BIN`，`sweepPdf` 也不看（规格未加条件）。
+- 启动阶段名：不新增 `StartupStage` 取值（规格的枚举是封闭的十项）。两个构造函数只在路径非绝对或并发非正整数时抛，而配置层已保证（`preview-config.ts:144`、`resolvePositiveInteger`），所以「转换器启动失败」在合法配置下不可达；万一抛出，此时 `owned.stage === "app"`（读代码推出，编译入口无法触发，不可观察）。建目录失败仍是 `preview_cache`；`clearWork` 永不让启动失败。
+- 关停（`releaseOwned`）：`OwnedResources` 加 `converter`、`pdfTimer`、`stopWorkClear`。次序为 `stopWorkClear()` → `await converter.close()` → 两个 `clearInterval` → 预览监听器 → 主实例 → DB（规格定了「转换器在先」；终止句柄的位置规格没写，放最前，偏离记录）。相对两个监听器：转换器在第一次 `listen` 之前构造，但到 `clearWork` 落定才受理转换，此时两个监听器都已在监听；关停时先于两者关闭。
+- D-26（改 `office-cache.ts`，266 行增到约 300 行）：常量 `WORK_CLEAR_TIMEOUT_MS = 10_000`，取值写进 PR（须小于 `server-startup-helpers` 的 `waitForStarted` 缺省 15 秒）。`createOfficeCleanup` 另收测试用的 `clearTimeoutMs?`（入口不传），返回值加 `stopWorkClear(): void`。到期与 `stopWorkClear` 都先对自己启动的 `sudo` 发 `SIGTERM`，2 秒内未退出再 `SIGKILL`，`exit` 时清计时器，只 resolve 一次所以日志至多一行。发信号的守卫复用 `office.ts:126` 的 `terminate`（pid 为正、未退出），导出它或加信号参数，不抄第二份。**先发 `SIGTERM` 的理由**：`sudo` 会把收到的 `SIGTERM` 转给命令，`SIGKILL` 转不了，而这条命令不经 `setpriv --pdeathsig`——读 sudo 手册推出，**未测**。`find` 是否随之结束只能在真实 Linux `sudo` 的 uid 分离部署上观察，PR 按观察结果标「实测」或「未测」；`find` 留下即停下回 owner（design D18 该条），不改 sudoers。
+- #1286 / D-23（不宣称闭合；以下全部读代码推出，未测）：`/o/` 是读窗口的第四条路由，有两段。① `resolve` / `lstat` → 转换进程按路径打开输入：排队把这段间隔从毫秒级拉长到最坏约 `ceil(8 / concurrency) × timeoutMs`（缺省约 4 分钟，`concurrency` 为 1 时约 8 分钟）；其间条目被换成符号链接时转换进程读的是链接目标，文档上限用的是 `lstat` 时的大小，换入的内容不受它约束（输出仍受 200 MiB 上限）。`OMP_USER` 模式下读的一方是 omp 用户，同 uid 模式下是应用用户。② `convert` 落定 → `lstat` → `sendFileRange` 按路径打开缓存 PDF：`pdf/` 为 `0700`、属应用用户。PR 的「已知残余」照此写；design D22「已知残余」读窗口清单补一句 `/o/`、`preview/app.ts` 头注释补同一段，PR 正文列出动过的每个 `openspec/` 文件。
+- 必改的既有断言（逐条进偏离记录，不得放宽）：`preview-app.test.ts:121-139` 的「exactly one route」与两段 `printRoutes` 字面量改成两条路由的实际输出；`:276` 的 `/o/${token}/readme.md` 从「一律 404」列表移出（现为 415，由新文件钉住）；`server-handshake-log.test.ts:171-197` 的两处 `appAssemblyOf(…, {tokens, port})` 补 `officeAvailable` 并各断言 `true` / `false` 原样透传；`office-work-clear.test.ts:58-73` 的本地封装跟随返回形状。`office-cache.test.ts`（462 行）与 `office-converter.test.ts`（795 行）不动。没有扫描 `server.ts` / `preview/app.ts` 源码文本的测试（`git grep` 只命中把 `server.ts` 当入口 URL 的用例）。
+- 新测试文件与夹具：`server/test/preview-office-route.test.ts`（规格四个场景，加大写扩展名、尾随空格、恰等于上限、`officeReady` 为假；docx 由用例写进 `world.root`，不改 `seedFiles`；「路径是数据」一例含前导与尾随空格、`..` 段、前导 `/`、合成与分解字符两种写法，期望对照 `/w/` 同向量的既有用例；失败正文一律 `toBe(<文案>)` 加 `content-length`）。`server/test/server-startup-office.test.ts`（编译入口，显式预留 `PREVIEW_PORT`，#1337）含三例：(a) 同 uid、`OFFICE_BIN` 指向 `fake-soffice.mjs`，用其睡眠标记发起 `/o/` 后 SIGTERM——记录文件里的 pid 在有界时间内不存在、请求被拒、退出码 0、application stderr 为空、次序 trace 以 `listener-close:<预览>`、`listener-close:<主>`、`db-close` 结尾；(b) `pdf/` 预置一个 8 天前的文件，启动后被删；(c) `OMP_USER=omp` 加 `OFFICE_BIN`、`PATH` 首项是含假 `sudo` 的临时目录：假 `sudo` 挂起期间签发令牌请求 `/o/` 得 503 繁忙且没有 soffice 记录，随后 SIGTERM——假 `sudo` 的 pid 不存在、stderr 恰一行 `preview_work_clear_failed`、没有 `server_started`、退出码 0。(c) 需要只桩 `/usr/bin/setpriv` 存在性的预加载钩子（`server-startup-omp-user.test.ts:141-165` 的钩子同时替换了 `spawn`，不能照搬），且不能等 `waitForStarted`，改等假 `sudo` 的记录文件。`fake-sudo-find.mjs` 加 `sudo.exit` 取值 `hang`：先写含 pid 的记录再睡眠，睡眠有上限。`startEntry` / `openWorkspace` / `makeSandboxRoot` 等是 `server-startup-preview.test.ts:77-233` 的本地函数，搬进新的 `server/test/server-startup-preview-helpers.ts` 由两个文件导入；`server-startup-helpers.ts`（697 行）不加行。
+- 变异（15.3 的四条加补充；每条写明判红用例）：
+- 上限检查挪到 `convert` 之后 → 「拒绝在转换之前」的 `convert` 零调用断言。
+- 扩展名检查挪到 `convert` 之后或删掉 → 同上（`readme.md`、`doc.pdf` 两行）。
+- 扩展名比较不转小写 → `A.DOCX` 得 PDF 的用例；改成前缀 / 包含匹配 → `a.docx.bak` 与尾随空格两例的 415。
+- `>` 写成 `>=` → 恰等于上限放行的用例。
+- 路由不自己判 `available` → `available:false` 替身一例的 `convert` 零调用。
+- 失败文案带文件名 → 「转换结果到状态码」的正文 `toBe`。
+- `busy` 与 `failed` 的状态或文案对调，或只对调其中一个 → 同场景对应行。
+- PDF 响应加 CSP `sandbox`，或用原文件名调 `previewHeaders` → 「成功与缓存」的 CSP 整串相等与 `Content-Type`。
+- 不接断开信号 → 「客户端断开即中止」的 `signal.aborted`；`aborted` 时照常写响应 → 同用例的 `bytesWritten === 0`。
+- `/o/` 跳过 `resolve` → `%2e%2e/x.docx` 的 403 与 `sandbox.reject` 行（`op` 为 `read`、actor 为令牌的账号）；`link` / `linkdir` 符号链接同为 403。
+- 令牌检查挪到路径之后 → 未知令牌加穿越得 404 且审计零行。
+- 用 A 的令牌请求只在 B 或他人空间里的文件名 → 404，`convert` 零调用。
+- 去掉 `officeReady` 判定 → 路由文件的「未就绪 503」；入口在 `clearWork` 之前置真 → 编译入口 (c) 的 503。
+- 关停不调 `converter.close()` → 编译入口 (a) 的「pid 不存在」。
+- `close()` 挪到预览监听器之后 → 同例 stderr 多一行 `listener_force_close`（读代码推出：在途请求撑满 2 秒预算后被强制回收）。
+- 启动不跑 `sweepPdf` → 编译入口 (b)。
+- 去掉 D-26 超时 → `office-work-clear.test.ts` 的「挂起的假 `sudo`，`clearWork` 在超时后落定」；超时后不记日志或记两行 → 同例日志整行相等。
+- 关停不调 `stopWorkClear` → 编译入口 (c) 的假 `sudo` pid 仍在；`stopWorkClear` 在没有在途子进程时抛出 → 单测「清空落定之后才调用 stopWorkClear…」（评审后 `stopWorkClear` 改为一次性，原「空闲时调用无事发生」拆成它与「先于清空到达的关停不丢…」）。
+- `clearWork` 仍不传 `officeBin` / `ompUser` → 编译入口 (c) 没有假 `sudo` 记录。
+- `officeAvailable` 仍写死 `false` → `server-handshake-log` 的 `true` 一例。
+- 不可观察：24 小时这个周期值、定时器的 `unref`、两个 `clearInterval` 之间的先后、`stopWorkClear` 与 `converter.close()` 的先后、构造失败时的阶段名、`SIGTERM` 换成 `SIGKILL`（假 `sudo` 两者都死，差别只在真实 `sudo` 下的 `find`）。
+
 ## 20.3、20.4 / 20.5 / 20.6 的压缩包分摊部分（#1097）
 
 - 非 Critical Path（读代码推出）：本刀只是 `GET …/archive` 的第一个界面调用方，不加路由、`sandbox.resolve` 或 `op`，一个评审席即可。D-23 / #1286：浏览器侧没有 resolve→open 窗口（读代码推出，无实测）；被调路由的读窗口与证据等级照抄 `design.md:322`（末段替换答 404 为「钩子辅助复现：包裹 `fs.openSync`、测试装配下的源码处理器经 `inject`」，中间目录分量被换为「读代码推出，未测，未挡住」）。本刀不闭合、不加宽，界面文案与 PR 不得写「列表一定来自空间内的文件」。
@@ -784,6 +823,39 @@
 - `key` 用 `path` → 重复成员的行数断言红（React 对重复 key 的实际去重行为未核对，红不了就在 PR 里写「未做」）。
 - 不可观察：成员格的截断样式与空格的视觉合并（jsdom 无布局）。
 - 未做：`刷新` 后压缩包重新列出的页面级断言。建议在 `files-preview-states.test.tsx` 加一条（点 `刷新` 后 `archive?` 请求恰两次），不加就在 PR 里如实写未做。
+
+## 26.2 只读步骤，含分摊的 26.3 / 26.4 条款（#1112）
+
+- 不触及 Critical Path：只改 `smoke/files.hurl` 与 `smoke/fixtures/README.md`，不动 `sandbox.resolve`、`op`、路由。D-23：本刀不新增路由，只对 `file` / `download` / `/w/` 各发单次只读请求，不与替换动作对时；#1286 的 resolve→open 读窗口既不收窄也不放宽，冒烟对它不构成证据（读代码推出）。
+- 前置全部在 `origin/master`（核对的是代码）：范围 `server/src/workspaces/range-send.ts`；下载 `rest-entries.ts:123`；签发 `rest-preview-token.ts`；`/w/` `server/src/preview/app.ts:110`；入口接线 `server.ts:367-378`（预览监听器先 listen）；夹具七个文件在树上（`clip.wav` 844 B）；26.1 已勾。不等实测 1.1 / 1.2 / 1.3，被 1.2 挡的重命名 / 删除步骤在 #1113。
+- 与 issue 的差异（origin/master 为准）：(a) 「他账号的三个 404」中 `tree` 404 已在 `files.hurl:185-187`，本刀只加 `download?path=readme.md` 与 `POST preview-token` 两步，都断言与 `:187` 相同的信封；连同 S1g 的上传 404（`:190-194`）文件里共四个他账号 404，头注释照此写。(b) PR Boundary 只列 `smoke/files.hurl`，但 `smoke/fixtures/README.md:26`（消费方）与 `:43`（「目前没有大小字面量」）会变假，26.1 注记已把补写交给本刀，须同 PR 改。(c) `files.hurl:1-9` 头注释同步。(d) `tasks.md` 的 26.2 / 26.3 / 26.4 不勾（由 #1113 勾），只加注记指针；PR 文本写明动了 `openspec/` 的哪两个文件。
+- 插入位置：属主的新步骤作为一整块放在 `:166`（json 上传 400）之后、`:168` 登出之前，块内保持规格次序（范围 → 下载 → preview-token → html → css → 伪造令牌 → 主站 text/plain）。下载会写一条 `file.download` 审计，不得落在 `:61-81` 或 `:137-159` 的「快照 → 断言」之间。`session-meta.hurl` 的审计断言都相对自己的动作取，不受影响（读代码推出）。
+- 范围请求：`GET …/file?path=clip.wav` 带 `Range: bytes=0-3` → `HTTP 206`，`header "Content-Type" == "audio/wav"`，`header "Content-Range" startsWith "bytes 0-3/"`，`bytes count == 4`，`bytes == hex,52494646;`。不写总长 844。`RIFF` 比对比规格（只要求 4 字节）严，记入偏离记录；依据是 README 的「头四个字节为 `RIFF`」。
+- 下载：`GET …/download?path=readme.md` → 200，`Content-Type == "application/octet-stream"`，`Content-Disposition startsWith "attachment"`，正文 `file,fixtures/sandbox/u1/smoke-fixture/readme.md;`。
+- 变量与端口：hurl 文件仍只拿 Makefile 传的 `base_url`，不加 `--variable`，`Makefile`、`.github/**`、`scripts/test-ci-harness.sh` 都不用改（后者用假 hurl，只钉 Makefile 命令行与三个旧夹具的 `cmp`）。预览地址只取自签发响应：`preview_base: jsonpath "$.base"`；`preview_origin: jsonpath "$.base" regex /^(https?:\/\/[^\/]+)\/w\/[0-9a-f]{64}\/$/`（形状不符则捕获失败即红）。文件里不写主机名与端口。CI 的 `PREVIEW_PORT` 缺省 0，由系统分配，与 18016 / 19016 不在同一段（读代码推出）。
+- 签发步骤：`POST …/preview-token` 不带 body、不带 `Content-Type`（带 body 即 400，`rest-preview-token.ts:70`），`HTTP 200`。hurl 不发 `Origin`，登记的 `embedOrigin` 为 null，CSP 的后半为 `frame-ancestors 'none'`（读代码推出，`headers.ts:65-72`）。
+- 隔离来源的断言有五条：(1) 签发步骤里 `jsonpath "$.base" not startsWith "{{base_url}}/"`，末尾的 `/` 必须有，否则主端口 3000、预览端口 30001 时假红。(2) `GET {{preview_base}}site/index.html` → 200，`Content-Type == "text/html; charset=utf-8"`，CSP `contains "sandbox"` 且 `not contains "allow-same-origin"`，`Referrer-Policy == "no-referrer"`，`header "Set-Cookie" not exists`，正文 `file,…/site/index.html;`。(3) `GET {{preview_base}}site/style.css` → 200，`text/css; charset=utf-8`，正文 `file,`。(4) `GET {{preview_origin}}/w/<64 个 0>/site/index.html` → `HTTP 404`，`text/plain; charset=utf-8`，CSP `not exists`，`body == "预览不存在或已过期"`。(5) `GET {{base_url}}/api/workspaces/{{workspace_id}}/file?path=site/index.html` → 200，`text/plain; charset=utf-8`，`nosniff`，正文 `file,`。
+- 冒烟证明不了的两件事，PR 里不得写成已证明：(a) 「预览来源不需要 cookie」——libcurl 的 cookie 不分端口，同主机的 `workbuddy_session` 会被带到预览端口（读代码推出，未测），这条性质的证据在 `server/test/preview-app.test.ts`。(b) 浏览器里的不透明来源与 iframe 行为——hurl 只看响应头，真实浏览器证据归 27.1(b)。
+- 可重复性（读代码推出，26.3 的两次 `make smoke` 才是实测）：新步骤不建不删任何条目；同一 (账号, 空间) 在 900 秒内再签发返回同一令牌并续期（`tokens.ts:55-58`），步骤不依赖令牌是新的；每跑一次多一条 `file.download` 审计行，不清理，与既有上传同性质；他账号的 `preview-token` 在 `preParsing` 即 404，不签发。夹具只读，`git status` 应干净。
+- 不触真实模型端点：`files.hurl` 不建会话、不发消息；CI 的上游是 `ci-fake-upstream.sh`（`ci-compiled-server.sh:80`）。失败时 hurl 会打印含令牌的地址，CI 经 `sanitize` 抹掉 64 位十六进制（`:21`），本地不抹，令牌只在进程内存、15 分钟失效。
+- 守卫：`files.hurl` 201 行，加约 75 行；biome / knip / jscpd / semgrep 不扫 `smoke/`；64 个 `0` 熵低，不会被 gitleaks 当密钥（未测）。无清单行（no checklist rows）。同批其它刀（#1074、#1093、#1095–#1098）都不碰 `smoke/`，本刀可排在批内任意位置；与 #1113 同改 `files.hurl`，#1113 须排在本刀之后。
+- 规格没写明的分支：「把 `base` 里的令牌段换成 64 个 0」用「捕获来源再拼」实现，不用替换过滤器，结果地址相同；规格的 CSP 只要求「含 / 不含」，本刀不改成整串相等，免得钉死 `frame-ancestors`；`Set-Cookie not exists`、404 正文与 `not startsWith` 三条比规格严，都记入偏离记录。
+- 变异：`server/src/preview/headers.ts:18-19` 把 `html` / `htm` 的类型改成 `PLAIN` → 断言 (2) 的 `Content-Type` 判红（26.4 必做）。
+- 变异：`server/src/workspaces/preview.ts` 让 `classifyPreview` 对 `html` 返回 `text/html; charset=utf-8` → 断言 (5) 判红（26.4 必做）。只把 `html` 从 `TEXT_EXTENSIONS` 删掉不是有效变异：会走嗅探，仍是 `text/plain`（读代码推出）。
+- 变异：`headers.ts:99` 的 CSP 加上 `allow-same-origin` → (2) 的 `not contains` 判红。
+- 变异：`headers.ts:99` 去掉 `sandbox …;` 只留 `frame-ancestors` → (2) 的 `contains "sandbox"` 判红。
+- 变异：`headers.ts:80` 去掉 `Referrer-Policy` → (2) 判红。
+- 变异：`preview/app.ts:112-114` 令牌查不到也放行，或固定取某个登记 → (4) 的 404 判红。
+- 变异：`range-send.ts:39-41` 不发 206（忽略 `Range`）→ 范围步骤的 `HTTP 206` 判红。
+- 变异：区间起点偏一（发 1–4 字节）→ `bytes == hex,52494646;` 判红；只有 `count == 4` 时不可观察，这是加 `RIFF` 比对的理由。
+- 变异：区间终点偏一（发 5 字节）→ `bytes count == 4` 判红。
+- 变异：`rest-entries.ts:148-149` 的 `Content-Type` 改成 `text/plain`，或 `Content-Disposition` 改成 `inline` → 下载步骤各自判红（两边各做一次）。
+- 变异：`rest-entries.ts:132` 去掉下载的 `ensureOwnedRoot` → 他账号 `download` 判红吗：不可观察。lisi 的 `sandbox.resolve` 仍会按账号拒绝，状态码多半是 403 而不是 200，404 断言会红，但红的原因不是「读到了别人的文件」；PR 里写「未做」，归属次序的证据在 `server/test/workspaces-http-boundary.test.ts`。
+- 变异：`rest-preview-token.ts:64-67` 去掉 `preParsing` 的归属检查 → 他账号 `preview-token` 的 404 判红（得到 200）。
+- 变异：`server.ts:358` 不把 `preview` 传给 `appAssemblyOf`（签发端点不注册）→ 签发步骤判红。主站对未知 `/api` 路径答什么未核对，但不是带 `base` 的 200，捕获必失败。
+- 变异：夹具侧：删掉沙箱里的 `site/style.css` → (3) 判红；改 `site/index.html` 一个字节而不同步仓库 → (2) 与 (5) 的 `file,` 比对判红。
+- 变异：预览监听器绑到与主监听器不同的地址（hurl 连不上）→ (2) 以连接错误判红；`base` 误指回主站来源 → (1) 判红。
+- 变异：不可观察：令牌 900 秒到期与不续期（冒烟不等时间）；`frame-ancestors` 的取值（未断言）；`/w/` 不读 cookie（见上）；`Access-Control-Allow-Origin` / CORP（未断言，证据在 `preview-app.test.ts`）。
 
 ## 20.2，含分摊的 20.4 / 20.5 / 20.6 条款（#1096）
 

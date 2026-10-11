@@ -22,6 +22,7 @@ import { HttpError } from "../src/core/errors/index.js";
 import { createPreviewApp } from "../src/preview/app.js";
 import { removeTempDirs, tempDir } from "./core-db-helpers.js";
 import {
+  DOCUMENT_MAX_BYTES,
   expectFixedFailure,
   expectNoSuccessHeaders,
   FAILURE_HEADERS,
@@ -34,6 +35,7 @@ import {
   README_TEXT,
   rawAnswer,
   rejectRows,
+  unavailableConverter,
   WORKSPACE_A,
   WORKSPACE_B,
   withPreviewWorld,
@@ -49,6 +51,11 @@ const ROOT_OF_SQL = "SELECT dir FROM workspaces WHERE owner_id = ? AND id = ? LI
 const CLIP = Buffer.from(Array.from({ length: 1000 }, (_, index) => (index * 7) & 0xff));
 const SPARSE_BYTES = 64 * 1024 * 1024;
 const SETTLE_DEADLINE_MS = 2_000;
+/** `/o/`'s two required dependencies, for the listeners built here by hand: the feature is off. */
+const OFFICE_OFF = {
+  converter: unavailableConverter(),
+  limits: { documentMaxBytes: DOCUMENT_MAX_BYTES },
+};
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -118,7 +125,7 @@ describe("preview listener: 令牌放行，cookie 不放行", () => {
     });
   });
 
-  it("has no cookie parser, no principal, no database handle and exactly one route", async () => {
+  it("has no cookie parser, no principal, no database handle and exactly two routes", async () => {
     await withPreviewWorld(async ({ preview }) => {
       expect(preview.hasRequestDecorator("cookies")).toBe(false);
       expect(preview.hasReplyDecorator("setCookie")).toBe(false);
@@ -126,8 +133,11 @@ describe("preview listener: 令牌放行，cookie 不放行", () => {
       expect(preview.hasDecorator("db")).toBe(false);
       expect(preview.hasDecorator("authNow")).toBe(false);
       await preview.ready();
+      // `/w/` and, since #1074, `/o/`: the same shape, nothing else.
       expect(preview.printRoutes()).toBe(
-        "└── /\n    └── w/\n        └── :token\n            └── /\n                └── * (GET, HEAD)\n",
+        "└── /\n    ├── w/\n    │   └── :token\n    │       └── /\n" +
+          "    │           └── * (GET, HEAD)\n    └── o/\n        └── :token\n" +
+          "            └── /\n                └── * (GET, HEAD)\n",
       );
       // Its hooks: the method gate and the shutdown's idle sweep — nothing that authenticates.
       expect(preview.printRoutes({ commonPrefix: false, includeHooks: true })).toBe(
@@ -266,6 +276,8 @@ describe("preview listener: 拒绝项", () => {
     });
   });
 
+  // `/o/<token>/readme.md` left this list with #1074: it is a route now and answers 415
+  // (`preview-office-route.test.ts`, 「拒绝在转换之前」); `/x/` stands where it stood.
   it("answers 404 for every path that is not /w/<token>/<path>", async () => {
     await withPreviewWorld(async (world) => {
       const token = await tokenForA(world);
@@ -273,7 +285,7 @@ describe("preview listener: 拒绝项", () => {
         "/",
         `/w/${token}`,
         `/W/${token}/readme.md`,
-        `/o/${token}/readme.md`,
+        `/x/${token}/readme.md`,
         `/w//readme.md`,
         "/readme.md",
         "/api/workspaces",
@@ -418,6 +430,7 @@ describe("preview listener: 空间消失后令牌失效", () => {
       tokens: {
         lookup: () => ({ ownerId: ZHANGSAN, workspaceId: WORKSPACE_A, embedOrigin: null }),
       },
+      ...OFFICE_OFF,
     });
     try {
       const response = await preview.inject({ url: `/w/${UNKNOWN_TOKEN}/readme.md` });
@@ -545,6 +558,7 @@ describe("preview listener: bounded shutdown", () => {
         },
       },
       tokens: { lookup: () => null },
+      ...OFFICE_OFF,
     });
 
     await expect(preview.close()).resolves.toBeUndefined();
@@ -560,6 +574,7 @@ describe("preview listener: bounded shutdown", () => {
           },
         },
         tokens: { lookup: () => null },
+        ...OFFICE_OFF,
         listenerCloseBudgetMs: 0,
       }),
     ).toThrow("listener close budget must be an integer in 1..2147483647 ms");
