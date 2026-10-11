@@ -86,6 +86,8 @@ describe("listArchive", () => {
           { path: "é", type: "file", size: 5 },
           { path: "é", type: "file", size: 6 },
           { path: "d", type: "dir", size: 1024 },
+          // 服务端对名为 `.gz` 的文件真会发出空成员名；本行 format 是 tar，所以 null 的 size 也不限于 gz。
+          { path: "", type: "file", size: null },
         ],
         truncated: false,
       },
@@ -201,8 +203,7 @@ type RequestingMethod = [
   method: string,
 ];
 
-// 名字依规格句序。`promoteWorkspace` 不在内：它归 chat-web。这张表是声明式的——新增第十一个发请求的
-// 方法而不加行，它看不出。各方法的 body 与返回形状由各自的测试文件承担。
+// 名字依规格句序。`promoteWorkspace` 不在内：它归 chat-web。各方法的 body 与返回形状由各自的测试文件承担。
 const REQUESTING_METHODS: RequestingMethod[] = [
   ["listWorkspaces", (client) => client.listWorkspaces(), "/api/workspaces", "GET"],
   ["createWorkspace", (client) => client.createWorkspace({ name: "n" }), "/api/workspaces", "POST"],
@@ -241,6 +242,35 @@ const REQUESTING_METHODS: RequestingMethod[] = [
   ],
 ];
 
+// 客户端上不属于 files-web 那十个的方法，按来源分组。
+const OTHER_CLIENT_METHODS = [
+  // 会话（chat-web）
+  "listSessions",
+  "createSession",
+  "patchSession",
+  "deleteSession",
+  "getMessages",
+  "prompt",
+  "stopSession",
+  "regenerateSession",
+  "forkSession",
+  "undoMessage",
+  "decideApproval",
+  "getComposerOptions",
+  // 由 api-files.ts 实现，但归 chat-web
+  "promoteWorkspace",
+  // 命令与项目配置
+  "listCommands",
+  "listProjectConfig",
+  // 上传
+  "uploadFile",
+  // 登录态与服务信息
+  "getMe",
+  "getInfo",
+  "login",
+  "logout",
+];
+
 describe("十个发请求的方法", () => {
   it("恰是规格列出的十个", () => {
     expect(REQUESTING_METHODS.map(([name]) => name)).toStrictEqual([
@@ -255,6 +285,18 @@ describe("十个发请求的方法", () => {
       "deleteEntry",
       "issuePreviewToken",
     ]);
+  });
+
+  // 新增的客户端方法必须在这里归类：是 files-web 的发请求方法就给 `REQUESTING_METHODS` 加一行（上一例
+  // 随之变红，逼着对照规格），否则把名字加进 `OTHER_CLIENT_METHODS`。两边都不加，本例变红。
+  // 比的是键集，不比顺序：顺序只是 `createApiClient` 里展开的先后。
+  it("客户端的全部方法恰是这十个加上已归类的其余方法", () => {
+    const client = createApiClient();
+
+    expect(Object.keys(client).sort()).toStrictEqual(
+      [...REQUESTING_METHODS.map(([name]) => name), ...OTHER_CLIENT_METHODS].sort(),
+    );
+    expect(Object.values(client).every((member) => typeof member === "function")).toBe(true);
   });
 
   it.each(REQUESTING_METHODS)(

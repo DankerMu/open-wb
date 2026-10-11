@@ -345,14 +345,14 @@
 ## 16.1 的 listArchive 部分、16.4、16.5（#1080）
 
 - 非 Critical Path（读代码推出）：本刀只有浏览器端一个方法，无路由、无 `sandbox.resolve`、无 `op`，一个评审席即可。D-23 / #1286：客户端自身没有 resolve→open 窗口（读代码推出，无实测）；被调路由的读窗口已登记在 `design.md:322`，证据等级照抄该行——末段换入为「钩子辅助复现：包裹 `fs.openSync`、测试装配下的源码处理器经 `inject`；不是编译产物，未在 uid 分离部署上跑，不是自然竞态」，中间分量换入为「读代码推出，未测，未挡住」。本刀不闭合、不加宽，注释与 PR 不得写「列表一定来自空间内的文件」。
-- 前置按代码核对已齐：0.1（#1049）；10.3（#1065）的 `server/src/workspaces/rest-archive.ts:84` 路由，在 `server/src/workspaces/index.ts:18` 无条件注册；#1079 / #1082 / #1083 / #1084 的 `createFileMethods(onUnauthorized, transport)` 已在（`web/src/lib/api-files.ts` 488 行，`web/src/lib/api.ts` 497 行）。16.1 属 `tasks.md:45`「不等 1.2」一句，三项实测都不挡。
+- 前置按代码核对已齐：0.1（#1049）；10.3（#1065）的 `server/src/workspaces/rest-archive.ts:87` 路由，在 `server/src/workspaces/index.ts:18` 无条件注册；#1079 / #1082 / #1083 / #1084 的 `createFileMethods(onUnauthorized, transport)` 已在（`web/src/lib/api-files.ts` 488 行，`web/src/lib/api.ts` 497 行）。16.1 属 `tasks.md:45`「不等 1.2」一句，三项实测都不挡。
 - 与 issue / `tasks.md` / 编排提示的差异（origin/master 为准）：
 - 提示写「16.1/16.2 listArchive part」，16.2 已由 #1084 勾，本刀是 16.1 的 `listArchive` 半边加 16.4、16.5 收口。
 - issue 写形状 `{path, type, size}`，实际 `size` 是 `number | null`（`archive.ts:50`，workspaces「压缩包列表」的 `gz` 行）。
 - issue 写「模块骨架已在 #1079」，工厂其实随 #1082 落地；issue 依赖只列 #1049 / #1065 / #1079，实际还叠在 #1082–#1084 上。
-- issue 写 16.4「任务号登记在 #1084」，`tasks.md:394` 未勾，由本刀勾。
-- PR Boundary 与 `tasks.md:394` 写「`api-files.test.ts` 扩充」，该文件 743 行不加行，用例进新文件（先例 #1079–#1084）。
-- `tasks.md:400` / issue 写「把总数断言改为十」，但 `web/test` 里没有任何九或十的总数断言可改（`git grep` 无命中），本刀是新建。
+- issue 写 16.4「任务号登记在 #1084」，`tasks.md` 的 16.4 未勾，由本刀勾。
+- PR Boundary 与 `tasks.md` 的 16.4 写「`api-files.test.ts` 扩充」，该文件 743 行不加行，用例进新文件（先例 #1079–#1084）。
+- issue 写「把总数断言改为十」（`tasks.md` 16.5 之后那句只说这个总数随最后合入的一刀成立），但 `web/test` 里没有任何九或十的总数断言可改（`git grep` 无命中），本刀是新建。
 - 实现（`api-files.ts`）：`WorkspaceEndpoint` 联合加 `"archive"`，`Pick<ApiClient, …>` 加 `"listArchive"`。方法体为 `request(`${workspaceEndpoint(workspaceId, "archive")}?path=${encodeURIComponent(path)}`, getRequestOptions(options?.signal), onUnauthorized, 200)`，解析失败 `throw requestFailed(200)`。init 恰为 `{credentials:"same-origin", method:"GET", cache:"no-store"}` 加可选 `signal`，无 `headers` / `body`。
 - 类型与 knip：`api-files.ts` 导出 `ArchiveListing = { format: "zip"|"tar"|"tar.gz"|"gz"; entries: {path: string; type: "file"|"dir"; size: number|null}[]; truncated: boolean }`，条目类型与两个解析器不导出。`api.ts` 只加一个 `type ArchiveListing` 导入名和一行 `ApiClient` 成员 `listArchive(workspaceId: string, path: string, options?: ApiRequestOptions): Promise<ArchiveListing>`，不加公共类型再导出；#1097 用 `Awaited<ReturnType<ApiClient["listArchive"]>>`。行数估算（未实测，以 `scripts/size-guard.sh` 为准）：`api-files.ts` 约 545，`api.ts` 约 500。
 - 严格解析：顶层 `hasExactlyKeys` 三键，`format` 属四值，`truncated` 为 `boolean`，`entries` 经 `parseJsonArray`；条目 `hasExactlyKeys` 三键，`path` 为 `string`（空串也收，成员名是数据），`type` 属两值，`size === null || isNonNegativeSafeInteger(size)`。目录的 `size` 原样保留（规格 `links.tar` 的目录 `size` 为 1024），不按 `type` 或 `format` 交叉校验。
@@ -419,7 +419,8 @@
 - 变异：新测试或 `web/src/features/**` 直接导入 `api-files.js` → 「api-files.ts 的导出只被 api.ts 消费」判红。
 - 变异：既有九个方法之一的地址或 method 被改 → 十行表对应行判红（各自文件的字面量断言也红）。
 - 变异：不可观察：地址经 `workspaceEndpoint` 还是内联拼同一个字符串。
-- 变异：不可观察：第十一个发请求的方法未加进十行表。
+- 变异（评审后订正）：第十一个方法——原记为不可观察，评审指出对客户端键集做全名单断言就能看见；已加该断言，往工厂返回里多加一个方法时判红（实测）。它只看得见多键或少键，不判断归类对不对。
+- 变异（评审后补）：拒绝空串成员名、或只在 `gz` 下收 `size:null` → 用例 C 的「成员名是数据」行判红（实测；该行新增 `path:""`、`size:null` 的一项，服务端对名为 `.gz` 的文件确实给出空串成员名）。
 - 变异：不可观察：`ArchiveListing` 多留一个无人用的导出（只有 knip 报，没有测试会红）。
 - 变异：不可观察：超出安全整数的 `size`（规格无场景，不为它造用例）。
 - 变异：不适用于本刀：穿越、符号链接、他人空间 404、`sandbox.reject` 审计都是服务端行为，已由 #1065 的 `server/test/workspaces-archive-route.test.ts` 承担。客户端只有「路径是数据」（用例 A、B）与 id 编码（用例 A）两条。
