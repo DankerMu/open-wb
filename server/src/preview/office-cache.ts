@@ -16,11 +16,13 @@
  * - 键取自 `lstat` 那一刻，转换进程随后才按路径读输入；其间输入被改写，旧键下存进的就是新内容。
  * - 本进程对 `work/`（`2770`、无 sticky，omp 用户可写）的递归删除交给 `rmSync`：顶层条目与其内部
  *   任何一级都可在检查之后被该用户的存活进程换成符号链接（`office.ts` 的 `removeJob` 同类）。已在
- *   钉定的 Node 24.13.1 上核实不跟随：strace 下递归逐级 `openat`（父目录描述符 + 名字，
- *   `O_NOFOLLOW|O_DIRECTORY`）再 `unlinkat`，按描述符而不是按路径；经真实的 `clearWork`，预先放好
- *   的顶层与嵌套链接都只删掉链接本身，边删边换的自然竞态在 ext4 与 overlayfs 上各 40 轮无一次删到
- *   外面。这是该运行时版本的实现，不是 Node 的承诺（仓库只为开发与 CI 钉了版本）：仍登记在此，换
- *   版本须重新核实。
+ *   钉定的 Node 24.13.1（官方 Linux 构建）上核实不跟随。strace 跟的是一次参数与这里相同的裸
+ *   `rmSync`，不是 `clearWork`：顶层按路径打开（`openat(AT_FDCWD, <路径>, …O_NOFOLLOW|O_DIRECTORY)`），
+ *   最后对它的 `rmdir` 也按路径；其下各级才是 `openat`（父目录描述符 + 名字，
+ *   `O_NOFOLLOW|O_DIRECTORY`）再 `unlinkat`，按描述符。经真实的 `clearWork`（不提供 `ompUser` 的
+ *   分支，链接由 omp 用户以自己的 uid 放），预先放好的顶层与嵌套链接都只删掉链接本身；删除途中
+ *   换入没有测过。这是该运行时版本的实现，不是 Node 的承诺（仓库只为开发与 CI 钉了版本）：仍登记
+ *   在此，换版本须重新核实。
  */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";

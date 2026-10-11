@@ -19,8 +19,9 @@
  * residual of this change, left to the deployment model of ADR-0010: one dedicated omp uid and
  * trusted accounts). In the sweep: the checks and the `rm` go by path. Node gives its callers no
  * `*at` calls, and the one recursion found to use them is not the one used here: `rmSync` walks by
- * descriptor (Node 24.13.1 on Linux, strace: `openat` with `O_NOFOLLOW|O_DIRECTORY`, then
- * `unlinkat`), while this `rm` is the `fs/promises` one, in that runtime a JavaScript walk doing
+ * descriptor below its top level (Node 24.13.1 on Linux, strace: `openat` with
+ * `O_NOFOLLOW|O_DIRECTORY`, then `unlinkat`), while this `rm` is the `fs/promises` one, in that
+ * runtime a JavaScript walk doing
  * `lstat`, `readdir`, `rmdir` and `unlink` on a path each (read from the runtime's source, not
  * traced). Each level is resolved by path again after its check,
  * and the recursion inside `rm` goes by path too, so nothing here is atomic. The
@@ -53,7 +54,7 @@
  * One case on the target side needs no race (measured on a uid-separated Linux deployment, ext4
  * and overlayfs, Node 24.13.1, driving the compiled `moveToTrash` and `sweep`, not the route, with
  * no `.trash` present). `ensureOwnedDir` refuses a symlink, a regular file and a directory of
- * another uid (measured at `.trash`, the last one at the owner level as well),
+ * another uid (measured at `.trash`, the last one at the owner level as well; on ext4 only),
  * but an existing directory of this uid is taken whatever its mode and whoever moved it there. An
  * account root is such a directory, and the omp uid can rename it to `<SANDBOX_ROOT>/.trash`,
  * before `.trash` exists or after moving the real one aside. The next deletion by any other

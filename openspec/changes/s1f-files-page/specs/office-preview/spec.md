@@ -94,7 +94,7 @@
 
 #### Scenario: 启动清空超时与关停终止
 - **WHEN** 以 `ompUser: "omp"` 与一个 `officeBin` 运行一次启动时清理，`sudo` 被替换为记录自己的 pid 之后一直睡眠的假可执行文件；另一例在该假 `sudo` 仍在运行时调用清理对象的终止句柄
-- **THEN** 第一例清理在超时之后落定且没有抛出，application stderr 恰多一行 `{"event":"preview_work_clear_failed"}`，那个假 `sudo` 在有界时间内已不存在，`work` 下本进程可删的条目照常被删除，假 `sudo` 恰被启动一次；第二例那个假 `sudo` 在有界时间内已不存在，清理照常落定且没有抛出
+- **THEN** 第一例清理在超时之后落定且没有抛出，application stderr 恰多一行 `{"event":"preview_work_clear_failed"}`，那个假 `sudo` 在有界时间内已不存在，`work` 下本进程可删的条目照常被删除，假 `sudo` 恰被启动一次；第二例那个假 `sudo` 在有界时间内已不存在，清理照常落定且没有抛出，application stderr 同样恰多一行 `{"event":"preview_work_clear_failed"}`（被信号终止按该命令失败处理）
 
 ### Requirement: 办公文档预览路由
 预览监听器的 `GET /o/<token>/<path>` SHALL 以与 preview-origin「预览监听器」`/w/` 相同的次序校验令牌、空间根与路径（`resolve(op=read)`，越界 403 + 审计，不存在或非普通文件 404），随后：扩展名（小写）不是 `docx`、`xlsx`、`pptx` → 415；文件大小超过 `PREVIEW_DOCUMENT_MAX_BYTES` → 413（不启动转换）；转换器 `available` 为 `false` → 503；否则调用 `convert`，以请求连接的关闭作为其 `signal`。成功时 SHALL 以 `Content-Type: application/pdf`、preview-origin「预览响应头与内容类型」对 PDF 规定的头返回缓存文件的完整字节，并支持单段 `Range`。`PREVIEW_DOCUMENT_MAX_BYTES` 在服务端只由本路由执行：`/w/<token>/<path>` 对任何文件（含 `pdf`）都没有大小上限——它还要提供 HTML 页面引用的任意相对资源，持有令牌本就可以经它读到该空间的任何文件，按扩展名单独拦 `pdf` 不减少暴露面；PDF 的预览上限因此只是浏览器侧的呈现门槛，由页面按令牌响应的 `documentMaxBytes` 判定是否建 iframe（file-previewers「PDF 与办公文档」）。
