@@ -12,8 +12,10 @@ import {
   authenticatedFilesRoutes,
   cleanupFilesFixture,
   type FetchRoutes,
+  imagePreviewResponse,
   renderFiles,
   secondWorkspace,
+  stubBlobUrls,
   workspace,
 } from "./files-fixture.js";
 import { createFetchMock, deferredResponse, jsonResponse, textPreviewResponse } from "./support.js";
@@ -382,6 +384,86 @@ describe("WorkspaceBrowser 受控路径与定位", () => {
     expect(onPathChange.mock.calls).toStrictEqual([]);
   });
 
+  it("path 改成 null 时放掉选中图片的 blob 地址：恰好 revoke 一次", async () => {
+    const blobUrls = stubBlobUrls(["blob:pic"]);
+    const { setPath } = mount(
+      "out/pic.png",
+      {},
+      routes({
+        [OUT]: () => jsonResponse({ path: "out", entries: [fileEntry("pic.png", 8)] }),
+        [`${FILE}out%2Fpic.png`]: () => imagePreviewResponse(),
+      }),
+    );
+    const image = await previewRegion().findByRole("img", { name: "pic.png" });
+    expect(image.getAttribute("src")).toBe("blob:pic");
+    await settle();
+    expect(blobUrls.revokeObjectURL.mock.calls).toStrictEqual([]);
+
+    setPath(null);
+    expect(await previewRegion().findByText("未选择文件", { exact: true })).toBeTruthy();
+    await settle();
+    expect(blobUrls.revokeObjectURL.mock.calls).toStrictEqual([["blob:pic"]]);
+  });
+
+  it("path 改去别处、目录列表还没回来又改回当前选中：放弃那次定位，列表回来后选中与预览不动、不再请求", async () => {
+    const src = deferredResponse();
+    const { onPathChange, requests, setPath } = mount(
+      "out/a.md",
+      {},
+      routes({ [SRC]: () => src.promise }),
+    );
+    await selectedRow("a.md");
+    await previewRegion().findByText("甲的正文", { exact: true });
+
+    setPath("src/deep/app.ts");
+    await settle();
+    expect(requests()).toStrictEqual([ROOT, OUT, FILE_A, SRC]);
+    expect(fileRow("a.md").getAttribute("aria-current")).toBe("true");
+
+    setPath("out/a.md");
+    await act(async () => {
+      src.resolve(jsonResponse({ path: "src", entries: [dirEntry("deep")] }));
+    });
+    // `src` 的列表确实落地了（它在等的时候已被展开）；`deep` 没有被走下去。
+    expect(await within(tree()).findByRole("button", { name: "展开 deep" })).toBeTruthy();
+    await settle();
+    expect(requests()).toStrictEqual([ROOT, OUT, FILE_A, SRC]);
+    expect(fileRow("a.md").getAttribute("aria-current")).toBe("true");
+    expect(previewRegion().getByText("甲的正文", { exact: true })).toBeTruthy();
+    expect(onPathChange.mock.calls).toStrictEqual([]);
+  });
+
+  it("reveal 还在等目录列表时 path 改回当前选中：同样放弃，不选中 reveal 的目标、不回调", async () => {
+    const src = deferredResponse();
+    const { browser, onPathChange, requests, setPath } = mount(
+      "out/a.md",
+      {},
+      routes({ [SRC]: () => src.promise }),
+    );
+    await selectedRow("a.md");
+    await previewRegion().findByText("甲的正文", { exact: true });
+    // 先让 `path` 离开当前选中：指向已加载的目录，选中不动、没有请求。
+    setPath("out");
+    await settle();
+    expect(requests()).toStrictEqual([ROOT, OUT, FILE_A]);
+    expect(fileRow("a.md").getAttribute("aria-current")).toBe("true");
+
+    act(() => browser().reveal("src/deep/app.ts"));
+    await settle();
+    expect(requests()).toStrictEqual([ROOT, OUT, FILE_A, SRC]);
+
+    setPath("out/a.md");
+    await act(async () => {
+      src.resolve(jsonResponse({ path: "src", entries: [dirEntry("deep")] }));
+    });
+    expect(await within(tree()).findByRole("button", { name: "展开 deep" })).toBeTruthy();
+    await settle();
+    expect(requests()).toStrictEqual([ROOT, OUT, FILE_A, SRC]);
+    expect(fileRow("a.md").getAttribute("aria-current")).toBe("true");
+    expect(previewRegion().getByText("甲的正文", { exact: true })).toBeTruthy();
+    expect(onPathChange.mock.calls).toStrictEqual([]);
+  });
+
   it("StrictMode 下以 path 渲染同样选中 a.md，不回调", async () => {
     const { onPathChange, requests } = mount("out/a.md", {}, routes(), true);
 
@@ -396,7 +478,8 @@ describe("WorkspaceBrowser 受控路径与定位", () => {
 
 describe("WorkspaceBrowser 标记与子树", () => {
   const marked = { label: MARK, paths: new Set(["out/a.md"]) };
-  const only = new Set(["out/a.md", "x/y.md"]);
+  // 插入顺序故意与显示顺序（同级按名字）相反：不排序的话 `x` 会排在 `out` 前面。
+  const only = new Set(["x/y.md", "out/a.md"]);
 
   it("标记与子树：out 与 out/a.md 两行带标记；传入 onlyPaths 之后树恰为 out → a.md 与 x → y.md，没有新的 tree 请求", async () => {
     const { treeRequests, requests, update } = mount(null, { markedPaths: marked });
@@ -478,15 +561,18 @@ describe("WorkspaceBrowser 标记与子树", () => {
   });
 
   it("挂载时就带着 onlyPaths：连根也不请求；撤掉之后才请求根", async () => {
-    const { requests, update } = mount(null, { onlyPaths: only });
+    // 根下的文件最先插入、名字又排在 `x` 前面：目录在前，同类再按名字。
+    const { requests, update } = mount(null, {
+      onlyPaths: new Set(["readme.md", "x/y.md", "out/a.md"]),
+    });
 
     expect(await within(tree()).findByRole("button", { name: "y.md" })).toBeTruthy();
-    expect(rowNames()).toStrictEqual(["设计文档", "out", "a.md", "x", "y.md"]);
+    expect(rowNames()).toStrictEqual(["设计文档", "out", "a.md", "x", "y.md", "readme.md"]);
     await settle();
     expect(requests()).toStrictEqual([]);
 
     update({});
-    expect(await within(tree()).findByRole("button", { name: "readme.md" })).toBeTruthy();
+    expect(await within(tree()).findByRole("button", { name: "展开 bad" })).toBeTruthy();
     await settle();
     expect(requests()).toStrictEqual([ROOT]);
   });
