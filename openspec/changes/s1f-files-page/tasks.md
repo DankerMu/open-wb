@@ -50,7 +50,7 @@
 > - 分层守卫：`web/test/ui-layering.test.ts` 的 `MIGRATED_AREAS` 与清单断言两处同步改。组 3 起 `web/src/features/files` 整目录在清单里；`web/src/features/chat/` 下新增的 `.ts`/`.tsx` 在同一 PR 逐个登记。
 >   已迁移文件从 `web/src/ui` 只可导入 `Icon`、`IconName`、`BrandMark`、`useEscapeFallback`，不得导入 `useToast`。`web/test/chat-module-layout.test.ts` 的导入方向不变（`page.tsx → use-chat-session.ts → turn-actions.ts`）。
 > - 拷入层（`web/src/components/ui`、`web/src/components/assistant-ui`）：只新增 `resizable`（组 23），且只做 ADR-0013 的六类修改；既有拷入文件不动。`web/src/ui/**` 冻结区不动、不加图标。
-> - 门槛：knip（不留未引用导出）、jscpd、单文件 800 行（`web/src/lib/api.ts` 778 行不再加方法；`web/src/lib/md-render.ts` 797 行不改；`web/e2e/ui-walk-sessions.spec.ts` 681 行与 `web/e2e/ui-walk-layout.ts` 793 行不加行，
+> - 门槛：knip（不留未引用导出）、jscpd、单文件 800 行（`web/src/lib/api.ts` 当时 778 行不再加方法（#1082 把工作空间方法搬进 `api-files.ts` 之后为 489 行，经 #1083、#1084 后 497 行，新方法仍只进 `api-files.ts`）；`web/src/lib/md-render.ts` 797 行不改；`web/e2e/ui-walk-sessions.spec.ts` 681 行与 `web/e2e/ui-walk-layout.ts` 793 行不加行，
 >   新走查步骤写进新 helper 文件；`server/src/workspaces/rest.ts` 的新路由放进新文件）、覆盖率 80%。
 > - 代码分割只在 `web/src/features/files/previewers/index.ts`（组 17 起有守卫）；`vite.config.ts` 不加 `manualChunks`。
 > - 一切用户给的路径过 `sandbox.resolve`；属他人与不存在的工作空间 id 一律是相同的 404 且先于路径检查；越界必写 `sandbox.reject`。
@@ -73,7 +73,7 @@
   同时核对绝对计数与当时的主规格相符：配置项 = 主规格的项数 + 12、归属身份 = 主规格的条数 + 2、错误码不变、`op` 集合 = 主规格的集合加 `delete` 与 `move`；同一条文内正文与场景的计数、枚举一致。
   表外另核一处：ui-primitives「按钮单一实现与旧类退役」（底本是主规格，不属重叠）的场景「迁移后行为不回归」引用了 C 的 session-sidebar「分组侧栏」与 ui-foundation「组件分层」对 `新建会话` 的规定——确认当时主规格里这两条仍是「名称与行为不变」「`session-sidebar.tsx` 在已迁移清单里」，且主规格的 ui-primitives 该条没有被 C / S1g 改过。
   每条 MODIFIED 保留主规格该条文现有的全部场景标题。验证：`$HOME/.nvm/versions/node/v24.13.1/bin/openspec validate s1f-files-page --strict --no-interactive` 与 `$HOME/.local/bin/openspec validate s1f-files-page --strict --no-interactive` 都通过且 ERROR 为 0。
-  实施注记见 `implementation-notes.md`「0.1（#1049）」。
+  实施注记见 `implementation-notes-1.md`「0.1（#1049）」。
   核对记录（#1049，2026-10-09，底本为 C 归档于 #980、S1g 归档于 #1047 / PR #1284 之后的主规格，合并提交 `7e0e6d3`）：D25 表十三条（十二条 MODIFIED 与被移除的「产物面板」）的表头全部命中主规格，本 change 另十四条 MODIFIED 的表头同样命中、35 条 ADDED 的表头在主规格里都不存在（预期归档输出 +35、~26、-1）；十三条与主规格的句子级差异只有 D25「本 change 的增量」列所列内容，外加一处表里漏列的本 change 自己的增量——「服务启动与装配」失败记录 `reason` 枚举的 `preview_cache` / `preview_listen` 一句（#1203 对齐时加入），已补进 D25 的表，delta 无需修改。与 S1g 同名的五条（chat-web「会话页」、http-service-skeleton 三条、sandbox-core「resolve 契约与逃逸向量」）带着 S1g 已交付的全部句子与场景；C 在实现期改过的各处（启动失败 `reason` 枚举与场景「启动失败记录带失败阶段」等）也都在。26 条 MODIFIED 的场景标题集合都是主规格同名条文的超集。计数：主规格为二十三项配置、十五条归属身份、十六码、`op ∈ {read, list, mkdir, write}`、迁移回执到 042；本 change 为三十五项（+12）、十七条（+2）、十六码（不变）、`op` 加 `delete` 与 `move`，不新增迁移；同一条文内正文与场景的计数、枚举一致。表外一处：主规格 session-sidebar「分组侧栏」仍写「既有的 `新建会话` 按钮（名称与行为不变）」，ui-foundation「组件分层」的场景「会话页迁移终态」仍把 `session-sidebar.tsx` 列在已迁移清单里，ui-primitives「按钮单一实现与旧类退役」自本 change 起草以来未被 C / S1g 改过。本 change 独自修改的十四条的主规格底本自起草以来逐字未变。两个 openspec CLI（1.3.1 与 1.13.2）的 `validate --strict` 都通过，0 个 ERROR。文首所列行数的现值（已同步进文首与 design）：`web/src/lib/api.ts` 778、`web/src/lib/md-render.ts` 797、`web/e2e/ui-walk-sessions.spec.ts` 681、`web/e2e/ui-walk-layout.ts` 793、`server/src/workspaces/rest.ts` 416。
 - [ ] 0.2 本 change 归档之前：用当时的主规格把 0.1 再做一遍（期间主规格若又被别的 change 改过，以当时的为准），diff 里仍只允许出现 D25 表里列的增量。
 
@@ -116,7 +116,7 @@ Minimal mergeable slice: 三项各自独立，可分别记录、分别成 PR（�
     `:233-239` 的「`readme.md` 的列表符号不为 `none`」断言**原样保留**（它现在证明 Tailwind 的还原生效；去掉还原这条就红），只改 `:232` 那行说它靠 `legacy.css` 的注释。该文件 594 行，改写不增行。
   核对过、这一刀不受影响的（开工时确认仍成立）：`web/test/chat-messages.test.tsx:185-187`（`preview.tsx` 含 `MarkdownView`、不含 `function renderBlock`）；`files-page.test.tsx:537-541`（`preview.tsx` 含 `fileIcon(`、`formatSize(`）；
   `files-empty-layout.test.tsx:174-181` 与 `ui-tokens.test.ts:76-88` 读的 `files.css` 规则（暂留）；`files-empty-layout.test.tsx:190-194`；走查 `ui-walk-layout.ts:304-311` 的 `.ui-btn` 探针（它在选中文件之前运行，取到的是 `新建`，不是 `查看源码`）。
-  实施注记见 `implementation-notes.md`「2.1（#1076）」。
+  实施注记见 `implementation-notes-1.md`「2.1（#1076）」。
 - [x] 2.2 `web/src/features/files/dialogs.tsx`：`新建工作空间`、`新建文件夹` 两个对话框改用拷入层 `dialog`、`input`、`label`、`button`；文案、校验、409 映射、忙碌态、取消中止与焦点规则不变。单独登记进 `MIGRATED_AREAS`。
   五个定点（都是既有断言依赖的）：前四个是属性与元素的选择，`DialogContent` 上显式传 `aria-modal="true"`（拷入的 `dialog` 不自带，冻结区 `Dialog` 是自己补的；`files-overlays.test.tsx:75`、`:124` 与 files-web「创建浮层的焦点时序与模态清理」断言它）；遮罩用拷入层自带的 `data-slot="dialog-overlay"`；
   右上的 `关闭` 用拷入层自带的关闭按钮（可访问名 `关闭`）；`位置` 仍是原生 `<select>`（拷入层没有 `select`，本 change 不新拷入；走查 `ui-walk.spec.ts:288` 的 `getByLabel("位置").selectOption(…)` 依赖它）。
@@ -133,7 +133,7 @@ Minimal mergeable slice: 三项各自独立，可分别记录、分别成 PR（�
     同一用例 `:259-261` 对 `page.tsx` 的导入断言这一刀不动（3.2 改）；O7 的禁用字面量清单（`<dialog`、`role="menu"`、`showModal` 等）原样通过——拷入层源码里没有这些字面量。
   核对过、原样通过的：`files-overlays.test.tsx` 的 O1–O6、O9（「创建流程焦点闭环」「取消类关闭无模态残留」「挂起期点遮罩中止请求」三个场景逐条对照；`expectModalSet` / `expectModalCleared` 读的 `aria-hidden` 与 `body` 的 `pointer-events` 来自 Radix Dialog，新旧相同）、
   `files-errors.test.tsx`、`files-concurrency.test.tsx`、`files-fixture.tsx`（这三个文件没有类名或结构选择器落在对话框上）、走查 `ui-walk.spec.ts:205-219`、`:262-264`、`:286-300`（按角色与标签定位）。
-  实施注记见 `implementation-notes.md`「2.2、2.3（#1077）」。
+  实施注记见 `implementation-notes-1.md`「2.2、2.3（#1077）」。
 - [x] 2.3 变异证据：把 `新建文件夹` 对话框的初始焦点从 `位置` 挪走 → 焦点闭环用例判红；去掉预览头的 `data-slot` → 修改时间格式用例判红；`查看源码` 改回冻结区的 `Button` → 「`className` 不含 `ui-btn`」判红（分层守卫同时判红）；
   去掉 Markdown 容器上还原列表符号的类 → 走查的「列表符号不为 `none`」判红；去掉 `DialogContent` 的 `aria-modal` → 「初始焦点经受延迟回焦」用例判红；把 `CreationMenu` 留在 `dialogs.tsx` → 分层守卫判红；
   去掉挂起上升沿移焦点到关闭按钮的那段逻辑（或改成聚焦首个可用控件）→ O4、O5 的「活动元素是 `关闭`」与走查的 `关闭` `toBeFocused` 判红。
@@ -155,7 +155,7 @@ Minimal mergeable slice: 2.1 与 2.2 互不依赖，各自一刀，各自合入�
   - `web/test/files-empty-layout.test.tsx:21-25` 的 `emptyStateOf` 帮手：`.ui-empty-state` → `[data-slot="empty-state"]`（服务于 `:38-40`、`:47-48`、`:82`；`:39`、`:48`、`:82` 里直接写的 `closest(".ui-empty-state")` 同改）。
   - `web/test/files-overlays.test.tsx:223`（O8 的 `新建`）：`className` 由「恰为 `ui-btn ui-btn--secondary ui-btn--md`」改为「不含 `ui-btn`」（2.2 留下的两条之一）。
   这三个文件与 `ui-tokens.test.ts`、`topbar.test.tsx` 里**读 `files.css` 规则体**的断言不是选择器改动，随 3.3 逐条处理（见 3.3）。
-  实施注记见 `implementation-notes.md`「3.1–3.7（#1078）」。
+  实施注记见 `implementation-notes-1.md`「3.1–3.7（#1078）」。
 - [x] 3.2 `web/src/features/files/page.tsx`：分栏与窄屏纵排改用 Tailwind（宽于 760 左右分栏，否则纵排），加 `刷新` 按钮（files-web「目录树与预览」的「手动刷新」场景）；`?ws=` 的缺省、纠正与归属隔离不变。
   工作空间切换器（今天是 `page.tsx:90` 起的冻结区 `Popover`，其中 `:149` 的 `＋ 新建工作空间` 用冻结区 `Button`）改用拷入层 `popover` 与 `button`，必要时拆出 `workspace-switcher.tsx`。切换器弹层保留 `role="dialog"` 与可及名 `工作空间切换器`
   （ui-primitives「基元组件库」的场景「既有对话框迁移不回归」仍断言它；`web/test/files-page.test.tsx`、`files-overlays.test.tsx`、`files-logical-path.test.tsx` 与走查 `ui-walk.spec.ts:206` 按这个名字定位切换器，这些定位原样保留）；
@@ -200,7 +200,7 @@ Minimal mergeable slice: 3.1–3.5 同刀（目录登记、`files.css` 删除、
 ## 4. sandbox-core — `delete` 与 `move` 两个 `op`
 
 - [x] 4.1 `server/src/core/sandbox/resolve.ts` 与 `index.ts`：`op` 联合在 S1g 之后的成员（`read`、`list`、`mkdir`、`write`）上增加 `delete`、`move`（不动 `write` 的任何规则）；末段校验（非空、非 `.`/`..`、不含反斜杠）从 `mkdir`、`write` 扩到四个 `op`。facade 的审计 `detail.op` 原样带出新值。
-  实施注记见 `implementation-notes.md`「4.1–4.3（#1053）」。
+  实施注记见 `implementation-notes-1.md`「4.1–4.3（#1053）」。
 - [x] 4.2 测试（`server/test/sandbox-resolve.test.ts`、`sandbox-facade.test.ts`）：sandbox-core「删除与移动的逃逸向量」场景的八种输入各对两个 `op`；合法路径；`regular-file/child` 对新 `op` 不是越界；facade 对 `delete` 的拒绝写出 `detail.op === "delete"`。
 - [x] 4.3 变异证据：把空串放行给 `delete` → 「根不能被删除」用例判红；去掉 `move` 的末段校验 → `a/` 用例判红。
 
@@ -212,7 +212,7 @@ Minimal mergeable slice: atomic - 一个纯函数加它的 facade 类型，测�
 - [x] 5.1 `server/src/agent-config.ts`（或并列的新文件 `server/src/preview-config.ts`，由 `resolveServerConfig` 合并）：解析 `PREVIEW_PORT`、`PREVIEW_ORIGIN`、`PREVIEW_CACHE_DIR`、`OFFICE_BIN`、`OFFICE_CONVERT_TIMEOUT_MS`、`OFFICE_CONVERT_CONCURRENCY`、
   `PREVIEW_TEXT_MAX_BYTES`、`PREVIEW_IMAGE_MAX_BYTES`、`PREVIEW_DOCUMENT_MAX_BYTES`、`PREVIEW_NOTEBOOK_MAX_BYTES`、`PREVIEW_ARCHIVE_MAX_ENTRIES`、`TRASH_RETENTION_DAYS`，缺省值与校验按 http-service-skeleton「服务启动与装配」；
   错误只命名键、不回显值。本任务只到 `ServerConfig` 的字段，不接任何消费方。
-  实施注记见 `implementation-notes.md`「5.1–5.3（#1054）」。
+  实施注记见 `implementation-notes-1.md`「5.1–5.3（#1054）」。
 - [x] 5.2 测试（`server/test/server-config.test.ts` 或新文件）：「预览与文件键的缺省与覆盖」的解析部分；「预览与文件键的非法值」逐键逐值；既有按键数断言的用例按「主规格当时的项数 + 12」更新（C、S1g 之后为二十三项，加十二为三十五项；http-service-skeleton「Shared agent module assembly」的场景「Pure source and compiled configuration identity」同步）；`server-entry-silent.test.ts` 的非法配置路径加两三个新键的样本（编译入口 nonzero、恰一行 generic 记录、无副作用）。
 - [x] 5.3 变异证据：让 `PREVIEW_PORT` 拒绝 `0` → 缺省用例判红；让 `PREVIEW_ORIGIN` 接受带路径的值 → 非法值用例判红；错误 message 带上输入值 → 「不含输入值」断言判红。
 
@@ -223,9 +223,9 @@ Minimal mergeable slice: atomic - 纯解析函数与其测试；没有消费方�
 
 - [x] 6.1 `server/src/workspaces/preview.ts`：`classifyPreview(absPath, name, size, options)` 按 workspaces「预览分类元数据与有界字节流」的表重写（文本扩展名与 `Dockerfile` / `Makefile`、图片七种、音视频四种、Notebook、由别处提供的集合、`sniffedText`、`limits`）；新增纯函数 `sniffText`。
   导出图片、音频、视频、Notebook 四个扩展名集合供组 17 的契约测试读取。
-  实施注记见 `implementation-notes.md`「6.1、6.2 最小接线（#1055）」。
+  实施注记见 `implementation-notes-1.md`「6.1、6.2 最小接线（#1055）」。
 - [x] 6.2 `server/src/workspaces/rest.ts` 的 `file` 路由：未知 / 无扩展名时读前至多 8192 字节嗅探后再分类；`limits` 经 `registerWorkspaces` 的依赖对象传入（缺省为规格缺省值），`server/src/app.ts` 把 `ServerConfig` 的三个上限接进来（`assembly` 新增可选字段）。
-  实施注记见 `implementation-notes.md`「6.2（部分）、6.3、6.4（#1056）」。
+  实施注记见 `implementation-notes-1.md`「6.2（部分）、6.3、6.4（#1056）」。
 - [x] 6.3 测试：`server/test/` 新文件 `workspaces-preview-classify.test.ts`（分类器六个场景中除范围解析外的全部）与既有工作空间路由测试里补「未知与无扩展名文件的嗅探」「图片与拒绝」「Notebook 与可配置上限」「文本、截断与 html」（含 `svg`、`htm` 为 `text/plain`）。
   断言已知扩展名的请求不发生嗅探读取（以对 `open`/`read` 的计数或注入的读函数为证）。preview-origin「主站不把工作空间文件当文档返回」的 `file` 半边（`page.html`、`logo.svg`、`feed.xml` 为 `text/plain`，`doc.pdf` 为 415）也在这里断言。
   随条文改写的既有测试（与 6.1 同 PR，逐条记入偏离记录）：`server/test/workspace-preview.test.ts`（`classifyPreview` 的三参调用改四参；`IMAGE_LIMIT = 10_485_760` 与「11 MiB 的 png 被拒」改为 20 MiB 边界）、
@@ -238,9 +238,9 @@ Minimal mergeable slice: 6.1 + 6.2 中「路由按新签名调用、上限仍取
 ## 7. workspaces — 音视频的范围请求
 
 - [x] 7.1 `preview.ts` 新增纯函数 `parseRange` 与 `openRangeStream`（只有函数与导出，路由不变）。测试：`parseRange` 的十个输入（workspaces「嗅探与范围解析」场景）；`openRangeStream(path, 10, 19)` 恰产出第 10–19 字节，读完前销毁时描述符释放。
-  实施注记见 `implementation-notes.md`「7.1（#1057）」。
+  实施注记见 `implementation-notes-1.md`「7.1（#1057）」。
 - [x] 7.2 把「按区间发送一个文件」做成 `server/src/workspaces/` 下可复用的小函数（200 / 206 / 416 的头与正文；组 12、15 的预览监听器直接用它）。
-  实施注记见 `implementation-notes.md`「7.2、7.3、7.4、7.5（#1058）」。
+  实施注记见 `implementation-notes-1.md`「7.2、7.3、7.4、7.5（#1058）」。
 - [x] 7.3 `file` 路由对 `rangeable` 的类别经 7.2 的函数按 workspaces「文件预览」返回 200 / 206 / 416，其余类别忽略 `Range`。
 - [x] 7.4 测试：路由层「音视频的范围请求」场景，206 用真实监听的 HTTP 客户端断言字节与 `Content-Range`（`inject` 之外再走一次真连接）；流在区间读完前被客户端中止时描述符释放。
 - [x] 7.5 变异证据：`bytes=-100` 当成 `0-100` → 后缀区间用例判红；对 `readme.md` 也回 206 → 「其余类别忽略」用例判红；416 带上 JSON 信封 → 空体断言判红。
@@ -253,8 +253,8 @@ Minimal mergeable slice: 7.1（纯函数与其测试）先合；7.2–7.4（发�
 - [x] 8.1 新文件 `server/src/workspaces/trash.ts`：`createTrash({sandboxRoot, retentionDays, rename?})` 提供 `moveToTrash(ownerId, workspaceId, absPath) → trashId`（四级目录逐级 `ensureOwnedDir(…, 0o700)`——符号链接、非目录、他人持有都拒绝——、一次 `rename`、失败时删掉空批次并抛出）与 `sweep(now)`（file-operations「回收目录的保留与清理」）。
   断言账号 id 不以 `.` 开头（design D22）：以种子账号与 `store` 的 owner 段校验为证，写成一条测试——它只读账号与目录校验、不执行 `rename`，归 `sweep` 半边，写在 `workspaces-trash-sweep.test.ts` 里（不等 1.2）。
   本任务按是否执行 `rename` 分两半交付：`sweep` 半边（`createTrash` 的构造与目录校验、`sweep`）不 `rename` 用户条目，不等 1.2，是 13.1 的前提；`moveToTrash` 半边 Depends on 1.2，是 8.2 的前提。
-  实施注记见 `implementation-notes.md`「8.1 的 sweep 半边，含分摊的 8.3 / 8.4 条款（#1059）」。
-  实施注记见 `implementation-notes.md`「8.1 的 moveToTrash 半边、8.2、8.3、8.4（#1060）」。
+  实施注记见 `implementation-notes-1.md`「8.1 的 sweep 半边，含分摊的 8.3 / 8.4 条款（#1059）」。
+  实施注记见 `implementation-notes-1.md`「8.1 的 moveToTrash 半边、8.2、8.3、8.4（#1060）」。
 - [x] 8.2 新文件 `server/src/workspaces/rest-entries.ts`：`DELETE /api/workspaces/:id/entries`，检查次序、审计 `file.delete`（`detail` 三键）与失败语义按 file-operations「删除到回收目录」；由 `registerWorkspaces` 注册，`trash` 经依赖对象传入。
 - [x] 8.3 测试（新文件 `server/test/workspaces-delete.test.ts`）：「删除文件与目录」「同名先后删除互不覆盖」「拒绝项」「改名失败不丢文件」（注入抛 `EXDEV` 的 `rename`）「回收目录被预先占位」「回收目录不可见」；审计失败时 500 且条目已在回收目录。这个测试文件与 8.2 的路由、8.1 的 `moveToTrash` 半边 Depends on 1.2：其结论与设计相符才开工。
   `server/test/workspaces-trash-sweep.test.ts`（随 8.1 的 `sweep` 半边，不等 1.2）：「到期的批次被清除」「临时空间删除后批次保留到期满」（空间行与 `tmp-<id>` 目录都不存在时，批次在保留期内不动、期满被清；清理不查 `workspaces` 表）「保留期可配置」「清理出错不外溢」，以及 8.1 的「账号 id 不以点开头」。
@@ -268,10 +268,10 @@ Minimal mergeable slice: 8.1 的 `sweep` 半边与 `workspaces-trash-sweep.test.
 ## 9. file-operations — 重命名 / 移动与下载
 
 - [x] 9.1 `rest-entries.ts`：`POST /api/workspaces/:id/move`（严格的 `{from,to}` body、检查次序、409 不覆盖、子树 400、审计 `file.move` 与两种 `title`）；`server/src/http/errors.ts` 的归属路由集合加入 `POST /api/workspaces/:id/move`。
-  实施注记见 `implementation-notes.md`「9.1、9.2、9.5（#1062）」。
+  实施注记见 `implementation-notes-1.md`「9.1、9.2、9.5（#1062）」。
 - [x] 9.2 测试（新文件 `server/test/workspaces-move.test.ts`）：file-operations「重命名与移动」六个场景（含「子树判断先于存在性」：`d1/sub` 存在与不存在两种夹具都是 400，`d1 → d10` 不被误判）；`server/test/http-parser-owners.test.ts` 加该路由的四种 content-parser 错误 → 400 且无文件变化。
 - [x] 9.3 `rest-entries.ts`：`GET /api/workspaces/:id/download`（附件头、`filename` 与 `filename*` 的生成做成纯函数、审计先于首字节、不支持 `Range`）。
-  实施注记见 `implementation-notes.md`「9.3、9.4（#1061）」。
+  实施注记见 `implementation-notes-1.md`「9.3、9.4（#1061）」。
 - [x] 9.4 测试（新文件 `server/test/workspaces-download.test.ts`）：file-operations「下载」四个场景；文件名函数对中文、空格、引号、反斜杠、控制字符的输出；preview-origin「主站不把工作空间文件当文档返回」场景的 `download` 半边（html、svg、pdf、xml 都是 `application/octet-stream` 附件；`file` 半边在 6.3）。
 - [x] 9.5 变异证据：目标存在时仍 `rename` → 「同名拒绝」里内容被覆盖而判红；不查子树 → `d1 → d1/sub/d1`（`d1/sub` 已存在的夹具）得到 `rename` 的失败或成功而不是 400，判红；把子树判断放回父目录检查之后 → `d1/sub` 不存在的夹具得到 404 而不是 400，判红；用不带 `/` 的前缀比较 → `d1 → d10` 被误拒而判红；审计挪到发送之后 → 「审计失败不发文件」判红；`Content-Type` 改用真实类型 → html 下载的类型断言判红。
 
@@ -282,13 +282,13 @@ Minimal mergeable slice: 9.1–9.2（移动）与 9.3–9.4（下载）互不依
 
 - [x] 10.1 新文件 `server/src/workspaces/archive.ts` 的 tar / tar.gz / gz 部分：`node:zlib` 加 512 字节头的遍历器（ustar `name`/`prefix`、GNU `L`、pax `path`；成员正文跳过不读）；单个 gz 一项；到条目上限停读；tar 与 tar.gz 的 5 秒时限（时钟可注入）；
   扩展记录 65536 字节与成员名 4096 字节的硬上限——按头里**声明**的长度在读取之前判定，超出即停读并置 `truncated`（一项都没读出时为不支持）。读取经一个可注入的读函数，测试用它记录单次读取的最大长度。
-  实施注记见 `implementation-notes.md`「10.1（#1063）」。
+  实施注记见 `implementation-notes-1.md`「10.1（#1063）」。
 - [x] 10.6 `archive.ts` 遍历器的两处修正（owner 裁决 2026-10-09；规格条文随本任务的代码 PR 落地，不在此前写）。Depends on：10.1。挡住：10.3。
   (a) 一个完整的 gzip 流之后的字节被忽略：带尾部字节的 tar.gz / gz 的列表等于去掉尾部后的列表，`truncated` 为 `false`。
   (b) typeflag 为 `1`–`6` 的 tar 成员没有正文：遍历器不按其头里的 `size` 跳过字节，下一个头紧随其后；该条目的 `size` 仍显示头里的值。
   各带用例与变异证据（去掉 (a) → 带尾部的包与无尾部的包列表不等或 `truncated` 为 `true` 而判红；去掉 (b) → 这类成员之后的成员丢失或错位而判红）。
 - [x] 10.2 `archive.ts` 的 zip 部分：`yauzl`（新依赖，MIT，登记 `ATTRIBUTION.md`）只读中央目录；成员名超过 4096 字节的成员不计入结果，停读并置 `truncated`（名字随中央目录项读入后判定——`zip` 的名长字段只有 2 字节，读入量有界；不要求在 `yauzl` 交出该项之前拦截）。
-  实施注记见 `implementation-notes.md`「10.2（#1064）」。
+  实施注记见 `implementation-notes-1.md`「10.2（#1064）」。
 - [x] 10.3 `GET /api/workspaces/:id/archive` 路由（新文件或并入 `rest-entries.ts`），`PREVIEW_ARCHIVE_MAX_ENTRIES` 经 `limits` 传入。
   实施注记见 `implementation-notes.md`「10.3、10.4、10.5（#1065）」。
 - [x] 10.4 测试（新文件 `server/test/workspaces-archive.test.ts`）：workspaces「压缩包列表」五个场景（含「声明超大的长文件名记录」：1 KiB 文件声明 4 GiB 的 `L` 记录、两个成员之后声明 1 GiB 的 pax 头、5000 字节的 zip 成员名与 `L` 名字、注入时钟的未压缩 tar 超时）。
@@ -302,10 +302,10 @@ Minimal mergeable slice: 10.1（tar / gz 的遍历器）与它在 10.4 里的用
 ## 11. preview-origin — 令牌登记表与签发端点
 
 - [x] 11.1 新文件 `server/src/preview/tokens.ts`：preview-origin「预览令牌登记表」（时钟由参数传入，便于测试）。
-  实施注记见 `implementation-notes.md`「11.1（#1066）」。
+  实施注记见 `implementation-notes-1.md`「11.1（#1066）」。
 - [x] 11.2 `POST /api/workspaces/:id/preview-token`（`server/src/workspaces/` 下的新路由文件，仅在 `assembly.preview` 存在时注册）：响应六键、`base` 的推导（`PREVIEW_ORIGIN` 优先，否则请求协议 + 主机名 + 预览端口函数的返回值）、`embedOrigin` 取 `Origin` 头；
   `errors.ts` 的归属路由集合加入它。
-  实施注记见 `implementation-notes.md`「11.2、11.3（#1067）」。
+  实施注记见 `implementation-notes-1.md`「11.2、11.3（#1067）」。
 - [x] 11.3 测试：`server/test/preview-tokens.test.ts`（登记表三个场景）；`server/test/preview-token-rest.test.ts`（「签发与复用」「对外来源与转换可用」「归属与请求体」；IPv6 主机名的方括号；响应头与日志不含令牌）；未装配 `preview` 时 404（http-service-skeleton「未装配预览的可注入 app」）。
   `server/test/http-parser-owners.test.ts` 的归属身份表（`:29-42`，与 `:144-146` 的条数断言、常量名里的条数）加入 `POST /api/workspaces/:id/preview-token`，做法同 9.2 对 `move` 的处理；先合的那一个把条数加一，后合的再加一。
 - [ ] 11.4 跨路由边界测试（扩展 `server/test/workspaces-http.test.ts` 既有的「完整真实装配与隔离」用例，写成一份表驱动）：workspaces「工作空间 HTTP 集成边界」的场景「新增路由沿用同一边界」——对 `archive`、`download`、`DELETE entries`、`move`、`preview-token` 五条路由逐条断言：
@@ -322,7 +322,7 @@ Minimal mergeable slice: 11.1 的登记表与测试先合（只依赖 0.1）；�
 - [x] 12.1 新文件 `server/src/preview/app.ts`：`createPreviewApp({store, sandbox, tokens, converter, limits})`，只有 `/w/<token>/*`（`/o/` 在组 15 加）；校验次序、不读 cookie、404 / 403 的固定纯文本、复用组 7 的区间发送函数；有界关停沿用 `app.ts` 的 `registerListenerShutdown`（必要时把它提到两个实例都能导入的模块）。
   实施注记见 `implementation-notes.md`「12.1、12.3、12.4（#1069）」。
 - [x] 12.2 响应头与类型表（preview-origin「预览响应头与内容类型」）：做成一个纯函数 `previewHeaders(name, embedOrigin)`，成功与失败响应都经它或其子集。
-  实施注记见 `implementation-notes.md`「12.2（#1068）」。
+  实施注记见 `implementation-notes-1.md`「12.2（#1068）」。
 - [x] 12.3 测试（新文件 `server/test/preview-app.test.ts` 与 `preview-headers.test.ts`）：「令牌放行，cookie 不放行」「相对资源与子目录」「拒绝项」「作用域只有一个工作空间」「空间消失后令牌失效」「范围请求」，以及响应头的五个场景。
   「不认 cookie」的证据：同一请求带与不带有效 `workbuddy_session` 的响应逐字节相同，且该实例上没有注册 cookie 解析与认证钩子。
 - [x] 12.4 变异证据：给 CSP 加上 `allow-same-origin` → 头断言判红；目录请求回退到 `index.html` → 拒绝项判红；失败体回显路径 → 「不含所请求的路径」判红；用令牌之外的条件（cookie）放行 → 第一场景的 404 判红。
@@ -332,14 +332,14 @@ Minimal mergeable slice: 12.2 的头函数与其测试先合；监听器实例�
 
 ## 13. http-service-skeleton — 入口接线：两个监听器、缓存目录与周期清理
 
-- [ ] 13.1 `server/src/server.ts`：按 http-service-skeleton「预览监听器的装配与关停」——预览监听器先于主监听器 `listen`、同一 `AbortSignal`、失败走既有 cleanup；监听成功后建 `PREVIEW_CACHE_DIR` 三个目录并清空 `work`；
+- [x] 13.1 `server/src/server.ts`：按 http-service-skeleton「预览监听器的装配与关停」——预览监听器先于主监听器 `listen`、同一 `AbortSignal`、失败走既有 cleanup；监听成功后建 `PREVIEW_CACHE_DIR` 三个目录并清空 `work`；
   启动回收目录清理（8.1 的 `sweep` 半边）的定时器（`unref`）；`OwnedResources` 增加预览实例与该定时器；关停次序（回收目录清理的定时器 → 预览监听器 → 主监听器 → DB；转换器与转换缓存清理在组 15 接入这个序列）；`listener_force_close` 至多一行。`appAssemblyOf` 带上 `preview`。
   清空 `work`：本任务只做本进程自己的递归删除（此时入口还没有转换器，`work` 下不会有属 omp 用户的东西）；同时配置了 `OMP_USER` 与 `OFFICE_BIN` 时先执行的那条 `sudo … find`（owner D-24）由 14.3 提供、在 15.1 连同真实转换器一起接进入口。
   #1286：启动与周期清理的接线不等它（owner D-23，design D22「已知残余」）。`server/src/workspaces/trash.ts:12` 的头注释写着「settle it before anything schedules this sweep」，同一个代码 PR 把这半句改成已裁决的现状（登记为已知残余、issue 保持打开）；注释的其余陈述不动。
   实施注记见 `implementation-notes.md`「13.1、13.2、13.3（#1070）」。
-- [ ] 13.2 测试（`server/test/server-startup-order.test.ts`、`listener-shutdown.test.ts` 或新文件，用既有 `server-startup-helpers` 起编译入口）：「两个监听器的启动与干净关停」「预览端口被占用」「关停期间的在途请求与转换」中在途请求的部分（转换的部分在 15.2）；
+- [x] 13.2 测试（`server/test/server-startup-order.test.ts`、`listener-shutdown.test.ts` 或新文件，用既有 `server-startup-helpers` 起编译入口）：「两个监听器的启动与干净关停」「预览端口被占用」「关停期间的在途请求与转换」中在途请求的部分（转换的部分在 15.2）；
   「预览与文件键的缺省与覆盖」里关于实际绑定端口与四键启动记录的部分；信号落在两次 `listen` 之间时两个端口都可立即复用。
-- [ ] 13.3 变异证据：先起主监听器 → 「主监听器受理时预览已可用」的断言判红（在 success record 之前对预览端口的探测）；关停时先关 DB → 在途预览请求的用例出现 5xx 而判红；启动记录多一个键 → 精确四键断言判红。
+- [x] 13.3 变异证据：先起主监听器 → 「主监听器受理时预览已可用」的断言判红（在 success record 之前对预览端口的探测）；关停时先关 DB → 在途预览请求的用例出现 5xx 而判红；启动记录多一个键 → 精确四键断言判红。
 
 Suggested fixture level: expanded - 生产入口的启动与关停次序，涉及端口与 DB 的释放
 Minimal mergeable slice: atomic - 两个监听器与回收目录定时器在入口的启动与关停必须成对修改，拆开会留下不关的监听器或不停的定时器（Depends on 5.1、8.1 的 `sweep` 半边、11.2、12.1；不依赖 8.1 的 `moveToTrash` 半边与 8.2，因此不等 1.2）
@@ -347,7 +347,7 @@ Minimal mergeable slice: atomic - 两个监听器与回收目录定时器在入�
 ## 14. office-preview — 转换器
 
 - [x] 14.1 新文件 `server/src/preview/office.ts`：`createOfficeConverter`——作业目录、argv 与环境、sudo 前缀（复用 `core/process-path` 的 `setpriv` 检查）、成功判定；终止在途转换（超时、`signal` 中止、`close()`）按 office-preview「转换器调用契约」的两种模式：同 uid 模式以新进程组启动并对进程组发 `SIGKILL`，`OMP_USER` 模式只杀自己启动的 `sudo`（不执行 `kill`/`pkill`/第二次 `sudo`，不新增 sudoers 规则）。
-  实施注记见 `implementation-notes.md`「14.1、14.4（#1071）」。
+  实施注记见 `implementation-notes-1.md`「14.1、14.4（#1071）」。
 - [x] 14.2 同文件或 `office-queue.ts`：并发上限、排队上限 8、按缓存键去重、排队中中止出队（office-preview「并发上限与排队」）。
   实施注记见 `implementation-notes.md`「14.2，含分摊的 14.5 / 14.6 条款（#1073）」。
 - [x] 14.3 缓存与周期清理（office-preview「转换缓存」）：键的计算、命中更新修改时间、输出**复制**后改名进 `pdf/`、失败不入缓存、7 天清理函数、启动时清空 `work/`（周期定时器在 15.1 接进 `server.ts`）。
@@ -358,7 +358,7 @@ Minimal mergeable slice: atomic - 两个监听器与回收目录定时器在入�
   - 该命令失败（检查不过、spawn 失败、非 0 退出、被信号终止）：application stderr 恰一行 `{"event":"preview_work_clear_failed"}`（没有其它键），不抛出，本进程自己的删除照常进行。
   - spawn 经可注入的函数（与 14.1 同一个 seam），测试用记录型假 `sudo`（14.5）；变异证据在 14.6。
   - CI：`uid-isolation` job 不设 `OFFICE_BIN`，这条命令在那里不执行，`.github/scripts/ci-uid-isolation.sh` 不需要改。
-  实施注记见 `implementation-notes.md`「14.3，含分摊的 14.5 / 14.6 条款（#1072）」。
+  实施注记见 `implementation-notes-1.md`「14.3，含分摊的 14.5 / 14.6 条款（#1072）」。
 - [x] 14.4 测试夹具 `server/test/fixtures/fake-soffice.mjs`（可执行；按输入文件名里的标记：正常写出一个最小 PDF、退出码 1、不写输出、写空文件、写符号链接、睡眠、先起一个子进程再睡眠；把收到的 argv 与环境写到作业目录旁的记录文件）。
 - [x] 14.7 `office.ts` 的输出复制设界（owner 裁决 2026-10-09；规格条文随本任务的代码 PR 落地，不在此前写）。Depends on：14.1。挡住：14.5、15.1。
   对输出按同一个 fd 的 `fstat` 所得 `size` 复制恰好这么多字节：`size` 大于 200 MiB → 不读，`failed`；读到的字节少于 `size` → `failed`（半截的副本不留在 `pdf/`）。上限是写死的常量，不加配置键。
@@ -387,12 +387,13 @@ Minimal mergeable slice: atomic - 一条路由、它的映射表与转换器在�
 ## 16. files-web — API 客户端：`api-files.ts`
 
 - [ ] 16.1 新文件 `web/src/lib/api-files.ts`：两个地址函数 `fileUrl`、`downloadUrl` 与 `listArchive`；传输由 `api.ts` 注入、对 `api.ts` 只有类型导入；响应严格解析。`api.ts` 只加接线与类型再导出（不超过 800 行；必要时把既有工作空间方法一并挪进 `api-files.ts`）。
-  实施注记见 `implementation-notes.md`「16.1 的地址函数部分，含分摊的 16.4 / 16.5 条款（#1079）」。
-- [ ] 16.2 `api-files.ts`：`moveEntry`、`deleteEntry`、`issuePreviewToken`（同样的注入与严格解析）。
+  实施注记见 `implementation-notes-1.md`「16.1 的地址函数部分，含分摊的 16.4 / 16.5 条款（#1079）」。
+- [x] 16.2 `api-files.ts`：`moveEntry`、`deleteEntry`、`issuePreviewToken`（同样的注入与严格解析）。
   实施注记见 `implementation-notes.md`「16.2 的 issuePreviewToken 部分，含分摊的 16.4 / 16.5 条款（#1082）」。
   实施注记见 `implementation-notes.md`「16.2 的 moveEntry 部分，含分摊的 16.4 条款（#1083）」。
+  实施注记见 `implementation-notes.md`「16.2（deleteEntry）、16.4、16.5（#1084）」。
 - [x] 16.3 `fetchPreview` 的图片类型集合扩到六种，`audio/*`、`video/*`、`image/svg+xml`、`text/html` 仍按失败处理。
-  实施注记见 `implementation-notes.md`「16.3（#1081）」。
+  实施注记见 `implementation-notes-1.md`「16.3（#1081）」。
 - [ ] 16.4 测试（`web/test/api-files.test.ts` 扩充）：files-web「API 客户端扩展」五个场景，随 16.1–16.3 各自的方法分批加入，对应如下——
   地址函数一刀（`fileUrl`、`downloadUrl`）：「地址函数与严格解析」里两个地址的编码与「没有发出请求」；「模块划分可持续验证」（`api-files.ts` 对 `./api.js` 只有 `import type`，size-guard 与 knip 通过——这一刀建文件时就成立，之后每一刀都重跑）。
   `listArchive` 一刀：「方法与错误码」里它的一行（`GET …/archive?path=`、返回形状、四种错误信封）；「地址函数与严格解析」里 `entries` 含 `type` 为 `link` 的残缺响应。
@@ -408,7 +409,7 @@ Minimal mergeable slice: 16.1 按方法分两刀——地址函数 `fileUrl`、`
 
 ## 17. file-previewers — 框架：类别判定、按需加载、预览头与下载
 
-- [ ] 17.1 新目录 `web/src/features/files/previewers/`：`index.ts`（唯一含动态 `import()` 的文件，按类别返回带缓存的加载函数）与 `kind.ts`（`previewKind`、`textView`、图标映射）。把组 2 的 Markdown、表格、源码、图片四个既有预览各搬成一个模块，经 `index.ts` 加载；2.1 定的 `data-slot`（`preview-code`、`preview-table`、`preview-markdown` 等）随模块原样带走。这一刀里 `preview.tsx` 即经 `kind.ts` 的 `previewKind` / `textView` 在这四类之间分流（两个导出在本刀就有生产调用方，knip 不报未引用）；其余类别的分流随 17.2。
+- [x] 17.1 新目录 `web/src/features/files/previewers/`：`index.ts`（唯一含动态 `import()` 的文件，按类别返回带缓存的加载函数）与 `kind.ts`（`previewKind`、`textView`、图标映射）。把组 2 的 Markdown、表格、源码、图片四个既有预览各搬成一个模块，经 `index.ts` 加载；2.1 定的 `data-slot`（`preview-code`、`preview-table`、`preview-markdown` 等）随模块原样带走。这一刀里 `preview.tsx` 即经 `kind.ts` 的 `previewKind` / `textView` 在这四类之间分流（两个导出在本刀就有生产调用方，knip 不报未引用）；其余类别的分流随 17.2。
   这一刀的边界（定死，下面的测试处置以它为前提）：
   - 留在 `preview.tsx`、同步渲染的：预览头（图标、路径、元数据）、截断提示行、不支持态、错误态——它们不经任何预览器模块。
   - 进模块、首次经动态 `import()` 才出现的：表格（`CsvTable`）、源码（`CodeView`，含 `json` 的格式化）、图片（`img`）、Markdown（`MarkdownPreview` 整个搬走，**`查看源码` / `渲染视图` 切换按钮留在 Markdown 模块里**，不上提到预览头；Markdown 模块在 `previewers/` 内部静态导入源码模块的 `CodeView`，所以同一次挂载里切换视图仍是同步的）。
@@ -449,6 +450,7 @@ Minimal mergeable slice: 16.1 按方法分两刀——地址函数 `fileUrl`、`
   - `web/test/chat-messages.test.tsx:185-187` 断言 `preview.tsx` 含 `MarkdownView`、不含 `function renderBlock`——读的文件改为 Markdown 预览器模块（「文件页的 Markdown 仍经 `lib/markdown-view`、不自带渲染器」的意思不变）。
   - 不搬的：`csv.ts`（`web/test/csv.test.ts:2` 导入 `parseCsv`；表格模块导入它）、`file-meta.ts` 的 `fileIcon` / `formatSize` / `formatMtime` / `logicalPath`（`file-meta.test.ts:2`、`files-page.test.tsx:3`、`preview.test.tsx:3`、`files-logical-path.test.tsx:3` 导入；`kind.ts` 的图标映射调用或扩充 `fileIcon`，不另立导出）、
     预览头（`files-page.test.tsx:537-541` 断言 `preview.tsx` 含 `fileIcon(`、`formatSize(`）。`files-empty-layout.test.tsx:190-194` 读的 `preview.tsx`、`types.ts` 仍在原处。
+  实施注记见 `implementation-notes.md`「17.1、17.3（#1085）」。
 - [ ] 17.2 `preview.tsx`：按 `previewKind` 选预览器（加载中的 `正在加载预览…` 与加载失败的 `预览组件加载失败` + `重试` 已在 17.1 落地，这里只是让新类别也走同一段逻辑）；预览头的 `下载 <文件名>` 链接（`downloadUrl` + `download` 属性）对所有文件渲染；不支持 / 超限 / 截断 / 其它错误的文案表（file-previewers「预览头、下载与不可预览的呈现」）。
   `tree.tsx` / `page.tsx` 去掉扩展名白名单的预判：非按扩展名分流的文件一律发一次 `file` 请求（files-web「目录树与预览」；网页的渲染视图这一例外在组 19 引入，此前 html 仍是源码视图、发一次 `file` 请求）。
   过渡规则：预览器模块尚未合入的类别（pdf、办公文档、音视频、Notebook、压缩包——组 19、20 才有）在此之前按「未知」处理——发一次 `file` 请求，由服务端裁决并沿用既有呈现：pdf、办公文档、压缩包得到 415（workspaces「文件预览」）→ `该类型不支持预览`；Notebook 得到 `text/plain` → 源码视图；音视频得到 `audio/*` / `video/*` → `fetchPreview` 按「失败不变成预览」走 request_failed 的安全文案。每种情况预览头都有下载链接。各自的预览器合入时在那一刀改成该类别的呈现，并改掉受影响的既有断言。
@@ -457,7 +459,7 @@ Minimal mergeable slice: 16.1 按方法分两刀——地址函数 `fileUrl`、`
   - `web/test/files-empty-layout.test.tsx:51-75`（E2）：`归档.zip` 的副行同上；`:74` 的「零次 `file` 请求」改为「恰一次 `file` 请求、415 后显示不支持」，夹具补该路由的 415 信封，用例标题里的 `without a file request` 同改。
   - `web/test/files-page.test.tsx:162-169`：`archive.zip` 的 `file` 请求数由 0 改为 1（夹具补 415），`该类型不支持预览` 的断言不变。
   写作时既有测试里受白名单影响的只有 zip 这一种扩展名（`grep -rnE '\.zip|\.bin|不支持预览' web/test web/e2e`）；走查不选不支持的文件，不受影响。
-- [ ] 17.3 守卫（新文件 `web/test/previewers-code-split.test.ts`）：ui-foundation「预览器按需加载是唯一的代码分割」两个场景的静态部分（动态 `import()` 只在 `previewers/index.ts`、`previewers/` 之外不静态导入其内部模块、`vite.config.ts` 无 `manualChunks`、注入样本自证）；
+- [x] 17.3 守卫（新文件 `web/test/previewers-code-split.test.ts`）：ui-foundation「预览器按需加载是唯一的代码分割」两个场景的静态部分（动态 `import()` 只在 `previewers/index.ts`、`previewers/` 之外不静态导入其内部模块、`vite.config.ts` 无 `manualChunks`、注入样本自证）；
   「构建产物确有按需块」的唯一落点是 `make ui-walk`：在 `web/e2e/ui-walk-files.ts`（组 3 建的 helper）里，`/files` 步骤选中 `readme.md` 之前记录已成功加载的 `.js`，选中时断言新增了至少一个来自同源 `assets/` 的 200 `.js` 响应。
   走查本来就对 `npm run build --workspace web` 的产物运行（CI 的 ui-walk job 先 build 再起服务），所以不新增构建步骤、不改 `.github/workflows/ci.yml` 的步骤序列，也不动 `scripts/test-ci-harness.sh` 的期望；`make check` 与 `make test-guardrails` 不执行构建，不放这条断言。
 - [ ] 17.4 契约测试（`web/test/preview-kind-contract.test.ts`）：读取服务端 `preview.ts` 导出的四个扩展名集合与 `kind.ts` 的对应集合，断言两两相等（file-previewers「与服务端的扩展名表一致」）。
@@ -548,7 +550,7 @@ Minimal mergeable slice: 22.1（重命名）、22.4（删除）、22.2（移动�
 ## 23. workspace-sidebar — 外壳：顶栏按钮、并排布局、窄屏覆盖；移除产物面板
 
 - [x] 23.1 拷入 shadcn `resizable` 到 `web/src/components/ui/resizable.tsx`（`react-resizable-panels` 加入依赖并登记 `ATTRIBUTION.md`；只做六类修改；确认没有引入新的 `@radix-ui/*` 包）。
-  实施注记见 `implementation-notes.md`「23.1（#1104）」。
+  实施注记见 `implementation-notes-1.md`「23.1（#1104）」。
 - [ ] 23.2 新文件 `web/src/features/chat/workspace-sidebar.tsx` 与 `use-workspace-sidebar.ts`（登记 `MIGRATED_AREAS`）：开合意图、宽屏的 `complementary` + 分隔线、宽度读写 `localStorage` 键 `workbuddy-workspace-sidebar`（读失败与非法值回缺省）、窄屏的全屏 `sheet`（焦点进 `关闭`、Escape、焦点归还且 `preventScroll`）、
   切换会话保持、未绑定会话与欢迎态不渲染但保留意图。主体先挂 `WorkspaceBrowser`（`stacked` 布局，无标记、无过滤）与头部的 `刷新`、`关闭`、`在文件页打开`。
 - [ ] 23.3 `topbar-actions.ts`：第四项改为 `{key:"workspace", label:"工作空间侧边栏", icon:"folder"}`，带 `expanded`，只在 `workspaceId` 非 null 时填入；`page.tsx` 的主区改为对话区 + 侧边栏两栏。
@@ -613,7 +615,7 @@ Minimal mergeable slice: 25.1（文件变更卡）与 25.2（产物卡）可各�
 ## 26. files-harness — 夹具与 `files.hurl`
 
 - [x] 26.1 夹具：`smoke/fixtures/sandbox/u1/smoke-fixture/` 新增 `site/index.html`、`site/style.css`、`sample.py`、`clip.wav`（按 files-harness「沙箱夹具与 files.hurl」的内容约定；`clip.wav` 由一段不入库的脚本生成，生成方式记入 `smoke/fixtures/README.md`）。
-  实施注记见 `implementation-notes.md`「26.1（#1111）」。
+  实施注记见 `implementation-notes-1.md`「26.1（#1111）」。
 - [ ] 26.2 `smoke/files.hurl`：追加范围请求、下载、`hurl-a` → `hurl-b` 的重命名与删除（宽容状态码保证可重复）、同名移动 409、越界删除 403、`preview-token` 与隔离来源的 html / css / 伪造令牌 404、主站对同一 html 的 `text/plain`、他账号的三个 404。
 - [ ] 26.3 验证：对同一服务连续两次 `make smoke` 全绿；在 `POST move` 之后人为中断一次再跑仍全绿；跑完后空间里没有 `hurl-a` / `hurl-b`、夹具文件未变（`git status` 干净）。
 - [ ] 26.4 变异证据（对临时改坏的服务各跑一次，结果写进 PR）：预览监听器对 html 返回 `text/plain` → hurl 判红；主站对 html 返回 `text/html` → hurl 判红；删除后条目仍在 → 第二次删除的 404 断言判红。
@@ -649,5 +651,5 @@ Minimal mergeable slice: 28.1–28.5 的文档可一个 PR 合入；28.6 的实�
 
 ## 启动失败记录的阶段取值（#1203 对齐）
 
-- [ ] 本 change 新增的启动步骤进入 `server_start_failed` 的 `reason` 枚举：建预览缓存目录 → `preview_cache`，预览监听器 listen → `preview_listen`；`server/src/server.ts` 在这两步开始之前推进阶段变量。测试：http-service-skeleton「启动失败记录带失败阶段」的写法（真实编译入口、整行精确相等）各加一例；既有「预览端口失败 → 恰一行 generic failure record」的断言改为带 `reason` 的整行。归档次序：本 change 的「服务启动与装配」MODIFIED 副本须保留 `s1f-session-list-temp-space` 引入的该场景（已同步进本副本）。
+- [x] 本 change 新增的启动步骤进入 `server_start_failed` 的 `reason` 枚举：建预览缓存目录 → `preview_cache`，预览监听器 listen → `preview_listen`；`server/src/server.ts` 在这两步开始之前推进阶段变量。测试：http-service-skeleton「启动失败记录带失败阶段」的写法（真实编译入口、整行精确相等）各加一例；既有「预览端口失败 → 恰一行 generic failure record」的断言改为带 `reason` 的整行。归档次序：本 change 的「服务启动与装配」MODIFIED 副本须保留 `s1f-session-list-temp-space` 引入的该场景（已同步进本副本）。
 

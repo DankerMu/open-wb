@@ -116,6 +116,7 @@ export type ApiClient = {
     input: MoveEntryInput,
     options?: ApiRequestOptions,
   ): Promise<{ path: string }>;
+  deleteEntry(workspaceId: string, path: string, options?: ApiRequestOptions): Promise<void>;
   listAudit(filter?: AuditFilter, options?: ApiRequestOptions): Promise<AuditList>;
   listSessions(options?: ApiRequestOptions): Promise<ChatSessionList>;
   createSession(input?: ChatSessionCreateInput, options?: ApiRequestOptions): Promise<ChatSession>;
@@ -372,11 +373,13 @@ async function request(
   return parseJsonResponse(response, options.signal ?? undefined, onUnauthorized);
 }
 
-async function logoutRequest(
+/** A request whose only success is 204: the body of a 204 is never read. */
+async function noContentRequest(
+  path: string,
   options: RequestInit,
   onUnauthorized: ApiClientOptions["onUnauthorized"],
 ): Promise<void> {
-  const response = await fetchResponse("/api/auth/logout", options);
+  const response = await fetchResponse(path, options);
   if (response.status === 204) {
     return;
   }
@@ -394,6 +397,7 @@ export function createApiClient({ onUnauthorized }: ApiClientOptions = {}): ApiC
     fetchResponse,
     getRequestOptions,
     isSuccessfulStatus,
+    noContentRequest,
     parseJsonResponse,
     request,
     requestFailed,
@@ -481,11 +485,9 @@ export function createApiClient({ onUnauthorized }: ApiClientOptions = {}): ApiC
     },
 
     async logout(options) {
-      await logoutRequest(
-        {
-          ...requestOptions(options?.signal),
-          method: "POST",
-        },
+      await noContentRequest(
+        "/api/auth/logout",
+        { ...requestOptions(options?.signal), method: "POST" },
         onUnauthorized,
       );
     },

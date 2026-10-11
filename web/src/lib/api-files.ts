@@ -90,6 +90,12 @@ type FileTransport = {
   requestFailed(status: number): ApiError;
   fetchResponse(path: string, options: RequestInit): Promise<Response>;
   isSuccessfulStatus(status: number): boolean;
+  /** Resolves on 204 without reading a body; anything else rejects like `request`. */
+  noContentRequest(
+    path: string,
+    options: RequestInit,
+    onUnauthorized: ApiClientOptions["onUnauthorized"],
+  ): Promise<void>;
   parseJsonResponse(
     response: Response,
     signal: AbortSignal | undefined,
@@ -104,7 +110,8 @@ type WorkspaceEndpoint =
   | "promote"
   | "download"
   | "preview-token"
-  | "move";
+  | "move"
+  | "entries";
 
 /** Same-origin address of one endpoint of a workspace; the id is encoded as a single path segment. */
 function workspaceEndpoint(workspaceId: string, endpoint: WorkspaceEndpoint): string {
@@ -318,8 +325,9 @@ export function createFileMethods(
   | "fetchPreview"
   | "issuePreviewToken"
   | "moveEntry"
+  | "deleteEntry"
 > {
-  const { getRequestOptions, request, requestFailed, requestOptions } = transport;
+  const { getRequestOptions, noContentRequest, request, requestFailed, requestOptions } = transport;
   return {
     async listWorkspaces(options) {
       const response = await request(
@@ -463,6 +471,18 @@ export function createFileMethods(
       }
 
       return moved;
+    },
+
+    async deleteEntry(workspaceId, path, options) {
+      // No body, no Content-Type; 204 is the only success and has no body to parse. The path is
+      // data: encoded whole, not trimmed or normalised, the empty string included — the server's
+      // sandbox decides. This method has no resolve-then-act step of its own (read from this
+      // code); the known residual of the route it calls (#1286) is neither closed nor widened.
+      await noContentRequest(
+        `${workspaceEndpoint(workspaceId, "entries")}?path=${encodeURIComponent(path)}`,
+        { ...requestOptions(options?.signal), method: "DELETE" },
+        onUnauthorized,
+      );
     },
   };
 }
