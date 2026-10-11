@@ -4,7 +4,15 @@
  * written before anything is spied on (`writeFileSync` opens too).
  */
 import { execFileSync, spawn } from "node:child_process";
-import fs, { mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import fs, {
+  constants,
+  copyFileSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { join, resolve } from "node:path";
 import { gzipSync } from "node:zlib";
@@ -56,6 +64,8 @@ const THREE_ENTRIES = [
 const THREE_ZIP = zipArchive(ZIP_THREE_RECORDS);
 /** `THREE_MEMBERS` cut inside its second header: `a.txt` is listed, then the archive is damaged. */
 const CUT_TAR = THREE_MEMBERS.subarray(0, 1024 + 100);
+/** Cut where `a.txt` ends, on a block boundary: the next header reads as no bytes at all. */
+const BLOCK_CUT_TAR = THREE_MEMBERS.subarray(0, 1024);
 const DEFAULT_BYTE_LIMITS = { text: 1_048_576, image: 20_971_520, notebook: 10_485_760 };
 
 afterEach(() => {
@@ -89,6 +99,11 @@ function spyDescriptors() {
         return opened === path && result?.type === "return" ? [result.value as number] : [];
       }),
     closed: () => close.mock.calls.map(([fd]) => fd),
+    /** The write bits (`O_WRONLY`, `O_RDWR`) of the flags of each `openSync` of `path`. */
+    writeBitsOf: (path: string) =>
+      open.mock.calls.flatMap(([opened, flags]) =>
+        opened === path ? [(flags as number) & (constants.O_WRONLY | constants.O_RDWR)] : [],
+      ),
     /** Reads so far, positional or not, through any descriptor at all. */
     reads: () => vi.mocked(fs.read).mock.calls.length + vi.mocked(fs.readSync).mock.calls.length,
     /** Reads, positional or not, through any of `descriptors`. */
@@ -160,6 +175,9 @@ describe("archive route: the listing of each format", () => {
       const gzReads = io.reads() - readsBeforeGz;
 
       const gzDescriptors = io.descriptorsOf(join(root, "notes.txt.gz"));
+      const writeBits = [...archives.map(([name]) => name), "notes.txt.gz"].map((name) =>
+        io.writeBitsOf(join(root, name)),
+      );
       const wholeReads = io.wholeReadsBelow(sandboxRoot);
       const closed = io.closed();
       // The snapshot below reads every file itself: the spies come off first.
@@ -172,6 +190,8 @@ describe("archive route: the listing of each format", () => {
       for (const [name] of archives) {
         expect(readsOf[name], name).toBeGreaterThan(0);
       }
+      // Each archive is opened once, and for reading only.
+      expect(writeBits).toEqual([[0], [0], [0], [0], [0]]);
       expect(closed).toHaveLength(5);
       expect(closed.at(-1)).toBe(gzDescriptors[0]);
       // No archive is read whole by path.
@@ -183,18 +203,25 @@ describe("archive route: the listing of each format", () => {
     });
   });
 
-  it("takes the format from the resolved entry's name, whatever the last segment of the request is", async () => {
+  it("takes the format and a bare gz's item from the resolved entry's name, not from the request path", async () => {
     await withWorkspacesApp(async (fixture) => {
       const { app } = fixture;
       const root = seedWorkspace(fixture);
       mkdirSync(join(root, "docs"));
       writeFileSync(join(root, "docs", "X.TAR"), THREE_MEMBERS);
+      writeFileSync(join(root, "docs", "n.txt.gz"), gzipSync("some notes\n"));
       const cookie = bearerCookie(await loginSessionId(app, "zhangsan"));
 
       // The request ends in `.`, which the resolver skips; the name is matched in lower case.
       expectWorkspaceResponse(await listing(app, cookie, "docs/X.TAR/."), 200, {
         format: "tar",
         entries: THREE_ENTRIES,
+        truncated: false,
+      });
+      // The item is the file's own name without `.gz`: the directory of the request is not in it.
+      expectWorkspaceResponse(await listing(app, cookie, "docs/n.txt.gz"), 200, {
+        format: "gz",
+        entries: [{ path: "n.txt", type: "file", size: null }],
         truncated: false,
       });
     });
@@ -315,6 +342,7 @@ describe("archive route: refusals and damage", () => {
       mkdirSync(join(root, "out"));
       writeFileSync(join(root, "fake.zip"), "this is not a zip\n");
       writeFileSync(join(root, "cut.tar"), CUT_TAR);
+      writeFileSync(join(root, "block-cut.tar"), BLOCK_CUT_TAR);
       writeFileSync(join(root, "x.zip"), THREE_ZIP);
       // Outside the workspace and a valid zip: only the sandbox keeps it from being listed.
       writeFileSync(join(sandboxRoot, "u1", "x.zip"), THREE_ZIP);
@@ -335,6 +363,8 @@ describe("archive route: refusals and damage", () => {
         ["gone.zip", `${base}?path=gone.zip`, cookie, 404, NOT_FOUND_ENVELOPE],
         ["fake.zip", `${base}?path=fake.zip`, cookie, 415, UNSUPPORTED_ENVELOPE],
         ["cut.tar", `${base}?path=cut.tar`, cookie, 200, cutListing],
+        // No end blocks and nothing after `a.txt`: a read that gets no bytes is not a zero block.
+        ["block-cut.tar", `${base}?path=block-cut.tar`, cookie, 200, cutListing],
         ["../x.zip", `${base}?path=..%2Fx.zip`, cookie, 403, SANDBOX_DENIED_ENVELOPE],
         ["another owner's x.zip", `${base}?path=x.zip`, foreignCookie, 404, NOT_FOUND_ENVELOPE],
         // Absent is judged before the name: a missing file that is no archive name is 404 too.
@@ -624,6 +654,25 @@ describe("archive route: the target is swapped between lstat and the open", () =
 
     expectNotFoundUnread(swapped);
     expect(swapped.descriptors).toEqual([]);
+  }, 15_000);
+
+  // Not one of the refusals: what is listed is the file that was opened, at its own size. A zip is
+  // read from its end, so the size the lstat saw (of the three-member zip) would not find it.
+  it("another zip of a different size: lists the one it opened", async () => {
+    const swapped = await requestWithSwap((target, sandboxRoot) => {
+      // Copied, not written: `writeFileSync` would go through the hooked `openSync` itself.
+      copyFileSync(join(sandboxRoot, "outside.zip"), target);
+      return undefined;
+    });
+
+    expect(swapped.status).toBe(200);
+    expect(JSON.parse(swapped.payload)).toEqual({
+      format: "zip",
+      entries: [{ path: "outside-secret.txt", type: "file", size: 3 }],
+      truncated: false,
+    });
+    expect(swapped.descriptors).toHaveLength(1);
+    expect(swapped.closed).toEqual(swapped.descriptors);
   }, 15_000);
 });
 
