@@ -1155,6 +1155,6 @@
 - 变异：非 2xx 时跳过 `parseJsonResponse`，直接抛 `requestFailed` → 用例③（code / message 丢失）与用例④的合法 401 行判红。
 - 变异：去掉 401 通知或通知两次 → 用例④判红。
 - 变异：网络失败原样抛出而不映射 → 用例⑤判红。
-- 变异：客户端对 path 做 `trim` 或 `normalize` → 仅当用例①的 path 带首尾空白才可观察；地址函数的同款断言在 `api-files-url.test.ts`，本刀不重复，标「不可观察」。
+- 变异：客户端对 path 做 `trim` 或 `normalize` → 仅当用例①的 path 带首尾空白才可观察；地址函数的同款断言在 `api-files-url.test.ts`，本刀不重复，标「不可观察」。（评审订正：这个理由不成立——`api-files-url.test.ts` 钉的是 `fileUrl` / `downloadUrl`，`deleteEntry` 不调用它们；删除是破坏性操作，改为在本刀的用例里用带首尾空白、`..` 段与两种 é 的 path 钉住，变异须判红。）
 - 变异：不可观察：地址经 `workspaceEndpoint` 还是内联拼接；204 分支走 `noContentRequest` 还是内联写法。
 - 变异：16.5 指定的三条变异不属本刀（#1079、#1082、#1081），PR 表里只引用，不重做。
