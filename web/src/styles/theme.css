@@ -41,6 +41,13 @@
   --sidebar-border: var(--wb-color-border-primary);
   --sidebar-accent: var(--wb-bg-hover);
   --sidebar-accent-foreground: var(--wb-text-primary);
+  /* Syntax colours of the source previewer. Each token switches under [data-theme="dark"] by
+     itself, so there is no dark override here. */
+  --syntax-keyword: var(--wb-palette-purple-8);
+  --syntax-string: var(--wb-status-success-text);
+  --syntax-number: var(--wb-status-warning-text);
+  --syntax-comment: var(--wb-text-tertiary);
+  --syntax-title: var(--wb-palette-blue-8);
 }
 
 [data-theme="dark"] {

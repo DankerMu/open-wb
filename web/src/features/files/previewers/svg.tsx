@@ -41,7 +41,7 @@ function SvgImage({ name, content }: { name: string; content: string }) {
           {showSource ? "图片视图" : "查看源码"}
         </Button>
       </div>
-      {showSource ? <CodeView text={content} /> : image}
+      {showSource ? <CodeView name={name} text={content} /> : image}
     </div>
   );
 }
@@ -55,5 +55,9 @@ export function SvgPreviewer({
   content: string;
   truncated: boolean;
 }) {
-  return truncated ? <CodeView text={content} /> : <SvgImage content={content} name={name} />;
+  return truncated ? (
+    <CodeView name={name} text={content} />
+  ) : (
+    <SvgImage content={content} name={name} />
+  );
 }

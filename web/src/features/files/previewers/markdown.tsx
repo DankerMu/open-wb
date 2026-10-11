@@ -36,10 +36,10 @@ function RenderedMarkdownDocument({ text }: { text: string }) {
   );
 }
 
-function MarkdownPreview({ text }: { text: string }) {
+function MarkdownPreview({ name, text }: { name: string; text: string }) {
   const [showSource, setShowSource] = useState(false);
   const body = showSource ? (
-    <CodeView text={text} />
+    <CodeView name={name} text={text} />
   ) : (
     // Replacing a content snapshot avoids React's sibling-placement scan on dense inline updates.
     <RenderedMarkdownDocument key={text} text={text} />
@@ -60,6 +60,6 @@ function MarkdownPreview({ text }: { text: string }) {
   );
 }
 
-export function MarkdownPreviewer({ content }: { name: string; content: string }) {
-  return <MarkdownPreview text={content} />;
+export function MarkdownPreviewer({ name, content }: { name: string; content: string }) {
+  return <MarkdownPreview name={name} text={content} />;
 }

@@ -73,6 +73,18 @@
   - 用途：`server/` 压缩包列表读取 zip 的中央目录（`server/src/workspaces/archive.ts`,s1f-files-page 任务 10.2）,只列成员名与大小,不解压任何成员;运行时依赖,随 server 安装。其唯一的间接依赖 `pend`（MIT,版权归 Andrew Kelley）随之安装;类型声明 `@types/yauzl`（MIT）只在开发期使用。
   - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;两个包各自带 `LICENSE`,**若 server 的 `node_modules` 进入本项目发行物**,发行物须附带这两份 MIT 声明。
 
+- **lowlight** —— `MIT License`,版权归 Titus Wormer（https://github.com/wooorm/lowlight）
+  - 用途：`web/` 文件预览的源码着色（`web/src/features/files/previewers/highlight.ts`,s1f-files-page 任务 18.1）：把文本交给 highlight.js 的语法定义,产出语法树而不是 HTML 字符串。只在按需加载的高亮块里,不进入口包;会话消息里的代码块不用它。
+  - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;包自带 `license`,随打包产物分发时须附带该 MIT 声明。
+
+- **highlight.js** —— `BSD 3-Clause License`（SPDX：BSD-3-Clause）,版权归 Ivan Sagalaev 及贡献者（https://github.com/highlightjs/highlight.js）
+  - 用途：lowlight 的语法引擎与语言定义。`web/` 直接依赖它是为了按语言逐个导入（`highlight.js/lib/languages/*`,现注册 19 种）;版本范围写成与 lowlight 所要求的同一个小版本线,安装结果里只有一份。
+  - 义务：BSD-3-Clause 要求在源码与二进制形式的再分发中保留版权声明、条件列表与免责声明,且不得用版权人或贡献者的名义为衍生品背书;包自带 `LICENSE`,随打包产物分发时须附带该声明。
+
+- **hast-util-to-jsx-runtime** —— `MIT License`,版权归 Titus Wormer（https://github.com/syntax-tree/hast-util-to-jsx-runtime）
+  - 用途：把 lowlight 产出的语法树变成 React 元素（同在 `highlight.ts`）,文件内容因此不经任何 HTML 解析。此前已是 `@assistant-ui/react-markdown` → `react-markdown` 的间接依赖,随任务 18.1 转为 `web/` 的直接依赖,版本不变。
+  - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;包自带 `license`,随打包产物分发时须附带该 MIT 声明。
+
 ## 4. 本仓库自有内容
 
 - `app-reference/analysis/*.md` —— 结构分析文档（仓库作者）
