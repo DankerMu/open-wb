@@ -26,8 +26,8 @@
 
 > 2026-09-26 更新（S0a/S0b/S1a/S1e 关闭后）。原 2026-08-30 版只记脚手架；本节以已晋升 spec（`openspec/specs/`，19 份）为事实源。
 
-- 工程控制面：`make check`（lint/typecheck/test/anti-drift）、`make test-guardrails`、`make omp-fetch`；CI `ci.yml` 九个 job
-  （fast-checks / unit-tests / anti-drift / secret-scan / sast / smoke / ui-walk / uid-isolation / all-checks-passed）+ 分支保护。
+- 工程控制面：`make check`（lint/typecheck/test/anti-drift）、`make test-guardrails`、`make omp-fetch`；CI `ci.yml` 十个 job
+  （fast-checks / unit-tests / unit-tests-web / anti-drift / secret-scan / sast / smoke / ui-walk / uid-isolation / all-checks-passed）+ 分支保护。
 - 运行时验证 harness（调用方拥有已运行服务）：`make smoke`（`smoke/{public,auth,chat,files,session-meta}.hurl`）、`make smoke-live`（真实上游）、
   `make ui-walk`（Playwright 双 project：1440 亮 / 390 暗）、`make ui-shots`（六格 × 五态 demo-vs-app 截图对，人工签收输入）；
   控制面同步由 `scripts/test-ci-harness.sh` oracle 守住。

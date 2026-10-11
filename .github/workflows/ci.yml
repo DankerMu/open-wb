@@ -29,8 +29,18 @@ jobs:
       - uses: astral-sh/setup-uv@v7
       - run: npm ci
       - run: cd kbservice && uv sync
-      - run: npm test --workspaces
+      - run: npm test --workspace server
       - run: cd kbservice && uv run pytest
+
+  unit-tests-web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version-file: .tool-versions, cache: npm }
+      - run: npm ci
+      - run: npm test --workspace web
 
   anti-drift:
     runs-on: ubuntu-latest
@@ -149,7 +159,7 @@ jobs:
     # 聚合门禁：分支保护只指向本 job。skipped 视为失败——GitHub 把 skipped 的
     # required check 当通过，这个洞必须在这里堵死。
     if: always()
-    needs: [fast-checks, unit-tests, anti-drift, secret-scan, sast, smoke, ui-walk, uid-isolation]
+    needs: [fast-checks, unit-tests, unit-tests-web, anti-drift, secret-scan, sast, smoke, ui-walk, uid-isolation]
     runs-on: ubuntu-latest
     steps:
       - name: verify all required jobs succeeded

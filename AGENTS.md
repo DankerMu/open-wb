@@ -128,7 +128,7 @@ make setup    # npm install + uv sync + 挂 git hooks
 - **证据要求**：成功声明须附本会话的新鲜命令输出（命令+退出码）。验证世界而非自述：重跑命令、外部重读文件、打真实端点；关键词探测自身输出不算证据。UI 声明需截图 + 零新增控制台报错。
 - **范围化验证**：选覆盖改动面的最窄检查；改单模块跑该模块测试，全量交给 CI。覆盖率范围不得用 pass-with-no-tests 或收窄 include 掩盖未覆盖文件。
 - **迭代闸门**：同一失败检查最多 3 轮修复循环，然后停下报告已试与所需；绝不削弱/跳过/删除测试换绿（skip 需关联 issue + 截止期）；每个绿点 checkpoint 提交。
-- **CI 排障协议**：先分类失败层（fast-checks/unit-tests/anti-drift/secret-scan/sast）→ 读日志取第一个可行动错误 → 用同一命令本地复现 → 修根因 → 本地重跑该层再推送。环境差异记入 Important Development Notes。
+- **CI 排障协议**：先分类失败层（fast-checks/unit-tests/unit-tests-web/anti-drift/secret-scan/sast）→ 读日志取第一个可行动错误 → 用同一命令本地复现 → 修根因 → 本地重跑该层再推送。环境差异记入 Important Development Notes。
 - 并行 agent 各用独立 worktree；一任务一分支。
 
 ## Enforcement Index
