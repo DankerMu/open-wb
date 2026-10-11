@@ -18,6 +18,7 @@ import { yieldMacrotask } from "./ui-support.js";
  * file-previewers「预览头、下载与不可预览的呈现」与「未知文件由服务端裁决」的页面级场景：
  * 浏览器不按扩展名预筛，每个文件发一次 `file` 请求，由应答决定呈现；预览头的下载链接哪一态都在。
  * 音视频除外（file-previewers「音视频」）：选中即把文件自己的地址交给媒体元素，页面不为它发 `file` 请求。
+ * 压缩包也除外（file-previewers「压缩包列表」）：选中发一次 `archive` 请求列出成员，不发 `file` 请求。
  */
 
 afterEach(() => {
@@ -26,6 +27,7 @@ afterEach(() => {
 
 const FILE = "/api/workspaces/workspace-1/file?path=";
 const DOWNLOAD = "/api/workspaces/workspace-1/download?path=";
+const ARCHIVE = "/api/workspaces/workspace-1/archive?path=";
 
 type FileFixture = { size: number; route: FetchRoutes[string] };
 
@@ -33,8 +35,25 @@ function unsupported() {
   return jsonResponse({ error: { code: "preview_unsupported", message: "该类型不支持预览" } }, 415);
 }
 
-/** 根目录下恰有 `files` 这些文件的空间；每个文件的 `file` 路由就是它的 `route`。 */
-function renderWorkspaceWith(files: Record<string, FileFixture>, strict = false) {
+/** 一次 `archive` 应答；函数形式，供同一文件被列出多次。 */
+function archiveListing(...members: string[]) {
+  return () =>
+    jsonResponse({
+      format: "zip",
+      entries: members.map((path, index) => ({ path, type: "file", size: index + 1 })),
+      truncated: false,
+    });
+}
+
+/**
+ * 根目录下恰有 `files` 这些文件的空间；每个文件的 `file` 路由就是它的 `route`，`extraRoutes` 是
+ * 另外的路由（压缩包的 `archive`）。
+ */
+function renderWorkspaceWith(
+  files: Record<string, FileFixture>,
+  strict = false,
+  extraRoutes: FetchRoutes = {},
+) {
   const names = Object.keys(files);
   const entries = names.map((name, index) => ({
     name,
@@ -48,6 +67,7 @@ function renderWorkspaceWith(files: Record<string, FileFixture>, strict = false)
       "/api/workspaces/workspace-1/tree?path=": () => jsonResponse({ path: "", entries }),
       "/api/workspaces/workspace-2/tree?path=": () => jsonResponse({ path: "", entries: [] }),
       ...Object.fromEntries(names.map((name) => [`${FILE}${name}`, files[name]?.route])),
+      ...extraRoutes,
     }),
     strict,
   );
@@ -107,6 +127,10 @@ function fileRequests(fetchMock: ReturnType<typeof renderFiles>["fetchMock"]) {
   return paths(fetchMock).filter((path) => path.includes("/file?"));
 }
 
+function archiveRequests(fetchMock: ReturnType<typeof renderFiles>["fetchMock"]) {
+  return paths(fetchMock).filter((path) => path.includes("/archive?"));
+}
+
 describe("文件页的预览状态", () => {
   it("未知文件由服务端裁决：schema.proto 按文本显示为带行号的源码，blob.bin 得到 415 后显示不支持，各恰一次 file 请求", async () => {
     const { fetchMock } = renderWorkspaceWith({
@@ -145,18 +169,22 @@ describe("文件页的预览状态", () => {
   });
 
   it("每个文件都能下载：可预览、不支持、超限与压缩包的预览头都有下载链接，页面不对 download 地址发请求", async () => {
-    const { fetchMock } = renderWorkspaceWith({
-      "readme.md": { size: 4, route: textPreviewResponse("# 说明") },
-      "blob.bin": { size: 91, route: unsupported() },
-      "huge.png": {
-        size: 22_020_096,
-        route: jsonResponse(
-          { error: { code: "preview_too_large", message: "文件过大，无法预览" } },
-          413,
-        ),
+    const { fetchMock } = renderWorkspaceWith(
+      {
+        "readme.md": { size: 4, route: textPreviewResponse("# 说明") },
+        "blob.bin": { size: 91, route: unsupported() },
+        "huge.png": {
+          size: 22_020_096,
+          route: jsonResponse(
+            { error: { code: "preview_too_large", message: "文件过大，无法预览" } },
+            413,
+          ),
+        },
+        "archive.zip": { size: 2048, route: new Error("archive.zip must not be fetched") },
       },
-      "archive.zip": { size: 2048, route: unsupported() },
-    });
+      false,
+      { [`${ARCHIVE}archive.zip`]: archiveListing("inner/note.txt") },
+    );
 
     await select("readme.md");
     expect(await screen.findByRole("heading", { level: 1, name: "说明" })).toBeTruthy();
@@ -171,13 +199,135 @@ describe("文件页的预览状态", () => {
     expectDownloadLink("huge.png");
 
     await select("archive.zip");
-    await expectEmptyState("该类型不支持预览", "archive.zip · 2.0 KB");
+    expect(await previewRegion().findByRole("cell", { name: "inner/note.txt" })).toBeTruthy();
     expectDownloadLink("archive.zip");
 
     expect(fileRequests(fetchMock)).toStrictEqual(
-      ["readme.md", "blob.bin", "huge.png", "archive.zip"].map((name) => `${FILE}${name}`),
+      ["readme.md", "blob.bin", "huge.png"].map((name) => `${FILE}${name}`),
     );
+    expect(archiveRequests(fetchMock)).toStrictEqual([`${ARCHIVE}archive.zip`]);
     expect(paths(fetchMock).filter((path) => path.includes("/download"))).toStrictEqual([]);
+  });
+
+  it("压缩包的刷新与再点同一行各重新列出一次：archive 请求依次为一、二、三次，前一次的 signal 已中止，全程没有 file 请求", async () => {
+    let listed = 0;
+    const { fetchMock } = renderWorkspaceWith(
+      { "archive.zip": { size: 2048, route: new Error("archive.zip must not be fetched") } },
+      false,
+      {
+        [`${ARCHIVE}archive.zip`]: () => {
+          listed += 1;
+          return archiveListing(`第 ${listed} 次.txt`)();
+        },
+      },
+    );
+    const signals = () =>
+      fetchMock.mock.calls
+        .filter(([path]) => path.includes("/archive?"))
+        .map(([, options]) => options?.signal?.aborted);
+
+    await select("archive.zip");
+    expect(await previewRegion().findByRole("cell", { name: "第 1 次.txt" })).toBeTruthy();
+    expect(archiveRequests(fetchMock)).toStrictEqual([`${ARCHIVE}archive.zip`]);
+    expect(previewRegion().getByText("共 1 项", { exact: true })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    expect(await previewRegion().findByRole("cell", { name: "第 2 次.txt" })).toBeTruthy();
+    expect(previewRegion().queryByRole("cell", { name: "第 1 次.txt" })).toBeNull();
+    expect(archiveRequests(fetchMock)).toStrictEqual([
+      `${ARCHIVE}archive.zip`,
+      `${ARCHIVE}archive.zip`,
+    ]);
+    expectDownloadLink("archive.zip");
+
+    await select("archive.zip");
+    expect(await previewRegion().findByRole("cell", { name: "第 3 次.txt" })).toBeTruthy();
+    expect(archiveRequests(fetchMock)).toHaveLength(3);
+    expect(signals().slice(0, 2)).toStrictEqual([true, true]);
+    expect(previewRegion().queryByText("正在读取文件")).toBeNull();
+    expect(fileRequests(fetchMock)).toStrictEqual([]);
+  });
+
+  it("先图片后压缩包再回文本：选中压缩包时图片的 Blob 地址恰被释放一次；切走后表格消失，切换工作空间后也没有表格", async () => {
+    const blobUrls = stubBlobUrls(["blob:x"]);
+    const { fetchMock } = renderWorkspaceWith(
+      {
+        "logo.png": { size: 8, route: imagePreviewResponse() },
+        "archive.zip": { size: 2048, route: new Error("archive.zip must not be fetched") },
+        "readme.md": { size: 4, route: textPreviewResponse("# 说明") },
+      },
+      false,
+      { [`${ARCHIVE}archive.zip`]: archiveListing("inner/note.txt") },
+    );
+
+    await select("logo.png");
+    expect(await screen.findByRole("img", { name: "logo.png" })).toBeTruthy();
+    expect(blobUrls.revokeObjectURL.mock.calls).toStrictEqual([]);
+
+    await select("archive.zip");
+    expect(await previewRegion().findByRole("cell", { name: "inner/note.txt" })).toBeTruthy();
+    expect(screen.queryByRole("img", { name: "logo.png" })).toBeNull();
+    expect(blobUrls.revokeObjectURL.mock.calls).toStrictEqual([["blob:x"]]);
+
+    await select("readme.md");
+    expect(await screen.findByRole("heading", { level: 1, name: "说明" })).toBeTruthy();
+    expect(previewRegion().queryByRole("cell", { name: "inner/note.txt" })).toBeNull();
+
+    await select("archive.zip");
+    expect(await previewRegion().findByRole("cell", { name: "inner/note.txt" })).toBeTruthy();
+    await selectWorkspaceByName(/数据分析/);
+    await screen.findByText("未选择文件", { exact: true });
+    expect(screen.queryByRole("cell", { name: "inner/note.txt" })).toBeNull();
+    expect(archiveRequests(fetchMock)).toHaveLength(2);
+    expect(fileRequests(fetchMock)).toStrictEqual([`${FILE}logo.png`, `${FILE}readme.md`]);
+  });
+
+  it("压缩包的列表请求按整段路径编码：uploads 下名字含空格、中文与井号的压缩包，请求地址是写死的含 uploads%2F 的编码结果", async () => {
+    const name = "会议 归档#1.zip";
+    // 整段路径 `uploads/会议 归档#1.zip` 的编码：目录分隔符也在里面，只传文件名得不到它。
+    const encoded = "uploads%2F%E4%BC%9A%E8%AE%AE%20%E5%BD%92%E6%A1%A3%231.zip";
+    const { fetchMock } = renderFiles(
+      "/files?ws=workspace-1",
+      authenticatedFilesRoutes([workspace, secondWorkspace], {
+        "/api/workspaces/workspace-1/tree?path=": () =>
+          jsonResponse({
+            path: "",
+            entries: [{ name: "uploads", type: "dir", size: 0, mtime: 100 }],
+          }),
+        "/api/workspaces/workspace-1/tree?path=uploads": () =>
+          jsonResponse({
+            path: "uploads",
+            entries: [{ name, type: "file", size: 2048, mtime: 101 }],
+          }),
+        [`${ARCHIVE}${encoded}`]: archiveListing("inner/note.txt"),
+      }),
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "展开 uploads" }));
+    await select(name);
+    expect(await previewRegion().findByRole("cell", { name: "inner/note.txt" })).toBeTruthy();
+    expect(archiveRequests(fetchMock)).toStrictEqual([`${ARCHIVE}${encoded}`]);
+    expect(fileRequests(fetchMock)).toStrictEqual([]);
+  });
+
+  it("损坏的压缩包：archive 答 415 时显示「无法读取该压缩包」而不是不支持态，下载链接仍在，页面不弹 Toast，没有 file 请求", async () => {
+    const { fetchMock } = renderWorkspaceWith(
+      { "broken.zip": { size: 39, route: new Error("broken.zip must not be fetched") } },
+      false,
+      { [`${ARCHIVE}broken.zip`]: unsupported },
+    );
+    const toasts = screen.getByRole("region", { name: "通知" });
+
+    await select("broken.zip");
+    expect((await previewRegion().findByRole("alert")).textContent).toBe("无法读取该压缩包");
+    expect(screen.queryByText("该类型不支持预览")).toBeNull();
+    expectDownloadLink("broken.zip");
+    // 让出一轮：Toast 若有，是在文案之后的一次状态更新里才进通知区的。
+    await yieldMacrotask();
+    expect(within(toasts).queryByRole("listitem")).toBeNull();
+    expect(document.querySelector(".ui-toast")).toBeNull();
+    expect(archiveRequests(fetchMock)).toStrictEqual([`${ARCHIVE}broken.zip`]);
+    expect(fileRequests(fetchMock)).toStrictEqual([]);
   });
 
   it("截断提示：带截断头的 big.log 显示源码与一行按响应头大小写成的提示", async () => {

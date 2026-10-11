@@ -1,3 +1,5 @@
+import type { ApiClient } from "../../lib/api.js";
+
 export type Workspace = {
   id: string;
   name: string;
@@ -41,6 +43,14 @@ type FilePreview =
 
 export type PreviewState =
   | { status: "success"; data: FilePreview }
+  /**
+   * 压缩包：没有预取的正文，成员由预览器自己调 `load` 列出。每次选中或刷新给一个新的 `load`，
+   * 预览器据此重新列出。
+   */
+  | {
+      status: "archive";
+      load: (signal: AbortSignal) => Promise<Awaited<ReturnType<ApiClient["listArchive"]>>>;
+    }
   | { status: "error"; message: string }
   | { status: "unsupported" }
   | { status: "too-large" };

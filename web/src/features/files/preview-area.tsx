@@ -34,12 +34,22 @@ export function failedPreview(error: unknown): PreviewState {
   return { status: "error", message: errorMessage(error) };
 }
 
+type ArchiveLoad = Extract<PreviewState, { status: "archive" }>["load"];
+
 /**
- * 选中即有、不发 `file` 请求的预览；`null` 表示这个文件照常请求。目前只有音视频：把文件自己的地址
- * `url` 交给媒体元素，由浏览器去取。
+ * 选中即有、不发 `file` 请求的预览；`null` 表示这个文件照常请求。音视频：把文件自己的地址 `url`
+ * 交给媒体元素，由浏览器去取。压缩包：把 `listArchive`（对这个文件的一次成员列表请求）交给压缩包
+ * 预览器，由它在挂上之后调用。
  */
-export function immediatePreview(entry: TreeEntry, url: string): PreviewState | null {
+export function immediatePreview(
+  entry: TreeEntry,
+  url: string,
+  listArchive: ArchiveLoad,
+): PreviewState | null {
   const kind = previewKind(entry.name);
+  if (kind === "archive") {
+    return { status: "archive", load: listArchive };
+  }
   if (kind === "audio" || kind === "video") {
     return {
       status: "success",
