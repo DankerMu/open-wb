@@ -924,3 +924,41 @@
 - D-27（owner 2026-10-10）：五条后果登记在 D-23 之下，#1286 保持打开，不闭合、不加复核。验收清单 FL-01 指向的 D22 段落标题与 Risks 条目标题都没有改，清单未动，结论仍全部 `待签`。
 - 同样写着「Node 无 `*at` 调用」而不在本刀范围内的三处，只报不改：`server/src/workspaces/temp-dir-remove.ts`、`server/src/sessions/session-delete.ts` 的注释与 `docs/adr/0010-dedicated-omp-uid.md`。
 - 预审订正：`work/` 边删边换的自然竞态原记「ext4 与 overlayfs 各 40 轮未复现」，改记**未测**——那份脚本换不掉它要换的那一级（该级非空，其父目录由应用用户建、没有让 omp 用户能写的 `chmod`），没有替换发生过的记录，不计为证据。不跟随的结论只靠 `strace` 与预先放好的顶层、嵌套两例；被 `strace` 的是参数相同的裸 `rmSync`，不是 `clearWork`，顶层的打开与最后的 `rmdir` 按路径，其下各级才按描述符。
+
+## 10.3、10.4、10.5（#1065）
+
+- **Critical Path：沙箱与文件边界**（新增一条读用户文件的路由，`sandbox.resolve(op=read)` 之后按路径打开攻击者可控的压缩包）：两个评审席加 owner 白盒审查；不加 `op`、不动 `http/errors.ts`（GET 无 body，归属身份仍为 17 条）。
+- 前置已核对代码而非复选框：`preview-config.ts:48` 的 `previewArchiveMaxEntries`、`rest.ts:40` 的 `limits?`、`archive.ts`（722 行，`listArchive(format, name, readAt, {maxEntries, now, size})` 含 zip 与多成员 gzip）。但该配置值至今无人消费：`server.ts:114-118` 只转发 text / image / notebook。
+- 与 issue 的出入（以 master 为准）：① 「`rest-entries.ts` 不存在则本 PR 建」——已存在（232 行，download / DELETE entries / move）；② 「新文件 `workspaces-archive.test.ts`」——已存在（516 行，全是解析层用例）；③ 规格「压缩包列表」现为七个场景而非五个，10.6 加的两个属解析层，路由层不重复；④ 切片声明缺 10.6 一句（`tasks.md:299`）；⑤ PR Boundary 漏列 `preview.ts`、`rest.ts`、`server.ts`、两个既有测试文件与 `archive.ts:3` 的注释。
+- `limits` 接入：`PreviewLimits`（`preview.ts:55`）加必填 `archiveEntries: number`，`DEFAULT_PREVIEW_LIMITS` 加 `archiveEntries: 1000`，`server.ts:114` 的 `appAssemblyOf` 加 `archiveEntries: config.previewArchiveMaxEntries`。`app.ts:257` 整对象转发不用改，只改 `app.ts:102` 与 `rest.ts:39` 的注释；路由不读环境变量。
+- 因上一条必须改的既有断言（测试参与 `tsc`，只增不减，逐条进偏离记录）：`workspaces-preview-classify.test.ts:114` 的 `toEqual` 补 `archiveEntries: 1000`，`:283` 的字面量补字段；`workspaces-file-sniff.test.ts:293` 的字面量补字段，`:307-316` 两个 `toEqual` 各补一行（配置 `PREVIEW_ARCHIVE_MAX_ENTRIES: "3"` → 3、缺省 → 1000），`:297` 标题 three → four。
+- 路由落新文件 `server/src/workspaces/rest-archive.ts`（约 90 行），导出 `registerWorkspaceArchive(app, dependencies: WorkspaceRestDependencies): void`，在 `index.ts` 的 `registerWorkspaces` 里无条件注册；依据是 tasks 文首「`rest.ts` 的新路由放进新文件」。`archive.ts:3` 的「The route comes later.」同刀改写（只动注释）。HEAD 沿用 `file` / `tree` 的缺省，成功路径不写审计，不必像 download 那样关掉。
+- 处理次序：`currentPrincipal` → `ensureOwnedRoot`（404）→ `parsePathQuery(query, true)`（缺失或重复 400）→ `resolve(…, "read")`（403 加 `sandbox.reject`）→ `lstatExisting` 非普通文件 404 → `archiveFormat(basename(absPath))` 为 null 则 415 → 打开 → `listArchive` → `finally` 里 `closeSync`；全部结果带 `onRequest: noStoreWorkspaceResponse`。
+- 「不存在的非压缩包名（`gone.md`）」不是未规定分支，答 404：需求句序「目标不存在或不是普通文件 → 404」先于格式判定，场景「拒绝与损坏」的 `out`（目录、无压缩包扩展名）→ 404 也钉住 lstat 在格式之前。取 `basename(absPath)` 而非查询串末段，理由同 6.1 注记（`resolve` 吞掉 `.` 与空分量）。
+- 打开方式：把 `rest.ts:184-208` 的 `sniffedAsText` 里「`openSync(O_RDONLY|O_NOFOLLOW|O_NONBLOCK)` + 错误码映射 + `fstatSync().isFile()`」原样抽成导出的 `openRegularFile(absPath): number`（非普通文件时自己 `closeSync` 再抛 `not_found`），嗅探与本路由共用。纯搬移，`workspaces-file-sniff.test.ts:385-560` 的七条换入用例必须原样全绿；master 上没有按源码扫描这段的测试。
+- `readAt` 与参数：用 `node:fs` 回调式 `read(fd, buffer, 0, length, position, cb)`，在调用时取具名导入（不要模块加载时 `promisify`，否则 `spyBodyIo` 看不到）；循环读到填满或 `bytesRead === 0`，只在文件尾短读。`size` 取打开后 `fstatSync(fd).size`，`now` 传 `() => performance.now()`，`maxEntries` 取 `limits.archiveEntries`。`gz` 也走同一条路，打开后零次读取即关闭。
+- 交接项：① `archiveEntries` 为 0 时 tar 列 0 项而 zip 列 1 项（读代码推出：`archive.ts:175` 先判后读，`:441` 先 push 后判）；配置层已限正整数，依赖对象未校验，所以注册时仿 `rest.ts:229` 校验「正的安全整数」，否则抛 `Error`。② zip 没有时限，本刀不加（规格只给 tar / tar.gz 5 秒）；它的有界性是「读取次数 ≤ 2·上限 + 3、每次 ≤ 65536」，读代码推出，路由层未测，上限配得很大时即无实际时限。③ 客户端断开不取消遍历，跑到上限或时限为止（读代码推出）。
+- D-23 窗口如实陈述（不闭合、不改 `file` / `download`）：本路由是 `resolve` → `lstat` → 按路径 `openSync` 的同类窗口，新增一处。末段在 `lstat` 后被换成符号链接、命名管道、目录或被删 → 404、不读、描述符已关，证据等级为「钩子辅助下经真实处理器复现」（见下两条换入用例）。中间分量被换成符号链接时 `open` 跟随它，读到空间外同名文件的成员名与大小（不含内容），这一条是读代码推出、未测。打开之后全按描述符，文件被截短即短读按损坏处理（读代码推出）。同刀在 `design.md` D22「已知残余」第三条的路由名单里补上 `archive` 与上述区别（只增文字）。
+- 测试落新文件 `server/test/workspaces-archive-route.test.ts`（偏离 issue 写的文件名；既有文件再加会逼近 800 行，`workspaces-archive-tar.test.ts` 782 行与 `workspaces-http.test.ts` 736 行不动）。复用 `workspaces-archive-helpers.ts` 的 `THREE_MEMBERS`、`ZIP_THREE_RECORDS`、`zipArchive`、`zipCentral`、`tarFile`、`tarHeader`、`TAR_END`、`emptyMembers`，以及 `workspaces-http-helpers.ts` 的 `withWorkspacesApp`、`seedWorkspace`、`auditRows`、`auditCount`、`contentOf`、`SANDBOX_DENIED_ENVELOPE`；不新增 helper 导出，期望值写字面量。
+- 用例：① 三种格式——五个文件的响应体整体 `toEqual`；`contentOf(sandboxRoot)` 请求前后相等，建好 app 后 `vi.stubEnv("TMPDIR", <空目录>)` 且该目录仍为空；`notes.txt.gz` 的描述符零次 `read`。② 上限——`archiveEntries: 3` 装配下 5 成员 `x.tar` 恰 3 项加 `truncated`；缺省装配下 1500 成员的 tar 与 zip 各恰 1000 项；`archiveEntries: 0` 装配即抛。③ 七个输入按规格次序，另加 `gone.md` → 404、未认证 401、缺 `path` 与重复 `path` → 400；`../x.zip` 的 `sandbox.reject` 行形状照 `workspaces-download.test.ts:270-277`。④ 逃逸——外部真放一个合法 `x.zip`；向外与向内的符号链接 `link.zip` → 403；他人（`lisi`）、不存在、无根目录的 id 带 `../x.zip` 与真实存在的 `x.zip` → 同一 404、审计行数不变、零 `openSync`。⑤ 换入——仿 sniff 的 `requestWithSwap`，符号链接与 `mkfifo` 两条。⑥ 关闭——200、415（`fake.zip`）、`cut.tar` 三种结果后 `closeSync` 收到的正是 `openSync` 返回的 fd。⑦ 短读——把 `fs.read` mock 成每次至多给 100 字节，`x.tar` 仍三项。
+- 「恶意成员名只是数据」经路由：tar 与 zip 各含 `../../etc/passwd`、`/abs/x`、`<script>…`（zip 另加带 `\` 的），`entries[].path` 原样；预置哨兵 `<sandboxRoot>/etc/passwd`。写——`contentOf(sandboxRoot)` 前后相等。读——`spyMetadataIo()` 再加本文件内对 `fs.promises` 的 `open` / `lstat` / `stat` / `readFile` 的 spy，断言没有任何调用的路径参数等于哨兵、`/abs/x`、`/etc/passwd` 或 `join(root, 成员名)`。证据范围只到这些被 spy 的函数，其余 API 不可观察，PR 里照此写，不写「不可能访问」。
+- 守卫与清单：新导出 `openRegularFile`、`registerWorkspaceArchive` 都有 `src` 内调用方（knip）；biome 认知复杂度 15，读循环单拆小函数；不用动态 `RegExp`；`rest.ts` 486 行加约 10 行；不新增配置键，不动 `docs/architecture/system.md` 第 9 节（键表归 28.1）；纯服务端、无界面消费方（20.3 才有），no checklist rows；不动 hurl（26.2 的步骤里没有 archive）。
+- 同批共用文件：`PreviewLimits` 变四个字段，其后的 #1069（12.1 依赖 6.1 的 `limits` 类型）若自己构造该对象须带 `archiveEntries`，或直接用装配传来的整个对象；`server/src/workspaces/rest.ts` 与 `index.ts` 本刀先改，#1069 若要复用 `openRegularFile` 从这里取。本批其余各刀与本刀无共用文件。
+- 变异：路由里对成员名做路径解析（对 `join(dirname(absPath), entry.path)` 做 `lstat` 或 `open`）→ 「恶意成员名」用例的路径参数断言判红（10.5 分摊给本刀的那条）。
+- 变异：对成员名做 `normalize` 或去前导 `/` → 同一用例的原样断言判红。
+- 变异：去掉 `ensureOwnedRoot` → 无根目录的 id 一例判红；他人 id 仍由 store 挡成 404，这一半不可观察（同 9.3 注记）。
+- 变异：`ensureOwnedRoot` 挪到 `resolve` 之后 → 他人或不存在的 id 带 `../x.zip` 的「审计行数不变」判红。
+- 变异：去掉 `sandbox.resolve`（直接拼路径）→ `../x.zip` 判红（外部真有合法 zip，得 200）；`op` 写成 `list` → `sandbox.reject` 行的 `op: "read"` 判红。
+- 变异：格式判定挪到 lstat 之前 → `out`（目录）仍 404 不红，靠 `gone.md` → 404 判红，所以该例必须加。
+- 变异：去掉 lstat 的普通文件判定 → 不可观察（`openRegularFile` 的 `fstat` 同样答 404）；它只为在格式判定之前给出 404、且不去打开目录与管道，靠白盒审查。
+- 变异：`openRegularFile` 去掉 `O_NOFOLLOW` → 符号链接换入用例判红（200 并列出外部包）；去掉 `O_NONBLOCK` → `mkfifo` 换入用例判红（响应超时）；去掉 `fstat` → 目录或管道换入用例判红。sniff 的七条既有用例同样会红。
+- 变异：无视 `limits.archiveEntries`、写死 1000 → 上限 3 的 `x.tar` 判红；缺省写成别的数 → 1500 成员的「恰 1000 项」判红。
+- 变异：`appAssemblyOf` 漏接或接错字段 → `workspaces-file-sniff.test.ts:307-316` 的 `toEqual` 判红；`app.ts` 不转发 `previewLimits` → 既有 sniff 用例三与本刀上限 3 用例判红。
+- 变异：去掉注册时的正整数校验 → `archiveEntries: 0` 装配用例判红。
+- 变异：`size` 传 0 或传 lstat 之外的错值 → `x.zip` 三项用例判红（415）。
+- 变异：`readAt` 不循环（一次读多少算多少）→ 短读 mock 用例判红（415）；整包 `readFileSync` → `fs.readFileSync` 未被调用的断言判红。
+- 变异：去掉 `finally` 里的 `closeSync` → 关闭用例判红。
+- 变异：去掉 `noStoreWorkspaceResponse` → 每条用例的 `no-store` 断言判红；`parsePathQuery` 的 `required` 传 `false` → 缺 `path` → 400 判红。
+- 变异：不在 `index.ts` 注册 → 全部路由用例判红（404）。
+- 变异：`now` 传恒定时钟、或给 zip 加时限 → 不可观察（路由不注入时钟，解析层的 `slow.tar` 已在 #1063 钉住），靠白盒审查。
+- 变异：`lstat` 之后中间分量被换成符号链接 → 不可观察，本刀不写用例，属 D-23 登记的残余，不声称挡住。
