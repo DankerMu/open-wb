@@ -2,7 +2,9 @@
 
 ## Purpose
 Defines HTTP smoke and browser walk-through surfaces plus their CI/control-plane wiring, shared test-harness invariants, and guard/oracle contracts.
+
 ## Requirements
+
 ### Requirement: HTTP smoke（hurl）
 `smoke/` 下 SHALL 有彼此独立、无需跨文件 cookie 或文件顺序的 Hurl 用例：`public.hurl` 覆盖 healthz、info、默认守卫 401、显式伪造 session id 401 与深链 fallback；`auth.hurl` 覆盖登录成功/凭证错误/停用（逐字断言 `$.error.message`）、已认证 API 404、登出与登出后 401；`chat.hurl` 独立覆盖登录、创建201、prompt202、完成正文与步骤、他账号404及代理无 bearer401。`make smoke` SHALL 只对已运行服务执行public/auth/chat/files/session-meta 五个 top-level 文件：唯一输入 `SMOKE_BASE_URL` 缺省为 `http://127.0.0.1:3000`，并作为 `base_url` 传给单 job、全局 retry0 的 test-mode Hurl（仅 messages GET 允许有界 per-entry retry）；目标不得 build/start/stop 服务或安装工具。Hurl SHALL 仅从 caller PATH 发现并在只含 PATH 的 clean child environment 中运行，不能继承 ambient Hurl option/variable、credential、proxy 或 config/home state。深链 exact-byte 合同只在 caller 以 `STATIC_ROOT=<repo>/smoke/fixtures/static` 启动服务时成立，不以 default `make dev`/`web/dist` 为绿路径。本机缺 Hurl 时目标 SHALL 在任何请求前非零退出并打印命名 `hurl` 的官方安装指引。`make smoke` SHALL 传入 `content_pattern=^你好，这是 WorkBuddy 的第一条流式回复。$` 与 `min_bash_steps=1`；手动 smoke-live 保持其既有形状档契约不变。
 
@@ -66,7 +68,9 @@ smoke 与 ui-walk SHALL 作为两个独立 Ubuntu job 进入 CI，并纳入 `all
 
 控制面 SHALL 同步 AGENTS.md、constraints.yaml 与 Makefile：Verification Matrix 明列 `make smoke`、`make ui-walk`、作为二进制供给前置的 `make omp-fetch` 与手动真实上游 `make smoke-live` 及各自 evidence；Enforcement Index 保持 smoke/ui-walk 为 `block`，omp-fetch 为 prerequisite，smoke-live 为 `review-only`。Directory Map 的 server/ 与 smoke/ SHALL 包含对话职责。constraints.yaml verification.surfaces SHALL 恰有十个 surface，各含 command/evidence/required_at，omp-fetch 与 smoke-live 的 required_at 分别为 prerequisite/manual。Makefile 页头 SHALL 描述这些职责且不再延后 #107；四个同名 targets（smoke/ui-walk/omp-fetch/smoke-live）与 .PHONY 保持一致；`ui-shots` 目标、其 `UI_SHOTS_*` 变量与 `web` 的 `ui-shots` 脚本 SHALL 不存在，source-derived oracle SHALL 拒绝每个 target 的 GNU Make 等价 spaced duplicate/redefinition。第三方 action 四项白名单不变；ui-walk job 的 `timeout-minutes: 15` 覆盖两个 Playwright project。S0b 同 uid 的 /proc 与配置文件凭证风险登记 SHALL 在 ADR0010 要求的 merged-master uid-isolation job 与 aggregate 全绿证据成立后关闭；strictness_profile.downgrades SHALL 不含 s0b_same_uid_credential_exposure，其余三条降级保持不变。AGENTS.md Enforcement Index SHALL 含 uid 隔离、CI uid-isolation/all-checks-passed 与 block 的精确四列行；不得以设置 OMP_USER、普通CI跳过或容器结果代替正式master证据，也不得声称用户生产部署已验收。
 
-`fast-checks` 与 `anti-drift` SHALL 各使用 exact `timeout-minutes: 10`，在各自独立 runner 先执行 lockfile 约束的 `npm ci` clean install，再执行原有全部质量步骤；该预算来自 300–302 秒历史安装高尾及同 workflow 10 分钟 `unit-tests` 成功对照，不代表 registry/cache/runner 底层延迟来源已被证明或消除。`constraints.yaml` SHALL 分别以 `ci.fast_checks_timeout_minutes: 10` 与 `ci.anti_drift_timeout_minutes: 10` 镜像这两个执行值。source-derived oracle SHALL 拒绝任一 timeout 回退或镜像不一致、`npm ci`/下游质量步骤删除或替换、job/step `if`/`continue-on-error`/custom shell 绕过，以及 aggregate 对 failure/cancelled/skipped 的弱化。unit-tests、secret-scan、sast 的 timeout 与步骤、smoke/ui-walk 的 timeout，以及覆盖率、复杂度、重复、文件大小、diff size 和其他门禁阈值 SHALL 保持不变。
+`fast-checks` 与 `anti-drift` SHALL 各使用 exact `timeout-minutes: 10`，在各自独立 runner 先执行 lockfile 约束的 `npm ci` clean install，再执行原有全部质量步骤；该预算来自 300–302 秒历史安装高尾及同 workflow 10 分钟 `unit-tests` 成功对照，不代表 registry/cache/runner 底层延迟来源已被证明或消除。`constraints.yaml` SHALL 分别以 `ci.fast_checks_timeout_minutes: 10` 与 `ci.anti_drift_timeout_minutes: 10` 镜像这两个执行值。source-derived oracle SHALL 拒绝任一 timeout 回退或镜像不一致、`npm ci`/下游质量步骤删除或替换、job/step `if`/`continue-on-error`/custom shell 绕过，以及 aggregate 对 failure/cancelled/skipped 的弱化。secret-scan、sast 的 timeout 与步骤、smoke/ui-walk 的 timeout，以及覆盖率、复杂度、重复、文件大小、diff size 和其他门禁阈值 SHALL 保持不变。
+
+单元测试 SHALL 拆成两个并行的独立 Ubuntu job，各使用 exact `timeout-minutes: 10`：`unit-tests` 依次执行 checkout、setup-node、setup-uv、`npm ci`、`cd kbservice && uv sync`、`npm test --workspace server` 与 `cd kbservice && uv run pytest`；`unit-tests-web` 依次执行 checkout、setup-node、`npm ci` 与 `npm test --workspace web`，不安装 uv。根 `package.json` 的 workspaces 恰为 server 与 web，两 job 合起来 SHALL 覆盖拆分前 `npm test --workspaces` 的全部套件，不得遗漏其一；测试内容、覆盖率阈值与本地 `make test` SHALL 不变，不引入测试分片，也不新增 `constraints.yaml` 镜像。`all-checks-passed.needs` SHALL 同时包含两者。source-derived oracle SHALL 以完整 metadata 与步骤序列钉住这两个 job，拒绝 `unit-tests-web` 缺失或不在聚合依赖中、任一 timeout 偏离 10、action major 漂移、setup 步骤缺失/重复/搬移、`npm ci` 或任一测试步骤删除/替换（含两个 workspace 互换）、`unit-tests-web` 多出 setup-uv，以及 job/step `if`/`continue-on-error` 绕过。
 
 #### Scenario: 两个真实 harness job 独立全绿并进入聚合
 - **GIVEN** fresh Ubuntu runners、受 lockfile 约束的 Node dependencies、固定 Hurl archive digest 与 Playwright Chromium revision
@@ -88,6 +92,16 @@ smoke 与 ui-walk SHALL 作为两个独立 Ubuntu job 进入 CI，并纳入 `all
 - **WHEN** 新 PR 与 master push CI 使用本 requirement 的配置运行 fast-checks 与 anti-drift
 - **THEN** 两 job 各有 10 分钟总预算，`npm ci` 之后的 Biome/Ruff/typecheck 或 knip/jscpd/naming/size 步骤实际执行且成功，不以 cancelled/skipped 结束，`all-checks-passed` 成功
 
+#### Scenario: 单元测试拆分后两套件各有独立预算
+- **GIVEN** 拆分前 `unit-tests` 在一个 runner 上串行执行 server vitest、web vitest 与 kbservice pytest，对 10 分钟时限的实测耗时为 6:20、9:41、9:48、超时、9:09、9:57、超时（测试本身全部通过，两次靠重跑）；其中一次超时运行里 `npm ci` 约 8 秒（缓存命中）、server 套件约 3.5 分钟、web 套件约 6 分钟
+- **WHEN** 新 PR 与 master push CI 使用本 requirement 的配置并行运行 `unit-tests` 与 `unit-tests-web`
+- **THEN** 工作流共十个 job：九个 direct job（fast-checks、unit-tests、unit-tests-web、anti-drift、secret-scan、sast、smoke、ui-walk、uid-isolation）加 `all-checks-passed`；两个测试 job 各有自己的 10 分钟预算，server 套件与 kbservice pytest 在 `unit-tests`、web 套件在 `unit-tests-web` 实际执行且成功，没有套件被遗漏
+- **AND** 两者中任一 failure/cancelled/skipped 时 `all-checks-passed` 非零
+
+#### Scenario: 测试 job 的拆分不可漂移
+- **WHEN** source-derived fixture 分别删除 `unit-tests-web`、把它移出 `all-checks-passed.needs`、把任一测试 job 的 timeout 改成 15、删除或替换任一测试步骤、互换两个 workspace、在 `unit-tests-web` 回退/删除/重复/搬移 checkout 或 setup-node、为它加入 setup-uv，或加入 job/step skip/continue 绕过
+- **THEN** `make test-guardrails` 的 CI contract oracle 非零；未变 fixture 仍通过
+
 #### Scenario: timeout 与质量步骤不可漂移或旁路
 - **WHEN** source-derived fixture 分别把任一目标 timeout 改回 5、删除或错配任一 constraints mirror、删除/替换 `npm ci` 或任一下游质量步骤、加入 job/step skip/continue/custom-shell 绕过，或使 aggregate 不再拒绝 failure/cancelled/skipped
 - **THEN** `make test-guardrails` 的 CI contract oracle 非零；未变 fixture 与无关 legacy job 演进控制组仍通过
@@ -104,11 +118,11 @@ smoke 与 ui-walk SHALL 作为两个独立 Ubuntu job 进入 CI，并纳入 `all
 - WHEN either smoke or ui-walk starts through the shared compiled-server helper, or a mutation deletes/reorders fixture copy or removes files.hurl from Make smoke
 - THEN both valid modes SHALL provision the tracked three files before startup and mutated wiring SHALL fail the precise source/runtime oracle; existing lifecycle and sibling-job isolation guarantees remain unchanged
 
-第三个 harness job uid-isolation SHALL 遵循 omp-uid-isolation 的正式CI要求，timeout15，隔离job-owned端口/DB/状态并复用既有工具安装及compiled-server smoke。all-checks-passed SHALL 额外依赖uid-isolation，direct job精确八个；checkout/setup-node出现次数 SHALL 分别8/6，uv及其它action数量不变。源码派生oracle SHALL 同步新job步骤/env/aggregate与helper可选OMP_USER保留；任何去掉opt-in、换uid传递、HOME门禁、共享组执行或必需依赖的候选 SHALL 被拒绝。既有两个harness jobs及全部更早场景保持不变。
+第三个 harness job uid-isolation SHALL 遵循 omp-uid-isolation 的正式CI要求，timeout15，隔离job-owned端口/DB/状态并复用既有工具安装及compiled-server smoke。all-checks-passed SHALL 额外依赖uid-isolation，direct job（含 unit-tests-web）精确九个；checkout/setup-node出现次数 SHALL 分别9/7，uv及其它action数量不变。源码派生oracle SHALL 同步新job步骤/env/aggregate与helper可选OMP_USER保留；任何去掉opt-in、换uid传递、HOME门禁、共享组执行或必需依赖的候选 SHALL 被拒绝。既有两个harness jobs及全部更早场景保持不变。
 
 #### Scenario: uid job 与精确 oracle 原子接线
 - WHEN the workflow and source/runtime guardrails run on the same revision
-- THEN eight direct jobs include uid-isolation, checkout/setup-node counts are8/6, the selected Linux test is executed not skipped, real-omp five-file smoke passes under OMP_USER=omp, and failure/cancelled/skipped in that job fails the aggregate
+- THEN nine direct jobs include uid-isolation and unit-tests-web, checkout/setup-node counts are9/7, the selected Linux test is executed not skipped, real-omp five-file smoke passes under OMP_USER=omp, and failure/cancelled/skipped in that job fails the aggregate
 
 #### Scenario: 换 uid 透传保持可选
 - WHEN the existing compiled-server helper receives OMP_USER absent or present
@@ -142,19 +156,19 @@ server 与 web SHALL 通过逐字相同的完整相对 specifier `../vitest.shar
 - **THEN** fixture inspection、Biome 或默认/native loader 验证非零，不能由 bundle loader 转译、stale artifact、fallback、lint exclusion 或输出过滤假绿
 
 ### Requirement: 第三方 CI action 使用 Node 24 runtime
-CI SHALL 只以 `actions/checkout@v5`、`actions/setup-node@v5`、`astral-sh/setup-uv@v7` 与 `gitleaks/gitleaks-action@v3` 使用这四种第三方 action；其对应 major tag 的 `action.yml` SHALL 声明 `runs.using: node24`，且 GitHub-hosted runner SHALL 满足 Node 24 action 所需的 runner v2.327.1+。八个 direct jobs 的使用矩阵 SHALL 完整且唯一：checkout 分别出现在 fast-checks、unit-tests、anti-drift、secret-scan、sast、smoke、ui-walk、uid-isolation；setup-node 分别出现在 fast-checks、unit-tests、anti-drift、smoke、ui-walk、uid-isolation；setup-uv 只出现在 fast-checks 与 unit-tests；gitleaks-action 只出现在 secret-scan。不得保留旧/混合 major、Node 20 fallback environment、重复/替换/旁路 action 或未受约束的同类使用点。
+CI SHALL 只以 `actions/checkout@v5`、`actions/setup-node@v5`、`astral-sh/setup-uv@v7` 与 `gitleaks/gitleaks-action@v3` 使用这四种第三方 action；其对应 major tag 的 `action.yml` SHALL 声明 `runs.using: node24`，且 GitHub-hosted runner SHALL 满足 Node 24 action 所需的 runner v2.327.1+。九个 direct jobs 的使用矩阵 SHALL 完整且唯一：checkout 分别出现在 fast-checks、unit-tests、unit-tests-web、anti-drift、secret-scan、sast、smoke、ui-walk、uid-isolation；setup-node 分别出现在 fast-checks、unit-tests、unit-tests-web、anti-drift、smoke、ui-walk、uid-isolation；setup-uv 只出现在 fast-checks 与 unit-tests；gitleaks-action 只出现在 secret-scan。不得保留旧/混合 major、Node 20 fallback environment、重复/替换/旁路 action 或未受约束的同类使用点。
 
-关键输入与顺序 SHALL 保持：每个 checkout 在所属 job 的仓库消费者前执行；六个 setup-node 均保留 exact `{ node-version-file: .tool-versions, cache: npm }` 并在 `npm ci` 前完成，只缓存 npm package-manager data 而非 `node_modules`；两个 setup-uv 在 `uv sync` / `uv run` 前安装 uv并保持 GitHub-hosted cache lookup/restore 与成功 post lifecycle，按 cache hit/miss 允许 no-save/save 分支；secret-scan 的 checkout 保留 exact `fetch-depth: 0`，随后 gitleaks-action 只以 exact `GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}` 环境运行。所有原有 run steps、job timeout、constraints mirror、质量阈值、service harness、八项 aggregate dependencies及 failure/cancelled/skipped 拒绝语义 SHALL 保持不变。
+关键输入与顺序 SHALL 保持：每个 checkout 在所属 job 的仓库消费者前执行；七个 setup-node 均保留 exact `{ node-version-file: .tool-versions, cache: npm }` 并在 `npm ci` 前完成，只缓存 npm package-manager data 而非 `node_modules`；两个 setup-uv 在 `uv sync` / `uv run` 前安装 uv并保持 GitHub-hosted cache lookup/restore 与成功 post lifecycle，按 cache hit/miss 允许 no-save/save 分支；secret-scan 的 checkout 保留 exact `fetch-depth: 0`，随后 gitleaks-action 只以 exact `GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}` 环境运行。除 unit-tests 按「CI 接线与控制面同步」拆出 unit-tests-web 外，所有原有 run steps、job timeout、constraints mirror、质量阈值、service harness，以及九项 aggregate dependencies及 failure/cancelled/skipped 拒绝语义 SHALL 保持不变。
 
-source-derived CI oracle SHALL 从实际传入 workflow 解析全部八个 direct jobs，校验上述 action major/矩阵/输入/顺序和无 fallback/bypass 条件；任一旧 major、遗漏、混合、重复、替换、relocation、关键 input 漂移或 `ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION` 注入均 SHALL 使 `make test-guardrails` 非零。Mutation generator SHALL 绑定 scratch source，生成失败不得充当成功 rejection；不使用目标 action 的新增 unrelated job SHALL 继续可演进。
+source-derived CI oracle SHALL 从实际传入 workflow 解析全部九个 direct jobs，校验上述 action major/矩阵/输入/顺序和无 fallback/bypass 条件；任一旧 major、遗漏、混合、重复、替换、relocation、关键 input 漂移或 `ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION` 注入均 SHALL 使 `make test-guardrails` 非零。Mutation generator SHALL 绑定 scratch source，生成失败不得充当成功 rejection；不使用目标 action 的新增 unrelated job SHALL 继续可演进。
 
 #### Scenario: 所有 direct jobs 在 Node 24 action 上完成
 - **WHEN** 新 PR CI 在 GitHub-hosted `ubuntu-latest` 执行该 workflow
-- **THEN** fast-checks、unit-tests、anti-drift、secret-scan、sast、smoke、ui-walk、uid-isolation 与 `all-checks-passed` 均成功，所有 action post/cache steps 和原有下游 run steps实际执行
+- **THEN** fast-checks、unit-tests、unit-tests-web、anti-drift、secret-scan、sast、smoke、ui-walk、uid-isolation 与 `all-checks-passed` 均成功，所有 action post/cache steps 和原有下游 run steps实际执行
 - **AND** setup-node 从 `.tool-versions` 使用 Node 24.13.1，main step 完成 npm cache lookup/restore（允许 primary-key hit 或 miss）且 post step 成功；primary-key miss 时 SHALL 保存新 cache，hit 时 SHALL 允许明确的 `not saving cache` 结果；setup-uv 安装可执行 uv并完成其 hosted cache lifecycle，secret-scan 在 full-history checkout 后成功执行 gitleaks
 
 #### Scenario: Node 20 runtime annotation 完全消失
-- **WHEN** 查询同一 PR head SHA 上八个 direct jobs 的全部 check-run annotations 与 action step logs
+- **WHEN** 查询同一 PR head SHA 上九个 direct jobs 的全部 check-run annotations 与 action step logs
 - **THEN** `Node.js 20 is deprecated` annotation 为零，四种 action均不被列为 Node 20 target，且 workflow/job/step environment 中不存在 `ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION`
 - **AND** 项目 `.tool-versions` 的 Node 24 与 action自身的 `runs.using: node24` SHALL 作为两个独立证据记录，不得相互替代
 
@@ -249,4 +263,3 @@ Web unit-test assertions on DOM that changes only after a route transition commi
 #### Scenario: 块外裸 define 被拒
 - **WHEN** 在各组 `?=` 默认值行之前（如 `SHELL := /bin/bash` 之后）插入 `define SMOKE_BASE_URL` 或 `define UI_WALK_BASE_URL`，body 为 `http://evil`、以 `endef` 结束，然后运行契约检查
 - **THEN** 两种变异各自以非零退出，而未改动的 Makefile 检查退出 0
-
