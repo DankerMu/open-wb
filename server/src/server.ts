@@ -1,5 +1,6 @@
 /**
- * 生产唯一入口（Issue #7）：validate → DB-parent prepare → openDb → createApp → listen → 成功记录。
+ * 生产唯一入口（Issue #7）：validate → DB-parent prepare → openDb → createApp → 预览监听器 listen →
+ * listen → 托管布局与两个托管文件 → 预览缓存目录 → 成功记录 → 回收目录首扫（#1070）。
  *
  * ESM main guard：import 本模块只暴露纯配置 seam（resolveServerConfig），不产生任何
  * startup/signal/filesystem 副作用；只有直接执行本模块（import.meta.main）才进入主路径。
@@ -7,9 +8,18 @@
  * - 完整 env 配置在 SIGINT/SIGTERM 注册与任何文件系统/DB/listen 副作用之前同步校验；
  * - 配置失败只发一行 generic application stderr JSON，不安装 handler、不获取任何资源；
  * - 失败记录带 reason：失败所处的启动阶段（封闭枚举的源码字面量，#1203），不带 error 的任何内容；
- * - 一个 per-entry AbortController 随 listen 传递：ready/pre-bind 窗口内的 signal 也会
- *   中止绑定，不会留下一个逃过 releaseOwned 的后到 listener（Fastify 也因 aborted 跳过
- *   server.listen/在 abort 时 close，Node 原生 listen signal 同样中止未完成绑定）；
+ * - 一个 per-entry AbortController 随两次 listen 传递（预览监听器在先，同一个 signal）：
+ *   ready/pre-bind 窗口内的 signal 也会中止绑定，不会留下一个逃过 releaseOwned 的后到 listener
+ *   （Fastify 也因 aborted 跳过 server.listen/在 abort 时 close，Node 原生 listen signal 同样
+ *   中止未完成绑定）；两次都成功之后才换新的 controller；
+ * - 关停与失败清理同一条路：回收目录清理的定时器 → 预览监听器 → 主实例（其 preClose 里 runtime
+ *   退出，再关主监听器）→ DB。预览监听器先于 runtime 关：omp 只连主监听器上的模型代理，预览实例
+ *   没有 `/api` 与 `/v1`；
+ * - 已知残余（#1286 未闭合，owner D-23）：自本入口起，回收目录的 `sweep`、预览监听器的 `/w/` 与
+ *   启动时对 `work/` 的 `clearWork` 有了生产调用方，`sweep` 每次启动与每 6 小时无需任何用户动作就
+ *   走一遍。三者检查之后按路径操作的替换窗口原样存在，各自的陈述与证据等级见
+ *   `workspaces/trash.ts`、`preview/app.ts`、`preview/office-cache.ts` 的头注释；本入口只是调用方，
+ *   没有为它们加任何检查；
  * - 启动成功/失败发布都走 Promise 管理的单行 writer：同步 throw / write callback /
  *   stream error 三路只 settle 一次，error 事件被消费后才移除监听，绝不抛原始 stack。
  */
@@ -31,15 +41,26 @@ import type { FastifyInstance } from "fastify";
 import { type AgentSettings, resolveAgentSettings } from "./agent-config.js";
 import { type AssemblyDependencies, createApp, type SessionRuntime } from "./app.js";
 import { openDb } from "./core/db/index.js";
+import { ensureOwnedDir } from "./core/sandbox/dirs.js";
 import { deriveProxyBaseUrl, writeManagedModelsYml } from "./model-proxy/models-yml.js";
+import { createPreviewApp } from "./preview/app.js";
+import { createOfficeCleanup } from "./preview/office-cache.js";
+import { createPreviewTokens, type PreviewTokens } from "./preview/tokens.js";
 import { type PreviewSettings, resolvePreviewSettings } from "./preview-config.js";
 import { writeHostOverlay } from "./sessions/omp/host-overlay.js";
 import type { HandshakeTimeoutRecord } from "./sessions/omp/spawn-gate.js";
 import { ensureOmpStateLayout, ompAgentDir } from "./sessions/omp/state-layout.js";
 import type { TodoRejection } from "./sessions/store-todo.js";
 import { writeManagedLine } from "./startup-writer.js";
+import { createTrash } from "./workspaces/trash.js";
 
 const PRIVATE_DB_FILE_MODE = 0o600;
+/** 预览缓存目录的三个 mode（design D18）：根、`work`（omp 用户可写）、`pdf`。 */
+const PREVIEW_CACHE_DIR_MODE = 0o2750;
+const PREVIEW_WORK_DIR_MODE = 0o2770;
+const PREVIEW_PDF_DIR_MODE = 0o700;
+/** 回收目录的清理周期（design D22）：6 小时。 */
+const TRASH_SWEEP_INTERVAL_MS = 21_600_000;
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 3000;
@@ -103,10 +124,31 @@ export function sessionRuntimeOf(config: ServerConfig): SessionRuntime {
  * log 把每条握手超时记录、warn 把每条被丢弃的任务清单候选记录（不含任务文本）写成 application stderr 一行 JSON，
  * 写失败吞掉；
  * onError 把 supervisor 每次通知的保留故障写成一行 generic `session_fault`（#664）。
+ * 恒带按 `TRASH_RETENTION_DAYS` 建的回收目录服务（构造不碰文件系统）：删除路由与入口的周期清理用同一个。
+ * 给了 `preview`（令牌登记表与返回预览监听器已绑定端口的函数）才带预览依赖，签发端点由此注册。
  */
-export function appAssemblyOf(config: ServerConfig): AssemblyDependencies {
+export function appAssemblyOf(
+  config: ServerConfig,
+  preview?: { tokens: PreviewTokens; port: () => number },
+): AssemblyDependencies & { trash: ReturnType<typeof createTrash> } {
   return {
     runtime: sessionRuntimeOf(config),
+    trash: createTrash({
+      sandboxRoot: config.sandboxRoot,
+      retentionDays: config.trashRetentionDays,
+    }),
+    ...(preview === undefined
+      ? {}
+      : {
+          preview: {
+            tokens: preview.tokens,
+            port: preview.port,
+            ...(config.previewOrigin === undefined ? {} : { origin: config.previewOrigin }),
+            documentMaxBytes: config.previewDocumentMaxBytes,
+            // 入口尚未装配转换器（#1074）。
+            officeAvailable: false,
+          },
+        }),
     modelCatalog: config.modelCatalog,
     approvalMaxMode: config.approvalMaxMode,
     uploadMaxBytes: config.uploadMaxBytes,
@@ -202,10 +244,12 @@ type StartupStage =
   | "config"
   | "db"
   | "app"
+  | "preview_listen"
   | "listen"
   | "state_layout"
   | "models_yml"
   | "host_overlay"
+  | "preview_cache"
   | "publish";
 
 /** 失败记录：generic application stderr 一行，恰 event 与 reason 两个键；退出码已定。 */
@@ -242,10 +286,16 @@ if (import.meta.main) {
   runEntrypoint();
 }
 
-/** 入口拥有的一次性资源状态：app 与 DB 均只在此关闭，避免重复/二次关闭。 */
+/** 入口拥有的一次性资源状态：定时器、两个实例与 DB 均只在此关闭，避免重复/二次关闭。 */
 interface OwnedResources {
   controller: AbortController;
   app: FastifyInstance | undefined;
+  /** 预览监听器的实例：先于主实例 listen，先于主实例关闭。 */
+  preview: FastifyInstance | undefined;
+  /** 回收目录清理的周期定时器（已 unref）。 */
+  trashTimer: NodeJS.Timeout | undefined;
+  /** 一次关停无论几个监听器被强制回收，`listener_force_close` 至多一行。 */
+  forceCloseEmitted: boolean;
   db: DatabaseSync | undefined;
   releasing: Promise<void> | undefined;
   releaseFailed: boolean;
@@ -270,6 +320,9 @@ function runEntrypoint(): void {
   const owned: OwnedResources = {
     controller: new AbortController(),
     app: undefined,
+    preview: undefined,
+    trashTimer: undefined,
+    forceCloseEmitted: false,
     db: undefined,
     releasing: undefined,
     releaseFailed: false,
@@ -292,17 +345,37 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
     }
     owned.db = openDb(config.dbPath);
     owned.stage = "app";
+    // 启动失败一经判定，失败路径只留 generic 失败记录：强制回收不再发布。两个实例共用这一个回调。
+    const onListenerForceClose = (): void => {
+      if (!owned.failed && !owned.forceCloseEmitted) {
+        owned.forceCloseEmitted = true;
+        emitListenerForceClose();
+      }
+    };
+    // 预览监听器绑定之后才有值。主监听器在它之后才 listen，受理签发请求时这里已是绑定的端口。
+    let previewPort = 0;
+    const tokens = createPreviewTokens();
+    const assembly = appAssemblyOf(config, { tokens, port: () => previewPort });
     owned.app = createApp({
       db: owned.db,
       staticRoot: config.staticRoot,
-      // 启动失败一经判定，失败路径只留 generic 失败记录：强制回收不再发布。
-      onListenerForceClose: () => {
-        if (!owned.failed) {
-          emitListenerForceClose();
-        }
-      },
-      assembly: appAssemblyOf(config),
+      onListenerForceClose,
+      assembly,
     });
+    // 与主实例同一个 store 与沙箱 facade（越界由它写 sandbox.reject），同一张令牌登记表。
+    const { store, sandbox } = owned.app.workspaces;
+    owned.preview = createPreviewApp({ store, sandbox, tokens, onListenerForceClose });
+    owned.stage = "preview_listen";
+    await owned.preview.listen({
+      host: config.host,
+      port: config.previewPort,
+      signal: owned.controller.signal,
+    });
+    if (owned.signalReceived) {
+      await releaseOwned(owned);
+      return;
+    }
+    previewPort = boundAddressOf(owned.preview, "preview").port;
     owned.stage = "listen";
     await owned.app.listen({
       host: config.host,
@@ -314,7 +387,7 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
       await releaseOwned(owned);
       return;
     }
-    await publishStarted(owned, config);
+    await publishStarted(owned, config, assembly.trash);
   } catch {
     // 真实失败判定必须先于本失败路径的第一次 yield：一旦决定失败，signal 不得压制其
     // generic 发布，也不得把退出码降为 0（sticky failure）。
@@ -325,18 +398,22 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
   }
 }
 
-/** 成功记录：listen 之后建托管布局、写托管 models 与宿主 overlay，再发实际 bound address/port。 */
-async function publishStarted(owned: OwnedResources, config: ServerConfig): Promise<void> {
-  // publish 涵盖发布步骤里三个具名子步骤之外的一切，包括开头这两项核对。
+/**
+ * 成功记录：listen 之后建托管布局、写托管 models 与宿主 overlay、建预览缓存目录，再发主监听器
+ * 实际的 bound address/port；记录写出之后回收目录扫第一轮，入口不等它。
+ */
+async function publishStarted(
+  owned: OwnedResources,
+  config: ServerConfig,
+  trash: ReturnType<typeof createTrash>,
+): Promise<void> {
+  // publish 涵盖发布步骤里具名子步骤之外的一切，包括开头这两项核对。
   owned.stage = "publish";
   const app = owned.app;
   if (app === undefined) {
     throw new Error("startup owns no app instance");
   }
-  const address = app.server.address();
-  if (address === null || typeof address === "string") {
-    throw new Error("startup owns no bound address");
-  }
+  const address = boundAddressOf(app, "main");
   if (owned.signalReceived) {
     return;
   }
@@ -349,6 +426,8 @@ async function publishStarted(owned: OwnedResources, config: ServerConfig): Prom
   });
   owned.stage = "host_overlay";
   await writeHostOverlay(config.ompStateDir);
+  owned.stage = "preview_cache";
+  await preparePreviewCache(config.previewCacheDir);
   owned.stage = "publish";
   if (owned.signalReceived || owned.app === undefined) {
     return;
@@ -357,6 +436,10 @@ async function publishStarted(owned: OwnedResources, config: ServerConfig): Prom
   if (!sameAddress(published, address)) {
     throw new Error("startup bound address changed before publication");
   }
+  // 上面的 signalReceived 核对到这里是同步代码（没有 await）：releaseOwned 若已开始，上面已经返回；
+  // 之后才开始的 releaseOwned 会清掉这个定时器。
+  owned.trashTimer = setInterval(() => void trash.sweep(Date.now()), TRASH_SWEEP_INTERVAL_MS);
+  owned.trashTimer.unref();
   await writeManagedLine(
     process.stdout,
     `${JSON.stringify({
@@ -366,6 +449,32 @@ async function publishStarted(owned: OwnedResources, config: ServerConfig): Prom
       modules: STARTUP_MODULES,
     })}\n`,
   );
+  if (!owned.signalReceived) {
+    // 不等待：sweep 永不 reject，关停也不中止在途的一轮，进程待它落定后退出。
+    void trash.sweep(Date.now());
+  }
+}
+
+/**
+ * 预览缓存目录（office-preview「转换缓存」）：三个目录各自校正到精确 mode，再清空 `work` 的遗留。
+ * `ensureOwnedDir` 不递归，所以先建缺失的父目录（与 DB 父目录同一做法）。清空走不带 `ompUser` 的
+ * 分支：不提权、不 spawn，只删本进程删得掉的条目，`clearWork` 永不 reject。
+ */
+async function preparePreviewCache(cacheDir: string): Promise<void> {
+  mkdirSync(dirname(cacheDir), { recursive: true });
+  ensureOwnedDir(cacheDir, PREVIEW_CACHE_DIR_MODE);
+  ensureOwnedDir(join(cacheDir, "work"), PREVIEW_WORK_DIR_MODE);
+  ensureOwnedDir(join(cacheDir, "pdf"), PREVIEW_PDF_DIR_MODE);
+  await createOfficeCleanup({ cacheDir }).clearWork();
+}
+
+/** 已绑定的 TCP 地址；未绑定（含 listen 被 signal 中止后 resolve 的情形）即抛出。 */
+function boundAddressOf(instance: FastifyInstance, name: "main" | "preview"): AddressInfo {
+  const address = addressOf(instance);
+  if (address === undefined) {
+    throw new Error(`startup owns no bound ${name} address`);
+  }
+  return address;
 }
 
 function sameAddress(left: string | AddressInfo | null, right: AddressInfo): boolean {
@@ -398,21 +507,23 @@ function addressOf(app: FastifyInstance): AddressInfo | undefined {
 async function releaseOwned(owned: OwnedResources): Promise<void> {
   if (owned.releasing === undefined) {
     owned.releasing = (async () => {
-      await closeOwnedApp(owned);
+      clearInterval(owned.trashTimer);
+      await closeOwnedInstance(owned, "preview");
+      await closeOwnedInstance(owned, "app");
       closeOwnedDb(owned);
     })();
   }
   await owned.releasing;
 }
 
-async function closeOwnedApp(owned: OwnedResources): Promise<void> {
-  if (owned.app === undefined) {
+async function closeOwnedInstance(owned: OwnedResources, which: "preview" | "app"): Promise<void> {
+  const instance = owned[which];
+  if (instance === undefined) {
     return;
   }
-  const app = owned.app;
-  owned.app = undefined;
+  owned[which] = undefined;
   try {
-    await app.close();
+    await instance.close();
   } catch {
     owned.releaseFailed = true;
   }

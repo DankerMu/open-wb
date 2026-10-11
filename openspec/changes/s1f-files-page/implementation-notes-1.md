@@ -1,0 +1,926 @@
+# 实施注记·第一部分（s1f-files-page）
+
+#1049 至 #1318 各切片的注记，自 `implementation-notes.md` 原样移出（该文件超过单文件 1000 行门槛）；此后不再追加，新切片写进 `implementation-notes.md`。
+
+## 0.1（#1049）
+
+- 不触及 Critical Path：本刀只改规格文本；产物是上面的 D25 一格、0.1 下的核对记录、PR 描述，以及贴进 Epic #1048「对底记录」的逐条结果。
+- 编排者步骤（我未运行）：`$HOME/.nvm/versions/node/v24.13.1/bin/openspec validate s1f-files-page --strict --no-interactive` 与 `$HOME/.local/bin/openspec validate s1f-files-page --strict --no-interactive`，两个都要 0 个 ERROR，结果填进核对记录。
+- 表头：26 条 MODIFIED 与 1 条 REMOVED 全部逐字命中主规格；35 条 ADDED 在主规格里都不存在；没有 RENAMED。
+- 重叠数：D 的 MODIFIED / REMOVED 里恰有 13 条同名出现在 C 或 S1g 的归档 delta 中，与 D25「十三条」一致；主规格里自 D 起草（`792955f`）以来变过的也恰是这 13 条。
+- 与 S1g 同名的恰是 #1047 交接的五条；其中 sandbox-core 一条只有 S1g 改过，其余四条 C 与 S1g 都改过。
+- 逐条结果，http-service-skeleton 三条：「统一错误信封」「Shared agent module assembly」只含表列增量；「服务启动与装配」另有上面那一句漏列。
+- 逐条结果，其余九条 MODIFIED（sandbox-core、chat-web「会话页」、session-sidebar「会话条目菜单与重命名」、spa-shell、ui-foundation「组件分层」、chat-harness 两条、turn-artifacts 两条）：只含表列增量。
+- 逐条结果，「产物面板」：REMOVED 表头命中，主规格现有三个场景（含 C 的「临时空间会话的面板行」），delta 带 Reason / Migration。
+- 没有发现任何会覆盖前序文本的旧文本：S1g 的四个配置键与缺省值、`upload_too_large`、uploads 归属身份、`op=write` 各句与「写操作的逃逸向量」、空白发送一句都在 D 的 delta 里逐字存活。
+- S1g 归档前修订的四处（上传路由细节、迁移 040 回滚场景、全部自动确认框的遮罩、粘贴时文字优先）都在 S1g 的 ADDED 条文里，D 没有同名条文，不涉及。
+- 计数与代码一致：`server/src/http/errors.ts:51-67` 十五条归属身份；`server/src/core/errors/index.ts:6-21` 十六码；`server/src/core/sandbox/resolve.ts:14` 与 `index.ts:29` 的 `op` 是四成员；迁移到 `042_chat_message_attachments.sql`。
+- 表外核对成立，代码佐证：`web/src/features/chat/session-sidebar.tsx:2` 从 `@/components/ui/button` 导入 `Button`；`web/test/ui-layering.test.ts:58` 与 `:385` 登记了该文件。
+- 引用检查：D 全部文档里 186 处「capability「条文或场景名」」引用，在主规格与 D 的并集里都解析得到，没有悬空引用。
+- 行数漂移（进 PR 描述）：`api.ts` 是 778 行而非 729，离 800 只剩 22 行，「不再加方法」变成硬约束；`ui-walk-sessions.spec.ts` 是 681 而非 776；`md-render.ts` 797、`ui-walk-layout.ts` 793、`rest.ts` 416 无漂移。
+- issue 正文不必同步：没有任何计数或措辞变化（#1054、#1062、#1067、#1053、#1105、#1109、#1110、#1115 维持原文）。
+- 只读脚本留在 scratchpad 的 `tools/` 下：`rediff_d.py`（表头、场景超集、句子级 diff）、`order_d.py`（次序与底本是否变过）、`overlap_d.py`（重叠数）、`xref_d.py`（引用检查）；0.2（#1124）可直接复用。
+
+## 2.1（#1076）
+
+- 不触及 Critical Path：`preview.tsx` 是纯展示组件，不取数、不处理路径、不碰 `sandbox.resolve`；单席评审即可。本刀不加 FL 行：`docs/acceptance/functional-checklist.md:189-192`「文件（FL）」现为空表，首批行（含 Markdown / CSV / 图片 / 源码预览）归 `tasks.md:188` 的 3.6，issue 的 PR Boundary 也不含该文件；行为与文案不变、只有观感变化这一点记入偏离记录。
+- 行号漂移（记入偏离记录）：`chat-steps.test.tsx:148` 实为 `:137`，用例仍在（`:132` 起），所以改成 `not.toContain(".files-md")` 是要做的事，不是「无事可做」。`ui-walk.spec.ts` 实为 622 行（非 594）：`.files-code` 在 `:266`，`.files-table` 在 `:275`，列表符号断言在 `:255-261`，注释在 `:254`。其余点名行号全部成立：`preview.test.tsx:159`、`:195-204`、`:496`、`:515`；`files-page.test.tsx:506-512`、`:537-541`；`files-empty-layout.test.tsx:71-73`、`:174-181`、`:190-194`；`chat-messages.test.tsx:185-187`；`ui-tokens.test.ts:76-87`；`ui-walk-layout.ts:304-311`。
+- 任务 grep 在 `origin/master` 的完整处置，等价改写：`preview.test.tsx:159`、`:496`、`:515`、`:195-204`（标题一并改，不再含 `ui-btn`）；`files-page.test.tsx:506`、`:511`、`:512`；`files-empty-layout.test.tsx:72`；`chat-steps.test.tsx:137`；`ui-walk.spec.ts:266`、`:275` 与 `:254` 的注释。`web/e2e/**` 其余文件、`scripts/`、冒烟都没有预览选择器，也没有截图比对。
+- 同一 grep 的其余命中都不由 `preview.tsx` 渲染，旧名保留、本刀不动：`files-empty-layout.test.tsx:22/39/48/82`（3.1）与 `:174-181`（读 `files.css`，3.3）；`files-overlays.test.tsx:220-236`（2.2 / 3.x）；`ui-walk-layout.ts:302-310`（3.5）；`ui-tokens.test.ts:83`（3.3）；`chat-page-search.test.tsx:569`、`chat-page.test.tsx:363`、`functional-checklist.test.ts:274/281`、`ui-dialog` / `ui-empty-state` / `ui-form` / `ui-guardrails` 各测试（冻结基元自身或无关）。
+- `ui-walk-layout.ts:304-311` 的 `.ui-btn` 探针不受影响：`新建` 在 `aside` 里，DOM 上先于预览的 `section`（`tree.tsx:262-277`），`.first()` 取到的始终是它，与调用次序无关。
+- `preview.tsx`（现 204 行，预计不超过 260）：导入改为 `import { Button } from "@/components/ui/button"` 加 `import { Icon } from "../../ui/index.js"`。拷入层 `Button` 不带默认 `type`（`components/ui/button.tsx:43-64`；冻结区是 `type ?? "button"`），必须显式写 `type="button"`，并用 `variant="secondary"`（高度与旧 `md` 相同）。不覆盖它自带的 `data-slot="button"`，拷入层文件零改动。
+- `data-slot` 落点：`header` 用 `preview-header`，其下两个 `p` 用 `preview-path`、`preview-meta`；`CodeView` 外层 `div` 用 `preview-code`，`CsvTable` 外层 `div` 用 `preview-table`；`RenderedMarkdownDocument` 的 `div` 用 `preview-markdown` 并保留 `data-markdown-body=""`；不支持态的块用 `empty-state`，副行 `p` 用 `empty-state-desc`。三个滚动容器都带 `overflow-auto flex-1 min-h-0`。保留 `article`、`table`、`role="alert"` 的结构，以及 `PreviewBody key={path}`、`RenderedMarkdownDocument key={text}`。
+- 不支持态在文件内就地渲染（不导出、不建新文件；共用小组件是 3.1 的事）。`files.css:251-257` 的两条是承重规则，要搬过来：块上 `min-w-0`，副行 `[overflow-wrap:anywhere]`。`files-empty-layout.test.tsx:176-181` 之后读的是死规则，不再是证据。
+- Markdown 排版要把 `files.css:266-341` 整段搬成 `preview-markdown` 容器上的后代变体（先例 `quick-login.tsx:41` 的 `[&_b]:…`；仓库没有 typography 插件，不写 `prose`）。内容：容器的内边距、最大宽度、`[overflow-wrap:anywhere]`；`h1`–`h4` 的字号、外边距、`font-bold`；`p` / `ul` / `ol` 的下边距；`[&_ul]:list-disc [&_ol]:list-decimal` 加左内边距；`li`、`code`、`pre`、`pre code`、`table`、`th` / `td`。类串放模块级不导出常量。不写 `list-none`（`ui-layering.test.ts:639-657` 会要求 `role="list"`）。
+- 其余样式对等：等宽字体用 `font-(family-name:--wb-mono)`（`font-mono` 不是 `--wb-mono`）；窄屏用既有的 `narrow:` 变体（`theme.css:17`），头部 `narrow:flex-wrap narrow:items-start`，元数据 `ml-auto narrow:ml-0`；`ui-alert` / `ui-muted` 换成 token 类（先例 `approval-card.tsx:138`，如 `text-(--wb-status-error-text) bg-(--wb-status-error-soft-bg)`、`text-muted-foreground`）。不写 hex / rgba / `--wb-palette-`（`ui-guardrails.test.ts:47-75`）。
+- 共享文件的精确改动，供 2.2 排序：`ui-layering.test.ts`（718 行）在 `:88` 与 `:415` 两处的 `workspace-list.ts` 之后各插一行 `"web/src/features/files/preview.tsx",`，不加注释行。这是 2.1 与 2.2 唯一共同触碰的文件；2.2 在同两处紧挨着插 `dialogs.tsx`，rebase 各一行，3.4 把两行换成目录。`legacy.css` 只删 `:101-113`（注释加三条规则，其中 `:103` 与 `:107` 是同一选择器的两条）。`ui-walk.spec.ts` 只改 `:254`、`:266`、`:275` 三行，不增行。
+- 必须留下的：`files.css` 全文不动。其中 `.files-preview`（`:178`）与 `.files-preview-body`（`:234`）不是死规则，`tree.tsx:275`、`:288` 仍命中，issue 说的「死规则」只对 `preview.tsx` 自己的类成立。`legacy.css:9` 的 `@import` 与 `:115-128` 的 `.ui-alert` / `.ui-muted` 留着（`tree.tsx`、`page.tsx`、`dialogs.tsx` 与会话页在用）。`emptyStateOf` 帮手、`tree.tsx`、`page.tsx`、`dialogs.tsx`、`markdown-view.tsx`、冻结区都不动。
+- 断言写法：`files-empty-layout.test.tsx:72` 改为 `unsupported.closest('[data-slot="empty-state"]')` 先断言非空，再取其内的 `[data-slot="empty-state-desc"]`，不再经 `emptyStateOf`。`files-page.test.tsx:505-509` 保留 `waitFor`。`preview.test.tsx` 的按钮用例断言两种模式下的可访问名、`getAttribute("type") === "button"`、`className` 不匹配 `/\bui-btn/`。经页面渲染取预览正文的断言一律 `findBy` / `waitFor`。
+- 本刀可证的规格范围：files-web「修改时间本地格式」全部可证；「预览状态」不含 `下载 <文件名>` 链接（组 17）；ui-primitives「迁移后行为不回归」只证 `查看源码` / `渲染视图` 一项（其余四个按钮归 2.2 与组 3）；ui-foundation「文件页整目录已迁移」本刀不可证（3.4 之前是单文件条目）。
+- 变异表（进 PR 描述）：
+- 变异 → 预期判红：去掉 `preview-meta` → `preview.test.tsx` 修改时间格式用例；去掉 `preview-header` / `preview-path` → `files-page.test.tsx` 预览头用例；`查看源码` 改回冻结区 `Button` → `preview.test.tsx` 按钮用例加 `ui-layering.test.ts` 的现状用例；去掉 `type="button"` → 同一按钮用例；去掉 `empty-state-desc` → `preview.test.tsx` 两条不支持态用例加 `files-empty-layout` 的不支持态用例；去掉 `data-markdown-body` → `preview.test.tsx` 的 Markdown 用例抛错；保留 `legacy.css` 三条规则 → `chat-steps.test.tsx` 的 `.files-md` 用例。
+- 只有走查能看见的变异（jsdom 不可见）：去掉 `[&_ul]:list-disc` → `ui-walk.spec.ts` 的列表符号断言；去掉 `preview-code` / `preview-table` 的 `overflow-auto` → 走查的 `expectScrollableX`。预期不可观测（无断言，归 3.6 的 FL 行人工走查）：去掉 `narrow:` 类、`min-w-0`、标题字重。
+
+## 2.2、2.3（#1077）
+
+- 前提与边界：不触及任何 Critical Path（纯前端展示层），一个评审席即可；不在 1.1 / 1.2 / 1.3 挡住的集合里；0.1（#1049）与 2.1（#1076）在 origin/master（7e0e6d3）都未合入，按约定视为先合；`implementation-notes.md` 尚不存在。
+- 行号漂移：`files-overlays.test.tsx`（263 行）的全部行号、`dialogs.tsx:37-52`、`web/src/ui/dialog.tsx:68-81,164-171`、`web/src/components/ui/dialog.tsx:61-70`、`ui-walk-layout.ts:304-311`、`tree.tsx` 644 行都仍成立；只有 `web/e2e/ui-walk.spec.ts` 漂了（594 → 622 行）：`205-219` → `:226-238`，`262-264` → `:284-286`，`createWalkOutWhileHeld` `286-301` → `:308-324`，`位置` 的 `selectOption` `288` → `:310`，`关闭` `toBeFocused` `294` → `:316`，Tab 循环 `295-298` → `:317-320`；走查文件本刀不改，只在偏离记录里改引用。
+- 任务 grep 的当前完整命中（10 条，全在 `files-overlays.test.tsx`）：`:75`、`:124` `aria-modal` 原样保留；`:133`、`:208` `.ui-dialog-overlay` → `[data-slot="dialog-overlay"]`（等价改写，兄弟节点遮罩的按压已由 `chat-page-session-rename-pin.test.tsx:452` 证明可行）；`:220` 标题、`:223`、`:228` 旧名暂留到 3.1 / 3.2；`:233`、`:236` 改为 `className` 不含 `ui-btn`；`:255` 的 `primitiveImport` 帮手保留，`:256-258` 按上面的替换文本改，`:259-261` 不动。
+- 放宽到 `web/test web/e2e` 无新增依赖：`files-page.test.tsx:182-205,260-292`、`files-errors.test.tsx:111-115,150-153`、`files-concurrency.test.tsx:28-44`、`files-logical-path.test.tsx:131-139,217-222`、`files-empty-layout.test.tsx:109-113` 都只按角色、标签与 `option` 取元素；`web/test/ui-dialog*.test.tsx` 的 `.ui-dialog*` 属冻结区自测，`web/e2e/ui-walk-steps.ts:164` 属会话页，都不动；`scripts`、`Makefile`、smoke 零命中。
+- `dialogs.tsx`（220 → 约 210–240 行）导入：`@/components/ui/dialog` 的 `Dialog, DialogContent, DialogHeader, DialogTitle`，`@/components/ui/button`、`input`、`label`，冻结区只留 `useEscapeFallback`；不直接导入 `radix-ui`（`ui-guardrails.test.ts:99`）、不导入 `useToast`；两个对话框共用文件内一个不导出的外框组件（标题、`pending`、`returnFocus`、初始焦点 ref、`onCancel`），焦点逻辑只写一份，导出仍只有 `WorkspaceDialog`、`DirectoryDialog`，props 不变（`page.tsx`、`tree.tsx` 调用处不改）。
+- 外框照 `rename-dialog.tsx:74-110` 的写法：`<Dialog open onOpenChange={cancelOnClose(onCancel)}>`；`DialogContent` 传 `aria-modal="true"`、`aria-describedby={undefined}`、`ref={fallback.ref}`、`onEscapeKeyDown` / `onKeyDown` 取自 `useEscapeFallback({ canClose: true, onOpenChange })`、`onOpenAutoFocus`（`preventDefault` 后聚焦 `工作空间名称` / `位置` 的 ref）、`onCloseAutoFocus`（`preventDefault` 后 `returnFocus.current?.focus({ preventScroll: true })`）；`DialogTitle` 必须有（对话框的可访问名靠它）；Escape、右上 `关闭`、遮罩都只经 `onOpenChange(false)` → `onCancel`，挂起期不锁关闭（等同取消等待）。
+- 挂起期焦点：文件内一个 `useLayoutEffect(…, [pending])`；`pending` 为真且活动元素是 `null` / `body` / 内容内已禁用控件时，聚焦 `fallback.ref.current.querySelector('[data-slot="dialog-close"]')`，其余不动；两个对话框都不会以 `pending=true` 挂载，所以不需要 `wasBusy` ref。
+- 表单：`取消` 必须显式 `type="button"`——冻结区 `Button` 默认 `button`（`web/src/ui/button.tsx:34`），拷入层 `Button` 没有默认，漏写会让 `取消` 变成表单的默认提交按钮（输入框里按 Enter 等于取消，点 `取消` 还会再触发一次提交）；`创建` 是唯一 `type="submit"` 且 `disabled={pending}`，不写任何键盘处理；不加原生 `required`（`files-page.test.tsx:261-262` 靠空名提交拿到 `请输入名称`）；表单保留 `aria-busy`，挂起说明 `role="status"` 与错误 `role="alert"` 文案逐字不变，错误只在对话框内显示、失败后对话框不关。
+- 字段：`useId` + `<Label htmlFor>` + `<Input id>`（先例 `login-form.tsx:17-18,87`），不用包裹式 label（拷入层 `Label` 是横排 flex）；`位置` 仍是原生 `<select id>`，Tailwind 类写在本文件；`将在你的沙箱内创建同名目录` 仍是普通 `<p>`；`files-dialog-form`、`files-field`、`files-dialog-actions`、`files-status`、`ui-alert`、`ui-muted` 不再使用，`files.css:492-493,555-583` 成死规则留到 3.3，`files.css` 本刀不改。
+- `CreationMenu` 连同 `CreationMenuProps` 搬到 `tree.tsx`（644 → 约 667 行）：`tree.tsx:3` 的导入加 `Button`、`Menu`，`:4` 去掉 `CreationMenu`；函数体一行不改，但要去掉 `export`（只有 `tree.tsx:266` 调用，留着会被 knip 判未引用导出）——记入偏离记录；`files-empty-layout.test.tsx:183-188`、`files-page.test.tsx:536-541` 读 `tree.tsx` 源码的断言不受影响。
+- 与 2.1 的共享行只有 `web/test/ui-layering.test.ts` 的 `MIGRATED_AREAS`（`:13-89`）与清单断言（`:341-416`）：两刀各在两处列表末尾（`"web/src/features/chat/workspace-list.ts"` 之后）追加一行，按字母序；2.2 rebase 到 2.1 之后，两处末尾都须读作 `…/chat/workspace-list.ts`、`web/src/features/files/dialogs.tsx`、`web/src/features/files/preview.tsx`，即 `dialogs.tsx` 插在 2.1 的 `preview.tsx` 之前；除此之外没有重叠（2.2 不碰 CSS、走查、`preview.tsx`）。
+- `files-overlays.test.tsx` 的新增断言：O8 对话框半条在「不含 `ui-btn`」「`创建` 为 submit」之外，加 `取消` 的 `type` 为 `button`，以及「请求挂起期间禁用」（给 O8 的 `/api/workspaces` 换成 `workspaceRoute([workspace], () => held.promise)`，填名、点 `创建`、`waitFor(create.disabled)`，结束前点 `取消`）；O1–O6、O9 一行不改。
+- 变异表（2.3 分摊到本刀的四条在前）：(1) 把 `位置` 的初始焦点 ref 挂到 `文件夹名称` → O3 `:126` 红；(2) 去掉 `aria-modal` → O1 `:75`、O3 `:124` 红；(3) `CreationMenu` 留在 `dialogs.tsx` → 分层守卫「web/src 现状」与 O7 新断言红；(4) 去掉挂起期移焦点，或改成聚焦首个可用控件 → O4 `:152`、O5 `:173` 红（jsdom 走已禁用控件分支），走查 `ui-walk.spec.ts:316` 红（Chromium 走 `body` 分支，jsdom 观察不到）；另加：去掉 `取消` 的 `type="button"` → O8 新断言与 O2 红；去掉 `onCloseAutoFocus` → O1 `:82`、O2 `:114`、O3 `:129` 红；去掉 `disabled={pending}` → O4 `:151`、O5 `:172` 红。
+- 预计观察不到的变异与偏离记录：整段删掉 `onOpenAutoFocus` 不会红——拷入层把 `关闭` 放在 `children` 之后，Radix 默认聚焦的首个可聚焦控件本来就是 `位置` / `工作空间名称`，所以变异 (1) 必须写成「挪到别的控件」；去掉 `useEscapeFallback` 在 `files-*` 用例里也不会红（没有轻提示在场）。偏离记录写：Tab 顺序里 `关闭` 由最前变最后；宽度用拷入层默认、不再是冻结区的中号；`returnFocus.current` 为空时不再回落到打开者（两条入口都传真实触发器）；`export` 去掉；走查行号改引用。功能验收清单本刀不加行——「文件（FL）」节现为空表，首批行由 3.6 随组 3 加，那时 `新建工作空间` / `新建文件夹` 两行要覆盖四种取消类关闭、挂起说明与同名冲突提示留在对话框内。
+
+## 4.1–4.3（#1053）
+
+- **Critical Path：沙箱与文件边界**（`server/src/core/sandbox/resolve.ts`、`index.ts`）；PR 标注请求白盒审查，分配两个评审席；PR 描述带逐条变异表。
+- 漂移核对：issue 的「Current behavior」与代码一致——`resolve.ts` 78 行，`op` 联合在 `:14`，末段判定门在 `:31`（`createsEntry(op) && !isValidMkdirTerminal(...)`），私有谓词在 `:56-59`；`index.ts` 50 行，联合在 `:29`，审计在 `:39-45`；`sandbox-resolve.test.ts` 315 行、`sandbox-facade.test.ts` 258 行。无漂移。
+- 必须改的类型点恰三处：`resolve.ts:14`、`index.ts:29`、`server/test/sandbox-resolve.test.ts:90`（`expectRejected` 的 `op` 参数，不改则 tsc TS2345）。其余不动：`workspaces/rest.ts:23` 用 `ReturnType<typeof createSandbox>` 自动变宽；`sessions/prompt-attachments.ts:24` 的窄端口 `op:"read"` 仍可赋值；`workspaces/store.ts:307`、`sessions/undo.ts:270` 直接调纯 `resolve` 且恒为 `"read"`。
+- 仓库里没有对 `op` 的 `switch`、穷尽表或「四种 op」计数断言；钉住 `op` 集合的只有两个沙箱测试文件和 `smoke/files.hurl:81,159`（只断言 `list`、`write`，本刀不动）。
+- 产品改动只有三点：两处联合加 `"delete" | "move"`；`:58` 的析取加这两个成员；`:56` 的注释改写（「都在目标位置新建条目」对新 op 不成立）。私有谓词 `createsEntry` 改名为 `namesEntry` 之类，不导出。不要内联进 `resolve`（PR #1138 记录内联会让 Biome 认知复杂度从 15 升到 16），不要做 per-op 表，不要抽 `SandboxOp` 导出类型。
+- 契约，符号链接：任一已存在分量（含末段）经 `lstat` 为符号链接即拒绝，与 `op` 无关。`delete`/`move` 对「末段是链接」是拒绝，不是「作用于链接本身」（file-operations「拒绝项」`path=link` → 403、「不能经符号链接移出」`{from:"link"}` → 403）。逐分量循环 `:36-48` 一行不改。
+- 契约，目标与 `move`：`resolve` 不判定目标是否存在、是什么类型（`regular-file/child` 对新 op 返回 `ok:true`，由路由回 404）。移动的源与目标各解析一次，都用 `op=move`，目标不复用 `write`/`mkdir`。空串对两个 op 都被末段规则拒绝，这是「根不能被删除、移动或作为移动目标」的唯一防线。
+- 契约，拒绝原因：`reason` 是自由字符串，不是封闭枚举，本刀不新增值。现有六个是 `cannot resolve sandbox root`(:20)、`path contains a NUL byte`(:24)、`path is absolute`(:27)、`mkdir name is invalid`(:32)、`path is not inside the sandbox root`(:38,:46)、`path escapes the sandbox root`(:51)。`mount` 是 `workspaces/snapshots.ts:60` 的快照 `SkipReason`，与沙箱无关。
+- 偏离记录一：新 op 被末段规则拒绝时 `detail.reason` 仍是 `mkdir name is invalid`。沿 PR #1138 先例不改文案；全仓无人断言该字符串（测试只用 `/\S/`）。
+- 契约，`resolve` 不做的事（不加规则，记偏离）：不折叠大小写，不做 Unicode 规范化（字节透传，先例 `uploads/图 (1).png`），除 NUL 外不拒控制字符，没有点开头名字的规则，不看 `dev`/挂载点，不预检名字长度。超过 255 字节的分量在 `lstat` 抛 `ENAMETOOLONG` 后落到 `:46` 被拒，即 403 加审计，既有用例 `:293-304` 已钉。
+- 契约，回收目录与临时空间：`<SANDBOX_ROOT>/.trash` 在任何空间根之外，`../.trash` 被 `..` 规则拒绝，经 `resolve` 不可寻址；空间内名叫 `.trash` 的条目只是普通条目。临时空间根 `tmp-<id>` 走同一个 `rootOf`，无特殊分支，它的根同样由空串规则保护。
+- 审计：`sandbox.reject` 只在 facade 写（`index.ts:39-45`，字段 `kind`、`actorId`、`workspaceId`、`title`、`detail:{relPath, op, reason}`，先 emit 后抛 `sandbox_denied`）；纯 `resolve` 不写。新 op 靠 `detail.op` 原样带出，产品代码除类型外零改动。`rootOf` 为 null 时在 `index.ts:31-33` 抛 `not_found`，先于路径检查且无审计，与 `op` 无关。
+- `sandbox-resolve.test.ts` 新增四个 `it`（沿用 `createLayout`、`expectRejected`、前后 `snapshotTree` 比对，以 `for (const op of ["delete","move"] as const)` 循环）：
+- (a) 七个与 op 无关的向量：`../x`、`a/../../x`、`/etc/passwd`、`a\0b`、`outside-link`、`linkdir/child`、`dangling`。
+- (b) 标题含 `the workspace root cannot be deleted`，断言空串对 `delete` 与 `move` 都被拒；它是场景的第八个向量，也是 4.3 第一条变异的落点。
+- (c) `a`、`a/b/c.md` 对两个 op 返回精确的 `absPath`。
+- (d) `a/.`、`a/..`、`a/b\c`、`a/` 对两个 op 被拒。
+- `sandbox-resolve.test.ts` 既有用例只追加，不改标题、不削弱断言：`:266` 的 `regular-file/child` 用例加 `delete`、`move` 两条 `ok:true`，以及 `regular-file/child/..` 对 `delete` 的拒绝。另建议在 (a) 加 `a/../a` 对两个 op 的拒绝（规格外的补充行，记偏离记录二）：它是新 op 下「根内的 `..`」的唯一见证，没有它变异 M5 无法归到新 op。`write` 的六个既有用例（`:165-252`）逐字不动。
+- `sandbox-facade.test.ts` 只在两个既有 `it` 里追加：`:102` 的审计用例末尾加一个循环 `[["", "delete"], ["a/", "move"]] as const`，各断言恰新增一条事件（长度 5、6）且 `detail` 为 `{relPath, op, reason: /\S/}`；`:58` 的 `not_found` 循环对 `"delete"`、`"move"` 各加一次调用（仍无审计）。不单开同形 `it`（PR #1138 记录会多出 4 个 jscpd clone；`.jscpd.json` 阈值 3%、无忽略项）。
+- 门槛：改后 `resolve.ts` 约 80 行、`index.ts` 50 行、两个测试约 390 与 280 行，远低于 800。knip 无影响：没有新导出，联合变宽不产生未引用导出，与 10.1 的处理相同；`delete`/`move` 在 #1060、#1062 之前没有调用方，只有这两个测试文件能观察到。
+- 实现前的红：tsc TS2345（三处联合）。运行期只有与 op 相关的八条断言红，即空串、`a/.`、`a/b\c`、`a/` 各对两个 op；vitest 不做类型检查。其余向量在旧代码下已是绿的，PR 描述照 #1138 的写法如实说明。
+- 变异表（4.3 两条加补充）：
+- M1 谓词去掉 `delete`（空串放行）→ (b)、(d) 的 delete 行与 facade 的 `["", "delete"]` 红。
+- M2 谓词去掉 `move` → (d) 的 `a/` 等 move 行、(b) 的 move 行与 facade 的 `["a/", "move"]` 红。
+- M3 `inspectExisting` 恒返回 true → (a) 的三个符号链接行红；与 op 无关，既有用例同时红。
+- M4 去掉 `:26` 的绝对路径判定 → (a) 的 `/etc/passwd` 红（解析为 `<root>/etc/passwd`）。
+- M5 去掉 `:37` 的 `..` 判定 → 仅 `a/../a` 行与既有 `regular-file/child/..`（read）红；`../x`、`a/../../x` 仍被 `:50` 的边界匹配拒绝。
+- M6 去掉 `:50` 的边界匹配 → 不可观察（有 `..` 与符号链接两条规则在前，属纵深防御）。
+- M7 去掉 `:23` 的 NUL 判定 → 预期不可观察（`lstatSync` 对含 NUL 的路径抛错，落到 `:46` 仍被拒，只是原因不同；测试不钉原因）。
+- M8 facade 把审计挪到抛出之后或去掉 → `:102` 用例的长度断言红。
+- 不新增也不修改功能验收清单行：纯服务端，没有路由使用新 op，无用户可见变化。
+
+## 5.1–5.3（#1054）
+
+- 不触及 Critical Path：纯解析、无消费方、不放宽任何边界，`sandbox.resolve`、omp 子进程、审批档位都不动；一个评审席即可。服务端纯函数，无用户可见变化，no checklist rows；文档不动（十二键一览归 28.1 的 ADR-0014 运维一节，#1118）。
+- 落点：新文件 `server/src/preview-config.ts`，沿 `model-catalog.ts` 的先例；导出 `interface PreviewSettings`（上表十二字段，两个可选）与 `resolvePreviewSettings(env: Record<string, string | undefined>, repoRoot: string): PreviewSettings`，无任何 fs / IO。`server/src/server.ts:57` 改为 `ServerConfig extends AgentSettings, PreviewSettings`，`resolveServerConfig` 末尾展开它，`:65` 注释改成「三十五项——四项自有，agent 十九项，预览与文件十二项」。`appAssemblyOf`、`sessionRuntimeOf`、`app.ts`、启动次序都不动。
+- 复用：`server/src/agent-config.ts`（223 行）把 `resolvePositiveInteger` 与 `resolveOwnedPath` 改为导出，由 `preview-config.ts` 导入，不反向导入。knip 不报：两个函数有导入方，接口成员不计（S1g 2.1 先例）。`DEFAULT_*` 常量不导出，测试写规格字面量。
+- 逐键实现：八个数值键用 `resolvePositiveInteger`；`PREVIEW_CACHE_DIR` 用 `resolveOwnedPath`；`PREVIEW_PORT` 另写一个 `0..65535` 的函数（正则 `/^[0-9]+$/u` 加前导零判定加范围）；`PREVIEW_ORIGIN` 用正则字面量 `/^https?:\/\/[^/?#\s]+$/u`（不用 `new RegExp`，不 trim，不加 `i`）；`OFFICE_BIN` 用 `isAbsolute(raw)`，不绑 repo root、不规范化。可选键缺席时对象上不出现该键（`exactOptionalPropertyTypes`，同 `ompUser`）。
+- 错误文本逐字钉住（与输入无关）：数值键沿用 `<KEY> must be a canonical ASCII decimal` 与 `<KEY> must be within 1..2147483647`；`PREVIEW_PORT must be a canonical ASCII decimal` 与 `PREVIEW_PORT must be within 0..65535`；`PREVIEW_ORIGIN must be a scheme and authority only`（空串同文）；`PREVIEW_CACHE_DIR must not be empty`；`OFFICE_BIN must be an absolute path`（空串同文）。
+- 漂移一：`server/test/server-config.test.ts` 已 771 行，不得加行。新建 `server/test/preview-config.test.ts`，放缺省、覆盖、非法值，以及「Pure source and compiled configuration identity」的十二键部分（`SOURCE_ENTRY` 与 `DIST_ENTRY` 两个 URL、`process.chdir(tmpdir())` 下，缺省与覆盖 `toEqual`）。
+- 漂移二：5.2 点名的 `server-entry-silent.test.ts`（60 行）只有 import-without-main 一例，没有「非法配置路径」，不改它。编译入口用例照 #989 落在 `server/test/omp-max-processes-config.test.ts`（338 行）第四个 `describe`，复用其 `scratch`、`refused`、`FAILED_RECORD`、`NODE_SQLITE_WARNING`。
+- 漂移三：不存在「按键数断言」的既有用例。`git grep` 二十三 / twenty-three 在代码里只中 `server/src/server.ts:65` 一条注释；`server-config.test.ts` 的 `toEqual(base)` 类断言在加键后保持绿。因此没有既有测试必须改，计数「三十五」不被任何机械检查钉住，issue 里 Width exception 的「同时变红」不成立，写进偏离记录。
+- 解析层用例：(a) `{}` 下十二字段逐个 `toBe` 缺省，`Object.hasOwn` 对 `previewOrigin`、`officeBin` 为 false，显式 `undefined` 同缺省；(b) 十二键全给非缺省（`PREVIEW_ORIGIN=https://preview.example.test`、relative `PREVIEW_CACHE_DIR=cache/p` 得 `join(REPO_ROOT,"cache","p")`、`OFFICE_BIN=/opt/x/../soffice` 原样）后，与 base 不同的字段集合恰为这十二个；(c) 逐键单独覆盖时其余十一项仍为缺省；(d) 边界：`PREVIEW_PORT` 显式 `"0"`、`"1"`、`"65535"` 被接受，八个数值键的 `"1"` 与 `"2147483647"` 被接受，`PREVIEW_ORIGIN` 接受 `http://127.0.0.1:8080` 与 `https://[::1]:9443`。
+- 非法值表按规格逐键逐值共 70 例（6 + 5 + 1 + 2 + 8×7），每例用 `expectKeyOnlyMessage` 式的整句相等加 `toContain(key)`；带哨兵的值另断言 message 不含它（空串跳过，先例在 `omp-max-processes-config.test.ts:127`）。规格之外补：`PREVIEW_PORT` 的 `" 1"`、`"+1"`、`"1e2"`、`"00"`；`PREVIEW_ORIGIN` 的 `https://`、`HTTPS://a.test`、`" https://a.test"`、`https://a.test?x`、`https://a.test#f`、`"https://a.test\n"`、`https://a b`；`OFFICE_BIN` 的 `./soffice`、`bin/soffice`。
+- 编译入口用例：同一张 70 例表（就地 `flatMap` 生成，另一条 `toHaveLength(70)`），每例断言 `{code:1, signal:null}`、stdout 为空、stderr 去掉 sqlite 警告后整行等于 `{"event":"server_start_failed","reason":"config"}\n` 且不含键名、`db` / `state` / `sandbox` / `bin` 与 `compiled.root/var` 都不存在、端口拒连；非空取值另断言 stderr 不含该值。5.2 写「两三个样本」，但场景 THEN 写「每一例」，按场景与 #989 先例取全表，记入偏离记录。
+- 规格没写的分支，取最简处理并记偏离：`PREVIEW_PORT` 等于 `PORT` 不在配置层拒绝（留给 13.1 的 `preview_listen` 失败）；`PREVIEW_ORIGIN` 只按正则，不做 `new URL` 解析；`PREVIEW_CACHE_DIR` 不查与 `SANDBOX_ROOT` / `OMP_STATE_DIR` 的包含关系；`OFFICE_BIN` 不查存在性、空白与 NUL；多键同时非法时点名哪一个不保证。
+- 场景「预览与文件键的缺省与覆盖」里「预览监听器绑定端口」与 `server_started` 四键属 13.2（#1070），本刀只做「解析出的配置」半边，PR 描述写明。
+- 守卫：`preview-config.ts` 约 90 行，`agent-config.ts` 只加两个 `export`，`omp-max-processes-config.test.ts` 约到 400 行，新测试文件约 250 行，都远离 800。jscpd 若把端口函数判为与 `server.ts` 的 `resolvePort` 重复，就在 `agent-config.ts` 抽一个带上下界的整数解析函数，由 `resolvePositiveInteger` 与端口共用，既有两句错误文本不变；不加 ignore。测试里不出现真实主机名、IP 或像密钥的串。
+- 变异表（进 PR 描述；红在 `preview-config.test.ts` 的称「解析层」，红在 `omp-max-processes-config.test.ts` 的称「入口层」）：
+- 任一缺省值改动 → 解析层 (a)。
+- `PREVIEW_PORT` 拒绝 `0` → 解析层 (d) 的显式 `"0"`。5.3 写「缺省用例判红」不准：未设置时不经过范围判定。
+- `PREVIEW_PORT` 上界改 65536，或接受 `01` → 解析层非法值 `65536` / `01`。
+- 数值键下界改 0，或上界加 1 → 解析层 `0` / `2147483648`；上界减 1 → (d) 的 `2147483647`。
+- `PREVIEW_ORIGIN` 接受带路径的值、去掉 `$`、加 `i` 或先 trim → 解析层对应非法值。
+- `OFFICE_BIN` 改用 `resolveOwnedPath` → 解析层 `soffice` 用例；空串放行为未配置 → 解析层空值用例。
+- `PREVIEW_CACHE_DIR` 空串放行 → 解析层空值用例。
+- 任一 message 拼入输入值 → 整句相等断言。
+- `resolveServerConfig` 漏掉展开 → 解析层 (a) 与入口层全表。
+- 两键读串（如 TEXT 读成 IMAGE）→ 解析层 (c)。
+- 入口吞掉配置错误继续启动 → 入口层 `code:1` 与端口拒连。
+- 不可观察：`:65` 注释里的数字、展开次序。
+- 十二个键 → 字段名与缺省（规则以规格「服务启动与装配」的十二键一段为准；前四个字段名由场景「预览与文件键的缺省与覆盖」给定，后八个由本注记定）：`PREVIEW_PORT` → `previewPort`（`0`；canonical 十进制 `0..65535`）；`PREVIEW_ORIGIN` → `previewOrigin?`（缺席；给出时整体匹配 `^https?://[^/?#\s]+$`，空串非法）；`PREVIEW_CACHE_DIR` → `previewCacheDir`（repo root 下 `var/preview-cache`；relative 相对 repo root，空串非法）；`OFFICE_BIN` → `officeBin?`（缺席即转换关闭；给出时须为绝对路径，空串非法，不查存在性）；`OFFICE_CONVERT_TIMEOUT_MS` → `officeConvertTimeoutMs`（`60000`）；`OFFICE_CONVERT_CONCURRENCY` → `officeConvertConcurrency`（`2`）；`PREVIEW_TEXT_MAX_BYTES` → `previewTextMaxBytes`（`1048576`）；`PREVIEW_IMAGE_MAX_BYTES` → `previewImageMaxBytes`（`20971520`）；`PREVIEW_DOCUMENT_MAX_BYTES` → `previewDocumentMaxBytes`（`104857600`）；`PREVIEW_NOTEBOOK_MAX_BYTES` → `previewNotebookMaxBytes`（`10485760`）；`PREVIEW_ARCHIVE_MAX_ENTRIES` → `previewArchiveMaxEntries`（`1000`）；`TRASH_RETENTION_DAYS` → `trashRetentionDays`（`30`）。后八个数值键与 `OMP_IDLE_MS` 同一解析纪律（`1..2147483647`）。
+- 安全缺省由解析层用例钉住：`PREVIEW_ORIGIN`、`OFFICE_BIN` 缺省时对象上没有该键；`OFFICE_BIN` 的相对名（`soffice`、`./soffice`）被拒（这条路径之后会进 sudoers 行）；`PREVIEW_CACHE_DIR` 空串被拒（不得落成 repo root）；各上限与 `TRASH_RETENTION_DAYS` 的 `0` 被拒。
+
+## 6.1、6.2 最小接线（#1055）
+
+- 触及 Critical Path「沙箱与文件边界」（用户文件预览的内容类型与上限；`sandbox.resolve` 调用本身不动）：两个评审席位 + owner 白盒审查。前提只有 0.1（#1049）；不等 1.1 / 1.2 / 1.3，不等 4.1、5.1。
+- 漂移一：`server/src/workspaces/preview.ts:31-35` 的第二参是 `ext` 而不是 issue 写的 `name`，`rest.ts:288` 传 `extname(absPath).slice(1)`。`workspace-preview.test.ts` 的 15 处调用（:102 :113 :129 :145 :174 :185 :189 :192 :194 :207 :225 :226 :236 :265 :326）全传裸扩展名，新语义下「无点 = 无扩展名」会全红，须逐处改成文件名（如 `"x." + ext.toUpperCase()`、`"big.log"`）并加第四参，逐条进偏离记录。
+- 漂移二：该文件三处整对象 `toEqual`（:103-109、:114-120、:175-181）因返回值新增 `rangeable` 变红，各补 `rangeable: false`，不得降成 `toMatchObject`。`:11` 的 `IMAGE_LIMIT` 改 `20_971_520`，`:159` 标题改 20 MiB，`:171/:189` 的 11 MiB 改 21 MiB，并补一条「11 MiB 的 png 现在被允许」。`:97` 标题里的 exact 去掉（全表断言在新文件）。
+- 行数：`preview.ts` 78、`rest.ts` 416、`workspace-preview.test.ts` 342、`workspaces-http.test.ts` 622。最后一个本刀后约 710，#1056 / #1058 的路由用例必须另开文件。
+- 签名与导出：`classifyPreview(absPath: string, name: string, size: number, options: { limits: PreviewLimits; sniffedText?: boolean })`，`options` 与 `limits` 必填。导出 `DEFAULT_PREVIEW_LIMITS = { text: 1_048_576, image: 20_971_520, notebook: 10_485_760 }`、`sniffText(bytes: Uint8Array): boolean`，以及 `IMAGE_EXTENSIONS` / `AUDIO_EXTENSIONS` / `VIDEO_EXTENSIONS` / `NOTEBOOK_EXTENSIONS`（均为 `ReadonlySet<string>`，图片集合取自类型表的键）。
+- 扩展名解析：`const i = name.lastIndexOf("."); ext = i <= 0 ? "" : name.slice(i + 1).toLowerCase()`，不用正则。`Dockerfile` / `Makefile` 精确且区分大小写。查表只用 `Set` / `Map`，不用对象字面量（`workspace-preview.test.ts:203` 的原型名用例保留，名字改成 `"file." + ext`）。
+- 判定次序：文本表 / 两个文件名 → 图片 → 音频 → 视频 → `ipynb` → 「由别处提供」集合（`pdf docx xlsx pptx zip tar gz tgz`，模块内不导出，直接抛 `preview_unsupported`）→ `options.sniffedText === true` 才是 `text` → 否则抛。`g.tar.gz` 的扩展名是 `gz`。
+- `sniffText` 最简实现：`bytes.includes(0)` 为假，且 `new TextDecoder("utf-8", { fatal: true }).decode(bytes, { stream: true })` 不抛。`stream: true` 正好容忍末尾未完整的多字节序列；函数自身不截 8192（那是 #1056 路由的事）。GBK 用例用字节 `D6 D0 CE C4`，不要用恰好以合法前缀结尾的串。
+- 路由接线（`rest.ts:288`）：`classifyPreview(absPath, basename(absPath), status.size, { limits: DEFAULT_PREVIEW_LIMITS })`。取 `basename(absPath)` 而不是查询串末段：`resolve` 会吞掉 `""` 与 `.` 分量（`page.html/.` 的 `absPath` 仍以 `page.html` 结尾），且逐分量拒绝符号链接，两者不会不一致。`:292` 的 `nosemgrep` 行保留在 `reply.send` 正上方，只改理由文字（现含音视频）。
+- 规格没写的分支（进偏离记录）：本刀到 #1058 之间，`mp3 / wav / mp4 / webm` 经 `file` 路由返回 200 全量并带 `Accept-Ranges: bytes`，`Range` 被忽略。`clearPreviewHeadersOnError` 不加 `Accept-Ranges` 的清除，留给 #1058 的区间发送函数。本刀路由不传 `sniffedText`，`LICENSE` 与 `workspaces-http.test.ts:509-517` 的 `file.__proto__` / `file.constructor` 仍是 415。
+- 新文件 `server/test/workspaces-preview-classify.test.ts` 只放新断言：全表（含 `A.YAML`、`x.env`、两个文件名）、`sniffedText` 三态（`dockerfile`、`notes.proto`、`LICENSE`、`.gitignore`）、图片七种与恰 20 MiB / +1 的 `gif`、`ipynb` 恰 10 MiB / +1、5 GiB `mp4`（只传数字，不建文件）、`wav`、`limits.image = 1024`、「由别处提供」九个名字带 `sniffedText: true`、`sniffText` 六个输入、`html` / `htm` / `svg` 跨截断点。另补 `.env` 不带嗅探 → `preview_unsupported`：场景里的 `.gitignore` 区分不出「点在开头视为无扩展名」，`.env` 才能。
+- 「流关闭和错误」的 `openPreviewStream` 部分已由 `workspace-preview.test.ts:277-316` 五条钉死，原样保留，新文件不复制，在偏离记录里写明对应关系（`openRangeStream` 属 #1057）。边界值一律写字面量，不从 `DEFAULT_PREVIEW_LIMITS` 取，否则「用回 10 MiB」的变异测不出来。
+- 门槛：jscpd 把 `server/test` 计入。`expectCanonicalError`、`expectedTextHeaders`、`collectBytes`、`spyMetadataIo` 从 `workspace-preview.test.ts` 搬进 `server/test/workspace-file-helpers.ts`（现 28 行），两个测试文件导入，搬家不改断言。knip 的 server 入口含 `test/**/*.test.ts`，新导出每个都要被新测试文件导入。`PreviewLimits` 类型照 `PreviewClassification` 的先例导出（master 上零导入方且门禁为绿）；若 knip 报，就在测试里 `import type` 一次。
+- 路由层（`workspaces-http.test.ts`，在 :419 与 :470 两条里加行）：`logo.svg`、`page.htm`、`feed.xml` 为 `text/plain; charset=utf-8`，`anim.gif`、`pic.webp` 为 200 对应类型，`doc.pdf`、`deck.pptx` 为 415，目录 `out` 为 404，`huge.png` 改 21 MiB（:476）。另加一条 `file` 路由的逃逸用例，因为现有路由层只有 `tree` 的越界审计（`workspaces-http-failures.test.ts:169`）：属主请求 `../outside.html` 与指向空间外的符号链接 `link.svg` → 403 `sandbox_denied` 且各一行 `sandbox.reject`（`op` 为 `read`）；他人的 id 带 `../x.html` → 404 且审计行数不变。
+- 不加验收清单行：`web/src/features/files/tree.tsx:69-98` 的 `supportsPreview` 仍只放行旧十二种，`web/src/lib/api.ts:425` 仍只认 png / jpeg。唯一可见变化是 10–20 MiB 的 png / jpg 由「文件过大」变成可预览，清单里没有钉 10 MiB 的行。不是配置切片：不碰 `docs/architecture/system.md` 第 9 节与配置计数测试。
+- 变异：`svg` 的类型改成 `image/svg+xml` → 新文件「html / htm / svg 永不以文档类型返回」与路由 `logo.svg` 的 `content-type` 断言判红。
+- 变异：图片上限用回 `10_485_760` → 新文件「恰 20 MiB 的 gif」与 `workspace-preview.test.ts` 改写后的恰 20 MiB png、「11 MiB 的 png 被允许」判红。路由层 21 MiB 的 `huge.png` 在此变异下仍是 413，不可观察。
+- 变异：图片判定 `>` 写成 `>=` → 恰 20 MiB 用例判红。
+- 变异：Notebook 超限改成截断或改用文本上限 → 「10 MiB+1 的 ipynb 抛 `preview_too_large`」与「恰 10 MiB 不截断」判红。
+- 变异：去掉「由别处提供」集合的判定 → 「九个名字带 `sniffedText: true` 仍抛」判红。路由层 `doc.pdf` 不可观察（本刀路由不传 `sniffedText`）。
+- 变异：`sniffedText` 缺省当成 `true` → 新文件「未提供时抛」与路由 `file.__proto__` / `file.constructor` 的 415 判红。
+- 变异：去掉小写归一 → `A.YAML` 判红；`Dockerfile` 改成不区分大小写 → `dockerfile` 未嗅探用例判红。
+- 变异：点在开头也算扩展名（`i < 0` 代替 `i <= 0`）→ 补的 `.env` 用例判红；场景原文的 `.gitignore` 不可观察。
+- 变异：无视 `options.limits`，用模块常量 → `limits.image = 1024` 的 2 KiB png 判红。
+- 变异：去掉 `mp4` 的 `rangeable` 或 `Accept-Ranges` → 5 GiB mp4 用例判红；给图片也加 `Accept-Ranges` → `workspace-preview.test.ts` 的整对象 `toEqual` 判红。
+- 变异：`sniffText` 去掉 NUL 判定 → 「含一个 0x00」判红；去掉 `stream: true` → 「截在汉字第二字节」判红；恒返回 `true` → GBK 与 PNG 头判红。
+- 变异：文本表漏掉 `xml` 或 `htm` → 路由 `feed.xml` / `page.htm` 判红。
+- 变异：用对象字面量查表 → `workspace-preview.test.ts:203` 的原型名用例判红。
+- 变异：逃逸，他人或不存在的 id：去掉 `file` 路由的 `ensureOwnedRoot` → `workspaces-http-failures.test.ts:57`（`file?path=keep.txt` 的相同 404、零审计）与新增的「他人 id 带越界路径」判红。
+- 变异：逃逸，穿越：跳过 `sandbox.resolve` 或直接拼路径 → 新增的 `../outside.html` 403 + `sandbox.reject`（`op` 为 `read`）判红。
+- 变异：逃逸，符号链接：把 `lstat` 换成 `stat` 且绕过 `resolve` → 新增的 `link.svg` 用例判红。只换 `lstatExisting` 而保留 `resolve` 时不可观察（`resolve` 已先拒），在表里标注。
+- 变异：逃逸，`op`：把 `"read"` 换成 `"list"` → 新增用例里审计行 `op` 的断言判红。
+  - 实施后更正一（规格文本）：场景「由别处提供与不支持」原把 `i.exe` 与八个「由别处提供」的名字并列为「即使带 `sniffedText: true` 也抛」，与条文表格 `text` 行（不在表内任何一行且 `sniffedText === true` 即 `text`）矛盾。以条文为准，场景改为：八个名字带 `sniffedText: true` 仍抛；`i.exe` 在 `sniffedText` 未提供或为 `false` 时抛。测试里第九个名字用 `I.PDF`（顺带钉住大小写归一）。此处改动待 owner 确认。
+  - 实施后更正二（变异预测）：「去掉 `file` 路由的 `ensureOwnedRoot`」不会让「他人 id」用例判红——`core/sandbox/index.ts` 的 facade 自己先查 `rootOf`，为空即 `not_found` 且无审计，是双重保证；该变异只在 `workspaces-http-failures.test.ts` 的「owned missing root」用例判红。
+
+## 7.1（#1057）
+
+- 不触及 Critical Path：本刀不调 `sandbox.resolve`、不加 `op`、不加路由、没有生产调用方；`openRangeStream` 与既有 `openPreviewStream` 同约，只收已解析的 `absPath`（`server/src/workspaces/preview.ts:1-8` 文首注释写明 resolve 在模块外）。逃逸向量随 #1058（7.3）的路由接入评审，本刀一个评审席位即可。
+- 前提：只有 0.1（#1049 / PR #1285）。7.1 在「组 2–7 不等 1.2」之列，不等 1.1 / 1.3，不等 5.1（边表写明 7.1 以参数收值）；6.1 只挡 7.3，不挡 7.1。
+- 现状无漂移：`preview.ts` 78 行，导出只有 `PreviewClassification`、`classifyPreview`、`openPreviewStream`；全仓 `git grep 'parseRange\|openRangeStream\|range-parser'` 在 `server`、`web`、`openspec/specs` 零命中，不引入依赖。`rest.ts` 416 行，本刀不动。
+- 签名：`export type RangeResult = { start: number; end: number } | "unsatisfiable" | "ignore"`；`export function parseRange(header: string | undefined, size: number): RangeResult`；`export function openRangeStream(absPath: string, start: number, end: number): Readable`，实现就是 `createReadStream(absPath, { start, end })`（两端含）。
+- `parseRange` 用一条正则字面量 `/^bytes=(\d*)-(\d*)$/`，不用 `new RegExp`（semgrep）。判定次序固定：不匹配或两组皆空 → `ignore`；两组皆有且 `a > b` → `ignore`；`size === 0` → `unsatisfiable`；有 `a` 且 `a >= size` → `unsatisfiable`；后缀 `n === 0` → `unsatisfiable`；否则返回区间，`end = min(b, size-1)`。
+- 规格没写、取最简并记入偏离记录的分支：`header` 为 `undefined` 或空串 → `ignore`；后缀 `n > size` → `{0, size-1}`；`Bytes=` 等非小写单位 → `ignore`（只认字面 `bytes=`）；前导零按十进制接受；既 `a > b` 又 `a >= size`（如 `bytes=1000-999`）→ `ignore`；语法不合的头在 `size = 0` 时仍是 `ignore`。
+- `openRangeStream` 不加任何校验：`start > end` 时 Node 同步抛 `ERR_OUT_OF_RANGE`（已实测），调用方只传 `parseRange` 的结果；`size = 0` 不会走到这里。
+- 测试放新文件 `server/test/workspace-preview-range.test.ts`（过 naming-guard），不追加进 `workspace-preview.test.ts`——那个文件 #1055 同批要改写（三参改四参、`IMAGE_LIMIT`）。
+- 辅助函数：`workspace-preview.test.ts:75-94` 的 `collectBytes`、`waitForClose`、`waitForOpen` 原样搬进 `server/test/workspace-file-helpers.ts`（现 28 行）并导出，两个测试文件都从那里导入；原文件 `:4` 的 `Readable` 导入随之无引用，一并删掉。断言一条不动，记入偏离记录。若 #1055 先合且已搬过，直接复用。不复制函数（jscpd）。
+- `parseRange` 用例：`it.each` 十行，`size = 1000`，逐字用规格的十个输入与期望（`bytes=0-99`→`{0,99}`、`900-`→`{900,999}`、`-100`→`{900,999}`、`990-2000`→`{990,999}`、`1000-`与`-0`→`unsatisfiable`、`5-2`、`0-1,5-6`、`items=0-1`、`bytes= 0-1`→`ignore`），用 `toEqual` 断言。上一条所列的自选分支各补一行。
+- `openRangeStream` 用例四条，文件为 64 字节且每字节等于下标：(a) `(path, 10, 19)` 收到的字节恰为 `Buffer.from([10..19])`、长度 10；(b) 读完后等 `close`，`fstatSync(fd)` 抛 `EBADF`；(c) `open` 后立即 `destroy()`，等 `close`，同样 `EBADF`；(d) 不存在的路径以 `ENOENT` 拒绝且有 `close`。
+- (b) 不可省：实测 `autoClose: false` 时读完后描述符仍开着，而 `destroy()` 照样关闭——任务点名的「读完前销毁」用例单独抓不住描述符泄漏。
+- knip：`knip.json` 的 server 入口含 `test/**/*.test.ts`，`parseRange`、`openRangeStream` 以测试为唯一导入方即可；`RangeResult` 也要被测试文件 `import type` 引用（如给 `it.each` 的表标类型），否则报未引用导出。
+- 其余门槛与文档：`preview.ts` 增约 35 行、新测试约 110 行，远离 800；不加配置键，`docs/architecture/system.md` 第 9 节与配置计数测试不动；纯服务端函数无用户可见变化，no checklist rows；文首注释补一句「范围解析与闭区间流同在本模块」。
+- 与 #1055 的合并次序：两刀都改 `preview.ts`。本刀把新函数加在 `openPreviewStream` 之后、`classified` 之前，不动 13–52 行；后合的一方 rebase，不在本刀预先适配 `rangeable`。
+- 变异：`bytes=-100` 当成 `0-100`（7.5 分摊条款）→ `parseRange` 的 `bytes=-100` 行判红（得到 `{0,100}`，期望 `{900,999}`）。
+- 变异：去掉 `end` 的截断 → `bytes=990-2000` 行判红（`{990,2000}`）。
+- 变异：`bytes=<a>-` 的 `end` 取 `size` 而非 `size-1` → `bytes=900-` 行判红。
+- 变异：去掉 `a >= size` 判定 → `bytes=1000-` 行判红。
+- 变异：去掉 `n === 0` 判定 → `bytes=-0` 行判红。
+- 变异：去掉 `a > b` 判定，或把它改回 `unsatisfiable` → `bytes=5-2` 行判红。
+- 变异：多段时取第一段（正则去掉 `$` 锚）→ `bytes=0-1,5-6` 行判红。
+- 变异：不校验单位（`[a-z]+=`）→ `items=0-1` 行判红。
+- 变异：解析前 `trim` 或允许 `\s*` → `bytes= 0-1` 行判红。
+- 变异：判定次序写反（先判 `size === 0` 或 `a >= size`，再判语法与 `a > b`）→ 自选分支的 `bytes=1000-999` 行与 `size = 0` 的非法头行判红；规格的十行抓不住，所以这两行必须写。
+- 变异：后缀 `n > size` 不夹到 0 → 自选分支的 `bytes=-1500` 行判红（`start` 为负）。
+- 变异：`openRangeStream` 的 `end` 当开区间（`end - 1`）→ 用例 (a) 判红（9 字节）；`start` 写成 0 → (a) 判红（字节值不是 10..19）。
+- 变异：`createReadStream` 加 `autoClose: false` → 用例 (b) 判红（`close` 不来，超时）；用例 (c) 仍绿，已实测。
+- 变异：「销毁时不释放描述符」预期不可观测：薄封装下释放由 Node 的 `ReadStream._destroy` 完成，没有可以去掉的实现行；用例 (c) 只在有人把它换成自管 `fs.open` 的实现时才会红。PR 表里照此标注。
+- 变异：把 open 错误吞成空流（如捕获后返回 `Readable.from([])`）→ 用例 (d) 判红。
+
+## 8.1 的 sweep 半边，含分摊的 8.3 / 8.4 条款（#1059）
+
+- **Critical Path：沙箱与文件边界**（回收目录、递归删除、符号链接）——双评审席位并请 owner 白盒审查；仅服务端、无调用方，**不加验收清单行**，不碰配置键与 `docs/architecture/system.md` 第 9 节的表。
+- 前提与实测：唯一前提 0.1（#1049）；**不依赖 #1053**（4.1 只通向 8.2、9.1）与 #1054（`retentionDays` 以参数收值）。本刀是 8.1 不执行 `rename` 的半边，**不在 1.2 所挡集合内**；1.2 已记录为「与设计相符」（`design.md` D22「实测」），`moveToTrash` 半边（#1060）也已放行，它另等 4.1。1.3 与本刀无关。
+- **任务前提与现码不符**：8.1 说以「`store` 的 owner 段校验」为证，但 `server/src/workspaces/store.ts:287-298` 的 `rejectUnsafeOwnerSegment` 只拒空串、`.`、`..`、NUL、`/`、`\`；`core/sandbox/resolve.ts:36-48` 也不拒点开头分量；`010_auth_schema_seed.sql:12` 只 CHECK `length(id) > 0`。今天 id 为 `.trash` 的账号能把 `<SANDBOX_ROOT>/.trash` 建成 `2770` 的账号根。处置：给 `rejectUnsafeOwnerSegment` 加一行 `ownerId.startsWith(".")`（主规格 workspaces 的「without accepting unsafe owner path segments」已涵盖，不改规格），**PR Boundary 需放宽到 `store.ts`（487 行）**，记入偏离记录；编排者若不放宽，则测试只钉种子账号，store 缺口另开 issue。
+- 「账号 id 不以点开头」写在新文件里（`workspace-store.test.ts` 已 798 行，**不得加行**），两条：① `withOpenDb(":memory:")` 迁移后 `accounts` 恰四行且 `id LIKE '.%'` 为 0 行；② 照 `workspace-store.test.ts:613` 的 `insertUnsafeOwnerAccount` 插入 id=`.trash` 的账号，`store.create({id:".trash"},{name:"alpha"})`、`store.list(".trash")` 都以非 `HttpError` 抛出，`<sandboxRoot>/.trash` 不存在，`workspaces` 与审计各 0 行。
+- 形状：`server/src/workspaces/trash.ts` 只导出 `createTrash(options: { sandboxRoot: string; retentionDays: number }): { sweep(now: number): Promise<void> }`。**不声明 `rename?`**（本半边无读者，#1060 加可选字段不破坏调用方，记偏离）；不导出返回类型接口（knip 报未用类型；#1070 用 `ReturnType<typeof createTrash>`）。构造函数不碰文件系统。knip 的 server entry 含 `test/**/*.test.ts`，测试是唯一导入方即可过。
+- 「目录校验」在本半边 = `sweep` 开头对 `join(sandboxRoot, ".trash")` 的一次 `lstat`：不存在、非目录（含符号链接）、`uid !== process.geteuid?.()` 时本轮直接返回。**不调 `ensureOwnedDir`**（`core/sandbox/dirs.ts:41`，它会 `mkdir` 并 `chmod`，与「不存在时不创建」冲突；规格括注只列三项、不含 mode），留给 #1060。本刀不 import `core/sandbox`。
+- 遍历用 `fs/promises`（异步，不堵事件循环）：三层 `readdir(…, { withFileTypes: true })`，owner 层、workspace 层、批次层都只认 `dirent.isDirectory()`（Dirent 不跟随符号链接）。批次名用正则**字面量** `/^(\d+)-[0-9a-f]{16}$/`（semgrep），`Number(m[1]) < now - retentionDays * 86_400_000` 才 `rm(batch, { recursive: true })`，不带 `force`；`rm` 不跟随批次内部的链接。
+- 规格未写明的分支，取最简并记偏离：时间戳恰等于界限 → 保留；批次名合规但是普通文件或符号链接 → 不碰；清空后的 `<ownerId>`、`<workspaceId>` 空目录 → 不删（免与 #1060 建批次竞态）；`.trash` 的 mode 不是 `0700` → 照常清理、不校正；超长数字时间戳 → 视为未到期。
+- 出错不外溢：每个批次的 `rm` 单独 `try/catch`，每层 `readdir` 也 `catch` 后继续下一个兄弟，`sweep` 永不 reject；不写审计、不打日志。
+- 夹具（`server/test/workspaces-trash-sweep.test.ts`，复用 `core-db-helpers.ts` 的 `tempDir` / `removeTempDirs` / `withOpenDb`）：`sandboxRoot = realpathSync(tempDir())`，四级目录 `mkdirSync(…, 0o700)` 直接建出，批次名 `${ts}-${"0123456789abcdef"}`。8.3 的「修改时间由夹具设定」易误导——清理只看批次名，夹具用 `utimesSync` 把 mtime **设反**（到期批次设为现在，未到期设为 40 天前）以钉住这一点。
+- 用例（一）：「到期的批次被清除」——31 天前被删；29 天前（含内容）、`keep-me`、指向空间外目录的符号链接都在，链接目标内容逐字节不变；另加批次名合规且已到期的符号链接、owner 层与 workspace 层的符号链接，目标内都放到期批次形状的目录，断言全部未动。「`.trash` 被占位」——符号链接指向含到期批次形状的目录树、普通文件各一例，什么都不删。
+- 用例（二）：「临时空间删除后批次保留到期满」——夹具等价：不建 DB、不建 `tmp-<T>`，只有 `.trash/u1/<T>/<批次>`；`sweep(删除时刻 + 29 天)` 不动，`sweep(+31 天)` 删除。「不查 `workspaces` 表」由签名保证（无 `db` 参数）；场景里「经路由删除」「`tree`/`file` 404」归 #1060。「保留期可配置」——`retentionDays: 1` 删 2 天前的批次，同一夹具 `retentionDays: 30` 不删；`TRASH_RETENTION_DAYS` 与启动首扫归 #1054 / #1070。
+- 用例（三）：「清理出错不外溢」——到期批次 A 内有 `chmodSync(…, 0o500)` 的子目录含一文件，另有可删的到期批次 B：`await expect(sweep(now)).resolves.toBeUndefined()`，B 被删、A 仍在；`it.skipIf(process.geteuid?.() === 0)`（范式见 `sandbox-dirs.test.ts:336`），`afterEach` 先 `chmod 0o700` 再 `removeTempDirs()`。`.trash` 不存在一例不跳过：不抛，事后 `existsSync(".trash") === false`。
+- 守卫与存量：两个新文件远低于 800 行；`workspaces/` 下无模块清单类断言。放宽 `store.ts` 后既有测试无一变红（全库没有点开头的 owner id 用例，`workspace-store.test.ts:554` 用 `bad/id`）；`<state>/trash` 相关断言（`omp-state-layout.test.ts:125,147,185`、`server-startup-layout.test.ts:134`）不动——那是另一套「移入即删」的目录（`state-layout.ts:46`、`temp-dir-remove.ts:77-105`），不要复用 `removeDirThroughTrash`。覆盖率门槛是全局 80%，上述用例已覆盖各 `catch` 分支。
+- 变异：清理跟随符号链接（`isDirectory()` 换成 `stat` 后判断，或对批次层链接也 `rm`）→「到期的批次被清除」里「链接目标内容不变」判红（8.4 点名的那条）。
+- 变异：去掉 `.trash` 的 `lstat` 校验 →「`.trash` 被占位」符号链接一例里目标目录下的到期批次被删而判红。
+- 变异：owner 层或 workspace 层不过滤符号链接 → 对应两条「链接目标内未动」断言判红。
+- 变异：正则放宽（去掉 `^…$` 或 `{16}`）→ 需在夹具加一个 `<31 天前毫秒>-zz` 之类近似名才判红；只有 `keep-me` 时**不可观察**，所以夹具必须带近似名。
+- 变异：比较写反或用 `<=` → 29 天前批次被删判红；`<=` 另需一条「恰等于界限保留」用例，否则不可观察。
+- 变异：用 mtime 代替批次名里的时间戳 → mtime 设反的夹具下 31 天前批次未删、29 天前被删，判红。
+- 变异：保留期写死 30 →「保留期可配置」`retentionDays: 1` 一例判红。
+- 变异：去掉单批次的 `try/catch` →「清理出错不外溢」里 `resolves` 判红，或批次 B 未删判红（root 下跳过，不可观察）。
+- 变异：`.trash` 不存在时 `mkdir`（或改调 `ensureOwnedDir`）→「没有被创建」判红。
+- 变异：去掉 `rejectUnsafeOwnerSegment` 的点开头分支 →「账号 id 不以点开头」第 ② 条判红（`<sandboxRoot>/.trash` 被建出）。
+- 变异：种子里加一个点开头 id → 第 ① 条判红。
+- 变异：「清理去查 `workspaces` 表」→ **不可观察**（结构上排除：`createTrash` 不收 `db`）；评审以签名为证。
+
+## 9.3、9.4（#1061）
+
+- **Critical Path：沙箱与文件边界**（无上限读出用户文件、审计次序）——两个评审席位 + owner 白盒；前置只有 0.1，不等任何实测与兄弟刀。
+- 漂移：`server/src/workspaces/rest-entries.ts` 在 origin/master 不存在，由本刀新建；`index.ts`（9 行）只调 `registerWorkspaceRest`，本刀加一行 `registerWorkspaceEntries(app, dependencies)`，签名 `(app: FastifyInstance, dependencies: WorkspaceRestDependencies): void`。
+- 复用而不复制（jscpd）：给 `rest.ts`（416 行）的 `currentPrincipal`、`ensureOwnedRoot`、`parsePathQuery`、`lstatExisting`、`noStoreWorkspaceResponse` 加 `export`，`rest-entries.ts` 单向导入；knip 由该导入满足；不改 `core/sandbox`、`http/errors.ts`（GET 无 body，不进归属集）、`preview.ts`。
+- 处理次序：`onRequest: noStoreWorkspaceResponse` → `currentPrincipal` → `ensureOwnedRoot` → `parsePathQuery(query, true)` → `sandbox.resolve(principal, id, path, "read")` → `lstatExisting` 非 `isFile()` 则 404 → `audit.emit({kind:"file.download", actorId, workspaceId, title:` `下载 ${path}` `, detail:{path, size}})` → 之后才设头 → `reply.send(openPreviewStream(absPath, status.size))`。
+- 头：`Content-Type: application/octet-stream`、`Content-Disposition`、`Content-Length: String(status.size)`（必须显式设）、`X-Content-Type-Options: nosniff`；流按 `size` 截界，文件在 lstat 后增长也不会多发字节，0 字节文件由 `openPreviewStream` 的空流分支处理。
+- 纯函数 `export function attachmentDisposition(name: string): string`（放 `rest-entries.ts`，测试是 knip 入口）：入参 `basename(absPath)`，不取请求串末段（`a/b.md/` 的末段是空串）。
+- ASCII 回退名按码点替换：`0x20–0x7E` 之外及 `"`、`\` 各换一个 `_`，一个代理对只换一个 `_`；`季度 报告"v2".pdf` → `__ ___v2_.pdf`。
+- `filename*` 按 `Buffer.from(name, "utf8")` 逐字节编码：RFC 5987 attr-char（字母数字与 ``!#$&+-.^_`|~``）原样，其余 `%XX` 大写。不用 `encodeURIComponent`：它放过 `'()*`，遇孤立代理项抛 `URIError`。不写动态 `new RegExp`（semgrep）。
+- 规格未写的分支（记入偏离记录）：(a) 路由设 `exposeHeadRoute: false`，否则 Fastify 自动的 HEAD 会跑同一 handler、写一条没发字节的 `file.download`；HEAD 落到 `/api/*` 兜底 → 404、无审计。(b) 审计后、发头前打开失败（文件消失，或 omp 用户建的不可读文件）→ 500 信封，审计行保留。(c) 符号链接 → 403 + `sandbox.reject`。(d) `path=` 空串 → 解析到根 → 404。
+- 分支 (b) 需要路由级 `onError` 钩子移除 `Content-Type`、`Content-Disposition`、`Content-Length`，否则 500 的 JSON 会带着 `octet-stream` 与 attachment 头发出；`rest.ts:51` 的 `clearPreviewHeadersOnError` 是同一理由。
+- 新文件 `server/test/workspaces-download.test.ts`（用 `withWorkspacesApp`、`insertWorkspace`、`loginSessionId`、`bearerCookie`）：「任意文件作为附件」五个文件加一个 0 字节文件，`rawPayload.equals`，审计五行的 `detail.path` / `detail.size`；`big.bin` 30 MiB 运行时在临时目录生成，不入库。
+- 「拒绝项」六例各断言没有 `file.download` 行，另加：重复 `path` → 400；`lisi` 带 `../x` 请求 zhangsan 的 id 与不存在的 id → 相同 404 且审计零行；符号链接指向空间外文件 → 403，`detail.op="read"`；HEAD → 404 无审计。
+- 「审计失败不发文件」沿用 `workspaces-http-failures.test.ts:267` 的 `db.setAuthorizer` 拒绝 `audit_events` INSERT：断言 500 `INTERNAL_ERROR_ENVELOPE`、`no-store`、无 `content-disposition`、`content-type` 为 JSON、正文不含文件内容，且 `spyBodyIo()` 的 `createReadStream` 对该文件零调用。最后一条让「审计挪到发送之后」确定判红，不依赖 Fastify 的发头时机（未读 Fastify 源码核实）。
+- 其余用例：「不支持范围」（100 字节，200，无 `content-range`、无 `accept-ranges`）；html / svg / pdf / xml 四例都是 `application/octet-stream` + attachment；纯函数表驱动（中文、空格、`"`、`\`、`\n` 与 `\x7f`、emoji、`'()*`）；打开失败用 `workspaces-http.test.ts:577` 的 `onSend` 里 `unlinkSync` 手法；文件名含 `\n` 的真实文件下载 → 200。
+- 既有测试无须改：`workspaces-http-failures.test.ts:231` 的 "all five routes" 是显式 URL 列表，`server-assembly.test.ts:560` 只包 `registerWorkspaces`。不要往 `workspaces-http.test.ts`「完整真实装配与隔离」加 `download` 行（那是 11.4）。无 checklist 行（纯服务端；CH-33 归 25.6）；不动 `docs/architecture/system.md` §9；`smoke/files.hurl` 归 26.2。`reply.send(stream)` 若被 semgrep 标记，仿 `rest.ts:298` 加 `nosemgrep`。
+- 变异：`audit.emit` 挪到 `reply.send(stream)` 之后 → 「审计失败不发文件」判红。状态码与正文断言是否判红取决于发头时机；`createReadStream` 零调用断言保证判红。
+- 变异：`Content-Type` 改用真实类型（按扩展名）→ 「主站不把工作空间文件当文档返回·download 半边」的 html / svg / pdf / xml 断言判红，「任意文件作为附件」的 `page.html` 也红。
+- 变异：去掉 `ensureOwnedRoot`，或挪到 `resolve` 之后 → 「lisi + `../x` → 404 且审计零行」判红（变成 403 加一条 `sandbox.reject`）。
+- 变异：`resolve` 的 `op` 换成跳过沙箱的直接 `join(root, path)` → 「`../x` → 403 + `sandbox.reject`」与符号链接用例判红。
+- 变异：去掉 `isFile()` 判断 → 「拒绝项」的 `out` 目录用例判红（变成 500 或 `EISDIR`）。
+- 变异：`parsePathQuery(query, false)` → 缺 `path` 的 400 判红（变成 404）。
+- 变异：下载改走 `classifyPreview` 的上限 → 30 MiB `big.bin` 与 `archive.zip` 判红（413 / 415）。
+- 变异：去掉 `Content-Length`，或取截断值 → 「精确的 `Content-Length`」判红。
+- 变异：ASCII 回退名不替换 `"` 或 `\` → 纯函数用例判红；不替换控制字符 → `\n` 文件名的真实下载判红（`setHeader` 抛 `ERR_INVALID_CHAR` → 500）。
+- 变异：`filename*` 改用 `encodeURIComponent` → `'()*` 用例判红。
+- 变异：支持 `Range`（返回 206）→ 「不支持范围」判红。
+- 变异：去掉 `exposeHeadRoute: false` → HEAD 用例判红（多出一条 `file.download`）。
+- 变异：去掉 `onError` 清头 → 「打开失败」用例的 `content-type` 为 JSON、无 `content-disposition` 断言判红。
+- 变异：预期不可观察：把流的 `end` 截界去掉（改成无界 `createReadStream`）。测试里文件不会在 lstat 后增长，属防御性实现，PR 表中标注「不可观察」。
+  - 实施后更正：上面「流不按 `size` 截界 → 预期不可观察」已不成立——交付的测试加了「审计后文件增长」用例，该变异判红。规格点名的外账号 `lisi` 是种子里唯一的管理员（`u3`），评审后测试的两处外账号改为 `lisi`（另保留普通成员一行）；「去掉 `ensureOwnedRoot`」由「属于自己但根目录缺失的 id」夹具判红（他人 id 的 404 是 facade 的双重保证）。`rest.ts` 在本刀之前是 418 行。lstat → 打开窗口的完整陈述（中间目录分量、FIFO）见 #1286。
+
+## 11.1（#1066）
+
+- Critical Path：代码本身不碰 `sandbox.resolve`、`op`、路径或文件系统（规格明文禁止），不落在 `AGENTS.md` 两条白盒路径内；但它是预览监听器读用户文件的唯一凭据，issue 已要求 PR 标注白盒审查，建议按两个评审席位处理。
+- 依赖：边表 11.1 只 ← 0.1（#1049 / PR #1285，按已合计）；不在 1.2 挡住的集合里，不等 1.1、1.3，与 #1052 的裁决无关；代码上只导入 `node:crypto`，同批兄弟切片都不是前提。
+- 下游：等本刀的是 #1067（11.2–11.3）、#1069（12.1 收 `tokens`）及经它们的 13.1；#1068（12.2）不等它，它若也在 `server/src/preview/` 下建文件，谁先合都不冲突。
+- 命名与唯一实现：`server/src/sessions/tokens.ts:9` 已有 `TokenRegistry`（39 行；单键、轮换、`revoke`、无到期）；新文件导出 `createPreviewTokens()`（或类 `PreviewTokenRegistry`），不得再叫 `TokenRegistry`，不拷贝其函数体（jscpd 含测试文件）。
+- 偏离记录写明不扩展旧表的理由：复合键、到期与续期、无吊销；D13 写的是「同一做法」，文件位置由规格钉在 `server/src/preview/`。
+- 签名照规格逐字：`issue({ownerId, workspaceId, embedOrigin}, now) → {token, expiresAt}`、`lookup(token, now) → {ownerId, workspaceId, embedOrigin} | null`；`now` 是两个调用上必填的毫秒 `number`，不设 `Date.now` 缺省、不在构造时收时钟；`embedOrigin: string | null`；`lookup` 恰返回三键，不带 `expiresAt` 与 `token`。
+- 复合键不得用分隔符拼接（`ownerId`、`workspaceId` 都是 `string`，`server/src/auth/index.ts:32`）：用嵌套 `Map<ownerId, Map<workspaceId, token>>` 加 `Map<token, 记录>`，不用普通对象当表；清除一条记录时两张表同时删。
+- 到期判定在 `issue` 与 `lookup` 用同一个谓词 `now >= expiresAt`（规格只在 `lookup` 一句写了边界，`issue` 恰在 `t + 900000` 时按已过期生成新令牌并删掉旧令牌的记录）；续期一律赋值为 `now + 900000`，时钟回拨时到期时间随之前移，不做单调保护。
+- 规格未写的随机数撞车：沿用 `sessions/tokens.ts:15-17` 的失败关闭——新令牌已在表里则抛不含令牌的 `Error`，既有记录不动；否则静默覆盖会把别人的令牌改指到本次的账号与空间。
+- 规格未写的残留：不做全表清扫；工作空间删除后既不再签发也不再查找的过期记录留到进程重启（每条常数字节），记入偏离记录。
+- 测试 `server/test/preview-tokens.test.ts`（新）：三个场景各一个 `describe`，真实 `randomBytes`；到期一律写字面量 `900000` / `899999`，不从源文件导入 TTL 常量（常量不导出）；正则用字面量 `/^[0-9a-f]{64}$/u`。
+- 场景之外必须补的断言：再次签发后 `lookup` 的 `embedOrigin` 是本次的值（含改成 `null`）；不经任何 `lookup` 直接在 `t + 900000` 再签发得到新令牌（规格场景二先 `lookup` 清除了记录，会掩盖 `issue` 自己的到期判断）；`("a:b","c")` 与 `("a","b:c")` 得到不同令牌；`lookup("constructor")`、`lookup("__proto__")` 为 `null`；两个实例互不可见。
+- 撞车用例按 `server/test/session-tokens.test.ts:80-88` 的写法（`vi.spyOn(nodeCrypto, "randomBytes")` 加 `syncBuiltinESMExports`，`afterEach` 还原），所以源文件必须用具名导入 `import { randomBytes } from "node:crypto"`；测试里不出现 64 位十六进制字面量（gitleaks），未知令牌由活令牌派生（`toUpperCase()`、`slice(0, 63)`），大写用例先断言令牌含 `[a-f]`。
+- 门槛与范围：knip 的 server 入口含 `test/**/*.test.ts`（`knip.json:9`），测试作唯一导入方合法，但未被测试导入的导出类型也会报，只导出测试实际导入的名字；既有测试无一需要改（没有测试枚举 `server/src` 目录或读 `docs/architecture/system.md`，`http-parser-owners.test.ts` 的条数属 #1067）；不是配置切片，不动 `system.md` 第 9 节；服务端纯模块，no checklist rows；只勾 11.1，11.3、11.5 的任务号留给 #1067、#1075。
+- 变异：`lookup` 顺手把 `expiresAt` 推后 → 「到期与查找不续期」里 `t + 899999` 查过之后 `t + 900000` 不再是 `null`，判红（`lookup` 不返回 `expiresAt`，这是唯一的观察方式）。
+- 变异：到期判定 `>=` 写成 `>` → 同一用例 `t + 900000` 的 `lookup` 非 `null`，判红。
+- 变异：`lookup` 到期时不清除记录而只返回 `null` → 「到期后再签发得到新令牌、旧令牌仍为 `null`」判红。
+- 变异：`issue` 不判到期、直接复用键上的旧记录 → 补充用例「不经 `lookup` 在 `t + 900000` 再签发」判红；规格场景二原样写法下此变异不可观察。
+- 变异：未过期再签发时生成新令牌 → 「签发、复用与续期」的同一令牌断言判红。
+- 变异：再签发不推后到期时间（保持 `t + 900000`）→ 同场景 `expiresAt = t + 5 分钟 + 900000` 判红。
+- 变异：再签发不更新 `embedOrigin` → 补充的 `embedOrigin` 断言判红。
+- 变异：键只用 `ownerId` → `(u1, w2)` 与 `(u1, w1)` 同令牌，判红；键只用 `workspaceId` → `(u2, w1)` 同令牌，判红（跨账号、跨空间的隔离向量）。
+- 变异：键改成 `ownerId + ":" + workspaceId` 拼接 → 分隔符碰撞用例判红。
+- 变异：令牌改成 16 字节或大写十六进制 → `/^[0-9a-f]{64}$/u` 判红。
+- 变异：`lookup` 改成不区分大小写或前缀匹配 → 「未知令牌」判红。
+- 变异：存储换成普通对象 → `lookup("constructor")` 非 `null`，判红。
+- 变异：去掉撞车检查 → 撞车用例里另一键的令牌被改指，判红。
+- 变异：登记表改成模块级单例 → 「两个实例互不可见」判红。
+- 变异：不可观察：「不写日志、不进审计」——纯模块没有日志与审计依赖，无从断言；证据在 #1067 的响应头与日志断言。
+- 变异：不可观察：遍历、符号链接、「他人空间 404 先于路径检查」「越界写 `sandbox.reject`」——登记表不接触路径，这些向量属 #1067、#1069 与 11.4。
+
+## 12.2（#1068）
+
+- Critical Path：本刀不调 `sandbox.resolve`、不碰 fs、不加 `op`，但这组头是「预览用户文件」的全部来源隔离性质，issue 也要求白盒，按 Critical Path 处理（两席评审加 owner 白盒）。穿越、符号链接、跨空间 id 这些向量在本刀没有对象，归 #1069；本刀的逃逸向量在头层，见变异清单。
+- 依赖：边表上 12.2 只 ← 0.1（#1049 / PR #1285）；按代码零 import，前提已齐。不等 1.1 / 1.2 / 1.3，也不等 #1052 的裁决。同批里不依赖任何一刀，可第一个合；下游是 #1069（12.1）与 15.1。
+- 与同批的交集：只有 #1066 也建 `server/src/preview/` 目录（它建 `tokens.ts`），两刀文件不同。本刀不建 `index.ts` 桶文件，不 import `tokens.ts` 的类型，`embedOrigin` 就地写成 `string | null`。
+- 漂移一：issue 的 Current behavior 属实，`origin/master` 的 `server/src` 里没有 CSP、`frame-ancestors`、`Referrer-Policy`，`nosniff` 只在 `server/src/workspaces/preview.ts:70`。但规格说的「与 workspaces 分类器相同」在代码里不成立：`preview.ts:17-21` 只有 png/jpg/jpeg，其余要等 6.1（#1055）。
+- 类型值的处置：按 D 的 workspaces delta（`specs/workspaces/spec.md:9-11`）写死字面量：`image/gif`、`image/webp`、`image/bmp`、`image/x-icon`、`audio/mpeg`、`audio/wav`、`video/mp4`、`video/webm`。不 import `workspaces/preview.ts`（`docs/architecture/system.md:79` 不许 feature 间未声明的依赖），测试里也不调 `classifyPreview`（#1055 会把它改成四参，谁后合谁红）。
+- 漂移二：issue 正文与 D14 标题写 `Access-Control-Allow-Origin: *`「一律」，且都没提 `Cross-Origin-Resource-Policy: cross-origin`。规格条文是：ACAO、CORP、CSP 只在成功响应，失败响应只有三项公共头加 `text/plain`。以规格为准，记入偏离记录；issue 验收第三条的「一律带 ACAO」按「成功响应一律」读。
+- 新文件 `server/src/preview/headers.ts`（实际 106 行，无 import），两个导出：`previewHeaders(name: string, embedOrigin: string | null): Record<string, string>` 与 `previewFailureHeaders(): Record<string, string>`。类型表与常量不导出；knip 的 server entry 含 `test/**/*.test.ts`，测试是唯一引用方即可过。
+- 成功响应恰七键，键名大小写沿用 `preview.ts:68-72`：`Content-Type`、`X-Content-Type-Options: nosniff`、`Cache-Control: no-store`、`Referrer-Policy: no-referrer`、`Access-Control-Allow-Origin: *`、`Cross-Origin-Resource-Policy: cross-origin`、`Content-Security-Policy`。失败响应恰四键：`Content-Type: text/plain; charset=utf-8` 加前三项公共头，416 也用它。状态码与 `预览不存在或已过期` 文案归 #1069，本刀不放。
+- 类型表用 `Map`，共 29 个扩展名：html htm css js mjs json map svg png jpg jpeg gif webp bmp ico woff woff2 ttf otf pdf mp3 wav mp4 webm txt md csv tsv xml。取法是 `lastIndexOf(".")`，为 `-1` 时直接 `application/octet-stream`，否则取其后小写。不能用对象字面量，否则 `a.constructor`、`a.__proto__` 会命中原型；也不能直接 `slice(lastIndexOf+1)`，否则无扩展名的文件 `html` 会得到 `text/html`。
+- 未写明分支一：`name` 可以是带 `/` 的相对路径，含 `/` 的「扩展名」不在表里，自然落到 octet-stream（`site.v2/README`）。`a.`、`.gitignore`、`a.tar.gz` 都是 octet-stream；`.html` 按字面规则是 `text/html`，带 sandbox。`xml` 是 `text/plain`，不是 XML 类型。
+- 未写明分支二：CSP 是否带 `sandbox` 只看算出的 `Content-Type === "application/pdf"`，不看原始文件名，所以 `X.PDF` 也走例外，`a.svg` 必带 sandbox。15.1 的 `/o/` 成功响应以一个 `.pdf` 名调用同一函数，本刀不为它加第三个参数。1.1 实测留给 owner 的「PDF 例外是否保留」不挡本刀，照规格实现。
+- 未写明分支三（偏离记录，请白盒评审确认）：`embedOrigin` 来自签发请求的 `Origin` 头，账号本人用非浏览器客户端可发 `*`、`null`、`http://a; x`。汇点处 fail-closed：仅当 `URL.canParse(e) && new URL(e).origin === e` 时原样写入，否则与 `null` 一样取 `'none'`。实施时追加第三个条件（`headers.ts:50`、`:70`）：含 `*`、`;`、`,`、`'` 任一字符即取 `'none'`——`http://*`、`http://*.a.test`、`http://a;b`、`http://a,b`、`http://a'b` 都能通过前两个条件原样往返，前两者是 CSP 通配，后三者是指令或策略分隔符。不写正则，避开 semgrep 的 `detect-non-literal-regexp`。
+- 新文件 `server/test/preview-headers.test.ts`（实际 284 行，先写红；另有「能当来源解析但含 CSP 语法字符」一组六例，先自证输入能原样往返），用例：HTML 七键整对象 `toEqual` 且 CSP 逐字相等；PDF 的 CSP 恰为 `frame-ancestors http://127.0.0.1:3000`，`null` 时恰为 `frame-ancestors 'none'`；29 行 `it.each` 全表字面量；表外一组全为 octet-stream（`README`、`data.bin`、`html`、`pdf`、`a.`、`a.xhtml`、`a.ts`、`a.docx`、`a.zip`、`a.constructor`、`a.__proto__`、`site.v2/README`）；大小写 `A.HTML`、`X.PDF`；失败四键整对象相等且三项公共头与成功响应逐值相同；非法 `embedOrigin` 一组（`*`、`null`、`http://a.test/`、`http://a.test; sandbox allow-same-origin`、`javascript:alert(1)`）取 `'none'`，合法的 `http://[::1]:3000`、`https://preview.example.test` 原样。
+- 门槛与清单：既有测试无一需要改（纯新增两文件，`server/test/workspace-preview.test.ts` 不动）；800 行、jscpd、naming-guard、gitleaks 都不触发，覆盖率要求两个分支都被上面的用例走到。不是配置刀，不动 `system.md` 第 9 节的表与配置条数断言。未接线、无用户可见变化，no checklist rows。`tasks.md` 只勾 12.2，12.3 / 12.4 留给 #1069。
+- 变异：非 PDF 的 CSP 加上 `allow-same-origin` → 「HTML 响应是不透明来源」的 CSP 逐字相等断言判红（issue 指定的那条）。
+- 变异：CSP 加 `allow-popups`、`allow-top-navigation` 或 `default-src 'self'` → 同一条逐字相等断言判红。
+- 变异：PDF 也带 `sandbox` → 「PDF 响应不带 sandbox」的恰等断言判红。
+- 变异：PDF 例外改按原始文件名 `endsWith(".pdf")` 判 → `X.PDF` 用例判红。
+- 变异：把 `svg` 也列入不带 sandbox 的例外 → `a.svg` 带 sandbox 的断言判红。
+- 变异：`embedOrigin` 为 `null` 时输出 `frame-ancestors *` 或省略该指令 → `'none'` 用例判红。
+- 变异：去掉 `embedOrigin` 校验、原样拼接 → 非法 `embedOrigin` 一组判红。
+- 变异：退回只有前两个条件的原式（去掉字符检查）→ 「含 CSP 语法字符」一组判红。
+- 变异：字符表 `*`、`;`、`,`、`'` 各去一个 → 该组对应字符的用例判红。
+- 变异：表外回退改成 `text/plain` 或 `text/html` → `README`、`data.bin` 用例判红。
+- 变异：`lastIndexOf` 为 `-1` 时不提前返回 → 文件名 `html`、`pdf` 的用例判红。
+- 变异：`Map` 换成对象字面量 → `a.constructor`、`a.__proto__` 用例判红。
+- 变异：去掉 `toLowerCase` → `A.HTML` 用例判红。
+- 变异：`xml` 改成 `application/xml`，或表里加 `xhtml` → 全表行与表外行判红。
+- 变异：成功响应删掉 `nosniff`、`no-store`、`no-referrer`、ACAO、CORP 任一项 → 七键整对象相等判红。
+- 变异：失败响应多带 ACAO 或 CSP，或 `Content-Type` 变成 JSON → 失败四键整对象相等判红。
+- 变异：预期不可观察：「按内容嗅探」。函数签名里没有内容参数，本刀写不出这条变异；它的证据是签名本身，路由层的证明在 #1069 的「类型只看文件名」（`notes.txt` 内容是 HTML）。
+- 变异：预期不可观察：404 状态码与正文文案、令牌与 `Origin` 的往返。本刀没有监听器，归 #1069。
+
+## 10.1（#1063）
+
+- Critical Path：本刀不碰 `sandbox.resolve`、不加 `op`、不加路由（那是 #1065），但解析的是用户文件里攻击者可控的字节，按 issue 要求 PR 标注白盒审查、两个评审席；本层的逃逸向量是内存与时间上界、成员名只是数据，「他人工作空间 → 相同 404」「越界 → `sandbox.reject`」归 #1065 / #1075。
+- 解析层契约（规格只写了路由层，此处定死）：`archive.ts` 导出 `archiveFormat(name: string): "tar" | "tar.gz" | "gz" | null` 与 `listArchive(format, name, readAt, options): Promise<{format, entries, truncated}>`；`readAt: (position: number, length: number) => Promise<Buffer>`（文件尾返回短 Buffer）；`options: {maxEntries: number; now: () => number}`；条目是 `{path: string; type: "file" | "dir"; size: number | null}`（`size` 必填，`exactOptionalPropertyTypes`）；「不支持」一律 `throw new HttpError("preview_unsupported")`（同 `preview.ts:51` 的做法）。
+- `archive.ts` 本刀不导入 `node:fs`、`node:os`、`node:path`：文件由调用方打开并给出 `readAt`，「不落盘、不访问成员路径」由此在结构上成立；只导入 `node:zlib` 与 `../core/errors/index.js`。#1064 的 zip 需要 fd 或路径时由那一刀自己扩签名，记入其偏离记录。
+- `archiveFormat` 按小写文件名判定，先判 `.tar.gz` / `.tgz`、再 `.tar`、最后 `.gz`；`.zip` 在本刀返回 null，由 #1064 加入，本刀不写「`.zip` → null」的断言（否则下一刀要改），用 `readme.md` → null 覆盖该分支；`gz` 不读任何字节，`path` 为 `name.slice(0, -3)`（保留原大小写），`size: null`——内容不是 gzip 的 `x.gz` 也返回一项，记入偏离记录。
+- 一个遍历器、两个字节源（否则 jscpd 3% 会咬）：内部 `ByteSource {read(n), skip(n)}`；`tar` 的 `skip` 只挪位置不读；`tar.gz` 以固定 65536 字节的块经 `readAt` 取压缩字节喂 `zlib.createGunzip()`，`skip` 丢弃解压出的字节；任何退出路径（上限、时限、损坏、抛错）都在 `finally` 里 `destroy()` gunzip；每次 `readAt` 的 `length` 因此至多 65536。
+- 头校验（规格未写，「一项都读不出 → 415」靠它才可测）：每个 512 字节头验 ustar 校验和（校验和域按八个空格计、无符号求和）；`size` 只认八进制，base-256 或非法字符按损坏；`prefix` 只在 magic 恰为 `ustar\0` 时拼接（GNU 的 `ustar␠␠\0` 该区域不是 prefix）；名字取到首个 NUL，优先级 pax `path` > `L` > `prefix/name`；`Buffer.toString("utf8")` 自带 U+FFFD 替换。
+- 结束与损坏的判定：读到一个全零块 → 正常结束（零项时返回 `entries: []`、`truncated: false`，不是 415）；短头、缺头（文件尾没有零块）、坏校验和、坏 `size`、gunzip 报错、坏 pax 记录都算损坏——此前零项则抛不支持，已有项则停读并置 `truncated: true`；头已读全而正文被截断的成员计入结果（`cut.tar` 两种切法各一例：切在第二个头中间 → 一项；切在最后一个成员正文中间 → 含该成员）；不取文件大小。
+- 扩展记录：`L` 与 `x` 先看声明的 `size`，大于 65536 即不读、按损坏处理；读入后名字（去尾 NUL）超过 4096 字节同样按损坏，该成员不计入；`K`、`g` 整段 `skip`、不读入、不成为条目；pax 用 `indexOf` 逐条按字节解析 `LEN key=value\n`，只取 `path`，不用 `RegExp`（semgrep）；ustar 拼接名最长 256 字节，不会触上限。
+- 类型与大小：`typeflag` 为 `5` → `dir`，其余一律 `file`；`path` 原样（含尾部 `/`、`..`、前导 `/`）；`size` 取头里的值，pax 的 `size` 记录不认；正文一律按头里的 `size` 向上取整到 512 跳过。
+- 上限：`entries.length === maxEntries` 时立即停读并置 `truncated: true`，不探下一个头（规格字面）；后果是恰有 `maxEntries` 个成员的包也报 `truncated`，用「上限 3、三个成员」一例钉住并记入偏离记录。
+- 时限 5000 毫秒是模块常量：开始取一次 `now()`，每轮取头之前判一次（扩展记录那一轮也判，否则一串 `g` 头不受限），`tar.gz` 的 `skip` 每丢一块再判一次；`slow.tar` 的时钟由测试的 `readAt` 驱动——收到第三个成员头的位置时把假时钟拨到 +6000，期望恰三项；另加规格外的 `bomb.tgz`（第一个成员正文 8 MiB 的零、后跟一个成员，假时钟每调用一次加 1000）期望一项 + `truncated`，它同时钉住 `tar.gz` 也有时限。
+- 测试落位：字节构造器（`tarHeader`、`tarFile`、`paxRecord`、记录最大 `length` 的 `readAt` 包装）放新文件 `server/test/workspaces-archive-helpers.ts`，因为 `workspaces-archive.test.ts` 还要被 #1064、#1065 续写，本刀控制在约 300 行内；helper 的每个导出都要有测试导入（`knip.json` 里 `test/**` 的非 `.test.ts` 文件只是 project 不是 entry）；`archive.ts` 的导出只被测试引用是合规的。
+- 「无新增文件」要能判红：包写进 `tempDir()`（`server/test/core-db-helpers.ts:128`），`readAt` 用真实文件句柄；用 `vi.stubEnv("TMPDIR", <空子目录>)` 后断言该子目录仍为空、包所在目录的列表前后相同，不要快照全局 `os.tmpdir()`（并行 worker 会抖）；恶意成员名一例另用 `spyBodyIo()`（`server/test/workspace-file-helpers.ts:17`）断言没有任何调用收到成员名路径。
+- 门槛与清单：biome 认知复杂度上限 15，遍历循环必须拆成 `parseHeader` / `readExtension` / `parsePax` / `walk` 等小函数；`noUncheckedIndexedAccess` 下取字节用 `readUInt8` 或 `subarray`；覆盖率分支 80%，损坏分支逐条有用例（随机 1 KiB 的 `junk.tar` → 不支持、非 gzip 的 `x.tgz` → 不支持、0 字节 `.tar` → 不支持）；不新增配置键、不动 `docs/architecture/system.md` 第 9 节、不动 `server/src/workspaces/index.ts`；纯服务端库函数，no checklist rows。
+- 变异：到上限后继续读 → 1500 成员 `big.tar.gz` 的「恰 1000 项」与上限 3 的 `x.tar`「恰 3 项」判红。
+- 变异：不认 GNU `L` → 200 字符长路径用例判红；不认 pax `path` → 中文路径用例判红。
+- 变异：去掉扩展记录 65536 的声明长度判定（按声明长度分配或读取）→ `evil.tar` / `evil2.tar` 的「`readAt` 最大 `length` ≤ 65536」判红；`evil.tar` 也可能先以 `ERR_OUT_OF_RANGE` 抛出，同样算红。
+- 变异：去掉成员名 4096 字节上限 → `long2.tar` 的「恰一项 + `truncated`、没有超过 4096 字节的 `path`」判红。
+- 变异：时限只套在 `tar.gz` 上 → `slow.tar`「恰三项」判红；时限只套在 `tar` 上，或去掉 `skip` 里的逐块判定 → `bomb.tgz`「恰一项」判红。
+- 变异：去掉校验和校验 → `sum.tar` 判红（会列出 `xad.txt`）；`junk.tar` 不红——它在第 148 字节是 `M`，先被八进制校验和域拒掉。
+- 变异：不论 magic 都拼 `prefix` → 需要一例 GNU magic 且 `prefix` 区域非零的头，期望 `path` 只取 `name`；不加这一例则此变异不可观察，建议加。
+- 变异：把 `x`、`g`、`K` 记录当成员 → 中文路径用例的条数断言判红。
+- 变异：对成员名做规范化（`path.normalize` 或去前导 `/`）→ 恶意成员名用例的原样断言判红；对成员名做文件系统访问 → `spyBodyIo` 断言判红，但只拦得住回调与同步 API，`fs.promises` 不在其内。完整的「空间外无读写」归 #1065。
+- 变异：把 `.gz` 的判定排到 `.tar.gz` 之前 → `x.tar.gz` 的 `format` 断言判红。
+- 变异：去掉 `finally` 里的 gunzip `destroy()` → 本刀不可观察（没有可数的句柄），靠白盒审查。
+- 变异：目录遍历、符号链接、跨工作空间 id、他人工作空间 404、越界审计 → 本刀没有路由，不可观察，归 #1065 / #1075。
+
+## 14.1、14.4（#1071）
+
+- 触及 Critical Path「omp 子进程治理」同类（spawn / 回收、sudo 身份、环境不得带凭证）：两个评审席位，PR 标白盒审查；不经 `sandbox.resolve`（输入已是绝对路径）；纯服务端，无验收清单行；不动 `docs/architecture/system.md`。
+- 现状核对：`server/src/preview/` 与 `server/test/fixtures/` 都不存在（既有假可执行文件在 `server/test/support/`，`fake-omp.mjs` 为 100755）；按任务原文新建 `test/fixtures/`，`naming-guard` 的草稿目录正则不命中，约定不一致记入偏离记录。
+- 复用点：`server/src/core/process-path.ts` 的 `SETPRIV_PATH`（:5）、`assertSafeSudoPath`（:11）、`assertSetprivExecutable`（:26），调用形态照 `sessions/omp/process.ts:74-77`，每次 `convert` 在 spawn 前检查，抛错即 `failed` 且不 spawn、不回退；作业目录用 `core/sandbox/dirs.ts:41` 的 `ensureOwnedDir(job, 0o2770)`。
+- 不导入 `sessions/omp/process.ts:56` 的 `SpawnImpl`（返回 `ChildProcessWithoutNullStreams`，与 `stdio:"ignore"` 不符）；`office.ts` 自定本地 spawn 类型，缺省 `node:child_process` 的 `spawn`。
+- 签名偏离：选项为 `{officeBin?, cacheDir, timeoutMs, ompUser?, spawn?}`；`spawn` 是规格五键之外的测试 seam；`concurrency` 本刀不收（无行为可证），由 #1073 加入；错误为 `OfficeConvertError`，`kind ∈ unavailable|failed|timeout|aborted`，`message` 恒等于 `kind`。
+- 输出落点（规格未写，#1072 正文「输出留在作业目录」与规格「作业目录已不存在」冲突，以规格为准）：成功后复制为 `<cacheDir>/pdf/<随机名>.pdf` 再删 `<job>` 并返回该路径；#1072 只把随机名换成缓存键并加命中；`work/`、`pdf/` 由调用方建，本刀不 mkdir，`work/` 缺失即 `failed`。
+- 成功判定与复制同一个 fd：`open(O_RDONLY|O_NOFOLLOW|O_NONBLOCK)`（`O_NONBLOCK` 防输出名被换成 FIFO 时 open 挂住） → `fstat` 为普通文件且 `size>0` → 从该 fd 读出写入 `wx`、`0600` 的新文件；不用「`lstat` 后 `copyFile`」（`OMP_USER` 模式下中间可被换成符号链接）；输出名为 `parse(basename(absInput)).name + ".pdf"`。
+- 删作业目录：`rmSync(job,{recursive:true,force:true})` 必须包 try/catch（本机实测：子目录 `0500` 时 `force` 仍抛 `ENOTEMPTY`）；`out/`、`profile/` 不预建，由假 `soffice` 自己 `mkdir -p`。
+- 终止：同 uid 模式 `detached:true`，仅当 `child.pid` 为正整数且未退出时 `process.kill(-pid,"SIGKILL")`（`officeBin` 不存在时 `pid` 为 `undefined`，不得落成 `kill(0)` 杀掉自己的进程组）；`OMP_USER` 模式不 `detached`，`child.kill("SIGKILL")`；两者都等 `exit` 后才落定；spawn 的 `error` 事件仅在没有 pid（进程未起来）时落定为 `failed`；有 pid 的 `error`（如 `kill` 得 `EPERM`）不落定，仍等 `exit`。
+- 未写明的分支：调用时 `signal` 已中止 → `aborted`，不 spawn、不建作业目录；`close()` 幂等，其后 `convert` 立即 `aborted`；`LANG` 缺席时不设该键。
+- 夹具 `fake-soffice.mjs`（100755，`#!/usr/bin/env node`）：记录写在 `dirname(<job>)/<job 名>.record.json`，内容 `{argv: process.argv.slice(1), env, pid, childPid?}`；标记取自最后一个 argv 的文件名；「先起子进程再睡眠」的子进程与睡眠都设上限（如 30 秒）自行退出。
+- 另加第八、第九个标记（第九个是 `fifo`：输出名是命名管道，断言 `failed` 且不挂住；第八个如下）（偏离 14.4 的七种）：在 `<job>` 下留一个 `0500` 的非空目录后正常写 PDF，用例断言 `convert` 仍成功、结果可读，`afterEach` 先 `chmod` 再清；这是 #1052 第 1 点在同 uid 下的等价物，没有它 try/catch 分支无证。
+- 测试 `office-converter.test.ts`：注入的 spawn 包装器记录每次的 `command`、`args`、`options.env` 与 `ChildProcess`，是「恰启动一次」「命令为 `sudo`」「`exit` 的 signal 为 `SIGKILL`」「basename 不为 `soffice` / `libreoffice`」的判据；假 `sudo` 是临时 bin 目录里名为 `sudo`、指向夹具的符号链接，`process.env.PATH` 设为「临时 bin:`dirname(process.execPath)`:/usr/bin:/bin」并在 `afterEach` 还原；sudo 用例套 `useSetprivStub()`（`test/support/setpriv.ts`）。
+- 断言口径（偏离记录）：环境键集合对包装器的 `options.env` 精确断言，对子进程记录先去掉 macOS 运行时注入的 `__CF_USER_TEXT_ENCODING` 再精确断言；`LANG` 随 `process.env.LANG` 条件断言；父环境里的 `MODEL_UPSTREAM_API_KEY` 用低熵占位值；「缓存目录里没有新增文件」落实为 `pdf/` 为空且 `work/` 下没有目录（只剩记录文件）；「都已不存在」为对 `pid`、`childPid` 轮询 `process.kill(pid,0)` 直到 `ESRCH`，先断言 `childPid` 已记录；中止与 `close()` 用例先等记录出现再动手；`OMP_USER` 场景末句「并发名额已释放」留给 #1073；`OMP_USER` 用例不断言作业目录已删。
+- 门槛：`convert` 拆成 argv / 环境构造、spawn 与等待、终止、输出判定四个函数（Biome 复杂度 15）；sudo 前缀数组不照抄 `process.ts:137-153` 的结构与注释（jscpd），也不抽共用 helper 进 `core/process-path`；knip 以 `test/**/*.test.ts` 为入口，测试是唯一导入方即可，只导出测试用到的符号；`.mjs` 不计 800 行但受 Biome 约束；200 毫秒超时若在 CI 上抖，放大数值并记偏离，不放松断言。
+- 变异：同 uid 超时改为只 `child.kill("SIGKILL")` → 「超时与中止」的 `childPid` 不存在断言判红。
+- 变异：`OMP_USER` 终止改为经注入的 spawn 再起一个 `sudo … pkill` → 「假 `sudo` 恰被启动一次」判红。绕过注入 spawn 直接调 `child_process` 的写法测试观察不到，靠白盒审查。
+- 变异：sudo 立即失败后回退直接启动 `officeBin` → 「sudo 前缀」的启动次数与命令断言判红。
+- 变异：环境改为继承 `process.env` → 「argv、环境与成功判定」的键集合断言判红（记录里出现 `MODEL_UPSTREAM_API_KEY`）。
+- 变异：`HOME` 不指向作业目录，或 `UserInstallation` / `--outdir` 不在同一作业目录下 → 同一场景的 argv / `HOME` 断言判红。
+- 变异：输出判定把 `O_NOFOLLOW` / `fstat` 换成跟随链接的 `stat` → 「各类失败」的符号链接例判红；去掉 `size>0` → 空文件例判红；不看退出码 → 退出码 1 例判红。
+- 变异：错误 `message` 带上输入路径或作业目录 → 「各类失败」的「不含路径」断言判红。
+- 变异：去掉成败后的删作业目录 → 「作业目录已不存在」判红；让删除失败上抛 → 第八标记用例判红。
+- 变异：结果直接返回 `<job>/out/*.pdf` 而不复制 → 「落定路径内容等于假进程所写 PDF」判红（作业目录已删，读不到）。
+- 变异：去掉 `close()` 后的 `aborted` 短路 → 「`close()` 之后的 `convert`」判红；去掉 `available:false` 的短路 → 「未配置」的零次 spawn 与 `work` 下无新目录判红。
+- 变异：预计不可观察：`lstat` 与复制之间的换链接竞态（假进程无法定时注入）；`OMP_USER` 模式下真实后代残留（已登记残余，归 28.6 人工验证）。
+
+## 23.1（#1104）
+
+- 不触 Critical Path（无沙箱、omp 子进程、审批）；单评审席即可；无配置键、无 `docs/architecture/system.md` 表改动；纯拷入、无用户可见变化——no checklist rows；不登记 `MIGRATED_AREAS`。
+- 依赖：边表「23.1 只 ← 0.1」（#1049 / PR #1285 视为已合），代码层面也无其它前提；不等 1.1 / 1.2 / 1.3，与 #1052 的裁决无关；不依赖同批任何兄弟刀。唯一下游是 #1105（23.2–23.6，另 ← 21.1）。
+- 合并次序：本刀改根 `package-lock.json`、`web/package.json`、`ATTRIBUTION.md` 第 3 节；同批凡加 npm 依赖的刀（proposal 点名服务端 `yauzl`，属组 10）会在锁文件与 `ATTRIBUTION.md` 冲突，串行合，后合者 rebase 后重跑 `npm install`，不手工合锁文件。
+- registry 原件取自 `https://ui.shadcn.com/r/styles/radix-nova/resizable.json`（`web/components.json` 的 style 即 `radix-nova`）：单文件约 50 行，导出 `ResizableHandle`、`ResizablePanel`、`ResizablePanelGroup`，只导入 `cn` 与 `react-resizable-panels`，不导入 `radix-ui`、`lucide-react`、`react`。
+- 六类修改实际只有两类，PR 描述逐条列：（三）Biome 格式化（双引号、分号、行宽 100、导入排序；首行 `"use client";` 保留，先例 `web/src/components/ui/collapsible.tsx:1`）；（四）`import { cn } from "cn"` 改为 `from "@/lib/utils"`。颜色类全是主题变量（`bg-border`、`ring-ring`、`ring-offset-background`），无可见文案，预期无需类型适配，不做透传修改。
+- 依赖：`npm install react-resizable-panels --workspace web`，当前 4.14.3，MIT，无运行时依赖，peer 为 react / react-dom ^18 || ^19。registry 原件用的是 v4 API（`Group` / `Panel` / `Separator`、`GroupProps` / `PanelProps` / `SeparatorProps`），不得装 3.x。`web/package.json` 的 `@radix-ui/*` 仍是 7 个，PR 描述贴 diff 佐证。
+- `ATTRIBUTION.md` 第 3 节新增条目，标题行须满足 `ui-guardrails.test.ts:230` 的 `hasEntry` 格式：``- **react-resizable-panels** —— `MIT License`,版权归 Brian Vaughn（https://github.com/bvaughn/react-resizable-panels）``，下接「用途」（shadcn/ui `resizable` 的依赖，会话页工作空间侧边栏分隔线用；本刀尚无应用层调用方）与「义务」两行。版权人以安装后包内许可文件为准。shadcn/ui 条目的用途句补一句「`resizable` 随 s1f-files-page 任务 23.1 拷入,新增依赖 `react-resizable-panels`」。
+- 新测试 `web/test/components-ui-resizable.test.tsx`（命名先例 `components-ui-button.test.tsx`、`components-ui-radio-group.test.tsx`；它是 knip 眼里唯一的导入方）：渲染 `ResizablePanelGroup` + 两个 `ResizablePanel` + `ResizableHandle withHandle`。断言三个 `data-slot`（`resizable-panel-group` / `resizable-panel` / `resizable-handle`）、`getByRole("separator")` 存在且可聚焦、`withHandle` 时分隔线内有一个子 `div`、调用方 `className` 透传到 Group 与 Handle。
+- jsdom 坑：库在 Group 挂载时无条件 `new ownerDocument.defaultView.ResizeObserver(...)`，jsdom 没有它，`web/test` 也没有现成桩。测试内 `vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} })`，`afterEach` 里 `vi.unstubAllGlobals()` 与 `cleanup`；桩写在本测试文件内，不新建共享 helper。
+- 上述渲染断言在 jsdom 下未经执行验证（只确认了 `ResizeObserver` 一处硬依赖，`adoptedStyleSheets` 有守卫）。若还有别的缺口使 Group 挂不上，停下报告，不 mock 整个库、不改拷入文件。
+- `web/test/ui-guardrails.test.ts`（254 行）的 `describe("ATTRIBUTION.md")` 加一条：`hasEntry(attribution, "react-resizable-panels", /\bMIT\b/)` 为真，且 `web/package.json` 的 `dependencies` 含该包。这是唯一要动的既有测试文件，只增不改。
+- 豁免核对，全部按目录通配，无事可做：`constraints.yaml:169`（`web/src/components/ui/**`）、`web/vitest.config.ts:16`、`.jscpd.json:9`、`scripts/size-guard.sh:20`、`biome.json:44`（只关 linter，formatter 与导入排序仍生效）、`knip.json` 的 `ignore`。`web/test/ui-layering.test.ts:524` 钉死 `knip.json` 只有这两条 `ignore`；不加 `ignoreDependencies`（issue 禁止改 knip 规则）。
+- 既有守卫不受影响：`ui-layering.test.ts:704` 只钉 `assistant-ui` 目录的文件集，`components/ui` 无文件清单断言；拷入文件无动态 `import()`；应用层零导入，主包字节数不变。
+- 偏离记录写三条：（1）新增测试文件作为唯一导入方，原因见 knip 行为；（2）六类修改只用到两类；（3）版本落在 v4。
+- 变异清单：
+- 删 `ATTRIBUTION.md` 的 `react-resizable-panels` 条目标题行，或去掉其 `MIT` → `ui-guardrails.test.ts` 新增用例红。
+- 删 `web/test/components-ui-resizable.test.tsx`（或去掉其对 `@/components/ui/resizable` 的导入）→ `npx knip` 报 `react-resizable-panels` 未使用依赖，`make check` 的 anti-drift 红（预期，按源码推断）。
+- `resizable.tsx` 的 `ResizableHandle` 去掉 `{...props}` 或 `data-slot` → `components-ui-resizable.test.tsx` 的 `data-slot` / `className` 透传断言红。
+- `ResizableHandle` 把 `withHandle &&` 改成恒假 → 「分隔线内有子 `div`」断言红。
+- 测试里去掉 `ResizeObserver` 桩 → 同文件渲染即抛错变红（证明桩是必需的，不是装饰）。
+- `web/package.json` 多加一个未登记的 `@radix-ui/react-*` → 既有 `ui-guardrails.test.ts:219`「Radix 条目列出 web 已安装的每个 @radix-ui/* 包」红。
+- 把 `cn` 导入改回 `"cn"` → `npm run typecheck` 与测试的模块解析红。
+- 预期不可观测：把 `bg-border` 换成颜色字面量（拷入层关了 linter，无颜色守卫扫 `components/ui`）——只能靠评审对照 registry 原件 diff，PR 描述附逐行对照。
+
+## 26.1（#1111）
+
+- 不触及 Critical Path：只加四个被跟踪的数据文件并改 `smoke/fixtures/README.md`，不动 `sandbox.resolve`、`op`、路由、omp 子进程或审批；单席评审即可，无需 owner 白盒。
+- 依赖：边表「26.1 只 ← 0.1」，0.1 即 #1049（PR #1285）；不等实测 1.1 / 1.2 / 1.3，与 #1052 的裁决无关；代码上不依赖同批任何一刀（#1053、#1054、#1055、#1057、#1059、#1061、#1063、#1066、#1068、#1071、#1076、#1077、#1104），可排在批内任意位置。下游是 26.2（#1112）、27.1 的 (a)(b)(c) 与 27.2。
+- 引用核对无漂移：夹具目录在 `origin/master` 恰为 `readme.md`（369 B）、`notes.csv`（42 B）、`logo.png`（1277 B）；`smoke/files.hurl:38-43` 对 `tree` 只有三条 `exists` 断言，无计数、无顺序；`web/e2e/ui-walk.spec.ts:326-330` 的 `expectRootFileButtons` 只按名取三个按钮，`:246` 的 `toHaveCount(0)` 只针对 `walk-out`。新增文件不会让既有断言变红。
+- 夹具经既有 `cp -R smoke/fixtures/sandbox/u1/. "$SANDBOX_ROOT/u1/"` 进 CI（`.github/scripts/ci-compiled-server.sh:16`、`ci-uid-isolation.sh:95`，后者 `:97` 的 `find -type d -exec chmod 2770` 自动覆盖新目录 `site/`）；`scripts/test-ci-harness.sh:466-469` 只 `cmp` 三个旧文件，本刀不改它。
+- `site/index.html`（纯 ASCII、LF、文末换行、两格缩进）：`<!doctype html>`、`<html lang="en">`、`<meta charset="utf-8">`、`<title>smoke-site</title>`、`<link rel="stylesheet" href="./style.css">`、`<h1>smoke-site</h1>`。不放 `<script>`、内联 `style`、外链地址、favicon 链接：27.1(b) 的 oracle 是「只有预览来源的非 `baseURL` 请求、零 console 错误」。
+- `site/style.css` 只有一条规则 `h1 { color: rgb(0, 128, 0); }`；不在 `index.html` 里重复颜色，否则 27.2「删掉 `style.css` 必红」失效。
+- `sample.py` 两行、四格缩进、文末换行、模式 100644、无 shebang：`def greet(name):` 与 `    return f"hello, {name}"`。首行必须含会被 `highlight.js` 着色的记号（`def` 关键字），因为 27.1(a) 断言首行至少一个高亮元素；首行不要写空行或纯标识符。
+- `clip.wav` 定为 844 字节：Python 3 标准库 `wave` + `struct`，单声道、16 位、8000 Hz、400 帧，第 `i` 帧取 `8000 if (i // 9) % 2 == 0 else -8000`（纯整数方波，可逐字节复现）。我在 scratchpad 实测：44 字节文件头、`data` 块 800 字节、0–3 字节为 `RIFF`，`file` 输出 `RIFF (little-endian) data, WAVE audio, Microsoft PCM, 16 bit, mono 8000 Hz`，sha256 前缀 `6aef1c67`。
+- README 须改的现有句子（否则文档为假）：`:7`「恰好三个文件」改为七个（根下五个加 `site/` 下两个）；`:12` 标题「三个夹具文件」改为「夹具文件」并加四行（用途与内容要点）；`:40`「必须恰好列出五个文件」改为九个并列全；新增一节「`clip.wav` 的生成方式」。
+- README 的写法决定（记入偏离记录）：生成方式仿 `logo.png` 一节用文字写参数与逐帧规则，加一句 `file` 核对输出，不贴可运行的代码块（验收写「仓库里没有生成脚本」）；「消费方」一节本刀不加行，因为新文件此刻没有消费方，由 26.2、27.1 各自补；「替换夹具时要同步检查」加一条：标题 `smoke-site`、相对地址 `./style.css`、颜色 `rgb(0, 128, 0)`、`clip.wav` 不超过 1 KiB 由 files-harness 条文钉死。
+- 守卫都不会触发：四个路径未被 `.gitignore` 命中（`git check-ignore` 无命中）；biome、ruff、jscpd、knip、semgrep 都不扫 `smoke/`；`size-guard` 对暂存的 `sample.py` 只查 800 行；`naming-guard` 无禁用后缀；`clip.wav` 是二进制 diff，gitleaks 不看内容。`.gitattributes` 不用改（Linux CI 不换行尾，`logo.png` 已有先例）。
+- 无清单行：本刀没有产品代码与用户可见行为变化，`docs/acceptance/functional-checklist.md` 不动（该文件现无 `smoke-fixture` 或 `readme.md` 字样）；FL 行随 27.1 与组 17–22。
+- 验证证据（写进 PR）：用含新夹具的沙箱起服务，连跑两次 `make smoke` 全绿，并跑 `make ui-walk`（目录树多出 `site`、`sample.py`、`clip.wav` 三行，既有步骤应不变）；另贴 `git ls-files smoke/fixtures/sandbox`（九行）、`wc -c clip.wav`（844）、`file clip.wav` 的输出。
+- PR 边界之外允许的唯一改动：`openspec/changes/s1f-files-page/tasks.md` 勾选 26.1 并留注记指针（issue 正文要求）；不改 `smoke/*.hurl`、`.github/**`、`scripts/**`、`web/e2e/**`。
+- 变异：删掉 `site/style.css` → 本刀不可观测；27.2 在标题颜色断言处判红，26.2 的 `GET {{base}}site/style.css` 200 判红。
+- 变异：`index.html` 的 `href` 写成绝对地址或 `style.css` 改名 → 本刀不可观测；27.1(b) 的 `rgb(0, 128, 0)` 判红。
+- 变异：`<h1>` 文本不是 `smoke-site` → 本刀不可观测；27.1(b) 的标题断言与源码视图断言判红。
+- 变异：`sample.py` 首行改为空行 → 本刀不可观测；27.1(a) 的首行高亮元素断言判红。
+- 变异：`clip.wav` 截成不足 4 字节或换成非 RIFF 内容 → 本刀不可观测；26.2 的 `Range: bytes=0-3` 206 与 4 字节正文判红（仅当 26.2 比对字节；规格只要求长度，见下）。
+- 变异：`clip.wav` 超过 1 KiB → 任何切片都不可观测（条文禁止长度字面断言）；只靠本刀 PR 里的 `wc -c` 与 README 的同步检查项。
+- 变异：夹具文件漏提交（只在本机沙箱里）→ 本刀 CI 不红（既有 hurl 不取新文件）；PR 里的 `git ls-files` 九行是唯一证据，26.2 的 CI 才会红。
+- 变异：回归方向（本刀可观测）：误改 `readme.md`、`notes.csv`、`logo.png` 任一字节 → `ui-walk.spec.ts:250-282` 的标题、五行、256×256 断言判红；`files.hurl:89-103` 因 `file,` 自引用不会红。
+
+## 10.6（#1301）
+
+- Critical Path 同 10.1：仍只解析攻击者可控的字节，不碰 `sandbox.resolve`、不加路由；本刀把 gzip 的头与流尾改为自己读，PR 标注白盒审查。只动 `server/src/workspaces/archive.ts` 与三个 archive 测试文件；导入仍只有 `node:zlib`（`crc32`、`createInflateRaw`）与 `../core/errors/index.js`。
+- 2026-10-09 所有者裁决后的规格：完整的 gzip 流之后紧跟合法的 gzip 头 → 接着读下一个流、输出接在前一个流之后（多成员 gzip，与 `tar xzf`、bsdtar、Python `tarfile` 一致）；否则其后的字节被忽略。服务的格式是 bgzip（BGZF，每块一个流、头里带 FEXTRA、以一个空流收尾）、eStargz（每个 tar 成员一个流，另有目录与尾标的流）与 `cat a.tgz b.tgz`。第一轮「只读第一个流」的实现与用例已按此改写，见下面「改写了期望的既有断言」。
+- (a) 的机制：`tar.gz` 不用 `createGunzip()`，自己读 RFC 1952 的头、把 deflate 数据交给 `createInflateRaw()`、流尾的 CRC-32 与长度自己核对。
+  - 压缩字节只存在于「最近一次读取」里（`buffer`，至多 65536 字节，`start` 是它在文件里的偏移，`cursor` 是已用到哪里），每次从中切至多 1024 字节的一片喂给 inflater；一片不跨两次读取。
+  - 每喂完一片比较 `inflater.bytesWritten` 与本流已喂入的字节数：相等则继续；前者更小即 deflate 数据已结束，差值是没被用掉的字节数，`cursor` 退回这么多，正好落在流尾 8 字节上。差值是累计的：deflate 数据恰在一片的末尾结束时那一片看不出来（差值 0），下一片整片没被用掉，`cursor` 整片退回。流后的字节因此不另存一份、不拼接，仍在 `buffer` 里。
+  - 流尾 8 字节随即读出并核对（不够时向 `readAt` 取下一次读取，至多一次）。相符 → 销毁这个 inflater，状态回到「两个流之间」；不符或不全 → 数据到此结束。
+  - 下一个流是惰性开始的：只有遍历还要更多字节时，下一步才在 `cursor` 处判头。合法 → 新建一个 inflater（各自挂 `error` 与 `data` 监听，CRC、长度、已喂字节数清零）；不合法或读不全 → 数据到此结束，其后的字节不喂、不读。遍历已到 tar 结束块、已到条目上限或已到时，这一步不会发生，流后的字节一个都不多读。
+  - `fill()` 每次只走一步——开始一个流，或喂一片——没有循环、没有递归；流与流之间的循环就是 `read` / `skip` 里原有的 `while (… && !ended && !expired())`，所以每开始一个流之前都读一次时钟。100 万个空流（各 20 字节、解出零字节）在真实时钟下 5.2 秒返回空列表 + `truncated`，10 万个 0.9 秒走完并列出其后的三个成员（探针，Node v24.13.1）。
+  - 读到比请求短的一次读取即文件结束（`readAt` 的约定），此后不再调用 `readAt`。
+- 五项判定：
+  - (i)「合法的 gzip 头」= 魔数 `1f 8b`、CM 为 8、FLG 的保留位（`0xe0`）为零、FEXTRA / FNAME / FCOMMENT 在可用的字节里完整结束、FHCRC 置位时 CRC-16 相符，且头之后同一次读取里至少还有一个字节。判定分三种结果：长度、`invalid`（魔数、CM、保留位、FHCRC 不符——再读多少也不会变）、`incomplete`（可用的字节只够头的开头）。两种非长度的结果在流之后都按「其后的字节」忽略，不是损坏。
+  - (ii) 流尾之后不足 10 字节、全零的填充（按块补齐的 `.tgz`）、任意非 gzip 字节 → 忽略；头两个字节不是魔数时立即判 `invalid`，不为它多读。
+  - (iii) 流尾 8 字节齐全而 CRC-32 或长度不符 → 该流按原行为处理（见下「损坏」），不再读下一个流。流尾不全（文件到此为止）→ 已解出的照常交出，也没有下一个流可读。
+  - (iv) 空流（解出零字节）合法，逐个越过，每个一步。
+  - (v) 下一个流的头在当前读取里只有开头（`incomplete`）、`cursor > 0` 且文件还没结束 → 从该流自己的绝对偏移另读一次 65536 字节，在新读取上重判，仅此一次；仍读不全 → 忽略。`cursor` 为 0 时这次读取本来就从头的位置开始，不重读。重读的位置严格大于上一次读取的位置，不回到 0、不缓存跨读取的字节。头逼近 65536 字节的流连成串时每次读取只前进一个流，读入总量不超过文件长度的两倍左右，仍受时限约束。
+- 与规格条文的对照：「每个 gzip 流的头 SHALL 在一次至多 65536 字节的读取之内结束，否则按损坏处理」与「否则这些字节被忽略」对第二个及以后的流在可观察结果上相同——本模块里 gzip 层的损坏就是「数据到此结束」，遍历随后读到短块：已有项则 `truncated`，一项都没有则不支持；tar 已到结束块时遍历根本不再读。文件开头不是合法的 gzip 头同样是「数据到此结束」，遍历读不到第一个头 → 不支持（与第一轮抛 `CorruptArchive` 的结果相同，变异验证过不可区分，所以只留一条路径）。
+- 为什么不能留着 Gunzip（探针在 Node v24.13.1 上的结果，脚本在会话草稿目录 `probe1301/p1.mjs`、`p2.mjs`，不入库）：
+  - Gunzip 在一个流结束后不发 `end`，要等下一批输入才判定后面是什么：全零 → 当填充、发 `end`；`1f 8b` 开头的 → 接着解（多成员被拼接，这一点与新规格相同）；其它非零字节一律 `Z_DATA_ERROR`。
+  - 流尾与无关字节落在同一次 `write` 里时，这次 `write` 解出的字节一个都不交出（3000 字节的流 + 10 个 `j` 一次写入：`data` 0 字节、`bytesWritten` 0）；分两次写则第一次交出 3000 字节、第二次报错。10.1 的「2976 项 + `truncated`」「三个成员 + 尾部 → 不支持」都由此而来。没有选项能让它把非 gzip 的尾部当作结束，也没有选项能让它对下一个头的合法性另作判定。
+  - InflateRaw 停在最后一个 deflate 块：同一次或之后的 `write` 里多出来的字节不报错、不产出；`bytesWritten` 是**被用掉**的字节数而不是写入的字节数（写入 33、用掉 23；流恰好在一次 `write` 的末尾结束时，下一次 `write` 用掉 0）。中途损坏仍是 `Z_DATA_ERROR`，截断仍在 `end()` 时 `Z_BUF_ERROR`。
+  - 用 `bytesWritten` 而不用 `end` 事件或 `readableEnded`：前者在 `write` 回调时已确定，后者取决于事件派发的时序。
+- 损坏（gzip 流自身损坏或未结束，行为与第一轮相同）：文件开头不是合法的头 → 不支持；deflate 中途出错或被截断 → 此前各片解出的照常交出，然后短读 → 已有项则 `truncated`（发生在第二个流里也一样：前面各流的成员都在）；流尾 8 字节齐全而不符 → 数据到此结束，并且「看出 deflate 数据已结束的那一片」解出的字节不交出。那一片通常就是流的最后一片（小包整个在一片里，三个成员的小包因此是不支持）；deflate 数据恰在片边界结束时，看出结束的是下一片，它什么都没解出，所以什么都不丢——整个流的输出都已交出，只是到此为止、不读下一个流。流尾不足 8 字节 → 已解出的照常交出，结束块读到了就不置 `truncated`。遍历在结束块处已返回时流尾根本不会被读到。
+- (b)：`takeHeader` 的缺省分支里 typeflag 为 `1`–`6` 的成员返回 0（不跳过任何字节），其余仍按头里的 `size` 向上取整到 512；条目的 `size` 仍是头里的值，`5` 之外仍是 `file`。`0`、NUL、`7`、未知字母照旧有正文。
+- 改写了期望的既有断言：
+  - 第一轮：`workspaces-archive-tar.test.ts`「读出若干项之后才损坏…」里的 `tail.tgz`（3000 个成员 + 300000 个 `j`）由「条数在 1–3000 之间、是前缀、`truncated:true`」改为「与不带尾部的 `whole.tgz` 整个列表相等」（3000 项、`truncated:false`）；循环里原 `tail.tgz` 的位置换成中途被 64 个 `0xff` 覆盖的 `garbled.tgz` 及其带尾部的版本，条数上界由 `≤ 3000` 收紧为 `< 3000`。
+  - 第二轮（裁决后翻转，仅此一条用例）：同文件「多成员 gzip（两个流首尾相接）」里「没有结束块的第一个流（`m0`、`m1`）+ 第二个流（`second.txt` 与结束块）」由 `[m0, m1]`、`truncated:true`、与只有第一个流时整个列表相等，改为 `[m0, m1, second.txt]`、`truncated:false`；「只有第一个流」的 `[m0, m1]`、`truncated:true` 改为单独断言。同一用例里没翻转的三条原样保留：第一个流已带结束块 → 三项、`truncated:false`；第一个流 + 300000 个 `j` → 与只有第一个流时相等、`positions` 为 `[0]`；第一个流 + 第二个流的 `positions` 为 `[0]`。用例标题与所在 `describe` 的标题同步改写。
+- 改了夹具、没改断言的两处：
+  - 第一轮：「读函数自己的失败原样抛出」的第三段，夹具加一个 100000 字节不可压缩正文的成员，使压缩流确实越过 65536、第二次读落在流的中途。
+  - 第二轮：「gzip 流自身损坏、一项都读不出」的「FNAME 没有结尾的 NUL」一行，原夹具取真实 gzip 流的前 17 字节并置 FNAME 位，第 10–16 字节是 deflate 输出、可能含 NUL；改为显式的 `1f 8b 08 08 00 00 00 00 00 03` + `61 62 63 64 65 66 67`，七个字节都非零。
+- 偏离记录：
+  - 每个流的头必须在一次 65536 字节的读取结束之前结束（头之后同一次读取里至少还有一个字节）：FNAME / FCOMMENT 在其中找不到结尾的 NUL、FEXTRA 伸出其外、或头恰好占满 → 文件的第一个流按损坏（不支持），其后的流按忽略。Gunzip 对头的长度没有上限；FEXTRA 至多 65535 字节，头因此要靠 65524 字节以上的 FEXTRA 或超长的 FNAME / FCOMMENT 才触及这条界线。
+  - 下一个头的 CM 或保留位不对、FHCRC 不符时本刀按「其后的字节」忽略；`gzip -d` 对魔数相符而头不合法的后续流会报错。规格的 `multi-bad.tgz` 钉的是前者。
+  - 魔数与头都合法而 deflate 数据是垃圾的尾部会被当作一个流开始，随即 `Z_DATA_ERROR` → 数据到此结束；结果与忽略相同（那一片什么都不交出）。
+  - FHCRC 置位时核对头的 CRC-16（`crc32` 低 16 位），与 zlib 相同；头里的 MTIME、XFL、OS 不看。
+  - 流尾不符时不交出的字节以「片」为单位（见上「损坏」）。Gunzip 的实际后果取决于流尾相对 `write` 边界的位置与 16 KiB 的输出块，这些与分片有关的差别不复刻。
+  - deflate 数据结束后本刀立刻读流尾 8 字节（至多多一次 `readAt`），即使遍历已不需要更多数据；下一个流的头则不预读。
+  - 条目上限在遍历里判定：列出第 N 项之后、判上限之前，遍历仍会跳过该项的正文（10.1 起如此），正文跨到后面的流时这些流会被读到；跳过受时限约束，不产生新条目。
+  - 单个 `gz` 仍不读任何字节，流之后的字节与它无关。
+- 用例数：两个 archive 测试文件合计 117 条（`workspaces-archive.test.ts` 33、`workspaces-archive-tar.test.ts` 84）；第一轮结束时 90 条（29 + 61），第二轮新增 27 条（4 + 23）。第二轮在第一轮的源码上先红的 25 条：新增 27 条里的 24 条，加上翻转的那一条既有用例。
+- 第二轮新增而不是先红后绿的三条（在第一轮的源码上本来就通过，靠变异咬住）：「一个成员之后是 100000 个空的 gzip 流」（第一轮把空流当尾部忽略，结果同为 `[a.txt]` + `truncated`；去掉时限或让 `fill` 连着走多个流即红）、「流尾的 CRC-32 不符的流之后不接着读下一个流」（不符后继续读即红）、`multi-bad.tgz`（不查 CM 即红）。「deflate 数据恰在片边界结束」一条里，「有无 300000 个尾部字节列表相同、`positions` 为 `[0]`」两段在第一轮的源码上是绿的，先红的是同一条里「后跟第二个流」的两段。
+- 第一轮不是先红后绿的用例照旧（防头与流尾解析回退）：「gzip 流自身损坏、一项都读不出 → 不支持」十三行、「流尾的 8 个字节不全」、「deflate 数据在第一片之后才不合法」、`garbled.tgz` 两例、「类型 `0` / NUL / `7` / 未知字母有正文」四行、带尾部的 `bombtail.tgz`、单个 `gz` 后跟非零字节、后跟 10 个零字节。
+- 变异：去掉 (a)（`gunzipSource` 换回 10.1 的 `createGunzip` 实现，保留 (b)）→ 29 条判红：`tail.tgz`、`tail2.tgz`、`bigtail.tgz`、`multi-tail.tgz`、`multi-bad.tgz`、带尾部的各例、「头恰好占满」、全部跨读取边界与「不构成合法头的字节被忽略」各行等；`multi.tgz` 与 `blocks.tgz` 不红（Gunzip 本来就拼接多成员）。
+- 变异：不接着读下一个流（流尾相符后也置 `ended`，即第一轮的行为）→ 25 条判红，正是先红的那 25 条。
+- 变异：下一个头不合法时按流尾不符处理（预读头、丢弃那一片的输出）→ 44 条判红，含 `tail.tgz`、`tail2.tgz`、`multi-bad.tgz`、`multi-tail.tgz` 与全部带尾部的用例。
+- 变异：头不合法时抛 `CorruptArchive` 而不是置 `ended` → 不可观察（117 条全绿）：两者都让遍历在同一处停下，见「与规格条文的对照」。
+- 变异：去掉 `read` 循环里的 `expired()`（流与流之间的循环就是它）→ 4 条判红：两条 `stall.tgz` 与两条「100000 个空的 gzip 流」；让 `fill` 连着走完相邻的流才返回 → 两条「100000 个空的 gzip 流」判红。去掉 `skip` 循环里的 → `bomb.tgz` 与带尾部的 `bombtail.tgz` 判红；去掉取头循环里的 → `slow.tar` 与「恰到 5000 毫秒」判红。
+- 变异：下一个流复用上一个 inflater → 22 条判红（结束了的 raw inflater 不再用掉任何字节，下一个流立刻被判流尾不符）；CRC 与长度不按流清零 → 21 条判红；已喂字节数不按流清零 → 19 条判红。
+- 变异：流结束时不销毁旧 inflater、或去掉 `close()` 里的 `destroy()` → 不可观察（117 条全绿），靠白盒审查：`feed` 里 `current.destroy()` 与 `inflater = null` 相邻，`close()` 在 `listArchive` 的 `finally` 里。
+- 变异：去掉 inflater 的 `error` 监听 → 「deflate 数据在第一片之后才不合法」与「deflate 数据一开始就不合法」判红，并有两个未捕获的错误。
+- 变异：`unused > 0 && unused < slice.length`（整片没用掉时不当作流结束）→ 「deflate 数据恰在片边界结束」判红，红在「后跟第二个流、文件到此为止」一段（`b.txt` 丢失）。带 300000 个尾部字节的两段在这个变异下不红：没用掉的字节数是累计的，再下一片就不等于片长了，`cursor` 仍退回到流尾上——这个变异在新实现里只在流尾与其后全部字节不足一片时才有后果。
+- 变异：deflate 结束后不置结束也不退回（继续喂）→ 29 条判红；没用掉的字节不退回 `cursor` → 36 条判红。
+- 变异：头跨读取边界时不另读 → 「头的 10 个字节有 5 个在第一次读取里」「头只有第一个字节在第一次读取里」「FNAME 70000 字节…紧跟在第一次读取里的流之后」判红；另读前先回到偏移 0 读一次（重放）→ 同样三条判红（`positions` 精确相等）；文件已结束仍另读 → 6 条判红（「不足 10 字节的头」等五行与片边界一条的 `positions`）；`cursor` 为 0 时也另读 → 「FNAME 70000 字节…恰从第二次读取的开头起」判红；魔数不对也当作 `incomplete` → 3 条判红（300000 个 `j` 或零字节之后多读一次）。
+- 变异：短读之后继续调用 `readAt` → 「deflate 数据恰在片边界结束」判红（`positions` 多出文件末尾的一次读）。
+- 变异：`readAt` 的 `length` 改为 131072 → 23 条判红。
+- 变异：上限改在读完下一个头之后才判 → 5 条判红：`big.tar.gz`、上限 3 的 `x.tar`、「恰有上限那么多成员」、带尾部的 `captail.tgz`、「条目上限在第二个流里达到」。
+- 变异：流尾不核对 → 4 条判红（「CRC-32 不符」「长度不符」「CRC-32 不符且后跟无关字节」「不符的流之后不接着读」）；只核对 CRC → 「长度不符」判红；只核对长度 → 3 条判红；不符时不丢弃那一片的输出 → 同样 4 条判红；不符之后仍接着读下一个流 → 「不符的流之后不接着读」判红。
+- 变异：不核对 FHCRC → 「FHCRC 不符」两行（文件开头的、流之后的）判红；接受保留标志位 → 同样两行判红；不查 CM → 「压缩方法不是 deflate」与 `multi-bad.tgz` 判红；不跳过 FNAME / FCOMMENT → 6 条判红（「gzip 头的可选字段」与第二个流带 FNAME 的各条）。
+- 变异：允许头恰好占满一次读取（`<` 放回 `<=`）→ 3 条判红：「头恰好占满第一次读取的 65536 字节」与两条「FNAME 70000 字节」。第一轮记为不可观察，本轮头的判定有了 `incomplete` 这个结果，变成可观察。
+- 变异：去掉 (b)（一律 `padded(header.size)`）→ `links.tar` 与类型 `1`–`6` 六条判红。
+- 变异：把 typeflag `0` 与 `7` 也当作没有正文 → 50 条判红，含既有的三种格式三项、`slow.tar`、`bomb.tgz`、`cut.tar`、恶意成员名，以及多成员的各条。
+- 变异：预期不可观察：「`listArchive` 返回之后没有迟到的 zlib 回调去碰 `readAt`」。结构上成立——`readAt` 只在 `fetch` 里、由遍历的 `read` / `skip` 串行 `await` 调用，没有后台循环；换流时旧 inflater 先销毁再置空，新 inflater 到下一步才建。没有用例能数出迟到的调用，靠白盒审查。
+- 变异：预期不可观察：内存上界。压缩侧只有一次读取的 `buffer`（至多 65536 字节）与拼流尾用的至多 8 字节；头在 `buffer` 的视图上判定，不复制；解压侧仍是一片 1024 字节能解出的量。没有可断言的内存计数，证据是 `readAt` 的最大 `length` 与 `positions`。
+
+## 14.7（#1302）
+
+- Critical Path 同 14.1（处理不可信文档的子进程的输出）：PR 标白盒审查。只动 `server/src/preview/office.ts` 的 `collectOutput` 与头注释、夹具 `fake-soffice.mjs`（加两个标记，仍是 100755）、新测试文件 `server/test/office-converter-output.test.ts`；`office-converter.test.ts`（795 行）一个字节没动，没有抽共用 helper——新文件自带一份只够用的搭建（建目录、记下 cwd 的 spawn 包装、`afterEach` 关转换器并删临时目录），形状与旧文件的 `stage()` 不同，jscpd 在两个文件之间没有报出克隆。
+- 机制：`open` + `fstat` 之后取 `size`。`size > OUTPUT_LIMIT_BYTES`（模块常量 `209_715_200`，不进 `OfficeConverterOptions`、不读环境）与「不是普通文件」「`size === 0`」并在同一个判定里返回 `null`，此时还没有建读流、也没有在 `pdf/` 下取名。复制用 `source.createReadStream({ autoClose: false, start: 0, end: size - 1 })`（`end` 是闭区间），读流因此只读前 `size` 个字节。文件比 `end` 短时读流正常结束、不报错，所以 `pipeline` 落定后再比 `reader.bytesRead !== size`，不等即抛进既有的 `catch`：`unlink` 掉 `wx` 建出的副本、返回 `null`。其余原样：`O_NOFOLLOW|O_NONBLOCK`、同一个 fd、`wx` + `0600`、`finally` 里关 fd、错误只带种类。
+- 给了 `start: 0` 之后读流用的是按位置读（`pread`），不再依赖 fd 的当前偏移；该 fd 是本次调用刚打开的，两者在这里等价。
+- 头注释：「其后代可能残留」改为实测事实——`ompUser` 模式杀不到包装脚本再派生的 `soffice.bin`，它每次都留下、把整份转换跑完才退出（实测最长在终止之后 128 秒）、不占名额，实际并发可以超过配置的上限（design D18、owner D-25）。只改注释。
+- 没有新增源码 seam。「取得大小之后」这个时刻由测试在 `FileHandle.prototype.stat` 上的探针给出（`vi.spyOn`，`afterEach` 里 `vi.restoreAllMocks()`）：探针先调原函数，用设备号与 inode 认出这是输出文件，在把结果交还转换器之前同步 `appendFileSync` / `truncateSync`——改动确定落在 `fstat` 与第一次读取之间，没有竞态，也不需要假进程留下帮手。输出路径由注入的 spawn 包装（14.1 已有的测试 seam）记下的 `cwd` 拼出。
+- 「没有读取输出的内容」的判据：同一个探针记下输出句柄，另在 `FileHandle.prototype.read` 上逐次记录 `this`，断言该句柄上的 `read` 为 0 次。会话草稿目录的探针脚本（不入库）在 Node v24.13.1 上确认：`FileHandle#createReadStream` 的每次读取都经过 `FileHandle.prototype.read`；追加一例里同一计数大于 0，证明 0 次不是因为探针看不见。
+- 夹具新增标记 `sparse-limit`、`sparse-over`：`writeFileSync(output, "")` 后 `truncateSync` 到 209715200 / 209715201，只设长度、不写数据。上限在夹具、测试、源码里各持一份字面量。
+- 200 MiB 一例的实测：转换器真的往临时目录写出 200 MiB 的零；本机（APFS、SSD）该例 0.12–0.27 秒（连跑 10 次的范围），整个文件 6 条约 0.3 秒；用例时限给 60 秒，临时目录在 `afterEach` 删。超限一例在本刀之后不写任何数据（约 0.03 秒）；在本刀之前的源码上它会写出 200 MiB + 1 字节（红跑时 0.16 秒）。
+- 先红后绿：在本刀之前的源码上 6 条里 5 条红（追加一例结果是 86093 字节而不是 77；超限与截短三例 `convert` 成功）。「恰 200 MiB」一例在之前的源码上本来就通过，不是先红后绿，作用是钉住 `>` 不退成 `>=`。
+- 偏离记录：
+  - 截短一例做成三行（少 1 字节、一半、0 字节），规格场景只列一种；0 字节那行钉住「`wx` 建出的空文件也不留下」。
+  - 短读的判定用读流的 `bytesRead`，不是写流的 `bytesWritten`；`pipeline` 成功时两者相等。
+  - 规格写「读取之前被截短」；读到一半才被截短走的是同一个比较，但没有用例（探针只在 `fstat` 处有确定的时刻）。
+- 变异：去掉上限判定（`|| size > OUTPUT_LIMIT_BYTES`）→ 「200 MiB + 1 字节」一例判红（`convert` 成功）。
+- 变异：上限改在复制之后才判（读完再拒）→ 同一例的「`read` 为 0 次」判红（实得 3201 次）；`convert` 仍是 `failed`、`pdf/` 仍为空，只有这一条断言看得见。
+- 变异：去掉读流的 `start` / `end`（读到文件末尾）→ 追加一例判红（多读的字节使字节数比对不等，`convert` 以 `failed` 落定）；连比对一起去掉即本刀之前的源码，同一例以「86093 字节」判红。
+- 变异：去掉 `bytesRead` 与 `size` 的比对 → 截短三行判红（`convert` 成功，短的副本进了 `pdf/`）。
+- 变异：短读时直接返回 `null`、不删副本 → 截短三行的「`pdf/` 为空」判红（各剩 1 个文件）。
+- 变异：`>` 改成 `>=` → 「恰 200 MiB」一例判红（`failed`）。
+- 变异：预期不可观察：上限做成可配置（选项或环境变量）而缺省值不变——没有用例会去设它，靠白盒审查与 `OfficeConverterOptions` 的键集合；fd 在失败路径上是否关闭（同 14.1，没有可数的句柄计数）；绕过 `FileHandle#read`（例如按 fd 号调 `fs.read`）读取超限输出的写法探针看不见。
+
+## 6.2（部分）、6.3、6.4（#1056）
+
+- 触及 Critical Path「沙箱与文件边界」（`file` 路由在分类前新增一次对用户文件的按路径读取，决定主站返回的内容类型）：两个评审席位加 owner 白盒审查。前提 0.1（#1049）、5.1（#1054，`server/src/preview-config.ts:40/42/46`）、6.1（#1055，`preview.ts:129` 的 `sniffText`）都已在 origin/master（97cc5786）的代码里；不等 1.1 / 1.2 / 1.3，#1286 不挡。
+- 6.2 已交付的半边（#1055）：`rest.ts:288-290` 四参调用，`limits` 写死 `DEFAULT_PREVIEW_LIMITS`，不传 `sniffedText`。本刀剩下三件：嗅探、`limits` 依赖对象、配置到装配的接线。issue 的 6.2 / 6.3 / 6.4 摘录与 `tasks.md` 逐字一致，无条文差异。
+- 漂移一（issue 的 PR Boundary 写「不改 `server.ts`」，做不到）：`app.ts` 看不到 `ServerConfig`，映射在 `server/src/server.ts:107` 的 `appAssemblyOf`（先例 `:112` 的 `uploadMaxBytes`）。本刀必须在那里加 `previewLimits: { text: config.previewTextMaxBytes, image: config.previewImageMaxBytes, notebook: config.previewNotebookMaxBytes }`，否则生产永远拿缺省值。tasks 6.2 的「`app.ts` 把 `ServerConfig` 接进来」同样不精确，记入偏离记录首条。`server-handshake-log.test.ts:129-160` 逐字段断言，不会红。
+- 漂移二（既有断言必须改）：`server/test/workspaces-http.test.ts:528-529` 的 `file.__proto__` / `file.constructor` 内容是 `"x"`，`:574-583` 断言 415；接上嗅探后会变 200。把两文件内容改成含 `0x00` 的字节，415 断言原样保留（「原型名不继承命中」的原意不变），逐条记入偏离记录。#1055 注记引的 `:509-517` 已过期。其余 `file` 路由调用方（`workspaces-http-failures.test.ts:47/79/123/152/160/249`、`session-temp-workspace.test.ts:123`、`smoke/files.hurl:84-99`）全是已知扩展名，不受影响。
+- 判定「要不要嗅探」需要谓词：`preview.ts` 新增导出 `needsTextSniff(name: string): boolean`（不在五行表、不是两个文件名、不在 `SERVED_ELSEWHERE` 时为真），与 `classifyPreview` 共用一个模块内的扩展名提取函数；分类表与集合一个字不动，守住「不改分类表」。不许用「先分类、捕获 `preview_unsupported` 再嗅探重试」：那样 `doc.pdf` 也会被读，违反「文件预览」条文。
+- 读取实现钉死：`rest.ts` 从 `node:fs` 取 `openSync` / `readSync` / `closeSync`，`readSync(fd, Buffer.alloc(8192), 0, 8192, 0)` 一次，`finally` 里关，把 `buf.subarray(0, bytesRead)` 交给 `sniffText`，结果作为 `sniffedText` 传入。不用 `fs.promises`（`workspace-file-helpers.ts:20` 的 `spyBodyIo` 看不见，读取计数会空过）。0 字节文件也走同一条路，不加特例。
+- 依赖对象：`WorkspaceRestDependencies`（`rest.ts:21`）加 `limits?: PreviewLimits`，`registerWorkspaceRest` 内 `dependencies.limits ?? DEFAULT_PREVIEW_LIMITS`，替换 `:289`。`AssemblyDependencies`（`app.ts:76`）加 `previewLimits?: PreviewLimits`，`app.ts:226` 按 `exactOptionalPropertyTypes` 条件展开转发，缺省只在 workspaces 一处。路由不读环境变量。
+- 规格没写的分支（进偏离记录）：`limits` 不做 `uploadMaxBytes` 式的正整数校验（配置层已限 `1..2147483647`）；嗅探打开被拒时，`ENOENT` / `ENOTDIR`（文件或其父目录在 `lstat` 后消失，复用 `isStructuralAbsence`）、`ELOOP`（换成符号链接）、`ENXIO`（Linux）/ `EOPNOTSUPP`（macOS，换成 unix socket）都按路由既有的 404 处理、不写审计（预审补记，规格「目标不存在 → 404」）；其余 `openSync` / `fstatSync` / `readSync` 失败（`EACCES`、`EIO`、`EMFILE` 等）原样抛出，即 generic 500，此时尚未写任何预览头。macOS 的 `EOPNOTSUPP`（102）在 Node 里没有名字，`error.code` 是 `Unknown system error -102`，所以按 `errno === -os.constants.errno.EOPNOTSUPP` 比，为此 `rest.ts` 多一行 `node:os` 的 import；不传 `limits` 的对象整体缺省，不支持只给部分字段；音视频中间态不变（200 全量带 `Accept-Ranges: bytes`、忽略 `Range`，到 #1058 为止）。
+- D-23 窗口如实陈述：未知或无扩展名文件在 `resolve` → `lstat` 之后的按路径打开由一次（读流）变两次（嗅探加读流），都没有 `O_NOFOLLOW` / `O_NONBLOCK`，嗅探的同步 `openSync` 遇到被换入的命名管道会卡住事件循环（原先只卡线程池）。它属 D22「已知残余」里 `file` 那一条的同一个窗口，本刀不闭合、不加防护，也不对已知扩展名引入新的打开。两次打开之间文件被换时，响应类型仍是 `text/plain` 加 `nosniff`，不会变成文档类型。**实施时由编排方覆盖（不得加宽残余）**：嗅探那一次打开改为 `O_RDONLY | O_NOFOLLOW | O_NONBLOCK`，随后 `fstatSync(fd).isFile()`，非普通文件与 `ELOOP` 都按路由既有的 404 处理、不调 `readSync`——所以被换入的命名管道不会卡住事件循环，末段被换成的符号链接不被跟随。其后的读流仍按路径 `createReadStream`，窗口没有闭合。
+- 测试落新文件 `server/test/workspaces-file-sniff.test.ts`（`workspaces-http.test.ts` 已 736 行，只做漂移二的两处内容改写，不加行）。`workspaces-http-helpers.ts:18` 的 `withWorkspacesApp` 加第三个可选参 `options: { previewLimits?: PreviewLimits } = {}` 并入 `assembly`（先例 `workspace-upload-helpers.ts:83`），不另抄一份（jscpd）。
+- 用例一「未知与无扩展名文件的嗅探」：`LICENSE`、`.gitignore`、`schema.proto`、0 字节 `empty` 为 200 `text/plain; charset=utf-8` 精确字节（`empty` 空体、`X-Workbuddy-Size: 0`）；含 `0x00` 的 `blob.bin` 与 `core` 为 415 信封，无 `X-Workbuddy-Size`。另补：文本内容的 `x.constructor` 为 200；10 KiB 文件 NUL 在偏移 8192 为 200、在 8191 为 415；8192 处切开三字节汉字仍为 200；1.5 MiB 的未知扩展名文本被截到 1048576 并带截断头。
+- 用例二「已知扩展名不发生嗅探读取」：夹具先写完再 `spyBodyIo()`（`writeFileSync` 内部也走 `openSync`），断言 `openSync` / `readSync` 没有任何一次首参等于目标路径（按路径过滤，不比绝对次数）；对象为 `readme.md`、`logo.png`、`doc.pdf`、`a.ipynb`、`Dockerfile`。对照组 `LICENSE` 恰一次 `openSync`，且 `readSync` 的长度参数为 8192。
+- 用例三「Notebook 与可配置上限」与接线：缺省装配下 3 KB `a.ipynb` 为 200 无截断头，11 MiB `big.ipynb`（`truncateSync` 造）为 413；`previewLimits = { text: 16, image: 1024, notebook: 2048 }` 装配下 20 字节 `t.txt` 为 200 恰 16 字节加 `X-Workbuddy-Truncated: 1`、`X-Workbuddy-Size: 20`，2 KiB `p.png` 与 3 KB `a.ipynb` 为 413，嗅探通过的 20 字节 `LICENSE` 同样截到 16。再加 `appAssemblyOf(resolveServerConfig({ PREVIEW_TEXT_MAX_BYTES: "16", … }, ENTRY)).previewLimits` 的 `toEqual`，以及空 env 下等于三个缺省字面量（先例 `workspace-upload-rest.test.ts:758-765`，该文件 766 行，不往里加）。缺省边界已由既有 `big.log` / `large.png` / `huge.png` 钉住，不复制。
+- 用例四（逃逸）与其它：既有逃逸用例（`workspaces-http.test.ts:592`）只用已知扩展名，本刀补未知扩展名的：`../OUTSIDE` 与指向空间外的符号链接 `link.proto` 为 403 `sandbox_denied`、各一行 `sandbox.reject`（`op` 为 `read`）、对目标零 `openSync`；他人 id 与不存在的 id 带 `../x.proto` 为相同 404、审计行数不变、零读取；目录 `dir.proto` 为 404 且零读取。`needsTextSniff` 的真值表加进 `workspaces-preview-classify.test.ts`（396 行）。与兄弟刀共用文件：`rest.ts:275-297` 之后由 #1058 再改，`app.ts` / `server.ts` 的装配字段之后由 #1067、13.1 再加，#1065 往同一个 `limits` 里加条目上限；本刀在栈底，后者 rebase。行数：`rest.ts` 418 加约 25，`app.ts` 490，`server.ts` 471，都远离 800。no checklist rows（`web/src/features/files/tree.tsx:92` 的 `supportsPreview` 在 17.2 之前仍挡住未知扩展名）；`docs/architecture/system.md` 第 9 节不动（十二键表归 28.1）；不加配置键，启动失败契约不涉及。
+- 变异：对已知扩展名也嗅探（去掉 `needsTextSniff` 判定，6.4 分摊条款）→ 用例二 `readme.md` / `logo.png` 的「无 `openSync`」判红。
+- 变异：两遍分类法（捕获 `preview_unsupported` 后嗅探）或谓词漏掉 `SERVED_ELSEWHERE` → 用例二的 `doc.pdf` 与 classify 文件里的谓词真值表判红；`doc.pdf` 的状态码仍是 415，单看状态不可观察。
+- 变异：不嗅探（`sniffedText` 恒不传）→ 用例一 `LICENSE` 等四个 200 判红；恒传 `true` → `blob.bin` / `core` 的 415 判红。
+- 变异：漏掉 `subarray(0, bytesRead)` → 用例一所有小于 8 KiB 的文本（`LICENSE`）变 415 判红。
+- 变异：读取长度改成整文件或大于 8192 → 「NUL 在 8192 处为 200」与 `readSync` 长度参数断言判红；改成 8191 → 「NUL 在 8191 处为 415」判红。
+- 变异：嗅探挪到 `sandbox.resolve` 或 `lstat` 之前 → 用例四的 `../OUTSIDE`、`link.proto`、`dir.proto` 零读取断言判红。
+- 变异：逃逸，穿越与符号链接：跳过 `resolve` → 用例四的 403 与 `sandbox.reject` 判红；`op` 换成 `list` → 审计行 `op` 断言判红。
+- 变异：逃逸，他人与不存在的 id：嗅探放在 `ensureOwnedRoot` 之前 → 用例四的零读取判红；只去掉 `ensureOwnedRoot` 时 404 不变（facade 自查 `rootOf`，#1055 更正二），标为不可观察。
+- 变异：路由无视 `dependencies.limits`、继续用 `DEFAULT_PREVIEW_LIMITS` → 用例三的 `t.txt` 16 字节、`p.png` 413 判红。
+- 变异：`app.ts` 不转发 `previewLimits` → 用例三同上判红；`appAssemblyOf` 漏接或把 text / image 读串 → `appAssemblyOf(...).previewLimits` 的 `toEqual` 判红。
+- 变异：缺省值改成别的数 → 既有 `big.log`（1048576）、`large.png`（11 MiB 为 200）与用例三的 `big.ipynb` 413 判红。
+- 变异：嗅探通过的文本不走文本上限 → 用例一的 1.5 MiB 未知扩展名截断与用例三的 `LICENSE` 截到 16 判红。
+- 变异：原型名：查表改成对象字面量 → `workspaces-http.test.ts:574-583`（改成二进制内容后）的 415 判红。
+- 变异：`closeSync` 漏掉 → 可观察（测试另 spy 了 `fs.closeSync`）：用例二对照组 `LICENSE` 的「关掉的正是嗅探打开的那个 fd」，以及替换用例里换成命名管道、换成目录两例的「打开的 fd 都已关」判红。不可观察的只剩：0 字节文件是否跳过读取。
+- 替换用例怎么注入替换：`fs.openSync` 的 spy 在路由第一次以目标路径调用时，先删掉目标、放上替换物（命名管道 / 符号链接 / 目录 / 什么都不放 / 把父目录换成普通文件 / unix socket），再调真实的 `openSync`——正好落在路由的 `lstat` 与嗅探打开之间，不依赖沙箱内部 `lstat` 的次数。`EACCES` 一例在同一处把文件放回原样后直接抛出带 `code: "EACCES"` 的错误。命名管道一例不再带 `skipIf`（同文件用例四与既有 `workspaces-http.test.ts` 本来就无条件调用 `mkfifo`）。
+- 变异（预审补）：所有打开错误都映射成 404 → `EACCES` 一例判红（404 而非 500）；去掉 `ENOENT` → 「删除」一例判红；去掉 `ENOTDIR` → 「父目录换成普通文件」一例判红；去掉 socket 的两个 errno、或只去掉 `EOPNOTSUPP`、或把它写成按名字比（`code === "EOPNOTSUPP"`）→ unix socket 一例在 macOS 判红；只去掉 `ENXIO` 在 macOS 不可观察，Linux（CI）上该例判红（容器里探过：Linux 打开 socket 得到 `ENXIO`）。
+- 变异（预审补）：已知扩展名改用 `readFileSync(absPath)` 嗅探 → 用例二判红；带 `"utf8"` 的写法不经过 `openSync`，靠新加的「工作空间根下零 `readFileSync` / `readFile`」断言抓到（原断言放过）。响应读流自己会对路径调一次异步 `fs.open`，所以对 200 的已知名字断言的是「异步打开恰一次」，对 `doc.pdf`（415）断言路径下零打开。
+
+## 7.2、7.3、7.4、7.5（#1058）
+
+- **Critical Path：沙箱与文件边界**。本刀给用户文件的读取加了一种由客户端给定偏移的按路径打开，7.1 注记已把逃逸向量留到本刀，所以要两个评审席位加 owner 白盒。前提 0.1、6.1、7.1 按代码都已在 origin/master（`server/src/workspaces/preview.ts:77` 的 `rangeable`、`:152-185` 的 `parseRange` / `openRangeStream`）。不等 1.1 / 1.2 / 1.3，不等 5.1。
+- 同批交集：#1056 也改 `server/src/workspaces/rest.ts` 的 `file` 处理器（origin/master `:271-296`，嗅探与 `limits`），尚未合入。边表里 6.2 不是 7.3 的前提，但两刀改同一个处理器，本刀必须排在 #1056 之后并以它的分支为底。`rest.ts` 现为 418 行（文首写的 416 已漂移），本刀净增约 6 行。本刀不动 `rest-entries.ts`、`index.ts`、`preview.ts`、`server/src/preview/`。
+- issue 与 `tasks.md` 的差异：7.2–7.4 逐字相同，7.5 只多一句分摊登记；本刀承担「`readme.md` 回 206」与「416 带信封」两条变异，后缀区间一条已随 #1057 交付。issue 把 `workspaces-http.test.ts` 列为可选落点，但它已 736 行，用例一律进新文件。issue 没提 D-23，见下面的窗口一条。
+- 7.2 新文件 `server/src/workspaces/range-send.ts`（约 45 行，只 import `./preview.js` 与 fastify 类型）。签名供 #1069 原样复用：`export function sendFileRange(request: Pick<FastifyRequest, "method" | "headers">, reply: FastifyReply, file: { absPath: string; size: number; headers: Readonly<Record<string, string>>; unsatisfiableHeaders: Readonly<Record<string, string>> }): FastifyReply`。
+- 签名的两点理由：`request` 用 `Pick` 是因为带路由泛型的 `FastifyRequest` 传不进缺省泛型的参数，`reply: FastifyReply` 则有 `sessions/stream/sse.ts:26` 的先例。`file` 的类型内联、不另导出具名类型，免得 knip 报未引用导出；函数本身由 `rest.ts` 导入即可。
+- 函数行为：`parseRange(request.headers.range, size)` 得区间时回 206，写 `headers`、`Accept-Ranges: bytes`、`Content-Range: bytes a-b/size`、`Content-Length` 为区间长度，正文用 `openRangeStream`。`ignore`（含无头、多段、非 `bytes`）回 200，写 `headers`、`Accept-Ranges`、`Content-Length: size`，正文用 `openPreviewStream(absPath, size)`，它在 `size = 0` 时不开文件。`unsatisfiable` 回 `reply.code(416)`，只写 `unsatisfiableHeaders` 与 `Content-Range: bytes */size`，然后无参 `send()`，不打开文件，也不 `throw HttpError`（416 不在 definition map）。
+- HEAD（规格没写，进偏离记录）：preview-origin 规定监听器响应 `GET`（及其 `HEAD`），而 `file` 路由现有 Fastify 自动生成的 HEAD，其 onSend 对流载荷做 `resume()`，会把整个文件读一遍，对无上限的音视频是白读。函数在 `request.method === "HEAD"` 时状态与头照旧，正文用 `openPreviewStream(absPath, 0)` 的空流。不能无参 `send()`，那样 Fastify 会把 `Content-Length` 改写成 `0`。这一条是读 fastify 5.12.1 的 `lib/head-route.js` 与 `reply.js:646-652` 推出的，没有运行过，以 HEAD 用例为证。
+- 7.3 路由接入：分类之后 `if (preview.rangeable) return sendFileRange(request, reply, { absPath, size: status.size, headers: preview.headers, unsatisfiableHeaders: { "X-Content-Type-Options": "nosniff" } })`，`no-store` 仍由 `onRequest` 钩子给。其余类别走原来的「写头循环 + `openPreviewStream(absPath, preview.limit)`」，一行不改，所以文本与图片仍是分块、不带 `Content-Length` 与 `Content-Range`。`clearPreviewHeadersOnError`（`rest.ts:51`）补删 `Content-Range` 与 `Accept-Ranges`（6.1 注记留给本刀）；`Content-Type` 与 `Content-Length` 由 Fastify 的 `handleError` 自己删。
+- 其余自定分支（进偏离记录）：`If-Range` 不读，带它的请求仍只按 `Range` 判，因为规格条文只认 `Range`，且服务端不发 `ETag` / `Last-Modified`、响应是 `no-store`，浏览器不会带它，用一条用例钉住。重复的 `Range` 头被 Node 合并成逗号串，按 `ignore` 回 200。0 字节的 `empty.mp4` 无 `Range` 回 200 且 `Content-Length: 0`，带 `bytes=0-` 回 416 `bytes */0`。206 也带 `X-Workbuddy-Size`（全长）。416 不带 `Content-Type`、`Accept-Ranges`、`X-Workbuddy-Size`。
+- #1286 窗口的措辞（D22「已知残余」、ADR-0011:30；PR 不得写成已闭合）：本刀之后 `file` 路由仍是「`lstatExisting(absPath)` 判为普通文件 → `createReadStream` 按路径打开一次」，没有 `O_NOFOLLOW` / `O_NONBLOCK`，其间条目或任一中间目录被换成符号链接时读到链接目标的 `[start, end]` 字节，换成命名管道时 `open` 占住一个线程池线程。本刀不加第二次 `stat` 或打开，416 与 HEAD 不打开文件，窗口不变宽。新增一点如实登记：`Content-Length` / `Content-Range` 取 `lstat` 时的大小，其间文件变短则正文短于声明长度（与已交付的 `download` 相同），变长不多发。
+- 7.4 新文件 `server/test/workspaces-file-range.test.ts`（约 260 行），复用 `withWorkspacesApp`、`insertWorkspace`、`withListeningApp`、`spyBodyIo`、`waitForClose`。`requestWorkspaceFile` 不能带头，在新文件里写一个本地 `inject` 小函数，不改共享 helper。夹具是 1000 字节的 `clip.mp4`（第 i 字节为 `i % 251`）、2 KB 的 `readme.md`、`song.mp3`、`logo.png`、0 字节的 `empty.mp4`。既有测试没有一条因本刀变红，`workspaces-http.test.ts:467` 的图片无 `accept-ranges` 与 `:691` 的打开失败用例原样保留。
+- `inject` 用例：规格七行逐字，每行断言状态、`content-type`、`content-range`、`content-length`、`accept-ranges`、`nosniff`、`no-store` 与字节。另补 `bytes=990-2000` → `990-999/1000` 且长度 10、`bytes=0-0`、`song.mp3` 的 206、`logo.png` 带 `Range` → 200 无 `content-range`、空文件两例、`If-Range` 一例。416 断言 `payload === ""`、`content-length: "0"`、无 `content-type`、`createReadStream` 零调用。HEAD 两例：无 `Range` 回 200 且 `content-length: "1000"`，带 `Range` 回 206；都是空体、`createReadStream` 零调用。打开失败沿用 `:691` 的 `onSend` 里 `unlinkSync` 手法并带 `Range`，期望 500 信封、无 `content-range` 与 `accept-ranges`。逃逸向量带 `Range: bytes=0-9`：`../outside.mp4` 与外指符号链接 `link.mp4` → 403 加一行 `sandbox.reject`（`op` 为 `read`）且无 `content-range`；他人 id 与不存在的 id 带 `../x.mp4` → 相同 404、审计零行。
+- 真连接用例两条。(a) `fetch` 带 `Range: bytes=0-99`：206、`content-range: bytes 0-99/1000`、`content-length: 100`、字节等于文件前 100 字节。(b) 中止：`truncateSync` 出 64 MiB 的稀疏 `big.mp4`，`node:http` 带 `Range: bytes=0-` 收到首个 `data` 即 `res.destroy()`；从 `createReadStream` 的 spy 取流，等 `close`，断言 `destroyed`、`bytesRead` 小于文件大小（否则用例恒真）、`fstatSync(fd)` 抛 `EBADF`，随后 `app.close()` 不挂。workspaces「流错误与真实客户端中止」目前在路由层没有真中止用例，这是第一条。
+- 门槛与文档：size-guard、jscpd、naming-guard 都不触发；`reply.send(stream)` 若被 CI 的 semgrep 标记，仿 `rest.ts:294` 加带理由的 `nosemgrep`。不是配置刀，不动 `docs/architecture/system.md` 第 9 节与配置计数测试。纯服务端，`web/src/features/files/tree.tsx` 的 `supportsPreview` 还不放行音视频，no checklist rows。`smoke/files.hurl` 的范围步骤归 26.2。`tasks.md` 勾 7.2、7.3、7.4；7.5 的勾选条件（两条分摊变异在 PR 表里、后缀一条已随 #1057）本刀合入即满足，一并勾。
+- 变异：对 `readme.md` 也回 206（去掉 `preview.rangeable` 判断，7.5）→ 「其余类别忽略」的 `readme.md` 与 `logo.png` 两行判红。
+- 变异：416 带上 JSON 信封（`reply.code(416).send({error:…})`，7.5）→ 416 的 `payload === ""`、`content-length: "0"`、无 `content-type` 判红。
+- 变异：`unsatisfiable` 当成 `ignore` 回 200 → `bytes=1000-` 行判红；416 的 `Content-Range` 写成 `bytes 0-999/1000` 或漏写 → 同行判红。
+- 变异：416 用 `headers` 而不是 `unsatisfiableHeaders` → 416 的「无 `content-type` / `accept-ranges` / `x-workbuddy-size`」判红；416 丢掉 `nosniff` → 同用例判红。
+- 变异：先开流再判 416（泄漏描述符）→ 416 的 `createReadStream` 零调用判红。
+- 变异：206 的 `Content-Length` 写成全长 → `inject` 的 `content-length` 字面量断言与真连接用例 (a) 判红；`Content-Range` 的 `end` 取开区间 → `bytes 0-99/1000` 判红。
+- 变异：206 的正文用 `openPreviewStream(absPath, size)`（发整段）→ 「100 字节且等于文件前 100 字节」与 `bytes=900-` 的字节断言判红。
+- 变异：状态码漏设 206 → 四个 206 行判红；200 不带 `Content-Length` 或 `Accept-Ranges` → 无 `Range` 行判红。
+- 变异：多段取第一段回 206 → `bytes=0-1,5-6` 行判红（`parseRange` 层已由 #1057 钉住，此处是路由层重复证据）。
+- 变异：读 `If-Range` 并据此回 200 → `If-Range` 用例判红（自定分支的钉子）。
+- 变异：HEAD 时照常打开区间流 → HEAD 两例的 `createReadStream` 零调用判红；HEAD 改成无参 `send()` → `content-length: "1000"` 判红。
+- 变异：去掉 `clearPreviewHeadersOnError` 新增的两行 → 「带 `Range` 的打开失败」里无 `content-range` / `accept-ranges` 判红。
+- 变异：改成手写 `stream.pipe(reply.raw)` 且不处理响应关闭 → 中止用例 (b) 判红（等不到 `close`，超时）。预期不可观察：薄封装下「中止时销毁流」是 Fastify `reply.js:858-865` 做的，本刀没有可以删掉的实现行，PR 表照此标注。
+- 变异：逃逸，穿越：`rangeable` 分支绕过 `sandbox.resolve` 直接拼路径 → `../outside.mp4` 的 403 加 `sandbox.reject` 判红。
+- 变异：逃逸，符号链接：`rangeable` 分支绕过 `resolve` 且把 `lstat` 换成 `stat` → `link.mp4` 用例判红。只换 `lstatExisting` 而保留 `resolve` 时不可观察（`resolve` 先拒）。
+- 变异：逃逸，他人或不存在的 id：把 `ensureOwnedRoot` 挪到 `resolve` 之后 → 「他人 id 带 `../x.mp4` → 404 且审计零行」预期不可观察（facade 自己先查 `rootOf`，见 6.1 的实施后更正二），只在 `workspaces-http-failures.test.ts` 的「根目录缺失」用例判红。
+- 变异：逃逸，`op`：`"read"` 换成 `"list"` → 审计行 `op` 断言判红。
+- 变异：预期不可观察：`lstat` 之后文件被替换或截短（#1286 窗口），测试不制造竞态，属登记的残余。
+
+## 10.2（#1064）
+
+- Critical Path（沙箱与文件边界类）：本刀在服务进程里解析攻击者可控的字节，并首次让第三方解析器 `yauzl` 接触这些字节；不碰 `sandbox.resolve`、不加 `op`、不加路由，没有 resolve→open 窗口，对 #1286（D-23）既不闭合也不放宽。PR 标注白盒审查、两个评审席；「他人工作空间 → 相同 404」「越界 → `sandbox.reject`」归 #1065。
+- 前置与漂移：0.1、10.1（#1063）、10.6（#1301）都已合入，不等 1.1/1.2/1.3。issue 的 10.2 原文与 `tasks.md:285` 逐字相同。差异三处：issue 引的切片声明缺 10.6 一句；issue 的「只认 tar/tar.gz/gz」仍成立，但 gzip 容器已由 `archive.ts` 自己解析；`archive.ts` 现为 588 行，文首 `:3` 的「The zip half and the route come later」与 `:7-10` 的不变量段要改写。
+- 依赖事实：`yauzl` 3.4.0，MIT（© 2014 Josh Wolfe），唯一间接依赖 `pend ~1.2.0`（MIT，© 2014 Andrew Kelley），两包都没有 install 脚本；GHSA-gmq8-994r-jv83 只影响 `=3.2.0`。`server/package.json` 的 `dependencies` 加 `"yauzl": "^3.4.0"`，新建 `devDependencies` 放 `"@types/yauzl": "^3.4.0"`（MIT；与 `yauzl` 同一 manifest，knip 若仍报再挪到根）。根 `package-lock.json` 现无这三个包，必须重生成，否则 CI 的 `npm ci` 失败。
+- 依赖守卫：仓库没有许可证扫描，`constraints.yaml` 没有依赖规则，`docs/architecture/system.md` 没有依赖表（不动）。`ATTRIBUTION.md` 第 3 节加一行，以 `- **yauzl** —— \`MIT License\`,版权归 Josh Wolfe（https://github.com/thejoshwolfe/yauzl）` 开头，用途里写明 `pend`（MIT）。在 `web/test/ui-guardrails.test.ts:243` 的 `react-resizable-panels` 用例旁加一条 `hasEntry(…, "yauzl", /\bMIT\b/)`，并断言 `server/package.json` 的 `dependencies` 含 `yauzl`（该文件 264 行）。PR 描述按 `AGENTS.md:40` 写 D7 的理由。
+- 签名扩展（10.1 注记已预留，记入偏离记录）：`ArchiveFormat` 加 `"zip"`，`archiveFormat` 认 `.zip`。`listArchive` 的 `options` 改为 `{maxEntries: number; now: () => number; size: number}`，`size` 是压缩包字节数，必填，只有 zip 读它。不做可选：漏传会让 yauzl 同步抛错，被映射成所有 zip 都 415。`readAt` 契约不变。
+- 喂给 yauzl 的方式：`class … extends RandomAccessReader`，只 `override read(buffer, offset, length, position, callback)`，不实现 `_readStreamForRange`，不用 `open`/`fromFd`/`fromBuffer`。yauzl 一次会要 65577 字节（EOCD 搜索，文件 ≥ 65577 字节时）和至多 196605 字节（单个目录项的名字+扩展+注释）。适配器按 ≤65536 字节一片循环调 `readAt`，保住「单次 `readAt` ≤ 65536」对全部格式成立；内存上界另记为 yauzl 自己的两个缓冲。
+- 短读必须报错：`@types/yauzl` 的回调类型是 `(err) => void`，而 yauzl 只靠第二个实参 `bytesRead < length` 判 EOF，缓冲是 `Buffer.allocUnsafe`。短读时调 `callback(null)` 会把未初始化的堆内存当成成员名返回。任一片短读即 `callback(new CorruptArchive())`。`readAt` 的拒绝先存到 reader 上再交给 callback，外层据此原样重抛。
+- 选项与取值：用 `fromRandomAccessReaderPromise(reader, size, {decodeStrings: false, validateEntrySizes: false})` 加 `for await (… of zipfile.eachEntry())`。`decodeStrings: true` 时 `validateFileName` 会把 `../../etc/passwd`、`/abs/x`、含 `\` 的名字变成错误；`validateEntrySizes: true` 时 stored 成员大小不等也成错误。不读 `entry.fileName`（运行时是 Buffer），`path = entry.fileNameRaw.toString("utf8")`，`type` 只看 `path.endsWith("/")`，`size = entry.uncompressedSize`。
+- 名字解码的偏离记录：不看位 11、不做 CP437、不认 0x7075 扩展，即不用 `getFileNameLowLevel`。理由是规格字面写「不合法的 UTF-8 → U+FFFD」，与 tar 一致，未置位的 UTF-8 名仍正确，且名字长度只有 `fileNameLength` 一个来源。4096 上限按 `entry.fileNameRaw.length`（同 tar 的 `memberName`）：超出则不计入、停读、`truncated: true`，此前零项则 415。
+- 上限与结束：push 之后 `entries.length === maxEntries` 即返回 `truncated: true`，不读下一项，也不信 `entryCount`；恰有上限那么多成员的包同样报 `truncated`，与 tar 一致，记入偏离记录。`finally` 里 `zipfile?.close()`，并挂一个常驻的 `zipfile.on("error", () => {})`。zip 不读时钟（规格与 D7 只给 tar/tar.gz 5 秒）；有限性靠读取次数 ≤ 2·maxEntries + 3（未分片计）、每次有界、不解压。
+- 错误映射只有一条，同 tar：yauzl 的任何拒绝在零项时是 `HttpError("preview_unsupported")`，已有项时是 `truncated: true`，存下的 `readAt` 失败原样抛。实测落入此规则的有：找不到 EOCD（`fake.zip`、0 字节、目录被截断）、EOCD 之后有多余字节、目录偏移越界或没算前缀（自解压包）、条目数虚高、强加密位 0x40、扩展字段长度越界。前缀与尾部两种 415 和 10.6 的 gzip 尾部忽略不同，记入偏离记录。
+- 按声明如实返回、不算损坏的情形：条目数虚低或为 0 时只列声明的那么多，`truncated: false`；空 zip 是 `entries: []`、`truncated: false`；zip64 的 `size` 超过 2^53 时是失精度的 number（实测 18446744073709552000）。
+- 行数与落位：zip 约 110–130 行，`archive.ts` 到约 710 行，留在本文件，不必拆兄弟文件；草稿超过约 760 行才拆 `archive-zip.ts`。文首注释写明 yauzl 加载时 `require("fs")`，但经 `RandomAccessReader` 从不调用。字节构造器 `zipCentral`、`zipArchive` 进 `workspaces-archive-helpers.ts`（204 行），不写本地文件头和成员正文，每个导出都被测试导入；`archiveOnDisk`/`list` 给出 `size: bytes.length`，`list` 的 `options` 参数显式标注为不含 `size` 的类型，`DEFAULTS` 加 `size: 0`。
+- 测试与清单：规格点名的五例进 `workspaces-archive.test.ts`（441 行）——`archiveFormat` 的 `x.zip`/`X.ZIP` 行、`x.zip` 三项并入「无新增文件」用例、1500 成员的 `big.zip`（>65577 字节，断言恰 1000 项、`maxLength() ≤ 65536`、`positions` 不含第 1001 项的偏移）、`long.zip`、`fake.zip`、恶意名并入既有 `spyBodyIo` 用例。其余边界进新文件 `server/test/workspaces-archive-zip.test.ts`。既有断言不用改，只有两处内联 `options` 各加一行 `size`（`workspaces-archive.test.ts:259`、`workspaces-archive-tar.test.ts:106`，后者 781 → 782 行，不得再加）。纯服务端库函数，no checklist rows；不新增配置键。
+- 变异：到上限后继续读，或把上限判定挪到取下一项之后 → `big.zip` 的「恰 1000 项」与 `positions` 断言判红。
+- 变异：去掉 4096 上限 → `long.zip` 的「恰两项 + `truncated`、没有超过 4096 字节的 `path`」判红；超长成员「跳过后继续」→ 同例判红，夹具在超长成员后须再放一个正常成员。
+- 变异：`decodeStrings: true` → 恶意成员名用例判红（一项之后 `truncated`）。
+- 变异：对名字做规范化（`\` → `/`、去前导 `/`）→ 恶意名用例判红，名单里须含一个带 `\` 的名字。
+- 变异：改用 `yauzl.open(path)` 或 `fromFd` → `spyBodyIo` 的 `fs.open`/`fs.read` 断言判红。
+- 变异：`validateEntrySizes: true` → 新例「stored 成员 compressedSize ≠ uncompressedSize 仍被列出」判红。
+- 变异：`size` 取 `compressedSize` → 新例「method 8、两个大小不等」判红。
+- 变异：目录按外部属性或 `size === 0` 判 → `x.zip` 的 `dir/` 与新例「零字节文件是 `file`」判红。
+- 变异（预审补）：以 `\` 结尾的名字也判成 `dir` → 「只有以 / 结尾的名字是 dir」一例判红，名单里须含一个以 `\` 结尾的名字（`back\`，应为 `file`）。
+- 变异：适配器不分片 → `big.zip` 的 `maxLength() ≤ 65536` 判红（实测为 65577）；新例「扩展 65532 + 注释 65535 的胖目录项」同样判红（实测为 131068）。
+- 变异：短读当作读满（`callback(null)`）→ 新例「中央目录在第二项中间被截断、EOCD 仍指向它」判红：应为一项 + `truncated`，变异后多出垃圾名。
+- 变异：`readAt` 失败被吞成 415 或 `truncated` → 新例「zip 的读函数失败原样抛出」（首次读失败、读出两项后失败各一）判红。
+- 变异：用 `getFileNameLowLevel` 或 CP437 解码 → 新例「未置位 11 的 UTF-8 中文名原样」「`ff fe 41` → `\ufffd\ufffdA`」判红。
+- 变异：`archiveFormat` 不认 `.zip`，或 `format` 回错 → `x.zip` 行与三项用例判红。
+- 变异：EOCD 后的多余字节改为容忍、条目数改为不信声明 → 新例「尾部 4 字节 → 不支持」「条目数虚高 → 三项 + `truncated`」「虚低 → 一项、`truncated: false`」判红。
+- 变异：空 zip 判成 415 → 新例「22 字节的空 zip → `[]`、`truncated: false`」判红。
+- 变异：整包读入内存 → `maxLength` 与 `positions` 断言判红；`x.zip` 加 100000 字节前缀并修正偏移，断言 `positions` 不含 0。
+- 变异：去掉 `finally` 里的 `close()`、去掉常驻 `error` 监听 → 不可观察（惰性读取下返回后没有在途读取，探针未见迟到的读），靠白盒审查。
+- 变异：给 zip 加或不加时限 → 不可观察（规格不给 zip 时限）；可加一条「`now` 抛错的时钟下 zip 照常列出」把「zip 不读时钟」钉住。
+- 变异：目录遍历、符号链接、跨工作空间 id、他人工作空间 404、越界审计 → 本刀没有路由，不可观察，归 #1065 / #1075。
+- 变异：删掉 `ATTRIBUTION.md` 的 yauzl 行 → `ui-guardrails.test.ts` 新增的那条判红；不加该用例则不可观察。
+
+## 11.2、11.3（#1067）
+
+- Critical Path：本路由不调 `sandbox.resolve`、不加 `op`、不读写用户路径，但它签发的令牌是预览来源上读用户文件的全部凭据，按 Critical Path 处理（两个评审席位加 owner 白盒）。D-23：本路由只对空间根目录做一次 `lstat`（`ensureOwnedRoot`），没有「解析后按路径操作」的替换窗口，不闭合也不扩大 #1286。
+- 前提已齐（按代码核对）：0.1 已合；5.1 的 `server/src/preview-config.ts` 有 `previewOrigin?`、`previewDocumentMaxBytes`、`officeBin?`；11.1 的 `server/src/preview/tokens.ts`（96 行）导出 `createPreviewTokens` 与 `PreviewTokens`；#1013 的 `POST /api/workspaces/:id/uploads` 已在 `server/src/http/errors.ts:54-70`。不在 1.2 挡住的集合里，不等 1.1、1.3。issue 的任务摘录与 `tasks.md` 的 11.2、11.3 逐字一致，无差异。
+- 漂移（行号与计数）：`tasks.md` 写的 `http-parser-owners.test.ts:29-42` 与 `:144-146`，现为身份表 `:29-45`、条数断言 `:149-153`。底数 15 属实（`errors.ts` 集合 15 项，主规格 `openspec/specs/http-service-skeleton/spec.md:129` 为 fifteen-identity）。按本批次序本刀先于 #1062，本刀是 15 → 16，#1062 再到 17；本刀任何文字都不写「十七」。
+- 漂移（issue 的 PR Boundary 漏列）：`server/src/app.ts`（490 行）必须改。`AssemblyDependencies`（`:76-108`）没有 `preview`，`registerWorkspaces` 的调用在 `:226-232`。`server.ts` 的 `appAssemblyOf`（`:107`）不动，所以合入后生产入口不注册该路由（404），直到 13.1（#1070）；issue 写的「签发出的地址无人应答」不准，记入偏离记录。
+- 落点：新文件 `server/src/workspaces/rest-preview-token.ts`（约 70 行，命名守卫不触发），导出 `registerWorkspacePreviewToken(app, dependencies, preview)` 与 `interface WorkspacePreviewDependencies { tokens: { issue(binding: { ownerId: string; workspaceId: string; embedOrigin: string | null }, now: number): { token: string; expiresAt: number } }; port: () => number; origin?: string; documentMaxBytes: number; officeAvailable: boolean }`。`tokens` 写成结构类型，不从 `../preview/tokens.js` 导入（`docs/architecture/system.md` 第 2 条不许未声明的 feature 间依赖，12.2 同一做法）。`workspaces/index.ts`（11 行）的 `registerWorkspaces` 加第三个可选参数，`!== undefined` 时才注册；`app.ts` 加 `preview?: WorkspacePreviewDependencies` 并原样传入。
+- 处理次序（先例 `server/src/sessions/rest.ts:348-359` 的 stop）：`onRequest: noStoreWorkspaceResponse`（401 也带 `no-store`）→ 根守卫 401 → 路由级 `preParsing` 内 `ensureOwnedRoot(dependencies, currentPrincipal(request), request.params.id)`（他人、不存在、根目录不在都是同一 404，先于 body 解析）→ `bodyLimit: 1` → handler 里 `request.body !== undefined` 即 `bad_request` → 算预览来源 → `tokens.issue(…, Date.now())` → 回六键。`BODYLESS_BODY_LIMIT`（`sessions/rest.ts:151`）与 `rest.ts:178-186` 的两个 `preParsing` 闭包都没导出：常量本地定义，`preParsing` 就地内联（写法同 `sessions/undo.ts:341`），`rest.ts` 零改动。
+- 响应与取值：键序恰为 `token, base, officeBase, expiresAt, documentMaxBytes, officeAvailable`。`embedOrigin` 为 `request.headers.origin ?? null`，原样传入（空串、`null` 字面、任意垃圾都不校验，校验在 `server/src/preview/headers.ts` 写头处）。`ownerId` 为 `principal.id`。时钟用 `Date.now()`，不给 `assembly.preview` 加时钟字段（规格只列五项）。不调 `audit.emit`，不写日志（`createApp` 是 `logger: false`）。
+- 预览来源：有 `preview.origin` 时原样用且不调 `preview.port()`；否则为 `${request.protocol}://${request.hostname}:${preview.port()}`。Fastify 5.12.1 的 `request.hostname` 已去端口并保留 IPv6 方括号，不要手写拆分，不用 `request.host` 与 `request.port`。`createApp` 没开 `trustProxy`，`X-Forwarded-Host/Proto` 不被采信，TLS 终结在前时必须配 `PREVIEW_ORIGIN`（D12 已写），本刀不加 `trustProxy`。
+- 规格未写的分支（偏离记录，请白盒确认）：(a) `Host` 缺失或拼出的串 `URL.canParse` 为假 → 400 `bad_request`，不签发；通过 `canParse` 的怪值（`a.test/x`）原样进 `base`，只回给伪造者本人。(b) 临时空间照常签发：`rootOf` 的 SQL（`store.ts:84`）不滤 `temporary`，转正后 id 与目录不变、令牌继续有效。(c) 登记表撞车抛错 → 通用 500，信封不含令牌。(d) 无频率限制：每个 (账号, 空间) 至多一条记录，条数以该账号的空间数为界，已删空间的过期记录留到重启（11.1 已登记）。(e) 没有 CSRF 令牌，靠 `SameSite=Lax`（`auth/session.ts:218`）；`Origin` 只记录不拦截。
+- 必须改的既有文件：`errors.ts:55-70` 的集合加一行，`:45` 与 `:72` 的「十五条」注释改十六；`http-parser-owners.test.ts` 的 `FIFTEEN_OWNER_IDENTITIES` 改名 `SIXTEEN_OWNER_IDENTITIES` 并加一行，`:28` 注释（十五条 POST 加一条 PATCH）、`:149-150` 两处标题、`:152` 的 `toBe(15)` 改 16，证据 3 的 `NON_OWNER_METHODS` 加 `["PUT", "/api/workspaces/:id/preview-token"]`。任务未点名的 grep 命中：`http-typed-errors.test.ts:190` 的 describe 标题写「十五条」但不断言条数，只改标题文字。其余既有断言不动。
+- 新测试 `server/test/preview-token-rest.test.ts`（约 280 行）：夹具给 `workspaces-http-helpers.ts`（101 行）的 `withWorkspacesApp` 加一个可选的 assembly 追加参数，不另抄 `runtime` 块（jscpd）。登记表用真的 `createPreviewTokens()` 并包一层数 `issue` 次数；`vi.useFakeTimers({ toFake: ["Date"] })`（先例 `session-rest-helpers.ts:74`）钉 `expiresAt`；body 目录复用 `session-bodyless-rest-helpers.ts` 导出的 `INJECT_BODIES`、`PRE_PARSER_BODIES`，inject 自己写。不出现 64 位十六进制字面量（gitleaks），正则用字面量。
+- 用例：(1) 签发与复用：`Origin` 与 `Host` 用端口 3000、`port: () => P`（P 不等于 3000）→ 两次 200 同令牌，`base`、`officeBase` 逐字相等，`expiresAt` 恰为 `t + 900000` 与 `t + 300000 + 900000`，`audit_events` 行数不变，`lookup(token)` 恰为 `{ownerId, workspaceId, embedOrigin}`；无 `Origin` 时为 `null`，换 `Origin` 再签随之更新。(2) 来源：`origin` 已设且 `port` 是会抛的函数 → `base` 恰为该值；`Host: [::1]:3000` → `http://[::1]:<P>/w/…`；`Host` 不带端口；带 `X-Forwarded-Host/Proto` 时 `base` 不变；`documentMaxBytes` 注入非缺省值；`officeAvailable: true`；空 `Host` → 400。(3) 归属与请求体：lisi 对 zhangsan 的 id、不存在的 id、`%2e%2e` → 相同 404；未登录 → 401；自己的空间上 `INJECT_BODIES` 逐例 400；lisi 带 `{}` 仍是 404；根目录移走 → 404；每例 `issue` 调用数为 0 且带 `no-store`。(4) 令牌不外泄：全部响应头的值、请求期间被 spy 的 `process.stdout/stderr.write` 与 `assembly.log/warn/onError` 都不含令牌。(5) 未装配：不带 `preview` 时 typed 404，同 app 的 `GET …/tree` 200。(6) 临时空间 200。
+- 本刀测不到的场景部分：「对外来源与转换可用」只能在 assembly 接缝测，`PREVIEW_ORIGIN`、`OFFICE_BIN` 到 `assembly.preview` 的映射归 #1070 与 #1074。「归属与请求体」THEN 里「访问预览监听器得不到文件」要到 #1069 才可观察，本刀以 `issue` 调用数为 0 代替。11.4 的五路由表归 #1075。
+- 门槛与清单：全部文件远离 800 行；knip 不报（新导出由 `index.ts`、`app.ts` 与测试引用）；不是配置刀，不动 `system.md` 第 9 节与配置条数断言；服务端且生产入口未接线，no checklist rows；`tasks.md` 勾 11.2，11.3 按 issue 约定在各分摊刀合入后再勾。
+- 同批共改文件，请 orchestrator 排序：`server/src/app.ts`（#1056 接 `limits`，本刀接 `preview`）；`server/test/workspaces-http-helpers.ts`（#1056 多半也要传装配项）；`server/src/http/errors.ts` 与 `server/test/http-parser-owners.test.ts`（#1062 再加一，常量再改名）；`server/src/workspaces/index.ts`（本刀改签名，#1060、#1062 若新建路由文件也会动它）。本刀不碰 `rest.ts`、`rest-entries.ts`。
+- 变异：去掉 `preParsing` 的归属检查（他人的空间也签发）→ (3) 的 lisi 404 与 `issue` 调用数 0 判红（issue 指定的第一条）。
+- 变异：`base` 用 `request.host` 或 `Host` 头里的端口 → (1) 的 `base` 逐字相等判红，因为 P 不等于 3000（issue 指定的第二条）。
+- 变异：归属检查挪进 handler（晚于 body 解析）→ (3)「lisi 带 `{}` 仍是 404」变 400，判红。
+- 变异：`ensureOwnedRoot` 换成只查 `rootOf !== null` → (3)「根目录移走 → 404」判红。
+- 变异：`ownerId` 取自别处，或 `workspaceId` 不取 `:id` → (1) 的 `lookup` 三键相等判红（跨账号、跨空间向量）。
+- 变异：`errors.ts` 集合不加本路由 → (3) 的 body 目录出现 500 判红，`http-parser-owners` 新行判红。
+- 变异：去掉 handler 的 `request.body !== undefined` → (3) 里 `1`（1 字节合法 JSON，过得了 `bodyLimit: 1`）变 200，判红。
+- 变异：`bodyLimit` 放大到 16 KiB → 预期不可观察：`{}` 被解析后仍由 handler 判 400；只有同时去掉上一条才红。
+- 变异：`embedOrigin` 写死 `null`，或取 `Referer`、`Host` → (1) 的 `embedOrigin` 断言判红；在路由处校验或规范化它 → 补一例 `Origin: http://a.test/` 断言 `lookup` 原样返回，判红。
+- 变异：`origin` 已设仍拼请求主机，或提前调 `port()` → (2) 会抛的 `port` 用例判红。
+- 变异：手写 `split(":")` 取主机名 → (2) 的 `[::1]` 用例判红。
+- 变异：开 `trustProxy` 或读 `X-Forwarded-*` → (2) 的转发头用例判红。
+- 变异：`officeBase` 写成 `/w/`，或 `base` 少结尾斜杠 → (1) 的逐字相等判红。
+- 变异：`documentMaxBytes` 写死缺省值、`officeAvailable` 写死 `false` → (2) 的注入值用例判红。
+- 变异：响应多一键、少一键或键序变 → (1) 的 `Object.keys` 相等判红。
+- 变异：写一条审计（如 `preview.token`）→ (1) 的 `audit_events` 行数判红。
+- 变异：令牌放进响应头（`Location`、`ETag`）或打日志 → (4) 判红。
+- 变异：去掉 `onRequest` 的 no-store → 各例 `cache-control` 断言判红（含 401、404、400）。
+- 变异：无条件注册路由 → (5) 的 404 判红（`preview` 为 `undefined` 时 handler 抛错成 500）。
+- 变异：时钟传常量或 0 → (1) 的 `expiresAt` 恰等判红。
+- 变异：400 分支放到 `issue` 之后（先签发再拒绝）→ (3) 与空 `Host` 用例的 `issue` 调用数 0 判红。
+- 变异（预审补）：协议写死 `"http"`（不取 `request.protocol`）→ 新增的「TLS 连接上是 `https`」一例判红。inject 没有 TLS，夹具的 `onRequest` 钩子给带标记请求的 socket 置 `encrypted`（Fastify 5 不开 `trustProxy` 时 `request.protocol` 只看这一位）。
+- 变异（预审补）：`embedOrigin` 的 `??` 换成 `||` → (1) 的 `Origin` 原样登记一例判红（循环里补了空串）。
+- 变异（预审补）：`errors.ts` 集合不加本路由，最终树上重跑为红 13：`http-parser-owners` 新行 4 例、真实 socket 一例、(3) 的 body 目录 7 行（`{}` 超限、坏 JSON、空 JSON、不支持的媒体类型、`{"x":1}`、无 content-type 的 `1`、1.1 MB）、(4) 一例。
+- 变异（预审补）：分支 (a) 后半（通过 `canParse` 的怪 `Host`）补一行钉现状：`Host: a.test/x:3000` → `base` 为 `http://a.test/x:<预览端口>/w/<token>/`；「去掉 `canParse`」重跑仍只红拒绝的三行与 (4)。
+- 变异（预审补）：不可观察：根路径上是普通文件时不是 404 而是通用 500——`rootOf` 里的 `computeSafeRoot`（`store.ts:312-315`）先抛，`GET …/tree` 实测相同，既有行为；`ensureOwnedRoot` 的「存在但不是目录」一支走不到，没有能钉它的变异，用例标题去掉「or is no directory」。上文「只做一次 `lstat`」应读作 `rootOf` 里一次加 `ensureOwnedRoot` 一次。
+- 变异：不可观察：遍历与符号链接（本路由没有路径参数）、「越界写 `sandbox.reject`」——归 #1069 与 11.4（#1075）。`lookup` 顺手续期属 #1066，已有证据。
+
+## 8.1 的 moveToTrash 半边、8.2、8.3、8.4（#1060）
+
+- **Critical Path：沙箱与文件边界**（删除用户数据、回收目录、`rename` 与文件系统补偿）——两个评审席位并请 owner 白盒审查；纯服务端，**不加验收清单行**（FL-01 已在 `docs/acceptance/functional-checklist.md:193`），不碰配置键计数与 `docs/architecture/system.md` 第 9 节。
+- 漂移：`server/src/workspaces/rest-entries.ts` 已存在（93 行，#1061 的下载路由），本刀在 `registerWorkspaceEntries` 里加路由，不新建文件；`trash.ts` 126 行，`createTrash`（`:36`）没有 `rename?`、不 import `core/sandbox`；`rest.ts` 418 行（不加路由，只给 `WorkspaceRestDependencies` `:21` 加字段）、`workspaces/index.ts` 11 行（不用改）、`app.ts` 490 行、`workspaces-http-helpers.ts` 101 行；堆叠分支上先重读这些行号。
+- issue 与 tasks.md / 规格的差异（后者为准）：① issue 写「新文件 `rest-entries.ts`」，tasks 8.2 也这么写，实际已存在；② issue 验收写「符号链接 / 非目录 / 他人持有 → 500」，规格场景「回收目录被预先占位」的三例是符号链接、普通文件、`.trash/u1` 为 `0777`（**校正为 `0700` 后删除成功**），没有「他人持有」的路由用例；③ issue 的 8.1 摘录缺 tasks 里指向 #1059 注记的那一行；④ 定时器 issue 写 #1070，tasks 写 13.1，同一件事。编排方提示里的「多路径批量、部分失败、16 KiB body 校验」规格里都不存在：一次请求一个 `path`，「批次」只是每次删除一个目录，路由不设 `bodyLimit`。
+- 形状：`createTrash(options: { sandboxRoot: string; retentionDays: number; rename?: (from: string, to: string) => void })`，返回对象加**同步**的 `moveToTrash(ownerId: string, workspaceId: string, absPath: string): string`，`rename` 缺省 `renameSync`。流程：`.trash`、`<ownerId>`、`<workspaceId>`、`<batch>` 四级依次 `ensureOwnedDir(…, 0o700)`（从 `../core/sandbox/dirs.js` 导入，先例 `preview/office.ts:22`）→ `rename(absPath, join(batchDir, basename(absPath)))` → 失败时 `rmdirSync(batchDir)`（非递归、只删批次这一级、吞掉自身错误）后抛原错。批次名 `${Date.now()}-${randomBytes(8).toString("hex")}`。不导出新的模块级符号，不给两个段加校验（`ownerId` 已过 `rejectUnsafeOwnerSegment`，`workspaceId` 是库里命中的行；记偏离）。
+- 注入缝：`AssemblyDependencies`（`app.ts`）加 `trash?: ReturnType<typeof createTrash>`（仿 `snapshots?`），缺省由 `createApp` 以 `runtime.sandboxRoot` 建一个；`WorkspaceRestDependencies` 加**必填** `trash`，`app.ts:226` 的调用传入。缺省的 `retentionDays`：把 `preview-config.ts:24` 的 `DEFAULT_TRASH_RETENTION_DAYS` 加 `export` 后导入 `app.ts`（13.1 之前无人调 `sweep`，零运行期影响；记偏离）。`appAssemblyOf` 不动，13.1（#1070）沿用 `assembly.trash` 拿到同一个服务。`withWorkspacesApp` 加第三个可选参数 `assemblyOf?: (sandboxRoot: string) => Pick<AssemblyDependencies, "trash">`。
+- 路由次序：`onRequest: noStoreWorkspaceResponse` → `currentPrincipal` → `ensureOwnedRoot` → `parsePathQuery(query, true)` → `sandbox.resolve(principal, id, path, "delete")` → `lstatExisting`：不存在 404、非 `isFile()` 且非 `isDirectory()` 404 → `trash.moveToTrash(principal.id, id, absPath)` → `audit.emit({kind:"file.delete", actorId, workspaceId, title:` `删除 ${path}` `, detail:{path, type, trashId}})` → `reply.code(204).send()`。`detail.path` 用请求原串。不改 `core/sandbox`、`http/errors.ts`。
+- 规格未写明的分支（最简处理，记偏离）：(a) 带合法 JSON body → 忽略，204；`Content-Type: application/json` 加畸形 body → generic 500 且目标未动（非归属路由的既有语义，他人 id 同样是 500，因为 parser 先于处理器），这条 http-service-skeleton「工作空间新增两条归属路由」的 DELETE 分句写在本刀新测试文件里，不进 `http-parser-owners.test.ts`（它归 #1062 / #1067）；(b) FIFO → 404；(c) `rename` 得 `ENOENT`（条目在 `lstat` 后消失）→ 500；(d) 空的 `<ownerId>`、`<workspaceId>` 目录在失败后保留；(e) `uploads` 等顶层目录可删，只有根（空串）被 `op=delete` 的末段规则拒绝；(f) 空间内名叫 `.trash` 的条目是普通条目，可删。
+- `trash.ts:1-27` 头注释：第 2–3 行「this half only sweeps…moving entries in comes with the delete route」在本刀变假，必须改写；`:12` 的「settle it before anything schedules this sweep」**同刀**改成已裁决现状（D-23：登记为已知残余、#1286 保持打开），因为紧挨着要新增 `moveToTrash` 的残余段落，留着会自相矛盾。记偏离「提前履行 tasks 13.1 注记的那半句」；#1070 以 `git grep 'settle it before'` 零命中为证，其余陈述不动。
+- **残余（D-23，不声称闭合，写进头注释与 PR 描述）· 源侧**：`resolve` 对每个分量各 `lstat` 一次，路由对末段再 `lstat` 一次，此后 `rename` 按路径、什么都不复查。空间根及其下各级都是 `2770`、omp 用户可写：任一**中间**分量在检查后被换成符号链接，`rename` 就跟随它，把链接目标目录里同名、应用用户移得动、且在同一文件系统上的条目（别的账号的空间、同盘的状态目录条目）收进回收目录，到期被清理，审计仍记空间内的逻辑路径；跨文件系统则 `EXDEV` → 500。末段被换成链接时只是链接本身被移走（`rename` 不跟随末段），`type` 记错。
+- **残余 · 目标侧**（读代码推出，未实测）：四级各校验一次，校验的是「属应用用户的 `0700` 真实目录」，没有把路径绑定在真正的 `.trash` 下。`.trash` 通过第一级校验后可被 omp 用户改名挪开并换成符号链接（`SANDBOX_ROOT` 组可写、无 sticky；1.2 附带实测同父目录内改名成功），后三级就在链接目标下被 `mkdir` / `chmod`。后果两条：批次落在 `.trash` 之外（omp 用户读不到，但清理也扫不到）；链接指向 `SANDBOX_ROOT` 自身时，第二级 `ensureOwnedDir` 把账号根 `<SANDBOX_ROOT>/<ownerId>`（应用用户持有的 `2770`）**校正为 `0700`**，omp 用户从此进不去该账号的全部空间，直到管理员改回。补偿的 `rmdir` 同样按路径。这是规格规定的逐级 `ensureOwnedDir` 语义加 D22 已登记的同一类窗口，本刀没有放宽它；**不加 `realpath` 复核**（不闭合，只会被读成闭合）。
+- 1.2 实测供引用：uid 分离部署下工作空间与 `.trash` 同一 `st_dev`，无 `EXDEV`；omp 用户建的 `0660` 文件与 `2770` 目录（含子树）都能被应用用户 `rename` 进 `0700` 批次并移回，inode、属主、组、mode 不变——移入后条目仍属 omp 用户，只是按路径够不着（仍持有描述符或工作目录的进程除外）；`chmod g-w` 的目录跨父目录移动得 `EACCES` → 规格的 500、条目留在原处。未测「去掉组写位的目录里的单个文件」。
+- 新文件 `server/test/workspaces-delete.test.ts`（`workspaces-http.test.ts` 736 行不得加行），用例：① 删除文件与目录（204、空体、`no-store`；批次名匹配字面量 `/^\d+-[0-9a-f]{16}$/u`；四级目录 `mode & 0o7777 === 0o700`；`out` 子树完整；`file.delete` 两行 `detail` 恰三键）② 同名先后删除 ③ 拒绝项九例（四个 403 各一条 `sandbox.reject`、`detail.op === "delete"`；断言 `existsSync(<root>/.trash) === false`，比「没有新增批次」更强）④ lisi、不存在的 id、无根目录的自有 id → 逐字相同的 404，审计零行，文件未动，`.trash` 不存在 ⑤ 注入抛 `EXDEV` 的 `rename` → `INTERNAL_ERROR_ENVELOPE`、`readdirSync(.trash/u1/<id>)` 为空、无 `file.delete` ⑥ 预先占位三例 ⑦ 回收目录不可见（本空间与另一空间各级 `tree`；`path=.trash` → 404，`path=../.trash` → 403，`tree` 与 `file` 都测）⑧ 审计失败（`db.setAuthorizer`，范式在 `workspaces-http-failures.test.ts:267`）→ 500 且条目在批次里 ⑨ body 两例 ⑩ FIFO → 404（`mkfifo` 已在 knip `ignoreBinaries`）。204 不能用 `expectWorkspaceResponse`（它调 `.json()`）。
+- 夹具与守卫：⑥ 第三例先建 `0700` 的 `.trash`，再 `mkdirSync` + `chmodSync(…, 0o777)` 建 `u1`（`mkdir` 的 mode 受 umask 影响）。「他人持有」在路由层不可夹具（非 root 无法在临时目录造他人持有的目录），由 `sandbox-dirs.test.ts:336` 钉住，不许用改写 `geteuid` 伪造；规格括注「进程为 root 时归属一例跳过」在三例里没有对应项，三例都不跳过。jscpd：`auditRows`、`SANDBOX_DENIED_ENVELOPE`、`seedWorkspace` 与 `workspaces-download.test.ts:27-72` 同形，报 clone 就搬进 `workspaces-http-helpers.ts`，下载测试只改 import（等价改写，记偏离）。既有测试无须改断言：`server-assembly.test.ts:560` 只包一层 `registerWorkspaces`，`workspaces-http-failures.test.ts:231` 是显式 URL 列表，`<state>/trash` 的断言是另一套目录。
+- 同批共用文件（按既定堆叠次序）：`rest.ts` 的 `WorkspaceRestDependencies` 与 `app.ts:226` 的调用——#1056（`limits`）、#1067（`preview?`）在前，本刀加 `trash`；`rest-entries.ts`——本刀在前，#1062 在其上加 `move`；`workspaces-http-helpers.ts`——本刀加第三参数，#1062 复用。合入后 13.1 之前回收目录只进不清，属 tasks 已定的次序，PR 描述写明。
+- 变异：批次目录（或任一级）建成 `0755` → ① 的 mode 断言红（8.4 第一条）。
+- 变异：用递归 `mkdirSync(batchDir, { recursive: true })` 代替逐级 `ensureOwnedDir` → ⑥ 符号链接例里 `notes.md` 被移进链接目标而红；普通文件例仍是 500，**不可观察**（8.4 第二条）。
+- 变异：`rename` 失败后不 `rmdir` 批次 → ⑤「没有残留」红（8.4 第三条）。
+- 变异：「删除先于归属检查」（8.4 第四条）：只去掉 `ensureOwnedRoot` 时，他人 id 仍被 facade 的 `rootOf(principal)` 挡成 404，**不可观察**；它由 ④ 的无根自有 id 判红（404 变成 403 加一条 `sandbox.reject`）。要让 ④ 的 lisi 用例红，变异体须按空间属主查根，PR 表两种都列。
+- 变异：`resolve` 的 `op` 写成 `"read"` → ③ 的 `path=`（空串）变成移走空间根或 500，且 `detail.op` 断言红。
+- 变异：跳过 `resolve`，直接 `join(root, path)` → ③ 的 `../x`、`link` 与 ⑦ 的 `../.trash` 红。
+- 变异：去掉 `isFile() / isDirectory()` 判定 → ⑩ FIFO 用例红（变成 204）。
+- 变异：存在性检查挪到 `moveToTrash` 之后 → ③ `missing.md` 的「`.trash` 不存在」红。
+- 变异：`audit.emit` 挪到 `rename` 之前 → ⑧「条目已在回收目录」红（条目仍在原处）；吞掉审计错误 → ⑧ 的 500 红。
+- 变异：审计 `detail` 多一键或少 `trashId` → ① 的三键 `toEqual` 红；`trashId` 不等于实际批次名 → ① 红。
+- 变异：批次名不带随机段（只用毫秒）→ ② 需在同一毫秒内两删才红；用 `vi.spyOn(Date, "now")` 固定时间，否则**不可观察**。
+- 变异：去掉 `rename` 注入（恒用 `renameSync`）→ ⑤ 红（204）。
+- 变异：`parsePathQuery(query, false)` → ③ 缺 `path` 的 400 红（变成 403）。
+- 变异：目标名取查询串末段而非 `basename(absPath)` → 预期**不可观察**（末段规则已拒 `a/`、`a/.`）；加 `./notes.md` 用例也只钉 `detail.path` 原串。
+- 变异：把 `.trash` 建在空间根下 → ⑦ 的 `tree` 断言与 ① 的位置断言红。
+- 变异：把路由加进 `http/errors.ts` 归属集 → ⑨ 畸形 body 的 500 红（变成 400）。
+- 变异：去掉 `onRequest: noStoreWorkspaceResponse` → ③ 未登录 401 与各例的 `cache-control` 断言红。
+- 变异：补偿改成递归 `rm` 整个 `<workspaceId>` 级 → ②（第一个批次被连带删除）需配一例「已有批次后再注入失败」才红；⑤ 里加这一步。
+- 预审补：**残余 · 目标侧还有一条不需要竞态的**（读 `dirs.ts:69-96` 与 `trash.ts` 的四级循环推出，**未在 uid 分离部署上实测**）。上面「预先占位由逐级校验挡住」只对符号链接、普通文件、他人持有的目录成立；`ensureOwnedDir` 容忍 `EEXIST`，已存在的条目只要是**应用用户持有的真实目录**就被接受，不看 mode（校正为 `0700`）、不看是谁挪来的。规格（file-operations `:6`）只设想了 omp 用户放「符号链接或自己的目录」，没有设想它挪动应用用户的目录：账号根正是应用用户持有的 `2770` 目录，omp 用户可以在 `.trash` 出现之前、或把真正的 `.trash` 改名挪开之后，把某个账号根改名为 `<SANDBOX_ROOT>/.trash`。此后任一其他账号的下一次删除把该账号根校正为 `0700`、在其中建后三级、把条目改名进去、答 204 并写审计。后果：该账号根变 `0700`（与上一条相同，omp 用户进不去，该账号既有空间的请求因根不在原处得 404（它新建空间时账号根会被重建，之后它在新空间里的删除同样会触发））；被挪开的真正 `.trash` 里的既有批次清理再也扫不到；新批次落在被劫持的目录里——**只在它仍叫 `.trash` 期间**清理扫得到（与符号链接变体不同：这里 `.trash` 是通过 `lstat` 校验的真实目录；清理还会走进该账号根，其下 `2770` 的空间目录过不了校验、被跳过），改回原名后批次留在账号根下、扫不到。确定性、无窗口；没有新增权限（omp 用户本来就能改写 `SANDBOX_ROOT` 下的一切，ADR-0010 信任模型）。属 #1286 / D-23 已登记残余的同一类，不闭合、不加复核；头注释与 PR「已知残余」同步写明。
+
+## 9.1、9.2、9.5（#1062）
+
+- **Critical Path：沙箱与文件边界**（改动用户文件位置、`op=move` 两端、审计次序）：两个评审席 + owner 白盒；纯服务端，**no checklist rows**（FL-01 已在）；不碰配置键、`docs/architecture/system.md` §9、`core/sandbox`、`trash.ts`、`smoke/files.hurl`（26.2）、`workspaces-http.test.ts`（736 行；11.4 归 #1075）。
+- 与 `tasks.md` 的出入：issue 里 9.1 / 9.2 / 9.5 的任务原文与 `tasks.md` 逐字一致。issue 其余四处过时：① PR Boundary 写「`rest-entries.ts` 不存在则本 PR 建」，主干已有（93 行，下载路由，`index.ts:10` 已注册）；② 「已知残余」只写了微秒级覆盖窗口，裁决后登记的是 D22「已知残余」的整段替换窗口（见下）；③ PR Boundary 漏了 `rest.ts`（只加 `export`）与 `http-typed-errors.test.ts:190` 的标题；④ 11.3 引的 `http-parser-owners.test.ts:29-42`、`:144-146` 现为 `:28-45`、`:149-155`。
+- 归属条数以合入时的底为准，底数加一：主干是 15（`errors.ts:52-68`、`FIFTEEN_OWNER_IDENTITIES`）；按本批栈序 #1067 在前，本刀是 16 → 17，#1067 未在底上则是 15 → 16。规格 delta 与 D25 写的「十七条 / 其余十六条」是终态。须同步改：`errors.ts:45-51` 与 `:72` 的注释、集合加 `"POST /api/workspaces/:id/move"`；`http-parser-owners.test.ts` 的常量名、`:28` 注释、`:149-150` 两个标题、`:152` 的 `toBe(n)`；`http-typed-errors.test.ts:190` 的标题（只列十条、无条数断言，仅改标题，记偏离）。另在「证据 3」的 `NON_OWNER_METHODS` 加 `["PUT", "/api/workspaces/:id/move"]`。
+- 9.2 与现码不符：`http-parser-owners.test.ts` 不挂产品路由（文件头 `:6-9`，`requestShaped` 接缝），「无文件变化」在那里不可观察。该文件只加身份行（`it.each` 自动得到 ×4 个真实 CTP 错误）；「400 且无文件变化、无审计、`no-store`」写在 `workspaces-move.test.ts`，走 `app.inject`，仿 `workspace-promote.test.ts:574-600`。
+- 复用而不复制：`rest.ts`（418 行，#1056、#1058 也改它）只给 `WORKSPACE_BODY_LIMIT`（:38）、`isOrdinaryDirectory`（:143）、`parseBodyRecord`（:363）加 `export`，零新增行；已导出的 `currentPrincipal`、`ensureOwnedRoot`、`lstatExisting`、`noStoreWorkspaceResponse` 照用。`parseMoveBody` 写在 `rest-entries.ts`：`parseBodyRecord` 后判 `Object.keys(record).length === 2` 且 `from`、`to` 都是 string。
+- 与 #1060 的共用：DELETE 无 body，没有 body 校验可复用；可共用的只有「`lstat` 结果 → `"file" | "dir"`，否则 404」这一个模块私有函数（两条路由的 404 判定与 `detail.type`）。#1060 先合则直接用它的，没有就由本刀写成一个并让 DELETE 改用，不各写一份。测试侧的 `auditRows`、`SANDBOX_DENIED_ENVELOPE`、建空间夹具同理：`workspaces-http-helpers.ts`（101 行）里已有就导入，没有就放进去共用，不从 `workspaces-download.test.ts:36-68` 整段粘贴（jscpd 3%，无忽略项）。
+- 合并排序：`rest-entries.ts` #1060 → #1062；`errors.ts` 与 `http-parser-owners.test.ts` #1067 → #1062；`rest.ts` 在 #1056、#1058 之后。
+- 路由选项：`bodyLimit: WORKSPACE_BODY_LIMIT`、`onRequest: noStoreWorkspaceResponse`、路由内联 `preParsing`（`ensureOwnedRoot(dependencies, currentPrincipal(request), request.params.id); done(null, payload)`，同 `rest.ts:185-188` 的做法，不为它把闭包提出 `rest.ts`）。没有这个钩子，他人 id 带坏 body 会先得到 400，违背「归属 404 在先」。用查根的那一版，自己名下但根目录缺失的 id 也是 404。
+- 处理体（全程同步，检查与改名之间不 `await`）：`parseMoveBody` → `resolve(from,"move")` → `resolve(to,"move")`（前者抛出则后者不执行）→ `toAbs.startsWith(fromAbs + "/")` → 400 → `lstatExisting(fromAbs)` 非文件非目录 → 404 → `!isOrdinaryDirectory(dirname(toAbs))` → 404 → `lstatExisting(toAbs) !== undefined` → 409 → `renameSync(fromAbs, toAbs)`（`node:fs` 具名导入，不 try/catch）→ `audit.emit` → `{ path: to }`。`resolve` 已跳过空分量与 `.`（`resolve.ts:40`），所以词法前缀比较与 `dirname(fromAbs) === dirname(toAbs)` 都在已解析路径上做；`title` 是 `重命名 ${from} → ${basename(toAbs)}` 或 `移动 ${from} → ${to}`，`detail` 与响应带原始的 `from`、`to`。
+- 「不覆盖」按 D23 是先看再改名，不是原子的：Node 没有 `RENAME_NOREPLACE`，D23 否决 `link` + `unlink`（`fs.protected_hardlinks`）。检查与改名之间不 `await` 只保证别的处理体的 JS 不在中间运行，不保证文件系统不变：本进程其它请求已经交给 libuv 线程池的调用（`upload.ts:70` 的 `link`、`snapshots-restore.ts` 的 `fsp.*`）照样可以落在 `lstat(to)` 与 `renameSync` 之间，窗口对本进程的并发请求和别的进程（助手）都开着（读代码推出，未复现）：`lstat(to)` 之后被建出的文件会被覆盖（目录源遇空目录同样），非空目录则 `ENOTEMPTY` → 500。PR 不得写「已闭合」。
+- D-23 残余的精确陈述：`resolve` 对 `from` 与 `to` 的每个已存在分量（含末段）各 `lstat` 一次，路由再 `lstat` 三处（`from`、`to` 的父目录、`to`）；此后 `rename` 按路径重新解析两端的全部中间分量，无一被复核。`from` 的中间分量被换成符号链接 → 空间外、应用用户够得着的条目被移进来；`to` 的中间分量（含刚查过的父目录）被换 → 条目被移出去；末段被换成链接只会移动链接本身。不得加宽：不加 `await`、不重试、不做复制回退、不 `mkdir -p` 目标父目录。
+- 规格未写明的分支，取最简，记偏离（一）：① 审计在 `rename` 之后失败 → 500，条目已在 `to`，不回滚（与删除的明文一致）；② `rename` 的任何失败（`EACCES`、`EXDEV`、`ENOENT`、`EINVAL`、`EBUSY`）一律 generic 500，源留原处；空间内子目录是挂载点时的 `EXDEV` 也在此列，`resolve` 不看 `st_dev`；③ `to` 已存在且是符号链接 → 403（`resolve` 先拒），不是 409；④ `{from:"a.md",to:"a.md/x"}`（源是文件）→ 400；⑤ 不加 `resolve` 之外的名字规则（控制字符、点开头、`uploads` 都可移动）。
+- 规格未写明的分支（二）：⑥ 仅大小写不同的改名在大小写不敏感的文件系统（macOS 开发机）是 409，Linux 是 200；`{from:"d1",to:"D1/x"}` 在前者是 `EINVAL` → 500。不做特判，测试里不出现仅大小写不同的名字。⑦ 临时空间走同一个 `rootOf`，无分支，加一例 200 即可。⑧ 「无上限的文件读出」指同组的下载半边（9.3，已交付）；移动只做 `lstat`，不读任何文件字节，响应只有 `{path}`。
+- 新文件 `server/test/workspaces-move.test.ts`（预计 450 行以内）：六个场景照规格，每例断言前后目录树、文件内容与 `file.move` / `sandbox.reject` 行数；「改名失败」用 `vi.spyOn(fs, "renameSync").mockImplementationOnce(抛带 code 的错)` + `syncBuiltinESMExports()`，`EACCES` 与 `EXDEV` 各一例，导入 `workspace-file-helpers.ts` 以复用它的 `afterEach` 还原，断言 500 `INTERNAL_ERROR_ENVELOPE`、`no-store`、正文不含 errno 与路径、`to` 不存在。不加依赖字段 `rename?`。
+- 规格外补充用例：`{from:"../a",to:"../b"}` 恰一条 `sandbox.reject` 且 `relPath` 为 `../a`；`{from:"link/x.md",to:"x.md"}` → 403，空间外文件仍在；`lisi`（种子管理员 `u3`）与不存在的 id 带越界 `from`、带坏 JSON、带超限 body → 逐字相同的 404，零审计；未登录带坏 body → 401；审计失败（`db.setAuthorizer`，仿 `workspaces-http-failures.test.ts:270`）；parser 四例（坏 JSON、空 JSON body、`text/plain`、超 16 KiB）加 `application/octet-stream`；恰 16 KiB 的合法 body（空格补齐，仿 `workspaces-http.test.ts:644`）→ 200。
+- 变异：9.5 ①：去掉 `lstat(to)` 的 409 判断 → 「同名拒绝」的 `a.md → b.md` 里 `b.md` 内容被覆盖，判红（文件覆盖文件时 `rename` 不抛错）。
+- 变异：9.5 ②：不查子树 → 「子树判断先于存在性」的 `d1 → d1/sub/d1`（`d1/sub` 存在）得到 500 而非 400，判红。
+- 变异：9.5 ③：子树判断挪到父目录检查之后 → `d1 → d1/nodir/x`、`missing → missing/x` 与「其它拒绝」的 `d1 → d1/sub/d1` 得到 404，判红。
+- 变异：9.5 ④：前缀比较不带 `/` → `d1 → d10` 得到 400 而非 200，判红。
+- 变异：`resolve` 的 `op` 换成直接 `join(root, path)`（任一端）→ `../a.md`、`link/a.md`、`link/x.md` 的 403 与 `sandbox.reject`（`detail.op="move"`）判红，空间外出现或丢失文件。
+- 变异：先解析 `to`，或一端失败后仍解析另一端 → 「恰一条、`relPath` 为 `../a`」判红。
+- 变异：`to` 改用 `op="mkdir"` 或 `"write"` → 状态码不变，仅 `detail.op` 断言判红（断言须写 `op`）。
+- 变异：去掉 `preParsing` → 他人或未知 id 带坏 JSON、带超限 body 得到 400 而非 404，判红；只留处理体里的 `ensureOwnedRoot` 时同样红。
+- 变异：去掉 `ensureOwnedRoot` → 根目录缺失的自有 id 得到 403 加审计行而非 404，判红；他人 id 的 404 由 facade 的 `rootOf` 双重保证，仅靠该例**不可观察**。
+- 变异：`errors.ts` 不加身份 → `http-parser-owners.test.ts` 的新行 ×4 与 move 测试的坏 JSON、空 body、octet-stream、超限四例判红（500）；`text/plain` 一例**不可观察**（内置 parser 给出 string，处理体自己回 400）。
+- 变异：去掉 `bodyLimit` → 只有「合法 `{from,to}` 加空格超 16 KiB」的例子判红（变成 200 且文件被移动）；用非法形状的大 body 时**不可观察**，所以夹具必须是合法形状。
+- 变异：body 放宽（允许多余键、不查类型）→ `{from,to,extra:1}`、`{from:1,to:"b"}` 判红。
+- 变异：审计挪到 `rename` 之前 → 「改名失败」出现 `file.move` 行，判红；去掉审计或在审计前就返回 → 「重命名与移动」的三行与审计失败例判红。
+- 变异：`title` 恒用「移动」，或用原始字符串比较父目录 → `重命名 a.md → b.md` 的标题断言判红；后一种须有 `{from:"a.md",to:"./c.md"}` 的例子才可观察。
+- 变异：`rename` 失败后做复制回退 → `EXDEV` 例里 `to` 出现，判红；吞掉 `rename` 的错并返回 200 → 「改名失败」判红。
+- 变异：自动创建目标父目录 → `a.md → nodir/a.md` 得到 200，判红；源类型判断放宽到任意类型 → 需加命名管道夹具（`mkfifo`）才可观察，否则标注**不可观察**。
+- 变异：`renameSync` 换成 `await rename()` → 现有用例**不可观察**（spy 落空会使「改名失败」变红，但窗口加宽本身测不出），由评审按「同步、无 `await`」核对。
+- 预审补：**「同步故本进程插不进来」不成立**（上面「不覆盖」一条已就地改正；头注释与 PR「已知残余」第 1 条同改）。读代码推出、未复现的一例：同一用户向 `uploads/x` 的上传在途时把另一个文件移到 `uploads/x`——`lstat(to)` 看到没有，线程池里的 `link`（`upload.ts:70`）落地，`renameSync` 把刚链接上的文件覆盖，上传接着 `unlink(temp)`（`:108`），内容的最后一个名字没了；上传答 201，移动答 200 并写一行正常的 `file.move`。`snapshots-restore.ts` 的 `fsp.mkdir`（`:416`）、`fsp.rename`（`:591`）、`fsp.symlink`（`:609`）同理。不加锁、不加复核（D-23）。
+- 预审补：**`to` 侧中间分量被换的后果不只是「移出去」**（上面「D-23 残余的精确陈述」一条的补充）。分量在路由的 `lstat(to)` 之后被换成符号链接时，那次检查看的是替换前的空间内路径，链接指向的真实目录从未被检查：那里已有的同名非目录（源是文件）或同名空目录（源是目录）被**替换**——同一文件系统上应用用户写得进的任何目录，别的用户的工作空间、`.trash`、快照目录在内；响应 200，审计记逻辑路径。裸 `fs.renameSync` 经被换成符号链接的父目录在本机 APFS、Node 24.13.1 上实测如此；经路由、Linux、uid 分离部署未测。分量换在 `lstat(to)` 之前时，父目录检查与 `lstat(to)` 会跟随它：真实目录里已有同名条目 → 409，没有 → 不覆盖地移出；被换的是直接父目录且在父目录检查之前 → 404（读代码推出）。
+- 预审补：**唯一「成功却没动」的组合**：窗口里在 `to` 出现的是 `from` 的硬链接时，POSIX `rename` 什么都不做并返回成功（本机 APFS 对裸 `fs.renameSync` 实测：不抛错、两个名字都在、`nlink` 为 2；Linux 按 `rename(2)` 推出）→ 路由答 200 并写 `file.move`，条目仍在 `from`。检查时刻已存在的硬链接由 `lstat(to)` 看见，答 409。
+- 预审补：次序用例四行，都加在既有的 `it` 里（文件 518 → 526 行）：`missing → a.md`、`pipe.bin → a.md` → 404（变异：`entryTypeOf(fromAbs)` 挪到 409 判断之后，修复前存活）；`d1 → d1/sub`（`d1/sub` 存在）→ 400（变异：409 判断挪到子树判断之前，修复前存活）；`missing → ../x` → 403 加一条 `sandbox.reject`（变异：`entryTypeOf(fromAbs)` 挪到 `resolve(to)` 之前——预审报它存活，实测修复前已被 `missing → missing/x` 判红，新行另钉沙箱先于源存在性）。整份变异脚本 40 条在最终树上重跑全红。
+- 预审补：上面「规格未写明的分支（一）」里 ②、③、④ 其实由规格决定，不是偏离：② `rename` 失败 → generic 500、源留原处是 file-operations `spec.md:54` 的明文；③ 已存在的符号链接 → 403 而非 409 来自 `spec.md:52` 的次序加 sandbox-core `spec.md:4`（任一已存在分量为符号链接即拒，悬空在内）；④ `a.md → a.md/x` → 400 来自 `spec.md:52`（纯词法、先于一切存在性检查）。body 形状不符先于沙箱同样是 `spec.md:52` 的次序。真正未写明的只剩 ①、⑤、⑥、⑦ 与「无 body → 400」。
+
+## 14.3，含分摊的 14.5 / 14.6 条款（#1072）
+
+- Critical Path 两次命中：「omp 子进程治理」（新增一处 spawn）与提权策略改动（owner D-24 的 `sudo … find`）；两个评审席位，PR 标白盒审查，测试通过不豁免。纯服务端、合入后生产入口无调用方（15.1 才接）：无验收清单行、无配置键、不动 `docs/architecture/system.md`、不动 `server.ts` 与 `.github/scripts/ci-uid-isolation.sh`；ADR-0010 增补的两行 sudoers 归 28.1 / 28.2。
+- 前置核对（按代码，不按勾选框）：0.1、14.1、14.4、14.7 均已在 origin/master（`server/src/preview/office.ts` 324 行，`collectOutput` 已带 200 MiB 上界；`fake-soffice.mjs` 在）；不在 1.2 挡住的集合里，1.1 / 1.3 不挡；不依赖 5.1、13.1（全部以参数收值）。与本批其它切片无共用源文件，只有 `tasks.md` 与 `implementation-notes.md` 的叠栈冲突。
+- issue 正文与 `tasks.md` 14.3 的差异（以 tasks.md 为准）：①「Current behavior：输出留在作业目录」不实，现状是 `convert` 返回 `<cacheDir>/pdf/<32 位十六进制>.pdf`，复制已由 14.1 / 14.7 交付，本刀不重做；② 正文没有 D-24 的两种情况（`sudo` argv、`cwd:"/"`、环境、`assertSafeSudoPath`、失败日志、共用 spawn seam）；③ 验收写三个场景，规格「转换缓存」现为四个（多「OMP_USER 模式下启动时清空 work」），「周期清理」另缺「`pdf` 不可读时不抛」；④ 14.6 摘录 2 条变异，tasks.md 另有 8 条启动清空的变异；⑤ 键的写法缺 UTF-8、十进制、小写十六进制、`lstat`；⑥ tasks.md 14.5 的「新文件 `office-converter.test.ts`」已过时（已存在，795 行）。
+- 分层（定案）：包一层，不改 `createOfficeConverter`。新文件 `server/src/preview/office-cache.ts`；`office.ts` 只给 `OfficeConverter`、`OfficeSpawn` 两个类型加 `export`，并更正 `office.ts:13` 头注释的「缓存不在这里」去向，`collectOutput` 一个字节不动。理由：`office-converter.test.ts:378`（`HEX_32_PDF`）与 `:402-419`（同一输入转两次、断言启动两次且结果不同）钉的是单次转换契约，缓存进 `convert` 会让两处变红；包一层使 14.1 / 14.7 的源码与两个测试文件保持原样。
+- `createOfficeCache({cacheDir, converter}) → {available, convert, close}`（与 `OfficeConverter` 同形）：`convert` 先判 `!converter.available || 已 close || signal 已中止 || !isAbsolute(absInput)`，任一成立即原样转交 `converter.convert`，由它按规格次序给出 `unavailable` / `aborted` / `failed`，不重复造错；`close()` 置位后转交。随后 `lstat(absInput)`，失败即 `OfficeConvertError("failed")`、不启动进程。再查 `pdf/<key>.pdf`：`lstat` 为普通文件且 `size>0` 则 `utimes` 为当前时刻并返回；命中路径任何错误（含与清理撞车的 `ENOENT`）一律当未命中。未命中则 `await converter.convert()` 得 `pdf/<随机名>.pdf`，`rename` 成 `<key>.pdf` 后返回；`rename` 失败则 `unlink` 随机名并报 `failed`。随机名即规格的「同目录临时名」；同目录、`0700`、同属主，改名安全，不二次打开输出。
+- 键：导出 `officeCacheKey(absInput): Promise<string>`，值为 `sha256(absInput + "\0" + String(stats.mtimeMs) + "\0" + String(stats.size))` 的小写十六进制。`mtimeMs` 在纳秒级文件系统上带小数，原样 `String()`，不取整、不用 bigint（偏离记录）。它是 #1073 去重的唯一键来源。并发与去重不在本刀：两个同键未命中各转一次，后到的 `rename` 原子覆盖，返回同一路径。15.1 的组合次序是缓存在最外（命中不占名额、不判 `busy`）→ 排队 → 单次转换；排队插在未命中路径上，由 #1073 落位。
+- 清理：`createOfficeCleanup({cacheDir, officeBin?, ompUser?, spawn?, log?}) → {clearWork(): Promise<void>, sweepPdf(now: number): Promise<void>}`，形状照 `workspaces/trash.ts` 的 `sweep(now)`，两者永不 reject。模块顶层零副作用，不建定时器；24 小时定时器与 `unref` 归 15.1（#1074），只重跑 `sweepPdf`。两个工厂在 `cacheDir` 非绝对路径时同步抛 `cacheDir and officeBin must be absolute paths`（参数错误不是清理错误，偏离记录）。`sweepPdf`：`readdir` → 逐项 `lstat` → 普通文件且 `mtimeMs < now − 7×86_400_000` 才 `unlink`，逐项 try/catch；目录与符号链接不碰；崩溃遗留的随机名 `.pdf` 同样按 7 天清掉。
+- `clearWork`：仅当 `ompUser` 与 `officeBin` 都提供时，先 `assertSafeSudoPath(process.env.PATH)`（不调 `assertSetprivExecutable`），再经注入的 spawn 起恰一次 `sudo`，argv 恰为 `["-n","-u",ompUser,"--","/usr/bin/find",join(cacheDir,"work"),"-mindepth","1","-delete"]`，选项恰为 `{cwd:"/", env:{PATH, LANG?}, stdio:"ignore", shell:false}`（没有 `HOME`、没有 `detached`）。等它落定：`exit` 的 code 为 0 才算成功；无 pid 的 `error`、spawn 同步抛、非 0、被信号结束、前置检查抛都算失败，失败恰调一次 `log({event:"preview_work_clear_failed"})`，`log` 自身抛错吞掉。之后每种模式都执行本进程的删除：`readdirSync(work)` 后逐项 `rmSync(…,{recursive:true,force:true})`，逐项 try/catch（14.1 实测 `0500` 子目录会让 `force` 仍抛，一项删不掉不得挡住其余），不删 `work` 自身。拆成「跑 sudo 得布尔」与「自己删」两个函数以过 Biome 复杂度 15。
+- 日志口径（偏离记录）：`server/src` 里没有模块直接写 `process.stderr`，惯例是注入端口由 `server.ts` 的 `writeRecord` 落行（`spawn-gate.ts` 的 `SpawnLog`、`store-todo.ts` 的 `warn`；`startup-writer.ts` 头注释写明 `server.ts` 是唯一消费方）。本刀按惯例用 `log?` 端口，测试断言恰一次调用且 `JSON.stringify(record) === '{"event":"preview_work_clear_failed"}'`；真实 stderr 的整行相等由 15.1 把 `writeRecord` 的联合类型放宽后在 15.2 证明。tasks.md 14.5「stderr 恰多一行」在本刀按此落实。
+- 窗口声明（D-23：不宣称闭合、不放宽）：本刀没有路由、不经 `sandbox.resolve`。缓存读写全在 `pdf/`（`0700`）与 `cacheDir`（`2750`）之下，omp 用户写不进，没有 #1286 类窗口。有两处按路径的操作：① `lstat(absInput)` 算键之后转换进程才按路径读输入，其间输入被改写时旧键下可能存进新内容的 PDF（下次 `lstat` 得新键，旧条目只在 mtime 与 size 都撞上时才会再命中，属 D17「不按内容哈希」的既定取舍）；② 本进程在 `work/`（`2770`，omp 用户可写）下的递归删除：作业目录的父目录就是 `work/` 自己（`2770`、不带 sticky 位；`2750` 的是 `cacheDir`），所以顶层条目与其内部任何一级都可在本进程检查之后被存活的 omp uid 进程换成符号链接——检查那一刻已是符号链接的顶层条目只被解除、不被跟随；与已交付的 `removeJob` 同类。统一用 `rmSync`（Node 24.13.1 走原生 `binding.rmSync`，异步 `rm` 是按路径的 JS 递归）；原生实现的抗竞态性没有实测。
+- 既有测试：`office-converter.test.ts`（795）与 `office-converter-output.test.ts`（189）零改动；`fake-soffice.mjs` 不加标记。新夹具 `server/test/fixtures/fake-sudo-find.mjs`（100755）：既有假 `sudo`（指向 `fake-soffice.mjs` 的链接）在没有 `--outdir` 时以 64 退出，不能复用。新夹具从 argv 找到 `/usr/bin/find` 之后的路径，把 `{argv, env, cwd, pid, entriesAtStart, entriesAtExit}` 写到 `<cacheDir>/sudo.record.json`，两次列目录之间睡约 150 毫秒，自己什么都不删，退出方式读同级哨兵文件（缺省 0；`1`；`signal` 为自杀）。测试把它链成临时 bin 目录里的 `sudo`，`PATH` 为「临时 bin:`dirname(process.execPath)`:/usr/bin:/bin」，`afterEach` 还原。
+- 新测试 `server/test/office-cache.test.ts`（预计 450–600 行，超 700 行则把启动清空一组拆到 `office-work-clear.test.ts` 并记偏离）；自带搭建，不从 795 行的旧文件抽 helper，写成不同形状以免 jscpd 报克隆。用例清单：
+- 「命中、失效与复制」：结果文件名等于测试按规格字面算出的键且等于 `officeCacheKey` 的返回；第二次调用零启动、同路径、修改时间被更新（先把缓存文件 `utimes` 到一天前）。输入的 mtime 先 `utimes` 成整秒，再分别做「只改大小（改写后把 mtime 设回）」「只改 mtime」「同大小同 mtime 的另一路径」三例，各自重新启动。缓存文件 `0600`、`uid` 为本进程。inode 用 14.7 的 `FileHandle.prototype.stat` 探针在 `fstat` 时刻取作业输出的 `ino` 比对（此刻两文件并存，不受 inode 复用影响）。键位置上预先放空文件或指向非空文件的符号链接，都按未命中处理。
+- 「失败不入缓存」：同一转换器、同一输入。第一次由注入的 spawn 包装器换成内联 node 脚本——先在 `<cwd>/out/<名>.pdf` 写出完好 PDF，再分别退出码 1 / 睡过 `timeoutMs` / 睡到被中止（D-25 的真实形状：被终止的作业留下完整 PDF）；断言 `pdf/` 为空；第二次放行到真夹具，启动一次并成功。超时例的 `timeoutMs` 取 1000 起，抖动则放大数值并记偏离，不放松断言。
+- 「周期清理」：8 天前删、6 天前留、恰在界上的留；旧 mtime 的子目录与指向外部文件的符号链接都留，外部文件原样；`pdf` 置 `000`（`it.skipIf(euid===0)`）与 `pdf` 不存在两例都不抛；`clearWork` 清掉遗留作业目录。
+- 「启动时清空 work」：规格四例 + `PATH` 含相对项 + `PATH` 里没有 `sudo`（`error` 无 pid）+ 被信号结束，各恰一条日志、不抛。成功例断言包装器记录的 `command`、`args`、`options` 逐项 `toEqual`，夹具记录的 `argv`、`cwd === "/"` 与之相符，且 `entriesAtStart`、`entriesAtExit` 都含遗留目录、返回后 `work` 为空且仍是 `2770` 目录。另有：`cacheDir` 带尾斜杠时 argv 第 6 项仍是 `<cacheDir>/work`；`work` 下指向外部目录的符号链接被解除而外部文件仍在；一个 `0500` 非空目录删不掉时同级其余条目照删（`afterEach` 先 `chmod` 再清）。
+- 环境断言沿用 14.1 口径：对 `options.env` 精确断言，对子进程记录先去掉 `__CF_USER_TEXT_ENCODING`；父环境占位值用低熵字面量；正则一律字面量。
+- 门槛：knip 的 server 入口含 `test/**/*.test.ts`，`createOfficeCleanup` 在 15.1 之前只有测试导入即可，`officeCacheKey` 同理（#1073 接手后有源码导入方）；只导出用到的符号。`office-cache.ts` 对 `office.ts` 只做 `import type` 与 `OfficeConvertError` 的单向导入，`office.ts` 不反向导入。`.mjs` 夹具不计 800 行但受 Biome 约束。规格签名 `createOfficeConverter({…, concurrency})` 的合成体由 14.2 / 15.1 给出，本刀不改该签名（偏离记录）。
+- 否决的方案：把键与命中做进 `createOfficeConverter.convert`（`office-converter.test.ts` 要改两处，且命中查询会在 `closed` 检查与 spawn 之间引入 `await`，`close()` 之后可能仍起进程）；从作业目录直接 `rename` 进 `pdf/`（D18 明令禁止）；在本模块 `setInterval` 或直接写 `process.stderr`。
+- 变异：`collectOutput` 改成把作业输出 `rename` 进 `pdf/` → 「命中、失效与复制」的 `ino` 不同与 `0600` 断言判红（既有 `office-converter.test.ts:380-383` 同时判红）。
+- 变异：失败后仍收集并入缓存（如 `timeout` / `aborted` / 非 0 退出之后照样取输出改名）→ 「失败不入缓存」三例的「`pdf/` 为空」判红。
+- 变异：内存里按键记住失败结果 → 同三例的「第二次启动了进程并成功」判红。
+- 变异：键里去掉 `size` / 去掉 `mtimeMs` / 去掉路径 → 分别是「只改大小」「只改 mtime」「另一路径」一例的启动次数与路径断言判红。
+- 变异：去掉 `0x00` 分隔或换算法 → 「文件名等于字面算出的键」判红。
+- 变异：命中时不 `utimes` → 「修改时间被更新」判红。
+- 变异：命中判定用跟随链接的 `stat`，或去掉 `size>0` → 符号链接例、空文件例的「重新启动」判红。
+- 变异：命中不短路（每次都转换）→ 「第二次零启动」判红。
+- 变异：`close()` 之后命中仍返回成功，或 `signal` 已中止仍返回命中 → 对应两例的 `aborted` 判红。
+- 变异：未配置 `officeBin` 时先 `lstat` 后报 `failed` → 「`unavailable` 且零启动」判红。
+- 变异：相对路径的 `absInput` 走到 `lstat` → 「`failed`、不按 cwd 解析」判红（在 cwd 下放同名文件作陷阱）。
+- 变异：`sweepPdf` 阈值改 6 天或 9 天 → 6 天 / 8 天例判红；`<` 改 `<=` → 界上例判红。
+- 变异：`sweepPdf` 用 `stat` 跟随链接或连目录也删 → 「链接与子目录都留」判红。
+- 变异：`sweepPdf` / `clearWork` 让错误上抛 → 「`pdf` 不可读 / 不存在不抛」「`0500` 目录例不抛」判红。
+- 变异：同 uid 模式也执行 `sudo` → 「没有启动 `sudo`」判红。
+- 变异：判定只看 `ompUser` → 「有 `ompUser` 无 `officeBin` 时零启动」判红。
+- 变异：跳过 `sudo` 时连自己的删除也跳过 → 该两例的「`work` 为空」判红。
+- 变异：argv 加通配、换命令、路径用字符串拼接、加 `setpriv` 前缀 → argv 逐项相等与尾斜杠例判红。
+- 变异：`cwd` 不是 `/`、`shell:true`、环境带 `HOME` 或继承 `process.env` → `options` 的 `toEqual` 与夹具记录的 `cwd` 判红。
+- 变异：不等 `sudo` 结束就开始自己的删除 → `entriesAtExit` 含遗留目录的断言判红。
+- 变异：命令失败时抛出 → 「不抛出」判红；失败不记日志、记两次、记录带路径或用户名 → 「恰一次且整串相等」判红。
+- 变异：去掉 `assertSafeSudoPath` → 「`PATH` 含相对项时零启动且一条日志」判红。
+- 变异：自己的删除遇到第一项失败即停 → 「`0500` 目录旁的条目照删」判红。
+- 变异：自己的删除跟随顶层符号链接，或把 `work` 自身删掉 → 「外部文件仍在」「`work` 仍是 `2770` 目录」判红。
+- 变异：周期清理里也调 `sudo … find`：本刀不可观察（定时器不在本刀），归 15.2 与白盒审查。
+- 变异：预期不可观察：绕过注入的 spawn 直接调 `child_process`（夹具仍会留下记录，但启动次数的判据失效，靠白盒审查）；作业目录内部递归期间换入链接的竞态（无法定时注入）；`OMP_USER` 模式下属主不同于本进程的真实情形（同 uid 测试里 `uid` 断言恒真，判据是 `ino` 与 mode，真实属主归 28.6 人工验证）；`find` 在真实 sudoers 下的字面匹配（归 28.x）。
+- 变异：不适用的越界向量：目录穿越、跨空间 id、他人空间 404 先于路径检查、`sandbox.reject` 审计——本刀没有路由与 `resolve`，这些随 15.1 的 `/o/` 路由。
+- 预审补：**上面「窗口声明」② 原写「顶层条目换不走（父目录 `2750`）」是错的**（已就地改正；`office-cache.ts` 头注释 `:17-19` 与 PR「已知残余」第 1 条同改）。`2750` 是 `cacheDir`，作业目录的父目录是 `work/`（`2770`、无 sticky），omp 用户可以在 `removeOwnEntries` 的 `readdirSync` 之后、`rmSync` 判定之后改名或替换顶层条目。原生 `rmSync` 递归途中是否跟随换入的链接取决于运行时的 Node 版本（`.tool-versions` 的 `nodejs 24.13.1` 只约束开发与 CI，`package.json` 没有 `engines`），没有核实、没有实测、不闭合。源码除这三行头注释外一个字节没动。
+- 预审补：修复前存活的四条变异，各补一处断言后判红（`office-cache.test.ts` 429 → 462 行、21 → 23 例）：
+  - `sweepPdf` 用 `atimeMs` 判 → 「删掉修改时间早于 7 天的普通文件…」：`aged()` 多一个访问时间参数，`on-the-limit.pdf` 的访问时间放到 8 天前、`just-over.pdf` 的放到 1 天前（原先 atime 恒等于 mtime）。
+  - 键用 `String(Math.trunc(mtimeMs))` → 新例「把修改时间改成带小数毫秒的值：重新启动进程，结果是另一个键的文件」：修改时间取 `1700000000 + 1/64` 秒，`mtimeMs` 为 `1700000000015.625`（二进制与微秒 / 纳秒粒度下都精确），期望键里的字面量是 `1700000000015.625`；用例先断言 `lstat` 读回的就是这个值，粒度更粗的文件系统上它以夹具前置断言失败而不是静默通过。本机 APFS 可观察。
+  - `sweepPdf` 只删 `.pdf` 后缀 → 同一例加 8 天前的无后缀普通文件 `eight-days-no-suffix`，断言被删。
+  - `officeCacheKey` 用跟随链接的 `stat` → 新例「输入是指向另一个文件的符号链接：键取自链接自己的 lstat，不是目标的大小与修改时间」：相对目标 `a.docx`（链接自己的 `size` 为 6）、`lutimes` 把链接的修改时间钉在 `1700000001000`，期望键按这两个字面量拼；`officeCacheKey` 与经缓存的 `convert` 两层都断言（转换进程按路径读输入、跟随链接，转换本身成功）。
+- 预审补：「一个 0500 的非空目录删不掉…」（现名「两个 0500 的非空目录删不掉：不抛，同级其余条目照删」）原夹具靠名字排序（`a-first` / `m-locked` / `z-last`），而 `readdirSync` 的次序由文件系统定（APFS、ext4 `dir_index` 按哈希）：`0500` 目录恰排在最后时「遇第一项失败即停」存活。改为建五个各含一个 `keep` 的目录，读一次实际次序，锁其中第 2、第 4 项——可删的条目在两个锁住的目录前面、中间、后面都有，与次序无关；断言留下的恰是这两项且各自的 `keep` 原样、没有日志。变异在新夹具上判红（`office-work-clear.test.ts` 280 → 287 行，例数不变）。
+- 预审补：PR 里两条「由实现者定」的分支其实已有定案：`sweepPdf` 不看文件名来自规格「转换缓存」的「删除 `pdf` 下修改时间早于『当前时刻 − 7 天』的普通文件」（`spec.md:75`，没有名字条件），上面「清理」一条也写了崩溃遗留的随机名 `.pdf` 同样清；同键并发未命中各转一次不是自由选择——规格「并发上限与排队」（`spec.md:58`）要求共用同一次转换，上面「键」一条把它推给 #1073。
+- 预审补：**与 #1073 的交接**：去重必须把 `rename` 包在里面（落在缓存的未命中路径之内，`office-cache.ts:87-93`）。只在转换器一层去重时，共用同一次转换的调用拿到的是同一个 `pdf/<随机名>.pdf`，第一个 `rename` 成功、其余的以 `ENOENT` 失败并报 `failed`。`office-cache.test.ts:239-251`「同一个键的两次并发未命中各转一次…」里的 `launches` 长度为 2 钉的是今天不去重的行为，#1073 落地时预期改它。
+- 预审补：`sudo … find` 无超时的后果补全（原只写了「`clearWork` 不落定」）：这个 `ChildProcess` 没有 `unref`，它不退出时事件循环一直活着；`createOfficeCleanup` 不交出任何能终止它的句柄，关停或 `process.exit` 时 `sudo` / `find` 可能成为孤儿并继续在 `work/` 下删除，下一个实例在途的作业目录可能被它删到。是否加超时、是否交出句柄归 15.1（#1074）定，本刀不改。
+- 预审补：CI 口径：「写出完好 PDF 之后以 timeout 结束…」的 `timeoutMs` 是 1000，负载高的 runner 上可能抖动（上面已定：抖动则放大数值、不放松断言）；「pdf 目录不可读…」与「两个 0500 的非空目录删不掉…」两例在 root 下跳过（`it.skipIf(euid===0)`），容器里以 root 跑测试时这两条变异没有判据。
+
+## 16.1 的地址函数部分，含分摊的 16.4 / 16.5 条款（#1079）
+
+- 非 Critical Path（只拼字符串，无路由，无 `sandbox.resolve`，D-23 / #1286 的窗口不涉及）。前置 0.1（#1049）与 9.3（#1061）已在 origin/master：`server/src/workspaces/rest-entries.ts:59` 有 `GET /api/workspaces/:id/download`。16.1 属「不等 1.2」一句，三项实测都不挡。
+- 文件位置：规格、`tasks.md:374` 与 issue 一致写 `web/src/lib/api-files.ts`（origin/master 不存在，本刀新建）。编排提示里的 `web/src/features/files/api-files.ts` 是笔误，不照做。因此不动 `web/src/features/**`，`web/test/ui-layering.test.ts` 的 `MIGRATED_AREAS` 与清单断言都不改。
+- 漂移：issue「Current behavior」写 `api.ts` 729 行，实际 778 行（`tasks.md` 文首与 design:471 的 778 正确）。issue 的 16.1 任务引文与 `tasks.md:374` 逐字一致，无差异。「既有六个方法」数字自洽：`promoteWorkspace` 归 chat-web / session-sidebar，不在 files-web 的六个里。
+- 形态：`export function fileUrl(workspaceId: string, path: string): string` 与 `downloadUrl(同签名)` 是模块级纯函数，不是 `ApiClient` 的成员（规格写「纯函数」，17.2 / 20.1 / 25.2 直接当 `href` / `src` 用）。`ApiClient` 类型不变，既有的客户端替身不用改。
+- 复用既有助手：把 `api.ts:406-408` 的 `workspaceEndpoint` 挪进 `api-files.ts` 并导出，联合类型加 `"download"`。`api.ts` 值导入它（`tree` / `dirs` / `promote` 三处照用），方向是允许的 `api.ts → api-files.ts`。不在 `api-files.ts` 另写一份拼接，否则 id 编码有两个来源，且 `api-files.ts` 不能从 `./api.js` 值导入。
+- `api.ts` 的改动共四处：删 406-408；加 `import { fileUrl, workspaceEndpoint } from "./api-files.js";`；加 `export { downloadUrl, fileUrl } from "./api-files.js";`；`fetchPreview`（690 行）改为请求 `fileUrl(workspaceId, path)`。净约 −2 行（778 → 约 776）。偏离记录：issue 写「只加接线与类型再导出」，实际是值再导出、一个助手搬家、一行改写。
+- 不建空的 `createFileMethods` 工厂（两个函数不需要传输，空工厂是占位）；工厂随第一个发请求的方法（#1080）落地。所以本刀 `api-files.ts` 里没有任何 `./api.js` 导入，「只有 `import type`」此刻是空真，要靠下一条的自证用例才有牙。
+- 编码：两处都用 `encodeURIComponent`（id 段与 `path` 值），返回同源相对地址。不用 `URLSearchParams`（空格会变 `+`，解码仍相等但违反规格）。服务端 `parsePathQuery`（`rest.ts:86`）读 Fastify 默认解码后的 `query.path`，`server/src` 没有自定义 `querystringParser`，兼容。
+- 规格没写的分支，取最简并记入偏离记录：`path` 为空串 → `…?path=`（服务端解析到根 → 404）；孤立代理项 → `encodeURIComponent` 同步抛 `URIError`，与 `listTree` / `fetchPreview` 现状一致，不捕获；不规范化 `..` 或前导 `/`，路径是数据，由服务端沙箱裁决。
+- 测试文件：`web/test/api-files.test.ts` 已 743 行，后面还有五刀要加用例，本刀用例放新文件 `web/test/api-files-url.test.ts`（偏离 16.4 的「扩充」字样与 issue 的 PR Boundary）。它只从 `../src/lib/api.js` 导入，不直接导入 `api-files.js`，否则「导出只供 `api.ts` 使用」的断言会红。
+- 地址用例断言整串字面量，并另断言 `new URL(url, "http://x").searchParams.get("path")` 等于原路径：`fileUrl("w1", "报告 2026/a b#1.mp4")` → `/api/workspaces/w1/file?path=%E6%8A%A5%E5%91%8A%202026%2Fa%20b%231.mp4`；`downloadUrl("w1", "a&b.txt")` → `/api/workspaces/w1/download?path=a%26b.txt`；id 用 `ws/%#?+ 中` → 段为 `ws%2F%25%23%3F%2B%20%E4%B8%AD`。`vi.stubGlobal("fetch", vi.fn())` 后调用两个函数，断言 `fetch` 零调用。
+- 导入方向断言放 `web/test/chat-module-layout.test.ts`（122 行，`importersOf` 未导出，别处复用会被 jscpd 抓）。(a) `importersOf("web/src/lib/api-files")` 等于 `["web/src/lib/api.ts"]`。(b) 新纯函数判定「去注释后的源码里，说明符 `./api.js` 的每次出现都在以 `import type` 开头的语句内」，按语句判定而不是按行，用正则字面量（semgrep）。
+- 断言 (b) 的自证样例：值导入、`import { type X } from`、`export … from`、动态 `import()` 都判违规，多行 `import type {…}` 判合规。把它同时用在 `api-sessions.ts`、`api-upload.ts`、`api-commands.ts`（各有一条真实的 `import type`）和 `api-files.ts`。样例串不要写成指向真实模块的字面量（该文件 64 行的同款注意）。
+- 既有测试不必改、不许放松：`api-files.test.ts:261` 的预览请求地址字面量现在顺带钉住 `fileUrl` 的编码；`chat-page-artifact-card*`、`files-page*` 等对 `…/file?path=` 的断言原样通过。knip 由 `api.ts` 的值导入和新测试经 `api.js` 的引用满足，`knip.json` 不改；`api-files.ts` 约 15 行，命名守卫无碍。
+- 同批同文件的排序：本刀动 `api.ts` 的 1-10、406-408、690 行和文末一行；#1081（16.3）动的是 `api.ts:419-430` 的 `parsePreviewKind` 与 `api-files.test.ts`，与本刀零行重叠，可按既定顺序叠。提示里说 #1081 改 `api-files.ts`，按 origin/master 的代码它改的是 `api.ts`，除非它把预览那一簇搬家。
+- `api.ts` 的余量：本刀后约 776 行，#1080、#1082–#1084 各加 `ApiClient` 成员和接线后会逼近 800。「必要时把既有工作空间方法挪进 `api-files.ts`」要由其中一刀执行，不是本刀；建议在 #1081 或 #1080 的 fixture 里定。
+- 无 checklist 行（纯函数，无界面变化）；不动 `docs/architecture/system.md` §9；不涉及配置；`tasks.md` 的 16.1 复选框由 #1080 勾，本刀只在 PR 描述里给出 16.4 / 16.5 的分摊条款与变异表。
+- 变异：`downloadUrl` 不编码 `&`（直接拼 `path`）→ `api-files-url.test.ts` 的 `a&b.txt` 字面量与 `searchParams.get("path")` 两条断言判红（16.5 指定项）。
+- 变异：两个函数改用 `encodeURI` → `报告 2026/a b#1.mp4` 字面量判红（`/` 与 `#` 没编码，`#` 之后变成片段，往返也红）。
+- 变异：改用 `URLSearchParams` → 字面量判红（空格成 `+`）；往返断言不红，所以字面量断言不可省。
+- 变异：id 段不编码 → `ws/%#?+ 中` 用例判红。
+- 变异：`fileUrl` 与 `downloadUrl` 的端点名互换 → 两条字面量判红，`api-files.test.ts:261` 的预览地址也红。
+- 变异：任一函数内部调用 `fetch` → 「没有发出请求」判红。
+- 变异：`api-files.ts` 加一条从 `./api.js` 的值导入（或 `import { type X }`）→ 断言 (b) 判红，另有自证样例保证判定函数本身有牙。
+- 变异：`web/src` 下另一个文件直接导入 `api-files.js` → 断言 (a) 判红。
+- 变异：`workspaceEndpoint` 搬家时丢掉 `encodeURIComponent` → `api-files.test.ts:107` 的 promote 地址与 `:261` 的预览地址判红。
+- 变异：预期不可观察：`fetchPreview` 退回内联拼接而不调 `fileUrl`。输出相同，`:261` 照过，属复用选择，PR 表里标注「不可观察」。
+- 预审补：导入方向判定原先只认字面量 `./api.js`，而 `@/lib/api`、`@/lib/api.js`、`./api`、`../lib/api.js` 都解析到 `api.ts`（`moduleResolution: Bundler` + `@/*` 别名；`web/src/features/settings/page.tsx:6` 就在用 `@/lib/api`），经它们的值导入会全绿通过。`importsApiAsTypeOnly` 改为 `(from, text)`：遍历同文件的 `SPECIFIER` 匹配，留下 `resolveModule(from, 说明符)` 等于 `web/src/lib/api` 的，再做「语句以 `import type` 开头」的检查；`API_SPECIFIER` 删除。用例标题改为「拆出的 API 模块对 api.ts 只有类型导入」。
+- 预审补：自证加一例「别名、无后缀与上级目录写法指向同一个 api.ts，别处的同名模块不算」，原自证例加一条单引号的值导入判违规（原来的单引号样例只期望合规，双引号专用的正则能活下来）。别名说明符经变量拼入，不写成 `from "@/…"` 字面量。
+- 预审补：判定的已知漏判如实记：语句边界取上一个分号，不带分号的 `import type … from "./other.js"` 后紧跟对 `api.ts` 的值导入会漏判（biome 强制分号，进不了仓库）；`SPECIFIER` 不认反引号说明符与 `require()`。不写「不会漏判」。
+- 预审补：「不规范化」原先只钉了路径结构（`..`、首尾 `/`、空串）。加两行：首尾空白 `" a "` → `%20a%20`；NFD 的 `"e\u0301"` → `e%CC%81`，解码后仍是分解形式。`api-files-url.test.ts` 70 → 72 行、9 → 11 例。
+- 预审补：变异：`api-files.ts` 加 `import { x } from "@/lib/api";` → 「拆出的 API 模块对 api.ts 只有类型导入」判红；同一变异对改之前的判定全绿。`SPECIFIER` 只认双引号 → 「类型导入判定自证：值导入、内联 type…」判红。`fileUrl` 加 `.trim()` → 「路径是数据，不规范化：首尾空白」判红；加 `.normalize("NFC")` → 「…：分解形式（NFD）的重音字符」判红。
+- 预审补：上面「不在 `api-files.ts` 另写一份拼接，否则 id 编码有两个来源」一句只对 `api.ts` 一侧成立：`web/src/lib/api-upload.ts:44` 的 `uploadEndpoint` 早就独立拼 `/api/workspaces/<id>/uploads?name=…`，本刀不动，PR 的范围外已列。
+- 预审补：`api.ts` 实测 777 / 800 行（上面估的「约 776」偏 1），余量 23 行；#1080、#1082–#1084 里必须有一刀把既有工作空间方法挪进 `api-files.ts`。
+
+## 16.3（#1081）
+
+- 不是 Critical Path：纯浏览器端的 Content-Type 判定，不碰 `sandbox.resolve`、路径、`op`、路由；D-23 的 resolve→open 窗口本刀没有，不闭合也不加宽。前置 6.1（#1055）已合入（`server/src/workspaces/preview.ts:27-35`）；不等 1.1 / 1.2 / 1.3；一个评审席即可。
+- 现状：两种类型的判定在 `web/src/lib/api.ts:420-430` 的 `parsePreviewKind`（:425 `contentType === "image/png" || contentType === "image/jpeg"`），经 `parsePreviewMetadata`（:432）到 `previewRequest`（:457-494）。`api.ts` 现为 778 行；#1079 的 issue 写的「729 行」已过时。
+- 改动点跟着 `parsePreviewKind` 走：#1079 若把预览函数挪进 `web/src/lib/api-files.ts` 就改那里，否则改 `api.ts`。`fetchPreview` 是既有方法，规格只要求「新增方法」放 `api-files.ts`，本刀不为此搬家。
+- 六种类型的精确字符串（规格 files-web:4 与服务端一致）：`image/png`、`image/jpeg`、`image/gif`、`image/webp`、`image/bmp`、`image/x-icon`。ico 是 `image/x-icon`，不接受 `image/vnd.microsoft.icon`、`image/ico`。既有的 `split(";", 1)` + `trim` + `toLowerCase` 归一保留。
+- 实现建议零增行：把 :425 的条件换成正则字面量 `/^image\/(?:png|jpeg|gif|webp|bmp|x-icon)$/.test(contentType ?? "")`，两端锚定，不用 `new RegExp`、不用 `startsWith("image/")`。若改用 `Set` 约增 3 行，须先量叠加 #1079 后的行数，不得超过 800。
+- 不支持的类型今天的表现不变：`parsePreviewMetadata` 返回 null → `requestFailed(200)`（稳定的 request_failed 文案），不读正文、不调 `URL.createObjectURL`；文件页落到 `tree.tsx:538-545` 的 `{status:"error"}`，产物卡落到 `artifact-card.tsx` 的 `failed(...)`。它不是 `unsupported` 态（那个只由 `supportsPreview` 给出）。
+- 既有断言盘点（已重跑 grep `fetchPreview|image/` 于 `web/src web/test web/e2e`）：没有任何用例把 gif / webp / bmp / ico 钉成「被拒绝」；唯一的拒绝类型行是 `web/test/api-files.test.ts:483-491` 的 `application/octet-stream`。本刀是纯新增，不改写、不放松任何既有断言。`web/test/preview.test.tsx:441-480`（`PreviewPane` 不分配不释放 Blob 地址）与 `web/test/files-fixture.tsx:62` 不动。
+- 用例放新文件 `web/test/api-files-preview-types.test.ts`（偏离 16.4 的「`api-files.test.ts` 扩充」，记入偏离记录）。理由：`api-files.test.ts` 已 743 行，本刀约增 40–60 行，#1079 先在同一文件加地址函数用例，其后还有 #1080、#1082–#1084，800 行必破。knip 入口 `test/**/*.test.ts` 已覆盖，naming-guard 不拦这个名字，不改 `knip.json`。
+- 用例一（「预览元数据与资源」）：一条 `it.each`，行为 `image/gif`、`image/webp`、`image/bmp`、`image/x-icon`，外加一行带参数与大写的 `IMAGE/GIF; charset=binary`。断言 `{kind:"image", url, size:<头值>, truncated:false}`，`size` 头值故意不等于正文长度；`createObjectURL` 恰好调用 1 次，入参 `Blob` 的字节与响应正文一致，`blob.type` 等于响应头的类型；调用方 `URL.revokeObjectURL(preview.url)` 可释放。bmp / x-icon 两行超出 16.4 点名的两种，是加强，记入偏离记录。
+- 用例二（「失败不变成预览」）：一条 `it.each`，行为 `text/html`、`image/svg+xml`、`video/mp4`，另加 `audio/mpeg`（16.3 任务文本含 `audio/*`）。每行响应 200，带合法 `X-Workbuddy-Size`，正文 `private preview body`。断言 `expectRequestFailure(error, 200)`、`error.message` 不含正文、`createObjectURL` 未被调用。helper 用 `./support.js` 的 `captureApiError`、`expectRequestFailure`；`stubPreviewResponse` 是 `api-files.test.ts:18-22` 的本地函数，新文件自写等价的两行 stub，不为复用去动旧文件。不要复制 :524-559 的 jpeg 整块（jscpd）。
+- 不加验收清单行：没有用户可见变化。文件页 `tree.tsx:69-98` 的 `previewableExtensions` / `supportsPreview` 仍只放行 png / jpg / jpeg；产物卡 `stream-artifacts.ts:51-64` 的 `ARTIFACT_KINDS` 同样只有 png / jpg / jpeg。新类型在界面上可达要等 17.x / 18.4（#1090）。不是配置切片，不碰 `docs/architecture/system.md` 第 9 节。
+- 同文件排序：与 #1079 共用 `web/src/lib/api.ts`（或其新建的 `api-files.ts`），按 #1079 → #1081 叠放；用例放新文件后，两刀在测试文件上不再相交。#1078（3.1–3.5）不碰 `api.ts`、`api-files*.test.ts`，也不改 `fetchPreview` 的契约，与本刀无文件交集；它改 `tree.tsx` 时若扩 `previewableExtensions`，属于它或 17.x 的范围。issue 写明本刀不依赖 #1079，#1079 若卡住可直接落在 master 的 `api.ts` 上。
+- issue 与 `tasks.md` 的差异：16.3、16.4 的 16.3 一行、16.5 的第三条逐字一致，无差异。issue 的 PR Boundary 写 `web/test/api-files.test.ts`，按上条改为新测试文件；「不改 `web/src/features/**`」照办。
+- 变异：把 `video/mp4` 加进图片集合 → 用例二的 `video/mp4` 行判红（16.5 指定的那条）。
+- 变异：把 `image/svg+xml` 加进集合，或把判定放宽为 `image/` 前缀 → 用例二的 `image/svg+xml` 行判红；去掉正则的 `$` 锚 → `image/gif+xml` 行判红（实施时更正：`svg+xml` 不以六种子类型之一开头，去锚后仍被拒）。这是 D4 的逃逸向量：主站来源下的 SVG Blob 地址。
+- 变异：把 `text/html` 当作 `text` 或 `image` → 用例二的 `text/html` 行判红。
+- 变异：把 `audio/mpeg` 加进集合 → 用例二的 `audio/mpeg` 行判红。
+- 变异：从集合去掉 `image/gif` → 用例一的 gif 行与 `IMAGE/GIF; charset=binary` 行判红。
+- 变异：从集合去掉 `image/webp` → 用例一的 webp 行判红。
+- 变异：从集合去掉 `image/bmp` 或 `image/x-icon`，或把后者写成 `image/vnd.microsoft.icon` → 用例一对应行判红。若只按 16.4 写 gif / webp 两行，这条变异不可观测，所以四行都要有。
+- 变异：去掉 `toLowerCase` 或 `split(";")` 归一 → 用例一的 `IMAGE/GIF; charset=binary` 行判红。
+- 变异：失败分支改成先读正文再判类型（先 `response.blob()` + `createObjectURL`） → 用例二的「`createObjectURL` 未被调用」判红。
+- 变异：预期不可观测：去掉正则的 `^` 锚（如 `x-image/png`）——没有对应用例，真实输入域里服务端不会发，不补。
+
+## 3.1–3.7（#1078）
+
+- 前提与边界：不触及 Critical Path（纯前端展示层，不碰 `sandbox.resolve`、不加 `op`、不加路由），一个评审席；本刀没有任何服务端路由，对 #1286 的替换窗口既不闭合也不加宽。不在 1.1 / 1.2 / 1.3 挡住的集合里。0.1、2.1、2.2 按代码核实已在 origin/master（97cc5786）：`preview.tsx:10` 已用拷入层 `Button`、七个 `data-slot` 已在；`CreationMenu` 在 `tree.tsx:252-273`；`MIGRATED_AREAS` 两个单文件条目在 `ui-layering.test.ts:89-90`、清单断言在 `:418-419`。issue 的任务摘录与 `tasks.md:146-197` 没有实质差异；批次说明写「3.1–3.5」，实际范围是 3.1–3.7。
+- 行号漂移（进偏离记录）：`tree.tsx` 是 667 行不是 644；`files-overlays.test.tsx` 的 O8 `:223/:228` 实为 `:267/:272`，`describe` 标题在 `:262`、用例标题在 `:263`，O7 对 `page.tsx` 的断言 `:259-261` 实为 `:312-314`，`dialogs.tsx` 那条在 `:309-311`；`files-empty-layout.test.tsx:82` 实为 `:84`，E5 在 `:154-200`；`ui-walk.spec.ts:206/:227` 实为 `:228/:249`；`topbar.test.tsx:263` 实为 `:265/:269`，`files.css` 一项在 `:275`。其余成立：`files-page.test.tsx:129/:499-501`、`files-logical-path.test.tsx:90/:145/:175-178`、`files-fixture.tsx:108-109`、`ui-walk-layout.ts:300-311/:313-341/:360`、`page.tsx:90/:149`。FL 节不是空表，已有 FL-01（D-23 残余知悉行），本刀从 FL-02 起。
+- 重跑 grep 后未被点名、本刀必须处置的：`files-overlays.test.tsx:307-308` 的 `primitiveImport`（动态 `new RegExp`）在 O7 两条导入断言删除后成死代码，一并删。3.3 改写后的未用导入要删：`files-page.test.tsx` 的 `blockBody`/`stripComments`，`files-logical-path.test.tsx` 的四个 ui-support 导入，`files-empty-layout.test.tsx` 的 `blockBody`/`stripComments`/`COLOR_LITERAL_PATTERNS`（留 `readRepoFile`），`ui-tokens.test.ts` 的 `blockBody`/`stripComments`（先确认其余 `describe` 不用）。E5 标题不再提 column widths。`ui-walk-layout.ts:193` 与 `:300-303` 的注释随探针改写。`smoke/`、`scripts/`、`Makefile` 零类名依赖；走查没有截图比对（`screenshot: "off"`），也没有包体阈值检查。
+- 文件落点：新建 `empty-state.tsx`（块 `data-slot="empty-state"` 带 `min-w-0`，副行 `empty-state-desc` 带 `[overflow-wrap:anywhere]`，类串照 `preview.tsx:189-196`），供 `tree.tsx` 的空根、未选文件、`page.tsx` 的无空间与 `preview.tsx` 的不支持态共用（DOM 与类不变，避免 jscpd 克隆）。新建 `workspace-switcher.tsx`（`page.tsx:24-161` 搬出）。新建 `columns.tsx`，放 `WorkspaceColumns`、`CreationMenu`、`EmptyPreview`；`tree.tsx` 留 `DirectoryNode`/`DirectoryTree`/`PreviewArea`/`WorkspaceBrowser`，`fileIcon(`、`formatSize(`、`size={14}` 必须留在 `tree.tsx`（`files-page.test.tsx:533-543` 读它）。不预先做 21.1 的 `workspace-browser.tsx`。三个新文件名都过 naming-guard，目录登记后自动受分层守卫管。
+- `新建`：`DropdownMenu modal={false}` 加 `DropdownMenuContent loop collisionPadding={8}`（先例 `session-menu.tsx:47,59`；冻结区 `Menu` 就是非模态，缺省模态会锁 `body` 指针事件，与随后打开的对话框叠加），内容显式给宽度（缺省取触发器宽度）。触发器是拷入层 `Button`，`aria-label="新建"`、显式 `type="button"`、保留 `triggerRef`；`＋ 新建工作空间` 与 `刷新` 同样显式 `type="button"`（拷入层 `Button` 没有缺省 `type`）。树条目与切换器列表项用原生 `<button type="button">` 加 Tailwind，不套拷入层 `Button`。
+- 树的 DOM 与类：`li > button + [p 副行] + [ul]` 的次序不变；名称 `span` 用 `data-slot="tree-name"` 加 `min-w-0 flex-1 truncate`，按钮自身 `flex w-full min-w-0`（缺 `min-w-0` 时 jsdom 的类名断言仍绿，只有走查 `expectTruncatedRow` 能抓）；大小 `span` 用 `tree-size` 并保留 `aria-hidden="true"`；副行保持 `p`，用 `tree-root-path` 加 `truncate`。`aside` 带 `data-slot="files-layout"` 的父容器与 `section` 的 `data-slot="files-preview"` 都在 `WorkspaceColumns` 上，两者不写任何 `bg-*`；`aside` 自己的 `bg-(--wb-bg-secondary)` 保留（issue 420 的守卫不管它）。箭头：收起时 `-rotate-90`、展开时 `rotate-0` 加 `transition-transform`（`theme.css` 的全局 reduce 块已覆盖）。`ui-alert`/`ui-muted`/`files-status` 换成 token 类（照 `preview.tsx:170,204`）。
+- 三个陷阱：`features/files` 下任何 `ul` 不写 `list-none`（preflight 已去符号；写了会被 `ui-layering.test.ts:643` 要求 `role="list"`）；该目录 `.tsx` 的注释里不写井号加数字的 issue 编号，也不写 `rgba(` 字面量——`ui-guardrails.test.ts:47-51` 连注释行一起扫 hex/rgba，井号加三位数字会命中，`rgba(0, 0, 0, 0)` 只出现在 `web/e2e/ui-walk-files.ts`；断点只用 `narrow:`（`theme.css:17`），`ui-foundation-entry.test.ts:298` 禁 `max-[760px]:`。
+- 布局与样式搬运：缺省 `grid grid-cols-[280px_minmax(0,1fr)]` 左右分栏，`narrow:flex narrow:flex-col narrow:overflow-auto` 纵排，照搬 `files.css:589-611` 的窄屏规则（树 `narrow:border-r-0 narrow:border-b`、树滚动区 `narrow:max-h-[16rem]`、预览 `narrow:min-h-[16rem]`）。900 以下的 210 档用 `max-[900px]:grid-cols-[210px_minmax(0,1fr)]` 保留（规格已不规定，观感不变；它编译为小于 900，与旧规则差 1 像素，记偏离）。
+- 切换器：`Popover open onOpenChange` 加 `PopoverContent aria-label="工作空间切换器" align="start" collisionPadding={8}`（Radix 缺省 `role="dialog"`，先例 `capability-bar.tsx:223-228`）；搜索框保持可按标签 `搜索工作空间` 取到且 `placeholder` 不变（`files-overlays.test.tsx:72,89`、`files-logical-path.test.tsx:96`、`files-page.test.tsx:216` 都用 `getByLabelText`）；`ul` 带 `data-slot="switcher-list"`，项是 `li > button[aria-pressed]`，空间名在 `strong`；打开聚焦搜索框、Escape 回焦 `选择工作空间` 由 Radix 给出，不写焦点代码。
+- `刷新`（规格没写的分支取最简，记偏离）：`WorkspaceColumns` 新增可选 `onRefresh`，按钮可访问名恰为 `刷新`，位于 `工作空间目录` 与 `新建` 之间；无空间态渲染但 `disabled`。`WorkspaceBrowser` 的刷新是对 `new Set(["", ...loadedDirectoryPaths(cacheRef.current)])` 逐个 `loadDirectory(path, true)`，根始终在内（根首载失败后可重试）；从未加载成功的非根目录不重取（仍靠折叠重开）；列表里已不可达的缓存不重取。有选中文件时调 `selectFile(entry, path)`（同文件分支保留旧预览与模式；不支持类型不发 `file`）；失败沿用现有 `directoryErrors`，旧缓存不动；不重取工作空间列表。预览头的大小与时间沿用选中时的条目快照。
+- `刷新` 用例放新文件 `web/test/files-refresh.test.tsx`：路由值用数组（`support.ts:88-93` 逐次 `shift`，多发一次即抛错），根、`out`、`readme.md` 各两份响应，第二份 `out` 多出 `new.md`。步骤是展开 `out`、选 `readme.md`、点 `查看源码`、点 `刷新`；断言三条路径请求各恰两次、`new.md` 出现、`out` 仍 `aria-expanded="true"`、`readme.md` 仍 `aria-current`、按钮仍是 `渲染视图`；预览正文一律 `findBy`/`waitFor`。另加一条：刷新时根返回 500 → 旧条目仍在且出现 `role="alert"`。
+- 3.1 / 3.2 的选择器改写（逐条进偏离记录）：`files-page.test.tsx:129` → `[data-slot="tree-name"]`，`:499` → `[data-slot="tree-size"]`；`files-logical-path.test.tsx:90` → `'[data-slot="switcher-list"] li'`，`:176` → `matches('[data-slot="tree-root-path"]')`；`files-empty-layout.test.tsx:22/:39/:48/:84` → `[data-slot="empty-state"]`；`files-overlays.test.tsx:267/:272` → `not.toContain("ui-btn")`，`:262/:263` 标题改写，`:307-314` 删除（`primitiveImport` 与两条导入断言）。
+- 3.3 的规则体断言：`files-page.test.tsx:546-557` 删来源注释与 `.files-tree-size` 两条；名称省略改成在 `:470` 的渲染用例里断言 `tree-name` 带 `truncate`；颜色扫描改成 `listRepoFiles("web/src/features/files", …\.tsx)` 加 `stripTsComments` 加 `COLOR_LITERAL_PATTERNS`（已被 `ui-guardrails.test.ts:47` 包含，照任务仍写，偏离记录注明）。`files-logical-path.test.tsx:181-190` 整段删，换成副行带 `truncate`。`files-empty-layout.test.tsx:155-164,178-183,197-199` 删，`:166-175` 换成 `truncate`，`:176-177` 换成渲染 `.ts`、`.csv`、`.md` 三个预览后以 `waitFor` 取 `preview-code`/`preview-table`/`preview-markdown` 断言 `overflow-auto`（E5 变 `async`），`:185-196` 原样留。`ui-tokens.test.ts:76-87` 整个 `describe` 删。`topbar.test.tsx:275` 删一项。
+- 3.4：`ui-layering.test.ts:89-90` 与 `:418-419` 各两行换成一行 `"web/src/features/files",`；新增一条自证，用真实规则 `{ migrated: MIGRATED_AREAS, frozen: FROZEN_FILES }` 调 `layeringViolations`：`web/src/features/files/tree.tsx` 导入 `Dialog` 判 1 条，`web/src/features/files/files.css` 判「已迁移区域出现 .css」，`web/src/features/files/previewers/x.tsx` 导入 `Menu` 判 1 条（证明子目录自动在内）；文件约 734 行。`ui-foundation-entry.test.ts` 加一条：`legacy.css` 不含 `features/files`，且该目录下 `.css` 列表为空；`:94-107` 的导入闭包用例是动态算的，不必改。
+- 3.5：新建 `web/e2e/ui-walk-files.ts`，只依赖 `@playwright/test`，不反向导入 `ui-walk-layout.ts`；导出 `expectLegacyOverPreflight(page)`（`page.evaluate` 里建 `svg.ui-icon` 追加到 `body`，读 `display` 后移除，期望 `inline-block`）与 `expectFilesUnpainted(page)`（两个 `data-slot` 的 `backgroundColor` 都是 `rgba(0, 0, 0, 0)`）。`ui-walk-layout.ts` 删本地探针改为导入，`expectTreeBesidePreview` 去掉 `width` 参数与两条 `poll`，`:360` 换选择器，净减行。`ui-walk.spec.ts:273-279`（选中 `logo.png` 之后）调一次 `expectFilesUnpainted`，加一行导入，622 行有余量。helper 里只用正则字面量。
+- 门槛：`web/e2e` 不在 knip 的 project 里；冻结区 `Button`/`EmptyState`/`Menu`/`Popover` 失去 `features/files` 这个调用方后仍被 `web/test/ui-menu.test.tsx`、`ui-popover-tooltip.test.tsx`、`ui-empty-state.test.tsx` 导入，knip 不报。预估 `tree.tsx` 约 600、`page.tsx` 约 320、`columns.tsx` 约 110、`workspace-switcher.tsx` 约 130。
+- 本刀可证范围：files-web「手动刷新」「空目录与空态文案」「树条目图标与大小」「绝对路径不出界面」「创建流程焦点闭环」「文件页不自涂底色」；「长名截断与布局规则」只证类名与走查的行省略（5000 字符源码与宽 4000 图片归组 27）。不可证、不得顺手实现：「一次浏览」的压缩包与 415 分支（组 17/20）、「非法 ?ws= 回退」里移除 `path`（21.2）、「树的键盘操作」的 `更多操作`（组 22）、files-harness 重载后的 (a)–(f)。PR 描述写明。
+- 拆分建议：不拆，一个 PR。两刀切法机械上可行（先迁 `tree.tsx`/`page.tsx` 留死规则，后删 `files.css`），但前一刀已经要改走查的宽度断言与探针，`MIGRATED_AREAS` 要改两遍，中间态里 `ui-tokens` 的底色守卫读的是没有元素命中的死规则（假绿），且与 `tasks.md:197` 的切片行冲突。规模：源码 6 个文件（3 新）、删 1 个 CSS、`legacy.css` 一行、测试 9 个文件（1 新）、e2e 3 个文件（1 新）、清单 7 行。
+- 合并次序：与本批其它切片没有共同的源码文件。#1079 / #1081 的 `api-files.ts` 按 16.1 在 `web/src/lib/`，尚不在 master（批次说明里的 `features/files/api-files.ts` 路径不对），`web/src/lib` 也不在 `MIGRATED_AREAS`；`tree.tsx:69-98` 的 `supportsPreview` 本刀不动。
+- 变异：恢复 `legacy.css` 对 `files.css` 的 `@import` → `ui-foundation-entry.test.ts` 新断言判红；文件也恢复时 `ui-layering.test.ts` 现状用例同时判红。
+- 变异：在 `features/files` 任一文件导入旧 `Menu` 或 `Dialog` → `ui-layering.test.ts`「web/src 现状」判红；从 `MIGRATED_AREAS` 去掉目录条目 → 清单断言与新自证判红。
+- 变异：缺省纵排、`narrow:` 才并排（断点写反）→ 仅走查：`expectFilesColumns` 在 desktop 的「preview right of tree」与 mobile 的「tree stacked above preview」判红。
+- 变异：层声明里 `legacy` 挪到 `base` 之前 → 仅走查：`ui-icon` 探针得到 `block` 判红；`ui-foundation-entry.test.ts:73-92` 同时判红。
+- 变异：给 `files-preview` 或 `files-layout` 容器加 `bg-card` → 仅走查：`expectFilesUnpainted` 判红（两个 project）。
+- 变异：去掉名称 `span` 的 `truncate` → `files-page.test.tsx` 与 `files-empty-layout.test.tsx` 的 `truncate` 断言判红；只去掉 `min-w-0` → 仅走查：`expectTruncatedRow` 判红。
+- 变异：去掉 `PopoverContent` 的 `aria-label` 或改 `role` → `files-overlays.test.tsx:71,270`、`files-page.test.tsx:214`、`files-logical-path.test.tsx:86` 与走查 `ui-walk.spec.ts:228` 判红。
+- 变异：`新建` 或 `＋ 新建工作空间` 改回冻结区 `Button` → O8（`:267/:272`）与分层守卫判红。
+- 变异：条目的 `ul` 挪出 `li` → `files-fixture.tsx:108-109` 取不到子层，`files-page.test.tsx:81` 的浏览用例判红；副行挪到 `ul` 之后 → `files-logical-path.test.tsx:145,175-178` 判红。
+- 变异：去掉 `tree-size` 的 `aria-hidden` 或 `data-slot` → `files-page.test.tsx:499-501` 判红；去掉 `switcher-list` → L5 的过滤用例判红；去掉 `empty-state` → E1、E3 判红。
+- 变异：`刷新` 只重取根 / 不重取当前文件 / 重取后回到渲染视图 / 清掉展开态 → `files-refresh.test.tsx` 的请求次数、`new.md`、`渲染视图` 按钮、`aria-expanded` 各自判红；刷新失败时清空旧列表 → 500 用例判红。
+- 变异：去掉 `DropdownMenu` 的 `modal={false}` → 预计不可观察（没有用例断言菜单打开期间的 `body` 指针事件）；去掉三个预览容器的 `overflow-auto` → 改写后的 E5 判红，走查 `expectScrollableX` 同时判红。
+- 变异：预计不可观察、归 FL 行人工走查：210 档的类、`narrow:max-h-[16rem]`、箭头旋转、空态块的 `min-w-0` 与副行的 `overflow-wrap`。
+- 预审补：`刷新` 的范围改为「已加载的目录（含折叠着的）」并上「正显示读取错误的目录」（`tree.tsx:598-607`，并集项取 `directoryErrors` 的键）。首载失败的非根目录与根一样由刷新重试，成功后错误行换成列表——有意的小行为改动，原先要折叠再展开才重试。既没加载过、也没有错误行的目录仍不取；「刷新失败保留旧列表」不变。
+- 预审补：`files-refresh.test.tsx` R1 加一个展开后又折叠的目录 `closed`（两份应答，刷新后请求恰两次、仍折叠，再展开看到第二份）；新增 R5（展开 → 错误行 → 刷新 → 列表，请求恰两次）。变异：刷新只遍历展开着的路径 → R1 判红；去掉并集项 → R5 判红。
+- 预审补：两处源码扫描改成扫 `web/src/features/files` 下每个 `.tsx`——E5 的退役字符串（`此文件夹为空`、`files-tree-empty`、`ui-empty"`）与 `topbar.test.tsx` 的「不含 `<h1`」；`topbar` 清单的其余条目不动。变异：往 `columns.tsx` 写入退役字符串或 `<h1` → 各自判红。
+- 预审补：L4 的副行断言恢复元素约束，`matches('p[data-slot="tree-root-path"]')`。
+- 预审补（已知、未处理）：当前打开的文件重取失败时预览换成错误态（规格只保护目录列表）；去掉刷新分支里对在途请求的 `abort()` 没有红用例（近似等价）；切换器弹层层级由 1500 变为拷入层的 `z-50`，只能由走查截图与 FL-08 确认；已展开后在服务端被删掉、留有错误行的目录每次刷新会再取一次。清单 FL-05 / FL-06 的措辞不涉及失败目录，未改，结论仍全部 `待签`。
+
+## 实测订正（#1318）
+
+- 只改文字，不改行为：`design.md`（D22「已知残余」加「实测」、Risks 对应条目、D18 加 D-26、D32 表加 D-26 / D-27）、`tasks.md` 15.1 加一行、`specs/office-preview/spec.md`「转换缓存」加超时与终止句柄及一个场景、三处源码头注释。上面各节是当时的记录，不回改；与本节不一致处以本节与 design D22「实测」（#1318，不是同在 D22 之下的 #1051 那一段）为准。
+- 证据等级四种，不混写：实测 / 钩子辅助下经真实处理器复现 / 自然竞态未复现（N 轮）/ 未测。环境：uid 分离的 Linux 测试部署（Ubuntu 24.04 宿主（内核 6.8）上的 Debian 12 容器，ext4 命名卷与 overlayfs，Node 24.13.1，提交 081ed4f0）。
+- 「8.1 的 moveToTrash 半边…（#1060）」一节与 `trash.ts` 头注释里「无需竞态的账号根收编」原标「读代码推出，未实测」：现已实测（驱动编译后的 `moveToTrash` 与 `sweep`，不经路由），行为与原描述一致，只去掉限定词。
+- `rest-entries.ts` 头注释原写「从未经路由复现」（「9.1、9.2、9.5（#1062）」一节记的是「读代码推出、未复现」）：现为「钩子辅助下经真实处理器复现」（沙箱、store、审计是替身，换入动作由钩子完成），自然竞态 20000 轮未复现（跑的是按处理器调用次序写的脚本）；补上同一文件系统的前提（跨文件系统 `EXDEV`）。审计行、`from` 一侧、线程池时序仍未测。
+- `office-cache.ts` 头注释（「14.3…（#1072）」一节交付）原写「`rmSync` 递归是否跟随符号链接没有核实」：已在 Node 24.13.1 上核实不跟随（`openat` 带 `O_NOFOLLOW|O_DIRECTORY` 加 `unlinkat`）；绑定运行时版本，仍登记。
+- `trash.ts` 头注释的「Node has no `*at` calls」作为一概而论的说法不成立，已改；但 `sweep` 用的是 `fs/promises` 的 `rm`（`trash.ts` 的 import 行），被 `strace` 的是 `rmSync`，两者在该运行时是两套实现。所以「`rm` 内部的递归按路径」这半句**保留**，改标为读运行时源码所得、未测——没有照「已被否证」去写。
+- D-26（owner 2026-10-10）：启动时那条 `sudo … find` 加应用一侧的固定超时与关停时的终止句柄，sudoers 行不变，随 15.1（#1074）实现；取值未定，写「固定常量，取值随 15.1 定并写进 PR」。`sudo` 被终止后 `find` 是否随之结束未测，留给 15.1 的 PR 按观察写明。
+- D-27（owner 2026-10-10）：五条后果登记在 D-23 之下，#1286 保持打开，不闭合、不加复核。验收清单 FL-01 指向的 D22 段落标题与 Risks 条目标题都没有改，清单未动，结论仍全部 `待签`。
+- 同样写着「Node 无 `*at` 调用」而不在本刀范围内的三处，只报不改：`server/src/workspaces/temp-dir-remove.ts`、`server/src/sessions/session-delete.ts` 的注释与 `docs/adr/0010-dedicated-omp-uid.md`。
+- 预审订正：`work/` 边删边换的自然竞态原记「ext4 与 overlayfs 各 40 轮未复现」，改记**未测**——那份脚本换不掉它要换的那一级（该级非空，其父目录由应用用户建、没有让 omp 用户能写的 `chmod`），没有替换发生过的记录，不计为证据。不跟随的结论只靠 `strace` 与预先放好的顶层、嵌套两例；被 `strace` 的是参数相同的裸 `rmSync`，不是 `clearWork`，顶层的打开与最后的 `rmdir` 按路径，其下各级才按描述符。
