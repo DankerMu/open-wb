@@ -9,7 +9,7 @@
  * 路径照规格的键字面拼，不引用源码。
  */
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createOfficeConverter, OfficeConvertError } from "../src/preview/office.js";
@@ -357,6 +357,28 @@ describe("并发上限与排队：队满", { timeout: 20_000 }, () => {
     expect(launched(on)).toEqual([running, ...queued.slice(1), late]);
     expect(calls[0]?.state).toBe("aborted");
   });
+
+  it("排队的组有两个调用方、只中止一个：另一个照常等到成功，这个键恰启动一次", async () => {
+    const on = rig();
+    const cache = cacheOn(on, { concurrency: 1 });
+    const [running, shared] = gates(on, ["run", "shared"]) as [string, string];
+    const abort = new AbortController();
+    const head = watch(cache.convert(running));
+    // 中止的是开出这一组的那个调用。
+    const calls = [watch(cache.convert(shared, abort.signal)), watch(cache.convert(shared))];
+
+    abort.abort();
+    await microtasks();
+
+    expect(states(calls)).toEqual(["aborted", "pending"]);
+    expect(on.launches).toHaveLength(1);
+
+    release(running, shared);
+    expect(await head.promise).toBe(slotOf(on, running));
+    expect(await calls[1]?.promise).toBe(slotOf(on, shared));
+    expect(launched(on)).toEqual([running, shared]);
+    expect(calls[0]?.state).toBe("aborted");
+  });
 });
 
 describe("并发上限与排队：同一输入只转一次", { timeout: 20_000 }, () => {
@@ -417,11 +439,33 @@ describe("并发上限与排队：同一输入只转一次", { timeout: 20_000 }
     const dying = on.launches[0]?.child;
     await vi.waitFor(() => expect(dying?.signalCode).toBe("SIGKILL"), GONE_WITHIN);
     expect(readdirSync(on.pdf)).toEqual([]);
+    // 被杀的那一组落定、放了名额（作业目录只剩新组的）：它从键表里只删自己，再来的同键调用加入新组。
+    await vi.waitFor(() => expect(jobDirs(on)).toHaveLength(1), GONE_WITHIN);
+    await microtasks();
+    const joiner = watch(cache.convert(input));
+    expect(on.launches).toHaveLength(2);
 
     release(input);
     expect(await again.promise).toBe(slotOf(on, input));
+    expect(await joiner.promise).toBe(slotOf(on, input));
     expect(launched(on)).toEqual([input, input]);
     expect(readdirSync(on.pdf)).toEqual([basename(slotOf(on, input))]);
+  });
+
+  it("成功的组不留在键表里：缓存文件被删之后同一输入重新启动，位置上又是 PDF", async () => {
+    const on = rig();
+    const cache = cacheOn(on, { concurrency: 1 });
+    const input = on.input("a.docx");
+    const slot = slotOf(on, input);
+    expect(await cache.convert(input)).toBe(slot);
+    expect(on.launches).toHaveLength(1);
+
+    unlinkSync(slot);
+    // 挂在已经成功的那一组上的话，拿到的是一个不存在的文件的路径，而且零启动。
+    expect(await cache.convert(input)).toBe(slot);
+
+    expect(launched(on)).toEqual([input, input]);
+    expect(readFileSync(slot, "utf8")).toBe(PDF);
   });
 });
 
@@ -457,6 +501,35 @@ describe("并发上限与排队：关停与参数", { timeout: 20_000 }, () => {
     expect(after.state).toBe("aborted");
     expect(on.launches).toHaveLength(1);
     expect(readdirSync(on.pdf)).toEqual([]);
+  });
+
+  it("close()：转换器已交回副本、正在改名的共用任务——等它落定才返回，返回时位置上已是 PDF", async () => {
+    const on = rig();
+    const input = on.input("a.docx");
+    const produced = join(on.work, "produced.pdf");
+    writeFileSync(produced, PDF);
+    // 替身转换器：立即交回一个真实文件，它的 close() 不等任何东西——等改名的只能是缓存自己。
+    const cache = createOfficeCache({
+      cacheDir: on.cacheDir,
+      converter: { available: true, convert: async () => produced, close: async () => undefined },
+      concurrency: 1,
+    });
+    closers.push(cache);
+    const call = watch(cache.convert(input));
+    // 只跑微任务：改名已经发出，它的完成要等事件循环转一圈才通知得到。
+    await microtasks();
+    expect(call.state).toBe("pending");
+
+    let returned = false;
+    const closing = cache.close().then(() => {
+      returned = true;
+    });
+    await microtasks();
+
+    expect(returned).toBe(false);
+    await closing;
+    expect(readFileSync(slotOf(on, input), "utf8")).toBe(PDF);
+    expect(readdirSync(on.work)).toEqual([]);
   });
 
   it("concurrency 为 0、负数、小数：构造即抛固定 message", () => {
