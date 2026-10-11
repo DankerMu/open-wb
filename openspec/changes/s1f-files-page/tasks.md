@@ -330,14 +330,14 @@ Minimal mergeable slice: 12.2 的头函数与其测试先合；监听器实例�
 
 ## 13. http-service-skeleton — 入口接线：两个监听器、缓存目录与周期清理
 
-- [ ] 13.1 `server/src/server.ts`：按 http-service-skeleton「预览监听器的装配与关停」——预览监听器先于主监听器 `listen`、同一 `AbortSignal`、失败走既有 cleanup；监听成功后建 `PREVIEW_CACHE_DIR` 三个目录并清空 `work`；
+- [x] 13.1 `server/src/server.ts`：按 http-service-skeleton「预览监听器的装配与关停」——预览监听器先于主监听器 `listen`、同一 `AbortSignal`、失败走既有 cleanup；监听成功后建 `PREVIEW_CACHE_DIR` 三个目录并清空 `work`；
   启动回收目录清理（8.1 的 `sweep` 半边）的定时器（`unref`）；`OwnedResources` 增加预览实例与该定时器；关停次序（回收目录清理的定时器 → 预览监听器 → 主监听器 → DB；转换器与转换缓存清理在组 15 接入这个序列）；`listener_force_close` 至多一行。`appAssemblyOf` 带上 `preview`。
   清空 `work`：本任务只做本进程自己的递归删除（此时入口还没有转换器，`work` 下不会有属 omp 用户的东西）；同时配置了 `OMP_USER` 与 `OFFICE_BIN` 时先执行的那条 `sudo … find`（owner D-24）由 14.3 提供、在 15.1 连同真实转换器一起接进入口。
   #1286：启动与周期清理的接线不等它（owner D-23，design D22「已知残余」）。`server/src/workspaces/trash.ts:12` 的头注释写着「settle it before anything schedules this sweep」，同一个代码 PR 把这半句改成已裁决的现状（登记为已知残余、issue 保持打开）；注释的其余陈述不动。
   实施注记见 `implementation-notes.md`「13.1、13.2、13.3（#1070）」。
-- [ ] 13.2 测试（`server/test/server-startup-order.test.ts`、`listener-shutdown.test.ts` 或新文件，用既有 `server-startup-helpers` 起编译入口）：「两个监听器的启动与干净关停」「预览端口被占用」「关停期间的在途请求与转换」中在途请求的部分（转换的部分在 15.2）；
+- [x] 13.2 测试（`server/test/server-startup-order.test.ts`、`listener-shutdown.test.ts` 或新文件，用既有 `server-startup-helpers` 起编译入口）：「两个监听器的启动与干净关停」「预览端口被占用」「关停期间的在途请求与转换」中在途请求的部分（转换的部分在 15.2）；
   「预览与文件键的缺省与覆盖」里关于实际绑定端口与四键启动记录的部分；信号落在两次 `listen` 之间时两个端口都可立即复用。
-- [ ] 13.3 变异证据：先起主监听器 → 「主监听器受理时预览已可用」的断言判红（在 success record 之前对预览端口的探测）；关停时先关 DB → 在途预览请求的用例出现 5xx 而判红；启动记录多一个键 → 精确四键断言判红。
+- [x] 13.3 变异证据：先起主监听器 → 「主监听器受理时预览已可用」的断言判红（在 success record 之前对预览端口的探测）；关停时先关 DB → 在途预览请求的用例出现 5xx 而判红；启动记录多一个键 → 精确四键断言判红。
 
 Suggested fixture level: expanded - 生产入口的启动与关停次序，涉及端口与 DB 的释放
 Minimal mergeable slice: atomic - 两个监听器与回收目录定时器在入口的启动与关停必须成对修改，拆开会留下不关的监听器或不停的定时器（Depends on 5.1、8.1 的 `sweep` 半边、11.2、12.1；不依赖 8.1 的 `moveToTrash` 半边与 8.2，因此不等 1.2）
@@ -649,5 +649,5 @@ Minimal mergeable slice: 28.1–28.5 的文档可一个 PR 合入；28.6 的实�
 
 ## 启动失败记录的阶段取值（#1203 对齐）
 
-- [ ] 本 change 新增的启动步骤进入 `server_start_failed` 的 `reason` 枚举：建预览缓存目录 → `preview_cache`，预览监听器 listen → `preview_listen`；`server/src/server.ts` 在这两步开始之前推进阶段变量。测试：http-service-skeleton「启动失败记录带失败阶段」的写法（真实编译入口、整行精确相等）各加一例；既有「预览端口失败 → 恰一行 generic failure record」的断言改为带 `reason` 的整行。归档次序：本 change 的「服务启动与装配」MODIFIED 副本须保留 `s1f-session-list-temp-space` 引入的该场景（已同步进本副本）。
+- [x] 本 change 新增的启动步骤进入 `server_start_failed` 的 `reason` 枚举：建预览缓存目录 → `preview_cache`，预览监听器 listen → `preview_listen`；`server/src/server.ts` 在这两步开始之前推进阶段变量。测试：http-service-skeleton「启动失败记录带失败阶段」的写法（真实编译入口、整行精确相等）各加一例；既有「预览端口失败 → 恰一行 generic failure record」的断言改为带 `reason` 的整行。归档次序：本 change 的「服务启动与装配」MODIFIED 副本须保留 `s1f-session-list-temp-space` 引入的该场景（已同步进本副本）。
 
