@@ -34,6 +34,12 @@ export type CreateDirResult = {
   path: string;
 };
 
+/** Body of `POST …/move`. Both paths are data: sent as given, the server's sandbox decides. */
+export type MoveEntryInput = {
+  from: string;
+  to: string;
+};
+
 export type FilePreview =
   | {
       kind: "text";
@@ -91,7 +97,14 @@ type FileTransport = {
   ): Promise<unknown>;
 };
 
-type WorkspaceEndpoint = "tree" | "dirs" | "file" | "promote" | "download" | "preview-token";
+type WorkspaceEndpoint =
+  | "tree"
+  | "dirs"
+  | "file"
+  | "promote"
+  | "download"
+  | "preview-token"
+  | "move";
 
 /** Same-origin address of one endpoint of a workspace; the id is encoded as a single path segment. */
 function workspaceEndpoint(workspaceId: string, endpoint: WorkspaceEndpoint): string {
@@ -168,6 +181,7 @@ function parseWorkspaceTree(value: unknown): WorkspaceTree | null {
   return entries ? { path: value.path, entries } : null;
 }
 
+/** Exactly `{path}`; the answer of both `createDir` and `moveEntry`. */
 function parseCreateDirResult(value: unknown): CreateDirResult | null {
   if (!hasExactlyKeys(value, ["path"]) || typeof value.path !== "string") {
     return null;
@@ -303,6 +317,7 @@ export function createFileMethods(
   | "createDir"
   | "fetchPreview"
   | "issuePreviewToken"
+  | "moveEntry"
 > {
   const { getRequestOptions, request, requestFailed, requestOptions } = transport;
   return {
@@ -423,6 +438,31 @@ export function createFileMethods(
       }
 
       return issued;
+    },
+
+    async moveEntry(workspaceId, input, options) {
+      // Key by key, not `JSON.stringify(input)`. Read from the route's code, not exercised from
+      // here: its body parser wants exactly `from` and `to` and answers 400 to a third key.
+      // The answer is returned as the server gave it; `path` is not compared with `to`. A 200
+      // with `{path}` does not prove the entry is at `to` (known residual of the route, see the
+      // header of `server/src/workspaces/rest-entries.ts`): list the directory again afterwards.
+      const response = await request(
+        workspaceEndpoint(workspaceId, "move"),
+        {
+          ...requestOptions(options?.signal),
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ from: input.from, to: input.to }),
+        },
+        onUnauthorized,
+        200,
+      );
+      const moved = parseCreateDirResult(response);
+      if (!moved) {
+        throw requestFailed(200);
+      }
+
+      return moved;
     },
   };
 }
