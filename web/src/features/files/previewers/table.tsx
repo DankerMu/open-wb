@@ -3,7 +3,8 @@
  * `preview-table` is a stable hook tests and the UI walk select by.
  */
 import { parseCsv } from "../csv.js";
-import { SCROLL_BODY, WIDE_TABLE } from "./code.js";
+import { CodeView, SCROLL_BODY, WIDE_TABLE } from "./code.js";
+import { fileExtension } from "./kind.js";
 
 const CSV_CELL =
   "border border-(--wb-border-default) px-[0.6rem] py-[0.35rem] text-left [overflow-wrap:anywhere]";
@@ -55,6 +56,7 @@ export function CsvTable({ text }: { text: string }) {
   );
 }
 
-export function TablePreviewer({ content }: { name: string; content: string }) {
-  return <CsvTable text={content} />;
+/** `tsv` 按制表符分列之前先显示源码：按逗号分列会把一行挤进一个单元格。 */
+export function TablePreviewer({ name, content }: { name: string; content: string }) {
+  return fileExtension(name) === "tsv" ? <CodeView text={content} /> : <CsvTable text={content} />;
 }

@@ -57,6 +57,7 @@ type DirectoryNodeProps = DirectoryTreeState & {
 type PreviewAreaProps = {
   loading: boolean;
   selectedFile: SelectedFile | null;
+  workspaceId: string;
 };
 
 /** 树行（目录与文件同一写法）；选中的文件行由 `aria-current` 着色。 */
@@ -68,21 +69,6 @@ const ROW_NAME = "min-w-0 flex-1 truncate";
 /** 行下方的附注（错误、读取中、空目录、根的逻辑路径）与行内文字左对齐。 */
 const ROW_NOTE = "mr-2 ml-7";
 
-const previewableExtensions: Record<string, true> = {
-  md: true,
-  txt: true,
-  log: true,
-  csv: true,
-  json: true,
-  js: true,
-  ts: true,
-  tsx: true,
-  html: true,
-  png: true,
-  jpg: true,
-  jpeg: true,
-};
-
 function workspacePath(parent: string, name: string) {
   if (parent.length === 0) {
     return name;
@@ -91,12 +77,17 @@ function workspacePath(parent: string, name: string) {
   return `${parent}/${name}`;
 }
 
-function supportsPreview(name: string) {
-  const extensionStart = name.lastIndexOf(".");
-  return (
-    extensionStart >= 0 &&
-    previewableExtensions[name.slice(extensionStart + 1).toLowerCase()] === true
-  );
+/** 取预览失败后的呈现：不支持与超限按信封的 code 认，其余显示信封 message 或安全文案。 */
+function failedPreview(error: unknown): PreviewState {
+  const code = error instanceof ApiError ? error.code : null;
+  if (code === "preview_unsupported") {
+    return { status: "unsupported" };
+  }
+  if (code === "preview_too_large") {
+    return { status: "too-large" };
+  }
+
+  return { status: "error", message: errorMessage(error) };
 }
 
 function loadedDirectoryPaths(cache: DirectoryCache) {
@@ -268,7 +259,7 @@ function DirectoryTree({ rootPath, workspaceName, ...state }: DirectoryTreeProps
   );
 }
 
-function PreviewArea({ loading, selectedFile }: PreviewAreaProps) {
+function PreviewArea({ loading, selectedFile, workspaceId }: PreviewAreaProps) {
   if (!selectedFile) {
     return <EmptyPreview />;
   }
@@ -282,6 +273,7 @@ function PreviewArea({ loading, selectedFile }: PreviewAreaProps) {
           path={selectedFile.path}
           preview={selectedFile.preview}
           size={selectedFile.entry.size}
+          workspaceId={workspaceId}
         />
       ) : (
         <p className={STATUS_TEXT} role="status">
@@ -456,11 +448,6 @@ export function WorkspaceBrowser({
       if (!sameFile) {
         releaseOwnedImage();
       }
-      if (!supportsPreview(entry.name)) {
-        publishSelectedFile({ ...next, preview: { status: "unsupported" } });
-        setPreviewLoading(false);
-        return;
-      }
 
       publishSelectedFile(next);
       setPreviewLoading(true);
@@ -505,13 +492,12 @@ export function WorkspaceBrowser({
           }
 
           releaseOwnedImage();
-          publishSelectedFile({
-            ...current,
-            preview: { status: "error", message: errorMessage(error) },
-          });
+          publishSelectedFile({ ...current, preview: failedPreview(error) });
           setPreviewLoading(false);
         })
         .finally(() => {
+          // 结果已在上面交付或丢弃；中止是为了放掉没读正文就判失败的应答（如尚无预览器的音视频）。
+          controller.abort();
           if (previewControllerRef.current === controller) {
             previewControllerRef.current = null;
           }
@@ -628,7 +614,13 @@ export function WorkspaceBrowser({
         onNewDirectory={openFolderDialog}
         onNewWorkspace={onNewWorkspace}
         onRefresh={refresh}
-        preview={<PreviewArea loading={previewLoading} selectedFile={selectedFile} />}
+        preview={
+          <PreviewArea
+            loading={previewLoading}
+            selectedFile={selectedFile}
+            workspaceId={workspace.id}
+          />
+        }
         switcher={switcher}
       />
       {folderDialog ? (

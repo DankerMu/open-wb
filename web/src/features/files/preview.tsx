@@ -1,8 +1,8 @@
 /**
- * File preview shell: header, truncation line, unsupported and error states render here,
- * synchronously. The body of a successful preview comes from a previewer module under
- * `previewers/`, loaded on first use through `previewers/index.ts` (the app's only code split);
- * this module owns the cache of loaded previewers.
+ * File preview shell: header (with the download link every file gets), truncation line,
+ * unsupported, too-large and error states render here, synchronously. The body of a successful
+ * preview comes from a previewer module under `previewers/`, loaded on first use through
+ * `previewers/index.ts` (the app's only code split); this module owns the cache of loaded previewers.
  * Blob URLs are caller-owned; this module never allocates or revokes them.
  * Markdown mode is keyed by `path`; callers must remount across workspaces
  * if the same relative path can name different files.
@@ -10,7 +10,7 @@
  */
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import type { ApiClient } from "../../lib/api.js";
+import { downloadUrl } from "../../lib/api.js";
 import { Icon } from "../../ui/index.js";
 import { ALERT_BOX, STATUS_TEXT } from "./columns.js";
 import { EmptyState } from "./empty-state.js";
@@ -22,15 +22,12 @@ import {
   previewKind,
   textView,
 } from "./previewers/index.js";
+import type { PreviewState } from "./types.js";
 
-type FilePreviewSuccess = Awaited<ReturnType<ApiClient["fetchPreview"]>>;
-
-type PreviewState =
-  | { status: "success"; data: FilePreviewSuccess }
-  | { status: "error"; message: string }
-  | { status: "unsupported" };
+type FilePreviewSuccess = Extract<PreviewState, { status: "success" }>["data"];
 
 type PreviewPaneProps = {
+  workspaceId: string;
   path: string;
   name: string;
   size: number;
@@ -72,7 +69,7 @@ function previewerFor(name: string, data: FilePreviewSuccess): PreviewerId {
   return view === "markdown" || view === "table" ? view : "code";
 }
 
-export function PreviewPane({ path, name, size, mtime, preview }: PreviewPaneProps) {
+export function PreviewPane({ workspaceId, path, name, size, mtime, preview }: PreviewPaneProps) {
   const truncatedSize =
     preview.status === "success" && preview.data.truncated ? preview.data.size : null;
   return (
@@ -94,9 +91,19 @@ export function PreviewPane({ path, name, size, mtime, preview }: PreviewPanePro
           className="ml-auto shrink text-[0.7rem] text-(--wb-text-tertiary) [overflow-wrap:anywhere] narrow:ml-0"
           data-slot="preview-meta"
         >{`${formatSize(size)} · ${formatMtime(mtime)}`}</p>
+        {/* 浏览器直接导航下载：文件名由服务端的 Content-Disposition 给，这里不经 fetch。 */}
+        <a
+          aria-label={`下载 ${name}`}
+          className="inline-flex shrink-0 rounded-[6px] p-1 text-(--wb-text-secondary) hover:bg-(--wb-brand-primary-subtle) hover:text-(--wb-text-primary)"
+          download
+          href={downloadUrl(workspaceId, path)}
+          title={`下载 ${name}`}
+        >
+          <Icon name="download" size={16} />
+        </a>
       </header>
       {truncatedSize === null ? null : (
-        <p className="px-4 pt-[0.65rem] text-[13px] text-muted-foreground">{`预览已截断（原始大小 ${truncatedSize} B）`}</p>
+        <p className="px-4 pt-[0.65rem] text-[13px] text-muted-foreground">{`文件超过预览上限，仅显示开头部分 · 共 ${formatSize(truncatedSize)}`}</p>
       )}
       <PreviewBody key={path} name={name} preview={preview} size={size} />
     </article>
@@ -112,12 +119,12 @@ function PreviewBody({
   preview: PreviewState;
   size: number;
 }) {
-  if (preview.status === "unsupported") {
+  if (preview.status === "unsupported" || preview.status === "too-large") {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center">
         <EmptyState
-          description={`${name} · ${formatSize(size)}\u3000二进制或未识别格式`}
-          title="该类型不支持预览"
+          description={`${name} · ${formatSize(size)}`}
+          title={preview.status === "unsupported" ? "该类型不支持预览" : "文件过大，无法预览"}
         />
       </div>
     );
