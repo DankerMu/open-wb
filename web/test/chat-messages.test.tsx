@@ -182,7 +182,7 @@ describe("(M5) static contract", () => {
     expect(existsSync(resolve(import.meta.dirname, "../src/features/files/md-render.ts"))).toBe(
       false,
     );
-    const preview = readRepoFile("web/src/features/files/preview.tsx");
+    const preview = readRepoFile("web/src/features/files/previewers/markdown.tsx");
     expect(preview).toContain("MarkdownView");
     expect(preview).not.toContain("function renderBlock");
     const chat = listRepoFiles("web/src/features/chat", (path) => /\.tsx?$/.test(path));

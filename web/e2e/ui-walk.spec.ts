@@ -12,7 +12,7 @@ import { allowFirstApproval, expectAllowedBar, generatingStatus } from "./ui-wal
 import { type CreatedSessions, watchCreatedSessions } from "./ui-walk-cleanup.js";
 import { walkComposer } from "./ui-walk-composer.js";
 import { createSessionFromSidebar } from "./ui-walk-create-session.js";
-import { expectFilesUnpainted } from "./ui-walk-files.js";
+import { expectFilesUnpainted, expectOnDemandChunk } from "./ui-walk-files.js";
 import { armGate, controlOrigin, deleteGate, gatePhase, releaseGate } from "./ui-walk-gate.js";
 import {
   clickRoute,
@@ -248,7 +248,9 @@ async function walkFiles(page: Page, project: WalkProject): Promise<void> {
   }
 
   const preview = files.getByRole("region", { name: "文件预览" });
-  await tree.getByRole("button", { name: "readme.md", exact: true }).click();
+  await expectOnDemandChunk(page, () =>
+    tree.getByRole("button", { name: "readme.md", exact: true }).click(),
+  );
   await expect(
     preview.getByRole("heading", { level: 1, name: SMOKE_FIXTURE, exact: true }),
   ).toBeVisible();

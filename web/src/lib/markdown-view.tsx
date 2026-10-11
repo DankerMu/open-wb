@@ -1,7 +1,7 @@
 /**
- * React renderer for the shared Markdown subset (lib/md-render.ts); moved from
- * features/files/preview.tsx unchanged. Emits React elements only: source HTML stays text,
- * links are inert (href="#", destinations dropped).
+ * React renderer for the shared Markdown subset (lib/md-render.ts); moved here unchanged from the
+ * files preview, whose Markdown previewer (features/files/previewers/markdown.tsx) is its caller.
+ * Emits React elements only: source HTML stays text, links are inert (href="#", destinations dropped).
  */
 import { type KeyboardEvent, type MouseEvent, type ReactNode, useMemo } from "react";
 import { type MdBlock, type MdInline, parseMarkdown } from "./md-render.js";
