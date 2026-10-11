@@ -10,6 +10,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   readFileSync,
   renameSync,
@@ -22,6 +23,7 @@ import { basename, dirname, join, parse } from "node:path";
 /** 正常转换写出的全部字节；测试里另抄一份字面量来对。 */
 const PDF = "%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n";
 const SLEEP_MS = 30_000;
+const GATE_POLL_MS = 15;
 const PROFILE_PREFIX = "-env:UserInstallation=file://";
 
 const argv = process.argv.slice(1);
@@ -105,6 +107,22 @@ const behaviours = {
   },
   sleep() {
     sleepThenExit();
+  },
+  /**
+   * 等放行（任务 14.2，#1073）：输出先写好，然后轮询 `<输入路径>.release`，出现即以 0 退出。
+   * 到上限还没等到就以 1 退出——没被放行的转换不该算成功。
+   */
+  gate() {
+    writeFileSync(output, PDF);
+    const deadline = Date.now() + SLEEP_MS;
+    setInterval(() => {
+      if (existsSync(`${input}.release`)) {
+        process.exit(0);
+      }
+      if (Date.now() > deadline) {
+        process.exit(1);
+      }
+    }, GATE_POLL_MS);
   },
   /** 子进程不 detached，与本进程同一个进程组；它自己也只活到上限。 */
   "spawn-sleep"() {

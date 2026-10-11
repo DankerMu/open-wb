@@ -11,7 +11,8 @@
  * 可以多于配置的并发上限——已登记的残余（design D18、owner D-25）。
  *
  * `work/` 与 `pdf/` 由调用方建好，本模块不 mkdir 它们。这里只有单次转换：缓存键、命中与两个清理
- * 函数在包在外面的 `office-cache.ts`，并发上限与排队不在这两个文件里。
+ * 函数在包在外面的 `office-cache.ts`，并发上限、排队与去重在 `office-queue.ts`（由前者接进未命中
+ * 的路径；`busy` 只从那里来，本文件不产生它）。
  */
 import { type ChildProcess, type SpawnOptions, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -27,7 +28,7 @@ const RANDOM_NAME_BYTES = 16;
 /** 输出 PDF 的大小上限，200 MiB；写死，不是配置项。 */
 const OUTPUT_LIMIT_BYTES = 209_715_200;
 
-type OfficeConvertErrorKind = "unavailable" | "failed" | "timeout" | "aborted";
+type OfficeConvertErrorKind = "unavailable" | "failed" | "timeout" | "aborted" | "busy";
 
 /** 只带种类：`message` 恒等于 `kind`，不带子进程输出、路径、环境或底层错误。 */
 export class OfficeConvertError extends Error {

@@ -4,8 +4,12 @@
  * 缓存包在单次转换（`office.ts`）外面，不改它：结果在 `<cacheDir>/pdf/<键>.pdf`，命中只把修改时间
  * 更新为当前时刻，不启动进程；未命中才转换。转换器交回的已经是本进程自己新建的副本
  * `pdf/<随机名>.pdf`（`0600`，从作业输出的 fd 复制而来），这里只在 `pdf/` 之内把它改名成键——
- * 作业目录里的输出从不被改名进缓存。失败的转换什么都不留，也不记在内存里。同一个键的并发未命中
- * 各转一次，后到的改名原子覆盖先到的；并发上限、排队与去重不在这里。
+ * 作业目录里的输出从不被改名进缓存。失败的转换什么都不留，也不记在内存里。
+ *
+ * 未命中的路径经 `office-queue.ts`（office-preview「并发上限与排队」）：同一个键的并发未命中共用
+ * 一次「转换 + 改名」，改名在共用的任务之内——每个调用方各自改名的话，只有第一个找得到那个随机
+ * 名。算键与查命中都是同步的 `lstat`，`convert()` 在把调用交给队列之前没有 `await`：到达次序就是
+ * 调用次序。命中不进队列，队满时照常返回。
  *
  * 清理函数永不 reject，本模块不建定时器，顶层没有副作用：何时调用由入口决定。`clearWork` 在同时
  * 提供 `ompUser` 与 `officeBin` 时先以该用户执行一条参数逐项固定的 `sudo … find … -delete`——
@@ -14,6 +18,9 @@
  *
  * 没有闭合的窗口（第一条读代码推出，没有实测；第二条在 uid 分离的 Linux 测试部署上实测过）：
  * - 键取自 `lstat` 那一刻，转换进程随后才按路径读输入；其间输入被改写，旧键下存进的就是新内容。
+ *   排队把这段间隔拉长了：键在到达时取，进程在轮到这一组时才启动，最坏约
+ *   `ceil(8 / concurrency) × timeoutMs`（读代码推出，没有实测）。调用方在此之前做的路径检查到
+ *   进程打开输入之间的间隔同样被拉长。
  * - 本进程对 `work/`（`2770`、无 sticky，omp 用户可写）的递归删除交给 `rmSync`：顶层条目与其内部
  *   任何一级都可在检查之后被该用户的存活进程换成符号链接（`office.ts` 的 `removeJob` 同类）。已在
  *   钉定的 Node 24.13.1（官方 Linux 构建）上核实不跟随。strace 跟的是一次参数与这里相同的裸
@@ -26,11 +33,12 @@
  */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readdirSync, rmSync } from "node:fs";
-import { lstat, readdir, rename, unlink, utimes } from "node:fs/promises";
+import { lstatSync, readdirSync, rmSync, utimesSync } from "node:fs";
+import { lstat, readdir, rename, unlink } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { assertSafeSudoPath } from "../core/process-path.js";
 import { OfficeConvertError, type OfficeConverter, type OfficeSpawn } from "./office.js";
+import { createOfficeQueue } from "./office-queue.js";
 
 /** sudoers 规则里逐字写的那条路径；不经 `PATH` 查找。 */
 const FIND_PATH = "/usr/bin/find";
@@ -41,24 +49,28 @@ const BAD_PATHS = "cacheDir and officeBin must be absolute paths";
 /**
  * `sha256(<absInput 的 UTF-8> 0x00 <mtimeMs 的十进制> 0x00 <size 的十进制>)` 的小写十六进制，
  * `mtimeMs` 与 `size` 取自此刻对输入的 `lstat`（纳秒级文件系统上 `mtimeMs` 带小数，原样写入）。
- * `lstat` 失败时以它的错误 reject——那个 message 带路径，调用方不得原样交给请求方。
+ * 同步：键是排队与去重的依据，必须在调用到达的那一拍里定下。`lstat` 失败时原样抛出它的错误——
+ * 那个 message 带路径，调用方不得原样交给请求方。
  */
-export async function officeCacheKey(absInput: string): Promise<string> {
-  const { mtimeMs, size } = await lstat(absInput);
+export function officeCacheKey(absInput: string): string {
+  const { mtimeMs, size } = lstatSync(absInput);
   return createHash("sha256")
     .update(`${absInput}\0${String(mtimeMs)}\0${String(size)}`, "utf8")
     .digest("hex");
 }
 
-/** 命中：大小大于 0 的普通文件（`lstat`，符号链接不算）。命中即把修改时间更新为当前时刻。 */
-async function touchIfCached(slot: string): Promise<boolean> {
+/**
+ * 命中：大小大于 0 的普通文件（`lstat`，符号链接不算）。命中即把修改时间更新为当前时刻。
+ * 同步，理由同上：同键的第二个调用不能在第一个入队之前越过这一步。
+ */
+function touchIfCached(slot: string): boolean {
   try {
-    const stats = await lstat(slot);
+    const stats = lstatSync(slot);
     if (!stats.isFile() || stats.size === 0) {
       return false;
     }
     const now = new Date();
-    await utimes(slot, now, now);
+    utimesSync(slot, now, now);
     return true;
   } catch {
     // 不存在，或刚好被周期清理删掉：按未命中处理，重新转换。
@@ -66,30 +78,30 @@ async function touchIfCached(slot: string): Promise<boolean> {
   }
 }
 
-/** 与 `OfficeConverter` 同形，包在它外面；`cacheDir` 必须就是构造 `converter` 时给的那一个。 */
+/**
+ * 与 `OfficeConverter` 同形，包在它外面；`cacheDir` 必须就是构造 `converter` 时给的那一个。
+ * `concurrency` 是同时运行的转换数上限，不是正整数即同步抛出固定 message 的普通错误。
+ */
 export function createOfficeCache(options: {
   cacheDir: string;
   converter: OfficeConverter;
+  concurrency: number;
 }): OfficeConverter {
   const { cacheDir, converter } = options;
   if (!isAbsolute(cacheDir)) {
     throw new Error(BAD_PATHS);
   }
+  const queue = createOfficeQueue({ concurrency: options.concurrency });
   const pdfDir = join(cacheDir, "pdf");
   let closed = false;
+  /** 已经启动、还没落定的共用任务，给 `close()` 等。 */
+  const storing = new Set<Promise<string>>();
 
-  async function cached(absInput: string, signal?: AbortSignal): Promise<string> {
-    let key: string;
-    try {
-      key = await officeCacheKey(absInput);
-    } catch {
-      throw new OfficeConvertError("failed");
-    }
-    const slot = join(pdfDir, `${key}.pdf`);
-    if (await touchIfCached(slot)) {
-      return slot;
-    }
-    // 失败原样上抛：此时 pdf/ 里没有这次转换的任何文件，下一次调用重新转换。
+  /**
+   * 一组同键调用共用的任务：转换，再把副本改名进键的位置。`signal` 是队列给这一组的内部信号。
+   * 失败原样上抛：此时 pdf/ 里没有这次转换的任何文件，下一次调用重新转换。
+   */
+  async function convertInto(slot: string, absInput: string, signal: AbortSignal): Promise<string> {
     const produced = await converter.convert(absInput, signal);
     try {
       await rename(produced, slot);
@@ -98,6 +110,30 @@ export function createOfficeCache(options: {
       throw new OfficeConvertError("failed");
     }
     return slot;
+  }
+
+  /** 从头到尾同步，没有 `await`：返回时这个调用已经命中、加入、启动、入队或被拒绝。 */
+  function cached(absInput: string, signal?: AbortSignal): Promise<string> {
+    let key: string;
+    try {
+      key = officeCacheKey(absInput);
+    } catch {
+      return Promise.reject(new OfficeConvertError("failed"));
+    }
+    const slot = join(pdfDir, `${key}.pdf`);
+    if (touchIfCached(slot)) {
+      return Promise.resolve(slot);
+    }
+    const task = (shared: AbortSignal): Promise<string> => {
+      const run = convertInto(slot, absInput, shared);
+      const forget = (): void => {
+        storing.delete(run);
+      };
+      storing.add(run);
+      run.then(forget, forget);
+      return run;
+    };
+    return queue.run(key, task, signal);
   }
 
   return {
@@ -109,9 +145,13 @@ export function createOfficeCache(options: {
       }
       return cached(absInput, signal);
     },
-    close() {
+    async close() {
       closed = true;
-      return converter.close();
+      // 先清队列：排队的组以 aborted 落定、一个都不启动；然后才终止在途的转换。
+      queue.close();
+      await converter.close();
+      // 转换已经交回副本、正在改名的任务不归转换器管：等它们落定。
+      await Promise.allSettled([...storing]);
     },
   };
 }
