@@ -712,7 +712,7 @@
 - `close()` 挪到预览监听器之后 → 同例 stderr 多一行 `listener_force_close`（读代码推出：在途请求撑满 2 秒预算后被强制回收）。
 - 启动不跑 `sweepPdf` → 编译入口 (b)。
 - 去掉 D-26 超时 → `office-work-clear.test.ts` 的「挂起的假 `sudo`，`clearWork` 在超时后落定」；超时后不记日志或记两行 → 同例日志整行相等。
-- 关停不调 `stopWorkClear` → 编译入口 (c) 的假 `sudo` pid 仍在；`stopWorkClear` 在没有在途子进程时抛出 → 单测「空闲时调用无事发生」。
+- 关停不调 `stopWorkClear` → 编译入口 (c) 的假 `sudo` pid 仍在；`stopWorkClear` 在没有在途子进程时抛出 → 单测「清空落定之后才调用 stopWorkClear…」（评审后 `stopWorkClear` 改为一次性，原「空闲时调用无事发生」拆成它与「先于清空到达的关停不丢…」）。
 - `clearWork` 仍不传 `officeBin` / `ompUser` → 编译入口 (c) 没有假 `sudo` 记录。
 - `officeAvailable` 仍写死 `false` → `server-handshake-log` 的 `true` 一例。
 - 不可观察：24 小时这个周期值、定时器的 `unref`、两个 `clearInterval` 之间的先后、`stopWorkClear` 与 `converter.close()` 的先后、构造失败时的阶段名、`SIGTERM` 换成 `SIGKILL`（假 `sudo` 两者都死，差别只在真实 `sudo` 下的 `find`）。
