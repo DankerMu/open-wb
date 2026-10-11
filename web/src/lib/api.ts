@@ -1,5 +1,6 @@
 import { type Command, createCommandMethods, type ProjectConfigFile } from "./api-commands.js";
 import {
+  type ArchiveListing,
   type CreateDirResult,
   type CreateWorkspaceInput,
   createFileMethods,
@@ -117,6 +118,11 @@ export type ApiClient = {
     options?: ApiRequestOptions,
   ): Promise<{ path: string }>;
   deleteEntry(workspaceId: string, path: string, options?: ApiRequestOptions): Promise<void>;
+  listArchive(
+    workspaceId: string,
+    path: string,
+    options?: ApiRequestOptions,
+  ): Promise<ArchiveListing>;
   listAudit(filter?: AuditFilter, options?: ApiRequestOptions): Promise<AuditList>;
   listSessions(options?: ApiRequestOptions): Promise<ChatSessionList>;
   createSession(input?: ChatSessionCreateInput, options?: ApiRequestOptions): Promise<ChatSession>;

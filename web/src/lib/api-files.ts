@@ -69,6 +69,23 @@ export type PreviewToken = {
   officeAvailable: boolean;
 };
 
+type ArchiveEntry = {
+  path: string;
+  type: "file" | "dir";
+  /** `null` when the archive does not state it (the single entry of a `gz`). */
+  size: number | null;
+};
+
+/**
+ * What `GET …/archive` answers. Entry paths are member names as stored in the archive: data, never
+ * a path to open — returned as given, not trimmed, normalised or checked against the workspace.
+ */
+export type ArchiveListing = {
+  format: "zip" | "tar" | "tar.gz" | "gz";
+  entries: ArchiveEntry[];
+  truncated: boolean;
+};
+
 type PreviewKind = FilePreview["kind"];
 
 type PreviewMetadata = {
@@ -111,7 +128,8 @@ type WorkspaceEndpoint =
   | "download"
   | "preview-token"
   | "move"
-  | "entries";
+  | "entries"
+  | "archive";
 
 /** Same-origin address of one endpoint of a workspace; the id is encoded as a single path segment. */
 function workspaceEndpoint(workspaceId: string, endpoint: WorkspaceEndpoint): string {
@@ -234,6 +252,41 @@ function parsePreviewToken(value: unknown): PreviewToken | null {
   return { token, base, officeBase, expiresAt, documentMaxBytes, officeAvailable };
 }
 
+function parseArchiveEntry(value: unknown): ArchiveEntry | null {
+  if (!hasExactlyKeys(value, ["path", "type", "size"])) {
+    return null;
+  }
+
+  const { path, size, type } = value;
+  if (
+    typeof path !== "string" ||
+    (type !== "file" && type !== "dir") ||
+    (size !== null && !isNonNegativeSafeInteger(size))
+  ) {
+    return null;
+  }
+
+  return { path, type, size };
+}
+
+/** Exactly the three keys of the contract. A directory's `size` is kept as the server gave it. */
+function parseArchiveListing(value: unknown): ArchiveListing | null {
+  if (!hasExactlyKeys(value, ["format", "entries", "truncated"])) {
+    return null;
+  }
+
+  const { format, truncated } = value;
+  if (
+    (format !== "zip" && format !== "tar" && format !== "tar.gz" && format !== "gz") ||
+    typeof truncated !== "boolean"
+  ) {
+    return null;
+  }
+
+  const entries = parseJsonArray(value.entries, parseArchiveEntry);
+  return entries ? { format, entries, truncated } : null;
+}
+
 function parsePreviewSize(value: string | null): number | null {
   if (value === null || !/^\d+$/.test(value)) {
     return null;
@@ -326,6 +379,7 @@ export function createFileMethods(
   | "issuePreviewToken"
   | "moveEntry"
   | "deleteEntry"
+  | "listArchive"
 > {
   const { getRequestOptions, noContentRequest, request, requestFailed, requestOptions } = transport;
   return {
@@ -483,6 +537,26 @@ export function createFileMethods(
         { ...requestOptions(options?.signal), method: "DELETE" },
         onUnauthorized,
       );
+    },
+
+    async listArchive(workspaceId, path, options) {
+      // The path is data: encoded whole, not trimmed or normalised, the empty string included —
+      // the server's sandbox decides. This method has no resolve-then-open step of its own (read
+      // from this code, not measured); the known read window of the route it calls (#1286) is
+      // neither closed nor widened, so a 200 is not proof the listing came from a file inside
+      // the workspace.
+      const response = await request(
+        `${workspaceEndpoint(workspaceId, "archive")}?path=${encodeURIComponent(path)}`,
+        getRequestOptions(options?.signal),
+        onUnauthorized,
+        200,
+      );
+      const listing = parseArchiveListing(response);
+      if (!listing) {
+        throw requestFailed(200);
+      }
+
+      return listing;
     },
   };
 }

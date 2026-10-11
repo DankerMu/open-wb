@@ -50,7 +50,7 @@
 > - 分层守卫：`web/test/ui-layering.test.ts` 的 `MIGRATED_AREAS` 与清单断言两处同步改。组 3 起 `web/src/features/files` 整目录在清单里；`web/src/features/chat/` 下新增的 `.ts`/`.tsx` 在同一 PR 逐个登记。
 >   已迁移文件从 `web/src/ui` 只可导入 `Icon`、`IconName`、`BrandMark`、`useEscapeFallback`，不得导入 `useToast`。`web/test/chat-module-layout.test.ts` 的导入方向不变（`page.tsx → use-chat-session.ts → turn-actions.ts`）。
 > - 拷入层（`web/src/components/ui`、`web/src/components/assistant-ui`）：只新增 `resizable`（组 23），且只做 ADR-0013 的六类修改；既有拷入文件不动。`web/src/ui/**` 冻结区不动、不加图标。
-> - 门槛：knip（不留未引用导出）、jscpd、单文件 800 行（`web/src/lib/api.ts` 当时 778 行不再加方法（#1082 把工作空间方法搬进 `api-files.ts` 之后为 489 行，经 #1083、#1084 后 497 行，新方法仍只进 `api-files.ts`）；`web/src/lib/md-render.ts` 797 行不改；`web/e2e/ui-walk-sessions.spec.ts` 681 行与 `web/e2e/ui-walk-layout.ts` 793 行不加行，
+> - 门槛：knip（不留未引用导出）、jscpd、单文件 800 行（`web/src/lib/api.ts` 当时 778 行不再加方法（#1082 把工作空间方法搬进 `api-files.ts` 之后为 489 行，经 #1083、#1084 后 497 行，经 #1080 后 503 行（`api-files.ts` 562 行），新方法仍只进 `api-files.ts`）；`web/src/lib/md-render.ts` 797 行不改；`web/e2e/ui-walk-sessions.spec.ts` 681 行与 `web/e2e/ui-walk-layout.ts` 793 行不加行，
 >   新走查步骤写进新 helper 文件；`server/src/workspaces/rest.ts` 的新路由放进新文件）、覆盖率 80%。
 > - 代码分割只在 `web/src/features/files/previewers/index.ts`（组 17 起有守卫）；`vite.config.ts` 不加 `manualChunks`。
 > - 一切用户给的路径过 `sandbox.resolve`；属他人与不存在的工作空间 id 一律是相同的 404 且先于路径检查；越界必写 `sandbox.reject`。
@@ -386,15 +386,16 @@ Minimal mergeable slice: atomic - 一条路由、它的映射表与转换器在�
 
 ## 16. files-web — API 客户端：`api-files.ts`
 
-- [ ] 16.1 新文件 `web/src/lib/api-files.ts`：两个地址函数 `fileUrl`、`downloadUrl` 与 `listArchive`；传输由 `api.ts` 注入、对 `api.ts` 只有类型导入；响应严格解析。`api.ts` 只加接线与类型再导出（不超过 800 行；必要时把既有工作空间方法一并挪进 `api-files.ts`）。
+- [x] 16.1 新文件 `web/src/lib/api-files.ts`：两个地址函数 `fileUrl`、`downloadUrl` 与 `listArchive`；传输由 `api.ts` 注入、对 `api.ts` 只有类型导入；响应严格解析。`api.ts` 只加接线与类型再导出（不超过 800 行；必要时把既有工作空间方法一并挪进 `api-files.ts`）。
   实施注记见 `implementation-notes-1.md`「16.1 的地址函数部分，含分摊的 16.4 / 16.5 条款（#1079）」。
+  实施注记见 `implementation-notes.md`「16.1 的 listArchive 部分、16.4、16.5（#1080）」。
 - [x] 16.2 `api-files.ts`：`moveEntry`、`deleteEntry`、`issuePreviewToken`（同样的注入与严格解析）。
   实施注记见 `implementation-notes.md`「16.2 的 issuePreviewToken 部分，含分摊的 16.4 / 16.5 条款（#1082）」。
   实施注记见 `implementation-notes.md`「16.2 的 moveEntry 部分，含分摊的 16.4 条款（#1083）」。
   实施注记见 `implementation-notes.md`「16.2（deleteEntry）、16.4、16.5（#1084）」。
 - [x] 16.3 `fetchPreview` 的图片类型集合扩到六种，`audio/*`、`video/*`、`image/svg+xml`、`text/html` 仍按失败处理。
   实施注记见 `implementation-notes-1.md`「16.3（#1081）」。
-- [ ] 16.4 测试（`web/test/api-files.test.ts` 扩充）：files-web「API 客户端扩展」五个场景，随 16.1–16.3 各自的方法分批加入，对应如下——
+- [x] 16.4 测试（`web/test/api-files.test.ts` 扩充）：files-web「API 客户端扩展」五个场景，随 16.1–16.3 各自的方法分批加入，对应如下——
   地址函数一刀（`fileUrl`、`downloadUrl`）：「地址函数与严格解析」里两个地址的编码与「没有发出请求」；「模块划分可持续验证」（`api-files.ts` 对 `./api.js` 只有 `import type`，size-guard 与 knip 通过——这一刀建文件时就成立，之后每一刀都重跑）。
   `listArchive` 一刀：「方法与错误码」里它的一行（`GET …/archive?path=`、返回形状、四种错误信封）；「地址函数与严格解析」里 `entries` 含 `type` 为 `link` 的残缺响应。
   `issuePreviewToken` 一刀：「方法与错误码」里它的一行（无 body 的 `POST …/preview-token`）；「地址函数与严格解析」里缺 `base` 的残缺响应。
@@ -402,7 +403,7 @@ Minimal mergeable slice: atomic - 一条路由、它的映射表与转换器在�
   16.3 一刀：「预览元数据与资源」里 `image/gif`、`image/webp` 两种类型；「失败不变成预览」里 `text/html`、`image/svg+xml`、`video/mp4` 三种 Content-Type（该场景其余既有断言不动）。
   「方法与错误码」里「十个发请求的方法」这个总数，随四个新方法中最后合入的那一刀成立；先合的各刀只断言自己那一行与既有六个方法不回归。
   `web/test/chat-module-layout.test.ts` 同款的导入方向断言加上 `api-files.ts`（对 `./api.js` 只有 `import type`）。
-- [ ] 16.5 变异证据：`downloadUrl` 不编码 `&` → 地址函数用例判红；接受缺 `base` 的令牌响应 → 严格解析用例判红；把 `video/mp4` 当图片 → 「失败不变成预览」判红。
+- [x] 16.5 变异证据：`downloadUrl` 不编码 `&` → 地址函数用例判红；接受缺 `base` 的令牌响应 → 严格解析用例判红；把 `video/mp4` 当图片 → 「失败不变成预览」判红。
 
 Suggested fixture level: compact - 客户端方法的机械扩充，契约由 mock fetch 测试钉住
 Minimal mergeable slice: 16.1 按方法分两刀——地址函数 `fileUrl`、`downloadUrl`（Depends on 9.3）带用例先合，`listArchive`（Depends on 10.3）带用例随后，组 17 只依赖前一刀；16.3（Depends on 6.1）带自己的用例随后；16.2 按方法分刀——`issuePreviewToken`（Depends on 11.2）、`moveEntry`（Depends on 9.1）、`deleteEntry`（Depends on 8.2）各带自己的用例，后两个间接等 1.2，前一个不等。每个方法都有测试引用（`web/test/**/*.test.ts(x)` 是 knip 的入口），不需要为过 knip 另造调用点，也不改 `knip.json`
