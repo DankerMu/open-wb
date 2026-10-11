@@ -25,6 +25,8 @@ const issuedWith = (patch: Record<string, unknown>) => ({ ...ISSUED, ...patch })
 
 afterEach(() => {
   window.history.replaceState(null, "", "/");
+  localStorage.clear();
+  sessionStorage.clear();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -37,11 +39,13 @@ describe("issuePreviewToken", () => {
 
     const issued = await createApiClient().issuePreviewToken("ws/%#?+ 中", { signal });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/workspaces/ws%2F%25%23%3F%2B%20%E4%B8%AD/preview-token",
-      { method: "POST", credentials: "same-origin", signal },
-    );
+    // 逐键严格相等：`toHaveBeenCalledWith` 会放过多出来的 `undefined` 键。
+    expect(fetchMock.mock.calls).toStrictEqual([
+      [
+        "/api/workspaces/ws%2F%25%23%3F%2B%20%E4%B8%AD/preview-token",
+        { method: "POST", credentials: "same-origin", signal },
+      ],
+    ]);
     expect(issued).toEqual(ISSUED);
   });
 
@@ -53,10 +57,9 @@ describe("issuePreviewToken", () => {
 
     const issued = await createApiClient().issuePreviewToken("workspace-1");
 
-    expect(fetchMock).toHaveBeenCalledWith("/api/workspaces/workspace-1/preview-token", {
-      method: "POST",
-      credentials: "same-origin",
-    });
+    expect(fetchMock.mock.calls).toStrictEqual([
+      ["/api/workspaces/workspace-1/preview-token", { method: "POST", credentials: "same-origin" }],
+    ]);
     expect(issued.officeAvailable).toBe(true);
   });
 
@@ -68,9 +71,13 @@ describe("issuePreviewToken", () => {
     ["token 为空串", issuedWith({ token: "" }), 200],
     ["base 为空串", issuedWith({ base: "" }), 200],
     ["officeBase 为空串", issuedWith({ officeBase: "" }), 200],
+    ["base 不是字符串", issuedWith({ base: ["b"] }), 200],
+    ["officeBase 不是字符串", issuedWith({ officeBase: ["o"] }), 200],
     ["expiresAt 为字符串", issuedWith({ expiresAt: "1790000000000" }), 200],
     ["expiresAt 为小数", issuedWith({ expiresAt: 1.5 }), 200],
+    ["expiresAt 为 -1", issuedWith({ expiresAt: -1 }), 200],
     ["documentMaxBytes 为 -1", issuedWith({ documentMaxBytes: -1 }), 200],
+    ["documentMaxBytes 为小数", issuedWith({ documentMaxBytes: 1.5 }), 200],
     ["officeAvailable 为 0", issuedWith({ officeAvailable: 0 }), 200],
     ["正文为 null", null, 200],
     ["六键齐全但状态是 201", ISSUED, 201],
@@ -118,12 +125,19 @@ describe("issuePreviewToken", () => {
     window.history.replaceState(null, "", "/files?probe=preview-token");
     const setItem = vi.spyOn(Storage.prototype, "setItem");
     const hrefBefore = window.location.href;
+    // 条数与 cookie 也比：按属性赋值（`sessionStorage.x = …`）不经过 `setItem`。起点必须是空的——
+    // 前面的用例若已留下同样的一条，「前后相等」同样看不出来（存储由 `afterEach` 清；cookie 不清，
+    // 留下的一条会让下面「起点为空」这一句红）。
+    const kept = () => [localStorage.length, sessionStorage.length, document.cookie];
+    const keptBefore = kept();
+    expect(keptBefore).toEqual([0, 0, ""]);
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(ISSUED)));
 
     const issued = await createApiClient().issuePreviewToken("workspace-1");
 
     expect(issued.token).toBe(TOKEN);
     expect(setItem).not.toHaveBeenCalled();
+    expect(kept()).toEqual(keptBefore);
     expect(window.location.href).toBe(hrefBefore);
   });
 });
