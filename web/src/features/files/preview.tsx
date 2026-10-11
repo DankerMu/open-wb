@@ -4,6 +4,9 @@
  * preview comes from a previewer module under `previewers/`, loaded on first use through
  * `previewers/index.ts` (the app's only code split); this module owns the cache of loaded previewers.
  * An archive has no fetched body: its previewer is loaded the same way and lists the members itself.
+ * A web page has none either: its previewer gets the preview token, the view and, as its source
+ * view, the body this module renders for the outcome of the source request. The token only passes
+ * through here on its way from the host's prop to that previewer.
  * Blob URLs are caller-owned; this module never allocates or revokes them.
  * Markdown mode is keyed by `path`; callers must remount across workspaces
  * if the same relative path can name different files.
@@ -24,8 +27,10 @@ import {
   textView,
 } from "./previewers/index.js";
 import type { PreviewState } from "./types.js";
+import type { usePreviewToken } from "./use-preview-token.js";
 
 type FilePreviewSuccess = Extract<PreviewState, { status: "success" }>["data"];
+type WebPreview = Extract<PreviewState, { status: "web" }>;
 
 type PreviewPaneProps = {
   workspaceId: string;
@@ -34,6 +39,10 @@ type PreviewPaneProps = {
   size: number;
   mtime: number;
   preview: PreviewState;
+  /** The host's `usePreviewToken` result; only a web page's rendered view reads it. */
+  previewToken: ReturnType<typeof usePreviewToken>;
+  /** 查看源码 / 渲染视图 of a web page: the view is the host's. Without it the button does nothing. */
+  onWebViewChange?: ((view: WebPreview["view"]) => void) | undefined;
 };
 
 /**
@@ -73,9 +82,20 @@ function previewerFor(name: string, data: FilePreviewSuccess): PreviewerId {
   return view === "markdown" || view === "table" || view === "svg" ? view : "code";
 }
 
-export function PreviewPane({ workspaceId, path, name, size, mtime, preview }: PreviewPaneProps) {
+export function PreviewPane({
+  workspaceId,
+  path,
+  name,
+  size,
+  mtime,
+  preview,
+  previewToken,
+  onWebViewChange = ignoreViewChange,
+}: PreviewPaneProps) {
+  // 网页的渲染视图不受预览上限约束：截断行只属于它的源码视图。
+  const shown = preview.status === "web" && preview.view === "source" ? preview.source : preview;
   const truncatedSize =
-    preview.status === "success" && preview.data.truncated ? preview.data.size : null;
+    shown?.status === "success" && shown.data.truncated ? shown.data.size : null;
   return (
     <article className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
       <header
@@ -109,10 +129,32 @@ export function PreviewPane({ workspaceId, path, name, size, mtime, preview }: P
       {truncatedSize === null ? null : (
         <p className="px-4 pt-[0.65rem] text-[13px] text-muted-foreground">{`文件超过预览上限，仅显示开头部分 · 共 ${formatSize(truncatedSize)}`}</p>
       )}
-      <PreviewBody key={path} name={name} preview={preview} size={size} />
+      {preview.status === "web" ? (
+        <LoadedPreview
+          content=""
+          id="web"
+          key={path}
+          name={name}
+          truncated={false}
+          web={{
+            path,
+            token: previewToken,
+            view: preview.view,
+            reload: preview.reload,
+            onViewChange: onWebViewChange,
+            source: preview.source ? (
+              <PreviewBody name={name} preview={preview.source} size={size} />
+            ) : null,
+          }}
+        />
+      ) : (
+        <PreviewBody key={path} name={name} preview={preview} size={size} />
+      )}
     </article>
   );
 }
+
+function ignoreViewChange() {}
 
 function PreviewBody({
   name,
@@ -120,7 +162,7 @@ function PreviewBody({
   size,
 }: {
   name: string;
-  preview: PreviewState;
+  preview: Exclude<PreviewState, WebPreview>;
   size: number;
 }) {
   if (preview.status === "unsupported" || preview.status === "too-large") {
@@ -179,12 +221,14 @@ function LoadedPreview({
   content,
   truncated,
   load,
+  web,
 }: {
   id: PreviewerId;
   name: string;
   content: string;
   truncated: boolean;
   load?: Parameters<Previewer>[0]["load"];
+  web?: Parameters<Previewer>[0]["web"];
 }) {
   const [loaded, setLoaded] = useState<Loaded>(() => {
     const Previewer = readyPreviewers.get(id);
@@ -210,7 +254,9 @@ function LoadedPreview({
   }, [id, loading]);
 
   if (loaded.status === "ready") {
-    return <loaded.Previewer content={content} load={load} name={name} truncated={truncated} />;
+    return (
+      <loaded.Previewer content={content} load={load} name={name} truncated={truncated} web={web} />
+    );
   }
   if (loading) {
     return (

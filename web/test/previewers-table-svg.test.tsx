@@ -102,6 +102,7 @@ describe("表格预览器：tsv 与 csv", () => {
           },
           status: "success",
         }}
+        previewToken={{ status: "idle" }}
         size={26}
         workspaceId="w1"
       />,
@@ -148,6 +149,7 @@ function svgPane(name: string, text: string, truncated: boolean) {
       name={name}
       path={`uploads/${name}`}
       preview={{ data: { kind: "text", size: text.length, text, truncated }, status: "success" }}
+      previewToken={{ status: "idle" }}
       size={text.length}
       workspaceId="w1"
     />

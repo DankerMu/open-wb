@@ -41,6 +41,7 @@ function sourcePreview(PreviewPane: Pane, name: string, text: string) {
         data: { kind: "text", size: text.length, text, truncated: false },
         status: "success",
       }}
+      previewToken={{ status: "idle" }}
       size={text.length}
       workspaceId="w1"
     />

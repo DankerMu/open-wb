@@ -544,6 +544,7 @@ describe("PreviewPane：Notebook", () => {
         name={name}
         path={`uploads/${name}`}
         preview={preview}
+        previewToken={{ status: "idle" }}
         size={size}
         workspaceId="w1"
       />

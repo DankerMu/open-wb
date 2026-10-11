@@ -36,6 +36,7 @@ function textPreview(
         },
         status: "success",
       }}
+      previewToken={{ status: "idle" }}
       size={metadataSize}
       workspaceId="w1"
     />
@@ -465,6 +466,7 @@ describe("PreviewPane image ownership", () => {
           data: { kind: "image", size: 4096, truncated: false, url: "blob:preview-image-1" },
           status: "success",
         }}
+        previewToken={{ status: "idle" }}
         size={4096}
         workspaceId="w1"
       />,
@@ -482,6 +484,7 @@ describe("PreviewPane image ownership", () => {
           data: { kind: "image", size: 4096, truncated: false, url: "blob:preview-image-2" },
           status: "success",
         }}
+        previewToken={{ status: "idle" }}
         size={4096}
         workspaceId="w1"
       />,
@@ -505,6 +508,7 @@ describe("PreviewPane image ownership", () => {
           data: { kind: "image", size: 4096, truncated: false, url: "blob:preview-image-1" },
           status: "success",
         }}
+        previewToken={{ status: "idle" }}
         size={4096}
         workspaceId="w1"
       />,
@@ -527,6 +531,7 @@ describe("PreviewPane unsupported error and truncation", () => {
         name="归档.zip"
         path="nested/归档.zip"
         preview={{ status: "unsupported" }}
+        previewToken={{ status: "idle" }}
         size={91}
         workspaceId="w1"
       />,
@@ -547,6 +552,7 @@ describe("PreviewPane unsupported error and truncation", () => {
         name={name}
         path={name}
         preview={{ status: "unsupported" }}
+        previewToken={{ status: "idle" }}
         size={91}
         workspaceId="w1"
       />,
@@ -566,6 +572,7 @@ describe("PreviewPane unsupported error and truncation", () => {
         name="secret.txt"
         path="out/secret.txt"
         preview={{ message: "路径不在沙箱内", status: "error" }}
+        previewToken={{ status: "idle" }}
         size={91}
         workspaceId="w1"
       />,
@@ -591,6 +598,7 @@ describe("PreviewPane unsupported error and truncation", () => {
         name="huge.png"
         path="assets/huge.png"
         preview={{ status: "too-large" }}
+        previewToken={{ status: "idle" }}
         size={22_020_096}
         workspaceId="w1"
       />,
@@ -625,6 +633,7 @@ describe("PreviewPane download link", () => {
         name={name}
         path={`out/${name}`}
         preview={preview}
+        previewToken={{ status: "idle" }}
         size={91}
         workspaceId="w1"
       />,
@@ -650,6 +659,7 @@ describe("PreviewPane download link", () => {
         name="e.txt"
         path={path}
         preview={{ status: "unsupported" }}
+        previewToken={{ status: "idle" }}
         size={91}
         workspaceId="w1"
       />,

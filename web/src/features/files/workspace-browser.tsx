@@ -7,6 +7,10 @@
  *   only expanded. A level that fails or lacks the next name ends the walk there. A selection made
  *   this way is not reported; a click and `reveal` report through `onPathChange` once the file is
  *   found.
+ * - A web page (html / htm) is the exception to that one request: it opens in the rendered view,
+ *   loaded by a frame from the preview origin, and `file` is requested only for its source view
+ *   (`immediatePreview`). The preview token is issued here, by the one `usePreviewToken` call, and
+ *   handed down as a prop; it is not part of the selection, the address or anything stored.
  * - `onlyPaths`: the tree is built from those paths (`subtreeOf`) and neither the listing cache
  *   nor the expanded set is written, so both are back when it is dropped. `loadDirectory` returns
  *   without a request while it is set: tests pin that for `refresh`, for a walk (it ends at the
@@ -38,9 +42,16 @@ import { DirectoryDialog } from "./dialogs.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
 import { logicalPath } from "./file-meta.js";
 import { useFolderDialog } from "./folder-dialog.js";
-import { failedPreview, immediatePreview, PreviewArea, type SelectedFile } from "./preview-area.js";
+import {
+  failedPreview,
+  immediatePreview,
+  PreviewArea,
+  type SelectedFile,
+  withFetched,
+} from "./preview-area.js";
 import { DirectoryTree } from "./tree.js";
 import type { TreeEntry } from "./types.js";
+import { usePreviewToken } from "./use-preview-token.js";
 
 /** 进行中的定位：`asked` 是这一次已经请求过的目录，请求过仍没有列表即失败。 */
 type Reveal = { asked: Set<string>; notify: boolean; path: string };
@@ -106,6 +117,12 @@ export function WorkspaceBrowser({
   const revealRef = useRef<Reveal | null>(null);
   const selectedFileRef = useRef<SelectedFile | null>(null);
   const subtreeOnly = onlyPaths !== undefined;
+  // 这一页唯一的一次调用：选中的是网页（渲染或源码视图）时才签发与续期。
+  const previewToken = usePreviewToken(
+    client,
+    workspaceId,
+    selectedFile?.preview?.status === "web",
+  );
 
   const releaseOwnedImage = useCallback(() => {
     const url = ownedImageUrlRef.current;
@@ -234,33 +251,20 @@ export function WorkspaceBrowser({
     [loadDirectory],
   );
 
-  const selectFile = useCallback(
-    (entry: TreeEntry, path: string) => {
-      previewRequestRef.current += 1;
-      previewControllerRef.current?.abort();
-      previewControllerRef.current = null;
+  /** 放弃进行中的 `file` 请求：它的应答此后不再交付。 */
+  const cancelPreviewRequest = useCallback(() => {
+    previewRequestRef.current += 1;
+    previewControllerRef.current?.abort();
+    previewControllerRef.current = null;
+  }, []);
+
+  /**
+   * 为已发布的选中项 `path` 发一次 `file` 请求；调用方先 `cancelPreviewRequest`。结局经
+   * `withFetched` 放进那时的预览：网页收进它的 `source`，其余类别就是预览本身。
+   */
+  const requestPreview = useCallback(
+    (path: string) => {
       const request = previewRequestRef.current;
-      const previous = selectedFileRef.current;
-      const sameFile = previous?.path === path;
-      const next: SelectedFile =
-        sameFile && previous ? { ...previous, entry, path } : { entry, path, preview: null };
-
-      if (!sameFile) {
-        releaseOwnedImage();
-      }
-
-      // 不发 `file` 请求的类别在这里交付：上一个请求已中止，换了文件时旧图片也已释放，没有新请求要管。
-      // 压缩包的成员列表请求由它的预览器发起并中止；这里每次给一个新函数，刷新与再点同一行因此重新列出。
-      const immediate = immediatePreview(entry, fileUrl(workspaceId, path), (signal) =>
-        client.listArchive(workspaceId, path, { signal }),
-      );
-      if (immediate) {
-        publishSelectedFile({ entry, path, preview: immediate });
-        setPreviewLoading(false);
-        return;
-      }
-
-      publishSelectedFile(next);
       setPreviewLoading(true);
       const controller = new AbortController();
       previewControllerRef.current = controller;
@@ -286,7 +290,10 @@ export function WorkspaceBrowser({
           } else {
             releaseOwnedImage();
           }
-          publishSelectedFile({ ...current, preview: { status: "success", data: preview } });
+          publishSelectedFile({
+            ...current,
+            preview: withFetched(current.preview, { status: "success", data: preview }),
+          });
           setPreviewLoading(false);
         })
         .catch((error: unknown) => {
@@ -303,7 +310,10 @@ export function WorkspaceBrowser({
           }
 
           releaseOwnedImage();
-          publishSelectedFile({ ...current, preview: failedPreview(error) });
+          publishSelectedFile({
+            ...current,
+            preview: withFetched(current.preview, failedPreview(error)),
+          });
           setPreviewLoading(false);
         })
         .finally(() => {
@@ -315,6 +325,70 @@ export function WorkspaceBrowser({
         });
     },
     [client, publishSelectedFile, releaseOwnedImage, workspaceId],
+  );
+
+  const selectFile = useCallback(
+    (entry: TreeEntry, path: string) => {
+      cancelPreviewRequest();
+      const previous = selectedFileRef.current;
+      const sameFile = previous?.path === path;
+      const next: SelectedFile =
+        sameFile && previous ? { ...previous, entry, path } : { entry, path, preview: null };
+
+      if (!sameFile) {
+        releaseOwnedImage();
+      }
+
+      // 不发 `file` 请求的类别在这里交付：上一个请求已中止，换了文件时旧图片也已释放，没有新请求要管。
+      // 压缩包的成员列表请求由它的预览器发起并中止；这里每次给一个新函数，刷新与再点同一行因此重新列出。
+      // 网页也在这里：渲染视图不请求；同一路径停在源码视图时得到 `null`，走下面那一次请求。
+      const immediate = immediatePreview(
+        entry,
+        fileUrl(workspaceId, path),
+        (signal) => client.listArchive(workspaceId, path, { signal }),
+        sameFile && previous ? previous.preview : null,
+      );
+      if (immediate) {
+        publishSelectedFile({ entry, path, preview: immediate });
+        setPreviewLoading(false);
+        return;
+      }
+
+      publishSelectedFile(next);
+      requestPreview(path);
+    },
+    [
+      cancelPreviewRequest,
+      client,
+      publishSelectedFile,
+      releaseOwnedImage,
+      requestPreview,
+      workspaceId,
+    ],
+  );
+
+  /**
+   * 网页预览的视图切换。切到源码而源码没有取过：发一次 `file` 请求；取过就不再发。切回渲染：放弃
+   * 还在途的那一次——它的结局不知道，取过的源码一并丢掉，下次看源码重新取。
+   */
+  const showWebView = useCallback(
+    (view: "rendered" | "source") => {
+      const current = selectedFileRef.current;
+      const web = current?.preview;
+      if (!current || web?.status !== "web" || web.view === view) {
+        return;
+      }
+
+      const source = previewControllerRef.current ? null : web.source;
+      cancelPreviewRequest();
+      publishSelectedFile({ ...current, preview: { ...web, view, source } });
+      if (view === "source" && source === null) {
+        requestPreview(current.path);
+      } else {
+        setPreviewLoading(false);
+      }
+    },
+    [cancelPreviewRequest, publishSelectedFile, requestPreview],
   );
 
   /** 点击文件行：放弃进行中的定位，选中并上报。点已选中的文件照样重取预览。 */
@@ -467,6 +541,8 @@ export function WorkspaceBrowser({
         preview={
           <PreviewArea
             loading={previewLoading}
+            onWebViewChange={showWebView}
+            previewToken={previewToken}
             selectedFile={selectedFile}
             workspaceId={workspaceId}
           />

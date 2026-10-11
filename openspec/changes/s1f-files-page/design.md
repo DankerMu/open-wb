@@ -174,7 +174,7 @@ ADR-0013 增补记录这条例外与本 change 完成后的包体数字。
 - HTML 渲染视图：`<iframe src="<base><path>" sandbox="allow-scripts allow-forms allow-modals" referrerpolicy="no-referrer" title="<文件名>">`。
   属性与响应头的 `sandbox` 取同一组，谁都不含 `allow-same-origin`、`allow-top-navigation`、`allow-popups`。
 - PDF 与办公文档：`<iframe src="…" title="<文件名>">`，**不带** `sandbox` 属性。
-- 主站页面自身的响应头不变（不新增 CSP）。预览页面里的脚本拿不到主站的任何东西，依据是 D13/D14，而不是主站的头。
+- 主站页面自身的响应头不变（不新增 CSP）。预览页面里的脚本读不到主站的 cookie、存储与 DOM，对主站的请求不带会话 cookie——依据是 D13/D14（不透明来源、子请求不带 `SameSite=Lax` cookie），而不是主站的头。#1093 走查实测（仅 Chromium，主站与预览监听器同主机不同端口）：框内来源为 `null`，读 `document.cookie`、`localStorage`、`parent.document`、`top.location` 均抛 `SecurityError`，框内以 `credentials: "include"` 对主站的 `fetch` 不带 cookie、得 401；**框内文档自身的导航请求带了主站会话 cookie**（cookie 不按端口隔离，见 Context），监听器不读它。框内文档经表单提交或自我导航去主站时带不带 cookie 未测；其它引擎与不同主机的部署未测。
 已知限制：不透明来源下 `localStorage`、`sessionStorage`、cookie、IndexedDB 不可用，依赖它们的页面会报错——与现有 `srcdoc` 预览相同，不是回归。
 
 **D16 PDF 交给浏览器自带的查看器，从隔离来源以不带 `sandbox` 的 `iframe` 加载。**
