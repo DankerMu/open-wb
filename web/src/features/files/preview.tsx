@@ -66,7 +66,7 @@ function previewerFor(name: string, data: FilePreviewSuccess): PreviewerId {
   if (data.kind === "image") return "image";
   if (previewKind(name) !== "text") return "code";
   const view = textView(name);
-  return view === "markdown" || view === "table" ? view : "code";
+  return view === "markdown" || view === "table" || view === "svg" ? view : "code";
 }
 
 export function PreviewPane({ workspaceId, path, name, size, mtime, preview }: PreviewPaneProps) {
@@ -146,6 +146,7 @@ function PreviewBody({
       id={id}
       key={id}
       name={name}
+      truncated={preview.data.truncated}
     />
   );
 }
@@ -156,7 +157,17 @@ type Loaded =
   | { status: "ready"; Previewer: Previewer };
 
 /** Keyed by `id` by the caller, so one mount only ever waits on one previewer. */
-function LoadedPreview({ id, name, content }: { id: PreviewerId; name: string; content: string }) {
+function LoadedPreview({
+  id,
+  name,
+  content,
+  truncated,
+}: {
+  id: PreviewerId;
+  name: string;
+  content: string;
+  truncated: boolean;
+}) {
   const [loaded, setLoaded] = useState<Loaded>(() => {
     const Previewer = readyPreviewers.get(id);
     return Previewer ? { status: "ready", Previewer } : { status: "loading" };
@@ -181,7 +192,7 @@ function LoadedPreview({ id, name, content }: { id: PreviewerId; name: string; c
   }, [id, loading]);
 
   if (loaded.status === "ready") {
-    return <loaded.Previewer content={content} name={name} />;
+    return <loaded.Previewer content={content} name={name} truncated={truncated} />;
   }
   if (loading) {
     return (
