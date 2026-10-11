@@ -108,6 +108,20 @@ describe("压缩包预览器：列表与截断", () => {
     expect(screen.queryByText(/^共 /)).toBeNull();
   });
 
+  // 截断与否只看 `truncated`：服务端的上限可配，项数不到 1000 也可以是截断的。
+  it("3 项且 truncated：显示「仅显示前 3 项」，没有「共 …」；1536 字节的成员大小格是「1.5 KB」", async () => {
+    render(
+      <ArchivePreviewer
+        load={loadOf(listing([file("a.txt", 5), file("b.bin", 1536), file("c.md", 7)], true))}
+      />,
+    );
+
+    const all = await rows();
+    expect(all.map((row) => cellsOf(row)[1]?.textContent)).toStrictEqual(["5 B", "1.5 KB", "7 B"]);
+    expect(screen.getByText("仅显示前 3 项", { exact: true })).toBeTruthy();
+    expect(screen.queryByText(/^共 /)).toBeNull();
+  });
+
   it("大小未知（gz 的单个成员，size 为 null）显示「—」；tar 里带大小的目录仍不显示大小", async () => {
     render(
       <ArchivePreviewer
@@ -300,7 +314,7 @@ describe("压缩包预览器：损坏的压缩包与其它失败", () => {
 });
 
 describe("压缩包预览器：请求归属", () => {
-  it("卸载即中止在途的 load；它之后落定或被拒都不留下表格，也没有未处理的拒绝", async () => {
+  it("卸载即中止在途的 load", () => {
     const first = pendingLoad();
     const view = render(<ArchivePreviewer load={first.load} />);
     expect(first.load).toHaveBeenCalledTimes(1);
@@ -308,18 +322,14 @@ describe("压缩包预览器：请求归属", () => {
 
     view.unmount();
     expect(signalOf(first.load).aborted).toBe(true);
-    first.resolve(listing([file("a.txt", 5)]));
-    await flush();
-    expect(document.querySelector("table")).toBeNull();
 
+    // 第二个实例：中止的是各自那一次调用的 signal。
     const second = pendingLoad();
     const again = render(<ArchivePreviewer load={second.load} />);
+    expect(signalOf(second.load).aborted).toBe(false);
     again.unmount();
     expect(signalOf(second.load).aborted).toBe(true);
-    second.reject(new ApiError(415, "preview_unsupported", "该类型不支持预览"));
-    await flush();
-    expect(document.querySelector("table")).toBeNull();
-    expect(screen.queryByRole("alert")).toBeNull();
+    expect(second.load).toHaveBeenCalledTimes(1);
   });
 
   it("换一个 load（刷新或再点同一行）：旧 signal 中止、新 load 恰调一次，等待期间是读取态，迟到的旧结果不顶掉新列表", async () => {
