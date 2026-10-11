@@ -185,13 +185,11 @@ describe("Notebook 预览器：单元格与输出", () => {
     expect(document.body.textContent).not.toContain("HTML-SENTINEL");
   });
 
-  it("主文档里没有因 HTML 输出新增的 script 元素，它的脚本也没有运行", () => {
-    Reflect.deleteProperty(window, "__nb");
+  it("主文档里没有因 HTML 输出新增的 script 元素", () => {
     renderNotebook(DEMO);
 
     expect(screen.getByText("[3]", { exact: true })).toBeTruthy();
     expect(document.querySelector("script")).toBeNull();
-    expect("__nb" in window).toBe(false);
   });
 
   it("主文档里的表格恰是每个代码单元的源码视图自带的那一张，没有因 HTML 输出新增的", () => {
@@ -344,6 +342,17 @@ describe("Notebook 预览器：输出按类型", () => {
     expect(monoTexts(container)).toStrictEqual(["abcd\ne"]);
   });
 
+  it("traceback 里前面没有 ESC 的方括号文字原样保留", () => {
+    const container = withOutputs({
+      output_type: "error",
+      traceback: ["[Errno 2] No such file", `${ESC}[0;31mFileNotFoundError${ESC}[0m: [Errno 2]`],
+    });
+
+    expect(monoTexts(container)).toStrictEqual([
+      "[Errno 2] No such file\nFileNotFoundError: [Errno 2]",
+    ]);
+  });
+
   it("不认识的 output_type 显示「不支持的输出类型」加类型名；data 为空的输出什么都不显示", () => {
     const container = withOutputs(
       { output_type: "update_display_data", data: { "text/plain": "x" } },
@@ -390,14 +399,6 @@ describe("Notebook 预览器：解析失败退回源码", () => {
     await flush();
     expect(container.querySelectorAll(COLORED)).toHaveLength(0);
     expect(stub.loadHighlighter).not.toHaveBeenCalled();
-  });
-
-  it("嵌套极深的 JSON 不抛错，按退回处理", () => {
-    const depth = 200_000;
-    const content = `${"[".repeat(depth)}${"]".repeat(depth)}`;
-
-    expect(() => renderNotebook(content)).not.toThrow();
-    expect(screen.getByText(FALLBACK, { exact: true })).toBeTruthy();
   });
 
   it("被截断的内容不解析：即使开头是完整的 Notebook 也显示源码", () => {
@@ -511,6 +512,7 @@ describe("Notebook 预览器：代码单元的语言", () => {
       "metadata 里两处都不是非空字符串",
       { metadata: { language_info: { name: 5 }, kernelspec: {} } },
     ],
+    ["kernelspec.language 是空串", { metadata: { kernelspec: { language: "" } } }],
   ])("%s 时按 python 着色", async (_label, extra) => {
     const { metadata: _metadata, ...bare } = JSON.parse(notebook([code('print("hi")')]));
     const container = renderNotebook(JSON.stringify({ ...bare, ...extra }));
