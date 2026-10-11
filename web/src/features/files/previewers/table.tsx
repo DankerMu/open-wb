@@ -1,9 +1,10 @@
 /**
- * Table previewer: the CSV table ported from resource/workbuddy-live-demo.html:3910-3938.
+ * Table previewer: the CSV table ported from resource/workbuddy-live-demo.html:3910-3938,
+ * shared by `tsv` with a tab as the delimiter.
  * `preview-table` is a stable hook tests and the UI walk select by.
  */
 import { parseCsv } from "../csv.js";
-import { CodeView, SCROLL_BODY, WIDE_TABLE } from "./code.js";
+import { SCROLL_BODY, WIDE_TABLE } from "./code.js";
 import { fileExtension } from "./kind.js";
 
 const CSV_CELL =
@@ -24,8 +25,8 @@ function csvCells(
   return { headers: annotate(headers), rows: rows.map(annotate) };
 }
 
-export function CsvTable({ text }: { text: string }) {
-  const parsed = parseCsv(text);
+export function CsvTable({ text, delimiter = "," }: { text: string; delimiter?: "," | "\t" }) {
+  const parsed = parseCsv(text, delimiter);
   const { headers, rows } = csvCells(parsed.headers, parsed.rows);
   return (
     <div className={`${SCROLL_BODY} px-4 pt-3 pb-5`} data-slot="preview-table">
@@ -56,7 +57,7 @@ export function CsvTable({ text }: { text: string }) {
   );
 }
 
-/** `tsv` 按制表符分列之前先显示源码：按逗号分列会把一行挤进一个单元格。 */
+/** 分隔符只看扩展名：`tsv` 按制表符，其余按逗号；不看内容猜。 */
 export function TablePreviewer({ name, content }: { name: string; content: string }) {
-  return fileExtension(name) === "tsv" ? <CodeView text={content} /> : <CsvTable text={content} />;
+  return <CsvTable delimiter={fileExtension(name) === "tsv" ? "\t" : ","} text={content} />;
 }
