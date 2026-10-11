@@ -1085,3 +1085,42 @@
 - 变异：不可观察：`workspaceEndpoint` 留着 `export`（没有测试会红，只有 knip 报）。
 - 变异：不可观察：客户端不校验令牌的十六进制形态（按 (a) 有意不做，无用例）。
 - 变异：不可观察：遍历、符号链接、跨空间 id、他人空间 404、`sandbox.reject`（本刀无路径参数、无服务端代码；归 #1067 已有证据与 11.4 / #1075）。
+
+## 16.2 的 moveEntry 部分，含分摊的 16.4 条款（#1083）
+
+- 非 Critical Path：本刀只在浏览器端把 `from` / `to` 当不透明数据放进 JSON，不碰 `sandbox.resolve`、`op`、路由，一个评审席即可。D-23 / #1286：本刀自身没有 resolve→rename 窗口（由代码推得），窗口全在它调用的 `server/src/workspaces/rest-entries.ts` 的 move 路由，证据等级以该文件头注释与 D22「实测（#1318）」为准；本刀不闭合、不加宽，注释与 PR 描述不得写「移动后条目一定在 `to`」。
+- 前置已在 origin/master（看代码）：0.1（#1049）；9.1（#1062，`rest-entries.ts` 的 `POST /api/workspaces/:id/move`，成功 `return { path: to }`）；#1079（`web/src/lib/api-files.ts` 19 行）。实测 1.2 已勾（`tasks.md:88`），design D22 结论「与设计相符」，不挡本刀；1.1 / 1.3 不涉及。
+- 与 issue / `tasks.md` 的出入：① issue 的 16.2 引文与 `tasks.md:385` 逐字一致；② issue 与 `tasks.md:44` 的「间接等 1.2」是过时措辞，不是现行门槛；③ PR Boundary 写 `web/test/api-files.test.ts`，该文件 743 行不得再加，用例进新文件（偏离 16.4 的「扩充」，记偏离记录）；④ issue 没写对 #1082 的叠放依赖；⑤ `tasks.md:53` 与 design:495 写 `api.ts` 778 行，实为 777；⑥ issue「Current behavior」属实（`web/src` 无 `moveEntry`）。
+- 需要 #1082 提供（未合入，无法核对，开工时先核）：(a) `api-files.ts` 里的 `createFileMethods(onUnauthorized, transport)`，返回 `Pick<ApiClient, …>`，transport 至少有 `request`、`requestOptions`、`requestFailed`（同形参照 `api-commands.ts:29-38`、`:98-101`）；(b) 既有工作空间方法及其解析器已搬进 `api-files.ts`，其中 `parseCreateDirResult`（现 `api.ts:332-338`）正是本刀要的 `{path}` 解析；(c) `api.ts` 行数已降。
+- 若 #1082 没搬：本刀约 +5 行（`ApiClient` 成员与接线）仍在 800 内，但 #1084 放不下，交编排者处理，本刀不设计搬家。此时 `{path}` 解析也不在 `api-files.ts` 另写一份（jscpd 3%，无忽略项），把 `parseCreateDirResult` 连同 `createDir` 一起挪过来。
+- 签名：`moveEntry(workspaceId: string, input: { from: string; to: string }, options?: ApiRequestOptions): Promise<{ path: string }>`。新类型放 `api-files.ts` 并导出，只由 `api.ts` 以 `import type` 取来写 `ApiClient` 成员（knip 由此满足，`knip.json` 不改）。`api-files.ts` 对 `./api.js` 只许 `import type`。
+- 实现：`request(workspaceEndpoint(workspaceId, "move"), { ...requestOptions(options?.signal), method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from: input.from, to: input.to }) }, onUnauthorized, 200)`，解析失败 `throw requestFailed(200)`。逐键取值而不是 `JSON.stringify(input)`：服务端 `parseMoveBody` 要求恰两个键，多带一个键就是 400。不加 `cache: "no-store"`（与 `createDir` 等 POST 一致）。
+- 同行冲突须排序：`api-files.ts:1` 的 `WorkspaceEndpoint` 联合，#1082 加 `"preview-token"`、本刀加 `"move"`、#1084 加 `"entries"`；`createFileMethods` 的返回类型与 `api.ts` 的 `ApiClient` 也是三刀同处。按批序 #1082 → #1083 → #1084 叠放，不并行。
+- 由规格定死、不算「未规定」的分支：成功码只认 200（file-operations「重命名与移动」:52「成功返回 200 `{path:<to>}`」加 files-web:4「键集或类型不符的成功响应按 request_failed」），201 等经 `expectedStatus` 得 `request_failed(201)`；`{}`、`{path:1}`、`{path:"x",extra:1}` 均为 `request_failed(200)`。
+- 规格没写、取最简并记偏离记录：不比对返回的 `path` 与 `to`，原样返回服务端值；`from` / `to` 不 trim、不规范化、不做空串校验，原样发出由服务端裁决；孤立代理项在 id 里使 `encodeURIComponent` 同步抛 `URIError`，与 `listTree` 现状一致，不捕获。
+- 测试放新文件 `web/test/api-files-move.test.ts`（约 110 行；同款命名 `api-files-url.test.ts`、`api-files-preview-types.test.ts` 已过 naming-guard）。只从 `../src/lib/api.js` 导入，不得导入 `api-files.js`，否则 `web/test/chat-module-layout.test.ts:64-65` 判红。辅助函数用 `./support.js` 的 `jsonResponse`、`captureApiError`、`expectRequestFailure`、`unauthorizedResponseCases`，不抄 `api-files.test.ts:212-232` 的 `createDir` 整块。
+- 用例：① id `ws/%#?+ 中` 带 `signal`，断言地址 `/api/workspaces/ws%2F%25%23%3F%2B%20%E4%B8%AD/move` 与整个 `RequestInit` 字面量（`method`、`credentials`、`headers`、`body`、`signal`），返回 `{path}`；② 路径是数据：`from` 为 `" ../a 报告/ "`、`to` 为 `"/b"`，另经类型断言多塞一个键，断言 `body` 整串恰为两键原值；③ `it.each` 残缺响应三行（`{}` 是 16.4 点名项）；④ 201 成功 → `request_failed(201)`；⑤ `it.each` 错误信封 409 `conflict`（issue 点名）、403 `sandbox_denied`、400 `bad_request`、404 `not_found`，断言 status / code / message 原样；⑥ `it.each(unauthorizedResponseCases())` 断言 401 回调恰一次。规格「四种错误信封」里的 413 / 415 对 move 不适用，由 400 / 404 替换，记偏离记录。
+- 既有测试不必改、不许放松：`web/test` 里的 `ApiClient` 替身都是类型断言（`chat-new-session-block.test.ts:9-10`、`workspace-list-silent.test.tsx:23`），加成员不破；没有任何用例枚举方法个数。`chat-module-layout.test.ts:64-73` 两条原样重跑。「搬家后源码扫描测试要跟着走」这条 grep 无命中：`web/test`、`web/e2e` 没有读 `api.ts` 源码找工作空间方法的测试，只有 `web/e2e/ui-walk-layout.ts:59` 一句注释提到 `REQUEST_FAILED_MESSAGE`，它留在 `api.ts`。
+- 「十个发请求的方法」总数不在本刀成立：`listArchive`（#1080）不在本批、16.1 未勾，本批 #1084 合入后仍是九个。本刀只断言自己那一行；`tasks.md` 的 16.2 复选框归 #1084，16.4 的总数句归四刀里最后合入的一刀（按现状是 #1080）。
+- 无 checklist 行（无界面，重命名 / 移动的界面在 #1100 / #1102 / #1103）；不碰 `web/src/features/**`、`ui-layering.test.ts`、配置、`docs/architecture/system.md` §9。给 22.x 的交接：200 加 `{path}` 不证明条目已在 `to`——硬链接空操作一例仅在钩子辅助下复现，自然竞态未复现（见路由头注释），界面应在成功后重新列目录。
+- 变异：`method` 改成 `GET` 或 `PUT` → 用例①判红。
+- 变异：端点 `"move"` 写成别的段名 → 用例①的地址字面量判红。
+- 变异：`workspaceId` 不经 `encodeURIComponent` → 用例①判红。
+- 变异：body 键改名（如 `source` / `target`）或 `from` 与 `to` 对调 → 用例①②的 `body` 字面量判红。
+- 变异：`JSON.stringify(input)` 整个对象透传 → 用例②（多余键）判红。
+- 变异：对 `from` / `to` 加 `.trim()`、去前导 `/`、折叠 `..` 或 `.normalize()` → 用例②判红。
+- 变异：丢掉 `Content-Type` 头、`credentials: "same-origin"` 或 `signal` → 用例①的 `RequestInit` 字面量判红。
+- 变异：误加 `cache: "no-store"` → 用例①判红（`toHaveBeenCalledWith` 是深度相等）。
+- 变异：解析放宽为接受 `{}`（如 `path ?? to`）→ 用例③的 `{}` 行判红。
+- 变异：去掉 `typeof path === "string"` → 用例③的 `{path:1}` 行判红。
+- 变异：`hasExactlyKeys` 换成只查 `"path" in value` → 用例③的 `{path:"x",extra:1}` 行判红。
+- 变异：去掉 `expectedStatus` 200，或写成 201 → 用例④与用例①判红。
+- 变异：方法内 `catch` 后一律抛 `request_failed`（吞掉信封）→ 用例⑤四行判红。
+- 变异：不传 `onUnauthorized` 给 `request` → 用例⑥判红。
+- 变异：`api-files.ts` 对 `./api.js` 出现值导入或 `import { type X }` → `chat-module-layout.test.ts`「拆出的 API 模块对 api.ts 只有类型导入」判红。
+- 变异：测试文件或 `web/src` 其他文件直接导入 `api-files.js` → `chat-module-layout.test.ts:64`「api-files.ts 的导出只被 api.ts 消费」判红。
+- 变异：`api.ts` 漏接 `createFileMethods` 的 `moveEntry` → 类型检查失败（`ApiClient` 缺成员），且用例①判红。
+- 变异：不可观察：用 `workspaceEndpoint(id, "move")` 还是内联拼同一个字符串（输出相同）。
+- 变异：不可观察：复用 `parseCreateDirResult` 还是另写一份等价解析（行为相同，只有 jscpd 可能拦，不保证）。
+- 变异：不可观察：比对返回的 `path` 与 `to`——规格不要求，本刀不做，也不为它造用例。
+- 变异：不适用：穿越、符号链接、跨工作空间 id、他人工作空间 404、`sandbox.reject` 审计，都是服务端行为，已由 #1062 的 `workspaces-move.test.ts` 承担；客户端一侧只有「路径是数据」（用例②）与 id 编码（用例①）两条。

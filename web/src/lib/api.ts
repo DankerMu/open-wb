@@ -4,6 +4,7 @@ import {
   type CreateWorkspaceInput,
   createFileMethods,
   type FilePreview,
+  type MoveEntryInput,
   type PreviewToken,
   type Workspace,
   type WorkspaceList,
@@ -110,6 +111,11 @@ export type ApiClient = {
     options?: ApiRequestOptions,
   ): Promise<FilePreview>;
   issuePreviewToken(workspaceId: string, options?: ApiRequestOptions): Promise<PreviewToken>;
+  moveEntry(
+    workspaceId: string,
+    input: MoveEntryInput,
+    options?: ApiRequestOptions,
+  ): Promise<{ path: string }>;
   listAudit(filter?: AuditFilter, options?: ApiRequestOptions): Promise<AuditList>;
   listSessions(options?: ApiRequestOptions): Promise<ChatSessionList>;
   createSession(input?: ChatSessionCreateInput, options?: ApiRequestOptions): Promise<ChatSession>;
