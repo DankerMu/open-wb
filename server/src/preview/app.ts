@@ -12,8 +12,13 @@
  * 已知残余（design D22「已知残余」、D-23，#1286 未闭合；以下为读代码推出，未测）：`lstat` 判定为普通文件
  * 之后，文件由区间发送函数按路径打开，不带 `O_NOFOLLOW` / `O_NONBLOCK`。其间条目或中间分量若被换成
  * 符号链接，读到的是链接目标；被换成命名管道，则占住一个线程池线程。这与主站 `file` / `download`
- * 是同一个窗口，本路由是它的第三条；不同之处有二：这里没有字节上限，读到的是目标全文；凭据是
- * 路径里的令牌而不是 cookie。`Content-Length` 取 `lstat` 时的大小，其间文件变短则正文短于声明。
+ * 是同一个窗口，本路由是它的第三条。与 `file` 的文本 / 图片 / 笔记本分支不同，`/w/` 没有字节上限
+ * （`download` 与 `file` 的音视频分支同样没有）；读到的至多是 `lstat` 时 `size` 个字节，该值由换入方
+ * 决定。凭据是路径里的令牌而不是 cookie，持令牌者包括被预览文档自己的脚本（成功响应带
+ * `Access-Control-Allow-Origin: *`，CSP 允许脚本且不设取源指令，文档地址里就有令牌）：该文档由 omp
+ * 侧写入，与能换路径的是同一方，它可以在预览打开期间自行重复请求去撞窗口，并把读到的内容发往外部；
+ * `file` / `download` 的字节只回到带 cookie 的主站页面。`/w/` 的成功读取不写审计行（`download` 写
+ * `file.download`）。`Content-Length` 取 `lstat` 时的大小，其间文件变短则正文短于声明。
  */
 import { basename } from "node:path";
 import fastify, { type FastifyInstance, type FastifyReply } from "fastify";

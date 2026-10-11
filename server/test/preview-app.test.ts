@@ -5,6 +5,7 @@
  * Anything a URL parser would rewrite (dot segments, NUL, a bad escape) goes over a real socket;
  * range requests go to the real listener. Oracles: the spec's literals and the bytes written here.
  */
+import { execFileSync } from "node:child_process";
 import {
   closeSync,
   ftruncateSync,
@@ -547,5 +548,44 @@ describe("preview listener: bounded shutdown", () => {
     });
 
     await expect(preview.close()).resolves.toBeUndefined();
+  });
+
+  it("refuses a close budget of zero when it is built", () => {
+    expect(() =>
+      createPreviewApp({
+        store: { rootOf: () => null },
+        sandbox: {
+          resolve: () => {
+            throw new Error("unreachable: nothing is requested");
+          },
+        },
+        tokens: { lookup: () => null },
+        listenerCloseBudgetMs: 0,
+      }),
+    ).toThrow("listener close budget must be an integer in 1..2147483647 ms");
+  });
+});
+
+describe("preview listener: 不是普通文件的目标", () => {
+  it("answers the fixed 404 at once for a named pipe placed in the workspace and writes no audit row", async () => {
+    await withPreviewWorld(async (world) => {
+      const token = await tokenForA(world);
+      // Nobody ever writes to it. Its lstat size is 0, so a listener that took it for a file would
+      // answer an empty 200 without opening it: the status pins the check, the deadline only guards.
+      execFileSync("mkfifo", [join(world.root, "pipe.bin")]);
+
+      const answer = await Promise.race([
+        rawAnswer(world.origin, `/w/${token}/pipe.bin`),
+        new Promise<never>((_resolve, reject) => {
+          setTimeout(
+            () => reject(new Error("no answer within the deadline")),
+            SETTLE_DEADLINE_MS,
+          ).unref();
+        }),
+      ]);
+
+      expectFixedFailure(answer, 404);
+      expect(auditCount(world.db)).toEqual({ count: 0 });
+    });
   });
 });
