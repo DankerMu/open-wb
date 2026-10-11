@@ -949,7 +949,7 @@
 - 变异：去掉 `ensureOwnedRoot` → 无根目录的 id 一例判红；他人 id 仍由 store 挡成 404，这一半不可观察（同 9.3 注记）。
 - 变异：`ensureOwnedRoot` 挪到 `resolve` 之后 → 他人或不存在的 id 带 `../x.zip` 的「审计行数不变」判红。
 - 变异：去掉 `sandbox.resolve`（直接拼路径）→ `../x.zip` 判红（外部真有合法 zip，得 200）；`op` 写成 `list` → `sandbox.reject` 行的 `op: "read"` 判红。
-- 变异：格式判定挪到 lstat 之前 → `out`（目录）仍 404 不红，靠 `gone.md` → 404 判红，所以该例必须加。
+- 变异：格式判定挪到 lstat 之前 → `out`（目录）仍 404 不红，靠 `gone.md` → 404 判红，所以该例必须加。（评审订正：`archiveFormat("out")` 为 null，变异后 `out` 直接答 415 判红——实测报出的就是它；`gone.md` 同样判红、`gone.zip` 不红是读代码推出。）
 - 变异：去掉 lstat 的普通文件判定 → 不可观察（`openRegularFile` 的 `fstat` 同样答 404）；它只为在格式判定之前给出 404、且不去打开目录与管道，靠白盒审查。
 - 变异：`openRegularFile` 去掉 `O_NOFOLLOW` → 符号链接换入用例判红（200 并列出外部包）；去掉 `O_NONBLOCK` → `mkfifo` 换入用例判红（响应超时）；去掉 `fstat` → 目录或管道换入用例判红。sniff 的七条既有用例同样会红。
 - 变异：无视 `limits.archiveEntries`、写死 1000 → 上限 3 的 `x.tar` 判红；缺省写成别的数 → 1500 成员的「恰 1000 项」判红。
