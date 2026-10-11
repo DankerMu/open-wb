@@ -48,7 +48,7 @@ describe("files empty states", () => {
     expect(hint.closest('[data-slot="empty-state"]')).toBe(previewEmpty);
   });
 
-  it("E2 shows 空目录 for an expanded empty folder and the unsupported subline after one file request answered 415", async () => {
+  it("E2 shows 空目录 for an expanded empty folder and the member list of a selected zip after one archive request and no file request", async () => {
     const { fetchMock } = renderFiles(
       "/files?ws=workspace-1",
       authenticatedFilesRoutes([workspace], {
@@ -60,10 +60,11 @@ describe("files empty states", () => {
           ],
         }),
         "/api/workspaces/workspace-1/tree?path=out": jsonResponse({ path: "out", entries: [] }),
-        "/api/workspaces/workspace-1/file?path=%E5%BD%92%E6%A1%A3.zip": jsonResponse(
-          { error: { code: "preview_unsupported", message: "该类型不支持预览" } },
-          415,
-        ),
+        "/api/workspaces/workspace-1/archive?path=%E5%BD%92%E6%A1%A3.zip": jsonResponse({
+          format: "zip",
+          entries: [{ path: "报告/第一章.md", type: "file", size: 7 }],
+          truncated: false,
+        }),
       }),
     );
 
@@ -72,13 +73,10 @@ describe("files empty states", () => {
     expect(screen.queryByText("该工作空间暂无目录")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "归档.zip" }));
-    const unsupported = await screen.findByText("该类型不支持预览", { exact: true });
-    const block = unsupported.closest('[data-slot="empty-state"]');
-    expect(block).not.toBeNull();
-    const description = block?.querySelector('[data-slot="empty-state-desc"]');
-    expect(description?.textContent).toBe("归档.zip · 86.3 MB");
-    expect(fetchMock.mock.calls.filter(([path]) => path.includes("/file?"))).toStrictEqual([
-      ["/api/workspaces/workspace-1/file?path=%E5%BD%92%E6%A1%A3.zip", expect.anything()],
+    expect(await screen.findByText("报告/第一章.md", { exact: true })).toBeTruthy();
+    expect(fetchMock.mock.calls.filter(([path]) => path.includes("/file?"))).toStrictEqual([]);
+    expect(fetchMock.mock.calls.filter(([path]) => path.includes("/archive?"))).toStrictEqual([
+      ["/api/workspaces/workspace-1/archive?path=%E5%BD%92%E6%A1%A3.zip", expect.anything()],
     ]);
   });
 

@@ -6,20 +6,23 @@
  * keeps its own promise: no requirement counts its calls, and every source view shares one load.
  */
 import type { ReactElement, ReactNode } from "react";
+import type { PreviewState } from "../types.js";
 
 export { previewKind, textView } from "./kind.js";
 
-export type PreviewerId = "markdown" | "table" | "code" | "image" | "svg" | "media";
+export type PreviewerId = "markdown" | "table" | "code" | "image" | "svg" | "media" | "archive";
 
 /**
  * `content` is the text for text previewers, the caller-owned Blob URL for the image one and the
- * file's own address for the media one.
+ * file's own address for the media one; the archive one gets none and lists the members itself
+ * through `load`.
  * `truncated` says the text is only the head of the file; previewers that show it as is ignore it.
  */
 export type Previewer = (props: {
   name: string;
   content: string;
   truncated: boolean;
+  load?: Extract<PreviewState, { status: "archive" }>["load"] | undefined;
 }) => ReactElement;
 
 const LOADERS: Record<PreviewerId, () => Promise<Previewer>> = {
@@ -29,6 +32,7 @@ const LOADERS: Record<PreviewerId, () => Promise<Previewer>> = {
   image: () => import("./image.js").then((module) => module.ImagePreviewer),
   svg: () => import("./svg.js").then((module) => module.SvgPreviewer),
   media: () => import("./media.js").then((module) => module.MediaPreviewer),
+  archive: () => import("./archive.js").then((module) => module.ArchivePreviewer),
 };
 
 export function loadPreviewer(id: PreviewerId): Promise<Previewer> {

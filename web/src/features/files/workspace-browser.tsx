@@ -250,7 +250,10 @@ export function WorkspaceBrowser({
       }
 
       // 不发 `file` 请求的类别在这里交付：上一个请求已中止，换了文件时旧图片也已释放，没有新请求要管。
-      const immediate = immediatePreview(entry, fileUrl(workspaceId, path));
+      // 压缩包的成员列表请求由它的预览器发起并中止；这里每次给一个新函数，刷新与再点同一行因此重新列出。
+      const immediate = immediatePreview(entry, fileUrl(workspaceId, path), (signal) =>
+        client.listArchive(workspaceId, path, { signal }),
+      );
       if (immediate) {
         publishSelectedFile({ entry, path, preview: immediate });
         setPreviewLoading(false);

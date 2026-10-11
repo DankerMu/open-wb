@@ -749,3 +749,77 @@
 - `clearWork` 仍不传 `officeBin` / `ompUser` → 编译入口 (c) 没有假 `sudo` 记录。
 - `officeAvailable` 仍写死 `false` → `server-handshake-log` 的 `true` 一例。
 - 不可观察：24 小时这个周期值、定时器的 `unref`、两个 `clearInterval` 之间的先后、`stopWorkClear` 与 `converter.close()` 的先后、构造失败时的阶段名、`SIGTERM` 换成 `SIGKILL`（假 `sudo` 两者都死，差别只在真实 `sudo` 下的 `find`）。
+
+## 20.3、20.4 / 20.5 / 20.6 的压缩包分摊部分（#1097）
+
+- 非 Critical Path（读代码推出）：本刀只是 `GET …/archive` 的第一个界面调用方，不加路由、`sandbox.resolve` 或 `op`，一个评审席即可。D-23 / #1286：浏览器侧没有 resolve→open 窗口（读代码推出，无实测）；被调路由的读窗口与证据等级照抄 `design.md:322`（末段替换答 404 为「钩子辅助复现：包裹 `fs.openSync`、测试装配下的源码处理器经 `inject`」，中间目录分量被换为「读代码推出，未测，未挡住」）。本刀不闭合、不加宽，界面文案与 PR 不得写「列表一定来自空间内的文件」。
+- 前置按代码核对已齐、三项实测都不挡（`tasks.md:45`「组 17–21 不等 1.2」）：`listArchive` 在 `web/src/lib/api-files.ts:542`（#1080），加载框架在 `previewers/index.ts` 与 `preview.tsx:44-62`（#1085），白名单已去（#1087，`tree.tsx:437-507` 对每个文件都发 `fetchPreview`）。#1091 / #1092 不在 origin/master（最新合入是 #1090），本刀不依赖它们。批内 #1093 / #1095 / #1096 未合入也无注记段，它们对同一批文件的改法没能核对。
+- 与 issue / `tasks.md` 的差异（origin/master 为准，进偏离记录）：
+- PR Boundary 漏列必改的 `tree.tsx`（639 行）、`preview.tsx`（219 行）、`types.ts`（39 行）；多列了不必改的 `kind.ts`（`archive` 类与四个扩展名已在 `kind.ts:28-31`）。
+- issue 写三列「路径、类型、大小」，规格是两列（路径、目录带图标；大小），以规格为准，不设类型列。
+- `files-page.test.tsx` 的 zip 断言在 `:165-172`、路由在 `:116-119`（任务写 `:162-169`）；E2 在 `files-empty-layout.test.tsx:51-83`。
+- 任务没点名、重跑 grep 命中的第三处是 `files-preview-states.test.tsx:122-156`。
+- 「过渡呈现在 `index.ts` / `kind.ts` 里登记」不成立：过渡是 `tree.tsx` 的 415 映射，没有登记项可替换。
+- 谁发请求（先定这条）：预览器自己调，依据是 file-previewers「压缩包预览器 SHALL 调用 `listArchive(workspaceId, path)`」与 20.4「表格与文案在 `listArchive` 落定后才有」。
+- `types.ts` 的 `PreviewState` 加 `{ status: "archive"; load: (signal: AbortSignal) => Promise<ArchiveListing> }`，类型取 `Awaited<ReturnType<ApiClient["listArchive"]>>`（#1080 注记），不加新导出类型。
+- `tree.tsx` 的 `selectFile` 在 `:452` 的 `publishSelectedFile(next)` 处对 `previewKind(entry.name) === "archive"`（从 `./previewers/index.js` 取）改为发布 `preview: { status: "archive", load: (signal) => client.listArchive(workspace.id, path, { signal }) }`、`setPreviewLoading(false)` 后返回，不调 `fetchPreview`。
+- 分支必须排在 `:439-450` 之后：先中止上一个在途预览并 `releaseOwnedImage()`，`files-page.test.tsx:167` 的 `blob:logo` 释放断言靠它。
+- 每次选中或 `刷新`（`tree.tsx:591` 重调 `selectFile`）都得到新的 `load`，预览器以它为 effect 依赖重新列出，这就满足 files-web:90「重新取当前文件的预览」，不另设计数器。
+- `preview.tsx` / `index.ts`：
+- `PreviewerId` 加 `"archive"`，`LOADERS.archive = () => import("./archive.js").then((m) => m.ArchivePreviewer)`。
+- `Previewer` 的属性加可选 `load?`，`PreviewBody` 对 `status === "archive"` 渲染 `<LoadedPreview id="archive" content="" truncated={false} load={preview.load} …>`；`index.ts` 里不得用 `as` 断言。
+- `ArchivePreviewer({ name, load })` 在 `load` 缺失时显示 request_failed 安全文案、零请求，用一条直接渲染用例钉住，不留无测试分支。
+- `PreviewPane` 仍按状态而不是按文件名分流，所以 `preview.test.tsx:516-553` 那两条（`.zip` 名字加 `status:"unsupported"`）不改且仍有意义。
+- 共同文件与次序：`tree.tsx`、`preview.tsx`、`previewers/index.ts`、`types.ts` 是 #1093（网页零 `file` 请求）、#1095（音视频直接地址）、#1096（`LOADERS`）与本刀都要改的，#1098 随后整体搬 `tree.tsx`。给定次序里本刀排在 #1096 之后，开工先看前三刀是否已有「该类别不发 `fetchPreview`」的分支和属性加宽：有就并进去，不另立一套；没有就按上两条。`files-preview-states.test.tsx` 的「每个文件都能下载」用例可能也被 #1095 动。
+- `previewers/archive.tsx`（新，估 110 行）：
+- 请求归属：effect 里 `new AbortController()` → `load(signal)`，清理函数 `abort()`，落定时 `signal.aborted` 即丢弃。切文件靠 `PreviewBody key={path}` 重挂，切空间靠 `WorkspaceBrowser key`，刷新靠 `load` 变（均读代码推出，由下面的归属用例实测）。
+- 读取中显示 `正在读取文件`（`role="status"`，`STATUS_TEXT` 取自 `../columns.js`）；规格没给文案，沿用 `tree.tsx:280`，记偏离。
+- 可静态导入 `../file-meta.js`、`../errors.js`、`../columns.js` 与 `../../../ui/index.js` 的 `Icon`：`previewers-code-split.test.ts:72` 只查 `index.ts` 与目录外文件，`features/files` 整目录已在 `ui-layering.test.ts:89`。
+- 表格每行两格：路径格内容为 `{entry.path}`，`title={entry.path}` 原样，不 `trim`、不规范化、不拼地址；目录行前加 `Icon name="folder"`。大小格：`type==="dir"` 为空串（zip 目录 `size` 是 0、tar 可为 1024，都不显示），`size===null` 为 `—`，其余 `formatSize`。
+- 行的 `key` 不能用 `path`（成员名可重复、可为空串），照 `table.tsx:13-26` 预先编号。
+- 表内不得有 `a`、`button`、`onClick`，模块内不得出现 `fetch`、`fileUrl`、`downloadUrl`：成员永不被请求。
+- 首尾空格只保证 DOM 文本与 `title` 原样（测试实测）；`truncate` 的 `nowrap` 会在视觉上合并空格（读 CSS 推出，未测），不为此加样式。
+- 由规格定死的分支（不算未规定）：
+- 计数行在表格上方：`truncated:false` → `共 N 项`；`true` → `仅显示前 N 项`，且不同时出现 `共 N 项`（规格句的分号对举加场景「后者显示 `仅显示前 1000 项`」；截断时总数未知）。
+- `entries` 为空 → 只显示 `压缩包内没有文件`，无表格、无计数行（「条目为空时显示…」；计数行位置是「表格上方」，没有表格就没有它）。
+- `ApiError.code === "preview_unsupported"` → `无法读取该压缩包`，按 code 认，不按 status（先例 #1087：信封残缺的 415 已落成 request_failed）。
+- 401 不改状态（「401 交由认证守卫」）；其它 `ApiError` → 信封 message，网络失败或非法响应 → request_failed 安全文案（都经 `errorMessage`）。
+- 路由实际只发 400 / 401 / 403 / 404 / 415 / 500（读 `rest-archive.ts` 推出），所以 413 一行钉的只是客户端映射：显示信封 message `文件过大，无法预览`，不是不支持态。
+- 取最简并记偏离：失败文案（含 415）统一放一个 `role="alert"` 段落（类名同 `preview.tsx:134`），不用 `EmptyState`（预览器拿不到文件大小）、不用 Toast。
+- `web/test/previewers-archive.test.tsx`（新，估 300 行；静态导入 `ArchivePreviewer`，`load` 用 `vi.fn`，正文一律 `await screen.findBy…`）：
+- 「列表与截断」：三项 → `共 3 项`、三行，大小格 `textContent` 依次 `"5 B"`、`""`、`"7 B"`，第二行有目录图标，`within(table).queryAllByRole("button"|"link")` 为空。
+- 1000 项加 `truncated:true` → `仅显示前 1000 项`、1000 行，且 `queryByText("共 1000 项")` 为空；`gz` 的 `size:null` → `—`。
+- 空包 → `压缩包内没有文件` 且无 `table`；`{entries:[], truncated:true}` 同样。
+- 「恶意成员名只是文字」夹具：`../../etc/passwd`、`/abs/x`、`<img src=x onerror=alert(1)>`、`<script>alert(1)</script>`、`" a "`、`\u00e9` 与 `e\u0301`、空串、重复一项。逐行断言路径格 `textContent` 与 `title` 都 `toBe` 原值（`findByText` 会折叠空白，不能用来证首尾空格）、行数等于项数、`document.querySelector("img, script")` 为空。
+- 点击：先断言 `load` 恰被调用一次、全局 `fetch` 桩零次，再逐格 `fireEvent.click`，两个计数都不变。
+- 「损坏的压缩包」经 `PreviewPane` 渲染（下载链接在预览头）：`load` 以 415 `preview_unsupported` 拒绝 → `无法读取该压缩包`、`下载 x.zip` 链接的 `href` 与 `download` 属性都在、「通知」区无 `listitem`、无 `.ui-toast`。
+- `it.each`：413 → 信封 message，404 → 信封 message，`TypeError` → 安全文案，401 → 仍是 `正在读取文件` 且无 `alert`。
+- 归属：挂起的 `load` 在卸载后 `signal.aborted === true`，随后落定不出现表格、无未处理拒绝；`rerender` 换新 `load` 后旧 signal 中止、新 `load` 被调一次、显示新列表。
+- 既有断言改写（逐条进偏离记录，不削弱）：
+- `files-page.test.tsx`：`:116-119` 的路由换成 `"/api/workspaces/workspace-1/archive?path=archive.zip": jsonResponse({format:"zip", entries:[{path:"a.txt",type:"file",size:5}], truncated:false})`；`:166` 换成 `await screen.findByText("a.txt")`；`:167` 的释放断言保留；`:168-172` 改为 `archive?path=archive.zip` 恰一次、`file?path=archive.zip` 零次。
+- `files-empty-layout.test.tsx` E2：路由键用编码后的 `…/archive?path=%E5%BD%92%E6%A1%A3.zip`（不编码会落成 `unexpected request`）；`:75` 换成 `findByText(成员路径)`；`:80-82` 改为 `file?` 请求 `toStrictEqual([])` 加恰一次 `archive?`；`:51` 标题改写。`:76-79` 的副行断言随条文删除，副行仍由 `files-preview-states.test.tsx:102` 与 `preview.test.tsx:529` 钉住；空目录那半不动。
+- `files-preview-states.test.tsx:133、:148-154`：`archive.zip` 改走 `archive` 路由（`renderWorkspaceWith` 只会拼 `file` 路由，需加一个额外路由入参），断言成员行加 `expectDownloadLink("archive.zip")`，`fileRequests` 剩三项，另断言恰一次 `archive?`。
+- 不改：`preview.test.tsx`、`previewers-loading.test.tsx`、`api-files-archive.test.ts`（没有新的 `ApiClient` 方法）、`preview-kind*.test.ts`、`previewers-table-svg.test.tsx`（`:296` 的静态扫描自动覆盖 `archive.tsx`）。
+- 门槛：
+- 行数估算（未实测，以 `scripts/size-guard.sh` 为准）：`tree.tsx` 约 655，`preview.tsx` 约 235，`files-page.test.tsx` 563 基本不变，新测试文件约 300。
+- knip：`ArchivePreviewer` 由 `index.ts` 的动态导入与测试引用，不加别的导出。
+- 新增一个按需块，`web/e2e/ui-walk-files.ts:38` 的 `expectOnDemandChunk` 只要求「至少一个」，不受影响（读代码推出）；走查里没有选中 zip 的步骤，不加。
+- 无新依赖；测试里不写动态 `new RegExp`。
+- PR 正文要列出动到的 `openspec/` 文件：`tasks.md` 勾 20.3，20.4–20.6 待各分摊刀齐了再勾，加注记文件。
+- FL 行（20.5）：编号取合入时 FL 节的下一个；origin/master 末行是 FL-14，#1091 与批内三刀都可能先占号，行首「接 FL-xx」随之改。FL-13、FL-14 之后会话里挂着 3 个附件，前面各刀再加多少没能核对，所以行首自带清理。格式守卫会拒点号紧跟字母的裸扩展名，文件名都用 ASCII 主干。草稿：
+- 操作：`接上一行（文件页停在 FL-05 的空间，uploads 已展开）；在 FL-10 用的那个会话标签页里（文件页所在的标签页不动），先把输入框上方还挂着的附件标签逐个点右端的叉号移除（没有就跳过），再经「+」菜单「上传文件」传入三个自备文件：demo.zip（内含 a.txt 与文件夹 dir，dir 里有 b.md）、同样内容打成的 demo.tar.gz、many.zip（内含 1001 个以上的小文件，可用脚本生成），等标签传完；回到文件页点「刷新」，在 uploads 里依次点 demo.zip、点列表里的任意一行、点 demo.tar.gz、点 many.zip`
+- 期望：`demo.zip 与 demo.tar.gz 都显示成员表格，每行是包内路径与大小，表格上方写着「共 N 项」且 N 等于表格行数；列表里若有文件夹行，它带文件夹图标、不显示大小；点任意一行什么都不发生，页面不跳转、不下载；many.zip 上方写的是「仅显示前 1000 项」（服务用缺省上限时），表格恰 1000 行；三个文件的预览头都有下载图标`
+- 结论 `待签`。不写固定的项数：不同打包工具是否写目录项、是否夹带额外成员不一样。
+- 变异证据（PR 描述带表）：
+- 成员名经 `dangerouslySetInnerHTML` 渲染 → 「恶意成员名只是文字」的 `img, script` 断言与 `previewers-table-svg.test.tsx:296` 都红（20.6 点名的那条）。
+- `title` 或文本只 `trimStart` / 只 `trimEnd` → `" a "` 行的 `toBe` 红（两侧各算一条）。
+- 路径包成 `<a>` 或 `<button>` → 「表格里没有按钮或链接」红。
+- 成员点击时发请求 → 点击前后计数断言红。
+- 目录行显示大小 → `""` 那格红；`null` 显示成 `0 B` → `—` 红。
+- 截断时仍写 `共 N 项` → 1000 项用例红；空包仍渲染表格或计数行 → 空包用例红。
+- 415 文案写成 `该类型不支持预览`，或按 status 而不按 code 判 → 「损坏的压缩包」与 413 行红。
+- 401 显示错误 → 401 行红；清理函数不 `abort` → 归属用例红。
+- `selectFile` 仍对压缩包调 `fetchPreview` → `files-page.test.tsx` 的零次 `file` 与 E2 的 `[]` 红；压缩包分支提到 `tree.tsx:448` 之前 → `files-page.test.tsx:167` 红。
+- `key` 用 `path` → 重复成员的行数断言红（React 对重复 key 的实际去重行为未核对，红不了就在 PR 里写「未做」）。
+- 不可观察：成员格的截断样式与空格的视觉合并（jsdom 无布局）。
+- 未做：`刷新` 后压缩包重新列出的页面级断言。建议在 `files-preview-states.test.tsx` 加一条（点 `刷新` 后 `archive?` 请求恰两次），不加就在 PR 里如实写未做。
