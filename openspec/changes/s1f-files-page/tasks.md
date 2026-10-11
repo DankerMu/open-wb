@@ -483,6 +483,7 @@ Minimal mergeable slice: 17.1 + 17.3（搬家、加载占位与失败重试、�
     在 `:241` 的点击之后与 `:242` 的 `rerender` 之后各加一行 `await act(async () => { await loadHighlighter(); })`——`loadHighlighter` 指 `previewers/index.ts` 导出的那个带缓存的高亮加载函数（高亮库的动态 `import()` 只能写在该文件，`code.tsx` 与测试都从它取；名字以实现为准）（等的是同一个带缓存的 promise，着色的提交因此落在 `act` 之内；高亮模块已被同文件前面的用例加载过时这两行是空操作），`:257` 原样保留。
     这里等加载函数而不用 `findBy`，是因为该用例要证明的是「没有 `act` 之外的更新」而不是某段内容出现，且这段输入着色后有没有可供等待的着色元素取决于语法定义。同文件另两处 `console.error` 的 spy（`:104`、`:144`）只匹配 `same key`，不受影响。
 - [ ] 18.2 `previewers/table.tsx` 支持 `tsv`（制表符分列）。
+  实施注记见 `implementation-notes.md`「18.2，含分摊的 18.5 / 18.6 条款（#1088）」。
 - [ ] 18.3 `previewers/svg.tsx`：`data:` 地址的 `img`、图片 / 源码切换、截断时只显示源码、`img` 的 `error` → `无法显示该图片`（仍可看源码）。
 - [ ] 18.4 图片预览接受六种类型；`img` 的 `error` → `无法显示该图片`、移除破图、释放 Blob 地址、保留下载链接。
   18.2–18.4 不改动任何既有用例：写作时 `grep -nE '\.(tsv|svg|gif|webp|bmp|ico)' web/test/files-*.tsx web/test/preview.test.tsx web/e2e/*.ts` 零命中（`svg` 今天不在白名单里，没有用例选它）；既有图片用例（`preview.test.tsx:441`、`files-page.test.tsx:441`、`files-concurrency.test.tsx:155`）不触发 `error` 事件，17.1 之后已是 `findBy`。
