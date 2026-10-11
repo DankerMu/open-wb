@@ -359,7 +359,7 @@ describe("ImagePreviewer", () => {
     expect(blobUrls.createObjectURL).not.toHaveBeenCalled();
   });
 
-  it("失败按地址记：同一文件换了新的 Blob 地址后 img 复现，地址不变时仍是失败文案，不再多释放", () => {
+  it("失败按地址记：同一文件换了新的 Blob 地址后 img 复现，地址不变时仍是失败文案，不再多释放；新地址再出错照样释放并换成文案", () => {
     const blobUrls = stubBlobUrls([]);
     const view = render(<ImagePreviewer content="blob:broken" name="broken.png" />);
     fireEvent.error(screen.getByRole("img", { name: "broken.png" }));
@@ -369,9 +369,16 @@ describe("ImagePreviewer", () => {
     expect(screen.queryByRole("img")).toBeNull();
 
     view.rerender(<ImagePreviewer content="blob:next" name="broken.png" />);
-    expect(screen.getByRole("img", { name: "broken.png" }).getAttribute("src")).toBe("blob:next");
+    const next = screen.getByRole("img", { name: "broken.png" });
+    expect(next.getAttribute("src")).toBe("blob:next");
     expect(screen.queryByText("无法显示该图片")).toBeNull();
     expect(blobUrls.revokeObjectURL.mock.calls).toStrictEqual([["blob:broken"]]);
+
+    fireEvent.error(next);
+
+    expect(screen.getByText("无法显示该图片")).toBeTruthy();
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(blobUrls.revokeObjectURL.mock.calls).toStrictEqual([["blob:broken"], ["blob:next"]]);
   });
 
   it("没有 error 就不释放：渲染、重渲染、换地址与卸载都不动调用方的 Blob 地址", () => {
@@ -387,12 +394,12 @@ describe("ImagePreviewer", () => {
     expect(blobUrls.createObjectURL).not.toHaveBeenCalled();
   });
 
-  it("文件页选中损坏的 broken.png：提示出现且没有 Toast、img 被移除、Blob 地址被释放、下载链接仍在", async () => {
-    const blobUrls = stubBlobUrls(["blob:broken"]);
+  it("文件页选中损坏的 broken.png：提示出现且没有 Toast、img 被移除、Blob 地址被释放、下载链接仍在；改选 logo.png 时持有者对同一地址再释放一次", async () => {
+    const blobUrls = stubBlobUrls(["blob:broken", "blob:logo"]);
     const consoleError = vi.spyOn(console, "error");
     const rejections = observeUnhandledRejections();
     try {
-      renderImageFiles({ "broken.png": "image/png" });
+      renderImageFiles({ "broken.png": "image/png", "logo.png": "image/png" });
       const toasts = screen.getByRole("region", { name: "通知" });
       const preview = within(await screen.findByRole("region", { name: "文件预览" }));
 
@@ -405,7 +412,7 @@ describe("ImagePreviewer", () => {
 
       expect(preview.getByText("无法显示该图片")).toBeTruthy();
       expect(preview.queryByRole("img")).toBeNull();
-      expect(blobUrls.revokeObjectURL).toHaveBeenCalledWith("blob:broken");
+      expect(blobUrls.revokeObjectURL.mock.calls).toStrictEqual([["blob:broken"]]);
       // Toast 是通知区列表里的一项（类名 ui-toast，自身不带 role）；预览区此时也不该有 alert。
       expect(within(toasts).queryByRole("listitem")).toBeNull();
       expect(document.querySelector(".ui-toast")).toBeNull();
@@ -415,6 +422,13 @@ describe("ImagePreviewer", () => {
         "/api/workspaces/workspace-1/download?path=broken.png",
       );
       expect(link.hasAttribute("download")).toBe(true);
+
+      // 记录在案的偏离：持有者（tree.tsx）不知道图片模块已经释放过，改选别的文件时对同一地址再释放一次。
+      fireEvent.click(screen.getByRole("button", { name: "logo.png" }));
+      const logo = await preview.findByRole("img", { name: "logo.png" });
+      expect(logo.getAttribute("src")).toBe("blob:logo");
+      expect(preview.queryByText("无法显示该图片")).toBeNull();
+      expect(blobUrls.revokeObjectURL.mock.calls).toStrictEqual([["blob:broken"], ["blob:broken"]]);
 
       await settle();
       expect(rejections.unhandled).toEqual([]);
