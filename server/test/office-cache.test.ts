@@ -67,7 +67,7 @@ function cacheOn(on: Bench, overrides: { officeBin?: string | null; timeoutMs?: 
     timeoutMs,
     spawn: on.spawn,
   });
-  const cache = createOfficeCache({ cacheDir: on.cacheDir, converter });
+  const cache = createOfficeCache({ cacheDir: on.cacheDir, converter, concurrency: 2 });
   closers.push(cache);
   return cache;
 }
@@ -236,7 +236,7 @@ describe("转换缓存：命中、失效与复制", () => {
     expect(lstatSync(elsewhere).mtimeMs).toBe(INPUT_MTIME_S * 1000);
   });
 
-  it("同一个键的两次并发未命中各转一次，落定为同一路径，pdf/ 里只有这一个文件", async () => {
+  it("同一个键的两次并发未命中共用一次转换，落定为同一路径，pdf/ 里只有这一个文件", async () => {
     const on = bench();
     const input = on.input("a.docx");
     const cache = cacheOn(on);
@@ -245,7 +245,7 @@ describe("转换缓存：命中、失效与复制", () => {
 
     expect(one).toBe(join(on.pdf, `${literalKey(input, "1700000000000", "26")}.pdf`));
     expect(two).toBe(one);
-    expect(on.launches).toHaveLength(2);
+    expect(on.launches).toHaveLength(1);
     expect(readdirSync(on.pdf)).toEqual([basename(one)]);
     expect(readFileSync(one, "utf8")).toBe(PDF);
   });
@@ -320,9 +320,9 @@ describe("转换缓存：命中、失效与复制", () => {
     const on = bench();
     const converter = createOfficeConverter({ cacheDir: on.cacheDir, timeoutMs: 1_000 });
 
-    expect(() => createOfficeCache({ cacheDir: "var/preview-cache", converter })).toThrow(
-      new Error(BAD_PATHS),
-    );
+    expect(() =>
+      createOfficeCache({ cacheDir: "var/preview-cache", converter, concurrency: 2 }),
+    ).toThrow(new Error(BAD_PATHS));
     expect(() => createOfficeCleanup({ cacheDir: "var/preview-cache" })).toThrow(
       new Error(BAD_PATHS),
     );
