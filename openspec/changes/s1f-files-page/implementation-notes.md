@@ -649,3 +649,31 @@
 - 变异：不可观察：键变时是否清缓存 ref（渲染期比对已挡住，只影响令牌在内存里的驻留）。
 - 变异：不可观察：「令牌不出现在界面可见文本」与 iframe 是否重载（jsdom 无 iframe 行为，归 #1093 与走查）。
 - 变异：不可观察：遍历、符号链接、跨空间 id、他人空间 404、`sandbox.reject`（本刀无路径参数、无服务端代码；归 #1067 已有证据与 11.4 / #1075）。
+
+## 21.1，含分摊的 21.3 / 21.5 条款（#1098）
+
+- 定性与前提：不触 Critical Path（路径只作数据交给既有 `listTree` / `fetchPreview`，无新 `op`、不碰 `sandbox.resolve`、不动服务端）；不等 1.1 / 1.2 / 1.3；边「21.1 ← 17.2」的前提 #1087 已在 origin/master（`c3564461`，最后合入是 #1090）；#1091、#1092 与本批兄弟刀均未合入，未能核对。
+- **需编排者先裁定（规格句与 issue 边界冲突）**：场景「两处同一份实现」第二句「`features/chat` 只经 `features/files/index` 导入」今天是红的——`web/src/features/chat/attachment-chips.tsx:7`、`capability-bar.tsx:16`、`file-changes-card.tsx:7`、`message-thread.tsx:15` 直接导入 `../files/file-meta.js`，而 issue 写「不改 `features/chat/**`」。编排方裁定取 (b)（保持 issue 边界，待 owner 复核）。二选一原文：(a) 放宽边界，`index.ts` 再导出 `formatSize` / `logicalPath` 并改这四行导入（推荐，断言按规格原文写）；(b) 断言对 `file-meta` 写明例外、注释指向 23.2（#1105）并记偏离。不得悄悄只断第一句。
+- **`usePreviewToken` 的宿主与批内次序**：抽取后唯一同时持有 client、工作空间 id 与选中项的是 `WorkspaceBrowser`，钩子在 `workspace-browser.tsx` 里调一次，结果经 `PreviewArea` 传给 `PreviewPane`。#1092、#1093、#1095–#1097 若先落栈，其宿主改动落在 `tree.tsx:292-639`，正是本刀搬走的那段——本刀以栈顶为底整段搬，下述行号届时全部漂移；`tree.tsx`、`preview.tsx` 是批内多刀共碰文件，须排序。
+- 最大漂移（origin/master 为准，进偏离记录）：issue「Current behavior」与 21.1「从 `page.tsx` 抽」不成立。`WorkspaceBrowser` 已存在于 `tree.tsx:292-639`（非受控，props `{account, client, switcher, workspace, onNewWorkspace}`），`page.tsx`（336 行）已是它的包装，`index.ts` 只导出 `FilesPage`。实际动作是把 `tree.tsx:292-639` 连同 `SelectedFile`、`FolderDialogState`、`failedPreview`、`loadedDirectoryPaths`、`PreviewArea` 搬进新文件，`tree.tsx` 只留 `DirectoryNode` / `DirectoryTree`（约 260 行，`DirectoryTree` 改为导出）。
+- 不是纯重构：文件页行为不变，但组件新增六个属性与两个命令式方法，只有新测试覆盖；PR 不得对组件本身写「行为不变」。属性形状按规格句定为 `{client, workspaceId, account, name?, dir?, path, onPathChange, layout?, markedPaths?, onlyPaths?, ref?}`。`switcher` / `onNewWorkspace` 规格没有，改为可选的文件页专用槽位（记偏离）；`onNewWorkspace` 缺省时 `＋` 菜单只剩 `新建文件夹`，文件页仍是两项，O2 不变。
+- 命令式句柄：React 19.2，用 `ref` 属性加 `useImperativeHandle`（同 `web/src/features/chat/thread-viewport.tsx:154`），不用 `forwardRef`。导出 `WorkspaceBrowserHandle = {reveal(path, options?: {view?}): void; refresh(paths?: string[]): void}`。`view` 本刀只有类型、无消费方（19.x / 25.2 才用），写「未做」。`layout="stacked"` 本刀只换外框类；「树可收起」的按钮按 24.2 归 #1106，写「未做」。
+- 受控路径（一套机制）：`path` 属性变化 → 逐级 `listTree` 未加载的父目录并展开 → 末级列表里是文件则选中并发一次 `file`，是目录则只展开不选中（21.2 依赖），不在列表里或某级失败则停在该级、沿用既有错误行（「文件不存在」文案归 #1099）。由 `path` 属性引起的选中不回调 `onPathChange`；点击与 `reveal` 在找到叶子后各回调一次。点击当前已选文件仍重取预览（`tree.tsx:444-446` 的 `sameFile` 分支；今天无测试钉它，新测试补一条）。
+- `refresh(paths?)`：无参等于今天的 `tree.tsx:584-593`（已加载目录 ∪ 报错目录 ∪ 当前文件），`WorkspaceColumns.onRefresh` 继续走无参，R1–R5 不动。带参只重取各路径的已加载祖先层，当前文件在 `paths` 里才重取预览。场景可判别：`reveal` 后 `src`、`src/deep` 已加载，`refresh(["out/b.md"])` 只许请求根与 `out`。
+- `markedPaths` 形状取 `{paths: ReadonlySet<string>; label: string}`（场景同时给了集合与文本）。标记必须是 `<li>` 内按钮的兄弟元素，经 `aria-describedby` 关联，不得放进 `<button>`——文件行可访问名恰为文件名（`files-empty-layout.test.tsx` E4、大量 `getByRole("button",{name})`）。父目录集合由纯函数推出。
+- `onlyPaths`：由路径集合合成列表与「全展开」集合，不写真实的 `cache` / `expandedPaths`（撤掉后恢复原展开与选中，24.2 依赖），不调 `listTree`。父层未缓存的叶子没有 `size` / `mtime`：不渲染 `tree-size`，不得伪造 `mtime: 0`，不改 `preview.tsx`（`:34`、`:93` 必填 `mtime`）；这类叶子的选中与预览头写「未做」，交 #1106。
+- 页面包装：`path` 本刀放页面本地状态（地址参数是 #1099）。`page.tsx` 以 `key={currentWorkspace.id}` 重挂浏览器，页面级 `useState` 不随 key 重置——用一个按工作空间 id 设 key 的内层持有者，否则 `files-page.test.tsx:363`（StrictMode 切换）与 `:424` 会红。
+- 既有测试：以下文件应原样保绿，零改写——`files-page`、`files-concurrency`、`files-empty-layout`、`files-errors`、`files-logical-path`、`files-overlays`、`files-preview-states`、`files-refresh`、`preview`、`previewers-loading`、`previewers-table-svg`、`previewers-code-split`、`topbar`、`auth-session-client`、`ui-layering`、`chat-module-layout`。读源码断言的实际行号是 `files-page.test.tsx:540-562`（任务写 536-544）、`files-empty-layout.test.tsx:208-215`（任务写 183-189）、`topbar.test.tsx:262-274`；`fileIcon(`、`formatSize(`、`size={14}` 都在留下的 `DirectoryNode`（`tree.tsx:154/229/239`）。三处 `listRepoFiles("web/src/features/files", .tsx)` 扫描自动覆盖新文件：不得含颜色字面量、三个退役字面量、`<h1`；新文件只可导入 `./preview.js`，不得导入 `./previewers/*`。
+- 新测试 `web/test/workspace-browser.test.tsx`：不挂路由，直接渲染（`createFetchMock` 加 `createApiClient()`，请求数取 `fetchMock.mock.calls`），从 `../src/features/files/index.js` 导入（同时证明经 `index.ts` 导出，并给 knip 一个消费方，knip 的 web 入口含 `test/**/*.test.tsx`）。静态断言：`features/files` 无 `features/chat` 导入；`web/src` 里 `function DirectoryNode` 与 `function PreviewPane` 各恰一个定义；`workspace-browser.tsx` 不导入 `react-router`、不含 `window.location` / `history`。预览正文一律 `findBy` / `waitFor`；「没有新的 tree 请求」先断起点计数再断不变；调用形状用 `toStrictEqual(mock.calls)`。
+- 门槛与杂项：合成列表、祖先集合、`refresh(paths)` 选层三个纯函数放新小模块（如 `browser-paths.ts`），`workspace-browser.tsx` 控制在约 550 行以内（组 22 的对话框随后进同一文件）。`web/src/features/files` 整目录已在 `MIGRATED_AREAS`（`ui-layering.test.ts:89`、`:432`），不必登记。不加验收清单行（无用户可见变化）。PR 列出动过的 `openspec/` 文件（`tasks.md` 勾 21.1 与注记）；21.3、21.5 的任务号不在本刀勾。
+- 变异：`onlyPaths` 下仍调 `listTree` → 「标记与子树」的「没有新的 `tree` 请求」判红。
+- 变异：只标文件不标父目录 → 「标记与子树」中 `out` 行的标记断言判红；只标父目录不标文件 → 同用例 `out/a.md` 行判红。
+- 变异：标记放进 `<button>` 内 → 新用例「带标记的行可访问名仍恰为文件名」判红。
+- 变异：`reveal` 不调 `onPathChange` → 「受控路径与定位」判红；回调传父目录而非叶子路径 → 同用例的 `toStrictEqual` 判红。
+- 变异：`reveal` 跳过中间层（只请求 `src/deep`）→ 「依次请求 `src`、`src/deep`」判红；重复请求已加载的根 → 同用例计数判红。
+- 变异：`refresh(paths)` 退化成无参全刷 → 「只对根与 `out` 重新请求」判红（`src` 多一次）；只刷直接父层、漏掉根 → 同用例判红。
+- 变异：`path` 属性引起的选中回调了 `onPathChange` → 「初始渲染后回调零次」判红。
+- 变异：`onlyPaths` 写进真实展开状态 → 「撤掉 `onlyPaths` 后原展开与选中复原」判红。
+- 变异：页面的 `path` 状态不随工作空间重置 → `files-page.test.tsx:363` 判红。
+- 变异：`workspace-browser.tsx` 导入 `react-router` → 静态断言与无路由渲染同红；`features/files` 加一行 `../chat/` 导入 → 静态断言判红；复制一份 `DirectoryNode` → 定义计数判红。
+- 变异：不可观察 / 未做：`stacked` 的收起按钮、`reveal` 的 `view`、未缓存叶子在 `onlyPaths` 下的选中，三项写「未做」；`stacked` 外框类只能以 DOM 类名断言，布局效果在 jsdom 不可观察。
