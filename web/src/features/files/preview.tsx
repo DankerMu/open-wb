@@ -64,6 +64,7 @@ function acquirePreviewer(id: PreviewerId): Promise<Previewer> {
 /** The data's shape wins over the name: an image payload is an image whatever the file is called. */
 function previewerFor(name: string, data: FilePreviewSuccess): PreviewerId {
   if (data.kind === "image") return "image";
+  if (data.kind === "media") return "media";
   if (previewKind(name) !== "text") return "code";
   const view = textView(name);
   return view === "markdown" || view === "table" || view === "svg" ? view : "code";
@@ -142,7 +143,7 @@ function PreviewBody({
   const id = previewerFor(name, preview.data);
   return (
     <LoadedPreview
-      content={preview.data.kind === "image" ? preview.data.url : preview.data.text}
+      content={preview.data.kind === "text" ? preview.data.text : preview.data.url}
       id={id}
       key={id}
       name={name}

@@ -6,6 +6,7 @@ import { ApiError } from "../../lib/api.js";
 import { EmptyPreview, STATUS_TEXT } from "./columns.js";
 import { errorMessage } from "./errors.js";
 import { PreviewPane } from "./preview.js";
+import { previewKind } from "./previewers/index.js";
 import type { PreviewState, TreeEntry } from "./types.js";
 
 export type SelectedFile = {
@@ -31,6 +32,22 @@ export function failedPreview(error: unknown): PreviewState {
   }
 
   return { status: "error", message: errorMessage(error) };
+}
+
+/**
+ * 选中即有、不发 `file` 请求的预览；`null` 表示这个文件照常请求。目前只有音视频：把文件自己的地址
+ * `url` 交给媒体元素，由浏览器去取。
+ */
+export function immediatePreview(entry: TreeEntry, url: string): PreviewState | null {
+  const kind = previewKind(entry.name);
+  if (kind === "audio" || kind === "video") {
+    return {
+      status: "success",
+      data: { kind: "media", url, size: entry.size, truncated: false },
+    };
+  }
+
+  return null;
 }
 
 export function PreviewArea({ loading, selectedFile, workspaceId }: PreviewAreaProps) {
