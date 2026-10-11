@@ -23,7 +23,10 @@
 
 ## 消费方
 
-- `smoke/files.hurl`：`tree` 断言三个文件名存在；`file?path=…` 用 `file,fixtures/sandbox/u1/smoke-fixture/…;` 自引用比对字节，并断言 Content-Type（`readme.md`、`notes.csv` 为 `text/plain; charset=utf-8`，`logo.png` 为 `image/png`）。字节比对随夹具内容自动跟随，不含长度或大小字面量。
+- `smoke/files.hurl`：`tree` 断言三个文件名存在；`file?path=…` 用 `file,fixtures/sandbox/u1/smoke-fixture/…;` 自引用比对字节，并断言 Content-Type（`readme.md`、`notes.csv` 为 `text/plain; charset=utf-8`，`logo.png` 为 `image/png`）。字节比对随夹具内容自动跟随，不含长度或大小字面量。此外：
+  - `clip.wav`：带 `Range: bytes=0-3` 取 `file?path=clip.wav`，断言 206、`audio/wav`、`Content-Range` 以 `bytes 0-3/` 开头、正文恰为 `52 49 46 46`（`RIFF`）四个字节；总长不写。
+  - `readme.md`：`download?path=readme.md` 是 `application/octet-stream` 附件，字节自引用比对。
+  - `site/index.html`、`site/style.css`：经 `preview-token` 响应里的 `base` 从预览来源取，字节自引用比对，类型分别为 `text/html; charset=utf-8`（并断言 CSP 含 `sandbox`、不含 `allow-same-origin`）与 `text/css; charset=utf-8`；主站的 `file?path=site/index.html` 对同一文件是 `text/plain; charset=utf-8`，同样比对字节。
 - `web/e2e/ui-walk.spec.ts` 的 `walkFiles`：断言 readme 渲染出一级标题 `smoke-fixture`、源码视图第一行为 `# smoke-fixture`；CSV 预览恰好 5 行（表头加 4 行数据），含 `alpha 1`、`beta 2` 与说明 `共 4 行 · 大文件仅预览前若干行`；`logo.png` 预览图的 `naturalWidth` 与 `naturalHeight` 均为 256。
 - `scripts/test-ci-harness.sh`：用 `cmp -s` 比对源夹具与复制目标，与内容无关。
 - `web/e2e/ui-walk-project-config.ts` 的 `walkProjectConfig`：绑定 `ui-walk-skills` 的会话顶栏在 `重命名` 之前有 `项目配置 1`，弹层 `当前目录` 组恰一条 `AGENTS.md`、类型 `说明`；`expectNoProjectConfig`：绑定 `ui-walk-sessions` 的会话顶栏恰为三个按钮。
@@ -40,7 +43,7 @@
 ## 替换夹具时要同步检查
 
 - `web/e2e/ui-walk.spec.ts` 的 `walkFiles`：readme 标题与源码首行、CSV 行数与说明文案、图片尺寸。
-- `smoke/files.hurl`：目前没有大小字面量；以后若增加长度或大小断言，替换夹具时要一起更新。
+- `smoke/files.hurl`：没有长度或大小字面量，但有一处内容字面量——`clip.wav` 的头四个字节 `hex,52494646;`（`RIFF`），替换 `clip.wav` 时须保持（或一起更新）；它还按扩展名断言 `clip.wav` 为 `audio/wav`、`site/index.html` 在预览来源为 `text/html`、`site/style.css` 为 `text/css`，这三个文件的路径与扩展名不要改。以后若增加长度或大小断言，替换夹具时要一起更新。
 - `site/index.html` 的标题 `smoke-site`、相对地址 `./style.css`、`site/style.css` 的颜色 `rgb(0, 128, 0)` 与 `clip.wav` 不超过 1 KiB 由 files-harness 规格条文钉死，替换时保持不变。
 - `git ls-files smoke/fixtures/sandbox` 必须恰好列出九个文件：`smoke-fixture/` 的 `readme.md`、`notes.csv`、`logo.png`、`sample.py`、`clip.wav`、`site/index.html`、`site/style.css`，以及 `ui-walk-skills/.omp/skills/walk-brief/SKILL.md` 与 `ui-walk-skills/AGENTS.md`；CI 不检查多余文件，新增文件不要放进 `sandbox/`。
 - 给 `ui-walk-skills` 增删项目配置文件时同步 `web/e2e/ui-walk-project-config.ts` 的 `FIXTURE_FILES` 与按钮上的数目。
