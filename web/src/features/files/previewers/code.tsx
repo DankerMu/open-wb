@@ -113,10 +113,18 @@ function useColoredLines(text: string, language: string | null): ReactNode[] | n
     : null;
 }
 
-/** `name` 决定着色语言；不传即不着色。 */
-export function CodeView({ text, name }: { text: string; name?: string }) {
-  const language =
-    name === undefined || text.length > HIGHLIGHT_LIMIT ? null : highlightLanguage(name);
+/** `name` 决定着色语言；`language` 给了就直接用它、不看 `name`；两个都不传即不着色。 */
+export function CodeView({
+  text,
+  name,
+  language: named,
+}: {
+  text: string;
+  name?: string;
+  language?: string;
+}) {
+  const byName = name === undefined ? null : highlightLanguage(name);
+  const language = text.length > HIGHLIGHT_LIMIT ? null : (named ?? byName);
   const colored = useColoredLines(text, language);
   return (
     <div className={`${SCROLL_BODY} py-[0.4rem]`} data-slot="preview-code">

@@ -10,7 +10,15 @@ import type { PreviewState } from "../types.js";
 
 export { previewKind, textView } from "./kind.js";
 
-export type PreviewerId = "markdown" | "table" | "code" | "image" | "svg" | "media" | "archive";
+export type PreviewerId =
+  | "markdown"
+  | "table"
+  | "code"
+  | "image"
+  | "svg"
+  | "media"
+  | "archive"
+  | "notebook";
 
 /**
  * `content` is the text for text previewers, the caller-owned Blob URL for the image one and the
@@ -33,6 +41,7 @@ const LOADERS: Record<PreviewerId, () => Promise<Previewer>> = {
   svg: () => import("./svg.js").then((module) => module.SvgPreviewer),
   media: () => import("./media.js").then((module) => module.MediaPreviewer),
   archive: () => import("./archive.js").then((module) => module.ArchivePreviewer),
+  notebook: () => import("./notebook.js").then((module) => module.NotebookPreviewer),
 };
 
 export function loadPreviewer(id: PreviewerId): Promise<Previewer> {

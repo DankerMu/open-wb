@@ -66,7 +66,9 @@ function acquirePreviewer(id: PreviewerId): Promise<Previewer> {
 function previewerFor(name: string, data: FilePreviewSuccess): PreviewerId {
   if (data.kind === "image") return "image";
   if (data.kind === "media") return "media";
-  if (previewKind(name) !== "text") return "code";
+  const kind = previewKind(name);
+  if (kind === "notebook") return "notebook";
+  if (kind !== "text") return "code";
   const view = textView(name);
   return view === "markdown" || view === "table" || view === "svg" ? view : "code";
 }

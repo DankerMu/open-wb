@@ -155,10 +155,15 @@ function svgPane(name: string, text: string, truncated: boolean) {
 }
 
 /** 把文件内容当 HTML 解析的四种写法；按原文查（注释也算）。iframe 元素本身不在其列。 */
+const HTML_SINKS = ["dangerouslySetInnerHTML", ".innerHTML", "srcDoc", "insertAdjacentHTML"];
+
 function injectsHtml(source: string): boolean {
-  return ["dangerouslySetInnerHTML", ".innerHTML", "srcDoc", "insertAdjacentHTML"].some((needle) =>
-    source.includes(needle),
-  );
+  return HTML_SINKS.some((needle) => source.includes(needle));
+}
+
+/** 每种写法在 `source` 里出现的次数，次序同 `HTML_SINKS`。 */
+function sinkCounts(source: string): number[] {
+  return HTML_SINKS.map((needle) => source.split(needle).length - 1);
 }
 
 /** 能把内容当另一份文档载入的嵌入元素；SVG 预览器一个都不该渲染。 */
@@ -293,7 +298,7 @@ describe("SvgPreviewer", () => {
     expect(sourceLines()).toEqual(["plain words"]);
   });
 
-  it("previewers/ 下没有任何文件把内容当 HTML 解析", () => {
+  it("previewers/ 下只有 Notebook 预览器把内容交给 HTML 解析，且只有一处：sandbox 为空的 iframe 的 srcDoc", () => {
     expect(injectsHtml("<div dangerouslySetInnerHTML={{ __html: content }} />")).toBe(true);
     expect(injectsHtml("node.innerHTML = content;")).toBe(true);
     expect(injectsHtml("<iframe srcDoc={content} />")).toBe(true);
@@ -303,7 +308,14 @@ describe("SvgPreviewer", () => {
 
     const files = listRepoFiles("web/src/features/files/previewers", () => true);
     expect(files).toContain("web/src/features/files/previewers/svg.tsx");
-    expect(files.filter((path) => injectsHtml(readRepoFile(path)))).toEqual([]);
+    const notebook = "web/src/features/files/previewers/notebook.tsx";
+    expect(files.filter((path) => injectsHtml(readRepoFile(path)))).toEqual([notebook]);
+    // 该文件里 srcDoc 恰一次（注释里也不写这个词），另外三种写法零次，并且写着空的 sandbox。
+    expect(sinkCounts('<iframe sandbox="" srcDoc={a} />\n// srcDoc\nnode.innerHTML = a;')).toEqual([
+      0, 1, 2, 0,
+    ]);
+    expect(sinkCounts(readRepoFile(notebook))).toEqual([0, 0, 1, 0]);
+    expect(readRepoFile(notebook)).toContain('sandbox=""');
   });
 });
 
