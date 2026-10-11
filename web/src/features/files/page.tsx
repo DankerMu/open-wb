@@ -1,4 +1,12 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ComponentProps,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useLocation, useNavigate } from "react-router";
 import { type ApiClient, ApiError } from "../../lib/api.js";
 import { useAuth } from "../auth/index.js";
@@ -6,8 +14,8 @@ import { ALERT_BOX, EmptyPreview, STATUS_TEXT, WorkspaceColumns } from "./column
 import { WorkspaceDialog } from "./dialogs.js";
 import { EmptyState } from "./empty-state.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
-import { WorkspaceBrowser } from "./tree.js";
 import type { Workspace } from "./types.js";
+import { WorkspaceBrowser } from "./workspace-browser.js";
 import { WorkspaceSwitcher } from "./workspace-switcher.js";
 
 type WorkspaceListState =
@@ -77,6 +85,17 @@ function EmptyWorkspace({
       switcher={switcher}
     />
   );
+}
+
+/**
+ * 文件页的浏览器：当前路径是这里的本地状态。调用方按工作空间 id 设 `key`，换空间即重挂，上一个
+ * 空间的路径不带过来。
+ */
+function PageBrowser(
+  props: Omit<ComponentProps<typeof WorkspaceBrowser>, "onPathChange" | "path">,
+) {
+  const [path, setPath] = useState<string | null>(null);
+  return <WorkspaceBrowser {...props} onPathChange={setPath} path={path} />;
 }
 
 export function FilesPage() {
@@ -305,13 +324,15 @@ export function FilesPage() {
         </p>
       )}
       {listForClient && currentWorkspace && urlMatchesWorkspace ? (
-        <WorkspaceBrowser
+        <PageBrowser
           account={principal.account}
           client={client}
+          dir={currentWorkspace.dir}
           key={currentWorkspace.id}
+          name={currentWorkspace.name}
           onNewWorkspace={openWorkspaceDialog}
           switcher={switcher}
-          workspace={currentWorkspace}
+          workspaceId={currentWorkspace.id}
         />
       ) : null}
       {listForClient && !currentWorkspace && urlMatchesWorkspace ? (
