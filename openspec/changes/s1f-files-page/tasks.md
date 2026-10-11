@@ -475,7 +475,7 @@ Minimal mergeable slice: 17.1 + 17.3（搬家、加载占位与失败重试、�
 
 ## 18. file-previewers — 源码高亮、tsv、更多图片与 SVG
 
-- [ ] 18.1 `previewers/code.tsx`：引入 `lowlight`、`highlight.js`、`hast-util-to-jsx-runtime`（登记 `ATTRIBUTION.md`）；`highlightLanguage(name)` 映射；只注册映射用到的语言；语法树 → React 元素（不用 `dangerouslySetInnerHTML`）；按行切分后保持行号表；先显示未着色内容；颜色用主题变量（`web/src/styles/theme.css` 增加语法色变量，引用 `--wb-*` token，不写颜色字面量）。
+- [x] 18.1 `previewers/code.tsx`：引入 `lowlight`、`highlight.js`、`hast-util-to-jsx-runtime`（登记 `ATTRIBUTION.md`）；`highlightLanguage(name)` 映射；只注册映射用到的语言；语法树 → React 元素（不用 `dangerouslySetInnerHTML`）；按行切分后保持行号表；先显示未着色内容；颜色用主题变量（`web/src/styles/theme.css` 增加语法色变量，引用 `--wb-*` token，不写颜色字面量）。
   对既有用例的两个前提与一处改写（着色是正文出现之后才提交的又一次更新；同刀处置并记入偏离记录）：
   - `CodeView` 新增的文件名参数是可选的，不传即不着色、仍带行号——`web/test/preview.test.tsx` 的 `describe("CodeView")` 三条（`:114`、`:129`、`:143`）直接 `render(<CodeView text=… />)`，原样通过。
   - 着色只在内容单元格里加包裹元素，不改行数、不改单元格的 `textContent`，空行仍是一个不换行空格——既有的源码断言比的都是这两样，原样通过：`preview.test.tsx:119-126`、`:135-140`、`:186`、`:221`、`:550-562`（17.1 之后的行号以当时为准），走查 `web/e2e/ui-walk.spec.ts:241-243`（`toHaveText` 比文本）。
@@ -490,9 +490,9 @@ Minimal mergeable slice: 17.1 + 17.3（搬家、加载占位与失败重试、�
 - [x] 18.4 图片预览接受六种类型；`img` 的 `error` → `无法显示该图片`、移除破图、释放 Blob 地址、保留下载链接。
   18.2–18.4 不改动任何既有用例：写作时 `grep -nE '\.(tsv|svg|gif|webp|bmp|ico)' web/test/files-*.tsx web/test/preview.test.tsx web/e2e/*.ts` 零命中（`svg` 今天不在白名单里，没有用例选它）；既有图片用例（`preview.test.tsx:441`、`files-page.test.tsx:441`、`files-concurrency.test.tsx:155`）不触发 `error` 事件，17.1 之后已是 `findBy`。
   实施注记见 `implementation-notes.md`「18.4，含分摊的 18.5 / 18.6 / 18.7 条款（#1090）」。
-- [ ] 18.5 测试（新文件 `web/test/previewers-code.test.tsx`、`previewers-table-svg.test.tsx`；两个文件静态导入各自的预览器模块直接渲染，行号、文本、`img` 的 `src` 这类模块同步渲染的内容同步断言，着色元素一律 `await waitFor(…)` 取，「先内容后颜色」以 `vi.mock` 把 `previewers/index.ts` 的高亮加载函数换成可手动放行的 promise；经 `PreviewPane` 走的用例按文首纪律 `findBy`）：file-previewers「源码视图与语法高亮」三个场景、「Markdown、表格、图片与 SVG」四个场景（含「损坏的图片」）；静态断言 `previewers/` 下没有 `dangerouslySetInnerHTML`。
-- [ ] 18.6 FL 行：代码文件按语言着色且带行号（亮暗各看一次）、tsv 表格、gif / webp / svg 图片与 svg 的源码切换、损坏的图片文件的提示与下载；结论 `待签`。
-- [ ] 18.7 变异证据：把 SVG 文本插进 DOM → 「没有内联 `svg` / `script`」判红；高亮完成前不渲染内容 → 「先内容后颜色」判红；着色后行数变化 → 行数断言判红；图片 `error` 时不处理 → 「损坏的图片」判红。
+- [x] 18.5 测试（新文件 `web/test/previewers-code.test.tsx`、`previewers-table-svg.test.tsx`；两个文件静态导入各自的预览器模块直接渲染，行号、文本、`img` 的 `src` 这类模块同步渲染的内容同步断言，着色元素一律 `await waitFor(…)` 取，「先内容后颜色」以 `vi.mock` 把 `previewers/index.ts` 的高亮加载函数换成可手动放行的 promise；经 `PreviewPane` 走的用例按文首纪律 `findBy`）：file-previewers「源码视图与语法高亮」三个场景、「Markdown、表格、图片与 SVG」四个场景（含「损坏的图片」）；静态断言 `previewers/` 下没有 `dangerouslySetInnerHTML`。
+- [x] 18.6 FL 行：代码文件按语言着色且带行号（亮暗各看一次）、tsv 表格、gif / webp / svg 图片与 svg 的源码切换、损坏的图片文件的提示与下载；结论 `待签`。
+- [x] 18.7 变异证据：把 SVG 文本插进 DOM → 「没有内联 `svg` / `script`」判红；高亮完成前不渲染内容 → 「先内容后颜色」判红；着色后行数变化 → 行数断言判红；图片 `error` 时不处理 → 「损坏的图片」判红。
 
 Suggested fixture level: compact - 独立的预览器模块；安全点（不把文件内容当 HTML）有专门的断言
 Minimal mergeable slice: 18.2（tsv）、18.3（svg）、18.4（图片）三刀互不依赖、都没有新依赖，各带自己的用例可分别先合；18.1 的高亮带依赖登记随后

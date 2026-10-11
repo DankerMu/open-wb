@@ -11,6 +11,8 @@ const SRC = "web/src";
 const PREVIEWERS = `${SRC}/features/files/previewers`;
 const INDEX = `${PREVIEWERS}/index.ts`;
 const KIND = `${PREVIEWERS}/kind.js`;
+const HIGHLIGHT = `${PREVIEWERS}/highlight.ts`;
+const HIGHLIGHT_MODULE = `${PREVIEWERS}/highlight.js`;
 const VITE_CONFIG = "web/vite.config.ts";
 
 const DYNAMIC_IMPORT = /\bimport\s*\(/;
@@ -48,10 +50,26 @@ function specifierViolation(path: string, specifier: string): string | null {
     : `${path}: previewers/ 之外静态导入其内部模块 ${specifier}`;
 }
 
-function staticImportViolations(path: string, code: string): string[] {
+/**
+ * previewers/ 里 `index.ts` 与 `highlight.ts` 之外的模块：高亮库与高亮模块都不许静态导入——
+ * 否则高亮器并进那个预览器的块，不再是 `index.ts` 的动态导入单独取的那一块。目录内其余互相导入不管。
+ */
+function highlightViolation(path: string, specifier: string): string | null {
+  const reachesHighlighter =
+    HIGHLIGHT_LIBRARY.test(specifier) || resolveSpecifier(path, specifier) === HIGHLIGHT_MODULE;
+  return reachesHighlighter
+    ? `${path}: 高亮库与高亮模块只许由 highlight.ts 静态导入，不得静态导入 ${specifier}`
+    : null;
+}
+
+function staticImportViolations(
+  path: string,
+  code: string,
+  check: (path: string, specifier: string) => string | null,
+): string[] {
   const violations: string[] = [];
   for (const match of code.matchAll(STATIC_SPECIFIER)) {
-    const violation = specifierViolation(path, match[1] as string);
+    const violation = check(path, match[1] as string);
     if (violation !== null) violations.push(violation);
   }
   return violations;
@@ -70,7 +88,9 @@ function codeSplitViolations(files: SourceFile[]): string[] {
       violations.push(`${path}: 不得配置 manualChunks`);
     }
     if (path === INDEX || !path.startsWith(`${PREVIEWERS}/`)) {
-      violations.push(...staticImportViolations(path, code));
+      violations.push(...staticImportViolations(path, code, specifierViolation));
+    } else if (path !== HIGHLIGHT) {
+      violations.push(...staticImportViolations(path, code, highlightViolation));
     }
   }
   if (!indexSplits) violations.push(`${INDEX}: 没有动态 import()`);
@@ -84,23 +104,30 @@ const COMPLIANT_INDEX: SourceFile = {
 };
 
 describe("预览器按需加载是唯一的代码分割", () => {
-  it("web/src 现状：动态 import() 恰在 previewers/index.ts，previewers/ 的内部模块不被外部静态导入，vite.config.ts 无 manualChunks", () => {
+  it("web/src 现状：动态 import() 恰在 previewers/index.ts，previewers/ 的内部模块不被外部静态导入，高亮库与高亮模块只由 highlight.ts 静态导入，vite.config.ts 无 manualChunks", () => {
     const files = [...listRepoFiles(SRC, (path) => /\.tsx?$/.test(path)), VITE_CONFIG].map(
       (path) => ({ path, source: readRepoFile(path) }),
     );
 
     expect(files.map((file) => file.path)).toContain(INDEX);
+    expect(files.map((file) => file.path)).toContain(HIGHLIGHT);
     expect(files.map((file) => file.path)).toContain(`${SRC}/features/files/preview.tsx`);
     expect(codeSplitViolations(files)).toEqual([]);
   });
 
-  it("自证：previewers/index.ts 自身的动态导入与它对 kind 的静态再导出、同目录其它模块之间的静态导入与目录内的高亮库导入都合规", () => {
+  it("自证：previewers/index.ts 自身的动态导入与它对 kind 的静态再导出、同目录其它模块之间的静态导入、highlight.ts 自己对高亮库的导入都合规", () => {
     expect(
       codeSplitViolations([
         COMPLIANT_INDEX,
         {
           path: `${PREVIEWERS}/markdown.tsx`,
-          source: 'import { CodeView } from "./code.js";\nimport { lowlight } from "lowlight";',
+          source:
+            'import { CodeView } from "./code.js";\nimport { loadHighlighter } from "./index.js";',
+        },
+        {
+          path: HIGHLIGHT,
+          source:
+            'import xml from "highlight.js/lib/languages/xml";\nimport { createLowlight } from "lowlight";',
         },
         {
           path: `${SRC}/features/files/preview.tsx`,
@@ -173,6 +200,33 @@ describe("预览器按需加载是唯一的代码分割", () => {
       `${page}: previewers/ 之外静态导入其内部模块 ./previewers/code.js`,
       `${preview}: previewers/ 之外静态导入其内部模块 ./previewers/kind.js`,
       `${chat}: previewers/ 之外静态导入其内部模块 @/features/files/previewers/table.js`,
+    ]);
+  });
+
+  it("自证：previewers/ 里 highlight.ts 之外的模块静态导入高亮模块或高亮库判失败，相对路径、别名与只为副作用的导入都算", () => {
+    const code = `${PREVIEWERS}/code.tsx`;
+    const markdown = `${PREVIEWERS}/markdown.tsx`;
+    const svg = `${PREVIEWERS}/svg.tsx`;
+    const prefix = "高亮库与高亮模块只许由 highlight.ts 静态导入，不得静态导入";
+    expect(
+      codeSplitViolations([
+        COMPLIANT_INDEX,
+        {
+          path: code,
+          source: 'import "./highlight.js";\nimport { fileExtension } from "./kind.js";',
+        },
+        {
+          path: markdown,
+          source:
+            'import { createLowlight } from "lowlight";\nimport { highlightLines } from "@/features/files/previewers/highlight.js";',
+        },
+        { path: svg, source: 'import xml from "highlight.js/lib/languages/xml";' },
+      ]),
+    ).toEqual([
+      `${code}: ${prefix} ./highlight.js`,
+      `${markdown}: ${prefix} lowlight`,
+      `${markdown}: ${prefix} @/features/files/previewers/highlight.js`,
+      `${svg}: ${prefix} highlight.js/lib/languages/xml`,
     ]);
   });
 
