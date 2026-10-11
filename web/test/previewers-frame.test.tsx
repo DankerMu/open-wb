@@ -3,6 +3,7 @@
 // 页面级经文件页与假 fetch，iframe 在签发落定之后才有，一律 `findBy…` / `waitFor` 取到再断言。
 // jsdom 不为 iframe 导航：这里钉的是属性值与请求次数。框内文档的来源、是否带凭据、同目录资源是否
 // 生效都不在这个文件里。
+import { inspect } from "node:util";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -20,6 +21,7 @@ import { listRepoFiles, readRepoFile, stripTsComments, yieldMacrotask } from "./
 afterEach(() => {
   cleanup();
   cleanupFilesFixture();
+  vi.restoreAllMocks();
 });
 
 /** 夹具令牌：长度与真实令牌相同，但不是十六进制。 */
@@ -65,6 +67,14 @@ describe("网页预览器（组件级）：iframe 的属性", () => {
     render(<WebPreviewer name="index.html" web={web()} />);
 
     expect(document.querySelectorAll("iframe")).toHaveLength(1);
+    // 属性集合封死：多出任何一个（allow、allowfullscreen、name、data-*…）都要先改这里。
+    expect(frame().getAttributeNames().sort()).toStrictEqual([
+      "class",
+      "referrerpolicy",
+      "sandbox",
+      "src",
+      "title",
+    ]);
     expect(frame().getAttribute("sandbox")).toBe("allow-scripts allow-forms allow-modals");
     expect(frame().getAttribute("referrerpolicy")).toBe("no-referrer");
     expect(frame().getAttribute("title")).toBe("index.html");
@@ -389,7 +399,15 @@ describe("文件页的网页预览（页面级）：渲染视图与源码", () =
     expect(fileRequests(fetchMock)).toStrictEqual([`${FILE}readme.md`, `${FILE}site%2Findex.html`]);
   });
 
-  it("令牌与 base 不在界面文字里，不在地址里，也不在两个存储里；来回切换视图地址不变", async () => {
+  it("令牌与 base 不在界面文字里，不在地址里，不在两个存储、cookie 与控制台输出里，页面标记里恰出现一次（iframe 的 src）；来回切换视图地址不变", async () => {
+    // 先于渲染装上：首次挂载时的输出也算。
+    const consoles = [
+      vi.spyOn(console, "log"),
+      vi.spyOn(console, "info"),
+      vi.spyOn(console, "debug"),
+      vi.spyOn(console, "warn"),
+      vi.spyOn(console, "error"),
+    ];
     renderSite();
     await openSite();
     await select("index.html");
@@ -399,6 +417,9 @@ describe("文件页的网页预览（页面级）：渲染视图与源码", () =
     const leaked = (text: string) => text.includes(TOKEN) || text.includes(PREVIEW_HOST);
     expect(leaked(document.body.textContent ?? "")).toBe(false);
     expect(leaked(visited)).toBe(false);
+    // 标记里唯一的一处是 iframe 的 src：别的属性（data-*、href…）里没有第二份。
+    expect(document.body.innerHTML.split(TOKEN)).toHaveLength(2);
+    expect(frame().getAttribute("src")).toBe(`${BASE}site/index.html`);
 
     fireEvent.click(screen.getByRole("button", { name: "查看源码" }));
     expect(await previewRegion().findByRole("cell", { name: "<h1>首页</h1>" })).toBeTruthy();
@@ -407,8 +428,15 @@ describe("文件页的网页预览（页面级）：渲染视图与源码", () =
     await shownFrame("index.html");
 
     expect(window.location.href).toBe(visited);
+    expect(document.body.innerHTML.split(TOKEN)).toHaveLength(2);
     expect(leaked(JSON.stringify(window.localStorage))).toBe(false);
     expect(leaked(JSON.stringify(window.sessionStorage))).toBe(false);
+    expect(document.cookie.includes(TOKEN)).toBe(false);
+    // 按参数的内容查，不按次数：别的输出（如 React 的告警）不算泄漏。
+    const printed = consoles
+      .flatMap((spy) => spy.mock.calls.flat())
+      .map((argument) => (typeof argument === "string" ? argument : inspect(argument)));
+    expect(printed.filter(leaked)).toStrictEqual([]);
   });
 
   it("源码被截断时截断行只在源码视图里有", async () => {
@@ -438,7 +466,7 @@ describe("文件页的网页预览（页面级）：渲染视图与源码", () =
   });
 });
 
-describe("文件页的网页预览（页面级）：源码视图下的续期", () => {
+describe("文件页的网页预览（页面级）：续期只在选中网页时", () => {
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -461,6 +489,23 @@ describe("文件页的网页预览（页面级）：源码视图下的续期", (
     fireEvent.click(screen.getByRole("button", { name: "渲染视图" }));
     expect(frame().getAttribute("src")).toBe(`${BASE}site/index.html`);
     expect(issueRequests(fetchMock)).toStrictEqual([ISSUE, ISSUE]);
+  });
+
+  // 「需要令牌」跟着当前选中项走，不是选过一次网页就一直为真。
+  it("看过网页再选中非网页文件：此后五分钟不再签发", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const { fetchMock } = renderSite();
+    await openSite();
+    await select("index.html");
+    await shownFrame("index.html");
+    expect(issueRequests(fetchMock)).toStrictEqual([ISSUE]);
+
+    await select("readme.md");
+    expect(await screen.findByRole("heading", { level: 1, name: "说明" })).toBeTruthy();
+    expect(document.querySelector("iframe")).toBeNull();
+
+    await act(() => vi.advanceTimersByTimeAsync(300_000));
+    expect(issueRequests(fetchMock)).toStrictEqual([ISSUE]);
   });
 });
 
@@ -568,6 +613,40 @@ describe("文件页的网页预览（页面级）：刷新与再点同一行", (
       `${FILE}site%2Findex.html`,
       `${FILE}site%2Findex.html`,
     ]);
+  });
+
+  it("源码视图下刷新、新的一次还在取时切回渲染视图：再看源码重新取，不显示刷新之前取回的那份", async () => {
+    const pending = deferredResponse();
+    const answers: (Promise<Response> | Response)[] = [
+      textPreviewResponse(INDEX_SOURCE),
+      pending.promise,
+      textPreviewResponse("<h1>第三次</h1>"),
+    ];
+    const { fetchMock } = renderSite({
+      [`${FILE}site%2Findex.html`]: () => answers.shift() ?? new Error("a fourth file request"),
+    });
+    await openSite();
+    await select("index.html");
+    await shownFrame("index.html");
+    fireEvent.click(screen.getByRole("button", { name: "查看源码" }));
+    expect(await previewRegion().findByRole("cell", { name: "<h1>首页</h1>" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(fileRequests(fetchMock)).toHaveLength(2));
+    fireEvent.click(screen.getByRole("button", { name: "渲染视图" }));
+    await shownFrame("index.html");
+
+    fireEvent.click(screen.getByRole("button", { name: "查看源码" }));
+    expect(await previewRegion().findByRole("cell", { name: "<h1>第三次</h1>" })).toBeTruthy();
+    expect(sourceLines()).toStrictEqual(["<h1>第三次</h1>"]);
+    expect(fileRequests(fetchMock)).toStrictEqual([
+      `${FILE}site%2Findex.html`,
+      `${FILE}site%2Findex.html`,
+      `${FILE}site%2Findex.html`,
+    ]);
+    pending.resolve(textPreviewResponse("<h1>迟到的</h1>"));
+    await yieldMacrotask();
+    expect(sourceLines()).toStrictEqual(["<h1>第三次</h1>"]);
   });
 });
 

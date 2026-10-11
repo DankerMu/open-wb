@@ -5,8 +5,10 @@
  * request, calls no hook and keeps no state: token, view and reload count are the host's.
  *
  * What the frame is given, and how far each statement is backed:
- * - The address is `base` + path and nothing else (tests pin the attribute). `base` belongs to the
- *   preview listener, a different origin from the page embedding it (read from the server code).
+ * - The address is `base` + path and nothing else (tests pin the attribute). `base` is by default
+ *   the same host on the preview port (read from the server code); with a configured preview
+ *   origin it is that value, and whether that differs from the main site is the deployment's to
+ *   decide (not verified here).
  * - `sandbox` is exactly `allow-scripts allow-forms allow-modals` (tests pin the attribute; jsdom
  *   shows the value only, not what a browser does with it). The file's content is never given to
  *   the frame as an inline document: it only ever arrives through the address.
