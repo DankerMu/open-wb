@@ -710,3 +710,36 @@
 - 变异：`finally` 里的 `controller.abort()` 删掉 → 搬到 `clip.dat` 的中止断言红。
 - 变异：不可观察（jsdom）：`preload="metadata"` 是否真的只取元数据；是否真的发范围请求及 206 的使用；元素移除后播放是否停止、连接是否断开；视频等比缩放（只是类名）；`刷新` 后正在播放的媒体不重载。这些只由 FL 行与后续走查（#1114）覆盖。
 - 变异：未做：StrictMode 专门用例（本刀无分配，无可断言的释放次数）。
+
+## 26.2 只读步骤，含分摊的 26.3 / 26.4 条款（#1112）
+
+- 不触及 Critical Path：只改 `smoke/files.hurl` 与 `smoke/fixtures/README.md`，不动 `sandbox.resolve`、`op`、路由。D-23：本刀不新增路由，只对 `file` / `download` / `/w/` 各发单次只读请求，不与替换动作对时；#1286 的 resolve→open 读窗口既不收窄也不放宽，冒烟对它不构成证据（读代码推出）。
+- 前置全部在 `origin/master`（核对的是代码）：范围 `server/src/workspaces/range-send.ts`；下载 `rest-entries.ts:123`；签发 `rest-preview-token.ts`；`/w/` `server/src/preview/app.ts:110`；入口接线 `server.ts:367-378`（预览监听器先 listen）；夹具七个文件在树上（`clip.wav` 844 B）；26.1 已勾。不等实测 1.1 / 1.2 / 1.3，被 1.2 挡的重命名 / 删除步骤在 #1113。
+- 与 issue 的差异（origin/master 为准）：(a) 「他账号的三个 404」中 `tree` 404 已在 `files.hurl:185-187`，本刀只加 `download?path=readme.md` 与 `POST preview-token` 两步，都断言与 `:187` 相同的信封；连同 S1g 的上传 404（`:190-194`）文件里共四个他账号 404，头注释照此写。(b) PR Boundary 只列 `smoke/files.hurl`，但 `smoke/fixtures/README.md:26`（消费方）与 `:43`（「目前没有大小字面量」）会变假，26.1 注记已把补写交给本刀，须同 PR 改。(c) `files.hurl:1-9` 头注释同步。(d) `tasks.md` 的 26.2 / 26.3 / 26.4 不勾（由 #1113 勾），只加注记指针；PR 文本写明动了 `openspec/` 的哪两个文件。
+- 插入位置：属主的新步骤作为一整块放在 `:166`（json 上传 400）之后、`:168` 登出之前，块内保持规格次序（范围 → 下载 → preview-token → html → css → 伪造令牌 → 主站 text/plain）。下载会写一条 `file.download` 审计，不得落在 `:61-81` 或 `:137-159` 的「快照 → 断言」之间。`session-meta.hurl` 的审计断言都相对自己的动作取，不受影响（读代码推出）。
+- 范围请求：`GET …/file?path=clip.wav` 带 `Range: bytes=0-3` → `HTTP 206`，`header "Content-Type" == "audio/wav"`，`header "Content-Range" startsWith "bytes 0-3/"`，`bytes count == 4`，`bytes == hex,52494646;`。不写总长 844。`RIFF` 比对比规格（只要求 4 字节）严，记入偏离记录；依据是 README 的「头四个字节为 `RIFF`」。
+- 下载：`GET …/download?path=readme.md` → 200，`Content-Type == "application/octet-stream"`，`Content-Disposition startsWith "attachment"`，正文 `file,fixtures/sandbox/u1/smoke-fixture/readme.md;`。
+- 变量与端口：hurl 文件仍只拿 Makefile 传的 `base_url`，不加 `--variable`，`Makefile`、`.github/**`、`scripts/test-ci-harness.sh` 都不用改（后者用假 hurl，只钉 Makefile 命令行与三个旧夹具的 `cmp`）。预览地址只取自签发响应：`preview_base: jsonpath "$.base"`；`preview_origin: jsonpath "$.base" regex /^(https?:\/\/[^\/]+)\/w\/[0-9a-f]{64}\/$/`（形状不符则捕获失败即红）。文件里不写主机名与端口。CI 的 `PREVIEW_PORT` 缺省 0，由系统分配，与 18016 / 19016 不在同一段（读代码推出）。
+- 签发步骤：`POST …/preview-token` 不带 body、不带 `Content-Type`（带 body 即 400，`rest-preview-token.ts:70`），`HTTP 200`。hurl 不发 `Origin`，登记的 `embedOrigin` 为 null，CSP 的后半为 `frame-ancestors 'none'`（读代码推出，`headers.ts:65-72`）。
+- 隔离来源的断言有五条：(1) 签发步骤里 `jsonpath "$.base" not startsWith "{{base_url}}/"`，末尾的 `/` 必须有，否则主端口 3000、预览端口 30001 时假红。(2) `GET {{preview_base}}site/index.html` → 200，`Content-Type == "text/html; charset=utf-8"`，CSP `contains "sandbox"` 且 `not contains "allow-same-origin"`，`Referrer-Policy == "no-referrer"`，`header "Set-Cookie" not exists`，正文 `file,…/site/index.html;`。(3) `GET {{preview_base}}site/style.css` → 200，`text/css; charset=utf-8`，正文 `file,`。(4) `GET {{preview_origin}}/w/<64 个 0>/site/index.html` → `HTTP 404`，`text/plain; charset=utf-8`，CSP `not exists`，`body == "预览不存在或已过期"`。(5) `GET {{base_url}}/api/workspaces/{{workspace_id}}/file?path=site/index.html` → 200，`text/plain; charset=utf-8`，`nosniff`，正文 `file,`。
+- 冒烟证明不了的两件事，PR 里不得写成已证明：(a) 「预览来源不需要 cookie」——libcurl 的 cookie 不分端口，同主机的 `workbuddy_session` 会被带到预览端口（读代码推出，未测），这条性质的证据在 `server/test/preview-app.test.ts`。(b) 浏览器里的不透明来源与 iframe 行为——hurl 只看响应头，真实浏览器证据归 27.1(b)。
+- 可重复性（读代码推出，26.3 的两次 `make smoke` 才是实测）：新步骤不建不删任何条目；同一 (账号, 空间) 在 900 秒内再签发返回同一令牌并续期（`tokens.ts:55-58`），步骤不依赖令牌是新的；每跑一次多一条 `file.download` 审计行，不清理，与既有上传同性质；他账号的 `preview-token` 在 `preParsing` 即 404，不签发。夹具只读，`git status` 应干净。
+- 不触真实模型端点：`files.hurl` 不建会话、不发消息；CI 的上游是 `ci-fake-upstream.sh`（`ci-compiled-server.sh:80`）。失败时 hurl 会打印含令牌的地址，CI 经 `sanitize` 抹掉 64 位十六进制（`:21`），本地不抹，令牌只在进程内存、15 分钟失效。
+- 守卫：`files.hurl` 201 行，加约 75 行；biome / knip / jscpd / semgrep 不扫 `smoke/`；64 个 `0` 熵低，不会被 gitleaks 当密钥（未测）。无清单行（no checklist rows）。同批其它刀（#1074、#1093、#1095–#1098）都不碰 `smoke/`，本刀可排在批内任意位置；与 #1113 同改 `files.hurl`，#1113 须排在本刀之后。
+- 规格没写明的分支：「把 `base` 里的令牌段换成 64 个 0」用「捕获来源再拼」实现，不用替换过滤器，结果地址相同；规格的 CSP 只要求「含 / 不含」，本刀不改成整串相等，免得钉死 `frame-ancestors`；`Set-Cookie not exists`、404 正文与 `not startsWith` 三条比规格严，都记入偏离记录。
+- 变异：`server/src/preview/headers.ts:18-19` 把 `html` / `htm` 的类型改成 `PLAIN` → 断言 (2) 的 `Content-Type` 判红（26.4 必做）。
+- 变异：`server/src/workspaces/preview.ts` 让 `classifyPreview` 对 `html` 返回 `text/html; charset=utf-8` → 断言 (5) 判红（26.4 必做）。只把 `html` 从 `TEXT_EXTENSIONS` 删掉不是有效变异：会走嗅探，仍是 `text/plain`（读代码推出）。
+- 变异：`headers.ts:99` 的 CSP 加上 `allow-same-origin` → (2) 的 `not contains` 判红。
+- 变异：`headers.ts:99` 去掉 `sandbox …;` 只留 `frame-ancestors` → (2) 的 `contains "sandbox"` 判红。
+- 变异：`headers.ts:80` 去掉 `Referrer-Policy` → (2) 判红。
+- 变异：`preview/app.ts:112-114` 令牌查不到也放行，或固定取某个登记 → (4) 的 404 判红。
+- 变异：`range-send.ts:39-41` 不发 206（忽略 `Range`）→ 范围步骤的 `HTTP 206` 判红。
+- 变异：区间起点偏一（发 1–4 字节）→ `bytes == hex,52494646;` 判红；只有 `count == 4` 时不可观察，这是加 `RIFF` 比对的理由。
+- 变异：区间终点偏一（发 5 字节）→ `bytes count == 4` 判红。
+- 变异：`rest-entries.ts:148-149` 的 `Content-Type` 改成 `text/plain`，或 `Content-Disposition` 改成 `inline` → 下载步骤各自判红（两边各做一次）。
+- 变异：`rest-entries.ts:132` 去掉下载的 `ensureOwnedRoot` → 他账号 `download` 判红吗：不可观察。lisi 的 `sandbox.resolve` 仍会按账号拒绝，状态码多半是 403 而不是 200，404 断言会红，但红的原因不是「读到了别人的文件」；PR 里写「未做」，归属次序的证据在 `server/test/workspaces-http-boundary.test.ts`。
+- 变异：`rest-preview-token.ts:64-67` 去掉 `preParsing` 的归属检查 → 他账号 `preview-token` 的 404 判红（得到 200）。
+- 变异：`server.ts:358` 不把 `preview` 传给 `appAssemblyOf`（签发端点不注册）→ 签发步骤判红。主站对未知 `/api` 路径答什么未核对，但不是带 `base` 的 200，捕获必失败。
+- 变异：夹具侧：删掉沙箱里的 `site/style.css` → (3) 判红；改 `site/index.html` 一个字节而不同步仓库 → (2) 与 (5) 的 `file,` 比对判红。
+- 变异：预览监听器绑到与主监听器不同的地址（hurl 连不上）→ (2) 以连接错误判红；`base` 误指回主站来源 → (1) 判红。
+- 变异：不可观察：令牌 900 秒到期与不续期（冒烟不等时间）；`frame-ancestors` 的取值（未断言）；`/w/` 不读 cookie（见上）；`Access-Control-Allow-Origin` / CORP（未断言，证据在 `preview-app.test.ts`）。
