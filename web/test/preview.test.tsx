@@ -36,6 +36,7 @@ function textPreview(
         status: "success",
       }}
       size={metadataSize}
+      workspaceId="w1"
     />
   );
 }
@@ -458,6 +459,7 @@ describe("PreviewPane image ownership", () => {
           status: "success",
         }}
         size={4096}
+        workspaceId="w1"
       />,
     );
 
@@ -474,6 +476,7 @@ describe("PreviewPane image ownership", () => {
           status: "success",
         }}
         size={4096}
+        workspaceId="w1"
       />,
     );
     expect(screen.getByRole("img", { name: "logo.png" }).getAttribute("src")).toBe(
@@ -496,6 +499,7 @@ describe("PreviewPane image ownership", () => {
           status: "success",
         }}
         size={4096}
+        workspaceId="w1"
       />,
     );
     expect(await screen.findByRole("img", { name: "logo.png" })).toBeTruthy();
@@ -517,12 +521,13 @@ describe("PreviewPane unsupported error and truncation", () => {
         path="nested/归档.zip"
         preview={{ status: "unsupported" }}
         size={91}
+        workspaceId="w1"
       />,
     );
 
     expect(screen.getByText("该类型不支持预览")).toBeTruthy();
     expect(document.querySelector('[data-slot="empty-state-desc"]')?.textContent).toBe(
-      "归档.zip · 91 B\u3000二进制或未识别格式",
+      "归档.zip · 91 B",
     );
     expect(screen.getByText(`91 B · ${FILE_MTIME_TEXT}`)).toBeTruthy();
   });
@@ -536,12 +541,13 @@ describe("PreviewPane unsupported error and truncation", () => {
         path={name}
         preview={{ status: "unsupported" }}
         size={91}
+        workspaceId="w1"
       />,
     );
 
     expect(screen.getByText("该类型不支持预览")).toBeTruthy();
     expect(document.querySelector('[data-slot="empty-state-desc"]')?.textContent).toBe(
-      `${name} · 91 B\u3000二进制或未识别格式`,
+      `${name} · 91 B`,
     );
     expect(document.querySelector("img")).toBeNull();
   });
@@ -554,6 +560,7 @@ describe("PreviewPane unsupported error and truncation", () => {
         path="out/secret.txt"
         preview={{ message: "路径不在沙箱内", status: "error" }}
         size={91}
+        workspaceId="w1"
       />,
     );
 
@@ -564,10 +571,98 @@ describe("PreviewPane unsupported error and truncation", () => {
   it("shows a truncation banner with original total bytes rather than text length", () => {
     render(textPreview("notes.txt", "short", { originalSize: 12_345, size: 42, truncated: true }));
 
-    expect(screen.getByText("预览已截断（原始大小 12345 B）")).toBeTruthy();
+    expect(screen.getByText("文件超过预览上限，仅显示开头部分 · 共 12.1 KB")).toBeTruthy();
     expect(screen.getByText(`42 B · ${FILE_MTIME_TEXT}`)).toBeTruthy();
-    expect(screen.queryByText("预览已截断（原始大小 5 B）")).toBeNull();
-    expect(screen.queryByText("预览已截断（原始大小 12 KB）")).toBeNull();
+    expect(screen.queryByText("文件超过预览上限，仅显示开头部分 · 共 5 B")).toBeNull();
+    expect(screen.queryByText("文件超过预览上限，仅显示开头部分 · 共 42 B")).toBeNull();
+  });
+
+  it("shows the too-large copy with the same name and size subline", () => {
+    render(
+      <PreviewPane
+        mtime={FILE_MTIME}
+        name="huge.png"
+        path="assets/huge.png"
+        preview={{ status: "too-large" }}
+        size={22_020_096}
+        workspaceId="w1"
+      />,
+    );
+
+    expect(screen.getByText("文件过大，无法预览")).toBeTruthy();
+    expect(document.querySelector('[data-slot="empty-state-desc"]')?.textContent).toBe(
+      "huge.png · 21.0 MB",
+    );
+    expect(screen.queryByText("该类型不支持预览")).toBeNull();
+    expect(screen.getByText(`21.0 MB · ${FILE_MTIME_TEXT}`)).toBeTruthy();
+  });
+});
+
+// file-previewers「预览头、下载与不可预览的呈现」：下载链接在公共预览头里，哪一态都有。
+describe("PreviewPane download link", () => {
+  const STATES = [
+    ["unsupported", "blob.bin", { status: "unsupported" }],
+    ["too-large", "huge.png", { status: "too-large" }],
+    ["error", "secret.txt", { message: "路径不在沙箱内", status: "error" }],
+    [
+      "success",
+      "notes.txt",
+      { data: { kind: "text", size: 5, text: "hello", truncated: false }, status: "success" },
+    ],
+  ] as const;
+
+  it.each(STATES)("links to the download address in the %s state", (_state, name, preview) => {
+    render(
+      <PreviewPane
+        mtime={FILE_MTIME}
+        name={name}
+        path={`out/${name}`}
+        preview={preview}
+        size={91}
+        workspaceId="w1"
+      />,
+    );
+
+    const link = screen.getByRole("link", { name: `下载 ${name}` });
+    expect(link.getAttribute("href")).toBe(`/api/workspaces/w1/download?path=out%2F${name}`);
+    expect(link.hasAttribute("download")).toBe(true);
+    expect(link.getAttribute("download")).toBe("");
+    expect(link.getAttribute("title")).toBe(`下载 ${name}`);
+    expect(link.hasAttribute("target")).toBe(false);
+    expect(link.closest('[data-slot="preview-header"]')).not.toBeNull();
+  });
+
+  // 路径是数据：首尾空格、`..` 段、开头的 `/`、合成与分解两种写法的字符都原样编码，不裁剪、不规范化。
+  it.each([
+    [" /docs/../\u00e9-e\u0301.txt ", "%20%2Fdocs%2F..%2F%C3%A9-e%CC%81.txt%20"],
+    ["/ docs/../\u00e9-e\u0301.txt ", "%2F%20docs%2F..%2F%C3%A9-e%CC%81.txt%20"],
+  ])("encodes the path %j whole without trimming or normalising it", (path, encoded) => {
+    render(
+      <PreviewPane
+        mtime={FILE_MTIME}
+        name="e.txt"
+        path={path}
+        preview={{ status: "unsupported" }}
+        size={91}
+        workspaceId="w1"
+      />,
+    );
+
+    const href = screen.getByRole("link", { name: "下载 e.txt" }).getAttribute("href");
+    expect(href).toBe(`/api/workspaces/w1/download?path=${encoded}`);
+    expect(href).toBe(`/api/workspaces/w1/download?path=${encodeURIComponent(path)}`);
+    expect(new URL(href ?? "", "http://localhost").searchParams.get("path")).toBe(path);
+  });
+});
+
+describe("PreviewPane TSV", () => {
+  it("shows a tab-separated file as numbered source rather than a comma-split table", async () => {
+    render(textPreview("t.tsv", "name\tsize\nalpha\t1\n"));
+
+    expect(await screen.findByRole("cell", { name: "name\tsize" })).toBeTruthy();
+    expect(document.querySelector('[data-slot="preview-code"]')).not.toBeNull();
+    expect(document.querySelector('[data-slot="preview-table"]')).toBeNull();
+    expect(screen.queryByRole("columnheader")).toBeNull();
   });
 });
 

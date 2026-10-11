@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CodePreviewer } from "../src/features/files/previewers/code.js";
 import type { Previewer } from "../src/features/files/previewers/index.js";
 import { deferred, observeUnhandledRejections, settle } from "./chat-stream-support.js";
+import { jsonResponse, textPreviewResponse } from "./support.js";
 
 /*
  * file-previewers「按需加载」的 `PreviewPane` 级部分。加载函数换成桩（`previewKind` / `textView` 保持原样），
@@ -41,6 +42,7 @@ function sourcePreview(PreviewPane: Pane, name: string, text: string) {
         status: "success",
       }}
       size={text.length}
+      workspaceId="w1"
     />
   );
 }
@@ -124,6 +126,106 @@ describe("PreviewPane 的预览器按需加载", () => {
       expect(observer.unhandled).toEqual([]);
     } finally {
       observer.stop();
+    }
+  });
+});
+
+/*
+ * 页面级：经整页渲染走到 `PreviewPane`。`files-fixture.js` 在每条用例里动态导入——静态导入会钉住重置之前的
+ * 模块图（连同 `preview.tsx` 的缓存），后一条的次数断言就空转；用同一份导入的 `cleanupFilesFixture` 收尾，
+ * 文件级的 `afterEach(cleanup)` 不释放 router。
+ */
+const TREE_ROOT = "/api/workspaces/workspace-1/tree?path=";
+const TREE_SRC = "/api/workspaces/workspace-1/tree?path=src";
+
+async function renderSourceWorkspace() {
+  const fixture = await import("./files-fixture.js");
+  const mounted = fixture.renderFiles(
+    "/files?ws=workspace-1",
+    fixture.authenticatedFilesRoutes([fixture.workspace], {
+      [TREE_ROOT]: () =>
+        jsonResponse({
+          path: "",
+          entries: [
+            { name: "src", type: "dir", size: 0, mtime: 101 },
+            { name: "main.py", type: "file", size: 8, mtime: 102 },
+            { name: "other.ts", type: "file", size: 12, mtime: 103 },
+          ],
+        }),
+      [TREE_SRC]: () => jsonResponse({ path: "src", entries: [] }),
+      "/api/workspaces/workspace-1/file?path=main.py": () => textPreviewResponse("print(1)"),
+      "/api/workspaces/workspace-1/file?path=other.ts": () => textPreviewResponse("const b = 2;"),
+    }),
+  );
+  return { ...mounted, fixture };
+}
+
+describe("文件页的预览器按需加载", () => {
+  it("第一次才加载：展开目录不加载预览器，选中 main.py 时源码预览器恰加载一次并显示占位，再选 other.ts 不再加载", async () => {
+    const gate = deferred<Previewer>();
+    stub.loadPreviewer.mockReturnValue(gate.promise);
+    const { fixture } = await renderSourceWorkspace();
+    try {
+      fireEvent.click(await screen.findByRole("button", { name: "展开 src" }));
+      expect(await screen.findByText("空目录", { exact: true })).toBeTruthy();
+      expect(stub.loadPreviewer.mock.calls).toStrictEqual([]);
+
+      fireEvent.click(screen.getByRole("button", { name: "main.py" }));
+      expect((await screen.findByText("正在加载预览…")).getAttribute("role")).toBe("status");
+      expect(screen.queryByRole("row")).toBeNull();
+      expect(stub.loadPreviewer.mock.calls).toStrictEqual([["code"]]);
+
+      await act(async () => {
+        gate.resolve(CodePreviewer);
+      });
+      expect(await screen.findByRole("cell", { name: "print(1)" })).toBeTruthy();
+      expect(screen.queryByText("正在加载预览…")).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "other.ts" }));
+      expect(await screen.findByRole("cell", { name: "const b = 2;" })).toBeTruthy();
+      expect(sourceLines()).toStrictEqual(["const b = 2;"]);
+      expect(stub.loadPreviewer.mock.calls).toStrictEqual([["code"]]);
+    } finally {
+      fixture.cleanupFilesFixture();
+    }
+  });
+
+  it("加载失败可重试：失败时显示「预览组件加载失败」「重试」与「下载 main.py」且目录树仍可展开，重试后显示源码且没有未处理的拒绝", async () => {
+    stub.loadPreviewer
+      .mockImplementationOnce(() => Promise.reject(new Error("chunk request failed")))
+      .mockImplementation(() => Promise.resolve(CodePreviewer));
+    const { fetchMock, fixture } = await renderSourceWorkspace();
+    const observer = observeUnhandledRejections();
+    try {
+      fireEvent.click(await screen.findByRole("button", { name: "main.py" }));
+
+      expect(await screen.findByText("预览组件加载失败")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
+      const link = screen.getByRole("link", { name: "下载 main.py" });
+      expect(link.getAttribute("href")).toBe("/api/workspaces/workspace-1/download?path=main.py");
+      expect(link.hasAttribute("download")).toBe(true);
+      expect(screen.queryByRole("row")).toBeNull();
+      expect(stub.loadPreviewer.mock.calls).toStrictEqual([["code"]]);
+
+      expect(fetchMock.mock.calls.filter(([path]) => path === TREE_SRC)).toStrictEqual([]);
+      fireEvent.click(screen.getByRole("button", { name: "展开 src" }));
+      expect(await screen.findByText("空目录", { exact: true })).toBeTruthy();
+      expect(fetchMock.mock.calls.filter(([path]) => path === TREE_SRC)).toHaveLength(1);
+      expect(screen.getByText("预览组件加载失败")).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: "重试" }));
+      expect(await screen.findByRole("cell", { name: "print(1)" })).toBeTruthy();
+
+      expect(sourceLines()).toStrictEqual(["print(1)"]);
+      expect(screen.queryByText("预览组件加载失败")).toBeNull();
+      expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
+      expect(screen.getByRole("link", { name: "下载 main.py" })).toBeTruthy();
+      expect(stub.loadPreviewer.mock.calls).toStrictEqual([["code"], ["code"]]);
+      await settle();
+      expect(observer.unhandled).toStrictEqual([]);
+    } finally {
+      observer.stop();
+      fixture.cleanupFilesFixture();
     }
   });
 });

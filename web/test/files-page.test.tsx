@@ -113,6 +113,10 @@ describe("workspace page route integration", () => {
           "name,size\nalpha,1\nbeta,2\n",
         ),
         "/api/workspaces/workspace-1/file?path=logo.png": imagePreviewResponse(),
+        "/api/workspaces/workspace-1/file?path=archive.zip": jsonResponse(
+          { error: { code: "preview_unsupported", message: "该类型不支持预览" } },
+          415,
+        ),
         "/api/workspaces/workspace-1/dirs": (_path, options) => {
           expect(options).toMatchObject({ body: '{"path":"drafts"}', method: "POST" });
           return jsonResponse({ path: "drafts" }, 201);
@@ -165,7 +169,7 @@ describe("workspace page route integration", () => {
       fetchMock.mock.calls.filter(
         ([path]) => path === "/api/workspaces/workspace-1/file?path=archive.zip",
       ),
-    ).toHaveLength(0);
+    ).toHaveLength(1);
 
     const menuTrigger = screen.getByRole("button", { name: "新建" });
     pressPointer(menuTrigger);

@@ -48,7 +48,7 @@ describe("files empty states", () => {
     expect(hint.closest('[data-slot="empty-state"]')).toBe(previewEmpty);
   });
 
-  it("E2 shows 空目录 for an expanded empty folder and the unsupported subline without a file request", async () => {
+  it("E2 shows 空目录 for an expanded empty folder and the unsupported subline after one file request answered 415", async () => {
     const { fetchMock } = renderFiles(
       "/files?ws=workspace-1",
       authenticatedFilesRoutes([workspace], {
@@ -60,6 +60,10 @@ describe("files empty states", () => {
           ],
         }),
         "/api/workspaces/workspace-1/tree?path=out": jsonResponse({ path: "out", entries: [] }),
+        "/api/workspaces/workspace-1/file?path=%E5%BD%92%E6%A1%A3.zip": jsonResponse(
+          { error: { code: "preview_unsupported", message: "该类型不支持预览" } },
+          415,
+        ),
       }),
     );
 
@@ -72,8 +76,10 @@ describe("files empty states", () => {
     const block = unsupported.closest('[data-slot="empty-state"]');
     expect(block).not.toBeNull();
     const description = block?.querySelector('[data-slot="empty-state-desc"]');
-    expect(description?.textContent).toBe("归档.zip · 86.3 MB\u3000二进制或未识别格式");
-    expect(fetchMock.mock.calls.filter(([path]) => path.includes("/file?"))).toEqual([]);
+    expect(description?.textContent).toBe("归档.zip · 86.3 MB");
+    expect(fetchMock.mock.calls.filter(([path]) => path.includes("/file?"))).toStrictEqual([
+      ["/api/workspaces/workspace-1/file?path=%E5%BD%92%E6%A1%A3.zip", expect.anything()],
+    ]);
   });
 
   it("E3 shows the create-workspace guidance as an empty state when the account has no workspace", async () => {
