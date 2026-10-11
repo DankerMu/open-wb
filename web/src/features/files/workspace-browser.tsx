@@ -24,7 +24,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { ApiClient } from "../../lib/api.js";
+import { type ApiClient, fileUrl } from "../../lib/api.js";
 import {
   type DirectoryCache,
   loadedDirectoryPaths,
@@ -38,7 +38,7 @@ import { DirectoryDialog } from "./dialogs.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
 import { logicalPath } from "./file-meta.js";
 import { useFolderDialog } from "./folder-dialog.js";
-import { failedPreview, PreviewArea, type SelectedFile } from "./preview-area.js";
+import { failedPreview, immediatePreview, PreviewArea, type SelectedFile } from "./preview-area.js";
 import { DirectoryTree } from "./tree.js";
 import type { TreeEntry } from "./types.js";
 
@@ -249,6 +249,14 @@ export function WorkspaceBrowser({
         releaseOwnedImage();
       }
 
+      // 不发 `file` 请求的类别在这里交付：上一个请求已中止，换了文件时旧图片也已释放，没有新请求要管。
+      const immediate = immediatePreview(entry, fileUrl(workspaceId, path));
+      if (immediate) {
+        publishSelectedFile({ entry, path, preview: immediate });
+        setPreviewLoading(false);
+        return;
+      }
+
       publishSelectedFile(next);
       setPreviewLoading(true);
       const controller = new AbortController();
@@ -296,7 +304,7 @@ export function WorkspaceBrowser({
           setPreviewLoading(false);
         })
         .finally(() => {
-          // 结果已在上面交付或丢弃；中止是为了放掉没读正文就判失败的应答（如尚无预览器的音视频）。
+          // 结果已在上面交付或丢弃；中止是为了放掉没读正文就判失败的应答（如内容类型不被接受的 200）。
           controller.abort();
           if (previewControllerRef.current === controller) {
             previewControllerRef.current = null;

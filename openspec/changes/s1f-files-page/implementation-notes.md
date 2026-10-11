@@ -678,6 +678,39 @@
 - 变异：`workspace-browser.tsx` 导入 `react-router` → 静态断言与无路由渲染同红；`features/files` 加一行 `../chat/` 导入 → 静态断言判红；复制一份 `DirectoryNode` → 定义计数判红。
 - 变异：不可观察 / 未做：`stacked` 的收起按钮、`reveal` 的 `view`、未缓存叶子在 `onlyPaths` 下的选中，三项写「未做」；`stacked` 外框类只能以 DOM 类名断言，布局效果在 jsdom 不可观察。
 
+## 20.1，及分摊的 20.4 / 20.5 / 20.6 音视频部分（#1095）
+
+- 前提与边界：不触及 Critical Path（纯浏览器侧，不改服务端、不加路由、不处理路径，地址只经既有 `fileUrl`），一个评审席。前置按代码核实已合：17.1（#1085）、16.1 的 `fileUrl`（`web/src/lib/api-files.ts:143`，经 `api.ts:503` 再导出）、7.3（`server/src/workspaces/rest.ts:366` 的 `rangeable` → `sendFileRange`）、17.2（#1087）；不在 1.1 / 1.2 / 1.3 挡住的集合里。对 #1286：本刀没有路由，不闭合；浏览器发的范围请求落在 `GET …/file` 的音视频分支，即 D22「已知残余」已登记的读窗口（`resolve` → `lstat` → 按路径打开，无字节上限），每次拖动多触发一次——读代码推出，未实测。
+- 与 issue / tasks 的差异（origin/master 为准，进偏离记录）：(a) `kind.ts` 不用改，`:22-25` 四个扩展名与 `previewKind` 已在；(b) issue 的 PR Boundary 漏了三个必改文件：`tree.tsx`（`:457` 无条件 `client.fetchPreview`，「没有经 `fetchPreview` 的请求」只能在这里满足）、`preview.tsx`（`:65-70` 的 `previewerFor` 把非 `text` 类一律送 `code`）、`types.ts`（`FilePreview` 没有承载直接地址的成员）；(c) tasks 20.4「20.1 不改动任何既有用例」自 #1087 起不成立：`web/test/files-preview-states.test.tsx:181-199` 钉着过渡呈现，本刀必须改写（17.2 过渡规则末句与 issue「以开工时的 grep 为准」已授权）；(d) 过渡呈现不在 `index.ts` / `kind.ts` 里，而在 `tree.tsx` + `fetchPreview` 的拒绝路径。
+- 字节怎么到元素：只走地址，不走 Blob。由规格句裁定，不是未规定：file-previewers「音视频」写 `src` 为主站 `file` 地址、「页面 SHALL NOT 经 `fetch` 把媒体读进内存」；files-web「API 客户端扩展」写「音视频不经它读取」。`web/src/lib/api*.ts` 不动，`previewRequest` 继续拒绝 `audio/*` / `video/*`，`api-files-preview-types.test.ts:69-70` 不动。
+- `tree.tsx` 的 `selectFile`：在 `previewRequestRef` 自增、上一个控制器中止、`releaseOwnedImage()` 之后，新建 `AbortController` 之前加分支。`previewKind(entry.name)` 为 `audio` / `video` 时同步发布 `{status:"success", data:{kind:"media", url: fileUrl(workspace.id, path), size: entry.size, truncated:false}}`，`setPreviewLoading(false)`，返回。`previewKind` 从 `./previewers/index.js` 取，`fileUrl` 从 `../../lib/api.js` 取。`:500` 的 `finally` 里的 `controller.abort()` 保留，只把 `:499` 注释里「如尚无预览器的音视频」改掉。
+- 其余接线：`types.ts` 的 `FilePreview` 加第三个成员 `{kind:"media"; url:string; size:number; truncated:false}`。`preview.tsx` 的 `previewerFor` 首行加 `data.kind === "media"` → `"media"`；`content` 取值改为 `data.kind === "text" ? data.text : data.url`。`previewers/index.ts` 的 `PreviewerId` 加 `"media"`，`LOADERS` 加 `media: () => import("./media.js").then((m) => m.MediaPreviewer)`；`Previewer` 的 props 仍是 `{name, content, truncated}`。grep `previewers-code-split` / `previewers-loading` / `preview-kind` 三个测试文件，没有枚举 `PreviewerId` 的断言。
+- `previewers/media.tsx`（新，约 35 行）：`export function MediaPreviewer({name, content}: {name:string; content:string})`，`useState(false)` 记失败。`previewKind(name) === "video"` 渲染 `<video controls preload="metadata" src={content} className="max-h-full max-w-full">`，否则 `<audio controls preload="metadata" src={content}>`，都不写 `autoPlay`；`onError` 置失败后移除元素，改显示 `<p>无法播放该文件</p>`（与 `image.tsx:18` 同形，不用 Toast、不用 `role="alert"`）。目录内静态导入 `./kind.js` 是守卫允许的。外层容器类与 `image.tsx:16` 相近，若 jscpd 命中就抽到 `columns.tsx` 的常量，不加 ignore。
+- 卸载释放什么：本刀不分配任何东西（无 Blob 地址、无 `AbortController`、无定时器），`ownedImageUrlRef` 不涉及媒体。`PreviewBody key={path}`（`preview.tsx:108`）使换文件即卸载元素，换空间由树重挂——这是可测的全部。「播放随之停止」只是由 HTML 标准推出（元素移出文档后暂停），未实测；浏览器何时断开在途的范围请求未实测。未做：卸载时不主动清 `src` / 调 `load()`（规格只要求元素被移除；jsdom 的 `load()` 是未实现告警）。
+- 规格未逐字写的分支（取最简，进偏离记录）：(a) `刷新`（`tree.tsx:584-591` 重跑 `selectFile`）对媒体发布同一地址，元素不重挂，播放不中断；失败态也因此保留，切到别的文件再切回才重试。files-web「目录树与预览」的「重新取当前文件的预览，保留…视图模式」没有媒体场景，页面对媒体本就无可重取。(b) 媒体请求遇 401 / 404 / 416 / 空文件，一律是元素 `error` →「无法播放该文件」，认证守卫不被通知；由规格句「媒体元素触发 `error` 时…」裁定，不另发探测请求。(c) 浏览器不支持的编码若不触发 `error`（只出声或黑屏）就没有文案，未实测。
+- 既有断言的处置：`files-preview-states.test.tsx:181-199` 拆成两条。其一 `clip.mp4`：`await waitFor` 取 `video`，`getAttribute("src")` 等于 `${FILE}clip.mp4`，`expectDownloadLink("clip.mp4")`，之后 `fileRequests(fetchMock)` 为 `[]`（先断言同一用例里先选的 `readme.md` 留下恰一条 `file` 记录，避免空对空；`clip.mp4` 的 `file` 路由给一个会抛的桩）。其二保住「未读正文就判失败的应答被中止」：原断言整体搬到文本类名字 `clip.dat`（仍回 200 `video/mp4`），alert 文案与 `signal.aborted === true` 不削弱。
+- 新文件 `web/test/previewers-media.test.tsx`（静态导入 `MediaPreviewer` 直接渲染，同步断言；媒体元素没有 ARIA role，用 `container.querySelector`）：(1) `voice.mp3` / `a.WAV` → 恰一个 `audio`、零个 `video`；`clip.mp4` / `f.webm` 反之；(2) 各自 `hasAttribute("controls")`、`getAttribute("preload") === "metadata"`、`hasAttribute("autoplay") === false`、`getAttribute("src")` 与传入的 `content` 逐字相等，`content` 取 `fileUrl("w 1", " 报告/../a b#é.mp4 ")` 及首字符为 `/`、含分解形式 `é` 的各一例；(3) `fireEvent.error` 后文本为 `无法播放该文件`、元素已不在、没有 `.ui-toast`，audio 与 video 各一例；(4) 失败后以新 `key` 重挂另一文件，播放器恢复。
+- 页面级用例放 `files-preview-states.test.tsx`（现 232 行；`renderWorkspaceWith` / `fileRequests` / `expectDownloadLink` 是它的本地函数，不为复用导出）：「没有经 `fetchPreview` 的请求」与「下载链接仍在」在模块级是空断言（模块拿不到 client，预览头不在模块里），必须在这里。另加：先选 `logo.png` 再选 `voice.mp3` → `revokeObjectURL` 恰一次；选 `clip.mp4` 后选 `readme.md`、再切空间 → 文档里没有 `video`；`clip.mp4` 触发 `error` → 文案出现、`下载 clip.mp4` 仍在、「通知」区无 `listitem`；页面级地址用一个含空格、中文与 `#` 的文件名。验收写的验证路径只列了 `previewers-media.test.tsx`，PR 描述要补上这个文件。
+- 门槛：`tree.tsx` 639 → 约 655、`preview.tsx` 219、`index.ts` 33，都远离 800。knip 无新增仅测试引用的导出（`MediaPreviewer` 经 `index.ts` 可达；`knip.json` 的 web `entry` 我没读全，本刀用不到）。`ui-layering` 无需登记（`features/files` 整目录已在清单）。`api-files-archive.test.ts` 的客户端键集不变（没有新 `ApiClient` 方法）。`previewers-table-svg.test.tsx` 的静态禁用项不受影响。不加依赖、不动 `ATTRIBUTION.md`、不涉及配置与 `system.md`。
+- 同批撞文件（请编排排序）：`tree.tsx` 的 `selectFile`、`preview.tsx` 的 `previewerFor` / `PreviewBody`、`previewers/index.ts` 的 `PreviewerId` + `LOADERS`、`types.ts`、`files-preview-states.test.tsx`、`functional-checklist.md` 的 FL 节、`tasks.md`，与 #1093、#1096、#1097、#1098 全部重叠。若 #1093 已为 html 引入「选中不发 `file` 请求」的分支或状态形状，本刀复用它，不另立第二种。`usePreviewToken`（#1092）与本刀无关，媒体不需要令牌。
+- FL 行（一行，编号取开工时 FL 节的下一个，origin/master 现到 FL-14；结论 `待签`）。操作：「接上一行（文件页停在 FL-05 的空间，uploads 已展开）；在 FL-10 用的那个会话标签页里（文件页所在的标签页不动）经「+」菜单「上传文件」传入自备的 voice.mp3、clip.mp4（各不短于半分钟，且能在所用浏览器里直接打开播放）与 broken.mp4（任意文本文件复制后改名），等标签传完；回到文件页点「刷新」，在 uploads 里点 voice.mp3，点播放，把进度条拖到中段；播放中点 clip.mp4，点播放，把进度条拖到靠后；再点 broken.mp4，点预览头的下载图标；最后点 logo.png」。期望：「voice.mp3 是带播放按钮与进度条的音频播放器，点开时不自动出声；播放后拖动即从新位置继续；点 clip.mp4 后 mp3 的声音停止，出现带控制条的视频，画面完整且不超出预览区，不自动播放，播放与拖动同样有效；broken.mp4 显示「无法播放该文件」，页面不弹提示，下载图标仍在，存下的文件与原文本文件内容相同；logo.png 照常显示」。注意：以 FL-14 为上一行时待发附件是 3 个，加本行 3 个为 6 个；若 #1091 / #1093 的行先合入，按实际重数，超过 10 就在行首写明先清标签。浏览器行为只对实际走过的引擎写实测（仅 Chromium）。
+- openspec 改动（PR 描述逐个列出）：`tasks.md` 只勾 20.1（20.4–20.6 登记在 #1097，不勾）并加一行注记指针；本注记进 `implementation-notes.md`（现 579 行，上限 1000）。`design.md:454` 的过渡说明自述「合入即消失」，不改。
+- 变异：`selectFile` 去掉媒体分支（改回 `fetchPreview`）→ `files-preview-states` 的 `clip.mp4` 用例红（`fileRequests` 不为空，会抛的桩使 `video` 不出现）。即 20.6 指定的那条。
+- 变异：媒体分支提到 `releaseOwnedImage()` 之前返回 → 「先图片后 mp3，`revokeObjectURL` 恰一次」红。
+- 变异：`previewerFor` 不认 `media`（落到 `code`）→ 页面级取 `video` 的用例红（出现的是源码表格）。
+- 变异：`LOADERS` 缺 `media` 或导出名写错 → 页面级用例红（`预览组件加载失败`）。
+- 变异：`src` 再编码一次，或改用 `downloadUrl` → 模块级「`src` 与 `content` 逐字相等」红，页面级地址断言红。
+- 变异：只对 video 设 `controls`（audio 漏）→ 模块级 audio 属性用例红；反向同理。
+- 变异：`preload` 改成 `auto` 或删掉 → `preload` 断言红。
+- 变异：加 `autoPlay` → `hasAttribute("autoplay")` 断言红。
+- 变异：mp3 / wav 也渲染成 `video`（判别写反）→ 模块级用例 (1) 红。
+- 变异：只给 video 挂 `onError`（audio 漏）→ audio 的失败用例红；反向同理。
+- 变异：失败后保留元素（只追加文案）→ 「元素已不在」红。
+- 变异：失败时调用 Toast → 「通知」区无 `listitem` / 无 `.ui-toast` 红。
+- 变异：`finally` 里的 `controller.abort()` 删掉 → 搬到 `clip.dat` 的中止断言红。
+- 变异：不可观察（jsdom）：`preload="metadata"` 是否真的只取元数据；是否真的发范围请求及 206 的使用；元素移除后播放是否停止、连接是否断开；视频等比缩放（只是类名）；`刷新` 后正在播放的媒体不重载。这些只由 FL 行与后续走查（#1114）覆盖。
+- 变异：未做：StrictMode 专门用例（本刀无分配，无可断言的释放次数）。
+
 ## 15.1、15.2、15.3（#1074）
 
 - **Critical Path 两条都命中**：「沙箱与文件边界」（新的对外路由 `GET /o/<token>/*`，凭令牌调 `sandbox.resolve(op=read)` 并把用户文件交给外部进程）与「omp 子进程治理」（转换进程首次有网络可达的调用方；D-26 改 `sudo … find` 的处置）；两个评审席位加 owner 白盒。纯服务端：**no checklist rows**（浏览器侧归 #1094）；不是配置刀，不动 `docs/architecture/system.md` 第 9 节与配置计数；与同批 #1093 / #1095–#1098 / #1112 没有共用源文件。
