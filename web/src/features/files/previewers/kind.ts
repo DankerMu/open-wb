@@ -31,6 +31,19 @@ const KIND_BY_EXTENSION = new Map<string, PreviewKind>([
   ["gz", "archive"],
 ]);
 
+function extensionsOf(kind: PreviewKind): ReadonlySet<string> {
+  return new Set([...KIND_BY_EXTENSION].filter(([, k]) => k === kind).map(([ext]) => ext));
+}
+
+/*
+ * 与服务端 `workspaces/preview.ts` 的同名导出逐项相等（`web/test/preview-kind-contract.test.ts`）。
+ * 从上面那张表派生，不另写字面量：`previewKind` 查的就是这张表。
+ */
+export const IMAGE_EXTENSIONS = extensionsOf("image");
+export const AUDIO_EXTENSIONS = extensionsOf("audio");
+export const VIDEO_EXTENSIONS = extensionsOf("video");
+export const NOTEBOOK_EXTENSIONS = extensionsOf("notebook");
+
 const TEXT_VIEW_BY_EXTENSION = new Map<string, TextView>([
   ["md", "markdown"],
   ["csv", "table"],
