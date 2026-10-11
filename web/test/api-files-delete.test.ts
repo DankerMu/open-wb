@@ -30,14 +30,18 @@ describe("deleteEntry", () => {
     vi.stubGlobal("fetch", fetchMock);
     const { signal } = new AbortController();
 
+    // path 是数据：首尾各一个空格、中间的 `..` 段都原样发出；é 两种写法并排：已合成的 `\u00e9`
+    // （NFD 会拆开它）与未合成的 `e\u0301`（NFC 会并掉它），所以两个方向的 `normalize` 都看得出。
+    const path = " /x/../报告 2026/\u00e9e\u0301 b#1&x.md ";
+
     await expect(
-      createApiClient().deleteEntry("ws/%#?+ 中", "报告 2026/a b#1&x.md", { signal }),
+      createApiClient().deleteEntry("ws/%#?+ 中", path, { signal }),
     ).resolves.toBeUndefined();
 
     // 逐键严格相等：`toHaveBeenCalledWith` 会放过多出来的 `undefined` 键。没有 body、headers、cache。
     expect(fetchMock.mock.calls).toStrictEqual([
       [
-        "/api/workspaces/ws%2F%25%23%3F%2B%20%E4%B8%AD/entries?path=%E6%8A%A5%E5%91%8A%202026%2Fa%20b%231%26x.md",
+        "/api/workspaces/ws%2F%25%23%3F%2B%20%E4%B8%AD/entries?path=%20%2Fx%2F..%2F%E6%8A%A5%E5%91%8A%202026%2F%C3%A9e%CC%81%20b%231%26x.md%20",
         { method: "DELETE", credentials: "same-origin", signal },
       ],
     ]);
@@ -59,6 +63,22 @@ describe("deleteEntry", () => {
     ]);
   });
 
+  it("前导 / 不剥掉，原样编码发出", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(unreadableResponse(204));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      createApiClient().deleteEntry("workspace-1", "/x/../a.md"),
+    ).resolves.toBeUndefined();
+
+    expect(fetchMock.mock.calls).toStrictEqual([
+      [
+        "/api/workspaces/workspace-1/entries?path=%2Fx%2F..%2Fa.md",
+        { method: "DELETE", credentials: "same-origin" },
+      ],
+    ]);
+  });
+
   it("成功码只认 204：200 按失败处理", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({}, 200)));
 
@@ -72,18 +92,17 @@ describe("deleteEntry", () => {
     [404, "not_found", "工作空间不存在"],
     [400, "bad_request", "请求无效"],
     [500, "internal_error", "服务器内部错误"],
-  ])("%i 的错误信封原样保留 status / code / message", async (status, code, message) => {
+  ])("%i 的错误信封原样保留 status / code / message，不重发", async (status, code, message) => {
     const onUnauthorized = vi.fn();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(jsonResponse({ error: { code, message } }, status)),
-    );
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ error: { code, message } }, status));
+    vi.stubGlobal("fetch", fetchMock);
 
     const error = await captureApiError(
       createApiClient({ onUnauthorized }).deleteEntry("workspace-1", "a.md"),
     );
 
     expect(error).toMatchObject({ status, code, message });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(onUnauthorized).not.toHaveBeenCalled();
   });
 
@@ -104,11 +123,13 @@ describe("deleteEntry", () => {
     expect(onUnauthorized.mock.calls).toEqual([[signal]]);
   });
 
-  it("网络失败映射为 status 0 的 request_failed", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+  it("网络失败映射为 status 0 的 request_failed，不重发", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", fetchMock);
 
     const error = await captureApiError(createApiClient().deleteEntry("workspace-1", "a.md"));
 
     expectRequestFailure(error, 0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
