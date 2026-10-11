@@ -962,3 +962,53 @@
 - 变异：不在 `index.ts` 注册 → 全部路由用例判红（404）。
 - 变异：`now` 传恒定时钟、或给 zip 加时限 → 不可观察（路由不注入时钟，解析层的 `slow.tar` 已在 #1063 钉住），靠白盒审查。
 - 变异：`lstat` 之后中间分量被换成符号链接 → 不可观察，本刀不写用例，属 D-23 登记的残余，不声称挡住。
+
+## 12.1、12.3、12.4（#1069）
+
+- **Critical Path：沙箱与文件边界**——新的对外监听面，凭路径里的令牌读用户文件、调 `sandbox.resolve(op=read)`，按两个评审席位加 owner 白盒处理。前提按代码已齐：6.1（`server/src/workspaces/preview.ts:55`）、7.2（`range-send.ts:11` 的 `sendFileRange`）、11.1（`server/src/preview/tokens.ts:35`）、12.2（`headers.ts:89`、`:104`）；不执行 `rename`，不在 1.2 挡住的集合里，不等 1.1、1.3。
+- 与 issue / `tasks.md` 的差异（origin/master 为准）：12.1 逐字相同。issue「Current behavior」已漂移（主站现有音视频 Range 与 `download`）。issue 未提 D-23、`frameworkErrors`、关停预算两项参数、第二个测试文件、`system.md` 与 `server/src/app.ts` 的改动。issue 的拒绝清单缺 416 与 500。规格写 `tokens.lookup(token)`，实际签名是 `lookup(token, now)`，监听器传 `Date.now()`（与 `rest-preview-token.ts:81` 一致）。
+- `registerListenerShutdown` 必须搬：它是 `server/src/app.ts:376-432` 的非导出函数。连同 `validateListenerCloseBudget`（`:358-363`）、`TIMER_MAX_MS`（`:153`）、`LISTENER_CLOSE_BUDGET_MS`（`:151`）原样搬到新文件 `server/src/http/listener-shutdown.ts`，只搬不改。`app.ts` 保留 `export { LISTENER_CLOSE_BUDGET_MS }` 再导出（`server/test/listener-shutdown.test.ts:15`、`:472` 从 `../src/app.js` 取它，该测试一行不改）；`app.ts` 518 行降到约 440 行。没有测试扫描 `app.ts` 源码里的这些符号（`auth-provider-name.test.ts:101` 只查 `"dev-stub"`），无源码扫描测试需跟随。
+- 分层：`sendFileRange` 在 `workspaces/`，任务 7.2 明文要求监听器直接用它，而 `docs/architecture/system.md:79` 第 2 条的允许清单里没有 `preview`。处置：把 `server/src/preview/app.ts` 定为与 `server/src/app.ts` 同层的第二个装配根，在该条补一句声明（纯文档，不是第 9 节配置表）。它因此可直接导入 `../workspaces/range-send.js`、`../workspaces/rest.js` 的 `lstatExisting` / `isOrdinaryDirectory`（`:161-165` 已导出，不重写以免 jscpd）、`../http/listener-shutdown.js`、`../core/sandbox`、`../core/errors`。`preview/headers.ts`、`tokens.ts` 仍保持零跨模块导入。
+- 签名：`createPreviewApp(options: { store: Pick<WorkspaceStore,"rootOf">; sandbox: Pick<ReturnType<typeof createSandbox>,"resolve">; tokens: Pick<PreviewTokens,"lookup">; converter?: OfficeConverter; limits?: { documentMaxBytes: number }; listenerCloseBudgetMs?: number; onListenerForceClose?: () => void }): FastifyInstance`。实现只读前三项与后两项，`converter`、`limits` 不解构。偏离记录写三点：后两项是规格五键之外的扩展（「同一预算」要求 13.1 传入，「至多一行」的去重归 #1070）；`converter` 可选是因为 13.1 起入口时还没有转换器；边表「6.1 → 12.1（`limits` 类型）」名不副实——`PreviewLimits`（`preview.ts:55-62`）只有 text / image / notebook，`/w/` 无上限，`/o/` 要的文档上限不在其中，交 #1074 接线。
+- 实例构造：`fastify({ logger: false, frameworkErrors })`，紧接着调 `registerListenerShutdown`（次序理由见 `app.ts:176` 注释）。不设 `rewriteUrl`：`rewriteUntrustedUrl` 会把 `%2e%2e` 改写成 404 并多解一次码，与规格的 403 加审计和「解码一次」相悖。不注册 `registerAuth`、`registerAuthGuard`、`@fastify/cookie`、`@fastify/static`，不 `decorate("db")`，不导入 `handleHttpError`（那是 JSON 信封）。
+- 所有失败经同一个本地函数 `fail(reply, status, text)`，写 `previewFailureHeaders()` 加固定文案，不依赖钩子补头（`frameworkErrors` 路径不跑钩子）。四处入口：(a) `frameworkErrors` → 404；(b) 根 `onRequest` 钩子，方法非 GET/HEAD → 404；(c) `setNotFoundHandler` → 404；(d) `setErrorHandler`：`HttpError` 的 `sandbox_denied` → 403 `路径不在工作空间内`，`not_found` → 404 `预览不存在或已过期`，其余 → 500。
+- 上条的两个理由均为读码推出：(a) fastify 缺省对坏百分号序列答 400、对超过 `maxParamLength`（缺省 100）的 `:token` 答 414，JSON 体都回显整条路径（`fastify.js:645-694`），违反「SHALL NOT 回显」。(b) 404 上下文同样对带 body 的方法跑 content parser（`lib/handle-request.js:39-75`），会先答 400 / 415 / 413，所以方法拒绝必须在 `onRequest`。
+- 规格未写的 500（偏离记录）：非 `HttpError` 的失败（含 `lstat` 之后文件消失导致的打开失败）答 500、`previewFailureHeaders()`、空体——仿 416「有状态无文案」，不新造文案。处理器先 `removeHeader` 掉 `Access-Control-Allow-Origin`、`Cross-Origin-Resource-Policy`、`Content-Security-Policy`、`Content-Range`、`Accept-Ranges`、`Content-Length`。缺省处理器会把含宿主绝对路径的 `ENOENT … open '<abs>'` 写进响应体，所以这个处理器不可省。
+- 路由只有 `app.get("/w/:token/*")`（自动 HEAD）。次序逐句对规格：① `tokens.lookup(token, Date.now())` 为 `null` → 404；② `store.rootOf({id: ownerId}, workspaceId)` 为 `null` 或 `!isOrdinaryDirectory(root)` → 404；③ 通配参数为空串 → 404；④ `sandbox.resolve({id: ownerId}, workspaceId, path, "read")`；⑤ `lstatExisting(absPath)` 为 `undefined` 或 `!isFile()` → 404；⑥ `sendFileRange(request, reply, { absPath, size, headers: previewHeaders(basename(absPath), embedOrigin), unsatisfiableHeaders: previewFailureHeaders() })`。第 ② 步不可省：根被移走时 `resolve.ts:18` 的 `realpathSync` 失败，会写审计并答 403，与「空间消失 → 404、没有审计行」相反。
+- 由检查次序或规格句子决定、不算「未写明」的分支：`path` 取 find-my-way 的通配参数即「解码一次」（`index.js:672-680`，读码推出；`%252e%252e` 得到字面名 `%2e%2e` → 404）；`%00`、`//etc/passwd`（绝对）、超长分量都是沙箱拒绝 → 403 加审计（规格「被拒时…响应 403」）；`/w/<T>`（无斜杠）、`/W/…`、`/o/…`、`/api/*` → 404（「其它路径一律 404」）；未知令牌加 `%2e%2e` → 404 且零审计（查令牌先于 `resolve`）。
+- 自定分支（偏离记录）：`/w/<T>/readme.md/` 的尾斜杠不特判——`resolve` 跳过空分量，结果是 200，与主站 `file?path=readme.md/` 现状一致；类型取 `basename(absPath)`，与 `rest.ts:344` 同法。查询串忽略；不读 `If-Range`（沿 7.2）。
+- D-23 / #1286（不得写成闭合）：`/w/` 具有 D22「已知残余」第三条（`file` / `download`）的同一个窗口——`lstatExisting` 判为普通文件后由 `createReadStream` 按路径打开，无 `O_NOFOLLOW` / `O_NONBLOCK`；其间条目或中间分量被换成符号链接则读到链接目标，被换成命名管道则占住一个线程池线程。**读码推出，未测**（#1318 没测读路径）。本刀不加第二次 `stat` / 打开、不嗅探，416 与 HEAD 不开文件，单次请求的窗口不比 `file` 宽。必须如实登记三点：这是该窗口的第三条路由；`/w/` 无字节上限，读到的是目标全文；凭据是令牌而非 cookie。`Content-Length` 取 `lstat` 时的大小，其间变短则正文短于声明。
+- 评审订正（上一条的「三点」）：「`/w/` 无字节上限，读到的是目标全文」与「利用条件同 D22」两处不准，以此为准——与 `file` 的文本 / 图片 / 笔记本分支不同，`/w/` 没有字节上限（`download` 与 `file` 的音视频分支同样没有）；读到的至多是 `lstat` 时 `size` 个字节，该值由换入方决定。凭据是路径里的令牌而不是 cookie，持令牌者包括被预览文档自己的脚本（成功响应带 `Access-Control-Allow-Origin: *`，CSP 允许脚本且不设取源指令，文档地址里就有令牌）：该文档由 omp 侧写入，与能换路径的是同一方，它可以自行重复请求去撞窗口，并把读到的内容发往外部；它也可以把令牌本身发往外部，此后任何持令牌方（含换路径的 omp 侧进程——前提是它连得到预览监听端口，绑定地址由 #1070 定）在令牌有效期内（900 秒，主站每次签发都会续期）都可以直接请求并与自己的替换动作对时，不限于预览打开期间，也不需要浏览器；`file` / `download` 的字节只回到带 cookie 的主站页面。`/w/` 的成功读取不写审计行（`download` 写 `file.download`）。以上均为读代码推出，未测。
+- 测试落点：按主题拆两个新文件加一个 helper，防 800 行（`preview-token-rest.test.ts` 已 595 行）——`server/test/preview-app.test.ts`（六个场景、拒绝项、范围、关停）、`server/test/preview-app-headers.test.ts`（经监听器的头）、`server/test/preview-app-helpers.ts`（建 world）。第二个文件名是对 12.3 单一文件名的偏离。world 用 `withWorkspacesApp` 带 `assembly.preview` 的主站签发令牌，预览侧用同一 `db` 另建 `createWorkspaceStore` 与 `createSandbox`。既有测试无一需要改；`preview-headers.test.ts`、`listener-shutdown.test.ts` 原样保留。
+- 测试陷阱一（实测）：`inject` 用 `new URL` 解析地址，`/w/T/%2e%2e/%2e%2e/etc/passwd` 被折叠成 `/etc/passwd`，经 `inject` 断言会得到 404，「越界 403」恒不可观察。穿越、`%00`、`//`、坏百分号、超长 token 一律走 `raw-http-helpers.ts` 的 `withListeningApp` + `rawHttpRequest`（真实 socket）。范围场景按 design seam 用真实监听的 `fetch`。
+- 测试陷阱二：「带与不带 cookie 逐字节相同」比较状态、`rawPayload` 与去掉 `date` 的头。过期用 `issue(binding, Date.now() - 900_000)`，不用假定时器。「不续期」：在 `t0` 签发、请求数次后直接 `registry.lookup(T, t0 + 900_000)` 必为 `null`，并用包装器断言 `issue` 零调用。
+- 「不认 cookie」的结构证据：`hasRequestDecorator("cookies")`、`hasReplyDecorator("setCookie")`、`hasRequestDecorator("principal")`、`hasDecorator("db")`、`hasDecorator("authNow")` 全为 `false`；`printRoutes()` 只有 `/w/:token/*`；包裹 `db.prepare`，断言预览请求期间没有 SQL 含 `auth_sessions`（表名见 `auth/session.ts:15`），若原生对象不可包裹则以「签名不收 `db`」为证并在 PR 标注。四个请求的后三个断言正文恰为 `预览不存在或已过期`、无 `set-cookie`。
+- 头文件用例（映射已由 `preview-headers.test.ts` 钉死，此处只证接线）：HTML 恰七个头；PDF 两例（带 `Origin` 与无 `Origin` 签发）；「类型只看文件名」五个文件，`notes.txt` 内容为 HTML；`embedOrigin` 一合法一非法，登记值不出现在任何头里；404 / 403 / 416 / 500 各断言恰四个失败头，无 ACAO / CORP / CSP；416 另有 `content-range: bytes */1000` 与空体。
+- 关停用例：`listenerCloseBudgetMs: 50`，对 64 MiB 稀疏文件发请求、收到首个 `data` 后不再读，`app.close()` 在界内落定且 `onListenerForceClose` 恰一次。另加一条从未 `listen` 的实例 `close()` 不抛。
+- 门槛与文档：新文件 `server/src/preview/app.ts` 约 120 行、`http/listener-shutdown.ts` 约 90 行；size-guard、naming-guard、jscpd 不触发。knip：`createPreviewApp` 在 13.1 之前只有测试引用，server entry 含 `test/**/*.test.ts`，可过；helper 的导出须被两个测试文件都用到。正则一律字面量。不是配置刀，不动 `system.md` 第 9 节与配置计数测试。入口未启动监听器，无用户可见变化，**no checklist rows**。`tasks.md` 勾 12.1、12.3、12.4（另一半已随 #1068 交付，仿 7.5 先例）。
+- 同批交集：本刀改 `server/src/app.ts`（搬出约 80 行）与 `docs/architecture/system.md` 第 2 条。#1065 若为 10.3 的上限接线改 `app.ts` 的装配段，本刀以它的分支为底（不同区段）。与 #1073（`preview/office*.ts`）及四个 web 切片无共同文件。
+- 交接：#1070 传入两项关停参数并负责 `listener_force_close` 至多一行；#1074 复用 `fail` 与「令牌 → 根 → `resolve` → `lstat`」这段（届时再抽函数，本刀不预抽），定 `limits` 的最终类型，并沿用 500 的处置。
+- 变异：目录请求回退到 `index.html`（12.4）→ 「拒绝项」的 `/w/<T>/site`、`/w/<T>/site/` 两例 404 判红。
+- 变异：失败体回显路径或令牌（12.4）→ 「拒绝项」全部正文恰等于固定文案的断言判红。
+- 变异：有有效 cookie 即放行（12.4）→ 「令牌放行，cookie 不放行」第二个请求的 404 判红。
+- 变异：去掉 `frameworkErrors` → `/w/<T>/%zz` 与 101 字符 token 两例判红（状态变 400 / 414，正文含路径）。
+- 变异：方法拒绝从 `onRequest` 挪进 `setNotFoundHandler` → `POST` 带 `content-type: text/xml` 体、带坏 JSON 体两例判红。
+- 变异：去掉第 ② 步的根目录检查 → 「空间消失后令牌失效」的 404 与零审计判红；只去掉 `isOrdinaryDirectory` 而留 `rootOf` → 「根目录被移走」一例判红，「空间已不属于该账号」一例不红。
+- 变异：把 `resolve` 提到 `lookup` 之前或对未知令牌也 `resolve` → 「未知令牌 + `%2e%2e` → 零审计」判红。
+- 变异：逃逸，穿越：绕过 `sandbox.resolve` 直接 `join(root, path)` → 真实 socket 的 `%2e%2e/%2e%2e/etc/passwd` 403 加 `sandbox.reject`（`actor_id` 为 zhangsan、`detail.op` 为 `read`）判红。
+- 变异：逃逸，符号链接：绕过 `resolve` 且 `lstat` 换 `stat` → `/w/<T>/link` 与中间分量为链接的 `linkdir/x` 判红。只把 `lstatExisting` 换成 `stat` 而保留 `resolve`：不可观察（`resolve` 先拒）。
+- 变异：逃逸，跨空间 / 他人：`rootOf` 用请求里的任何值而非令牌绑定的 `ownerId` / `workspaceId`，或忽略 `ownerId` → 「作用域只有一个工作空间」（B 的文件、lisi 的同名文件）判红。
+- 变异：逃逸，`op`：`"read"` 换成 `"list"` → 审计行 `detail.op` 断言判红；审计 actor 换成固定值 → `actor_id` 断言判红。
+- 变异：监听器顺手续期（调 `issue`）→ 「不续期」的 `lookup(T, t0 + 900_000) === null` 与 `issue` 零调用判红。
+- 变异：`lookup` 传固定的 `0` 而非 `Date.now()` → 「过期后 404」判红。
+- 变异：二次解码（加 `decodeURIComponent` 或设 `rewriteUrl`）→ `%252e%252e/x` 应为 404 且零审计的用例判红。
+- 变异：空 `<path>` 不拒绝 → `/w/<T>/` 的 404 判红。原因是 `resolve("")` 返回根目录，随后落入「目录 → 404」，所以这条预期**不可观察**，PR 表照此标注，第 ③ 步仅为与规格句子逐字对应。
+- 变异：类型取自内容或改传整条路径 → 「类型只看文件名」的 `notes.txt` 判红；改传未 `basename` 的路径 → `readme.md/` 用例的 `content-type` 判红。
+- 变异：成功响应不经 `previewHeaders` 或丢 `embedOrigin` → 「HTML 恰七个头」与 PDF 两例判红。
+- 变异：失败响应带上 ACAO / CSP，或 416 用成功头 → 四个失败头的恰等断言判红。
+- 变异：错误处理器不清成功头 → 「`onSend` 里 `unlinkSync` 后 500」一例的无 CSP / `content-range` 判红；去掉 `setErrorHandler` → 同例正文不含临时目录路径的断言判红。
+- 变异：206 发整段、416 当成 200、漏 `Accept-Ranges` → 「范围请求」三行（真实监听）判红。
+- 变异：预览实例不调 `registerListenerShutdown` → 关停用例判红（`close()` 不在界内落定、`onListenerForceClose` 零次）。
+- 变异：搬家时改了 `registerListenerShutdown` 的行为 → 既有 `listener-shutdown.test.ts` 判红（它未改即为证据）。
+- 变异：不可观察：`lstat` 与打开之间的替换（#1286 窗口），测试不造竞态，属登记残余。
+- 变异：不可观察：畸形请求行、超大请求头这类 socket 层 400 / 431，由 Node 的 `clientError` 路径应答，不经本实例的任何处理器，本刀不测。
