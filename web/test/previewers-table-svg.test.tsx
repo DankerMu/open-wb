@@ -1,8 +1,9 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PreviewPane } from "../src/features/files/preview.js";
 import { SvgPreviewer } from "../src/features/files/previewers/svg.js";
 import { TablePreviewer } from "../src/features/files/previewers/table.js";
+import { ToastProvider } from "../src/ui/index.js";
 import { observeUnhandledRejections, settle } from "./chat-stream-support.js";
 import { listRepoFiles, readRepoFile } from "./ui-support.js";
 
@@ -144,10 +145,15 @@ function svgPane(name: string, text: string, truncated: boolean) {
   );
 }
 
-/** 把文件内容当 HTML 解析的两种写法；按原文查（注释也算）。 */
+/** 把文件内容当 HTML 解析的四种写法；按原文查（注释也算）。iframe 元素本身不在其列。 */
 function injectsHtml(source: string): boolean {
-  return source.includes("dangerouslySetInnerHTML") || source.includes(".innerHTML");
+  return ["dangerouslySetInnerHTML", ".innerHTML", "srcDoc", "insertAdjacentHTML"].some((needle) =>
+    source.includes(needle),
+  );
 }
+
+/** 能把内容当另一份文档载入的嵌入元素；SVG 预览器一个都不该渲染。 */
+const EMBEDDERS = "iframe, object, embed";
 
 // file-previewers「Markdown、表格、图片与 SVG」的场景「SVG 以图片方式加载」「被截断的 SVG」与「损坏的图片」的 svg 半边。
 describe("SvgPreviewer", () => {
@@ -173,6 +179,7 @@ describe("SvgPreviewer", () => {
     expect(image.getAttribute("src")).toBe(SVG_SRC);
     expect(image.getAttribute("alt")).toBe("logo.svg");
     expect(document.querySelector("svg, script")).toBeNull();
+    expect(document.querySelector(EMBEDDERS)).toBeNull();
     expect(createObjectURL).not.toHaveBeenCalled();
   });
 
@@ -184,11 +191,13 @@ describe("SvgPreviewer", () => {
     expect(screen.queryByRole("img")).toBeNull();
     expect(screen.queryByRole("button", { name: "查看源码" })).toBeNull();
     expect(document.querySelector("svg, script")).toBeNull();
+    expect(document.querySelector(EMBEDDERS)).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "图片视图" }));
     expect(screen.getByRole("img", { name: "logo.svg" }).getAttribute("src")).toBe(SVG_SRC);
     expect(screen.getByRole("button", { name: "查看源码" })).toBeTruthy();
     expect(sourceLines()).toEqual([]);
+    expect(document.querySelector(EMBEDDERS)).toBeNull();
   });
 
   it("被截断的 SVG 只显示源码：没有 img，也没有切换按钮", () => {
@@ -249,16 +258,24 @@ describe("SvgPreviewer", () => {
 
     expect(await screen.findAllByRole("row")).toHaveLength(SVG_LINES.length);
     expect(sourceLines()).toEqual(SVG_LINES);
+    expect(screen.getByText(/^文件超过预览上限，仅显示开头部分/)).toBeTruthy();
     expect(screen.queryByRole("img")).toBeNull();
     expect(screen.queryByRole("button", { name: "查看源码" })).toBeNull();
   });
 
-  it("经预览面板的损坏 svg：提示出现、下载链接仍在、仍可看源码", async () => {
-    render(svgPane("bad.svg", "plain words", false));
+  it("经预览面板的损坏 svg：提示出现且没有 Toast、下载链接仍在、仍可看源码", async () => {
+    // 与 main.tsx 同样挂在 ToastProvider 之下：通知区在场，「没有 Toast」才不是空话。
+    render(<ToastProvider>{svgPane("bad.svg", "plain words", false)}</ToastProvider>);
+    const toasts = screen.getByRole("region", { name: "通知" });
 
     fireEvent.error(await screen.findByRole("img", { name: "bad.svg" }));
     expect(screen.getByText("无法显示该图片")).toBeTruthy();
     expect(screen.queryByRole("img")).toBeNull();
+    // Toast 是通知区列表里的一项（Radix 的 li，类名 ui-toast，自身不带 role）；只在通知区里查，
+    // 不碰面板自己的 status。面板此时也不该有 alert。
+    expect(within(toasts).queryByRole("listitem")).toBeNull();
+    expect(document.querySelector(".ui-toast")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getByRole("link", { name: "下载 bad.svg" }).getAttribute("href")).toBe(
       "/api/workspaces/w1/download?path=uploads%2Fbad.svg",
     );
@@ -270,7 +287,10 @@ describe("SvgPreviewer", () => {
   it("previewers/ 下没有任何文件把内容当 HTML 解析", () => {
     expect(injectsHtml("<div dangerouslySetInnerHTML={{ __html: content }} />")).toBe(true);
     expect(injectsHtml("node.innerHTML = content;")).toBe(true);
+    expect(injectsHtml("<iframe srcDoc={content} />")).toBe(true);
+    expect(injectsHtml('node.insertAdjacentHTML("beforeend", content);')).toBe(true);
     expect(injectsHtml("<img alt={name} src={src} />")).toBe(false);
+    expect(injectsHtml("<iframe src={src} />")).toBe(false);
 
     const files = listRepoFiles("web/src/features/files/previewers", () => true);
     expect(files).toContain("web/src/features/files/previewers/svg.tsx");
