@@ -1124,3 +1124,37 @@
 - 变异：不可观察：复用 `parseCreateDirResult` 还是另写一份等价解析（行为相同，只有 jscpd 可能拦，不保证）。
 - 变异：不可观察：比对返回的 `path` 与 `to`——规格不要求，本刀不做，也不为它造用例。
 - 变异：不适用：穿越、符号链接、跨工作空间 id、他人工作空间 404、`sandbox.reject` 审计，都是服务端行为，已由 #1062 的 `workspaces-move.test.ts` 承担；客户端一侧只有「路径是数据」（用例②）与 id 编码（用例①）两条。
+
+## 16.2（deleteEntry）、16.4、16.5（#1084）
+
+- 不是 Critical Path 的服务端切片，但它是 Critical Path 路由的浏览器端：无路由、无 `sandbox.resolve`、路径只当数据。D-23 / #1286 的窗口本刀自己没有（读代码推出），属于 `server/src/workspaces/rest-entries.ts:158-181` 的删除路由与 `moveToTrash`（D22「实测（#1318）」第 1 项）；本刀不闭合，也不新增调用点（界面在 #1101）。一个评审席即可。
+- 前置已在 origin/master：0.1（#1049 关闭）、8.2（#1060 关闭，`rest-entries.ts:158` `app.delete(".../entries")`、`:179` 204）、#1079（`web/src/lib/api-files.ts` 19 行）。1.2 在 `tasks.md` 已勾选、#1051 关闭，不挡。
+- 需要 #1082 / #1083 先交付：`api-files.ts` 里的 `createFileMethods(onUnauthorized, transport)` 工厂与传输类型，并已把既有工作空间方法挪出 `api.ts`（今 777 / 800）。开工先重量 `api.ts`、`api-files.ts` 行数，再看传输类型有哪些字段。
+- `deleteEntry` 不能走 `request(…, 204)`：`parseJsonResponse`（`api.ts:501`）对空体 `response.json()` 抛错，变成 `requestFailed(204)`。须照 `api-sessions.ts:142-155` 的 `deleteSession` 形状：204 直接返回且不读正文；其它 2xx → `requestFailed(status)`；非 2xx → `parseJsonResponse` 抛信封错误。
+- 复制 `deleteSession` 是这个 204 形状的第三份（另一份是 `api.ts:557-572` 的 `logoutRequest`），jscpd 3% 全仓、无 ignore。最省做法：把 `logoutRequest(options, onUnauthorized)` 改成 `noContentRequest(path, options, onUnauthorized)`，`logout` 传 `"/api/auth/logout"`，再注入传输；`api.ts` 净增约 1 行，不动 `api-sessions.ts`。记入偏离记录，PR 前跑 jscpd。
+- 签名：`ApiClient` 加一行 `deleteEntry(workspaceId: string, path: string, options?: ApiRequestOptions): Promise<void>;`。请求为 `${workspaceEndpoint(workspaceId, "entries")}?path=${encodeURIComponent(path)}`，init 恰为 `{ credentials: "same-origin", method: "DELETE" }` 加可选 `signal`；`WorkspaceEndpoint` 联合加 `"entries"`。
+- 不带 `body`、`headers`、`cache`。带 `Content-Type: application/json` 而无体时 Fastify 默认解析器会答 400——这是框架行为的推断，本仓库未测（`server/test/workspaces-delete.test.ts:642` 只测了合法体与残缺体）。
+- 规格已定的分支，客户端不预检：空串 `path` 发出 `…?path=`，由服务端答 403（file-operations「拒绝项」：`path=`（空串）→ 403 `sandbox_denied`）；不 `trim`、不规范化 `..`、不重试。
+- 沿用现状并记偏离：孤立代理项使 `encodeURIComponent` 抛 `URIError`，方法以它拒绝（不是 `ApiError`，与 `listTree` 同）；中止与网络失败是 `requestFailed(0)`（`api.ts:493-499`）；500 信封原样成 `ApiError`。
+- 测试放新文件 `web/test/api-files-delete.test.ts`（`api-files.test.ts` 743 行；偏离 16.4「扩充」与 issue 的 PR Boundary，先例 #1079 / #1081）。只从 `../src/lib/api.js` 导入：`chat-module-layout.test.ts:40-44` 的 `importersOf` 也扫 `web/test`，直接导入 `api-files.js` 会让 `:64-65` 判红。
+- 用例：① id `ws/%#?+ 中`、path `报告 2026/a b#1&x.md`、带 `signal`，`toHaveBeenCalledWith("/api/workspaces/ws%2F%25%23%3F%2B%20%E4%B8%AD/entries?path=<编码>", { method: "DELETE", credentials: "same-origin", signal })`，无 `body`，resolve 为 `undefined`，204 响应的 `json` / `text` 未被调用；② 200 → `expectRequestFailure(…, 200)`；③ `it.each` 403 `sandbox_denied`、404 `not_found`、400 `bad_request`、500 保留 status / code / message（message 用任意字面量）；④ `unauthorizedResponseCases()` 三行各通知一次且入参是 `signal`；⑤ `fetch` 拒绝 → `requestFailed(0)`。
+- 不要整段粘贴 `api-sessions-metadata.test.ts:252-306`，`stubFetch`（`:45-49`）与 `unreadableResponse`（`:51-61`）是该文件的局部函数。新文件自写两三行等价 stub，或把 `unreadableResponse` 提到 `web/test/support.ts`（那就多动两个测试文件，记入偏离）。
+- 既有测试不必改：唯一的整客户端替身 `web/test/workspace-list-silent.test.tsx:23` 是 `as unknown as ApiClient`，加成员不破类型检查；`chat-module-layout.test.ts:68-73` 的 `import type` 断言对 `api-files.ts` 原样重跑。knip 由新测试经 `api.js` 的引用满足，`knip.json` 不改；`ui-layering.test.ts` 不动。
+- 「十个发请求的方法」本刀不成立：#1080（`listArchive`）仍 OPEN 且不在本批次序里，本刀合入后是九个。本刀只断言自己那一行，既有六个方法不回归，总数断言留给 #1080。issue 验收第二条按此读，记入偏离。
+- 复选框：16.2 由本刀勾（三个方法中最后合入）；16.1、16.4 不勾（等 #1080）。16.5 的三条变异分属 #1079、#1082、#1081，本刀合入时三刀都已合，按 issue 的字面规则可勾——是否等 #1080 一起勾请编排方定。
+- 与 issue 的差异（origin/master 为准）：PR Boundary 写 `api-files.test.ts`，实际用新文件；issue 称本刀是「序号最大的一刀」，但不是最后合入的；`tasks.md` 文首写 `api.ts` 778 行，实测 777。
+- 无 checklist 行（无界面变化，确认框在 #1101）；非配置切片，不碰 `docs/architecture/system.md` 第 9 节。与 #1082 / #1083 共用 `api-files.ts` 和 `api.ts`，按既定顺序叠放；与 #1085 无文件交集。
+- 变异：方法写成 `POST` 或 `GET` → 用例①的 `toHaveBeenCalledWith` 判红。
+- 变异：加 `body`（如 `JSON.stringify({ path })`）或 `Content-Type` 头 → 用例①判红（init 精确匹配，且断言无 `body`）。
+- 变异：`path` 不编码或改用 `encodeURI` → 用例①的地址字面量判红（`&`、`#`、`/`）。
+- 变异：id 段不编码（跨空间 id 注入向量）→ 用例①的 `ws%2F…` 判红。
+- 变异：端点名写错（`entry`、`file`）或把 path 放进路径段 → 用例①判红。
+- 变异：丢 `credentials: "same-origin"` 或不转发 `signal` → 用例①判红。
+- 变异：改用 `request(…, 204)` 或在 204 上读正文 → 用例①判红（`json` 被调用，或以 `requestFailed(204)` 拒绝）。
+- 变异：把任意 2xx 当成功 → 用例②判红。
+- 变异：非 2xx 时跳过 `parseJsonResponse`，直接抛 `requestFailed` → 用例③（code / message 丢失）与用例④的合法 401 行判红。
+- 变异：去掉 401 通知或通知两次 → 用例④判红。
+- 变异：网络失败原样抛出而不映射 → 用例⑤判红。
+- 变异：客户端对 path 做 `trim` 或 `normalize` → 仅当用例①的 path 带首尾空白才可观察；地址函数的同款断言在 `api-files-url.test.ts`，本刀不重复，标「不可观察」。（评审订正：这个理由不成立——`api-files-url.test.ts` 钉的是 `fileUrl` / `downloadUrl`，`deleteEntry` 不调用它们；删除是破坏性操作，改为在本刀的用例里用带首尾空白、`..` 段与两种 é 的 path 钉住，变异须判红。）
+- 变异：不可观察：地址经 `workspaceEndpoint` 还是内联拼接；204 分支走 `noContentRequest` 还是内联写法。
+- 变异：16.5 指定的三条变异不属本刀（#1079、#1082、#1081），PR 表里只引用，不重做。

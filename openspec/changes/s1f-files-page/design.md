@@ -18,7 +18,7 @@
   - `audit_events.kind` 只有格式约束（小写点分），新增审计种类不需要迁移。
   - `web/package.json` 没有任何高亮、PDF、办公文档、Notebook、压缩包相关的库；`hast-util-to-jsx-runtime` 已随 `@assistant-ui/react-markdown` 进了 `node_modules`。
   - 包体 `web/dist` JS 1,086,670 字节（gzip 326,274），`vite.config.ts` 没有 `manualChunks`，全站没有动态 `import()`。
-  - `web/src/lib/api.ts` 778 行、`md-render.ts` 797 行，离 800 行上限都很近。
+  - `web/src/lib/api.ts` 778 行（#1082 搬家之后 489 行，经 #1083、#1084 后 497 行）、`md-render.ts` 797 行，离 800 行上限都很近。
 - **约束**：ADR-0013（拷入层六类修改、应用层不引 Radix）；ADR-0010（omp 以专用系统用户运行，凭证不进 omp 可读环境）；ADR-0011（界面只显示逻辑路径）；
   `CONTEXT.md` 不变量 3（一切路径过 `resolve`）；功能验收清单的行由 owner 签。
 - **实现与归档次序**：C `s1f-session-list-temp-space` → S1g `s1g-composer-capabilities` → 本 change。上面的「现状」是 master 的代码事实；本 change 的规格 delta 里凡与 C 或 S1g 同名的 MODIFIED，都以「主规格 → C → S1g」叠加后的文本为底再加本 change 的增量（见 D25 的重叠表）。
@@ -494,7 +494,7 @@ D-19 至 D-22 是 2026-10-06 的决定；D-23 至 D-25 是 owner 2026-10-09 的�
 - **整条替换的规格冲突** → 本 change 的十三条重叠条文以 C、S1g 当前的 delta 为底（D25 的表）。它们在实现期若再改这些条文，本 change 的同名条文要跟着改——由 tasks 0.1（开工前）与 0.2（归档前）的对底发现：diff 里出现表外的差异就先改本 change 的 delta 与表。
 - **走查的请求 oracle** → 现有「零非 `baseURL` 源请求」会被预览来源打破；本 change 把例外限定为「预览令牌响应给出的那个来源」，其余仍为零。
 - **包体** → 主包多出 `react-resizable-panels` 与侧边栏、文件操作的代码；高亮、Notebook 等在按需块里。数字在收尾时量并写进 ADR-0013 增补。
-- **800 行上限** → `api.ts`（778）不再加方法，新方法进 `api-files.ts`；`md-render.ts`（797）不改；`ui-walk-sessions.spec.ts`（681）与 `ui-walk-layout.ts`（793）不加行，新走查步骤进新 helper 文件。
+- **800 行上限** → `api.ts`（当时 778，#1082 搬家之后 489，经 #1083、#1084 后 497）不再加方法，新方法进 `api-files.ts`；`md-render.ts`（797）不改；`ui-walk-sessions.spec.ts`（681）与 `ui-walk-layout.ts`（793）不加行，新走查步骤进新 helper 文件。
 
 ## Migration Plan
 
