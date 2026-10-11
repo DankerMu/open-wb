@@ -13,6 +13,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type AssemblyDependencies, createApp } from "../src/app.js";
 import { openDb } from "../src/core/db/index.js";
+import { createPreviewTokens } from "../src/preview/tokens.js";
 import { appAssemblyOf, resolveServerConfig, sessionRuntimeOf } from "../src/server.js";
 import { TokenRegistry } from "../src/sessions/tokens.js";
 import { settle } from "./session-approval-helpers.js";
@@ -155,6 +156,46 @@ describe("appAssemblyOf (L2)", () => {
     expect(Object.hasOwn(assembly, "upstream")).toBe(false);
     expect(typeof assembly.log).toBe("function");
     expect(upstream.upstream).toEqual({ baseUrl: "http://127.0.0.1:9/v1", apiKey: "k-652" });
+    expect(stdout).not.toHaveBeenCalled();
+    expect(stderr).not.toHaveBeenCalled();
+  });
+
+  it("carries the preview dependencies only when given the token registry and port, origin only when configured", () => {
+    const stdout = spyWrites(process.stdout);
+    const stderr = spyWrites(process.stderr);
+    const tokens = createPreviewTokens();
+    const port = (): number => 4173;
+    const bare = resolveServerConfig({}, ENTRY);
+    const configured = resolveServerConfig(
+      {
+        PREVIEW_ORIGIN: "https://preview.example.test:8443",
+        PREVIEW_DOCUMENT_MAX_BYTES: "12345",
+      },
+      ENTRY,
+    );
+
+    expect(Object.hasOwn(appAssemblyOf(bare), "preview")).toBe(false);
+    expect(Object.hasOwn(appAssemblyOf(configured), "preview")).toBe(false);
+
+    const byDefault = appAssemblyOf(bare, { tokens, port }).preview;
+    expect(byDefault).toEqual({
+      tokens,
+      port,
+      documentMaxBytes: 104_857_600,
+      officeAvailable: false,
+    });
+    expect(Object.hasOwn(byDefault ?? {}, "origin")).toBe(false);
+
+    const withOrigin = appAssemblyOf(configured, { tokens, port }).preview;
+    expect(withOrigin).toEqual({
+      tokens,
+      port,
+      origin: "https://preview.example.test:8443",
+      documentMaxBytes: 12_345,
+      officeAvailable: false,
+    });
+    expect(withOrigin?.tokens).toBe(tokens);
+    expect(withOrigin?.port).toBe(port);
     expect(stdout).not.toHaveBeenCalled();
     expect(stderr).not.toHaveBeenCalled();
   });

@@ -137,7 +137,7 @@ describe("production entry lifecycle", () => {
     }
   }, 90_000);
 
-  it("records native exit before listener close before database close", async () => {
+  it("records native exit before the main listener's close before database close", async () => {
     const compiled = await compileServerEntry();
     const port = await reserveWildcardPort();
     const previewPort = await reserveWildcardPort();
@@ -159,7 +159,7 @@ describe("production entry lifecycle", () => {
       exitCode = await server.stop();
       // 预览监听器先绑定、先关闭；主监听器仍在 runtime 退出之后关，DB 最后。
       expect(readFileSync(tracePath, "utf8")).toBe(
-        `listening:${previewPort}\nlistening:${port}\nlistener-close:${previewPort}\nruntime-exit\nlistener-close:${port}\ndb-close\n`,
+        `listening:127.0.0.1:${previewPort}\nlistening:127.0.0.1:${port}\nlistener-close:${previewPort}\nruntime-exit\nlistener-close:${port}\ndb-close\n`,
       );
       expect(exitCode).toBe(0);
     } finally {
@@ -244,7 +244,7 @@ describe("production entry lifecycle", () => {
         providers: { workbuddy: { baseUrl: `http://127.0.0.1:${port}/v1` } },
       });
       expect(readFileSync(tracePath, "utf8")).toBe(
-        `listening:${previewPort}\nlistening:${port}\nlistener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
+        `listening:127.0.0.1:${previewPort}\nlistening:127.0.0.1:${port}\nlistener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
       );
       await expectBindable("127.0.0.1", port);
       await expectBindable("127.0.0.1", previewPort);
