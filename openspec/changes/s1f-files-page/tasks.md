@@ -519,7 +519,7 @@ Minimal mergeable slice: 19.1 的 hook 与测试先合；`frame.tsx` 的网页�
 - [x] 20.1 `previewers/media.tsx`：`audio` / `video`（`controls`、`preload="metadata"`、`src` 为 `fileUrl`、`error` → `无法播放该文件`）。
   实施注记见 `implementation-notes.md`「20.1，及分摊的 20.4 / 20.5 / 20.6 音视频部分（#1095）」。
 - [ ] 20.2 `previewers/notebook.tsx`：nbformat 4 的只读渲染（design D6 与 file-previewers「Notebook」）；Markdown 单元经 `mdRender`（只调用，不改 `md-render.ts`）；代码单元复用 18.1 的着色；输出按类型；解析失败退回源码。
-- [ ] 20.3 `previewers/archive.tsx`：`listArchive` 的表格、`共 N 项` / `仅显示前 N 项`、空包、415。
+- [x] 20.3 `previewers/archive.tsx`：`listArchive` 的表格、`共 N 项` / `仅显示前 N 项`、空包、415。
   压缩包至此不再走 17.2 的过渡规则，17.2 改过的两处 zip 断言同刀再改（记入偏离记录）：`web/test/files-page.test.tsx:162-169` 与 `files-empty-layout.test.tsx` 的 E2 里，选中 zip 由「一次 `file` 请求、415、`该类型不支持预览`」改为「一次 `archive` 请求、零次 `file` 请求、显示成员列表」
   （files-web「目录树与预览」的场景「一次浏览」；夹具补 `archive` 路由的响应）。两处都把原来 `await screen.findByText("该类型不支持预览", …)` 那一行换成 `await screen.findByText(<夹具里的一个成员路径>)`，请求次数的断言排在它之后（成员列表要等压缩包模块加载与 `listArchive` 两步，不能同步取）。E2 的另一半（空目录文案）不动。组 19、20 的其余类别（pdf、办公文档、音视频、Notebook）在写作时的既有测试里没有用例，各自合入时以开工的 grep 为准。
   实施注记见 `implementation-notes.md`「20.3、20.4 / 20.5 / 20.6 的压缩包分摊部分（#1097）」。
