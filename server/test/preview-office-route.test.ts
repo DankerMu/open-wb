@@ -7,7 +7,8 @@
  * status codes and its six texts, copied as literals, and the bytes written here. The path and
  * token boundary of the route is in `preview-office-route-boundary.test.ts`.
  */
-import { Agent, get as httpGet } from "node:http";
+import { writeFileSync } from "node:fs";
+import { Agent, get as httpGet, type IncomingMessage } from "node:http";
 import { connect as connectTcp, type Socket } from "node:net";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -392,6 +393,22 @@ describe("office preview route: 转换结果到状态码", () => {
     );
   });
 
+  it("answers 502 with the failed text when what the converter hands back is a directory, not a file", async () => {
+    // Exists, so "is it there" alone would send it on: only the regular-file half refuses it.
+    const directory = tempDir();
+    const converter = standIn(() => Promise.resolve(directory));
+    await withPreviewWorld(
+      async (world) => {
+        const token = await tokenForA(world);
+        seed(world, "a.docx");
+
+        expectOfficeFailure(await rawAnswer(world.origin, `/o/${token}/a.docx`), 502, TEXT.failed);
+        expect(converter.convert).toHaveBeenCalledTimes(1);
+      },
+      { converter },
+    );
+  });
+
   it("answers the empty 500 with the failure headers when convert fails with anything else, echoing nothing of the error", async () => {
     const converter = standIn(() =>
       Promise.reject(new Error("ENOENT: /srv/cache/work/zq-unique-marker")),
@@ -531,8 +548,64 @@ describe("office preview route: 客户端断开即中止", () => {
     }
   });
 
-  it("leaves the signal unaborted and no listener behind on a connection that is reused after the conversion settled", async () => {
-    const converter = standIn();
+  it("hands convert an already aborted signal when the connection is closed before the handler runs, and writes no byte", async () => {
+    // The stand-in notes the signal's state at the moment of the call: a `close` listener attached
+    // to a socket that is already destroyed may never fire, so only the check made on the spot
+    // can have aborted it by then.
+    const abortedAtCall: unknown[] = [];
+    const converter = standIn((_absInput, signal) => {
+      abortedAtCall.push(signal?.aborted);
+      return Promise.reject(new OfficeConvertError("aborted"));
+    });
+    const wired = wire();
+    try {
+      await withPreviewWorld(
+        async (world) => {
+          const token = await tokenForA(world);
+          seed(world, "a.docx");
+
+          const outcome = await rawAnswer(world.origin, `/o/${token}/a.docx`).then(
+            (answer) => ({ answer }),
+            (error: unknown) => ({ error }),
+          );
+          await until(() => converter.convert.mock.calls.length === 1, "convert to be called");
+          await delay(50);
+
+          expect(abortedAtCall).toEqual([true]);
+          expect(converter.convert).toHaveBeenCalledTimes(1);
+          if ("answer" in outcome) {
+            expect(outcome.answer.body).toBe("");
+            expect(Number.isNaN(outcome.answer.status)).toBe(true);
+          }
+          expect(wired.sockets[0]?.bytesWritten).toBe(0);
+          expect(wired.rejections).toEqual([]);
+        },
+        {
+          converter,
+          beforeListen: (preview) => {
+            wired.beforeListen(preview);
+            // The server's side of the connection goes away as the request is announced — before
+            // the listener's asynchronous method hook, so before the route handler.
+            preview.server.on("request", (request: IncomingMessage) => request.socket.destroy());
+          },
+        },
+      );
+    } finally {
+      wired.release();
+    }
+  });
+
+  it("leaves the signal unaborted and no listener behind on a connection that is reused after conversions that succeeded and that failed", async () => {
+    const pdf = join(tempDir(), "kept.pdf");
+    writeFileSync(pdf, PDF_BYTES);
+    // Every third conversion fails: a listener taken off only after a success would stay behind.
+    let calls = 0;
+    const converter = standIn(() => {
+      calls += 1;
+      return calls % 3 === 0
+        ? Promise.reject(new OfficeConvertError("failed"))
+        : Promise.resolve(pdf);
+    });
     const wired = wire();
     const agent = new Agent({ keepAlive: true, maxSockets: 1 });
     const fetchOver = (url: string): Promise<number> =>
@@ -551,9 +624,11 @@ describe("office preview route: 客户端断开即中止", () => {
           expect(await fetchOver(`${world.origin}/w/${token}/readme.md`)).toBe(200);
           const socket = wired.sockets[0];
           const baseline = socket?.listenerCount("close");
+          const statuses: number[] = [];
           for (let round = 0; round < 12; round += 1) {
-            expect(await fetchOver(`${world.origin}/o/${token}/a.docx`)).toBe(200);
+            statuses.push(await fetchOver(`${world.origin}/o/${token}/a.docx`));
           }
+          expect(statuses).toEqual([200, 200, 502, 200, 200, 502, 200, 200, 502, 200, 200, 502]);
 
           // One connection carried all thirteen requests.
           expect(wired.sockets).toHaveLength(1);

@@ -382,7 +382,8 @@ describe("转换缓存：启动清空的超时与关停终止（owner D-26）", 
 
     const elapsed = performance.now() - startedAt;
     expect(elapsed).toBeGreaterThanOrEqual(9_999);
-    expect(elapsed).toBeLessThan(20_000);
+    // 上界压在 10 秒 + 2 秒宽限之内：时限被改长（比如 15 秒）或落到 SIGKILL 升级都会越过它。
+    expect(elapsed).toBeLessThan(12_000);
     expectTerminated(on, logs, await recordedPid(on), "SIGTERM");
   }, 30_000);
 
@@ -395,7 +396,8 @@ describe("转换缓存：启动清空的超时与关停终止（owner D-26）", 
 
     const elapsed = performance.now() - startedAt;
     expect(elapsed).toBeGreaterThanOrEqual(SHORT_TIMEOUT_MS + 2_000 - 2);
-    expect(elapsed).toBeLessThan(15_000);
+    // 1 秒超时 + 2 秒宽限 = 3 秒；宽限被改长（比如 5 秒）就会越过这个上界。
+    expect(elapsed).toBeLessThan(5_000);
     expectTerminated(on, logs, await recordedPid(on), "SIGKILL");
   }, 20_000);
 
@@ -434,12 +436,34 @@ describe("转换缓存：启动清空的超时与关停终止（owner D-26）", 
     expectTerminated(on, logs, pid, "SIGTERM");
   }, 20_000);
 
-  it("空闲时调用无事发生：之前、之后调用 stopWorkClear 都不抛，也不影响随后的一次正常清空", async () => {
+  it("先于清空到达的关停不丢：stopWorkClear 之后的 clearWork 不启动 sudo，按失败记恰一行日志，本进程的删除照常", async () => {
     const on = hangingBench();
+    // 假 sudo 若被启动，会立刻以 0 退出并留下记录。
     rmSync(join(on.cacheDir, "sudo.exit"));
     const { logs, cleanup } = cleanupOf(on);
 
     expect(cleanup.stopWorkClear()).toBe(undefined);
+    await expect(cleanup.clearWork()).resolves.toBe(undefined);
+    expect(cleanup.stopWorkClear()).toBe(undefined);
+
+    expect(on.launches).toEqual([]);
+    expect(existsSync(join(on.cacheDir, "sudo.record.json"))).toBe(false);
+    expect(logs).toHaveLength(1);
+    expect(JSON.stringify(logs[0])).toBe(WORK_CLEAR_FAILED);
+    expect(readdirSync(on.work)).toEqual([]);
+    expect(modeOf(on.work)).toBe(0o2770);
+
+    // 不可撤回：再清一次仍不启动，那一次自己再记一行。
+    await expect(cleanup.clearWork()).resolves.toBe(undefined);
+    expect(on.launches).toEqual([]);
+    expect(logs).toHaveLength(2);
+  });
+
+  it("清空落定之后才调用 stopWorkClear：不抛，不多记日志，已完成的那次清空不受影响", async () => {
+    const on = hangingBench();
+    rmSync(join(on.cacheDir, "sudo.exit"));
+    const { logs, cleanup } = cleanupOf(on);
+
     await expect(cleanup.clearWork()).resolves.toBe(undefined);
     expect(cleanup.stopWorkClear()).toBe(undefined);
 
@@ -450,7 +474,7 @@ describe("转换缓存：启动清空的超时与关停终止（owner D-26）", 
     expect(readdirSync(on.work)).toEqual([]);
   });
 
-  it("同 uid 模式没有 sudo 可终止：stopWorkClear 不抛，没有启动任何进程", async () => {
+  it("同 uid 模式没有 sudo 可终止：stopWorkClear 之前、之后的清空都不启动进程、不记日志", async () => {
     const on = hangingBench();
     const logs: unknown[] = [];
     const cleanup = createOfficeCleanup({
@@ -462,6 +486,8 @@ describe("转换缓存：启动清空的超时与关停终止（owner D-26）", 
 
     await cleanup.clearWork();
     expect(cleanup.stopWorkClear()).toBe(undefined);
+    // 没有那条命令，也就没有「该命令失败」：关停之后的清空同样不记日志。
+    await cleanup.clearWork();
 
     expect(on.launches).toEqual([]);
     expect(logs).toEqual([]);

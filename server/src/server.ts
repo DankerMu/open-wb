@@ -327,7 +327,7 @@ interface OwnedResources {
   preview: FastifyInstance | undefined;
   /** 办公文档转换器：先于两个监听器关闭。 */
   converter: OfficeConverter | undefined;
-  /** 终止启动时那条 `sudo … find`；没有在途的即无事发生。 */
+  /** 终止启动时那条 `sudo … find`；调用过之后 `clearWork` 不再启动它。 */
   stopWorkClear: (() => void) | undefined;
   /** `clearWork` 落定之后才为真：此前 `/o/` 不启动转换。 */
   officeReady: boolean;
@@ -489,6 +489,11 @@ async function publishStarted(
   });
   owned.stage = "host_overlay";
   await writeHostOverlay(config.ompStateDir);
+  // 上面两步等待期间收到的信号：`releaseOwned` 的 `stopWorkClear` 已经调用过，那时没有在途的
+  // `sudo`。不建目录、不清空、不记日志，与前面几处核对同样直接返回。
+  if (owned.signalReceived) {
+    return;
+  }
   owned.stage = "preview_cache";
   await preparePreviewCache(config.previewCacheDir, cleanup);
   owned.stage = "publish";
@@ -528,7 +533,7 @@ async function publishStarted(
  * 预览缓存目录（office-preview「转换缓存」）：三个目录各自校正到精确 mode，再清空 `work` 的遗留。
  * `ensureOwnedDir` 不递归，所以先建缺失的父目录（与 DB 父目录同一做法）。同时配置了 `OMP_USER` 与
  * `OFFICE_BIN` 时 `clearWork` 先以 omp 用户执行那条固定参数的 `sudo … find`（owner D-24；有 10 秒
- * 时限，关停时由 `stopWorkClear` 终止，owner D-26），否则不提权、不 spawn；两种情况下都再删本进程
+ * 时限，关停时由 `stopWorkClear` 终止，此后也不再启动，owner D-26），否则不提权、不 spawn；两种情况下都再删本进程
  * 删得掉的条目。`clearWork` 永不 reject：它失败只记一行 `preview_work_clear_failed`，不是启动失败。
  */
 async function preparePreviewCache(cacheDir: string, cleanup: OfficeCleanup): Promise<void> {

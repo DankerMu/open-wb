@@ -183,6 +183,49 @@ describe("production entry with the office converter", () => {
     }
   }, 60_000);
 
+  it("runs one conversion at a time under OFFICE_CONVERT_CONCURRENCY=1: the second starts only after the first has settled", async () => {
+    const entry = await startEntry({
+      prepare: makeSandboxRoot,
+      env: () => ({ OFFICE_BIN: FAKE_SOFFICE, OFFICE_CONVERT_CONCURRENCY: "1" }),
+    });
+    const { server } = entry;
+    try {
+      await server.waitForStarted();
+      const workspace = await openWorkspace(entry);
+      // `@gate`：假 soffice 写好输出后一直等 `<输入路径>.release` 出现才退出——第一个转换何时
+      // 落定由本用例决定，不靠睡眠时长。
+      writeFileSync(join(workspace.root, "first@gate.docx"), "not a real office document");
+      writeFileSync(join(workspace.root, "second.docx"), "not a real office document");
+
+      let firstSettled = false;
+      let secondSettled = false;
+      const first = settleOf(officeUrl(workspace.base, "first@gate.docx")).finally(() => {
+        firstSettled = true;
+      });
+      await until(() => sofficeRecords(entry).length === 1, 10_000, "the gated fake soffice");
+      const second = settleOf(officeUrl(workspace.base, "second.docx")).finally(() => {
+        secondSettled = true;
+      });
+      // 1 秒：并发若不是 1，第二个假 soffice 此时早已启动（一次 node 冷启动加写记录，约 0.1 秒）
+      // 并答完。这个余量只决定「并发被写死成 2」测不测得出；并发确为 1 时，第一个在放行之前
+      // 不可能落定，下面三条不会因为机器慢而误红。
+      await delay(1_000);
+      expect(sofficeRecords(entry)).toHaveLength(1);
+      expect(firstSettled).toBe(false);
+      expect(secondSettled).toBe(false);
+
+      writeFileSync(join(workspace.root, "first@gate.docx.release"), "");
+      expect(await first).toEqual({ status: 200 });
+      expect(await second).toEqual({ status: 200 });
+      expect(sofficeRecords(entry)).toHaveLength(2);
+
+      expect(await server.stop()).toBe(0);
+      expect(applicationStderr(server.stderr())).toBe("");
+    } finally {
+      await server.dispose();
+    }
+  }, 60_000);
+
   it("sweeps the conversion cache once at startup and reports the converter unavailable without OFFICE_BIN", async () => {
     const now = Date.now();
     const entry = await startEntry({
@@ -242,9 +285,35 @@ describe("production entry clearing work/ as the omp user", () => {
     "",
   ].join("\n");
 
-  it("starts no conversion while the sudo find is still running, and on SIGTERM terminates it, logs one line and never publishes", async () => {
-    const entry = await startEntry({
-      hook: SETPRIV_PRESENT_HOOK,
+  /**
+   * 再加一段：把写 `models.yml` 的那次 `rename` 扣住——先留下 `<根>/models.hold`，等
+   * `<根>/models.release` 出现才放行（根取自 `PREVIEW_CACHE_DIR` 的上一级；最多等 20 秒）。入口因此
+   * 停在 `publishStarted` 里 `writeManagedModelsYml` 的等待上，先于 `preparePreviewCache`。
+   */
+  const HOLD_MODELS_YML_HOOK = [
+    SETPRIV_PRESENT_HOOK,
+    "const { dirname, join } = require('node:path');",
+    "const promises = require('node:fs/promises');",
+    "const root = dirname(process.env.PREVIEW_CACHE_DIR);",
+    "const nativeRename = promises.rename;",
+    "promises.rename = async function rename(from, to) {",
+    "  if (String(to).endsWith('/models.yml')) {",
+    "    fs.writeFileSync(join(root, 'models.hold'), '');",
+    "    const deadline = Date.now() + 20000;",
+    "    while (!fs.existsSync(join(root, 'models.release')) && Date.now() < deadline) {",
+    "      await new Promise((resolve) => setTimeout(resolve, 10));",
+    "    }",
+    "  }",
+    "  return nativeRename.call(this, from, to);",
+    "};",
+    "syncBuiltinESMExports();",
+    "",
+  ].join("\n");
+
+  /** `OMP_USER` 模式的入口：假 `sudo` 在 `PATH` 首项，`work/` 下有一项上一次运行的遗留。 */
+  function startOmpEntry(hook: string, sudoExit?: string): Promise<Entry> {
+    return startEntry({
+      hook,
       prepare: (root) => {
         makeSandboxRoot(root);
         mkdirSync(join(root, "fake-bin"));
@@ -252,7 +321,9 @@ describe("production entry clearing work/ as the omp user", () => {
         // 上一次运行的遗留：本进程删得掉，但要等 sudo 结束之后才删。
         mkdirSync(join(root, "preview-cache", "work", "stale"), { recursive: true });
         writeFileSync(join(root, "preview-cache", "work", "stale", "x"), "stale");
-        writeFileSync(join(root, "preview-cache", "sudo.exit"), "hang");
+        if (sudoExit !== undefined) {
+          writeFileSync(join(root, "preview-cache", "sudo.exit"), sudoExit);
+        }
       },
       env: (root) => ({
         OMP_USER: "omp",
@@ -261,6 +332,10 @@ describe("production entry clearing work/ as the omp user", () => {
         PATH: `${join(root, "fake-bin")}:${dirname(process.execPath)}:/usr/bin:/bin`,
       }),
     });
+  }
+
+  it("starts no conversion while the sudo find is still running, and on SIGTERM terminates it, logs one line and never publishes", async () => {
+    const entry = await startOmpEntry(SETPRIV_PRESENT_HOOK, "hang");
     const { server, port, previewPort } = entry;
     const cache = join(entry.root, "preview-cache");
     try {
@@ -315,6 +390,38 @@ describe("production entry clearing work/ as the omp user", () => {
       const trace = entry.readTrace().split("\n");
       expect(trace.filter((line) => line === "runtime-exit")).toHaveLength(1);
       expect(trace.filter((line) => line !== "runtime-exit").join("\n")).toBe(
+        `listening:127.0.0.1:${previewPort}\nlistening:127.0.0.1:${port}\n` +
+          `listener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
+      );
+    } finally {
+      await server.dispose();
+    }
+  }, 60_000);
+
+  it("never starts the sudo find when SIGTERM arrives before the clearing step: nothing is cleared or logged, and nothing is published", async () => {
+    // 没有 `sudo.exit`：假 sudo 若被启动，约 150 毫秒后以 0 退出并留下 `sudo.record.json`。
+    const entry = await startOmpEntry(HOLD_MODELS_YML_HOOK);
+    const { server, port, previewPort } = entry;
+    const cache = join(entry.root, "preview-cache");
+    try {
+      // 入口停在写 models.yml 的等待上：两个监听器已在监听，清空那一步还没到。
+      await waitForFile(join(entry.root, "models.hold"), 15_000);
+      expect(existsSync(join(cache, "sudo.record.json"))).toBe(false);
+      expect(server.stdout()).toBe("");
+
+      const stopping = server.stop();
+      // `db-close` 是关停序列的最后一步：此时 `stopWorkClear` 早已调用过，而没有在途的 sudo。
+      await until(() => entry.readTrace().includes("db-close\n"), 10_000, "the shutdown to finish");
+      writeFileSync(join(entry.root, "models.release"), "");
+      expect(await stopping).toBe(0);
+
+      expect(existsSync(join(cache, "sudo.record.json"))).toBe(false);
+      // 入口在清空那一步之前就返回：不清空、不记日志，遗留留给下一次启动。
+      expect(applicationStderr(server.stderr())).toBe("");
+      expect(readdirSync(join(cache, "work"))).toEqual(["stale"]);
+      expect(server.stdout()).toBe("");
+      // 没有任何子进程被启动过（没有 runtime-exit 行）。
+      expect(entry.readTrace()).toBe(
         `listening:127.0.0.1:${previewPort}\nlistening:127.0.0.1:${port}\n` +
           `listener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
       );
