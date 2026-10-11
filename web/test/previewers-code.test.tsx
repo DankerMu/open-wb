@@ -98,7 +98,24 @@ describe("源码视图：行号与字面值", () => {
     ]);
     expect(categoryOf(container, "/* a")).toBe("hljs-comment");
     expect(categoryOf(container, "b */")).toBe("hljs-comment");
+    expect(categoryOf(container, "const")).toMatch(/^hljs-/);
     expect(categoryOf(container, "const")).not.toBe("hljs-comment");
+  });
+
+  it("嵌在子语言里的跨行记号也按行切开：x.html 的 script 里跨两行的块注释，每行文字与源码相同，注释的两行各带注释类别", async () => {
+    const text = "<script>\n/* a\nb */\nconst x = 1;\n</script>";
+    const { container } = render(<CodeView name="x.html" text={text} />);
+    await flush();
+    await flush();
+
+    const lines = sourceLines(container);
+    expect(lines.map((line) => line.text)).toEqual(text.split("\n"));
+    expect(lines.map((line) => line.number)).toEqual(["1", "2", "3", "4", "5"]);
+    expect(lines[1]?.colored).toBeGreaterThan(0);
+    expect(lines[2]?.colored).toBeGreaterThan(0);
+    expect(categoryOf(container, "/* a")).toBe("hljs-comment");
+    expect(categoryOf(container, "b */")).toBe("hljs-comment");
+    expect(document.querySelector("script")).toBeNull();
   });
 
   it("跨行记号中间的空行仍是一个不换行空格", async () => {
@@ -122,6 +139,8 @@ describe("源码视图：行号与字面值", () => {
       { number: "3", text: '  "b": "x"' },
       { number: "4", text: "}" },
     ]);
+    expect(categoryOf(container, "1")).toMatch(/^hljs-/);
+    expect(categoryOf(container, '"x"')).toMatch(/^hljs-/);
     expect(categoryOf(container, "1")).not.toBe(categoryOf(container, '"x"'));
   });
 });
