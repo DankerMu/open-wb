@@ -486,7 +486,7 @@ Minimal mergeable slice: 17.1 + 17.3（搬家、加载占位与失败重试、�
   实施注记见 `implementation-notes.md`「18.2，含分摊的 18.5 / 18.6 条款（#1088）」。
 - [x] 18.3 `previewers/svg.tsx`：`data:` 地址的 `img`、图片 / 源码切换、截断时只显示源码、`img` 的 `error` → `无法显示该图片`（仍可看源码）。
   实施注记见 `implementation-notes.md`「18.3，含分摊的 18.5 / 18.6 / 18.7 条款（#1089）」。
-- [ ] 18.4 图片预览接受六种类型；`img` 的 `error` → `无法显示该图片`、移除破图、释放 Blob 地址、保留下载链接。
+- [x] 18.4 图片预览接受六种类型；`img` 的 `error` → `无法显示该图片`、移除破图、释放 Blob 地址、保留下载链接。
   18.2–18.4 不改动任何既有用例：写作时 `grep -nE '\.(tsv|svg|gif|webp|bmp|ico)' web/test/files-*.tsx web/test/preview.test.tsx web/e2e/*.ts` 零命中（`svg` 今天不在白名单里，没有用例选它）；既有图片用例（`preview.test.tsx:441`、`files-page.test.tsx:441`、`files-concurrency.test.tsx:155`）不触发 `error` 事件，17.1 之后已是 `findBy`。
   实施注记见 `implementation-notes.md`「18.4，含分摊的 18.5 / 18.6 / 18.7 条款（#1090）」。
 - [ ] 18.5 测试（新文件 `web/test/previewers-code.test.tsx`、`previewers-table-svg.test.tsx`；两个文件静态导入各自的预览器模块直接渲染，行号、文本、`img` 的 `src` 这类模块同步渲染的内容同步断言，着色元素一律 `await waitFor(…)` 取，「先内容后颜色」以 `vi.mock` 把 `previewers/index.ts` 的高亮加载函数换成可手动放行的 promise；经 `PreviewPane` 走的用例按文首纪律 `findBy`）：file-previewers「源码视图与语法高亮」三个场景、「Markdown、表格、图片与 SVG」四个场景（含「损坏的图片」）；静态断言 `previewers/` 下没有 `dangerouslySetInnerHTML`。
