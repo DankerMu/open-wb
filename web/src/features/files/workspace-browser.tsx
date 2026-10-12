@@ -29,9 +29,10 @@
  *   creating a folder would go through the same gate. Dropping it requests the root if that was
  *   never loaded and replays nothing else.
  * - Entry operations: the row menu, its dialog and the request are `useEntryOperations`
- *   (`entry-ops.tsx`); after a rename `followEntry` moves the listings, the expanded set and the
- *   selection to the new path without walking again, and after a delete drops them (a deleted
- *   current file or ancestor: `onPathChange(null)`). No row menu while `onlyPaths` is set.
+ *   (`entry-ops.tsx`); after a rename or a move `useFollowEntry` (`follow-entry.ts`) moves the
+ *   listings, the expanded set and the selection to the new path without walking again, and after a
+ *   delete drops them (a deleted current file or ancestor: `onPathChange(null)`). No row menu while
+ *   `onlyPaths` is set.
  */
 import {
   type ReactNode,
@@ -48,10 +49,6 @@ import {
   type DirectoryCache,
   loadedDirectoryPaths,
   markedRows,
-  movedCache,
-  movedKeys,
-  movedPath,
-  movedTarget,
   normalizedPath,
   parentPath,
   refreshLayers,
@@ -60,10 +57,11 @@ import {
 } from "./browser-paths.js";
 import { type BrowserLayout, emptyNote, WorkspaceColumns } from "./columns.js";
 import { DirectoryDialog } from "./dialogs.js";
-import { abandonRequests, useEntryOperations } from "./entry-ops.js";
+import { useEntryOperations } from "./entry-ops.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
 import { logicalPath } from "./file-meta.js";
 import { useFolderDialog } from "./folder-dialog.js";
+import { useFollowEntry } from "./follow-entry.js";
 import {
   failedPreview,
   immediatePreview,
@@ -589,49 +587,27 @@ export function WorkspaceBrowser({
     [directoryErrors, loadDirectory, selectFile],
   );
 
-  /**
-   * `from` 已被改名为 `to`，或已被删除（`to` 为 `null`），界面跟过去而不重新逐级展开。次序：放弃 `from`
-   * 之下在途的目录请求；列表缓存、展开集合、目录的失败文案与进行中的定位换到新路径（`movedKeys`；删除时
-   * `from` 之下的都丢掉、定位放弃）；当前文件在 `from` 之下时在新路径重新选中一次（按新名的类别重取：
-   * `file`、`archive` 或预览来源的地址）并上报，删除时清掉选中并上报 `null`——选中在前、上报在后，上报
-   * 回来的 `path` 不另起定位；重新列出 `to`（删除：`from`）的父目录；已展开而没有列表的新路径补一次请求。
-   */
-  const followEntry = useCallback(
-    (from: string, to: string | null) => {
-      abandonRequests(directoryRequestsRef.current, from);
-      setLoadingPaths(
-        (current) => new Set([...current].filter((path) => movedPath(path, from, to) === path)),
-      );
-      cacheRef.current = movedCache(cacheRef.current, from, to);
-      setDirectories(cacheRef.current);
-      const expanded = movedKeys(expandedPathsRef.current.entries(), from, to);
-      expandedPathsRef.current = new Set(expanded.map(([path]) => path));
-      setExpandedPaths(expandedPathsRef.current);
-      setDirectoryErrors((current) =>
-        Object.fromEntries(movedKeys(Object.entries(current), from, to)),
-      );
-      failedDirectoriesRef.current = new Map(movedKeys(failedDirectoriesRef.current, from, to));
-      revealRef.current = movedTarget(revealRef.current, from, to);
-      const selected = selectedFileRef.current;
-      const next = movedTarget(selected, from, to);
-      if (selected && !next) {
-        clearSelection();
-        onPathChange(null);
-      } else if (next && next.path !== selected?.path) {
-        const name = next.path.slice(next.path.lastIndexOf("/") + 1);
-        selectFile({ ...next.entry, name }, next.path);
-        onPathChange(next.path);
-      }
-      loadDirectory(parentPath(to ?? from), true);
-      for (const [path] of expanded) {
-        if (to !== null && movedPath(path, to, null) === null) {
-          loadDirectory(path);
-        }
-      }
-    },
-    [clearSelection, loadDirectory, onPathChange, selectFile],
-  );
-  const operations = useEntryOperations(client, workspaceId, followEntry);
+  const followEntry = useFollowEntry({
+    cacheRef,
+    clearSelection,
+    directoryRequestsRef,
+    expandedPathsRef,
+    failedDirectoriesRef,
+    loadDirectory,
+    onPathChange,
+    revealRef,
+    selectFile,
+    selectedFileRef,
+    setDirectories,
+    setDirectoryErrors,
+    setExpandedPaths,
+    setLoadingPaths,
+  });
+  const operations = useEntryOperations(client, workspaceId, followEntry, {
+    cacheRef,
+    expandedPathsRef,
+    name,
+  });
 
   useImperativeHandle(
     ref,
@@ -662,7 +638,7 @@ export function WorkspaceBrowser({
         directory={
           emptyNote(onlyPaths, onlyPathsEmpty) ?? (
             <DirectoryTree
-              // `onlyPaths` 下没有行菜单：不列目录，改名之后既不能重列也跟不过去。
+              // `onlyPaths` 下没有行菜单：不列目录，改名、移动之后既不能重列也跟不过去。
               actions={subtree ? undefined : operations.actions}
               cache={subtree ? subtree.tree : directories}
               errors={subtree ? NO_ERRORS : directoryErrors}

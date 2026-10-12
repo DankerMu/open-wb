@@ -141,7 +141,7 @@ describe("行菜单", () => {
     ).toBeNull();
   });
 
-  it("R17 文件行的菜单恰为 重命名、删除、下载，下载是指向 download 地址、带 download 属性的链接；目录行的菜单恰为 重命名、删除", async () => {
+  it("R17 文件行的菜单恰为 重命名、移动到…、删除、下载，下载是指向 download 地址、带 download 属性的链接；目录行的菜单恰为 重命名、移动到…、删除", async () => {
     const { fetchMock, view } = openFiles(nested());
     await expand("out");
 
@@ -153,7 +153,7 @@ describe("行菜单", () => {
       within(fileMenu)
         .getAllByRole("menuitem")
         .map((item) => item.textContent),
-    ).toStrictEqual(["重命名", "删除", "下载"]);
+    ).toStrictEqual(["重命名", "移动到…", "删除", "下载"]);
     const link = within(fileMenu).getByRole("menuitem", { name: "下载" });
     expect(link.tagName).toBe("A");
     expect(link.getAttribute("href")).toBe("/api/workspaces/workspace-1/download?path=out%2Fb.md");
@@ -166,7 +166,7 @@ describe("行菜单", () => {
       within(directoryMenu)
         .getAllByRole("menuitem")
         .map((item) => item.textContent),
-    ).toStrictEqual(["重命名", "删除"]);
+    ).toStrictEqual(["重命名", "移动到…", "删除"]);
     expect(directoryMenu.querySelector("a")).toBeNull();
     expect(
       fetchMock.mock.calls.map(([path]) => path).filter((path) => path.includes("/download")),
@@ -247,7 +247,7 @@ describe("没有范围外的入口", () => {
     // 切换器里的条目都是工作空间：这里连单独的「删除」「重命名」也不该有。
     expect(inSwitcher.filter((name) => /上传|删除|重命名/.test(name))).toStrictEqual([]);
     seen.push(...inSwitcher);
-    // 行菜单有「删除」、今后会有「移动到…」（针对条目）：只断言没有针对工作空间的与上传。
+    // 行菜单有「删除」「移动到…」（针对条目）：只断言没有针对工作空间的与上传。
     expect(seen.filter((name) => /上传|删除工作空间|重命名工作空间/.test(name))).toStrictEqual([]);
     expect(pickerCount + pickers()).toBe(0);
   });
