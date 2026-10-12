@@ -1,27 +1,30 @@
 // files-web「文件操作界面」与「树的键盘操作」：行菜单 `更多操作 <名>` 本身——哪些行有、里面有什么、
-// 只用键盘走通重命名。重命名对话框与改名之后的跟随在 files-ops-rename.test.tsx。
+// 只用键盘走通重命名；以及「没有范围外的入口」。重命名对话框在 files-ops-rename.test.tsx，改名之后的
+// 跟随在 files-ops-follow.test.tsx。
 
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceBrowser } from "../src/features/files/index.js";
 import { createApiClient } from "../src/lib/api.js";
-import { findRow, row, rowNames, settle, tree } from "./files-deep-link-support.js";
+import { findRow, previewRegion, row, rowNames, settle, tree } from "./files-deep-link-support.js";
 import { cleanupFilesFixture } from "./files-fixture.js";
 import {
   dialogGone,
-  dirEntry,
+  expand,
   fileEntry,
+  fileUrl,
+  flat,
   focusedOn,
-  type Listings,
   MOVE,
   menuButton,
   nameInput,
+  nested,
   openFiles,
   openRowMenu,
   treeUrl,
 } from "./files-ops-support.js";
-import { createFetchMock, jsonResponse } from "./support.js";
-import { yieldMacrotask } from "./ui-support.js";
+import { createFetchMock, jsonResponse, textPreviewResponse } from "./support.js";
+import { pressPointer, yieldMacrotask } from "./ui-support.js";
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -29,20 +32,26 @@ afterEach(async () => {
   await yieldMacrotask();
 });
 
-/** 根下两个文件。 */
-const flat = (): Listings => ({ "": [fileEntry("notes.md"), fileEntry("readme.md", 8)] });
+/**
+ * `root` 里每个控件（按钮、链接、表单字段、菜单项）的名字：`aria-label`、`title`、`placeholder` 与
+ * 文字接在一起。直接查 DOM 而不按角色查：模态层打开时页面其余部分是 aria-hidden，按角色查会漏掉。
+ */
+function controlNames(root: ParentNode) {
+  const controls = root.querySelectorAll(
+    'button, a, input, select, textarea, [role="button"], [role="link"], [role="menuitem"]',
+  );
+  return [...controls].map((control) =>
+    ["aria-label", "title", "placeholder"]
+      .map((attribute) => control.getAttribute(attribute) ?? "")
+      .concat(control.textContent ?? "")
+      .join(" ")
+      .trim(),
+  );
+}
 
-/** 根下 `out`（含 `sub` 与两个文件）、同级的 `output`、一个文件。 */
-const nested = (): Listings => ({
-  "": [dirEntry("out"), dirEntry("output"), fileEntry("top.md")],
-  out: [dirEntry("sub"), fileEntry("a.md"), fileEntry("b.md")],
-  "out/sub": [fileEntry("x.md")],
-  output: [fileEntry("o.md")],
-});
-
-async function expand(name: string) {
-  fireEvent.click(await findRow(`展开 ${name}`));
-  await findRow(`折叠 ${name}`);
+/** `expected` 里没有被任何一个控件名包含的那些。 */
+function missing(names: readonly string[], expected: readonly string[]) {
+  return expected.filter((text) => !names.some((name) => name.includes(text)));
 }
 
 describe("行菜单", () => {
@@ -191,5 +200,55 @@ describe("行菜单", () => {
 
     view.rerender(browser());
     expect(menuButton("notes.md")).toBeTruthy();
+  });
+});
+
+describe("没有范围外的入口", () => {
+  it("R21 整页的控件、新建菜单、切换器弹层与行菜单里都没有上传、删除工作空间、重命名工作空间", async () => {
+    openFiles(nested(), { [fileUrl("top.md")]: () => textPreviewResponse("正文") });
+    await expand("out");
+    fireEvent.click(row("top.md"));
+    expect(await previewRegion().findByText("正文", { exact: true })).toBeTruthy();
+    const seen = controlNames(document);
+    // 确实看到了页面上的控件：下面「没有」的断言因此不是空话。
+    expect(
+      missing(seen, ["选择工作空间", "刷新", "新建", "更多操作 out", "下载 top.md"]),
+    ).toStrictEqual([]);
+    // 文件选择框是没有名字的上传入口：各层打开的时候各数一次。
+    const pickers = () => document.querySelectorAll('input[type="file"]').length;
+    let pickerCount = pickers();
+
+    await yieldMacrotask();
+    pressPointer(screen.getByRole("button", { name: "新建" }));
+    const creation = await screen.findByRole("menu");
+    expect(missing(controlNames(creation), ["新建文件夹", "新建工作空间"])).toStrictEqual([]);
+    seen.push(...controlNames(creation));
+    pickerCount += pickers();
+    fireEvent.keyDown(creation, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+
+    for (const [name, item] of [
+      ["a.md", "下载"],
+      ["out", "重命名"],
+    ] as const) {
+      const menu = await openRowMenu(name);
+      expect(missing(controlNames(menu), [item])).toStrictEqual([]);
+      seen.push(...controlNames(menu));
+      pickerCount += pickers();
+      fireEvent.keyDown(menu, { key: "Escape" });
+      await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    }
+
+    await yieldMacrotask();
+    fireEvent.click(screen.getByRole("button", { name: "选择工作空间" }));
+    const switcher = await screen.findByRole("dialog", { name: "工作空间切换器" });
+    const inSwitcher = controlNames(switcher);
+    expect(missing(inSwitcher, ["＋ 新建工作空间", "设计文档", "搜索工作空间"])).toStrictEqual([]);
+    // 切换器里的条目都是工作空间：这里连单独的「删除」「重命名」也不该有。
+    expect(inSwitcher.filter((name) => /上传|删除|重命名/.test(name))).toStrictEqual([]);
+    seen.push(...inSwitcher);
+    // 行菜单今后会有「删除」「移动到…」（针对条目）：只断言没有针对工作空间的与上传。
+    expect(seen.filter((name) => /上传|删除工作空间|重命名工作空间/.test(name))).toStrictEqual([]);
+    expect(pickerCount + pickers()).toBe(0);
   });
 });

@@ -2,7 +2,7 @@
 
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect } from "vitest";
-import { dirEntry, fileEntry, tree } from "./files-deep-link-support.js";
+import { dirEntry, fileEntry, findRow, tree } from "./files-deep-link-support.js";
 import {
   authenticatedFilesRoutes,
   type FetchRoutes,
@@ -22,6 +22,22 @@ type Entry = ReturnType<typeof dirEntry>;
 export type Listings = Record<string, Entry[]>;
 
 export { dirEntry, fileEntry };
+
+/** 根下两个文件。 */
+export const flat = (): Listings => ({ "": [fileEntry("notes.md"), fileEntry("readme.md", 8)] });
+
+/** 根下 `out`（含 `sub` 与两个文件）、同级的 `output`、一个文件。 */
+export const nested = (): Listings => ({
+  "": [dirEntry("out"), dirEntry("output"), fileEntry("top.md")],
+  out: [dirEntry("sub"), fileEntry("a.md"), fileEntry("b.md")],
+  "out/sub": [fileEntry("x.md")],
+  output: [fileEntry("o.md")],
+});
+
+export async function expand(name: string) {
+  fireEvent.click(await findRow(`展开 ${name}`));
+  await findRow(`折叠 ${name}`);
+}
 
 /**
  * 以 `listings` 为目录内容打开文件页。没列出的目录、`extra` 里没有的地址一经请求就抛错，并留在请求

@@ -1,36 +1,30 @@
-// files-web「文件操作界面」：行菜单 `更多操作 <名>`、`重命名` 对话框与改名之后的跟随。期望值按规格的
-// 场景手写；`to` 的写法（父目录 + `/` + 新名）按 `POST …/move` 的请求体约定手写，不经 `renameTarget` 算。
+// files-web「文件操作界面」：`重命名` 对话框——名字的检查、发出的请求、请求中的状态、焦点与模态清理。
+// 期望值按规格的场景手写；`to` 的写法（父目录 + `/` + 新名）按 `POST …/move` 的请求体约定手写，不经
+// `renameTarget` 算。改名之后的跟随在 files-ops-follow.test.tsx。
 
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  address,
-  findRow,
-  previewRegion,
-  row,
-  rowNames,
-  selectedRow,
-  settle,
-  tree,
-} from "./files-deep-link-support.js";
-import { cleanupFilesFixture, expectLocation } from "./files-fixture.js";
+import { WorkspaceBrowser } from "../src/features/files/index.js";
+import { createApiClient } from "../src/lib/api.js";
+import { findRow, rowNames, settle } from "./files-deep-link-support.js";
+import { cleanupFilesFixture } from "./files-fixture.js";
 import {
   dialogGone,
-  dirEntry,
+  expand,
   fileEntry,
-  fileUrl,
+  flat,
   focusedOn,
-  type Listings,
   MOVE,
   menuButton,
   nameInput,
+  nested,
   openFiles,
   openRename,
   renameTo,
   submitButton,
   treeUrl,
 } from "./files-ops-support.js";
-import { deferredResponse, jsonResponse, textPreviewResponse } from "./support.js";
+import { createFetchMock, deferredResponse, jsonResponse } from "./support.js";
 import { pressPointer, yieldMacrotask } from "./ui-support.js";
 
 const CONFLICT = () =>
@@ -43,36 +37,12 @@ afterEach(async () => {
   await yieldMacrotask();
 });
 
-/** 根下两个文件。 */
-const flat = (): Listings => ({ "": [fileEntry("notes.md"), fileEntry("readme.md", 8)] });
-
-/** 根下 `out`（含 `sub` 与两个文件）、同级的 `output`、一个文件。 */
-const nested = (): Listings => ({
-  "": [dirEntry("out"), dirEntry("output"), fileEntry("top.md")],
-  out: [dirEntry("sub"), fileEntry("a.md"), fileEntry("b.md")],
-  "out/sub": [fileEntry("x.md")],
-  output: [fileEntry("o.md")],
-});
-
 const moved = (path: string) => () => jsonResponse({ path });
 
 function overlay() {
   const element = document.querySelector('[data-slot="dialog-overlay"]');
   if (!element) throw new Error("expected the dialog overlay");
   return element;
-}
-
-async function expand(name: string) {
-  fireEvent.click(await findRow(`展开 ${name}`));
-  await findRow(`折叠 ${name}`);
-}
-
-/** `折叠 <目录>` 那一行之下的各行名字。 */
-function rowsUnder(directory: string) {
-  const names = row(`折叠 ${directory}`)
-    .closest("li")
-    ?.querySelectorAll(':scope > ul [data-slot="tree-name"]');
-  return [...(names ?? [])].map((node) => node.textContent);
 }
 
 describe("重命名", () => {
@@ -134,6 +104,61 @@ describe("重命名", () => {
       '{"from":"notes.md","to":"todo.md"}',
       '{"from":"notes.md","to":"todo.md"}',
     ]);
+  });
+
+  it("R2b 409 之后改成含分隔符的名字再提交：显示的是分隔符的文案而不是上一次的冲突文案，没有第二次 POST", async () => {
+    const { moves } = openFiles(flat(), { [MOVE]: CONFLICT });
+    await findRow("notes.md");
+    const dialog = await openRename("notes.md");
+    renameTo(dialog, "todo.md");
+    expect((await within(dialog).findByRole("alert")).textContent).toBe("该目录下已存在同名条目");
+    expect(moves()).toHaveLength(1);
+
+    renameTo(dialog, "a/b");
+    await waitFor(() =>
+      expect(within(dialog).getByRole("alert").textContent).toBe("名称不能包含路径分隔符"),
+    );
+    await settle();
+    expect(within(dialog).getAllByRole("alert")).toHaveLength(1);
+    expect(screen.getByRole("dialog", { name: "重命名" })).toBe(dialog);
+    expect(moves()).toHaveLength(1);
+  });
+
+  it("R2c 服务端答 401：对话框里不显示失败文案，停在请求中的样子（登录层接手），再提交不发第二次 POST，取消仍可关闭", async () => {
+    // 整页上 401 会先把页面换成登录页、对话框随之卸载；直接渲染组件，看的是对话框自己做了什么。
+    const fetchMock = createFetchMock({
+      [treeUrl("")]: () => jsonResponse({ path: "", entries: [fileEntry("notes.md")] }),
+      [MOVE]: () => jsonResponse({ error: { code: "unauthorized", message: "登录已失效" } }, 401),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const moves = () => fetchMock.mock.calls.filter(([path]) => path === MOVE);
+    render(
+      <WorkspaceBrowser
+        account="zhangsan"
+        client={createApiClient()}
+        onPathChange={() => {}}
+        path={null}
+        workspaceId="workspace-1"
+      />,
+    );
+    await findRow("notes.md");
+    const dialog = await openRename("notes.md");
+
+    renameTo(dialog, "todo.md");
+    await waitFor(() => expect(moves()).toHaveLength(1));
+    await settle();
+    expect(screen.getByRole("dialog", { name: "重命名" })).toBe(dialog);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(within(dialog).getByRole("status").textContent).toBe(PENDING_NOTE);
+    expect(submitButton(dialog).disabled).toBe(true);
+    fireEvent.submit(nameInput(dialog).closest("form") as HTMLFormElement);
+    await settle();
+    expect(moves()).toHaveLength(1);
+    expect(rowNames()).toStrictEqual(["工作空间", "notes.md"]);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    await dialogGone();
+    await focusedOn(() => menuButton("notes.md"));
   });
 
   it.each([
@@ -382,296 +407,5 @@ describe("重命名对话框的焦点与模态清理", () => {
     await dialogGone();
     await findRow("todo.md");
     await noToast();
-  });
-});
-
-describe("当前文件随操作变化", () => {
-  it("R9 预览 out/a.md 时把 out 改名为 dist：选中项与地址跟到 dist/a.md，dist 仍展开；其后的请求恰为 POST、新路径的 file、根的 tree", async () => {
-    const listings = nested();
-    const { mark } = openFiles(
-      listings,
-      {
-        [fileUrl("out/a.md")]: () => textPreviewResponse("旧路径的正文"),
-        [fileUrl("dist/a.md")]: () => textPreviewResponse("新路径的正文"),
-        [MOVE]: () => {
-          listings[""] = [dirEntry("dist"), dirEntry("output"), fileEntry("top.md")];
-          return jsonResponse({ path: "dist" });
-        },
-      },
-      address("out/a.md"),
-    );
-    await findRow("折叠 out");
-    expect(await previewRegion().findByText("旧路径的正文", { exact: true })).toBeTruthy();
-    const dialog = await openRename("out");
-    const since = mark();
-
-    renameTo(dialog, "dist");
-    await dialogGone();
-    expect(await previewRegion().findByText("新路径的正文", { exact: true })).toBeTruthy();
-    await expectLocation("/files?ws=workspace-1&path=dist%2Fa.md");
-    expect(row("折叠 dist").getAttribute("aria-expanded")).toBe("true");
-    expect(rowsUnder("dist")).toStrictEqual(["sub", "a.md", "b.md"]);
-    const selected = row("折叠 dist").closest("li")?.querySelector('[aria-current="true"]');
-    expect(selected?.querySelector('[data-slot="tree-name"]')?.textContent).toBe("a.md");
-    expect(tree().querySelectorAll('[aria-current="true"]')).toHaveLength(1);
-    await settle();
-    expect(rowNames()).toStrictEqual([
-      "设计文档",
-      "dist",
-      "sub",
-      "a.md",
-      "b.md",
-      "output",
-      "top.md",
-    ]);
-    // 没有 `tree?path=out`、`tree?path=dist`，也没有为地址的变化另起一次定位。
-    expect(since()).toStrictEqual([
-      `POST ${MOVE} {"from":"out","to":"dist"}`,
-      fileUrl("dist/a.md"),
-      treeUrl(""),
-    ]);
-  });
-
-  it("R9b 目录里的当前文件 out/a.md 改名：to 带着父目录，只重新列出 out，选中项与地址跟到新路径", async () => {
-    const listings = nested();
-    const { mark } = openFiles(
-      listings,
-      {
-        [fileUrl("out/a.md")]: () => textPreviewResponse("旧路径的正文"),
-        [fileUrl("out/c.md")]: () => textPreviewResponse("新路径的正文"),
-        [MOVE]: () => {
-          listings.out = [dirEntry("sub"), fileEntry("b.md"), fileEntry("c.md")];
-          return jsonResponse({ path: "out/c.md" });
-        },
-      },
-      address("out/a.md"),
-    );
-    await findRow("折叠 out");
-    expect(await previewRegion().findByText("旧路径的正文", { exact: true })).toBeTruthy();
-    const dialog = await openRename("a.md");
-    const since = mark();
-
-    renameTo(dialog, "c.md");
-    await dialogGone();
-    expect(await previewRegion().findByText("新路径的正文", { exact: true })).toBeTruthy();
-    await expectLocation("/files?ws=workspace-1&path=out%2Fc.md");
-    await selectedRow("c.md");
-    await settle();
-    expect(rowsUnder("out")).toStrictEqual(["sub", "b.md", "c.md"]);
-    expect(since()).toStrictEqual([
-      `POST ${MOVE} {"from":"out/a.md","to":"out/c.md"}`,
-      fileUrl("out/c.md"),
-      treeUrl("out"),
-    ]);
-  });
-
-  it("R10 随操作更新：当前文件 a.md 改名为 b.md 后地址的 path 是 b.md，ws 不变", async () => {
-    const listings: Listings = { "": [fileEntry("a.md"), fileEntry("readme.md", 8)] };
-    openFiles(listings, {
-      [fileUrl("a.md")]: () => textPreviewResponse("甲"),
-      [fileUrl("b.md")]: () => textPreviewResponse("乙"),
-      [MOVE]: () => {
-        listings[""] = [fileEntry("b.md"), fileEntry("readme.md", 8)];
-        return jsonResponse({ path: "b.md" });
-      },
-    });
-    fireEvent.click(await findRow("a.md"));
-    await expectLocation("/files?ws=workspace-1&path=a.md");
-    expect(await previewRegion().findByText("甲", { exact: true })).toBeTruthy();
-
-    renameTo(await openRename("a.md"), "b.md");
-    await dialogGone();
-    await expectLocation("/files?ws=workspace-1&path=b.md");
-    await selectedRow("b.md");
-    expect(await previewRegion().findByText("乙", { exact: true })).toBeTruthy();
-    // 预览头用的是选中条目的名字：它也换成了新名字。
-    const download = previewRegion().getByRole("link", { name: "下载 b.md" });
-    expect(download.getAttribute("href")).toBe("/api/workspaces/workspace-1/download?path=b.md");
-    expect(previewRegion().queryByRole("link", { name: "下载 a.md" })).toBeNull();
-  });
-
-  it("R10b 改名的不是当前文件也不是它的祖先：选中项、预览与地址都不动，没有 file 请求", async () => {
-    const listings = flat();
-    const { mark } = openFiles(listings, {
-      [fileUrl("readme.md")]: () => textPreviewResponse("自述正文"),
-      [MOVE]: () => {
-        listings[""] = [fileEntry("todo.md"), fileEntry("readme.md", 8)];
-        return jsonResponse({ path: "todo.md" });
-      },
-    });
-    fireEvent.click(await findRow("readme.md"));
-    expect(await previewRegion().findByText("自述正文", { exact: true })).toBeTruthy();
-    const dialog = await openRename("notes.md");
-    const since = mark();
-
-    renameTo(dialog, "todo.md");
-    await dialogGone();
-    await findRow("todo.md");
-    await settle();
-    await selectedRow("readme.md");
-    expect(previewRegion().getByText("自述正文", { exact: true })).toBeTruthy();
-    await expectLocation("/files?ws=workspace-1&path=readme.md");
-    expect(since()).toStrictEqual([`POST ${MOVE} {"from":"notes.md","to":"todo.md"}`, treeUrl("")]);
-  });
-
-  it("R11 已展开的 out/sub 跟到 dist/sub 且不重新请求；名字以 out 开头的同级 output 不动", async () => {
-    const listings = nested();
-    const { mark } = openFiles(listings, {
-      [MOVE]: () => {
-        listings[""] = [dirEntry("dist"), dirEntry("output"), fileEntry("top.md")];
-        return jsonResponse({ path: "dist" });
-      },
-    });
-    await expand("out");
-    await expand("sub");
-    await expand("output");
-    const dialog = await openRename("out");
-    const since = mark();
-
-    renameTo(dialog, "dist");
-    await dialogGone();
-    await findRow("折叠 dist");
-    await settle();
-    expect(row("折叠 sub").getAttribute("aria-expanded")).toBe("true");
-    expect(row("折叠 output").getAttribute("aria-expanded")).toBe("true");
-    expect(rowNames()).toStrictEqual([
-      "设计文档",
-      "dist",
-      "sub",
-      "x.md",
-      "a.md",
-      "b.md",
-      "output",
-      "o.md",
-      "top.md",
-    ]);
-    expect(since()).toStrictEqual([`POST ${MOVE} {"from":"out","to":"dist"}`, treeUrl("")]);
-  });
-
-  it("R11b 深一层的 out/sub/x.md 改名：只重新列出 out/sub，不重列根与 out", async () => {
-    const listings = nested();
-    const { mark } = openFiles(listings, {
-      [MOVE]: () => {
-        listings["out/sub"] = [fileEntry("y.md")];
-        return jsonResponse({ path: "out/sub/y.md" });
-      },
-    });
-    await expand("out");
-    await expand("sub");
-    const dialog = await openRename("x.md");
-    const since = mark();
-
-    renameTo(dialog, "y.md");
-    await dialogGone();
-    await findRow("y.md");
-    await settle();
-    expect(since()).toStrictEqual([
-      `POST ${MOVE} {"from":"out/sub/x.md","to":"out/sub/y.md"}`,
-      treeUrl("out/sub"),
-    ]);
-  });
-
-  it("R18 展开了而列表还在途的 out/sub：改名后旧路径的请求被中止，新路径补请求一次", async () => {
-    const listings = nested();
-    const held = deferredResponse();
-    const { fetchMock, mark } = openFiles(listings, {
-      [treeUrl("out/sub")]: () => held.promise,
-      [treeUrl("dist/sub")]: () => jsonResponse({ path: "dist/sub", entries: [fileEntry("x.md")] }),
-      [MOVE]: () => {
-        listings[""] = [dirEntry("dist"), dirEntry("output"), fileEntry("top.md")];
-        return jsonResponse({ path: "dist" });
-      },
-    });
-    await expand("out");
-    fireEvent.click(await findRow("展开 sub"));
-    await within(tree()).findByText("正在读取目录", { exact: true });
-    const dialog = await openRename("out");
-    const since = mark();
-
-    renameTo(dialog, "dist");
-    await dialogGone();
-    await findRow("x.md");
-    await settle();
-    const stale = fetchMock.mock.calls.find(([path]) => path === treeUrl("out/sub"));
-    expect(stale?.[1]?.signal?.aborted).toBe(true);
-    expect(within(tree()).queryByText("正在读取目录", { exact: true })).toBeNull();
-    expect(rowsUnder("sub")).toStrictEqual(["x.md"]);
-    expect(since()).toStrictEqual([
-      `POST ${MOVE} {"from":"out","to":"dist"}`,
-      treeUrl(""),
-      treeUrl("dist/sub"),
-    ]);
-  });
-  it("R19 读取失败且已折叠的 out/sub：改名后失败文案跟到 dist 之下，刷新重取的是新路径", async () => {
-    const listings = nested();
-    const failure = () =>
-      jsonResponse({ error: { code: "internal", message: "目录读取失败" } }, 500);
-    const { mark } = openFiles(listings, {
-      [treeUrl("out/sub")]: failure,
-      [treeUrl("dist/sub")]: failure,
-      [MOVE]: () => {
-        listings[""] = [dirEntry("dist"), dirEntry("output"), fileEntry("top.md")];
-        listings.dist = listings.out as Listings[string];
-        return jsonResponse({ path: "dist" });
-      },
-    });
-    await expand("out");
-    fireEvent.click(await findRow("展开 sub"));
-    expect((await within(tree()).findByRole("alert")).textContent).toBe("目录读取失败");
-    fireEvent.click(row("折叠 sub"));
-    const dialog = await openRename("out");
-    const since = mark();
-
-    renameTo(dialog, "dist");
-    await dialogGone();
-    await findRow("折叠 dist");
-    await settle();
-    const alert = within(tree()).getByRole("alert");
-    expect(alert.textContent).toBe("目录读取失败");
-    expect(row("展开 sub").closest("li")?.contains(alert)).toBe(true);
-    expect(since()).toStrictEqual([`POST ${MOVE} {"from":"out","to":"dist"}`, treeUrl("")]);
-
-    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
-    await settle();
-    expect(since().slice(2).sort()).toStrictEqual(
-      [treeUrl(""), treeUrl("dist"), treeUrl("dist/sub")].sort(),
-    );
-  });
-
-  it("R20 地址的定位还在等 out/sub 的列表时把 out 改名：定位跟到 dist/sub/x.md 并选中，不为旧路径发请求，地址不改", async () => {
-    const listings = nested();
-    const held = deferredResponse();
-    const { mark } = openFiles(
-      listings,
-      {
-        [treeUrl("out/sub")]: () => held.promise,
-        [treeUrl("dist/sub")]: () =>
-          jsonResponse({ path: "dist/sub", entries: [fileEntry("x.md")] }),
-        [fileUrl("dist/sub/x.md")]: () => textPreviewResponse("新路径的正文"),
-        [MOVE]: () => {
-          listings[""] = [dirEntry("dist"), dirEntry("output"), fileEntry("top.md")];
-          return jsonResponse({ path: "dist" });
-        },
-      },
-      address("out/sub/x.md"),
-    );
-    await findRow("折叠 sub");
-    await within(tree()).findByText("正在读取目录", { exact: true });
-    const dialog = await openRename("out");
-    const since = mark();
-
-    renameTo(dialog, "dist");
-    await dialogGone();
-    expect(await previewRegion().findByText("新路径的正文", { exact: true })).toBeTruthy();
-    await selectedRow("x.md");
-    await settle();
-    expect(since()).toStrictEqual([
-      `POST ${MOVE} {"from":"out","to":"dist"}`,
-      treeUrl(""),
-      treeUrl("dist/sub"),
-      fileUrl("dist/sub/x.md"),
-    ]);
-    // 由地址定位到的选中不写地址（「地址定位到文件」）：`path` 仍是进入时的写法。
-    await expectLocation("/files?ws=workspace-1&path=out%2Fsub%2Fx.md");
   });
 });
