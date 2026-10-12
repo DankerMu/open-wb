@@ -333,7 +333,7 @@ describe("压缩包预览器：请求归属", () => {
     expect(second.load).toHaveBeenCalledTimes(1);
   });
 
-  it("换一个 load（刷新或再点同一行）：旧 signal 中止、新 load 恰调一次，等待期间是读取态，迟到的旧结果不顶掉新列表", async () => {
+  it("换一个 load（刷新或再点同一行）：旧 signal 中止、新 load 恰调一次，等待期间上一次的列表仍在且其后是读取态，迟到的旧结果既不顶掉它也不顶掉新列表", async () => {
     const old = pendingLoad();
     const shown = loadOf(listing([file("old.txt", 1)]));
     const view = render(<ArchivePreviewer load={shown} />);
@@ -343,7 +343,16 @@ describe("压缩包预览器：请求归属", () => {
     expect(signalOf(shown).aborted).toBe(true);
     expect(old.load).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("status").textContent).toBe("正在读取文件");
-    expect(screen.queryByRole("table")).toBeNull();
+    const kept = screen.getByRole("table");
+    expect(
+      within(kept)
+        .getAllByRole("row")
+        .map((row) => cellsOf(row)[0]?.textContent),
+    ).toStrictEqual(["old.txt"]);
+    expect(screen.getByText("共 1 项", { exact: true })).toBeTruthy();
+    expect(
+      kept.compareDocumentPosition(screen.getByRole("status")) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
 
     const next = pendingLoad();
     view.rerender(<ArchivePreviewer load={next.load} />);
@@ -355,6 +364,7 @@ describe("压缩包预览器：请求归属", () => {
     await flush();
     expect(screen.queryByText("stale.txt")).toBeNull();
     expect(screen.getByRole("status").textContent).toBe("正在读取文件");
+    expect((await rows()).map((row) => cellsOf(row)[0]?.textContent)).toStrictEqual(["old.txt"]);
 
     next.resolve(listing([file("new-1.txt", 3), file("new-2.txt", 4)]));
     expect((await rows()).map((row) => cellsOf(row)[0]?.textContent)).toStrictEqual([
@@ -362,6 +372,8 @@ describe("压缩包预览器：请求归属", () => {
       "new-2.txt",
     ]);
     expect(screen.getByText("共 2 项", { exact: true })).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByText("old.txt")).toBeNull();
     expect(shown).toHaveBeenCalledTimes(1);
     expect(old.load).toHaveBeenCalledTimes(1);
   });
@@ -409,16 +421,58 @@ describe("压缩包预览器：请求归属", () => {
     expect((await rows()).map((row) => cellsOf(row)[0]?.textContent)).toStrictEqual(["fresh.txt"]);
   });
 
-  it("失败之后换一个 load：错误文案让位给读取态，再让位给新列表", async () => {
+  it("失败之后换一个 load：错误文案保留并在其后显示读取态，新列表到达后才让位", async () => {
     const view = render(
       <ArchivePreviewer
         load={failing(new ApiError(415, "preview_unsupported", "该类型不支持预览"))}
       />,
     );
     expect((await screen.findByRole("alert")).textContent).toBe("无法读取该压缩包");
+    expect(screen.queryByRole("status")).toBeNull();
 
-    view.rerender(<ArchivePreviewer load={loadOf(listing([file("a.txt", 5)]))} />);
+    const next = pendingLoad();
+    view.rerender(<ArchivePreviewer load={next.load} />);
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toBe("无法读取该压缩包");
+    const status = screen.getByRole("status");
+    expect(status.textContent).toBe("正在读取文件");
+    expect(alert.compareDocumentPosition(status) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    next.resolve(listing([file("a.txt", 5)]));
     expect(await rows()).toHaveLength(1);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("空包之后换一个 load：「压缩包内没有文件」保留并在其后显示读取态；新的一次失败时换成失败文案，状态行撤掉", async () => {
+    const view = render(<ArchivePreviewer load={loadOf(listing([]))} />);
+    const empty = await screen.findByText("压缩包内没有文件", { exact: true });
+    expect(screen.queryByRole("status")).toBeNull();
+
+    const next = pendingLoad();
+    view.rerender(<ArchivePreviewer load={next.load} />);
+    const status = screen.getByRole("status");
+    expect(status.textContent).toBe("正在读取文件");
+    expect(screen.getByText("压缩包内没有文件", { exact: true })).toBe(empty);
+    expect(empty.compareDocumentPosition(status) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    next.reject(new ApiError(500, "internal_error", "读取失败"));
+    expect((await screen.findByRole("alert")).textContent).toBe("读取失败");
+    expect(screen.queryByText("压缩包内没有文件")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("列表之后换一个 load 而它得到 401：上一次的列表与读取态都留着，不显示失败文案", async () => {
+    const view = render(<ArchivePreviewer load={loadOf(listing([file("old.txt", 1)]))} />);
+    expect((await rows()).map((row) => cellsOf(row)[0]?.textContent)).toStrictEqual(["old.txt"]);
+
+    const next = failing(new ApiError(401, "unauthorized", "登录已失效"));
+    view.rerender(<ArchivePreviewer load={next} />);
+    await flush();
+    await flush();
+    expect(next).toHaveBeenCalledTimes(1);
+    expect((await rows()).map((row) => cellsOf(row)[0]?.textContent)).toStrictEqual(["old.txt"]);
+    expect(screen.getByRole("status").textContent).toBe("正在读取文件");
     expect(screen.queryByRole("alert")).toBeNull();
   });
 });

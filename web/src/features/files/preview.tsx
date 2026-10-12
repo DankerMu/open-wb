@@ -202,7 +202,8 @@ function PreviewBody({
     <LoadedPreview
       content={preview.data.kind === "text" ? preview.data.text : preview.data.url}
       id={id}
-      key={id}
+      // 媒体另带 `reload`：刷新或再点同一行换一个新的挂载，媒体元素与它的失败态随之换新。
+      key={preview.data.kind === "media" ? `media:${preview.data.reload}` : id}
       name={name}
       truncated={preview.data.truncated}
     />

@@ -7,9 +7,16 @@
  * made to find out why. Walked: a file whose body is not media. Read from the HTML standard, not
  * walked: a 401 / 404 / 416 answer and a format the browser rejects end the same way; a format it
  * plays badly without reporting an error shows no message.
- * The failure lasts as long as this mount: the caller keys the preview body by path, so another
- * file starts clean and coming back to this one tries again, while 刷新 and a second click on the
- * same row keep the message.
+ * The failure lasts as long as this mount. The caller remounts it for another file and, on the
+ * same file, for 刷新 and a second click on the same row: each gets a new element with the same
+ * address and no message.
+ * Walked in Chromium only: after 刷新 a clip that was playing is a new element, back at its start
+ * and not playing. Whether a new element asks the server again is the browser's call. In that
+ * walk one remounted within about 40 seconds of the previous fetch of the same address sent no
+ * request and ended as the previous one had, a file replaced on disk in between included; one
+ * remounted about 70 seconds after fetched again. The mechanism was not looked into.
+ * A 401 answer is one more `error` among the others: the event carries no status, so nothing here
+ * can tell the authentication guard, and nothing asks.
  */
 import { useState } from "react";
 import { previewKind } from "./kind.js";

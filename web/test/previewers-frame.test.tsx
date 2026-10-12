@@ -8,14 +8,24 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebPreviewer } from "../src/features/files/previewers/frame.js";
+import { cleanupFilesFixture } from "./files-fixture.js";
 import {
-  authenticatedFilesRoutes,
-  cleanupFilesFixture,
-  type FetchRoutes,
-  renderFiles,
-  workspace,
-} from "./files-fixture.js";
-import { deferredResponse, jsonResponse, paths, textPreviewResponse } from "./support.js";
+  BASE,
+  FILE,
+  fileRequests,
+  frame,
+  INDEX_SOURCE,
+  ISSUE,
+  issueRequests,
+  openSite,
+  PREVIEW_HOST,
+  previewRegion,
+  renderSite,
+  select,
+  shownFrame,
+  TOKEN,
+} from "./files-site-fixture.js";
+import { deferredResponse, jsonResponse, textPreviewResponse } from "./support.js";
 import { listRepoFiles, readRepoFile, stripTsComments, yieldMacrotask } from "./ui-support.js";
 
 afterEach(() => {
@@ -24,10 +34,6 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** 夹具令牌：长度与真实令牌相同，但不是十六进制。 */
-const TOKEN = "t".repeat(64);
-const PREVIEW_HOST = "preview.example.test";
-const BASE = `https://${PREVIEW_HOST}/w/${TOKEN}/`;
 const SANDBOX = "allow-scripts allow-forms allow-modals";
 
 type Web = NonNullable<ComponentProps<typeof WebPreviewer>["web"]>;
@@ -52,14 +58,6 @@ function web(patch: Partial<Web> = {}): Web {
     source: null,
     ...patch,
   };
-}
-
-function frame(): HTMLIFrameElement {
-  const element = document.querySelector("iframe");
-  if (!(element instanceof HTMLIFrameElement)) {
-    throw new Error("no iframe in the document");
-  }
-  return element;
 }
 
 describe("网页预览器（组件级）：iframe 的属性", () => {
@@ -234,92 +232,13 @@ describe("令牌 hook 的调用点", () => {
   });
 });
 
-const TREE = "/api/workspaces/workspace-1/tree?path=";
-const FILE = "/api/workspaces/workspace-1/file?path=";
 const DOWNLOAD = "/api/workspaces/workspace-1/download?path=";
-const ISSUE = "/api/workspaces/workspace-1/preview-token";
-const INDEX_SOURCE = '<h1>首页</h1>\n<script>document.title = "ran";</script>';
-
-/** 签发端点的六键应答；函数形式，续签或多发都给一份新的。 */
-function issued() {
-  return jsonResponse({
-    token: TOKEN,
-    base: BASE,
-    officeBase: `https://${PREVIEW_HOST}/o/${TOKEN}/`,
-    expiresAt: 1_800_000_000_000,
-    documentMaxBytes: 104_857_600,
-    officeAvailable: false,
-  });
-}
-
-/**
- * 根下 `readme.md` 与目录 `site`，`site` 里是 `index.html` 与 `about.htm`。`file` 路由缺省对
- * `site/index.html` 答它的源码、对 `readme.md` 答一行 Markdown；别的 `file` 请求没有路由，发了就抛错。
- */
-function renderSite(routes: FetchRoutes = {}) {
-  return renderFiles(
-    "/files?ws=workspace-1",
-    authenticatedFilesRoutes([workspace], {
-      [TREE]: () =>
-        jsonResponse({
-          path: "",
-          entries: [
-            { name: "site", type: "dir", size: 0, mtime: 100 },
-            { name: "readme.md", type: "file", size: 4, mtime: 101 },
-          ],
-        }),
-      [`${TREE}site`]: () =>
-        jsonResponse({
-          path: "site",
-          entries: [
-            { name: "about.htm", type: "file", size: 20, mtime: 102 },
-            { name: "index.html", type: "file", size: 52, mtime: 103 },
-          ],
-        }),
-      [ISSUE]: issued,
-      [`${FILE}site%2Findex.html`]: () => textPreviewResponse(INDEX_SOURCE),
-      [`${FILE}readme.md`]: () => textPreviewResponse("# 说明"),
-      ...routes,
-    }),
-  );
-}
-
-type Mock = ReturnType<typeof renderFiles>["fetchMock"];
-
-function fileRequests(fetchMock: Mock) {
-  return paths(fetchMock).filter((path) => path.includes("/file?"));
-}
-
-function issueRequests(fetchMock: Mock) {
-  return paths(fetchMock).filter((path) => path === ISSUE);
-}
-
-function previewRegion() {
-  return within(screen.getByRole("region", { name: "文件预览" }));
-}
-
-async function select(name: string) {
-  fireEvent.click(await screen.findByRole("button", { name }));
-}
-
-async function openSite() {
-  fireEvent.click(await screen.findByRole("button", { name: "展开 site" }));
-}
 
 /** 源码视图的各行文字（行号格之后的那一格）。 */
 function sourceLines() {
   return previewRegion()
     .queryAllByRole("row")
     .map((row) => within(row).getAllByRole("cell")[1]?.textContent);
-}
-
-/** 等到预览里的 iframe 是 `name` 这个文件的（树里同名的行也带这个 title，所以不按 title 查）。 */
-function shownFrame(name: string) {
-  return waitFor(() => {
-    const element = frame();
-    expect(element.getAttribute("title")).toBe(name);
-    return element;
-  });
 }
 
 function expectDownloadLink(path: string, name: string) {

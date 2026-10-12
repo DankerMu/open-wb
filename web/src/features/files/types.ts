@@ -34,9 +34,13 @@ type FilePreview =
       truncated: boolean;
     }
   | {
-      /** 音视频：`url` 是文件本身的地址（`fileUrl`），由媒体元素自己去取，页面不读它的字节。 */
+      /**
+       * 音视频：`url` 是文件本身的地址（`fileUrl`），由媒体元素自己去取，页面不读它的字节。
+       * `reload` 每加一，媒体元素换一个新的（地址不变）。
+       */
       kind: "media";
       url: string;
+      reload: number;
       size: number;
       truncated: false;
     };

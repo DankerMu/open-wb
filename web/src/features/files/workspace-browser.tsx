@@ -134,11 +134,13 @@ export function WorkspaceBrowser({
   const revealRef = useRef<Reveal | null>(null);
   const selectedFileRef = useRef<SelectedFile | null>(null);
   const subtreeOnly = onlyPaths !== undefined;
-  // 这一页唯一的一次调用：选中的是网页（渲染或源码视图）时才签发与续期。
+  // 这一页唯一的一次调用：选中的是网页（渲染或源码视图）时才签发与续期。第四参是网页预览的
+  // `reload`：渲染视图下刷新或再点同一行使它变化，令牌由此按需重新签发；其余情况给 0。
   const previewToken = usePreviewToken(
     client,
     workspaceId,
     selectedFile?.preview?.status === "web",
+    selectedFile?.preview?.status === "web" ? selectedFile.preview.reload : 0,
   );
 
   const releaseOwnedImage = useCallback(() => {
