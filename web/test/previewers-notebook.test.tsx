@@ -340,6 +340,11 @@ describe("Notebook 预览器：输出按类型", () => {
       "\n<p>一</p>\n<p>二</p>",
     ],
     ["空串时恰为固定前缀", "", ""],
+    [
+      "原文是带 DOCTYPE 与 head 的整页时前缀仍在最前，不挪进 head",
+      "<!DOCTYPE html><html><head><title>t</title></head><body><p>x</p></body></html>",
+      "<!DOCTYPE html><html><head><title>t</title></head><body><p>x</p></body></html>",
+    ],
   ])("HTML 输出的 srcdoc 是固定前缀加原文：%s", (_label, html, original) => {
     const container = withOutputs(display({ "text/html": html }));
 
