@@ -39,6 +39,8 @@ const SECOND_ROOT = "/api/workspaces/workspace-2/tree?path=";
 const DECOMPOSED = "café.md";
 const COMPOSED = "café.md";
 const FILE_DECOMPOSED = `${FILE}cafe%CC%81.md`;
+/** 轮询里按它找树、不按角色：实测角色查询一次几十毫秒，等待大半花在它上面（#1362）。 */
+const TREE_NAV = 'nav[aria-label="工作空间目录树"]';
 /** 服务端信封里的两条文案（`server/src/core/errors` 的 `not_found`、`sandbox_denied`）。 */
 const NOT_FOUND = "请求的资源不存在";
 const DENIED = "目标路径不在你的沙箱内，操作已拒绝";
@@ -100,7 +102,8 @@ function tree() {
 
 /** 树上各行的名字，自上而下。 */
 function rowNames() {
-  return [...tree().querySelectorAll('[data-slot="tree-name"]')].map((node) => node.textContent);
+  const names = document.querySelectorAll(`${TREE_NAV} [data-slot="tree-name"]`);
+  return [...names].map((node) => node.textContent);
 }
 
 function row(name: string) {
@@ -115,8 +118,10 @@ async function findRow(name: string) {
 
 async function selectedRow(name: string) {
   await waitFor(() => {
-    expect(row(name).getAttribute("aria-current")).toBe("true");
+    const current = `${TREE_NAV} [aria-current="true"] [data-slot="tree-name"]`;
+    expect(document.querySelector(current)?.textContent).toBe(name);
   });
+  expect(row(name).getAttribute("aria-current")).toBe("true");
 }
 
 function previewRegion() {
