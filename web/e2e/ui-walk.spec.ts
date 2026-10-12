@@ -75,6 +75,9 @@ test("fresh browser journey logs in, walks four routes, persists theme, and logs
   baseURL,
   page,
 }, testInfo) => {
+  // 只放宽这一个用例，配置里的 30 s 不动：master 上 CI run 38264707453 的 list 输出里它在 mobile-dark
+  // 用了 26.6 s（余量 3.4 s，不重试），而 /files 的步骤还在往这条旅程里加。不加固定等待。
+  test.setTimeout(60_000);
   const project = walkProject(testInfo.project.name);
   const options = { watchAssets: project === "desktop-light" };
   await runWithBrowserErrorOracle(page, baseURL, options, (oracle) =>
@@ -311,7 +314,7 @@ async function walkFiles(page: Page, project: WalkProject): Promise<void> {
     restored.getByRole("button", { name: `展开 ${walkOut}`, exact: true }),
   ).toBeVisible();
 
-  // (a)(c)(d)，再重载做 (e)：重载后同一组断言重跑一遍。
+  // (a)(b)(c)(d)，再重载做 (e)：重载后 (c)(d) 与选中态那组断言重跑一遍。
   await expectNewPreviews(page, workspaceId);
   await page.reload();
   await expectAuthenticatedRoute(page, project, "/files", "工作空间", "工作空间");
