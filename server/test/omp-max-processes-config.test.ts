@@ -314,6 +314,8 @@ describe("production entry rejects invalid preview and file settings before effe
       "PREVIEW_ARCHIVE_MAX_ENTRIES",
       "TRASH_RETENTION_DAYS",
     ].flatMap((key) => POSITIVE_INVALID.map((raw) => [key, raw] as const)),
+    // #1353：这一个键的上界是 10000。
+    ["PREVIEW_ARCHIVE_MAX_ENTRIES", "10001"],
   ] as const;
   let compiled: CompiledServerEntry;
 
@@ -321,8 +323,8 @@ describe("production entry rejects invalid preview and file settings before effe
     compiled = await compileServerEntry();
   }, 90_000);
 
-  it("规格列出的非法取值共七十例", () => {
-    expect(PREVIEW_INVALID).toHaveLength(70);
+  it("规格列出的非法取值共七十一例", () => {
+    expect(PREVIEW_INVALID).toHaveLength(71);
   });
 
   it.each(PREVIEW_INVALID)(

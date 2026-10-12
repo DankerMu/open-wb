@@ -16,16 +16,23 @@
  *   4096 bytes is not listed; either one ends the walk as corruption does. A zip name comes with
  *   its central directory record, whose three length fields are two bytes each, and is judged
  *   once that record is in;
- * - the walk stops at `maxEntries`; a tar / tar.gz also stops 5000 ms after it began: the clock is
- *   read before every header and, in a tar.gz, before every 1024 compressed bytes handed to the
- *   inflater and before every gzip stream that is begun. A zip has no time limit and does not
- *   read the clock: only the central directory is read, a bounded number of bounded reads per
- *   entry listed, and nothing is inflated.
+ * - the walk stops at `maxEntries`; a zip, a tar and a tar.gz also stop 5000 ms after the walk
+ *   began — the same limit, counted from before the first read (for a zip that is the search for
+ *   its end record). The clock is read before every tar header and, in a tar.gz, before every
+ *   1024 compressed bytes handed to the inflater and before every gzip stream that is begun; for
+ *   a zip, once the archive is open and again after each record listed, that is before the next
+ *   one is asked for. A bare gz reads nothing, the clock included.
+ *   The limit is cooperative (read off the code, no test holds a read open): it is looked at
+ *   between reads and neither interrupts nor abandons a `readAt` that is under way, so a walk
+ *   lasts 5000 ms plus whatever its last step takes, and a `readAt` that never settles holds the
+ *   walk for as long. One zip step is the reads of one central directory record (46 bytes, then
+ *   up to 196605) and yauzl's synchronous parse of its extra fields.
  * Corruption (a short or missing header, a bad checksum, a non-octal size, a bad pax record, a
  * gzip stream that is not one or breaks off, anything yauzl refuses in a zip) with nothing listed yet is `preview_unsupported`;
  * after the first entry it ends the walk with `truncated`. Running out of time is never
- * `preview_unsupported`: it returns what was listed, possibly nothing, with `truncated`. A failure
- * of `readAt` itself is rethrown as it is.
+ * `preview_unsupported`: it returns what was listed, possibly nothing, with `truncated`. A zip
+ * that yauzl refuses is corruption whatever the clock says. A failure of `readAt` itself is
+ * rethrown as it is.
  * A tar.gz is one gzip stream or several end to end (bgzip, eStargz, `cat a.tgz b.tgz`): their
  * inflated data is read as one tar, as `tar xzf` reads it. Where a complete stream is not followed
  * by a valid gzip header — padding, junk, a header cut short — the data ends there: what follows is
@@ -35,7 +42,7 @@
  * taken at its word for the number of entries: fewer than the directory holds lists that many.
  */
 import { crc32, createInflateRaw, type InflateRaw } from "node:zlib";
-import { fromRandomAccessReaderPromise, RandomAccessReader, type ZipFile } from "yauzl";
+import { type Entry, fromRandomAccessReaderPromise, RandomAccessReader, type ZipFile } from "yauzl";
 import { HttpError } from "../core/errors/index.js";
 
 type ArchiveFormat = "zip" | "tar" | "tar.gz" | "gz";
@@ -46,7 +53,10 @@ interface ArchiveEntry {
   /** The member name as the archive gives it: no normalisation, `..` and a leading `/` included. */
   path: string;
   type: "file" | "dir";
-  /** The size in the member's header (a zip: the uncompressed size); null where the format does not say (a bare .gz). */
+  /**
+   * The size in the member's header (a zip: the uncompressed size), always a safe integer; null
+   * where the format does not say (a bare .gz).
+   */
   size: number | null;
 }
 
@@ -141,10 +151,11 @@ export async function listArchive(
     const entries: ArchiveEntry[] = [{ path: name.slice(0, -3), type: "file", size: null }];
     return { format, entries, truncated: false };
   }
-  if (format === "zip") {
-    return { format, ...(await walkZip(readAt, options.size, options.maxEntries)) };
-  }
+  // One deadline for the three formats that read, begun before any of them does.
   const expired = deadline(options.now);
+  if (format === "zip") {
+    return { format, ...(await walkZip(readAt, options.size, options.maxEntries, expired)) };
+  }
   if (format === "tar") {
     return { format, ...(await walk(positionalSource(readAt), options.maxEntries, expired)) };
   }
@@ -411,8 +422,17 @@ class ZipReader extends RandomAccessReader {
  * path extra field say, and a member is a directory when that name ends with `/` and only then.
  * Whatever yauzl refuses — no end record, bytes after it, a record that is not one, strong
  * encryption, an extra field that overruns — is corruption; a failure of `readAt` is not.
+ * The clock is read once the archive is open and after every record listed; a record that was
+ * read is listed, as a tar header is. Being out of time is not looked at in the `catch`: the
+ * deadline is not handed to the reader, so nothing yauzl refuses is the deadline's doing and it
+ * is corruption at any time (read off the code; one test lists non-zip bytes past the deadline).
  */
-async function walkZip(readAt: ReadAt, size: number, maxEntries: number): Promise<Walked> {
+async function walkZip(
+  readAt: ReadAt,
+  size: number,
+  maxEntries: number,
+  expired: Expired,
+): Promise<Walked> {
   const reader = new ZipReader(readAt, size);
   const entries: ArchiveEntry[] = [];
   let zipfile: ZipFile | undefined;
@@ -426,19 +446,16 @@ async function walkZip(readAt: ReadAt, size: number, maxEntries: number): Promis
     // yauzl reports through the iterator below; this keeps an 'error' it emits once the iterator
     // has let go from being an uncaught event.
     zipfile.on("error", () => {});
+    // The search for the end record took the time there was: no record is asked for.
+    if (expired()) {
+      return { entries, truncated: true };
+    }
     for await (const entry of zipfile.eachEntry()) {
-      if (entry.fileNameRaw.length > MAX_NAME_BYTES) {
-        throw new CorruptArchive();
-      }
-      const path = entry.fileNameRaw.toString("utf8");
-      entries.push({
-        path,
-        type: path.endsWith("/") ? "dir" : "file",
-        size: entry.uncompressedSize,
-      });
+      entries.push(zipEntry(entry));
       // Judged before the next record is asked for, and without trusting the declared count: an
-      // archive of exactly `maxEntries` members is `truncated` too, as a tar is.
-      if (entries.length >= maxEntries) {
+      // archive of exactly `maxEntries` members is `truncated` too, as a tar is, and so is one
+      // whose last record was read as the time ran out.
+      if (entries.length >= maxEntries || expired()) {
         return { entries, truncated: true };
       }
     }
@@ -455,6 +472,24 @@ async function walkZip(readAt: ReadAt, size: number, maxEntries: number): Promis
     // Every way out releases yauzl's hold on the reader; nothing is in flight by then.
     zipfile?.close();
   }
+}
+
+/**
+ * What one central directory record lists as, or corruption where it cannot be listed: a name
+ * longer than 4096 bytes, or a size that is not a safe integer. A zip64 size is eight bytes that
+ * yauzl hands over as a double: from 2^53 on it is no longer the number in the archive (and a
+ * rounded one is never below 2^53). It is neither listed nor clamped; a tar cannot get here, its
+ * octal size field tops out at 2^36 - 1.
+ */
+function zipEntry(entry: Entry): ArchiveEntry {
+  if (entry.fileNameRaw.length > MAX_NAME_BYTES) {
+    throw new CorruptArchive();
+  }
+  if (!Number.isSafeInteger(entry.uncompressedSize)) {
+    throw new CorruptArchive();
+  }
+  const path = entry.fileNameRaw.toString("utf8");
+  return { path, type: path.endsWith("/") ? "dir" : "file", size: entry.uncompressedSize };
 }
 
 /** An uncompressed tar: stepping over a body moves the position and reads nothing. */

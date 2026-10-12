@@ -21,6 +21,11 @@ const DEFAULT_PREVIEW_DOCUMENT_MAX_BYTES = 104_857_600;
 /** Notebook 预览的字节上限缺省值：10 MiB。 */
 const DEFAULT_PREVIEW_NOTEBOOK_MAX_BYTES = 10_485_760;
 const DEFAULT_PREVIEW_ARCHIVE_MAX_ENTRIES = 1_000;
+/**
+ * 压缩包条目上限的可配上界（#1353）：一次列表的内存与响应大小同它成正比，响应是一次
+ * `JSON.stringify`。只用于这一个键，其余数值键仍到 2147483647。
+ */
+const MAX_PREVIEW_ARCHIVE_MAX_ENTRIES = 10_000;
 export const DEFAULT_TRASH_RETENTION_DAYS = 30;
 
 export interface PreviewSettings {
@@ -44,7 +49,7 @@ export interface PreviewSettings {
   previewDocumentMaxBytes: number;
   /** Notebook 预览的字节上限（PREVIEW_NOTEBOOK_MAX_BYTES，缺省 10485760）。 */
   previewNotebookMaxBytes: number;
-  /** 压缩包成员列表的条目数上限（PREVIEW_ARCHIVE_MAX_ENTRIES，缺省 1000）。 */
+  /** 压缩包成员列表的条目数上限（PREVIEW_ARCHIVE_MAX_ENTRIES，缺省 1000，范围 1..10000）。 */
   previewArchiveMaxEntries: number;
   /** 回收目录的保留天数（TRASH_RETENTION_DAYS，缺省 30）。 */
   trashRetentionDays: number;
@@ -100,6 +105,7 @@ export function resolvePreviewSettings(
       env.PREVIEW_ARCHIVE_MAX_ENTRIES,
       DEFAULT_PREVIEW_ARCHIVE_MAX_ENTRIES,
       "PREVIEW_ARCHIVE_MAX_ENTRIES",
+      MAX_PREVIEW_ARCHIVE_MAX_ENTRIES,
     ),
     trashRetentionDays: resolvePositiveInteger(
       env.TRASH_RETENTION_DAYS,

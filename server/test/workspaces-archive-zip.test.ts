@@ -34,6 +34,14 @@ function uint64(value: bigint): Buffer {
   bytes.writeBigUInt64LE(value);
   return bytes;
 }
+/** A record whose 4-byte uncompressed size is all ones: the size is the 8 bytes of its zip64 extra field. */
+const zip64Sized = (name: string, size: bigint) =>
+  zipCentral({
+    name,
+    size: 0xffffffff,
+    compressedSize: 1,
+    extra: extraField(0x0001, uint64(size)),
+  });
 
 describe("zip 列表：从中央目录项里取什么", () => {
   it("stored 成员的 compressedSize 与 uncompressedSize 不等仍被列出", async () => {
@@ -121,39 +129,149 @@ describe("zip 列表：从中央目录项里取什么", () => {
     expect(listing.entries).toEqual([{ path: "a.txt", type: "file", size: 5 }]);
   });
 
-  it("zip64 扩展字段给出的大小超过 2^53 时是失精度的 number", async () => {
+  it("safe.zip：zip64 扩展字段给出的 5368709120 与 9007199254740991 原样列出", async () => {
     const { listing } = await list(
-      "zip64.zip",
+      "safe.zip",
       zipArchive([
-        zipCentral({
-          name: "huge.bin",
-          size: 0xffffffff,
-          compressedSize: 1,
-          extra: extraField(0x0001, uint64(0xffffffffffffffffn)),
-        }),
-        zipCentral({
-          name: "five-gib.bin",
-          size: 0xffffffff,
-          compressedSize: 1,
-          extra: extraField(0x0001, uint64(5n * 1024n ** 3n)),
-        }),
+        zip64Sized("five-gib.bin", 5n * 1024n ** 3n),
+        zip64Sized("largest.bin", 2n ** 53n - 1n),
       ]),
     );
-    expect(listing.entries).toEqual([
-      { path: "huge.bin", type: "file", size: 18_446_744_073_709_552_000 },
-      { path: "five-gib.bin", type: "file", size: 5_368_709_120 },
-    ]);
+    expect(listing).toEqual({
+      format: "zip",
+      entries: [
+        { path: "five-gib.bin", type: "file", size: 5_368_709_120 },
+        { path: "largest.bin", type: "file", size: 9_007_199_254_740_991 },
+      ],
+      truncated: false,
+    });
+  });
+
+  it("over.zip：zip64 大小为 9007199254740992 的成员不计入并停读 → 恰一项并置 truncated，其后的成员不列", async () => {
+    const { listing } = await list(
+      "over.zip",
+      zipArchive([plain("one.txt", 1), zip64Sized("huge.bin", 2n ** 53n), plain("after.txt", 4)]),
+    );
+    expect(listing).toEqual({
+      format: "zip",
+      entries: [{ path: "one.txt", type: "file", size: 1 }],
+      truncated: true,
+    });
+  });
+
+  it("over-first.zip：第一个成员的 zip64 大小为 18446744073709551615 → 不支持", async () => {
+    await expect(
+      list(
+        "over-first.zip",
+        zipArchive([zip64Sized("huge.bin", 0xffffffffffffffffn), plain("after.txt", 4)]),
+      ),
+    ).rejects.toMatchObject(UNSUPPORTED);
+  });
+});
+
+describe("zip 列表：读取时限", () => {
+  // Records of 46 + 2 bytes at 0, 48, 96, 144, 192. The first read is the search for the end
+  // record: the whole 262-byte file, from 0, so a position alone does not tell it from the read of
+  // the first record — its length does.
+  const names = ["m0", "m1", "m2", "m3", "m4"];
+  const five = zipArchive(names.map((name) => plain(name)));
+  const START = 1_000_000;
+
+  /** Lists `bytes` as a zip under a clock that `elapsed` sets, in milliseconds since the start, at each read. */
+  async function listTimed(
+    name: string,
+    bytes: Buffer,
+    elapsed: (position: number, length: number) => number | undefined,
+  ) {
+    const file = await archiveOnDisk(name, bytes);
+    let clock = START;
+    const readAt = (position: number, length: number) => {
+      clock = START + (elapsed(position, length) ?? clock - START);
+      return file.readAt(position, length);
+    };
+    const listing = await listArchive("zip", name, readAt, {
+      maxEntries: 1000,
+      now: () => clock,
+      size: file.size,
+    });
+    return { file, listing };
+  }
+
+  it("slow.zip：时钟在读第 3 个目录项时越过 5 秒 → 恰三项并置 truncated，第 4 个目录项的位置不读", async () => {
+    expect(five).toHaveLength(262);
+    const { file, listing } = await listTimed("slow.zip", five, (position) =>
+      position === 96 ? 6000 : undefined,
+    );
+    expect(listing).toEqual({
+      format: "zip",
+      entries: ["m0", "m1", "m2"].map((path) => ({ path, type: "file", size: 0 })),
+      truncated: true,
+    });
+    expect(file.positions).toEqual([0, 0, 46, 48, 94, 96, 142]);
+    expect(file.positions).not.toContain(144);
+  });
+
+  it("slow.zip：时钟在查找结束记录的那次读取时就越过 5 秒 → 空列表并置 truncated，一个目录项都不读", async () => {
+    const { file, listing } = await listTimed("slow.zip", five, (_position, length) =>
+      length === 262 ? 6000 : undefined,
+    );
+    expect(listing).toEqual({ format: "zip", entries: [], truncated: true });
+    // The search for the end record and nothing after it.
+    expect(file.positions).toEqual([0]);
+  });
+
+  it("slow.zip：时钟停在 4999 毫秒 → 五项，truncated:false", async () => {
+    const { listing } = await listTimed("slow.zip", five, () => 4999);
+    expect(listing.entries.map((entry) => entry.path)).toEqual(names);
     expect(listing.truncated).toBe(false);
   });
 
-  it("zip 不读时钟：读时钟即抛错的 now 之下照常列出", async () => {
-    const { listing } = await list("clock.zip", zipArchive(ZIP_THREE_RECORDS), {
-      maxEntries: 1000,
-      now: () => {
-        throw new Error("the zip listing read the clock");
-      },
+  it("时钟在读最后一个目录项时越过 5 秒 → 五项并置 truncated；22 字节的空 zip 到时 → 空列表并置 truncated", async () => {
+    const last = await listTimed("last.zip", five, (position) =>
+      position === 192 ? 6000 : undefined,
+    );
+    expect(last.listing.entries.map((entry) => entry.path)).toEqual(names);
+    expect(last.listing.truncated).toBe(true);
+
+    const empty = await listTimed("empty.zip", zipArchive([]), () => 6000);
+    expect(empty.listing).toEqual({ format: "zip", entries: [], truncated: true });
+  });
+
+  it("不是 zip 的字节在时钟越过 5 秒之后仍是不支持，不是空列表", async () => {
+    await expect(
+      listTimed("fake.zip", Buffer.from("plain text, not a zip at all\n"), () => 6000),
+    ).rejects.toMatchObject(UNSUPPORTED);
+  });
+
+  it("5 个胖目录项（扩展字段 65532 字节、注释 65535 字节）在读第 2 项时到时 → 恰两项，单次读取不超过 65536 字节，第 3 项的位置不读", async () => {
+    // Each record is 46 + 7 + 65532 + 65535 = 131120 bytes: they begin at 0, 131120, 262240, …
+    const fat = (name: string) =>
+      zipCentral({
+        name,
+        size: 6,
+        extra: extraField(0x7777, Buffer.alloc(65_528, "e")),
+        comment: Buffer.alloc(65_535, "c"),
+      });
+    const records = ["fat0.md", "fat1.md", "fat2.md", "fat3.md", "fat4.md"].map(fat);
+    expect(records.map((record) => record.length)).toEqual(Array(5).fill(131_120));
+    const { file, listing } = await listTimed("fat-slow.zip", zipArchive(records), (position) =>
+      position === 131_120 ? 6000 : undefined,
+    );
+    expect(listing).toEqual({
+      format: "zip",
+      entries: [
+        { path: "fat0.md", type: "file", size: 6 },
+        { path: "fat1.md", type: "file", size: 6 },
+      ],
+      truncated: true,
     });
-    expect(listing).toEqual({ format: "zip", entries: THREE_ENTRIES, truncated: false });
+    expect(file.maxLength()).toBeLessThanOrEqual(READ_LIMIT);
+    // The search for the end record (the last 65577 of 655622 bytes, in two pieces), then two
+    // records, each 46 bytes and then 131074 in three pieces. Nothing at 262240.
+    expect(file.positions).toEqual([
+      590_045, 655_581, 0, 46, 65_582, 131_118, 131_120, 131_166, 196_702, 262_238,
+    ]);
+    expect(file.positions).not.toContain(262_240);
   });
 });
 
@@ -305,6 +423,25 @@ describe("zip 列表：损坏", () => {
     end64.writeBigUInt64LE(0n, 48);
     const near = await list("near.zip", Buffer.concat([directory, end64, locator, zipArchive([])]));
     expect(near.listing).toEqual({ format: "zip", entries: THREE_ENTRIES, truncated: false });
+  });
+
+  it("zip64 结束记录声明 18446744073709551615 项、目录实有三项 → 三项并置 truncated", async () => {
+    const directory = Buffer.concat(ZIP_THREE_RECORDS);
+    const end64 = Buffer.alloc(56);
+    end64.writeUInt32LE(0x06064b50, 0);
+    end64.writeBigUInt64LE(44n, 4);
+    end64.writeBigUInt64LE(0xffffffffffffffffn, 24);
+    end64.writeBigUInt64LE(0xffffffffffffffffn, 32);
+    end64.writeBigUInt64LE(0n, 48);
+    const locator = Buffer.alloc(20);
+    locator.writeUInt32LE(0x07064b50, 0);
+    locator.writeBigUInt64LE(BigInt(directory.length), 8);
+    locator.writeUInt32LE(1, 16);
+    const { listing } = await list(
+      "count64.zip",
+      Buffer.concat([directory, end64, locator, zipArchive([])]),
+    );
+    expect(listing).toEqual({ format: "zip", entries: THREE_ENTRIES, truncated: true });
   });
 
   it("中央目录在第二项中间被截断、结束记录仍声明三项 → 恰一项并置 truncated", async () => {
