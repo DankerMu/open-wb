@@ -312,3 +312,44 @@
 - 变异：跳过中间层或重复请求根 → 「深链打开」的 `toStrictEqual` 序列判红。
 - 变异：不可观察：服务端是否写了 `sandbox.reject`（web 测试看不到，由上述服务端测试承担）；真实浏览器重载（jsdom 无，归 #1114 与 FL-21）。
 - 变异：未做：`reveal()` 失败的呈现；`刷新` 重走失败的定位；别名路径（`./x`、`a//b`）的行高亮。
+
+## 19.6、19.7、20.7、20.8（#1352）
+
+- 非 Critical Path（按代码推得）：只改 `web/src/features/files/` 六个文件，不碰 `sandbox.resolve`、`op`、路由与路径处理；`use-preview-token.ts` 是凭据的前端生命周期，PR 标 owner 白盒。D-23 / #1286：不新增路由，`archive` 与 `preview-token` 的调用次数只随用户点击增加，不闭合也不加宽 D22 的读窗口（按代码推得）。重签让服务端把同一令牌的到期推后 15 分钟，与续期同性质（按 `specs/preview-origin/spec.md:4` 与 `design.md:147-148` 推得，未测）。
+- 前提（查代码，均在 origin/master）：#1092 `use-preview-token.ts`（122 行）、#1093 `previewers/frame.tsx`（84）、#1095 `media.tsx`（39）、#1097 `archive.tsx`（121）、#1098 `workspace-browser.tsx`（567）；边表 19.6 ← 19.1、19.2 网页部分、21.1 与 20.7 ← 20.1、20.3、21.1 全部满足；不在 1.1 / 1.2 / 1.3 挡住的集合里。#1099 未合（栈上在前），同改 `workspace-browser.tsx`，交点只有 `:121-125` 的 hook 调用。#1094 须在本刀之后，基于四参签名接 pdf / 办公文档的重载计数。
+- 与 issue 的差异：任务号与规格文字已由 `202e5a29` 落库；issue 只说 files-web / file-previewers 各补一句，实际另改了 `specs/workspace-sidebar/spec.md:75`；issue 写「超过 15 分钟」，规格用 5 分钟（与 owner 认可的复用规则同一常量 `RENEW_MS`）。服务端令牌闲置 15 分钟才失效（`design.md:146-148`），所以第 5–15 分钟之间这条规则的代价是多一次签发加一帧加载态，真正的 404 首帧只在 15 分钟之后（按代码推得，未走查）；场景名「过期的 base」取的是客户端规则的含义。
+- hook 入口：签名改为 `usePreviewToken(client, workspaceId, needed, attempt: number)`，返回值形状不变（`preview-area.tsx:24`、`preview.tsx:43`、`previewers/index.ts:47` 都用 `ReturnType`）。`attempt` 进主 effect 的依赖，沿用 `:101-108` 的唯一判据：上次成功签发不满 5 分钟只重排定时器到原时刻，否则置 loading 并立即签发。失败态、401 后的 loading、在途首签时 `issuedRef` 都为空，落到立即签发（在途的那一次由清理函数中止），与替换后的规格句一致。否决「另起 effect 只在 error 时触发」：多一个 state，且续期失败后保留的旧 `ready` 换不掉。
+- 过期首帧：渲染期预判。用一个 ref 记 effect 上次运行时的 `(needed, attempt)`，必须在 `:44` 的提前返回之前写入，否则「不需要」那一次记不下来。本次渲染 `needed` 为真、`workspaceId` 非空、与记录不同、且上次成功签发不新鲜（无记录、`age < 0` 或 `>= RENEW_MS`，与 `:102` 抽成同一函数）时直接返回 `LOADING`。连续需要期间的在途续期与续期失败后保留的 `ready` 不受影响（记录相同）。否决「不需要时用定时器到点丢弃」：后台标签页定时器会被推迟（未实测）。
+- 宿主：`workspace-browser.tsx:122` 第四参传 `selectedFile?.preview?.status === "web" ? selectedFile.preview.reload : 0`；`previewers-frame.test.tsx:218` 的调用点扫描按 `usePreviewToken(` 计数，仍是 1。源码视图下 `刷新` 时 `reload` 不变（`preview-area.tsx:73-75`），不重签——符合规格「渲染视图下…」的限定，不是偏离。
+- 媒体：`types.ts:36-42` 的 `media` 加 `reload: number`；唯一构造点是 `preview-area.tsx:80-85`（`git grep 'kind: "media"'` 在 `web/src` 仅此一处，`web/test` 无人手造该形状，必填字段不破坏夹具）。`previous` 是同一路径的媒体时加一，否则为 0；`preview.tsx:201-208` 对媒体用 `key={`media:${reload}`}`，其余类别 key 不变；`readyPreviewers` 命中，重挂首帧不闪加载态。同步改 `media.tsx:10-12` 与 `preview-area.tsx:53-60` 的注释。「新元素以同一 `src` 重新请求」（`rest.ts:62` 的 no-store 经 `:349` 挂在 file 路由）与「播放中被刷新回到开头且不自动播放」都是按代码推得，浏览器未走查。
+- 压缩包：`archive.tsx:69` 改为保留最后一次落定的结果（列表、空包或失败文案），`settled.load !== load` 时在其后追加 `正在读取文件` 状态行（`role="status"`，片段的第二个子节点，`shrink-0`）；首次仍只有状态行。新结果含失败都替换旧的；401 停在「旧结果 + 状态行」（规格未写，沿用 `:58-59` 交给认证守卫的既有做法，进偏离记录）。同步改 `archive.tsx:4-7` 的注释。
+- 媒体 401：规格已定，不通知认证守卫，实现不加任何请求。按钮 `刷新` 同时发的 `tree`（`workspace-browser.tsx:481-487`）遇 401 经客户端通知守卫（按代码推得）；再点同一行不发客户端请求，仍停在「无法播放该文件」。
+- 规格未写的两个分支（取最简，进偏离记录）：① `attempt` 是变化信号不是计数——在两个网页之间切换使 `reload` 由 N 变 0 也算变化，新鲜时不发请求，只有续期已失败且满 5 分钟时多一次重签加一帧加载态；② 本地时钟被拨回（`age < 0`）按不新鲜处理，沿用 T2「本地时钟被拨回」已钉住的做法。
+- 必须改写的既有断言（逐条进偏离记录，不得放松）：① `use-preview-token.test.tsx:138-148` 改为先断言 `frames.slice(from)` 长度大于 0、全为 `LOADING`，落定后接 `READY`，删「设计如此」注释；`mount` 与 `Props`（`:12`、`:50-61`）加第四个字段。② `files-preview-states.test.tsx:530-559` 标题与断言反转：先断言前后都是 `HTMLVideoElement` 再 `not.toBe`，失败态在 `刷新` 与再点同一行后各自清除，`file` 请求仍为 `[]`。③ `previewers-archive.test.tsx:345-346`（表格不再为 null，旧行仍在且其后有状态行）、`:356-357`（迟到的 `stale.txt` 仍不出现，`old.txt` 仍在）、`:412-423`（失败文案保留加状态行，再让位给新列表），`:336` 与 `:412` 的标题同改。保持原样且须仍绿：`previewers-frame.test.tsx:548-568`、`:512-545`、`previewers-media.test.tsx:120`、`files-preview-states.test.tsx:212-249`、`use-preview-token.test.tsx` 的 T9（`:412`）。
+- 新用例：hook 级（`use-preview-token.test.tsx`，现 482 行）——失败态下 `attempt` 加一立即第二次签发并转 `ready`；第 2 分钟 `attempt` 加一不发请求，第 5 分钟整才续期；续期失败后 `attempt` 加一，那一帧即 `LOADING` 并立即签发；在途首签时 `attempt` 加一，旧 signal 中止、恰两次调用；在途续期期间宿主重渲染仍是同一个 `ready`；给 T2「本地时钟被拨回」（`:151-163`，现只断言 effect 之后）补首帧断言。页面级放新文件 `web/test/previewers-frame-refetch.test.tsx`（`previewers-frame.test.tsx` 729 行、`workspace-browser.test.tsx` 758 行都不加）：规格的两个新场景；「没建过 iframe」用 `vi.spyOn(document, "createElement")` 数 `"iframe"`，先断言首次选中时为 1（按代码推得 React 经它建节点，不成立就换 `MutationObserver`），只数第二次选中之后的增量。files-web 场景「刷新总是重取」放 `files-preview-states.test.tsx`（592 行），含一条第二次 `archive` 应答挂起的用例。
+- 门槛：把 `previewers-frame.test.tsx:237-330` 的页面级夹具（`issued`、`renderSite`、`openSite`、`shownFrame`、`issueRequests` 与常量）搬到新文件 `web/test/files-site-fixture.tsx` 供两处导入，避免 jscpd；knip 的 web 入口含 `test/**/*.test.tsx`，夹具有先例 `files-fixture.tsx`。不新增导出、依赖、`ApiClient` 方法；`ui-layering` 不用登记；`previewers-table-svg.test.tsx` 的静态扫描不受影响；假时钟用例不建大 DOM；`toStrictEqual` 断 `mock.calls`。
+- FL 行（一行，结论 `待签`；origin/master 止于 FL-19，编号取 #1099 的 21.4 行之后；不上传，待发附件数不变）｜操作：`接上一行（文件页停在 FL-05 的空间，uploads 已展开）；点 clip.mp4，点播放，等几秒后点「刷新」；点 broken.mp4，点「刷新」；点 demo.zip，点「刷新」`｜预期：`clip.mp4 点「刷新」后播放停止、进度回到开头，再点播放可以重新播放；broken.mp4 点「刷新」后仍显示「无法播放该文件」，页面不弹提示；demo.zip 点「刷新」后成员表格仍在、内容不变`。三个文件来自 FL-16 / FL-17。坑：#1099 的行若停在别的空间或带 `path` 的地址，「接上一行」要改写；签发失败后重签与过期首帧，签核人在正常部署里做不出来，不写行。
+- PR 文本须列出改到的 `openspec/` 文件：`tasks.md`（19.6–19.7、20.7–20.8 与边表一行，连同上面的替换与勾选）、`specs/files-web/spec.md`、`specs/file-previewers/spec.md`、`specs/workspace-sidebar/spec.md:75`、`implementation-notes.md`（本节；另把 #1095 一节 `:42` 的「元素不重挂…失败态也因此保留」与 #1097 一节里「回到读取态」的条目标「已由 20.7 取代」——后者未逐行核对位置）；design.md 无须改。浏览器行为的陈述一律标「按代码推得，未走查」，本刀不加 ui-walk 步骤。
+- 变异：`attempt` 不进 effect 依赖 → hook 级「失败态下 attempt 加一立即第二次签发」与页面级「签发失败后刷新」判红。
+- 变异：`attempt` 变化时无条件重签（去掉新鲜度判断）→ `previewers-frame.test.tsx:548-568` 的 `issueRequests === [ISSUE]` 与 hook 级「第 2 分钟不发请求」判红。
+- 变异：`attempt` 变化后从当下重数 5 分钟 → 「第 5 分钟整才续期」判红。
+- 变异：只对失败态重签、不对「满 5 分钟」重签 → 「续期失败后 attempt 加一那一帧即 LOADING 并立即签发」判红。
+- 变异：只对「满 5 分钟」重签、不对失败态重签 → 「失败态下 attempt 加一」与页面级「签发失败后刷新」判红。
+- 变异：在途首签时 `attempt` 变化不中止旧请求 → 「在途首签时 attempt 加一」的旧 signal `aborted === true` 断言判红。
+- 变异：去掉渲染期预判 → 改写后的 T2 末段（首帧 `LOADING`）与页面级「过期的 base 不建首帧」判红。
+- 变异：预判只看 `needed` 的变化、不看 `attempt` → 「续期失败后 attempt 加一那一帧即 LOADING」判红。
+- 变异：预判不比对记录、只看不新鲜 → 新增的「在途续期期间宿主重渲染仍是同一个 ready」判红；T9 断言在重渲染之外，看不到它。
+- 变异：记录写在提前返回之后（「不需要」那一次没记下）→ 改写后的 T2 末段与「过期的 base 不建首帧」判红。
+- 变异：预判漏掉 `age < 0` → T2「本地时钟被拨回」补上的首帧断言判红；不补则写「未做」。
+- 变异：宿主第四参恒传 0 → 页面级「签发失败后刷新」判红。
+- 变异：宿主把媒体的 `reload` 也传进去 → 未做：媒体不需要令牌，`needed` 为假时 effect 提前返回，不发请求、返回值不变。
+- 变异：媒体 `reload` 不递增，或 `key` 不含它 → 改写后的 `files-preview-states.test.tsx:530` 判红（`not.toBe` 与失败态清除两处）。
+- 变异：只在 `刷新` 重挂、再点同一行不重挂 → 同一用例的后半判红；反之前半判红。两者都经 `selectFile`，要人为加分支才会出现，仍列出。
+- 变异：换文件时沿用上一个媒体的 `reload` → 不可观察：`PreviewBody key={path}`（`preview.tsx:151`）已重挂，DOM 与请求无差别。
+- 变异：压缩包重新列出时清掉旧列表 → 改写后的 `previewers-archive.test.tsx:345-346`「旧行仍在」与页面级挂起用例判红。
+- 变异：保留旧列表但不加状态行 → 同两处的 `role="status"` 断言判红。
+- 变异：只保留列表、不保留失败文案 → 改写后的 `:412` 判红。
+- 变异：迟到的旧结果顶掉当前显示 → `:356` 的 `stale.txt` 断言与两条 StrictMode 用例（`:370`、`:393`）判红。
+- 变异：新结果到达后状态行不撤 → `files-preview-states.test.tsx:247` 的「没有 正在读取文件」判红。
+- 变异：媒体 `error` 时另发探测请求或调用认证守卫 → `files-preview-states.test.tsx:512` 加「error 之后 fetch 调用数不变」断言后判红；不加则写「未做」。
+- 变异：遍历、符号链接、跨空间 id、他人空间 404、`sandbox.reject` → 不适用：本刀没有带路径参数的新代码与服务端改动，证据在 11.4 / #1075。

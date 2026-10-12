@@ -514,6 +514,7 @@ Minimal mergeable slice: 18.2（tsv）、18.3（svg）、18.4（图片）三刀�
 - [ ] 19.4 FL 行：html 的渲染 / 源码切换且同目录的样式表与图片在预览里生效、pdf 可翻页、docx / xlsx / pptx 转换后可看、服务器没装转换组件时的说明、超过上限的文档只给下载；结论 `待签`。
 - [ ] 19.5 变异证据：给网页 iframe 加 `allow-same-origin` → 属性断言判红；每次预览都重新签发 → 「合计恰一次签发」判红；整条路径一次 `encodeURIComponent`（把 `/` 也编码）→ 路径编码用例判红。
 - [ ] 19.6 `use-preview-token.ts` 加第四参数 `attempt: number`（宿主给网页预览的 `reload`，其余给 0）：`attempt` 变化时，距上次成功签发不足 5 分钟的不发请求、续期时刻不变，其余（签发失败态、尚无成功签发——在途的那一次被中止、已满 5 分钟）立即重新签发；需要令牌的预览重新出现而上次成功签发已满 5 分钟时，那一次渲染起就是 loading，不交出旧 `base`。`workspace-browser.tsx` 的唯一调用点传入。凭据的前端生命周期：owner 白盒。（#1352，owner 2026-10-11 裁决「刷新统一为总是重取」；19.2 的 PDF 与办公文档部分 ← 19.6）
+  实施注记见 `implementation-notes.md`「19.6、19.7、20.7、20.8（#1352）」。
 - [ ] 19.7 测试与变异证据（`use-preview-token.test.tsx` 改写 T2 末段并加用例；新文件 `web/test/previewers-frame-refetch.test.tsx` 页面级两条：file-previewers「隔离来源的嵌入与令牌」的场景「签发失败后刷新」「过期的 base 不建首帧」）。
 
 Suggested fixture level: expanded - 不可信内容的嵌入方式与凭据的前端生命周期；属性错一个就是来源隔离被削弱
