@@ -19,11 +19,16 @@ import {
   tree,
 } from "./files-deep-link-support.js";
 import {
+  authenticatedFilesRoutes,
   cleanupFilesFixture,
   expectLocation,
   imagePreviewResponse,
   openDirectoryDialog,
+  renderFiles,
+  secondWorkspace,
+  selectWorkspaceByName,
   stubBlobUrls,
+  workspace,
 } from "./files-fixture.js";
 import {
   confirmButton,
@@ -222,6 +227,56 @@ describe("当前文件随操作变化：删除", () => {
     expect(new URLSearchParams(window.location.search).has("path")).toBe(false);
     expect(new URLSearchParams(window.location.search).get("ws")).toBe("workspace-1");
     expectEmptyPreview();
+  });
+
+  it("D24 随操作更新的三步连着走：当前文件 a.md 改名为 b.md、删除、再经切换器换到另一个空间——path 依次是 b.md、被移除、保持移除，ws 依次是原空间、原空间、新空间；新空间里同名的 b.md 不被选中", async () => {
+    const listings: Listings = { "": [fileEntry("a.md"), fileEntry("readme.md", 8)] };
+    const { fetchMock } = renderFiles(
+      "/files?ws=workspace-1",
+      authenticatedFilesRoutes([workspace, secondWorkspace], {
+        [treeUrl("")]: () => jsonResponse({ path: "", entries: listings[""] }),
+        "/api/workspaces/workspace-2/tree?path=": () =>
+          jsonResponse({ path: "", entries: [fileEntry("b.md")] }),
+        [fileUrl("a.md")]: () => textPreviewResponse("甲"),
+        [fileUrl("b.md")]: () => textPreviewResponse("乙"),
+        [MOVE]: () => {
+          listings[""] = [fileEntry("b.md"), fileEntry("readme.md", 8)];
+          return jsonResponse({ path: "b.md" });
+        },
+        [entriesUrl("b.md")]: () => {
+          listings[""] = [fileEntry("readme.md", 8)];
+          return deleted();
+        },
+      }),
+    );
+    fireEvent.click(await findRow("a.md"));
+    await expectLocation("/files?ws=workspace-1&path=a.md");
+
+    renameTo(await openRename("a.md"), "b.md");
+    await dialogGone();
+    await expectLocation("/files?ws=workspace-1&path=b.md");
+    expect(await previewRegion().findByText("乙", { exact: true })).toBeTruthy();
+
+    fireEvent.click(confirmButton(await openDelete("b.md")));
+    await confirmGone();
+    await expectLocation("/files?ws=workspace-1");
+    await settle();
+
+    await yieldMacrotask();
+    await selectWorkspaceByName(/数据分析/);
+    await expectLocation("/files?ws=workspace-2");
+    await waitFor(() => expect(rowNames()).toStrictEqual(["数据分析", "b.md"]));
+    await settle();
+    await expectLocation("/files?ws=workspace-2");
+    expect(new URLSearchParams(window.location.search).has("path")).toBe(false);
+    expect(selectedCount()).toBe(0);
+    expectEmptyPreview();
+    // 新空间里没有为那个同名文件发过 file 请求。
+    expect(
+      fetchMock.mock.calls
+        .map(([path]) => path)
+        .filter((path) => path.includes("workspace-2/file")),
+    ).toStrictEqual([]);
   });
 
   it("D20 组件收到的 path 指向 out/a.md 而被点的是 out/b.md 这一行：DELETE 送的是这一行的路径，不上报路径变化", async () => {
