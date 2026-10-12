@@ -469,7 +469,8 @@ Minimal mergeable slice: 16.1 按方法分两刀——地址函数 `fileUrl`、`
   实施注记见 `implementation-notes-2.md`「17.4（#1086）」。
 - [x] 17.5 测试（`web/test/preview.test.tsx` 扩充、`web/test/previewers-loading.test.tsx` 扩充——该文件与它的三条 `PreviewPane` 级用例已随 17.1 建立，这里补页面级场景，其中「加载失败可重试」的 `下载 main.py` 断言依赖 17.2 的预览头；凡取预览正文的断言一律 `await screen.findBy…` / `waitFor`，不在 `render` 或点击之后同步取）：「判定表」「未知文件由服务端裁决」「第一次才加载」「加载失败可重试」「每个文件都能下载」「截断提示」「请求归属与资源释放」。
 - [x] 17.6 FL 行：每个文件都有下载按钮、未知类型文件的两种结果（看得了 / 不支持加下载）；结论 `待签`。
-- [ ] 17.7 变异证据：在 `page.tsx` 里静态导入 `previewers/code` → 守卫判红；把 `previewers/index.ts` 的动态 `import()` 全改成静态导入 → 走查的「选中时新增 `.js` 响应」断言判红；不支持态去掉下载链接 → 「每个文件都能下载」判红；恢复扩展名白名单 → `schema.proto` 用例判红；去掉加载期间的 `正在加载预览…` 占位，或让 `重试` 不重新发起加载 → `previewers-loading.test.tsx` 对应用例判红（这两条随 17.1 的 PR）。
+- [x] 17.7 变异证据：在 `page.tsx` 里静态导入 `previewers/code` → 守卫判红；把 `previewers/index.ts` 的动态 `import()` 全改成静态导入 → 走查的「选中时新增 `.js` 响应」断言判红；不支持态去掉下载链接 → 「每个文件都能下载」判红；恢复扩展名白名单 → `schema.proto` 用例判红；去掉加载期间的 `正在加载预览…` 占位，或让 `重试` 不重新发起加载 → `previewers-loading.test.tsx` 对应用例判红（这两条随 17.1 的 PR）。
+  合入记录（2026-10-11，owner 裁决「补跑这条变异」）：走查一侧的红证已补——把 `previewers/index.ts` 的 9 个动态 `import()` 全改静态导入并重新构建后，`ui-walk` 两个 project 都红在 `web/e2e/ui-walk-files.ts` 的 `selecting a file fetches an on-demand previewer chunk`（`Expected: > 0 / Received: 0`），基线 9 通过 1 跳过；变异已还原、未入库。其余各条的红证在 #1328（守卫）与 #1333（下载链接、白名单）。残余：这条断言不区分预览器块与语法高亮块，今天成立是因为断言窗口内不加载高亮块；渲染视图的围栏代码若接上高亮器，它会对本变异失明。
 
 Suggested fixture level: compact - 前端展示层的结构调整；全站唯一的代码分割点由静态守卫钉住
 Minimal mergeable slice: 17.1 + 17.3（搬家、加载占位与失败重试、静态守卫与走查里的按需块断言，除首次加载的异步之外行为不变；17.1 点名的两处导入 / 读源码断言同刀改指新模块，`preview.test.tsx` 的 12 个用例与 `files-page.test.tsx` 的一处同刀改为 `findBy`，`previewers-loading.test.tsx` 的三条新用例同刀）先合，单独合入时 `make check` 全绿；17.2 的预览头、文案与白名单去除随后，它点名的三个既有测试文件的断言同刀改写
