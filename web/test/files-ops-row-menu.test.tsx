@@ -1,26 +1,45 @@
 // files-web「文件操作界面」与「树的键盘操作」：行菜单 `更多操作 <名>` 本身——哪些行有、里面有什么、
-// 只用键盘走通重命名；以及「没有范围外的入口」。重命名对话框在 files-ops-rename.test.tsx，改名之后的
-// 跟随在 files-ops-follow.test.tsx。
+// 只用键盘走通重命名；行按钮的 Tab 次序与 Enter / 空格；以及「没有范围外的入口」。重命名对话框在
+// files-ops-rename.test.tsx，改名之后的跟随在 files-ops-follow.test.tsx。
 
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceBrowser } from "../src/features/files/index.js";
 import { createApiClient } from "../src/lib/api.js";
-import { findRow, previewRegion, row, rowNames, settle, tree } from "./files-deep-link-support.js";
+import {
+  expectEmptyPreview,
+  findRow,
+  previewRegion,
+  row,
+  rowNames,
+  selectedRow,
+  settle,
+  tree,
+} from "./files-deep-link-support.js";
 import { cleanupFilesFixture } from "./files-fixture.js";
 import {
+  cancelButton,
+  confirmGone,
   dialogGone,
+  dirEntry,
+  dragTransfer,
   expand,
   fileEntry,
   fileUrl,
   flat,
   focusedOn,
+  hoverOver,
   MOVE,
   menuButton,
   nameInput,
   nested,
+  openDelete,
   openFiles,
+  openMove,
+  openRename,
   openRowMenu,
+  pressKey,
+  tabStops,
   treeUrl,
 } from "./files-ops-support.js";
 import { createFetchMock, jsonResponse, textPreviewResponse } from "./support.js";
@@ -203,9 +222,66 @@ describe("行菜单", () => {
   });
 });
 
+describe("树的键盘操作", () => {
+  it("R22 Tab 次序是行按钮、它的更多操作、下一行；目录 out 的按钮上按 Enter 展开且 aria-expanded 为 true；文件 readme.md 的按钮上按空格选中并显示预览；每个非根行旁的更多操作可聚焦", async () => {
+    const { mark } = openFiles(
+      { "": [dirEntry("out"), fileEntry("readme.md", 8)], out: [fileEntry("a.md")] },
+      { [fileUrl("readme.md")]: () => textPreviewResponse("说明正文") },
+    );
+    const out = await findRow("展开 out");
+    expect(tabStops()).toStrictEqual([
+      "折叠 设计文档",
+      "展开 out",
+      "更多操作 out",
+      "readme.md",
+      "更多操作 readme.md",
+    ]);
+    expect(out.getAttribute("aria-expanded")).toBe("false");
+    const since = mark();
+
+    // jsdom 不移动焦点：Tab 次序由上面的列表钉住，这里直接把焦点放到按钮上再按键。
+    out.focus();
+    pressKey(out, "Enter");
+    expect(await findRow("折叠 out")).toBe(out);
+    expect(out.getAttribute("aria-expanded")).toBe("true");
+    await findRow("a.md");
+    expect(document.activeElement).toBe(out);
+    expect(since()).toStrictEqual([treeUrl("out")]);
+
+    const readme = row("readme.md");
+    expect(readme.hasAttribute("aria-current")).toBe(false);
+    expectEmptyPreview();
+    readme.focus();
+    pressKey(readme, " ");
+    await selectedRow("readme.md");
+    expect(await previewRegion().findByText("说明正文", { exact: true })).toBeTruthy();
+    expect(document.activeElement).toBe(readme);
+    expect(since()).toStrictEqual([treeUrl("out"), fileUrl("readme.md")]);
+
+    expect(tabStops()).toStrictEqual([
+      "折叠 设计文档",
+      "折叠 out",
+      "更多操作 out",
+      "a.md",
+      "更多操作 a.md",
+      "readme.md",
+      "更多操作 readme.md",
+    ]);
+    for (const name of ["out", "a.md", "readme.md"]) {
+      const menu = menuButton(name);
+      expect(menu.tabIndex).toBe(0);
+      expect(menu.disabled).toBe(false);
+      menu.focus();
+      expect(document.activeElement).toBe(menu);
+    }
+  });
+});
+
 describe("没有范围外的入口", () => {
-  it("R21 整页的控件、新建菜单、切换器弹层与行菜单里都没有上传、删除工作空间、重命名工作空间", async () => {
-    openFiles(nested(), { [fileUrl("top.md")]: () => textPreviewResponse("正文") });
+  it("R21 整页的控件、新建菜单、切换器弹层、行菜单与它打开的对话框里都没有上传、删除工作空间、重命名工作空间；拖进来的操作系统文件哪一行都不接受", async () => {
+    const { mark } = openFiles(nested(), {
+      [fileUrl("top.md")]: () => textPreviewResponse("正文"),
+    });
     await expand("out");
     fireEvent.click(row("top.md"));
     expect(await previewRegion().findByText("正文", { exact: true })).toBeTruthy();
@@ -227,17 +303,53 @@ describe("没有范围外的入口", () => {
     fireEvent.keyDown(creation, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
 
-    for (const [name, item] of [
-      ["a.md", "下载"],
-      ["out", "重命名"],
+    // 行菜单的全部项：文件行四项，目录行三项。
+    for (const [name, items] of [
+      ["a.md", ["重命名", "移动到…", "删除", "下载"]],
+      ["out", ["重命名", "移动到…", "删除"]],
     ] as const) {
       const menu = await openRowMenu(name);
-      expect(missing(controlNames(menu), [item])).toStrictEqual([]);
+      expect(
+        within(menu)
+          .getAllByRole("menuitem")
+          .map((item) => item.textContent),
+      ).toStrictEqual(items);
       seen.push(...controlNames(menu));
       pickerCount += pickers();
       fireEvent.keyDown(menu, { key: "Escape" });
       await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
     }
+
+    // 行菜单打开的三个对话框各看一次。
+    const rename = await openRename("a.md");
+    expect(missing(controlNames(rename), ["取消", "重命名"])).toStrictEqual([]);
+    seen.push(...controlNames(rename));
+    pickerCount += pickers();
+    fireEvent.click(cancelButton(rename));
+    await dialogGone();
+    const move = await openMove("a.md");
+    expect(missing(controlNames(move), ["取消", "移动", "根目录"])).toStrictEqual([]);
+    seen.push(...controlNames(move));
+    pickerCount += pickers();
+    fireEvent.click(cancelButton(move));
+    await dialogGone("移动到");
+    const confirm = await openDelete("a.md");
+    expect(missing(controlNames(confirm), ["取消", "删除"])).toStrictEqual([]);
+    seen.push(...controlNames(confirm));
+    pickerCount += pickers();
+    fireEvent.click(cancelButton(confirm));
+    await confirmGone();
+
+    // 拖放不是上传入口：带 `Files` 的拖动在根行、目录行、文件行上都不被接受，硬发 drop 也没有请求。
+    const since = mark();
+    for (const target of [row("折叠 设计文档"), row("折叠 out"), row("top.md")]) {
+      const files = dragTransfer(["Files"]);
+      expect(hoverOver(target, files)).toBe(false);
+      expect(target.hasAttribute("data-drop-target")).toBe(false);
+      fireEvent.drop(target, { dataTransfer: files });
+    }
+    await settle();
+    expect(since()).toStrictEqual([]);
 
     await yieldMacrotask();
     fireEvent.click(screen.getByRole("button", { name: "选择工作空间" }));
@@ -247,7 +359,7 @@ describe("没有范围外的入口", () => {
     // 切换器里的条目都是工作空间：这里连单独的「删除」「重命名」也不该有。
     expect(inSwitcher.filter((name) => /上传|删除|重命名/.test(name))).toStrictEqual([]);
     seen.push(...inSwitcher);
-    // 行菜单有「删除」「移动到…」（针对条目）：只断言没有针对工作空间的与上传。
+    // 行菜单与它的对话框有「重命名」「移动到…」「删除」（针对条目）：只断言没有针对工作空间的与上传。
     expect(seen.filter((name) => /上传|删除工作空间|重命名工作空间/.test(name))).toStrictEqual([]);
     expect(pickerCount + pickers()).toBe(0);
   });

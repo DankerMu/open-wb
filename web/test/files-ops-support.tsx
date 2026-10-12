@@ -160,6 +160,91 @@ export function moveInto(dialog: HTMLElement, target: string) {
   fireEvent.click(moveButton(dialog));
 }
 
+/** 树里 Tab 会停的控件各自的名字，按文档顺序；有正的 `tabindex`（Tab 次序就不是文档顺序了）即抛错。 */
+export function tabStops() {
+  const controls = tree().querySelectorAll<HTMLElement>("button, a[href], input, [tabindex]");
+  if ([...controls].some((control) => control.tabIndex > 0)) throw new Error("positive tabindex");
+  return [...controls]
+    .filter((control) => control.tabIndex >= 0 && !(control as HTMLButtonElement).disabled)
+    .map((control) => control.getAttribute("aria-label") ?? control.getAttribute("title"));
+}
+
+/**
+ * 在聚焦着的原生 `button` 上按一次 `key`（`Enter` 或空格）。jsdom 不做「键盘激活按钮」这一步——那是
+ * 浏览器的缺省动作，不是 DOM 事件自带的——这里照浏览器补上：Enter 在 `keydown` 之后点击，空格在
+ * `keyup` 之后点击；处理器拦了缺省动作就不点。发的是键盘事件，点击只由它们引出。
+ * 只有原生的 `<button type="button">` 才有这个缺省动作：换成 `<div role="button">` 浏览器就不点了，
+ * 所以不是它即抛错。
+ */
+export function pressKey(button: HTMLElement, key: "Enter" | " ") {
+  if (!(button instanceof HTMLButtonElement) || button.type !== "button") {
+    throw new Error('expected a native <button type="button">');
+  }
+  if (document.activeElement !== button) throw new Error("expected the button to have focus");
+  const down = fireEvent.keyDown(button, { key });
+  if (key === "Enter" && down) fireEvent.click(button);
+  const up = fireEvent.keyUp(button, { key });
+  if (key === " " && down && up) fireEvent.click(button);
+}
+
+/** 树的拖放写进 `dataTransfer` 的自定义类型（手写，不从实现导入）。 */
+export const ENTRY_DRAG = "application/x-workbuddy-entry";
+
+/**
+ * 一次拖动的 `dataTransfer` 桩：jsdom 没有 `DragEvent` 与 `DataTransfer`，`fireEvent` 把给它的对象原样
+ * 挂到事件上，同一次拖动的各事件共用一个。`types` 是 `foreign`（预置的外来类型，如 `Files`）加上
+ * `setData` 写过的类型。
+ */
+export function dragTransfer(foreign: string[] = []) {
+  const data = new Map<string, string>();
+  return {
+    dropEffect: "none",
+    effectAllowed: "uninitialized",
+    files: [],
+    items: [],
+    get types() {
+      return [...foreign, ...data.keys()];
+    },
+    setData: (type: string, value: string) => void data.set(type, value),
+    getData: (type: string) => data.get(type) ?? "",
+  };
+}
+
+type Transfer = ReturnType<typeof dragTransfer>;
+
+/** 拖着 `transfer` 经过 `target`（不经本树的 `dragstart`）；返回值：这一行是否接受放下（拦了缺省动作）。 */
+export function hoverOver(target: Element, transfer: Transfer) {
+  fireEvent.dragEnter(target, { dataTransfer: transfer });
+  return fireEvent.dragOver(target, { dataTransfer: transfer }) === false;
+}
+
+/** 从 `source` 拖起、经过 `target`，还没放下。`accepted`：`target` 是否接受放下。 */
+export function dragOnto(source: Element, target: Element, transfer = dragTransfer()) {
+  fireEvent.dragStart(source, { dataTransfer: transfer });
+  return { accepted: hoverOver(target, transfer), transfer };
+}
+
+/**
+ * 在 `target` 上放下并结束拖动。真实浏览器在不接受的行上不发 `drop`，这里照发：「不接受」的用例因此
+ * 另断言放下之后没有请求。
+ */
+export function dropOn(source: Element, target: Element, transfer: Transfer) {
+  fireEvent.drop(target, { dataTransfer: transfer });
+  fireEvent.dragEnd(source, { dataTransfer: transfer });
+}
+
+/**
+ * 已展开的目录 `directory`（按行上的名字，根是空间名）直属的、名字逐字为 `name` 的行按钮。树上别处有
+ * 同名的行、或名字带首尾空格（角色查询会折掉）时用它：行按钮的 `title` 就是列表里的名字。
+ */
+export function rowIn(directory: string, name: string) {
+  const item = screen.getByRole("button", { name: `折叠 ${directory}` }).closest("li");
+  const rows = item?.querySelectorAll<HTMLButtonElement>(":scope > ul > li > button[title]");
+  const found = [...(rows ?? [])].find((button) => button.title === name);
+  if (!found) throw new Error(`expected a row named ${JSON.stringify(name)} in ${directory}`);
+  return found;
+}
+
 /** 拷入层 `dialog` 的遮罩。 */
 export function overlay() {
   const element = document.querySelector('[data-slot="dialog-overlay"]');

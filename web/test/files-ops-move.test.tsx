@@ -24,6 +24,7 @@ import {
   openFiles,
   openMove,
   overlay,
+  rowIn,
   rowsUnder,
   targetSelect,
   treeUrl,
@@ -123,6 +124,37 @@ describe("移动到", () => {
       `POST ${MOVE} {"from":" a%20b#c?.md ","to":"out/ a%20b#c?.md "}`,
       treeUrl(""),
       treeUrl("out"),
+    ]);
+  });
+
+  it("M1d 目标目录的名字含首尾空格与 %：to 里目标目录那一半也原样送出，不去空白、不解码", async () => {
+    const directory = " o%20ut ";
+    const listings: Listings = { "": [dirEntry(directory), fileEntry("a.md")], [directory]: [] };
+    const { mark } = openFiles(listings, {
+      [MOVE]: () => {
+        listings[""] = [dirEntry(directory)];
+        listings[directory] = [fileEntry("a.md")];
+        return jsonResponse({ path: `${directory}/a.md` });
+      },
+    });
+    await findRow("a.md");
+    // 按 `title` 逐字找：角色查询会把可访问名里的首尾空格折掉。
+    fireEvent.click(rowIn("设计文档", directory));
+    await waitFor(() =>
+      expect(rowIn("设计文档", directory).getAttribute("aria-expanded")).toBe("true"),
+    );
+    await within(tree()).findByText("空目录", { exact: true });
+    const dialog = await openMove("a.md");
+    expect(targets(dialog)).toStrictEqual([directory]);
+    const since = mark();
+
+    fireEvent.click(moveButton(dialog));
+    await dialogGone("移动到");
+    await settle();
+    expect(since()).toStrictEqual([
+      `POST ${MOVE} {"from":"a.md","to":" o%20ut /a.md"}`,
+      treeUrl(""),
+      treeUrl(directory),
     ]);
   });
 
