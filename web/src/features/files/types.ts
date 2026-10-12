@@ -67,4 +67,9 @@ export type PreviewState =
    * 框换一个新的；`source` 是源码视图那一次 `file` 请求的结局，没取过或正在取第一次时为 `null`。
    * 预览令牌与它的地址前缀不在这里。
    */
-  | { status: "web"; view: "rendered" | "source"; reload: number; source: FetchedPreview | null };
+  | { status: "web"; view: "rendered" | "source"; reload: number; source: FetchedPreview | null }
+  /**
+   * PDF 与办公文档（docx / xlsx / pptx）：选中即有，不发 `file` 请求，正文由预览器的框从隔离预览
+   * 来源加载。`reload` 每加一，框换一个新的。预览令牌与它的地址前缀不在这里。
+   */
+  | { status: "document"; reload: number };

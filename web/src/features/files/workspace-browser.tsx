@@ -15,8 +15,10 @@
  *   again. `reveal` reports no failure, and `刷新` does not repeat a failed walk.
  * - A web page (html / htm) is the exception to that one request: it opens in the rendered view,
  *   loaded by a frame from the preview origin, and `file` is requested only for its source view
- *   (`immediatePreview`). The preview token is issued here, by the one `usePreviewToken` call, and
- *   handed down as a prop; it is not part of the selection, the address or anything stored.
+ *   (`immediatePreview`). A PDF or office document (docx / xlsx / pptx) is loaded by a frame from
+ *   the preview origin too, and `file` is never requested for it. The preview token is issued
+ *   here, by the one `usePreviewToken` call, and handed down as a prop; it is not part of the
+ *   selection, the address or anything stored.
  * - `onlyPaths`: the tree is built from those paths (`subtreeOf`) and neither the listing cache
  *   nor the expanded set is written, so both are back when it is dropped. `loadDirectory` returns
  *   without a request while it is set: tests pin that for `refresh`, for a walk (it ends at the
@@ -134,14 +136,13 @@ export function WorkspaceBrowser({
   const revealRef = useRef<Reveal | null>(null);
   const selectedFileRef = useRef<SelectedFile | null>(null);
   const subtreeOnly = onlyPaths !== undefined;
-  // 这一页唯一的一次调用：选中的是网页（渲染或源码视图）时才签发与续期。第四参是网页预览的
-  // `reload`：渲染视图下刷新或再点同一行使它变化，令牌由此按需重新签发；其余情况给 0。
-  const previewToken = usePreviewToken(
-    client,
-    workspaceId,
-    selectedFile?.preview?.status === "web",
-    selectedFile?.preview?.status === "web" ? selectedFile.preview.reload : 0,
-  );
+  // 这一页唯一的一次调用：选中的是网页（渲染或源码视图）、PDF 或办公文档时才签发与续期。第四参是
+  // 该预览的 `reload`：刷新或再点同一行使它变化（网页限渲染视图），令牌由此按需重新签发；其余情况给 0。
+  const framed =
+    selectedFile?.preview?.status === "web" || selectedFile?.preview?.status === "document"
+      ? selectedFile.preview
+      : null;
+  const previewToken = usePreviewToken(client, workspaceId, framed !== null, framed?.reload ?? 0);
 
   const releaseOwnedImage = useCallback(() => {
     const url = ownedImageUrlRef.current;

@@ -52,6 +52,11 @@ export function withFetched(current: PreviewState | null, fetched: FetchedPrevie
   return current?.status === "web" ? { ...current, source: fetched } : fetched;
 }
 
+/** 文档预览的 `reload`：同一路径上一次也是文档预览时加一，否则从 0 起。 */
+function documentReload(previous: PreviewState | null): number {
+  return previous?.status === "document" ? previous.reload + 1 : 0;
+}
+
 /**
  * 选中即有、不发 `file` 请求的预览；`null` 表示这个文件照常请求。`previous` 是同一路径上一次的
  * 预览（换了文件为 `null`）。
@@ -61,6 +66,8 @@ export function withFetched(current: PreviewState | null, fetched: FetchedPrevie
  * 网页：默认是渲染视图，由预览器把隔离预览来源的地址交给框，页面不为它发 `file` 请求。换了文件
  * 视图回到渲染；再次选中或刷新时，渲染视图 `reload` 加一并丢掉取过的源码（下次看源码重新取）；
  * 源码视图返回 `null`，照常请求一次，结局由 `withFetched` 收进 `source`。
+ * PDF 与办公文档：同样不请求 `file`，由预览器的框从隔离预览来源加载；再次选中或刷新时 `reload`
+ * 加一，预览器据此换一个新的框。
  */
 export function immediatePreview(
   entry: TreeEntry,
@@ -76,6 +83,9 @@ export function immediatePreview(
     return previous.view === "source"
       ? null
       : { ...previous, reload: previous.reload + 1, source: null };
+  }
+  if (kind === "pdf" || kind === "office") {
+    return { status: "document", reload: documentReload(previous) };
   }
   if (kind === "archive") {
     return { status: "archive", load: listArchive };

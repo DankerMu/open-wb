@@ -7,6 +7,8 @@
  * A web page has none either: its previewer gets the preview token, the view and, as its source
  * view, the body this module renders for the outcome of the source request. The token only passes
  * through here on its way from the host's prop to that previewer.
+ * A PDF or an office document has no fetched body either: its previewer gets the token, the path
+ * and the entry's size, and decides there whether a frame is built.
  * Blob URLs are caller-owned; this module never allocates or revokes them.
  * Markdown mode is keyed by `path`; callers must remount across workspaces
  * if the same relative path can name different files.
@@ -31,6 +33,7 @@ import type { usePreviewToken } from "./use-preview-token.js";
 
 type FilePreviewSuccess = Extract<PreviewState, { status: "success" }>["data"];
 type WebPreview = Extract<PreviewState, { status: "web" }>;
+type DocumentPreview = Extract<PreviewState, { status: "document" }>;
 
 type PreviewPaneProps = {
   workspaceId: string;
@@ -39,7 +42,7 @@ type PreviewPaneProps = {
   size: number;
   mtime: number;
   preview: PreviewState;
-  /** The host's `usePreviewToken` result; only a web page's rendered view reads it. */
+  /** The host's `usePreviewToken` result; a web page's rendered view, a PDF and an office document read it. */
   previewToken: ReturnType<typeof usePreviewToken>;
   /** 查看源码 / 渲染视图 of a web page: the view is the host's. Without it the button does nothing. */
   onWebViewChange?: ((view: WebPreview["view"]) => void) | undefined;
@@ -147,6 +150,21 @@ export function PreviewPane({
             ) : null,
           }}
         />
+      ) : preview.status === "document" ? (
+        <LoadedPreview
+          content=""
+          doc={{
+            path,
+            token: previewToken,
+            reload: preview.reload,
+            size,
+            office: previewKind(name) === "office",
+          }}
+          id="document"
+          key={path}
+          name={name}
+          truncated={false}
+        />
       ) : (
         <PreviewBody key={path} name={name} preview={preview} size={size} />
       )}
@@ -162,7 +180,7 @@ function PreviewBody({
   size,
 }: {
   name: string;
-  preview: Exclude<PreviewState, WebPreview>;
+  preview: Exclude<PreviewState, WebPreview | DocumentPreview>;
   size: number;
 }) {
   if (preview.status === "unsupported" || preview.status === "too-large") {
@@ -223,6 +241,7 @@ function LoadedPreview({
   truncated,
   load,
   web,
+  doc,
 }: {
   id: PreviewerId;
   name: string;
@@ -230,6 +249,7 @@ function LoadedPreview({
   truncated: boolean;
   load?: Parameters<Previewer>[0]["load"];
   web?: Parameters<Previewer>[0]["web"];
+  doc?: Parameters<Previewer>[0]["doc"];
 }) {
   const [loaded, setLoaded] = useState<Loaded>(() => {
     const Previewer = readyPreviewers.get(id);
@@ -256,7 +276,14 @@ function LoadedPreview({
 
   if (loaded.status === "ready") {
     return (
-      <loaded.Previewer content={content} load={load} name={name} truncated={truncated} web={web} />
+      <loaded.Previewer
+        content={content}
+        doc={doc}
+        load={load}
+        name={name}
+        truncated={truncated}
+        web={web}
+      />
     );
   }
   if (loading) {
