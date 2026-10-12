@@ -1,4 +1,5 @@
-// /files probes for the UI walk that need a real browser's computed styles.
+// /files probes for the UI walk that need a real browser's computed styles, and the walk's
+// steps over the new previews (highlighted source, audio, download link, deep link).
 
 import { expect, type Page, type Response } from "@playwright/test";
 
@@ -65,4 +66,70 @@ export async function expectOnDemandChunk(page: Page, select: () => Promise<void
   } finally {
     page.off("response", onResponse);
   }
+}
+
+// files-harness「走查 /files 步骤」(a)，再选中 `clip.wav` 做 (c)(d)。调用时页面已选中工作空间、树已加载。
+export async function expectNewPreviews(page: Page, workspaceId: string): Promise<void> {
+  const files = page.locator("main");
+  const tree = files.getByRole("navigation", { name: "工作空间目录树" });
+  const preview = files.getByRole("region", { name: "文件预览" });
+
+  await tree.getByRole("button", { name: "sample.py", exact: true }).click();
+  const firstLine = preview.locator('[data-slot="preview-code"]').getByRole("row").first();
+  await expect(firstLine.getByRole("cell").nth(0), "sample.py line number").toHaveText("1");
+  // 未着色的行第二格只有文本节点，着色后才有元素；着色在 effect 里晚于源码落地（读代码推出），所以轮询。
+  await expect(
+    firstLine.getByRole("cell").nth(1).locator("span"),
+    "sample.py first line carries a syntax-highlight element",
+  ).not.toHaveCount(0);
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get("path"), "path after selecting sample.py")
+    .toBe("sample.py");
+
+  await tree.getByRole("button", { name: "clip.wav", exact: true }).click();
+  await expectClipSelected(page, workspaceId);
+}
+
+// (c)(d) 与选中态；重载之后再调一次即 (e)。地址里的 `path` 重载后原样还在，证明不了恢复——
+// (e) 的判据是树行的 `aria-current` 与重新出现的播放器、下载链接。
+export async function expectClipSelected(page: Page, workspaceId: string): Promise<void> {
+  const files = page.locator("main");
+  const tree = files.getByRole("navigation", { name: "工作空间目录树" });
+  const preview = files.getByRole("region", { name: "文件预览" });
+  const origin = new URL(page.url()).origin;
+  const query = (name: string) => new URL(page.url()).searchParams.get(name);
+
+  await expect.poll(() => query("ws"), "ws while clip.wav is selected").toBe(workspaceId);
+  await expect.poll(() => query("path"), "path while clip.wav is selected").toBe("clip.wav");
+  await expect(
+    tree.getByRole("button", { name: "clip.wav", exact: true }),
+    "clip.wav row is the current one",
+  ).toHaveAttribute("aria-current", "true");
+
+  // (c)：`src` 读属性值（解析后的绝对地址）；首次选中与由地址恢复的选中都不带 `v`（实测）。
+  const audio = preview.locator("audio");
+  await expect(audio, "clip.wav audio player").toHaveCount(1);
+  await expect(audio, "clip.wav audio controls").toHaveAttribute("controls", "");
+  await expect(audio, "clip.wav audio src").toHaveJSProperty(
+    "src",
+    `${origin}/api/workspaces/${workspaceId}/file?path=clip.wav`,
+  );
+  // 规格条文之外：出错时播放器会被换成「无法播放该文件」，只数元素可能赶在出错之前就过（读代码推出）；
+  // 这里等到元数据读到（HAVE_METADATA）且没有错误。
+  await expect
+    .poll(
+      () => audio.evaluate((el: HTMLAudioElement) => [el.error === null, el.readyState >= 1]),
+      "clip.wav metadata loaded without error",
+    )
+    .toEqual([true, true]);
+
+  // (d)：只读属性，不点击（点击会触发下载导航）。
+  const download = preview
+    .locator('[data-slot="preview-header"]')
+    .getByRole("link", { name: "下载 clip.wav", exact: true });
+  await expect(download, "clip.wav download href").toHaveJSProperty(
+    "href",
+    `${origin}/api/workspaces/${workspaceId}/download?path=clip.wav`,
+  );
+  await expect(download, "clip.wav download attribute").toHaveAttribute("download", "");
 }
