@@ -14,19 +14,15 @@ import {
   assistantMessage,
   edit,
   goLive,
-  listed,
   MESSAGES,
-  openSession,
   PROJ,
-  quiesce,
   type Snapshot,
   toolStep,
   turn,
   write,
 } from "./chat-page-file-changes-support.js";
 import { envelope } from "./chat-page-ownership-support.js";
-import { cleanupSessionMeta, crumb } from "./chat-page-session-meta-support.js";
-import type { FetchRoutes } from "./chat-page-support.js";
+import { cleanupSessionMeta } from "./chat-page-session-meta-support.js";
 import { historyUser, latestSource, observeUnhandledRejections } from "./chat-stream-support.js";
 import {
   BOUND,
@@ -38,14 +34,18 @@ import {
   mountSidebarPage,
   NAME,
   OPEN_IN_FILES,
+  openChanges,
   openSidebar,
+  rowNames,
   SAME_SPACE,
   selectSession,
+  settled,
   TEMPORARY,
   treeOf,
+  treeRequests,
 } from "./chat-workspace-sidebar-support.js";
-import { issued, shownFrame } from "./files-site-fixture.js";
-import { type FetchMock, jsonResponse, paths, textPreviewResponse } from "./support.js";
+import { shownFrame } from "./files-site-fixture.js";
+import { jsonResponse, paths } from "./support.js";
 import { yieldMacrotask } from "./ui-support.js";
 
 const MARK = "本会话已改动";
@@ -62,22 +62,6 @@ const SRC = treeOf(PROJ.id, "src");
 const OUT = treeOf(PROJ.id, "out");
 
 afterEach(cleanupSessionMeta);
-
-/**
- * PROJ 的目录：根下 `deep`、`out`、`src` 三个目录与 `draft.md`、`readme.md`；`out` 里是 `b.md` 与
- * `index.html`，`src` 里是 `app.ts` 与 `util.ts`，`deep` 里是 `x.md`（用例都不展开它）。
- */
-function project(extra: FetchRoutes = {}): FetchRoutes {
-  return {
-    [ROOT]: listing("", [dir("deep"), dir("out"), dir("src"), file("draft.md"), file("readme.md")]),
-    [treeOf(PROJ.id, "deep")]: listing("deep", [file("x.md")]),
-    [OUT]: listing("out", [file("b.md"), file("index.html")]),
-    [SRC]: listing("src", [file("app.ts"), file("util.ts")]),
-    [fileOf(PROJ.id, "readme.md")]: () => textPreviewResponse("自述正文"),
-    [`/api/workspaces/${PROJ.id}/preview-token`]: () => issued(),
-    ...extra,
-  };
-}
 
 /**
  * 规格场景「标记」的会话：第一条助手消息的已结束步骤改了 `src/app.ts` 与 `more`；第二条（id 2，状态
@@ -106,14 +90,6 @@ function twoTurns(last: "done" | "running", ...more: ReturnType<typeof write>[])
   };
 }
 
-/** 在 PROJ 上打开 `snapshot` 的会话页与侧边栏，等到根目录里的 `readme.md` 出现。 */
-async function openChanges(snapshot: Snapshot, extra: FetchRoutes = {}) {
-  const page = await openSession(snapshot, listed, project(extra));
-  await crumb("saved title");
-  const { region } = await openSidebar("readme.md");
-  return { ...page, region };
-}
-
 /** 展开 `out` 与 `src`，等到两层的文件行都出现。 */
 async function expandOutAndSrc(region: HTMLElement) {
   fireEvent.click(within(region).getByRole("button", { name: "展开 out" }));
@@ -129,16 +105,6 @@ const button = (scope: HTMLElement, name: string) =>
 const preview = (scope: HTMLElement) =>
   within(within(scope).getByRole("region", { name: PREVIEW }));
 
-/** 对 PROJ 发出的全部 `tree` 请求，按调用顺序。 */
-function treeRequests(fetchMock: FetchMock) {
-  return paths(fetchMock).filter((path) => path.startsWith(`/api/workspaces/${PROJ.id}/tree?`));
-}
-
-/** 树上各行的名字，自上而下；树栏收起时照样读（直接在 DOM 里找）。 */
-function rowNames(scope: HTMLElement) {
-  return [...scope.querySelectorAll('[data-slot="tree-name"]')].map((node) => node.textContent);
-}
-
 /** 带标记的行，自上而下：`[行名, 标记的文本]`。 */
 function markedRows(scope: HTMLElement) {
   return [...scope.querySelectorAll('[data-slot="tree-mark"]')].map((mark) => [
@@ -151,12 +117,6 @@ function markedRows(scope: HTMLElement) {
 function description(row: HTMLElement) {
   const id = row.getAttribute("aria-describedby");
   return id === null ? null : (document.getElementById(id)?.textContent ?? "");
-}
-
-/** 让已发出的请求与随后的渲染落地，之后再断「没有新的请求」。 */
-async function settled() {
-  await quiesce();
-  await yieldMacrotask();
 }
 
 describe("本会话改动标记与过滤", () => {
