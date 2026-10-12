@@ -4,13 +4,23 @@
 # → 最新审计必须相对快照为新事件且关联本次 workspace/path/op → md/png/csv 预览
 # → 上传 smoke-upload.txt 201 → 同名再传 201 且自动编号 → tree?path=uploads 列出两者
 # → 越界名 ../escape.txt 403 且入审计 → application/json 上传 400
-# → clip.wav 范围请求 206 → readme.md 附件下载 → 签发 preview-token
+# → clip.wav 范围请求 206 → readme.md 附件下载
+# → mkdir hurl-a（201 或 409）→ 改名为 hurl-b（200 或 409）→ 删除 hurl-b 精确 204 → 再删精确 404
+# → 清理 hurl-a（204 或 404）→ readme.md 移到已存在的 notes.csv 精确 409 → 删除 ../x 精确 403
+# → 根树里没有 hurl-a / hurl-b，readme.md 与 notes.csv 仍在 → 签发 preview-token
 # → 隔离来源的 site/index.html（text/html + CSP sandbox）与 site/style.css → 伪造令牌 404
 # → 主站对同一 html 仍是 text/plain
 # → 登出 → lisi 外账号读树、下载、签发 preview-token、上传共四个 404 → 登出，
 # 不留下 live authentication session。
 # 上传的文件留在正式空间 uploads/ 里不清理，所以编号不写死，重跑稳定。
-# 范围请求起的各步只读：不建不删条目；每跑一次多一条 file.download 审计，不清理。
+# 范围请求、下载与预览来源各步只读；下载每跑一次多一条 file.download 审计，不清理。
+# 文件操作各步只建、改名、删除 hurl-a / hurl-b 两个空目录，并自行清理：三处宽容状态码
+# （201|409、200|409、204|404）接受上一次中断留下的 hurl-a、hurl-b，完整跑完后两者都不在；
+# 四处精确断言（204、404、409、403）每次都执行。删除的目录进服务端的回收目录，回收批次
+# 与这几步写下的审计行不清理。readme.md、notes.csv 只被 409 那一步点名，409 成立时两者不动。
+# 中断的运行（没走到登出）会留下一条登录会话，「不留下」只对完整运行成立。
+# 这几步是单线程顺序请求，hurl-a 由服务进程建出、再由同一进程改名与删除（读代码推出）：
+# resolve 到 rename 之间的窗口、跨 uid 的改名、回收批次的内容都不在本文件的证明范围内。
 # 预览来源的地址只取自签发响应的 base，本文件不写主机名与端口。
 # 本文件只看响应头与字节，下面两件事不在它的证明范围内：预览来源不依赖 cookie
 # （证据在 server/test/preview-app.test.ts）；浏览器里的不透明来源与 iframe 行为（要真实浏览器）。
@@ -190,6 +200,61 @@ HTTP 200
 header "Content-Type" == "application/octet-stream"
 header "Content-Disposition" startsWith "attachment"
 file,fixtures/sandbox/u1/smoke-fixture/readme.md;
+
+# 建目录 hurl-a：仅 201 或 409（上一次中断的运行可能留下它）。
+POST {{base_url}}/api/workspaces/{{workspace_id}}/dirs
+Content-Type: application/json
+{"path":"hurl-a"}
+HTTP *
+[Asserts]
+status toString matches /^(201|409)$/
+
+# 改名 hurl-a → hurl-b：仅 200 或 409（上一次中断的运行可能留下 hurl-b）。
+# 改名成功的证据是下一步的精确 204，不是这里的状态码。
+POST {{base_url}}/api/workspaces/{{workspace_id}}/move
+Content-Type: application/json
+{"from":"hurl-a","to":"hurl-b"}
+HTTP *
+[Asserts]
+status toString matches /^(200|409)$/
+
+# 删除 hurl-b：exact 204，无正文。
+DELETE {{base_url}}/api/workspaces/{{workspace_id}}/entries?path=hurl-b
+HTTP 204
+[Asserts]
+body == ""
+
+# 再删一次：exact 404 not_found（删除后条目不在）。
+DELETE {{base_url}}/api/workspaces/{{workspace_id}}/entries?path=hurl-b
+HTTP 404
+{"error":{"code":"not_found","message":"请求的资源不存在"}}
+
+# 清理 hurl-a：仅 204 或 404（改名在上面答 409 时它还在）。
+DELETE {{base_url}}/api/workspaces/{{workspace_id}}/entries?path=hurl-a
+HTTP *
+[Asserts]
+status toString matches /^(204|404)$/
+
+# 移动到已存在的同名目标：exact 409 conflict，不覆盖。
+POST {{base_url}}/api/workspaces/{{workspace_id}}/move
+Content-Type: application/json
+{"from":"readme.md","to":"notes.csv"}
+HTTP 409
+{"error":{"code":"conflict","message":"同名资源已存在"}}
+
+# 字面 path=../x 的越界删除：exact 403 sandbox_denied。
+DELETE {{base_url}}/api/workspaces/{{workspace_id}}/entries?path=../x
+HTTP 403
+{"error":{"code":"sandbox_denied","message":"目标路径不在你的沙箱内，操作已拒绝"}}
+
+# 文件操作各步之后的根树：hurl-a / hurl-b 都不在，readme.md 与 notes.csv 仍在。
+GET {{base_url}}/api/workspaces/{{workspace_id}}/tree
+HTTP 200
+[Asserts]
+jsonpath "$.entries[?(@.name=='hurl-a')]" not exists
+jsonpath "$.entries[?(@.name=='hurl-b')]" not exists
+jsonpath "$.entries[?(@.name=='readme.md' && @.type=='file')]" exists
+jsonpath "$.entries[?(@.name=='notes.csv' && @.type=='file')]" exists
 
 # 签发预览令牌：不带 body（带 body 即 400）。base 形如 <来源>/w/<64 位十六进制>/，
 # 形状不符则 preview_origin 捕获失败；base 不得落在主站来源之下（末尾的 / 防端口前缀误判）。
