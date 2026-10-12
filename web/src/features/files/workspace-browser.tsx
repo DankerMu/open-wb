@@ -9,10 +9,13 @@
  * - A walk started by `path` that does not end on a file leaves nothing selected. Ending on a
  *   directory shows the empty preview; a last name missing from its parent's listing shows
  *   `文件不存在`; a level whose request failed shows that failure's message (none for a 401, which
- *   belongs to the login layer). `path` is forwarded as given: whether a level may be listed is the
- *   server's answer, nothing here inspects or rewrites the segments. A failed level without a row
- *   on the tree is kept out of the error rows and the expanded set, so `刷新` does not ask for it
- *   again. `reveal` reports no failure, and `刷新` does not repeat a failed walk.
+ *   belongs to the login layer). Before the walk `path` loses its empty and `.` segments
+ *   (`normalizedPath`); nothing left is the same as no `path`, and a `..` segment ends it there
+ *   with `文件不存在` and no request for it. The other segments go out as given: whether a level
+ *   may be listed is the server's answer. A `path` equal to the selection as written is left
+ *   alone before any of that, and `reveal` takes its path as given. A failed level without
+ *   a row on the tree is kept out of the error rows and the expanded set, so `刷新` does not ask
+ *   for it again. `reveal` reports no failure, and `刷新` does not repeat a failed walk.
  * - A web page (html / htm) is the exception to that one request: it opens in the rendered view,
  *   loaded by a frame from the preview origin, and `file` is requested only for its source view
  *   (`immediatePreview`). A PDF or office document (docx / xlsx / pptx) is loaded by a frame from
@@ -41,6 +44,7 @@ import {
   type DirectoryCache,
   loadedDirectoryPaths,
   markedRows,
+  normalizedPath,
   refreshLayers,
   revealStep,
   subtreeOf,
@@ -476,8 +480,8 @@ export function WorkspaceBrowser({
   );
 
   /**
-   * 定位落在目录 `path` 上：展开并请求它。它的父目录不在 `rows`（树上有行的各级）里时——别名路径，如
-   * `./out`——它自己也没有行：不展开、不请求。
+   * 定位落在目录 `path` 上：展开并请求它。它的父目录不在 `rows`（树上有行的各级）里时——上一级的
+   * 列表没列出、却能列的目录——它自己也没有行：不展开、不请求。
    */
   const openDirectory = useCallback(
     (path: string, rows: readonly string[]) => {
@@ -526,19 +530,23 @@ export function WorkspaceBrowser({
     }
   }, [awaitDirectory, endWithoutFile, expandDirectories, onPathChange, openDirectory, selectFile]);
 
-  // `path` 属性只在变化时生效一次，每次都顶掉进行中的定位：与当前选中相同就只是放弃它，`null` 另清掉
-  // 选中，其余换成对 `path` 的定位。其后每当目录列表或进行中的目录请求有变化，推进定位。
+  // `path` 属性只在变化时生效一次，每次都顶掉进行中的定位。与当前选中逐字相同（点击后宿主送回来的
+  // 就是这样）只是放弃它，不看它的写法。其余先过 `normalizedPath`，比的、走的都是之后的写法：与当前
+  // 选中相同同样只是放弃；`null` 与去掉空段、点段后什么都不剩的清掉选中；含 `..` 段的同样清掉选中并
+  // 显示 `文件不存在`，不定位（因此不为它发请求）；其余换成对它的定位。其后每当目录列表或进行中的
+  // 目录请求有变化，推进定位。
   // biome-ignore lint/correctness/useExhaustiveDependencies: `directories` 与 `loadingPaths` 是推进定位的触发条件。
   useEffect(() => {
     if (appliedPathRef.current !== path) {
       appliedPathRef.current = path;
-      setPathNotice(null);
-      if (path === null) {
-        revealRef.current = null;
+      revealRef.current = null;
+      const selected = selectedFileRef.current?.path;
+      const target = path === selected ? path : normalizedPath(path ?? "");
+      setPathNotice(target === null ? MISSING_FILE : null);
+      if (!target) {
         clearSelection();
-      } else {
-        revealRef.current =
-          selectedFileRef.current?.path === path ? null : { asked: new Set(), notify: false, path };
+      } else if (target !== selected) {
+        revealRef.current = { asked: new Set(), notify: false, path: target };
       }
     }
     continueReveal();

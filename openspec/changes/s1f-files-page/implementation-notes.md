@@ -549,3 +549,37 @@
 - 变异：`endWithoutFile` 去掉 `target.notify` 判断 → 组件段「reveal() 定位到不存在的文件或失败的一级…」判红。
 - 变异：搬移时漏掉任意一个 `it` → vitest 汇总 39 变 38，对照表缺行。
 - 合入后更正（以 #1362 的 PR 文本为准）：实测根因是 `waitFor` 回调里按角色查询的成本（单次 21–43ms，占首例等待的 78%），不是渲染；除 `selectedRow` 外还改了 `rowNames`（拆分后它成了 failures 文件冷启动首例的第一个等待）；`expect(` 合计 112（原 111 加修复的一行）；`TREE` 未从 support 导出（与 `ROOT` 同值，knip 报重复导出）；两句变异报文预测与实测不同（M2 报 `expected undefined to be 'app.ts'`，M3 红 10 例）。1000ms 预算这一类没有闭合：`findRow` 与 `previewRegion().findBy*` 仍在轮询里跑角色查询。
+
+## 21.7、21.8（#1361）
+
+- 定性：服务端、`sandbox.resolve`、`op` 集合零改动，按 #1099 口径不改 Critical Path 代码；但本刀改了浏览器发往沙箱边界的输入，且让一类越界链接不再写 `sandbox.reject`，建议按 Critical Path 待遇（两席评审加 owner 白盒标注）。不变量：规范化只删段或整条拦下，不产生服务端对原串不会解析到的路径——唯一例外是以 `/` 开头的写法，见漂移二（`server/src/core/sandbox/resolve.ts:37-42` 同样跳过空段与 `.`、拒 `..`）。
+- 前提：21.2（#1099）已在 origin/master；本分支叠在未合入的 #1362 上，测试文件名来自它；不等 1.1 / 1.2 / 1.3。
+- 漂移一：21.8 说 FL-22 有「`..` 期望」，但 `docs/acceptance/functional-checklist.md:216` 只有 nope.html 一步。漂移二：`server/src/core/sandbox/resolve.ts:26` 对 `/` 开头直接拒（403 加审计），所以 `/readme.md` 改前是 403，改后去掉前导空段选中它，属 owner 裁决的预期变化，写进 PR。
+- 落点：`browser-paths.ts`（162 行）加 `export function normalizedPath(path: string): string | null`，`split("/")` 后滤掉 `""` 与 `"."`，任一段 `=== ".."` 返回 `null`，否则 `join("/")`；不写正则、不 `trim`、不 `.normalize()`、不处理 `\`。调用方是 `workspace-browser.tsx:532-545` 的 `path` effect（641 行，约加 6 行），knip 有消费方。
+- effect 分支：`path === null` 或结果为 `""` → 走现有 `null` 分支（`revealRef = null; clearSelection()`）；结果为 `null` → 同上再 `setPathNotice(MISSING_FILE)`；否则 `Reveal.path` 与 `selectedFileRef.current?.path` 的比较都用规范化后的值。`appliedPathRef` 仍比对原串。`page.tsx`（361 行）零改动，`:169` 注释仍成立。
+- 不采用「`page.tsx` 把含 `..` 的路径折成 `".."` 传下去」：它靠「根列表里没有 `..`」这个巧合，根列表读取失败时预览区显示根的错误而不是 `文件不存在`。不得把 `""` 当路径传给 `revealStep`：`parentDirectories("")` 为空，结果是 `文件不存在`。
+- 命名与注释：`workspace-browser.test.tsx:711-712` 扫描 `workspace-browser.tsx` 不得含整词 `location` / `history`，新标识符避开。同步改 `workspace-browser.tsx:479-480` 的 `openDirectory` 注释（别名例子不再可达）与 `files-deep-link-failures.test.ts:1-4` 的文件头；`browser-paths.ts:68` 的 `revealStep` 注释仍成立。
+- `reveal()` 不规范化（偏离记录）：本分支 `web/src` 里没有任何调用方（只有 `workspace-browser.tsx:573` 的定义与 `index.ts:3` 的类型导出）。会话侧边栏 `workspace-sidebar.tsx:43/89-90` 的 `path` 只来自 `onPathChange`（点击行，规范写法），`:64` 的 `在文件页打开` 因此已能往返。组 25 接 `reveal` 时再决定是否复用 `normalizedPath`。
+- 与既有逻辑的交互（据代码推出，未实测）：别名地址上点已选中行 → `writePath` 写规范写法，属性变化但与选中相同，不重新定位，`file` 只多一次；`..` 被拦后点 `刷新` → 只重取根，文案保留；重命名 / 移动 / 删除跟踪（组 22）未合入，届时须拿选中项路径比对，不拿地址原串。
+- `openDirectory` 的 `rows.includes` 守卫（`workspace-browser.tsx:484`）保留：上级列表没列出但能列的目录仍可达。它唯一的判红用例是 `files-deep-link-failures.test.ts:240-263` 的 `./bad`，改写为 `ghost/bad`（根不列 `ghost`，`tree?path=ghost` 应答 200 含目录 `bad`，`ghost%2Fbad` 给 404）：请求恰为 `[ROOT, ghost]`，`刷新` 后 `[ROOT, ghost, ROOT]`，没有错误行。
+- 必须改写的既有断言（`files-deep-link-failures.test.ts`，355 行，逐条进偏离记录）：`:86-93` `../x` → `trees:[ROOT]`、`MISSING`、去掉 `extra`；`:102-109` `/etc/x` → `trees:[ROOT, tree?path=etc]`、404 文案；`:140-146` `out/` → `notice:null`；`:218-220` 刷新表的 `../x` 行 → 换成 `link/x`（桩给 403），另加「`../x` 后点刷新 → `[ROOT, ROOT]`」；`:240-263` 如上。`:126-132`（`..`）与 `:133-139`（`/x`）结果不变，只改标题里的理由。
+- 403 文案的覆盖不得丢：表里补一例 `link/x`（`tree?path=link` 桩给 `sandbox_denied`）→ 显示 `DENIED`。不得动 `web/test/api-files-url.test.ts:47` 与 `api-files.test.ts:184-261`（钉着客户端方法原样编码 `..`）。#1099 注记里「浏览器端把 `..` 规范化掉 → 第四例判红」那条变异作废，在本节写明。
+- 新测试：`web/test/browser-paths.test.ts`（纯函数表：`./a//b/`→`a/b`、`/`→`""`、`.`→`""`、`a/../b`→`null`、`..`→`null`、`...`、`. `、`..\x`、`%2E%2E`、` a `、分解形式均原样）；`web/test/files-deep-link-alias.test.ts`（场景六例加拦截四例，整页渲染，请求串 `toStrictEqual`，每例 `expectLocation(at)`）。`%2E%2E%2Fx` 的地址须手写字面串（`support` 的 `address()` 不会编码点）；另加 `%252E%252E%2Fx` → 请求 `tree?path=%252E%252E`。`workspace-browser.test.tsx`（753 行）不加行。
+- FL：不加行，改 FL-22（结论 `待签`，行数仍 27）。操作在「点 logo.png」之后、「关掉这个标签页」之前插入：「再粘贴一次 FL-20 的地址，在 path 一段的 uploads 前面加上一个点和 %2F 再回车；看完后把这个点改成两个点再回车」。期望插入：「加一个点后 uploads 已展开，fl-page.html 那一行是选中的样子，预览区是渲染后的网页，地址栏里仍是带一个点的写法；改成两个点后树里只有根下各行、uploads 没有展开、没有选中行，预览区显示「文件不存在」，不出现「目标路径不在你的沙箱内」」。坑：回车是整页重载，展开状态不继承；请求数与审计行签字人看不到，不写进期望；格式测试 `functional-checklist.test.ts:30` 对「点后接字母」敏感，行内不要出现前面是空格的点开头的词。
+- 变异：不去 `.` 段 → alias 文件第一例（`./readme.md` 无选中行、多一次 `tree?path=.`）与 `browser-paths.test.ts` 判红。
+- 变异：不去空段 → 第二例（`src//deep/app.ts` 请求序列多出 `src%2F`）、第三例（`/readme.md`）、第四例（`src/deep/` 显示 `文件不存在`）判红。
+- 变异：不拦 `..` → `../x`（多出 `tree?path=..`）、`a/../b`、`out/..`、`%2E%2E%2Fx` 判红；单独的 `..` 不红（改前也不发请求）。
+- 变异：拦了但仍发请求（只设文案不清 `revealRef`）→ `../x` 的 `trees:[ROOT]` 判红；刷新时重走 → 「`../x` 后点刷新 `[ROOT, ROOT]`」判红。
+- 变异：把 `..` 解析掉（`a/../b` → `b`）→ `a/../b` 用例（根下放一个 `b`，断无选中、`文件不存在`）判红。
+- 变异：拦了但不清已有选中 → 「已选中 readme.md 时地址改到 `../x`」判红（表 `:311-314` 加一行）。
+- 变异：规范化后为空仍去定位 → `path=.` / `path=/` 的 `未选择文件` 判红（显示 `文件不存在`）。
+- 变异：把规范化写法写回地址 → alias 六例的 `expectLocation(at)` 判红。
+- 变异：比较前 `trim` → 既有前导 / 尾随空格两例与纯函数表的 `. `、` a ` 判红；把 `...` 当点段 → 纯函数表判红。
+- 变异：把 `\` 当分隔符 → `..\x` 用例（须请求根后显示 `文件不存在`，不被拦成零定位）与纯函数表判红。
+- 变异：解码第二次 → `%252E%252E%2Fx` 用例（须发出 `tree?path=%252E%252E`）判红。
+- 变异：规范化漏进客户端方法（`api-files.ts`）→ `api-files-url.test.ts:47`、`api-files.test.ts:201/261` 判红。
+- 变异：去掉 `openDirectory` 的 `rows.includes` 守卫 → 改写后的 `ghost/bad` 判红（多出 `tree?path=ghost%2Fbad`）。
+- 变异：选中比较用原串而非规范化值 → 「别名地址上点已选中行后 `file` 只多一次、无新 `tree`」判红。
+- 变异：逃逸向量（服务端未改，由既有测试承担）：遍历、符号链接、跨空间 id、他人空间 404 先于路径检查，见 `server/test/workspaces-http.test.ts`、`workspaces-http-boundary.test.ts`。
+- 变异：不可观察：服务端没有写 `sandbox.reject`（web 测试看不到，只能断零请求）；真实浏览器重载（归 FL-21 / FL-22）。
+- 合入后更正（以 #1361 的 PR 文本为准）：`path` effect 在规范化之前多一条短路——`path` 与当前选中逐字相同时不规范化（否则 `chat-workspace-sidebar-layout.test.tsx` L7 的夹具名 `/../é é&ws=x#h.md` 点击后被当成含 `..` 拦下）；编排方裁定保留，规格句已补。`..\x` 用例改为断言同名文件被选中（整页上「请求根后不存在」与「被拦下」分不出来）；M15 的判红用例是「已选中时地址改到它的别名」；M09a（逐段 trim）只红纯函数表。实现者另定的四个分支（定位进行中改到含 `..` 的写法顶掉进行中的定位；根列表失败时 `..` 仍显示 `文件不存在`；`..` 后刷新只重取根；`path=/`、`//` 同 `path=.`）待 owner 复核。

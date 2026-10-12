@@ -22,6 +22,18 @@ export function workspacePath(parent: string, name: string) {
   return `${parent}/${name}`;
 }
 
+/**
+ * 地址里的 `path` 在定位之前的写法：按 `/` 切开，去掉空段与 `.` 段后接回去（`./a//b/` → `a/b`，
+ * `/`、`.` → `""`）；有一段恰为 `..` 时是 `null`——调用方不为它发请求。只认这三种段：不去空格、
+ * 不解码、不做 Unicode 规范化，`\` 不是分隔符，`...` 是普通的名字。
+ * 服务端 `sandbox.resolve` 逐段时同样跳过空段与 `.`、拒绝 `..`；它另外整条拒绝以 `/` 开头的写法，
+ * 这里则把开头的空段去掉、按相对路径定位。
+ */
+export function normalizedPath(path: string): string | null {
+  const segments = path.split("/").filter((segment) => segment !== "" && segment !== ".");
+  return segments.includes("..") ? null : segments.join("/");
+}
+
 /** 各级父目录，自根向下：`src/deep/app.ts` → `["", "src", "src/deep"]`；根自身没有父目录。 */
 function parentDirectories(path: string): string[] {
   if (path.length === 0) {
