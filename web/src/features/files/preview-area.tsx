@@ -3,7 +3,7 @@
  * and what the pane shows for each state. The request itself lives in the browser.
  */
 import { ApiError } from "../../lib/api.js";
-import { EmptyPreview, STATUS_TEXT } from "./columns.js";
+import { ALERT_BOX, EmptyPreview, STATUS_TEXT } from "./columns.js";
 import { errorMessage } from "./errors.js";
 import { PreviewPane } from "./preview.js";
 import { previewKind, textView } from "./previewers/index.js";
@@ -19,6 +19,8 @@ export type SelectedFile = {
 type PreviewAreaProps = {
   loading: boolean;
   selectedFile: SelectedFile | null;
+  /** 没有选中文件时代替空态显示的失败文案（当前路径没有定位到文件）。 */
+  notice?: string | null | undefined;
   workspaceId: string;
   /** 宿主那一次 `usePreviewToken` 的结果，原样交给预览面板。 */
   previewToken: ReturnType<typeof usePreviewToken>;
@@ -89,13 +91,20 @@ export function immediatePreview(
 
 export function PreviewArea({
   loading,
+  notice,
   onWebViewChange,
   previewToken,
   selectedFile,
   workspaceId,
 }: PreviewAreaProps) {
   if (!selectedFile) {
-    return <EmptyPreview />;
+    return notice ? (
+      <p className={`${ALERT_BOX} mx-4 mt-3 shrink-0 text-[12px]`} role="alert">
+        {notice}
+      </p>
+    ) : (
+      <EmptyPreview />
+    );
   }
 
   return (
