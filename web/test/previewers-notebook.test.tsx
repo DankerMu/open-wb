@@ -87,6 +87,12 @@ function sourceLines(container: HTMLElement): { number: string | null; text: str
   });
 }
 
+/**
+ * file-previewers「Notebook」需求句里的固定前缀，在这里另写一遍：不从模块导入，
+ * 否则改掉模块里的指令时两边一起变，断言看不出来。
+ */
+const PREFIX =
+  "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src data:; style-src 'unsafe-inline'\">";
 const HTML = "<table><tr><td>HTML-SENTINEL</td></tr></table><script>window.__nb = 1</script>";
 /** 内容里带一个换行（Jupyter 存的 base64 以换行结尾，也可能折行）。 */
 const PNG_BASE64 = "iVBORw0KGgo=\nAAAA\n";
@@ -153,7 +159,7 @@ describe("Notebook 预览器：单元格与输出", () => {
     const frame = frames[0] as HTMLIFrameElement;
     expect(frame.hasAttribute("sandbox")).toBe(true);
     expect(frame.getAttribute("sandbox")).toBe("");
-    expect(frame.getAttribute("srcdoc")).toBe(HTML);
+    expect(frame.getAttribute("srcdoc")).toBe(PREFIX + HTML);
     expect(frame.hasAttribute("src")).toBe(false);
     expect(frame.getAttribute("title")).toBe("HTML 输出");
     expect(screen.queryByText("PLAIN-SENTINEL")).toBeNull();
@@ -306,11 +312,55 @@ describe("Notebook 预览器：输出按类型", () => {
     expect(document.querySelector("b")).toBeNull();
   });
 
-  it("text/html 是字符串数组时拼接后原样成为 srcdoc，前后不加任何内容", () => {
+  it("text/html 是字符串数组时拼接后接在固定前缀之后，其后不加任何内容", () => {
     const container = withOutputs(display({ "text/html": ["<p>一</p>\n", "<p>二</p>"] }));
 
-    expect(container.querySelector("iframe")?.getAttribute("srcdoc")).toBe("<p>一</p>\n<p>二</p>");
+    expect(container.querySelector("iframe")?.getAttribute("srcdoc")).toBe(
+      `${PREFIX}<p>一</p>\n<p>二</p>`,
+    );
     expect(container.querySelector("iframe")?.getAttribute("sandbox")).toBe("");
+  });
+
+  // file-previewers「Notebook」的场景「HTML 输出的 srcdoc 是固定前缀加原文」。jsdom 不加载 iframe：
+  // 这里钉的只是交给浏览器的字符串，策略在真实浏览器里挡不挡得住不在这个文件能说的范围内。
+  it.each([
+    [
+      "外链与 data: 图片、外链样式表、内联样式与 &amp; 原样保留",
+      '<img src="https://example.test/a.png"><link rel="stylesheet" href="https://example.test/a.css"><img src="data:image/png;base64,iVBORw0KGgo="><p style="color:red">x &amp; y</p>',
+      '<img src="https://example.test/a.png"><link rel="stylesheet" href="https://example.test/a.css"><img src="data:image/png;base64,iVBORw0KGgo="><p style="color:red">x &amp; y</p>',
+    ],
+    [
+      "原文自带的策略 meta 不被去掉，排在固定前缀之后",
+      '<meta http-equiv="Content-Security-Policy" content="default-src *"><img src="https://example.test/b.png">',
+      '<meta http-equiv="Content-Security-Policy" content="default-src *"><img src="https://example.test/b.png">',
+    ],
+    [
+      "字符串数组按原样拼接，首尾空白保留",
+      ["\n<p>一</p>\n", "<p>二</p>"],
+      "\n<p>一</p>\n<p>二</p>",
+    ],
+    ["空串时恰为固定前缀", "", ""],
+    [
+      "原文是带 DOCTYPE 与 head 的整页时前缀仍在最前，不挪进 head",
+      "<!DOCTYPE html><html><head><title>t</title></head><body><p>x</p></body></html>",
+      "<!DOCTYPE html><html><head><title>t</title></head><body><p>x</p></body></html>",
+    ],
+    [
+      "原文以 html 开标签开头、没有 DOCTYPE 时前缀仍在最前",
+      "<html><head><title>t</title></head><body><p>x</p></body></html>",
+      "<html><head><title>t</title></head><body><p>x</p></body></html>",
+    ],
+    [
+      "原文开头的字节序标记与其中的回车换行原样保留",
+      "\uFEFF<p>一</p>\r\n<p>二</p>\r\n",
+      "\uFEFF<p>一</p>\r\n<p>二</p>\r\n",
+    ],
+  ])("HTML 输出的 srcdoc 是固定前缀加原文：%s", (_label, html, original) => {
+    const container = withOutputs(display({ "text/html": html }));
+
+    const frames = [...container.querySelectorAll("iframe")];
+    expect(frames.map((node) => node.getAttribute("srcdoc"))).toStrictEqual([PREFIX + original]);
+    expect(frames.map((node) => node.getAttribute("sandbox"))).toStrictEqual([""]);
   });
 
   it("stream 原样显示（不去转义序列），多个输出各占一块", () => {
@@ -460,7 +510,7 @@ describe("Notebook 预览器：任何 JSON 都不抛", () => {
       "不支持的输出类型 __proto__",
     ]);
     expect(screen.queryByText("SVG-PLAIN-SENTINEL")).toBeNull();
-    // 四个按 raw 显示的单元（前三个与 x）、一个空的 stream、两个 error、一张空内容的 png、一个空文档的 iframe。
+    // 四个按 raw 显示的单元（前三个与 x）、一个空的 stream、两个 error、一张空内容的 png、一个只有固定前缀的 iframe。
     expect(monoTexts(root)).toStrictEqual(["", "", "", "ab", "", "", "not-an-array"]);
     expect(sourceLines(root).map((line) => line.text)).toStrictEqual([" ", " ", "st"]);
     expect([...root.querySelectorAll("img")].map((node) => node.getAttribute("src"))).toStrictEqual(
@@ -468,7 +518,7 @@ describe("Notebook 预览器：任何 JSON 都不抛", () => {
     );
     expect(
       [...root.querySelectorAll("iframe")].map((node) => node.getAttribute("srcdoc")),
-    ).toStrictEqual([""]);
+    ).toStrictEqual([PREFIX]);
     expect(root.querySelector("iframe")?.getAttribute("sandbox")).toBe("");
   });
 
@@ -564,7 +614,7 @@ describe("PreviewPane：Notebook", () => {
     expect(await screen.findByText("[3]", { exact: true })).toBeTruthy();
     expect(sourceLines(container)).toStrictEqual([{ number: "1", text: 'print("hi")' }]);
     expect(container.querySelector("iframe")?.getAttribute("sandbox")).toBe("");
-    expect(container.querySelector("iframe")?.getAttribute("srcdoc")).toBe(HTML);
+    expect(container.querySelector("iframe")?.getAttribute("srcdoc")).toBe(PREFIX + HTML);
     expect(screen.getByRole("link", { name: "下载 g.ipynb" })).toBeTruthy();
   });
 
