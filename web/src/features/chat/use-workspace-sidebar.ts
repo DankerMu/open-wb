@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useRequestMainWidth } from "../../lib/shell-nav.js";
+import type { ChatState } from "./stream.js";
+import { summarizeChanges } from "./stream-artifacts.js";
 import { WORKSPACE_ACTION_LABEL } from "./topbar-actions.js";
 
 const STORAGE_KEY = "workbuddy-workspace-sidebar";
@@ -27,6 +29,16 @@ function storedShare(): number {
   } catch {
     return DEFAULT_SHARE;
   }
+}
+
+/**
+ * 「本会话改动」集合（workspace-sidebar「本会话改动标记与过滤」）：视图里全部消息的已结束步骤的
+ * `changes` 的路径，同一路径只算一次；running 步骤的不算（`summarizeChanges` 的规则）。视图未就绪
+ * （`null`）时是空集。集合只增不因文件被删而减：`changes` 没有删除这一类。
+ */
+export function sessionChangedPaths(view: ChatState | null): ReadonlySet<string> {
+  const steps = view?.messages.flatMap((message) => message.steps) ?? [];
+  return new Set(summarizeChanges(steps).map((change) => change.path));
 }
 
 /**

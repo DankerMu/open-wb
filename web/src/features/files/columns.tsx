@@ -53,6 +53,12 @@ type WorkspaceColumnsProps = CreationMenuProps & {
   onRefresh?: () => void;
   preview: ReactNode;
   switcher?: ReactNode;
+  /**
+   * 树栏（连同 `刷新` 与 `新建`）带 `hidden` 属性收起，不卸载。实测（Chromium 151，构建产物的样式表）：
+   * 带同一组类的 `aside` 加上 `hidden` 后 `display` 为 `none`、高度为 0——Tailwind preflight 的
+   * `[hidden]` 规则带 `!important`，压过 `flex` 类。
+   */
+  treeCollapsed?: boolean | undefined;
 };
 
 export function EmptyPreview() {
@@ -96,6 +102,7 @@ export function WorkspaceColumns({
   onRefresh,
   preview,
   switcher,
+  treeCollapsed,
 }: WorkspaceColumnsProps) {
   const [frame, column, scroller, pane] = LAYOUT[layout];
   return (
@@ -106,6 +113,7 @@ export function WorkspaceColumns({
       <aside
         aria-label="工作空间文件"
         className={`flex min-h-0 min-w-0 flex-col border-(--wb-border-default) bg-(--wb-bg-secondary) ${column}`}
+        hidden={treeCollapsed}
       >
         {switcher}
         <div className="flex shrink-0 items-center gap-1 px-3 pt-[0.65rem] pb-[0.4rem]">
