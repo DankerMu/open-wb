@@ -654,3 +654,35 @@
 - 变异：把 `requestMainWidth` 放进 `setWanted` 的 updater → 预计不可观察（幂等，StrictMode 双调无差别），如实写「不可观察」。
 - 变异：走查结束不展开外壳侧栏 → 后续走查步骤红（顺序依赖，不计入变异表）。
 - 合入后更正（以 #1363 的 PR 文本为准）：开工实测通过（Chromium，视口 800：折叠与第二栏挂载同批发生，分栏库在 Group 变宽过程中重新满足像素最小宽度，稳定在 511 / 240，方向键能移动分隔线；其它引擎未走）。走查的 1200 / 800 两段放进同文件的新函数 `walkFit`（注记写只改 `walkBeside`）；800 段多断一步「关闭后刷新仍折叠」。「先请求、再置意图」只在 `onSelect` 里，没有抽内部打开函数——组 25 的 `reveal` 必须走这段，不能直接置意图。「视口从不超过 760 拉宽不折叠」无用例无走查（读代码推出：实现里没有任何尺寸监听）；阈值对应视口约 849 以下是读代码推出，边界未实测。
+
+## 10.7、10.8、10.9（#1353）
+
+- **Critical Path：沙箱与文件边界**（解析攻击者可控的压缩包）：两个评审席加 owner 白盒；本刀不动 `rest-archive.ts` 的处理次序（只改 `:12-16` 的注释）、不加 `op`、不动路径处理；`workspaces-archive-route.test.ts:459-700` 的逃逸用例原样全绿是硬条件，该文件 748 行不加用例。
+- 前置已核对代码：`archive.ts`（722 行，`walkZip` `:415-458`、`deadline` `:161-168`、`DEADLINE_MS=5000` `:81`）、`rest-archive.ts`（119 行）、`preview-config.ts:99-103`、`agent-config.ts:158-174`（`MAX_POSITIVE_SETTING` `:41`）、yauzl 3.4.0 均在；不在 1.1 / 1.2 / 1.3 所挡集合里，不做 `rename`；36b 其余各刀与本刀无共用源码文件，只共用 openspec 文本。
+- issue 现状四条已核对属实：上界 2147483647；zip 不读时钟（`archive.ts:145` 不传 `expired`）；`server/src` 除 office 队列与 omp spawn 外没有任何并发限制；zip64 一条比 issue 写的更具体——yauzl `index.js:1054-1066` 的 `readUInt64LE` 返回 double，`validateEntrySizes:false` 下无人检查，服务端会发出 `18446744073709552000`，而 `web/src/lib/api-files.ts:265` 用 `isNonNegativeSafeInteger` 拒绝整份列表（`requestFailed(200)`）：一条伪造记录让整个预览变成通用错误，不是「现状已安全」。
+- (a) 配置：`resolvePositiveInteger(raw, fallback, key, max = MAX_POSITIVE_SETTING)`，判定与消息都用 `max`；`preview-config.ts` 加不导出的 `MAX_PREVIEW_ARCHIVE_MAX_ENTRIES = 10_000` 只传给这一个键。不要在 `preview-config.ts` 里包第二层判断，否则 `10001` 与 `2147483648` 得到两种消息。`rest-archive.ts:83` 的注册校验不加 10000（上界是配置规则；手工构造的 `limits` 仍只要求正的安全整数，既有用例 `:324` 不动）——进偏离记录。
+- (b) zip 时限：`listArchive` 里把 `const expired = deadline(options.now)` 提到 zip 分支之前（`gz` 仍不读时钟），`walkZip(readAt, size, maxEntries, expired)`；打开成功后、`for await` 之前判一次 `expired()` → `{entries: [], truncated: true}`；循环里 push 之后的判断改为 `entries.length >= maxEntries || expired()`。`catch` 不加 `!expired()`——zip 的时限不会表现成 yauzl 的错误，损坏仍是 415。时钟读取次数为 1 + 1 + 已列项数。
+- (c) zip64：`walkZip` 在 push 之前 `if (!Number.isSafeInteger(entry.uncompressedSize)) throw new CorruptArchive()`，落进既有 `catch`。2^53 及以上的真值经 double 舍入后仍 ≥ 2^53，不会误收。`compressedSize`、`relativeOffsetOfLocalHeader` 不进响应，不判。tar 不用改：`parseOctal` 对 12 字节字段至多 2^36−1，base-256 已拒。
+- 规格没写的分支（进偏离记录）：恰好读完最后一项时到时 → `truncated:true`（与 tar 相同，也与「恰 `maxEntries` 项也置 truncated」同一口径）；空 zip 到时 → 200 空列表 + `truncated:true`；时限是协作式的，一次卡住的 `readAt`（如挂载盘）不被打断，tar 现状相同，如实写进 `archive.ts` 文首，不声称硬时限。
+- 必须改的既有断言（逐条进偏离记录，不得静默放宽）：① `workspaces-archive-zip.test.ts:124-147` 钉的是失精度的 `18_446_744_073_709_552_000`，改写为场景「zip64 声明的大小」三例；② `:149-158`「zip 不读时钟」前提被裁决推翻，替换为场景「zip 的读取时限」三例（仿 `workspaces-archive.test.ts:305-316`，按 `readAt` 的 `position` 推进时钟：5 个 `plain` 记录各 48 字节，第 3 项的 46 字节头在位置 96，第 4 项在 144）；③ `preview-config.test.ts:199-202` 的 `it.each(NUMERIC)` 上界 2147483647 对该键会红，拆成七键原样加该键「接受 1 与 10000」；④ `:63` 的 `POSITIVE_RANGE` 对该键的 `0` 与 `2147483648` 两行改为 `must be within 1..10000`；⑤ `SPEC_INVALID` 加 `["PREVIEW_ARCHIVE_MAX_ENTRIES","10001",…]`，`:69` 注释与 `:215-216` 的 70 改 71；⑥ `omp-max-processes-config.test.ts:303-328` 的 `PREVIEW_INVALID` 同加一例，`toHaveLength(70)` 改 71。
+- 新增用例落点：zip 的全部进 `workspaces-archive-zip.test.ts`（409 行，约加 70 行）；另加「zip64 结束记录声明 2^64−1 项、目录实有三项 → 三项 + `truncated:true`」（仿 `:284-300` 手拼 `end64`）与「5 个胖目录项（扩展字段 65532 + 注释 65535）在第 2 项时到时 → 恰两项，`maxLength()` ≤ 65536，第 3 项位置未读」。不写真实睡眠的慢用例，全用注入时钟。`workspaces-archive-tar.test.ts`（782 行）不动。
+- 注释同刀改写（只改字，改完须与代码一致）：`archive.ts:19-23`（「A zip has no time limit and does not read the clock…」）与 `rest-archive.ts:12-16`（no time limit for a zip / 大上限即无上限）；`rest-archive.ts` 里「no limit on concurrent listings, and no cancellation」保留并补上「walk 至多 5 秒加一步」。
+- 必须实测而不是推算（10.8；issue 明写「读代码 + 一次粗测」）：最坏包 = tar.gz，10000 个成员各带 4096 字节 `\x01` 名字的 pax `path` 记录（压缩后很小、解压约 56 MB），经真实路由。记状态码、响应字节数、耗时、RSS 峰值、`monitorEventLoopDelay` 最大值。另测装配 `archiveEntries: 100000` 的同构包（预期 `JSON.stringify` 抛 `Invalid string length` → 500，是给 owner 的上界依据，只是推算）；单个 zip 胖目录项的同步解析耗时；缺省与 10000 各 8 并发的 RSS 与 healthz 延迟。结果填 design D7「实测」，推算与实测分开标注。
+- 文档与计数：`docs/architecture/system.md` 加 9.4（上文 E）；master 上 `git grep PREVIEW_ -- docs` 只命中验收清单，该文件没有被任何测试读取，没有配置计数守卫要动；会咬人的计数只有规格的「三十五项」（不变）与两处测试的 70 → 71。`implementation-notes-1.md:101` 钉的旧消息文本是历史注记，不改。
+- 守卫与清单：无新导出（knip）；`archive.ts` 约加 15 行（737），`agent-config.ts` 227、`preview-config.ts` 147 无压力；不用动态 `RegExp`；纯服务端、缺省配置下界面行为不变，no checklist rows；不动 hurl 与 web。
+- 变异：`resolvePositiveInteger` 忽略 `max`（或该键没传 `max`）→ `preview-config.test.ts` 的 `10001` 一行与编译入口的 `10001` 一例判红。
+- 变异：上界写成 9999 或用 `>=` → 「接受 1 与 10000」判红。
+- 变异：越界消息仍写 `1..2147483647` → 该键 `0` / `10001` / `2147483648` 三行的整句断言判红。
+- 变异：`max` 误套到其它数值键 → 七键「接受 2147483647」判红。
+- 变异：`walkZip` 不判 `expired()`（时限只套 tar）→ `slow.zip` 第一例判红（列出五项）。
+- 变异：去掉循环前那次判断 → 第二例（查找结束记录时到时）判红（列出一项而不是零项）。
+- 变异：`deadline` 在 yauzl 打开之后才起算 → 同一例判红（五项、`truncated:false`）。
+- 变异：循环内改成 push 之前判断（读到的那项被丢）→ 第一例判红（两项）。
+- 变异：到时后不停读（置了 `truncated` 但继续 `next()`）→ 第一例「位置 144 未被读取」判红。
+- 变异：zip 用另一个时限常量（如 50000）→ 第一例判红；`>=` 写成 `>` 且时钟恰 5000 → 不可观察（既有用例没有 5000 整的），靠白盒。
+- 变异：zip 的 `catch` 加 `!expired()` 或到时后把损坏答成 200 → 既有 `fake.zip` → 415 不红（时钟恒 0）；不可观察，除非补一例「非 zip 字节 + 时钟已越过 → 415」，建议补。
+- 变异：去掉大小的安全整数判断 → `over.zip` 判红（三项、含失精度数）与 `over-first.zip` 判红（200）。
+- 变异：改成钳到 `MAX_SAFE_INTEGER` → `over.zip` 判红（三项）。
+- 变异：判断写成 `>= MAX_SAFE_INTEGER` → `safe.zip` 的 9007199254740991 判红。
+- 变异：路由给 zip 传恒定时钟 → 不可观察（路由不注入时钟），靠白盒；`listArchive` 对 `gz` 读时钟 → 不可观察，靠白盒。
+- 变异：逃逸向量（本刀不改，既有用例须仍红得起来，PR 表里照列）：去掉 `sandbox.resolve` → `../x.zip` 判红（`workspaces-archive-route.test.ts:337`）；跟随符号链接 → `:460` 与 `:613` 判红；`ensureOwnedRoot` 挪到 `resolve` 之后 → `:494`（他人、不存在、无根 id 同一 404、审计行数不变、零 `openSync`）判红；越界不写 `sandbox.reject` → `:337` 的审计行断言判红；对成员名做路径解析 → `:680` 判红。
