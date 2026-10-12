@@ -616,3 +616,41 @@
 - 变异：不可观察：浏览器是否真的重新请求、整页重载后是否撞值——jsdom 不发媒体请求，归走查 ③④⑥。
 - 变异：逃逸向量不适用：`path` 值与服务端未改，由既有 `server/test/workspaces-http*.test.ts` 承担。
 - 合入后更正（以 #1356 的 PR 文本为准）：落点是同文件不导出的 `mediaPreview`（`immediatePreview` 加一行后认知复杂度超限，故抽出）；已有服务端用例钉住 `file` 路由忽略多余查询键（`server/test/workspaces-file-range.test.ts`，媒体发的是范围请求，故不放在 failures 文件）；`Date.now()` 种子有实测依据——种子为 0 的构建上，覆盖文件、整页重载后点 `刷新` 地址又成了用过的 `&v=1`，Firefox 153 没有请求到达、仍是旧视频（Chromium 151 重新请求了）；交付构建两种引擎都取到新内容。测试加了约 69 行（预计 30）。#1352 一节「地址不变…是否改地址待 owner 定」已由 20.9 取代。首次选中（含改选再选回、整页重载后自动选回）不带 `v`，两种引擎都实测到旧内容窗口，是否也绕开待 owner 定。
+
+## 23.8–23.9（#1363）
+
+- 不触 Critical Path：纯 web，`server/**` 零改动，单评审席。前置 23.2–23.7（#1105）已在 origin/master（`workspace-sidebar.tsx` 214 行、`use-workspace-sidebar.ts` 71 行、`page.tsx` 141 行）；不等 1.1 / 1.2 / 1.3。栈内前序 #1362 / #1361 / #1356 未对照其 diff，按标题推断不碰这些文件。
+- **现状**：外壳没有给页面的折叠入口。`useSidebarCollapsed(): readonly [boolean, () => void]`（`sidebar.tsx:34`）唯一调用方是 `app-shell.tsx:86`；折叠态不渲染列表区（`sidebar.tsx:179`）。`features/**` 与 `lib/**` 没有任何对 `routes/**` 的导入，页面与外壳的既有接缝都在 `web/src/lib`（`topbar.tsx`、`sidebar-slot.tsx`）。
+- **接缝**：新文件 `web/src/lib/shell-nav.tsx` 导出 `ShellNavProvider({ children, requestMainWidth })` 与 `useRequestMainWidth(): (needed: number) => void`，Provider 外返回 no-op。不进 `MIGRATED_AREAS`（不在 chat 目录），`ui-layering.test.ts` 与 `chat-module-layout.test.ts` 都不触发；两个导出各有 src 调用方，knip 过。
+- **外壳侧**：`useSidebarCollapsed` 返回 `[collapsed, toggle, collapse]`；`collapse` 读 `collapsedRef`，已折叠直接返回，否则走 `toggle` 的同一路径（`setCollapsed` + `writeCollapsed`）。不得在页面请求里直接调 `toggle`，已折叠时它会展开。`AppShell` 给 `<main>` 挂 ref，`requestMainWidth(needed)` 为：`narrow` 时返回；取 `main.clientWidth`，为 0 或 `>= needed` 时返回；否则 `collapse()`。
+- **宽度为 0 不折叠（进偏离记录）**：jsdom 没有布局，`clientWidth` 恒为 0。不设这条，既有每个打开侧边栏的用例都会折叠外壳侧栏，`chat-workspace-sidebar-support.tsx:91-99` 的 `selectSession` 找不到 `会话列表`，L4 等全红；不许靠改那些用例过关。真实浏览器里 `main` 不会是 0 宽。
+- **页面侧**：`MIN_WIDTH` 从 `workspace-sidebar.tsx:20` 搬到 `use-workspace-sidebar.ts` 并导出（前者改为导入，避免值导入成环）。`slot.onSelect` 改为读闭包里的 `wanted`：为假时先 `requestMainWidth(MIN_WIDTH.conversation + MIN_WIDTH.sidebar + 1)`，再 `setWanted(!wanted)`；请求不放进 updater（StrictMode 双调）。`+1` 是分隔线的 `w-px`（`resizable.tsx:30`）。组 25 的 `reveal` 须走同一个内部打开函数。
+- **为什么不用「并排侧边栏出现」的 effect**：意图恢复时用户点的是外壳侧栏里的会话条目，折叠会卸载列表区，焦点落到 body。只在用户的打开动作上判断，焦点必在顶栏按钮（或将来的卡片按钮）上，因此不需要任何焦点处理；用例断言折叠后 `document.activeElement` 仍是顶栏按钮。
+- **由规格句决定的分支（进偏离记录供 owner 复核）**：(a) 自动折叠写持久化，之后拉宽窗口或刷新仍是折叠，要用户自己展开；只改当次状态要再加一层「生效值」，不取。(b) 关闭不恢复。(c) 开着缩窄、手动展开、切会话、意图恢复、窄屏拉宽都不判断。(d) 折叠后会话列表不可见，800 宽下换会话要先展开，此时两栏被挤窄，是裁决的固有后果。(e) 不动存储的侧边栏占比：`defaultSize` 仍是百分比，折叠后不足 240 的由分栏的像素下限夹住（由代码推断）。
+- **阈值**：折叠条件是主区 < 561，即视口 < 849（由 `w-72` / `w-12` 推出，未实测；issue 与 D26 的「约 870」不准）。实现只量主区，不写 288、848 之类常数；走查与清单只用 800 与 1200，不取边界值。
+- **开工先实测，不成立就停下报告**：点击那一下折叠与打开同批渲染，分栏在主区 512 时挂上第二栏，随 `transition-[width] duration-250`（`sidebar.tsx:148`）长到 752。`react-resizable-panels` 4.14.3 在 Group 变宽后是否重新满足像素 `minSize` 未验证。不满足时不重挂 `ConversationView`、不改拷入文件、不 mock 库。
+- **新测试文件** `web/test/chat-workspace-sidebar-fit.test.tsx`（导入 `chat-workspace-sidebar-support.js`；挂载后用 `Object.defineProperty(screen.getByRole("main"), "clientWidth", { configurable: true, value })` 给宽度，`vi.spyOn(Storage.prototype, "setItem")` 按键 `workbuddy-sidebar` 过滤；标题不得许诺宽度或可拖）。
+- **用例 F1–F4**：F1 宽 512、展开时点击，断言 `data-collapsed="true"`、存储 `collapsed`、地标出现、焦点在顶栏按钮，用 `关闭工作空间侧边栏` 关掉后仍折叠。F2 宽 912，不折叠且零写入。F3 预置存储 `collapsed`、宽 512，仍折叠且零写入。F4 边界表：560 折叠，561 不折叠。
+- **用例 F5–F8**：F5 `installNarrowViewport` 加宽 390，出现 dialog 且零写入。F6 接 F1 点 `展开侧栏`，再 `selectSession(SAME_SPACE)`、`selectSession(OTHER)`，始终展开。F7 接 F6 切 `UNBOUND` 再切回 `BOUND`，侧边栏恢复且仍展开；随后关闭再点顶栏按钮，再次折叠。F8 不桩宽度（0），不折叠。
+- **既有文件的改动**：既有测试零改动；`sidebar.test.tsx`、`app-shell-responsive.test.tsx` 不导入 `useSidebarCollapsed`，元组加第三项不影响。`workspace-sidebar.tsx:109-110` 与 `use-workspace-sidebar.ts:12-13` 的注释随改。Provider 外的 no-op 由既有的 hook 直测覆盖，没有就在 fit 文件加一例。
+- **走查**：只改 `web/e2e/ui-walk-workspace-sidebar.ts` 的 `walkBeside`，`withViewport` 从 `ui-walk-layout.js` 导入；`ui-walk-layout.ts`（775 行）与 `ui-walk-sessions.spec.ts`（677 行，`:149` 已调用）不加行。1440 打开后加断 `aside` 的 `data-collapsed="false"`。
+- **走查的 1200 与 800 两段**：`withViewport` 1200 打开并断展开，缩到 800 仍展开，关闭。`withViewport` 800 打开后断折叠与存储 `collapsed`，`expect.poll` 等对话区栏 ≥320、侧边栏 ≥240（容差 1），`ArrowLeft` 后宽度变化，无横向溢出；关闭后仍折叠。
+- **走查必须还原**：返回前点 `展开侧栏` 并断 `workbuddy-sidebar` 为 `expanded`，否则后续步骤找不到会话列表。semgrep：只用正则字面量。
+- **清单**：新增一行，取 rebase 后的下一个空号（origin/master 最后是 CH-99）。期望列里不写带单位的数字。坑：自动折叠是持久的，本行不以「展开」收尾会让之后走 SH-02、SH-04 的签署人看到与预期不符的初态；CH-98 留下的侧边栏宽度不影响本行。
+- **清单行文本**：`| CH-100 | 宽度 800 下打开一个绑定了工作空间的会话，先确认左边的侧栏是展开的（是折叠的就点「展开侧栏」）；点顶栏「工作空间侧边栏」；按 Tab 把焦点移到对话区与侧边栏之间的分隔线上按几次左右方向键；用侧边栏右上角的关闭图标关掉它；刷新页面；点「展开侧栏」，把窗口拉宽到 1200，再点顶栏「工作空间侧边栏」；开着它把窗口缩回 800；最后关掉侧边栏 \| 第一次打开时左边的侧栏自己折叠成只剩图标，侧边栏与对话区并排、两边都留有可用的宽度，方向键能改变两边宽度；关掉侧边栏后左边的侧栏仍是折叠的，刷新后也仍是折叠的；宽度 1200 下打开时左边的侧栏保持展开；开着侧边栏缩回 800 时左边的侧栏不会自己折叠（这时两栏被挤窄、分隔线可能动不了，属已知表现） \| 待签 |`
+- 变异：打开时不发请求（不折叠）→ F1 红，走查 800 段红。
+- 变异：去掉宽度比较（宽屏也折叠）→ F2 红，走查 1440 / 1200 的 `data-collapsed="false"` 红。
+- 变异：关闭侧边栏时展开外壳侧栏 → F1 后半红，走查 800 段「关闭后仍折叠」红。
+- 变异：只 `setCollapsed` 不 `writeCollapsed` → F1 的存储断言红。
+- 变异：用 `toggle` 代替幂等的 `collapse` → F3 红（已折叠被展开，且有写入）。
+- 变异：去掉 `narrow` 判断 → F5 红。
+- 变异：阈值只算 320 + 240 或把 `<` 写成 `<=` → F4 红。
+- 变异：去掉「宽度为 0 不折叠」→ F8 红，另有 `chat-workspace-sidebar-layout.test.tsx` 的 L4 等经 `会话列表` 换会话的用例红。
+- 变异：改成「并排侧边栏出现即判断」的 effect → F7 的「切回后仍展开」红。
+- 变异：切换会话时重新判断 → F6 红。
+- 变异：手动展开后「本次不再折叠」做成永久标记 → F7 末段「再次打开重新判断」红。
+- 变异：窗口缩窄时重新判断（`ResizeObserver` 或 `resize` 监听）→ 走查 1200 缩到 800 段红；jsdom 不可观察（`radix-platform.ts` 的 `ResizeObserver` 桩不回调）。
+- 变异：折叠后两栏仍低于最小宽度或分隔线不动 → 走查 800 段红；jsdom 不可观察（无布局）。
+- 变异：把 `requestMainWidth` 放进 `setWanted` 的 updater → 预计不可观察（幂等，StrictMode 双调无差别），如实写「不可观察」。
+- 变异：走查结束不展开外壳侧栏 → 后续走查步骤红（顺序依赖，不计入变异表）。
+- 合入后更正（以 #1363 的 PR 文本为准）：开工实测通过（Chromium，视口 800：折叠与第二栏挂载同批发生，分栏库在 Group 变宽过程中重新满足像素最小宽度，稳定在 511 / 240，方向键能移动分隔线；其它引擎未走）。走查的 1200 / 800 两段放进同文件的新函数 `walkFit`（注记写只改 `walkBeside`）；800 段多断一步「关闭后刷新仍折叠」。「先请求、再置意图」只在 `onSelect` 里，没有抽内部打开函数——组 25 的 `reveal` 必须走这段，不能直接置意图。「视口从不超过 760 拉宽不折叠」无用例无走查（读代码推出：实现里没有任何尺寸监听）；阈值对应视口约 849 以下是读代码推出，边界未实测。

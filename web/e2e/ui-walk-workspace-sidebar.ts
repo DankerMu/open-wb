@@ -5,13 +5,23 @@
 // a modal dialog over the whole viewport, Tab stays inside it and Escape hands the focus back
 // without scrolling the thread. No file is selected: no preview token is issued and no request
 // leaves the base origin.
+//
+// `desktop-light` also walks the open action that collapses the shell sidebar (#1363): at 1200 the
+// two minimum widths fit and nothing collapses, not even when the window is then narrowed to 800 with
+// the sidebar open; at 800 the open click collapses the shell sidebar, both panels reach their minimum
+// widths once the collapse transition has ended and the separator moves by keyboard; closing does not
+// expand it again. The walk expands the shell sidebar before returning: later steps need the session
+// list.
 
 import { expect, type Locator, type Page } from "@playwright/test";
-import type { WalkProject } from "./ui-walk-layout.js";
+import { type WalkProject, withViewport } from "./ui-walk-layout.js";
 
 const NAME = "工作空间侧边栏";
 const CLOSE = "关闭工作空间侧边栏";
 const STORAGE_KEY = "workbuddy-workspace-sidebar";
+/** The shell's own sidebar (spa-shell) and the key its collapse preference is stored under. */
+const SHELL_SIDEBAR = "侧栏";
+const SHELL_STORAGE_KEY = "workbuddy-sidebar";
 /**
  * The minimum widths in pixels (design D26): the conversation panel and the sidebar cannot be
  * dragged below them. The conversation is measured on its panel, not on the chat column inside it,
@@ -65,6 +75,8 @@ async function walkBeside(page: Page, file: string): Promise<void> {
   await expect(button).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByRole("dialog", { name: NAME, exact: true })).toHaveCount(0);
   await expect(separator).toHaveCount(1);
+  // The two minimum widths fit beside the expanded shell sidebar: the open action leaves it alone.
+  await expect(shellSidebar(page)).toHaveAttribute("data-collapsed", "false");
 
   // Side by side: the conversation got narrower and ends where the sidebar starts.
   const columnBox = await column.boundingBox();
@@ -124,6 +136,97 @@ async function walkBeside(page: Page, file: string): Promise<void> {
   await expect(button).toHaveAttribute("aria-expanded", "false");
 }
 
+function shellSidebar(page: Page): Locator {
+  return page.getByRole("complementary", { name: SHELL_SIDEBAR, exact: true });
+}
+
+/** Resolves once two successive polls of the width agree (a transition has ended); returns it. */
+async function settledWidth(target: Locator): Promise<number> {
+  let last = Number.NaN;
+  await expect
+    .poll(async () => {
+      const previous = last;
+      last = await widthOf(target);
+      return last === previous;
+    })
+    .toBe(true);
+  return last;
+}
+
+/**
+ * The open action and the shell sidebar (workspace-sidebar「放不下时折叠外壳侧栏」「只在打开的那一下
+ * 判断」). Starts and ends with the workspace sidebar closed and the shell sidebar expanded.
+ */
+async function walkFit(page: Page, file: string): Promise<void> {
+  const button = trigger(page);
+  const region = page.getByRole("complementary", { name: NAME, exact: true });
+  const group = page.locator('[data-slot="resizable-panel-group"]');
+  const conversation = group.locator('[data-slot="resizable-panel"]').first();
+  const separator = page.getByRole("separator");
+  const shell = shellSidebar(page);
+  const shellStored = () =>
+    page.evaluate((key) => window.localStorage.getItem(key), SHELL_STORAGE_KEY);
+  const height = page.viewportSize()?.height ?? 0;
+  const open = async () => {
+    await button.click();
+    await expect(region.getByRole("button", { name: file, exact: true })).toBeVisible();
+  };
+  const close = async () => {
+    await region.getByRole("button", { name: CLOSE, exact: true }).click();
+    await expect(region).toHaveCount(0);
+  };
+  await expect(shell).toHaveAttribute("data-collapsed", "false");
+  const before = await shellStored();
+
+  // 1200: both minimum widths fit. Narrowing the window with the sidebar open does not collapse.
+  await withViewport(page, { width: 1200, height }, async () => {
+    await open();
+    await expect(shell).toHaveAttribute("data-collapsed", "false");
+    const wide = await settledWidth(group);
+    await page.setViewportSize({ width: 800, height });
+    await expect.poll(() => widthOf(group)).toBeLessThan(wide);
+    await settledWidth(group);
+    await expect(shell).toHaveAttribute("data-collapsed", "false");
+    expect(await shellStored()).toBe(before);
+    await close();
+    await expect(shell).toHaveAttribute("data-collapsed", "false");
+  });
+
+  // 800: they do not fit beside the expanded shell sidebar, so the open click collapses it.
+  await withViewport(page, { width: 800, height }, async () => {
+    await expect(shell).toHaveAttribute("data-collapsed", "false");
+    await open();
+    await expect(shell).toHaveAttribute("data-collapsed", "true");
+    expect(await shellStored()).toBe("collapsed");
+    await expect(button).toBeFocused();
+    await expect(separator).toHaveCount(1);
+    // Once the collapse transition has ended neither side is below its minimum width.
+    await settledWidth(group);
+    expect(await widthOf(conversation)).toBeGreaterThanOrEqual(MIN_WIDTH.conversation - TOLERANCE);
+    const beside = await widthOf(region);
+    expect(beside).toBeGreaterThanOrEqual(MIN_WIDTH.sidebar - TOLERANCE);
+    // The separator moves: the earlier drag left the sidebar at its minimum, so widen it.
+    await separator.focus();
+    for (let presses = 0; presses < 3; presses += 1) await page.keyboard.press("ArrowLeft");
+    await expect.poll(() => widthOf(region)).toBeGreaterThan(beside);
+    expect(await widthOf(conversation)).toBeGreaterThanOrEqual(MIN_WIDTH.conversation - TOLERANCE);
+    expect(await overflow(page)).toBe(0);
+    // Closing does not bring the shell sidebar back.
+    await close();
+    await expect(shell).toHaveAttribute("data-collapsed", "true");
+    expect(await shellStored()).toBe("collapsed");
+    // Nor does a reload: the collapse went through the stored preference.
+    await page.reload();
+    await expect(button).toHaveAttribute("aria-expanded", "false");
+    await expect(shell).toHaveAttribute("data-collapsed", "true");
+  });
+
+  // The collapse is persistent; later walk steps need the session list.
+  await page.getByRole("button", { name: "展开侧栏", exact: true }).click();
+  await expect(shell).toHaveAttribute("data-collapsed", "false");
+  expect(await shellStored()).toBe("expanded");
+}
+
 async function walkOverlay(page: Page, file: string): Promise<void> {
   const button = trigger(page);
   const layer = page.getByRole("dialog", { name: NAME, exact: true });
@@ -160,12 +263,14 @@ async function walkOverlay(page: Page, file: string): Promise<void> {
 
 /**
  * Opens the sidebar of the current session from the top bar; its tree lists `file` (written by the
- * turn). Leaves the sidebar closed with the focus on the top-bar button.
+ * turn). Leaves the sidebar closed and, on `desktop-light`, the shell sidebar expanded.
  */
 export async function walkWorkspaceSidebar(
   page: Page,
   file: string,
   project: WalkProject,
 ): Promise<void> {
-  await (project === "desktop-light" ? walkBeside(page, file) : walkOverlay(page, file));
+  if (project === "mobile-dark") return walkOverlay(page, file);
+  await walkBeside(page, file);
+  await walkFit(page, file);
 }

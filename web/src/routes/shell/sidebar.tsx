@@ -30,8 +30,11 @@ function writeCollapsed(collapsed: boolean): void {
 /**
  * 侧栏折叠状态：初值读 localStorage，toggle 时写回。写入放在回调而非 updater 或 effect 里：
  * updater 在 StrictMode 下会双调，effect 会在挂载时多写一次；collapsedRef 与 state 同步推进。
+ *
+ * 第三项 `collapse` 是幂等的折叠：已折叠时什么都不做（不改状态、不写存储），否则走 toggle 的同一条
+ * 路径。页面经外壳请求腾出主区宽度时用它，不用 toggle——已折叠时 toggle 会把侧栏展开。
  */
-export function useSidebarCollapsed(): readonly [boolean, () => void] {
+export function useSidebarCollapsed(): readonly [boolean, () => void, () => void] {
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const collapsedRef = useRef(collapsed);
   const toggle = useCallback(() => {
@@ -40,7 +43,10 @@ export function useSidebarCollapsed(): readonly [boolean, () => void] {
     setCollapsed(next);
     writeCollapsed(next);
   }, []);
-  return [collapsed, toggle] as const;
+  const collapse = useCallback(() => {
+    if (!collapsedRef.current) toggle();
+  }, [toggle]);
+  return [collapsed, toggle, collapse] as const;
 }
 
 /** 文档流变体（宽屏，可折叠）或覆盖层变体（窄屏，始终展开、选路由即关闭）。 */
