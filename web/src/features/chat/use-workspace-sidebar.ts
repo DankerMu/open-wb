@@ -112,8 +112,11 @@ export function useAssistantRefresh(
   useEffect(() => () => clearTimeout(timer.current), []);
 }
 
-/** 一次待套用的定位：`seq` 每次 `reveal` 加一，同一路径再点一次也是新的一次。 */
-type Located = { path: string; seq: number; sessionId: string };
+/**
+ * 一次待套用的定位：`seq` 每次 `reveal` 加一，同一路径再点一次也是新的一次。`view` 只有产物卡的
+ * `打开网页预览` 带：这一次还要把该网页置为渲染视图。
+ */
+type Located = { path: string; seq: number; sessionId: string; view?: "rendered" | undefined };
 
 /**
  * 会话页的工作空间侧边栏状态（workspace-sidebar「布局与开合」「从卡片定位到文件」）。`workspaceId` 是
@@ -131,9 +134,10 @@ type Located = { path: string; seq: number; sessionId: string };
  *   卸载又重建），记下的那个已不在文档里。按钮在外壳的顶栏里渲染，这里按 DOM 取而不传 ref。
  *   `restoreFocus(true)`（只有窄屏模态层关闭时这样调）先试 `reveal` 记下的那个卡片按钮：它还在文档里
  *   就还给它，否则回顶栏按钮。两条路都带 `preventScroll`。
- * - `reveal(path, trigger)` 是文件变更卡 `查看详情` 的落点，会话没有工作空间时为 `undefined`（同
- *   `slot`）。它记下 `trigger` 与一次定位（`located`），侧边栏没开就打开——这也是一次打开动作，同样先
- *   向外壳请求主区宽度；已经开着时不请求。引用稳定（只随 `sessionId` 变）：它一路传进消息的渲染函数，
+ * - `reveal(path, trigger, options?)` 是文件变更卡 `查看详情` 与 html 产物卡 `打开网页预览` 的落点（后者
+ *   带 `{ view: "rendered" }`，记进这一次定位），会话没有工作空间时为 `undefined`（同 `slot`）。它记下
+ *   `trigger` 与一次定位（`located`），侧边栏没开就打开——这也是一次打开动作，同样先向外壳请求主区
+ *   宽度；已经开着时不请求。引用稳定（只随 `sessionId` 变）：它一路传进消息的渲染函数，
  *   换引用会让每条助手消息重渲染；所以「开着没有」读的是 `wantedRef` 而不是闭包里的 `wanted`。
  * - `located` 交给侧边栏内容去套用（`SidebarContent`）。它带着发起时的会话：换会话（含换到未绑定的
  *   会话）即丢弃，不会被定位进另一个会话的树，切回来也不重新套用（规格「切换到另一个绑定了工作空间
@@ -158,11 +162,11 @@ export function useWorkspaceSidebar(workspaceId: string | null | undefined, sess
     setWanted(next);
   };
   const reveal = useCallback(
-    (path: string, opener: HTMLElement) => {
+    (path: string, opener: HTMLElement, options?: { view: "rendered" }) => {
       if (sessionId === undefined) return;
       trigger.current = opener;
       seq.current += 1;
-      setPending({ path, seq: seq.current, sessionId });
+      setPending({ path, seq: seq.current, sessionId, view: options?.view });
       if (wantedRef.current) return;
       requestMainWidth(BESIDE_WIDTH);
       wantedRef.current = true;
