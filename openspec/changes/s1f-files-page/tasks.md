@@ -685,6 +685,7 @@ Minimal mergeable slice: 26.1 的夹具与 README 可先合（既有 hurl 只断
 - [x] 27.2 验证「相对资源没加载不可假绿」：在隔离的调用方夹具里删掉 `site/style.css` 跑一次，确认在标题颜色断言处失败；恢复后全绿。结果写进 PR。
   实施注记见 `implementation-notes.md`「27.1 的 (b)、27.2（#1115）」。
 - [ ] 27.3 FL 行核对：把组 3、17–22 各自加的 FL 行通读一遍，补上遗漏的窄屏与深色情形，去重；确认全部为 `待签`、守卫通过。
+  实施注记见 `implementation-notes.md`「27.3（#1117）」。
 
 Suggested fixture level: compact - 真实浏览器走查的扩充；隔离来源 iframe 的行为只有这一层能证明
 Minimal mergeable slice: (a)(c)(d)(e) 四步不依赖隔离来源，可先合；(b)（Depends on 19.2 的网页渲染视图）与 (f)（Depends on 22.1、22.4，间接等 1.2）各自随后
