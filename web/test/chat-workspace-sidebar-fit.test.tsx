@@ -8,8 +8,9 @@
  * jsdom 证不了的：折叠的过渡结束后两栏各自的宽度、分隔线能否移动、开着侧边栏缩窄窗口，只在
  * `make ui-walk` 里证明。
  */
-import { fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SHELL_NARROW_QUERY } from "../src/lib/viewport.js";
 import { cleanupSessionMeta, installNarrowViewport } from "./chat-page-session-meta-support.js";
 import {
   BOUND,
@@ -24,6 +25,7 @@ import {
   sidebarRegion,
   UNBOUND,
 } from "./chat-workspace-sidebar-support.js";
+import { createMediaQuery, installMatchMedia } from "./media-query-support.js";
 
 const SHELL_KEY = "workbuddy-sidebar";
 
@@ -183,6 +185,7 @@ describe("只在打开的那一下判断", () => {
   it("F7 打开的意图在回到绑定会话时恢复不折叠外壳侧栏；关闭后再点一次顶栏按钮重新判断，又把它折叠", async () => {
     const writes = await mountTight();
     await open();
+    expect(shellCollapsed()).toBe("true");
     expandShell();
     expect(shellCollapsed()).toBe("false");
 
@@ -201,5 +204,40 @@ describe("只在打开的那一下判断", () => {
     expect(shellCollapsed()).toBe("true");
     expect(writes()).toStrictEqual(["collapsed", "expanded", "collapsed"]);
     expect(window.localStorage.getItem(SHELL_KEY)).toBe("collapsed");
+  });
+
+  it("F9 外壳侧栏展开、侧边栏开着时用顶栏按钮关闭：外壳侧栏仍是展开的，不写折叠偏好", async () => {
+    const writes = await mountTight();
+    const { trigger } = await open();
+    expect(shellCollapsed()).toBe("true");
+    expandShell();
+    expect(shellCollapsed()).toBe("false");
+
+    fireEvent.click(trigger);
+
+    expect(sidebarRegion()).toBeNull();
+    expect(sidebarButton().getAttribute("aria-expanded")).toBe("false");
+    expect(shellCollapsed()).toBe("false");
+    expect(writes()).toStrictEqual(["collapsed", "expanded"]);
+    expect(window.localStorage.getItem(SHELL_KEY)).toBe("expanded");
+  });
+
+  it("F10 挂载后视口才变窄：打开的是模态层，不读写外壳侧栏的折叠偏好", async () => {
+    const shell = createMediaQuery(false);
+    installMatchMedia((query) => (query === SHELL_NARROW_QUERY ? shell : createMediaQuery(false)));
+    await mountSidebarPage(BOUND);
+    const writes = shellWrites();
+    setMainWidth(390);
+    expect(shellCollapsed()).toBe("false");
+
+    act(() => shell.emit(true));
+    await screen.findByRole("button", { name: "打开导航" });
+
+    fireEvent.click(sidebarButton());
+    const layer = await screen.findByRole("dialog", { name: NAME });
+    await within(layer).findByRole("button", { name: "readme.md" });
+
+    expect(writes()).toStrictEqual([]);
+    expect(window.localStorage.getItem(SHELL_KEY)).toBeNull();
   });
 });
