@@ -5,7 +5,9 @@ import { describe, expect, it } from "vitest";
 import {
   type DirectoryCache,
   movedCache,
+  movedKeys,
   movedPath,
+  movedTarget,
   normalizedPath,
   parentPath,
   renameTarget,
@@ -126,6 +128,88 @@ describe("movedPath", () => {
     ["", "out", ""],
   ])("%j 在 %j 被删除之后是 %j", (path, from, expected) => {
     expect(movedPath(path, from, null)).toBe(expected);
+  });
+});
+
+describe("movedTarget", () => {
+  const target = (path: string) => ({ path, notify: true });
+
+  it("在 from 之下：路径换到 to 之下，其余字段原样；不在其下：路径不变", () => {
+    expect(movedTarget(target("out/a.md"), "out", "dist")).toStrictEqual(target("dist/a.md"));
+    expect(movedTarget(target("output/o.md"), "out", "dist")).toStrictEqual(target("output/o.md"));
+  });
+
+  it("from 被删除：在它之下的是 null，同级的原样；本来就没有的还是 null", () => {
+    expect(movedTarget(target("out/sub/x.md"), "out", null)).toBeNull();
+    expect(movedTarget(target("out"), "out", null)).toBeNull();
+    expect(movedTarget(target("output/o.md"), "out", null)).toStrictEqual(target("output/o.md"));
+    expect(movedTarget(null, "out", "dist")).toBeNull();
+    expect(movedTarget(null, "out", null)).toBeNull();
+  });
+});
+
+// 展开集合与两张目录失败表在改名、删除之后的键：元组进、元组出，值原样。
+describe("movedKeys", () => {
+  const table = (): [string, number][] => [
+    ["", 1],
+    ["out", 2],
+    ["out/sub", 3],
+    ["output", 4],
+  ];
+
+  it("改名：from 与它之下的键换到 to 之下，同级的 output 与根不动，次序与值原样", () => {
+    expect(movedKeys(table(), "out", "dist")).toStrictEqual([
+      ["", 1],
+      ["dist", 2],
+      ["dist/sub", 3],
+      ["output", 4],
+    ]);
+  });
+
+  it("删除（to 为 null）：from 与它之下的键丢掉，没有名为 null 的键", () => {
+    expect(movedKeys(table(), "out", null)).toStrictEqual([
+      ["", 1],
+      ["output", 4],
+    ]);
+    expect(movedKeys(table(), "out/sub", null)).toStrictEqual([
+      ["", 1],
+      ["out", 2],
+      ["output", 4],
+    ]);
+  });
+
+  it("to 与它之下早先留下的键先丢掉，名字以它开头的同级不算", () => {
+    const stale: [string, string][] = [
+      ["dist", "旧"],
+      ["dist/gone", "旧"],
+      ["distant", "留"],
+      ["out", "新"],
+      ["out/sub", "新"],
+    ];
+    expect(movedKeys(stale, "out", "dist")).toStrictEqual([
+      ["distant", "留"],
+      ["dist", "新"],
+      ["dist/sub", "新"],
+    ]);
+  });
+
+  it("集合的 entries() 可直接给它：展开集合的写法", () => {
+    const expanded = new Set(["", "out", "out/sub", "output"]);
+    expect(movedKeys(expanded.entries(), "out", null).map(([path]) => path)).toStrictEqual([
+      "",
+      "output",
+    ]);
+    expect(movedKeys(expanded.entries(), "out", "dist").map(([path]) => path)).toStrictEqual([
+      "",
+      "dist",
+      "dist/sub",
+      "output",
+    ]);
+  });
+
+  it("名为 __proto__ 的目录只是一个普通的键", () => {
+    expect(movedKeys([["__proto__", 1]], "__proto__", "x")).toStrictEqual([["x", 1]]);
+    expect(movedKeys([["a", 1]], "a", "__proto__")).toStrictEqual([["__proto__", 1]]);
   });
 });
 

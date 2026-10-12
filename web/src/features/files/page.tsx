@@ -207,10 +207,12 @@ export function FilesPage() {
   );
 
   // 在树里选中文件：以 replace 把它写进 `path`，其余参数与页内锚点不动。由地址定位到的选中不经过这里。
+  // `null`（当前文件或它的祖先被删除）：把 `path` 这一项拿掉。
   const writePath = useCallback(
-    (path: string) => {
+    (path: string | null) => {
       const parameters = new URLSearchParams(location.search);
-      parameters.set("path", path);
+      if (path === null) parameters.delete("path");
+      else parameters.set("path", path);
       navigate(
         { hash: location.hash, pathname: location.pathname, search: `?${parameters}` },
         { replace: true },

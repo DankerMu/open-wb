@@ -14,6 +14,8 @@ import { pressPointer, yieldMacrotask } from "./ui-support.js";
 
 const API = "/api/workspaces/workspace-1";
 export const MOVE = `${API}/move`;
+/** `DELETE …/entries?path=` 的地址：`path` 整段编码一次。 */
+export const entriesUrl = (path: string) => `${API}/entries?path=${encodeURIComponent(path)}`;
 export const treeUrl = (path: string) => `${API}/tree?path=${encodeURIComponent(path)}`;
 export const fileUrl = (path: string) => `${API}/file?path=${encodeURIComponent(path)}`;
 
@@ -34,6 +36,9 @@ export const nested = (): Listings => ({
   output: [fileEntry("o.md")],
 });
 
+/** `nested()` 的根在 `out` 被拿掉之后的样子。 */
+export const withoutOut = () => [dirEntry("output"), fileEntry("top.md")];
+
 export async function expand(name: string) {
   fireEvent.click(await findRow(`展开 ${name}`));
   await findRow(`折叠 ${name}`);
@@ -41,8 +46,8 @@ export async function expand(name: string) {
 
 /**
  * 以 `listings` 为目录内容打开文件页。没列出的目录、`extra` 里没有的地址一经请求就抛错，并留在请求
- * 记录里。返回的 `since()` 是调用之后发出的请求，按顺序：`POST` 写成 `POST <地址> <请求体>`，其余
- * 只写地址。
+ * 记录里。返回的 `since()` 是调用之后发出的请求，按顺序：`GET` 只写地址，其余方法写成
+ * `<方法> <地址>`，带请求体的后面再接请求体（`POST <地址> <请求体>`、`DELETE <地址>`）。
  */
 export function openFiles(
   listings: Listings,
@@ -61,9 +66,11 @@ export function openFiles(
   }
   const mounted = renderFiles(at, authenticatedFilesRoutes([workspace], { ...trees, ...extra }));
   const log = () =>
-    mounted.fetchMock.mock.calls.map(([path, options]) =>
-      options?.method === "POST" ? `POST ${path} ${String(options.body)}` : path,
-    );
+    mounted.fetchMock.mock.calls.map(([path, options]) => {
+      const method = options?.method ?? "GET";
+      const body = options?.body == null ? [] : [String(options.body)];
+      return method === "GET" ? path : [method, path, ...body].join(" ");
+    });
   return {
     ...mounted,
     /** 从现在起的请求记录。 */
@@ -72,6 +79,8 @@ export function openFiles(
       return () => log().slice(start);
     },
     moves: () => mounted.fetchMock.mock.calls.filter(([path]) => path === MOVE),
+    deletes: () =>
+      mounted.fetchMock.mock.calls.filter(([, options]) => options?.method === "DELETE"),
   };
 }
 
@@ -93,6 +102,28 @@ export async function openRename(name: string) {
   fireEvent.click(within(await openRowMenu(name)).getByRole("menuitem", { name: "重命名" }));
   return screen.findByRole("dialog", { name: "重命名" });
 }
+
+/** 经行菜单打开 `name` 这一行的删除确认框（`alertdialog`，按标题找）。 */
+export async function openDelete(name: string) {
+  fireEvent.click(within(await openRowMenu(name)).getByRole("menuitem", { name: "删除" }));
+  return screen.findByRole("alertdialog", { name: `删除「${name}」？` });
+}
+
+export function confirmGone() {
+  return waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+}
+
+export function cancelButton(dialog: HTMLElement) {
+  return within(dialog).getByRole<HTMLButtonElement>("button", { name: "取消" });
+}
+
+/** 确认框里的 `删除`。 */
+export function confirmButton(dialog: HTMLElement) {
+  return within(dialog).getByRole<HTMLButtonElement>("button", { name: "删除" });
+}
+
+/** `DELETE` 成功的应答：204，没有正文。 */
+export const deleted = () => new Response(null, { status: 204 });
 
 export function nameInput(dialog: HTMLElement) {
   return within(dialog).getByLabelText<HTMLInputElement>("名称");

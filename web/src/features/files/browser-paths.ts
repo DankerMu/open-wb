@@ -52,17 +52,49 @@ export function movedPath(path: string, from: string, to: string | null): string
 }
 
 /**
- * `from` 被移到 `to`（`null`：被删除）之后的列表缓存，不请求：先丢掉 `to` 及其下早先留下的键，再把
- * `from` 及其下的键与各自的 `listing.path` 换到 `to` 之下；`from` 在它已加载的父目录列表里的那一条
- * 拿掉，`to` 的父目录已加载时以新名字放进去（顶掉同名的旧条目；父目录没变就留在原来的位置）。
+ * 带着路径的一样东西（选中项、进行中的定位）在 `from` 被移到 `to`（`null`：被删除）之后：路径照
+ * `movedPath` 换，其余原样；没有这样东西，或它在被删除的 `from` 之下，是 `null`。
+ */
+export function movedTarget<T extends { path: string }>(
+  target: T | null,
+  from: string,
+  to: string | null,
+): T | null {
+  const path = target ? movedPath(target.path, from, to) : null;
+  return target && path !== null ? { ...target, path } : null;
+}
+
+/**
+ * 以路径为键的一组项（展开集合、目录的失败文案、列表缓存）在 `from` 被移到 `to`（`null`：被删除）之后
+ * 的样子：先丢掉 `to` 及其下早先留下的项，再把 `from` 及其下的键换到 `to` 之下，`to` 为 `null` 时丢掉；
+ * 其余原样，次序不变。进出都是元组：键不经过对象的属性名。
+ */
+export function movedKeys<T>(
+  entries: Iterable<readonly [string, T]>,
+  from: string,
+  to: string | null,
+): [string, T][] {
+  return [...entries].flatMap(([key, value]): [string, T][] => {
+    const stale = to !== null && movedPath(key, to, null) === null;
+    const moved = stale ? null : movedPath(key, from, to);
+    return moved === null ? [] : [[moved, value]];
+  });
+}
+
+/**
+ * `from` 被移到 `to`（`null`：被删除）之后的列表缓存，不请求：键照 `movedKeys` 换，换了键的列表连同
+ * 它的 `listing.path`；`from` 在它已加载的父目录列表里的那一条拿掉，`to` 的父目录已加载时以新名字
+ * 放进去（顶掉同名的旧条目；父目录没变就留在原来的位置）。
  * 父目录随后由调用方重新列出，这里改列表只为那之前的几帧。
  */
 export function movedCache(cache: DirectoryCache, from: string, to: string | null): DirectoryCache {
-  const kept = Object.entries(cache).flatMap(([key, listing]): [string, DirectoryListing][] => {
-    const stale = to !== null && movedPath(key, to, null) === null;
-    const moved = stale ? null : movedPath(key, from, to);
-    return moved === null ? [] : [[moved, moved === key ? listing : { ...listing, path: moved }]];
-  });
+  const keyed = Object.entries(cache).map(([key, listing]) => [key, { key, listing }] as const);
+  const kept = movedKeys(keyed, from, to).map(
+    ([moved, { key, listing }]): [string, DirectoryListing] => [
+      moved,
+      moved === key ? listing : { ...listing, path: moved },
+    ],
+  );
   // `Object.fromEntries` 定义自有属性：名为 `__proto__` 的目录不会改到原型。
   const next: DirectoryCache = Object.fromEntries(kept);
   const lastName = (path: string) => path.slice(path.lastIndexOf("/") + 1);

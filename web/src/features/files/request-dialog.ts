@@ -53,13 +53,14 @@ export function useRequestDialog<T>() {
 
   /**
    * 为当前对话框发出 `request`；已有一次在途时什么都不做。成功：关闭对话框，再调 `onDone`。失败：
-   * 对话框留着并显示文案——409 是 `conflictText`，其余是信封 message；401 不显示（登录层接手）。
+   * 对话框留着并显示文案——409 是 `conflictText`（没给就同其余），其余是信封 message；401 不显示
+   * （登录层接手）。
    */
   const submit = useCallback(
     (
       request: (signal: AbortSignal) => Promise<unknown>,
       onDone: () => void,
-      conflictText: string,
+      conflictText?: string,
     ) => {
       const dialogId = dialogIdRef.current;
       if (dialogId === null || mutationRef.current) {
@@ -90,8 +91,8 @@ export function useRequestDialog<T>() {
           }
 
           mutationRef.current = null;
-          const message =
-            error instanceof ApiError && error.status === 409 ? conflictText : errorMessage(error);
+          const conflict = error instanceof ApiError && error.status === 409 ? conflictText : null;
+          const message = conflict ?? errorMessage(error);
           setDialog((current) =>
             current?.id === dialogId ? { ...current, error: message, pending: false } : current,
           );
