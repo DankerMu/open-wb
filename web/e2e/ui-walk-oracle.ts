@@ -1,5 +1,6 @@
 // Browser error oracle for the UI walk: exact /api/auth/me 401 accounting plus console/page errors,
-// and (when enabled) static-asset requestfailed and cross-origin request accounting.
+// and (when enabled) static-asset requestfailed and cross-origin request accounting. The one
+// exception to the latter: requests to an origin this server itself handed out as a preview `base`.
 
 import type { ConsoleMessage, Page, Request, Response } from "@playwright/test";
 
@@ -9,6 +10,7 @@ const UNAUTHORIZED_NETWORK_LOG =
 const STATIC_RESOURCE_TYPES = new Set(["image", "font", "stylesheet", "script"]);
 // 导航与 SSE 取消产生的中止不是资源缺失。
 const ABORTED = "net::ERR_ABORTED";
+const PREVIEW_TOKEN_PATH = /^\/api\/workspaces\/[^/]+\/preview-token$/;
 
 type AuthPhase = "initial" | "authenticated" | "post-logout-reload";
 
@@ -23,8 +25,15 @@ export type AuthOracle = {
   unexpectedConsole: string[];
   pageErrors: string[];
   failedAssets: string[];
-  foreignRequests: string[];
+  foreignRequests: ForeignRequest[];
+  /** Origins of the `base` in each 200 `preview-token` response from the baseURL origin. */
+  previewOrigins: Set<string>;
+  /** One per such response: its body is read asynchronously, so the journey's end awaits these. */
+  previewReads: Promise<void>[];
+  previewUnreadable: string[];
 };
+
+type ForeignRequest = { origin: string; entry: string };
 
 /** The inputs the /api/auth/me origin binding needs: the baseURL origin and the page under test. */
 export type OriginBinding = Pick<AuthOracle, "productionOrigin" | "page">;
@@ -48,6 +57,7 @@ export async function runWithBrowserErrorOracle(
   } catch (error) {
     journeyError = error;
   }
+  await Promise.all(oracle.previewReads);
   throwCombinedFailure(journeyError, collectOracleFailures(oracle));
 }
 
@@ -64,6 +74,9 @@ function attachAuthOracle(page: Page, baseURL: string | undefined): AuthOracle {
     pageErrors: [],
     failedAssets: [],
     foreignRequests: [],
+    previewOrigins: new Set(),
+    previewReads: [],
+    previewUnreadable: [],
   };
   page.on("response", (response) => classifyMeResponse(oracle, response));
   page.on("console", (message) => classifyConsoleMessage(oracle, message));
@@ -76,6 +89,41 @@ function attachAuthOracle(page: Page, baseURL: string | undefined): AuthOracle {
 function attachAssetOracle(oracle: AuthOracle): void {
   oracle.page.on("requestfailed", (request) => classifyFailedRequest(oracle, request));
   oracle.page.on("request", (request) => classifyRequestOrigin(oracle, request));
+  oracle.page.on("response", (response) => {
+    if (isPreviewTokenIssue(oracle, response)) {
+      oracle.previewReads.push(readPreviewOrigin(oracle, response));
+    }
+  });
+}
+
+// 预览来源的例外：只认 baseURL 来源上 `POST /api/workspaces/<id>/preview-token` 的 200 响应。
+function isPreviewTokenIssue(oracle: AuthOracle, response: Response): boolean {
+  const url = parseAbsoluteUrl(response.url());
+  return (
+    url !== null &&
+    url.origin === oracle.productionOrigin &&
+    PREVIEW_TOKEN_PATH.test(url.pathname) &&
+    response.request().method() === "POST" &&
+    response.status() === 200
+  );
+}
+
+// 取响应体里 `base` 的来源入集；读不出或不是 http(s) 绝对地址就记一条失败，什么也不放行。
+// 响应体是异步读的，iframe 的请求事件可能先到（读代码推出），所以放行只在旅程结束后按集合过滤，不在请求事件里做。
+async function readPreviewOrigin(oracle: AuthOracle, response: Response): Promise<void> {
+  let base: unknown;
+  try {
+    const body: unknown = await response.json();
+    base = body !== null && typeof body === "object" && "base" in body ? body.base : undefined;
+  } catch {
+    base = undefined;
+  }
+  const url = typeof base === "string" ? parseAbsoluteUrl(base) : null;
+  if (!url || (url.protocol !== "http:" && url.protocol !== "https:")) {
+    oracle.previewUnreadable.push(`preview-token 200 without a readable base: ${response.url()}`);
+    return;
+  }
+  oracle.previewOrigins.add(url.origin);
 }
 
 function classifyFailedRequest(oracle: AuthOracle, request: Request): void {
@@ -92,7 +140,10 @@ function classifyRequestOrigin(oracle: AuthOracle, request: Request): void {
     return;
   }
   if (url.origin !== oracle.productionOrigin) {
-    oracle.foreignRequests.push(`${request.method()} ${request.resourceType()} ${url.href}`);
+    oracle.foreignRequests.push({
+      origin: url.origin,
+      entry: `${request.method()} ${request.resourceType()} ${url.href}`,
+    });
   }
 }
 
@@ -225,9 +276,12 @@ function collectOracleFailures(oracle: AuthOracle): string[] {
     ...oracle.unexpectedMe.map((entry) => `unexpected /api/auth/me: ${entry}`),
     ...oracle.unexpectedConsole,
     ...oracle.failedAssets.map((entry) => `static asset requestfailed: ${entry}`),
-    ...oracle.foreignRequests.map(
-      (entry) => `cross-origin request (baseURL ${oracle.productionOrigin}): ${entry}`,
-    ),
+    ...oracle.previewUnreadable,
+    ...oracle.foreignRequests
+      .filter((request) => !oracle.previewOrigins.has(request.origin))
+      .map(
+        (request) => `cross-origin request (baseURL ${oracle.productionOrigin}): ${request.entry}`,
+      ),
   ];
   if (oracle.initialUnauthorized !== 1) {
     failures.push(
